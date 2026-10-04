@@ -1,0 +1,32 @@
+# Research data
+data/
+runs/
+private/
+gold/
+holdout/
+
+# Dialogue and media artifacts
+*.xlsx
+*.xls
+*.xlsm
+*.csv
+*.tsv
+*.wav
+*.mp3
+*.mp4
+*.mov
+*.m4a
+
+# Secrets
+.env
+.env.*
+!.env.example
+*secret*
+*credentials*
+
+# Local tooling
+.DS_Store
+__pycache__/
+.venv/
+venv/
+target/

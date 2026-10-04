@@ -1,0 +1,4 @@
+{"dialogue_id":"synthetic-001","utterance_no":1,"speaker":"A","utterance":"右側の細長い形です。","ah_label":"Analytic","segment_type":"example"}
+{"dialogue_id":"synthetic-001","utterance_no":2,"speaker":"B","utterance":"右側って、どれですか？","ah_label":null,"segment_type":"example"}
+{"dialogue_id":"synthetic-001","utterance_no":3,"speaker":"A","utterance":"一番端にある、少し斜めのやつです。","ah_label":"Analytic","segment_type":"example"}
+{"dialogue_id":"synthetic-001","utterance_no":4,"speaker":"B","utterance":"ああ、それなら分かります。","ah_label":null,"segment_type":"example"}
