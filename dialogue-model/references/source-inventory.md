@@ -11,7 +11,7 @@ Authoritative experiment design is in the project repository. This inventory lis
 - 対話アノテーション_No.5(3).xlsx
 - 対話アノテーション_AI統合基準_運用基準あり(20260805-234634).xlsx
 
-All original files were verified in the ChatGPT conversation container. The 2 manuscripts were extracted as text into a private directory on the authorized Mac. The six Excel workbooks and original PDF binaries await a secure manual transfer to the Mac.
+All eight original research files were transferred to the authorized Mac on 2026-10-12 and integrity-checked as an archive. The full original files are stored outside Git in `~/Research/dialogue-grounding/private-sources/originals/`; supplementary paper text extracts remain in the parent private directory. The initial Opus/Astra reviews were completed before transfer, and subsequent source-based addenda must be distinguished from those initial drafts.
 
 Local approved source directory on the Mac: ~/Research/dialogue-grounding/private-sources/ .
 Relative read-only local convenience link: .research-local/ (excluded from Git tracking locally).
