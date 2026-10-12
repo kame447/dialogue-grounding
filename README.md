@@ -1,4 +1,4 @@
-# dialogue-annotation-jev
+# dialogue-grounding
 
 共通基盤形成における「やり過ごし」の役割を研究するためのリポジトリです。
 
