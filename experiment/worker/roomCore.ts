@@ -1,4 +1,4 @@
-import { MOCK_OPENING, mockPlaceholderNames, mockReplyText } from "./partners/mockRules";
+import { MOCK_OPENING, mockAnswers, mockReplyText } from "./partners/mockRules";
 import {
   LIMITS,
   PROTOCOL_VERSION,
@@ -13,8 +13,10 @@ import {
   type Figure,
   type Survey,
   type ServerMessage,
+  type NameAnswers,
+  answersError,
 } from "../src/ai/protocol";
-import { normalizeName, validateNames } from "../src/domain/names";
+import { normalizeName } from "../src/domain/names";
 import { STIMULUS_SETS } from "../src/stimuli/sets";
 import { createLayout, createRng } from "../src/stimuli/layout";
 import { placeFigures } from "../src/stimuli/scene";
@@ -30,7 +32,8 @@ export interface RoomState {
   slots: Record<Seat, Record<string, string>>;
   phases: { human: HumanSnapshot["phase"]; ai: AgentSnapshot["phase"] };
   joined: { human: boolean; ai: boolean };
-  names: Record<Seat, Record<string, string> | null>;
+  /** Post-conversation answers; null per figure = "not agreed / don't know". */
+  names: Record<Seat, NameAnswers | null>;
   survey: Survey | null;
   messages: Array<ChatMessage & { seat: Seat }>;
   chatClosedBy: Seat | null;
@@ -156,13 +159,16 @@ export function humanSnapshot(
   const rows = result
     ? s.orders.human.map((id) => {
         const slot = slotOf(s, "human", id),
-          selfName = s.names.human?.[slot] ?? "",
-          aiName = scored ? (s.names.ai?.[slotOf(s, "ai", id)] ?? "") : null;
+          selfName = s.names.human?.[slot] ?? null,
+          aiName = scored ? (s.names.ai?.[slotOf(s, "ai", id)] ?? null) : null;
         return {
           slot,
           selfName,
           aiName,
-          match: aiName === null ? null : normalizeName(selfName) === normalizeName(aiName),
+          // "Not agreed" is a failure: it never matches, not even when both seats answered it.
+          match: !scored
+            ? null
+            : selfName !== null && aiName !== null && normalizeName(selfName) === normalizeName(aiName),
         };
       })
     : null;
@@ -231,9 +237,6 @@ export function agentSnapshot(
   };
 }
 type Out = { to: Seat; msg: ServerMessage };
-const sameKeys = (a: Record<string, string>, slots: Record<string, string>) =>
-  Object.keys(a).length === 6 &&
-  Object.keys(slots).every((k) => Object.hasOwn(a, k));
 export function handle(
   s: RoomState,
   seat: Seat,
@@ -360,26 +363,18 @@ export function handle(
   } else if (msg.type === "submit_names") {
     if ((seat === "human" ? s.phases.human : s.phases.ai) !== "naming")
       err("invalid_phase", "名前を提出できる状態ではありません。");
-    else if (!sameKeys(msg.names, s.slots[seat]))
-      err("invalid_names", "6つの図形に別々の名前を入力してください。");
+    else if (answersError(msg.names, Object.keys(s.slots[seat]), normalizeName))
+      // Generic text: never refer to figure numbers.
+      err("invalid_names", "すべての図形に、名前か「未合意・わからない」を回答してください。名前は図形ごとに別にしてください。");
     else {
-      const vals = s.orders[seat].map(
-        (id) =>
-          msg.names[
-            Object.keys(s.slots[seat]).find((k) => s.slots[seat][k] === id)!
-          ],
+      s.names[seat] = Object.fromEntries(
+        Object.entries(msg.names).map(([k, v]) => [k, v === null ? null : v.trim()]),
       );
-      const v = validateNames(vals);
-      // Generic text: the per-field messages of validateNames refer to figure numbers.
-      if (!v.ok) err("invalid_names", "6つの図形に、それぞれ別の名前を入力してください。");
-      else {
-        s.names[seat] = { ...msg.names };
-        if (seat === "human") s.phases.human = "survey";
-        else s.phases.ai = "done";
-        if (seat === "ai" && s.phases.human === "waiting_ai_names")
-          s.phases.human = "results";
-        snap();
-      }
+      if (seat === "human") s.phases.human = "survey";
+      else s.phases.ai = "done";
+      if (seat === "ai" && s.phases.human === "waiting_ai_names")
+        s.phases.human = "results";
+      snap();
     }
   } else if (msg.type === "submit_survey" && seat === "human") {
     if (s.phases.human !== "survey")
@@ -420,10 +415,9 @@ export function appendAiMessage(
 }
 
 /**
- * The mock AI's submission: distinct placeholders per AI slot, chosen without looking at the
- * conversation or the human's figures. Needed only because the room requires six names; they
- * are never scored or shown (see humanSnapshot).
+ * The mock AI's answers: "not agreed / don't know" for every AI slot, since it sees no figures.
+ * Mock rooms are never scored or shown (see humanSnapshot).
  */
-export function mockNames(s: RoomState): Record<string, string> {
-  return mockPlaceholderNames(s.orders.ai.map((id) => slotOf(s, "ai", id)));
+export function mockNames(s: RoomState): NameAnswers {
+  return mockAnswers(s.orders.ai.map((id) => slotOf(s, "ai", id)));
 }

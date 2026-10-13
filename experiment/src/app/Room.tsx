@@ -90,8 +90,8 @@ function Stage({ room, snapshot }: { room: RoomApi; snapshot: HumanSnapshot }) {
       return <SurveyStage room={room} />;
     case 'waiting_ai_names':
       return (
-        <CenterState title="AIの名前の提出を待っています" spinner>
-          <p>回答を受け付けました。AIが名前を提出すると、結果が表示されます。この画面を開いたままお待ちください。</p>
+        <CenterState title="AIの回答を待っています" spinner>
+          <p>AIが回答を提出すると結果が表示されます。この画面を開いたままお待ちください。</p>
         </CenterState>
       );
     case 'results':
@@ -120,7 +120,7 @@ function ChatStage({ room, snapshot, offline }: { room: RoomApi; snapshot: Human
               {mock && <p className="panel-sub">相手は模擬AIです（図形は見ていません）</p>}
             </div>
             {!mock && <span className="chat-status"><span className={`dot ${snapshot.ai.connected ? 'dot-on' : ''}`} aria-hidden="true" />{snapshot.ai.connected ? '接続中' : '切断中'}</span>}
-            <button className="btn btn-sm head-action" onClick={() => setConfirmEnd(true)} disabled={room.busy}>会話を終えて名前を決める</button>
+            <button className="btn btn-sm head-action" onClick={() => setConfirmEnd(true)} disabled={room.busy}>会話を終了する</button>
           </div>
           <Thread
             messages={snapshot.messages}
@@ -142,11 +142,11 @@ function ChatStage({ room, snapshot, offline }: { room: RoomApi; snapshot: Human
         {zoom && <div className="zoom-art"><FigureArt polygons={zoom.polygons} rotation={zoom.placement.rotation} label="拡大した図形" /></div>}
         <div className="modal-actions"><button className="btn" onClick={() => setZoom(null)}>閉じる</button></div>
       </Dialog>
-      <Dialog open={confirmEnd} title="会話を終えますか？" onClose={() => setConfirmEnd(false)}>
-        <p>会話には戻れません。次に、各図形の名前をAIに見せずに入力します。</p>
+      <Dialog open={confirmEnd} title="話し合いを終了しますか？" onClose={() => setConfirmEnd(false)}>
+        <p>終了後、会話で共有できたと思う名前を回答します。</p>
         <div className="modal-actions">
           <button className="btn" onClick={() => setConfirmEnd(false)}>会話に戻る</button>
-          <button className="btn btn-primary" onClick={() => { room.endChat(); setConfirmEnd(false); }}>名前の入力へ進む</button>
+          <button className="btn btn-primary" onClick={() => { room.endChat(); setConfirmEnd(false); }}>終了して回答へ</button>
         </div>
       </Dialog>
     </>

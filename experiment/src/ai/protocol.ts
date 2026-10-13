@@ -49,6 +49,14 @@ export type AgentPhase = 'waiting_human' | 'chat' | 'naming' | 'done';
 
 export type Point = [number, number];
 
+/**
+ * A seat's post-conversation answer for one figure: the name it believes was shared in the
+ * conversation, or null = "not agreed / don't know". Naming itself happens in the conversation;
+ * this answer is an independent report, not proof that an agreement occurred.
+ */
+export type NameAnswer = string | null;
+export type NameAnswers = Record<string, NameAnswer>;
+
 /** Where a figure sits in this seat's scene (SCENE units, clockwise degrees). See src/stimuli/scene.ts. */
 export interface FigurePlacement {
   x: number;
@@ -88,9 +96,11 @@ export interface Survey {
 export interface ResultRow {
   /** The human's own figure slot (to draw it as it appeared in the human's scene). */
   slot: string;
-  selfName: string;
-  /** null when the AI's answer is not scored (mock AI: it never identifies figures). */
-  aiName: string | null;
+  /** null = the human answered "not agreed / don't know". */
+  selfName: NameAnswer;
+  /** null = the AI answered "not agreed", or (when results.scored is false) not shown at all. */
+  aiName: NameAnswer;
+  /** Both answered the same name. "Not agreed" never matches, not even with another "not agreed". null when unscored. */
   match: boolean | null;
 }
 
@@ -113,7 +123,7 @@ export interface HumanSnapshot {
   figures: Figure[];
   messages: ChatMessage[];
   chatClosedBy: 'self' | 'partner' | null;
-  myNames: Record<string, string> | null;
+  myNames: NameAnswers | null;
   mySurvey: Survey | null;
   /**
    * Only set when phase === 'results'. Rows in the human's own figure order.
@@ -132,7 +142,7 @@ export interface AgentSnapshot {
   figures: Figure[];
   messages: ChatMessage[];
   chatClosedBy: 'self' | 'partner' | null;
-  myNames: Record<string, string> | null;
+  myNames: NameAnswers | null;
 }
 
 export type HumanClientMessage =
@@ -140,7 +150,7 @@ export type HumanClientMessage =
   | { type: 'chat'; clientId: string; text: string }
   | { type: 'typing'; active: boolean }
   | { type: 'end_chat' }
-  | { type: 'submit_names'; names: Record<string, string> }
+  | { type: 'submit_names'; names: NameAnswers }
   | { type: 'submit_survey'; survey: Survey }
   /** External mode only, before any agent has connected: replace the AI seat by the mock AI. */
   | { type: 'use_mock' }
@@ -153,7 +163,7 @@ export type AgentClientMessage =
   | { type: 'chat'; clientId: string; text: string }
   | { type: 'typing'; active: boolean }
   | { type: 'end_chat' }
-  | { type: 'submit_names'; names: Record<string, string> }
+  | { type: 'submit_names'; names: NameAnswers }
   | { type: 'ping' };
 
 export type ErrorCode =
@@ -240,11 +250,30 @@ function parseFrame(data: unknown): Record<string, unknown> | null {
   }
 }
 
-function parseNames(names: unknown): Record<string, string> | null {
+function parseNames(names: unknown): NameAnswers | null {
   if (!names || typeof names !== 'object' || Array.isArray(names)) return null;
   const entries = Object.entries(names as Record<string, unknown>);
-  if (entries.length > 12 || entries.some(([k, v]) => k.length > 64 || typeof v !== 'string' || v.length > LIMITS.maxNameChars * 2)) return null;
-  return Object.fromEntries(entries) as Record<string, string>;
+  if (entries.length > 12 || entries.some(([k, v]) => k.length > 64 || (v !== null && (typeof v !== 'string' || v.length > LIMITS.maxNameChars * 2)))) return null;
+  return Object.fromEntries(entries) as NameAnswers;
+}
+
+/**
+ * Semantic check of one seat's answers: every figure answered (a name or null = not agreed),
+ * names non-empty, within the length limit and distinct from each other. Several nulls are fine.
+ */
+export function answersError(answers: NameAnswers, slots: readonly string[], normalize: (s: string) => string): string | null {
+  if (Object.keys(answers).length !== slots.length || !slots.every((slot) => Object.hasOwn(answers, slot))) return 'missing';
+  const seen = new Set<string>();
+  for (const slot of slots) {
+    const value = answers[slot];
+    if (value === null) continue;
+    const n = normalize(value);
+    if (!n) return 'empty';
+    if (value.trim().length > LIMITS.maxNameChars) return 'too_long';
+    if (seen.has(n)) return 'duplicate';
+    seen.add(n);
+  }
+  return null;
 }
 
 /** Messages both seats share. Returns undefined when the type is not a shared one. */

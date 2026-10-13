@@ -3,7 +3,7 @@ import type {
   PartnerTurnInput,
   PartnerTurnOutput,
 } from "./types";
-import { MOCK_OPENING, mockPlaceholderNames, mockReplyText } from "./mockRules";
+import { MOCK_OPENING, mockAnswers, mockReplyText } from "./mockRules";
 
 /**
  * Explicitly a scripted simulation. It has no perception, does not inspect figure geometry and does
@@ -17,7 +17,7 @@ export class MockAi implements PartnerAdapter {
     return { utterance: humanTurns === 0 ? MOCK_OPENING : mockReplyText(humanTurns - 1) };
   }
 
-  async proposeNames(input: PartnerTurnInput): Promise<Record<string, string>> {
-    return mockPlaceholderNames(input.figures.map((figure) => figure.slot));
+  async proposeNames(input: PartnerTurnInput): Promise<Record<string, null>> {
+    return mockAnswers(input.figures.map((figure) => figure.slot));
   }
 }

@@ -28,19 +28,29 @@ export async function sendHuman(page: Page, text: string) {
   await expect(page.getByRole('log', { name: '会話' })).toContainText(text);
 }
 
+export const ANSWER_HEADING = '会話で共有した名前を回答';
+
 export async function endChat(page: Page) {
-  await page.getByRole('button', { name: '会話を終えて名前を決める' }).click();
-  await page.getByRole('dialog', { name: '会話を終えますか？' }).getByRole('button', { name: '名前の入力へ進む' }).click();
-  await expect(page.getByRole('heading', { name: '名前をつける' })).toBeVisible();
+  await page.getByRole('button', { name: '会話を終了する' }).click();
+  await page.getByRole('dialog', { name: '話し合いを終了しますか？' }).getByRole('button', { name: '終了して回答へ' }).click();
+  await expect(page.getByRole('heading', { name: ANSWER_HEADING })).toBeVisible();
 }
 
-/** Opens the naming dialog of the i-th figure (DOM order only; nothing on screen is numbered). */
+/** Answers the i-th figure with a name (DOM order only; nothing on screen is numbered). */
 export async function nameFigure(page: Page, i: number, value: string) {
   await clickFigure(figureButtons(page).nth(i));
-  const dialog = page.getByRole('dialog', { name: '名前をつける' });
-  await dialog.getByRole('textbox', { name: '名前' }).fill(value);
+  const dialog = page.getByRole('dialog', { name: '回答を入力' });
+  await dialog.getByRole('textbox', { name: '会話で共有した名前' }).fill(value);
   await dialog.getByRole('button', { name: '決定' }).click();
   return dialog;
+}
+
+/** Answers the i-th figure as "not agreed / don't know". */
+export async function markNotAgreed(page: Page, i: number) {
+  await clickFigure(figureButtons(page).nth(i));
+  const dialog = page.getByRole('dialog', { name: '回答を入力' });
+  await dialog.getByRole('button', { name: '未合意・わからない' }).click();
+  await expect(dialog).toHaveCount(0);
 }
 
 export async function fillNames(page: Page, values = names) {
@@ -51,8 +61,8 @@ export async function fillNames(page: Page, values = names) {
 }
 
 export async function confirmNames(page: Page) {
-  await page.getByRole('button', { name: '名前を確定する' }).click();
-  await page.getByRole('dialog', { name: 'この名前で確定しますか？' }).getByRole('button', { name: '確定する' }).click();
+  await page.getByRole('button', { name: '回答を提出する' }).click();
+  await page.getByRole('dialog', { name: '回答を提出しますか？' }).getByRole('button', { name: '提出する', exact: true }).click();
 }
 
 export async function submitSurvey(page: Page) {
@@ -70,6 +80,9 @@ export async function participantText(page: Page) {
   });
 }
 
+/** Also: the old "end the chat, then decide the names" framing must not appear anywhere. */
 export async function expectNoFigureNumbers(page: Page) {
-  expect(await participantText(page)).not.toMatch(NUMBERED);
+  const text = await participantText(page);
+  expect(text).not.toMatch(NUMBERED);
+  expect(text).not.toMatch(/名前を決める|名前をつける|名前を確定/);
 }

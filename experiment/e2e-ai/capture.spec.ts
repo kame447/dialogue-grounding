@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
-import { aiMessages, clickFigure, confirmNames, endChat, figureButtons, fillNames, nameFigure, names, scene, submitSurvey } from './helpers';
+import { aiMessages, ANSWER_HEADING, clickFigure, confirmNames, figureButtons, markNotAgreed, nameFigure, scene, submitSurvey } from './helpers';
 
 /** Deterministic screenshots of every participant state for visual inspection (screenshots/{local,deployed}/<project>/, gitignored). */
 async function shot(page: Page, project: string, name: string) {
@@ -31,22 +31,25 @@ test('capture participant and researcher states @narrow', async ({ page }, info)
   await clickFigure(figureButtons(page).first());
   await shot(page, project, '04-zoom');
   await page.getByRole('button', { name: '閉じる' }).click();
-  await page.getByRole('button', { name: '会話を終えて名前を決める' }).click();
+  await page.getByRole('button', { name: '会話を終了する' }).click();
   await shot(page, project, '05-end-confirm');
-  await page.getByRole('dialog', { name: '会話を終えますか？' }).getByRole('button', { name: '名前の入力へ進む' }).click();
-  await expect(page.getByRole('heading', { name: '名前をつける' })).toBeVisible();
-  await shot(page, project, '06-naming');
+  await page.getByRole('dialog', { name: '話し合いを終了しますか？' }).getByRole('button', { name: '終了して回答へ' }).click();
+  await expect(page.getByRole('heading', { name: ANSWER_HEADING })).toBeVisible();
+  await shot(page, project, '06-answer');
   await nameFigure(page, 0, '山');
   await nameFigure(page, 2, '鳥');
   const dialog = await nameFigure(page, 1, '山');
-  await shot(page, project, '07-naming-dialog-duplicate');
+  await shot(page, project, '07-answer-dialog-duplicate');
   await dialog.getByRole('button', { name: 'キャンセル' }).click();
-  await page.getByRole('button', { name: '名前を確定する' }).click();
-  await shot(page, project, '08-naming-partial');
-  await fillNames(page, names);
-  await page.getByRole('button', { name: '名前を確定する' }).click();
-  await shot(page, project, '09-naming-confirm');
-  await page.getByRole('dialog', { name: 'この名前で確定しますか？' }).getByRole('button', { name: '修正する' }).click();
+  await page.getByRole('button', { name: '回答を提出する' }).click();
+  await shot(page, project, '08-answer-partial');
+  await nameFigure(page, 1, '舟');
+  await nameFigure(page, 3, '星');
+  await markNotAgreed(page, 4);
+  await markNotAgreed(page, 5);
+  await page.getByRole('button', { name: '回答を提出する' }).click();
+  await shot(page, project, '09-answer-confirm');
+  await page.getByRole('dialog', { name: '回答を提出しますか？' }).getByRole('button', { name: '修正する' }).click();
   await confirmNames(page);
   await expect(page.getByRole('radiogroup', { name: /精神的努力/ })).toBeVisible();
   await shot(page, project, '10-survey');

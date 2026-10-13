@@ -38,7 +38,8 @@ function decide(snapshot, event) {
     return {
       type: "submit_names",
       names: Object.fromEntries(
-        snapshot.figures.map((f) => [f.slot, `スタブ名-${f.slot.slice(0, 6)}`]),
+        // Post-conversation answers: a name, or null = "not agreed / don't know".
+        snapshot.figures.map((f, i) => [f.slot, i === 0 ? null : `スタブ名-${f.slot.slice(0, 6)}`]),
       ),
     };
   return null;

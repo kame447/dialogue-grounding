@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ChatMessage, HumanClientMessage, HumanServerMessage, HumanSnapshot, Survey } from '../ai/protocol';
+import type { ChatMessage, HumanClientMessage, HumanServerMessage, HumanSnapshot, NameAnswers, Survey } from '../ai/protocol';
 import { WebSocketTransport, type CloseReason, type RoomTransport, type TransportStatus } from './transport';
 
 export interface PendingChat { clientId: string; text: string; failed: boolean }
@@ -66,7 +66,7 @@ export function useRoom(roomId: string, token: string, transportFactory: Transpo
         case 'error':
           setBusy(false);
           if (msg.code === 'not_found' || msg.code === 'expired' || msg.code === 'bad_token') { setClosedReason(msg.code); return; }
-          setError(msg.code === 'invalid_names' ? '名前を確認してください。' : msg.message);
+          setError(msg.code === 'invalid_names' ? '回答を確認してください。' : msg.message);
           if (msg.clientId) markFailed(msg.clientId);
           break;
         case 'replaced':
@@ -124,7 +124,7 @@ export function useRoom(roomId: string, token: string, transportFactory: Transpo
     clearError: () => setError(null),
     setTyping: (active: boolean) => send({ type: 'typing', active }),
     endChat: () => act({ type: 'end_chat' }),
-    submitNames: (names: Record<string, string>) => act({ type: 'submit_names', names }),
+    submitNames: (names: NameAnswers) => act({ type: 'submit_names', names }),
     submitSurvey: (survey: Survey) => act({ type: 'submit_survey', survey }),
     useMock: () => act({ type: 'use_mock' }),
     deleteRoom: () => act({ type: 'delete_room' }),

@@ -135,15 +135,14 @@ describe("human + AI room core", () => {
     expect(new Set(replies).size).toBeGreaterThan(2);
   });
 
-  it("mock placeholders are distinct, independent of the chat, and never scored or shown", async () => {
+  it("mock answers 'not agreed' for every figure, independent of the chat, and is never scored", async () => {
     const state = room("mock");
     join(state, "human");
     const before = mockNames(state);
     state.messages.push({ id: "1", from: "self", text: "右上の鳥っぽいのは鳥", at: 1, seat: "human" });
     expect(mockNames(state)).toEqual(before);
-    const values = Object.values(before);
-    expect(new Set(values).size).toBe(6);
     expect(Object.keys(before).sort()).toEqual(Object.keys(state.slots.ai).sort());
+    expect(Object.values(before).every((v) => v === null)).toBe(true);
     const input = { figures: agentSnapshot(state, connected).figures, history: [], publicCues: { humanStage: "chat" as const, chatClosed: false } };
     expect(await new MockAi().proposeNames(input)).toEqual(before);
 
@@ -154,7 +153,48 @@ describe("human + AI room core", () => {
     expect(results.scored).toBe(false);
     expect(results.matched).toBeNull();
     expect(results.rows.every((row) => row.aiName === null && row.match === null)).toBe(true);
-    expect(JSON.stringify(results)).not.toContain("模擬AI未判定");
+  });
+
+  it("accepts 'not agreed' (null) answers, distinguishes them from blanks and rejects duplicate names", () => {
+    const state = room("external");
+    startExternal(state);
+    act(state, "human", { type: "end_chat" });
+    const slots = state.orders.human.map((id) => Object.keys(state.slots.human).find((k) => state.slots.human[k] === id)!);
+    const reject = (names: Record<string, string | null>) =>
+      expect(act(state, "human", { type: "submit_names", names }).out[0].msg).toMatchObject({ type: "error", code: "invalid_names" });
+    // A blank (missing answer or empty string) is not "not agreed".
+    reject(Object.fromEntries(slots.slice(0, 5).map((slot) => [slot, null])));
+    reject(Object.fromEntries(slots.map((slot, i) => [slot, i === 0 ? "  " : null])));
+    // Names must differ; several "not agreed" are fine.
+    reject(Object.fromEntries(slots.map((slot, i) => [slot, i < 2 ? "鳥" : null])));
+    expect(state.phases.human).toBe("naming");
+    const ok = Object.fromEntries(slots.map((slot, i) => [slot, i === 0 ? " 鳥 " : i === 1 ? "猫" : null]));
+    act(state, "human", { type: "submit_names", names: ok });
+    expect(state.phases.human).toBe("survey");
+    expect(state.names.human![slots[0]]).toBe("鳥");
+    expect(state.names.human![slots[2]]).toBeNull();
+  });
+
+  it("scores over all six figures; 'not agreed' never matches, even on both sides", () => {
+    const state = room("external");
+    startExternal(state);
+    act(state, "human", { type: "end_chat" });
+    // Map each canonical stimulus to the same answer on both seats, via the internal ids.
+    const answerFor: Record<string, string | null> = {};
+    state.orders.human.forEach((id, i) => { answerFor[id] = ["鳥", "猫", null, null, "山", "川"][i]; });
+    const seatAnswers = (seat: Seat, override: (id: string) => string | null) =>
+      Object.fromEntries(Object.entries(state.slots[seat]).map(([slot, id]) => [slot, override(id)]));
+    act(state, "human", { type: "submit_names", names: seatAnswers("human", (id) => answerFor[id]) });
+    act(state, "human", { type: "submit_survey", survey });
+    // AI: same for the first two, null where the human was null, a different name for "山", null for "川".
+    act(state, "ai", { type: "submit_names", names: seatAnswers("ai", (id) => (answerFor[id] === "山" ? "岩" : answerFor[id] === "川" ? null : answerFor[id])) });
+    const results = humanSnapshot(state, connected).results!;
+    expect(results.scored).toBe(true);
+    expect(results.total).toBe(6);
+    expect(results.matched).toBe(2);
+    const nullBoth = results.rows.filter((row) => row.selfName === null && row.aiName === null);
+    expect(nullBoth).toHaveLength(2);
+    expect(nullBoth.every((row) => row.match === false)).toBe(true);
   });
 
   it("gives each seat a fixed, irregular, non-overlapping scattered placement", () => {

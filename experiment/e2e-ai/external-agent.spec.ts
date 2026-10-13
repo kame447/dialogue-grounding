@@ -1,7 +1,7 @@
 import { test, expect, type BrowserContext, type Page } from '@playwright/test';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
-import { base, confirmNames, fillNames, scene } from './helpers';
+import { base, confirmNames, endChat, fillNames, markNotAgreed, scene } from './helpers';
 
 let child: ChildProcess | undefined;
 /** The participant's separate device uses the same viewport/touch settings as the current project. */
@@ -31,15 +31,18 @@ test('researcher provisions external room and stub agent completes the flow', as
     await human.getByRole('textbox', { name: 'メッセージ' }).fill('図形について相談したいです');
     await human.getByRole('button', { name: '送信', exact: true }).click();
     await expect(human.getByRole('log', { name: '会話' })).toContainText('外部エージェント・スタブ', { timeout: 30_000 });
-    await human.getByRole('button', { name: '会話を終えて名前を決める' }).click();
-    await human.getByRole('dialog', { name: '会話を終えますか？' }).getByRole('button', { name: '名前の入力へ進む' }).click();
+    await endChat(human);
     await fillNames(human, ['あ', 'い', 'う', 'え', 'お', 'か']);
+    await markNotAgreed(human, 5);
     await confirmNames(human);
     for (const scale of ['精神的努力', '円滑さ', '煩わしさ']) await human.getByRole('radiogroup', { name: new RegExp(scale) }).getByRole('radio', { name: '1', exact: true }).check();
     await human.getByRole('button', { name: '回答を送信' }).click();
     await expect(human.getByRole('heading', { name: '結果' })).toBeVisible();
     const table = human.getByRole('table', { name: '名前の対応' });
     await expect(table).toContainText('スタブ名');
+    // The stub answers one figure "not agreed"; both seats' "not agreed" never count as a match.
+    await expect(table.getByText('未合意')).toHaveCount(2);
+    await expect(human.getByText('一致 0 / 6')).toBeVisible();
     await expect(table.getByRole('row')).toHaveCount(7);
     await expect(human.getByText(/^一致 \d \/ 6$/)).toBeVisible();
     expect(await table.innerText()).not.toMatch(/図形\s*[0-9]/);

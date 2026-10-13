@@ -1,6 +1,14 @@
-import type { Figure } from '../../ai/protocol';
+import type { Figure, NameAnswer } from '../../ai/protocol';
 import { SCENE, pathData, worldPolygons } from '../../stimuli/scene';
 
+export interface SceneLabel { text: string; tone?: 'muted' | 'error' }
+
+/** Label for a post-conversation answer: a name, "未合意" (null) or, when not answered yet, "未回答". */
+export function answerLabel(answer: NameAnswer | undefined, error = false): SceneLabel {
+  if (answer === undefined) return { text: '未回答', tone: 'muted' };
+  if (answer === null) return { text: '未合意', tone: 'muted' };
+  return { text: answer, tone: error ? 'error' : undefined };
+}
 /**
  * This seat's six silhouettes, scattered at the server-given positions and orientations
  * (src/stimuli/scene.ts). Figures carry no number, name or visible frame; the participant refers
@@ -12,11 +20,8 @@ export function Scene(props: {
   /** Accessible name of each figure button (must not number the figures). */
   figureLabel?: (figure: Figure) => string;
   onPick?: (figure: Figure) => void;
-  /** Participant's own names, drawn on the silhouettes (naming / confirmation / results). */
-  names?: Record<string, string>;
-  invalid?: ReadonlySet<string>;
-  /** Show an empty marker on figures without a name. */
-  markEmpty?: boolean;
+  /** Participant's own answers, drawn on the silhouettes (answer form / confirmation / results). */
+  labels?: Record<string, SceneLabel>;
   className?: string;
 }) {
   const { figures, onPick } = props;
@@ -49,17 +54,17 @@ export function Scene(props: {
             );
           })}
         </svg>
-        {props.names && figures.map((figure) => {
-          const name = props.names?.[figure.slot]?.trim() ?? '';
-          if (!name && !props.markEmpty) return null;
+        {props.labels && figures.map((figure) => {
+          const label = props.labels?.[figure.slot];
+          if (!label) return null;
           return (
             <span
               key={figure.slot}
               aria-hidden="true"
-              className={`name-pill ${name ? '' : 'name-pill-empty'} ${props.invalid?.has(figure.slot) ? 'name-pill-error' : ''}`}
+              className={`name-pill ${label.tone === 'muted' ? 'name-pill-empty' : ''} ${label.tone === 'error' ? 'name-pill-error' : ''}`}
               style={{ left: `${(figure.placement.x / SCENE.width) * 100}%`, top: `${(figure.placement.y / SCENE.height) * 100}%` }}
             >
-              {name || '名前'}
+              {label.text}
             </span>
           );
         })}

@@ -1,4 +1,4 @@
-import type { Figure } from "../../src/ai/protocol";
+import type { Figure, NameAnswers } from "../../src/ai/protocol";
 
 /** Future multimodal partner seam. Figures are already in AI order and use opaque slots. */
 export interface PartnerTurnInput {
@@ -18,5 +18,5 @@ export interface PartnerTurnOutput {
 export interface PartnerAdapter {
   readonly kind: "mock" | "external";
   respond(input: PartnerTurnInput): Promise<PartnerTurnOutput>;
-  proposeNames(input: PartnerTurnInput): Promise<Record<string, string>>;
+  proposeNames(input: PartnerTurnInput): Promise<NameAnswers>;
 }

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { HumanSnapshot } from '../../ai/protocol';
 import { Dialog } from '../components/Dialog';
 import { FigureArt } from '../components/Figure';
-import { Scene } from '../components/Scene';
+import { Scene, answerLabel } from '../components/Scene';
 import type { RoomApi } from '../useRoom';
 
 export function ResultsStage({ room, snapshot }: { room: RoomApi; snapshot: HumanSnapshot }) {
@@ -10,7 +10,8 @@ export function ResultsStage({ room, snapshot }: { room: RoomApi; snapshot: Huma
   const results = snapshot.results;
   if (!results) return null;
   const figureBySlot = new Map(snapshot.figures.map((f) => [f.slot, f]));
-  const myNames = Object.fromEntries(results.rows.map((row) => [row.slot, row.selfName]));
+  const myLabels = Object.fromEntries(results.rows.map((row) => [row.slot, answerLabel(row.selfName)]));
+  const shown = (answer: string | null) => answer ?? <span className="muted">未合意</span>;
   return (
     <main className="page">
       <div className="page-head">
@@ -22,28 +23,28 @@ export function ResultsStage({ room, snapshot }: { room: RoomApi; snapshot: Huma
           <table className="result-table">
             <caption>名前の対応</caption>
             <colgroup><col className="col-figure" /><col /><col /><col className="col-match" /></colgroup>
-            <thead><tr><th scope="col"><span className="sr-only">図形</span></th><th scope="col">あなた</th><th scope="col">AI</th><th scope="col">一致</th></tr></thead>
+            <thead><tr><th scope="col"><span className="sr-only">図形</span></th><th scope="col">あなたの回答</th><th scope="col">AIの回答</th><th scope="col">一致</th></tr></thead>
             <tbody>
               {results.rows.map((row) => {
                 const figure = figureBySlot.get(row.slot);
                 return (
                   <tr key={row.slot}>
                     <td>{figure && <FigureArt polygons={figure.polygons} rotation={figure.placement.rotation} />}</td>
-                    <td>{row.selfName}</td>
-                    <td>{row.aiName}</td>
+                    <td>{shown(row.selfName)}</td>
+                    <td>{shown(row.aiName)}</td>
                     <td className={row.match ? 'match-yes' : 'match-no'}>{row.match ? '一致' : '不一致'}</td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
-          <p className="disclaimer">動作確認用のDEMOです。外部AIエージェントの提出をそのまま照合しており、研究結果としては扱いません。</p>
+          <p className="disclaimer">会話後に別々に提出した回答の照合です（未合意は一致に数えません）。会話中の合意そのものを示すものではなく、研究結果としては扱いません。</p>
         </>
       ) : (
         <>
           <p className="disclaimer">模擬AIは図形を見ていないため、一致は判定しません。このDEMOは命名操作と質問紙の確認用です。</p>
-          <section className="result-scene" aria-label="あなたがつけた名前">
-            <Scene figures={snapshot.figures} names={myNames} />
+          <section className="result-scene" aria-label="あなたの回答">
+            <Scene figures={snapshot.figures} labels={myLabels} />
           </section>
         </>
       )}

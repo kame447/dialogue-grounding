@@ -26,7 +26,7 @@ test('figures and conversation share one screen; figures are scattered, unnumber
   for (let i = 0; i < 6; i++) await inView(await figureButtons(page).nth(i).locator('.fig-shape').boundingBox());
   await inView(await page.getByRole('textbox', { name: 'メッセージ' }).boundingBox());
   await inView(await page.getByRole('button', { name: '送信', exact: true }).boundingBox());
-  await inView(await page.getByRole('button', { name: '会話を終えて名前を決める' }).boundingBox());
+  await inView(await page.getByRole('button', { name: '会話を終了する' }).boundingBox());
   const log = await page.getByRole('log', { name: '会話' }).boundingBox();
   expect(log!.height).toBeGreaterThan(testInfo.project.name === 'narrow' ? 120 : 200);
   // Legible silhouettes (longer side of the drawn shape).

@@ -10,16 +10,16 @@ const PROMPTS = [
   "受け取りました。ほかの図形についてもどうぞ。",
   "その図形は、画面のどのあたりにありますか？",
   "呼び方の案があれば教えてください。",
-  "受け取りました。6つとも話せたら「会話を終えて名前を決める」へ進んでください。",
+  "受け取りました。話し合いが済んだら「会話を終了する」を押してください。",
 ];
 
 /** Neutral reply for the n-th human message (0-based), independent of its content. */
 export const mockReplyText = (n: number) => PROMPTS[n % PROMPTS.length];
 
 /**
- * Six distinct placeholder answers for the AI slots. They are not derived from the conversation or
- * the human's figures, and the server neither scores nor shows them.
+ * The mock AI's post-conversation answers. It cannot see the figures or resolve references, so it
+ * honestly answers "not agreed / don't know" (null) for every figure. Mock rooms are never scored.
  */
-export function mockPlaceholderNames(slots: string[]): Record<string, string> {
-  return Object.fromEntries(slots.map((slot) => [slot, `模擬AI未判定-${slot}`]));
+export function mockAnswers(slots: string[]): Record<string, null> {
+  return Object.fromEntries(slots.map((slot) => [slot, null]));
 }

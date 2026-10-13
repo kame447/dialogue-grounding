@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import type { HumanPhase, RoomMode } from '../../ai/protocol';
 
-export const STEPS = ['会話', '名前', 'アンケート', '結果'] as const;
+export const STEPS = ['会話', '名前の回答', 'アンケート', '結果'] as const;
 
 export function stepIndex(phase: HumanPhase): number {
   switch (phase) {
