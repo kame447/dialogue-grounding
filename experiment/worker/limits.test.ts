@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { LIMITS } from "../src/ai/protocol";
 import { createLimit } from "./limits";
-import { extractNamePairs } from "./partners/mockRules";
+import { MOCK_OPENING, mockReplyText } from "./partners/mockRules";
 
 describe("room creation limit", () => {
   it("uses the dev override only on localhost", () => {
@@ -18,13 +18,10 @@ describe("room creation limit", () => {
   });
 });
 
-describe("mock name extraction", () => {
-  it("keeps only the last mention per figure", () => {
-    const pairs = extractNamePairs("図形2は細長くて、左に傾いた人みたいに見えます。図形2は踊り子");
-    expect([...pairs]).toEqual([[2, "踊り子"]]);
-  });
-
-  it("reads several figures and full-width digits", () => {
-    expect([...extractNamePairs("図形１は山、図形3を「星」")]).toEqual([[1, "山"], [3, "星"]]);
+describe("mock AI script", () => {
+  it("never asks for or mentions figure numbers", () => {
+    for (const text of [MOCK_OPENING, ...Array.from({ length: 8 }, (_, i) => mockReplyText(i))]) {
+      expect(text).not.toMatch(/図形\s*[0-9０-９]|番号/);
+    }
   });
 });

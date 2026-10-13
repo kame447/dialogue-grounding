@@ -1,108 +1,127 @@
 import { useEffect, useMemo, useState } from 'react';
-import { LIMITS, type HumanSnapshot } from '../../ai/protocol';
+import { LIMITS, type Figure, type HumanSnapshot } from '../../ai/protocol';
 import { normalizeName } from '../../domain/names';
 import { Thread } from '../components/Chat';
 import { Dialog } from '../components/Dialog';
 import { FigureArt } from '../components/Figure';
+import { Scene } from '../components/Scene';
+import { useAppHeight } from '../useAppHeight';
 import type { RoomApi } from '../useRoom';
 
-const storageKey = (roomId: string) => `dg-ai-names:${roomId}`;
+const storageKey = (roomKey: string) => `dg-ai-names2:${roomKey}`;
 
-/** Per-field state: duplicates are shown immediately, empty fields turn into errors after a confirm attempt. */
-function fieldIssues(names: string[]) {
-  const norm = names.map(normalizeName);
-  return norm.map((n, i) => {
-    if (!n) return { kind: 'empty' as const };
-    const dup = norm.findIndex((m, j) => j !== i && m === n);
-    if (dup >= 0) return { kind: 'dup' as const, other: dup };
-    if (names[i].trim().length > LIMITS.maxNameChars) return { kind: 'long' as const };
-    return null;
-  });
+/** Slots whose name collides with another figure's name (after normalisation). */
+function duplicates(names: Record<string, string>): Set<string> {
+  const bySlot = Object.entries(names).map(([slot, name]) => [slot, normalizeName(name)] as const).filter(([, n]) => n);
+  return new Set(bySlot.filter(([slot, n]) => bySlot.some(([other, m]) => other !== slot && m === n)).map(([slot]) => slot));
 }
 
+/**
+ * Names are given on the same scattered scene the conversation used: the participant picks a
+ * silhouette and types its name, which then appears on the silhouette. No numbers, no list.
+ */
 export function NamingStage({ room, snapshot }: { room: RoomApi; snapshot: HumanSnapshot }) {
+  useAppHeight();
   const roomKey = snapshot.figures.map((f) => f.slot).join('');
-  const [names, setNames] = useState<string[]>(() => {
+  const slots = snapshot.figures.map((f) => f.slot);
+  const [names, setNames] = useState<Record<string, string>>(() => {
     try {
       const saved = JSON.parse(sessionStorage.getItem(storageKey(roomKey)) ?? 'null') as unknown;
-      if (Array.isArray(saved) && saved.length === 6 && saved.every((v) => typeof v === 'string')) return saved as string[];
+      if (saved && typeof saved === 'object') {
+        return Object.fromEntries(slots.map((slot) => [slot, typeof (saved as Record<string, unknown>)[slot] === 'string' ? (saved as Record<string, string>)[slot] : '']));
+      }
     } catch { /* ignore */ }
-    return Array(6).fill('');
+    return Object.fromEntries(slots.map((slot) => [slot, '']));
   });
-  const [attempted, setAttempted] = useState(false);
+  const [editing, setEditing] = useState<Figure | null>(null);
+  const [draft, setDraft] = useState('');
+  const [draftError, setDraftError] = useState('');
   const [confirm, setConfirm] = useState(false);
-  const [review, setReview] = useState(false);
+  const [attempted, setAttempted] = useState(false);
   useEffect(() => { try { sessionStorage.setItem(storageKey(roomKey), JSON.stringify(names)); } catch { /* ignore */ } }, [roomKey, names]);
-  const issues = useMemo(() => fieldIssues(names), [names]);
-  const filled = names.filter((n) => normalizeName(n)).length;
-  const ok = issues.every((x) => x === null);
-  const dupCount = issues.filter((x) => x?.kind === 'dup').length;
 
+  const dup = useMemo(() => duplicates(names), [names]);
+  const filled = slots.filter((slot) => normalizeName(names[slot] ?? '')).length;
+  const ready = filled === slots.length && dup.size === 0;
+
+  const open = (figure: Figure) => { setEditing(figure); setDraft(names[figure.slot] ?? ''); setDraftError(''); };
+  const save = () => {
+    if (!editing) return;
+    const value = draft.trim();
+    const n = normalizeName(value);
+    if (value.length > LIMITS.maxNameChars) return setDraftError(`${LIMITS.maxNameChars}文字以内で入力してください`);
+    if (n && slots.some((slot) => slot !== editing.slot && normalizeName(names[slot] ?? '') === n)) return setDraftError('ほかの図形と同じ名前です。別の名前にしてください');
+    setNames((prev) => ({ ...prev, [editing.slot]: value }));
+    setEditing(null);
+  };
   const tryConfirm = () => {
     setAttempted(true);
-    if (ok) setConfirm(true);
-    else document.getElementById(`name-${issues.findIndex((x) => x !== null)}`)?.focus();
+    if (ready) setConfirm(true);
   };
+  const missing = slots.length - filled;
 
   return (
     <>
-      <main className="page">
-        <div className="page-head">
-          <div>
-            <h1>図形の名前を決める</h1>
-            <p>会話で決めた呼び方を、6つの図形それぞれに入力してください。入力内容はAIには見えません。</p>
+      <div className="workspace">
+        <section className="panel scene-panel" aria-label="あなたの図形">
+          <Scene
+            figures={snapshot.figures}
+            names={names}
+            markEmpty
+            invalid={dup}
+            onPick={open}
+            figureLabel={(f) => (names[f.slot]?.trim() ? `「${names[f.slot].trim()}」と名付けた図形` : '名前が未入力の図形')}
+          />
+        </section>
+        <section className="panel chat" aria-labelledby="naming-title">
+          <div className="panel-head">
+            <div className="head-text">
+              <h2 id="naming-title">名前をつける</h2>
+              <p className="panel-sub">図形を押して入力・AIには見えません</p>
+            </div>
+            <span className="panel-count" role="status">{filled}/{slots.length}</span>
           </div>
-          <button className="btn btn-quiet" onClick={() => setReview(true)}>会話を見返す</button>
-        </div>
-        <div className="name-grid">
-          {snapshot.figures.map((figure, i) => {
-            const issue = issues[i];
-            const error = issue?.kind === 'dup' || issue?.kind === 'long' || (attempted && issue?.kind === 'empty');
-            const msg = issue?.kind === 'dup' ? `同じ名前があります（図形${issue.other + 1}）` : issue?.kind === 'long' ? `${LIMITS.maxNameChars}文字以内で入力してください` : issue?.kind === 'empty' ? '未入力' : '';
-            return (
-              <div className="name-card" key={figure.slot}>
-                <FigureArt polygons={figure.polygons} />
-                <label htmlFor={`name-${i}`}>図形{i + 1}の名前</label>
-                <input
-                  id={`name-${i}`}
-                  className="field-input"
-                  autoComplete="off"
-                  maxLength={LIMITS.maxNameChars + 10}
-                  value={names[i]}
-                  aria-invalid={error || undefined}
-                  aria-describedby={`name-msg-${i}`}
-                  onChange={(e) => setNames((prev) => prev.map((n, j) => (j === i ? e.target.value : n)))}
-                />
-                <span id={`name-msg-${i}`} className={`field-msg ${error ? 'field-msg-error' : ''}`}>{msg}</span>
-              </div>
-            );
-          })}
-        </div>
-      </main>
-      <div className="sticky-actions">
-        <div className="sticky-inner">
-          <p role="status">入力済み {filled}/6{dupCount > 0 ? '・重複あり' : ''}</p>
-          <button className="btn btn-primary" onClick={tryConfirm} disabled={room.busy}>名前を確認する</button>
-        </div>
+          <Thread messages={snapshot.messages} label="会話の記録" aiLabel={snapshot.mode === 'mock' ? '模擬AI' : 'AI'} />
+          <div className="panel-foot">
+            {attempted && !ready && <p className="field-msg field-msg-error" role="alert">{missing > 0 ? `名前が未入力の図形があります（残り${missing}）` : '同じ名前の図形があります'}</p>}
+            <button className="btn btn-primary" onClick={tryConfirm} disabled={room.busy}>名前を確定する</button>
+          </div>
+        </section>
       </div>
-      <Dialog open={confirm} title="この名前で確定しますか？" onClose={() => setConfirm(false)}>
+      <Dialog open={editing !== null} title="名前をつける" onClose={() => setEditing(null)} className="modal-name">
+        {editing && (
+          <form className="name-form" onSubmit={(e) => { e.preventDefault(); save(); }}>
+            <div className="name-art"><FigureArt polygons={editing.polygons} rotation={editing.placement.rotation} /></div>
+            <input
+              className="field-input"
+              aria-label="名前"
+              autoComplete="off"
+              autoFocus
+              enterKeyHint="done"
+              maxLength={LIMITS.maxNameChars + 10}
+              value={draft}
+              aria-invalid={draftError ? true : undefined}
+              aria-describedby="name-error"
+              onChange={(e) => { setDraft(e.target.value); setDraftError(''); }}
+            />
+            <span id="name-error" className="field-msg field-msg-error">{draftError}</span>
+            <div className="modal-actions">
+              <button type="button" className="btn" onClick={() => setEditing(null)}>キャンセル</button>
+              <button type="submit" className="btn btn-primary">決定</button>
+            </div>
+          </form>
+        )}
+      </Dialog>
+      <Dialog open={confirm} title="この名前で確定しますか？" onClose={() => setConfirm(false)} className="modal-wide">
         <p>確定すると変更できません。</p>
-        <ul className="confirm-list">
-          {snapshot.figures.map((figure, i) => (
-            <li key={figure.slot}><FigureArt polygons={figure.polygons} /><span>図形{i + 1}：{names[i].trim()}</span></li>
-          ))}
-        </ul>
+        <div className="confirm-scene"><Scene figures={snapshot.figures} names={names} /></div>
         <div className="modal-actions">
           <button className="btn" onClick={() => setConfirm(false)}>修正する</button>
           <button className="btn btn-primary" disabled={room.busy} onClick={() => {
-            room.submitNames(Object.fromEntries(snapshot.figures.map((f, i) => [f.slot, names[i].trim()])));
+            room.submitNames(Object.fromEntries(slots.map((slot) => [slot, names[slot].trim()])));
             setConfirm(false);
           }}>確定する</button>
         </div>
-      </Dialog>
-      <Dialog open={review} title="会話の記録" onClose={() => setReview(false)}>
-        <div className="review-log"><Thread messages={snapshot.messages} label="会話の記録" /></div>
-        <div className="modal-actions"><button className="btn" onClick={() => setReview(false)}>閉じる</button></div>
       </Dialog>
     </>
   );

@@ -1,7 +1,7 @@
 import { test, expect, type BrowserContext, type Page } from '@playwright/test';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
-import { base, showTab } from './helpers';
+import { base, confirmNames, fillNames, scene } from './helpers';
 
 let child: ChildProcess | undefined;
 /** The participant's separate device uses the same viewport/touch settings as the current project. */
@@ -26,21 +26,23 @@ test('researcher provisions external room and stub agent completes the flow', as
     await human.goto(participantUrl);
     await expect(human.getByText('AI接続待機中')).toBeVisible();
     child = spawn(process.execPath, ['agent/stub-agent.mjs', '--base', base, '--room', roomId, '--once'], { cwd: process.cwd(), env: { ...process.env, DG_AGENT_TOKEN: aiToken }, stdio: 'ignore' });
-    await expect(human.getByRole('region', { name: 'あなたの図形' })).toBeVisible({ timeout: 30_000 });
-    await showTab(human, '会話');
+    await expect(scene(human)).toBeVisible({ timeout: 30_000 });
     await expect(human.getByRole('log', { name: '会話' })).toBeVisible();
     await human.getByRole('textbox', { name: 'メッセージ' }).fill('図形について相談したいです');
     await human.getByRole('button', { name: '送信', exact: true }).click();
     await expect(human.getByRole('log', { name: '会話' })).toContainText('外部エージェント・スタブ', { timeout: 30_000 });
     await human.getByRole('button', { name: '会話を終えて名前を決める' }).click();
     await human.getByRole('dialog', { name: '会話を終えますか？' }).getByRole('button', { name: '名前の入力へ進む' }).click();
-    for (let i = 1; i <= 6; i++) await human.getByRole('textbox', { name: `図形${i}の名前` }).fill(`人間${i}`);
-    await human.getByRole('button', { name: '名前を確認する' }).click();
-    await human.getByRole('dialog').getByRole('button', { name: '確定する' }).click();
+    await fillNames(human, ['あ', 'い', 'う', 'え', 'お', 'か']);
+    await confirmNames(human);
     for (const scale of ['精神的努力', '円滑さ', '煩わしさ']) await human.getByRole('radiogroup', { name: new RegExp(scale) }).getByRole('radio', { name: '1', exact: true }).check();
     await human.getByRole('button', { name: '回答を送信' }).click();
     await expect(human.getByRole('heading', { name: '結果' })).toBeVisible();
-    await expect(human.getByRole('table', { name: '名前の対応' })).toContainText('スタブ名1');
+    const table = human.getByRole('table', { name: '名前の対応' });
+    await expect(table).toContainText('スタブ名');
+    await expect(table.getByRole('row')).toHaveCount(7);
+    await expect(human.getByText(/^一致 \d \/ 6$/)).toBeVisible();
+    expect(await table.innerText()).not.toMatch(/図形\s*[0-9]/);
   } finally { await context.close(); }
 });
 
@@ -56,9 +58,8 @@ test('mock fallback works and each websocket endpoint rejects the opposite seat 
   try {
     const human = await context.newPage(); await human.goto(participantUrl);
     await human.getByRole('button', { name: '模擬AIで始める' }).click();
-    await expect(human.getByRole('region', { name: 'あなたの図形' })).toBeVisible();
-    await showTab(human, '会話');
-    await expect(human.getByText('（模擬AI）').first()).toBeVisible();
+    await expect(scene(human)).toBeVisible();
+    await expect(human.getByRole('log', { name: '会話' }).locator('.msg-ai')).not.toHaveCount(0);
     const failures = await page.evaluate(async ({ roomId, humanToken, agentToken }) => {
       const attempt = (url: string, token: string) => new Promise<string>(resolve => {
         const ws = new WebSocket(url); let settled = false;

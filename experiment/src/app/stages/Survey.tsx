@@ -27,7 +27,7 @@ export function SurveyStage({ room }: { room: RoomApi }) {
       <div className="page-head">
         <div>
           <h1>やりとりについての質問</h1>
-          <p>名前は確定しました。結果を見る前に、3つの質問に答えてください。回答はAIには渡されません。</p>
+          <p>結果の前に、3つの質問に答えてください。回答はAIには渡されません。</p>
         </div>
       </div>
       {QUESTIONS.map((q) => (

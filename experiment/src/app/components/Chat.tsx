@@ -4,8 +4,8 @@ import type { PendingChat } from '../useRoom';
 
 const time = (at: number) => new Date(at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
 
-export function Thread(props: { messages: ChatMessage[]; pending?: PendingChat[]; aiTyping?: boolean; onRetry?: (clientId: string) => void; empty?: ReactNode; label?: string }) {
-  const { messages, pending = [], aiTyping = false } = props;
+export function Thread(props: { messages: ChatMessage[]; pending?: PendingChat[]; aiTyping?: boolean; onRetry?: (clientId: string) => void; empty?: ReactNode; label?: string; aiLabel?: string }) {
+  const { messages, pending = [], aiTyping = false, aiLabel = 'AI' } = props;
   const ref = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   const count = messages.length + pending.length + (aiTyping ? 1 : 0);
@@ -22,7 +22,7 @@ export function Thread(props: { messages: ChatMessage[]; pending?: PendingChat[]
         <ol>
           {messages.map((m) => (
             <li key={m.id} className={`msg ${m.from === 'self' ? 'msg-self' : 'msg-ai'}`}>
-              <span className="msg-who">{m.from === 'self' ? 'あなた' : 'AI'}・{time(m.at)}</span>
+              <span className="msg-who">{m.from === 'self' ? 'あなた' : aiLabel}・{time(m.at)}</span>
               <div className="bubble">{m.text}</div>
             </li>
           ))}
@@ -37,7 +37,7 @@ export function Thread(props: { messages: ChatMessage[]; pending?: PendingChat[]
           ))}
           {aiTyping && (
             <li className="msg msg-ai">
-              <span className="typing" role="status"><span className="typing-dots" aria-hidden="true"><i /><i /><i /></span>AIが入力中</span>
+              <span className="typing" role="status"><span className="typing-dots" aria-hidden="true"><i /><i /><i /></span>{aiLabel}が入力中</span>
             </li>
           )}
         </ol>

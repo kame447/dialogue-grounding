@@ -38,7 +38,7 @@ function decide(snapshot, event) {
     return {
       type: "submit_names",
       names: Object.fromEntries(
-        snapshot.figures.map((f, i) => [f.slot, `スタブ名${i + 1}`]),
+        snapshot.figures.map((f) => [f.slot, `スタブ名-${f.slot.slice(0, 6)}`]),
       ),
     };
   return null;

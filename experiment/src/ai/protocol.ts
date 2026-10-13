@@ -7,7 +7,9 @@
  * connects with its own token from another machine (mode 'external'). No real model is connected.
  *
  * Leak rules enforced by the server (see docs/agent-protocol.md):
- * - Figures are addressed by opaque per-room, per-seat slot keys; never stimulus IDs.
+ * - Figures are addressed by opaque per-room, per-seat slot keys; never stimulus IDs. They are never
+ *   numbered or named on screen: each seat sees the same six silhouettes scattered at its own
+ *   irregular positions and orientations (`placement`, see src/stimuli/scene.ts).
  * - The human never receives the AI token, the AI's figure order, the AI's names before results,
  *   or any condition / scoring field.
  * - The AI never receives the human's survey answers or the human's names before results.
@@ -47,11 +49,21 @@ export type AgentPhase = 'waiting_human' | 'chat' | 'naming' | 'done';
 
 export type Point = [number, number];
 
+/** Where a figure sits in this seat's scene (SCENE units, clockwise degrees). See src/stimuli/scene.ts. */
+export interface FigurePlacement {
+  x: number;
+  y: number;
+  rotation: number;
+  scale: number;
+}
+
 export interface Figure {
   /** Opaque, random per room and seat. Not a stimulus ID and not shared with the other seat. */
   slot: string;
-  /** Silhouette polygons in a 0..100 square. */
+  /** Canonical silhouette polygons in a 0..100 square (unrotated). */
   polygons: Point[][];
+  /** Seat-specific position/orientation, fixed for the room (server-generated from its seed). */
+  placement: FigurePlacement;
 }
 
 export interface ChatMessage {
@@ -74,10 +86,12 @@ export interface Survey {
 }
 
 export interface ResultRow {
-  polygons: Point[][];
+  /** The human's own figure slot (to draw it as it appeared in the human's scene). */
+  slot: string;
   selfName: string;
-  aiName: string;
-  match: boolean;
+  /** null when the AI's answer is not scored (mock AI: it never identifies figures). */
+  aiName: string | null;
+  match: boolean | null;
 }
 
 export interface HumanSnapshot {
@@ -101,8 +115,11 @@ export interface HumanSnapshot {
   chatClosedBy: 'self' | 'partner' | null;
   myNames: Record<string, string> | null;
   mySurvey: Survey | null;
-  /** Only set when phase === 'results'. Rows in the human's own figure order. */
-  results: { rows: ResultRow[]; matched: number; total: number } | null;
+  /**
+   * Only set when phase === 'results'. Rows in the human's own figure order.
+   * scored is false for the mock AI: it does not see the figures, so no agreement is computed.
+   */
+  results: { scored: boolean; rows: ResultRow[]; matched: number | null; total: number } | null;
 }
 
 export interface AgentSnapshot {

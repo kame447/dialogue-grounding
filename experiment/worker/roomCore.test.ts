@@ -1,7 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { LIMITS, type HumanClientMessage, type Seat } from "../src/ai/protocol";
-import { validateNames } from "../src/domain/names";
 import { MockAi } from "./partners/mockAi";
 import {
   agentSnapshot,
@@ -85,8 +84,8 @@ describe("human + AI room core", () => {
     expect(state.phases).toEqual({ human: "chat", ai: "chat" });
     expect(state.mockOpeningSent).toBe(false);
     const opening = mockOpening(state);
-    expect(opening).toContain("動作確認用の模擬AI");
-    expect(opening).toContain("図形は見ていません");
+    expect(opening).toBe("こんにちは。図形の名前を考えましょう。");
+    expect(opening).not.toMatch(/図形\s*[0-9０-９]/);
     expect(state.mockOpeningSent).toBe(true);
     if (!state.mockOpeningSent) mockOpening(state);
     expect(state.mockOpeningSent).toBe(true);
@@ -126,62 +125,65 @@ describe("human + AI room core", () => {
     expect(latest.nextMessageId).toBe(7);
   });
 
-  it("extracts multiple names and full-width figure numbers and maps the oracle result", () => {
+  it("mock replies never parse or mention figure numbers", () => {
     const state = room("mock");
     join(state, "human");
-    mockReply(state, "図形２は鳥、図形1は猫、図形３は犬、図形4は魚");
-    expect(state.mockRecorded).toEqual({ 1: "猫", 2: "鳥", 3: "犬", 4: "魚" });
-    mockReply(state, "図形5は木、図形６は月");
-    expect(Object.keys(state.mockRecorded)).toHaveLength(6);
-
-    const oracleNames = mockNames(state);
-    const humanNames = namesFor(state, "human", [
-      "猫",
-      "鳥",
-      "犬",
-      "魚",
-      "木",
-      "月",
-    ]);
-    state.names.human = humanNames;
-    state.names.ai = oracleNames;
-    state.phases.human = "results";
-    const rows = humanSnapshot(state, connected).results!.rows;
-    expect(rows).toHaveLength(6);
-    expect(rows.every((row) => row.match)).toBe(true);
+    const replies = Array.from({ length: 8 }, () => mockReply(state));
+    for (const reply of [mockOpening(state), ...replies]) {
+      expect(reply).not.toMatch(/図形\s*[0-9０-９]|図形N|番号|記録しました/);
+    }
+    expect(new Set(replies).size).toBeGreaterThan(2);
   });
 
-  it("uses distinct valid placeholders for unrecorded figures", () => {
+  it("mock placeholders are distinct, independent of the chat, and never scored or shown", async () => {
     const state = room("mock");
     join(state, "human");
-    mockReply(state, "図形１は鳥");
-    const names = mockNames(state);
-    const values = state.orders.ai.map((id) => {
-      const slot = Object.keys(state.slots.ai).find(
-        (key) => state.slots.ai[key] === id,
-      )!;
-      return names[slot];
-    });
+    const before = mockNames(state);
+    state.messages.push({ id: "1", from: "self", text: "右上の鳥っぽいのは鳥", at: 1, seat: "human" });
+    expect(mockNames(state)).toEqual(before);
+    const values = Object.values(before);
     expect(new Set(values).size).toBe(6);
-    expect(values).toContain("未記録2");
-    expect(validateNames(values).ok).toBe(true);
+    expect(Object.keys(before).sort()).toEqual(Object.keys(state.slots.ai).sort());
+    const input = { figures: agentSnapshot(state, connected).figures, history: [], publicCues: { humanStage: "chat" as const, chatClosed: false } };
+    expect(await new MockAi().proposeNames(input)).toEqual(before);
+
+    state.names.human = namesFor(state, "human");
+    state.names.ai = before;
+    state.phases.human = "results";
+    const results = humanSnapshot(state, connected).results!;
+    expect(results.scored).toBe(false);
+    expect(results.matched).toBeNull();
+    expect(results.rows.every((row) => row.aiName === null && row.match === null)).toBe(true);
+    expect(JSON.stringify(results)).not.toContain("模擬AI未判定");
   });
 
-  it("keeps mock oracle names stable across adapter instances and recreated state", async () => {
-    const state = room("mock");
-    mockReply(state, "図形２は鳥、図形1は猫");
-    const recreated = JSON.parse(JSON.stringify(state)) as RoomState;
-    const input = {
-      figures: humanSnapshot(state, connected).figures,
-      history: [
-        { from: "human" as const, text: "図形２は鳥、図形1は猫", at: 1 },
-      ],
-      publicCues: { humanStage: "chat" as const, chatClosed: false },
-    };
-    const first = await new MockAi().proposeNames(input, state);
-    const second = await new MockAi().proposeNames(input, recreated);
-    expect(second).toEqual(first);
-    expect(Object.values(second)).toContain("鳥");
+  it("gives each seat a fixed, irregular, non-overlapping scattered placement", () => {
+    const state = room("external");
+    const human = humanSnapshot(state, connected).figures;
+    const ai = agentSnapshot(state, connected).figures;
+    expect(human.every((f) => f.placement && f.placement.scale > 0)).toBe(true);
+    // Stable across snapshots and a stored/reloaded room.
+    const reloaded = JSON.parse(JSON.stringify(state)) as RoomState;
+    expect(humanSnapshot(reloaded, connected).figures).toEqual(human);
+    // Same canonical figure differs in position and orientation between seats.
+    const key = (f: { polygons: unknown }) => JSON.stringify(f.polygons);
+    const aiByShape = new Map(ai.map((f) => [key(f), f.placement]));
+    const differing = human.filter((f) => {
+      const other = aiByShape.get(key(f))!;
+      return other.rotation !== f.placement.rotation && (other.x !== f.placement.x || other.y !== f.placement.y);
+    });
+    expect(differing.length).toBe(6);
+  });
+
+  it("does not echo per-figure numbered validation text for invalid names", () => {
+    const state = room("external");
+    startExternal(state);
+    act(state, "human", { type: "end_chat" });
+    const names = namesFor(state, "human");
+    names[Object.keys(names)[1]] = names[Object.keys(names)[0]];
+    const out = act(state, "human", { type: "submit_names", names }).out[0].msg;
+    expect(out).toMatchObject({ type: "error", code: "invalid_names" });
+    expect(JSON.stringify(out)).not.toMatch(/図形\s*[0-9]/);
   });
 
   it("moves from external waiting_ai to chat after both seats join", () => {
@@ -323,7 +325,10 @@ describe("human + AI room core", () => {
 
     act(state, "ai", { type: "submit_names", names: namesFor(state, "ai") });
     expect(state.phases.human).toBe("results");
-    expect(humanSnapshot(state, connected).results?.total).toBe(6);
+    const results = humanSnapshot(state, connected).results!;
+    expect(results.total).toBe(6);
+    expect(results.scored).toBe(true);
+    expect(results.matched).toBe(results.rows.filter((row) => row.match).length);
   });
 
   it("withholds private fields from both snapshots before results", () => {

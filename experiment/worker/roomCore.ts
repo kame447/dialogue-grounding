@@ -1,4 +1,4 @@
-import { extractNamePairs } from "./partners/mockRules";
+import { MOCK_OPENING, mockPlaceholderNames, mockReplyText } from "./partners/mockRules";
 import {
   LIMITS,
   PROTOCOL_VERSION,
@@ -17,6 +17,7 @@ import {
 import { normalizeName, validateNames } from "../src/domain/names";
 import { STIMULUS_SETS } from "../src/stimuli/sets";
 import { createLayout, createRng } from "../src/stimuli/layout";
+import { placeFigures } from "../src/stimuli/scene";
 
 export interface RoomState {
   roomId: string;
@@ -36,7 +37,8 @@ export interface RoomState {
   rateTimes: Record<Seat, number[]>;
   clientMessages: Record<Seat, Record<string, ChatMessage>>;
   nextMessageId: number;
-  mockRecorded: Record<number, string>;
+  /** Legacy field of rooms created before 2026-10-13 (number-parsing mock); no longer read. */
+  mockRecorded?: Record<number, string>;
   mockPromptIndex: number;
   mockOpeningSent: boolean;
   mockPendingReplies: number;
@@ -87,7 +89,6 @@ export function createRoomState(i: {
     rateTimes: { human: [], ai: [] },
     clientMessages: { human: {}, ai: {} },
     nextMessageId: 1,
-    mockRecorded: {},
     mockPromptIndex: 0,
     mockOpeningSent: false,
     mockPendingReplies: 0,
@@ -118,11 +119,31 @@ export function join(s: RoomState, seat: Seat): RoomState {
   }
   return s;
 }
-const fig = (s: RoomState, seat: Seat): Figure[] =>
-  s.orders[seat].map((id) => ({
-    slot: Object.keys(s.slots[seat]).find((k) => s.slots[seat][k] === id)!,
+/** Placements depend only on (set, seed, seat); cache them per isolate. */
+const placementCache = new Map<string, ReturnType<typeof placeFigures>>();
+function placementsFor(s: RoomState, seat: Seat) {
+  // Placement follows the canonical stimulus order of the set, so it is independent of slot order.
+  const ids = STIMULUS_SETS[s.setId].stimuli.map((x) => x.id);
+  const key = `${s.setId}:${s.seed}:${seat}`;
+  let placements = placementCache.get(key);
+  if (!placements) {
+    placements = placeFigures(ids.map(polygons), s.seed, seat);
+    if (placementCache.size > 500) placementCache.clear();
+    placementCache.set(key, placements);
+  }
+  const found = placements;
+  return (id: string) => found[ids.indexOf(id)];
+}
+const slotOf = (s: RoomState, seat: Seat, id: string) =>
+  Object.keys(s.slots[seat]).find((k) => s.slots[seat][k] === id)!;
+const fig = (s: RoomState, seat: Seat): Figure[] => {
+  const place = placementsFor(s, seat);
+  return s.orders[seat].map((id) => ({
+    slot: slotOf(s, seat, id),
     polygons: polygons(id),
+    placement: place(id),
   }));
+};
 export function humanSnapshot(
   s: RoomState,
   c: { human: boolean; ai: boolean },
@@ -130,19 +151,18 @@ export function humanSnapshot(
 ): HumanSnapshot {
   const phase = s.phases.human,
     result = phase === "results";
+  // The mock AI never identifies figures, so its placeholder answers are not scored or shown.
+  const scored = s.mode === "external";
   const rows = result
     ? s.orders.human.map((id) => {
-        const hs = Object.keys(s.slots.human).find(
-            (k) => s.slots.human[k] === id,
-          )!,
-          as = Object.keys(s.slots.ai).find((k) => s.slots.ai[k] === id)!,
-          selfName = s.names.human?.[hs] ?? "",
-          aiName = s.names.ai?.[as] ?? "";
+        const slot = slotOf(s, "human", id),
+          selfName = s.names.human?.[slot] ?? "",
+          aiName = scored ? (s.names.ai?.[slotOf(s, "ai", id)] ?? "") : null;
         return {
-          polygons: polygons(id),
+          slot,
           selfName,
           aiName,
-          match: normalizeName(selfName) === normalizeName(aiName),
+          match: aiName === null ? null : normalizeName(selfName) === normalizeName(aiName),
         };
       })
     : null;
@@ -173,11 +193,9 @@ export function humanSnapshot(
     mySurvey: s.survey,
     results: rows
       ? {
-          rows: rows.map(({ polygons: selfPolygons, ...r }) => ({
-            polygons: selfPolygons,
-            ...r,
-          })),
-          matched: rows.filter((r) => r.match).length,
+          scored,
+          rows,
+          matched: scored ? rows.filter((r) => r.match).length : null,
           total: rows.length,
         }
       : null,
@@ -352,7 +370,8 @@ export function handle(
           ],
       );
       const v = validateNames(vals);
-      if (!v.ok) err("invalid_names", Object.values(v.errors).join(" "));
+      // Generic text: the per-field messages of validateNames refer to figure numbers.
+      if (!v.ok) err("invalid_names", "6つの図形に、それぞれ別の名前を入力してください。");
       else {
         s.names[seat] = { ...msg.names };
         if (seat === "human") s.phases.human = "survey";
@@ -375,34 +394,11 @@ export function handle(
 }
 export function mockOpening(s: RoomState): string {
   s.mockOpeningSent = true;
-  return [
-    "（模擬AI）こんにちは。私は動作確認用の模擬AIで、図形は見ていません。",
-    "「図形2は鳥」のように番号と名前を書いてもらえれば、",
-    "その名前を記録して最後に提出します。",
-  ].join("");
+  return MOCK_OPENING;
 }
-export function mockReply(s: RoomState, text: string): string {
-  const captured = [...extractNamePairs(text)];
-  for (const [n, name] of captured) s.mockRecorded[n] = name;
-  const missing = [1, 2, 3, 4, 5, 6].filter((n) => !s.mockRecorded[n]);
-  if (missing.length) {
-    if (captured.length) {
-      const saved = captured
-        .map(([n, name]) => `図形${n}を「${name}」として記録しました。`)
-        .join("");
-      const remaining = missing.map((n) => `図形${n}`).join("・");
-      return `（模擬AI）${saved}未記録: ${remaining}`;
-    }
-    return [
-      "図形1は…の形ですか？",
-      "図形2は…と呼べそうですか？",
-      "図形3はどんな名前がよいでしょう？",
-    ][s.mockPromptIndex++ % 3].replace("図形", "（模擬AI）図形");
-  }
-  return [
-    "（模擬AI）6つの名前を記録しました。",
-    "「会話を終えて名前を決める」から提出に進めます。",
-  ].join("");
+/** The mock never parses figure references; it only gives neutral, short prompts in turn. */
+export function mockReply(s: RoomState): string {
+  return mockReplyText(s.mockPromptIndex++);
 }
 
 export function appendAiMessage(
@@ -424,30 +420,10 @@ export function appendAiMessage(
 }
 
 /**
- * Demo-only oracle mapping: numbered human figures are mapped to AI stimulus slots to complete
- * flow. This is not grounding or perception.
+ * The mock AI's submission: distinct placeholders per AI slot, chosen without looking at the
+ * conversation or the human's figures. Needed only because the room requires six names; they
+ * are never scored or shown (see humanSnapshot).
  */
 export function mockNames(s: RoomState): Record<string, string> {
-  const result: Record<string, string> = {},
-    seen = new Set<string>();
-  for (let n = 1; n <= 6; n++) {
-    const id = s.orders.human[n - 1],
-      slot = Object.keys(s.slots.ai).find((k) => s.slots.ai[k] === id)!;
-    const name = s.mockRecorded[n] ?? `未記録${n}`;
-    let distinct = name;
-    let suffix = 2;
-    while (seen.has(normalizeName(distinct))) distinct = `${name}${suffix++}`;
-    seen.add(normalizeName(distinct));
-    result[slot] = distinct;
-  }
-  if (
-    !validateNames(
-      s.orders.ai.map(
-        (id) =>
-          result[Object.keys(s.slots.ai).find((k) => s.slots.ai[k] === id)!],
-      ),
-    ).ok
-  )
-    throw new Error("Mock names invalid");
-  return result;
+  return mockPlaceholderNames(s.orders.ai.map((id) => slotOf(s, "ai", id)));
 }

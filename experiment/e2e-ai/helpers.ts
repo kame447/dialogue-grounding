@@ -1,22 +1,24 @@
-import { expect, type Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 
 export const base = process.env.AI_BASE_URL || 'http://127.0.0.1:8795';
 export const names = ['山', '川', '星', '舟', '鳥', '月'];
+export const INTRO = '6つの図形の名前を、AIと決めてください';
+/** Any visible figure number / ordinal ("図形1", "図形２", "図形N"). */
+export const NUMBERED = /図形\s*[0-9０-９NＮ]|[0-9０-９]番目の図形|左から[0-9０-９]/;
 
-/** On narrow screens figures and chat are tabs; switch when the tab bar is shown. */
-export async function showTab(page: Page, name: '図形' | '会話') {
-  const tab = page.getByRole('tablist', { name: '表示切替' }).getByRole('tab', { name: new RegExp(`^${name}`) });
-  if (await tab.isVisible()) await tab.click();
-}
+export const scene = (page: Page) => page.getByRole('region', { name: 'あなたの図形' });
+export const figureButtons = (page: Page) => scene(page).getByRole('button');
+/** Click a figure at its centre hit area (kept clear of the other silhouettes by the generator). */
+export const clickFigure = (figure: Locator) => figure.locator('circle').click();
+export const aiMessages = (page: Page) => page.getByRole('log', { name: '会話' }).locator('.msg-ai .bubble');
 
 export async function startMock(page: Page) {
   await page.goto('/#/');
-  await expect(page.getByRole('heading', { name: '図形の命名対話' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: INTRO })).toBeVisible();
   await page.getByRole('button', { name: 'デモを始める' }).click();
-  await expect(page.getByRole('region', { name: 'あなたの図形' })).toBeVisible();
-  await showTab(page, '会話');
+  await expect(scene(page)).toBeVisible();
   await expect(page.getByRole('log', { name: '会話' })).toBeVisible();
-  await expect(page.getByText('（模擬AI）').first()).toBeVisible();
+  await expect(aiMessages(page).first()).toBeVisible();
 }
 
 export async function sendHuman(page: Page, text: string) {
@@ -29,37 +31,45 @@ export async function sendHuman(page: Page, text: string) {
 export async function endChat(page: Page) {
   await page.getByRole('button', { name: '会話を終えて名前を決める' }).click();
   await page.getByRole('dialog', { name: '会話を終えますか？' }).getByRole('button', { name: '名前の入力へ進む' }).click();
+  await expect(page.getByRole('heading', { name: '名前をつける' })).toBeVisible();
+}
+
+/** Opens the naming dialog of the i-th figure (DOM order only; nothing on screen is numbered). */
+export async function nameFigure(page: Page, i: number, value: string) {
+  await clickFigure(figureButtons(page).nth(i));
+  const dialog = page.getByRole('dialog', { name: '名前をつける' });
+  await dialog.getByRole('textbox', { name: '名前' }).fill(value);
+  await dialog.getByRole('button', { name: '決定' }).click();
+  return dialog;
 }
 
 export async function fillNames(page: Page, values = names) {
-  for (let i = 0; i < 6; i++) await page.getByRole('textbox', { name: `図形${i + 1}の名前` }).fill(values[i]);
+  for (let i = 0; i < 6; i++) {
+    const dialog = await nameFigure(page, i, values[i]);
+    await expect(dialog).toHaveCount(0);
+  }
 }
 
 export async function confirmNames(page: Page) {
-  await page.getByRole('button', { name: '名前を確認する' }).click();
+  await page.getByRole('button', { name: '名前を確定する' }).click();
   await page.getByRole('dialog', { name: 'この名前で確定しますか？' }).getByRole('button', { name: '確定する' }).click();
 }
 
 export async function submitSurvey(page: Page) {
-  for (const [label, count] of [['精神的努力', 9], ['円滑さ', 7], ['煩わしさ', 7]] as const) {
-    const group = page.getByRole('radiogroup', { name: new RegExp(label) });
-    await group.getByRole('radio', { name: '1', exact: true }).check();
+  for (const label of ['精神的努力', '円滑さ', '煩わしさ']) {
+    await page.getByRole('radiogroup', { name: new RegExp(label) }).getByRole('radio', { name: '1', exact: true }).check();
   }
   await page.getByRole('button', { name: '回答を送信' }).click();
 }
 
-export async function completeMockToResults(page: Page) {
-  await startMock(page);
-  for (let i = 1; i <= 6; i++) {
-    await sendHuman(page, `図形${i}は${names[i - 1]}`);
-    await expect(page.getByRole('log', { name: '会話' })).toContainText('（模擬AI）');
-  }
-  await endChat(page);
-  await fillNames(page, Array(6).fill('山'));
-  await expect(page.getByText('未入力')).toHaveCount(0);
-  await expect(page.getByText('同じ名前があります').first()).toBeVisible();
-  await fillNames(page);
-  await confirmNames(page);
-  await submitSurvey(page);
-  await expect(page.getByRole('heading', { name: '結果' })).toBeVisible();
+/** Visible text plus accessibility/tooltip/placeholder attributes of the whole document. */
+export async function participantText(page: Page) {
+  return page.evaluate(() => {
+    const attrs = [...document.querySelectorAll('*')].flatMap((el) => ['aria-label', 'title', 'placeholder', 'alt', 'aria-description'].map((a) => el.getAttribute(a) ?? ''));
+    return `${document.body.innerText}\n${document.body.textContent}\n${attrs.join('\n')}`;
+  });
+}
+
+export async function expectNoFigureNumbers(page: Page) {
+  expect(await participantText(page)).not.toMatch(NUMBERED);
 }

@@ -43,7 +43,15 @@ human snapshot に刺激ID、set/seed、AI slot/order、token/hash、mode 内部
 
 ## 模擬AIと将来の接続
 
-模擬AIは図形を見ず、認識もしない単純な文字列ルールです。会話の応答と名前の照合を動かすためのデモであり、研究結果には使えません。名前提出時の番号→刺激対応にはサーバー内の oracle を使います。これはデモ完走専用で、grounding や知覚を意味しません。
+## 図形の配置契約（散在・番号なし）
+
+図形はどの画面にも番号・名前・枠を付けません。各席は同じ6図形を、席ごとに異なる不規則な位置・向きで散在した1枚のシーン（`SCENE` = 400×300 単位、原点左上・y下向き）として受け取ります。snapshot の各 figure は `slot`（席ごとの opaque キー）、`polygons`（0..100 の正規化座標・未回転）、`placement`（`x`,`y`＝正規化 bbox 中心のシーン座標、`rotation`＝時計回りの度、`scale`）を持ちます。シーン座標は `world = (x, y) + R(rotation)·scale·(p − c)`（c は polygons の bbox 中心）で、`src/stimuli/scene.ts` の `worldPolygons()` / `sceneSvg()` が唯一の実装です。描画側で CSS 回転を足さないでください。将来 VLM には `sceneSvg(snapshot.figures)` をラスタライズした画像を渡し、返答や命名は自席の `slot` で行います。
+
+配置はサーバーがルームの seed と席から決定論的に生成するため、再読込・再接続で変わりません（ストレージに追加データなし・DO migration 不要）。生成は重なり・はみ出しなし、図形間の最小間隔、整列（同一行/列に4つ以上、または3つずつ2列）を棄却し、試行回数に上限（`PLACEMENT_BUDGET`）があります。1席あたり実測数 ms。人間の図形クリック（拡大・命名）はローカル操作で、サーバーにも AI にも送られません。
+
+## 模擬AIと将来の接続
+
+模擬AIは図形を見ず、参照も解決しない固定文の応答です（冒頭は「こんにちは。図形の名前を考えましょう。」、以降は発話内容に依存しない短い促し）。番号を解析・要求することはありません。名前提出は、6名が必要な状態機械のために AI slot ごとの「未判定」プレースホルダーを入れるだけで、模擬AIモードでは一致を計算・表示しません（`results.scored = false`）。一致は外部エージェントが自分で提出した場合にのみ算出します。
 
 将来のマルチモーダル接続口は `worker/partners/types.ts` の `PartnerAdapter` です。`PartnerTurnInput` は AI order の opaque slot 付き figures、会話履歴、公開 stage cue を受けます。将来 VLM が `PartnerJudgement.checkNow` と応答を返す形を想定しています。現在は実装も外部モデル API 呼出しもありません。
 

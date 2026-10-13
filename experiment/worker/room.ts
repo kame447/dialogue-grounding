@@ -272,7 +272,7 @@ export class TangramRoom extends DurableObject<Env> {
       s.mode === "mock" &&
       !s.chatClosedBy
     ) {
-      mockText = mockReply(s, msg.text);
+      mockText = mockReply(s);
       this.prepareMockReply(s);
     }
     if (msg.type === "end_chat" && seat === "human" && s.mode === "mock") {
