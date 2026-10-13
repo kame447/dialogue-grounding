@@ -6,7 +6,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite --port 5173 --strictPort",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && tsc -p tsconfig.worker.json && vite build",
+    "worker:dev": "npm run build && wrangler dev --port 8788",
+    "e2e:live": "playwright test -c playwright.live.config.ts",
+    "deploy": "npm run build && wrangler deploy",
     "preview": "vite preview --port 4173 --strictPort",
     "typecheck": "tsc -b",
     "test": "vitest run",
@@ -18,6 +21,7 @@
     "react-dom": "19.3.0"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "5.20260928.1",
     "@playwright/test": "1.63.0",
     "@testing-library/react": "16.3.3",
     "@testing-library/user-event": "14.6.7",
@@ -27,6 +31,7 @@
     "jsdom": "30.1.1",
     "typescript": "7.0.2",
     "vite": "8.3.1",
-    "vitest": "5.0.2"
+    "vitest": "5.0.2",
+    "wrangler": "4.143.1"
   }
 }

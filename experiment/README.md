@@ -1,5 +1,14 @@
 # 図形共同命名タスク 実験UIプロトタイプ（DEMO・AI未接続）
 
+## 公開デモURL（2台で試す）
+
+**https://dg-tangram-live-demo.kame-website.workers.dev/#/live**
+
+- PC1でこのURLを開いて「ルームを作成」を押し、表示された「参加者2の招待リンク」をもう1台へ送ります。PC1は「参加者1としてこの端末で入る」を押します。
+- 2人で同じ6図形を別々の並び順で見ながら、WebSocketでチャットします。そのあと各自が名前を確定し、3問に答えると、2人とも終わった時点でDEMO結果が表示されます。
+- これは人間同士の通信確認用DEMOです。研究参加・正式同意・本実験ではなく、AI調整A/B研究のデータとも混ぜません。ルームは24時間で自動削除されます。
+- モック相手のデモ（従来の画面）は https://dg-tangram-live-demo.kame-website.workers.dev/ 、構成・セキュリティ・デプロイ手順は [`docs/live-demo.md`](docs/live-demo.md) を参照してください。
+
 > **DEMO / 試作品。** 実験本番・実在の参加者には使用できません。対話相手は規則ベースの `MockPartner` で、画像理解も認知判断もしていません。表示される一致・不一致は動作確認用であり、研究結果ではありません。
 
 研究課題（共通基盤形成で、表象のずれ・不確実性を課題遂行に支障のない範囲で許容することが精神的努力を軽減し会話を円滑にするか）を検証するための参加者インターフェースの叩き台です。仕様は [`../dialogue-model/proposals/2026-10-13-interface-prototype-task.md`](../dialogue-model/proposals/2026-10-13-interface-prototype-task.md) です。

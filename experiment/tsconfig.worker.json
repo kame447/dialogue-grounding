@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": ["@cloudflare/workers-types"]
+  },
+  "include": ["worker", "src/live/protocol.ts", "src/domain/names.ts", "src/domain/types.ts", "src/stimuli/sets.ts", "src/stimuli/stimulus-data.ts", "src/stimuli/layout.ts"],
+  "exclude": ["worker/**/*.test.ts"]
+}

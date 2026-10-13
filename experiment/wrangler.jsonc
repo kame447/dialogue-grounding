@@ -1,0 +1,21 @@
+// Standalone DEMO worker for the live two-device co-naming prototype.
+// It must not share a name, route, domain, KV, D1 or R2 with any other project on the account.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "dg-tangram-live-demo",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-09-28",
+  "workers_dev": true,
+  "preview_urls": false,
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "ROOMS", "class_name": "LiveRoom" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["LiveRoom"] }],
+  "observability": { "enabled": false }
+}

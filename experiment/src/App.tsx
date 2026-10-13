@@ -13,6 +13,9 @@ import { ResultsScreen } from './participant/ResultsScreen';
 import { Shell } from './participant/Shell';
 import { BlockSurveyScreen, ComparisonScreen } from './participant/SurveyScreens';
 import { usePartner } from './participant/usePartner';
+import { LiveLobby } from './live/LiveLobby';
+import { LiveRoom } from './live/LiveRoom';
+import { parseInviteHash } from './live/protocol';
 import { ResearcherDemo } from './researcher/ResearcherDemo';
 import { getStimulus } from './stimuli/sets';
 
@@ -37,11 +40,19 @@ function createPartner(): PartnerPort {
   return new MockPartner({ seed: randomSeed(), latencyMs: Number.isFinite(latency) ? latency : 900, failNextCalls: Number(params.get('mockFailNext') ?? '0') || 0 });
 }
 
+type Route = 'participant' | 'researcher' | 'live';
+
+function readRoute(): Route {
+  const hash = window.location.hash;
+  if (hash.startsWith('#/researcher')) return 'researcher';
+  if (hash === '#/live' || hash.startsWith('#/live/')) return 'live';
+  return 'participant';
+}
+
 function useRoute() {
-  const read = () => (window.location.hash.startsWith('#/researcher') ? 'researcher' : 'participant');
-  const [route, setRoute] = useState<'participant' | 'researcher'>(read);
+  const [route, setRoute] = useState<{ name: Route; hash: string }>(() => ({ name: readRoute(), hash: window.location.hash }));
   useEffect(() => {
-    const on = () => setRoute(read());
+    const on = () => setRoute({ name: readRoute(), hash: window.location.hash });
     window.addEventListener('hashchange', on);
     return () => window.removeEventListener('hashchange', on);
   }, []);
@@ -49,7 +60,7 @@ function useRoute() {
 }
 
 export function App() {
-  const route = useRoute();
+  const { name: route, hash } = useRoute();
   const [session, setSession] = useState<SessionState | null>(() => {
     const loaded = loadSession();
     return loaded ? reduce(loaded, { type: 'RESTORED' }) : null;
@@ -71,7 +82,7 @@ export function App() {
     if (route !== 'participant') return;
     window.history.pushState({ guard: true }, '', window.location.href);
     const onPop = () => {
-      if (window.location.hash.startsWith('#/researcher')) return;
+      if (readRoute() !== 'participant') return;
       window.history.pushState({ guard: true }, '', window.location.href);
       setNotice('このデモでは前の画面に戻ることはできません。現在の画面から続けてください。');
     };
@@ -86,6 +97,11 @@ export function App() {
 
   if (route === 'researcher') {
     return <ResearcherDemo session={session} onReplace={setSession} />;
+  }
+  if (route === 'live') {
+    // Human-pair live DEMO: state lives in the room server, independent of the mock-partner session.
+    const invite = parseInviteHash(hash);
+    return invite ? <LiveRoom key={`${invite.roomId}/${invite.token}`} roomId={invite.roomId} token={invite.token} /> : <LiveLobby />;
   }
 
   const start = () => {
