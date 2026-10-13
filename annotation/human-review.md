@@ -1,4 +1,4 @@
-# Human Review
+# 人間による確認（Human Review）
 
 ## 基本方針
 

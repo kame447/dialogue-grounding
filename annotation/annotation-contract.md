@@ -1,4 +1,4 @@
-# Annotation Contract
+# アノテーション契約（Annotation Contract）
 
 ## 観察可能性の原則
 

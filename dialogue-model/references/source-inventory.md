@@ -1,9 +1,9 @@
-# Research source inventory (2026-10-12)
+# 研究資料一覧（Research source inventory, 2026-10-12）
 
-Authoritative experiment design is in the project repository. This inventory lists external sources needed for a grounded design review, but intentionally does not store primary conversation records in Git.
+実験設計の正本はこのリポジトリの文書です。この一覧は、根拠に基づく設計レビューに必要な外部資料を列挙するもので、一次的な対話記録は意図的に Git に保存しません。
 
-- HCS2026_Iida.pdf: conference report describing the misalignment and repair/deferral annotation framework (5 dialogues, 838 utterances).
-- [A] - Iida(2).pdf: longer research manuscript, analyses, examples and limitations.
+- HCS2026_Iida.pdf：ずれと修復／保留のアノテーション枠組みを述べた研究会報告（5 対話、838 発話）
+- [A] - Iida(2).pdf：より詳しい研究原稿。分析、事例、限界
 - 対話アノテーション_No.1(7).xlsx
 - 対話アノテーション_No.2(20260805-234618).xlsx
 - 対話アノテーション_No.3(7).xlsx
@@ -11,9 +11,10 @@ Authoritative experiment design is in the project repository. This inventory lis
 - 対話アノテーション_No.5(3).xlsx
 - 対話アノテーション_AI統合基準_運用基準あり(20260805-234634).xlsx
 
-All eight original research files were transferred to the authorized Mac on 2026-10-12 and integrity-checked as an archive. The full original files are stored outside Git in `~/Research/dialogue-grounding/private-sources/originals/`; supplementary paper text extracts remain in the parent private directory. The initial Opus/Astra reviews were completed before transfer, and subsequent source-based addenda must be distinguished from those initial drafts.
+2026-10-12 に、上記 8 件の原資料を許可された Mac へ転送し、アーカイブとして完全性を確認しました。原本は Git の外の `~/Research/dialogue-grounding/private-sources/originals/` に保管しています。論文の補助的なテキスト抽出は、その親の非公開ディレクトリにあります。初回の Opus／Astra レビューは転送前に完了しており、その後の原資料に基づく補遺は初回の草案と区別して扱います。
 
-Local approved source directory on the Mac: ~/Research/dialogue-grounding/private-sources/ .
-Relative read-only local convenience link: .research-local/ (excluded from Git tracking locally).
+Mac 上の承認済み資料ディレクトリ：`~/Research/dialogue-grounding/private-sources/`
 
-No private data, extracted transcripts, completed annotation workbooks, participant names or contents of their utterances should be copied to the Git repository. Review findings must quote or paraphrase only short, non-identifying excerpts.
+読み取り専用の相対リンク：`.research-local/`（ローカルで Git 追跡から除外）
+
+非公開データ、抽出した書き起こし、完成済みのアノテーション・ワークブック、参加者の名前や発話内容を Git リポジトリへコピーしてはいけません。レビューで引用・言い換えをする場合は、個人を特定しない短い抜粋に限ります。

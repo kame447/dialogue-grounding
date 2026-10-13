@@ -1,4 +1,4 @@
-# Privacy and Reproducibility
+# 個人情報と再現性（Privacy and Reproducibility）
 
 ## データ管理
 

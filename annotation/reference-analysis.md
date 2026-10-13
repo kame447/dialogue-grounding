@@ -1,4 +1,4 @@
-# Reference Analysis: jev-curate
+# 参考実装の分析：jev-curate（Reference Analysis）
 
 ## 参照時点
 

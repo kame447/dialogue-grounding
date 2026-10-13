@@ -1,4 +1,4 @@
-# Context and State
+# 文脈と状態（Context and State）
 
 ## 基本文脈
 

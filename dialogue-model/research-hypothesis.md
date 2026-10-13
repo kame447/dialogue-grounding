@@ -1,4 +1,6 @@
-# Research Hypothesis
+# 研究仮説（Research Hypothesis）
+
+> 状態：partly-superseded（2026-10-06 作成）。やり過ごしの機能と限界を扱う基本的な考え方は有効です。ただし上位仮説は [2026-10-13 研究者による明確化](proposals/2026-10-13-researcher-clarification.md)で「ずれ・不確実性の許容が、成功を維持しつつ精神的努力と会話の円滑さにどう影響するか」と定め直され、やり過ごしはその方略の一つになりました。現在の状態は [研究の現在の状態](../docs/current-research-status.md) を参照してください。
 
 ## 中心仮説
 

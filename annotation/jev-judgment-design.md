@@ -1,4 +1,4 @@
-# Jev Judgment Design
+# Jev による判断の設計（Jev Judgment Design）
 
 ## Jev を使う条件
 

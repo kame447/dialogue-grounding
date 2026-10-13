@@ -1,4 +1,6 @@
-# Evaluation
+# 評価計画（Evaluation）
+
+> 状態：partly-superseded（2026-10-06 作成）。課題達成と調整コストを分けて評価する原則は有効です。現在は、6図形の共同命名の成功（名前と対象の対応）と、人間参加者が報告する精神的努力・会話の円滑さを中心に置く方針です（[2026-10-12 整理](proposals/2026-10-12-research-clarification-and-measurement-brief.md)、[2026-10-13 明確化](proposals/2026-10-13-researcher-clarification.md)）。本文の「後続課題での識別成功」などは必須ではなくなりました。
 
 ## 評価したいこと
 

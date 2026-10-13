@@ -1,8 +1,40 @@
-# Research-design reviews
+# 研究設計レビュー（Research-design reviews）
 
-This directory stores review notes and experiment-design proposals from independent model critiques.
-Files here are drafts until approved. Use dated filenames and preserve disagreements rather than rewriting them away.
+独立したAIモデル（Opus 5.5／Astra）による実験設計のレビューと提案を置く場所です。ここにある文書は、研究者が承認するまで草案です。ファイル名に日付を付け、意見の相違は書き換えて消さずに残します。採用した設計は、研究者の確認後に [decisions/](../decisions/README.md) へ記録します。
 
-For the 2026-10-12 Orrery review, the planned deliverables are an Opus 5.5 experimental-design draft, an independent Astra methodological critique, and an integrated response to critiques. The final adopted design belongs in dialogue-model/decisions/ once human review concludes.
+非公開の原アノテーションと論文原本は Git の外にあります。[研究資料一覧](../references/source-inventory.md)を参照してください。
 
-The private source annotations and manuscript binaries remain outside Git; see ../references/source-inventory.md.
+## 2026-10-12 のレビュー草案（local-only）
+
+研究者の Mac 上の作業用クローンの `dialogue-model/reviews/` に、次の 10 件が**未追跡**で存在します（2026-10-13 確認）。いずれも研究者未承認の草案であり、本文は Git に入れず、GitHub にも公開していません。ここでは状態と要旨だけを記録します。
+
+| 段階 | ファイル | 状態 |
+| --- | --- | --- |
+| 初回 | 2026-10-12-opus-design.md | Opus 独立初稿。draft-review |
+| 初回 | 2026-10-12-astra-methodological-review.md | Astra 独立監査。draft |
+| 初回 | 2026-10-12-astra-critique.md | 第二の Astra 独立批判（Phase 1 のみ）。draft |
+| 初回 | 2026-10-12-integrated-design.md | 初回の統合案。draft-review。**後の案で大きく変更** |
+| 原資料確認 | 2026-10-12-opus-source-addendum.md | 原資料の非識別集計による補遺。draft |
+| 原資料確認 | 2026-10-12-astra-source-addendum.md | 同、Astra 側。draft |
+| 原資料確認 | 2026-10-12-source-reviewed-addendum.md | 補遺の採否。draft |
+| 再定式化後 | 2026-10-12-opus-reframed-design.md | 2026-10-12 再協議依頼を受けた Opus 独立案。draft |
+| 再定式化後 | 2026-10-12-astra-measurement-audit.md | 同、Astra 独立監査。draft |
+| 再定式化後 | 2026-10-12-reframed-integrated-design.md | 再定式化後の統合案。draft-review。**草案の中で最新** |
+
+## 草案の中で撤回・変更された主な点
+
+再定式化後の統合案（2026-10-12 夜）では、初回の統合案（同日午後）から次の点が撤回・変更されています。初回の草案を現行案として読まないでください。
+
+- 後続参照テスト G・共同配置課題 T を必須とする案 → 必須にしない（両レビュアーが自ら撤回）
+- 総文字数 10% 削減などの数値ゲート、5／10 ポイントの許容低下、数百人規模の人数見積もり → 研究者が採用した基準ではない
+- 後続参照の正答率を主要結果とする初期の確認的な問い → 共同命名の成功と主観的な精神的努力を中心に置く形へ変更
+- 三層構造 → 比較対象の一つとして扱う。さらに 2026-10-13 の研究者の明確化で、形状・見立てと対象対応の判断を単一のマルチモーダルLLMに統合する方針が優先された
+
+## 研究者の明確化で決着した点（2026-10-13）
+
+再定式化後の統合案で「研究者の判断事項」として残っていた次の 2 点は、[2026-10-13 の明確化](../proposals/2026-10-13-researcher-clarification.md)で方針が示されました。
+
+- 参加者内か参加者間か → 参加者内（AB／BA の順序を均衡化）
+- 精神的努力の回想期間 → 名前を決める会話中の努力を尋ね、会話と提出を必要以上に分けない
+
+その他の未決事項（尺度、許容低下幅、意味のある差、人数、閾値の操作方法など）は [研究の現在の状態](../../docs/current-research-status.md) にまとめています。

@@ -1,4 +1,4 @@
-# Evaluation Plan
+# アノテーション支援の評価計画（Evaluation Plan）
 
 ## 現在の 5 対話の扱い
 

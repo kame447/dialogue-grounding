@@ -1,4 +1,4 @@
-# Architecture
+# 処理構成（Architecture）
 
 ## 基本構造
 

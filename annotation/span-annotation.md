@@ -1,4 +1,4 @@
-# Span Annotation
+# 発話区間（span）のアノテーション（Span Annotation）
 
 ## 問題設定
 

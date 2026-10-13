@@ -1,4 +1,6 @@
-# Observable Information Policy
+# 観察可能な情報の原則（Observable Information Policy）
+
+> 状態：current（2026-10-06 作成）。2026-10-12 の整理でも維持されています。事後アンケートで主観的な努力を尋ねることは、この原則と矛盾しません（[2026-10-12 整理 §3](proposals/2026-10-12-research-clarification-and-measurement-brief.md)）。
 
 ## 基本原則
 

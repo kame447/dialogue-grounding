@@ -1,4 +1,4 @@
-# Data Contract
+# データ契約（Data Contract）
 
 ## raw input
 

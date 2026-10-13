@@ -1,4 +1,6 @@
-# Roadmap
+# 研究工程（Roadmap）
+
+> 状態：partly-superseded（2026-10-06 作成）。段階の大枠は参考になりますが、Phase 3〜5 の課題・比較条件は、6図形の共同命名と人間参加者による A／B 参加者内比較へ具体化されています（[2026-10-13 明確化](proposals/2026-10-13-researcher-clarification.md)）。実験UIの試作の状況は [研究の現在の状態](../docs/current-research-status.md) を参照してください。
 
 ## Phase 0: 仮説固定
 
