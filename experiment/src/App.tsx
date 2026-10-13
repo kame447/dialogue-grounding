@@ -13,11 +13,9 @@ import { ResultsScreen } from './participant/ResultsScreen';
 import { Shell } from './participant/Shell';
 import { BlockSurveyScreen, ComparisonScreen } from './participant/SurveyScreens';
 import { usePartner } from './participant/usePartner';
-import { LiveLobby } from './live/LiveLobby';
-import { LiveRoom } from './live/LiveRoom';
-import { parseInviteHash } from './live/protocol';
 import { ResearcherDemo } from './researcher/ResearcherDemo';
 import { getStimulus } from './stimuli/sets';
+import './ui/styles.css';
 
 const COUNTER_KEY = 'dg-experiment-demo-counter';
 
@@ -40,19 +38,19 @@ function createPartner(): PartnerPort {
   return new MockPartner({ seed: randomSeed(), latencyMs: Number.isFinite(latency) ? latency : 900, failNextCalls: Number(params.get('mockFailNext') ?? '0') || 0 });
 }
 
-type Route = 'participant' | 'researcher' | 'live';
+/** Legacy browser-only mock flow, mounted under #/legacy by src/app/Root.tsx. */
+type Route = 'participant' | 'researcher';
 
 function readRoute(): Route {
   const hash = window.location.hash;
-  if (hash.startsWith('#/researcher')) return 'researcher';
-  if (hash === '#/live' || hash.startsWith('#/live/')) return 'live';
+  if (hash.startsWith('#/legacy/researcher')) return 'researcher';
   return 'participant';
 }
 
 function useRoute() {
-  const [route, setRoute] = useState<{ name: Route; hash: string }>(() => ({ name: readRoute(), hash: window.location.hash }));
+  const [route, setRoute] = useState<Route>(readRoute);
   useEffect(() => {
-    const on = () => setRoute({ name: readRoute(), hash: window.location.hash });
+    const on = () => setRoute(readRoute());
     window.addEventListener('hashchange', on);
     return () => window.removeEventListener('hashchange', on);
   }, []);
@@ -60,7 +58,7 @@ function useRoute() {
 }
 
 export function App() {
-  const { name: route, hash } = useRoute();
+  const route = useRoute();
   const [session, setSession] = useState<SessionState | null>(() => {
     const loaded = loadSession();
     return loaded ? reduce(loaded, { type: 'RESTORED' }) : null;
@@ -97,11 +95,6 @@ export function App() {
 
   if (route === 'researcher') {
     return <ResearcherDemo session={session} onReplace={setSession} />;
-  }
-  if (route === 'live') {
-    // Human-pair live DEMO: state lives in the room server, independent of the mock-partner session.
-    const invite = parseInviteHash(hash);
-    return invite ? <LiveRoom key={`${invite.roomId}/${invite.token}`} roomId={invite.roomId} token={invite.token} /> : <LiveLobby />;
   }
 
   const start = () => {

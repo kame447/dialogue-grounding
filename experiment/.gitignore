@@ -6,3 +6,4 @@ playwright-report/
 .vitest/
 .wrangler/
 .dev.vars
+screenshots/

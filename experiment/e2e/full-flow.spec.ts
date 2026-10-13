@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { completeRun, storedSession } from './helpers';
 
 test('full participant path, event record and screen captures', async ({ page }, testInfo) => {
-  await page.goto('/?mockLatency=50');
+  await page.goto('/?mockLatency=50#/legacy');
   await completeRun(page, true);
   await expect(page.getByRole('heading', { name: 'ご協力ありがとうございました' })).toBeVisible();
   const s = await storedSession(page);

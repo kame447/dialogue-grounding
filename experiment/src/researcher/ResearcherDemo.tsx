@@ -48,7 +48,7 @@ export function ResearcherDemo(props: { session: SessionState | null; onReplace:
   }
 
   return <main className="rd-page">
-    <section className="rd-banner" role="note"><p>研究者向けデモ画面 — 実験本番には使用禁止。本番ではサーバー側の認証・権限制御が必要です。データはこのタブのsessionStorageのみに保存され、外部送信しません。</p><a href="#/">参加者画面へ</a></section>
+    <section className="rd-banner" role="note"><p>研究者向けデモ画面 — 実験本番には使用禁止。本番ではサーバー側の認証・権限制御が必要です。データはこのタブのsessionStorageのみに保存され、外部送信しません。</p><a href="#/legacy">参加者画面へ</a></section>
     <section><h2>条件割付（4系列）</h2><div className="rd-table-wrap"><table><thead><tr><th>系列</th><th>Round1 条件 + セット</th><th>Round2 条件 + セット</th></tr></thead><tbody>{SEQUENCE_IDS.map((id) => <tr key={id} className={session?.assignment.sequenceId === id ? 'rd-current' : undefined}><th>{id}{session?.assignment.sequenceId === id ? '（現在）' : ''}</th>{SEQUENCES[id].blocks.map((block) => <td key={block.round}>{block.condition} / {block.stimulusSet}</td>)}</tr>)}</tbody></table></div>{renderNewSessionForm()}</section>
     {!session ? <p className="rd-empty">セッションがありません</p> : <>
       <section><h2>使用図形セットと配置</h2><p className="rd-sample">{SAMPLE_NOTICE}</p>{session.blocks.map((block, blockIndex) => <div className="rd-block" key={blockIndex}><h3>Round {block.plan.round}・条件 {block.plan.condition}・セット {block.plan.stimulusSet}</h3>{(['human','partner'] as const).map((side) => <div className="rd-layout-row" key={side}><h4>{side === 'human' ? '人間側配置' : '相手側配置'}</h4><div className="rd-stimuli">{block.layout[side].map((id) => <div className="rd-stimulus" key={id}><StimulusSvg stimulus={getStimulus(id)} size={76} label={`${id} ${SAMPLE_NOTICE}`} /><code>{id}</code></div>)}</div></div>)}</div>)}</section>

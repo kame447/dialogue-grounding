@@ -1,5 +1,7 @@
 # PartnerPort とモック実装
 
+> **legacy。** 旧ブラウザ内モック版（`#/legacy`）の `PartnerPort` です。現行DEMOの将来のAI接続口はサーバー側の `worker/partners/types.ts`（`PartnerAdapter`）で、[`agent-protocol.md`](agent-protocol.md) に記載しています。
+
 `PartnerPort` は会話相手との境界です。UIと実験フローは `respond` と `submitNames` のみを呼び、具体的な相手実装に依存しません。現在の `MockPartner` は動作確認用の決定規則で返答と最終提出を作ります。画像理解は行わず、研究結果ではありません。実験刺激や対話方略の妥当性を示すものでもありません。
 
 ## 依存の向き

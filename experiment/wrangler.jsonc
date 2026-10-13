@@ -1,8 +1,9 @@
-// Standalone DEMO worker for the live two-device co-naming prototype.
+// Standalone DEMO worker: one human participant + one AI partner (mock AI or external agent; no real model).
 // It must not share a name, route, domain, KV, D1 or R2 with any other project on the account.
+// The previous two-human DEMO (dg-tangram-live-demo) is a separate Worker and is not touched from here.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "dg-tangram-live-demo",
+  "name": "dg-tangram-ai-demo",
   "main": "worker/index.ts",
   "compatibility_date": "2026-09-28",
   "workers_dev": true,
@@ -14,8 +15,8 @@
     "run_worker_first": ["/api/*"]
   },
   "durable_objects": {
-    "bindings": [{ "name": "ROOMS", "class_name": "LiveRoom" }]
+    "bindings": [{ "name": "ROOMS", "class_name": "TangramRoom" }]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["LiveRoom"] }],
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TangramRoom"] }],
   "observability": { "enabled": false }
 }

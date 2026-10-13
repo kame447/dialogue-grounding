@@ -141,7 +141,7 @@ describe('DEMO stimulus sets', () => {
         expect(layout.filter((piece) => strictlyInside(point, piece.polygon)).length).toBeLessThanOrEqual(1);
       }
     }
-  });
+  }, 30_000); // dense geometric sampling; can exceed the 5 s default when files run in parallel
 
   it('renders an accessible SVG without scoring ids or researcher notes', () => {
     const stimulus = getStimulus('alpha-1');

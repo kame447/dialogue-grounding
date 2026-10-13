@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2022"],
+    "lib": ["ES2022", "DOM"],
     "module": "ESNext",
     "moduleResolution": "bundler",
     "strict": true,
@@ -12,6 +12,14 @@
     "noEmit": true,
     "types": ["@cloudflare/workers-types"]
   },
-  "include": ["worker", "src/live/protocol.ts", "src/domain/names.ts", "src/domain/types.ts", "src/stimuli/sets.ts", "src/stimuli/stimulus-data.ts", "src/stimuli/layout.ts"],
+  "include": [
+    "worker",
+    "src/ai/protocol.ts",
+    "src/domain/names.ts",
+    "src/domain/types.ts",
+    "src/stimuli/sets.ts",
+    "src/stimuli/stimulus-data.ts",
+    "src/stimuli/layout.ts"
+  ],
   "exclude": ["worker/**/*.test.ts"]
 }

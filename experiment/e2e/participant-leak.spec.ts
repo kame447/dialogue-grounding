@@ -9,7 +9,7 @@ async function assertNoLeak(page: any) {
 }
 
 test('participant screens do not expose researcher-only details', async ({ page }) => {
-  await page.goto('/?mockLatency=50'); await assertNoLeak(page);
+  await page.goto('/?mockLatency=50#/legacy'); await assertNoLeak(page);
   await page.getByRole('button', { name: 'デモをはじめる' }).click(); await assertNoLeak(page);
   await page.getByLabel('上記を読み、デモとして進めることに同意します').check(); await page.getByRole('button', { name: '同意して進む' }).click(); await assertNoLeak(page);
   await page.getByRole('button', { name: 'ラウンド1を始める' }).click(); await assertNoLeak(page);

@@ -20,9 +20,6 @@ export function WelcomeScreen(props: { onStart: () => void; resumable: boolean }
           {props.resumable ? 'デモを続ける' : 'デモをはじめる'}
         </button>
       </div>
-      <p className="muted">
-        2台の端末で人間同士が会話する通信確認用DEMOは <a href="#/live">2台で試す</a> から始められます（モック相手のデモとは別で、研究データとして扱いません）。
-      </p>
     </section>
   );
 }

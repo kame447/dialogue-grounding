@@ -2,19 +2,20 @@
   "name": "dialogue-grounding-experiment-ui",
   "private": true,
   "version": "0.1.0",
-  "description": "DEMO prototype of the tangram co-naming experiment UI (AI not connected; mock partner only)",
+  "description": "DEMO: human participant + AI partner tangram co-naming (mock AI and external agent port; no real model connected)",
   "type": "module",
   "scripts": {
     "dev": "vite --port 5173 --strictPort",
     "build": "tsc -b && tsc -p tsconfig.worker.json && vite build",
-    "worker:dev": "npm run build && wrangler dev --port 8788",
-    "e2e:live": "playwright test -c playwright.live.config.ts",
+    "worker:dev": "npm run build && wrangler dev --port 8795 --ip 127.0.0.1",
     "deploy": "npm run build && wrangler deploy",
     "preview": "vite preview --port 4173 --strictPort",
     "typecheck": "tsc -b",
     "test": "vitest run",
     "test:watch": "vitest",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "e2e:ai": "playwright test -c playwright.ai.config.ts",
+    "agent:stub": "node agent/stub-agent.mjs"
   },
   "dependencies": {
     "react": "19.3.0",

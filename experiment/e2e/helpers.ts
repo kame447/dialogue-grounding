@@ -3,7 +3,7 @@ import { expect, type Page } from '@playwright/test';
 export const sessionKey = 'dg-experiment-demo-session-v1';
 
 export async function startRoundOne(page: Page) {
-  await page.goto('/?mockLatency=50');
+  await page.goto('/?mockLatency=50#/legacy');
   await page.getByRole('button', { name: 'デモをはじめる' }).click();
   await page.getByLabel('上記を読み、デモとして進めることに同意します').check();
   await page.getByRole('button', { name: '同意して進む' }).click();

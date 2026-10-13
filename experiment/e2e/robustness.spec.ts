@@ -14,7 +14,7 @@ test('reload preserves chat and survey phase; duplicate sends and locks are idem
 });
 
 test('Enter twice submits one message and retry recovers first failure', async ({ page }) => {
-  await page.goto('/?mockLatency=50&mockFailNext=1');
+  await page.goto('/?mockLatency=50&mockFailNext=1#/legacy');
   await page.getByRole('button',{name:'デモをはじめる'}).click(); await page.getByLabel('上記を読み、デモとして進めることに同意します').check();
   await page.getByRole('button',{name:'同意して進む'}).click(); await page.getByRole('button',{name:'ラウンド1を始める'}).click();
   const input=page.getByRole('textbox',{name:'メッセージ'}); await input.fill('失敗して再送'); await input.press('Enter');

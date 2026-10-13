@@ -1,5 +1,7 @@
 # 2台で試す（人間同士のライブ通信DEMO）
 
+> **過去の資料（legacy）。** 人間2人向けの旧DEMO（別Worker `dg-tangram-live-demo`）の説明です。このブランチの新Worker `dg-tangram-ai-demo` には人間同士のルームはありません。現行の構成は [`agent-protocol.md`](agent-protocol.md) と [`../README.md`](../README.md) を参照してください。
+
 公開URL: https://dg-tangram-live-demo.kame-website.workers.dev
 
 人間2人が別々の端末で会話し、同じ6図形に共通の名前を付けるまでを確認する通信DEMOです。AIは接続していません。AI調整のA/B研究とは別の機能で、ここでのやりとりは研究データとして扱いません。正式な同意手続きもないため、研究参加や本実験に使ってはいけません。

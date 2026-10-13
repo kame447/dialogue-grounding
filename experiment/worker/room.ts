@@ -1,71 +1,383 @@
-import { DurableObject } from 'cloudflare:workers';
-import { LIVE_CLOSE, LIVE_LIMITS, LIVE_PROTOCOL_VERSION, isRoomId, isToken, parseClientMessage, type LiveRole, type ServerMessage } from '../src/live/protocol';
-import { constantTimeEqual, sha256Hex } from './tokens';
-import { createRoomState, handle, isExpired, join, snapshotFor, type RoomState } from './roomCore';
+import { DurableObject } from "cloudflare:workers";
+import {
+  CLOSE,
+  LIMITS,
+  PROTOCOL_VERSION,
+  isRoomId,
+  isToken,
+  parseAgentMessage,
+  parseHumanMessage,
+  type Seat,
+  type ServerMessage,
+} from "../src/ai/protocol";
+import { sha256Hex } from "./tokens";
+import {
+  agentSnapshot,
+  createRoomState,
+  handle,
+  humanSnapshot,
+  isExpired,
+  join,
+  mockNames,
+  mockOpening,
+  mockReply,
+  appendAiMessage,
+  tokenMatches,
+  type RoomState,
+} from "./roomCore";
 
-interface Env {}
-type Attachment = { seat: LiveRole | null };
-const KEY = 'state';
-export class LiveRoom extends DurableObject<Env> {
-  private get sockets(): WebSocket[] { return this.ctx.getWebSockets(); }
-  private async read(): Promise<RoomState | undefined> { return this.ctx.storage.get<RoomState>(KEY); }
-  private async write(state: RoomState): Promise<void> { await this.ctx.storage.put(KEY, state); }
-  private send(socket: WebSocket, message: ServerMessage): void { try { socket.send(JSON.stringify(message)); } catch { /* socket is closing */ } }
-  // `gone` is a socket that is closing but may still be listed by getWebSockets().
-  private seatSocket(seat: LiveRole, gone?: WebSocket): WebSocket | undefined { return this.sockets.find((s) => s !== gone && (s.deserializeAttachment() as Attachment | null)?.seat === seat); }
-  private connected(gone?: WebSocket): Record<LiveRole, boolean> { return { p1: !!this.seatSocket('p1', gone), p2: !!this.seatSocket('p2', gone) }; }
-  private snapshot(state: RoomState, seat: LiveRole, gone?: WebSocket): void { const socket = this.seatSocket(seat, gone); if (socket) this.send(socket, { type: 'snapshot', state: snapshotFor(state, seat, this.connected(gone)) }); }
-
-  async fetch(request: Request): Promise<Response> {
-    if (new URL(request.url).pathname === '/init' && request.method === 'POST') {
-      if (await this.read()) return new Response('exists', { status: 409 });
-      const body = await request.json() as { roomId: string; tokenHashes: Record<LiveRole, string>; setId: 'alpha' | 'beta'; seed: number; now: number };
-      if (!isRoomId(body.roomId) || !body.tokenHashes?.p1 || !body.tokenHashes?.p2 || !['alpha', 'beta'].includes(body.setId) || !Number.isInteger(body.seed)) return new Response('bad init', { status: 400 });
-      const state = createRoomState({ ...body, randomSlot: () => { const b = new Uint8Array(12); crypto.getRandomValues(b); return Array.from(b, (v) => v.toString(16).padStart(2, '0')).join(''); } });
-      await this.write(state); await this.ctx.storage.setAlarm(state.expiresAt); return new Response('ok');
+interface Env {
+  MOCK_AI_DELAY_MS?: string;
+}
+type Attachment = { seat: Seat | null };
+const KEY = "state";
+export class TangramRoom extends DurableObject<Env> {
+  private mockReplyTail: Promise<void> = Promise.resolve();
+  private get sockets() {
+    return this.ctx.getWebSockets();
+  }
+  private async read() {
+    return this.ctx.storage.get<RoomState>(KEY);
+  }
+  private send(ws: WebSocket, m: ServerMessage) {
+    try {
+      ws.send(JSON.stringify(m));
+    } catch {}
+  }
+  private seatSocket(seat: Seat, exclude?: WebSocket) {
+    return this.sockets.find(
+      (ws) =>
+        ws !== exclude &&
+        (ws.deserializeAttachment() as Attachment | null)?.seat === seat,
+    );
+  }
+  private connected(exclude?: WebSocket) {
+    return {
+      human: !!this.seatSocket("human", exclude),
+      ai: !!this.seatSocket("ai", exclude),
+    };
+  }
+  private snapshot(s: RoomState, seat: Seat) {
+    const ws = this.seatSocket(seat);
+    if (ws)
+      this.send(ws, {
+        type: "snapshot",
+        state:
+          seat === "human"
+            ? humanSnapshot(s, this.connected())
+            : agentSnapshot(s, this.connected()),
+      });
+  }
+  private async expire(_s: RoomState) {
+    for (const ws of this.sockets) {
+      this.send(ws, { type: "deleted" });
+      try {
+        ws.close(CLOSE.expired, "expired");
+      } catch {}
     }
-    if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') return new Response('websocket required', { status: 426 });
-    const pair = new WebSocketPair(); const client = pair[0]; const server = pair[1];
-    this.ctx.acceptWebSocket(server); server.serializeAttachment({ seat: null } satisfies Attachment);
-    const state = await this.read();
-    if (!state) { this.send(server, { type: 'error', code: 'not_found', message: 'ルームが見つかりません。' }); server.close(LIVE_CLOSE.expired); return new Response(null, { status: 101, webSocket: client }); }
-    if (isExpired(state, Date.now())) { this.send(server, { type: 'error', code: 'expired', message: 'ルームの有効期限が切れました。' }); server.close(LIVE_CLOSE.expired); return new Response(null, { status: 101, webSocket: client }); }
+    await this.ctx.storage.deleteAll();
+  }
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    if (url.pathname === "/init" && request.method === "POST") {
+      if (await this.read()) return new Response("exists", { status: 409 });
+      const b = (await request.json()) as {
+        roomId: string;
+        tokenHashes: { human: string; agent: string | null };
+        mode: "mock" | "external";
+        setId: "alpha" | "beta";
+        seed: number;
+        now: number;
+      };
+      if (
+        !isRoomId(b.roomId) ||
+        !b.tokenHashes?.human ||
+        !["mock", "external"].includes(b.mode) ||
+        !["alpha", "beta"].includes(b.setId) ||
+        !Number.isInteger(b.seed)
+      )
+        return new Response("bad init", { status: 400 });
+      const s = createRoomState({
+        ...b,
+        randomSlot: () => {
+          const x = new Uint8Array(12);
+          crypto.getRandomValues(x);
+          return Array.from(x, (v) => v.toString(16).padStart(2, "0")).join("");
+        },
+      });
+      await this.ctx.storage.put(KEY, s);
+      await this.ctx.storage.setAlarm(s.expiresAt);
+      return new Response("ok");
+    }
+    if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket")
+      return new Response("websocket required", { status: 426 });
+    const pair = new WebSocketPair(),
+      client = pair[0],
+      server = pair[1];
+    this.ctx.acceptWebSocket(server);
+    const expected =
+      request.headers.get("x-tangram-seat") === "ai" ? "ai" : "human";
+    server.serializeAttachment({ seat: null, expected } satisfies Attachment & {
+      expected: Seat;
+    });
+    const s = await this.read();
+    if (!s || s.deleted) {
+      this.send(server, {
+        type: "error",
+        code: "not_found",
+        message: "ルームが見つかりません。",
+      });
+      server.close(CLOSE.expired);
+      return new Response(null, { status: 101, webSocket: client });
+    }
+    if (isExpired(s, Date.now())) {
+      await this.expire(s);
+      server.close(CLOSE.expired);
+      return new Response(null, { status: 101, webSocket: client });
+    }
     return new Response(null, { status: 101, webSocket: client });
   }
-
-  async webSocketMessage(socket: WebSocket, raw: string | ArrayBuffer): Promise<void> {
-    const attachment = socket.deserializeAttachment() as Attachment | null;
-    const state = await this.read();
-    if (!state || isExpired(state, Date.now())) { this.send(socket, { type: 'error', code: state ? 'expired' : 'not_found', message: state ? 'ルームの有効期限が切れました。' : 'ルームが見つかりません。' }); socket.close(LIVE_CLOSE.expired); return; }
-    const text = typeof raw === 'string' ? raw : new TextDecoder().decode(raw);
-    if (text.length > LIVE_LIMITS.maxFrameBytes) { this.send(socket, { type: 'error', code: 'bad_request', message: 'メッセージが大きすぎます。' }); if (!attachment?.seat) socket.close(LIVE_CLOSE.protocol); return; }
-    if (!attachment?.seat) {
-      let hello: unknown; try { hello = JSON.parse(text); } catch { hello = null; }
-      const value = hello as { type?: string; protocol?: number; token?: string } | null;
-      if (!value || value.type !== 'hello' || value.protocol !== LIVE_PROTOCOL_VERSION || !isToken(value.token)) { this.send(socket, { type: 'error', code: 'bad_token', message: '接続情報を確認できません。' }); socket.close(LIVE_CLOSE.badToken); return; }
-      const hash = await sha256Hex(value.token);
-      const seat: LiveRole | null = constantTimeEqual(hash, state.tokenHashes.p1) ? 'p1' : constantTimeEqual(hash, state.tokenHashes.p2) ? 'p2' : null;
-      if (!seat) { this.send(socket, { type: 'error', code: 'bad_token', message: '接続情報を確認できません。' }); socket.close(LIVE_CLOSE.badToken); return; }
-      const old = this.seatSocket(seat, socket); if (old) { old.serializeAttachment({ seat: null } satisfies Attachment); this.send(old, { type: 'replaced' }); old.close(LIVE_CLOSE.replaced, 'replaced'); }
-      socket.serializeAttachment({ seat } satisfies Attachment);
-      join(state, seat); await this.write(state);
-      this.snapshot(state, seat); this.snapshot(state, seat === 'p1' ? 'p2' : 'p1');
+  async webSocketMessage(ws: WebSocket, raw: string | ArrayBuffer) {
+    const a = ws.deserializeAttachment() as Attachment | null,
+      s = await this.read();
+    if (!s || s.deleted) {
+      this.send(ws, {
+        type: "error",
+        code: "not_found",
+        message: "ルームが見つかりません。",
+      });
+      ws.close(CLOSE.expired);
       return;
     }
-    const msg = parseClientMessage(text);
-    if (!msg || msg.type === 'hello') { this.send(socket, { type: 'error', code: 'bad_request', message: 'メッセージ形式を確認してください。' }); return; }
-    const result = handle(state, attachment.seat, msg, Date.now(), this.connected());
-    if (msg.type !== 'typing' && msg.type !== 'ping') await this.write(result.state);
-    for (const item of result.out) { const target = this.seatSocket(item.to); if (target) this.send(target, item.msg); }
+    if (isExpired(s, Date.now())) {
+      await this.expire(s);
+      return;
+    }
+    const text = typeof raw === "string" ? raw : new TextDecoder().decode(raw);
+    if (new TextEncoder().encode(text).byteLength > LIMITS.maxFrameBytes) {
+      this.send(ws, {
+        type: "error",
+        code: "bad_request",
+        message: "メッセージが大きすぎます。",
+      });
+      if (!a?.seat) ws.close(CLOSE.protocol);
+      return;
+    }
+    if (!a?.seat) {
+      const wanted =
+        (
+          ws.deserializeAttachment() as
+            | (Attachment & { expected?: Seat })
+            | null
+        )?.expected ?? "human";
+      const parsed =
+        wanted === "ai" ? parseAgentMessage(text) : parseHumanMessage(text);
+      const hello = parsed && parsed.type === "hello" ? parsed : null;
+      if (
+        !hello ||
+        hello.protocol !== PROTOCOL_VERSION ||
+        !isToken(hello.token)
+      ) {
+        this.send(ws, {
+          type: "error",
+          code: "bad_token",
+          message: "接続情報を確認できません。",
+        });
+        ws.close(CLOSE.badToken);
+        return;
+      }
+      const hash = await sha256Hex(hello.token);
+      const current = await this.read();
+      if (!current || current.deleted) {
+        this.send(ws, {
+          type: "error",
+          code: "not_found",
+          message: "ルームが見つかりません。",
+        });
+        ws.close(CLOSE.expired);
+        return;
+      }
+      if (isExpired(current, Date.now())) {
+        await this.expire(current);
+        ws.close(CLOSE.expired);
+        return;
+      }
+      if (!tokenMatches(current, wanted, hash)) {
+        this.send(ws, {
+          type: "error",
+          code: "bad_token",
+          message: "接続情報を確認できません。",
+        });
+        ws.close(CLOSE.badToken);
+        return;
+      }
+      const old = this.seatSocket(wanted, ws);
+      if (old) {
+        this.send(old, { type: "replaced" });
+        old.close(CLOSE.replaced, "replaced");
+      }
+      ws.serializeAttachment({
+        seat: wanted,
+        expected: wanted,
+      } satisfies Attachment & { expected: Seat });
+      join(current, wanted);
+      let opening: string | null = null;
+      if (
+        current.mode === "mock" &&
+        wanted === "human" &&
+        !current.mockOpeningSent
+      ) {
+        opening = mockOpening(current);
+        this.prepareMockReply(current);
+      }
+      await this.ctx.storage.put(KEY, current);
+      this.snapshot(current, wanted);
+      this.snapshot(current, wanted === "human" ? "ai" : "human");
+      if (opening) {
+        this.broadcastMockTyping(current);
+        await this.enqueueMockReply(opening);
+      }
+      return;
+    }
+    const seat = a.seat,
+      msg =
+        seat === "human" ? parseHumanMessage(text) : parseAgentMessage(text);
+    if (!msg || msg.type === "hello") {
+      this.send(ws, {
+        type: "error",
+        code: "bad_request",
+        message: "メッセージ形式を確認してください。",
+      });
+      return;
+    }
+    const result = handle(s, seat, msg, Date.now(), this.connected());
+    if (result.deleteRoom) {
+      await this.ctx.storage.deleteAlarm();
+      for (const socket of this.sockets) {
+        this.send(socket, { type: "deleted" });
+        try {
+          socket.close(CLOSE.deleted, "deleted");
+        } catch {}
+      }
+      await this.ctx.storage.deleteAll();
+      return;
+    }
+    let mockText: string | null = null;
+    if (result.useMock && s.mode === "mock" && !s.mockOpeningSent) {
+      mockText = mockOpening(s);
+      this.prepareMockReply(s);
+    } else if (
+      msg.type === "chat" &&
+      seat === "human" &&
+      s.mode === "mock" &&
+      !s.chatClosedBy
+    ) {
+      mockText = mockReply(s, msg.text);
+      this.prepareMockReply(s);
+    }
+    if (msg.type === "end_chat" && seat === "human" && s.mode === "mock") {
+      s.names.ai = mockNames(s);
+      s.phases.ai = "done";
+    }
+    await this.ctx.storage.put(KEY, s);
+    for (const item of result.out) {
+      const target = this.seatSocket(item.to);
+      if (target) this.send(target, item.msg);
+    }
+    if (msg.type === "chat" || msg.type === "typing") {
+      this.snapshot(s, "human");
+      this.snapshot(s, "ai");
+    }
+    if (mockText) {
+      this.broadcastMockTyping(s);
+      await this.enqueueMockReply(mockText);
+    }
+    if (msg.type === "end_chat" && seat === "human" && s.mode === "mock") {
+      this.snapshot(s, "human");
+    }
   }
+  private prepareMockReply(state: RoomState) {
+    state.mockPendingReplies += 1;
+    state.aiTyping = true;
+  }
+  private broadcastMockTyping(state: RoomState) {
+    for (const ws of this.sockets) {
+      const attachment = ws.deserializeAttachment() as Attachment | null;
+      if (attachment?.seat !== "human") continue;
+      this.send(ws, { type: "partner_typing", active: true });
+      this.send(ws, {
+        type: "snapshot",
+        state: humanSnapshot(state, this.connected()),
+      });
+    }
+  }
+  private enqueueMockReply(text: string): Promise<void> {
+    const next = this.mockReplyTail.then(() => this.deliverMockReply(text));
+    this.mockReplyTail = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
+  }
+  private async deliverMockReply(text: string) {
+    const override = this.env.MOCK_AI_DELAY_MS,
+      delay =
+        override === undefined
+          ? 600 + Math.floor(Math.random() * 601)
+          : Math.max(0, Number(override) || 0);
+    await new Promise((resolve) => setTimeout(resolve, delay));
 
-  async webSocketClose(socket: WebSocket): Promise<void> {
-    const attachment = socket.deserializeAttachment() as Attachment | null;
-    if (!attachment?.seat) return;
-    const state = await this.read(); if (!state) return;
-    const peer = attachment.seat === 'p1' ? 'p2' : 'p1'; this.snapshot(state, peer, socket);
-    try { socket.close(1000, 'closed'); } catch { /* already closed */ }
+    let state = await this.read();
+    if (!state || state.deleted) return;
+    if (isExpired(state, Date.now())) {
+      await this.expire(state);
+      return;
+    }
+    const pending = Math.max(0, state.mockPendingReplies - 1);
+    if (state.chatClosedBy || state.phases.human !== "chat") {
+      state.mockPendingReplies = pending;
+      state.aiTyping = pending > 0;
+      await this.ctx.storage.put(KEY, state);
+      this.broadcastMockTyping(state);
+      return;
+    }
+
+    state = appendAiMessage(state, text, Date.now());
+    state.mockPendingReplies = pending;
+    state.aiTyping = pending > 0;
+    const message = state.messages[state.messages.length - 1];
+    await this.ctx.storage.put(KEY, state);
+    for (const ws of this.sockets) {
+      const attachment = ws.deserializeAttachment() as Attachment | null;
+      if (attachment?.seat !== "human") continue;
+      this.send(ws, {
+        type: "partner_typing",
+        active: state.aiTyping,
+      });
+      this.send(ws, {
+        type: "chat",
+        message: { ...message, from: "partner" },
+      });
+      this.send(ws, {
+        type: "snapshot",
+        state: humanSnapshot(state, this.connected()),
+      });
+    }
   }
-  async webSocketError(socket: WebSocket): Promise<void> { await this.webSocketClose(socket); }
-  async alarm(): Promise<void> { for (const socket of this.sockets) { try { socket.close(LIVE_CLOSE.expired, 'expired'); } catch { /* already closed */ } } await this.ctx.storage.deleteAll(); }
+  async webSocketClose(ws: WebSocket) {
+    const a = ws.deserializeAttachment() as Attachment | null;
+    if (!a?.seat) return;
+    const s = await this.read();
+    if (s) this.snapshot(s, a.seat === "human" ? "ai" : "human");
+    try {
+      ws.close(1000, "closed");
+    } catch {}
+  }
+  async webSocketError(ws: WebSocket) {
+    await this.webSocketClose(ws);
+  }
+  async alarm() {
+    const s = await this.read();
+    if (s) await this.expire(s);
+  }
 }
