@@ -9,6 +9,6 @@
   "vars": {
     "UPSTREAM_PROVIDER": "openai",
     "MAX_COMPLETION_TOKENS": "1024",
-    "DIALOGUE_MODEL": "gpt-4o-mini"
+    "DIALOGUE_MODEL": "gpt-6-luna"
   }
 }
