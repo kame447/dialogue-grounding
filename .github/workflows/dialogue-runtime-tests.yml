@@ -1,0 +1,25 @@
+name: Dialogue AI runtime tests
+
+on:
+  push:
+    paths:
+      - "dialogue-model/runtime/**"
+      - "tests/**"
+      - "package.json"
+      - ".github/workflows/dialogue-runtime-tests.yml"
+  pull_request:
+    paths:
+      - "dialogue-model/runtime/**"
+      - "tests/**"
+      - "package.json"
+      - ".github/workflows/dialogue-runtime-tests.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm test
