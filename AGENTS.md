@@ -27,3 +27,7 @@ AI は、提示された自分側の画像と公開対話履歴を用いた意�
 ## 研究用 Cloudflare Worker
 
 研究用Workerは workers/research-ai-proxy/ に配置する。StudyPlanner本番Workerを研究用APIに流用せず、既存の認証・モデル固定・リクエスト境界・秘密情報の分離という設計原則だけ再利用する。上流APIキーはCloudflare Secret UPSTREAM_API_KEY にのみ保持し、ローカル対話クライアントは別のRESEARCH_PROXY_TOKEN で接続する。Workerは認証失敗時・Secret未設定時にfail closedとする。モデル・上流URL・転送対象フィールドをクライアントに決定させない。API使用量の上限、機密データの送信条件、実験条件の確定は別途検討が必要。
+
+## 研究用対話モデルの選択責務
+
+Laplansの modelPolicy.ts と同様、研究用クライアントは purpose=dialogue_turn だけを送信し、モデルIDを指定しない。Workerの modelPolicy.mjs が用途と DIALOGUE_MODEL の通常環境変数から実際のモデルを解決する。モデルIDはSecretではないので、モデル変更時にAPIキーを登録し直さない。クライアントからの任意の model 指定では内部分岐を変えない。接続したモデルはWorker側の読み取り専用 /v1/model-policy と応答モデル欄で確認する。研究上の比較条件が異なるモデルを混用しないようにする。

@@ -4,13 +4,14 @@
 
 ## 推奨: Cloudflare Worker経由
 
-上流のAIサービスのAPIキーは研究用のCloudflare Workerだけに保存します。クライアントの .env にはWorker接続用トークンだけを持たせます。最初に ../../workers/research-ai-proxy/README.md の接続・設定手順を参照してください。
+上流のAIサービスのAPIキーは研究用のCloudflare Workerだけに保存します。クライアントの .env にはWorker接続用トークンだけを持たせます。モデルIDはCloudflare側の DIALOGUE_MODEL が決定し、クライアントからは purpose: dialogue_turn のみを送ります。最初に ../../workers/research-ai-proxy/README.md の接続・設定手順を参照してください。
 
 Node.js 22以上で実行します。
 
     cp .env.example .env
     # Cloudflare WorkerのURL、同じモデルID、接続トークンを設定
     node --env-file=.env dialogue-model/runtime/cli.mjs --check
+    node --env-file=.env dialogue-model/runtime/cli.mjs --show-model
     node --env-file=.env dialogue-model/runtime/cli.mjs --smoke
     node --env-file=.env dialogue-model/runtime/cli.mjs --strategy repair-first --image /path/to/ai-side.png
 

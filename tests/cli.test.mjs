@@ -63,3 +63,34 @@ test("the CLI reaches a local API and can run an image dialogue", async () => {
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("--show-model reports Worker policy without issuing an AI completion", async () => {
+  let calls = 0;
+  const server = createServer((req, res) => {
+    assert.equal(req.url, "/v1/model-policy");
+    assert.equal(req.method, "GET");
+    assert.equal(req.headers.authorization, "Bearer a-research-token-more-than-32-characters");
+    calls++;
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({
+      purpose: "dialogue_turn", provider: "openai", model: "gpt-4o-mini", ready: false,
+    }));
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  try {
+    const result = await runCLI(["--show-model"], {
+      RESEARCH_AI_PROVIDER: "cloudflare",
+      RESEARCH_AI_BASE_URL: "http://127.0.0.1:" + server.address().port + "/v1",
+      RESEARCH_PROXY_TOKEN: "a-research-token-more-than-32-characters",
+      RESEARCH_AI_MODEL: "ignored-local-model",
+    });
+    assert.equal(result.code, 0, result.stderr);
+    assert.match(result.stdout, /model=gpt-4o-mini ready=false/);
+    assert.doesNotMatch(result.stdout, /ignored-local-model|research-token/);
+    assert.equal(calls, 1);
+  } finally {
+    server.close();
+    await once(server, "close");
+  }
+});

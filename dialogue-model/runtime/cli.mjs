@@ -13,6 +13,7 @@ const HELP = [
   "Research dialogue AI connection (Node.js >= 22)",
   "node --env-file=.env dialogue-model/runtime/cli.mjs --smoke",
   "node --env-file=.env dialogue-model/runtime/cli.mjs --check",
+  "node --env-file=.env dialogue-model/runtime/cli.mjs --show-model",
   "node --env-file=.env dialogue-model/runtime/cli.mjs --strategy repair-first --image /path/my-tangrams.png",
   "node --env-file=.env dialogue-model/runtime/cli.mjs --strategy bypass-enabled --image /path/my-tangrams.png --message 'この図形はどう呼びますか？'",
   "The image must show ONLY the AI participant's own six figures.",
@@ -24,6 +25,7 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
     options: {
       help: { type: "boolean" },
       check: { type: "boolean" },
+      "show-model": { type: "boolean" },
       smoke: { type: "boolean" },
       strategy: { type: "string" },
       image: { type: "string" },
@@ -38,12 +40,19 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
 
   const config = loadConfig(env);
   if (values.check) {
-    console.log("Configured provider=" + config.provider + " model=" + config.model +
+    console.log("Configured provider=" + config.provider +
+      (config.purpose ? " purpose=" + config.purpose : " model=" + config.model) +
       " endpoint=" + config.baseUrl + " (no request sent)");
     return;
   }
 
   const client = createChatClient(config);
+  if (values["show-model"]) {
+    const policy = await client.getModelPolicy();
+    console.log("Worker purpose=" + policy.purpose + " provider=" + policy.provider +
+      " model=" + policy.model + " ready=" + policy.ready);
+    return;
+  }
   if (values.smoke) {
     const result = await client.complete([
       { role: "user", content: "日本語で短く挨拶してください。" },
