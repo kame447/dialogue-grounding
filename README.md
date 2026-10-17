@@ -8,7 +8,7 @@
 
 `dialogue-model/` は、人間の対話における調整の働きを、LLMを用いた共同課題や実験を通して検討する領域です。議論やレビューの記録はこのディレクトリ以下に残しますが、現在の採用事項と計画の優先順位は[SSOT](dialogue-model/README.md)に従います。
 
-対話モデルに外部AIを接続する最小実行基盤は[接続手順](dialogue-model/runtime/README.md)にあります。キーをローカルで設定すれば、OpenAI・Geminiの互換APIで画像付き対話を試せます。これは確定済み実験プロトコルではありません。
+対話モデルに外部AIを接続する最小実行基盤は[接続手順](dialogue-model/runtime/README.md)にあります。研究用Cloudflare WorkerにAPIキーをSecretとして登録し、ローカルにはWorker接続トークンのみを置くことで、OpenAI・Geminiの互換APIで画像付き対話を試せます。これは確定済み実験プロトコルではありません。
 
 ## 資料の扱い
 

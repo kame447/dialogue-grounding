@@ -14,17 +14,18 @@ function integerOption(value, name, defaultValue, max) {
 
 export function loadConfig(env = process.env) {
   const provider = (env.RESEARCH_AI_PROVIDER || "openai").trim().toLowerCase();
-  if (!["openai", "gemini", "custom"].includes(provider)) {
-    throw new Error("RESEARCH_AI_PROVIDER must be openai, gemini, or custom");
+  if (!["cloudflare", "openai", "gemini", "custom"].includes(provider)) {
+    throw new Error("RESEARCH_AI_PROVIDER must be cloudflare, openai, gemini, or custom");
   }
 
   const model = env.RESEARCH_AI_MODEL?.trim();
-  const apiKey = env.RESEARCH_AI_API_KEY?.trim();
+  const secretName = provider === "cloudflare" ? "RESEARCH_PROXY_TOKEN" : "RESEARCH_AI_API_KEY";
+  const apiKey = env[secretName]?.trim();
   if (!model) throw new Error("Set RESEARCH_AI_MODEL");
-  if (!apiKey) throw new Error("Set RESEARCH_AI_API_KEY");
+  if (!apiKey) throw new Error("Set " + secretName);
 
   const configuredUrl = env.RESEARCH_AI_BASE_URL?.trim() || PROVIDER_URLS[provider];
-  if (!configuredUrl) throw new Error("Custom provider requires RESEARCH_AI_BASE_URL");
+  if (!configuredUrl) throw new Error("Set RESEARCH_AI_BASE_URL");
 
   let url;
   try {
@@ -36,6 +37,13 @@ export function loadConfig(env = process.env) {
   if ((url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) ||
       url.username || url.password || url.search || url.hash) {
     throw new Error("RESEARCH_AI_BASE_URL must use HTTPS (HTTP only for local tests), without credentials or query");
+  }
+  if (provider === "cloudflare") {
+    if (url.pathname === "/") url.pathname = "/v1";
+    if (url.pathname !== "/v1") {
+      throw new Error("Cloudflare URL must point to the Worker root or /v1");
+    }
+    if (apiKey.length < 32) throw new Error("RESEARCH_PROXY_TOKEN must be at least 32 characters");
   }
 
   return Object.freeze({

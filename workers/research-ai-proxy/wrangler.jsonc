@@ -1,0 +1,13 @@
+{
+  "name": "dialogue-grounding-ai-proxy",
+  "main": "src/index.mjs",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": true,
+  "observability": {
+    "enabled": false
+  },
+  "vars": {
+    "UPSTREAM_PROVIDER": "openai",
+    "MAX_COMPLETION_TOKENS": "1024"
+  }
+}

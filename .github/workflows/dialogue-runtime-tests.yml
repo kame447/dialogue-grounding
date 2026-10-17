@@ -6,12 +6,16 @@ on:
       - "dialogue-model/runtime/**"
       - "tests/**"
       - "package.json"
+      - "package-lock.json"
+      - "workers/research-ai-proxy/**"
       - ".github/workflows/dialogue-runtime-tests.yml"
   pull_request:
     paths:
       - "dialogue-model/runtime/**"
       - "tests/**"
       - "package.json"
+      - "package-lock.json"
+      - "workers/research-ai-proxy/**"
       - ".github/workflows/dialogue-runtime-tests.yml"
 
 jobs:
@@ -22,4 +26,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - run: npm ci
       - run: npm test
+      - run: npm run deploy:research-proxy:dry
