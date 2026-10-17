@@ -6,7 +6,12 @@
     "node": ">=22"
   },
   "scripts": {
-    "test": "node --test tests/*.test.mjs",
-    "ai": "node dialogue-model/runtime/cli.mjs"
+    "test": "node --test tests/*.test.mjs workers/research-ai-proxy/src/*.test.mjs",
+    "ai": "node dialogue-model/runtime/cli.mjs",
+    "deploy:research-proxy": "wrangler deploy --config workers/research-ai-proxy/wrangler.jsonc",
+    "deploy:research-proxy:dry": "wrangler deploy --dry-run --config workers/research-ai-proxy/wrangler.jsonc"
+  },
+  "devDependencies": {
+    "wrangler": "4.151.1"
   }
 }
