@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer, request as httpRequest } from "node:http";
 import { once } from "node:events";
+import { readFile } from "node:fs/promises";
+import { runInNewContext } from "node:vm";
 import { startNamingServer } from "../dialogue-model/runtime/web/server.mjs";
 import { SLOTS } from "../dialogue-model/runtime/naming-task.mjs";
 import { createChatClient } from "../dialogue-model/runtime/client.mjs";
@@ -20,8 +22,11 @@ async function setup(t, { hideStrategy = false, fail = false } = {}) {
     payloads.push(JSON.parse(Buffer.concat(chunks)));
     if (fail) { res.writeHead(500); res.end("RAW-ERROR-SECRET-TOKEN-PROMPT-IMAGE"); return; }
     const final = payloads.at(-1).messages.at(-1).content.includes("最終提出要求");
+    const judgment = payloads.at(-1).messages.some((message) => message.role === "system" && message.content.includes("【非公開の対話判断】"));
+    const content = judgment ? JSON.stringify({ action: "accept", targetSlot: null, candidateName: null, discriminatingFeature: null, note: null }) :
+      final ? JSON.stringify(names("AI-PRIVATE-")) : "公開AI発話";
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ model: "mock", choices: [{ message: { content: final ? JSON.stringify(names("AI-PRIVATE-")) : "公開AI発話" } }] }));
+    res.end(JSON.stringify({ model: "mock", choices: [{ message: { content } }] }));
   });
   upstream.listen(0, "127.0.0.1"); await once(upstream, "listening");
   const client = createChatClient({ provider: "cloudflare", purpose: "dialogue_turn", apiKey: "PRIVATE-TEST-KEY",
@@ -115,4 +120,131 @@ test("Web rejects cross-origin/foreign host requests and isolates browser sessio
   assert.equal((await request("/api/start", { strategy: "unsupported", seed: 100 })).status, 400);
   const current = await (await request("/api/state")).json();
   assert.equal(current.trial.seed, 100);
+});
+
+// A small DOM surface executes the shipped UI script without a browser or npm
+// dependencies. HTTP tests above exercise the real server independently.
+async function uiHarness() {
+  class Element {
+    constructor(tag = "div") { this.tagName = tag; this.children = []; this.handlers = {}; this.attributes = {}; this.value = ""; this._text = ""; this.scrollTop = 0; }
+    set textContent(value) { this._text = String(value); this.children = []; }
+    get textContent() { return this._text + this.children.map((c) => c.textContent).join(""); }
+    append(...children) { this.children.push(...children); }
+    replaceChildren(...children) { this._text = ""; this.children = [...children]; }
+    setAttribute(name, value) { this.attributes[name] = value; }
+    getAttribute(name) { return this.attributes[name] ?? null; }
+    removeAttribute(name) { delete this.attributes[name]; }
+    get scrollHeight() { return this.children.length * 100; }
+    querySelectorAll(selector) { const tags = selector.split(","); return this.children.flatMap((c) => [...(tags.includes(c.tagName) ? [c] : []), ...c.querySelectorAll(selector)]); }
+    addEventListener(type, handler) { (this.handlers[type] ??= []).push(handler); }
+    fire(type, values = {}) { const event = { target: this, prevented: false, preventDefault() { this.prevented = true; }, ...values }; for (const handler of this.handlers[type] ?? []) handler(event); return event; }
+    requestSubmit() { this.fire("submit"); }
+    focus(options) { this.focusOptions = options; }
+  }
+  const html = await readFile(new URL("../dialogue-model/runtime/web/index.html", import.meta.url), "utf8");
+  const script = await readFile(new URL("../dialogue-model/runtime/web/app.js", import.meta.url), "utf8");
+  const elements = Object.fromEntries([...html.matchAll(/<([a-z]+)\b[^>]*\bid="([^"]+)"/gu)].map(([, tag, id]) => [id, new Element(tag)]));
+  const chatButton = new Element("button"), submitButton = new Element("button");
+  elements.chat.append(elements.utterance, elements["chat-status"], chatButton);
+  elements.submission.append(elements.names, submitButton);
+  const setupButton = new Element("button"); elements.setup.append(setupButton);
+  elements.setup.elements = { seed: new Element("input") };
+  const requests = [], pending = [];
+  const state = { busy: false, trial: { trialId: "dom-trial", slots: SLOTS, status: "dialogue", publicHistory: [], humanSubmitted: false } };
+  const response = (value) => ({ ok: true, json: async () => value });
+  runInNewContext(script, {
+    document: {
+      getElementById: (id) => elements[id], createElement: (tag) => new Element(tag),
+      createTextNode: (text) => { const node = new Element("text"); node.textContent = text; return node; },
+      querySelectorAll: (selector) => [...new Set(Object.values(elements).flatMap((e) => e.querySelectorAll(selector)))],
+    },
+    fetch: async (path, options) => {
+      requests.push({ path, body: options?.body ? JSON.parse(options.body) : undefined });
+      if (path === "/api/state") return response(state);
+      return new Promise((resolve) => pending.push((value) => resolve(response(value))));
+    },
+    setTimeout, clearTimeout,
+  });
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+  await settle();
+  return { elements, chatButton, requests, pending, state, settle };
+}
+
+test("Web UI keeps a bounded transcript and responsive image beside a stable composer", async () => {
+  const css = await readFile(new URL("../dialogue-model/runtime/web/style.css", import.meta.url), "utf8");
+  const html = await readFile(new URL("../dialogue-model/runtime/web/index.html", import.meta.url), "utf8");
+  assert.match(css, /\.workspace\s*\{[^}]*grid-template-columns:1\.3fr 1fr/u);
+  assert.match(css, /\.workspace \.panel\s*\{[^}]*height:clamp\([^}]*display:flex/u);
+  assert.match(css, /#history\s*\{[^}]*min-height:0[^}]*overflow-y:auto[^}]*overscroll-behavior:contain/u);
+  assert.match(css, /#chat textarea\s*\{resize:none\}/u);
+  assert.match(css, /@media\(max-width:850px\)\{\.workspace\{grid-template-columns:1fr/u);
+  assert.match(html, /<label for="utterance">/u);
+  assert.match(html, /id="chat-status" role="status" aria-live="polite"/u);
+  assert.match(html, /Enterで送信・Shift\+Enterで改行/u);
+});
+
+test("Web UI labels all six final names explicitly and suppresses keyboard send during IME or Shift+Enter", async () => {
+  const { elements, requests } = await uiHarness();
+  assert.equal(elements.names.children.length, 6);
+  elements.names.children.forEach((label, i) => {
+    assert.equal(label.textContent, SLOTS[i]);
+    assert.equal(label.htmlFor, label.children[0].id);
+    assert.ok(label.htmlFor);
+    assert.equal(label.children[0].name, SLOTS[i]);
+  });
+  const input = elements.utterance; input.value = "会話";
+  for (const event of [{ shiftKey: true }, { isComposing: true }, { keyCode: 229 }]) {
+    assert.equal(input.fire("keydown", { key: "Enter", ...event }).prevented, false);
+  }
+  input.fire("compositionstart");
+  assert.equal(input.fire("keydown", { key: "Enter" }).prevented, false);
+  input.fire("compositionend");
+  assert.equal(requests.length, 1);
+  input.value = "　 ";
+  assert.equal(input.fire("keydown", { key: "Enter" }).prevented, true);
+  assert.equal(requests.length, 1);
+});
+
+test("Web UI Enter sends once, disables input throughout AI wait, and scrolls new messages without moving focus", async () => {
+  const { elements, chatButton, requests, pending, state, settle } = await uiHarness();
+  elements.utterance.value = "この図形はどう見えますか";
+  const enter = elements.utterance.fire("keydown", { key: "Enter" });
+  assert.equal(enter.prevented, true);
+  assert.equal(requests.length, 2);
+  assert.deepEqual(requests[1], { path: "/api/turn", body: { utterance: "この図形はどう見えますか" } });
+  assert.equal(elements.utterance.disabled, true);
+  assert.equal(chatButton.disabled, true);
+  assert.equal(elements["chat-status"].textContent, "AIが考えています…");
+  elements.chat.fire("submit"); elements.utterance.fire("keydown", { key: "Enter" });
+  assert.equal(requests.length, 2);
+  const publicHistory = Array.from({ length: 60 }, (_, i) => ({ role: i % 2 ? "assistant" : "user", content: "公開発話" + i }));
+  pending.shift()({ ...state, trial: { ...state.trial, publicHistory } });
+  await settle();
+  assert.equal(elements.history.children.length, 60);
+  assert.equal(elements.history.scrollTop, elements.history.scrollHeight);
+  assert.equal(elements.utterance.disabled, false); assert.equal(chatButton.disabled, false);
+  assert.equal(elements["chat-status"].textContent, "");
+  assert.equal(elements.utterance.value, "");
+  assert.equal(elements.utterance.focusOptions.preventScroll, true);
+});
+
+test("Web UI retains result table while omitting private figure IDs from every displayed detail", async () => {
+  const ui = await uiHarness();
+  const result = {
+    provisional: true, success: true, matchedCount: 6,
+    figures: SLOTS.map((slot, i) => ({ figureId: "PRIVATE-ID-" + i, human: { slot, rawName: "名前" + i }, ai: { rawName: "名前" + i }, matched: true })),
+    duplicateNames: { human: [{ name: "重複", slots: SLOTS.slice(0, 2), figureIds: ["PRIVATE-DUPLICATE"] }], ai: [] },
+  };
+  // Reuse a turn response to render a finished server state without coupling the
+  // DOM harness to form serialization or the server's final-request protocol.
+  ui.elements.utterance.value = "完了"; ui.elements.chat.fire("submit");
+  ui.pending.shift()({ trial: { ...ui.state.trial, status: "completed", humanSubmitted: true, result } });
+  await ui.settle();
+  assert.equal(ui.elements.results.hidden, false);
+  assert.equal(ui.elements["result-body"].querySelectorAll("table").length, 1);
+  assert.equal(ui.elements["result-body"].querySelectorAll("td").length, 24);
+  assert.match(ui.elements["result-body"].textContent, /あなたの位置/u);
+  assert.match(ui.elements["result-body"].textContent, /研究者用/u);
+  assert.doesNotMatch(ui.elements["result-body"].textContent, /PRIVATE-|figureId/u);
+  assert.equal(ui.elements.utterance.disabled, true);
 });

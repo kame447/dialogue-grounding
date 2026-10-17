@@ -2,6 +2,8 @@ const $ = (id) => document.getElementById(id);
 let current = null;
 let working = false;
 let serverBusy = false;
+let awaitingAI = false;
+let composing = false;
 let refreshTimer;
 const errors = {
   ai_unavailable: "AIに接続できませんでした。公開対話は直前の確定状態を保持しています。",
@@ -18,6 +20,7 @@ async function api(path, body) {
   return value;
 }
 function render({ trial, busy = false }) {
+  const historyChanged = trial?.trialId !== current?.trialId || JSON.stringify(trial?.publicHistory) !== JSON.stringify(current?.publicHistory);
   current = trial;
   serverBusy = busy;
   clearTimeout(refreshTimer);
@@ -26,20 +29,25 @@ function render({ trial, busy = false }) {
   $("trial").hidden = !trial;
   if (!trial) return;
   if (!$("board").getAttribute("src")) $("board").src = "/api/image";
-  $("history").replaceChildren(...trial.publicHistory.map((item) => {
-    const li = document.createElement("li");
-    li.className = item.role === "assistant" ? "ai" : "human";
-    const who = document.createElement("strong");
-    who.textContent = item.role === "assistant" ? "AI" : "あなた";
-    li.append(who, document.createTextNode(item.content));
-    return li;
-  }));
-  $("history").scrollTop = $("history").scrollHeight;
+  if (historyChanged) {
+    $("history").replaceChildren(...trial.publicHistory.map((item) => {
+      const li = document.createElement("li");
+      li.className = item.role === "assistant" ? "ai" : "human";
+      const who = document.createElement("strong");
+      who.textContent = item.role === "assistant" ? "AI" : "あなた";
+      li.append(who, document.createTextNode(item.content));
+      return li;
+    }));
+    $("history").scrollTop = $("history").scrollHeight;
+  }
   if (!$("names").children.length) {
-    trial.slots.forEach((slot) => {
+    trial.slots.forEach((slot, index) => {
       const label = document.createElement("label");
+      const inputId = "submission-name-" + index;
+      label.htmlFor = inputId;
       label.textContent = slot;
       const input = document.createElement("input");
+      input.id = inputId;
       input.name = slot;
       input.maxLength = 200;
       input.autocomplete = "off";
@@ -78,23 +86,31 @@ function renderResult(result) {
     $("result-body").append(table);
   }
   const details = document.createElement("details");
-  const summary = document.createElement("summary"); summary.textContent = "暫定採点の詳細";
-  const pre = document.createElement("pre"); pre.textContent = JSON.stringify(result, null, 2);
+  const summary = document.createElement("summary"); summary.textContent = "研究者用：暫定採点の詳細";
+  const pre = document.createElement("pre");
+  // Keep internal correspondence IDs out of every rendered view, including
+  // researcher details. Slots and submitted names are sufficient for review.
+  pre.textContent = JSON.stringify(result, (key, value) => ["figureId", "figureIds"].includes(key) ? undefined : value, 2);
   details.append(summary, pre); $("result-body").append(details);
 }
 function setControls() {
+  $("chat-status").textContent = awaitingAI || serverBusy ? "AIが考えています…" : "";
   document.querySelectorAll("button").forEach((button) => { button.disabled = working || serverBusy; });
   $("chat").querySelectorAll("textarea,button").forEach((control) => { control.disabled = working || serverBusy || current?.status !== "dialogue"; });
   $("submission").querySelectorAll("input,button").forEach((control) => { control.disabled = working || serverBusy || current?.humanSubmitted || current?.status === "submission_error"; });
 }
-async function operate(action) {
+async function operate(action, { ai = false } = {}) {
   if (working) return;
-  working = true; $("notice").textContent = "処理中…"; setControls();
+  working = true; awaitingAI = ai;
+  $("notice").textContent = ai ? "" : "処理中…"; setControls();
   try { render(await action()); $("notice").textContent = ""; }
   catch (error) {
     $("notice").textContent = error.message;
     try { render(await api("/api/state")); } catch { /* Keep the last confirmed state. */ }
-  } finally { working = false; setControls(); }
+  } finally {
+    working = false; awaitingAI = false; setControls();
+    if (ai && !serverBusy && current?.status === "dialogue") $("utterance").focus({ preventScroll: true });
+  }
 }
 $("setup").addEventListener("submit", (event) => {
   event.preventDefault();
@@ -108,13 +124,23 @@ $("setup").addEventListener("submit", (event) => {
 });
 $("chat").addEventListener("submit", (event) => {
   event.preventDefault();
+  if (working || serverBusy || current?.status !== "dialogue") return;
   const utterance = $("utterance").value;
-  operate(async () => { const state = await api("/api/turn", { utterance }); $("utterance").value = ""; return state; });
+  if (!utterance.trim()) return;
+  operate(async () => { const state = await api("/api/turn", { utterance }); $("utterance").value = ""; return state; }, { ai: true });
+});
+$("utterance").addEventListener("compositionstart", () => { composing = true; });
+$("utterance").addEventListener("compositionend", () => { composing = false; });
+$("utterance").addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" || event.shiftKey || event.isComposing || composing || event.keyCode === 229) return;
+  event.preventDefault();
+  if (event.repeat || working || serverBusy || current?.status !== "dialogue") return;
+  $("chat").requestSubmit();
 });
 $("submission").addEventListener("submit", (event) => {
   event.preventDefault();
   const submission = Object.fromEntries(new FormData(event.target));
-  operate(() => api("/api/submit", { submission }));
+  operate(() => api("/api/submit", { submission }), { ai: true });
 });
 $("new-trial").addEventListener("click", () => {
   $("setup").hidden = false;

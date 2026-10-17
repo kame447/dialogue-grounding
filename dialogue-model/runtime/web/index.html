@@ -26,7 +26,9 @@
           <img id="board" alt="あなたに提示された6図形。2段3列で、上段左から下段右の位置で参照します。">
         </section>
         <section class="panel dialogue"><h2>対話</h2><ol id="history" aria-live="polite" aria-label="公開された会話"></ol>
-          <form id="chat"><label for="utterance">メッセージ</label><textarea id="utterance" name="utterance" rows="3" maxlength="12000" required></textarea><button>送信</button></form>
+          <form id="chat"><label for="utterance">メッセージ <span class="muted">Enterで送信・Shift+Enterで改行</span></label><textarea id="utterance" name="utterance" rows="3" maxlength="12000" required></textarea>
+            <div class="chat-actions"><p id="chat-status" role="status" aria-live="polite"></p><button>送信</button></div>
+          </form>
         </section>
       </div>
       <section class="panel"><h2>最終提出</h2><p>あなた自身の画面上の位置ごとに名前を記入してください。未命名は空欄にできます。提出すると対話を終了し、名称を確定します。</p>
