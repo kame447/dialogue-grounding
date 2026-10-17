@@ -18,10 +18,10 @@ export function loadConfig(env = process.env) {
     throw new Error("RESEARCH_AI_PROVIDER must be cloudflare, openai, gemini, or custom");
   }
 
-  const model = env.RESEARCH_AI_MODEL?.trim();
+  const model = provider === "cloudflare" ? undefined : env.RESEARCH_AI_MODEL?.trim();
   const secretName = provider === "cloudflare" ? "RESEARCH_PROXY_TOKEN" : "RESEARCH_AI_API_KEY";
   const apiKey = env[secretName]?.trim();
-  if (!model) throw new Error("Set RESEARCH_AI_MODEL");
+  if (provider !== "cloudflare" && !model) throw new Error("Set RESEARCH_AI_MODEL");
   if (!apiKey) throw new Error("Set " + secretName);
 
   const configuredUrl = env.RESEARCH_AI_BASE_URL?.trim() || PROVIDER_URLS[provider];
@@ -49,6 +49,7 @@ export function loadConfig(env = process.env) {
   return Object.freeze({
     provider,
     model,
+    purpose: provider === "cloudflare" ? "dialogue_turn" : undefined,
     apiKey,
     baseUrl: url.toString().replace(/\/$/, ""),
     timeoutMs: integerOption(env.RESEARCH_AI_TIMEOUT_MS, "RESEARCH_AI_TIMEOUT_MS", 45000, 120000),

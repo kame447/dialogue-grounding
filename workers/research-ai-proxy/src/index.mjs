@@ -1,3 +1,5 @@
+import { resolvePurposeModel } from "./modelPolicy.mjs";
+
 const UPSTREAM_URLS = Object.freeze({
   openai: "https://api.openai.com/v1/chat/completions",
   gemini: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
@@ -99,9 +101,8 @@ function validateMessage(message) {
   return { role: message.role, content: parts };
 }
 
-function validatedPayload(body, env) {
+function validatedPayload(body, selectedModel, env) {
   if (!body || typeof body !== "object" || Array.isArray(body) ||
-      body.model !== env.RESEARCH_AI_MODEL ||
       !Array.isArray(body.messages) || body.messages.length === 0 ||
       body.messages.length > MAX_MESSAGES) return null;
 
@@ -118,7 +119,7 @@ function validatedPayload(body, env) {
     limit : body.max_completion_tokens;
   if (!Number.isSafeInteger(requested) || requested < 1 || requested > limit) return null;
 
-  return { model: env.RESEARCH_AI_MODEL, messages, max_completion_tokens: requested };
+  return { model: selectedModel, messages, max_completion_tokens: requested };
 }
 
 function sanitizeResult(data, model) {
@@ -146,7 +147,7 @@ function sanitizeResult(data, model) {
 
 export async function handleRequest(request, env, fetchImpl = globalThis.fetch) {
   const pathname = new URL(request.url).pathname;
-  if (!["/health", "/v1/chat/completions"].includes(pathname)) {
+  if (!["/health", "/v1/chat/completions", "/v1/model-policy"].includes(pathname)) {
     return reply(404, { error: "not_found" });
   }
 
@@ -159,7 +160,17 @@ export async function handleRequest(request, env, fetchImpl = globalThis.fetch) 
 
   const provider = env.UPSTREAM_PROVIDER || "openai";
   const endpoint = UPSTREAM_URLS[provider];
-  if (!endpoint || !env.UPSTREAM_API_KEY || !env.RESEARCH_AI_MODEL) {
+  const policy = resolvePurposeModel({ purpose: "dialogue_turn" }, env);
+  const ready = Boolean(endpoint && env.UPSTREAM_API_KEY && "model" in policy);
+  if (pathname === "/v1/model-policy") {
+    return request.method === "GET" ? reply(200, {
+      purpose: "dialogue_turn",
+      provider,
+      model: "model" in policy ? policy.model : null,
+      ready,
+    }) : reply(405, { error: "method_not_allowed" });
+  }
+  if (!ready) {
     return reply(503, { error: "provider_unconfigured" });
   }
   if (pathname === "/health") {
@@ -180,7 +191,9 @@ export async function handleRequest(request, env, fetchImpl = globalThis.fetch) 
     return reply(status, { error: status === 413 ? "request_too_large" : "invalid_json" });
   }
 
-  const payload = validatedPayload(body, env);
+  const selected = resolvePurposeModel(body, env);
+  if ("error" in selected) return reply(400, { error: selected.error });
+  const payload = validatedPayload(body, selected.model, env);
   if (!payload) return reply(400, { error: "invalid_request" });
 
   const controller = new AbortController();
@@ -200,7 +213,7 @@ export async function handleRequest(request, env, fetchImpl = globalThis.fetch) 
         error: response.status === 429 ? "upstream_rate_limited" : "upstream_error",
       });
     }
-    const result = sanitizeResult(await response.json(), env.RESEARCH_AI_MODEL);
+    const result = sanitizeResult(await response.json(), selected.model);
     return result ? reply(200, result) : reply(502, { error: "invalid_upstream_response" });
   } catch {
     return reply(controller.signal.aborted ? 504 : 502, {

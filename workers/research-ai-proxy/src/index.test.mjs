@@ -6,7 +6,7 @@ const env = {
   RESEARCH_PROXY_TOKEN: "a-valid-local-test-token-at-least-thirty-two-characters",
   UPSTREAM_PROVIDER: "openai",
   UPSTREAM_API_KEY: "upstream-secret-must-not-leak",
-  RESEARCH_AI_MODEL: "vision-model-for-test",
+  DIALOGUE_MODEL: "vision-model-for-test",
   MAX_COMPLETION_TOKENS: "500",
 };
 
@@ -23,7 +23,7 @@ function request(path, token, body, method = "POST", headers = {}) {
 }
 
 function bodyWith(messages, extras = {}) {
-  return { model: env.RESEARCH_AI_MODEL, messages, ...extras };
+  return { purpose: "dialogue_turn", messages, ...extras };
 }
 
 const simpleMessages = [{ role: "user", content: "図形について話しましょう。" }];
@@ -75,7 +75,7 @@ test("Worker pins model, preserves participant image, and filters unwanted reque
   ];
   const res = await handleRequest(
     request("/v1/chat/completions", env.RESEARCH_PROXY_TOKEN,
-      bodyWith(messages, { purpose: "ignored", max_completion_tokens: 300 })),
+      bodyWith(messages, { model: "hijacked-client-model", max_completion_tokens: 300 })),
     env,
     async (endpoint, options) => {
       url = endpoint;
@@ -87,7 +87,7 @@ test("Worker pins model, preserves participant image, and filters unwanted reque
   assert.equal(sent.headers.Authorization, "Bearer upstream-secret-must-not-leak");
   assert.deepEqual(Object.keys(sent.body).sort(),
     ["max_completion_tokens", "messages", "model"]);
-  assert.equal(sent.body.model, env.RESEARCH_AI_MODEL);
+  assert.equal(sent.body.model, env.DIALOGUE_MODEL);
   assert.deepEqual(sent.body.messages[1].content[1], image);
   const answer = await res.json();
   assert.equal(answer.choices[0].message.content, "船のように見えます。");
@@ -99,7 +99,8 @@ test("Worker never forwards unsupported models, tools, or arbitrary image URLs",
   let calls = 0;
   const upstream = async () => { calls++; return Response.json(result); };
   const cases = [
-    { ...bodyWith(simpleMessages), model: "unauthorized-model" },
+    { ...bodyWith(simpleMessages), purpose: "unauthorized-purpose", model: "unauthorized-model" },
+    { messages: simpleMessages, model: env.DIALOGUE_MODEL },
     bodyWith([{ role: "tool", content: "invoke" }]),
     bodyWith([{ role: "user", content: [
       { type: "image_url", image_url: { url: "https://localhost/secret" } },
@@ -142,7 +143,7 @@ test("Worker refuses unexpectedly large request, unsupported content type, and a
   assert.equal((await handleRequest(wrongType, env)).status, 415);
   const notConfigured = await handleRequest(
     request("/v1/chat/completions", env.RESEARCH_PROXY_TOKEN, bodyWith(simpleMessages)),
-    { ...env, RESEARCH_AI_MODEL: "" });
+    { ...env, DIALOGUE_MODEL: "" });
   assert.equal(notConfigured.status, 503);
 });
 
@@ -157,4 +158,47 @@ test("upstream 429 and invalid response are handled without forwarding raw data"
     async () => Response.json({ choices: [] }));
   assert.equal(invalid.status, 502);
   assert.equal((await invalid.json()).error, "invalid_upstream_response");
+});
+
+test("authenticated model policy is readable without consuming upstream inference", async () => {
+  let calls = 0;
+  const upstream = async () => { calls++; return Response.json(result); };
+  const invalid = await handleRequest(
+    request("/v1/model-policy", "not-the-token", undefined, "GET"), env, upstream);
+  assert.equal(invalid.status, 401);
+  const ready = await handleRequest(
+    request("/v1/model-policy", env.RESEARCH_PROXY_TOKEN, undefined, "GET"), env, upstream);
+  assert.equal(ready.status, 200);
+  assert.deepEqual(await ready.json(), {
+    purpose: "dialogue_turn", provider: "openai", model: env.DIALOGUE_MODEL, ready: true,
+  });
+  const notReady = await handleRequest(
+    request("/v1/model-policy", env.RESEARCH_PROXY_TOKEN, undefined, "GET"),
+    { ...env, UPSTREAM_API_KEY: undefined }, upstream);
+  assert.deepEqual(await notReady.json(), {
+    purpose: "dialogue_turn", provider: "openai", model: env.DIALOGUE_MODEL, ready: false,
+  });
+  assert.equal(calls, 0);
+});
+
+test("Worker picks the internal model for the same client request after a configuration change", async () => {
+  const seen = [];
+  const fetchImpl = async (url, options) => {
+    const data = JSON.parse(options.body);
+    seen.push({ url, model: data.model });
+    return Response.json(result);
+  };
+  const requestBody = bodyWith(simpleMessages, { model: "untrusted-client-choice" });
+  for (const [provider, model] of [
+    ["openai", "vision-A"],
+    ["openai", "vision-B"],
+    ["gemini", "gemini-vision-C"],
+  ]) {
+    const res = await handleRequest(
+      request("/v1/chat/completions", env.RESEARCH_PROXY_TOKEN, requestBody),
+      { ...env, UPSTREAM_PROVIDER: provider, DIALOGUE_MODEL: model }, fetchImpl);
+    assert.equal(res.status, 200);
+  }
+  assert.deepEqual(seen.map((row) => row.model), ["vision-A", "vision-B", "gemini-vision-C"]);
+  assert.ok(seen[2].url.startsWith("https://generativelanguage.googleapis.com/"));
 });
