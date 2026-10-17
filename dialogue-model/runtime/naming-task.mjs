@@ -3,6 +3,7 @@ import { mkdir, realpath, stat, writeFile, rename, rm } from "node:fs/promises";
 import { basename, dirname, join, resolve, parse, relative, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createDialogueSession, STRATEGIES } from "./session.mjs";
+import { createLunaJudge } from "./judgment/luna.mjs";
 
 // Fixed participant-facing coordinates, never figure identities.
 export const SLOTS = Object.freeze(["上段左", "上段中", "上段右", "下段左", "下段中", "下段右"]);
@@ -72,7 +73,7 @@ function clone(value) { return structuredClone(value); }
 function tokenCount(value) { return Number.isSafeInteger(value) && value >= 0 ? value : null; }
 
 export async function createNamingTask({
-  client, strategy, seed, createTrial, scoreTrial, runDir = process.env.RESEARCH_RUN_DIR,
+  client, strategy, seed, createTrial, scoreTrial, createJudge = createLunaJudge, runDir = process.env.RESEARCH_RUN_DIR,
 } = {}) {
   if (!STRATEGIES.includes(strategy)) throw new NamingTaskError("invalid_strategy");
   if (!Number.isSafeInteger(seed)) throw new NamingTaskError("invalid_seed");
@@ -88,24 +89,26 @@ export async function createNamingTask({
   const recordId = randomUUID();
   const requests = [];
   const meteredClient = {
-    async complete(messages) {
+    async complete(messages, options = {}) {
       const started = performance.now();
       try {
         const response = await client.complete(messages);
-        requests.push({ kind: closed ? "final_submission" : "dialogue_turn", status: "ok",
+        requests.push({ kind: options.phase ?? (closed ? "final_submission" : "dialogue_turn"), status: "ok",
+          retryCount: tokenCount(response.retryCount) ?? 0, timeoutMs: tokenCount(response.timeoutMs),
           model: typeof response.model === "string" ? response.model : null,
           usage: { inputTokens: tokenCount(response.usage?.inputTokens), outputTokens: tokenCount(response.usage?.outputTokens) },
           latencyMs: Math.round(performance.now() - started) });
         return response;
-      } catch {
-        requests.push({ kind: closed ? "final_submission" : "dialogue_turn", status: "error",
+      } catch (error) {
+        requests.push({ kind: options.phase ?? (closed ? "final_submission" : "dialogue_turn"), status: "error",
+          retryCount: tokenCount(error?.retryCount) ?? 0, timeoutMs: tokenCount(error?.timeoutMs),
           model: null, usage: { inputTokens: null, outputTokens: null }, latencyMs: Math.round(performance.now() - started) });
         throw new NamingTaskError("ai_unavailable");
       }
     },
   };
   if (!client || typeof client.complete !== "function") throw new NamingTaskError("invalid_client");
-  const session = createDialogueSession({ client: meteredClient, strategy,
+  const session = createDialogueSession({ client: meteredClient, strategy, judge: createJudge(meteredClient),
     image: { mimeType: trial.ai.mimeType, base64: trial.ai.png.toString("base64") } });
   let humanSubmission = null;
   let aiSubmission = null;
@@ -120,7 +123,7 @@ export async function createNamingTask({
     const record = {
       recordId, trialId: trial.trialId, seed: trial.seed ?? seed, strategy, startedAt,
       updatedAt: new Date().toISOString(), status: result ? "completed" : finalFailed ? "submission_error" : closed ? "submitting" : "dialogue",
-      publicHistory: session.getHistory(), humanSubmission, aiSubmission,
+      publicHistory: session.getHistory(), judgments: session.getJudgmentHistory(), ownLedger: session.getOwnLedger(), humanSubmission, aiSubmission,
       scoring: result ? { key: trial.key, result } : null, requests,
     };
     const temporary = join(directory, "." + recordId + ".tmp");

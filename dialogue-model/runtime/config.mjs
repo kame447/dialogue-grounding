@@ -52,7 +52,7 @@ export function loadConfig(env = process.env) {
     purpose: provider === "cloudflare" ? "dialogue_turn" : undefined,
     apiKey,
     baseUrl: url.toString().replace(/\/$/, ""),
-    timeoutMs: integerOption(env.RESEARCH_AI_TIMEOUT_MS, "RESEARCH_AI_TIMEOUT_MS", 45000, 120000),
+    timeoutMs: integerOption(env.RESEARCH_AI_TIMEOUT_MS, "RESEARCH_AI_TIMEOUT_MS", undefined, 120000),
     maxCompletionTokens: integerOption(
       env.RESEARCH_AI_MAX_COMPLETION_TOKENS, "RESEARCH_AI_MAX_COMPLETION_TOKENS", undefined, 32768
     ),

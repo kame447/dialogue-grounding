@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { main } from "../dialogue-model/runtime/naming-cli.mjs";
 import { createChatClient } from "../dialogue-model/runtime/client.mjs";
 import { SLOTS } from "../dialogue-model/runtime/naming-task.mjs";
+import { SAFE_JUDGMENT } from "../dialogue-model/runtime/judgment/schema.mjs";
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL2qwAAAABJRU5ErkJggg==", "base64");
 const names = (prefix) => Object.fromEntries(SLOTS.map((slot, i) => [slot, prefix + i]));
 const createTrial = ({ seed }) => ({ trialId: "cli-trial", seed, human: { png, mimeType: "image/png" }, ai: { png, mimeType: "image/png" },
@@ -23,9 +24,10 @@ async function setup(t, { fail = false } = {}) {
     const chunks = []; for await (const c of req) chunks.push(c);
     payloads.push(JSON.parse(Buffer.concat(chunks)));
     if (fail) { res.writeHead(500); res.end("DO-NOT-DISCLOSE-RAW-ERROR"); return; }
+    const judge = payloads.at(-1).messages.some((m) => m.role === "system" && m.content.includes("【非公開の対話判断】"));
     const final = payloads.at(-1).messages.at(-1).content.includes("最終提出要求");
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ model: "mock-cli-model", choices: [{ message: { content: final ? JSON.stringify(names("AI-final")) : "AIの公開応答" } }] }));
+    res.end(JSON.stringify({ model: "mock-cli-model", choices: [{ message: { content: judge ? JSON.stringify(SAFE_JUDGMENT) : final ? JSON.stringify(names("AI-final")) : "AIの公開応答" } }] }));
   });
   server.listen(0, "127.0.0.1"); await once(server, "listening");
   t.after(async () => { await new Promise((r) => server.close(r)); await rm(dir, { recursive: true, force: true }); });
@@ -44,11 +46,11 @@ test("script CLI exports only human PNG, sends each public line in order, and su
     JSON.stringify({ submission: names("PRIVATE-HUMAN-FINAL") })].join("\n"));
   const state = await main([...args, "--script", script], { RESEARCH_RUN_DIR: "" }, dependencies);
   assert.equal(state.status, "completed"); assert.equal(state.publicHistory.length, 4);
-  assert.equal(payloads.length, 3);
+  assert.equal(payloads.length, 5);
   assert.doesNotMatch(JSON.stringify(payloads[0]), /FUTURE-SECOND|PRIVATE-HUMAN|PRIVATE-ID/);
   assert.doesNotMatch(JSON.stringify(payloads), /PRIVATE-HUMAN-FINAL|PRIVATE-ID/);
-  assert.equal(payloads[1].messages.at(-1).content, "FUTURE-SECOND-PUBLIC");
-  assert.equal(payloads[2].purpose, "dialogue_turn");
+  assert.equal(payloads[3].messages.at(-1).content, "FUTURE-SECOND-PUBLIC");
+  assert.equal(payloads[4].purpose, "dialogue_turn");
   const files = await readdir(join(dir, "images")); assert.equal(files.length, 1); assert.match(files[0], /^human-.*\.png$/);
   assert.deepEqual(await readFile(join(dir, "images", files[0])), png);
   assert.match(getOutput(), /AIの公開応答/); assert.match(getOutput(), /provisional/);
@@ -60,7 +62,7 @@ test("script without a submission performs dialogue only and never fabricates a 
   const script = join(dir, "turns.jsonl");
   await writeFile(script, JSON.stringify({ utterance: "public" }) + "\n");
   const state = await main([...args, "--script", script], { RESEARCH_RUN_DIR: "" }, dependencies);
-  assert.equal(payloads.length, 1); assert.equal(state.aiSubmitted, false); assert.equal(state.humanSubmitted, false);
+  assert.equal(payloads.length, 2); assert.equal(state.aiSubmitted, false); assert.equal(state.humanSubmitted, false);
   assert.doesNotMatch(getOutput(), /AI-final/);
 });
 
@@ -69,9 +71,9 @@ test("interactive CLI supports /submit with six prompted positions and /exit", a
   const input = Readable.from(["public dialogue\n/submit\nname0\nname1\nname2\nname3\nname4\nname5\n"]);
   const state = await main(args, { RESEARCH_RUN_DIR: "" }, { ...dependencies, input });
   assert.equal(state.status, "completed"); assert.equal(state.humanSubmission[SLOTS[5]], "name5");
-  assert.equal(payloads.length, 2); assert.match(getOutput(), /下段右の名称/);
+  assert.equal(payloads.length, 3); assert.match(getOutput(), /下段右の名称/);
   const exitState = await main(args, { RESEARCH_RUN_DIR: "" }, { ...dependencies, input: Readable.from(["/exit\n"]) });
-  assert.equal(exitState.aiSubmitted, false); assert.equal(payloads.length, 2);
+  assert.equal(exitState.aiSubmitted, false); assert.equal(payloads.length, 3);
 });
 
 test("invalid JSONL is rejected before any API call or image export; repo image paths are refused", async (t) => {

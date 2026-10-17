@@ -6,6 +6,7 @@ import { spawn } from "node:child_process";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { SAFE_JUDGMENT } from "../dialogue-model/runtime/judgment/schema.mjs";
 
 function runCLI(args, env) {
   return new Promise((resolve, reject) => {
@@ -27,9 +28,10 @@ test("the CLI reaches a local API and can run an image dialogue", async () => {
     const buffers = [];
     for await (const chunk of req) buffers.push(chunk);
     requests.push(JSON.parse(Buffer.concat(buffers).toString()));
+    const judge = requests.at(-1).messages.some((m) => m.role === "system" && m.content.includes("【非公開の対話判断】"));
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ model: "mock-version",
-      choices: [{ message: { content: "名前を考えましょう。" } }] }));
+      choices: [{ message: { content: judge ? JSON.stringify(SAFE_JUDGMENT) : "名前を考えましょう。" } }] }));
   });
   const dir = await mkdtemp(join(tmpdir(), "dialogue-cli-"));
   server.listen(0, "127.0.0.1");
@@ -53,10 +55,10 @@ test("the CLI reaches a local API and can run an image dialogue", async () => {
     ], env);
     assert.equal(dialogue.code, 0, dialogue.stderr);
     assert.match(dialogue.stdout, /名前を考えましょう/);
-    assert.equal(requests.length, 2);
-    assert.ok(requests[1].messages.some((message) =>
+    assert.equal(requests.length, 3);
+    assert.ok(requests[2].messages.some((message) =>
       Array.isArray(message.content) && message.content.some((part) => part.type === "image_url")));
-    assert.equal(requests[1].messages.at(-1).content, "これは何に見えますか？");
+    assert.equal(requests[2].messages.at(-1).content, "これは何に見えますか？");
   } finally {
     server.close();
     await once(server, "close");

@@ -41,7 +41,7 @@ test("provider transport posts the configured payload and parses responses", asy
     text: "確認しました",
     model: "mock-multimodal-version",
     finishReason: "stop",
-    usage: { inputTokens: 13, outputTokens: 4 },
+    usage: { inputTokens: 13, outputTokens: 4 }, retryCount: 0, timeoutMs: 2000,
   });
 });
 
@@ -61,7 +61,7 @@ test("an HTTP error never exposes the provider response or API key", async () =>
 
 test("timeout is reported without logging request contents", async () => {
   const client = createChatClient({ ...config, timeoutMs: 5 }, async (_url, { signal }) =>
-    new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(new Error("stopped")))));
+    new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(new Error("stopped")))), { sleep: async () => {} });
   await assert.rejects(client.complete([{ role: "user", content: "private" }]), /timeout/);
 });
 
@@ -97,4 +97,82 @@ test("real local HTTP server exercises the network and multimodal JSON path", as
     server.close();
     await once(server, "close");
   }
+});
+
+test("only transient HTTP statuses get at most two exponential retries with unchanged image payload", async (t) => {
+  for (const transient of [429, 502, 503, 504]) {
+    await t.test(String(transient), async () => {
+      const bodies = []; const waits = [];
+      const server = createServer(async (req, res) => {
+        const chunks = []; for await (const c of req) chunks.push(c);
+        bodies.push(JSON.parse(Buffer.concat(chunks)));
+        res.setHeader("Content-Type", "application/json");
+        if (bodies.length < 3) { res.writeHead(transient); res.end("PRIVATE-UPSTREAM-ECHO"); }
+        else res.end(JSON.stringify({ model: "fixed-worker-model", choices: [{ message: { content: "再試行後の応答" } }] }));
+      });
+      server.listen(0, "127.0.0.1"); await once(server, "listening");
+      try {
+        const client = createChatClient({ provider: "cloudflare", purpose: "dialogue_turn", apiKey: "local-key",
+          baseUrl: "http://127.0.0.1:" + server.address().port + "/v1" }, undefined, { sleep: async (ms) => { waits.push(ms); } });
+        const result = await client.complete([{ role: "user", content: [{ type: "image_url", image_url: { url: "data:image/png;base64,iVBORw0KGgo=" } }] }]);
+        assert.equal(result.retryCount, 2); assert.equal(result.timeoutMs, 90000);
+        assert.deepEqual(waits, [500, 1000]); assert.equal(bodies.length, 3);
+        assert.deepEqual(bodies[0], bodies[1]); assert.deepEqual(bodies[1], bodies[2]);
+        assert.equal(bodies[0].purpose, "dialogue_turn"); assert.ok(!Object.hasOwn(bodies[0], "model"));
+      } finally { await new Promise((r) => server.close(r)); }
+    });
+  }
+});
+
+test("non-transient HTTP and malformed success responses never retry or expose raw data", async () => {
+  for (const status of [400, 401, 403, 404, 408, 500, 501]) {
+    let calls = 0;
+    const client = createChatClient(config, async () => { calls++; return new Response("PRIVATE-RAW-ERROR", { status }); },
+      { sleep: async () => assert.fail("must not retry") });
+    await assert.rejects(client.complete([{ role: "user", content: "PRIVATE-PROMPT" }]), (error) => {
+      assert.equal(error.status, status); assert.equal(error.retryCount, 0);
+      assert.doesNotMatch(error.message, /PRIVATE|test-only-secret/); return true;
+    });
+    assert.equal(calls, 1);
+  }
+  for (const body of ["bad JSON PRIVATE", JSON.stringify({ choices: [] })]) {
+    let calls = 0;
+    const client = createChatClient(config, async () => { calls++; return new Response(body); }, { sleep: async () => assert.fail("must not retry") });
+    await assert.rejects(client.complete([{ role: "user", content: "public" }]), /invalid_json|empty_response/);
+    assert.equal(calls, 1);
+  }
+});
+
+test("network and timeout retry counts survive terminal errors; one transient network failure can recover", async () => {
+  for (const mode of ["network", "timeout"]) {
+    let calls = 0; const waits = [];
+    const client = createChatClient({ ...config, timeoutMs: 2 }, async (_url, { signal }) => {
+      calls++;
+      if (mode === "network") throw new Error("PRIVATE-NETWORK-ERROR");
+      return new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(new Error("PRIVATE-TIMEOUT-ERROR"))));
+    }, { sleep: async (ms) => { waits.push(ms); } });
+    await assert.rejects(client.complete([{ role: "user", content: "PRIVATE-PROMPT" }]), (error) => {
+      assert.equal(error.code, mode === "network" ? "network_error" : "timeout");
+      assert.equal(error.retryCount, 2); assert.doesNotMatch(error.message, /PRIVATE/); return true;
+    });
+    assert.equal(calls, 3); assert.deepEqual(waits, [500, 1000]);
+  }
+  let calls = 0;
+  const client = createChatClient(config, async () => {
+    if (++calls === 1) throw new Error("temporary");
+    return Response.json({ choices: [{ message: { content: "recovered" } }] });
+  }, { sleep: async () => {} });
+  assert.equal((await client.complete([{ role: "user", content: "public" }])).retryCount, 1);
+});
+
+test("default timeout follows image presence while an explicit timeout overrides both", async () => {
+  const fetchImpl = async () => Response.json({ choices: [{ message: { content: "ok" } }] });
+  const plain = [{ role: "user", content: "public" }];
+  const withImage = [{ role: "user", content: [{ type: "image_url", image_url: { url: "data:image/png;base64,AA==" } }] }];
+  const client = createChatClient({ ...config, timeoutMs: undefined }, fetchImpl);
+  assert.equal((await client.complete(plain)).timeoutMs, 45000);
+  assert.equal((await client.complete(withImage)).timeoutMs, 90000);
+  const explicit = createChatClient({ ...config, timeoutMs: 12345 }, fetchImpl);
+  assert.equal((await explicit.complete(plain)).timeoutMs, 12345);
+  assert.equal((await explicit.complete(withImage)).timeoutMs, 12345);
 });
