@@ -4,9 +4,10 @@ const SHARED_INSTRUCTIONS = [
   "あなたは二者によるタングラム6図形の共同命名課題の参加者です。",
   "相手と会話し、それぞれの図形について共同で使用できる名前を決めてください。",
   "画像はあなた自身に提示された図形です。相手の画像や内部認識、正しい対応表は見えません。",
+  "画像には6図形が2段3列に並びます。位置名は上段左・上段中・上段右・下段左・下段中・下段右で、あなた自身の画面上の位置です。相手の画面では配置と向きが異なります。",
   "相手の理解を決めつけず、それまでの公開された会話と自分の画像だけを使ってください。",
   "図形の見立てや形状について、課題を進めるのに不要な完全一致まで求める必要はありません。",
-  "回答は日本語の自然な対話発話にし、解説や内部ラベル、思考過程は出力しないでください。",
+  "対話中の回答は日本語の自然な発話にし、解説や内部ラベル、思考過程は出力しないでください。",
 ].join("\n");
 
 const STRATEGY_INSTRUCTIONS = Object.freeze({
@@ -53,6 +54,18 @@ export function createDialogueSession({ client, strategy, image = null }) {
   return {
     getHistory() {
       return history.map((item) => ({ ...item }));
+    },
+    // A private task response uses the same image and public history, and is
+    // never appended to the dialogue as a participant utterance.
+    async finalRequest(instructions) {
+      if (typeof instructions !== "string" || !instructions.trim()) throw new Error("Final instructions are required");
+      if (pending) throw new Error("Concurrent turns are not supported");
+      pending = true;
+      try {
+        return await client.complete(messagesFor(instructions));
+      } finally {
+        pending = false;
+      }
     },
     async turn(utterance) {
       if (typeof utterance !== "string" || !utterance.trim()) {
