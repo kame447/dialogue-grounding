@@ -51,6 +51,6 @@ Worker側の DIALOGUE_MODEL が dialogue_turn 用モデルを一元管理しま�
 
 Cloudflare Dashboardの Worker > Settings > Variables and Secrets から DIALOGUE_MODEL の通常変数を変更できます。コード修正・API Secret更新・クライアント変更は不要です。ただし wrangler.jsonc はデプロイ時の設定の正本となるため、Dashboardで値を変えた後は同ファイルも追随させてください。さもないと後のデプロイで以前の値に戻る可能性があります。
 
-リポジトリから管理する場合は wrangler.jsonc の DIALOGUE_MODEL を編集して npm run deploy:research-proxy を実行します。初期値 gpt-4o-mini は接続テスト用の暫定値であり、研究本実験のモデル確定ではありません。プロバイダ自体を openai から gemini に変更する場合には UPSTREAM_PROVIDER も変更し、対応する上流APIキーにSecretを更新する必要があります。
+リポジトリから管理する場合は wrangler.jsonc の DIALOGUE_MODEL を編集して npm run deploy:research-proxy を実行します。設定値 gpt-6-luna は研究用AIの指定モデルです。正式実験を行う際はモデル設定を固定し、実行記録にも保持してください。プロバイダ自体を openai から gemini に変更する場合には UPSTREAM_PROVIDER も変更し、対応する上流APIキーにSecretを更新する必要があります。
 
 node --env-file=.env dialogue-model/runtime/cli.mjs --show-model で実際のWorkerが現在採用しているモデルと設定完了状態を表示できます。このコマンドは上流AIを呼ばず、推論課金を発生させません。条件比較では同じモデルバージョンを使用し、実験実施中にモデルを変更しないでください。
