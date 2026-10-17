@@ -39,3 +39,11 @@ test("loopback HTTP is allowed for isolated integration tests", () => {
   });
   assert.equal(config.baseUrl, "http://127.0.0.1:9999/v1");
 });
+
+test("unset timeout permits the client image-aware default, and explicit timeout stays validated", () => {
+  const env = { RESEARCH_AI_MODEL: "model", RESEARCH_AI_API_KEY: "local-key" };
+  assert.equal(loadConfig(env).timeoutMs, undefined);
+  assert.equal(loadConfig({ ...env, RESEARCH_AI_TIMEOUT_MS: "90000" }).timeoutMs, 90000);
+  assert.throws(() => loadConfig({ ...env, RESEARCH_AI_TIMEOUT_MS: "0" }), /RESEARCH_AI_TIMEOUT_MS/);
+  assert.throws(() => loadConfig({ ...env, RESEARCH_AI_TIMEOUT_MS: "120001" }), /RESEARCH_AI_TIMEOUT_MS/);
+});
