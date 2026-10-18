@@ -234,6 +234,9 @@ test("CLI: mock by default, private output outside the repo with 0600 files, liv
   const summary = readFileSync(join(out, "shadow-summary.sanitized.md"), "utf8");
   assert.ok(!summary.includes(SECRET_TEXT) && !summary.includes("尖った形"));
   assert.match(summary, /uncalibrated/);
+  const saved = JSON.parse(readFileSync(join(out, "shadow-run.json"), "utf8"));
+  assert.equal(saved.caseResults.length, 1, "per-case verdicts are kept for offline re-scoring");
+  assert.ok(!JSON.stringify(saved).includes("尖った形"), "the private run file holds no case text either");
   assert.match(lines[0], /"casesInvalid":1/);
   await assert.rejects(main(["--record", recordPath, "--out", "dialogue-model/tmp-out"]), /repository_output_forbidden/);
   await assert.rejects(main(["--cases", join(dir, "cases.jsonl"), "--out", out, "--client", "live"]), /max-calls/);
