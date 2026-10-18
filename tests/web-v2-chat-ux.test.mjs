@@ -297,13 +297,16 @@ test("Enter, Shift+Enter and IME never submit; clicking send preserves the exact
   assert.equal(messageBodies(e).at(-1), text);
 });
 
-test("scrolled-up readers retain their position during optimistic send and authoritative refresh", async () => {
+// Updated 2026-10-19 (E1): the reader's own send now jumps to the bottom, as
+// in ordinary chat apps; arrivals still never move a scrolled-up reader.
+test("own send jumps to the bottom; scrolled-up readers retain their position during authoritative refresh", async () => {
   const state = trial();
   state.events.push(...Array.from({ length: 12 }, (_, index) => ({ id: "history-" + index, speaker: "ai", text: "過去の会話" + index })));
   const { e, getState, poll } = await ui(state);
   e.history.scrollTop = 80; e.history.fire("scroll");
-  send(e, "スクロールを奪わない");
-  assert.equal(e.history.scrollTop, 80, "sending does not force a scrolled-up reader to the bottom");
+  send(e, "送信したら末尾へ");
+  assert.equal(e.history.scrollTop, e.history.scrollHeight, "sending shows the sent bubble at the bottom");
+  e.history.scrollTop = 80; e.history.fire("scroll");
   await tick(); assert.equal(e.history.scrollTop, 80, "DOM replacement restores the reader position");
   getState().trial.events.push({ id: "last-ai", speaker: "ai", text: "新しい応答" });
   getState().trial.aiStatus = "idle"; await poll();
