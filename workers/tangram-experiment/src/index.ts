@@ -6,11 +6,12 @@ import { isExcessiveTraffic, type SoftLimitBindings } from "./soft-limits";
 
 type Strategy = "repair-first" | "bypass-enabled";
 type ApiBody = Record<string, unknown>;
+type UtteranceStyle = "default" | "concise";
 type StoredTrial = {
   recordId: string;
   seed: number;
   strategy: Strategy;
-  options: { referenceMemory: boolean };
+  options: { referenceMemory: boolean; utteranceStyle?: UtteranceStyle };
   queueState: { pendingHumanEventIds: string[]; errorCode: string | null };
   closed?: boolean;
   [field: string]: unknown;
@@ -27,6 +28,8 @@ type NamingTask = {
 };
 
 export interface Env extends SoftLimitBindings {
+  // Deployment-wide AI utterance style for new trials; identical for both strategies.
+  V2_UTTERANCE_STYLE?: string;
   NAMING_SESSIONS: DurableObjectNamespace<TangramSession>;
   ASSETS: Fetcher;
   AI_PROXY: { chat(payload: unknown): Promise<{ status: number; data: unknown }> };
@@ -87,6 +90,9 @@ export class TangramSession extends DurableObject<Env> {
   }
 
   private async createTrial(seed: number, strategy: Strategy, referenceMemory: boolean, restore?: StoredTrial): Promise<NamingTask> {
+    // New trials follow the deployment setting; a restored trial keeps its recorded style.
+    const utteranceStyle: UtteranceStyle = restore ? restore.options.utteranceStyle ?? "default"
+      : this.env.V2_UTTERANCE_STYLE === "concise" ? "concise" : "default";
     // The AI proxy keeps both authentication and upstream secrets in its own Worker.
     const client = createChatClient({ provider: "cloudflare", baseUrl: "https://internal.proxy/v1",
       purpose: "dialogue_turn", apiKey: "service-binding-only" }, async (_url, options) => {
@@ -96,7 +102,7 @@ export class TangramSession extends DurableObject<Env> {
         status: response.status, headers: { "Content-Type": "application/json" },
       });
     });
-    return await createNamingTaskV2(({ client, seed, strategy, referenceMemory, runDir: null,
+    return await createNamingTaskV2(({ client, seed, strategy, referenceMemory, utteranceStyle, runDir: null,
       ...(restore ? { restore } : {}),
       onPersist: (snapshot: StoredTrial) => this.ctx.storage.put("active", snapshot),
     }) as unknown as Parameters<typeof createNamingTaskV2>[0]) as NamingTask;

@@ -44,16 +44,20 @@ export function parseAiNamesV2(text, slots) {
  * @param {{ client, strategy, seed, referenceMemory?: boolean, runDir?: string, createTrial?, scoreTrial?,
  *   judge?: import('../judgment/schema.mjs').DialogueJudge | null, now?: () => number, restore?: object | null, onPersist?: Function | null,
  *   decisionShadowClient?: {chooseAction(request: object): Promise<any>} | null,
- *   activeDecision?: {purpose: string, client: {chooseAction(request: object): Promise<any>}} | null }} options
+ *   activeDecision?: {purpose: string, client: {chooseAction(request: object): Promise<any>}} | null,
+ *   utteranceStyle?: string }} options
  */
 export async function createNamingTaskV2({
   client, strategy, seed, referenceMemory = false, runDir = process.env.RESEARCH_RUN_DIR,
   createTrial = createTrialV2, scoreTrial = defaultScoreTrial, judge = null, now = () => Date.now(),
-  restore = null, onPersist = null, decisionShadowClient = null, activeDecision = null,
+  restore = null, onPersist = null, decisionShadowClient = null, activeDecision = null, utteranceStyle = "default",
 }) {
   if (!STRATEGIES.includes(strategy)) throw new NamingTaskError("invalid_strategy");
   if (!Number.isSafeInteger(seed)) throw new NamingTaskError("invalid_seed");
   if (typeof referenceMemory !== "boolean") throw new NamingTaskError("invalid_options");
+  // A restored trial keeps the style it started with, whatever the deployment now says.
+  const style = restore?.options?.utteranceStyle ?? utteranceStyle;
+  if (!["default", "concise"].includes(style)) throw new NamingTaskError("invalid_options");
   const directory = runDir ? await (await import("../naming-task.mjs")).outsideRepositoryDirectory(runDir) : null;
   const trial = createTrial({ seed });
   const scene = participantView(trial);
@@ -76,7 +80,7 @@ export async function createNamingTaskV2({
     },
   };
   const dialogue = createDialogueV2({ client: trackingClient, strategy, image: { mimeType: model.mimeType, base64: model.png.toString("base64") },
-    anchors: model.anchors, judge, referenceMemory, decisionShadowClient, activeDecision,
+    anchors: model.anchors, judge, referenceMemory, decisionShadowClient, activeDecision, utteranceStyle: style,
     onResearchUpdate: () => persist().catch(() => {}) });
   const queue = createHumanMessageQueue({ runAiTurn: dialogue.runAiTurn,
     initialPrivateState: dialogue.initialPrivateState(), now,
@@ -106,7 +110,7 @@ export async function createNamingTaskV2({
     const privateState = queue.getPrivateState();
     const record = {
       recordId, version: VERSION, trialId: trial.trialId, seed, strategy, startedAt, updatedAt: new Date(now()).toISOString(),
-      options: { visualAid: false, referenceMemory, decisionShadow: Boolean(decisionShadowClient), activeDecision: activeDecision?.purpose ?? null },
+      options: { visualAid: false, referenceMemory, decisionShadow: Boolean(decisionShadowClient), activeDecision: activeDecision?.purpose ?? null, utteranceStyle: style },
       status: result ? "completed" : closed ? "submitting" : "dialogue",
       // Origin is research metadata only; queue/model/participant events stay ordinary public speech.
       events: snapshot.events.map((event) => event.seq === 1 && event.speaker === "ai" && event.text === SCRIPTED_OPENING

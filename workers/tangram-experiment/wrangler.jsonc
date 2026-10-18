@@ -7,6 +7,10 @@
     "nodejs_compat"
   ],
   "workers_dev": true,
+  // Trial: concise AI utterances for every new v2 session (both strategies). Set "default" to revert.
+  "vars": {
+    "V2_UTTERANCE_STYLE": "concise"
+  },
   "observability": {
     "enabled": false
   },
