@@ -59,7 +59,7 @@ export function createDialogueSession({ client, strategy, image = null, judge = 
         const judgment = validateJudgment(await dialogueJudge.judge({ image: ownImage, publicHistory: visibleHistory,
           strategy, ownLedger: structuredClone(ownLedger), ownJudgmentHistory: judgmentHistory
             .filter((item) => item.status === "committed")
-            .map(({ judgment }) => ({ action: judgment.action, targetSlot: judgment.targetSlot })),
+            .map(({ judgment }) => ({ action: judgment.action, targetSlot: judgment.targetSlot, candidateName: judgment.candidateName })),
         }), { ownLedger });
         trace.judgment = judgment;
         trace.validation = dialogueJudge.getDiagnostics?.().at(-1) ?? null;

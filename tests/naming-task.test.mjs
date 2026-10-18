@@ -28,7 +28,7 @@ async function mock(t, respond, judgeResponse = JSON.stringify(SAFE_JUDGMENT)) {
     const chunks = [];
     for await (const chunk of req) chunks.push(chunk);
     requests.push(JSON.parse(Buffer.concat(chunks).toString()));
-    const value = isJudge(requests.at(-1)) ? { text: judgeResponse } : await respond(++nonJudgeCalls, requests.at(-1));
+    const value = isJudge(requests.at(-1)) ? typeof judgeResponse === "function" ? await judgeResponse(requests.at(-1)) : { text: judgeResponse } : await respond(++nonJudgeCalls, requests.at(-1));
     res.writeHead(value.status ?? 200, { "Content-Type": "application/json" });
     res.end(value.raw ?? JSON.stringify({ model: "one-fixed-model", usage: { prompt_tokens: 12, completion_tokens: 7 },
       choices: [{ message: { content: value.text } }] }));
@@ -154,6 +154,7 @@ test("records are opt-in, private, metered, and keep key only within completed s
   assert.equal(record.requests[0].model, "one-fixed-model"); assert.equal(record.requests[0].usage.inputTokens, 12);
   assert.equal(record.requests[0].kind, "judgment"); assert.equal(record.requests[1].kind, "generation");
   assert.equal(record.requests[2].kind, "final_submission"); assert.equal(record.requests[0].retryCount, 0); assert.equal(typeof record.requests[0].latencyMs, "number");
+  assert.equal(record.requests[0].httpStatus, null);
   assert.equal((await stat(join(directory, name))).mode & 0o777, 0o600);
   assert.doesNotMatch(JSON.stringify(record), /TEST-TOKEN|base64|image_url/);
   assert.equal((await readdir(directory)).length, 1);
@@ -221,4 +222,43 @@ test("judge fallback is persisted without raw invalid output and transient gener
   assert.equal(record.requests.at(-1).kind, "generation"); assert.equal(record.requests.at(-1).retryCount, 1);
   assert.equal(record.requests.at(-1).timeoutMs, 90000);
   assert.doesNotMatch(JSON.stringify(record), /PRIVATE-RAW-502|PRIVATE-INVALID-JUDGMENT/);
+});
+
+test("research request diagnostics retain only failed HTTP status and retry count for judgment and generation", async (t) => {
+  for (const phase of ["judgment", "generation"]) for (const status of [422, 502]) await t.test(phase + " HTTP " + status, async (t) => {
+    const directory = await mkdtemp(join(tmpdir(), "naming-http-status-"));
+    t.after(() => rm(directory, { recursive: true, force: true }));
+    const failure = { status, raw: "PRIVATE-RAW-RESPONSE-TOKEN-IMAGE-PROMPT" };
+    const { client, requests } = await mock(t, async () => phase === "generation" ? failure : { text: "公開応答" },
+      phase === "judgment" ? async () => failure : JSON.stringify(SAFE_JUDGMENT));
+    const task = await createNamingTask(taskOptions(client, { runDir: directory }));
+    await assert.rejects(task.turn("公開発話"), (error) => error.code === "ai_unavailable");
+    const [file] = await readdir(directory);
+    const record = JSON.parse(await readFile(join(directory, file), "utf8"));
+    const failed = record.requests.at(-1), retryCount = status === 502 ? 2 : 0;
+    assert.equal(failed.kind, phase);
+    assert.equal(failed.status, "error");
+    assert.equal(failed.httpStatus, status);
+    assert.equal(failed.retryCount, retryCount);
+    assert.equal(requests.length, (phase === "generation" ? 1 : 0) + 1 + retryCount);
+    assert.equal(record.judgments[0].status, phase === "judgment" ? "judge_error" : "generation_error");
+    assert.deepEqual(record.publicHistory, []);
+    assert.ok(Object.values(record.ownLedger).every((entry) => entry.name === null));
+    assert.deepEqual(task.getState().publicHistory, []);
+    assert.ok(!Object.hasOwn(task.getState(), "requests"));
+    assert.ok(!Object.hasOwn(task.getState(), "judgments"));
+    assert.doesNotMatch(JSON.stringify(record), /PRIVATE-RAW-RESPONSE|TEST-TOKEN|base64|image_url/);
+  });
+});
+
+test("request diagnostics discard absent or non-HTTP error statuses without persisting raw error data", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "naming-invalid-http-status-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const client = { async complete() { throw Object.assign(new Error("PRIVATE-RAW-ERROR"), { status: "PRIVATE-STATUS", body: "PRIVATE-BODY" }); } };
+  const task = await createNamingTask(taskOptions(client, { runDir: directory }));
+  await assert.rejects(task.turn("公開発話"), /ai_unavailable/);
+  const [file] = await readdir(directory);
+  const record = JSON.parse(await readFile(join(directory, file), "utf8"));
+  assert.equal(record.requests[0].httpStatus, null);
+  assert.doesNotMatch(JSON.stringify(record), /PRIVATE-RAW|PRIVATE-STATUS|PRIVATE-BODY/);
 });

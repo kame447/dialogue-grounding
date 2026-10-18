@@ -71,6 +71,7 @@ export async function outsideRepositoryDirectory(path) {
 
 function clone(value) { return structuredClone(value); }
 function tokenCount(value) { return Number.isSafeInteger(value) && value >= 0 ? value : null; }
+function httpStatus(value) { return Number.isInteger(value) && value >= 100 && value <= 599 ? value : null; }
 
 export async function createNamingTask({
   client, strategy, seed, createTrial, scoreTrial, createJudge = createLunaJudge, runDir = process.env.RESEARCH_RUN_DIR,
@@ -94,6 +95,7 @@ export async function createNamingTask({
       try {
         const response = await client.complete(messages);
         requests.push({ kind: options.phase ?? (closed ? "final_submission" : "dialogue_turn"), status: "ok",
+          httpStatus: null,
           retryCount: tokenCount(response.retryCount) ?? 0, timeoutMs: tokenCount(response.timeoutMs),
           model: typeof response.model === "string" ? response.model : null,
           usage: { inputTokens: tokenCount(response.usage?.inputTokens), outputTokens: tokenCount(response.usage?.outputTokens) },
@@ -101,6 +103,7 @@ export async function createNamingTask({
         return response;
       } catch (error) {
         requests.push({ kind: options.phase ?? (closed ? "final_submission" : "dialogue_turn"), status: "error",
+          httpStatus: httpStatus(error?.status),
           retryCount: tokenCount(error?.retryCount) ?? 0, timeoutMs: tokenCount(error?.timeoutMs),
           model: null, usage: { inputTokens: null, outputTokens: null }, latencyMs: Math.round(performance.now() - started) });
         throw new NamingTaskError("ai_unavailable");

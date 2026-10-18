@@ -14,7 +14,7 @@ import { SLOTS } from "../stimuli/board.mjs";
  * @property {PublicUtterance[]} publicHistory
  * @property {'repair-first'|'bypass-enabled'} strategy
  * @property {OwnLedger} ownLedger
- * @property {{action: JudgmentAction, targetSlot: Slot|null}[]} [ownJudgmentHistory]
+ * @property {{action: JudgmentAction, targetSlot: Slot|null, candidateName: string|null}[]} [ownJudgmentHistory]
  */
 /** @typedef {{judge(input: JudgeInput): Promise<Judgment>}} DialogueJudge */
 
@@ -69,6 +69,12 @@ export function validateJudgment(value, { ownLedger = createOwnLedger() } = {}) 
       ledger[targetSlot].name !== candidateName && action !== "repair") {
     throw new JudgmentValidationError("reassignment_requires_repair");
   }
+  const assignedName = candidateName ?? (targetSlot && ["agree", "defer", "revisit"].includes(action) ? ledger[targetSlot].name : null);
+  if (assignedName !== null && SLOTS.some((slot) => slot !== targetSlot && ledger[slot].name === assignedName)) {
+    // Repair must explicitly release the old slot before reusing its name on
+    // another. Never infer which correspondence is correct or silently move it.
+    throw new JudgmentValidationError("duplicate_name_requires_repair");
+  }
   return judgment;
 }
 
@@ -84,7 +90,8 @@ export function applyJudgment(ownLedger, value) {
   else if (action === "defer") ledger[targetSlot] = { status: "deferred", name: candidateName ?? current.name };
   else if (action === "revisit") ledger[targetSlot] = { status: current.status === "agreed" ? "agreed" :
     (candidateName ?? current.name) === null ? "unassigned" : "tentative", name: candidateName ?? current.name };
-  else if (candidateName !== null && ["accept", "propose_name", "confirm"].includes(action)) {
+  else if (action === "confirm" && candidateName !== null) ledger[targetSlot] = { status: "tentative", name: candidateName };
+  else if (candidateName !== null && ["accept", "propose_name"].includes(action)) {
     ledger[targetSlot] = { status: current.status === "agreed" ? "agreed" : "tentative", name: candidateName };
   }
   return ledger;

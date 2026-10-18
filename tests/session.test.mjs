@@ -58,6 +58,41 @@ test("generated dialogue text never decides ledger, completion, or final submiss
   assert.equal(session.getHistory().length, 2);
 });
 
+test("named confirmation and agreement retain the same own target across turns with identical generators in both conditions", async () => {
+  const candidate = { ...SAFE_JUDGMENT, action: "confirm", targetSlot: "下段中", candidateName: "作業候補",
+    discriminatingFeature: "候補間で異なるくぼみ", note: "PRIVATE-CANDIDATE-NOTE" };
+  const agree = { ...SAFE_JUDGMENT, action: "agree", targetSlot: candidate.targetSlot, candidateName: candidate.candidateName };
+  const executions = [];
+  for (const strategy of ["repair-first", "bypass-enabled"]) {
+    const calls = [];
+    let judgeCount = 0;
+    const session = createDialogueSession({ strategy, image: { ...ownImage, humanImage: "PRIVATE-HUMAN-IMAGE", key: "PRIVATE-KEY" },
+      client: { async complete(messages) {
+        calls.push(structuredClone(messages));
+        return { text: isJudge(messages) ? JSON.stringify([candidate, agree][judgeCount++]) : "公開された応答" };
+      } } });
+    await session.turn("名前について確認したいです");
+    assert.deepEqual(session.getOwnLedger()[candidate.targetSlot], { status: "tentative", name: candidate.candidateName });
+    await session.turn("その名前にしましょう");
+    assert.deepEqual(session.getOwnLedger()[candidate.targetSlot], { status: "agreed", name: candidate.candidateName });
+    const notesMessage = calls[2].find((m) => typeof m.content === "string" && m.content.includes('"ownJudgmentHistory"'));
+    const notes = JSON.parse(notesMessage.content.slice(notesMessage.content.indexOf("\n") + 1));
+    assert.deepEqual(notes.ownJudgmentHistory, [{ action: "confirm", targetSlot: candidate.targetSlot, candidateName: candidate.candidateName }]);
+    assert.doesNotMatch(JSON.stringify(calls), /PRIVATE-CANDIDATE-NOTE|PRIVATE-HUMAN-IMAGE|PRIVATE-KEY/);
+    const historyBeforeFinal = session.getHistory();
+    await session.finalRequest("最終名称は自分の画像と公開履歴を照合して決めてください");
+    assert.match(JSON.stringify(calls.at(-1)), /作業候補/);
+    assert.deepEqual(session.getHistory(), historyBeforeFinal);
+    assert.deepEqual(session.getJudgmentHistory().map((item) => item.judgment.candidateName), [candidate.candidateName, candidate.candidateName]);
+    executions.push(calls);
+  }
+  for (const index of [0, 2]) {
+    assert.notEqual(executions[0][index][1].content, executions[1][index][1].content);
+    assert.deepEqual(executions[0][index].filter((_, i) => i !== 1), executions[1][index].filter((_, i) => i !== 1));
+  }
+  for (const index of [1, 3, 4]) assert.deepEqual(executions[0][index], executions[1][index]);
+});
+
 test("invalid strategy and missing public utterance are rejected", async () => {
   const client = { async complete() { assert.fail("must not call"); } };
   assert.throws(() => createDialogueSession({ client, strategy: "unknown" }), /Unsupported/);
