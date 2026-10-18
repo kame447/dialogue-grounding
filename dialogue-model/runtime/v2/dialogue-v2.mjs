@@ -15,7 +15,9 @@ export const GENERATOR_INSTRUCTIONS_V2 = [
   "まず相手の発話に短く応じ、必要なら全体の印象・身近なものへの見立てを1つ伝えてください。形の分析は、判断に discriminatingFeature があるとき（相手が識別に迷う・詳細を求める、複数候補が残る、食い違いが未解決など）だけにし、その場合も特徴は1つに絞って相手の反応を待ってください。",
   "挨拶や「どれからにしますか」のような漠然とした開始には、短く受け止めて相手に選んでもらうか、簡単な見立てを1つだけ出してください。先回りして詳しい形の説明や名前の一括提案をしないでください。",
   "1回は1〜2文、親しみやすいです・ます調で返してください。講義調、長い前置き、特徴の列挙は避けてください。短さ自体は目的ではありません。",
+  "「合意」「候補」「案」「受け取りました」のような手続きを説明する言葉は避け、普段のチャットのように言ってください。合意した後に同じ特徴の説明を繰り返さないでください。",
   "指定されたactionの対話機能を実現し、自分で別のactionに置き換えないでください。followUpがあれば主actionを先に、両方を全体で1〜2文にまとめてください。",
+  "propose_nameやagreeにdiscriminatingFeatureがあるときは、質問にせず、その特徴に短く触れて自分がどの図形のことと理解したかを相手に示してください。propose_nameでは相手が出した名前を候補として受けるだけにし、合意は表明しないでください。",
   "confirmは相手への短い確認、propose_nameは命名の提案として表現し、どちらも合意を表明しないでください。合意を表明できるのはagreeのときだけです。repairでは自己訂正を明示し、repair以外では取り違えや取り消しを表明しないでください。defer/revisitは保留・再訪であることが分かるように伝えてください。acceptでは受け止めるだけにしてください。",
   "targetSlotや内部参照ID、画像内の座標・範囲は自分だけの作業メモです。相手に言わず、位置での指定も求めないでください。相手の画面では配置も向きも異なります。",
   "自分の画面の向きに依存する上下左右・右向き・上端・下端などの語で形を説明しないでください。特徴を伝えるときは、回転しても変わらない尖りの数や大小・くぼみ・細長さ・四角の有無・部分同士のつながりから選んでください。",
@@ -30,6 +32,19 @@ const FINAL_INSTRUCTIONS_V2 = [
 ].join("\n");
 
 const clone = (value) => structuredClone(value);
+
+// What the public utterance may claim for each typed act (shared by both strategies).
+export const ACTION_SCOPE_V2 = Object.freeze({
+  accept: "受け止めるだけ。名前に決まったとは言わない",
+  propose_name: "どの図形と理解したかを示すか名前を出すだけ。決まった・それでいこうとは言わない",
+  confirm: "確認するだけ。決まった・それでいこうとは言わない",
+  agree: "この名前に決まったことを伝えてよい",
+  repair: "自分の取り違え・決めた名前の訂正であることを明示する",
+  defer: "後で戻ることを伝える。決まったとは言わない",
+  revisit: "保留していた図形に戻る。決まったとは言わない",
+  move_on: "別の図形に進む。決まったとは言わない",
+  close: "終わりにしてよいか相談する",
+});
 
 /** Public events -> chat messages, keeping every speaker turn (consecutive human messages stay distinct). */
 export function eventsToHistory(events) {
@@ -97,9 +112,9 @@ export function createDialogueV2({ client, strategy, image, anchors, judge = nul
     let judgment, memoryUpdate = null;
     if (state.graph) {
       const core = { ...rawJudgment }; delete core.reference;
-      const validCore = validateJudgment(core, { ownLedger: state.ledger });
+      const validCore = validateJudgment(core, { ownLedger: state.ledger, agreeEvidence: true });
       try {
-        judgment = validateJudgment(rawJudgment, { ownLedger: state.ledger });
+        judgment = validateJudgment(rawJudgment, { ownLedger: state.ledger, agreeEvidence: true });
         const staged = prepareMemory(state.graph, latest.seq, judgment.reference, publicTurns);
         memoryUpdate = staged.update;
         trace.memory.interpretation = judgment.reference != null;
@@ -109,7 +124,7 @@ export function createDialogueV2({ client, strategy, image, anchors, judge = nul
         trace.memory.rejected = "memory_" + (error instanceof ReferenceGraphError || error?.name === "JudgmentValidationError" ? error.code : "invalid_update");
         memoryUpdate = stageMemory(state.graph, latest.seq, null, publicTurns);
       }
-    } else judgment = validateJudgment(rawJudgment, { ownLedger: state.ledger });
+    } else judgment = validateJudgment(rawJudgment, { ownLedger: state.ledger, agreeEvidence: true });
     trace.judgment = { ...judgment };
     delete trace.judgment.reference;
     trace.validation = dialogueJudge.getDiagnostics?.().at(-1) ?? null;
@@ -118,10 +133,11 @@ export function createDialogueV2({ client, strategy, image, anchors, judge = nul
     const result = await client.complete([
       { role: "system", content: TASK_INSTRUCTIONS_V2 },
       { role: "system", content: GENERATOR_INSTRUCTIONS_V2 },
-      { role: "system", content: "この発話の判断（非公開）:\n" + JSON.stringify({ action, targetSlot, candidateName, discriminatingFeature,
+      { role: "system", content: "この発話の判断（非公開）:\n" + "主actionで言えること: " + ACTION_SCOPE_V2[action] +
+        (judgment.followUp ? "。followUpで言えること: " + ACTION_SCOPE_V2[judgment.followUp.action] : "") + "\n" + JSON.stringify({ action, targetSlot, candidateName, discriminatingFeature,
         ...(Object.hasOwn(judgment, "followUp") ? { followUp: judgment.followUp } : {}) }) },
       ...ownImageMessage(ownImage),
-      { role: "system", content: "AI自身の作業メモ（非公開・正解表ではない）:\n" + JSON.stringify({ ownLedger: state.ledger }) },
+      { role: "system", content: "AI自身の作業メモ（非公開・正解表ではない）:\n" + JSON.stringify({ ownLedger: state.ledger, agreeEvidence: true }) },
       ...history,
     ], { phase: "generation" });
     abortIf(signal);
