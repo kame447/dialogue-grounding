@@ -90,6 +90,15 @@
         "period": 60
       }
     },
+    // Provisional questionnaire saves (drafts and submissions), per browser session.
+    {
+      "name": "QUESTIONNAIRE_RATE_LIMIT",
+      "namespace_id": "202610190301",
+      "simple": {
+        "limit": 30,
+        "period": 60
+      }
+    },
     // /admin: every request that presents credentials, right or wrong, per visitor IP.
     // The ADMIN_TOKEN secret is set separately (wrangler secret put); without it /admin is 404.
     {

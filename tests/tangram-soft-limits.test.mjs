@@ -18,6 +18,7 @@ function bindings() {
     SESSION_ACTION_RATE_LIMIT: new Counter(30),
     IP_ACTION_RATE_LIMIT: new Counter(120),
     GLOBAL_ACTION_RATE_LIMIT: new Counter(300),
+    QUESTIONNAIRE_RATE_LIMIT: new Counter(30),
   };
 }
 function request(path, { method = 'POST', ip = '203.0.113.42', forwardedFor = '' } = {}) {
@@ -70,4 +71,15 @@ test('a high global rate across many IPs is also limited; unrelated endpoints ar
   assert.equal(await isExcessiveTraffic(request('/api/ai-submit', { ip: '198.51.100.42' }), limits, 'other'), true);
   assert.equal(await isExcessiveTraffic(request('/api/not-a-route'), limits, 'other'), false);
   assert.equal(await isExcessiveTraffic(request('/api/message'), limits, null), false);
+});
+
+test('questionnaire saves have their own per-session limit and never use the AI-action counters', async () => {
+  const limits = bindings();
+  const path = '/api/records/0f8fad5b-d9cb-469f-a165-70867728950e/questionnaire';
+  for (let i = 0; i < 30; i++) assert.equal(await isExcessiveTraffic(request(path), limits, 'participant'), false);
+  assert.equal(await isExcessiveTraffic(request(path), limits, 'participant'), true);
+  assert.equal(await isExcessiveTraffic(request(path), limits, 'other-participant'), false);
+  assert.equal(await isExcessiveTraffic(request(path, { method: 'GET' }), limits, 'participant'), false, 'reading is not limited');
+  for (const name of ['SESSION_ACTION_RATE_LIMIT', 'IP_ACTION_RATE_LIMIT', 'GLOBAL_ACTION_RATE_LIMIT', 'START_RATE_LIMIT']) assert.equal(limits[name].counts.size, 0, name);
+  assert.equal(await isExcessiveTraffic(request('/api/message'), limits, 'participant'), false, 'AI turns are unaffected');
 });
