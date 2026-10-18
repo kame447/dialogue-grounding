@@ -63,12 +63,15 @@ export function prepareMemory(graph, turn, interpretation = null, publicTurns) {
   if (!operations.some(op => op.id === mentionId)) operations.length = 0;
   for (const dropped of evidence.dropped ?? []) rejected.push("memory_" + dropped.reason);
   if (operations.some(op => op.id === mentionId)) {
+    const focus = ({ mode, slot }) => attempt({ kind: "focus", id: `${turn}:${mode}`, slot, mode, mentionId });
     if (evidence.feature) attempt({ kind: "feature", id: `${turn}:feature`, ...evidence.feature, mentionId });
+    // A lone revisit returns to the deferred slot before a name said in the same
+    // turn; staged after it, that name would make the revisit look not deferred.
+    const revisitFirst = evidence.focus.length > 0 && evidence.focus.every(({ mode }) => mode === "revisit");
+    if (revisitFirst) evidence.focus.forEach(focus);
     if (evidence.name) attempt({ kind: "name", id: `${turn}:name`, ...evidence.name, mentionIds: [mentionId],
       replaces: graph.records.findLast(r => r.kind === "name" && r.slot === evidence.name.slot)?.id ?? null });
-    for (const { mode, slot } of evidence.focus) {
-      attempt({ kind: "focus", id: `${turn}:${mode}`, slot, mode, mentionId });
-    }
+    if (!revisitFirst) evidence.focus.forEach(focus);
   }
   return { update: update(), rejected: rejected.length ? [...new Set(rejected)].join(",") : null };
 }
