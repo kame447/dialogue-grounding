@@ -15,9 +15,8 @@ const ownTrial = createTrial({ seed: 31 });
 const sheet = createOwnImageRotationSheet(ownTrial.ai.png, { enabled: true });
 const finalNames = Object.fromEntries(SLOTS.map((slot, i) => [slot, '最終名' + i]));
 const utterance = '試しの呼び名にします';
-const mention = (extra = {}) => ({ kind: 'mention', id: '1:m', sourceTurn: 1, speaker: 'human', quote: utterance,
-  slots: [SLOTS[0]], confidence: 1, epistemic: 'grounded', intent: 'name_acceptance', antecedent: null, ...extra });
-const validOps = () => [mention(), { kind: 'name', id: '1:n', slot: SLOTS[0], name: '試しの呼び名', agreement: 'explicit', mentionIds: ['1:m'], replaces: null }];
+const reference = (extra = {}) => ({ slots: [SLOTS[0]], epistemic: 'grounded', intent: 'name_acceptance',
+  feature: null, nameAcceptance: { slot: SLOTS[0], name: '試しの呼び名' }, deferSlot: null, revisitSlot: null, ...extra });
 const phase = (messages) => messages.some(m => m.role === 'system' && m.content.includes('【非公開の対話判断】')) ? 'judge' :
   messages.at(-1).content.includes('最終提出要求') ? 'final' : 'generation';
 const images = (body) => body.messages.flatMap(m => Array.isArray(m.content) ? m.content.filter(p => p.type === 'image_url') : []);
@@ -98,7 +97,7 @@ test('reference graph is judge-only private memory, independent of ledger, with 
   for (const strategy of ['repair-first', 'bypass-enabled']) {
     let judgments = 0;
     const app = await setup(t, { strategy, visualAid: true, referenceMemory: true }, (kind) => kind === 'judge' ? {
-      text: JSON.stringify({ ...SAFE_JUDGMENT, memoryOps: judgments++ === 0 ? validOps() : [] }),
+      text: JSON.stringify({ ...SAFE_JUDGMENT, reference: judgments++ === 0 ? reference() : null }),
     } : {});
     await app.task.turn(utterance); await app.task.turn('次の公開相談'); await app.task.submitAI();
     const record = await app.record();
@@ -106,7 +105,7 @@ test('reference graph is judge-only private memory, independent of ledger, with 
     assert.equal(record.referenceGraph.ownSlots[SLOTS[0]].candidate.name, '試しの呼び名');
     assert.equal(record.referenceGraph.ownSlots[SLOTS[0]].status, 'agreed');
     assert.equal(record.ownLedger[SLOTS[0]].name, null, 'memory never silently reconciles the ledger');
-    assert.deepEqual(record.judgments.map(j => j.memory), [{ opsApplied: 2, rejected: null }, { opsApplied: 0, rejected: null }]);
+    assert.deepEqual(record.judgments.map(j => j.memory), [{ opsApplied: 2, rejected: null, interpretation: true }, { opsApplied: 0, rejected: null, interpretation: false }]);
     const judges = app.requests.filter(r => phase(r.messages) === 'judge');
     assert.match(textOnly(judges[1]), /ownReferences.*試しの呼び名/u);
     for (const body of app.requests.filter(r => phase(r.messages) !== 'judge')) assert.doesNotMatch(textOnly(body), /ownReferences|memoryOps|publicTurns|referenceGraph/);
@@ -114,12 +113,15 @@ test('reference graph is judge-only private memory, independent of ledger, with 
     privateState(app.task); runs.push(app.requests);
   }
   assert.deepEqual(runs[0].filter(r => phase(r.messages) !== 'judge'), runs[1].filter(r => phase(r.messages) !== 'judge'));
+  assert.deepEqual(runs[0].filter(r => phase(r.messages) === 'judge').map(r => r.messages.filter((_, i) => i !== 1)),
+    runs[1].filter(r => phase(r.messages) === 'judge').map(r => r.messages.filter((_, i) => i !== 1)));
+
 });
 
-test('invalid memory operations retry once then fall back to empty operations while retaining a valid act', async (t) => {
-  for (const bad of [[mention({ speaker: 'ai', quote: 'PRIVATE-FUTURE-RESPONSE' })], Array(17).fill({ kind: 'unknown' })]) await t.test(Array.isArray(bad) && bad.length === 17 ? 'operation budget' : 'unpublished evidence', async (t) => {
+test('invalid reference interpretations retry once then fall back to null while retaining a valid act', async (t) => {
+  for (const bad of [reference({ quote: 'PRIVATE-FUTURE-RESPONSE' }), reference({ slots: ['invalid'] }), reference({ feature: {} })]) await t.test('strict interpretation', async (t) => {
     const app = await setup(t, { referenceMemory: true }, kind => kind === 'judge' ? { text: JSON.stringify({ ...SAFE_JUDGMENT,
-      action: 'propose_name', targetSlot: SLOTS[1], candidateName: '有効な候補', memoryOps: bad }) } : {});
+      action: 'propose_name', targetSlot: SLOTS[1], candidateName: '有効な候補', reference: bad }) } : {});
     await app.task.turn(utterance);
     assert.equal(app.requests.length, 3);
     const record = await app.record(), judgment = record.judgments[0];
@@ -128,9 +130,8 @@ test('invalid memory operations retry once then fall back to empty operations wh
     assert.equal(record.referenceGraph.mentions.length, 0);
     assert.equal(judgment.validation.memoryFallback, true);
     assert.equal(judgment.validation.fallback, false);
-    assert.deepEqual(judgment.judgment.memoryOps, []);
-    assert.equal(judgment.memory.opsApplied, 0);
-    assert.match(judgment.memory.rejected, /^memory_/u);
+    assert.equal(Object.hasOwn(judgment.judgment, 'reference'), false);
+    assert.deepEqual(judgment.memory, { opsApplied: 0, rejected: 'memory_invalid_reference,memory_invalid_reference', interpretation: false });
     assert.match(app.requests[1].messages.at(-1).content, /memory_/u);
     assert.doesNotMatch(JSON.stringify(record), /PRIVATE-FUTURE-RESPONSE/);
     assert.doesNotMatch(textOnly(app.requests[1]), /PRIVATE-FUTURE-RESPONSE/);
@@ -138,28 +139,29 @@ test('invalid memory operations retry once then fall back to empty operations wh
   });
 });
 
-test('a corrected memory retry applies only the valid update and logs the rejection code', async (t) => {
+test('a corrected reference retry applies only the valid interpretation and logs rejection', async (t) => {
   let tries = 0;
   const app = await setup(t, { referenceMemory: true }, kind => kind === 'judge' ? { text: JSON.stringify({ ...SAFE_JUDGMENT,
-    memoryOps: tries++ === 0 ? [mention({ quote: 'NOT-PUBLIC' })] : validOps() }) } : {});
+    reference: tries++ === 0 ? reference({ quote: 'NOT-PUBLIC' }) : reference() }) } : {});
   await app.task.turn(utterance);
   const record = await app.record();
   assert.equal(record.referenceGraph.mentions.length, 1);
   assert.equal(record.referenceGraph.revision, 1);
-  assert.deepEqual(record.judgments[0].memory, { opsApplied: 2, rejected: 'memory_nonpublic_evidence' });
+  assert.deepEqual(record.judgments[0].memory, { opsApplied: 2, rejected: 'memory_invalid_reference', interpretation: true });
+  assert.equal(Object.hasOwn(record.judgments[0].judgment, 'reference'), false);
 });
 
 test('generation failure leaves graph unchanged and retry commits its staged operations once', async (t) => {
   let fail = true;
   const app = await setup(t, { referenceMemory: true }, kind => {
-    if (kind === 'judge') return { text: JSON.stringify({ ...SAFE_JUDGMENT, memoryOps: validOps() }) };
+    if (kind === 'judge') return { text: JSON.stringify({ ...SAFE_JUDGMENT, reference: reference() }) };
     if (kind === 'generation' && fail) { fail = false; return { status: 500, raw: 'PRIVATE-GENERATION-ERROR' }; }
     return { text: '発話を解析して記憶に追加してはいけない名前' };
   });
   await assert.rejects(app.task.turn(utterance), { code: 'ai_unavailable' });
   let record = await app.record();
   assert.equal(record.referenceGraph.revision, 0); assert.equal(record.referenceGraph.mentions.length, 0);
-  assert.deepEqual(record.judgments[0].memory, { opsApplied: 0, rejected: null });
+  assert.deepEqual(record.judgments[0].memory, { opsApplied: 0, rejected: null, interpretation: true });
   assert.deepEqual(privateState(app.task).publicHistory, []);
   await app.task.turn(utterance); record = await app.record();
   assert.equal(record.referenceGraph.revision, 1); assert.equal(record.referenceGraph.mentions.length, 1);
@@ -199,4 +201,16 @@ test('invalid option values fail before trial creation or API calls; runtime doe
     const source = await readFile(new URL('../dialogue-model/runtime/' + path, import.meta.url), 'utf8');
     assert.doesNotMatch(source, /createJevJudge\s*\(|from\s+["'][^"']*jev/iu);
   }
+});
+
+test('a public name proposal persists a candidate with agreement none and is requested by the shared judge instructions', async (t) => {
+  const app = await setup(t, { referenceMemory: true }, kind => kind === 'judge' ? { text: JSON.stringify({ ...SAFE_JUDGMENT,
+    reference: reference({ intent: 'name_proposal', nameAcceptance: { slot: SLOTS[0], name: '帆' } }) }) } : {});
+  await app.task.turn('帆と呼ぶのはどうでしょう');
+  const record = await app.record();
+  assert.equal(record.referenceGraph.ownSlots[SLOTS[0]].candidate.name, '帆');
+  assert.equal(record.referenceGraph.ownSlots[SLOTS[0]].candidate.agreement, 'none');
+  assert.deepEqual(record.judgments[0].memory, { opsApplied: 2, rejected: null, interpretation: true });
+  const instructions = app.requests[0].messages.find(m => typeof m.content === 'string' && m.content.includes('nameAcceptanceは話題の名前の欄'));
+  assert.match(instructions.content, /提案した公開発話でもslotとnameを入れ、intent=name_proposal/u);
 });
