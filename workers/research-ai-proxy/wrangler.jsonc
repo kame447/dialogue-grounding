@@ -10,6 +10,6 @@
     "UPSTREAM_PROVIDER": "openai",
     "MAX_COMPLETION_TOKENS": "8192",
     "DIALOGUE_MODEL": "gpt-6-luna",
-    "RESEARCH_DECISIONS_ENABLED": "false"
+    "RESEARCH_DECISIONS_ENABLED": "true"
   }
 }

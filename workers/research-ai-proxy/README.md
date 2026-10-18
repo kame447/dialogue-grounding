@@ -66,7 +66,9 @@ security find-generic-password -a research -s dialogue-grounding-openrouter-api-
   npx wrangler secret put OPENROUTER_DECISIONS_API_KEY --config workers/research-ai-proxy/wrangler.jsonc
 ```
 
-上記の前にCloudflare認証とWorkerアクセス権を確認してください。既存の `UPSTREAM_API_KEY` と `DIALOGUE_MODEL` は変更しません。公開接続を有効にするには `workers/research-ai-proxy/wrangler.jsonc` の `RESEARCH_DECISIONS_ENABLED` を `true` にして研究用Workerをデプロイします。デプロイ前は動作しません。初期値は `false` です。秘密キーの値はGitやログに記録しません。
+上記の前にCloudflare認証とWorkerアクセス権を確認してください。既存の `UPSTREAM_API_KEY` と `DIALOGUE_MODEL` は変更しません。公開接続を有効にするには `workers/research-ai-proxy/wrangler.jsonc` の `RESEARCH_DECISIONS_ENABLED` を `true` にして研究用Workerをデプロイします。デプロイ前は動作しません。秘密キーの値はGitやログに記録しません。
+
+2026-10-19、研究者の承認により `RESEARCH_DECISIONS_ENABLED` を `true` にしました（研究用Workerのみ。デプロイは統括担当が行います）。`OPENROUTER_DECISIONS_API_KEY` が未登録または `sk-or-` 形式でない場合、フラグが `true` でも `/v1/decisions` は 503 で閉じます。`/v1/chat/completions`・`/v1/model-policy`・実験Workerが使うサービスバインディング（`chat` のみ）は変わりません。この有効化は比較・shadow 計測用の経路を開くだけで、実験条件・既定の方略・参加者画面は変更しません。回帰は `src/decisions-security.test.mjs` で確認します。
 
 研究用Workerが有効化された後、研究データを一切使わない固定の合成対話で、双方のモデルの応答を並べて確認できます。
 
