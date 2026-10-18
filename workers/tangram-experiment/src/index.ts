@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { createChatClient } from "../../../dialogue-model/runtime/client.mjs";
 import { createNamingTaskV2 } from "../../../dialogue-model/runtime/v2/naming-task-v2.mjs";
+import { createGroundingJudgeClient } from "../../../dialogue-model/runtime/grounding/client.ts";
 import { NamingTaskError } from "../../../dialogue-model/runtime/naming-error.mjs";
 import { sessionCookie, sessionId } from "./session-cookie.ts";
 import { isExcessiveTraffic, type SoftLimitBindings } from "./soft-limits";
@@ -45,7 +46,14 @@ export interface Env extends SoftLimitBindings {
   V2_UTTERANCE_STYLE?: string;
   NAMING_SESSIONS: DurableObjectNamespace<TangramSession>;
   ASSETS: Fetcher;
-  AI_PROXY: { chat(payload: unknown): Promise<{ status: number; data: unknown }> };
+  AI_PROXY: {
+    chat(payload: unknown): Promise<{ status: number; data: unknown }>;
+    // Absent on proxy deployments without the grounding route; the shadow then records not_found.
+    grounding?(payload: unknown): Promise<{ status: number; data: unknown }>;
+  };
+  // Researcher-only shadow of two-axis grounding evidence for new trials: "on" enables it; unset or anything else is off.
+  // It writes private research records only and never changes the dialogue, for either strategy.
+  GROUNDING_SHADOW?: string;
   // Researcher-only admin log. Without the secret (or the limiter) /admin is 404.
   ADMIN_TOKEN?: string;
   ADMIN_INDEX?: DurableObjectNamespace<AdminIndex>;
@@ -214,7 +222,17 @@ export class TangramSession extends DurableObject<Env> {
         status: response.status, headers: { "Content-Type": "application/json" },
       });
     });
-    return await createNamingTaskV2(({ client, seed, strategy, referenceMemory, utteranceStyle, runDir: null,
+    const groundingShadow = this.env.GROUNDING_SHADOW === "on" ? {
+      judge: createGroundingJudgeClient({ provider: "cloudflare", baseUrl: "https://internal.proxy/v1", apiKey: "service-binding-only" },
+        async (_url, options) => {
+          // An RPC stub to an older proxy has no such method; the call then rejects and is recorded as an error.
+          const proxy = this.env.AI_PROXY;
+          if (typeof proxy.grounding !== "function") return new Response(JSON.stringify({ error: "not_found" }), { status: 404 });
+          const response = await proxy.grounding(JSON.parse(String(options?.body ?? "")));
+          return new Response(JSON.stringify(response.data), { status: response.status, headers: { "Content-Type": "application/json" } });
+        }),
+    } : null;
+    return await createNamingTaskV2(({ client, seed, strategy, referenceMemory, utteranceStyle, runDir: null, groundingShadow,
       ...(restore ? { restore } : {}),
       // Every write also keeps record:<recordId>, so a later trial never erases this one.
       onPersist: async (snapshot: StoredTrial) => {

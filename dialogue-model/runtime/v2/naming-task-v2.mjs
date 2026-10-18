@@ -48,12 +48,14 @@ export function parseAiNamesV2(text, slots) {
  *   judge?: import('../judgment/schema.mjs').DialogueJudge | null, now?: () => number, restore?: object | null, onPersist?: Function | null,
  *   decisionShadowClient?: {chooseAction(request: object): Promise<any>} | null,
  *   activeDecision?: {purpose: string, client: {chooseAction(request: object): Promise<any>}} | null,
- *   utteranceStyle?: string }} options
+ *   utteranceStyle?: string, groundingShadow?: import('./grounding-shadow.ts').GroundingShadowOptions | null }} options
+ *   groundingShadow is a researcher-only, default-off shadow; a restored trial keeps it only if it started with it.
  */
 export async function createNamingTaskV2({
   client, strategy, seed, referenceMemory = false, runDir = process.env.RESEARCH_RUN_DIR,
   createTrial = createTrialV2, scoreTrial = defaultScoreTrial, judge = null, now = () => Date.now(),
   restore = null, onPersist = null, decisionShadowClient = null, activeDecision = null, utteranceStyle = "default",
+  groundingShadow = null,
 }) {
   if (!STRATEGIES.includes(strategy)) throw new NamingTaskError("invalid_strategy");
   if (!Number.isSafeInteger(seed)) throw new NamingTaskError("invalid_seed");
@@ -61,6 +63,9 @@ export async function createNamingTaskV2({
   // A restored trial keeps the style it started with, whatever the deployment now says.
   const style = restore?.options?.utteranceStyle ?? utteranceStyle;
   if (!["default", "concise"].includes(style)) throw new NamingTaskError("invalid_options");
+  // Shadow records are private research data; they survive restore with the record.
+  const grounding = restore && restore.options?.groundingShadow !== true ? null : groundingShadow;
+  const groundingRecords = Array.isArray(restore?.groundingShadow) ? clone(restore.groundingShadow) : [];
   const directory = runDir ? await (await import("../naming-task.mjs")).outsideRepositoryDirectory(runDir) : null;
   const trial = createTrial({ seed });
   const scene = participantView(trial);
@@ -104,6 +109,7 @@ export async function createNamingTaskV2({
   const dialogue = createDialogueV2({ client: trackingClient, strategy, image: { mimeType: model.mimeType, base64: model.png.toString("base64") },
     anchors: model.anchors, judge, referenceMemory, decisionShadowClient: trackDecisions(decisionShadowClient, "decision_shadow"),
     activeDecision: activeDecision && { ...activeDecision, client: trackDecisions(activeDecision.client, "decision_active") }, utteranceStyle: style,
+    groundingShadow: grounding, onGroundingShadow: grounding ? (record) => { groundingRecords.push(record); } : null,
     onResearchUpdate: () => persist().catch(() => {}) });
   async function timedAiTurn(input) {
     const attemptIndex = dialogue.getAttempts().length;
@@ -161,7 +167,9 @@ export async function createNamingTaskV2({
     const privateState = queue.getPrivateState();
     const record = {
       recordId, version: VERSION, trialId: trial.trialId, seed, strategy, startedAt, updatedAt: new Date(now()).toISOString(),
-      options: { visualAid: false, referenceMemory, decisionShadow: Boolean(decisionShadowClient), activeDecision: activeDecision?.purpose ?? null, utteranceStyle: style },
+      options: { visualAid: false, referenceMemory, decisionShadow: Boolean(decisionShadowClient), activeDecision: activeDecision?.purpose ?? null, utteranceStyle: style,
+        // Present only when on, so default-off records keep their previous shape.
+        ...(grounding ? { groundingShadow: true } : {}) },
       status: result ? "completed" : closed ? "submitting" : "dialogue",
       // Origin is research metadata only; queue/model/participant events stay ordinary public speech.
       events: snapshot.events.map((event) => event.seq === 1 && event.speaker === "ai" && event.text === SCRIPTED_OPENING
@@ -169,6 +177,7 @@ export async function createNamingTaskV2({
       // Same role/content shape as v1 so offline metrics apply unchanged.
       publicHistory: snapshot.events.map((e) => ({ role: e.speaker === "human" ? "user" : "assistant", content: e.text })),
       judgments: privateState.judgments, attempts: dialogue.getAttempts(), ownLedger: privateState.ledger,
+      ...(grounding || groundingRecords.length ? { groundingShadow: clone(groundingRecords) } : {}),
       ...(referenceMemory ? { referenceGraph: dialogue.snapshotGraph(privateState) } : {}),
       humanSubmission, aiSubmission, closed, finalError,
       queueState: queue.getDurableState(), scoring: result ? { key: trial.key, result } : null, requests, turnTimings,
@@ -254,7 +263,8 @@ export async function createNamingTaskV2({
       return aiSubmitting;
     },
     // Researcher-only; never returned over the participant API.
-    researcherView() { return { key: clone(trial.key), privateState: queue.getPrivateState(), attempts: dialogue.getAttempts() }; },
+    researcherView() { return { key: clone(trial.key), privateState: queue.getPrivateState(), attempts: dialogue.getAttempts(),
+      groundingShadow: clone(groundingRecords) }; },
   };
 
   async function submitAIOnce() {

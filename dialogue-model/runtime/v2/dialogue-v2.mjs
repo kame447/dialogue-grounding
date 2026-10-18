@@ -11,6 +11,7 @@ import { stageMemory, prepareMemory } from "../judgment/memory.mjs";
 import { buildDecisionEvidence } from "./decision-evidence.mjs";
 import { resolveActiveJudgment } from "./active-judge.mjs";
 import { findGuardViolations, rewriteReasons, fallbackUtterance } from "./generation-guard.ts";
+import { startGroundingShadow, validateGroundingShadowOptions } from "./grounding-shadow.ts";
 
 // Identical across strategies. Holistic first; analysis only when the judge asks for it.
 export const GENERATOR_INSTRUCTIONS_V2 = [
@@ -89,10 +90,14 @@ function abortIf(signal) {
  * @param {{ client, strategy, image: {mimeType, base64}, anchors: {id, bbox, centroid}[], judge?: import('../judgment/schema.mjs').DialogueJudge | null,
  *   referenceMemory?: boolean, decisionShadowClient?: {chooseAction(request: object): Promise<any>} | null,
  *   onResearchUpdate?: (() => void) | null, activeDecision?: {purpose: string, client: {chooseAction(request: object): Promise<any>}} | null,
- *   utteranceStyle?: string }} options utteranceStyle is validated at runtime against UTTERANCE_STYLES.
+ *   utteranceStyle?: string, groundingShadow?: import('./grounding-shadow.ts').GroundingShadowOptions | null,
+ *   onGroundingShadow?: ((record: import('./grounding-shadow.ts').GroundingShadowRecord) => void) | null }} options
+ *   utteranceStyle is validated at runtime against UTTERANCE_STYLES. groundingShadow (default off) only produces
+ *   private records through onGroundingShadow; it never changes the act, the utterance or the private state.
  */
 export function createDialogueV2({ client, strategy, image, anchors, judge = null, referenceMemory = false,
-  decisionShadowClient = null, onResearchUpdate = null, activeDecision = null, utteranceStyle = "default" }) {
+  decisionShadowClient = null, onResearchUpdate = null, activeDecision = null, utteranceStyle = "default",
+  groundingShadow = null, onGroundingShadow = null }) {
   if (!client || typeof client.complete !== "function") throw new Error("A chat client is required");
   if (!STRATEGIES.includes(strategy)) throw new Error("Unsupported dialogue strategy");
   if (typeof referenceMemory !== "boolean") throw new Error("Invalid memory option");
@@ -105,6 +110,8 @@ export function createDialogueV2({ client, strategy, image, anchors, judge = nul
   if (activeDecision !== null && (!activeDecision || !["decision_jev", "decision_luna"].includes(activeDecision.purpose) ||
       typeof activeDecision.client?.chooseAction !== "function")) throw new Error("Invalid active decision client");
   if (activeDecision && decisionShadowClient) throw new Error("Active and shadow decisions are mutually exclusive");
+  const grounding = validateGroundingShadowOptions(groundingShadow);
+  if (grounding && typeof onGroundingShadow !== "function") throw new Error("Invalid grounding shadow callback");
   const ownImage = { mimeType: image.mimeType, base64: image.base64 };
   ownImageMessage(ownImage);
   const slots = anchors.map((anchor) => anchor.id);
@@ -291,6 +298,14 @@ export function createDialogueV2({ client, strategy, image, anchors, judge = nul
     const committedTrace = { ...clone(trace), status: "committed" };
     // Committed judgments keep a pending marker; settled shadow data belongs only to attempts.
     if (decisionShadowClient) committedTrace.decisionShadow = { status: "pending" };
+    // Shadow grounding evidence for the act just staged, judged on the public turns before this
+    // utterance. It starts only after generation, is never awaited and settles into a private record.
+    if (grounding) {
+      startGroundingShadow(grounding, { events, judgment, ownLedger: state.ledger, turnIndex: latest.seq, lastEventId: lastEventId ?? null,
+        priorAiActs: state.judgments.flatMap(({ turnIndex, judgment: act }) => [act, ...(act.followUp ? [act.followUp] : [])]
+          .map(({ action, targetSlot, candidateName }) => ({ turn: turnIndex, action, targetSlot, candidateName }))) },
+      (record) => { try { onGroundingShadow(record); } catch { /* research sink only */ } notifyResearchUpdate(); });
+    }
     // The queue installs this only if the snapshot is still current.
     return { text: result.text, privateState: { ledger: nextLedger, judgments: [...state.judgments, committedTrace], graph: nextGraph } };
   }

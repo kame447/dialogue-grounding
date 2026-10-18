@@ -112,6 +112,11 @@ export function renderDetail(record: unknown, summary: AdminSummary, latency: La
       a.errorElapsedMs === undefined ? "" : ms(a.errorElapsedMs) + " ms"].filter((part) => part !== "" && part !== undefined).join(" / ") : "",
     a.generationRetried === true ? "あり" : "", a.validation ?? null, a.memory ?? null,
     a.generationGuard ?? null, a.activeJudge ?? null, a.decisionShadow ?? null, a.utteranceStyle ?? null]);
+  // Shadow-only, uncalibrated relative scores: never shown as a probability of being correct.
+  const grounding = list(r.groundingShadow).filter(isPlain).map((g) => [g.turnIndex, g.targetSlot ?? "", g.status,
+    isPlain(g.identification) ? g.identification.level : "", isPlain(g.nameAgreement) ? g.nameAgreement.level : "",
+    g.error ?? "", g.latencyMs === null || g.latencyMs === undefined ? "" : ms(g.latencyMs),
+    isPlain(g.usage) && typeof g.usage.costUsd === "number" ? g.usage.costUsd : "", list(g.inputGaps).join(", ")]);
   const requests = list(r.requests).filter(isPlain).map((q, i) => [i + 1, q.kind, q.status, q.httpStatus ?? "", q.errorCode ?? "",
     ms(q.latencyMs), q.retryCount ?? "", q.model ?? ""]);
   return page(`記録 ${summary.recordId.slice(0, 8)}`, `<p><a href="/admin">← 一覧</a></p>
@@ -125,6 +130,7 @@ ${latencySection(latency)}
 <h2>公開発話</h2>${table(["seq", "話者", "時刻", "由来", "本文"], events)}
 <h2>確定した判断（ターンごと）</h2>${table(["ターン", "行為", "対象", "名前", "弁別特徴", "followUp", "active 判断"], judgments)}
 <h2>実行の記録（中断・失敗を含む）</h2>${table(["ターン", "状態", "エラー（コード / 段階 / HTTP / 経過）", "生成の再試行", "検証", "参照メモリ", "生成ガード", "active 判断", "影の判断", "発話様式"], attempts)}
+${grounding.length ? `<h2>根拠の影判定（Jev 2軸・研究用・未校正）</h2>${table(["ターン", "対象", "結果", "対象同定の根拠", "名称合意の根拠", "エラー", "ms", "費用 USD", "入力の不足"], grounding)}` : ""}
 <h2>外部要求</h2>${table(["#", "段階", "結果", "HTTP", "コード", "ms", "再送", "モデル"], requests)}
 <h2>提出と採点</h2>${table(["項目", "値"], [["人間の提出", r.humanSubmission ?? null], ["AIの提出", r.aiSubmission ?? null],
   ["診断", r.diagnostics ?? null], ["採点", r.scoring ?? null]])}
