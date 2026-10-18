@@ -24,6 +24,8 @@ let activitySince = 0;
 let chatStalled = false;
 let chatDisconnected = false;
 let checkingChat = false;
+let retryingAI = false;
+let submissionWarning = "";
 // Presentation/network safeguards only; these never close a research trial or
 // cancel backend generation. A stalled state is refreshed, never auto-retried.
 const CHAT_STALL_MS = 60000;
@@ -99,7 +101,7 @@ function resetLocal() {
   answers = new Map(); selected = null; selectedTarget = null;
   pending = []; sceneSignature = ""; followHistory = true;
   clearTimeout(typingTimer); activitySignature = ""; activitySince = 0;
-  chatStalled = false; chatDisconnected = false; checkingChat = false;
+  chatStalled = false; chatDisconnected = false; checkingChat = false; submissionWarning = "";
   $("utterance").value = "";
   $("history").replaceChildren();
   $("history").historySignature = undefined;
@@ -107,6 +109,9 @@ function resetLocal() {
   $("confirm-scene").replaceChildren();
   $("figure-preview").replaceChildren();
   $("result-body").replaceChildren();
+  $("confirm-list").replaceChildren();
+  $("result-list").replaceChildren();
+  $("result-list").summarySignature = undefined;
   $("name-list").replaceChildren();
   $("name-list").namesSignature = undefined;
   $("figure-name").value = "";
@@ -214,18 +219,37 @@ function renderNameList() {
     if (selectedTarget?.nameChoiceShapeId === shape.id) selectedTarget = button;
     button.setAttribute("aria-haspopup", "dialog");
     button.setAttribute("data-empty", String(!answers.has(shape.id)));
-    const thumbnail = svgNode("svg", { "aria-hidden": "true", focusable: "false" });
-    let box;
-    try { box = path.getBBox(); } catch { /* Use participant frame without layout. */ }
-    thumbnail.setAttribute("viewBox", box?.width > 0 ? `${box.x - 12} ${box.y - 12} ${box.width + 24} ${box.height + 24}` : `0 0 ${scene().width} ${scene().height}`);
-    thumbnail.append(svgNode("path", { d: shape.path, class: "preview-shape" }));
     const label = document.createElement("span");
     label.textContent = answers.has(shape.id) ? answers.get(shape.id) ?? "未合意・わからない" : "名前を入力";
-    button.append(thumbnail, label);
+    button.append(thumbnail(path), label);
     button.addEventListener("click", () => { openFigure(shape, path); selectedTarget = button; });
     $("name-list").append(button);
   }
 }
+function thumbnail(path) {
+  const node = svgNode("svg", { "aria-hidden": "true", focusable: "false" });
+  let box;
+  try { box = path.getBBox(); } catch { /* Use participant frame without layout. */ }
+  node.setAttribute("viewBox", box?.width > 0 ? `${box.x - 12} ${box.y - 12} ${box.width + 24} ${box.height + 24}` : `0 0 ${scene().width} ${scene().height}`);
+  node.append(svgNode("path", { d: path.sceneShape.path, class: "preview-shape" }));
+  return node;
+}
+// Readable text beside each thumbnail: scene labels shrink to a few pixels on
+// a phone. The text repeats only what the scene labels already show.
+function renderSummary(target, text) {
+  target.replaceChildren();
+  for (const path of $("board").querySelectorAll("path")) {
+    if (!path.sceneShape) continue;
+    const item = document.createElement("div"); item.className = "summary-item";
+    const label = document.createElement("span"); label.textContent = text(path.sceneShape);
+    item.append(thumbnail(path), label);
+    target.append(item);
+  }
+}
+const resultSummary = (shape) => {
+  const row = rowFor(shape.id);
+  return row ? `あなた：${row.human.rawName || "未合意"}\nAI：${row.ai?.rawName || "未合意"} · ${row.matched ? "一致" : "不一致"}` : "";
+};
 function renderStage(focus = false) {
   const stage = participantStage();
   $("conversation-stage").hidden = stage !== "chat";
@@ -257,9 +281,10 @@ function reconciles(item, event) {
 function renderChatActivity() {
   const log = $("history"), scrollTop = log.scrollTop;
   const failed = pending.some((item) => item.status === "failed");
-  const aiError = current?.aiStatus === "error";
-  const waiting = Boolean(current && !submitted() && (aiThinking() || pending.some((item) => item.status !== "failed")));
-  const signature = JSON.stringify([trialIdentity(current), events().at(-1)?.id, current?.aiStatus]);
+  // A retry in flight is shown as AI activity, not as the error it replaces.
+  const aiError = current?.aiStatus === "error" && !retryingAI;
+  const waiting = Boolean(current && !submitted() && (aiThinking() || retryingAI || pending.some((item) => item.status !== "failed")));
+  const signature = JSON.stringify([trialIdentity(current), events().at(-1)?.id, current?.aiStatus, retryingAI]);
   clearTimeout(typingTimer);
   if (!waiting) { activitySignature = ""; chatStalled = false; }
   else {
@@ -340,13 +365,20 @@ function render(state) {
   if (trial.humanSubmission) for (const [id, name] of Object.entries(trial.humanSubmission)) answers.set(id, name || null);
   $("scene-status").textContent = data?.shapes?.length ? "" : "図形を準備しています。表示されるまでお待ちください。";
   updateSceneLabels($("board")); updateNameCount(); renderNameList(); renderHistory();
-  $("submission-status").textContent = trial.status === "submission_error" || trial.finalError === "invalid_ai_submission" ? errors.invalid_ai_submission :
+  // Polling must not erase the unanswered-figure warning before it is resolved.
+  if (submitted() || data?.shapes?.every((shape) => answers.has(shape.id))) submissionWarning = "";
+  $("submission-status").textContent = submissionWarning || (trial.status === "submission_error" || trial.finalError === "invalid_ai_submission" ? errors.invalid_ai_submission :
     trial.status === "scoring_error" ? errors.scoring_error : trial.result ? "双方の提出が完了しました。" :
-      submitted() ? "あなたの回答を確定しました。AIの提出を待っています。" : "メモはこのブラウザのタブに保存されます。相手には届きません。";
+      submitted() ? "あなたの回答を確定しました。AIの提出を待っています。" : "メモはこのブラウザのタブに保存されます。相手には届きません。");
   const previousStage = $("results").hidden === false ? "results" : null;
   renderStage();
   if (resultsReady() && previousStage !== "results") $("results-title").focus({ preventScroll: true });
   $("result-body").textContent = resultsReady() ? "図形を選択すると、拡大して確認できます。" : "";
+  const summarySignature = resultsReady() ? JSON.stringify([sceneSignature, current.result.figures]) : "";
+  if ($("result-list").summarySignature !== summarySignature) {
+    $("result-list").summarySignature = summarySignature;
+    if (resultsReady()) renderSummary($("result-list"), resultSummary); else $("result-list").replaceChildren();
+  }
   $("new-trial").hidden = !trial.result && !["completed", "submission_error"].includes(trial.status);
   retrySubmission.hidden = !canRetrySubmission();
   retrySubmission.textContent = trial.status === "scoring_error" ? "採点を再試行" : "AIの提出を再試行";
@@ -475,7 +507,8 @@ $("chat").addEventListener("submit", (event) => {
 $("retry-chat").addEventListener("click", async () => {
   if (working || checkingChat || sending || !chatOpen()) return;
   if (current?.aiStatus === "error" && !serverBusy) {
-    await operate(() => api("/api/retry", {}));
+    retryingAI = true; renderChatActivity();
+    try { await operate(() => api("/api/retry", {})); } finally { retryingAI = false; renderChatActivity(); }
   } else {
     checkingChat = true; renderChatActivity();
     try { await refreshState(); } finally { checkingChat = false; renderChatActivity(); }
@@ -496,9 +529,11 @@ $("submission").addEventListener("submit", (event) => {
   event.preventDefault();
   if (working || sending || aiThinking() || !dialogueOpen()) return;
   if (!scene()?.shapes?.length || scene().shapes.some((shape) => !answers.has(shape.id))) {
-    $("submission-status").textContent = "未回答の図形があります。図形を選んで名前か「未合意・わからない」を入力してください。"; return;
+    submissionWarning = "未回答の図形があります。図形を選んで名前か「未合意・わからない」を入力してください。";
+    $("submission-status").textContent = submissionWarning; return;
   }
   addScene($("confirm-scene"), false);
+  renderSummary($("confirm-list"), (shape) => answers.get(shape.id) ?? "未合意・わからない");
   $("confirm-dialog").showModal(); $("confirm-cancel").focus({ preventScroll: true });
 });
 $("confirm-cancel").addEventListener("click", () => closeDialog("confirm-dialog"));

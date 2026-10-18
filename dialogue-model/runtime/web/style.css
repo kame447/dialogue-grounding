@@ -85,6 +85,13 @@ button:disabled{opacity:.45;cursor:default}
 .submission-panel form button{width:100%;font-size:.85rem}
 #submission-status{color:var(--muted);font-size:.78rem;margin:12px 0 0}
 #result-body{font-size:.85rem;overflow-wrap:anywhere}
+.summary-list{display:grid;gap:8px;margin:12px 0 0}
+.summary-list:empty{display:none}
+.summary-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:7px;font-size:.8rem;line-height:1.5;min-width:0}
+.summary-item svg{width:40px;height:36px;flex-shrink:0}
+.summary-item span{white-space:pre-line;overflow-wrap:anywhere;min-width:0}
+#result-list{margin-bottom:16px}
+@media(min-width:761px){#confirm-list{display:none}}
 .questionnaire-note{border-top:1px solid var(--line);padding-top:16px;margin-top:auto}
 #new-trial{font-size:.75rem;margin:0 20px 20px;flex-shrink:0}
 dialog{border:1px solid var(--line);border-radius:12px;padding:26px;max-width:min(680px,calc(100vw - 28px));width:100%;max-height:92dvh;overflow:auto;color:inherit;box-shadow:0 24px 80px #24252224}
@@ -103,5 +110,29 @@ dialog::backdrop{background:#24252260}
 [hidden]{display:none!important}
 :focus-visible{outline:3px solid #858f77;outline-offset:3px}
 @media(max-width:1000px){main{padding:0 20px 20px}.workspace{grid-template-columns:minmax(0,2fr) minmax(300px,1fr);gap:14px}.topbar{gap:20px}.progress li+li:before{width:16px;margin:0 10px 0 4px}}
-@media(max-width:760px){main{padding:0 12px 20px}.topbar{min-height:110px;align-items:flex-start;justify-content:center;flex-direction:column;gap:14px;padding:16px 0;margin-bottom:14px}h1{font-size:.94rem}.topbar nav{width:100%}.progress{justify-content:space-between;font-size:.72rem}.progress li{gap:5px}.progress li+li:before{width:10px;margin:0 5px 0 0}.step-number{width:21px;height:21px;font-size:.65rem}.progress small{font-size:.57rem}.workspace{height:auto;min-height:0;grid-template-columns:1fr;gap:12px}.board{height:38dvh;min-height:260px;max-height:400px;padding:16px 16px 12px}.board .panel-head h2{font-size:.88rem}.scene-area{min-height:0}.privacy-note{font-size:.65rem;line-height:1.5}.dialogue{height:76dvh;min-height:460px;max-height:820px}.conversation-head{padding:16px}.shape-name{font-size:25px}dialog{padding:20px}.modal-actions button{padding:10px 12px}.name-list{grid-template-columns:1fr 1fr;gap:8px}.name-choice{padding:8px;gap:8px;flex-direction:column;align-items:flex-start}.name-choice svg{width:42px;height:38px}#setup{margin:24px auto}.panel{border-radius:8px}}
+@media(max-width:760px){main{padding:0 12px 20px}.topbar{min-height:110px;align-items:flex-start;justify-content:center;flex-direction:column;gap:14px;padding:16px 0;margin-bottom:14px}h1{font-size:.94rem}.topbar nav{width:100%}.progress{justify-content:space-between;font-size:.72rem}.progress li{gap:5px}.progress li+li:before{width:10px;margin:0 5px 0 0}.step-number{width:21px;height:21px;font-size:.65rem}.progress small{font-size:.57rem}.workspace{height:auto;min-height:0;grid-template-columns:1fr;gap:12px}.board{height:38dvh;min-height:260px;max-height:400px;padding:16px 16px 12px}.board .panel-head h2{font-size:.88rem}.scene-area{min-height:0}.privacy-note{font-size:.65rem;line-height:1.5}.dialogue{height:76dvh;min-height:460px;max-height:820px}.conversation-head{padding:16px}.shape-name{font-size:25px}dialog{padding:20px}.modal-actions button{padding:10px 12px}.name-list{grid-template-columns:1fr 1fr;gap:8px}.name-choice{padding:8px;gap:8px;flex-direction:column;align-items:flex-start}.name-choice svg{width:42px;height:38px}#confirm-list{grid-template-columns:1fr 1fr}#confirm-scene{max-height:30dvh}#setup{margin:24px auto}.panel{border-radius:8px}}
+/* Phones, conversation stage only: the page is one viewport tall, so the board
+   stays visible above an independently scrolling log and the composer. The
+   figures keep the same scene and viewBox; only the layout box changes. */
+@media(max-width:760px){
+main:has(#trial:not([hidden]) #conversation-stage:not([hidden])){height:100dvh;display:flex;flex-direction:column;padding-bottom:10px}
+main:has(#trial:not([hidden]) #conversation-stage:not([hidden])) .topbar{min-height:0;padding:10px 0;gap:6px;margin-bottom:10px;flex-shrink:0}
+main:has(#trial:not([hidden]) #conversation-stage:not([hidden])) #trial{flex:1;min-height:0}
+main:has(#trial:not([hidden]) #conversation-stage:not([hidden])) .workspace{height:100%;display:flex;flex-direction:column;gap:10px}
+main:has(#trial:not([hidden]) #conversation-stage:not([hidden])) .board{flex:0 0 auto;height:35dvh;min-height:0;max-height:none;padding:10px 12px 8px}
+main:has(#trial:not([hidden]) #conversation-stage:not([hidden])) .privacy-note{margin-top:4px}
+main:has(#trial:not([hidden]) #conversation-stage:not([hidden])) .dialogue{flex:1;height:auto;min-height:0;max-height:none}
+main:has(#trial:not([hidden]) #conversation-stage:not([hidden])) .conversation-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 12px}
+main:has(#trial:not([hidden]) #conversation-stage:not([hidden])) #finish-conversation{width:auto;margin-top:0;font-size:.72rem;padding:6px 10px}
+main:has(#trial:not([hidden]) #conversation-stage:not([hidden])) #history{padding:12px}
+main:has(#trial:not([hidden]) #conversation-stage:not([hidden])) #chat{display:flex;align-items:flex-end;gap:8px;padding:10px 12px}
+main:has(#trial:not([hidden]) #conversation-stage:not([hidden])) #chat textarea{flex:1;min-height:56px;max-height:96px}
+main:has(#trial:not([hidden]) #conversation-stage:not([hidden])) .chat-actions{margin:0}
+main:has(#trial:not([hidden]) #conversation-stage:not([hidden])) .chat-actions .muted{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+}
+@media(max-width:760px) and (max-height:500px){
+main:has(#trial:not([hidden]) #conversation-stage:not([hidden])) .workspace{flex-direction:row}
+main:has(#trial:not([hidden]) #conversation-stage:not([hidden])) .board{flex:1 1 0;height:auto}
+main:has(#trial:not([hidden]) #conversation-stage:not([hidden])) .dialogue{flex:1 1 0}
+}
 @media(prefers-reduced-motion:reduce){.typing-indicator span{animation:none}#history{scroll-behavior:auto}.silhouette[role=button]{transition:none}}
