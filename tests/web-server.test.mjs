@@ -186,7 +186,7 @@ async function uiHarness({ unstarted = false } = {}) {
 }
 
 test("Web UI keeps a bounded transcript and responsive image beside a stable composer", async () => {
-  const css = await readFile(new URL("../dialogue-model/runtime/web/style.css", import.meta.url), "utf8");
+  const css = await readFile(new URL("../dialogue-model/runtime/web/v1/style.css", import.meta.url), "utf8");
   const html = await readFile(new URL("../dialogue-model/runtime/web/v1/index.html", import.meta.url), "utf8");
   assert.match(css, /\.workspace\s*\{[^}]*grid-template-columns:1\.3fr 1fr/u);
   assert.match(css, /\.workspace \.panel\s*\{[^}]*height:clamp\([^}]*display:flex/u);
