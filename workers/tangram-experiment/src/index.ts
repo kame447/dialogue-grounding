@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import { createChatClient } from "../../../dialogue-model/runtime/client.mjs";
 import { createNamingTaskV2 } from "../../../dialogue-model/runtime/v2/naming-task-v2.mjs";
 import { NamingTaskError } from "../../../dialogue-model/runtime/naming-error.mjs";
+import { isExcessiveTraffic, type SoftLimitBindings } from "./soft-limits";
 
 type Strategy = "repair-first" | "bypass-enabled";
 type ApiBody = Record<string, unknown>;
@@ -25,10 +26,9 @@ type NamingTask = {
   submitAI(): Promise<unknown>;
 };
 
-export interface Env {
+export interface Env extends SoftLimitBindings {
   NAMING_SESSIONS: DurableObjectNamespace<TangramSession>;
   ASSETS: Fetcher;
-  EXPERIMENT_ACCESS_CODE: string;
   AI_PROXY: { chat(payload: unknown): Promise<{ status: number; data: unknown }> };
 }
 
@@ -41,21 +41,6 @@ const errors = new Set([
 ]);
 
 const json = (status: number, body: unknown): Response => Response.json(body, { status });
-const authChallenge = () => new Response("Access code required", {
-  status: 401, headers: { "WWW-Authenticate": 'Basic realm="Tangram Research Demo", charset="UTF-8"', "Cache-Control": "no-store" },
-});
-
-function sameString(a: string, b: string): boolean {
-  let difference = a.length ^ b.length;
-  for (let i = 0; i < Math.max(a.length, b.length); i++) difference |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
-  return difference === 0;
-}
-
-function isAuthorized(request: Request, env: Env): boolean {
-  if (!env.EXPERIMENT_ACCESS_CODE) return false;
-  const authorization = request.headers.get("Authorization") ?? "";
-  return sameString(authorization, `Basic ${btoa(`research:${env.EXPERIMENT_ACCESS_CODE}`)}`);
-}
 
 function sessionId(cookie: string | null): string | null {
   return cookie?.match(/(?:^|;\s*)tangram_session=([a-f0-9]{64})(?:;|$)/)?.[1] ?? null;
@@ -166,21 +151,37 @@ export class TangramSession extends DurableObject<Env> {
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    if (!isAuthorized(request, env)) return authChallenge();
     const url = new URL(request.url);
     if (request.method === "POST" && request.headers.get("Origin") && request.headers.get("Origin") !== url.origin) {
       return json(403, { error: "request_forbidden" });
     }
-    const headers = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
+    const headers = { "Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow, noarchive",
+      "X-Content-Type-Options": "nosniff",
       "Referrer-Policy": "no-referrer", "Content-Security-Policy": "default-src 'self'; img-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'" };
+    const withHeaders = (result: Response, setCookie?: string): Response => {
+      const response = new Response(result.body, result);
+      for (const [key, value] of Object.entries(headers)) response.headers.set(key, value);
+      if (setCookie) response.headers.set("Set-Cookie", setCookie);
+      return response;
+    };
+    if (url.pathname === "/robots.txt") {
+      return withHeaders(new Response("User-agent: *\nDisallow: /\n", {
+        headers: { "Content-Type": "text/plain; charset=utf-8" },
+      }));
+    }
     let result: Response;
     let setCookie: string | undefined;
     if (url.pathname.startsWith("/api/")) {
       let cookie = sessionId(request.headers.get("Cookie"));
-      if (!cookie && request.method !== "GET") return json(401, { error: "session_required" });
+      if (!cookie && request.method !== "GET") return withHeaders(json(401, { error: "session_required" }));
       if (!cookie) {
         cookie = newSessionId();
         setCookie = `${SESSION_COOKIE}=${cookie}; Path=/; Secure; HttpOnly; SameSite=Strict`;
+      }
+      if (request.method === "POST" && await isExcessiveTraffic(request, env, cookie)) {
+        const limited = json(429, { error: "rate_limited" });
+        limited.headers.set("Retry-After", "60");
+        return withHeaders(limited);
       }
       const object = env.NAMING_SESSIONS.get(env.NAMING_SESSIONS.idFromName(cookie));
       const forwardHeaders = new Headers(request.headers);
@@ -196,9 +197,6 @@ export default {
         setCookie = `${SESSION_COOKIE}=${newSessionId()}; Path=/; Secure; HttpOnly; SameSite=Strict`;
       }
     }
-    const response = new Response(result.body, result);
-    for (const [key, value] of Object.entries(headers)) response.headers.set(key, value);
-    if (setCookie) response.headers.set("Set-Cookie", setCookie);
-    return response;
+    return withHeaders(result, setCookie);
   },
 } satisfies ExportedHandler<Env>;

@@ -12,7 +12,7 @@
 
 AIは同一Cloudflareアカウント内のサービスバインディング `AI_PROXY` を通して呼び出します。既存の `dialogue-grounding-ai-proxy` に `InternalResearchProxy` という内部エントリポイントを追加し、モデル選択、接続認証、上流APIキーは従来のAI Worker内で保持します。
 
-アクセスにはHTTP Basic認証を使います。ユーザー名 `research`、パスワードは `EXPERIMENT_ACCESS_CODE`（Cloudflare Worker Secret）です。パスワードをソースに書き込まないでください。
+公開ページは認証なしで開けます。実験参加者の操作を妨げない範囲でBot由来の大量アクセスのみ抑制します。APIキーは公開されず、Cloudflare内部の既存AI Workerだけが保持します。
 
 ## デプロイ
 
@@ -26,7 +26,17 @@ npm run deploy:research-proxy  # 内部エントリポイント変更時のみ
 npm run deploy:tangram
 ```
 
-初回は `npx wrangler secret put EXPERIMENT_ACCESS_CODE --config workers/tangram-experiment/wrangler.jsonc` を用いてアクセス用パスワードを登録します。AIプロキシのSecretをこの公開Workerに複製する必要はありません。旧版v1はローカルNodeサーバーの `/v1/` で利用できますが、公開URLではv2のみを提供します。
+公開Workerへのアクセスコード登録は不要です。AIプロキシのSecretをこの公開Workerに複製する必要もありません。旧版v1はローカルNodeサーバーの `/v1/` で利用できますが、公開URLではv2のみを提供します。
+
+## 緩いBot対策
+
+公開ページにはログイン・CAPTCHA・会話時間制限・総発話回数制限を設けません。CloudflareのRate Limiting bindingを使用し、短時間に異常な回数の操作が起こった場合だけHTTP 429を返します。
+
+- 試行開始：同じIPから40回／60秒
+- AIを利用する操作（発話送信・再試行・名前提出など）：同じブラウザセッションで30回／60秒、同じIPで120回／60秒、Cloudflare拠点全体で300回／60秒
+- 画面表示、画像やスクリプト取得、会話履歴更新（GET `/api/state`）：制限なし
+
+同じネットワークを共有する被験者にも影響しにくいよう余裕を設けています。429の際は `Retry-After: 60` を返します。検索エンジンに対しては `robots.txt` と `X-Robots-Tag: noindex` を返します。これは検索対策であり、アクセス遮断ではありません。レート制限はCloudflare拠点ごとの概算カウンターであり、世界的な厳密な上限や支出上限にはなりません。
 
 ## 制限
 
