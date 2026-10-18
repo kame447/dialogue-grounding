@@ -10,7 +10,7 @@ import { createChatClient } from "../client.mjs";
 import { createNamingTask, NamingTaskError, outsideRepositoryDirectory } from "../naming-task.mjs";
 import { createNamingTaskV2 } from "../v2/naming-task-v2.mjs";
 import { createDecisionComparisonClient } from "../decisions-client.mjs";
-import { applyQuestionnaire, participantReview, QUESTIONNAIRE_FORM, recordListEntry, sortRecordList } from "../v2/participant-records.ts";
+import { applyQuestionnaire, lockResult, participantReview, QUESTIONNAIRE_FORM, recordListEntry, sortRecordList } from "../v2/participant-records.ts";
 
 const PUBLIC = dirname(fileURLToPath(import.meta.url));
 // "/" serves the v2 participant UI; "/v1/" keeps the original v1 (2x3 grid) UI unchanged.
@@ -122,7 +122,9 @@ export function createNamingServer({ client, createTrial, scoreTrial, runDir = p
         const value = task ? { ...task.getState() } : null;
         if (value) { delete value.visualAid; delete value.referenceMemory; }
         if (value && hideStrategy) delete value.strategy;
-        return { trial: value, hideStrategy, busy: session.starting || Boolean(value?.busy) };
+        // v2: the result stays withheld until this trial's questionnaire is submitted (v1 is unchanged).
+        const trial = value && task.version === 2 ? lockResult(value, session.questionnaires.get(value.sessionId) ?? null) : value;
+        return { trial, hideStrategy, busy: session.starting || Boolean(value?.busy) };
       };
       if (req.method === "GET" && pathname === "/api/state") return json(200, state());
       // The participant's own v2 trials in this session only; any other id is the same not_found.
@@ -136,7 +138,8 @@ export function createNamingServer({ client, createTrial, scoreTrial, runDir = p
         const [, recordId, view] = recordPath;
         const record = RECORD_ID.test(recordId) ? session.records.get(recordId) : undefined;
         if (!record) return json(404, { error: "not_found" });
-        if (view === "review") return req.method === "GET" ? json(200, participantReview(record)) : json(404, { error: "not_found" });
+        if (view === "review") return req.method === "GET"
+          ? json(200, lockResult(participantReview(record), session.questionnaires.get(recordId) ?? null)) : json(404, { error: "not_found" });
         if (req.method === "GET") return json(200, { recordId, form: QUESTIONNAIRE_FORM, questionnaire: session.questionnaires.get(recordId) ?? null });
         if (req.method !== "POST") return json(404, { error: "not_found" });
         const body = await readJSON(req);

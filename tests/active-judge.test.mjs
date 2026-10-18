@@ -210,7 +210,11 @@ test("mock active v2 HTTP session reaches submissions/scoring without exposing m
   assert.doesNotMatch(JSON.stringify(state), /activeDecision|activeJudge|decision_jev|PRIVATE-|rejectedCandidates/);
   const names = Object.fromEntries(state.trial.scene.shapes.map((shape, index) => [shape.id, "合成名" + index]));
   const submitted = await web.request("/api/names", { names, confirm: true }); assert.equal(submitted.status, 200);
-  state = await submitted.json(); assert.equal(state.trial.status, "completed"); assert.equal(state.trial.result.total, 6);
+  state = await submitted.json(); assert.equal(state.trial.status, "completed");
+  // The result stays withheld until the questionnaire is submitted.
+  assert.equal(state.trial.result, undefined); assert.equal(state.trial.resultLocked, true);
+  assert.equal((await web.request(`/api/records/${state.trial.sessionId}/questionnaire`, { answers: { mental_effort: 4, task_difficulty: 4, smoothness: 4, bothersome: 4 }, submit: true })).status, 200);
+  state = await (await web.request("/api/state")).json(); assert.equal(state.trial.resultLocked, false); assert.equal(state.trial.result.total, 6);
   const [filename] = (await readdir(directory)).filter((name) => name.endsWith(".json"));
   const record = JSON.parse(await readFile(join(directory, filename), "utf8"));
   assert.equal(record.options.activeDecision, "decision_jev"); assert.equal(record.judgments[0].activeJudge.finalAction, "defer");

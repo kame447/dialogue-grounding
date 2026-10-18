@@ -12,7 +12,7 @@ import { summarizeLatency } from "./admin/latency.ts";
 import { ACTIVE_KEY, archiveSnapshot, backfillActive, deleteArchived, expireRecords, ledgerIds, nextExpiry, readArchived,
   readQuestionnaire, retentionDays, writeQuestionnaire } from "./admin/archive.ts";
 import { RECORD_ID } from "./admin/summary.ts";
-import { applyQuestionnaire, participantReview, QUESTIONNAIRE_FORM, recordListEntry, sortRecordList,
+import { applyQuestionnaire, lockResult, participantReview, QUESTIONNAIRE_FORM, recordListEntry, sortRecordList,
   type Questionnaire } from "../../../dialogue-model/runtime/v2/participant-records.ts";
 
 export { AdminIndex };
@@ -246,7 +246,7 @@ export class TangramSession extends DurableObject<Env> {
     if (!record) throw new NamingTaskError("not_found");
     if (view === "review") {
       if (request.method !== "GET") throw new NamingTaskError("not_found");
-      return json(200, participantReview(record));
+      return json(200, lockResult(participantReview(record), await readQuestionnaire(this.ctx.storage, recordId)));
     }
     if (request.method === "GET") {
       return json(200, { recordId, form: QUESTIONNAIRE_FORM, questionnaire: await readQuestionnaire(this.ctx.storage, recordId) });
@@ -267,16 +267,19 @@ export class TangramSession extends DurableObject<Env> {
     return json(200, { recordId, form: QUESTIONNAIRE_FORM, questionnaire });
   }
 
-  private state(): unknown {
-    const trial = this.trial?.getState() ?? null;
-    return { trial, hideStrategy: true, busy: Boolean(trial?.busy) };
+  /** Participant state; a completed trial's result stays withheld until its questionnaire is submitted. */
+  private async state(): Promise<unknown> {
+    const live = this.trial?.getState() ?? null;
+    const trial = live && typeof live.sessionId === "string"
+      ? lockResult(live, await readQuestionnaire(this.ctx.storage, live.sessionId)) : live;
+    return { trial, hideStrategy: true, busy: Boolean(live?.busy) };
   }
 
   async fetch(request: Request): Promise<Response> {
     try {
       await this.initialize();
       const pathname = new URL(request.url).pathname;
-      if (request.method === "GET" && pathname === "/api/state") return json(200, this.state());
+      if (request.method === "GET" && pathname === "/api/state") return json(200, await this.state());
       if (request.method === "GET" && pathname === "/api/records") return json(200, { records: await this.ownRecords() });
       const recordPath = pathname.match(/^\/api\/records\/([^/]+)\/(review|questionnaire)$/);
       if (recordPath) return await this.recordRoute(request, recordPath[1], recordPath[2]);
@@ -295,7 +298,7 @@ export class TangramSession extends DurableObject<Env> {
         const previous = this.trial?.getState().sessionId;
         if (typeof previous === "string") this.retired.add(previous);
         this.trial = await this.createTrial(seed, strategy as Strategy, body.referenceMemory === true);
-        return json(200, this.state());
+        return json(200, await this.state());
       }
       if (!this.trial) throw new NamingTaskError("trial_required");
       if (pathname === "/api/message") {
@@ -304,7 +307,7 @@ export class TangramSession extends DurableObject<Env> {
         const receipt = this.trial.message(body.text, clientId);
         await this.trial.persistNow();
         this.ctx.waitUntil(this.trial.whenIdle().catch(() => {}));
-        return json(202, { eventId: receipt.eventId, ...this.state() as object });
+        return json(202, { eventId: receipt.eventId, ...await this.state() as object });
       }
       if (pathname === "/api/retry") await this.trial.retry();
       if (pathname === "/api/names") {
@@ -313,7 +316,7 @@ export class TangramSession extends DurableObject<Env> {
         if (!this.trial.getState().aiSubmitted) await this.trial.submitAI();
       }
       if (pathname === "/api/ai-submit") await this.trial.submitAI();
-      return json(200, this.state());
+      return json(200, await this.state());
     } catch (error) {
       return sanitizedError(error);
     }

@@ -105,6 +105,21 @@ export function sortRecordList(entries: RecordListEntry[]): RecordListEntry[] {
   return entries.sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? "") || a.recordId.localeCompare(b.recordId));
 }
 
+/**
+ * Researcher decision (2026-10-19): the match result, the AI's names and the score
+ * stay hidden from the participant until that trial's questionnaire is submitted,
+ * so they cannot bias the answers. Applies to the live state and to the review,
+ * for earlier records too. Only the participant view changes; the stored record,
+ * its scoring and the admin pages are untouched.
+ * `resultLocked` is true exactly when a result exists and is being withheld.
+ */
+export function lockResult<T extends Record<string, unknown>>(view: T, questionnaire: unknown): Omit<T, "result"> & { resultLocked: boolean } {
+  const { result, ...rest } = view;
+  if (result === undefined) return { ...rest, resultLocked: false };
+  if (questionnaireStatus(questionnaire) === "submitted") return { ...rest, result, resultLocked: false } as Omit<T, "result"> & { resultLocked: boolean };
+  return { ...rest, resultLocked: true };
+}
+
 /** Same participant-facing result as the live state's `result`: own slots and names only, never figure ids. */
 export function participantResult(result: any) {
   return { provisional: result.provisional, success: result.success, matchedCount: result.matchedCount, total: result.total,
