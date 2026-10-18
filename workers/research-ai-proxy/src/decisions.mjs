@@ -56,7 +56,8 @@ export function buildDecisionPayload(body) {
 
 export function sanitizeDecision(data, requestedModel, purpose) {
   if (!data || typeof data !== "object" || typeof data.model !== "string" ||
-      !data.model.startsWith(requestedModel) ||
+      !(data.model === requestedModel || data.model.startsWith(requestedModel + "-") &&
+        /^[0-9]{8}$/.test(data.model.slice(requestedModel.length + 1))) ||
       data.answers?.action?.type !== "choice") return null;
 
   const { choice, probabilities, confidence } = data.answers.action;

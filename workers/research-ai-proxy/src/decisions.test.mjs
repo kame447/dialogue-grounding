@@ -104,6 +104,7 @@ test("Invalid, misrouted and sensitive upstream results fail closed", async () =
   const body = { purpose: "decision_jev", state: "同定はまだできていない" };
   for (const bad of [
     { ...upstreamResult(DECISION_MODELS.decision_jev), model: "other/model" },
+    { ...upstreamResult(DECISION_MODELS.decision_jev), model: "typesafe/jev-1.14-forged" },
     { ...upstreamResult(DECISION_MODELS.decision_jev), answers: { action: { type: "choice", choice: "invent_name", probabilities } } },
     { ...upstreamResult(DECISION_MODELS.decision_jev), answers: { action: { type: "choice", choice: "accept", probabilities: { accept: 1 } } } },
     { ...upstreamResult(DECISION_MODELS.decision_jev), answers: { action: { type: "choice", choice: "accept", probabilities: { ...probabilities, agree: 9 } } } },

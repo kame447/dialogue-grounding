@@ -8,6 +8,7 @@ import { createOwnLedger, validateJudgment, applyJudgment } from "../judgment/sc
 import { STRATEGIES, TASK_INSTRUCTIONS_V2, ownImageMessage, publicMessages } from "../judgment/instructions.mjs";
 import { createReferenceGraph, applyReferenceUpdate, snapshotReferenceGraph, ReferenceGraphError, REFERENCE_LIMITS } from "../memory/reference-graph.mjs";
 import { stageMemory, prepareMemory } from "../judgment/memory.mjs";
+import { buildDecisionEvidence } from "./decision-evidence.mjs";
 
 // Identical across strategies. Holistic first; analysis only when the judge asks for it.
 export const GENERATOR_INSTRUCTIONS_V2 = [
@@ -70,10 +71,14 @@ function abortIf(signal) {
 /**
  * @param {{ client, strategy, image: {mimeType, base64}, anchors: {id, bbox, centroid}[], judge?, referenceMemory?: boolean }} options
  */
-export function createDialogueV2({ client, strategy, image, anchors, judge = null, referenceMemory = false }) {
+export function createDialogueV2({ client, strategy, image, anchors, judge = null, referenceMemory = false,
+  decisionShadowClient = null }) {
   if (!client || typeof client.complete !== "function") throw new Error("A chat client is required");
   if (!STRATEGIES.includes(strategy)) throw new Error("Unsupported dialogue strategy");
   if (typeof referenceMemory !== "boolean") throw new Error("Invalid memory option");
+  if (decisionShadowClient !== null && typeof decisionShadowClient?.chooseAction !== "function") {
+    throw new Error("Invalid decision shadow client");
+  }
   const ownImage = { mimeType: image.mimeType, base64: image.base64 };
   ownImageMessage(ownImage);
   const slots = anchors.map((anchor) => anchor.id);
@@ -127,6 +132,22 @@ export function createDialogueV2({ client, strategy, image, anchors, judge = nul
     } else judgment = validateJudgment(rawJudgment, { ownLedger: state.ledger, agreeEvidence: true });
     trace.judgment = { ...judgment };
     delete trace.judgment.reference;
+    if (decisionShadowClient) {
+      const purposes = ["decision_jev", "decision_luna"];
+      try {
+        const evidence = buildDecisionEvidence({ events, ownLedger: state.ledger, judgment, strategy });
+        const results = await Promise.allSettled(purposes.map((purpose) =>
+          decisionShadowClient.chooseAction({ purpose, state: evidence })));
+        abortIf(signal);
+        trace.decisionShadow = results.map((result, index) => result.status === "fulfilled" ? {
+          purpose: purposes[index], model: result.value.model, action: result.value.action,
+          probabilities: result.value.probabilities, usage: result.value.usage ?? null,
+          latencyMs: result.value.latencyMs ?? null, status: "ok",
+        } : { purpose: purposes[index], status: "error", error: "decision_unavailable" });
+      } catch {
+        trace.decisionShadow = purposes.map((purpose) => ({ purpose, status: "error", error: "evidence_unavailable" }));
+      }
+    }
     trace.validation = dialogueJudge.getDiagnostics?.().at(-1) ?? null;
     trace.status = "generation_error";
     const { action, targetSlot, candidateName, discriminatingFeature } = judgment;

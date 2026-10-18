@@ -26,6 +26,7 @@ export function createDecisionComparisonClient(config, fetchImpl = globalThis.fe
       }
 
       const controller = new AbortController();
+      const started = performance.now();
       const timeout = setTimeout(() => controller.abort(), 20_000);
       try {
         const response = await fetchImpl(url, {
@@ -43,7 +44,9 @@ export function createDecisionComparisonClient(config, fetchImpl = globalThis.fe
         const data = await response.json();
         if (data?.purpose !== purpose || !DECISION_ACTIONS.includes(data.action) ||
             typeof data.model !== "string" ||
-            !data.model.startsWith(DECISION_MODELS[purpose]) ||
+            !(data.model === DECISION_MODELS[purpose] ||
+              data.model.startsWith(DECISION_MODELS[purpose] + "-") &&
+              /^[0-9]{8}$/.test(data.model.slice(DECISION_MODELS[purpose].length + 1))) ||
             !data.probabilities || !DECISION_ACTIONS.every((action) =>
               Number.isFinite(data.probabilities[action]) &&
               data.probabilities[action] >= 0 && data.probabilities[action] <= 1)) {
@@ -53,6 +56,7 @@ export function createDecisionComparisonClient(config, fetchImpl = globalThis.fe
           purpose, model: data.model, action: data.action,
           probabilities: data.probabilities, confidence: data.confidence ?? null,
           usage: data.usage ?? null,
+          latencyMs: Math.round(performance.now() - started),
         };
       } catch (error) {
         if (error instanceof DecisionConnectionError) throw error;

@@ -51,6 +51,12 @@ Jev 1.14 と GPT-6 Luna Decisions は OpenRouter `POST /api/alpha/decisions` を
 
 応答は `action` と各行動の `probabilities`、課金記録等に限定しています。この選択は診断・比較用であり、既存のLunaによる対象・名称・弁別特徴の生成や発話生成を自動的に置き換えません。`agree` はモデルが選んだだけでは成立させず、図形同定と共同採用の証拠を別途確認します。実験比較の条件・閾値は未承認です。
 
+比較は研究用v2に `decisionShadowClient: createDecisionComparisonClient(config)` を明示的に渡すことで有効化できます。既定では呼び出しません。明示した場合、従来どおりLunaが作業メモ・図形の見立てを推定した後、公開済み発話（最新12件）とAI自身の未確定候補だけを同じJSONに整形して両モデルへ同時に渡します。研究者用の非公開記録にモデル・選択行動・確率・入力費用・応答時間・エラー有無を残します。決定結果は発話生成や内部の名称合意には一切反映されません。片方のAPIが失敗しても会話処理は継続します。
+
+評価用の先行するLunaの仮説は正解を保証せず、比較モデルの判断に共通の誤りを与える可能性があります。Lunaによる意味解釈性能と、Jev/Luna Decisionsによる行動選択性能は分けて評価してください。原対話・参加者データをOpenRouterへ送信する前に、参加者の同意・匿名化方針・提供者の保存条件を確認してください。実際の行動切り替えは、合意根拠の検証と予備評価を経るまで既定OFFのままです。
+
+実行形式はOpenRouterが公開する[Decisions API](https://openrouter.ai/blog/insights/what-is-jev/)に準拠しています。
+
 OpenRouterの研究用APIキーはローカルのmacOSキーチェーンに `service=dialogue-grounding-openrouter-api-key`、`account=research` として保存されています。Cloudflare WorkerはMacのキーチェーンを直接読めないため、Wranglerにログインしたうえで、研究用Worker専用Secretとして一度だけ転送します（値は表示しません）。
 
 ```sh
