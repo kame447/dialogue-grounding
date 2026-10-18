@@ -186,7 +186,10 @@ async function handleDecisions(request, env, fetchImpl) {
     try { data = await upstream.json(); }
     catch { return reply(502, { error: "invalid_upstream_response" }); }
     const response = sanitizeDecision(data, payload.model, body.purpose);
-    return response ? reply(200, response) : reply(502, { error: "invalid_upstream_response" });
+    if (!response || JSON.stringify(response).includes(env.OPENROUTER_DECISIONS_API_KEY)) {
+      return reply(502, { error: "invalid_upstream_response" });
+    }
+    return reply(200, response);
   } catch {
     return reply(controller.signal.aborted ? 504 : 502, {
       error: controller.signal.aborted ? "upstream_timeout" : "upstream_unavailable",

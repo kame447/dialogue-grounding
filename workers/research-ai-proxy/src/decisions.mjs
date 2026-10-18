@@ -71,12 +71,12 @@ export function sanitizeDecision(data, requestedModel, purpose) {
   }
   const usage = data.usage;
   const nonnegative = (value) => Number.isFinite(value) && value >= 0 ? value : null;
-  const boundedString = (value, limit) => typeof value === "string" && value.length <= limit ? value : null;
+  const metadata = (value, pattern) => typeof value === "string" && !/sk-/i.test(value) && pattern.test(value) ? value : null;
   return {
     purpose,
     model: data.model,
-    provider: boundedString(data.provider, 64),
-    id: boundedString(data.id, 128),
+    provider: metadata(data.provider, /^[A-Za-z][A-Za-z0-9 ._-]{0,63}$/),
+    id: metadata(data.id, /^gen-[A-Za-z0-9_-]{1,124}$/),
     action: choice,
     probabilities: Object.fromEntries(DECISION_ACTIONS.map((key) => [key, probabilities[key]])),
     confidence: confidence ?? null,

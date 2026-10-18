@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { handleRequest } from "./index.mjs";
-import { DECISION_ACTIONS, DECISION_MODELS, OPENROUTER_DECISIONS_URL } from "./decisions.mjs";
+import { DECISION_ACTIONS, DECISION_MODELS, OPENROUTER_DECISIONS_URL, sanitizeDecision } from "./decisions.mjs";
 import { createDecisionComparisonClient } from "../../../dialogue-model/runtime/decisions-client.mjs";
 
 const TOKEN = "local-authentication-token-longer-than-thirty-two-characters";
@@ -145,7 +145,7 @@ test("synthetic Jev/Luna sample shapes preserve billed output tokens and bounded
   for (const purpose of Object.keys(DECISION_MODELS)) {
     const result = { ...upstreamResult(DECISION_MODELS[purpose]),
       model: DECISION_MODELS[purpose] + (purpose === "decision_jev" ? "-20261014" : "-20261006"),
-      provider: "synthetic-provider", id: "synthetic-request-id", usage: { input_tokens: 98, output_tokens: 86, cost: 0.000004 } };
+      provider: purpose === "decision_jev" ? "TypeSafe" : "OpenAI", id: "gen-synthetic-request-id", usage: { input_tokens: 98, output_tokens: 86, cost: 0.000004 } };
     if (purpose === "decision_jev") result.answers.action.probabilities = Object.fromEntries(DECISION_ACTIONS.map((action) => [action, action === "accept" ? 1 : 0]));
     const client = createDecisionComparisonClient({ provider: "cloudflare", baseUrl: "https://research.test/v1", apiKey: TOKEN },
       async (url, init) => handleRequest(new Request(url, init), env, async () => Response.json(result)));
@@ -153,16 +153,16 @@ test("synthetic Jev/Luna sample shapes preserve billed output tokens and bounded
     assert.equal(data.action, "accept");
     assert.equal(data.probabilities.accept, purpose === "decision_jev" ? 1 : 0.84);
     assert.equal(data.usage.outputTokens, 86);
-    assert.equal(data.provider, "synthetic-provider");
-    assert.equal(data.id, "synthetic-request-id");
+    assert.equal(data.provider, result.provider);
+    assert.equal(data.id, "gen-synthetic-request-id");
     assert.doesNotMatch(JSON.stringify(data), /sk-or-|key-not-to-be-forwarded|local-authentication/);
   }
 });
 
 test("Decision optional metadata is bounded and invalid usage numbers become null", async () => {
   const bodies = [
-    { provider: "p".repeat(64), id: "i".repeat(128), usage: { output_tokens: 0 } },
-    { provider: "p".repeat(65), id: "i".repeat(129), usage: { output_tokens: -1 } },
+    { provider: "p".repeat(64), id: "gen-" + "i".repeat(124), usage: { output_tokens: 0 } },
+    { provider: "p".repeat(65), id: "gen-" + "i".repeat(125), usage: { output_tokens: -1 } },
     { provider: 10, id: {}, usage: { output_tokens: "86" } },
   ];
   for (let index = 0; index < bodies.length; index++) {
@@ -174,4 +174,50 @@ test("Decision optional metadata is bounded and invalid usage numbers become nul
     assert.equal(data.id, index === 0 ? bodies[index].id : null);
     assert.equal(data.usage.outputTokens, index === 0 ? 0 : null);
   }
+});
+
+test("metadata shape and key-like text filters keep secrets out of provider/id", () => {
+  const model = DECISION_MODELS.decision_jev;
+  for (const field of ["provider", "id"]) {
+    const malformed = field === "provider" ? ["1Provider", "Provider\n"] : ["gen-", "foreign-id", "gen-id\n"];
+    for (const value of [env.OPENROUTER_DECISIONS_API_KEY, "SK-or-synthetic-secret", "gen-Sk-or-synthetic-secret", "TypeSafe sk-secret", "", "provider/foreign", null, 1, ...malformed]) {
+      const data = sanitizeDecision({ ...upstreamResult(model), [field]: value }, model, "decision_jev");
+      assert.equal(data[field], null);
+      assert.doesNotMatch(JSON.stringify(data), /sk-or-|sk-secret/i);
+    }
+  }
+  for (const provider of ["TypeSafe", "OpenAI", "Provider_Name-1.0"]) {
+    const data = sanitizeDecision({ ...upstreamResult(model), provider, id: "gen-synthetic_123-abc" }, model, "decision_jev");
+    assert.equal(data.provider, provider);
+    assert.equal(data.id, "gen-synthetic_123-abc");
+  }
+});
+
+test("upstream secret reflected in provider, id or model never reaches the response body", async () => {
+  for (const field of ["provider", "id", "model"]) {
+    const result = await handleRequest(req("/v1/decisions", { purpose: "decision_jev", state: "公開発話" }), env,
+      async () => Response.json({ ...upstreamResult(DECISION_MODELS.decision_jev), [field]: env.OPENROUTER_DECISIONS_API_KEY }));
+    const text = await result.text();
+    assert.ok(!text.includes(env.OPENROUTER_DECISIONS_API_KEY));
+    if (field === "model") {
+      assert.equal(result.status, 502);
+      assert.deepEqual(JSON.parse(text), { error: "invalid_upstream_response" });
+    } else {
+      assert.equal(result.status, 200);
+      assert.equal(JSON.parse(text)[field], null);
+    }
+  }
+});
+
+test("Worker scans the whole sanitized response as a second secret-reflection barrier", async () => {
+  // Simulate a credential change while upstream is in flight. The response
+  // guard must reject the configured value even if metadata syntax permits it.
+  const reflectiveEnv = { ...env };
+  const response = await handleRequest(req("/v1/decisions", { purpose: "decision_jev", state: "公開発話" }), reflectiveEnv,
+    async () => {
+      reflectiveEnv.OPENROUTER_DECISIONS_API_KEY = "TypeSafe";
+      return Response.json({ ...upstreamResult(DECISION_MODELS.decision_jev), provider: "TypeSafe", id: "gen-safe" });
+    });
+  assert.equal(response.status, 502);
+  assert.deepEqual(await response.json(), { error: "invalid_upstream_response" });
 });
