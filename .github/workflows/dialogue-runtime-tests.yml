@@ -7,6 +7,7 @@ on:
       - "tests/**"
       - "package.json"
       - "package-lock.json"
+      - "tsconfig.runtime.json"
       - "workers/research-ai-proxy/**"
       - "workers/tangram-experiment/**"
       - ".github/workflows/dialogue-runtime-tests.yml"
@@ -16,6 +17,7 @@ on:
       - "tests/**"
       - "package.json"
       - "package-lock.json"
+      - "tsconfig.runtime.json"
       - "workers/research-ai-proxy/**"
       - "workers/tangram-experiment/**"
       - ".github/workflows/dialogue-runtime-tests.yml"
@@ -31,5 +33,6 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npx tsc -p workers/tangram-experiment/tsconfig.json
+      - run: npm run typecheck:runtime
       - run: npm run deploy:tangram:dry
       - run: npm run deploy:research-proxy:dry
