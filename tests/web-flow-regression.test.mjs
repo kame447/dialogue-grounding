@@ -259,7 +259,7 @@ for (const strategy of STRATEGIES) {
     e.setup.fire("submit"); await app.settled();
     assert.equal(e.setup.hidden, true); assert.equal(e.trial.hidden, false);
     assert.equal(e.board.src, "/api/image");
-    assert.deepEqual(app.calls[1], { path: "/api/start", body: { strategy, seed: SEED } });
+    assert.deepEqual(app.calls[1], { path: "/api/start", body: { strategy, seed: SEED, visualAid: false, referenceMemory: false } });
     assert.equal(e.names.children.length, 6);
     e.names.children.forEach((label, i) => {
       const input = label.children[0];

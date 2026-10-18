@@ -30,7 +30,7 @@ async function readJSON(req) {
 }
 
 export function createNamingServer({ client, createTrial, scoreTrial, runDir = process.env.RESEARCH_RUN_DIR,
-  hideStrategy = false, now = Date.now } = {}) {
+  hideStrategy = false, now = Date.now, createTask = createNamingTask } = {}) {
   const sessions = new Map();
   const reclaimable = (session) => {
     if (session.requests || session.starting) return false;
@@ -89,7 +89,8 @@ export function createNamingServer({ client, createTrial, scoreTrial, runDir = p
       }
       if (!session) return json(401, { error: "session_required" });
       const state = () => {
-        const value = session.task?.getState() ?? null;
+        const value = session.task ? { ...session.task.getState() } : null;
+        if (value) { delete value.visualAid; delete value.referenceMemory; }
         if (value && hideStrategy) delete value.strategy;
         return { trial: value, hideStrategy, busy: session.starting || Boolean(value?.busy) };
       };
@@ -104,10 +105,13 @@ export function createNamingServer({ client, createTrial, scoreTrial, runDir = p
       const body = await readJSON(req);
       if (!body || typeof body !== "object" || Array.isArray(body)) throw new NamingTaskError("invalid_request");
       if (pathname === "/api/start") {
+        const { visualAid = false, referenceMemory = false } = body;
+        if (typeof visualAid !== "boolean" || typeof referenceMemory !== "boolean") throw new NamingTaskError("invalid_request");
         if (session.starting || session.task?.getState().busy) throw new NamingTaskError("busy");
         session.starting = true;
         try {
-          session.task = await createNamingTask({ client, createTrial, scoreTrial, runDir, strategy: body.strategy, seed: body.seed });
+          session.task = await createTask({ client, createTrial, scoreTrial, runDir, strategy: body.strategy, seed: body.seed,
+            visualAid, referenceMemory });
         } finally { session.starting = false; }
       } else {
         if (!session.task) throw new NamingTaskError("trial_required");

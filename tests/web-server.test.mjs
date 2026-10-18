@@ -124,7 +124,7 @@ test("Web rejects cross-origin/foreign host requests and isolates browser sessio
 
 // A small DOM surface executes the shipped UI script without a browser or npm
 // dependencies. HTTP tests above exercise the real server independently.
-async function uiHarness() {
+async function uiHarness({ unstarted = false } = {}) {
   class Element {
     constructor(tag = "div") { this.tagName = tag; this.children = []; this.handlers = {}; this.attributes = {}; this.value = ""; this._text = ""; this.scrollTop = 0; }
     set textContent(value) { this._text = String(value); this.children = []; }
@@ -150,9 +150,17 @@ async function uiHarness() {
   elements.chat.append(elements.utterance, elements["chat-status"], chatButton);
   elements.submission.append(elements.names, submitButton);
   const setupButton = new Element("button"); elements.setup.append(setupButton);
-  elements.setup.elements = { seed: new Element("input") };
+  const strategyInput = new Element("input"), seedInput = new Element("input");
+  strategyInput.name = "strategy"; strategyInput.value = "repair-first";
+  seedInput.name = "seed"; seedInput.value = "1";
+  const toggles = ["visualAid", "referenceMemory"].map(name => {
+    const input = new Element("input"); input.type = "checkbox"; input.name = name; input.value = "on"; input.checked = false;
+    return input;
+  });
+  elements.setup.append(strategyInput, seedInput, ...toggles);
   const requests = [], pending = [];
-  const state = { busy: false, trial: { trialId: "dom-trial", slots: SLOTS, status: "dialogue", publicHistory: [], humanSubmitted: false } };
+  const state = { busy: false, hideStrategy: true, trial: unstarted ? null :
+    { trialId: "dom-trial", slots: SLOTS, status: "dialogue", publicHistory: [], humanSubmitted: false } };
   const response = (value, ok = true) => ({ ok, json: async () => value });
   runInNewContext(script, {
     document: {
@@ -161,7 +169,8 @@ async function uiHarness() {
       querySelectorAll: (selector) => [...new Set(Object.values(elements).flatMap((e) => e.querySelectorAll(selector)))],
     },
     FormData: class {
-      constructor(form) { this.values = form.querySelectorAll("input").map(input => [input.name, input.value]); }
+      constructor(form) { this.values = form.querySelectorAll("input").filter(input => input.type !== "checkbox" || input.checked).map(input => [input.name, input.value]); }
+      get(name) { return this.values.find(([key]) => key === name)?.[1] ?? null; }
       [Symbol.iterator]() { return this.values[Symbol.iterator](); }
     },
     fetch: async (path, options) => {
@@ -188,6 +197,35 @@ test("Web UI keeps a bounded transcript and responsive image beside a stable com
   assert.match(html, /id="chat-status" role="status" aria-live="polite"/u);
   assert.match(html, /Enterで送信・Shift\+Enterで改行/u);
 });
+
+test("researcher toggles are labelled, unchecked by default, and confined to the setup form", async () => {
+  const html = await readFile(new URL("../dialogue-model/runtime/web/index.html", import.meta.url), "utf8");
+  const setup = html.match(/<form id="setup"[\s\S]*?<\/form>/u)[0];
+  for (const [id, name] of [["visual-aid", "visualAid"], ["reference-memory", "referenceMemory"]]) {
+    assert.match(setup, new RegExp('for="' + id + '"'));
+    const input = setup.match(new RegExp('<input[^>]*id="' + id + '"[^>]*>'))[0];
+    assert.match(input, new RegExp('name="' + name + '"'));
+    assert.match(input, /type="checkbox"/u);
+    assert.doesNotMatch(input, /\bchecked\b/u);
+  }
+  assert.doesNotMatch(html.slice(html.indexOf('<section id="trial"')), /visualAid|referenceMemory|視覚補助|参照メモリ/u);
+});
+
+for (const [visualAid, referenceMemory] of [[false, false], [true, false], [false, true], [true, true]]) {
+  test(`Web UI sends selected booleans and hides researcher setup during the trial (${visualAid},${referenceMemory})`, async () => {
+    const { elements, requests, pending, state, settle } = await uiHarness({ unstarted: true });
+    assert.equal(elements.setup.hidden, false);
+    elements.setup.elements.visualAid.checked = visualAid;
+    elements.setup.elements.referenceMemory.checked = referenceMemory;
+    elements.setup.fire("submit");
+    assert.deepEqual(requests.at(-1), { path: "/api/start", body: { strategy: "repair-first", seed: 1, visualAid, referenceMemory } });
+    pending.shift()({ ...state, trial: { trialId: "blind-toggle-trial", slots: SLOTS, status: "dialogue", publicHistory: [], humanSubmitted: false } });
+    await settle();
+    assert.equal(elements.setup.hidden, true);
+    assert.equal(elements.trial.hidden, false);
+    assert.doesNotMatch(elements.trial.textContent, /視覚補助|参照メモリ|visualAid|referenceMemory/u);
+  });
+}
 
 test("Web UI labels all six final names explicitly and suppresses keyboard send during IME or Shift+Enter", async () => {
   const { elements, requests } = await uiHarness();

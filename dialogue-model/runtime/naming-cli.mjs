@@ -14,6 +14,7 @@ const HELP = [
   "6図形共同命名（操作確認用プロトタイプ）",
   "node --env-file=.env dialogue-model/runtime/naming-cli.mjs --strategy repair-first --seed 1 --image-dir /outside/repository/images",
   "非対話: 上記に --script /outside/repository/turns.jsonl を追加",
+  "研究者用（既定OFF）: --visual-aid（自分の盤面の回転シート）、--reference-memory（参照メモリ）",
   'JSONL: {"utterance":"公開発話"} または公開発話のJSON文字列。最終行は {"submission":{"上段左":"名称",...6位置}} にできます。',
   "/submit で6位置の名称を順に入力して確定。/submit <JSON> も使用可能。/exit で終了。",
   "AI最終提出は人間の提出後に照合します。実験条件・採点は暫定です。",
@@ -43,6 +44,7 @@ export async function main(argv = process.argv.slice(2), env = process.env, depe
   const { values } = parseArgs({ args: argv, options: {
     help: { type: "boolean" }, strategy: { type: "string" }, seed: { type: "string" },
     "image-dir": { type: "string" }, script: { type: "string" },
+    "visual-aid": { type: "boolean", default: false }, "reference-memory": { type: "boolean", default: false },
   } });
   if (values.help) { say(HELP); return; }
   if (!STRATEGIES.includes(values.strategy) || !values.seed?.trim() || !values["image-dir"]) throw new NamingTaskError("invalid_cli_options");
@@ -51,7 +53,8 @@ export async function main(argv = process.argv.slice(2), env = process.env, depe
   const actions = values.script ? scriptActions(await readFile(values.script, "utf8")) : null;
   const imageDir = await outsideRepositoryDirectory(values["image-dir"]);
   const client = dependencies.client ?? createChatClient(loadConfig(env));
-  const task = await createNamingTask({ client, strategy: values.strategy, seed,
+  const task = await (dependencies.createTask ?? createNamingTask)({ client, strategy: values.strategy, seed,
+    visualAid: values["visual-aid"], referenceMemory: values["reference-memory"],
     createTrial: dependencies.createTrial, scoreTrial: dependencies.scoreTrial, runDir: env.RESEARCH_RUN_DIR });
   await mkdir(imageDir, { recursive: true, mode: 0o700 });
   if (await outsideRepositoryDirectory(imageDir) !== imageDir) throw new NamingTaskError("repository_output_forbidden");

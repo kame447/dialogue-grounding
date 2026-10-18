@@ -133,7 +133,8 @@ $("setup").addEventListener("submit", (event) => {
   event.preventDefault();
   const data = new FormData(event.target);
   operate(async () => {
-    const state = await api("/api/start", { strategy: data.get("strategy"), seed: Number(data.get("seed")) });
+    const state = await api("/api/start", { strategy: data.get("strategy"), seed: Number(data.get("seed")),
+      visualAid: data.get("visualAid") === "on", referenceMemory: data.get("referenceMemory") === "on" });
     $("board").removeAttribute("src");
     $("names").replaceChildren();
     return state;
