@@ -8,8 +8,10 @@
 //   different figures. correctnessKnown is therefore always false.
 // - M records the local sharing state but not its dimension (target, position,
 //   orientation, feature, name...). M4 is local sharing, not "same referent
-//   confirmed"; M2 is a public problem of an unknown dimension. Target-axis values
-//   derived from M are therefore "derived" or "weak", never "explicit".
+//   confirmed"; M2 is a public problem of an unknown dimension. Every target-axis
+//   value derived from M is therefore "weak", and M2 alone gives "insufficient";
+//   "contradicted" needs an explicit denial (a12 / Deny) as well. Whether M4 at a
+//   commitment point may count as target sharing is a researcher decision.
 // - a11 (agreement) / a3 (acceptance) / a9 (repetition) / a4 (response) mark the
 //   positions where a listener commits; they are where an unfounded 「わかります」
 //   would sit. They are never evidence of a shared referent by themselves.
@@ -20,7 +22,7 @@ import { EVAL_CASE_SCHEMA } from "./evalcase.ts";
 import type { LabeledRow, MState } from "./labels.ts";
 import { episodes } from "./labels.ts";
 
-export const DERIVE_RULESET = "jev-grounding-derive/v1";
+export const DERIVE_RULESET = "jev-grounding-derive/v2";
 
 /** Speech functions at which a speaker commits to the partner's content. */
 export const COMMIT_FUNCTIONS: readonly string[] = Object.freeze(["a11", "a3", "a9", "a4"]);
@@ -31,7 +33,16 @@ export interface Derived {
   target: TargetEvidence | null;
   name: NameEvidence | null;
   basis: string[];
+  /** Weakest quality over the axes that carry a value. */
   quality: LabelQuality;
+  axisQuality: { target: LabelQuality | null; name: LabelQuality | null };
+}
+
+const RANK: Record<LabelQuality, number> = { explicit: 2, derived: 1, weak: 0 };
+
+function weakest(axis: Derived["axisQuality"]): LabelQuality {
+  const present = [axis.target, axis.name].filter((q): q is LabelQuality => q !== null);
+  return present.length === 0 ? "weak" : present.reduce((a, b) => (RANK[a] <= RANK[b] ? a : b));
 }
 
 const OPEN: readonly MState[] = ["M1", "M2", "M3"];
@@ -71,7 +82,8 @@ export function deriveEpisodeEnd(episodeRows: readonly LabeledRow[]): Derived {
   if (finalM) basis.push(`M:${finalM}`);
   for (const p of processes) basis.push(`P:${p}`);
   if (end.er) basis.push(`ER:${end.er}`);
-  return { target, name, basis, quality: "derived" };
+  const axisQuality = { target: target ? "weak" as const : null, name: name ? "derived" as const : null };
+  return { target, name, basis, quality: weakest(axisQuality), axisQuality };
 }
 
 /**
@@ -89,16 +101,16 @@ export function deriveLocal(focal: LabeledRow, previous: readonly LabeledRow[]):
   if (deny) basis.push("deny");
 
   let target: TargetEvidence | null = null;
-  let quality: LabelQuality = "derived";
+  const openM2 = focal.m === "M2" || (!focal.m && prevM === "M2");
   if (focal.p === "P5") basis.push("rule:T-P5-null");
   else if (deny && (focal.m === "M2" || prevM === "M2")) { target = "contradicted"; basis.push("rule:T-deny-M2"); }
   else if (focal.m === "M4") { target = "supported"; basis.push("rule:T-focal-M4"); }
-  else if (focal.m === "M2") { target = "contradicted"; quality = "weak"; basis.push("rule:T-focal-M2"); }
-  else if (!focal.m && prevM === "M2") { target = "contradicted"; quality = "weak"; basis.push("rule:T-open-M2"); }
+  else if (openM2) { target = "insufficient"; basis.push("rule:T-open-M2-nodeny"); } // a public problem, not proof of different referents
   else if ((focal.m === "M1" || focal.m === "M3") || (!focal.m && (prevM === "M1" || prevM === "M3"))) {
     target = "insufficient"; basis.push("rule:T-open-M1M3");
   } else basis.push("rule:T-no-open-state-null"); // blank after M0/M4 or before any M: not "no misalignment"
-  return { target, name: null, basis, quality };
+  const axisQuality = { target: target ? "weak" as const : null, name: null };
+  return { target, name: null, basis, quality: weakest(axisQuality), axisQuality };
 }
 
 export interface BuildOptions {
@@ -141,6 +153,7 @@ export function buildHistoricalCases(dialogueKey: string, rows: readonly Labeled
         expected: { target: derived.target, name: derived.name },
         labelBasis: [`ruleset:${DERIVE_RULESET}`, ...derived.basis],
         labelQuality: derived.quality,
+        axisQuality: derived.axisQuality,
         correctnessKnown: false,
       };
     };

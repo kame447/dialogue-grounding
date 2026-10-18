@@ -2,7 +2,7 @@
 // Only cases with a non-null expected value enter an axis. Scores reported here
 // are agreement with label-derived gold, not "probability correct"; any judge
 // confidence stays a relative score until calibrated against human gold.
-import type { FailureTag, GroundingEvalCase, NameEvidence, TargetEvidence } from "./evalcase.ts";
+import type { FailureTag, GroundingEvalCase, LabelQuality, NameEvidence, TargetEvidence } from "./evalcase.ts";
 import { FAILURE_TAGS, NAME_LEVELS, TARGET_LEVELS } from "./evalcase.ts";
 
 export interface Prediction {
@@ -56,11 +56,22 @@ export function axisReport<L extends string>(levels: readonly L[], pairs: readon
   };
 }
 
-export function evaluate(cases: readonly GroundingEvalCase[], predictions: readonly Prediction[]): { target: AxisReport; name: AxisReport } {
+/** Quality of one axis' gold: the per-axis value when present, else the case-level one. */
+export function axisQualityOf(c: GroundingEvalCase, axis: "target" | "name"): LabelQuality {
+  return c.axisQuality?.[axis] ?? c.labelQuality;
+}
+
+/**
+ * Per-axis agreement. `qualities` restricts which gold enters (for example
+ * ["explicit", "derived"] for a headline that excludes weak, M-derived labels);
+ * report weak gold separately rather than mixing it in.
+ */
+export function evaluate(cases: readonly GroundingEvalCase[], predictions: readonly Prediction[], qualities?: readonly LabelQuality[]): { target: AxisReport; name: AxisReport } {
   const byId = new Map(predictions.map((p) => [p.caseId, p]));
-  const target = cases.filter((c) => c.expected.target !== null)
+  const keep = (c: GroundingEvalCase, axis: "target" | "name") => !qualities || qualities.includes(axisQualityOf(c, axis));
+  const target = cases.filter((c) => c.expected.target !== null && keep(c, "target"))
     .map((c) => ({ gold: c.expected.target as TargetEvidence, predicted: byId.get(c.caseId)?.target ?? null }));
-  const name = cases.filter((c) => c.expected.name !== null)
+  const name = cases.filter((c) => c.expected.name !== null && keep(c, "name"))
     .map((c) => ({ gold: c.expected.name as NameEvidence, predicted: byId.get(c.caseId)?.name ?? null }));
   return { target: axisReport(TARGET_LEVELS, target), name: axisReport(NAME_LEVELS, name) };
 }
@@ -114,6 +125,8 @@ export function goldCounts(cases: readonly GroundingEvalCase[]): Record<string, 
     bump(`${scope}/target`, c.expected.target ?? "null");
     bump(`${scope}/name`, c.expected.name ?? "null");
     bump(`${scope}/quality`, c.labelQuality);
+    if (c.expected.target !== null) bump(`${scope}/targetQuality`, axisQualityOf(c, "target"));
+    if (c.expected.name !== null) bump(`${scope}/nameQuality`, axisQualityOf(c, "name"));
     for (const tag of c.failureTags ?? []) bump(`${scope}/failureTags`, tag);
   }
   return out;

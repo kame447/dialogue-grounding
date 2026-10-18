@@ -53,6 +53,8 @@ export interface GroundingEvalCase {
   /** Which labels or rules the expected values came from, e.g. ["rule:T-open-M2", "M2", "a11"]. */
   labelBasis: string[];
   labelQuality: LabelQuality;
+  /** Per-axis quality when the axes differ (labelQuality is then the weakest). */
+  axisQuality?: { target: LabelQuality | null; name: LabelQuality | null };
   /** False for every historical case: ER1 and a11 are not evidence of independent correctness. */
   correctnessKnown: boolean;
   failureTags?: FailureTag[];
@@ -110,6 +112,10 @@ export function validateEvalCase(value: unknown): string[] {
   }
   if (!Array.isArray(value.labelBasis) || value.labelBasis.some((b) => typeof b !== "string")) errors.push("labelBasis");
   if (!QUALITIES.includes(value.labelQuality as LabelQuality)) errors.push("labelQuality");
+  if (value.axisQuality !== undefined) {
+    const aq = value.axisQuality;
+    if (!isRecord(aq) || [aq.target, aq.name].some((q) => q !== null && !QUALITIES.includes(q as LabelQuality))) errors.push("axisQuality");
+  }
   if (typeof value.correctnessKnown !== "boolean") errors.push("correctnessKnown");
   if (value.source === "historical" && value.correctnessKnown !== false) errors.push("historical cases cannot know correctness");
   if (value.failureTags !== undefined && (!Array.isArray(value.failureTags) || value.failureTags.some((t) => !(FAILURE_TAGS as readonly string[]).includes(t as string)))) {

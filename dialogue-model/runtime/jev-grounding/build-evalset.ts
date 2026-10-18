@@ -8,8 +8,8 @@
 //   --out <private dir> [--procedural H1:E0 ...]
 import { createHash } from "node:crypto";
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, relative, resolve, isAbsolute } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import type { GroundingEvalCase, Split } from "./evalcase.ts";
 import { validateEvalCase } from "./evalcase.ts";
@@ -21,13 +21,9 @@ import { assignSplits, findLeakage, leaveOneDialogueOut, SPLIT_VERSION } from ".
 import { goldCounts } from "./metrics.ts";
 import type { SessionRecord, TurnAnnotation } from "./ai-session.ts";
 import { buildAiTurnCases, validateAnnotation } from "./ai-session.ts";
-
-const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
-
-export function insideRepo(path: string, root: string = REPO_ROOT): boolean {
-  const rel = relative(root, resolve(path));
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
-}
+// Shared guard: canonicalises the path (symlinks included) and rejects this
+// repository and any directory under a .git checkout or worktree.
+import { outsideRepositoryDirectory } from "../naming-task.mjs";
 
 function sha256(text: string): string {
   return createHash("sha256").update(text).digest("hex");
@@ -88,7 +84,7 @@ async function main(): Promise<void> {
     },
   });
   if (!values.historical || !values.out) throw new Error("--historical and --out are required");
-  if (insideRepo(values.out)) throw new Error("--out must be outside the repository");
+  const outDir: string = await outsideRepositoryDirectory(values.out);
   const historicalText = await readFile(values.historical, "utf8");
   const rows = historicalText.split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l) as HistoricalRow);
   let record: SessionRecord | undefined;
@@ -113,9 +109,9 @@ async function main(): Promise<void> {
   const leakage = findLeakage([...result.historical, ...result.aiTurns]);
   if (leakage.length) throw new Error(`leakage: ${leakage.join("; ")}`);
 
-  await mkdir(values.out, { recursive: true, mode: 0o700 });
-  await chmod(values.out, 0o700);
-  const out = (name: string) => resolve(values.out as string, name);
+  await mkdir(outDir, { recursive: true, mode: 0o700 });
+  await chmod(outDir, 0o700);
+  const out = (name: string) => resolve(outDir, name);
   await writePrivate(out("historical-cases.private.jsonl"), jsonl(result.historical));
   await writePrivate(out("skeleton-cases.LOCAL-ONLY.jsonl"), jsonl(result.skeleton));
   await writePrivate(out("ai-turn-cases.private.jsonl"), jsonl(result.aiTurns));

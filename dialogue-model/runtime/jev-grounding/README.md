@@ -16,12 +16,12 @@ files 0600) and are never committed. Nothing here calls a model.
 | --- | --- |
 | `evalcase.ts` | Case type shared with the shadow runner, runtime validator, `toJudgeInput()` (public history only), `assertSendable()` |
 | `labels.ts` | Parsers for a1–a30 / M0–M4 / P1–P6 / ER0–ER1 / episode markers, active-M restoration, label distributions |
-| `derive.ts` | Conservative gold rules (`jev-grounding-derive/v1`) for episode-end and local-window cases |
+| `derive.ts` | Conservative gold rules (`jev-grounding-derive/v2`) for episode-end and local-window cases |
 | `skeleton.ts` | Label-skeleton rendering with an invented lexicon (local-only) |
 | `split.ts` | Seeded per-dialogue split, leave-one-dialogue-out folds, leakage check |
 | `metrics.ts` | Per-axis confusion / accuracy / macro-F1 / abstention, failure-tag detection with a pluggable flag policy |
 | `ai-session.ts` | AI-session turns as cases (history ends before the AI reply), offline answer-key check |
-| `build-evalset.ts` | Researcher CLI; refuses an output directory inside the repository; prints counts only |
+| `build-evalset.ts` | Researcher CLI; output guard shared with `naming-task.mjs` (canonical path, no repository or `.git` checkout); prints counts only |
 
 ## What the labels can and cannot support
 
@@ -30,7 +30,11 @@ files 0600) and are never committed. Nothing here calls a model.
 - ER1/ER0 support the name axis at episode end only. ER1 is joint adoption, not
   independent correctness: `correctnessKnown` is always false for historical cases.
 - M does not record its dimension (target, position, orientation, name…), so
-  target values derived from M are `derived` or `weak`, never `explicit`.
+  every target value derived from M is `weak` (`axisQuality.target`), and M2
+  alone gives `insufficient`: `contradicted` also needs an explicit denial (a12 /
+  Deny). Whether M4 at a commitment point may count as target sharing is a
+  researcher decision; until then report weak gold separately from the headline
+  (`evaluate(cases, predictions, ["explicit", "derived"])`).
 - a11 / a3 / a9 / a4 mark commitment positions (where an unfounded 「わかります」
   would sit); they are never evidence of a shared referent by themselves.
 - P5 (approximate adoption) leaves the target axis null: what stayed incomplete

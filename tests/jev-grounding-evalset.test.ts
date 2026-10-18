@@ -1,7 +1,9 @@
 // Jev grounding eval-set tooling on synthetic fixtures only (no real dialogue, no answer key).
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { HistoricalRow } from "../dialogue-model/runtime/jev-grounding/labels.ts";
 import { distribution, labelRows, parseALabels, parseAH, parseEpisodeMarks, parseER, parseM, parseP } from "../dialogue-model/runtime/jev-grounding/labels.ts";
 import { buildHistoricalCases, deriveEpisodeEnd, deriveLocal, normalizeText } from "../dialogue-model/runtime/jev-grounding/derive.ts";
@@ -12,7 +14,8 @@ import { axisReport, detection, evaluate } from "../dialogue-model/runtime/jev-g
 import { renderSkeleton } from "../dialogue-model/runtime/jev-grounding/skeleton.ts";
 import type { SessionRecord, TurnAnnotation } from "../dialogue-model/runtime/jev-grounding/ai-session.ts";
 import { affirmationCandidate, aiTurns, buildAiTurnCases, offlineCorrect, validateAnnotation } from "../dialogue-model/runtime/jev-grounding/ai-session.ts";
-import { buildAll, insideRepo } from "../dialogue-model/runtime/jev-grounding/build-evalset.ts";
+import { buildAll } from "../dialogue-model/runtime/jev-grounding/build-evalset.ts";
+import { outsideRepositoryDirectory } from "../dialogue-model/runtime/naming-task.mjs";
 
 function row(dialogue: number, no: number, speaker: string, text: string, labels: Partial<HistoricalRow> = {}): HistoricalRow {
   return { dialogue, utteranceNo: String(no), speaker, text, ...labels };
@@ -70,6 +73,8 @@ test("episode-end gold: ER gives the name axis; the target axis needs M4 and sta
   const e0 = rows.filter((r) => r.episode === 0);
   const e1 = rows.filter((r) => r.episode === 1);
   assert.deepEqual([deriveEpisodeEnd(e0).target, deriveEpisodeEnd(e0).name], ["supported", "agreed"]);
+  assert.deepEqual(deriveEpisodeEnd(e0).axisQuality, { target: "weak", name: "derived" });
+  assert.equal(deriveEpisodeEnd(e0).quality, "weak");
   assert.deepEqual([deriveEpisodeEnd(e1).target, deriveEpisodeEnd(e1).name], ["insufficient", "not_agreed"]);
   const p5 = labelRows([...fixture().slice(0, 5), row(1, 6, "A", "まあ鳥で", { episode: "E0 end", adjustmentProcess: "P5 次善的合意", episodeResult: "ER1" })]).get("H1") ?? [];
   const derived = deriveEpisodeEnd(p5);
@@ -82,14 +87,22 @@ test("local gold: agreement is not a shared referent; open trouble, denial and M
   const rows = labelRows(fixture()).get("H1") ?? [];
   // Row 4: a11 while M3 is open → insufficient, even though it is an agreement.
   assert.equal(deriveLocal(rows[3], rows.slice(0, 3)).target, "insufficient");
-  // Row 5: a11 with M4 → supported (dimension unverified, so "derived" not "explicit").
+  // Row 5: a11 with M4 → supported, weak: M4's dimension is not recorded.
   const r5 = deriveLocal(rows[4], rows.slice(0, 4));
   assert.equal(r5.target, "supported");
-  assert.equal(r5.quality, "derived");
-  // Row 9: a4 right after an open M2 → contradicted (weak).
+  assert.equal(r5.quality, "weak");
+  // Row 9: a4 right after an open M2 without a denial → insufficient, not contradicted.
   const r9 = deriveLocal(rows[8], rows.slice(6, 8));
-  assert.equal(r9.target, "contradicted");
-  assert.equal(r9.quality, "weak");
+  assert.equal(r9.target, "insufficient");
+  assert.ok(r9.basis.includes("rule:T-open-M2-nodeny"));
+  // A denial on an open M2 → contradicted, still weak.
+  const deny = { ...rows[8], aLabels: ["a12"] };
+  assert.deepEqual([deriveLocal(deny, rows.slice(6, 8)).target, deriveLocal(deny, rows.slice(6, 8)).quality], ["contradicted", "weak"]);
+  // Every target value derived from M is weak.
+  for (let i = 0; i < rows.length; i++) {
+    const d = deriveLocal(rows[i], rows.slice(0, i));
+    if (d.target !== null) assert.equal(d.axisQuality.target, "weak");
+  }
   // A blank M after M4 is not "no misalignment": no gold.
   const after = labelRows([...fixture().slice(0, 5), row(1, 6, "B", "はい", { speechFunctions: "a11（同意）" })]).get("H1") ?? [];
   assert.equal(deriveLocal(after[5], after.slice(0, 5)).target, null);
@@ -174,6 +187,10 @@ test("metrics: confusion, macro-F1, abstention and missing predictions", () => {
   assert.equal(report.target.accuracy, 1);
   assert.equal(report.name.accuracy, 1);
   assert.equal(report.name.n, cases.filter((c) => c.expected.name !== null).length);
+  // Headline without weak gold: target (all M-derived, weak) drops out, ER-derived names stay.
+  const headline = evaluate(cases, [], ["explicit", "derived"]);
+  assert.equal(headline.target.n, 0);
+  assert.equal(headline.name.n, report.name.n);
 });
 
 // Invented AI-session record; slot ids and figures are fictional.
@@ -240,7 +257,14 @@ test("skeleton text uses none of the source characters and stays local-only in b
   assert.equal(all.distributions.all.rows, 30);
 });
 
-test("the builder refuses to write inside the repository", () => {
-  assert.equal(insideRepo("dialogue-model/x"), true);
-  assert.equal(insideRepo(tmpdir()), false);
+test("the builder's output guard rejects the repository, any .git checkout and symlinks into it", async () => {
+  await assert.rejects(outsideRepositoryDirectory("dialogue-model/x"));
+  const dir = await mkdtemp(join(tmpdir(), "jev-evalset-"));
+  try {
+    assert.ok(await outsideRepositoryDirectory(join(dir, "out")));
+    await symlink(process.cwd(), join(dir, "link"));
+    await assert.rejects(outsideRepositoryDirectory(join(dir, "link", "out")));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
