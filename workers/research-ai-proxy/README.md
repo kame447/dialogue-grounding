@@ -37,13 +37,44 @@ Wrangler設定の UPSTREAM_PROVIDER は openai または gemini とし、実際�
 
 ## 契約と保護
 
-Workerは認証付き POST /v1/chat/completions、GET /v1/model-policy、GET /health のみを提供します。公開CORSは設定せず、上流の宛先とモデルを固定しています。リクエスト最大18MiB、メッセージ最大256件、PNG/JPEG/WebPのbase64画像のみ対応し、外部の画像URLは受け付けません。
+Workerは認証付き POST /v1/chat/completions、GET /v1/model-policy、GET /health と、既定OFFの比較専用 POST /v1/decisions・GET /v1/decision-policy を提供します。公開CORSは設定せず、上流の宛先とモデルを固定しています。リクエスト最大18MiB、メッセージ最大256件、PNG/JPEG/WebPのbase64画像のみ対応し、外部の画像URLは受け付けません。
 
 WorkerはAPIキー、対話本文、画像をログに残す処理を持たず、Observabilityも無効にしています。ただしCloudflare基盤側やAIプロバイダのログ・保存ポリシーまで否定できるわけではありません。実データを送る前に匿名化、外部サービス利用条件を確認してください。
 
 外部API利用量の日次上限は未実装です。接続用トークンの秘匿とプロバイダ側の支出上限を併用してください。必要に応じてStudyPlannerのDurable Objectクォータ設計を参考に、研究用として独立導入してください。
 
 .env、.dev.vars、WranglerのローカルファイルはGitに追加しません。npm test で模擬APIを使った接続契約を検証します。
+
+## OpenRouter Decisions 比較（研究用・既定OFF）
+
+Jev 1.14 と GPT-6 Luna Decisions は OpenRouter `POST /api/alpha/decisions` を使い、通常の Chat Completions と別の型付き回答を返します。Workerの `POST /v1/decisions` に `{"purpose":"decision_jev","state":"公開済みの対話情報と、自分の画像から得た根拠"}` または `decision_luna` を指定すると、同一の9行動の選択問題を固定モデルに送ります。モデルIDと設問はWorker管理で、クライアントからの任意モデル・質問は拒否します。現段階では画像の直接送信は行わず、`state` は最大2万文字のテキストのみです。
+
+応答は `action` と各行動の `probabilities`、課金記録等に限定しています。この選択は診断・比較用であり、既存のLunaによる対象・名称・弁別特徴の生成や発話生成を自動的に置き換えません。`agree` はモデルが選んだだけでは成立させず、図形同定と共同採用の証拠を別途確認します。実験比較の条件・閾値は未承認です。
+
+比較は研究用v2に `decisionShadowClient: createDecisionComparisonClient(config)` を明示的に渡すことで有効化できます。既定では呼び出しません。明示した場合、従来どおりLunaが作業メモ・図形の見立てを推定した後、公開済み発話（最新12件）とAI自身の未確定候補だけを同じJSONに整形して両モデルへ同時に渡します。研究者用の非公開記録にモデル・選択行動・確率・入力費用・応答時間・エラー有無を残します。決定結果は発話生成や内部の名称合意には一切反映されません。片方のAPIが失敗しても会話処理は継続します。
+
+評価用の先行するLunaの仮説は正解を保証せず、比較モデルの判断に共通の誤りを与える可能性があります。Lunaによる意味解釈性能と、Jev/Luna Decisionsによる行動選択性能は分けて評価してください。原対話・参加者データをOpenRouterへ送信する前に、参加者の同意・匿名化方針・提供者の保存条件を確認してください。実際の行動切り替えは、合意根拠の検証と予備評価を経るまで既定OFFのままです。
+
+実行形式はOpenRouterが公開する[Decisions API](https://openrouter.ai/blog/insights/what-is-jev/)に準拠しています。
+
+OpenRouterの研究用APIキーはローカルのmacOSキーチェーンに `service=dialogue-grounding-openrouter-api-key`、`account=research` として保存されています。Cloudflare WorkerはMacのキーチェーンを直接読めないため、Wranglerにログインしたうえで、研究用Worker専用Secretとして一度だけ転送します（値は表示しません）。
+
+```sh
+cd ~/Developer/dialogue-grounding
+npx wrangler login
+security find-generic-password -a research -s dialogue-grounding-openrouter-api-key -w |
+  npx wrangler secret put OPENROUTER_DECISIONS_API_KEY --config workers/research-ai-proxy/wrangler.jsonc
+```
+
+上記の前にCloudflare認証とWorkerアクセス権を確認してください。既存の `UPSTREAM_API_KEY` と `DIALOGUE_MODEL` は変更しません。公開接続を有効にするには `workers/research-ai-proxy/wrangler.jsonc` の `RESEARCH_DECISIONS_ENABLED` を `true` にして研究用Workerをデプロイします。デプロイ前は動作しません。初期値は `false` です。秘密キーの値はGitやログに記録しません。
+
+研究用Workerが有効化された後、研究データを一切使わない固定の合成対話で、双方のモデルの応答を並べて確認できます。
+
+```sh
+node --env-file=.env dialogue-model/runtime/diagnostics/compare-decisions.mjs --fixture
+```
+
+上記CLIは既存の `RESEARCH_AI_PROVIDER=cloudflare` と `RESEARCH_PROXY_TOKEN` の接続設定を使います。2種類の合成事例を両モデルへ同一入力で送り、判断とコストだけを表示します。実験用のアノテーションや正解対応表は送らないでください。APIの模擬テストと有料の実疎通は分けて記録してください。
 
 ## モデル変更の方法（Laplansと同じ用途ルーティング）
 

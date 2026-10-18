@@ -42,7 +42,7 @@ export function parseAiNamesV2(text, slots) {
 export async function createNamingTaskV2({
   client, strategy, seed, referenceMemory = false, runDir = process.env.RESEARCH_RUN_DIR,
   createTrial = createTrialV2, scoreTrial = defaultScoreTrial, judge = null, now = () => Date.now(),
-  restore = null, onPersist = null,
+  restore = null, onPersist = null, decisionShadowClient = null,
 }) {
   if (!STRATEGIES.includes(strategy)) throw new NamingTaskError("invalid_strategy");
   if (!Number.isSafeInteger(seed)) throw new NamingTaskError("invalid_seed");
@@ -69,7 +69,8 @@ export async function createNamingTaskV2({
     },
   };
   const dialogue = createDialogueV2({ client: trackingClient, strategy, image: { mimeType: model.mimeType, base64: model.png.toString("base64") },
-    anchors: model.anchors, judge, referenceMemory });
+    anchors: model.anchors, judge, referenceMemory, decisionShadowClient,
+    onResearchUpdate: () => persist().catch(() => {}) });
   const queue = createHumanMessageQueue({ runAiTurn: dialogue.runAiTurn,
     initialPrivateState: dialogue.initialPrivateState(), ...(restore?.queueState ? { initialState: restore.queueState } : {}) });
   const recordId = restore?.recordId ?? randomUUID();
@@ -95,7 +96,7 @@ export async function createNamingTaskV2({
     const privateState = queue.getPrivateState();
     const record = {
       recordId, version: VERSION, trialId: trial.trialId, seed, strategy, startedAt, updatedAt: new Date(now()).toISOString(),
-      options: { visualAid: false, referenceMemory },
+      options: { visualAid: false, referenceMemory, decisionShadow: Boolean(decisionShadowClient) },
       status: result ? "completed" : closed ? "submitting" : "dialogue",
       events: snapshot.events,
       // Same role/content shape as v1 so offline metrics apply unchanged.
