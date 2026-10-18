@@ -1,11 +1,14 @@
 import { SLOTS } from "../stimuli/board.mjs";
+import { normalizeName } from "../scoring.mjs";
 
 /** @typedef {'上段左'|'上段中'|'上段右'|'下段左'|'下段中'|'下段右'} Slot */
 /** @typedef {'accept'|'propose_name'|'confirm'|'repair'|'defer'|'revisit'|'agree'|'move_on'|'close'} JudgmentAction */
 /** @typedef {'unassigned'|'tentative'|'agreed'|'deferred'} LedgerStatus */
 /** @typedef {{status: LedgerStatus, name: string|null}} LedgerEntry */
 /** @typedef {Record<Slot, LedgerEntry>} OwnLedger AI's own slot notes, never an answer key. */
-/** @typedef {{action: JudgmentAction, targetSlot: Slot|null, candidateName: string|null, discriminatingFeature: string|null, note: string|null}} Judgment */
+/** @typedef {'propose_name'|'confirm'|'move_on'|'revisit'|'defer'} FollowUpAction */
+/** @typedef {{action: FollowUpAction, targetSlot: Slot|null, candidateName: string|null, discriminatingFeature: string|null}} FollowUp */
+/** @typedef {{action: JudgmentAction, targetSlot: Slot|null, candidateName: string|null, discriminatingFeature: string|null, note: string|null, followUp?: FollowUp|null}} Judgment */
 /** @typedef {{mimeType: string, base64: string}} ParticipantImage */
 /** @typedef {{role: 'user'|'assistant', content: string}} PublicUtterance */
 /**
@@ -14,14 +17,16 @@ import { SLOTS } from "../stimuli/board.mjs";
  * @property {PublicUtterance[]} publicHistory
  * @property {'repair-first'|'bypass-enabled'} strategy
  * @property {OwnLedger} ownLedger
- * @property {{action: JudgmentAction, targetSlot: Slot|null, candidateName: string|null}[]} [ownJudgmentHistory]
+ * @property {{action: JudgmentAction, targetSlot: Slot|null, candidateName: string|null}[]} [ownJudgmentHistory] Committed acts in primary-then-followUp order.
  */
 /** @typedef {{judge(input: JudgeInput): Promise<Judgment>}} DialogueJudge */
 
 export const ACTIONS = Object.freeze(["accept", "propose_name", "confirm", "repair", "defer", "revisit", "agree", "move_on", "close"]);
+export const FOLLOW_UP_ACTIONS = Object.freeze(["propose_name", "confirm", "move_on", "revisit", "defer"]);
 export const STATUSES = Object.freeze(["unassigned", "tentative", "agreed", "deferred"]);
 export const SAFE_JUDGMENT = Object.freeze({ action: "accept", targetSlot: null, candidateName: null, discriminatingFeature: null, note: null });
 const KEYS = Object.keys(SAFE_JUDGMENT);
+const ACT_KEYS = KEYS.filter((key) => key !== "note");
 
 export class JudgmentValidationError extends Error {
   constructor(code = "invalid_judgment") { super("Invalid dialogue judgment: " + code); this.name = "JudgmentValidationError"; this.code = code; }
@@ -47,9 +52,7 @@ export function validateOwnLedger(value) {
   return Object.fromEntries(SLOTS.map((slot) => [slot, { status: value[slot].status, name: value[slot].name?.trim() ?? null }]));
 }
 
-/** @returns {Judgment} */
-export function validateJudgment(value, { ownLedger = createOwnLedger() } = {}) {
-  const ledger = validateOwnLedger(ownLedger);
+function validateAct(value, ledger) {
   if (!exactKeys(value, KEYS) || !ACTIONS.includes(value.action) ||
       !(value.targetSlot === null || SLOTS.includes(value.targetSlot)) ||
       !nullableText(value.candidateName, 200) || !nullableText(value.discriminatingFeature, 400) || !nullableText(value.note, 1000)) {
@@ -66,11 +69,12 @@ export function validateJudgment(value, { ownLedger = createOwnLedger() } = {}) 
   // A slot may hold one working name. Overwriting any remembered name requires
   // an explicit self-repair, including a named slot that was later deferred.
   if (targetSlot && ledger[targetSlot].name !== null && candidateName !== null &&
-      ledger[targetSlot].name !== candidateName && action !== "repair") {
+      normalizeName(ledger[targetSlot].name) !== normalizeName(candidateName) && action !== "repair") {
     throw new JudgmentValidationError("reassignment_requires_repair");
   }
   const assignedName = candidateName ?? (targetSlot && ["agree", "defer", "revisit"].includes(action) ? ledger[targetSlot].name : null);
-  if (assignedName !== null && SLOTS.some((slot) => slot !== targetSlot && ledger[slot].name === assignedName)) {
+  if (assignedName !== null && SLOTS.some((slot) => slot !== targetSlot && ledger[slot].name !== null &&
+      normalizeName(ledger[slot].name) === normalizeName(assignedName))) {
     // Repair must explicitly release the old slot before reusing its name on
     // another. Never infer which correspondence is correct or silently move it.
     throw new JudgmentValidationError("duplicate_name_requires_repair");
@@ -78,10 +82,26 @@ export function validateJudgment(value, { ownLedger = createOwnLedger() } = {}) 
   return judgment;
 }
 
-/** Apply typed decisions only; never inspect a generated utterance for state. */
-export function applyJudgment(ownLedger, value) {
+/** @returns {Judgment} Validate followUp against the primary act's resulting notes. */
+export function validateJudgment(value, { ownLedger = createOwnLedger() } = {}) {
   const ledger = validateOwnLedger(ownLedger);
-  const judgment = validateJudgment(value, { ownLedger: ledger });
+  if (!exactKeys(value, KEYS) && !exactKeys(value, [...KEYS, "followUp"])) throw new JudgmentValidationError();
+  const judgment = validateAct(Object.fromEntries(KEYS.map((key) => [key, value[key]])), ledger);
+  if (Object.hasOwn(value, "followUp")) {
+    if (value.followUp === null) judgment.followUp = null;
+    else {
+      if (!exactKeys(value.followUp, ACT_KEYS) || !FOLLOW_UP_ACTIONS.includes(value.followUp.action)) {
+        throw new JudgmentValidationError("invalid_follow_up");
+      }
+      const followUp = validateAct({ ...value.followUp, note: null }, applyAct(ledger, judgment));
+      judgment.followUp = Object.fromEntries(ACT_KEYS.map((key) => [key, followUp[key]]));
+    }
+  }
+  return judgment;
+}
+
+// Mutates only an already whitelisted local copy, never the caller's ledger.
+function applyAct(ledger, judgment) {
   const { action, targetSlot, candidateName } = judgment;
   if (!targetSlot) return ledger;
   const current = ledger[targetSlot];
@@ -94,5 +114,14 @@ export function applyJudgment(ownLedger, value) {
   else if (candidateName !== null && ["accept", "propose_name"].includes(action)) {
     ledger[targetSlot] = { status: current.status === "agreed" ? "agreed" : "tentative", name: candidateName };
   }
+  return ledger;
+}
+
+/** Apply both typed acts atomically; never infer state from generated speech. */
+export function applyJudgment(ownLedger, value) {
+  const ledger = validateOwnLedger(ownLedger);
+  const judgment = validateJudgment(value, { ownLedger: ledger });
+  applyAct(ledger, judgment);
+  if (judgment.followUp) applyAct(ledger, judgment.followUp);
   return ledger;
 }

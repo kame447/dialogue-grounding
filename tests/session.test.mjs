@@ -142,6 +142,73 @@ test("every typed action reaches the same generator constraints in both strategi
   });
 });
 
+test("agreement plus a next proposal reaches both ledger slots and the same generator in both strategies", async () => {
+  const proposed = { ...SAFE_JUDGMENT, action: "propose_name", targetSlot: "上段左", candidateName: "最初の候補" };
+  const compound = { ...proposed, action: "agree", note: "PRIVATE-COMPOUND-NOTE",
+    followUp: { action: "propose_name", targetSlot: "下段右", candidateName: "次の候補", discriminatingFeature: null } };
+  const allCalls = [];
+  for (const strategy of ["repair-first", "bypass-enabled"]) {
+    let judgeIndex = 0;
+    const calls = [];
+    const session = createDialogueSession({ strategy, image: ownImage, client: { async complete(messages) {
+      calls.push(structuredClone(messages));
+      return { text: isJudge(messages) ? JSON.stringify([proposed, compound, SAFE_JUDGMENT][judgeIndex++]) : "公開された返答" };
+    } } });
+    await session.turn("最初の相談");
+    await session.turn("合意して次の相談へ進みます");
+    assert.deepEqual(session.getOwnLedger()["上段左"], { status: "agreed", name: "最初の候補" });
+    assert.deepEqual(session.getOwnLedger()["下段右"], { status: "tentative", name: "次の候補" });
+    assert.equal(session.getHistory().length, 4, "two typed acts still produce just one public reply");
+    const generated = calls[3], payload = JSON.parse(generated[2].content.split("\n").slice(1).join("\n"));
+    assert.deepEqual(payload.followUp, compound.followUp);
+    assert.equal(payload.action, "agree");
+    assert.match(generated[1].content, /主actionを先にfollowUpを後に/u);
+    assert.match(generated[1].content, /両方の機能を全体で1〜2文/u);
+    assert.doesNotMatch(JSON.stringify(generated), /PRIVATE-COMPOUND-NOTE|repair-first|bypass-enabled/);
+    await session.turn("次の対象の相談を続けます");
+    const memory = calls[4].find((message) => typeof message.content === "string" && message.content.includes('"ownJudgmentHistory"'));
+    assert.deepEqual(JSON.parse(memory.content.split("\n").slice(1).join("\n")).ownJudgmentHistory, [
+      { action: "propose_name", targetSlot: "上段左", candidateName: "最初の候補" },
+      { action: "agree", targetSlot: "上段左", candidateName: "最初の候補" },
+      { action: "propose_name", targetSlot: "下段右", candidateName: "次の候補" },
+    ]);
+    assert.equal(session.getJudgmentHistory()[1].judgment.note, "PRIVATE-COMPOUND-NOTE");
+    allCalls.push(calls);
+  }
+  for (const index of [0, 2, 4]) assert.deepEqual(allCalls[0][index].filter((_, i) => i !== 1), allCalls[1][index].filter((_, i) => i !== 1));
+  for (const index of [1, 3, 5]) assert.deepEqual(allCalls[0][index], allCalls[1][index]);
+});
+
+test("failed compound generation rolls back both acts and only replays committed acts on retry", async () => {
+  const proposed = { ...SAFE_JUDGMENT, action: "propose_name", targetSlot: "上段左", candidateName: "主候補" };
+  const compound = { ...proposed, action: "agree",
+    followUp: { action: "confirm", targetSlot: "下段右", candidateName: "追加候補", discriminatingFeature: "候補間のくぼみの違い" } };
+  let judgeIndex = 0, failNext = false;
+  const calls = [];
+  const session = createDialogueSession({ strategy: "repair-first", client: { async complete(messages) {
+    calls.push(structuredClone(messages));
+    if (isJudge(messages)) return { text: JSON.stringify(judgeIndex++ === 0 ? proposed : compound) };
+    if (failNext) { failNext = false; throw new Error("PRIVATE-GENERATION-ERROR"); }
+    return { text: "公開返答" };
+  } } });
+  await session.turn("最初の相談");
+  const beforeLedger = session.getOwnLedger(), beforeHistory = session.getHistory();
+  failNext = true;
+  await assert.rejects(session.turn("複合の相談"), /PRIVATE-GENERATION-ERROR/);
+  assert.deepEqual(session.getOwnLedger(), beforeLedger);
+  assert.deepEqual(session.getHistory(), beforeHistory);
+  const failed = session.getJudgmentHistory().at(-1);
+  assert.equal(failed.status, "generation_error");
+  assert.deepEqual(failed.ownLedgerBefore, failed.ownLedgerAfter);
+  await session.turn("複合の相談");
+  const memory = calls[4].find((message) => typeof message.content === "string" && message.content.includes('"ownJudgmentHistory"'));
+  assert.deepEqual(JSON.parse(memory.content.split("\n").slice(1).join("\n")).ownJudgmentHistory,
+    [{ action: "propose_name", targetSlot: "上段左", candidateName: "主候補" }]);
+  assert.deepEqual(session.getOwnLedger()["上段左"], { status: "agreed", name: "主候補" });
+  assert.deepEqual(session.getOwnLedger()["下段右"], { status: "tentative", name: "追加候補" });
+  assert.equal(session.getHistory().length, 4);
+});
+
 test("invalid strategy and missing public utterance are rejected", async () => {
   const client = { async complete() { assert.fail("must not call"); } };
   assert.throws(() => createDialogueSession({ client, strategy: "unknown" }), /Unsupported/);

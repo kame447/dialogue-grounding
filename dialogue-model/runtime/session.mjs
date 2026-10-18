@@ -6,8 +6,9 @@ export { STRATEGIES };
 // Identical across conditions. Only the judge selects a strategy-dependent act.
 const GENERATOR_INSTRUCTIONS = [
   "【公開発話の生成】与えられた判断を、相手に向けた自然な日本語のチャット発話にしてください。",
-  "1回は1〜2文、1ターン1論点です。相手の発言を短く受け止め、親しみやすいです・ます調で返してください。硬いビジネス敬語、長い前置き、講義調は避けてください。",
+  "1回は1〜2文です。主actionとfollowUpで指定された範囲だけを扱い、相手の発言を短く受け止め、親しみやすいです・ます調で返してください。硬いビジネス敬語、長い前置き、講義調は避けてください。",
   "指定されたactionの対話機能を実現し、自分で別のactionに置き換えないでください。candidateNameがあればその名称を使ってください。",
+  "followUpがあれば、主actionを先にfollowUpを後に、両方の機能を全体で1〜2文にまとめて表現してください。以下のaction別制約はそれぞれの対象に適用し、主actionでの合意をfollowUpの別対象への合意に広げないでください。followUpがなければ主actionだけを表現してください。",
   "confirmは相手への質問・確認として表現し、propose_nameは命名の提案として表現してください。どちらも名称への合意・確定を表明せず、相手が確認や提案に答えられる形にしてください。",
   "名称への合意・確定を表明できるのはagreeのときだけです。agreeでは対象のcandidateNameへの合意を明示してください。candidateNameがnullなら、targetSlotのownLedgerに記録された名前を使ってください。",
   "repairでは自分の誤対応・改名・対応の取り消しを自己訂正として明示してください。訂正した候補を合意済みとして扱わないでください。",
@@ -64,7 +65,8 @@ export function createDialogueSession({ client, strategy, image = null, judge = 
         const judgment = validateJudgment(await dialogueJudge.judge({ image: ownImage, publicHistory: visibleHistory,
           strategy, ownLedger: structuredClone(ownLedger), ownJudgmentHistory: judgmentHistory
             .filter((item) => item.status === "committed")
-            .map(({ judgment }) => ({ action: judgment.action, targetSlot: judgment.targetSlot, candidateName: judgment.candidateName })),
+            .flatMap(({ judgment }) => [judgment, ...(judgment.followUp ? [judgment.followUp] : [])]
+              .map(({ action, targetSlot, candidateName }) => ({ action, targetSlot, candidateName }))),
         }), { ownLedger });
         trace.judgment = judgment;
         trace.validation = dialogueJudge.getDiagnostics?.().at(-1) ?? null;
@@ -73,7 +75,9 @@ export function createDialogueSession({ client, strategy, image = null, judge = 
         const result = await client.complete([
           { role: "system", content: TASK_INSTRUCTIONS },
           { role: "system", content: GENERATOR_INSTRUCTIONS },
-          { role: "system", content: "この発話の判断（非公開）:\n" + JSON.stringify({ action, targetSlot, candidateName, discriminatingFeature }) },
+          { role: "system", content: "この発話の判断（非公開）:\n" + JSON.stringify({ action, targetSlot, candidateName, discriminatingFeature,
+            ...(Object.hasOwn(judgment, "followUp") ? { followUp: judgment.followUp } : {}),
+          }) },
           ...ownImageMessage(ownImage), ledgerMessage(), ...visibleHistory,
         ], { phase: "generation" });
         if (typeof result?.text !== "string" || !result.text.trim()) throw new Error("The chat client returned no utterance");
