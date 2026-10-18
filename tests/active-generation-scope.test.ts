@@ -90,7 +90,7 @@ test("normal mode remains exactly the pre-fix byte sequence and same-action acti
   assert.equal(directive(normal.calls[0]).length, 0);
   // Captured from the unmodified ed943ba/171ced7 assembly before this fix; re-pinned for the shared
   // joint-reference text (HUMANLIKE-REFERENCE-2026-10-19), which is the same in every mode.
-  assert.equal(createHash("sha256").update(JSON.stringify(normal.calls)).digest("hex"), "1a585a5cd13a96253a1b7268d57483017219dbb794291f9682ef7d08e74b4629");
+  assert.equal(createHash("sha256").update(JSON.stringify(normal.calls)).digest("hex"), "ba9694a87d98f40d718cf01d3e5d3110048ee3dba8f2c0a2783f93a143b8f298");
   const unchanged = await capture(), fallback = await capture({ failDecision: true });
   assert.deepEqual(unchanged.calls, normal.calls); assert.deepEqual(fallback.calls, normal.calls);
   assert.equal(directive(unchanged.calls[0]).length, 0); assert.equal(directive(fallback.calls[0]).length, 0);

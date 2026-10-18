@@ -20,7 +20,7 @@ const anchors = ids.map((id, i) => ({ id, bbox: { x: i, y: 0, w: 1, h: 1 }, cent
 const image = { mimeType: "image/png", base64: "c3ludGhldGlj" };
 
 const TASK_ELEMENT = lines(TASK_INSTRUCTIONS_V2).find((l) => l.startsWith("人間同士の命名では"))!;
-const GENERATOR_ELEMENT = lines(GENERATOR_INSTRUCTIONS_V2).find((l) => l.startsWith("propose_nameでも、相手がまだ名前を出しておらず"))!;
+const GENERATOR_ELEMENT = lines(GENERATOR_INSTRUCTIONS_V2).find((l) => l.startsWith("accept・confirmでは、相手がまだ使っていない名前を"))!;
 
 test("v1 task text and the concise text are byte-identical to origin/main 345706f", () => {
   assert.equal(sha(TASK_INSTRUCTIONS), "eab651c869324c43bb9332b0109f69fe7751a85753c800182fa49a997f271ae4");
@@ -43,7 +43,9 @@ test("the new text pins the human-like sequence without fixed phrasings or strat
   assert.match(TASK_ELEMENT, /相手が名前を出していないうちから名前を持ち出して先へ進めないでください/);
   assert.match(TASK_ELEMENT, /名前の提案は、相手が名前を求めたり提案したりしたとき、または同じ対象を指していると公開対話から言えるときに行えます/);
   assert.match(TASK_ELEMENT, /進め方は相手に任せてよく、相手の確認・異論・迷いに応じてください/);
-  assert.match(GENERATOR_ELEMENT, /名前を持ち出さず/);
+  // The typed act and the public utterance stay aligned: propose_name/agree voice the name, accept/confirm do not raise one.
+  assert.match(GENERATOR_ELEMENT, /accept・confirmでは、相手がまだ使っていない名前を自分から持ち出さず/);
+  assert.doesNotMatch(GENERATOR_ELEMENT, /propose_name[^。]*名前を持ち出さず/);
   assert.match(GENERATOR_ELEMENT, /相手にもそう見えるものがあるかを尋ねられます/);
   for (const element of [TASK_ELEMENT, GENERATOR_ELEMENT]) {
     assert.doesNotMatch(element, /[「」『』]/u, "no quoted template utterances");
@@ -95,6 +97,7 @@ test("early-naming heuristics separate raising a name, agreeing, echoing and che
   assert.equal(checksJointReference("「船」と呼ぶのはどうでしょう？"), false);
   assert.equal(humanRaisesNaming(["船って呼びません？"]), true);
   assert.equal(humanRaisesNaming(["じゃあそれは船で"]), true);
+  assert.equal(humanRaisesNaming(["はい、船でお願いします。"]), true);
   assert.equal(humanRaisesNaming(["帆みたいな三角があって、端が細いです"]), false);
   assert.equal(humanChecksPresence(["船みたいなの、あります？"]), true);
 });
@@ -123,6 +126,18 @@ test("analyzeDialogue counts unrequested early naming per figure mention, checks
   assert.equal(stats.agreesCorrect, 1);
   assert.equal(stats.firstAgreeHumanTurn, 3);
   assert.deepEqual(analyzeDialogue(turns).agreesCorrect, null, "no key, no correctness");
+  assert.equal(stats.nameUnderOtherAct, 0);
+  assert.equal(stats.proposeWithoutName, 0);
+  const mismatched = analyzeDialogue([
+    { speaker: "human", text: "船みたいなの、あります？" },
+    { speaker: "ai", text: "「船」と呼ぶ形のことですか？", act: { action: "confirm", targetSlot: ids[0], candidateName: "船" } },
+    { speaker: "human", text: "帆みたいな三角があるやつです" },
+    { speaker: "ai", text: "こちらにもそう見えるのがあります。", act: { action: "propose_name", targetSlot: ids[0], candidateName: "船" } },
+    { speaker: "human", text: "船って呼びません？" },
+    { speaker: "ai", text: "船、いいですね。そう呼ぶのはどうでしょう？", act: { action: "propose_name", targetSlot: ids[0], candidateName: "船" } },
+  ]);
+  assert.equal(mismatched.nameUnderOtherAct, 1);
+  assert.equal(mismatched.proposeWithoutName, 1, "the partner's name echoed as a proposal still voices it");
 });
 
 test("turnsFromRecord aligns committed judgments with AI events and skips other shapes", () => {

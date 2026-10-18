@@ -19,7 +19,7 @@ const QUESTION = /(?:[?？]|か[。]?)$/u;
 const REFERENT = /みたい|っぽ|見え|よう|形|やつ|もの|のこと|あります|それ|その/u;
 const PRESENCE_CHECK = /あります(?:か|よね|\?|？)|ありません(?:か|\?|？)|あります[?？]|ある[?？]/u;
 // The partner raises naming: a proposal, a request or an elliptic "Xで".
-const HUMAN_NAMING = /呼|名前|でどう|でいい|にしよう|にしましょう|で決|はどう|でいきましょう|で[。!！]?$/u;
+const HUMAN_NAMING = /呼|名前|でどう|でいい|でお願い|にしよう|にしましょう|で決|はどう|でいきましょう|で[。!！]?$/u;
 
 /** Sentence-local: a name is raised in a clause that does not itself declare agreement. */
 export function raisesName(text: string): boolean {
@@ -36,8 +36,11 @@ export function humanChecksPresence(texts: readonly string[]): boolean {
   return texts.some((t) => PRESENCE_CHECK.test(clean(t)));
 }
 
+// Acts whose function may voice a name (proposal, agreement, correction of an agreed name).
+const NAMING_ACTS = new Set(["propose_name", "agree", "repair"]);
+
 export type Turn = { speaker: "human" | "ai"; text: string; goldFigure?: string | null;
-  act?: { action: string; targetSlot: string | null; followUp?: { action: string; targetSlot: string | null } | null } | null };
+  act?: { action: string; targetSlot: string | null; candidateName?: string | null; followUp?: { action: string; targetSlot: string | null } | null } | null };
 export type DialogueStats = {
   aiTurns: number; chars: number[];
   nameRaised: number; nameRaisedUnrequested: number;
@@ -48,13 +51,15 @@ export type DialogueStats = {
   presenceChecks: number; presenceCheckAnsweredWithName: number;
   /** agree committed while the partner had not raised naming in the answered turn(s). */
   agrees: number; agreesUnrequested: number; agreesCorrect: number | null; firstAgreeHumanTurn: number | null;
+  /** Act/utterance mismatch: a name raised under accept/confirm/defer/move_on…, or a propose_name that voices no name. */
+  nameUnderOtherAct: number; proposeWithoutName: number;
 };
 
 /** aiKey (optional, private): own slot -> figure id, used only with human-turn goldFigure. */
 export function analyzeDialogue(turns: readonly Turn[], aiKey: Record<string, string> | null = null): DialogueStats {
   const stats: DialogueStats = { aiTurns: 0, chars: [], nameRaised: 0, nameRaisedUnrequested: 0, earlyNamingFirst: 0, earlyNamingFirstOrSecond: 0,
     proposeActs: 0, proposeActsUnrequestedEarly: 0, jointReferenceChecks: 0, presenceChecks: 0, presenceCheckAnsweredWithName: 0,
-    agrees: 0, agreesUnrequested: 0, agreesCorrect: aiKey ? 0 : null, firstAgreeHumanTurn: null };
+    agrees: 0, agreesUnrequested: 0, agreesCorrect: aiKey ? 0 : null, firstAgreeHumanTurn: null, nameUnderOtherAct: 0, proposeWithoutName: 0 };
   const mentions: Record<string, number> = {};
   let pending: string[] = [], humanTurns = 0, gold: string | null = null;
   for (const turn of turns) {
@@ -83,6 +88,10 @@ export function analyzeDialogue(turns: readonly Turn[], aiKey: Record<string, st
       stats.proposeActs++;
       if (!requested && index <= 2) stats.proposeActsUnrequestedEarly++;
     }
+    const action = turn.act?.action ?? null;
+    if (named && action && !NAMING_ACTS.has(action)) stats.nameUnderOtherAct++;
+    const candidate = turn.act?.candidateName?.trim();
+    if (action === "propose_name" && !named && !(candidate && clean(turn.text).includes(clean(candidate)))) stats.proposeWithoutName++;
     if (checksJointReference(turn.text)) stats.jointReferenceChecks++;
     if (humanChecksPresence(pending)) {
       stats.presenceChecks++;
@@ -116,7 +125,7 @@ export function sumStats(all: readonly DialogueStats[]) {
   const total = (k: keyof DialogueStats) => all.reduce((n, s) => n + ((s[k] as number | null) ?? 0), 0);
   const chars = all.flatMap((s) => s.chars).sort((a, b) => a - b);
   const keys = ["aiTurns", "nameRaised", "nameRaisedUnrequested", "earlyNamingFirst", "earlyNamingFirstOrSecond", "proposeActs",
-    "proposeActsUnrequestedEarly", "jointReferenceChecks", "presenceChecks", "presenceCheckAnsweredWithName", "agrees", "agreesUnrequested"] as const;
+    "proposeActsUnrequestedEarly", "jointReferenceChecks", "presenceChecks", "presenceCheckAnsweredWithName", "agrees", "agreesUnrequested", "nameUnderOtherAct", "proposeWithoutName"] as const;
   return { records: all.length, ...Object.fromEntries(keys.map((k) => [k, total(k)])),
     medianChars: chars.length ? (chars.length % 2 ? chars[(chars.length - 1) / 2] : (chars[chars.length / 2 - 1] + chars[chars.length / 2]) / 2) : null,
     meanChars: chars.length ? Math.round(chars.reduce((a, b) => a + b, 0) / chars.length * 10) / 10 : null };
