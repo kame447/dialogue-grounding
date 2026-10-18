@@ -7,6 +7,7 @@
   },
   "scripts": {
     "test": "node --test tests/*.test.mjs tests/*.test.ts workers/research-ai-proxy/src/*.test.mjs workers/research-ai-proxy/src/*.test.ts",
+    "typecheck:runtime": "tsc -p tsconfig.runtime.json",
     "ai": "node dialogue-model/runtime/cli.mjs",
     "deploy:research-proxy": "wrangler deploy --config workers/research-ai-proxy/wrangler.jsonc",
     "deploy:research-proxy:dry": "wrangler deploy --dry-run --config workers/research-ai-proxy/wrangler.jsonc",
