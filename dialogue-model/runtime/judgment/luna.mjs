@@ -12,8 +12,15 @@ const judgeInstructionsFor = (version) => [
   "propose_name は対象と名前候補を選ぶ、agree は対象の名前に合意する、confirm は対象を区別する特徴で確かめる、repair は自分の対応の取り違え・合意済み名を訂正する、defer は保留、revisit は保留対象へ戻る、move_on は別対象へ進む、accept は相手の発言を受け止める、close は対話終了を相談する判断です。",
   "ownLedger は自分の過去判断を記録した作業メモで、相手との正しい対応を保証しません。tentativeの同じ対象の名前を言い換える・相手の呼び名に合わせるだけなら、agreeで新しいcandidateNameを指定し、repairは選ばないでください。まだ相談中の言い換えは同じtargetSlotのconfirmやpropose_nameでも扱えます。repairは自分の対応の取り違え・合意済み名の訂正に限り、別の対象への付け替えにも必要です。誤対応を取り消すrepairではcandidateName=nullで自分の枠を空にできます。",
   "confirm・propose_name・agreeではcandidateNameに対象の名前候補を保持できます。confirmでまだ照合中でも、話題の名前候補があればtargetSlotとcandidateNameを記録してください。confirmの候補名は仮の記憶であり、名称への合意を意味しません。",
-  "相手が提案した名前を受け入れる・同意するときは、confirmやacceptではなく必ずagreeを選び、対象のtargetSlotとcandidateNameを指定してください。propose_nameには対象枠と名称が必要です。既存の名前にagreeする場合のcandidateNameはnullでも構いません。",
-  ...(version === 2 ? ["名称提案のない大まかな見立てや挨拶・相槌にはacceptを選べます。acceptでは名称合意を作らず、candidateNameはnullにしてください。対応しそうな対象や名前を実際に提案するときだけpropose_nameを使い、曖昧さや食い違いの根拠がなければconfirmを挟まず、discriminatingFeature=nullで短い全体の見立てに進めます。相手の名称提案にagreeする場合も、対象を識別できていれば追加の特徴確認は不要です。"] : []),
+  version === 2
+    ? "agreeは名称への合意です。共通教示の合意条件（対象の同定と、相手がその名前を使う意図）を満たすときだけ選び、targetSlotとcandidateNameを指定してください。相手が名前を出しても対象の同定が不十分なら、agreeではなく、その名前を候補として保持するpropose_name、confirm、accept、または方略に応じてdefer・move_onを選べます。propose_nameには対象枠と名称が必要です。既存の名前にagreeする場合のcandidateNameはnullでも構いません。"
+    : "相手が提案した名前を受け入れる・同意するときは、confirmやacceptではなく必ずagreeを選び、対象のtargetSlotとcandidateNameを指定してください。propose_nameには対象枠と名称が必要です。既存の名前にagreeする場合のcandidateNameはnullでも構いません。",
+  ...(version === 2 ? [
+    "名称提案のない大まかな見立てや挨拶・相槌にはacceptを選べます。acceptでは名称合意を作らず、candidateNameはnullにしてください。対応しそうな対象や名前を実際に提案するときだけpropose_nameを使い、曖昧さや食い違いの根拠がなければconfirmを挟まず、discriminatingFeature=nullで短い全体の見立てに進めます。",
+    "agreeの前に、自分の画像と公開対話から対象を1つに絞れるか確かめてください。相手が述べた形の特徴があれば、自分の対象に実際にあるかを自分の画像で確かめてください。対象を絞れないときはagreeしないでください。対象と名称採用の意思が明確なら追加の確認質問や特徴の付加は不要です。",
+    "作業メモでまだunassignedかdeferredの対象には、その返答でagreeできません。相手が名前を出していても、相手の見立てを短く受け止め、自分の画像の全体の見立てと結び付けて理解を表し、必要なら自分の見立ても1つ返してください。名前はpropose_nameの候補として保持できます。discriminatingFeatureは原則nullとし、共通教示の分析トリガーがあるときだけ1特徴を入れてください。tentativeの対象でも、公開対話から対象を1つに絞れ、相手がその名前を使う意図を示し、曖昧さや矛盾が残っていない場合だけagreeしてください。内部に候補が複数あるだけでconfirmにせず、まだ名前を確定しない見立ての共有を続けられます。deferredの対象はrevisitしてから扱ってください。",
+    "相手の返答が相槌だけ（はい・うん・それ等）のときにagreeできるのは、自分の直前の名称提案が相手が導入または受け入れた対象についてのもので、その提案への受入れと読め、公開対話に曖昧さや矛盾が残っていないときだけです。識別特徴の付加は条件ではありません。対象や名称採用の意思が不明ならacceptとし、分析トリガーがあるときだけconfirmを選べます。新たな特徴を付け足すことで合意の根拠を代用しないでください。",
+  ] : []),
   "followUpは不要なら省略またはnull、必要ならaction, targetSlot, candidateName, discriminatingFeatureだけを持つ1個のオブジェクトです。followUp.actionは " + FOLLOW_UP_ACTIONS.join(" | ") + " のいずれかで、noteや入れ子のfollowUpは含めないでください。",
   version === 2
     ? "相手の発話に現在の対象への合意と次の対象への移行・提案依頼が含まれる場合は、主actionで先に合意を扱い、followUpで次の対象への提案や確認を扱えます。具体的に次の対象の提案を任されたら、自分の画像と公開対話から対象と候補名を判断し、合意だけで止めずにfollowUpで応じてください。"
@@ -22,7 +29,7 @@ const judgeInstructionsFor = (version) => [
   "ownJudgmentHistoryの直前までの対象と名前候補を確認してください。同じ対象について話し続けているときは直前のtargetSlotを維持し、その対象を別の枠と解釈し直す場合はrepairで明示してください。別の対象へ話題が移った場合と混同しないでください。",
   "同じ名前を同時に2つの枠へ記録しないでください。名前を別枠へ移す必要がある場合は、まず元の枠をrepairとcandidateName=nullで明示的に空にし、その後に対象を照合して割り当て直してください。",
   version === 2
-    ? "confirmを選ぶのは共通教示の弁別確認が必要な場面だけです。confirmには型の制約としてdiscriminatingFeatureが必要ですが、そのために確認自体や画像にない特徴を作らないでください。候補が複数ならそれらを互いに区別する、自分の画像で観察できる特徴を1つ選んでください。相手の明示的な迷い・詳細の質問や未解決の食い違いには、その問題を解く特徴1つを選んでください。相手の説明の単なる言い換えや、候補同士で違いのない特徴にしないでください。回転しても変わりにくい尖りの数・細長さ・くぼみなどを自分の画像で確かめてください。"
+    ? "confirmを選ぶのは共通教示の分析トリガーがある場面だけです。相手が迷い・曖昧さ・食い違いを表明したか特徴・詳細を求めた、公開対話の矛盾が未解決、または名前を確定しようとする時点で対象を1つに絞れず誤った合意の実害があるときに検討してください。内部の候補数だけはトリガーではありません。confirmには型の制約としてdiscriminatingFeatureが必要ですが、そのために確認自体や画像にない特徴を作らないでください。トリガーがあるときは、自分の画像で観察できる、問題を解く特徴1つを選び、一度に1特徴ずつ扱ってください。相手の説明の単なる言い換えや、候補同士で違いのない特徴にしないでください。回転しても変わりにくい特徴を自分の画像で確かめてください。"
     : "confirmにはdiscriminatingFeatureが必要です。相手の説明に当てはまりうる自分の候補が複数あるとき、それらを互いに区別する、自分の画像で観察できる特徴を1つ選んでください。相手の説明の単なる言い換えや、候補同士で違いのない特徴にしないでください。回転しても変わりにくい尖りの数・細長さ・くぼみなどを自分の画像で確かめてください。",
   "主判断とfollowUpのdiscriminatingFeatureには、自分の画面の向きに依存する上下左右・右向き・上端・下端などの語を使わないでください。回転しても変わらない、尖りの数や大小・くぼみ・細長さ・四角の有無・部分同士のつながりから、候補を区別する特徴を1つ選んでください。相手の向きを表す語は、自分の同じ向きに固定せず回転を考慮して解釈してください。",
   version === 2
@@ -79,17 +86,17 @@ export function createLunaJudge(client) {
       for (let attempt = 0; attempt < 2; attempt++) {
         validCore = null; memoryFailure = false;
         const response = await client.complete(attempt ? [...messages,
-          { role: "system", content: "前回の判断は検証できませんでした。検証理由: " + failures.at(-1) + "。tentativeの同じ対象の言い換えはagree/confirm/propose_nameで新しい名前を指定できます。合意済み名の訂正や対象の付け替えはrepairを使ってください。同名が別枠にある場合は元の枠をrepairとcandidateName=nullで空にしてから再割当してください。上記JSON形式と制約を守って再提出してください。" }] : messages,
+          { role: "system", content: "前回の判断は検証できませんでした。検証理由: " + failures.at(-1) + "。tentativeの同じ対象の言い換えはagree/confirm/propose_nameで新しい名前を指定できます。合意済み名の訂正や対象の付け替えはrepairを使ってください。同名が別枠にある場合は元の枠をrepairとcandidateName=nullで空にしてから再割当してください。" + (failures.at(-1) === "agree_requires_shared_identification" ? version === 2 ? "作業メモでunassignedかdeferredの対象にはまだagreeできません。全体の見立てで理解を示すpropose_nameやaccept、または方略に応じたdefer・move_on・revisitを選んでください。discriminatingFeatureは原則nullで、共通教示の分析トリガーがあるときだけ1特徴を添えるかconfirmを選んでください。" : "作業メモでunassignedかdeferredの対象にはまだagreeできません。識別特徴1つを添えたpropose_name、confirm、accept、または方略に応じたdefer・move_on・revisitを選んでください。" : "") + "上記JSON形式と制約を守って再提出してください。" }] : messages,
         { phase: "judgment" });
         try {
           const parsed = JSON.parse(response.text);
           if (referenceContext) {
             const core = { ...parsed }; delete core.reference;
-            validCore = validateJudgment(core, { ownLedger: ledger });
+            validCore = validateJudgment(core, { ownLedger: ledger, agreeEvidence: version === 2 });
           }
           let judgment;
           try {
-            judgment = validateJudgment(parsed, { ownLedger: ledger });
+            judgment = validateJudgment(parsed, { ownLedger: ledger, agreeEvidence: version === 2 });
             if (referenceContext) stageMemory(referenceContext.graph, referenceContext.turn, judgment.reference, publicTurns);
           } catch (error) {
             memoryFailure = Boolean(referenceContext && validCore);

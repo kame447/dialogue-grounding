@@ -73,10 +73,11 @@ for (const memory of [false, true]) test(`v2 common policy and evidence are iden
     assert.match(task, /まず全体の印象・身近なものへの見立て/);
     assert.match(task, /毎発話で名称を決めたり、幾何学的な特徴を添えたりする必要はありません/);
     assert.match(task, /まず自分の画像に対応しそうな対象があるか/);
-    assert.match(task, /説明・識別に明示的に迷うか詳細・確認を求める/);
-    assert.match(task, /候補が2つ以上ある/);
-    assert.match(task, /前の食い違いが未解決/);
-    assert.match(task, /取り違えの疑いが名称の重複・付け替えや最終対応に影響/);
+    assert.match(task, /相手が迷い・曖昧さ・食い違いを表明したか特徴・詳細を求めた/);
+    assert.match(task, /内部に候補が複数残るだけでは、confirmや特徴の説明を始めない/);
+    assert.match(task, /公開対話の矛盾が未解決/);
+    assert.match(task, /名前を確定しようとする時点で対象を1つに絞れず誤った合意の実害がある/);
+    assert.doesNotMatch(task + judge, /説明に合う候補が2つ以上ある/);
     assert.match(task, /確認・修復をするか保留するかは方略に従って/);
     assert.match(task, /挨拶や漠然とした開始の相談だけで/);
     assert.match(task, /不確かさや問い返しを毎回演出せず/);
@@ -86,6 +87,9 @@ for (const memory of [false, true]) test(`v2 common policy and evidence are iden
     assert.match(judge, /型の制約としてdiscriminatingFeatureが必要/);
     assert.match(judge, /確認自体や画像にない特徴を作らない/);
     assert.match(judge, /propose_nameやfollowUpを作らない/);
+    assert.match(task, /見立ての共有、対象の同定、名称への合意は別の段階/);
+    assert.match(task, /毎回確認の質問をする必要はありません/);
+    assert.match(judge, /相手が述べた形の特徴があれば、自分の対象に実際にあるか/);
     assert.equal(JSON.stringify(value.messages).includes("ownReferences"), memory);
   }
   same(left.messages.filter((m) => !policy(m)), right.messages.filter((m) => !policy(m)),
@@ -99,7 +103,9 @@ for (const strategy of STRATEGIES) for (const memory of [false, true]) {
       { text: "まずどう進めましょうか。", result: { ...SAFE_JUDGMENT, note: NOTE } },
       { text: "風車っぽく見える形があります。", result: { ...SAFE_JUDGMENT, targetSlot: slot, note: NOTE } },
       { text: "そちらから一つ名前を提案してください。", result: { ...SAFE_JUDGMENT, action: "propose_name", targetSlot: slot, candidateName: "風車", note: NOTE } },
-      { text: "その形を風車と呼びませんか。", result: { ...SAFE_JUDGMENT, action: "agree", targetSlot: slot, candidateName: "風車", note: NOTE } },
+      // A partner's name for a new target is kept as a candidate while the AI shows which figure it means.
+      { text: "羽が四つある形を風車と呼びませんか。", result: { ...SAFE_JUDGMENT, action: "propose_name", targetSlot: slot, candidateName: "風車",
+        discriminatingFeature: "尖りが四つある", note: NOTE } },
       { text: "似た形が二つあって迷っています。くぼみはありますか。", result: { ...SAFE_JUDGMENT,
         action: "confirm", targetSlot: slot, candidateName: "風車", discriminatingFeature: "輪郭にくぼみがある", note: NOTE } },
     ];
@@ -111,6 +117,9 @@ for (const strategy of STRATEGIES) for (const memory of [false, true]) {
       assert.equal(ledger[slot].status, status);
       if (output.action === "accept") assert.equal(ledger[slot].name, null, "reception is not a naming agreement");
     }
+    for (const discriminatingFeature of [null, "尖りが四つある"]) assert.throws(() => validateJudgment({ ...SAFE_JUDGMENT, action: "agree", targetSlot: slot,
+      candidateName: "風車", discriminatingFeature }, { agreeEvidence: true }), /agree_requires_shared_identification/,
+      "v2 never agrees in the same turn a target is first identified");
     assert.throws(() => validateJudgment({ ...SAFE_JUDGMENT, action: "confirm", targetSlot: slot }),
       "v2 must retain the typed discriminating-feature requirement when confirm is actually selected");
   });
