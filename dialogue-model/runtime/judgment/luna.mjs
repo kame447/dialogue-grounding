@@ -1,24 +1,33 @@
 import { ACTIONS, FOLLOW_UP_ACTIONS, SAFE_JUDGMENT, validateJudgment, validateOwnLedger, JudgmentValidationError } from "./schema.mjs";
-import { STRATEGIES, TASK_INSTRUCTIONS, JUDGE_POLICIES, ownImageMessage, ownRotationMessage, publicMessages } from "./instructions.mjs";
+import { STRATEGIES, taskInstructionsFor, JUDGE_POLICIES, ownImageMessage, ownRotationMessage, publicMessages } from "./instructions.mjs";
 import { summarizeForJudge, ReferenceGraphError } from "../memory/reference-graph.mjs";
 import { MEMORY_INSTRUCTIONS, stageMemory } from "./memory.mjs";
 
-const JUDGE_INSTRUCTIONS = [
+const judgeInstructionsFor = (version) => [
   "【非公開の対話判断】次の公開発話を生成するために、対話上の判断をJSONだけで返してください。これは対話相手への発話ではありません。",
   "必須キーは action, targetSlot, candidateName, discriminatingFeature, note の5個です。任意キーとしてfollowUpを追加できます。action は " + ACTIONS.join(" | ") + " です。",
-  "targetSlot は自分の6位置の1つ、またはnull。candidateName は名称文字列またはnull。discriminatingFeature は候補を区別する画像上の特徴1つ、またはnull。note は短い作業メモまたはnullで、相手には公開されません。",
+  version === 2
+    ? "targetSlot はownLedgerのキーにある自分専用の内部参照IDの1つ、またはnull。相手と共有された位置名・図形番号ではありません。candidateName は名称文字列またはnull。discriminatingFeature は候補を区別する画像上の特徴1つ、またはnull。note は短い作業メモまたはnullで、相手には公開されません。"
+    : "targetSlot は自分の6位置の1つ、またはnull。candidateName は名称文字列またはnull。discriminatingFeature は候補を区別する画像上の特徴1つ、またはnull。note は短い作業メモまたはnullで、相手には公開されません。",
   "propose_name は対象と名前候補を選ぶ、agree は対象の名前に合意する、confirm は対象を区別する特徴で確かめる、repair は自分の対応の取り違え・合意済み名を訂正する、defer は保留、revisit は保留対象へ戻る、move_on は別対象へ進む、accept は相手の発言を受け止める、close は対話終了を相談する判断です。",
   "ownLedger は自分の過去判断を記録した作業メモで、相手との正しい対応を保証しません。tentativeの同じ対象の名前を言い換える・相手の呼び名に合わせるだけなら、agreeで新しいcandidateNameを指定し、repairは選ばないでください。まだ相談中の言い換えは同じtargetSlotのconfirmやpropose_nameでも扱えます。repairは自分の対応の取り違え・合意済み名の訂正に限り、別の対象への付け替えにも必要です。誤対応を取り消すrepairではcandidateName=nullで自分の枠を空にできます。",
   "confirm・propose_name・agreeではcandidateNameに対象の名前候補を保持できます。confirmでまだ照合中でも、話題の名前候補があればtargetSlotとcandidateNameを記録してください。confirmの候補名は仮の記憶であり、名称への合意を意味しません。",
   "相手が提案した名前を受け入れる・同意するときは、confirmやacceptではなく必ずagreeを選び、対象のtargetSlotとcandidateNameを指定してください。propose_nameには対象枠と名称が必要です。既存の名前にagreeする場合のcandidateNameはnullでも構いません。",
+  ...(version === 2 ? ["名称提案のない大まかな見立てや挨拶・相槌にはacceptを選べます。acceptでは名称合意を作らず、candidateNameはnullにしてください。対応しそうな対象や名前を実際に提案するときだけpropose_nameを使い、曖昧さや食い違いの根拠がなければconfirmを挟まず、discriminatingFeature=nullで短い全体の見立てに進めます。相手の名称提案にagreeする場合も、対象を識別できていれば追加の特徴確認は不要です。"] : []),
   "followUpは不要なら省略またはnull、必要ならaction, targetSlot, candidateName, discriminatingFeatureだけを持つ1個のオブジェクトです。followUp.actionは " + FOLLOW_UP_ACTIONS.join(" | ") + " のいずれかで、noteや入れ子のfollowUpは含めないでください。",
-  "相手の発話に現在の対象への合意と次の対象への移行・提案依頼が含まれる場合は、主actionで先に合意を扱い、followUpで次の対象への提案や確認を扱えます。次の提案を求められたら、自分の画像と公開対話から対象と候補名を判断し、合意だけで止めずにfollowUpで応じてください。",
+  version === 2
+    ? "相手の発話に現在の対象への合意と次の対象への移行・提案依頼が含まれる場合は、主actionで先に合意を扱い、followUpで次の対象への提案や確認を扱えます。具体的に次の対象の提案を任されたら、自分の画像と公開対話から対象と候補名を判断し、合意だけで止めずにfollowUpで応じてください。"
+    : "相手の発話に現在の対象への合意と次の対象への移行・提案依頼が含まれる場合は、主actionで先に合意を扱い、followUpで次の対象への提案や確認を扱えます。次の提案を求められたら、自分の画像と公開対話から対象と候補名を判断し、合意だけで止めずにfollowUpで応じてください。",
   "主actionの後にfollowUpを適用します。followUpにも同じ対象・候補名・弁別的特徴の制約と同名重複禁止が適用されます。tentativeの同じ対象の言い換えはconfirmやpropose_nameで扱えますが、合意済み名の変更や対象の付け替えにはrepairが必要です。1回の返答に必要な追加判断だけを選び、方略に応じた確認や保留の選択を維持してください。",
   "ownJudgmentHistoryの直前までの対象と名前候補を確認してください。同じ対象について話し続けているときは直前のtargetSlotを維持し、その対象を別の枠と解釈し直す場合はrepairで明示してください。別の対象へ話題が移った場合と混同しないでください。",
   "同じ名前を同時に2つの枠へ記録しないでください。名前を別枠へ移す必要がある場合は、まず元の枠をrepairとcandidateName=nullで明示的に空にし、その後に対象を照合して割り当て直してください。",
-  "confirmにはdiscriminatingFeatureが必要です。相手の説明に当てはまりうる自分の候補が複数あるとき、それらを互いに区別する、自分の画像で観察できる特徴を1つ選んでください。相手の説明の単なる言い換えや、候補同士で違いのない特徴にしないでください。回転しても変わりにくい尖りの数・細長さ・くぼみなどを自分の画像で確かめてください。",
+  version === 2
+    ? "confirmを選ぶのは共通教示の弁別確認が必要な場面だけです。confirmには型の制約としてdiscriminatingFeatureが必要ですが、そのために確認自体や画像にない特徴を作らないでください。候補が複数ならそれらを互いに区別する、自分の画像で観察できる特徴を1つ選んでください。相手の明示的な迷い・詳細の質問や未解決の食い違いには、その問題を解く特徴1つを選んでください。相手の説明の単なる言い換えや、候補同士で違いのない特徴にしないでください。回転しても変わりにくい尖りの数・細長さ・くぼみなどを自分の画像で確かめてください。"
+    : "confirmにはdiscriminatingFeatureが必要です。相手の説明に当てはまりうる自分の候補が複数あるとき、それらを互いに区別する、自分の画像で観察できる特徴を1つ選んでください。相手の説明の単なる言い換えや、候補同士で違いのない特徴にしないでください。回転しても変わりにくい尖りの数・細長さ・くぼみなどを自分の画像で確かめてください。",
   "主判断とfollowUpのdiscriminatingFeatureには、自分の画面の向きに依存する上下左右・右向き・上端・下端などの語を使わないでください。回転しても変わらない、尖りの数や大小・くぼみ・細長さ・四角の有無・部分同士のつながりから、候補を区別する特徴を1つ選んでください。相手の向きを表す語は、自分の同じ向きに固定せず回転を考慮して解釈してください。",
-  "相手から名称が出るのを待つだけにせず、画像から未命名の対象の名前を提案できます。画像にない特徴・図形を推測で作らないでください。",
+  version === 2
+    ? "相手から具体的に次の提案を任された場合や対話の流れに合う場合は、画像から未命名の対象の短い全体の見立てと名前を提案できます。挨拶や漠然とした開始の相談ではacceptで相手に見立てから始めてもらう選択もあり、対象や名前を埋めるためだけにpropose_nameやfollowUpを作らないでください。画像にない特徴・図形を推測で作らないでください。"
+    : "相手から名称が出るのを待つだけにせず、画像から未命名の対象の名前を提案できます。画像にない特徴・図形を推測で作らないでください。",
   "同じ質問を繰り返さず、公開応答に合わせて判断を更新してください。どの方略でも、見立ての完全一致と対象の識別を区別してください。",
   "各名称は200文字以内、特徴は400文字以内、メモは1000文字以内。説明文・Markdown・上記以外の追加キーは返さないでください。",
 ].join("\n");
@@ -29,8 +38,9 @@ export function createLunaJudge(client) {
   const diagnostics = [];
   return {
     getDiagnostics() { return structuredClone(diagnostics); },
-    async judge({ image = null, rotationImage = null, referenceContext = null, publicHistory, strategy, ownLedger, ownJudgmentHistory = [] }) {
+    async judge({ image = null, rotationImage = null, referenceContext = null, publicHistory, strategy, ownLedger, ownJudgmentHistory = [], version = 1 }) {
       if (!STRATEGIES.includes(strategy)) throw new Error("Unsupported dialogue strategy");
+      const taskInstructions = taskInstructionsFor(version);
       const ledger = validateOwnLedger(ownLedger);
       const previous = ownJudgmentHistory.map(({ action, targetSlot, candidateName = null }) => {
         if (!ACTIONS.includes(action) || !(targetSlot === null || Object.hasOwn(ledger, targetSlot)) ||
@@ -41,9 +51,9 @@ export function createLunaJudge(client) {
       const publicTurns = referenceContext?.publicTurns.map(({ turn, speaker, text }) => ({ turn, speaker, text }));
       if (referenceContext) stageMemory(referenceContext.graph, referenceContext.turn, null, publicTurns);
       const messages = [
-        { role: "system", content: TASK_INSTRUCTIONS },
+        { role: "system", content: taskInstructions },
         { role: "system", content: JUDGE_POLICIES[strategy] },
-        { role: "system", content: JUDGE_INSTRUCTIONS },
+        { role: "system", content: judgeInstructionsFor(version) },
         ...(referenceContext ? [{ role: "system", content: MEMORY_INSTRUCTIONS }] : []),
         ...ownImageMessage(image), ...ownRotationMessage(rotationImage),
         { role: "system", content: "AI自身の作業メモ（公開発話ではない）:\n" + JSON.stringify({ ownLedger: ledger, ownJudgmentHistory: previous }) },
