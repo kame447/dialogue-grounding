@@ -53,7 +53,7 @@ for (const memory of [false, true]) test(`a judge connection failure falls back 
   assert.equal(calls.length, 1);
   assert.equal(calls[0].phase, "judgment");
   assert.equal(calls[0].timeoutMs, JUDGE_TIME_BUDGET_MS);
-  assert.deepEqual(judge.getDiagnostics().at(-1), { attempts: 2, fallback: true, failures: ["connection_timeout"], ...(memory ? { memoryFallback: false } : {}) });
+  assert.deepEqual(judge.getDiagnostics().at(-1), { attempts: 1, fallback: true, failures: ["connection_timeout"], ...(memory ? { memoryFallback: false } : {}) });
 });
 
 test("non-connection errors still propagate", async () => {
@@ -72,7 +72,7 @@ test("the validation retry gets the remaining budget, and is skipped when too li
     assert.deepEqual(await judge.judge(judgeInput(false)), SAFE_JUDGMENT);
     assert.equal(calls.length, expectRetry ? 2 : 1);
     if (expectRetry) assert.equal(calls[1].timeoutMs, JUDGE_TIME_BUDGET_MS - elapsed);
-    else assert.deepEqual(judge.getDiagnostics().at(-1)?.failures, ["invalid_json", "time_budget"]);
+    else assert.deepEqual(judge.getDiagnostics().at(-1), { attempts: 1, fallback: true, failures: ["invalid_json", "time_budget"] });
   }
 });
 

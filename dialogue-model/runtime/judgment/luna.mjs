@@ -113,11 +113,15 @@ export function createLunaJudge(client, { candidateConflict = false, timeBudgetM
         }
       };
       let validCore = null, memoryFailure = false, rawConflict, conflictPresent = false, pending = null;
+      // Diagnostics count the upstream calls actually made (a budget skip or a
+      // connection failure ends the phase early).
       const started = now();
+      let calls = 0;
       for (let attempt = 0; attempt < 2; attempt++) {
         const remaining = timeBudgetMs - (now() - started);
         if (attempt && remaining < minRetryMs) { failures.push("time_budget"); break; }
         let response;
+        calls++;
         try {
           response = await client.complete(attempt ? [...messages,
           { role: "system", content: "前回の判断は検証できませんでした。検証理由: " + failures.at(-1) + "。tentativeの同じ対象の言い換えはagree/confirm/propose_nameで新しい名前を指定できます。合意済み名の訂正や対象の付け替えはrepairを使ってください。同名が別枠にある場合は元の枠をrepairとcandidateName=nullで空にしてから再割当してください。" + (failures.at(-1) === "agree_requires_shared_identification" ? version === 2 ? "作業メモでunassignedかdeferredの対象にはまだagreeできません。全体の見立てで理解を示すpropose_nameやaccept、または方略に応じたdefer・move_on・revisitを選んでください。discriminatingFeatureは原則nullで、共通教示の分析トリガーがあるときだけ1特徴を添えるかconfirmを選んでください。" : "作業メモでunassignedかdeferredの対象にはまだagreeできません。識別特徴1つを添えたpropose_name、confirm、accept、または方略に応じたdefer・move_on・revisitを選んでください。" : "") + (candidateConflict ? CONFLICT_RETRY_HINTS[failures.at(-1)] ?? "" : "") + "上記JSON形式と制約を守って再提出してください。" }] : messages,
@@ -162,15 +166,15 @@ export function createLunaJudge(client, { candidateConflict = false, timeBudgetM
         }
       }
       if (pending) {
-        diagnostics.push({ attempts: 2, fallback: false, failures, ...(referenceContext ? { memoryFallback: false } : {}), ...pending.outcome });
+        diagnostics.push({ attempts: calls, fallback: false, failures, ...(referenceContext ? { memoryFallback: false } : {}), ...pending.outcome });
         return pending.judgment;
       }
       if (memoryFailure && validCore) {
-        diagnostics.push({ attempts: 2, fallback: false, failures, memoryFallback: true,
+        diagnostics.push({ attempts: calls, fallback: false, failures, memoryFallback: true,
           ...(candidateConflict ? conflictOutcome(conflictPresent, rawConflict, validCore) : {}) });
         return { ...validCore, reference: null };
       }
-      diagnostics.push({ attempts: 2, fallback: true, failures, ...(referenceContext ? { memoryFallback: false } : {}),
+      diagnostics.push({ attempts: calls, fallback: true, failures, ...(referenceContext ? { memoryFallback: false } : {}),
         ...(candidateConflict ? { conflict: null, conflictError: null, nonDiscriminating: false } : {}) });
       return { ...SAFE_JUDGMENT, ...(referenceContext ? { reference: null } : {}) };
     },
