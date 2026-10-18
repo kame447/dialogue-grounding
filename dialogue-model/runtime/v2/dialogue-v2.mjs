@@ -9,6 +9,8 @@ import { STRATEGIES, TASK_INSTRUCTIONS_V2, ownImageMessage, publicMessages } fro
 import { createReferenceGraph, applyReferenceUpdate, snapshotReferenceGraph, ReferenceGraphError, REFERENCE_LIMITS } from "../memory/reference-graph.mjs";
 import { stageMemory, prepareMemory } from "../judgment/memory.mjs";
 import { buildDecisionEvidence } from "./decision-evidence.mjs";
+import { resolveActiveJudgment } from "./active-judge.mjs";
+import { findAgreementClaims, fallbackUtterance } from "./generation-guard.ts";
 
 // Identical across strategies. Holistic first; analysis only when the judge asks for it.
 export const GENERATOR_INSTRUCTIONS_V2 = [
@@ -72,7 +74,7 @@ function abortIf(signal) {
  * @param {{ client, strategy, image: {mimeType, base64}, anchors: {id, bbox, centroid}[], judge?, referenceMemory?: boolean }} options
  */
 export function createDialogueV2({ client, strategy, image, anchors, judge = null, referenceMemory = false,
-  decisionShadowClient = null, onResearchUpdate = null }) {
+  decisionShadowClient = null, onResearchUpdate = null, activeDecision = null }) {
   if (!client || typeof client.complete !== "function") throw new Error("A chat client is required");
   if (!STRATEGIES.includes(strategy)) throw new Error("Unsupported dialogue strategy");
   if (typeof referenceMemory !== "boolean") throw new Error("Invalid memory option");
@@ -80,6 +82,9 @@ export function createDialogueV2({ client, strategy, image, anchors, judge = nul
     throw new Error("Invalid decision shadow client");
   }
   if (onResearchUpdate !== null && typeof onResearchUpdate !== "function") throw new Error("Invalid research update callback");
+  if (activeDecision !== null && (!activeDecision || !["decision_jev", "decision_luna"].includes(activeDecision.purpose) ||
+      typeof activeDecision.client?.chooseAction !== "function")) throw new Error("Invalid active decision client");
+  if (activeDecision && decisionShadowClient) throw new Error("Active and shadow decisions are mutually exclusive");
   const ownImage = { mimeType: image.mimeType, base64: image.base64 };
   ownImageMessage(ownImage);
   const slots = anchors.map((anchor) => anchor.id);
@@ -159,6 +164,24 @@ export function createDialogueV2({ client, strategy, image, anchors, judge = nul
         memoryUpdate = stageMemory(state.graph, latest.seq, null, publicTurns);
       }
     } else judgment = validateJudgment(rawJudgment, { ownLedger: state.ledger, agreeEvidence: true });
+    if (activeDecision) {
+      let decision;
+      const started = performance.now();
+      try {
+        const evidence = buildDecisionEvidence({ events, ownLedger: state.ledger, judgment, strategy });
+        decision = { ...await activeDecision.client.chooseAction({ purpose: activeDecision.purpose, state: evidence }), purpose: activeDecision.purpose };
+      } catch (error) { decision = { error, purpose: activeDecision.purpose, latencyMs: Math.round(performance.now() - started) }; }
+      abortIf(signal);
+      const resolved = resolveActiveJudgment({ lunaJudgment: judgment, decision, ownLedger: state.ledger, strategy });
+      judgment = resolved.judgment;
+      trace.activeJudge = resolved.record;
+      if (state.graph) {
+        const staged = prepareMemory(state.graph, latest.seq, judgment.reference, publicTurns);
+        memoryUpdate = staged.update;
+        trace.memory.interpretation = judgment.reference != null;
+        trace.memory.rejected ??= staged.rejected;
+      }
+    }
     trace.judgment = { ...judgment };
     delete trace.judgment.reference;
     if (decisionShadowClient) {
@@ -168,7 +191,7 @@ export function createDialogueV2({ client, strategy, image, anchors, judge = nul
     trace.validation = dialogueJudge.getDiagnostics?.().at(-1) ?? null;
     trace.status = "generation_error";
     const { action, targetSlot, candidateName, discriminatingFeature } = judgment;
-    const result = await client.complete([
+    const generationMessages = [
       { role: "system", content: TASK_INSTRUCTIONS_V2 },
       { role: "system", content: GENERATOR_INSTRUCTIONS_V2 },
       { role: "system", content: "この発話の判断（非公開）:\n" + "主actionで言えること: " + ACTION_SCOPE_V2[action] +
@@ -176,10 +199,40 @@ export function createDialogueV2({ client, strategy, image, anchors, judge = nul
         ...(Object.hasOwn(judgment, "followUp") ? { followUp: judgment.followUp } : {}) }) },
       ...ownImageMessage(ownImage),
       { role: "system", content: "AI自身の作業メモ（非公開・正解表ではない）:\n" + JSON.stringify({ ownLedger: state.ledger, agreeEvidence: true }) },
+      ...(trace.activeJudge && trace.activeJudge.finalAction !== trace.activeJudge.lunaAction ? [{
+        role: "system", content: "【この発話の表現範囲（非公開）】この発話のactionは" + action + "です。" + ACTION_SCOPE_V2[action] + "。" +
+          (action === "agree" ? "" : "相手が名前を提案していても、このactionでは名称への合意・決定を表す表現（呼びましょう／でいいですね／決まり 等）を使わないでください。") +
+          (action === "accept" ? "受け止めや見立ての共有にとどめてください。" : "このactionで指定された対話機能の範囲だけを表現してください。") +
+          "内部の判断・処理・ラベルを相手に説明せず、公開する発話だけを返してください。",
+      }] : []),
       ...history,
-    ], { phase: "generation" });
+    ];
+    let result = await client.complete(generationMessages, { phase: "generation" });
     abortIf(signal);
     if (typeof result?.text !== "string" || !result.text.trim()) throw new Error("The chat client returned no utterance");
+    trace.generationGuard = { violations: [], regenerated: false, fallback: false };
+    if (action !== "agree") {
+      trace.generationGuard.violations = findAgreementClaims(result.text);
+      if (trace.generationGuard.violations.length) {
+        abortIf(signal);
+        trace.generationGuard.regenerated = true;
+        let retry = null;
+        try {
+          retry = await client.complete([...generationMessages, {
+            role: "system", content: "【公開発話の書き直し】この発話のactionは" + action + "です。" + ACTION_SCOPE_V2[action] +
+              "。前の下書きは名称の決定・合意を表していました。決定・合意を表明せず、このactionの範囲で書き直してください。内部処理は説明せず、公開する発話だけを返してください。",
+          }], { phase: "generation" });
+        } catch { /* Retry failure is private; never retain a raw provider error. */ }
+        abortIf(signal);
+        const retryCodes = typeof retry?.text === "string" && retry.text.trim() ? findAgreementClaims(retry.text) : null;
+        trace.generationGuard.violations = [...new Set([...trace.generationGuard.violations, ...(retryCodes ?? [])])];
+        if (retryCodes && retryCodes.length === 0) result = retry;
+        else {
+          result = { text: fallbackUtterance(judgment) };
+          trace.generationGuard.fallback = true;
+        }
+      }
+    }
     const nextLedger = applyJudgment(state.ledger, judgment);
     const nextGraph = state.graph ? applyReferenceUpdate(state.graph, memoryUpdate, { publicTurns, generationSucceeded: true }) : null;
     if (state.graph) trace.memory.opsApplied = memoryUpdate.operations.length;
