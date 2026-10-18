@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>6図形の共同命名</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <main>
+    <header><p class="eyebrow">研究用プロトタイプ</p><h1>6図形の共同命名</h1>
+      <p>AIと会話して、同じ図形に同じ名前を付けてください。相手の画面では配置と向きが異なります。</p>
+    </header>
+    <p id="notice" role="status" aria-live="polite"></p>
+    <form id="setup" class="panel">
+      <h2>研究者用：試行の開始</h2>
+      <label>方略<select name="strategy"><option value="repair-first">確認・修復を優先</option><option value="bypass-enabled">保留・後からの調整を許容</option></select></label>
+      <label>Seed<input name="seed" type="number" step="1" required value="1"></label>
+      <button>開始</button>
+      <p class="muted">実験条件・採点規則は暫定です。研究者が開始してから参加者に画面を渡してください。</p>
+    </form>
+    <section id="trial" hidden>
+      <div class="workspace">
+        <section class="panel board"><h2>あなたの図形</h2><p>上段左・上段中・上段右／下段左・下段中・下段右</p>
+          <img id="board" alt="あなたに提示された6図形。2段3列で、上段左から下段右の位置で参照します。">
+        </section>
+        <section class="panel dialogue"><h2>対話</h2><ol id="history" aria-live="polite" aria-label="公開された会話"></ol>
+          <form id="chat"><label for="utterance">メッセージ <span class="muted">Enterで送信・Shift+Enterで改行</span></label><textarea id="utterance" name="utterance" rows="3" maxlength="12000" required></textarea>
+            <div class="chat-actions"><p id="chat-status" role="status" aria-live="polite"></p><button>送信</button></div>
+          </form>
+        </section>
+      </div>
+      <section class="panel"><h2>最終提出</h2><p>あなた自身の画面上の位置ごとに名前を記入してください。未命名は空欄にできます。提出すると対話を終了し、名称を確定します。</p>
+        <form id="submission"><div id="names" class="names"></div><button>名前を確定して提出</button></form>
+        <p id="submission-status" aria-live="polite"></p>
+      </section>
+      <section id="results" class="panel" hidden><h2>照合結果（暫定）</h2><p>表記揺れ・部分成功・重複名の正式な扱いは未決定です。以下は操作確認用の暫定採点です。</p><div id="result-body"></div></section>
+      <button id="new-trial" type="button" hidden>研究者用：次の試行を準備</button>
+    </section>
+  </main>
+</body>
+</html>
