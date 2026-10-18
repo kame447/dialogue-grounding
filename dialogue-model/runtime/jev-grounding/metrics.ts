@@ -61,14 +61,16 @@ export function axisQualityOf(c: GroundingEvalCase, axis: "target" | "name"): La
   return c.axisQuality?.[axis] ?? c.labelQuality;
 }
 
+/** Gold that may enter headline numbers. Weak (M-derived) gold is opt-in only. */
+export const HEADLINE_QUALITIES: readonly LabelQuality[] = Object.freeze(["explicit", "derived"]);
+
 /**
- * Per-axis agreement. `qualities` restricts which gold enters (for example
- * ["explicit", "derived"] for a headline that excludes weak, M-derived labels);
- * report weak gold separately rather than mixing it in.
+ * Per-axis agreement. By default only HEADLINE_QUALITIES gold enters; pass
+ * ["weak"] (or all three) explicitly to report weak gold, separately.
  */
-export function evaluate(cases: readonly GroundingEvalCase[], predictions: readonly Prediction[], qualities?: readonly LabelQuality[]): { target: AxisReport; name: AxisReport } {
+export function evaluate(cases: readonly GroundingEvalCase[], predictions: readonly Prediction[], qualities: readonly LabelQuality[] = HEADLINE_QUALITIES): { target: AxisReport; name: AxisReport } {
   const byId = new Map(predictions.map((p) => [p.caseId, p]));
-  const keep = (c: GroundingEvalCase, axis: "target" | "name") => !qualities || qualities.includes(axisQualityOf(c, axis));
+  const keep = (c: GroundingEvalCase, axis: "target" | "name") => qualities.includes(axisQualityOf(c, axis));
   const target = cases.filter((c) => c.expected.target !== null && keep(c, "target"))
     .map((c) => ({ gold: c.expected.target as TargetEvidence, predicted: byId.get(c.caseId)?.target ?? null }));
   const name = cases.filter((c) => c.expected.name !== null && keep(c, "name"))

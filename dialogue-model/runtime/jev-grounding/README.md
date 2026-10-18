@@ -33,8 +33,9 @@ files 0600) and are never committed. Nothing here calls a model.
   every target value derived from M is `weak` (`axisQuality.target`), and M2
   alone gives `insufficient`: `contradicted` also needs an explicit denial (a12 /
   Deny). Whether M4 at a commitment point may count as target sharing is a
-  researcher decision; until then report weak gold separately from the headline
-  (`evaluate(cases, predictions, ["explicit", "derived"])`).
+  researcher decision; until then weak gold stays out of the headline:
+  `evaluate()` excludes it by default, and `evaluate(cases, predictions, ["weak"])`
+  reports it separately.
 - a11 / a3 / a9 / a4 mark commitment positions (where an unfounded 「わかります」
   would sit); they are never evidence of a shared referent by themselves.
 - P5 (approximate adoption) leaves the target axis null: what stayed incomplete

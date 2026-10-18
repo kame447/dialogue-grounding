@@ -183,12 +183,12 @@ test("metrics: confusion, macro-F1, abstention and missing predictions", () => {
   assert.ok(r.macroF1 !== null && Math.abs(r.macroF1 - (2 / 3 + 0) / 2) < 1e-9);
   const rows = labelRows(fixture()).get("H1") ?? [];
   const cases = buildHistoricalCases("H1", rows, { split: () => "train" });
-  const report = evaluate(cases, cases.map((c) => ({ caseId: c.caseId, target: c.expected.target ?? "unknown", name: c.expected.name ?? "unknown" })));
+  const report = evaluate(cases, cases.map((c) => ({ caseId: c.caseId, target: c.expected.target ?? "unknown", name: c.expected.name ?? "unknown" })), ["explicit", "derived", "weak"]);
   assert.equal(report.target.accuracy, 1);
   assert.equal(report.name.accuracy, 1);
   assert.equal(report.name.n, cases.filter((c) => c.expected.name !== null).length);
   // Headline without weak gold: target (all M-derived, weak) drops out, ER-derived names stay.
-  const headline = evaluate(cases, [], ["explicit", "derived"]);
+  const headline = evaluate(cases, []);
   assert.equal(headline.target.n, 0);
   assert.equal(headline.name.n, report.name.n);
 });
