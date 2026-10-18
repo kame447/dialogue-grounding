@@ -93,6 +93,55 @@ test("named confirmation and agreement retain the same own target across turns w
   for (const index of [1, 3, 4]) assert.deepEqual(executions[0][index], executions[1][index]);
 });
 
+test("every typed action reaches the same generator constraints in both strategies without promoting speech to agreement", async (t) => {
+  const targetSlot = "上段中", candidateName = "候補名";
+  const cases = [
+    { action: "accept" },
+    { action: "confirm", targetSlot, candidateName, discriminatingFeature: "候補を区別するくぼみ" },
+    { action: "propose_name", targetSlot, candidateName },
+    { action: "agree", targetSlot, candidateName },
+    { action: "repair", targetSlot, candidateName },
+    { action: "defer", targetSlot },
+    { action: "revisit", targetSlot },
+    { action: "move_on" },
+    { action: "close" },
+  ];
+  for (const item of cases) await t.test(item.action, async () => {
+    const judgment = { ...SAFE_JUDGMENT, ...item, note: "PRIVATE-ACTION-NOTE" }, payloads = [];
+    for (const strategy of ["repair-first", "bypass-enabled"]) {
+      let generated;
+      const client = { async complete(messages) {
+        if (isJudge(messages)) return { text: JSON.stringify(judgment) };
+        generated = structuredClone(messages);
+        // Deliberately misleading mock speech must never decide ledger status.
+        return { text: "名称は合意済みです。" };
+      } };
+      const session = createDialogueSession({ client, strategy, image: ownImage });
+      await session.turn("公開発話");
+      const instructions = generated[1].content;
+      assert.match(instructions, /confirmは相手への質問・確認/u);
+      assert.match(instructions, /propose_nameは命名の提案/u);
+      assert.match(instructions, /どちらも名称への合意・確定を表明せず/u);
+      assert.match(instructions, /名称への合意・確定を表明できるのはagreeのときだけ/u);
+      assert.match(instructions, /repairでは.*自己訂正として明示/u);
+      assert.match(instructions, /deferでは.*保留することを、revisitでは.*再訪/u);
+      assert.match(instructions, /move_onでは別対象への移行/u);
+      assert.match(instructions, /closeでは対話終了を相談/u);
+      assert.match(instructions, /acceptでは相手の発言を受け止め/u);
+      const sent = JSON.parse(generated[2].content.split("\n").slice(1).join("\n"));
+      const { action, targetSlot: slot, candidateName: name, discriminatingFeature } = judgment;
+      assert.deepEqual(sent, { action, targetSlot: slot, candidateName: name, discriminatingFeature });
+      assert.doesNotMatch(JSON.stringify(generated), /PRIVATE-ACTION-NOTE|repair-first|bypass-enabled/);
+      assert.equal(Object.values(session.getOwnLedger()).some((entry) => entry.status === "agreed"), action === "agree");
+      if (["confirm", "propose_name", "repair"].includes(action)) {
+        assert.deepEqual(session.getOwnLedger()[targetSlot], { status: "tentative", name: candidateName });
+      }
+      payloads.push(generated);
+    }
+    assert.deepEqual(payloads[0], payloads[1]);
+  });
+});
+
 test("invalid strategy and missing public utterance are rejected", async () => {
   const client = { async complete() { assert.fail("must not call"); } };
   assert.throws(() => createDialogueSession({ client, strategy: "unknown" }), /Unsupported/);
