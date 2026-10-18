@@ -1,6 +1,8 @@
 // Data audit for the shadow comparison: missing turns, future-turn and
 // answer-key leakage into judge inputs, split leakage, and label quality.
 // Reports counts and ids only, never utterance text.
+import { assertSendable } from "../../jev-grounding/evalcase.ts";
+import type { GroundingEvalCase } from "../../jev-grounding/evalcase.ts";
 import { sortedEvents } from "./replay.ts";
 import type { SessionRecordLike } from "./replay.ts";
 import type { EvalCaseLike, JevAxesInput, ReplayItem } from "./types.ts";
@@ -68,7 +70,7 @@ export function auditCases(cases: readonly EvalCaseLike[]) {
     // judgedTurnIndex is either the last history turn or history.length (the reply to come).
     focalOutOfRange: cases.filter((c) => !Number.isSafeInteger(c.judgedTurnIndex) || c.judgedTurnIndex < 0 || c.judgedTurnIndex > c.history.length).length,
     turnsAfterFocal: cases.filter((c) => c.history.length - 1 > c.judgedTurnIndex).length,
-    historicalMarkedSendable: cases.filter((c) => c.source === "historical" && (c.externalModelAllowed === true || c.sendable === true)).length,
+    historicalMarkedSendable: cases.filter((c) => c.source === "historical" && c.externalModelAllowed === true).length,
     sendable: cases.filter((c) => isSendable(c)).length,
     bySource: count((c) => c.source),
     bySplit: count((c) => c.split),
@@ -82,8 +84,12 @@ export function auditCases(cases: readonly EvalCaseLike[]) {
   };
 }
 
-/** Only synthetic or AI-session cases explicitly marked sendable may reach an external model. */
+/** jev-evalset's guard (#50) is the single sendability rule: externalModelAllowed and not historical. */
 export function isSendable(c: EvalCaseLike): boolean {
-  const marked = c.externalModelAllowed === true || c.sendable === true;
-  return marked && c.externalModelAllowed !== false && c.sendable !== false && c.source !== "historical";
+  try {
+    assertSendable(c as unknown as GroundingEvalCase);
+    return c.externalModelAllowed === true;
+  } catch {
+    return false;
+  }
 }

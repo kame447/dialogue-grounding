@@ -14,6 +14,8 @@ import { mkdirSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { outsideRepositoryDirectory } from "../../naming-task.mjs";
+import { toJudgeInput as caseJudgeInput } from "../../jev-grounding/evalcase.ts";
+import type { GroundingEvalCase } from "../../jev-grounding/evalcase.ts";
 import { auditCases, auditRecord, isSendable, toJudgeInput } from "./audit.ts";
 import { createMockJevAxesClient } from "./mock-client.ts";
 import { caseProbe, summarizeCases, summarizeTurns, turnResult } from "./metrics.ts";
@@ -151,7 +153,8 @@ export async function runShadow({ record = null, cases = [], knownFailures = [],
     if (live && !liveAllowed(c)) { caseResults.push({ ...base, verdict: null, error: "not_sendable", probe: caseProbe(c, null) }); continue; }
     if (stopped) { caseResults.push({ ...base, verdict: null, error: "skipped_" + stopped, probe: caseProbe(c, null) }); continue; }
     try {
-      const v = await judge.judgeAxes({ history: c.history.slice(0, c.judgedTurnIndex + 1).map((t) => ({ speaker: t.speaker, text: t.text })) });
+      // jev-evalset's view of a case: public history only, no gold, tags, probe or old action.
+      const v = await judge.judgeAxes({ history: caseJudgeInput(c as unknown as GroundingEvalCase).history.slice(0, c.judgedTurnIndex + 1) });
       const verdict = { target: v.target, name: v.name };
       caseResults.push({ ...base, verdict, error: null, probe: caseProbe(c, verdict) });
     } catch (error) {

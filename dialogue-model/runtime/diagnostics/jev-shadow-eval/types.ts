@@ -67,9 +67,8 @@ export type EvalCaseLike = {
   /** Leakage unit (dialogue or episode); splits are assigned per group. */
   groupId: string;
   split: "train" | "dev" | "holdout";
-  /** Both absent, or either false, means the case must never reach an external model. */
+  /** Anything but true means the case must never reach an external model. */
   externalModelAllowed?: boolean;
-  sendable?: boolean;
   history: JudgeTurn[];
   judgedTurnIndex: number;
   /** null = no gold; a blank source label is never mapped to a value. */

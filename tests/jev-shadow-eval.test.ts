@@ -152,9 +152,8 @@ test("live runs: never the session replay, never non-synthetic or unsendable cas
   assert.deepEqual(Object.keys(mixed.cases.bySplit.dev.byQuality), ["derived", "weak"]);
   assert.equal(liveAllowed(cases[1]), false);
   assert.equal(liveAllowed(cases[3]), false);
-  assert.equal(liveAllowed(syntheticCase({ externalModelAllowed: undefined, sendable: true })), true);
-  assert.equal(liveAllowed(syntheticCase({ externalModelAllowed: false, sendable: true })), false, "either false blocks");
   assert.equal(liveAllowed(syntheticCase({ externalModelAllowed: undefined })), false, "unmarked is not sendable");
+  assert.equal(liveAllowed({ ...syntheticCase(), sendable: true, externalModelAllowed: undefined } as EvalCaseLike), false, "no alias: only externalModelAllowed counts");
 });
 
 test("live runs stop on a missing route and report it", async () => {
