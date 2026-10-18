@@ -64,6 +64,7 @@
             <h2 id="results-title" tabindex="-1">照合結果（暫定）</h2>
             <p class="muted">図形のそばに、あなたとAIの名称・暫定照合を表示しています。正式な採点規則は検討中です。</p>
             <div id="result-body"></div>
+            <div id="result-list" class="summary-list" aria-label="照合結果の一覧"></div>
             <p class="muted questionnaire-note">アンケートは予定段階のため、今回は実施しません。</p>
           </section>
           <button id="new-trial" type="button" class="secondary" hidden>研究者用：次の試行を準備</button>
@@ -85,6 +86,7 @@
     <h2 id="confirm-title">この回答を提出しますか？</h2>
     <p>図形のそばの名前を確認してください。提出すると対話を終了し、回答を変更できなくなります。</p>
     <svg id="confirm-scene" viewBox="0 0 1200 800" aria-label="提出する図形と名前" xmlns="http://www.w3.org/2000/svg"></svg>
+    <div id="confirm-list" class="summary-list" aria-label="提出する名前の一覧"></div>
     <div class="modal-actions"><button id="confirm-cancel" type="button" class="secondary">修正する</button><button id="confirm-submit" type="button">この回答で提出する</button></div>
   </dialog>
 </body>
