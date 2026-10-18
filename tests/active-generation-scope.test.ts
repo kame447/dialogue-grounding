@@ -32,7 +32,7 @@ async function capture(options: CaptureOptions = {}) {
   const calls: GenerationCall[] = [];
   const weights = options.weights ?? { [selectedAction]: 1 };
   const selected = { purpose: "decision_jev", model: DECISION_MODELS.decision_jev, action: selectedAction,
-    probabilities: Object.fromEntries(DECISION_ACTIONS.map((action: Action) => [action, weights[action] ?? 0])),
+    probabilities: Object.fromEntries((DECISION_ACTIONS as readonly Action[]).map((action) => [action, weights[action] ?? 0])),
     latencyMs: 10, usage: { costUsd: 0.00001 }, rawBody: "PRIVATE-DECISION-BODY" };
   const session = createDialogueV2({ strategy, image, anchors,
     judge: { async judge() { return { ...SAFE_JUDGMENT, action: lunaAction, targetSlot: ids[0],

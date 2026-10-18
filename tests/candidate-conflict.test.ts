@@ -135,7 +135,7 @@ test("missing or malformed conflict blocks are recorded without a retry or a saf
 
 test("validator: shapes, target membership and the split rule", () => {
   const ownIds = ids;
-  const v = (conflict: unknown, judgment = confirm) => validateCandidateConflict(conflict, { ownIds, judgment });
+  const v = (conflict: unknown, judgment: { targetSlot: string | null; discriminatingFeature: string | null } = confirm) => validateCandidateConflict(conflict, { ownIds, judgment });
   const code = (fn: () => unknown) => { try { fn(); return null; } catch (error) { assert.ok(error instanceof CandidateConflictError); return error.code; } };
   assert.deepEqual(v({ candidates: [], featureFits: null }), { candidates: [], featureFits: null });
   assert.equal(code(() => v({ candidates: [], featureFits: [] })), "conflict_fits_required");

@@ -6,15 +6,18 @@ import { validateReferenceInterpretation } from "./memory.mjs";
 /** @typedef {'accept'|'propose_name'|'confirm'|'repair'|'defer'|'revisit'|'agree'|'move_on'|'close'} JudgmentAction */
 /** @typedef {'unassigned'|'tentative'|'agreed'|'deferred'} LedgerStatus */
 /** @typedef {{status: LedgerStatus, name: string|null}} LedgerEntry */
-/** @typedef {Record<Slot, LedgerEntry>} OwnLedger AI's own slot notes, never an answer key. */
+/** @typedef {Record<string, LedgerEntry>} OwnLedger AI's own slot notes, never an answer key. Keys are v1 Slot names or the v2 AI's opaque own ids. */
 /** @typedef {'propose_name'|'confirm'|'move_on'|'revisit'|'defer'} FollowUpAction */
-/** @typedef {{action: FollowUpAction, targetSlot: Slot|null, candidateName: string|null, discriminatingFeature: string|null}} FollowUp */
-/** @typedef {{action: JudgmentAction, targetSlot: Slot|null, candidateName: string|null, discriminatingFeature: string|null, note: string|null, followUp?: FollowUp|null, reference?: object|null}} Judgment Reference interpretations also require provenance validation against the session graph. */
+/** @typedef {{action: FollowUpAction, targetSlot: SlotRef|null, candidateName: string|null, discriminatingFeature: string|null}} FollowUp */
+/** @typedef {string} SlotRef A v1 Slot name or a v2 opaque own id. */
+/** @typedef {{action: JudgmentAction, targetSlot: SlotRef|null, candidateName: string|null, discriminatingFeature: string|null, note: string|null, followUp?: FollowUp|null, reference?: object|null}} Judgment Reference interpretations also require provenance validation against the session graph. */
 /** @typedef {{mimeType: string, base64: string}} ParticipantImage */
 /** @typedef {{role: 'user'|'assistant', content: string}} PublicUtterance */
 /**
  * @typedef {object} JudgeInput
+ * @property {number} [version] 2 selects the v2 opaque-id prompt.
  * @property {ParticipantImage|null} image
+ * @property {{id: string, bbox: object, centroid: object}[]} [ownAnchors] v2 only: the AI's own private anchors.
  * @property {ParticipantImage|null} [rotationImage] Derived exclusively from the participant's own board.
  * @property {{graph: object, turn: number, publicTurns: {turn: number, speaker: 'human'|'ai', text: string}[]}|null} [referenceContext] Private provenance context, never generator input.
  * @property {PublicUtterance[]} publicHistory
