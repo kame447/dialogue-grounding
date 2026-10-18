@@ -18,8 +18,6 @@ import {
 // orchestration instrument, NOT evidence of Luna's vision, strategy, success,
 // or human naturalness. Lengths sample test workloads, never runtime minima.
 const LENGTHS = [60, 80, 120];
-// Remove this explicit skip once the parent's toggle implementation is imported.
-const TOGGLE_PENDING = "Awaiting BriskPasteur toggle integration (ORRERY contract #5907); baseline runtime is exercised below";
 const OPTIONS = [
   { visualAid: false, referenceMemory: false }, { visualAid: true, referenceMemory: false },
   { visualAid: false, referenceMemory: true }, { visualAid: true, referenceMemory: true },
@@ -111,13 +109,16 @@ function instrument(length, { visualAid = false, referenceMemory = false } = {})
       const memory = JSON.parse(note.content.slice(note.content.indexOf("\n") + 1));
       assert.deepEqual(memory.ownJudgmentHistory, expectedActs, "replay committed primary/follow-up acts exactly once");
       if (referenceMemory) {
-        const summary = typeof memory.ownReferences === "string" ? JSON.parse(memory.ownReferences) : memory.ownReferences;
+        const referenceNote = messages.find((m) => typeof m.content === "string" && m.content.includes('"ownReferences"'));
+        assert.ok(referenceNote);
+        const references = JSON.parse(referenceNote.content.slice(referenceNote.content.indexOf("\n") + 1));
+        const summary = references.ownReferences;
         assert.ok(summary, "enabled judge receives private referent memory");
         assert.equal(summary.scope, "private_own_slots_not_ground_truth");
         assert.equal(summary.revision, index, "failed attempts cannot advance reference revision");
         assert.ok(JSON.stringify(summary).length <= 6000);
         assert.deepEqual(Object.keys(summary.ownSlots), SLOTS);
-        assert.equal(memory.currentTurn, index + 1);
+        assert.equal(references.currentTurn, index + 1);
       } else assert.equal(Object.hasOwn(memory, "ownReferences"), false);
       if (fault === "judge_error") { fault = null; throw new Error("PRIVATE-TRANSPORT-ERROR"); }
       if (fault === "invalid_json") { fault = null; return { text: "not JSON", model: "scripted-test-only" }; }
@@ -185,6 +186,7 @@ for (const strategy of STRATEGIES) for (const length of LENGTHS) {
       image: { ...ownImage, humanImage: "PRIVATE-HUMAN-IMAGE", key: trial.key } });
     await exerciseTurns(session, script, length, () => session.getHistory());
     const traces = session.getJudgmentHistory();
+    assert.deepEqual(script.counts, { judgment: length + 5, generation: length + 3, final: 0 });
     assert.deepEqual(traces.map(({ turnIndex, status }) => ({ turnIndex, status })), script.expectedTraces);
     assert.equal(traces.filter((trace) => trace.status === "committed").length, length);
     for (let index = 0; index < traces.length; index++) {
@@ -204,9 +206,7 @@ for (const strategy of STRATEGIES) for (const length of LENGTHS) {
     assert.equal(session.getJudgmentHistory()[0].status, "committed");
   });
 
-  for (const options of OPTIONS) test(`${strategy}: ${length} naming exchanges (visual=${options.visualAid}, memory=${options.referenceMemory}) stay private and score only after both submissions`, {
-    skip: (options.visualAid || options.referenceMemory) && TOGGLE_PENDING,
-  }, async (t) => {
+  for (const options of OPTIONS) test(`${strategy}: ${length} naming exchanges (visual=${options.visualAid}, memory=${options.referenceMemory}) stay private and score only after both submissions`, async (t) => {
     const directory = await mkdtemp(join(tmpdir(), "long-dialogue-regression-"));
     t.after(() => rm(directory, { recursive: true, force: true }));
     const script = instrument(length, options);
@@ -243,7 +243,7 @@ for (const strategy of STRATEGIES) for (const length of LENGTHS) {
       }
     });
     const beforeFinal = await record();
-    if (!TOGGLE_PENDING) assert.deepEqual(beforeFinal.options, options);
+    assert.deepEqual(beforeFinal.options, options);
     if (options.referenceMemory) {
       assert.equal(beforeFinal.referenceGraph.revision, length);
       assert.equal(beforeFinal.referenceGraph.lastTurn, length);
@@ -269,6 +269,7 @@ for (const strategy of STRATEGIES) for (const length of LENGTHS) {
     assert.equal(completed.status, "completed");
     assert.equal(completed.result.matchedCount, 6); assert.equal(completed.result.success, true);
     assert.equal(scoreCalls, 1); assert.equal(script.counts.final, 1);
+    assert.deepEqual(script.counts, { judgment: length + 5, generation: length + 3, final: 1 }, "no additional judgment/model phase is introduced");
     assert.deepEqual(completed.publicHistory, script.expectedHistory, "private submissions cannot create public turns");
     await assert.rejects(task.turn("提出後の発話"), { code: "dialogue_closed" });
     await assert.rejects(task.submitAI(), { code: "already_submitted" });
