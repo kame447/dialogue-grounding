@@ -379,3 +379,136 @@ test("all hard array/text budgets reject without partial state changes", () => {
   throws(() => apply(next, 14, [question(14, { mentionIds: ["1:m"] })]), "capacity_exceeded");
   assert.equal(JSON.stringify(next), pinned);
 });
+
+const OPAQUE_SLOTS = ["s-8fa1", "s-30be", "s-c219", "s-91dd", "s-6e50", "s-a764"];
+
+test("opaque slots ground mentions, observations, features and names in snapshots and judge summaries", () => {
+  const [target] = OPAQUE_SLOTS;
+  const initial = createReferenceGraph({ slots: OPAQUE_SLOTS, ownObservations: [{ slot: target, feature: "細長い" }] });
+  const ops = [
+    mention(1, "shape", { slots: [target], quote: "細長い", intent: "feature_assertion" }),
+    feature(1, { slot: target, mentionId: "1:shape" }),
+    mention(1, "naming", { slots: [target], quote: "鳥で合意します", intent: "name_acceptance" }),
+    name(1, { slot: target, agreement: "explicit", mentionIds: ["1:naming"] }),
+  ];
+  const staged = validateReferenceUpdate(initial, update(initial, 1, ops), { publicTurns: publicTurnsFor(ops) });
+  const graph = applyReferenceUpdate(initial, staged, { publicTurns: publicTurnsFor(ops), generationSucceeded: true });
+  assert.deepEqual(graph.slots, OPAQUE_SLOTS);
+  const snapshot = snapshotReferenceGraph(graph);
+  assert.deepEqual(Object.keys(snapshot.ownSlots), OPAQUE_SLOTS);
+  assert.equal(snapshot.ownSlots[target].status, "agreed");
+  assert.equal(snapshot.ownSlots[target].candidate.name, "鳥");
+  assert.deepEqual(snapshot.ownSlots[target].ownObservations, [{ feature: "細長い", source: "own_image" }]);
+  assert.equal(snapshot.ownSlots[target].features[0].feature, "細長い");
+  assert.deepEqual(snapshot.ownSlots[target].features[0].candidateOwnSlots, [target]);
+  assert.equal(Object.hasOwn(snapshot.ownSlots, A), false);
+  const summary = JSON.parse(summarizeForJudge(graph));
+  assert.deepEqual(Object.keys(summary.ownSlots), OPAQUE_SLOTS);
+  assert.equal(summary.ownSlots[target].candidate.name, "鳥");
+  assert.deepEqual(summary.recentHumanReferences[0].candidateOwnSlots, [target]);
+  assert.deepEqual(initial.records, [], "staging and applying leave the original graph untouched");
+});
+
+test("opaque slots reject IDs from another board or the legacy board at every graph boundary", () => {
+  const [target] = OPAQUE_SLOTS;
+  const graph = apply(createReferenceGraph({ slots: OPAQUE_SLOTS }), 1, [
+    mention(1, "m", { slots: [target], quote: "細長い鳥", intent: "name_proposal" }),
+    name(1, { slot: target }),
+  ]);
+  const before = JSON.stringify(graph);
+  for (const foreign of ["s-OTHER-SEED", A]) {
+    const source = mention(2, "m", { slots: [target], quote: "細長い鳥", intent: "feature_assertion" });
+    const invalid = [
+      mention(2, "bad", { slots: [foreign] }),
+      feature(2, { slot: foreign }),
+      name(2, { slot: foreign }),
+      { kind: "focus", id: "2:focus", slot: foreign, mode: "defer", mentionId: "2:m" },
+      question(2, { slots: [target, foreign] }),
+    ];
+    for (const op of invalid) throws(() => apply(graph, 2, [source, op]), "invalid_slot");
+    throws(() => createReferenceGraph({ slots: OPAQUE_SLOTS, ownObservations: [{ slot: foreign, feature: "細長い" }] }), "invalid_slot");
+    const forged = JSON.parse(JSON.stringify(graph));
+    forged.records[0].slots = [foreign];
+    throws(() => snapshotReferenceGraph(forged), "invalid_slot");
+    throws(() => summarizeForJudge(forged), "invalid_slot");
+  }
+  assert.equal(JSON.stringify(graph), before);
+  // Preserve the legacy error contract when slots were omitted.
+  throws(() => apply(createReferenceGraph(), 1, [mention(1, "m", { slots: [target] })]), "invalid_mention");
+});
+
+test("explicit slot sets contain exactly six unique bounded strings", () => {
+  const invalid = [null, "slots", [], OPAQUE_SLOTS.slice(1), [...OPAQUE_SLOTS, "s-extra"],
+    [...OPAQUE_SLOTS.slice(0, 5), OPAQUE_SLOTS[0]], [...OPAQUE_SLOTS.slice(0, 5), ""],
+    [...OPAQUE_SLOTS.slice(0, 5), "  "], [...OPAQUE_SLOTS.slice(0, 5), 7],
+    [...OPAQUE_SLOTS.slice(0, 5), "x".repeat(161)]];
+  const sparse = [...OPAQUE_SLOTS]; delete sparse[0]; invalid.push(sparse);
+  for (const slots of invalid) {
+    throws(() => createReferenceGraph({ slots }), "invalid_slots");
+    throws(() => snapshotReferenceGraph({ ...createReferenceGraph(), slots }), "invalid_slots");
+  }
+  const observations = Array.from({ length: 9 }, (_, i) => ({ slot: OPAQUE_SLOTS[0], feature: `特徴${i}` }));
+  throws(() => createReferenceGraph({ slots: OPAQUE_SLOTS, ownObservations: observations }), "invalid_observations");
+});
+
+test("opaque slot configuration is copied, frozen, persisted and restored deterministically", () => {
+  const slots = [...OPAQUE_SLOTS];
+  const graph = createReferenceGraph({ slots });
+  slots[0] = "s-mutated";
+  assert.deepEqual(graph.slots, OPAQUE_SLOTS); assert.ok(Object.isFrozen(graph.slots));
+  const restored = JSON.parse(JSON.stringify(graph));
+  const ops = [mention(1, "m", { slots: [OPAQUE_SLOTS[0]], quote: "鳥", intent: "name_proposal" }), name(1, { slot: OPAQUE_SLOTS[0] })];
+  const next = apply(graph, 1, ops);
+  assert.deepEqual(apply(restored, 1, ops), next);
+  assert.deepEqual(snapshotReferenceGraph(JSON.parse(JSON.stringify(next))), snapshotReferenceGraph(next));
+  assert.equal(summarizeForJudge(JSON.parse(JSON.stringify(next))), summarizeForJudge(next));
+});
+
+test("opaque slots preserve uncertain questions, deferred candidates and pinned evidence through pruning", () => {
+  const [target, other] = OPAQUE_SLOTS;
+  let graph = apply(createReferenceGraph({ slots: OPAQUE_SLOTS }), 1, [
+    mention(1, "m", { slots: [target], quote: "鳥", intent: "name_proposal" }), name(1, { slot: target }),
+    mention(1, "two", { slots: [target, other], epistemic: "hypothesis" }),
+    question(1, { slots: [target, other], mentionIds: ["1:two"] }),
+    { kind: "focus", id: "1:focus", slot: target, mode: "defer", mentionId: "1:m" },
+  ]);
+  for (let turn = 2; turn <= 40; turn++) graph = apply(graph, turn, [mention(turn, "m", { slots: [other] })]);
+  assert.ok(!graph.records.some((r) => r.id === "2:m"));
+  assert.equal(view(graph, target).candidate.name, "鳥"); assert.equal(view(graph, target).status, "deferred");
+  assert.equal(view(graph, other).candidate, null);
+  assert.deepEqual(snapshotReferenceGraph(graph).questions[0].slots, [target, other]);
+  graph = apply(graph, 41, [mention(41, "m", { slots: [target] }),
+    { kind: "focus", id: "41:focus", slot: target, mode: "revisit", mentionId: "41:m" }]);
+  assert.equal(view(graph, target).status, "tentative");
+  assert.ok(JSON.stringify(graph).length <= REFERENCE_LIMITS.graphChars);
+});
+
+test("omitted slots preserve exact legacy JSON shapes and restore pre-extension records", () => {
+  const graph = createReferenceGraph();
+  assert.equal(JSON.stringify(graph), '{"schemaVersion":1,"revision":0,"lastTurn":0,"ownObservations":[],"records":[]}');
+  assert.deepEqual(createReferenceGraph({ slots: undefined }), graph);
+  const ownSlots = Object.fromEntries(SLOTS.map((slot) => [slot, { status: "unassigned", candidate: null, ownObservations: [], features: [] }]));
+  assert.equal(JSON.stringify(snapshotReferenceGraph(graph)), JSON.stringify({ schemaVersion: 1, revision: 0, lastTurn: 0,
+    ownSlots, mentions: [], questions: [], repairs: [] }));
+  assert.equal(summarizeForJudge(graph), JSON.stringify({ scope: "private_own_slots_not_ground_truth", revision: 0,
+    ownSlots: Object.fromEntries(SLOTS.map((slot) => [slot, { status: "unassigned", candidate: null }])),
+    unresolvedQuestions: [], recentHumanReferences: [], omitted: { humanReferences: 0, questions: 0 } }));
+  const legacy = JSON.parse('{"schemaVersion":1,"revision":1,"lastTurn":1,"ownObservations":[],"records":[' +
+    '{"kind":"mention","id":"1:m","sourceTurn":1,"speaker":"human","quote":"鳥","slots":["上段左"],"confidence":0.8,' +
+    '"epistemic":"grounded","intent":"name_proposal","antecedent":null,"turn":1},' +
+    '{"kind":"name","id":"1:name","slot":"上段左","name":"鳥","agreement":"none","mentionIds":["1:m"],"replaces":null,"turn":1}]}');
+  assert.equal(view(legacy).candidate.name, "鳥");
+  const next = apply(legacy, 2, []);
+  assert.equal(Object.hasOwn(next, "slots"), false); assert.equal(view(next).candidate.name, "鳥");
+});
+
+test("slot IDs are opaque strings even when they contain punctuation or object property names", () => {
+  const slots = ["a:b", "a", "__proto__", "constructor", "toString", "s-final"];
+  const graph = createReferenceGraph({ slots, ownObservations: [{ slot: "a:b", feature: "c" }, { slot: "a", feature: "b:c" }] });
+  const snapshot = snapshotReferenceGraph(graph), summary = JSON.parse(summarizeForJudge(graph));
+  assert.deepEqual(Object.keys(snapshot.ownSlots), slots); assert.deepEqual(Object.keys(summary.ownSlots), slots);
+  assert.equal(snapshot.ownSlots["a:b"].ownObservations[0].feature, "c");
+  assert.equal(snapshot.ownSlots.a.ownObservations[0].feature, "b:c");
+  assert.equal(snapshot.ownSlots.__proto__.status, "unassigned");
+  assert.equal(summary.ownSlots.constructor.status, "unassigned");
+});
