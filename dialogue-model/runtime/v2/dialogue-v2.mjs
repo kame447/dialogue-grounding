@@ -9,6 +9,7 @@ import { STRATEGIES, TASK_INSTRUCTIONS_V2, ownImageMessage, publicMessages } fro
 import { createReferenceGraph, applyReferenceUpdate, snapshotReferenceGraph, ReferenceGraphError, REFERENCE_LIMITS } from "../memory/reference-graph.mjs";
 import { stageMemory, prepareMemory } from "../judgment/memory.mjs";
 import { buildDecisionEvidence } from "./decision-evidence.mjs";
+import { resolveActiveJudgment } from "./active-judge.mjs";
 
 // Identical across strategies. Holistic first; analysis only when the judge asks for it.
 export const GENERATOR_INSTRUCTIONS_V2 = [
@@ -72,7 +73,7 @@ function abortIf(signal) {
  * @param {{ client, strategy, image: {mimeType, base64}, anchors: {id, bbox, centroid}[], judge?, referenceMemory?: boolean }} options
  */
 export function createDialogueV2({ client, strategy, image, anchors, judge = null, referenceMemory = false,
-  decisionShadowClient = null, onResearchUpdate = null }) {
+  decisionShadowClient = null, onResearchUpdate = null, activeDecision = null }) {
   if (!client || typeof client.complete !== "function") throw new Error("A chat client is required");
   if (!STRATEGIES.includes(strategy)) throw new Error("Unsupported dialogue strategy");
   if (typeof referenceMemory !== "boolean") throw new Error("Invalid memory option");
@@ -80,6 +81,9 @@ export function createDialogueV2({ client, strategy, image, anchors, judge = nul
     throw new Error("Invalid decision shadow client");
   }
   if (onResearchUpdate !== null && typeof onResearchUpdate !== "function") throw new Error("Invalid research update callback");
+  if (activeDecision !== null && (!activeDecision || !["decision_jev", "decision_luna"].includes(activeDecision.purpose) ||
+      typeof activeDecision.client?.chooseAction !== "function")) throw new Error("Invalid active decision client");
+  if (activeDecision && decisionShadowClient) throw new Error("Active and shadow decisions are mutually exclusive");
   const ownImage = { mimeType: image.mimeType, base64: image.base64 };
   ownImageMessage(ownImage);
   const slots = anchors.map((anchor) => anchor.id);
@@ -159,6 +163,24 @@ export function createDialogueV2({ client, strategy, image, anchors, judge = nul
         memoryUpdate = stageMemory(state.graph, latest.seq, null, publicTurns);
       }
     } else judgment = validateJudgment(rawJudgment, { ownLedger: state.ledger, agreeEvidence: true });
+    if (activeDecision) {
+      let decision;
+      const started = performance.now();
+      try {
+        const evidence = buildDecisionEvidence({ events, ownLedger: state.ledger, judgment, strategy });
+        decision = { ...await activeDecision.client.chooseAction({ purpose: activeDecision.purpose, state: evidence }), purpose: activeDecision.purpose };
+      } catch (error) { decision = { error, purpose: activeDecision.purpose, latencyMs: Math.round(performance.now() - started) }; }
+      abortIf(signal);
+      const resolved = resolveActiveJudgment({ lunaJudgment: judgment, decision, ownLedger: state.ledger, strategy });
+      judgment = resolved.judgment;
+      trace.activeJudge = resolved.record;
+      if (state.graph) {
+        const staged = prepareMemory(state.graph, latest.seq, judgment.reference, publicTurns);
+        memoryUpdate = staged.update;
+        trace.memory.interpretation = judgment.reference != null;
+        trace.memory.rejected ??= staged.rejected;
+      }
+    }
     trace.judgment = { ...judgment };
     delete trace.judgment.reference;
     if (decisionShadowClient) {

@@ -9,6 +9,7 @@ import { loadConfig } from "../config.mjs";
 import { createChatClient } from "../client.mjs";
 import { createNamingTask, NamingTaskError } from "../naming-task.mjs";
 import { createNamingTaskV2 } from "../v2/naming-task-v2.mjs";
+import { createDecisionComparisonClient } from "../decisions-client.mjs";
 
 const PUBLIC = dirname(fileURLToPath(import.meta.url));
 // "/" serves the v2 participant UI; "/v1/" keeps the original v1 (2x3 grid) UI unchanged.
@@ -35,7 +36,9 @@ async function readJSON(req) {
 }
 
 export function createNamingServer({ client, createTrial, scoreTrial, runDir = process.env.RESEARCH_RUN_DIR,
-  hideStrategy = false, now = Date.now, createTask = createNamingTask, createTaskV2 = createNamingTaskV2 } = {}) {
+  hideStrategy = false, now = Date.now, createTask = createNamingTask, createTaskV2 = createNamingTaskV2, activeDecision = null } = {}) {
+  if (activeDecision !== null && (!activeDecision || !["decision_jev", "decision_luna"].includes(activeDecision.purpose) ||
+      typeof activeDecision.client?.chooseAction !== "function")) throw new Error("Invalid active decision client");
   const sessions = new Map();
   const reclaimable = (session) => {
     if (session.requests || session.starting) return false;
@@ -124,7 +127,7 @@ export function createNamingServer({ client, createTrial, scoreTrial, runDir = p
         session.starting = true;
         try {
           session.task = version === 2
-            ? await createTaskV2({ client, runDir, strategy: body.strategy, seed: body.seed, referenceMemory })
+            ? await createTaskV2({ client, runDir, strategy: body.strategy, seed: body.seed, referenceMemory, activeDecision })
             : await createTask({ client, createTrial, scoreTrial, runDir, strategy: body.strategy, seed: body.seed, visualAid, referenceMemory });
         } finally { session.starting = false; }
         session.pageVersion = version;
@@ -178,15 +181,20 @@ export async function startNamingServer({ port = 8787, ...options } = {}) {
   return server;
 }
 
-export async function main(argv = process.argv.slice(2), env = process.env) {
+export async function main(argv = process.argv.slice(2), env = process.env,
+  { createClient = createChatClient, createDecisionClient = createDecisionComparisonClient, startServer = startNamingServer } = {}) {
   const { values } = parseArgs({ args: argv, options: { port: { type: "string", default: "8787" },
-    "hide-strategy": { type: "boolean", default: false }, help: { type: "boolean" } } });
+    "hide-strategy": { type: "boolean", default: false }, "active-decision-judge": { type: "string" }, help: { type: "boolean" } } });
   if (values.help) {
-    console.log("node --env-file=.env dialogue-model/runtime/web/server.mjs --port 8787 [--hide-strategy]");
+    console.log("node --env-file=.env dialogue-model/runtime/web/server.mjs --port 8787 [--hide-strategy] [--active-decision-judge decision_jev|decision_luna]");
     return;
   }
-  const client = createChatClient(loadConfig(env));
-  const server = await startNamingServer({ port: Number(values.port), client, runDir: env.RESEARCH_RUN_DIR, hideStrategy: values["hide-strategy"] });
+  const purpose = values["active-decision-judge"];
+  if (purpose !== undefined && !["decision_jev", "decision_luna"].includes(purpose)) throw new Error("Invalid active decision purpose");
+  const config = loadConfig(env);
+  const client = createClient(config);
+  const activeDecision = purpose === undefined ? null : { client: createDecisionClient(config), purpose };
+  const server = await startServer({ port: Number(values.port), client, runDir: env.RESEARCH_RUN_DIR, hideStrategy: values["hide-strategy"], activeDecision });
   console.log("共同命名課題: http://127.0.0.1:" + server.address().port);
   return server;
 }
