@@ -2,6 +2,7 @@
 // private run records, read-only, and prints aggregate counts only (never
 // texts, names, ids or rows). Paths are arguments; --out must be outside Git.
 // node tabulate.ts --scan <private-runs dir> [--record <file>] [--out <dir outside repo>]
+import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,6 +15,8 @@ export const STRATEGIES = Object.freeze(["repair-first", "bypass-enabled"]);
 export const DEFER_LIKE = Object.freeze(["defer", "move_on", "revisit"]);
 type Counts = Record<string, number>;
 const bump = (counts: Counts, key: string | null | undefined, by = 1) => { if (key) counts[key] = (counts[key] ?? 0) + by; };
+/** Private directory names never appear in output; only a short stable hash. */
+export const familyKey = (family: string) => "family-" + createHash("sha256").update(family).digest("hex").slice(0, 8);
 const isPlain = (v: unknown): v is Record<string, any> => Boolean(v) && typeof v === "object" && !Array.isArray(v);
 
 export type Kind = "dialogue" | "pilot" | "decisions_rows" | "replay_rows";
@@ -85,7 +88,7 @@ export function createTabulation() {
       if (target) previousTarget = target;
       const t = (table.byTurnType[type] ??= { n: 0, luna: {}, final: {} });
       t.n++; bump(t.luna, luna); bump(t.final, final);
-      bump((table.families[family] ??= {}), final);
+      bump((table.families[familyKey(family)] ??= {}), final);
     });
   }
   function addPilot(value: any, file: string) {
@@ -129,7 +132,6 @@ export function createTabulation() {
     else addReplay(value as any[]);
   }
   function summary() {
-    for (const s of STRATEGIES) for (const k of Object.keys(dialogue[s].families)) if (!k) delete dialogue[s].families[k];
     return { notice: "研究者専用の集計。実験結果・方略効果の証拠ではない。", sources, skipped, dialogue, pilot, decisions, replay };
   }
   return { add, summary };

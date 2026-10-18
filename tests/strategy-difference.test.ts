@@ -5,7 +5,7 @@ import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { classifyHumanTurn, TURN_TYPES } from "../dialogue-model/runtime/diagnostics/strategy-difference/turn-type.ts";
-import { createTabulation, detect, humanTextsPerJudgment, main } from "../dialogue-model/runtime/diagnostics/strategy-difference/tabulate.ts";
+import { createTabulation, detect, familyKey, humanTextsPerJudgment, main } from "../dialogue-model/runtime/diagnostics/strategy-difference/tabulate.ts";
 import { createOwnLedger } from "../dialogue-model/runtime/judgment/schema.mjs";
 
 const CANARY = "SYNTHETIC_TEXT_CANARY";
@@ -76,7 +76,9 @@ test("cli scans directories, writes only outside the repository", async () => {
   writeFileSync(join(root, "fam", "broken.json"), "{");
   const logs: string[] = [];
   const s = await main(["--scan", root, "--out", root], (line: string) => logs.push(line));
-  assert.deepEqual(s.dialogue["repair-first"].families, { fam: { defer: 1 } });
+  assert.deepEqual(s.dialogue["repair-first"].families, { [familyKey("fam")]: { defer: 1 } });
+  assert.match(familyKey("fam"), /^family-[0-9a-f]{8}$/);
+  assert.ok(!JSON.stringify(s).includes('"fam"') && !logs.join("").includes('"fam"'), "directory names must not leak");
   assert.equal(s.skipped.unrecognized, 1);
   assert.ok(!logs.join("").includes(CANARY));
   await assert.rejects(main(["--scan", root, "--out", "dialogue-model"]), /repository_output_forbidden/);
