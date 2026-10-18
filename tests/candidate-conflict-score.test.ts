@@ -35,10 +35,18 @@ test("scoring needs annotation-provenance gold, not the AI's own choice", () => 
   assert.throws(() => scoreFeatureSplit({ scorerFits: ["x"], scoredIds: ids, targetSlot: null, gold: null }), /outside/);
 });
 
-test("runtime modules never import the key-consuming scorer", () => {
-  const roots = ["dialogue-model/runtime/v2", "dialogue-model/runtime/judgment", "dialogue-model/runtime/web"];
-  for (const root of roots) for (const name of readdirSync(root)) {
-    if (!/\.(mjs|ts)$/.test(name)) continue;
-    assert.ok(!readFileSync(`${root}/${name}`, "utf8").includes("candidate-conflict-score"), `${root}/${name}`);
-  }
+test("runtime and Worker modules never import the key-consuming scorer", () => {
+  const files: string[] = [];
+  const walk = (dir: string, deep: boolean) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = `${dir}/${entry.name}`;
+      if (entry.isDirectory()) { if (deep) walk(path, deep); }
+      else if (/\.(mjs|js|ts)$/.test(entry.name)) files.push(path);
+    }
+  };
+  walk("dialogue-model/runtime", false);
+  for (const dir of ["v2", "judgment", "web", "memory", "visual", "stimuli"]) walk(`dialogue-model/runtime/${dir}`, true);
+  for (const worker of readdirSync("workers")) walk(`workers/${worker}/src`, true);
+  assert.ok(files.some((f) => f.startsWith("workers/")) && files.some((f) => f === "dialogue-model/runtime/session.mjs"));
+  for (const file of files) assert.ok(!/candidate-conflict-score|diagnostics\/candidate-conflict\//.test(readFileSync(file, "utf8")), file);
 });
