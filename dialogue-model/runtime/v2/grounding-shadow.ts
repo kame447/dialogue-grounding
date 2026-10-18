@@ -4,6 +4,7 @@
 // the queue or anything a participant sees; its only output is a private record.
 import { buildGroundingEvidence, type GroundingAiHypothesis, type GroundingInputGap, type GroundingMemoryEvidence,
   type GroundingNote, type GroundingPriorAct } from "../grounding/evidence.ts";
+import { buildMemoryEvidence } from "../grounding/memory-evidence.ts";
 import { parseGroundingVerdict, type GroundingJudge, type GroundingVerdict } from "../grounding/client.ts";
 
 export const GROUNDING_SHADOW_TIMEOUT_MS = 20_000;
@@ -18,6 +19,8 @@ export type GroundingShadowInput = {
   lastEventId: string | null;
   /** Only when reference memory is on; see GroundingEvidenceInput.memoryEvidence. */
   memoryEvidence?: GroundingMemoryEvidence | null;
+  /** The committed reference graph before this AI utterance; null/absent when memory is off. Read only. */
+  graph?: unknown;
 };
 export type GroundingShadowRecord = {
   turnIndex: number;
@@ -65,7 +68,17 @@ export function startGroundingShadow(options: GroundingShadowOptions, input: Gro
     const build = (memoryEvidence: GroundingMemoryEvidence | null | undefined) => buildGroundingEvidence({ events: input.events,
       asOfSeq: input.turnIndex, aiHypothesis: input.judgment, ownNamingNotes: input.ownLedger, priorAiActs: input.priorAiActs, memoryEvidence });
     try {
-      try { evidence = build(input.memoryEvidence); }
+      // Built here, after the current task, from the pre-turn graph; nothing is written back to memory.
+      let memory = input.memoryEvidence;
+      let memoryGap = false;
+      if (input.graph !== null && input.graph !== undefined) {
+        try { memory = buildMemoryEvidence(input.graph, { asOfSeq: input.turnIndex, events: input.events }); }
+        catch { memory = null; memoryGap = true; }
+      }
+      try {
+        evidence = build(memory);
+        if (memoryGap) evidence.gaps.push("memory_unavailable");
+      }
       catch (error) {
         // Unusable memory evidence must not stop the axes: judge without it and record the gap.
         if (code(error) !== "invalid_memory_evidence") throw error;

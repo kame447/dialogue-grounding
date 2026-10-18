@@ -302,6 +302,8 @@ export function createDialogueV2({ client, strategy, image, anchors, judge = nul
     // utterance. It starts only after generation, is never awaited and settles into a private record.
     if (grounding) {
       startGroundingShadow(grounding, { events, judgment, ownLedger: state.ledger, turnIndex: latest.seq, lastEventId: lastEventId ?? null,
+        // Pre-turn memory only: this turn's interpretation is already the judgment, never counted twice.
+        ...(state.graph ? { graph: state.graph } : {}),
         priorAiActs: state.judgments.flatMap(({ turnIndex, judgment: act }) => [act, ...(act.followUp ? [act.followUp] : [])]
           .map(({ action, targetSlot, candidateName }) => ({ turn: turnIndex, action, targetSlot, candidateName }))) },
       (record) => { try { onGroundingShadow(record); } catch { /* research sink only */ } notifyResearchUpdate(); });
