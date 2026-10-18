@@ -3,6 +3,14 @@ import { createChatClient } from "../../../dialogue-model/runtime/client.mjs";
 import { createNamingTaskV2 } from "../../../dialogue-model/runtime/v2/naming-task-v2.mjs";
 import { NamingTaskError } from "../../../dialogue-model/runtime/naming-error.mjs";
 import { isExcessiveTraffic, type SoftLimitBindings } from "./soft-limits";
+import { AdminIndex } from "./admin/index-do";
+import { handleAdmin, isAdminPath, type AdminLimiter } from "./admin/routes.ts";
+import { summarizeRecord, type AdminSummary } from "./admin/summary.ts";
+import type { AuditEntry } from "./admin/index-store.ts";
+import { summarizeLatency } from "./admin/latency.ts";
+import { ACTIVE_KEY, archiveSnapshot, backfillActive, deleteArchived, expireRecords, nextExpiry, readArchived, retentionDays } from "./admin/archive.ts";
+
+export { AdminIndex };
 
 type Strategy = "repair-first" | "bypass-enabled";
 type ApiBody = Record<string, unknown>;
@@ -33,7 +41,15 @@ export interface Env extends SoftLimitBindings {
   NAMING_SESSIONS: DurableObjectNamespace<TangramSession>;
   ASSETS: Fetcher;
   AI_PROXY: { chat(payload: unknown): Promise<{ status: number; data: unknown }> };
+  // Researcher-only admin log. Without the secret (or the limiter) /admin is 404.
+  ADMIN_TOKEN?: string;
+  ADMIN_INDEX?: DurableObjectNamespace<AdminIndex>;
+  ADMIN_RATE_LIMIT?: AdminLimiter;
+  // Days after a record's last update before automatic deletion (integer 1-365; invalid -> 30).
+  RECORD_RETENTION_DAYS?: string;
 }
+
+const ADMIN_INDEX_NAME = "global";
 
 const SESSION_COOKIE = "tangram_session";
 const MAX_BODY_BYTES = 64 * 1024;
@@ -75,11 +91,82 @@ function sanitizedError(error: unknown): Response {
 export class TangramSession extends DurableObject<Env> {
   private trial: NamingTask | null = null;
   private initialized: Promise<void> | null = null;
+  private lastIndexed = new Map<string, string>();
+  // Trials replaced by /api/start in this browser: their late writes go only to their own archive key.
+  private retired = new Set<string>();
+
+  /** Researcher-only read of one archived trial for /admin. It neither restores nor resumes a trial. */
+  async adminRecord(recordId: string): Promise<StoredTrial | null> {
+    return await readArchived(this.ctx.storage, recordId) as StoredTrial | null;
+  }
+
+  /** Researcher deletion (authenticated /admin only): removes the record now and tombstones its id. */
+  async adminDelete(recordId: string): Promise<boolean> {
+    const existed = await deleteArchived(this.ctx.storage, recordId);
+    this.forget([recordId]);
+    await this.scheduleExpiry();
+    return existed;
+  }
+
+  /** Retention: the alarm deletes records RECORD_RETENTION_DAYS after their last update, never earlier. */
+  async alarm(): Promise<void> {
+    await this.runExpiry();
+    await this.scheduleExpiry();
+  }
+
+  private retention(): number { return retentionDays(this.env.RECORD_RETENTION_DAYS); }
+
+  private index() {
+    return this.env.ADMIN_INDEX ? this.env.ADMIN_INDEX.get(this.env.ADMIN_INDEX.idFromName(ADMIN_INDEX_NAME)) : null;
+  }
+
+  /** Index entries go first: if that fails, nothing is deleted and the alarm retries. */
+  private async runExpiry(): Promise<void> {
+    const removed = await expireRecords(this.ctx.storage, Date.now(), this.retention(), async (ids) => {
+      await this.index()?.remove(ids, "retention");
+    });
+    this.forget(removed);
+  }
+
+  private forget(recordIds: string[]): void {
+    for (const id of recordIds) this.lastIndexed.delete(id);
+    const current = this.trial?.getState().sessionId;
+    if (typeof current === "string" && recordIds.includes(current)) this.trial = null;
+  }
+
+  /** One alarm per session at its earliest expiry; refreshed on every write. */
+  private async scheduleExpiry(): Promise<void> {
+    const next = await nextExpiry(this.ctx.storage, this.retention());
+    if (next === null) await this.ctx.storage.deleteAlarm();
+    else await this.ctx.storage.setAlarm(next);
+  }
+
+  /** Best effort: an index failure never affects the participant's trial or its record. */
+  private async registerSummary(record: StoredTrial): Promise<void> {
+    try {
+      if (!this.env.ADMIN_INDEX) return;
+      const summary = summarizeRecord(record, this.ctx.id.toString(), summarizeLatency(record));
+      // Skip writes when nothing but the timestamp changed.
+      const key = JSON.stringify({ ...summary, updatedAt: null });
+      if (this.lastIndexed.get(summary.recordId) === key) return;
+      this.lastIndexed.set(summary.recordId, key);
+      await this.index()?.upsert(summary);
+    } catch {
+      this.lastIndexed.clear();
+    }
+  }
 
   private async initialize(): Promise<void> {
     if (this.initialized) return this.initialized;
     this.initialized = (async () => {
-      const record = await this.ctx.storage.get<StoredTrial>("active");
+      // Expired records go before any restore, so an expired trial is never resumed.
+      await this.runExpiry();
+      // Sessions from before the archive: copy "active" to its record key once (additive) and index it.
+      const backfilled = await backfillActive(this.ctx.storage, Date.now());
+      if (backfilled) this.ctx.waitUntil(this.registerSummary(backfilled as StoredTrial));
+      // Alarm on restore, including backfilled sessions (expiry from their last update).
+      await this.scheduleExpiry();
+      const record = await this.ctx.storage.get<StoredTrial>(ACTIVE_KEY);
       if (!record) return;
       this.trial = await this.createTrial(record.seed, record.strategy, record.options.referenceMemory, record);
       if (!record.closed && record.queueState.pendingHumanEventIds.length && !record.queueState.errorCode) {
@@ -104,7 +191,12 @@ export class TangramSession extends DurableObject<Env> {
     });
     return await createNamingTaskV2(({ client, seed, strategy, referenceMemory, utteranceStyle, runDir: null,
       ...(restore ? { restore } : {}),
-      onPersist: (snapshot: StoredTrial) => this.ctx.storage.put("active", snapshot),
+      // Every write also keeps record:<recordId>, so a later trial never erases this one.
+      onPersist: async (snapshot: StoredTrial) => {
+        if (!await archiveSnapshot(this.ctx.storage, snapshot, this.retired, Date.now())) return;
+        await this.scheduleExpiry();
+        this.ctx.waitUntil(this.registerSummary(snapshot));
+      },
     }) as unknown as Parameters<typeof createNamingTaskV2>[0]) as NamingTask;
   }
 
@@ -129,6 +221,9 @@ export class TangramSession extends DurableObject<Env> {
         if (body.referenceMemory !== undefined && typeof body.referenceMemory !== "boolean") throw new NamingTaskError("invalid_options");
         if (body.visualAid === true) throw new NamingTaskError("invalid_options");
         if (this.trial && this.trial.getState().status !== "completed") throw new NamingTaskError("busy");
+        // The replaced trial stays archived under its recordId; only "active" moves on.
+        const previous = this.trial?.getState().sessionId;
+        if (typeof previous === "string") this.retired.add(previous);
         this.trial = await this.createTrial(seed, strategy as Strategy, body.referenceMemory === true);
         return json(200, this.state());
       }
@@ -158,6 +253,31 @@ export class TangramSession extends DurableObject<Env> {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+    // Researcher-only, read-only, with its own headers; never reaches assets or the participant API.
+    if (isAdminPath(url.pathname)) {
+      const index = env.ADMIN_INDEX ? env.ADMIN_INDEX.get(env.ADMIN_INDEX.idFromName(ADMIN_INDEX_NAME)) : null;
+      // Internal RPC to the owning object named by the index; the participant API is never used.
+      const owner = (summary: AdminSummary) => {
+        try { return env.NAMING_SESSIONS.get(env.NAMING_SESSIONS.idFromString(summary.objectId)); } catch { return null; }
+      };
+      return handleAdmin(request, {
+        token: index ? env.ADMIN_TOKEN : undefined,
+        limiter: env.ADMIN_RATE_LIMIT,
+        retentionDays: retentionDays(env.RECORD_RETENTION_DAYS),
+        listPage: async (after) => (await index!.page(after)) as { items: AdminSummary[]; next: string | null },
+        getSummary: async (recordId) => (await index!.get(recordId)) as AdminSummary | null,
+        getRecord: async (summary) => (await owner(summary)?.adminRecord(summary.recordId)) ?? null,
+        // Record first, then its index entry (with a content-free audit entry); both steps are idempotent.
+        deleteRecord: async (summary) => {
+          const session = owner(summary);
+          if (!session) throw new Error("invalid_object");
+          await session.adminDelete(summary.recordId);
+          await index!.remove([summary.recordId], "admin");
+        },
+        audit: async () => (await index!.audit()) as AuditEntry[],
+        summarizeLatency,
+      });
+    }
     if (request.method === "POST" && request.headers.get("Origin") && request.headers.get("Origin") !== url.origin) {
       return json(403, { error: "request_forbidden" });
     }
