@@ -8,6 +8,7 @@ import { join, resolve } from "node:path";
 import { createNamingTask, SLOTS, outsideRepositoryDirectory } from "../dialogue-model/runtime/naming-task.mjs";
 import { createChatClient } from "../dialogue-model/runtime/client.mjs";
 import { SAFE_JUDGMENT } from "../dialogue-model/runtime/judgment/schema.mjs";
+import { SLOTS as BOARD_SLOTS } from "../dialogue-model/runtime/stimuli/board.mjs";
 const isJudge = (body) => body.messages.some((m) => m.role === "system" && m.content.includes("【非公開の対話判断】"));
 
 const AI_PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL2qwAAAABJRU5ErkJggg==", "base64");
@@ -211,7 +212,7 @@ test("private ledger/judgments are recorded, excluded from participant state, an
 test("judge fallback is persisted without raw invalid output and transient generation retries are counted", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "naming-fallback-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const { client, requests } = await mock(t, async (i) => i === 1 ? { status: 502, raw: "PRIVATE-RAW-502" } : { text: "公開応答" }, "PRIVATE-INVALID-JUDGMENT");
+  const { client, requests } = await mock(t, async (i) => i === 1 ? { status: 503, raw: "PRIVATE-RAW-503" } : { text: "公開応答" }, "PRIVATE-INVALID-JUDGMENT");
   const task = await createNamingTask(taskOptions(client, { runDir: directory }));
   await task.turn("公開発話");
   assert.equal(requests.length, 4); // Two format attempts, then one retried generation.
@@ -221,11 +222,11 @@ test("judge fallback is persisted without raw invalid output and transient gener
   assert.deepEqual(record.judgments[0].judgment, SAFE_JUDGMENT);
   assert.equal(record.requests.at(-1).kind, "generation"); assert.equal(record.requests.at(-1).retryCount, 1);
   assert.equal(record.requests.at(-1).timeoutMs, 90000);
-  assert.doesNotMatch(JSON.stringify(record), /PRIVATE-RAW-502|PRIVATE-INVALID-JUDGMENT/);
+  assert.doesNotMatch(JSON.stringify(record), /PRIVATE-RAW-503|PRIVATE-INVALID-JUDGMENT/);
 });
 
 test("research request diagnostics retain only failed HTTP status and retry count for judgment and generation", async (t) => {
-  for (const phase of ["judgment", "generation"]) for (const status of [422, 502]) await t.test(phase + " HTTP " + status, async (t) => {
+  for (const phase of ["judgment", "generation"]) for (const status of [422, 502, 503]) await t.test(phase + " HTTP " + status, async (t) => {
     const directory = await mkdtemp(join(tmpdir(), "naming-http-status-"));
     t.after(() => rm(directory, { recursive: true, force: true }));
     const failure = { status, raw: "PRIVATE-RAW-RESPONSE-TOKEN-IMAGE-PROMPT" };
@@ -235,7 +236,7 @@ test("research request diagnostics retain only failed HTTP status and retry coun
     await assert.rejects(task.turn("公開発話"), (error) => error.code === "ai_unavailable");
     const [file] = await readdir(directory);
     const record = JSON.parse(await readFile(join(directory, file), "utf8"));
-    const failed = record.requests.at(-1), retryCount = status === 502 ? 2 : 0;
+    const failed = record.requests.at(-1), retryCount = status === 503 ? 2 : 0;
     assert.equal(failed.kind, phase);
     assert.equal(failed.status, "error");
     assert.equal(failed.httpStatus, status);
@@ -261,4 +262,148 @@ test("request diagnostics discard absent or non-HTTP error statuses without pers
   const record = JSON.parse(await readFile(join(directory, file), "utf8"));
   assert.equal(record.requests[0].httpStatus, null);
   assert.doesNotMatch(JSON.stringify(record), /PRIVATE-RAW|PRIVATE-STATUS|PRIVATE-BODY/);
+});
+
+test("ledger/final diagnostics are private, completion-only snapshots in either submission order and do not alter scoring", async (t) => {
+  for (const first of ["human", "ai"]) await t.test(first + " submits first", async (t) => {
+    const directory = await mkdtemp(join(tmpdir(), "naming-final-diagnostics-"));
+    t.after(() => rm(directory, { recursive: true, force: true }));
+    const firstName = "作業候補甲", nextName = "作業候補乙", deferredName = "保留候補", lastName = "作業候補丙";
+    const decisions = [
+      { ...SAFE_JUDGMENT, action: "propose_name", targetSlot: SLOTS[0], candidateName: firstName,
+        followUp: { action: "propose_name", targetSlot: SLOTS[1], candidateName: nextName, discriminatingFeature: null } },
+      { ...SAFE_JUDGMENT, action: "agree", targetSlot: SLOTS[0], candidateName: firstName,
+        followUp: { action: "defer", targetSlot: SLOTS[2], candidateName: deferredName, discriminatingFeature: null } },
+      { ...SAFE_JUDGMENT, action: "propose_name", targetSlot: SLOTS[4], candidateName: lastName },
+    ];
+    const finalNames = { [SLOTS[0]]: nextName, [SLOTS[1]]: firstName, [SLOTS[2]]: deferredName,
+      [SLOTS[3]]: "", [SLOTS[4]]: "最終提出で改訂", [SLOTS[5]]: "" };
+    let judgeIndex = 0, scoreCalls = 0;
+    const { client, requests } = await mock(t, async (_i, body) => ({ text: body.messages.at(-1).content.includes("最終提出要求") ? JSON.stringify(finalNames) : "公開応答" }),
+      async () => ({ text: JSON.stringify(decisions[judgeIndex++]) }));
+    // Controlled scorer verifies diagnostics cannot override a scoring result;
+    // this fixture is not evidence of successful model perception or naming.
+    const scoringResult = { provisional: true, success: true, matchedCount: 6, total: 6, figures: [] };
+    const task = await createNamingTask(taskOptions(client, { runDir: directory, scoreTrial(args) {
+      scoreCalls++; assert.deepEqual(args.aiSubmission, finalNames); return scoringResult;
+    } }));
+    const [file] = await readdir(directory);
+    const record = async () => JSON.parse(await readFile(join(directory, file), "utf8"));
+    assert.equal((await record()).diagnostics, null);
+    for (const utterance of ["最初の公開相談", "合意と次の相談", "別の公開相談"]) await task.turn(utterance);
+    assert.equal((await record()).diagnostics, null);
+    const human = submission("PRIVATE-HUMAN-FINAL-");
+    if (first === "human") await task.submitHuman(human);
+    else await task.submitAI();
+    assert.equal((await record()).diagnostics, null);
+    assert.equal(scoreCalls, 0);
+    if (first === "human") await task.submitAI();
+    else await task.submitHuman(human);
+    const completed = await record();
+    assert.deepEqual(completed.diagnostics, {
+      ledgerFinalMismatch: { count: 3, slots: [SLOTS[0], SLOTS[1], SLOTS[4]] },
+      ledgerStatusCounts: { unassigned: 2, tentative: 2, agreed: 1, deferred: 1 },
+    });
+    assert.equal(scoreCalls, 1);
+    assert.deepEqual(completed.scoring.result, scoringResult);
+    assert.deepEqual(task.getState().result, scoringResult);
+    assert.equal(completed.ownLedger[SLOTS[0]].name, firstName, "final names never overwrite the working ledger");
+    assert.equal(completed.ownLedger[SLOTS[1]].name, nextName);
+    assert.deepEqual(completed.aiSubmission, finalNames);
+    assert.ok(!Object.hasOwn(task.getState(), "diagnostics"));
+    assert.ok(!Object.hasOwn(task.getState().result, "ledgerFinalMismatch"));
+    assert.doesNotMatch(JSON.stringify(requests), /ledgerFinalMismatch|ledgerStatusCounts|PRIVATE-HUMAN-FINAL-|PRIVATE-FIGURE-ID|SECRET-TRIAL-ID/);
+  });
+});
+
+test("naming task exports the canonical board slots rather than a parallel definition", () => {
+  assert.equal(SLOTS, BOARD_SLOTS);
+});
+
+test("AI final connection failures preserve history and human submission and can be retried", async (t) => {
+  for (const humanFirst of [false, true]) await t.test(humanFirst ? "human already committed" : "AI requested first", async (t) => {
+    const directory = await mkdtemp(join(tmpdir(), "naming-final-retry-"));
+    t.after(() => rm(directory, { recursive: true, force: true }));
+    let failNextFinal = true;
+    const finalNames = submission("AI-FINAL");
+    const { client, requests } = await mock(t, async (_i, body) => {
+      if (!body.messages.at(-1).content.includes("最終提出要求")) return { text: "公開AI応答" };
+      if (failNextFinal) { failNextFinal = false; return { status: 500, raw: "PRIVATE-RAW-FINAL-ERROR" }; }
+      return { text: JSON.stringify(finalNames) };
+    });
+    const task = await createNamingTask(taskOptions(client, { runDir: directory }));
+    await task.turn("公開の相談");
+    const before = task.getState().publicHistory, human = submission("PRIVATE-HUMAN");
+    if (humanFirst) await task.submitHuman(human);
+    await assert.rejects(task.submitAI(), { code: "ai_unavailable" });
+    const failed = task.getState();
+    assert.equal(failed.status, humanFirst ? "submitting" : "dialogue");
+    assert.equal(failed.humanSubmitted, humanFirst);
+    assert.equal(failed.aiSubmitted, false);
+    assert.deepEqual(failed.humanSubmission, humanFirst ? human : null);
+    assert.deepEqual(failed.publicHistory, before);
+    assert.equal(failed.busy, false);
+    const [file] = await readdir(directory);
+    const record = JSON.parse(await readFile(join(directory, file), "utf8"));
+    assert.equal(record.status, failed.status);
+    assert.deepEqual(record.humanSubmission, failed.humanSubmission);
+    assert.deepEqual(record.publicHistory, before);
+    assert.equal(record.requests.at(-1).httpStatus, 500);
+    assert.doesNotMatch(JSON.stringify(record), /PRIVATE-RAW-FINAL-ERROR/);
+    const retried = await task.submitAI();
+    assert.equal(retried.aiSubmitted, true);
+    assert.equal(retried.status, humanFirst ? "completed" : "submitting");
+    assert.deepEqual(retried.publicHistory, before);
+    if (!humanFirst) await task.submitHuman(human);
+    assert.deepEqual(task.getState().aiSubmission, finalNames);
+    const finals = requests.filter((body) => body.messages.at(-1).content.includes("最終提出要求"));
+    assert.equal(finals.length, 2);
+    assert.deepEqual(finals[0], finals[1]);
+    assert.doesNotMatch(JSON.stringify(finals), /PRIVATE-HUMAN/);
+  });
+});
+
+test("scoring failure retains and persists both submissions in either order, then retries without AI calls", async (t) => {
+  for (const first of ["human", "ai"]) await t.test(first + " submits first", async (t) => {
+    const directory = await mkdtemp(join(tmpdir(), "naming-scoring-error-"));
+    t.after(() => rm(directory, { recursive: true, force: true }));
+    const finalNames = submission("AI-FINAL"), human = submission("PRIVATE-HUMAN");
+    const { client, requests } = await mock(t, async () => ({ text: JSON.stringify(finalNames) }));
+    let scoreCalls = 0;
+    const task = await createNamingTask(taskOptions(client, { runDir: directory, scoreTrial(args) {
+      scoreCalls++;
+      if (scoreCalls === 1) throw new TypeError("PRIVATE-SCORING-TYPEERROR");
+      return fakeScore(args);
+    } }));
+    if (first === "human") await task.submitHuman(human);
+    else await task.submitAI();
+    await assert.rejects(first === "human" ? task.submitAI() : task.submitHuman(human), (error) => {
+      assert.equal(error.code, "scoring_error");
+      assert.doesNotMatch(error.message, /PRIVATE-SCORING|ai_unavailable/);
+      return true;
+    });
+    const failed = task.getState();
+    assert.equal(failed.status, "scoring_error");
+    assert.equal(failed.humanSubmitted, true); assert.equal(failed.aiSubmitted, true);
+    assert.deepEqual(failed.humanSubmission, human);
+    assert.equal(failed.busy, false);
+    assert.ok(!Object.hasOwn(failed, "result"));
+    assert.ok(!Object.hasOwn(failed, "aiSubmission"));
+    const [file] = await readdir(directory);
+    const record = JSON.parse(await readFile(join(directory, file), "utf8"));
+    assert.equal(record.status, "scoring_error");
+    assert.deepEqual(record.humanSubmission, human);
+    assert.deepEqual(record.aiSubmission, finalNames);
+    assert.equal(record.scoring, null);
+    assert.doesNotMatch(JSON.stringify(record), /PRIVATE-SCORING-TYPEERROR/);
+    const requestCount = requests.length;
+    const retried = await task.submitAI();
+    assert.equal(scoreCalls, 2); assert.equal(requests.length, requestCount);
+    assert.equal(retried.status, "completed");
+    assert.deepEqual(retried.result, fakeScore({ key: fakeTrial({ seed: 101 }).key, humanSubmission: human, aiSubmission: finalNames }));
+    const completed = JSON.parse(await readFile(join(directory, file), "utf8"));
+    assert.equal(completed.status, "completed");
+    assert.deepEqual(completed.scoring.result, retried.result);
+    await assert.rejects(task.submitAI(), { code: "already_submitted" });
+  });
 });

@@ -7,6 +7,7 @@ import { createLunaJudge, createJevJudge, createOwnLedger, validateOwnLedger, va
 import { JUDGE_POLICIES } from "../dialogue-model/runtime/judgment/instructions.mjs";
 const image = { mimeType: "image/png", base64: "iVBORw0KGgo=" };
 const judgment = (extra = {}) => ({ ...SAFE_JUDGMENT, ...extra });
+const followUp = (extra = {}) => ({ action: "propose_name", targetSlot: "下段右", candidateName: "追加の候補", discriminatingFeature: null, ...extra });
 const input = (extra = {}) => ({ image, strategy: "repair-first", publicHistory: [{ role: "user", content: "公開発話" }], ownLedger: createOwnLedger(), ...extra });
 async function mock(t, replies) {
   const requests = [];
@@ -167,6 +168,75 @@ test("repeated duplicate-name judgments fall back without changing the ledger", 
   assert.deepEqual(applyJudgment(ledger, value), before);
   assert.equal(requests.length, 2);
   assert.deepEqual(judge.getDiagnostics(), [{ attempts: 2, fallback: true, failures: ["duplicate_name_requires_repair", "duplicate_name_requires_repair"] }]);
+});
+
+test("optional followUp preserves legacy judgments and validates exactly one restricted four-field act", () => {
+  assert.deepEqual(validateJudgment(SAFE_JUDGMENT), SAFE_JUDGMENT);
+  assert.deepEqual(validateJudgment(judgment({ followUp: null })), judgment({ followUp: null }));
+  for (const item of [
+    followUp(), followUp({ action: "confirm", discriminatingFeature: "候補間の違い" }),
+    followUp({ action: "move_on", targetSlot: null, candidateName: null }),
+    followUp({ action: "revisit", candidateName: null }), followUp({ action: "defer", candidateName: null }),
+  ]) {
+    const value = judgment({ followUp: item });
+    assert.deepEqual(validateJudgment(value), value);
+  }
+  for (const item of [undefined, [], {}, "PRIVATE-RAW-FOLLOWUP", 1,
+    ...["accept", "agree", "repair", "close", "unknown"].map((action) => followUp({ action })),
+    followUp({ note: "PRIVATE-NOTE" }), followUp({ followUp: null }), followUp({ key: "PRIVATE-KEY" }),
+    followUp({ targetSlot: "F1" }), followUp({ candidateName: 2 }), followUp({ candidateName: null }),
+    followUp({ action: "confirm" }),
+  ]) assert.throws(() => validateJudgment(judgment({ followUp: item })));
+  const value = judgment({ followUp: followUp({ candidateName: " 追加の候補 " }) });
+  assert.equal(validateJudgment(value).followUp.candidateName, "追加の候補");
+  assert.equal(value.followUp.candidateName, " 追加の候補 ");
+});
+
+test("compound ledger updates apply primary before followUp and reject the whole update if either conflicts", () => {
+  const ledger = createOwnLedger(); ledger["上段左"] = { status: "tentative", name: "記憶名" };
+  const transfer = judgment({ action: "repair", targetSlot: "上段左", followUp: followUp({ candidateName: "記憶名" }) });
+  const moved = applyJudgment(ledger, transfer);
+  assert.deepEqual(moved["上段左"], { status: "unassigned", name: null });
+  assert.deepEqual(moved["下段右"], { status: "tentative", name: "記憶名" });
+  assert.equal(ledger["上段左"].name, "記憶名");
+  const agreedThenDeferred = judgment({ action: "agree", targetSlot: "上段左", candidateName: "記憶名",
+    followUp: followUp({ action: "defer", targetSlot: "上段左", candidateName: null }) });
+  assert.deepEqual(applyJudgment(ledger, agreedThenDeferred)["上段左"], { status: "deferred", name: "記憶名" });
+  const duplicate = judgment({ action: "propose_name", targetSlot: "上段中", candidateName: "主候補",
+    followUp: followUp({ candidateName: "主候補" }) });
+  const before = structuredClone(ledger);
+  assert.throws(() => validateJudgment(duplicate, { ownLedger: ledger }), /duplicate_name_requires_repair/);
+  assert.throws(() => applyJudgment(ledger, duplicate), /duplicate_name_requires_repair/);
+  assert.deepEqual(ledger, before);
+  assert.throws(() => applyJudgment(ledger, judgment({ followUp: followUp({ targetSlot: "上段左" }) })), /reassignment_requires_repair/);
+  assert.throws(() => applyJudgment(ledger, judgment({ followUp: followUp({ candidateName: "記憶名" }) })), /duplicate_name_requires_repair/);
+});
+
+test("renaming and cross-slot duplicates use the same provisional orthographic normalization as scoring", () => {
+  const ledger = createOwnLedger(); ledger["上段左"] = { status: "agreed", name: "ウ サギ" };
+  assert.deepEqual(applyJudgment(ledger, judgment({ action: "agree", targetSlot: "上段左", candidateName: "うさぎ" }))["上段左"],
+    { status: "agreed", name: "うさぎ" });
+  for (const name of ["うさぎ", "ｳｻｷﾞ", "ウ　サギ"]) {
+    assert.throws(() => validateJudgment(judgment({ action: "propose_name", targetSlot: "下段右", candidateName: name }), { ownLedger: ledger }), /duplicate_name_requires_repair/);
+    assert.throws(() => validateJudgment(judgment({ followUp: followUp({ candidateName: name }) }), { ownLedger: ledger }), /duplicate_name_requires_repair/);
+  }
+  assert.throws(() => validateJudgment(judgment({ action: "agree", targetSlot: "上段左", candidateName: "別の名" }), { ownLedger: ledger }), /reassignment_requires_repair/);
+  const withinTurn = judgment({ action: "propose_name", targetSlot: "上段中", candidateName: "Ａ１",
+    followUp: followUp({ candidateName: "A 1" }) });
+  assert.throws(() => validateJudgment(withinTurn), /duplicate_name_requires_repair/);
+});
+
+test("judge retries an invalid followUp against the primary result without committing either rejected act", async (t) => {
+  const primary = { action: "propose_name", targetSlot: "上段左", candidateName: "主候補" };
+  const invalid = judgment({ ...primary, followUp: followUp({ candidateName: "主候補" }) });
+  const corrected = judgment({ ...primary, followUp: followUp() });
+  const { client, requests } = await mock(t, [JSON.stringify(invalid), JSON.stringify(corrected)]);
+  const ledger = createOwnLedger(), judge = createLunaJudge(client);
+  assert.deepEqual(await judge.judge(input({ ownLedger: ledger })), corrected);
+  assert.ok(Object.values(ledger).every((entry) => entry.status === "unassigned"));
+  assert.deepEqual(judge.getDiagnostics(), [{ attempts: 2, fallback: false, failures: ["duplicate_name_requires_repair"] }]);
+  assert.match(requests[1].messages.at(-1).content, /duplicate_name_requires_repair/);
+  assert.match(requests[0].messages[2].content, /主actionの後にfollowUp/u);
 });
 
 test("Jev remains an explicit unimplemented adapter", () => {
