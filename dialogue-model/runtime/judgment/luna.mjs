@@ -4,6 +4,12 @@ import { summarizeForJudge, ReferenceGraphError } from "../memory/reference-grap
 import { MEMORY_INSTRUCTIONS, stageMemory } from "./memory.mjs";
 import { CANDIDATE_CONFLICT_INSTRUCTIONS, CONFLICT_RETRY_HINTS, CandidateConflictError, splitConflict, validateCandidateConflict } from "../v2/candidate-conflict.ts";
 
+// Robustness bound, identical for both strategies: one upstream stall must not
+// fail the whole reply. Each attempt gets the remaining budget; a validation
+// retry needs a minimum window; otherwise the existing safe fallback applies.
+export const JUDGE_TIME_BUDGET_MS = 50000;
+export const JUDGE_MIN_RETRY_MS = 12000;
+
 const judgeInstructionsFor = (version) => [
   "【非公開の対話判断】次の公開発話を生成するために、対話上の判断をJSONだけで返してください。これは対話相手への発話ではありません。",
   "必須キーは action, targetSlot, candidateName, discriminatingFeature, note の5個です。任意キーとしてfollowUpを追加できます。action は " + ACTIONS.join(" | ") + " です。",
@@ -54,11 +60,17 @@ export function ownAnchorMessage(anchors, ledger) {
  * candidateConflict (v2 only, default off) is a researcher-unapproved opt-in
  * intervention: Luna also returns a private candidate list, kept only in
  * diagnostics, never returned. Conflict-block problems never replace a valid act.
+ * A connection failure or timeout of a judge call (AIConnectionError) ends the
+ * judge phase with the same fallback as two invalid replies; other errors throw.
  * @returns {import('./schema.mjs').DialogueJudge & {getDiagnostics(): Record<string, unknown>[]}}
  */
-export function createLunaJudge(client, { candidateConflict = false } = {}) {
+export function createLunaJudge(client, { candidateConflict = false, timeBudgetMs = JUDGE_TIME_BUDGET_MS,
+  minRetryMs = JUDGE_MIN_RETRY_MS, now = () => Date.now() } = {}) {
   if (!client || typeof client.complete !== "function") throw new Error("A chat client is required");
   if (typeof candidateConflict !== "boolean") throw new Error("Invalid candidate conflict option");
+  if (![timeBudgetMs, minRetryMs].every((ms) => Number.isSafeInteger(ms) && ms > 0) || typeof now !== "function") {
+    throw new Error("Invalid judge time budget");
+  }
   const diagnostics = [];
   return {
     getDiagnostics() { return structuredClone(diagnostics); },
@@ -101,11 +113,22 @@ export function createLunaJudge(client, { candidateConflict = false } = {}) {
         }
       };
       let validCore = null, memoryFailure = false, rawConflict, conflictPresent = false, pending = null;
+      const started = now();
       for (let attempt = 0; attempt < 2; attempt++) {
-        validCore = null; memoryFailure = false; rawConflict = undefined; conflictPresent = false;
-        const response = await client.complete(attempt ? [...messages,
+        const remaining = timeBudgetMs - (now() - started);
+        if (attempt && remaining < minRetryMs) { failures.push("time_budget"); break; }
+        let response;
+        try {
+          response = await client.complete(attempt ? [...messages,
           { role: "system", content: "前回の判断は検証できませんでした。検証理由: " + failures.at(-1) + "。tentativeの同じ対象の言い換えはagree/confirm/propose_nameで新しい名前を指定できます。合意済み名の訂正や対象の付け替えはrepairを使ってください。同名が別枠にある場合は元の枠をrepairとcandidateName=nullで空にしてから再割当してください。" + (failures.at(-1) === "agree_requires_shared_identification" ? version === 2 ? "作業メモでunassignedかdeferredの対象にはまだagreeできません。全体の見立てで理解を示すpropose_nameやaccept、または方略に応じたdefer・move_on・revisitを選んでください。discriminatingFeatureは原則nullで、共通教示の分析トリガーがあるときだけ1特徴を添えるかconfirmを選んでください。" : "作業メモでunassignedかdeferredの対象にはまだagreeできません。識別特徴1つを添えたpropose_name、confirm、accept、または方略に応じたdefer・move_on・revisitを選んでください。" : "") + (candidateConflict ? CONFLICT_RETRY_HINTS[failures.at(-1)] ?? "" : "") + "上記JSON形式と制約を守って再提出してください。" }] : messages,
-        { phase: "judgment" });
+        { phase: "judgment", timeoutMs: Math.max(1, remaining) });
+        } catch (error) {
+          if (error?.name !== "AIConnectionError") throw error;
+          failures.push("connection_" + (typeof error.code === "string" ? error.code : "error"));
+          break;
+        }
+        // A retry that never produced a reply keeps attempt 1's memory fallback.
+        validCore = null; memoryFailure = false; rawConflict = undefined; conflictPresent = false;
         try {
           let parsed = JSON.parse(response.text);
           if (candidateConflict) {

@@ -40,7 +40,11 @@ test("v1 task, complete judge retry requests and both four-line strategy policie
   };
   for (const strategy of STRATEGIES) {
     const calls = [];
-    await createLunaJudge({ async complete(messages, options) { calls.push({ messages, options });
+    // The local per-call deadline is a client option, never sent upstream; the
+    // pinned digest covers the request messages and phase byte for byte.
+    await createLunaJudge({ async complete(messages, { timeoutMs, ...options }) {
+      assert.ok(Number.isSafeInteger(timeoutMs) && timeoutMs > 0);
+      calls.push({ messages, options });
       return { text: calls.length === 1 ? "invalid-json" : JSON.stringify(SAFE_JUDGMENT) }; } })
       .judge({ version: 1, strategy, publicHistory: [{ role: "user", content: "こんにちは" }], ownLedger: createOwnLedger() });
     assert.equal(digest(JUDGE_POLICIES[strategy]), baseline[strategy].policy);

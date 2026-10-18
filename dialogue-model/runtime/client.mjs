@@ -45,11 +45,16 @@ export function createChatClient(config, fetchImpl = globalThis.fetch, {
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), timeoutMs);
+      // Enforce the deadline even when fetchImpl ignores the signal (e.g. a
+      // Durable Object service-binding RPC adapter).
+      const aborted = new Promise((_resolve, reject) => controller.signal.addEventListener("abort",
+        () => reject(new AIConnectionError("timeout")), { once: true }));
+      aborted.catch(() => {});
       let failure;
       let responseReceived = false;
       let retryAllowed = false;
       try {
-        const response = await fetchImpl(url, { ...options, signal: controller.signal });
+        const response = await Promise.race([fetchImpl(url, { ...options, signal: controller.signal }), aborted]);
         responseReceived = true;
         if (!response.ok) {
           // Dispose of the body without inspecting or exposing an upstream echo.
@@ -57,7 +62,7 @@ export function createChatClient(config, fetchImpl = globalThis.fetch, {
           throw new AIConnectionError(httpCode, response.status);
         }
         let data;
-        try { data = await response.json(); }
+        try { data = await Promise.race([response.json(), aborted]); }
         catch (error) {
           if (controller.signal.aborted) throw new AIConnectionError("timeout");
           throw new AIConnectionError(error instanceof SyntaxError ? "invalid_json" : "network_error");
@@ -95,14 +100,17 @@ export function createChatClient(config, fetchImpl = globalThis.fetch, {
         return data;
       }, "policy_http_error");
     },
-    async complete(messages) {
+    /** @param {object[]} messages @param {{timeoutMs?: number}} [options] A shorter per-call deadline; never longer than the configured one. */
+    async complete(messages, { timeoutMs: callTimeoutMs } = {}) {
       if (!Array.isArray(messages) || messages.length === 0) throw new Error("At least one chat message is required");
+      if (callTimeoutMs !== undefined && (!Number.isSafeInteger(callTimeoutMs) || callTimeoutMs < 1)) throw new Error("Invalid call timeout");
       const payload = {
         ...(config.purpose ? { purpose: config.purpose } : { model: config.model }), messages,
         ...(config.maxCompletionTokens !== undefined ? { max_completion_tokens: config.maxCompletionTokens } : {}),
       };
       const hasImage = messages.some((message) => Array.isArray(message.content) && message.content.some((part) => part?.type === "image_url"));
-      const timeoutMs = config.timeoutMs ?? (hasImage ? 90000 : 45000);
+      const configuredMs = config.timeoutMs ?? (hasImage ? 90000 : 45000);
+      const timeoutMs = callTimeoutMs === undefined ? configuredMs : Math.min(configuredMs, callTimeoutMs);
       return request(endpoint, { method: "POST", headers: {
         Authorization: "Bearer " + config.apiKey, "Content-Type": "application/json",
       }, body: JSON.stringify(payload) }, timeoutMs, (data) => {
