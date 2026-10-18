@@ -69,7 +69,20 @@ test("reference ambiguity is summarized from a graph snapshot", () => {
     { kind: "question", status: "open" },
   ] };
   assert.deepEqual(dialogueMetrics(record({ referenceGraph })).referenceAmbiguity,
-    { humanMentions: 3, unresolved: 1, multiCandidate: 1, grounded: 1, openQuestions: 1 });
+    { humanMentions: 3, unresolved: 1, multiCandidate: 1, grounded: 1, openQuestions: 1, namedSlots: 0, explicitlyAgreedSlots: 0 });
+});
+
+test("reference ambiguity also reads persisted snapshots", () => {
+  const referenceGraph = {
+    mentions: [
+      { kind: "mention", speaker: "human", epistemic: "grounded", slots: ["上段中"] },
+      { kind: "mention", speaker: "human", epistemic: "unresolved", slots: [] },
+    ],
+    questions: [{ status: "open" }],
+    ownSlots: { 上段中: { candidate: { agreement: "explicit" } }, 上段左: { candidate: { agreement: "none" } }, 下段右: { candidate: null } },
+  };
+  assert.deepEqual(dialogueMetrics(record({ referenceGraph })).referenceAmbiguity,
+    { humanMentions: 2, unresolved: 1, multiCandidate: 0, grounded: 1, openQuestions: 1, namedSlots: 2, explicitlyAgreedSlots: 1 });
 });
 
 test("aggregation keeps every strategy and toggle condition separate", () => {

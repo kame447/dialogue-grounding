@@ -42,14 +42,21 @@ function speakerRuns(history) {
   return runs;
 }
 
+// Accepts either a raw graph ({ records }) or a persisted snapshot
+// ({ mentions, questions, ownSlots }) from snapshotReferenceGraph.
 function referenceAmbiguity(graph) {
-  const mentions = (graph?.records ?? []).filter((record) => record.kind === "mention" && record.speaker === "human");
+  const all = Array.isArray(graph?.records) ? graph.records
+    : [...(graph?.mentions ?? []), ...(graph?.questions ?? []).map((q) => ({ kind: "question", ...q }))];
+  const mentions = all.filter((record) => record.kind === "mention" && record.speaker === "human");
+  const slots = graph?.ownSlots ? Object.values(graph.ownSlots) : [];
   return {
     humanMentions: mentions.length,
     unresolved: mentions.filter((m) => m.epistemic === "unresolved").length,
     multiCandidate: mentions.filter((m) => m.epistemic === "hypothesis" && m.slots.length > 1).length,
     grounded: mentions.filter((m) => m.epistemic === "grounded").length,
-    openQuestions: (graph?.records ?? []).filter((record) => record.kind === "question" && record.status === "open").length,
+    openQuestions: all.filter((record) => record.kind === "question" && record.status === "open").length,
+    namedSlots: slots.filter((s) => s?.candidate).length,
+    explicitlyAgreedSlots: slots.filter((s) => s?.candidate?.agreement === "explicit").length,
   };
 }
 
