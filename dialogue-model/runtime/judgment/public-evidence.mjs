@@ -73,7 +73,10 @@ const CONFIDENCE = { unresolved: 0, hypothesis: 0.5, grounded: 0.9 };
 export function groundReference({ publicTurns, turn, interpretation }) {
   const human = publicTurns.find((t) => t.turn === turn && t.speaker === "human");
   if (!human) return { human: null, antecedent: null, feature: null, name: null, focus: [], dropped: [{ kind: "mention", reason: "no_public_human_turn" }] };
-  const previousAi = publicTurns.find((t) => t.turn === turn - 1 && t.speaker === "ai") ?? null;
+  // The latest public AI utterance before this human turn. In v1 exchange
+  // numbering that is turn - 1; in v2 event numbering consecutive human
+  // messages may sit in between.
+  const previousAi = publicTurns.filter((t) => t.speaker === "ai" && t.turn < turn).at(-1) ?? null;
   const dropped = [];
   let slots = [...interpretation.slots];
   let epistemic = interpretation.epistemic;

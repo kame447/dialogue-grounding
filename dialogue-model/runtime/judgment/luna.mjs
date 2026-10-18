@@ -32,13 +32,23 @@ const judgeInstructionsFor = (version) => [
   "各名称は200文字以内、特徴は400文字以内、メモは1000文字以内。説明文・Markdown・上記以外の追加キーは返さないでください。",
 ].join("\n");
 
+// v2 only: where each of the AI's own opaque ids lies in its own image (pixels).
+// Never a cross-board mapping; absent (no message) in v1.
+export function ownAnchorMessage(anchors, ledger) {
+  if (anchors === null) return [];
+  if (!Array.isArray(anchors) || anchors.length !== Object.keys(ledger).length ||
+      !anchors.every((a) => a && Object.hasOwn(ledger, a.id) && a.bbox && a.centroid)) throw new Error("Invalid own anchors");
+  const rows = anchors.map(({ id, bbox, centroid }) => ({ id, bbox: { x: bbox.x, y: bbox.y, w: bbox.w, h: bbox.h }, centroid: { x: centroid.x, y: centroid.y } }));
+  return [{ role: "system", content: "自分の画像内の各図形の内部参照ID（非公開。画像のピクセル範囲。相手の画面とは無関係で、相手に言わない）:\n" + JSON.stringify(rows) }];
+}
+
 /** @returns {import('./schema.mjs').DialogueJudge & {getDiagnostics(): object[]}} */
 export function createLunaJudge(client) {
   if (!client || typeof client.complete !== "function") throw new Error("A chat client is required");
   const diagnostics = [];
   return {
     getDiagnostics() { return structuredClone(diagnostics); },
-    async judge({ image = null, rotationImage = null, referenceContext = null, publicHistory, strategy, ownLedger, ownJudgmentHistory = [], version = 1 }) {
+    async judge({ image = null, rotationImage = null, referenceContext = null, publicHistory, strategy, ownLedger, ownJudgmentHistory = [], version = 1, ownAnchors = null }) {
       if (!STRATEGIES.includes(strategy)) throw new Error("Unsupported dialogue strategy");
       const taskInstructions = taskInstructionsFor(version);
       const ledger = validateOwnLedger(ownLedger);
@@ -56,6 +66,7 @@ export function createLunaJudge(client) {
         { role: "system", content: judgeInstructionsFor(version) },
         ...(referenceContext ? [{ role: "system", content: MEMORY_INSTRUCTIONS }] : []),
         ...ownImageMessage(image), ...ownRotationMessage(rotationImage),
+        ...ownAnchorMessage(ownAnchors, ledger),
         { role: "system", content: "AI自身の作業メモ（公開発話ではない）:\n" + JSON.stringify({ ownLedger: ledger, ownJudgmentHistory: previous }) },
         ...(referenceContext ? [{ role: "system", content: "AI自身の参照メモと公開発話の出典番号（非公開・正解表ではない）:\n" + JSON.stringify({
           ownReferences: JSON.parse(summarizeForJudge(referenceContext.graph)), currentTurn: referenceContext.turn,

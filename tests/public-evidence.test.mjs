@@ -117,3 +117,15 @@ test("missing human turn yields no materials", () => {
   assert.equal(g.human, null);
   assert.equal(g.dropped[0].reason, "no_public_human_turn");
 });
+
+test("with event numbering, the previous AI utterance is found across consecutive human messages", () => {
+  const turns = [
+    { turn: 1, speaker: "human", text: "どれから？" },
+    { turn: 2, speaker: "ai", text: "細長い形を「稲妻」と呼ぶのはどうでしょう？" },
+    { turn: 3, speaker: "human", text: "えっと" },
+    { turn: 4, speaker: "human", text: "それでお願いします" },
+  ];
+  const g = groundReference({ publicTurns: turns, turn: 4, interpretation: interp({ intent: "name_acceptance", nameAcceptance: { slot: "上段左", name: "稲妻" } }) });
+  assert.equal(g.antecedent.sourceTurn, 2);
+  assert.deepEqual(g.name, { slot: "上段左", name: "稲妻", agreement: "implicit" }, "a contentful acceptance of the AI's literal proposal is implicit, not explicit");
+});
