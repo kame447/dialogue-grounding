@@ -184,13 +184,13 @@ function axisConfusion<L extends string>(rows: readonly { gold: L | null; pred: 
  * annotation labels and is not correctness; see the evalset's label rules. */
 const axisQ = (r: CaseResult, axis: "target" | "name") => r.axisQuality?.[axis] ?? r.labelQuality;
 
-/** With `excludeWeak`, each axis drops rows whose gold for that axis is weak. */
-function caseBlock(rows: readonly CaseResult[], excludeWeak = false) {
-  const keep = (r: CaseResult, axis: "target" | "name") => !excludeWeak || axisQ(r, axis) !== "weak";
+/** Rows are kept per axis: `qualities` lists the gold qualities included for each axis. */
+function caseBlock(rows: readonly CaseResult[], qualities: readonly string[] | null = null) {
+  const keep = (r: CaseResult, axis: "target" | "name") => !qualities || qualities.includes(axisQ(r, axis));
   const target = axisConfusion(rows.filter((r) => keep(r, "target")).map((r) => ({ gold: r.expected.target, pred: r.verdict?.target ?? null })), TARGET_LEVELS);
   const name = axisConfusion(rows.filter((r) => keep(r, "name")).map((r) => ({ gold: r.expected.name, pred: r.verdict?.name ?? null })), NAME_LEVELS);
   rows = rows.filter((r) => keep(r, "target"));
-  // "Risk" view: the verdict withholds support where gold says supported.
+  // "Risk" view (target axis): the verdict withholds support where gold says supported.
   const goldSupported = rows.filter((r) => r.expected.target === "supported" && r.verdict);
   const goldUnsupported = rows.filter((r) => (r.expected.target === "insufficient" || r.expected.target === "contradicted") && r.verdict);
   const risky = (r: CaseResult) => r.verdict!.target === "insufficient" || r.verdict!.target === "contradicted";
@@ -202,16 +202,19 @@ function caseBlock(rows: readonly CaseResult[], excludeWeak = false) {
   };
 }
 
+const HEADLINE_QUALITIES = ["explicit", "derived"];
+
 /** Agreement with provisional gold. Gold is derived from annotation labels and
- * is not correctness. Headline numbers exclude `weak` labels; every split is
- * also broken down by label quality. */
+ * is not correctness. Headline numbers keep explicit and derived gold per axis;
+ * every split is also broken down by per-axis gold quality. */
 export function summarizeCases(results: readonly CaseResult[], cases: readonly EvalCaseLike[] = []) {
   const bySplit: Record<string, { headline: ReturnType<typeof caseBlock>; byQuality: Record<string, ReturnType<typeof caseBlock>> }> = {};
   for (const split of [...new Set(results.map((r) => r.split))].sort()) {
     const rows = results.filter((r) => r.split === split);
     bySplit[split] = {
-      headline: caseBlock(rows, true),
-      byQuality: Object.fromEntries([...new Set(rows.map((r) => r.labelQuality))].sort().map((q) => [q, caseBlock(rows.filter((r) => r.labelQuality === q))])),
+      headline: caseBlock(rows, HEADLINE_QUALITIES),
+      // Grouped per axis quality, so the headline equals the explicit + derived rows.
+      byQuality: Object.fromEntries([...new Set(rows.flatMap((r) => [axisQ(r, "target"), axisQ(r, "name")]))].sort().map((q) => [q, caseBlock(rows, [q])])),
     };
   }
   // Repeated calls on identical input: caseId "X#r2" repeats "X".

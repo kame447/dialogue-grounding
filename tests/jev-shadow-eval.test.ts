@@ -146,6 +146,9 @@ test("live runs: never the session replay, never non-synthetic or unsendable cas
     axisQuality: { target: "weak", name: "derived" } })], client: createMockJevAxesClient() });
   assert.equal(perAxis.cases.bySplit.dev.headline.target.goldPresent, 0, "weak target gold is dropped");
   assert.equal(perAxis.cases.bySplit.dev.headline.name.goldPresent, 1, "derived name gold on the same case stays");
+  assert.equal(perAxis.cases.bySplit.dev.byQuality.weak.target.goldPresent, 1);
+  assert.equal(perAxis.cases.bySplit.dev.byQuality.weak.name.goldPresent, 0, "per-quality rows are per axis too");
+  assert.equal(perAxis.cases.bySplit.dev.byQuality.derived.name.goldPresent, 1);
   assert.deepEqual(Object.keys(mixed.cases.bySplit.dev.byQuality), ["derived", "weak"]);
   assert.equal(liveAllowed(cases[1]), false);
   assert.equal(liveAllowed(cases[3]), false);
@@ -174,7 +177,7 @@ test("budget wrapper rejects invalid verdicts and invalid budgets", async () => 
 test("grounding adapter maps speakers, judges as of the last public turn and passes nothing else", async () => {
   let built: unknown = null;
   const client = groundingAxesClient({
-    buildState(input) { built = input; return "STATE"; },
+    buildState(input) { built = input; return { state: "STATE" }; },
     async judge(request) {
       assert.deepEqual(request, { purpose: "grounding_jev", state: "STATE" });
       return { model: "jev-x", identification: { level: "insufficient", scores: { insufficient: 0.6 } }, nameAgreement: { level: "unclear" }, usage: null, latencyMs: 5 };

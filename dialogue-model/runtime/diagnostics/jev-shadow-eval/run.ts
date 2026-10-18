@@ -26,12 +26,12 @@ import type { AiHypothesis, EvalCaseLike, FailureTag, JevAxesClient, JevAxesInpu
 
 /** The parts of the grounding judge (dialogue-model/runtime/grounding/) this runner uses. */
 export type GroundingDeps = {
-  buildState(input: { events: { seq: number; speaker: "human" | "ai"; text: string }[]; asOfSeq: number; aiHypothesis?: AiHypothesis | null }): string;
+  buildState(input: { events: { seq: number; speaker: "human" | "ai"; text: string }[]; asOfSeq: number; aiHypothesis?: AiHypothesis | null }): { state: string };
   judge(request: { purpose: "grounding_jev"; state: string }): Promise<{
     model: string;
     identification: { level: string; scores?: Record<string, number> };
     nameAgreement: { level: string; scores?: Record<string, number> };
-    usage: { inputTokens?: number; outputTokens?: number; costUsd?: number } | null;
+    usage: { inputTokens?: number | null; outputTokens?: number | null; costUsd?: number | null } | null;
     latencyMs: number;
   }>;
 };
@@ -42,11 +42,12 @@ export function groundingAxesClient(deps: GroundingDeps): JevAxesClient {
     kind: "live" as const,
     async judgeAxes(input: JevAxesInput): Promise<JevAxesVerdict> {
       const events = input.history.map((t, i) => ({ seq: i + 1, speaker: t.speaker === "self" ? "ai" as const : "human" as const, text: t.text }));
-      const v = await deps.judge({ purpose: "grounding_jev", state: deps.buildState({ events, asOfSeq: events.length, aiHypothesis: input.aiHypothesis ?? null }) });
+      const v = await deps.judge({ purpose: "grounding_jev", state: deps.buildState({ events, asOfSeq: events.length, aiHypothesis: input.aiHypothesis ?? null }).state });
       return {
         target: v.identification.level as TargetLevel, name: v.nameAgreement.level as NameLevel,
         scores: { target: v.identification.scores, name: v.nameAgreement.scores },
-        model: v.model, latencyMs: v.latencyMs, usage: v.usage,
+        model: v.model, latencyMs: v.latencyMs,
+        usage: v.usage && { inputTokens: v.usage.inputTokens ?? undefined, outputTokens: v.usage.outputTokens ?? undefined, costUsd: v.usage.costUsd ?? undefined },
       };
     },
   });
@@ -227,7 +228,8 @@ function args(argv: string[]) {
 
 async function liveClient(): Promise<JevAxesClient> {
   // Specifiers are computed so the type-check does not depend on the grounding
-  // module, which ships in a separate PR.
+  // module, which ships in a separate PR (#52). Interface checked against #52
+  // head 73e9ada; re-check after it merges and before any live run.
   const base = "../../grounding/";
   const evidence = await import(base + "evidence.ts");
   const client = await import(base + "client.ts");
