@@ -163,6 +163,20 @@ test("a name nobody said publicly up to the judged point is AI-private and never
   assert.ok(!JSON.stringify(buildMemoryEvidence(graph, { asOfSeq: 6, events: redacted })).includes("鳥"));
 });
 
+test("a short name that appears elsewhere but not in its own cited turns is not public", () => {
+  const ev: Event[] = [
+    { seq: 1, speaker: "ai", text: "家にしませんか" },
+    { seq: 2, speaker: "human", text: "家の近くで見た形かも" },
+  ];
+  const graph = build([{ turn: 1, ops: [mention(1, "m", { speaker: "ai", quote: "家にしませんか", intent: "name_proposal" }),
+    { kind: "name", id: "1:n", slot: A, name: "家", agreement: "none", mentionIds: ["1:m"], replaces: null }] }], ev.slice(0, 1));
+  assert.equal(figure(buildMemoryEvidence(graph, { asOfSeq: 2, events: ev }), A).name!.visibility, "public");
+  // Same dialogue, but the cited turn is unavailable: "家" in an unrelated turn does not make the name public.
+  const elsewhere = [{ seq: 1, speaker: "ai" as const, text: "これにしませんか" }, ev[1]];
+  const a = figure(buildMemoryEvidence(graph, { asOfSeq: 2, events: elsewhere }), A);
+  assert.deepEqual([a.name!.visibility, a.name!.text, a.name!.agreement], ["ai_private", null, "none"]);
+});
+
 test("no free text, labels or private fields leak: only closed vocabulary, own ids, numbers and public names", () => {
   const graph = build(dialogueSteps, events);
   const evidence = buildMemoryEvidence(graph, { asOfSeq: 6, events })!;
