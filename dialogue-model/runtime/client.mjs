@@ -1,6 +1,16 @@
-const RETRYABLE_STATUS = new Set([429, 502, 503, 504]);
-const RETRYABLE_CODE = new Set(["network_error", "timeout"]);
+const GET_RETRYABLE_STATUS = new Set([429, 502, 503, 504]);
+const GET_RETRYABLE_CODE = new Set(["network_error", "timeout"]);
+const POST_RETRYABLE_STATUS = new Set([429, 503]);
+const PRECONNECT_CODES = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "UND_ERR_CONNECT_TIMEOUT"]);
 const MAX_RETRIES = 2;
+
+function isPreconnectFailure(error) {
+  // Fetch's generic TypeError does not prove that a POST was never delivered.
+  // Keep native transport causes local; expose only the sanitized error below.
+  const cause = error?.cause ?? error;
+  const failures = Array.isArray(cause?.errors) ? cause.errors : [cause];
+  return failures.length > 0 && failures.every((failure) => PRECONNECT_CODES.has(failure?.code));
+}
 
 export class AIConnectionError extends Error {
   constructor(code, status) {
@@ -36,8 +46,11 @@ export function createChatClient(config, fetchImpl = globalThis.fetch, {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), timeoutMs);
       let failure;
+      let responseReceived = false;
+      let retryAllowed = false;
       try {
         const response = await fetchImpl(url, { ...options, signal: controller.signal });
+        responseReceived = true;
         if (!response.ok) {
           // Dispose of the body without inspecting or exposing an upstream echo.
           await response.body?.cancel().catch(() => {});
@@ -55,10 +68,16 @@ export function createChatClient(config, fetchImpl = globalThis.fetch, {
           error instanceof AIConnectionError ? error : new AIConnectionError("network_error");
         failure.retryCount = attempt;
         failure.timeoutMs = timeoutMs;
+        // A gateway error, abort, reset or unreadable response can follow a
+        // completed, billable generation. Never replay that POST automatically.
+        retryAllowed = options.method === "POST"
+          ? POST_RETRYABLE_STATUS.has(failure.status) ||
+            (!responseReceived && !controller.signal.aborted && isPreconnectFailure(error))
+          : GET_RETRYABLE_STATUS.has(failure.status) || GET_RETRYABLE_CODE.has(failure.code);
       } finally {
         clearTimeout(timeout);
       }
-      if (attempt === MAX_RETRIES || !(RETRYABLE_STATUS.has(failure.status) || RETRYABLE_CODE.has(failure.code))) throw failure;
+      if (attempt === MAX_RETRIES || !retryAllowed) throw failure;
       await sleep(500 * 2 ** attempt);
     }
   }
