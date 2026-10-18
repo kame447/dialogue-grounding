@@ -41,6 +41,20 @@ export const act = (action: string, targetSlot: string | null = null, candidateN
 export const ref = (slots: string[], epistemic: Reference["epistemic"], intent: string, extra: Partial<Reference> = {}): Reference =>
   ({ slots, epistemic, intent, feature: null, nameAcceptance: null, deferSlot: null, revisitSlot: null, ...extra });
 
+// The judge's per-call timeoutMs is the remaining wall-clock budget (#38), so two runs
+// can differ by a few ms. Bytes are compared without it; the budget is checked separately.
+export const BUDGET_TOLERANCE_MS = 50;
+export const stableOptions = ({ timeoutMs, ...rest }: CallOptions) => rest;
+export function assertSameBudget(actual: CallOptions, expected: CallOptions, judgeBudgetMs: number) {
+  if (actual.phase !== "judgment") {
+    if (actual.timeoutMs !== expected.timeoutMs) throw new Error("timeoutMs differs outside the judge budget");
+    return;
+  }
+  const values = [actual.timeoutMs, expected.timeoutMs];
+  if (!values.every((ms) => Number.isSafeInteger(ms) && ms! > 0 && ms! <= judgeBudgetMs) ||
+      Math.abs(values[0]! - values[1]!) > BUDGET_TOLERANCE_MS) throw new Error("judge budgets differ: " + values.join(" vs "));
+}
+
 /** Text parts only (image data excluded), so token scans never match inside base64. */
 export function requestText(request: Request): string {
   return request.messages.map((message) => typeof message.content === "string" ? message.content
