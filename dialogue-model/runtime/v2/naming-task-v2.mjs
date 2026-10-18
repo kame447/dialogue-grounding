@@ -17,6 +17,9 @@ export const VERSION = 2;
 const SCRIPTED_OPENING = "まず、どの図形から話しましょうか？";
 const NAME_LIMIT = 200;
 const clone = (value) => structuredClone(value);
+// Research latency records keep enum-like codes only, never messages or bodies.
+const errorCode = (error) => typeof error?.code === "string" && /^[a-z][a-z0-9_]{0,39}$/.test(error.code) ? error.code : "error";
+const safeCodes = (values) => Array.isArray(values) ? values.map((value) => typeof value === "string" && /^[a-z][a-z0-9_]{0,59}$/.test(value) ? value : "invalid") : [];
 
 /** Names keyed by the submitter's own opaque ids; null or "" means not agreed / unknown. */
 export function validateNamesV2(value, slots) {
@@ -64,25 +67,73 @@ export async function createNamingTaskV2({
   const model = modelView(trial);
   const humanSlots = scene.shapes.map((shape) => shape.id);
   const requests = restore?.requests ? clone(restore.requests) : [];
+  // Private per-attempt timings; they survive restore with the record.
+  const turnTimings = Array.isArray(restore?.turnTimings) ? clone(restore.turnTimings) : [];
+  // The queue runs one AI turn at a time, so every upstream call starts inside the
+  // current attempt (requestSeq) or outside any turn (final submission: null).
+  let currentRequestSeq = null;
   const trackingClient = {
     async complete(messages, options = {}) {
-      const started = now();
+      const started = now(), requestSeq = currentRequestSeq;
       try {
         const response = await client.complete(messages, options);
         requests.push({ kind: options.phase ?? "dialogue", status: "ok", model: response?.model ?? null,
-          usage: response?.usage ?? null, latencyMs: now() - started, retryCount: response?.retryCount ?? 0 });
+          usage: response?.usage ?? null, latencyMs: now() - started, retryCount: response?.retryCount ?? 0, requestSeq });
         return response;
       } catch (error) {
         requests.push({ kind: options.phase ?? "dialogue", status: "error", httpStatus: Number.isInteger(error?.status) ? error.status : null,
-          latencyMs: now() - started, retryCount: error?.retryCount ?? 0 });
+          latencyMs: now() - started, retryCount: error?.retryCount ?? 0, requestSeq, errorCode: errorCode(error) });
+        throw error;
+      }
+    },
+  };
+  const trackDecisions = (decisionClient, kind) => decisionClient && {
+    async chooseAction(request) {
+      const started = now(), requestSeq = currentRequestSeq;
+      const purpose = ["decision_jev", "decision_luna"].includes(request?.purpose) ? request.purpose : null;
+      try {
+        const response = await decisionClient.chooseAction(request);
+        requests.push({ kind, purpose, status: "ok", latencyMs: now() - started, requestSeq });
+        return response;
+      } catch (error) {
+        requests.push({ kind, purpose, status: "error", latencyMs: now() - started, requestSeq, errorCode: errorCode(error) });
         throw error;
       }
     },
   };
   const dialogue = createDialogueV2({ client: trackingClient, strategy, image: { mimeType: model.mimeType, base64: model.png.toString("base64") },
-    anchors: model.anchors, judge, referenceMemory, decisionShadowClient, activeDecision, utteranceStyle: style,
+    anchors: model.anchors, judge, referenceMemory, decisionShadowClient: trackDecisions(decisionShadowClient, "decision_shadow"),
+    activeDecision: activeDecision && { ...activeDecision, client: trackDecisions(activeDecision.client, "decision_active") }, utteranceStyle: style,
     onResearchUpdate: () => persist().catch(() => {}) });
-  const queue = createHumanMessageQueue({ runAiTurn: dialogue.runAiTurn,
+  async function timedAiTurn(input) {
+    const attemptIndex = dialogue.getAttempts().length;
+    const timing = { requestSeq: input.requestSeq, lastEventId: input.lastEventId, pendingEventIds: input.pendingHumanEvents.map((event) => event.id),
+      startedAtMs: now(), endedAtMs: null, outcome: "running", errorCode: null, judgeAttempts: null, validationFailures: [],
+      judgeFallback: false, guardRegenerated: false, guardFallback: false };
+    turnTimings.push(timing);
+    currentRequestSeq = input.requestSeq;
+    try {
+      const result = await dialogue.runAiTurn(input);
+      timing.outcome = "returned";
+      return result;
+    } catch (error) {
+      timing.outcome = error?.name === "AbortError" ? "superseded" : "error";
+      if (timing.outcome === "error") timing.errorCode = errorCode(error);
+      throw error;
+    } finally {
+      timing.endedAtMs = now();
+      if (currentRequestSeq === input.requestSeq) currentRequestSeq = null;
+      const attempt = dialogue.getAttempts()[attemptIndex];
+      if (attempt) {
+        timing.judgeAttempts = Number.isSafeInteger(attempt.validation?.attempts) ? attempt.validation.attempts : null;
+        timing.validationFailures = safeCodes(attempt.validation?.failures);
+        timing.judgeFallback = attempt.validation?.fallback === true;
+        timing.guardRegenerated = attempt.generationGuard?.regenerated === true;
+        timing.guardFallback = attempt.generationGuard?.fallback === true;
+      }
+    }
+  }
+  const queue = createHumanMessageQueue({ runAiTurn: timedAiTurn,
     initialPrivateState: dialogue.initialPrivateState(), now,
     initialEvents: [{ speaker: "ai", text: SCRIPTED_OPENING, nonReferential: true }],
     ...(restore?.queueState ? { initialState: restore.queueState } : {}) });
@@ -120,7 +171,7 @@ export async function createNamingTaskV2({
       judgments: privateState.judgments, attempts: dialogue.getAttempts(), ownLedger: privateState.ledger,
       ...(referenceMemory ? { referenceGraph: dialogue.snapshotGraph(privateState) } : {}),
       humanSubmission, aiSubmission, closed, finalError,
-      queueState: queue.getDurableState(), scoring: result ? { key: trial.key, result } : null, requests,
+      queueState: queue.getDurableState(), scoring: result ? { key: trial.key, result } : null, requests, turnTimings,
       diagnostics: aiSubmission ? {
         ledgerFinalMismatch: (() => { const slots = dialogue.slots.filter((s) => (privateState.ledger[s].name ?? null) !== (aiSubmission[s] ?? null)); return { count: slots.length, slots }; })(),
         ledgerStatusCounts: Object.fromEntries(STATUSES.map((status) => [status, dialogue.slots.filter((s) => privateState.ledger[s].status === status).length])),
