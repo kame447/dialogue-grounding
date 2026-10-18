@@ -79,6 +79,11 @@ export async function readArchived(storage: ArchiveStorage, recordId: string): P
   return (await storage.get<Archivable>(archiveKey(recordId))) ?? null;
 }
 
+/** RecordIds with a stored record in this session (used to re-register index entries). */
+export async function ledgerIds(storage: ArchiveStorage): Promise<string[]> {
+  return Object.keys(await ledgerOf(storage)).sort();
+}
+
 /** When the session's alarm should fire: the earliest expiry, or null with no records. */
 export async function nextExpiry(storage: ArchiveStorage, days: number): Promise<number | null> {
   const times = Object.values(await ledgerOf(storage));
@@ -114,7 +119,9 @@ export async function expireRecords(storage: ArchiveStorage, now: number, days: 
   // Re-check after the await: a record updated meanwhile is no longer expired.
   const still = new Set(await expiredIds(storage, now, days));
   const removing = ids.filter((id) => still.has(id));
-  await removeRecords(storage, removing, false);
+  // Tombstoned like a researcher deletion: a late write from the same trial cannot
+  // recreate a record that the index no longer lists.
+  await removeRecords(storage, removing, true);
   return removing;
 }
 

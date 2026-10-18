@@ -28,7 +28,9 @@ export const ADMIN_HEADERS: Readonly<Record<string, string>> = Object.freeze({
   "Cache-Control": "no-store",
   "X-Robots-Tag": "noindex, nofollow, noarchive",
   "X-Content-Type-Options": "nosniff",
-  "Referrer-Policy": "no-referrer",
+  // same-origin (not no-referrer): under no-referrer, browsers send `Origin: null` on the
+  // delete form's POST, which the CSRF check would then always reject.
+  "Referrer-Policy": "same-origin",
   "Content-Security-Policy": "default-src 'none'; style-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
   "Cross-Origin-Resource-Policy": "same-origin",
 });
@@ -46,10 +48,16 @@ const notFound = () => plain(404, "Not found");
 /** Visitor key from Cloudflare's own header only; never a client-supplied forwarding header. */
 const visitorKey = (request: Request) => "admin:" + (request.headers.get("CF-Connecting-IP") ?? "ip-unavailable");
 
-/** CSRF guard: an explicit same-origin Origin header (required) and, when sent, Sec-Fetch-Site. */
+/**
+ * CSRF guard. Origin is required: either this site's origin, or the opaque "null"
+ * only when the browser-set Sec-Fetch-Site says same-origin. Any other origin, a
+ * missing Origin, or a cross-site Sec-Fetch-Site is rejected.
+ */
 function sameOrigin(request: Request, url: URL): boolean {
+  const origin = request.headers.get("Origin");
   const site = request.headers.get("Sec-Fetch-Site");
-  return request.headers.get("Origin") === url.origin && (site === null || site === "same-origin");
+  if (origin === url.origin) return site === null || site === "same-origin";
+  return origin === "null" && site === "same-origin";
 }
 
 async function confirmation(request: Request): Promise<string | null> {

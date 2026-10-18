@@ -201,6 +201,19 @@ test("admin delete needs auth, a same-origin POST and a confirmation equal to th
   assert.equal(calls.deleteRecord, 1);
 });
 
+test("browser form POSTs pass the CSRF check: same-origin referrer policy, and Origin null only with Sec-Fetch-Site same-origin", async () => {
+  assert.equal(ADMIN_HEADERS["Referrer-Policy"], "same-origin", "no-referrer would make browsers send Origin: null");
+  const { value, calls } = deps({ limiter: { async limit() { return { success: true }; } } });
+  assert.equal((await handleAdmin(deleteRequest(RECORD, RECORD, { Origin: "null", "Sec-Fetch-Site": "same-origin" }), value)).status, 303);
+  assert.equal(calls.deleteRecord, 1);
+  for (const headers of [{ Origin: "null", "Sec-Fetch-Site": "" }, { Origin: "null", "Sec-Fetch-Site": "cross-site" },
+    { Origin: "null", "Sec-Fetch-Site": "same-site" }, { Origin: "https://evil.test", "Sec-Fetch-Site": "same-origin" },
+    { Origin: "https://example.test", "Sec-Fetch-Site": "same-site" }]) {
+    assert.equal((await handleAdmin(deleteRequest(RECORD, RECORD, headers), value)).status, 403, JSON.stringify(headers));
+  }
+  assert.equal(calls.deleteRecord, 1);
+});
+
 test("deleting removes the record and its index entry, writes a content-free audit entry, and cannot be undone by a late write", async () => {
   const session = memoryStorage(), index = memoryStorage();
   await archiveSnapshot(session, record({ updatedAt: iso(T0) }), new Set(), T0);
@@ -295,6 +308,41 @@ test("restore after eviction keeps the archive; a legacy active-only session is 
   assert.equal(await backfillActive(memoryStorage(), T0), null);
   const odd = memoryStorage(); await odd.put({ [ACTIVE_KEY]: { recordId: "not-a-uuid" } });
   assert.equal(await backfillActive(odd, T0), null);
+});
+
+test("a legacy active-only session older than retention is backfilled, then expired before restore: never resumed, never listed", async () => {
+  const session = memoryStorage(), index = memoryStorage();
+  await session.put({ [ACTIVE_KEY]: record({ recordId: SECOND, updatedAt: iso(T0 - 45 * DAY) }) });
+  // Same order as TangramSession.initialize(): backfill -> expiry -> schedule -> restore.
+  assert.equal((await backfillActive(session, T0))?.recordId, SECOND);
+  const removed = await expireRecords(session, T0, 30, async (ids) => { await removeSummaries(index, ids, "retention", T0); });
+  assert.deepEqual(removed, [SECOND]);
+  assert.equal(await session.get(ACTIVE_KEY), undefined, "nothing left to restore");
+  assert.equal(await readArchived(session, SECOND), null);
+  assert.equal(await nextExpiry(session, 30), null);
+  assert.equal(await getSummary(index, SECOND), null);
+  assert.equal(await upsertSummary(index, summaryOf(record({ recordId: SECOND }))), false, "never indexed again");
+  assert.equal(await archiveSnapshot(session, record({ recordId: SECOND, updatedAt: iso(T0) }), new Set(), T0), false,
+    "a late write cannot recreate an expired record");
+  assert.deepEqual((await listAudit(index)).map((a) => a.reason), ["retention"]);
+  // Inside the window it is kept and restorable.
+  const fresh = memoryStorage();
+  await fresh.put({ [ACTIVE_KEY]: record({ recordId: FIRST, updatedAt: iso(T0 - 10 * DAY) }) });
+  await backfillActive(fresh, T0);
+  assert.deepEqual(await expireRecords(fresh, T0, 30, async () => {}), []);
+  assert.equal((await fresh.get<any>(ACTIVE_KEY)).recordId, FIRST);
+  assert.equal(await nextExpiry(fresh, 30), T0 + 20 * DAY);
+});
+
+test("a stale ordering key never shows a duplicate or a deleted row", async () => {
+  const index = memoryStorage();
+  await upsertSummary(index, summaryOf(record({ updatedAt: iso(T0) })));
+  await upsertSummary(index, summaryOf(record({ updatedAt: iso(T0 + 1000) })));
+  // Simulate a leftover key from an interleaved write.
+  await index.put({ [`u:${String(9_999_999_999_999 - T0).padStart(13, "0")}:${RECORD}`]: RECORD, [`u:0000000000001:${FIRST}`]: FIRST });
+  const page = await listPage(index);
+  assert.deepEqual(page.items.map((s) => s.recordId), [RECORD]);
+  assert.equal(page.items[0].updatedAt, iso(T0 + 1000));
 });
 
 test("archive keys accept only UUID record ids", async () => {
@@ -407,8 +455,19 @@ test("participant state is unchanged and /admin is routed before the participant
   const source = await readFile(new URL("../workers/tangram-experiment/src/index.ts", import.meta.url), "utf8");
   assert.match(source, /private state\(\): unknown \{\n\s+const trial = this\.trial\?\.getState\(\) \?\? null;\n\s+return \{ trial, hideStrategy: true, busy: Boolean\(trial\?\.busy\) \};/);
   assert.ok(source.indexOf("isAdminPath(url.pathname)") < source.indexOf('url.pathname.startsWith("/api/")'));
-  // Expired records go before any restore; persist refreshes the alarm.
-  assert.ok(source.indexOf("await this.runExpiry();") < source.indexOf("const record = await this.ctx.storage.get<StoredTrial>(ACTIVE_KEY)"));
-  assert.match(source, /archiveSnapshot\(this\.ctx\.storage, snapshot, this\.retired, Date\.now\(\)\)\) return;\n\s+await this\.scheduleExpiry\(\);/);
+  // initialize(): backfill -> expiry -> schedule -> restore (audit M2).
+  const init = source.slice(source.indexOf("private async initialize()"));
+  const order = ["backfillActive(", "await this.runExpiry();", "await this.scheduleExpiry();", "const record = await this.ctx.storage.get<StoredTrial>(ACTIVE_KEY)",
+    "this.registerSummary(record)", "this.createTrial("].map((needle) => init.indexOf(needle));
+  assert.ok(order.every((at) => at >= 0) && order.every((at, i) => i === 0 || at > order[i - 1]), String(order));
+  // Persist refreshes the alarm; every archive mutation is serialized (audit L4).
+  assert.match(source, /archiveSnapshot\(this\.ctx\.storage, snapshot, this\.retired, Date\.now\(\)\)\)\) return;\n\s+await this\.scheduleExpiry\(\);/);
+  for (const call of ["archiveSnapshot(", "deleteArchived(", "expireRecords(", "backfillActive("]) {
+    const uses = source.split(call).length - 1;
+    const wrapped = source.split("this.serialized(() => " + call).length - 1;
+    assert.ok(uses >= 1 && uses === wrapped, `${call} ${wrapped}/${uses}`);
+  }
+  // The alarm re-registers remaining records, repairing a missed best-effort index write (audit L2).
+  assert.match(source.slice(source.indexOf("async alarm()")), /^async alarm\(\)[\s\S]*?ledgerIds\(this\.ctx\.storage\)[\s\S]*?this\.registerSummary\(/);
   assert.doesNotMatch(source, /deleteAll/);
 });

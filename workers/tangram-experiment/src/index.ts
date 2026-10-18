@@ -8,7 +8,7 @@ import { handleAdmin, isAdminPath, type AdminLimiter } from "./admin/routes.ts";
 import { summarizeRecord, type AdminSummary } from "./admin/summary.ts";
 import type { AuditEntry } from "./admin/index-store.ts";
 import { summarizeLatency } from "./admin/latency.ts";
-import { ACTIVE_KEY, archiveSnapshot, backfillActive, deleteArchived, expireRecords, nextExpiry, readArchived, retentionDays } from "./admin/archive.ts";
+import { ACTIVE_KEY, archiveSnapshot, backfillActive, deleteArchived, expireRecords, ledgerIds, nextExpiry, readArchived, retentionDays } from "./admin/archive.ts";
 
 export { AdminIndex };
 
@@ -102,7 +102,7 @@ export class TangramSession extends DurableObject<Env> {
 
   /** Researcher deletion (authenticated /admin only): removes the record now and tombstones its id. */
   async adminDelete(recordId: string): Promise<boolean> {
-    const existed = await deleteArchived(this.ctx.storage, recordId);
+    const existed = await this.serialized(() => deleteArchived(this.ctx.storage, recordId));
     this.forget([recordId]);
     await this.scheduleExpiry();
     return existed;
@@ -112,6 +112,21 @@ export class TangramSession extends DurableObject<Env> {
   async alarm(): Promise<void> {
     await this.runExpiry();
     await this.scheduleExpiry();
+    // Re-register the remaining records, so a missed best-effort index write is repaired.
+    for (const id of await ledgerIds(this.ctx.storage)) {
+      const record = await readArchived(this.ctx.storage, id);
+      if (record) await this.registerSummary(record as StoredTrial);
+    }
+  }
+
+  // Archive mutations (persist, delete, expiry, backfill) run one at a time in this
+  // object, so ledger read-modify-writes never interleave. A Durable Object is single
+  // threaded, so this chain covers every writer of this session's storage.
+  private archiveQueue: Promise<unknown> = Promise.resolve();
+  private serialized<T>(task: () => Promise<T>): Promise<T> {
+    const run = this.archiveQueue.then(task, task);
+    this.archiveQueue = run.catch(() => {});
+    return run;
   }
 
   private retention(): number { return retentionDays(this.env.RECORD_RETENTION_DAYS); }
@@ -122,9 +137,9 @@ export class TangramSession extends DurableObject<Env> {
 
   /** Index entries go first: if that fails, nothing is deleted and the alarm retries. */
   private async runExpiry(): Promise<void> {
-    const removed = await expireRecords(this.ctx.storage, Date.now(), this.retention(), async (ids) => {
+    const removed = await this.serialized(() => expireRecords(this.ctx.storage, Date.now(), this.retention(), async (ids) => {
       await this.index()?.remove(ids, "retention");
-    });
+    }));
     this.forget(removed);
   }
 
@@ -159,15 +174,16 @@ export class TangramSession extends DurableObject<Env> {
   private async initialize(): Promise<void> {
     if (this.initialized) return this.initialized;
     this.initialized = (async () => {
-      // Expired records go before any restore, so an expired trial is never resumed.
+      // Order matters: backfill, then expiry, then the alarm, then restore. A legacy
+      // active-only session older than the retention period is archived with its own
+      // last update and immediately expired, so it is never resumed.
+      await this.serialized(() => backfillActive(this.ctx.storage, Date.now()));
       await this.runExpiry();
-      // Sessions from before the archive: copy "active" to its record key once (additive) and index it.
-      const backfilled = await backfillActive(this.ctx.storage, Date.now());
-      if (backfilled) this.ctx.waitUntil(this.registerSummary(backfilled as StoredTrial));
-      // Alarm on restore, including backfilled sessions (expiry from their last update).
       await this.scheduleExpiry();
       const record = await this.ctx.storage.get<StoredTrial>(ACTIVE_KEY);
       if (!record) return;
+      // (Re-)index the restored trial, which also covers backfilled sessions and missed index writes.
+      this.ctx.waitUntil(this.registerSummary(record));
       this.trial = await this.createTrial(record.seed, record.strategy, record.options.referenceMemory, record);
       if (!record.closed && record.queueState.pendingHumanEventIds.length && !record.queueState.errorCode) {
         this.ctx.waitUntil(this.trial.whenIdle().catch(() => {}));
@@ -193,7 +209,7 @@ export class TangramSession extends DurableObject<Env> {
       ...(restore ? { restore } : {}),
       // Every write also keeps record:<recordId>, so a later trial never erases this one.
       onPersist: async (snapshot: StoredTrial) => {
-        if (!await archiveSnapshot(this.ctx.storage, snapshot, this.retired, Date.now())) return;
+        if (!await this.serialized(() => archiveSnapshot(this.ctx.storage, snapshot, this.retired, Date.now()))) return;
         await this.scheduleExpiry();
         this.ctx.waitUntil(this.registerSummary(snapshot));
       },

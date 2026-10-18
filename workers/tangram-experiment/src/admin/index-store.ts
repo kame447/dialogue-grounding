@@ -34,7 +34,10 @@ export async function recordHash(recordId: string): Promise<string> {
 
 /** Adds or refreshes a summary; ignored for an id that was already deleted. */
 export async function upsertSummary(storage: IndexStorage, summary: AdminSummary): Promise<boolean> {
-  if (await storage.get("d:" + await recordHash(summary.recordId))) return false;
+  // Hash first: from here on only storage operations are awaited, so the Durable
+  // Object's input gate keeps a concurrent upsert from interleaving the read and write.
+  const hash = await recordHash(summary.recordId);
+  if (await storage.get("d:" + hash)) return false;
   const previous = await storage.get<AdminSummary>("r:" + summary.recordId);
   const key = orderKey(summary);
   if (previous && orderKey(previous) !== key) await storage.delete([orderKey(previous)]);
@@ -53,7 +56,13 @@ export async function listPage(storage: IndexStorage, after: string | null = nul
   const entries = [...keys.entries()];
   const page = entries.slice(0, limit);
   const items: AdminSummary[] = [];
-  for (const [, id] of page) { const summary = await getSummary(storage, id); if (summary) items.push(summary); }
+  const seen = new Set<string>();
+  // An ordering key is shown only if it is its record's current one, so a stale key never duplicates a row.
+  for (const [key, id] of page) {
+    if (seen.has(id)) continue;
+    const summary = await getSummary(storage, id);
+    if (summary && orderKey(summary) === key) { items.push(summary); seen.add(id); }
+  }
   return { items, next: entries.length > limit ? page.at(-1)![0] : null };
 }
 
