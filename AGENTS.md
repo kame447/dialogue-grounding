@@ -24,6 +24,14 @@ AI は、提示された自分側の画像と公開対話履歴を用いた意�
 
 変更時は関連テスト、差分、正本との整合性を確認する。問題が起きたときは仮説を切り分け、同じ失敗操作を無条件に繰り返さない。元の研究資料や他担当の未コミット成果物を上書きしない。実装の進捗はGitHub Issue/PRなど永続記録に残す。
 
+## TypeScript への段階的移行
+
+新規の実装ファイルは原則 TypeScript（`.ts`／`.tsx`）で書き、対話状態・調整過程・API入出力の不整合を型で防ぐ。既存の `.mjs` は一括で書き換えず、大きく手を入れる機会に段階的に移行する。進行中の作業を壊さない。
+
+- Node 24 の型除去（`process.features.typescript === "strip"`）と Wrangler でそのまま実行できるよう、消去可能な構文だけを使う（`enum`・`namespace`・コンストラクタ引数プロパティを使わない、型は `import type`、import には `.ts` 拡張子を書く）。
+- 型は検証ではない。API入出力・モデル出力・保存記録など外部から来る値の実行時検証は維持する。
+- テストは既存の `npm test` で実行されること（`.test.ts` を追加したら test の対象パターンを更新する）。型検査（`tsc --noEmit`）の導入は別途決める。
+
 ## 研究用 Cloudflare Worker
 
 研究用Workerは workers/research-ai-proxy/ に配置する。StudyPlanner本番Workerを研究用APIに流用せず、既存の認証・モデル固定・リクエスト境界・秘密情報の分離という設計原則だけ再利用する。上流APIキーはCloudflare Secret UPSTREAM_API_KEY にのみ保持し、ローカル対話クライアントは別のRESEARCH_PROXY_TOKEN で接続する。Workerは認証失敗時・Secret未設定時にfail closedとする。モデル・上流URL・転送対象フィールドをクライアントに決定させない。API使用量の上限、機密データの送信条件、実験条件の確定は別途検討が必要。
