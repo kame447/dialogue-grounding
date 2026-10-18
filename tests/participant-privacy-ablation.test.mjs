@@ -228,13 +228,8 @@ test('reference memory rejects researcher-only graph fields and unobserved/futur
   assert.deepEqual(graph.records, []); assert.equal(graph.revision, 0);
 });
 
-// Contract supplied by runtime/Web owners in ORRERY #5903/#5906. These tests
-// execute as TODO on base c3b259a; remove todo after those commits are merged.
-const awaitingRuntime = { todo: 'Requires BriskPasteur runtime toggle wiring (#5906)' };
-const awaitingWeb = { todo: 'Requires BriskPasteur runtime and JauntyKepler Web toggle wiring (#5903/#5906)' };
-
 for (const visualAid of [false, true]) for (const referenceMemory of [false, true]) {
-  test(`ablation visual=${visualAid}, memory=${referenceMemory} preserves per-phase privacy and strategy parity`, awaitingRuntime, async () => {
+  test(`ablation visual=${visualAid}, memory=${referenceMemory} preserves per-phase privacy and strategy parity`, async () => {
     const left = await run({ visualAid, referenceMemory, strategy: 'repair-first' });
     const right = await run({ visualAid, referenceMemory, strategy: 'bypass-enabled' });
     const expectedImages = ['data:image/png;base64,' + image.base64,
@@ -256,7 +251,7 @@ for (const visualAid of [false, true]) for (const referenceMemory of [false, tru
   });
 }
 
-test('invalid runtime toggles fail before trial construction and any model request', awaitingRuntime, async () => {
+test('invalid runtime toggles fail before trial construction and any model request', async () => {
   for (const key of ['visualAid', 'referenceMemory']) for (const value of [null, 'true', 0, 1, [], {}]) {
     const client = fakeClient();
     let trials = 0;
@@ -267,7 +262,7 @@ test('invalid runtime toggles fail before trial construction and any model reque
   }
 });
 
-test('enabled visual aid rejects unsupported own PNG before any model request', awaitingRuntime, async () => {
+test('enabled visual aid rejects unsupported own PNG before any model request', async () => {
   const client = fakeClient();
   await assert.rejects(createNamingTask(options(client, { visualAid: true, createTrial(input) {
     const value = trial(input); value.ai.png = Buffer.from('synthetic-invalid-png'); return value;
@@ -285,7 +280,7 @@ const memoryInput = (call) => {
   return JSON.parse(message.content.slice(message.content.indexOf('{'))).ownReferences;
 };
 
-test('valid memory operations commit with generation, survive to the next judge, and stay out of generator/final', awaitingRuntime, async () => {
+test('valid memory operations commit with generation, survive to the next judge, and stay out of generator/final', async () => {
   let failGeneration = true, judgeCalls = 0;
   const client = fakeClient(({ phase }) => {
     if (phase === 'judgment') return JSON.stringify({ ...judgment, memoryOps: ++judgeCalls <= 2 ? referenceOps() : [] });
@@ -316,7 +311,7 @@ test('valid memory operations commit with generation, survive to the next judge,
   assertModelPrivacy(client.calls);
 });
 
-test('nonpublic memory evidence is retried once then dropped while retaining a valid core judgment', awaitingRuntime, async () => {
+test('nonpublic memory evidence is retried once then dropped while retaining a valid core judgment', async () => {
   const client = fakeClient(({ phase }) => phase === 'judgment' ?
     JSON.stringify({ ...judgment, memoryOps: [mention(CANARY)] }) : REPLY);
   const session = createDialogueSession({ client, image, strategy: 'repair-first', referenceMemory: true });
@@ -330,7 +325,7 @@ test('nonpublic memory evidence is retried once then dropped while retaining a v
   assert.doesNotMatch(selected.content, /memoryOps|SYNTHETIC_PRIVATE/);
 });
 
-test('Web ON state and pending AI choices stay private; malformed toggles cannot replace the live trial', awaitingWeb, async (t) => {
+test('Web ON state and pending AI choices stay private; malformed toggles cannot replace the live trial', async (t) => {
   const client = fakeClient();
   let trials = 0;
   const server = await startNamingServer({ port: 0, ...options(client), hideStrategy: true,
