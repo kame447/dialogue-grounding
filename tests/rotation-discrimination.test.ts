@@ -7,10 +7,10 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { binomialTail, leakFindings, parseSame, parseSlot, renderBoard, renderSingle, wilson } from "../dialogue-model/runtime/diagnostics/rotation/bench-common.ts";
-import { FIGURE_IDS, invariantIou, presentedIou, rankPairs, pairwiseInvariant, seedAnalysis, turningDistance, huDistance, outerContour } from "../dialogue-model/runtime/diagnostics/rotation/shape-similarity.ts";
+import { FIGURE_IDS, rotationMargin, invariantIou, presentedIou, rankPairs, pairwiseInvariant, seedAnalysis, turningDistance, huDistance, outerContour } from "../dialogue-model/runtime/diagnostics/rotation/shape-similarity.ts";
 import { buildVisionMessages, planVision } from "../dialogue-model/runtime/diagnostics/rotation/vision-bench.ts";
 import { PHRASES, buildVerbalMessages, planVerbal, describe } from "../dialogue-model/runtime/diagnostics/rotation/verbal-bench.ts";
-import { CALL_BUDGET, confusion, main, planAll, summarizeAll } from "../dialogue-model/runtime/diagnostics/rotation/run.ts";
+import { CALL_BUDGET, confusion, isOutsideRepository, main, planAll, summarizeAll } from "../dialogue-model/runtime/diagnostics/rotation/run.ts";
 
 const requestText = (messages: unknown) => JSON.stringify(messages);
 const textParts = (messages: Array<{ content: Array<{ type: string; text?: string }> }>) =>
@@ -36,6 +36,12 @@ test("pair ranking covers 15 unordered pairs and puts different figures below id
   // vision-bench fixes these pairs from the same ranking.
   assert.deepEqual(rows.slice(0, 3).map((r) => r.a + r.b), ["F3F4", "F1F6", "F3F6"]);
   assert.deepEqual(rows.slice(-3).map((r) => r.a + r.b).sort(), ["F2F6", "F4F5", "F5F6"]);
+});
+
+test("appearance margin is positive without rotation and shrinks with it", () => {
+  assert.ok(rotationMargin(0, 32).every((r) => r.margin > 0 && Math.abs(r.self - 1) < 1e-12));
+  const quarter = rotationMargin(90, 32);
+  assert.ok(quarter.filter((r) => r.margin > 0).length < 6);
 });
 
 test("v2 seed analysis: the two screens always differ by a quarter turn", () => {
@@ -111,6 +117,11 @@ test("parsers and interval statistics", () => {
 test("live runner: refuses unsafe settings, then runs against a local mock Worker", async () => {
   const token = "t".repeat(40);
   await assert.rejects(main(["live", "--bench", "verbal", "--out", "dialogue-model/tmp"], { RESEARCH_AI_PROVIDER: "cloudflare", RESEARCH_PROXY_TOKEN: token, RESEARCH_AI_BASE_URL: "http://127.0.0.1:9/v1" }), /outside the repository/u);
+  assert.equal(isOutsideRepository("/repo/..cache", "/repo"), false);
+  assert.equal(isOutsideRepository("/repo/..cache/x", "/repo"), false);
+  assert.equal(isOutsideRepository("/repo/sub", "/repo"), false);
+  assert.equal(isOutsideRepository("/elsewhere", "/repo"), true);
+  assert.equal(isOutsideRepository("/", "/repo"), true);
   const out = mkdtempSync(join(tmpdir(), "rotation-bench-"));
   await assert.rejects(main(["live", "--bench", "verbal", "--out", out], { RESEARCH_AI_PROVIDER: "openai", RESEARCH_AI_API_KEY: token, RESEARCH_AI_MODEL: "m" }), /research Worker/u);
   const bodies: Array<Record<string, unknown>> = [];

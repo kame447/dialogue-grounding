@@ -239,3 +239,17 @@ export function seedAnalysis(seed: number, size = 64): { seed: number; figures: 
   });
   return { seed, figures: rows, presentedMisranked: rows.filter((r) => r.presentedRank > 1).length };
 }
+
+/** Appearance margin at a relative rotation: overlap of a figure with itself
+ * turned by `degrees`, minus the best overlap with any other figure in any
+ * quarter orientation. Positive means the true counterpart still looks most
+ * alike without mental rotation (an option sketch, not an adopted condition). */
+export function rotationMargin(degrees: number, size = 64): Array<{ figureId: string; self: number; bestOther: number; margin: number }> {
+  return FIGURE_IDS.map((h) => {
+    const base = rasterize(h, 0, size);
+    const self = iou(base, rasterize(h, degrees, size));
+    let bestOther = 0;
+    for (const g of FIGURE_IDS) if (g !== h) for (const q of [0, 90, 180, 270]) bestOther = Math.max(bestOther, iou(base, rasterize(g, q, size)));
+    return { figureId: h, self, bestOther, margin: self - bestOther };
+  });
+}

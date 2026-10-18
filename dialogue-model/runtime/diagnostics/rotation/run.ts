@@ -5,7 +5,7 @@
 //   live  --bench ... --out <dir outside the repository>
 // Live runs go only through the research Worker (createChatClient(loadConfig())).
 import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname, relative, resolve } from "node:path";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { createChatClient } from "../../client.mjs";
@@ -22,6 +22,12 @@ export const BENCHES = Object.freeze(["vision", "verbal"] as const);
 export const CALL_BUDGET = 300;
 export const OFFLINE_SEEDS = Object.freeze([40, 44, 137, ...Array.from({ length: 20 }, (_, i) => 1001 + i)]);
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
+
+/** True only for paths that leave the repository ("..cache" stays inside). */
+export function isOutsideRepository(path: string, root = REPO_ROOT): boolean {
+  const rel = relative(root, resolve(path));
+  return rel === ".." || rel.startsWith(".." + sep) || isAbsolute(rel);
+}
 
 type Item = VisionItem | VerbalItem;
 type Result = VisionResult | VerbalResult;
@@ -128,7 +134,7 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   if (items.length > CALL_BUDGET) throw new Error("Planned requests exceed the call budget");
   if (!values.out) throw new Error("--out is required for live runs");
   const out = resolve(values.out);
-  if (!relative(REPO_ROOT, out).startsWith("..")) throw new Error("--out must be outside the repository");
+  if (!isOutsideRepository(out)) throw new Error("--out must be outside the repository");
   const concurrency = Number(values.concurrency);
   if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 4) throw new Error("--concurrency must be 1-4");
   const config = loadConfig(env);

@@ -2,8 +2,10 @@
 // board and one short partner-style description written for the partner's
 // view of a figure. Aligned and rotated items differ only in the target's own
 // orientation, which isolates verbal correspondence across rotation from
-// whole-board vision. Descriptions are a fixed, researcher-authored template
-// table (an Opus-written proxy for a human partner, not participant language).
+// whole-board vision. Descriptions are a fixed template table WRITTEN BY A
+// MODEL (Claude Opus, acting as a proxy partner) and not approved by the
+// researcher. They are not human or participant language; never report
+// results from them as evidence about how humans describe these figures.
 import { SLOTS, imagePart, parseSlot, randomSource, renderBoard, shuffle } from "./bench-common.ts";
 import type { BoardEntry, ChatClient, ChatMessage, Slot } from "./bench-common.ts";
 
