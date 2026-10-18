@@ -5,11 +5,11 @@ import { groundReference, publicTurnsFromHistory } from "./public-evidence.mjs";
 export const REFERENCE_INTENTS = Object.freeze(["refer", "name_proposal", "name_acceptance", "feature_assertion", "feature_acceptance", "denial", "correction", "acknowledgment"]);
 const exact = (v, keys) => v && typeof v === "object" && !Array.isArray(v) && Object.keys(v).length === keys.length && keys.every(k => Object.hasOwn(v, k));
 const text = (v, max) => typeof v === "string" && v.trim().length > 0 && v.length <= max;
-const slot = v => SLOTS.includes(v);
 const fail = () => { throw new ReferenceGraphError("invalid_reference"); };
 
 /** Only semantic choices come from the judge. Provenance/IDs are never accepted. */
-export function validateReferenceInterpretation(value) {
+export function validateReferenceInterpretation(value, slots = SLOTS) {
+  const slot = (v) => slots.includes(v);
   if (value === null) return null;
   if (!exact(value, ["slots", "epistemic", "intent", "feature", "nameAcceptance", "deferSlot", "revisitSlot"]) ||
       !Array.isArray(value.slots) || value.slots.length > 6 || !value.slots.every(slot) || new Set(value.slots).size !== value.slots.length ||

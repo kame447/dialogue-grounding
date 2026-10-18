@@ -1,5 +1,5 @@
 import { SLOTS } from "../stimuli/board.mjs";
-import { normalizeName } from "../scoring.mjs";
+import { normalizeName, slotsOf } from "../scoring.mjs";
 import { validateReferenceInterpretation } from "./memory.mjs";
 
 /** @typedef {'上段左'|'上段中'|'上段右'|'下段左'|'下段中'|'下段右'} Slot */
@@ -38,26 +38,32 @@ const exactKeys = (value, keys) => value && typeof value === "object" && !Array.
   Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
 const nullableText = (value, limit) => value === null || (typeof value === "string" && value.trim().length > 0 && value.length <= limit);
 
-/** @returns {OwnLedger} */
-export function createOwnLedger() {
-  return Object.fromEntries(SLOTS.map((slot) => [slot, { status: "unassigned", name: null }]));
+/** v1 uses the fixed position names; v2 passes the AI's six opaque own ids. @returns {OwnLedger} */
+export function createOwnLedger(slots = SLOTS) {
+  const own = ledgerSlots(Object.fromEntries(slots.map((slot) => [slot, null])));
+  return Object.fromEntries(own.map((slot) => [slot, { status: "unassigned", name: null }]));
+}
+
+function ledgerSlots(value) {
+  try { return slotsOf(value); } catch { throw new JudgmentValidationError("invalid_ledger"); }
 }
 
 /** @returns {OwnLedger} A fresh, whitelisted copy suitable for an AI request. */
 export function validateOwnLedger(value) {
-  if (!exactKeys(value, SLOTS)) throw new JudgmentValidationError("invalid_ledger");
-  for (const slot of SLOTS) {
+  const slots = ledgerSlots(value);
+  if (!exactKeys(value, slots)) throw new JudgmentValidationError("invalid_ledger");
+  for (const slot of slots) {
     const entry = value[slot];
     if (!exactKeys(entry, ["status", "name"]) || !STATUSES.includes(entry.status) || !nullableText(entry.name, 200) ||
         (entry.status === "unassigned" && entry.name !== null) ||
         (["tentative", "agreed"].includes(entry.status) && entry.name === null)) throw new JudgmentValidationError("invalid_ledger");
   }
-  return Object.fromEntries(SLOTS.map((slot) => [slot, { status: value[slot].status, name: value[slot].name?.trim() ?? null }]));
+  return Object.fromEntries(slots.map((slot) => [slot, { status: value[slot].status, name: value[slot].name?.trim() ?? null }]));
 }
 
 function validateAct(value, ledger) {
   if (!exactKeys(value, KEYS) || !ACTIONS.includes(value.action) ||
-      !(value.targetSlot === null || SLOTS.includes(value.targetSlot)) ||
+      !(value.targetSlot === null || Object.hasOwn(ledger, value.targetSlot)) ||
       !nullableText(value.candidateName, 200) || !nullableText(value.discriminatingFeature, 400) || !nullableText(value.note, 1000)) {
     throw new JudgmentValidationError();
   }
@@ -77,7 +83,7 @@ function validateAct(value, ledger) {
     throw new JudgmentValidationError("reassignment_requires_repair");
   }
   const assignedName = candidateName ?? (targetSlot && ["agree", "defer", "revisit"].includes(action) ? ledger[targetSlot].name : null);
-  if (assignedName !== null && SLOTS.some((slot) => slot !== targetSlot && ledger[slot].name !== null &&
+  if (assignedName !== null && Object.keys(ledger).some((slot) => slot !== targetSlot && ledger[slot].name !== null &&
       normalizeName(ledger[slot].name) === normalizeName(assignedName))) {
     // Repair must explicitly release the old slot before reusing its name on
     // another. Never infer which correspondence is correct or silently move it.
@@ -103,7 +109,7 @@ export function validateJudgment(value, { ownLedger = createOwnLedger() } = {}) 
     }
   }
   if (Object.hasOwn(value, "reference")) {
-    try { judgment.reference = validateReferenceInterpretation(value.reference); }
+    try { judgment.reference = validateReferenceInterpretation(value.reference, Object.keys(ledger)); }
     catch (error) { throw new JudgmentValidationError(error.code ?? "invalid_reference"); }
   }
   return judgment;
