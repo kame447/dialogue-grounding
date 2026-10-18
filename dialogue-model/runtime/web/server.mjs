@@ -11,8 +11,12 @@ import { createNamingTask, NamingTaskError } from "../naming-task.mjs";
 import { createNamingTaskV2 } from "../v2/naming-task-v2.mjs";
 
 const PUBLIC = dirname(fileURLToPath(import.meta.url));
+// "/" serves the v2 participant UI; "/v1/" keeps the original v1 (2x3 grid) UI unchanged.
 const FILES = { "/": ["index.html", "text/html; charset=utf-8"],
-  "/app.js": ["app.js", "text/javascript; charset=utf-8"], "/style.css": ["style.css", "text/css; charset=utf-8"] };
+  "/app.js": ["app.js", "text/javascript; charset=utf-8"], "/style.css": ["style.css", "text/css; charset=utf-8"],
+  "/v1/": ["v1/index.html", "text/html; charset=utf-8"],
+  "/v1/app.js": ["v1/app.js", "text/javascript; charset=utf-8"], "/v1/style.css": ["v1/style.css", "text/css; charset=utf-8"] };
+const PAGES = ["/", "/v1/"];
 const MAX_BODY = 64 * 1024;
 const MAX_SESSIONS = 64;
 const SESSION_IDLE_MS = 30 * 60 * 1000;
@@ -78,7 +82,7 @@ export function createNamingServer({ client, createTrial, scoreTrial, runDir = p
       if (session) { session.lastAccess = timestamp; session.requests++; }
       if (req.method === "GET" && Object.hasOwn(FILES, pathname)) {
         const [file, type] = FILES[pathname];
-        if (pathname === "/" && !session) {
+        if (PAGES.includes(pathname) && !session) {
           if (!makeRoom()) return json(503, { error: "session_limit" });
           const id = randomBytes(32).toString("hex");
           session = { task: null, starting: false, lastAccess: timestamp, requests: 1 };

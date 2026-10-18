@@ -36,7 +36,7 @@ async function setup(t, { hideStrategy = false, fail = false } = {}) {
     await Promise.all([new Promise((r) => server.close(r)), new Promise((r) => upstream.close(r))]);
   });
   const base = "http://127.0.0.1:" + server.address().port;
-  const page = await fetch(base);
+  const page = await fetch(base + "/v1/");
   const cookie = page.headers.get("set-cookie").split(";")[0];
   async function request(path, body, extra = {}) {
     return fetch(base + path, { headers: { cookie, ...(body === undefined ? {} : { "Content-Type": "application/json" }), ...extra },
@@ -112,7 +112,7 @@ test("Web rejects cross-origin/foreign host requests and isolates browser sessio
   });
   assert.equal(foreignHostStatus, 403);
   await request("/api/start", { strategy: "repair-first", seed: 100 });
-  const otherPage = await fetch(base);
+  const otherPage = await fetch(base + "/v1/");
   const otherCookie = otherPage.headers.get("set-cookie").split(";")[0];
   const other = await fetch(base + "/api/state", { headers: { cookie: otherCookie } });
   assert.equal((await other.json()).trial, null);
@@ -143,8 +143,8 @@ async function uiHarness({ unstarted = false } = {}) {
     requestSubmit() { this.fire("submit"); }
     focus(options) { this.focusOptions = options; }
   }
-  const html = await readFile(new URL("../dialogue-model/runtime/web/index.html", import.meta.url), "utf8");
-  const script = await readFile(new URL("../dialogue-model/runtime/web/app.js", import.meta.url), "utf8");
+  const html = await readFile(new URL("../dialogue-model/runtime/web/v1/index.html", import.meta.url), "utf8");
+  const script = await readFile(new URL("../dialogue-model/runtime/web/v1/app.js", import.meta.url), "utf8");
   const elements = Object.fromEntries([...html.matchAll(/<([a-z]+)\b[^>]*\bid="([^"]+)"/gu)].map(([, tag, id]) => [id, new Element(tag)]));
   const chatButton = new Element("button"), submitButton = new Element("button");
   elements.chat.append(elements.utterance, elements["chat-status"], chatButton);
@@ -187,7 +187,7 @@ async function uiHarness({ unstarted = false } = {}) {
 
 test("Web UI keeps a bounded transcript and responsive image beside a stable composer", async () => {
   const css = await readFile(new URL("../dialogue-model/runtime/web/style.css", import.meta.url), "utf8");
-  const html = await readFile(new URL("../dialogue-model/runtime/web/index.html", import.meta.url), "utf8");
+  const html = await readFile(new URL("../dialogue-model/runtime/web/v1/index.html", import.meta.url), "utf8");
   assert.match(css, /\.workspace\s*\{[^}]*grid-template-columns:1\.3fr 1fr/u);
   assert.match(css, /\.workspace \.panel\s*\{[^}]*height:clamp\([^}]*display:flex/u);
   assert.match(css, /#history\s*\{[^}]*min-height:0[^}]*overflow-y:auto[^}]*overscroll-behavior:contain/u);
@@ -199,7 +199,7 @@ test("Web UI keeps a bounded transcript and responsive image beside a stable com
 });
 
 test("researcher toggles are labelled, unchecked by default, and confined to the setup form", async () => {
-  const html = await readFile(new URL("../dialogue-model/runtime/web/index.html", import.meta.url), "utf8");
+  const html = await readFile(new URL("../dialogue-model/runtime/web/v1/index.html", import.meta.url), "utf8");
   const setup = html.match(/<form id="setup"[\s\S]*?<\/form>/u)[0];
   for (const [id, name] of [["visual-aid", "visualAid"], ["reference-memory", "referenceMemory"]]) {
     assert.match(setup, new RegExp('for="' + id + '"'));
