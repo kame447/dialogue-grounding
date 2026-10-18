@@ -92,7 +92,11 @@ export function renderDetail(record: unknown, summary: AdminSummary, latency: La
   const events = list(r.events).filter(isPlain).map((e) => [e.seq, e.speaker, e.at, e.origin ?? "", e.text]);
   const judgments = list(r.judgments).filter(isPlain).map((j) => [j.turnIndex, j.judgment?.action, j.judgment?.targetSlot,
     j.judgment?.candidateName, j.judgment?.discriminatingFeature, j.judgment?.followUp ?? null, j.activeJudge ?? null]);
-  const attempts = list(r.attempts).filter(isPlain).map((a) => [a.turnIndex, a.status, a.validation ?? null, a.memory ?? null,
+  // errorCode/errorPhase/errorStatus/errorElapsedMs and generationRetried are written by the v2 turn on failure.
+  const attempts = list(r.attempts).filter(isPlain).map((a) => [a.turnIndex, a.status,
+    a.errorCode ? [a.errorCode, a.errorPhase, a.errorStatus === null || a.errorStatus === undefined ? "" : "HTTP " + a.errorStatus,
+      a.errorElapsedMs === undefined ? "" : ms(a.errorElapsedMs) + " ms"].filter((part) => part !== "" && part !== undefined).join(" / ") : "",
+    a.generationRetried === true ? "あり" : "", a.validation ?? null, a.memory ?? null,
     a.generationGuard ?? null, a.activeJudge ?? null, a.decisionShadow ?? null, a.utteranceStyle ?? null]);
   const requests = list(r.requests).filter(isPlain).map((q, i) => [i + 1, q.kind, q.status, q.httpStatus ?? "", q.errorCode ?? "",
     ms(q.latencyMs), q.retryCount ?? "", q.model ?? ""]);
@@ -105,7 +109,7 @@ ${table(["項目", "値"], [["Durable Object", summary.objectId], ["開始", sum
 ${latencySection(latency)}
 <h2>公開発話</h2>${table(["seq", "話者", "時刻", "由来", "本文"], events)}
 <h2>確定した判断（ターンごと）</h2>${table(["ターン", "行為", "対象", "名前", "弁別特徴", "followUp", "active 判断"], judgments)}
-<h2>実行の記録（中断・失敗を含む）</h2>${table(["ターン", "状態", "検証", "参照メモリ", "生成ガード", "active 判断", "影の判断", "発話様式"], attempts)}
+<h2>実行の記録（中断・失敗を含む）</h2>${table(["ターン", "状態", "エラー（コード / 段階 / HTTP / 経過）", "生成の再試行", "検証", "参照メモリ", "生成ガード", "active 判断", "影の判断", "発話様式"], attempts)}
 <h2>外部要求</h2>${table(["#", "段階", "結果", "HTTP", "コード", "ms", "再送", "モデル"], requests)}
 <h2>提出と採点</h2>${table(["項目", "値"], [["人間の提出", r.humanSubmission ?? null], ["AIの提出", r.aiSubmission ?? null],
   ["診断", r.diagnostics ?? null], ["採点", r.scoring ?? null]])}
