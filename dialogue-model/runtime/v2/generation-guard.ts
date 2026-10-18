@@ -30,7 +30,7 @@ export function findAgreementClaims(text: string): string[] {
       if (code === "explicit_agreement" && /^(?:していません|していない|しません|ではありません|ではない|はしていません|はしていない)/u.test(tail)) continue;
       // Temporal deferral is a supported act, not a naming decision. Quoted
       // names ending in these characters do not match this unquoted suffix.
-      if (code === "name_selection" && /(?:後|あと|後日|今度|別の機会)$/u.test(normalized.slice(0, match.index))) continue;
+      if (code === "name_selection" && /(?:後|あと|後日|今度|別の機会|保留|後回し)$/u.test(normalized.slice(0, match.index))) continue;
       codes.push(code);
       break;
     }
@@ -38,9 +38,11 @@ export function findAgreementClaims(text: string): string[] {
   return codes;
 }
 
-// Declared self-correction; partner-directed thanks ("訂正ありがとう"), negations
-// ("間違いない") and conditionals ("間違えていたら") are outside these inflections.
-const selfRepair = /(?:訂正|撤回)(?:します|しました|させてください|させて下さい|です)|取り消(?:します|しました|させてください)|(?:取り違え|勘違い|間違え)(?:ました|ていました|てました|でした)|(?:取り違え|勘違い|間違い|誤り)(?:でした|です)/gu;
+// First-person self-correction of the AI's own earlier statement only: speaker
+// performatives (訂正します), past self-error verbs (取り違えていました), or an error
+// noun owned by the speaker (私の間違いでした). A judgment about the partner's guess
+// (それは違います／誤りです), thanks, negations and conditionals are not matched.
+const selfRepair = /(?:訂正|撤回)(?:します|しました|させてください|させて下さい)|取り消(?:します|しました|させてください)|(?:取り違え|勘違い|見間違え|間違え)(?:ました|ていました|てました)|(?:私|わたし|自分|こちら)の[^。!?、,]{0,12}?(?:取り違え|勘違い|見間違い|間違い|誤り)(?:でした|です)|見間違いでした|(?:さっき|先ほど|前)の(?:は|も)[^。!?]{0,12}?違いました/gu;
 
 /** Self-repair wording (allowed only under repair). Clause-local question exemption. */
 export function findRepairClaims(text: string): string[] {
@@ -54,7 +56,7 @@ export function findRepairClaims(text: string): string[] {
 }
 
 const internalId = /(?<![A-Za-z0-9])s-[0-9a-f]{4}(?![A-Za-z0-9])/iu;
-const internalField = /(?<![A-Za-z])(?:targetSlot|candidateName|discriminatingFeature|followUp|ownLedger|agreeEvidence|propose_name|move_on|judgment|ledger)(?![A-Za-z])|[{[]"?[A-Za-z_]+"?:/u;
+const internalField = /(?<![A-Za-z])(?:targetSlot|candidateName|discriminatingFeature|ownLedger|ledger|judgment)(?![A-Za-z])|\{"[^"]{1,40}":/u;
 
 /** Private ids, field names or JSON in public text: a leak under every action. */
 export function findInternalLeaks(text: string): string[] {

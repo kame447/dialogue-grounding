@@ -28,7 +28,8 @@ export const GENERATOR_INSTRUCTIONS_V2 = [
 ].join("\n");
 
 // Opt-in research option (default off), identical across strategies: one dialogue
-// function per turn and chat-like brevity. Never changes the judged act itself.
+// function per turn and chat-like brevity. It removes the unspoken followUp from
+// the validated act before the ledger, memory and generation (see runAiTurn).
 export const UTTERANCE_STYLES = Object.freeze(["default", "concise"]);
 export const CONCISE_INSTRUCTIONS_V2 = [
   "【短いチャット】この発話では、指定されたactionの対話機能を1つだけ実現してください。挨拶や相槌だけで終えず相手の発話の内容に応じ、相槌は短い一言までにし、次の図形・次の名前・別の話題は出さないでください。",
