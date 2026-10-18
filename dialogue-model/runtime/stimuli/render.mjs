@@ -35,6 +35,7 @@ export function renderPolygons(polygons, { width = 1200, height = 800, supersamp
   }
   const w = width * supersample, h = height * supersample;
   const raster = Buffer.alloc(w * h, 255);
+  const spans = Array.from({ length: h }, () => []);
   for (const points of polygons) {
     const p = points.map(([x, y]) => [x * supersample, y * supersample]);
     const start = Math.max(0, Math.ceil(Math.min(...p.map(a => a[1])) - 0.5));
@@ -44,16 +45,42 @@ export function renderPolygons(polygons, { width = 1200, height = 800, supersamp
       for (let i = 0; i < p.length; i++) {
         const a = p[i], b = p[(i + 1) % p.length];
         if ((a[1] <= scanY && b[1] > scanY) || (b[1] <= scanY && a[1] > scanY)) {
-          intersections.push(a[0] + (scanY - a[1]) * (b[0] - a[0]) / (b[1] - a[1]));
+          const dx = b[0] - a[0];
+          const x = a[0] + (scanY - a[1]) * dx / (b[1] - a[1]);
+          // A conservative roundoff bound for the six arithmetic operations
+          // above (the interpolation parameter lies in [0, 1]). This scales
+          // with coordinate precision, never with a pixel-sized margin.
+          const error = 8 * Number.EPSILON * (Math.abs(a[0]) + Math.abs(dx));
+          intersections.push({ x, error });
         }
       }
-      intersections.sort((a, b) => a - b);
+      intersections.sort((a, b) => a.x - b.x);
       for (let i = 0; i + 1 < intersections.length; i += 2) {
-        const left = Math.max(0, Math.ceil(intersections[i] - 0.5));
-        const right = Math.min(w, Math.ceil(intersections[i + 1] - 0.5));
-        if (right > left) raster.fill(0, y * w + left, y * w + right);
+        spans[y].push([intersections[i], intersections[i + 1]]);
       }
     }
+  }
+  // Union continuous coverage before sample ownership is rounded. Separately
+  // quantizing opposite evaluations of a shared edge can exclude the same
+  // sample from both pieces. Only roundoff-sized gaps are treated as touching;
+  // exterior endpoints and genuine gaps retain their original coordinates.
+  for (let y = 0; y < h; y++) {
+    const row = spans[y].sort((a, b) => a[0].x - b[0].x);
+    const fill = (a, b) => {
+      const left = Math.max(0, Math.ceil(a.x - 0.5));
+      const right = Math.min(w, Math.ceil(b.x - 0.5));
+      if (right > left) raster.fill(0, y * w + left, y * w + right);
+    };
+    let left, right;
+    for (const [a, b] of row) {
+      if (right && a.x - right.x <= a.error + right.error) {
+        if (b.x > right.x || (b.x === right.x && b.error > right.error)) right = b;
+      } else {
+        if (right) fill(left, right);
+        [left, right] = [a, b];
+      }
+    }
+    if (right) fill(left, right);
   }
   const pixels = Buffer.alloc(width * height);
   for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
