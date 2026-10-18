@@ -54,11 +54,11 @@ function clonePrivate(value) {
 
 /** Deterministic state machine: no networking, timers, logs or model decisions. */
 export function createHumanMessageSequencer({
-  now = Date.now, maxPendingMessages = 64, maxTextLength = 12000, initialPrivateState = null,
+  now = Date.now, maxPendingMessages = 64, maxTextLength = 12000, initialPrivateState = null, initialState = null,
 } = {}) {
   if (typeof now !== "function" || !positive(maxPendingMessages) || !positive(maxTextLength)) fail("invalid_options");
   const events = [], pending = [], clients = new Map();
-  let privateState = clonePrivate(initialPrivateState);
+  let privateState = clonePrivate(initialState ? initialState.privateState : initialPrivateState);
   let active = null, requestSeq = 0, closed = false, lastMillis = 0, errorCode = null;
   function nextEvent(speaker, text) {
     const millis = now();
@@ -67,6 +67,32 @@ export function createHumanMessageSequencer({
     const atMillis = Math.max(lastMillis, millis), seq = events.length + 1;
     if (!positive(seq)) fail("sequence_exhausted");
     return { event: Object.freeze({ id: `event-${seq}`, speaker, text, at: new Date(atMillis).toISOString(), seq, turn: seq }), atMillis };
+  }
+  if (initialState) {
+    if (!Array.isArray(initialState.events) || !Array.isArray(initialState.pendingHumanEventIds) || !Array.isArray(initialState.clients)) fail("invalid_options");
+    for (const [i, value] of initialState.events.entries()) {
+      if (!value || value.id !== `event-${i+1}` || value.seq !== i+1 || value.turn !== i+1 ||
+          !["human", "ai"].includes(value.speaker) || !validText(value.text, maxTextLength) ||
+          !Number.isFinite(Date.parse(value.at))) fail("invalid_options");
+      events.push(Object.freeze({ ...value }));
+    }
+    const byId = new Map(events.map(event => [event.id, event]));
+    for (const id of initialState.pendingHumanEventIds) {
+      const value = byId.get(id);
+      if (value?.speaker !== "human") fail("invalid_options");
+      pending.push(value);
+    }
+    for (const entry of initialState.clients) {
+      if (!Array.isArray(entry) || entry.length !== 2 || !/^[A-Za-z0-9_.:-]{1,128}$/.test(entry[0])) fail("invalid_options");
+      const event = byId.get(entry[1]);
+      if (event?.speaker !== "human") fail("invalid_options");
+      clients.set(entry[0], event);
+    }
+    lastMillis = Math.max(0, initialState.lastMillis ?? 0, events.length ? Date.parse(events.at(-1).at) : 0);
+    requestSeq = initialState.requestSeq ?? 0;
+    closed = initialState.closed === true;
+    errorCode = initialState.errorCode ?? null;
+    if (!Number.isSafeInteger(requestSeq) || requestSeq < 0 || (closed && pending.length)) fail("invalid_options");
   }
   const isCurrent = (request) => Boolean(!closed && active && active.request === request && !active.invalid && request.revision === events.length);
   function finish(request) {
@@ -127,6 +153,11 @@ export function createHumanMessageSequencer({
     },
     close() { closed = true; if (active) active.invalid = true; },
     getPrivateState() { return clonePrivate(privateState); },
+    getDurableState() {
+      return { events: events.map(publicCopy), pendingHumanEventIds: pending.map((event) => event.id),
+        privateState: clonePrivate(privateState), clients: [...clients.entries()].map(([id, event]) => [id, event.id]),
+        closed, errorCode, requestSeq, lastMillis };
+    },
     getSnapshot({ afterSeq = 0 } = {}) {
       if (!Number.isSafeInteger(afterSeq) || afterSeq < 0 || afterSeq > events.length) fail("invalid_cursor");
       // Explicit allowlist: never spread requests, model results or exceptions.
@@ -180,7 +211,7 @@ export function createHumanMessageQueue({ runAiTurn, ...options } = {}) {
     return running;
   }
   async function whenIdle() { while (running) await running; }
-  return Object.freeze({
+  const queue = Object.freeze({
     enqueue(input) {
       const receipt = state.acceptHuman(input);
       if (!receipt.duplicate) {
@@ -192,8 +223,11 @@ export function createHumanMessageQueue({ runAiTurn, ...options } = {}) {
     },
     getSnapshot: state.getSnapshot,
     getPrivateState: state.getPrivateState,
+    getDurableState: state.getDurableState,
     retry() { retryRequested = true; start(); return whenIdle(); },
     whenIdle,
     close() { state.close(); controller?.abort(); },
   });
+  if (options.initialState && state.getSnapshot().status === "pending") start();
+  return queue;
 }
