@@ -30,6 +30,7 @@ AIの各ターンについて、公開対話にどこまで根拠があるかを
 
 - **ローカル**：`node --env-file=.env dialogue-model/runtime/web/server.mjs --grounding-shadow`
 - **実験Worker**：Worker環境変数 `GROUNDING_SHADOW=on` で有効になる。未設定ならOFF。有効化には、研究用プロキシに `RESEARCH_GROUNDING_ENABLED=true` を設定したデプロイと `grounding()` RPC が必要。2026-10-19時点では**未デプロイで、研究者の承認とOpenRouterのSecretが必要**。
+- **実験Workerで `GROUNDING_SHADOW=on` にすると、実際の参加者の公開発話がAIの各ターンごとに第三者（OpenRouter / Jev）へ送られ、ターンごとに費用も発生する。** 既存のLuna経路とは別の送信先になるため、研究者と倫理面の別途の判断が必要である。現在の承認は合成事例の50回以下に限られるので、デプロイ済みの実験Workerでは未設定のままにする。合成事例の実呼び出しに必要なのはプロキシ側の `RESEARCH_GROUNDING_ENABLED=true` だけである。
 - 参加者のリクエストからは切り替えられない。復元した試行は、開始時にshadowがONだった場合だけONを維持する。
 
 結果は記録の `groundingShadow` 配列（ターン、対象、状態、2軸の段階とスコア、エラーコード、遅延、費用、入力の不足）と、管理画面の「根拠の影判定」節に残る。shadowは生成の後に開始し、await しない。独自のタイムアウト（既定20秒）を持ち、失敗しても会話を止めずエラー記録になる。
