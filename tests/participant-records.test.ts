@@ -7,7 +7,7 @@ import { once } from "node:events";
 import { readFile } from "node:fs/promises";
 import { startNamingServer } from "../dialogue-model/runtime/web/server.mjs";
 import { createChatClient } from "../dialogue-model/runtime/client.mjs";
-import { applyQuestionnaire, participantReview, QUESTIONNAIRE_FORM, questionnaireStatus } from "../dialogue-model/runtime/v2/participant-records.ts";
+import { applyQuestionnaire, lockResult, participantReview, QUESTIONNAIRE_FORM, questionnaireStatus } from "../dialogue-model/runtime/v2/participant-records.ts";
 import { archiveSnapshot, backfillActive, deleteArchived, expiredIds, expireRecords, readArchived, readQuestionnaire,
   writeQuestionnaire } from "../workers/tangram-experiment/src/admin/archive.ts";
 import { summarizeRecord } from "../workers/tangram-experiment/src/admin/summary.ts";
@@ -141,6 +141,23 @@ test("the review holds only the participant's own scene, public events, own name
   assert.equal(code(() => participantReview(completed({ status: "dialogue", scoring: null }))), "trial_not_completed");
 });
 
+test("lockResult withholds a result until the questionnaire is submitted, for earlier records too, without mutating the view", () => {
+  const review = participantReview(completed());
+  const frozen = structuredClone(review);
+  const draft = applyQuestionnaire(null, { answers: full(), submit: false }, NOW).questionnaire;
+  const submitted = applyQuestionnaire(null, { answers: full(), submit: true }, NOW).questionnaire;
+  for (const questionnaire of [null, undefined, draft, { status: "submitted?" }]) {
+    const locked = lockResult(review, questionnaire);
+    assert.equal(locked.resultLocked, true);
+    assert.equal("result" in locked, false);
+    assert.ok(!JSON.stringify(locked).includes("AI名"), "no AI names while locked");
+  }
+  assert.deepEqual(lockResult(review, submitted), { ...frozen, resultLocked: false });
+  assert.deepEqual(review, frozen, "the input view is not modified");
+  // A trial without a result (still in dialogue) has nothing to withhold.
+  assert.deepEqual(lockResult({ status: "dialogue", events: [] }, null), { status: "dialogue", events: [], resultLocked: false });
+});
+
 // --- Admin ------------------------------------------------------------------------
 
 test("admin shows the questionnaire escaped in the detail and only its state in the index", () => {
@@ -196,6 +213,9 @@ test("Worker routes: one indistinguishable not_found, own records only, and name
   // Only a submission refreshes retention (draft saves never extend a record's life).
   assert.match(route, /writeQuestionnaire\(this\.ctx\.storage, recordId, next\.questionnaire, Date\.now\(\),\s+next\.questionnaire\.status === "submitted"\)/);
   assert.doesNotMatch(route, /archiveSnapshot|storage\.put|humanSubmission|scoring/);
+  // The review's result is withheld until that record's questionnaire is submitted.
+  assert.match(route, /lockResult\(participantReview\(record\), await readQuestionnaire\(this\.ctx\.storage, recordId\)\)/);
+  assert.doesNotMatch(source, /(?<!await )this\.state\(\)/, "state() is always awaited, never sent as a promise");
   assert.ok(source.indexOf('pathname === "/api/records"') < source.indexOf("if (!this.trial) throw"));
 });
 
@@ -258,7 +278,8 @@ test("local server: own completed trials are listed and reviewable; other browse
   ({ state } = { state: (await completeTrial(alice, 31)).state });
   const first = state.sessionId;
   const review = await (await alice(`/api/records/${first}/review`)).json();
-  assert.deepEqual(review.result, state.result, "the review shows exactly the results screen");
+  assert.deepEqual([review.resultLocked, review.result, state.resultLocked, state.result], [true, undefined, true, undefined],
+    "the result is withheld in both views until the questionnaire is submitted");
   assert.deepEqual(review.scene, state.scene);
   assert.deepEqual(review.events, state.events.map(({ id, speaker, text, at }: any) => ({ id, speaker, text, at })));
   for (const secret of ["figureId", "seed", "anchors", "judgments", "AI名\":{", "PRIVATE"]) assert.ok(!JSON.stringify(review).includes(secret), secret);
@@ -285,6 +306,7 @@ test("local server: a late questionnaire on a completed trial leaves names and s
   const { state } = await completeTrial(request, 33);
   const id = state.sessionId;
   const reviewBefore = await (await request(`/api/records/${id}/review`)).json();
+  assert.deepEqual([reviewBefore.resultLocked, "result" in reviewBefore, state.resultLocked, "result" in state], [true, false, true, false]);
   let response = await request(`/api/records/${id}/questionnaire`);
   assert.deepEqual(await response.json(), { recordId: id, form: QUESTIONNAIRE_FORM, questionnaire: null });
   response = await request(`/api/records/${id}/questionnaire`, { answers: { smoothness: 5 }, comment: "途中", submit: false });
@@ -299,6 +321,12 @@ test("local server: a late questionnaire on a completed trial leaves names and s
   assert.deepEqual([response.status, (await response.json()).questionnaire], [200, submitted]);
   response = await request(`/api/records/${id}/questionnaire`, { answers: full(5), comment: "完了", submit: true });
   assert.deepEqual([response.status, await response.json()], [409, { error: "questionnaire_submitted" }]);
-  assert.deepEqual(await (await request(`/api/records/${id}/review`)).json(), reviewBefore);
-  assert.deepEqual((await (await request("/api/state")).json()).trial.result, state.result);
+  // After submission: the same review plus the result, identical to the live state's (scoring is unchanged).
+  const { result, resultLocked, ...reviewAfter } = await (await request(`/api/records/${id}/review`)).json();
+  const { resultLocked: _locked, ...unchanged } = reviewBefore;
+  assert.deepEqual(reviewAfter, unchanged);
+  assert.equal(resultLocked, false);
+  assert.equal(result.total, 6);
+  const live = (await (await request("/api/state")).json()).trial;
+  assert.deepEqual([live.resultLocked, live.result], [false, result]);
 });

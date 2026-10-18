@@ -71,6 +71,12 @@ test("v2 over HTTP: own scene only, immediate consecutive messages, private name
   response = await request("/api/names", { names: Object.fromEntries(ids.map((id, i) => [id, i === 0 ? null : "人名" + i])), confirm: true });
   assert.equal(response.status, 200);
   state = await response.json();
+  assert.equal(state.trial.status, "completed");
+  assert.equal(state.trial.result, undefined, "withheld until the questionnaire is submitted");
+  assert.equal(state.trial.resultLocked, true);
+  assert.equal((await request(`/api/records/${state.trial.sessionId}/questionnaire`, { answers: { mental_effort: 4, task_difficulty: 4, smoothness: 4, bothersome: 4 }, submit: true })).status, 200);
+  state = await (await request("/api/state")).json();
+  assert.equal(state.trial.resultLocked, false);
   assert.equal(state.trial.result.total, 6);
   assert.ok(!JSON.stringify(state).includes("figureId"));
   assert.equal((await request("/api/message", { text: "まだ？" })).status, 400);

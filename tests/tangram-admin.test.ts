@@ -493,7 +493,8 @@ test("wrangler keeps migration v1 unchanged, adds AdminIndex under v2, sets 30-d
 
 test("participant state is unchanged and /admin is routed before the participant API", async () => {
   const source = await readFile(new URL("../workers/tangram-experiment/src/index.ts", import.meta.url), "utf8");
-  assert.match(source, /private state\(\): unknown \{\n\s+const trial = this\.trial\?\.getState\(\) \?\? null;\n\s+return \{ trial, hideStrategy: true, busy: Boolean\(trial\?\.busy\) \};/);
+  // Participant state is the live state, with only the result withheld until the questionnaire is submitted.
+  assert.match(source, /private async state\(\): Promise<unknown> \{\n\s+const live = this\.trial\?\.getState\(\) \?\? null;\n\s+const trial = live && typeof live\.sessionId === "string"\n\s+\? lockResult\(live, await readQuestionnaire\(this\.ctx\.storage, live\.sessionId\)\) : live;\n\s+return \{ trial, hideStrategy: true, busy: Boolean\(live\?\.busy\) \};/);
   assert.ok(source.indexOf("isAdminPath(url.pathname)") < source.indexOf('url.pathname.startsWith("/api/")'));
   // initialize(): backfill -> expiry -> schedule -> restore (audit M2).
   const init = source.slice(source.indexOf("private async initialize()"));
