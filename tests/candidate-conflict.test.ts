@@ -1,0 +1,173 @@
+// Synthetic ids, images and canned judge replies only; no live-model claim.
+import test from "node:test";
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { createLunaJudge } from "../dialogue-model/runtime/judgment/luna.mjs";
+import { JUDGE_POLICIES } from "../dialogue-model/runtime/judgment/instructions.mjs";
+import { createOwnLedger, SAFE_JUDGMENT } from "../dialogue-model/runtime/judgment/schema.mjs";
+import { createReferenceGraph } from "../dialogue-model/runtime/memory/reference-graph.mjs";
+import { createDialogueV2 } from "../dialogue-model/runtime/v2/dialogue-v2.mjs";
+import {
+  CANDIDATE_CONFLICT_INSTRUCTIONS, CONFLICT_RETRY_HINTS, CandidateConflictError, splitConflict,
+  validateCandidateConflict, scoreFeatureSplit,
+} from "../dialogue-model/runtime/v2/candidate-conflict.ts";
+
+type Message = { role: string; content: unknown };
+type Strategy = "repair-first" | "bypass-enabled";
+const ids = ["s-0001", "s-0002", "s-0003", "s-0004", "s-0005", "s-0006"];
+const anchors = ids.map((id, i) => ({ id, bbox: { x: i, y: 0, w: 1, h: 1 }, centroid: { x: i, y: 0 } }));
+const image = { mimeType: "image/png", base64: "iVBORw0KGgo=" };
+const confirm = { action: "confirm", targetSlot: "s-0001", candidateName: "鳥", discriminatingFeature: "細い尖りが一つだけある", note: null };
+const twoCandidates = { candidates: [{ id: "s-0001", feature: "細い尖りが一つだけある" }, { id: "s-0002", feature: "尖りが三つある" }], featureFits: ["s-0001"] };
+const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+
+function scripted(replies: string[]) {
+  const requests: Message[][] = [];
+  return { requests, client: { async complete(messages: Message[]) {
+    requests.push(structuredClone(messages));
+    return { text: replies[Math.min(requests.length - 1, replies.length - 1)] };
+  } } };
+}
+
+async function runJudge({ version = 2, strategy = "repair-first" as Strategy, memory = false, candidateConflict, replies }:
+  { version?: number; strategy?: Strategy; memory?: boolean; candidateConflict?: boolean; replies: string[] }) {
+  const { requests, client } = scripted(replies);
+  const judge = candidateConflict === undefined ? createLunaJudge(client) : createLunaJudge(client, { candidateConflict });
+  const ledger = version === 2 ? createOwnLedger(ids) : createOwnLedger();
+  const output = await judge.judge({ version, strategy, image, publicHistory: [{ role: "user", content: "鳥みたい" }], ownLedger: ledger,
+    ...(version === 2 ? { ownAnchors: anchors } : {}),
+    ...(memory ? { referenceContext: { graph: createReferenceGraph(version === 2 ? { slots: ids } : undefined), turn: 1,
+      publicTurns: [{ turn: 1, speaker: "human", text: "鳥みたい" }] } } : {}) });
+  return { output, requests, diagnostics: judge.getDiagnostics() };
+}
+
+// Pinned against origin/main 6377de9 (two invalid replies: first request + retry).
+// Update only when the DEFAULT prompt is intentionally changed elsewhere.
+const DEFAULT_DIGESTS: Record<string, string> = {
+  "v1:repair-first:false": "3242732e6fbcaa6e8bf3cec1a4c933a45a2414a460133681c79223fd610f1f21",
+  "v1:repair-first:true": "163310d0bf8c4f6188bf9dd4749b37eb387c82dd4c02f846764c1fdf7052dc21",
+  "v1:bypass-enabled:false": "fc441bbe543472aa57303455cb557b24cc069afd457b77dcfb719e602f835024",
+  "v1:bypass-enabled:true": "bbeb4824b2f286e72b2aad4ebc2bfd1a9201032efc66f9679733ad2c49e0091f",
+  "v2:repair-first:false": "e0d3f9620ac2bc5c0c933ebf23fb8aa8f0392ac602c7412f54ccd926ddc8566b",
+  "v2:repair-first:true": "6e8a0da84a634a5bdec9c2e3c1208b603065eb4ca367805649bacdf4967a9636",
+  "v2:bypass-enabled:false": "9ec1f9323b627c5505a5799dd2c6009d45b23bc6fcad930b297f51c33afe1a11",
+  "v2:bypass-enabled:true": "220135ed93d4d84cc11e92202710a965035d256af6542c1b0c513a4a6f4e0f41",
+};
+
+test("default v1 and v2 judge requests, including the retry, stay byte-identical", async () => {
+  for (const key of Object.keys(DEFAULT_DIGESTS)) {
+    const [v, strategy, memory] = key.split(":");
+    for (const candidateConflict of [undefined, false]) {
+      const { requests } = await runJudge({ version: Number(v.slice(1)), strategy: strategy as Strategy, memory: memory === "true",
+        candidateConflict, replies: ["not json", "also bad"] });
+      assert.equal(requests.length, 2);
+      assert.equal(digest(requests), DEFAULT_DIGESTS[key], key);
+      assert.ok(!JSON.stringify(requests).includes("conflict"), key);
+    }
+  }
+});
+
+test("opt-in inserts one strategy-independent system message after the judge rules", async () => {
+  const bodies: Record<string, Message[]> = {};
+  for (const strategy of ["repair-first", "bypass-enabled"] as Strategy[]) {
+    const off = await runJudge({ strategy, replies: [JSON.stringify(SAFE_JUDGMENT)] });
+    const on = await runJudge({ strategy, candidateConflict: true, replies: [JSON.stringify({ ...SAFE_JUDGMENT, conflict: { candidates: [], featureFits: null } })] });
+    const [first] = on.requests;
+    assert.deepEqual(first[3], { role: "system", content: CANDIDATE_CONFLICT_INSTRUCTIONS });
+    assert.deepEqual([...first.slice(0, 3), ...first.slice(4)], off.requests[0]);
+    assert.equal(first[1].content, JUDGE_POLICIES[strategy]);
+    bodies[strategy] = first.filter((_, i) => i !== 1);
+  }
+  assert.deepEqual(bodies["repair-first"], bodies["bypass-enabled"], "only JUDGE_POLICIES may differ by strategy");
+  assert.ok(!/repair-first|bypass-enabled|保留を優先|確認を優先/.test(CANDIDATE_CONFLICT_INSTRUCTIONS));
+});
+
+test("opt-in rejects v1 and non-boolean options", async () => {
+  await assert.rejects(runJudge({ version: 1, candidateConflict: true, replies: ["{}"] }), /requires version 2/);
+  assert.throws(() => createLunaJudge(scripted([]).client, { candidateConflict: "yes" as unknown as boolean }), /Invalid candidate conflict option/);
+});
+
+test("a discriminating conflict is kept in diagnostics only, never in the returned judgment", async () => {
+  const { output, requests, diagnostics } = await runJudge({ candidateConflict: true, replies: [JSON.stringify({ ...confirm, conflict: twoCandidates })] });
+  assert.equal(requests.length, 1);
+  assert.deepEqual(output, confirm);
+  assert.ok(!Object.hasOwn(output, "conflict"));
+  assert.deepEqual(diagnostics.at(-1), { attempts: 1, fallback: false, failures: [], conflict: twoCandidates });
+});
+
+test("a feature common to all candidates is rejected, retried with a hint, then safely falls back", async () => {
+  const common = { ...twoCandidates, featureFits: ["s-0001", "s-0002"] };
+  const fixed = { ...twoCandidates, featureFits: ["s-0002"] };
+  const retried = await runJudge({ candidateConflict: true, replies: [JSON.stringify({ ...confirm, conflict: common }), JSON.stringify({ ...confirm, conflict: fixed })] });
+  assert.equal(retried.requests.length, 2);
+  assert.match(String(retried.requests[1].at(-1)?.content), /non_discriminating_feature/);
+  assert.ok(String(retried.requests[1].at(-1)?.content).includes(CONFLICT_RETRY_HINTS.non_discriminating_feature));
+  assert.deepEqual(retried.output, confirm);
+  assert.deepEqual(retried.diagnostics.at(-1)?.conflict, fixed);
+
+  const failed = await runJudge({ candidateConflict: true, memory: true, replies: [JSON.stringify({ ...confirm, reference: null, conflict: common })] });
+  assert.deepEqual(failed.output, { ...SAFE_JUDGMENT, reference: null });
+  assert.deepEqual(failed.diagnostics.at(-1), { attempts: 2, fallback: true, failures: ["non_discriminating_feature", "non_discriminating_feature"], memoryFallback: false, conflict: null });
+});
+
+test("missing or malformed conflict blocks fail closed", async () => {
+  const missing = await runJudge({ candidateConflict: true, replies: [JSON.stringify(confirm)] });
+  assert.deepEqual(missing.output, SAFE_JUDGMENT);
+  assert.deepEqual(missing.diagnostics.at(-1)?.failures, ["invalid_conflict", "invalid_conflict"]);
+});
+
+test("validator: shapes, target membership and the split rule", () => {
+  const ownIds = ids;
+  const v = (conflict: unknown, judgment = confirm) => validateCandidateConflict(conflict, { ownIds, judgment });
+  const code = (fn: () => unknown) => { try { fn(); return null; } catch (error) { assert.ok(error instanceof CandidateConflictError); return error.code; } };
+  assert.deepEqual(v({ candidates: [], featureFits: null }), { candidates: [], featureFits: null });
+  assert.equal(code(() => v({ candidates: [], featureFits: [] })), "conflict_fits_required");
+  assert.equal(code(() => v({ candidates: [twoCandidates.candidates[0]], featureFits: null })), "invalid_conflict");
+  assert.equal(code(() => v({ candidates: [...twoCandidates.candidates, { id: "s-0003", feature: "a" }, { id: "s-0004", feature: "b" }], featureFits: ["s-0001"] })), "invalid_conflict");
+  assert.equal(code(() => v({ candidates: [twoCandidates.candidates[0], twoCandidates.candidates[0]], featureFits: ["s-0001"] })), "invalid_conflict");
+  assert.equal(code(() => v({ candidates: [{ id: "F1", feature: "a" }, { id: "s-0002", feature: "b" }], featureFits: ["s-0002"] })), "invalid_conflict");
+  assert.equal(code(() => v({ ...twoCandidates, extra: 1 })), "invalid_conflict");
+  assert.equal(code(() => v(twoCandidates, { ...confirm, targetSlot: "s-0003" })), "conflict_target_not_candidate");
+  assert.equal(code(() => v({ ...twoCandidates, featureFits: null })), "conflict_fits_required");
+  assert.equal(code(() => v({ ...twoCandidates, featureFits: [] })), "non_discriminating_feature");
+  assert.equal(code(() => v({ ...twoCandidates, featureFits: ["s-0001", "s-0002"] })), "non_discriminating_feature");
+  assert.equal(code(() => v({ ...twoCandidates, featureFits: ["s-0003"] })), "invalid_conflict");
+  // Conflict recorded without a feature (e.g. defer / accept) needs no fits.
+  assert.deepEqual(v({ ...twoCandidates, featureFits: null }, { targetSlot: null, discriminatingFeature: null }), { ...twoCandidates, featureFits: null });
+  assert.equal(code(() => v(twoCandidates, { targetSlot: "s-0001", discriminatingFeature: null })), "conflict_fits_required");
+  // Three candidates: a feature fitting two of them still splits the set.
+  const three = { candidates: [...twoCandidates.candidates, { id: "s-0003", feature: "四角がある" }], featureFits: ["s-0001", "s-0003"] };
+  assert.deepEqual(v(three), three);
+  assert.deepEqual(splitConflict({ a: 1 }), { core: { a: 1 }, conflict: undefined, present: false });
+  const raw = { a: 1, conflict: 2 };
+  assert.deepEqual(splitConflict(raw), { core: { a: 1 }, conflict: 2, present: true });
+  assert.deepEqual(raw, { a: 1, conflict: 2 });
+});
+
+test("scorer arithmetic uses only researcher-supplied fits", () => {
+  const conflict = { candidates: twoCandidates.candidates, featureFits: ["s-0001"] };
+  assert.deepEqual(scoreFeatureSplit({ scorerFits: ["s-0001", "s-0002"], scoredIds: ids, targetSlot: "s-0001", trueReferent: "s-0002", conflict }), {
+    scoredIds: ids, fitsTarget: true, fitsReferent: true, separatesTargetFromReferent: false, splitsCandidates: false, claimMatchesScorer: false, fitCount: 2 });
+  assert.deepEqual(scoreFeatureSplit({ scorerFits: ["s-0001"], scoredIds: ids, targetSlot: "s-0001", trueReferent: "s-0002", conflict }), {
+    scoredIds: ids, fitsTarget: true, fitsReferent: false, separatesTargetFromReferent: true, splitsCandidates: true, claimMatchesScorer: true, fitCount: 1 });
+  assert.equal(scoreFeatureSplit({ scorerFits: [], scoredIds: ids, targetSlot: "s-0001", trueReferent: "s-0001" }).separatesTargetFromReferent, null);
+  assert.throws(() => scoreFeatureSplit({ scorerFits: ["x"], scoredIds: ids, targetSlot: null }), /outside/);
+});
+
+test("v2 dialogue with an injected opt-in judge never shows candidate features to the generator", async () => {
+  const secretFeature = "SYNTHETIC_PRIVATE_CANDIDATE_FEATURE";
+  const conflict = { candidates: [{ id: "s-0001", feature: secretFeature }, { id: "s-0002", feature: secretFeature + "2" }], featureFits: null };
+  const requests: Message[][] = [];
+  const client = { async complete(messages: Message[], options: { phase?: string } = {}) {
+    requests.push(structuredClone(messages));
+    return { text: options.phase === "judgment" ? JSON.stringify({ ...SAFE_JUDGMENT, targetSlot: null, conflict }) : "そうですね。" };
+  } };
+  const judge = createLunaJudge(client, { candidateConflict: true });
+  const dialogue = createDialogueV2({ client, strategy: "bypass-enabled", image, anchors, judge });
+  const turn = await dialogue.runAiTurn({ events: [{ id: "e-1", seq: 1, speaker: "human", text: "鳥みたい" }], signal: null,
+    privateState: dialogue.initialPrivateState(), lastEventId: "e-1" });
+  assert.equal(turn.text, "そうですね。");
+  assert.equal(requests.length, 2);
+  assert.ok(!JSON.stringify(requests[1]).includes(secretFeature), "generator input must not include candidate notes");
+  assert.deepEqual(turn.privateState.judgments[0].validation.conflict, conflict);
+});
