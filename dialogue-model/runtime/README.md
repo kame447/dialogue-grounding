@@ -2,6 +2,10 @@
 
 この接続基盤は、AI自身に提示したタングラム画像・公開済み対話履歴・AI自身の判断による作業メモから次の発話を生成します。研究方針の唯一の正本は ../README.md で、実験手続きの採用を意味しません。
 
+## 公開版（v2）
+
+操作確認用の最新ページは <https://tangram-grounding-experiment.kame-website.workers.dev/> （認証不要）です。公開サーバーはTypeScript Worker + Durable Objectで、内部サービスバインディングを通して既存の研究AI Workerを利用します。ローカル版 `http://127.0.0.1:8787` はMac上でのみ利用できます。公開版の手順は [workers/tangram-experiment/README.md](../../workers/tangram-experiment/README.md) を参照してください。
+
 ## 推奨: Cloudflare Worker経由
 
 上流のAIサービスのAPIキーは研究用のCloudflare Workerだけに保存します。クライアントの .env にはWorker接続用トークンだけを持たせます。モデルIDはCloudflare側の DIALOGUE_MODEL が決定し、クライアントからは purpose: dialogue_turn のみを送ります。最初に ../../workers/research-ai-proxy/README.md の接続・設定手順を参照してください。

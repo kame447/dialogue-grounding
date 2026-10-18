@@ -1,0 +1,75 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "tangram-grounding-experiment",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-18",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "workers_dev": true,
+  "observability": {
+    "enabled": false
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "NAMING_SESSIONS",
+        "class_name": "TangramSession"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "TangramSession"
+      ]
+    }
+  ],
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+  "services": [
+    {
+      "binding": "AI_PROXY",
+      "service": "dialogue-grounding-ai-proxy",
+      "entrypoint": "InternalResearchProxy"
+    }
+  ],
+  "ratelimits": [
+    {
+      "name": "START_RATE_LIMIT",
+      "namespace_id": "202610181801",
+      "simple": {
+        "limit": 40,
+        "period": 60
+      }
+    },
+    {
+      "name": "SESSION_ACTION_RATE_LIMIT",
+      "namespace_id": "202610181802",
+      "simple": {
+        "limit": 30,
+        "period": 60
+      }
+    },
+    {
+      "name": "IP_ACTION_RATE_LIMIT",
+      "namespace_id": "202610181803",
+      "simple": {
+        "limit": 120,
+        "period": 60
+      }
+    },
+    {
+      "name": "GLOBAL_ACTION_RATE_LIMIT",
+      "namespace_id": "202610181804",
+      "simple": {
+        "limit": 300,
+        "period": 60
+      }
+    }
+  ]
+}
