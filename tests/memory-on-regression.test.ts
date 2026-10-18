@@ -11,7 +11,7 @@ import { JUDGE_TIME_BUDGET_MS } from "../dialogue-model/runtime/judgment/luna.mj
 import { GENERATION_TIMEOUT_MS } from "../dialogue-model/runtime/v2/dialogue-v2.mjs";
 import {
   A, B, C, D, act, ref, ids, humanIds, humanPngBase64, aiPngBase64, trial, createScriptedTrial, requestText, requestImages,
-  type Request, type Step,
+  stableOptions, assertSameBudget, type Request, type Step,
 } from "./helpers/memory-harness.ts";
 import { SCRIPT } from "./helpers/memory-script.ts";
 
@@ -148,7 +148,8 @@ test("memory OFF regression: identical public behaviour and byte-identical reque
     for (const [index, request] of on.requests.entries()) {
       const other = off.requests[index];
       assert.equal(request.phase, other.phase);
-      assert.deepEqual(request.options, other.options);
+      assert.deepEqual(stableOptions(request.options), stableOptions(other.options));
+      assertSameBudget(request.options, other.options, JUDGE_TIME_BUDGET_MS);
       const stripped = request.messages.filter((m) => !isMemoryMessage(m));
       assert.equal(JSON.stringify(stripped), JSON.stringify(other.messages), strategy + " request " + index + " differs beyond memory");
       if (request.phase === "judgment") assert.equal(request.messages.length - stripped.length, 2);

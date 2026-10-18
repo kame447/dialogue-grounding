@@ -7,7 +7,8 @@ import assert from "node:assert/strict";
 import { setTimeout as pause } from "node:timers/promises";
 import { snapshotReferenceGraph } from "../dialogue-model/runtime/memory/reference-graph.mjs";
 import { createMockGroundingJudge, type GroundingJudge, type GroundingRequest } from "../dialogue-model/runtime/grounding/client.ts";
-import { A, B, C, createScriptedTrial, humanIds, ids, trial } from "./helpers/memory-harness.ts";
+import { JUDGE_TIME_BUDGET_MS } from "../dialogue-model/runtime/judgment/luna.mjs";
+import { A, B, C, assertSameBudget, createScriptedTrial, humanIds, ids, stableOptions, trial } from "./helpers/memory-harness.ts";
 import { SCRIPT } from "./helpers/memory-script.ts";
 
 type Rec = Record<string, any>;
@@ -41,7 +42,12 @@ async function run({ steps = SCRIPT, referenceMemory = true, shadow = "ok" as Be
   await harness.task.persistNow();
   return { ...harness, shadowRequests: recorder.requests, graphsBefore, final: harness.records.at(-1)! };
 }
-const chat = (requests: Rec[]) => JSON.stringify(requests.map(({ phase, messages, options }) => ({ phase, messages, options })));
+// Request bodies byte for byte; the wall-clock judge budget is compared within a tolerance.
+const chat = (requests: Rec[]) => JSON.stringify(requests.map(({ phase, messages, options }) => ({ phase, messages, options: stableOptions(options) })));
+function assertSameRequests(actual: Rec[], expected: Rec[], label = "") {
+  assert.equal(chat(actual), chat(expected), label + "Luna requests must be byte-identical");
+  actual.forEach((request, index) => assertSameBudget(request.options, expected[index].options, JUDGE_TIME_BUDGET_MS));
+}
 const participantVisible = (r: Rec) => ({ events: r.events.map(({ seq, speaker, text }: Rec) => ({ seq, speaker, text })),
   ledger: r.ownLedger, privateState: r.queueState.privateState, graph: r.referenceGraph ?? null, judgments: r.judgments });
 
@@ -50,7 +56,7 @@ test("shadow on vs off (memory ON): identical upstream requests, utterances, led
     const off = await run({ strategy, shadow: null });
     const on = await run({ strategy });
     assert.equal(on.shadowRequests.length, SCRIPT.length);
-    assert.equal(chat(on.requests), chat(off.requests), strategy + ": Luna requests must be byte-identical");
+    assertSameRequests(on.requests, off.requests, strategy + ": ");
     assert.deepEqual(participantVisible(on.final), participantVisible(off.final));
     // The mock clock also ticks on the shadow's extra research persists, so wall-clock stamps are excluded.
     const visible = (task: Rec) => { const state = task.getState();
@@ -113,7 +119,7 @@ test("shadow failures (error, hang past its own timeout) never change the dialog
   const off = await run({ shadow: null });
   for (const behaviour of ["throw", "hang"] as const) {
     const on = await run({ shadow: behaviour });
-    assert.equal(chat(on.requests), chat(off.requests));
+    assertSameRequests(on.requests, off.requests);
     assert.deepEqual(participantVisible(on.final), participantVisible(off.final));
     assert.equal(on.final.groundingShadow.length, SCRIPT.length);
     for (const record of on.final.groundingShadow) {
