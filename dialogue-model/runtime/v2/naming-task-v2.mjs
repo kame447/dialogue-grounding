@@ -9,7 +9,7 @@ import { createTrialV2, participantView, modelView } from "../stimuli/scatter-v2
 import { scoreTrial as defaultScoreTrial, normalizeName } from "../scoring.mjs";
 import { createHumanMessageQueue } from "../web/human-message-queue.mjs";
 import { createDialogueV2 } from "./dialogue-v2.mjs";
-import { outsideRepositoryDirectory, NamingTaskError } from "../naming-task.mjs";
+import { NamingTaskError } from "../naming-error.mjs";
 import { STRATEGIES } from "../judgment/instructions.mjs";
 import { STATUSES } from "../judgment/schema.mjs";
 
@@ -42,17 +42,17 @@ export function parseAiNamesV2(text, slots) {
 export async function createNamingTaskV2({
   client, strategy, seed, referenceMemory = false, runDir = process.env.RESEARCH_RUN_DIR,
   createTrial = createTrialV2, scoreTrial = defaultScoreTrial, judge = null, now = () => Date.now(),
-  decisionShadowClient = null,
+  restore = null, onPersist = null, decisionShadowClient = null,
 }) {
   if (!STRATEGIES.includes(strategy)) throw new NamingTaskError("invalid_strategy");
   if (!Number.isSafeInteger(seed)) throw new NamingTaskError("invalid_seed");
   if (typeof referenceMemory !== "boolean") throw new NamingTaskError("invalid_options");
-  const directory = runDir ? await outsideRepositoryDirectory(runDir) : null;
+  const directory = runDir ? await (await import("../naming-task.mjs")).outsideRepositoryDirectory(runDir) : null;
   const trial = createTrial({ seed });
   const scene = participantView(trial);
   const model = modelView(trial);
   const humanSlots = scene.shapes.map((shape) => shape.id);
-  const requests = [];
+  const requests = restore?.requests ? clone(restore.requests) : [];
   const trackingClient = {
     async complete(messages, options = {}) {
       const started = now();
@@ -71,10 +71,13 @@ export async function createNamingTaskV2({
   const dialogue = createDialogueV2({ client: trackingClient, strategy, image: { mimeType: model.mimeType, base64: model.png.toString("base64") },
     anchors: model.anchors, judge, referenceMemory, decisionShadowClient,
     onResearchUpdate: () => persist().catch(() => {}) });
-  const queue = createHumanMessageQueue({ runAiTurn: dialogue.runAiTurn, initialPrivateState: dialogue.initialPrivateState() });
-  const recordId = randomUUID();
-  const startedAt = new Date(now()).toISOString();
-  let humanSubmission = null, aiSubmission = null, result = null, closed = false, finalError = null;
+  const queue = createHumanMessageQueue({ runAiTurn: dialogue.runAiTurn,
+    initialPrivateState: dialogue.initialPrivateState(), ...(restore?.queueState ? { initialState: restore.queueState } : {}) });
+  const recordId = restore?.recordId ?? randomUUID();
+  const startedAt = restore?.startedAt ?? new Date(now()).toISOString();
+  let humanSubmission = restore?.humanSubmission ?? null, aiSubmission = restore?.aiSubmission ?? null,
+    result = restore?.scoring?.result ?? null, closed = restore?.closed ?? false,
+    finalError = restore?.finalError ?? null;
 
   function publicEvents() {
     return queue.getSnapshot().events.map(({ id, speaker, text, at }) => ({ id, speaker, text, at }));
@@ -88,7 +91,7 @@ export async function createNamingTaskV2({
     return next;
   }
   async function writeRecord() {
-    if (!directory) return;
+    if (!directory && !onPersist) return;
     const snapshot = queue.getSnapshot();
     const privateState = queue.getPrivateState();
     const record = {
@@ -100,16 +103,19 @@ export async function createNamingTaskV2({
       publicHistory: snapshot.events.map((e) => ({ role: e.speaker === "human" ? "user" : "assistant", content: e.text })),
       judgments: privateState.judgments, attempts: dialogue.getAttempts(), ownLedger: privateState.ledger,
       ...(referenceMemory ? { referenceGraph: dialogue.snapshotGraph(privateState) } : {}),
-      humanSubmission, aiSubmission, scoring: result ? { key: trial.key, result } : null, requests,
+      humanSubmission, aiSubmission, closed, finalError,
+      queueState: queue.getDurableState(), scoring: result ? { key: trial.key, result } : null, requests,
       diagnostics: aiSubmission ? {
         ledgerFinalMismatch: (() => { const slots = dialogue.slots.filter((s) => (privateState.ledger[s].name ?? null) !== (aiSubmission[s] ?? null)); return { count: slots.length, slots }; })(),
         ledgerStatusCounts: Object.fromEntries(STATUSES.map((status) => [status, dialogue.slots.filter((s) => privateState.ledger[s].status === status).length])),
       } : null,
     };
+    if (onPersist) await onPersist(record);
+    if (!directory) return;
     const temporary = join(directory, "." + recordId + ".tmp");
     try {
       await mkdir(directory, { recursive: true, mode: 0o700 });
-      if (await outsideRepositoryDirectory(directory) !== directory) throw new NamingTaskError("repository_output_forbidden");
+      if (await (await import("../naming-task.mjs")).outsideRepositoryDirectory(directory) !== directory) throw new NamingTaskError("repository_output_forbidden");
       await writeFile(temporary, JSON.stringify(record, null, 2) + "\n", { mode: 0o600, flag: "wx" });
       await rename(temporary, join(directory, recordId + ".json"));
     } catch {
@@ -145,6 +151,7 @@ export async function createNamingTaskV2({
       return { eventId: receipt.event.id, duplicate: receipt.duplicate };
     },
     async whenIdle() { await queue.whenIdle(); await persist(); },
+    async persistNow() { await persist(); },
     async retry() { await queue.retry(); await persist(); },
     getState() {
       const snapshot = queue.getSnapshot();
