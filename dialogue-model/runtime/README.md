@@ -4,7 +4,7 @@
 
 ## 公開版（v2）
 
-操作確認用の最新ページは <https://tangram-grounding-experiment.kame-website.workers.dev/> （認証あり）です。公開サーバーはTypeScript Worker + Durable Objectで、内部サービスバインディングを通して既存の研究AI Workerを利用します。ローカル版 `http://127.0.0.1:8787` はMac上でのみ利用できます。公開版の手順は [workers/tangram-experiment/README.md](../../workers/tangram-experiment/README.md) を参照してください。
+操作確認用の最新ページは <https://tangram-grounding-experiment.kame-website.workers.dev/> （認証不要）です。公開サーバーはTypeScript Worker + Durable Objectで、内部サービスバインディングを通して既存の研究AI Workerを利用します。ローカル版 `http://127.0.0.1:8787` はMac上でのみ利用できます。公開版の手順は [workers/tangram-experiment/README.md](../../workers/tangram-experiment/README.md) を参照してください。
 
 ## 推奨: Cloudflare Worker経由
 
