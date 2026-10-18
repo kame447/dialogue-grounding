@@ -183,6 +183,8 @@ export async function runShadow({ record = null, cases = [], knownFailures = [],
     turns: summarizeTurns(turns, knownFailures),
     turnResults: turns,
     cases: summarizeCases(caseResults, cases),
+    /** Per-case verdicts (ids, gold, verdict, flags; no text), kept so results can be re-scored offline. */
+    caseResults,
   };
 }
 
