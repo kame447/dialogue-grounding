@@ -59,7 +59,8 @@ export function eventsToHistory(events) {
 
 /** Public events -> provenance turns numbered by event sequence, newest window only. */
 export function eventsToPublicTurns(events) {
-  return events.map((event) => ({ turn: event.seq, speaker: event.speaker, text: event.text })).slice(-REFERENCE_LIMITS.publicTurns);
+  return events.map((event) => ({ turn: event.seq, speaker: event.speaker, text: event.text,
+    ...(event.nonReferential === true ? { nonReferential: true } : {}) })).slice(-REFERENCE_LIMITS.publicTurns);
 }
 
 function abortIf(signal) {

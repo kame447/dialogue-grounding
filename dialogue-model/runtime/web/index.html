@@ -41,12 +41,16 @@
         <aside class="panel dialogue" aria-label="会話と名前の確認">
           <section id="conversation-stage" class="stage" aria-labelledby="dialogue-title">
             <div class="conversation-head">
-              <div class="panel-head"><h2 id="dialogue-title">会話</h2><span id="chat-status" role="status" aria-live="polite"></span></div>
+              <div class="panel-head"><h2 id="dialogue-title">会話</h2><span id="chat-status" class="sr-only" role="status" aria-live="polite"></span></div>
               <button id="finish-conversation" type="button" class="secondary">会話を終了して名前を決める <span aria-hidden="true">→</span></button>
             </div>
-            <ol id="history" role="log" tabindex="0" aria-live="polite" aria-label="公開された会話"></ol>
+            <div class="transcript">
+              <ol id="history" role="log" tabindex="0" aria-live="polite" aria-label="公開された会話"></ol>
+              <div id="typing-indicator" class="typing-indicator" aria-hidden="true" hidden><span></span><span></span><span></span></div>
+              <div id="chat-recovery" class="chat-recovery" hidden><p id="chat-recovery-message"></p><button id="retry-chat" type="button" class="quiet">状態を確認</button></div>
+            </div>
             <form id="chat"><label for="utterance" class="sr-only">メッセージ</label><textarea id="utterance" name="utterance" rows="2" maxlength="12000" required placeholder="メッセージを入力…" aria-describedby="send-hint"></textarea>
-              <div class="chat-actions"><span id="send-hint" class="muted">Enterで送信<br>Shift+Enterで改行</span><button id="send-message">送信 <span aria-hidden="true">↑</span></button></div>
+              <div class="chat-actions"><span id="send-hint" class="muted">改行して入力できます</span><button id="send-message">送信 <span aria-hidden="true">↑</span></button></div>
             </form>
           </section>
           <section id="name-stage" class="stage submission-panel" aria-labelledby="names-title" hidden>

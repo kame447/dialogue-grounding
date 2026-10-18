@@ -159,7 +159,9 @@ test("AI thinking keeps composer active; consecutive sends are optimistic and po
   assert.match(e.history.textContent, /最初の発話/u); assert.match(e.history.textContent, /補足の発話/u);
   release(); await tick();
   const messages = calls.filter((call) => call.path === "/api/message");
-  assert.deepEqual(messages.map((call) => call.body), [{ text: "最初の発話" }, { text: "補足の発話" }]);
+  assert.deepEqual(messages.map((call) => call.body.text), ["最初の発話", "補足の発話"]);
+  assert.ok(messages.every((call) => typeof call.body.clientId === "string" && call.body.clientId.length > 0));
+  assert.notEqual(messages[0].body.clientId, messages[1].body.clientId);
   assert.equal(e.history.children.length, 2, "accepted messages are not duplicated by poll reconciliation");
   assert.doesNotMatch(JSON.stringify(calls), /秘密のローカルメモ/u);
 });

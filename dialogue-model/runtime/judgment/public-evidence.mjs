@@ -76,7 +76,9 @@ export function groundReference({ publicTurns, turn, interpretation }) {
   // The latest public AI utterance before this human turn. In v1 exchange
   // numbering that is turn - 1; in v2 event numbering consecutive human
   // messages may sit in between.
-  const previousAi = publicTurns.filter((t) => t.speaker === "ai" && t.turn < turn).at(-1) ?? null;
+  // Scripted setup questions remain in chat history, but supply no referential
+  // evidence: even a literal noun in them is not an AI naming proposal.
+  const previousAi = publicTurns.filter((t) => t.speaker === "ai" && t.turn < turn && !t.nonReferential).at(-1) ?? null;
   const dropped = [];
   let slots = [...interpretation.slots];
   let epistemic = interpretation.epistemic;

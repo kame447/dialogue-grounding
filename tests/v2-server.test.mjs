@@ -63,7 +63,7 @@ test("v2 over HTTP: own scene only, immediate consecutive messages, private name
   const second = await request("/api/message", { text: "あ、違う、人っぽいのかも" });
   assert.equal(second.status, 202, "a second message is accepted while the AI is thinking");
   state = await waitIdle();
-  assert.deepEqual(state.trial.events.map((e) => e.speaker), ["human", "human", "ai"]);
+  assert.deepEqual(state.trial.events.map((e) => e.speaker), ["ai", "human", "human", "ai"]);
 
   const ids = state.trial.scene.shapes.map((s) => s.id);
   response = await request("/api/names", { names: Object.fromEntries(ids.map((id, i) => [id, i === 0 ? null : "人名" + i])), confirm: false });

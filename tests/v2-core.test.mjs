@@ -84,8 +84,8 @@ test("a correction sent while the AI is thinking supersedes the stale reply", as
   release();
   await task.whenIdle();
   const events = task.getState().events;
-  assert.deepEqual(events.map((e) => e.speaker), ["human", "human", "ai"]);
-  assert.match(events[2].text, /魚かも/);
+  assert.deepEqual(events.map((e) => e.speaker), ["ai", "human", "human", "ai"]);
+  assert.match(events[3].text, /魚かも/);
   const lastGeneration = client.calls.filter((c) => c.phase === "generation").at(-1).messages;
   const humanTurns = lastGeneration.filter((m) => m.role === "user" && typeof m.content === "string").map((m) => m.content);
   assert.deepEqual(humanTurns, ["これは鳥っぽい", "あ、違う、魚かも"]);
@@ -196,14 +196,14 @@ test("an upstream error keeps the message pending and blocks submission until re
   task.message("これはどう？");
   await task.whenIdle();
   assert.equal(task.getState().aiStatus, "error");
-  assert.deepEqual(task.getState().events.map((e) => e.speaker), ["human"], "the human message is preserved");
+  assert.deepEqual(task.getState().events.map((e) => e.speaker), ["ai", "human"], "the opening and human message are preserved");
   const ids = task.getState().scene.shapes.map((s) => s.id);
   await assert.rejects(task.submitHuman({ names: Object.fromEntries(ids.map((id) => [id, null])) }), /ai_retry_required/);
   await assert.rejects(task.submitAI(), /ai_retry_required/);
   assert.equal(task.researcherView().privateState.judgments.length, 0, "failed generation committed nothing");
   fail = false;
   await task.retry();
-  assert.deepEqual(task.getState().events.map((e) => e.speaker), ["human", "ai"]);
+  assert.deepEqual(task.getState().events.map((e) => e.speaker), ["ai", "human", "ai"]);
   await task.submitHuman({ names: Object.fromEntries(ids.map((id) => [id, null])) });
 });
 

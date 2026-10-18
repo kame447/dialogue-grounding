@@ -138,9 +138,11 @@ test('active audit: a newer human message supersedes the waiting decision and on
   assert.deepEqual(generations[0].filter(m => m.role === 'user' && typeof m.content === 'string').map(m => m.content), ['最初の合成発話', '新しい訂正の合成発話']);
   assert.ok(!evidence[0].includes('新しい訂正')); assert.ok(evidence[1].includes('新しい訂正'));
   const researcher = task.researcherView();
-  assert.equal(researcher.privateState.judgments.length, 1); assert.equal(researcher.privateState.judgments[0].turnIndex, 2);
+  assert.equal(researcher.privateState.judgments.length, 1); assert.equal(researcher.privateState.judgments[0].turnIndex, 3);
   assert.equal(researcher.attempts.length, 2);
-  assert.equal(task.getState().events.filter(e => e.speaker === 'ai').length, 1);
+  assert.equal(task.getState().events.filter(e => e.speaker === 'ai').length, 2);
+  const opening = task.getState().events[0];
+  assert.deepEqual([opening.id, opening.speaker, opening.text], ['event-1', 'ai', 'まず、どの図形から話しましょうか？']);
   assert.doesNotMatch(JSON.stringify(task.getState()), /activeDecision|activeJudge|decision_jev|probabilities|lunaAction|rejectedCandidates/);
 });
 

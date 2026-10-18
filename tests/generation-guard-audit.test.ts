@@ -195,12 +195,15 @@ test('guard audit: stale regeneration never commits a discarded decision or cont
   task.message('次の訂正です。', 'second'); release.resolve(); await task.whenIdle();
   assert.equal(calls, 4);
   const state = task.getState(), researcher = task.researcherView();
-  assert.equal(state.events.filter((e: any) => e.speaker === 'ai').length, 1);
+  const aiEvents = state.events.filter((e: any) => e.speaker === 'ai');
+  assert.equal(aiEvents.length, 2);
+  assert.equal(state.events[0].speaker, 'ai');
+  assert.equal(state.events[0].text, 'まず、どの図形から話しましょうか？');
   assert.equal(researcher.privateState.judgments.length, 1);
-  assert.equal(researcher.privateState.judgments[0].turnIndex, 2);
+  assert.equal(researcher.privateState.judgments[0].turnIndex, 3);
   assert.equal(researcher.privateState.judgments[0].generationGuard.fallback, true);
   assert.doesNotMatch(JSON.stringify(state), /generationGuard|violations|regenerated|fallback|PRIVATE-DISCARDED/);
-  assert.deepEqual(findAgreementClaims(state.events.find((e: any) => e.speaker === 'ai').text), []);
+  assert.deepEqual(findAgreementClaims(aiEvents.at(-1).text), []);
 });
 
 test('guard audit: normal and active task public replies are guarded without promoting private agreement', async () => {

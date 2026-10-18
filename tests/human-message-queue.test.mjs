@@ -16,7 +16,7 @@ test("human events commit immediately with stable event-sourced turn, ID and tim
   const a = createHumanMessageSequencer({ now }), b = createHumanMessageSequencer({ now });
   for (const state of [a, b]) {
     assert.deepEqual(state.acceptHuman(message("first", "鳥かも")), {
-      duplicate: false, event: { id: "event-1", speaker: "human", text: "鳥かも", at: "1970-01-01T00:00:01.234Z", seq: 1, turn: 1 },
+      duplicate: false, event: { id: "event-1", speaker: "human", text: "鳥かも", at: "1970-01-01T00:00:01.234Z", seq: 1, turn: 1, clientId: "first" },
     });
     state.acceptHuman(message("second", "訂正、船です"));
     const request = state.beginRequest();
