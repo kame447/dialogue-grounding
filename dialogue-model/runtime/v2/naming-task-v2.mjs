@@ -44,7 +44,7 @@ export function parseAiNamesV2(text, slots) {
 }
 
 /**
- * @param {{ client, strategy, seed, referenceMemory?: boolean, runDir?: string, createTrial?, scoreTrial?,
+ * @param {{ client, strategy, seed, referenceMemory?: boolean, runDir?: string | null, createTrial?, scoreTrial?,
  *   judge?: import('../judgment/schema.mjs').DialogueJudge | null, now?: () => number, restore?: object | null, onPersist?: Function | null,
  *   decisionShadowClient?: {chooseAction(request: object): Promise<any>} | null,
  *   activeDecision?: {purpose: string, client: {chooseAction(request: object): Promise<any>}} | null,
