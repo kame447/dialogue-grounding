@@ -98,7 +98,7 @@ test("Web errors never return raw API errors, prompts, images, or tokens; failed
   assert.equal(submitted.status, 502);
   assert.deepEqual(await submitted.json(), { error: "ai_unavailable" });
   const failed = await (await request("/api/state")).json();
-  assert.equal(failed.trial.humanSubmitted, true); assert.equal(failed.trial.status, "submission_error");
+  assert.equal(failed.trial.humanSubmitted, true); assert.equal(failed.trial.status, "submitting");
   assert.ok(!Object.hasOwn(failed.trial, "result"));
 });
 
@@ -136,6 +136,8 @@ async function uiHarness() {
     removeAttribute(name) { delete this.attributes[name]; }
     get scrollHeight() { return this.children.length * 100; }
     querySelectorAll(selector) { const tags = selector.split(","); return this.children.flatMap((c) => [...(tags.includes(c.tagName) ? [c] : []), ...c.querySelectorAll(selector)]); }
+    get elements() { return this._elements ?? Object.fromEntries(this.querySelectorAll("input").map(input => [input.name, input])); }
+    set elements(value) { this._elements = value; }
     addEventListener(type, handler) { (this.handlers[type] ??= []).push(handler); }
     fire(type, values = {}) { const event = { target: this, prevented: false, preventDefault() { this.prevented = true; }, ...values }; for (const handler of this.handlers[type] ?? []) handler(event); return event; }
     requestSubmit() { this.fire("submit"); }
@@ -151,17 +153,21 @@ async function uiHarness() {
   elements.setup.elements = { seed: new Element("input") };
   const requests = [], pending = [];
   const state = { busy: false, trial: { trialId: "dom-trial", slots: SLOTS, status: "dialogue", publicHistory: [], humanSubmitted: false } };
-  const response = (value) => ({ ok: true, json: async () => value });
+  const response = (value, ok = true) => ({ ok, json: async () => value });
   runInNewContext(script, {
     document: {
       getElementById: (id) => elements[id], createElement: (tag) => new Element(tag),
       createTextNode: (text) => { const node = new Element("text"); node.textContent = text; return node; },
       querySelectorAll: (selector) => [...new Set(Object.values(elements).flatMap((e) => e.querySelectorAll(selector)))],
     },
+    FormData: class {
+      constructor(form) { this.values = form.querySelectorAll("input").map(input => [input.name, input.value]); }
+      [Symbol.iterator]() { return this.values[Symbol.iterator](); }
+    },
     fetch: async (path, options) => {
       requests.push({ path, body: options?.body ? JSON.parse(options.body) : undefined });
       if (path === "/api/state") return response(state);
-      return new Promise((resolve) => pending.push((value) => resolve(response(value))));
+      return new Promise((resolve) => pending.push((value, ok) => resolve(response(value, ok))));
     },
     setTimeout, clearTimeout,
   });
@@ -248,3 +254,29 @@ test("Web UI retains result table while omitting private figure IDs from every d
   assert.doesNotMatch(ui.elements["result-body"].textContent, /PRIVATE-|figureId/u);
   assert.equal(ui.elements.utterance.disabled, true);
 });
+
+for (const [error, status, aiSubmitted] of [["ai_unavailable", "submitting", false], ["scoring_error", "scoring_error", true]]) {
+  test(`Web UI offers ${error} retry without resubmitting human names`, async () => {
+    const { elements, requests, pending, state, settle } = await uiHarness();
+    elements.submission.fire("submit");
+    assert.equal(requests.at(-1).path, "/api/submit");
+    state.trial = { ...state.trial, status, humanSubmitted: true, aiSubmitted,
+      humanSubmission: names("committed-human-") };
+    pending.shift()({ error }, false);
+    await settle();
+    assert.match(elements.notice.textContent, error === "scoring_error" ? /採点でエラー/ : /再試行/);
+    if (error === "scoring_error") assert.match(elements["submission-status"].textContent, /採点でエラー/);
+    const retry = elements.submission.querySelectorAll("button").find(button => /再試行/.test(button.textContent));
+    assert.ok(retry, "a dedicated final-submission retry button is present");
+    assert.equal(retry.hidden, false);
+    assert.equal(retry.disabled, false);
+    assert.equal(elements.submission.querySelectorAll("input")[0].disabled, true);
+    retry.fire("click");
+    assert.deepEqual(requests.at(-1), { path: "/api/ai-submit", body: {} });
+    assert.equal(retry.disabled, true);
+    pending.shift()({ ...state, trial: { ...state.trial, status: "completed", aiSubmitted: true } });
+    await settle();
+    assert.equal(retry.hidden, true);
+    assert.equal(retry.disabled, true);
+  });
+}

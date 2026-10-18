@@ -6,13 +6,26 @@ let awaitingAI = false;
 let composing = false;
 let refreshTimer;
 const errors = {
-  ai_unavailable: "AIに接続できませんでした。公開対話は直前の確定状態を保持しています。",
+  ai_unavailable: "AIに接続できませんでした。公開対話は直前の確定状態を保持しています。再試行できます。",
+  scoring_error: "採点でエラーが発生しました。提出内容を保持しています。採点を再試行できます。",
   invalid_ai_submission: "AIの最終提出を検証できませんでした。この試行は照合できません。",
   repository_output_forbidden: "記録先はリポジトリ外に設定してください。",
   record_write_failed: "研究記録を保存できませんでした。研究者が保存先を確認してください。",
   invalid_seed: "Seedを安全な整数で入力してください。",
   busy: "処理中です。完了を待ってください。",
 };
+const retrySubmission = document.createElement("button");
+retrySubmission.type = "button";
+retrySubmission.hidden = true;
+retrySubmission.addEventListener("click", () => {
+  if (!canRetrySubmission() || working || serverBusy) return;
+  operate(() => api("/api/ai-submit", {}), { ai: current.status !== "scoring_error" });
+});
+$("submission").append(retrySubmission);
+function canRetrySubmission() {
+  return Boolean(current?.humanSubmitted && (current.status === "scoring_error" ||
+    (current.status === "submitting" && !current.aiSubmitted)));
+}
 async function api(path, body) {
   const response = await fetch(path, body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const value = await response.json();
@@ -57,8 +70,11 @@ function render({ trial, busy = false }) {
   }
   if (trial.humanSubmission) trial.slots.forEach((slot) => { $("submission").elements[slot].value = trial.humanSubmission[slot]; });
   $("submission-status").textContent = trial.status === "submission_error" ? "AIの提出エラーにより照合できません。研究者がこの試行を確認してください。" :
+    trial.status === "scoring_error" ? errors.scoring_error :
     trial.result ? "双方の提出が完了しました。" : trial.humanSubmitted ? "あなたの提出を確定しました。" :
       trial.aiSubmitted ? "AIは提出済みです。内容はあなたの提出後に表示されます。" : "あなたの名称は公開対話に送信されません。";
+  retrySubmission.textContent = trial.status === "scoring_error" ? "採点を再試行" : "AIの提出を再試行";
+  retrySubmission.hidden = !canRetrySubmission();
   $("new-trial").hidden = !["completed", "submission_error"].includes(trial.status);
   $("results").hidden = !trial.result;
   if (trial.result) renderResult(trial.result);
@@ -98,6 +114,7 @@ function setControls() {
   document.querySelectorAll("button").forEach((button) => { button.disabled = working || serverBusy; });
   $("chat").querySelectorAll("textarea,button").forEach((control) => { control.disabled = working || serverBusy || current?.status !== "dialogue"; });
   $("submission").querySelectorAll("input,button").forEach((control) => { control.disabled = working || serverBusy || current?.humanSubmitted || current?.status === "submission_error"; });
+  retrySubmission.disabled = working || serverBusy || !canRetrySubmission();
 }
 async function operate(action, { ai = false } = {}) {
   if (working) return;

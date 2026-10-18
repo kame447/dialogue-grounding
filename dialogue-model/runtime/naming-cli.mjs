@@ -21,13 +21,17 @@ const HELP = [
 
 function scriptActions(text) {
   if (text.length > 2 * 1024 * 1024) throw new NamingTaskError("invalid_script");
-  return text.split(/\r?\n/).filter((line) => line.trim()).map((line) => {
+  const lines = text.split(/\r?\n/).filter((line) => line.trim());
+  return lines.map((line, index) => {
     let value;
     try { value = JSON.parse(line); } catch { throw new NamingTaskError("invalid_script"); }
     if (typeof value === "string") value = { utterance: value };
     if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).length !== 1) throw new NamingTaskError("invalid_script");
     if (Object.hasOwn(value, "utterance") && typeof value.utterance === "string" && value.utterance.trim() && value.utterance.length <= 12000) return value;
-    if (Object.hasOwn(value, "submission")) return { submission: validateSubmission(value.submission) };
+    if (Object.hasOwn(value, "submission")) {
+      if (index !== lines.length - 1) throw new NamingTaskError("invalid_script");
+      return { submission: validateSubmission(value.submission) };
+    }
     throw new NamingTaskError("invalid_script");
   });
 }
@@ -85,17 +89,23 @@ export async function main(argv = process.argv.slice(2), env = process.env, depe
       if (!text) continue;
       if (text === "/submit" || text.startsWith("/submit ")) {
         let submission;
-        if (text.startsWith("/submit ")) {
-          try { submission = validateSubmission(JSON.parse(text.slice(8))); }
-          catch { throw new NamingTaskError("invalid_submission"); }
-        } else {
-          submission = {};
-          for (const slot of SLOTS) {
-            output.write(slot + "の名称（未命名は空欄）> ");
-            const name = await lines.next();
-            if (name.done || name.value.trim() === "/exit") return task.getState();
-            submission[slot] = name.value;
+        try {
+          if (text.startsWith("/submit ")) {
+            submission = validateSubmission(JSON.parse(text.slice(8)));
+          } else {
+            submission = {};
+            for (const slot of SLOTS) {
+              output.write(slot + "の名称（未命名は空欄）> ");
+              const name = await lines.next();
+              if (name.done || name.value.trim() === "/exit") return task.getState();
+              submission[slot] = name.value;
+            }
+            submission = validateSubmission(submission);
           }
+        } catch (error) {
+          if (!(error instanceof SyntaxError) && !(error instanceof NamingTaskError && error.code === "invalid_submission")) throw error;
+          say("提出内容を確認してください。6位置の名称は各200字以内で再入力できます。");
+          continue;
         }
         await submit(submission);
         break;
