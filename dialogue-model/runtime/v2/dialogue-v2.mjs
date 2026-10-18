@@ -33,6 +33,19 @@ const FINAL_INSTRUCTIONS_V2 = [
 
 const clone = (value) => structuredClone(value);
 
+// What the public utterance may claim for each typed act (shared by both strategies).
+export const ACTION_SCOPE_V2 = Object.freeze({
+  accept: "受け止めるだけ。名前に決まったとは言わない",
+  propose_name: "どの図形と理解したかを示すか名前を出すだけ。決まった・それでいこうとは言わない",
+  confirm: "確認するだけ。決まった・それでいこうとは言わない",
+  agree: "この名前に決まったことを伝えてよい",
+  repair: "自分の取り違え・決めた名前の訂正であることを明示する",
+  defer: "後で戻ることを伝える。決まったとは言わない",
+  revisit: "保留していた図形に戻る。決まったとは言わない",
+  move_on: "別の図形に進む。決まったとは言わない",
+  close: "終わりにしてよいか相談する",
+});
+
 /** Public events -> chat messages, keeping every speaker turn (consecutive human messages stay distinct). */
 export function eventsToHistory(events) {
   return events.map((event) => {
@@ -120,7 +133,8 @@ export function createDialogueV2({ client, strategy, image, anchors, judge = nul
     const result = await client.complete([
       { role: "system", content: TASK_INSTRUCTIONS_V2 },
       { role: "system", content: GENERATOR_INSTRUCTIONS_V2 },
-      { role: "system", content: "この発話の判断（非公開）:\n" + JSON.stringify({ action, targetSlot, candidateName, discriminatingFeature,
+      { role: "system", content: "この発話の判断（非公開）:\n" + "主actionで言えること: " + ACTION_SCOPE_V2[action] +
+        (judgment.followUp ? "。followUpで言えること: " + ACTION_SCOPE_V2[judgment.followUp.action] : "") + "\n" + JSON.stringify({ action, targetSlot, candidateName, discriminatingFeature,
         ...(Object.hasOwn(judgment, "followUp") ? { followUp: judgment.followUp } : {}) }) },
       ...ownImageMessage(ownImage),
       { role: "system", content: "AI自身の作業メモ（非公開・正解表ではない）:\n" + JSON.stringify({ ownLedger: state.ledger, agreeEvidence: true }) },

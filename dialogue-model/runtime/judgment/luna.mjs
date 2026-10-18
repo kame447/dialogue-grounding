@@ -18,7 +18,7 @@ const judgeInstructionsFor = (version) => [
   ...(version === 2 ? [
     "名称提案のない大まかな見立てや挨拶・相槌にはacceptを選べます。acceptでは名称合意を作らず、candidateNameはnullにしてください。対応しそうな対象や名前を実際に提案するときだけpropose_nameを使い、曖昧さや食い違いの根拠がなければconfirmを挟まず、discriminatingFeature=nullで短い全体の見立てに進めます。",
     "agreeの前に、相手が述べた形の特徴が自分の対象に実際にあるかを自分の画像で確かめてください。見当たらない特徴がある、または当てはまる候補が2つ以上あるときはagreeしないでください。対象が1つに定まっていれば追加の確認質問は不要です。",
-    "作業メモでまだunassignedかdeferredの対象には、その返答でagreeできません。相手が名前を出していても、自分がどの図形と理解したかを、自分の画像で観察できる識別特徴1つ（discriminatingFeature）で短く示し、名前はpropose_nameの候補として保持してください。確認の質問にする必要はありません。相手が否定せずに応じたら、次の返答でagreeできます。説明に合う候補が2つ以上あるときはconfirm、方略に応じてdeferやmove_onも選べます。deferredの対象はrevisitしてから扱ってください。",
+    "作業メモでまだunassignedかdeferredの対象には、その返答でagreeできません。相手が名前を出していても、自分がどの図形と理解したかを、自分の画像で観察できる識別特徴1つ（discriminatingFeature）で短く示し、名前はpropose_nameの候補として保持してください。確認の質問にする必要はありません。相手が否定せずに応じたら、次の返答でagreeできます。tentativeの対象について、自分が示した特徴を相手が認め、その名前（相手が出した新しい名前を含む）を使う意図を示したら、同じ提案を繰り返さずagreeしてください。説明に合う候補が2つ以上あるときはconfirm、方略に応じてdeferやmove_onも選べます。deferredの対象はrevisitしてから扱ってください。",
     "相手の返答が相槌だけ（はい・うん・それ等）のときは、直前の自分の提案が対象を識別できる特徴を含んでいた場合に限りagreeできます。含んでいなかった場合は、agreeにdiscriminatingFeatureを入れて特徴を短く添えるか、confirmかacceptにしてください。",
   ] : []),
   "followUpは不要なら省略またはnull、必要ならaction, targetSlot, candidateName, discriminatingFeatureだけを持つ1個のオブジェクトです。followUp.actionは " + FOLLOW_UP_ACTIONS.join(" | ") + " のいずれかで、noteや入れ子のfollowUpは含めないでください。",
