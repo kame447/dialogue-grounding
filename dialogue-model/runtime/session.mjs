@@ -2,7 +2,7 @@ import { createLunaJudge } from "./judgment/luna.mjs";
 import { createOwnLedger, validateJudgment, applyJudgment } from "./judgment/schema.mjs";
 import { STRATEGIES, TASK_INSTRUCTIONS, ownImageMessage, ownRotationMessage, publicMessages } from "./judgment/instructions.mjs";
 import { createReferenceGraph, snapshotReferenceGraph, applyReferenceUpdate, ReferenceGraphError } from "./memory/reference-graph.mjs";
-import { stageMemory, visibleTurns } from "./judgment/memory.mjs";
+import { stageMemory, prepareMemory, visibleTurns } from "./judgment/memory.mjs";
 export { STRATEGIES };
 
 // Identical across conditions. Only the judge selects a strategy-dependent act.
@@ -71,7 +71,7 @@ export function createDialogueSession({ client, strategy, image = null, judge = 
       const trace = { turnIndex: history.length / 2 + 1, judgment: null,
         ownLedgerBefore: structuredClone(ownLedger), ownLedgerAfter: structuredClone(ownLedger),
         validation: null, status: "judge_error" };
-      if (graph) trace.memory = { opsApplied: 0, rejected: null };
+      if (graph) trace.memory = { opsApplied: 0, rejected: null, interpretation: false };
       const visibleHistory = [...publicMessages(history), { role: "user", content: utterance }];
       const publicTurns = graph ? visibleTurns(visibleHistory) : null;
       try {
@@ -85,18 +85,22 @@ export function createDialogueSession({ client, strategy, image = null, judge = 
         });
         let judgment, memoryUpdate;
         if (graph) {
-          const core = { ...rawJudgment }; delete core.memoryOps;
+          const core = { ...rawJudgment }; delete core.reference;
           const validCore = validateJudgment(core, { ownLedger });
           try {
             judgment = validateJudgment(rawJudgment, { ownLedger });
-            memoryUpdate = stageMemory(graph, trace.turnIndex, judgment.memoryOps, publicTurns);
+            const staged = prepareMemory(graph, trace.turnIndex, judgment.reference, publicTurns);
+            memoryUpdate = staged.update;
+            trace.memory.interpretation = judgment.reference != null;
+            trace.memory.rejected = staged.rejected;
           } catch (error) {
-            judgment = { ...validCore, memoryOps: [] };
+            judgment = { ...validCore, reference: null };
             trace.memory.rejected = "memory_" + (error instanceof ReferenceGraphError || error?.name === "JudgmentValidationError" ? error.code : "invalid_update");
-            memoryUpdate = stageMemory(graph, trace.turnIndex, [], publicTurns);
+            memoryUpdate = stageMemory(graph, trace.turnIndex, null, publicTurns);
           }
         } else judgment = validateJudgment(rawJudgment, { ownLedger });
-        trace.judgment = judgment;
+        trace.judgment = { ...judgment };
+        delete trace.judgment.reference;
         trace.validation = dialogueJudge.getDiagnostics?.().at(-1) ?? null;
         if (graph) trace.memory.rejected ??= trace.validation?.failures?.filter((code) => code.startsWith("memory_")).join(",") || null;
         trace.status = "generation_error";

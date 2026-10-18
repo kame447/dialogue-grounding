@@ -39,7 +39,7 @@ export function createLunaJudge(client) {
         return { action, targetSlot, candidateName: candidateName?.trim() ?? null };
       });
       const publicTurns = referenceContext?.publicTurns.map(({ turn, speaker, text }) => ({ turn, speaker, text }));
-      if (referenceContext) stageMemory(referenceContext.graph, referenceContext.turn, [], publicTurns);
+      if (referenceContext) stageMemory(referenceContext.graph, referenceContext.turn, null, publicTurns);
       const messages = [
         { role: "system", content: TASK_INSTRUCTIONS },
         { role: "system", content: JUDGE_POLICIES[strategy] },
@@ -63,13 +63,13 @@ export function createLunaJudge(client) {
         try {
           const parsed = JSON.parse(response.text);
           if (referenceContext) {
-            const core = { ...parsed }; delete core.memoryOps;
+            const core = { ...parsed }; delete core.reference;
             validCore = validateJudgment(core, { ownLedger: ledger });
           }
           let judgment;
           try {
             judgment = validateJudgment(parsed, { ownLedger: ledger });
-            if (referenceContext) stageMemory(referenceContext.graph, referenceContext.turn, judgment.memoryOps, publicTurns);
+            if (referenceContext) stageMemory(referenceContext.graph, referenceContext.turn, judgment.reference, publicTurns);
           } catch (error) {
             memoryFailure = Boolean(referenceContext && validCore);
             throw error;
@@ -83,10 +83,10 @@ export function createLunaJudge(client) {
       }
       if (memoryFailure && validCore) {
         diagnostics.push({ attempts: 2, fallback: false, failures, memoryFallback: true });
-        return { ...validCore, memoryOps: [] };
+        return { ...validCore, reference: null };
       }
       diagnostics.push({ attempts: 2, fallback: true, failures, ...(referenceContext ? { memoryFallback: false } : {}) });
-      return { ...SAFE_JUDGMENT, ...(referenceContext ? { memoryOps: [] } : {}) };
+      return { ...SAFE_JUDGMENT, ...(referenceContext ? { reference: null } : {}) };
     },
   };
 }
