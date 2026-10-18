@@ -2,7 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { createDialogueV2, ACTION_SCOPE_V2 } from "../dialogue-model/runtime/v2/dialogue-v2.mjs";
+import { createDialogueV2, GENERATION_TIMEOUT_MS, ACTION_SCOPE_V2 } from "../dialogue-model/runtime/v2/dialogue-v2.mjs";
 import { SAFE_JUDGMENT } from "../dialogue-model/runtime/judgment/schema.mjs";
 import { DECISION_ACTIONS, DECISION_MODELS } from "../workers/research-ai-proxy/src/decisions.mjs";
 
@@ -38,7 +38,10 @@ async function capture(options: CaptureOptions = {}) {
     judge: { async judge() { return { ...SAFE_JUDGMENT, action: lunaAction, targetSlot: ids[0],
       candidateName: ["accept", "move_on", "close"].includes(lunaAction) ? null : "鳥",
       discriminatingFeature: options.feature ?? (lunaAction === "confirm" ? "細長い部分がある" : null), note: "PRIVATE-SOURCE-NOTE" }; } },
-    client: { async complete(messages: Message[], config: { phase?: string }) { calls.push(structuredClone({ messages, options: config })); return { text: "公開応答" }; } },
+    // The local per-call deadline is never sent upstream; the pinned digest covers messages and phase.
+    client: { async complete(messages: Message[], { timeoutMs, ...config }: { phase?: string; timeoutMs?: number }) {
+      assert.equal(timeoutMs, GENERATION_TIMEOUT_MS);
+      calls.push(structuredClone({ messages, options: config })); return { text: "公開応答" }; } },
     activeDecision: active ? { purpose: "decision_jev", client: { async chooseAction() {
       if (failDecision) throw Object.assign(new Error("PRIVATE-DECISION-ERROR"), { code: "payment_required" });
       return selected;

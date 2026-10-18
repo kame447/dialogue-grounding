@@ -44,6 +44,11 @@ const FINAL_INSTRUCTIONS_V2 = [
 ].join("\n");
 
 const clone = (value) => structuredClone(value);
+// Robustness bound, identical for both strategies: a single Luna call was seen to
+// stall ~85 s live. Worst case per turn: judge 50 s + generation 2 x 40 s + guard rewrite 40 s.
+export const GENERATION_TIMEOUT_MS = 40000;
+const stalled = (error) => error?.name === "AIConnectionError" && (error.code === "timeout" || error.preResponse === true);
+const traceCode = (value) => typeof value === "string" && /^[a-z][a-z0-9_]{0,39}$/.test(value) ? value : "error";
 
 // What the public utterance may claim for each typed act (shared by both strategies).
 export const ACTION_SCOPE_V2 = Object.freeze({
@@ -144,7 +149,21 @@ export function createDialogueV2({ client, strategy, image, anchors, judge = nul
     };
   }
 
-  async function runAiTurn({ events, signal, privateState, lastEventId }) {
+  // Failed attempts keep only sanitized fields: code, phase, HTTP status, elapsed ms.
+  async function runAiTurn(args) {
+    const before = attempts.length, started = performance.now();
+    try { return await runAiTurnUnbounded(args); }
+    catch (error) {
+      const trace = attempts.length > before ? attempts.at(-1) : null;
+      if (trace && error?.name !== "AbortError") Object.assign(trace, {
+        errorCode: traceCode(error?.code), errorPhase: trace.status === "generation_error" ? "generation" : "judgment",
+        errorStatus: Number.isInteger(error?.status) ? error.status : null, errorElapsedMs: Math.round(performance.now() - started),
+      });
+      throw error;
+    }
+  }
+
+  async function runAiTurnUnbounded({ events, signal, privateState, lastEventId }) {
     const state = clone(privateState);
     const humanEvents = events.filter((event) => event.speaker === "human");
     const latest = humanEvents.at(-1);
@@ -229,7 +248,17 @@ export function createDialogueV2({ client, strategy, image, anchors, judge = nul
       }] : []),
       ...history,
     ];
-    let result = await client.complete(generationMessages, { phase: "generation" });
+    // One retry only for a stall or a failure before any response; the abandoned first
+    // attempt's late result is ignored. The caller's client records both attempts.
+    const generate = () => client.complete(generationMessages, { phase: "generation", timeoutMs: GENERATION_TIMEOUT_MS });
+    let result;
+    try { result = await generate(); }
+    catch (error) {
+      if (!stalled(error)) throw error;
+      abortIf(signal);
+      trace.generationRetried = true;
+      result = await generate();
+    }
     abortIf(signal);
     if (typeof result?.text !== "string" || !result.text.trim()) throw new Error("The chat client returned no utterance");
     // Publication rules for the committed act (agreement only under agree, self-repair
@@ -243,7 +272,7 @@ export function createDialogueV2({ client, strategy, image, anchors, judge = nul
         retry = await client.complete([...generationMessages, {
           role: "system", content: "【公開発話の書き直し】この発話のactionは" + action + "です。" + ACTION_SCOPE_V2[action] +
             "。" + rewriteReasons(trace.generationGuard.violations) + "内部処理は説明せず、公開する発話だけを返してください。",
-        }], { phase: "generation" });
+        }], { phase: "generation", timeoutMs: GENERATION_TIMEOUT_MS });
       } catch { /* Retry failure is private; never retain a raw provider error. */ }
       abortIf(signal);
       const retryCodes = typeof retry?.text === "string" && retry.text.trim() ? findGuardViolations(retry.text, action) : null;

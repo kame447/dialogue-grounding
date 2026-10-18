@@ -71,6 +71,8 @@ v2 の記録には、AI の各試行（キューの `requestSeq` ごと）の `t
 
 `judgment/schema.mjs` はJSDocの `DialogueJudge` / `Judgment` / `OwnLedger` と実行時バリデータを定義します。`createLunaJudge(client)` は同じ既存クライアントを使い、Workerに `purpose=dialogue_turn` を送信します。モデルIDを独自に決定しません。`createJevJudge()` は未実装を明示するエラーを返すスタブです。Jevの導入・採用を意味しません。
 
+判断フェーズには上流の停滞に備えた時間予算（50秒、両方略共通）があります。接続失敗・タイムアウトのときは既存の安全な判断（accept）に戻して発話を続け、`validation` に `fallback: true` と `connection_*`（または `time_budget`）の失敗コードを残します。発話生成は1回40秒で、停滞か応答前の接続失敗のときだけ1回再試行します。**action の分布などを分析するときは、これらのフォールバックのターンを除外してください**（方略の判断ではなく接続上の代替です）。
+
 通常の1ターンは、判断JSONを得る呼び出しと、その判断から公開発話を生成する呼び出しの2段です。判断は `action / targetSlot / candidateName / discriminatingFeature / note` の5キーに限定し、不正なJSON・列挙値・名称の不正な再割当があれば1回だけ再要求します。再度不正なら、対象や名前の合意を確定しない `accept / targetSlot=null` を既定判断にします。検証理由は固定コードとして記録し、不正なモデル出力本文を記録しません。通信失敗はこの形式フォールバックに置き換えず、公開履歴を保持した接続エラーにします。
 
 AI自身の6位置ごとに `unassigned / tentative / agreed / deferred` と名称を作業メモとして管理します。これはAI自身の過去判断の記録であり、相手との対応が正しいことを保証しません。名前の付いた枠の改名には `repair` が必要で、誤対応の撤回も明示的な `repair` で行えます。状態は生成発話の文面から逆算せず、検証済み判断からのみ更新します。生成失敗時は公開履歴と作業メモをともに確定しません。
