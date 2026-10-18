@@ -6,14 +6,20 @@
     "node": ">=22"
   },
   "scripts": {
-    "test": "node --test tests/*.test.mjs workers/research-ai-proxy/src/*.test.mjs",
+    "test": "node --test tests/*.test.mjs tests/*.test.ts workers/research-ai-proxy/src/*.test.mjs workers/research-ai-proxy/src/*.test.ts",
     "ai": "node dialogue-model/runtime/cli.mjs",
     "deploy:research-proxy": "wrangler deploy --config workers/research-ai-proxy/wrangler.jsonc",
     "deploy:research-proxy:dry": "wrangler deploy --dry-run --config workers/research-ai-proxy/wrangler.jsonc",
     "naming:web": "node dialogue-model/runtime/web/server.mjs",
-    "naming:cli": "node dialogue-model/runtime/naming-cli.mjs"
+    "naming:cli": "node dialogue-model/runtime/naming-cli.mjs",
+    "build:tangram": " node workers/tangram-experiment/build-assets.mjs",
+    "deploy:tangram": "npm run build:tangram && wrangler deploy --config workers/tangram-experiment/wrangler.jsonc",
+    "deploy:tangram:dry": "npm run build:tangram && wrangler deploy --dry-run --config workers/tangram-experiment/wrangler.jsonc"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261018.1",
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2",
     "wrangler": "4.151.1"
   }
 }

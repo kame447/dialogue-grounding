@@ -1,4 +1,5 @@
 import { resolvePurposeModel } from "./modelPolicy.mjs";
+import { OPENROUTER_DECISIONS_URL, DECISION_MODELS, decisionConfig, buildDecisionPayload, sanitizeDecision } from "./decisions.mjs";
 
 const UPSTREAM_URLS = Object.freeze({
   openai: "https://api.openai.com/v1/chat/completions",
@@ -145,9 +146,62 @@ function sanitizeResult(data, model) {
   };
 }
 
+async function handleDecisions(request, env, fetchImpl) {
+  const status = decisionConfig(env);
+  if (!status.enabled) return reply(503, { error: "decisions_disabled" });
+  if (!status.keyReady) return reply(503, { error: "decisions_unconfigured" });
+  if (request.method !== "POST") return reply(405, { error: "method_not_allowed" });
+  if (!request.headers.get("Content-Type")?.toLowerCase().startsWith("application/json")) {
+    return reply(415, { error: "unsupported_media_type" });
+  }
+
+  let body;
+  try {
+    body = JSON.parse(await readBoundedText(request));
+  } catch (error) {
+    const tooLarge = error?.message === "request_too_large";
+    return reply(tooLarge ? 413 : 400, { error: tooLarge ? "request_too_large" : "invalid_json" });
+  }
+  const payload = buildDecisionPayload(body);
+  if (!payload) return reply(400, { error: "invalid_request" });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15_000);
+  try {
+    const upstream = await fetchImpl(OPENROUTER_DECISIONS_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer " + env.OPENROUTER_DECISIONS_API_KEY,
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    if (!upstream.ok) {
+      return reply(upstream.status === 402 ? 402 : upstream.status === 429 ? 429 : 502, {
+        error: upstream.status === 402 ? "upstream_payment_required" :
+          upstream.status === 429 ? "upstream_rate_limited" : "upstream_error",
+      });
+    }
+    let data;
+    try { data = await upstream.json(); }
+    catch { return reply(502, { error: "invalid_upstream_response" }); }
+    const response = sanitizeDecision(data, payload.model, body.purpose);
+    if (!response || JSON.stringify(response).includes(env.OPENROUTER_DECISIONS_API_KEY)) {
+      return reply(502, { error: "invalid_upstream_response" });
+    }
+    return reply(200, response);
+  } catch {
+    return reply(controller.signal.aborted ? 504 : 502, {
+      error: controller.signal.aborted ? "upstream_timeout" : "upstream_unavailable",
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export async function handleRequest(request, env, fetchImpl = globalThis.fetch) {
   const pathname = new URL(request.url).pathname;
-  if (!["/health", "/v1/chat/completions", "/v1/model-policy"].includes(pathname)) {
+  if (!["/health", "/v1/chat/completions", "/v1/model-policy", "/v1/decisions", "/v1/decision-policy"].includes(pathname)) {
     return reply(404, { error: "not_found" });
   }
 
@@ -157,6 +211,17 @@ export async function handleRequest(request, env, fetchImpl = globalThis.fetch) 
   if (!(await tokenMatches(request.headers.get("Authorization"), env.RESEARCH_PROXY_TOKEN))) {
     return reply(401, { error: "unauthorized" });
   }
+
+  if (pathname === "/v1/decision-policy") {
+    const config = decisionConfig(env);
+    return request.method === "GET" ? reply(200, {
+      ready: config.enabled && config.keyReady,
+      enabled: config.enabled,
+      models: DECISION_MODELS,
+      textOnly: true,
+    }) : reply(405, { error: "method_not_allowed" });
+  }
+  if (pathname === "/v1/decisions") return handleDecisions(request, env, fetchImpl);
 
   const provider = env.UPSTREAM_PROVIDER || "openai";
   const endpoint = UPSTREAM_URLS[provider];

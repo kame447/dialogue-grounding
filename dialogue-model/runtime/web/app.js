@@ -59,6 +59,7 @@ const errors = {
   record_write_failed: "研究記録を保存できませんでした。研究者が保存先を確認してください。",
   invalid_seed: "Seedを安全な整数で入力してください。",
   busy: "処理中です。完了を待ってください。",
+  rate_limited: "短時間に送信が集中しています。1分ほど待ってからもう一度送信してください。",
 };
 async function api(path, body, signal) {
   const response = await fetch(path, body === undefined ? (signal ? { signal } : {}) : {

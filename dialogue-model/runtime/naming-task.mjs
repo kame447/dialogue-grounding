@@ -1,3 +1,5 @@
+import { NamingTaskError } from "./naming-error.mjs";
+export { NamingTaskError };
 import { randomUUID } from "node:crypto";
 import { mkdir, realpath, stat, writeFile, rename, rm } from "node:fs/promises";
 import { basename, dirname, join, resolve, parse, relative, isAbsolute } from "node:path";
@@ -18,13 +20,6 @@ const FINAL_INSTRUCTIONS = [
   "説明、Markdown、追加キーは含めないでください。相手の画面上の位置を回答しないでください。",
 ].join("\n");
 
-export class NamingTaskError extends Error {
-  constructor(code) {
-    super("Naming task failed: " + code);
-    this.name = "NamingTaskError";
-    this.code = code;
-  }
-}
 
 export function validateSubmission(value) {
   if (!value || typeof value !== "object" || Array.isArray(value) ||

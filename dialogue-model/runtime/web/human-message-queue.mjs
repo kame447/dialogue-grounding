@@ -49,6 +49,7 @@ export class HumanMessageQueueError extends Error {
 const fail = (code) => { throw new HumanMessageQueueError(code); };
 const positive = (value) => Number.isSafeInteger(value) && value > 0;
 const validText = (value, limit) => typeof value === "string" && value.trim().length > 0 && value.length <= limit;
+const validClientId = (value) => typeof value === "string" && /^[A-Za-z0-9_.:-]{1,80}$/.test(value);
 const publicCopy = ({ nonReferential, ...event }) => event;
 const frozenEvents = (events) => Object.freeze(events.map((event) => Object.freeze({ ...event })));
 function clonePrivate(value) {
@@ -58,12 +59,14 @@ function clonePrivate(value) {
 
 /** Deterministic state machine: no networking, timers, logs or model decisions. */
 export function createHumanMessageSequencer({
-  now = Date.now, maxPendingMessages = 64, maxTextLength = 12000, initialPrivateState = null,
+  now = Date.now, maxPendingMessages = 64, maxTextLength = 12000, initialPrivateState = null, initialState = null,
   initialEvents = [],
 } = {}) {
   if (typeof now !== "function" || !positive(maxPendingMessages) || !positive(maxTextLength) || !Array.isArray(initialEvents)) fail("invalid_options");
+  const restoring = initialState !== null;
+  if (restoring && (!initialState || typeof initialState !== "object" || Array.isArray(initialState))) fail("invalid_options");
   const events = [], pending = [], clients = new Map();
-  let privateState = clonePrivate(initialPrivateState);
+  let privateState = clonePrivate(restoring ? initialState.privateState : initialPrivateState);
   let active = null, requestSeq = 0, closed = false, lastMillis = 0, errorCode = null;
   function nextEvent(speaker, text, clientId, nonReferential = false) {
     const millis = now();
@@ -75,11 +78,45 @@ export function createHumanMessageSequencer({
       ...(speaker === "human" && clientId !== undefined ? { clientId } : {}),
       ...(nonReferential ? { nonReferential: true } : {}) }), atMillis };
   }
-  for (const initial of initialEvents) {
-    if (!initial || typeof initial !== "object" || Array.isArray(initial) || initial.speaker !== "ai" || !validText(initial.text, maxTextLength)) fail("invalid_options");
-    // Scripted setup speech is public dialogue, never evidence of a proposed name.
-    const { event, atMillis } = nextEvent("ai", initial.text, undefined, true);
-    events.push(event); lastMillis = atMillis;
+  if (restoring) {
+    if (!Array.isArray(initialState.events) || !Array.isArray(initialState.pendingHumanEventIds) || !Array.isArray(initialState.clients)) fail("invalid_options");
+    for (const [i, value] of initialState.events.entries()) {
+      const required = ["id", "seq", "turn", "speaker", "text", "at"];
+      if (!value || typeof value !== "object" || Array.isArray(value) ||
+          !required.every((key) => Object.hasOwn(value, key)) ||
+          Object.keys(value).some((key) => !required.includes(key) && key !== "clientId" && key !== "nonReferential") ||
+          (Object.hasOwn(value, "clientId") && (value.speaker !== "human" || !validClientId(value.clientId))) ||
+          (Object.hasOwn(value, "nonReferential") && (value.speaker !== "ai" || value.nonReferential !== true)) ||
+          value.id !== `event-${i+1}` || value.seq !== i+1 || value.turn !== i+1 ||
+          !["human", "ai"].includes(value.speaker) || !validText(value.text, maxTextLength) ||
+          !Number.isFinite(Date.parse(value.at))) fail("invalid_options");
+      events.push(Object.freeze({ ...value }));
+    }
+    const byId = new Map(events.map(event => [event.id, event]));
+    for (const id of initialState.pendingHumanEventIds) {
+      const value = byId.get(id);
+      if (value?.speaker !== "human") fail("invalid_options");
+      pending.push(value);
+    }
+    for (const entry of initialState.clients) {
+      if (!Array.isArray(entry) || entry.length !== 2 || !validClientId(entry[0]) || clients.has(entry[0])) fail("invalid_options");
+      const event = byId.get(entry[1]);
+      if (event?.speaker !== "human" || (event.clientId !== undefined && event.clientId !== entry[0])) fail("invalid_options");
+      clients.set(entry[0], event);
+    }
+    if (events.some((event) => event.clientId !== undefined && clients.get(event.clientId) !== event)) fail("invalid_options");
+    lastMillis = Math.max(0, initialState.lastMillis ?? 0, events.length ? Date.parse(events.at(-1).at) : 0);
+    requestSeq = initialState.requestSeq ?? 0;
+    closed = initialState.closed === true;
+    errorCode = initialState.errorCode ?? null;
+    if (!Number.isSafeInteger(requestSeq) || requestSeq < 0 || (closed && pending.length)) fail("invalid_options");
+  } else {
+    for (const initial of initialEvents) {
+      if (!initial || typeof initial !== "object" || Array.isArray(initial) || initial.speaker !== "ai" || !validText(initial.text, maxTextLength)) fail("invalid_options");
+      // Initialize once; a restored transcript is authoritative even when empty.
+      const { event, atMillis } = nextEvent("ai", initial.text, undefined, true);
+      events.push(event); lastMillis = atMillis;
+    }
   }
   const isCurrent = (request) => Boolean(!closed && active && active.request === request && !active.invalid && request.revision === events.length);
   function finish(request) {
@@ -90,7 +127,7 @@ export function createHumanMessageSequencer({
   return Object.freeze({
     acceptHuman(input) {
       if (!input || typeof input !== "object" || Array.isArray(input) ||
-          (input.clientId !== undefined && (typeof input.clientId !== "string" || !/^[A-Za-z0-9_.:-]{1,80}$/.test(input.clientId))) ||
+          (input.clientId !== undefined && !validClientId(input.clientId)) ||
           !validText(input.text, maxTextLength)) fail("invalid_message");
       const previous = input.clientId === undefined ? null : clients.get(input.clientId);
       if (previous) {
@@ -141,6 +178,12 @@ export function createHumanMessageSequencer({
     },
     close() { closed = true; if (active) active.invalid = true; },
     getPrivateState() { return clonePrivate(privateState); },
+    getDurableState() {
+      // Durable state is private: unlike polling copies, it retains script provenance.
+      return { events: events.map((event) => ({ ...event })), pendingHumanEventIds: pending.map((event) => event.id),
+        privateState: clonePrivate(privateState), clients: [...clients.entries()].map(([id, event]) => [id, event.id]),
+        closed, errorCode, requestSeq, lastMillis };
+    },
     getSnapshot({ afterSeq = 0 } = {}) {
       if (!Number.isSafeInteger(afterSeq) || afterSeq < 0 || afterSeq > events.length) fail("invalid_cursor");
       // Explicit allowlist: never spread requests, model results or exceptions.
@@ -194,7 +237,7 @@ export function createHumanMessageQueue({ runAiTurn, ...options } = {}) {
     return running;
   }
   async function whenIdle() { while (running) await running; }
-  return Object.freeze({
+  const queue = Object.freeze({
     enqueue(input) {
       const receipt = state.acceptHuman(input);
       if (!receipt.duplicate) {
@@ -206,8 +249,11 @@ export function createHumanMessageQueue({ runAiTurn, ...options } = {}) {
     },
     getSnapshot: state.getSnapshot,
     getPrivateState: state.getPrivateState,
+    getDurableState: state.getDurableState,
     retry() { retryRequested = true; start(); return whenIdle(); },
     whenIdle,
     close() { state.close(); controller?.abort(); },
   });
+  if (options.initialState && state.getSnapshot().status === "pending") start();
+  return queue;
 }
