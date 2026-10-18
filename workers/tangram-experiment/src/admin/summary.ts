@@ -60,6 +60,8 @@ export function errorCodesOf(record: Record<string, any>): string[] {
     if (!isPlain(attempt)) continue;
     if (attempt.status === "judge_error" || attempt.status === "generation_error") add("attempt_" + attempt.status);
     add(attempt.memory?.rejected);
+    // A failed turn's sanitized cause (v2 trace.errorCode), e.g. "timeout"; prefixed so it filters distinctly.
+    if (typeof attempt.errorCode === "string" && CODE.test(attempt.errorCode)) add("turn_" + attempt.errorCode);
     if (attempt.generationGuard?.fallback === true) add("guard_fallback");
     if (attempt.validation?.fallback === true) add("judge_safe_fallback");
   }

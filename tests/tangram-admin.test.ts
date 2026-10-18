@@ -417,6 +417,21 @@ test("every record value is escaped in the list and detail pages", () => {
   assert.match(list, /30 日後に自動削除/);
 });
 
+test("a failed turn's sanitized cause (v2 errorCode/errorPhase/errorStatus/errorElapsedMs) is shown and indexed as a code", () => {
+  const failed = record({ attempts: [
+    { turnIndex: 2, status: "generation_error", errorCode: "timeout", errorPhase: "generation", errorStatus: 504, errorElapsedMs: 61000, generationRetried: true },
+    { turnIndex: 4, status: "judge_error", errorCode: "<b>x</b>", errorPhase: "judgment", errorStatus: null, errorElapsedMs: 12 },
+  ] });
+  const s = summaryOf(failed);
+  assert.ok(s.errorCodes.includes("turn_timeout"));
+  assert.ok(!s.errorCodes.some((code) => code.includes("<")), "a non-code cause is never indexed");
+  const html = renderDetail(failed, s, summarizeLatency(failed), 30);
+  assert.match(html, /エラー（コード \/ 段階 \/ HTTP \/ 経過）/);
+  assert.match(html, /<td>timeout \/ generation \/ HTTP 504 \/ 61000 ms<\/td><td>あり<\/td>/);
+  assert.match(html, /<td>&lt;b&gt;x&lt;\/b&gt; \/ judgment \/ 12 ms<\/td><td><\/td>/);
+  assert.doesNotMatch(html, /<b>x<\/b>/);
+});
+
 test("filters accept known values only", () => {
   const s = summaryOf();
   assert.deepEqual(parseFilter(new URLSearchParams("status=bogus&error=maybe&memory=1")), { status: "any", error: "any", memory: "any" });
