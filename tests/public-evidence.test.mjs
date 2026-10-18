@@ -50,7 +50,7 @@ test("a bare yes cannot ground or agree without a single-slot antecedent", () =>
   const g = groundReference({ publicTurns: turns, turn: 1, interpretation: interp({ intent: "name_acceptance", nameAcceptance: { slot: "上段左", name: "稲妻" } }) });
   assert.equal(g.human.epistemic, "hypothesis");
   assert.equal(g.name, null);
-  assert.deepEqual(g.dropped.map((d) => d.reason).sort(), ["bare_deictic_downgraded", "not_literal_in_public_text"]);
+  assert.deepEqual(g.dropped.map((d) => d.reason).sort(), ["bare_acknowledgment", "bare_deictic_downgraded"]);
 });
 
 test("a bare yes after the AI's public proposal stays a hypothesis and records no name", () => {
