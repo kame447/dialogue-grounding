@@ -10,7 +10,7 @@ import { createReferenceGraph, applyReferenceUpdate, snapshotReferenceGraph, Ref
 import { stageMemory, prepareMemory } from "../judgment/memory.mjs";
 import { buildDecisionEvidence } from "./decision-evidence.mjs";
 import { resolveActiveJudgment } from "./active-judge.mjs";
-import { findAgreementClaims, fallbackUtterance } from "./generation-guard.ts";
+import { findGuardViolations, rewriteReasons, fallbackUtterance } from "./generation-guard.ts";
 
 // Identical across strategies. Holistic first; analysis only when the judge asks for it.
 export const GENERATOR_INSTRUCTIONS_V2 = [
@@ -25,6 +25,15 @@ export const GENERATOR_INSTRUCTIONS_V2 = [
   "targetSlotや内部参照ID、画像内の座標・範囲は自分だけの作業メモです。相手に言わず、位置での指定も求めないでください。相手の画面では配置も向きも異なります。",
   "自分の画面の向きに依存する上下左右・右向き・上端・下端などの語で形を説明しないでください。特徴を伝えるときは、回転しても変わらない尖りの数や大小・くぼみ・細長さ・四角の有無・部分同士のつながりから選んでください。",
   "公開履歴と矛盾する説明、同じ確認の言い換え反復、画像にない特徴の追加をしないでください。判断JSON、作業メモ、方略の説明、思考過程は出力せず、公開する発話だけを返してください。",
+].join("\n");
+
+// Opt-in research option (default off), identical across strategies: one dialogue
+// function per turn and chat-like brevity. It removes the unspoken followUp from
+// the validated act before the ledger, memory and generation (see runAiTurn).
+export const UTTERANCE_STYLES = Object.freeze(["default", "concise"]);
+export const CONCISE_INSTRUCTIONS_V2 = [
+  "【短いチャット】この発話では、指定されたactionの対話機能を1つだけ実現してください。挨拶や相槌だけで終えず相手の発話の内容に応じ、相槌は短い一言までにし、次の図形・次の名前・別の話題は出さないでください。",
+  "人間同士のチャットのように、多くは1文で、相手の発話と同じくらいの長さにしてください。相手の言葉の言い直しや自分の見立ての繰り返しはしないでください。確認したい特徴などの必要な内容は削らず、短さのために不自然にしないでください。",
 ].join("\n");
 
 const FINAL_INSTRUCTIONS_V2 = [
@@ -75,10 +84,12 @@ function abortIf(signal) {
  * @param {{ client, strategy, image: {mimeType, base64}, anchors: {id, bbox, centroid}[], judge?, referenceMemory?: boolean }} options
  */
 export function createDialogueV2({ client, strategy, image, anchors, judge = null, referenceMemory = false,
-  decisionShadowClient = null, onResearchUpdate = null, activeDecision = null }) {
+  decisionShadowClient = null, onResearchUpdate = null, activeDecision = null, utteranceStyle = "default" }) {
   if (!client || typeof client.complete !== "function") throw new Error("A chat client is required");
   if (!STRATEGIES.includes(strategy)) throw new Error("Unsupported dialogue strategy");
   if (typeof referenceMemory !== "boolean") throw new Error("Invalid memory option");
+  if (!UTTERANCE_STYLES.includes(utteranceStyle)) throw new Error("Invalid utterance style");
+  const concise = utteranceStyle === "concise";
   if (decisionShadowClient !== null && typeof decisionShadowClient?.chooseAction !== "function") {
     throw new Error("Invalid decision shadow client");
   }
@@ -165,6 +176,12 @@ export function createDialogueV2({ client, strategy, image, anchors, judge = nul
         memoryUpdate = stageMemory(state.graph, latest.seq, null, publicTurns);
       }
     } else judgment = validateJudgment(rawJudgment, { ownLedger: state.ledger, agreeEvidence: true });
+    // Concise style: the unspoken followUp is removed from the act itself, so the
+    // ledger, memory and generation never carry an act the partner did not hear.
+    if (concise) {
+      trace.utteranceStyle = { style: utteranceStyle, droppedFollowUp: judgment.followUp ? clone(judgment.followUp) : null };
+      if (judgment.followUp) judgment = { ...judgment, followUp: null };
+    }
     if (activeDecision) {
       let decision;
       const started = performance.now();
@@ -195,6 +212,7 @@ export function createDialogueV2({ client, strategy, image, anchors, judge = nul
     const generationMessages = [
       { role: "system", content: TASK_INSTRUCTIONS_V2 },
       { role: "system", content: GENERATOR_INSTRUCTIONS_V2 },
+      ...(concise ? [{ role: "system", content: CONCISE_INSTRUCTIONS_V2 }] : []),
       { role: "system", content: "この発話の判断（非公開）:\n" + "主actionで言えること: " + ACTION_SCOPE_V2[action] +
         (judgment.followUp ? "。followUpで言えること: " + ACTION_SCOPE_V2[judgment.followUp.action] : "") + "\n" + JSON.stringify({ action, targetSlot, candidateName, discriminatingFeature,
         ...(Object.hasOwn(judgment, "followUp") ? { followUp: judgment.followUp } : {}) }) },
@@ -211,27 +229,26 @@ export function createDialogueV2({ client, strategy, image, anchors, judge = nul
     let result = await client.complete(generationMessages, { phase: "generation" });
     abortIf(signal);
     if (typeof result?.text !== "string" || !result.text.trim()) throw new Error("The chat client returned no utterance");
-    trace.generationGuard = { violations: [], regenerated: false, fallback: false };
-    if (action !== "agree") {
-      trace.generationGuard.violations = findAgreementClaims(result.text);
-      if (trace.generationGuard.violations.length) {
-        abortIf(signal);
-        trace.generationGuard.regenerated = true;
-        let retry = null;
-        try {
-          retry = await client.complete([...generationMessages, {
-            role: "system", content: "【公開発話の書き直し】この発話のactionは" + action + "です。" + ACTION_SCOPE_V2[action] +
-              "。前の下書きは名称の決定・合意を表していました。決定・合意を表明せず、このactionの範囲で書き直してください。内部処理は説明せず、公開する発話だけを返してください。",
-          }], { phase: "generation" });
-        } catch { /* Retry failure is private; never retain a raw provider error. */ }
-        abortIf(signal);
-        const retryCodes = typeof retry?.text === "string" && retry.text.trim() ? findAgreementClaims(retry.text) : null;
-        trace.generationGuard.violations = [...new Set([...trace.generationGuard.violations, ...(retryCodes ?? [])])];
-        if (retryCodes && retryCodes.length === 0) result = retry;
-        else {
-          result = { text: fallbackUtterance(judgment) };
-          trace.generationGuard.fallback = true;
-        }
+    // Publication rules for the committed act (agreement only under agree, self-repair
+    // only under repair, never internal ids/fields). Wording never changes the act.
+    trace.generationGuard = { violations: findGuardViolations(result.text, action), regenerated: false, fallback: false };
+    if (trace.generationGuard.violations.length) {
+      abortIf(signal);
+      trace.generationGuard.regenerated = true;
+      let retry = null;
+      try {
+        retry = await client.complete([...generationMessages, {
+          role: "system", content: "【公開発話の書き直し】この発話のactionは" + action + "です。" + ACTION_SCOPE_V2[action] +
+            "。" + rewriteReasons(trace.generationGuard.violations) + "内部処理は説明せず、公開する発話だけを返してください。",
+        }], { phase: "generation" });
+      } catch { /* Retry failure is private; never retain a raw provider error. */ }
+      abortIf(signal);
+      const retryCodes = typeof retry?.text === "string" && retry.text.trim() ? findGuardViolations(retry.text, action) : null;
+      trace.generationGuard.violations = [...new Set([...trace.generationGuard.violations, ...(retryCodes ?? [])])];
+      if (retryCodes && retryCodes.length === 0) result = retry;
+      else {
+        result = { text: fallbackUtterance(judgment) };
+        trace.generationGuard.fallback = true;
       }
     }
     const nextLedger = applyJudgment(state.ledger, judgment);
