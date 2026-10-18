@@ -86,6 +86,9 @@ for (const memory of [false, true]) test(`v2 common policy and evidence are iden
     assert.match(judge, /型の制約としてdiscriminatingFeatureが必要/);
     assert.match(judge, /確認自体や画像にない特徴を作らない/);
     assert.match(judge, /propose_nameやfollowUpを作らない/);
+    assert.match(task, /見立ての共有、対象の同定、名称への合意は別の段階/);
+    assert.match(task, /毎回確認の質問をする必要はありません/);
+    assert.match(judge, /相手が述べた形の特徴が自分の対象に実際にあるか/);
     assert.equal(JSON.stringify(value.messages).includes("ownReferences"), memory);
   }
   same(left.messages.filter((m) => !policy(m)), right.messages.filter((m) => !policy(m)),
@@ -99,7 +102,9 @@ for (const strategy of STRATEGIES) for (const memory of [false, true]) {
       { text: "まずどう進めましょうか。", result: { ...SAFE_JUDGMENT, note: NOTE } },
       { text: "風車っぽく見える形があります。", result: { ...SAFE_JUDGMENT, targetSlot: slot, note: NOTE } },
       { text: "そちらから一つ名前を提案してください。", result: { ...SAFE_JUDGMENT, action: "propose_name", targetSlot: slot, candidateName: "風車", note: NOTE } },
-      { text: "その形を風車と呼びませんか。", result: { ...SAFE_JUDGMENT, action: "agree", targetSlot: slot, candidateName: "風車", note: NOTE } },
+      // A first agreement on an unassigned target carries the identifying feature it will mention.
+      { text: "羽が四つある形を風車と呼びませんか。", result: { ...SAFE_JUDGMENT, action: "agree", targetSlot: slot, candidateName: "風車",
+        discriminatingFeature: "尖りが四つある", note: NOTE } },
       { text: "似た形が二つあって迷っています。くぼみはありますか。", result: { ...SAFE_JUDGMENT,
         action: "confirm", targetSlot: slot, candidateName: "風車", discriminatingFeature: "輪郭にくぼみがある", note: NOTE } },
     ];
@@ -111,6 +116,8 @@ for (const strategy of STRATEGIES) for (const memory of [false, true]) {
       assert.equal(ledger[slot].status, status);
       if (output.action === "accept") assert.equal(ledger[slot].name, null, "reception is not a naming agreement");
     }
+    assert.throws(() => validateJudgment({ ...SAFE_JUDGMENT, action: "agree", targetSlot: slot, candidateName: "風車" }, { agreeEvidence: true }),
+      /agree_requires_identification/, "v2 never agrees on an unidentified target from a name alone");
     assert.throws(() => validateJudgment({ ...SAFE_JUDGMENT, action: "confirm", targetSlot: slot }),
       "v2 must retain the typed discriminating-feature requirement when confirm is actually selected");
   });

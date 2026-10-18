@@ -92,12 +92,16 @@ function validateAct(value, ledger) {
   return judgment;
 }
 
-/** @returns {Judgment} Validate followUp against the primary act's resulting notes. */
-export function validateJudgment(value, { ownLedger = createOwnLedger() } = {}) {
+/** @returns {Judgment} Validate followUp against the primary act's resulting notes; evidence checks are v2 opt-in. */
+export function validateJudgment(value, { ownLedger = createOwnLedger(), agreeEvidence = false } = {}) {
   const ledger = validateOwnLedger(ownLedger);
   const optional = ["followUp", "reference"].filter((key) => value && Object.hasOwn(value, key));
   if (!exactKeys(value, [...KEYS, ...optional])) throw new JudgmentValidationError();
   const judgment = validateAct(Object.fromEntries(KEYS.map((key) => [key, value[key]])), ledger);
+  if (agreeEvidence && judgment.action === "agree" &&
+      ["unassigned", "deferred"].includes(ledger[judgment.targetSlot].status) && judgment.discriminatingFeature === null) {
+    throw new JudgmentValidationError("agree_requires_identification");
+  }
   if (Object.hasOwn(value, "followUp")) {
     if (value.followUp === null) judgment.followUp = null;
     else {

@@ -12,8 +12,15 @@ const judgeInstructionsFor = (version) => [
   "propose_name は対象と名前候補を選ぶ、agree は対象の名前に合意する、confirm は対象を区別する特徴で確かめる、repair は自分の対応の取り違え・合意済み名を訂正する、defer は保留、revisit は保留対象へ戻る、move_on は別対象へ進む、accept は相手の発言を受け止める、close は対話終了を相談する判断です。",
   "ownLedger は自分の過去判断を記録した作業メモで、相手との正しい対応を保証しません。tentativeの同じ対象の名前を言い換える・相手の呼び名に合わせるだけなら、agreeで新しいcandidateNameを指定し、repairは選ばないでください。まだ相談中の言い換えは同じtargetSlotのconfirmやpropose_nameでも扱えます。repairは自分の対応の取り違え・合意済み名の訂正に限り、別の対象への付け替えにも必要です。誤対応を取り消すrepairではcandidateName=nullで自分の枠を空にできます。",
   "confirm・propose_name・agreeではcandidateNameに対象の名前候補を保持できます。confirmでまだ照合中でも、話題の名前候補があればtargetSlotとcandidateNameを記録してください。confirmの候補名は仮の記憶であり、名称への合意を意味しません。",
-  "相手が提案した名前を受け入れる・同意するときは、confirmやacceptではなく必ずagreeを選び、対象のtargetSlotとcandidateNameを指定してください。propose_nameには対象枠と名称が必要です。既存の名前にagreeする場合のcandidateNameはnullでも構いません。",
-  ...(version === 2 ? ["名称提案のない大まかな見立てや挨拶・相槌にはacceptを選べます。acceptでは名称合意を作らず、candidateNameはnullにしてください。対応しそうな対象や名前を実際に提案するときだけpropose_nameを使い、曖昧さや食い違いの根拠がなければconfirmを挟まず、discriminatingFeature=nullで短い全体の見立てに進めます。相手の名称提案にagreeする場合も、対象を識別できていれば追加の特徴確認は不要です。"] : []),
+  version === 2
+    ? "agreeは名称への合意です。共通教示の合意条件（対象の同定と、相手がその名前を使う意図）を満たすときだけ選び、targetSlotとcandidateNameを指定してください。相手が名前を出しても対象の同定が不十分なら、agreeではなく、その名前を候補として保持するpropose_name、confirm、accept、または方略に応じてdefer・move_onを選べます。propose_nameには対象枠と名称が必要です。既存の名前にagreeする場合のcandidateNameはnullでも構いません。"
+    : "相手が提案した名前を受け入れる・同意するときは、confirmやacceptではなく必ずagreeを選び、対象のtargetSlotとcandidateNameを指定してください。propose_nameには対象枠と名称が必要です。既存の名前にagreeする場合のcandidateNameはnullでも構いません。",
+  ...(version === 2 ? [
+    "名称提案のない大まかな見立てや挨拶・相槌にはacceptを選べます。acceptでは名称合意を作らず、candidateNameはnullにしてください。対応しそうな対象や名前を実際に提案するときだけpropose_nameを使い、曖昧さや食い違いの根拠がなければconfirmを挟まず、discriminatingFeature=nullで短い全体の見立てに進めます。",
+    "agreeの前に、相手が述べた形の特徴が自分の対象に実際にあるかを自分の画像で確かめてください。見当たらない特徴がある、または当てはまる候補が2つ以上あるときはagreeしないでください。対象が1つに定まっていれば追加の確認質問は不要です。",
+    "作業メモでまだunassignedかdeferredの対象にagreeするときは、その対象を識別できる、自分の画像で観察できる特徴1つをdiscriminatingFeatureに入れてください。発話で短く触れ、相手が違いに気付けるようにするためです。",
+    "相手の返答が相槌だけ（はい・うん・それ等）のときは、直前の自分の提案が対象を識別できる特徴を含んでいた場合に限りagreeできます。含んでいなかった場合は、agreeにdiscriminatingFeatureを入れて特徴を短く添えるか、confirmかacceptにしてください。",
+  ] : []),
   "followUpは不要なら省略またはnull、必要ならaction, targetSlot, candidateName, discriminatingFeatureだけを持つ1個のオブジェクトです。followUp.actionは " + FOLLOW_UP_ACTIONS.join(" | ") + " のいずれかで、noteや入れ子のfollowUpは含めないでください。",
   version === 2
     ? "相手の発話に現在の対象への合意と次の対象への移行・提案依頼が含まれる場合は、主actionで先に合意を扱い、followUpで次の対象への提案や確認を扱えます。具体的に次の対象の提案を任されたら、自分の画像と公開対話から対象と候補名を判断し、合意だけで止めずにfollowUpで応じてください。"
@@ -79,17 +86,17 @@ export function createLunaJudge(client) {
       for (let attempt = 0; attempt < 2; attempt++) {
         validCore = null; memoryFailure = false;
         const response = await client.complete(attempt ? [...messages,
-          { role: "system", content: "前回の判断は検証できませんでした。検証理由: " + failures.at(-1) + "。tentativeの同じ対象の言い換えはagree/confirm/propose_nameで新しい名前を指定できます。合意済み名の訂正や対象の付け替えはrepairを使ってください。同名が別枠にある場合は元の枠をrepairとcandidateName=nullで空にしてから再割当してください。上記JSON形式と制約を守って再提出してください。" }] : messages,
+          { role: "system", content: "前回の判断は検証できませんでした。検証理由: " + failures.at(-1) + "。tentativeの同じ対象の言い換えはagree/confirm/propose_nameで新しい名前を指定できます。合意済み名の訂正や対象の付け替えはrepairを使ってください。同名が別枠にある場合は元の枠をrepairとcandidateName=nullで空にしてから再割当してください。" + (failures.at(-1) === "agree_requires_identification" ? "作業メモでunassignedかdeferredの対象へのagreeには、その対象を識別できる特徴1つをdiscriminatingFeatureに入れるか、まだ合意せず別のactionを選んでください。" : "") + "上記JSON形式と制約を守って再提出してください。" }] : messages,
         { phase: "judgment" });
         try {
           const parsed = JSON.parse(response.text);
           if (referenceContext) {
             const core = { ...parsed }; delete core.reference;
-            validCore = validateJudgment(core, { ownLedger: ledger });
+            validCore = validateJudgment(core, { ownLedger: ledger, agreeEvidence: version === 2 });
           }
           let judgment;
           try {
-            judgment = validateJudgment(parsed, { ownLedger: ledger });
+            judgment = validateJudgment(parsed, { ownLedger: ledger, agreeEvidence: version === 2 });
             if (referenceContext) stageMemory(referenceContext.graph, referenceContext.turn, judgment.reference, publicTurns);
           } catch (error) {
             memoryFailure = Boolean(referenceContext && validCore);
