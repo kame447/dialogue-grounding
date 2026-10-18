@@ -53,16 +53,28 @@ test("a bare yes cannot ground or agree without a single-slot antecedent", () =>
   assert.deepEqual(g.dropped.map((d) => d.reason).sort(), ["bare_deictic_downgraded", "not_literal_in_public_text"]);
 });
 
-test("yes to the AI's public proposal becomes implicit, never explicit, agreement", () => {
+test("a bare yes after the AI's public proposal stays a hypothesis and records no name", () => {
   const h = history(["どれからにします？", "細長い形を「稲妻」と呼ぶのはどうでしょう？"], ["はい"]);
   const turns = publicTurnsFromHistory(h);
   const g = groundReference({ publicTurns: turns, turn: 2, interpretation: interp({ intent: "name_acceptance", nameAcceptance: { slot: "上段左", name: "稲妻" } }) });
   assert.equal(g.antecedent.speaker, "ai");
   assert.equal(g.antecedent.sourceTurn, 1);
-  assert.equal(g.human.epistemic, "grounded");
-  assert.deepEqual(g.name, { slot: "上段左", name: "稲妻", agreement: "implicit" });
+  assert.equal(g.human.epistemic, "hypothesis");
+  assert.equal(g.name, null);
+  assert.ok(g.dropped.some((d) => d.kind === "name" && d.reason === "bare_acknowledgment"));
   const graph = applyReferenceUpdate(createReferenceGraph(), { expectedRevision: 0, turn: 2, operations: ops(2, g) }, { publicTurns: turns, generationSucceeded: true });
-  assert.equal(graph.records.filter((r) => r.kind === "name")[0].agreement, "implicit");
+  assert.equal(graph.records.filter((r) => r.kind === "name").length, 0);
+  assert.equal(graph.records.find((r) => r.speaker === "human").epistemic, "hypothesis");
+});
+
+test("accepting the AI's proposal while repeating the name is grounded and explicit", () => {
+  const h = history(["どれからにします？", "細長い形を「稲妻」と呼ぶのはどうでしょう？"], ["はい、稲妻で"]);
+  const turns = publicTurnsFromHistory(h);
+  const g = groundReference({ publicTurns: turns, turn: 2, interpretation: interp({ intent: "name_acceptance", nameAcceptance: { slot: "上段左", name: "稲妻" } }) });
+  assert.equal(g.antecedent, null);
+  assert.deepEqual(g.name, { slot: "上段左", name: "稲妻", agreement: "explicit" });
+  const graph = applyReferenceUpdate(createReferenceGraph(), { expectedRevision: 0, turn: 2, operations: ops(2, g) }, { publicTurns: turns, generationSucceeded: true });
+  assert.equal(graph.records.find((r) => r.kind === "name").agreement, "explicit");
 });
 
 test("saying the name while accepting it is explicit and is accepted by the graph", () => {

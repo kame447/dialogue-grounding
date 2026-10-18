@@ -98,8 +98,9 @@ export function groundReference({ publicTurns, turn, interpretation }) {
     intent: nameSupport?.where === "ai" ? "name_proposal" : "feature_assertion",
   } : null;
 
-  // A bare acknowledgment never grounds a referent by itself.
-  if (bare && epistemic === "grounded" && !antecedent) {
+  // A bare acknowledgment never grounds a referent, even after a public
+  // proposal; the antecedent is kept only as provenance for the hypothesis.
+  if (bare && epistemic === "grounded") {
     epistemic = slots.length ? "hypothesis" : "unresolved";
     dropped.push({ kind: "mention", reason: "bare_deictic_downgraded" });
   }
@@ -118,7 +119,8 @@ export function groundReference({ publicTurns, turn, interpretation }) {
   if (interpretation.feature) {
     const { slot, polarity } = interpretation.feature;
     const intentOk = ["feature_assertion", "feature_acceptance", "denial", "correction"].includes(interpretation.intent);
-    if (!featureSupport) dropped.push({ kind: "feature", reason: "not_literal_in_public_text" });
+    if (bare) dropped.push({ kind: "feature", reason: "bare_acknowledgment" });
+    else if (!featureSupport) dropped.push({ kind: "feature", reason: "not_literal_in_public_text" });
     else if (!intentOk || !slots.includes(slot)) dropped.push({ kind: "feature", reason: "intent_or_slot_mismatch" });
     else if (featureSupport.where === "ai" && !(antecedent && singleOn(slot))) dropped.push({ kind: "feature", reason: "antecedent_not_single" });
     else feature = { slot, feature: featureSupport.span.text, polarity };
@@ -127,7 +129,8 @@ export function groundReference({ publicTurns, turn, interpretation }) {
   let name = null;
   if (interpretation.nameAcceptance) {
     const { slot } = interpretation.nameAcceptance;
-    if (!nameSupport) dropped.push({ kind: "name", reason: "not_literal_in_public_text" });
+    if (bare) dropped.push({ kind: "name", reason: "bare_acknowledgment" });
+    else if (!nameSupport) dropped.push({ kind: "name", reason: "not_literal_in_public_text" });
     else if (!slots.includes(slot)) dropped.push({ kind: "name", reason: "slot_mismatch" });
     else if (nameSupport.where === "ai" && !(antecedent && singleOn(slot))) dropped.push({ kind: "name", reason: "antecedent_not_single" });
     else {
