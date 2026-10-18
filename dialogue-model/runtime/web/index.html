@@ -9,8 +9,14 @@
 </head>
 <body>
   <main>
-    <header><p class="eyebrow">研究用プロトタイプ</p><h1>6図形の共同命名</h1>
-      <p>AIと会話して、同じ図形に同じ名前を付けてください。相手の画面では配置と向きが異なります。</p>
+    <header class="topbar">
+      <h1>6図形の共同命名</h1>
+      <nav aria-label="課題の進行"><ol class="progress">
+        <li id="step-chat" data-state="active" aria-current="step"><span class="step-number">1</span>会話</li>
+        <li id="step-names" data-state="upcoming"><span class="step-number">2</span>名前</li>
+        <li id="step-questionnaire" data-state="planned" aria-disabled="true"><span class="step-number">3</span>アンケート<small>予定</small></li>
+        <li id="step-results" data-state="upcoming"><span class="step-number">4</span>結果</li>
+      </ol></nav>
     </header>
     <p id="notice" role="status" aria-live="polite"></p>
     <form id="setup" class="panel">
@@ -28,25 +34,37 @@
       <div class="workspace">
         <section class="panel board" aria-labelledby="board-title">
           <div class="panel-head"><h2 id="board-title">あなたの図形</h2><span id="name-count" class="muted" role="status"></span></div>
-          <p class="muted">図形を選ぶと拡大できます。会話で共有した名前は、自分のメモとして入力できます。</p>
           <div id="scene-area" class="scene-area"><svg id="board" viewBox="0 0 1200 800" aria-label="あなたの図形。選択して拡大・名前を入力" xmlns="http://www.w3.org/2000/svg"></svg></div>
           <p id="scene-status" role="status" class="muted"></p>
-          <p class="privacy-note">入力した名前や図形の選択は相手に届きません。名前を共有するには、メッセージで伝えてください。</p>
+          <p class="privacy-note">図形を選んで拡大・名前をメモできます。メモは相手に届きません。</p>
         </section>
-        <section class="panel dialogue" aria-labelledby="dialogue-title">
-          <div class="panel-head"><h2 id="dialogue-title">対話</h2><span id="chat-status" role="status" aria-live="polite"></span></div>
-          <ol id="history" role="log" tabindex="0" aria-live="polite" aria-label="公開された会話"></ol>
-          <form id="chat"><label for="utterance">メッセージ</label><textarea id="utterance" name="utterance" rows="2" maxlength="12000" required placeholder="形や向きをことばで伝えてみましょう"></textarea>
-            <div class="chat-actions"><span class="muted">Enterで送信・Shift+Enterで改行</span><button id="send-message">送信</button></div>
-          </form>
-        </section>
+        <aside class="panel dialogue" aria-label="会話と名前の確認">
+          <section id="conversation-stage" class="stage" aria-labelledby="dialogue-title">
+            <div class="conversation-head">
+              <div class="panel-head"><h2 id="dialogue-title">会話</h2><span id="chat-status" role="status" aria-live="polite"></span></div>
+              <button id="finish-conversation" type="button" class="secondary">会話を終了して名前を決める <span aria-hidden="true">→</span></button>
+            </div>
+            <ol id="history" role="log" tabindex="0" aria-live="polite" aria-label="公開された会話"></ol>
+            <form id="chat"><label for="utterance" class="sr-only">メッセージ</label><textarea id="utterance" name="utterance" rows="2" maxlength="12000" required placeholder="メッセージを入力…" aria-describedby="send-hint"></textarea>
+              <div class="chat-actions"><span id="send-hint" class="muted">Enterで送信<br>Shift+Enterで改行</span><button id="send-message">送信 <span aria-hidden="true">↑</span></button></div>
+            </form>
+          </section>
+          <section id="name-stage" class="stage submission-panel" aria-labelledby="names-title" hidden>
+            <div class="panel-head"><h2 id="names-title" tabindex="-1">名前を決める</h2><button id="back-to-chat" type="button" class="quiet">会話に戻る</button></div>
+            <p class="muted">会話で共有した名前を確認してください。図形を選ぶと修正できます。</p>
+            <div id="name-list" class="name-list" aria-label="提出する名前"></div>
+            <form id="submission"><button id="review-names">回答を確認する</button></form>
+            <p id="submission-status" role="status" aria-live="polite"></p>
+          </section>
+          <section id="results" class="stage" aria-labelledby="results-title" hidden>
+            <h2 id="results-title" tabindex="-1">照合結果（暫定）</h2>
+            <p class="muted">図形のそばに、あなたとAIの名称・暫定照合を表示しています。正式な採点規則は検討中です。</p>
+            <div id="result-body"></div>
+            <p class="muted questionnaire-note">アンケートは予定段階のため、今回は実施しません。</p>
+          </section>
+          <button id="new-trial" type="button" class="secondary" hidden>研究者用：次の試行を準備</button>
+        </aside>
       </div>
-      <section class="panel submission-panel"><h2>会話で共有した名前を提出</h2><p>すべての図形を選んで名前を入力するか、「未合意・わからない」を選んでください。提出前に確認・修正できます。</p>
-        <form id="submission"><button id="review-names">回答を確認する</button></form>
-        <p id="submission-status" role="status" aria-live="polite"></p>
-      </section>
-      <section id="results" class="panel" hidden><h2>照合結果（暫定）</h2><p>図形のそばに、あなたとAIの名称・暫定照合を表示しています。正式な採点規則は検討中です。</p><div id="result-body"></div></section>
-      <button id="new-trial" type="button" hidden>研究者用：次の試行を準備</button>
     </section>
   </main>
   <dialog id="name-dialog" aria-labelledby="name-title" aria-describedby="name-privacy">

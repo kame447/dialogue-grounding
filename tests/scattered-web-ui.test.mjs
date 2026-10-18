@@ -213,9 +213,11 @@ test("final results appear beside own figures without correspondence IDs", async
   assert.doesNotMatch(e.board.textContent + e["result-body"].textContent, /PRIVATE-GOLD|s-a81c|figureId/u);
 });
 
-test("layout gives chat half the desktop width and a tall independent scrolling log", () => {
-  assert.match(css, /grid-template-columns:1fr 1fr/u);
-  assert.match(css, /height:82dvh/u); assert.match(css, /height:74dvh/u);
+test("layout gives figures seventy percent and chat a tall independent scrolling log", () => {
+  assert.match(css, /grid-template-columns:minmax\(0,7fr\) minmax\(0,3fr\)/u);
+  assert.match(css, /height:calc\(100dvh - 138px\)/u); assert.match(css, /height:76dvh/u);
+  assert.match(html, /id="name-stage"[^>]*hidden/u);
+  assert.match(html, /id="finish-conversation"/u);
   assert.match(css, /overflow-y:auto/u); assert.match(css, /overscroll-behavior:contain/u);
   assert.match(css, /pointer-events:visibleFill/u); assert.match(css, /prefers-reduced-motion/u);
 });
