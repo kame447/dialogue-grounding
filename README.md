@@ -2,6 +2,10 @@
 
 現在の研究目的・実験計画・評価方針・未決定事項は、[現行の研究・実験計画（SSOT）](dialogue-model/README.md)に集約しています。研究計画を知りたい場合は、この1ファイルだけを参照してください。
 
+## タングラム共同命名 v2 公開デモ
+
+現在の操作確認ページは [タングラム共同命名 v2](https://tangram-grounding-experiment.kame-website.workers.dev/) です（認証あり）。Cloudflare上のTypeScriptエントリポイント、デプロイ手順と制約は [公開版README](workers/tangram-experiment/README.md) を参照してください。
+
 ## 研究領域
 
 `annotation/` は既存の人間対話で観察された表象のずれと調整を記述する領域です。発話機能 a1–a30、ずれ状態 M0–M4、調整過程 P1–P6、エピソード結果 ER0/ER1、局所問題の後続処理を扱います。

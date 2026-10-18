@@ -36,3 +36,6 @@ node_modules/
 .wrangler/
 .dev.vars
 .dev.vars.*
+
+# Built experiment UI assets (never publish backend modules as static files)
+/workers/tangram-experiment/dist/
