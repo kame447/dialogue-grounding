@@ -106,6 +106,10 @@ test("judge uses own image/public history/whitelisted own notes and differs only
   assert.match(common, /別の枠と解釈し直す場合はrepair/u);
   assert.match(common, /自分の候補が複数あるとき、それらを互いに区別する/u);
   assert.match(common, /相手の説明の単なる言い換え/u);
+  assert.match(common, /主判断とfollowUpのdiscriminatingFeatureには/u);
+  assert.match(common, /画面の向きに依存する上下左右・右向き・上端・下端などの語を使わない/u);
+  assert.match(common, /回転しても変わらない、尖りの数や大小・くぼみ・細長さ・四角の有無・部分同士のつながり/u);
+  assert.match(common, /相手の向きを表す語は、自分の同じ向きに固定せず回転を考慮/u);
 });
 
 test("judge receives candidate names from own prior acts but strips unrelated history metadata", async (t) => {

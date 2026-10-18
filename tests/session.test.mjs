@@ -5,6 +5,17 @@ import { SAFE_JUDGMENT } from "../dialogue-model/runtime/judgment/schema.mjs";
 const ownImage = { mimeType: "image/png", base64: "c3ludGhldGlj" };
 const decision = { ...SAFE_JUDGMENT, action: "propose_name", targetSlot: "上段左", candidateName: "共同の名", note: "PRIVATE-JUDGE-NOTE" };
 const isJudge = (messages) => messages.some((m) => m.role === "system" && m.content.includes("【非公開の対話判断】"));
+function assertShapeDescriptionConstraints(instructions) {
+  assert.match(instructions, /1発話で伝える形の特徴は原則1つ/u);
+  assert.match(instructions, /discriminatingFeatureまたは相手の質問への答えを優先/u);
+  assert.match(instructions, /複数の特徴の列挙や説明調を避け、相手の反応を待/u);
+  assert.match(instructions, /followUpがある場合も発話全体でこの原則/u);
+  assert.match(instructions, /短さ自体を目的にせず/u);
+  assert.match(instructions, /画面の向きに依存する上下左右・右向き・上端・下端などの語を使わない/u);
+  assert.match(instructions, /回転しても変わらない、尖りの数や大小・くぼみ・細長さ・四角の有無・部分同士のつながり/u);
+  assert.match(instructions, /公開履歴を確認し、自分が以前述べた形の特徴と矛盾する説明をしない/u);
+  assert.match(instructions, /相手の上下左右の説明を自分の同じ向きに固定して解釈しない/u);
+}
 
 test("two-stage sessions differ only in judge policy; generator payload and own image/history stay equal", async () => {
   const calls = [];
@@ -119,6 +130,7 @@ test("every typed action reaches the same generator constraints in both strategi
       const session = createDialogueSession({ client, strategy, image: ownImage });
       await session.turn("公開発話");
       const instructions = generated[1].content;
+      assertShapeDescriptionConstraints(instructions);
       assert.match(instructions, /confirmは相手への質問・確認/u);
       assert.match(instructions, /propose_nameは命名の提案/u);
       assert.match(instructions, /どちらも名称への合意・確定を表明せず/u);
@@ -164,6 +176,7 @@ test("agreement plus a next proposal reaches both ledger slots and the same gene
     assert.equal(payload.action, "agree");
     assert.match(generated[1].content, /主actionを先にfollowUpを後に/u);
     assert.match(generated[1].content, /両方の機能を全体で1〜2文/u);
+    assertShapeDescriptionConstraints(generated[1].content);
     assert.doesNotMatch(JSON.stringify(generated), /PRIVATE-COMPOUND-NOTE|repair-first|bypass-enabled/);
     await session.turn("次の対象の相談を続けます");
     const memory = calls[4].find((message) => typeof message.content === "string" && message.content.includes('"ownJudgmentHistory"'));
