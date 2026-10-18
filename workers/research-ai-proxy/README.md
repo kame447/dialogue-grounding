@@ -18,7 +18,7 @@ Node.js 22以上、Cloudflare Wranglerのログインが必要です。リポジ
 
 RESEARCH_PROXY_TOKEN は32文字以上のランダムな接続用トークンで、クライアントの .env にも同一値を設定します。UPSTREAM_API_KEY はプロバイダの本物のAPIキーで、Cloudflareにのみ登録します。使用モデルはSecretではなく、Cloudflare Workerの通常設定 DIALOGUE_MODEL（workers/research-ai-proxy/wrangler.jsonc）で変更します。ローカルの .env にはモデル名を記入しません。
 
-Wrangler設定の UPSTREAM_PROVIDER は openai または gemini とし、実際に利用するAPIに合わせます。デフォルトの openai は実験で使うモデルの採用を意味しません。MAX_COMPLETION_TOKENS はリクエストあたりの出力制限です。比較条件では同じ値を使ってください。
+Wrangler設定の UPSTREAM_PROVIDER は openai または gemini とし、実際に利用するAPIに合わせます。デフォルトの openai は実験で使うモデルの採用を意味しません。MAX_COMPLETION_TOKENS はリクエストあたりの出力制限（推論モデルでは推論トークンを含む）です。現在の研究設定は 8192（Worker側の上限も 8192）で、1024 では gpt-6-luna の画像付き判断JSONが推論だけで上限に達し本文が空になる事例を確認しました。上限到達で本文が空の場合は再試行しても同じ結果になるため、HTTP 422 `upstream_output_limit` を返します。比較条件では同じ値を使ってください。
 
 ## クライアントの .env
 

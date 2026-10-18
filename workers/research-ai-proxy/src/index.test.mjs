@@ -158,6 +158,23 @@ test("upstream 429 and invalid response are handled without forwarding raw data"
     async () => Response.json({ choices: [] }));
   assert.equal(invalid.status, 502);
   assert.equal((await invalid.json()).error, "invalid_upstream_response");
+  const exhausted = await handleRequest(req(), env, async () => Response.json({
+    choices: [{ message: { role: "assistant", content: "" }, finish_reason: "length" }],
+  }));
+  assert.equal(exhausted.status, 422);
+  assert.equal((await exhausted.json()).error, "upstream_output_limit");
+});
+
+test("completion cap accepts the research setting of 8192 and rejects larger values", async () => {
+  let forwarded;
+  const upstream = async (_url, init) => { forwarded = JSON.parse(init.body); return Response.json(result); };
+  const ok = await handleRequest(request("/v1/chat/completions", env.RESEARCH_PROXY_TOKEN,
+    bodyWith(simpleMessages)), { ...env, MAX_COMPLETION_TOKENS: "8192" }, upstream);
+  assert.equal(ok.status, 200);
+  assert.equal(forwarded.max_completion_tokens, 8192);
+  const tooLarge = await handleRequest(request("/v1/chat/completions", env.RESEARCH_PROXY_TOKEN,
+    bodyWith(simpleMessages)), { ...env, MAX_COMPLETION_TOKENS: "8193" }, upstream);
+  assert.equal(tooLarge.status, 400);
 });
 
 test("authenticated model policy is readable without consuming upstream inference", async () => {

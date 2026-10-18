@@ -8,7 +8,7 @@
   },
   "vars": {
     "UPSTREAM_PROVIDER": "openai",
-    "MAX_COMPLETION_TOKENS": "1024",
+    "MAX_COMPLETION_TOKENS": "8192",
     "DIALOGUE_MODEL": "gpt-6-luna"
   }
 }
