@@ -121,7 +121,7 @@ const messageText = body => JSON.stringify(body.messages.map(m => ({ ...m,
   content: Array.isArray(m.content) ? m.content.filter(p => p.type !== "image_url") : m.content })));
 
 function checkParticipantState(state, blind = false) {
-  for (const key of ["visualAid", "referenceMemory", "options", "referenceGraph", "ownLedger", "judgments"]) assert.equal(Object.hasOwn(state, key), false, key);
+  for (const key of ["visualAid", "referenceMemory", "options", "referenceGraph", "reference", "memoryOps", "ownLedger", "judgments"]) assert.equal(Object.hasOwn(state, key), false, key);
   if (blind) assert.equal(Object.hasOwn(state, "strategy"), false);
   assert.doesNotMatch(JSON.stringify(state), /ownReferences|memoryOps|PRIVATE-CORRESPONDENCE/u);
 }
@@ -135,12 +135,11 @@ async function integratedRuntime(t, referenceMemory) {
     const chunks = []; for await (const chunk of req) chunks.push(chunk);
     const body = JSON.parse(Buffer.concat(chunks).toString("utf8")); requests.push(body);
     const phase = requestPhase(body);
-    const operations = phase === "judge" && judgments++ === 0 ? [
-      { kind: "mention", id: "1:mention", sourceTurn: 1, speaker: "human", quote: publicTurns[0], slots: [SLOTS[0]],
-        confidence: 1, epistemic: "grounded", intent: "name_acceptance", antecedent: null },
-      { kind: "name", id: "1:name", slot: SLOTS[0], name: "帆", agreement: "explicit", mentionIds: ["1:mention"], replaces: null },
-    ] : [];
-    const text = phase === "judge" ? JSON.stringify({ ...SAFE_JUDGMENT, ...(referenceMemory ? { memoryOps: operations } : {}) }) :
+    const reference = phase === "judge" && judgments++ === 0 ? {
+      slots: [SLOTS[0]], epistemic: "grounded", intent: "name_acceptance", feature: null,
+      nameAcceptance: { slot: SLOTS[0], name: "帆" }, deferSlot: null, revisitSlot: null,
+    } : null;
+    const text = phase === "judge" ? JSON.stringify({ ...SAFE_JUDGMENT, ...(referenceMemory ? { reference } : {}) }) :
       phase === "final" ? JSON.stringify(finalNames) : "公開されたAIの固定応答";
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ model: "loopback-test-only", choices: [{ message: { content: text } }] }));
@@ -216,7 +215,7 @@ for (const entrypoint of ["Web", "CLI"]) for (const strategy of ["repair-first",
           assert.equal(body.messages[ownIndex + 1].content.length, 2);
           assert.match(body.messages[ownIndex + 1].content[0].text, /0\/90\/180\/270/u);
         }
-        if (!referenceMemory || requestPhase(body) !== "judge") assert.doesNotMatch(messageText(body), /ownReferences|memoryOps|publicTurns|referenceGraph/u);
+        if (!referenceMemory || requestPhase(body) !== "judge") assert.doesNotMatch(messageText(body), /ownReferences|memoryOps|publicTurns|referenceGraph|nameAcceptance|deferSlot|revisitSlot/u);
       }
       const record = await app.record();
       assert.deepEqual(record.options, { visualAid, referenceMemory });
@@ -229,6 +228,11 @@ for (const entrypoint of ["Web", "CLI"]) for (const strategy of ["repair-first",
         assert.equal(record.referenceGraph.revision, 2);
         assert.equal(record.referenceGraph.ownSlots[SLOTS[0]].candidate.name, "帆");
         assert.deepEqual(record.judgments.map(item => item.memory.opsApplied), [2, 0]);
+        assert.deepEqual(record.judgments.map(item => item.memory.interpretation), [true, false]);
+        for (const item of record.judgments) {
+          assert.equal(Object.hasOwn(item.judgment, "reference"), false, "raw reference interpretation stays out of judgment traces");
+          assert.equal(Object.hasOwn(item.judgment, "memoryOps"), false, "program-generated operations stay out of judgment traces");
+        }
         assert.equal(record.ownLedger[SLOTS[0]].name, null, "memory updates must not rewrite the ledger");
       } else {
         assert.equal(Object.hasOwn(record, "referenceGraph"), false);
