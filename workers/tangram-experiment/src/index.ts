@@ -258,7 +258,8 @@ export class TangramSession extends DurableObject<Env> {
     const questionnaire = await this.serialized(async () => {
       const previous = await readQuestionnaire<Questionnaire>(this.ctx.storage, recordId);
       const next = applyQuestionnaire(previous, body, new Date().toISOString());
-      if (next.changed && !await writeQuestionnaire(this.ctx.storage, recordId, next.questionnaire, Date.now())) throw new NamingTaskError("not_found");
+      if (next.changed && !await writeQuestionnaire(this.ctx.storage, recordId, next.questionnaire, Date.now(),
+        next.questionnaire.status === "submitted")) throw new NamingTaskError("not_found");
       return next.questionnaire;
     });
     await this.scheduleExpiry();

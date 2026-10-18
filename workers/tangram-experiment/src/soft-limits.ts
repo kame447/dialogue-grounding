@@ -13,9 +13,12 @@ export interface SoftLimitBindings {
   IP_ACTION_RATE_LIMIT: LimitBinding;
   SESSION_ACTION_RATE_LIMIT: LimitBinding;
   GLOBAL_ACTION_RATE_LIMIT: LimitBinding;
+  /** Questionnaire saves, per browser session; its own namespace, so it never uses up the AI-action budget. */
+  QUESTIONNAIRE_RATE_LIMIT: LimitBinding;
 }
 
 const AI_ACTIONS = new Set(["/api/message", "/api/retry", "/api/names", "/api/ai-submit"]);
+const QUESTIONNAIRE = /^\/api\/records\/[^/]+\/questionnaire$/;
 
 /** Only genuine request metadata from Cloudflare, never user-supplied X-Forwarded-For. */
 function visitorKey(request: Request): string {
@@ -34,6 +37,7 @@ export async function isExcessiveTraffic(
   if (path === "/api/start") {
     return !(await bindings.START_RATE_LIMIT.limit({ key: ip })).success;
   }
+  if (QUESTIONNAIRE.test(path)) return !(await bindings.QUESTIONNAIRE_RATE_LIMIT.limit({ key: cookie })).success;
   if (!AI_ACTIONS.has(path)) return false;
   if (!(await bindings.SESSION_ACTION_RATE_LIMIT.limit({ key: cookie })).success) return true;
   if (!(await bindings.IP_ACTION_RATE_LIMIT.limit({ key: ip })).success) return true;

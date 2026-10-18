@@ -8,7 +8,7 @@ import { readFile } from "node:fs/promises";
 import { startNamingServer } from "../dialogue-model/runtime/web/server.mjs";
 import { createChatClient } from "../dialogue-model/runtime/client.mjs";
 import { applyQuestionnaire, participantReview, QUESTIONNAIRE_FORM, questionnaireStatus } from "../dialogue-model/runtime/v2/participant-records.ts";
-import { archiveSnapshot, backfillActive, deleteArchived, expireRecords, readArchived, readQuestionnaire,
+import { archiveSnapshot, backfillActive, deleteArchived, expiredIds, expireRecords, readArchived, readQuestionnaire,
   writeQuestionnaire } from "../workers/tangram-experiment/src/admin/archive.ts";
 import { summarizeRecord } from "../workers/tangram-experiment/src/admin/summary.ts";
 import { renderDetail, renderList, parseFilter } from "../workers/tangram-experiment/src/admin/render.ts";
@@ -99,7 +99,11 @@ test("a questionnaire can be added later to a trial completed before this change
   await storage.put({ active: completed() });
   await backfillActive(storage, T0 + DAY);
   const answers = applyQuestionnaire(null, { answers: full(3), submit: true }, NOW).questionnaire;
-  assert.equal(await writeQuestionnaire(storage, RECORD, answers, T0 + 20 * DAY), true);
+  // A draft never extends retention; the submission does (once).
+  const draft = applyQuestionnaire(null, { answers: {}, submit: false }, NOW).questionnaire;
+  assert.equal(await writeQuestionnaire(storage, RECORD, draft, T0 + 25 * DAY, false), true);
+  assert.deepEqual(await expiredIds(storage, T0 + 30 * DAY + 10 * 60 * 1000, 30), [RECORD], "a draft save does not extend retention");
+  assert.equal(await writeQuestionnaire(storage, RECORD, answers, T0 + 20 * DAY, true), true);
   assert.deepEqual(await readQuestionnaire(storage, RECORD), answers);
   // The record itself is untouched: names, key and scoring are byte-identical.
   assert.deepEqual(await readArchived(storage, RECORD), completed());
@@ -107,7 +111,7 @@ test("a questionnaire can be added later to a trial completed before this change
   assert.deepEqual(removed, [], "the questionnaire save counts as an update for retention");
   assert.deepEqual(await expireRecords(storage, T0 + 51 * DAY, 30, async () => {}), [RECORD]);
   assert.equal(await readQuestionnaire(storage, RECORD), null, "expiry removes the answers with the record");
-  assert.equal(await writeQuestionnaire(storage, RECORD, answers, T0 + 52 * DAY), false, "never recreated after expiry");
+  assert.equal(await writeQuestionnaire(storage, RECORD, answers, T0 + 52 * DAY, true), false, "never recreated after expiry");
   assert.equal([...storage.map.keys()].some((key) => key.includes(RECORD)), false);
 });
 
@@ -115,13 +119,13 @@ test("questionnaire writes are refused for unknown, malformed or deleted records
   const storage = memoryStorage();
   await archiveSnapshot(storage, completed(), new Set(), T0);
   const answers = applyQuestionnaire(null, { answers: {}, submit: false }, NOW).questionnaire;
-  assert.equal(await writeQuestionnaire(storage, "11111111-1111-4111-8111-111111111111", answers, T0), false);
-  await assert.rejects(writeQuestionnaire(storage, "../active", answers, T0));
+  assert.equal(await writeQuestionnaire(storage, "11111111-1111-4111-8111-111111111111", answers, T0, false), false);
+  await assert.rejects(writeQuestionnaire(storage, "../active", answers, T0, false));
   assert.equal(await readQuestionnaire(storage, "../active"), null);
-  assert.equal(await writeQuestionnaire(storage, RECORD, answers, T0), true);
+  assert.equal(await writeQuestionnaire(storage, RECORD, answers, T0, false), true);
   await deleteArchived(storage, RECORD);
   assert.equal(await readQuestionnaire(storage, RECORD), null);
-  assert.equal(await writeQuestionnaire(storage, RECORD, answers, T0), false, "a tombstoned record never gets answers back");
+  assert.equal(await writeQuestionnaire(storage, RECORD, answers, T0, true), false, "a tombstoned record never gets answers back");
 });
 
 // --- Review ----------------------------------------------------------------------
@@ -176,11 +180,21 @@ test("the participant cookie is persistent for the retention period and keeps Ht
   assert.match(source, /sessionCookie\(sessionId\(request\.headers\.get\("Cookie"\)\) \?\? newSessionId\(\), retentionDays\(env\.RECORD_RETENTION_DAYS\)\)/);
 });
 
+test("questionnaire saves have their own 30/60s per-session rate limit namespace in wrangler", async () => {
+  const raw = await readFile(new URL("../workers/tangram-experiment/wrangler.jsonc", import.meta.url), "utf8");
+  const config = JSON.parse(raw.split("\n").filter((line) => !line.trim().startsWith("//")).join("\n"));
+  const limit = config.ratelimits.find((r: any) => r.name === "QUESTIONNAIRE_RATE_LIMIT");
+  assert.deepEqual(limit?.simple, { limit: 30, period: 60 });
+  assert.equal(new Set(config.ratelimits.map((r: any) => r.namespace_id)).size, config.ratelimits.length, "its own namespace");
+});
+
 test("Worker routes: one indistinguishable not_found, own records only, and names/scoring never written", async () => {
   const source = await readFile(new URL("../workers/tangram-experiment/src/index.ts", import.meta.url), "utf8");
   const route = source.slice(source.indexOf("private async recordRoute("), source.indexOf("private state()"));
   assert.match(route, /RECORD_ID\.test\(recordId\) \? await readArchived\(this\.ctx\.storage, recordId\)/);
   assert.match(route, /this\.serialized\(async \(\) => \{[\s\S]*writeQuestionnaire\(/);
+  // Only a submission refreshes retention (draft saves never extend a record's life).
+  assert.match(route, /writeQuestionnaire\(this\.ctx\.storage, recordId, next\.questionnaire, Date\.now\(\),\s+next\.questionnaire\.status === "submitted"\)/);
   assert.doesNotMatch(route, /archiveSnapshot|storage\.put|humanSubmission|scoring/);
   assert.ok(source.indexOf('pathname === "/api/records"') < source.indexOf("if (!this.trial) throw"));
 });

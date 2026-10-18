@@ -92,15 +92,18 @@ export async function readQuestionnaire<T = unknown>(storage: ArchiveStorage, re
 }
 
 /**
- * Stores the questionnaire beside its record and refreshes the record's ledger
- * time: a questionnaire save counts as an update for retention. Refused (false)
- * when the record is missing, expired or deleted, so answers never outlive it.
+ * Stores the questionnaire beside its record. Only a submission (refreshRetention)
+ * counts as an update for retention; draft saves never extend the record's life,
+ * and a submission happens once. Refused (false) when the record is missing,
+ * expired or deleted, so answers never outlive it.
  */
-export async function writeQuestionnaire(storage: ArchiveStorage, recordId: string, questionnaire: unknown, now: number): Promise<boolean> {
+export async function writeQuestionnaire(storage: ArchiveStorage, recordId: string, questionnaire: unknown, now: number,
+  refreshRetention: boolean): Promise<boolean> {
   const key = archiveKey(recordId);
   const ledger = await ledgerOf(storage);
   if (!Object.hasOwn(ledger, recordId) || !(await storage.get(key)) || (await tombstonesOf(storage)).includes(recordId)) return false;
-  await storage.put({ [questionnaireKey(recordId)]: questionnaire, [LEDGER_KEY]: { ...ledger, [recordId]: Math.max(ledger[recordId], now) } });
+  await storage.put({ [questionnaireKey(recordId)]: questionnaire,
+    ...(refreshRetention ? { [LEDGER_KEY]: { ...ledger, [recordId]: Math.max(ledger[recordId], now) } } : {}) });
   return true;
 }
 
