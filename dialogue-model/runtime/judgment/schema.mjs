@@ -98,9 +98,10 @@ export function validateJudgment(value, { ownLedger = createOwnLedger(), agreeEv
   const optional = ["followUp", "reference"].filter((key) => value && Object.hasOwn(value, key));
   if (!exactKeys(value, [...KEYS, ...optional])) throw new JudgmentValidationError();
   const judgment = validateAct(Object.fromEntries(KEYS.map((key) => [key, value[key]])), ledger);
-  if (agreeEvidence && judgment.action === "agree" &&
-      ["unassigned", "deferred"].includes(ledger[judgment.targetSlot].status) && judgment.discriminatingFeature === null) {
-    throw new JudgmentValidationError("agree_requires_identification");
+  // v2: agreement needs a target that was already presented publicly and answered by
+  // the partner (tentative). A private fit, even with a stated feature, is not shared.
+  if (agreeEvidence && judgment.action === "agree" && ["unassigned", "deferred"].includes(ledger[judgment.targetSlot].status)) {
+    throw new JudgmentValidationError("agree_requires_shared_identification");
   }
   if (Object.hasOwn(value, "followUp")) {
     if (value.followUp === null) judgment.followUp = null;

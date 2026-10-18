@@ -8,10 +8,13 @@ const act = (extra = {}) => ({ ...SAFE_JUDGMENT, action: 'agree', targetSlot: sl
 const ledgerWith = (status, name = status === 'unassigned' ? null : '帆') => ({ ...createOwnLedger(slots), [slot]: { status, name } });
 
 for (const status of ['unassigned', 'deferred']) {
-  test(`opt-in primary agree requires identification for ${status} and permits an identifying feature`, () => {
+  test(`opt-in primary agree on a ${status} target is rejected even with an identifying feature`, () => {
     const ownLedger = ledgerWith(status), before = structuredClone(ownLedger);
-    assert.throws(() => validateJudgment(act(), { ownLedger, agreeEvidence: true }), { code: 'agree_requires_identification' });
-    assert.deepEqual(validateJudgment(act({ discriminatingFeature: 'くぼみが二つ' }), { ownLedger, agreeEvidence: true }), act({ discriminatingFeature: 'くぼみが二つ' }));
+    assert.throws(() => validateJudgment(act(), { ownLedger, agreeEvidence: true }), { code: 'agree_requires_shared_identification' });
+    assert.throws(() => validateJudgment(act({ discriminatingFeature: 'くぼみが二つ' }), { ownLedger, agreeEvidence: true }), { code: 'agree_requires_shared_identification' });
+    // The same turn may present the target with a feature and keep the name as a candidate.
+    const present = act({ action: 'propose_name', discriminatingFeature: 'くぼみが二つ' });
+    assert.deepEqual(validateJudgment(present, { ownLedger, agreeEvidence: true }), present);
     assert.deepEqual(ownLedger, before);
   });
 }
