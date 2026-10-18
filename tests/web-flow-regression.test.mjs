@@ -57,7 +57,7 @@ async function setup(t, { hideStrategy = false } = {}) {
     await Promise.all([new Promise((resolve) => server.close(resolve)), new Promise((resolve) => upstream.close(resolve))]);
   });
   const base = "http://127.0.0.1:" + server.address().port;
-  const page = await fetch(base);
+  const page = await fetch(base + "/v1/");
   const html = await page.text(), cookie = page.headers.get("set-cookie").split(";")[0];
   const request = (path, body) => fetch(base + path, {
     headers: { cookie, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
@@ -207,7 +207,7 @@ class Element {
 
 async function ui(t, strategy) {
   const app = await setup(t);
-  const script = await readFile(new URL("../dialogue-model/runtime/web/app.js", import.meta.url), "utf8");
+  const script = await readFile(new URL("../dialogue-model/runtime/web/v1/app.js", import.meta.url), "utf8");
   const elements = Object.fromEntries([...app.html.matchAll(/<([a-z]+)\b[^>]*\bid="([^"]+)"/gu)]
     .map(([, tag, id]) => [id, new Element(tag)]));
   const chatButton = new Element("button"), submitButton = new Element("button");
@@ -259,7 +259,7 @@ for (const strategy of STRATEGIES) {
     e.setup.fire("submit"); await app.settled();
     assert.equal(e.setup.hidden, true); assert.equal(e.trial.hidden, false);
     assert.equal(e.board.src, "/api/image");
-    assert.deepEqual(app.calls[1], { path: "/api/start", body: { strategy, seed: SEED } });
+    assert.deepEqual(app.calls[1], { path: "/api/start", body: { strategy, seed: SEED, visualAid: false, referenceMemory: false } });
     assert.equal(e.names.children.length, 6);
     e.names.children.forEach((label, i) => {
       const input = label.children[0];

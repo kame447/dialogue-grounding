@@ -1,3 +1,5 @@
+import { OWN_SLOT_LABELS } from "../visual/own-image-rotation.mjs";
+
 export const STRATEGIES = Object.freeze(["repair-first", "bypass-enabled"]);
 
 export const TASK_INSTRUCTIONS = [
@@ -7,6 +9,27 @@ export const TASK_INSTRUCTIONS = [
   "自分の画面の位置名を相手への発話に出さないでください。相手の位置や上下左右の説明を、自分の同じ位置・向きへそのまま対応させないでください。画像内の候補を回転させて考え、向きが変わっても保たれる形の特徴で照合してください。",
   "公開された会話と自分の画像、自分自身の作業メモだけを使ってください。図形の見立てや形状について、課題に不要な完全一致まで求める必要はありません。",
 ].join("\n");
+
+// Version 1 stays byte-for-byte stable for comparison with existing trials.
+// Version 2 shares this approach across strategies and judge/generator phases.
+export const TASK_INSTRUCTIONS_V2 = [
+  "あなたは二者によるタングラム6図形の共同命名課題の参加者です。相手と相談し、各図形を共同で識別できる名前を決めてください。",
+  "画像はあなた自身に提示された図形だけです。相手の画像・内部認識・正しい対応表は見えません。",
+  "自分の対象の内部参照ID・位置・画像範囲は、自分だけの作業メモ・最終提出用です。相手と共有された図形番号ではなく、相手の画面では配置も向きも異なります。",
+  "内部参照ID・位置名・画像座標を相手への発話に出さず、相手にもそれらでの指定を求めないでください。相手の位置や上下左右の説明を、自分の同じ位置・向きへそのまま対応させないでください。画像内の候補を回転させて考え、向きが変わっても保たれる全体の見立てや形の特徴で照合してください。",
+  "公開された会話と自分の画像、自分自身の作業メモだけを使ってください。図形の見立てや形状について、課題に不要な完全一致まで求める必要はありません。",
+  "まず全体の印象・身近なものへの見立てを短く共有し、相手の反応を待ってください。毎発話で名称を決めたり、幾何学的な特徴を添えたりする必要はありません。",
+  "相手の大まかな見立てを受けたら、まず自分の画像に対応しそうな対象があるかを考えてください。見立ての違いだけを対象の取り違えとせず、根拠のある対応は受け止めてください。相槌や似た印象だけから、同じ対象・名称への合意を作らないでください。",
+  "分析的な弁別確認は、相手が対象の説明・識別に明示的に迷うか詳細・確認を求める、説明に合う候補が2つ以上ある、前の食い違いが未解決、または取り違えの疑いが名称の重複・付け替えや最終対応に影響するときに限って検討してください。そのときは違いを解く特徴1つを選び、確認・修復をするか保留するかは方略に従ってください。",
+  "挨拶や漠然とした開始の相談だけで、複雑な対象の分析・命名を先回りしないでください。相手に見立てから始めてもらう受け止めも選べます。具体的に提案を任された場合や対話の流れに合う場合は、簡単な全体の見立てを1つ提案できます。",
+  "不確かさや問い返しを毎回演出せず、直前の応答に合わせて必要な一手だけを選んでください。短い受け止めだけの発話も可能です。同じ質問の反復や複数の特徴の一括説明を避けてください。",
+].join("\n");
+
+export function taskInstructionsFor(version = 1) {
+  if (version === 1) return TASK_INSTRUCTIONS;
+  if (version === 2) return TASK_INSTRUCTIONS_V2;
+  throw new Error("Unsupported task version");
+}
 
 // The only strategy-dependent text. Equal structure and comparable specificity;
 // no dialogue examples or condition-specific encouragement of task success.
@@ -41,4 +64,12 @@ export function publicMessages(history) {
     throw new Error("Invalid public history");
   }
   return history.map(({ role, content }) => ({ role, content }));
+}
+
+export function ownRotationMessage(image = null) {
+  if (image === null) return [];
+  const messages = ownImageMessage(image);
+  messages[0].content[0].text = "【実験環境からの提示。公開発話ではありません】直前の自分の6図形を0/90/180/270度、時計回りに回転した画像です。ラベルは自分の内部参照だけに使います。対応: " +
+    JSON.stringify(OWN_SLOT_LABELS) + "。相手の画面ではありません。ラベルや内部位置を相手に言わないでください。";
+  return messages;
 }

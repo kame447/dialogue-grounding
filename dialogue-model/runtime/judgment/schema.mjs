@@ -1,5 +1,6 @@
 import { SLOTS } from "../stimuli/board.mjs";
-import { normalizeName } from "../scoring.mjs";
+import { normalizeName, slotsOf } from "../scoring.mjs";
+import { validateReferenceInterpretation } from "./memory.mjs";
 
 /** @typedef {'上段左'|'上段中'|'上段右'|'下段左'|'下段中'|'下段右'} Slot */
 /** @typedef {'accept'|'propose_name'|'confirm'|'repair'|'defer'|'revisit'|'agree'|'move_on'|'close'} JudgmentAction */
@@ -8,12 +9,14 @@ import { normalizeName } from "../scoring.mjs";
 /** @typedef {Record<Slot, LedgerEntry>} OwnLedger AI's own slot notes, never an answer key. */
 /** @typedef {'propose_name'|'confirm'|'move_on'|'revisit'|'defer'} FollowUpAction */
 /** @typedef {{action: FollowUpAction, targetSlot: Slot|null, candidateName: string|null, discriminatingFeature: string|null}} FollowUp */
-/** @typedef {{action: JudgmentAction, targetSlot: Slot|null, candidateName: string|null, discriminatingFeature: string|null, note: string|null, followUp?: FollowUp|null}} Judgment */
+/** @typedef {{action: JudgmentAction, targetSlot: Slot|null, candidateName: string|null, discriminatingFeature: string|null, note: string|null, followUp?: FollowUp|null, reference?: object|null}} Judgment Reference interpretations also require provenance validation against the session graph. */
 /** @typedef {{mimeType: string, base64: string}} ParticipantImage */
 /** @typedef {{role: 'user'|'assistant', content: string}} PublicUtterance */
 /**
  * @typedef {object} JudgeInput
  * @property {ParticipantImage|null} image
+ * @property {ParticipantImage|null} [rotationImage] Derived exclusively from the participant's own board.
+ * @property {{graph: object, turn: number, publicTurns: {turn: number, speaker: 'human'|'ai', text: string}[]}|null} [referenceContext] Private provenance context, never generator input.
  * @property {PublicUtterance[]} publicHistory
  * @property {'repair-first'|'bypass-enabled'} strategy
  * @property {OwnLedger} ownLedger
@@ -35,26 +38,32 @@ const exactKeys = (value, keys) => value && typeof value === "object" && !Array.
   Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
 const nullableText = (value, limit) => value === null || (typeof value === "string" && value.trim().length > 0 && value.length <= limit);
 
-/** @returns {OwnLedger} */
-export function createOwnLedger() {
-  return Object.fromEntries(SLOTS.map((slot) => [slot, { status: "unassigned", name: null }]));
+/** v1 uses the fixed position names; v2 passes the AI's six opaque own ids. @returns {OwnLedger} */
+export function createOwnLedger(slots = SLOTS) {
+  const own = ledgerSlots(Object.fromEntries(slots.map((slot) => [slot, null])));
+  return Object.fromEntries(own.map((slot) => [slot, { status: "unassigned", name: null }]));
+}
+
+function ledgerSlots(value) {
+  try { return slotsOf(value); } catch { throw new JudgmentValidationError("invalid_ledger"); }
 }
 
 /** @returns {OwnLedger} A fresh, whitelisted copy suitable for an AI request. */
 export function validateOwnLedger(value) {
-  if (!exactKeys(value, SLOTS)) throw new JudgmentValidationError("invalid_ledger");
-  for (const slot of SLOTS) {
+  const slots = ledgerSlots(value);
+  if (!exactKeys(value, slots)) throw new JudgmentValidationError("invalid_ledger");
+  for (const slot of slots) {
     const entry = value[slot];
     if (!exactKeys(entry, ["status", "name"]) || !STATUSES.includes(entry.status) || !nullableText(entry.name, 200) ||
         (entry.status === "unassigned" && entry.name !== null) ||
         (["tentative", "agreed"].includes(entry.status) && entry.name === null)) throw new JudgmentValidationError("invalid_ledger");
   }
-  return Object.fromEntries(SLOTS.map((slot) => [slot, { status: value[slot].status, name: value[slot].name?.trim() ?? null }]));
+  return Object.fromEntries(slots.map((slot) => [slot, { status: value[slot].status, name: value[slot].name?.trim() ?? null }]));
 }
 
 function validateAct(value, ledger) {
   if (!exactKeys(value, KEYS) || !ACTIONS.includes(value.action) ||
-      !(value.targetSlot === null || SLOTS.includes(value.targetSlot)) ||
+      !(value.targetSlot === null || Object.hasOwn(ledger, value.targetSlot)) ||
       !nullableText(value.candidateName, 200) || !nullableText(value.discriminatingFeature, 400) || !nullableText(value.note, 1000)) {
     throw new JudgmentValidationError();
   }
@@ -74,7 +83,7 @@ function validateAct(value, ledger) {
     throw new JudgmentValidationError("reassignment_requires_repair");
   }
   const assignedName = candidateName ?? (targetSlot && ["agree", "defer", "revisit"].includes(action) ? ledger[targetSlot].name : null);
-  if (assignedName !== null && SLOTS.some((slot) => slot !== targetSlot && ledger[slot].name !== null &&
+  if (assignedName !== null && Object.keys(ledger).some((slot) => slot !== targetSlot && ledger[slot].name !== null &&
       normalizeName(ledger[slot].name) === normalizeName(assignedName))) {
     // Repair must explicitly release the old slot before reusing its name on
     // another. Never infer which correspondence is correct or silently move it.
@@ -86,7 +95,8 @@ function validateAct(value, ledger) {
 /** @returns {Judgment} Validate followUp against the primary act's resulting notes. */
 export function validateJudgment(value, { ownLedger = createOwnLedger() } = {}) {
   const ledger = validateOwnLedger(ownLedger);
-  if (!exactKeys(value, KEYS) && !exactKeys(value, [...KEYS, "followUp"])) throw new JudgmentValidationError();
+  const optional = ["followUp", "reference"].filter((key) => value && Object.hasOwn(value, key));
+  if (!exactKeys(value, [...KEYS, ...optional])) throw new JudgmentValidationError();
   const judgment = validateAct(Object.fromEntries(KEYS.map((key) => [key, value[key]])), ledger);
   if (Object.hasOwn(value, "followUp")) {
     if (value.followUp === null) judgment.followUp = null;
@@ -97,6 +107,10 @@ export function validateJudgment(value, { ownLedger = createOwnLedger() } = {}) 
       const followUp = validateAct({ ...value.followUp, note: null }, applyAct(ledger, judgment));
       judgment.followUp = Object.fromEntries(ACT_KEYS.map((key) => [key, followUp[key]]));
     }
+  }
+  if (Object.hasOwn(value, "reference")) {
+    try { judgment.reference = validateReferenceInterpretation(value.reference, Object.keys(ledger)); }
+    catch (error) { throw new JudgmentValidationError(error.code ?? "invalid_reference"); }
   }
   return judgment;
 }

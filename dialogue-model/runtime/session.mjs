@@ -1,6 +1,8 @@
 import { createLunaJudge } from "./judgment/luna.mjs";
 import { createOwnLedger, validateJudgment, applyJudgment } from "./judgment/schema.mjs";
-import { STRATEGIES, TASK_INSTRUCTIONS, ownImageMessage, publicMessages } from "./judgment/instructions.mjs";
+import { STRATEGIES, TASK_INSTRUCTIONS, ownImageMessage, ownRotationMessage, publicMessages } from "./judgment/instructions.mjs";
+import { createReferenceGraph, snapshotReferenceGraph, applyReferenceUpdate, ReferenceGraphError } from "./memory/reference-graph.mjs";
+import { stageMemory, prepareMemory, visibleTurns } from "./judgment/memory.mjs";
 export { STRATEGIES };
 
 // Identical across conditions. Only the judge selects a strategy-dependent act.
@@ -25,23 +27,28 @@ const GENERATOR_INSTRUCTIONS = [
   "判断JSON、内部位置名、内部ラベル、作業メモ、方略の説明、思考過程を出力せず、公開する発話だけを返してください。",
 ].join("\n");
 
-export function createDialogueSession({ client, strategy, image = null, judge = null }) {
+export function createDialogueSession({ client, strategy, image = null, judge = null, rotationImage = null, referenceMemory = false }) {
   if (!client || typeof client.complete !== "function") throw new Error("A chat client is required");
   if (!STRATEGIES.includes(strategy)) throw new Error("Unsupported dialogue strategy");
+  if (typeof referenceMemory !== "boolean") throw new Error("Invalid memory option");
   // Copy only participant-visible image fields, never arbitrary caller metadata.
   const ownImage = image === null ? null : { mimeType: image.mimeType, base64: image.base64 };
   ownImageMessage(ownImage);
+  const rotations = rotationImage === null ? null : { mimeType: rotationImage.mimeType, base64: rotationImage.base64 };
+  ownRotationMessage(rotations);
   const dialogueJudge = judge ?? createLunaJudge(client);
   if (typeof dialogueJudge.judge !== "function") throw new Error("A dialogue judge is required");
   const history = [];
   const judgmentHistory = [];
   let ownLedger = createOwnLedger();
+  let graph = referenceMemory ? createReferenceGraph() : null;
   let pending = false;
   const ledgerMessage = () => ({ role: "system", content: "AI自身の作業メモ（非公開・正解表ではない）:\n" + JSON.stringify({ ownLedger }) });
 
   return {
     getHistory() { return publicMessages(history); },
     getOwnLedger() { return structuredClone(ownLedger); },
+    getReferenceGraph() { return graph ? snapshotReferenceGraph(graph) : null; },
     // Private research diagnostics: orchestration persists these, never getState.
     getJudgmentHistory() { return structuredClone(judgmentHistory); },
     async finalRequest(instructions) {
@@ -52,7 +59,7 @@ export function createDialogueSession({ client, strategy, image = null, judge = 
         return await client.complete([
           { role: "system", content: TASK_INSTRUCTIONS },
           { role: "system", content: "これは非公開の最終提出です。作業メモは初期候補であり正解ではありません。自分の画像と公開対話を照合し、最終的な名称はあなた自身で判断してください。" },
-          ...ownImageMessage(ownImage), ledgerMessage(), ...publicMessages(history),
+          ...ownImageMessage(ownImage), ...ownRotationMessage(rotations), ledgerMessage(), ...publicMessages(history),
           { role: "user", content: instructions },
         ], { phase: "final_submission" });
       } finally { pending = false; }
@@ -64,16 +71,38 @@ export function createDialogueSession({ client, strategy, image = null, judge = 
       const trace = { turnIndex: history.length / 2 + 1, judgment: null,
         ownLedgerBefore: structuredClone(ownLedger), ownLedgerAfter: structuredClone(ownLedger),
         validation: null, status: "judge_error" };
+      if (graph) trace.memory = { opsApplied: 0, rejected: null, interpretation: false };
       const visibleHistory = [...publicMessages(history), { role: "user", content: utterance }];
+      const publicTurns = graph ? visibleTurns(visibleHistory) : null;
       try {
-        const judgment = validateJudgment(await dialogueJudge.judge({ image: ownImage, publicHistory: visibleHistory,
+        const rawJudgment = await dialogueJudge.judge({ image: ownImage, publicHistory: visibleHistory,
+          ...(rotations ? { rotationImage: rotations } : {}),
+          ...(graph ? { referenceContext: { graph, turn: trace.turnIndex, publicTurns } } : {}),
           strategy, ownLedger: structuredClone(ownLedger), ownJudgmentHistory: judgmentHistory
             .filter((item) => item.status === "committed")
             .flatMap(({ judgment }) => [judgment, ...(judgment.followUp ? [judgment.followUp] : [])]
               .map(({ action, targetSlot, candidateName }) => ({ action, targetSlot, candidateName }))),
-        }), { ownLedger });
-        trace.judgment = judgment;
+        });
+        let judgment, memoryUpdate;
+        if (graph) {
+          const core = { ...rawJudgment }; delete core.reference;
+          const validCore = validateJudgment(core, { ownLedger });
+          try {
+            judgment = validateJudgment(rawJudgment, { ownLedger });
+            const staged = prepareMemory(graph, trace.turnIndex, judgment.reference, publicTurns);
+            memoryUpdate = staged.update;
+            trace.memory.interpretation = judgment.reference != null;
+            trace.memory.rejected = staged.rejected;
+          } catch (error) {
+            judgment = { ...validCore, reference: null };
+            trace.memory.rejected = "memory_" + (error instanceof ReferenceGraphError || error?.name === "JudgmentValidationError" ? error.code : "invalid_update");
+            memoryUpdate = stageMemory(graph, trace.turnIndex, null, publicTurns);
+          }
+        } else judgment = validateJudgment(rawJudgment, { ownLedger });
+        trace.judgment = { ...judgment };
+        delete trace.judgment.reference;
         trace.validation = dialogueJudge.getDiagnostics?.().at(-1) ?? null;
+        if (graph) trace.memory.rejected ??= trace.validation?.failures?.filter((code) => code.startsWith("memory_")).join(",") || null;
         trace.status = "generation_error";
         const { action, targetSlot, candidateName, discriminatingFeature } = judgment;
         const result = await client.complete([
@@ -82,11 +111,15 @@ export function createDialogueSession({ client, strategy, image = null, judge = 
           { role: "system", content: "この発話の判断（非公開）:\n" + JSON.stringify({ action, targetSlot, candidateName, discriminatingFeature,
             ...(Object.hasOwn(judgment, "followUp") ? { followUp: judgment.followUp } : {}),
           }) },
-          ...ownImageMessage(ownImage), ledgerMessage(), ...visibleHistory,
+          ...ownImageMessage(ownImage), ...ownRotationMessage(rotations), ledgerMessage(), ...visibleHistory,
         ], { phase: "generation" });
         if (typeof result?.text !== "string" || !result.text.trim()) throw new Error("The chat client returned no utterance");
         // Commit ledger and public history together only after generation succeeds.
-        ownLedger = applyJudgment(ownLedger, judgment);
+        const nextLedger = applyJudgment(ownLedger, judgment);
+        const nextGraph = graph ? applyReferenceUpdate(graph, memoryUpdate, { publicTurns, generationSucceeded: true }) : null;
+        ownLedger = nextLedger;
+        graph = nextGraph;
+        if (graph) trace.memory.opsApplied = memoryUpdate.operations.length;
         history.push({ role: "user", content: utterance }, { role: "assistant", content: result.text });
         trace.ownLedgerAfter = structuredClone(ownLedger);
         trace.status = "committed";
