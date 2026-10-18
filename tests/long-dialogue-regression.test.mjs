@@ -97,7 +97,7 @@ function instrument(length, { visualAid = false, referenceMemory = false } = {})
     for (const id of ids) assert.equal(text.includes(id), false, "scoring identity leaked to model");
     assert.equal(JSON.stringify(messages).includes(trial.human.png.toString("base64")), false);
     if (final) {
-      assert.doesNotMatch(text, /ownReferences|referenceGraph|memoryOps|private_own_slots_not_ground_truth/);
+      assert.doesNotMatch(text, /ownReferences|referenceGraph|memoryOps|nameAcceptance|deferSlot|revisitSlot|private_own_slots_not_ground_truth/);
       assert.deepEqual(publicText(messages).slice(0, -1), expectedHistory);
       return { text: JSON.stringify(finalFor("ai")), model: "scripted-test-only" };
     }
@@ -122,13 +122,15 @@ function instrument(length, { visualAid = false, referenceMemory = false } = {})
       } else assert.equal(Object.hasOwn(memory, "ownReferences"), false);
       if (fault === "judge_error") { fault = null; throw new Error("PRIVATE-TRANSPORT-ERROR"); }
       if (fault === "invalid_json") { fault = null; return { text: "not JSON", model: "scripted-test-only" }; }
-      return { text: JSON.stringify({ ...item.judgment, ...(referenceMemory ? { memoryOps: [
-        { kind: "mention", id: `${index + 1}:m`, sourceTurn: index + 1, speaker: "human", quote: item.human,
-          slots: [SLOTS[item.slotIndex]], confidence: 0.8, epistemic: "grounded", intent: "feature_assertion", antecedent: null },
-        { kind: "feature", id: `${index + 1}:feature`, slot: SLOTS[item.slotIndex], feature: "くぼみ", polarity: "confirmed", mentionId: `${index + 1}:m` },
-      ] } : {}) }), model: "scripted-test-only" };
+      // The instrument supplies semantic interpretation only. The runtime owns
+      // quotes, turn numbers, speakers, confidence, IDs and graph operations.
+      return { text: JSON.stringify({ ...item.judgment, ...(referenceMemory ? { reference: {
+        slots: [SLOTS[item.slotIndex]], epistemic: "grounded", intent: "feature_assertion",
+        feature: { slot: SLOTS[item.slotIndex], feature: "くぼみ", polarity: "confirmed" },
+        nameAcceptance: null, deferSlot: null, revisitSlot: null,
+      } } : {}) }), model: "scripted-test-only" };
     }
-    assert.doesNotMatch(text, /ownJudgmentHistory|repair-first|bypass-enabled|ownReferences|referenceGraph|memoryOps|private_own_slots_not_ground_truth/);
+    assert.doesNotMatch(text, /ownJudgmentHistory|repair-first|bypass-enabled|ownReferences|referenceGraph|memoryOps|nameAcceptance|deferSlot|revisitSlot|private_own_slots_not_ground_truth/);
     if (fault === "generation_error") { fault = null; throw new Error("PRIVATE-TRANSPORT-ERROR"); }
     return { text: item.ai, model: "scripted-test-only", retryCount: 0 };
   } };
@@ -145,10 +147,10 @@ function instrument(length, { visualAid = false, referenceMemory = false } = {})
 }
 
 function privateState(state, completed = false) {
-  for (const key of ["key", "ownLedger", "judgments", "requests", "scoring", "options", "referenceGraph", "ownReferences", "visualAid", "referenceMemory"]) {
+  for (const key of ["key", "ownLedger", "judgments", "requests", "scoring", "options", "reference", "referenceGraph", "ownReferences", "visualAid", "referenceMemory"]) {
     assert.equal(Object.hasOwn(state, key), false, key + " must remain private");
   }
-  assert.doesNotMatch(JSON.stringify(state), /PRIVATE-JUDGE-NOTE|PRIVATE-TRANSPORT-ERROR|ownJudgmentHistory|memoryOps/);
+  assert.doesNotMatch(JSON.stringify(state), /PRIVATE-JUDGE-NOTE|PRIVATE-TRANSPORT-ERROR|ownJudgmentHistory|memoryOps|nameAcceptance|deferSlot|revisitSlot/);
   if (!completed) {
     assert.equal(Object.hasOwn(state, "aiSubmission"), false);
     assert.equal(Object.hasOwn(state, "result"), false);
@@ -239,7 +241,14 @@ for (const strategy of STRATEGIES) for (const length of LENGTHS) {
         for (const slot of SLOTS) assert.ok(graph.ownSlots[slot].features.length <= REFERENCE_LIMITS.featuresPerSlot);
         if (committedCount) assert.deepEqual(saved.judgments.at(-1).memory, {
           opsApplied: saved.judgments.at(-1).status === "committed" ? 2 : 0, rejected: null,
+          interpretation: saved.judgments.at(-1).status !== "judge_error",
         });
+        for (const mention of graph.mentions) {
+          assert.equal(mention.id, `${mention.sourceTurn}:human`, "runtime assigns public-source IDs");
+          assert.equal(mention.speaker, "human");
+          assert.equal(mention.quote, exchange(mention.sourceTurn - 1, length).human, "runtime quotes actual public speech");
+          assert.equal(mention.scope, "human_reference_interpretation");
+        }
       }
     });
     const beforeFinal = await record();
@@ -247,7 +256,13 @@ for (const strategy of STRATEGIES) for (const length of LENGTHS) {
     if (options.referenceMemory) {
       assert.equal(beforeFinal.referenceGraph.revision, length);
       assert.equal(beforeFinal.referenceGraph.lastTurn, length);
-      assert.ok(!beforeFinal.referenceGraph.mentions.some((mention) => mention.id === "1:m"), "old unpinned mentions are pruned in the session too");
+      assert.ok(!beforeFinal.referenceGraph.mentions.some((mention) => mention.id === "1:human"), "old unpinned mentions are pruned in the session too");
+      for (const trace of beforeFinal.judgments) {
+        if (trace.judgment) {
+          assert.equal(Object.hasOwn(trace.judgment, "reference"), false, "raw interpretation is excluded from persisted judgment trace");
+          assert.equal(Object.hasOwn(trace.judgment, "memoryOps"), false);
+        }
+      }
     } else assert.equal(Object.hasOwn(beforeFinal, "referenceGraph"), false);
     assert.equal(beforeFinal.scoring, null);
     assert.equal(beforeFinal.humanSubmission, null); assert.equal(beforeFinal.aiSubmission, null);
