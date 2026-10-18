@@ -6,6 +6,7 @@ import { createDialogueSession, STRATEGIES } from "./session.mjs";
 import { createLunaJudge } from "./judgment/luna.mjs";
 import { STATUSES } from "./judgment/schema.mjs";
 import { SLOTS } from "./stimuli/board.mjs";
+import { createOwnImageRotationSheet } from "./visual/own-image-rotation.mjs";
 
 // Fixed participant-facing coordinates, never figure identities.
 export { SLOTS, STRATEGIES };
@@ -76,9 +77,11 @@ function httpStatus(value) { return Number.isInteger(value) && value >= 100 && v
 
 export async function createNamingTask({
   client, strategy, seed, createTrial, scoreTrial, createJudge = createLunaJudge, runDir = process.env.RESEARCH_RUN_DIR,
+  visualAid = false, referenceMemory = false,
 } = {}) {
   if (!STRATEGIES.includes(strategy)) throw new NamingTaskError("invalid_strategy");
   if (!Number.isSafeInteger(seed)) throw new NamingTaskError("invalid_seed");
+  if (typeof visualAid !== "boolean" || typeof referenceMemory !== "boolean") throw new NamingTaskError("invalid_options");
   if (!createTrial) ({ createTrial } = await import("./stimuli/board.mjs"));
   if (!scoreTrial) ({ scoreTrial } = await import("./scoring.mjs"));
   let directory;
@@ -88,11 +91,23 @@ export async function createNamingTask({
       trial.ai.mimeType !== "image/png" || trial.human.mimeType !== "image/png" || !trial.key) {
     throw new NamingTaskError("invalid_trial");
   }
+  let rotationImage = null;
+  if (visualAid) {
+    try {
+      const sheet = createOwnImageRotationSheet(trial.ai.png, { enabled: true });
+      rotationImage = { mimeType: sheet.mimeType, base64: sheet.png.toString("base64") };
+    } catch { throw new NamingTaskError("invalid_trial"); }
+  }
   const recordId = randomUUID();
   const requests = [];
   const meteredClient = {
     async complete(messages, options = {}) {
       const started = performance.now();
+      // Leave room for the client's fixed envelope under the Worker's 18 MiB
+      // cap. Each own-image message has only text + image, below four parts.
+      if (visualAid && Buffer.byteLength(JSON.stringify({ purpose: "dialogue_turn", messages })) > 18 * 1024 * 1024 - 1024) {
+        throw new NamingTaskError("request_too_large");
+      }
       try {
         const response = await client.complete(messages);
         requests.push({ kind: options.phase ?? (closed ? "final_submission" : "dialogue_turn"), status: "ok",
@@ -113,7 +128,7 @@ export async function createNamingTask({
   };
   if (!client || typeof client.complete !== "function") throw new NamingTaskError("invalid_client");
   const session = createDialogueSession({ client: meteredClient, strategy, judge: createJudge(meteredClient),
-    image: { mimeType: trial.ai.mimeType, base64: trial.ai.png.toString("base64") } });
+    image: { mimeType: trial.ai.mimeType, base64: trial.ai.png.toString("base64") }, rotationImage, referenceMemory });
   let humanSubmission = null;
   let aiSubmission = null;
   let result = null;
@@ -140,6 +155,8 @@ export async function createNamingTask({
     if (!directory) return;
     const record = {
       recordId, trialId: trial.trialId, seed: trial.seed ?? seed, strategy, startedAt,
+      options: { visualAid, referenceMemory },
+      ...(referenceMemory ? { referenceGraph: session.getReferenceGraph() } : {}),
       updatedAt: new Date().toISOString(), status: trialStatus(),
       publicHistory: session.getHistory(), judgments: session.getJudgmentHistory(), ownLedger: session.getOwnLedger(), humanSubmission, aiSubmission,
       scoring: result ? { key: trial.key, result } : null, requests,

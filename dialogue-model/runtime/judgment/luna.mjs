@@ -1,5 +1,7 @@
 import { ACTIONS, FOLLOW_UP_ACTIONS, SAFE_JUDGMENT, validateJudgment, validateOwnLedger, JudgmentValidationError } from "./schema.mjs";
-import { STRATEGIES, TASK_INSTRUCTIONS, JUDGE_POLICIES, ownImageMessage, publicMessages } from "./instructions.mjs";
+import { STRATEGIES, TASK_INSTRUCTIONS, JUDGE_POLICIES, ownImageMessage, ownRotationMessage, publicMessages } from "./instructions.mjs";
+import { summarizeForJudge, ReferenceGraphError } from "../memory/reference-graph.mjs";
+import { MEMORY_INSTRUCTIONS, stageMemory } from "./memory.mjs";
 
 const JUDGE_INSTRUCTIONS = [
   "【非公開の対話判断】次の公開発話を生成するために、対話上の判断をJSONだけで返してください。これは対話相手への発話ではありません。",
@@ -27,7 +29,7 @@ export function createLunaJudge(client) {
   const diagnostics = [];
   return {
     getDiagnostics() { return structuredClone(diagnostics); },
-    async judge({ image = null, publicHistory, strategy, ownLedger, ownJudgmentHistory = [] }) {
+    async judge({ image = null, rotationImage = null, referenceContext = null, publicHistory, strategy, ownLedger, ownJudgmentHistory = [] }) {
       if (!STRATEGIES.includes(strategy)) throw new Error("Unsupported dialogue strategy");
       const ledger = validateOwnLedger(ownLedger);
       const previous = ownJudgmentHistory.map(({ action, targetSlot, candidateName = null }) => {
@@ -36,29 +38,55 @@ export function createLunaJudge(client) {
             (targetSlot === null && candidateName !== null)) throw new Error("Invalid own judgment history");
         return { action, targetSlot, candidateName: candidateName?.trim() ?? null };
       });
+      const publicTurns = referenceContext?.publicTurns.map(({ turn, speaker, text }) => ({ turn, speaker, text }));
+      if (referenceContext) stageMemory(referenceContext.graph, referenceContext.turn, [], publicTurns);
       const messages = [
         { role: "system", content: TASK_INSTRUCTIONS },
         { role: "system", content: JUDGE_POLICIES[strategy] },
         { role: "system", content: JUDGE_INSTRUCTIONS },
-        ...ownImageMessage(image),
+        ...(referenceContext ? [{ role: "system", content: MEMORY_INSTRUCTIONS }] : []),
+        ...ownImageMessage(image), ...ownRotationMessage(rotationImage),
         { role: "system", content: "AI自身の作業メモ（公開発話ではない）:\n" + JSON.stringify({ ownLedger: ledger, ownJudgmentHistory: previous }) },
+        ...(referenceContext ? [{ role: "system", content: "AI自身の参照メモと公開発話の出典番号（非公開・正解表ではない）:\n" + JSON.stringify({
+          ownReferences: JSON.parse(summarizeForJudge(referenceContext.graph)), currentTurn: referenceContext.turn,
+          publicTurns: publicTurns.map(({ turn, speaker }) => ({ turn, speaker })),
+        }) }] : []),
         ...publicMessages(publicHistory),
       ];
       const failures = [];
+      let validCore = null, memoryFailure = false;
       for (let attempt = 0; attempt < 2; attempt++) {
+        validCore = null; memoryFailure = false;
         const response = await client.complete(attempt ? [...messages,
           { role: "system", content: "前回の判断は検証できませんでした。検証理由: " + failures.at(-1) + "。tentativeの同じ対象の言い換えはagree/confirm/propose_nameで新しい名前を指定できます。合意済み名の訂正や対象の付け替えはrepairを使ってください。同名が別枠にある場合は元の枠をrepairとcandidateName=nullで空にしてから再割当してください。上記JSON形式と制約を守って再提出してください。" }] : messages,
         { phase: "judgment" });
         try {
-          const judgment = validateJudgment(JSON.parse(response.text), { ownLedger: ledger });
-          diagnostics.push({ attempts: attempt + 1, fallback: false, failures });
+          const parsed = JSON.parse(response.text);
+          if (referenceContext) {
+            const core = { ...parsed }; delete core.memoryOps;
+            validCore = validateJudgment(core, { ownLedger: ledger });
+          }
+          let judgment;
+          try {
+            judgment = validateJudgment(parsed, { ownLedger: ledger });
+            if (referenceContext) stageMemory(referenceContext.graph, referenceContext.turn, judgment.memoryOps, publicTurns);
+          } catch (error) {
+            memoryFailure = Boolean(referenceContext && validCore);
+            throw error;
+          }
+          diagnostics.push({ attempts: attempt + 1, fallback: false, failures, ...(referenceContext ? { memoryFallback: false } : {}) });
           return judgment;
         } catch (error) {
-          failures.push(error instanceof JudgmentValidationError ? error.code : "invalid_json");
+          const code = error instanceof JudgmentValidationError || error instanceof ReferenceGraphError ? error.code : "invalid_json";
+          failures.push(memoryFailure ? "memory_" + code : code);
         }
       }
-      diagnostics.push({ attempts: 2, fallback: true, failures });
-      return { ...SAFE_JUDGMENT };
+      if (memoryFailure && validCore) {
+        diagnostics.push({ attempts: 2, fallback: false, failures, memoryFallback: true });
+        return { ...validCore, memoryOps: [] };
+      }
+      diagnostics.push({ attempts: 2, fallback: true, failures, ...(referenceContext ? { memoryFallback: false } : {}) });
+      return { ...SAFE_JUDGMENT, ...(referenceContext ? { memoryOps: [] } : {}) };
     },
   };
 }
