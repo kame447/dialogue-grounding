@@ -50,6 +50,8 @@ const fail = (code) => { throw new HumanMessageQueueError(code); };
 const positive = (value) => Number.isSafeInteger(value) && value > 0;
 const validText = (value, limit) => typeof value === "string" && value.trim().length > 0 && value.length <= limit;
 const validClientId = (value) => typeof value === "string" && /^[A-Za-z0-9_.:-]{1,80}$/.test(value);
+/** @typedef {{id: string, seq: number, turn: number, speaker: 'human'|'ai', text: string, at: string, clientId?: string, nonReferential?: true}} QueueEvent */
+/** @type {(event: QueueEvent) => Omit<QueueEvent, 'nonReferential'>} */
 const publicCopy = ({ nonReferential, ...event }) => event;
 const frozenEvents = (events) => Object.freeze(events.map((event) => Object.freeze({ ...event })));
 function clonePrivate(value) {

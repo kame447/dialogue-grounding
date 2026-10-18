@@ -12,5 +12,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["dialogue-model/**/*.ts"]
+  "include": ["dialogue-model/**/*.ts", "tests/**/*.ts"]
 }

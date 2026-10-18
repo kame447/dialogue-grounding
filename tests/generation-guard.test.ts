@@ -191,7 +191,8 @@ function setup({ action = "accept", strategy = "repair-first", active = false, r
   const raw = { ...SAFE_JUDGMENT, action, targetSlot: ids[0], candidateName: ["accept", "close", "move_on"].includes(action) ? null : name,
     discriminatingFeature: action === "confirm" ? feature : null, ...(followUp ? { followUp } : {}) };
   const dialogue = createDialogueV2({ strategy, image, anchors, referenceMemory,
-    judge: { async judge() { return raw; } },
+    // Deliberately unvalidated raw output (followUp may be malformed); the session validates it.
+    judge: { async judge(): Promise<any> { return raw; } },
     client: { async complete(messages: Message[], options: unknown) {
       calls.push(structuredClone({ messages, options })); hook(calls.length);
       const reply = replies[Math.min(calls.length - 1, replies.length - 1)];
@@ -309,8 +310,8 @@ test("mock v2 sessions publish no decision wording unless agree, normal and acti
     for (let i = 0; i < actions.length; i++) {
       queue.enqueue({ clientId: `turn-${i}`, text: "鳥の形についてです。" }); await queue.whenIdle();
       const snapshot = queue.getSnapshot(), state = queue.getPrivateState();
-      assert.equal(snapshot.status, "idle"); const action = state.judgments.at(-1).judgment.action;
-      if (action !== "agree") assert.equal(findAgreementClaims(snapshot.events.at(-1).text).length, 0);
+      assert.equal(snapshot.status, "idle"); const action = state.judgments.at(-1)!.judgment.action;
+      if (action !== "agree") assert.equal(findAgreementClaims(snapshot.events.at(-1)!.text).length, 0);
       assert.doesNotMatch(JSON.stringify(snapshot), /generationGuard|violations|ownLedger|activeJudge|judgment/);
     }
     assert.equal(queue.getPrivateState().judgments.length, actions.length);

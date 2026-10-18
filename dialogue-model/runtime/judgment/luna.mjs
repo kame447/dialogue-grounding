@@ -54,7 +54,7 @@ export function ownAnchorMessage(anchors, ledger) {
  * candidateConflict (v2 only, default off) is a researcher-unapproved opt-in
  * intervention: Luna also returns a private candidate list, kept only in
  * diagnostics, never returned. Conflict-block problems never replace a valid act.
- * @returns {import('./schema.mjs').DialogueJudge & {getDiagnostics(): object[]}}
+ * @returns {import('./schema.mjs').DialogueJudge & {getDiagnostics(): Record<string, unknown>[]}}
  */
 export function createLunaJudge(client, { candidateConflict = false } = {}) {
   if (!client || typeof client.complete !== "function") throw new Error("A chat client is required");

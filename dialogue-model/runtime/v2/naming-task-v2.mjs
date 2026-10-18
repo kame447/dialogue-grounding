@@ -40,6 +40,12 @@ export function parseAiNamesV2(text, slots) {
   return Object.fromEntries(slots.map((slot) => [slot, typeof value[slot] === "string" && value[slot].trim() ? value[slot].trim() : null]));
 }
 
+/**
+ * @param {{ client, strategy, seed, referenceMemory?: boolean, runDir?: string, createTrial?, scoreTrial?,
+ *   judge?: import('../judgment/schema.mjs').DialogueJudge | null, now?: () => number, restore?: object | null, onPersist?: Function | null,
+ *   decisionShadowClient?: {chooseAction(request: object): Promise<any>} | null,
+ *   activeDecision?: {purpose: string, client: {chooseAction(request: object): Promise<any>}} | null }} options
+ */
 export async function createNamingTaskV2({
   client, strategy, seed, referenceMemory = false, runDir = process.env.RESEARCH_RUN_DIR,
   createTrial = createTrialV2, scoreTrial = defaultScoreTrial, judge = null, now = () => Date.now(),
