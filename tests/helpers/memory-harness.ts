@@ -57,8 +57,8 @@ export function requestImages(request: Request): string[] {
  * Only the upstream chat client is mocked.
  */
 export async function createScriptedTrial({ steps, referenceMemory, strategy = "repair-first", restore = null, stepOffset = 0,
-  requests = [], records = [] }: { steps: Step[]; referenceMemory: boolean; strategy?: string; restore?: object | null; stepOffset?: number;
-  requests?: Request[]; records?: Record<string, any>[] }) {
+  requests = [], records = [], extra = {} }: { steps: Step[]; referenceMemory: boolean; strategy?: string; restore?: object | null; stepOffset?: number;
+  requests?: Request[]; records?: Record<string, any>[]; extra?: Record<string, unknown> }) {
   let stepIndex = -1;
   const pending = { judge: [] as Reply[], generation: [] as Reply[] };
   let clock = Date.UTC(2026, 9, 19) + stepOffset * 1000;
@@ -92,8 +92,9 @@ export async function createScriptedTrial({ steps, referenceMemory, strategy = "
       throw new Error("unexpected phase " + phase);
     },
   };
+  // extra: other createNamingTaskV2 options under test (for example a mock grounding shadow).
   const task = await createNamingTaskV2({ client, strategy, seed: SEED, referenceMemory, runDir: null, restore,
-    now: () => (clock += 1000), onPersist: async (record: Record<string, any>) => { records.push(structuredClone(record)); } });
+    now: () => (clock += 1000), onPersist: async (record: Record<string, any>) => { records.push(structuredClone(record)); }, ...extra } as any);
   return {
     task, requests, records,
     /** Sends the next scripted human line and waits until the AI turn settles (or errors). */
