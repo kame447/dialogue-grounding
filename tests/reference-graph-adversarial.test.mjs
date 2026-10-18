@@ -318,6 +318,7 @@ test("adversarial: slot permutations preserve semantic state and never create ot
 test("adversarial: long seeded dialogue preserves six candidates, uncertainty, attribution and bounded JSON", () => {
   let graph = createReferenceGraph();
   let seed = 0x51a7, turn = 0;
+  const seenSpeakers = new Set(), seenSlots = new Set();
   const random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed; };
   for (const [i, slot] of SLOTS.entries()) {
     turn++;
@@ -326,14 +327,20 @@ test("adversarial: long seeded dialogue preserves six candidates, uncertainty, a
   }
   for (; turn < 420;) {
     turn++;
-    const slot = SLOTS[random() % SLOTS.length], other = SLOTS[(SLOTS.indexOf(slot) + 1) % SLOTS.length];
-    const speaker = random() % 2 ? "human" : "ai", label = `合成特徴${turn}`;
+    // Higher bits avoid the alternating low-bit pattern of a congruential PRNG.
+    const slot = SLOTS[(random() >>> 16) % SLOTS.length], other = SLOTS[(SLOTS.indexOf(slot) + 1) % SLOTS.length];
+    const speaker = (random() >>> 16) % 2 ? "human" : "ai", label = `合成特徴${turn}`;
+    seenSpeakers.add(speaker); seenSlots.add(slot);
     const ops = [mention(turn, "m", { slots: [slot, other], epistemic: "hypothesis", confidence: 0.25, speaker, quote: label, intent: "feature_assertion" }),
       feature(turn, { slot, feature: label })];
-    graph = commit(graph, turn, ops);
+    const previous = graph;
+    graph = commit(previous, turn, ops);
     assert.ok(graph.records.length <= REFERENCE_LIMITS.records);
     assert.ok(JSON.stringify(graph).length <= REFERENCE_LIMITS.graphChars);
-    if (turn % 17 === 0) graph = copy(graph);
+    if (turn % 17 === 0) {
+      assert.deepEqual(commit(copy(previous), turn, copy(ops)), graph, "JSON rehydration must preserve deterministic transitions");
+      graph = copy(graph);
+    }
   }
   const snapshot = snapshotReferenceGraph(graph);
   for (const [i, slot] of SLOTS.entries()) {
@@ -354,6 +361,8 @@ test("adversarial: long seeded dialogue preserves six candidates, uncertainty, a
   }
   assert.equal(graph.lastTurn, 420);
   assert.equal(graph.revision, 420);
+  assert.deepEqual([...seenSpeakers].sort(), ["ai", "human"]);
+  assert.deepEqual([...seenSlots].sort(), [...SLOTS].sort());
 });
 
 test("adversarial: bounded summaries reject impossible budgets without truncating valid names", () => {
