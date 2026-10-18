@@ -6,7 +6,7 @@ const UPSTREAM_URLS = Object.freeze({
 });
 const MAX_REQUEST_BYTES = 18 * 1024 * 1024;
 const MAX_MESSAGES = 256;
-const MAX_COMPLETION_TOKENS = 4096;
+const MAX_COMPLETION_TOKENS = 8192;
 const MAX_TEXT_CHARS = 20000;
 const MAX_IMAGE_CHARS = 14 * 1024 * 1024;
 const JSON_HEADERS = {
@@ -197,7 +197,9 @@ export async function handleRequest(request, env, fetchImpl = globalThis.fetch) 
   if (!payload) return reply(400, { error: "invalid_request" });
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 45000);
+  // Reasoning models spend completion tokens before visible text; keep this
+  // below the client's 90 s image-turn timeout.
+  const timeout = setTimeout(() => controller.abort(), 85000);
   try {
     const response = await fetchImpl(endpoint, {
       method: "POST",
@@ -213,8 +215,14 @@ export async function handleRequest(request, env, fetchImpl = globalThis.fetch) 
         error: response.status === 429 ? "upstream_rate_limited" : "upstream_error",
       });
     }
-    const result = sanitizeResult(await response.json(), selected.model);
-    return result ? reply(200, result) : reply(502, { error: "invalid_upstream_response" });
+    const data = await response.json();
+    const result = sanitizeResult(data, selected.model);
+    if (result) return reply(200, result);
+    // Empty text after hitting the cap is deterministic for the same request,
+    // so it is reported as non-retryable instead of a transient upstream error.
+    return data?.choices?.[0]?.finish_reason === "length" ?
+      reply(422, { error: "upstream_output_limit" }) :
+      reply(502, { error: "invalid_upstream_response" });
   } catch {
     return reply(controller.signal.aborted ? 504 : 502, {
       error: controller.signal.aborted ? "upstream_timeout" : "upstream_unavailable",
