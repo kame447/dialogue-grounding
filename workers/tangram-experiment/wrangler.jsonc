@@ -9,7 +9,10 @@
   "workers_dev": true,
   // Trial: concise AI utterances for every new v2 session (both strategies). Set "default" to revert.
   "vars": {
-    "V2_UTTERANCE_STYLE": "concise"
+    "V2_UTTERANCE_STYLE": "concise",
+    // Records are deleted automatically this many days after their last update (integer 1-365; invalid -> 30).
+    // Provisional default until the researcher decides the retention policy.
+    "RECORD_RETENTION_DAYS": "30"
   },
   "observability": {
     "enabled": false
@@ -19,14 +22,26 @@
       {
         "name": "NAMING_SESSIONS",
         "class_name": "TangramSession"
+      },
+      // Researcher-only admin log index (allowlisted, PII-free summaries).
+      {
+        "name": "ADMIN_INDEX",
+        "class_name": "AdminIndex"
       }
     ]
   },
+  // v1 is deployed and must never change; new classes get new tags.
   "migrations": [
     {
       "tag": "v1",
       "new_sqlite_classes": [
         "TangramSession"
+      ]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": [
+        "AdminIndex"
       ]
     }
   ],
@@ -72,6 +87,16 @@
       "namespace_id": "202610181804",
       "simple": {
         "limit": 300,
+        "period": 60
+      }
+    },
+    // /admin: every request that presents credentials, right or wrong, per visitor IP.
+    // The ADMIN_TOKEN secret is set separately (wrangler secret put); without it /admin is 404.
+    {
+      "name": "ADMIN_RATE_LIMIT",
+      "namespace_id": "202610190101",
+      "simple": {
+        "limit": 30,
         "period": 60
       }
     }
