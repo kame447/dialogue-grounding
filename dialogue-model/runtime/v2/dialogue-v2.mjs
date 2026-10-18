@@ -81,7 +81,10 @@ function abortIf(signal) {
 }
 
 /**
- * @param {{ client, strategy, image: {mimeType, base64}, anchors: {id, bbox, centroid}[], judge?, referenceMemory?: boolean }} options
+ * @param {{ client, strategy, image: {mimeType, base64}, anchors: {id, bbox, centroid}[], judge?: import('../judgment/schema.mjs').DialogueJudge | null,
+ *   referenceMemory?: boolean, decisionShadowClient?: {chooseAction(request: object): Promise<any>} | null,
+ *   onResearchUpdate?: (() => void) | null, activeDecision?: {purpose: string, client: {chooseAction(request: object): Promise<any>}} | null,
+ *   utteranceStyle?: string }} options utteranceStyle is validated at runtime against UTTERANCE_STYLES.
  */
 export function createDialogueV2({ client, strategy, image, anchors, judge = null, referenceMemory = false,
   decisionShadowClient = null, onResearchUpdate = null, activeDecision = null, utteranceStyle = "default" }) {

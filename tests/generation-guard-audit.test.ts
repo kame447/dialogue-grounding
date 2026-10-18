@@ -88,7 +88,7 @@ function makeSession({ action = 'accept', strategy = 'repair-first', referenceMe
       targetSlot: action === 'accept' ? null : ids[0], candidateName: action === 'accept' ? null : '鳥' }; } },
     client: { complete }, activeDecision: active ? { purpose: 'decision_jev', client: { async chooseAction() {
       return { purpose: 'decision_jev', model: 'typesafe/jev-1.14-20261014', action: 'accept',
-        probabilities: Object.fromEntries(DECISION_ACTIONS.map((a: Action) => [a, a === 'accept' ? 1 : 0])) };
+        probabilities: Object.fromEntries((DECISION_ACTIONS as readonly Action[]).map((a) => [a, a === 'accept' ? 1 : 0])) };
     } } } : null });
 }
 
@@ -213,7 +213,7 @@ test('guard audit: normal and active task public replies are guarded without pro
       judge: { async judge({ ownLedger }: any) { return { ...SAFE_JUDGMENT, action: 'propose_name', targetSlot: Object.keys(ownLedger)[0], candidateName: '鳥' }; } },
       client: { async complete() { calls++; return { text: '「鳥」にしましょう。' }; } },
       activeDecision: active ? { purpose: 'decision_jev', client: { async chooseAction() { return { purpose: 'decision_jev', action: 'accept',
-        probabilities: Object.fromEntries(DECISION_ACTIONS.map((a: Action) => [a, a === 'accept' ? 1 : 0])) }; } } } : null });
+        probabilities: Object.fromEntries((DECISION_ACTIONS as readonly Action[]).map((a) => [a, a === 'accept' ? 1 : 0])) }; } } } : null });
     for (let i = 0; i < 2; i++) { task.message('鳥に見える形があります。', `turn-${i}`); await task.whenIdle(); }
     assert.equal(calls, 4);
     for (const e of task.getState().events.filter((e: any) => e.speaker === 'ai')) assert.deepEqual(findAgreementClaims(e.text), []);

@@ -20,7 +20,7 @@ function setup({ utteranceStyle, strategy = "repair-first", raw = agreeWithFollo
   { utteranceStyle?: string; strategy?: string; raw?: object; referenceMemory?: boolean; active?: boolean } = {}) {
   const calls: Message[][] = [];
   const dialogue = createDialogueV2({ strategy, image, anchors, referenceMemory, ...(utteranceStyle === undefined ? {} : { utteranceStyle }),
-    judge: { async judge() { return structuredClone(raw); } },
+    judge: { async judge(): Promise<any> { return structuredClone(raw); } }, // raw, validated by the session
     client: { async complete(messages: Message[]) { calls.push(structuredClone(messages)); return { text: "では「鳥」で決まりですね。" }; } },
     activeDecision: active ? { purpose: "decision_luna", client: { async chooseAction() {
       return { action: "agree", probabilities: Object.fromEntries(DECISION_ACTIONS.map((a: string) => [a, Number(a === "agree")])) }; } } } : null,
@@ -108,7 +108,7 @@ test("mock E2E across strategies: concise yields one function per turn without l
   const results: Record<string, ReturnType<typeof summarize>> = {};
   for (const strategy of ["repair-first", "bypass-enabled"]) for (const utteranceStyle of ["default", "concise"]) {
     let turn = 0;
-    const dialogue = createDialogueV2({ strategy, image, anchors, utteranceStyle, judge: { async judge() { return structuredClone(script[turn++]); } },
+    const dialogue = createDialogueV2({ strategy, image, anchors, utteranceStyle, judge: { async judge(): Promise<any> { return structuredClone(script[turn++]); } },
       client: { async complete(messages: Message[]) { return voice(messages); } } });
     const queue = createHumanMessageQueue({ runAiTurn: dialogue.runAiTurn, initialPrivateState: dialogue.initialPrivateState() });
     for (const [i, text] of ["鳥っぽいのある？", "それそれ。", "猫っぽいのも"].entries()) { queue.enqueue({ clientId: `turn-${i}`, text }); await queue.whenIdle(); }
