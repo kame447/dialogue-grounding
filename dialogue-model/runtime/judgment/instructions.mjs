@@ -1,3 +1,5 @@
+import { OWN_SLOT_LABELS } from "../visual/own-image-rotation.mjs";
+
 export const STRATEGIES = Object.freeze(["repair-first", "bypass-enabled"]);
 
 export const TASK_INSTRUCTIONS = [
@@ -41,4 +43,12 @@ export function publicMessages(history) {
     throw new Error("Invalid public history");
   }
   return history.map(({ role, content }) => ({ role, content }));
+}
+
+export function ownRotationMessage(image = null) {
+  if (image === null) return [];
+  const messages = ownImageMessage(image);
+  messages[0].content[0].text = "【実験環境からの提示。公開発話ではありません】直前の自分の6図形を0/90/180/270度、時計回りに回転した画像です。ラベルは自分の内部参照だけに使います。対応: " +
+    JSON.stringify(OWN_SLOT_LABELS) + "。相手の画面ではありません。ラベルや内部位置を相手に言わないでください。";
+  return messages;
 }

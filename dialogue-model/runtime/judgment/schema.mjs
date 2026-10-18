@@ -8,12 +8,14 @@ import { normalizeName } from "../scoring.mjs";
 /** @typedef {Record<Slot, LedgerEntry>} OwnLedger AI's own slot notes, never an answer key. */
 /** @typedef {'propose_name'|'confirm'|'move_on'|'revisit'|'defer'} FollowUpAction */
 /** @typedef {{action: FollowUpAction, targetSlot: Slot|null, candidateName: string|null, discriminatingFeature: string|null}} FollowUp */
-/** @typedef {{action: JudgmentAction, targetSlot: Slot|null, candidateName: string|null, discriminatingFeature: string|null, note: string|null, followUp?: FollowUp|null}} Judgment */
+/** @typedef {{action: JudgmentAction, targetSlot: Slot|null, candidateName: string|null, discriminatingFeature: string|null, note: string|null, followUp?: FollowUp|null, memoryOps?: object[]|null}} Judgment Memory operations also require provenance validation against the session graph. */
 /** @typedef {{mimeType: string, base64: string}} ParticipantImage */
 /** @typedef {{role: 'user'|'assistant', content: string}} PublicUtterance */
 /**
  * @typedef {object} JudgeInput
  * @property {ParticipantImage|null} image
+ * @property {ParticipantImage|null} [rotationImage] Derived exclusively from the participant's own board.
+ * @property {{graph: object, turn: number, publicTurns: {turn: number, speaker: 'human'|'ai', text: string}[]}|null} [referenceContext] Private provenance context, never generator input.
  * @property {PublicUtterance[]} publicHistory
  * @property {'repair-first'|'bypass-enabled'} strategy
  * @property {OwnLedger} ownLedger
@@ -86,7 +88,8 @@ function validateAct(value, ledger) {
 /** @returns {Judgment} Validate followUp against the primary act's resulting notes. */
 export function validateJudgment(value, { ownLedger = createOwnLedger() } = {}) {
   const ledger = validateOwnLedger(ownLedger);
-  if (!exactKeys(value, KEYS) && !exactKeys(value, [...KEYS, "followUp"])) throw new JudgmentValidationError();
+  const optional = ["followUp", "memoryOps"].filter((key) => value && Object.hasOwn(value, key));
+  if (!exactKeys(value, [...KEYS, ...optional])) throw new JudgmentValidationError();
   const judgment = validateAct(Object.fromEntries(KEYS.map((key) => [key, value[key]])), ledger);
   if (Object.hasOwn(value, "followUp")) {
     if (value.followUp === null) judgment.followUp = null;
@@ -97,6 +100,10 @@ export function validateJudgment(value, { ownLedger = createOwnLedger() } = {}) 
       const followUp = validateAct({ ...value.followUp, note: null }, applyAct(ledger, judgment));
       judgment.followUp = Object.fromEntries(ACT_KEYS.map((key) => [key, followUp[key]]));
     }
+  }
+  if (Object.hasOwn(value, "memoryOps")) {
+    if (value.memoryOps !== null && (!Array.isArray(value.memoryOps) || value.memoryOps.length > 16)) throw new JudgmentValidationError("invalid_memory_ops");
+    judgment.memoryOps = structuredClone(value.memoryOps);
   }
   return judgment;
 }
