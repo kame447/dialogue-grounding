@@ -177,6 +177,31 @@ test("record detail is served only for indexed trials with a well-formed recordI
   assert.match(html, /memory_invalid_update/);
   assert.match(html, /ai_unavailable/);
   assert.match(html, /method="post" action="\/admin\/record\/0f8fad5b-d9cb-469f-a165-70867728950e\/delete"/);
+  assert.match(html, /href="\/admin\/record\/0f8fad5b-d9cb-469f-a165-70867728950e\.json"/);
+});
+
+test("JSON export of one record: same auth and limiter, admin headers, attachment, indexed ids only", async () => {
+  const { value, calls } = deps({ limiter: { async limit() { return { success: true }; } } });
+  const path = "/admin/record/" + RECORD + ".json";
+  assert.equal((await handleAdmin(req(path), value)).status, 401);
+  assert.equal((await handleAdmin(req(path, { Authorization: "Bearer wrong" }), value)).status, 401);
+  assert.equal((await handleAdmin(req(path, AUTH), deps({ token: undefined }).value)).status, 404);
+  assert.equal((await handleAdmin(req("/admin/record/" + FIRST + ".json", AUTH), value)).status, 404);
+  for (const odd of [RECORD + ".JSON", RECORD + ".json.json", RECORD + ".html", "..%2Factive.json"]) {
+    assert.equal((await handleAdmin(req("/admin/record/" + odd, AUTH), value)).status, 404, odd);
+  }
+  assert.equal((await handleAdmin(req(path, AUTH, "POST"), value)).status, 404, "export is GET-only");
+  assert.equal(calls.getRecord, 0);
+  const response = await handleAdmin(req(path, AUTH), value);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("Content-Type"), "application/json; charset=utf-8");
+  assert.equal(response.headers.get("Content-Disposition"), `attachment; filename="tangram-record-${RECORD}.json"`);
+  for (const [key, header] of Object.entries(ADMIN_HEADERS)) assert.equal(response.headers.get(key), header, key);
+  assert.equal(response.headers.get("Set-Cookie"), null);
+  assert.equal(response.headers.get("Access-Control-Allow-Origin"), null);
+  assert.deepEqual(await response.json(), record());
+  const limited = deps({ limiter: { async limit() { return { success: false }; } } });
+  assert.equal((await handleAdmin(req(path, AUTH), limited.value)).status, 429);
 });
 
 // --- Admin delete ---------------------------------------------------------
@@ -372,7 +397,7 @@ test("the index pages newest first with no cap, and re-indexing moves an entry i
 
 test("the index summary is an allowlist with no cookies, IPs, user agents, text or names", () => {
   const value = summaryOf();
-  assert.deepEqual(Object.keys(value).sort(), ["aiStatus", "counts", "errorCodes", "latency", "objectId", "recordId", "referenceMemory",
+  assert.deepEqual(Object.keys(value).sort(), ["aiStatus", "counts", "errorCodes", "latency", "objectId", "questionnaire", "recordId", "referenceMemory",
     "startedAt", "status", "strategy", "updatedAt", "utteranceStyle"]);
   const text = JSON.stringify(value);
   for (const secret of ["PRIVATE", "tangram_session", "f".repeat(64), "203.0.113.9", "Mozilla", "s-ab12", "client-", "<script", "model-x", "trial-"]) {

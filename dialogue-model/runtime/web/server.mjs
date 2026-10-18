@@ -1,15 +1,16 @@
 #!/usr/bin/env node
 import { createServer } from "node:http";
 import { randomBytes } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { loadConfig } from "../config.mjs";
 import { createChatClient } from "../client.mjs";
-import { createNamingTask, NamingTaskError } from "../naming-task.mjs";
+import { createNamingTask, NamingTaskError, outsideRepositoryDirectory } from "../naming-task.mjs";
 import { createNamingTaskV2 } from "../v2/naming-task-v2.mjs";
 import { createDecisionComparisonClient } from "../decisions-client.mjs";
+import { applyQuestionnaire, participantReview, QUESTIONNAIRE_FORM, recordListEntry, sortRecordList } from "../v2/participant-records.ts";
 
 const PUBLIC = dirname(fileURLToPath(import.meta.url));
 // "/" serves the v2 participant UI; "/v1/" keeps the original v1 (2x3 grid) UI unchanged.
@@ -21,6 +22,22 @@ const PAGES = ["/", "/v1/"];
 const MAX_BODY = 64 * 1024;
 const MAX_SESSIONS = 64;
 const SESSION_IDLE_MS = 30 * 60 * 1000;
+const RECORD_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** Writes the provisional questionnaire beside the trial record (<recordId>.questionnaire.json), never inside the repository. */
+async function writeQuestionnaireFile(runDir, recordId, questionnaire) {
+  if (!runDir) return;
+  const directory = await outsideRepositoryDirectory(runDir);
+  const temporary = join(directory, "." + recordId + ".questionnaire.tmp");
+  try {
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    await writeFile(temporary, JSON.stringify({ recordId, questionnaire }, null, 2) + "\n", { mode: 0o600 });
+    await rename(temporary, join(directory, recordId + ".questionnaire.json"));
+  } catch {
+    await rm(temporary, { force: true }).catch(() => {});
+    throw new NamingTaskError("record_write_failed");
+  }
+}
 
 async function readJSON(req) {
   if (req.headers["content-type"]?.split(";")[0] !== "application/json") throw new NamingTaskError("invalid_request");
@@ -89,7 +106,8 @@ export function createNamingServer({ client, createTrial, scoreTrial, runDir = p
         if (PAGES.includes(pathname) && !session) {
           if (!makeRoom()) return json(503, { error: "session_limit" });
           const id = randomBytes(32).toString("hex");
-          session = { task: null, starting: false, lastAccess: timestamp, requests: 1 };
+          // records/questionnaires: this session's v2 trials (latest stored record) for review and the questionnaire.
+          session = { task: null, starting: false, lastAccess: timestamp, requests: 1, records: new Map(), questionnaires: new Map() };
           sessions.set(id, session);
           res.setHeader("Set-Cookie", "naming_session=" + id + "; HttpOnly; SameSite=Strict; Path=/");
         }
@@ -107,6 +125,29 @@ export function createNamingServer({ client, createTrial, scoreTrial, runDir = p
         return { trial: value, hideStrategy, busy: session.starting || Boolean(value?.busy) };
       };
       if (req.method === "GET" && pathname === "/api/state") return json(200, state());
+      // The participant's own v2 trials in this session only; any other id is the same not_found.
+      if (req.method === "GET" && pathname === "/api/records") {
+        const active = session.task?.version === 2 ? session.task.getState().sessionId : null;
+        return json(200, { records: sortRecordList([...session.records.values()].map((record) =>
+          recordListEntry(record, record.recordId === active, session.questionnaires.get(record.recordId) ?? null))) });
+      }
+      const recordPath = pathname.match(/^\/api\/records\/([^/]+)\/(review|questionnaire)$/);
+      if (recordPath) {
+        const [, recordId, view] = recordPath;
+        const record = RECORD_ID.test(recordId) ? session.records.get(recordId) : undefined;
+        if (!record) return json(404, { error: "not_found" });
+        if (view === "review") return req.method === "GET" ? json(200, participantReview(record)) : json(404, { error: "not_found" });
+        if (req.method === "GET") return json(200, { recordId, form: QUESTIONNAIRE_FORM, questionnaire: session.questionnaires.get(recordId) ?? null });
+        if (req.method !== "POST") return json(404, { error: "not_found" });
+        const body = await readJSON(req);
+        if (record.status !== "completed") throw new NamingTaskError("trial_not_completed");
+        const next = applyQuestionnaire(session.questionnaires.get(recordId) ?? null, body, new Date(now()).toISOString());
+        if (next.changed) {
+          await writeQuestionnaireFile(runDir, recordId, next.questionnaire);
+          session.questionnaires.set(recordId, next.questionnaire);
+        }
+        return json(200, { recordId, form: QUESTIONNAIRE_FORM, questionnaire: next.questionnaire });
+      }
       if (req.method === "GET" && pathname === "/api/image") {
         if (!session.task) return json(409, { error: "trial_required" });
         // v2 participants see their own scene as vector paths; no PNG route.
@@ -128,7 +169,8 @@ export function createNamingServer({ client, createTrial, scoreTrial, runDir = p
         session.starting = true;
         try {
           session.task = version === 2
-            ? await createTaskV2({ client, runDir, strategy: body.strategy, seed: body.seed, referenceMemory, activeDecision, utteranceStyle })
+            ? await createTaskV2({ client, runDir, strategy: body.strategy, seed: body.seed, referenceMemory, activeDecision, utteranceStyle,
+              onPersist: (record) => { session.records.set(record.recordId, record); } })
             : await createTask({ client, createTrial, scoreTrial, runDir, strategy: body.strategy, seed: body.seed, visualAid, referenceMemory });
         } finally { session.starting = false; }
         session.pageVersion = version;
@@ -161,10 +203,11 @@ export function createNamingServer({ client, createTrial, scoreTrial, runDir = p
       const allowed = ["invalid_strategy", "invalid_seed", "invalid_submission", "invalid_utterance", "invalid_request",
         "busy", "dialogue_closed", "already_submitted", "trial_required", "invalid_ai_submission",
         "ai_unavailable", "scoring_error", "record_write_failed", "repository_output_forbidden", "invalid_output_directory",
-        "invalid_message", "invalid_options", "ai_busy", "ai_retry_required", "submission_error"];
+        "invalid_message", "invalid_options", "ai_busy", "ai_retry_required", "submission_error",
+        "invalid_questionnaire", "questionnaire_submitted", "trial_not_completed"];
       const code = error instanceof NamingTaskError && allowed.includes(error.code) ? error.code : "operation_failed";
       if (!res.headersSent) json(code === "scoring_error" ? 500 : ["ai_unavailable", "invalid_ai_submission"].includes(code) ? 502
-        : ["ai_busy", "ai_retry_required"].includes(code) ? 409 : 400, { error: code });
+        : ["ai_busy", "ai_retry_required", "questionnaire_submitted", "trial_not_completed"].includes(code) ? 409 : 400, { error: code });
       else res.end();
     } finally {
       if (session) { session.requests--; session.lastAccess = now(); }
