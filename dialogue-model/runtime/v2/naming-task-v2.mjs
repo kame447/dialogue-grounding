@@ -152,6 +152,8 @@ export async function createNamingTaskV2({
         events: publicEvents(),
         aiStatus: snapshot.status === "pending" || snapshot.status === "processing" ? "thinking" : snapshot.status === "error" ? "error" : "idle",
         submitted: humanSubmission !== null, aiSubmitted: aiSubmission !== null, closed,
+        status: result ? "completed" : closed ? "submitting" : "dialogue",
+        busy: snapshot.status === "pending" || snapshot.status === "processing",
         // Participant-facing result: own slots and names only, never figure ids.
         ...(result ? { result: { provisional: result.provisional, success: result.success, matchedCount: result.matchedCount, total: result.total,
           figures: result.figures.map(({ human, ai, matched }) => ({ human: { slot: human.slot, rawName: human.rawName }, ai: { rawName: ai.rawName }, matched })) } } : {}),

@@ -8,6 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { loadConfig } from "../config.mjs";
 import { createChatClient } from "../client.mjs";
 import { createNamingTask, NamingTaskError } from "../naming-task.mjs";
+import { createNamingTaskV2 } from "../v2/naming-task-v2.mjs";
 
 const PUBLIC = dirname(fileURLToPath(import.meta.url));
 const FILES = { "/": ["index.html", "text/html; charset=utf-8"],
@@ -30,7 +31,7 @@ async function readJSON(req) {
 }
 
 export function createNamingServer({ client, createTrial, scoreTrial, runDir = process.env.RESEARCH_RUN_DIR,
-  hideStrategy = false, now = Date.now, createTask = createNamingTask } = {}) {
+  hideStrategy = false, now = Date.now, createTask = createNamingTask, createTaskV2 = createNamingTaskV2 } = {}) {
   const sessions = new Map();
   const reclaimable = (session) => {
     if (session.requests || session.starting) return false;
@@ -97,25 +98,43 @@ export function createNamingServer({ client, createTrial, scoreTrial, runDir = p
       if (req.method === "GET" && pathname === "/api/state") return json(200, state());
       if (req.method === "GET" && pathname === "/api/image") {
         if (!session.task) return json(409, { error: "trial_required" });
+        // v2 participants see their own scene as vector paths; no PNG route.
+        if (session.task.version === 2) return json(404, { error: "not_found" });
         const image = session.task.getHumanImage();
         res.writeHead(200, { "Content-Type": image.mimeType });
         return res.end(image.png);
       }
-      if (req.method !== "POST" || !["/api/start", "/api/turn", "/api/submit", "/api/ai-submit"].includes(pathname)) return json(404, { error: "not_found" });
+      const V1_ROUTES = ["/api/turn", "/api/submit"], V2_ROUTES = ["/api/message", "/api/names", "/api/retry"];
+      if (req.method !== "POST" || !["/api/start", "/api/ai-submit", ...V1_ROUTES, ...V2_ROUTES].includes(pathname)) return json(404, { error: "not_found" });
       const body = await readJSON(req);
       if (!body || typeof body !== "object" || Array.isArray(body)) throw new NamingTaskError("invalid_request");
       if (pathname === "/api/start") {
-        const { visualAid = false, referenceMemory = false } = body;
-        if (typeof visualAid !== "boolean" || typeof referenceMemory !== "boolean") throw new NamingTaskError("invalid_request");
+        const { visualAid = false, referenceMemory = false, version = 1 } = body;
+        if (typeof visualAid !== "boolean" || typeof referenceMemory !== "boolean" || ![1, 2].includes(version)) throw new NamingTaskError("invalid_request");
+        // v2 keeps the visual aid off: measured as no benefit, and it is a v1 ablation only.
+        if (version === 2 && visualAid) throw new NamingTaskError("invalid_request");
         if (session.starting || session.task?.getState().busy) throw new NamingTaskError("busy");
         session.starting = true;
         try {
-          session.task = await createTask({ client, createTrial, scoreTrial, runDir, strategy: body.strategy, seed: body.seed,
-            visualAid, referenceMemory });
+          session.task = version === 2
+            ? await createTaskV2({ client, runDir, strategy: body.strategy, seed: body.seed, referenceMemory })
+            : await createTask({ client, createTrial, scoreTrial, runDir, strategy: body.strategy, seed: body.seed, visualAid, referenceMemory });
         } finally { session.starting = false; }
       } else {
         if (!session.task) throw new NamingTaskError("trial_required");
         if (session.starting) throw new NamingTaskError("busy");
+        const isV2 = session.task.version === 2;
+        if ((isV2 && V1_ROUTES.includes(pathname)) || (!isV2 && V2_ROUTES.includes(pathname))) return json(404, { error: "not_found" });
+        if (pathname === "/api/message") {
+          const receipt = session.task.message(body.text, typeof body.clientId === "string" ? body.clientId.slice(0, 80) : undefined);
+          return json(202, { eventId: receipt.eventId, ...state() });
+        }
+        if (pathname === "/api/retry") await session.task.retry();
+        if (pathname === "/api/names") {
+          if (body.confirm !== true) throw new NamingTaskError("invalid_submission");
+          await session.task.submitHuman({ names: body.names });
+          if (!session.task.getState().aiSubmitted) await session.task.submitAI();
+        }
         if (pathname === "/api/turn") await session.task.turn(body.utterance);
         if (pathname === "/api/ai-submit") await session.task.submitAI();
         if (pathname === "/api/submit") {
@@ -129,9 +148,11 @@ export function createNamingServer({ client, createTrial, scoreTrial, runDir = p
       // Neither exception messages nor upstream bodies cross this boundary.
       const allowed = ["invalid_strategy", "invalid_seed", "invalid_submission", "invalid_utterance", "invalid_request",
         "busy", "dialogue_closed", "already_submitted", "trial_required", "invalid_ai_submission",
-        "ai_unavailable", "scoring_error", "record_write_failed", "repository_output_forbidden", "invalid_output_directory"];
+        "ai_unavailable", "scoring_error", "record_write_failed", "repository_output_forbidden", "invalid_output_directory",
+        "invalid_message", "invalid_options", "ai_busy", "ai_retry_required", "submission_error"];
       const code = error instanceof NamingTaskError && allowed.includes(error.code) ? error.code : "operation_failed";
-      if (!res.headersSent) json(code === "scoring_error" ? 500 : ["ai_unavailable", "invalid_ai_submission"].includes(code) ? 502 : 400, { error: code });
+      if (!res.headersSent) json(code === "scoring_error" ? 500 : ["ai_unavailable", "invalid_ai_submission"].includes(code) ? 502
+        : ["ai_busy", "ai_retry_required"].includes(code) ? 409 : 400, { error: code });
       else res.end();
     } finally {
       if (session) { session.requests--; session.lastAccess = now(); }
