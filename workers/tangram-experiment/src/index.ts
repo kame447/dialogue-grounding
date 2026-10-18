@@ -2,13 +2,18 @@ import { DurableObject } from "cloudflare:workers";
 import { createChatClient } from "../../../dialogue-model/runtime/client.mjs";
 import { createNamingTaskV2 } from "../../../dialogue-model/runtime/v2/naming-task-v2.mjs";
 import { NamingTaskError } from "../../../dialogue-model/runtime/naming-error.mjs";
+import { sessionCookie, sessionId } from "./session-cookie.ts";
 import { isExcessiveTraffic, type SoftLimitBindings } from "./soft-limits";
 import { AdminIndex } from "./admin/index-do";
 import { handleAdmin, isAdminPath, type AdminLimiter } from "./admin/routes.ts";
 import { summarizeRecord, type AdminSummary } from "./admin/summary.ts";
 import type { AuditEntry } from "./admin/index-store.ts";
 import { summarizeLatency } from "./admin/latency.ts";
-import { ACTIVE_KEY, archiveSnapshot, backfillActive, deleteArchived, expireRecords, ledgerIds, nextExpiry, readArchived, retentionDays } from "./admin/archive.ts";
+import { ACTIVE_KEY, archiveSnapshot, backfillActive, deleteArchived, expireRecords, ledgerIds, nextExpiry, readArchived,
+  readQuestionnaire, retentionDays, writeQuestionnaire } from "./admin/archive.ts";
+import { RECORD_ID } from "./admin/summary.ts";
+import { applyQuestionnaire, participantReview, QUESTIONNAIRE_FORM, recordListEntry, sortRecordList,
+  type Questionnaire } from "../../../dialogue-model/runtime/v2/participant-records.ts";
 
 export { AdminIndex };
 
@@ -51,19 +56,15 @@ export interface Env extends SoftLimitBindings {
 
 const ADMIN_INDEX_NAME = "global";
 
-const SESSION_COOKIE = "tangram_session";
 const MAX_BODY_BYTES = 64 * 1024;
 const errors = new Set([
   "invalid_strategy", "invalid_seed", "invalid_submission", "invalid_request", "busy", "trial_required",
   "ai_unavailable", "scoring_error", "invalid_message", "invalid_options", "ai_busy", "ai_retry_required",
   "submission_error", "already_submitted", "dialogue_closed", "record_write_failed",
+  "not_found", "invalid_questionnaire", "questionnaire_submitted", "trial_not_completed",
 ]);
 
 const json = (status: number, body: unknown): Response => Response.json(body, { status });
-
-function sessionId(cookie: string | null): string | null {
-  return cookie?.match(/(?:^|;\s*)tangram_session=([a-f0-9]{64})(?:;|$)/)?.[1] ?? null;
-}
 
 function newSessionId(): string {
   return [...crypto.getRandomValues(new Uint8Array(32))].map((x) => x.toString(16).padStart(2, "0")).join("");
@@ -84,7 +85,8 @@ async function readBody(request: Request): Promise<ApiBody> {
 function sanitizedError(error: unknown): Response {
   const code = error instanceof NamingTaskError && errors.has(error.code) ? error.code : "operation_failed";
   const status = code === "scoring_error" || code === "record_write_failed" ? 500
-    : code === "ai_unavailable" ? 502 : ["ai_busy", "ai_retry_required", "busy"].includes(code) ? 409 : 400;
+    : code === "ai_unavailable" ? 502 : code === "not_found" ? 404
+    : ["ai_busy", "ai_retry_required", "busy", "questionnaire_submitted", "trial_not_completed"].includes(code) ? 409 : 400;
   return json(status, { error: code });
 }
 
@@ -97,7 +99,14 @@ export class TangramSession extends DurableObject<Env> {
 
   /** Researcher-only read of one archived trial for /admin. It neither restores nor resumes a trial. */
   async adminRecord(recordId: string): Promise<StoredTrial | null> {
-    return await readArchived(this.ctx.storage, recordId) as StoredTrial | null;
+    return await this.withQuestionnaire(await readArchived(this.ctx.storage, recordId) as StoredTrial | null);
+  }
+
+  /** The record with its stored questionnaire (kept under its own key, see archive.ts). */
+  private async withQuestionnaire(record: StoredTrial | null): Promise<StoredTrial | null> {
+    if (!record) return null;
+    const questionnaire = await readQuestionnaire(this.ctx.storage, record.recordId);
+    return questionnaire ? { ...record, questionnaire } : record;
   }
 
   /** Researcher deletion (authenticated /admin only): removes the record now and tombstones its id. */
@@ -160,7 +169,7 @@ export class TangramSession extends DurableObject<Env> {
   private async registerSummary(record: StoredTrial): Promise<void> {
     try {
       if (!this.env.ADMIN_INDEX) return;
-      const summary = summarizeRecord(record, this.ctx.id.toString(), summarizeLatency(record));
+      const summary = summarizeRecord(await this.withQuestionnaire(record), this.ctx.id.toString(), summarizeLatency(record));
       // Skip writes when nothing but the timestamp changed.
       const key = JSON.stringify({ ...summary, updatedAt: null });
       if (this.lastIndexed.get(summary.recordId) === key) return;
@@ -216,6 +225,47 @@ export class TangramSession extends DurableObject<Env> {
     }) as unknown as Parameters<typeof createNamingTaskV2>[0]) as NamingTask;
   }
 
+  /** This browser's trials: exactly the records in this session object's own storage. */
+  private async ownRecords() {
+    const active = this.trial?.getState().sessionId;
+    const entries = [];
+    for (const id of await ledgerIds(this.ctx.storage)) {
+      const record = await readArchived(this.ctx.storage, id);
+      if (record) entries.push(recordListEntry(record, id === active, await readQuestionnaire(this.ctx.storage, id)));
+    }
+    return sortRecordList(entries);
+  }
+
+  /**
+   * Read-only review and the provisional questionnaire of one of this browser's
+   * trials. Any other id (unknown, malformed, another browser's, expired or
+   * deleted) gets the same not_found. Never touches names, the key or scoring.
+   */
+  private async recordRoute(request: Request, recordId: string, view: string): Promise<Response> {
+    const record = RECORD_ID.test(recordId) ? await readArchived(this.ctx.storage, recordId) as StoredTrial | null : null;
+    if (!record) throw new NamingTaskError("not_found");
+    if (view === "review") {
+      if (request.method !== "GET") throw new NamingTaskError("not_found");
+      return json(200, participantReview(record));
+    }
+    if (request.method === "GET") {
+      return json(200, { recordId, form: QUESTIONNAIRE_FORM, questionnaire: await readQuestionnaire(this.ctx.storage, recordId) });
+    }
+    if (request.method !== "POST") throw new NamingTaskError("not_found");
+    const body = await readBody(request);
+    if (record.status !== "completed") throw new NamingTaskError("trial_not_completed");
+    // Read-modify-write inside the archive queue, so concurrent saves never interleave.
+    const questionnaire = await this.serialized(async () => {
+      const previous = await readQuestionnaire<Questionnaire>(this.ctx.storage, recordId);
+      const next = applyQuestionnaire(previous, body, new Date().toISOString());
+      if (next.changed && !await writeQuestionnaire(this.ctx.storage, recordId, next.questionnaire, Date.now())) throw new NamingTaskError("not_found");
+      return next.questionnaire;
+    });
+    await this.scheduleExpiry();
+    this.ctx.waitUntil(this.registerSummary(record));
+    return json(200, { recordId, form: QUESTIONNAIRE_FORM, questionnaire });
+  }
+
   private state(): unknown {
     const trial = this.trial?.getState() ?? null;
     return { trial, hideStrategy: true, busy: Boolean(trial?.busy) };
@@ -226,6 +276,9 @@ export class TangramSession extends DurableObject<Env> {
       await this.initialize();
       const pathname = new URL(request.url).pathname;
       if (request.method === "GET" && pathname === "/api/state") return json(200, this.state());
+      if (request.method === "GET" && pathname === "/api/records") return json(200, { records: await this.ownRecords() });
+      const recordPath = pathname.match(/^\/api\/records\/([^/]+)\/(review|questionnaire)$/);
+      if (recordPath) return await this.recordRoute(request, recordPath[1], recordPath[2]);
       if (request.method !== "POST") return json(404, { error: "not_found" });
       if (!["/api/start", "/api/message", "/api/retry", "/api/names", "/api/ai-submit"].includes(pathname)) return json(404, { error: "not_found" });
       const body = await readBody(request);
@@ -318,7 +371,7 @@ export default {
       if (!cookie && request.method !== "GET") return withHeaders(json(401, { error: "session_required" }));
       if (!cookie) {
         cookie = newSessionId();
-        setCookie = `${SESSION_COOKIE}=${cookie}; Path=/; Secure; HttpOnly; SameSite=Strict`;
+        setCookie = sessionCookie(cookie, retentionDays(env.RECORD_RETENTION_DAYS));
       }
       if (request.method === "POST" && await isExcessiveTraffic(request, env, cookie)) {
         const limited = json(429, { error: "rate_limited" });
@@ -334,9 +387,9 @@ export default {
       }));
     } else {
       result = await env.ASSETS.fetch(request);
-      if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/index.html") &&
-          !sessionId(request.headers.get("Cookie"))) {
-        setCookie = `${SESSION_COOKIE}=${newSessionId()}; Path=/; Secure; HttpOnly; SameSite=Strict`;
+      // Page loads keep the same session id and renew its Max-Age (see session-cookie.ts).
+      if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/index.html")) {
+        setCookie = sessionCookie(sessionId(request.headers.get("Cookie")) ?? newSessionId(), retentionDays(env.RECORD_RETENTION_DAYS));
       }
     }
     return withHeaders(result, setCookie);

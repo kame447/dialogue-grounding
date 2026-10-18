@@ -2,6 +2,8 @@
 //   "active"            the trial this browser resumes
 //   "record:<recordId>" every trial's latest record, so a new trial never erases an earlier log
 //   "ledger"            recordId -> last update (ms), which drives retention
+//   "questionnaire:<recordId>"  the participant's provisional questionnaire for that trial;
+//                       deleted together with its record (expiry or researcher deletion)
 //   "tombstones"        recordIds deleted by a researcher (ids only), so a still-running
 //                       trial cannot write its record back after deletion
 // Records expire RECORD_RETENTION_DAYS after their last update; nothing is deleted
@@ -26,6 +28,10 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 export const archiveKey = (recordId: string) => {
   if (!UUID.test(recordId)) throw new TypeError("invalid_record_id");
   return "record:" + recordId;
+};
+const questionnaireKey = (recordId: string) => {
+  archiveKey(recordId);
+  return "questionnaire:" + recordId;
 };
 
 /** RECORD_RETENTION_DAYS: an integer 1-365; anything else falls back to 30. */
@@ -79,6 +85,25 @@ export async function readArchived(storage: ArchiveStorage, recordId: string): P
   return (await storage.get<Archivable>(archiveKey(recordId))) ?? null;
 }
 
+/** The questionnaire stored for one trial, or null (also for unknown or malformed ids). */
+export async function readQuestionnaire<T = unknown>(storage: ArchiveStorage, recordId: string): Promise<T | null> {
+  if (!UUID.test(recordId)) return null;
+  return (await storage.get<T>(questionnaireKey(recordId))) ?? null;
+}
+
+/**
+ * Stores the questionnaire beside its record and refreshes the record's ledger
+ * time: a questionnaire save counts as an update for retention. Refused (false)
+ * when the record is missing, expired or deleted, so answers never outlive it.
+ */
+export async function writeQuestionnaire(storage: ArchiveStorage, recordId: string, questionnaire: unknown, now: number): Promise<boolean> {
+  const key = archiveKey(recordId);
+  const ledger = await ledgerOf(storage);
+  if (!Object.hasOwn(ledger, recordId) || !(await storage.get(key)) || (await tombstonesOf(storage)).includes(recordId)) return false;
+  await storage.put({ [questionnaireKey(recordId)]: questionnaire, [LEDGER_KEY]: { ...ledger, [recordId]: Math.max(ledger[recordId], now) } });
+  return true;
+}
+
 /** RecordIds with a stored record in this session (used to re-register index entries). */
 export async function ledgerIds(storage: ArchiveStorage): Promise<string[]> {
   return Object.keys(await ledgerOf(storage)).sort();
@@ -95,7 +120,7 @@ export async function expiredIds(storage: ArchiveStorage, now: number, days: num
   return Object.entries(await ledgerOf(storage)).filter(([, updated]) => expiryOf(updated, days) <= now).map(([id]) => id).sort();
 }
 
-/** Removes records (and "active" when it is one of them) plus their ledger entries. */
+/** Removes records (and "active" when it is one of them), their questionnaires and ledger entries. */
 async function removeRecords(storage: ArchiveStorage, ids: readonly string[], tombstone: boolean): Promise<void> {
   if (!ids.length) return;
   const ledger = await ledgerOf(storage);
@@ -104,7 +129,7 @@ async function removeRecords(storage: ArchiveStorage, ids: readonly string[], to
   const updates: Record<string, unknown> = { [LEDGER_KEY]: ledger };
   if (tombstone) updates[TOMBSTONES_KEY] = [...new Set([...(await tombstonesOf(storage)), ...ids])];
   await storage.put(updates);
-  await storage.delete([...ids.map(archiveKey), ...(active && ids.includes(active.recordId) ? [ACTIVE_KEY] : [])]);
+  await storage.delete([...ids.map(archiveKey), ...ids.map(questionnaireKey), ...(active && ids.includes(active.recordId) ? [ACTIVE_KEY] : [])]);
 }
 
 /**

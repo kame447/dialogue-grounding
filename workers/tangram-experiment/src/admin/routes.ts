@@ -2,6 +2,7 @@
 // authentication, CSRF checks, headers and routing are testable without
 // Cloudflare. Fails closed: no token (or no rate limiter) means 404.
 // The only state-changing route is POST /admin/record/<recordId>/delete.
+// GET /admin/record/<recordId>.json downloads that one full record as JSON.
 import { checkAdmin, presentedToken } from "./auth.ts";
 import { ADMIN_CSS, applyFilter, parseFilter, renderDetail, renderList, renderMessage } from "./render.ts";
 import { OBJECT_ID, RECORD_ID } from "./summary.ts";
@@ -99,12 +100,15 @@ export async function handleAdmin(request: Request, deps: AdminDeps): Promise<Re
     return respond(200, renderList(applyFilter(page.items, filter), filter, page.next, await deps.audit(), deps.retentionDays,
       url.searchParams.get("deleted") === "1"));
   }
-  const match = url.pathname.match(/^\/admin\/record\/([^/]+)$/);
+  const match = url.pathname.match(/^\/admin\/record\/([^/.]+)(\.json)?$/);
   if (!match || !RECORD_ID.test(match[1])) return notFound();
   // Only indexed trials are viewable; the owning object comes from the index, not the URL.
   const summary = await deps.getSummary(match[1]);
   if (!summary || summary.recordId !== match[1] || !OBJECT_ID.test(summary.objectId)) return notFound();
   const record = await deps.getRecord(summary);
   if (!record) return respond(404, renderMessage("記録がありません", "このセッションには保存済みの記録がありません。"));
+  // Researcher export of the full stored record (including the provisional questionnaire), as a download.
+  if (match[2]) return respond(200, JSON.stringify(record, null, 2), "application/json; charset=utf-8",
+    { "Content-Disposition": `attachment; filename="tangram-record-${summary.recordId}.json"` });
   return respond(200, renderDetail(record, summary, deps.summarizeLatency(record), deps.retentionDays));
 }

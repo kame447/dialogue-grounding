@@ -16,6 +16,8 @@ export type AdminSummary = {
   aiStatus: string;
   counts: { humanMessages: number; aiMessages: number; committedTurns: number; attempts: number; incompleteAttempts: number; requestErrors: number };
   errorCodes: string[];
+  /** Provisional questionnaire state only ("none" | "draft" | "submitted"); never answers or comments. */
+  questionnaire: string;
   /** Cross-session index form: per-turn detail is dropped; code-keyed maps keep code keys only. */
   latency: IndexLatency;
 };
@@ -97,6 +99,7 @@ export function summarizeRecord(record: unknown, objectId: string, latency: Late
       requestErrors: list(record.requests).filter((request) => isPlain(request) && request.status !== "ok").length,
     },
     errorCodes: errorCodesOf(record),
+    questionnaire: pick(record.questionnaire?.status, ["draft", "submitted"], "none"),
     latency: indexLatency(latency),
   };
 }

@@ -61,7 +61,8 @@ export function renderList(summaries: AdminSummary[], filter: ListFilter, next: 
 <td>${escapeHtml(s.status)}</td><td${s.aiStatus === "error" ? ' class="bad"' : ""}>${escapeHtml(s.aiStatus)}</td>
 <td>${s.counts.humanMessages}/${s.counts.aiMessages}</td><td>${s.counts.committedTurns}/${s.counts.attempts}</td><td>${s.counts.requestErrors}</td>
 <td${s.errorCodes.length ? ' class="bad"' : ""}>${escapeHtml(s.errorCodes.join(", "))}</td>
-<td>${ms(s.latency.turn.p50Ms)} / ${ms(s.latency.turn.p95Ms)}</td><td>${escapeHtml(s.latency.slowestPhase?.phase ?? "")}</td></tr>`).join("");
+<td>${ms(s.latency.turn.p50Ms)} / ${ms(s.latency.turn.p95Ms)}</td><td>${escapeHtml(s.latency.slowestPhase?.phase ?? "")}</td>
+<td>${escapeHtml(QUESTIONNAIRE_LABELS[s.questionnaire] ?? QUESTIONNAIRE_LABELS.none)}</td></tr>`).join("");
   return page("実験ログ（研究者用）", `<h1>実験ログ（研究者用・読み取り専用）</h1>
 <form method="get" action="/admin"><label>状態 <select name="status">${STATUS_FILTERS.map((v) => option(v, filter.status)).join("")}</select></label>
 <label>エラー <select name="error">${option("any", filter.error, "すべて")}${option("with", filter.error, "あり")}${option("without", filter.error, "なし")}</select></label>
@@ -69,11 +70,24 @@ export function renderList(summaries: AdminSummary[], filter: ListFilter, next: 
 <button>絞り込み</button></form>
 ${deleted ? `<p class="bad">記録を削除しました。</p>` : ""}
 <p class="muted">試行ごとの一覧（同じブラウザの過去の試行も含む）。更新が新しい順に ${PAGE_LIMIT_NOTE}。絞り込みはこのページ内に適用します。記録は最終更新から ${retentionDays} 日後に自動削除されます。</p>
-${summaries.length ? `<div class="wrap"><table>${head(["記録", "更新", "方略", "メモリ", "発話様式", "状態", "AI", "人/AI発話", "確定/試行", "要求エラー", "エラーコード", "応答 p50/p95 ms", "最遅段階"])}${rows}</table></div>` : `<p class="muted">該当なし</p>`}
+${summaries.length ? `<div class="wrap"><table>${head(["記録", "更新", "方略", "メモリ", "発話様式", "状態", "AI", "人/AI発話", "確定/試行", "要求エラー", "エラーコード", "応答 p50/p95 ms", "最遅段階", "仮アンケート"])}${rows}</table></div>` : `<p class="muted">該当なし</p>`}
 ${next ? `<p><a href="/admin${escapeHtml(query({ after: next }))}">次のページ →</a></p>` : ""}
 <h2>削除の記録（内容なし）</h2>${table(["削除日時", "理由", "記録IDのハッシュ"], audit.map((a) => [a.deletedAt, a.reason, a.recordHash]))}`);
 }
 const PAGE_LIMIT_NOTE = "1ページ100件";
+// Index entries written before the questionnaire existed have no state: shown as "none".
+const QUESTIONNAIRE_LABELS: Record<string, string> = { none: "なし", draft: "下書き", submitted: "提出済み" };
+
+/** The participant's provisional questionnaire (研究者未承認の仮項目), item by item; no total score. */
+function questionnaireSection(value: unknown): string {
+  const title = `<h2>仮アンケート（研究者未承認の試行項目）</h2>`;
+  if (!isPlain(value)) return `${title}<p class="muted">回答なし</p>`;
+  const answers = isPlain(value.answers) ? value.answers : {};
+  return `${title}${table(["項目", "値"], [["版", value.version], ["状態", QUESTIONNAIRE_LABELS[value.status] ?? value.status],
+    ["作成", value.createdAt], ["更新", value.updatedAt], ["提出", value.submittedAt ?? null]])}
+${table(["項目ID", "回答（1-7）"], Object.entries(answers).map(([id, answer]) => [id, answer ?? "未回答"]))}
+<h3>自由記述</h3>${value.comment ? `<pre>${escapeHtml(value.comment)}</pre>` : `<p class="muted">なし</p>`}`;
+}
 
 function latencySection(latency: LatencySummary): string {
   const phases = Object.entries(latency.byPhase).map(([phase, p]) => [phase, p.count, p.errors, ms(p.p50Ms), ms(p.p90Ms), ms(p.p95Ms), ms(p.maxMs), ms(p.totalMs)]);
@@ -102,6 +116,7 @@ export function renderDetail(record: unknown, summary: AdminSummary, latency: La
     ms(q.latencyMs), q.retryCount ?? "", q.model ?? ""]);
   return page(`記録 ${summary.recordId.slice(0, 8)}`, `<p><a href="/admin">← 一覧</a></p>
 <h1>記録 ${escapeHtml(summary.recordId)}</h1>
+<p><a href="/admin/record/${escapeHtml(summary.recordId)}.json">JSONで保存（この記録の全項目）</a></p>
 ${table(["項目", "値"], [["Durable Object", summary.objectId], ["開始", summary.startedAt], ["更新", summary.updatedAt], ["方略", summary.strategy],
   ["参照メモリ", summary.referenceMemory ? "ON" : "OFF"], ["発話様式", summary.utteranceStyle], ["状態", summary.status], ["AI", summary.aiStatus],
   ["キュー", r.queueState ? { errorCode: r.queueState.errorCode ?? null, pending: list(r.queueState.pendingHumanEventIds).length, closed: r.queueState.closed ?? false } : null],
@@ -113,6 +128,7 @@ ${latencySection(latency)}
 <h2>外部要求</h2>${table(["#", "段階", "結果", "HTTP", "コード", "ms", "再送", "モデル"], requests)}
 <h2>提出と採点</h2>${table(["項目", "値"], [["人間の提出", r.humanSubmission ?? null], ["AIの提出", r.aiSubmission ?? null],
   ["診断", r.diagnostics ?? null], ["採点", r.scoring ?? null]])}
+${questionnaireSection(r.questionnaire)}
 <h2>削除</h2><p class="muted">この記録は最終更新から ${retentionDays} 日後に自動削除されます。今すぐ削除する場合は、記録IDを確認欄に入力してください。削除は取り消せません。</p>
 <form method="post" action="/admin/record/${escapeHtml(summary.recordId)}/delete"><label>確認（記録ID） <input name="confirm" autocomplete="off" required></label>
 <button>この記録を削除</button></form>`);
