@@ -37,5 +37,39 @@
       "service": "dialogue-grounding-ai-proxy",
       "entrypoint": "InternalResearchProxy"
     }
+  ],
+  "ratelimits": [
+    {
+      "name": "START_RATE_LIMIT",
+      "namespace_id": "202610181801",
+      "simple": {
+        "limit": 40,
+        "period": 60
+      }
+    },
+    {
+      "name": "SESSION_ACTION_RATE_LIMIT",
+      "namespace_id": "202610181802",
+      "simple": {
+        "limit": 30,
+        "period": 60
+      }
+    },
+    {
+      "name": "IP_ACTION_RATE_LIMIT",
+      "namespace_id": "202610181803",
+      "simple": {
+        "limit": 120,
+        "period": 60
+      }
+    },
+    {
+      "name": "GLOBAL_ACTION_RATE_LIMIT",
+      "namespace_id": "202610181804",
+      "simple": {
+        "limit": 300,
+        "period": 60
+      }
+    }
   ]
 }
