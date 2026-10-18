@@ -10,6 +10,8 @@ import { auditRecord, auditCases, inputLeaks, answerKeyTokens, toJudgeInput } fr
 import { shadowFlags } from "../dialogue-model/runtime/diagnostics/jev-shadow-eval/metrics.ts";
 import { mockVerdict, createMockJevAxesClient } from "../dialogue-model/runtime/diagnostics/jev-shadow-eval/mock-client.ts";
 import { runShadow, budgeted, groundingAxesClient, parseCase, parseKnownFailure, main, liveAllowed } from "../dialogue-model/runtime/diagnostics/jev-shadow-eval/run.ts";
+import { buildGroundingEvidence } from "../dialogue-model/runtime/grounding/evidence.ts";
+import { createMockGroundingJudge } from "../dialogue-model/runtime/grounding/client.ts";
 import type { EvalCaseLike, JevAxesClient, JevAxesInput } from "../dialogue-model/runtime/diagnostics/jev-shadow-eval/types.ts";
 
 const SECRET_TEXT = "合成テキスト固有語ZQX";
@@ -186,6 +188,18 @@ test("grounding adapter maps speakers, judges as of the last public turn and pas
   assert.deepEqual(built, { events: [{ seq: 1, speaker: "ai", text: "a" }, { seq: 2, speaker: "human", text: "b" }], asOfSeq: 2, aiHypothesis: null });
   assert.equal(v.target, "insufficient");
   assert.equal(client.kind, "live");
+});
+
+test("adapter runs end to end on the real grounding evidence builder with its mock judge", async () => {
+  const states: string[] = [];
+  const judge = createMockGroundingJudge((state) => { states.push(state);
+    return { identification: state.includes("そうそう") ? "supported" : "insufficient", nameAgreement: "unclear" }; });
+  const client = groundingAxesClient({ buildState: buildGroundingEvidence, judge: (request) => judge.judge(request) });
+  const run = await runShadow({ cases: [syntheticCase()], client, maxCalls: 1 });
+  assert.deepEqual(run.meta.calls.failureCodes, {});
+  assert.equal(run.cases.bySplit.dev.headline.target.agreement, 1);
+  assert.equal(states.length, 1);
+  assert.ok(!states[0].includes("supported\"") && !states[0].includes("derived"), "no gold or quality in the judge state");
 });
 
 test("case audit: split leakage by group, historical marked sendable, label distribution", () => {

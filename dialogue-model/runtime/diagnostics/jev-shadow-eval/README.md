@@ -40,5 +40,5 @@ node dialogue-model/runtime/diagnostics/jev-shadow-eval/run.ts \
 - `--out` must be outside the repository. The run writes `shadow-run.json`, `shadow-report.private.md` and `shadow-summary.sanitized.md`, all mode 0600, with no utterance text.
 - The default client is the mock.
 - `--client live --max-calls N` (1 ≤ N ≤ 50) is opt-in. It refuses `--record` and sends only cases with `source: "synthetic"` that pass `assertSendable` (`externalModelAllowed: true`).
-- The live client needs the grounding judge route (`/v1/grounding-evidence`, PR #52) and its client modules under `dialogue-model/runtime/grounding/`. As of 2026-10-19 the route is not deployed, and deploying it needs researcher approval. Check the live status again before any live run.
+- The live client uses the grounding judge (`dialogue-model/runtime/grounding/`, `/v1/grounding-evidence`) with the research proxy config (`RESEARCH_AI_PROVIDER=cloudflare`). The route answers only while the proxy's `RESEARCH_GROUNDING_ENABLED` is on, and that is a researcher decision. Check the live status before any live run.
 - Sendability and the case judge input come from jev-evalset (`jev-grounding/evalcase.ts`: `assertSendable`, `toJudgeInput`). A live run additionally requires `source: "synthetic"`.

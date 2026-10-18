@@ -14,6 +14,9 @@ import { mkdirSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { outsideRepositoryDirectory } from "../../naming-task.mjs";
+import { loadConfig } from "../../config.mjs";
+import { createGroundingJudgeClient } from "../../grounding/client.ts";
+import { buildGroundingEvidence } from "../../grounding/evidence.ts";
 import { toJudgeInput as caseJudgeInput } from "../../jev-grounding/evalcase.ts";
 import type { GroundingEvalCase } from "../../jev-grounding/evalcase.ts";
 import { auditCases, auditRecord, isSendable, toJudgeInput } from "./audit.ts";
@@ -229,16 +232,9 @@ function args(argv: string[]) {
   return out;
 }
 
-async function liveClient(): Promise<JevAxesClient> {
-  // Specifiers are computed so the type-check does not depend on the grounding
-  // module, which ships in a separate PR (#52). Interface checked against #52
-  // head 73e9ada; re-check after it merges and before any live run.
-  const base = "../../grounding/";
-  const evidence = await import(base + "evidence.ts");
-  const client = await import(base + "client.ts");
-  const { loadConfig } = await import("../../config.mjs");
-  const judge = client.createGroundingJudgeClient(loadConfig(process.env));
-  return groundingAxesClient({ buildState: evidence.buildGroundingEvidence, judge: (request) => judge.judge(request) });
+function liveClient(): JevAxesClient {
+  const judge = createGroundingJudgeClient(loadConfig(process.env));
+  return groundingAxesClient({ buildState: buildGroundingEvidence, judge: (request) => judge.judge(request) });
 }
 
 export async function main(argv = process.argv.slice(2), log = console.log) {
@@ -262,7 +258,7 @@ export async function main(argv = process.argv.slice(2), log = console.log) {
   const cases = rawCases.map(parseCase).filter((c): c is EvalCaseLike => c !== null);
   const rawFailures = a.failures ? parseJsonl(resolve(a.failures)) : [];
   const knownFailures = rawFailures.map(parseKnownFailure).filter((f): f is KnownFailure => f !== null);
-  const client = live ? await liveClient() : createMockJevAxesClient();
+  const client = live ? liveClient() : createMockJevAxesClient();
   const result = await runShadow({ record, cases, knownFailures, client, maxCalls });
   const input = { casesRead: rawCases.length, casesInvalid: rawCases.length - cases.length, failuresRead: rawFailures.length, failuresInvalid: rawFailures.length - knownFailures.length };
   mkdirSync(out, { recursive: true, mode: 0o700 });
