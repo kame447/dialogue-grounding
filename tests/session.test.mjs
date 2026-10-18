@@ -136,6 +136,8 @@ test("every typed action reaches the same generator constraints in both strategi
       assert.match(instructions, /どちらも名称への合意・確定を表明せず/u);
       assert.match(instructions, /名称への合意・確定を表明できるのはagreeのときだけ/u);
       assert.match(instructions, /repairでは.*自己訂正として明示/u);
+      assert.match(instructions, /repair以外では取り違えや取り消しを表明しない/u);
+      assert.match(instructions, /仮名の言い換えをagreeで受け入れるときは.*新しい呼び名で合意するだけ/u);
       assert.match(instructions, /deferでは.*保留することを、revisitでは.*再訪/u);
       assert.match(instructions, /move_onでは別対象への移行/u);
       assert.match(instructions, /closeでは対話終了を相談/u);
@@ -220,6 +222,37 @@ test("failed compound generation rolls back both acts and only replays committed
   assert.deepEqual(session.getOwnLedger()["上段左"], { status: "agreed", name: "主候補" });
   assert.deepEqual(session.getOwnLedger()["下段右"], { status: "tentative", name: "追加候補" });
   assert.equal(session.getHistory().length, 4);
+});
+
+test("agree adopts a different tentative wording without repair or validation retry in either strategy", async () => {
+  const proposed = { ...SAFE_JUDGMENT, action: "propose_name", targetSlot: "上段右", candidateName: "仮の呼び名" };
+  const accepted = { ...SAFE_JUDGMENT, action: "agree", targetSlot: proposed.targetSlot, candidateName: "採用する呼び名", note: "PRIVATE-WORDING-NOTE" };
+  const executions = [];
+  for (const strategy of ["repair-first", "bypass-enabled"]) {
+    let judgeIndex = 0;
+    const calls = [];
+    const session = createDialogueSession({ strategy, image: ownImage, client: { async complete(messages) {
+      calls.push(structuredClone(messages));
+      return { text: isJudge(messages) ? JSON.stringify([proposed, accepted][judgeIndex++]) : "公開された返答" };
+    } } });
+    await session.turn("名前を相談します");
+    assert.deepEqual(session.getOwnLedger()[proposed.targetSlot], { status: "tentative", name: proposed.candidateName });
+    await session.turn("その呼び名に合わせましょう");
+    assert.equal(calls.length, 4, "two turns need one judgment and one generation each, without repair retry");
+    assert.deepEqual(session.getOwnLedger()[proposed.targetSlot], { status: "agreed", name: accepted.candidateName });
+    const trace = session.getJudgmentHistory().at(-1);
+    assert.equal(trace.judgment.action, "agree");
+    assert.deepEqual(trace.validation, { attempts: 1, fallback: false, failures: [] });
+    const generated = calls[3], sent = JSON.parse(generated[2].content.split("\n").slice(1).join("\n"));
+    assert.equal(sent.action, "agree"); assert.equal(sent.candidateName, accepted.candidateName);
+    assert.match(generated[1].content, /repair以外では取り違えや取り消しを表明しない/u);
+    assert.match(generated[1].content, /仮名の言い換えをagreeで受け入れるときは.*新しい呼び名で合意するだけ/u);
+    assert.doesNotMatch(JSON.stringify(generated), /PRIVATE-WORDING-NOTE|repair-first|bypass-enabled/);
+    assertShapeDescriptionConstraints(generated[1].content);
+    executions.push(calls);
+  }
+  for (const index of [0, 2]) assert.deepEqual(executions[0][index].filter((_, i) => i !== 1), executions[1][index].filter((_, i) => i !== 1));
+  for (const index of [1, 3]) assert.deepEqual(executions[0][index], executions[1][index]);
 });
 
 test("invalid strategy and missing public utterance are rejected", async () => {

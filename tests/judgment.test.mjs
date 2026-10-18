@@ -33,8 +33,8 @@ test("typed Judgment rejects unknown fields/actions, invalid slots and incomplet
   assert.throws(() => validateOwnLedger(invalidLedger), /invalid_ledger/);
 });
 
-test("remembered slot renaming requires repair and can explicitly release a wrong correspondence", () => {
-  for (const status of ["tentative", "agreed", "deferred"]) {
+test("agreed and deferred slot renaming requires repair and can explicitly release a wrong correspondence", () => {
+  for (const status of ["agreed", "deferred"]) {
     const ledger = createOwnLedger(); ledger["下段右"] = { status, name: "最初の名称" };
     for (const action of ["accept", "propose_name", "agree", "defer", "revisit", "confirm"]) {
       assert.throws(() => validateJudgment(judgment({ action, targetSlot: "下段右", candidateName: "別の名称", discriminatingFeature: "細長さ" }), { ownLedger: ledger }), /reassignment_requires_repair/);
@@ -44,6 +44,24 @@ test("remembered slot renaming requires repair and can explicitly release a wron
     assert.equal(ledger["下段右"].name, "最初の名称");
     assert.deepEqual(applyJudgment(ledger, judgment({ action: "repair", targetSlot: "下段右" }))["下段右"], { status: "unassigned", name: null });
   }
+});
+
+test("tentative same-slot wording can change by agree, confirm or propose_name while other guards remain", () => {
+  const ledger = createOwnLedger(); ledger["下段右"] = { status: "tentative", name: "仮の呼び名" };
+  for (const action of ["agree", "confirm", "propose_name"]) {
+    const value = judgment({ action, targetSlot: "下段右", candidateName: "採用する呼び名", discriminatingFeature: "候補間の違い" });
+    assert.deepEqual(validateJudgment(value, { ownLedger: ledger }), value);
+    assert.deepEqual(applyJudgment(ledger, value)["下段右"], { status: action === "agree" ? "agreed" : "tentative", name: "採用する呼び名" });
+    assert.equal(ledger["下段右"].name, "仮の呼び名");
+  }
+  for (const action of ["accept", "defer", "revisit"]) {
+    assert.throws(() => validateJudgment(judgment({ action, targetSlot: "下段右", candidateName: "別名" }), { ownLedger: ledger }), /reassignment_requires_repair/);
+  }
+  const follow = judgment({ followUp: followUp({ targetSlot: "下段右", candidateName: "追加側の呼び名" }) });
+  assert.deepEqual(applyJudgment(ledger, follow)["下段右"], { status: "tentative", name: "追加側の呼び名" });
+  ledger["上段左"] = { status: "agreed", name: "他の対象名" };
+  assert.throws(() => applyJudgment(ledger, judgment({ action: "agree", targetSlot: "下段右", candidateName: "他の対象名" })), /duplicate_name_requires_repair/);
+  assert.throws(() => applyJudgment(ledger, judgment({ followUp: followUp({ targetSlot: "下段右", candidateName: "他の対象名" }) })), /duplicate_name_requires_repair/);
 });
 
 test("ledger transitions come only from typed acts, retain deferred names and support agreement/revisit", () => {
@@ -106,6 +124,8 @@ test("judge uses own image/public history/whitelisted own notes and differs only
   assert.match(common, /別の枠と解釈し直す場合はrepair/u);
   assert.match(common, /自分の候補が複数あるとき、それらを互いに区別する/u);
   assert.match(common, /相手の説明の単なる言い換え/u);
+  assert.match(common, /相手の呼び名に合わせるだけなら、agreeで新しいcandidateName/u);
+  assert.match(common, /repairは自分の対応の取り違え・合意済み名の訂正に限り/u);
   assert.match(common, /主判断とfollowUpのdiscriminatingFeatureには/u);
   assert.match(common, /画面の向きに依存する上下左右・右向き・上端・下端などの語を使わない/u);
   assert.match(common, /回転しても変わらない、尖りの数や大小・くぼみ・細長さ・四角の有無・部分同士のつながり/u);
@@ -212,7 +232,8 @@ test("compound ledger updates apply primary before followUp and reject the whole
   assert.throws(() => validateJudgment(duplicate, { ownLedger: ledger }), /duplicate_name_requires_repair/);
   assert.throws(() => applyJudgment(ledger, duplicate), /duplicate_name_requires_repair/);
   assert.deepEqual(ledger, before);
-  assert.throws(() => applyJudgment(ledger, judgment({ followUp: followUp({ targetSlot: "上段左" }) })), /reassignment_requires_repair/);
+  const agreedLedger = structuredClone(ledger); agreedLedger["上段左"].status = "agreed";
+  assert.throws(() => applyJudgment(agreedLedger, judgment({ followUp: followUp({ targetSlot: "上段左" }) })), /reassignment_requires_repair/);
   assert.throws(() => applyJudgment(ledger, judgment({ followUp: followUp({ candidateName: "記憶名" }) })), /duplicate_name_requires_repair/);
 });
 
