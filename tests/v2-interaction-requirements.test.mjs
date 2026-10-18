@@ -551,7 +551,8 @@ requirement('v2 UI: correct silhouette opens local naming; unanswered differs fr
     }
     assert.equal(e['name-dialog'].open, false);
   }
-  assert.equal(app.calls.length, 1, 'clicks, unknown selection and local naming perform no network request');
+  // The read-only record list (GET /api/records) is loaded once at start.
+  assert.equal(app.calls.filter((call) => call.path !== '/api/records').length, 1, 'clicks, unknown selection and local naming perform no network request');
   assert.ok(!e.history.textContent.includes('synthetic private answer '));
   e.submission.fire('submit');
   assert.equal(e['confirm-dialog'].open, true);

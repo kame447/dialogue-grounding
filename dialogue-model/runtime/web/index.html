@@ -14,11 +14,16 @@
       <nav aria-label="課題の進行"><ol class="progress">
         <li id="step-chat" data-state="active" aria-current="step"><span class="step-number">1</span>会話</li>
         <li id="step-names" data-state="upcoming"><span class="step-number">2</span>名前</li>
-        <li id="step-questionnaire" data-state="planned" aria-disabled="true"><span class="step-number">3</span>アンケート<small>予定</small></li>
+        <li id="step-questionnaire" data-state="upcoming"><span class="step-number">3</span>アンケート<small id="step-questionnaire-note">試行用</small></li>
         <li id="step-results" data-state="upcoming"><span class="step-number">4</span>結果</li>
       </ol></nav>
     </header>
     <p id="notice" role="status" aria-live="polite"></p>
+    <details id="record-history" class="record-history" hidden>
+      <summary id="record-summary">このブラウザの以前の試行</summary>
+      <p class="muted">以前の試行の会話・名前・結果は閲覧のみです。アンケートは提出するまで回答できます。</p>
+      <ul id="record-list" class="record-list"></ul>
+    </details>
     <form id="setup" class="panel">
       <h2>研究者用：試行の開始</h2>
       <label>方略<select name="strategy"><option value="repair-first">確認・修復を優先</option><option value="bypass-enabled">保留・後からの調整を許容</option></select></label>
@@ -39,6 +44,18 @@
           <p class="privacy-note">図形を選んで拡大・名前をメモできます。メモは相手に届きません。</p>
         </section>
         <aside class="panel dialogue" aria-label="会話と名前の確認">
+          <!-- Survey/review navigation (after the names are submitted). -->
+          <div id="review-bar" class="review-bar" hidden>
+            <p id="review-notice" class="review-notice"></p>
+            <nav id="stage-nav" class="stage-nav" aria-label="提出後の画面の切り替え">
+              <button type="button" data-stage="chat">会話</button><button type="button" data-stage="names">名前</button><button type="button" data-stage="questionnaire">アンケート</button><button type="button" data-stage="results">結果</button>
+            </nav>
+            <button id="exit-review" type="button" class="secondary" hidden>現在の試行に戻る</button>
+          </div>
+          <div id="survey-prompt" class="survey-prompt" role="region" aria-label="未回答のアンケート" hidden>
+            <p><strong>アンケートが未回答です。</strong><span id="survey-prompt-detail">数問の質問に回答してください。</span></p>
+            <button id="open-survey" type="button">アンケートに回答する</button>
+          </div>
           <section id="conversation-stage" class="stage" aria-labelledby="dialogue-title">
             <div class="conversation-head">
               <div class="panel-head"><h2 id="dialogue-title">会話</h2><span id="chat-status" class="sr-only" role="status" aria-live="polite"></span></div>
@@ -55,19 +72,32 @@
             </form>
           </section>
           <section id="name-stage" class="stage submission-panel" aria-labelledby="names-title" hidden>
-            <div class="panel-head"><h2 id="names-title" tabindex="-1">名前を決める</h2><button id="back-to-chat" type="button" class="quiet">会話に戻る</button></div>
-            <p class="muted">会話で共有した名前を確認してください。図形を選ぶと修正できます。</p>
+            <div class="panel-head"><h2 id="names-title" tabindex="-1"><span id="names-title-text">名前を決める</span></h2><button id="back-to-chat" type="button" class="quiet">会話に戻る</button></div>
+            <p id="names-help" class="muted">会話で共有した名前を確認してください。図形を選ぶと修正できます。</p>
             <div id="name-list" class="name-list" aria-label="提出する名前"></div>
             <form id="submission"><button id="review-names">回答を確認する</button></form>
             <p id="submission-status" role="status" aria-live="polite"></p>
+          </section>
+          <section id="questionnaire-stage" class="stage" aria-labelledby="questionnaire-title" hidden>
+            <div class="panel-head"><h2 id="questionnaire-title" tabindex="-1">アンケート</h2><span class="provisional-badge">試行用・研究者未承認</span></div>
+            <p id="questionnaire-notice" class="muted"></p>
+            <p id="questionnaire-lock" class="questionnaire-lock" hidden>結果（照合・AIの名前）は、このアンケートの提出後に表示します。</p>
+            <p id="questionnaire-loading" class="muted" role="status" aria-live="polite"></p>
+            <form id="questionnaire-form" novalidate hidden>
+              <div id="questionnaire-items"></div>
+              <label for="questionnaire-comment" class="questionnaire-comment">自由記述（任意）<textarea id="questionnaire-comment" rows="3"></textarea></label>
+              <p id="questionnaire-status" class="questionnaire-status" role="status" aria-live="polite"></p>
+              <button id="questionnaire-submit">アンケートを提出する</button>
+            </form>
+            <div class="stage-actions"><button id="questionnaire-to-names" type="button" class="secondary"><span aria-hidden="true">←</span> 名前を見る</button><button id="questionnaire-to-results" type="button" class="secondary">結果を見る <span aria-hidden="true">→</span></button></div>
           </section>
           <section id="results" class="stage" aria-labelledby="results-title" hidden>
             <h2 id="results-title" tabindex="-1">照合結果（暫定）</h2>
             <p class="muted">図形のそばに、あなたとAIの名称・暫定照合を表示しています。正式な採点規則は検討中です。</p>
             <div id="result-body"></div>
             <div id="result-list" class="summary-list" aria-label="照合結果の一覧"></div>
-            <p class="muted questionnaire-note">アンケートは予定段階のため、今回は実施しません。</p>
           </section>
+          <p id="new-trial-warning" class="new-trial-warning" role="status" hidden>この試行のアンケートは未提出です。もう一度押すと次の試行を準備します。この試行は後から「以前の試行」で回答できます。</p>
           <button id="new-trial" type="button" class="secondary" hidden>研究者用：次の試行を準備</button>
         </aside>
       </div>

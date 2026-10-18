@@ -120,7 +120,7 @@ test("six exact silhouette buttons have no spatial/ordinal labels and open keybo
   assert.equal(e["name-dialog"].open, true);
   e["name-cancel"].fire("click");
   assert.equal(path.fire("keydown", { key: "Enter" }).prevented, true);
-  assert.equal(calls.length, 1, "selection and zoom stay local");
+  assert.equal(calls.filter((call) => call.path !== "/api/records").length, 1, "selection and zoom stay local");
 });
 
 test("name editing/cancel and unknown stay local; all answers require explicit final confirmation", async () => {
@@ -132,10 +132,10 @@ test("name editing/cancel and unknown stay local; all answers require explicit f
   paths(e)[0].fire("click"); e["figure-name"].value = "捨てる編集"; e["name-cancel"].fire("click");
   assert.doesNotMatch(e.board.textContent, /捨てる編集/u);
   for (const path of paths(e).slice(1)) { path.fire("click"); e["name-unknown"].fire("click"); }
-  assert.equal(calls.length, 1);
+  assert.equal(calls.filter((call) => call.path !== "/api/records").length, 1);
   e.submission.fire("submit"); assert.equal(e["confirm-dialog"].open, true);
   assert.match(e["confirm-scene"].textContent, /会話の名前/u);
-  e["confirm-cancel"].fire("click"); assert.equal(calls.length, 1);
+  e["confirm-cancel"].fire("click"); assert.equal(calls.filter((call) => call.path !== "/api/records").length, 1);
   e.submission.fire("submit"); e["confirm-submit"].fire("click"); await tick();
   const request = calls.find((call) => call.path === "/api/names");
   assert.deepEqual(request.body, { names: { "s-a81c": "会話の名前", "s-f120": null, "s-119e": null, "s-cc02": null, "s-a620": null, "s-67b4": null }, confirm: true });
@@ -182,7 +182,7 @@ test("IME, Shift+Enter and repeated Enter do not accidentally send", async () =>
   }
   e.utterance.fire("compositionstart"); e.utterance.fire("keydown", { key: "Enter" }); e.utterance.fire("compositionend");
   e.utterance.fire("keydown", { key: "Enter", repeat: true });
-  assert.equal(calls.length, 1);
+  assert.equal(calls.filter((call) => call.path !== "/api/records").length, 1);
 });
 
 test("new trial clears old labels, dialogs, message drafts and result content, even for repeated seed", async () => {
