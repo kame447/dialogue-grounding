@@ -66,10 +66,11 @@ function validateAct(value, ledger) {
       (action === "agree" && candidateName === null && ledger[targetSlot].name === null) ||
       (action === "confirm" && discriminatingFeature === null) ||
       (["move_on", "close"].includes(action) && candidateName !== null)) throw new JudgmentValidationError("inconsistent_action");
-  // A slot may hold one working name. Overwriting any remembered name requires
-  // an explicit self-repair, including a named slot that was later deferred.
+  // A tentative name may adopt the other participant's wording on this slot.
+  // Agreed/deferred names and other acts still require explicit self-repair.
   if (targetSlot && ledger[targetSlot].name !== null && candidateName !== null &&
-      normalizeName(ledger[targetSlot].name) !== normalizeName(candidateName) && action !== "repair") {
+      normalizeName(ledger[targetSlot].name) !== normalizeName(candidateName) && action !== "repair" &&
+      !(ledger[targetSlot].status === "tentative" && ["agree", "confirm", "propose_name"].includes(action))) {
     throw new JudgmentValidationError("reassignment_requires_repair");
   }
   const assignedName = candidateName ?? (targetSlot && ["agree", "defer", "revisit"].includes(action) ? ledger[targetSlot].name : null);
