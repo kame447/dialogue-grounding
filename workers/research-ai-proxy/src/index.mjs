@@ -177,11 +177,15 @@ async function handleDecisions(request, env, fetchImpl) {
       signal: controller.signal,
     });
     if (!upstream.ok) {
-      return reply(upstream.status === 429 ? 429 : 502, {
-        error: upstream.status === 429 ? "upstream_rate_limited" : "upstream_error",
+      return reply(upstream.status === 402 ? 402 : upstream.status === 429 ? 429 : 502, {
+        error: upstream.status === 402 ? "upstream_payment_required" :
+          upstream.status === 429 ? "upstream_rate_limited" : "upstream_error",
       });
     }
-    const response = sanitizeDecision(await upstream.json(), payload.model, body.purpose);
+    let data;
+    try { data = await upstream.json(); }
+    catch { return reply(502, { error: "invalid_upstream_response" }); }
+    const response = sanitizeDecision(data, payload.model, body.purpose);
     return response ? reply(200, response) : reply(502, { error: "invalid_upstream_response" });
   } catch {
     return reply(controller.signal.aborted ? 504 : 502, {

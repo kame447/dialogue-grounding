@@ -71,14 +71,18 @@ export function sanitizeDecision(data, requestedModel, purpose) {
   }
   const usage = data.usage;
   const nonnegative = (value) => Number.isFinite(value) && value >= 0 ? value : null;
+  const boundedString = (value, limit) => typeof value === "string" && value.length <= limit ? value : null;
   return {
     purpose,
     model: data.model,
+    provider: boundedString(data.provider, 64),
+    id: boundedString(data.id, 128),
     action: choice,
     probabilities: Object.fromEntries(DECISION_ACTIONS.map((key) => [key, probabilities[key]])),
     confidence: confidence ?? null,
     usage: {
       inputTokens: nonnegative(usage?.input_tokens),
+      outputTokens: nonnegative(usage?.output_tokens),
       costUsd: nonnegative(usage?.cost),
     },
   };

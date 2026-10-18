@@ -69,7 +69,8 @@ export async function createNamingTaskV2({
     },
   };
   const dialogue = createDialogueV2({ client: trackingClient, strategy, image: { mimeType: model.mimeType, base64: model.png.toString("base64") },
-    anchors: model.anchors, judge, referenceMemory, decisionShadowClient });
+    anchors: model.anchors, judge, referenceMemory, decisionShadowClient,
+    onResearchUpdate: () => persist().catch(() => {}) });
   const queue = createHumanMessageQueue({ runAiTurn: dialogue.runAiTurn, initialPrivateState: dialogue.initialPrivateState() });
   const recordId = randomUUID();
   const startedAt = new Date(now()).toISOString();

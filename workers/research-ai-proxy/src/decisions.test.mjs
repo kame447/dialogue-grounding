@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { handleRequest } from "./index.mjs";
 import { DECISION_ACTIONS, DECISION_MODELS, OPENROUTER_DECISIONS_URL } from "./decisions.mjs";
+import { createDecisionComparisonClient } from "../../../dialogue-model/runtime/decisions-client.mjs";
 
 const TOKEN = "local-authentication-token-longer-than-thirty-two-characters";
 const env = {
@@ -121,4 +122,56 @@ test("Invalid, misrouted and sensitive upstream results fail closed", async () =
     async () => { throw new Error("sensitive network exception"); });
   assert.equal(fail.status, 502);
   assert.doesNotMatch(await fail.text(), /sensitive/);
+});
+
+test("Decision payment and rate limits keep their HTTP codes and never expose upstream secrets", async () => {
+  for (const [status, error] of [[402, "upstream_payment_required"], [429, "upstream_rate_limited"], [500, "upstream_error"]]) {
+    const response = await handleRequest(req("/v1/decisions", { purpose: "decision_jev", state: "公開発話" }), env,
+      async () => new Response(env.OPENROUTER_DECISIONS_API_KEY + env.UPSTREAM_API_KEY + TOKEN, { status }));
+    assert.equal(response.status, status === 500 ? 502 : status);
+    assert.deepEqual(await response.json(), { error });
+  }
+});
+
+test("non-JSON and invalid Decision bodies map to invalid_upstream_response without echoing secrets", async () => {
+  for (const response of [new Response("<html>" + env.OPENROUTER_DECISIONS_API_KEY + "</html>"), Response.json({ key: env.UPSTREAM_API_KEY }), Response.json(null)]) {
+    const result = await handleRequest(req("/v1/decisions", { purpose: "decision_luna", state: "公開発話" }), env, async () => response);
+    assert.equal(result.status, 502);
+    assert.deepEqual(await result.json(), { error: "invalid_upstream_response" });
+  }
+});
+
+test("synthetic Jev/Luna sample shapes preserve billed output tokens and bounded metadata end to end", async () => {
+  for (const purpose of Object.keys(DECISION_MODELS)) {
+    const result = { ...upstreamResult(DECISION_MODELS[purpose]),
+      model: DECISION_MODELS[purpose] + (purpose === "decision_jev" ? "-20261014" : "-20261006"),
+      provider: "synthetic-provider", id: "synthetic-request-id", usage: { input_tokens: 98, output_tokens: 86, cost: 0.000004 } };
+    if (purpose === "decision_jev") result.answers.action.probabilities = Object.fromEntries(DECISION_ACTIONS.map((action) => [action, action === "accept" ? 1 : 0]));
+    const client = createDecisionComparisonClient({ provider: "cloudflare", baseUrl: "https://research.test/v1", apiKey: TOKEN },
+      async (url, init) => handleRequest(new Request(url, init), env, async () => Response.json(result)));
+    const data = await client.chooseAction({ purpose, state: "公開発話" });
+    assert.equal(data.action, "accept");
+    assert.equal(data.probabilities.accept, purpose === "decision_jev" ? 1 : 0.84);
+    assert.equal(data.usage.outputTokens, 86);
+    assert.equal(data.provider, "synthetic-provider");
+    assert.equal(data.id, "synthetic-request-id");
+    assert.doesNotMatch(JSON.stringify(data), /sk-or-|key-not-to-be-forwarded|local-authentication/);
+  }
+});
+
+test("Decision optional metadata is bounded and invalid usage numbers become null", async () => {
+  const bodies = [
+    { provider: "p".repeat(64), id: "i".repeat(128), usage: { output_tokens: 0 } },
+    { provider: "p".repeat(65), id: "i".repeat(129), usage: { output_tokens: -1 } },
+    { provider: 10, id: {}, usage: { output_tokens: "86" } },
+  ];
+  for (let index = 0; index < bodies.length; index++) {
+    const response = await handleRequest(req("/v1/decisions", { purpose: "decision_jev", state: "公開発話" }), env,
+      async () => Response.json({ ...upstreamResult(DECISION_MODELS.decision_jev), ...bodies[index] }));
+    assert.equal(response.status, 200);
+    const data = await response.json();
+    assert.equal(data.provider, index === 0 ? bodies[index].provider : null);
+    assert.equal(data.id, index === 0 ? bodies[index].id : null);
+    assert.equal(data.usage.outputTokens, index === 0 ? 0 : null);
+  }
 });

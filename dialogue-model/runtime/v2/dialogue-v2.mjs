@@ -72,13 +72,14 @@ function abortIf(signal) {
  * @param {{ client, strategy, image: {mimeType, base64}, anchors: {id, bbox, centroid}[], judge?, referenceMemory?: boolean }} options
  */
 export function createDialogueV2({ client, strategy, image, anchors, judge = null, referenceMemory = false,
-  decisionShadowClient = null }) {
+  decisionShadowClient = null, onResearchUpdate = null }) {
   if (!client || typeof client.complete !== "function") throw new Error("A chat client is required");
   if (!STRATEGIES.includes(strategy)) throw new Error("Unsupported dialogue strategy");
   if (typeof referenceMemory !== "boolean") throw new Error("Invalid memory option");
   if (decisionShadowClient !== null && typeof decisionShadowClient?.chooseAction !== "function") {
     throw new Error("Invalid decision shadow client");
   }
+  if (onResearchUpdate !== null && typeof onResearchUpdate !== "function") throw new Error("Invalid research update callback");
   const ownImage = { mimeType: image.mimeType, base64: image.base64 };
   ownImageMessage(ownImage);
   const slots = anchors.map((anchor) => anchor.id);
@@ -86,6 +87,34 @@ export function createDialogueV2({ client, strategy, image, anchors, judge = nul
   const dialogueJudge = judge ?? createLunaJudge(client);
   // Research-only trace of every attempted run (including superseded or failed ones).
   const attempts = [];
+  const notifyResearchUpdate = () => {
+    Promise.resolve().then(() => onResearchUpdate?.()).catch(() => {});
+  };
+
+  function startDecisionShadow(trace, input) {
+    const purposes = ["decision_jev", "decision_luna"];
+    const errors = (error) => purposes.map((purpose) => ({ purpose, status: "error", error }));
+    let evidence;
+    try { evidence = buildDecisionEvidence(input); }
+    catch {
+      trace.decisionShadow = errors("evidence_unavailable");
+      notifyResearchUpdate();
+      return;
+    }
+    trace.decisionShadow = { status: "pending" };
+    // Research work has no awaited dependency on generation or queue completion.
+    Promise.allSettled(purposes.map((purpose) => Promise.resolve().then(() =>
+      decisionShadowClient.chooseAction({ purpose, state: evidence })))).then((results) => {
+      trace.decisionShadow = clone(results.map((result, index) => result.status === "fulfilled" ? {
+        purpose: purposes[index], model: result.value.model, action: result.value.action,
+        provider: result.value.provider ?? null, id: result.value.id ?? null,
+        probabilities: result.value.probabilities, usage: result.value.usage ?? null,
+        latencyMs: result.value.latencyMs ?? null, status: "ok",
+      } : { purpose: purposes[index], status: "error", error: "decision_unavailable" }));
+    }).catch(() => {
+      trace.decisionShadow = errors("decision_unavailable");
+    }).then(notifyResearchUpdate).catch(() => {});
+  }
 
   function initialPrivateState() {
     return {
@@ -133,21 +162,9 @@ export function createDialogueV2({ client, strategy, image, anchors, judge = nul
     trace.judgment = { ...judgment };
     delete trace.judgment.reference;
     if (decisionShadowClient) {
-      const purposes = ["decision_jev", "decision_luna"];
-      try {
-        const evidence = buildDecisionEvidence({ events, ownLedger: state.ledger, judgment, strategy });
-        const results = await Promise.allSettled(purposes.map((purpose) =>
-          decisionShadowClient.chooseAction({ purpose, state: evidence })));
-        abortIf(signal);
-        trace.decisionShadow = results.map((result, index) => result.status === "fulfilled" ? {
-          purpose: purposes[index], model: result.value.model, action: result.value.action,
-          probabilities: result.value.probabilities, usage: result.value.usage ?? null,
-          latencyMs: result.value.latencyMs ?? null, status: "ok",
-        } : { purpose: purposes[index], status: "error", error: "decision_unavailable" });
-      } catch {
-        trace.decisionShadow = purposes.map((purpose) => ({ purpose, status: "error", error: "evidence_unavailable" }));
-      }
+      startDecisionShadow(trace, { events, ownLedger: state.ledger, judgment, strategy });
     }
+    abortIf(signal);
     trace.validation = dialogueJudge.getDiagnostics?.().at(-1) ?? null;
     trace.status = "generation_error";
     const { action, targetSlot, candidateName, discriminatingFeature } = judgment;
@@ -168,8 +185,11 @@ export function createDialogueV2({ client, strategy, image, anchors, judge = nul
     if (state.graph) trace.memory.opsApplied = memoryUpdate.operations.length;
     trace.ownLedgerAfter = clone(nextLedger);
     trace.status = "staged";
+    const committedTrace = { ...clone(trace), status: "committed" };
+    // Committed judgments keep a pending marker; settled shadow data belongs only to attempts.
+    if (decisionShadowClient) committedTrace.decisionShadow = { status: "pending" };
     // The queue installs this only if the snapshot is still current.
-    return { text: result.text, privateState: { ledger: nextLedger, judgments: [...state.judgments, { ...clone(trace), status: "committed" }], graph: nextGraph } };
+    return { text: result.text, privateState: { ledger: nextLedger, judgments: [...state.judgments, committedTrace], graph: nextGraph } };
   }
 
   async function finalRequest({ events, privateState }, retry = false) {

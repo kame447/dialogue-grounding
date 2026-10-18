@@ -39,7 +39,8 @@ export function createDecisionComparisonClient(config, fetchImpl = globalThis.fe
           signal: controller.signal,
         });
         if (!response.ok) {
-          throw new DecisionConnectionError(response.status === 429 ? "rate_limited" : "upstream_error");
+          throw new DecisionConnectionError(response.status === 402 ? "payment_required" :
+            response.status === 429 ? "rate_limited" : "upstream_error");
         }
         const data = await response.json();
         if (data?.purpose !== purpose || !DECISION_ACTIONS.includes(data.action) ||
@@ -54,6 +55,8 @@ export function createDecisionComparisonClient(config, fetchImpl = globalThis.fe
         }
         return {
           purpose, model: data.model, action: data.action,
+          provider: typeof data.provider === "string" && data.provider.length <= 64 ? data.provider : null,
+          id: typeof data.id === "string" && data.id.length <= 128 ? data.id : null,
           probabilities: data.probabilities, confidence: data.confidence ?? null,
           usage: data.usage ?? null,
           latencyMs: Math.round(performance.now() - started),
