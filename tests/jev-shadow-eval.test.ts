@@ -10,6 +10,8 @@ import { auditRecord, auditCases, inputLeaks, answerKeyTokens, toJudgeInput } fr
 import { shadowFlags } from "../dialogue-model/runtime/diagnostics/jev-shadow-eval/metrics.ts";
 import { mockVerdict, createMockJevAxesClient } from "../dialogue-model/runtime/diagnostics/jev-shadow-eval/mock-client.ts";
 import { runShadow, budgeted, groundingAxesClient, parseCase, parseKnownFailure, main, liveAllowed } from "../dialogue-model/runtime/diagnostics/jev-shadow-eval/run.ts";
+import { buildGroundingEvidence } from "../dialogue-model/runtime/grounding/evidence.ts";
+import { createMockGroundingJudge } from "../dialogue-model/runtime/grounding/client.ts";
 import type { EvalCaseLike, JevAxesClient, JevAxesInput } from "../dialogue-model/runtime/diagnostics/jev-shadow-eval/types.ts";
 
 const SECRET_TEXT = "合成テキスト固有語ZQX";
@@ -146,12 +148,14 @@ test("live runs: never the session replay, never non-synthetic or unsendable cas
     axisQuality: { target: "weak", name: "derived" } })], client: createMockJevAxesClient() });
   assert.equal(perAxis.cases.bySplit.dev.headline.target.goldPresent, 0, "weak target gold is dropped");
   assert.equal(perAxis.cases.bySplit.dev.headline.name.goldPresent, 1, "derived name gold on the same case stays");
+  assert.equal(perAxis.cases.bySplit.dev.byQuality.weak.target.goldPresent, 1);
+  assert.equal(perAxis.cases.bySplit.dev.byQuality.weak.name.goldPresent, 0, "per-quality rows are per axis too");
+  assert.equal(perAxis.cases.bySplit.dev.byQuality.derived.name.goldPresent, 1);
   assert.deepEqual(Object.keys(mixed.cases.bySplit.dev.byQuality), ["derived", "weak"]);
   assert.equal(liveAllowed(cases[1]), false);
   assert.equal(liveAllowed(cases[3]), false);
-  assert.equal(liveAllowed(syntheticCase({ externalModelAllowed: undefined, sendable: true })), true);
-  assert.equal(liveAllowed(syntheticCase({ externalModelAllowed: false, sendable: true })), false, "either false blocks");
   assert.equal(liveAllowed(syntheticCase({ externalModelAllowed: undefined })), false, "unmarked is not sendable");
+  assert.equal(liveAllowed({ ...syntheticCase(), sendable: true, externalModelAllowed: undefined } as EvalCaseLike), false, "no alias: only externalModelAllowed counts");
 });
 
 test("live runs stop on a missing route and report it", async () => {
@@ -174,7 +178,7 @@ test("budget wrapper rejects invalid verdicts and invalid budgets", async () => 
 test("grounding adapter maps speakers, judges as of the last public turn and passes nothing else", async () => {
   let built: unknown = null;
   const client = groundingAxesClient({
-    buildState(input) { built = input; return "STATE"; },
+    buildState(input) { built = input; return { state: "STATE" }; },
     async judge(request) {
       assert.deepEqual(request, { purpose: "grounding_jev", state: "STATE" });
       return { model: "jev-x", identification: { level: "insufficient", scores: { insufficient: 0.6 } }, nameAgreement: { level: "unclear" }, usage: null, latencyMs: 5 };
@@ -184,6 +188,18 @@ test("grounding adapter maps speakers, judges as of the last public turn and pas
   assert.deepEqual(built, { events: [{ seq: 1, speaker: "ai", text: "a" }, { seq: 2, speaker: "human", text: "b" }], asOfSeq: 2, aiHypothesis: null });
   assert.equal(v.target, "insufficient");
   assert.equal(client.kind, "live");
+});
+
+test("adapter runs end to end on the real grounding evidence builder with its mock judge", async () => {
+  const states: string[] = [];
+  const judge = createMockGroundingJudge((state) => { states.push(state);
+    return { identification: state.includes("そうそう") ? "supported" : "insufficient", nameAgreement: "unclear" }; });
+  const client = groundingAxesClient({ buildState: buildGroundingEvidence, judge: (request) => judge.judge(request) });
+  const run = await runShadow({ cases: [syntheticCase()], client, maxCalls: 1 });
+  assert.deepEqual(run.meta.calls.failureCodes, {});
+  assert.equal(run.cases.bySplit.dev.headline.target.agreement, 1);
+  assert.equal(states.length, 1);
+  assert.ok(!states[0].includes("supported\"") && !states[0].includes("derived"), "no gold or quality in the judge state");
 });
 
 test("case audit: split leakage by group, historical marked sendable, label distribution", () => {

@@ -14,6 +14,11 @@ import { mkdirSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { outsideRepositoryDirectory } from "../../naming-task.mjs";
+import { loadConfig } from "../../config.mjs";
+import { createGroundingJudgeClient } from "../../grounding/client.ts";
+import { buildGroundingEvidence } from "../../grounding/evidence.ts";
+import { toJudgeInput as caseJudgeInput } from "../../jev-grounding/evalcase.ts";
+import type { GroundingEvalCase } from "../../jev-grounding/evalcase.ts";
 import { auditCases, auditRecord, isSendable, toJudgeInput } from "./audit.ts";
 import { createMockJevAxesClient } from "./mock-client.ts";
 import { caseProbe, summarizeCases, summarizeTurns, turnResult } from "./metrics.ts";
@@ -26,12 +31,12 @@ import type { AiHypothesis, EvalCaseLike, FailureTag, JevAxesClient, JevAxesInpu
 
 /** The parts of the grounding judge (dialogue-model/runtime/grounding/) this runner uses. */
 export type GroundingDeps = {
-  buildState(input: { events: { seq: number; speaker: "human" | "ai"; text: string }[]; asOfSeq: number; aiHypothesis?: AiHypothesis | null }): string;
+  buildState(input: { events: { seq: number; speaker: "human" | "ai"; text: string }[]; asOfSeq: number; aiHypothesis?: AiHypothesis | null }): { state: string };
   judge(request: { purpose: "grounding_jev"; state: string }): Promise<{
     model: string;
     identification: { level: string; scores?: Record<string, number> };
     nameAgreement: { level: string; scores?: Record<string, number> };
-    usage: { inputTokens?: number; outputTokens?: number; costUsd?: number } | null;
+    usage: { inputTokens?: number | null; outputTokens?: number | null; costUsd?: number | null } | null;
     latencyMs: number;
   }>;
 };
@@ -42,11 +47,12 @@ export function groundingAxesClient(deps: GroundingDeps): JevAxesClient {
     kind: "live" as const,
     async judgeAxes(input: JevAxesInput): Promise<JevAxesVerdict> {
       const events = input.history.map((t, i) => ({ seq: i + 1, speaker: t.speaker === "self" ? "ai" as const : "human" as const, text: t.text }));
-      const v = await deps.judge({ purpose: "grounding_jev", state: deps.buildState({ events, asOfSeq: events.length, aiHypothesis: input.aiHypothesis ?? null }) });
+      const v = await deps.judge({ purpose: "grounding_jev", state: deps.buildState({ events, asOfSeq: events.length, aiHypothesis: input.aiHypothesis ?? null }).state });
       return {
         target: v.identification.level as TargetLevel, name: v.nameAgreement.level as NameLevel,
         scores: { target: v.identification.scores, name: v.nameAgreement.scores },
-        model: v.model, latencyMs: v.latencyMs, usage: v.usage,
+        model: v.model, latencyMs: v.latencyMs,
+        usage: v.usage && { inputTokens: v.usage.inputTokens ?? undefined, outputTokens: v.usage.outputTokens ?? undefined, costUsd: v.usage.costUsd ?? undefined },
       };
     },
   });
@@ -150,7 +156,8 @@ export async function runShadow({ record = null, cases = [], knownFailures = [],
     if (live && !liveAllowed(c)) { caseResults.push({ ...base, verdict: null, error: "not_sendable", probe: caseProbe(c, null) }); continue; }
     if (stopped) { caseResults.push({ ...base, verdict: null, error: "skipped_" + stopped, probe: caseProbe(c, null) }); continue; }
     try {
-      const v = await judge.judgeAxes({ history: c.history.slice(0, c.judgedTurnIndex + 1).map((t) => ({ speaker: t.speaker, text: t.text })) });
+      // jev-evalset's view of a case: public history only, no gold, tags, probe or old action.
+      const v = await judge.judgeAxes({ history: caseJudgeInput(c as unknown as GroundingEvalCase).history.slice(0, c.judgedTurnIndex + 1) });
       const verdict = { target: v.target, name: v.name };
       caseResults.push({ ...base, verdict, error: null, probe: caseProbe(c, verdict) });
     } catch (error) {
@@ -225,15 +232,9 @@ function args(argv: string[]) {
   return out;
 }
 
-async function liveClient(): Promise<JevAxesClient> {
-  // Specifiers are computed so the type-check does not depend on the grounding
-  // module, which ships in a separate PR.
-  const base = "../../grounding/";
-  const evidence = await import(base + "evidence.ts");
-  const client = await import(base + "client.ts");
-  const { loadConfig } = await import("../../config.mjs");
-  const judge = client.createGroundingJudgeClient(loadConfig(process.env));
-  return groundingAxesClient({ buildState: evidence.buildGroundingEvidence, judge: (request) => judge.judge(request) });
+function liveClient(): JevAxesClient {
+  const judge = createGroundingJudgeClient(loadConfig(process.env));
+  return groundingAxesClient({ buildState: buildGroundingEvidence, judge: (request) => judge.judge(request) });
 }
 
 export async function main(argv = process.argv.slice(2), log = console.log) {
@@ -257,7 +258,7 @@ export async function main(argv = process.argv.slice(2), log = console.log) {
   const cases = rawCases.map(parseCase).filter((c): c is EvalCaseLike => c !== null);
   const rawFailures = a.failures ? parseJsonl(resolve(a.failures)) : [];
   const knownFailures = rawFailures.map(parseKnownFailure).filter((f): f is KnownFailure => f !== null);
-  const client = live ? await liveClient() : createMockJevAxesClient();
+  const client = live ? liveClient() : createMockJevAxesClient();
   const result = await runShadow({ record, cases, knownFailures, client, maxCalls });
   const input = { casesRead: rawCases.length, casesInvalid: rawCases.length - cases.length, failuresRead: rawFailures.length, failuresInvalid: rawFailures.length - knownFailures.length };
   mkdirSync(out, { recursive: true, mode: 0o700 });

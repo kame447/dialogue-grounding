@@ -67,7 +67,7 @@ function common(run: ShadowRun) {
     `- Gold distribution: target ${j(ca.goldTarget)}; name ${j(ca.goldName)}; label basis ${j(ca.labelBasis)}`,
     "",
     "## Labelled cases (agreement with provisional gold)",
-    "Headline rows exclude weak gold per axis (`axisQuality`, else `labelQuality`); per-quality rows (by `labelQuality`) follow. Risk-flag rates use the target axis.",
+    "Headline rows exclude weak gold per axis (`axisQuality`, else `labelQuality`); per-quality rows (also per axis) follow. A case's target and name can fall under different qualities. Risk-flag rates use the target axis.",
     ...Object.entries(run.cases.bySplit).flatMap(([split, s]) => [
       `- ${split} (headline, non-weak): ${j(brief(s.headline))}`,
       ...Object.entries(s.byQuality).map(([q, b]) => `  - ${q}: ${j(brief(b))}`)]),
