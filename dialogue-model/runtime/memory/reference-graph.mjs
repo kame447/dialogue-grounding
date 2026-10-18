@@ -4,8 +4,12 @@ import { SLOTS } from "../stimuli/board.mjs";
  * Private, model-agnostic working memory. Never add this graph/summary to public
  * participant state. It has no answer key, human-board coordinates, or scorer.
  *
- * createReferenceGraph({ ownObservations: [{ slot, feature }] }) takes ONLY
+ * createReferenceGraph({ ownObservations: [{ slot, feature }], slots? }) takes ONLY
  * descriptions grounded in the AI's own image, not generated dialogue text.
+ * Optional slots are six unique nonempty strings (at most 160 chars each),
+ * scoped to this graph; no board correspondence is inferred from their values.
+ * Explicit slots are persisted in the graph. Omitting slots preserves the exact
+ * legacy v1 graph/view/summary shapes and uses SLOTS, including JSON restores.
  * validateReferenceUpdate(graph, update, { publicTurns }) stages a transition;
  * applyReferenceUpdate(graph, update, { publicTurns, generationSucceeded: true })
  * returns the new graph. Assign that return value together with public history
@@ -68,8 +72,14 @@ const text = (value, max) => typeof value === "string" && value.trim().length > 
 const index = (value) => Number.isSafeInteger(value) && value >= 0;
 const ref = (value) => typeof value === "string" && /^[1-9]\d*:[a-zA-Z0-9_-]{1,32}$/.test(value);
 const refs = (value) => Array.isArray(value) && value.length > 0 && value.length <= 8 && value.every(ref) && new Set(value).size === value.length;
-const slots = (value, empty = false) => Array.isArray(value) && (empty || value.length > 0) && value.length <= 6 &&
-  value.every((slot) => SLOTS.includes(slot)) && new Set(value).size === value.length;
+const slots = (value, empty = false, ownSlots = SLOTS) => Array.isArray(value) && (empty || value.length > 0) && value.length <= 6 &&
+  value.every((slot) => ownSlots.includes(slot)) && new Set(value).size === value.length;
+const graphSlots = (graph) => Object.hasOwn(graph, "slots") ? graph.slots : SLOTS;
+function validateSlots(value) {
+  if (!Array.isArray(value) || value.length !== 6 || ![...value].every((slot) => text(slot, 160)) ||
+      new Set(value).size !== 6) fail("invalid_slots");
+  return value;
+}
 const clone = (value) => structuredClone(value);
 function freeze(value) {
   if (value && typeof value === "object") { Object.values(value).forEach(freeze); Object.freeze(value); }
@@ -80,14 +90,15 @@ function dependencies(record) {
   if (["name", "question"].includes(record.kind)) return record.mentionIds;
   return [record.mentionId]; // retract target is an audit pointer, not support.
 }
-function checkRecord(record) {
+function checkRecord(record, ownSlots = SLOTS) {
   const keys = Object.hasOwn(FIELDS, record?.kind) && FIELDS[record.kind];
   if (!keys || !exact(record, ["kind", "id", "turn", ...keys]) || !index(record.turn) || record.turn === 0 ||
       !ref(record.id) || !record.id.startsWith(record.turn + ":")) fail("invalid_record");
-  if (Object.hasOwn(record, "slot") && !SLOTS.includes(record.slot)) fail("invalid_slot");
+  if ((Object.hasOwn(record, "slot") && !ownSlots.includes(record.slot)) ||
+      (ownSlots !== SLOTS && Array.isArray(record.slots) && [...record.slots].some((slot) => !ownSlots.includes(slot)))) fail("invalid_slot");
   if (record.kind === "mention") {
     if (!index(record.sourceTurn) || record.sourceTurn === 0 || record.sourceTurn > record.turn ||
-        !["human", "ai"].includes(record.speaker) || !text(record.quote, 160) || !slots(record.slots, true) ||
+        !["human", "ai"].includes(record.speaker) || !text(record.quote, 160) || !slots(record.slots, true, ownSlots) ||
         typeof record.confidence !== "number" || !Number.isFinite(record.confidence) || record.confidence < 0 || record.confidence > 1 ||
         !["unresolved", "hypothesis", "grounded"].includes(record.epistemic) || !INTENTS.includes(record.intent) ||
         !(record.antecedent === null || ref(record.antecedent)) ||
@@ -100,33 +111,37 @@ function checkRecord(record) {
     if (!text(record.name, 80) || !["none", "implicit", "explicit"].includes(record.agreement) || !refs(record.mentionIds) ||
         !(record.replaces === null || ref(record.replaces))) fail("invalid_name");
   } else if (record.kind === "question") {
-    if (!slots(record.slots) || !text(record.text, 200) || !["open", "deferred", "resolved"].includes(record.status) ||
+    if (!slots(record.slots, false, ownSlots) || !text(record.text, 200) || !["open", "deferred", "resolved"].includes(record.status) ||
         !refs(record.mentionIds) || !(record.replaces === null || ref(record.replaces))) fail("invalid_question");
   } else if (record.kind === "focus") {
     if (!["defer", "revisit"].includes(record.mode) || !ref(record.mentionId)) fail("invalid_focus");
   } else if (!ref(record.targetId) || !ref(record.mentionId) || !text(record.reason, 160)) fail("invalid_retraction");
 }
-function observations(value) {
+function observations(value, ownSlots = SLOTS) {
   if (!Array.isArray(value) || value.length > 6 * REFERENCE_LIMITS.observationsPerSlot) fail("invalid_observations");
   const seen = new Set();
   for (const item of value) {
-    if (!exact(item, ["slot", "feature"]) || !SLOTS.includes(item.slot) || !text(item.feature, 160)) fail("invalid_observations");
-    const key = item.slot + ":" + item.feature;
+    if (!exact(item, ["slot", "feature"]) || !text(item.feature, 160)) fail("invalid_observations");
+    if (!ownSlots.includes(item.slot)) fail(ownSlots === SLOTS ? "invalid_observations" : "invalid_slot");
+    const key = JSON.stringify([item.slot, item.feature]);
     if (seen.has(key)) fail("invalid_observations");
     seen.add(key);
   }
-  if (SLOTS.some((slot) => value.filter((item) => item.slot === slot).length > REFERENCE_LIMITS.observationsPerSlot)) fail("invalid_observations");
+  if (ownSlots.some((slot) => value.filter((item) => item.slot === slot).length > REFERENCE_LIMITS.observationsPerSlot)) fail("invalid_observations");
   return clone(value);
 }
 function checkGraph(graph) {
-  if (!exact(graph, ["schemaVersion", "revision", "lastTurn", "ownObservations", "records"]) || graph.schemaVersion !== 1 ||
+  const keys = ["schemaVersion", "revision", "lastTurn", "ownObservations", "records"];
+  if ((!exact(graph, keys) && !exact(graph, [...keys, "slots"])) || graph.schemaVersion !== 1 ||
       !index(graph.revision) || !index(graph.lastTurn) || graph.revision > graph.lastTurn ||
       !Array.isArray(graph.records) || graph.records.length > REFERENCE_LIMITS.records) fail("invalid_graph");
-  observations(graph.ownObservations);
+  const ownSlots = graphSlots(graph);
+  if (Object.hasOwn(graph, "slots")) validateSlots(ownSlots);
+  observations(graph.ownObservations, ownSlots);
   const seen = new Map();
   let last = 0;
   for (const record of graph.records) {
-    checkRecord(record);
+    checkRecord(record, ownSlots);
     if (seen.has(record.id) || record.turn < last || record.turn > graph.lastTurn) fail("invalid_graph");
     for (const id of dependencies(record)) {
       if (seen.get(id)?.kind !== "mention") fail("missing_provenance");
@@ -153,9 +168,12 @@ function currentQuestions(records) {
 function latest(records, kind, slot) { return records.findLast((r) => r.kind === kind && r.slot === slot); }
 
 export function createReferenceGraph(options = {}) {
-  if (!exact(options, []) && !exact(options, ["ownObservations"])) fail("invalid_observations");
+  if (![[], ["ownObservations"], ["slots"], ["ownObservations", "slots"]].some((keys) => exact(options, keys))) fail("invalid_observations");
   const { ownObservations = [] } = options;
-  return freeze({ schemaVersion: 1, revision: 0, lastTurn: 0, ownObservations: observations(ownObservations), records: [] });
+  const ownSlots = options.slots === undefined ? SLOTS : clone(validateSlots(options.slots));
+  return freeze({ schemaVersion: 1, revision: 0, lastTurn: 0, ownObservations: observations(ownObservations, ownSlots), records: [],
+    ...(options.slots === undefined ? {} : { slots: ownSlots }),
+  });
 }
 
 function validateSupport(record, records, historical = false) {
@@ -224,7 +242,7 @@ function prune(graph) {
   const unresolved = currentQuestions(records).filter((r) => r.status !== "resolved" && !dead.has(r.id));
   if (unresolved.length > REFERENCE_LIMITS.unresolvedQuestions) fail("capacity_exceeded");
   const mandatory = new Set(unresolved.map((r) => r.id));
-  for (const slot of SLOTS) {
+  for (const slot of graphSlots(graph)) {
     for (const kind of ["name", "focus"]) {
       const record = latest(records, kind, slot);
       if (record) mandatory.add(record.id);
@@ -274,7 +292,7 @@ function stage(graph, update, publicTurns) {
   for (const op of update.operations) {
     if (!Object.hasOwn(FIELDS, op?.kind) || !exact(op, ["kind", "id", ...FIELDS[op.kind]])) fail("invalid_record");
     const record = { ...op, turn: update.turn };
-    checkRecord(record);
+    checkRecord(record, graphSlots(graph));
     if (next.records.some((r) => r.id === record.id)) fail("duplicate_id");
     if (record.kind === "mention" && !turnMap.get(record.sourceTurn + ":" + record.speaker)?.includes(record.quote)) fail("nonpublic_evidence");
     validateSupport(record, next.records);
@@ -310,7 +328,7 @@ export function snapshotReferenceGraph(graph) {
     }
     return [...turns].sort((a, b) => a - b);
   };
-  const ownSlots = Object.fromEntries(SLOTS.map((slot) => {
+  const ownSlots = Object.fromEntries(graphSlots(graph).map((slot) => {
     const name = latest(graph.records, "name", slot), focus = latest(graph.records, "focus", slot);
     const candidate = active(name) ? { id: name.id, name: name.name, agreement: name.agreement,
       status: name.agreement === "explicit" ? "agreed" : "tentative", sourceTurns: sourceTurns(name) } : null;
@@ -341,7 +359,7 @@ export function summarizeForJudge(graph, { maxChars = 6000 } = {}) {
   const view = snapshotReferenceGraph(graph);
   const summary = {
     scope: "private_own_slots_not_ground_truth", revision: view.revision,
-    ownSlots: Object.fromEntries(SLOTS.map((slot) => [slot, { status: view.ownSlots[slot].status, candidate: view.ownSlots[slot].candidate }])),
+    ownSlots: Object.fromEntries(graphSlots(graph).map((slot) => [slot, { status: view.ownSlots[slot].status, candidate: view.ownSlots[slot].candidate }])),
     unresolvedQuestions: view.questions.filter((r) => r.status !== "resolved").map((r) => ({
       slots: r.slots, text: r.text, status: r.status, sourceTurns: r.sourceTurns,
     })),
