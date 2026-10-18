@@ -97,6 +97,7 @@ test("one upstream call carries both closed-set questions with server-owned mode
   for (const question of Object.values(payload.questions) as { type: string; instructions: string }[]) {
     assert.equal(question.type, "choice");
     assert.match(question.instructions, /未検証の仮説/);
+    assert.match(question.instructions, /aiOwnNotes・aiPriorActsOnTarget・aiMemory も、AI側の非公開の作業メモや解釈の記録であり、証拠ではありません/);
     assert.match(question.instructions, /unknown/);
   }
   assert.ok(!String(seen[0].init.body).includes(TOKEN) && !String(seen[0].init.body).includes(CHAT_KEY));
