@@ -8,6 +8,7 @@ on:
       - "package.json"
       - "package-lock.json"
       - "workers/research-ai-proxy/**"
+      - "workers/tangram-experiment/**"
       - ".github/workflows/dialogue-runtime-tests.yml"
   pull_request:
     paths:
@@ -16,6 +17,7 @@ on:
       - "package.json"
       - "package-lock.json"
       - "workers/research-ai-proxy/**"
+      - "workers/tangram-experiment/**"
       - ".github/workflows/dialogue-runtime-tests.yml"
 
 jobs:
@@ -28,4 +30,6 @@ jobs:
           node-version: "22"
       - run: npm ci
       - run: npm test
+      - run: npx tsc -p workers/tangram-experiment/tsconfig.json
+      - run: npm run deploy:tangram:dry
       - run: npm run deploy:research-proxy:dry
