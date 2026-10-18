@@ -6,7 +6,8 @@ import { AIConnectionError, createChatClient } from "../dialogue-model/runtime/c
 import { createLunaJudge, JUDGE_TIME_BUDGET_MS, JUDGE_MIN_RETRY_MS } from "../dialogue-model/runtime/judgment/luna.mjs";
 import { createOwnLedger, SAFE_JUDGMENT } from "../dialogue-model/runtime/judgment/schema.mjs";
 import { createReferenceGraph } from "../dialogue-model/runtime/memory/reference-graph.mjs";
-import { createDialogueV2 } from "../dialogue-model/runtime/v2/dialogue-v2.mjs";
+import { createDialogueV2, GENERATION_TIMEOUT_MS } from "../dialogue-model/runtime/v2/dialogue-v2.mjs";
+import { createNamingTaskV2 } from "../dialogue-model/runtime/v2/naming-task-v2.mjs";
 
 type Message = { role: string; content: unknown };
 type Options = { phase?: string; timeoutMs?: number };
@@ -97,4 +98,81 @@ test("memory ON: a stalled judge call still yields a public reply through the re
   assert.equal(committed.judgment.action, "accept");
   assert.deepEqual(committed.validation.failures, ["connection_timeout"]);
   assert.deepEqual(turn.privateState.ledger, createOwnLedger(ids));
+});
+
+// Generation bound (follow-up): one retry only for a stall or a pre-response failure.
+function scriptedGeneration(failures: Array<AIConnectionError | null>) {
+  const generation: Options[] = [];
+  const client = { async complete(_m: Message[], options: Options = {}) {
+    if (options.phase !== "generation") return { text: JSON.stringify(SAFE_JUDGMENT) };
+    generation.push(options);
+    const failure = failures[generation.length - 1];
+    if (failure) throw failure;
+    return { text: "家みたいな形がありますね。" };
+  } };
+  return { client, generation };
+}
+const failureOf = (code: string, preResponse: boolean, status?: number) =>
+  Object.assign(new AIConnectionError(code, status), { preResponse });
+const humanEvents = [{ id: "event-1", seq: 1, speaker: "human", text: "家みたいなのありますね" }];
+async function turn(client: { complete(m: Message[], o?: Options): Promise<{ text: string }> }) {
+  const dialogue = createDialogueV2({ client, strategy: "repair-first", image, anchors, referenceMemory: true });
+  const run = dialogue.runAiTurn({ events: humanEvents, lastEventId: "event-1", privateState: dialogue.initialPrivateState(), signal: new AbortController().signal });
+  return { run, attempts: () => dialogue.getAttempts() };
+}
+
+for (const [name, failure] of [["timeout", failureOf("timeout", false)], ["pre-response network", failureOf("network_error", true)]] as const) {
+  test(`generation: a ${name} failure gets exactly one retry with the bounded deadline`, async () => {
+    const { client, generation } = scriptedGeneration([failure]);
+    const { run, attempts } = await turn(client);
+    const result = await run;
+    assert.equal(result.text, "家みたいな形がありますね。");
+    assert.deepEqual(generation.map((o) => o.timeoutMs), [GENERATION_TIMEOUT_MS, GENERATION_TIMEOUT_MS]);
+    assert.equal(result.privateState.judgments.at(-1)!.generationRetried, true);
+    assert.equal(attempts().at(-1)!.errorCode, undefined);
+  });
+}
+
+test("generation: a post-response HTTP failure is not replayed; the trace keeps only sanitized fields", async () => {
+  const { client, generation } = scriptedGeneration([failureOf("provider_http_error", false, 502)]);
+  const { run, attempts } = await turn(client);
+  await assert.rejects(run, /provider_http_error/u);
+  assert.equal(generation.length, 1);
+  const trace = attempts().at(-1)!;
+  assert.equal(trace.errorCode, "provider_http_error");
+  assert.equal(trace.errorPhase, "generation");
+  assert.equal(trace.errorStatus, 502);
+  assert.ok(Number.isInteger(trace.errorElapsedMs) && trace.errorElapsedMs >= 0);
+  assert.doesNotMatch(JSON.stringify(trace), /AI connection failed|stack/u);
+});
+
+test("generation: two stalls fail the turn as before (participant can retry)", async () => {
+  const { client, generation } = scriptedGeneration([failureOf("timeout", false), failureOf("timeout", false)]);
+  const { run, attempts } = await turn(client);
+  await assert.rejects(run, /timeout/u);
+  assert.equal(generation.length, 2);
+  assert.equal(attempts().at(-1)!.errorCode, "timeout");
+});
+
+test("judgment-phase errors are tagged without their message", async () => {
+  const client = { async complete() { throw Object.assign(new Error("PRIVATE raw upstream body"), { code: "Not A Code!" }); } };
+  const { run, attempts } = await turn(client);
+  await assert.rejects(run);
+  const trace = attempts().at(-1)!;
+  assert.equal(trace.errorCode, "error");
+  assert.equal(trace.errorPhase, "judgment");
+  assert.equal(trace.errorStatus, null);
+  assert.doesNotMatch(JSON.stringify(trace), /PRIVATE/u);
+});
+
+test("the naming task records both generation attempts in requests, with codes", async () => {
+  const { client } = scriptedGeneration([failureOf("timeout", false)]);
+  const records: Array<{ requests: Array<{ kind: string; status: string; errorCode?: string }> }> = [];
+  const task = await createNamingTaskV2({ client, seed: 5151, strategy: "bypass-enabled", referenceMemory: true, runDir: null,
+    onPersist: async (record: never) => { records.push(structuredClone(record)); } });
+  task.message("家みたいなのありますね", "c-1");
+  await task.whenIdle();
+  await task.persistNow();
+  const generation = records.at(-1)!.requests.filter((r) => r.kind === "generation");
+  assert.deepEqual(generation.map((r) => [r.status, r.errorCode ?? null]), [["error", "timeout"], ["ok", null]]);
 });

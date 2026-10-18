@@ -73,6 +73,8 @@ export function createChatClient(config, fetchImpl = globalThis.fetch, {
           error instanceof AIConnectionError ? error : new AIConnectionError("network_error");
         failure.retryCount = attempt;
         failure.timeoutMs = timeoutMs;
+        // No response headers arrived (callers may choose a bounded replay).
+        failure.preResponse = !responseReceived;
         // A gateway error, abort, reset or unreadable response can follow a
         // completed, billable generation. Never replay that POST automatically.
         retryAllowed = options.method === "POST"
