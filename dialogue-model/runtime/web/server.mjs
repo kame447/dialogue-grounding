@@ -89,12 +89,15 @@ export function createNamingServer({ client, createTrial, scoreTrial, runDir = p
           sessions.set(id, session);
           res.setHeader("Set-Cookie", "naming_session=" + id + "; HttpOnly; SameSite=Strict; Path=/");
         }
+        // The two UIs share the session cookie; each page sees only a trial of its own version.
+        if (PAGES.includes(pathname)) session.pageVersion = pathname === "/v1/" ? 1 : 2;
         res.writeHead(200, { "Content-Type": type });
         return res.end(await readFile(resolve(PUBLIC, file)));
       }
       if (!session) return json(401, { error: "session_required" });
       const state = () => {
-        const value = session.task ? { ...session.task.getState() } : null;
+        const task = session.task && (session.task.version ?? 1) === (session.pageVersion ?? session.task.version ?? 1) ? session.task : null;
+        const value = task ? { ...task.getState() } : null;
         if (value) { delete value.visualAid; delete value.referenceMemory; }
         if (value && hideStrategy) delete value.strategy;
         return { trial: value, hideStrategy, busy: session.starting || Boolean(value?.busy) };
@@ -124,6 +127,7 @@ export function createNamingServer({ client, createTrial, scoreTrial, runDir = p
             ? await createTaskV2({ client, runDir, strategy: body.strategy, seed: body.seed, referenceMemory })
             : await createTask({ client, createTrial, scoreTrial, runDir, strategy: body.strategy, seed: body.seed, visualAid, referenceMemory });
         } finally { session.starting = false; }
+        session.pageVersion = version;
       } else {
         if (!session.task) throw new NamingTaskError("trial_required");
         if (session.starting) throw new NamingTaskError("busy");

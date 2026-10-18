@@ -89,3 +89,12 @@ test("v2 refuses the visual aid and invalid versions", async (t) => {
   assert.equal((await request("/api/start", { version: 2, strategy: "repair-first", seed: 32, visualAid: true })).status, 400);
   assert.equal((await request("/api/start", { version: 3, strategy: "repair-first", seed: 32 })).status, 400);
 });
+
+test("each UI page sees only a trial of its own version", async (t) => {
+  const { request } = await setup(t);
+  assert.equal((await request("/api/start", { version: 2, strategy: "repair-first", seed: 33 })).status, 200);
+  assert.equal((await request("/v1/")).status, 200);
+  assert.equal((await (await request("/api/state")).json()).trial, null, "the v1 page shows its start form, not the v2 trial");
+  assert.equal((await request("/")).status, 200);
+  assert.equal((await (await request("/api/state")).json()).trial.version, 2, "the v2 trial is still there for the v2 page");
+});
