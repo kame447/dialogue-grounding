@@ -100,9 +100,9 @@ type GraphView = { ownSlots: Record<string, SlotView>; questions: (GraphRecord &
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
-function publicTexts(events: readonly unknown[], asOfSeq: number): string[] {
+function publicTexts(events: readonly unknown[], asOfSeq: number): Map<number, string> {
   if (!Array.isArray(events)) throw new MemoryEvidenceError("invalid_public_events");
-  const texts: string[] = [];
+  const texts = new Map<number, string>();
   let previous = 0;
   for (const event of events) {
     if (!isRecord(event) || !Number.isSafeInteger(event.seq) || (event.seq as number) <= previous ||
@@ -110,7 +110,7 @@ function publicTexts(events: readonly unknown[], asOfSeq: number): string[] {
       throw new MemoryEvidenceError("invalid_public_events");
     }
     previous = event.seq as number;
-    if (previous <= asOfSeq) texts.push(event.text);
+    if (previous <= asOfSeq) texts.set(previous, event.text);
   }
   return texts;
 }
@@ -134,6 +134,8 @@ const sortedUnique = (values: number[]) => [...new Set(values)].sort((a, b) => a
  *   graph.lastTurn <= asOfSeq (the shadow passes the pre-turn committed graph). A later graph may already have
  *   pruned older history, so replaying an earlier turn from it is a lower bound, never an invented record.
  * @param options.events public events (seq/speaker/text); only texts up to asOfSeq are used, to check that names are public.
+ *   A name counts as public only if it occurs in one of the public turns the name record itself cites, so a short
+ *   name that merely appears somewhere else in the dialogue is not treated as said as a name.
  */
 export function buildMemoryEvidence(graph: unknown, options: { asOfSeq: number; events: readonly unknown[] }): MemoryEvidence | null {
   if (graph === null || graph === undefined) return null;
@@ -165,7 +167,7 @@ export function buildMemoryEvidence(graph: unknown, options: { asOfSeq: number; 
   const turnRef = (m: GraphRecord): MemoryTurnRef => ({ turn: m.sourceTurn as number, speaker: m.speaker as MemorySpeaker, intent: m.intent as MemoryIntent });
   const byTurn = (a: { turn: number }, b: { turn: number }) => a.turn - b.turn;
   const slotIds: string[] = prefix.slots ?? [...SLOTS];
-  const isPublic = (name: string) => texts.some((text) => text.includes(name));
+  const isPublic = (name: string, sourceTurns: number[]) => sourceTurns.some((turn) => texts.get(turn)?.includes(name));
 
   const full = slotIds.map((slot) => {
     const slotView = view.ownSlots[slot];
@@ -174,7 +176,7 @@ export function buildMemoryEvidence(graph: unknown, options: { asOfSeq: number; 
     let memoryStatus = slotView.status;
     if (candidate) {
       const record = byId.get(candidate.id) as GraphRecord;
-      const visibility = isPublic(candidate.name) ? "public" : "ai_private";
+      const visibility = isPublic(candidate.name, candidate.sourceTurns) ? "public" : "ai_private";
       const speakers = new Set((record.mentionIds ?? []).map((id) => byId.get(id)?.speaker as MemorySpeaker));
       name = {
         text: visibility === "public" ? candidate.name : null,
