@@ -1,5 +1,6 @@
 import { resolvePurposeModel } from "./modelPolicy.mjs";
 import { OPENROUTER_DECISIONS_URL, DECISION_MODELS, decisionConfig, buildDecisionPayload, sanitizeDecision } from "./decisions.mjs";
+import { GROUNDING_MODELS, GROUNDING_LEVELS, groundingConfig, buildGroundingPayload, sanitizeGroundingVerdict } from "./grounding.ts";
 
 const UPSTREAM_URLS = Object.freeze({
   openai: "https://api.openai.com/v1/chat/completions",
@@ -146,10 +147,14 @@ function sanitizeResult(data, model) {
   };
 }
 
-async function handleDecisions(request, env, fetchImpl) {
-  const status = decisionConfig(env);
-  if (!status.enabled) return reply(503, { error: "decisions_disabled" });
-  if (!status.keyReady) return reply(503, { error: "decisions_unconfigured" });
+const DECISION_ROUTE = { name: "decisions", config: decisionConfig, build: buildDecisionPayload, sanitize: sanitizeDecision };
+// Two-axis grounding evidence (shadow research only): its own opt-in flag, the same OpenRouter secret.
+const GROUNDING_ROUTE = { name: "grounding", config: groundingConfig, build: buildGroundingPayload, sanitize: sanitizeGroundingVerdict };
+
+async function handleDecisions(request, env, fetchImpl, route = DECISION_ROUTE) {
+  const status = route.config(env);
+  if (!status.enabled) return reply(503, { error: route.name + "_disabled" });
+  if (!status.keyReady) return reply(503, { error: route.name + "_unconfigured" });
   if (request.method !== "POST") return reply(405, { error: "method_not_allowed" });
   if (!request.headers.get("Content-Type")?.toLowerCase().startsWith("application/json")) {
     return reply(415, { error: "unsupported_media_type" });
@@ -162,7 +167,7 @@ async function handleDecisions(request, env, fetchImpl) {
     const tooLarge = error?.message === "request_too_large";
     return reply(tooLarge ? 413 : 400, { error: tooLarge ? "request_too_large" : "invalid_json" });
   }
-  const payload = buildDecisionPayload(body);
+  const payload = route.build(body);
   if (!payload) return reply(400, { error: "invalid_request" });
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15_000);
@@ -185,7 +190,7 @@ async function handleDecisions(request, env, fetchImpl) {
     let data;
     try { data = await upstream.json(); }
     catch { return reply(502, { error: "invalid_upstream_response" }); }
-    const response = sanitizeDecision(data, payload.model, body.purpose);
+    const response = route.sanitize(data, payload.model, body.purpose);
     if (!response || JSON.stringify(response).includes(env.OPENROUTER_DECISIONS_API_KEY)) {
       return reply(502, { error: "invalid_upstream_response" });
     }
@@ -201,7 +206,7 @@ async function handleDecisions(request, env, fetchImpl) {
 
 export async function handleRequest(request, env, fetchImpl = globalThis.fetch) {
   const pathname = new URL(request.url).pathname;
-  if (!["/health", "/v1/chat/completions", "/v1/model-policy", "/v1/decisions", "/v1/decision-policy"].includes(pathname)) {
+  if (!["/health", "/v1/chat/completions", "/v1/model-policy", "/v1/decisions", "/v1/decision-policy", "/v1/grounding-evidence", "/v1/grounding-policy"].includes(pathname)) {
     return reply(404, { error: "not_found" });
   }
 
@@ -221,7 +226,18 @@ export async function handleRequest(request, env, fetchImpl = globalThis.fetch) 
       textOnly: true,
     }) : reply(405, { error: "method_not_allowed" });
   }
+  if (pathname === "/v1/grounding-policy") {
+    const config = groundingConfig(env);
+    return request.method === "GET" ? reply(200, {
+      ready: config.enabled && config.keyReady,
+      enabled: config.enabled,
+      models: GROUNDING_MODELS,
+      levels: GROUNDING_LEVELS,
+      textOnly: true,
+    }) : reply(405, { error: "method_not_allowed" });
+  }
   if (pathname === "/v1/decisions") return handleDecisions(request, env, fetchImpl);
+  if (pathname === "/v1/grounding-evidence") return handleDecisions(request, env, fetchImpl, GROUNDING_ROUTE);
 
   const provider = env.UPSTREAM_PROVIDER || "openai";
   const endpoint = UPSTREAM_URLS[provider];

@@ -87,3 +87,7 @@ Cloudflare Dashboardの Worker > Settings > Variables and Secrets から DIALOGU
 リポジトリから管理する場合は wrangler.jsonc の DIALOGUE_MODEL を編集して npm run deploy:research-proxy を実行します。設定値 gpt-6-luna は研究用AIの指定モデルです。正式実験を行う際はモデル設定を固定し、実行記録にも保持してください。プロバイダ自体を openai から gemini に変更する場合には UPSTREAM_PROVIDER も変更し、対応する上流APIキーにSecretを更新する必要があります。
 
 node --env-file=.env dialogue-model/runtime/cli.mjs --show-model で実際のWorkerが現在採用しているモデルと設定完了状態を表示できます。このコマンドは上流AIを呼ばず、推論課金を発生させません。条件比較では同じモデルバージョンを使用し、実験実施中にモデルを変更しないでください。
+
+## 2軸の根拠判定（Jev・shadow研究用・既定OFF・未デプロイ）
+
+`POST /v1/grounding-evidence`（`{"purpose":"grounding_jev","state":"..."}`）と、読み取り専用の `GET /v1/grounding-policy`、サービスバインディングの `grounding()` RPC は、Jev 1.14 に閉集合の2設問（対象同定の根拠・名称合意の根拠）を1回で問う研究用経路です。Decisions とは別のフラグ `RESEARCH_GROUNDING_ENABLED`（`wrangler.jsonc` の初期値は `"false"`）で有効化し、Secretは同じ `OPENROUTER_DECISIONS_API_KEY` を使います。モデル・設問・基準文はWorker管理で、選択肢外の回答や欠けたスコアは 502 で閉じます。スコアは未校正の相対値です。仕様は `dialogue-model/runtime/grounding/README.md` を参照してください。**この経路はデプロイされておらず、有効化には研究者の承認と上記Secretが必要です。**

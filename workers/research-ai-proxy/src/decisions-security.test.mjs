@@ -32,7 +32,9 @@ test("security: deployed config enables Decisions by a plain flag and holds no s
   const source = await readFile(new URL("../wrangler.jsonc", import.meta.url), "utf8");
   const config = JSON.parse(source.replace(/^\s*\/\/.*$/gm, ""));
   assert.equal(config.vars.RESEARCH_DECISIONS_ENABLED, "true");
-  assert.deepEqual(Object.keys(config.vars).sort(), ["DIALOGUE_MODEL", "MAX_COMPLETION_TOKENS", "RESEARCH_DECISIONS_ENABLED", "UPSTREAM_PROVIDER"]);
+  // The grounding-evidence shadow route ships disabled; enabling it needs a separate researcher decision.
+  assert.equal(config.vars.RESEARCH_GROUNDING_ENABLED, "false");
+  assert.deepEqual(Object.keys(config.vars).sort(), ["DIALOGUE_MODEL", "MAX_COMPLETION_TOKENS", "RESEARCH_DECISIONS_ENABLED", "RESEARCH_GROUNDING_ENABLED", "UPSTREAM_PROVIDER"]);
   assert.equal(config.main, "src/worker.ts");
   assert.equal(config.observability.enabled, false);
   assert.doesNotMatch(source, /sk-or-|OPENROUTER_DECISIONS_API_KEY|UPSTREAM_API_KEY|RESEARCH_PROXY_TOKEN/);
@@ -97,7 +99,7 @@ test("security: Decisions enforce body size, method and content type before any 
 
 test("security: unknown or near-miss paths are 404 with or without a token", async () => {
   for (const path of ["/", "/v1", "/v1/decisions/", "/v1/Decisions", "/v1/decision", "/v1/decisions/extra", "/v1/decision-policy/",
-    "/v1/grounding-evidence", "/api/alpha/decisions", "/v1/chat/completions/", "/admin"]) {
+    "/v1/grounding-evidence/", "/v1/grounding", "/api/alpha/decisions", "/v1/chat/completions/", "/admin"]) {
     for (const bearer of [TOKEN, null]) {
       const upstream = noUpstream();
       const response = await handleRequest(request(path, { bearer }), env, upstream.fetch);
@@ -186,14 +188,17 @@ test("security: chat completions and model policy are identical with Decisions o
   for (const policy of policies) assert.deepEqual(policy, { purpose: "dialogue_turn", provider: "openai", model: "gpt-6-luna", ready: true });
 });
 
-test("security: the service-binding entrypoint exposes chat only, never Decisions", async () => {
+test("security: the service-binding entrypoint exposes chat and grounding only, never Decisions", async () => {
   const source = await readFile(new URL("./worker.ts", import.meta.url), "utf8");
   const start = source.indexOf("export class InternalResearchProxy");
   assert.ok(start >= 0);
   const classBody = source.slice(start, source.indexOf("\n}\n", start));
   const methods = [...classBody.matchAll(/^ {2}(?:async\s+)?(?:static\s+)?([A-Za-z_$#][\w$]*)\s*\(/gm)].map((match) => match[1]);
-  assert.deepEqual(methods, ["chat"]);
-  assert.match(classBody, /\/v1\/chat\/completions/);
-  assert.doesNotMatch(classBody, /decision|grounding|OPENROUTER/i);
+  assert.deepEqual(methods, ["chat", "grounding"]);
+  assert.match(classBody, /'\/v1\/chat\/completions'/);
+  assert.match(classBody, /'\/v1\/grounding-evidence'/);
+  assert.doesNotMatch(classBody, /decision|OPENROUTER/i);
+  // The forwarder only accepts these two fixed paths.
+  assert.match(source, /path: '\/v1\/chat\/completions' \| '\/v1\/grounding-evidence'/);
 });
 
