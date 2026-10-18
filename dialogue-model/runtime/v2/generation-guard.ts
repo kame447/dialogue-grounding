@@ -40,7 +40,7 @@ export function findAgreementClaims(text: string): string[] {
 
 // Declared self-correction; partner-directed thanks ("訂正ありがとう"), negations
 // ("間違いない") and conditionals ("間違えていたら") are outside these inflections.
-const selfRepair = /(?:訂正|撤回)(?:します|しました|させてください|させて下さい|です)|取り消(?:します|しました|させてください)|(?:取り違え|勘違い|間違え)(?:ました|ていました|てました|でした)|(?:取り違え|勘違い|間違い)(?:でした|です)/gu;
+const selfRepair = /(?:訂正|撤回)(?:します|しました|させてください|させて下さい|です)|取り消(?:します|しました|させてください)|(?:取り違え|勘違い|間違え)(?:ました|ていました|てました|でした)|(?:取り違え|勘違い|間違い|誤り)(?:でした|です)/gu;
 
 /** Self-repair wording (allowed only under repair). Clause-local question exemption. */
 export function findRepairClaims(text: string): string[] {

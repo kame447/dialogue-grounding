@@ -31,7 +31,7 @@ export const GENERATOR_INSTRUCTIONS_V2 = [
 // function per turn and chat-like brevity. Never changes the judged act itself.
 export const UTTERANCE_STYLES = Object.freeze(["default", "concise"]);
 export const CONCISE_INSTRUCTIONS_V2 = [
-  "【短いチャット】この発話では、指定されたactionの対話機能を1つだけ実現してください。相槌は短い一言までにし、次の図形・次の名前・別の話題は出さないでください。",
+  "【短いチャット】この発話では、指定されたactionの対話機能を1つだけ実現してください。挨拶や相槌だけで終えず相手の発話の内容に応じ、相槌は短い一言までにし、次の図形・次の名前・別の話題は出さないでください。",
   "人間同士のチャットのように、多くは1文で、相手の発話と同じくらいの長さにしてください。相手の言葉の言い直しや自分の見立ての繰り返しはしないでください。確認したい特徴などの必要な内容は削らず、短さのために不自然にしないでください。",
 ].join("\n");
 

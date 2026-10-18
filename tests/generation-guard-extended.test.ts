@@ -16,7 +16,8 @@ const events = [{ id: "e-1", seq: 1, speaker: "human", text: "鳥みたいです
 
 test("self-repair declarations are detected clause-locally", () => {
   for (const text of ["すみません、訂正します。", "私の取り違えでした。", "間違えました、猫のほうです。", "さっきのは勘違いでした。",
-    "前の名前は取り消します。", "あれは撤回させてください。", "私の間違いです。どれのことですか？", "取り違えていました。いいですか？"]) {
+    "前の名前は取り消します。", "あれは撤回させてください。", "私の間違いです。どれのことですか？", "取り違えていました。いいですか？",
+    "さっきの名前はいったん取り消します。", "私の見間違いでした。", "そう言ったのは私の誤りでした。", "その対応は取り消させてください。"]) {
     assert.deepEqual(findRepairClaims(text), ["self_repair"], text);
   }
 });
@@ -24,7 +25,8 @@ test("self-repair declarations are detected clause-locally", () => {
 test("legitimate holistic, proposal, question and partner-directed replies are not repair claims", () => {
   for (const text of ["鳥みたいに見えますね。", "「鳥」と呼ぶのはどうでしょう？", "訂正ありがとうございます。", "間違いないですか？",
     "間違えていたらすみません。", "取り違えないように確認させてください。", "それは勘違いですか？", "訂正しますか？",
-    "なるほど、家っぽい形ですね。", "尖りが二つある形のことですか？", "この形の話には、あとで戻りたいです。"]) {
+    "なるほど、家っぽい形ですね。", "尖りが二つある形のことですか？", "この形の話には、あとで戻りたいです。",
+    "それは誤りですか？", "誤りではないと思います。", "間違えやすい形ですね。"]) {
     assert.deepEqual(findGuardViolations(text, "accept"), [], text);
   }
 });
