@@ -36,7 +36,7 @@ export const MEMORY_INSTRUCTIONS = [
 
 /** Build and validate each optional operation without discarding a valid mention. */
 export function prepareMemory(graph, turn, interpretation = null, publicTurns) {
-  const reference = validateReferenceInterpretation(interpretation ?? null);
+  const reference = validateReferenceInterpretation(interpretation ?? null, graph.slots ?? SLOTS);
   const operations = [], rejected = [];
   const update = () => validateReferenceUpdate(graph, { expectedRevision: graph.revision, turn, operations }, { publicTurns });
   update();
