@@ -3,7 +3,6 @@ const SVG = "http://www.w3.org/2000/svg";
 let current = null;
 let working = false;
 let serverBusy = false;
-let composing = false;
 let refreshTimer;
 let refreshRequest = null;
 let generation = 0;
@@ -18,6 +17,20 @@ let legacyMessages = false;
 let followHistory = true;
 let preparing = false;
 let localStage = "chat";
+let messageSequence = 0;
+let typingTimer;
+let activitySignature = "";
+let activitySince = 0;
+let chatStalled = false;
+let chatDisconnected = false;
+let checkingChat = false;
+// Presentation/network safeguards only; these never close a research trial or
+// cancel backend generation. A stalled state is refreshed, never auto-retried.
+const CHAT_STALL_MS = 60000;
+const MESSAGE_ACK_MS = 20000;
+const STATE_REFRESH_MS = 10000;
+const newClientId = () => globalThis.crypto?.randomUUID?.() ??
+  `chat-${Date.now().toString(36)}-${++messageSequence}-${Math.random().toString(36).slice(2, 12)}`;
 const draftKey = "joint-naming-v2-draft";
 const trialIdentity = (trial) => trial?.sessionId ?? trial?.trialId;
 // UI drafts stay in this browser tab, never in API requests or research records.
@@ -47,9 +60,9 @@ const errors = {
   invalid_seed: "Seedを安全な整数で入力してください。",
   busy: "処理中です。完了を待ってください。",
 };
-async function api(path, body) {
-  const response = await fetch(path, body === undefined ? {} : {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+async function api(path, body, signal) {
+  const response = await fetch(path, body === undefined ? (signal ? { signal } : {}) : {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), ...(signal ? { signal } : {}),
   });
   const value = await response.json();
   if (!response.ok) {
@@ -84,6 +97,8 @@ function resetLocal() {
   localStage = "chat";
   answers = new Map(); selected = null; selectedTarget = null;
   pending = []; sceneSignature = ""; followHistory = true;
+  clearTimeout(typingTimer); activitySignature = ""; activitySince = 0;
+  chatStalled = false; chatDisconnected = false; checkingChat = false;
   $("utterance").value = "";
   $("history").replaceChildren();
   $("history").historySignature = undefined;
@@ -227,33 +242,87 @@ function changeStage(stage) {
   if (!current || submitted() || working || sending || pending.some((item) => item.status === "queued")) return;
   localStage = stage; storeDraft(); setControls(); renderStage(true);
 }
-function events() {
-  return current?.events ?? (current?.publicHistory ?? []).map((item, i) => ({ id: i, speaker: item.role === "assistant" ? "ai" : "human", text: item.content }));
+function eventsFor(trial) {
+  return trial?.events ?? (trial?.publicHistory ?? []).map((item, i) => ({ id: i, speaker: item.role === "assistant" ? "ai" : "human", text: item.content }));
+}
+const events = () => eventsFor(current);
+function reconciles(item, event) {
+  if (event.speaker !== "human") return false;
+  // clientId works before the POST acknowledgement; eventId supports receipts
+  // from servers that do not include the optional clientId in their events.
+  if (event.clientId && event.clientId === item.clientId) return true;
+  return item.eventId !== undefined && event.id === item.eventId;
+}
+function renderChatActivity() {
+  const log = $("history"), scrollTop = log.scrollTop;
+  const failed = pending.some((item) => item.status === "failed");
+  const aiError = current?.aiStatus === "error";
+  const waiting = Boolean(current && !submitted() && (aiThinking() || pending.some((item) => item.status !== "failed")));
+  const signature = JSON.stringify([trialIdentity(current), events().at(-1)?.id, current?.aiStatus]);
+  clearTimeout(typingTimer);
+  if (!waiting) { activitySignature = ""; chatStalled = false; }
+  else {
+    if (signature !== activitySignature) { activitySignature = signature; activitySince = Date.now(); chatStalled = false; }
+    const remaining = CHAT_STALL_MS - (Date.now() - activitySince);
+    if (remaining <= 0) chatStalled = true;
+    else if (!failed && !aiError && !chatDisconnected) typingTimer = setTimeout(renderChatActivity, remaining);
+  }
+  const showDots = waiting && !failed && !aiError && !chatStalled && !chatDisconnected;
+  $("typing-indicator").hidden = !showDots;
+  $("chat-recovery").hidden = !(aiError || chatStalled || chatDisconnected);
+  $("chat-recovery-message").textContent = aiError ? "返答を取得できませんでした。" : "会話の更新を確認できません。";
+  $("retry-chat").textContent = aiError ? "AIの返答を再試行" : "状態を確認";
+  $("retry-chat").disabled = working || checkingChat || sending || !chatOpen();
+  $("chat-status").textContent = failed ? "送信を確認できません。メッセージの再送ボタンで再試行できます。" :
+    aiError ? "AIの返答を取得できませんでした。再試行できます。" :
+      chatStalled || chatDisconnected ? "会話の更新を確認できません。状態を確認してください。" :
+        showDots ? "AIが返答を作成しています" : "";
+  if (followHistory) log.scrollTo({ top: log.scrollHeight, behavior: "auto" });
+  else log.scrollTop = scrollTop;
+}
+function retryMessage(item) {
+  if (working || sending || !chatOpen() || item.status !== "failed" || !pending.includes(item)) return;
+  // Reuse the exact id and text. The server deduplicates even an ambiguous
+  // acknowledgement failure; only this explicit click retries the request.
+  item.status = "queued"; renderHistory(); drainMessages();
 }
 function renderHistory() {
   const log = $("history");
-  const oldSignature = log.historySignature;
+  const scrollTop = log.scrollTop;
   const publicEvents = events();
-  pending = pending.filter((item) => item.eventId === undefined || !publicEvents.some((event) => event.id === item.eventId));
-  const signature = JSON.stringify([publicEvents, pending.map(({ text, status }) => ({ text, status }))]);
-  if (oldSignature === signature) return;
-  log.historySignature = signature;
-  log.replaceChildren();
-  const items = [...publicEvents, ...pending.map((item) => ({ speaker: "human", text: item.text, pending: item.status }))];
-  for (const item of items) {
-    const li = document.createElement("li");
-    li.className = item.speaker === "ai" ? "ai" : "human";
-    const who = document.createElement("strong"); who.textContent = item.speaker === "ai" ? "AI" : "あなた";
-    const body = document.createElement("p"); body.textContent = item.text;
-    li.append(who, body);
-    if (item.pending) {
-      const status = document.createElement("small");
-      status.textContent = item.pending === "failed" ? "送信を確認できません。公開された会話を確認してください。自動では再送しません。" : item.pending === "accepted" ? "受理済み・会話を更新中…" : "送信中…";
-      li.append(status); li.className += " pending";
+  pending = pending.filter((item) => !publicEvents.some((event) => reconciles(item, event)));
+  const signature = JSON.stringify([publicEvents, pending.map(({ text, status, clientId }) => ({ text, status, clientId }))]);
+  if (log.historySignature !== signature) {
+    log.historySignature = signature;
+    log.replaceChildren();
+    // Keep the server's append-only order; unacknowledged local drafts follow.
+    const items = [...publicEvents, ...pending.map((item) => ({ ...item, speaker: "human", local: item }))];
+    for (const item of items) {
+      const li = document.createElement("li");
+      li.className = item.speaker === "ai" ? "ai" : "human";
+      const who = document.createElement("strong"); who.textContent = item.speaker === "ai" ? "AI" : "あなた";
+      const body = document.createElement("p"); body.textContent = item.text;
+      li.append(who, body);
+      if (item.local) {
+        li.className += " pending";
+        if (item.status === "failed") {
+          const status = document.createElement("small"); status.className = "message-failure";
+          const mark = document.createElement("span"); mark.textContent = "!"; mark.setAttribute("aria-hidden", "true");
+          const explanation = document.createElement("span"); explanation.className = "sr-only";
+          explanation.textContent = "送信を確認できません。自動では再送しません。";
+          const retry = document.createElement("button"); retry.type = "button"; retry.className = "retry-message";
+          retry.textContent = "再送"; retry.setAttribute("aria-label", "このメッセージを再送");
+          retry.disabled = working || sending || !chatOpen();
+          retry.addEventListener("click", () => retryMessage(item.local));
+          status.append(mark, explanation, retry); li.append(status);
+        }
+      }
+      log.append(li);
     }
-    log.append(li);
   }
+  renderChatActivity();
   if (followHistory) log.scrollTo({ top: log.scrollHeight, behavior: "auto" });
+  else log.scrollTop = scrollTop;
 }
 function render(state) {
   const trial = state.trial;
@@ -283,7 +352,8 @@ function render(state) {
   setControls(); scheduleRefresh();
 }
 function setControls() {
-  $("chat-status").textContent = aiThinking() ? "AIが考えています… 続けて送信できます" : "";
+  renderChatActivity();
+  $("history").querySelectorAll("button").forEach((node) => { node.disabled = working || sending || !chatOpen(); });
   $("chat").querySelectorAll("textarea,button").forEach((node) => { node.disabled = working || !chatOpen(); });
   $("setup").querySelectorAll("input,select,button").forEach((node) => { node.disabled = working; });
   $("finish-conversation").disabled = working || sending || pending.some((item) => item.status === "queued") || !dialogueOpen() || !scene()?.shapes?.length;
@@ -302,8 +372,8 @@ async function refreshState() {
   const epoch = generation;
   const requestEpoch = stateEpoch;
   refreshRequest = (async () => {
-    try { const state = await api("/api/state"); if (epoch === generation && requestEpoch === stateEpoch) render(state); }
-    catch { $("notice").textContent = "状態を更新できませんでした。通信を確認しています。メッセージは自動で再送しません。"; }
+    try { const state = await boundedRequest("/api/state", undefined, STATE_REFRESH_MS); if (epoch === generation && requestEpoch === stateEpoch) { chatDisconnected = false; render(state); } }
+    catch { if (epoch === generation) { chatDisconnected = true; renderChatActivity(); } }
     finally { refreshRequest = null; scheduleRefresh(); }
   })();
   return refreshRequest;
@@ -316,6 +386,17 @@ async function operate(action) {
   catch (error) { $("notice").textContent = error.message; await refreshState(); }
   finally { working = false; setControls(); }
 }
+async function boundedRequest(path, body, timeoutMs = MESSAGE_ACK_MS) {
+  const controller = typeof AbortController === "function" ? new AbortController() : null;
+  let timer;
+  try {
+    return await Promise.race([api(path, body, controller?.signal), new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        controller?.abort(); reject(new Error("通信を確認できませんでした。"));
+      }, timeoutMs);
+    })]);
+  } finally { clearTimeout(timer); }
+}
 async function drainMessages() {
   if (sending) return;
   sending = true;
@@ -326,29 +407,37 @@ async function drainMessages() {
       item.status = "sending"; renderHistory(); setControls();
       try {
         let state;
-        if (legacyMessages) state = await api("/api/turn", { utterance: item.text });
+        if (legacyMessages) state = await boundedRequest("/api/turn", { utterance: item.text });
         else {
-          try { state = await api("/api/message", { text: item.text }); }
+          try { state = await boundedRequest("/api/message", { text: item.text, clientId: item.clientId }); }
           catch (error) {
-            // An explicit missing endpoint is the only safe fallback. Never replay an ambiguous failure.
+            // Only an explicit missing endpoint permits the existing legacy
+            // fallback. Timeouts or ambiguous failures are never replayed.
             if (![404, 405].includes(error.status)) throw error;
             legacyMessages = true;
-            state = await api("/api/turn", { utterance: item.text });
+            state = await boundedRequest("/api/turn", { utterance: item.text });
           }
         }
         if (epoch !== generation) break;
-        if (state?.trial !== undefined) { pending = pending.filter((message) => message !== item); render(state); }
-        else { item.eventId = state.eventId; item.status = "accepted"; await refreshState(); }
-      } catch (error) {
+        item.eventId = state.eventId ?? item.eventId;
+        if (legacyMessages && state?.trial) {
+          const human = eventsFor(state.trial).filter((event) => event.speaker === "human").at(-1);
+          if (human?.text === item.text) item.eventId = human.id;
+        }
+        item.status = "accepted";
+        if (state?.trial !== undefined) render(state);
+        else await refreshState();
+      } catch {
         if (epoch !== generation) break;
-        item.status = "failed"; $("notice").textContent = error.message;
-        // A failed request may still have reached the server. Refresh, never auto resend.
+        if (pending.includes(item)) item.status = "failed";
+        renderHistory(); setControls();
+        // The server may already have accepted it. Refresh without resending.
         await refreshState();
       }
       renderHistory();
     }
   } finally {
-    sending = false; setControls(); scheduleRefresh();
+    sending = false; renderHistory(); setControls(); scheduleRefresh();
     if (pending.some((item) => item.status === "queued")) drainMessages();
   }
 }
@@ -376,15 +465,20 @@ $("chat").addEventListener("submit", (event) => {
   if (working || !chatOpen()) return;
   const text = $("utterance").value;
   if (!text.trim()) return;
-  pending.push({ text, status: "queued" });
-  $("utterance").value = ""; followHistory = true; renderHistory();
+  pending.push({ text, clientId: newClientId(), status: "queued" });
+  $("utterance").value = ""; renderHistory();
   $("utterance").focus({ preventScroll: true }); drainMessages();
 });
-$("utterance").addEventListener("compositionstart", () => { composing = true; });
-$("utterance").addEventListener("compositionend", () => { composing = false; });
-$("utterance").addEventListener("keydown", (event) => {
-  if (event.key !== "Enter" || event.shiftKey || event.isComposing || composing || event.keyCode === 229) return;
-  event.preventDefault(); if (!event.repeat && !working && chatOpen()) $("chat").requestSubmit();
+// Textarea Enter (including IME) is left to native multiline editing. Sending
+// is an explicit form action; no keydown handler turns Enter into a request.
+$("retry-chat").addEventListener("click", async () => {
+  if (working || checkingChat || sending || !chatOpen()) return;
+  if (current?.aiStatus === "error" && !serverBusy) {
+    await operate(() => api("/api/retry", {}));
+  } else {
+    checkingChat = true; renderChatActivity();
+    try { await refreshState(); } finally { checkingChat = false; renderChatActivity(); }
+  }
 });
 $("finish-conversation").addEventListener("click", () => changeStage("names"));
 $("back-to-chat").addEventListener("click", () => changeStage("chat"));

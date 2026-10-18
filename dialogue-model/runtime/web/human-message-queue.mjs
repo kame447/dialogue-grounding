@@ -8,6 +8,10 @@
  *   the queue throughout retries. The pending bound rejects NEW messages before
  *   acceptance, never evicts an accepted message. The full transcript/dedup map
  *   lives for the trial and must not be silently truncated.
+ * - initialEvents contains AI-only scripted public events, assigned ordinary
+ *   sequence/turn numbers once at creation. They are never pending human work
+ *   and cannot start a model request. Optional human clientId values are echoed
+ *   for optimistic UI reconciliation; absent IDs do not enable deduplication.
  * - runAiTurn({events, pendingHumanEvents, lastEventId, revision, requestSeq,
  *   signal, privateState}) performs judgment AND generation against this exact
  *   public snapshot. Consecutive human events are one request but stay distinct
@@ -45,8 +49,8 @@ export class HumanMessageQueueError extends Error {
 const fail = (code) => { throw new HumanMessageQueueError(code); };
 const positive = (value) => Number.isSafeInteger(value) && value > 0;
 const validText = (value, limit) => typeof value === "string" && value.trim().length > 0 && value.length <= limit;
-const publicCopy = (event) => ({ ...event });
-const frozenEvents = (events) => Object.freeze(events.map((event) => Object.freeze(publicCopy(event))));
+const publicCopy = ({ nonReferential, ...event }) => event;
+const frozenEvents = (events) => Object.freeze(events.map((event) => Object.freeze({ ...event })));
 function clonePrivate(value) {
   try { return structuredClone(value); }
   catch { fail("invalid_private_state"); }
@@ -55,18 +59,27 @@ function clonePrivate(value) {
 /** Deterministic state machine: no networking, timers, logs or model decisions. */
 export function createHumanMessageSequencer({
   now = Date.now, maxPendingMessages = 64, maxTextLength = 12000, initialPrivateState = null,
+  initialEvents = [],
 } = {}) {
-  if (typeof now !== "function" || !positive(maxPendingMessages) || !positive(maxTextLength)) fail("invalid_options");
+  if (typeof now !== "function" || !positive(maxPendingMessages) || !positive(maxTextLength) || !Array.isArray(initialEvents)) fail("invalid_options");
   const events = [], pending = [], clients = new Map();
   let privateState = clonePrivate(initialPrivateState);
   let active = null, requestSeq = 0, closed = false, lastMillis = 0, errorCode = null;
-  function nextEvent(speaker, text) {
+  function nextEvent(speaker, text, clientId, nonReferential = false) {
     const millis = now();
     if (!Number.isSafeInteger(millis) || millis < 0 || millis > 8640000000000000) fail("invalid_clock");
     // Wall-clock regression never changes ordering or moves timestamps backward.
     const atMillis = Math.max(lastMillis, millis), seq = events.length + 1;
     if (!positive(seq)) fail("sequence_exhausted");
-    return { event: Object.freeze({ id: `event-${seq}`, speaker, text, at: new Date(atMillis).toISOString(), seq, turn: seq }), atMillis };
+    return { event: Object.freeze({ id: `event-${seq}`, speaker, text, at: new Date(atMillis).toISOString(), seq, turn: seq,
+      ...(speaker === "human" && clientId !== undefined ? { clientId } : {}),
+      ...(nonReferential ? { nonReferential: true } : {}) }), atMillis };
+  }
+  for (const initial of initialEvents) {
+    if (!initial || typeof initial !== "object" || Array.isArray(initial) || initial.speaker !== "ai" || !validText(initial.text, maxTextLength)) fail("invalid_options");
+    // Scripted setup speech is public dialogue, never evidence of a proposed name.
+    const { event, atMillis } = nextEvent("ai", initial.text, undefined, true);
+    events.push(event); lastMillis = atMillis;
   }
   const isCurrent = (request) => Boolean(!closed && active && active.request === request && !active.invalid && request.revision === events.length);
   function finish(request) {
@@ -77,17 +90,18 @@ export function createHumanMessageSequencer({
   return Object.freeze({
     acceptHuman(input) {
       if (!input || typeof input !== "object" || Array.isArray(input) ||
-          typeof input.clientId !== "string" || !/^[A-Za-z0-9_.:-]{1,128}$/.test(input.clientId) ||
+          (input.clientId !== undefined && (typeof input.clientId !== "string" || !/^[A-Za-z0-9_.:-]{1,80}$/.test(input.clientId))) ||
           !validText(input.text, maxTextLength)) fail("invalid_message");
-      const previous = clients.get(input.clientId);
+      const previous = input.clientId === undefined ? null : clients.get(input.clientId);
       if (previous) {
         if (previous.text !== input.text) fail("client_id_conflict");
         return { event: publicCopy(previous), duplicate: true };
       }
       if (closed) fail("closed");
       if (pending.length >= maxPendingMessages) fail("pending_full");
-      const { event, atMillis } = nextEvent("human", input.text);
-      events.push(event); pending.push(event); clients.set(input.clientId, event);
+      const { event, atMillis } = nextEvent("human", input.text, input.clientId);
+      events.push(event); pending.push(event);
+      if (input.clientId !== undefined) clients.set(input.clientId, event);
       lastMillis = atMillis; errorCode = null;
       if (active) active.invalid = true;
       return { event: publicCopy(event), duplicate: false };

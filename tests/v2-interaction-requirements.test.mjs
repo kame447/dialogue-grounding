@@ -297,6 +297,7 @@ requirement('v2 participant state: no seed or researcher mapping can reconstruct
 
 for (const first of ['human', 'ai']) requirement(`v2 final names: withheld until both commitments, scored once (${first} first)`, namingPending, async () => {
   const { task, calls, scored, submission, trial } = await taskFixture();
+  const publicBefore = task.getState().events;
   if (first === 'human') await task.submitHuman({ names: submission('human') });
   else await task.submitAI();
   const pending = task.getState();
@@ -309,7 +310,7 @@ for (const first of ['human', 'ai']) requirement(`v2 final names: withheld until
   const complete = task.getState();
   assert.equal(scored.length, 1, 'either submission order must trigger scoring exactly once');
   assert.equal(complete.result.matchedCount, 6);
-  assert.deepEqual(complete.events, [], 'private final requests and names are not public events');
+  assert.deepEqual(complete.events, publicBefore, 'private final requests and names are not public events');
   assert.ok(complete.result.figures.every((row) => Object.keys(row.ai).every((key) => key === 'rawName')),
     'final participant display may show AI names without partner IDs/geometry');
   for (const call of calls) {
@@ -326,17 +327,18 @@ requirement('v2 task retry: accepted human message survives generation failure w
     if (attempts++ === 0) throw new Error(PRIVATE);
     return { text: REPLY[1] };
   } } });
+  const opening = task.getState().events.map((event) => event.text);
   const receipt = task.message(PUBLIC[0], 'task-stable-client-id');
   assert.ok(receipt.eventId);
   await task.whenIdle();
   const failed = task.getState();
   assert.equal(failed.aiStatus, 'error');
-  assert.deepEqual(failed.events.map((event) => event.text), [PUBLIC[0]]);
+  assert.deepEqual(failed.events.map((event) => event.text), [...opening, PUBLIC[0]]);
   assert.ok(!JSON.stringify(failed).includes(PRIVATE));
   await task.retry();
   const done = task.getState();
   assert.equal(done.aiStatus, 'idle');
-  assert.deepEqual(done.events.map((event) => event.text), [PUBLIC[0], REPLY[1]]);
+  assert.deepEqual(done.events.map((event) => event.text), [...opening, PUBLIC[0], REPLY[1]]);
   assert.equal(attempts, 2, 'explicit retry resumes AI work without requiring another human event');
 });
 
@@ -346,13 +348,14 @@ requirement('v2 invalid final response: one bounded format retry, no scoring and
     phases.push(options.phase);
     return { text: JSON.stringify({ researcherOnly: PRIVATE }) };
   } } });
+  const publicBefore = task.getState().events;
   await task.submitHuman({ names: submission('human') });
   await assert.rejects(task.submitAI());
   assert.deepEqual(phases, ['final_submission', 'final_submission'], 'invalid format receives exactly one retry');
   assert.equal(scored.length, 0);
   const state = task.getState();
   assert.equal(Object.hasOwn(state, 'result'), false);
-  assert.deepEqual(state.events, []);
+  assert.deepEqual(state.events, publicBefore);
   assert.ok(!JSON.stringify(state).includes(PRIVATE), 'raw invalid final response stays private');
 });
 

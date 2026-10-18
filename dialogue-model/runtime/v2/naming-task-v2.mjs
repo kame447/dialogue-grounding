@@ -14,6 +14,7 @@ import { STRATEGIES } from "../judgment/instructions.mjs";
 import { STATUSES } from "../judgment/schema.mjs";
 
 export const VERSION = 2;
+const SCRIPTED_OPENING = "まず、どの図形から話しましょうか？";
 const NAME_LIMIT = 200;
 const clone = (value) => structuredClone(value);
 
@@ -69,13 +70,15 @@ export async function createNamingTaskV2({
   };
   const dialogue = createDialogueV2({ client: trackingClient, strategy, image: { mimeType: model.mimeType, base64: model.png.toString("base64") },
     anchors: model.anchors, judge, referenceMemory });
-  const queue = createHumanMessageQueue({ runAiTurn: dialogue.runAiTurn, initialPrivateState: dialogue.initialPrivateState() });
+  const queue = createHumanMessageQueue({ runAiTurn: dialogue.runAiTurn, initialPrivateState: dialogue.initialPrivateState(),
+    now, initialEvents: [{ speaker: "ai", text: SCRIPTED_OPENING, nonReferential: true }] });
   const recordId = randomUUID();
   const startedAt = new Date(now()).toISOString();
   let humanSubmission = null, aiSubmission = null, result = null, closed = false, finalError = null;
 
   function publicEvents() {
-    return queue.getSnapshot().events.map(({ id, speaker, text, at }) => ({ id, speaker, text, at }));
+    return queue.getSnapshot().events.map(({ id, speaker, text, at, clientId }) => ({ id, speaker, text, at,
+      ...(speaker === "human" && clientId !== undefined ? { clientId } : {}) }));
   }
 
   // Writes are serialized; each writes the latest state.
@@ -93,7 +96,8 @@ export async function createNamingTaskV2({
       recordId, version: VERSION, trialId: trial.trialId, seed, strategy, startedAt, updatedAt: new Date(now()).toISOString(),
       options: { visualAid: false, referenceMemory },
       status: result ? "completed" : closed ? "submitting" : "dialogue",
-      events: snapshot.events,
+      // Origin is research metadata only; queue/model/participant events stay ordinary public speech.
+      events: snapshot.events.map((event) => event.seq === 1 ? { ...event, origin: "scripted_opening" } : event),
       // Same role/content shape as v1 so offline metrics apply unchanged.
       publicHistory: snapshot.events.map((e) => ({ role: e.speaker === "human" ? "user" : "assistant", content: e.text })),
       judgments: privateState.judgments, attempts: dialogue.getAttempts(), ownLedger: privateState.ledger,
@@ -135,7 +139,7 @@ export async function createNamingTaskV2({
   return {
     version: VERSION,
     /** Accept a human message immediately, even while the AI is thinking. */
-    message(text, clientId = randomUUID()) {
+    message(text, clientId) {
       if (closed) throw new NamingTaskError("dialogue_closed");
       if (typeof text !== "string" || !text.trim() || text.length > 2000) throw new NamingTaskError("invalid_message");
       const receipt = queue.enqueue({ clientId, text: text.trim() });

@@ -284,9 +284,13 @@ function stage(graph, update, publicTurns) {
   if (!Array.isArray(publicTurns) || publicTurns.length > REFERENCE_LIMITS.publicTurns) fail("invalid_public_turns");
   const turnMap = new Map();
   for (const item of publicTurns) {
-    if (!exact(item, ["turn", "speaker", "text"]) || !index(item.turn) || item.turn === 0 || item.turn > update.turn ||
+    const ordinary = exact(item, ["turn", "speaker", "text"]);
+    const scripted = exact(item, ["turn", "speaker", "text", "nonReferential"]) && item.nonReferential === true && item.speaker === "ai";
+    if ((!ordinary && !scripted) || !index(item.turn) || item.turn === 0 || item.turn > update.turn ||
         !["human", "ai"].includes(item.speaker) || !text(item.text, 12000) || turnMap.has(item.turn + ":" + item.speaker)) fail("invalid_public_turns");
-    turnMap.set(item.turn + ":" + item.speaker, item.text);
+    // Keep the sequence entry for duplicate detection, without admitting any
+    // scripted text as a mention, antecedent or downstream name source.
+    turnMap.set(item.turn + ":" + item.speaker, scripted ? null : item.text);
   }
   const next = clone(graph);
   for (const op of update.operations) {

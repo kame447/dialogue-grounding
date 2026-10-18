@@ -54,13 +54,26 @@ button:disabled{opacity:.45;cursor:default}
 #history strong{display:block;font-size:.68rem;color:var(--muted);font-weight:500}
 #history p{margin:4px 0 0}
 #history small{display:block;color:var(--muted);margin-top:6px;font-size:.7rem}
-.pending{opacity:.75}
+.pending{opacity:.85}
+.transcript{display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden}
+.typing-indicator{display:flex;align-items:center;gap:5px;align-self:flex-start;flex-shrink:0;margin:0 20px 14px;padding:13px 15px;background:#f5f5f2;border-radius:10px 10px 10px 3px}
+.typing-indicator span{width:6px;height:6px;background:#92978a;border-radius:50%;animation:typing-bounce 1.3s ease-in-out infinite}
+.typing-indicator span:nth-child(2){animation-delay:.16s}
+.typing-indicator span:nth-child(3){animation-delay:.32s}
+@keyframes typing-bounce{0%,60%,100%{transform:translateY(0);opacity:.55}30%{transform:translateY(-4px);opacity:1}}
+.chat-recovery{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-shrink:0;padding:8px 16px 12px;font-size:.75rem;color:var(--muted)}
+.chat-recovery p{margin:0}
+.chat-recovery button{flex-shrink:0}
+#history .message-failure{display:flex;align-items:center;gap:6px}
+.message-failure>span:first-child{display:inline-flex;justify-content:center;align-items:center;width:15px;height:15px;border:1px solid #999c91;border-radius:50%;font-size:.65rem}
+.retry-message{background:transparent;border:0;color:#61675a;font-size:.72rem;padding:3px 5px;text-decoration:underline;text-underline-offset:3px}
+.retry-message:disabled{opacity:.45}
 #chat{flex-shrink:0;border-top:1px solid var(--line);padding:16px;background:#fff}
-#chat textarea{max-height:140px;min-height:76px;margin:0;font-size:.88rem;line-height:1.7}
+#chat textarea{max-height:140px;min-height:76px;overflow-y:auto;margin:0;font-size:.88rem;line-height:1.7}
 .chat-actions{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:10px}
 .chat-actions .muted{font-size:.65rem;line-height:1.6}
 .chat-actions button{flex-shrink:0;padding:9px 16px;font-size:.82rem}
-#chat-status{font-size:.66rem;color:var(--muted);max-width:76%;text-align:right;line-height:1.5}
+
 #name-stage,#results{padding:20px;overflow-y:auto;overscroll-behavior:contain}
 #name-stage>.muted,#results>.muted{margin-top:14px}
 .name-list{display:grid;gap:8px;margin:6px 0 20px}
@@ -91,4 +104,4 @@ dialog::backdrop{background:#24252260}
 :focus-visible{outline:3px solid #858f77;outline-offset:3px}
 @media(max-width:1000px){main{padding:0 20px 20px}.workspace{grid-template-columns:minmax(0,2fr) minmax(300px,1fr);gap:14px}.topbar{gap:20px}.progress li+li:before{width:16px;margin:0 10px 0 4px}}
 @media(max-width:760px){main{padding:0 12px 20px}.topbar{min-height:110px;align-items:flex-start;justify-content:center;flex-direction:column;gap:14px;padding:16px 0;margin-bottom:14px}h1{font-size:.94rem}.topbar nav{width:100%}.progress{justify-content:space-between;font-size:.72rem}.progress li{gap:5px}.progress li+li:before{width:10px;margin:0 5px 0 0}.step-number{width:21px;height:21px;font-size:.65rem}.progress small{font-size:.57rem}.workspace{height:auto;min-height:0;grid-template-columns:1fr;gap:12px}.board{height:38dvh;min-height:260px;max-height:400px;padding:16px 16px 12px}.board .panel-head h2{font-size:.88rem}.scene-area{min-height:0}.privacy-note{font-size:.65rem;line-height:1.5}.dialogue{height:76dvh;min-height:460px;max-height:820px}.conversation-head{padding:16px}.shape-name{font-size:25px}dialog{padding:20px}.modal-actions button{padding:10px 12px}.name-list{grid-template-columns:1fr 1fr;gap:8px}.name-choice{padding:8px;gap:8px;flex-direction:column;align-items:flex-start}.name-choice svg{width:42px;height:38px}#setup{margin:24px auto}.panel{border-radius:8px}}
-@media(prefers-reduced-motion:reduce){#history{scroll-behavior:auto}.silhouette[role=button]{transition:none}}
+@media(prefers-reduced-motion:reduce){.typing-indicator span{animation:none}#history{scroll-behavior:auto}.silhouette[role=button]{transition:none}}
