@@ -242,7 +242,7 @@ for (const visualAid of [false, true]) for (const referenceMemory of [false, tru
       same(a.messages.filter((m) => !policy(m)), b.messages.filter((m) => !policy(m)), 'strategies may differ only in declared judge policy');
       const payload = JSON.stringify(a.messages);
       if (a.phase === 'judgment' && referenceMemory) assert.ok(payload.includes('ownReferences'), 'enabled judge must receive memory summary');
-      else assert.ok(!/ownReferences|referenceGraph|memoryOps|private_own_slots_not_ground_truth/.test(payload), 'graph must stay out of generator and final requests');
+      else assert.ok(!/ownReferences|referenceGraph|memoryOps|"reference"\s*:|private_own_slots_not_ground_truth/.test(payload), 'graph must stay out of generator and final requests');
       if (visualAid) {
         const at = a.messages.findIndex((m) => imageURLs([m]).includes(expectedImages[0]));
         same(imageURLs([a.messages[at + 1]]), [expectedImages[1]], 'derived image must immediately follow own image');
@@ -270,34 +270,37 @@ test('enabled visual aid rejects unsupported own PNG before any model request', 
   assert.equal(client.calls.length, 0);
 });
 
-const mention = (quote = '鳥にしましょう') => ({ kind: 'mention', id: '1:m', sourceTurn: 1, speaker: 'human', quote,
-  slots: [SLOTS[0]], confidence: 0.8, epistemic: 'grounded', intent: 'name_proposal', antecedent: null });
-const referenceOps = () => [mention(), { kind: 'name', id: '1:n', slot: SLOTS[0], name: '鳥', agreement: 'none',
-  mentionIds: ['1:m'], replaces: null }];
+const namingReference = () => ({ slots: [SLOTS[0]], epistemic: 'grounded', intent: 'name_acceptance', feature: null,
+  nameAcceptance: { slot: SLOTS[0], name: '鳥' }, deferSlot: null, revisitSlot: null });
 const memoryInput = (call) => {
   const message = call.messages.find((m) => typeof m.content === 'string' && m.content.includes('"ownReferences":'));
   assert.ok(message, 'judge must receive structured own reference summary');
   return JSON.parse(message.content.slice(message.content.indexOf('{'))).ownReferences;
 };
 
-test('valid memory operations commit with generation, survive to the next judge, and stay out of generator/final', async () => {
+test('bounded reference interpretation commits with generation, reaches the next judge, and stays out of generator/final', async () => {
   let failGeneration = true, judgeCalls = 0;
   const client = fakeClient(({ phase }) => {
-    if (phase === 'judgment') return JSON.stringify({ ...judgment, memoryOps: ++judgeCalls <= 2 ? referenceOps() : [] });
+    if (phase === 'judgment') return JSON.stringify({ ...judgment, action: 'agree', candidateName: '鳥',
+      reference: ++judgeCalls <= 2 ? namingReference() : null });
     if (phase === 'generation' && failGeneration) { failGeneration = false; throw new Error(CANARY); }
     return phase === 'final_submission' ? JSON.stringify(CHOICE) : REPLY;
   });
   const session = createDialogueSession({ client, image, strategy: 'repair-first', referenceMemory: true });
   const initialGraph = session.getReferenceGraph(), initialLedger = session.getOwnLedger();
-  await assert.rejects(session.turn('鳥にしましょう'));
+  await assert.rejects(session.turn('鳥でいいです'));
   assert.deepEqual(session.getHistory(), []);
   assert.deepEqual(session.getOwnLedger(), initialLedger);
   assert.deepEqual(session.getReferenceGraph(), initialGraph);
   assert.equal(session.getJudgmentHistory()[0].memory.opsApplied, 0);
-  await session.turn('鳥にしましょう');
+  await session.turn('鳥でいいです');
   assert.equal(session.getReferenceGraph().revision, 1);
   assert.equal(session.getReferenceGraph().ownSlots[SLOTS[0]].candidate.name, '鳥');
-  assert.equal(session.getJudgmentHistory().at(-1).memory.opsApplied, 2);
+  assert.equal(session.getJudgmentHistory().at(-1).memory.interpretation, true);
+  for (const trace of session.getJudgmentHistory()) {
+    assert.ok(!Object.hasOwn(trace.judgment, 'reference'), 'trace must omit reference contents');
+    assert.ok(!Object.hasOwn(trace.judgment, 'memoryOps'), 'trace must omit graph operations');
+  }
   await session.turn('続けて相談しましょう');
   const judges = client.calls.filter((c) => c.phase === 'judgment');
   assert.equal(memoryInput(judges[0]).revision, 0);
@@ -305,15 +308,30 @@ test('valid memory operations commit with generation, survive to the next judge,
   assert.equal(memoryInput(judges[2]).ownSlots[SLOTS[0]].candidate.name, '鳥');
   await session.finalRequest('【非公開最終提出要求】JSONで提出してください');
   for (const call of client.calls.filter((c) => c.phase !== 'judgment')) {
-    assert.ok(!/ownReferences|memoryOps|private_own_slots_not_ground_truth/.test(JSON.stringify(call.messages)),
-      'non-judge model input must omit graph and operations');
+    assert.ok(!/ownReferences|memoryOps|"reference"\s*:|private_own_slots_not_ground_truth/.test(JSON.stringify(call.messages)),
+      'non-judge model input must omit graph and reference interpretation');
   }
   assertModelPrivacy(client.calls);
 });
 
-test('nonpublic memory evidence is retried once then dropped while retaining a valid core judgment', async () => {
+test('injected private quote in reference is retried once then dropped while retaining a valid core judgment', async () => {
   const client = fakeClient(({ phase }) => phase === 'judgment' ?
-    JSON.stringify({ ...judgment, memoryOps: [mention(CANARY)] }) : REPLY);
+    JSON.stringify({ ...judgment, reference: { ...namingReference(), quote: CANARY, sourceTurn: 99 } }) : REPLY);
+  const session = createDialogueSession({ client, image, strategy: 'repair-first', referenceMemory: true });
+  await session.turn(PUBLIC);
+  assert.deepEqual(client.calls.map((c) => c.phase), ['judgment', 'judgment', 'generation']);
+  assertModelPrivacy(client.calls);
+  assert.deepEqual(session.getReferenceGraph().mentions, []);
+  assert.equal(session.getJudgmentHistory().at(-1).memory.opsApplied, 0);
+  assert.equal(session.getJudgmentHistory().at(-1).memory.interpretation, false);
+  const selected = client.calls.at(-1).messages.find((m) => typeof m.content === 'string' && m.content.startsWith('この発話の判断'));
+  assert.match(selected.content, /"action":"propose_name"/);
+  assert.doesNotMatch(selected.content, /memoryOps|"reference"\s*:|SYNTHETIC_PRIVATE/);
+});
+
+test('legacy model-authored memory operations are rejected without disclosing their contents', async () => {
+  const client = fakeClient(({ phase }) => phase === 'judgment' ? JSON.stringify({ ...judgment,
+    memoryOps: [{ kind: 'mention', id: '99:injected', sourceTurn: 99, quote: CANARY }] }) : REPLY);
   const session = createDialogueSession({ client, image, strategy: 'repair-first', referenceMemory: true });
   await session.turn(PUBLIC);
   assert.deepEqual(client.calls.map((c) => c.phase), ['judgment', 'judgment', 'generation']);
@@ -321,8 +339,8 @@ test('nonpublic memory evidence is retried once then dropped while retaining a v
   assert.deepEqual(session.getReferenceGraph().mentions, []);
   assert.equal(session.getJudgmentHistory().at(-1).memory.opsApplied, 0);
   const selected = client.calls.at(-1).messages.find((m) => typeof m.content === 'string' && m.content.startsWith('この発話の判断'));
-  assert.match(selected.content, /"action":"propose_name"/);
-  assert.doesNotMatch(selected.content, /memoryOps|SYNTHETIC_PRIVATE/);
+  assert.match(selected.content, /"action":"accept"/);
+  assert.doesNotMatch(selected.content, /memoryOps|"reference"\s*:|SYNTHETIC_PRIVATE/);
 });
 
 test('Web ON state and pending AI choices stay private; malformed toggles cannot replace the live trial', async (t) => {
