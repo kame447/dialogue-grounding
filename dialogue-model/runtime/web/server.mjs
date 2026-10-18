@@ -36,7 +36,8 @@ async function readJSON(req) {
 }
 
 export function createNamingServer({ client, createTrial, scoreTrial, runDir = process.env.RESEARCH_RUN_DIR,
-  hideStrategy = false, now = Date.now, createTask = createNamingTask, createTaskV2 = createNamingTaskV2, activeDecision = null } = {}) {
+  hideStrategy = false, now = Date.now, createTask = createNamingTask, createTaskV2 = createNamingTaskV2, activeDecision = null, utteranceStyle = "default" } = {}) {
+  if (!["default", "concise"].includes(utteranceStyle)) throw new Error("Invalid utterance style");
   if (activeDecision !== null && (!activeDecision || !["decision_jev", "decision_luna"].includes(activeDecision.purpose) ||
       typeof activeDecision.client?.chooseAction !== "function")) throw new Error("Invalid active decision client");
   const sessions = new Map();
@@ -127,7 +128,7 @@ export function createNamingServer({ client, createTrial, scoreTrial, runDir = p
         session.starting = true;
         try {
           session.task = version === 2
-            ? await createTaskV2({ client, runDir, strategy: body.strategy, seed: body.seed, referenceMemory, activeDecision })
+            ? await createTaskV2({ client, runDir, strategy: body.strategy, seed: body.seed, referenceMemory, activeDecision, utteranceStyle })
             : await createTask({ client, createTrial, scoreTrial, runDir, strategy: body.strategy, seed: body.seed, visualAid, referenceMemory });
         } finally { session.starting = false; }
         session.pageVersion = version;
@@ -184,9 +185,9 @@ export async function startNamingServer({ port = 8787, ...options } = {}) {
 export async function main(argv = process.argv.slice(2), env = process.env,
   { createClient = createChatClient, createDecisionClient = createDecisionComparisonClient, startServer = startNamingServer } = {}) {
   const { values } = parseArgs({ args: argv, options: { port: { type: "string", default: "8787" },
-    "hide-strategy": { type: "boolean", default: false }, "active-decision-judge": { type: "string" }, help: { type: "boolean" } } });
+    "hide-strategy": { type: "boolean", default: false }, "active-decision-judge": { type: "string" }, "utterance-style": { type: "string" }, help: { type: "boolean" } } });
   if (values.help) {
-    console.log("node --env-file=.env dialogue-model/runtime/web/server.mjs --port 8787 [--hide-strategy] [--active-decision-judge decision_jev|decision_luna]");
+    console.log("node --env-file=.env dialogue-model/runtime/web/server.mjs --port 8787 [--hide-strategy] [--active-decision-judge decision_jev|decision_luna] [--utterance-style default|concise]");
     return;
   }
   const purpose = values["active-decision-judge"];
@@ -194,7 +195,7 @@ export async function main(argv = process.argv.slice(2), env = process.env,
   const config = loadConfig(env);
   const client = createClient(config);
   const activeDecision = purpose === undefined ? null : { client: createDecisionClient(config), purpose };
-  const server = await startServer({ port: Number(values.port), client, runDir: env.RESEARCH_RUN_DIR, hideStrategy: values["hide-strategy"], activeDecision });
+  const server = await startServer({ port: Number(values.port), client, runDir: env.RESEARCH_RUN_DIR, hideStrategy: values["hide-strategy"], activeDecision, utteranceStyle: values["utterance-style"] ?? "default" });
   console.log("共同命名課題: http://127.0.0.1:" + server.address().port);
   return server;
 }
