@@ -1,10 +1,12 @@
-// Opt-in v2 judge extension (default off; researcher-unapproved diagnostic).
+// Opt-in v2 judge intervention (default off; researcher-unapproved, not adopted).
 // When an impression fits two or more of the AI's OWN figures, Luna lists them
 // with one feature each and declares which listed candidates its chosen
 // discriminatingFeature fits in its own image. A feature that fits every listed
 // candidate (or none) cannot separate them and is rejected deterministically.
 // The block is private research data: never generator input, never public.
 // It says nothing about the partner's board; fits are Luna's own claims.
+// Problems with the block are recorded by the judge and never discard a valid
+// act. Key-consuming scoring lives in diagnostics/, never imported here.
 
 export type CandidateEntry = { id: string; feature: string };
 export type CandidateConflict = { candidates: CandidateEntry[]; featureFits: string[] | null };
@@ -92,39 +94,4 @@ export function validateCandidateConflict(value: unknown, { ownIds, judgment }: 
   // The one deterministic content rule: the feature must split the listed set.
   if (fits.length === 0 || fits.length === ids.length) throw new CandidateConflictError("non_discriminating_feature");
   return { candidates, featureFits: [...fits] };
-}
-
-export type FeatureSplitScore = {
-  scoredIds: string[];
-  fitsTarget: boolean | null;
-  fitsReferent: boolean | null;
-  separatesTargetFromReferent: boolean | null;
-  splitsCandidates: boolean | null;
-  claimMatchesScorer: boolean | null;
-  fitCount: number;
-};
-
-/**
- * RESEARCHER ONLY, offline. `scorerFits` comes from a separate scorer that saw
- * the AI's own crops; `trueReferent` comes from the held-out key. Neither may
- * ever reach a judge or generator. Pure set arithmetic, no I/O.
- */
-export function scoreFeatureSplit({ scorerFits, scoredIds, targetSlot, trueReferent = null, conflict = null }: {
-  scorerFits: readonly string[]; scoredIds: readonly string[]; targetSlot: string | null;
-  trueReferent?: string | null; conflict?: CandidateConflict | null;
-}): FeatureSplitScore {
-  if (!scorerFits.every((id) => scoredIds.includes(id))) throw new TypeError("scorer fits outside scored ids");
-  const has = (id: string | null) => id === null || !scoredIds.includes(id) ? null : scorerFits.includes(id);
-  const fitsTarget = has(targetSlot), fitsReferent = has(trueReferent);
-  const listed = conflict?.candidates.map((entry) => entry.id) ?? [];
-  const listedFits = listed.filter((id) => scorerFits.includes(id));
-  return {
-    scoredIds: [...scoredIds],
-    fitsTarget, fitsReferent,
-    separatesTargetFromReferent: fitsTarget === null || fitsReferent === null || targetSlot === trueReferent ? null : fitsTarget !== fitsReferent,
-    splitsCandidates: listed.length >= 2 && listed.every((id) => scoredIds.includes(id)) ? listedFits.length > 0 && listedFits.length < listed.length : null,
-    claimMatchesScorer: conflict?.featureFits && listed.every((id) => scoredIds.includes(id))
-      ? listed.every((id) => conflict.featureFits!.includes(id) === scorerFits.includes(id)) : null,
-    fitCount: scorerFits.length,
-  };
 }

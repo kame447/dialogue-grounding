@@ -9,7 +9,7 @@ import { createReferenceGraph } from "../dialogue-model/runtime/memory/reference
 import { createDialogueV2 } from "../dialogue-model/runtime/v2/dialogue-v2.mjs";
 import {
   CANDIDATE_CONFLICT_INSTRUCTIONS, CONFLICT_RETRY_HINTS, CandidateConflictError, splitConflict,
-  validateCandidateConflict, scoreFeatureSplit,
+  validateCandidateConflict,
 } from "../dialogue-model/runtime/v2/candidate-conflict.ts";
 
 type Message = { role: string; content: unknown };
@@ -92,10 +92,10 @@ test("a discriminating conflict is kept in diagnostics only, never in the return
   assert.equal(requests.length, 1);
   assert.deepEqual(output, confirm);
   assert.ok(!Object.hasOwn(output, "conflict"));
-  assert.deepEqual(diagnostics.at(-1), { attempts: 1, fallback: false, failures: [], conflict: twoCandidates });
+  assert.deepEqual(diagnostics.at(-1), { attempts: 1, fallback: false, failures: [], conflict: twoCandidates, conflictError: null, nonDiscriminating: false });
 });
 
-test("a feature common to all candidates is rejected, retried with a hint, then safely falls back", async () => {
+test("a feature common to all candidates gets one corrective retry and never discards the valid act", async () => {
   const common = { ...twoCandidates, featureFits: ["s-0001", "s-0002"] };
   const fixed = { ...twoCandidates, featureFits: ["s-0002"] };
   const retried = await runJudge({ candidateConflict: true, replies: [JSON.stringify({ ...confirm, conflict: common }), JSON.stringify({ ...confirm, conflict: fixed })] });
@@ -103,17 +103,34 @@ test("a feature common to all candidates is rejected, retried with a hint, then 
   assert.match(String(retried.requests[1].at(-1)?.content), /non_discriminating_feature/);
   assert.ok(String(retried.requests[1].at(-1)?.content).includes(CONFLICT_RETRY_HINTS.non_discriminating_feature));
   assert.deepEqual(retried.output, confirm);
-  assert.deepEqual(retried.diagnostics.at(-1)?.conflict, fixed);
+  assert.deepEqual(retried.diagnostics.at(-1), { attempts: 2, fallback: false, failures: ["non_discriminating_feature"], conflict: fixed, conflictError: null, nonDiscriminating: false });
 
-  const failed = await runJudge({ candidateConflict: true, memory: true, replies: [JSON.stringify({ ...confirm, reference: null, conflict: common })] });
-  assert.deepEqual(failed.output, { ...SAFE_JUDGMENT, reference: null });
-  assert.deepEqual(failed.diagnostics.at(-1), { attempts: 2, fallback: true, failures: ["non_discriminating_feature", "non_discriminating_feature"], memoryFallback: false, conflict: null });
+  // Still non-discriminating after the retry: keep the act, flag it privately.
+  const kept = await runJudge({ candidateConflict: true, memory: true, replies: [JSON.stringify({ ...confirm, reference: null, conflict: common })] });
+  assert.equal(kept.requests.length, 2);
+  assert.deepEqual(kept.output, { ...confirm, reference: null });
+  assert.deepEqual(kept.diagnostics.at(-1), { attempts: 2, fallback: false, failures: ["non_discriminating_feature"], memoryFallback: false,
+    conflict: null, conflictError: "non_discriminating_feature", nonDiscriminating: true });
+
+  // Retry with an invalid core: the first valid act survives.
+  const firstKept = await runJudge({ candidateConflict: true, replies: [JSON.stringify({ ...confirm, conflict: common }), "not json"] });
+  assert.deepEqual(firstKept.output, confirm);
+  assert.deepEqual(firstKept.diagnostics.at(-1), { attempts: 2, fallback: false, failures: ["non_discriminating_feature", "invalid_json"],
+    conflict: null, conflictError: "non_discriminating_feature", nonDiscriminating: true });
 });
 
-test("missing or malformed conflict blocks fail closed", async () => {
+test("missing or malformed conflict blocks are recorded without a retry or a safe fallback", async () => {
   const missing = await runJudge({ candidateConflict: true, replies: [JSON.stringify(confirm)] });
-  assert.deepEqual(missing.output, SAFE_JUDGMENT);
-  assert.deepEqual(missing.diagnostics.at(-1)?.failures, ["invalid_conflict", "invalid_conflict"]);
+  assert.equal(missing.requests.length, 1);
+  assert.deepEqual(missing.output, confirm);
+  assert.deepEqual(missing.diagnostics.at(-1), { attempts: 1, fallback: false, failures: [], conflict: null, conflictError: "invalid_conflict", nonDiscriminating: false });
+  const outside = await runJudge({ candidateConflict: true, replies: [JSON.stringify({ ...confirm, targetSlot: "s-0003", conflict: twoCandidates })] });
+  assert.deepEqual(outside.output, { ...confirm, targetSlot: "s-0003" });
+  assert.equal(outside.diagnostics.at(-1)?.conflictError, "conflict_target_not_candidate");
+  // Only an invalid core act still ends in the existing safe judgment.
+  const invalidCore = await runJudge({ candidateConflict: true, replies: ["not json"] });
+  assert.deepEqual(invalidCore.output, SAFE_JUDGMENT);
+  assert.deepEqual(invalidCore.diagnostics.at(-1), { attempts: 2, fallback: true, failures: ["invalid_json", "invalid_json"], conflict: null, conflictError: null, nonDiscriminating: false });
 });
 
 test("validator: shapes, target membership and the split rule", () => {
@@ -144,16 +161,6 @@ test("validator: shapes, target membership and the split rule", () => {
   assert.deepEqual(raw, { a: 1, conflict: 2 });
 });
 
-test("scorer arithmetic uses only researcher-supplied fits", () => {
-  const conflict = { candidates: twoCandidates.candidates, featureFits: ["s-0001"] };
-  assert.deepEqual(scoreFeatureSplit({ scorerFits: ["s-0001", "s-0002"], scoredIds: ids, targetSlot: "s-0001", trueReferent: "s-0002", conflict }), {
-    scoredIds: ids, fitsTarget: true, fitsReferent: true, separatesTargetFromReferent: false, splitsCandidates: false, claimMatchesScorer: false, fitCount: 2 });
-  assert.deepEqual(scoreFeatureSplit({ scorerFits: ["s-0001"], scoredIds: ids, targetSlot: "s-0001", trueReferent: "s-0002", conflict }), {
-    scoredIds: ids, fitsTarget: true, fitsReferent: false, separatesTargetFromReferent: true, splitsCandidates: true, claimMatchesScorer: true, fitCount: 1 });
-  assert.equal(scoreFeatureSplit({ scorerFits: [], scoredIds: ids, targetSlot: "s-0001", trueReferent: "s-0001" }).separatesTargetFromReferent, null);
-  assert.throws(() => scoreFeatureSplit({ scorerFits: ["x"], scoredIds: ids, targetSlot: null }), /outside/);
-});
-
 test("v2 dialogue with an injected opt-in judge never shows candidate features to the generator", async () => {
   const secretFeature = "SYNTHETIC_PRIVATE_CANDIDATE_FEATURE";
   const conflict = { candidates: [{ id: "s-0001", feature: secretFeature }, { id: "s-0002", feature: secretFeature + "2" }], featureFits: null };
@@ -170,4 +177,5 @@ test("v2 dialogue with an injected opt-in judge never shows candidate features t
   assert.equal(requests.length, 2);
   assert.ok(!JSON.stringify(requests[1]).includes(secretFeature), "generator input must not include candidate notes");
   assert.deepEqual(turn.privateState.judgments[0].validation.conflict, conflict);
+  assert.ok(!Object.hasOwn(turn.privateState.judgments[0].judgment, "conflict"));
 });

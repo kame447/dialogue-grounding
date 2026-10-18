@@ -51,8 +51,9 @@ export function ownAnchorMessage(anchors, ledger) {
 }
 
 /**
- * candidateConflict (v2 only, default off) is a researcher-unapproved opt-in: Luna
- * also returns a private candidate list, kept only in diagnostics, never returned.
+ * candidateConflict (v2 only, default off) is a researcher-unapproved opt-in
+ * intervention: Luna also returns a private candidate list, kept only in
+ * diagnostics, never returned. Conflict-block problems never replace a valid act.
  * @returns {import('./schema.mjs').DialogueJudge & {getDiagnostics(): object[]}}
  */
 export function createLunaJudge(client, { candidateConflict = false } = {}) {
@@ -90,9 +91,18 @@ export function createLunaJudge(client, { candidateConflict = false } = {}) {
         ...publicMessages(publicHistory),
       ];
       const failures = [];
-      let validCore = null, memoryFailure = false, conflict = null, rawConflict;
+      // Opt-in conflict problems never discard a valid act: they are recorded privately.
+      const conflictOutcome = (present, raw, judgment) => {
+        if (!present) return { conflict: null, conflictError: "invalid_conflict", nonDiscriminating: false };
+        try { return { conflict: validateCandidateConflict(raw, { ownIds: Object.keys(ledger), judgment }), conflictError: null, nonDiscriminating: false }; }
+        catch (error) {
+          const code = error instanceof CandidateConflictError ? error.code : "invalid_conflict";
+          return { conflict: null, conflictError: code, nonDiscriminating: code === "non_discriminating_feature" };
+        }
+      };
+      let validCore = null, memoryFailure = false, rawConflict, conflictPresent = false, pending = null;
       for (let attempt = 0; attempt < 2; attempt++) {
-        validCore = null; memoryFailure = false; rawConflict = undefined;
+        validCore = null; memoryFailure = false; rawConflict = undefined; conflictPresent = false;
         const response = await client.complete(attempt ? [...messages,
           { role: "system", content: "前回の判断は検証できませんでした。検証理由: " + failures.at(-1) + "。tentativeの同じ対象の言い換えはagree/confirm/propose_nameで新しい名前を指定できます。合意済み名の訂正や対象の付け替えはrepairを使ってください。同名が別枠にある場合は元の枠をrepairとcandidateName=nullで空にしてから再割当してください。" + (failures.at(-1) === "agree_requires_shared_identification" ? version === 2 ? "作業メモでunassignedかdeferredの対象にはまだagreeできません。全体の見立てで理解を示すpropose_nameやaccept、または方略に応じたdefer・move_on・revisitを選んでください。discriminatingFeatureは原則nullで、共通教示の分析トリガーがあるときだけ1特徴を添えるかconfirmを選んでください。" : "作業メモでunassignedかdeferredの対象にはまだagreeできません。識別特徴1つを添えたpropose_name、confirm、accept、または方略に応じたdefer・move_on・revisitを選んでください。" : "") + (candidateConflict ? CONFLICT_RETRY_HINTS[failures.at(-1)] ?? "" : "") + "上記JSON形式と制約を守って再提出してください。" }] : messages,
         { phase: "judgment" });
@@ -100,8 +110,7 @@ export function createLunaJudge(client, { candidateConflict = false } = {}) {
           let parsed = JSON.parse(response.text);
           if (candidateConflict) {
             const split = splitConflict(parsed);
-            if (!split.present) throw new CandidateConflictError("invalid_conflict");
-            parsed = split.core; rawConflict = split.conflict;
+            parsed = split.core; rawConflict = split.conflict; conflictPresent = split.present;
           }
           if (referenceContext) {
             const core = { ...parsed }; delete core.reference;
@@ -115,29 +124,31 @@ export function createLunaJudge(client, { candidateConflict = false } = {}) {
             memoryFailure = Boolean(referenceContext && validCore);
             throw error;
           }
-          if (candidateConflict) conflict = validateCandidateConflict(rawConflict, { ownIds: Object.keys(ledger), judgment });
-          diagnostics.push({ attempts: attempt + 1, fallback: false, failures, ...(referenceContext ? { memoryFallback: false } : {}),
-            ...(candidateConflict ? { conflict } : {}) });
+          const outcome = candidateConflict ? conflictOutcome(conflictPresent, rawConflict, judgment) : null;
+          // A non-discriminating feature gets one corrective retry; the valid act is kept either way.
+          if (outcome?.nonDiscriminating && attempt === 0) {
+            pending = { judgment, outcome };
+            failures.push(outcome.conflictError);
+            continue;
+          }
+          diagnostics.push({ attempts: attempt + 1, fallback: false, failures, ...(referenceContext ? { memoryFallback: false } : {}), ...(outcome ?? {}) });
           return judgment;
         } catch (error) {
-          const code = error instanceof JudgmentValidationError || error instanceof ReferenceGraphError ||
-            error instanceof CandidateConflictError ? error.code : "invalid_json";
+          const code = error instanceof JudgmentValidationError || error instanceof ReferenceGraphError ? error.code : "invalid_json";
           failures.push(memoryFailure ? "memory_" + code : code);
         }
       }
+      if (pending) {
+        diagnostics.push({ attempts: 2, fallback: false, failures, ...(referenceContext ? { memoryFallback: false } : {}), ...pending.outcome });
+        return pending.judgment;
+      }
       if (memoryFailure && validCore) {
-        let ok = true;
-        if (candidateConflict) {
-          try { conflict = validateCandidateConflict(rawConflict, { ownIds: Object.keys(ledger), judgment: validCore }); }
-          catch (error) { ok = false; failures.push(error instanceof CandidateConflictError ? error.code : "invalid_conflict"); }
-        }
-        if (ok) {
-          diagnostics.push({ attempts: 2, fallback: false, failures, memoryFallback: true, ...(candidateConflict ? { conflict } : {}) });
-          return { ...validCore, reference: null };
-        }
+        diagnostics.push({ attempts: 2, fallback: false, failures, memoryFallback: true,
+          ...(candidateConflict ? conflictOutcome(conflictPresent, rawConflict, validCore) : {}) });
+        return { ...validCore, reference: null };
       }
       diagnostics.push({ attempts: 2, fallback: true, failures, ...(referenceContext ? { memoryFallback: false } : {}),
-        ...(candidateConflict ? { conflict: null } : {}) });
+        ...(candidateConflict ? { conflict: null, conflictError: null, nonDiscriminating: false } : {}) });
       return { ...SAFE_JUDGMENT, ...(referenceContext ? { reference: null } : {}) };
     },
   };
