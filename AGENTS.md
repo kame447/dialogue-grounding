@@ -30,7 +30,7 @@ AI は、提示された自分側の画像と公開対話履歴を用いた意�
 
 - Node 24 の型除去（`process.features.typescript === "strip"`）と Wrangler でそのまま実行できるよう、消去可能な構文だけを使う（`enum`・`namespace`・コンストラクタ引数プロパティを使わない、型は `import type`、import には `.ts` 拡張子を書く）。
 - 型は検証ではない。API入出力・モデル出力・保存記録など外部から来る値の実行時検証は維持する。
-- テストは既存の `npm test` で実行されること（`.test.ts` を追加したら test の対象パターンを更新する）。型検査（`tsc --noEmit`）の導入は別途決める。
+- テストは `npm test` で実行する（`tests/*.test.ts` も対象）。CI は Workers の TypeScript を `tsc` で型検査する（`workers/tangram-experiment/tsconfig.json`）。新しい `.ts` もこの型検査を通す。
 
 ## 研究用 Cloudflare Worker
 
