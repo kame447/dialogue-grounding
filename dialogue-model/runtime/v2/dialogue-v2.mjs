@@ -198,6 +198,12 @@ export function createDialogueV2({ client, strategy, image, anchors, judge = nul
         ...(Object.hasOwn(judgment, "followUp") ? { followUp: judgment.followUp } : {}) }) },
       ...ownImageMessage(ownImage),
       { role: "system", content: "AI自身の作業メモ（非公開・正解表ではない）:\n" + JSON.stringify({ ownLedger: state.ledger, agreeEvidence: true }) },
+      ...(trace.activeJudge && trace.activeJudge.finalAction !== trace.activeJudge.lunaAction ? [{
+        role: "system", content: "【この発話の表現範囲（非公開）】この発話のactionは" + action + "です。" + ACTION_SCOPE_V2[action] + "。" +
+          (action === "agree" ? "" : "相手が名前を提案していても、このactionでは名称への合意・決定を表す表現（呼びましょう／でいいですね／決まり 等）を使わないでください。") +
+          (action === "accept" ? "受け止めや見立ての共有にとどめてください。" : "このactionで指定された対話機能の範囲だけを表現してください。") +
+          "内部の判断・処理・ラベルを相手に説明せず、公開する発話だけを返してください。",
+      }] : []),
       ...history,
     ], { phase: "generation" });
     abortIf(signal);
