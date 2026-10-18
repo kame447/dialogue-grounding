@@ -27,22 +27,44 @@
     </form>
     <section id="trial" hidden>
       <div class="workspace">
-        <section class="panel board"><h2>あなたの図形</h2><p>上段左・上段中・上段右／下段左・下段中・下段右</p>
-          <img id="board" alt="あなたに提示された6図形。2段3列で、上段左から下段右の位置で参照します。">
+        <section class="panel board" aria-labelledby="board-title">
+          <div class="panel-head"><h2 id="board-title">あなたの図形</h2><span id="name-count" class="muted" role="status"></span></div>
+          <p class="muted">図形を選ぶと拡大できます。会話で共有した名前は、自分のメモとして入力できます。</p>
+          <div id="scene-area" class="scene-area"><svg id="board" viewBox="0 0 1200 800" aria-label="あなたの図形。選択して拡大・名前を入力" xmlns="http://www.w3.org/2000/svg"></svg></div>
+          <p id="scene-status" role="status" class="muted"></p>
+          <p class="privacy-note">入力した名前や図形の選択は相手に届きません。名前を共有するには、メッセージで伝えてください。</p>
         </section>
-        <section class="panel dialogue"><h2>対話</h2><ol id="history" aria-live="polite" aria-label="公開された会話"></ol>
-          <form id="chat"><label for="utterance">メッセージ <span class="muted">Enterで送信・Shift+Enterで改行</span></label><textarea id="utterance" name="utterance" rows="3" maxlength="12000" required></textarea>
-            <div class="chat-actions"><p id="chat-status" role="status" aria-live="polite"></p><button>送信</button></div>
+        <section class="panel dialogue" aria-labelledby="dialogue-title">
+          <div class="panel-head"><h2 id="dialogue-title">対話</h2><span id="chat-status" role="status" aria-live="polite"></span></div>
+          <ol id="history" role="log" tabindex="0" aria-live="polite" aria-label="公開された会話"></ol>
+          <form id="chat"><label for="utterance">メッセージ</label><textarea id="utterance" name="utterance" rows="2" maxlength="12000" required placeholder="形や向きをことばで伝えてみましょう"></textarea>
+            <div class="chat-actions"><span class="muted">Enterで送信・Shift+Enterで改行</span><button id="send-message">送信</button></div>
           </form>
         </section>
       </div>
-      <section class="panel"><h2>最終提出</h2><p>あなた自身の画面上の位置ごとに名前を記入してください。未命名は空欄にできます。提出すると対話を終了し、名称を確定します。</p>
-        <form id="submission"><div id="names" class="names"></div><button>名前を確定して提出</button></form>
-        <p id="submission-status" aria-live="polite"></p>
+      <section class="panel submission-panel"><h2>会話で共有した名前を提出</h2><p>すべての図形を選んで名前を入力するか、「未合意・わからない」を選んでください。提出前に確認・修正できます。</p>
+        <form id="submission"><button id="review-names">回答を確認する</button></form>
+        <p id="submission-status" role="status" aria-live="polite"></p>
       </section>
-      <section id="results" class="panel" hidden><h2>照合結果（暫定）</h2><p>表記揺れ・部分成功・重複名の正式な扱いは未決定です。以下は操作確認用の暫定採点です。</p><div id="result-body"></div></section>
+      <section id="results" class="panel" hidden><h2>照合結果（暫定）</h2><p>図形のそばに、あなたとAIの名称・暫定照合を表示しています。正式な採点規則は検討中です。</p><div id="result-body"></div></section>
       <button id="new-trial" type="button" hidden>研究者用：次の試行を準備</button>
     </section>
   </main>
+  <dialog id="name-dialog" aria-labelledby="name-title" aria-describedby="name-privacy">
+    <form id="name-form">
+      <h2 id="name-title">この図形の名前</h2>
+      <svg id="figure-preview" class="figure-preview" aria-label="選択した図形の拡大" xmlns="http://www.w3.org/2000/svg"></svg>
+      <p id="name-privacy" class="muted">会話で共有できたと思う名前を入力してください。この入力は相手には届きません。</p>
+      <label for="figure-name">会話で共有した名前<input id="figure-name" maxlength="200" autocomplete="off" aria-describedby="name-error"></label>
+      <p id="name-error" class="field-error" role="alert"></p>
+      <div class="modal-actions"><button id="name-unknown" type="button" class="secondary">未合意・わからない</button><button id="name-cancel" type="button" class="quiet">キャンセル</button><button type="submit">メモを保存</button></div>
+    </form>
+  </dialog>
+  <dialog id="confirm-dialog" aria-labelledby="confirm-title">
+    <h2 id="confirm-title">この回答を提出しますか？</h2>
+    <p>図形のそばの名前を確認してください。提出すると対話を終了し、回答を変更できなくなります。</p>
+    <svg id="confirm-scene" viewBox="0 0 1200 800" aria-label="提出する図形と名前" xmlns="http://www.w3.org/2000/svg"></svg>
+    <div class="modal-actions"><button id="confirm-cancel" type="button" class="secondary">修正する</button><button id="confirm-submit" type="button">この回答で提出する</button></div>
+  </dialog>
 </body>
 </html>
