@@ -104,17 +104,17 @@ const paths = (e) => e.board.querySelectorAll("path");
 const save = (e, path, text) => { path.fire("click"); e["figure-name"].value = text; e["name-form"].fire("submit"); };
 
 
-test("chat opens with an inactive planned questionnaire and a hidden final form", async () => {
+test("chat opens with an upcoming questionnaire step and a hidden final form", async () => {
   const { e, calls } = await ui();
   assert.equal(e["conversation-stage"].hidden, false);
   assert.equal(e["name-stage"].hidden, true);
   assert.equal(e.results.hidden, true);
   assert.equal(e["step-chat"].getAttribute("aria-current"), "step");
-  assert.equal(e["step-questionnaire"].getAttribute("data-state"), "planned");
-  assert.equal(e["step-questionnaire"].getAttribute("aria-disabled"), "true");
+  assert.equal(e["step-questionnaire"].getAttribute("data-state"), "upcoming");
+  assert.equal(e["review-bar"].hidden, true, "review navigation appears only after submission");
   assert.equal(e["name-list"].children.length, 6);
   assert.equal(e.setup.hidden, true);
-  assert.equal(calls.length, 1);
+  assert.equal(calls.filter((call) => call.path !== "/api/records").length, 1);
 });
 
 test("explicit name-stage navigation preserves names and history without submitting", async () => {
@@ -139,7 +139,7 @@ test("explicit name-stage navigation preserves names and history without submitt
   assert.equal(e.utterance.disabled, false);
   assert.equal(e.utterance.focused, true);
   assert.match(e.history.textContent, /公開された相談/u);
-  assert.equal(calls.length, 1, "stage changes and draft editing never call the server");
+  assert.equal(calls.filter((call) => call.path !== "/api/records").length, 1, "stage changes and draft editing never call the server");
 });
 
 test("reload restores stage and private drafts only for the same opaque v2 session", async () => {
@@ -150,7 +150,7 @@ test("reload restores stage and private drafts only for the same opaque v2 sessi
   const restored = await ui(trial("session-one"), undefined, storage);
   assert.equal(restored.e["name-stage"].hidden, false);
   assert.match(restored.e.board.textContent, /同じ試行の名前/u);
-  assert.equal(restored.calls.length, 1);
+  assert.equal(restored.calls.filter((call) => call.path !== "/api/records").length, 1);
   const fresh = await ui(trial("session-two"), undefined, storage);
   assert.equal(fresh.e["conversation-stage"].hidden, false);
   assert.doesNotMatch(fresh.e.board.textContent, /同じ試行/u);
@@ -166,7 +166,12 @@ test("accepted final names stay in Name stage until the server publishes a resul
   e["confirm-submit"].fire("click"); await tick();
   assert.equal(e.results.hidden, true);
   assert.equal(e["name-stage"].hidden, false);
-  assert.equal(e["back-to-chat"].disabled, true);
+  // After submission the chat stays viewable (read-only), never editable.
+  assert.equal(e["back-to-chat"].disabled, false);
+  assert.equal(e["review-names"].hidden, true);
+  assert.equal(e.chat.hidden, true);
+  assert.equal(e["review-bar"].hidden, false);
+  assert.match(e["review-notice"].textContent, /名前と会話はもう変更できません/u);
   assert.equal(calls.filter((call) => call.path === "/api/names").length, 1);
   assert.equal(calls.find((call) => call.path === "/api/names").body.confirm, true);
   getState().trial.aiSubmitted = true;

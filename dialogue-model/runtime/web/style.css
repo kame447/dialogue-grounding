@@ -96,7 +96,6 @@ button:disabled{opacity:.45;cursor:default}
 .summary-item span{white-space:pre-line;overflow-wrap:anywhere;min-width:0}
 #result-list{margin-bottom:16px}
 @media(min-width:761px){#confirm-list{display:none}}
-.questionnaire-note{border-top:1px solid var(--line);padding-top:16px;margin-top:auto}
 #new-trial{font-size:.75rem;margin:0 20px 20px;flex-shrink:0}
 dialog{border:1px solid var(--line);border-radius:12px;padding:26px;max-width:min(680px,calc(100vw - 28px));width:100%;max-height:92dvh;overflow:auto;color:inherit;box-shadow:0 24px 80px #24252224}
 dialog::backdrop{background:#24252260}
@@ -147,3 +146,63 @@ main:has(#trial:not([hidden]) #conversation-stage:not([hidden])) .dialogue{flex:
 main:has(#trial:not([hidden]) #conversation-stage:not([hidden])) .topbar{display:none}
 }
 @media(prefers-reduced-motion:reduce){.typing-indicator span{animation:none}.silhouette[role=button]{transition:none}}
+/* Survey and review after submission. The questionnaire items are provisional
+   trial items (試行用・研究者未承認); the badge keeps that visible. */
+.review-bar{flex-shrink:0;padding:12px 16px;border-bottom:1px solid var(--line);background:#fafaf7}
+.review-notice{font-size:.75rem;color:#51564c;margin:0 0 8px;line-height:1.6}
+.stage-nav{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px}
+.stage-nav button{background:#fff;color:#44483e;border-color:var(--line);font-size:.75rem;padding:8px 4px;min-height:40px}
+.stage-nav button[aria-current=true]{background:var(--accent);color:#fff;border-color:var(--accent)}
+#exit-review{width:100%;margin-top:8px;font-size:.78rem}
+.survey-prompt{flex-shrink:0;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:12px 16px 0;padding:12px 14px;border:1px solid #c9a24a;background:#fdf7e7;border-radius:8px;font-size:.8rem}
+.survey-prompt p{margin:0;line-height:1.6}
+.survey-prompt strong{display:block}
+.survey-prompt button{font-size:.8rem;padding:9px 14px}
+#questionnaire-stage{padding:20px;overflow-y:auto;overscroll-behavior:contain}
+.provisional-badge{flex-shrink:0;font-size:.68rem;color:#7a4f12;background:#fdf1d8;border:1px solid #e6c88a;border-radius:999px;padding:2px 9px}
+#questionnaire-loading:empty{display:none}
+.questionnaire-lock{font-size:.78rem;color:#51564c;background:#f3f4ef;border-radius:7px;padding:8px 10px;margin:0 0 12px}
+.questionnaire-item{border:1px solid var(--line);border-radius:8px;padding:12px 12px 10px;margin:0 0 12px;min-width:0}
+.questionnaire-item legend{font-size:.85rem;font-weight:500;padding:0 4px;line-height:1.6}
+.likert{display:grid;grid-template-columns:repeat(auto-fit,minmax(36px,1fr));gap:4px;margin-top:6px}
+.likert-option{position:relative;margin:0;font-weight:500}
+.likert-option input{position:absolute;opacity:0;width:100%;height:100%;margin:0;inset:0;cursor:pointer}
+.likert-option span{display:flex;align-items:center;justify-content:center;min-height:44px;border:1px solid #d7d9d1;border-radius:7px;background:#fff;font-size:.85rem}
+.likert-option input:checked+span{background:var(--accent);border-color:var(--accent);color:#fff}
+.likert-option input:focus-visible+span{outline:3px solid #858f77;outline-offset:2px}
+.likert-option input:disabled{cursor:default}
+.likert-option input:disabled+span{opacity:.7}
+.likert-anchors{display:flex;justify-content:space-between;gap:12px;margin-top:6px;font-size:.7rem;color:var(--muted);line-height:1.5}
+.likert-anchors span:last-child{text-align:right}
+.questionnaire-comment{font-size:.85rem;margin-top:4px}
+.questionnaire-comment textarea{resize:vertical;min-height:84px;font-size:.85rem}
+.questionnaire-status{font-size:.78rem;color:var(--muted);margin:4px 0 10px}
+#questionnaire-submit{width:100%}
+.stage-actions{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:16px;padding-top:12px;border-top:1px solid var(--line)}
+.stage-actions button{font-size:.78rem;padding:8px 12px}
+.record-history{margin:0 0 14px;padding:10px 14px;border:1px solid var(--line);border-radius:8px;background:#fff;font-size:.82rem}
+.record-history[data-pending=true]{border-color:#c9a24a;background:#fdf7e7}
+.record-history summary{cursor:pointer;font-weight:600;min-height:28px;display:flex;align-items:center}
+.record-history>.muted{margin:6px 0 8px}
+.record-list{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.record-list li{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:8px 10px;border:1px solid var(--line);border-radius:7px;background:#fff}
+.record-actions{display:flex;gap:6px;flex-wrap:wrap}
+.record-actions button{font-size:.75rem;padding:7px 11px}
+.new-trial-warning{font-size:.75rem;color:#963d32;margin:0 20px 8px}
+/* Keep the board and chat within one desktop viewport under the closed list. */
+@media(min-width:761px){main:has(#record-history:not([hidden]):not([open])) .workspace{height:calc(100dvh - 196px)}}
+@media(max-width:760px){
+.review-bar{padding:10px 12px}
+.survey-prompt{margin:10px 12px 0}
+#questionnaire-stage{padding:16px}
+main:has(#trial:not([hidden]) #conversation-stage:not([hidden])) .record-history{flex-shrink:0;margin-bottom:8px;padding:6px 10px}
+}
+/* Phones, read-only chat after submission: no composer to keep on screen, so
+   the page scrolls normally instead of the one-viewport composer layout. */
+@media(max-width:760px){
+main:has(#trial:not([hidden]) #conversation-stage:not([hidden])):has(#review-bar:not([hidden])){height:auto;max-height:none;display:block}
+main:has(#trial:not([hidden]) #conversation-stage:not([hidden])):has(#review-bar:not([hidden])) .workspace{height:auto;display:grid}
+main:has(#trial:not([hidden]) #conversation-stage:not([hidden])):has(#review-bar:not([hidden])) .board{height:38dvh}
+main:has(#trial:not([hidden]) #conversation-stage:not([hidden])):has(#review-bar:not([hidden])) .dialogue{height:auto;max-height:none}
+main:has(#trial:not([hidden]) #conversation-stage:not([hidden])):has(#review-bar:not([hidden])) #history{min-height:240px;max-height:60dvh}
+}
