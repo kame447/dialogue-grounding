@@ -15,6 +15,8 @@ let pending = [];
 let sending = false;
 let legacyMessages = false;
 let followHistory = true;
+// Messages (public + local) the reader has seen at the bottom of the log.
+let seenMessages = 0;
 let preparing = false;
 let localStage = "chat";
 let messageSequence = 0;
@@ -99,7 +101,7 @@ function resetLocal() {
   closeDialog("confirm-dialog", false);
   localStage = "chat";
   answers = new Map(); selected = null; selectedTarget = null;
-  pending = []; sceneSignature = ""; followHistory = true;
+  pending = []; sceneSignature = ""; followHistory = true; seenMessages = 0;
   clearTimeout(typingTimer); activitySignature = ""; activitySince = 0;
   chatStalled = false; chatDisconnected = false; checkingChat = false; submissionWarning = "";
   $("utterance").value = "";
@@ -252,6 +254,7 @@ const resultSummary = (shape) => {
 };
 function renderStage(focus = false) {
   const stage = participantStage();
+  const wasHidden = $("conversation-stage").hidden;
   $("conversation-stage").hidden = stage !== "chat";
   $("name-stage").hidden = stage !== "names";
   $("results").hidden = stage !== "results";
@@ -261,6 +264,8 @@ function renderStage(focus = false) {
     // aria-current=false keeps the inactive stages out of the current-step state.
     $(id).setAttribute("aria-current", active ? "step" : "false");
   }
+  // A display:none log loses its offset; returning to the chat shows the newest.
+  if (stage === "chat" && wasHidden) followToBottom(); else updateFollowPill();
   if (focus) (stage === "names" ? $("names-title") : stage === "results" ? $("results-title") : $("utterance")).focus({ preventScroll: true });
 }
 function changeStage(stage) {
@@ -278,8 +283,25 @@ function reconciles(item, event) {
   if (event.clientId && event.clientId === item.clientId) return true;
   return item.eventId !== undefined && event.id === item.eventId;
 }
+// Like an ordinary chat app: while following, the newest message stays at the
+// bottom and older ones are pushed up. A reader who scrolled up is never moved;
+// a pill offers the jump instead. Only explicit actions resume following.
+const AT_BOTTOM_PX = 40;
+const messageCount = () => events().length + pending.length;
+function updateFollowPill() {
+  if (followHistory) seenMessages = messageCount();
+  $("new-messages").hidden = followHistory || messageCount() <= seenMessages || participantStage() !== "chat";
+}
+function keepPosition(scrollTop) {
+  const log = $("history");
+  if (followHistory) log.scrollTo({ top: log.scrollHeight, behavior: "instant" });
+  else if (scrollTop !== undefined) log.scrollTop = scrollTop;
+  updateFollowPill();
+}
+function followToBottom() {
+  followHistory = true; keepPosition();
+}
 function renderChatActivity() {
-  const log = $("history"), scrollTop = log.scrollTop;
   const failed = pending.some((item) => item.status === "failed");
   // A retry in flight is shown as AI activity, not as the error it replaces.
   const aiError = current?.aiStatus === "error" && !retryingAI;
@@ -303,14 +325,12 @@ function renderChatActivity() {
     aiError ? "AIの返答を取得できませんでした。再試行できます。" :
       chatStalled || chatDisconnected ? "会話の更新を確認できません。状態を確認してください。" :
         showDots ? "AIが返答を作成しています" : "";
-  if (followHistory) log.scrollTo({ top: log.scrollHeight, behavior: "auto" });
-  else log.scrollTop = scrollTop;
 }
 function retryMessage(item) {
   if (working || sending || !chatOpen() || item.status !== "failed" || !pending.includes(item)) return;
   // Reuse the exact id and text. The server deduplicates even an ambiguous
   // acknowledgement failure; only this explicit click retries the request.
-  item.status = "queued"; renderHistory(); drainMessages();
+  item.status = "queued"; followHistory = true; renderHistory(); drainMessages();
 }
 function renderHistory() {
   const log = $("history");
@@ -347,8 +367,7 @@ function renderHistory() {
     }
   }
   renderChatActivity();
-  if (followHistory) log.scrollTo({ top: log.scrollHeight, behavior: "auto" });
-  else log.scrollTop = scrollTop;
+  keepPosition(scrollTop);
 }
 function render(state) {
   const trial = state.trial;
@@ -387,7 +406,7 @@ function render(state) {
 function setControls() {
   renderChatActivity();
   $("history").querySelectorAll("button").forEach((node) => { node.disabled = working || sending || !chatOpen(); });
-  $("chat").querySelectorAll("textarea,button").forEach((node) => { node.disabled = working || !chatOpen(); });
+  for (const id of ["utterance", "send-message"]) $(id).disabled = working || !chatOpen();
   $("setup").querySelectorAll("input,select,button").forEach((node) => { node.disabled = working; });
   $("finish-conversation").disabled = working || sending || pending.some((item) => item.status === "queued") || !dialogueOpen() || !scene()?.shapes?.length;
   $("back-to-chat").disabled = working || submitted();
@@ -482,8 +501,25 @@ retrySubmission.type = "button"; retrySubmission.hidden = true;
 retrySubmission.addEventListener("click", () => { if (!working && !serverBusy && canRetrySubmission()) operate(() => api("/api/ai-submit", {})); });
 $("submission").append(retrySubmission);
 $("history").addEventListener("scroll", () => {
-  const log = $("history"); followHistory = log.scrollHeight - log.scrollTop - log.clientHeight < 64;
+  const log = $("history"); followHistory = log.scrollHeight - log.scrollTop - log.clientHeight < AT_BOTTOM_PX;
+  updateFollowPill();
 });
+$("new-messages").addEventListener("click", () => { followToBottom(); $("history").focus({ preventScroll: true }); });
+// The keyboard, a rotated phone or a growing composer shrink the log; keep a
+// following reader at the bottom. The phone layout fits the visual viewport,
+// so the composer stays above an on-screen keyboard.
+if (typeof ResizeObserver === "function") new ResizeObserver(() => { if (followHistory) keepPosition(); }).observe($("history"));
+const viewport = globalThis.visualViewport;
+if (viewport) {
+  const fitViewport = () => {
+    // Pinch zoom also shrinks the visual viewport; only a keyboard or a
+    // rotation should resize the layout, so ignore zoomed states.
+    if (Math.abs((viewport.scale ?? 1) - 1) >= 0.01) return;
+    document.documentElement.style.setProperty("--viewport-height", `${Math.round(viewport.height)}px`);
+    if (followHistory) keepPosition();
+  };
+  viewport.addEventListener("resize", fitViewport); fitViewport();
+}
 $("setup").addEventListener("submit", (event) => {
   event.preventDefault();
   const data = new FormData(event.target);
@@ -499,7 +535,7 @@ $("chat").addEventListener("submit", (event) => {
   const text = $("utterance").value;
   if (!text.trim()) return;
   pending.push({ text, clientId: newClientId(), status: "queued" });
-  $("utterance").value = ""; renderHistory();
+  $("utterance").value = ""; followHistory = true; renderHistory();
   $("utterance").focus({ preventScroll: true }); drainMessages();
 });
 // Textarea Enter (including IME) is left to native multiline editing. Sending

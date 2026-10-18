@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content">
   <title>6図形の共同命名</title>
   <link rel="stylesheet" href="/style.css">
   <script src="/app.js" defer></script>
@@ -46,10 +46,11 @@
             </div>
             <div class="transcript">
               <ol id="history" role="log" tabindex="0" aria-live="polite" aria-label="公開された会話"></ol>
-              <div id="typing-indicator" class="typing-indicator" aria-hidden="true" hidden><span></span><span></span><span></span></div>
-              <div id="chat-recovery" class="chat-recovery" hidden><p id="chat-recovery-message"></p><button id="retry-chat" type="button" class="quiet">状態を確認</button></div>
+              <button id="new-messages" type="button" class="new-messages" hidden><span aria-hidden="true">↓</span> 新しいメッセージ</button>
             </div>
-            <form id="chat"><label for="utterance" class="sr-only">メッセージ</label><textarea id="utterance" name="utterance" rows="2" maxlength="12000" required placeholder="メッセージを入力…" aria-describedby="send-hint"></textarea>
+            <form id="chat"><div class="composer-status"><div id="typing-indicator" class="typing-indicator" aria-hidden="true" hidden><span></span><span></span><span></span></div>
+              <div id="chat-recovery" class="chat-recovery" hidden><p id="chat-recovery-message"></p><button id="retry-chat" type="button" class="quiet">状態を確認</button></div></div>
+              <label for="utterance" class="sr-only">メッセージ</label><textarea id="utterance" name="utterance" rows="2" maxlength="12000" required placeholder="メッセージを入力…" aria-describedby="send-hint"></textarea>
               <div class="chat-actions"><span id="send-hint" class="muted">改行して入力できます</span><button id="send-message">送信 <span aria-hidden="true">↑</span></button></div>
             </form>
           </section>
