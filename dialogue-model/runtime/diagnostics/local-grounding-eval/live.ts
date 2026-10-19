@@ -21,7 +21,7 @@ import type { LocalGroundingOptions, LocalSegmentProposal, LocalFunctionVerdict,
 type Event = { seq: number; id: string; speaker: "human" | "ai"; text: string };
 type Client = { complete(messages: any[], options?: any): Promise<{ text: string; model?: string }> };
 export type LiveOptions = { outputDir: string; seed: number; strategy: "repair-first" | "bypass-enabled";
-  mode: "branch" | "multiturn" | "both"; caseId?: string };
+  mode: "branch" | "multiturn" | "both"; caseId?: string; localTimeoutMs?: number };
 export type LiveDependencies = { client: Client; expectedModel: string;
   createLocalGrounding: (client: Client) => LocalGroundingOptions; secrets?: readonly string[];
   cases?: readonly LiveCase[]; randomOrder?: () => boolean; judge?: any;
@@ -31,6 +31,8 @@ type ClassifierEvidence = { turn: number; callIndex: number | null; status: "ok"
 type Session = { classifierEvidence: ClassifierEvidence[]; events: Event[]; state: any; records: LocalGroundingResearchRecord[]; receipts: AuditReceipt[];
   provenance: Array<{ humanTurn: number; aiTurn: number; judgment: any; text: string }> };
 const fail = (code: string): never => { throw new Error(code); };
+// The extractor accepts whole-millisecond deadlines up to 60 seconds.
+const localTimeout = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 1 && (value as number) <= 60000;
 const turns = (events: Event[]): PublicTurn[] => events.map(e => ({ turn: e.seq, speaker: e.speaker, text: e.text }));
 const safeAct = (act: any, slots: string[]): any => ({ action: act.action, targetSlot: act.targetSlot, candidateName: act.candidateName,
   discriminatingFeature: act.discriminatingFeature, ...(Object.hasOwn(act, "note") ? { note: null } : {}),
@@ -44,6 +46,7 @@ export function privateSnapshot(state: any): any {
   return { ledger: validateOwnLedger(state.ledger), graph: structuredClone(state.graph),
     judgments: state.judgments.map((j: any) => ({ turnIndex: j.turnIndex, lastEventId: j.lastEventId ?? null,
       status: j.status, judgment: safeAct(j.judgment, Object.keys(state.ledger)),
+      ...(j.generationGuard ? { generationGuard: { fallback: j.generationGuard.fallback === true } } : {}),
       ...(j.localGrounding ? { localGrounding: { attemptNumber: j.localGrounding.attemptNumber } } : {}) })) };
 }
 
@@ -51,15 +54,17 @@ export function parseLiveArguments(args: readonly string[]): LiveOptions {
   const values: Record<string, string> = {};
   for (let i = 0; i < args.length; i++) {
     const flag = args[i], value = args[++i];
-    if (!["--out", "--seed", "--strategy", "--mode", "--case"].includes(flag) || Object.hasOwn(values, flag) || !value || value.startsWith("--")) fail("invalid_arguments");
+    if (!["--out", "--seed", "--strategy", "--mode", "--case", "--local-timeout-ms"].includes(flag) || Object.hasOwn(values, flag) || !value || value.startsWith("--")) fail("invalid_arguments");
     values[flag] = value;
   }
   const seed = Number(values["--seed"] ?? 1701), strategy = values["--strategy"] ?? "bypass-enabled", mode = values["--mode"] ?? "both";
   if (!values["--out"]) fail("output_directory_required");
+  const localTimeoutMs = values["--local-timeout-ms"] === undefined ? undefined : Number(values["--local-timeout-ms"]);
+  if (localTimeoutMs !== undefined && !localTimeout(localTimeoutMs)) fail("invalid_arguments");
   if (!Number.isSafeInteger(seed) || !["repair-first", "bypass-enabled"].includes(strategy) || !["branch", "multiturn", "both"].includes(mode) ||
       (values["--case"] && !/^[A-Za-z0-9_-]{1,80}$/.test(values["--case"]))) fail("invalid_arguments");
   return { outputDir: values["--out"], seed, strategy: strategy as LiveOptions["strategy"], mode: mode as LiveOptions["mode"],
-    ...(values["--case"] ? { caseId: values["--case"] } : {}) };
+    ...(values["--case"] ? { caseId: values["--case"] } : {}), ...(localTimeoutMs === undefined ? {} : { localTimeoutMs }) };
 }
 
 function validateCatalog(catalog: readonly LiveCase[], secrets: readonly string[]): void {
@@ -81,6 +86,7 @@ export async function runLiveEvaluation(options: LiveOptions, deps: LiveDependen
 }> {
   const destination = await validateOutputDirectory(options.outputDir);
   if (!Number.isSafeInteger(options.seed) || !["repair-first", "bypass-enabled"].includes(options.strategy) || !["branch", "multiturn", "both"].includes(options.mode)) fail("invalid_arguments");
+  if (options.localTimeoutMs !== undefined && !localTimeout(options.localTimeoutMs)) fail("invalid_arguments");
   const secrets = deps.secrets ?? [], catalog = deps.cases ?? LIVE_CASES;
   validateCatalog(catalog, secrets); assertPublicText(deps.expectedModel, secrets);
   const selected = catalog.filter(c => !options.caseId || c.id === options.caseId);
@@ -138,7 +144,7 @@ export async function runLiveEvaluation(options: LiveOptions, deps: LiveDependen
     const captured = { segments: [] as LocalSegmentProposal[], verdicts: [] as LocalFunctionVerdict[] };
     if (localOn && !localByCase.has(caseId)) localByCase.set(caseId, deps.createLocalGrounding(checked));
     const local = localOn ? localByCase.get(caseId)! : null;
-    const observed: LocalGroundingOptions | null = local && { timeoutMs: local.timeoutMs,
+    const observed: LocalGroundingOptions | null = local && { timeoutMs: options.localTimeoutMs ?? local.timeoutMs,
       extractor: { get lastDiagnostics() { return (local.extractor as any).lastDiagnostics; },
         async extract(input: LocalExtractionInput, opts?: { signal?: AbortSignal; timeoutMs?: number }) { const result = await local.extractor.extract(input, opts); captured.segments = structuredClone(result); return result; } } as any,
       classifier: { get metadata() { return (local.classifier as any).metadata; }, get lastEvidence() { return (local.classifier as any).lastEvidence; },
@@ -187,6 +193,8 @@ export async function runLiveEvaluation(options: LiveOptions, deps: LiveDependen
     return session;
   };
   const diagnostics = async (c: LiveCase, stage: string, session: Session, gate?: GateResult) => {
+    // Keep the runtime's optional extractor/classifier.errorCode with each settled
+    // attempt. These are closed-set diagnostics, never raw provider exceptions.
     await write(c.id + "." + stage + ".private.json", { caseId: c.id, stage, publicTurns: turns(session.events),
       provenance: session.provenance, classifierEvidence: session.classifierEvidence, records: session.records, receipts: session.receipts, snapshot: privateSnapshot(session.state), ...(gate ? { gate } : {}) });
   };
