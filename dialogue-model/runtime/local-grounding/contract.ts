@@ -58,6 +58,14 @@ export type LocalSource = typeof LOCAL_SOURCES[number];
 
 export type PublicTurn = { turn: number; speaker: "human" | "ai"; text: string };
 
+/** Same private AI-side image and pixel anchors used by the v2 dialogue judge. */
+export type LocalOwnImage = { mimeType: "image/png" | "image/jpeg" | "image/webp"; base64: string };
+export type LocalOwnAnchor = {
+  id: string;
+  bbox: { x: number; y: number; w: number; h: number };
+  centroid: { x: number; y: number };
+};
+
 // ---- Step 1: Luna extraction (free text, model output; untrusted) ----
 export type LocalSegmentProposal = {
   /** Model-local id, unique within one extraction ("s1", "s2", ...). */
@@ -80,6 +88,10 @@ export type LocalExtractionInput = {
   turn: number;
   publicTurns: readonly PublicTurn[];
   ownSlots: readonly string[];
+  /** AI's OWN image only; never the partner's image or an answer-key rendering. */
+  ownImage: LocalOwnImage;
+  /** Pixel coordinates in ownImage. IDs must match ownSlots exactly. */
+  ownAnchors: readonly LocalOwnAnchor[];
   /** Private summary of current local issues (summarizeLocalIssues). Same for both strategies. */
   issueSummary: string;
 };
