@@ -4,10 +4,11 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, readdir, stat, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { evaluateValidityGate, auditLocalTurn } from "../dialogue-model/runtime/diagnostics/local-grounding-eval/gate.ts";
+import { evaluateValidityGate, evaluateRunGate, auditLocalTurn } from "../dialogue-model/runtime/diagnostics/local-grounding-eval/gate.ts";
 import type { AuditReceipt } from "../dialogue-model/runtime/diagnostics/local-grounding-eval/gate.ts";
 import { runLiveEvaluation, parseLiveArguments } from "../dialogue-model/runtime/diagnostics/local-grounding-eval/live.ts";
 import type { LiveDependencies } from "../dialogue-model/runtime/diagnostics/local-grounding-eval/live.ts";
+import { LIVE_CASES } from "../dialogue-model/runtime/diagnostics/local-grounding-eval/live-cases.ts";
 import type { LiveCase } from "../dialogue-model/runtime/diagnostics/local-grounding-eval/live-cases.ts";
 import { LocalExtractionError } from "../dialogue-model/runtime/local-grounding/extract.ts";
 import { LocalClassificationError } from "../dialogue-model/runtime/local-grounding/classify.ts";
@@ -71,6 +72,23 @@ function receipt(act: "agree" | "deny" | "name_accept"): AuditReceipt {
   const c: any = { kind: "claim", id: "3:local1", speaker: "human", act, targets: ["s-0001"], respondsTo: "3:ai1" };
   return { turn: 3, verified: [c, { ...c, id: "3:ai1", speaker: "ai", act: "assert", respondsTo: null }], unverified: 0,
     classifierOk: true, pipelineOk: true, model: "typesafe/jev-1.14-20261014", expected: act };
+}
+
+function distributedCases() {
+  const acts = ["agree", "deny", "name_accept"] as const;
+  const cases = acts.map(act => ({ id: act, steps: script.steps.map((s, i) => ({ text: s.text + (i === 0 ? "（" + act + "）" : ""),
+    ...(s.expect === act ? { expect: act } : {}) })) }));
+  const deps = dependencies({ cases }), original = deps.createLocalGrounding;
+  deps.createLocalGrounding = client => {
+    const local = original(client), classify = local.classifier.classify;
+    local.classifier.classify = async (input, options) => {
+      const chosen = cases.find(c => c.steps[0].text === input.publicTurns[0].text)!.id;
+      const verdicts = await classify(input, options);
+      return verdicts.map(v => acts.includes(v.act as any) && v.act !== chosen ? { ...v, act: "unknown", respondsToClaimId: null } : v);
+    };
+    return local;
+  };
+  return { acts, cases, deps };
 }
 
 test("validity gate demands every category, target, verified update, classifier and matching script step", () => {
@@ -150,14 +168,19 @@ test("empty extraction or mismatched live prefix blocks comparisons and every bl
   assert.equal(deps.judgments.length, script.steps.length - 1, "no comparison generation before gate");
 }));
 
-test("one invalid script among valid cases prevents all comparisons", async () => temporary(async outputDir => {
+test("an invalid script is excluded with reasons while eligible scripts continue to comparison", async () => temporary(async outputDir => {
   const altered = structuredClone(script); altered.id = "mismatched"; altered.steps[1].text = "よく分からないから説明を続けて。";
   const deps = dependencies({ cases: [script, altered] });
   const result = await runLiveEvaluation({ ...config, outputDir }, deps);
-  assert.equal(result.status, "gate_failed");
-  assert.ok(result.unmet?.includes("script_mismatch"));
-  assert.equal(deps.judgments.length, 8);
-  assert.ok(!(await readdir(result.directory)).includes("blinded.jsonl"));
+  assert.equal(result.status, "completed");
+  assert.equal(result.excludedCases, 1);
+  const excluded = JSON.parse(await readFile(join(result.directory, "exclusions.private.json"), "utf8"));
+  assert.ok(excluded.some((e: any) => e.caseId === altered.id && e.unmet.includes("script_mismatch")));
+  assert.equal(deps.judgments.length, 20);
+  const rows = (await readFile(join(result.directory, "blinded.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line));
+  assert.deepEqual(rows.map(r => r.caseId), [script.id, script.id]);
+  const map = JSON.parse(await readFile(join(result.directory, "mapping.private.json"), "utf8"));
+  assert.ok(map.mapping.every((m: any) => m.caseId === script.id));
 }));
 
 test("public and private outputs refuse prompt/image/credential echoes and model drift with fixed diagnostics", async () => {
@@ -252,8 +275,10 @@ test("generation failure leaves staged claims uncommitted and preserves complete
       return original.complete(messages, options);
     } };
     const result = await runLiveEvaluation({ ...config, mode: "branch", outputDir }, deps);
-    assert.equal(result.status, failureAt === 2 ? "gate_failed" : "failed");
-    if (failureAt === 5) assert.equal(result.code, "evaluation_unavailable");
+    assert.equal(result.status, "gate_failed");
+    assert.ok(result.unmet?.includes("no_eligible_cases"));
+    const excluded = JSON.parse(await readFile(join(result.directory, "exclusions.private.json"), "utf8"));
+    assert.ok(excluded.some((e: any) => e.caseId === script.id && e.code === "evaluation_unavailable"));
     const prefixPath = join(result.directory, script.id + (failureAt === 2 ? ".prefix-failed.private.json" : ".prefix.private.json"));
     const prefix = JSON.parse(await readFile(prefixPath, "utf8"));
     if (failureAt === 2) {
@@ -370,3 +395,191 @@ test("independent audit refuses even a literal AI feature claim from a published
   assert.equal(ordinary.verified.filter(c => c.speaker === "ai").length, 1);
   assert.equal(ordinary.unverified, 0);
 });
+
+
+test("six new human-only scripts avoid elicitation commands and represent different local issues", () => {
+  assert.equal(LIVE_CASES.length, 6);
+  assert.equal(new Set(LIVE_CASES.map(c => c.id)).size, 6);
+  const expected = new Set<string>();
+  for (const c of LIVE_CASES) {
+    assert.ok(c.steps.length >= 4);
+    for (const step of c.steps) {
+      assert.deepEqual(Object.keys(step).filter(k => !["text", "expect"].includes(k)), []);
+      assert.doesNotMatch(step.text, /説明して|提案して|選んで|取り消して|撤回/);
+      for (const act of typeof step.expect === "string" ? [step.expect] : step.expect ?? []) expected.add(act);
+    }
+  }
+  for (const act of ["agree", "deny", "name_accept", "name_propose", "name_reject", "defer", "revisit"]) assert.ok(expected.has(act));
+  const backchannel = LIVE_CASES.find(c => c.id === "ambiguous-backchannel")!;
+  assert.ok(backchannel.steps.some(s => s.text === "うん。" && s.expect === undefined));
+});
+
+test("case gates enforce structure independently while required functions are covered across eligible scripts", () => {
+  const inputs = ["agree", "deny", "name_accept"].map(act => ({ caseId: act, receipts: [receipt(act as "agree" | "deny" | "name_accept")] }));
+  for (const c of inputs) {
+    const result = evaluateValidityGate(c.receipts, { scope: "case" });
+    assert.ok(result.passed); assert.equal(result.scope, "case");
+  }
+  const run = evaluateRunGate(inputs);
+  assert.ok(run.passed); assert.equal(run.scope, "run");
+  assert.deepEqual(run.includedCaseIds, ["agree", "deny", "name_accept"]);
+  const missing = evaluateRunGate(inputs.slice(0, 2));
+  assert.deepEqual(missing.unmet, ["name_accept_missing"]);
+  assert.ok(missing.cases.every(c => c.passed), "no script is required to supply every function");
+  const unverified = structuredClone(inputs); unverified[2].receipts[0].unverified = 1;
+  const blocked = evaluateRunGate(unverified);
+  assert.deepEqual(blocked.excludedCaseIds, ["name_accept"]);
+  assert.ok(blocked.unmet.includes("name_accept_missing"), "excluded scripts cannot supply function coverage");
+  assert.ok(blocked.cases[2].unmet.includes("unverified_updates"));
+  for (const flaw of ["ai", "target", "classifier", "pipeline"] as const) {
+    const bad = structuredClone(inputs);
+    const r = bad[0].receipts[0];
+    if (flaw === "ai") r.verified = r.verified.filter(c => c.speaker !== "ai");
+    if (flaw === "target") r.verified.forEach(c => { c.targets = []; });
+    if (flaw === "classifier") r.classifierOk = false;
+    if (flaw === "pipeline") r.pipelineOk = false;
+    const result = evaluateRunGate(bad);
+    assert.ok(result.excludedCaseIds.includes("agree"));
+    assert.ok(!result.passed, "another case's structural evidence cannot rescue this one");
+  }
+});
+
+test("compound expectations require every function in that same human turn", () => {
+  const compound = receipt("agree"); compound.expected = ["agree", "deny"];
+  assert.ok(evaluateValidityGate([compound], { scope: "case" }).unmet.includes("script_mismatch"));
+  compound.verified.push({ ...receipt("deny").verified[0], id: "3:local2" });
+  assert.ok(evaluateValidityGate([compound], { scope: "case" }).passed);
+  assert.equal(evaluateRunGate([{ caseId: "compound", receipts: [compound] }]).passed, false, "name acceptance remains mandatory globally");
+});
+
+test("live branch and E2E cohorts can supply agreement, denial and naming in different scripts", async () => temporary(async outputDir => {
+  const { acts, deps } = distributedCases();
+  const result = await runLiveEvaluation({ ...config, outputDir }, deps);
+  assert.equal(result.status, "completed");
+  assert.equal(result.excludedCases, 0);
+  const preflight = JSON.parse(await readFile(join(result.directory, "gate.private.json"), "utf8"));
+  for (const c of preflight.cases) for (const act of acts) assert.equal(c.counts[act], act === c.caseId ? 1 : 0);
+  const final = JSON.parse(await readFile(join(result.directory, "final-gates.private.json"), "utf8"));
+  assert.ok(final.branch.passed && final.multiturn.passed);
+  assert.equal((await readFile(join(result.directory, "blinded.jsonl"), "utf8")).trim().split("\n").length, 6);
+}));
+
+
+test("a later invalid E2E case is removed from both modes without stopping the remaining cases", async () => temporary(async outputDir => {
+  const bad = structuredClone(script); bad.id = "later-classifier-error"; bad.steps[0].text += "もう一つの話。";
+  const deps = dependencies({ cases: [bad, script] }), original = deps.createLocalGrounding;
+  deps.createLocalGrounding = client => {
+    const local = original(client), base = local.classifier as any;
+    let count = 0, selected = false;
+    return { extractor: local.extractor, classifier: {
+      get metadata() { return base.metadata; },
+      get lastEvidence() { const e = base.lastEvidence; return e && { ...e, status: selected && count > 5 ? "error" : e.status }; },
+      async classify(input: any, options: any) {
+        count++; selected = input.publicTurns[0].text === bad.steps[0].text;
+        return base.classify(input, options);
+      },
+    } as any };
+  };
+  const result = await runLiveEvaluation({ ...config, outputDir }, deps);
+  assert.equal(result.status, "completed"); assert.equal(result.excludedCases, 1);
+  const rows = (await readFile(join(result.directory, "blinded.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line));
+  assert.deepEqual(rows.map(r => [r.caseId, r.mode]), [[script.id, "branch"], [script.id, "multiturn"]]);
+  const excluded = JSON.parse(await readFile(join(result.directory, "exclusions.private.json"), "utf8"));
+  assert.ok(excluded.some((e: any) => e.caseId === bad.id && e.stage === "multiturn-new" && e.unmet.includes("classifier_evidence_invalid")));
+  assert.ok((await readdir(result.directory)).includes(bad.id + ".branch.completed.private.json"), "earlier private checkpoint survives but is excluded from blind output");
+  const final = JSON.parse(await readFile(join(result.directory, "final-gates.private.json"), "utf8"));
+  for (const mode of ["branch", "multiturn"]) assert.deepEqual(final[mode].includedCaseIds, [script.id]);
+}));
+
+test("global function coverage is required before comparison and recomputed after case exclusion", async () => {
+  await temporary(async outputDir => {
+    const { deps, cases } = distributedCases(); deps.cases = cases.slice(0, 2);
+    const result = await runLiveEvaluation({ ...config, outputDir }, deps);
+    assert.equal(result.status, "gate_failed"); assert.deepEqual(result.unmet, ["name_accept_missing"]);
+    assert.equal(deps.judgments.length, 8, "only prefixes are generated when global coverage is missing");
+    assert.ok(!(await readdir(result.directory)).includes("blinded.jsonl"));
+  });
+  await temporary(async outputDir => {
+    const { deps } = distributedCases(), original = deps.createLocalGrounding;
+    deps.createLocalGrounding = client => {
+      const local = original(client), base = local.classifier as any;
+      let count = 0, selected = false;
+      return { extractor: local.extractor, classifier: {
+        get metadata() { return base.metadata; },
+        get lastEvidence() { const e = base.lastEvidence; return e && { ...e, status: selected && count > 4 ? "error" : e.status }; },
+        async classify(input: any, options: any) {
+          count++; selected = input.publicTurns[0].text.includes("（name_accept）");
+          return base.classify(input, options);
+        },
+      } as any };
+    };
+    const result = await runLiveEvaluation({ ...config, outputDir }, deps);
+    assert.equal(result.status, "gate_failed"); assert.deepEqual(result.unmet, ["name_accept_missing"]);
+    const preflight = JSON.parse(await readFile(join(result.directory, "gate.private.json"), "utf8"));
+    assert.ok(preflight.passed);
+    const final = JSON.parse(await readFile(join(result.directory, "final-gates.private.json"), "utf8"));
+    for (const mode of ["branch", "multiturn"]) {
+      assert.deepEqual(final[mode].includedCaseIds, ["agree", "deny"]);
+      assert.equal(final[mode].counts.name_accept, 0);
+    }
+    for (const file of ["blinded.jsonl", "mapping.private.json"]) assert.ok(!(await readdir(result.directory)).includes(file));
+  });
+});
+
+test("expect arrays reject empty, duplicate or non-function labels before any model call", async () => temporary(async outputDir => {
+  for (const expect of [[], ["agree", "agree"], ["ER1"], ["agree", "invalid"], null, { act: "agree" }]) {
+    const c = structuredClone(script); (c.steps[1] as any).expect = expect;
+    const deps = dependencies({ cases: [c] });
+    await assert.rejects(runLiveEvaluation({ ...config, outputDir }, deps), /invalid_cases/);
+    assert.equal(deps.calls.length, 0);
+  }
+  assert.deepEqual(await readdir(outputDir), []);
+}));
+
+test("a prefix provider failure or model mismatch excludes that script without poisoning later scripts", async () => {
+  for (const fault of ["model", "provider"] as const) await temporary(async outputDir => {
+    const bad = structuredClone(script); bad.id = "failed-prefix";
+    const deps = dependencies({ cases: [bad, script] }), original = deps.client;
+    let first = true;
+    deps.client = { async complete(messages, options) {
+      if (first) {
+        first = false;
+        if (fault === "provider") throw new Error("PRIVATE_PROVIDER_CANARY");
+        return { text: "四角がある図形ですね。", model: "wrong-model" };
+      }
+      return original.complete(messages, options);
+    } };
+    const result = await runLiveEvaluation({ ...config, outputDir }, deps);
+    assert.equal(result.status, "completed"); assert.equal(result.excludedCases, 1);
+    const excluded = JSON.parse(await readFile(join(result.directory, "exclusions.private.json"), "utf8"));
+    assert.ok(excluded.some((e: any) => e.caseId === bad.id && e.code === (fault === "model" ? "model_changed" : "evaluation_unavailable")));
+    const rows = (await readFile(join(result.directory, "blinded.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line));
+    assert.ok(rows.every(r => r.caseId === script.id));
+    for (const file of await readdir(result.directory)) assert.ok(!(await readFile(join(result.directory, file), "utf8")).includes("PRIVATE_PROVIDER_CANARY"));
+  });
+});
+
+test("an abandoned model call belongs to its excluded script and cannot invalidate the next script", async () => temporary(async outputDir => {
+  const bad = structuredClone(script); bad.id = "timed-out-prefix"; bad.steps[0].text += "これは別の図形の話。";
+  let release!: (reply: { text: string; model: string }) => void;
+  const lateReply = new Promise<{ text: string; model: string }>(resolve => { release = resolve; });
+  const deps = dependencies({ cases: [bad, script], onProgress: progress => {
+    if (progress.caseId === script.id && progress.stage === "prefix" && progress.turn === 1) release({ text: "破棄された応答", model: "wrong-model" });
+  } });
+  const originalClient = deps.client, originalLocal = deps.createLocalGrounding;
+  deps.client = { async complete(messages, options) {
+    return options?.phase === "local_extraction" ? lateReply : originalClient.complete(messages, options);
+  } };
+  deps.createLocalGrounding = client => {
+    const local = originalLocal(client), extract = local.extractor.extract;
+    local.extractor.extract = async (input, options) => {
+      if (input.publicTurns[0].text === bad.steps[0].text && input.turn === 1) await client.complete([], { phase: "local_extraction" });
+      return extract(input, options);
+    };
+    return local;
+  };
+  const result = await runLiveEvaluation({ ...config, outputDir, localTimeoutMs: 1000 }, deps);
+  assert.equal(result.status, "completed"); assert.equal(result.excludedCases, 1);
+  const final = JSON.parse(await readFile(join(result.directory, "result.private.json"), "utf8"));
+  assert.deepEqual(final.includedCaseIds, [script.id]); assert.deepEqual(final.excludedCaseIds, [bad.id]);
+}));
