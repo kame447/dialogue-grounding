@@ -50,6 +50,9 @@ test("v2 name axis: five ordered levels, each criterion with a short phrasing, a
   assert.match(NAME_AGREEMENT_CRITERIA.unclear, /と呼びませんか/);
   assert.match(NAME_AGREEMENT_CRITERIA.unclear, /文脈上この図形の名前として出された仮称/);
   assert.doesNotMatch(NAME_AGREEMENT_CRITERIA.unclear, /Xみたい|見立てを述べた/);
+  // Agreement with an impression counts only as a reply to a proposal; an impression-only exchange is no_name.
+  assert.match(NAME_AGREEMENT_CRITERIA.unclear, /提案に対して、[^。]*見立てへの同意だけが返った/);
+  assert.match(NAME_AGREEMENT_CRITERIA.unclear, /提案がなく見立ての共有だけなら unclear ではなく no_name/);
   assert.match(NAME_AGREEMENT_CRITERIA.agreed, /返答がない・空欄・相槌だけは合意ではない/);
   assert.match(NAME_AGREEMENT_CRITERIA.not_agreed, /名前の提案が一度もない場合は選ばない/);
   assert.match(NAME_AGREEMENT_CRITERIA.unknown, /unknown ではなく no_name/);
