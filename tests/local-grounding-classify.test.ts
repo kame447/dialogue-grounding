@@ -72,7 +72,7 @@ test("Luna stand-in uses its own phase and immutable classifierKind metadata", a
     requests.push(JSON.stringify(messages));
     return { text: JSON.stringify([verdict]) };
   } });
-  assert.equal(classifier.metadata.classifierKind, "luna_standin");
+  assert.deepEqual(classifier.metadata, { classifierKind: "luna_standin", calibrated: false });
   assert.equal(Object.isFrozen(classifier.metadata), true);
   for (const strategy of ["repair-first", "bypass-enabled"]) {
     assert.deepEqual(await classifier.classify({ ...input, strategy } as LocalClassificationInput, { timeoutMs: 1234 }), [verdict]);
@@ -81,18 +81,30 @@ test("Luna stand-in uses its own phase and immutable classifierKind metadata", a
   assert.doesNotMatch(requests[0], /strategy|repair-first|bypass-enabled/);
 });
 
-test("transport-independent classifier accepts a future Jev call and records scores without promotion", async () => {
-  const classifier = createLocalFunctionClassifier({ call: async (state) => {
+test("transport-independent classifier labels injected calls as unverified and records scores without promotion", async () => {
+  const classifier = createLocalFunctionClassifier({ classifierKind: "unverified_injected", call: async (state) => {
     assert.equal(state, buildLocalClassificationState(input));
     return [{ ...verdict, rawScore: 1 }];
   } });
-  assert.equal(classifier.metadata.classifierKind, "jev");
+  assert.deepEqual(classifier.metadata, { classifierKind: "unverified_injected", calibrated: false });
   assert.deepEqual(await classifier.classify(input), [{ ...verdict, rawScore: 1 }]);
+});
+
+test("classifierKind is required and verified Jev labels are rejected before any call", () => {
+  let calls = 0;
+  const call = async () => { calls++; return [verdict]; };
+  // @ts-expect-error Omission must fail both the public type and runtime validation.
+  assert.throws(() => createLocalFunctionClassifier({ call }), code("invalid_input"));
+  // @ts-expect-error A verified Jev route is not implemented or validated.
+  assert.throws(() => createLocalFunctionClassifier({ call, classifierKind: "jev" }), code("invalid_input"));
+  // @ts-expect-error Arbitrary injected metadata must not claim a verified classifier.
+  assert.throws(() => createLocalFunctionClassifier({ call, classifierKind: "verified" }), code("invalid_input"));
+  assert.equal(calls, 0);
 });
 
 test("invalid input fails locally; empty segments make no call", async () => {
   let calls = 0;
-  const classifier = createLocalFunctionClassifier({ call: async () => { calls++; return [verdict]; } });
+  const classifier = createLocalFunctionClassifier({ classifierKind: "unverified_injected", call: async () => { calls++; return [verdict]; } });
   const badClaim = { ...input.priorClaims[0], quote: "公開されていない名前" };
   for (const value of [{ ...input, turn: 0 }, { ...input, publicTurns: [] }, { ...input, segments: [input.segments[0], input.segments[0]] },
     { ...input, segments: [{ ...input.segments[0], quote: "別発話" }] }, { ...input, priorClaims: [badClaim] },
@@ -106,7 +118,7 @@ test("invalid input fails locally; empty segments make no call", async () => {
 test("timeout and caller abort are enforced around a call ignoring cancellation", async () => {
   let calls = 0;
   let signal: AbortSignal | undefined;
-  const classifier = createLocalFunctionClassifier({ call: (_state, options) => { calls++; signal = options.signal; return new Promise(() => {}); } });
+  const classifier = createLocalFunctionClassifier({ classifierKind: "unverified_injected", call: (_state, options) => { calls++; signal = options.signal; return new Promise(() => {}); } });
   await assert.rejects(classifier.classify(input, { timeoutMs: 5 }), code("timeout"));
   assert.equal(signal?.aborted, true);
   const controller = new AbortController();
@@ -121,7 +133,7 @@ test("timeout and caller abort are enforced around a call ignoring cancellation"
 test("errors never retain raw provider text, arbitrary codes, prompts, secrets or causes", async () => {
   for (const call of [async () => { throw Object.assign(new Error("sk-secret PROMPT_CANARY RAW_CANARY"), { code: "SECRET_CODE", cause: "RAW_CANARY" }); },
     async () => "RAW_CANARY sk-secret", async () => [{ ...verdict, private: "RAW_CANARY sk-secret" }]]) {
-    await assert.rejects(createLocalFunctionClassifier({ call }).classify(input), (e: unknown) => {
+    await assert.rejects(createLocalFunctionClassifier({ classifierKind: "unverified_injected", call }).classify(input), (e: unknown) => {
       assert.ok(e instanceof LocalClassificationError);
       assert.doesNotMatch(inspect(e, { showHidden: true }) + JSON.stringify(e), /sk-secret|CANARY|SECRET_CODE/);
       assert.equal(Object.hasOwn(e, "cause"), false);
@@ -129,18 +141,18 @@ test("errors never retain raw provider text, arbitrary codes, prompts, secrets o
     });
   }
   const forged = Object.assign(new LocalClassificationError("invalid_response"), { code: "sk-secret", prompt: "PROMPT_CANARY" });
-  await assert.rejects(createLocalFunctionClassifier({ call: async () => { throw forged; } }).classify(input), (e: unknown) => {
+  await assert.rejects(createLocalFunctionClassifier({ classifierKind: "unverified_injected", call: async () => { throw forged; } }).classify(input), (e: unknown) => {
     assert.ok(e instanceof LocalClassificationError);
     assert.equal(e.code, "unavailable");
     assert.doesNotMatch(inspect(e), /sk-secret|CANARY/);
     return true;
   });
-  await assert.rejects(createLocalFunctionClassifier({ call: async () => { throw { code: "timeout", raw: "RAW_CANARY" }; } }).classify(input), code("timeout"));
+  await assert.rejects(createLocalFunctionClassifier({ classifierKind: "unverified_injected", call: async () => { throw { code: "timeout", raw: "RAW_CANARY" }; } }).classify(input), code("timeout"));
 });
 
 test("classification snapshots segment ids before awaiting the injected call", async () => {
   const mutable = structuredClone(input);
-  const classifier = createLocalFunctionClassifier({ call: async () => {
+  const classifier = createLocalFunctionClassifier({ classifierKind: "unverified_injected", call: async () => {
     mutable.segments[0].segmentId = "changed";
     return [verdict];
   } });

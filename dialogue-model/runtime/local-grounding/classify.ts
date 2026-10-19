@@ -110,17 +110,18 @@ export function parseLocalFunctionVerdicts(raw: unknown, input: Pick<LocalClassi
   return input.segments.map((s) => verdicts.get(s.segmentId)!);
 }
 
-export type LocalClassifierMetadata = Readonly<{ classifierKind: "luna_standin" | "jev" }>;
+export type LocalClassifierMetadata = Readonly<{ classifierKind: "luna_standin" | "unverified_injected"; calibrated: false }>;
 export type IdentifiedLocalClassifier = LocalFunctionClassifier & { readonly metadata: LocalClassifierMetadata };
 type CallOptions = { signal: AbortSignal; timeoutMs: number };
 type ClassifierCall = (state: string, options: CallOptions) => Promise<unknown>;
 
-/** Transport-independent call returns the strict verdict array (or its JSON text). */
-export function createLocalFunctionClassifier({ call, classifierKind = "jev", timeoutMs = 15000 }:
-  { call: ClassifierCall; classifierKind?: LocalClassifierMetadata["classifierKind"]; timeoutMs?: number }): IdentifiedLocalClassifier {
-  if (typeof call !== "function" || !includes(["jev", "luna_standin"], classifierKind) || !positive(timeoutMs) || timeoutMs > 60000) fail("invalid_input");
+/** Transport-independent call returns the strict verdict array (or its JSON text).
+ * Callers must identify unverified injections explicitly; no verified Jev route exists yet. */
+export function createLocalFunctionClassifier({ call, classifierKind, timeoutMs = 15000 }:
+  { call: ClassifierCall; classifierKind: LocalClassifierMetadata["classifierKind"]; timeoutMs?: number }): IdentifiedLocalClassifier {
+  if (typeof call !== "function" || !includes(["luna_standin", "unverified_injected"], classifierKind) || !positive(timeoutMs) || timeoutMs > 60000) fail("invalid_input");
   return Object.freeze({
-    metadata: Object.freeze({ classifierKind }),
+    metadata: Object.freeze({ classifierKind, calibrated: false as const }),
     async classify(input: LocalClassificationInput, options: { signal?: AbortSignal; timeoutMs?: number } = {}) {
       if (options.signal?.aborted) fail("aborted");
       const deadline = options.timeoutMs ?? timeoutMs;
