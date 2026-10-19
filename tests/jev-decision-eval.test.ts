@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runJevEvaluation, parseEvaluationArguments, evaluationErrorCode } from "../dialogue-model/runtime/diagnostics/jev-decision-eval/live.ts";
 import type { EvaluationDependencies } from "../dialogue-model/runtime/diagnostics/jev-decision-eval/live.ts";
-import { evaluateTrialGate, evaluateRunGate, projectDecision } from "../dialogue-model/runtime/diagnostics/jev-decision-eval/gate.ts";
+import { evaluateTrialGate, evaluateRunGate, projectDecision, auditJevLocalTurn } from "../dialogue-model/runtime/diagnostics/jev-decision-eval/gate.ts";
 import type { TrialReceipt } from "../dialogue-model/runtime/diagnostics/jev-decision-eval/gate.ts";
 import type { JevDecision } from "../dialogue-model/runtime/decision/contract.ts";
 import { SYNTHETIC_CASES } from "../dialogue-model/runtime/diagnostics/jev-decision-eval/cases.ts";
@@ -14,16 +14,19 @@ import type { SyntheticCase } from "../dialogue-model/runtime/diagnostics/jev-de
 import { createLunaObserver, ObservationError } from "../dialogue-model/runtime/observation/observe.ts";
 import { createJevDecisionClient } from "../dialogue-model/runtime/decision/jev-decision.ts";
 import { createJevLocalTestClassifier } from "../dialogue-model/runtime/local-grounding/jev-local-test.ts";
-import { verifyLocalUpdate } from "../dialogue-model/runtime/local-grounding/verify.ts";
+import { verifyLocalUpdate, recordAiClaims } from "../dialogue-model/runtime/local-grounding/verify.ts";
 import { deriveLocalIssues } from "../dialogue-model/runtime/local-grounding/derive.ts";
 import { createReferenceGraph, applyReferenceUpdate } from "../dialogue-model/runtime/memory/reference-graph.mjs";
 
 function decision(extra: Partial<JevDecision> = {}): JevDecision {
-  return { action: "accept", target: { kind: "single", figureId: "s-0001" }, name: null, feature: null, observe: null,
+  const result: JevDecision = { action: "accept", target: { kind: "single", figureId: "s-0001" }, name: null, feature: null, observe: null,
     decisionKind: "jev_local_test", calibrated: false, evidence: { model: "typesafe/jev-1.14-20261014", responseId: "synthetic-1",
       choices: { action: "accept" }, scores: { action: { accept: 1 } }, latencyMs: 1, costUsd: 0,
       inputBudget: { maxChars: 20000, stateChars: 1000, omitted: { publicTurns: 0, claims: 0, publicNames: 0, repairHistory: 0,
         reobservations: 0, observationDetails: 0, observationChars: 0, issueSummaryChars: 0 } } }, ...extra };
+  result.evidence.stages = ["action_target", ...(["propose_name", "agree", "confirm", "repair", "request_observation"].includes(result.action) ? ["detail"] : [])]
+    .map((stage): any => ({ ...structuredClone(result.evidence), stage }));
+  return result;
 }
 function trial(): TrialReceipt {
   const anchors = Array.from({ length: 6 }, (_, i) => ({ id: `s-000${i + 1}`, bbox: { x: i * 10, y: 0, w: 8, h: 8 }, centroid: { x: i * 10 + 4, y: 4 } }));
@@ -39,7 +42,7 @@ function trial(): TrialReceipt {
       local: { turn: i * 2 + 1, verified: [], unverified: 0, classifierOk: true, pipelineOk: true, model: "typesafe/jev-1.14" },
       issues: [], ledger: Object.fromEntries(anchors.map(a => [a.id, { status: "unassigned", name: null }])), repairHistory: [], step: { text: "形の話をしよう。" } })) };
   const claim = (id: string, act: string, aspect: string, targets = ["s-0001"]): any => ({ kind: "claim", id, act, aspect, targets,
-    issueId: id, proposition: "四角がある", name: null, sourceTurn: 1, quote: "四角がある", speaker: "human", respondsTo: null, source: "partner_statement" });
+    issueId: id, proposition: "四角がある", name: null, sourceTurn: Number(id.split(":")[0]), quote: "四角がある", speaker: "human", respondsTo: null, source: "partner_statement" });
   result.turns[0].step.check = "construal_without_conflict";
   result.turns[0].local.verified = [claim("1:local1", "construe", "construal")];
   result.turns[1].step.check = "partial_agreement";
@@ -130,6 +133,80 @@ test("construal, partial agreement, multiple candidates and repair progress stay
   }
 });
 
+test("repair progress requires novel figure content; difficulty, repeats and record removal remain stagnation", () => {
+  const information = ["assert", "agree", "deny", "construe", "name_propose", "name_accept", "name_reject"];
+  const nonInformation = ["defer", "ask", "acknowledge", "unknown", "withdraw", "revisit"];
+  for (const act of [...information, ...nonInformation]) for (const aspect of ["part", "question", "progress"]) {
+    const receipt = trial(), repair = receipt.turns[2].repairHistory[0];
+    const claim: any = { ...receipt.turns[1].local.verified[0], id: "5:local2", sourceTurn: 5, act, aspect, proposition: "新しい図形の内容" };
+    receipt.turns[2].local.verified.push(claim);
+    repair.partnerClaims = [{ id: claim.id, act: claim.act, proposition: claim.proposition, targets: claim.targets }];
+    repair.candidatesAfter = [...repair.candidatesBefore];
+    const informative = information.includes(act) && aspect === "part";
+    repair.addedClaimIds = informative ? [claim.id] : [];
+    repair.progress = informative ? "changed" : "unchanged";
+    assert.equal(evaluateTrialGate(receipt).passed, true, act + ":" + aspect);
+    repair.progress = informative ? "unchanged" : "changed";
+    assert.ok(evaluateTrialGate(receipt).unmet.includes("repair_history_invalid"), act + ":" + aspect);
+  }
+  for (const after of [["s-0001", "s-0002", "s-0003"], [], ["s-0002", "s-0003"]]) {
+    const receipt = trial(), repair = receipt.turns[2].repairHistory[0];
+    repair.candidatesAfter = after; repair.removedClaimIds = ["3:local1"]; repair.progress = "unchanged";
+    assert.equal(evaluateTrialGate(receipt).passed, true);
+    repair.progress = "changed";
+    assert.ok(evaluateTrialGate(receipt).unmet.includes("repair_history_invalid"));
+  }
+  const receipt = trial(), repair = receipt.turns[2].repairHistory[0];
+  const repeated: any = { ...receipt.turns[1].local.verified[0], id: "5:local2", sourceTurn: 5, targets: ["s-0001", "s-0002", "s-0003"] };
+  receipt.turns[2].local.verified.push(repeated);
+  repair.partnerClaims = [{ id: repeated.id, act: repeated.act, proposition: repeated.proposition, targets: repeated.targets }];
+  repair.candidatesAfter = repeated.targets; repair.progress = "unchanged";
+  assert.equal(evaluateTrialGate(receipt).passed, true); // New ID and wider overlapping targets are not new content.
+  repair.addedClaimIds = [repeated.id]; repair.progress = "changed";
+  assert.ok(evaluateTrialGate(receipt).unmet.includes("repair_history_invalid"));
+  repair.addedClaimIds = []; repair.candidatesAfter = ["s-0001"];
+  assert.equal(evaluateTrialGate(receipt).passed, true); // Strict narrowing independently supplies progress.
+});
+
+test("every Jev stage contributes model validation and omission accounting once", () => {
+  const receipt = trial(), evidence = receipt.turns[2].decisions[0].evidence;
+  evidence.stages![1].inputBudget!.omitted.repairHistory = 4;
+  const result = evaluateTrialGate(receipt);
+  assert.equal(result.passed, true); assert.equal(result.inputBudget.calls, 5);
+  assert.equal(result.inputBudget.omittingCalls, 1); assert.equal(result.inputBudget.omitted.repairHistory, 4);
+  evidence.stages![0].model = "typesafe/jev-1.14-wrong";
+  assert.ok(evaluateTrialGate(receipt).unmet.includes("jev_evidence_invalid"));
+  evidence.stages![0].model = evidence.model;
+  delete evidence.stages![1].inputBudget;
+  assert.ok(evaluateTrialGate(receipt).unmet.includes("input_budget_unreported"));
+  evidence.stages!.pop();
+  assert.ok(evaluateTrialGate(receipt).unmet.includes("jev_evidence_invalid"));
+});
+
+test("Jev independent audit retains multiple AI feature targets and excludes fallback claims", () => {
+  const anchors = trial().anchors, targets = anchors.slice(0, 2).map(a => a.id);
+  const publicTurns = [{ turn: 1, speaker: "human" as const, text: "形の話をしよう。" },
+    { turn: 2, speaker: "ai" as const, text: "四角がある形ですか？" }, { turn: 3, speaker: "human" as const, text: "そうだね。" }];
+  for (const fallback of [false, true]) {
+    const graph = createReferenceGraph({ slots: anchors.map(a => a.id) });
+    const judgment = { action: "confirm", targetSlot: null, candidateName: null, discriminatingFeature: "四角" };
+    const before = { graph, judgments: [{ turnIndex: 1, judgment, generationGuard: { fallback }, jevTurn: { decision: { target: { kind: "multiple", figureIds: targets } } } }] };
+    const operations = recordAiClaims({ graph, turn: 3, publicTurns,
+      priorAct: { ...judgment, turn: 2, targetCandidates: targets, publishedFallback: fallback } }).operations;
+    assert.equal(operations.length, fallback ? 0 : 1);
+    if (!fallback) { assert.deepEqual(operations[0].targets, targets); assert.equal(operations[0].aspect, "part"); }
+    const after = { graph: applyReferenceUpdate(graph, { expectedRevision: graph.revision, turn: 3, operations }, { publicTurns, generationSucceeded: true }), judgments: [{ judgment: { reference: null } }] };
+    const record: any = { status: "committed", localStatus: "ok", aiClaims: operations, claims: [], verification: { accepted: operations.map(c => c.id) } };
+    const input = { before, after, publicTurns, record, segments: [], verdicts: [] };
+    const audit = auditJevLocalTurn(input);
+    assert.equal(audit.pipelineOk, true); assert.equal(audit.unverified, 0); assert.deepEqual(audit.verified, operations);
+    if (!fallback) {
+      before.judgments[0].jevTurn.decision.target.figureIds = [targets[0]];
+      const forged = auditJevLocalTurn(input); assert.equal(forged.pipelineOk, false); assert.equal(forged.unverified, 1);
+    }
+  }
+});
+
 test("all failed cases remain in the gate; selecting successful cases cannot pass", () => {
   const good = trial(), bad = trial(); bad.caseId = "failed"; bad.completed = false;
   const result = evaluateRunGate([good, bad], [good.caseId, bad.caseId]);
@@ -145,9 +222,10 @@ test("all failed cases remain in the gate; selecting successful cases cannot pas
 
 test("input omission is reported per decision and run without treating it as failure", () => {
   const good = trial(); good.turns[0].decisions[0].evidence.inputBudget!.omitted.claims = 7;
+  good.turns[0].decisions[0].evidence.stages![0].inputBudget!.omitted.claims = 7;
   const result = evaluateRunGate([good], [good.caseId]);
   assert.equal(result.passed, true); assert.equal(result.inputBudget.omittingCalls, 1);
-  assert.equal(result.inputBudget.omitted.claims, 7); assert.equal(result.inputBudget.calls, 4);
+  assert.equal(result.inputBudget.omitted.claims, 7); assert.equal(result.inputBudget.calls, 5);
   delete good.turns[0].decisions[0].evidence.inputBudget;
   assert.ok(evaluateTrialGate(good).unmet.includes("input_budget_unreported"));
 });
@@ -216,7 +294,7 @@ const script: SyntheticCase = { id: "mock-information-cycle", steps: [
   { text: "次は鍵みたいな形の話をしよう。" },
 ] };
 type MockFault = { phase?: string; phaseAt?: number; publicText?: string; model?: string; decisionModel?: string; cost?: number; classificationUnknown?: boolean;
-  firstAction?: "defer" | "move_on" | "revisit"; firstTarget?: "none" | "multiple"; decisionChoices?: Record<string, string>; detailFault?: "network" | "partial" | "model" };
+  firstAction?: "defer" | "move_on" | "revisit" | "confirm" | "repair"; bareReply?: "agree" | "deny"; postObservationConfirm?: boolean; firstTarget?: "none" | "multiple"; decisionChoices?: Record<string, string>; detailFault?: "network" | "partial" | "model" };
 function e2eDependencies(fault: MockFault = {}): EvaluationDependencies & { calls: any[]; http: any[]; created: { count: number } } {
   const calls: any[] = [], http: any[] = [], created = { count: 0 };
   const phaseCounts: Record<string, number> = {};
@@ -241,7 +319,7 @@ function e2eDependencies(fault: MockFault = {}): EvaluationDependencies & { call
       const turn = state.turn, quote = state.publicTurns.at(-1).text, slots = state.ownSlots;
       const segment = (id: string, aspect: string, proposition: string, targets = [slots[0]], name: string | null = null) =>
         ({ segmentId: id, quote, targets, aspect, proposition, name, linkedIssueId: null, respondsToTurn: null });
-      text = JSON.stringify(turn === 1 ? [segment("s1", "construal", "馬にも牛にも見える")] :
+      text = JSON.stringify(turn === 3 && fault.bareReply ? [segment("s1", "part", fault.bareReply === "agree" ? "四角がある" : "四角がない", [])] : turn === 1 ? [segment("s1", "construal", "馬にも牛にも見える")] :
         [3, 5].includes(turn) ? [segment("s1", "part", "四角がある")] : turn === 7 ?
           [segment("s1", "part", "四角がある"), segment("s2", "part", "細い部分が二つではない")] : turn === 9 ?
             [segment("s1", "referent", "鳥に見える候補が二つ", slots.slice(1, 3))] : turn === 11 ?
@@ -250,7 +328,7 @@ function e2eDependencies(fault: MockFault = {}): EvaluationDependencies & { call
       if (fault.publicText) text = fault.publicText === "prompt" ? messages.find(m => m.role === "system").content.split("\n").find((s: string) => s.length >= 24) : fault.publicText;
       else {
         const act = JSON.parse(messages.find(m => typeof m.content === "string" && m.content.startsWith("Jevが選んだ行動だけ")).content.split("\n").at(-1));
-        text = act.action === "confirm" ? `${act.discriminatingFeature}がある形のことですか？` : act.action === "agree" ? "「つばめ」でいいですね。" :
+        text = ["confirm", "repair"].includes(act.action) ? `${act.discriminatingFeature}がある形のことですか？` : act.action === "agree" ? "「つばめ」でいいですね。" :
           act.action === "defer" ? "その形の話はあとで戻ろう。" : act.action === "move_on" ? "別の形の話に進もう。" : text;
       }
     } else assert.fail("unexpected Luna phase " + options.phase);
@@ -276,7 +354,7 @@ function e2eDependencies(fault: MockFault = {}): EvaluationDependencies & { call
           const choices: Record<string, string> = {};
           if (payload.questions.action) {
             const observe = state.turn === 9 && state.reobservationAllowed;
-            const action = state.turn === 1 && fault.firstAction ? fault.firstAction : [1, 3, 5].includes(state.turn) ? "confirm" : observe ? "request_observation" : state.turn === 11 ? "agree" : "accept";
+            const action = state.turn === 1 && fault.firstAction ? fault.firstAction : [1, 3, 5].includes(state.turn) ? "confirm" : observe ? "request_observation" : state.turn === 9 && fault.postObservationConfirm ? "confirm" : state.turn === 11 ? "agree" : "accept";
             Object.assign(choices, { action, target: state.turn === 1 && fault.firstTarget ? fault.firstTarget :
               state.turn === 9 ? "multiple" : state.turn === 11 ? "figure_1" : "figure_0" });
             for (let i = 0; i < 6; i++) choices[`candidate_${i}`] = (state.turn === 9 ? [1, 2].includes(i) : true) ? "include" : "exclude";
@@ -299,9 +377,9 @@ function e2eDependencies(fault: MockFault = {}): EvaluationDependencies & { call
           const payload = JSON.parse(request.body as string), state = JSON.parse(payload.state); http.push({ kind: "classification", payload });
           const choices: Record<string, string> = {};
           state.segments.forEach((segment: any, i: number) => {
-            const act = fault.classificationUnknown ? "unknown" : state.turn === 1 || state.turn === 13 ? "construe" : state.turn === 11 ? "name_propose" : state.turn === 9 ? "assert" : i === 1 ? "deny" : "agree";
+            const act = fault.classificationUnknown ? "unknown" : state.turn === 3 && fault.bareReply ? fault.bareReply : state.turn === 1 || state.turn === 13 ? "construe" : state.turn === 11 ? "name_propose" : state.turn === 9 ? "assert" : i === 1 ? "deny" : "agree";
             const prior = ["agree", "deny"].includes(act) ? state.priorClaims.findLastIndex((c: any) => c.speaker === "ai" && c.aspect === "part" &&
-              c.proposition.includes(act === "deny" ? "細い部分が二つ" : "四角")) : -1;
+              c.proposition.includes(act === "deny" && !fault.bareReply ? "細い部分が二つ" : "四角")) : -1;
             choices[`segment_${i}_act`] = act; choices[`segment_${i}_antecedent`] = prior >= 0 ? "claim_" + prior : "none";
           });
           return response(payload, choices);
@@ -334,6 +412,15 @@ test("actual pipeline with mock Luna and mock Jev HTTP observes once, preserves 
   const attempts = (await readFile(join(result.directory, "attempts.private.jsonl"), "utf8")).trim().split("\n")
     .flatMap(line => JSON.parse(line).decisionAttempts ?? []);
   assert.ok(attempts.length > 0 && attempts.every(a => Object.keys(a.choices).length === 8 && a.rejectionCode === null && a.stages.length >= 1));
+  const sent = deps.http.filter(c => c.kind === "decision");
+  assert.equal(result.gate.inputBudget.calls, sent.length);
+  const stages = attempts.flatMap(a => a.stages);
+  assert.equal(stages.length, sent.length);
+  stages.forEach((stage, i) => {
+    assert.deepEqual(Object.keys(stage.choices), Object.keys(sent[i].payload.questions));
+    for (const [key, label] of Object.entries(stage.choices)) assert.ok(Object.hasOwn(sent[i].payload.questions[key].criteria, label as string));
+    assert.equal(stage.status, "ok"); assert.equal(stage.error, null); assert.equal(stage.inputBudget.maxChars, 20000);
+  });
   assert.ok(!files.some(f => /blind|mapping|argon|comparison/u.test(f)));
   assert.equal((await stat(result.directory)).mode & 0o777, 0o700);
   for (const file of files) {
@@ -341,6 +428,45 @@ test("actual pipeline with mock Luna and mock Jev HTTP observes once, preserves 
     const text = await readFile(join(result.directory, file), "utf8");
     for (const canary of ["sk-or-", "data:image/", "PRIVATE_PROVIDER_ERROR", "公開発話の生成"] ) assert.ok(!text.includes(canary));
   }
+}));
+
+test("multiple confirm/repair and the next bare reply keep all candidates in independent audit", async () => {
+  for (const firstAction of ["confirm", "repair"] as const) for (const bareReply of ["agree", "deny"] as const) await temporary(async outputDir => {
+    const deps = e2eDependencies({ firstAction, firstTarget: "multiple", bareReply });
+    const c: SyntheticCase = { id: "multiple-reply", steps: [script.steps[0], { text: bareReply === "agree" ? "そうだね。" : "それは違う。", expect: [{ act: bareReply, aspect: "part" }] }] };
+    deps.cases = [c];
+    const result = await runJevEvaluation({ outputDir, seed: 1701 }, deps);
+    const document = JSON.parse(await readFile(join(result.directory, c.id + ".private.json"), "utf8"));
+    assert.equal(document.receipt.completed, true);
+    const [first, next] = document.receipt.turns;
+    const candidates = document.receipt.anchors.map((a: any) => a.id);
+    assert.deepEqual(first.decisions[0].target, { kind: "multiple", figureIds: candidates });
+    assert.deepEqual(first.decisions[0].detailFigureIds, candidates);
+    assert.equal(first.finalAct.targetSlot, null);
+    assert.ok(next.local.pipelineOk && next.local.unverified === 0 && next.traceMatches);
+    const ai = next.local.verified.filter((claim: any) => claim.speaker === "ai");
+    assert.equal(ai.length, 1); assert.equal(ai[0].aspect, "part"); assert.deepEqual(ai[0].targets, candidates);
+    const reply = next.local.verified.find((claim: any) => claim.speaker === "human");
+    assert.equal(reply.act, bareReply); assert.equal(reply.respondsTo, ai[0].id); assert.deepEqual(reply.targets, candidates);
+    assert.ok(Object.values(first.ledger).every((entry: any) => entry.status === "unassigned"));
+    assert.ok(Object.values(next.ledger).every((entry: any) => entry.status !== "agreed"));
+  });
+});
+
+test("reobservation can have two two-stage judgments while all four stage budgets are counted", async () => temporary(async outputDir => {
+  const deps = e2eDependencies({ postObservationConfirm: true });
+  const result = await runJevEvaluation({ outputDir, seed: 1701 }, deps);
+  assert.equal(result.status, "passed", JSON.stringify(result.gate));
+  const calls = deps.http.filter(call => call.kind === "decision" && JSON.parse(call.payload.state).turn === 9);
+  assert.deepEqual(calls.map(call => Object.keys(call.payload.questions)), [
+    ["action", "target", "candidate_0", "candidate_1", "candidate_2", "candidate_3", "candidate_4", "candidate_5"],
+    ["observe_targets", "observe_aspect"],
+    ["action", "target", "candidate_0", "candidate_1", "candidate_2", "candidate_3", "candidate_4", "candidate_5"], ["feature"]]);
+  const document = JSON.parse(await readFile(join(result.directory, script.id + ".private.json"), "utf8"));
+  const turn = document.receipt.turns.find((turn: any) => turn.turn === 9);
+  assert.equal(turn.decisions.length, 2); assert.ok(turn.decisions.every((d: any) => d.evidence.stages.length === 2));
+  assert.equal(document.receipt.observations.filter((o: any) => o.turn === 9).length, 1);
+  assert.equal(result.gate.inputBudget.calls, deps.http.filter(call => call.kind === "decision").length);
 }));
 
 test("provider/model failure keeps every case, previous checkpoints and typed failures, and cannot pass", async () => {
@@ -560,7 +686,6 @@ test("two-stage rejected action/target labels retain fixed rules without a detai
     for (const [key, label] of Object.entries(c.choices)) assert.equal(attempt.choices[key], label);
     const document = JSON.parse(await readFile(join(result.directory, script.id + ".private.json"), "utf8"));
     assert.equal(document.receipt.completed, false);
-    // The turn flow maps only a typed invalid_decision to its own code; other rejections stay decision_failed.
     assert.equal(document.receipt.failureCode, c.error === "invalid_decision" ? "invalid_decision" : "decision_failed");
     assert.equal(document.publicTurns.filter((t: any) => t.speaker === "ai").length, 0);
   });
@@ -579,6 +704,7 @@ test("detail failure keeps both stages and closed first-stage labels without raw
     assert.deepEqual(attempt.stages[1].choices, {});
     assert.equal(attempt.stages[1].error, detailFault === "network" ? "network_error" : detailFault === "model" ? "model_mismatch" : "invalid_response");
     assert.ok(attempt.stages.every((stage: any) => stage.inputBudget.maxChars === 20000));
+    assert.equal(result.gate.inputBudget.calls, 2); assert.equal(result.gate.inputBudget.missingCalls, 0);
     for (const file of await readdir(result.directory)) assert.ok(!(await readFile(join(result.directory, file), "utf8")).includes("PRIVATE_DETAIL_ERROR"));
   });
 });
@@ -618,6 +744,35 @@ test("private decision attempts discard nonclosed labels, partial answers and un
     for (const file of await readdir(result.directory)) {
       const text = await readFile(join(result.directory, file), "utf8");
       for (const secret of ["PRIVATE_CHOICE_CANARY", "PRIVATE_CHOICE_KEY", "PRIVATE_REJECTION_CANARY"]) assert.ok(!text.includes(secret));
+    }
+  });
+});
+
+
+test("private stage budgets keep only numeric allowed fields, and malformed omission values are reported", async () => {
+  for (const malformed of [false, true]) await temporary(async outputDir => {
+    const deps = e2eDependencies({ detailFault: "network" }), create = deps.createComponents;
+    deps.createComponents = (shared, options) => {
+      const components = create(shared, options), adapter = components.jevDecision as NonNullable<ReturnType<typeof createJevDecisionClient>>;
+      let evidence: any = null;
+      return { ...components, jevDecision: {
+        get lastEvidence() { return structuredClone(evidence); },
+        async decide(input, callOptions) {
+          try { return await adapter.decide(input, callOptions); }
+          finally {
+            evidence = adapter.lastEvidence;
+            evidence.stages[1].inputBudget.PRIVATE_BUDGET_KEY = "PRIVATE_BUDGET_CANARY";
+            evidence.stages[1].inputBudget.omitted.PRIVATE_OMISSION_KEY = "PRIVATE_BUDGET_CANARY";
+            if (malformed) evidence.stages[1].inputBudget.omitted.claims = "PRIVATE_BUDGET_CANARY";
+          }
+        },
+      } };
+    };
+    const result = await runJevEvaluation({ outputDir, seed: 1701 }, deps);
+    assert.equal(result.gate.inputBudget.calls, 2); assert.equal(result.gate.inputBudget.missingCalls, malformed ? 1 : 0);
+    for (const file of await readdir(result.directory)) {
+      const text = await readFile(join(result.directory, file), "utf8");
+      for (const secret of ["PRIVATE_BUDGET_KEY", "PRIVATE_BUDGET_CANARY", "PRIVATE_OMISSION_KEY"]) assert.ok(!text.includes(secret));
     }
   });
 });
