@@ -29,6 +29,16 @@ export type RepairHistoryEntry = {
 };
 export type PublicNameCandidate = { name: string; figureId: string | null; sourceTurn: number };
 export type JevPriorAction = { turn: number; action: JevAction; target: JevTarget; name: string | null; feature: string | null };
+/** Human utterance referent, independent of the next action's target. No winner or calibration. */
+export type HumanReferentMaterial = { status: "ok" | "unknown"; scores: Record<string, number> | null };
+export type HumanReferentEstimate = HumanReferentMaterial & {
+  model: string | null;
+  responseId: string | null;
+  costUsd: number | null;
+  latencyMs: number;
+  inputBudget: DecisionInputBudget | null;
+  calibrated: false;
+};
 export type JevDecisionInput = {
   turn: number;
   publicTurns: readonly PublicTurn[];
@@ -43,6 +53,7 @@ export type JevDecisionInput = {
   publicNames: readonly PublicNameCandidate[];
   /** C sets false after its engineering limit for targeted reobservation is reached. */
   reobservationAllowed?: boolean;
+  humanReferent?: HumanReferentMaterial;
 };
 export type DecisionInputBudget = {
   maxChars: 20000;
@@ -79,5 +90,8 @@ export type JevDecision = {
   calibrated: false;
 };
 export type JevDecisionCallOptions = { signal?: AbortSignal; timeoutMs?: number };
-export type JevDecisionClient = { decide(input: JevDecisionInput, options?: JevDecisionCallOptions): Promise<JevDecision> };
+export type JevDecisionClient = {
+  decide(input: JevDecisionInput, options?: JevDecisionCallOptions): Promise<JevDecision>;
+  estimateReferent?(input: JevDecisionInput, options?: JevDecisionCallOptions): Promise<HumanReferentEstimate>;
+};
 export type JevQuestionLayout = "two_stage_v1";

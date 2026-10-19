@@ -5,7 +5,8 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { inspect } from "node:util";
 import { setImmediate as nextLoop } from "node:timers/promises";
-import { createJevDecisionClient, buildJevDecisionPayload, buildJevDecisionDetailPayload, parseJevActionTargetChoices, validateJevDecision, JEV_DECISION_MODEL, JEV_DECISION_REJECTION_CODES, JevDecisionError } from "../dialogue-model/runtime/decision/jev-decision.ts";
+import { createJevDecisionClient, buildJevDecisionPayload, buildJevDecisionDetailPayload, parseJevActionTargetChoices, validateJevDecision,
+  buildHumanReferentPayload, validateHumanReferentEstimate, JEV_DECISION_MODEL, JEV_DECISION_REJECTION_CODES, JevDecisionError } from "../dialogue-model/runtime/decision/jev-decision.ts";
 import type { JevDecisionPayload } from "../dialogue-model/runtime/decision/jev-decision.ts";
 import type { JevDecisionInput } from "../dialogue-model/runtime/decision/contract.ts";
 import { keychainKeyReader, KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT } from "../dialogue-model/runtime/diagnostics/jev-shadow-eval/local-openrouter.ts";
@@ -443,7 +444,7 @@ test("second-stage timeout and abort retain stage one; late data cannot alter ev
     let secondPayload: JevDecisionPayload | undefined;
     let calls = 0;
     const controller = new AbortController();
-    const client = createJevDecisionClient({ enabled: true, readKey, timeoutMs: 10, fetchImpl: async (_url, init) => {
+    const client = createJevDecisionClient({ enabled: true, readKey, timeoutMs: 1000, fetchImpl: async (_url, init) => {
       const p = JSON.parse(init.body as string) as JevDecisionPayload;
       calls++;
       if (p.questions.action) return Response.json(answer(p, { action: "repair", target: "figure_0" }));
@@ -495,4 +496,108 @@ test("a secret echo in stage two keeps only stage-one proof and halts unknown bi
   assert.equal(client.lastEvidence?.stages[1].error, "key_leak"); assert.deepEqual(client.lastEvidence?.stages[1].choices, {});
   assert.doesNotMatch(JSON.stringify(client.lastEvidence), /SYNTHETIC|extra|u0073/);
   await assert.rejects(client.decide(fixture()), code("cost_cap")); assert.equal(http.requests.length, 2);
+});
+
+test("human referent scores are a separate eight-label measurement, preserved without normalization or a winner", async t => {
+  const input = fixture();
+  let reads = 0;
+  const raw = { figure_0: 0.8, figure_1: 0.8, figure_2: 0.1, figure_3: 0.1, figure_4: 0.1, figure_5: 0.1, none: 0.2, multiple: 0.4 };
+  const http = await httpMock(t, p => {
+    if (!p.questions.human_referent) return { body: answer(p, { action: "move_on", target: "figure_5" }) };
+    assert.deepEqual(Object.keys(p.questions), ["human_referent"]);
+    assert.equal(Object.keys(p.questions.human_referent.criteria).length, 8);
+    const reply = answer(p, { human_referent: "multiple" }, JEV_DECISION_MODEL + "-20261014");
+    reply.answers.human_referent.probabilities = raw;
+    return { body: reply };
+  });
+  const client = createJevDecisionClient({ enabled: true, readKey: async () => { reads++; return KEY; }, fetchImpl: http.fetchImpl })!;
+  const estimate = await client.estimateReferent(input);
+  assert.equal(estimate.status, "ok"); assert.equal(estimate.calibrated, false);
+  assert.deepEqual(estimate.scores, Object.fromEntries([...input.ownSlots.map((id, i) => [id, raw[`figure_${i}` as keyof typeof raw]]), ["none", 0.2], ["multiple", 0.4]]));
+  assert.ok(Math.abs(Object.values(estimate.scores!).reduce((a, b) => a + b) - 1) > 1, "raw scores are not normalized");
+  assert.equal(estimate.model, JEV_DECISION_MODEL + "-20261014");
+  assert.equal(estimate.inputBudget?.stateChars, http.requests[0].payload.state.length);
+  assert.equal(client.callCount, 0); assert.equal(client.referentCallCount, 1); assert.equal(client.lastEvidence, null);
+  assert.deepEqual(validateHumanReferentEstimate(estimate, input), estimate);
+  const saved = structuredClone(estimate);
+  const result = await client.decide({ ...input, humanReferent: estimate });
+  assert.deepEqual(result.target, { kind: "single", figureId: "own-5" });
+  assert.equal(result.evidence.choices.target, "figure_5");
+  assert.deepEqual(JSON.parse(http.requests[1].payload.state).humanReferent, { status: "ok", scores: estimate.scores });
+  assert.deepEqual(estimate, saved); assert.deepEqual(client.lastReferentEvidence, saved);
+  assert.equal(client.callCount, 1); assert.equal(client.referentCallCount, 1); assert.equal(reads, 1);
+  assert.equal(client.spentUsd, 0.0002);
+  estimate.scores!["own-0"] = 0;
+  assert.equal(client.lastReferentEvidence?.scores?.["own-0"], 0.8);
+});
+
+test("missing, foreign, extra and out-of-range referent scores become unknown without completion", async t => {
+  let patch: (r: ReturnType<typeof answer>) => unknown = r => r;
+  const http = await httpMock(t, p => ({ body: patch(answer(p)) }));
+  const client = createJevDecisionClient({ enabled: true, readKey, fetchImpl: http.fetchImpl })!;
+  const patches = [
+    (r: ReturnType<typeof answer>) => { delete r.answers.human_referent.probabilities.figure_0; return r; },
+    (r: ReturnType<typeof answer>) => { r.answers.human_referent.probabilities.figure_0 = -0.01; return r; },
+    (r: ReturnType<typeof answer>) => { r.answers.human_referent.probabilities.figure_0 = 1.01; return r; },
+    (r: ReturnType<typeof answer>) => { r.answers.human_referent.probabilities.figure_0 = NaN; return r; },
+    (r: ReturnType<typeof answer>) => { r.answers.human_referent.probabilities.partner = 0.4; return r; },
+    (r: ReturnType<typeof answer>) => { r.answers.human_referent.choice = "RAW_CANARY"; return r; },
+    (r: ReturnType<typeof answer>) => ({ ...r, answers: {} }),
+    (r: ReturnType<typeof answer>) => ({ ...r, model: "typesafe/jev-1.13" }),
+  ];
+  for (patch of patches) {
+    const value = await client.estimateReferent(fixture());
+    assert.equal(value.status, "unknown"); assert.equal(value.scores, null);
+    assert.deepEqual(validateHumanReferentEstimate(value, fixture()), value);
+    assert.doesNotMatch(JSON.stringify(value), /RAW_CANARY|SYNTHETIC|probabilities/);
+  }
+  assert.equal(http.requests.length, patches.length); assert.equal(client.callCount, 0);
+  patch = r => r;
+  assert.equal((await client.estimateReferent(fixture())).status, "ok");
+  assert.equal((await client.decide(fixture())).action, "accept", "a known-cost invalid estimate does not block the action call");
+});
+
+test("referent transport errors and timeout become unknown; abort remains typed and late data stays detached", async t => {
+  const http = await httpMock(t, () => ({ status: 503, raw: KEY + " PROMPT_CANARY" }));
+  const failed = createJevDecisionClient({ enabled: true, readKey, fetchImpl: http.fetchImpl })!;
+  const unknown = await failed.estimateReferent(fixture());
+  assert.equal(unknown.status, "unknown"); assert.equal(unknown.scores, null);
+  assert.equal(unknown.model, null); assert.equal(unknown.responseId, null);
+  assert.doesNotMatch(JSON.stringify(unknown), /CANARY|SYNTHETIC/);
+  assert.equal((await failed.estimateReferent(fixture())).status, "unknown"); assert.equal(http.requests.length, 1);
+  const noKey = createJevDecisionClient({ enabled: true, readKey: async () => { throw new Error(KEY + " PROMPT_CANARY"); } })!;
+  assert.equal((await noKey.estimateReferent(fixture())).status, "unknown");
+  let release: (r: Response) => void = () => {};
+  const late = createJevDecisionClient({ enabled: true, readKey, timeoutMs: 5, fetchImpl: () => new Promise(r => { release = r; }) })!;
+  const timed = await late.estimateReferent(fixture());
+  assert.equal(timed.status, "unknown"); const snapshot = late.lastReferentEvidence;
+  release(Response.json(answer(buildHumanReferentPayload(fixture())))); await nextLoop();
+  assert.deepEqual(late.lastReferentEvidence, snapshot); assert.equal(late.spentUsd, 0);
+  const controller = new AbortController(); controller.abort("SECRET_CANARY");
+  await assert.rejects(late.estimateReferent(fixture(), { signal: controller.signal }), code("aborted"));
+});
+
+test("referent estimation and action decisions share the same cost stop rule", async t => {
+  const http = await httpMock(t, p => ({ body: answer(p, {}, JEV_DECISION_MODEL, 0.03) }));
+  const client = createJevDecisionClient({ enabled: true, readKey, fetchImpl: http.fetchImpl })!;
+  assert.equal((await client.estimateReferent(fixture())).status, "ok");
+  await assert.rejects(client.decide(fixture()), code("cost_cap"));
+  assert.equal(client.spentUsd, 0.03); assert.equal(http.requests.length, 1);
+  assert.equal((await client.estimateReferent(fixture())).status, "unknown"); assert.equal(http.requests.length, 1);
+});
+
+test("the referent validator rejects forged metadata, partial maps and unknown fields with fixed errors", async t => {
+  const http = await httpMock(t);
+  const client = createJevDecisionClient({ enabled: true, readKey, fetchImpl: http.fetchImpl })!;
+  const value = await client.estimateReferent(fixture());
+  const patches = [
+    { status: "secret" }, { calibrated: true }, { scores: {} }, { scores: { ...value.scores, "own-0": Infinity } },
+    { model: "LUNA_CANARY" }, { responseId: "RAW_CANARY" }, { costUsd: -1 }, { latencyMs: -1 },
+    { inputBudget: null }, { raw: "PROMPT_CANARY" }, { status: "unknown" },
+  ];
+  for (const patch of patches) assert.throws(() => validateHumanReferentEstimate({ ...value, ...patch }, fixture()), (error: unknown) => {
+    assert.ok(error instanceof JevDecisionError); assert.doesNotMatch(inspect(error, { showHidden: true }), /CANARY|SYNTHETIC|cause/); return true;
+  });
+  const copy = validateHumanReferentEstimate(value, fixture()); copy.scores!["own-0"] = 0.123;
+  assert.notDeepEqual(copy.scores, value.scores);
 });
