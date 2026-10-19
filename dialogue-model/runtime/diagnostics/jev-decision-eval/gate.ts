@@ -6,6 +6,9 @@ import type { JevDecision, RepairHistoryEntry, DecisionInputBudget } from "../..
 import type { ObservationMemo, ObservationIssue, ReobservationResult } from "../../observation/contract.ts";
 import type { LocalOwnAnchor, LocalIssueView } from "../../local-grounding/contract.ts";
 import type { AuditReceipt } from "../local-grounding-eval/gate.ts";
+import { recordAiClaims, verifyLocalUpdate } from "../../local-grounding/verify.ts";
+import { previewReferenceUpdate, snapshotReferenceGraph, validateReferenceUpdate } from "../../memory/reference-graph.mjs";
+import { prepareMemory } from "../../judgment/memory.mjs";
 import type { HumanStep } from "./cases.ts";
 
 export type ObservationReceipt = { turn: number | null; kind: "initial" | "targeted";
@@ -20,6 +23,45 @@ export type TrialReceipt = { caseId: string; completed: boolean; expectedTurns: 
   failureCode?: string;
   anchors: LocalOwnAnchor[]; observations: ObservationReceipt[]; wire: WireReceipt[]; turns: TurnReceipt[];
   failedDecisionInputs?: Array<{ turn: number; inputBudget: DecisionInputBudget | null }> };
+
+/** Reproduce Jev's installed operations independently, including ambiguous
+ * feature targets. The legacy Luna-judgment auditor keeps its original input. */
+export function auditJevLocalTurn(input: Parameters<typeof import("../local-grounding-eval/gate.ts").auditLocalTurn>[0]): AuditReceipt {
+  const turn = input.publicTurns.at(-1)!.turn, record = input.record;
+  let verified: AuditReceipt["verified"] = [], unverified = 0;
+  let pipelineOk = record?.status === "committed" && record.localStatus === "ok";
+  try {
+    snapshotReferenceGraph(input.before.graph); snapshotReferenceGraph(input.after.graph);
+    const previous = input.before.judgments.at(-1);
+    const priorAi = previous && input.publicTurns.find(t => t.speaker === "ai" && t.turn > previous.turnIndex && t.turn < turn);
+    const target = previous?.jevTurn?.decision?.target;
+    const ai = priorAi ? recordAiClaims({ graph: input.before.graph, turn, publicTurns: input.publicTurns,
+      priorAct: { ...previous.judgment, turn: priorAi.turn, publishedFallback: previous.generationGuard?.fallback === true,
+        ...(target?.kind === "multiple" ? { targetCandidates: [...target.figureIds] } : {}) } }).operations : [];
+    let update = prepareMemory(input.before.graph, turn, input.after.judgments.at(-1)?.judgment.reference ?? null, input.publicTurns).update;
+    for (const operation of ai) {
+      try { update = validateReferenceUpdate(input.before.graph, { ...update, operations: [...update.operations, operation] }, { publicTurns: input.publicTurns }); }
+      catch { /* Apply the runtime's graph budget checks before previewing. */ }
+    }
+    const staged = previewReferenceUpdate(input.before.graph, update, { publicTurns: input.publicTurns });
+    const human = verifyLocalUpdate({ graph: staged, turn, publicTurns: input.publicTurns,
+      segments: input.segments, verdicts: input.verdicts }).operations;
+    const candidates = [...ai, ...human], priorIds = new Set(input.before.graph.records.map((r: any) => r.id));
+    for (const installed of input.after.graph.records.filter((r: any) => r.kind === "claim" && !priorIds.has(r.id))) {
+      const { turn: insertionTurn, ...operation } = installed;
+      if (insertionTurn !== turn || !candidates.some(c => c.id === operation.id && isDeepStrictEqual(c, operation))) unverified++;
+      else verified.push(operation);
+    }
+    const recorded = [...(record?.aiClaims ?? []), ...(record?.claims ?? [])];
+    if (!isDeepStrictEqual(recorded, verified) ||
+        !isDeepStrictEqual([...(record?.verification.accepted ?? [])].sort(), verified.map(c => c.id).sort())) pipelineOk = false;
+  } catch { pipelineOk = false; unverified++; verified = []; }
+  const classifier = record?.classifier;
+  return { turn, verified, unverified, pipelineOk,
+    classifierOk: classifier?.kind === "jev_local_test" && classifier.status === "ok" &&
+      Number.isSafeInteger(classifier.callIndex) && classifier.callIndex! > 0 && isGroundingModel(classifier.model, "typesafe/jev-1.14"),
+    model: classifier?.model ?? null, ...(input.expected ? { expected: input.expected } : {}) };
+}
 
 export const GATE_ITEMS = ["trial_incomplete", "memo_mismatch", "initial_observation_count", "reobservation_mismatch",
   "non_observation_image", "observation_wire_mismatch", "luna_judgment_called", "jev_evidence_invalid", "action_changed",
@@ -104,8 +146,18 @@ export function evaluateTrialGate(trial: TrialReceipt): GateResult {
     }
     for (const decision of turn.decisions) {
       const evidence = decision.evidence;
-      countBudget(evidence?.inputBudget);
       if (typeof evidence?.model === "string") models.add(evidence.model);
+      const expectedStages = ["propose_name", "agree", "confirm", "repair", "request_observation"].includes(decision.action) ? 2 : 1;
+      const stages = evidence?.stages;
+      if (!Array.isArray(stages) || stages.length !== expectedStages) unmet.add("jev_evidence_invalid");
+      if (!stages?.length) countBudget(undefined);
+      for (const [i, stage] of (stages ?? []).entries()) {
+        countBudget(stage.inputBudget);
+        if (typeof stage.model === "string") models.add(stage.model);
+        if (stage.stage !== (i === 0 ? "action_target" : "detail") || !isGroundingModel(stage.model, "typesafe/jev-1.14") ||
+            typeof stage.responseId !== "string" || !/^[A-Za-z0-9_-]{1,200}$/u.test(stage.responseId)) unmet.add("jev_evidence_invalid");
+      }
+      if (!isDeepStrictEqual(evidence?.inputBudget, stages?.[0]?.inputBudget)) unmet.add("input_budget_unreported");
       if (decision.decisionKind !== "jev_local_test" || decision.calibrated !== false ||
           !isGroundingModel(evidence?.model, "typesafe/jev-1.14") ||
           typeof evidence.responseId !== "string" || !/^[A-Za-z0-9_-]{1,200}$/u.test(evidence.responseId)) unmet.add("jev_evidence_invalid");
@@ -153,8 +205,20 @@ export function evaluateTrialGate(trial: TrialReceipt): GateResult {
         [...repair.addedClaimIds, ...repair.removedClaimIds].some(id => !verifiedClaims.some(c => c.id === id)) ||
         repair.partnerClaims.some(c => !verifiedClaims.some(v => v.speaker === "human" && c.id === v.id && c.act === v.act &&
           c.proposition === v.proposition && sameSet(c.targets, v.targets)))) unmet.add("repair_history_invalid");
-    const changed = !sameSet(repair.candidatesBefore, repair.candidatesAfter) ||
-      repair.addedClaimIds.length > 0 || repair.removedClaimIds.length > 0;
+    const information = (c: AuditReceipt["verified"][number]) => c.speaker === "human" && c.targets.length > 0 &&
+      ["assert", "agree", "deny", "construe", "name_propose", "name_accept", "name_reject"].includes(c.act) &&
+      !["question", "progress"].includes(c.aspect);
+    const content = (c: AuditReceipt["verified"][number]) => JSON.stringify([c.aspect, c.act, c.proposition, c.name]);
+    const novel = repair.partnerClaims.flatMap(reply => {
+      const index = verifiedClaims.findIndex(c => c.id === reply.id);
+      const claim = verifiedClaims[index];
+      return claim && information(claim) && !verifiedClaims.slice(0, index).some(prior => information(prior) &&
+        content(prior) === content(claim) && prior.targets.some(id => claim.targets.includes(id))) ? [claim.id] : [];
+    });
+    if (!sameSet(repair.addedClaimIds, novel)) unmet.add("repair_history_invalid");
+    const narrowed = repair.candidatesAfter.length > 0 && repair.candidatesAfter.length < repair.candidatesBefore.length &&
+      repair.candidatesAfter.every(id => repair.candidatesBefore.includes(id));
+    const changed = novel.length > 0 || narrowed;
     if ((repair.progress === "changed" && !changed) || (repair.progress === "unchanged" && changed)) unmet.add("repair_history_invalid");
     if (repair.progress === "changed" && changed) counts.progress++;
     if (repair.progress === "unchanged" && !changed) counts.stagnation++;

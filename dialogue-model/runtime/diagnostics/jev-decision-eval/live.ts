@@ -11,19 +11,18 @@ import type { LocalGroundingResearchRecord } from "../../v2/local-grounding-turn
 import type { JevTurnTrace, JevPrivateState } from "../../v2/jev-turn.ts";
 import { createTrialV2, modelView } from "../../stimuli/scatter-v2.mjs";
 import { deriveLocalIssues } from "../../local-grounding/derive.ts";
-import { auditLocalTurn } from "../local-grounding-eval/gate.ts";
 import { assertPublicText, validateOutputDirectory } from "../local-grounding-eval/run.ts";
 import type { LocalFunctionClassifier, LocalOwnAnchor, LocalSegmentProposal, PublicTurn } from "../../local-grounding/contract.ts";
 import { LOCAL_ACTS, LOCAL_ASPECTS } from "../../local-grounding/contract.ts";
 import type { ObservationObserver } from "../../observation/contract.ts";
 import { ObservationError } from "../../observation/observe.ts";
 import type { ObservationErrorCode } from "../../observation/observe.ts";
-import type { JevDecisionClient, JevDecision } from "../../decision/contract.ts";
-import type { JevDecisionCallEvidence } from "../../decision/jev-decision.ts";
+import type { JevDecisionClient, JevDecision, DecisionInputBudget } from "../../decision/contract.ts";
+import type { JevDecisionCallEvidence, JevDecisionStageCallEvidence, JevDecisionRejectionCode } from "../../decision/jev-decision.ts";
 import { isGroundingModel } from "../../../../workers/research-ai-proxy/src/grounding.ts";
 import { SYNTHETIC_CASES } from "./cases.ts";
 import type { SyntheticCase } from "./cases.ts";
-import { evaluateRunGate } from "./gate.ts";
+import { evaluateRunGate, auditJevLocalTurn } from "./gate.ts";
 import type { ObservationReceipt, WireReceipt, TrialReceipt, TurnReceipt } from "./gate.ts";
 
 type Client = { complete(messages: any[], options?: any): Promise<{ text: string; model?: string }> };
@@ -57,6 +56,14 @@ class HarnessError extends Error {
     const safe = CODES.includes(code) ? code : "evaluation_unavailable";
     super(safe); this.name = "JevEvaluationError"; this.code = safe;
   }
+}
+function projectBudget(value: DecisionInputBudget | undefined): DecisionInputBudget | null {
+  const keys: Array<keyof DecisionInputBudget["omitted"]> = ["publicTurns", "claims", "publicNames", "repairHistory",
+    "reobservations", "observationDetails", "observationChars", "issueSummaryChars"];
+  if (!value || value.maxChars !== 20000 || !Number.isSafeInteger(value.stateChars) || value.stateChars < 1 || value.stateChars > 20000 ||
+      !value.omitted || keys.some(key => !Number.isSafeInteger(value.omitted[key]) || value.omitted[key] < 0)) return null;
+  return { maxChars: 20000, stateChars: value.stateChars,
+    omitted: Object.fromEntries(keys.map(key => [key, value.omitted[key]])) as DecisionInputBudget["omitted"] };
 }
 function publicText(value: unknown, secrets: readonly string[]): asserts value is string {
   try { assertPublicText(value, secrets); } catch { fail("privacy_rejected"); }
@@ -208,7 +215,7 @@ export async function runJevEvaluation(options: EvaluationOptions, deps: Evaluat
         } finally {
           const evidence = adapter.lastEvidence;
           const fresh = evidence && Number.isSafeInteger(evidence.callIndex) && evidence.callIndex > previousIndex;
-          const budget = fresh ? structuredClone(evidence.inputBudget ?? null) : null;
+          const budget = fresh ? projectBudget(evidence.inputBudget) : null;
           // Rebuild each request from the same input and closed first-stage labels.
           // A failed detail call must not erase the successful action/target evidence.
           const closedChoices = (raw: Record<string, string>, questions: ReturnType<typeof buildJevDecisionPayload>["questions"]) => {
@@ -216,10 +223,11 @@ export async function runJevEvaluation(options: EvaluationOptions, deps: Evaluat
             return raw && Object.keys(raw).length === keys.length && keys.every(key => typeof raw[key] === "string" &&
               Object.hasOwn(questions[key].criteria, raw[key])) ? Object.fromEntries(keys.map(key => [key, raw[key]])) : {};
           };
-          const rejection = (error: unknown, code: unknown) => ["inconsistent_decision", "invalid_decision"].includes(String(error)) &&
-            JEV_DECISION_REJECTION_CODES.includes(code as typeof JEV_DECISION_REJECTION_CODES[number]) ? code : null;
+          const rejection = (error: unknown, code: unknown): JevDecisionRejectionCode | null => ["inconsistent_decision", "invalid_decision"].includes(String(error)) &&
+            JEV_DECISION_REJECTION_CODES.includes(code as typeof JEV_DECISION_REJECTION_CODES[number]) ? code as JevDecisionRejectionCode : null;
           let choices: Record<string, string> = {};
-          const stages: Array<Record<string, any>> = [];
+          const stages: Array<Omit<JevDecisionStageCallEvidence, "scores" | "inputBudget" | "latencyMs"> &
+            { inputBudget: DecisionInputBudget | null; latencyMs: number | null }> = [];
           if (fresh) try {
             const first = buildJevDecisionPayload(input);
             choices = closedChoices(evidence.choices, first.questions);
@@ -234,7 +242,7 @@ export async function runJevEvaluation(options: EvaluationOptions, deps: Evaluat
                 responseId: typeof stage.responseId === "string" && /^gen-[A-Za-z0-9_-]{1,124}$/u.test(stage.responseId) ? stage.responseId : null,
                 latencyMs: Number.isFinite(stage.latencyMs) && stage.latencyMs >= 0 ? stage.latencyMs : null,
                 costUsd: typeof stage.costUsd === "number" && Number.isFinite(stage.costUsd) && stage.costUsd >= 0 ? stage.costUsd : null,
-                inputBudget: structuredClone(stage.inputBudget ?? null),
+                inputBudget: projectBudget(stage.inputBudget),
                 choices: closedChoices(stage.choices, expected.questions),
                 error: stage.error ? new JevDecisionError(stage.error).code : null,
                 rejectionCode: rejection(stage.error, stage.rejectionCode) });
@@ -248,7 +256,9 @@ export async function runJevEvaluation(options: EvaluationOptions, deps: Evaluat
             costUsd: fresh && typeof evidence.costUsd === "number" && Number.isFinite(evidence.costUsd) && evidence.costUsd >= 0 ? evidence.costUsd : null,
             error: fresh && evidence.error ? new JevDecisionError(evidence.error).code : succeeded ? null : "evaluation_unavailable", inputBudget: budget,
             choices, rejectionCode, stages });
-          if (!succeeded) (trial.failedDecisionInputs ??= []).push({ turn: input.turn, inputBudget: budget });
+          if (!succeeded) for (const stage of stages.length ? stages : [{ inputBudget: budget }]) {
+            (trial.failedDecisionInputs ??= []).push({ turn: input.turn, inputBudget: stage.inputBudget });
+          }
         }
       } };
       const dialogue = (createDialogueV2 as any)({ client, image, anchors, strategy: "bypass-enabled", referenceMemory: true, decisionMode: "jev",
@@ -275,7 +285,7 @@ export async function runJevEvaluation(options: EvaluationOptions, deps: Evaluat
           const settledLocal = settleLocalTraces(pendingLocal, state), local = settledLocal.find(r => r.status === "committed");
           const segments: LocalSegmentProposal[] = (local?.extractor.segments ?? []).map(s => ({ segmentId: s.segmentId, quote: s.quote,
             targets: s.targets, aspect: s.aspect, proposition: s.proposition, name: s.name, linkedIssueId: s.linkedIssueId, respondsToTurn: s.respondsToTurn }));
-          const localAudit = auditLocalTurn({ before, after: state, publicTurns: turns(events), record: local,
+          const localAudit = auditJevLocalTurn({ before, after: state, publicTurns: turns(events), record: local,
             segments, verdicts: (local?.classifier.verdicts ?? []).map(v => ({ ...v, rawScore: null })) });
           // No semantic segments requires no classifier call; a skipped call is
           // valid only alongside a successful, independently reproduced update.
