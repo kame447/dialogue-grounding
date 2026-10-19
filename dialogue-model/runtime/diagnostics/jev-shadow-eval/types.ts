@@ -6,12 +6,16 @@
 // are never "probability correct", and the old judge's action probabilities are
 // not reused as P(correct target).
 
+import { NAME_LEVELS as EVAL_NAME_LEVELS } from "../../jev-grounding/evalcase.ts";
+import type { NameEvidence } from "../../jev-grounding/evalcase.ts";
+
 export const TARGET_LEVELS = Object.freeze(["supported", "insufficient", "contradicted", "unknown"] as const);
-/** grounding-criteria/v2 (2026-10-19): `no_name` = neither a name nor a 見立て offered for this referent.
- * Runs before v2 used 4 levels, where "no name yet" counted as `not_agreed`. */
-export const NAME_LEVELS = Object.freeze(["agreed", "unclear", "not_agreed", "no_name", "unknown"] as const);
+/** grounding-criteria/v2 (2026-10-19, rule 6813): `no_name` = no explicit naming proposal for this
+ * referent; a 見立て alone (「鳥みたい」) is identification, so it is `no_name`. Shared with jev-evalset
+ * so the two never drift. Runs before v2 used 4 levels, where "no name yet" counted as `not_agreed`. */
+export const NAME_LEVELS: readonly NameEvidence[] = EVAL_NAME_LEVELS;
 export type TargetLevel = typeof TARGET_LEVELS[number];
-export type NameLevel = typeof NAME_LEVELS[number];
+export type NameLevel = NameEvidence;
 
 export type JudgeTurn = { speaker: "self" | "partner"; text: string };
 /** The AI's own unverified interpretation (Luna), never the answer key. */

@@ -39,6 +39,7 @@ export function compareRuns(oldRun: RunLike, newRun: RunLike) {
   const limits = [
     "The criteria differ: under v1, 'no name yet' counted as not_agreed (4 levels); v2 adds no_name (5 levels). Name agreement across runs measures the criterion change as much as the judge.",
     "The gold versions differ when the runs are scored against different gold; agreement is with each run's own gold.",
+    "Split-level agreement pools every label quality (weak and derived): the v1 run was scored against weak synthetic gold v1, the v2 run against synthetic gold v3.",
     "Small synthetic set, author-made gold; rates are provisional.",
   ];
   const perCase: { caseId: string; split: string; old: Verdict; new: Verdict; gold: CaseRow["expected"] }[] = [];
