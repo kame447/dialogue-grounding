@@ -11,7 +11,7 @@ import type { TrialReceipt } from "../dialogue-model/runtime/diagnostics/jev-dec
 import type { JevDecision } from "../dialogue-model/runtime/decision/contract.ts";
 import { SYNTHETIC_CASES } from "../dialogue-model/runtime/diagnostics/jev-decision-eval/cases.ts";
 import type { SyntheticCase } from "../dialogue-model/runtime/diagnostics/jev-decision-eval/cases.ts";
-import { createLunaObserver } from "../dialogue-model/runtime/observation/observe.ts";
+import { createLunaObserver, ObservationError } from "../dialogue-model/runtime/observation/observe.ts";
 import { createJevDecisionClient } from "../dialogue-model/runtime/decision/jev-decision.ts";
 import { createJevLocalTestClassifier } from "../dialogue-model/runtime/local-grounding/jev-local-test.ts";
 
@@ -243,10 +243,11 @@ function e2eDependencies(fault: MockFault = {}): EvaluationDependencies & { call
     return Response.json({ model, id: "gen-synthetic-" + http.length, answers, usage: { input_tokens: 10, output_tokens: 0, cost: fault.cost ?? 0.00001 } });
   }
   return { client, expectedModel: "worker-fixed", execution: "mock", cases: [script], calls, http, created,
-    createComponents(shared) {
+    createComponents(shared, componentOptions = {}) {
       created.count++;
       const readKey = async () => "sk-or-SYNTHETIC-MOCK-ONLY-1234567890";
-      return { observer: createLunaObserver(shared, { now: () => new Date("2026-10-20T00:00:00.000Z") }),
+      return { observer: createLunaObserver(shared, { now: () => new Date("2026-10-20T00:00:00.000Z"),
+        ...(componentOptions.observationTimeoutMs === undefined ? {} : { timeoutMs: componentOptions.observationTimeoutMs }) }),
         jevDecision: createJevDecisionClient({ enabled: true, readKey, fetchImpl: async (_url, request) => {
           const payload = JSON.parse(request.body as string), state = JSON.parse(payload.state);
           http.push({ kind: "decision", payload });
@@ -376,8 +377,8 @@ test("private observation echoes are redacted, stop before another model call, a
 test("outbound image inspection blocks a wrong image and an image outside observation before transport", async () => {
   for (const fault of ["wrong_image", "wrong_phase", "embedded_image"]) await temporary(async outputDir => {
     const deps = e2eDependencies(), create = deps.createComponents;
-    deps.createComponents = shared => {
-      const components = create(shared), observer = components.observer;
+    deps.createComponents = (shared, componentOptions) => {
+      const components = create(shared, componentOptions), observer = components.observer;
       return { ...components, observer: { ...observer, async observeAll(input, options) {
         const url = fault === "wrong_image" ? "data:image/png;base64,U1lOVEhFVElDX09OTFk=" : `data:${input.ownImage.mimeType};base64,${input.ownImage.base64}`;
         await shared.complete([{ role: "user", content: fault === "embedded_image" ? url : [{ type: "image_url", image_url: { url } }] }],
@@ -411,5 +412,88 @@ test("ambiguous defer/move_on preserve the candidate set and ledger; ambiguous r
       assert.equal(turn.decisions[0].target.kind, firstTarget);
       if (firstTarget === "multiple") assert.equal(turn.decisions[0].target.figureIds.length, 6);
     }
+  });
+});
+
+test("observation budget validates CLI/direct callers and preserves the omitted factory default", async () => {
+  assert.equal(Object.hasOwn(parseEvaluationArguments(["--out", "/tmp/eval"]), "observationTimeoutMs"), false);
+  for (const value of [1, 20000, 60000]) assert.equal(parseEvaluationArguments(["--out", "/tmp/eval", "--observation-timeout-ms", String(value)]).observationTimeoutMs, value);
+  for (const value of ["0", "-1", "0.5", "60001", "NaN", "Infinity", "invalid", " "]) {
+    assert.throws(() => parseEvaluationArguments(["--out", "/tmp/eval", "--observation-timeout-ms", value]), /invalid_arguments/);
+  }
+  for (const args of [["--out", "/tmp/eval", "--observation-timeout-ms"],
+    ["--out", "/tmp/eval", "--observation-timeout-ms", "30000", "--observation-timeout-ms", "60000"]]) {
+    assert.throws(() => parseEvaluationArguments(args), /invalid_arguments/);
+  }
+  await temporary(async outputDir => {
+    const deps = e2eDependencies();
+    for (const observationTimeoutMs of [0, -1, 0.5, 60001, NaN, Infinity, "60000", null]) {
+      await assert.rejects(runJevEvaluation({ outputDir, seed: 1701, observationTimeoutMs } as any, deps), /invalid_arguments/);
+    }
+    assert.equal(deps.created.count, 0); assert.equal(deps.calls.length, 0); assert.deepEqual(await readdir(outputDir), []);
+  });
+});
+
+test("observation factory budget reaches initial and targeted calls and is recorded separately from local processing", async () => {
+  for (const observationTimeoutMs of [undefined, 60000]) await temporary(async outputDir => {
+    const deps = e2eDependencies(), result = await runJevEvaluation({ outputDir, seed: 1701, localTimeoutMs: 45000,
+      ...(observationTimeoutMs === undefined ? {} : { observationTimeoutMs }) }, deps);
+    assert.equal(result.status, "passed");
+    const observations = deps.calls.filter(c => ["observation_initial", "observation_targeted"].includes(c.phase));
+    assert.equal(observations.length, 2);
+    assert.ok(observations.every(c => c.timeoutMs === (observationTimeoutMs ?? 20000)));
+    assert.ok(deps.calls.filter(c => c.phase === "local_extraction").every(c => c.timeoutMs === 45000));
+    const manifest = JSON.parse(await readFile(join(result.directory, "run.private.json"), "utf8"));
+    assert.equal(manifest.observationTimeoutMs, observationTimeoutMs); assert.equal(manifest.localTimeoutMs, 45000);
+    assert.equal(Object.hasOwn(manifest, "observationTimeoutMs"), observationTimeoutMs !== undefined);
+  });
+});
+
+test("initial and targeted observation failures retain only closed diagnostic fields in failure and trial records", async () => {
+  for (const phase of ["initial", "targeted"] as const) for (const kind of ["timeout", "invalid_json", "unknown", "modified"] as const) await temporary(async outputDir => {
+    const deps = e2eDependencies(), create = deps.createComponents;
+    deps.createComponents = (shared, componentOptions) => {
+      const components = create(shared, componentOptions);
+      const failure = async (): Promise<never> => {
+        const error = kind === "unknown" ? new Error("PRIVATE_OBSERVATION_MESSAGE") : new ObservationError(kind === "invalid_json" ? "invalid_json" : "timeout");
+        Object.assign(error, { message: "PRIVATE_OBSERVATION_MESSAGE", response: "PRIVATE_OBSERVATION_RESPONSE", observationPhase: "PRIVATE_PHASE" });
+        if (kind === "unknown" || kind === "modified") Object.assign(error, { code: kind === "unknown" ? "timeout" : "PRIVATE_OBSERVATION_CODE" });
+        throw error;
+      };
+      return { ...components, observer: { ...components.observer, ...(phase === "initial" ? { observeAll: failure } : { reobserve: failure }) } };
+    };
+    const result = await runJevEvaluation({ outputDir, seed: 1701, observationTimeoutMs: 60000 }, deps);
+    assert.equal(result.status, "gate_failed");
+    const failures = (await readFile(join(result.directory, "failures.private.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line));
+    assert.equal(failures.length, 1);
+    const expected = { caseId: script.id, turn: phase === "initial" ? null : 9, code: "observation_failed",
+      observationErrorCode: ["unknown", "modified"].includes(kind) ? "unavailable" : kind, observationPhase: phase };
+    assert.deepEqual(failures[0], expected);
+    const trial = JSON.parse(await readFile(join(result.directory, script.id + ".private.json"), "utf8"));
+    assert.deepEqual(trial.failure, expected);
+    const gate = JSON.parse(await readFile(join(result.directory, "gate.private.json"), "utf8"));
+    assert.deepEqual(gate.failures[0], expected);
+    for (const file of await readdir(result.directory)) {
+      const text = await readFile(join(result.directory, file), "utf8");
+      for (const secret of ["PRIVATE_OBSERVATION_MESSAGE", "PRIVATE_OBSERVATION_RESPONSE", "PRIVATE_OBSERVATION_CODE", "PRIVATE_PHASE"]) assert.ok(!text.includes(secret));
+    }
+  });
+});
+
+test("harness ignores spoofed diagnostics and renormalizes modified typed fields without saving arbitrary strings", async () => {
+  const { JevTurnError } = await import("../dialogue-model/runtime/v2/jev-turn.ts");
+  for (const typed of [false, true]) await temporary(async outputDir => {
+    const deps = e2eDependencies();
+    deps.createComponents = () => {
+      const error = typed ? new JevTurnError("observation_failed") : new Error("PRIVATE_DIAGNOSTIC_MESSAGE");
+      Object.assign(error, { observationErrorCode: typed ? "PRIVATE_DIAGNOSTIC_CODE" : "timeout", observationPhase: "PRIVATE_DIAGNOSTIC_PHASE" });
+      throw error;
+    };
+    const result = await runJevEvaluation({ outputDir, seed: 1701 }, deps);
+    assert.equal(result.status, "gate_failed"); assert.equal(deps.calls.length, 0);
+    const failure = JSON.parse((await readFile(join(result.directory, "failures.private.jsonl"), "utf8")).trim());
+    assert.deepEqual(failure, { caseId: script.id, turn: null, code: typed ? "observation_failed" : "evaluation_unavailable",
+      ...(typed ? { observationErrorCode: "unavailable" } : {}) });
+    for (const file of await readdir(result.directory)) assert.ok(!(await readFile(join(result.directory, file), "utf8")).includes("PRIVATE_DIAGNOSTIC_"));
   });
 });
