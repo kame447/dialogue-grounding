@@ -12,10 +12,10 @@ import { isGroundingModel } from "../../../../workers/research-ai-proxy/src/grou
 import { validateOwnLedger } from "../../judgment/schema.mjs";
 import { snapshotReferenceGraph } from "../../memory/reference-graph.mjs";
 import { assertPublicText, validateOutputDirectory, evaluationErrorCode } from "./run.ts";
-import { LIVE_CASES } from "./live-cases.ts";
+import { LIVE_CASES, EXPECTED_ACTS } from "./live-cases.ts";
 import type { LiveCase, HumanStep } from "./live-cases.ts";
-import { auditLocalTurn, evaluateValidityGate } from "./gate.ts";
-import type { AuditReceipt, GateResult } from "./gate.ts";
+import { auditLocalTurn, evaluateValidityGate, evaluateRunGate } from "./gate.ts";
+import type { AuditReceipt, GateResult, CaseReceipts } from "./gate.ts";
 import type { LocalGroundingOptions, LocalSegmentProposal, LocalFunctionVerdict, LocalExtractionInput, LocalClassificationInput, PublicTurn } from "../../local-grounding/contract.ts";
 
 type Event = { seq: number; id: string; speaker: "human" | "ai"; text: string };
@@ -74,15 +74,17 @@ function validateCatalog(catalog: readonly LiveCase[], secrets: readonly string[
         !Array.isArray(c.steps) || c.steps.length < 2 || c.steps.length > 32) fail("invalid_cases");
     assertPublicText(c.id, secrets);
     for (const s of c.steps) {
-      if (Object.keys(s).some(k => !["text", "expect"].includes(k)) ||
-          (s.expect !== undefined && !["agree", "deny", "name_accept", "defer", "revisit"].includes(s.expect))) fail("invalid_cases");
+      const expected = s.expect === undefined ? [] : typeof s.expect === "string" ? [s.expect] : s.expect;
+      if (Object.keys(s).some(k => !["text", "expect"].includes(k)) || !Array.isArray(expected) ||
+          (s.expect !== undefined && !expected.length) || new Set(expected).size !== expected.length ||
+          !expected.every(act => EXPECTED_ACTS.includes(act))) fail("invalid_cases");
       assertPublicText(s.text, secrets);
     }
   }
 }
 
 export async function runLiveEvaluation(options: LiveOptions, deps: LiveDependencies): Promise<{
-  directory: string; status: "completed" | "gate_failed" | "failed"; unmet?: string[]; code?: string;
+  directory: string; status: "completed" | "gate_failed" | "failed"; unmet?: string[]; code?: string; excludedCases?: number;
 }> {
   const destination = await validateOutputDirectory(options.outputDir);
   if (!Number.isSafeInteger(options.seed) || !["repair-first", "bypass-enabled"].includes(options.strategy) || !["branch", "multiturn", "both"].includes(options.mode)) fail("invalid_arguments");
@@ -98,19 +100,25 @@ export async function runLiveEvaluation(options: LiveOptions, deps: LiveDependen
   deps.onStarted?.(directory);
   const promptSpans = new Set<string>();
   const instructionSpans = new Set<string>();
-  let drift = false;
-  const checked: Client = { async complete(messages, callOptions) {
-    for (const message of messages) if (message.role === "system" && typeof message.content === "string") {
-      for (const line of message.content.split(/\r?\n/u)) if (line.trim().length >= 24) {
-        promptSpans.add(line.trim().slice(0, 80));
-        // Structured state is intentionally persisted privately. Instructions are not.
-        if (!/^[{[]/u.test(line.trim())) instructionSpans.add(line.trim().slice(0, 80));
+  const caseClients = new Map<string, { client: Client; drift: boolean }>();
+  const checkedClient = (caseId: string) => {
+    const existing = caseClients.get(caseId);
+    if (existing) return existing;
+    const connection: { client: Client; drift: boolean } = { drift: false, client: { async complete(messages, callOptions) {
+      for (const message of messages) if (message.role === "system" && typeof message.content === "string") {
+        for (const line of message.content.split(/\r?\n/u)) if (line.trim().length >= 24) {
+          promptSpans.add(line.trim().slice(0, 80));
+          // Structured state is intentionally persisted privately. Instructions are not.
+          if (!/^[{[]/u.test(line.trim())) instructionSpans.add(line.trim().slice(0, 80));
+        }
       }
-    }
-    const reply = await deps.client.complete(messages, callOptions);
-    if (reply.model !== deps.expectedModel) { drift = true; fail("model_changed"); }
-    return reply;
-  } };
+      const reply = await deps.client.complete(messages, callOptions);
+      if (reply.model !== deps.expectedModel) { connection.drift = true; fail("model_changed"); }
+      return reply;
+    } } };
+    caseClients.set(caseId, connection);
+    return connection;
+  };
   const publicText = (text: unknown) => {
     assertPublicText(text, secrets);
     const compact = (s: string) => s.normalize("NFKC").replace(/[\s\u200b-\u200d\ufeff]+/gu, "");
@@ -134,15 +142,17 @@ export async function runLiveEvaluation(options: LiveOptions, deps: LiveDependen
     if (await validateOutputDirectory(directory) !== directory) fail("repository_output_forbidden");
     await writeFile(path, serialized + "\n", { mode: 0o600, flag: "wx" });
   };
-  await write("run.private.json", { schemaVersion: 1, protocol: "generated-prefix-verified-jev", ...options, outputDir: undefined,
+  await write("run.private.json", { schemaVersion: 2, protocol: "case-structure-run-functions", ...options, outputDir: undefined,
     model: deps.expectedModel, catalogHash: createHash("sha256").update(JSON.stringify(selected)).digest("hex") });
   const board = modelView(createTrialV2({ seed: options.seed }));
   const stimulus = { image: { mimeType: board.mimeType, base64: board.png.toString("base64") }, anchors: board.anchors };
   const localByCase = new Map<string, LocalGroundingOptions>();
   const fresh = (): Session => ({ classifierEvidence: [], events: [], state: null, records: [], receipts: [], provenance: [] });
   const advance = async (session: Session, steps: HumanStep[], localOn: boolean, caseId: string, stage: string) => {
+    const connection = checkedClient(caseId);
+    connection.drift = false;
     const captured = { segments: [] as LocalSegmentProposal[], verdicts: [] as LocalFunctionVerdict[] };
-    if (localOn && !localByCase.has(caseId)) localByCase.set(caseId, deps.createLocalGrounding(checked));
+    if (localOn && !localByCase.has(caseId)) localByCase.set(caseId, deps.createLocalGrounding(connection.client));
     const local = localOn ? localByCase.get(caseId)! : null;
     const observed: LocalGroundingOptions | null = local && { timeoutMs: options.localTimeoutMs ?? local.timeoutMs,
       extractor: { get lastDiagnostics() { return (local.extractor as any).lastDiagnostics; },
@@ -161,7 +171,7 @@ export async function runLiveEvaluation(options: LiveOptions, deps: LiveDependen
           }
         } } as any };
     const pending: LocalGroundingResearchRecord[] = [];
-    const dialogue = createDialogueV2({ client: checked, ...stimulus, strategy: options.strategy, referenceMemory: true,
+    const dialogue = createDialogueV2({ client: connection.client, ...stimulus, strategy: options.strategy, referenceMemory: true,
       ...(deps.judge ? { judge: deps.judge } : {}), ...(observed ? { localGrounding: observed } : {}),
       onLocalGroundingTrace: (record: LocalGroundingResearchRecord) => pending.push(structuredClone(record)) } as any);
     session.state ??= dialogue.initialPrivateState();
@@ -175,7 +185,7 @@ export async function runLiveEvaluation(options: LiveOptions, deps: LiveDependen
       try {
         result = await dialogue.runAiTurn({ events: structuredClone(session.events), privateState: structuredClone(before),
           lastEventId: session.events.at(-1)!.id, requestSeq: seq });
-        if (drift) fail("model_changed");
+        if (connection.drift) fail("model_changed");
         publicText(result.text);
       } catch (error) {
         session.records.push(...settleLocalTraces(pending, session.state));
@@ -198,61 +208,89 @@ export async function runLiveEvaluation(options: LiveOptions, deps: LiveDependen
     await write(c.id + "." + stage + ".private.json", { caseId: c.id, stage, publicTurns: turns(session.events),
       provenance: session.provenance, classifierEvidence: session.classifierEvidence, records: session.records, receipts: session.receipts, snapshot: privateSnapshot(session.state), ...(gate ? { gate } : {}) });
   };
-  const prefixes = new Map<string, Session>(), preflight: AuditReceipt[] = [];
+  const prefixes = new Map<string, Session>(), preflight: CaseReceipts[] = [];
   const failures: Array<{ caseId: string; stage: string; code: string }> = [];
+  const exclusions: Array<{ caseId: string; stage: string; unmet: string[]; code?: string }> = [];
+  const failedCase = async (c: LiveCase, stage: string, session: Session, error: unknown) => {
+    let code = evaluationErrorCode(error);
+    try { if (session.state) await diagnostics(c, stage + "-failed", session); }
+    catch (diagnosticError) { code = evaluationErrorCode(diagnosticError); }
+    await write(c.id + "." + stage + ".failure.private.json", { caseId: c.id, stage, code });
+    failures.push({ caseId: c.id, stage, code });
+    exclusions.push({ caseId: c.id, stage, unmet: ["local_pipeline_incomplete"], code });
+  };
   for (const c of selected) {
     const session = fresh();
     try {
       await advance(session, c.steps.slice(0, -1), true, c.id, "prefix");
-      await diagnostics(c, "prefix", session, evaluateValidityGate(session.receipts));
-      prefixes.set(c.id, session); preflight.push(...session.receipts);
+      const caseGate = evaluateValidityGate(session.receipts, { scope: "case" });
+      await diagnostics(c, "prefix", session, caseGate);
+      preflight.push({ caseId: c.id, receipts: session.receipts });
+      if (caseGate.passed) prefixes.set(c.id, session);
+      else exclusions.push({ caseId: c.id, stage: "prefix", unmet: caseGate.unmet });
     } catch (error) {
-      failures.push({ caseId: c.id, stage: "prefix", code: evaluationErrorCode(error) });
-      if (session.state) await diagnostics(c, "prefix-failed", session);
+      await failedCase(c, "prefix", session, error);
+      // Partial successful turns never make an interrupted prefix eligible.
+      preflight.push({ caseId: c.id, receipts: [] });
     }
   }
   await write("failures.private.json", failures);
-  const gate = evaluateValidityGate(preflight);
-  if (failures.length) gate.unmet.push("local_pipeline_incomplete");
-  gate.unmet = [...new Set(gate.unmet)]; gate.passed = gate.unmet.length === 0;
+  const gate = evaluateRunGate(preflight);
   await write("gate.private.json", gate);
-  if (!gate.passed) return { directory, status: "gate_failed", unmet: gate.unmet };
+  if (!gate.passed) {
+    await write("exclusions.private.json", exclusions);
+    await write("result.private.json", { status: "gate_failed", stage: "prefix", unmet: gate.unmet });
+    return { directory, status: "gate_failed", unmet: gate.unmet, excludedCases: exclusions.length };
+  }
   const rows: any[] = [], mapping: any[] = [];
-  for (const c of selected) {
-    const modes = options.mode === "both" ? ["branch", "multiturn"] : [options.mode];
+  const modes: Array<"branch" | "multiturn"> = options.mode === "both" ? ["branch", "multiturn"] : [options.mode];
+  const finalReceipts = Object.fromEntries(modes.map(mode => [mode, [] as CaseReceipts[]]));
+  for (const c of selected.filter(c => gate.includedCaseIds.includes(c.id))) {
+    const pairs: Array<{ row: any; mapping: any }> = [];
+    const receipts: Record<string, AuditReceipt[]> = {};
+    let excluded = false;
     for (const mode of modes) {
       const reverse = deps.randomOrder?.() ?? randomInt(2) === 1;
       const order = reverse ? ["new", "old"] : ["old", "new"];
       const outputs: Record<string, Session> = {};
       for (const condition of order) {
         const session = mode === "branch" ? structuredClone(prefixes.get(c.id)!) : fresh();
-        // Prefix receipts remain private provenance; gate the new suffix on its own
-        // only when combined with its shared, already verified prefix.
         try {
           await advance(session, mode === "branch" ? c.steps.slice(-1) : c.steps, condition === "new", c.id, mode + "-" + condition);
-          const armGate = condition === "new" ? evaluateValidityGate(session.receipts) : undefined;
+          const armGate = condition === "new" ? evaluateValidityGate(session.receipts, { scope: "case" }) : undefined;
           await diagnostics(c, mode + "-" + condition, session, armGate);
           if (armGate && !armGate.passed) {
-            await write("result.private.json", { status: "gate_failed", caseId: c.id, stage: mode, unmet: armGate.unmet });
-            return { directory, status: "gate_failed", unmet: armGate.unmet };
+            exclusions.push({ caseId: c.id, stage: mode + "-new", unmet: armGate.unmet });
+            excluded = true; break;
           }
           outputs[condition] = session;
         } catch (error) {
-          if (session.state) await diagnostics(c, mode + "-" + condition + "-failed", session);
-          const code = evaluationErrorCode(error);
-          await write(c.id + "." + mode + ".failure.private.json", { caseId: c.id, stage: mode, code });
-          await write("result.private.json", { status: "failed", caseId: c.id, stage: mode, code });
-          return { directory, status: "failed", code };
+          await failedCase(c, mode + "-" + condition, session, error);
+          excluded = true; break;
         }
       }
+      if (excluded) break;
       const a = order[0], b = order[1];
       const row = mode === "branch" ? { caseId: c.id, mode, publicTurns: turns(outputs[a].events).slice(0, -1),
         responses: { A: outputs[a].events.at(-1)!.text, B: outputs[b].events.at(-1)!.text } } :
         { caseId: c.id, mode, dialogues: { A: turns(outputs[a].events), B: turns(outputs[b].events) } };
-      rows.push(row); mapping.push({ caseId: c.id, mode, A: a, B: b });
-      // Private per-pair checkpoint survives a later failure. Never share it with raters.
-      await write(c.id + "." + mode + ".completed.private.json", { row, mapping: mapping.at(-1) });
+      const pair = { row, mapping: { caseId: c.id, mode, A: a, B: b } };
+      pairs.push(pair); receipts[mode] = outputs.new.receipts;
+      // This private checkpoint can survive even when a later mode excludes the case.
+      await write(c.id + "." + mode + ".completed.private.json", pair);
     }
+    if (excluded) continue;
+    // Keep the same final case cohort across modes; one failed arm excludes all its rows.
+    rows.push(...pairs.map(p => p.row)); mapping.push(...pairs.map(p => p.mapping));
+    for (const mode of modes) finalReceipts[mode].push({ caseId: c.id, receipts: receipts[mode] });
+  }
+  await write("exclusions.private.json", exclusions);
+  const finalGates = Object.fromEntries(modes.map(mode => [mode, evaluateRunGate(finalReceipts[mode])]));
+  await write("final-gates.private.json", finalGates);
+  const unmet = [...new Set(Object.values(finalGates).flatMap(g => g.unmet))];
+  if (unmet.length) {
+    await write("result.private.json", { status: "gate_failed", stage: "comparison", unmet });
+    return { directory, status: "gate_failed", unmet, excludedCases: exclusions.length };
   }
   // No blind projection exists until EVERY required gate has passed.
   await write("mapping.private.json", { conditions: { old: "referenceMemory ON / localGrounding OFF", new: "referenceMemory ON / localGrounding ON / Jev local test" }, mapping });
@@ -262,7 +300,9 @@ export async function runLiveEvaluation(options: LiveOptions, deps: LiveDependen
   }
   if (await validateOutputDirectory(directory) !== directory) fail("repository_output_forbidden");
   await writeFile(join(directory, "blinded.jsonl"), rows.map(row => JSON.stringify(row)).join("\n") + "\n", { mode: 0o600, flag: "wx" });
-  return { directory, status: "completed" };
+  await write("result.private.json", { status: "completed", includedCaseIds: finalGates[modes[0]].includedCaseIds,
+    excludedCaseIds: [...new Set(exclusions.map(e => e.caseId))] });
+  return { directory, status: "completed", excludedCases: exclusions.length };
 }
 
 async function main(): Promise<void> {
@@ -281,7 +321,7 @@ async function main(): Promise<void> {
     onStarted: directory => process.stdout.write("live_evaluation_started " + basename(directory) + "\n"),
     onProgress: progress => process.stdout.write(JSON.stringify(progress) + "\n"),
     createLocalGrounding: shared => ({ extractor: createLunaLocalExtractor(shared), classifier: createJevLocalTestClassifier({ enabled: true })! }) });
-  process.stdout.write(JSON.stringify({ status: result.status, ...(result.unmet ? { unmet: result.unmet } : {}), ...(result.code ? { code: result.code } : {}) }) + "\n");
+  process.stdout.write(JSON.stringify({ status: result.status, ...(result.unmet ? { unmet: result.unmet } : {}), ...(result.code ? { code: result.code } : {}), ...(result.status === "completed" ? { excludedCases: result.excludedCases } : {}) }) + "\n");
   if (result.status !== "completed") process.exitCode = 1;
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
