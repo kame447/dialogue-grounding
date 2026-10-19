@@ -393,11 +393,106 @@ test("aspect inheritance never repairs explicit mismatches, other acts, or confl
     assert.deepEqual(run({ targets: [B] }, { act }).rejected, [{ segmentId: "s1", reason: "inconsistent_claim_response" }]);
     assert.deepEqual(run({}, { act, respondsToClaimId: "1:missing" }).rejected, [{ segmentId: "s1", reason: "missing_claim_response" }]);
   }
-  for (const act of ["agree", "deny", "assert", "ask", "withdraw", "name_accept"] as const) {
+  for (const act of ["agree", "deny", "withdraw", "name_accept"] as const) {
     const result = run({}, { act });
     assert.deepEqual(result.operations, []);
     assert.deepEqual(result.rejected, [{ segmentId: "s1", reason: "inconsistent_claim_response" }]);
   }
+});
+
+test("an independent naming proposal drops an incompatible human antecedent before inheriting its figure", () => {
+  const graph = commit(createReferenceGraph(), 5, [claim(5, { id: "5:local1", issueId: "5:local1", aspect: "referent",
+    act: "assert", speaker: "human", source: "partner_statement", quote: "その図形は分かります" })]);
+  const publicTurns: PublicTurn[] = [{ turn: 6, speaker: "ai", text: "呼び方をどうしましょうか" }, { turn: 7, speaker: "human", text: "この図形を灯台と呼ぼう" }];
+  const segments = [segment({ aspect: "name", targets: [], name: "灯台", quote: publicTurns[1].text,
+    proposition: "灯台という呼び名を提案", respondsToTurn: 6 })];
+  const result = verifyLocalUpdate({ graph, turn: 7, publicTurns, segments,
+    verdicts: [verdict({ act: "name_propose", respondsToClaimId: "5:local1" })] });
+  assert.deepEqual(result.rejected, []);
+  assert.deepEqual(result.operations.map(c => [c.act, c.aspect, c.targets, c.respondsTo, c.issueId, c.name]),
+    [["name_propose", "name", [], null, "7:local1", "灯台"]]);
+  assert.deepEqual(result.diagnostics, [{ segmentId: "s1", reason: "antecedent_dropped", respondsToClaimId: "5:local1", resolvedIssueId: "7:local1" }]);
+  assert.equal(segments[0].respondsToTurn, 6); assert.deepEqual(segments[0].targets, []);
+  const committed = commit(graph, 7, result.operations, publicTurns);
+  assert.equal(deriveLocalIssues(committed).find(i => i.issueId === "7:local1")!.nameState, "unclear");
+});
+
+test("all four independent acts can detach incompatible aspects, explicit targets or public response turns", () => {
+  const graph = commit(createReferenceGraph(), 1, [claim(1, { aspect: "orientation" })]);
+  for (const [act, aspect, name] of [["assert", "part", null], ["construe", "construal", null],
+    ["name_propose", "name", "灯台"], ["ask", "question", null]] as const) {
+    const result = verifyLocalUpdate({ graph, turn: 3, publicTurns: [{ turn: 3, speaker: "human", text: "灯台のような形について話します" }],
+      segments: [segment({ aspect, name, targets: [B], quote: "灯台のような形について話します" })],
+      verdicts: [verdict({ act, respondsToClaimId: "1:ai1" })] });
+    assert.deepEqual(result.rejected, []); assert.equal(result.operations[0].respondsTo, null);
+    assert.deepEqual(result.operations[0].targets, [B]); assert.equal(result.operations[0].issueId, "3:local1");
+    assert.equal(result.diagnostics?.[0].reason, "antecedent_dropped");
+  }
+  for (const s of [segment({ aspect: "orientation", targets: [B] }), segment({ aspect: "orientation", respondsToTurn: 2 })]) {
+    const result = verifyLocalUpdate({ graph, turn: 3, publicTurns: [{ turn: 2, speaker: "ai", text: "形について話します" }, { turn: 3, speaker: "human", text: s.quote }],
+      segments: [s], verdicts: [verdict({ act: "assert", respondsToClaimId: "1:ai1" })] });
+    assert.deepEqual(result.rejected, []); assert.equal(result.operations[0].respondsTo, null);
+  }
+});
+
+test("missing or malformed optional antecedents are diagnosed without retaining arbitrary model data", () => {
+  for (const [act, aspect, name] of [["assert", "part", null], ["construe", "construal", null],
+    ["name_propose", "name", "灯台"], ["ask", "question", null]] as const) {
+    for (const respondsToClaimId of ["1:missing", "SECRET_CANARY data:image/png;base64,QUJD", 42, { secret: "SECRET_CANARY" }] as const) {
+      const result = verifyLocalUpdate({ graph: createReferenceGraph(), turn: 2, publicTurns: [{ turn: 2, speaker: "human", text: "灯台のような形について話します" }],
+        segments: [segment({ aspect, name, quote: "灯台のような形について話します" })], verdicts: [verdict({ act, respondsToClaimId: respondsToClaimId as string })] });
+      assert.deepEqual(result.rejected, []); assert.equal(result.operations[0].respondsTo, null);
+      assert.deepEqual(result.diagnostics, [{ segmentId: "s1", reason: "antecedent_missing",
+        respondsToClaimId: respondsToClaimId === "1:missing" ? respondsToClaimId : null, resolvedIssueId: "2:local1" }]);
+      assert.doesNotMatch(JSON.stringify(result), /SECRET_CANARY|base64|QUJD/);
+    }
+  }
+});
+
+test("detaching an optional antecedent preserves compatible issue links but cannot inherit an incompatible issue", () => {
+  const graph = commit(createReferenceGraph(), 1, [claim(1), claim(1, { id: "1:other", issueId: "1:other", targets: [B] })]);
+  const run = (linkedIssueId: string) => verifyLocalUpdate({ graph, turn: 2, publicTurns: [{ turn: 2, speaker: "human", text: "四角は合ってる" }],
+    segments: [segment({ linkedIssueId })], verdicts: [verdict({ act: "assert", respondsToClaimId: "1:other" })] });
+  const related = run("1:ai1"); assert.equal(related.operations[0].issueId, "1:ai1"); assert.equal(related.operations[0].respondsTo, null);
+  assert.deepEqual(related.diagnostics, [{ segmentId: "s1", reason: "antecedent_dropped", respondsToClaimId: "1:other", resolvedIssueId: "1:ai1" }]);
+  const unrelated = run("1:other"); assert.equal(unrelated.operations[0].issueId, "2:local1");
+  assert.deepEqual(unrelated.diagnostics?.map(d => d.reason), ["issue_link_overridden", "antecedent_dropped"]);
+});
+
+test("required responses still reject mismatched or missing antecedents; independent statements still require public lexical evidence", () => {
+  const graph = commit(createReferenceGraph(), 1, [claim(1, { aspect: "orientation", act: "defer" })]);
+  const run = (act: LocalFunctionVerdict["act"], pointer: string | null = "1:ai1", s: Partial<LocalSegmentProposal> = {}) => verifyLocalUpdate({ graph, turn: 2,
+    publicTurns: [{ turn: 2, speaker: "human", text: "新しい形について話します" }],
+    segments: [segment({ quote: "新しい形について話します", ...s })], verdicts: [verdict({ act, respondsToClaimId: pointer })] });
+  for (const act of ["agree", "deny", "name_accept", "name_reject", "withdraw", "revisit"] as const) {
+    for (const pointer of ["1:ai1", "1:missing", "SECRET_CANARY", null]) {
+      const result = run(act, pointer); assert.deepEqual(result.operations, []); assert.equal(result.diagnostics, undefined);
+    }
+  }
+  for (const [act, s, reason] of [["assert", { quote: "非公開の引用" }, "nonpublic_quote"],
+    ["name_propose", { aspect: "name", name: "灯台" }, "nonpublic_name"],
+    ["assert", { respondsToTurn: 1 }, "nonpublic_response_turn"]] as const) {
+    const result = run(act, "1:missing", s); assert.deepEqual(result.operations, []);
+    assert.deepEqual(result.rejected, [{ segmentId: "s1", reason }]); assert.equal(result.diagnostics, undefined);
+  }
+  for (const sourceTurn of [2, 3]) {
+    const current = commit(createReferenceGraph(), sourceTurn, [claim(sourceTurn, { aspect: "orientation" })]);
+    const futurePointer = verifyLocalUpdate({ graph: current, turn: 2, publicTurns: [{ turn: 2, speaker: "human", text: "四角は合ってる" }],
+      segments: [segment()], verdicts: [verdict({ act: "assert", respondsToClaimId: `${sourceTurn}:ai1` })] });
+    assert.deepEqual(futurePointer.operations, []); assert.deepEqual(futurePointer.rejected, [{ segmentId: "s1", reason: "inconsistent_claim_response" }]);
+  }
+});
+
+test("valid independent links and bare acknowledgments keep their existing behavior", () => {
+  const graph = commit(createReferenceGraph(), 1, [claim(1)]);
+  const result = verifyLocalUpdate({ graph, turn: 2, publicTurns: [{ turn: 2, speaker: "human", text: "四角は合ってる" }],
+    segments: [segment({ targets: [] })], verdicts: [verdict({ act: "assert", respondsToClaimId: "1:ai1" })] });
+  assert.equal(result.operations[0].respondsTo, "1:ai1"); assert.deepEqual(result.operations[0].targets, [A]);
+  assert.equal(result.diagnostics, undefined);
+  const bare = verifyLocalUpdate({ graph, turn: 2, publicTurns: [{ turn: 2, speaker: "human", text: "はい" }],
+    segments: [segment({ quote: "はい" })], verdicts: [verdict({ act: "assert", respondsToClaimId: "1:missing" })] });
+  assert.equal(bare.operations[0].act, "acknowledge"); assert.equal(bare.operations[0].respondsTo, null);
+  assert.deepEqual(bare.operations[0].targets, []); assert.equal(bare.diagnostics, undefined);
 });
 
 test("progress revisit still requires an outstanding deferral and an issue link cannot supply an aspect", () => {
