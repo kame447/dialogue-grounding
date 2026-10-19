@@ -21,6 +21,8 @@
 
 保存記録には有効時だけ `options.localGrounding: true` が入り、claim は既存の `queueState.privateState.graph` と一緒に復元されます。再開時には研究者側から同じ抽出器・分類器を再注入してください。元々オフだった保存試行は、再注入だけではオンになりません。
 
+**判断の権限と観察（2026-10-20採用、未実装）：** 次の対話行動はJevが単独で選び、Lunaは試行の開始時に自分側の全図形を一度観察し、以後はJevが必要と判断したときだけ再観察する。[現行計画](../README.md#判断の権限と観察2026-10-20採用)と[決定0002](../decisions/0002-jev-decision-and-visual-observation.md)を参照。このディレクトリの現行のコード（Lunaの判断から始めるv2、Jevの2軸シャドーと行動の上書き、局所部分更新の試作と評価ハーネス）は、この方針より前の構成であり、新しい構成の実装ではない。
+
 ## 公開版（v2）
 
 操作確認用の最新ページは <https://tangram-grounding-experiment.kame-website.workers.dev/> （認証不要）です。公開サーバーはTypeScript Worker + Durable Objectで、内部サービスバインディングを通して既存の研究AI Workerを利用します。ローカル版 `http://127.0.0.1:8787` はMac上でのみ利用できます。公開版の手順は [workers/tangram-experiment/README.md](../../workers/tangram-experiment/README.md) を参照してください。
