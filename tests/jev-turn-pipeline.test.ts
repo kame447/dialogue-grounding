@@ -1,14 +1,15 @@
 // Synthetic observations, utterances and local model clients only.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { createDialogueV2 } from "../dialogue-model/runtime/v2/dialogue-v2.mjs";
 import { createMockJevDecisionClient } from "../dialogue-model/runtime/decision/mocks.ts";
-import { createJevDecisionClient, JEV_DECISION_MODEL, type JevDecisionPayload } from "../dialogue-model/runtime/decision/jev-decision.ts";
+import { createJevDecisionClient, buildHumanReferentPayload, JevDecisionError, JEV_DECISION_MODEL, type JevDecisionPayload } from "../dialogue-model/runtime/decision/jev-decision.ts";
 import { createHumanMessageQueue } from "../dialogue-model/runtime/web/human-message-queue.mjs";
 import { JevTurnError, settleJevTurnTraces, updateRepairHistory, type JevTurnTrace, type JevPrivateState } from "../dialogue-model/runtime/v2/jev-turn.ts";
 import { settleLocalTraces, type LocalGroundingResearchRecord } from "../dialogue-model/runtime/v2/local-grounding-turn.ts";
 import type { ObservationMemo, ObservationObserver } from "../dialogue-model/runtime/observation/contract.ts";
-import type { JevDecision, JevDecisionClient, JevDecisionInput, RepairHistoryEntry } from "../dialogue-model/runtime/decision/contract.ts";
+import type { JevDecision, JevDecisionClient, JevDecisionInput, RepairHistoryEntry, HumanReferentEstimate } from "../dialogue-model/runtime/decision/contract.ts";
 import type { LocalClaimView, LocalFunctionClassifier } from "../dialogue-model/runtime/local-grounding/contract.ts";
 import { MEMO_LOCAL_EXTRACTION_INSTRUCTIONS } from "../dialogue-model/runtime/local-grounding/extract.ts";
 import { ObservationError, type ObservationErrorCode } from "../dialogue-model/runtime/observation/observe.ts";
@@ -544,16 +545,20 @@ test("both real-adapter stage receipts survive the runtime transaction and settl
   const requests: JevDecisionPayload[] = [];
   const jevDecision = createJevDecisionClient({ enabled: true, readKey: async () => "sk-or-SYNTHETIC-c-pipeline-key-000000", fetchImpl: async (_url, init) => {
     const payload = JSON.parse(String(init.body)) as JevDecisionPayload; requests.push(payload);
+    if (payload.questions.human_referent) return jevResponse(payload, {}, requests.length);
     return jevResponse(payload, payload.questions.action ? { action: "confirm", target: "multiple", candidate_0: "include", candidate_1: "include" } : { feature: Object.keys(payload.questions.feature.criteria)[0] }, requests.length);
   } })!;
   const h = harness({ jevDecision }), result = await h.run();
-  assert.equal(requests.length, 2);
-  assert.deepEqual(Object.keys(requests[1].questions), ["feature"]);
+  assert.equal(requests.length, 3);
+  assert.deepEqual(Object.keys(requests[0].questions), ["human_referent"]);
+  assert.deepEqual(Object.keys(requests[2].questions), ["feature"]);
   const evidence = h.records[0].decisions[0].evidence;
   assert.deepEqual(evidence.stages?.map(s => s.stage), ["action_target", "detail"]);
-  assert.deepEqual(evidence.stages?.map(s => s.responseId), ["gen-c-stage-1", "gen-c-stage-2"]);
+  assert.deepEqual(evidence.stages?.map(s => s.responseId), ["gen-c-stage-2", "gen-c-stage-3"]);
   assert.ok(evidence.stages?.every(s => s.model === JEV_DECISION_MODEL + "-20261014" && s.inputBudget?.stateChars! <= 20000));
   assert.equal(evidence.costUsd, 0.0002);
+  assert.equal(h.records[0].humanReferent?.responseId, "gen-c-stage-1");
+  assert.equal(h.records[0].humanReferent?.costUsd, 0.0001);
   assert.deepEqual(settleJevTurnTraces(h.records, result.privateState)[0].decisions[0].evidence, evidence);
   assert.deepEqual(result.privateState.judgments[0].jevTurn.decision.target, { kind: "multiple", figureIds: ids.slice(0, 2) });
 });
@@ -563,11 +568,12 @@ test("name decisions with unresolved or multiple targets fail before detail and 
     let calls = 0;
     const jevDecision = createJevDecisionClient({ enabled: true, readKey: async () => "sk-or-SYNTHETIC-c-pipeline-key-000000", fetchImpl: async (_url, init) => {
       const payload = JSON.parse(String(init.body)) as JevDecisionPayload; calls++;
+      if (payload.questions.human_referent) return jevResponse(payload, {}, calls);
       return jevResponse(payload, { action, target, candidate_0: "include", candidate_1: "include" }, calls);
     } })!;
     const h = harness({ jevDecision }), initial = h.dialogue.initialPrivateState();
     await assert.rejects(h.run(initial), (error: unknown) => error instanceof JevTurnError && error.code === "invalid_decision");
-    assert.equal(calls, 1); assert.equal(h.records[0].publicSpeech, null); assert.equal(h.records[0].errorCode, "invalid_decision");
+    assert.equal(calls, 2); assert.equal(h.records[0].publicSpeech, null); assert.equal(h.records[0].errorCode, "invalid_decision");
     assert.equal(jevDecision.lastEvidence?.rejectionCode, "name_requires_single_target");
     assert.equal(jevDecision.lastEvidence?.stages[0].choices.action, action);
     assert.deepEqual(initial.graph.records, []);
@@ -622,4 +628,212 @@ test("agreement and denial can answer the public multiple-candidate AI primary w
     assert.deepEqual(result.privateState.ledger, first.privateState.ledger);
     assert.equal(settleLocalTraces(h.localRecords, result.privateState)[1].status, "committed");
   }
+});
+
+function referentResult(input: JevDecisionInput): HumanReferentEstimate {
+  const payload = buildHumanReferentPayload(input), budget = JSON.parse(payload.state).inputBudget;
+  return { status: "ok", scores: Object.fromEntries([...ids, "none", "multiple"].map((id, i) => [id, i < 2 ? 0.731 : 0.217])),
+    model: JEV_DECISION_MODEL + "-20261014", responseId: `gen-c-referent-${input.turn}`, costUsd: 0.0001, latencyMs: 7,
+    inputBudget: { maxChars: budget.maxChars, stateChars: payload.state.length, omitted: budget.omitted }, calibrated: false };
+}
+
+test("human referent raw scores are private evidence independent of the action target", async () => {
+  const order: string[] = [], estimates: JevDecisionInput[] = [], decisions: JevDecisionInput[] = [];
+  const delegate = createMockJevDecisionClient(input => {
+    order.push("decide"); decisions.push(structuredClone(input));
+    return { ...accept, action: "confirm", target: { kind: "single", figureId: ids[5] }, feature: "四角い部分" };
+  });
+  const h = harness({ observer: { async observeAll() { order.push("observe"); return memo(); }, async reobserve() { throw new Error("unused"); } },
+    jevDecision: { ...delegate, async estimateReferent(input: JevDecisionInput) { order.push("estimate"); estimates.push(structuredClone(input)); return referentResult(input); } } });
+  const result = await h.run(), referent = h.records[0].humanReferent!;
+  assert.deepEqual(order, ["observe", "estimate", "decide"]); assert.equal(estimates.length, 1);
+  assert.ok(!Object.hasOwn(estimates[0], "humanReferent"));
+  assert.deepEqual(referent.scores, referentResult(estimates[0]).scores);
+  assert.ok(Object.values(referent.scores!).reduce((a, b) => a + b, 0) > 1, "raw scores are not normalized");
+  assert.deepEqual(decisions[0].humanReferent, { status: "ok", scores: referent.scores });
+  assert.deepEqual(h.records[0].decisions[0].target, { kind: "single", figureId: ids[5] });
+  assert.equal(referent.turnIndex, 1); assert.equal(referent.calibrated, false);
+  assert.deepEqual(referent.observationMemo, { version: 1, sha256: createHash("sha256").update(JSON.stringify(memo())).digest("hex") });
+  assert.deepEqual(result.privateState.judgments[0].jevTurn.humanReferent, referent);
+  assert.deepEqual(result.privateState.graph.records, [], "a score map adds no grounding claim");
+  assert.ok(!JSON.stringify({ ledger: result.privateState.ledger, speech: result.text, calls: h.calls }).includes("humanReferent"));
+  assert.ok(!JSON.stringify(h.calls).includes("0.731"));
+  await h.dialogue.finalRequest({ events: h.events, privateState: result.privateState });
+  assert.ok(!JSON.stringify(h.calls).includes("gen-c-referent"));
+  const restored = JSON.parse(JSON.stringify(result.privateState));
+  assert.deepEqual(settleJevTurnTraces(h.records, restored)[0].humanReferent, referent);
+  assert.equal(settleJevTurnTraces(h.records, restored)[0].status, "committed");
+});
+
+test("reobservation reuses one estimate while a new human turn estimates the updated memo", async () => {
+  const estimates: JevDecisionInput[] = [], decisions: JevDecisionInput[] = [];
+  const delegate = createMockJevDecisionClient(input => {
+    decisions.push(structuredClone(input));
+    return decisions.length === 1 ? { action: "request_observation", target: { kind: "single", figureId: ids[0] }, name: null, feature: null,
+      observe: { figureIds: [ids[0]], aspect: "construal", question: "牛という見立ての根拠", partnerConstrual: "牛" } } : structuredClone(accept);
+  });
+  const h = harness({ jevDecision: { ...delegate, async estimateReferent(input: JevDecisionInput) {
+    estimates.push(structuredClone(input)); const result = referentResult(input);
+    if (estimates.length > 1) result.scores![ids[0]] = 0.123;
+    return result;
+  } } });
+  const first = await h.run();
+  assert.equal(estimates.length, 1); assert.equal(decisions.length, 2);
+  assert.deepEqual(decisions[0].humanReferent, decisions[1].humanReferent);
+  assert.equal(decisions[0].observations.figures[0].reobservations.length, 0);
+  assert.equal(decisions[1].observations.figures[0].reobservations.length, 1);
+  assert.equal(h.records[0].humanReferent!.observationMemo.sha256, createHash("sha256").update(JSON.stringify(estimates[0].observations)).digest("hex"));
+  const second = await h.run(first.privateState, { events: [...h.events, { id: "e2", seq: 2, speaker: "ai", text: first.text },
+    { id: "e3", seq: 3, speaker: "human", text: "牛にも見えるけれど角が違う" }], lastEventId: "e3" });
+  assert.equal(estimates.length, 2); assert.equal(estimates[1].observations.figures[0].reobservations.length, 1);
+  assert.notEqual(h.records[0].humanReferent!.observationMemo.sha256, h.records[1].humanReferent!.observationMemo.sha256);
+  assert.equal(h.records[1].humanReferent!.scores![ids[0]], 0.123);
+  assert.deepEqual(second.privateState.judgments[0].jevTurn.humanReferent, first.privateState.judgments[0].jevTurn.humanReferent);
+});
+
+test("missing, failed or malformed referent estimates become unknown without leaking their payload", async () => {
+  const secret = "Bearer SYNTHETIC_REFERENT_PRIVATE_CANARY";
+  const variants: Array<((input: JevDecisionInput) => unknown) | null> = [null,
+    () => { throw Object.assign(new Error(secret), { code: "synthetic_private_canary", response: secret }); },
+    input => { const r = referentResult(input); delete r.scores![ids[0]]; return r; },
+    input => ({ ...referentResult(input), scores: { ...referentResult(input).scores, foreign: 1 } }),
+    input => ({ ...referentResult(input), scores: { ...referentResult(input).scores, [ids[0]]: 1.01 } }),
+    input => ({ ...referentResult(input), scores: { ...referentResult(input).scores, [ids[0]]: NaN } }),
+    input => ({ ...referentResult(input), status: "unknown" }),
+    input => ({ ...referentResult(input), model: secret }),
+    input => ({ ...referentResult(input), responseId: secret }),
+    input => ({ ...referentResult(input), inputBudget: null }),
+    input => ({ ...referentResult(input), rawResponse: secret }),
+    input => Object.defineProperty(referentResult(input), "scores", { get() { throw new Error(secret); } }),
+  ];
+  for (const variant of variants) {
+    const inputs: JevDecisionInput[] = [];
+    const delegate = createMockJevDecisionClient(input => { inputs.push(input); return structuredClone(accept); });
+    const jevDecision = { ...delegate, ...(variant ? { async estimateReferent(input: JevDecisionInput) { return variant(input) as HumanReferentEstimate; } } : {}) };
+    const h = harness({ jevDecision }), result = await h.run();
+    assert.deepEqual(inputs[0].humanReferent, { status: "unknown", scores: null });
+    assert.equal(h.records[0].humanReferent!.status, "unknown"); assert.equal(h.records[0].humanReferent!.scores, null);
+    assert.equal(h.records[0].humanReferent!.model, null); assert.equal(h.records[0].humanReferent!.responseId, null);
+    assert.equal(result.text, "そう見えるんですね。");
+    assert.ok(!JSON.stringify({ records: h.records, state: result.privateState }).includes("CANARY"));
+  }
+  const delegate = createMockJevDecisionClient(() => structuredClone(accept));
+  const h = harness({ jevDecision: Object.defineProperty({ ...delegate }, "estimateReferent", { get() { throw new Error(secret); } }) });
+  assert.equal((await h.run()).privateState.judgments[0].jevTurn.humanReferent.status, "unknown");
+});
+
+test("a validated unknown estimate preserves only its bounded response evidence", async () => {
+  const delegate = createMockJevDecisionClient(input => { assert.deepEqual(input.humanReferent, { status: "unknown", scores: null }); return structuredClone(accept); });
+  const h = harness({ jevDecision: { ...delegate, async estimateReferent(input: JevDecisionInput) {
+    return { ...referentResult(input), status: "unknown", scores: null } as HumanReferentEstimate;
+  } } });
+  await h.run();
+  assert.equal(h.records[0].humanReferent!.status, "unknown");
+  assert.equal(h.records[0].humanReferent!.model, JEV_DECISION_MODEL + "-20261014");
+  assert.equal(h.records[0].humanReferent!.responseId, "gen-c-referent-1");
+  assert.equal(h.records[0].humanReferent!.costUsd, 0.0001);
+});
+
+test("referent input, estimator result, decision input and callback snapshots stay detached", async () => {
+  let returned: HumanReferentEstimate | null = null;
+  const delegate = createMockJevDecisionClient(input => { input.humanReferent!.scores![ids[0]] = 0; return structuredClone(accept); });
+  const h = harness({ jevDecision: { ...delegate, async estimateReferent(input: JevDecisionInput) {
+    returned = referentResult(input); input.observations.figures[0].analytic.composition = "SYNTHETIC_MUTATED"; return returned;
+  } }, onJevTurnTrace(record: JevTurnTrace) { record.humanReferent!.scores![ids[0]] = 0; } });
+  const initial = await h.dialogue.initializePrivateState!(), before = JSON.stringify(initial), result = await h.run(initial);
+  assert.equal(JSON.stringify(initial), before);
+  returned!.scores![ids[0]] = 0;
+  assert.equal(result.privateState.judgments[0].jevTurn.humanReferent.scores[ids[0]], 0.731);
+  assert.equal(h.dialogue.getAttempts()[0].humanReferent.scores[ids[0]], 0.731);
+  assert.equal(result.privateState.observationMemo.figures[0].analytic.composition, memo().figures[0].analytic.composition);
+});
+
+test("superseding a pending estimate aborts promptly and its late scores cannot install", async () => {
+  const entered = gate(), late = gate(); let estimates = 0, decisions = 0;
+  const delegate = createMockJevDecisionClient(() => { decisions++; return structuredClone(accept); });
+  const h = harness({ jevDecision: { ...delegate, async estimateReferent(input: JevDecisionInput) {
+    if (++estimates === 1) { entered.release(); await late.promise; }
+    return referentResult(input);
+  } } });
+  const queue = createHumanMessageQueue({ runAiTurn: h.dialogue.runAiTurn, initialPrivateState: await h.dialogue.initializePrivateState!() });
+  queue.enqueue({ text: "牛に見えます" }); await entered.promise;
+  queue.enqueue({ text: "馬にも見えます" }); await queue.whenIdle();
+  assert.equal(estimates, 2); assert.equal(decisions, 1);
+  assert.deepEqual(h.records.map(r => r.status), ["aborted", "staged"]);
+  const installed = queue.getPrivateState(), before = JSON.stringify(installed), records = JSON.stringify(h.records);
+  assert.equal(installed.judgments.length, 1); assert.equal(installed.judgments[0].jevTurn.humanReferent.turnIndex, 2);
+  late.release(); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(JSON.stringify(queue.getPrivateState()), before); assert.equal(JSON.stringify(h.records), records);
+});
+
+test("typed referent cancellation aborts instead of becoming an unknown successful turn", async () => {
+  let decisions = 0;
+  const h = harness({ jevDecision: { async estimateReferent() { throw new JevDecisionError("aborted"); },
+    async decide() { decisions++; throw new Error("must not choose"); } } });
+  const initial = h.dialogue.initialPrivateState(), before = JSON.stringify(initial);
+  await assert.rejects(h.run(initial), (e: unknown) => e instanceof JevTurnError && e.code === "aborted");
+  assert.equal(decisions, 0); assert.equal(JSON.stringify(initial), before);
+  assert.equal(h.records[0].status, "aborted"); assert.equal(h.records[0].publicSpeech, null);
+});
+
+test("failed generation retains private referent evidence without installing it", async () => {
+  const h = harness({ jevDecision: { ...createMockJevDecisionClient(() => structuredClone(accept)), async estimateReferent(input: JevDecisionInput) { return referentResult(input); } },
+    client: { async complete(_messages: unknown, options: { phase: string }) { if (options.phase === "local_extraction") return { text: "[]" }; throw new Error("SYNTHETIC_PRIVATE_CANARY"); } } });
+  const initial = h.dialogue.initialPrivateState(), before = JSON.stringify(initial);
+  await assert.rejects(h.run(initial), (e: unknown) => e instanceof JevTurnError && e.code === "generation_failed");
+  assert.equal(JSON.stringify(initial), before); assert.equal(h.records[0].humanReferent!.status, "ok");
+  assert.equal(settleJevTurnTraces(h.records, initial)[0].status, "error");
+});
+
+test("private referent field echoes are rewritten without estimating or choosing again", async () => {
+  for (const safeRewrite of [true, false]) {
+    let estimates = 0, decisions = 0, generations = 0;
+    const h = harness({ jevDecision: { ...createMockJevDecisionClient(() => { decisions++; return structuredClone(accept); }),
+      async estimateReferent(input: JevDecisionInput) { estimates++; return referentResult(input); } },
+      client: { async complete(_messages: unknown, options: { phase: string }) {
+        if (options.phase === "local_extraction") return { text: "[]" };
+        return { text: ++generations > 1 && safeRewrite ? "そう見えるんですね。" : "humanReferent multiple 0.731" };
+      } } });
+    if (safeRewrite) assert.equal((await h.run()).text, "そう見えるんですね。");
+    else await assert.rejects(h.run(), (e: unknown) => e instanceof JevTurnError && e.code === "unsafe_generation");
+    assert.equal(estimates, 1); assert.equal(decisions, 1); assert.equal(generations, 2);
+    assert.ok(h.records[0].generationGuard.violations.includes("internal_field"));
+  }
+});
+
+test("strategies supply identical human-referent evidence and requests", async () => {
+  const inputs: JevDecisionInput[][] = [[], []];
+  const harnesses = ["repair-first", "bypass-enabled"].map((strategy, index) => harness({ strategy,
+    jevDecision: { ...createMockJevDecisionClient(() => structuredClone(accept)), async estimateReferent(input: JevDecisionInput) {
+      inputs[index].push(structuredClone(input)); return referentResult(input);
+    } } }));
+  await harnesses[0].run(); await harnesses[1].run();
+  assert.deepEqual(inputs[0], inputs[1]);
+  assert.deepEqual(harnesses[0].records[0].humanReferent, harnesses[1].records[0].humanReferent);
+  assert.deepEqual(harnesses[0].calls.map(c => c.messages), harnesses[1].calls.map(c => c.messages));
+});
+
+test("default mode ignores an injected referent estimator and preserves its request, state and trace bytes", async () => {
+  let estimates = 0, decisions = 0;
+  const judge = { async judge() { return { action: "accept", targetSlot: null, candidateName: null, discriminatingFeature: null, note: null }; } };
+  const off = { decisionMode: null, localGrounding: null, judge };
+  const plain = harness({ ...off, jevDecision: null });
+  const injected = harness({ ...off, jevDecision: { async estimateReferent(input: JevDecisionInput) { estimates++; return referentResult(input); },
+    async decide() { decisions++; throw new Error("must not choose"); } } });
+  const a = await plain.run(), b = await injected.run();
+  assert.equal(estimates, 0); assert.equal(decisions, 0);
+  const bytes = (h: ReturnType<typeof harness>, result: unknown) => JSON.stringify({ result, calls: h.calls, attempts: h.dialogue.getAttempts() });
+  assert.equal(bytes(plain, a), bytes(injected, b));
+  assert.ok(!bytes(injected, b).includes("humanReferent"));
+});
+
+test("ordinary references to an uncertain figure do not trigger the private referent-field guard", async () => {
+  const text = "指している形はまだ一つに絞れません。";
+  let generations = 0;
+  const h = harness({ client: { async complete(_messages: unknown, options: { phase: string }) {
+    if (options.phase === "local_extraction") return { text: "[]" };
+    generations++; return { text };
+  } } });
+  assert.equal((await h.run()).text, text); assert.equal(generations, 1);
+  assert.deepEqual(h.records[0].generationGuard.violations, []);
 });

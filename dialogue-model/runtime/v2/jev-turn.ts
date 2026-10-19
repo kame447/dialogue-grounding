@@ -10,9 +10,9 @@ import { LOCAL_CLASSIFICATION_INSTRUCTIONS } from "../local-grounding/classify.t
 import type { LocalGroundingOptions, LocalOwnImage, LocalOwnAnchor, PublicTurn, LocalClaimView } from "../local-grounding/contract.ts";
 import type { ObservationMemo, ObservationObserver, ReobservationResult } from "../observation/contract.ts";
 import { validateObservationMemo, mergeReobservation, observationContextMessages, ObservationError, type ObservationErrorCode,
-  OBSERVATION_INITIAL_INSTRUCTIONS, OBSERVATION_TARGETED_INSTRUCTIONS } from "../observation/observe.ts";
-import type { JevDecision, JevDecisionClient, JevDecisionInput, JevObservationRequest, RepairHistoryEntry } from "../decision/contract.ts";
-import { validateJevDecision, JevDecisionError } from "../decision/jev-decision.ts";
+  OBSERVATION_INITIAL_INSTRUCTIONS, OBSERVATION_TARGETED_INSTRUCTIONS, OBSERVATION_MEMO_VERSION } from "../observation/observe.ts";
+import type { JevDecision, JevDecisionClient, JevDecisionInput, JevObservationRequest, RepairHistoryEntry, HumanReferentEstimate } from "../decision/contract.ts";
+import { validateJevDecision, validateHumanReferentEstimate, JevDecisionError } from "../decision/jev-decision.ts";
 import { prepareLocalGroundingTurn, validateLocalGroundingOptions, findLocalPublicationViolations } from "./local-grounding-turn.ts";
 import type { LocalGroundingResearchRecord, LocalGroundingTrace } from "./local-grounding-turn.ts";
 import { findGuardViolations, rewriteReasons } from "./generation-guard.ts";
@@ -28,6 +28,11 @@ export type JevTurnLocalOptions = Pick<LocalGroundingOptions, "classifier" | "ti
 export type JevTurnErrorCode = "invalid_state" | "observation_failed" | "decision_failed" | "invalid_decision" |
   "reobservation_limit" | "generation_failed" | "unsafe_generation" | "aborted";
 export type ObservationFailure = { observationErrorCode: ObservationErrorCode; observationPhase: "initial" | "targeted" };
+export type JevHumanReferentTrace = HumanReferentEstimate & {
+  turnIndex: number;
+  /** SHA-256 of JSON.stringify of the validated memo supplied to estimation. */
+  observationMemo: { version: number; sha256: string };
+};
 export class JevTurnError extends Error {
   code: JevTurnErrorCode;
   observationErrorCode?: ObservationErrorCode;
@@ -59,6 +64,7 @@ export type JevTurnTrace = {
   initialObservation: ObservationMemo | null;
   reobservations: Array<{ request: JevObservationRequest; result: ReobservationResult }>;
   local: LocalGroundingResearchRecord | null;
+  humanReferent: JevHumanReferentTrace | null;
   decisions: JevDecision[];
   intervention: "none_pending_researcher_decision";
   finalAction: Judgment | null;
@@ -73,7 +79,7 @@ export type JevTurnTrace = {
 };
 type CommittedAct = {
   turnIndex: number; lastEventId: string | null; status: "committed"; judgment: Judgment;
-  generationGuard: Guard; jevTurn: { attemptNumber: number; decision: JevDecision };
+  generationGuard: Guard; jevTurn: { attemptNumber: number; decision: JevDecision; humanReferent?: JevHumanReferentTrace };
   localGrounding: LocalGroundingTrace;
 };
 export type JevPrivateState = {
@@ -99,6 +105,10 @@ export function settleJevTurnTraces(records: readonly JevTurnTrace[], privateSta
 }
 
 function abortIf(signal?: AbortSignal) { if (signal?.aborted) throw new JevTurnError("aborted"); }
+async function observationHash(memo: ObservationMemo): Promise<string> {
+  const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(memo)));
+  return Array.from(new Uint8Array(hash), byte => byte.toString(16).padStart(2, "0")).join("");
+}
 async function interruptible<T>(work: Promise<T>, signal?: AbortSignal): Promise<T> {
   if (!signal) return work;
   let listener: () => void = () => {};
@@ -209,7 +219,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
     const ordinal = ++attemptsStarted;
     const attemptNumber = Number.isSafeInteger(requestSeq) && requestSeq! > 0 ? requestSeq! : ordinal;
     const record: JevTurnTrace = { turnIndex: latest.seq, lastEventId, attemptNumber, status: "error", initialObservation: null,
-      reobservations: [], local: null, decisions: [], intervention: "none_pending_researcher_decision", finalAction: null,
+      reobservations: [], local: null, humanReferent: null, decisions: [], intervention: "none_pending_researcher_decision", finalAction: null,
       publicSpeech: null, observationMemo: null, repairHistory: [], generationGuard: { violations: [], regenerated: false, fallback: false } };
     let errorCode: JevTurnErrorCode = "invalid_state";
     let observationPhase: ObservationFailure["observationPhase"] | null = null;
@@ -247,11 +257,38 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
           name: previous.jevTurn.decision.name, feature: previous.jevTurn.decision.feature } : null,
         publicNames: claims.filter(c => c.name !== null && publicTurns.some(t => t.turn === c.sourceTurn && t.text.includes(c.name!)))
           .map(c => ({ name: c.name!, figureId: c.targets.length === 1 ? c.targets[0] : null, sourceTurn: c.sourceTurn })) };
+      // Estimate the HUMAN utterance's referent once, before any action choice.
+      // It is private evidence, never a target selection or a graph operation.
+      errorCode = "decision_failed";
+      const referentInput = structuredClone({ ...baseInput, reobservationAllowed: maxReobservations > 0 });
+      const observationMemo = { version: OBSERVATION_MEMO_VERSION, sha256: await interruptible(observationHash(memo), signal) };
+      let estimate: HumanReferentEstimate = { status: "unknown", scores: null, model: null, responseId: null,
+        costUsd: null, latencyMs: 0, inputBudget: null, calibrated: false };
+      record.humanReferent = { ...estimate, turnIndex: latest.seq, observationMemo };
+      const referentStarted = performance.now();
+      try {
+        abortIf(signal);
+        if (typeof jevDecision.estimateReferent === "function") {
+          const raw = await interruptible(jevDecision.estimateReferent(structuredClone(referentInput), { signal }), signal);
+          abortIf(signal);
+          estimate = validateHumanReferentEstimate(raw, referentInput);
+        }
+      } catch (error) {
+        abortIf(signal);
+        let aborted = false;
+        try { aborted = (error instanceof JevTurnError || error instanceof JevDecisionError) && error.code === "aborted"; }
+        catch { /* An injected error getter cannot become research evidence. */ }
+        if (aborted) throw new JevTurnError("aborted");
+        estimate.latencyMs = Math.max(0, Math.round(performance.now() - referentStarted));
+      }
+      abortIf(signal);
+      record.humanReferent = { ...estimate, turnIndex: latest.seq, observationMemo };
+      baseInput.humanReferent = { status: estimate.status, scores: structuredClone(estimate.scores) };
       let decision: JevDecision;
       for (let count = 0; ; count++) {
         const input = structuredClone({ ...baseInput, observations: memo, reobservationAllowed: count < maxReobservations });
         errorCode = "decision_failed";
-        const raw = await interruptible(jevDecision.decide(input, { signal }), signal);
+        const raw = await interruptible(jevDecision.decide(structuredClone(input), { signal }), signal);
         abortIf(signal);
         errorCode = "invalid_decision";
         decision = validateJevDecision(raw, input);
@@ -299,7 +336,8 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         ...observationContextMessages(JSON.stringify({ scope: "private_observations_not_ground_truth", memo })),
         { role: "system", content: "局所問題（非公開）:\n" + summarizeLocalIssues(graph) },
         ...publicTurns.map(t => ({ role: t.speaker === "human" ? "user" as const : "assistant" as const, content: t.text }))];
-      const violations = (text: string, context: Message[]) => [...new Set([...findGuardViolations(text, judgment.action), ...findLocalPublicationViolations(text, context)])];
+      const violations = (text: string, context: Message[]) => [...new Set([...findGuardViolations(text, judgment.action), ...findLocalPublicationViolations(text, context),
+        ...(/human[_-]?referent/iu.test(text.normalize("NFKC").replace(/\s/gu, "")) ? ["internal_field"] : [])])];
       errorCode = "generation_failed";
       let result = await interruptible(client.complete(messages, { phase: "generation", timeoutMs: generation.timeoutMs, signal }), signal);
       abortIf(signal);
@@ -317,7 +355,8 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       const nextState: JevPrivateState = { ledger: ambiguousDefer || multipleFeature ? structuredClone(state.ledger) : applyJudgment(state.ledger, judgment),
         graph: applyReferenceUpdate(state.graph, prepared.update, { publicTurns, generationSucceeded: true }) as Graph,
         observationMemo: memo, repairHistory, judgments: [...state.judgments, { turnIndex: latest.seq, lastEventId, status: "committed", judgment,
-          generationGuard: structuredClone(record.generationGuard), jevTurn: { attemptNumber, decision }, localGrounding: { ...prepared.trace, attemptNumber } }] };
+          generationGuard: structuredClone(record.generationGuard), jevTurn: { attemptNumber, decision, humanReferent: structuredClone(record.humanReferent) },
+          localGrounding: { ...prepared.trace, attemptNumber } }] };
       record.status = "staged"; record.publicSpeech = result.text; record.local.status = "staged";
       return { text: result.text, privateState: nextState };
     } catch (error) {
