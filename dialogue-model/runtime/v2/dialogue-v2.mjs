@@ -12,6 +12,7 @@ import { buildDecisionEvidence } from "./decision-evidence.mjs";
 import { resolveActiveJudgment } from "./active-judge.mjs";
 import { findGuardViolations, rewriteReasons, fallbackUtterance } from "./generation-guard.ts";
 import { startGroundingShadow, validateGroundingShadowOptions } from "./grounding-shadow.ts";
+import { prepareLocalGroundingTurn, validateLocalGroundingOptions, localGroundingMemo } from "./local-grounding-turn.ts";
 
 // Identical across strategies. Holistic first; analysis only when the judge asks for it.
 export const GENERATOR_INSTRUCTIONS_V2 = [
@@ -91,16 +92,19 @@ function abortIf(signal) {
  *   referenceMemory?: boolean, decisionShadowClient?: {chooseAction(request: object): Promise<any>} | null,
  *   onResearchUpdate?: (() => void) | null, activeDecision?: {purpose: string, client: {chooseAction(request: object): Promise<any>}} | null,
  *   utteranceStyle?: string, groundingShadow?: import('./grounding-shadow.ts').GroundingShadowOptions | null,
- *   onGroundingShadow?: ((record: import('./grounding-shadow.ts').GroundingShadowRecord) => void) | null }} options
+ *   onGroundingShadow?: ((record: import('./grounding-shadow.ts').GroundingShadowRecord) => void) | null,
+ *   localGrounding?: import('../local-grounding/contract.ts').LocalGroundingOptions | null }} options
  *   utteranceStyle is validated at runtime against UTTERANCE_STYLES. groundingShadow (default off) only produces
  *   private records through onGroundingShadow; it never changes the act, the utterance or the private state.
  */
 export function createDialogueV2({ client, strategy, image, anchors, judge = null, referenceMemory = false,
   decisionShadowClient = null, onResearchUpdate = null, activeDecision = null, utteranceStyle = "default",
-  groundingShadow = null, onGroundingShadow = null }) {
+  groundingShadow = null, onGroundingShadow = null, localGrounding = null }) {
   if (!client || typeof client.complete !== "function") throw new Error("A chat client is required");
   if (!STRATEGIES.includes(strategy)) throw new Error("Unsupported dialogue strategy");
   if (typeof referenceMemory !== "boolean") throw new Error("Invalid memory option");
+  const local = validateLocalGroundingOptions(localGrounding);
+  if (local && !referenceMemory) throw new Error("Local grounding requires reference memory");
   if (!UTTERANCE_STYLES.includes(utteranceStyle)) throw new Error("Invalid utterance style");
   const concise = utteranceStyle === "concise";
   if (decisionShadowClient !== null && typeof decisionShadowClient?.chooseAction !== "function") {
@@ -236,6 +240,23 @@ export function createDialogueV2({ client, strategy, image, anchors, judge = nul
     }
     abortIf(signal);
     trace.validation = dialogueJudge.getDiagnostics?.().at(-1) ?? null;
+    let localMemo = null;
+    if (local) {
+      const baseMemoryUpdate = memoryUpdate;
+      const previous = state.judgments.at(-1);
+      const previousAi = previous && publicTurns.find(event => event.speaker === "ai" && event.turn > previous.turnIndex && event.turn < latest.seq);
+      const staged = await prepareLocalGroundingTurn(local, { graph: state.graph, update: memoryUpdate, publicTurns, signal,
+        ...(previousAi ? { priorAct: { ...previous.judgment, turn: previousAi.turn } } : {}) });
+      trace.localGrounding = staged.trace;
+      abortIf(signal);
+      memoryUpdate = staged.update;
+      try { localMemo = localGroundingMemo(state.graph, memoryUpdate, publicTurns); }
+      catch {
+        memoryUpdate = baseMemoryUpdate;
+        Object.assign(trace.localGrounding, { status: "error", accepted: 0 });
+        trace.localGrounding.rejected.push({ segmentId: "turn", reason: "summary_unavailable" });
+      }
+    }
     trace.status = "generation_error";
     const { action, targetSlot, candidateName, discriminatingFeature } = judgment;
     const generationMessages = [
@@ -247,6 +268,7 @@ export function createDialogueV2({ client, strategy, image, anchors, judge = nul
         ...(Object.hasOwn(judgment, "followUp") ? { followUp: judgment.followUp } : {}) }) },
       ...ownImageMessage(ownImage),
       { role: "system", content: "AI自身の作業メモ（非公開・正解表ではない）:\n" + JSON.stringify({ ownLedger: state.ledger, agreeEvidence: true }) },
+      ...(localMemo === null ? [] : [{ role: "system", content: localMemo }]),
       ...(trace.activeJudge && trace.activeJudge.finalAction !== trace.activeJudge.lunaAction ? [{
         role: "system", content: "【この発話の表現範囲（非公開）】この発話のactionは" + action + "です。" + ACTION_SCOPE_V2[action] + "。" +
           (action === "agree" ? "" : "相手が名前を提案していても、このactionでは名称への合意・決定を表す表現（呼びましょう／でいいですね／決まり 等）を使わないでください。") +
