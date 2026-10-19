@@ -94,3 +94,21 @@ test("private summaries and candidate views are deterministic, bounded detached 
   assert.throws(() => summarizeLocalIssues(graph, { maxChars: 1 }), /summary_budget_too_small/);
   assert.throws(() => priorClaimViews(graph, { limit: -1 }), /invalid_claim_limit/);
 });
+
+test("issue summaries retain bounded proposition content and its provenance for generation", () => {
+  let graph = apply(createReferenceGraph(), 1, [claim(1, { proposition: "四角い部分がある" })]);
+  graph = apply(graph, 2, [claim(2, { ...human, act: "agree", issueId: "1:c", respondsTo: "1:c", proposition: "四角の存在を支持" })]);
+  graph = apply(graph, 3, [claim(3, { ...human, act: "deny", issueId: "1:c", respondsTo: "1:c", proposition: "四角の存在は違う" })]);
+  for (let turn = 4; turn <= 8; turn++) graph = apply(graph, turn, [claim(turn, { ...human, act: "ask", issueId: "1:c", proposition: `四角について質問${turn}` })]);
+  const before = JSON.stringify(graph);
+  const summary = JSON.parse(summarizeLocalIssues(graph));
+  const issue = summary.issues[0];
+  assert.equal(issue.state, "contested"); assert.equal(issue.claims.length, 4);
+  assert.deepEqual(issue.claims.map((c: { id: string }) => c.id), ["1:c", "2:c", "3:c", "8:c"]);
+  assert.equal(issue.claims[0].proposition, "四角い部分がある"); assert.equal(issue.claims[0].source, "ai_hypothesis");
+  assert.equal(issue.claims[2].proposition, "四角の存在は違う"); assert.equal(issue.claims[2].respondsTo, "1:c");
+  assert.equal(issue.claims[3].proposition, "四角について質問8");
+  assert.ok(summarizeLocalIssues(graph, { maxChars: 200 }).length <= 200);
+  assert.equal(JSON.stringify(graph), before);
+  assert.equal(Object.hasOwn(deriveLocalIssues(graph)[0], "claims"), false);
+});
