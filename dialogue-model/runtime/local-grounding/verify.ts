@@ -70,6 +70,7 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     let prior = verdict.respondsToClaimId === null ? null : active.find(c => c.id === verdict.respondsToClaimId) ?? null;
     if (verdict.respondsToClaimId !== null && !prior) { reject("missing_claim_response"); continue; }
     let targets = [...segment.targets];
+    let aspect = segment.aspect;
     let linkedIssue = segment.linkedIssueId;
     let name = segment.name;
     if (isBareDeictic(quote) || /^(?:それ|これ|あれ)で(?:いい|良い|よい)(?:です)?[。！!？?\s]*$/u.test(quote.normalize("NFKC").trim())) {
@@ -85,7 +86,10 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     // Only absence of a target can inherit the verified antecedent's candidates.
     // A nonempty, contradictory target is never moved to a different figure.
     if (prior && targets.length === 0) targets = [...prior.targets];
-    if (prior && (prior.sourceTurn >= turn || prior.aspect !== segment.aspect || !overlap(prior.targets, targets) ||
+    // Deferring or revisiting an issue inherits its aspect only when extraction
+    // supplied generic progress. Explicit semantic disagreements remain invalid.
+    if (prior && aspect === "progress" && ["defer", "revisit"].includes(act)) aspect = prior.aspect;
+    if (prior && (prior.sourceTurn >= turn || prior.aspect !== aspect || !overlap(prior.targets, targets) ||
         (segment.respondsToTurn !== null && segment.respondsToTurn !== prior.sourceTurn))) {
       reject("inconsistent_claim_response"); continue;
     }
@@ -96,7 +100,7 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
         targets.length !== prior.targets.length || !targets.every(s => prior!.targets.includes(s)) || (name !== null && name !== prior.name))) {
       reject("unsupported_name_response"); continue;
     }
-    if (act === "construe" && segment.aspect !== "construal" || act.startsWith("name_") && segment.aspect !== "name") {
+    if (act === "construe" && aspect !== "construal" || act.startsWith("name_") && aspect !== "name") {
       reject("act_aspect_mismatch"); continue;
     }
     if (act === "name_propose") {
@@ -118,7 +122,7 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     const proposedIssue = linkedIssue;
     if (prior) linkedIssue = prior.issueId;
     let linked = linkedIssue === null ? [] : active.filter(c => c.issueId === linkedIssue);
-    const droppedIssue = linkedIssue !== null && (!ref(linkedIssue) || !linked.length || !linked.some(c => c.aspect === segment.aspect &&
+    const droppedIssue = linkedIssue !== null && (!ref(linkedIssue) || !linked.length || !linked.some(c => c.aspect === aspect &&
       (overlap(c.targets, targets) || (c.targets.length === 0 && targets.length === 0))));
     // A bad advisory link alone cannot discard an otherwise verified new claim.
     if (droppedIssue) { linkedIssue = null; linked = []; }
@@ -131,7 +135,7 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     const id = `${turn}:local${local}`;
     const issueId = prior?.issueId ?? linkedIssue ?? id;
     result.operations.push({ kind: "claim", id, issueId,
-      targets, aspect: segment.aspect, act, proposition: segment.proposition, name,
+      targets, aspect, act, proposition: segment.proposition, name,
       speaker: "human", sourceTurn: turn, quote, respondsTo: prior?.id ?? null, source: "partner_statement" });
     if (overriddenIssue || droppedIssue) (result.diagnostics ??= []).push({ segmentId: segment.segmentId, reason: "issue_link_overridden",
       linkedIssueId: ref(proposedIssue) ? proposedIssue : null, resolvedIssueId: issueId });

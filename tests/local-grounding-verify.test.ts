@@ -362,3 +362,62 @@ test("an invalid advisory issue without an antecedent starts a new issue and rec
     assert.equal(deriveLocalIssues(commit(graph, 2, result.operations)).find(i => i.issueId === "2:local1")!.state, "unconfirmed");
   }
 });
+
+test("progress defer and revisit inherit the verified issue's aspect without mutating extraction", () => {
+  for (const aspect of ["orientation", "part", "name"] as const) {
+    let graph = commit(createReferenceGraph(), 1, [claim(1, { aspect })]);
+    for (const [turn, act, respondsToClaimId] of [[2, "defer", "1:ai1"], [3, "revisit", "2:local1"]] as const) {
+      const quote = act === "defer" ? "その話はあとで考えます" : "さっき保留した話に戻ります";
+      const segments = [segment({ aspect: "progress", targets: [], quote })];
+      const result = verifyLocalUpdate({ graph, turn, publicTurns: [{ turn, speaker: "human", text: quote }],
+        segments, verdicts: [verdict({ act, respondsToClaimId })] });
+      assert.deepEqual(result.rejected, []); assert.equal(result.diagnostics, undefined);
+      assert.equal(result.operations[0].aspect, aspect); assert.deepEqual(result.operations[0].targets, [A]);
+      assert.equal(result.operations[0].issueId, "1:ai1"); assert.equal(result.operations[0].respondsTo, respondsToClaimId);
+      assert.equal(segments[0].aspect, "progress"); assert.deepEqual(segments[0].targets, []);
+      graph = commit(graph, turn, result.operations);
+      assert.equal(deriveLocalIssues(graph)[0].state, act === "defer" ? "deferred" : "unconfirmed");
+      assert.equal(deriveLocalIssues(graph)[0].aspect, aspect);
+    }
+  }
+});
+
+test("aspect inheritance never repairs explicit mismatches, other acts, or conflicting response provenance", () => {
+  const graph = commit(createReferenceGraph(), 1, [claim(1, { aspect: "orientation", act: "defer", speaker: "human", source: "partner_statement" })]);
+  const run = (s: Partial<LocalSegmentProposal> = {}, v: Partial<LocalFunctionVerdict> = {}) => verifyLocalUpdate({ graph, turn: 2,
+    publicTurns: [{ turn: 2, speaker: "human", text: "さっきの話について答えます" }],
+    segments: [segment({ aspect: "progress", quote: "さっきの話について答えます", ...s })],
+    verdicts: [verdict({ act: "revisit", respondsToClaimId: "1:ai1", ...v })] });
+  for (const act of ["defer", "revisit"] as const) {
+    assert.deepEqual(run({ aspect: "part" }, { act }).rejected, [{ segmentId: "s1", reason: "inconsistent_claim_response" }]);
+    assert.deepEqual(run({ targets: [B] }, { act }).rejected, [{ segmentId: "s1", reason: "inconsistent_claim_response" }]);
+    assert.deepEqual(run({}, { act, respondsToClaimId: "1:missing" }).rejected, [{ segmentId: "s1", reason: "missing_claim_response" }]);
+  }
+  for (const act of ["agree", "deny", "assert", "ask", "withdraw", "name_accept"] as const) {
+    const result = run({}, { act });
+    assert.deepEqual(result.operations, []);
+    assert.deepEqual(result.rejected, [{ segmentId: "s1", reason: "inconsistent_claim_response" }]);
+  }
+});
+
+test("progress revisit still requires an outstanding deferral and an issue link cannot supply an aspect", () => {
+  const graph = commit(createReferenceGraph(), 1, [claim(1, { aspect: "orientation" })]);
+  const run = (respondsToClaimId: string | null, act: "revisit" | "defer" = "revisit") => verifyLocalUpdate({ graph, turn: 2,
+    publicTurns: [{ turn: 2, speaker: "human", text: "さっきの話に戻ります" }],
+    segments: [segment({ aspect: "progress", linkedIssueId: "1:ai1", quote: "さっきの話に戻ります" })],
+    verdicts: [verdict({ act, respondsToClaimId })] });
+  for (const respondsToClaimId of ["1:ai1", null]) {
+    const result = run(respondsToClaimId);
+    assert.deepEqual(result.operations, []); assert.deepEqual(result.rejected, [{ segmentId: "s1", reason: "not_deferred" }]);
+  }
+  const deferred = run("1:ai1", "defer");
+  const afterDefer = commit(graph, 2, deferred.operations);
+  const revisited = verifyLocalUpdate({ graph: afterDefer, turn: 3, publicTurns: [{ turn: 3, speaker: "human", text: "その話に戻ります" }],
+    segments: [segment({ aspect: "progress", quote: "その話に戻ります" })], verdicts: [verdict({ act: "revisit", respondsToClaimId: "2:local1" })] });
+  const afterRevisit = commit(afterDefer, 3, revisited.operations);
+  const repeated = verifyLocalUpdate({ graph: afterRevisit, turn: 4, publicTurns: [{ turn: 4, speaker: "human", text: "もう一度その話に戻ります" }],
+    segments: [segment({ aspect: "progress", quote: "もう一度その話に戻ります" })], verdicts: [verdict({ act: "revisit", respondsToClaimId: "2:local1" })] });
+  assert.deepEqual(repeated.operations, []); assert.deepEqual(repeated.rejected, [{ segmentId: "s1", reason: "not_deferred" }]);
+  const standalone = run(null, "defer");
+  assert.equal(standalone.operations[0].aspect, "progress"); assert.equal(standalone.operations[0].issueId, "2:local1");
+});
