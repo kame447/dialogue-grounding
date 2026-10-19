@@ -32,7 +32,7 @@ export function auditLocalTurn(input: {
     const previous = input.before.judgments.at(-1);
     const priorAi = previous && input.publicTurns.find(t => t.speaker === "ai" && t.turn > previous.turnIndex && t.turn < turn);
     const ai = priorAi ? recordAiClaims({ graph: input.before.graph, turn, publicTurns: input.publicTurns,
-      priorAct: { ...previous.judgment, turn: priorAi.turn } }).operations : [];
+      priorAct: { ...previous.judgment, turn: priorAi.turn, publishedFallback: previous.generationGuard?.fallback === true } }).operations : [];
     let update = prepareMemory(input.before.graph, turn, input.after.judgments.at(-1)?.judgment.reference ?? null, input.publicTurns).update;
     for (const operation of ai) {
       try { update = validateReferenceUpdate(input.before.graph, { ...update, operations: [...update.operations, operation] }, { publicTurns: input.publicTurns }); }

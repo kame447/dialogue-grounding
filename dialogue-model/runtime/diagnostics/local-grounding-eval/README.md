@@ -14,6 +14,8 @@ node --env-file=.env dialogue-model/runtime/diagnostics/local-grounding-eval/liv
 
 Worker設定は下記の旧経路と同じです。Luna抽出・判断・生成は同じWorker client（`dialogue_turn`）を共有し、全応答のmodelとmodel-policyが一致することを検査します。分類だけは研究者が手動で有効にしたローカルJevアダプタを用い、既存のKeychain readerを分類呼出時に使います。分類器はケースごとに1インスタンスを作り、前置き・新側の分岐・実マルチターンで共有します。既定の費用上限0.05USDはそのケース内の累計に適用され、上限到達はゲート未達になります。Jevキーを `.env`、成果物、コンソールへ書きません。子エージェント・CIは実APIを呼びません。モデルポリシー・Worker・既定の方略は変更しません。
 
+`--local-timeout-ms <整数>` で、抽出・分類を合わせた1局所ターンの時間予算を1〜60000msの範囲で指定できます。たとえば画像付き抽出の配線確認では `--mode branch --local-timeout-ms 60000` と指定します。未指定時は既存の局所処理予算（通常20000ms）を維持し、判断・生成・Jevアダプタ固有の上限は変えません。指定値は `run.private.json` に保存します。時間予算を増やしてもゲートの要件は同じです。
+
 `--mode branch` は局所ONで評価直前まで前置きを実生成し、その**同じ公開履歴・privateState・判断履歴**の複製から、旧OFF／新ONの次応答を生成します。これは共通の局所ON前置きを条件とする「次ターンの追加更新」の比較です。旧側にも前置き時点のgraphは残るため、局所記憶が一度もなかった場合の比較とは解釈しません。
 
 `--mode multiturn` は両条件で同じ人間台本を最初から実行し、AIの発話は各条件で実生成します。先行AI発話は一致するとは限りません。`both` は両方式を別行で出力します。board seedは同じ刺激を再現するための値であり、APIの生成seedではありません。生成の乱数は固定できません。実行順・盲検A/Bの順はケース／方式ごとに乱数で決めます。
@@ -30,7 +32,7 @@ multiturnの新側も同じゲートを通すまで盲検ファイルを作り�
 
 出力先は必須で、Gitリポジトリ内とそこへ向かうsymlinkを拒否します。毎回 `local-live-<乱数>` を新規作成（0700）し、ファイルは0600で保存します。
 
-- `<case>.prefix.private.json`: 実生成の公開履歴、採用判断とのprovenance、C callbackとsettle結果、分類の返却model／responseId／費用／固定失敗理由、独立監査、分岐直前のledger／graph／判断履歴snapshot。判断はreferenceを含み、自由記述note・画像・プロンプト・API生応答は保存しません。
+- `<case>.prefix.private.json`: 実生成の公開履歴、採用判断とのprovenance、C callbackとsettle結果（失敗時のみ `records[].extractor.errorCode`／`records[].classifier.errorCode` に固定コードを保持）、分類の返却model／responseId／費用／固定失敗理由、独立監査、分岐直前のledger／graph／判断履歴snapshot（AI claimの出典確認に使う `generationGuard.fallback` も保持）。判断はreferenceを含み、自由記述note・画像・プロンプト・API生応答は保存しません。
 - `<case>.<mode>-<condition>.private.json`: 各条件の同じ診断。失敗途中の試行は `-failed` に残ります。
 - `gate.private.json`: 比較前のゲート、件数、返却Jev model IDs。比較中のゲート未達は該当arm診断と `result.private.json` に残ります。
 - `failures.private.json`: 前置き失敗のcaseId／stage／許可済み固定コード。比較失敗はケース別failureファイルへ固定コードで保存します。

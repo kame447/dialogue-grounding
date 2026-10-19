@@ -9,7 +9,10 @@ import type { AuditReceipt } from "../dialogue-model/runtime/diagnostics/local-g
 import { runLiveEvaluation, parseLiveArguments } from "../dialogue-model/runtime/diagnostics/local-grounding-eval/live.ts";
 import type { LiveDependencies } from "../dialogue-model/runtime/diagnostics/local-grounding-eval/live.ts";
 import type { LiveCase } from "../dialogue-model/runtime/diagnostics/local-grounding-eval/live-cases.ts";
+import { LocalExtractionError } from "../dialogue-model/runtime/local-grounding/extract.ts";
+import { LocalClassificationError } from "../dialogue-model/runtime/local-grounding/classify.ts";
 import { createMockLocalExtractor, createMockLocalClassifier } from "../dialogue-model/runtime/local-grounding/mocks.ts";
+import { recordAiClaims } from "../dialogue-model/runtime/local-grounding/verify.ts";
 import { createReferenceGraph, applyReferenceUpdate } from "../dialogue-model/runtime/memory/reference-graph.mjs";
 
 const script: LiveCase = { id: "synthetic-cycle", steps: [
@@ -121,6 +124,7 @@ test("real dialogue runtime generates/publishes prefixes, branches identical sta
   const prefix = JSON.parse(await readFile(join(result.directory, script.id + ".prefix.private.json"), "utf8"));
   assert.equal(prefix.provenance.length, 4);
   assert.ok(prefix.gate.passed);
+  assert.ok(prefix.records.every((r: any) => !Object.hasOwn(r.extractor, "errorCode") && !Object.hasOwn(r.classifier, "errorCode")));
   assert.deepEqual(prefix.gate.returnedModels, ["typesafe/jev-1.14-20261014"]);
   for (const provenance of prefix.provenance) {
     assert.equal(prefix.publicTurns.find((t: any) => t.turn === provenance.aiTurn).text, provenance.text);
@@ -162,6 +166,8 @@ test("public and private outputs refuse prompt/image/credential echoes and model
     const result = await runLiveEvaluation({ ...config, outputDir }, deps);
     assert.equal(result.status, "gate_failed");
     const artifacts = await readdir(result.directory);
+    const prefix = JSON.parse(await readFile(join(result.directory, script.id + ".prefix.private.json"), "utf8"));
+    assert.ok(prefix.snapshot.judgments.some((j: any) => j.generationGuard.fallback === true));
     assert.ok(!artifacts.includes("blinded.jsonl"));
     for (const f of artifacts) assert.ok(!(await readFile(join(result.directory, f), "utf8")).includes(text));
   });
@@ -258,4 +264,109 @@ test("generation failure leaves staged claims uncommitted and preserves complete
     for (const file of await readdir(result.directory)) assert.ok(!(await readFile(join(result.directory, file), "utf8")).includes("RAW_PRIVATE_PROVIDER_FAILURE"));
     assert.ok(!(await readdir(result.directory)).includes("blinded.jsonl"));
   });
+});
+
+test("local timeout CLI validates the extractor's millisecond bounds without changing the omitted default", async () => {
+  const defaults = parseLiveArguments(["--out", "/tmp/synthetic-evaluation"]);
+  assert.ok(!Object.hasOwn(defaults, "localTimeoutMs"));
+  for (const milliseconds of [1, 45000, 60000]) {
+    assert.equal(parseLiveArguments(["--out", "/tmp/synthetic-evaluation", "--local-timeout-ms", String(milliseconds)]).localTimeoutMs, milliseconds);
+  }
+  for (const value of ["0", "-1", "1.5", "60001", "NaN", "Infinity", "invalid", " "]) {
+    assert.throws(() => parseLiveArguments(["--out", "/tmp/synthetic-evaluation", "--local-timeout-ms", value]), /invalid_arguments/);
+  }
+  for (const args of [["--out", "x", "--local-timeout-ms"], ["--out", "x", "--local-timeout-ms", "20000", "--local-timeout-ms", "60000"]]) {
+    assert.throws(() => parseLiveArguments(args), /invalid_arguments/);
+  }
+  await temporary(async outputDir => {
+    const deps = dependencies();
+    for (const localTimeoutMs of [0, -1, 0.5, 60001, NaN, Infinity, "60000", null]) {
+      await assert.rejects(runLiveEvaluation({ ...config, outputDir, localTimeoutMs } as any, deps), /invalid_arguments/);
+    }
+    assert.equal(deps.calls.length, 0);
+    assert.deepEqual(await readdir(outputDir), []);
+  });
+});
+
+test("local timeout reaches extraction and the remaining classification budget in every live stage", async () => temporary(async outputDir => {
+  for (const scenario of [
+    { localTimeoutMs: undefined, factoryTimeoutMs: undefined, expected: 20000 },
+    { localTimeoutMs: undefined, factoryTimeoutMs: 12000, expected: 12000 },
+    { localTimeoutMs: 45000, factoryTimeoutMs: 12000, expected: 45000 },
+  ]) {
+    const deps = dependencies(), original = deps.createLocalGrounding;
+    const extraction: number[] = [], classification: number[] = [];
+    deps.createLocalGrounding = client => {
+      const local = original(client), extract = local.extractor.extract, classify = local.classifier.classify;
+      local.timeoutMs = scenario.factoryTimeoutMs;
+      local.extractor.extract = async (input, options) => { extraction.push(options!.timeoutMs!); return extract(input, options); };
+      local.classifier.classify = async (input, options) => { classification.push(options!.timeoutMs!); return classify(input, options); };
+      return local;
+    };
+    const result = await runLiveEvaluation({ ...config, outputDir, ...(scenario.localTimeoutMs === undefined ? {} : { localTimeoutMs: scenario.localTimeoutMs }) }, deps);
+    assert.equal(result.status, "completed");
+    assert.equal(extraction.length, script.steps.length * 2, "ON prefix, ON branch and ON E2E all use the configured budget");
+    assert.ok(extraction.every(value => value === scenario.expected));
+    assert.equal(classification.length, extraction.length);
+    assert.ok(classification.every(value => value > 0 && value <= scenario.expected));
+    const manifest = JSON.parse(await readFile(join(result.directory, "run.private.json"), "utf8"));
+    assert.equal(manifest.localTimeoutMs, scenario.localTimeoutMs);
+  }
+}));
+
+
+test("prefix preserves fixed per-stage error codes while provider errors and modified codes stay private", async () => {
+  for (const stage of ["extractor", "classifier"] as const) {
+    for (const kind of ["typed", "unknown", "modified"] as const) await temporary(async outputDir => {
+      const deps = dependencies(), original = deps.createLocalGrounding;
+      deps.createLocalGrounding = client => {
+        const local = original(client);
+        const error = kind === "unknown" ? new Error("PRIVATE_PROVIDER_MESSAGE") :
+          stage === "extractor" ? new LocalExtractionError("invalid_json") : new LocalClassificationError("invalid_json");
+        Object.assign(error, { message: "PRIVATE_PROVIDER_MESSAGE", response: "data:image/png;base64,PRIVATE_IMAGE" });
+        if (kind !== "typed") Object.assign(error, { code: kind === "modified" ? "PRIVATE_MODIFIED_CODE" : "invalid_json" });
+        if (stage === "extractor") local.extractor.extract = async () => { throw error; };
+        else local.classifier.classify = async () => { throw error; };
+        return local;
+      };
+      const result = await runLiveEvaluation({ ...config, outputDir, localTimeoutMs: 45000 }, deps);
+      assert.equal(result.status, "gate_failed");
+      const text = await readFile(join(result.directory, script.id + ".prefix.private.json"), "utf8");
+      const prefix = JSON.parse(text);
+      assert.equal(prefix.records.length, script.steps.length - 1);
+      assert.ok(prefix.records.every((r: any) => r[stage].errorCode === (kind === "typed" ? "invalid_json" : "unavailable")));
+      const other = stage === "extractor" ? "classifier" : "extractor";
+      assert.ok(prefix.records.every((r: any) => !Object.hasOwn(r[other], "errorCode")));
+      assert.ok(!(await readdir(result.directory)).includes("blinded.jsonl"));
+      for (const file of await readdir(result.directory)) {
+        const artifact = await readFile(join(result.directory, file), "utf8");
+        for (const canary of ["PRIVATE_PROVIDER_MESSAGE", "PRIVATE_MODIFIED_CODE", "PRIVATE_IMAGE", "data:image/"]) assert.ok(!artifact.includes(canary));
+      }
+    });
+  }
+});
+
+
+test("independent audit refuses even a literal AI feature claim from a published fallback turn", () => {
+  const publicTurns = [{ turn: 1, speaker: "human" as const, text: "図形を説明して。" },
+    { turn: 2, speaker: "ai" as const, text: "四角がある図形ですね。" }, { turn: 3, speaker: "human" as const, text: "続けて。" }];
+  const initial = createReferenceGraph({ slots: Array.from({ length: 6 }, (_, i) => `s-000${i + 1}`) });
+  const graph = applyReferenceUpdate(initial, { expectedRevision: 0, turn: 1, operations: [] },
+    { publicTurns: publicTurns.slice(0, 1), generationSucceeded: true });
+  const judgment = { action: "accept", targetSlot: "s-0001", candidateName: null, discriminatingFeature: "四角", note: null };
+  // A plausible, graph-valid claim with literal public provenance still cannot
+  // stand in for a program-owned fallback that did not publish the chosen act.
+  const operation = recordAiClaims({ graph, turn: 3, publicTurns, priorAct: { ...judgment, turn: 2 } }).operations[0];
+  assert.ok(operation);
+  const after = applyReferenceUpdate(graph, { expectedRevision: graph.revision, turn: 3, operations: [operation] },
+    { publicTurns, generationSucceeded: true });
+  const previous = { turnIndex: 1, judgment, generationGuard: { fallback: true } };
+  const input = { before: { graph, judgments: [previous] }, after: { graph: after, judgments: [previous] }, publicTurns, segments: [], verdicts: [] };
+  const fallback = auditLocalTurn(input);
+  assert.equal(fallback.verified.filter(c => c.speaker === "ai").length, 0);
+  assert.equal(fallback.unverified, 1);
+  // The same published text and judgment remain valid after a normal generation.
+  const ordinary = auditLocalTurn({ ...input, before: { graph, judgments: [{ ...previous, generationGuard: { fallback: false } }] } });
+  assert.equal(ordinary.verified.filter(c => c.speaker === "ai").length, 1);
+  assert.equal(ordinary.unverified, 0);
 });
