@@ -82,6 +82,9 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     }
     if (verdict.respondsToClaimId !== null && !prior && act !== "acknowledge") { reject("missing_claim_response"); continue; }
     if (responses.has(act) && !prior) { reject("missing_claim_response"); continue; }
+    // Only absence of a target can inherit the verified antecedent's candidates.
+    // A nonempty, contradictory target is never moved to a different figure.
+    if (prior && targets.length === 0) targets = [...prior.targets];
     if (prior && (prior.sourceTurn >= turn || prior.aspect !== segment.aspect || !overlap(prior.targets, targets) ||
         (segment.respondsToTurn !== null && segment.respondsToTurn !== prior.sourceTurn))) {
       reject("inconsistent_claim_response"); continue;
@@ -114,11 +117,11 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     const overriddenIssue = prior && linkedIssue !== null && linkedIssue !== prior.issueId;
     const proposedIssue = linkedIssue;
     if (prior) linkedIssue = prior.issueId;
-    const linked = linkedIssue === null ? [] : active.filter(c => c.issueId === linkedIssue);
-    if (linkedIssue !== null && (!ref(linkedIssue) || !linked.length || !linked.some(c => c.aspect === segment.aspect &&
-        (overlap(c.targets, targets) || (c.targets.length === 0 && targets.length === 0))))) {
-      reject("invalid_issue_link"); continue;
-    }
+    let linked = linkedIssue === null ? [] : active.filter(c => c.issueId === linkedIssue);
+    const droppedIssue = linkedIssue !== null && (!ref(linkedIssue) || !linked.length || !linked.some(c => c.aspect === segment.aspect &&
+      (overlap(c.targets, targets) || (c.targets.length === 0 && targets.length === 0))));
+    // A bad advisory link alone cannot discard an otherwise verified new claim.
+    if (droppedIssue) { linkedIssue = null; linked = []; }
     if (act === "revisit" && ![...linked].reverse().find(c => ["defer", "revisit"].includes(c.act))?.act.startsWith("defer")) {
       reject("not_deferred"); continue;
     }
@@ -126,11 +129,12 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     let local = result.operations.length + 1;
     while (graph.records.some(r => (r as { id?: string }).id === `${turn}:local${local}`) || result.operations.some(r => r.id === `${turn}:local${local}`)) local++;
     const id = `${turn}:local${local}`;
-    result.operations.push({ kind: "claim", id, issueId: prior?.issueId ?? linkedIssue ?? id,
+    const issueId = prior?.issueId ?? linkedIssue ?? id;
+    result.operations.push({ kind: "claim", id, issueId,
       targets, aspect: segment.aspect, act, proposition: segment.proposition, name,
       speaker: "human", sourceTurn: turn, quote, respondsTo: prior?.id ?? null, source: "partner_statement" });
-    if (overriddenIssue) (result.diagnostics ??= []).push({ segmentId: segment.segmentId, reason: "issue_link_overridden",
-      linkedIssueId: ref(proposedIssue) ? proposedIssue : null, resolvedIssueId: prior!.issueId });
+    if (overriddenIssue || droppedIssue) (result.diagnostics ??= []).push({ segmentId: segment.segmentId, reason: "issue_link_overridden",
+      linkedIssueId: ref(proposedIssue) ? proposedIssue : null, resolvedIssueId: issueId });
   }
   return result;
 }
