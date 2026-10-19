@@ -12,7 +12,7 @@ import { buildDecisionEvidence } from "./decision-evidence.mjs";
 import { resolveActiveJudgment } from "./active-judge.mjs";
 import { findGuardViolations, rewriteReasons, fallbackUtterance } from "./generation-guard.ts";
 import { startGroundingShadow, validateGroundingShadowOptions } from "./grounding-shadow.ts";
-import { prepareLocalGroundingTurn, validateLocalGroundingOptions, localGroundingMemo } from "./local-grounding-turn.ts";
+import { prepareLocalGroundingTurn, validateLocalGroundingOptions, localGroundingMemo, findLocalPublicationViolations } from "./local-grounding-turn.ts";
 
 // Identical across strategies. Holistic first; analysis only when the judge asks for it.
 export const GENERATOR_INSTRUCTIONS_V2 = [
@@ -292,23 +292,35 @@ export function createDialogueV2({ client, strategy, image, anchors, judge = nul
     if (typeof result?.text !== "string" || !result.text.trim()) throw new Error("The chat client returned no utterance");
     // Publication rules for the committed act (agreement only under agree, self-repair
     // only under repair, never internal ids/fields). Wording never changes the act.
-    trace.generationGuard = { violations: findGuardViolations(result.text, action), regenerated: false, fallback: false };
+    const publicationViolations = (text, messages) => {
+      const codes = findGuardViolations(text, action);
+      return local ? [...new Set([...codes, ...findLocalPublicationViolations(text, messages)])] : codes;
+    };
+    trace.generationGuard = { violations: publicationViolations(result.text, generationMessages), regenerated: false, fallback: false };
     if (trace.generationGuard.violations.length) {
       abortIf(signal);
       trace.generationGuard.regenerated = true;
       let retry = null;
+      const retryMessages = [...generationMessages, {
+        role: "system", content: "【公開発話の書き直し】この発話のactionは" + action + "です。" + ACTION_SCOPE_V2[action] +
+          "。" + rewriteReasons(trace.generationGuard.violations) + "内部処理は説明せず、公開する発話だけを返してください。",
+      }];
       try {
-        retry = await client.complete([...generationMessages, {
-          role: "system", content: "【公開発話の書き直し】この発話のactionは" + action + "です。" + ACTION_SCOPE_V2[action] +
-            "。" + rewriteReasons(trace.generationGuard.violations) + "内部処理は説明せず、公開する発話だけを返してください。",
-        }], { phase: "generation", timeoutMs: GENERATION_TIMEOUT_MS });
+        retry = await client.complete(retryMessages, { phase: "generation", timeoutMs: GENERATION_TIMEOUT_MS });
       } catch { /* Retry failure is private; never retain a raw provider error. */ }
       abortIf(signal);
-      const retryCodes = typeof retry?.text === "string" && retry.text.trim() ? findGuardViolations(retry.text, action) : null;
+      const retryCodes = typeof retry?.text === "string" && retry.text.trim() ? publicationViolations(retry.text, retryMessages) : null;
       trace.generationGuard.violations = [...new Set([...trace.generationGuard.violations, ...(retryCodes ?? [])])];
       if (retryCodes && retryCodes.length === 0) result = retry;
       else {
         result = { text: fallbackUtterance(judgment) };
+        if (local) {
+          const fallbackCodes = publicationViolations(result.text, retryMessages);
+          if (fallbackCodes.length) {
+            trace.generationGuard.violations = [...new Set([...trace.generationGuard.violations, ...fallbackCodes])];
+            result = { text: fallbackUtterance({ ...judgment, candidateName: null, discriminatingFeature: null }) };
+          }
+        }
         trace.generationGuard.fallback = true;
       }
     }
