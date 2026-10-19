@@ -13,6 +13,9 @@ export const JEV_DECISION_INPUT_LIMITS = Object.freeze({ publicTurns: 4096, repa
 const CODES = ["invalid_options", "invalid_input", "invalid_response", "inconsistent_decision", "model_mismatch", "key_unavailable", "key_leak",
   "unauthorized", "payment_required", "not_found", "rate_limited", "upstream_error", "network_error", "timeout", "aborted", "cost_cap", "cost_unreported", "busy"] as const;
 export type JevDecisionErrorCode = typeof CODES[number];
+export const JEV_DECISION_REJECTION_CODES = Object.freeze(["observation_target_required", "observation_aspect_required",
+  "name_requires_single_target", "name_required", "feature_requires_single_target", "feature_required", "observation_target_mismatch"] as const);
+export type JevDecisionRejectionCode = typeof JEV_DECISION_REJECTION_CODES[number];
 export class JevDecisionError extends Error {
   code: JevDecisionErrorCode;
   constructor(code: JevDecisionErrorCode) {
@@ -231,7 +234,8 @@ export function buildJevDecisionPayload(input: JevDecisionInput, { questionLayou
   return prepare(input, questionLayout).payload;
 }
 
-function decode(choices: Record<string, string>, prepared: ReturnType<typeof prepare>) {
+function decode(choices: Record<string, string>, prepared: ReturnType<typeof prepare>,
+  reject: (rule: JevDecisionRejectionCode) => never = () => fail("inconsistent_decision")) {
   const { slots, catalog, human } = prepared;
   const selected = slots.findIndex((_s, i) => choices.target === `figure_${i}`);
   // `multiple` does not invent a narrower subset: all six remain possible here.
@@ -245,7 +249,8 @@ function decode(choices: Record<string, string>, prepared: ReturnType<typeof pre
   if (action === "request_observation") {
     const figure = slots.find((_s, i) => choices.observe_target === `figure_${i}`);
     const aspect = OBSERVATION_ASPECTS.find(a => a === choices.observe_aspect);
-    if (!figure || !aspect) fail("inconsistent_decision");
+    if (!figure) reject("observation_target_required");
+    if (!aspect) reject("observation_aspect_required");
     observe = { figureIds: [figure], aspect, question: OBSERVE_QUESTIONS[aspect] + "\n今回の公開人間発話（引用）: " + human.slice(0, 160), partnerConstrual: null };
   }
   return { action, target, name, feature, observe };
@@ -293,7 +298,9 @@ export function validateJevDecision(value: unknown, input: JevDecisionInput): Je
     evidence: e, decisionKind: value.decisionKind, calibrated: false }) as JevDecision;
 }
 
-export type JevDecisionCallEvidence = JevDecisionEvidence & { callIndex: number; status: "ok" | "error"; error: JevDecisionErrorCode | null };
+export type JevDecisionCallEvidence = JevDecisionEvidence & { callIndex: number; status: "ok" | "error"; error: JevDecisionErrorCode | null;
+  /** Fixed validation rule; choices contain only fully validated closed labels, never criteria text. */
+  rejectionCode: JevDecisionRejectionCode | null };
 export type JevDecisionClientOptions = { enabled?: boolean; readKey?: () => Promise<string>; fetchImpl?: (url: string, init: RequestInit) => Promise<Response>;
   costCapUsd?: number; timeoutMs?: number; questionLayout?: JevQuestionLayout };
 
@@ -319,7 +326,7 @@ export function createJevDecisionClient(options: JevDecisionClientOptions = {}):
     async decide(input, callOptions = {}) {
       const callIndex = ++callCount, started = performance.now();
       const evidence: JevDecisionCallEvidence = { model: null, responseId: null, choices: {}, scores: {}, latencyMs: 0, costUsd: null,
-        callIndex, status: "error", error: null };
+        callIndex, status: "error", error: null, rejectionCode: null };
       const controller = new AbortController();
       let timer: ReturnType<typeof setTimeout> | undefined;
       let abort = () => {};
@@ -389,14 +396,23 @@ export function createJevDecisionClient(options: JevDecisionClientOptions = {}):
           }
           const measured: JevDecisionEvidence = { model: evidence.model, responseId: evidence.responseId, choices, scores,
             latencyMs: Math.max(0, Math.round(performance.now() - started)), costUsd: evidence.costUsd, inputBudget: p.budget };
+          // Retain safe labels before cross-question checks can reject their combination.
+          evidence.choices = { ...choices };
+          const reject = (rule: JevDecisionRejectionCode): never => { evidence.rejectionCode = rule; fail("inconsistent_decision"); };
           // Validate against the detached original snapshot, never against caller-mutated input.
-          const result = { ...decode(choices, p), evidence: measured, decisionKind: "jev_local_test" as const, calibrated: false as const };
+          const result = { ...decode(choices, p, reject), evidence: measured, decisionKind: "jev_local_test" as const, calibrated: false as const };
           // Structural consistency is checked without rebuilding A's source memo after awaiting.
           const core = result;
           const single = core.target.kind === "single";
-          if ((["propose_name", "agree"].includes(core.action) && (!single || core.name === null)) ||
-              (["confirm", "repair"].includes(core.action) && (!single || core.feature === null)) ||
-              (core.observe && core.target.kind === "single" && !core.observe.figureIds.includes(core.target.figureId))) fail("inconsistent_decision");
+          if (["propose_name", "agree"].includes(core.action)) {
+            if (!single) reject("name_requires_single_target");
+            if (core.name === null) reject("name_required");
+          }
+          if (["confirm", "repair"].includes(core.action)) {
+            if (!single) reject("feature_requires_single_target");
+            if (core.feature === null) reject("feature_required");
+          }
+          if (core.observe && core.target.kind === "single" && !core.observe.figureIds.includes(core.target.figureId)) reject("observation_target_mismatch");
           Object.assign(evidence, measured, { status: "ok" });
           return result;
         };
