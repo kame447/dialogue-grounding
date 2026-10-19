@@ -8,12 +8,13 @@
 
 ```sh
 node --env-file=.env dialogue-model/runtime/diagnostics/jev-decision-eval/live.ts \
-  --out /absolute/path/outside-any-repository --seed 1701 --local-timeout-ms 60000
+  --out /absolute/path/outside-any-repository --seed 1701 \
+  --local-timeout-ms 60000 --observation-timeout-ms 60000
 ```
 
 `.env`は既存の研究用Workerクライアント設定にだけ使う。purposeは`dialogue_turn`、生成モデルはWorkerのmodel-policyから確認し各応答で一致を検査する。Jevは既存の研究用Keychain経路を使い、モデルIDの完全一致または`-YYYYMMDD`付きの返却を許可して返却IDを残す。判断器と局所分類器は台本ごとに新しく作り、費用上限は各アダプタの既定を維持する。seedは自分側刺激の生成seedであり、生成文の再現性を保証しない。
 
-`--case <id>`は一件の診断用。省略した台本を合格扱いにせず、全体ゲートには`catalog_incomplete`が残る。`--local-timeout-ms`は1〜60000の整数、省略時はruntime既定。入力や出力パスが不正ならモデルを呼ぶ前に拒否する。出力先は必須で、Git管理下やリポジトリを指すsymlinkを拒否する。
+`--case <id>`は一件の診断用。省略した台本を合格扱いにせず、全体ゲートには`catalog_incomplete`が残る。`--local-timeout-ms`は1〜60000の整数、省略時はruntime既定。`--observation-timeout-ms`も1〜60000の整数で、初回観察と指定再観察の両方へ適用する。省略時は観察器の既定20秒を維持し、指定値は`run.private.json`の`observationTimeoutMs`へ記録する。局所抽出の予算とは独立している。入力や出力パスが不正ならモデルを呼ぶ前に拒否する。出力先は必須で、Git管理下やリポジトリを指すsymlinkを拒否する。
 
 ## 合成台本とゲート
 
@@ -31,11 +32,11 @@ Jevの`inputBudget`は全判断（再観察前の判断も含む）を記録し�
 
 | ファイル | 内容 |
 | --- | --- |
-| `run.private.json` | 構成、seed、モデル、全台本／選択台本ID、台本hash、暫定介入なしの指定 |
+| `run.private.json` | 構成、seed、モデル、全台本／選択台本ID、台本hash、指定した時間予算、暫定介入なしの指定 |
 | `attempts.private.jsonl` | 初回観察と各ターンの完了・失敗チェックポイント、公開履歴、局所処理とJevの追跡記録 |
-| `<case-id>.private.json` | 試行ごとの観察、送信phase／画像件数、独立監査、全公開履歴 |
+| `<case-id>.private.json` | 試行ごとの観察、送信phase／画像件数、独立監査、全公開履歴、失敗時の固定診断 |
 | `completed.private.jsonl` | 成否を含む試行の終了記録 |
-| `failures.private.jsonl` | 失敗時のみ。caseId、発話番号、固定エラーコード |
+| `failures.private.jsonl` | 失敗時のみ。caseId、発話番号、固定エラーコード。観察失敗は`observationErrorCode`と`observationPhase`も保存 |
 | `gate.private.json` | 全試行のゲート、返却モデル、省略集計、失敗一覧 |
 
 一件の失敗で他の台本を捨てない。成功済みターンは随時追記するので、中断しても以前のチェックポイントは残る。再開による合格ケースの選別は実装しない。`counts.invalidDecisions`は`invalid_decision`で停止した試行数を集計する。新モードのdefer／move_onは未特定・複数対象を許すが、revisitには単一対象が必要であり、失敗を別行動へ置き換えない。
@@ -43,6 +44,8 @@ Jevの`inputBudget`は全判断（再観察前の判断も含む）を記録し�
 Jevの失敗も`decisionAttempts`へ固定エラー、返却モデル、responseId、費用、入力予算の許可項目を保存する。失敗した判断の入力省略もゲートの予算集計に含める。APIの生応答や例外本文は残さない。
 
 相手画像、正解表、実対話、分析ラベルは扱わない。画像本文、資格情報、プロンプトや生のプロバイダエラーは保存しない。未知例外は固定`evaluation_unavailable`へ正規化する。危険な文字列を追跡記録に検出した場合はその値を`{redacted:true}`へ置換し、全体ゲートを不合格にする。失敗・棄却を含む記録は残す。
+
+観察の追加診断はruntimeの型付き`JevTurnError`からだけ取得する。`observationErrorCode`は観察器の固定閉集合へ再正規化し、`observationPhase`は`initial`／`targeted`だけを許す。初回観察はターン追跡記録を作る前に失敗するため、その例外の安全な診断を失敗ファイルと試行ファイルへ残す。例外本文や任意の`error.code`は転記しない。
 
 ## 模擬検証
 

@@ -16,6 +16,8 @@ import { assertPublicText, validateOutputDirectory } from "../local-grounding-ev
 import type { LocalFunctionClassifier, LocalOwnAnchor, LocalSegmentProposal, PublicTurn } from "../../local-grounding/contract.ts";
 import { LOCAL_ACTS, LOCAL_ASPECTS } from "../../local-grounding/contract.ts";
 import type { ObservationObserver } from "../../observation/contract.ts";
+import { ObservationError } from "../../observation/observe.ts";
+import type { ObservationErrorCode } from "../../observation/observe.ts";
 import type { JevDecisionClient, JevDecision } from "../../decision/contract.ts";
 import type { JevDecisionCallEvidence } from "../../decision/jev-decision.ts";
 import { isGroundingModel } from "../../../../workers/research-ai-proxy/src/grounding.ts";
@@ -26,9 +28,11 @@ import type { ObservationReceipt, WireReceipt, TrialReceipt, TurnReceipt } from 
 
 type Client = { complete(messages: any[], options?: any): Promise<{ text: string; model?: string }> };
 type Event = { seq: number; id: string; speaker: "human" | "ai"; text: string };
-export type EvaluationOptions = { outputDir: string; seed: number; caseId?: string; localTimeoutMs?: number };
+export type EvaluationOptions = { outputDir: string; seed: number; caseId?: string; localTimeoutMs?: number; observationTimeoutMs?: number };
+type ObservationFailure = { observationErrorCode?: ObservationErrorCode; observationPhase?: "initial" | "targeted" };
+type FailureRecord = { caseId: string; turn: number | null; code: EvaluationErrorCode } & ObservationFailure;
 export type EvaluationDependencies = { client: Client; expectedModel: string; execution: "mock" | "live";
-  createComponents(client: Client): { observer: ObservationObserver; jevDecision: JevDecisionClient; classifier: LocalFunctionClassifier };
+  createComponents(client: Client, options?: Pick<EvaluationOptions, "observationTimeoutMs">): { observer: ObservationObserver; jevDecision: JevDecisionClient; classifier: LocalFunctionClassifier };
   cases?: readonly SyntheticCase[]; secrets?: readonly string[]; onStarted?: (directory: string) => void;
   onProgress?: (progress: { caseId: string; turn: number | null; stage: "initial" | "turn" | "finished" }) => void };
 
@@ -62,15 +66,16 @@ export function parseEvaluationArguments(args: readonly string[]): EvaluationOpt
   const values: Record<string, string> = {};
   for (let i = 0; i < args.length; i++) {
     const key = args[i], value = args[++i];
-    if (!["--out", "--seed", "--case", "--local-timeout-ms"].includes(key) || Object.hasOwn(values, key) || !value?.trim() || value.startsWith("--")) fail("invalid_arguments");
+    if (!["--out", "--seed", "--case", "--local-timeout-ms", "--observation-timeout-ms"].includes(key) || Object.hasOwn(values, key) || !value?.trim() || value.startsWith("--")) fail("invalid_arguments");
     values[key] = value;
   }
   if (!values["--out"]) fail("output_directory_required");
   const seed = Number(values["--seed"] ?? 1701), localTimeoutMs = values["--local-timeout-ms"] === undefined ? undefined : Number(values["--local-timeout-ms"]);
-  if (!Number.isSafeInteger(seed) || (localTimeoutMs !== undefined && !validTimeout(localTimeoutMs)) ||
+  const observationTimeoutMs = values["--observation-timeout-ms"] === undefined ? undefined : Number(values["--observation-timeout-ms"]);
+  if (!Number.isSafeInteger(seed) || (localTimeoutMs !== undefined && !validTimeout(localTimeoutMs)) || (observationTimeoutMs !== undefined && !validTimeout(observationTimeoutMs)) ||
       (values["--case"] && !/^[A-Za-z0-9_-]{1,80}$/u.test(values["--case"]))) fail("invalid_arguments");
   return { outputDir: values["--out"], seed, ...(values["--case"] ? { caseId: values["--case"] } : {}),
-    ...(localTimeoutMs === undefined ? {} : { localTimeoutMs }) };
+    ...(localTimeoutMs === undefined ? {} : { localTimeoutMs }), ...(observationTimeoutMs === undefined ? {} : { observationTimeoutMs }) };
 }
 
 function validateCases(cases: readonly SyntheticCase[], secrets: readonly string[]): void {
@@ -95,6 +100,7 @@ export async function runJevEvaluation(options: EvaluationOptions, deps: Evaluat
   const destination = await validateOutputDirectory(options.outputDir);
   const catalog = deps.cases ?? SYNTHETIC_CASES, secrets = deps.secrets ?? [];
   if (!Number.isSafeInteger(options.seed) || (options.localTimeoutMs !== undefined && !validTimeout(options.localTimeoutMs)) ||
+      (options.observationTimeoutMs !== undefined && !validTimeout(options.observationTimeoutMs)) ||
       !["mock", "live"].includes(deps.execution)) fail("invalid_arguments");
   validateCases(catalog, secrets); publicText(deps.expectedModel, secrets);
   const selected = catalog.filter(c => !options.caseId || c.id === options.caseId);
@@ -129,11 +135,12 @@ export async function runJevEvaluation(options: EvaluationOptions, deps: Evaluat
   await persist("run.private.json", { schemaVersion: 1, architecture: "jev-decision-observation", seed: options.seed,
     execution: deps.execution, expectedModel: deps.expectedModel, expectedCaseIds: catalog.map(c => c.id), selectedCaseIds: selected.map(c => c.id),
     catalogHash: createHash("sha256").update(JSON.stringify(catalog)).digest("hex"), localTimeoutMs: options.localTimeoutMs,
+    observationTimeoutMs: options.observationTimeoutMs,
     intervention: "none_pending_researcher_decision", comparison: "not_implemented_pending_researcher_decision" });
   const { settleJevTurnTraces, JevTurnError } = await import("../../v2/jev-turn.ts");
   const { validateJevDecision, JevDecisionError } = await import("../../decision/jev-decision.ts");
   const receipts: TrialReceipt[] = [];
-  const failures: Array<{ caseId: string; turn: number | null; code: EvaluationErrorCode }> = [];
+  const failures: FailureRecord[] = [];
   for (const c of selected) {
     caseRedacted = false;
     const trial: TrialReceipt = { caseId: c.id, completed: false, expectedTurns: c.steps.length, anchors: structuredClone(anchors), observations: [], wire: [], turns: [] };
@@ -145,6 +152,7 @@ export async function runJevEvaluation(options: EvaluationOptions, deps: Evaluat
     let decisionOrder: number[] = [];
     let decisionAttempts: unknown[] = [];
     let clientFailure: EvaluationErrorCode | null = null;
+    let failure: FailureRecord | undefined;
     const events: Event[] = [];
     const client: Client = { async complete(messages, callOptions) {
       const phase = String(callOptions?.phase ?? "unknown");
@@ -173,7 +181,8 @@ export async function runJevEvaluation(options: EvaluationOptions, deps: Evaluat
       } catch (error) { if (error instanceof HarnessError) throw error; throw new HarnessError("evaluation_unavailable"); }
     } };
     try {
-      const components = deps.createComponents(client);
+      const components = options.observationTimeoutMs === undefined ? deps.createComponents(client) :
+        deps.createComponents(client, { observationTimeoutMs: options.observationTimeoutMs });
       const observer: ObservationObserver = {
         async observeAll(input, callOptions) {
           const record: ObservationReceipt = { turn: currentTurn, kind: "initial", order: ++callOrder, figureIds: input.ownAnchors.map(a => a.id), succeeded: false };
@@ -270,10 +279,15 @@ export async function runJevEvaluation(options: EvaluationOptions, deps: Evaluat
     } catch (error) {
       const code = clientFailure ?? (error instanceof JevTurnError ? new JevTurnError(error.code).code : evaluationErrorCode(error));
       trial.failureCode = code;
-      const failure = { caseId: c.id, turn: currentTurn, code };
+      const observation: ObservationFailure = {};
+      if (error instanceof JevTurnError) {
+        if (error.observationErrorCode !== undefined) observation.observationErrorCode = new ObservationError(error.observationErrorCode).code;
+        if (error.observationPhase === "initial" || error.observationPhase === "targeted") observation.observationPhase = error.observationPhase;
+      }
+      failure = { caseId: c.id, turn: currentTurn, code, ...observation };
       failures.push(failure); await persist("failures.private.jsonl", failure, true);
     }
-    await persist(c.id + ".private.json", { receipt: trial, publicTurns: turns(events) });
+    await persist(c.id + ".private.json", { receipt: trial, publicTurns: turns(events), ...(failure ? { failure } : {}) });
     await persist("completed.private.jsonl", { caseId: c.id, completed: trial.completed }, true);
     deps.onProgress?.({ caseId: c.id, turn: currentTurn, stage: "finished" });
   }
@@ -298,7 +312,8 @@ async function main(): Promise<void> {
   const { createJevDecisionClient } = await import("../../decision/jev-decision.ts");
   const { createJevLocalTestClassifier } = await import("../../local-grounding/jev-local-test.ts");
   const result = await runJevEvaluation(options, { client, expectedModel: policy.model, execution: "live", secrets: [config.apiKey],
-    createComponents: shared => ({ observer: createLunaObserver(shared), jevDecision: createJevDecisionClient({ enabled: true })!,
+    createComponents: (shared, componentOptions = {}) => ({ observer: createLunaObserver(shared,
+      componentOptions.observationTimeoutMs === undefined ? {} : { timeoutMs: componentOptions.observationTimeoutMs }), jevDecision: createJevDecisionClient({ enabled: true })!,
       classifier: createJevLocalTestClassifier({ enabled: true })! }),
     onStarted: directory => process.stdout.write("jev_evaluation_started " + basename(directory) + "\n"),
     onProgress: progress => process.stdout.write(JSON.stringify(progress) + "\n") });
