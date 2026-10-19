@@ -7,11 +7,22 @@ export const EVAL_CASE_SCHEMA = "jev-grounding-evalcase/v1";
 
 /** Axis 1: public evidence that both sides identify the same target. */
 export type TargetEvidence = "supported" | "insufficient" | "contradicted" | "unknown";
-/** Axis 2: public evidence that a name for that target was jointly adopted. */
-export type NameEvidence = "agreed" | "unclear" | "not_agreed" | "unknown";
+/**
+ * Axis 2: public evidence that a name for that target was jointly adopted
+ * (grounding-criteria/v2, researcher-approved 5 levels):
+ * agreed = joint adoption established; unclear = a name or a 見立て (「Xみたい」
+ * 「Xっぽい」 about this referent, by either side) is on the table but adoption is
+ * not settled; not_agreed = explicit rejection, competing candidates, withdrawal
+ * or non-adoption; no_name = neither a name nor a 見立て has been offered for this
+ * referent (pure position/shape description does not count; words said about
+ * another figure do not count). The name axis says nothing about target correctness;
+ * unknown = input insufficient or the referent cannot be identified.
+ * Public utterances only; private notes never count as agreement.
+ */
+export type NameEvidence = "agreed" | "unclear" | "not_agreed" | "no_name" | "unknown";
 
 export const TARGET_LEVELS: readonly TargetEvidence[] = Object.freeze(["supported", "insufficient", "contradicted", "unknown"]);
-export const NAME_LEVELS: readonly NameEvidence[] = Object.freeze(["agreed", "unclear", "not_agreed", "unknown"]);
+export const NAME_LEVELS: readonly NameEvidence[] = Object.freeze(["agreed", "unclear", "not_agreed", "no_name", "unknown"]);
 
 export type CaseSource = "historical" | "ai_session" | "synthetic";
 export type CaseUnit = "episode_end" | "local_window" | "ai_turn";
@@ -53,6 +64,8 @@ export interface GroundingEvalCase {
   /** Which labels or rules the expected values came from, e.g. ["rule:T-open-M2", "M2", "a11"]. */
   labelBasis: string[];
   labelQuality: LabelQuality;
+  /** Version of the gold labels (e.g. "v1", "v2"); old versions are kept, never overwritten. */
+  goldVersion?: string;
   /** Per-axis quality when the axes differ (labelQuality is then the weakest). */
   axisQuality?: { target: LabelQuality | null; name: LabelQuality | null };
   /** False for every historical case: ER1 and a11 are not evidence of independent correctness. */
@@ -112,6 +125,7 @@ export function validateEvalCase(value: unknown): string[] {
   }
   if (!Array.isArray(value.labelBasis) || value.labelBasis.some((b) => typeof b !== "string")) errors.push("labelBasis");
   if (!QUALITIES.includes(value.labelQuality as LabelQuality)) errors.push("labelQuality");
+  if (value.goldVersion !== undefined && !nonEmptyString(value.goldVersion)) errors.push("goldVersion");
   if (value.axisQuality !== undefined) {
     const aq = value.axisQuality;
     if (!isRecord(aq) || [aq.target, aq.name].some((q) => q !== null && !QUALITIES.includes(q as LabelQuality))) errors.push("axisQuality");
