@@ -67,6 +67,21 @@ test("extractor receives the same multimodal own-image format as the v2 judge an
   assert.deepEqual(await extractor.extract(input), [segment]); assert.equal(calls, 1);
 });
 
+test("deictic references reuse the summarized public AI claim's targets rather than selecting a new figure", async () => {
+  const issueSummary = JSON.stringify({ issues: [{ issueId: "2:ai1", targets: ["own-b"],
+    claims: [{ id: "2:ai1", speaker: "ai", proposition: "四角がある" }] }] });
+  const current = { ...input, issueSummary, publicTurns: [...input.publicTurns.slice(0, 2),
+    { turn: 3, speaker: "human" as const, text: "いま説明してくれた図形の四角はあります" }] };
+  const proposal = { ...segment, quote: current.publicTurns[2].text, targets: ["own-b"] };
+  const extractor = createLunaLocalExtractor({ async complete(messages) {
+    assert.match(messages[0].content as string, /そのAI claim/);
+    assert.match(messages[0].content as string, /画像から別の図形を推定し直さない/);
+    assert.equal(JSON.parse(messages[1].content as string).issueSummary, issueSummary);
+    return { text: JSON.stringify([proposal]) };
+  } });
+  assert.deepEqual(await extractor.extract(current), [proposal]);
+});
+
 test("own image and anchor extensions are projected rather than forwarding partner data or gold", () => {
   const decorated = { ...input,
     ownImage: { ...input.ownImage, partnerImage: "PARTNER_CANARY" },
