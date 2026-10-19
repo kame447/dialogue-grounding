@@ -148,6 +148,8 @@ export type LocalPriorAct = {
   turn: number;
   action: string;
   targetSlot: string | null;
+  /** Program-owned unresolved candidates; never a single-slot name decision. */
+  targetCandidates?: string[];
   candidateName: string | null;
   discriminatingFeature: string | null;
   /** Copied only from the committed publication trace, never a model verdict. */
@@ -184,7 +186,11 @@ export function recordAiClaims({ graph, turn, publicTurns, priorAct }: {
   const acts = [priorAct, ...(priorAct.followUp ? [priorAct.followUp] : [])];
   for (const [actIndex, act] of acts.entries()) {
     if (actIndex > 0 && ordinal === 0) ordinal = 1;
-    if (!act.targetSlot || !ownSlots.includes(act.targetSlot)) { reject("ai", "invalid_ai_target"); continue; }
+    const candidates = act.targetCandidates;
+    const targets = act.targetSlot !== null && ownSlots.includes(act.targetSlot) ? [act.targetSlot]
+      : act.targetSlot === null && Array.isArray(candidates) && candidates.length >= 2 && candidates.length <= ownSlots.length &&
+        new Set(candidates).size === candidates.length && candidates.every(id => ownSlots.includes(id)) ? [...candidates] : null;
+    if (!targets) { reject("ai", "invalid_ai_target"); continue; }
     if (!["accept", "propose_name", "confirm", "agree", "repair", "defer", "revisit", "move_on", "close"].includes(act.action)) {
       reject("ai", "invalid_ai_act"); continue;
     }
@@ -203,15 +209,15 @@ export function recordAiClaims({ graph, turn, publicTurns, priorAct }: {
       if (functionAct === "name_accept" && (!prior || !publicTurns.some(t => t.speaker === "human" && t.turn === prior.sourceTurn &&
           t.text.includes(prior.quote) && t.text.includes(name!)))) { reject(local, "missing_public_name_proposal"); return; }
       if (existing.some(c => c.speaker === "ai" && c.sourceTurn === source.turn && c.aspect === aspect &&
-          c.act === functionAct && c.targets.length === 1 && c.targets[0] === act.targetSlot && c.name === name && c.proposition === proposition &&
+          c.act === functionAct && c.targets.length === targets.length && c.targets.every(id => targets.includes(id)) && c.name === name && c.proposition === proposition &&
           c.respondsTo === (prior?.id ?? null))) return;
       const id = `${turn}:${local}`;
       if (graph.records.some(r => (r as { id?: string }).id === id)) { reject(local, "duplicate_ai_id"); return; }
-      result.operations.push({ kind: "claim", id, issueId: prior?.issueId ?? id, targets: [act.targetSlot!], aspect, act: functionAct,
+      result.operations.push({ kind: "claim", id, issueId: prior?.issueId ?? id, targets: [...targets], aspect, act: functionAct,
         proposition, name, speaker: "ai", sourceTurn: source.turn, quote, respondsTo: prior?.id ?? null, source: "ai_hypothesis" });
     };
     const naming = act.action === "propose_name" || (["confirm", "agree"].includes(act.action) && act.candidateName !== null);
-    if (naming) add("name", act.candidateName, act.action === "agree" ? "name_accept" : "name_propose");
+    if (naming && targets.length === 1) add("name", act.candidateName, act.action === "agree" ? "name_accept" : "name_propose");
     if (act.discriminatingFeature !== null) add("part", act.discriminatingFeature, act.action === "confirm" ? "ask" : "assert");
     // A follow-up never becomes primary if the main act had no literal element.
     if (ordinal === 0) ordinal = 1;

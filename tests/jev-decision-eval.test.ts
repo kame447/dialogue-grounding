@@ -560,8 +560,8 @@ test("two-stage rejected action/target labels retain fixed rules without a detai
     for (const [key, label] of Object.entries(c.choices)) assert.equal(attempt.choices[key], label);
     const document = JSON.parse(await readFile(join(result.directory, script.id + ".private.json"), "utf8"));
     assert.equal(document.receipt.completed, false);
-    // The next C integration maps typed invalid_decision separately.
-    assert.equal(document.receipt.failureCode, "decision_failed");
+    // The turn flow maps only a typed invalid_decision to its own code; other rejections stay decision_failed.
+    assert.equal(document.receipt.failureCode, c.error === "invalid_decision" ? "invalid_decision" : "decision_failed");
     assert.equal(document.publicTurns.filter((t: any) => t.speaker === "ai").length, 0);
   });
 });

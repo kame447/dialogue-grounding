@@ -12,7 +12,7 @@ import type { ObservationMemo, ObservationObserver, ReobservationResult } from "
 import { validateObservationMemo, mergeReobservation, observationContextMessages, ObservationError, type ObservationErrorCode,
   OBSERVATION_INITIAL_INSTRUCTIONS, OBSERVATION_TARGETED_INSTRUCTIONS } from "../observation/observe.ts";
 import type { JevDecision, JevDecisionClient, JevDecisionInput, JevObservationRequest, RepairHistoryEntry } from "../decision/contract.ts";
-import { validateJevDecision } from "../decision/jev-decision.ts";
+import { validateJevDecision, JevDecisionError } from "../decision/jev-decision.ts";
 import { prepareLocalGroundingTurn, validateLocalGroundingOptions, findLocalPublicationViolations } from "./local-grounding-turn.ts";
 import type { LocalGroundingResearchRecord, LocalGroundingTrace } from "./local-grounding-turn.ts";
 import { findGuardViolations, rewriteReasons } from "./generation-guard.ts";
@@ -23,6 +23,7 @@ type Message = { role: "system" | "user" | "assistant"; content: string };
 type ChatClient = { complete(messages: Message[], options: { phase: string; timeoutMs: number; signal?: AbortSignal }): Promise<{ text: string }> };
 type Guard = { violations: string[]; regenerated: boolean; fallback: false };
 const ACT_INSTRUCTIONS = "Jevが選んだ行動だけを文章にしてください。行動・対象・名前・特徴を変更しないでください。観察メモは仮説で、局所的な支持を図形全体の理解や名称決定へ拡張しないでください。";
+const DETAIL_INSTRUCTIONS = "対象は複数候補のままです。detailFigureIdsは選ばれた特徴の出典図形であり、対象の確定ではありません。その特徴を候補すべての性質にせず、候補を勝手に一つに絞らずに確認・修復を表現してください。";
 export type JevTurnLocalOptions = Pick<LocalGroundingOptions, "classifier" | "timeoutMs">;
 export type JevTurnErrorCode = "invalid_state" | "observation_failed" | "decision_failed" | "invalid_decision" |
   "reobservation_limit" | "generation_failed" | "unsafe_generation" | "aborted";
@@ -116,28 +117,41 @@ function emit<T>(sink: ((value: T) => unknown) | null | undefined, value: T) {
 }
 const targets = (decision: JevDecision) => decision.target.kind === "single" ? [decision.target.figureId]
   : decision.target.kind === "multiple" ? [...decision.target.figureIds] : [];
-const contentKey = (claim: LocalClaimView) => JSON.stringify([claim.aspect, claim.act, claim.proposition, claim.name, [...claim.targets].sort()]);
+const contentKey = (claim: LocalClaimView) => JSON.stringify([claim.aspect, claim.act, claim.proposition, claim.name]);
+const INFORMATION_ACTS = new Set(["assert", "agree", "deny", "construe", "name_propose", "name_accept", "name_reject"]);
+const figureInformation = (claim: LocalClaimView) => INFORMATION_ACTS.has(claim.act) && !["question", "progress"].includes(claim.aspect);
 const sameSet = (a: readonly string[], b: readonly string[]) => a.length === b.length && new Set(a).size === a.length && a.every(id => b.includes(id));
 
-/** Structural progress evidence only. New ids for repeated content add no information. */
+/** Decision 0002: new figure information or strict candidate narrowing only.
+ * Difficulty, backchannels, repeated content and record pruning add no progress. */
 export function updateRepairHistory(history: readonly RepairHistoryEntry[], before: readonly LocalClaimView[],
-  after: readonly LocalClaimView[], turn: number): RepairHistoryEntry[] {
+  after: readonly LocalClaimView[], turn: number, context?: { answeredRepairTurn: number }): RepairHistoryEntry[] {
   const result = structuredClone(history) as RepairHistoryEntry[];
   const pending = [...result].reverse().find(entry => entry.turn < turn && entry.progress === "unknown");
   if (!pending) return result;
   const roots = after.filter(c => c.speaker === "ai" && c.sourceTurn > pending.turn && c.sourceTurn < turn &&
     c.targets.some(id => pending.candidatesBefore.includes(id)));
+  const answered = context?.answeredRepairTurn === pending.turn;
   const replies = after.filter(c => c.speaker === "human" && c.sourceTurn === turn &&
-    (c.issueId === pending.issueId || roots.some(root => c.respondsTo === root.id)));
-  if (!replies.length) return result;
-  const previousContent = new Set(before.filter(c => c.speaker === "human").map(contentKey));
-  const novel = replies.filter(c => { const key = contentKey(c); if (previousContent.has(key)) return false; previousContent.add(key); return true; });
-  pending.issueId ??= replies[0].issueId;
+    (c.issueId === pending.issueId || roots.some(root => c.respondsTo === root.id) || answered &&
+      (!c.targets.length || c.targets.some(id => pending.candidatesBefore.includes(id)))));
+  if (!replies.length && !answered) return result;
+  const information = replies.filter(figureInformation);
+  const previousContent = before.filter(c => c.speaker === "human" && figureInformation(c));
+  const novel = information.filter(c => {
+    if (!c.targets.length) return false;
+    const duplicate = previousContent.some(prior => contentKey(prior) === contentKey(c) && prior.targets.some(id => c.targets.includes(id)));
+    previousContent.push(c);
+    return !duplicate;
+  });
+  pending.issueId ??= replies[0]?.issueId ?? roots.at(-1)?.issueId ?? null;
   pending.partnerClaims = replies.map(({ id, act, proposition, targets }) => ({ id, act, proposition, targets: [...targets] }));
-  pending.candidatesAfter = [...new Set(replies.flatMap(c => c.targets))];
+  pending.candidatesAfter = information.length ? [...new Set(information.flatMap(c => c.targets))] : [...pending.candidatesBefore];
   pending.addedClaimIds = novel.map(c => c.id);
   pending.removedClaimIds = before.filter(c => c.issueId === pending.issueId && !after.some(next => next.id === c.id)).map(c => c.id);
-  pending.progress = novel.length || pending.removedClaimIds.length || !sameSet(pending.candidatesBefore, pending.candidatesAfter) ? "changed" : "unchanged";
+  const narrowed = pending.candidatesAfter.length > 0 && pending.candidatesAfter.length < pending.candidatesBefore.length &&
+    pending.candidatesAfter.every(id => pending.candidatesBefore.includes(id));
+  pending.progress = novel.length || narrowed ? "changed" : "unchanged";
   return result;
 }
 
@@ -152,7 +166,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   const attempts: JevTurnTrace[] = [];
   let attemptsStarted = 0;
   let initialMemo: Promise<ObservationMemo> | null = null, initialRecorded = false;
-  const privateInstructions = [generation.task, generation.instructions, generation.concise ?? "", ACT_INSTRUCTIONS, LOCAL_EXTRACTION_INSTRUCTIONS,
+  const privateInstructions = [generation.task, generation.instructions, generation.concise ?? "", ACT_INSTRUCTIONS, DETAIL_INSTRUCTIONS, LOCAL_EXTRACTION_INSTRUCTIONS,
     MEMO_LOCAL_EXTRACTION_INSTRUCTIONS, LOCAL_CLASSIFICATION_INSTRUCTIONS, OBSERVATION_INITIAL_INSTRUCTIONS,
     OBSERVATION_TARGETED_INSTRUCTIONS].map(content => ({ role: "system", content }));
   function project<T>(value: T): T {
@@ -218,13 +232,15 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       } }, { getMemo: () => structuredClone(memo) }) };
       const prepared = await prepareLocalGroundingTurn(local, { graph: state.graph,
         update: stageMemory(state.graph, latest.seq, null, publicTurns), publicTurns, signal, ownImage, ownAnchors, captureResearch: true,
-        ...(previousAi ? { priorAct: { ...previous.judgment, turn: previousAi.turn, publishedFallback: previous.generationGuard.fallback } } : {}) });
+        ...(previousAi ? { priorAct: { ...previous.judgment, turn: previousAi.turn, publishedFallback: previous.generationGuard.fallback,
+          ...(previous.jevTurn.decision.target.kind === "multiple" ? { targetCandidates: [...previous.jevTurn.decision.target.figureIds] } : {}) } } : {}) });
       record.local = { ...prepared.research!, turnIndex: latest.seq, lastEventId, attemptNumber, status: "error", localStatus: prepared.trace.status };
       abortIf(signal);
       const graph = previewReferenceUpdate(state.graph, prepared.update, { publicTurns }) as Graph;
       const beforeClaims = priorClaimViews(state.graph, { limit: REFERENCE_LIMITS.records });
       const claims = priorClaimViews(graph, { limit: REFERENCE_LIMITS.records });
-      let repairHistory = updateRepairHistory(state.repairHistory, beforeClaims, claims, latest.seq);
+      let repairHistory = updateRepairHistory(state.repairHistory, beforeClaims, claims, latest.seq,
+        previous && previousAi && ["repair", "confirm", "revisit"].includes(previous.judgment.action) ? { answeredRepairTurn: previous.turnIndex } : undefined);
       const baseInput: JevDecisionInput = { turn: latest.seq, publicTurns, ownSlots: [...slots], observations: memo,
         issueSummary: summarizeLocalIssues(graph), priorClaims: claims, repairHistory,
         previousAction: previous && previousAi ? { turn: previousAi.turn, action: previous.jevTurn.decision.action, target: previous.jevTurn.decision.target,
@@ -258,11 +274,13 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       }
       errorCode = "invalid_decision";
       const ambiguousDefer = decision.action === "defer" && decision.target.kind !== "single";
+      const multipleFeature = ["confirm", "repair"].includes(decision.action) && decision.target.kind === "multiple";
       const act = { action: decision.action, targetSlot: decision.target.kind === "single" ? decision.target.figureId : null,
         candidateName: decision.name, discriminatingFeature: decision.feature, note: null };
       // P3 can retain an unresolved referent. Keep its whole candidate set in
       // the decision trace; no arbitrary slot is chosen or ledger entry changed.
-      const judgment: Judgment = ambiguousDefer ? { ...act, action: "defer" } : validateJudgment(act, { ownLedger: state.ledger });
+      const judgment: Judgment = ambiguousDefer ? { ...act, action: "defer" }
+        : multipleFeature ? { ...act, action: decision.action as "confirm" | "repair" } : validateJudgment(act, { ownLedger: state.ledger });
       if (judgment.action === "agree" && !claims.some(c => c.aspect === "name" && c.name === judgment.candidateName && c.targets.length === 1 &&
         c.targets[0] === judgment.targetSlot && (c.speaker === "human" && c.act === "name_propose" || c.act === "name_accept"))) throw new JevTurnError("invalid_decision");
       record.finalAction = judgment;
@@ -275,7 +293,9 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       record.observationMemo = memo; record.repairHistory = repairHistory;
       const messages: Message[] = [{ role: "system", content: generation.task }, { role: "system", content: generation.instructions },
         ...(generation.concise ? [{ role: "system" as const, content: generation.concise }] : []),
-        { role: "system", content: ACT_INSTRUCTIONS + "\n" + generation.actionScope[judgment.action] + "\n" + JSON.stringify({ ...judgment, target: decision.target }) },
+        { role: "system", content: ACT_INSTRUCTIONS + "\n" + generation.actionScope[judgment.action] + "\n" + JSON.stringify({ ...judgment, target: decision.target,
+          ...(decision.detailFigureIds ? { detailFigureIds: decision.detailFigureIds } : {}) }) },
+        ...(multipleFeature ? [{ role: "system" as const, content: DETAIL_INSTRUCTIONS }] : []),
         ...observationContextMessages(JSON.stringify({ scope: "private_observations_not_ground_truth", memo })),
         { role: "system", content: "局所問題（非公開）:\n" + summarizeLocalIssues(graph) },
         ...publicTurns.map(t => ({ role: t.speaker === "human" ? "user" as const : "assistant" as const, content: t.text }))];
@@ -294,7 +314,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         record.generationGuard.violations = [...new Set([...record.generationGuard.violations, ...codes])];
         if (codes.length) throw new JevTurnError("unsafe_generation");
       }
-      const nextState: JevPrivateState = { ledger: ambiguousDefer ? structuredClone(state.ledger) : applyJudgment(state.ledger, judgment),
+      const nextState: JevPrivateState = { ledger: ambiguousDefer || multipleFeature ? structuredClone(state.ledger) : applyJudgment(state.ledger, judgment),
         graph: applyReferenceUpdate(state.graph, prepared.update, { publicTurns, generationSucceeded: true }) as Graph,
         observationMemo: memo, repairHistory, judgments: [...state.judgments, { turnIndex: latest.seq, lastEventId, status: "committed", judgment,
           generationGuard: structuredClone(record.generationGuard), jevTurn: { attemptNumber, decision }, localGrounding: { ...prepared.trace, attemptNumber } }] };
@@ -305,7 +325,10 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       // Observation adapters are injected: even an own-class exception there
       // remains an observation failure. Do not read arbitrary code getters.
       if (!signal?.aborted && !observationPhase) {
-        try { if (error instanceof JevTurnError) code = new JevTurnError(error.code).code; }
+        try {
+          if (error instanceof JevTurnError) code = new JevTurnError(error.code).code;
+          else if (error instanceof JevDecisionError && error.code === "invalid_decision") code = "invalid_decision";
+        }
         catch { code = errorCode; }
       }
       record.status = code === "aborted" ? "aborted" : "error"; record.errorCode = code;
