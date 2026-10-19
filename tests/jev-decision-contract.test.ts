@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { ACTIONS } from "../dialogue-model/runtime/judgment/schema.mjs";
 import { JEV_ACTIONS } from "../dialogue-model/runtime/decision/contract.ts";
 import type { JevDecision, JevDecisionInput } from "../dialogue-model/runtime/decision/contract.ts";
-import { buildJevDecisionPayload, buildJevDecisionDetailPayload, validateJevDecision, JevDecisionError, JEV_ACTION_CRITERIA, JEV_DECISION_INPUT_LIMITS } from "../dialogue-model/runtime/decision/jev-decision.ts";
+import { buildJevDecisionPayload, buildJevDecisionDetailPayload, buildHumanReferentPayload, validateJevDecision, JevDecisionError, JEV_ACTION_CRITERIA, JEV_DECISION_INPUT_LIMITS } from "../dialogue-model/runtime/decision/jev-decision.ts";
 import { createMockJevDecisionClient } from "../dialogue-model/runtime/decision/mocks.ts";
 
 function fixture(): JevDecisionInput {
@@ -214,4 +214,30 @@ test("missing and excessive detail choices fail explicitly, without inventing or
   const large = fixture();
   large.observations.figures.forEach((f, i) => { f.analytic.shapes = Array.from({ length: 32 }, (_, j) => `形${i}-${j}`); f.analytic.relations = Array.from({ length: 32 }, (_, j) => `関係${i}-${j}`); });
   assert.throws(() => buildJevDecisionDetailPayload(large, { action: "repair", target: { kind: "multiple", figureIds: [...large.ownSlots] } }), code("invalid_input"));
+});
+
+test("human referent input is whitelisted, strategy-independent, and separate from action target", () => {
+  const input = fixture();
+  const scores = Object.fromEntries([...input.ownSlots, "none", "multiple"].map(id => [id, 0.2]));
+  const decorated = { ...input, humanReferent: { status: "ok", scores, raw: "SECRET_CANARY" }, gold: "GOLD_CANARY", image: "IMAGE_CANARY" };
+  const requests = ["repair-first", "bypass-enabled"].map(strategy => buildHumanReferentPayload({ ...decorated, strategy } as JevDecisionInput));
+  assert.deepEqual(requests[0], requests[1]);
+  assert.deepEqual(requests[0], buildHumanReferentPayload(input), "an existing referent estimate is never fed back into estimation");
+  assert.deepEqual(Object.keys(requests[0].questions), ["human_referent"]);
+  assert.doesNotMatch(JSON.stringify(requests[0]), /CANARY|strategy|"humanReferent"|"region"|observedAt/);
+  assert.match(requests[0].questions.human_referent.instructions, /次に行う行動の対象を選ぶ問いではありません/);
+  assert.match(requests[0].questions.human_referent.instructions, /見立ての語の一致・不一致だけで決めず/);
+  const action = buildJevDecisionPayload(decorated as JevDecisionInput);
+  assert.deepEqual(JSON.parse(action.state).humanReferent, { status: "ok", scores });
+  assert.doesNotMatch(action.state, /CANARY/);
+  const detail = buildJevDecisionDetailPayload(decorated as JevDecisionInput, { action: "confirm", target: { kind: "single", figureId: "own-5" } })!;
+  assert.deepEqual(JSON.parse(detail.state).humanReferent, { status: "ok", scores });
+  assert.match(action.questions.target.instructions, /humanReferent.*targetとは別/);
+  for (const humanReferent of [{ status: "unknown", scores }, { status: "ok", scores: {} }, { status: "ok", scores: { ...scores, partner: 1 } }, { status: "ok", scores: { ...scores, none: Infinity } }]) {
+    const state = JSON.parse(buildJevDecisionPayload({ ...input, humanReferent } as JevDecisionInput).state);
+    assert.deepEqual(state.humanReferent, { status: "unknown", scores: null });
+  }
+  assert.equal(Object.hasOwn(JSON.parse(buildJevDecisionPayload(input).state), "humanReferent"), false);
+  assert.doesNotMatch(buildJevDecisionPayload(input).questions.action.instructions, /humanReferent/);
+  assert.doesNotMatch(buildJevDecisionDetailPayload(input, { action: "confirm", target: { kind: "single", figureId: "own-0" } })!.questions.feature.instructions, /humanReferent/);
 });
