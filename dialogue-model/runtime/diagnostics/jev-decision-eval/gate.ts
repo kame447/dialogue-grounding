@@ -1,27 +1,38 @@
 // This audits wiring and declared synthetic expectations, not task accuracy.
+import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { isGroundingModel } from "../../../../workers/research-ai-proxy/src/grounding.ts";
 import { findGuardViolations } from "../../v2/generation-guard.ts";
-import type { JevDecision, RepairHistoryEntry, DecisionInputBudget } from "../../decision/contract.ts";
+import type { JevDecision, RepairHistoryEntry, DecisionInputBudget, HumanReferentEstimate, HumanReferentMaterial } from "../../decision/contract.ts";
 import type { ObservationMemo, ObservationIssue, ReobservationResult } from "../../observation/contract.ts";
 import type { LocalOwnAnchor, LocalIssueView } from "../../local-grounding/contract.ts";
 import type { AuditReceipt } from "../local-grounding-eval/gate.ts";
 import { recordAiClaims, verifyLocalUpdate } from "../../local-grounding/verify.ts";
 import { previewReferenceUpdate, snapshotReferenceGraph, validateReferenceUpdate } from "../../memory/reference-graph.mjs";
 import { prepareMemory } from "../../judgment/memory.mjs";
+import { OBSERVATION_MEMO_VERSION, mergeReobservation } from "../../observation/observe.ts";
+import type { JevHumanReferentTrace } from "../../v2/jev-turn.ts";
 import type { HumanStep } from "./cases.ts";
 
 export type ObservationReceipt = { turn: number | null; kind: "initial" | "targeted";
   order: number; figureIds: string[]; issue?: ObservationIssue; memo?: ObservationMemo; result?: ReobservationResult; succeeded: boolean };
 export type WireReceipt = { turn: number | null; phase: string; imageCount: number; succeeded: boolean };
 export type PublishedAct = { action: string; targetSlot: string | null; candidateName: string | null; discriminatingFeature: string | null };
+export type ReferentReceipt = { turn: number; order: number; inputSha256: string;
+  observationMemo: { version: number; sha256: string }; estimate: HumanReferentEstimate };
+export type DecisionInputHashes = { actionTarget: string; detail: string | null };
+export const memoIdentity = (memo: ObservationMemo) => ({ version: OBSERVATION_MEMO_VERSION,
+  sha256: createHash("sha256").update(JSON.stringify(memo), "utf8").digest("hex") });
+export const requestIdentity = (s: unknown) => createHash("sha256").update(JSON.stringify(s), "utf8").digest("hex");
+
 export type TurnReceipt = { turn: number; committed: boolean; traceMatches: boolean; decisions: JevDecision[]; finalAct: PublishedAct | null;
-  decisionOrder: number[];
+  decisionOrder: number[]; humanReferent: JevHumanReferentTrace | null;
+  decisionReferents: HumanReferentMaterial[]; decisionInputHashes: DecisionInputHashes[];
   intervention: string | null; publicText: string | null; local: AuditReceipt; issues: LocalIssueView[];
   ledger: Record<string, { status: string; name: string | null }>; repairHistory: RepairHistoryEntry[]; step: HumanStep };
 export type TrialReceipt = { caseId: string; completed: boolean; expectedTurns: number;
   failureCode?: string;
-  anchors: LocalOwnAnchor[]; observations: ObservationReceipt[]; wire: WireReceipt[]; turns: TurnReceipt[];
+  anchors: LocalOwnAnchor[]; referents: ReferentReceipt[]; observations: ObservationReceipt[]; wire: WireReceipt[]; turns: TurnReceipt[];
   failedDecisionInputs?: Array<{ turn: number; inputBudget: DecisionInputBudget | null }> };
 
 /** Reproduce Jev's installed operations independently, including ambiguous
@@ -67,12 +78,15 @@ export const GATE_ITEMS = ["trial_incomplete", "memo_mismatch", "initial_observa
   "non_observation_image", "observation_wire_mismatch", "luna_judgment_called", "jev_evidence_invalid", "action_changed",
   "publication_out_of_scope", "unverified_updates", "local_pipeline_incomplete", "script_mismatch", "repair_history_invalid",
   "construal_missing", "partial_agreement_missing", "multiple_candidates_missing", "denial_missing", "repair_progress_missing",
-  "repair_stagnation_missing", "reobservation_missing", "catalog_incomplete", "input_budget_unreported", "trace_mismatch"] as const;
+  "repair_stagnation_missing", "reobservation_missing", "catalog_incomplete", "input_budget_unreported", "trace_mismatch", "referent_missing", "referent_evidence_invalid", "referent_memo_mismatch",
+  "referent_action_coupled", "referent_publication"] as const;
 export type GateItem = typeof GATE_ITEMS[number];
 type InputBudgetReport = { calls: number; omittingCalls: number; missingCalls: number; omitted: DecisionInputBudget["omitted"] };
 const emptyBudget = (): InputBudgetReport => ({ calls: 0, omittingCalls: 0, missingCalls: 0, omitted: { publicTurns: 0, claims: 0,
   publicNames: 0, repairHistory: 0, reobservations: 0, observationDetails: 0, observationChars: 0, issueSummaryChars: 0 } });
-export type GateResult = { passed: boolean; unmet: GateItem[]; returnedModels: string[]; inputBudget: InputBudgetReport;
+export type GateResult = { conditionNeutrality: "not_measured; verified_by_regression";
+  referent: { attempts: number; known: number; unknown: number; inputBudget: InputBudgetReport };
+  passed: boolean; unmet: GateItem[]; returnedModels: string[]; inputBudget: InputBudgetReport;
   counts: { turns: number; initial: number; targeted: number; requests: number; unverified: number; invalidDecisions: number;
     construal: number; partial: number; multiple: number; denial: number; progress: number; stagnation: number } };
 
@@ -116,18 +130,44 @@ export function evaluateTrialGate(trial: TrialReceipt): GateResult {
   if (requests.length !== targeted.length || targeted.some(o => !o.succeeded)) unmet.add("reobservation_mismatch");
   const models = new Set<string>();
   const inputBudget = emptyBudget();
-  const countBudget = (budget: DecisionInputBudget | null | undefined) => {
-    inputBudget.calls++;
+  const referent = { attempts: trial.referents.length, known: 0, unknown: 0, inputBudget: emptyBudget() };
+  const countBudget = (budget: DecisionInputBudget | null | undefined, report = inputBudget, required = true) => {
+    report.calls++;
     if (!budget || budget.maxChars !== 20000 || !Number.isSafeInteger(budget.stateChars) || budget.stateChars < 1 || budget.stateChars > budget.maxChars ||
-        !budget.omitted || Object.keys(inputBudget.omitted).some(key => !Number.isSafeInteger(budget.omitted[key as keyof typeof budget.omitted]) || budget.omitted[key as keyof typeof budget.omitted] < 0)) {
-      inputBudget.missingCalls++; unmet.add("input_budget_unreported");
+        !budget.omitted || Object.keys(report.omitted).some(key => !Number.isSafeInteger(budget.omitted[key as keyof typeof budget.omitted]) || budget.omitted[key as keyof typeof budget.omitted] < 0)) {
+      report.missingCalls++; if (required) unmet.add("input_budget_unreported");
     } else {
-      if (Object.values(budget.omitted).some(n => n > 0)) inputBudget.omittingCalls++;
-      for (const key of Object.keys(inputBudget.omitted) as Array<keyof typeof budget.omitted>) inputBudget.omitted[key] += budget.omitted[key];
+      if (Object.values(budget.omitted).some(n => n > 0)) report.omittingCalls++;
+      for (const key of Object.keys(report.omitted) as Array<keyof typeof budget.omitted>) report.omitted[key] += budget.omitted[key];
     }
   };
   for (const failure of trial.failedDecisionInputs ?? []) countBudget(failure.inputBudget);
+  if (trial.referents.length !== trial.turns.length || trial.referents.some(r => !trial.turns.some(t => t.turn === r.turn))) unmet.add("referent_missing");
+  let memo = initial[0]?.memo;
+  for (const attempt of trial.referents) {
+    const estimate = attempt.estimate, labels = [...trial.anchors.map(a => a.id), "none", "multiple"];
+    const fullScores = !!estimate.scores && sameSet(Object.keys(estimate.scores), labels) &&
+      Object.values(estimate.scores).every(n => typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= 1);
+    if (estimate.status === "ok") referent.known++; else if (estimate.status === "unknown") referent.unknown++;
+    countBudget(estimate.inputBudget, referent.inputBudget, estimate.status === "ok");
+    if (!["ok", "unknown"].includes(estimate.status) || estimate.calibrated !== false ||
+        (estimate.status === "ok" ? !fullScores || !isGroundingModel(estimate.model, "typesafe/jev-1.14") || estimate.costUsd === null || estimate.inputBudget === null : estimate.scores !== null) ||
+        (estimate.model !== null && !isGroundingModel(estimate.model, "typesafe/jev-1.14")) ||
+        (estimate.responseId !== null && (!estimate.model || !/^gen-[A-Za-z0-9_-]{1,124}$/u.test(estimate.responseId))) ||
+        !(estimate.costUsd === null || typeof estimate.costUsd === "number" && Number.isFinite(estimate.costUsd) && estimate.costUsd >= 0) ||
+        !Number.isFinite(estimate.latencyMs) || estimate.latencyMs < 0 || !/^[a-f0-9]{64}$/u.test(attempt.inputSha256)) unmet.add("referent_evidence_invalid");
+    if (estimate.model) models.add(estimate.model);
+  }
   for (const turn of trial.turns) {
+    const attempts = trial.referents.filter(r => r.turn === turn.turn), attempt = attempts[0];
+    if (attempts.length !== 1 || !attempt || !Number.isSafeInteger(attempt.order) ||
+        !(attempt.order > (initial[0]?.order ?? Infinity)) || (turn.decisionOrder.length > 0 && attempt.order >= turn.decisionOrder[0])) unmet.add("referent_missing");
+    if (!memo || !attempt || !isDeepStrictEqual(attempt.observationMemo, memoIdentity(memo))) unmet.add("referent_memo_mismatch");
+    const expectedReferent = attempt ? { ...attempt.estimate, turnIndex: turn.turn, observationMemo: attempt.observationMemo } : null;
+    if (turn.committed && !isDeepStrictEqual(turn.humanReferent, expectedReferent)) unmet.add("referent_evidence_invalid");
+    if (turn.decisionReferents.length !== turn.decisions.length || turn.decisionInputHashes.length !== turn.decisions.length ||
+        turn.decisionReferents.some(material => !attempt || !isDeepStrictEqual(material, { status: attempt.estimate.status, scores: attempt.estimate.scores }))) unmet.add("referent_action_coupled");
+    if (turn.publicText && /human_?referent|指示対象分布|(?:"?(?:scores|calibrated|observationMemo)"?\s*:)/iu.test(turn.publicText.normalize("NFKC"))) unmet.add("referent_publication");
     if (!turn.traceMatches) unmet.add("trace_mismatch");
     const reobservations = targeted.filter(o => o.turn === turn.turn);
     const turnRequests = turn.decisions.filter(d => d.action === "request_observation");
@@ -144,10 +184,13 @@ export function evaluateTrialGate(trial: TrialReceipt): GateResult {
         request.figureIds.some(id => !trial.anchors.some(a => a.id === id)) ||
         !(observed.order > turn.decisionOrder[i] && observed.order < turn.decisionOrder[i + 1])) unmet.add("reobservation_mismatch");
     }
-    for (const decision of turn.decisions) {
+    for (const [decisionIndex, decision] of turn.decisions.entries()) {
       const evidence = decision.evidence;
       if (typeof evidence?.model === "string") models.add(evidence.model);
       const expectedStages = ["propose_name", "agree", "confirm", "repair", "request_observation"].includes(decision.action) ? 2 : 1;
+      const inputs = turn.decisionInputHashes[decisionIndex];
+      if (!inputs || !/^[a-f0-9]{64}$/u.test(inputs.actionTarget) ||
+          (expectedStages === 2 ? typeof inputs.detail !== "string" || !/^[a-f0-9]{64}$/u.test(inputs.detail) : inputs.detail !== null)) unmet.add("referent_action_coupled");
       const stages = evidence?.stages;
       if (!Array.isArray(stages) || stages.length !== expectedStages) unmet.add("jev_evidence_invalid");
       if (!stages?.length) countBudget(undefined);
@@ -193,6 +236,9 @@ export function evaluateTrialGate(trial: TrialReceipt): GateResult {
         involved.every(id => turn.ledger[id]?.status !== "agreed");
       if (ok) counts.partial++; else unmet.add("script_mismatch");
     }
+    for (const observation of reobservations) if (memo && observation.result && observation.succeeded) {
+      try { memo = mergeReobservation(memo, observation.result); } catch { unmet.add("referent_memo_mismatch"); }
+    }
   }
   if (counts.unverified) unmet.add("unverified_updates");
   // Count the final snapshot once; accumulating snapshots repeats prior entries.
@@ -223,7 +269,7 @@ export function evaluateTrialGate(trial: TrialReceipt): GateResult {
     if (repair.progress === "changed" && changed) counts.progress++;
     if (repair.progress === "unchanged" && !changed) counts.stagnation++;
   }
-  return { passed: !unmet.size, unmet: [...unmet], returnedModels: [...models], counts, inputBudget };
+  return { conditionNeutrality: "not_measured; verified_by_regression", referent, passed: !unmet.size, unmet: [...unmet], returnedModels: [...models], counts, inputBudget };
 }
 
 export function evaluateRunGate(trials: readonly TrialReceipt[], expectedCaseIds: readonly string[]): GateResult & {
@@ -235,6 +281,12 @@ export function evaluateRunGate(trials: readonly TrialReceipt[], expectedCaseIds
   const counts = { turns: 0, initial: 0, targeted: 0, requests: 0, unverified: 0, invalidDecisions: 0, construal: 0, partial: 0, multiple: 0,
     denial: 0, progress: 0, stagnation: 0 };
   const inputBudget = emptyBudget();
+  const referent = { attempts: 0, known: 0, unknown: 0, inputBudget: emptyBudget() };
+  for (const c of cases) {
+    for (const key of ["attempts", "known", "unknown"] as const) referent[key] += c.referent[key];
+    for (const key of ["calls", "omittingCalls", "missingCalls"] as const) referent.inputBudget[key] += c.referent.inputBudget[key];
+    for (const key of Object.keys(referent.inputBudget.omitted) as Array<keyof typeof referent.inputBudget.omitted>) referent.inputBudget.omitted[key] += c.referent.inputBudget.omitted[key];
+  }
   for (const c of cases) for (const key of Object.keys(counts) as Array<keyof typeof counts>) counts[key] += c.counts[key];
   for (const c of cases) {
     inputBudget.calls += c.inputBudget.calls; inputBudget.omittingCalls += c.inputBudget.omittingCalls; inputBudget.missingCalls += c.inputBudget.missingCalls;
@@ -243,6 +295,19 @@ export function evaluateRunGate(trials: readonly TrialReceipt[], expectedCaseIds
   for (const [key, code] of [["construal", "construal_missing"], ["partial", "partial_agreement_missing"], ["multiple", "multiple_candidates_missing"],
     ["denial", "denial_missing"], ["progress", "repair_progress_missing"], ["stagnation", "repair_stagnation_missing"],
     ["targeted", "reobservation_missing"]] as const) if (!counts[key]) unmet.add(code);
-  return { passed: !unmet.size, unmet: [...unmet], returnedModels: [...new Set(cases.flatMap(c => c.returnedModels))], counts, inputBudget,
+  return { conditionNeutrality: "not_measured; verified_by_regression", referent, passed: !unmet.size, unmet: [...unmet], returnedModels: [...new Set(cases.flatMap(c => c.returnedModels))], counts, inputBudget,
     cases, caseIds: trials.map(t => t.caseId) };
+}
+
+
+/** Compare only paired prefixes. A single live run does not establish neutrality. */
+export function compareConditionInputs(left?: readonly TrialReceipt[], right?: readonly TrialReceipt[]): "not_measured" | "matched" | "mismatch" {
+  if (!left?.length || !right?.length) return "not_measured";
+  const project = (trials: readonly TrialReceipt[]) => trials.map(t => ({ caseId: t.caseId, completed: t.completed,
+    referents: t.referents.map(r => ({ turn: r.turn, inputSha256: r.inputSha256, observationMemo: r.observationMemo })),
+    decisions: t.turns.map(turn => ({ turn: turn.turn, inputs: turn.decisionInputHashes })) })).sort((a, b) => a.caseId.localeCompare(b.caseId));
+  const valid = (trials: readonly TrialReceipt[]) => new Set(trials.map(t => t.caseId)).size === trials.length &&
+    trials.every(t => t.completed && t.referents.length === t.expectedTurns && evaluateTrialGate(t).passed);
+  return valid(left) && valid(right) &&
+    isDeepStrictEqual(project(left), project(right)) ? "matched" : "mismatch";
 }
