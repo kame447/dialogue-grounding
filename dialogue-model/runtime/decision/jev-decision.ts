@@ -8,6 +8,8 @@ import type { JevAction, JevDecision, JevDecisionClient, JevDecisionInput, JevDe
   JevQuestionLayout, JevTarget, RepairHistoryEntry, DecisionInputBudget } from "./contract.ts";
 
 export const JEV_DECISION_MODEL = "typesafe/jev-1.14";
+/** Finite ingestion guards, separate from the smaller retained working windows. */
+export const JEV_DECISION_INPUT_LIMITS = Object.freeze({ publicTurns: 4096, repairHistory: 4096, publicNames: 4096, reobservations: 64 });
 const CODES = ["invalid_options", "invalid_input", "invalid_response", "inconsistent_decision", "model_mismatch", "key_unavailable", "key_leak",
   "unauthorized", "payment_required", "not_found", "rate_limited", "upstream_error", "network_error", "timeout", "aborted", "cost_cap", "cost_unreported", "busy"] as const;
 export type JevDecisionErrorCode = typeof CODES[number];
@@ -78,9 +80,9 @@ function cleanTarget(value: unknown, slots: readonly string[], code: JevDecision
 function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "joint_choices_v1") {
   if (layout !== "joint_choices_v1") fail("invalid_options");
   if (!input || !positive(input.turn) || !strings(input.ownSlots, 6, 160) || input.ownSlots.length !== 6 || unique(input.ownSlots).length !== 6 ||
-      !Array.isArray(input.publicTurns) || input.publicTurns.length > 256 || !text(input.issueSummary, 12000, true) ||
-      !Array.isArray(input.priorClaims) || input.priorClaims.length > 160 || !Array.isArray(input.repairHistory) || input.repairHistory.length > 64 ||
-      !Array.isArray(input.publicNames) || input.publicNames.length > 128 ||
+      !Array.isArray(input.publicTurns) || input.publicTurns.length > JEV_DECISION_INPUT_LIMITS.publicTurns || !text(input.issueSummary, 12000, true) ||
+      !Array.isArray(input.priorClaims) || input.priorClaims.length > 160 || !Array.isArray(input.repairHistory) || input.repairHistory.length > JEV_DECISION_INPUT_LIMITS.repairHistory ||
+      !Array.isArray(input.publicNames) || input.publicNames.length > JEV_DECISION_INPUT_LIMITS.publicNames ||
       !(input.reobservationAllowed === undefined || typeof input.reobservationAllowed === "boolean")) fail("invalid_input");
   const slots = [...input.ownSlots];
   const ownIds = (v: unknown): v is string[] => strings(v, 6, 160) && unique(v).length === v.length && v.every(s => slots.includes(s));
@@ -96,7 +98,7 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "joint_cho
     const f = figures.find(f => f?.id === figureId);
     if (!f || !Array.isArray(f.holistic) || f.holistic.length > 32 || !f.analytic || !strings(f.analytic.shapes, 32, 1000) ||
         !text(f.analytic.composition, 2000, true) || !strings(f.analytic.relations, 32, 1000) || !strings(f.unknowns, 32, 1000) ||
-        !Array.isArray(f.reobservations) || f.reobservations.length > 32) fail("invalid_input");
+        !Array.isArray(f.reobservations) || f.reobservations.length > JEV_DECISION_INPUT_LIMITS.reobservations) fail("invalid_input");
     const holistic = f.holistic.map(h => {
       if (!h || !text(h.construal, 400) || !strings(h.basis, 32, 1000) || h.status !== "hypothesis") fail("invalid_input");
       return { construal: h.construal, basis: [...h.basis], status: "hypothesis" as const };
@@ -153,27 +155,36 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "joint_cho
     reobservations: 0, observationDetails: 0, observationChars: 0, issueSummaryChars: 0 };
   const material = { turn: input.turn, publicTurns, ownSlots: slots, observations, issueSummary: input.issueSummary,
     priorClaims, repairHistory, previousAction, publicNames, reobservationAllowed, inputBudget: { maxChars: 20000, omitted } };
-  let state = JSON.stringify(material);
+  let state = "";
   const over = () => { state = JSON.stringify(material); return state.length > 20000; };
-  // Engineering compaction only: leave the newest repairs/visual checks until
-  // older material is exhausted. Omission is counted, never interpreted as resolution.
-  while (over() && repairHistory.length > 4) { repairHistory.shift(); omitted.repairHistory++; }
-  for (const o of observations) while (over() && o.reobservations.length > 1) { o.reobservations.shift(); omitted.reobservations++; }
   const latestAi = [...publicTurns].reverse().find(t => t.speaker === "ai")?.turn;
-  const dropPublic = () => {
-    const at = publicTurns.findIndex(t => t.turn !== input.turn && t.turn !== latestAi && t.turn !== previousAction?.turn);
-    if (at < 0) return false;
-    publicTurns.splice(at, 1); omitted.publicTurns++;
+  const dropPublic = (count = 1) => {
+    const removable = publicTurns.filter(t => t.turn !== input.turn && t.turn !== latestAi && t.turn !== previousAction?.turn);
+    const dropped = new Set(removable.slice(0, count));
+    if (!dropped.size) return false;
+    publicTurns.splice(0, publicTurns.length, ...publicTurns.filter(t => !dropped.has(t))); omitted.publicTurns += dropped.size;
     // A claim/name whose source is omitted cannot serve as independent public evidence.
-    for (let i = priorClaims.length - 1; i >= 0; i--) if (!publicTurns.some(t => t.turn === priorClaims[i].sourceTurn && t.speaker === priorClaims[i].speaker)) {
+    const sources = new Set(publicTurns.map(t => `${t.turn}:${t.speaker}`)), turns = new Set(publicTurns.map(t => t.turn));
+    for (let i = priorClaims.length - 1; i >= 0; i--) if (!sources.has(`${priorClaims[i].sourceTurn}:${priorClaims[i].speaker}`)) {
       priorClaims.splice(i, 1); omitted.claims++;
     }
-    for (let i = publicNames.length - 1; i >= 0; i--) if (!publicTurns.some(t => t.turn === publicNames[i].sourceTurn)) {
+    for (let i = publicNames.length - 1; i >= 0; i--) if (!turns.has(publicNames[i].sourceTurn)) {
       publicNames.splice(i, 1); omitted.publicNames++;
     }
     return true;
   };
-  while (over() && publicTurns.length > 16 && dropPublic()) { /* deterministic oldest first */ }
+  // Retained windows are not ingestion limits. Long-lived C histories are kept
+  // intact by the caller; every removed item is accounted for in this request.
+  repairHistory.sort((a, b) => a.turn - b.turn);
+  publicNames.sort((a, b) => a.sourceTurn - b.sourceTurn);
+  if (repairHistory.length > 64) { const n = repairHistory.length - 64; repairHistory.splice(0, n); omitted.repairHistory += n; }
+  if (publicNames.length > 128) { const n = publicNames.length - 128; publicNames.splice(0, n); omitted.publicNames += n; }
+  if (publicTurns.length > 256) dropPublic(publicTurns.length - 256);
+  // Engineering compaction only: leave the newest repairs/visual checks until
+  // older material is exhausted. Batched drops avoid repeated large serializations.
+  while (over() && repairHistory.length > 4) { const n = Math.ceil((repairHistory.length - 4) / 2); repairHistory.splice(0, n); omitted.repairHistory += n; }
+  for (const o of observations) while (over() && o.reobservations.length > 1) { const n = Math.ceil((o.reobservations.length - 1) / 2); o.reobservations.splice(0, n); omitted.reobservations += n; }
+  while (over() && publicTurns.length > 16 && dropPublic(Math.ceil((publicTurns.length - 16) / 2))) { /* oldest first */ }
   while (over() && priorClaims.length > 16) { priorClaims.shift(); omitted.claims++; }
   for (const o of observations) {
     for (const h of o.holistic) while (over() && h.basis.length > 1) { h.basis.pop(); omitted.observationDetails++; }

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { ACTIONS } from "../dialogue-model/runtime/judgment/schema.mjs";
 import { JEV_ACTIONS } from "../dialogue-model/runtime/decision/contract.ts";
 import type { JevDecision, JevDecisionInput } from "../dialogue-model/runtime/decision/contract.ts";
-import { buildJevDecisionPayload, validateJevDecision, JevDecisionError, JEV_ACTION_CRITERIA } from "../dialogue-model/runtime/decision/jev-decision.ts";
+import { buildJevDecisionPayload, validateJevDecision, JevDecisionError, JEV_ACTION_CRITERIA, JEV_DECISION_INPUT_LIMITS } from "../dialogue-model/runtime/decision/jev-decision.ts";
 import { createMockJevDecisionClient } from "../dialogue-model/runtime/decision/mocks.ts";
 
 function fixture(): JevDecisionInput {
@@ -118,6 +118,47 @@ test("long indispensible public utterances fail explicitly rather than being sil
   input.publicNames = [];
   input.publicTurns = [{ turn: 1, speaker: "ai", text: "あ".repeat(12000) }, { turn: 2, speaker: "human", text: "い".repeat(12000) }];
   assert.throws(() => buildJevDecisionPayload(input), code("invalid_input"));
+});
+
+test("more than 64 repairs and 128 public names compact with exact counts and retain the newest entries", () => {
+  const input = fixture();
+  const names = Array.from({ length: 200 }, (_, i) => `名称${i}`);
+  input.publicTurns = [{ turn: 1, speaker: "ai", text: names.join("、") }, input.publicTurns[1]];
+  input.previousAction = null;
+  input.publicNames = names.map(name => ({ name, figureId: "own-0", sourceTurn: 1 }));
+  input.repairHistory = Array.from({ length: 200 }, (_, i) => ({ turn: 1, issueId: `issue-${i}`, action: "confirm" as const,
+    question: "確認", partnerClaims: [], candidatesBefore: ["own-0"], candidatesAfter: ["own-0"], addedClaimIds: [], removedClaimIds: [], progress: "unknown" as const }));
+  const state = JSON.parse(buildJevDecisionPayload(input).state);
+  assert.ok(state.publicNames.some((n: { name: string }) => n.name === "名称199"));
+  assert.ok(state.repairHistory.some((r: { issueId: string }) => r.issueId === "issue-199"));
+  assert.equal(state.inputBudget.omitted.publicNames, 200 - state.publicNames.length);
+  assert.equal(state.inputBudget.omitted.repairHistory, 200 - state.repairHistory.length);
+  assert.ok(JSON.stringify(state).length <= 20000);
+  assert.equal(input.publicNames.length, 200);
+  assert.equal(input.repairHistory.length, 200, "the caller's retained history is never modified");
+});
+
+test("large retained public histories compact, and A's 64-entry visual history is accepted", () => {
+  const input = fixture();
+  input.turn = 301; input.previousAction = null; input.publicNames = [];
+  input.publicTurns = [...Array.from({ length: 300 }, (_, i) => ({ turn: i + 1, speaker: i % 2 ? "ai" as const : "human" as const, text: `公開${i}` })),
+    { turn: 301, speaker: "human", text: "現在の発話" }];
+  const state = JSON.parse(buildJevDecisionPayload(input).state);
+  assert.equal(state.publicTurns.at(-1).text, "現在の発話");
+  assert.ok(state.publicTurns.some((t: { turn: number }) => t.turn === 300));
+  assert.equal(state.inputBudget.omitted.publicTurns, 301 - state.publicTurns.length);
+  const f = input.observations.figures[0];
+  f.reobservations = Array.from({ length: 64 }, (_, i) => ({ observedAt: "2026-10-20T00:00:00.000Z", figureId: f.id,
+    issue: { aspect: "part", question: "部分の確認", partnerConstrual: null }, supports: [`最新特徴${i}`], contradicts: [], unknown: [] }));
+  assert.doesNotThrow(() => buildJevDecisionPayload(input));
+});
+
+test("finite ingestion safety bounds remain typed errors rather than unrecorded clipping", () => {
+  const input = fixture();
+  const repair = { turn: 1, issueId: null, action: "confirm" as const, question: "確認", partnerClaims: [], candidatesBefore: [], candidatesAfter: [], addedClaimIds: [], removedClaimIds: [], progress: "unknown" as const };
+  assert.throws(() => buildJevDecisionPayload({ ...input, repairHistory: Array(JEV_DECISION_INPUT_LIMITS.repairHistory + 1).fill(repair) }), code("invalid_input"));
+  assert.throws(() => buildJevDecisionPayload({ ...input, publicNames: Array(JEV_DECISION_INPUT_LIMITS.publicNames + 1).fill(input.publicNames[0]) }), code("invalid_input"));
+  assert.throws(() => buildJevDecisionPayload({ ...input, publicTurns: Array(JEV_DECISION_INPUT_LIMITS.publicTurns + 1).fill(input.publicTurns[0]) }), code("invalid_input"));
 });
 
 test("invalid public name provenance, observation ids and current pre-actions fail before transport", () => {
