@@ -5,7 +5,7 @@
 //
 //   node dialogue-model/runtime/diagnostics/jev-shadow-eval/run.ts \
 //     --record <record.json> [--cases <cases.jsonl>] [--failures <failures.jsonl>] \
-//     --out <private dir> [--client mock|live --max-calls N]
+//     --out <private dir> [--client mock|live|local-openrouter --max-calls N]
 //
 // The mock client is the default. A live client needs --client live and an
 // explicit --max-calls budget, and only receives the AI session's own turns and
@@ -21,6 +21,7 @@ import { toJudgeInput as caseJudgeInput } from "../../jev-grounding/evalcase.ts"
 import type { GroundingEvalCase } from "../../jev-grounding/evalcase.ts";
 import { auditCases, auditRecord, isSendable, toJudgeInput } from "./audit.ts";
 import { createMockJevAxesClient } from "./mock-client.ts";
+import { createLocalOpenRouterJudge, keychainKeyReader } from "./local-openrouter.ts";
 import { caseProbe, summarizeCases, summarizeTurns, turnResult } from "./metrics.ts";
 import type { CaseResult, TurnResult } from "./metrics.ts";
 import { agreedSlotOutcome, replayItems } from "./replay.ts";
@@ -124,6 +125,10 @@ export type RunOptions = {
 };
 
 /** Real calls only for synthetic cases explicitly marked sendable. */
+/** Failures that will not recover within a run, or must not be retried. */
+export const STOP_CODES: ReadonlySet<string> = new Set(["not_found", "budget_exhausted", "payment_required", "unauthorized",
+  "key_unavailable", "key_leak", "cost_cap", "cost_unreported"]);
+
 export const liveAllowed = (c: EvalCaseLike) => c.source === "synthetic" && isSendable(c);
 // Note: a probe reply never reaches the judge; only history up to the focal turn does.
 
@@ -147,7 +152,7 @@ export async function runShadow({ record = null, cases = [], knownFailures = [],
       const code = errorCode(error);
       turns.push(turnResult(item, { error: code }, matched));
       // A missing route or exhausted budget will not recover within the run.
-      if (code === "not_found" || code === "budget_exhausted" || code === "payment_required") stopped = code;
+      if (STOP_CODES.has(code)) stopped = code;
     }
   }
   const caseResults: CaseResult[] = [];
@@ -166,7 +171,7 @@ export async function runShadow({ record = null, cases = [], knownFailures = [],
     } catch (error) {
       const code = errorCode(error);
       caseResults.push({ ...base, verdict: null, error: code, probe: caseProbe(c, null) });
-      if (code === "not_found" || code === "budget_exhausted" || code === "payment_required") stopped = code;
+      if (STOP_CODES.has(code)) stopped = code;
     }
   }
   const calls = summarizeCalls(judge.log);
@@ -174,7 +179,7 @@ export async function runShadow({ record = null, cases = [], knownFailures = [],
     meta: {
       recordId: typeof record?.recordId === "string" ? record.recordId.slice(0, 8) : null,
       strategy: record?.strategy ?? null,
-      client: client.kind,
+      client: client.label ?? client.kind,
       models: [...new Set(judge.log.filter((c) => c.model).map((c) => c.model!))],
       criteriaVersions: [...new Set(judge.log.filter((c) => c.ok).map((c) => c.criteriaVersion ?? "unversioned"))],
       maxCalls: live ? maxCalls : null,
@@ -238,21 +243,32 @@ function args(argv: string[]) {
   return out;
 }
 
+export type MainDeps = { readKey?: () => Promise<string>; fetchImpl?: (url: string, init: RequestInit) => Promise<Response> };
+
 function liveClient(): JevAxesClient {
   const judge = createGroundingJudgeClient(loadConfig(process.env));
   return groundingAxesClient({ buildState: buildGroundingEvidence, judge: (request) => judge.judge(request) });
 }
 
-export async function main(argv = process.argv.slice(2), log = console.log) {
+export async function main(argv = process.argv.slice(2), log = console.log, deps: MainDeps = {}) {
   const a = args(argv);
   if (!a.out) throw new Error("--out is required");
   // Results are private: refuse any directory inside a Git worktree.
   const out: string = await outsideRepositoryDirectory(resolve(a.out));
   const clientKind = a.client ?? "mock";
-  if (clientKind !== "mock" && clientKind !== "live") throw new Error("--client must be mock or live");
-  const live = clientKind === "live";
+  if (!["mock", "live", "local-openrouter"].includes(clientKind)) throw new Error("--client must be mock, live or local-openrouter");
+  const local = clientKind === "local-openrouter";
+  const live = clientKind === "live" || local;
   const maxCalls = live ? Number(a["max-calls"]) : 0;
-  if (live) {
+  if (local) {
+    // Temporary direct diagnostic (researcher-approved): synthetic cases only, <= 51 calls, <= $0.05.
+    if (!Number.isSafeInteger(maxCalls) || maxCalls < 1 || maxCalls > 51) throw new Error("--client local-openrouter needs --max-calls between 1 and 51");
+    if (a.record || a.failures) throw new Error("--client local-openrouter takes synthetic --cases only");
+    if (a["cost-cap-usd"] !== undefined && !(Number(a["cost-cap-usd"]) > 0 && Number(a["cost-cap-usd"]) <= 0.05)) {
+      throw new Error("--cost-cap-usd must be in (0, 0.05]");
+    }
+    if (!a.cases) throw new Error("--client local-openrouter needs --cases");
+  } else if (live) {
     // Real calls are opt-in per run, need an approved budget (team total <= 50)
     // and only go to synthetic cases; the AI-session replay stays mock.
     if (!Number.isSafeInteger(maxCalls) || maxCalls < 1 || maxCalls > 50) throw new Error("--client live needs --max-calls between 1 and 50");
@@ -264,14 +280,24 @@ export async function main(argv = process.argv.slice(2), log = console.log) {
   const cases = rawCases.map(parseCase).filter((c): c is EvalCaseLike => c !== null);
   const rawFailures = a.failures ? parseJsonl(resolve(a.failures)) : [];
   const knownFailures = rawFailures.map(parseKnownFailure).filter((f): f is KnownFailure => f !== null);
-  const client = live ? liveClient() : createMockJevAxesClient();
+  if (local && (rawCases.length !== cases.length || !cases.length || !cases.every(liveAllowed))) {
+    throw new Error("--client local-openrouter refuses the file: every line must be a valid synthetic case marked externalModelAllowed");
+  }
+  const localJudge = local ? createLocalOpenRouterJudge({ readKey: deps.readKey ?? keychainKeyReader(), fetchImpl: deps.fetchImpl,
+    // Split the $0.05 budget across invocations (e.g. smoke / main / holdout-add) so their sum stays within it.
+    costCapUsd: a["cost-cap-usd"] === undefined ? undefined : Number(a["cost-cap-usd"]) }) : null;
+  const client: JevAxesClient = localJudge
+    ? { ...groundingAxesClient({ buildState: buildGroundingEvidence, judge: (request) => localJudge.judge(request) }), label: "local-openrouter" }
+    : live ? liveClient() : createMockJevAxesClient();
   const result = await runShadow({ record, cases, knownFailures, client, maxCalls });
   const input = { casesRead: rawCases.length, casesInvalid: rawCases.length - cases.length, failuresRead: rawFailures.length, failuresInvalid: rawFailures.length - knownFailures.length };
+  const files: [string, string][] = [["shadow-run.json", JSON.stringify({ input, ...result }, null, 2) + "\n"],
+    ["shadow-report.private.md", privateMarkdown(result, input)], ["shadow-summary.sanitized.md", sanitizedMarkdown(result, input)]];
+  // Last barrier: nothing that contains the key is ever written.
+  if (localJudge && files.some(([, body]) => localJudge.leaks(body))) throw new Error("key leak detected; nothing was written");
   mkdirSync(out, { recursive: true, mode: 0o700 });
-  const write = (name: string, body: string) => { const p = resolve(out, name); writeFileSync(p, body, { mode: 0o600 }); chmodSync(p, 0o600); return p; };
-  write("shadow-run.json", JSON.stringify({ input, ...result }, null, 2) + "\n");
-  write("shadow-report.private.md", privateMarkdown(result, input));
-  write("shadow-summary.sanitized.md", sanitizedMarkdown(result, input));
+  chmodSync(out, 0o700);
+  for (const [name, body] of files) { const p = resolve(out, name); writeFileSync(p, body, { mode: 0o600 }); chmodSync(p, 0o600); }
   log(JSON.stringify({ out, client: result.meta.client, aiTurns: result.turns.aiTurns, cases: result.cases.cases, calls: result.meta.calls.total, failed: result.meta.calls.failed, ...input }));
   return result;
 }

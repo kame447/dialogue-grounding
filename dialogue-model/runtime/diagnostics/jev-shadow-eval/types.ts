@@ -39,6 +39,8 @@ export type JevAxesVerdict = {
 export type JevAxesClient = {
   /** "mock" never leaves the process; anything else is treated as an external model. */
   readonly kind: "mock" | "live";
+  /** Optional run label, e.g. "local-openrouter" for the temporary direct diagnostic. */
+  readonly label?: string;
   judgeAxes(input: JevAxesInput): Promise<JevAxesVerdict>;
 };
 
