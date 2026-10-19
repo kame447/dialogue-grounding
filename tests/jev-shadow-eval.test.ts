@@ -12,6 +12,7 @@ import { mockVerdict, createMockJevAxesClient } from "../dialogue-model/runtime/
 import { runShadow, budgeted, groundingAxesClient, parseCase, parseKnownFailure, main, liveAllowed } from "../dialogue-model/runtime/diagnostics/jev-shadow-eval/run.ts";
 import { buildGroundingEvidence } from "../dialogue-model/runtime/grounding/evidence.ts";
 import { createMockGroundingJudge } from "../dialogue-model/runtime/grounding/client.ts";
+import { compareRuns } from "../dialogue-model/runtime/diagnostics/jev-shadow-eval/compare.ts";
 import type { EvalCaseLike, JevAxesClient, JevAxesInput } from "../dialogue-model/runtime/diagnostics/jev-shadow-eval/types.ts";
 
 const SECRET_TEXT = "合成テキスト固有語ZQX";
@@ -200,6 +201,40 @@ test("adapter runs end to end on the real grounding evidence builder with its mo
   assert.equal(run.cases.bySplit.dev.headline.target.agreement, 1);
   assert.equal(states.length, 1);
   assert.ok(!states[0].includes("supported\"") && !states[0].includes("derived"), "no gold or quality in the judge state");
+});
+
+test("no_name (grounding-criteria/v2): gold and verdicts survive parsing and appear in the matrices", async () => {
+  const c = syntheticCase({ caseId: "nn", expected: { target: "supported", name: "no_name" }, labelQuality: "derived", goldVersion: "synthetic-gold/v2" });
+  assert.ok(parseCase(c), "a no_name gold case is not dropped");
+  const v2: JevAxesClient = { kind: "live", async judgeAxes() { return { target: "supported", name: "no_name", criteriaVersion: "grounding-criteria/v2", model: "m", latencyMs: 1 }; } };
+  const run = await runShadow({ cases: [c, syntheticCase({ caseId: "u", expected: { target: "supported", name: "unclear" }, labelQuality: "derived" })], client: v2, maxCalls: 2 });
+  assert.deepEqual(run.meta.calls.failureCodes, {}, "a no_name verdict is valid");
+  assert.deepEqual(run.meta.criteriaVersions, ["grounding-criteria/v2"]);
+  const name = run.cases.bySplit.dev.headline.name;
+  assert.equal(name.matrix.no_name.no_name, 1);
+  assert.equal(name.matrix.unclear.no_name, 1);
+  assert.equal(name.recall.no_name, 1);
+  assert.equal(name.precision.no_name, 0.5);
+  assert.deepEqual(run.cases.noNameErrors, [{ caseId: "u", split: "dev", gold: "unclear", verdict: "no_name" }]);
+  assert.deepEqual(run.cases.goldVersions, { "synthetic-gold/v2": 1, unversioned: 1 });
+  // An agreement claim while no name is on the table contradicts the evidence.
+  assert.deepEqual(shadowFlags(["agreement"], { target: "supported", name: "no_name" }), ["contradictory_agreement"]);
+  assert.equal(mockVerdict({ history: [{ speaker: "self", text: "どれから？" }, { speaker: "partner", text: "三角が上のやつ" }] }).name, "no_name");
+  assert.equal(mockVerdict({ history: [{ speaker: "self", text: "どれから？" }, { speaker: "partner", text: "鳥っぽいやつ" }] }).name, "no_name", "an impression alone is not a proposal (rule 6813)");
+  assert.equal(mockVerdict({ history: [{ speaker: "self", text: "それを「鳥」と呼びませんか？" }, { speaker: "partner", text: "うーん" }] }).name, "unclear");
+});
+
+test("compareRuns lines up two runs by case id and states the limits", () => {
+  const row = (caseId: string, name: string) => ({ caseId, split: "dev", expected: { target: "supported", name: "no_name" }, verdict: { target: "supported", name } });
+  const block = { target: { agreement: 1, scored: 2 }, name: { agreement: 0.5, scored: 2 } };
+  const oldRun = { meta: { models: ["m"] }, cases: { bySplit: { dev: { byQuality: { weak: block } } } } };
+  const cmp = compareRuns(oldRun, { meta: { models: ["m"], criteriaVersions: ["grounding-criteria/v2"] }, cases: { bySplit: { dev: { byQuality: { derived: block } } } },
+    caseResults: [row("a", "no_name")] });
+  assert.equal(cmp.perCase.compared, 0);
+  assert.ok(cmp.limits.some((l) => /per-case/.test(l)));
+  assert.deepEqual(cmp.old.bySplit.dev, { target: 1, targetScored: 2, name: 0.5, nameScored: 2 });
+  const both = compareRuns({ ...oldRun, caseResults: [row("a", "not_agreed")] }, { ...oldRun, caseResults: [row("a", "no_name")] });
+  assert.deepEqual(both.perCase.nameChanged, [{ caseId: "a", old: "not_agreed", new: "no_name", gold: "no_name" }]);
 });
 
 test("case audit: split leakage by group, historical marked sendable, label distribution", () => {

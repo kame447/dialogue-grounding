@@ -34,6 +34,7 @@ export type GroundingDeps = {
   buildState(input: { events: { seq: number; speaker: "human" | "ai"; text: string }[]; asOfSeq: number; aiHypothesis?: AiHypothesis | null }): { state: string };
   judge(request: { purpose: "grounding_jev"; state: string }): Promise<{
     model: string;
+    criteriaVersion?: string | null;
     identification: { level: string; scores?: Record<string, number> };
     nameAgreement: { level: string; scores?: Record<string, number> };
     usage: { inputTokens?: number | null; outputTokens?: number | null; costUsd?: number | null } | null;
@@ -51,7 +52,7 @@ export function groundingAxesClient(deps: GroundingDeps): JevAxesClient {
       return {
         target: v.identification.level as TargetLevel, name: v.nameAgreement.level as NameLevel,
         scores: { target: v.identification.scores, name: v.nameAgreement.scores },
-        model: v.model, latencyMs: v.latencyMs,
+        model: v.model, criteriaVersion: v.criteriaVersion ?? null, latencyMs: v.latencyMs,
         usage: v.usage && { inputTokens: v.usage.inputTokens ?? undefined, outputTokens: v.usage.outputTokens ?? undefined, costUsd: v.usage.costUsd ?? undefined },
       };
     },
@@ -62,7 +63,7 @@ export class BudgetExceededError extends Error {
   constructor() { super("live call budget exhausted"); this.name = "BudgetExceededError"; }
 }
 
-export type CallLog = { ok: boolean; code: string | null; latencyMs: number | null; model: string | null;
+export type CallLog = { ok: boolean; code: string | null; latencyMs: number | null; model: string | null; criteriaVersion: string | null;
   inputTokens: number; outputTokens: number; costUsd: number | null };
 
 /** Wraps a client so it refuses calls beyond the budget and records each call. */
@@ -79,10 +80,11 @@ export function budgeted(client: JevAxesClient, maxCalls: number) {
         if (!TARGET_LEVELS.includes(verdict?.target) || !NAME_LEVELS.includes(verdict?.name)) throw Object.assign(new Error("invalid verdict"), { code: "invalid_response" });
         const num = (v: unknown) => typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null;
         log.push({ ok: true, code: null, latencyMs: num(verdict.latencyMs), model: typeof verdict.model === "string" ? verdict.model.slice(0, 80) : null,
+          criteriaVersion: typeof verdict.criteriaVersion === "string" ? verdict.criteriaVersion.slice(0, 60) : null,
           inputTokens: num(verdict.usage?.inputTokens) ?? 0, outputTokens: num(verdict.usage?.outputTokens) ?? 0, costUsd: num(verdict.usage?.costUsd) });
         return verdict;
       } catch (error) {
-        log.push({ ok: false, code: errorCode(error), latencyMs: Math.round(performance.now() - started), model: null, inputTokens: 0, outputTokens: 0, costUsd: null });
+        log.push({ ok: false, code: errorCode(error), latencyMs: Math.round(performance.now() - started), model: null, criteriaVersion: null, inputTokens: 0, outputTokens: 0, costUsd: null });
         throw error;
       }
     },
@@ -152,6 +154,7 @@ export async function runShadow({ record = null, cases = [], knownFailures = [],
   for (const c of cases) {
     const q = (v: unknown) => typeof v === "string" ? v : c.labelQuality ?? "unspecified";
     const base = { caseId: c.caseId, split: c.split, source: c.source, labelQuality: c.labelQuality ?? "unspecified", expected: c.expected,
+      goldVersion: typeof c.goldVersion === "string" ? c.goldVersion.slice(0, 40) : null,
       axisQuality: { target: q(c.axisQuality?.target), name: q(c.axisQuality?.name) } };
     if (live && !liveAllowed(c)) { caseResults.push({ ...base, verdict: null, error: "not_sendable", probe: caseProbe(c, null) }); continue; }
     if (stopped) { caseResults.push({ ...base, verdict: null, error: "skipped_" + stopped, probe: caseProbe(c, null) }); continue; }
@@ -173,6 +176,7 @@ export async function runShadow({ record = null, cases = [], knownFailures = [],
       strategy: record?.strategy ?? null,
       client: client.kind,
       models: [...new Set(judge.log.filter((c) => c.model).map((c) => c.model!))],
+      criteriaVersions: [...new Set(judge.log.filter((c) => c.ok).map((c) => c.criteriaVersion ?? "unversioned"))],
       maxCalls: live ? maxCalls : null,
       calls,
       stopped,

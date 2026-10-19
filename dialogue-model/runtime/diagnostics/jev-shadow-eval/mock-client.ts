@@ -9,6 +9,8 @@ const DENIAL = /違う|ちが[うい]|じゃない|ではない|ない気|ない
 const CONFIRMED = /^(?:そう|それ|うん|はい|合って|同じ|あっ?てる|オッケー|OK|ok|おけ)|そうそう|それそれ|同じ|合ってる|それです|それだ/u;
 const NAME_OK = /それでいい|でいい|いいよ|いいね|いいです|オッケー|OK|賛成|決まり|それにしよ|それで/u;
 const NAMING = /と呼|って呼|名前|「[^」]{1,20}」/u;
+// Rule 6813: an impression (「鳥みたい」) is not a naming proposal; only an explicit proposal puts a name on the table.
+const PROPOSAL = /と呼|って呼|名前|に(?:しよう|しましょう)|でどう|でいいよ|「[^」]{1,20}」/u;
 
 export function mockVerdict(input: JevAxesInput): { target: TargetLevel; name: NameLevel } {
   const turns = input.history;
@@ -19,7 +21,8 @@ export function mockVerdict(input: JevAxesInput): { target: TargetLevel; name: N
   const denied = DENIAL.test(lastPartner);
   const target: TargetLevel = denied ? "contradicted" : CONFIRMED.test(lastPartner) && lastSelf ? "supported" : "insufficient";
   const selfNamed = NAMING.test(lastSelf);
-  const name: NameLevel = selfNamed && denied ? "not_agreed" : selfNamed && NAME_OK.test(lastPartner) ? "agreed" : "unclear";
+  const offered = turns.some((t) => PROPOSAL.test(t.text));
+  const name: NameLevel = selfNamed && denied ? "not_agreed" : selfNamed && NAME_OK.test(lastPartner) ? "agreed" : offered ? "unclear" : "no_name";
   return { target, name };
 }
 

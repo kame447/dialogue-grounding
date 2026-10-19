@@ -3,7 +3,7 @@
 This is a research-only runner. It compares the old v2 system's recorded behaviour with an independent 2-axis grounding verdict:
 
 - **target-identification evidence**: `supported` / `insufficient` / `contradicted` / `unknown`
-- **name-agreement evidence**: `agreed` / `unclear` / `not_agreed` / `unknown`
+- **name-agreement evidence** (`grounding-criteria/v2`, 2026-10-19): `agreed` / `unclear` / `not_agreed` / `no_name` / `unknown`. These come from public utterances only. A 見立て such as 「鳥みたい」 is identification, not a naming proposal, so it counts as `no_name`; `unclear` needs an explicit proposal, or a 仮称 offered as the name. Runs before v2 used 4 levels, where "no name yet" counted as `not_agreed`. v1 and v2 results are compared side by side, never pooled.
 
 It is a shadow only. It never writes to a record, a ledger or a dialogue, it is not shown to participants, and it does not change `repair-first` or `bypass-enabled`.
 
@@ -29,6 +29,12 @@ It is a shadow only. It never writes to a record, a ledger or a dialogue, it is 
   - ER1 is not independent correctness.
 - Flags outside the known-failure list are not confirmed false positives, because that list is not exhaustive.
 - The mock client (`mock-client.ts`) is a lexical stand-in, not a model. Its verdicts only exercise the plumbing.
+
+## Versions
+
+Every live verdict records the server-owned `criteriaVersion`, and every case may carry a `goldVersion`. The run summary lists both. Per-split and all-split tables give per-class precision and recall, and the private run file lists the individual name-axis errors that involve `no_name`.
+
+`compare.ts` lines up two runs over the same case ids (`--old`, `--new`, `--out`; private, 0600). It states the limits of the comparison: a different criterion, a different gold version, and missing per-case verdicts in runs made before per-case results were kept.
 
 ## Running
 

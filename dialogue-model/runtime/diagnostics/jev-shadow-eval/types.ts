@@ -6,10 +6,16 @@
 // are never "probability correct", and the old judge's action probabilities are
 // not reused as P(correct target).
 
+import { NAME_LEVELS as EVAL_NAME_LEVELS } from "../../jev-grounding/evalcase.ts";
+import type { NameEvidence } from "../../jev-grounding/evalcase.ts";
+
 export const TARGET_LEVELS = Object.freeze(["supported", "insufficient", "contradicted", "unknown"] as const);
-export const NAME_LEVELS = Object.freeze(["agreed", "unclear", "not_agreed", "unknown"] as const);
+/** grounding-criteria/v2 (2026-10-19, rule 6813): `no_name` = no explicit naming proposal for this
+ * referent; a 見立て alone (「鳥みたい」) is identification, so it is `no_name`. Shared with jev-evalset
+ * so the two never drift. Runs before v2 used 4 levels, where "no name yet" counted as `not_agreed`. */
+export const NAME_LEVELS: readonly NameEvidence[] = EVAL_NAME_LEVELS;
 export type TargetLevel = typeof TARGET_LEVELS[number];
-export type NameLevel = typeof NAME_LEVELS[number];
+export type NameLevel = NameEvidence;
 
 export type JudgeTurn = { speaker: "self" | "partner"; text: string };
 /** The AI's own unverified interpretation (Luna), never the answer key. */
@@ -25,6 +31,8 @@ export type JevAxesVerdict = {
   /** Uncalibrated relative scores; may be absent. */
   scores?: { target?: Partial<Record<TargetLevel, number>>; name?: Partial<Record<NameLevel, number>> } | null;
   model: string | null;
+  /** Server-owned criteria version stamped on each verdict (e.g. "grounding-criteria/v2"). */
+  criteriaVersion?: string | null;
   latencyMs: number;
   usage?: { inputTokens?: number; outputTokens?: number; costUsd?: number } | null;
 };
@@ -79,6 +87,8 @@ export type EvalCaseLike = {
   /** Per-axis quality (jev-grounding-derive/v2); labelQuality is the weaker of the two. */
   axisQuality?: { target?: "explicit" | "derived" | "weak" | null; name?: "explicit" | "derived" | "weak" | null } | null;
   correctnessKnown?: boolean;
+  /** Version of the gold labels (e.g. "synthetic-gold/v2"); results are never compared across versions silently. */
+  goldVersion?: string;
   aiSeq?: number;
   oldAction?: string;
   /** Synthetic cases: a candidate reply scored against failureTags. Never sent to the judge. */
