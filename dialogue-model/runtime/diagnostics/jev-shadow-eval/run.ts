@@ -264,6 +264,9 @@ export async function main(argv = process.argv.slice(2), log = console.log, deps
     // Temporary direct diagnostic (researcher-approved): synthetic cases only, <= 51 calls, <= $0.05.
     if (!Number.isSafeInteger(maxCalls) || maxCalls < 1 || maxCalls > 51) throw new Error("--client local-openrouter needs --max-calls between 1 and 51");
     if (a.record || a.failures) throw new Error("--client local-openrouter takes synthetic --cases only");
+    if (a["cost-cap-usd"] !== undefined && !(Number(a["cost-cap-usd"]) > 0 && Number(a["cost-cap-usd"]) <= 0.05)) {
+      throw new Error("--cost-cap-usd must be in (0, 0.05]");
+    }
     if (!a.cases) throw new Error("--client local-openrouter needs --cases");
   } else if (live) {
     // Real calls are opt-in per run, need an approved budget (team total <= 50)
@@ -280,7 +283,9 @@ export async function main(argv = process.argv.slice(2), log = console.log, deps
   if (local && (rawCases.length !== cases.length || !cases.length || !cases.every(liveAllowed))) {
     throw new Error("--client local-openrouter refuses the file: every line must be a valid synthetic case marked externalModelAllowed");
   }
-  const localJudge = local ? createLocalOpenRouterJudge({ readKey: deps.readKey ?? keychainKeyReader(), fetchImpl: deps.fetchImpl }) : null;
+  const localJudge = local ? createLocalOpenRouterJudge({ readKey: deps.readKey ?? keychainKeyReader(), fetchImpl: deps.fetchImpl,
+    // Split the $0.05 budget across invocations (e.g. smoke / main / holdout-add) so their sum stays within it.
+    costCapUsd: a["cost-cap-usd"] === undefined ? undefined : Number(a["cost-cap-usd"]) }) : null;
   const client: JevAxesClient = localJudge
     ? { ...groundingAxesClient({ buildState: buildGroundingEvidence, judge: (request) => localJudge.judge(request) }), label: "local-openrouter" }
     : live ? liveClient() : createMockJevAxesClient();

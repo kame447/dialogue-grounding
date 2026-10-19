@@ -125,6 +125,11 @@ test("CLI: opt-in, synthetic-only, call cap, stop codes, private 0700/0600 outpu
   const never = async () => { throw new Error("must not call"); };
   await assert.rejects(main(argv(["--max-calls", "52"]), () => {}, { readKey, fetchImpl: never }), /between 1 and 51/);
   await assert.rejects(main(argv([]), () => {}, { readKey, fetchImpl: never }), /between 1 and 51/);
+  await assert.rejects(main(argv(["--max-calls", "5", "--cost-cap-usd", "0.06"]), () => {}, { readKey, fetchImpl: never }), /cost-cap-usd/);
+  const capped = recorder(() => Response.json(upstreamBody(0.004)));
+  const small = await main(argv(["--max-calls", "3", "--cost-cap-usd", "0.005"]), () => {}, { readKey, fetchImpl: capped.fetchImpl });
+  assert.equal(capped.calls.length, 1, "a per-invocation cap below $0.05 is honoured");
+  assert.equal(small.meta.stopped, "cost_cap");
   await assert.rejects(main([...argv(["--max-calls", "5"]), "--record", casesPath], () => {}, { readKey, fetchImpl: never }), /synthetic --cases only/);
   for (const bad of [synthetic("h", { source: "historical" }), synthetic("ai", { source: "ai_session" }), synthetic("x", { externalModelAllowed: false })]) {
     const p = join(dir, "bad.jsonl");
