@@ -2,6 +2,8 @@
 
 この接続基盤は、AI自身に提示したタングラム画像・公開済み対話履歴・AI自身の判断による作業メモから次の発話を生成します。研究方針の唯一の正本は ../README.md で、実験手続きの採用を意味しません。
 
+**今後の設計（2026-10-19、未実装）：** 図形全体を一括で合意済みにせず、特徴・向き・見立て・名称などの局所問題について、公開発話に基づく同意・否定・保留・再訪を部分更新する。[現行計画の設計方針](../README.md#共通基盤の部分更新採用した設計方針)と[決定記録 0001](../decisions/0001-partial-grounding-state.md)を参照。既存の参照グラフおよびJevの2軸シャドー機能は、この新しい発話機能別の部分更新処理をまだ実現していない。
+
 ## 公開版（v2）
 
 操作確認用の最新ページは <https://tangram-grounding-experiment.kame-website.workers.dev/> （認証不要）です。公開サーバーはTypeScript Worker + Durable Objectで、内部サービスバインディングを通して既存の研究AI Workerを利用します。ローカル版 `http://127.0.0.1:8787` はMac上でのみ利用できます。公開版の手順は [workers/tangram-experiment/README.md](../../workers/tangram-experiment/README.md) を参照してください。
