@@ -138,7 +138,7 @@ export async function runJevEvaluation(options: EvaluationOptions, deps: Evaluat
     observationTimeoutMs: options.observationTimeoutMs,
     intervention: "none_pending_researcher_decision", comparison: "not_implemented_pending_researcher_decision" });
   const { settleJevTurnTraces, JevTurnError } = await import("../../v2/jev-turn.ts");
-  const { validateJevDecision, JevDecisionError } = await import("../../decision/jev-decision.ts");
+  const { validateJevDecision, buildJevDecisionPayload, JevDecisionError, JEV_DECISION_REJECTION_CODES } = await import("../../decision/jev-decision.ts");
   const receipts: TrialReceipt[] = [];
   const failures: FailureRecord[] = [];
   for (const c of selected) {
@@ -209,12 +209,23 @@ export async function runJevEvaluation(options: EvaluationOptions, deps: Evaluat
           const evidence = adapter.lastEvidence;
           const fresh = evidence && Number.isSafeInteger(evidence.callIndex) && evidence.callIndex > previousIndex;
           const budget = fresh ? structuredClone(evidence.inputBudget ?? null) : null;
+          let choices: Record<string, string> = {};
+          if (fresh) try {
+            const questions = buildJevDecisionPayload(input).questions, keys = Object.keys(questions);
+            if (Object.keys(evidence.choices).length === keys.length && keys.every(key => typeof evidence.choices[key] === "string" &&
+                Object.hasOwn(questions[key].criteria, evidence.choices[key]))) {
+              choices = Object.fromEntries(keys.map(key => [key, evidence.choices[key]]));
+            }
+          } catch { /* Invalid or partial answers cannot provide closed choice evidence. */ }
+          const rejectionCode = fresh && evidence.error === "inconsistent_decision" && evidence.rejectionCode !== null &&
+            JEV_DECISION_REJECTION_CODES.includes(evidence.rejectionCode) ? evidence.rejectionCode : null;
           decisionAttempts.push({ turn: input.turn, order, succeeded, callIndex: fresh ? evidence.callIndex : null,
             model: fresh && isGroundingModel(evidence.model, "typesafe/jev-1.14") ? evidence.model : null,
             responseId: fresh && typeof evidence.responseId === "string" && /^gen-[A-Za-z0-9_-]{1,124}$/u.test(evidence.responseId) ? evidence.responseId : null,
             latencyMs: fresh && Number.isFinite(evidence.latencyMs) && evidence.latencyMs >= 0 ? evidence.latencyMs : null,
             costUsd: fresh && typeof evidence.costUsd === "number" && Number.isFinite(evidence.costUsd) && evidence.costUsd >= 0 ? evidence.costUsd : null,
-            error: fresh && evidence.error ? new JevDecisionError(evidence.error).code : succeeded ? null : "evaluation_unavailable", inputBudget: budget });
+            error: fresh && evidence.error ? new JevDecisionError(evidence.error).code : succeeded ? null : "evaluation_unavailable", inputBudget: budget,
+            choices, rejectionCode });
           if (!succeeded) (trial.failedDecisionInputs ??= []).push({ turn: input.turn, inputBudget: budget });
         }
       } };

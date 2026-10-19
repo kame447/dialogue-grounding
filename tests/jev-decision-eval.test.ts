@@ -14,6 +14,9 @@ import type { SyntheticCase } from "../dialogue-model/runtime/diagnostics/jev-de
 import { createLunaObserver, ObservationError } from "../dialogue-model/runtime/observation/observe.ts";
 import { createJevDecisionClient } from "../dialogue-model/runtime/decision/jev-decision.ts";
 import { createJevLocalTestClassifier } from "../dialogue-model/runtime/local-grounding/jev-local-test.ts";
+import { verifyLocalUpdate } from "../dialogue-model/runtime/local-grounding/verify.ts";
+import { deriveLocalIssues } from "../dialogue-model/runtime/local-grounding/derive.ts";
+import { createReferenceGraph, applyReferenceUpdate } from "../dialogue-model/runtime/memory/reference-graph.mjs";
 
 function decision(extra: Partial<JevDecision> = {}): JevDecision {
   return { action: "accept", target: { kind: "single", figureId: "s-0001" }, name: null, feature: null, observe: null,
@@ -158,6 +161,25 @@ test("anonymous scripts contain only current human speech with no action elicita
   }
 });
 
+test("negative feature assertion satisfies the corrected script without being promoted to a responsive denial", () => {
+  const step = SYNTHETIC_CASES.find(c => c.id === "repair-information")!.steps.find(s => s.text === "棒の方には四角がない。")!;
+  const receipt = trial(), graph = createReferenceGraph({ slots: receipt.anchors.map(a => a.id) });
+  const publicTurns = [{ turn: 1, speaker: "human" as const, text: step.text }];
+  const segment = { segmentId: "s1", quote: step.text, targets: [receipt.anchors[0].id], aspect: "part" as const,
+    proposition: "棒の方には四角がない", name: null, linkedIssueId: null, respondsToTurn: null };
+  const input = { graph, turn: 1, publicTurns, segments: [segment] };
+  const accepted = verifyLocalUpdate({ ...input, verdicts: [{ segmentId: "s1", act: "assert", respondsToClaimId: null, rawScore: null }] });
+  assert.equal(accepted.operations.length, 1); assert.equal(accepted.operations[0].respondsTo, null);
+  const after = applyReferenceUpdate(graph, { expectedRevision: graph.revision, turn: 1, operations: accepted.operations }, { publicTurns, generationSucceeded: true });
+  assert.equal(deriveLocalIssues(after)[0].state, "unconfirmed");
+  receipt.turns[0].step = structuredClone(step); receipt.turns[0].local.verified = accepted.operations;
+  assert.equal(evaluateTrialGate(receipt).passed, true);
+  const rejected = verifyLocalUpdate({ ...input, verdicts: [{ segmentId: "s1", act: "deny", respondsToClaimId: null, rawScore: null }] });
+  assert.equal(rejected.operations.length, 0); assert.equal(rejected.rejected[0].reason, "missing_claim_response");
+  receipt.turns[0].local.verified = rejected.operations;
+  assert.ok(evaluateTrialGate(receipt).unmet.includes("script_mismatch"));
+});
+
 test("manual CLI rejects missing paths, unsupported modes, duplicate flags and bad budgets", () => {
   assert.throws(() => parseEvaluationArguments([]), /output_directory_required/);
   assert.deepEqual(parseEvaluationArguments(["--out", "/tmp/synthetic", "--case", "animal-construal", "--local-timeout-ms", "60000"]),
@@ -194,7 +216,7 @@ const script: SyntheticCase = { id: "mock-information-cycle", steps: [
   { text: "次は鍵みたいな形の話をしよう。" },
 ] };
 type MockFault = { phase?: string; phaseAt?: number; publicText?: string; model?: string; decisionModel?: string; cost?: number; classificationUnknown?: boolean;
-  firstAction?: "defer" | "move_on" | "revisit"; firstTarget?: "none" | "multiple" };
+  firstAction?: "defer" | "move_on" | "revisit"; firstTarget?: "none" | "multiple"; decisionChoices?: Record<string, string> };
 function e2eDependencies(fault: MockFault = {}): EvaluationDependencies & { calls: any[]; http: any[]; created: { count: number } } {
   const calls: any[] = [], http: any[] = [], created = { count: 0 };
   const phaseCounts: Record<string, number> = {};
@@ -260,6 +282,7 @@ function e2eDependencies(fault: MockFault = {}): EvaluationDependencies & { call
             choices[`name_${i}`] = Object.keys(names).find(k => names[k] === "つばめ") ?? "none";
             choices[`feature_${i}`] = action === "confirm" ? state.turn === 5 ? "feature_1" : "feature_0" : "none";
           }
+          Object.assign(choices, fault.decisionChoices);
           return response(payload, choices, fault.decisionModel);
         } })!,
         classifier: createJevLocalTestClassifier({ enabled: true, readKey, fetchImpl: async (_url, request) => {
@@ -298,6 +321,9 @@ test("actual pipeline with mock Luna and mock Jev HTTP observes once, preserves 
   assert.ok(!first.includes(script.steps[4].text) && !first.includes("check") && !first.includes("expect"));
   assert.ok(!first.includes("strategy") && !first.includes("currentAction"));
   const files = await readdir(result.directory);
+  const attempts = (await readFile(join(result.directory, "attempts.private.jsonl"), "utf8")).trim().split("\n")
+    .flatMap(line => JSON.parse(line).decisionAttempts ?? []);
+  assert.ok(attempts.length > 0 && attempts.every(a => Object.keys(a.choices).length === 16 && a.rejectionCode === null));
   assert.ok(!files.some(f => /blind|mapping|argon|comparison/u.test(f)));
   assert.equal((await stat(result.directory)).mode & 0o777, 0o700);
   for (const file of files) {
@@ -495,5 +521,66 @@ test("harness ignores spoofed diagnostics and renormalizes modified typed fields
     assert.deepEqual(failure, { caseId: script.id, turn: null, code: typed ? "observation_failed" : "evaluation_unavailable",
       ...(typed ? { observationErrorCode: "unavailable" } : {}) });
     for (const file of await readdir(result.directory)) assert.ok(!(await readFile(join(result.directory, file), "utf8")).includes("PRIVATE_DIAGNOSTIC_"));
+  });
+});
+
+test("rejected combinations retain all closed labels and their fixed rule without publishing an alternative", async () => {
+  const cases: Array<{ choices: Record<string, string>; rejectionCode: string }> = [
+    { choices: { target: "multiple" }, rejectionCode: "feature_requires_single_target" },
+    { choices: { feature_0: "none" }, rejectionCode: "feature_required" },
+    { choices: { action: "propose_name", target: "multiple" }, rejectionCode: "name_requires_single_target" },
+    { choices: { action: "propose_name", name_0: "none" }, rejectionCode: "name_required" },
+    { choices: { action: "request_observation", observe_target: "none", observe_aspect: "part" }, rejectionCode: "observation_target_required" },
+    { choices: { action: "request_observation", observe_target: "figure_0", observe_aspect: "none" }, rejectionCode: "observation_aspect_required" },
+    { choices: { action: "request_observation", observe_target: "figure_1", observe_aspect: "part" }, rejectionCode: "observation_target_mismatch" },
+  ];
+  for (const c of cases) await temporary(async outputDir => {
+    const deps = e2eDependencies({ decisionChoices: c.choices });
+    const result = await runJevEvaluation({ outputDir, seed: 1701 }, deps);
+    assert.equal(result.status, "gate_failed");
+    const attempts = (await readFile(join(result.directory, "attempts.private.jsonl"), "utf8")).trim().split("\n")
+      .flatMap(line => JSON.parse(line).decisionAttempts ?? []);
+    assert.equal(attempts.length, 1);
+    const attempt = attempts[0], questions = deps.http.find(call => call.kind === "decision").payload.questions;
+    assert.equal(attempt.succeeded, false); assert.equal(attempt.error, "inconsistent_decision");
+    assert.equal(attempt.rejectionCode, c.rejectionCode);
+    assert.deepEqual(Object.keys(attempt.choices).sort(), Object.keys(questions).sort());
+    for (const [key, label] of Object.entries(attempt.choices)) assert.ok(Object.hasOwn(questions[key].criteria, label as string));
+    for (const [key, label] of Object.entries(c.choices)) assert.equal(attempt.choices[key], label);
+    const document = JSON.parse(await readFile(join(result.directory, script.id + ".private.json"), "utf8"));
+    assert.equal(document.receipt.completed, false); assert.equal(document.receipt.failureCode, "decision_failed");
+    assert.equal(document.publicTurns.filter((t: any) => t.speaker === "ai").length, 0);
+  });
+});
+
+test("private decision attempts discard nonclosed labels, partial answers and unknown rejection text", async () => {
+  for (const fault of ["label", "partial", "extra_key"]) await temporary(async outputDir => {
+    const deps = e2eDependencies({ decisionChoices: { target: "multiple" } }), create = deps.createComponents;
+    deps.createComponents = (shared, options) => {
+      const components = create(shared, options), adapter = components.jevDecision as NonNullable<ReturnType<typeof createJevDecisionClient>>;
+      let evidence: any = null;
+      return { ...components, jevDecision: {
+        get lastEvidence() { return structuredClone(evidence); },
+        async decide(input, callOptions) {
+          try { return await adapter.decide(input, callOptions); }
+          finally {
+            evidence = adapter.lastEvidence;
+            if (fault === "label") evidence.choices.target = "PRIVATE_CHOICE_CANARY";
+            else if (fault === "partial") delete evidence.choices.name_5;
+            else evidence.choices.PRIVATE_CHOICE_KEY = "none";
+            evidence.rejectionCode = "PRIVATE_REJECTION_CANARY";
+          }
+        },
+      } };
+    };
+    const result = await runJevEvaluation({ outputDir, seed: 1701 }, deps);
+    assert.equal(result.status, "gate_failed");
+    const attempts = (await readFile(join(result.directory, "attempts.private.jsonl"), "utf8")).trim().split("\n")
+      .flatMap(line => JSON.parse(line).decisionAttempts ?? []);
+    assert.equal(attempts.length, 1); assert.deepEqual(attempts[0].choices, {}); assert.equal(attempts[0].rejectionCode, null);
+    for (const file of await readdir(result.directory)) {
+      const text = await readFile(join(result.directory, file), "utf8");
+      for (const secret of ["PRIVATE_CHOICE_CANARY", "PRIVATE_CHOICE_KEY", "PRIVATE_REJECTION_CANARY"]) assert.ok(!text.includes(secret));
+    }
   });
 });
