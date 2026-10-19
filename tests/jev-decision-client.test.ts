@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { inspect } from "node:util";
 import { setImmediate as nextLoop } from "node:timers/promises";
-import { createJevDecisionClient, buildJevDecisionPayload, validateJevDecision, JEV_DECISION_MODEL, JevDecisionError } from "../dialogue-model/runtime/decision/jev-decision.ts";
+import { createJevDecisionClient, buildJevDecisionPayload, validateJevDecision, JEV_DECISION_MODEL, JEV_DECISION_REJECTION_CODES, JevDecisionError } from "../dialogue-model/runtime/decision/jev-decision.ts";
 import type { JevDecisionPayload } from "../dialogue-model/runtime/decision/jev-decision.ts";
 import type { JevDecisionInput } from "../dialogue-model/runtime/decision/contract.ts";
 import { keychainKeyReader, KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT } from "../dialogue-model/runtime/diagnostics/jev-shadow-eval/local-openrouter.ts";
@@ -85,6 +85,7 @@ test("Jev alone selects agree with a public name, and evidence contains complete
   assert.deepEqual(validateJevDecision(result, input), result);
   assert.doesNotMatch(JSON.stringify(result), /SYNTHETIC|prompt|"publicTurns":\[/);
   assert.equal(client.lastEvidence?.status, "ok");
+  assert.equal(client.lastEvidence?.rejectionCode, null);
   assert.doesNotMatch(http.requests[0].payload.state, /lunaAction/);
 });
 
@@ -121,7 +122,61 @@ test("only target-scoped name/feature answers are used; irrelevant answers canno
   assert.equal(result.feature, "三角1"); assert.equal(result.name, null); assert.equal(result.action, "confirm");
   preferences = { ...preferences, action: "agree", target: "multiple" };
   await assert.rejects(client.decide(fixture()), code("inconsistent_decision"));
-  assert.equal(client.lastEvidence?.status, "error"); assert.deepEqual(client.lastEvidence?.choices, {});
+  assert.equal(client.lastEvidence?.status, "error"); assert.equal(client.lastEvidence?.choices.target, "multiple");
+  assert.equal(client.lastEvidence?.rejectionCode, "name_requires_single_target");
+});
+
+test("inconsistent decisions retain only closed labels and a fixed rejection rule without weakening validation", async t => {
+  const cases: Array<{ preferences: Record<string, string>; rule: string }> = [];
+  for (const action of ["propose_name", "agree"]) {
+    for (const target of ["none", "multiple"]) cases.push({ preferences: { action, target }, rule: "name_requires_single_target" });
+    cases.push({ preferences: { action, target: "figure_0", name_0: "none" }, rule: "name_required" });
+  }
+  for (const action of ["confirm", "repair"]) {
+    for (const target of ["none", "multiple"]) cases.push({ preferences: { action, target }, rule: "feature_requires_single_target" });
+    cases.push({ preferences: { action, target: "figure_0", feature_0: "none" }, rule: "feature_required" });
+  }
+  cases.push(
+    { preferences: { action: "request_observation", observe_target: "none", observe_aspect: "part" }, rule: "observation_target_required" },
+    { preferences: { action: "request_observation", observe_target: "figure_0", observe_aspect: "none" }, rule: "observation_aspect_required" },
+    { preferences: { action: "request_observation", target: "figure_0", observe_target: "figure_1", observe_aspect: "part" }, rule: "observation_target_mismatch" });
+  assert.deepEqual([...new Set(cases.map(c => c.rule))].sort(), [...JEV_DECISION_REJECTION_CODES].sort());
+  let preferences: Record<string, string> = {};
+  let malformed = false;
+  const http = await httpMock(t, p => {
+    const body = answer(p, preferences);
+    if (malformed) body.answers.observe_aspect.choice = "RAW_CANARY";
+    return { body: { ...body, extra: "RAW_CANARY" } };
+  });
+  const client = createJevDecisionClient({ enabled: true, readKey, fetchImpl: http.fetchImpl })!;
+  const input = { ...fixture(), issueSummary: "PROMPT_CANARY" };
+  for (const c of cases) {
+    preferences = c.preferences;
+    await assert.rejects(client.decide(input), (e: unknown) => {
+      assert.ok(code("inconsistent_decision")(e));
+      assert.doesNotMatch(inspect(e, { showHidden: true }), /CANARY|SYNTHETIC|choices|rejectionCode|cause/); return true;
+    });
+    const evidence = client.lastEvidence!;
+    assert.equal(evidence.status, "error"); assert.equal(evidence.error, "inconsistent_decision");
+    assert.equal(evidence.rejectionCode, c.rule);
+    const payload = http.requests.at(-1)!.payload;
+    const expected = Object.fromEntries(Object.entries(answer(payload, preferences).answers).map(([key, a]) => [key, a.choice]));
+    assert.deepEqual(evidence.choices, expected); assert.equal(Object.keys(evidence.choices).length, 16);
+    assert.deepEqual(evidence.scores, {});
+    assert.equal(evidence.model, JEV_DECISION_MODEL); assert.equal(evidence.responseId, "gen-jev-decision");
+    assert.equal(evidence.costUsd, 0.0001); assert.equal(evidence.callIndex, http.requests.length);
+    assert.doesNotMatch(JSON.stringify(evidence), /CANARY|SYNTHETIC|criteria|instructions|"publicTurns":\[/);
+    evidence.choices.action = "close";
+    assert.equal(client.lastEvidence?.choices.action, preferences.action, "failure evidence is detached too");
+  }
+  assert.equal(http.requests.length, cases.length, "each rejected call sends once without retry or fallback");
+  preferences = {};
+  await client.decide(input);
+  assert.equal(client.lastEvidence?.rejectionCode, null); assert.equal(client.lastEvidence?.status, "ok");
+  malformed = true;
+  await assert.rejects(client.decide(input), code("invalid_response"));
+  assert.deepEqual(client.lastEvidence?.choices, {}, "a late malformed answer cannot expose partial labels or prior call choices");
+  assert.deepEqual(client.lastEvidence?.scores, {}); assert.equal(client.lastEvidence?.rejectionCode, null);
 });
 
 test("validator rejects injected act changes, forged actual model, score maps and omission evidence", async t => {
