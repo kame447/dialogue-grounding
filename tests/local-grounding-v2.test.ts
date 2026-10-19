@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { createDialogueV2 } from "../dialogue-model/runtime/v2/dialogue-v2.mjs";
 import { createNamingTaskV2 } from "../dialogue-model/runtime/v2/naming-task-v2.mjs";
 import { createHumanMessageQueue } from "../dialogue-model/runtime/web/human-message-queue.mjs";
+import { findLocalPublicationViolations } from "../dialogue-model/runtime/v2/local-grounding-turn.ts";
 import type { LocalGroundingOptions, LocalSegmentProposal, LocalClassificationInput } from "../dialogue-model/runtime/local-grounding/contract.ts";
 
 const ids = Array.from({ length: 6 }, (_, i) => `s-000${i + 1}`);
@@ -246,4 +247,85 @@ test("JSON durable restore round-trips claims and cannot enable an originally of
   restoredOff.message(utterance); await restoredOff.whenIdle();
   assert.equal(saved.options.localGrounding, undefined);
   assert.ok(restoredOff.researcherView().attempts.every((a: any) => a.localGrounding === undefined));
+});
+
+test("local publication checks reject echoes without treating ordinary utterances as private fields", () => {
+  const instruction = "非公開の作業メモを引用せず、対話相手に向けた自然な発話だけを返してください。";
+  const messages = [{ role: "system", content: instruction }];
+  for (const text of ["四角い部分がある形ですね。", "名前はまだ決めずにお話しできますか？", "画像ではそう見えるんですね。",
+    "ベアという呼び方はどうでしょう？", "Bearerという単語", "sk-は短い接頭辞です。", "api_keyという表記", "1:1の比率でしょうか？", "船っぽい形です。内側にくぼみもあります。"] ) {
+    assert.deepEqual(findLocalPublicationViolations(text, messages), [], text);
+  }
+  assert.deepEqual(findLocalPublicationViolations("ownLedger s-ab12", messages), ["internal_id", "internal_field"]);
+  assert.deepEqual(findLocalPublicationViolations("issueId 1:local1", messages), ["internal_field", "internal_id"]);
+  assert.deepEqual(findLocalPublicationViolations("3:ai1", messages), ["internal_id"]);
+  assert.ok(findLocalPublicationViolations("ｏｗｎＬｅｄｇｅｒ　ｓ－ａｂ１２", messages).includes("internal_id"));
+  assert.deepEqual(findLocalPublicationViolations(instruction, messages), ["internal_prompt_echo"]);
+  assert.deepEqual(findLocalPublicationViolations(instruction, [{ role: "user", content: instruction }]), [], "public history is not a private instruction");
+  assert.deepEqual(findLocalPublicationViolations("短い公開文です。", [{ role: "system", content: "短い公開文です。" }]), [], "short coincidental phrases are not prompt echoes");
+});
+
+for (const [label, draft, expected] of [
+  ["spaced internal tokens", "ownLedger s-ab12", "internal_field"],
+  ["local issue tokens", "issueId 1:local1", "internal_field"],
+  ["image URI", "data:image/png;base64,U1lOVEhFVElDX09OTFk=", "internal_image"],
+  ["bearer", "Bearer synthetic-test-token-12345", "internal_credential"],
+  ["key prefix", "sk-synthetic-test-key-12345", "internal_credential"],
+  ["key assignment", "api_key=synthetic-test-key-12345", "internal_credential"],
+] as const) {
+  test(`opt-in publication guard rejects ${label} through rewrite and fallback`, async () => {
+    const h = harness({ localGrounding: options(), client: { async complete() { return { text: draft }; } } });
+    const result = await h.run();
+    const guard = h.dialogue.getAttempts()[0].generationGuard;
+    assert.ok(guard.violations.includes(expected));
+    assert.equal(guard.regenerated, true); assert.equal(guard.fallback, true);
+    assert.equal(result.text, "なるほど、そう見えるんですね。");
+    assert.equal(result.privateState.graph.records.filter((r: any) => r.kind === "claim").length, 1);
+    assert.ok(!JSON.stringify(h.dialogue.getAttempts()).includes(draft));
+  });
+}
+
+test("private local instructions and rewrite instructions cannot be echoed into public speech", async () => {
+  let calls = 0;
+  const drafts: string[] = [];
+  const h = harness({ localGrounding: options(), client: { async complete(messages: { role: string; content: unknown }[]) {
+    const message = ++calls === 1 ? messages.find(m => typeof m.content === "string" && m.content.startsWith("局所問題の作業メモ"))! : messages.at(-1)!;
+    const text = (message.content as string).split("\n")[0]; drafts.push(text); return { text };
+  } } });
+  const result = await h.run();
+  const guard = h.dialogue.getAttempts()[0].generationGuard;
+  assert.equal(guard.fallback, true); assert.ok(guard.violations.includes("internal_prompt_echo"));
+  assert.equal(result.text, "なるほど、そう見えるんですね。");
+  for (const draft of drafts) assert.ok(!JSON.stringify(h.dialogue.getAttempts()).includes(draft));
+});
+
+test("safe regeneration after a local leak keeps the model's ordinary public response", async () => {
+  let calls = 0;
+  const h = harness({ localGrounding: options(), client: { async complete() {
+    return { text: ++calls === 1 ? "ownLedger s-ab12" : "四角い部分がある形ですね。" };
+  } } });
+  const result = await h.run();
+  assert.equal(result.text, "四角い部分がある形ですね。");
+  assert.equal(h.dialogue.getAttempts()[0].generationGuard.fallback, false);
+});
+
+test("local checks revalidate dynamic fallback names and features before publication", async () => {
+  for (const [action, field] of [["propose_name", "candidateName"], ["confirm", "discriminatingFeature"]] as const) {
+    for (const value of ["Bearer synthetic-test-token-12345", "data:image/png;base64,AAA", "ownLedger s-ab12"]) {
+      const h = harness({ localGrounding: options(),
+        judge: { async judge() { return { ...core, action, targetSlot: ids[0], [field]: value }; } },
+        client: { async complete() { return { text: "ownLedger s-ab12" }; } } });
+      const result = await h.run();
+      assert.ok(!result.text.includes(value));
+      assert.deepEqual(findLocalPublicationViolations(result.text, []), []);
+      assert.equal(result.text, action === "propose_name" ? "その名前の候補はどうでしょう？" : "どの形のことか、もう少し教えてもらえますか？");
+    }
+  }
+});
+
+test("off keeps the existing publication behavior for the known whitespace boundary case", async () => {
+  const h = harness({ client: { async complete() { return { text: "ownLedger s-ab12" }; } } });
+  const result = await h.run();
+  assert.equal(result.text, "ownLedger s-ab12");
+  assert.deepEqual(h.dialogue.getAttempts()[0].generationGuard.violations, []);
 });
