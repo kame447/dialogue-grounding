@@ -50,7 +50,8 @@ export type DecisionInputBudget = {
   omitted: { publicTurns: number; claims: number; publicNames: number; repairHistory: number;
     reobservations: number; observationDetails: number; observationChars: number; issueSummaryChars: number };
 };
-export type JevDecisionEvidence = {
+export type JevDecisionStageEvidence = {
+  stage: "action_target" | "detail";
   model: string | null;
   responseId: string | null;
   /** Wire choice labels, with complete uncalibrated score maps for research only. */
@@ -61,11 +62,17 @@ export type JevDecisionEvidence = {
   /** Present on the real adapter, including when no material was omitted. */
   inputBudget?: DecisionInputBudget;
 };
+export type JevDecisionEvidence = Omit<JevDecisionStageEvidence, "stage"> & {
+  /** Real calls retain every executed stage; mocks omit this or supply an empty array. */
+  stages?: JevDecisionStageEvidence[];
+};
 export type JevDecision = {
   action: JevAction;
   target: JevTarget;
   name: string | null;
   feature: string | null;
+  /** Sources of the selected name/feature, within target; never a narrowed target. */
+  detailFigureIds?: string[];
   observe: JevObservationRequest | null;
   evidence: JevDecisionEvidence;
   decisionKind: "jev_local_test" | "mock";
@@ -73,4 +80,4 @@ export type JevDecision = {
 };
 export type JevDecisionCallOptions = { signal?: AbortSignal; timeoutMs?: number };
 export type JevDecisionClient = { decide(input: JevDecisionInput, options?: JevDecisionCallOptions): Promise<JevDecision> };
-export type JevQuestionLayout = "joint_choices_v1";
+export type JevQuestionLayout = "two_stage_v1";

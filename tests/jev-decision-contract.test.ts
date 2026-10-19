@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { ACTIONS } from "../dialogue-model/runtime/judgment/schema.mjs";
 import { JEV_ACTIONS } from "../dialogue-model/runtime/decision/contract.ts";
 import type { JevDecision, JevDecisionInput } from "../dialogue-model/runtime/decision/contract.ts";
-import { buildJevDecisionPayload, validateJevDecision, JevDecisionError, JEV_ACTION_CRITERIA, JEV_DECISION_INPUT_LIMITS } from "../dialogue-model/runtime/decision/jev-decision.ts";
+import { buildJevDecisionPayload, buildJevDecisionDetailPayload, validateJevDecision, JevDecisionError, JEV_ACTION_CRITERIA, JEV_DECISION_INPUT_LIMITS } from "../dialogue-model/runtime/decision/jev-decision.ts";
 import { createMockJevDecisionClient } from "../dialogue-model/runtime/decision/mocks.ts";
 
 function fixture(): JevDecisionInput {
@@ -26,7 +26,7 @@ test("closed action vocabulary includes existing acts plus an observation reques
   assert.deepEqual([...JEV_ACTIONS], [...ACTIONS, "request_observation"]);
   assert.deepEqual(Object.keys(JEV_ACTION_CRITERIA), [...JEV_ACTIONS]);
   const input = fixture(), payload = buildJevDecisionPayload(input);
-  assert.equal(Object.keys(payload.questions).length, 16);
+  assert.equal(Object.keys(payload.questions).length, 8);
   assert.deepEqual(Object.keys(payload.questions.target.criteria), ["none", "multiple", ...input.ownSlots.map((_s, i) => `figure_${i}`)]);
   assert.match(payload.questions.action.instructions, /Lunaの事前actionは与えられません/);
   assert.match(payload.questions.action.instructions, /AIが馬、相手が牛/);
@@ -46,9 +46,10 @@ test("strategy, current Luna action, images and unknown nested keys never reach 
   } as JevDecisionInput));
   assert.deepEqual(requests[0], requests[1]);
   assert.doesNotMatch(JSON.stringify(requests[0]), /CANARY|SECRET_ACTION|strategy|repair-first|bypass-enabled|"region"|observedAt/);
-  const names = requests[0].questions.name_0.criteria;
-  assert.deepEqual(Object.values(names).slice(1), ["馬", "船"]);
-  assert.equal(Object.values(requests[0].questions.name_1.criteria).includes("船"), false, "names retain their target provenance");
+  const names = buildJevDecisionDetailPayload(a, { action: "agree", target: { kind: "single", figureId: "own-0" } })!.questions.name.criteria;
+  assert.deepEqual(Object.values(names).map(s => JSON.parse(s).value), ["馬", "船"]);
+  const other = buildJevDecisionDetailPayload(a, { action: "agree", target: { kind: "single", figureId: "own-1" } })!;
+  assert.equal(Object.values(other.questions.name.criteria).some(s => JSON.parse(s).value === "船"), false);
 });
 
 test("all actions can be injected without a Luna pre-action and preserve mock provenance", () => {
@@ -77,7 +78,6 @@ test("names/features are closed, target-scoped, action-scoped, and never selecte
   const input = fixture(), single = { kind: "single" as const, figureId: "own-0" };
   for (const decision of [mockValue({ action: "agree", target: single, name: "not-in-candidates" }),
     mockValue({ action: "agree", target: { kind: "single", figureId: "own-1" }, name: "船" }),
-    mockValue({ action: "propose_name", target: { kind: "multiple", figureIds: ["own-0", "own-1"] }, name: "船" }),
     mockValue({ action: "confirm", target: single, feature: "三角1" }), mockValue({ action: "repair", target: single }),
     mockValue({ action: "accept", target: single, name: "船" }), mockValue({ action: "agree", target: single, name: "船", feature: "三角0" })]) {
     assert.throws(() => validateJevDecision(decision, input), code("inconsistent_decision"));
@@ -181,4 +181,37 @@ test("mocks simulate callbacks, delay, abort, timeout and fixed-code failures wi
   controller.abort("SECRET_CANARY");
   await assert.rejects(mock.decide(input, { signal: controller.signal }), code("aborted"));
   await assert.rejects(createMockJevDecisionClient(() => { throw new Error("SECRET_CANARY"); }).decide(input), code("invalid_response"));
+});
+
+test("stage two is action-scoped, strategy-independent, and retains candidate feature provenance", () => {
+  const input = fixture();
+  const selected = { action: "repair" as const, target: { kind: "multiple" as const, figureIds: ["own-0", "own-2"] } };
+  const bodies = ["repair-first", "bypass-enabled"].map(strategy => buildJevDecisionDetailPayload({ ...input, strategy, lunaAction: "SECRET_CANARY" } as JevDecisionInput, selected)!);
+  assert.deepEqual(bodies[0], bodies[1]); assert.doesNotMatch(JSON.stringify(bodies), /strategy|SECRET_CANARY/);
+  assert.deepEqual(Object.keys(bodies[0].questions), ["feature"]);
+  assert.deepEqual(JSON.parse(bodies[0].state).selected, selected);
+  const shared = Object.values(bodies[0].questions.feature.criteria).map(s => JSON.parse(s)).find(c => c.value === "四角が一つ");
+  assert.deepEqual(shared.figureIds, ["own-0", "own-2"]);
+  const value = mockValue({ ...selected, feature: "四角が一つ", detailFigureIds: ["own-0", "own-2"] });
+  assert.deepEqual(validateJevDecision(value, input), value);
+  assert.throws(() => validateJevDecision({ ...value, detailFigureIds: ["own-0"] }, input), code("inconsistent_decision"));
+  const missing = { ...value }; delete missing.detailFigureIds;
+  assert.throws(() => validateJevDecision(missing, input), code("inconsistent_decision"));
+  for (const action of ["propose_name", "agree"] as const) for (const target of [selected.target, { kind: "none" as const }]) {
+    assert.throws(() => buildJevDecisionDetailPayload(input, { action, target }), code("invalid_decision"));
+  }
+  assert.throws(() => buildJevDecisionPayload(input, { questionLayout: "joint_choices_v1" as never }), code("invalid_options"));
+});
+
+test("missing and excessive detail choices fail explicitly, without inventing or clipping candidates", () => {
+  const input = fixture();
+  input.publicNames = [];
+  for (const f of input.observations.figures) { f.holistic = []; f.analytic = { shapes: [], composition: "", relations: [] }; }
+  for (const action of ["confirm", "agree"] as const) {
+    assert.throws(() => buildJevDecisionDetailPayload(input, { action, target: { kind: "single", figureId: "own-0" } }), code("inconsistent_decision"));
+  }
+  assert.throws(() => buildJevDecisionDetailPayload(fixture(), { action: "repair", target: { kind: "multiple", figureIds: ["own-0", "partner"] } }), code("invalid_input"));
+  const large = fixture();
+  large.observations.figures.forEach((f, i) => { f.analytic.shapes = Array.from({ length: 32 }, (_, j) => `形${i}-${j}`); f.analytic.relations = Array.from({ length: 32 }, (_, j) => `関係${i}-${j}`); });
+  assert.throws(() => buildJevDecisionDetailPayload(large, { action: "repair", target: { kind: "multiple", figureIds: [...large.ownSlots] } }), code("invalid_input"));
 });
