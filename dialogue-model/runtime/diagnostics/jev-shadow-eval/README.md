@@ -48,3 +48,15 @@ node dialogue-model/runtime/diagnostics/jev-shadow-eval/run.ts \
 - `--client live --max-calls N` (1 ≤ N ≤ 50) is opt-in. It refuses `--record` and sends only cases with `source: "synthetic"` that pass `assertSendable` (`externalModelAllowed: true`).
 - The live client uses the grounding judge (`dialogue-model/runtime/grounding/`, `/v1/grounding-evidence`) with the research proxy config (`RESEARCH_AI_PROVIDER=cloudflare`). The route answers only while the proxy's `RESEARCH_GROUNDING_ENABLED` is on, and that is a researcher decision. Check the live status before any live run.
 - Sendability and the case judge input come from jev-evalset (`jev-grounding/evalcase.ts`: `assertSendable`, `toJudgeInput`). A live run additionally requires `source: "synthetic"`.
+
+## Temporary local OpenRouter diagnostic (`--client local-openrouter`)
+
+This client is **temporary**. The researcher approved it on 2026-10-19 because the research proxy's `grounding-criteria/v2` deploy is waiting for Cloudflare re-authentication. It calls OpenRouter Decisions **directly from this machine, bypassing the proxy**. It does not replace the proxy, and the proxy's v2 update still needs that re-authentication and a deploy.
+
+- **Opt-in per run.** No default configuration enables it.
+- **Inputs it refuses.** It takes `--cases` only, and every line must be a valid `source: "synthetic"` case marked `externalModelAllowed`; otherwise it refuses the file. It also refuses `--record` and `--failures`, so no historical, AI-session or participant text is accepted.
+- **Caps.** `--max-calls` must be between 1 and 51, and cumulative `usage.cost` is capped at $0.05. The cap is checked before each call, and a response without a cost fails closed.
+- **Stop conditions.** The run stops on 401/403, 402 or 404, on a missing key, a key leak, the cost cap or a missing cost.
+- **Same as the proxy.** The request is the proxy's own `buildGroundingPayload` (same model, questions, criteria, URL and 15 s timeout), and the response goes through the proxy's `sanitizeGroundingVerdict`, its key barrier and the client's `parseGroundingVerdict`. A test checks that the request body is byte-identical to the proxy's upstream request.
+- **The key.** It is read from the macOS Keychain (`security find-generic-password -s dialogue-grounding-openrouter-api-key -a research -w`) with `execFile`, not a shell, and kept in memory only. It is never in argv, env, logs, files or error messages. Responses and every output file are scanned for the key; any hit aborts, and nothing is written. Upstream error bodies are not read.
+- **Output.** The output directory must be outside any Git worktree (directory 0700, files 0600). Only sanitized verdicts and fixed error codes are stored.
