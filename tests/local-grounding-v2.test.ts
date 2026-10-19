@@ -5,7 +5,8 @@ import { createHash } from "node:crypto";
 import { createDialogueV2 } from "../dialogue-model/runtime/v2/dialogue-v2.mjs";
 import { createNamingTaskV2 } from "../dialogue-model/runtime/v2/naming-task-v2.mjs";
 import { createHumanMessageQueue } from "../dialogue-model/runtime/web/human-message-queue.mjs";
-import { findLocalPublicationViolations } from "../dialogue-model/runtime/v2/local-grounding-turn.ts";
+import { findLocalPublicationViolations, settleLocalTraces, type LocalGroundingResearchRecord } from "../dialogue-model/runtime/v2/local-grounding-turn.ts";
+import { LOCAL_EXTRACTION_INSTRUCTIONS } from "../dialogue-model/runtime/local-grounding/extract.ts";
 import type { LocalGroundingOptions, LocalSegmentProposal, LocalClassificationInput } from "../dialogue-model/runtime/local-grounding/contract.ts";
 
 const ids = Array.from({ length: 6 }, (_, i) => `s-000${i + 1}`);
@@ -99,13 +100,13 @@ test("one rejected segment preserves valid local claims and the existing memory"
 });
 
 test("trace permits only known classifier kinds and extraction diagnostic codes", async () => {
-  for (const classifierKind of ["unverified_injected", "luna_standin", "jev", "SYNTHETIC_PRIVATE_CANARY"]) {
+  for (const classifierKind of ["unverified_injected", "luna_standin", "jev_local_test", "jev", "SYNTHETIC_PRIVATE_CANARY"]) {
     const local = options();
     Object.assign(local.classifier, { metadata: { classifierKind } });
     Object.assign(local.extractor, { lastDiagnostics: { rejectedSegments: 1, reasons: ["quote_not_found"] } });
     const h = harness({ localGrounding: local }); await h.run();
     const trace = h.dialogue.getAttempts()[0].localGrounding;
-    assert.equal(trace.classifierKind, classifierKind === "luna_standin" ? "luna_standin" : "unverified_injected");
+    assert.equal(trace.classifierKind, classifierKind === "luna_standin" || classifierKind === "jev_local_test" ? classifierKind : "unverified_injected");
     assert.deepEqual(trace.extraction, { rejectedSegments: 1, reasons: ["quote_not_found"] });
     assert.ok(!JSON.stringify(trace).includes("CANARY"));
   }
@@ -328,4 +329,180 @@ test("off keeps the existing publication behavior for the known whitespace bound
   const result = await h.run();
   assert.equal(result.text, "ownLedger s-ab12");
   assert.deepEqual(h.dialogue.getAttempts()[0].generationGuard.violations, []);
+});
+
+test("local extractor receives the judge's own image and pixel anchors as detached copies", async () => {
+  const local = options(); let judgmentInput: any, extractionInput: any;
+  local.extractor.extract = async input => {
+    extractionInput = structuredClone(input);
+    input.ownImage.base64 = "caller-mutation";
+    input.ownAnchors[0].bbox.x = 999;
+    return [segment(input.ownSlots[0])];
+  };
+  const h = harness({ localGrounding: local, judge: { async judge(input: unknown) { judgmentInput = structuredClone(input); return core; } } });
+  await h.run();
+  assert.deepEqual(extractionInput.ownImage, judgmentInput.image);
+  assert.deepEqual(extractionInput.ownAnchors, judgmentInput.ownAnchors);
+  assert.deepEqual(extractionInput.ownAnchors, anchors);
+  assert.ok(!JSON.stringify(h.calls).includes("caller-mutation"));
+  assert.equal(anchors[0].bbox.x, 0);
+});
+
+test("callback is off with the feature and adds no request, state or attempt bytes", async () => {
+  const records: LocalGroundingResearchRecord[] = [];
+  const baseline = harness(), h = harness({ onLocalGroundingTrace: (record: LocalGroundingResearchRecord) => records.push(record) });
+  assert.deepEqual(await h.run(), await baseline.run());
+  assert.deepEqual(h.calls, baseline.calls);
+  assert.deepEqual(h.dialogue.getAttempts(), baseline.dialogue.getAttempts());
+  assert.deepEqual(records, []);
+  assert.throws(() => harness({ onLocalGroundingTrace: 1 }), /Invalid local grounding trace callback/);
+});
+
+test("private callback emits staged claims and settlement uses only installed judgments", async () => {
+  const records: LocalGroundingResearchRecord[] = [];
+  let during: LocalGroundingResearchRecord[] = [], queue: any;
+  const h = harness({ localGrounding: options(), onLocalGroundingTrace: (record: LocalGroundingResearchRecord) => {
+    records.push(record); during = settleLocalTraces(records, queue.getPrivateState());
+  } });
+  queue = createHumanMessageQueue({ runAiTurn: h.dialogue.runAiTurn, initialPrivateState: h.initial });
+  queue.enqueue({ text: utterance }); await queue.whenIdle();
+  assert.equal(records[0].status, "staged");
+  assert.equal(during[0].status, "superseded", "a pre-publication candidate is not proof of a commit");
+  const settled = settleLocalTraces(records, queue.getPrivateState());
+  assert.equal(settled[0].status, "committed"); assert.equal(records[0].status, "staged", "settlement is pure");
+  assert.equal(settled[0].attemptNumber, 1);
+  assert.deepEqual(records[0].verification.accepted, ["1:local1"]);
+  assert.equal(records[0].claims[0].sourceTurn, 1);
+  assert.equal(records[0].extractor.segments[0].quote, utterance);
+  assert.equal(records[0].extractor.segments[0].act, "assert");
+  assert.ok(!JSON.stringify(records).includes(image.base64));
+  assert.ok(!JSON.stringify(h.dialogue.getAttempts()).includes("extractor"));
+});
+
+test("late queue supersede of a staged result is distinguished from the installed turn", async () => {
+  const records: LocalGroundingResearchRecord[] = []; let queue: any;
+  const h = harness({ localGrounding: options(), onLocalGroundingTrace: (record: LocalGroundingResearchRecord) => {
+    records.push(record);
+    if (record.turnIndex === 1) queue.enqueue({ text: "別の特徴です" });
+  } });
+  queue = createHumanMessageQueue({ runAiTurn: h.dialogue.runAiTurn, initialPrivateState: h.initial });
+  queue.enqueue({ text: utterance }); await queue.whenIdle();
+  assert.deepEqual(records.map(r => r.status), ["staged", "staged"]);
+  assert.deepEqual(settleLocalTraces(records, queue.getPrivateState()).map(r => r.status), ["superseded", "committed"]);
+  assert.equal(queue.getPrivateState().judgments.length, 1);
+});
+
+test("aborted generation keeps a private attempt record without certifying its claims", async () => {
+  const records: LocalGroundingResearchRecord[] = [], entered = gate(), late = gate(); let calls = 0;
+  const h = harness({ localGrounding: options(), onLocalGroundingTrace: (record: LocalGroundingResearchRecord) => records.push(record),
+    client: { async complete() { if (++calls === 1) { entered.release(); await late.promise; } return { text: "なるほど。" }; } } });
+  const queue = createHumanMessageQueue({ runAiTurn: h.dialogue.runAiTurn, initialPrivateState: h.initial });
+  queue.enqueue({ text: utterance }); await entered.promise; queue.enqueue({ text: "別の特徴です" }); late.release(); await queue.whenIdle();
+  assert.deepEqual(records.map(r => r.status), ["aborted", "staged"]);
+  assert.deepEqual(settleLocalTraces(records, queue.getPrivateState()).map(r => r.status), ["aborted", "committed"]);
+});
+
+test("retry identity prevents a failed attempt with the same public event from becoming committed", async () => {
+  const records: LocalGroundingResearchRecord[] = []; let calls = 0;
+  const h = harness({ localGrounding: options(), onLocalGroundingTrace: (record: LocalGroundingResearchRecord) => records.push(record),
+    client: { async complete() { if (++calls === 1) throw new Error("SYNTHETIC_PRIVATE_CANARY"); return { text: "なるほど。" }; } } });
+  const queue = createHumanMessageQueue({ runAiTurn: h.dialogue.runAiTurn, initialPrivateState: h.initial });
+  queue.enqueue({ text: utterance }); await queue.whenIdle(); await queue.retry();
+  assert.deepEqual(records.map(r => r.attemptNumber), [1, 2]);
+  assert.equal(records[0].turnIndex, records[1].turnIndex); assert.equal(records[0].lastEventId, records[1].lastEventId);
+  assert.deepEqual(settleLocalTraces(records, queue.getPrivateState()).map(r => r.status), ["error", "committed"]);
+  const wrongAttempt = { ...records[1], attemptNumber: 1 };
+  assert.equal(settleLocalTraces([wrongAttempt], queue.getPrivateState())[0].status, "superseded");
+  assert.ok(!JSON.stringify(records).includes("CANARY"));
+});
+
+test("callback failures and mutation cannot change the generated result or graph", async () => {
+  const h = harness({ localGrounding: options(), onLocalGroundingTrace: async (record: LocalGroundingResearchRecord) => {
+    record.claims.length = 0; throw new Error("SYNTHETIC_PRIVATE_CANARY");
+  } });
+  const result = await h.run(); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(result.privateState.graph.records.filter((r: any) => r.kind === "claim").length, 1);
+  assert.ok(!JSON.stringify(h.dialogue.getAttempts()).includes("CANARY"));
+});
+
+test("Jev trace uses current response evidence, allows dated snapshots, and drops unrelated fields", async () => {
+  for (const model of ["typesafe/jev-1.14", "typesafe/jev-1.14-20261020", "SYNTHETIC_PRIVATE_CANARY"]) {
+    const records: LocalGroundingResearchRecord[] = [], local = options(); let evidence: unknown = null;
+    const classify = local.classifier.classify;
+    Object.assign(local.classifier, { metadata: { classifierKind: "jev_local_test", model: "typesafe/jev-1.14", calibrated: false } });
+    Object.defineProperty(local.classifier, "lastEvidence", { get: () => evidence });
+    local.classifier.classify = async (input, opts) => {
+      const verdicts = await classify(input, opts);
+      evidence = { callIndex: 1, status: "ok", model, rawResponse: "SYNTHETIC_PRIVATE_CANARY", imageBody: image.base64 };
+      return verdicts;
+    };
+    const h = harness({ localGrounding: local, onLocalGroundingTrace: (record: LocalGroundingResearchRecord) => records.push(record) }); await h.run();
+    assert.equal(records[0].classifier.kind, "jev_local_test");
+    assert.equal(records[0].classifier.model, model.startsWith("typesafe/") ? model : null);
+    assert.equal(records[0].classifier.callIndex, 1);
+    assert.equal(records[0].classifier.status, "ok");
+    assert.ok(!JSON.stringify(records).includes("CANARY")); assert.ok(!JSON.stringify(records).includes(image.base64));
+    assert.ok(!JSON.stringify(records).includes("rawScore"));
+  }
+});
+
+test("stale Jev evidence is not attributed to a later classification", async () => {
+  const records: LocalGroundingResearchRecord[] = [], local = options();
+  Object.assign(local.classifier, { metadata: { classifierKind: "jev_local_test" },
+    lastEvidence: { callIndex: 5, status: "ok", model: "typesafe/jev-1.14" } });
+  const h = harness({ localGrounding: local, onLocalGroundingTrace: (record: LocalGroundingResearchRecord) => records.push(record) }); await h.run();
+  assert.equal(records[0].classifier.model, null); assert.equal(records[0].classifier.callIndex, null);
+  assert.equal(records[0].classifier.status, "error");
+});
+
+test("research projection redacts image bodies, credential shapes and known private instructions", async () => {
+  const records: LocalGroundingResearchRecord[] = [], local = options();
+  local.extractor.extract = async () => [image.base64, "Bearer synthetic-test-token-12345", LOCAL_EXTRACTION_INSTRUCTIONS.split("\n")[0]].map((proposition, index) => ({ ...segment(ids[0]), segmentId: `s${index + 1}`, proposition }));
+  const h = harness({ localGrounding: local, onLocalGroundingTrace: (record: LocalGroundingResearchRecord) => records.push(record) }); await h.run();
+  assert.equal(records[0].claims.length, 3);
+  assert.ok(records[0].claims.every(claim => claim.redacted && claim.proposition === "[redacted]"));
+  assert.ok(records[0].extractor.segments.every(s => s.redacted));
+  assert.ok(!JSON.stringify(records).includes(image.base64)); assert.ok(!JSON.stringify(records).includes("Bearer"));
+});
+
+test("research separates public AI claims from human claims in verification order", async () => {
+  const records: LocalGroundingResearchRecord[] = [], local = options();
+  local.extractor.extract = async () => [{ ...segment(ids[0], "うん"), aspect: "name", proposition: "船でよい", name: "船", respondsToTurn: 2 }];
+  local.classifier.classify = async input => [{ segmentId: "s1", act: "name_accept", respondsToClaimId: input.priorClaims[0].id, rawScore: null }];
+  const h = harness({ localGrounding: local, onLocalGroundingTrace: (record: LocalGroundingResearchRecord) => records.push(record) });
+  (h.initial.judgments as any[]).push({ turnIndex: 1, judgment: { ...core, action: "propose_name", targetSlot: ids[0], candidateName: "船" } });
+  await h.run({ events: [events[0], { id: "event-2", seq: 2, speaker: "ai", text: "船と呼ぶのはどうでしょう？" },
+    { id: "event-3", seq: 3, speaker: "human", text: "うん" }], lastEventId: "event-3" });
+  assert.deepEqual(records[0].aiClaims.map(c => c.id), ["3:ai1"]);
+  assert.deepEqual(records[0].claims.map(c => c.id), ["3:local1"]);
+  assert.deepEqual(records[0].verification.accepted, ["3:ai1", "3:local1"]);
+  assert.equal(records[0].aiClaims[0].sourceTurn, 2);
+  assert.equal(records[0].claims[0].respondsTo, "3:ai1");
+});
+
+test("naming task callback and durable request identity survive restore without public trace exposure", async () => {
+  let saved: any;
+  const records: LocalGroundingResearchRecord[] = [], h = harness();
+  const args = { client: h.client, judge: h.judge, strategy: "repair-first", seed: 41, referenceMemory: true, runDir: "",
+    localGrounding: options(), onLocalGroundingTrace: (record: LocalGroundingResearchRecord) => records.push(record),
+    onPersist: async (record: unknown) => { saved = JSON.parse(JSON.stringify(record)); } };
+  const first = await createNamingTaskV2(args as any);
+  first.message(utterance); await first.whenIdle();
+  const restored = await createNamingTaskV2({ ...args, restore: saved } as any);
+  restored.message(utterance); await restored.whenIdle();
+  assert.deepEqual(records.map(r => r.attemptNumber), [1, 2]);
+  assert.deepEqual(settleLocalTraces(records, restored.researcherView().privateState).map(r => r.status), ["committed", "committed"]);
+  assert.ok(!JSON.stringify(restored.getState()).includes("extractor"));
+  assert.ok(!JSON.stringify(saved).includes('"extractor"'), "detailed records leave only through the requested private callback");
+});
+
+test("untrusted extraction identifiers and extra response fields never enter the private trace", async () => {
+  const records: LocalGroundingResearchRecord[] = [], local = options();
+  local.extractor.extract = async () => [{ ...segment(ids[0]),
+    segmentId: { key: "SYNTHETIC_PRIVATE_CANARY", imageBody: image.base64 }, rawResponse: "SYNTHETIC_PRIVATE_CANARY" } as any];
+  const h = harness({ localGrounding: local, onLocalGroundingTrace: (record: LocalGroundingResearchRecord) => records.push(record) }); await h.run();
+  assert.equal(typeof records[0].extractor.segments[0].segmentId, "string");
+  assert.equal(records[0].verification.accepted.length, 0);
+  assert.equal(records[0].verification.rejected.length, 1);
+  assert.ok(!JSON.stringify(records).includes("CANARY")); assert.ok(!JSON.stringify(records).includes(image.base64));
 });
