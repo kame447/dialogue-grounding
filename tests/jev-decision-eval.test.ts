@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runJevEvaluation, parseEvaluationArguments, evaluationErrorCode } from "../dialogue-model/runtime/diagnostics/jev-decision-eval/live.ts";
 import type { EvaluationDependencies } from "../dialogue-model/runtime/diagnostics/jev-decision-eval/live.ts";
-import { evaluateTrialGate, evaluateRunGate, projectDecision, auditJevLocalTurn } from "../dialogue-model/runtime/diagnostics/jev-decision-eval/gate.ts";
+import { evaluateTrialGate, evaluateRunGate, projectDecision, auditJevLocalTurn, memoIdentity, compareConditionInputs } from "../dialogue-model/runtime/diagnostics/jev-decision-eval/gate.ts";
 import type { TrialReceipt } from "../dialogue-model/runtime/diagnostics/jev-decision-eval/gate.ts";
 import type { JevDecision } from "../dialogue-model/runtime/decision/contract.ts";
 import { SYNTHETIC_CASES } from "../dialogue-model/runtime/diagnostics/jev-decision-eval/cases.ts";
@@ -31,13 +31,13 @@ function decision(extra: Partial<JevDecision> = {}): JevDecision {
 function trial(): TrialReceipt {
   const anchors = Array.from({ length: 6 }, (_, i) => ({ id: `s-000${i + 1}`, bbox: { x: i * 10, y: 0, w: 8, h: 8 }, centroid: { x: i * 10 + 4, y: 4 } }));
   const selected = decision();
-  const result: TrialReceipt = { caseId: "synthetic", completed: true, expectedTurns: 3, anchors,
+  const result: TrialReceipt = { caseId: "synthetic", completed: true, expectedTurns: 3, anchors, referents: [],
     observations: [{ turn: null, kind: "initial", order: 1, figureIds: anchors.map(a => a.id), succeeded: true,
       memo: { observedAt: "2026-10-20T00:00:00.000Z", figures: anchors.map(a => ({ id: a.id, region: a.bbox,
         holistic: [{ construal: "牛", basis: ["二つの出っ張り"], status: "hypothesis" }],
         analytic: { shapes: ["四角"], composition: "四角と細い部分", relations: ["角でつながる"] }, unknowns: [], reobservations: [] })) } }],
     wire: [{ turn: null, phase: "observation_initial", imageCount: 1, succeeded: true }],
-    turns: Array.from({ length: 3 }, (_, i) => ({ turn: i * 2 + 1, committed: true, traceMatches: true, decisions: [structuredClone(selected)], decisionOrder: [i + 2], finalAct: projectDecision(selected),
+    turns: Array.from({ length: 3 }, (_, i) => ({ turn: i * 2 + 1, committed: true, traceMatches: true, decisions: [structuredClone(selected)], decisionOrder: [i * 2 + 3], humanReferent: null, decisionReferents: [], decisionInputHashes: [], finalAct: projectDecision(selected),
       intervention: "none_pending_researcher_decision", publicText: "なるほど、そう見えるんですね。",
       local: { turn: i * 2 + 1, verified: [], unverified: 0, classifierOk: true, pipelineOk: true, model: "typesafe/jev-1.14" },
       issues: [], ledger: Object.fromEntries(anchors.map(a => [a.id, { status: "unassigned", name: null }])), repairHistory: [], step: { text: "形の話をしよう。" } })) };
@@ -53,14 +53,24 @@ function trial(): TrialReceipt {
   result.turns[2].local.verified = [claim("5:local1", "assert", "referent", ["s-0001", "s-0002"])];
   const observe = { figureIds: ["s-0001"], aspect: "part" as const, question: "四角はあるか", partnerConstrual: null };
   result.turns[2].decisions.unshift(decision({ action: "request_observation", observe }));
-  result.turns[2].decisionOrder = [4, 6];
+  result.turns[2].decisionOrder = [7, 9];
   const issue = { aspect: observe.aspect, question: observe.question, partnerConstrual: null };
-  result.observations.push({ turn: 5, kind: "targeted", order: 5, figureIds: observe.figureIds, issue, succeeded: true,
+  result.observations.push({ turn: 5, kind: "targeted", order: 8, figureIds: observe.figureIds, issue, succeeded: true,
     result: { observedAt: "2026-10-20T00:00:01.000Z", issue, figures: [{ figureId: "s-0001", supports: ["四角がある"], contradicts: [], unknown: [] }] } });
   result.wire.push({ turn: 5, phase: "observation_targeted", imageCount: 1, succeeded: true });
   result.turns[2].repairHistory = ["changed", "unchanged"].map((progress, i): any => ({ turn: 3 + i * 2, issueId: "3:local1", action: "confirm", question: "四角はあるか",
     partnerClaims: [], candidatesBefore: ["s-0001", "s-0002"], candidatesAfter: i ? ["s-0001", "s-0002"] : ["s-0001"],
     addedClaimIds: [], removedClaimIds: [], progress }));
+  for (const turn of result.turns) {
+    const estimate = { status: "ok" as const, scores: Object.fromEntries([...anchors.map(a => a.id), "none", "multiple"].map(id => [id, 0.6])),
+      model: "typesafe/jev-1.14-20261014", responseId: "gen-referent-synthetic", costUsd: 0.00001, latencyMs: 1,
+      inputBudget: structuredClone(turn.decisions[0].evidence.inputBudget!), calibrated: false as const };
+    const observationMemo = memoIdentity(result.observations[0].memo!);
+    result.referents.push({ turn: turn.turn, order: turn.decisionOrder[0] - 1, inputSha256: "a".repeat(64), observationMemo, estimate });
+    turn.humanReferent = { ...structuredClone(estimate), turnIndex: turn.turn, observationMemo };
+    turn.decisionReferents = turn.decisions.map(() => ({ status: estimate.status, scores: structuredClone(estimate.scores) }));
+    turn.decisionInputHashes = turn.decisions.map(d => ({ actionTarget: "b".repeat(64), detail: d.evidence.stages!.length === 2 ? "d".repeat(64) : null }));
+  }
   return result;
 }
 
@@ -207,6 +217,46 @@ test("Jev independent audit retains multiple AI feature targets and excludes fal
   }
 });
 
+test("referent gate keeps all eight raw scores or an explicit unknown, independent of actionTarget", () => {
+  const receipt = trial(), good = evaluateTrialGate(receipt);
+  assert.equal(good.passed, true); assert.deepEqual({ ...good.referent, inputBudget: undefined }, { attempts: 3, known: 3, unknown: 0, inputBudget: undefined });
+  assert.equal(good.referent.inputBudget.calls, 3); assert.equal(good.inputBudget.calls, 5);
+  assert.equal(good.conditionNeutrality, "not_measured; verified_by_regression");
+  assert.ok(Object.values(receipt.referents[0].estimate.scores!).reduce((sum, n) => sum + n, 0) > 1);
+  for (const change of [
+    (r: TrialReceipt) => { delete r.referents[0].estimate.scores!["s-0006"]; },
+    (r: TrialReceipt) => { r.referents[0].estimate.scores!.extra = 0.3; },
+    (r: TrialReceipt) => { r.referents[0].estimate.scores!["s-0006"] = 1.01; },
+    (r: TrialReceipt) => { r.referents[0].estimate.scores!["s-0006"] = NaN; },
+    (r: TrialReceipt) => { r.referents[0].estimate.model = "typesafe/jev-1.14-wrong"; },
+    (r: TrialReceipt) => { r.referents[0].estimate.status = "unknown"; },
+    (r: TrialReceipt) => { r.turns[0].humanReferent!.scores = null; },
+  ]) {
+    const bad = trial(); change(bad); assert.ok(evaluateTrialGate(bad).unmet.includes("referent_evidence_invalid"));
+  }
+  const unknown = trial(), attempt = unknown.referents[0];
+  Object.assign(attempt.estimate, { status: "unknown", scores: null, model: null, responseId: null, costUsd: null, inputBudget: null });
+  unknown.turns[0].humanReferent = { ...structuredClone(attempt.estimate), turnIndex: 1, observationMemo: attempt.observationMemo };
+  unknown.turns[0].decisionReferents = [{ status: "unknown", scores: null }];
+  const result = evaluateTrialGate(unknown); assert.equal(result.passed, true); assert.equal(result.referent.unknown, 1);
+});
+
+test("referent gates reject missing attempts, stale memo identity, changed decision material and public fields", () => {
+  for (const [code, change] of [
+    ["referent_missing", (r: TrialReceipt) => { r.referents.shift(); }],
+    ["referent_missing", (r: TrialReceipt) => { r.referents.push(structuredClone(r.referents[0])); }],
+    ["referent_missing", (r: TrialReceipt) => { r.referents[0].order = r.turns[0].decisionOrder[0]; }],
+    ["referent_missing", (r: TrialReceipt) => { r.referents[0].turn = 99; }],
+    ["referent_memo_mismatch", (r: TrialReceipt) => { r.referents[0].observationMemo.sha256 = "f".repeat(64); }],
+    ["referent_memo_mismatch", (r: TrialReceipt) => { r.referents[0].observationMemo.version++; }],
+    ["referent_action_coupled", (r: TrialReceipt) => { r.turns[0].decisionReferents[0].scores = { ...r.turns[0].decisions[0].evidence.scores.action }; }],
+    ["referent_action_coupled", (r: TrialReceipt) => { r.turns[2].decisionReferents[1].scores!["s-0001"] = 0.99; }],
+    ["referent_publication", (r: TrialReceipt) => { r.turns[0].publicText = 'ｈｕｍａｎＲｅｆｅｒｅｎｔ: {"scores":{}}'; }],
+  ] as const) {
+    const bad = trial(); change(bad); assert.ok(evaluateTrialGate(bad).unmet.includes(code), code);
+  }
+});
+
 test("all failed cases remain in the gate; selecting successful cases cannot pass", () => {
   const good = trial(), bad = trial(); bad.caseId = "failed"; bad.completed = false;
   const result = evaluateRunGate([good, bad], [good.caseId, bad.caseId]);
@@ -231,8 +281,9 @@ test("input omission is reported per decision and run without treating it as fai
 });
 
 test("anonymous scripts contain only current human speech with no action elicitation", () => {
-  assert.equal(SYNTHETIC_CASES.length, 3);
-  assert.equal(new Set(SYNTHETIC_CASES.map(c => c.id)).size, 3);
+  assert.equal(SYNTHETIC_CASES.length, 5);
+  assert.equal(new Set(SYNTHETIC_CASES.map(c => c.id)).size, 5);
+  assert.deepEqual(new Set(SYNTHETIC_CASES.map(c => c.referentScenario)), new Set(["continuity", "construal", "split", "repair", "shift"]));
   for (const c of SYNTHETIC_CASES) for (const step of c.steps) {
     assert.deepEqual(Object.keys(step).filter(k => !["text", "expect", "check"].includes(k)), []);
     assert.doesNotMatch(step.text, /説明して|提案して|選んで|撤回して|取り消して|act|ER1|a11|s-[0-9a-f]{4}/u);
@@ -294,7 +345,7 @@ const script: SyntheticCase = { id: "mock-information-cycle", steps: [
   { text: "次は鍵みたいな形の話をしよう。" },
 ] };
 type MockFault = { phase?: string; phaseAt?: number; publicText?: string; model?: string; decisionModel?: string; cost?: number; classificationUnknown?: boolean;
-  firstAction?: "defer" | "move_on" | "revisit" | "confirm" | "repair"; bareReply?: "agree" | "deny"; postObservationConfirm?: boolean; firstTarget?: "none" | "multiple"; decisionChoices?: Record<string, string>; detailFault?: "network" | "partial" | "model" };
+  firstAction?: "defer" | "move_on" | "revisit" | "confirm" | "repair"; bareReply?: "agree" | "deny"; postObservationConfirm?: boolean; firstTarget?: "none" | "multiple"; referentFault?: "missing" | "range" | "model" | "error"; decisionChoices?: Record<string, string>; detailFault?: "network" | "partial" | "model" };
 function e2eDependencies(fault: MockFault = {}): EvaluationDependencies & { calls: any[]; http: any[]; created: { count: number } } {
   const calls: any[] = [], http: any[] = [], created = { count: 0 };
   const phaseCounts: Record<string, number> = {};
@@ -348,8 +399,19 @@ function e2eDependencies(fault: MockFault = {}): EvaluationDependencies & { call
       const readKey = async () => "sk-or-SYNTHETIC-MOCK-ONLY-1234567890";
       return { observer: createLunaObserver(shared, { now: () => new Date("2026-10-20T00:00:00.000Z"),
         ...(componentOptions.observationTimeoutMs === undefined ? {} : { timeoutMs: componentOptions.observationTimeoutMs }) }),
-        jevDecision: createJevDecisionClient({ enabled: true, readKey, fetchImpl: async (_url, request) => {
+        jevDecision: createJevDecisionClient({ enabled: true, readKey, ...(componentOptions.decisionTimeoutMs === undefined ? {} : { timeoutMs: componentOptions.decisionTimeoutMs }), fetchImpl: async (_url, request) => {
           const payload = JSON.parse(request.body as string), state = JSON.parse(payload.state);
+          if (payload.questions.human_referent) {
+            http.push({ kind: "referent", payload });
+            if (fault.referentFault === "error") throw new Error("PRIVATE_REFERENT_ERROR");
+            const probabilities: Record<string, number> = Object.fromEntries(Object.keys(payload.questions.human_referent.criteria).map(label =>
+              [label, label === "figure_3" ? 0.9 : label === "multiple" ? 0.7 : 0.2]));
+            if (fault.referentFault === "missing") delete probabilities.figure_5;
+            if (fault.referentFault === "range") probabilities.figure_5 = 1.1;
+            return Response.json({ model: fault.referentFault === "model" ? "typesafe/jev-1.14-wrong" : "typesafe/jev-1.14-20261014",
+              id: "gen-referent-" + http.length, answers: { human_referent: { type: "choice", choice: "multiple", probabilities, confidence: 0.2 } },
+              usage: { cost: 0.00001 } });
+          }
           http.push({ kind: "decision", payload });
           const choices: Record<string, string> = {};
           if (payload.questions.action) {
@@ -467,6 +529,84 @@ test("reobservation can have two two-stage judgments while all four stage budget
   assert.equal(turn.decisions.length, 2); assert.ok(turn.decisions.every((d: any) => d.evidence.stages.length === 2));
   assert.equal(document.receipt.observations.filter((o: any) => o.turn === 9).length, 1);
   assert.equal(result.gate.inputBudget.calls, deps.http.filter(call => call.kind === "decision").length);
+}));
+
+test("actual referent HTTP is distinct from action stages and preserves raw scores, memo provenance and posthoc records", async () => temporary(async outputDir => {
+  const deps = e2eDependencies(), result = await runJevEvaluation({ outputDir, seed: 1701 }, deps);
+  assert.equal(result.status, "passed", JSON.stringify(result.gate));
+  const document = JSON.parse(await readFile(join(result.directory, script.id + ".private.json"), "utf8")), receipt = document.receipt;
+  const estimates = deps.http.filter(call => call.kind === "referent");
+  assert.equal(estimates.length, script.steps.length); assert.equal(result.gate.referent.attempts, script.steps.length);
+  assert.equal(result.gate.referent.known, script.steps.length); assert.equal(result.gate.referent.unknown, 0);
+  assert.equal(result.gate.referent.inputBudget.calls, estimates.length);
+  assert.equal(result.gate.inputBudget.calls, deps.http.filter(call => call.kind === "decision").length);
+  const ids = receipt.anchors.map((a: any) => a.id);
+  for (const [index, attempt] of receipt.referents.entries()) {
+    const turn = receipt.turns[index];
+    assert.deepEqual(Object.keys(attempt.estimate.scores), [...ids, "none", "multiple"]);
+    assert.deepEqual(Object.values(attempt.estimate.scores), [0.2, 0.2, 0.2, 0.9, 0.2, 0.2, 0.2, 0.7]);
+    assert.deepEqual(attempt.estimate.scores, turn.humanReferent.scores);
+    assert.ok(turn.decisionReferents.every((r: any) => JSON.stringify(r.scores) === JSON.stringify(attempt.estimate.scores)));
+    assert.equal(Object.hasOwn(JSON.parse(estimates[index].payload.state), "humanReferent"), false);
+    assert.ok(attempt.order < turn.decisionOrder[0]);
+  }
+  assert.equal(receipt.turns[0].decisions[0].target.figureId, ids[0]);
+  assert.equal(receipt.turns[0].humanReferent.scores[ids[3]], 0.9); // A distinct action target does not overwrite the estimate.
+  assert.equal(receipt.referents[4].observationMemo.sha256, receipt.referents[0].observationMemo.sha256);
+  assert.notEqual(receipt.referents[5].observationMemo.sha256, receipt.referents[4].observationMemo.sha256);
+  const afterObservation = receipt.turns.find((t: any) => t.turn === 9);
+  assert.equal(afterObservation.decisionReferents.length, 2);
+  assert.deepEqual(afterObservation.decisionReferents[0], afterObservation.decisionReferents[1]);
+  const trajectories = (await readFile(join(result.directory, "referent-trajectories.private.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line));
+  assert.equal(trajectories.length, script.steps.length);
+  assert.ok(trajectories.every(row => row.scoring === "unscored; independent_posthoc_required" && row.humanReferent && row.actionTarget));
+  const manifest = JSON.parse(await readFile(join(result.directory, "run.private.json"), "utf8"));
+  assert.equal(manifest.conditionNeutrality, "not_measured; verified_by_regression");
+  assert.equal(manifest.referentScoring, "unscored; independent_posthoc_required");
+  for (const call of deps.calls.filter(call => call.phase === "generation")) {
+    for (const message of call.messages) if (typeof message.content === "string") assert.doesNotMatch(message.content, /"humanReferent"\s*:/u);
+  }
+}));
+
+test("missing, out-of-range or wrong-model referent output stays unknown while action judgment continues", async () => {
+  for (const referentFault of ["missing", "range", "model"] as const) await temporary(async outputDir => {
+    const deps = e2eDependencies({ referentFault }), result = await runJevEvaluation({ outputDir, seed: 1701 }, deps);
+    assert.equal(result.status, "passed", JSON.stringify(result.gate));
+    assert.equal(result.gate.referent.unknown, script.steps.length); assert.equal(result.gate.referent.known, 0);
+    const receipt = JSON.parse(await readFile(join(result.directory, script.id + ".private.json"), "utf8")).receipt;
+    assert.ok(receipt.referents.every((r: any) => r.estimate.status === "unknown" && r.estimate.scores === null));
+    assert.ok(receipt.turns.every((t: any) => t.committed && t.decisionReferents.every((r: any) => r.status === "unknown" && r.scores === null)));
+  });
+});
+
+test("both strategies give the same referent and decision request JSON from the same prefixes", async () => temporary(async outputDir => {
+  const first = e2eDependencies(), second = e2eDependencies(); first.strategy = "repair-first"; second.strategy = "bypass-enabled";
+  const a = await runJevEvaluation({ outputDir, seed: 1701 }, first), b = await runJevEvaluation({ outputDir, seed: 1701 }, second);
+  assert.equal(a.status, "passed"); assert.equal(b.status, "passed");
+  const payloads = (deps: ReturnType<typeof e2eDependencies>) => deps.http.filter(call => ["referent", "decision"].includes(call.kind)).map(call => JSON.stringify(call.payload));
+  assert.deepEqual(payloads(first), payloads(second));
+  const x = JSON.parse(await readFile(join(a.directory, script.id + ".private.json"), "utf8")).receipt;
+  const y = JSON.parse(await readFile(join(b.directory, script.id + ".private.json"), "utf8")).receipt;
+  assert.equal(compareConditionInputs([x], [y]), "matched");
+  assert.equal(compareConditionInputs([x]), "not_measured");
+  y.referents[0].inputSha256 = "c".repeat(64);
+  assert.equal(compareConditionInputs([x], [y]), "mismatch");
+}));
+
+test("case metadata and scoring material remain outside prompts; decision time budget is explicit", async () => temporary(async outputDir => {
+  assert.equal(Object.hasOwn(parseEvaluationArguments(["--out", "/tmp/eval"]), "decisionTimeoutMs"), false);
+  assert.equal(parseEvaluationArguments(["--out", "/tmp/eval", "--decision-timeout-ms", "60000"]).decisionTimeoutMs, 60000);
+  for (const value of ["0", "60001", "0.5", "NaN", "-1"]) assert.throws(() => parseEvaluationArguments(["--out", "/tmp/eval", "--decision-timeout-ms", value]), /invalid_arguments/);
+  const deps = e2eDependencies(), create = deps.createComponents;
+  deps.cases = [{ ...script, referentScenario: "shift" }];
+  let received: unknown;
+  deps.createComponents = (shared, options) => { received = options; return create(shared, options); };
+  const result = await runJevEvaluation({ outputDir, seed: 1701, decisionTimeoutMs: 60000 }, deps);
+  assert.equal(result.status, "passed"); assert.deepEqual(received, { decisionTimeoutMs: 60000 });
+  for (const call of deps.http) assert.ok(!JSON.stringify(call.payload).includes("referentScenario"));
+  const manifest = JSON.parse(await readFile(join(result.directory, "run.private.json"), "utf8"));
+  assert.equal(manifest.decisionTimeoutMs, 60000);
+  for (const decisionTimeoutMs of [0, 60001, NaN, 0.5, "60000"]) await assert.rejects(runJevEvaluation({ outputDir, seed: 1701, decisionTimeoutMs } as any, deps), /invalid_arguments/);
 }));
 
 test("provider/model failure keeps every case, previous checkpoints and typed failures, and cannot pass", async () => {
@@ -774,5 +914,48 @@ test("private stage budgets keep only numeric allowed fields, and malformed omis
       const text = await readFile(join(result.directory, file), "utf8");
       for (const secret of ["PRIVATE_BUDGET_KEY", "PRIVATE_BUDGET_CANARY", "PRIVATE_OMISSION_KEY"]) assert.ok(!text.includes(secret));
     }
+  });
+});
+
+
+test("referent adapter exceptions and malformed objects become private unknown; typed abort remains unpublished", async () => {
+  const { JevDecisionError } = await import("../dialogue-model/runtime/decision/jev-decision.ts");
+  for (const fault of ["error", "getter", "object", "abort"] as const) await temporary(async outputDir => {
+    const deps = e2eDependencies(), create = deps.createComponents;
+    deps.createComponents = (shared, options) => {
+      const components = create(shared, options), adapter = components.jevDecision as NonNullable<ReturnType<typeof createJevDecisionClient>>;
+      return { ...components, jevDecision: {
+        get lastEvidence() { return adapter.lastEvidence; },
+        decide: (input, options) => adapter.decide(input, options),
+        async estimateReferent() {
+          if (fault === "object") return { status: "ok", scores: { PRIVATE_REFERENT_FIELD: "PRIVATE_REFERENT_VALUE" }, raw: "PRIVATE_REFERENT_RAW" } as any;
+          const error = fault === "error" ? new Error("PRIVATE_REFERENT_MESSAGE") : new JevDecisionError(fault === "abort" ? "aborted" : "invalid_response");
+          if (fault === "getter") Object.defineProperty(error, "code", { get() { throw new Error("PRIVATE_REFERENT_GETTER"); } });
+          Object.assign(error, { response: "PRIVATE_REFERENT_RESPONSE" });
+          throw error;
+        },
+      } };
+    };
+    const result = await runJevEvaluation({ outputDir, seed: 1701 }, deps);
+    const document = JSON.parse(await readFile(join(result.directory, script.id + ".private.json"), "utf8"));
+    assert.ok(document.receipt.referents.every((r: any) => r.estimate.status === "unknown" && r.estimate.scores === null));
+    if (fault === "abort") {
+      assert.equal(result.status, "gate_failed"); assert.equal(document.receipt.failureCode, "aborted");
+      assert.equal(document.receipt.referents.length, 1); assert.equal(document.publicTurns.filter((t: any) => t.speaker === "ai").length, 0);
+    } else { assert.equal(result.status, "passed", JSON.stringify(result.gate)); assert.equal(document.receipt.completed, true); }
+    for (const file of await readdir(result.directory)) assert.ok(!(await readFile(join(result.directory, file), "utf8")).includes("PRIVATE_REFERENT_"));
+  });
+});
+
+test("referent fields stay out of publication and participant-facing content, including fullwidth echoes", async () => {
+  for (const publicText of ['humanReferent: {"scores":{"none":0.2}}', 'ｈｕｍａｎ＿ｒｅｆｅｒｅｎｔ: {"status":"ok"}']) await temporary(async outputDir => {
+    const deps = e2eDependencies({ publicText }), result = await runJevEvaluation({ outputDir, seed: 1701 }, deps);
+    assert.equal(result.status, "gate_failed");
+    const document = JSON.parse(await readFile(join(result.directory, script.id + ".private.json"), "utf8"));
+    assert.equal(document.receipt.failureCode, "unsafe_generation");
+    assert.equal(document.receipt.referents.length, 1);
+    assert.equal(document.publicTurns.filter((t: any) => t.speaker === "ai").length, 0);
+    const journal = await readFile(join(result.directory, "attempts.private.jsonl"), "utf8");
+    assert.ok(!journal.includes(publicText));
   });
 });
