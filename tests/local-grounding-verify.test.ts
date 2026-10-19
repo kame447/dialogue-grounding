@@ -109,7 +109,7 @@ test("wrong speaker, wrong issue, missing IDs and duplicate model-local IDs are 
   assert.equal(repeated.operations.length, 0); assert.equal(repeated.rejected.length, 2);
 });
 
-test("recordAiClaims uses public committed literal elements, preserves fixed part aspect and deduplicates", () => {
+test("recordAiClaims uses a public committed act, preserves fixed part aspect and deduplicates", () => {
   const initial = createReferenceGraph();
   const priorAct = { turn: 1, action: "propose_name", targetSlot: A, candidateName: "船", discriminatingFeature: "四角がある" };
   const publicTurns: PublicTurn[] = [{ turn: 1, speaker: "ai", text: "四角があるので船と呼ぼう" }];
@@ -195,4 +195,94 @@ test("a public AI agree accepts only the latest matching public human naming pro
   const withdrawn = commit(graph, 3, [humanProposal(3, { act: "withdraw", respondsTo: "2:ai1", issueId: "2:ai1" }),
     humanProposal(3, { id: "3:other", act: "withdraw", respondsTo: "1:ai1", issueId: "1:ai1" })]);
   assert.equal(run({}, publicTurns, withdrawn).operations.length, 0);
+});
+
+test("a paraphrased public AI feature retains its committed proposition and supports a verified denial", () => {
+  const initial = createReferenceGraph();
+  const priorAct = { turn: 1, action: "confirm", targetSlot: A, candidateName: null, discriminatingFeature: "小さい三角が二つつながっている" };
+  const publicTurns: PublicTurn[] = [{ turn: 1, speaker: "ai", text: "小さな三角が2個くっついて見えますか？" },
+    { turn: 2, speaker: "human", text: "三角は一つです" }];
+  const result = recordAiClaims({ graph: initial, turn: 2, publicTurns, priorAct });
+  assert.equal(result.operations.length, 1); assert.deepEqual(result.rejected, []);
+  const feature = result.operations[0];
+  assert.equal(feature.proposition, priorAct.discriminatingFeature); assert.equal(feature.quote, publicTurns[0].text);
+  assert.equal(feature.act, "ask"); assert.equal(feature.source, "ai_hypothesis");
+  assert.equal(feature.quote.includes(feature.proposition), false);
+  const graph = commit(initial, 2, result.operations, publicTurns);
+  assert.equal(deriveLocalIssues(graph)[0].state, "unconfirmed");
+  const response = verifyLocalUpdate({ graph, turn: 2, publicTurns, segments: [segment({ quote: "三角は一つです", proposition: "三角は一つ" })],
+    verdicts: [verdict({ act: "deny", respondsToClaimId: feature.id })] });
+  assert.equal(response.operations[0].act, "deny"); assert.equal(response.operations[0].issueId, feature.issueId);
+  const combined = commit(initial, 2, [...result.operations, ...response.operations], publicTurns);
+  assert.equal(deriveLocalIssues(combined)[0].state, "denied");
+  assert.equal(recordAiClaims({ graph, turn: 3, publicTurns, priorAct }).operations.length, 0);
+});
+
+test("feature claims require a public AI source and bounded literal quote; names still require literal wording", () => {
+  const graph = createReferenceGraph();
+  const priorAct = { turn: 1, action: "propose_name", targetSlot: A, candidateName: "灯台", discriminatingFeature: "小さい三角が二つつながっている" };
+  const text = " ".repeat(170) + "小さな三角が2個くっついて見えます。" + "形を見ています。".repeat(30);
+  const source: PublicTurn = { turn: 1, speaker: "ai", text };
+  const run = (publicTurns: PublicTurn[]) => recordAiClaims({ graph, turn: 2, publicTurns, priorAct });
+  const result = run([source]);
+  assert.deepEqual(result.operations.map(c => [c.id, c.aspect]), [["2:ai2", "part"]]);
+  assert.deepEqual(result.rejected, [{ segmentId: "ai1", reason: "nonpublic_ai_element" }]);
+  const feature = result.operations[0];
+  assert.equal(feature.proposition, priorAct.discriminatingFeature); assert.ok(feature.quote.trim().length > 0);
+  assert.ok(feature.quote.length <= 160); assert.ok(source.text.includes(feature.quote));
+  assert.equal(deriveLocalIssues(commit(graph, 2, result.operations, [source]))[0].nameState, null);
+  assert.equal(run([]).operations.length, 0);
+  assert.equal(run([{ ...source, speaker: "human" }]).operations.length, 0);
+  assert.equal(run([{ ...source, nonReferential: true } as PublicTurn]).operations.length, 0);
+  assert.equal(run([{ ...source, turn: 3 }]).operations.length, 0);
+  assert.equal(run([{ ...source, text: " " }]).operations.length, 0);
+});
+
+test("verified Jev responses override conflicting or stale Luna issue links without becoming rejections", () => {
+  const graph = commit(createReferenceGraph(), 1, [claim(1, { aspect: "name", act: "name_propose", name: "灯台", quote: "灯台と呼ぼう" }),
+    claim(1, { id: "1:other", issueId: "1:other", targets: [B] })]);
+  const publicTurns: PublicTurn[] = [{ turn: 2, speaker: "human", text: "灯台でいいです" }];
+  for (const linkedIssueId of ["1:other", "1:missing", "MODEL_RAW_CANARY"]) {
+    const result = verifyLocalUpdate({ graph, turn: 2, publicTurns,
+      segments: [segment({ aspect: "name", quote: publicTurns[0].text, name: "灯台", linkedIssueId })],
+      verdicts: [verdict({ act: "name_accept", respondsToClaimId: "1:ai1" })] });
+    assert.equal(result.operations.length, 1); assert.deepEqual(result.rejected, []);
+    assert.equal(result.operations[0].issueId, "1:ai1"); assert.equal(result.operations[0].respondsTo, "1:ai1");
+    assert.deepEqual(result.diagnostics, [{ segmentId: "s1", reason: "issue_link_overridden",
+      linkedIssueId: linkedIssueId === "MODEL_RAW_CANARY" ? null : linkedIssueId, resolvedIssueId: "1:ai1" }]);
+    assert.doesNotMatch(JSON.stringify(result), /MODEL_RAW_CANARY/);
+    assert.equal(deriveLocalIssues(commit(graph, 2, result.operations, publicTurns))[0].nameState, "agreed");
+  }
+});
+
+test("an advisory issue cannot bypass response target/aspect/speaker checks or establish a response by itself", () => {
+  const graph = commit(createReferenceGraph(), 1, [claim(1)]);
+  const run = (s: Partial<LocalSegmentProposal>, v: Partial<LocalFunctionVerdict>) => verifyLocalUpdate({ graph, turn: 2,
+    publicTurns: [{ turn: 2, speaker: "human", text: "四角は合ってる" }], segments: [segment({ linkedIssueId: "1:missing", ...s })],
+    verdicts: [verdict({ act: "agree", respondsToClaimId: "1:ai1", ...v })] });
+  for (const result of [run({ targets: [B] }, {}), run({ aspect: "position" }, {}), run({}, { act: "withdraw" }),
+    run({}, { respondsToClaimId: "1:missing" }), run({}, { respondsToClaimId: null }), run({}, { act: "assert", respondsToClaimId: null })]) {
+    assert.equal(result.operations.length, 0); assert.equal(result.diagnostics, undefined);
+  }
+  const valid = run({ linkedIssueId: "1:ai1" }, {});
+  assert.equal(valid.operations.length, 1); assert.equal(valid.diagnostics, undefined);
+});
+
+test("a committed guard fallback cannot supply AI features or names, while an adopted rewrite can", () => {
+  const initial = createReferenceGraph();
+  const priorAct = { turn: 1, action: "propose_name", targetSlot: A, candidateName: "灯台", discriminatingFeature: "小さい三角が二つつながっている",
+    followUp: { action: "propose_name", targetSlot: B, candidateName: "鳥", discriminatingFeature: null } };
+  for (const text of ["なるほど、そう見えるんですね。", "灯台と呼びましょう。別のものは鳥でしょうか。小さな三角が2個くっついて見えます。", "data:image/png;base64,QUJD"]) {
+    const publicTurns: PublicTurn[] = [{ turn: 1, speaker: "ai", text }];
+    const result = recordAiClaims({ graph: initial, turn: 2, publicTurns, priorAct: { ...priorAct, publishedFallback: true } });
+    assert.deepEqual(result.operations, []);
+    assert.deepEqual(result.rejected, [{ segmentId: "ai", reason: "ai_fallback_utterance" }]);
+    assert.equal(JSON.stringify(result).includes(text), false);
+  }
+  const adopted = recordAiClaims({ graph: initial, turn: 2,
+    publicTurns: [{ turn: 1, speaker: "ai", text: "灯台と呼びましょう。小さな三角が2個くっついて見えます。" }],
+    priorAct: { ...priorAct, followUp: null, publishedFallback: false } });
+  assert.deepEqual(adopted.operations.map(c => c.aspect), ["name", "part"]);
+  assert.equal(adopted.operations[1].proposition, priorAct.discriminatingFeature);
+  assert.deepEqual(adopted.rejected, []);
 });
