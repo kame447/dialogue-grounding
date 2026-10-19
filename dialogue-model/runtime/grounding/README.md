@@ -7,7 +7,9 @@ AIの各ターンについて、公開対話にどこまで根拠があるかを
 | 軸 | 段階 | 要点 |
 | --- | --- | --- |
 | 対象同定の根拠 `identification` | `supported` / `insufficient` / `contradicted` / `unknown` | 相手自身の発話による識別的特徴の独立な一致、またはAIの示した特徴への明示的な肯定があり、矛盾がない場合だけ `supported`。見立ての類似・相槌・「わかります」・AI側の仮説だけでは `insufficient`。 |
-| 名称合意の根拠 `name_agreement` | `agreed` / `unclear` / `not_agreed` / `unknown` | 同じ対象の名称を両者が明示的に採用し、その後に別案・留保がない場合だけ `agreed`。名称が正しい対象を指すかはこの軸では判定しない。 |
+| 名称合意の根拠 `name_agreement` | `agreed` / `unclear` / `not_agreed` / `no_name` / `unknown` | 名前の明示的な提案（「〇〇と呼びませんか」「〇〇にしましょうか」、または文脈上この図形の名前として出された仮称）を他方が明示的に採用した場合だけ `agreed`。提案があり採用が未確定なら `unclear`、提案が拒否・競合・撤回されたなら `not_agreed`、名前の提案がまだないなら `no_name`。**見立て・印象の共有（「鳥みたい」）は対象の特定のためのもので、名前の提案ではない**ため、それだけなら `no_name`。返答がない・相槌だけは合意ではない。名称が正しい対象を指すかはこの軸では判定しない。 |
+
+判定基準には版があり、各判定に `criteriaVersion` として記録する。現行は `grounding-criteria/v2`（2026-10-19、研究者承認）。v1 は名称軸が4段階で、「名前がまだ出ていない」場合を `not_agreed` に含めていた。v1 の記録には版の欄がない。v1 と v2 の結果は同じ尺度ではないため、そのまま比較しない。クライアントは異なる版の応答を `invalid_response` として拒否する。
 
 `unknown` は、公開発話がない場合、判定対象を読み取れない場合、画像を見なければ判断できない場合に使う。各段階の基準文（短い別表現を含む）、設問文、モデルIDはWorker側の `workers/research-ai-proxy/src/grounding.ts` が持ち、クライアントは `{purpose:"grounding_jev", state}` だけを送る。2軸は1回の呼び出しで判定する。
 

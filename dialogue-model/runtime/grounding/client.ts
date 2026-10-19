@@ -2,7 +2,7 @@
 // research Worker. Uses the existing research bearer token, never an OpenRouter key.
 // Scores are relative, uncalibrated model scores; never call them P(correct target).
 import {
-  GROUNDING_LEVELS, GROUNDING_MAX_STATE_CHARS, GROUNDING_MODELS, isGroundingModel, validateAxis,
+  GROUNDING_CRITERIA_VERSION, GROUNDING_LEVELS, GROUNDING_MAX_STATE_CHARS, GROUNDING_MODELS, isGroundingModel, validateAxis,
   type AxisVerdict, type GroundingPurpose, type IdentificationEvidence, type NameAgreementEvidence,
 } from "../../../workers/research-ai-proxy/src/grounding.ts";
 
@@ -17,11 +17,14 @@ export type GroundingVerdict = {
   nameAgreement: AxisVerdict<NameAgreementEvidence>;
   usage: { inputTokens: number | null; outputTokens: number | null; costUsd: number | null } | null;
   latencyMs: number;
+  /** Version of the server-owned levels and criteria that produced this verdict. */
+  criteriaVersion: typeof GROUNDING_CRITERIA_VERSION;
 };
 export type GroundingJudge = { judge(request: GroundingRequest, options?: GroundingCallOptions): Promise<GroundingVerdict> };
 export type GroundingErrorCode = "not_found" | "disabled" | "invalid_config" | "invalid_request" | "rate_limited" | "payment_required" |
   "upstream_error" | "invalid_response" | "timeout" | "network_error" | "aborted";
 
+export { GROUNDING_CRITERIA_VERSION };
 export const GROUNDING_DEFAULT_TIMEOUT_MS = 20_000;
 export const GROUNDING_MAX_TIMEOUT_MS = 60_000;
 
@@ -47,7 +50,9 @@ export function parseGroundingVerdict(data: unknown, purpose: GroundingPurpose, 
   const value = data as Record<string, unknown>;
   const identification = validateAxis(value.identification, GROUNDING_LEVELS.identification, false);
   const nameAgreement = validateAxis(value.nameAgreement, GROUNDING_LEVELS.name_agreement, false);
-  if (value.purpose !== purpose || !isGroundingModel(value.model, GROUNDING_MODELS[purpose]) || !identification || !nameAgreement) {
+  // A different criteria version (e.g. a v1 proxy with 4 name levels) is never mixed into v2 results.
+  if (value.purpose !== purpose || !isGroundingModel(value.model, GROUNDING_MODELS[purpose]) || !identification || !nameAgreement ||
+      value.criteriaVersion !== GROUNDING_CRITERIA_VERSION) {
     throw new GroundingConnectionError("invalid_response");
   }
   const usage = value.usage && typeof value.usage === "object" ? value.usage as Record<string, unknown> : null;
@@ -57,6 +62,7 @@ export function parseGroundingVerdict(data: unknown, purpose: GroundingPurpose, 
     id: typeof value.id === "string" && value.id.length <= 128 ? value.id : null,
     usage: usage && { inputTokens: nonnegative(usage.inputTokens), outputTokens: nonnegative(usage.outputTokens), costUsd: nonnegative(usage.costUsd) },
     latencyMs,
+    criteriaVersion: GROUNDING_CRITERIA_VERSION,
   };
 }
 
@@ -120,6 +126,7 @@ export function createMockGroundingJudge(decide: (state: string) => {
         identification: { level: identification, scores: scores(GROUNDING_LEVELS.identification, identification), confidence: null },
         nameAgreement: { level: nameAgreement, scores: scores(GROUNDING_LEVELS.name_agreement, nameAgreement), confidence: null },
         usage: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
+        criteriaVersion: GROUNDING_CRITERIA_VERSION,
       }, request.purpose, Math.round(performance.now() - started));
     },
   });

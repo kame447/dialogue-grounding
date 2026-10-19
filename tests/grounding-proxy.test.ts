@@ -68,8 +68,8 @@ test("grounding route and policy require the proxy token and enforce method", as
   assert.equal((await handleRequest(request("/v1/grounding-policy", { method: "POST" }), env, never)).status, 405);
   const policy = await handleRequest(request("/v1/grounding-policy", { method: "GET" }), env);
   assert.deepEqual(JSON.parse(await safeText(policy)), { ready: true, enabled: true, models: GROUNDING_MODELS,
-    levels: { identification: ["supported", "insufficient", "contradicted", "unknown"], name_agreement: ["agreed", "unclear", "not_agreed", "unknown"] },
-    textOnly: true });
+    levels: { identification: ["supported", "insufficient", "contradicted", "unknown"], name_agreement: ["agreed", "unclear", "not_agreed", "no_name", "unknown"] },
+    criteriaVersion: "grounding-criteria/v2", textOnly: true });
 });
 
 test("one upstream call carries both closed-set questions with server-owned model, URL and criteria", async () => {
@@ -80,7 +80,8 @@ test("one upstream call carries both closed-set questions with server-owned mode
   });
   assert.equal(response.status, 200);
   const data = JSON.parse(await safeText(response));
-  assert.deepEqual(Object.keys(data).sort(), ["id", "identification", "model", "nameAgreement", "provider", "purpose", "usage"]);
+  assert.deepEqual(Object.keys(data).sort(), ["criteriaVersion", "id", "identification", "model", "nameAgreement", "provider", "purpose", "usage"]);
+  assert.equal(data.criteriaVersion, "grounding-criteria/v2");
   assert.equal(data.identification.level, "insufficient");
   assert.equal(data.nameAgreement.level, "unclear");
   assert.equal(data.usage.costUsd, 0.00004);

@@ -1,6 +1,6 @@
 import { resolvePurposeModel } from "./modelPolicy.mjs";
 import { OPENROUTER_DECISIONS_URL, DECISION_MODELS, decisionConfig, buildDecisionPayload, sanitizeDecision } from "./decisions.mjs";
-import { GROUNDING_MODELS, GROUNDING_LEVELS, groundingConfig, buildGroundingPayload, sanitizeGroundingVerdict } from "./grounding.ts";
+import { GROUNDING_CRITERIA_VERSION, GROUNDING_MODELS, GROUNDING_LEVELS, groundingConfig, buildGroundingPayload, sanitizeGroundingVerdict } from "./grounding.ts";
 
 const UPSTREAM_URLS = Object.freeze({
   openai: "https://api.openai.com/v1/chat/completions",
@@ -233,6 +233,7 @@ export async function handleRequest(request, env, fetchImpl = globalThis.fetch) 
       enabled: config.enabled,
       models: GROUNDING_MODELS,
       levels: GROUNDING_LEVELS,
+      criteriaVersion: GROUNDING_CRITERIA_VERSION,
       textOnly: true,
     }) : reply(405, { error: "method_not_allowed" });
   }

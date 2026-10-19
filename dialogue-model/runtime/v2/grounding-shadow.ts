@@ -5,7 +5,7 @@
 import { buildGroundingEvidence, type GroundingAiHypothesis, type GroundingInputGap, type GroundingMemoryEvidence,
   type GroundingNote, type GroundingPriorAct } from "../grounding/evidence.ts";
 import { buildMemoryEvidence } from "../grounding/memory-evidence.ts";
-import { parseGroundingVerdict, type GroundingJudge, type GroundingVerdict } from "../grounding/client.ts";
+import { GROUNDING_CRITERIA_VERSION, parseGroundingVerdict, type GroundingJudge, type GroundingVerdict } from "../grounding/client.ts";
 
 export const GROUNDING_SHADOW_TIMEOUT_MS = 20_000;
 
@@ -37,6 +37,8 @@ export type GroundingShadowRecord = {
   nameAgreement: GroundingVerdict["nameAgreement"] | null;
   usage: GroundingVerdict["usage"];
   id: string | null;
+  /** Criteria the record was judged (or attempted) under; absent on records made before v2. */
+  criteriaVersion: typeof GROUNDING_CRITERIA_VERSION;
 };
 
 const code = (error: unknown) => {
@@ -60,7 +62,7 @@ export function validateGroundingShadowOptions(value: unknown): GroundingShadowO
  */
 export function startGroundingShadow(options: GroundingShadowOptions, input: GroundingShadowInput,
   onSettled: (record: GroundingShadowRecord) => void): void {
-  const base = { turnIndex: input.turnIndex, lastEventId: input.lastEventId, targetSlot: input.judgment.targetSlot ?? null };
+  const base = { turnIndex: input.turnIndex, lastEventId: input.lastEventId, targetSlot: input.judgment.targetSlot ?? null , criteriaVersion: GROUNDING_CRITERIA_VERSION as typeof GROUNDING_CRITERIA_VERSION };
   const empty = { publicTurns: null, error: null, latencyMs: null, model: null, identification: null, nameAgreement: null, usage: null, id: null };
   const started = performance.now();
   Promise.resolve().then(async (): Promise<GroundingShadowRecord> => {
