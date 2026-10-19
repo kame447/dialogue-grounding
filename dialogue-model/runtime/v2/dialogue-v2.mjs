@@ -13,6 +13,7 @@ import { resolveActiveJudgment } from "./active-judge.mjs";
 import { findGuardViolations, rewriteReasons, fallbackUtterance } from "./generation-guard.ts";
 import { startGroundingShadow, validateGroundingShadowOptions } from "./grounding-shadow.ts";
 import { prepareLocalGroundingTurn, validateLocalGroundingOptions, localGroundingMemo, findLocalPublicationViolations } from "./local-grounding-turn.ts";
+import { createJevTurnRuntime } from "./jev-turn.ts";
 
 // Identical across strategies. Holistic first; analysis only when the judge asks for it.
 export const GENERATOR_INSTRUCTIONS_V2 = [
@@ -93,8 +94,15 @@ function abortIf(signal) {
  *   onResearchUpdate?: (() => void) | null, activeDecision?: {purpose: string, client: {chooseAction(request: object): Promise<any>}} | null,
  *   utteranceStyle?: string, groundingShadow?: import('./grounding-shadow.ts').GroundingShadowOptions | null,
  *   onGroundingShadow?: ((record: import('./grounding-shadow.ts').GroundingShadowRecord) => void) | null,
- *   localGrounding?: import('../local-grounding/contract.ts').LocalGroundingOptions | null,
- *   onLocalGroundingTrace?: ((record: import('./local-grounding-turn.ts').LocalGroundingResearchRecord) => unknown) | null }} options
+ *   localGrounding?: import('../local-grounding/contract.ts').LocalGroundingOptions | import('./jev-turn.ts').JevTurnLocalOptions | null,
+ *   onLocalGroundingTrace?: ((record: import('./local-grounding-turn.ts').LocalGroundingResearchRecord) => unknown) | null,
+ *   decisionMode?: 'jev' | null, observer?: import('../observation/contract.ts').ObservationObserver | null,
+ *   jevDecision?: import('../decision/contract.ts').JevDecisionClient | null, maxReobservations?: number,
+ *   onJevTurnTrace?: ((record: import('./jev-turn.ts').JevTurnTrace) => unknown) | null }} options
+ * @returns {{slots: readonly string[], initialPrivateState(): any,
+ *   initializePrivateState?: (options?: {signal?: AbortSignal}) => Promise<import('./jev-turn.ts').JevPrivateState>,
+ *   runAiTurn(args: any): Promise<{text: string, privateState: any}>, finalRequest(args: any, retry?: boolean): Promise<any>,
+ *   getAttempts(): any[], snapshotGraph(privateState: any): any}}
  *   utteranceStyle is validated at runtime against UTTERANCE_STYLES. groundingShadow (default off) only produces
  *   private records through onGroundingShadow; it never changes the act, the utterance or the private state.
  *   onLocalGroundingTrace is private and default off. It emits staged/error/aborted attempts;
@@ -102,11 +110,13 @@ function abortIf(signal) {
  */
 export function createDialogueV2({ client, strategy, image, anchors, judge = null, referenceMemory = false,
   decisionShadowClient = null, onResearchUpdate = null, activeDecision = null, utteranceStyle = "default",
-  groundingShadow = null, onGroundingShadow = null, localGrounding = null, onLocalGroundingTrace = null }) {
+  groundingShadow = null, onGroundingShadow = null, localGrounding = null, onLocalGroundingTrace = null,
+  decisionMode = null, observer = null, jevDecision = null, onJevTurnTrace = null, maxReobservations = 1 }) {
   if (!client || typeof client.complete !== "function") throw new Error("A chat client is required");
   if (!STRATEGIES.includes(strategy)) throw new Error("Unsupported dialogue strategy");
   if (typeof referenceMemory !== "boolean") throw new Error("Invalid memory option");
-  const local = validateLocalGroundingOptions(localGrounding);
+  if (decisionMode !== null && decisionMode !== "jev") throw new Error("Invalid dialogue decision mode");
+  const local = decisionMode === "jev" ? null : validateLocalGroundingOptions(localGrounding);
   if (local && !referenceMemory) throw new Error("Local grounding requires reference memory");
   if (onLocalGroundingTrace !== null && typeof onLocalGroundingTrace !== "function") throw new Error("Invalid local grounding trace callback");
   if (!UTTERANCE_STYLES.includes(utteranceStyle)) throw new Error("Invalid utterance style");
@@ -124,6 +134,15 @@ export function createDialogueV2({ client, strategy, image, anchors, judge = nul
   ownImageMessage(ownImage);
   const slots = anchors.map((anchor) => anchor.id);
   const ownAnchors = anchors.map(({ id, bbox, centroid }) => ({ id, bbox: { ...bbox }, centroid: { ...centroid } }));
+  if (decisionMode === "jev") {
+    if (!referenceMemory || !localGrounding) throw new Error("Jev decision mode requires local reference memory");
+    if (activeDecision || decisionShadowClient || groundingShadow) throw new Error("Jev decision mode cannot combine legacy decision paths");
+    return createJevTurnRuntime({ client, ownImage, ownAnchors, observer, jevDecision, localGrounding,
+      onJevTurnTrace, onLocalGroundingTrace, maxReobservations,
+      generation: { task: TASK_INSTRUCTIONS_V2, instructions: GENERATOR_INSTRUCTIONS_V2,
+        ...(concise ? { concise: CONCISE_INSTRUCTIONS_V2 } : {}), actionScope: ACTION_SCOPE_V2,
+        final: FINAL_INSTRUCTIONS_V2, timeoutMs: GENERATION_TIMEOUT_MS } });
+  }
   const dialogueJudge = judge ?? createLunaJudge(client);
   // Research-only trace of every attempted run (including superseded or failed ones).
   const attempts = [];
