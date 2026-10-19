@@ -2,12 +2,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { inspect } from "node:util";
-import { createLunaLocalExtractor, buildLocalExtractionMessages, parseLocalExtraction, LocalExtractionError,
+import { createLunaLocalExtractor, createMemoLocalExtractor, buildMemoExtractionMessages, buildLocalExtractionMessages, parseLocalExtraction, LocalExtractionError,
   LOCAL_EXTRACTION_INSTRUCTIONS } from "../dialogue-model/runtime/local-grounding/extract.ts";
 import { createMockLocalExtractor, LocalMockError } from "../dialogue-model/runtime/local-grounding/mocks.ts";
 import { ownImageMessage } from "../dialogue-model/runtime/judgment/instructions.mjs";
 import { createTrialV2, modelView } from "../dialogue-model/runtime/stimuli/scatter-v2.mjs";
 import type { LocalExtractionInput, LocalOwnAnchor, LocalSegmentProposal } from "../dialogue-model/runtime/local-grounding/contract.ts";
+import type { ObservationMemo } from "../dialogue-model/runtime/observation/contract.ts";
 
 const input: LocalExtractionInput = { turn: 3, ownSlots: ["own-a", "own-b"], issueSummary: "向きが未確認",
   ownImage: { mimeType: "image/png", base64: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aTbkAAAAASUVORK5CYII=" },
@@ -270,4 +271,83 @@ test("extractor mock is deterministic and simulates delay, timeout, abort and sa
   await assert.rejects(pending, (e: unknown) => e instanceof LocalMockError && e.code === "aborted");
   await assert.rejects(createMockLocalExtractor(() => { throw new Error("sk-secret"); }).extract(input),
     (e: unknown) => e instanceof LocalMockError && e.code === "mock_failure" && !inspect(e).includes("sk-secret"));
+});
+
+function memoFixture(): { own: LocalExtractionInput; memo: ObservationMemo } {
+  const ownSlots = ["own-a", "own-b", "own-c", "own-d", "own-e", "own-f"];
+  const ownAnchors = ownSlots.map((id, i) => ({ id, bbox: { x: i * 110, y: 10, w: 100, h: 80 }, centroid: { x: i * 110 + 50, y: 50 } }));
+  const memo: ObservationMemo = { observedAt: "2026-10-20T00:00:00.000Z", figures: ownAnchors.map(a => ({ id: a.id, region: { ...a.bbox },
+    holistic: [{ construal: "動物のような全体", basis: ["細い突起が首のように見える"], status: "hypothesis" }],
+    analytic: { shapes: ["四角い部分"], composition: "四角と三角が接する", relations: ["三角は四角の一辺に接する"] },
+    unknowns: ["突起の役割は不明"], reobservations: [] })) };
+  return { own: { ...structuredClone(input), ownSlots, ownAnchors }, memo };
+}
+
+test("opt-in memo extraction sends only textual visual material and keeps the legacy extraction contract", async () => {
+  const { own, memo } = memoFixture(); const requests: string[] = [];
+  const extractor = createMemoLocalExtractor({ async complete(messages, options) {
+    assert.equal(options.phase, "local_extraction"); assert.equal(options.timeoutMs, 4567);
+    requests.push(JSON.stringify(messages));
+    assert.equal(messages.length, 2); assert.ok(messages.every(m => typeof m.content === "string"));
+    const context = JSON.parse(messages[1].content as string);
+    assert.deepEqual(context.observations, memo); assert.deepEqual(context.ownAnchors, own.ownAnchors);
+    assert.match(messages[0].content as string, /hypothesis/); assert.match(messages[0].content as string, /確信できなければtargets: \[\]/);
+    assert.match(messages[0].content as string, /直ちに対象や名称の不一致と決めない/);
+    return { text: JSON.stringify([segment]) };
+  } }, { getMemo: () => memo, timeoutMs: 4567 });
+  assert.deepEqual(await extractor.extract(own), [segment]);
+  assert.doesNotMatch(requests[0], /image_url|base64|iVBOR|data:image/);
+  assert.deepEqual(buildLocalExtractionMessages(own).slice(2), ownImageMessage(own.ownImage));
+});
+
+test("memo requests remain identical across strategy metadata and carry current reobservations", async () => {
+  const { own, memo } = memoFixture(); const requests: string[] = [];
+  memo.figures[0].reobservations.push({ figureId: "own-a", observedAt: "2026-10-20T00:01:00.000Z",
+    issue: { aspect: "construal", question: "別の見立ての根拠は", partnerConstrual: "牛" },
+    supports: ["二つの突起が角に見える"], contradicts: ["四つの脚は確認できない"], unknown: ["角か耳か不明"] });
+  const extractor = createMemoLocalExtractor({ async complete(messages) { requests.push(JSON.stringify(messages)); return { text: "[]" }; } }, { getMemo: () => memo });
+  for (const strategy of ["repair-first", "bypass-enabled"]) await extractor.extract({ ...own, strategy, gold: "GOLD_CANARY", partnerImage: "PARTNER_CANARY",
+    publicTurns: [...own.publicTurns, { turn: 4, speaker: "human", text: "FUTURE_CANARY" }, { turn: own.turn, speaker: "ai", text: "UNPUBLISHED_CANARY" }] } as LocalExtractionInput);
+  assert.equal(requests[0], requests[1]); assert.doesNotMatch(requests[0], /CANARY|repair-first|bypass-enabled|image_url|iVBOR/);
+  assert.match(requests[0], /四つの脚は確認できない/);
+});
+
+test("memo extraction validates anchors and restored memo before a request and sanitizes memo-provider failures", async () => {
+  const { own, memo } = memoFixture(); let calls = 0;
+  const client = { async complete() { calls++; return { text: "[]" }; } };
+  const wrong = structuredClone(memo); wrong.figures[0].region.x++;
+  await assert.rejects(createMemoLocalExtractor(client, { getMemo: () => wrong }).extract(own), code("invalid_input"));
+  const extra = { ...memo, gold: "PRIVATE_CANARY" };
+  await assert.rejects(createMemoLocalExtractor(client, { getMemo: () => extra }).extract(own), code("invalid_input"));
+  await assert.rejects(createMemoLocalExtractor(client, { getMemo() { throw new Error("PRIVATE_CANARY " + own.ownImage.base64); } }).extract(own), error => {
+    assert.ok(code("invalid_input")(error)); assert.doesNotMatch(inspect(error), /PRIVATE_CANARY|iVBOR/); return true;
+  });
+  assert.throws(() => buildMemoExtractionMessages(own, { ...memo, figures: memo.figures.slice(1) }), code("invalid_input"));
+  assert.equal(calls, 0);
+});
+
+test("memo extraction keeps per-segment quote verification and takes a fresh detached memo each call", async () => {
+  const { own, memo } = memoFixture(); let current = memo; const compositions: string[] = [];
+  const extractor = createMemoLocalExtractor({ async complete(messages) {
+    compositions.push(JSON.parse(messages[1].content as string).observations.figures[0].analytic.composition);
+    current.figures[0].analytic.composition = "実行中に変化";
+    return { text: JSON.stringify([segment, { ...segment, segmentId: "bad", quote: "公開されていない" }]) };
+  } }, { getMemo: () => current });
+  assert.deepEqual(await extractor.extract(own), [segment]);
+  assert.equal(extractor.lastDiagnostics.rejectedSegments, 1);
+  current = structuredClone(memo); current.figures[0].analytic.composition = "次の観察メモ";
+  assert.deepEqual(await extractor.extract(own), [segment]);
+  assert.deepEqual(compositions, ["四角と三角が接する", "次の観察メモ"]);
+});
+
+test("long memo extraction contexts remain text-only and preserve all JSON within per-message proxy bounds", () => {
+  const { own, memo } = memoFixture();
+  for (let index = 0; index < 8; index++) memo.figures[0].reobservations.push({ figureId: "own-a", observedAt: memo.observedAt,
+    issue: { aspect: "part", question: "細い部分のつながり", partnerConstrual: null },
+    supports: Array(16).fill("細い部分が四角の辺に接している".repeat(10)), contradicts: [], unknown: [] });
+  const messages = buildMemoExtractionMessages(own, memo);
+  assert.ok(messages.length > 2); assert.ok(messages.every(m => m.content.length <= 20000));
+  const state = messages.slice(1).map(m => m.content.split("\n").slice(1).join("\n")).join("");
+  assert.deepEqual(JSON.parse(state).observations, memo);
+  assert.doesNotMatch(JSON.stringify(messages), /image_url|base64|iVBOR/);
 });
