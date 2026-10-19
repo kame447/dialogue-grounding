@@ -95,7 +95,9 @@ async function run(steps: Step[], { referenceMemory = true, strategy = "repair-f
 // is asserted for it (null below); 9 a feature description only.
 const BORDERLINE = "borderline";
 const EXPECTED_SCRIPT_LEVELS = ["no_name", "unclear", "no_name", "no_name", "no_name", "unknown", "no_name", "no_name", BORDERLINE, "no_name"];
-const levels = (record: Rec) => record.groundingShadow.map((r: Rec) => r.status === "ok" ? r.nameAgreement.level : r.status + ":" + r.error);
+// Detached shadow calls may finish out of order; compare their public turn order.
+const levels = (record: Rec) => [...record.groundingShadow].sort((a: Rec, b: Rec) => a.turnIndex - b.turnIndex)
+  .map((r: Rec) => r.status === "ok" ? r.nameAgreement.level : r.status + ":" + r.error);
 const visible = (r: Rec) => ({ events: r.events.map(({ seq, speaker, text }: Rec) => ({ seq, speaker, text })), ledger: r.ownLedger,
   privateState: r.queueState.privateState, judgments: r.judgments });
 
