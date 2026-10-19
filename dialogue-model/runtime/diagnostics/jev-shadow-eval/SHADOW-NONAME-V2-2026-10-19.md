@@ -49,7 +49,7 @@ This is a sanitized summary: aggregates and synthetic case ids only, with no utt
 | agreed | agreed 5 | 5/5 | 5/6 |
 | unclear | unclear 1, no_name 1 | 1/2 | 1/3 |
 | not_agreed | not_agreed 3, unclear 2, agreed 1 | 3/6 | 3/3 |
-| no_name | no_name 21 | 21/21 | 21/27 |
+| no_name | no_name 21 | 21/21 | 21/27 (all 6 false `no_name` verdicts are gold `unknown` U01–U04, a criterion question; see residuals) |
 | unknown | no_name 5 | 0/5 | — |
 
 **Target axis, all 39:**
@@ -73,7 +73,8 @@ This is a sanitized summary: aggregates and synthetic case ids only, with no utt
 
 **holdout-add (6, separate):**
 - Target 6/6.
-- Name 5/6; non-weak 4/4. `unclear` recall 4/4, precision 4/5.
+- Name 5/6; non-weak 4/4.
+- `unclear` vs `no_name` is now distinguishable on held-out explicit proposals, but on 4 cases only. This is not a rate.
 - The one miss is H06 (weak; one speaker offering two candidates): not_agreed → unclear.
 
 **Repeat stability:** 9 of 9 identical-input pairs gave identical verdicts on both axes.
@@ -87,14 +88,14 @@ This is a sanitized summary: aggregates and synthetic case ids only, with no utt
 | contradictory_agreement | 9/9 | 3 |
 | over_confirmation | 2/2 | 0 |
 
-3 of 18 clean controls were flagged.
+3 of 18 clean controls were flagged. The flag rules are uncalibrated, and they were checked only against weak, author-made probes.
 
 ## Comparison with the v1 run on the same 39 cases
 
 | Split | Target v1 → v2 | Name v1 → v2 |
 |---|---|---|
 | dev | 0.833 → 0.833 | 0.444 → 0.778 |
-| holdout | 0.857 → 0.952 | 0.238 → 0.762 |
+| holdout | 0.857 → 0.952 (mostly C03's gold changing from contradicted to insufficient) | 0.238 → 0.762 |
 
 **Limits of this comparison:**
 - **Three things changed at once:** the criteria (v1 → v2), the levels (4 → 5) and the gold (v1, author-only → v3, double-reviewed). The name-axis gain mostly reflects aligning the criterion and the gold, not a better judge.
@@ -102,6 +103,8 @@ This is a sanitized summary: aggregates and synthetic case ids only, with no utt
 - **Split level only:** the v1 run kept no per-case verdicts, so cases can't be compared one by one.
 
 ## Residual problems
+
+The first four items below are candidate criterion lines, a researcher decision. Gold v3 is **not** changed after these results. If a `grounding-criteria/v3` is adopted, it must be headlined on **fresh** holdout cases written blind to these outputs. The present 39 + 6 cases were seen during criterion design and can only be reported as a dev/regression table.
 
 - **No referent under discussion** (fillers, an image that isn't visible) is judged `no_name`, while the gold says `unknown`. The criterion needs a line deciding this; that is a researcher decision.
 - **Assignment to another figure** is not applied: C06's name is accepted for a different figure and judged `agreed`.
