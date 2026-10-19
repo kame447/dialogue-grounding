@@ -14,6 +14,18 @@ export type LocalVerificationDiagnostic = {
   /** Only bounded graph-ref syntax is retained, never arbitrary model text. */
   linkedIssueId: string | null;
   resolvedIssueId: string;
+} | {
+  segmentId: string;
+  reason: "antecedent_dropped";
+  /** The incompatible optional pointer, checked for graph-ref syntax. */
+  respondsToClaimId: string;
+  resolvedIssueId: string;
+} | {
+  segmentId: string;
+  reason: "antecedent_missing";
+  /** Invalid model text is never retained; only graph-ref syntax can survive. */
+  respondsToClaimId: string | null;
+  resolvedIssueId: string;
 };
 export type LocalVerifiedUpdate = LocalVerificationResult & { diagnostics?: LocalVerificationDiagnostic[] };
 type VerificationInput = {
@@ -28,6 +40,7 @@ const exact = (value: unknown, keys: string[]) => value !== null && typeof value
 const text = (value: unknown): value is string => typeof value === "string" && value.trim().length > 0 && value.length <= 160;
 const ref = (value: unknown) => typeof value === "string" && /^[1-9]\d*:[a-zA-Z0-9_-]{1,32}$/u.test(value);
 const responses = new Set(["agree", "deny", "name_accept", "name_reject", "withdraw"]);
+const independentActs = new Set(["assert", "construe", "name_propose", "ask"]);
 const overlap = (a: readonly string[], b: readonly string[]) => a.some(slot => b.includes(slot));
 
 /** Only the CURRENT public human turn may supply a new segment's quote. */
@@ -59,7 +72,7 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     const matches = verdicts.filter(v => v?.segmentId === segment.segmentId);
     const verdict = matches[0];
     if (matches.length !== 1 || !exact(verdict, ["segmentId", "act", "respondsToClaimId", "rawScore"]) ||
-        !LOCAL_ACTS.includes(verdict.act) || !(verdict.respondsToClaimId === null || ref(verdict.respondsToClaimId)) ||
+        !LOCAL_ACTS.includes(verdict.act) || !(verdict.respondsToClaimId === null || ref(verdict.respondsToClaimId) || independentActs.has(verdict.act)) ||
         !(verdict.rawScore === null || (typeof verdict.rawScore === "number" && Number.isFinite(verdict.rawScore)))) {
       reject("invalid_verdict"); continue;
     }
@@ -68,7 +81,8 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     if (!quote || quote.length > 160) { reject("nonpublic_quote"); continue; }
     let act = verdict.act;
     let prior = verdict.respondsToClaimId === null ? null : active.find(c => c.id === verdict.respondsToClaimId) ?? null;
-    if (verdict.respondsToClaimId !== null && !prior) { reject("missing_claim_response"); continue; }
+    const missingAntecedent = verdict.respondsToClaimId !== null && !prior;
+    if (missingAntecedent && !independentActs.has(act)) { reject("missing_claim_response"); continue; }
     let targets = [...segment.targets];
     let aspect = segment.aspect;
     let linkedIssue = segment.linkedIssueId;
@@ -81,8 +95,16 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
         act = "acknowledge"; prior = null; targets = []; linkedIssue = null; name = null;
       }
     }
-    if (verdict.respondsToClaimId !== null && !prior && act !== "acknowledge") { reject("missing_claim_response"); continue; }
+    if (verdict.respondsToClaimId !== null && !prior && act !== "acknowledge" && !independentActs.has(act)) { reject("missing_claim_response"); continue; }
     if (responses.has(act) && !prior) { reject("missing_claim_response"); continue; }
+    let droppedAntecedent: string | null = null;
+    // Independent statements do not require an antecedent. Check before target
+    // inheritance so discarding a pointer cannot transfer its figure candidates.
+    if (prior && independentActs.has(act) && prior.sourceTurn < turn &&
+        (prior.aspect !== aspect || !overlap(prior.targets, targets.length ? targets : prior.targets) ||
+          (segment.respondsToTurn !== null && segment.respondsToTurn !== prior.sourceTurn))) {
+      droppedAntecedent = prior.id; prior = null;
+    }
     // Only absence of a target can inherit the verified antecedent's candidates.
     // A nonempty, contradictory target is never moved to a different figure.
     if (prior && targets.length === 0) targets = [...prior.targets];
@@ -139,6 +161,10 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
       speaker: "human", sourceTurn: turn, quote, respondsTo: prior?.id ?? null, source: "partner_statement" });
     if (overriddenIssue || droppedIssue) (result.diagnostics ??= []).push({ segmentId: segment.segmentId, reason: "issue_link_overridden",
       linkedIssueId: ref(proposedIssue) ? proposedIssue : null, resolvedIssueId: issueId });
+    if (droppedAntecedent !== null) (result.diagnostics ??= []).push({ segmentId: segment.segmentId, reason: "antecedent_dropped",
+      respondsToClaimId: droppedAntecedent, resolvedIssueId: issueId });
+    if (missingAntecedent && independentActs.has(act)) (result.diagnostics ??= []).push({ segmentId: segment.segmentId, reason: "antecedent_missing",
+      respondsToClaimId: ref(verdict.respondsToClaimId) ? verdict.respondsToClaimId : null, resolvedIssueId: issueId });
   }
   return result;
 }
