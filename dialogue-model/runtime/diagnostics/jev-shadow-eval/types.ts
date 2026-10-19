@@ -7,7 +7,9 @@
 // not reused as P(correct target).
 
 export const TARGET_LEVELS = Object.freeze(["supported", "insufficient", "contradicted", "unknown"] as const);
-export const NAME_LEVELS = Object.freeze(["agreed", "unclear", "not_agreed", "unknown"] as const);
+/** grounding-criteria/v2 (2026-10-19): `no_name` = neither a name nor a 見立て offered for this referent.
+ * Runs before v2 used 4 levels, where "no name yet" counted as `not_agreed`. */
+export const NAME_LEVELS = Object.freeze(["agreed", "unclear", "not_agreed", "no_name", "unknown"] as const);
 export type TargetLevel = typeof TARGET_LEVELS[number];
 export type NameLevel = typeof NAME_LEVELS[number];
 
@@ -25,6 +27,8 @@ export type JevAxesVerdict = {
   /** Uncalibrated relative scores; may be absent. */
   scores?: { target?: Partial<Record<TargetLevel, number>>; name?: Partial<Record<NameLevel, number>> } | null;
   model: string | null;
+  /** Server-owned criteria version stamped on each verdict (e.g. "grounding-criteria/v2"). */
+  criteriaVersion?: string | null;
   latencyMs: number;
   usage?: { inputTokens?: number; outputTokens?: number; costUsd?: number } | null;
 };
@@ -79,6 +83,8 @@ export type EvalCaseLike = {
   /** Per-axis quality (jev-grounding-derive/v2); labelQuality is the weaker of the two. */
   axisQuality?: { target?: "explicit" | "derived" | "weak" | null; name?: "explicit" | "derived" | "weak" | null } | null;
   correctnessKnown?: boolean;
+  /** Version of the gold labels (e.g. "synthetic-gold/v2"); results are never compared across versions silently. */
+  goldVersion?: string;
   aiSeq?: number;
   oldAction?: string;
   /** Synthetic cases: a candidate reply scored against failureTags. Never sent to the judge. */

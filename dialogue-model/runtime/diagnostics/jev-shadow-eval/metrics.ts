@@ -16,7 +16,7 @@ export function shadowFlags(behaviours: readonly Behaviour[], verdict: Pick<JevA
   if (targetKnown && verdict.target !== "supported" && has("claims_understanding")) flags.push("unfounded_wakarimasu");
   // A unilateral naming decision ("…と呼びましょう") is both naming and an agreement claim.
   if (targetKnown && verdict.target !== "supported" && has("naming")) flags.push("early_naming");
-  if (has("agreement") && (verdict.name === "not_agreed" || verdict.target === "contradicted" ||
+  if (has("agreement") && (verdict.name === "not_agreed" || verdict.name === "no_name" || verdict.target === "contradicted" ||
       (verdict.name === "unclear" && targetKnown && verdict.target !== "supported"))) flags.push("contradictory_agreement");
   if (verdict.target === "supported" && verdict.name === "agreed" && has("confirmation") && !has("agreement")) flags.push("over_confirmation");
   return flags;
@@ -128,7 +128,7 @@ export function summarizeTurns(results: readonly TurnResult[], known: readonly K
 }
 
 export type CaseResult = {
-  caseId: string; split: string; source: string; labelQuality: string;
+  caseId: string; split: string; source: string; labelQuality: string; goldVersion: string | null;
   axisQuality?: { target: string; name: string };
   expected: EvalCaseLike["expected"]; verdict: { target: TargetLevel; name: NameLevel } | null; error: string | null;
   /** Flags on the case's probe reply, if any, and the tags it should raise. */
@@ -167,16 +167,14 @@ function axisConfusion<L extends string>(rows: readonly { gold: L | null; pred: 
   const matrix: Record<string, Record<string, number>> = {};
   for (const g of levels) matrix[g] = Object.fromEntries(levels.map((p) => [p, 0]));
   for (const r of scored) matrix[r.gold!][r.pred!] += 1;
-  const recall = Object.fromEntries(levels.map((l) => {
-    const n = scored.filter((r) => r.gold === l).length;
-    return [l, rate(matrix[l][l], n)];
-  }));
+  const recall = Object.fromEntries(levels.map((l) => [l, rate(matrix[l][l], scored.filter((r) => r.gold === l).length)]));
+  const precision = Object.fromEntries(levels.map((l) => [l, rate(matrix[l][l], scored.filter((r) => r.pred === l).length)]));
   return {
     goldPresent: rows.filter((r) => r.gold !== null).length,
     noGold: rows.filter((r) => r.gold === null).length,
     scored: scored.length,
     agreement: rate(scored.filter((r) => r.gold === r.pred).length, scored.length),
-    recall, matrix,
+    recall, precision, matrix,
   };
 }
 
@@ -222,7 +220,14 @@ export function summarizeCases(results: readonly CaseResult[], cases: readonly E
     const first = results.find((o) => o.caseId === r.caseId.replace(/#r\d+$/u, "") && o.verdict);
     return first ? first.verdict!.target === r.verdict!.target && first.verdict!.name === r.verdict!.name : null;
   }).filter((x): x is boolean => x !== null);
-  return { cases: results.length, bySource: countBy(results.map((r) => r.source)), byLabelQuality: countBy(results.map((r) => r.labelQuality)), bySplit,
+  // All splits together, per quality, for small sets where per-split numbers are tiny.
+  const all = Object.fromEntries([...new Set(results.flatMap((r) => [axisQ(r, "target"), axisQ(r, "name")]))].sort().map((q) => [q, caseBlock(results, [q])]));
+  // Individual name-axis errors that involve no_name (gold or verdict), by case id.
+  const noNameErrors = results.filter((r) => r.verdict && r.expected.name !== null && r.expected.name !== r.verdict.name &&
+    (r.expected.name === "no_name" || r.verdict.name === "no_name"))
+    .map((r) => ({ caseId: r.caseId, split: r.split, gold: r.expected.name, verdict: r.verdict!.name }));
+  return { cases: results.length, bySource: countBy(results.map((r) => r.source)), byLabelQuality: countBy(results.map((r) => r.labelQuality)),
+    goldVersions: countBy(results.map((r) => r.goldVersion ?? "unversioned")), bySplit, allSplits: all, noNameErrors,
     repeatStability: { pairs: repeats.length, identical: repeats.filter(Boolean).length },
     probes: summarizeProbes(results, cases) };
 }

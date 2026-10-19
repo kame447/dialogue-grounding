@@ -7,7 +7,7 @@ type InputCounts = { casesRead: number; casesInvalid: number; failuresRead: numb
 const j = (value: unknown) => "`" + JSON.stringify(value) + "`";
 type Block = ShadowRun["cases"]["bySplit"][string]["headline"];
 const brief = (b: Block) => ({ cases: b.cases, errors: b.errors, targetScored: b.target.scored, targetAgreement: b.target.agreement,
-  nameScored: b.name.scored, nameAgreement: b.name.agreement, riskFlagFalsePositiveRate: b.riskFlagFalsePositiveRate,
+  nameScored: b.name.scored, nameAgreement: b.name.agreement, nameRecall: b.name.recall, namePrecision: b.name.precision, riskFlagFalsePositiveRate: b.riskFlagFalsePositiveRate,
   riskFlagRecall: b.riskFlagRecall, verdictUnknownRate: b.verdictUnknownRate });
 
 const CAVEATS = [
@@ -23,7 +23,7 @@ function header(run: ShadowRun, input: InputCounts) {
   const live = m.client !== "mock";
   return [
     `- Client: **${m.client}**${live ? "" : " (in-process lexical stand-in, not a model, so verdicts carry no evidential weight)"}`,
-    `- Models used: ${m.models.length ? m.models.join(", ") : "none"}`,
+    `- Models used: ${m.models.length ? m.models.join(", ") : "none"}; criteria versions ${j(m.criteriaVersions)}; gold versions ${j(run.cases.goldVersions)}`,
     `- Calls: ${m.calls.total}${m.maxCalls !== null ? ` of budget ${m.maxCalls}` : ""} (ok ${m.calls.ok}, failed ${m.calls.failed}) ${j(m.calls.failureCodes)}${m.stopped ? `; stopped early: ${m.stopped}` : ""}`,
     `- Latency ms: ${j(m.calls.latencyMs)}; tokens in/out ${m.calls.inputTokens}/${m.calls.outputTokens}; cost USD ${m.calls.costUsd ?? "not reported by every call"}`,
     `- Session: strategy ${m.strategy ?? "?"}, task outcome ${j(m.taskOutcome)}`,
@@ -71,6 +71,8 @@ function common(run: ShadowRun) {
     ...Object.entries(run.cases.bySplit).flatMap(([split, s]) => [
       `- ${split} (headline, non-weak): ${j(brief(s.headline))}`,
       ...Object.entries(s.byQuality).map(([q, b]) => `  - ${q}: ${j(brief(b))}`)]),
+    ...Object.entries(run.cases.allSplits).map(([q, b]) => `- all splits, ${q}: ${j(brief(b))}`),
+    `- Name-axis errors involving no_name (gold or verdict): ${j(run.cases.noNameErrors.map((e) => [e.caseId, e.split, e.gold, e.verdict]))}`,
     `- Probe replies (synthetic, gold by construction): ${j(run.cases.probes)}`,
     `- Repeat stability (identical input, both axes equal): ${j(run.cases.repeatStability)}`,
     "",
