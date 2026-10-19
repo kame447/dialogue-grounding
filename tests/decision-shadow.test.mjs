@@ -9,6 +9,8 @@ import { createDialogueV2 } from "../dialogue-model/runtime/v2/dialogue-v2.mjs";
 import { createNamingTaskV2 } from "../dialogue-model/runtime/v2/naming-task-v2.mjs";
 import { createOwnLedger, SAFE_JUDGMENT } from "../dialogue-model/runtime/judgment/schema.mjs";
 import { createDecisionComparisonClient } from "../dialogue-model/runtime/decisions-client.mjs";
+import { JUDGE_TIME_BUDGET_MS } from "../dialogue-model/runtime/judgment/luna.mjs";
+import { assertSameBudget, stableOptions } from "./helpers/memory-harness.ts";
 
 function deferred() {
   let resolve, reject;
@@ -193,7 +195,11 @@ test("shadow on/off preserves text, ledger and complete chat-client call sequenc
       { ...publicEvent("続けましょう"), id: "event-3", seq: 3 }], privateState: first.privateState, lastEventId: "event-3" });
     outcomes.push({ calls, firstText: first.text, text: second.text, ledger: second.privateState.ledger });
   }
-  assert.deepEqual(outcomes[0], outcomes[1]);
+  // Only judgment timeoutMs depends on the elapsed wall-clock budget.
+  const stableOutcome = ({ calls, ...outcome }) => ({ ...outcome, calls: calls.map(({ options, ...call }) => ({ ...call,
+    options: options.phase === "judgment" ? stableOptions(options) : options })) });
+  assert.equal(JSON.stringify(stableOutcome(outcomes[0])), JSON.stringify(stableOutcome(outcomes[1])));
+  outcomes[0].calls.forEach((call, index) => assertSameBudget(call.options, outcomes[1].calls[index].options, JUDGE_TIME_BUDGET_MS));
 });
 
 test("late shadow settlement automatically persists attempts without another task action", { timeout: 10000 }, async () => {
