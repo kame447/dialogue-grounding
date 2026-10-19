@@ -3,6 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createDialogueV2 } from "../dialogue-model/runtime/v2/dialogue-v2.mjs";
 import { createMockJevDecisionClient } from "../dialogue-model/runtime/decision/mocks.ts";
+import { createJevDecisionClient, JEV_DECISION_MODEL, type JevDecisionPayload } from "../dialogue-model/runtime/decision/jev-decision.ts";
 import { createHumanMessageQueue } from "../dialogue-model/runtime/web/human-message-queue.mjs";
 import { JevTurnError, settleJevTurnTraces, updateRepairHistory, type JevTurnTrace, type JevPrivateState } from "../dialogue-model/runtime/v2/jev-turn.ts";
 import { settleLocalTraces, type LocalGroundingResearchRecord } from "../dialogue-model/runtime/v2/local-grounding-turn.ts";
@@ -11,6 +12,8 @@ import type { JevDecision, JevDecisionClient, JevDecisionInput, RepairHistoryEnt
 import type { LocalClaimView, LocalFunctionClassifier } from "../dialogue-model/runtime/local-grounding/contract.ts";
 import { MEMO_LOCAL_EXTRACTION_INSTRUCTIONS } from "../dialogue-model/runtime/local-grounding/extract.ts";
 import { ObservationError, type ObservationErrorCode } from "../dialogue-model/runtime/observation/observe.ts";
+import { recordAiClaims } from "../dialogue-model/runtime/local-grounding/verify.ts";
+import { createReferenceGraph, applyReferenceUpdate } from "../dialogue-model/runtime/memory/reference-graph.mjs";
 
 const ids = Array.from({ length: 6 }, (_, i) => `s-000${i + 1}`);
 const anchors = ids.map((id, x) => ({ id, bbox: { x, y: 0, w: 1, h: 1 }, centroid: { x, y: 0 } }));
@@ -269,6 +272,108 @@ test("progress records repeated content as unchanged, not new information from n
   assert.equal(history[0].progress, "unknown");
 });
 
+function progressFixture(candidates = ids.slice(0, 2)) {
+  const claim: LocalClaimView = { id: "5:local1", turn: 5, issueId: "1:ai1", targets: [...candidates], aspect: "part", act: "assert",
+    proposition: "三角が二つある", name: null, speaker: "human", sourceTurn: 5, quote: "三角が二つある", respondsTo: "1:ai1", source: "partner_statement" };
+  const history: RepairHistoryEntry[] = [{ turn: 3, issueId: "1:ai1", action: "confirm", question: "四角い部分", partnerClaims: [],
+    candidatesBefore: [...candidates], candidatesAfter: [...candidates], addedClaimIds: [], removedClaimIds: [], progress: "unknown" }];
+  return { claim, history };
+}
+
+test("difficulty and backchannels add no figure information or candidate narrowing", () => {
+  for (const act of ["defer", "ask", "acknowledge", "withdraw", "revisit"] as const) {
+    const { claim, history } = progressFixture();
+    const reply = { ...claim, act, targets: [ids[0]], proposition: "まだよく分からない" };
+    const result = updateRepairHistory(history, [], [reply], 5)[0];
+    assert.equal(result.progress, "unchanged", act);
+    assert.deepEqual(result.addedClaimIds, []);
+    assert.deepEqual(result.candidatesAfter, history[0].candidatesBefore);
+    assert.equal(result.partnerClaims[0].act, act);
+    assert.equal(history[0].progress, "unknown");
+  }
+  for (const aspect of ["progress", "question"] as const) {
+    const { claim, history } = progressFixture();
+    assert.equal(updateRepairHistory(history, [], [{ ...claim, aspect }], 5)[0].progress, "unchanged");
+  }
+});
+
+test("all seven information acts can add grounded new content to a repair", () => {
+  for (const act of ["assert", "agree", "deny", "construe", "name_propose", "name_accept", "name_reject"] as const) {
+    const { claim, history } = progressFixture();
+    const aspect = act.startsWith("name_") ? "name" : act === "construe" ? "construal" : "part";
+    const proposition = aspect === "name" ? "牛という名前" : aspect === "construal" ? "牛に見える" : claim.proposition;
+    const reply = { ...claim, act, aspect, proposition, quote: proposition, name: aspect === "name" ? "牛" : null } as LocalClaimView;
+    const result = updateRepairHistory(history, [], [reply], 5)[0];
+    assert.equal(result.progress, "changed", act); assert.deepEqual(result.addedClaimIds, [claim.id]);
+    assert.deepEqual(result.partnerClaims[0].targets, claim.targets);
+  }
+});
+
+test("a nonempty strict subset is progress, while expansion and loss of candidates are not", () => {
+  for (const change of ["narrowed", "expanded", "unresolved"] as const) {
+    const beforeTargets = change === "expanded" ? [ids[0]] : ids.slice(0, 2);
+    const { claim, history } = progressFixture(beforeTargets);
+    const prior = { ...claim, id: "2:local1", turn: 2, sourceTurn: 2 };
+    const nextTargets = change === "narrowed" ? [ids[0]] : change === "expanded" ? ids.slice(0, 2) : [];
+    const reply = { ...claim, targets: nextTargets };
+    const result = updateRepairHistory(history, [prior], [prior, reply], 5)[0];
+    assert.equal(result.progress, change === "narrowed" ? "changed" : "unchanged");
+    assert.deepEqual(result.addedClaimIds, [], "a candidate-only change is not a new proposition");
+    assert.deepEqual(result.candidatesAfter, nextTargets);
+  }
+});
+
+test("removal alone remains observable without counting as figure-information progress", () => {
+  const { claim, history } = progressFixture();
+  const prior = { ...claim, id: "2:local1", turn: 2, sourceTurn: 2 };
+  const result = updateRepairHistory(history, [prior], [], 5, { answeredRepairTurn: 3 })[0];
+  assert.equal(result.progress, "unchanged"); assert.deepEqual(result.removedClaimIds, [prior.id]);
+  assert.deepEqual(result.addedClaimIds, []); assert.deepEqual(result.candidatesAfter, history[0].candidatesBefore);
+});
+
+test("unanswered questions stay unknown, but a public reply without verified claims stagnates", () => {
+  const { history, claim } = progressFixture();
+  assert.equal(updateRepairHistory(history, [], [], 5)[0].progress, "unknown");
+  assert.equal(updateRepairHistory(history, [], [], 5, { answeredRepairTurn: 1 })[0].progress, "unknown");
+  assert.equal(updateRepairHistory(history, [], [], 5, { answeredRepairTurn: 3 })[0].progress, "unchanged");
+  assert.equal(updateRepairHistory(history, [], [], 3, { answeredRepairTurn: 3 })[0].progress, "unknown");
+  const other = { ...claim, issueId: "1:other", respondsTo: null, targets: [ids[2]] };
+  const result = updateRepairHistory(history, [], [other], 5, { answeredRepairTurn: 3 })[0];
+  assert.equal(result.progress, "unchanged"); assert.deepEqual(result.addedClaimIds, []); assert.deepEqual(result.partnerClaims, []);
+});
+
+test("new same-figure information can answer a public repair without an explicit claim pointer", () => {
+  const { history, claim } = progressFixture([ids[0]]);
+  const reply = { ...claim, issueId: "5:local1", respondsTo: null };
+  assert.equal(updateRepairHistory(history, [], [reply], 5)[0].progress, "unknown");
+  const result = updateRepairHistory(history, [], [reply], 5, { answeredRepairTurn: 3 })[0];
+  assert.equal(result.progress, "changed"); assert.deepEqual(result.addedClaimIds, [reply.id]);
+});
+
+test("difficulty and an unknown classification stagnate in the actual committed pipeline", async () => {
+  let extraction = 0;
+  const classifier: LocalFunctionClassifier = { async classify(input) {
+    const prior = [...input.priorClaims].reverse().find(c => c.speaker === "ai");
+    return input.segments.map(s => ({ segmentId: s.segmentId, act: s.quote === "まだよく分からない" ? "defer" : "unknown", respondsToClaimId: prior?.id ?? null, rawScore: null }));
+  } };
+  const h = harness({ localGrounding: { classifier }, jevDecision: createMockJevDecisionClient(() => ({ action: "confirm", target: { kind: "single", figureId: ids[0] },
+    name: null, feature: "四角い部分", observe: null })), client: { async complete(_messages: unknown, options: { phase: string }) {
+    if (options.phase !== "local_extraction") return { text: "四角い部分がある形ですか？" };
+    const quote = ++extraction === 2 ? "まだよく分からない" : "さっきと同じところで迷ってる";
+    return { text: extraction === 1 ? "[]" : JSON.stringify([{ segmentId: "s1", quote, targets: [ids[0]], aspect: "progress", proposition: quote,
+      name: null, linkedIssueId: null, respondsToTurn: null }]) };
+  } } });
+  const first = await h.run();
+  const secondEvents = [...h.events, { id: "e2", seq: 2, speaker: "ai", text: first.text }, { id: "e3", seq: 3, speaker: "human", text: "まだよく分からない" }];
+  const second = await h.run(first.privateState, { events: secondEvents, lastEventId: "e3" });
+  const third = await h.run(second.privateState, { events: [...secondEvents, { id: "e4", seq: 4, speaker: "ai", text: second.text },
+    { id: "e5", seq: 5, speaker: "human", text: "さっきと同じところで迷ってる" }], lastEventId: "e5" });
+  assert.deepEqual(third.privateState.repairHistory.map((r: RepairHistoryEntry) => r.progress), ["unchanged", "unchanged", "unknown"]);
+  assert.ok(third.privateState.repairHistory.every((r: RepairHistoryEntry) => r.addedClaimIds.length === 0));
+  assert.equal(h.records[1].local?.claims[0].act, "defer"); assert.equal(h.records[1].local?.claims[0].aspect, "part");
+  assert.equal(h.records[2].local?.claims.length, 0);
+});
+
 test("committed confirmations retain partner replies and distinguish repeated information", async () => {
   let extraction = 0;
   const classifier: LocalFunctionClassifier = { async classify(input) {
@@ -385,4 +490,136 @@ test("ambiguous defer and move_on keep all candidates without changing any ledge
   const h = harness({ jevDecision: createMockJevDecisionClient(() => ({ ...accept, action: "revisit", target: { kind: "multiple", figureIds: ids.slice(0, 2) } })) });
   await assert.rejects(h.run(), (e: unknown) => e instanceof JevTurnError && e.code === "invalid_decision");
   assert.equal(h.records[0].publicSpeech, null);
+});
+
+test("multiple-candidate feature confirmation and repair preserve candidate and provenance sets", async () => {
+  for (const action of ["confirm", "repair"] as const) for (const shared of [false, true]) {
+    const observations = memo(); observations.figures[0].analytic.shapes = ["くぼみがある"];
+    if (shared) observations.figures[1].analytic.shapes = ["くぼみがある"];
+    const provenance = shared ? ids.slice(0, 2) : [ids[0]];
+    const target = { kind: "multiple" as const, figureIds: ids.slice(0, 2) };
+    const h = harness({ observer: { async observeAll() { return observations; }, async reobserve() { throw new Error("unused"); } },
+      jevDecision: createMockJevDecisionClient(() => ({ action, target, name: null, feature: "くぼみがある", observe: null, detailFigureIds: provenance })),
+      client: { async complete(messages: any[], options: { phase: string }) {
+        if (options.phase === "local_extraction") return { text: "[]" };
+        const message = messages.find(m => m.content.startsWith("Jevが選んだ行動"));
+        const received = JSON.parse(message.content.split("\n").at(-1));
+        assert.deepEqual(received.target, target); assert.deepEqual(received.detailFigureIds, provenance);
+        assert.ok(messages.some(m => m.content.includes("特徴の出典図形であり、対象の確定ではありません")));
+        return { text: action === "repair" ? "捉え方を訂正します。くぼみのある形でしょうか？" : "くぼみのある形ですか？" };
+      } } });
+    const initial = h.dialogue.initialPrivateState();
+    initial.ledger[ids[0]] = { status: "tentative", name: "名前A" };
+    initial.ledger[ids[1]] = { status: "tentative", name: "名前B" };
+    const before = JSON.stringify(initial), result = await h.run(initial);
+    assert.equal(JSON.stringify(initial), before); assert.deepEqual(result.privateState.ledger, initial.ledger);
+    assert.equal(result.privateState.judgments[0].judgment.action, action);
+    assert.equal(result.privateState.judgments[0].judgment.targetSlot, null);
+    assert.deepEqual(result.privateState.judgments[0].jevTurn.decision.detailFigureIds, provenance);
+    assert.deepEqual(h.records[0].decisions[0].target, target);
+    assert.deepEqual(h.records[0].decisions[0].detailFigureIds, provenance);
+    assert.deepEqual(result.privateState.repairHistory[0].candidatesBefore, target.figureIds);
+  }
+});
+
+test("multiple feature provenance must be complete and belong to the selected candidates", async () => {
+  for (const provenance of [undefined, [ids[0]], [ids[2]]]) {
+    const h = harness({ jevDecision: createMockJevDecisionClient(() => ({ action: "confirm", target: { kind: "multiple", figureIds: ids.slice(0, 2) },
+      name: null, feature: "四角い部分", observe: null, ...(provenance ? { detailFigureIds: provenance } : {}) })) });
+    await assert.rejects(h.run(), JevTurnError);
+    assert.equal(h.records[0].publicSpeech, null); assert.deepEqual(h.dialogue.initialPrivateState().graph.records, []);
+  }
+});
+
+function jevResponse(payload: JevDecisionPayload, preferences: Record<string, string>, index: number) {
+  return new Response(JSON.stringify({ model: JEV_DECISION_MODEL + "-20261014", id: `gen-c-stage-${index}`,
+    answers: Object.fromEntries(Object.entries(payload.questions).map(([key, question]) => {
+      const selected = preferences[key] ?? (key.startsWith("candidate_") ? "exclude" : Object.keys(question.criteria)[0]);
+      return [key, { type: "choice", choice: selected,
+        probabilities: Object.fromEntries(Object.keys(question.criteria).map(label => [label, label === selected ? 1 : 0])), confidence: 1 }];
+    })), usage: { cost: 0.0001 } }), { headers: { "Content-Type": "application/json" } });
+}
+
+test("both real-adapter stage receipts survive the runtime transaction and settlement", async () => {
+  const requests: JevDecisionPayload[] = [];
+  const jevDecision = createJevDecisionClient({ enabled: true, readKey: async () => "sk-or-SYNTHETIC-c-pipeline-key-000000", fetchImpl: async (_url, init) => {
+    const payload = JSON.parse(String(init.body)) as JevDecisionPayload; requests.push(payload);
+    return jevResponse(payload, payload.questions.action ? { action: "confirm", target: "multiple", candidate_0: "include", candidate_1: "include" } : { feature: Object.keys(payload.questions.feature.criteria)[0] }, requests.length);
+  } })!;
+  const h = harness({ jevDecision }), result = await h.run();
+  assert.equal(requests.length, 2);
+  assert.deepEqual(Object.keys(requests[1].questions), ["feature"]);
+  const evidence = h.records[0].decisions[0].evidence;
+  assert.deepEqual(evidence.stages?.map(s => s.stage), ["action_target", "detail"]);
+  assert.deepEqual(evidence.stages?.map(s => s.responseId), ["gen-c-stage-1", "gen-c-stage-2"]);
+  assert.ok(evidence.stages?.every(s => s.model === JEV_DECISION_MODEL + "-20261014" && s.inputBudget?.stateChars! <= 20000));
+  assert.equal(evidence.costUsd, 0.0002);
+  assert.deepEqual(settleJevTurnTraces(h.records, result.privateState)[0].decisions[0].evidence, evidence);
+  assert.deepEqual(result.privateState.judgments[0].jevTurn.decision.target, { kind: "multiple", figureIds: ids.slice(0, 2) });
+});
+
+test("name decisions with unresolved or multiple targets fail before detail and publish nothing", async () => {
+  for (const action of ["propose_name", "agree"] as const) for (const target of ["none", "multiple"]) {
+    let calls = 0;
+    const jevDecision = createJevDecisionClient({ enabled: true, readKey: async () => "sk-or-SYNTHETIC-c-pipeline-key-000000", fetchImpl: async (_url, init) => {
+      const payload = JSON.parse(String(init.body)) as JevDecisionPayload; calls++;
+      return jevResponse(payload, { action, target, candidate_0: "include", candidate_1: "include" }, calls);
+    } })!;
+    const h = harness({ jevDecision }), initial = h.dialogue.initialPrivateState();
+    await assert.rejects(h.run(initial), (error: unknown) => error instanceof JevTurnError && error.code === "invalid_decision");
+    assert.equal(calls, 1); assert.equal(h.records[0].publicSpeech, null); assert.equal(h.records[0].errorCode, "invalid_decision");
+    assert.equal(jevDecision.lastEvidence?.rejectionCode, "name_requires_single_target");
+    assert.equal(jevDecision.lastEvidence?.stages[0].choices.action, action);
+    assert.deepEqual(initial.graph.records, []);
+  }
+});
+
+test("public AI features retain unresolved candidates without inventing a name or duplicate claim", () => {
+  const graph = createReferenceGraph({ slots: ids });
+  const publicTurns = [{ turn: 2, speaker: "ai" as const, text: "牛のような、四角い部分がある形ですか？" }];
+  const priorAct = { turn: 2, action: "confirm", targetSlot: null, targetCandidates: ids.slice(0, 2), candidateName: "牛", discriminatingFeature: "四角い部分" };
+  const before = JSON.stringify(graph), result = recordAiClaims({ graph, turn: 3, publicTurns, priorAct });
+  assert.equal(JSON.stringify(graph), before);
+  assert.deepEqual(result.rejected, []); assert.equal(result.operations.length, 1);
+  assert.deepEqual(result.operations[0], { kind: "claim", id: "3:ai1", issueId: "3:ai1", targets: ids.slice(0, 2), aspect: "part", act: "ask",
+    proposition: "四角い部分", name: null, speaker: "ai", sourceTurn: 2, quote: publicTurns[0].text, respondsTo: null, source: "ai_hypothesis" });
+  const installed = applyReferenceUpdate(graph, { expectedRevision: graph.revision, turn: 3, operations: result.operations }, { generationSucceeded: true, publicTurns });
+  assert.deepEqual(recordAiClaims({ graph: installed, turn: 5, publicTurns, priorAct: { ...priorAct, targetCandidates: [...priorAct.targetCandidates].reverse() } }).operations, []);
+  for (const candidates of [[], [ids[0]], [ids[0], ids[0]], [ids[0], "foreign-slot"], [...ids, ids[0]]]) {
+    const invalid = recordAiClaims({ graph, turn: 3, publicTurns, priorAct: { ...priorAct, targetCandidates: candidates } });
+    assert.deepEqual(invalid.operations, []); assert.deepEqual(invalid.rejected, [{ segmentId: "ai", reason: "invalid_ai_target" }]);
+  }
+  const fallback = recordAiClaims({ graph, turn: 3, publicTurns, priorAct: { ...priorAct, publishedFallback: true } });
+  assert.deepEqual(fallback.operations, []); assert.deepEqual(fallback.rejected, [{ segmentId: "ai", reason: "ai_fallback_utterance" }]);
+});
+
+test("agreement and denial can answer the public multiple-candidate AI primary without resolving a figure or name", async () => {
+  for (const act of ["agree", "deny"] as const) {
+    const text = act === "agree" ? "はい" : "四角い部分はありません";
+    let decisions = 0, extractions = 0;
+    const classifier: LocalFunctionClassifier = { async classify(input) {
+      const primary = input.priorClaims.find(c => c.speaker === "ai" && c.sourceTurn === 2)!;
+      assert.ok(primary); assert.deepEqual(primary.targets, ids.slice(0, 2));
+      return input.segments.map(s => ({ segmentId: s.segmentId, act, respondsToClaimId: primary.id, rawScore: null }));
+    } };
+    const h = harness({ localGrounding: { classifier },
+      jevDecision: createMockJevDecisionClient(() => ++decisions === 1 ? { action: "confirm", target: { kind: "multiple", figureIds: ids.slice(0, 2) },
+        name: null, feature: "四角い部分", observe: null, detailFigureIds: ids.slice(0, 2) } : accept),
+      client: { async complete(_messages: unknown, options: { phase: string }) {
+        if (options.phase === "local_extraction") return { text: ++extractions === 1 ? "[]" : JSON.stringify([{ segmentId: "reply", quote: text,
+          targets: [], aspect: "part", proposition: act === "agree" ? "四角い部分がある" : "四角い部分はない", name: null, linkedIssueId: null, respondsToTurn: 2 }]) };
+        return { text: decisions === 1 ? "四角い部分がある形ですか？" : "そう見えるんですね。" };
+      } } });
+    const first = await h.run();
+    const result = await h.run(first.privateState, { events: [...h.events, { id: "e2", seq: 2, speaker: "ai", text: first.text },
+      { id: "e3", seq: 3, speaker: "human", text }], lastEventId: "e3" });
+    const local = h.records[1].local!;
+    assert.equal(local.aiClaims.length, 1); assert.equal(local.claims.length, 1);
+    assert.deepEqual(local.aiClaims[0].targets, ids.slice(0, 2)); assert.equal(local.aiClaims[0].id, "3:ai1");
+    assert.equal(local.claims[0].act, act); assert.equal(local.claims[0].respondsTo, "3:ai1");
+    assert.deepEqual(local.claims[0].targets, ids.slice(0, 2)); assert.deepEqual(local.verification.rejected, []);
+    assert.ok([...local.aiClaims, ...local.claims].every(c => c.aspect === "part" && c.name === null));
+    assert.deepEqual(result.privateState.ledger, first.privateState.ledger);
+    assert.equal(settleLocalTraces(h.localRecords, result.privateState)[1].status, "committed");
+  }
 });
