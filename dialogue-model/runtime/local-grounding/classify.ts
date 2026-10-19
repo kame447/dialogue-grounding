@@ -110,15 +110,16 @@ export function parseLocalFunctionVerdicts(raw: unknown, input: Pick<LocalClassi
   return input.segments.map((s) => verdicts.get(s.segmentId)!);
 }
 
-export type LocalClassifierMetadata = Readonly<{ classifierKind: "luna_standin" | "unverified_injected"; calibrated: false }>;
+export type LocalClassifierMetadata = Readonly<{ classifierKind: "luna_standin" | "unverified_injected"; calibrated: false }> |
+  Readonly<{ classifierKind: "jev_local_test"; calibrated: false; model: "typesafe/jev-1.14" }>;
 export type IdentifiedLocalClassifier = LocalFunctionClassifier & { readonly metadata: LocalClassifierMetadata };
 type CallOptions = { signal: AbortSignal; timeoutMs: number };
 type ClassifierCall = (state: string, options: CallOptions) => Promise<unknown>;
 
 /** Transport-independent call returns the strict verdict array (or its JSON text).
- * Callers must identify unverified injections explicitly; no verified Jev route exists yet. */
+ * Unverified injections cannot select the separate, model-checked Jev test adapter's kind. */
 export function createLocalFunctionClassifier({ call, classifierKind, timeoutMs = 15000 }:
-  { call: ClassifierCall; classifierKind: LocalClassifierMetadata["classifierKind"]; timeoutMs?: number }): IdentifiedLocalClassifier {
+  { call: ClassifierCall; classifierKind: "luna_standin" | "unverified_injected"; timeoutMs?: number }): IdentifiedLocalClassifier {
   if (typeof call !== "function" || !includes(["luna_standin", "unverified_injected"], classifierKind) || !positive(timeoutMs) || timeoutMs > 60000) fail("invalid_input");
   return Object.freeze({
     metadata: Object.freeze({ classifierKind, calibrated: false as const }),
@@ -166,6 +167,5 @@ export function createLunaLocalClassifier(client: {
   } });
 }
 
-// Real Jev closed-set transport is pending a Worker route and deployment.
-// The existing local diagnostic is fixed to two axes and Keychain authorization;
-// it cannot be reused for LOCAL_ACTS without changing that approved boundary.
+// Production Jev transport still needs a Worker route and deployment. The explicitly
+// enabled, researcher-local experiment adapter lives separately in jev-local-test.ts.
