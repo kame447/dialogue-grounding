@@ -20,6 +20,10 @@ export type ObservationClient = { complete(messages: ObservationMessage[], optio
   phase: string; timeoutMs: number; signal: AbortSignal;
 }): Promise<{ text: string }> };
 
+/** Bump when the persisted shape accepted by validateObservationMemo changes. */
+export const OBSERVATION_MEMO_VERSION = 1;
+export { snapshotInput as snapshotObservationInput };
+
 // Engineering budgets, not experimental conditions or calibrated thresholds.
 export const OBSERVATION_LIMITS = Object.freeze({ figures: 6, text: 240, composition: 480, list: 16,
   holistic: 8, basis: 8, reobservations: 64, responseChars: 48000, memoChars: 128000 });
