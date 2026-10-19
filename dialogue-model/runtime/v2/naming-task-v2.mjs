@@ -49,14 +49,15 @@ export function parseAiNamesV2(text, slots) {
  *   decisionShadowClient?: {chooseAction(request: object): Promise<any>} | null,
  *   activeDecision?: {purpose: string, client: {chooseAction(request: object): Promise<any>}} | null,
  *   utteranceStyle?: string, groundingShadow?: import('./grounding-shadow.ts').GroundingShadowOptions | null,
- *   localGrounding?: import('../local-grounding/contract.ts').LocalGroundingOptions | null }} options
+ *   localGrounding?: import('../local-grounding/contract.ts').LocalGroundingOptions | null,
+ *   onLocalGroundingTrace?: ((record: import('./local-grounding-turn.ts').LocalGroundingResearchRecord) => unknown) | null }} options
  *   groundingShadow is a researcher-only, default-off shadow; a restored trial keeps it only if it started with it.
  */
 export async function createNamingTaskV2({
   client, strategy, seed, referenceMemory = false, runDir = process.env.RESEARCH_RUN_DIR,
   createTrial = createTrialV2, scoreTrial = defaultScoreTrial, judge = null, now = () => Date.now(),
   restore = null, onPersist = null, decisionShadowClient = null, activeDecision = null, utteranceStyle = "default",
-  groundingShadow = null, localGrounding = null,
+  groundingShadow = null, localGrounding = null, onLocalGroundingTrace = null,
 }) {
   if (!STRATEGIES.includes(strategy)) throw new NamingTaskError("invalid_strategy");
   if (!Number.isSafeInteger(seed)) throw new NamingTaskError("invalid_seed");
@@ -112,7 +113,7 @@ export async function createNamingTaskV2({
     anchors: model.anchors, judge, referenceMemory, decisionShadowClient: trackDecisions(decisionShadowClient, "decision_shadow"),
     activeDecision: activeDecision && { ...activeDecision, client: trackDecisions(activeDecision.client, "decision_active") }, utteranceStyle: style,
     groundingShadow: grounding, onGroundingShadow: grounding ? (record) => { groundingRecords.push(record); } : null,
-    localGrounding: local,
+    localGrounding: local, onLocalGroundingTrace,
     onResearchUpdate: () => persist().catch(() => {}) });
   async function timedAiTurn(input) {
     const attemptIndex = dialogue.getAttempts().length;

@@ -1,10 +1,14 @@
 // One opt-in local interpretation transaction. Model work can only propose
 // operations; the dialogue queue still owns publication and state installation.
-import type { LocalGroundingOptions, PublicTurn, LocalRejection, LocalVerificationResult } from "../local-grounding/contract.ts";
+import { LOCAL_ACTS, LOCAL_ASPECTS } from "../local-grounding/contract.ts";
+import type { LocalAct, LocalOwnImage, LocalOwnAnchor, LocalFunctionVerdict, LocalSegmentProposal, LocalGroundingOptions, PublicTurn, LocalRejection, LocalVerificationResult } from "../local-grounding/contract.ts";
 import { verifyLocalUpdate, recordAiClaims } from "../local-grounding/verify.ts";
 import { summarizeLocalIssues, priorClaimViews } from "../local-grounding/derive.ts";
 import { validateReferenceUpdate, previewReferenceUpdate, ReferenceGraphError } from "../memory/reference-graph.mjs";
 import { findInternalLeaks } from "./generation-guard.ts";
+import { literalSpan } from "../judgment/public-evidence.mjs";
+import { LOCAL_EXTRACTION_INSTRUCTIONS } from "../local-grounding/extract.ts";
+import { LOCAL_CLASSIFICATION_INSTRUCTIONS } from "../local-grounding/classify.ts";
 
 export const LOCAL_GROUNDING_TIMEOUT_MS = 20_000;
 type Message = { role: string; content: unknown };
@@ -39,10 +43,47 @@ export type LocalGroundingTrace = {
   segments: number;
   accepted: number;
   rejected: LocalRejection[];
-  classifierKind: "luna_standin" | "unverified_injected";
+  classifierKind: "luna_standin" | "unverified_injected" | "jev_local_test";
   latencyMs: number;
   extraction?: { rejectedSegments: number; reasons: Array<"quote_not_found" | "quote_span_too_long"> };
+  attemptNumber?: number;
 };
+type ResearchClaim = LocalVerificationResult["operations"][number] & { redacted?: true };
+export type LocalGroundingResearchData = {
+  extractor: { segments: Array<LocalSegmentProposal & { act?: LocalAct; redacted?: true }> };
+  classifier: { kind: LocalGroundingTrace["classifierKind"]; model: string | null; status: "not_called" | "ok" | "error" | "skipped";
+    callIndex: number | null; verdicts: Array<Pick<LocalFunctionVerdict, "segmentId" | "act" | "respondsToClaimId">> };
+  verification: { accepted: string[]; rejected: LocalRejection[] };
+  aiClaims: ResearchClaim[];
+  claims: ResearchClaim[];
+};
+export type LocalGroundingResearchRecord = LocalGroundingResearchData & {
+  turnIndex: number; lastEventId: string | null; attemptNumber: number;
+  status: "staged" | "error" | "aborted" | "committed" | "superseded";
+  localStatus: LocalGroundingTrace["status"];
+};
+
+/** Call after the queue settles. A generated candidate is not a commit receipt.
+ * Matching all three identifiers avoids promoting a failed retry of the same turn. */
+export function settleLocalTraces(records: readonly LocalGroundingResearchRecord[], privateState: unknown): LocalGroundingResearchRecord[] {
+  const judgments = (privateState as { judgments?: unknown })?.judgments;
+  return records.map(record => {
+    const installed = Array.isArray(judgments) && judgments.some(judgment => judgment?.status === "committed" &&
+      judgment.turnIndex === record.turnIndex && (judgment.lastEventId ?? null) === record.lastEventId &&
+      judgment.localGrounding?.attemptNumber === record.attemptNumber);
+    return { ...structuredClone(record), status: record.status === "staged" || record.status === "committed" || record.status === "superseded"
+      ? installed ? "committed" : "superseded" : record.status };
+  });
+}
+
+function classifierEvidence(classifier: LocalGroundingOptions["classifier"]): { callIndex: number | null; model: string | null; status: "ok" | "error" | "skipped" } {
+  try {
+    const evidence = (classifier as { lastEvidence?: { callIndex?: unknown; model?: unknown; status?: unknown } }).lastEvidence;
+    return { callIndex: Number.isSafeInteger(evidence?.callIndex) && (evidence!.callIndex as number) > 0 ? evidence!.callIndex as number : null,
+      model: typeof evidence?.model === "string" && /^typesafe\/jev-1\.14(?:-[0-9]{8})?$/u.test(evidence.model) ? evidence.model : null,
+      status: evidence?.status === "ok" ? "ok" : evidence?.status === "skipped" ? "skipped" : "error" };
+  } catch { return { callIndex: null, model: null, status: "error" }; }
+}
 
 export function validateLocalGroundingOptions(value: unknown): LocalGroundingOptions | null {
   if (value === null || value === undefined) return null;
@@ -55,7 +96,7 @@ export function validateLocalGroundingOptions(value: unknown): LocalGroundingOpt
 }
 
 // Never copy untrusted segment IDs or exception/provider messages into traces.
-const segmentCode = (value: string, index: number) => /^s[0-9]{1,4}$/.test(value) ? value : `segment_${index + 1}`;
+const segmentCode = (value: unknown, index: number) => typeof value === "string" && /^s[0-9]{1,4}$/.test(value) ? value : `segment_${index + 1}`;
 const reasonCode = (value: string) => /^[a-z][a-z0-9_]{0,59}$/.test(value) ? value : "invalid_update";
 const canceled = () => Object.assign(new Error("Local grounding canceled"), { name: "AbortError" });
 function extractionDiagnostics(extractor: LocalGroundingOptions["extractor"]): LocalGroundingTrace["extraction"] {
@@ -75,8 +116,10 @@ export function localGroundingMemo(graph: Graph, update: Update, publicTurns: re
 
 export async function prepareLocalGroundingTurn(options: LocalGroundingOptions, input: {
   graph: Graph; update: Update; publicTurns: readonly PublicTurn[]; signal?: AbortSignal;
+  ownImage: LocalOwnImage; ownAnchors: readonly LocalOwnAnchor[];
+  captureResearch?: boolean;
   priorAct?: Parameters<typeof recordAiClaims>[0]["priorAct"];
-}): Promise<{ update: Update; trace: LocalGroundingTrace }> {
+}): Promise<{ update: Update; trace: LocalGroundingTrace; research?: LocalGroundingResearchData }> {
   const started = performance.now();
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -84,11 +127,38 @@ export async function prepareLocalGroundingTurn(options: LocalGroundingOptions, 
   let extraction: LocalGroundingTrace["extraction"];
   let phase = "extractor_failed";
   const kind = (options.classifier as { metadata?: { classifierKind?: unknown } }).metadata?.classifierKind;
-  const classifierKind = kind === "luna_standin" ? kind : "unverified_injected";
+  const classifierKind = kind === "luna_standin" || kind === "jev_local_test" ? kind : "unverified_injected";
+  const research: LocalGroundingResearchData | null = input.captureResearch ? {
+    extractor: { segments: [] }, classifier: { kind: classifierKind, model: null, status: "not_called", callIndex: null, verdicts: [] },
+    verification: { accepted: [], rejected: [] }, aiClaims: [], claims: [],
+  } : null;
+  const privateInstructions = [LOCAL_EXTRACTION_INSTRUCTIONS, LOCAL_CLASSIFICATION_INSTRUCTIONS].map(content => ({ role: "system", content }));
+  const safeText = (value: string) => {
+    const codes = findLocalPublicationViolations(value, privateInstructions);
+    return (input.ownImage.base64 && value.includes(input.ownImage.base64)) || codes.some(code => ["internal_prompt_echo", "internal_credential", "internal_image"].includes(code))
+      ? "[redacted]" : value;
+  };
+  const researchClaim = (operation: LocalVerificationResult["operations"][number]): ResearchClaim => {
+    const quote = safeText(operation.quote), proposition = safeText(operation.proposition);
+    const name = operation.name === null ? null : safeText(operation.name);
+    return { kind: "claim", id: operation.id, issueId: operation.issueId, targets: [...operation.targets], aspect: operation.aspect,
+      act: operation.act, proposition, name, speaker: operation.speaker, sourceTurn: operation.sourceTurn, quote,
+      respondsTo: operation.respondsTo, source: operation.source,
+      ...(quote !== operation.quote || proposition !== operation.proposition || name !== operation.name ? { redacted: true as const } : {}) };
+  };
   const trace = (status: LocalGroundingTrace["status"], accepted = 0, rejected: LocalRejection[] = []): LocalGroundingTrace => ({
     status, segments: segmentsCount, accepted, rejected, classifierKind, latencyMs: Math.round(performance.now() - started),
     ...(extraction ? { extraction } : {}),
   });
+  const finish = (update: Update, record: LocalGroundingTrace) => {
+    if (!research) return { update, trace: record };
+    const snapshot = structuredClone(research);
+    const retained = new Set(update.operations.filter(operation => operation.kind === "claim").map(operation => operation.id));
+    snapshot.claims = snapshot.claims.filter(claim => retained.has(claim.id));
+    snapshot.aiClaims = snapshot.aiClaims.filter(claim => retained.has(claim.id));
+    snapshot.verification = { accepted: [...snapshot.aiClaims, ...snapshot.claims].map(claim => claim.id), rejected: structuredClone(record.rejected) };
+    return { update, trace: record, research: snapshot };
+  };
   let abortListener: (() => void) | undefined;
   const timeoutMs = options.timeoutMs ?? LOCAL_GROUNDING_TIMEOUT_MS;
   const deadline = started + timeoutMs;
@@ -122,7 +192,13 @@ export async function prepareLocalGroundingTurn(options: LocalGroundingOptions, 
       rejected.push(...verified.rejected.map((r, i) => ({ segmentId: segmentCode(r.segmentId, i), reason: reasonCode(r.reason) })));
       for (const operation of verified.operations) {
         const candidate = { ...update, operations: [...update.operations, operation] };
-        try { update = validateReferenceUpdate(input.graph, candidate, { publicTurns }); accepted++; }
+        try {
+          update = validateReferenceUpdate(input.graph, candidate, { publicTurns }); accepted++;
+          if (research) {
+            const claim = researchClaim(operation);
+            (claim.speaker === "ai" ? research.aiClaims : research.claims).push(claim);
+          }
+        }
         catch (error) {
           if (!(error instanceof ReferenceGraphError)) throw error;
           rejected.push({ segmentId: `operation_${accepted + rejected.length + 1}`, reason: "memory_" + reasonCode(error.code) });
@@ -136,29 +212,66 @@ export async function prepareLocalGroundingTurn(options: LocalGroundingOptions, 
     let segments;
     try {
       segments = await options.extractor.extract({ turn: input.update.turn, publicTurns: structuredClone(publicTurns),
-        ownSlots: [...input.graph.slots], issueSummary }, { signal: controller.signal, timeoutMs: Math.ceil(timeoutMs) });
+        ownSlots: [...input.graph.slots], issueSummary,
+        ownImage: { ...input.ownImage }, ownAnchors: structuredClone(input.ownAnchors) },
+      { signal: controller.signal, timeoutMs: Math.ceil(timeoutMs) });
     } finally { extraction = extractionDiagnostics(options.extractor); }
     check();
     if (!Array.isArray(segments)) throw new Error("Invalid local extraction");
     segments = structuredClone(segments);
     check();
     segmentsCount = segments.length;
+    if (research) research.extractor.segments = segments.flatMap((segment, index) => {
+      if (!segment || !LOCAL_ASPECTS.includes(segment.aspect)) return [];
+      const human = publicTurns.find(turn => turn.turn === input.update.turn && turn.speaker === "human");
+      const quote = typeof segment.quote === "string" && human ? literalSpan(human.text, segment.quote)?.text : null;
+      const proposition = typeof segment.proposition === "string" && segment.proposition.length <= 160 ? safeText(segment.proposition) : "";
+      const name = typeof segment.name === "string" && segment.name.length <= 160 ? safeText(segment.name) : null;
+      const sourceQuote = quote && quote.length <= 160 ? safeText(quote) : "";
+      return [{ segmentId: segmentCode(segment.segmentId, index), quote: sourceQuote,
+        targets: Array.isArray(segment.targets) ? segment.targets.filter(slot => input.graph.slots.includes(slot)).slice(0, 6) : [], aspect: segment.aspect,
+        proposition, name, linkedIssueId: graph.records.some((record: { issueId?: string }) => record.issueId === segment.linkedIssueId) ? segment.linkedIssueId : null,
+        respondsToTurn: Number.isSafeInteger(segment.respondsToTurn) && publicTurns.some(turn => turn.turn === segment.respondsToTurn && turn.turn < input.update.turn) ? segment.respondsToTurn : null,
+        ...(sourceQuote === "[redacted]" || proposition === "[redacted]" || name === "[redacted]" ? { redacted: true as const } : {}) }];
+    });
     phase = "classifier_failed";
     const priorClaims = priorClaimViews(graph);
     check();
-    const verdicts = await options.classifier.classify({ turn: input.update.turn, publicTurns: structuredClone(publicTurns),
-      segments: structuredClone(segments), priorClaims }, { signal: controller.signal, timeoutMs: Math.max(1, Math.ceil(deadline - performance.now())) });
+    const beforeEvidence = research ? classifierEvidence(options.classifier) : null;
+    let verdicts;
+    if (research) research.classifier.status = "error";
+    try {
+      verdicts = await options.classifier.classify({ turn: input.update.turn, publicTurns: structuredClone(publicTurns),
+        segments: structuredClone(segments), priorClaims }, { signal: controller.signal, timeoutMs: Math.max(1, Math.ceil(deadline - performance.now())) });
+      if (research) research.classifier.status = classifierKind === "jev_local_test" ? "error" : "ok";
+    } finally {
+      if (research && classifierKind === "jev_local_test") {
+        const evidence = classifierEvidence(options.classifier);
+        if (evidence.callIndex === (beforeEvidence?.callIndex ?? 0) + 1) Object.assign(research.classifier, evidence);
+      }
+    }
     check();
+    if (research && Array.isArray(verdicts)) {
+      research.classifier.verdicts = verdicts.flatMap(verdict => {
+        const index = segments.findIndex(segment => segment?.segmentId === verdict?.segmentId);
+        if (index < 0 || !LOCAL_ACTS.includes(verdict?.act)) return [];
+        const segmentId = segmentCode(verdict.segmentId, index);
+        const recorded = research.extractor.segments.find(segment => segment.segmentId === segmentId);
+        if (recorded) recorded.act = verdict.act;
+        return [{ segmentId, act: verdict.act,
+          respondsToClaimId: priorClaims.some(claim => claim.id === verdict.respondsToClaimId) ? verdict.respondsToClaimId : null }];
+      });
+    }
     phase = "verification_failed";
     merge(verifyLocalUpdate({ graph, turn: input.update.turn, publicTurns, segments, verdicts }));
     check();
-    return { update, trace: trace("ok", accepted, rejected) };
+    return finish(update, trace("ok", accepted, rejected));
   };
   try { return await Promise.race([limit, work()]); }
   catch (error) {
     const name = (error as Error)?.name;
     const status = name === "TimeoutError" ? "timeout" : name === "AbortError" ? "aborted" : "error";
-    return { update: input.update, trace: trace(status, 0, [{ segmentId: "turn", reason: status === "error" ? phase : status }]) };
+    return finish(input.update, trace(status, 0, [{ segmentId: "turn", reason: status === "error" ? phase : status }]));
   } finally {
     clearTimeout(timer);
     if (abortListener) input.signal?.removeEventListener("abort", abortListener);

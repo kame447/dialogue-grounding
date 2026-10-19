@@ -93,18 +93,22 @@ function abortIf(signal) {
  *   onResearchUpdate?: (() => void) | null, activeDecision?: {purpose: string, client: {chooseAction(request: object): Promise<any>}} | null,
  *   utteranceStyle?: string, groundingShadow?: import('./grounding-shadow.ts').GroundingShadowOptions | null,
  *   onGroundingShadow?: ((record: import('./grounding-shadow.ts').GroundingShadowRecord) => void) | null,
- *   localGrounding?: import('../local-grounding/contract.ts').LocalGroundingOptions | null }} options
+ *   localGrounding?: import('../local-grounding/contract.ts').LocalGroundingOptions | null,
+ *   onLocalGroundingTrace?: ((record: import('./local-grounding-turn.ts').LocalGroundingResearchRecord) => unknown) | null }} options
  *   utteranceStyle is validated at runtime against UTTERANCE_STYLES. groundingShadow (default off) only produces
  *   private records through onGroundingShadow; it never changes the act, the utterance or the private state.
+ *   onLocalGroundingTrace is private and default off. It emits staged/error/aborted attempts;
+ *   settleLocalTraces(records, installedPrivateState) confirms publication after the queue settles.
  */
 export function createDialogueV2({ client, strategy, image, anchors, judge = null, referenceMemory = false,
   decisionShadowClient = null, onResearchUpdate = null, activeDecision = null, utteranceStyle = "default",
-  groundingShadow = null, onGroundingShadow = null, localGrounding = null }) {
+  groundingShadow = null, onGroundingShadow = null, localGrounding = null, onLocalGroundingTrace = null }) {
   if (!client || typeof client.complete !== "function") throw new Error("A chat client is required");
   if (!STRATEGIES.includes(strategy)) throw new Error("Unsupported dialogue strategy");
   if (typeof referenceMemory !== "boolean") throw new Error("Invalid memory option");
   const local = validateLocalGroundingOptions(localGrounding);
   if (local && !referenceMemory) throw new Error("Local grounding requires reference memory");
+  if (onLocalGroundingTrace !== null && typeof onLocalGroundingTrace !== "function") throw new Error("Invalid local grounding trace callback");
   if (!UTTERANCE_STYLES.includes(utteranceStyle)) throw new Error("Invalid utterance style");
   const concise = utteranceStyle === "concise";
   if (decisionShadowClient !== null && typeof decisionShadowClient?.chooseAction !== "function") {
@@ -123,6 +127,15 @@ export function createDialogueV2({ client, strategy, image, anchors, judge = nul
   const dialogueJudge = judge ?? createLunaJudge(client);
   // Research-only trace of every attempted run (including superseded or failed ones).
   const attempts = [];
+  const localResearch = new WeakMap();
+  function emitLocalResearch(trace, status) {
+    const record = trace && localResearch.get(trace);
+    if (!record) return;
+    localResearch.delete(trace);
+    const snapshot = { ...clone(record), status, localStatus: trace.localGrounding?.status ?? record.localStatus };
+    try { Promise.resolve(onLocalGroundingTrace(snapshot)).catch(() => {}); }
+    catch { /* A private research sink never controls publication or state. */ }
+  }
   const notifyResearchUpdate = () => {
     Promise.resolve().then(() => onResearchUpdate?.()).catch(() => {});
   };
@@ -163,18 +176,23 @@ export function createDialogueV2({ client, strategy, image, anchors, judge = nul
   // Failed attempts keep only sanitized fields: code, phase, HTTP status, elapsed ms.
   async function runAiTurn(args) {
     const before = attempts.length, started = performance.now();
-    try { return await runAiTurnUnbounded(args); }
+    try {
+      const result = await runAiTurnUnbounded(args);
+      emitLocalResearch(attempts[before], "staged");
+      return result;
+    }
     catch (error) {
       const trace = attempts.length > before ? attempts.at(-1) : null;
       if (trace && error?.name !== "AbortError") Object.assign(trace, {
         errorCode: traceCode(error?.code), errorPhase: trace.status === "generation_error" ? "generation" : "judgment",
         errorStatus: Number.isInteger(error?.status) ? error.status : null, errorElapsedMs: Math.round(performance.now() - started),
       });
+      emitLocalResearch(attempts[before], error?.name === "AbortError" ? "aborted" : "error");
       throw error;
     }
   }
 
-  async function runAiTurnUnbounded({ events, signal, privateState, lastEventId }) {
+  async function runAiTurnUnbounded({ events, signal, privateState, lastEventId, requestSeq = null }) {
     const state = clone(privateState);
     const humanEvents = events.filter((event) => event.speaker === "human");
     const latest = humanEvents.at(-1);
@@ -186,6 +204,12 @@ export function createDialogueV2({ client, strategy, image, anchors, judge = nul
       judgment: null, ownLedgerBefore: clone(state.ledger), ownLedgerAfter: clone(state.ledger), validation: null, status: "judge_error" };
     if (state.graph) trace.memory = { opsApplied: 0, rejected: null, interpretation: false };
     attempts.push(trace);
+    const attemptNumber = Number.isSafeInteger(requestSeq) && requestSeq > 0 ? requestSeq : attempts.length;
+    if (local && onLocalGroundingTrace) localResearch.set(trace, {
+      turnIndex: latest.seq, lastEventId: lastEventId ?? null, attemptNumber, status: "error", localStatus: "error",
+      extractor: { segments: [] }, classifier: { kind: "unverified_injected", model: null, status: "not_called", callIndex: null, verdicts: [] },
+      verification: { accepted: [], rejected: [] }, aiClaims: [], claims: [],
+    });
     const rawJudgment = await dialogueJudge.judge({
       version: 2, image: ownImage, ownAnchors, publicHistory: history, strategy, ownLedger: clone(state.ledger),
       ...(state.graph ? { referenceContext: { graph: state.graph, turn: latest.seq, publicTurns } } : {}),
@@ -246,8 +270,13 @@ export function createDialogueV2({ client, strategy, image, anchors, judge = nul
       const previous = state.judgments.at(-1);
       const previousAi = previous && publicTurns.find(event => event.speaker === "ai" && event.turn > previous.turnIndex && event.turn < latest.seq);
       const staged = await prepareLocalGroundingTurn(local, { graph: state.graph, update: memoryUpdate, publicTurns, signal,
+        ownImage, ownAnchors, captureResearch: Boolean(onLocalGroundingTrace),
         ...(previousAi ? { priorAct: { ...previous.judgment, turn: previousAi.turn } } : {}) });
       trace.localGrounding = staged.trace;
+      if (onLocalGroundingTrace) {
+        trace.localGrounding.attemptNumber = attemptNumber;
+        Object.assign(localResearch.get(trace), staged.research);
+      }
       abortIf(signal);
       memoryUpdate = staged.update;
       try { localMemo = localGroundingMemo(state.graph, memoryUpdate, publicTurns); }
@@ -255,6 +284,8 @@ export function createDialogueV2({ client, strategy, image, anchors, judge = nul
         memoryUpdate = baseMemoryUpdate;
         Object.assign(trace.localGrounding, { status: "error", accepted: 0 });
         trace.localGrounding.rejected.push({ segmentId: "turn", reason: "summary_unavailable" });
+        const research = localResearch.get(trace);
+        if (research) Object.assign(research, { claims: [], aiClaims: [], verification: { accepted: [], rejected: clone(trace.localGrounding.rejected) } });
       }
     }
     trace.status = "generation_error";

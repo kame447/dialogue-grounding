@@ -5,9 +5,14 @@ import { inspect } from "node:util";
 import { createLunaLocalExtractor, buildLocalExtractionMessages, parseLocalExtraction, LocalExtractionError,
   LOCAL_EXTRACTION_INSTRUCTIONS } from "../dialogue-model/runtime/local-grounding/extract.ts";
 import { createMockLocalExtractor, LocalMockError } from "../dialogue-model/runtime/local-grounding/mocks.ts";
-import type { LocalExtractionInput, LocalSegmentProposal } from "../dialogue-model/runtime/local-grounding/contract.ts";
+import { ownImageMessage } from "../dialogue-model/runtime/judgment/instructions.mjs";
+import { createTrialV2, modelView } from "../dialogue-model/runtime/stimuli/scatter-v2.mjs";
+import type { LocalExtractionInput, LocalOwnAnchor, LocalSegmentProposal } from "../dialogue-model/runtime/local-grounding/contract.ts";
 
 const input: LocalExtractionInput = { turn: 3, ownSlots: ["own-a", "own-b"], issueSummary: "向きが未確認",
+  ownImage: { mimeType: "image/png", base64: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aTbkAAAAASUVORK5CYII=" },
+  ownAnchors: [{ id: "own-a", bbox: { x: 10, y: 20, w: 100, h: 80 }, centroid: { x: 55, y: 65 } },
+    { id: "own-b", bbox: { x: 180, y: 100, w: 80, h: 100 }, centroid: { x: 220, y: 160 } }],
   publicTurns: [{ turn: 1, speaker: "human", text: "船みたいですね" }, { turn: 2, speaker: "ai", text: "四角い部分がありますか" },
     { turn: 3, speaker: "human", text: "四角はあります。でも三角は下です。船と呼ぼう" }] };
 const segment: LocalSegmentProposal = { segmentId: "s1", quote: "四角はあります", targets: ["own-a"], aspect: "part",
@@ -41,7 +46,47 @@ test("both strategies produce byte-identical requests; only whitelisted present-
   }
   assert.equal(requests[0], requests[1]);
   assert.doesNotMatch(requests[0], /CANARY|repair-first|bypass-enabled|strategy/);
-  assert.deepEqual(Object.keys(JSON.parse(buildLocalExtractionMessages(input)[1].content)), ["turn", "publicTurns", "ownSlots", "issueSummary"]);
+  assert.deepEqual(Object.keys(JSON.parse(buildLocalExtractionMessages(input)[1].content)), ["turn", "publicTurns", "ownSlots", "issueSummary", "ownAnchors"]);
+});
+
+test("extractor receives the same multimodal own-image format as the v2 judge and matching pixel anchors", async () => {
+  const messages = buildLocalExtractionMessages(input);
+  assert.deepEqual(messages.slice(2), ownImageMessage(input.ownImage));
+  const context = JSON.parse(messages[1].content);
+  assert.deepEqual(context.ownAnchors, input.ownAnchors);
+  assert.deepEqual(context.ownAnchors.map((a: { id: string }) => a.id), input.ownSlots);
+  assert.equal(Object.hasOwn(context, "ownImage"), false);
+  assert.doesNotMatch(messages[1].content, /base64|image_url/);
+  assert.match(LOCAL_EXTRACTION_INSTRUCTIONS, /ピクセル座標/);
+  assert.match(LOCAL_EXTRACTION_INSTRUCTIONS, /画像上の根拠/);
+  assert.match(LOCAL_EXTRACTION_INSTRUCTIONS, /slot IDや名前だけで推測しない/);
+  let calls = 0;
+  const extractor = createLunaLocalExtractor({ async complete(sent) {
+    calls++; assert.deepEqual(sent, messages); return { text: JSON.stringify([segment]) };
+  } });
+  assert.deepEqual(await extractor.extract(input), [segment]); assert.equal(calls, 1);
+});
+
+test("own image and anchor extensions are projected rather than forwarding partner data or gold", () => {
+  const decorated = { ...input,
+    ownImage: { ...input.ownImage, partnerImage: "PARTNER_CANARY" },
+    ownAnchors: input.ownAnchors.map(a => ({ ...a, gold: "GOLD_CANARY", bbox: { ...a.bbox, answer: "ANSWER_CANARY" },
+      centroid: { ...a.centroid, partner: "PARTNER_CANARY" } })),
+  };
+  const messages = buildLocalExtractionMessages(decorated);
+  assert.doesNotMatch(JSON.stringify(messages), /CANARY/);
+  assert.deepEqual(JSON.parse(messages[1].content).ownAnchors, input.ownAnchors);
+});
+
+test("the existing v2 model projection supplies compatible own image and pixel anchors", () => {
+  const view = modelView(createTrialV2({ seed: 9 }));
+  const own: LocalExtractionInput = { ...input, ownSlots: view.anchors.map((a: LocalOwnAnchor) => a.id), ownAnchors: view.anchors,
+    ownImage: { mimeType: "image/png", base64: view.png.toString("base64") } };
+  const messages = buildLocalExtractionMessages(own);
+  assert.deepEqual(messages.slice(2), ownImageMessage(own.ownImage));
+  assert.deepEqual(JSON.parse(messages[1].content).ownAnchors, view.anchors);
+  assert.equal(JSON.stringify(messages).includes("figureId"), false);
+  assert.equal(JSON.stringify(messages).includes('"key"'), false);
 });
 
 test("invalid JSON and envelope, unknown keys, and out-of-set aspects are rejected with typed errors", () => {
@@ -115,6 +160,37 @@ test("invalid or ambiguous inputs fail before calling the client", async () => {
   assert.throws(() => createLunaLocalExtractor({ complete: async () => ({ text: "[]" }) }, { timeoutMs: 0 }), code("invalid_input"));
 });
 
+test("missing or malformed images and inconsistent anchors fail closed before any model call", async () => {
+  let calls = 0;
+  const extractor = createLunaLocalExtractor({ async complete() { calls++; return { text: "[]" }; } });
+  const badImages: unknown[] = [undefined, null, {}, { mimeType: "image/svg+xml", base64: input.ownImage.base64 },
+    { mimeType: "image/png", base64: "" }, { mimeType: "image/png", base64: "not base64!" },
+    { mimeType: "image/png", base64: "data:image/png;base64,AAAA" }, { mimeType: "image/png", base64: "AAA" },
+    { mimeType: "image/png", base64: "A===" }];
+  const first = input.ownAnchors[0], second = input.ownAnchors[1];
+  const badAnchors: unknown[] = [undefined, null, [], [first], [first, first], [first, { ...second, id: "partner-a" }],
+    [first, { ...second, bbox: { x: 1, y: 1, width: 1, height: 1 } }],
+    [first, { ...second, bbox: { ...second.bbox, w: 0 } }], [first, { ...second, centroid: { x: NaN, y: 100 } }],
+    [first, { ...second, bbox: { ...second.bbox, x: -1 } }], [first, { ...second, bbox: { ...second.bbox, h: Infinity } }],
+    [first, { ...second, centroid: { x: 999, y: 100 } }]];
+  for (const ownImage of badImages) await assert.rejects(extractor.extract({ ...input, ownImage } as LocalExtractionInput), code("invalid_input"));
+  for (const ownAnchors of badAnchors) await assert.rejects(extractor.extract({ ...input, ownAnchors } as LocalExtractionInput), code("invalid_input"));
+  assert.equal(calls, 0);
+});
+
+test("own image bodies never appear in errors or diagnostics, even if a provider echoes them", async () => {
+  for (const complete of [async () => { throw new Error(input.ownImage.base64); },
+    async () => ({ text: input.ownImage.base64 }), async () => ({ text: JSON.stringify([{ ...segment, quote: input.ownImage.base64 }]) })]) {
+    const extractor = createLunaLocalExtractor({ complete });
+    await assert.rejects(extractor.extract(input), (error: unknown) => {
+      assert.ok(error instanceof LocalExtractionError);
+      assert.ok(!inspect(error, { showHidden: true }).includes(input.ownImage.base64));
+      return true;
+    });
+    assert.ok(!JSON.stringify(extractor.lastDiagnostics).includes(input.ownImage.base64));
+  }
+});
+
 test("timeout and caller abort settle even for a client ignoring signal; pre-abort never calls it", async () => {
   let calls = 0;
   let signal: AbortSignal | undefined;
@@ -156,6 +232,9 @@ test("provenance snapshot remains stable when the caller mutates input during ex
   const mutable = structuredClone(input);
   const extractor = createLunaLocalExtractor({ async complete() {
     mutable.publicTurns[2].text = "別の発話";
+    mutable.ownImage.base64 = "CHANGED_IMAGE";
+    mutable.ownAnchors[0].id = "CHANGED_ANCHOR";
+    mutable.ownAnchors[0].bbox.x = 9999;
     return { text: JSON.stringify([segment]) };
   } });
   assert.deepEqual(await extractor.extract(mutable), [segment]);
