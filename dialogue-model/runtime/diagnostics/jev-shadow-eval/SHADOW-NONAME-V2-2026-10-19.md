@@ -49,7 +49,7 @@ This is a sanitized summary: aggregates and synthetic case ids only, with no utt
 | agreed | agreed 5 | 5/5 | 5/6 |
 | unclear | unclear 1, no_name 1 | 1/2 | 1/3 |
 | not_agreed | not_agreed 3, unclear 2, agreed 1 | 3/6 | 3/3 |
-| no_name | no_name 21 | 21/21 | 21/27 (all 6 false `no_name` verdicts are gold `unknown` U01–U04, a criterion question; see residuals) |
+| no_name | no_name 21 | 21/21 | 21/27 (5 of the 6 false `no_name` verdicts are gold `unknown`, U01–U04 including U02#r2, a criterion question; 1 is the weak `unclear` N02) |
 | unknown | no_name 5 | 0/5 | — |
 
 **Target axis, all 39:**
