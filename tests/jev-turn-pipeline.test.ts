@@ -10,6 +10,7 @@ import type { ObservationMemo, ObservationObserver } from "../dialogue-model/run
 import type { JevDecision, JevDecisionClient, JevDecisionInput, RepairHistoryEntry } from "../dialogue-model/runtime/decision/contract.ts";
 import type { LocalClaimView, LocalFunctionClassifier } from "../dialogue-model/runtime/local-grounding/contract.ts";
 import { MEMO_LOCAL_EXTRACTION_INSTRUCTIONS } from "../dialogue-model/runtime/local-grounding/extract.ts";
+import { ObservationError, type ObservationErrorCode } from "../dialogue-model/runtime/observation/observe.ts";
 
 const ids = Array.from({ length: 6 }, (_, i) => `s-000${i + 1}`);
 const anchors = ids.map((id, x) => ({ id, bbox: { x, y: 0, w: 1, h: 1 }, centroid: { x, y: 0 } }));
@@ -295,6 +296,79 @@ test("new mode rejects incomplete opt-ins and incompatible legacy decision paths
   for (const extra of [{ observer: null }, { jevDecision: null }, { referenceMemory: false }, { localGrounding: null },
     { localGrounding: { classifier: {} } }, { maxReobservations: 2 }, { decisionMode: "unknown" },
     { activeDecision: { purpose: "decision_jev", client: { chooseAction() {} } } }]) assert.throws(() => harness(extra));
+});
+
+function failingObservation(error: unknown, phase: "initial" | "targeted") {
+  return harness({ observer: { async observeAll() { if (phase === "initial") throw error; return memo(); }, async reobserve() { throw error; } },
+    jevDecision: createMockJevDecisionClient(() => ({ action: "request_observation", target: { kind: "single", figureId: ids[0] }, name: null, feature: null,
+      observe: { figureIds: [ids[0]], aspect: "construal", question: "牛という見立ての根拠", partnerConstrual: "牛" } })) });
+}
+
+test("initialization and both observation phases retain only existing fixed error codes", async () => {
+  const codes: ObservationErrorCode[] = ["invalid_input", "invalid_json", "invalid_response", "timeout", "aborted", "unavailable"];
+  for (const path of ["initialize", "initial", "targeted"] as const) for (const code of codes) {
+    const phase = path === "targeted" ? "targeted" : "initial";
+    const root = Object.assign(new ObservationError(code), { message: "Bearer SYNTHETIC_PRIVATE_CANARY", response: image.base64 });
+    const h = failingObservation(root, phase);
+    await assert.rejects(path === "initialize" ? h.dialogue.initializePrivateState!() : h.run(), (error: unknown) => {
+      assert.ok(error instanceof JevTurnError);
+      assert.equal(error.code, "observation_failed");
+      assert.equal(error.observationErrorCode, code); assert.equal(error.observationPhase, phase);
+      assert.equal(error.message, "observation_failed");
+      assert.ok(!JSON.stringify(error).includes("CANARY")); assert.ok(!JSON.stringify(error).includes(image.base64));
+      return true;
+    });
+    if (path === "initialize") assert.deepEqual(h.records, [], "initialization fails before a human turn exists");
+    else {
+      assert.equal(h.records[0].observationErrorCode, code); assert.equal(h.records[0].observationPhase, phase);
+      assert.equal(h.records[0].publicSpeech, null); assert.equal(h.records[0].status, "error");
+      assert.equal(h.dialogue.getAttempts()[0].observationErrorCode, code);
+      assert.ok(!JSON.stringify(h.records).includes("CANARY")); assert.ok(!JSON.stringify(h.records).includes(image.base64));
+    }
+  }
+});
+
+test("spoofed, modified and throwing observation codes become unavailable", async () => {
+  const modified = Object.assign(new ObservationError("timeout"), { code: "synthetic_private_canary" });
+  const getter = new ObservationError("timeout");
+  Object.defineProperty(getter, "code", { get() { throw new Error("SYNTHETIC_PRIVATE_CANARY"); } });
+  const ownGetter = new JevTurnError("invalid_state");
+  Object.defineProperty(ownGetter, "code", { get() { throw new Error("SYNTHETIC_PRIVATE_CANARY"); } });
+  const errors: unknown[] = [new Error("SYNTHETIC_PRIVATE_CANARY"), { name: "ObservationError", code: "timeout", response: image.base64 }, modified, getter, ownGetter];
+  for (const phase of ["initial", "targeted"] as const) for (const error of errors) {
+    const h = failingObservation(error, phase);
+    await assert.rejects(h.run(), (failure: unknown) => failure instanceof JevTurnError && failure.observationErrorCode === "unavailable" && failure.observationPhase === phase);
+    assert.equal(h.records[0].observationErrorCode, "unavailable");
+    assert.ok(!JSON.stringify(h.records).toLowerCase().includes("canary"));
+    assert.ok(!JSON.stringify(h.records).includes(image.base64));
+  }
+});
+
+test("observation abort diagnostics identify the interrupted phase and stay immutable", async () => {
+  for (const phase of ["initial", "targeted"] as const) {
+    const entered = gate(), late = gate(), controller = new AbortController();
+    const pending = async (): Promise<never> => { entered.release(); await late.promise; throw new ObservationError("invalid_json"); };
+    // Each attempt below uses a fresh runtime with an observer that ignores abort.
+    const observer = { observeAll: phase === "initial" ? pending : async () => memo(), reobserve: pending };
+    const runtime = harness({ observer, jevDecision: createMockJevDecisionClient(() => ({ action: "request_observation", target: { kind: "single", figureId: ids[0] }, name: null, feature: null,
+      observe: { figureIds: [ids[0]], aspect: "construal", question: "牛の根拠", partnerConstrual: "牛" } })) });
+    const running = runtime.run(undefined, { signal: controller.signal }); await entered.promise; controller.abort();
+    await assert.rejects(running, (error: unknown) => error instanceof JevTurnError && error.code === "aborted" && error.observationErrorCode === "aborted" && error.observationPhase === phase);
+    assert.equal(runtime.records[0].observationErrorCode, "aborted"); assert.equal(runtime.records[0].observationPhase, phase);
+    const before = JSON.stringify(runtime.records); late.release(); await new Promise(resolve => setImmediate(resolve));
+    assert.equal(JSON.stringify(runtime.records), before);
+  }
+});
+
+test("observation failures leave no stale diagnostics on success or unrelated errors", async () => {
+  let calls = 0;
+  const h = harness({ observer: { async observeAll() { if (++calls === 1) throw new ObservationError("timeout"); return memo(); }, async reobserve() { throw new Error("unused"); } } });
+  await assert.rejects(h.run(), JevTurnError); await h.run();
+  assert.equal(h.records[0].observationErrorCode, "timeout");
+  assert.ok(!Object.hasOwn(h.records[1], "observationErrorCode")); assert.ok(!Object.hasOwn(h.records[1], "observationPhase"));
+  const decision = harness({ jevDecision: { async decide() { throw new ObservationError("invalid_json"); } } });
+  await assert.rejects(decision.run(), (error: unknown) => error instanceof JevTurnError && error.code === "decision_failed" && error.observationErrorCode === undefined);
+  assert.ok(!Object.hasOwn(decision.records[0], "observationErrorCode"));
 });
 
 test("ambiguous defer and move_on keep all candidates without changing any ledger entry", async () => {
