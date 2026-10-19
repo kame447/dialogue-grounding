@@ -4,11 +4,12 @@ import { createHash, randomBytes } from "node:crypto";
 import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { isDeepStrictEqual } from "node:util";
+import { AIConnectionError } from "../../client.mjs";
 import { NamingTaskError } from "../../naming-error.mjs";
 import { createDialogueV2 } from "../../v2/dialogue-v2.mjs";
 import { settleLocalTraces } from "../../v2/local-grounding-turn.ts";
 import type { LocalGroundingResearchRecord } from "../../v2/local-grounding-turn.ts";
-import type { JevTurnTrace, JevPrivateState } from "../../v2/jev-turn.ts";
+import type { JevTurnTrace, JevPrivateState, JevGenerationErrorCode } from "../../v2/jev-turn.ts";
 import { createTrialV2, modelView } from "../../stimuli/scatter-v2.mjs";
 import { deriveLocalIssues } from "../../local-grounding/derive.ts";
 import { assertPublicText, validateOutputDirectory } from "../local-grounding-eval/run.ts";
@@ -29,7 +30,12 @@ type Client = { complete(messages: any[], options?: any): Promise<{ text: string
 type Event = { seq: number; id: string; speaker: "human" | "ai"; text: string };
 export type EvaluationOptions = { outputDir: string; seed: number; caseId?: string; localTimeoutMs?: number; observationTimeoutMs?: number; decisionTimeoutMs?: number };
 type ObservationFailure = { observationErrorCode?: ObservationErrorCode; observationPhase?: "initial" | "targeted" };
-type FailureRecord = { caseId: string; turn: number | null; code: EvaluationErrorCode } & ObservationFailure;
+const CONNECTION_ERROR_CODES = ["timeout", "network_error", "invalid_json", "empty_response", "provider_http_error",
+  "policy_http_error", "invalid_policy_response"] as const;
+type ConnectionErrorCode = typeof CONNECTION_ERROR_CODES[number];
+type ClientWireReceipt = WireReceipt & { errorCode?: ConnectionErrorCode };
+type FailureRecord = { caseId: string; turn: number | null; code: EvaluationErrorCode;
+  errorCode?: ConnectionErrorCode; generationErrorCode?: JevGenerationErrorCode } & ObservationFailure;
 export type EvaluationDependencies = { client: Client; expectedModel: string; execution: "mock" | "live";
   createComponents(client: Client, options?: Pick<EvaluationOptions, "observationTimeoutMs" | "decisionTimeoutMs">): { observer: ObservationObserver; jevDecision: JevDecisionClient; classifier: LocalFunctionClassifier };
   strategy?: "repair-first" | "bypass-enabled"; cases?: readonly SyntheticCase[]; secrets?: readonly string[]; onStarted?: (directory: string) => void;
@@ -64,6 +70,15 @@ function projectBudget(value: DecisionInputBudget | undefined): DecisionInputBud
       !value.omitted || keys.some(key => !Number.isSafeInteger(value.omitted[key]) || value.omitted[key] < 0)) return null;
   return { maxChars: 20000, stateChars: value.stateChars,
     omitted: Object.fromEntries(keys.map(key => [key, value.omitted[key]])) as DecisionInputBudget["omitted"] };
+}
+function connectionErrorCode(error: unknown): ConnectionErrorCode | undefined {
+  try {
+    if (error instanceof AIConnectionError) {
+      const code = error.code;
+      if (CONNECTION_ERROR_CODES.includes(code)) return code;
+    }
+  } catch { /* Do not read modified exception getters twice or preserve their text. */ }
+  return undefined;
 }
 function publicText(value: unknown, secrets: readonly string[]): asserts value is string {
   try { assertPublicText(value, secrets); } catch { fail("privacy_rejected"); }
@@ -148,7 +163,7 @@ export async function runJevEvaluation(options: EvaluationOptions, deps: Evaluat
     observationTimeoutMs: options.observationTimeoutMs, decisionTimeoutMs: options.decisionTimeoutMs,
     conditionNeutrality: "not_measured; verified_by_regression", referentScoring: "unscored; independent_posthoc_required",
     intervention: "none_pending_researcher_decision", comparison: "not_implemented_pending_researcher_decision" });
-  const { settleJevTurnTraces, JevTurnError } = await import("../../v2/jev-turn.ts");
+  const { settleJevTurnTraces, JevTurnError, normalizeGenerationErrorCode } = await import("../../v2/jev-turn.ts");
   const { validateJevDecision, validateHumanReferentEstimate, buildHumanReferentPayload, buildJevDecisionPayload, buildJevDecisionDetailPayload, parseJevActionTargetChoices, JevDecisionError, JEV_DECISION_REJECTION_CODES } = await import("../../decision/jev-decision.ts");
   const receipts: TrialReceipt[] = [];
   const failures: FailureRecord[] = [];
@@ -184,14 +199,19 @@ export async function runJevEvaluation(options: EvaluationOptions, deps: Evaluat
           else inspectText(part.text);
         }
       }
-      const wire: WireReceipt = { turn: currentTurn, phase, imageCount: urls.length + embeddedImages, succeeded: false }; trial.wire.push(wire);
+      const wire: ClientWireReceipt = { turn: currentTurn, phase, imageCount: urls.length + embeddedImages, succeeded: false }; trial.wire.push(wire);
       try {
         if (wire.imageCount && !["observation_initial", "observation_targeted"].includes(phase)) { clientFailure = "non_observation_image"; throw new HarnessError(clientFailure); }
         if (embeddedImages || urls.some(url => url !== `data:${image.mimeType};base64,${image.base64}`)) { clientFailure = "wrong_own_material"; throw new HarnessError(clientFailure); }
         const reply = await deps.client.complete(messages, callOptions);
         if (reply.model !== deps.expectedModel) { clientFailure = "model_changed"; throw new HarnessError(clientFailure); }
         wire.succeeded = true; return reply;
-      } catch (error) { if (error instanceof HarnessError) throw error; throw new HarnessError("evaluation_unavailable"); }
+      } catch (error) {
+        if (error instanceof HarnessError) throw error;
+        const code = connectionErrorCode(error);
+        if (code) { wire.errorCode = code; throw new AIConnectionError(code); }
+        throw new HarnessError("evaluation_unavailable");
+      }
     } };
     try {
       const componentOptions = { ...(options.observationTimeoutMs === undefined ? {} : { observationTimeoutMs: options.observationTimeoutMs }),
@@ -365,6 +385,11 @@ export async function runJevEvaluation(options: EvaluationOptions, deps: Evaluat
         if (error.observationPhase === "initial" || error.observationPhase === "targeted") observation.observationPhase = error.observationPhase;
       }
       failure = { caseId: c.id, turn: currentTurn, code, ...observation };
+      const wire = trial.wire.at(-1) as ClientWireReceipt | undefined;
+      if (wire?.turn === currentTurn && !wire.succeeded && wire.errorCode && CONNECTION_ERROR_CODES.includes(wire.errorCode) &&
+          (code === "generation_failed" && wire.phase === "generation" || code === "observation_failed" &&
+            ["observation_initial", "observation_targeted"].includes(wire.phase))) failure.errorCode = wire.errorCode;
+      if (error instanceof JevTurnError && code === "generation_failed") failure.generationErrorCode = normalizeGenerationErrorCode(error);
       failures.push(failure); await persist("failures.private.jsonl", failure, true);
     }
     await persist(c.id + ".private.json", { receipt: trial, publicTurns: turns(events), ...(failure ? { failure } : {}) });
