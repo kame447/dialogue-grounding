@@ -2,13 +2,13 @@
 // operations; the dialogue queue still owns publication and state installation.
 import { LOCAL_ACTS, LOCAL_ASPECTS } from "../local-grounding/contract.ts";
 import type { LocalAct, LocalOwnImage, LocalOwnAnchor, LocalFunctionVerdict, LocalSegmentProposal, LocalGroundingOptions, PublicTurn, LocalRejection, LocalVerificationResult } from "../local-grounding/contract.ts";
-import { verifyLocalUpdate, recordAiClaims } from "../local-grounding/verify.ts";
+import { verifyLocalUpdate, recordAiClaims, type LocalVerificationDiagnostic } from "../local-grounding/verify.ts";
 import { summarizeLocalIssues, priorClaimViews } from "../local-grounding/derive.ts";
 import { validateReferenceUpdate, previewReferenceUpdate, ReferenceGraphError } from "../memory/reference-graph.mjs";
 import { findInternalLeaks } from "./generation-guard.ts";
 import { literalSpan } from "../judgment/public-evidence.mjs";
-import { LOCAL_EXTRACTION_INSTRUCTIONS } from "../local-grounding/extract.ts";
-import { LOCAL_CLASSIFICATION_INSTRUCTIONS } from "../local-grounding/classify.ts";
+import { LOCAL_EXTRACTION_INSTRUCTIONS, LocalExtractionError, type LocalExtractionErrorCode } from "../local-grounding/extract.ts";
+import { LOCAL_CLASSIFICATION_INSTRUCTIONS, LocalClassificationError, type LocalClassificationErrorCode } from "../local-grounding/classify.ts";
 
 export const LOCAL_GROUNDING_TIMEOUT_MS = 20_000;
 type Message = { role: string; content: unknown };
@@ -50,10 +50,10 @@ export type LocalGroundingTrace = {
 };
 type ResearchClaim = LocalVerificationResult["operations"][number] & { redacted?: true };
 export type LocalGroundingResearchData = {
-  extractor: { segments: Array<LocalSegmentProposal & { act?: LocalAct; redacted?: true }> };
+  extractor: { segments: Array<LocalSegmentProposal & { act?: LocalAct; redacted?: true }>; errorCode?: LocalExtractionErrorCode };
   classifier: { kind: LocalGroundingTrace["classifierKind"]; model: string | null; status: "not_called" | "ok" | "error" | "skipped";
-    callIndex: number | null; verdicts: Array<Pick<LocalFunctionVerdict, "segmentId" | "act" | "respondsToClaimId">> };
-  verification: { accepted: string[]; rejected: LocalRejection[] };
+    callIndex: number | null; verdicts: Array<Pick<LocalFunctionVerdict, "segmentId" | "act" | "respondsToClaimId">>; errorCode?: LocalClassificationErrorCode };
+  verification: { accepted: string[]; rejected: LocalRejection[]; diagnostics?: LocalVerificationDiagnostic[] };
   aiClaims: ResearchClaim[];
   claims: ResearchClaim[];
 };
@@ -83,6 +83,17 @@ function classifierEvidence(classifier: LocalGroundingOptions["classifier"]): { 
       model: typeof evidence?.model === "string" && /^typesafe\/jev-1\.14(?:-[0-9]{8})?$/u.test(evidence.model) ? evidence.model : null,
       status: evidence?.status === "ok" ? "ok" : evidence?.status === "skipped" ? "skipped" : "error" };
   } catch { return { callIndex: null, model: null, status: "error" }; }
+}
+
+// Constructors own the closed code sets. Re-normalize even typed instances:
+// public code properties can be modified by an injected implementation.
+function extractionErrorCode(error: unknown): LocalExtractionErrorCode {
+  try { return error instanceof LocalExtractionError ? new LocalExtractionError(error.code).code : "unavailable"; }
+  catch { return "unavailable"; }
+}
+function classificationErrorCode(error: unknown): LocalClassificationErrorCode {
+  try { return error instanceof LocalClassificationError ? new LocalClassificationError(error.code).code : "unavailable"; }
+  catch { return "unavailable"; }
 }
 
 export function validateLocalGroundingOptions(value: unknown): LocalGroundingOptions | null {
@@ -156,7 +167,8 @@ export async function prepareLocalGroundingTurn(options: LocalGroundingOptions, 
     const retained = new Set(update.operations.filter(operation => operation.kind === "claim").map(operation => operation.id));
     snapshot.claims = snapshot.claims.filter(claim => retained.has(claim.id));
     snapshot.aiClaims = snapshot.aiClaims.filter(claim => retained.has(claim.id));
-    snapshot.verification = { accepted: [...snapshot.aiClaims, ...snapshot.claims].map(claim => claim.id), rejected: structuredClone(record.rejected) };
+    snapshot.verification = { ...snapshot.verification,
+      accepted: [...snapshot.aiClaims, ...snapshot.claims].map(claim => claim.id), rejected: structuredClone(record.rejected) };
     return { update, trace: record, research: snapshot };
   };
   let abortListener: (() => void) | undefined;
@@ -215,6 +227,9 @@ export async function prepareLocalGroundingTurn(options: LocalGroundingOptions, 
         ownSlots: [...input.graph.slots], issueSummary,
         ownImage: { ...input.ownImage }, ownAnchors: structuredClone(input.ownAnchors) },
       { signal: controller.signal, timeoutMs: Math.ceil(timeoutMs) });
+    } catch (error) {
+      if (research) research.extractor.errorCode = extractionErrorCode(error);
+      throw error;
     } finally { extraction = extractionDiagnostics(options.extractor); }
     check();
     if (!Array.isArray(segments)) throw new Error("Invalid local extraction");
@@ -244,6 +259,9 @@ export async function prepareLocalGroundingTurn(options: LocalGroundingOptions, 
       verdicts = await options.classifier.classify({ turn: input.update.turn, publicTurns: structuredClone(publicTurns),
         segments: structuredClone(segments), priorClaims }, { signal: controller.signal, timeoutMs: Math.max(1, Math.ceil(deadline - performance.now())) });
       if (research) research.classifier.status = classifierKind === "jev_local_test" ? "error" : "ok";
+    } catch (error) {
+      if (research) research.classifier.errorCode = classificationErrorCode(error);
+      throw error;
     } finally {
       if (research && classifierKind === "jev_local_test") {
         const evidence = classifierEvidence(options.classifier);
@@ -263,7 +281,12 @@ export async function prepareLocalGroundingTurn(options: LocalGroundingOptions, 
       });
     }
     phase = "verification_failed";
-    merge(verifyLocalUpdate({ graph, turn: input.update.turn, publicTurns, segments, verdicts }));
+    const verified = verifyLocalUpdate({ graph, turn: input.update.turn, publicTurns, segments, verdicts });
+    if (research && verified.diagnostics?.length) research.verification.diagnostics = verified.diagnostics
+      .filter(diagnostic => diagnostic.reason === "issue_link_overridden")
+      .map((diagnostic, index) => ({ segmentId: segmentCode(diagnostic.segmentId, index), reason: "issue_link_overridden",
+        linkedIssueId: diagnostic.linkedIssueId, resolvedIssueId: diagnostic.resolvedIssueId }));
+    merge(verified);
     check();
     return finish(update, trace("ok", accepted, rejected));
   };
@@ -271,6 +294,8 @@ export async function prepareLocalGroundingTurn(options: LocalGroundingOptions, 
   catch (error) {
     const name = (error as Error)?.name;
     const status = name === "TimeoutError" ? "timeout" : name === "AbortError" ? "aborted" : "error";
+    if (research && phase === "extractor_failed") research.extractor.errorCode ??= status === "error" ? extractionErrorCode(error) : status;
+    if (research && phase === "classifier_failed") research.classifier.errorCode ??= status === "error" ? classificationErrorCode(error) : status;
     return finish(input.update, trace(status, 0, [{ segmentId: "turn", reason: status === "error" ? phase : status }]));
   } finally {
     clearTimeout(timer);

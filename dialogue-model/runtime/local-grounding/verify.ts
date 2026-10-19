@@ -2,12 +2,20 @@
 // graph IDs and issue IDs. No score is used to promote an interpretation.
 import { LOCAL_ASPECTS, LOCAL_ACTS } from "./contract.ts";
 import type { LocalSegmentProposal, LocalFunctionVerdict, LocalVerificationResult, LocalClaimView, PublicTurn } from "./contract.ts";
-import { isBareDeictic, literalSpan } from "../judgment/public-evidence.mjs";
+import { isBareDeictic, literalSpan, quoteAround } from "../judgment/public-evidence.mjs";
 import { SLOTS } from "../stimuli/board.mjs";
 import { REFERENCE_LIMITS, snapshotReferenceGraph } from "../memory/reference-graph.mjs";
 import { priorClaimViews } from "./derive.ts";
 
 export type LocalGraph = { records: readonly unknown[]; slots?: readonly string[] };
+export type LocalVerificationDiagnostic = {
+  segmentId: string;
+  reason: "issue_link_overridden";
+  /** Only bounded graph-ref syntax is retained, never arbitrary model text. */
+  linkedIssueId: string | null;
+  resolvedIssueId: string;
+};
+export type LocalVerifiedUpdate = LocalVerificationResult & { diagnostics?: LocalVerificationDiagnostic[] };
 type VerificationInput = {
   graph: LocalGraph;
   turn: number;
@@ -23,8 +31,8 @@ const responses = new Set(["agree", "deny", "name_accept", "name_reject", "withd
 const overlap = (a: readonly string[], b: readonly string[]) => a.some(slot => b.includes(slot));
 
 /** Only the CURRENT public human turn may supply a new segment's quote. */
-export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts }: VerificationInput): LocalVerificationResult {
-  const result: LocalVerificationResult = { operations: [], rejected: [] };
+export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts }: VerificationInput): LocalVerifiedUpdate {
+  const result: LocalVerifiedUpdate = { operations: [], rejected: [] };
   // Revalidate JSON-restored graphs before using any model-selected pointer.
   snapshotReferenceGraph(graph);
   const active: LocalClaimView[] = priorClaimViews(graph, { limit: REFERENCE_LIMITS.records });
@@ -44,7 +52,7 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
         !LOCAL_ASPECTS.includes(segment.aspect) || !Array.isArray(segment.targets) || segment.targets.length > 6 ||
         ![...segment.targets].every(s => ownSlots.includes(s)) || new Set(segment.targets).size !== segment.targets.length ||
         !(segment.name === null || (segment.aspect === "name" && text(segment.name))) ||
-        !(segment.linkedIssueId === null || ref(segment.linkedIssueId)) ||
+        !(segment.linkedIssueId === null || (typeof segment.linkedIssueId === "string" && segment.linkedIssueId.length <= 128)) ||
         !(segment.respondsToTurn === null || (Number.isSafeInteger(segment.respondsToTurn) && segment.respondsToTurn > 0 && segment.respondsToTurn < turn))) {
       reject("invalid_segment"); continue;
     }
@@ -101,9 +109,14 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     if (segment.respondsToTurn !== null && act !== "acknowledge" && !publicTurns.some(t => t.turn === segment.respondsToTurn && t.turn < turn)) {
       reject("nonpublic_response_turn"); continue;
     }
+    // A verified claim response determines its issue. Luna's issue link is an
+    // advisory interpretation and cannot veto Jev's verified antecedent.
+    const overriddenIssue = prior && linkedIssue !== null && linkedIssue !== prior.issueId;
+    const proposedIssue = linkedIssue;
+    if (prior) linkedIssue = prior.issueId;
     const linked = linkedIssue === null ? [] : active.filter(c => c.issueId === linkedIssue);
-    if (linkedIssue !== null && (!linked.length || !linked.some(c => c.aspect === segment.aspect &&
-        (overlap(c.targets, targets) || (c.targets.length === 0 && targets.length === 0))) || (prior && prior.issueId !== linkedIssue))) {
+    if (linkedIssue !== null && (!ref(linkedIssue) || !linked.length || !linked.some(c => c.aspect === segment.aspect &&
+        (overlap(c.targets, targets) || (c.targets.length === 0 && targets.length === 0))))) {
       reject("invalid_issue_link"); continue;
     }
     if (act === "revisit" && ![...linked].reverse().find(c => ["defer", "revisit"].includes(c.act))?.act.startsWith("defer")) {
@@ -116,6 +129,8 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     result.operations.push({ kind: "claim", id, issueId: prior?.issueId ?? linkedIssue ?? id,
       targets, aspect: segment.aspect, act, proposition: segment.proposition, name,
       speaker: "human", sourceTurn: turn, quote, respondsTo: prior?.id ?? null, source: "partner_statement" });
+    if (overriddenIssue) (result.diagnostics ??= []).push({ segmentId: segment.segmentId, reason: "issue_link_overridden",
+      linkedIssueId: ref(proposedIssue) ? proposedIssue : null, resolvedIssueId: prior!.issueId });
   }
   return result;
 }
@@ -127,10 +142,14 @@ export type LocalPriorAct = {
   targetSlot: string | null;
   candidateName: string | null;
   discriminatingFeature: string | null;
-  followUp?: Omit<LocalPriorAct, "turn" | "followUp"> | null;
+  /** Copied only from the committed publication trace, never a model verdict. */
+  publishedFallback?: boolean;
+  followUp?: Omit<LocalPriorAct, "turn" | "followUp" | "publishedFallback"> | null;
 };
 
-/** Recover only literal elements of a committed act from its public AI turn.
+/** Recover a committed act only when its AI turn is already public. Feature
+ * propositions retain the act's intended feature, even if the published wording
+ * paraphrases it; their quote remains a literal public span. Names stay literal.
  * Feature aspect is conservatively fixed to part: an act has no aspect field,
  * and the program must not infer semantic aspects from generated language.
  */
@@ -146,6 +165,9 @@ export function recordAiClaims({ graph, turn, publicTurns, priorAct }: {
       priorAct.turn >= turn || sources.length !== 1) {
     reject("ai", "no_public_ai_turn"); return result;
   }
+  // A generic guard fallback did not publish the intended act's propositions.
+  // A successfully rewritten utterance has publishedFallback=false and is valid.
+  if (priorAct.publishedFallback === true) { reject("ai", "ai_fallback_utterance"); return result; }
   const source = sources[0];
   const ownSlots = graph.slots ?? SLOTS;
   const existing = graph.records.filter(r => (r as { kind?: string }).kind === "claim") as LocalClaimView[];
@@ -162,20 +184,23 @@ export function recordAiClaims({ graph, turn, publicTurns, priorAct }: {
       const local = `ai${++ordinal}`;
       if (!text(candidate)) return;
       const span = literalSpan(source.text, candidate);
-      if (!span || span.text.length > 160) { reject(local, "nonpublic_ai_element"); return; }
-      const quote = source.text.length <= 160 ? source.text : span.text;
-      const name = aspect === "name" ? span.text : null;
+      if (aspect === "name" && (!span || span.text.length > 160)) { reject(local, "nonpublic_ai_element"); return; }
+      const quote = aspect === "name" ? (source.text.length <= 160 ? source.text : span!.text) :
+        quoteAround(source.text.trimStart(), { maxChars: 160 });
+      if (!quote) { reject(local, "nonpublic_ai_element"); return; }
+      const proposition = aspect === "name" ? span!.text : candidate;
+      const name = aspect === "name" ? span!.text : null;
       const prior = functionAct === "name_accept" ? active.filter(c => c.speaker === "human" && c.aspect === "name" &&
         c.act === "name_propose" && c.sourceTurn < source.turn && c.targets.length === 1 && c.targets[0] === act.targetSlot && c.name === name).at(-1) : null;
       if (functionAct === "name_accept" && (!prior || !publicTurns.some(t => t.speaker === "human" && t.turn === prior.sourceTurn &&
           t.text.includes(prior.quote) && t.text.includes(name!)))) { reject(local, "missing_public_name_proposal"); return; }
       if (existing.some(c => c.speaker === "ai" && c.sourceTurn === source.turn && c.aspect === aspect &&
-          c.act === functionAct && c.targets.length === 1 && c.targets[0] === act.targetSlot && c.name === name && c.proposition === span.text &&
+          c.act === functionAct && c.targets.length === 1 && c.targets[0] === act.targetSlot && c.name === name && c.proposition === proposition &&
           c.respondsTo === (prior?.id ?? null))) return;
       const id = `${turn}:${local}`;
       if (graph.records.some(r => (r as { id?: string }).id === id)) { reject(local, "duplicate_ai_id"); return; }
       result.operations.push({ kind: "claim", id, issueId: prior?.issueId ?? id, targets: [act.targetSlot!], aspect, act: functionAct,
-        proposition: span.text, name, speaker: "ai", sourceTurn: source.turn, quote, respondsTo: prior?.id ?? null, source: "ai_hypothesis" });
+        proposition, name, speaker: "ai", sourceTurn: source.turn, quote, respondsTo: prior?.id ?? null, source: "ai_hypothesis" });
     };
     const naming = act.action === "propose_name" || (["confirm", "agree"].includes(act.action) && act.candidateName !== null);
     if (naming) add("name", act.candidateName, act.action === "agree" ? "name_accept" : "name_propose");
