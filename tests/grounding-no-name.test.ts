@@ -53,6 +53,7 @@ test("v2 name axis: five ordered levels, each criterion with a short phrasing, a
   // Agreement with an impression counts only as a reply to a proposal; an impression-only exchange is no_name.
   assert.match(NAME_AGREEMENT_CRITERIA.unclear, /提案に対して、[^。]*見立てへの同意だけが返った/);
   assert.match(NAME_AGREEMENT_CRITERIA.unclear, /提案がなく見立ての共有だけなら unclear ではなく no_name/);
+  assert.match(NAME_AGREEMENT_CRITERIA.no_name, /見立てに他方が同意しただけ（「たしかに鳥っぽい」）で名前の提案がない場合もここに入る/);
   assert.match(NAME_AGREEMENT_CRITERIA.agreed, /返答がない・空欄・相槌だけは合意ではない/);
   assert.match(NAME_AGREEMENT_CRITERIA.not_agreed, /名前の提案が一度もない場合は選ばない/);
   assert.match(NAME_AGREEMENT_CRITERIA.unknown, /unknown ではなく no_name/);
@@ -176,4 +177,29 @@ test("the shadow stays default OFF and the dialogue is identical with a no_name 
     assert.deepEqual(on.task.researcherView().privateState.judgments.map((j: Any) => j.judgment),
       off.task.researcherView().privateState.judgments.map((j: Any) => j.judgment));
   }
+});
+
+// A rule mock that mirrors the v2 criteria on synthetic text: an explicit 呼び/にしましょう proposal is the
+// only thing that puts a name on the table; impressions and agreement with them do not.
+const PROPOSAL = /と呼(?:びませんか|ぼう|びましょう)|にしましょう(?:か)?|にしませんか|名前は/;
+const ruleJudge = createMockGroundingJudge((state) => {
+  const turns: { speaker: string; text: string }[] = JSON.parse(state).publicDialogue;
+  const proposal = turns.findIndex((turn) => PROPOSAL.test(turn.text));
+  if (proposal < 0) return { identification: "insufficient", nameAgreement: "no_name" };
+  const adopted = turns.slice(proposal + 1).some((turn) => turn.speaker !== turns[proposal].speaker && /それにしましょう|でいいですね|それで決まり/.test(turn.text));
+  return { identification: "insufficient", nameAgreement: adopted ? "agreed" : "unclear" };
+});
+
+test("fixture: an impression plus agreement with it, without an explicit proposal, is no_name; a proposal is unclear", async () => {
+  const { buildGroundingEvidence } = await import("../dialogue-model/runtime/grounding/evidence.ts");
+  const judgeOf = async (texts: [string, string][]) => {
+    const events = texts.map(([speaker, text], index) => ({ seq: index + 1, speaker, text }));
+    const { state } = buildGroundingEvidence({ events, asOfSeq: events.length });
+    return (await ruleJudge.judge({ purpose: "grounding_jev", state })).nameAgreement.level;
+  };
+  assert.equal(await judgeOf([["human", "これ鳥みたいじゃないですか"], ["ai", "たしかに鳥っぽいですね"], ["human", "ですよね"]]), "no_name");
+  assert.equal(await judgeOf([["ai", "船っぽい形がありますか？"], ["human", "あります、船みたい"]]), "no_name");
+  assert.equal(await judgeOf([["human", "これを『鳥』と呼びませんか"], ["ai", "たしかに鳥っぽいですね"]]), "unclear");
+  assert.equal(await judgeOf([["human", "これを『鳥』と呼びませんか"]]), "unclear");
+  assert.equal(await judgeOf([["ai", "『船』にしましょうか"], ["human", "それにしましょう"]]), "agreed");
 });
