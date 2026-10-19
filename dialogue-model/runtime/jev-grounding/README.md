@@ -26,6 +26,8 @@ files 0600) and are never committed. Nothing here calls a model.
 | `metrics.ts` | Per-axis confusion / accuracy / macro-F1 / abstention, failure-tag detection with a pluggable flag policy |
 | `ai-session.ts` | AI-session turns as cases (history ends before the AI reply), offline answer-key check |
 | `build-evalset.ts` | Researcher CLI; output guard shared with `naming-task.mjs` (canonical path, no repository or `.git` checkout); prints counts only |
+| `name-scenes.ts` | Historical name-state scenes (row refs only), label-only proxies, comparison with a reader |
+| `compare-name-scenes.ts` | Researcher CLI for the scene comparison; prints counts only |
 
 ## What the labels can and cannot support
 
@@ -49,6 +51,17 @@ files 0600) and are never committed. Nothing here calls a model.
   annotated with 1–3 turns of local post-context); never ER or later rows.
 - The 5 dialogues shaped the annotation criteria, so agreement on them is a
   regression check, not generalisation (`annotation/evaluation.md`).
+
+## Historical name states (task D)
+
+The annotation scheme has no "naming proposal" label, so whether a name was
+proposed, left open, rejected or adopted has to be read from the utterances.
+Reader scenes (`NameScene`) hold row references only and live under
+private-runs. `compareScenes()` scores three label-only proxies against them:
+ER1 at the row (`erOnly`), the superseded "impression = candidate" reading
+(`impressionAsProposal`), and a11 with an acknowledged impression
+(`agreementTag`). They measure how far the labels can stand in for a reader;
+none of them is gold, and none says whether both people meant the same figure.
 
 ## Confidence
 
