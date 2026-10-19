@@ -138,7 +138,7 @@ export async function runJevEvaluation(options: EvaluationOptions, deps: Evaluat
     observationTimeoutMs: options.observationTimeoutMs,
     intervention: "none_pending_researcher_decision", comparison: "not_implemented_pending_researcher_decision" });
   const { settleJevTurnTraces, JevTurnError } = await import("../../v2/jev-turn.ts");
-  const { validateJevDecision, buildJevDecisionPayload, JevDecisionError, JEV_DECISION_REJECTION_CODES } = await import("../../decision/jev-decision.ts");
+  const { validateJevDecision, buildJevDecisionPayload, buildJevDecisionDetailPayload, parseJevActionTargetChoices, JevDecisionError, JEV_DECISION_REJECTION_CODES } = await import("../../decision/jev-decision.ts");
   const receipts: TrialReceipt[] = [];
   const failures: FailureRecord[] = [];
   for (const c of selected) {
@@ -209,23 +209,45 @@ export async function runJevEvaluation(options: EvaluationOptions, deps: Evaluat
           const evidence = adapter.lastEvidence;
           const fresh = evidence && Number.isSafeInteger(evidence.callIndex) && evidence.callIndex > previousIndex;
           const budget = fresh ? structuredClone(evidence.inputBudget ?? null) : null;
+          // Rebuild each request from the same input and closed first-stage labels.
+          // A failed detail call must not erase the successful action/target evidence.
+          const closedChoices = (raw: Record<string, string>, questions: ReturnType<typeof buildJevDecisionPayload>["questions"]) => {
+            const keys = Object.keys(questions);
+            return raw && Object.keys(raw).length === keys.length && keys.every(key => typeof raw[key] === "string" &&
+              Object.hasOwn(questions[key].criteria, raw[key])) ? Object.fromEntries(keys.map(key => [key, raw[key]])) : {};
+          };
+          const rejection = (error: unknown, code: unknown) => ["inconsistent_decision", "invalid_decision"].includes(String(error)) &&
+            JEV_DECISION_REJECTION_CODES.includes(code as typeof JEV_DECISION_REJECTION_CODES[number]) ? code : null;
           let choices: Record<string, string> = {};
+          const stages: Array<Record<string, any>> = [];
           if (fresh) try {
-            const questions = buildJevDecisionPayload(input).questions, keys = Object.keys(questions);
-            if (Object.keys(evidence.choices).length === keys.length && keys.every(key => typeof evidence.choices[key] === "string" &&
-                Object.hasOwn(questions[key].criteria, evidence.choices[key]))) {
-              choices = Object.fromEntries(keys.map(key => [key, evidence.choices[key]]));
+            const first = buildJevDecisionPayload(input);
+            choices = closedChoices(evidence.choices, first.questions);
+            let detail: ReturnType<typeof buildJevDecisionDetailPayload> = null;
+            try { detail = buildJevDecisionDetailPayload(input, parseJevActionTargetChoices(input, choices)); }
+            catch { /* Closed but inconsistent stage-one choices have no detail request. */ }
+            if (Array.isArray(evidence.stages) && evidence.stages.length <= 2) for (const [i, stage] of evidence.stages.entries()) {
+              const expected = i === 0 ? first : detail;
+              if (!expected || stage.stage !== (i === 0 ? "action_target" : "detail")) continue;
+              stages.push({ stage: stage.stage, status: stage.status === "ok" ? "ok" : "error",
+                model: isGroundingModel(stage.model, "typesafe/jev-1.14") ? stage.model : null,
+                responseId: typeof stage.responseId === "string" && /^gen-[A-Za-z0-9_-]{1,124}$/u.test(stage.responseId) ? stage.responseId : null,
+                latencyMs: Number.isFinite(stage.latencyMs) && stage.latencyMs >= 0 ? stage.latencyMs : null,
+                costUsd: typeof stage.costUsd === "number" && Number.isFinite(stage.costUsd) && stage.costUsd >= 0 ? stage.costUsd : null,
+                inputBudget: structuredClone(stage.inputBudget ?? null),
+                choices: closedChoices(stage.choices, expected.questions),
+                error: stage.error ? new JevDecisionError(stage.error).code : null,
+                rejectionCode: rejection(stage.error, stage.rejectionCode) });
             }
           } catch { /* Invalid or partial answers cannot provide closed choice evidence. */ }
-          const rejectionCode = fresh && evidence.error === "inconsistent_decision" && evidence.rejectionCode !== null &&
-            JEV_DECISION_REJECTION_CODES.includes(evidence.rejectionCode) ? evidence.rejectionCode : null;
+          const rejectionCode = fresh ? rejection(evidence.error, evidence.rejectionCode) : null;
           decisionAttempts.push({ turn: input.turn, order, succeeded, callIndex: fresh ? evidence.callIndex : null,
             model: fresh && isGroundingModel(evidence.model, "typesafe/jev-1.14") ? evidence.model : null,
             responseId: fresh && typeof evidence.responseId === "string" && /^gen-[A-Za-z0-9_-]{1,124}$/u.test(evidence.responseId) ? evidence.responseId : null,
             latencyMs: fresh && Number.isFinite(evidence.latencyMs) && evidence.latencyMs >= 0 ? evidence.latencyMs : null,
             costUsd: fresh && typeof evidence.costUsd === "number" && Number.isFinite(evidence.costUsd) && evidence.costUsd >= 0 ? evidence.costUsd : null,
             error: fresh && evidence.error ? new JevDecisionError(evidence.error).code : succeeded ? null : "evaluation_unavailable", inputBudget: budget,
-            choices, rejectionCode });
+            choices, rejectionCode, stages });
           if (!succeeded) (trial.failedDecisionInputs ??= []).push({ turn: input.turn, inputBudget: budget });
         }
       } };

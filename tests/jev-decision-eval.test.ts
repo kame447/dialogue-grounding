@@ -216,7 +216,7 @@ const script: SyntheticCase = { id: "mock-information-cycle", steps: [
   { text: "次は鍵みたいな形の話をしよう。" },
 ] };
 type MockFault = { phase?: string; phaseAt?: number; publicText?: string; model?: string; decisionModel?: string; cost?: number; classificationUnknown?: boolean;
-  firstAction?: "defer" | "move_on" | "revisit"; firstTarget?: "none" | "multiple"; decisionChoices?: Record<string, string> };
+  firstAction?: "defer" | "move_on" | "revisit"; firstTarget?: "none" | "multiple"; decisionChoices?: Record<string, string>; detailFault?: "network" | "partial" | "model" };
 function e2eDependencies(fault: MockFault = {}): EvaluationDependencies & { calls: any[]; http: any[]; created: { count: number } } {
   const calls: any[] = [], http: any[] = [], created = { count: 0 };
   const phaseCounts: Record<string, number> = {};
@@ -273,17 +273,27 @@ function e2eDependencies(fault: MockFault = {}): EvaluationDependencies & { call
         jevDecision: createJevDecisionClient({ enabled: true, readKey, fetchImpl: async (_url, request) => {
           const payload = JSON.parse(request.body as string), state = JSON.parse(payload.state);
           http.push({ kind: "decision", payload });
-          const observe = state.turn === 9 && state.reobservationAllowed;
-          const action = state.turn === 1 && fault.firstAction ? fault.firstAction : [1, 3, 5].includes(state.turn) ? "confirm" : observe ? "request_observation" : state.turn === 11 ? "agree" : "accept";
-          const choices: Record<string, string> = { action, target: state.turn === 1 && fault.firstTarget ? fault.firstTarget : state.turn === 9 ? "multiple" : state.turn === 11 ? "figure_1" : "figure_0",
-            observe_target: observe ? "figure_1" : "none", observe_aspect: observe ? "part" : "none" };
-          for (let i = 0; i < 6; i++) {
-            const names = payload.questions[`name_${i}`].criteria;
-            choices[`name_${i}`] = Object.keys(names).find(k => names[k] === "つばめ") ?? "none";
-            choices[`feature_${i}`] = action === "confirm" ? state.turn === 5 ? "feature_1" : "feature_0" : "none";
+          const choices: Record<string, string> = {};
+          if (payload.questions.action) {
+            const observe = state.turn === 9 && state.reobservationAllowed;
+            const action = state.turn === 1 && fault.firstAction ? fault.firstAction : [1, 3, 5].includes(state.turn) ? "confirm" : observe ? "request_observation" : state.turn === 11 ? "agree" : "accept";
+            Object.assign(choices, { action, target: state.turn === 1 && fault.firstTarget ? fault.firstTarget :
+              state.turn === 9 ? "multiple" : state.turn === 11 ? "figure_1" : "figure_0" });
+            for (let i = 0; i < 6; i++) choices[`candidate_${i}`] = (state.turn === 9 ? [1, 2].includes(i) : true) ? "include" : "exclude";
+            Object.assign(choices, fault.decisionChoices);
+          } else {
+            if (fault.detailFault === "network") throw new Error("PRIVATE_DETAIL_ERROR");
+            if (fault.detailFault === "partial") return Response.json({ model: "typesafe/jev-1.14", answers: {}, usage: { cost: 0.00001 } });
+            for (const [key, question] of Object.entries(payload.questions) as Array<[string, any]>) {
+              choices[key] = Object.keys(question.criteria).find(label => {
+                if (key === "observe_aspect") return label === "part";
+                const candidate = JSON.parse(question.criteria[label]);
+                return key === "observe_targets" ? candidate.length === 1 && candidate[0] === state.selected.target.figureIds[0] :
+                  candidate.value === (key === "name" ? "つばめ" : state.turn === 5 ? "細い部分が二つ" : "四角");
+              })!;
+            }
           }
-          Object.assign(choices, fault.decisionChoices);
-          return response(payload, choices, fault.decisionModel);
+          return response(payload, choices, fault.detailFault === "model" && !payload.questions.action ? "typesafe/jev-1.14-other" : fault.decisionModel);
         } })!,
         classifier: createJevLocalTestClassifier({ enabled: true, readKey, fetchImpl: async (_url, request) => {
           const payload = JSON.parse(request.body as string), state = JSON.parse(payload.state); http.push({ kind: "classification", payload });
@@ -323,7 +333,7 @@ test("actual pipeline with mock Luna and mock Jev HTTP observes once, preserves 
   const files = await readdir(result.directory);
   const attempts = (await readFile(join(result.directory, "attempts.private.jsonl"), "utf8")).trim().split("\n")
     .flatMap(line => JSON.parse(line).decisionAttempts ?? []);
-  assert.ok(attempts.length > 0 && attempts.every(a => Object.keys(a.choices).length === 16 && a.rejectionCode === null));
+  assert.ok(attempts.length > 0 && attempts.every(a => Object.keys(a.choices).length === 8 && a.rejectionCode === null && a.stages.length >= 1));
   assert.ok(!files.some(f => /blind|mapping|argon|comparison/u.test(f)));
   assert.equal((await stat(result.directory)).mode & 0o777, 0o700);
   for (const file of files) {
@@ -524,15 +534,13 @@ test("harness ignores spoofed diagnostics and renormalizes modified typed fields
   });
 });
 
-test("rejected combinations retain all closed labels and their fixed rule without publishing an alternative", async () => {
-  const cases: Array<{ choices: Record<string, string>; rejectionCode: string }> = [
-    { choices: { target: "multiple" }, rejectionCode: "feature_requires_single_target" },
-    { choices: { feature_0: "none" }, rejectionCode: "feature_required" },
-    { choices: { action: "propose_name", target: "multiple" }, rejectionCode: "name_requires_single_target" },
-    { choices: { action: "propose_name", name_0: "none" }, rejectionCode: "name_required" },
-    { choices: { action: "request_observation", observe_target: "none", observe_aspect: "part" }, rejectionCode: "observation_target_required" },
-    { choices: { action: "request_observation", observe_target: "figure_0", observe_aspect: "none" }, rejectionCode: "observation_aspect_required" },
-    { choices: { action: "request_observation", observe_target: "figure_1", observe_aspect: "part" }, rejectionCode: "observation_target_mismatch" },
+test("two-stage rejected action/target labels retain fixed rules without a detail call or alternative", async () => {
+  const cases: Array<{ choices: Record<string, string>; rejectionCode: string; error: string }> = [
+    { choices: { action: "propose_name", target: "multiple" }, rejectionCode: "name_requires_single_target", error: "invalid_decision" },
+    { choices: { action: "agree", target: "none" }, rejectionCode: "name_requires_single_target", error: "invalid_decision" },
+    { choices: { target: "none" }, rejectionCode: "detail_target_required", error: "invalid_decision" },
+    { choices: { target: "multiple", candidate_1: "exclude", candidate_2: "exclude", candidate_3: "exclude", candidate_4: "exclude", candidate_5: "exclude" },
+      rejectionCode: "multiple_requires_candidates", error: "inconsistent_decision" },
   ];
   for (const c of cases) await temporary(async outputDir => {
     const deps = e2eDependencies({ decisionChoices: c.choices });
@@ -542,20 +550,42 @@ test("rejected combinations retain all closed labels and their fixed rule withou
       .flatMap(line => JSON.parse(line).decisionAttempts ?? []);
     assert.equal(attempts.length, 1);
     const attempt = attempts[0], questions = deps.http.find(call => call.kind === "decision").payload.questions;
-    assert.equal(attempt.succeeded, false); assert.equal(attempt.error, "inconsistent_decision");
+    assert.equal(attempt.succeeded, false); assert.equal(attempt.error, c.error);
     assert.equal(attempt.rejectionCode, c.rejectionCode);
     assert.deepEqual(Object.keys(attempt.choices).sort(), Object.keys(questions).sort());
-    for (const [key, label] of Object.entries(attempt.choices)) assert.ok(Object.hasOwn(questions[key].criteria, label as string));
+    assert.equal(attempt.stages.length, 1); assert.equal(attempt.stages[0].stage, "action_target");
+    assert.deepEqual(attempt.stages[0].choices, attempt.choices);
+    assert.equal(attempt.stages[0].rejectionCode, c.rejectionCode);
+    assert.equal(deps.http.filter(call => call.kind === "decision").length, 1);
     for (const [key, label] of Object.entries(c.choices)) assert.equal(attempt.choices[key], label);
     const document = JSON.parse(await readFile(join(result.directory, script.id + ".private.json"), "utf8"));
-    assert.equal(document.receipt.completed, false); assert.equal(document.receipt.failureCode, "decision_failed");
+    assert.equal(document.receipt.completed, false);
+    // The next C integration maps typed invalid_decision separately.
+    assert.equal(document.receipt.failureCode, "decision_failed");
     assert.equal(document.publicTurns.filter((t: any) => t.speaker === "ai").length, 0);
   });
 });
 
-test("private decision attempts discard nonclosed labels, partial answers and unknown rejection text", async () => {
-  for (const fault of ["label", "partial", "extra_key"]) await temporary(async outputDir => {
-    const deps = e2eDependencies({ decisionChoices: { target: "multiple" } }), create = deps.createComponents;
+test("detail failure keeps both stages and closed first-stage labels without raw errors", async () => {
+  for (const detailFault of ["network", "partial", "model"] as const) await temporary(async outputDir => {
+    const deps = e2eDependencies({ detailFault });
+    const result = await runJevEvaluation({ outputDir, seed: 1701 }, deps);
+    assert.equal(result.status, "gate_failed");
+    const attempts = (await readFile(join(result.directory, "attempts.private.jsonl"), "utf8")).trim().split("\n")
+      .flatMap(line => JSON.parse(line).decisionAttempts ?? []);
+    const attempt = attempts[0]; assert.equal(attempts.length, 1);
+    assert.equal(attempt.stages.length, 2); assert.equal(attempt.stages[0].status, "ok");
+    assert.equal(attempt.stages[1].status, "error"); assert.deepEqual(attempt.stages[0].choices, attempt.choices);
+    assert.deepEqual(attempt.stages[1].choices, {});
+    assert.equal(attempt.stages[1].error, detailFault === "network" ? "network_error" : detailFault === "model" ? "model_mismatch" : "invalid_response");
+    assert.ok(attempt.stages.every((stage: any) => stage.inputBudget.maxChars === 20000));
+    for (const file of await readdir(result.directory)) assert.ok(!(await readFile(join(result.directory, file), "utf8")).includes("PRIVATE_DETAIL_ERROR"));
+  });
+});
+
+test("private decision attempts discard nonclosed labels, partial answers and unknown rejection text in either stage", async () => {
+  for (const stageIndex of [0, 1]) for (const fault of ["label", "partial", "extra_key"]) await temporary(async outputDir => {
+    const deps = e2eDependencies({ detailFault: "network" }), create = deps.createComponents;
     deps.createComponents = (shared, options) => {
       const components = create(shared, options), adapter = components.jevDecision as NonNullable<ReturnType<typeof createJevDecisionClient>>;
       let evidence: any = null;
@@ -565,10 +595,14 @@ test("private decision attempts discard nonclosed labels, partial answers and un
           try { return await adapter.decide(input, callOptions); }
           finally {
             evidence = adapter.lastEvidence;
-            if (fault === "label") evidence.choices.target = "PRIVATE_CHOICE_CANARY";
-            else if (fault === "partial") delete evidence.choices.name_5;
-            else evidence.choices.PRIVATE_CHOICE_KEY = "none";
-            evidence.rejectionCode = "PRIVATE_REJECTION_CANARY";
+            const corrupt = (choices: Record<string, string>) => {
+              if (fault === "label") choices[stageIndex ? "feature" : "target"] = "PRIVATE_CHOICE_CANARY";
+              else if (fault === "partial") delete choices[stageIndex ? "feature" : "candidate_5"];
+              else choices.PRIVATE_CHOICE_KEY = "none";
+            };
+            if (stageIndex === 0) corrupt(evidence.choices);
+            corrupt(evidence.stages[stageIndex].choices);
+            evidence.rejectionCode = evidence.stages[stageIndex].rejectionCode = "PRIVATE_REJECTION_CANARY";
           }
         },
       } };
@@ -577,7 +611,10 @@ test("private decision attempts discard nonclosed labels, partial answers and un
     assert.equal(result.status, "gate_failed");
     const attempts = (await readFile(join(result.directory, "attempts.private.jsonl"), "utf8")).trim().split("\n")
       .flatMap(line => JSON.parse(line).decisionAttempts ?? []);
-    assert.equal(attempts.length, 1); assert.deepEqual(attempts[0].choices, {}); assert.equal(attempts[0].rejectionCode, null);
+    assert.equal(attempts.length, 1); assert.deepEqual(attempts[0].stages[stageIndex].choices, {});
+    assert.equal(attempts[0].rejectionCode, null);
+    if (stageIndex === 0) assert.deepEqual(attempts[0].choices, {});
+    else assert.equal(Object.keys(attempts[0].choices).length, 8);
     for (const file of await readdir(result.directory)) {
       const text = await readFile(join(result.directory, file), "utf8");
       for (const secret of ["PRIVATE_CHOICE_CANARY", "PRIVATE_CHOICE_KEY", "PRIVATE_REJECTION_CANARY"]) assert.ok(!text.includes(secret));
