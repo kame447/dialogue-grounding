@@ -11,6 +11,7 @@ import type { TrialReceipt } from "../dialogue-model/runtime/diagnostics/jev-dec
 import type { JevDecision } from "../dialogue-model/runtime/decision/contract.ts";
 import { SYNTHETIC_CASES } from "../dialogue-model/runtime/diagnostics/jev-decision-eval/cases.ts";
 import type { SyntheticCase } from "../dialogue-model/runtime/diagnostics/jev-decision-eval/cases.ts";
+import { AIConnectionError } from "../dialogue-model/runtime/client.mjs";
 import { createLunaObserver, ObservationError } from "../dialogue-model/runtime/observation/observe.ts";
 import { createJevDecisionClient } from "../dialogue-model/runtime/decision/jev-decision.ts";
 import { createJevLocalTestClassifier } from "../dialogue-model/runtime/local-grounding/jev-local-test.ts";
@@ -957,5 +958,94 @@ test("referent fields stay out of publication and participant-facing content, in
     assert.equal(document.publicTurns.filter((t: any) => t.speaker === "ai").length, 0);
     const journal = await readFile(join(result.directory, "attempts.private.jsonl"), "utf8");
     assert.ok(!journal.includes(publicText));
+  });
+});
+
+
+test("typed client fixed codes survive generation in wire, trace and failure records without raw attributes", async () => {
+  for (const code of ["timeout", "network_error", "invalid_json", "empty_response", "provider_http_error", "policy_http_error", "invalid_policy_response"]) await temporary(async outputDir => {
+    const deps = e2eDependencies(), original = deps.client.complete;
+    deps.client.complete = async (messages, options) => {
+      if (options.phase === "generation") throw Object.assign(new AIConnectionError(code, 503), {
+        message: "PRIVATE_CONNECTION_MESSAGE", response: "PRIVATE_CONNECTION_RESPONSE", token: "PRIVATE_CONNECTION_TOKEN", prompt: "PRIVATE_CONNECTION_PROMPT" });
+      return original(messages, options);
+    };
+    const result = await runJevEvaluation({ outputDir, seed: 1701 }, deps);
+    assert.equal(result.status, "gate_failed");
+    const failure = JSON.parse((await readFile(join(result.directory, "failures.private.jsonl"), "utf8")).trim());
+    assert.equal(failure.code, "generation_failed"); assert.equal(failure.errorCode, code); assert.equal(failure.generationErrorCode, code);
+    const document = JSON.parse(await readFile(join(result.directory, script.id + ".private.json"), "utf8"));
+    const wire = document.receipt.wire.at(-1);
+    assert.equal(wire.phase, "generation"); assert.equal(wire.succeeded, false); assert.equal(wire.errorCode, code);
+    assert.deepEqual(document.failure, failure);
+    assert.equal(document.publicTurns.filter((t: any) => t.speaker === "ai").length, 0);
+    const gate = JSON.parse(await readFile(join(result.directory, "gate.private.json"), "utf8")); assert.deepEqual(gate.failures[0], failure);
+    const attempt = (await readFile(join(result.directory, "attempts.private.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line)).at(-1);
+    assert.equal(attempt.jevRecords[0].errorCode, "generation_failed"); assert.equal(attempt.jevRecords[0].generationErrorCode, code);
+    for (const file of await readdir(result.directory)) assert.ok(!(await readFile(join(result.directory, file), "utf8")).includes("PRIVATE_CONNECTION_"));
+  });
+});
+
+test("untyped, modified and throwing client codes remain unavailable, without attributing another phase's failure", async () => {
+  for (const fault of ["untyped", "modified", "getter", "local_then_unknown"] as const) await temporary(async outputDir => {
+    const deps = e2eDependencies(), original = deps.client.complete;
+    deps.client.complete = async (messages, options) => {
+      if (fault === "local_then_unknown" && options.phase === "local_extraction") throw new AIConnectionError("timeout");
+      if (options.phase === "generation") {
+        const error = fault === "untyped" || fault === "local_then_unknown" ? Object.assign(new Error("PRIVATE_CONNECTION_MESSAGE"), { code: "timeout" }) : new AIConnectionError("timeout");
+        if (fault === "modified") error.code = "PRIVATE_CONNECTION_CODE";
+        if (fault === "getter") Object.defineProperty(error, "code", { get() { throw new Error("PRIVATE_CONNECTION_GETTER"); } });
+        Object.assign(error, { message: "PRIVATE_CONNECTION_MESSAGE", response: "PRIVATE_CONNECTION_RESPONSE" }); throw error;
+      }
+      return original(messages, options);
+    };
+    const result = await runJevEvaluation({ outputDir, seed: 1701 }, deps);
+    assert.equal(result.status, "gate_failed");
+    const failure = JSON.parse((await readFile(join(result.directory, "failures.private.jsonl"), "utf8")).trim());
+    assert.equal(failure.code, "generation_failed"); assert.equal(Object.hasOwn(failure, "errorCode"), false);
+    assert.equal(failure.generationErrorCode, "unavailable");
+    const document = JSON.parse(await readFile(join(result.directory, script.id + ".private.json"), "utf8"));
+    assert.equal(Object.hasOwn(document.receipt.wire.at(-1), "errorCode"), false);
+    if (fault === "local_then_unknown") assert.equal(document.receipt.wire.find((w: any) => w.phase === "local_extraction").errorCode, "timeout");
+    for (const file of await readdir(result.directory)) assert.ok(!(await readFile(join(result.directory, file), "utf8")).includes("PRIVATE_CONNECTION_"));
+  });
+});
+
+test("a client code getter is read once, and invalid text retains C's fixed generation diagnosis", async () => {
+  for (const fault of ["once", "empty"] as const) await temporary(async outputDir => {
+    const deps = e2eDependencies(), original = deps.client.complete;
+    let reads = 0;
+    deps.client.complete = async (messages, options) => {
+      if (options.phase === "generation") {
+        if (fault === "empty") return { text: "", model: "worker-fixed" };
+        const error = new AIConnectionError("timeout");
+        Object.defineProperty(error, "code", { get() { reads++; return reads === 1 ? "timeout" : "PRIVATE_SECOND_READ"; } }); throw error;
+      }
+      return original(messages, options);
+    };
+    const result = await runJevEvaluation({ outputDir, seed: 1701 }, deps);
+    const failure = JSON.parse((await readFile(join(result.directory, "failures.private.jsonl"), "utf8")).trim());
+    assert.equal(failure.generationErrorCode, fault === "once" ? "timeout" : "invalid_response");
+    if (fault === "once") { assert.equal(reads, 1); assert.equal(failure.errorCode, "timeout"); }
+    else assert.equal(Object.hasOwn(failure, "errorCode"), false);
+    for (const file of await readdir(result.directory)) assert.ok(!(await readFile(join(result.directory, file), "utf8")).includes("PRIVATE_SECOND_READ"));
+  });
+});
+
+test("observation and rewrite transport failures keep only the current call's fixed diagnosis", async () => {
+  for (const stage of ["observation_initial", "observation_targeted", "rewrite"] as const) await temporary(async outputDir => {
+    const deps = e2eDependencies(stage === "rewrite" ? { publicText: 'humanReferent: {"scores":{}}' } : {}), original = deps.client.complete;
+    let generations = 0;
+    deps.client.complete = async (messages, options) => {
+      if (options.phase === "generation") generations++;
+      if (options.phase === stage || stage === "rewrite" && options.phase === "generation" && generations === 2) throw new AIConnectionError("network_error");
+      return original(messages, options);
+    };
+    const result = await runJevEvaluation({ outputDir, seed: 1701 }, deps);
+    assert.equal(result.status, "gate_failed");
+    const failure = JSON.parse((await readFile(join(result.directory, "failures.private.jsonl"), "utf8")).trim());
+    assert.equal(failure.errorCode, "network_error");
+    if (stage === "rewrite") { assert.equal(failure.code, "generation_failed"); assert.equal(failure.generationErrorCode, "network_error"); assert.equal(generations, 2); }
+    else { assert.equal(failure.code, "observation_failed"); assert.equal(Object.hasOwn(failure, "generationErrorCode"), false); }
   });
 });
