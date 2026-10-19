@@ -10,14 +10,18 @@ export type TargetEvidence = "supported" | "insufficient" | "contradicted" | "un
 /**
  * Axis 2: public evidence that a name for that target was jointly adopted
  * (grounding-criteria/v2, researcher-approved 5 levels):
- * agreed = joint adoption established; unclear = a name or a 見立て (「Xみたい」
- * 「Xっぽい」 about this referent, by either side) is on the table but adoption is
- * not settled; not_agreed = explicit rejection, competing candidates, withdrawal
- * or non-adoption; no_name = neither a name nor a 見立て has been offered for this
- * referent (pure position/shape description does not count; words said about
- * another figure do not count). The name axis says nothing about target correctness;
+ * agreed = an explicitly proposed name is explicitly adopted by the other side
+ * (a blank, missing reply or backchannel never counts); unclear = an explicit
+ * naming proposal for this referent (「『鳥』と呼びませんか」「『船』にしましょうか」),
+ * or a tentative label (仮称) that context shows is offered as its name, with
+ * adoption not settled; not_agreed = a proposed name is rejected, competes, is
+ * withdrawn or not adopted (never when no proposal exists); no_name = no explicit
+ * naming proposal for this referent: a 見立て or impression alone (「鳥みたい」
+ * 「船っぽい形がある？」) serves identification and is not a proposal, nor is a
+ * geometric description or a name said about another figure;
  * unknown = input insufficient or the referent cannot be identified.
- * Public utterances only; private notes never count as agreement.
+ * Public utterances only; private notes never count as agreement. The name
+ * axis says nothing about target correctness.
  */
 export type NameEvidence = "agreed" | "unclear" | "not_agreed" | "no_name" | "unknown";
 

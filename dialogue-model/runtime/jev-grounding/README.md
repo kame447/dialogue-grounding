@@ -7,8 +7,10 @@ shadow only:
   `supported` / `insufficient` / `contradicted` / `unknown`;
 - **name**: public evidence that a name for it was jointly adopted —
   `agreed` / `unclear` / `not_agreed` / `no_name` / `unknown`
-  (grounding-criteria/v2: `no_name` = no name proposal exists for this referent;
-  `not_agreed` = explicit rejection, competition, withdrawal or non-adoption).
+  (grounding-criteria/v2: `unclear` needs an explicit naming proposal or a 仮称
+  offered as the name by context; a 見立て or impression alone is `no_name`;
+  `not_agreed` = a proposed name rejected, competing, withdrawn or not adopted;
+  borderline 仮称 decisions are recorded with their rationale and marked weak).
 
 This directory holds code only. Cases built from the historical dialogues or the
 AI session stay under `private-runs/jev-grounding/evalset/` (directory 0700,
