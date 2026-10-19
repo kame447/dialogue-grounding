@@ -9,7 +9,8 @@ import { createMemoLocalExtractor, LOCAL_EXTRACTION_INSTRUCTIONS, MEMO_LOCAL_EXT
 import { LOCAL_CLASSIFICATION_INSTRUCTIONS } from "../local-grounding/classify.ts";
 import type { LocalGroundingOptions, LocalOwnImage, LocalOwnAnchor, PublicTurn, LocalClaimView } from "../local-grounding/contract.ts";
 import type { ObservationMemo, ObservationObserver, ReobservationResult } from "../observation/contract.ts";
-import { validateObservationMemo, mergeReobservation, observationContextMessages, OBSERVATION_INITIAL_INSTRUCTIONS, OBSERVATION_TARGETED_INSTRUCTIONS } from "../observation/observe.ts";
+import { validateObservationMemo, mergeReobservation, observationContextMessages, ObservationError, type ObservationErrorCode,
+  OBSERVATION_INITIAL_INSTRUCTIONS, OBSERVATION_TARGETED_INSTRUCTIONS } from "../observation/observe.ts";
 import type { JevDecision, JevDecisionClient, JevDecisionInput, JevObservationRequest, RepairHistoryEntry } from "../decision/contract.ts";
 import { validateJevDecision } from "../decision/jev-decision.ts";
 import { prepareLocalGroundingTurn, validateLocalGroundingOptions, findLocalPublicationViolations } from "./local-grounding-turn.ts";
@@ -25,13 +26,31 @@ const ACT_INSTRUCTIONS = "Jevが選んだ行動だけを文章にしてくださ
 export type JevTurnLocalOptions = Pick<LocalGroundingOptions, "classifier" | "timeoutMs">;
 export type JevTurnErrorCode = "invalid_state" | "observation_failed" | "decision_failed" | "invalid_decision" |
   "reobservation_limit" | "generation_failed" | "unsafe_generation" | "aborted";
+export type ObservationFailure = { observationErrorCode: ObservationErrorCode; observationPhase: "initial" | "targeted" };
 export class JevTurnError extends Error {
   code: JevTurnErrorCode;
-  constructor(code: JevTurnErrorCode) {
+  observationErrorCode?: ObservationErrorCode;
+  observationPhase?: ObservationFailure["observationPhase"];
+  constructor(code: JevTurnErrorCode, observation?: ObservationFailure) {
     const safe = (["invalid_state", "observation_failed", "decision_failed", "invalid_decision", "reobservation_limit",
       "generation_failed", "unsafe_generation", "aborted"] as const).includes(code) ? code : "invalid_state";
     super(safe); this.name = safe === "aborted" ? "AbortError" : "JevTurnError"; this.code = safe;
+    if (observation && (observation.observationPhase === "initial" || observation.observationPhase === "targeted")) {
+      this.observationPhase = observation.observationPhase;
+      this.observationErrorCode = new ObservationError(observation.observationErrorCode).code;
+    }
   }
+}
+// Only these constructors own the closed codes. Unknown, spoofed or modified
+// provider exceptions cannot put their messages, responses or tokens into logs.
+function observationFailure(error: unknown, phase: ObservationFailure["observationPhase"], aborted = false): ObservationFailure {
+  let code: ObservationErrorCode = "unavailable";
+  try {
+    if (aborted) code = "aborted";
+    else if (error instanceof ObservationError) code = new ObservationError(error.code).code;
+    else if (error instanceof JevTurnError && error.observationErrorCode !== undefined) code = new ObservationError(error.observationErrorCode).code;
+  } catch { code = "unavailable"; }
+  return { observationErrorCode: code, observationPhase: phase };
 }
 export type JevTurnTrace = {
   turnIndex: number; lastEventId: string | null; attemptNumber: number;
@@ -47,6 +66,8 @@ export type JevTurnTrace = {
   repairHistory: RepairHistoryEntry[];
   generationGuard: Guard;
   errorCode?: JevTurnErrorCode;
+  observationErrorCode?: ObservationErrorCode;
+  observationPhase?: ObservationFailure["observationPhase"];
   redacted?: true;
 };
 type CommittedAct = {
@@ -157,8 +178,11 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   async function memoOnce(signal?: AbortSignal) {
     abortIf(signal);
     if (!initialMemo) initialMemo = Promise.resolve().then(() => observer.observeAll({ ownImage: structuredClone(ownImage), ownAnchors: structuredClone(ownAnchors) }))
-      .then(memo => validateObservationMemo(memo, { ownAnchors })).catch(() => { initialMemo = null; throw new JevTurnError("observation_failed"); });
-    return structuredClone(await interruptible(initialMemo, signal));
+      .then(memo => validateObservationMemo(memo, { ownAnchors })).catch(error => {
+        initialMemo = null; throw new JevTurnError("observation_failed", observationFailure(error, "initial"));
+      });
+    try { return structuredClone(await interruptible(initialMemo, signal)); }
+    catch (error) { throw new JevTurnError(signal?.aborted ? "aborted" : "observation_failed", observationFailure(error, "initial", signal?.aborted)); }
   }
   async function initializePrivateState({ signal }: { signal?: AbortSignal } = {}): Promise<JevPrivateState> {
     return { ...initialPrivateState(), observationMemo: await memoOnce(signal) };
@@ -174,13 +198,16 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       reobservations: [], local: null, decisions: [], intervention: "none_pending_researcher_decision", finalAction: null,
       publicSpeech: null, observationMemo: null, repairHistory: [], generationGuard: { violations: [], regenerated: false, fallback: false } };
     let errorCode: JevTurnErrorCode = "invalid_state";
+    let observationPhase: ObservationFailure["observationPhase"] | null = null;
     try {
       abortIf(signal);
       const state = structuredClone(privateState);
       snapshotReferenceGraph(state.graph);
       if (!Array.isArray(state.judgments) || !Array.isArray(state.repairHistory) || !sameSet(state.graph.slots, slots)) throw new JevTurnError("invalid_state");
       errorCode = "observation_failed";
+      observationPhase = "initial";
       let memo = state.observationMemo ? validateObservationMemo(state.observationMemo, { ownAnchors }) : await memoOnce(signal);
+      observationPhase = null;
       if (!initialRecorded && initialMemo) { record.initialObservation = structuredClone(memo); initialRecorded = true; }
       const publicTurns: PublicTurn[] = events.filter(e => e.seq <= latest.seq).slice(-REFERENCE_LIMITS.publicTurns).map(e => ({ turn: e.seq, speaker: e.speaker, text: e.text,
         ...(e.nonReferential ? { nonReferential: true } : {}) }));
@@ -216,6 +243,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         if (decision.action !== "request_observation") break;
         if (count >= maxReobservations) throw new JevTurnError("reobservation_limit");
         errorCode = "observation_failed";
+        observationPhase = "targeted";
         const request = decision.observe!;
         const { figureIds, ...issue } = request;
         const result = await interruptible(observer.reobserve({ ownImage: structuredClone(ownImage), ownAnchors: structuredClone(ownAnchors),
@@ -223,9 +251,10 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         abortIf(signal);
         // merge validates the result; the request must still match this call.
         if (!sameSet(result.figures.map(f => f.figureId), figureIds) || result.issue.aspect !== issue.aspect ||
-            result.issue.question !== issue.question || result.issue.partnerConstrual !== issue.partnerConstrual) throw new JevTurnError("observation_failed");
+            result.issue.question !== issue.question || result.issue.partnerConstrual !== issue.partnerConstrual) throw new ObservationError("invalid_response");
         memo = validateObservationMemo(mergeReobservation(memo, result), { ownAnchors });
         record.reobservations.push({ request: structuredClone(request), result: structuredClone(result) });
+        observationPhase = null;
       }
       errorCode = "invalid_decision";
       const ambiguousDefer = decision.action === "defer" && decision.target.kind !== "single";
@@ -272,10 +301,18 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       record.status = "staged"; record.publicSpeech = result.text; record.local.status = "staged";
       return { text: result.text, privateState: nextState };
     } catch (error) {
-      const code = signal?.aborted ? "aborted" : error instanceof JevTurnError ? new JevTurnError(error.code).code : errorCode;
+      let code: JevTurnErrorCode = signal?.aborted ? "aborted" : errorCode;
+      // Observation adapters are injected: even an own-class exception there
+      // remains an observation failure. Do not read arbitrary code getters.
+      if (!signal?.aborted && !observationPhase) {
+        try { if (error instanceof JevTurnError) code = new JevTurnError(error.code).code; }
+        catch { code = errorCode; }
+      }
       record.status = code === "aborted" ? "aborted" : "error"; record.errorCode = code;
+      const observation = observationPhase ? observationFailure(error, observationPhase, signal?.aborted) : undefined;
+      if (observation) Object.assign(record, observation);
       if (record.local) record.local.status = record.status;
-      throw new JevTurnError(code);
+      throw new JevTurnError(code, observation);
     } finally {
       const safe = project(record); attempts.push(safe);
       emit(options.onJevTurnTrace, safe);
