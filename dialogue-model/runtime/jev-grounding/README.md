@@ -6,7 +6,11 @@ shadow only:
 - **target**: public evidence that both sides identify the same figure —
   `supported` / `insufficient` / `contradicted` / `unknown`;
 - **name**: public evidence that a name for it was jointly adopted —
-  `agreed` / `unclear` / `not_agreed` / `unknown`.
+  `agreed` / `unclear` / `not_agreed` / `no_name` / `unknown`
+  (grounding-criteria/v2: `unclear` needs an explicit naming proposal or a 仮称
+  offered as the name by context; a 見立て or impression alone is `no_name`;
+  `not_agreed` = a proposed name rejected, competing, withdrawn or not adopted;
+  borderline 仮称 decisions are recorded with their rationale and marked weak).
 
 This directory holds code only. Cases built from the historical dialogues or the
 AI session stay under `private-runs/jev-grounding/evalset/` (directory 0700,
@@ -16,7 +20,7 @@ files 0600) and are never committed. Nothing here calls a model.
 | --- | --- |
 | `evalcase.ts` | Case type shared with the shadow runner, runtime validator, `toJudgeInput()` (public history only), `assertSendable()` |
 | `labels.ts` | Parsers for a1–a30 / M0–M4 / P1–P6 / ER0–ER1 / episode markers, active-M restoration, label distributions |
-| `derive.ts` | Conservative gold rules (`jev-grounding-derive/v2`) for episode-end and local-window cases |
+| `derive.ts` | Conservative gold rules (`jev-grounding-derive/v3`) for episode-end and local-window cases |
 | `skeleton.ts` | Label-skeleton rendering with an invented lexicon (local-only) |
 | `split.ts` | Seeded per-dialogue split, leave-one-dialogue-out folds, leakage check |
 | `metrics.ts` | Per-axis confusion / accuracy / macro-F1 / abstention, failure-tag detection with a pluggable flag policy |
@@ -27,7 +31,8 @@ files 0600) and are never committed. Nothing here calls a model.
 
 - Blank labels are never mapped to a value. A blank M continues the last explicit
   M of the same episode; before the first M of an episode the state is unknown.
-- ER1/ER0 support the name axis at episode end only. ER1 is joint adoption, not
+- ER1 supports the name axis (`agreed`) at episode end only; ER0 leaves it
+  null because it cannot tell `no_name`, `unclear` and `not_agreed` apart. ER1 is joint adoption, not
   independent correctness: `correctnessKnown` is always false for historical cases.
 - M does not record its dimension (target, position, orientation, name…), so
   every target value derived from M is `weak` (`axisQuality.target`), and M2

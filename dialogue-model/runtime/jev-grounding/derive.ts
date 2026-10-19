@@ -3,7 +3,10 @@
 //
 // What the labels can support (and what they cannot):
 // - ER is the episode-level outcome: ER1 = a name or identifiable descriptor was
-//   jointly adopted, ER0 = not. It supports the name axis at episode end only.
+//   jointly adopted, ER0 = not. It supports the name axis at episode end only,
+//   and only for ER1 → agreed: ER0 does not say whether no name was proposed
+//   (no_name), a proposal was left open (unclear) or it was rejected
+//   (not_agreed), so ER0 leaves the name axis null.
 //   ER1 is not independent correctness: both people may have adopted one name for
 //   different figures. correctnessKnown is therefore always false.
 // - M records the local sharing state but not its dimension (target, position,
@@ -22,7 +25,7 @@ import { EVAL_CASE_SCHEMA } from "./evalcase.ts";
 import type { LabeledRow, MState } from "./labels.ts";
 import { episodes } from "./labels.ts";
 
-export const DERIVE_RULESET = "jev-grounding-derive/v2";
+export const DERIVE_RULESET = "jev-grounding-derive/v3";
 
 /** Speech functions at which a speaker commits to the partner's content. */
 export const COMMIT_FUNCTIONS: readonly string[] = Object.freeze(["a11", "a3", "a9", "a4"]);
@@ -63,7 +66,7 @@ export function deriveEpisodeEnd(episodeRows: readonly LabeledRow[]): Derived {
   const basis: string[] = [];
   let name: NameEvidence | null = null;
   if (end.er === "ER1") { name = "agreed"; basis.push("rule:N-ER1-end"); }
-  else if (end.er === "ER0") { name = "not_agreed"; basis.push("rule:N-ER0-end"); }
+  else if (end.er === "ER0") basis.push("rule:N-ER0-ambiguous-null");
   else basis.push("rule:N-ER-missing");
 
   const processes = new Set(episodeRows.map((r) => r.p).filter(Boolean));

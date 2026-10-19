@@ -75,7 +75,8 @@ test("episode-end gold: ER gives the name axis; the target axis needs M4 and sta
   assert.deepEqual([deriveEpisodeEnd(e0).target, deriveEpisodeEnd(e0).name], ["supported", "agreed"]);
   assert.deepEqual(deriveEpisodeEnd(e0).axisQuality, { target: "weak", name: "derived" });
   assert.equal(deriveEpisodeEnd(e0).quality, "weak");
-  assert.deepEqual([deriveEpisodeEnd(e1).target, deriveEpisodeEnd(e1).name], ["insufficient", "not_agreed"]);
+  assert.deepEqual([deriveEpisodeEnd(e1).target, deriveEpisodeEnd(e1).name], ["insufficient", null]);
+  assert.ok(deriveEpisodeEnd(e1).basis.includes("rule:N-ER0-ambiguous-null"), "ER0 cannot tell no_name / unclear / not_agreed apart");
   const p5 = labelRows([...fixture().slice(0, 5), row(1, 6, "A", "まあ鳥で", { episode: "E0 end", adjustmentProcess: "P5 次善的合意", episodeResult: "ER1" })]).get("H1") ?? [];
   const derived = deriveEpisodeEnd(p5);
   assert.equal(derived.name, "agreed");
@@ -147,6 +148,8 @@ test("validator rejects historical cases marked sendable or correct, and bad lev
   assert.ok(validateEvalCase({ ...c, externalModelAllowed: true }).some((e) => e.includes("externalModelAllowed")));
   assert.ok(validateEvalCase({ ...c, correctnessKnown: true }).length > 0);
   assert.ok(validateEvalCase({ ...c, expected: { target: "probably", name: null } }).includes("expected.target"));
+  assert.deepEqual(validateEvalCase({ ...c, expected: { target: null, name: "no_name" }, goldVersion: "v2" }), []);
+  assert.ok(validateEvalCase({ ...c, goldVersion: "" }).includes("goldVersion"));
   assert.ok(validateEvalCase({ ...c, judgedTurnIndex: 99 }).includes("judgedTurnIndex out of range"));
   assert.ok(validateEvalCase({ ...c, failureTags: ["bad"] }).includes("failureTags"));
   assert.deepEqual(validateEvalCase(null), ["case is not an object"]);
