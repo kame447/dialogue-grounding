@@ -90,10 +90,11 @@ async function run(steps: Step[], { referenceMemory = true, strategy = "repair-f
 // Per turn of SCRIPT under the stand-in (pre-utterance state, researcher boundary):
 // 0 鳥みたい = impression only; 1 「鳥と呼びましょう」 = explicit proposal, not yet adopted on record;
 // 2-4, 6-7 impressions/defer/revisit, never an explicit proposal for that figure; 5 no target;
-// 8 「波でいいです」 after only 「波みたい」: no explicit proposal form precedes it, so the stand-in says
-// no_name (v2 criteria: agreeing with a 見立て without a proposal is no_name; a gold/expert call
-// may still read this utterance as an adoption); 9 a feature description only.
-const EXPECTED_SCRIPT_LEVELS = ["no_name", "unclear", "no_name", "no_name", "no_name", "unknown", "no_name", "no_name", "no_name", "no_name"];
+// 8 「波でいいです」 after only 「波みたい」 is a borderline 仮称-by-context case (labelQuality weak):
+// it may offer 波 as this figure's name (unclear) or merely OK an impression (no_name). No level
+// is asserted for it (null below); 9 a feature description only.
+const BORDERLINE = "borderline";
+const EXPECTED_SCRIPT_LEVELS = ["no_name", "unclear", "no_name", "no_name", "no_name", "unknown", "no_name", "no_name", BORDERLINE, "no_name"];
 const levels = (record: Rec) => record.groundingShadow.map((r: Rec) => r.status === "ok" ? r.nameAgreement.level : r.status + ":" + r.error);
 const visible = (r: Rec) => ({ events: r.events.map(({ seq, speaker, text }: Rec) => ({ seq, speaker, text })), ledger: r.ownLedger,
   privateState: r.queueState.privateState, judgments: r.judgments });
@@ -220,7 +221,8 @@ test("agree, negation/repair, defer/revisit: verdicts follow the pre-turn eviden
   assert.equal(got[1], "unclear");
   // B after the denial and the AI's repair: 棒 was only ever an impression, so no_name, never not_agreed.
   assert.equal(got[3], "no_name");
-  assert.deepEqual(got, EXPECTED_SCRIPT_LEVELS);
+  assert.deepEqual(got.map((level: string, i: number) => EXPECTED_SCRIPT_LEVELS[i] === BORDERLINE ? BORDERLINE : level), EXPECTED_SCRIPT_LEVELS);
+  assert.ok(["no_name", "unclear"].includes(got[8]), "the borderline turn is never agreed / not_agreed");
 });
 
 test("the shadow stays default OFF and changes nothing: byte-identical Luna requests with no_name verdicts on vs off", async () => {
