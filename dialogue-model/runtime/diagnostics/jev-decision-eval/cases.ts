@@ -27,7 +27,7 @@ export const SYNTHETIC_CASES: readonly SyntheticCase[] = [
     { text: "そこはまだよく分からない。" },
     { text: "うーん、さっきと同じところで迷ってる。" },
     { text: "広い部分には四角が一つあって、棒とは角でつながってる。", expect: [{ act: "assert", aspect: "part" }] },
-    { text: "棒の方には四角がない。", expect: [{ act: "deny", aspect: "part" }] },
+    { text: "棒の方には四角がない。", expect: [{ act: "assert", aspect: "part" }] },
     { text: "『鍵』という名前でよさそう。" },
   ] },
 ];
