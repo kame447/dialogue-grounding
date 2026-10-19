@@ -90,8 +90,9 @@ async function run(steps: Step[], { referenceMemory = true, strategy = "repair-f
 // Per turn of SCRIPT under the stand-in (pre-utterance state, researcher boundary):
 // 0 鳥みたい = impression only; 1 「鳥と呼びましょう」 = explicit proposal, not yet adopted on record;
 // 2-4, 6-7 impressions/defer/revisit, never an explicit proposal for that figure; 5 no target;
-// 8 「波でいいです」 accepts a name that was only ever a 見立て (borderline; the stand-in finds no
-// explicit proposal form); 9 a feature description only.
+// 8 「波でいいです」 after only 「波みたい」: no explicit proposal form precedes it, so the stand-in says
+// no_name (v2 criteria: agreeing with a 見立て without a proposal is no_name; a gold/expert call
+// may still read this utterance as an adoption); 9 a feature description only.
 const EXPECTED_SCRIPT_LEVELS = ["no_name", "unclear", "no_name", "no_name", "no_name", "unknown", "no_name", "no_name", "no_name", "no_name"];
 const levels = (record: Rec) => record.groundingShadow.map((r: Rec) => r.status === "ok" ? r.nameAgreement.level : r.status + ":" + r.error);
 const visible = (r: Rec) => ({ events: r.events.map(({ seq, speaker, text }: Rec) => ({ seq, speaker, text })), ledger: r.ownLedger,
@@ -161,6 +162,9 @@ test("the v2 criteria text encodes the boundary for Jev (impression is not a pro
   assert.match(NAME_AGREEMENT_CRITERIA.unclear, /明示的に提案/u);
   assert.match(NAME_AGREEMENT_CRITERIA.no_name, /名前の提案ではない/u);
   assert.match(NAME_AGREEMENT_CRITERIA.agreed, /返答がない|相槌/u, "no reply / backchannel is not agreement");
+  // Agreeing with a 見立て without any proposal is still no_name, and unclear says so explicitly.
+  assert.match(NAME_AGREEMENT_CRITERIA.no_name, /見立てに他方が同意しただけ/u);
+  assert.match(NAME_AGREEMENT_CRITERIA.unclear, /提案がなく見立ての共有だけなら unclear ではなく no_name/u);
   assert.ok(!/未提案/u.test(NAME_AGREEMENT_CRITERIA.not_agreed), "not_agreed never covers 'nothing proposed' (that is no_name)");
 });
 
