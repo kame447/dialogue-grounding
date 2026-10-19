@@ -283,9 +283,16 @@ export async function prepareLocalGroundingTurn(options: LocalGroundingOptions, 
     phase = "verification_failed";
     const verified = verifyLocalUpdate({ graph, turn: input.update.turn, publicTurns, segments, verdicts });
     if (research && verified.diagnostics?.length) research.verification.diagnostics = verified.diagnostics
-      .filter(diagnostic => diagnostic.reason === "issue_link_overridden")
-      .map((diagnostic, index) => ({ segmentId: segmentCode(diagnostic.segmentId, index), reason: "issue_link_overridden",
-        linkedIssueId: diagnostic.linkedIssueId, resolvedIssueId: diagnostic.resolvedIssueId }));
+      .flatMap((diagnostic, index): LocalVerificationDiagnostic[] => {
+        const segmentId = segmentCode(diagnostic.segmentId, index);
+        if (diagnostic.reason === "issue_link_overridden") return [{ segmentId, reason: "issue_link_overridden",
+          linkedIssueId: diagnostic.linkedIssueId, resolvedIssueId: diagnostic.resolvedIssueId }];
+        if (diagnostic.reason === "antecedent_dropped") return [{ segmentId, reason: "antecedent_dropped",
+          respondsToClaimId: diagnostic.respondsToClaimId, resolvedIssueId: diagnostic.resolvedIssueId }];
+        if (diagnostic.reason === "antecedent_missing") return [{ segmentId, reason: "antecedent_missing",
+          respondsToClaimId: diagnostic.respondsToClaimId, resolvedIssueId: diagnostic.resolvedIssueId }];
+        return [];
+      });
     merge(verified);
     check();
     return finish(update, trace("ok", accepted, rejected));

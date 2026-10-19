@@ -6,7 +6,7 @@ import { createDialogueV2 } from "../dialogue-model/runtime/v2/dialogue-v2.mjs";
 import { createMockJevDecisionClient } from "../dialogue-model/runtime/decision/mocks.ts";
 import { createJevDecisionClient, buildHumanReferentPayload, JevDecisionError, JEV_DECISION_MODEL, type JevDecisionPayload } from "../dialogue-model/runtime/decision/jev-decision.ts";
 import { createHumanMessageQueue } from "../dialogue-model/runtime/web/human-message-queue.mjs";
-import { JevTurnError, settleJevTurnTraces, updateRepairHistory, type JevTurnTrace, type JevPrivateState } from "../dialogue-model/runtime/v2/jev-turn.ts";
+import { JevTurnError, JEV_GENERATION_ERROR_CODES, normalizeGenerationErrorCode, settleJevTurnTraces, updateRepairHistory, type JevTurnTrace, type JevPrivateState } from "../dialogue-model/runtime/v2/jev-turn.ts";
 import { settleLocalTraces, type LocalGroundingResearchRecord } from "../dialogue-model/runtime/v2/local-grounding-turn.ts";
 import type { ObservationMemo, ObservationObserver } from "../dialogue-model/runtime/observation/contract.ts";
 import type { JevDecision, JevDecisionClient, JevDecisionInput, RepairHistoryEntry, HumanReferentEstimate } from "../dialogue-model/runtime/decision/contract.ts";
@@ -15,6 +15,7 @@ import { MEMO_LOCAL_EXTRACTION_INSTRUCTIONS } from "../dialogue-model/runtime/lo
 import { ObservationError, type ObservationErrorCode } from "../dialogue-model/runtime/observation/observe.ts";
 import { recordAiClaims } from "../dialogue-model/runtime/local-grounding/verify.ts";
 import { createReferenceGraph, applyReferenceUpdate } from "../dialogue-model/runtime/memory/reference-graph.mjs";
+import { AIConnectionError } from "../dialogue-model/runtime/client.mjs";
 
 const ids = Array.from({ length: 6 }, (_, i) => `s-000${i + 1}`);
 const anchors = ids.map((id, x) => ({ id, bbox: { x, y: 0, w: 1, h: 1 }, centroid: { x, y: 0 } }));
@@ -77,12 +78,15 @@ test("Jev can select agreement directly from a verified human proposal without a
   }), client: { async complete(_messages: unknown, options: { phase: string }) {
     return { text: options.phase === "local_extraction" ? JSON.stringify([{ segmentId: "s1", quote: "牛と呼ぼう", targets: [ids[0]], aspect: "name", proposition: "牛という名前を提案する", name: "牛", linkedIssueId: null, respondsToTurn: null }]) : "牛でいいですね。" };
   } } });
-  const result = await h.run(undefined, { events: [{ ...h.events[0], text: "牛と呼ぼう" }] });
+  const initial = h.dialogue.initialPrivateState();
+  assert.equal(initial.ledger[ids[0]].status, "unassigned");
+  const result = await h.run(initial, { events: [{ ...h.events[0], text: "牛と呼ぼう" }] });
   assert.equal(result.privateState.ledger[ids[0]].status, "agreed");
   assert.equal(h.records[0].finalAction?.action, "agree");
   assert.equal(h.counts().judgeCalls, 0);
   assert.ok(!Object.hasOwn(inputs[0], "strategy")); assert.ok(!Object.hasOwn(inputs[0], "lunaAction"));
   assert.equal(h.records[0].local?.claims[0].source, "partner_statement");
+  assert.ok(!Object.hasOwn(h.records[0], "decisionRejectionCode"));
 });
 
 test("strategies receive the same materials while intervention remains pending", async () => {
@@ -96,9 +100,10 @@ test("strategies receive the same materials while intervention remains pending",
 test("a private observation's name cannot establish shared agreement", async () => {
   const h = harness({ jevDecision: createMockJevDecisionClient(() => ({ action: "agree", target: { kind: "single", figureId: ids[0] },
     name: "馬", feature: null, observe: null })) });
-  await assert.rejects(h.run(), (e: unknown) => e instanceof JevTurnError && e.code === "invalid_decision");
+  await assert.rejects(h.run(), (e: unknown) => e instanceof JevTurnError && e.code === "invalid_decision" && e.decisionRejectionCode === "agree_without_public_proposal");
   assert.equal(h.records[0].decisions[0].action, "agree");
   assert.equal(h.records[0].publicSpeech, null);
+  assert.equal(h.records[0].decisionRejectionCode, "agree_without_public_proposal");
 });
 
 test("targeted observation appends only requested evidence, then Jev chooses again", async () => {
@@ -836,4 +841,113 @@ test("ordinary references to an uncertain figure do not trigger the private refe
   } } });
   assert.equal((await h.run()).text, text); assert.equal(generations, 1);
   assert.deepEqual(h.records[0].generationGuard.violations, []);
+});
+
+test("typed generation failures keep only closed codes on initial generation and guard rewrite", async () => {
+  const codes = ["timeout", "network_error", "invalid_json", "empty_response", "provider_http_error", "policy_http_error", "invalid_policy_response"];
+  for (const code of codes) for (const rewrite of [false, true]) {
+    let generations = 0;
+    const h = harness({ client: { async complete(_messages: unknown, options: { phase: string }) {
+      if (options.phase === "local_extraction") return { text: "[]" };
+      if (++generations === 1 && rewrite) return { text: "牛で決まりですね。" };
+      throw Object.assign(new AIConnectionError(code, 503), { message: "Bearer SYNTHETIC_GENERATION_CANARY", response: "SYNTHETIC_GENERATION_CANARY" });
+    } } });
+    const initial = h.dialogue.initialPrivateState(), before = JSON.stringify(initial);
+    await assert.rejects(h.run(initial), (e: unknown) => e instanceof JevTurnError && e.code === "generation_failed" && e.generationErrorCode === code);
+    assert.equal(h.records[0].errorCode, "generation_failed"); assert.equal(h.records[0].generationErrorCode, code);
+    assert.equal(h.records[0].generationGuard.regenerated, rewrite); assert.equal(h.records[0].publicSpeech, null);
+    assert.equal(JSON.stringify(initial), before);
+    assert.ok(!JSON.stringify(h.records).includes("CANARY"));
+  }
+});
+
+test("untyped, spoofed and modified generation errors cannot inject trace codes or messages", async () => {
+  const secret = "Bearer SYNTHETIC_GENERATION_CANARY";
+  const errors = [new Error(secret), Object.assign(new Error(secret), { name: "AIConnectionError", code: "timeout", response: secret }),
+    Object.assign(new AIConnectionError("timeout"), { code: "synthetic_generation_canary", response: secret }),
+    Object.defineProperty(new AIConnectionError("timeout"), "code", { get() { throw new Error(secret); } }),
+    { code: "timeout", message: secret }, new JevDecisionError("timeout"),
+    Object.assign(new JevTurnError("generation_failed"), { generationErrorCode: "synthetic_generation_canary" })];
+  for (const error of errors) {
+    const h = harness({ client: { async complete(_messages: unknown, options: { phase: string }) {
+      if (options.phase === "local_extraction") return { text: "[]" }; throw error;
+    } } });
+    await assert.rejects(h.run(), (e: unknown) => e instanceof JevTurnError && e.code === "generation_failed" && e.generationErrorCode === "unavailable");
+    assert.equal(h.records[0].generationErrorCode, "unavailable"); assert.ok(!JSON.stringify(h.records).includes("CANARY"));
+    assert.ok(!JSON.stringify(h.records).includes("synthetic_generation_canary"));
+  }
+  for (const code of JEV_GENERATION_ERROR_CODES) {
+    const typed = new JevTurnError("generation_failed", undefined, { generationErrorCode: code });
+    assert.equal(normalizeGenerationErrorCode(typed), code);
+  }
+});
+
+test("malformed returned text has a fixed invalid-response diagnosis, while abort stays an abort", async () => {
+  for (const reply of [undefined, {}, { text: "" }, { text: "  \n" }, { text: 7 }]) {
+    const h = harness({ client: { async complete(_messages: unknown, options: { phase: string }) {
+      return options.phase === "local_extraction" ? { text: "[]" } : reply;
+    } } });
+    await assert.rejects(h.run(), (e: unknown) => e instanceof JevTurnError && e.code === "generation_failed" && e.generationErrorCode === "invalid_response");
+    assert.equal(h.records[0].generationErrorCode, "invalid_response");
+  }
+  const entered = gate(), late = gate();
+  const h = harness({ client: { async complete(_messages: unknown, options: { phase: string }) {
+    if (options.phase === "local_extraction") return { text: "[]" };
+    entered.release(); await late.promise; throw new AIConnectionError("timeout");
+  } } });
+  const controller = new AbortController(), pending = h.run(undefined, { signal: controller.signal });
+  await entered.promise; controller.abort(); await assert.rejects(pending, { name: "AbortError" });
+  assert.equal(h.records[0].errorCode, "aborted"); assert.ok(!Object.hasOwn(h.records[0], "generationErrorCode"));
+  const before = JSON.stringify(h.records); late.release(); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(JSON.stringify(h.records), before);
+});
+
+test("optional antecedent diagnostics keep only fixed fields and normalized segment identifiers", async () => {
+  for (const pointer of ["1:local1", "99:missing", "Bearer SYNTHETIC_ANTECEDENT_CANARY"]) {
+    let extractions = 0;
+    const classifier: LocalFunctionClassifier = { async classify(input) {
+      return input.segments.map(s => ({ segmentId: s.segmentId, act: s.aspect === "name" ? "name_propose" : "assert", respondsToClaimId: s.aspect === "name" ? pointer : null, rawScore: null }));
+    } };
+    const h = harness({ localGrounding: { classifier }, client: { async complete(_messages: unknown, options: { phase: string }) {
+      if (options.phase !== "local_extraction") return { text: "そう見えるんですね。" };
+      const first = ++extractions === 1;
+      return { text: JSON.stringify([{ segmentId: first ? "s1" : "SYNTHETIC_SEGMENT_CANARY", quote: first ? "四角い部分があります" : "馬と呼ぼう",
+        targets: first ? [ids[0]] : [], aspect: first ? "part" : "name", proposition: first ? "四角い部分がある" : "馬という名前を提案する",
+        name: first ? null : "馬", linkedIssueId: null, respondsToTurn: first ? null : 2 }]) };
+    } } });
+    const events = [{ ...h.events[0], text: "四角い部分があります" }], first = await h.run(undefined, { events });
+    const second = await h.run(first.privateState, { events: [...events, { id: "e2", seq: 2, speaker: "ai", text: first.text },
+      { id: "e3", seq: 3, speaker: "human", text: "馬と呼ぼう" }], lastEventId: "e3" });
+    const record = h.records[1].local!, dropped = pointer === "1:local1";
+    assert.deepEqual(record.verification.diagnostics, [{ segmentId: "segment_1", reason: dropped ? "antecedent_dropped" : "antecedent_missing",
+      respondsToClaimId: pointer.includes("CANARY") ? null : pointer, resolvedIssueId: "3:local1" }]);
+    assert.equal(record.claims[0].act, "name_propose"); assert.deepEqual(record.claims[0].targets, []);
+    assert.equal(record.claims[0].respondsTo, null); assert.equal(record.claims[0].issueId, "3:local1");
+    assert.deepEqual(settleLocalTraces(h.localRecords, second.privateState)[1].verification.diagnostics, record.verification.diagnostics);
+    assert.ok(!JSON.stringify(h.records).includes("CANARY"));
+  }
+});
+
+test("an independently preserved but unresolved name proposal still cannot authorize a single-figure agreement", async () => {
+  let extractions = 0, decisions = 0;
+  const classifier: LocalFunctionClassifier = { async classify(input) {
+    return input.segments.map(s => ({ segmentId: s.segmentId, act: s.aspect === "name" ? "name_propose" : "assert", respondsToClaimId: s.aspect === "name" ? "1:local1" : null, rawScore: null }));
+  } };
+  const h = harness({ localGrounding: { classifier }, jevDecision: createMockJevDecisionClient(() => ++decisions === 1 ? structuredClone(accept)
+    : { ...accept, action: "agree", target: { kind: "single", figureId: ids[0] }, name: "馬" }),
+    client: { async complete(_messages: unknown, options: { phase: string }) {
+      if (options.phase !== "local_extraction") return { text: "そう見えるんですね。" };
+      const first = ++extractions === 1;
+      return { text: JSON.stringify([{ segmentId: "s1", quote: first ? "四角い部分があります" : "馬と呼ぼう", targets: first ? [ids[0]] : [],
+        aspect: first ? "part" : "name", proposition: first ? "四角い部分がある" : "馬という名前を提案する", name: first ? null : "馬",
+        linkedIssueId: null, respondsToTurn: first ? null : 2 }]) };
+    } } });
+  const events = [{ ...h.events[0], text: "四角い部分があります" }], first = await h.run(undefined, { events });
+  const before = JSON.stringify(first.privateState);
+  await assert.rejects(h.run(first.privateState, { events: [...events, { id: "e2", seq: 2, speaker: "ai", text: first.text },
+    { id: "e3", seq: 3, speaker: "human", text: "馬と呼ぼう" }], lastEventId: "e3" }),
+    (e: unknown) => e instanceof JevTurnError && e.code === "invalid_decision" && e.decisionRejectionCode === "agree_without_public_proposal");
+  assert.equal(JSON.stringify(first.privateState), before);
+  assert.equal(h.records[1].local!.claims[0].act, "name_propose"); assert.deepEqual(h.records[1].local!.claims[0].targets, []);
+  assert.equal(h.records[1].decisionRejectionCode, "agree_without_public_proposal"); assert.equal(h.records[1].publicSpeech, null);
 });
