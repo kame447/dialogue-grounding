@@ -271,7 +271,8 @@ export function createDialogueV2({ client, strategy, image, anchors, judge = nul
       const previousAi = previous && publicTurns.find(event => event.speaker === "ai" && event.turn > previous.turnIndex && event.turn < latest.seq);
       const staged = await prepareLocalGroundingTurn(local, { graph: state.graph, update: memoryUpdate, publicTurns, signal,
         ownImage, ownAnchors, captureResearch: Boolean(onLocalGroundingTrace),
-        ...(previousAi ? { priorAct: { ...previous.judgment, turn: previousAi.turn } } : {}) });
+        ...(previousAi ? { priorAct: { ...previous.judgment, turn: previousAi.turn,
+          publishedFallback: previous.generationGuard?.fallback === true } } : {}) });
       trace.localGrounding = staged.trace;
       if (onLocalGroundingTrace) {
         trace.localGrounding.attemptNumber = attemptNumber;
