@@ -12,7 +12,11 @@ export const GROUNDING_MODELS = Object.freeze({
 export type GroundingPurpose = keyof typeof GROUNDING_MODELS;
 
 export type IdentificationEvidence = "supported" | "insufficient" | "contradicted" | "unknown";
-export type NameAgreementEvidence = "agreed" | "unclear" | "not_agreed" | "unknown";
+export type NameAgreementEvidence = "agreed" | "unclear" | "not_agreed" | "no_name" | "unknown";
+
+// Recorded with every verdict. v1 (2026-10-19): name axis agreed/unclear/not_agreed/unknown, where
+// "no name yet" fell under not_agreed. v2: no_name is its own level (researcher-approved option 3).
+export const GROUNDING_CRITERIA_VERSION = "grounding-criteria/v2";
 export type GroundingAxis = "identification" | "name_agreement";
 
 // Each criterion leads with short alternative phrasings of the level, then the
@@ -24,11 +28,16 @@ export const IDENTIFICATION_CRITERIA: Readonly<Record<IdentificationEvidence, st
   unknown: "判定不能（入力不足）。公開発話がない・判定対象がどの図形か読み取れない・画像を見なければ判断できず公開の記述もない等、与えられた情報からは判断できない。",
 });
 
+// Judged from public utterances only, per target figure, by either party. Researcher rule (2026-10-19,
+// superseding an earlier reading): a 見立て or visual impression (「鳥みたい」) serves identification and is
+// NOT a naming proposal; only an explicit proposal (「『鳥』と呼びませんか」) puts a name on the table. A
+// tentative label (仮称) counts as a proposal only when the context shows it is offered as this figure's name.
 export const NAME_AGREEMENT_CRITERIA: Readonly<Record<NameAgreementEvidence, string>> = Object.freeze({
-  agreed: "合意済（共同採用／呼び名が決まった）。判定対象の図形について、ある名称または識別可能な呼び名を両者が使うことを公開対話で明示的に採用し、その後に別案・留保・訂正が残っていない。",
-  unclear: "未確定（提案段階／採用意思が不明）。名称は出ているが、相手の採用意思が明示されていない、相槌だけ、留保付き、または見立てへの同意だけである。",
-  not_agreed: "未合意（不採用／競合／未提案）。判定対象の名称がまだ出ていない、相手が拒否・別案を出した、複数の名称が競合している、または同じ名称が別の図形に割り当てられている。",
-  unknown: "判定不能（入力不足）。公開発話がない、判定対象がどの図形か読み取れない等、与えられた情報からは判断できない。",
+  agreed: "合意済（共同採用／呼び名が決まった）。判定対象の図形について明示的に提案された名称を、他方が公開発話で採用すると明示した（「それにしましょう」「〇〇でいいですね」等）。返答がない・空欄・相槌だけは合意ではない。その後に別案・留保・撤回が残っていない。",
+  unclear: "提案中・未確定（名前の提案はあるが共同採用は未確定）。判定対象の図形について、どちらかが名前として明示的に提案した（「〇〇と呼びませんか」「〇〇にしましょうか」「名前は〇〇で」、または文脈上この図形の名前として出された仮称）が、他方の採用がまだ明示されていない。返答がない、相槌や「わかります」だけ、見立てへの同意だけ、「とりあえず」「仮に」等の留保付きの場合を含む。",
+  not_agreed: "不採用（拒否／競合／撤回）。判定対象の図形について名前が明示的に提案されたが、他方が明示的に拒否・否定した、別の名前を対案に出して競合が解消していない、提案者が撤回した、またはその名前が別の図形に割り当てられてこの図形には採用されていない。名前の提案が一度もない場合は選ばない。",
+  no_name: "名前の提案なし（見立てだけ／形の説明だけ）。判定対象の図形について、名前としての明示的な提案が公開対話にまだ一度もない。「鳥みたい」「船っぽい形がある？」のような見立て・印象の共有は対象を特定するためのもので名前の提案ではないため、それだけならここに入る。形の幾何的な説明（「三角が二つある」「とがっている」）も同じ。別の図形について出た名前はこの判定を妨げない。AIの作業メモ・aiSideClaims・aiMemory にしかない候補名は数えない。",
+  unknown: "判定不能（入力不足／対象を参照できない）。公開発話がない、または判定対象がどの図形か読み取れず、名前の提案の有無も判断できない。対象が読み取れて名前の提案がないなら unknown ではなく no_name。",
 });
 
 export const GROUNDING_LEVELS = Object.freeze({
@@ -85,7 +94,8 @@ export function buildGroundingPayload(body: unknown): GroundingPayload | null {
       name_agreement: {
         type: "choice",
         instructions: [...COMMON_INSTRUCTIONS,
-          "問: 判定対象の図形について、名称（識別可能な呼び名）を両者が共同で採用したことの公開対話上の証拠はどの段階ですか。名称が正しい図形を指しているかはこの問では判定しません。"].join("\n"),
+          "問: 判定対象の図形について、名称（識別可能な呼び名）を両者が共同で採用したことの公開対話上の証拠はどの段階ですか。名称が正しい図形を指しているかはこの問では判定しません。",
+          "公開対話の発話だけから判断してください。名称がこの図形について出たのか、別の図形について出たのかを区別してください。見立てや印象の共有（「〇〇みたい」）は対象の特定のためのもので、名前の提案ではありません。名前の明示的な提案がないこと（no_name）、提案はあるが共同採用が未確定であること（unclear）、提案が採用されなかったこと（not_agreed）を区別してください。"].join("\n"),
         criteria: NAME_AGREEMENT_CRITERIA,
       },
     },
@@ -101,6 +111,7 @@ export type GroundingVerdictBody = {
   identification: AxisVerdict<IdentificationEvidence>;
   nameAgreement: AxisVerdict<NameAgreementEvidence>;
   usage: { inputTokens: number | null; outputTokens: number | null; costUsd: number | null };
+  criteriaVersion: typeof GROUNDING_CRITERIA_VERSION;
 };
 
 /** Exact model or a dated snapshot of it (model-YYYYMMDD). */
@@ -157,5 +168,7 @@ export function sanitizeGroundingVerdict(data: unknown, requestedModel: string, 
       outputTokens: nonnegative(value.usage?.output_tokens),
       costUsd: nonnegative(value.usage?.cost),
     },
+    // Server-owned; never taken from the upstream or the client.
+    criteriaVersion: GROUNDING_CRITERIA_VERSION,
   };
 }
