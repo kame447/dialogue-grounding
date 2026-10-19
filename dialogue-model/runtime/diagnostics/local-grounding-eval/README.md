@@ -1,5 +1,51 @@
 # 匿名合成による局所 grounding 評価（手動専用）
 
+## 是正後の実生成比較: live.ts
+
+部分更新の比較には `live.ts` を使います。以前の `run.ts` は固定したAI発話と再計算判断を併用し、抽出器に画像・アンカーがない時期の結果も含むため、部分更新の効果検証として成立しません。旧結果は自然さの参考に限ります。Luna暫定分類器の結果をJevの精度評価と解釈しません。
+
+`live-cases.ts` は今回新規に書いた匿名の**人間側だけ**の合成台本です。実対話・Excel・過去5対話・正解表は使いません。期待actはゲート専用で、モデルへ渡しません。AIの発話は毎回 `createDialogueV2` の通常経路で生成し、公開する応答と採用した判断を対応付けます。抽出器には判断と同じ自分側の画像・pixelアンカーを渡し、相手画像は作成も送信もしません。
+
+```sh
+node --env-file=.env dialogue-model/runtime/diagnostics/local-grounding-eval/live.ts \
+  --out /absolute/path/outside-any-repository/evaluation \
+  --mode both --seed 1701 --strategy bypass-enabled
+```
+
+Worker設定は下記の旧経路と同じです。Luna抽出・判断・生成は同じWorker client（`dialogue_turn`）を共有し、全応答のmodelとmodel-policyが一致することを検査します。分類だけは研究者が手動で有効にしたローカルJevアダプタを用い、既存のKeychain readerを分類呼出時に使います。分類器はケースごとに1インスタンスを作り、前置き・新側の分岐・実マルチターンで共有します。既定の費用上限0.05USDはそのケース内の累計に適用され、上限到達はゲート未達になります。Jevキーを `.env`、成果物、コンソールへ書きません。子エージェント・CIは実APIを呼びません。モデルポリシー・Worker・既定の方略は変更しません。
+
+`--mode branch` は局所ONで評価直前まで前置きを実生成し、その**同じ公開履歴・privateState・判断履歴**の複製から、旧OFF／新ONの次応答を生成します。これは共通の局所ON前置きを条件とする「次ターンの追加更新」の比較です。旧側にも前置き時点のgraphは残るため、局所記憶が一度もなかった場合の比較とは解釈しません。
+
+`--mode multiturn` は両条件で同じ人間台本を最初から実行し、AIの発話は各条件で実生成します。先行AI発話は一致するとは限りません。`both` は両方式を別行で出力します。board seedは同じ刺激を再現するための値であり、APIの生成seedではありません。生成の乱数は固定できません。実行順・盲検A/Bの順はケース／方式ごとに乱数で決めます。
+
+まず全選択ケースの局所ON前置きを作り、次のゲートを通った場合だけ比較生成へ進みます。
+
+- 公開済みAI発話とコミット済み判断に由来するAI claimが1件以上、own slot付きclaimが1件以上。
+- 台本に置いた同意・否定・名称受諾それぞれに、先行AI claimへ結び付く対象付き更新が1件以上。保留・再訪を含む各期待ステップも個別に照合。
+- 採用graphの新claimと、前状態・公開引用・抽出／分類結果からプログラムのverifierを独立に再実行した操作が一致し、未検証更新は0件。
+- 全局所ターンの分類証跡が `jev_local_test`、status=ok、有効なcallIndex、返却modelが `typesafe/jev-1.14` または `typesafe/jev-1.14-YYYYMMDD`。返却IDは省略せず非公開記録へ保存。
+- callbackのturnIndex／lastEventId／attemptNumberが採用judgmentと一致し、`settleLocalTraces` がcommittedと認定すること。stagedだけでは認定しません。
+
+multiturnの新側も同じゲートを通すまで盲検ファイルを作りません。台本と実際のAI提案が噛み合わない場合は `script_mismatch` 等で失敗します。固定AI文・強制した判断・人工claimで補完しません。ゲートは比較機構が実際に動いたことの構造的確認であり、意味解釈の正しさや効果・課題成功の保証ではありません。
+
+出力先は必須で、Gitリポジトリ内とそこへ向かうsymlinkを拒否します。毎回 `local-live-<乱数>` を新規作成（0700）し、ファイルは0600で保存します。
+
+- `<case>.prefix.private.json`: 実生成の公開履歴、採用判断とのprovenance、C callbackとsettle結果、分類の返却model／responseId／費用／固定失敗理由、独立監査、分岐直前のledger／graph／判断履歴snapshot。判断はreferenceを含み、自由記述note・画像・プロンプト・API生応答は保存しません。
+- `<case>.<mode>-<condition>.private.json`: 各条件の同じ診断。失敗途中の試行は `-failed` に残ります。
+- `gate.private.json`: 比較前のゲート、件数、返却Jev model IDs。比較中のゲート未達は該当arm診断と `result.private.json` に残ります。
+- `failures.private.json`: 前置き失敗のcaseId／stage／許可済み固定コード。比較失敗はケース別failureファイルへ固定コードで保存します。
+- `<case>.<mode>.completed.private.json`: 完了ペアを逐次保存する診断用checkpoint。**A/B条件が読めるため評価者には渡しません。** 後続失敗でも残ります。
+- `mapping.private.json`: 最終的な条件対応表。評価者へ渡しません。
+- `blinded.jsonl`: **全必須ゲート通過後だけ**作成。branchは `publicTurns`＋`responses.A/B`、multiturnは各条件の番号付き `dialogues.A/B` です。評価者にはこれと `argon-prompt.md` だけを渡します。
+
+ゲート未達時の標準出力は `status=gate_failed` と固定の未達項目だけです。プロバイダの生エラー、トークン・APIキー・画像本文・プロンプトは出力しません。漏出検知が発火した候補は公開にも診断にも保存しません。これは任意の言い換えによる漏出まで検出するものではありません。
+
+`--case square-sail-revisit` で1系列だけを調べられます。新live経路は現在 `--resume` と外部の固定AI系列のインポートを受け付けません。途中までの非公開checkpointを保持しますが、自動再開は未実装です。失敗した全実行のやり直しに先立ち、固定コードとゲートの未達箇所を確認してください。
+
+模擬検証は `node --test tests/local-grounding-valid-eval.test.ts`。実APIによる成立性・効果確認は研究者／親の手動実行で別途行います。
+
+## 旧固定prefix経路: 自然さの参考専用
+
 研究目的の正本は [dialogue-model/README.md](../../../README.md)、設計原則は[決定0001](../../../decisions/0001-partial-grounding-state.md)。本ハーネスは実験条件や尺度の採用を意味しません。CI・`npm test` は模擬clientだけを使用し、このCLIを実行しません。
 
 `cases.ts` の16ケースは今回新規に書いた匿名の合成日本語です。研究者の実対話、Excel、過去5対話、参加者ログ、正解対応表を利用していません。`priorClaims` と `segments` は決定的E2E用の入力、`expected` は論点別の期待状態です。M/P/ER/aの研究ラベルを機械変換しません。これらのテスト用メタデータは実APIに送りません。
