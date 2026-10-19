@@ -16,6 +16,7 @@ import { validateJevDecision, validateHumanReferentEstimate, JevDecisionError } 
 import { prepareLocalGroundingTurn, validateLocalGroundingOptions, findLocalPublicationViolations } from "./local-grounding-turn.ts";
 import type { LocalGroundingResearchRecord, LocalGroundingTrace } from "./local-grounding-turn.ts";
 import { findGuardViolations, rewriteReasons } from "./generation-guard.ts";
+import { AIConnectionError } from "../client.mjs";
 
 type Graph = Parameters<typeof prepareLocalGroundingTurn>[1]["graph"];
 type Event = { id: string; seq: number; speaker: "human" | "ai"; text: string; nonReferential?: boolean };
@@ -28,6 +29,10 @@ export type JevTurnLocalOptions = Pick<LocalGroundingOptions, "classifier" | "ti
 export type JevTurnErrorCode = "invalid_state" | "observation_failed" | "decision_failed" | "invalid_decision" |
   "reobservation_limit" | "generation_failed" | "unsafe_generation" | "aborted";
 export type ObservationFailure = { observationErrorCode: ObservationErrorCode; observationPhase: "initial" | "targeted" };
+export const JEV_GENERATION_ERROR_CODES = Object.freeze(["timeout", "network_error", "invalid_json", "empty_response", "provider_http_error",
+  "policy_http_error", "invalid_policy_response", "invalid_response", "unavailable"] as const);
+export type JevGenerationErrorCode = typeof JEV_GENERATION_ERROR_CODES[number];
+export type JevTurnFailureDetails = { decisionRejectionCode?: "agree_without_public_proposal"; generationErrorCode?: JevGenerationErrorCode };
 export type JevHumanReferentTrace = HumanReferentEstimate & {
   turnIndex: number;
   /** SHA-256 of JSON.stringify of the validated memo supplied to estimation. */
@@ -37,7 +42,9 @@ export class JevTurnError extends Error {
   code: JevTurnErrorCode;
   observationErrorCode?: ObservationErrorCode;
   observationPhase?: ObservationFailure["observationPhase"];
-  constructor(code: JevTurnErrorCode, observation?: ObservationFailure) {
+  decisionRejectionCode?: JevTurnFailureDetails["decisionRejectionCode"];
+  generationErrorCode?: JevGenerationErrorCode;
+  constructor(code: JevTurnErrorCode, observation?: ObservationFailure, details: JevTurnFailureDetails = {}) {
     const safe = (["invalid_state", "observation_failed", "decision_failed", "invalid_decision", "reobservation_limit",
       "generation_failed", "unsafe_generation", "aborted"] as const).includes(code) ? code : "invalid_state";
     super(safe); this.name = safe === "aborted" ? "AbortError" : "JevTurnError"; this.code = safe;
@@ -45,7 +52,18 @@ export class JevTurnError extends Error {
       this.observationPhase = observation.observationPhase;
       this.observationErrorCode = new ObservationError(observation.observationErrorCode).code;
     }
+    if (details.decisionRejectionCode === "agree_without_public_proposal") this.decisionRejectionCode = details.decisionRejectionCode;
+    if (details.generationErrorCode !== undefined) this.generationErrorCode = JEV_GENERATION_ERROR_CODES.includes(details.generationErrorCode)
+      ? details.generationErrorCode : "unavailable";
   }
+}
+/** Never copy arbitrary code/message/response properties from an injected client. */
+export function normalizeGenerationErrorCode(error: unknown): JevGenerationErrorCode {
+  try {
+    const code = error instanceof AIConnectionError ? error.code : error instanceof JevTurnError ? error.generationErrorCode : undefined;
+    if (JEV_GENERATION_ERROR_CODES.includes(code)) return code;
+  } catch { /* Modified typed errors may have throwing getters. */ }
+  return "unavailable";
 }
 // Only these constructors own the closed codes. Unknown, spoofed or modified
 // provider exceptions cannot put their messages, responses or tokens into logs.
@@ -75,6 +93,8 @@ export type JevTurnTrace = {
   errorCode?: JevTurnErrorCode;
   observationErrorCode?: ObservationErrorCode;
   observationPhase?: ObservationFailure["observationPhase"];
+  decisionRejectionCode?: JevTurnFailureDetails["decisionRejectionCode"];
+  generationErrorCode?: JevGenerationErrorCode;
   redacted?: true;
 };
 type CommittedAct = {
@@ -319,7 +339,10 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       const judgment: Judgment = ambiguousDefer ? { ...act, action: "defer" }
         : multipleFeature ? { ...act, action: decision.action as "confirm" | "repair" } : validateJudgment(act, { ownLedger: state.ledger });
       if (judgment.action === "agree" && !claims.some(c => c.aspect === "name" && c.name === judgment.candidateName && c.targets.length === 1 &&
-        c.targets[0] === judgment.targetSlot && (c.speaker === "human" && c.act === "name_propose" || c.act === "name_accept"))) throw new JevTurnError("invalid_decision");
+        c.targets[0] === judgment.targetSlot && (c.speaker === "human" && c.act === "name_propose" || c.act === "name_accept"))) {
+        record.decisionRejectionCode = "agree_without_public_proposal";
+        throw new JevTurnError("invalid_decision");
+      }
       record.finalAction = judgment;
       if (["repair", "confirm", "revisit"].includes(judgment.action)) {
         const candidates = targets(decision), issue = [...claims].reverse().find(c => c.targets.some(id => candidates.includes(id)));
@@ -341,7 +364,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       errorCode = "generation_failed";
       let result = await interruptible(client.complete(messages, { phase: "generation", timeoutMs: generation.timeoutMs, signal }), signal);
       abortIf(signal);
-      if (typeof result?.text !== "string" || !result.text.trim()) throw new JevTurnError("generation_failed");
+      if (typeof result?.text !== "string" || !result.text.trim()) throw new JevTurnError("generation_failed", undefined, { generationErrorCode: "invalid_response" });
       record.generationGuard.violations = violations(result.text, messages);
       if (record.generationGuard.violations.length) {
         record.generationGuard.regenerated = true;
@@ -371,10 +394,13 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         catch { code = errorCode; }
       }
       record.status = code === "aborted" ? "aborted" : "error"; record.errorCode = code;
+      if (code === "generation_failed") record.generationErrorCode = normalizeGenerationErrorCode(error);
       const observation = observationPhase ? observationFailure(error, observationPhase, signal?.aborted) : undefined;
       if (observation) Object.assign(record, observation);
       if (record.local) record.local.status = record.status;
-      throw new JevTurnError(code, observation);
+      throw new JevTurnError(code, observation, {
+        ...(record.decisionRejectionCode ? { decisionRejectionCode: record.decisionRejectionCode } : {}),
+        ...(record.generationErrorCode ? { generationErrorCode: record.generationErrorCode } : {}) });
     } finally {
       const safe = project(record); attempts.push(safe);
       emit(options.onJevTurnTrace, safe);
