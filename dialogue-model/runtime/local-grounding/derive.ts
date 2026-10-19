@@ -70,7 +70,19 @@ export function deriveLocalIssues(graph: LocalGraph): LocalIssueView[] {
 /** Bounded, deterministic JSON. Whole issues are omitted, never partial strings. */
 export function summarizeLocalIssues(graph: LocalGraph, { maxChars = 6000 }: { maxChars?: number } = {}): string {
   if (!Number.isSafeInteger(maxChars) || maxChars < 1 || maxChars > REFERENCE_LIMITS.graphChars) throw new RangeError("invalid_summary_budget");
-  const summary = { scope: "private_local_issues_not_ground_truth", issues: deriveLocalIssues(graph), omitted: 0 };
+  const { claims, dead } = evidence(graph);
+  const issues = deriveLocalIssues(graph).map(issue => {
+    const active = claims.filter(c => c.issueId === issue.issueId && !dead.has(c.id));
+    // Keep the proposition at issue, each side's latest response and the newest
+    // update. The bounded prompt must say WHAT is supported/denied, not just IDs.
+    const selected = [active[0], active.filter(c => ["agree", "name_accept"].includes(c.act)).at(-1),
+      active.filter(c => ["deny", "name_reject"].includes(c.act)).at(-1), active.at(-1)].filter((c): c is Claim => c !== undefined);
+    const content = [...new Map(selected.map(c => [c.id, c])).values()].map(c => ({
+      id: c.id, act: c.act, proposition: c.proposition, speaker: c.speaker, sourceTurn: c.sourceTurn, source: c.source, respondsTo: c.respondsTo,
+    }));
+    return { ...issue, claims: content };
+  });
+  const summary = { scope: "private_local_issues_not_ground_truth", issues, omitted: 0 };
   while (JSON.stringify(summary).length > maxChars && summary.issues.length) { summary.issues.shift(); summary.omitted++; }
   const result = JSON.stringify(summary);
   if (result.length > maxChars) throw new RangeError("summary_budget_too_small");
