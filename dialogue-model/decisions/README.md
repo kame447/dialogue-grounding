@@ -14,3 +14,4 @@
 
 - [0001 局所問題・命題単位で共通基盤を部分更新する](0001-partial-grounding-state.md)（2026-10-19、accepted。処理順序の手順4は0002で改訂）
 - [0002 対話行動はJevが単独で判断し、Lunaは初回観察と必要時の再観察を担う](0002-jev-decision-and-visual-observation.md)（2026-10-20、accepted、設計原則のみ）
+- [0003 テスト仕様と期待値は、実装から独立した監査役（Astra）が監査する](0003-independent-test-audit.md)（2026-10-20、accepted、運用手順）
