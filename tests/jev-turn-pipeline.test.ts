@@ -951,3 +951,33 @@ test("an independently preserved but unresolved name proposal still cannot autho
   assert.equal(h.records[1].local!.claims[0].act, "name_propose"); assert.deepEqual(h.records[1].local!.claims[0].targets, []);
   assert.equal(h.records[1].decisionRejectionCode, "agree_without_public_proposal"); assert.equal(h.records[1].publicSpeech, null);
 });
+
+test("S1-c: none repair/confirm cannot publish or change state even with included candidates", async () => {
+  for (const action of ["repair", "confirm"]) {
+    const requests: JevDecisionPayload[] = [];
+    const jevDecision = createJevDecisionClient({ enabled: true, readKey: async () => "sk-or-SYNTHETIC-slice1-000000", fetchImpl: async (_url, init) => {
+      const payload = JSON.parse(String(init.body)) as JevDecisionPayload; requests.push(payload);
+      return jevResponse(payload, { action, target: "none", candidate_0: "include", candidate_1: "include" }, requests.length);
+    } })!;
+    const h = harness({ jevDecision }), initial = h.dialogue.initialPrivateState();
+    initial.ledger[ids[0]] = { status: "agreed", name: "舟" };
+    const before = structuredClone(initial);
+    await assert.rejects(h.run(initial), (error: unknown) => error instanceof JevTurnError && error.code === "invalid_decision");
+    assert.deepEqual(initial, before);
+    assert.equal(requests.length, 2); // Separate human-referent call, then action/target; no detail.
+    assert.deepEqual(Object.keys(requests[0].questions), ["human_referent"]);
+    assert.ok(requests[1].questions.action); assert.equal(requests[1].questions.feature, undefined);
+    assert.equal(h.calls.filter(c => ["generation", "regeneration", "guard_rewrite"].includes(c.options.phase)).length, 0);
+    assert.equal(h.records.length, 1); assert.equal(h.records[0].status, "error");
+    assert.equal(h.records[0].publicSpeech, null); assert.equal(h.records[0].finalAction, null);
+    assert.equal(h.records[0].errorCode, "invalid_decision"); assert.deepEqual(h.records[0].decisions, []);
+    assert.deepEqual(h.records[0].local?.aiClaims, []); assert.deepEqual(h.records[0].local?.claims, []);
+    assert.equal(h.dialogue.getAttempts().length, 1); assert.equal(h.dialogue.getAttempts()[0].errorCode, "invalid_decision");
+    const failed = jevDecision.lastEvidence!;
+    assert.equal(failed.status, "error"); assert.equal(failed.error, "invalid_decision");
+    assert.equal(failed.rejectionCode, "detail_target_required"); assert.equal(failed.choices.action, action);
+    assert.equal(failed.choices.target, "none"); assert.equal(failed.choices.candidate_0, "include");
+    assert.equal(failed.choices.candidate_1, "include"); assert.equal(failed.stages.length, 1);
+    assert.equal(failed.stages[0].rejectionCode, "detail_target_required");
+  }
+});

@@ -1,3 +1,5 @@
+// Frozen at 21e9fde after AUDIT-01: historical reproduction only.
+// Do not change old verdicts/counts to make new runtime results pass.
 // This audits wiring and declared synthetic expectations, not task accuracy.
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
