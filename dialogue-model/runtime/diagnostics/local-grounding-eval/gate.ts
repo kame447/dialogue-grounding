@@ -1,3 +1,7 @@
+// Frozen/retired old-configuration harness by researcher decision, 2026-10-21.
+// Preserve historical gates/expectations; do not green them for new evaluation.
+// Prefix failure with current old fixtures is not a universal none stop rule.
+// Historical reproduction requires its matching runtime/commit, not just this gate.
 // Historical reproduction uses legacy_private_plan; current runtime claims differ.
 // Structural validity, not a measurement of interpretation accuracy or task success.
 import { isDeepStrictEqual } from "node:util";
