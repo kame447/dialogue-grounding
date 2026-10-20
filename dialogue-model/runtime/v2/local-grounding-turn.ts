@@ -217,7 +217,9 @@ export async function prepareLocalGroundingTurn(options: LocalGroundingOptions, 
         }
       }
     };
-    if (input.priorAct) merge(recordAiClaims({ graph: input.graph, turn: input.update.turn, publicTurns, priorAct: input.priorAct }));
+    // Both current opt-in callers use this boundary. Never select legacy mode
+    // from options, stored priorAct fields, or other external input.
+    if (input.priorAct) merge(recordAiClaims({ graph: input.graph, turn: input.update.turn, publicTurns, priorAct: input.priorAct, featureSource: "none" }));
     const graph = previewReferenceUpdate(input.graph, update, { publicTurns });
     const issueSummary = summarizeLocalIssues(graph);
     check();

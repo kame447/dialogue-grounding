@@ -564,8 +564,18 @@ test("committed fallback turns produce no AI claims, while ordinary and rewritte
     const second = await h.run({ privateState: first.privateState, events: [events[0],
       { id: "event-2", seq: 2, speaker: "ai", text: first.text },
       { id: "event-3", seq: 3, speaker: "human", text: "うん" }], lastEventId: "event-3" });
-    assert.equal(records[1].aiClaims.length, publication === "fallback" ? 0 : 2);
-    assert.equal(second.privateState.graph.records.filter((r: any) => r.kind === "claim" && r.speaker === "ai").length, publication === "fallback" ? 0 : 2);
+    assert.equal(records[1].aiClaims.length, publication === "fallback" ? 0 : 1);
+    assert.equal(second.privateState.graph.records.filter((r: any) => r.kind === "claim" && r.speaker === "ai").length, publication === "fallback" ? 0 : 1);
+    // Public text expresses the feature, but this slice has no public-text feature extraction; coverage is not demonstrated.
+    assert.equal(records[1].aiClaims.filter(c => c.aspect === "part").length, 0);
+    const installed = second.privateState.graph.records.filter((r: any) => r.kind === "claim" && r.speaker === "ai");
+    assert.equal(installed.filter((r: any) => r.aspect === "part").length, 0);
+    if (publication !== "fallback") {
+      for (const claim of [records[1].aiClaims[0], installed[0]]) {
+        assert.equal(claim.aspect, "name"); assert.equal(claim.act, "name_propose"); assert.equal(claim.name, "船");
+        assert.equal(claim.sourceTurn, 2); assert.equal(claim.id, "3:ai1");
+      }
+    }
     assert.equal(records[1].verification.rejected.some(r => r.reason === "ai_fallback_utterance"), publication === "fallback");
   }
 });
