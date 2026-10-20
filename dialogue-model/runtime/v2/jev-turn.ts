@@ -375,7 +375,10 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         record.generationGuard.violations = [...new Set([...record.generationGuard.violations, ...codes])];
         if (codes.length) throw new JevTurnError("unsafe_generation");
       }
-      const nextState: JevPrivateState = { ledger: ambiguousDefer || multipleFeature ? structuredClone(state.ledger) : applyJudgment(state.ledger, judgment),
+      // A validated feature-only repair preserves both the current name and its
+      // status. Keep the legacy applyJudgment default outside this Jev boundary.
+      const featureOnlyRepair = judgment.action === "repair" && judgment.candidateName === null && judgment.discriminatingFeature !== null;
+      const nextState: JevPrivateState = { ledger: ambiguousDefer || multipleFeature || featureOnlyRepair ? structuredClone(state.ledger) : applyJudgment(state.ledger, judgment),
         graph: applyReferenceUpdate(state.graph, prepared.update, { publicTurns, generationSucceeded: true }) as Graph,
         observationMemo: memo, repairHistory, judgments: [...state.judgments, { turnIndex: latest.seq, lastEventId, status: "committed", judgment,
           generationGuard: structuredClone(record.generationGuard), jevTurn: { attemptNumber, decision, humanReferent: structuredClone(record.humanReferent) },

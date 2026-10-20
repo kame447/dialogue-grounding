@@ -16,6 +16,7 @@ import { ObservationError, type ObservationErrorCode } from "../dialogue-model/r
 import { recordAiClaims } from "../dialogue-model/runtime/local-grounding/verify.ts";
 import { createReferenceGraph, applyReferenceUpdate } from "../dialogue-model/runtime/memory/reference-graph.mjs";
 import { AIConnectionError } from "../dialogue-model/runtime/client.mjs";
+import { applyJudgment, validateJudgment } from "../dialogue-model/runtime/judgment/schema.mjs";
 
 const ids = Array.from({ length: 6 }, (_, i) => `s-000${i + 1}`);
 const anchors = ids.map((id, x) => ({ id, bbox: { x, y: 0, w: 1, h: 1 }, centroid: { x, y: 0 } }));
@@ -980,4 +981,43 @@ test("S1-c: none repair/confirm cannot publish or change state even with include
     assert.equal(failed.choices.candidate_1, "include"); assert.equal(failed.stages.length, 1);
     assert.equal(failed.stages[0].rejectionCode, "detail_target_required");
   }
+});
+
+test("S1-b: validated Jev feature-only repair preserves agreed 舟 and every other ledger status", async () => {
+  for (const status of ["agreed", "tentative", "deferred", "unassigned"] as const) {
+    const h = harness({ jevDecision: createMockJevDecisionClient(() => ({ action: "repair", target: { kind: "single", figureId: ids[0] },
+      name: null, feature: "四角い部分", observe: null })), client: { async complete(_messages: unknown, options: { phase: string }) {
+      return { text: options.phase === "local_extraction" ? "[]" : "形を確かめ直します。四角い部分がある形でしょうか？" };
+    } } });
+    const initial = h.dialogue.initialPrivateState();
+    initial.ledger[ids[0]] = { status, name: status === "unassigned" ? null : "舟" };
+    initial.ledger[ids[1]] = { status: "agreed", name: "灯台" };
+    const before = structuredClone(initial), result = await h.run(initial);
+    assert.deepEqual(initial, before);
+    assert.deepEqual(result.privateState.ledger, before.ledger);
+    assert.notEqual(result.privateState.ledger, initial.ledger);
+    assert.notEqual(result.privateState.ledger[ids[0]], initial.ledger[ids[0]]);
+    assert.equal(result.privateState.ledger[ids[0]].status, status);
+    assert.equal(result.privateState.ledger[ids[0]].name, status === "unassigned" ? null : "舟");
+    const committed = result.privateState.judgments.at(-1)!;
+    assert.equal(committed.judgment.action, "repair"); assert.equal(committed.judgment.candidateName, null);
+    assert.equal(committed.judgment.discriminatingFeature, "四角い部分");
+    assert.deepEqual(committed.jevTurn.decision.target, { kind: "single", figureId: ids[0] });
+    assert.equal(committed.jevTurn.decision.feature, "四角い部分");
+    assert.equal(h.records[0].finalAction?.action, "repair");
+    assert.equal(h.records[0].publicSpeech, result.text);
+    assert.equal(settleJevTurnTraces(h.records, result.privateState)[0].status, "committed");
+  }
+});
+
+test("S1-b: default applyJudgment still releases a name on the same validated feature-only repair", () => {
+  const state = harness().dialogue.initialPrivateState();
+  state.ledger[ids[0]] = { status: "agreed", name: "舟" };
+  state.ledger[ids[1]] = { status: "agreed", name: "灯台" };
+  const before = structuredClone(state.ledger);
+  const judgment = validateJudgment({ action: "repair", targetSlot: ids[0], candidateName: null, discriminatingFeature: "四角い部分", note: null },
+    { ownLedger: state.ledger });
+  const result = applyJudgment(state.ledger, judgment);
+  assert.deepEqual(result, { ...before, [ids[0]]: { status: "unassigned", name: null } });
+  assert.deepEqual(state.ledger, before);
 });
