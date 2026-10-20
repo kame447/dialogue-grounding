@@ -1,5 +1,6 @@
 // Frozen at 21e9fde after AUDIT-01: historical reproduction only.
 // Do not change old verdicts/counts to make new runtime results pass.
+// Local audit below explicitly reproduces legacy_private_plan claims.
 // This audits wiring and declared synthetic expectations, not task accuracy.
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
@@ -48,7 +49,7 @@ export function auditJevLocalTurn(input: Parameters<typeof import("../local-grou
     const previous = input.before.judgments.at(-1);
     const priorAi = previous && input.publicTurns.find(t => t.speaker === "ai" && t.turn > previous.turnIndex && t.turn < turn);
     const target = previous?.jevTurn?.decision?.target;
-    const ai = priorAi ? recordAiClaims({ graph: input.before.graph, turn, publicTurns: input.publicTurns,
+    const ai = priorAi ? recordAiClaims({ graph: input.before.graph, turn, publicTurns: input.publicTurns, featureSource: "legacy_private_plan",
       priorAct: { ...previous.judgment, turn: priorAi.turn, publishedFallback: previous.generationGuard?.fallback === true,
         ...(target?.kind === "multiple" ? { targetCandidates: [...target.figureIds] } : {}) } }).operations : [];
     let update = prepareMemory(input.before.graph, turn, input.after.judgments.at(-1)?.judgment.reference ?? null, input.publicTurns).update;

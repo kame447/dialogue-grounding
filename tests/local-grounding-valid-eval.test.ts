@@ -381,7 +381,8 @@ test("independent audit refuses even a literal AI feature claim from a published
   const judgment = { action: "accept", targetSlot: "s-0001", candidateName: null, discriminatingFeature: "四角", note: null };
   // A plausible, graph-valid claim with literal public provenance still cannot
   // stand in for a program-owned fallback that did not publish the chosen act.
-  const operation = recordAiClaims({ graph, turn: 3, publicTurns, priorAct: { ...judgment, turn: 2 } }).operations[0];
+  // Historical forged-feature fixture for the frozen fallback audit only.
+  const operation = recordAiClaims({ graph, turn: 3, publicTurns, featureSource: "legacy_private_plan", priorAct: { ...judgment, turn: 2 } }).operations[0];
   assert.ok(operation);
   const after = applyReferenceUpdate(graph, { expectedRevision: graph.revision, turn: 3, operations: [operation] },
     { publicTurns, generationSucceeded: true });

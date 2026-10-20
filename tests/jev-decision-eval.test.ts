@@ -202,7 +202,7 @@ test("Jev independent audit retains multiple AI feature targets and excludes fal
     const graph = createReferenceGraph({ slots: anchors.map(a => a.id) });
     const judgment = { action: "confirm", targetSlot: null, candidateName: null, discriminatingFeature: "四角" };
     const before = { graph, judgments: [{ turnIndex: 1, judgment, generationGuard: { fallback }, jevTurn: { decision: { target: { kind: "multiple", figureIds: targets } } } }] };
-    const operations = recordAiClaims({ graph, turn: 3, publicTurns,
+    const operations = recordAiClaims({ graph, turn: 3, publicTurns, featureSource: "legacy_private_plan",
       priorAct: { ...judgment, turn: 2, targetCandidates: targets, publishedFallback: fallback } }).operations;
     assert.equal(operations.length, fallback ? 0 : 1);
     if (!fallback) { assert.deepEqual(operations[0].targets, targets); assert.equal(operations[0].aspect, "part"); }
@@ -454,17 +454,43 @@ async function temporary(fn: (directory: string) => Promise<void>) {
   try { await fn(directory); } finally { await rm(directory, { recursive: true, force: true }); }
 }
 
-test("actual pipeline with mock Luna and mock Jev HTTP observes once, preserves partial issues and settles publication", async () => temporary(async outputDir => {
+// Fixed oracle from Astra's S1-a dependency verdict, not inferred from current results.
+const FEATURE_COVERAGE_G4 = ["script_mismatch", "partial_agreement_missing", "denial_missing", "repair_progress_missing"] as const;
+const FEATURE_COVERAGE_G3 = ["script_mismatch", "partial_agreement_missing", "denial_missing"] as const;
+function assertFeatureCoverageLoss(result: Awaited<ReturnType<typeof runJevEvaluation>>, expectedUnmet: readonly string[]) {
+  assert.equal(result.status, "gate_failed"); assert.equal(result.gate.passed, false);
+  assert.deepEqual([...result.gate.unmet].sort(), [...expectedUnmet].sort());
+  assert.equal(result.gate.cases.length, 1);
+  assert.equal(result.gate.cases[0].passed, false);
+  assert.deepEqual(result.gate.cases[0].unmet, ["script_mismatch"]);
+}
+function assertCompletedReceipt(receipt: any, expectedTurns: number) {
+  assert.equal(receipt.completed, true); assert.equal(receipt.expectedTurns, expectedTurns);
+  assert.equal(receipt.turns.length, expectedTurns); assert.equal(receipt.failureCode, undefined);
+  assert.ok(receipt.turns.every((t: any) => t.committed && t.traceMatches && t.local.unverified === 0 &&
+    typeof t.publicText === "string" && t.publicText.length > 0));
+}
+async function completedMockReceipt(directory: string, id = script.id) {
+  const document = JSON.parse(await readFile(join(directory, id + ".private.json"), "utf8"));
+  assertCompletedReceipt(document.receipt, script.steps.length);
+  assert.equal(document.failure, undefined);
+  return document.receipt;
+}
+
+test("mock pipeline completes publication while S1 feature coverage and repair progress remain lost", async () => temporary(async outputDir => {
   const deps = e2eDependencies(), result = await runJevEvaluation({ outputDir, seed: 1701, localTimeoutMs: 45000 }, deps);
-  assert.equal(result.status, "passed", JSON.stringify(result.gate));
+  assertFeatureCoverageLoss(result, FEATURE_COVERAGE_G4);
   assert.equal(deps.created.count, 1);
   const document = JSON.parse(await readFile(join(result.directory, script.id + ".private.json"), "utf8"));
   const receipt = document.receipt;
+  assertCompletedReceipt(receipt, script.steps.length);
   assert.equal(receipt.turns.length, script.steps.length);
   assert.ok(receipt.turns.every((t: any) => t.committed && t.local.unverified === 0));
   assert.equal(receipt.observations.filter((r: any) => r.kind === "initial").length, 1);
   assert.equal(receipt.observations.filter((r: any) => r.kind === "targeted").length, 1);
-  assert.ok(receipt.turns.at(-1).repairHistory.some((r: any) => r.progress === "changed"));
+  // Known capability loss: zero observed progress is not a semantic stagnation oracle.
+  assert.equal(result.gate.counts.progress, 0);
+  assert.equal(receipt.turns.at(-1).repairHistory.some((r: any) => r.progress === "changed"), false);
   assert.ok(receipt.turns.at(-1).repairHistory.some((r: any) => r.progress === "unchanged"));
   assert.ok(deps.calls.filter(c => c.phase === "local_extraction").every(c => c.timeoutMs === 45000 && !JSON.stringify(c.messages).includes("image_url")));
   assert.ok(deps.calls.every(c => !/judg/.test(c.phase)));
@@ -493,14 +519,14 @@ test("actual pipeline with mock Luna and mock Jev HTTP observes once, preserves 
   }
 }));
 
-test("multiple confirm/repair and the next bare reply keep all candidates in independent audit", async () => {
+test("multiple confirm/repair retain action candidates but S1 feature reply capability is unproven", async () => {
   for (const firstAction of ["confirm", "repair"] as const) for (const bareReply of ["agree", "deny"] as const) await temporary(async outputDir => {
     const deps = e2eDependencies({ firstAction, firstTarget: "multiple", bareReply });
     const c: SyntheticCase = { id: "multiple-reply", steps: [script.steps[0], { text: bareReply === "agree" ? "そうだね。" : "それは違う。", expect: [{ act: bareReply, aspect: "part" }] }] };
     deps.cases = [c];
     const result = await runJevEvaluation({ outputDir, seed: 1701 }, deps);
     const document = JSON.parse(await readFile(join(result.directory, c.id + ".private.json"), "utf8"));
-    assert.equal(document.receipt.completed, true);
+    assertCompletedReceipt(document.receipt, c.steps.length);
     const [first, next] = document.receipt.turns;
     const candidates = document.receipt.anchors.map((a: any) => a.id);
     assert.deepEqual(first.decisions[0].target, { kind: "multiple", figureIds: candidates });
@@ -508,9 +534,13 @@ test("multiple confirm/repair and the next bare reply keep all candidates in ind
     assert.equal(first.finalAct.targetSlot, null);
     assert.ok(next.local.pipelineOk && next.local.unverified === 0 && next.traceMatches);
     const ai = next.local.verified.filter((claim: any) => claim.speaker === "ai");
-    assert.equal(ai.length, 1); assert.equal(ai[0].aspect, "part"); assert.deepEqual(ai[0].targets, candidates);
-    const reply = next.local.verified.find((claim: any) => claim.speaker === "human");
-    assert.equal(reply.act, bareReply); assert.equal(reply.respondsTo, ai[0].id); assert.deepEqual(reply.targets, candidates);
+    assert.deepEqual(ai, []);
+    assert.deepEqual(next.local.verified.filter((claim: any) => claim.speaker === "human"), []);
+    const attempts = (await readFile(join(result.directory, "attempts.private.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line));
+    const local = attempts.find(a => a.stage === "turn" && a.turn === next.turn).localRecords[0];
+    assert.equal(local.localStatus, "ok"); assert.equal(local.classifier.status, "ok");
+    assert.deepEqual(local.aiClaims, []); assert.deepEqual(local.claims, []);
+    assert.deepEqual(local.verification.rejected, [{ segmentId: "s1", reason: "missing_claim_response" }]);
     assert.ok(Object.values(first.ledger).every((entry: any) => entry.status === "unassigned"));
     assert.ok(Object.values(next.ledger).every((entry: any) => entry.status !== "agreed"));
   });
@@ -519,7 +549,8 @@ test("multiple confirm/repair and the next bare reply keep all candidates in ind
 test("reobservation can have two two-stage judgments while all four stage budgets are counted", async () => temporary(async outputDir => {
   const deps = e2eDependencies({ postObservationConfirm: true });
   const result = await runJevEvaluation({ outputDir, seed: 1701 }, deps);
-  assert.equal(result.status, "passed", JSON.stringify(result.gate));
+  assertFeatureCoverageLoss(result, FEATURE_COVERAGE_G3);
+  await completedMockReceipt(result.directory);
   const calls = deps.http.filter(call => call.kind === "decision" && JSON.parse(call.payload.state).turn === 9);
   assert.deepEqual(calls.map(call => Object.keys(call.payload.questions)), [
     ["action", "target", "candidate_0", "candidate_1", "candidate_2", "candidate_3", "candidate_4", "candidate_5"],
@@ -534,7 +565,8 @@ test("reobservation can have two two-stage judgments while all four stage budget
 
 test("actual referent HTTP is distinct from action stages and preserves raw scores, memo provenance and posthoc records", async () => temporary(async outputDir => {
   const deps = e2eDependencies(), result = await runJevEvaluation({ outputDir, seed: 1701 }, deps);
-  assert.equal(result.status, "passed", JSON.stringify(result.gate));
+  assertFeatureCoverageLoss(result, FEATURE_COVERAGE_G4);
+  await completedMockReceipt(result.directory);
   const document = JSON.parse(await readFile(join(result.directory, script.id + ".private.json"), "utf8")), receipt = document.receipt;
   const estimates = deps.http.filter(call => call.kind === "referent");
   assert.equal(estimates.length, script.steps.length); assert.equal(result.gate.referent.attempts, script.steps.length);
@@ -572,7 +604,8 @@ test("actual referent HTTP is distinct from action stages and preserves raw scor
 test("missing, out-of-range or wrong-model referent output stays unknown while action judgment continues", async () => {
   for (const referentFault of ["missing", "range", "model"] as const) await temporary(async outputDir => {
     const deps = e2eDependencies({ referentFault }), result = await runJevEvaluation({ outputDir, seed: 1701 }, deps);
-    assert.equal(result.status, "passed", JSON.stringify(result.gate));
+    assertFeatureCoverageLoss(result, FEATURE_COVERAGE_G4);
+    await completedMockReceipt(result.directory);
     assert.equal(result.gate.referent.unknown, script.steps.length); assert.equal(result.gate.referent.known, 0);
     const receipt = JSON.parse(await readFile(join(result.directory, script.id + ".private.json"), "utf8")).receipt;
     assert.ok(receipt.referents.every((r: any) => r.estimate.status === "unknown" && r.estimate.scores === null));
@@ -583,16 +616,42 @@ test("missing, out-of-range or wrong-model referent output stays unknown while a
 test("both strategies give the same referent and decision request JSON from the same prefixes", async () => temporary(async outputDir => {
   const first = e2eDependencies(), second = e2eDependencies(); first.strategy = "repair-first"; second.strategy = "bypass-enabled";
   const a = await runJevEvaluation({ outputDir, seed: 1701 }, first), b = await runJevEvaluation({ outputDir, seed: 1701 }, second);
-  assert.equal(a.status, "passed"); assert.equal(b.status, "passed");
+  assertFeatureCoverageLoss(a, FEATURE_COVERAGE_G4); assertFeatureCoverageLoss(b, FEATURE_COVERAGE_G4);
+  await completedMockReceipt(a.directory); await completedMockReceipt(b.directory);
   const payloads = (deps: ReturnType<typeof e2eDependencies>) => deps.http.filter(call => ["referent", "decision"].includes(call.kind)).map(call => JSON.stringify(call.payload));
   assert.deepEqual(payloads(first), payloads(second));
   const x = JSON.parse(await readFile(join(a.directory, script.id + ".private.json"), "utf8")).receipt;
   const y = JSON.parse(await readFile(join(b.directory, script.id + ".private.json"), "utf8")).receipt;
-  assert.equal(compareConditionInputs([x], [y]), "matched");
+  for (const receipt of [x, y]) {
+    assert.equal(receipt.referents.length, script.steps.length);
+    for (const turn of receipt.turns) {
+      assert.ok(turn.decisions.length > 0);
+      assert.equal(turn.decisionInputHashes.length, turn.decisions.length);
+      assert.ok(turn.decisionInputHashes.every((h: any) => /^[a-f0-9]{64}$/.test(h.actionTarget)));
+    }
+  }
+  const projection = (receipt: any) => ({ caseId: receipt.caseId, completed: receipt.completed,
+    referents: receipt.referents.map((r: any) => ({ turn: r.turn, inputSha256: r.inputSha256, observationMemo: r.observationMemo })),
+    turns: receipt.turns.map((t: any) => ({ turn: t.turn, decisionInputHashes: t.decisionInputHashes })) });
+  assert.deepEqual(projection(x), projection(y));
+  // The frozen helper requires a passing historical gate. Its mismatch here does not demonstrate an input difference.
+  assert.equal(compareConditionInputs([x], [y]), "mismatch");
   assert.equal(compareConditionInputs([x]), "not_measured");
   y.referents[0].inputSha256 = "c".repeat(64);
   assert.equal(compareConditionInputs([x], [y]), "mismatch");
 }));
+
+test("historical comparison helper detects a changed input hash when both handcrafted trials pass", () => {
+  const left = trial(), right = structuredClone(left);
+  assert.equal(evaluateTrialGate(left).passed, true); assert.equal(evaluateTrialGate(right).passed, true);
+  assert.equal(compareConditionInputs([left], [right]), "matched");
+  const changedHash = "b".repeat(64);
+  assert.notEqual(right.referents[0].inputSha256, changedHash);
+  right.referents[0].inputSha256 = changedHash;
+  assert.equal(evaluateTrialGate(left).passed, true); assert.equal(evaluateTrialGate(right).passed, true);
+  assert.equal(compareConditionInputs([left], [right]), "mismatch");
+  assert.equal(compareConditionInputs([left]), "not_measured");
+});
 
 test("case metadata and scoring material remain outside prompts; decision time budget is explicit", async () => temporary(async outputDir => {
   assert.equal(Object.hasOwn(parseEvaluationArguments(["--out", "/tmp/eval"]), "decisionTimeoutMs"), false);
@@ -603,7 +662,8 @@ test("case metadata and scoring material remain outside prompts; decision time b
   let received: unknown;
   deps.createComponents = (shared, options) => { received = options; return create(shared, options); };
   const result = await runJevEvaluation({ outputDir, seed: 1701, decisionTimeoutMs: 60000 }, deps);
-  assert.equal(result.status, "passed"); assert.deepEqual(received, { decisionTimeoutMs: 60000 });
+  assertFeatureCoverageLoss(result, FEATURE_COVERAGE_G4);
+  await completedMockReceipt(result.directory); assert.deepEqual(received, { decisionTimeoutMs: 60000 });
   for (const call of deps.http) assert.ok(!JSON.stringify(call.payload).includes("referentScenario"));
   const manifest = JSON.parse(await readFile(join(result.directory, "run.private.json"), "utf8"));
   assert.equal(manifest.decisionTimeoutMs, 60000);
@@ -626,7 +686,11 @@ test("provider/model failure keeps every case, previous checkpoints and typed fa
     assert.ok(result.gate.inputBudget.calls > 0); assert.equal(result.gate.inputBudget.missingCalls, 0);
     const failures = await readFile(join(result.directory, "failures.private.jsonl"), "utf8");
     assert.ok(failures.includes(fault.model ? "model_changed" : fault.phase ? "generation_failed" : "decision_failed"));
-    if (fault.phase) assert.ok(result.gate.cases[1].passed, JSON.stringify(result.gate));
+    if (fault.phase) {
+      assert.equal(result.gate.cases[1].passed, false);
+      assert.deepEqual(result.gate.cases[1].unmet, ["script_mismatch"]);
+      await completedMockReceipt(result.directory, next.id);
+    }
   });
 });
 
@@ -741,7 +805,8 @@ test("observation factory budget reaches initial and targeted calls and is recor
   for (const observationTimeoutMs of [undefined, 60000]) await temporary(async outputDir => {
     const deps = e2eDependencies(), result = await runJevEvaluation({ outputDir, seed: 1701, localTimeoutMs: 45000,
       ...(observationTimeoutMs === undefined ? {} : { observationTimeoutMs }) }, deps);
-    assert.equal(result.status, "passed");
+    assertFeatureCoverageLoss(result, FEATURE_COVERAGE_G4);
+    await completedMockReceipt(result.directory);
     const observations = deps.calls.filter(c => ["observation_initial", "observation_targeted"].includes(c.phase));
     assert.equal(observations.length, 2);
     assert.ok(observations.every(c => c.timeoutMs === (observationTimeoutMs ?? 20000)));
@@ -943,7 +1008,10 @@ test("referent adapter exceptions and malformed objects become private unknown; 
     if (fault === "abort") {
       assert.equal(result.status, "gate_failed"); assert.equal(document.receipt.failureCode, "aborted");
       assert.equal(document.receipt.referents.length, 1); assert.equal(document.publicTurns.filter((t: any) => t.speaker === "ai").length, 0);
-    } else { assert.equal(result.status, "passed", JSON.stringify(result.gate)); assert.equal(document.receipt.completed, true); }
+    } else {
+      assertFeatureCoverageLoss(result, FEATURE_COVERAGE_G4);
+      assertCompletedReceipt(document.receipt, script.steps.length);
+    }
     for (const file of await readdir(result.directory)) assert.ok(!(await readFile(join(result.directory, file), "utf8")).includes("PRIVATE_REFERENT_"));
   });
 });

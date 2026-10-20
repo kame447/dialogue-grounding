@@ -23,7 +23,9 @@
 - 別の対象（slot）に対する名称提案への受諾は、現在の対象の名称合意に流用しない。
 - 対象候補が未特定・複数の部分は、対象を確定させない（`targets: []` または複数候補のまま）。
 - 状態（`LOCAL_ISSUE_STATES`、`LOCAL_NAME_STATES`）は記録から毎回導出し、別に保存しない。
-- `recordAiClaims` はコミット済みAI判断の字句要素を、そのAI発話が公開履歴にある場合だけ記録する。名称提案と特徴は別claimで、出典は `ai_hypothesis`。判断に論点欄のない `discriminatingFeature` の論点は `part` に固定し、生成文からプログラムが意味推論して論点を作らない。未公開・生成予定のAI文は出典にしない。
+- `recordAiClaims` は公開履歴で検証できた名称claimだけを記録する（出典は `ai_hypothesis`）。非公開計画の `discriminatingFeature` からは、公開文との字句一致や言い換えの有無によらず特徴claimを新設しない。既存graphのclaimは削除・移行しない。特徴が消費していた番号は予約し、後続の名称claimのIDとprimary/secondaryの役割を維持する。
+- `featureSource` の既定は `none`。現行の共通opt-in経路も `none` に固定し、外部設定・保存判断等から変更できない。`legacy_private_plan` は旧ゲート2か所と明示したlegacy回帰だけの旧記録再現用であり、現行runtimeの機能評価には使わない。旧モードでは従来の `part` claim・引用・IDを再現する。
+- 公開AI特徴への人間の同意・否定は、応答先claimが無くなることで棄却される場合があり、特徴への応答のカバレッジが一時的に下がる。これは両方略に同じく適用する暫定停止である。公開文からのAI特徴抽出や意味確認は実装していない。`repairHistory.question`、`previousAction` 等の計画由来情報、既存の旧特徴claimの扱いも未解決である。
 - AIの `confirm` と公開された名称候補の組合せは疑問形の `name_propose` とする。`agree` は同じ単一slot・同じ名称字句について、先行する公開済みの人間の `name_propose` がある場合だけ、その直近の提案に対する `name_accept` を記録する。人間の提案が無い・公開出典を確認できない場合は作らない。
 - 履歴だけから、公開発話に支持されない同意を新設しない。AIの仮説（`ai_hypothesis`）は正解ではなく、`grounded` も真の指示対象同定を意味しない。
 
