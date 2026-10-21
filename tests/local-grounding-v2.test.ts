@@ -180,12 +180,20 @@ test("supersede after local verification cannot install a stale generation snaps
 });
 
 for (const phase of ["extractor", "classifier"] as const) {
-  test(`${phase} timeout keeps the turn and legacy memory, and ignores late operations`, async () => {
-    const local = options(), late = gate(), records: LocalGroundingResearchRecord[] = [];
+  test(`${phase} timeout keeps the turn and legacy memory, and ignores late operations`, async t => {
+    let clock = 0;
+    t.mock.method(performance, "now", () => clock);
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const local = options(), entered = gate(), late = gate(), records: LocalGroundingResearchRecord[] = [];
     local.timeoutMs = 5;
-    if (phase === "extractor") local.extractor.extract = async () => { await late.promise; return [segment(ids[0])]; };
-    else local.classifier.classify = async () => { await late.promise; return [{ segmentId: "s1", act: "assert", respondsToClaimId: null, rawScore: 1 }]; };
-    const h = harness({ localGrounding: local, onLocalGroundingTrace: (record: LocalGroundingResearchRecord) => records.push(record) }); const result = await h.run();
+    if (phase === "extractor") local.extractor.extract = async () => { entered.release(); await late.promise; return [segment(ids[0])]; };
+    else local.classifier.classify = async () => { entered.release(); await late.promise; return [{ segmentId: "s1", act: "assert", respondsToClaimId: null, rawScore: 1 }]; };
+    const h = harness({ localGrounding: local, onLocalGroundingTrace: (record: LocalGroundingResearchRecord) => records.push(record) }); const work = h.run();
+    // Expire the shared deadline only after the selected phase has started.
+    await entered.promise;
+    clock = local.timeoutMs;
+    t.mock.timers.tick(local.timeoutMs);
+    const result = await work;
     assert.deepEqual(result.privateState.graph.records.map((r: any) => r.kind), ["mention", "feature"]);
     assert.equal(h.dialogue.getAttempts()[0].localGrounding.status, "timeout");
     assert.equal(records[0][phase].errorCode, "timeout");
