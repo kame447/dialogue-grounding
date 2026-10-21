@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { setImmediate as nextLoop } from "node:timers/promises";
 import { createJevChoiceTransport, createJevLocalTestClassifier, JevLocalTestError, JEV_LOCAL_TEST_MODEL } from "../dialogue-model/runtime/local-grounding/jev-local-test.ts";
 import type { JevChoiceInput, JevChoiceTransportOptions } from "../dialogue-model/runtime/local-grounding/jev-local-test.ts";
+import type { LocalClassificationInput } from "../dialogue-model/runtime/local-grounding/contract.ts";
 import { OPENROUTER_DECISIONS_URL } from "../workers/research-ai-proxy/src/grounding.ts";
 
 const KEY = "sk-or-SYNTHETIC-choice-transport-key-0000";
@@ -26,6 +27,42 @@ test("legacy builder failure still records evidence immediately, before the retu
   assert.equal(classifier.lastEvidence?.callIndex, 1); assert.deepEqual(classifier.lastEvidence?.choices, []);
   await assert.rejects(rejected, code("invalid_request"));
   assert.equal(reads, 0);
+});
+
+test("legacy evidence keeps the completed snapshot between the next parser and transport completion", async () => {
+  // Baseline c86c9d6 preserves the entire first snapshot at this interleaving.
+  const localInput: LocalClassificationInput = { turn: 2,
+    publicTurns: [{ turn: 2, speaker: "human", text: "三角は下です" }],
+    segments: [{ segmentId: "s1", quote: "三角は下です", targets: ["own-a"], aspect: "orientation",
+      proposition: "三角は下にある", name: null, linkedIssueId: null, respondsToTurn: null }], priorClaims: [] };
+  const probes: unknown[] = [];
+  let calls = 0;
+  const classifier = createJevLocalTestClassifier({ enabled: true, ...options({ fetchImpl: async (_url, init) => {
+    const call = ++calls, payload = JSON.parse(init.body as string);
+    const selected = call === 1 ? "assert" : "ask";
+    const response = Response.json({ model: JEV_LOCAL_TEST_MODEL, id: `gen-call-${call}`, usage: { cost: 0.001 },
+      answers: Object.fromEntries(Object.entries(payload.questions).map(([name, question]) => {
+        const labels = Object.keys((question as { criteria: object }).criteria);
+        const choice = name.endsWith("_act") ? selected : "none";
+        return [name, { type: "choice", choice, probabilities: Object.fromEntries(labels.map(label => [label, label === choice ? 1 : 0])) }];
+      })) });
+    if (call === 2) {
+      const raw = await response.text();
+      response.text = () => {
+        queueMicrotask(() => queueMicrotask(() => probes.push(classifier.lastEvidence)));
+        return Promise.resolve(raw);
+      };
+    }
+    return response;
+  } }) })!;
+  const firstResult = await classifier.classify(localInput);
+  assert.deepEqual(firstResult, [{ segmentId: "s1", act: "assert", respondsToClaimId: null, rawScore: 1 }]);
+  const first = classifier.lastEvidence;
+  const secondResult = await classifier.classify(localInput);
+  assert.deepEqual(probes, [first]);
+  assert.deepEqual(secondResult, [{ segmentId: "s1", act: "ask", respondsToClaimId: null, rawScore: 1 }]);
+  assert.equal(classifier.lastEvidence?.callIndex, 2); assert.equal(classifier.lastEvidence?.responseId, "gen-call-2");
+  assert.deepEqual(classifier.lastEvidence?.choices, secondResult);
 });
 
 test("choice transport fixes model/URL, preserves raw scores, and keeps evidence detached and closed", async () => {

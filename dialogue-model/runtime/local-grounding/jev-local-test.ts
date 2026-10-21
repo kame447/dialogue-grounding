@@ -255,7 +255,7 @@ export function createJevChoiceTransport(options: JevChoiceTransportOptions = {}
 export function createJevLocalTestClassifier(options: JevLocalTestOptions = {}): JevLocalTestClassifier | null {
   if (options.enabled !== true) return null;
   const transport = createJevChoiceTransport(options);
-  let parsed: { callIndex: number; choices: LocalFunctionVerdict[] } | null = null;
+  const parsed = new Map<number, LocalFunctionVerdict[]>();
   return Object.freeze({
     metadata: Object.freeze({ classifierKind: "jev_local_test" as const, calibrated: false as const, model: JEV_LOCAL_TEST_MODEL }),
     get lastEvidence(): JevLocalTestEvidence | null {
@@ -263,7 +263,7 @@ export function createJevLocalTestClassifier(options: JevLocalTestOptions = {}):
       if (!evidence) return null;
       return { callIndex: evidence.callIndex, classifierKind: "jev_local_test", status: evidence.status,
         model: evidence.model, responseId: evidence.responseId,
-        choices: evidence.status === "ok" && parsed?.callIndex === evidence.callIndex ? structuredClone(parsed.choices) : [],
+        choices: evidence.status === "ok" ? structuredClone(parsed.get(evidence.callIndex) ?? []) : [],
         latencyMs: evidence.latencyMs, costUsd: evidence.costUsd, error: evidence.error };
     },
     get spentUsd() { return transport.spentUsd; },
@@ -273,7 +273,11 @@ export function createJevLocalTestClassifier(options: JevLocalTestOptions = {}):
       const callIndex = transport.callCount + 1;
       return await transport.request(() => buildJevLocalTestPayload(input), callOptions, (raw, payload) => {
         const choices = parseChoices(raw, payload);
-        parsed = { callIndex, choices: structuredClone(choices) };
+        // Keep the published result until transport finally publishes its successor.
+        // At most the completed snapshot and this in-flight parse are retained.
+        const published = transport.lastEvidence?.callIndex;
+        for (const index of parsed.keys()) if (index !== published) parsed.delete(index);
+        parsed.set(callIndex, structuredClone(choices));
         return choices;
       }) ?? [];
     },
