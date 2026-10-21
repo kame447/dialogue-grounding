@@ -25,7 +25,7 @@
 - 状態（`LOCAL_ISSUE_STATES`、`LOCAL_NAME_STATES`）は記録から毎回導出し、別に保存しない。
 - `recordAiClaims` は公開履歴で検証できた名称claimだけを記録する（出典は `ai_hypothesis`）。非公開計画の `discriminatingFeature` からは、公開文との字句一致や言い換えの有無によらず特徴claimを新設しない。既存graphのclaimは削除・移行しない。特徴が消費していた番号は予約し、後続の名称claimのIDとprimary/secondaryの役割を維持する。
 - `featureSource` の既定は `none`。現行の共通opt-in経路も `none` に固定し、外部設定・保存判断等から変更できない。`legacy_private_plan` は旧ゲート2か所と明示したlegacy回帰だけの旧記録再現用であり、現行runtimeの機能評価には使わない。旧モードでは従来の `part` claim・引用・IDを再現する。
-- 公開AI特徴への人間の同意・否定は、応答先claimが無くなることで棄却される場合があり、特徴への応答のカバレッジが一時的に下がる。これは両方略に同じく適用する暫定停止である。公開文からのAI特徴抽出や意味確認は実装していない。`repairHistory.question`、`previousAction` 等の計画由来情報、既存の旧特徴claimの扱いも未解決である。
+- 公開AI特徴への人間の同意・否定は、応答先claimが無くなることで棄却される場合があり、特徴への応答のカバレッジが一時的に下がる。これは両方略に同じく適用する暫定停止である。既定offでは公開文からのAI特徴抽出や意味確認を行わない。下記スライスAは別途opt-inする模擬検証済みの経路であり、実モデルの意味認識精度や応答カバレッジの回復は未実証である。`repairHistory.question`、`previousAction` 等の計画由来情報、既存の旧特徴claimの扱いも未解決である。
 - AIの `confirm` と公開された名称候補の組合せは疑問形の `name_propose` とする。`agree` は同じ単一slot・同じ名称字句について、先行する公開済みの人間の `name_propose` がある場合だけ、その直近の提案に対する `name_accept` を記録する。人間の提案が無い・公開出典を確認できない場合は作らない。
 - 履歴だけから、公開発話に支持されない同意を新設しない。AIの仮説（`ai_hypothesis`）は正解ではなく、`grounded` も真の指示対象同定を意味しない。
 
@@ -36,3 +36,26 @@
 ## 未決定
 
 局所問題IDの切り方、抽出精度、Jevの選択肢・確信度の扱い、実際の行動選択への利用時点、実験への採用は未決定です。本機能は opt-in / shadow で検証してから研究者の承認を経て扱いを決めます。
+
+
+## スライスA：Jev経路のAI公開claim（既定off）
+
+`decisionMode: "jev"`、`referenceMemory: true` の既存構成で `localGrounding.aiPublicClaims: true` を明示すると動作する。省略・false・true以外の値では呼出・privateState・traceに新しい欄を追加しない。既存の人間側 verifier と名称リテラル経路は変更しない。
+
+生成ガードを通った最終文について、生成に使った観察メモのsnapshotをLunaが参照して分節し、独立したJev adapterが機能と意味支持を順に確認する。AI抽出は `ai_extraction`、機能は `ai_function`、意味支持は `ai_support` の段別証跡を持つ。後二段には観察メモ・計画・strategyを渡さず、三段とも画像を送らない。抽出のname部分は名称専用経路へ送り、acknowledgeはclaimにしない。独立したassert/construe/askは先行pointerを外して別issueとし、応答系は意味確認した同じ先行命題で構造検証できる場合だけ残す。
+
+検証済みの解釈は、その場でgraphへ入れず `aiPublic.pending` に公開文のSHA-256とsource keyを付けて候補保存する。queueは公開eventと候補stateを原子的に確定する。次の人間ターンの冒頭でeventの話者・一意なseq・本文hash・nonReferentialを照合し、モデルを再呼出しせず、pub全件→既存の名称回収→人間処理の順に一つのupdateへ加える。IDは挿入ターンの `3:pub1` 等、sourceTurnはAI公開seqの2等である。pubは容量と構造・先行根拠の全検証が通った集合だけを適用し、途中失敗を部分適用しない。
+
+pub全件と名称を加えるだけで操作上限を超えるとpubは0件（`op_limit_pre`）とし、名称は既存の境界で追加を試みる。人間段の開始後にpubを撤去しない。そのためpubが先に容量を使い、人間の後続情報が既存mergeの `memory_invalid_update` 等で失われやすくなる。上限値は変更していない。onでは人間抽出・分類が失敗しても前置きのpub・名称は候補に残る差がある。判断・生成の失敗やstaleでは候補全体を捨て、以前の公開eventとpendingを保持する。
+
+onの既存 `local` / `research.aiClaims` 等は人間段だけの記録となる。前置きのpubと名称のID・source key・sourceTurn・棄却理由は `aiPublic.application` に記録する。空の `local.aiClaims` だけで前置きを未適用と判断せず、graphの全claimが既存local traceに報告されたとも扱わない。研究用のredact済み投影は再検証の入力に戻さない。
+
+新しいphase `ai_public_claims` は生成後に開始し、既存local timeoutと同じ値を上限として三段で残時間を共有する。ターン全体の時間はその分伸びる。段の失敗・phase timeoutではfailed pendingを保存して公開を続け、caller abort/staleでは公開しない。空抽出/nameのみなら機能を、acknowledge/unknownのみなら意味確認をskipし、未呼出を成功や費用0と報告しない。Luna抽出の費用はこのclientで確認できないためunknown（null）である。
+
+Jev二段はruntime生成時に各1個のtransportを持ち、独立した費用状態・停止状態・evidenceを保持する。`aiPublicTransport` はreadKey/fetchImpl等を注入するローカル模擬検証用の依存設定で、model/URLは変更できない。各instanceの既存observed-cost上限は、providerの前払保証や試行全体の上限ではなく、新しい二枠を含む総支出が不変とも主張しない。実API利用・研究条件としてのon採用は別の承認対象である。
+
+`aiPublic.log` は各sourceの適用・不適用・欠測を最大64件保持し、古い記録の省略数を残す。記録や公開windowの欠落をappliedと推定しない。修復進展は直前の該当entryだけを更新し、受理済みの独立情報による既存changedを保持する。それ以外では人間local失敗・人間容量欠落・AI source不完全を理由付きunknownに保ち、欠測をunchangedへ落とさない。進展の意味定義を新設したものではない。
+
+onの復元はschema・pending・source key・権限・logを実行時に検証し、`aiPublic` のない旧stateは拒否する。新規on試行とJSON round-tripは利用できる。`await settleAiPublicClaims(attempts, committedPrivateState)` はseq/hashに加えcommitted judgmentのturn・lastEventId・attemptNumberを照合し、未公開/staleの候補を公開済みへ昇格させない。最後の公開AIのpendingはgraph未適用のまま残り得る。state・settle結果の外部永続保存は呼出し側の責務である。
+
+検証は `tests/jev-turn-ai-public-claims.test.ts` のSA-1〜30を含む決定的mock/local HTTPに限定する。意味認識能力、自然な発話の正解label、後継ゲート、live E2E、B/C、相槌の新規則、研究条件の採用を実証・確定したものではない。`repairHistory.question` と `previousAction` の計画由来情報、旧特徴claimの扱いは引き続き未解決である。
