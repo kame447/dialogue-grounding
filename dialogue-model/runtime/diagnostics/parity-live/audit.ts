@@ -19,6 +19,7 @@ export type SendReceipt = { id: number; provider: "luna" | "jev"; phase: string 
   inputTokens: number | null; outputTokens: number | null; model: string | null; modelMatches: boolean | null };
 export class RunBudget {
   lunaCalls = 0; halted = false; jevUnknown = false;
+  haltReason: string | null = null;
   syntheticInputTokens = 0; syntheticOutputTokens = 0; syntheticInputUnknown = 0; syntheticOutputUnknown = 0;
   readonly sends: SendReceipt[] = []; readonly refusals: Array<{ kind: string; reason: string; logicalCallId?: number | null }> = [];
   readonly stops: Array<{ reason: string; inFlight: SendReceipt[] }> = [];
@@ -47,7 +48,7 @@ export class RunBudget {
         this.observedLunaTokens < this.limits.lunaTokens)) { this.stop(reason); this.refuse(reservedLunaCall ? "luna_post" : "call", reason, logicalCallId); throw new Error("budget_stop"); }
   }
   refuse(kind: string, reason: string, logicalCallId?: number | null) { const entry = { kind, reason, logicalCallId }; this.refusals.push(entry); this.onRefusal?.(entry); }
-  stop(reason: string) { this.halted = true; if (!this.stops.some(s => s.reason === reason)) { this.stops.push({ reason,
+  stop(reason: string) { this.halted = true; this.haltReason ??= reason; if (!this.stops.some(s => s.reason === reason)) { this.stops.push({ reason,
     inFlight: structuredClone(this.sends.filter(s => s.status === "in_flight" || s.status === "sent_result_unknown")) });
     this.onLedgerEvent?.({ type: "stop", reason, inFlight: this.stops.at(-1)!.inFlight.map(s => s.id) }); } }
   reserve(provider: "luna" | "jev", phase: string | null, turn: number | null, logicalCallId: number | null = null) {
@@ -61,9 +62,12 @@ export class RunBudget {
     Object.assign(entry, values); entry.status = "observed_response";
     this.onLedgerEvent?.({ type: "response", entry: structuredClone(entry) });
     if (entry.provider === "jev" && entry.costUsd === null) { this.jevUnknown = true; this.stop("jev_cost_unknown"); }
+    this.checkObservedLimits();
+    this.onChange?.(structuredClone(entry));
+  }
+  checkObservedLimits() {
     if (this.observedJevUsd >= this.limits.jevUsd) this.stop("observed_jev_budget");
     if (this.observedLunaTokens >= this.limits.lunaTokens) this.stop("luna_token_budget");
-    this.onChange?.(structuredClone(entry));
   }
   unknown(entry: SendReceipt) {
     if (entry.status !== "in_flight") return;
@@ -78,12 +82,13 @@ export class RunBudget {
     missingOutputTokens: this.syntheticOutputUnknown + this.sends.filter(s => s.provider === "luna" && s.outputTokens === null).length,
     inFlight: this.sends.filter(s => s.status === "in_flight").map(s => s.id), sends: structuredClone(this.sends), refusals: structuredClone(this.refusals),
     lunaPosts: this.lunaPosts, jevPosts: this.jevPosts, jevUnknown: this.jevUnknown,
-    halted: this.halted, stops: structuredClone(this.stops), unresolvedJevSends: this.sends.filter(s => s.provider === "jev" && s.costUsd === null).map(s => s.id),
+    halted: this.halted, haltReason: this.haltReason, stops: structuredClone(this.stops), unresolvedJevSends: this.sends.filter(s => s.provider === "jev" && s.costUsd === null).map(s => s.id),
     lunaCostUsd: null, totalUsd: null, limits: { ...this.limits },
     countLimit: "atomic_pre_send_reservation", usdScope: "observed_jev_stop_threshold_all_in_flight_may_overshoot",
     tokenScope: "observed_lower_bound_stop_threshold_unknown_fields_excluded" }; }
 }
 export type CallReceipt = { id: number; sendIds: number[]; phase: Phase; turn: number | null; provider: "luna" | "jev"; requestSha256: string; instructionSha256: string;
+  expectedHttpRequestSha256?: string; httpRequestSha256?: string;
   requestedModel: string; model: string | null; status: "started" | "ok" | "error"; error: string | null;
   costUsd: number | null; inputTokens: number | null; outputTokens: number | null; imageCount: number; latencyMs: number | null };
 export type IdentityTurn = { turn: number; prefixSha256: string; publicText: string | null; humanReferent: string[]; actionInputs: string[];

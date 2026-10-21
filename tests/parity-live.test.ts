@@ -1,7 +1,7 @@
 // Mechanical synthetic mocks only; no model accuracy oracle or live credentials.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, readFile, stat, readdir, writeFile, chmod } from "node:fs/promises";
+import { mkdtemp, rm, readFile, stat, readdir, writeFile, chmod, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RESEARCH_TRIAL_PROFILE_V1, normalizedJson, researchHash, researchTrialProfile } from "../dialogue-model/runtime/v2/research-profile.ts";
@@ -40,7 +40,11 @@ function dependencies(config: any = {}) {
         if (options.phase === "observation_initial") {
           anchors = JSON.parse(messages[1].content).ownAnchors;
           text = JSON.stringify({ figures: anchors.map(a => ({ id: a.id, holistic: [], analytic: { shapes: ["細長い部分"], composition: "部分が接する", relations: [] }, unknowns: [] })) });
-        } else if (options.phase === "local_extraction") text = "[]";
+        } else if (options.phase === "local_extraction") {
+          const input = JSON.parse(messages[1].content);
+          text = config.localSegment ? JSON.stringify([{ segmentId: "s1", quote: input.publicTurns.at(-1).text,
+            targets: [input.ownSlots[0]], aspect: "part", proposition: "形を尋ねる", name: null, linkedIssueId: null, respondsToTurn: null }]) : "[]";
+        }
         else if (options.phase === "observation_targeted") {
           const input = JSON.parse(messages[1].content);
           text = JSON.stringify({ figures: input.figureIds.map((figureId: string) => ({ figureId, supports: ["細長い部分"], contradicts: [], unknown: [] })) });
@@ -134,7 +138,7 @@ test("paired replay reconstructs native wire bodies offline and detects a change
   const board = modelView(createTrialV2({ seed: 1701 }));
   item.tape.expectedRequests[0].requestSha256 = "changed";
   const replay = await pairedReplay(item.tape, { ownImage: { mimeType: board.mimeType, base64: board.png.toString("base64") }, ownAnchors: board.anchors }, MODEL, result.trials[0].profile);
-  assert.equal(replay.status, "same_material_payload_mismatch"); assert.equal(replay.labelsEqual, true); assert.equal(replay.reproducedRecordedWire, false);
+  assert.equal(replay.status, "same_material_payload_mismatch"); assert.equal(replay.labelsEqual, true); assert.equal(replay.reproducedRecordedPayloads, false);
 });
 
 test("public packets contain only prefix/hash, no private fields or future dialogue", async t => {
@@ -321,14 +325,22 @@ function independentHash(value: any): string {
 function instrumentedDependencies(config: any = {}) {
   const base = dependencies(config), create = base.deps.createLunaClient;
   base.deps.createLunaClient = async (label, options) => {
-    const mock = await create(label, options); let phase = "";
-    const client = createChatClient({ provider: "cloudflare", apiKey: "synthetic-luna-evidence-token", purpose: "dialogue_turn", baseUrl: "http://synthetic.invalid/v1" },
-      options.instrumentFetch(async (_url, init) => {
+    const mock = await create(label, options); let phase = "", retried = false;
+    const guardedFetch = options.instrumentFetch(async (_url, init) => {
         if ((init?.method ?? "GET") === "GET") return Response.json(await mock.getModelPolicy());
+        if (config.retryLuna && label !== "warmup" && phase === "generation" && !retried) { retried = true; return new Response("{}", { status: 503 }); }
         const reply = await mock.complete(JSON.parse(String(init?.body)).messages, { phase });
         return Response.json({ model: reply.model, choices: [{ message: { content: reply.text } }],
           usage: { prompt_tokens: reply.usage?.inputTokens, completion_tokens: reply.usage?.outputTokens } });
-      }));
+      });
+    const client = createChatClient({ provider: "cloudflare", apiKey: "synthetic-luna-evidence-token", purpose: "dialogue_turn", baseUrl: "http://synthetic.invalid/v1",
+      timeoutMs: options.request.timeoutMs ?? undefined, maxCompletionTokens: options.request.maxCompletionTokens ?? undefined }, async (url, init) => {
+      if (config.extraBodyKey && label !== "warmup" && init?.method === "POST") {
+        const body = JSON.parse(String(init.body)); body[config.extraBodyKey] = label === "bypass-enabled" ? 0 : 1;
+        return guardedFetch(url, { ...init, body: JSON.stringify(body) });
+      }
+      return guardedFetch(url, init);
+    }, { sleep: async () => {} });
     return { getModelPolicy: () => client.getModelPolicy(), complete(messages, opts) { phase = opts?.phase ?? ""; return client.complete(messages, opts); } };
   };
   return base;
@@ -348,11 +360,11 @@ test("independent evidence contains both raw replay sides, ordered sends/instanc
     for (const side of [pair.left, pair.right]) {
       assert.equal(independentHash(side.material), side.materialSha256);
       assert.deepEqual(side.material.state, tape.state); assert.deepEqual(side.material.events, tape.events); assert.deepEqual(side.material.profile, trial.profile);
-      assert.ok(side.material.profile.lunaRequest); assert.equal(side.material.boundary.luna, "complete_messages");
+      assert.ok(side.material.profile.lunaRequest); assert.equal(side.material.boundary.luna, "canonical_http_json");
       assert.ok(side.material.own.ownImage.byteSha256);
       assert.equal(side.requests.length, tape.expectedRequests.length);
       for (const [i, r] of side.requests.entries()) { assert.equal(independentHash(r.payload), r.payloadSha256);
-        assert.deepEqual([r.provider, r.phase, r.recordedRequestSha256], [tape.expectedRequests[i].provider, tape.expectedRequests[i].phase, tape.expectedRequests[i].requestSha256]);
+        assert.deepEqual([r.provider, r.phase, r.preProjectionPayloadSha256], [tape.expectedRequests[i].provider, tape.expectedRequests[i].phase, tape.expectedRequests[i].requestSha256]);
         if (r.phase !== "observation_targeted") assert.equal(r.payloadSha256, tape.expectedRequests[i].requestSha256);
         if (r.provider === "jev") { assert.ok(r.payload.questions); assert.equal(typeof r.payload.state, "string"); } }
     }
@@ -454,4 +466,153 @@ test("setup failure before cached.get records not_attempted without fabricated c
     assert.deepEqual(e.cache.find((c: any) => c.trialOrder === 0), { trialOrder: 0, status: "not_attempted", reason: `setup_failed:${stage}` });
     assert.deepEqual(result.trials[0].notReached, [1, 3]);
   }
+});
+
+for (const terminal of ["ai_function", "ai_support", "ai_extraction"] as const) test(`PL-1: terminal ${terminal} threshold stops state adoption/publication without a later send`, async t => {
+  const options = await fixture(t); options.scripts[0].humanTurns = [options.scripts[0].humanTurns[0]];
+  options.manifest.trials = options.manifest.trials.slice(0, 1);
+  if (terminal === "ai_extraction") options.manifest.caps.lunaTokens = 48;
+  else options.manifest.caps.jevUsd = terminal === "ai_function" ? 0.003 : 0.004;
+  const h = instrumentedDependencies({ empty: terminal === "ai_extraction" });
+  if (terminal === "ai_function") {
+    const create = h.deps.createJevTransport;
+    h.deps.createJevTransport = label => { const native = create(label); return { ...native, async fetchImpl(url, init) {
+      const response = await native.fetchImpl(url, init), p = JSON.parse(String(init.body)), state = JSON.parse(p.state);
+      if (state.aiSeq && p.questions.segment_0_act) {
+        const data = await response.json(), answer = data.answers.segment_0_act;
+        answer.choice = "acknowledge"; answer.probabilities = Object.fromEntries(Object.keys(answer.probabilities).map(k => [k, k === "acknowledge" ? 1 : 0]));
+        return Response.json(data);
+      }
+      return response;
+    } }; };
+  }
+  const result = await runParityLive(options, h.deps), trial = result.trials[0];
+  assert.equal(result.summary.failure, terminal === "ai_extraction" ? "luna_token_budget" : "observed_jev_budget");
+  assert.equal(result.summary.budget.jevUnknown, false);
+  assert.equal(trial.turns.length, 0); assert.equal(trial.lastCommittedState!.judgments.length, 0);
+  assert.equal(trial.lastCommittedState!.aiPublic!.pending, null);
+  assert.ok(!(await readdir(result.directory)).includes("public-0-2.packet.json"));
+  const e = JSON.parse(await readFile(join(result.directory, "verifier-evidence.private.json"), "utf8"));
+  const stop = e.events.find((v: any) => v.type === "stop" && v.scope === "run");
+  assert.ok(stop); assert.ok(!e.events.some((v: any) => v.seq > stop.seq && ["send", "commit"].includes(v.type)));
+  assert.equal(e.events.filter((v: any) => v.type === "send").at(-1).phase, terminal);
+});
+
+test("PL-1: terminal extraction also stops at the observed mock token threshold", async t => {
+  const options = await fixture(t); options.scripts[0].humanTurns = [options.scripts[0].humanTurns[0]];
+  options.manifest.trials = options.manifest.trials.slice(0, 1); options.manifest.caps.lunaTokens = 48;
+  const result = await runParityLive(options, dependencies({ empty: true }).deps);
+  assert.equal(result.summary.failure, "luna_token_budget"); assert.equal(result.trials[0].turns.length, 0);
+  assert.equal(result.trials[0].lastCommittedState!.judgments.length, 0);
+});
+
+for (const stall of ["fetch", "body"] as const) test(`PL-2: Jev local timeout stops immediately with unresolved ${stall}, and late billing stays on its send ID`, async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const entered = pause(), hold = pause(), h = instrumentedDependencies({ localSegment: true }), create = h.deps.createJevTransport;
+  h.deps.createJevTransport = label => { const native = create(label); return { ...native, async fetchImpl(url, init) {
+    const p = JSON.parse(String(init.body)), state = JSON.parse(p.state);
+    if (!p.questions.segment_0_act || state.aiSeq) return native.fetchImpl(url, init);
+    if (stall === "fetch") { entered.release(); await hold.promise; return native.fetchImpl(url, init); }
+    const body = await (await native.fetchImpl(url, init)).text();
+    return new Response(new ReadableStream({ start(controller) {
+      entered.release(); void hold.promise.then(() => { controller.enqueue(new TextEncoder().encode(body)); controller.close(); });
+    } }), { headers: { "Content-Type": "application/json" } });
+  } }; };
+  const work = runParityLive(await fixture(t), h.deps); await entered.promise; t.mock.timers.tick(15000);
+  const result = await work;
+  assert.equal(result.summary.failure, "jev_cost_unknown"); assert.equal(result.trials[0].turns.length, 0);
+  assert.equal(result.summary.budget.jevPosts, 1); assert.equal(result.summary.budget.jevUnknown, true);
+  const e = JSON.parse(await readFile(join(result.directory, "verifier-evidence.private.json"), "utf8"));
+  const stop = e.events.find((v: any) => v.type === "stop" && v.reason === "jev_cost_unknown");
+  assert.ok(!e.events.some((v: any) => v.seq > stop.seq && ["send", "commit", "complete"].includes(v.type)));
+  const id = result.summary.budget.sends.find(s => s.provider === "jev")!.id;
+  hold.release(); await new Promise<void>(r => setImmediate(r)); await new Promise<void>(r => setImmediate(r));
+  const latest = await result.flushBilling();
+  assert.equal(latest.sends.find(s => s.id === id)!.costUsd, 0.001); assert.equal(latest.jevPosts, 1); assert.equal(latest.halted, true);
+  assert.equal(result.trials[0].lastCommittedState!.judgments.length, 0);
+});
+
+test("PL-2: no Jev send means no unknown charge; normal billed cleanup also stays known", async t => {
+  const h = instrumentedDependencies(), create = h.deps.createJevTransport;
+  h.deps.createJevTransport = label => ({ ...create(label), readKey: async () => { throw new Error("synthetic key unavailable"); } });
+  const refused = await runParityLive(await fixture(t), h.deps);
+  assert.equal(refused.summary.budget.jevPosts, 0); assert.equal(refused.summary.budget.jevUnknown, false);
+  const normal = await runParityLive(await fixture(t), instrumentedDependencies().deps);
+  assert.equal(normal.summary.status, "wiring_passed"); assert.equal(normal.summary.budget.jevUnknown, false);
+});
+
+test("PL-3: required evidence write failure is save_failed and fails G3", async t => {
+  for (const mode of ["create", "replace"]) {
+  const options = await fixture(t), h = instrumentedDependencies(), create = h.deps.createLunaClient;
+  h.deps.createLunaClient = async (label, settings) => {
+    if (label === "warmup") {
+      const dir = join(options.outputDir, (await readdir(options.outputDir))[0]);
+      if (mode === "create") await rm(join(dir, "verifier-evidence.private.json"));
+      await mkdir(join(dir, "verifier-evidence.private.pending.json"));
+    }
+    return create(label, settings);
+  };
+  const result = await runParityLive(options, h.deps);
+  assert.equal(result.summary.status, "save_failed"); assert.equal(result.summary.failure, "evidence_record_failed");
+  assert.equal(result.summary.auditability.status, "save_failed");
+  assert.ok(result.summary.gates.every(g => g?.G3.passed === false && g.G3.evidencePresent === false));
+  assert.equal((await readdir(result.directory)).includes("verifier-evidence.private.json"), mode === "replace");
+  }
+});
+
+test("PL-3: late evidence/billing persistence failure reports final auditability diff without rewriting snapshot", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] }); const entered = pause(), hold = pause();
+  const h = instrumentedDependencies({ onCall: async (label: string, phase: string) => {
+    if (label !== "warmup" && phase === "generation") { entered.release(); await hold.promise; }
+  } });
+  const work = runParityLive(await fixture(t), h.deps); await entered.promise; t.mock.timers.tick(15 * 60 * 1000);
+  const result = await work, before = JSON.stringify(result.summary);
+  assert.equal(result.summary.auditability.status, "auditable");
+  await mkdir(join(result.directory, "verifier-evidence.private.pending.json"));
+  await rm(join(result.directory, "billing.private.jsonl")); await mkdir(join(result.directory, "billing.private.jsonl"));
+  hold.release(); await new Promise<void>(r => setImmediate(r)); await new Promise<void>(r => setImmediate(r));
+  const latest = await result.flushBilling();
+  assert.equal(latest.auditability.status, "save_failed"); assert.equal(latest.auditability.snapshotStatus, "auditable");
+  assert.equal(latest.auditability.changedSinceSnapshot, true);
+  assert.ok(latest.auditability.diff.evidenceWriteFailed); assert.ok(latest.auditability.diff.billingWriteFailed);
+  assert.equal(JSON.stringify(result.summary), before);
+});
+
+test("PL-4: both native offline serializers reproduce complete HTTP payloads and each recorded POST/retry", async t => {
+  const options = await fixture(t); options.manifest.lunaRequest = { timeoutMs: 10000, maxCompletionTokens: 321 } as any;
+  const result = await runParityLive(options, instrumentedDependencies({ observe: true, retryLuna: true }).deps);
+  assert.equal(result.summary.status, "wiring_passed");
+  const e = JSON.parse(await readFile(join(result.directory, "verifier-evidence.private.json"), "utf8"));
+  for (const pair of e.pairedReplay) {
+    const trial = result.trials[pair.trialOrder], replay = trial.replay.find(r => r.tape.events.at(-1)!.seq === pair.turn)!;
+    assert.equal(replay.result.actualLunaHttpMeasured, true); assert.equal(replay.result.reproducedRecordedPayloads, true);
+    for (const side of [pair.left, pair.right]) for (const [i, r] of side.requests.entries()) {
+      assert.equal(r.payloadDomain, "canonical_http_json"); assert.equal(independentHash(r.payload), r.payloadSha256);
+      assert.equal(r.preProjectionPayloadSha256, replay.tape.expectedRequests[i].requestSha256);
+      if (r.provider === "luna") {
+        assert.deepEqual(Object.keys(r.payload).sort(), ["max_completion_tokens", "messages", "purpose"]);
+        assert.equal(r.payload.purpose, "dialogue_turn"); assert.equal(r.payload.max_completion_tokens, 321);
+        assert.equal(r.completeMessagesSha256, replay.tape.expectedRequests[i].messagesSha256);
+        const actual = trial.http.filter(h => h.sendId !== null && replay.tape.expectedRequests[i].sendIds!.includes(h.sendId));
+        assert.ok(actual.length > 0); assert.ok(actual.every(h => h.hashScheme === "canonical_json_sha256" && h.requestSha256 === r.preProjectionPayloadSha256));
+        if (r.phase === "generation" && pair.turn === 1) assert.equal(actual.length, 2);
+      }
+    }
+  }
+  const { createTrialV2, modelView } = await import("../dialogue-model/runtime/stimuli/scatter-v2.mjs"), board = modelView(createTrialV2({ seed: 1701 }));
+  const trial = result.trials[0], tape = trial.replay[0].tape, changed = { ...trial.profile, lunaRequest: { ...trial.profile.lunaRequest, maxCompletionTokens: 322 } };
+  const replay = await pairedReplay(tape, { ownImage: { mimeType: board.mimeType, base64: board.png.toString("base64") }, ownAnchors: board.anchors }, MODEL, changed as any);
+  assert.equal(replay.status, "same_material_payload_mismatch"); assert.equal(replay.reproducedRecordedPayloads, false); assert.equal(replay.labelsEqual, true);
+  assert.deepEqual(replay.sides[0].requests.filter(r => r.provider === "luna").map(r => r.completeMessagesSha256),
+    tape.expectedRequests.filter(r => r.provider === "luna").map(r => r.messagesSha256));
+});
+
+for (const key of ["temperature", "model", "top_p", "unknown_body_key"]) test(`PL-4: extra Luna body key ${key} is refused before an actual trial POST`, async t => {
+  const result = await runParityLive(await fixture(t), instrumentedDependencies({ extraBodyKey: key }).deps);
+  assert.equal(result.summary.failure, "invalid_luna_wire"); assert.equal(result.summary.budget.lunaPosts, 1);
+  assert.equal(result.summary.budget.jevPosts, 0); assert.equal(result.summary.budget.jevUnknown, false);
+  assert.equal(result.trials[0].turns.length, 0);
+  const e = JSON.parse(await readFile(join(result.directory, "verifier-evidence.private.json"), "utf8"));
+  const refusal = e.events.find((v: any) => v.type === "refused" && v.reason === "invalid_luna_wire");
+  assert.ok(refusal); assert.ok(!e.events.some((v: any) => v.seq > refusal.seq && ["send", "commit"].includes(v.type)));
 });

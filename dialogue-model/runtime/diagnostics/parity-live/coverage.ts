@@ -11,7 +11,7 @@ import { priorClaimViews } from "../../local-grounding/derive.ts";
 import { REFERENCE_LIMITS } from "../../memory/reference-graph.mjs";
 import { researchHash } from "../../v2/research-profile.ts";
 export function stageGates(trial: Trial, context: { warmAudit: ObservationCacheAudit | null; warmCalls: CallReceipt[]; warmHttp: HttpReceipt[];
-  measuredHttp: boolean; cacheStable: boolean; privacyRejected: boolean; jevUnknown: boolean; execution: "mock" | "live" }) {
+  measuredHttp: boolean; cacheStable: boolean; privacyRejected: boolean; jevUnknown: boolean; evidencePresent: boolean; execution: "mock" | "live" }) {
   const posts = context.warmHttp.filter(c => c.kind === "completion_post").length;
   const perTurn = [...new Set([...trial.turns.map(t => t.turn), ...trial.calls.flatMap(c => c.turn === null ? [] : [c.turn])])].sort((a, b) => a - b).map(turn => {
     const t = trial.turns.find(t => t.turn === turn), trace = t?.trace.find(r => r.status === "committed") ?? trial.attempts.find(r => r.turnIndex === turn);
@@ -29,7 +29,8 @@ export function stageGates(trial: Trial, context: { warmAudit: ObservationCacheA
     warmup: context.warmAudit, completeCount: context.warmCalls.length, actualPosts: context.measuredHttp ? posts : null,
     trialInitialPosts: trial.http.filter(h => h.phase === "observation_initial").length, cacheStable: context.cacheStable };
   const G2 = { passed: perTurn.some(t => t.committed && t.imagesOnlyInObservation && Object.values(t.referent).every(Boolean) && Object.values(t.decision).every(Boolean)), perTurn };
-  const G3 = { passed: !!trial.profileSha256 && trial.cache !== null, storage: "repo_external_directory_0700_records_0600", profileSha256: trial.profileSha256 };
+  const G3 = { passed: !!trial.profileSha256 && trial.cache !== null && context.evidencePresent, evidencePresent: context.evidencePresent,
+    storage: "repo_external_directory_0700_records_0600", profileSha256: trial.profileSha256 };
   const G4 = { passed: !context.privacyRejected && !context.jevUnknown, privacyRejected: context.privacyRejected, unknownJevBilling: context.jevUnknown };
   return { G1, G2, G3, G4, passed: G1.passed && G2.passed && G3.passed && G4.passed && !trial.failure,
     conditionalPaths: "unselected_is_not_observed; primary_error_blocks_stage_transition" };

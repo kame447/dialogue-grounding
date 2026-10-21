@@ -11,7 +11,8 @@ export type LedgerEvent = Partial<Identity> & { seq: number; at: string;
   reason?: string; inFlight?: number[]; scope?: "run" | "trial" | "instance"; scopeDetail?: "logical_call";
   turn?: number | null; priorObservedMaximumUsd?: number; priorObservedSpentUsd?: number };
 export type ReplaySide = { label: Label; material: unknown; materialSha256: string;
-  requests: Array<{ provider: "luna" | "jev"; phase: string; payload: unknown; payloadSha256: string; recordedRequestSha256: string }> };
+  requests: Array<{ provider: "luna" | "jev"; phase: string; payload: unknown; payloadDomain: "canonical_http_json";
+    payloadSha256: string; preProjectionPayloadSha256: string; completeMessagesSha256?: string }> };
 export type CacheReceipt = { trialOrder: number | null; status: "not_attempted";
   reason: `setup_failed:${"luna_client" | "jev_transport" | "native_runtime" | "native_initialization"}` } | { trialOrder: number | null; status: "MISS" | "HIT";
   beforeSha256: string | null; afterSha256: string; memo: unknown; memoSha256: string;
@@ -37,7 +38,7 @@ export class VerifierEvidence {
   onChange: (() => void) | null = null;
   private lastAt = "";
   constructor(runId: string) { this.value = { version: 1, runId, normalizedEnvelopeFields: EVIDENCE_NORMALIZED_ENVELOPE_FIELDS,
-    imageProjection: "exact_synthetic_own_image_data_url_to_mime_and_byte_sha256; messages_boundary_not_http_byte_parity",
+    imageProjection: "exact_synthetic_own_image_data_url_to_mime_and_byte_sha256; canonical_http_json_not_raw_body_byte_parity",
     pairedReplay: [], events: [], cache: [] }; }
   event(event: Omit<LedgerEvent, "seq" | "at">) {
     const now = new Date().toISOString(); this.lastAt = now > this.lastAt ? now : this.lastAt;
