@@ -151,3 +151,43 @@ Its cache checks are not_reached; the trial remains failed/not_reached.
 Coverage remains computed from native trace/state. An approved conservative rejection
 requires independent contract evidence; reason strings or harness coverage results
 alone cannot prove it. Public naming agreement stays independent blind-review pending.
+
+## Failure records and planned mapping (REQUEST-16R / 16R2)
+
+`failure.private.json` is read independently of warmup and trials. Its closed v1
+warmup object has exactly `schemaVersion`, `scope`, `code`, `stage`, `calls`, `cache`,
+`observationCallStarted`, `policy`, `http`, `deadlines`; schemaVersion is
+`parity_live_failure_v1`. Warmup stage is client_setup / policy_get / cache_get /
+post_cache / unknown. The after_warmup scope has only schemaVersion/scope/code/stage
+and stage trial_loop / unknown. It never owns copies of warmup or trial calls.
+Call/HTTP receipts retain the existing successful-record field vocabulary. Final
+HTTP outcomes are returned / unknown, never started. Cache is an ObservationCacheAudit
+or null. Policy has exactly status/value: obtained owns purpose/ready/model/provider;
+not_requested and failed have null value. HTTP has measured/records; unmeasured has [].
+
+Deadlines have exactly configured/applied. Configured has observationMs and
+lunaClientTimeoutMs (integer or null); null uses native client defaults, not no deadline.
+Applied has observationOuterMs and completeCalls, the latter containing exactly
+callId/callOptionTimeoutMs for each warmup Luna complete, with a strict one-to-one ID
+correspondence. Null callOptionTimeoutMs means no explicit per-call option recorded.
+Native effective limits are not observed here or recomputed as recorded facts.
+
+observationOuterMs は、開始した cache.get に対して指定した観察用 timeout 値であり、cache.get の読込・lock・保存全体をその時間で打ち切ったこと、または観察タイマーの作動そのものを観測したことを意味しない。cache.get 未開始では null。実際の complete 呼出しの有無・指定値は observationCallStarted と completeCalls で別に示す。
+
+Legacy v0 has no schemaVersion and exactly code/calls/cache. Its known calls remain
+in accounting; HTTP/policy/deadlines are not_reached with legacy_unrecorded. Invalid
+new records cannot fall back to legacy. Unknown/missing keys or types are
+schema_violation; scope/file conflict is scope_contradiction; IDs owned across files
+are duplicate_ownership. Calls and their HTTP receipts within one file are two views
+of the same owner, not duplicate owners. Late usage revisions keep the same send ID
+and do not create a new send or erase an earlier stop obligation.
+
+Run metadata plannedMappingVersion:1 enables a strict one-to-one mapping of manifest
+trial positions to trial/skipped plannedIndex values, including identity correspondence.
+Missing marker means legacy_unrecorded; marker absent with plannedIndex means
+version_contradiction; any other marker means unknown_version. Missing plannedIndex
+in an existing row is planned_mapping. A missing started-trial file (summary.runOrder
+retains the started order) is output_missing, not guessed double execution or a passed
+mapping. Known duplicate indices/IDs and other contradictions still mismatch.
+Missing required outputs are not_reached with output_missing. Failure integrity never
+certifies execution success or suppresses actual cache, stage, ledger or gate failures.

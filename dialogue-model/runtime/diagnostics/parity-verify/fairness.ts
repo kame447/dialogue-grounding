@@ -130,6 +130,10 @@ export function cacheChecks(records: Records): Check[] {
     if (warm?.memoSha256) out.push(assertion(`cache.memo.identity.${i}`, row(t.identity).memo === warm.memoSha256, "same_initial_memo"));
   });
   if (!warmReceipt) out.push(missing("cache.warmup.receipt", "raw_initial_memo_and_file_hash_missing"));
+  else if (!warm) {
+    out.push(warmReceipt.status !== "MISS" || warmReceipt.beforeSha256 !== null ? assertion("cache.warmup.receipt", false, "warm_cache_file_receipt") :
+      missing("cache.warmup.receipt", "output_missing"));
+  }
   else {
     out.push(assertion("cache.warmup.receipt", warmReceipt.status === "MISS" && warmReceipt.beforeSha256 === null && shaLike(warmReceipt.afterSha256) &&
       warmReceipt.afterSha256 === warm?.fileSha256 && warmReceipt.afterSha256 === records.summary?.cacheFileSha256, "warm_cache_file_receipt"));
@@ -143,11 +147,14 @@ export function cacheChecks(records: Records): Check[] {
         missing(`cache.receipt.${i}.validation`, "cache_read_not_attempted"));
       return;
     }
-    out.push(Object.hasOwn(r, "memo") ? assertion(`cache.receipt.${i}.memo`, hash(r.memo) === r.memoSha256 && r.memoSha256 === warm?.memoSha256,
+    out.push(Object.hasOwn(r, "memo") && hash(r.memo) !== r.memoSha256 ? assertion(`cache.receipt.${i}.memo`, false, "raw_initial_memo_sha256") :
+      !warm?.memoSha256 ? missing(`cache.receipt.${i}.memo`, "output_missing") : Object.hasOwn(r, "memo") ? assertion(`cache.receipt.${i}.memo`, r.memoSha256 === warm.memoSha256,
       "raw_initial_memo_sha256") : missing(`cache.receipt.${i}.memo`));
     if (Object.hasOwn(r, "memo")) out.push(assertion(`cache.receipt.${i}.memo_schema`, initialMemo(r.memo), "initial_memo_structure_and_no_targeted_reobservations"));
-    out.push(assertion(`cache.receipt.${i}.validation`, r.validated === true && typeof r.requestedModel === "string" && r.requestedModel === r.returnedModel &&
-      r.requestedModel === row(warm?.policy).model, "memo_validation_and_exact_model"));
+    const policyModel = row(warm?.policy).model ?? row(row(records.failure?.policy).value).model;
+    const selfValid = r.validated === true && typeof r.requestedModel === "string" && r.requestedModel === r.returnedModel;
+    out.push(selfValid && policyModel === undefined ? missing(`cache.receipt.${i}.validation`, "output_missing") :
+      assertion(`cache.receipt.${i}.validation`, selfValid && r.requestedModel === policyModel, "memo_validation_and_exact_model"));
   });
   records.trials.forEach((t, i) => {
     const rs = receipts.filter(r => r.trialOrder === t.order);

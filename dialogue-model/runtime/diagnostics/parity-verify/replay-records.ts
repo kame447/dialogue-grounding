@@ -1,4 +1,4 @@
-import { allCalls, allHttp, assertion, check, combine, count, equal, hash, list, META_KEYS, missing, omit, row, rows, shaLike } from "./core.ts";
+import { allCalls, allHttp, assertion, callsComplete, check, combine, count, equal, hash, httpComplete, httpMissingReason, list, META_KEYS, missing, missingTrialOrders, omit, row, rows, shaLike } from "./core.ts";
 import type { Check, Records, Row } from "./core.ts";
 
 /** The sole permitted projection is an image URL value, never a whole message/body. */
@@ -27,19 +27,23 @@ export function replayChecks(records: Records): Check[] {
   // Per-request selection alone must never make an unmatched receipt disappear.
   const allPosts = allHttp(records).filter(h => h.kind === "completion_post" || h.method === "POST");
   const lunaCalls = allCalls(records).filter(c => c.provider === "luna");
-  out.push(assertion("replay.http_receipts", uniqueIds(allPosts.map(h => h.sendId)) &&
-    allPosts.every(h => h.kind === "completion_post" && h.method === "POST" && lunaCalls.some(c =>
-      c.id === h.callId && list(c.sendIds).includes(h.sendId) && c.phase === h.phase)) &&
-    lunaCalls.every(c => sameIds(list(c.sendIds), allPosts.filter(h => h.callId === c.id).map(h => h.sendId))),
-    "one_to_one_all_http_receipts_and_native_send_ids"));
+  const receiptContradiction = !uniqueIds(allPosts.map(h => h.sendId)) || allPosts.some(h => {
+    const c = lunaCalls.find(c => c.id === h.callId);
+    return h.kind !== "completion_post" || h.method !== "POST" || (!c ? callsComplete(records) : !list(c.sendIds).includes(h.sendId) || c.phase !== h.phase);
+  });
+  out.push(receiptContradiction ? assertion("replay.http_receipts", false, "one_to_one_all_http_receipts_and_native_send_ids") :
+    !httpComplete(records) ? missing("replay.http_receipts", httpMissingReason(records)) :
+      assertion("replay.http_receipts", lunaCalls.every(c => sameIds(list(c.sendIds), allPosts.filter(h => h.callId === c.id).map(h => h.sendId))),
+        "one_to_one_all_http_receipts_and_native_send_ids"));
   const expected = records.trials.flatMap(t => rows(t.replay).map(r => ({ order: t.order, turn: row(list(row(r.tape).events).at(-1)).seq })));
   if (!pairs.length) out.push(missing("replay.prewire", "both_label_raw_requests_missing"));
   if (records.evidence?.normalizedEnvelopeFields) out.push(assertion("replay.normalization", equal(records.evidence.normalizedEnvelopeFields, META_KEYS), "fixed_envelope_key_list"));
   for (const [i, pair] of pairs.entries()) {
     const id = `replay.${i}`, key = `${pair.trialOrder}:${pair.turn}`, a = row(pair.left), b = row(pair.right);
     const trial = records.trials.find(t => t.order === pair.trialOrder);
+    const outputMissing = !trial && missingTrialOrders(records).includes(Number(pair.trialOrder));
     const native = rows(trial?.replay).find(r => row(list(row(r.tape).events).at(-1)).seq === pair.turn), tape = row(native?.tape);
-    out.push(assertion(`${id}.binding`, expected.some(e => e.order === pair.trialOrder && e.turn === pair.turn) && !seen.has(key), "recorded_trial_turn_binding")); seen.add(key);
+    out.push(outputMissing && !seen.has(key) ? missing(`${id}.binding`, "output_missing") : assertion(`${id}.binding`, expected.some(e => e.order === pair.trialOrder && e.turn === pair.turn) && !seen.has(key), "recorded_trial_turn_binding")); seen.add(key);
     out.push(assertion(`${id}.labels`, a.label === "repair-first" && b.label === "bypass-enabled", "both_labels_captured"));
     if (!Object.hasOwn(a, "material") || !Object.hasOwn(b, "material")) { out.push(missing(`${id}.materials`)); continue; }
     out.push(assertion(`${id}.materials.sha256`, hash(a.material) === a.materialSha256 && hash(b.material) === b.materialSha256, "projected_material_sha256"));
@@ -49,12 +53,12 @@ export function replayChecks(records: Records): Check[] {
       assertion(`${id}.parity`, equal(left.map(r => omit(r, META_KEYS)), right.map(r => omit(r, META_KEYS))), "complete_projected_payloads_and_all_nonmetadata_fields"));
     for (const [sideName, side] of [["left", a], ["right", b]] as const) {
       const material = row(side.material), requests = rows(side.requests), originalRequests = rows(tape.expectedRequests);
-      out.push(different ? incomparable(`${id}.${sideName}.material_binding`) : assertion(`${id}.${sideName}.material_binding`,
+      out.push(outputMissing ? missing(`${id}.${sideName}.material_binding`, "output_missing") : different ? incomparable(`${id}.${sideName}.material_binding`) : assertion(`${id}.${sideName}.material_binding`,
         ["state", "events"].every(k => equal(material[k], tape[k])) && equal(material.profile, trial?.profile) &&
         ["luna", "jev", "reobservations"].every(k => !Object.hasOwn(material, k) || equal(material[k], tape[k])), "raw_frozen_material_binding"));
       const boundary = row(material.boundary), domainKnown = boundary.luna === "canonical_http_json" && boundary.jev === "canonical_http_json" && boundary.hashScheme === "canonical_json_sha256_not_raw_body_bytes";
       out.push(domainKnown ? check(`${id}.${sideName}.domain`, "pass", "canonical_http_json_boundary") : missing(`${id}.${sideName}.domain`, "full_http_hash_domains_not_recorded"));
-      const bindings: Check[] = [different ? incomparable(`${id}.${sideName}.count`) : assertion(`${id}.${sideName}.count`, requests.length > 0 && requests.length === originalRequests.length, "request_count_order")];
+      const bindings: Check[] = [outputMissing ? missing(`${id}.${sideName}.count`, "output_missing") : different ? incomparable(`${id}.${sideName}.count`) : assertion(`${id}.${sideName}.count`, requests.length > 0 && requests.length === originalRequests.length, "request_count_order")];
       out.push(...bindings);
       requests.forEach((request, j) => {
         const rid = `${id}.${sideName}.${j}`, original = originalRequests[j] ?? {}, body = row(request.payload);
@@ -65,12 +69,17 @@ export function replayChecks(records: Records): Check[] {
         const projection = projectionAudit(request.payload, row(row(material.own).ownImage));
         const projectionCheck = assertion(`${rid}.projection`, projection.valid && (provider === "luna" || projection.count === 0), "only_enumerated_own_image_url_projection");
         out.push(projectionCheck); bindings.push(projectionCheck);
-        const associated = different ? incomparable(`${rid}.recorded_hash_binding`) : assertion(`${rid}.recorded_hash_binding`, request.provider === original.provider && request.phase === original.phase &&
+        const associated = outputMissing ? missing(`${rid}.recorded_hash_binding`, "output_missing") : different ? incomparable(`${rid}.recorded_hash_binding`) : assertion(`${rid}.recorded_hash_binding`, request.provider === original.provider && request.phase === original.phase &&
           shaLike(request.preProjectionPayloadSha256) && request.preProjectionPayloadSha256 === original.requestSha256, "pre_projection_hash_association_to_recorded_http");
         out.push(associated); bindings.push(associated);
         const preimage = projection.count ? missing(`${rid}.original_recomputation`, "original_image_bytes_not_present_self_reported_hash_is_not_full_proof") :
           assertion(`${rid}.original_recomputation`, hash(request.payload) === request.preProjectionPayloadSha256, "independent_pre_projection_http_hash");
         out.push(preimage); bindings.push(preimage);
+        if (outputMissing) {
+          const absent = missing(`${rid}.actual_http`, "output_missing"); out.push(absent); bindings.push(absent);
+          if (!["luna", "jev"].includes(String(provider))) out.push(assertion(`${rid}.provider`, false, "known_provider_required"));
+          return;
+        }
         const calls = rows(trial?.calls).filter(c => c.provider === provider && c.turn === pair.turn);
         const prior = requests.slice(0, j).filter(r => r.provider === provider).length, call = calls[prior];
         if (provider === "luna") {
