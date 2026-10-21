@@ -107,3 +107,21 @@ contiguously. The obligation is satisfied only by a **run-scope stop before any 
 bookkeeping, an absent run stop, or only a narrower stop is a mismatch. Late cost backfill
 never removes the obligation or a prior violation. Each obligation reports its source
 sequence, affected send IDs and acknowledging run-stop sequence.
+
+POSTAUDIT-17 requires a one-to-one correspondence between actual POST receipts and
+expected send IDs. Duplicate, missing, wrongly owned, or wholly unmatched receipts are
+mismatches. A global inventory includes every POST receipt; per-request selection cannot
+discard an unmatched record. Call, phase and canonical HTTP hash checks remain in force.
+
+The fixed-fixture tests also preserve these earlier independent boundaries:
+
+| Boundary | Regression in `tests/parity-verify.test.ts` |
+| --- | --- |
+| Warm-up POST count | `restored boundary: warm-up zero POST is rejected; three allowed and four rejected` |
+| Memo structure beyond validation flag | `restored boundary: validated flag cannot certify a structurally invalid initial memo` |
+| Smoke snapshot scope | `restored boundary: later main-trial unknown billing and leakage cannot retroactively fail smoke G4` |
+| Actual public-window exclusion | `restored boundary: conservative public-window rejection needs actual exclusion facts` |
+| Human response antecedent exists | `restored boundary: accepted human response link needs its antecedent claim to exist` |
+
+The cache-count and technical-coverage boundary tests examine their respective checks
+directly; their synthetic mutations do not claim that the entire altered run is valid.

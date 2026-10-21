@@ -1,4 +1,4 @@
-import { assertion, check, combine, equal, hash, list, META_KEYS, missing, omit, row, rows, shaLike } from "./core.ts";
+import { allCalls, allHttp, assertion, check, combine, count, equal, hash, list, META_KEYS, missing, omit, row, rows, shaLike } from "./core.ts";
 import type { Check, Records, Row } from "./core.ts";
 
 /** The sole permitted projection is an image URL value, never a whole message/body. */
@@ -21,6 +21,17 @@ function projectionAudit(value: unknown, ownImage: Row, path: string[] = []): { 
 
 export function replayChecks(records: Records): Check[] {
   const out: Check[] = [], pairs = rows(records.evidence?.pairedReplay), seen = new Set<string>();
+  const uniqueIds = (ids: unknown[]) => ids.every(id => count(id) && id > 0) && new Set(ids).size === ids.length;
+  const sameIds = (a: unknown[], b: unknown[]) => uniqueIds(a) && uniqueIds(b) && a.length === b.length && a.every(id => b.includes(id));
+  // Account for EVERY POST receipt, including one whose IDs match no replay request.
+  // Per-request selection alone must never make an unmatched receipt disappear.
+  const allPosts = allHttp(records).filter(h => h.kind === "completion_post" || h.method === "POST");
+  const lunaCalls = allCalls(records).filter(c => c.provider === "luna");
+  out.push(assertion("replay.http_receipts", uniqueIds(allPosts.map(h => h.sendId)) &&
+    allPosts.every(h => h.kind === "completion_post" && h.method === "POST" && lunaCalls.some(c =>
+      c.id === h.callId && list(c.sendIds).includes(h.sendId) && c.phase === h.phase)) &&
+    lunaCalls.every(c => sameIds(list(c.sendIds), allPosts.filter(h => h.callId === c.id).map(h => h.sendId))),
+    "one_to_one_all_http_receipts_and_native_send_ids"));
   const expected = records.trials.flatMap(t => rows(t.replay).map(r => ({ order: t.order, turn: row(list(row(r.tape).events).at(-1)).seq })));
   if (!pairs.length) out.push(missing("replay.prewire", "both_label_raw_requests_missing"));
   if (records.evidence?.normalizedEnvelopeFields) out.push(assertion("replay.normalization", equal(records.evidence.normalizedEnvelopeFields, META_KEYS), "fixed_envelope_key_list"));
@@ -74,9 +85,11 @@ export function replayChecks(records: Records): Check[] {
           else out.push(missing(`${rid}.messages_recomputation`, "original_image_bytes_not_present"));
           if (original.actualSendMeasured !== true) { const absent = missing(`${rid}.actual_http`, "actual_luna_send_not_measured"); out.push(absent); bindings.push(absent); }
           else {
-            const sends = list(original.sendIds), receipts = rows(trial?.http).filter(h => sends.includes(h.sendId) && h.kind === "completion_post");
+            const sends = list(original.sendIds), receipts = rows(trial?.http).filter(h =>
+              (h.kind === "completion_post" || h.method === "POST") && (h.callId === call?.id || sends.includes(h.sendId)));
             const actual = different ? incomparable(`${rid}.actual_http`) : assertion(`${rid}.actual_http`, !!call && sends.length > 0 && receipts.length === sends.length &&
-              equal(sends, call.sendIds) && receipts.every(h => h.callId === call.id && h.phase === request.phase && h.hashScheme === "canonical_json_sha256" && h.requestSha256 === original.requestSha256) &&
+              sameIds(sends, receipts.map(h => h.sendId)) && equal(sends, call.sendIds) && receipts.every(h => h.kind === "completion_post" && h.method === "POST" &&
+                h.callId === call.id && h.phase === request.phase && h.hashScheme === "canonical_json_sha256" && h.requestSha256 === original.requestSha256) &&
               call.expectedHttpRequestSha256 === original.requestSha256 && call.httpRequestSha256 === original.requestSha256, "each_actual_post_and_retry_bound_to_full_http_hash");
             out.push(actual); bindings.push(actual);
           }

@@ -11,6 +11,7 @@ import type { Records, Row } from "../dialogue-model/runtime/diagnostics/parity-
 import { row, rows, list } from "../dialogue-model/runtime/diagnostics/parity-verify/core.ts";
 import { ledger } from "../dialogue-model/runtime/diagnostics/parity-verify/ledger.ts";
 import { coverage } from "../dialogue-model/runtime/diagnostics/parity-verify/coverage.ts";
+import { cacheChecks } from "../dialogue-model/runtime/diagnostics/parity-verify/fairness.ts";
 
 const captured: Record<string, Records> = JSON.parse(readFileSync(new URL("./fixtures/parity-verify/producer-records.json", import.meta.url), "utf8"));
 const fixture = (scenario = "known"): Records => structuredClone(captured[scenario]);
@@ -53,6 +54,37 @@ test("fixed producer explicit output limit and real injected retry bind every HT
   assert.ok(Number.isSafeInteger(maximum)); assert.equal(row(request.payload).max_completion_tokens, maximum);
   assert.ok(v.checks.some(c => c.reason === "each_actual_post_and_retry_bound_to_full_http_hash" && c.status === "pass"));
   assert.ok(v.checks.some(c => c.reason === "exact_luna_body_keys_purpose_explicit_limit" && c.status === "pass"));
+});
+function explicitRetry() {
+  const r = fixture("explicit_retry"), trial = r.trials.find(t => rows(t.calls).some(c => c.id === 8))!;
+  const call = rows(trial.calls).find(c => c.id === 8)!;
+  const receipts = rows(trial.http).filter(h => h.kind === "completion_post" && h.callId === call.id);
+  const pairIndex = rows(r.evidence!.pairedReplay).findIndex(p => p.trialOrder === trial.order && p.turn === call.turn);
+  const replay = rows(trial.replay).find(e => row(rows(row(e.tape).events).at(-1)).seq === call.turn)!;
+  const requestIndex = rows(row(replay.tape).expectedRequests).findIndex(q => list(q.sendIds).includes(8));
+  assert.deepEqual(call.sendIds, [8, 9]); assert.deepEqual(receipts.map(h => h.sendId), [8, 9]);
+  return { r, call, receipts, id: `replay.${pairIndex}.left.${requestIndex}.actual_http` };
+}
+test("POSTAUDIT-17: one duplicated receipt ID cannot cover two actual retry sends", () => {
+  const { r, call, receipts, id } = explicitRetry(); assert.equal(result(r, id).status, "pass");
+  const budget = hash(r.summary!.budget), tape = hash(r.trials.map(t => t.replay));
+  receipts[1].sendId = 8; // Sole corruption: receipt [8,9] -> [8,8].
+  assert.deepEqual(receipts.map(h => h.sendId), [8, 8]); assert.deepEqual(call.sendIds, [8, 9]);
+  assert.equal(hash(r.summary!.budget), budget); assert.equal(hash(r.trials.map(t => t.replay)), tape);
+  assert.equal(result(r, id).status, "mismatch"); assert.equal(result(r, "replay.http_receipts").status, "mismatch");
+});
+test("POSTAUDIT-17: unmatched ID within an owned call is retained and rejected", () => {
+  const { r, receipts, id } = explicitRetry(); receipts[1].sendId = 999999;
+  assert.equal(result(r, id).status, "mismatch"); assert.equal(result(r, "replay.http_receipts").status, "mismatch");
+});
+test("POSTAUDIT-17: wholly unmatched receipt cannot disappear through per-request filtering", () => {
+  const { r, receipts } = explicitRetry(), trial = r.trials.find(t => rows(t.calls).some(c => c.id === 8))!;
+  (trial.http as Row[]).push({ ...receipts[1], callId: 999999, sendId: 999999 });
+  assert.equal(result(r, "replay.http_receipts").status, "mismatch");
+});
+test("POSTAUDIT-17: correct send ID with wrong call ownership is rejected", () => {
+  const { r, receipts, id } = explicitRetry(); receipts[1].callId = 999999;
+  assert.equal(result(r, id).status, "mismatch"); assert.equal(result(r, "replay.http_receipts").status, "mismatch");
 });
 
 test("independent canonical JSON and SHA use fixed vectors and preserve array order", () => {
@@ -293,6 +325,57 @@ test("producer rejection reason alone cannot certify a conservative contract", (
   const r = fixture(), next = rows(r.trials[0].turns)[1];
   row(rows(next.trace).find(t => t.status === "committed")!.aiPublic).application = { aiSeq: 2, status: "not_applied", reasons: ["prior_pruned"], claims: [] };
   assert.equal(aiCell(r).classification, "not_reached");
+});
+test("restored boundary: warm-up zero POST is rejected; three allowed and four rejected", () => {
+  const r = fixture(), warmup = (data: Records) => cacheChecks(data).find(c => c.id === "cache.warmup")!;
+  assert.equal(warmup(r).status, "pass");
+  const post = rows(r.warmup!.http).find(h => h.kind === "completion_post")!;
+  const policies = rows(r.warmup!.http).filter(h => h.kind !== "completion_post");
+  r.warmup!.http = policies; assert.equal(warmup(r).status, "mismatch");
+  // Scope is the existing cache warm-up count gate, independently of ledger/receipt checks.
+  r.warmup!.http = [...policies, ...[1, 2, 3].map(sendId => ({ ...post, sendId }))];
+  assert.equal(warmup(r).status, "pass");
+  (r.warmup!.http as Row[]).push({ ...post, sendId: 4 }); assert.equal(warmup(r).status, "mismatch");
+});
+test("restored boundary: validated flag cannot certify a structurally invalid initial memo", () => {
+  const r = fixture(), receipt = rows(r.evidence!.cache)[0];
+  assert.equal(receipt.validated, true); assert.equal(result(r, "cache.receipt.0.memo_schema").status, "pass");
+  rows(row(receipt.memo).figures)[0].region = null;
+  assert.equal(receipt.validated, true); assert.equal(result(r, "cache.receipt.0.memo_schema").status, "mismatch");
+});
+test("restored boundary: later main-trial unknown billing and leakage cannot retroactively fail smoke G4", () => {
+  const r = fixture(), later = r.trials.at(-1)!, smoke = r.trials[0];
+  assert.equal(later.stage, "main"); const c = rows(later.calls).find(c => c.provider === "jev")!, id = list(c.sendIds)[0];
+  assert.ok(!rows(row(smoke.budget).sends).some(s => s.id === id));
+  assert.equal(result(r, "gate.G4").status, "pass");
+  rows(row(r.summary!.budget).sends).find(s => s.id === id)!.costUsd = null;
+  assert.ok(Number(report(r).totals.unknownJevCosts) > 0); assert.equal(result(r, "gate.G4").status, "pass");
+  rows(later.publicTurns)[0].text = "Bearer synthetic-later-trial-token";
+  assert.equal(result(r, "privacy.public").status, "mismatch"); assert.equal(result(r, "gate.G4").status, "pass");
+});
+test("restored boundary: conservative public-window rejection needs actual exclusion facts", () => {
+  const r = fixture(), trial = r.trials[0], next = rows(trial.turns)[1];
+  const trace = rows(next.trace).find(t => t.status === "committed")!, tape = row(rows(trial.replay)[1].tape);
+  const original = rows(tape.events); assert.equal(original.at(-1)!.seq, 3);
+  row(trace.aiPublic).application = { aiSeq: 2, status: "not_applied", reasons: ["source_out_of_window"], claims: [] };
+  const extended = [...original, ...Array.from({ length: 32 }, (_, i) => ({ seq: i + 4, speaker: (i + 4) % 2 ? "human" : "ai", text: "synthetic public window continuation" }))];
+  tape.events = extended; next.turn = 35;
+  assert.ok(!rows(tape.events).slice(-32).some(e => e.seq === 2 && e.speaker === "ai"));
+  assert.equal(aiCell(r).classification, "conservative_reject");
+  tape.events = extended.slice(0, 31); next.turn = 31;
+  assert.ok(rows(tape.events).slice(-32).some(e => e.seq === 2 && e.speaker === "ai"));
+  assert.deepEqual(row(row(trace.aiPublic).application).reasons, ["source_out_of_window"]);
+  assert.equal(aiCell(r).classification, "not_reached");
+});
+test("restored boundary: accepted human response link needs its antecedent claim to exist", () => {
+  const r = fixture(), next = rows(r.trials[0].turns)[1], graph = row(row(next.state).graph);
+  const antecedent = rows(graph.records).find(c => c.kind === "claim" && c.speaker === "ai" && Number(c.sourceTurn) < Number(next.turn))!;
+  assert.ok(antecedent);
+  (graph.records as Row[]).push({ id: "synthetic-human-response", kind: "claim", speaker: "human", turn: next.turn, sourceTurn: next.turn, respondsTo: antecedent.id });
+  const cell = () => coverage(r).cells.find(c => c.trialOrder === 0 && c.path === "humanResponseLinks" && c.turn === next.turn)!;
+  assert.equal(cell().classification, "live_demonstrated");
+  graph.records = rows(graph.records).filter(c => c.id !== antecedent.id);
+  assert.equal(cell().classification, "wiring_failed");
 });
 test("stage-status assertions without actual producer calls cannot establish AI coverage", () => {
   const r = fixture(); r.trials[0].calls = rows(r.trials[0].calls).filter(c => !(c.turn === 1 && c.phase === "ai_function"));
