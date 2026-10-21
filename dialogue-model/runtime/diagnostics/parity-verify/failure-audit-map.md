@@ -120,9 +120,12 @@ there is no coercion, trimming, case conversion or recursive normalization.
 | R121-3 missing evidence and temporal scope | Missing components without a known contradiction are not_reached; absent trial remains output_missing; later failure cannot invalidate an earlier good snapshot | `R121-3 unchanged save-failure capture keeps missing output and zero mismatches`; `R121-3 unknown components are not guessed false`; `R121-3 later failure does not invalidate an earlier good smoke snapshot or G4` |
 
 Policy vocabulary comes from the existing native getModelPolicy contract
-(`dialogue-model/runtime/client.mjs`); model syntax/maximum length comes from the
-existing Worker model-policy contract (`workers/research-ai-proxy/src/modelPolicy.mjs`).
-The verifier reimplements these validations and imports neither implementation.
+(`dialogue-model/runtime/client.mjs`). POSTAUDIT-23 fixes the model boundary to the
+producer's existing success-policy contract: first character ASCII alphanumeric,
+followed by up to 127 ASCII alphanumeric/dot/underscore/slash/hyphen characters.
+Colons and leading punctuation are rejected. The broader Worker model syntax is
+not this boundary. The verifier independently implements the approved pattern and
+imports no producer/runtime validation helper.
 It compares the recorded model to recorded requests, never a new research model ID.
 
 TDD RED: `node --test tests/parity-verify-schema-audit.test.ts` against 6eb2d7b,
@@ -131,3 +134,13 @@ checks). Log: `/private/tmp/sol3-r121-red.log`. After the minimum implementation
 the same 156 tests pass; log: `/private/tmp/sol3-r121-green-focused.log`.
 All four focused verifier files then pass 329/329, including the unchanged 173
 existing regressions; log: `/private/tmp/sol3-r121-green.log`. Strict typecheck passes.
+
+POSTAUDIT-23 / R121-2a adds eight model-boundary cases with matching policy and
+requestedModel: colon plus four leading punctuation negatives, length 1/128
+positives, and length 129 negative. The arbitrary-model positive is replaced by
+`organization/new-model-v2.1` as explicitly approved. Before the implementation
+change, the schema-audit file gave 164 tests, 159 pass / 5 fail (the five lexical
+negatives); log: `/private/tmp/sol3-r121-2a-red.log`. Existing 173 expectations,
+producer and C7 fixture are unchanged.
+GREEN: all four focused files pass 337/337; log:
+`/private/tmp/sol3-r121-2a-green.log`. Strict typecheck and diff check pass.

@@ -82,9 +82,9 @@ export function failureChecks(records: Records): Check[] {
       const policy = row(f.policy), value = row(policy.value), completeCalls = rows(f.calls).filter(c => c.provider === "luna");
       const policyRequired = oneOf(f.stage, ["cache_get", "post_cache"]) || f.observationCallStarted === true || completeCalls.length > 0;
       if (policy.status === "obtained") {
-        // Existing Worker model syntax and native policy provider vocabulary; no research model is pinned.
+        // Independently enforce the approved success-policy boundary (POSTAUDIT-23); no research model is pinned.
         const valid = value.purpose === "dialogue_turn" && value.ready === true && oneOf(value.provider, ["openai", "gemini"]) &&
-          typeof value.model === "string" && value.model.length <= 128 && /^[a-zA-Z0-9._:/-]+$/u.test(value.model) &&
+          typeof value.model === "string" && /^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/u.test(value.model) &&
           completeCalls.every(c => c.requestedModel === value.model);
         out.push(assertion("failure.policy", valid, "obtained_policy_matches_contract_and_requested_model"));
       } else out.push(policyRequired ? assertion("failure.policy", false, "policy_required_before_observation") :

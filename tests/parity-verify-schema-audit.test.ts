@@ -83,9 +83,24 @@ for (const model of [" ", "bad model;command", "a".repeat(129)]) test(`R121-2 ob
   assert.equal(result(r, "failure.policy").status, "mismatch");
 });
 test("R121-2 policy follows recorded requested model instead of pinning a research model ID", () => {
-  const r = fixture(), p = row(row(r.failure!.policy).value); p.model = "organization/new-model:v2.1";
+  const r = fixture(), p = row(row(r.failure!.policy).value); p.model = "organization/new-model-v2.1"; // POSTAUDIT-23 approved replacement.
   rows(r.failure!.calls).forEach(c => { c.requestedModel = p.model; });
   assert.ok(!failureChecks(r).some(c => c.id === "failure.policy" && c.status === "mismatch"));
+});
+for (const model of ["organization/new-model:v2.1", "/synthetic", ".synthetic", "_synthetic", "-synthetic"]) test(`R121-2a matched policy/request model rejects ${JSON.stringify(model)}`, () => {
+  const r = fixture(); row(row(r.failure!.policy).value).model = model;
+  rows(r.failure!.calls).forEach(c => { c.requestedModel = model; }); // Equality cannot mask invalid syntax.
+  assert.equal(schema(r).status, "pass"); assert.equal(result(r, "failure.policy").status, "mismatch");
+});
+for (const length of [1, 128]) test(`R121-2a matched policy/request model accepts length ${length}`, () => {
+  const r = fixture(), model = "A".repeat(length); row(row(r.failure!.policy).value).model = model;
+  rows(r.failure!.calls).forEach(c => { c.requestedModel = model; });
+  assert.equal(result(r, "failure.policy").status, "pass");
+});
+test("R121-2a matched policy/request model rejects length 129", () => {
+  const r = fixture(), model = "A".repeat(129); row(row(r.failure!.policy).value).model = model;
+  rows(r.failure!.calls).forEach(c => { c.requestedModel = model; });
+  assert.equal(result(r, "failure.policy").status, "mismatch");
 });
 for (const provider of ["openai", "gemini"]) test(`R121-2 existing provider ${provider} remains allowed`, () => {
   const r = fixture(); row(row(r.failure!.policy).value).provider = provider;
