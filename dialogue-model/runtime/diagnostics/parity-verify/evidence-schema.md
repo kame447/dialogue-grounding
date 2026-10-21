@@ -26,8 +26,11 @@ type ReplaySide = {
   materialSha256: string;
   requests: Array<{
     provider: 'luna' | 'jev'; phase: string;
-    payload: unknown; // entire model-facing boundary request, never remove body keys
-    payloadSha256: string;
+    payloadDomain: 'canonical_http_json';
+    payload: unknown; // entire parsed HTTP body AFTER the sole image projection
+    payloadSha256: string; // canonical projected body; independently recomputed
+    preProjectionPayloadSha256: string; // canonical original full HTTP body
+    completeMessagesSha256?: string; // Luna messages BEFORE projection; diagnostic
   }>;
 };
 type LedgerEvent = {
@@ -48,6 +51,8 @@ type LedgerEvent = {
   requestedModel?: string; model?: string | null;
   reason?: string;
   inFlight?: number[]; // stop: ALL sent but not yet completed send IDs, including unknown
+  scope?: 'run' | 'trial' | 'instance';
+  scopeDetail?: 'logical_call'; // instance + call identity, not instance lifetime
 };
 type CacheReceipt = {
   trialOrder: number | null; // null = warm-up
@@ -81,9 +86,28 @@ the same send boundary, after effective settings/dynamic questions/criteria/inst
 are assembled. Include model/output limit/timeout effective context in material; do
 not derive one label from the other. Existing taped request hashes remain separately
 checked, but one list plus labelsEqual is insufficient for independent parity proof.
-If Luna payload is messages-only at complete boundary (existing requestSha256 scheme),
-record those messages as payload and its full effective request settings in material;
-do not call that actual HTTP-byte parity. Jev payload is the full JSON HTTP body.
+The required boundary for BOTH providers is full canonical HTTP JSON, not raw-body-byte
+parity. `material.boundary` is `{luna:'canonical_http_json', jev:'canonical_http_json',
+hashScheme:'canonical_json_sha256_not_raw_body_bytes'}`. `material.state/events/profile`
+bind directly to the native tape/trial; optional frozen luna/jev/reobservations bind too.
+Messages-only legacy evidence cannot establish the approved full HTTP parity check.
+
+Hash domains are separate. `payloadSha256` recomputes the full projected HTTP object;
+`preProjectionPayloadSha256` binds to tape.expectedRequests[].requestSha256. If no
+projection occurs it is also independently recomputed. Where original image bytes
+are absent, the pre-projection recomputation is not_reached: matching self-reported
+hashes alone is not full proof. The only permitted projection is an own-image data URL
+at messages[i].content[j].image_url.url to exactly `{projection:'own_image_bytes_sha256',
+mimeType,byteSha256}`, matching material.own.ownImage. No other subtree is projected.
+Compare both complete projected payload/material trees; do not remove body fields.
+
+Luna's body keys are exactly purpose/messages and, only for an explicit request,
+max_completion_tokens. purpose is dialogue_turn and explicit maximum equals the profile.
+Tape Luna entries additionally carry messagesSha256, actualSendMeasured and sendIds.
+HttpReceipt callId/sendId/requestSha256/hashScheme bind EACH actual POST/retry to the
+canonical original HTTP object. CallReceipt.requestSha256 remains the legacy messages
+diagnostic; expectedHttpRequestSha256/httpRequestSha256 are full HTTP hashes. Each
+complete response's token fields are at response.usage.inputTokens/outputTokens.
 
 Events: `complete` means Luna complete entry (not retries); `reserve` occurs atomically
 before each allowed POST attempt; `send` immediately precedes actual fetch invocation;
@@ -99,6 +123,22 @@ no new sends/commits after run stop. If a stop is only trial/instance scoped, ad
 Late response revisions are allowed, new sends are not. Record Jev per-instance prior
 observed maximum alongside costs implicitly derivable from response order: .05 rule
 checks spent + prior maximum before next send; not a strict final spending guarantee.
+An actually-sent Jev call aborted/timed out while billing is unresolved creates a RUN
+stop obligation immediately, even if a producer labels its event logical-call/instance
+scoped. A missing or too-narrow stop is a mismatch. Pre-send refusals and cleanup of
+already-billed calls do not create that unknown-charge obligation. Known run USD/token
+thresholds apply to commits as well as sends. Later cost backfill never removes a past
+stop obligation. Luna logical-call abort alone does not terminate its client's lifetime.
+Parent decision 8054: the descriptive logical-call/instance abort and same-send
+unknown/response/stop bookkeeping may occur contiguously before the required run-scope
+stop. No reserve, complete, send, commit, policy GET or unrelated bookkeeping may
+intervene. Record the run stop even when late billing becomes known before it;
+only a narrower stop or no run stop is a mismatch, and backfill never cancels the duty.
+
+Public packets contain only prefix/sha256; prefix elements contain only speaker/turn/text.
+The verifier checks increasing unique turns, filename trial/checkpoint, absence of future
+turns, and exact agreement with recorded public events/committed speech through that
+checkpoint. Contradictions mismatch; insufficient public source evidence is not_reached.
 
 Cache: include warm-up and every entered trial, bind trialOrder to trial-N.private.json.
 Every trial before==after==warm after, cache HIT, memo SHA identical. Warm-up must MISS,

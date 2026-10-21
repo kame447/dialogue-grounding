@@ -2,6 +2,7 @@ import { assertion, check, combine, equal, list, missing, omit, profileHash, row
 import type { Check, Records, Row } from "./core.ts";
 import { cacheChecks, publicPrivacy } from "./fairness.ts";
 import { ledger } from "./ledger.ts";
+import { requiredPackets } from "./packets.ts";
 
 export type CoverageClass = "live_demonstrated" | "partial_demonstrated" | "conservative_reject" | "not_observed" | "not_reached" | "wiring_failed";
 export type Coverage = { trialOrder: unknown; turn: unknown; path: string; classification: CoverageClass; reason: string;
@@ -138,10 +139,7 @@ export function gates(records: Records, independent: Check[]): Check[] {
     const storageCheck = !storage ? missing("storage.permissions", "filesystem_metadata_not_supplied") : assertion("storage.permissions",
       required.every(name => storage.some(s => s.name === name && s.external && s.regular && s.mode === 0o600)) &&
       storage.every(s => s.external && s.regular && s.mode === 0o600), "external_private_regular_record_files");
-    const packets = records.packets;
-    const packetCheck = !packets ? missing("storage.packets") : assertion("storage.packets", turns.length > 0 && turns.every(t =>
-      [t.turn, Number(t.turn) + 1].every(seq => packets.some(p => p.name === `public-${trial.order}-${seq}.packet.json` &&
-        Array.isArray(p.value.prefix) && p.value.sha256 !== undefined))), "public_packets_present");
+    const packetCheck = requiredPackets(records, trial);
     const stageModels = assertion("smoke.models", [...rows(records.warmup?.calls), ...rows(trial.calls)].every(c => c.status !== "ok" ||
       typeof c.model === "string" && c.model === c.requestedModel), "smoke_requested_returned_models");
     const stageProfile = trial.profile ? assertion("smoke.profile", profileHash(row(trial.profile)) === trial.profileSha256 &&

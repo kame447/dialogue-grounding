@@ -1,375 +1,337 @@
-// Entirely synthetic record fixtures. No harness imports, APIs or credentials.
+// Fixed synthetic producer records; no runtime harness/model/credential imports.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { mkdtemp, writeFile, chmod, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { canonical, hash, loadRecords, profileHash, sha256, verifyDirectory, verifyRecords } from "../dialogue-model/runtime/diagnostics/parity-verify/index.ts";
+import { canonical, hash, profileHash, sha256, loadRecords, verifyDirectory, verifyRecords } from "../dialogue-model/runtime/diagnostics/parity-verify/index.ts";
 import type { Records, Row } from "../dialogue-model/runtime/diagnostics/parity-verify/index.ts";
+import { row, rows, list } from "../dialogue-model/runtime/diagnostics/parity-verify/core.ts";
+import { ledger } from "../dialogue-model/runtime/diagnostics/parity-verify/ledger.ts";
 import { coverage } from "../dialogue-model/runtime/diagnostics/parity-verify/coverage.ts";
-import { row, rows } from "../dialogue-model/runtime/diagnostics/parity-verify/core.ts";
 
-const digest = sha256("synthetic cache bytes");
-function fixture(): Records {
-  const profile = { id: "synthetic_profile", referenceMemory: true, decisionMode: "jev", humanReferent: true,
-    localGrounding: { enabled: true, aiPublicClaims: true }, initialObservation: "cache_required", timeouts: { decisionMs: 15000 },
-    modelPolicy: { jevModel: "test-jev" }, questionLayout: "two_stage_v1", lunaRequest: { timeoutMs: null, maxCompletionTokens: null } };
-  const memo = { observedAt: "2026-10-21T00:00:00Z", figures: [{ id: "own-1", region: { x: 0, y: 0, w: 10, h: 10 },
-    holistic: [{ construal: "synthetic shape", basis: ["synthetic parts"], status: "hypothesis" }],
-    analytic: { shapes: ["triangle"], composition: "synthetic triangle", relations: [] }, unknowns: [], reobservations: [] }] };
-  const caps = { lunaCalls: 131, lunaPosts: 393, jevPosts: 208, jevUsd: 2, lunaTokens: 1500000 };
-  const manifest = { id: "synthetic", caps };
-  const records: Records = { run: { runId: "synthetic-only", execution: "mock", manifest, manifestSha256: hash(manifest), profile, profileSha256: profileHash(profile) },
-    summary: {}, warmup: {}, trials: [], billing: [], packets: [], storage: [],
-    evidence: { version: 1, runId: "synthetic-only", events: [], pairedReplay: [], cache: [] } };
-  const sends: Row[] = [], events = records.evidence!.events as Row[], billing = records.billing!, cache = records.evidence!.cache as Row[];
-  let callId = 0, sendId = 0;
-  const push = (event: Row) => { events.push({ seq: events.length + 1, at: "2026-10-21T00:00:00Z", ...event }); };
-  const addCall = (order: number | null, label: string, provider: string, phase: string, payload: unknown) => {
-    const id = ++callId, sid = ++sendId, model = provider === "luna" ? "test-luna" : "test-jev";
-    const context = { provider, trialOrder: order, label, instanceId: `${provider}-${order ?? "warm"}`, callId: id, phase };
-    if (provider === "luna") push({ type: "complete", ...context });
-    push({ type: "reserve", ...context, sendId: sid }); push({ type: "send", ...context, sendId: sid });
-    const initial = { id: sid, provider, phase, turn: order === null ? null : 1, logicalCallId: id, status: "in_flight", costUsd: null,
-      inputTokens: null, outputTokens: null, model: null, modelMatches: null };
-    billing.push({ entry: structuredClone(initial), stops: [] });
-    const result = { ...initial, status: "observed_response", costUsd: provider === "jev" ? 0.001 : null,
-      inputTokens: provider === "luna" ? 10 : null, outputTokens: provider === "luna" ? 2 : null, model, modelMatches: true };
-    sends.push(result); billing.push({ entry: structuredClone(result), stops: [] });
-    push({ type: "response", ...context, sendId: sid, status: "ok", requestedModel: model, model, costUsd: result.costUsd,
-      inputTokens: result.inputTokens, outputTokens: result.outputTokens });
-    return { id, sendIds: [sid], phase, turn: order === null ? null : 1, provider, requestSha256: hash(payload), instructionSha256: hash("synthetic instructions"),
-      requestedModel: model, model, status: "ok", error: null, costUsd: result.costUsd, inputTokens: result.inputTokens,
-      outputTokens: result.outputTokens, imageCount: 0, latencyMs: 1 };
-  };
-  const policy = () => ({ method: "GET", kind: "policy_get", phase: null, requestSha256: null, status: 200, outcome: "returned" });
-  const snapshot = () => {
-    const luna = sends.filter(s => s.provider === "luna"), jev = sends.filter(s => s.provider === "jev");
-    return { sends: structuredClone(sends), observedJevUsd: jev.length * 0.001, observedInputTokens: luna.length * 10,
-      observedOutputTokens: luna.length * 2, observedLunaTokens: luna.length * 12, missingInputTokens: 0, missingOutputTokens: 0,
-      lunaCalls: luna.length, lunaPosts: luna.length, jevPosts: jev.length, inFlight: [], unresolvedJevSends: [],
-      jevUnknown: false, halted: false, stops: [], limits: caps, lunaCostUsd: null, totalUsd: null };
-  };
-  const httpPost = (phase: string, payload: unknown) => ({ method: "POST", kind: "completion_post", phase, requestSha256: hash(payload), status: 200, outcome: "returned" });
-  const warmPayload = [{ role: "user", content: "Observe synthetic own image" }];
-  const warmCall = addCall(null, "warmup", "luna", "observation_initial", warmPayload);
-  records.warmup = { audit: { status: "MISS", key: { modelHash: hash("test-luna") } }, memoSha256: hash(memo), fileSha256: digest,
-    calls: [warmCall], http: [policy(), httpPost("observation_initial", warmPayload)], policy: { model: "test-luna" } };
-  cache.push({ trialOrder: null, status: "MISS", beforeSha256: null, afterSha256: digest, memo, memoSha256: hash(memo), validated: true, requestedModel: "test-luna", returnedModel: "test-luna" });
-  const labels = ["repair-first", "repair-first", "bypass-enabled"];
-  for (let order = 0; order < labels.length; order++) {
-    const label = labels[order], stage = order === 0 ? "smoke" : "main";
-    const request = (key: string) => ({ model: "test-jev", state: "{}", questions: { [key]: { type: "choice", instructions: "Use public evidence", criteria: { unknown: "Uncertain", figure_0: "Own figure" } } } });
-    const hr = request("human_referent"), decision = request("action"), generation = [{ role: "system", content: "Generate a natural response from the synthetic public history only." }];
-    const response = (key: string) => ({ model: "test-jev", usage: { cost: 0.001 }, answers: { [key]: { type: "choice", choice: "unknown", probabilities: { unknown: 1, figure_0: 0 } } } });
-    const calls = [addCall(order, label, "jev", "human_referent", hr), addCall(order, label, "jev", "decision", decision), addCall(order, label, "luna", "generation", generation)];
-    const state = { graph: { records: [] }, ledger: {}, repairHistory: [], observationMemo: structuredClone(memo), aiPublic: { log: [] } };
-    const publicTurns = [{ id: "human-1", seq: 1, speaker: "human", text: "形があるね。" }, { id: "ai-2", seq: 2, speaker: "ai", text: "見てみよう。" }];
-    const trace = { status: "committed", turnIndex: 1, publicSpeech: "見てみよう。", humanReferent: { status: "ok", model: "test-jev" },
-      local: { status: "committed", localStatus: "ok" }, decisions: [{ action: "describe", decisionKind: "jev_local_test", evidence: { stages: [{ model: "test-jev" }] } }],
-      finalAction: { action: "describe" }, reobservations: [], aiPublic: { pending: { aiSeq: 2, status: "empty", candidates: [], reasons: [] },
-        stages: { ai_extraction: { status: "ok" }, ai_function: { status: "skipped" }, ai_support: { status: "skipped" } } } };
-    const tape = { state: structuredClone(state), events: [structuredClone(publicTurns[0])], jev: [response("human_referent"), response("action")],
-      luna: [{ phase: "generation", response: { model: "test-luna", text: "見てみよう。", inputTokens: 10, outputTokens: 2 } }],
-      expectedRequests: calls.map(c => ({ provider: c.provider, phase: c.phase, requestSha256: c.requestSha256 })) };
-    const trial: Row = { order, stage, label, scriptId: "S0", completed: true, failure: null, profile: structuredClone(profile), profileSha256: profileHash(profile),
-      cache: { status: "HIT", key: { modelHash: hash("test-luna") } },
-      identity: { image: hash("own image"), anchors: hash("own anchors"), memo: hash(memo), prompts: hash("prompts"), profile: profileHash(profile),
-        timeouts: hash(profile.timeouts), requestedModels: hash(["test-luna", "test-jev"]), returnedModels: ["test-luna", "test-jev"] },
-      calls, http: [policy(), httpPost("generation", generation)], publicTurns, attempts: [], budget: snapshot(),
-      turns: [{ turn: 1, publicText: "見てみよう。", trace: [trace], state, humanReferent: [hash(hr)], actionInputs: [hash(decision)],
-        humanMaterial: [hash("same referent materials")], actionMaterial: [hash("same action materials")] }],
-      replay: [{ tape, result: { requests: structuredClone(tape.expectedRequests), labelsEqual: true, status: "same_material_same_payload" } }],
-      gates: { G1: { passed: true }, G2: { passed: true }, G3: { passed: true }, G4: { passed: true } } };
-    records.trials.push(trial);
-    const material = { state: structuredClone(tape.state), events: structuredClone(tape.events), profile: structuredClone(profile) };
-    const requests = [hr, decision, generation].map((payload, j) => ({ provider: calls[j].provider, phase: calls[j].phase, payload, payloadSha256: hash(payload) }));
-    (records.evidence!.pairedReplay as Row[]).push({ trialOrder: order, turn: 1,
-      left: { label: "repair-first", material: structuredClone(material), materialSha256: hash(material), requests: structuredClone(requests) },
-      right: { label: "bypass-enabled", material: structuredClone(material), materialSha256: hash(material), requests: structuredClone(requests) } });
-    cache.push({ trialOrder: order, status: "HIT", beforeSha256: digest, afterSha256: digest, memo: structuredClone(memo), memoSha256: hash(memo), validated: true, requestedModel: "test-luna", returnedModel: "test-luna" });
-    for (const seq of [1, 2]) {
-      const prefix = publicTurns.filter(t => t.seq <= seq).map(t => ({ turn: t.seq, speaker: t.speaker, text: t.text }));
-      records.packets!.push({ name: `public-${order}-${seq}.packet.json`, value: { prefix, sha256: hash(prefix) } });
-    }
-  }
-  const budget = { sends, observedJevUsd: 0.006, observedInputTokens: 40, observedOutputTokens: 8, observedLunaTokens: 48,
-    missingInputTokens: 0, missingOutputTokens: 0, lunaCalls: 4, lunaPosts: 4, jevPosts: 6, inFlight: [], unresolvedJevSends: [],
-    jevUnknown: false, halted: false, stops: [], limits: caps, lunaCostUsd: null, totalUsd: null };
-  records.summary = { runId: "synthetic-only", profile: structuredClone(profile), profileSha256: profileHash(profile), manifestSha256: hash(manifest), budget, cacheFileSha256: digest };
-  const names = ["run.private.json", "summary.private.json", "warmup.private.json", ...records.trials.map(t => `trial-${t.order}.private.json`)];
-  records.storage = [...names, ...records.packets!.map(p => p.name)].map(name => ({ name, mode: 0o600, external: true, regular: true }));
-  return records;
+const captured: Record<string, Records> = JSON.parse(readFileSync(new URL("./fixtures/parity-verify/producer-records.json", import.meta.url), "utf8"));
+const fixture = (scenario = "known"): Records => structuredClone(captured[scenario]);
+const report = (r: Records) => verifyRecords(r);
+function result(r: Records, id: string) {
+  const found = report(r).checks.find(c => c.id === id); assert.ok(found, `missing ${id}`); return found;
 }
-const result = (records: Records, id: string) => {
-  const report = verifyRecords(records), found = report.checks.find(c => c.id === id);
-  assert.ok(found, `missing check ${id}; ${JSON.stringify(report.checks.filter(c => c.status === "mismatch"))}`); return found;
-};
-function corrupt(name: string, mutate: (r: Records) => void, id: string) {
+const pair = (r: Records) => rows(r.evidence!.pairedReplay)[0];
+const firstRequest = (r: Records, side = "left", provider = "luna", phase?: string) => rows(row(pair(r)[side]).requests).find(q => q.provider === provider && (!phase || q.phase === phase))!;
+const firstTape = (r: Records) => row(rows(r.trials[0].replay)[0].tape);
+function lua(r: Records) {
+  const tape = firstTape(r), turn = row(rows(tape.events).at(-1)).seq;
+  const response = rows(tape.luna).find(e => e.phase === "generation")!;
+  const call = rows(r.trials[0].calls).find(c => c.turn === turn && c.phase === "generation")!;
+  const index = rows(tape.luna).indexOf(response);
+  return { response: row(response.response), call, id: `validation.luna_usage.0.${turn}.${index}` };
+}
+function jevAnswer(r: Records) { return row(Object.values(row(rows(firstTape(r).jev)[0].answers))[0]); }
+function rehashPacket(r: Records, i = 0) { r.packets![i].value.sha256 = hash(r.packets![i].value.prefix); }
+function reseal(r: Records, side: string, req: Row) { req.payloadSha256 = hash(req.payload); return req; }
+function change(name: string, mutate: (r: Records) => void, id: string) {
   test(name, () => { const r = fixture(); assert.equal(result(r, id).status, "pass"); mutate(r); assert.equal(result(r, id).status, "mismatch"); });
 }
 
-test("independent canonical JSON matches fixed SHA vectors, preserves arrays, rejects invalid JSON", () => {
+test("fixed producer fixture connects nested usage, native full HTTP bodies, images and gates", () => {
+  const r = fixture(), v = report(r);
+  assert.deepEqual(v.checks.filter(c => c.status === "mismatch"), []);
+  assert.ok(v.checks.filter(c => c.id.startsWith("validation.luna_usage.")).length > 0);
+  assert.ok(v.checks.filter(c => c.id.startsWith("validation.luna_usage.")).every(c => c.status === "pass"));
+  assert.equal(result(r, "replay.0.parity").status, "pass");
+  assert.ok(v.checks.some(c => c.reason === "original_image_bytes_not_present_self_reported_hash_is_not_full_proof" && c.status === "not_reached"));
+  for (const gate of ["G1", "G2", "G3", "G4"]) assert.equal(result(r, `gate.${gate}`).status, "pass");
+  const { response, call } = lua(r); assert.equal(row(response.usage).inputTokens, 10); assert.equal(call.inputTokens, 10);
+});
+test("fixed producer explicit output limit and real injected retry bind every HTTP attempt", () => {
+  const r = fixture("explicit_retry"), v = report(r), budget = row(r.summary!.budget);
+  assert.deepEqual(v.checks.filter(c => c.status === "mismatch"), []);
+  assert.ok(Number(budget.lunaPosts) > Number(budget.lunaCalls));
+  const request = firstRequest(r), maximum = row(row(r.trials[0].profile).lunaRequest).maxCompletionTokens;
+  assert.ok(Number.isSafeInteger(maximum)); assert.equal(row(request.payload).max_completion_tokens, maximum);
+  assert.ok(v.checks.some(c => c.reason === "each_actual_post_and_retry_bound_to_full_http_hash" && c.status === "pass"));
+  assert.ok(v.checks.some(c => c.reason === "exact_luna_body_keys_purpose_explicit_limit" && c.status === "pass"));
+});
+
+test("independent canonical JSON and SHA use fixed vectors and preserve array order", () => {
   assert.equal(canonical({ z: [2, 1], a: { c: false, b: "日本語" } }), '{"a":{"b":"日本語","c":false},"z":[2,1]}');
   assert.equal(sha256("abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
-  assert.equal(hash({ b: 1, a: 2 }), hash({ a: 2, b: 1 }));
-  assert.notEqual(hash([1, 2]), hash([2, 1]));
+  assert.equal(hash({ a: 2, b: 1 }), hash({ b: 1, a: 2 })); assert.notEqual(hash([1, 2]), hash([2, 1]));
+  assert.equal(profileHash({ feature: true, label: "a" }), profileHash({ feature: true, label: "b" }));
   for (const v of [undefined, NaN, Infinity, new Date(), [undefined], new Array(1)]) assert.throws(() => canonical(v));
 });
-test("clean full synthetic records have no mismatch and all four gates pass", () => {
-  const r = fixture(), report = verifyRecords(r);
-  assert.deepEqual(report.checks.filter(c => c.status === "mismatch"), []);
-  for (const gate of ["G1", "G2", "G3", "G4"]) assert.equal(result(r, `gate.${gate}`).status, "pass");
-  assert.equal(report.status, "not_reached"); // Naming semantics deliberately not evaluated.
-  assert.equal(report.totals.policyGets, 4); assert.equal(report.totals.lunaComplete, 4);
+for (const scenario of ["input_missing", "both_missing"]) test(`real producer nested usage preserves ${scenario}`, () => {
+  const r = fixture(scenario), { response, call, id } = lua(r);
+  assert.equal(result(r, id).status, "pass"); assert.equal(row(response.usage).inputTokens, null); assert.equal(call.inputTokens, null);
+  assert.deepEqual(report(r).checks.filter(c => c.status === "mismatch"), []);
+  assert.ok(Number(report(r).totals.unknownInputTokens) > 0);
+  if (scenario === "input_missing") { assert.equal(row(response.usage).outputTokens, 2); assert.equal(call.outputTokens, 2); }
+  else { assert.equal(row(response.usage).outputTokens, null); assert.equal(call.outputTokens, null); }
 });
-corrupt("one profile flag changed invalidates profile SHA", r => { row(r.trials[1].profile).referenceMemory = false; }, "identity.profile.3");
-corrupt("one memo SHA changed across labels is detected", r => { row(r.trials[2].identity).memo = hash("corrupt"); }, "identity.pair.0.memo");
-corrupt("one byte-equivalent cache hash changed after trial is detected", r => { rows(r.evidence!.cache)[1].afterSha256 = hash("changed cache"); }, "cache.immutable.0");
-corrupt("trial MISS is never accepted", r => { row(r.trials[0].cache).status = "MISS"; }, "cache.trial.0");
-corrupt("warm-up zero POST is never accepted", r => { r.warmup!.http = rows(r.warmup!.http).filter(h => h.kind !== "completion_post"); }, "cache.warmup");
-corrupt("unknown Luna USD cannot become zero", r => { row(r.summary!.budget).lunaCostUsd = 0; }, "ledger.unknown_cost");
-corrupt("one budget total changed is detected", r => { row(r.summary!.budget).observedJevUsd = 0; }, "ledger.total.observedJevUsd");
-corrupt("unknown input-token field cannot be silently zeroed in total", r => { rows(row(r.summary!.budget).sends)[0].inputTokens = null; }, "ledger.total.observedInputTokens");
-corrupt("duplicate one send ID is detected", r => { rows(row(r.summary!.budget).sends)[1].id = 1; }, "ledger.ids");
-corrupt("one call references another call's send", r => { rows(r.trials[0].calls)[0].sendIds = [1]; }, "ledger.call.1");
-corrupt("a model mismatch is detected", r => { rows(r.trials[0].calls)[0].model = "other-model"; }, "identity.model.1");
-corrupt("one non-observation image crosses the wire boundary", r => { rows(r.trials[0].calls)[0].imageCount = 1; }, "identity.images");
-corrupt("one public secret-like token is detected without being printed", r => { rows(r.trials[0].publicTurns)[1].text = "Bearer synthetic-private-token"; }, "privacy.public");
-corrupt("one public packet SHA is corrupted", r => { r.packets![0].value.sha256 = hash("corrupt"); }, "records.packet.0");
-corrupt("one file permission is too broad", r => { r.storage![0].mode = 0o644; }, "gate.G3");
-corrupt("one stage-one primary error blocks G2 even when final speech committed", r => { rows(r.trials[0].calls)[2].status = "error"; }, "gate.G2");
-corrupt("one recorded probability shape is invalid", r => {
-  const tape = row(rows(r.trials[0].replay)[0].tape);
-  row(row(row(rows(tape.jev)[0].answers).human_referent).probabilities).unknown = 2;
-}, "gate.G2");
-corrupt("one evidence run ID differs", r => { r.evidence!.runId = "unrelated"; }, "records.evidence");
-corrupt("one ordered event sequence is duplicated", r => { rows(r.evidence!.events)[1].seq = 1; }, "ledger.event_order");
-corrupt("one reservation becomes a refusal before the actual send", r => { rows(r.evidence!.events).find(e => e.type === "reserve")!.type = "refused"; }, "ledger.event.2.reserved_before_send");
-
-test("raw paired payload differences are detected even if original harness says labelsEqual", () => {
-  const r = fixture(), pair = rows(r.evidence!.pairedReplay)[0], request = rows(row(pair.right).requests)[0];
-  row(request.payload).model = "other-model";
-  request.payloadSha256 = hash(request.payload);
-  assert.equal(result(r, "replay.0.parity").status, "mismatch");
-  assert.equal(result(r, "replay.0.right.wire_binding").status, "mismatch");
-});
-test("normalization omits only pre-listed envelope keys and never nested model keys", () => {
-  const r = fixture(), request = rows(row(rows(r.evidence!.pairedReplay)[0].right).requests)[0];
-  request.label = "metadata-only"; request.startedAt = "measurement-only";
-  assert.equal(result(r, "replay.0.parity").status, "pass");
-  row(request.payload).label = "model-visible"; request.payloadSha256 = hash(request.payload);
-  assert.equal(result(r, "replay.0.parity").status, "mismatch");
-});
-test("genuine upstream material differences are not classified as label mismatches", () => {
-  const r = fixture(), right = row(rows(r.evidence!.pairedReplay)[0].right);
-  row(right.material).state = { graph: { records: ["upstream stochastic difference"] } };
-  right.materialSha256 = hash(right.material);
-  assert.equal(result(r, "replay.0.parity").status, "not_comparable");
-  rows(r.trials[2].turns)[0].humanMaterial = [hash("different upstream material")];
-  assert.equal(result(r, "identity.pair.0.turn.0.humanReferent").status, "not_comparable");
-});
-test("missing raw evidence cannot be replaced with labelsEqual or gate pass booleans", () => {
-  const r = fixture(); delete r.evidence;
-  assert.equal(result(r, "replay.prewire").status, "not_reached");
-  assert.equal(result(r, "ledger.events").status, "not_reached");
-  assert.equal(result(r, "cache.immutable.0").status, "not_reached");
-  assert.equal(result(r, "gate.claim.G1").status, "not_reached");
+test("known nested usage cannot be downgraded to null or hidden by flat values", () => {
+  const r = fixture(), { response, call, id } = lua(r); call.inputTokens = null; response.inputTokens = null;
+  assert.equal(row(response.usage).inputTokens, 10); assert.equal(result(r, id).status, "mismatch");
 });
 
-test("run stop reports all in-flight calls; no new send or commit can follow it", () => {
-  const r = fixture(), events = rows(r.evidence!.events), sendIndex = events.findIndex(e => e.type === "send");
-  const s = events[sendIndex], stop = { seq: 0, at: s.at, type: "stop", reason: "trial_timeout", scope: "run", inFlight: [s.sendId] };
-  events.splice(sendIndex + 1, 0, stop); events.forEach((e, i) => { e.seq = i + 1; });
-  r.evidence!.events = events;
-  const report = verifyRecords(r);
-  assert.deepEqual(report.inFlightAtStops[0].sendIds, [s.sendId]);
-  assert.equal(result(r, "ledger.stop_discipline").status, "mismatch");
-  stop.inFlight = [];
-  assert.ok(verifyRecords(r).checks.some(c => c.reason === "all_in_flight_at_stop_listed" && c.status === "mismatch"));
+for (const confidence of [2, -0.1, "0.5", {}, []]) test(`Jev confidence rejects native-contract invalid ${JSON.stringify(confidence)}`, () => {
+  const r = fixture(); jevAnswer(r).confidence = confidence; assert.equal(result(r, "gate.G2").status, "mismatch");
 });
-test("Jev per-instance prediction rule checks previous maximum, not merely final USD", () => {
-  const r = fixture(), events = rows(r.evidence!.events);
-  const responses = events.filter(e => e.type === "response" && e.provider === "jev" && e.trialOrder === 0);
-  responses[0].costUsd = 0.03; // .03 spent + .03 predicted exceeds .05 before next send.
-  const report = verifyRecords(r);
-  assert.ok(report.checks.some(c => c.reason === "jev_instance_point05_rule" && c.status === "mismatch"));
+for (const confidence of [undefined, null, 0, 0.5, 1]) test(`Jev confidence permits native-contract value ${confidence}`, () => {
+  const r = fixture(), answer = jevAnswer(r); if (confidence === undefined) delete answer.confidence; else answer.confidence = confidence;
+  assert.equal(result(r, "gate.G2").status, "pass");
 });
-test("unknown Jev billing halts within the same trial, while unknown Luna usage is a lower bound", () => {
-  const r = fixture(), events = rows(r.evidence!.events);
-  events.find(e => e.type === "response" && e.provider === "jev")!.costUsd = null;
-  assert.equal(result(r, "ledger.stop_discipline").status, "mismatch");
-  const clean = fixture(), budget = row(clean.summary!.budget), send = rows(budget.sends)[0];
-  send.inputTokens = null; budget.observedInputTokens = 30; budget.observedLunaTokens = 38; budget.missingInputTokens = 1;
-  assert.equal(result(clean, "ledger.total.missingInputTokens").status, "pass");
-  assert.equal(verifyRecords(clean).totals.unknownInputTokens, 1);
-});
-test("late response revisions are billed once and never reopen a stopped run", () => {
-  const r = fixture(), events = rows(r.evidence!.events), lastResponse = events.at(-1)!;
-  const stop = { seq: events.length + 1, at: lastResponse.at, type: "stop", scope: "run", reason: "end", inFlight: [] };
-  events.push(stop, { ...lastResponse, seq: events.length + 2 }); r.evidence!.events = events;
-  assert.equal(result(r, "ledger.stop_discipline").status, "pass");
-  assert.equal(verifyRecords(r).totals.latestKnownLunaTokens, 48);
-  events.push({ type: "commit", seq: events.length + 1, at: lastResponse.at, trialOrder: 2 });
-  assert.equal(result(r, "ledger.stop_discipline").status, "mismatch");
+test("probabilities do not gain a new sum-to-one rule", () => {
+  const r = fixture(), values = row(jevAnswer(r).probabilities); for (const k of Object.keys(values)) values[k] = 0.8;
+  assert.equal(result(r, "gate.G2").status, "pass");
 });
 
-function coverageFixture() {
-  const r = fixture(), trial = r.trials[0], turns = rows(trial.turns), turn = turns[0], trace = rows(turn.trace)[0];
-  const candidates = [{ candidateKey: "2#1", quote: "見て", sourceTurn: 2 }, { candidateKey: "2#2", quote: "みよう", sourceTurn: 2 }];
-  (trial.calls as Row[]).push(...["ai_extraction", "ai_function", "ai_support"].map((phase, index) => ({ turn: 1, phase, status: "ok", sendIds: [100 + index], model: "test-model", requestedModel: "test-model" })));
-  trace.aiPublic = { stages: { ai_extraction: { status: "ok" }, ai_function: { status: "ok" }, ai_support: { status: "ok" } },
-    pending: { aiSeq: 2, status: "ready", candidates, reasons: [] } };
-  const next = structuredClone(turn); next.turn = 3;
-  rows(next.trace)[0].aiPublic = { pending: { aiSeq: 4, status: "empty", candidates: [] }, stages: {},
-    application: { aiSeq: 2, status: "applied", claims: [{ id: "3:pub1", candidateKey: "2#1" }, { id: "3:pub2", candidateKey: "2#2" }] } };
-  row(row(next.state).graph).records = [{ id: "3:pub1", speaker: "ai", sourceTurn: 2 }, { id: "3:pub2", speaker: "ai", sourceTurn: 2 }];
-  trial.turns = [turn, next]; r.trials = [trial]; return r;
+change("PV-3 rejects private fields at packet top level", r => { r.packets![0].value.privateTrace = { plan: "synthetic" }; }, "records.packet.0");
+change("PV-3 rejects private fields in a prefix event even with a recomputed hash", r => { rows(r.packets![0].value.prefix)[0].targets = ["own-1"]; rehashPacket(r); }, "records.packet.0");
+change("PV-3 rejects a rehashed future turn", r => { (r.packets![0].value.prefix as Row[]).push({ speaker: "ai", turn: 99, text: "synthetic future" }); rehashPacket(r); }, "records.packet.0");
+change("PV-3 rejects duplicated turns", r => { (r.packets![0].value.prefix as Row[]).push(structuredClone(rows(r.packets![0].value.prefix)[0])); rehashPacket(r); }, "records.packet.0");
+change("PV-3 rejects non-public speaker", r => { rows(r.packets![0].value.prefix)[0].speaker = "system"; rehashPacket(r); }, "records.packet.0");
+change("PV-3 rejects another trial's recorded utterance", r => {
+  const other = rows(r.trials[1].publicTurns).find(e => e.seq === 3)!;
+  assert.notEqual(other.text, rows(r.packets![0].value.prefix)[0].text);
+  rows(r.packets![0].value.prefix)[0].text = other.text; rehashPacket(r);
+}, "records.packet.0");
+change("PV-3 binds filename checkpoint to prefix", r => { r.packets![0].name = "public-0-99.packet.json"; }, "records.packet.0");
+test("PV-3 reversed order and duplicate checkpoint files are contradictions", () => {
+  const r = fixture(), i = r.packets!.findIndex(p => p.name === "public-0-2.packet.json");
+  r.packets![i].value.prefix = rows(r.packets![i].value.prefix).reverse(); rehashPacket(r, i);
+  assert.equal(result(r, `records.packet.${i}`).status, "mismatch");
+  const other = fixture(); other.packets!.push(structuredClone(other.packets![0]));
+  assert.equal(result(other, `records.packet.${other.packets!.length - 1}`).status, "mismatch");
+});
+test("PV-3 incomplete public evidence is not_reached, while known contradiction stays mismatch", () => {
+  const r = fixture(); delete r.trials[0].publicTurns; r.trials[0].replay = []; r.trials[0].turns = [];
+  assert.equal(result(r, "records.packet.0").status, "not_reached");
+  const other = fixture(); rows(other.trials[0].publicTurns)[0].text = "contradictory recorded public event";
+  assert.equal(result(other, "records.packet.0").status, "mismatch");
+});
+change("PV-3 malformed packet also fails the storage gate", r => { r.packets![0].value.privateTrace = {}; }, "gate.G3");
+
+// Minimal event sequences test stop semantics, with native records retained separately.
+function timeline(items: Row[]) { return items.map((e, i) => ({ seq: i + 1, at: "2026-10-21T00:00:00.000Z", ...e })); }
+function ctx(provider: "luna" | "jev", callId: number, instanceId = `${provider}-unit`): Row {
+  return { provider, callId, instanceId, trialOrder: 0, label: "repair-first", phase: provider === "luna" ? "generation" : "decision", requestedModel: "synthetic" };
 }
-const aiCell = (r: Records) => coverage(r).cells.find(c => c.path === "aiPublic" && c.turn === 1)!;
-test("AI coverage is recomputed from stage, commit, next application and graph evidence", () => {
-  const r = coverageFixture(); assert.equal(aiCell(r).classification, "live_demonstrated");
-  row(row(rows(rows(r.trials[0].turns)[0].trace)[0].aiPublic).stages).ai_function = { status: "error" };
-  assert.equal(aiCell(r).classification, "wiring_failed");
+function send(context: Row, sendId: number): Row[] { return [{ ...context, type: "reserve", sendId }, { ...context, type: "send", sendId }]; }
+function response(context: Row, sendId: number, cost: number | null = 0.001): Row {
+  return { ...context, type: "response", sendId, status: "ok", model: "synthetic", ...(context.provider === "jev" ? { costUsd: cost } : { inputTokens: 1, outputTokens: 1 }) };
+}
+function account(items: Row[], r = fixture()) { r.evidence!.events = timeline(items); return ledger(r); }
+function stopStatus(items: Row[], r = fixture()) { return account(items, r).checks.find(c => c.id === "ledger.stop_discipline")!.status; }
+const stop = (scope: string, ids: number[], fields: Row = {}): Row => ({ type: "stop", scope, inFlight: ids, reason: "phase_aborted", ...fields });
+
+test("PV-4 unresolved sent Jev logical abort requires run scope before other-instance sends/commit", () => {
+  const a = ctx("jev", 1), b = ctx("jev", 2, "different-jev");
+  const items = [...send(a, 1), stop("instance", [1], { ...a, scopeDetail: "logical_call" }), ...send(b, 2), response(b, 2), { type: "commit", trialOrder: 0 }, response(a, 1)];
+  const v = account(items); assert.equal(v.checks.find(c => c.id === "ledger.stop_discipline")!.status, "mismatch");
+  assert.ok(v.checks.some(c => c.reason === "no_new_work_before_required_run_stop" && c.status === "mismatch"));
 });
-test("partial AI application remains candidate-level partial demonstration", () => {
-  const r = coverageFixture(), turn = rows(r.trials[0].turns)[1];
-  row(row(rows(turn.trace)[0].aiPublic).application).status = "partial";
-  assert.equal(aiCell(r).classification, "partial_demonstrated"); assert.equal(aiCell(r).acceptedCandidates, 2);
+test("PV-4 omitted run stop stays a violation even if late billing becomes known", () => {
+  const a = ctx("jev", 1); const items = [...send(a, 1), { ...response(a, 1, null), status: "unknown" }, response(a, 1)];
+  assert.equal(stopStatus(items), "mismatch");
+  assert.ok(account(items).checks.some(c => c.reason === "fact_derived_run_stop_recorded" && c.status === "mismatch"));
 });
-test("last pending and failed pending have different coverage classifications", () => {
-  const r = coverageFixture(); r.trials[0].turns = [rows(r.trials[0].turns)[0]];
-  assert.equal(aiCell(r).classification, "not_reached");
-  row(row(rows(rows(r.trials[0].turns)[0].trace)[0].aiPublic).pending).status = "failed";
-  assert.equal(aiCell(r).classification, "wiring_failed");
+test("PV-4 native sent-abort evidence prevents a missing abort event from hiding obligation", () => {
+  const r = fixture(), c = rows(r.trials[0].calls).find(c => c.provider === "jev")!;
+  c.status = "error"; c.error = "aborted"; c.costUsd = null;
+  const a = ctx("jev", Number(c.id)), sid = Number(list(c.sendIds)[0]);
+  assert.equal(stopStatus([...send(a, sid), { type: "commit", trialOrder: 0 }, response(a, sid)], r), "mismatch");
 });
-test("a conservative-rejection reason alone never proves correct contract execution", () => {
-  const r = coverageFixture(), next = rows(r.trials[0].turns)[1];
-  row(rows(next.trace)[0].aiPublic).application = { aiSeq: 2, status: "not_applied", reasons: ["prior_pruned"], claims: [] };
-  assert.equal(aiCell(r).classification, "not_reached");
+test("PV-4 proper run stop allows late known billing without dialogue commit", () => {
+  const a = ctx("jev", 1);
+  assert.equal(stopStatus([...send(a, 1), stop("run", [1]), stop("instance", [1], { ...a, scopeDetail: "logical_call" }), response(a, 1)]), "pass");
 });
-test("repair's initial unknown is not an actual next-turn progress evaluation", () => {
-  const r = coverageFixture(), turns = rows(r.trials[0].turns);
-  rows(turns[0].trace)[0].finalAction = { action: "repair" };
-  for (const turn of turns) row(turn.state).repairHistory = [{ turn: 1, progress: "unknown" }];
-  const repair = () => coverage(r).cells.find(c => c.path === "repair" && c.turn === 1)!;
-  assert.equal(repair().classification, "not_reached");
-  rows(row(turns[1].state).repairHistory)[0].progress = "unchanged";
-  assert.equal(repair().classification, "live_demonstrated");
+function producerAbortOrder(): Row[] {
+  const a = ctx("jev", 1);
+  return [...send(a, 1), stop("instance", [1], { ...a, scopeDetail: "logical_call" }),
+    { ...response(a, 1, null), status: "unknown" }, stop("run", [1], { reason: "jev_cost_unknown" }), response(a, 1)];
+}
+test("parent8054: real 225122d descriptive-abort / unknown / run-stop order passes", () => {
+  const v = account(producerAbortOrder()); assert.equal(v.checks.find(c => c.id === "ledger.stop_discipline")!.status, "pass");
+  const obligations = rows(v.totals.stopObligations); assert.ok(obligations.length > 0);
+  assert.ok(obligations.every(o => Number(o.runStopSeq) >= Number(o.seq)));
 });
-test("naming ledger cannot replace independent public-agreement judgment", () => {
-  const r = fixture(); row(rows(r.trials[0].turns)[0].state).ledger = { status: "agreed", name: "synthetic" };
-  assert.equal(coverage(r).cells.find(c => c.path === "naming")!.classification, "not_reached");
+for (const kind of ["reserve", "complete", "send", "commit", "policy_get"]) test(`parent8054: one ${kind} before run-stop acknowledgment fails`, () => {
+  const items = producerAbortOrder(), b = ctx(kind === "complete" || kind === "policy_get" ? "luna" : "jev", 2, "other-instance");
+  if (kind === "send") items.splice(2, 0, { ...b, type: "reserve", sendId: 2 });
+  const index = items.findIndex(e => e.type === "stop" && e.scope === "instance");
+  const work = kind === "commit" ? { type: kind, trialOrder: 0 } : { ...b, type: kind, ...(kind === "reserve" || kind === "send" ? { sendId: 2 } : {}) };
+  items.splice(index + 1, 0, work);
+  if (kind === "send") { items.find(e => e.type === "stop" && e.scope === "run")!.inFlight = [1, 2]; items.push(response(b, 2)); }
+  const v = account(items); assert.equal(v.checks.find(c => c.id === "ledger.stop_discipline")!.status, "mismatch");
+  assert.ok(v.checks.some(c => c.reason === "no_new_work_before_required_run_stop" && c.status === "mismatch"));
+});
+test("parent8054: deleting run stop is a violation even with late known billing", () => {
+  const items = producerAbortOrder().filter(e => !(e.type === "stop" && e.scope === "run"));
+  assert.equal(stopStatus(items), "mismatch");
+  assert.ok(account(items).checks.some(c => c.reason === "fact_derived_run_stop_recorded" && c.status === "mismatch"));
+});
+test("parent8054: unrelated response is not contiguous same-send bookkeeping", () => {
+  const a = ctx("jev", 1), b = ctx("jev", 2, "other-instance");
+  const items = [...send(a, 1), ...send(b, 2), stop("instance", [1], { ...a, scopeDetail: "logical_call" }), response(b, 2),
+    { ...response(a, 1, null), status: "unknown" }, stop("run", [1]), response(a, 1)];
+  const v = account(items); assert.equal(v.checks.find(c => c.id === "ledger.stop_discipline")!.status, "mismatch");
+  assert.ok(v.checks.some(c => c.reason === "only_same_send_bookkeeping_before_run_stop" && c.status === "mismatch"));
+});
+test("PV-4 pre-send Jev refusal has no unknown-charge stop obligation", () => {
+  const a = ctx("jev", 1), b = ctx("jev", 2, "different-jev");
+  assert.equal(stopStatus([{ ...a, type: "refused", reason: "phase_aborted" }, ...send(b, 2), response(b, 2), { type: "commit", trialOrder: 0 }]), "pass");
+});
+test("PV-4 billed Jev cleanup abort stops only that logical call", () => {
+  const a = ctx("jev", 1), b = ctx("jev", 2);
+  assert.equal(stopStatus([...send(a, 1), response(a, 1), stop("instance", [], { ...a, scopeDetail: "logical_call" }), ...send(b, 2), response(b, 2), { type: "commit", trialOrder: 0 }]), "pass");
+});
+test("PV-4 Luna logical abort does not permanently stop a reusable client", () => {
+  const a = ctx("luna", 1), b = ctx("luna", 2);
+  const items = [{ ...a, type: "complete" }, ...send(a, 1), stop("instance", [1], { ...a, scopeDetail: "logical_call" }),
+    { ...b, type: "complete" }, ...send(b, 2), response(b, 2), response(a, 1), { type: "commit", trialOrder: 0 }];
+  assert.equal(stopStatus(items), "pass");
+  assert.equal(stopStatus(items.map(e => { const copy = { ...e }; delete copy.scopeDetail; return copy; })), "mismatch");
+});
+for (const provider of ["jev", "luna"] as const) test(`PV-4 ${provider} threshold applies directly to commit with missing stop`, () => {
+  const r = fixture(), c = ctx(provider, 1); row(row(r.run!.manifest).caps)[provider === "jev" ? "jevUsd" : "lunaTokens"] = provider === "jev" ? 0.001 : 2;
+  const items = [...(provider === "luna" ? [{ ...c, type: "complete" }] : []), ...send(c, 1), response(c, 1), { type: "commit", trialOrder: 0 }];
+  const v = account(items, r); assert.equal(v.checks.find(c => c.id === "ledger.stop_discipline")!.status, "mismatch");
+  assert.ok(v.checks.some(c => c.reason === "no_commit_after_stop_or_threshold" && c.status === "mismatch"));
+});
+test("PV-4 all in-flight calls and later consumption remain visible; revisions counted once", () => {
+  const a = ctx("luna", 1), b = ctx("luna", 2), items = [{ ...a, type: "complete" }, ...send(a, 1), { ...b, type: "complete" }, ...send(b, 2), stop("run", [1, 2]), response(a, 1), response(b, 2), response(a, 1)];
+  const v = account(items); assert.equal(v.checks.find(c => c.id === "ledger.stop_discipline")!.status, "pass");
+  assert.deepEqual(v.inFlightAtStops[0].sendIds, [1, 2]); assert.equal(v.totals.latestKnownLunaTokens, 4);
+  assert.equal(v.inFlightAtStops[0].calls![0].knownInputTokensAtStop, null); assert.equal(v.inFlightAtStops[0].calls![0].latestKnownInputTokens, 1);
+  const partial = structuredClone(items); (partial.find(e => e.type === "stop")!.inFlight as number[]).pop(); assert.equal(stopStatus(partial), "mismatch");
+});
+test("Jev instance .05 predicted-spend rule is distinct from final overshoot", () => {
+  const a = ctx("jev", 1), b = ctx("jev", 2);
+  assert.equal(stopStatus([...send(a, 1), response(a, 1, 0.03), ...send(b, 2), response(b, 2)]), "mismatch");
+  assert.equal(stopStatus([...send(a, 1), response(a, 1, 0.06)]), "pass");
 });
 
-test("setup failure before cache read is explicitly not_reached with no fabricated validation", () => {
+test("PV-2 projected image body has an independent hash and a separately bound original hash", () => {
+  const r = fixture(), req = firstRequest(r, "left", "luna", "observation_targeted");
+  assert.ok(req); assert.notEqual(req.payloadSha256, req.preProjectionPayloadSha256);
+  const v = report(r); assert.ok(v.checks.some(c => c.reason === "post_projection_canonical_payload_sha256" && c.status === "pass"));
+  assert.ok(v.checks.some(c => c.reason === "original_image_bytes_not_present_self_reported_hash_is_not_full_proof" && c.status === "not_reached"));
+});
+test("PV-2 changing both projected image bodies is detected against the frozen own image", () => {
+  const r = fixture();
+  for (const side of ["left", "right"]) {
+    const req = firstRequest(r, side, "luna", "observation_targeted"), image = rows(row(req.payload).messages).flatMap(m => rows(m.content)).find(p => p.type === "image_url")!;
+    row(row(image.image_url).url).byteSha256 = hash("different image bytes"); reseal(r, side, req);
+  }
+  assert.ok(report(r).checks.some(c => c.reason === "only_enumerated_own_image_url_projection" && c.status === "mismatch"));
+});
+test("PV-2 changing one model-facing field cannot be normalized away", () => {
+  const r = fixture(), req = firstRequest(r, "right"); row(req.payload).label = "model-visible"; reseal(r, "right", req);
+  assert.equal(result(r, "replay.0.parity").status, "mismatch");
+  assert.ok(report(r).checks.some(c => c.reason === "exact_luna_body_keys_purpose_explicit_limit" && c.status === "mismatch"));
+});
+test("PV-2 only the fixed top-level envelope metadata list may differ", () => {
+  const r = fixture(), req = firstRequest(r, "right"); req.label = "measurement-label"; req.startedAt = "measurement-time";
+  assert.equal(result(r, "replay.0.parity").status, "pass");
+  const other = fixture(); other.evidence!.normalizedEnvelopeFields = [...list(other.evidence!.normalizedEnvelopeFields), "temperature"];
+  assert.equal(result(other, "replay.normalization").status, "mismatch");
+});
+test("PV-2 changing original HTTP, complete-message or injected-POST domains is detected separately", () => {
+  for (const field of ["preProjectionPayloadSha256", "completeMessagesSha256"]) {
+    const r = fixture(); firstRequest(r)[field] = hash("wrong hash domain");
+    assert.ok(report(r).checks.some(c => c.reason === (field === "preProjectionPayloadSha256" ? "pre_projection_hash_association_to_recorded_http" : "complete_messages_diagnostic_association_only") && c.status === "mismatch"));
+  }
+  const r = fixture(); rows(r.trials[0].http).find(h => h.kind === "completion_post")!.requestSha256 = hash("wrong actual HTTP body");
+  assert.ok(report(r).checks.some(c => c.reason === "each_actual_post_and_retry_bound_to_full_http_hash" && c.status === "mismatch"));
+});
+test("PV-2 moving projection to a non-image subtree does not grant a new normalization", () => {
+  const r = fixture(), req = firstRequest(r, "right"); row(req.payload).messages = [{ role: "user", content: row(row(row(pair(r).right).material).own).ownImage }]; reseal(r, "right", req);
+  assert.ok(report(r).checks.some(c => c.reason === "only_enumerated_own_image_url_projection" && c.status === "mismatch"));
+});
+test("different upstream materials are not comparable; absent raw proof remains not_reached", () => {
+  const r = fixture(), side = row(pair(r).right); row(side.material).state = { graph: { records: [] }, syntheticDifference: true }; side.materialSha256 = hash(side.material);
+  assert.equal(result(r, "replay.0.parity").status, "not_comparable");
+  const absent = fixture(); delete absent.evidence; assert.equal(result(absent, "replay.prewire").status, "not_reached");
+});
+
+change("profile corruption is detected", r => { row(r.trials[0].profile).referenceMemory = false; }, "identity.profile.2");
+change("memo SHA corruption is detected", r => { rows(r.evidence!.cache)[1].memoSha256 = hash("wrong memo"); }, "cache.receipt.1.memo");
+change("cache file mutation is detected", r => { rows(r.evidence!.cache)[1].afterSha256 = hash("changed cache bytes"); }, "cache.immutable.0");
+change("known usage totals are independently recomputed", r => { row(r.summary!.budget).observedInputTokens = 0; }, "ledger.total.observedInputTokens");
+change("unknown Luna USD cannot become zero", r => { row(r.summary!.budget).lunaCostUsd = 0; }, "ledger.unknown_cost");
+test("setup failure before cache read remains not_reached without fabricated HIT", () => {
   const r = fixture(), trial = r.trials[0]; trial.failure = "client_setup_failed"; trial.cache = null;
-  r.evidence!.cache = [rows(r.evidence!.cache)[0], { trialOrder: 0, status: "not_attempted", reason: "setup_failed:luna_client" }, ...rows(r.evidence!.cache).slice(2)];
-  for (const id of ["cache.trial.0", "cache.memo.identity.0", "cache.immutable.0", "cache.receipt.1.validation", "gate.G1"])
-    assert.equal(result(r, id).status, "not_reached");
-  rows(r.evidence!.cache)[1].validated = true;
-  assert.equal(result(r, "cache.receipt.1.memo").status, "mismatch");
+  r.evidence!.cache = rows(r.evidence!.cache).map(c => c.trialOrder === 0 ? { trialOrder: 0, status: "not_attempted", reason: "setup_failed:luna_client" } : c);
+  assert.equal(result(r, "cache.trial.0").status, "not_reached"); assert.equal(result(r, "cache.immutable.0").status, "not_reached");
 });
-test("later-trial unknown billing and leaked public text cannot retroactively invalidate smoke gates", () => {
-  const r = fixture(); rows(row(r.summary!.budget).sends).find(s => s.provider === "jev" && s.logicalCallId === 8)!.costUsd = null;
-  rows(r.trials[2].publicTurns)[1].text = "Bearer synthetic-later-trial-token";
-  assert.equal(result(r, "gate.G4").status, "pass");
-  assert.equal(result(r, "privacy.public").status, "mismatch");
+test("technical coverage and naming semantics stay separate", () => {
+  const r = fixture(), cells = coverage(r).cells;
+  assert.ok(cells.some(c => c.path === "naming" && c.classification === "not_reached"));
+  assert.ok(cells.every(c => c.qualification === "mock_only"));
 });
-test("warm-up permits three actual POST attempts but rejects a fourth", () => {
-  const r = fixture(), post = rows(r.warmup!.http).find(h => h.kind === "completion_post")!;
-  (r.warmup!.http as Row[]).push(structuredClone(post), structuredClone(post));
-  assert.equal(result(r, "cache.warmup").status, "pass");
-  (r.warmup!.http as Row[]).push(structuredClone(post));
-  assert.equal(result(r, "cache.warmup").status, "mismatch");
-});
-test("coverage cannot promote stage-status assertions without actual stage calls", () => {
-  const r = coverageFixture(); r.trials[0].calls = rows(r.trials[0].calls).filter(c => c.phase !== "ai_function");
+const aiCell = (r: Records) => coverage(r).cells.find(c => c.trialOrder === 0 && c.path === "aiPublic" && c.turn === 1)!;
+test("producer AI coverage requires real stages, commit and next graph application", () => {
+  const r = fixture(); assert.equal(aiCell(r).classification, "live_demonstrated");
+  const trace = rows(rows(r.trials[0].turns)[0].trace).find(t => t.status === "committed")!;
+  row(row(trace.aiPublic).stages).ai_function = { status: "error" };
   assert.equal(aiCell(r).classification, "wiring_failed");
 });
-test("conservative public-window rejection needs independently observable contract facts", () => {
-  const r = coverageFixture(), trial = r.trials[0], next = rows(trial.turns)[1]; next.turn = 35;
-  row(rows(next.trace)[0].aiPublic).application = { aiSeq: 2, status: "not_applied", reasons: ["source_out_of_window"], claims: [] };
-  const events = [{ seq: 1, speaker: "human", text: "initial" }, { seq: 2, speaker: "ai", text: "見てみよう。" },
-    ...Array.from({ length: 33 }, (_, i) => ({ seq: i + 3, speaker: "human", text: "synthetic continuation" }))];
-  (trial.replay as Row[]).push({ tape: { state: structuredClone(row(next.state)), events } });
-  assert.equal(aiCell(r).classification, "conservative_reject");
-  row(row(rows(next.trace)[0].aiPublic).application).reasons = ["prior_pruned"];
+test("producer partial application remains candidate-level partial demonstration", () => {
+  const r = fixture(), next = rows(r.trials[0].turns)[1];
+  row(row(rows(next.trace).find(t => t.status === "committed")!.aiPublic).application).status = "partial";
+  assert.equal(aiCell(r).classification, "partial_demonstrated");
+});
+test("producer final pending and failed pending remain different coverage classes", () => {
+  const r = fixture(); r.trials[0].turns = [rows(r.trials[0].turns)[0]];
+  assert.equal(aiCell(r).classification, "not_reached");
+  row(row(rows(rows(r.trials[0].turns)[0].trace).find(t => t.status === "committed")!.aiPublic).pending).status = "failed";
+  assert.equal(aiCell(r).classification, "wiring_failed");
+});
+test("producer rejection reason alone cannot certify a conservative contract", () => {
+  const r = fixture(), next = rows(r.trials[0].turns)[1];
+  row(rows(next.trace).find(t => t.status === "committed")!.aiPublic).application = { aiSeq: 2, status: "not_applied", reasons: ["prior_pruned"], claims: [] };
   assert.equal(aiCell(r).classification, "not_reached");
 });
-test("reobservation demonstration requires validated result, memo merge and follow-up decision", () => {
-  const r = fixture(), trial = r.trials[0], turn = rows(trial.turns)[0], trace = rows(turn.trace)[0];
-  trace.decisions = [{ action: "request_observation" }, { action: "describe" }];
-  const issue = { aspect: "shape", question: "Which shape?", partnerConstrual: null };
-  const figure = { figureId: "own-1", supports: ["synthetic"], contradicts: [], unknown: [] };
-  const observedAt = "2026-10-21T00:00:01Z";
-  trace.reobservations = [{ result: { observedAt, issue, figures: [figure] } }];
-  rows(row(row(turn.state).observationMemo).figures)[0].reobservations = [{ ...figure, issue, observedAt }];
-  (trial.calls as Row[]).push({ turn: 1, phase: "observation_targeted", status: "ok", model: "test-luna", requestedModel: "test-luna" });
-  const cell = () => coverage(r).cells.find(c => c.path === "reobservation")!;
+test("stage-status assertions without actual producer calls cannot establish AI coverage", () => {
+  const r = fixture(); r.trials[0].calls = rows(r.trials[0].calls).filter(c => !(c.turn === 1 && c.phase === "ai_function"));
+  assert.equal(aiCell(r).classification, "wiring_failed");
+});
+test("repair initial unknown does not prove that progress was evaluated", () => {
+  const r = fixture(), turns = rows(r.trials[0].turns);
+  rows(turns[0].trace).find(t => t.status === "committed")!.finalAction = { action: "repair" };
+  for (const turn of turns) row(turn.state).repairHistory = [{ turn: 1, progress: "unknown" }];
+  const cell = () => coverage(r).cells.find(c => c.trialOrder === 0 && c.turn === 1 && c.path === "repair")!;
+  assert.equal(cell().classification, "not_reached");
+  rows(row(turns[1].state).repairHistory)[0].progress = "unchanged";
   assert.equal(cell().classification, "live_demonstrated");
-  rows(row(row(turn.state).observationMemo).figures)[0].reobservations = [];
+});
+test("producer reobservation requires an actual merge and follow-up decision", () => {
+  const r = fixture(), turn = rows(r.trials[0].turns)[0];
+  const cell = () => coverage(r).cells.find(c => c.trialOrder === 0 && c.turn === 1 && c.path === "reobservation")!;
+  assert.equal(cell().classification, "live_demonstrated");
+  for (const figure of rows(row(row(turn.state).observationMemo).figures)) figure.reobservations = [];
   assert.equal(cell().classification, "not_reached");
 });
-test("accepted human response links prove only existing-prior wiring", () => {
-  const r = fixture(), turn = rows(r.trials[0].turns)[0];
-  const records = [{ id: "0:pub1", kind: "claim", speaker: "ai", sourceTurn: 0 },
-    { id: "1:local1", kind: "claim", speaker: "human", turn: 1, respondsTo: "0:pub1" }];
-  row(row(turn.state).graph).records = records;
-  const cell = () => coverage(r).cells.find(c => c.path === "humanResponseLinks")!;
-  assert.equal(cell().classification, "live_demonstrated");
-  records[1].respondsTo = "unrecorded-prior";
-  assert.equal(cell().classification, "wiring_failed");
-});
-test("all already-sent in-flight calls are listed, not just the last call", () => {
-  const r = fixture(), events = rows(r.evidence!.events), first = events.findIndex(e => e.type === "response");
-  const response = events.splice(first, 1)[0], secondSend = events.findIndex((e, i) => i > first && e.type === "send");
-  const inFlight = [response.sendId, events[secondSend].sendId];
-  events.splice(secondSend + 1, 0, { type: "stop", reason: "timeout", scope: "run", at: response.at, inFlight }, response);
-  events.forEach((e, i) => { e.seq = i + 1; }); r.evidence!.events = events;
-  assert.deepEqual(verifyRecords(r).inFlightAtStops[0].sendIds, inFlight);
-  const check = verifyRecords(r).checks.find(c => c.reason === "all_in_flight_at_stop_listed")!;
-  assert.equal(check.status, "pass");
-  (events.find(e => e.type === "stop")!.inFlight as unknown[]).pop();
-  assert.equal(verifyRecords(r).checks.find(c => c.reason === "all_in_flight_at_stop_listed")!.status, "mismatch");
-});
-test("observed token threshold stops later sends without calling the threshold a hard consumption cap", () => {
-  const r = fixture(), events = rows(r.evidence!.events);
-  events.find(e => e.type === "response" && e.provider === "luna")!.inputTokens = 1500001;
-  assert.ok(verifyRecords(r).checks.some(c => c.reason === "no_send_after_stop_or_threshold" && c.status === "mismatch"));
-});
-test("a separate policy GET is still forbidden after a run stop", () => {
-  const r = fixture(), events = rows(r.evidence!.events), at = events.at(-1)!.at;
-  events.push({ seq: events.length + 1, at, type: "stop", scope: "run", reason: "end", inFlight: [] },
-    { seq: events.length + 2, at, type: "policy_get", provider: "luna" });
-  r.evidence!.events = events;
-  assert.ok(verifyRecords(r).checks.some(c => c.reason === "policy_get_separate_and_not_after_stop" && c.status === "mismatch"));
-});
-test("memo validation flag cannot certify a structurally invalid initial memo", () => {
-  const r = fixture(), receipt = rows(r.evidence!.cache)[0];
-  rows(row(receipt.memo).figures)[0].region = null;
-  assert.equal(result(r, "cache.receipt.0.memo_schema").status, "mismatch");
-});
+change("producer trial MISS cannot masquerade as cached initial observation", r => { row(r.trials[0].cache).status = "MISS"; }, "cache.trial.0");
+change("producer duplicate send IDs are detected", r => { rows(row(r.summary!.budget).sends)[1].id = 1; }, "ledger.ids");
+change("non-observation image remains a boundary failure", r => { rows(r.trials[0].calls).find(c => c.provider === "jev")!.imageCount = 1; }, "identity.images");
+change("public credential-shaped text remains a leak failure", r => { rows(r.trials[0].publicTurns)[0].text = "Bearer synthetic-private-token"; }, "privacy.public");
 
-test("file loader uses actual permissions, reads JSONL and verifies CLI with no network", async t => {
-  const dir = await mkdtemp(join(tmpdir(), "parity-verify-")); await chmod(dir, 0o700);
-  t.after(() => rm(dir, { recursive: true, force: true }));
-  const r = fixture();
-  const files: Array<[string, unknown]> = [["run.private.json", r.run], ["summary.private.json", r.summary], ["warmup.private.json", r.warmup],
-    ["verifier-evidence.private.json", r.evidence], ...r.trials.map(tr => [`trial-${tr.order}.private.json`, tr] as [string, unknown]),
-    ...r.packets!.map(p => [p.name, p.value] as [string, unknown])];
+test("file loader and CLI verify the frozen record files with actual private permissions", async t => {
+  const dir = await mkdtemp(join(tmpdir(), "parity-verify-")); await chmod(dir, 0o700); t.after(() => rm(dir, { recursive: true, force: true }));
+  const r = fixture(), files: Array<[string, unknown]> = [["run.private.json", r.run], ["summary.private.json", r.summary], ["warmup.private.json", r.warmup],
+    ["verifier-evidence.private.json", r.evidence], ...r.trials.map(tr => [`trial-${tr.order}.private.json`, tr] as [string, unknown]), ...r.packets!.map(p => [p.name, p.value] as [string, unknown])];
   for (const [name, value] of files) await writeFile(join(dir, name), JSON.stringify(value), { mode: 0o600 });
   await writeFile(join(dir, "billing.private.jsonl"), r.billing!.map(x => JSON.stringify(x)).join("\n") + "\n", { mode: 0o600 });
   assert.deepEqual((await verifyDirectory(dir)).checks.filter(c => c.status === "mismatch"), []);
-  await chmod(join(dir, "run.private.json"), 0o644);
-  assert.equal(result(await loadRecords(dir), "gate.G3").status, "mismatch");
+  await chmod(join(dir, "run.private.json"), 0o644); assert.equal(result(await loadRecords(dir), "gate.G3").status, "mismatch");
   const cli = spawnSync(process.execPath, ["dialogue-model/runtime/diagnostics/parity-verify/index.ts", dir], { encoding: "utf8" });
   assert.equal(cli.status, 2); assert.equal(JSON.parse(cli.stdout).status, "mismatch");
 });
-test("loader rejects symlinks and malformed JSON without disclosing contents", async t => {
+test("loader rejects symlinks and malformed input without exposing record contents", async t => {
   const dir = await mkdtemp(join(tmpdir(), "parity-verify-invalid-")); t.after(() => rm(dir, { recursive: true, force: true }));
-  await writeFile(join(dir, "source"), "private-body", { mode: 0o600 }); await symlink(join(dir, "source"), join(dir, "run.private.json"));
-  await assert.rejects(loadRecords(dir), /unsafe_or_oversized_record_file/u);
-  assert.equal(verifyRecords({ trials: [], run: { value: undefined } }).status, "mismatch");
+  await writeFile(join(dir, "source"), "synthetic private body", { mode: 0o600 }); await symlink(join(dir, "source"), join(dir, "run.private.json"));
+  await assert.rejects(loadRecords(dir), /unsafe_or_oversized_record_file/u); assert.equal(verifyRecords({ trials: [], run: { value: undefined } }).status, "mismatch");
 });

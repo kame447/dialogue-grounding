@@ -87,5 +87,23 @@ can be exceeded by calls already sent. Policy GETs never consume POST generation
 is certified only for independently provable prior pruning or public-window exclusion;
 other rejection contracts without sufficient raw evidence remain `not_reached`.
 Leak checks cover lexical credential/image/internal-ID patterns and recorded prompt-line
-echoes, not general semantic information disclosure. Luna messages-only replay proves
-the recorded complete-call boundary; it does not claim actual HTTP-byte identity.
+echoes, not general semantic information disclosure. Luna replay now requires full
+canonical HTTP bodies with the producer's fixed body-key contract. Projected body hashes,
+original HTTP hashes, and complete-message diagnostic hashes are separate checks;
+original-image preimage proof remains not_reached when the bytes are absent. Canonical
+HTTP JSON identity is not raw HTTP-body byte identity.
+
+POSTAUDIT-15 regressions use a fixed JSON capture from the synthetic instrumented
+producer rather than hand-built response schemas. The tests read that JSON only;
+the verifier and its regression tests never import the harness at runtime. Public
+packets are bound to closed schemas and exact trial/checkpoint public prefixes. Stop
+obligations follow unresolved sent Jev aborts and observed thresholds, apply to commits,
+and survive late billing. Logical-call cancellation is separate from instance lifetime.
+
+Parent decision 8054 permits the producer's descriptive logical-call/instance abort,
+same-send unknown marking and response/stop bookkeeping to precede the required run stop
+contiguously. The obligation is satisfied only by a **run-scope stop before any new work**
+(`reserve`, `complete`, `send`, `commit`, `policy_get`). An intervening work event, unrelated
+bookkeeping, an absent run stop, or only a narrower stop is a mismatch. Late cost backfill
+never removes the obligation or a prior violation. Each obligation reports its source
+sequence, affected send IDs and acknowledging run-stop sequence.

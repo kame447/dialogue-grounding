@@ -66,10 +66,22 @@ export function ledger(records: Records): Accounting {
   let priorSeq = -1, priorTime = -Infinity, ordered = true, globalStop = false;
   let knownJev = 0, knownTokens = 0, completeCount = 0;
   const reserved = new Map<unknown, Row>(), sent = new Map<unknown, Row>(), responses = new Map<unknown, Row>();
-  const stoppedInstances = new Set<unknown>(), stoppedTrials = new Set<unknown>();
+  const stoppedInstances = new Set<unknown>(), stoppedTrials = new Set<unknown>(), stoppedCalls = new Set<string>();
+  const callKey = (e: Row) => `${e.provider}:${e.instanceId}:${e.callId}`;
+  let explicitRunStop = false;
+  let explicitRunStopSeq: number | null = null;
+  const obligations: Array<{ seq: number | null; reason: string; sendIds: unknown[]; runStopSeq: number | null }> = [];
+  const pendingObligations = new Set<number>();
+  const requireRunStop = (event: Row, reason: string, ids: unknown[] = presentSendId(event) ? [event.sendId] : []) => {
+    obligations.push({ seq: count(event.seq) ? event.seq : null, reason, sendIds: ids, runStopSeq: explicitRunStopSeq });
+    if (!explicitRunStop) pendingObligations.add(obligations.length - 1);
+    globalStop = true;
+  };
   const flight = new Set<unknown>(), inFlightAtStops: Accounting["inFlightAtStops"] = [];
   const instanceCosts = new Map<unknown, Map<unknown, number>>();
   const instanceOwners = new Map<unknown, string>();
+  const nativeAborts = calls.filter(c => c.provider === "jev" && c.status === "error" && !amount(c.costUsd) && list(c.sendIds).length > 0 &&
+    typeof c.error === "string" && /abort|timeout|deadline/u.test(c.error));
   let instanceEvidence = true;
   const eventFailure = (i: number, ok: boolean, reason: string) => checks.push(assertion(`ledger.event.${i}.${reason}`, ok, reason));
   for (const [i, e] of events.entries()) {
@@ -77,7 +89,23 @@ export function ledger(records: Records): Accounting {
     ordered &&= count(e.seq) && e.seq > priorSeq && Number.isFinite(at) && at >= priorTime;
     if (count(e.seq)) priorSeq = e.seq;
     if (Number.isFinite(at)) priorTime = at;
-    const stopped = globalStop || stoppedInstances.has(e.instanceId) || stoppedTrials.has(e.trialOrder);
+    const stopped = globalStop || stoppedInstances.has(e.instanceId) || stoppedTrials.has(e.trialOrder) || stoppedCalls.has(callKey(e));
+    const underThresholds = () => knownJev < effective.jevUsd && knownTokens < effective.lunaTokens;
+    const affected = (request: Row) => e.type === "refused" ? callKey(request) === callKey(e) :
+      e.scope === "run" || e.scope === undefined || e.scope === "trial" && request.trialOrder === e.trialOrder ||
+      e.scope === "instance" && (e.scopeDetail === "logical_call" ? callKey(request) === callKey(e) : request.instanceId === e.instanceId);
+    const unresolvedAffectedJev = () => [...sent].some(([id, request]) => request.provider === "jev" && affected(request) && !amount(responses.get(id)?.costUsd));
+    if (pendingObligations.size) {
+      const ids = new Set([...pendingObligations].flatMap(index => obligations[index].sendIds));
+      const sameCall = [...ids].some(id => sent.has(id) && callKey(sent.get(id)!) === callKey(e));
+      const sameInstance = [...ids].some(id => sent.get(id)?.instanceId === e.instanceId && sent.get(id)?.provider === e.provider);
+      const descriptiveStop = e.type === "stop" && e.scope === "instance" && typeof e.reason === "string" && /abort|timeout|deadline/u.test(e.reason) &&
+        (e.scopeDetail === "logical_call" ? sameCall : sameInstance) && list(e.inFlight).every(id => ids.has(id));
+      const bookkeeping = e.type === "response" && ids.has(e.sendId) || descriptiveStop ||
+        e.type === "refused" && sameCall && typeof e.reason === "string" && /abort|timeout|deadline/u.test(e.reason);
+      if (["reserve", "complete", "send", "commit", "policy_get"].includes(String(e.type))) eventFailure(i, false, "no_new_work_before_required_run_stop");
+      else if (!(e.type === "stop" && (e.scope ?? "run") === "run")) eventFailure(i, bookkeeping, "only_same_send_bookkeeping_before_run_stop");
+    }
     if (e.type === "complete") {
       eventFailure(i, e.provider === "luna" && !stopped && completeCount < effective.lunaCalls, "complete_entry"); completeCount++;
     } else if (e.type === "reserve") {
@@ -113,7 +141,7 @@ export function ledger(records: Records): Accounting {
           if (!instanceCosts.has(e.instanceId)) instanceCosts.set(e.instanceId, new Map());
           instanceCosts.get(e.instanceId)!.set(e.sendId, e.costUsd);
           knownJev += e.costUsd - (amount(prior?.costUsd) ? prior!.costUsd as number : 0);
-        } else globalStop = true;
+        } else requireRunStop(e, "sent_jev_billing_unknown");
       } else {
         for (const field of ["inputTokens", "outputTokens"]) {
           eventFailure(i, e[field] === null || count(e[field]), `${field}_known_or_null`);
@@ -123,23 +151,41 @@ export function ledger(records: Records): Accounting {
       }
       responses.set(e.sendId, e);
       if (e.status !== "unknown") flight.delete(e.sendId);
+      if (!underThresholds()) requireRunStop(e, "observed_run_threshold_reached");
     } else if (e.type === "stop") {
       const scope = e.scope ?? "run";
-      eventFailure(i, ["run", "trial", "instance"].includes(String(scope)), "stop_scope");
+      const logical = scope === "instance" && e.scopeDetail === "logical_call";
+      eventFailure(i, ["run", "trial", "instance"].includes(String(scope)) && (e.scopeDetail === undefined || logical && count(e.callId)), "stop_scope");
+      if (typeof e.reason === "string" && /abort|timeout|deadline/u.test(e.reason) && unresolvedAffectedJev()) {
+        const affectedIds = [...sent].filter(([id, request]) => request.provider === "jev" && affected(request) && !amount(responses.get(id)?.costUsd)).map(([id]) => id);
+        requireRunStop(e, "sent_jev_unresolved_at_abort_or_timeout", affectedIds);
+      }
       const ids = [...flight].filter(id => scope === "run" || scope === "trial" && sent.get(id)?.trialOrder === e.trialOrder ||
-        scope === "instance" && sent.get(id)?.instanceId === e.instanceId);
+        scope === "instance" && (logical ? callKey(sent.get(id)!) === callKey(e) : sent.get(id)?.instanceId === e.instanceId));
       eventFailure(i, Array.isArray(e.inFlight) && equal([...list(e.inFlight)].sort(), ids.sort()), "all_in_flight_at_stop_listed");
       inFlightAtStops.push({ seq: count(e.seq) ? e.seq : null, sendIds: [...ids], calls: ids.map(id => {
         const request = sent.get(id)!, usage = responses.get(id);
         return { sendId: id, provider: request.provider === "jev" ? "jev" : "luna", knownCostUsdAtStop: amount(usage?.costUsd) ? usage!.costUsd : null,
           knownInputTokensAtStop: count(usage?.inputTokens) ? usage!.inputTokens : null, knownOutputTokensAtStop: count(usage?.outputTokens) ? usage!.outputTokens : null };
       }) });
-      if (scope === "run") globalStop = true;
+      if (scope === "run") {
+        globalStop = true; explicitRunStop = true; explicitRunStopSeq = count(e.seq) ? e.seq : null;
+        for (const index of pendingObligations) obligations[index].runStopSeq = explicitRunStopSeq;
+        pendingObligations.clear();
+      }
       else if (scope === "trial") stoppedTrials.add(e.trialOrder);
+      else if (logical) stoppedCalls.add(callKey(e));
       else stoppedInstances.add(e.instanceId);
-    } else if (e.type === "commit") eventFailure(i, !stopped, "no_commit_after_stop");
-    else if (e.type === "policy_get") eventFailure(i, e.provider === "luna" && !presentSendId(e) && !stopped, "policy_get_separate_and_not_after_stop");
-    else if (e.type !== "refused") eventFailure(i, false, "recognized_event_type");
+    } else if (e.type === "commit") {
+      const abortedIds = nativeAborts.flatMap(c => list(c.sendIds).filter(id => sent.has(id) && !amount(responses.get(id)?.costUsd)));
+      if (abortedIds.length) requireRunStop(e, "native_sent_jev_abort_unresolved_at_commit", abortedIds);
+      eventFailure(i, !stopped && !globalStop && underThresholds(), "no_commit_after_stop_or_threshold");
+    }
+    else if (e.type === "policy_get") eventFailure(i, e.provider === "luna" && !presentSendId(e) && !stopped && underThresholds(), "policy_get_separate_and_not_after_stop");
+    else if (e.type === "refused") {
+      if (typeof e.reason === "string" && /abort|timeout|deadline/u.test(e.reason) && unresolvedAffectedJev())
+        requireRunStop(e, "sent_jev_unresolved_at_refusal", [...sent].filter(([id, request]) => request.provider === "jev" && affected(request) && !amount(responses.get(id)?.costUsd)).map(([id]) => id));
+    } else eventFailure(i, false, "recognized_event_type");
   }
   checks.push(assertion("ledger.event_order", ordered, "strict_seq_nondecreasing_timestamp"));
   checks.push(instanceEvidence ? assertion("ledger.instance_cap", true, "per_instance_checks_in_event_report") : missing("ledger.instance_cap", "instance_id_missing"));
@@ -157,6 +203,10 @@ export function ledger(records: Records): Accounting {
   totals.latestKnownLunaTokens = knownTokens;
   totals.reservations = reserved.size;
   totals.actualSends = sent.size;
+  const actualAbortedIds = nativeAborts.flatMap(c => list(c.sendIds).filter(id => sent.has(id)));
+  if (actualAbortedIds.length) requireRunStop({}, "native_aborted_sent_jev_billing_unresolved", actualAbortedIds);
+  totals.stopObligations = obligations;
+  checks.push(assertion("ledger.event.required_run_stop", pendingObligations.size === 0 && (obligations.length === 0 || explicitRunStop), "fact_derived_run_stop_recorded"));
   for (const stop of inFlightAtStops) for (const call of stop.calls ?? []) {
     const latest = responses.get(call.sendId);
     call.latestKnownCostUsd = amount(latest?.costUsd) ? latest!.costUsd : null;

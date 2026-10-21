@@ -1,0 +1,52 @@
+{
+  "producerCommit": "225122dbae9557933b1ccd62f4a74d3ac2a81b6e",
+  "baseVerifierCommit": "f912ea08dd4752c602ffc77cc3a2c67aeca20989",
+  "fixtureSha256": "76b31d2710df2b94bfbc3dffa43d4a7d4c7ea174b3d1853cb4941feeb5c65143",
+  "generation": "One local invocation of runParityLive with instrumentedDependencies; synthetic injected fetch only. No API calls. Known/input_missing/both_missing differ only in mocked upstream usage. explicit_retry is the parent-provided capture from the same finalized producer. No record fields were rewritten after capture.",
+  "producerFiles": [
+    {
+      "path": "dialogue-model/runtime/diagnostics/parity-live/README.md",
+      "sha256": "9040b27a6c10f185ee54a1dd630a6bb86df38a708008cae4065036d9277e6ae3"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/parity-live/audit.ts",
+      "sha256": "146db2b03da1c27039b536d1891cdfa658d44ef15491036d760599f8f82236c3"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/parity-live/cases.ts",
+      "sha256": "04e9b9fa50d111b7dd0bd036c8b47442a81af5c176b1ff8be518c30d76aa5955"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/parity-live/coverage.ts",
+      "sha256": "fcdaa5d1cc7dd70a208005c2616b3abfcfe6af0a72d82bfc4d2fdf9ffa44e371"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/parity-live/evidence.ts",
+      "sha256": "b93f3903fc7f84793c6ab2bd46e38ff193e4b8213c5462d3e0d060e90c64cb79"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/parity-live/live.ts",
+      "sha256": "7ea8ec94604168b1aff414ace7d10e7bd70623cba1c67748eb973d5bd42c5486"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/parity-live/luna-wire.ts",
+      "sha256": "a403072f99cf07bb35224b7afea7d8c6de4fb4779d413f366ffc219b4c8965c6"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/parity-live/manifest.ts",
+      "sha256": "fd8a62bebdbba4dc73bfc454d3ea15135c440b4cb17854c52f65a1be60933d45"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/parity-live/replay.ts",
+      "sha256": "3dee410ccbff6032ad14a2f7a459dbcb0410224b1715b888faa39fcf2690fc26"
+    },
+    {
+      "path": "dialogue-model/runtime/v2/research-profile.ts",
+      "sha256": "e283f3fe4a7a4ef5983ef9ad59edfdb704ef2a4b7a2f6c1ac142306b1eeafa65"
+    },
+    {
+      "path": "tests/parity-live.test.ts",
+      "sha256": "d7bbe1f5588adc1d67baf3609723c75c1b006a1a9a955b6269178f2f58951b6c"
+    }
+  ]
+}

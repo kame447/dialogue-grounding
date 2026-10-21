@@ -1,11 +1,12 @@
 import { lstat, readFile, readdir, realpath } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { assertion, canonical, check, combine, equal, hash, missing, row, rows } from "./core.ts";
+import { assertion, canonical, check, combine, equal, missing, row, rows } from "./core.ts";
 import type { Check, Records, Row } from "./core.ts";
 import { cacheChecks, fairness, publicPrivacy, wireValidation } from "./fairness.ts";
 import { coverage, gates } from "./coverage.ts";
 import { ledger } from "./ledger.ts";
+import { packetChecks } from "./packets.ts";
 
 export { canonical, hash, sha256, profileHash, META_KEYS } from "./core.ts";
 export type { Check, Records, Row, Status } from "./core.ts";
@@ -46,7 +47,7 @@ export function verifyRecords(records: Records) {
       throw new TypeError("invalid_trial_or_turn_identity");
     records.trials.forEach((t, i) => checks.push(assertion(`records.trial_shape.${i}`, Array.isArray(t.calls) && Array.isArray(t.http) && Array.isArray(t.turns) &&
       Array.isArray(t.replay) && ["repair-first", "bypass-enabled"].includes(String(t.label)) && ["smoke", "main"].includes(String(t.stage)), "required_trial_arrays_and_labels")));
-    (records.packets ?? []).forEach((p, i) => checks.push(assertion(`records.packet.${i}`, Array.isArray(p.value.prefix) && hash(p.value.prefix) === p.value.sha256, "raw_public_packet_sha256")));
+    checks.push(...packetChecks(records));
     const accounting = ledger(records), technical = coverage(records);
     checks.push(...fairness(records), ...wireValidation(records), ...cacheChecks(records), ...accounting.checks, ...journal(records), publicPrivacy(records));
     checks.push(...gates(records, checks));
@@ -55,7 +56,8 @@ export function verifyRecords(records: Records) {
     return { version: 1, status: report.status, counts: statusCounts(checks), checks, totals: accounting.totals,
       inFlightAtStops: accounting.inFlightAtStops, coverage: technical.cells,
       limitations: ["no_semantic_scoring", "no_intervention_effect_claim", "unrecorded_activity_cannot_be_verified", "mock_paths_are_not_live_demonstrations",
-        "leak_checks_are_lexical_and_use_recorded_prompt_lines_only", "luna_messages_boundary_is_not_actual_http_byte_parity"] };
+        "leak_checks_are_lexical_and_use_recorded_prompt_lines_only", "canonical_http_json_identity_is_not_raw_body_byte_identity",
+        "projected_image_original_bytes_are_not_independently_reconstructed"] };
   } catch {
     checks.push(check("records.schema", "mismatch", "invalid_or_non_json_record_shape"));
     return { version: 1, status: "mismatch" as const, counts: statusCounts(checks), checks, totals: {}, inFlightAtStops: [], coverage: [],

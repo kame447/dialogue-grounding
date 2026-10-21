@@ -1,5 +1,6 @@
-import { allCalls, allHttp, amount, assertion, check, count, equal, hash, list, META_KEYS, missing, omit, profileHash, row, rows, shaLike } from "./core.ts";
-import type { Check, Records, Row } from "./core.ts";
+import { allCalls, allHttp, amount, assertion, check, count, equal, hash, list, missing, profileHash, row, rows, shaLike } from "./core.ts";
+import type { Check, Records } from "./core.ts";
+import { replayChecks } from "./replay-records.ts";
 
 export function fairness(records: Records): Check[] {
   const out: Check[] = [];
@@ -45,50 +46,7 @@ export function fairness(records: Records): Check[] {
     }
   }
 
-  const pairs = rows(records.evidence?.pairedReplay);
-  const expected = records.trials.flatMap(t => rows(t.replay).map(r => ({ order: t.order, turn: row(list(row(r.tape).events).at(-1)).seq })));
-  const seen = new Set<string>();
-  if (!pairs.length) out.push(missing("replay.prewire", "both_label_raw_requests_missing"));
-  for (const [i, pair] of pairs.entries()) {
-    const id = `replay.${i}`, a = row(pair.left), b = row(pair.right);
-    const key = `${pair.trialOrder}:${pair.turn}`;
-    out.push(assertion(`${id}.binding`, expected.some(e => e.order === pair.trialOrder && e.turn === pair.turn) && !seen.has(key), "recorded_trial_turn_binding"));
-    seen.add(key);
-    out.push(assertion(`${id}.labels`, a.label === "repair-first" && b.label === "bypass-enabled", "both_labels_captured"));
-    if (!Object.hasOwn(a, "material") || !Object.hasOwn(b, "material")) { out.push(missing(`${id}.materials`)); continue; }
-    out.push(assertion(`${id}.materials.sha256`, hash(a.material) === a.materialSha256 && hash(b.material) === b.materialSha256, "raw_material_sha256"));
-    const different = !equal(a.material, b.material);
-    const trial = records.trials.find(t => t.order === pair.trialOrder);
-    const native = rows(trial?.replay).find(r => row(list(row(r.tape).events).at(-1)).seq === pair.turn);
-    const tape = row(native?.tape);
-    for (const [sideName, side] of [["left", a], ["right", b]] as const) {
-      const material = row(side.material);
-      out.push(different ? check(`${id}.${sideName}.material_binding`, "not_comparable", "upstream_material_difference") :
-        assertion(`${id}.${sideName}.material_binding`, equal(material.state, tape.state) && equal(material.events, tape.events) &&
-        equal(material.profile, trial?.profile), "raw_material_bound_to_recorded_tape_and_profile"));
-    }
-    const x = rows(a.requests), y = rows(b.requests);
-    if (!x.length || !y.length) { out.push(missing(`${id}.requests`)); continue; }
-    for (const [side, requests] of [["left", x], ["right", y]] as const) requests.forEach((request, j) => {
-      out.push(Object.hasOwn(request, "payload") ? assertion(`${id}.${side}.${j}.sha256`, hash(request.payload) === request.payloadSha256, "raw_prewire_sha256")
-        : missing(`${id}.${side}.${j}.sha256`));
-    });
-    out.push(different ? check(`${id}.parity`, "not_comparable", "upstream_material_difference") : assertion(`${id}.parity`,
-      equal(x.map(r => omit(r, ["payloadSha256", ...META_KEYS])), y.map(r => omit(r, ["payloadSha256", ...META_KEYS]))), "full_prewire_payloads"));
-    for (const [sideName, requests] of [["left", x], ["right", y]] as const) {
-      // A true upstream difference remains not_comparable; raw integrity is still checked.
-      const expectedRequests = rows(tape.expectedRequests);
-      out.push(different ? check(`${id}.${sideName}.wire_binding`, "not_comparable", "upstream_material_difference") : assertion(`${id}.${sideName}.wire_binding`,
-        requests.length === expectedRequests.length && requests.every((r, j) => r.provider === expectedRequests[j].provider && r.phase === expectedRequests[j].phase &&
-          Object.hasOwn(r, "payload") && hash(r.payload) === expectedRequests[j].requestSha256), "raw_prewire_reproduces_recorded_wire"));
-    }
-  }
-  expected.forEach((e, i) => { if (!seen.has(`${e.order}:${e.turn}`)) out.push(missing(`replay.required.${i}`, "paired_raw_requests_missing")); });
-  for (const [i, trial] of records.trials.entries()) rows(trial.replay).forEach((r, j) => {
-    const expectedRequests = row(r.tape).expectedRequests, captured = row(r.result).requests;
-    out.push(Array.isArray(expectedRequests) && Array.isArray(captured) ? assertion(`replay.recorded.${i}.${j}`, equal(expectedRequests, captured), "one_sided_recorded_hash_consistency_only")
-      : missing(`replay.recorded.${i}.${j}`));
-  });
+  out.push(...replayChecks(records));
   const calls = allCalls(records);
   calls.forEach((c, i) => {
     out.push(c.status === "started" ? missing(`identity.model.${i}`, "response_not_reached") :
@@ -116,6 +74,7 @@ export function wireValidation(records: Records): Check[] {
           const q = row(questions[key]), a = row(answers[key]), probabilities = row(a.probabilities), labels = Object.keys(row(q.criteria)).sort();
           return q.type === "choice" && labels.length > 0 && a.type === "choice" && typeof a.choice === "string" && labels.includes(a.choice) &&
             equal(labels, Object.keys(probabilities).sort()) && Object.values(probabilities).every(v => typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 1) &&
+            (a.confidence === undefined || a.confidence === null || typeof a.confidence === "number" && Number.isFinite(a.confidence) && a.confidence >= 0 && a.confidence <= 1) &&
             Object.keys(a).every(k => ["type", "choice", "probabilities", "confidence"].includes(k));
         });
       out.push(assertion(`validation.jev.${trial.order}.${turn}.${i}.${j}`, valid, "exact_model_question_keys_choice_and_probability_shape"));
@@ -125,10 +84,10 @@ export function wireValidation(records: Records): Check[] {
         "recorded_raw_usage_cost_matches_call_receipt"));
     });
     rows(tape.luna).forEach((entry, j) => {
-      const response = row(entry.response), call = rows(trial.calls).filter(c => c.provider === "luna" && c.turn === turn)[j];
+      const response = row(entry.response), usage = row(response.usage), call = rows(trial.calls).filter(c => c.provider === "luna" && c.turn === turn)[j];
       const fields = ["inputTokens", "outputTokens"];
       out.push(assertion(`validation.luna_usage.${trial.order}.${turn}.${j}`, !!call && fields.every(field =>
-        call[field] === (count(response[field]) ? response[field] : null)), "raw_complete_usage_fields_match_receipt_unknown_preserved"));
+        call[field] === (count(usage[field]) ? usage[field] : null)), "nested_complete_usage_fields_match_receipt_unknown_preserved"));
     });
   }
   return out;
