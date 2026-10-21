@@ -6,7 +6,8 @@ import type { RunBudget } from "./audit.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
 export type HttpReceipt = { method: string; kind: "policy_get" | "completion_post"; phase: string | null;
   requestSha256: string | null; status: number | null; outcome: "started" | "returned" | "unknown" };
-export function lunaWire(settings: LunaRequestSettings, budget: RunBudget, onSecret: (key: string) => void = () => {}) {
+export function lunaWire(settings: LunaRequestSettings, budget: RunBudget, onSecret: (key: string) => void = () => {},
+  onPolicyGet: () => void = () => {}) {
   const records: HttpReceipt[] = [];
   const owned: ReturnType<RunBudget["reserve"]>[] = [];
   const context = new AsyncLocalStorage<{ record: CallReceipt; signal?: AbortSignal }>();
@@ -40,6 +41,7 @@ export function lunaWire(settings: LunaRequestSettings, budget: RunBudget, onSec
         if (send) owned.push(send);
         records.push(record);
         try {
+          if (send) budget.sent(send); else onPolicyGet();
           const response = await fetchImpl(url, { ...init, ...(signal ? { signal: init?.signal ? AbortSignal.any([signal, init.signal]) : signal } : {}) });
           // Account each send once, even when complete() later rejects an empty
           // body, or the trial has already ended. Failed HTTP bodies stay unread.

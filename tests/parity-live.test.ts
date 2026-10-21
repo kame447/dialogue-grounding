@@ -15,6 +15,8 @@ import { createChatClient } from "../dialogue-model/runtime/client.mjs";
 import { createServer } from "node:http";
 import { SYNTHETIC_PROBES } from "../dialogue-model/runtime/diagnostics/parity-live/cases.ts";
 import { APPROVED_RUN_MANIFEST } from "../dialogue-model/runtime/diagnostics/parity-live/manifest.ts";
+import { createHash } from "node:crypto";
+import { EVIDENCE_NORMALIZED_ENVELOPE_FIELDS, projectReplayValue } from "../dialogue-model/runtime/diagnostics/parity-live/evidence.ts";
 
 const MODEL = "synthetic-luna", KEY = "sk-or-SYNTHETIC-parity-local-key-0000", TEXT = "細長い部分があります。";
 const caps = { jevUsd: 2, jevPosts: 208, lunaCalls: 131, lunaPosts: 393, lunaTokens: 1500000 };
@@ -308,4 +310,148 @@ test("overlapping complete calls keep retry ownership while another call is in f
   retry.release(); await a; second.release(); await b;
   assert.deepEqual(budget.sends.map(s => s.logicalCallId), [1, 2, 1]);
   assert.equal(budget.lunaCalls, 2); assert.equal(budget.lunaPosts, 3); assert.equal(budget.observedLunaTokens, 4);
+});
+
+// Independent verifier: do not use the implementation's JSON/hash/ledger helpers.
+function independentHash(value: any): string {
+  const canonical = (v: any): string => Array.isArray(v) ? `[${v.map(canonical).join(",")}]` : v !== null && typeof v === "object"
+    ? `{${Object.keys(v).sort().map(k => `${JSON.stringify(k)}:${canonical(v[k])}`).join(",")}}` : JSON.stringify(v);
+  return createHash("sha256").update(canonical(value)).digest("hex");
+}
+function instrumentedDependencies(config: any = {}) {
+  const base = dependencies(config), create = base.deps.createLunaClient;
+  base.deps.createLunaClient = async (label, options) => {
+    const mock = await create(label, options); let phase = "";
+    const client = createChatClient({ provider: "cloudflare", apiKey: "synthetic-luna-evidence-token", purpose: "dialogue_turn", baseUrl: "http://synthetic.invalid/v1" },
+      options.instrumentFetch(async (_url, init) => {
+        if ((init?.method ?? "GET") === "GET") return Response.json(await mock.getModelPolicy());
+        const reply = await mock.complete(JSON.parse(String(init?.body)).messages, { phase });
+        return Response.json({ model: reply.model, choices: [{ message: { content: reply.text } }],
+          usage: { prompt_tokens: reply.usage?.inputTokens, completion_tokens: reply.usage?.outputTokens } });
+      }));
+    return { getModelPolicy: () => client.getModelPolicy(), complete(messages, opts) { phase = opts?.phase ?? ""; return client.complete(messages, opts); } };
+  };
+  return base;
+}
+
+test("independent evidence contains both raw replay sides, ordered sends/instances and cache byte receipts", async t => {
+  const options = await fixture(t), result = await runParityLive(options, instrumentedDependencies({ observe: true }).deps);
+  assert.equal(result.summary.status, "wiring_passed"); assert.equal(result.summary.evidenceWriteFailed, false);
+  const path = join(result.directory, "verifier-evidence.private.json"), e = JSON.parse(await readFile(path, "utf8"));
+  assert.equal((await stat(path)).mode & 0o777, 0o600);
+  assert.equal(e.version, 1); assert.equal(e.runId, result.summary.runId); assert.equal(e.pairedReplay.length, 4);
+  for (const pair of e.pairedReplay) {
+    const trial = result.trials[pair.trialOrder], tape = trial.replay.find(r => r.tape.events.at(-1)!.seq === pair.turn)!.tape;
+    assert.equal(pair.turn, tape.events.at(-1)!.seq);
+    assert.deepEqual([pair.left.label, pair.right.label], ["repair-first", "bypass-enabled"]);
+    assert.notEqual(pair.left, pair.right);
+    for (const side of [pair.left, pair.right]) {
+      assert.equal(independentHash(side.material), side.materialSha256);
+      assert.deepEqual(side.material.state, tape.state); assert.deepEqual(side.material.events, tape.events); assert.deepEqual(side.material.profile, trial.profile);
+      assert.ok(side.material.profile.lunaRequest); assert.equal(side.material.boundary.luna, "complete_messages");
+      assert.ok(side.material.own.ownImage.byteSha256);
+      assert.equal(side.requests.length, tape.expectedRequests.length);
+      for (const [i, r] of side.requests.entries()) { assert.equal(independentHash(r.payload), r.payloadSha256);
+        assert.deepEqual([r.provider, r.phase, r.recordedRequestSha256], [tape.expectedRequests[i].provider, tape.expectedRequests[i].phase, tape.expectedRequests[i].requestSha256]);
+        if (r.phase !== "observation_targeted") assert.equal(r.payloadSha256, tape.expectedRequests[i].requestSha256);
+        if (r.provider === "jev") { assert.ok(r.payload.questions); assert.equal(typeof r.payload.state, "string"); } }
+    }
+    assert.deepEqual(pair.left.material, pair.right.material); assert.deepEqual(pair.left.requests, pair.right.requests);
+  }
+  assert.deepEqual(e.events.map((v: any) => v.seq), e.events.map((_v: any, i: number) => i + 1));
+  assert.ok(e.events.every((v: any, i: number) => !i || v.at >= e.events[i - 1].at));
+  const sends = e.events.filter((v: any) => v.type === "send");
+  assert.equal(sends.length, result.summary.budget.lunaPosts + result.summary.budget.jevPosts);
+  for (const s of sends) {
+    assert.ok(s.provider && s.instanceId && s.callId && s.phase && s.requestedModel);
+    const reserve = e.events.find((v: any) => v.type === "reserve" && v.sendId === s.sendId);
+    const response = e.events.find((v: any) => v.type === "response" && v.sendId === s.sendId);
+    assert.ok(reserve.seq < s.seq && s.seq < response.seq);
+    assert.equal(reserve.instanceId, s.instanceId); assert.equal(response.instanceId, s.instanceId);
+    if (s.provider === "jev") assert.equal(typeof s.priorObservedMaximumUsd, "number");
+  }
+  assert.equal(e.events.filter((v: any) => v.type === "complete").length, result.summary.budget.lunaCalls);
+  assert.equal(e.events.filter((v: any) => v.type === "policy_get").length, 3);
+  for (const id of new Set(sends.map((s: any) => s.instanceId))) assert.equal(new Set(sends.filter((s: any) => s.instanceId === id).map((s: any) => s.trialOrder)).size, 1);
+  assert.equal(e.cache.length, 3); assert.equal(e.cache[0].beforeSha256, null); assert.equal(e.cache[0].status, "MISS");
+  const cacheBytes = await readFile(join(options.cacheDir, (await readdir(options.cacheDir))[0]));
+  assert.equal(e.cache[0].afterSha256, createHash("sha256").update(cacheBytes).digest("hex"));
+  assert.deepEqual(e.cache[0].memo, JSON.parse(cacheBytes.toString()).memo);
+  for (const receipt of e.cache) {
+    assert.equal(independentHash(receipt.memo), receipt.memoSha256); assert.equal(receipt.validated, true);
+    assert.equal(receipt.requestedModel, receipt.returnedModel);
+    assert.ok(receipt.memo.figures.every((f: any) => f.reobservations.length === 0));
+    if (receipt.trialOrder !== null) { assert.equal(receipt.status, "HIT"); assert.equal(receipt.beforeSha256, e.cache[0].afterSha256); assert.equal(receipt.afterSha256, e.cache[0].afterSha256); }
+  }
+  const raw = await readFile(path, "utf8"); assert.ok(!raw.includes(KEY)); assert.ok(!raw.includes("synthetic-luna-evidence-token")); assert.ok(!raw.includes("data:image/"));
+});
+
+test("prelisted envelope metadata never removes nested model label/timestamps", () => {
+  assert.deepEqual(EVIDENCE_NORMALIZED_ENVELOPE_FIELDS, ["label", "runId", "timestamp", "timestamps", "startedAt", "finishedAt", "createdAt"]);
+  const payload = { label: "model-label", nested: { timestamp: "significant", instructions: "full instructions" } };
+  assert.deepEqual(projectReplayValue(payload, { mimeType: "image/png", base64: "c3ludGhldGlj" }), payload);
+  assert.notEqual(independentHash(payload), independentHash({ ...payload, nested: { ...payload.nested, timestamp: "changed" } }));
+});
+
+test("evidence retains unknown-to-late-usage revisions on one send ID after a run stop", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const entered = pause(), hold = pause();
+  const h = instrumentedDependencies({ onCall: async (label: string, phase: string) => {
+    if (label !== "warmup" && phase === "generation") { entered.release(); await hold.promise; }
+  } });
+  const work = runParityLive(await fixture(t), h.deps); await entered.promise; t.mock.timers.tick(15 * 60 * 1000);
+  const result = await work, path = join(result.directory, "verifier-evidence.private.json");
+  assert.equal(result.summary.failure, "trial_timeout"); assert.equal(result.summary.evidenceWriteFailed, false);
+  const before = JSON.parse(await readFile(path, "utf8")), stop = before.events.find((v: any) => v.type === "stop" && v.scope === "run");
+  const unknown = before.events.find((v: any) => v.type === "response" && v.provider === "luna" && v.status === "unknown");
+  assert.ok(stop.inFlight.includes(unknown.sendId)); assert.ok(!before.events.some((v: any) => v.seq > stop.seq && ["send", "commit"].includes(v.type)));
+  hold.release(); await new Promise<void>(resolve => setImmediate(resolve)); await new Promise<void>(resolve => setImmediate(resolve));
+  const latest = await result.flushBilling(); assert.equal(latest.evidenceWriteFailed, false);
+  const after = JSON.parse(await readFile(path, "utf8")), revisions = after.events.filter((v: any) => v.type === "response" && v.sendId === unknown.sendId);
+  assert.equal(revisions.at(-1).inputTokens, 10); assert.equal(revisions.at(-1).outputTokens, 2);
+  assert.ok(revisions.at(-1).seq > stop.seq); assert.equal(result.trials[0].turns.length, 0);
+  assert.equal(after.events.filter((v: any) => v.type === "send").length, before.events.filter((v: any) => v.type === "send").length);
+});
+
+test("unknown Jev billing is evidenced before its run stop without subsequent sends or commits", async t => {
+  const result = await runParityLive(await fixture(t), instrumentedDependencies({ unknownCost: true }).deps);
+  const e = JSON.parse(await readFile(join(result.directory, "verifier-evidence.private.json"), "utf8"));
+  const response = e.events.find((v: any) => v.type === "response" && v.provider === "jev"), stop = e.events.find((v: any) => v.type === "stop" && v.reason === "jev_cost_unknown");
+  assert.equal(response.costUsd, null); assert.ok(response.seq < stop.seq);
+  assert.ok(!e.events.some((v: any) => v.seq > stop.seq && ["send", "commit"].includes(v.type)));
+});
+
+test("instance spending guard and known-cost schema failure remain distinguishable evidence", async t => {
+  const capped = await runParityLive(await fixture(t), instrumentedDependencies({ cost: 0.02 }).deps);
+  const events = JSON.parse(await readFile(join(capped.directory, "verifier-evidence.private.json"), "utf8")).events;
+  const cap = events.find((e: any) => e.type === "stop" && e.scope === "instance" && e.reason === "cost_cap");
+  assert.ok(cap.instanceId); assert.ok(!events.some((e: any) => e.type === "send" && e.instanceId === cap.instanceId && e.seq > cap.seq));
+  const h = instrumentedDependencies(), original = h.deps.createJevTransport;
+  h.deps.createJevTransport = label => {
+    const native = original(label); return { ...native, async fetchImpl(url, options) {
+      const response = await native.fetchImpl(url, options), body = JSON.parse(String(options.body));
+      if (body.questions.action) { const data = await response.json(); data.answers = {}; return Response.json(data); }
+      return response;
+    } };
+  };
+  const invalid = await runParityLive(await fixture(t), h.deps);
+  const e = JSON.parse(await readFile(join(invalid.directory, "verifier-evidence.private.json"), "utf8")).events;
+  const error = e.find((v: any) => v.type === "response" && v.provider === "jev" && v.status === "error");
+  assert.equal(error.costUsd, 0.001);
+  const latest = new Map<number, any>(); for (const r of e.filter((v: any) => v.type === "response" && v.provider === "jev")) latest.set(r.sendId, r);
+  assert.equal([...latest.values()].reduce((n, r) => n + r.costUsd, 0), invalid.summary.budget.observedJevUsd);
+});
+
+test("setup failure before cached.get records not_attempted without fabricated cache validation", async t => {
+  for (const stage of ["luna_client", "jev_transport"] as const) {
+    const h = instrumentedDependencies();
+    if (stage === "luna_client") { const create = h.deps.createLunaClient;
+      h.deps.createLunaClient = (label, options) => { if (label !== "warmup") throw new Error("synthetic setup failure"); return create(label, options); };
+    } else h.deps.createJevTransport = () => { throw new Error("synthetic setup failure"); };
+    const result = await runParityLive(await fixture(t), h.deps);
+    assert.equal(result.summary.status, "wiring_failed"); assert.equal(result.trials[0].completed, false);
+    const e = JSON.parse(await readFile(join(result.directory, "verifier-evidence.private.json"), "utf8"));
+    assert.deepEqual(e.cache.find((c: any) => c.trialOrder === 0), { trialOrder: 0, status: "not_attempted", reason: `setup_failed:${stage}` });
+    assert.deepEqual(result.trials[0].notReached, [1, 3]);
+  }
 });

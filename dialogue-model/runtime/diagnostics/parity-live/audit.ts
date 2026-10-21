@@ -24,6 +24,7 @@ export class RunBudget {
   readonly stops: Array<{ reason: string; inFlight: SendReceipt[] }> = [];
   onChange: ((entry: SendReceipt) => void) | null = null;
   onRefusal: ((entry: { kind: string; reason: string; logicalCallId?: number | null }) => void) | null = null;
+  onLedgerEvent: ((event: { type: "reserve" | "send" | "response" | "stop"; entry?: SendReceipt; reason?: string; inFlight?: number[] }) => void) | null = null;
   readonly limits: BudgetLimits;
   constructor(limits: BudgetLimits) {
     if (![limits.lunaCalls, limits.lunaTokens, limits.lunaPosts, limits.jevPosts].every(v => Number.isSafeInteger(v) && v > 0) ||
@@ -39,23 +40,26 @@ export class RunBudget {
   stopReason(): string | null { return this.jevUnknown ? "jev_cost_unknown" : this.halted ? "budget_stop" : this.observedJevUsd >= this.limits.jevUsd ? "observed_jev_budget"
     : this.lunaCalls >= this.limits.lunaCalls ? "luna_call_budget" : this.lunaPosts >= this.limits.lunaPosts ? "luna_http_budget"
       : this.jevPosts >= this.limits.jevPosts ? "jev_http_budget" : this.observedLunaTokens >= this.limits.lunaTokens ? "luna_token_budget" : null; }
-  beforeSend(reservedLunaCall = false) {
+  beforeSend(reservedLunaCall = false, logicalCallId: number | null = null) {
     const reason = this.stopReason();
     if (reason && !(reservedLunaCall && reason === "luna_call_budget" && !this.halted && !this.jevUnknown &&
         this.observedJevUsd < this.limits.jevUsd && this.lunaPosts < this.limits.lunaPosts && this.jevPosts < this.limits.jevPosts &&
-        this.observedLunaTokens < this.limits.lunaTokens)) { this.stop(reason); this.refuse(reservedLunaCall ? "luna_post" : "call", reason); throw new Error("budget_stop"); }
+        this.observedLunaTokens < this.limits.lunaTokens)) { this.stop(reason); this.refuse(reservedLunaCall ? "luna_post" : "call", reason, logicalCallId); throw new Error("budget_stop"); }
   }
   refuse(kind: string, reason: string, logicalCallId?: number | null) { const entry = { kind, reason, logicalCallId }; this.refusals.push(entry); this.onRefusal?.(entry); }
-  stop(reason: string) { this.halted = true; if (!this.stops.some(s => s.reason === reason)) this.stops.push({ reason,
-    inFlight: structuredClone(this.sends.filter(s => s.status === "in_flight" || s.status === "sent_result_unknown")) }); }
+  stop(reason: string) { this.halted = true; if (!this.stops.some(s => s.reason === reason)) { this.stops.push({ reason,
+    inFlight: structuredClone(this.sends.filter(s => s.status === "in_flight" || s.status === "sent_result_unknown")) });
+    this.onLedgerEvent?.({ type: "stop", reason, inFlight: this.stops.at(-1)!.inFlight.map(s => s.id) }); } }
   reserve(provider: "luna" | "jev", phase: string | null, turn: number | null, logicalCallId: number | null = null) {
-    this.beforeSend(provider === "luna");
+    this.beforeSend(provider === "luna", logicalCallId);
     const entry: SendReceipt = { id: this.sends.length + 1, provider, phase, turn, logicalCallId, status: "in_flight", costUsd: null,
       inputTokens: null, outputTokens: null, model: null, modelMatches: null };
-    this.sends.push(entry); this.onChange?.(structuredClone(entry)); return entry;
+    this.sends.push(entry); this.onLedgerEvent?.({ type: "reserve", entry: structuredClone(entry) }); this.onChange?.(structuredClone(entry)); return entry;
   }
+  sent(entry: SendReceipt) { this.onLedgerEvent?.({ type: "send", entry: structuredClone(entry) }); }
   observe(entry: SendReceipt, values: Partial<Pick<SendReceipt, "costUsd" | "inputTokens" | "outputTokens" | "model" | "modelMatches">>) {
     Object.assign(entry, values); entry.status = "observed_response";
+    this.onLedgerEvent?.({ type: "response", entry: structuredClone(entry) });
     if (entry.provider === "jev" && entry.costUsd === null) { this.jevUnknown = true; this.stop("jev_cost_unknown"); }
     if (this.observedJevUsd >= this.limits.jevUsd) this.stop("observed_jev_budget");
     if (this.observedLunaTokens >= this.limits.lunaTokens) this.stop("luna_token_budget");
@@ -64,6 +68,7 @@ export class RunBudget {
   unknown(entry: SendReceipt) {
     if (entry.status !== "in_flight") return;
     entry.status = "sent_result_unknown";
+    this.onLedgerEvent?.({ type: "response", entry: structuredClone(entry) });
     if (entry.provider === "jev") { this.jevUnknown = true; this.stop("jev_cost_unknown"); }
     this.onChange?.(structuredClone(entry));
   }
