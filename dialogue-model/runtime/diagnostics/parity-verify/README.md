@@ -39,6 +39,13 @@ or `not_reached` (required evidence absent). Missing evidence never counts as su
   model and usage records. G4: public leakage checks and no unknown Jev billing;
   budget consistency and stop discipline are additional independent checks. Compare claimed
   gates with these recomputations; do not use claimed gate booleans as evidence.
+- Astra RULING-C7-G2: a committed turn's valid G2 evidence survives a later
+  finalization failure. Recorded in-turn call, attempt, validation, stage and image
+  failures still block G2. Independently, `gate.claim.execution` rejects overall
+  passed=true with primary failure, and `gate.primary_error_progression` rejects
+  main started after a warmup or earlier-trial primary failure. These checks do not
+  combine G1–G4. Missing failure order is unresolved; error-code names never prove
+  timing. A good earlier smoke's snapshots are not invalidated by later main errors.
 - Coverage requires each path's actual execution, validation, commit and subsequent
   application evidence. AI partial application is candidate-level `partial_demonstrated`;
   approved conservative rejection needs contract evidence, not a reason string alone.

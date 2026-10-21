@@ -191,3 +191,14 @@ retains the started order) is output_missing, not guessed double execution or a 
 mapping. Known duplicate indices/IDs and other contradictions still mismatch.
 Missing required outputs are not_reached with output_missing. Failure integrity never
 certifies execution success or suppresses actual cache, stage, ledger or gate failures.
+
+Astra RULING-C7-G2 separates turn evidence from execution success. A later cache
+finalization error does not erase a committed turn with validated referent/decision,
+matching response models and image boundaries. In-turn call/attempt/stage/validation
+failures still block G2; an error code alone proves neither a valid turn nor timing.
+`gate.claim.execution` independently rejects overall passed=true for a trial with
+primary failure (also the corresponding summary snapshot), or a global success claim
+with run failure. `gate.primary_error_progression` independently rejects main started
+after failed warmup or an earlier failed trial. When only a run failure is recorded
+and its order relative to main cannot be established, progression is not_reached.
+Neither primary-error check is derived by combining G1–G4.

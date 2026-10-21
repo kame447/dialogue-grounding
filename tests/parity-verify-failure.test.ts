@@ -290,7 +290,13 @@ test("PREAPPROVAL-16R2: failure integrity never masks actual cache or stage gate
   rows(r.evidence!.cache).find(c => c.trialOrder === 0)!.afterSha256 = null;
   assert.equal(schema(r).status, "pass"); assert.equal(find(r, "records.ownership").status, "pass");
   assert.deepEqual(verifyRecords(r).checks.filter(c => c.id.startsWith("ledger.") && c.status === "mismatch"), []);
-  for (const id of ["cache.immutable.0", "gate.G1", "gate.G2"]) assert.equal(find(r, id).status, "mismatch");
+  for (const id of ["cache.immutable.0", "gate.G1"]) assert.equal(find(r, id).status, "mismatch");
+  // Astra 8162/parent 8164: committed-turn G2 survives, independent error guards do not.
+  assert.equal(find(r, "gate.G2").status, "pass");
+  assert.equal(find(r, "gate.claim.execution").status, "mismatch");
+  assert.equal(find(r, "gate.claim.execution").reason, "overall_passed_requires_no_primary_execution_failure");
+  assert.equal(find(r, "gate.primary_error_progression").status, "mismatch");
+  assert.equal(find(r, "gate.primary_error_progression").reason, "main_started_after_primary_execution_failure");
 });
 test("PREAPPROVAL-16R2: physical field deletion and physical file loss have distinct outcomes", async () => {
   const dir = await mkdtemp(join(tmpdir(), "parity-mapping-")), r = mapped();
