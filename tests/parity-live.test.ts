@@ -897,3 +897,211 @@ test("phaseTimeouts: selecting 60s phases never extends the native Jev 15s trans
     const result = await work; assert.equal(result.summary.status, "wiring_failed"); assert.equal(result.trials[0].turns.length, 0);
   } finally { hold.release(); await new Promise<void>(resolve => setImmediate(resolve)); }
 });
+
+// PREAPPROVAL-16R2 producer-only captures. No independent verifier is imported.
+export const FAILURE_SCENARIOS = ["observation_timeout", "policy_get_failed", "post_cache", "cache_read_failed", "cache_read_and_save_failed"] as const;
+export type FailureScenario = typeof FAILURE_SCENARIOS[number];
+export async function failureScenario(t: TestContext, scenario: FailureScenario) {
+  const options = await saveGateFixture(t);
+  options.scripts[0].humanTurns = options.scripts[0].humanTurns.slice(0, 1);
+  const entered = pause(), interrupted: { signal: AbortSignal | null } = { signal: null };
+  const h = instrumentedDependencies({ onCall: async (label: string, phase: string) => {
+    if (label !== "warmup" && phase === "ai_extraction" && scenario.startsWith("cache_read")) {
+      for (const file of await readdir(options.cacheDir)) await rm(join(options.cacheDir, file));
+      if (scenario === "cache_read_and_save_failed") {
+        await mkdir(join(options.outputDir, (await readdir(options.outputDir))[0], "trial-0.private.json"));
+      }
+    }
+  } });
+  if (scenario === "post_cache") {
+    const synthetic = dependencies(), create = synthetic.deps.createLunaClient;
+    h.deps.createLunaClient = async (label, settings) => {
+      const base = await create(label, settings);
+      const native = createChatClient({ provider: "cloudflare", apiKey: "synthetic-private-key", purpose: "dialogue_turn",
+        baseUrl: "http://synthetic.invalid/v1" }, settings.instrumentFetch(async () => Response.json(await base.getModelPolicy())));
+      // Intentionally inconsistent wiring: measured GET, but no HTTP POST for
+      // complete. The genuine post-cache wiring failure must remain visible.
+      return { getModelPolicy: () => native.getModelPolicy(), complete: base.complete };
+    };
+  } else if (scenario === "policy_get_failed" || scenario === "observation_timeout") {
+    const create = h.deps.createLunaClient;
+    h.deps.createLunaClient = (label, settings) => create(label, { ...settings,
+      instrumentFetch: fetchImpl => settings.instrumentFetch(async (url, init) => {
+        if (scenario === "policy_get_failed" && (init?.method ?? "GET") === "GET") return new Response("{}", { status: 401 });
+        if (scenario === "observation_timeout" && init?.method === "POST") {
+          interrupted.signal = init.signal!; entered.release();
+          return new Promise<Response>((_resolve, reject) => init.signal!.addEventListener("abort", () => reject(new Error("synthetic abort")), { once: true }));
+        }
+        return fetchImpl(url, init);
+      }) });
+  }
+  const clock = scenario === "observation_timeout" ? phaseClock(t) : null;
+  const work = runParityLive(options, h.deps);
+  if (clock) { await entered.promise; clock.advance(20000); }
+  const result = await work;
+  return { result, options, h, abortedSignal: interrupted.signal };
+}
+export async function capturedFailureRecords(directory: string) {
+  const records: any = { trials: [], packets: [], storage: [], billing: [] };
+  for (const name of (await readdir(directory)).sort()) {
+    const file = join(directory, name), info = await stat(file);
+    records.storage.push({ name, mode: info.mode & 0o777, external: true, regular: info.isFile() });
+    if (!info.isFile()) continue;
+    const text = await readFile(file, "utf8");
+    if (name === "billing.private.jsonl") { records.billing = text.trim().split("\n").filter(Boolean).map(line => JSON.parse(line)); continue; }
+    if (!name.endsWith(".json")) continue;
+    const value = JSON.parse(text);
+    if (/^trial-\d+\.private\.json$/u.test(name)) records.trials.push(value);
+    else if (name.startsWith("public-")) records.packets.push({ name, value });
+    else if (name === "run.private.json") records.run = value;
+    else if (name === "summary.private.json") records.summary = value;
+    else if (name === "warmup.private.json") records.warmup = value;
+    else if (name === "failure.private.json") records.failure = value;
+    else if (name === "verifier-evidence.private.json") records.evidence = value;
+  }
+  return records;
+}
+function assertPlannedMapping(result: Awaited<ReturnType<typeof runParityLive>>, count: number) {
+  const indices = [...result.trials.map(trial => trial.plannedIndex), ...result.summary.skipped.map(skipped => skipped.plannedIndex)];
+  assert.deepEqual(indices.sort((a, b) => a - b), Array.from({ length: count }, (_, i) => i));
+}
+for (const scenario of FAILURE_SCENARIOS) test(`failure producer: ${scenario} retains receipt ownership and every planned slot`, async t => {
+  const { result, options, abortedSignal } = await failureScenario(t, scenario), records = await capturedFailureRecords(result.directory);
+  const failure = records.failure;
+  assert.equal(records.run.plannedMappingVersion, 1); assertPlannedMapping(result, options.manifest.trials.length);
+  assert.equal(failure.schemaVersion, "parity_live_failure_v1");
+  assert.ok(result.summary.status !== "wiring_passed");
+  if (!scenario.startsWith("cache_read")) {
+    assert.deepEqual(Object.keys(failure).sort(), ["schemaVersion", "scope", "code", "stage", "calls", "cache", "observationCallStarted", "policy", "http", "deadlines"].sort());
+    assert.equal(failure.scope, "warmup"); assert.equal(records.warmup, undefined); assert.equal(result.trials.length, 0);
+    assert.equal(failure.http.measured, true); assert.ok(failure.http.records.every((r: any) => ["returned", "unknown"].includes(r.outcome)));
+    assert.deepEqual(failure.deadlines.configured, { observationMs: 20000, lunaClientTimeoutMs: null });
+    assert.deepEqual(failure.deadlines.applied.completeCalls.map((c: any) => c.callId), failure.calls.map((c: any) => c.id));
+    assert.equal(new Set(failure.deadlines.applied.completeCalls.map((c: any) => c.callId)).size, failure.calls.length);
+    assert.ok(result.summary.skipped.every(s => s.reason === `warmup_failed:${failure.code}`));
+    if (scenario === "policy_get_failed") {
+      assert.equal(failure.stage, "policy_get"); assert.deepEqual(failure.policy, { status: "failed", value: null });
+      assert.equal(failure.observationCallStarted, false); assert.equal(failure.deadlines.applied.observationOuterMs, null);
+      assert.deepEqual(failure.deadlines.applied.completeCalls, []); assert.deepEqual(failure.calls, []);
+      assert.equal(failure.http.records.length, 1); assert.equal(failure.http.records[0].kind, "policy_get");
+      assert.equal(result.summary.budget.lunaPosts, 0);
+    } else {
+      assert.equal(failure.stage, scenario === "post_cache" ? "post_cache" : "cache_get");
+      assert.equal(failure.policy.status, "obtained"); assert.deepEqual(Object.keys(failure.policy.value).sort(), ["model", "provider", "purpose", "ready"]);
+      assert.equal(failure.observationCallStarted, true); assert.equal(failure.deadlines.applied.observationOuterMs, 20000);
+      assert.equal(failure.calls.length, 1); assert.equal(failure.deadlines.applied.completeCalls[0].callOptionTimeoutMs, 20000);
+      if (scenario === "observation_timeout") {
+        assert.equal(abortedSignal!.aborted, true); assert.equal(failure.cache, null); assert.equal(result.summary.budget.lunaPosts, 1);
+        assert.equal(failure.http.records.filter((r: any) => r.kind === "completion_post").length, 1);
+      } else {
+        assert.equal(failure.code, "cache_warmup_http_wiring"); assert.equal(failure.cache.status, "MISS");
+        assert.equal(failure.http.records.filter((r: any) => r.kind === "completion_post").length, 0);
+      }
+    }
+  } else {
+    assert.deepEqual(failure, { schemaVersion: "parity_live_failure_v1", scope: "after_warmup", code: "cache_read_failed", stage: "trial_loop" });
+    assert.ok(records.warmup); assert.equal(result.trials.length, 1); assert.equal(result.trials[0].failure, "cache_read_failed");
+    assert.equal(result.trials[0].plannedIndex, 0); assert.equal(result.trials[0].gates!.G1.cacheStable, false);
+    assert.ok(result.trials[0].calls.some(c => c.provider === "luna") && result.trials[0].calls.some(c => c.provider === "jev"));
+    assert.ok(result.trials[0].http.length > 0);
+    assert.equal(result.summary.budget.halted, true);
+    if (scenario === "cache_read_failed") {
+      assert.equal(records.trials.length, 1); assert.equal(records.trials[0].failure, "cache_read_failed");
+      assert.deepEqual(records.trials[0].calls, result.trials[0].calls); assert.deepEqual(records.trials[0].http, result.trials[0].http);
+    } else {
+      assert.equal(records.trials.length, 0); assert.equal(result.summary.status, "save_failed"); assert.equal(result.trials[0].gates!.G3.passed, false);
+      assert.ok(result.summary.skipped.every(s => s.reason === "save_failed:trial-0.private.json"));
+    }
+  }
+  const calls = [...(failure.calls ?? []), ...(records.warmup?.calls ?? []), ...records.trials.flatMap((trial: any) => trial.calls)];
+  assert.equal(new Set(calls.map(c => c.id)).size, calls.length);
+  const sends = [...(failure.http?.records ?? []), ...(records.warmup?.http ?? []), ...records.trials.flatMap((trial: any) => trial.http)].flatMap(r => r.sendId === null ? [] : [r.sendId]);
+  assert.equal(new Set(sends).size, sends.length);
+});
+
+test("failure producer: skipped main before smoke preserves plannedIndex distinct from trial order", async t => {
+  const options = await saveGateFixture(t), first = options.manifest.trials[0], second = options.manifest.trials[1];
+  options.manifest.trials = [second, first];
+  const result = await runParityLive(options, instrumentedDependencies().deps);
+  assert.equal(result.trials.length, 1); assert.equal(result.trials[0].order, 0); assert.equal(result.trials[0].plannedIndex, 1);
+  assert.equal(result.summary.skipped[0].plannedIndex, 0); assert.equal(result.summary.skipped[0].reason, "smoke_stage_not_ready");
+  assertPlannedMapping(result, 2);
+});
+
+for (const measured of [false, true]) test(`failure producer: client setup fails with policy not requested, measured=${measured}`, async t => {
+  const options = await saveGateFixture(t), h = dependencies();
+  h.deps.createLunaClient = async (_label, settings) => {
+    if (measured) settings.instrumentFetch(async () => { throw new Error("must not send"); });
+    throw new Error("synthetic raw error must not be recorded");
+  };
+  const result = await runParityLive(options, h.deps), records = await capturedFailureRecords(result.directory), failure = records.failure;
+  assert.equal(failure.scope, "warmup"); assert.equal(failure.stage, "client_setup");
+  assert.deepEqual(failure.policy, { status: "not_requested", value: null });
+  assert.deepEqual(failure.http, { measured, records: [] }); assert.deepEqual(failure.calls, []);
+  assert.equal(failure.observationCallStarted, false); assert.equal(failure.deadlines.applied.observationOuterMs, null);
+  assert.deepEqual(failure.deadlines.applied.completeCalls, []);
+  assert.ok(!JSON.stringify(records).includes("synthetic raw error")); assertPlannedMapping(result, options.manifest.trials.length);
+});
+
+test("failure producer: an invalid policy is failed/null and retains its measured GET receipt", async t => {
+  const options = await saveGateFixture(t), h = instrumentedDependencies(), create = h.deps.createLunaClient;
+  h.deps.createLunaClient = async (label, settings) => {
+    const base = await create(label, settings);
+    return { ...base, async getModelPolicy() { return { ...await base.getModelPolicy(), ready: false }; } };
+  };
+  const result = await runParityLive(options, h.deps), { failure } = await capturedFailureRecords(result.directory);
+  assert.equal(failure.stage, "policy_get"); assert.equal(failure.code, "invalid_model_policy");
+  assert.deepEqual(failure.policy, { status: "failed", value: null }); assert.equal(failure.http.records.length, 1);
+  assert.equal(failure.http.records[0].kind, "policy_get"); assert.equal(failure.observationCallStarted, false);
+});
+
+test("failure producer: other finalization exceptions still save the started trial before after_warmup", async t => {
+  const { VerifierEvidence } = await import("../dialogue-model/runtime/diagnostics/parity-live/evidence.ts");
+  const cache = VerifierEvidence.prototype.cache;
+  t.mock.method(VerifierEvidence.prototype, "cache", function (this: InstanceType<typeof VerifierEvidence>, receipt: Parameters<InstanceType<typeof VerifierEvidence>["cache"]>[0]) {
+    if (receipt.trialOrder !== null) throw new Error("synthetic finalization error");
+    return cache.call(this, receipt);
+  });
+  const options = await saveGateFixture(t), result = await runParityLive(options, instrumentedDependencies().deps);
+  const records = await capturedFailureRecords(result.directory);
+  assert.equal(records.trials.length, 1); assert.equal(records.trials[0].failure, "trial_finalize_failed");
+  assert.ok(records.trials[0].calls.length > 0); assert.ok(records.trials[0].http.length > 0);
+  assert.deepEqual(records.failure, { schemaVersion: "parity_live_failure_v1", scope: "after_warmup", code: "trial_finalize_failed", stage: "trial_loop" });
+  assert.equal(result.summary.budget.halted, true); assertPlannedMapping(result, options.manifest.trials.length);
+  assert.equal(result.summary.coverage.length, 0, "unavailable coverage is not fabricated or recomputed after finalization fails");
+});
+
+test("failure producer: late warm-up usage revises the same send after close without changing failure ownership", async t => {
+  const clock = phaseClock(t), entered = pause(), hold = pause(), parsed = pause();
+  const options = await saveGateFixture(t), h = instrumentedDependencies(), create = h.deps.createLunaClient;
+  h.deps.createLunaClient = (label, settings) => create(label, { ...settings,
+    instrumentFetch: fetchImpl => settings.instrumentFetch(async (url, init) => {
+      if (init?.method !== "POST") return fetchImpl(url, init);
+      entered.release(); await hold.promise;
+      const response = await fetchImpl(url, init), clone = response.clone.bind(response);
+      response.clone = () => {
+        const body = clone(), json = body.json.bind(body);
+        body.json = async () => { const value = await json(); parsed.release(); return value; };
+        return body;
+      };
+      return response;
+    }) });
+  const work = runParityLive(options, h.deps);
+  try {
+    await entered.promise; clock.advance(20000);
+    const result = await work, original = await readFile(join(result.directory, "failure.private.json"), "utf8");
+    const before = JSON.parse(original), send = result.summary.budget.sends[0];
+    assert.equal(before.scope, "warmup"); assert.equal(send.status, "sent_result_unknown");
+    assert.equal(before.http.records.find((r: any) => r.kind === "completion_post").outcome, "unknown");
+    hold.release(); await parsed.promise; await new Promise<void>(resolve => setImmediate(resolve));
+    const latest = await result.flushBilling();
+    assert.equal(latest.sends.length, 1); assert.equal(latest.sends[0].id, send.id);
+    assert.equal(latest.sends[0].inputTokens, 10); assert.equal(latest.sends[0].outputTokens, 2);
+    const records = await capturedFailureRecords(result.directory);
+    const revisions = records.billing.filter((v: any) => v.entry?.id === send.id);
+    assert.equal(revisions.at(-1).entry.inputTokens, 10); assert.equal(revisions.at(-1).entry.outputTokens, 2);
+    assert.equal(await readFile(join(result.directory, "failure.private.json"), "utf8"), original);
+    assert.equal(result.trials.length, 0); assert.equal(records.trials.length, 0);
+    assert.equal(records.evidence.events.filter((v: any) => v.type === "send").length, 1);
+  } finally { hold.release(); }
+});

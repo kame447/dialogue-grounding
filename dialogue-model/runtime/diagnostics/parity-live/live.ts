@@ -43,7 +43,7 @@ export type Dependencies = { execution: "mock" | "live";
 };
 export type Options = { outputDir: string; cacheDir: string; manifest: RunManifest; scripts: readonly Script[] };
 type Event = { id: string; seq: number; speaker: "human" | "ai"; text: string };
-export type Trial = Omit<ComparableTrial, "turns"> & { order: number; stage: string; profile: ReturnType<typeof researchTrialProfile>; profileSha256: string;
+export type Trial = Omit<ComparableTrial, "turns"> & { order: number; plannedIndex: number; stage: string; profile: ReturnType<typeof researchTrialProfile>; profileSha256: string;
   failure: string | null; cache: ObservationCacheAudit | null; calls: CallReceipt[];
   turns: Array<IdentityTurn & { trace: JevTurnTrace[]; state: JevPrivateState; wiring: unknown }>;
   notReached: number[]; aiPublicSettlement: unknown; durationMs: number; budget: unknown; http: HttpReceipt[]; attempts: JevTurnTrace[];
@@ -84,7 +84,9 @@ export async function runParityLive(options: Options, deps: Dependencies) {
   const board = modelView(createTrialV2({ seed: manifest.seed })); // Own projection only.
   const image = { mimeType: board.mimeType, base64: board.png.toString("base64") }, anchors = board.anchors;
   const own = { ownImage: image, ownAnchors: anchors };
-  const promptSources = await promptSourceManifest(), trials: Trial[] = [], skipped: unknown[] = [];
+  const promptSources = await promptSourceManifest(), trials: Trial[] = [];
+  const skipped: Array<{ plannedIndex: number; scriptId: string; label: Label; reason: string; status: "not_reached" }> = [];
+  const trialCoverage = new Map<Trial, ReturnType<typeof wiringCoverage> | null>();
   const clients = new Set<LunaClient>(), connections = new Map<LunaClient, ReturnType<typeof lunaWire>>(), promptSpans = new Set<string>();
   let privacyRejected = false, fatal: string | null = null, logicalCallSequence = 0;
   let activeRunStop: ((reason: string) => void) | null = null;
@@ -211,10 +213,19 @@ export async function runParityLive(options: Options, deps: Dependencies) {
       savedBillingRevision = revision;
     }).catch(() => { billingWriteFailed = true; saveFailed("billing.private.jsonl"); });
   };
+  const warmConnection: { current: ReturnType<typeof lunaWire> | null } = { current: null };
+  let warmupSaved = false, warmClosed = false, trialLoopStarted = false;
+  let warmStage: "client_setup" | "policy_get" | "cache_get" | "post_cache" | "unknown" = "unknown";
+  let warmPolicy: { status: "not_requested" | "failed" | "obtained"; value: Awaited<ReturnType<LunaClient["getModelPolicy"]>> | null } = { status: "not_requested", value: null };
+  // observationOuterMs は、開始した cache.get に対して指定した観察用 timeout 値であり、cache.get の読込・lock・保存全体をその時間で打ち切ったこと、または観察タイマーの作動そのものを観測したことを意味しない。cache.get 未開始では null。実際の complete 呼出しの有無・指定値は observationCallStarted と completeCalls で別に示す。
+  let observationOuterMs: number | null = null;
+  const warmCompleteCalls: Array<{ callId: number; callOptionTimeoutMs: number | null }> = [];
   const freshClient = async (label: Label | "warmup", signal?: AbortSignal, trialOrder: number | null = null) => {
+    if (label === "warmup") warmStage = "client_setup";
     const identity = { provider: "luna" as const, instanceId: `luna-${++instanceSequence}`, trialOrder, label, requestedModel: expectedModel };
     const connection = lunaWire(manifest.lunaRequest, budget, key => secrets.push(key), () => evidence.event({ ...identity,
       type: "policy_get", callId: 0, phase: "model_policy" }));
+    if (label === "warmup") warmConnection.current = connection;
     if (signal) connection.bind(signal);
     const client = await deps.createLunaClient(label, { request: manifest.lunaRequest, instrumentFetch: connection.instrumentFetch });
     if (!client || typeof client.complete !== "function" || typeof client.getModelPolicy !== "function") fail("missing_luna_dependency");
@@ -222,10 +233,13 @@ export async function runParityLive(options: Options, deps: Dependencies) {
     connections.set(client, connection);
     lunaIdentities.set(client, identity);
     if (deps.execution === "live" && !connection.measured) fail("luna_http_uninstrumented");
+    if (label === "warmup") { warmStage = "policy_get"; warmPolicy = { status: "failed", value: null }; }
     const policy = await client.getModelPolicy();
     if (policy.purpose !== PROFILE.modelPolicy.purpose || !policy.ready || !modelName(policy.model) || !["openai", "gemini"].includes(policy.provider)) fail("invalid_model_policy");
     identity.requestedModel = policy.model;
-    return { client, policy: { purpose: policy.purpose, ready: policy.ready, model: policy.model, provider: policy.provider } };
+    const value = { purpose: policy.purpose, ready: policy.ready, model: policy.model, provider: policy.provider };
+    if (label === "warmup") warmPolicy = { status: "obtained", value };
+    return { client, policy: value };
   };
   let expectedModel = "", warmAudit: ObservationCacheAudit | null = null, cacheHash: string | null = null;
   let warmHttpRecords: HttpReceipt[] = [], warmMeasured = false, cacheStable = true;
@@ -269,6 +283,7 @@ export async function runParityLive(options: Options, deps: Dependencies) {
       }
       if (imageCount && !["observation_initial", "observation_targeted"].includes(phase)) { stop("non_observation_image"); fail("non_observation_image"); }
       const { record, started } = start(phase, "luna", messages, messages.filter(m => m.role === "system"), imageCount);
+      if (calls === warmCalls) warmCompleteCalls.push({ callId: record.id, callOptionTimeoutMs: callOptions.timeoutMs ?? null });
       record.expectedHttpRequestSha256 = researchHash(canonicalLunaPayload(messages, manifest.lunaRequest));
       const callSignal = callOptions.signal ? AbortSignal.any([signal, callOptions.signal]) : signal;
       const recordAbort = () => evidence.event({ ...evidence.calls.get(record.id), type: "stop", reason: "phase_aborted",
@@ -347,7 +362,7 @@ export async function runParityLive(options: Options, deps: Dependencies) {
     };
     return { client, fetchImpl, adapterResult, readKey: async () => { const key = await jev!.readKey(); if (typeof key === "string") secrets.push(key); return key; } };
   }
-  await persist("run.private.json", { runId, manifest, manifestSha256: researchHash(manifest), execution: deps.execution, profile: PROFILE, profileSha256: RESEARCH_TRIAL_PROFILE_SHA256,
+  await persist("run.private.json", { runId, plannedMappingVersion: 1, manifest, manifestSha256: researchHash(manifest), execution: deps.execution, profile: PROFILE, profileSha256: RESEARCH_TRIAL_PROFILE_SHA256,
     promptSources, scripts: scripts.map(s => ({ id: s.id, sha256: researchHash(s), turns: s.humanTurns.length })),
     engineeringLimits: { ...ENGINEERING_LIMITS, ...budget.limits }, comparison: "not_implemented_pending_researcher_decision",
     semantic: "not_installed_pending_auditor_approval", coverage: "not_measured_by_wiring_harness" }, ["profile", "manifest"]);
@@ -358,47 +373,51 @@ export async function runParityLive(options: Options, deps: Dependencies) {
     const warm = await freshClient("warmup"); expectedModel = warm.policy.model;
     const controller = new AbortController();
     activeRunStop = reason => { fatal ??= reason; controller.abort(); };
-    const wire = wireScope(warm.client, null, warmCalls, controller.signal, () => null, () => false, code => { fatal = code; controller.abort(); });
+    const wire = wireScope(warm.client, null, warmCalls, controller.signal, () => null, () => warmClosed, code => { fatal = code; controller.abort(); });
     const cache = await createObservationCache({ directory: cacheDir, modelId: expectedModel, client: wire.client, onMiss: "observe", timeoutMs: PROFILE.timeouts.observationMs });
     const cacheFile = join(cacheDir, observationCacheFileName(createObservationCacheKey(own, { modelId: expectedModel })));
     let warmBefore: string | null = null;
     try { warmBefore = digestBytes(await readFile(cacheFile)); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-    const initial = await cache.get(own, { signal: controller.signal }); warmAudit = initial.audit;
+    warmStage = "cache_get"; observationOuterMs = PROFILE.timeouts.observationMs;
+    const initial = await cache.get(own, { signal: controller.signal, timeoutMs: observationOuterMs }); warmAudit = initial.audit;
+    warmStage = "post_cache";
     if (warmCalls.length !== (warmAudit.status === "MISS" ? 1 : 0)) fail("cache_warmup_wiring");
     const warmHttp = connections.get(warm.client)!;
     warmHttpRecords = warmHttp.records; warmMeasured = warmHttp.measured;
     const posts = warmHttp.records.filter(r => r.kind === "completion_post").length;
     if (warmHttp.measured && (warmAudit.status === "MISS" ? posts < 1 || posts > 3 : posts !== 0)) fail("cache_warmup_http_wiring");
-    warmHttp.close();
+    warmClosed = true; warmHttp.close();
     activeRunStop = null;
     cacheHash = digestBytes(await readFile(cacheFile));
     evidence.cache({ trialOrder: null, status: warmAudit.status, beforeSha256: warmBefore, afterSha256: cacheHash,
       memo: initial.memo, memoSha256: researchHash(initial.memo), validated: true, requestedModel: expectedModel, returnedModel: warm.policy.model });
-    await persist("warmup.private.json", { audit: warmAudit, memoSha256: researchHash(initial.memo), fileSha256: cacheHash, calls: warmCalls, http: warmHttp.records, policy: warm.policy }, ["usage", "model_ids"]);
+    warmupSaved = (await persist("warmup.private.json", { audit: warmAudit, memoSha256: researchHash(initial.memo), fileSha256: cacheHash, calls: warmCalls, http: warmHttp.records, policy: warm.policy }, ["usage", "model_ids"])).saved;
+    if (!warmupSaved) fail("save_failed");
     warmupSaving = await auditability();
+    trialLoopStarted = true;
     for (const planned of manifest.trials) {
-        plannedIndex++;
+        const index = plannedIndex++;
         const script = scripts.find(s => s.id === planned.scriptId)!, label = planned.label;
         const beforeTrial = await auditability();
         if (beforeTrial.status === "save_failed") {
-          skipped.push({ scriptId: script.id, label, reason: `save_failed:${beforeTrial.firstSaveFailure ?? "required_records"}`, status: "not_reached" }); continue;
+          skipped.push({ plannedIndex: index, scriptId: script.id, label, reason: `save_failed:${beforeTrial.firstSaveFailure ?? "required_records"}`, status: "not_reached" }); continue;
         }
         if (planned.stage === "main" && manifest.trials.some(t => t.stage === "smoke") &&
             !trials.filter(t => t.stage === "smoke").some(t => t.gates?.passed)) {
-          skipped.push({ scriptId: script.id, label, reason: "smoke_stage_not_ready", status: "not_reached" }); continue;
+          skipped.push({ plannedIndex: index, scriptId: script.id, label, reason: "smoke_stage_not_ready", status: "not_reached" }); continue;
         }
         const stopReason = fatal ?? budget.stopReason();
         if (stopReason) { budget.stop(stopReason);
-          skipped.push({ scriptId: script.id, label, reason: stopReason, status: "not_reached" }); continue; }
+          skipped.push({ plannedIndex: index, scriptId: script.id, label, reason: stopReason, status: "not_reached" }); continue; }
         const controller = new AbortController(), started = performance.now(); let closed = false, turn: number | null = null;
         let state: JevPrivateState | null = null;
         const events: Event[] = [], traces: JevTurnTrace[] = [];
-        const trial: Trial = { scriptId: script.id, label, stage: planned.stage, completed: false, order: trials.length, profile: PROFILE, profileSha256: RESEARCH_TRIAL_PROFILE_SHA256,
+        const trial: Trial = { scriptId: script.id, label, stage: planned.stage, completed: false, order: trials.length, plannedIndex: index, profile: PROFILE, profileSha256: RESEARCH_TRIAL_PROFILE_SHA256,
           failure: null, cache: null, calls: [], turns: [], notReached: [], aiPublicSettlement: [], durationMs: 0, budget: null, http: [], attempts: [], replay: [], lastCommittedState: null, failureAtTurn: null,
           identity: { image: researchHash(image), anchors: researchHash(anchors), memo: "", prompts: researchHash(promptSources), profile: RESEARCH_TRIAL_PROFILE_SHA256,
             timeouts: researchHash(PROFILE.timeouts), requestedModels: researchHash({ luna: expectedModel, jev: PROFILE.modelPolicy.jevModel }), returnedModels: [] } };
         trials.push(trial);
-        const trialBefore = digestBytes(await readFile(cacheFile));
+        let trialBefore: string | null = null;
         let initialTrialMemo: typeof initial.memo | null = null;
         let cacheReadAttempted = false;
         let setupStage: "luna_client" | "jev_transport" | "native_runtime" | "native_initialization" = "luna_client";
@@ -413,6 +432,7 @@ export async function runParityLive(options: Options, deps: Dependencies) {
           timer = setTimeout(() => stop("trial_timeout"), ENGINEERING_LIMITS.trialMs);
         });
         const work = async () => {
+          try { trialBefore = digestBytes(await readFile(cacheFile)); } catch { fail("cache_read_failed"); }
           const fresh = await freshClient(label, controller.signal, trial.order); if (fresh.policy.model !== expectedModel) fail("model_changed");
           const connection = connections.get(fresh.client)!; trial.http = connection.records;
           setupStage = "jev_transport";
@@ -510,51 +530,78 @@ export async function runParityLive(options: Options, deps: Dependencies) {
         try { await Promise.race([work(), canceled]); }
         catch (error) { trial.failure ??= budget.haltReason ?? fatal ?? (error instanceof HarnessError ? error.code : "trial_failed"); }
         finally { closed = true; activeRunStop = null; clearTimeout(timer); controller.abort(); }
-        connections.forEach(c => { if (c.records === trial.http) c.close(); });
-        trial.calls.filter(c => c.status === "started").forEach(c => {
-          const last = budget.sends.find(s => s.id === c.sendIds.at(-1));
-          c.status = "error"; c.error = last?.status === "observed_response" ? "aborted_after_response" : "in_flight_outcome_unknown";
-          if (c.provider === "jev" && last?.costUsd !== undefined && last.costUsd !== null) c.costUsd = last.costUsd;
-        });
-        budget.sends.filter(s => s.status === "in_flight").forEach(s => budget.unknown(s));
-        trial.attempts = state ? settleJevTurnTraces(traces, state) : structuredClone(traces);
-        trial.lastCommittedState = structuredClone(state);
-        trial.durationMs = Math.max(0, performance.now() - started);
-        trial.identity.returnedModels = [...new Set(trial.calls.flatMap(c => c.model ? [c.model] : []))].sort();
-        trial.failureAtTurn = trial.failure ? turn : null;
-        trial.notReached = script.humanTurns.map((_s, i) => i * 2 + 1).filter(t => !trial.turns.some(r => r.turn === t) && t !== trial.failureAtTurn);
-        trial.budget = budget.snapshot();
-        const trialAfter = digestBytes(await readFile(cacheFile));
-        if (trial.cache && initialTrialMemo) evidence.cache({ trialOrder: trial.order, status: trial.cache.status, beforeSha256: trialBefore,
-          afterSha256: trialAfter, memo: initialTrialMemo, memoSha256: researchHash(initialTrialMemo), validated: true,
-          requestedModel: expectedModel, returnedModel: expectedModel });
-        else if (!cacheReadAttempted) evidence.cache({ trialOrder: trial.order, status: "not_attempted", reason: `setup_failed:${setupStage}` });
-        if (trialAfter !== cacheHash) { cacheStable = false; trial.failure = "cache_changed"; trial.completed = false; fatal = "cache_changed"; }
-        const saved = await auditability();
-        trial.gates = stageGates(trial, { warmAudit, warmCalls, warmHttp: warmHttpRecords, measuredHttp: warmMeasured,
-          saving: saved,
-          cacheStable, privacyRejected, jevUnknown: budget.jevUnknown, execution: deps.execution });
-        const coverage = wiringCoverage(trial, deps.execution, own);
+        let finalizeFailed = false, coverage: ReturnType<typeof wiringCoverage> | null = null;
+        try {
+          connections.forEach(c => { if (c.records === trial.http) c.close(); });
+          trial.calls.filter(c => c.status === "started").forEach(c => {
+            const last = budget.sends.find(s => s.id === c.sendIds.at(-1));
+            c.status = "error"; c.error = last?.status === "observed_response" ? "aborted_after_response" : "in_flight_outcome_unknown";
+            if (c.provider === "jev" && last?.costUsd !== undefined && last.costUsd !== null) c.costUsd = last.costUsd;
+          });
+          budget.sends.filter(s => s.status === "in_flight").forEach(s => budget.unknown(s));
+          trial.attempts = state ? settleJevTurnTraces(traces, state) : structuredClone(traces);
+          trial.lastCommittedState = structuredClone(state);
+          trial.durationMs = Math.max(0, performance.now() - started);
+          trial.identity.returnedModels = [...new Set(trial.calls.flatMap(c => c.model ? [c.model] : []))].sort();
+          trial.failureAtTurn = trial.failure ? turn : null;
+          trial.notReached = script.humanTurns.map((_s, i) => i * 2 + 1).filter(t => !trial.turns.some(r => r.turn === t) && t !== trial.failureAtTurn);
+          trial.budget = budget.snapshot();
+          let trialAfter: string | null = null;
+          try { trialAfter = digestBytes(await readFile(cacheFile)); }
+          catch { cacheStable = false; trial.failure ??= "cache_read_failed"; trial.completed = false; finalizeFailed = true; }
+          if (trial.cache && initialTrialMemo && trialAfter !== null) evidence.cache({ trialOrder: trial.order, status: trial.cache.status, beforeSha256: trialBefore,
+            afterSha256: trialAfter, memo: initialTrialMemo, memoSha256: researchHash(initialTrialMemo), validated: true,
+            requestedModel: expectedModel, returnedModel: expectedModel });
+          else if (!cacheReadAttempted) evidence.cache({ trialOrder: trial.order, status: "not_attempted", reason: `setup_failed:${setupStage}` });
+          if (trialAfter !== null && trialAfter !== cacheHash) { cacheStable = false; trial.failure = "cache_changed"; trial.completed = false; fatal = "cache_changed"; }
+          const saved = await auditability();
+          trial.gates = stageGates(trial, { warmAudit, warmCalls, warmHttp: warmHttpRecords, measuredHttp: warmMeasured,
+            saving: saved,
+            cacheStable, privacyRejected, jevUnknown: budget.jevUnknown, execution: deps.execution });
+          coverage = wiringCoverage(trial, deps.execution, own);
+        } catch {
+          trial.failure ??= "trial_finalize_failed"; trial.completed = false; finalizeFailed = true;
+          if (trial.gates) trial.gates.passed = false;
+        }
+        trialCoverage.set(trial, coverage);
+        if (finalizeFailed) { fatal ??= trial.failure; budget.stop(trial.failure!); trial.budget = budget.snapshot(); }
+        // Every started trial keeps ownership of its receipts even if finalization
+        // fails. Saving failure remains explicit; it never moves a trial to skipped.
         const failureCategory = !trial.failure ? null : budget.jevUnknown ? "sent_result_unknown_run_halted" :
           /budget|cost_cap|trial_timeout/u.test(trial.failure) ? "budget_or_time_stop" : "validation_or_pipeline_failure_known_billing";
         const trialSave = await persist(`trial-${trial.order}.private.json`, { ...trial, failureCategory, coverage, publicTurns: events }, ["profile", "cost", "usage", "model_ids"]);
         if (!trialSave.saved) {
           // No published gate file exists: the atomic trial-record save failed.
           // Other completed trials' historical gates are never revised.
-          trial.gates.G3.passed = false; trial.gates.G3.saving = await auditability(); trial.gates.passed = false;
+          if (trial.gates) { trial.gates.G3.passed = false; trial.gates.G3.saving = await auditability(); trial.gates.passed = false; }
         }
         if (trialSave.redacted) { trial.completed = false; trial.failure = "privacy_rejected"; privacyRejected = true; }
         // A primary wiring failure is retained; do not repeat the same script/input.
         if (trial.failure) { fatal ??= trial.failure; budget.stop(trial.failure); }
+        if (finalizeFailed) fail(trial.failure!);
     }
   } catch (error) {
     if (!(error instanceof HarnessError && error.code === "save_failed" && firstSaveFailure)) {
       fatal ??= budget.haltReason ?? (error instanceof HarnessError ? error.code : "warmup_failed"); budget.stop(fatal);
     }
-    await persist("failure.private.json", { code: fatal ?? "save_failed", calls: warmCalls, cache: warmAudit }); }
+    if (warmupSaved) {
+      await persist("failure.private.json", { schemaVersion: "parity_live_failure_v1", scope: "after_warmup", code: fatal ?? "save_failed",
+        stage: trialLoopStarted ? "trial_loop" : "unknown" });
+    } else {
+      warmClosed = true;
+      warmConnection.current?.close();
+      warmCalls.filter(c => c.status === "started").forEach(c => { c.status = "error"; c.error = "in_flight_outcome_unknown"; });
+      await persist("failure.private.json", { schemaVersion: "parity_live_failure_v1", scope: "warmup", code: fatal ?? "save_failed", stage: warmStage,
+        calls: warmCalls, cache: warmAudit, observationCallStarted: warmCalls.length > 0, policy: warmPolicy,
+        http: { measured: warmConnection.current?.measured ?? false, records: warmConnection.current?.measured ? warmConnection.current.records : [] },
+        deadlines: { configured: { observationMs: PROFILE.timeouts.observationMs, lunaClientTimeoutMs: manifest.lunaRequest.timeoutMs },
+          applied: { observationOuterMs, completeCalls: warmCompleteCalls } } });
+    }
+  }
   warmupSaving ??= await auditability();
-  if (firstSaveFailure) for (const planned of manifest.trials.slice(plannedIndex)) skipped.push({ scriptId: planned.scriptId, label: planned.label,
-    reason: `save_failed:${firstSaveFailure}`, status: "not_reached" });
+  const accountedPlans = new Set([...trials.map(t => t.plannedIndex), ...skipped.map(s => s.plannedIndex)]);
+  for (const [index, planned] of manifest.trials.entries()) if (!accountedPlans.has(index)) skipped.push({ plannedIndex: index, scriptId: planned.scriptId, label: planned.label,
+    reason: firstSaveFailure ? `save_failed:${firstSaveFailure}` : warmupSaved ? fatal ?? "trial_failed" : `warmup_failed:${fatal ?? "save_failed"}`, status: "not_reached" });
   const pairs = scripts.map(s => {
     const pair = trials.filter(t => t.scriptId === s.id && t.stage === "main");
     return { scriptId: s.id, result: pair.length === 2 ? compareParity(pair[0], pair[1]) : { status: "not_reached" } };
@@ -569,7 +616,9 @@ export async function runParityLive(options: Options, deps: Dependencies) {
     status: saveFailure ? "save_failed" : !fatal && !privacyRejected && trials.length === manifest.trials.length && trials.every(t => t.completed) ? "wiring_passed" : "wiring_failed",
     failure: saveFailure ?? fatal, executionFailure: fatal, auditability: savedAtSummary, warmupSaving, privacyRejected, runOrder: trials.map(t => ({ scriptId: t.scriptId, label: t.label })), pairs, skipped,
     budget: budgetAtSummary, cacheAudit: warmAudit, cacheFileSha256: cacheHash, comparison: "not_implemented_pending_researcher_decision",
-    semantic: "independent_blind_packets_no_automated_scoring", gates: trials.map(t => t.gates), coverage: trials.map(t => wiringCoverage(t, deps.execution, own)),
+    semantic: "independent_blind_packets_no_automated_scoring", gates: trials.map(t => t.gates), coverage: trials.flatMap(t => {
+      const recorded = trialCoverage.get(t); return recorded ? [recorded] : [];
+    }),
     billingJournal: "billing.private.jsonl; late_consumption_revisions_do_not_commit_dialogue", billingWriteFailed,
     verifierEvidence: "verifier-evidence.private.json", evidenceWriteFailed };
   // The summary cannot include a receipt for its own not-yet-completed write.
