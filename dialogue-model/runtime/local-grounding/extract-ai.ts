@@ -78,22 +78,34 @@ type Client = { complete(messages: Array<{ role: "system" | "user"; content: str
   options: { phase: string; timeoutMs: number; signal: AbortSignal }): Promise<{ text: string }> };
 export function createMemoAiExtractor(client: Client) {
   let evidence = emptyAiEvidence(), diagnostics: AiExtractionDiagnostics = { rejected: [] };
-  return Object.freeze({
-    get lastEvidence() { return structuredClone(evidence); }, get lastDiagnostics() { return structuredClone(diagnostics); },
-    async extract(input: AiPublicInput, options: { timeoutMs: number; signal: AbortSignal }) {
-      diagnostics = { rejected: [] }; evidence = { ...emptyAiEvidence(), status: "error", calls: 1 };
-      const snapshot = snapshotAiExtraction(input), messages = buildMemoAiExtractionMessages(snapshot);
-      if (messages.some(m => typeof m.content !== "string")) fail("invalid_input");
-      if (options.signal.aborted) fail("aborted");
+  function start(input: AiPublicInput, options: { timeoutMs: number; signal: AbortSignal }) {
+    // Each invocation owns its evidence, including after its caller has timed out.
+    const callEvidence = emptyAiEvidence(), callDiagnostics: AiExtractionDiagnostics = { rejected: [] };
+    evidence = callEvidence; diagnostics = callDiagnostics;
+    const result = (async () => {
       try {
+        const snapshot = snapshotAiExtraction(input), messages = buildMemoAiExtractionMessages(snapshot);
+        if (messages.some(m => typeof m.content !== "string")) fail("invalid_input");
+        if (options.signal.aborted) fail("aborted");
+        callEvidence.status = "error"; callEvidence.calls = 1;
         const response = await client.complete(messages, { ...options, phase: "ai_extraction" });
         if (options.signal.aborted) fail("aborted");
-        const segments = parseAiExtraction(response?.text, snapshot, diagnostics);
-        evidence.status = "ok"; return segments;
+        const segments = parseAiExtraction(response?.text, snapshot, callDiagnostics);
+        callEvidence.status = "ok"; return segments;
       } catch (error) {
-        evidence.error = error instanceof AiPublicError ? new AiPublicError(error.code).code : "unavailable";
-        throw new AiPublicError(evidence.error as AiPublicError["code"]);
+        callEvidence.status = "error";
+        callEvidence.error = error instanceof AiPublicError ? new AiPublicError(error.code).code : "unavailable";
+        throw new AiPublicError(callEvidence.error as AiPublicError["code"]);
       }
+    })();
+    return Object.freeze({ result, get evidence() { return structuredClone(callEvidence); },
+      get diagnostics() { return structuredClone(callDiagnostics); } });
+  }
+  return Object.freeze({
+    get lastEvidence() { return structuredClone(evidence); }, get lastDiagnostics() { return structuredClone(diagnostics); },
+    start,
+    extract(input: AiPublicInput, options: { timeoutMs: number; signal: AbortSignal }) {
+      return start(input, options).result;
     },
   });
 }

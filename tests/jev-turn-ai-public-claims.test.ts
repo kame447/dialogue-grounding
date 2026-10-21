@@ -191,6 +191,138 @@ test("SA-7: phase timeout publishes failed pending; caller abort publishes nothi
   assert.equal(JSON.stringify(state), before); assert.equal(stopped.records[0].publicSpeech, null);
 });
 
+test("SA-7 regression: timed-out extraction records the complete call even when the client ignores abort", async t => {
+  let clock = 0; t.mock.method(performance, "now", () => clock); t.mock.timers.enable({ apis: ["setTimeout"] });
+  const hold = pause(), entered = pause(), h = harness({ timeoutMs: 1000, onCall: async (phase: string) => {
+    if (phase === "ai_extraction") { entered.release(); await hold.promise; }
+  } });
+  try {
+    const work = h.run(); await entered.promise; clock = 1000; t.mock.timers.tick(1000);
+    const result = await work;
+    assert.equal(result.text, TEXT);
+    assert.equal(result.privateState.aiPublic.pending.status, "failed");
+    assert.equal(h.calls.filter(c => c.phase === "ai_extraction").length, 1);
+    assert.deepEqual(h.records[0].aiPublic?.stages.ai_extraction, {
+      status: "error", calls: 1, model: null, responseId: null, callIndex: null, costUsd: null, error: "timeout", choices: [],
+    });
+    assert.equal(h.records[0].aiPublic?.stages.ai_function.calls, 0);
+    assert.equal(h.records[0].aiPublic?.stages.ai_support.calls, 0);
+    assert.equal(h.network.length, 0);
+    const committed = JSON.stringify(h.records[0]); hold.release();
+    await new Promise<void>(resolve => setImmediate(resolve));
+    assert.equal(JSON.stringify(h.records[0]), committed);
+  } finally { hold.release(); }
+});
+
+test("SA-7 regression: a stale extraction cannot contaminate the next turn's successful evidence", async t => {
+  let clock = 0; t.mock.method(performance, "now", () => clock); t.mock.timers.enable({ apis: ["setTimeout"] });
+  const old = pause(), next = pause(), enteredOld = pause(), enteredNext = pause(); let count = 0;
+  const h = harness({ timeoutMs: 1000, onCall: async (phase: string) => {
+    if (phase !== "ai_extraction") return;
+    if (++count === 1) { enteredOld.release(); await old.promise; }
+    else { enteredNext.release(); await next.promise; }
+  } });
+  try {
+    const firstWork = h.run(); await enteredOld.promise; clock = 1000; t.mock.timers.tick(1000);
+    const first = await firstWork;
+    assert.equal(first.privateState.aiPublic.pending.status, "failed");
+    const committed = JSON.stringify(h.records[0]);
+    const second = h.next(first); await enteredNext.promise;
+    old.release(); await new Promise<void>(resolve => setImmediate(resolve));
+    next.release(); const result = await second;
+    assert.equal(result.privateState.aiPublic.pending.status, "ready");
+    assert.equal(h.records[1].aiPublic?.stages.ai_extraction.status, "ok");
+    assert.equal(h.records[1].aiPublic?.stages.ai_extraction.error, null);
+    assert.equal(h.records[1].aiPublic?.stages.ai_extraction.calls, 1);
+    assert.equal(JSON.stringify(h.records[0]), committed);
+  } finally { old.release(); next.release(); }
+});
+
+test("SA-7/17 regression: caller-aborted stale extraction leaves committed state and the retry's evidence intact", async () => {
+  const config: any = {}, h = harness(config), first = await h.run(), before = JSON.stringify(first.privateState);
+  const old = pause(), next = pause(), enteredOld = pause(), enteredNext = pause(), controller = new AbortController(); let count = 0;
+  config.onCall = async (phase: string) => {
+    if (phase !== "ai_extraction") return;
+    if (++count === 1) { enteredOld.release(); await old.promise; }
+    else { enteredNext.release(); await next.promise; }
+  };
+  try {
+    const stale = h.next(first, "次の発話", { signal: controller.signal });
+    await enteredOld.promise; controller.abort();
+    await assert.rejects(stale, (e: any) => e.code === "aborted");
+    assert.equal(h.records[1].publicSpeech, null); assert.equal(h.records[1].aiPublic?.pending, null);
+    const rejected = JSON.stringify(h.records[1]);
+    const retry = h.run(first.privateState); await enteredNext.promise;
+    old.release(); await new Promise<void>(resolve => setImmediate(resolve)); next.release();
+    const result = await retry;
+    assert.equal(result.privateState.aiPublic.pending.status, "ready");
+    assert.equal(h.records[2].aiPublic?.stages.ai_extraction.status, "ok");
+    assert.equal(h.records[2].aiPublic?.stages.ai_extraction.error, null);
+    assert.equal(JSON.stringify(h.records[1]), rejected);
+    assert.equal(JSON.stringify(first.privateState), before);
+    assert.equal(first.privateState.aiPublic.pending.aiSeq, 2);
+    assert.equal(h.events[1].text, first.text);
+  } finally { old.release(); next.release(); }
+});
+
+for (const phase of ["ai_function", "ai_support"] as const) test(`SA-7 regression: ${phase} timeout keeps the sent call and unknown cost`, async t => {
+  let clock = 0; t.mock.method(performance, "now", () => clock); t.mock.timers.enable({ apis: ["setTimeout"] });
+  const hold = pause(), entered = pause(), h = harness({ timeoutMs: 1000, onFetch: async (stage: string) => {
+    if (stage === phase) { entered.release(); await hold.promise; }
+  } });
+  try {
+    const work = h.run(); await entered.promise;
+    clock = 1000; t.mock.timers.tick(1000);
+    const result = await work;
+    assert.equal(result.text, TEXT); assert.equal(result.privateState.aiPublic.pending.status, "failed");
+    assert.deepEqual(result.privateState.aiPublic.pending.reasons, [phase + "_timeout"]);
+    const stages = h.records[0].aiPublic!.stages;
+    for (const name of ["ai_extraction", "ai_function", "ai_support"] as const) {
+      const actual = name === "ai_extraction" ? h.calls.filter(c => c.phase === name).length : h.network.filter(c => c.phase === name).length;
+      assert.equal(stages[name].calls, actual, name);
+    }
+    assert.equal(stages[phase].status, "error"); assert.equal(stages[phase].error, "timeout");
+    assert.equal(stages[phase].costUsd, null);
+    const committed = JSON.stringify(h.records[0]); hold.release();
+    await new Promise<void>(resolve => setImmediate(resolve));
+    assert.equal(JSON.stringify(h.records[0]), committed);
+  } finally { hold.release(); }
+});
+
+test("SA-11 regression: restore rejects impossible application logs without requiring retained graph claims", async () => {
+  const h = harness(), first = await h.run(), second = await h.next(first);
+  const original = JSON.parse(JSON.stringify(second.privateState.aiPublic));
+  assert.deepEqual(validateAiPublicState(original, ids, 4, second.privateState.graph), original);
+  const reject = (change: (log: any) => void) => {
+    const state = structuredClone(original); change(state.log[0]);
+    assert.throws(() => validateAiPublicState(state, ids, 4, second.privateState.graph), (e: any) => e.code === "invalid_state");
+  };
+  reject(log => { log.appliedAtTurn = 999; log.ids = ["999:pub1"]; });
+  // Within maxSeq, but ahead of the committed graph's last turn.
+  reject(log => { log.appliedAtTurn = 4; log.ids = ["4:pub1"]; });
+  for (const status of ["applied", "partial"]) reject(log => { log.status = status; log.ids = []; });
+  reject(log => { log.ids = ["4:pub1"]; });
+  reject(log => { log.ids = ["3:local1"]; });
+  reject(log => { log.status = "not_applied"; });
+  let pruned = second.privateState.graph;
+  const oldClaims = aiClaims(second.privateState), text = "四角も二本の出っ張りもあります";
+  pruned = applyReferenceUpdate(pruned, { expectedRevision: pruned.revision, turn: 5, operations: oldClaims.map((c, i) => ({
+    kind: "claim", id: `5:close${i + 1}`, issueId: c.issueId, targets: c.targets, aspect: c.aspect, act: "agree", proposition: c.proposition,
+    name: null, speaker: "human", sourceTurn: 5, quote: text, respondsTo: c.id, source: "partner_statement",
+  })) }, { publicTurns: [{ turn: 5, speaker: "human", text }], generationSucceeded: true });
+  for (const turn of [6, 7]) {
+    pruned = applyReferenceUpdate(pruned, { expectedRevision: pruned.revision, turn, operations: Array.from({ length: REFERENCE_LIMITS.operations }, (_, i) => ({
+      kind: "claim", id: `${turn}:recent${i + 1}`, issueId: `${turn}:recent${i + 1}`, targets: [ids[0]], aspect: "part", act: "assert",
+      proposition: text, name: null, speaker: "human", sourceTurn: turn, quote: text, respondsTo: null, source: "partner_statement",
+    })) }, { publicTurns: [{ turn, speaker: "human", text }], generationSucceeded: true });
+  }
+  assert.ok(original.log[0].ids.every((id: string) => !pruned.records.some((r: { id: string }) => r.id === id)));
+  const historical = { ...original, pending: null };
+  assert.deepEqual(validateAiPublicState(historical, ids, 7, pruned), historical);
+  const omitted = { ...historical, log: [], omitted: 1 };
+  assert.deepEqual(validateAiPublicState(omitted, ids, 7, pruned), omitted);
+});
+
 test("SA-8: retry reuses the old source without re-extraction, preserves failed state and inserts no duplicates", async () => {
   const config: any = {}, h = harness(config), first = await h.run(), before = JSON.stringify(first.privateState);
   config.fail = "generation";

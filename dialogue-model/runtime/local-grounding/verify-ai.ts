@@ -76,14 +76,19 @@ export function verifyAiPublicUpdate({ graph, aiSeq, candidateText, publicTurns,
 export function initialAiPublicState(): AiPublicState { return { schema: 1, pending: null, log: [], omitted: 0 }; }
 function invalid(): never { throw new AiPublicError("invalid_state"); }
 export function validateAiPublicState(value: unknown, slots: readonly string[], maxSeq = Number.MAX_SAFE_INTEGER, graph?: LocalGraph): AiPublicState {
+  const lastTurn = graph ? snapshotReferenceGraph(graph).lastTurn : maxSeq;
   if (!aiExact(value, ["schema", "pending", "log", "omitted"]) || value.schema !== 1 || !Array.isArray(value.log) || value.log.length > 64 ||
       !Number.isSafeInteger(value.omitted) || (value.omitted as number) < 0) invalid();
   const sources = new Set<number>();
   for (const log of value.log as unknown[]) {
-    if (!aiExact(log, ["aiSeq", "status", "reasons", "appliedAtTurn", "ids"]) || !aiIndex(log.aiSeq) || log.aiSeq > maxSeq ||
+    if (!aiExact(log, ["aiSeq", "status", "reasons", "appliedAtTurn", "ids"]) || !aiIndex(log.aiSeq) || log.aiSeq < 2 || log.aiSeq > maxSeq ||
         sources.has(log.aiSeq) || !["applied", "partial", "not_applied", "failed", "empty", "skipped_fallback"].includes(log.status as string) ||
         !Array.isArray(log.reasons) || !log.reasons.every(reason) || new Set(log.reasons).size !== log.reasons.length || !aiIndex(log.appliedAtTurn) || log.appliedAtTurn <= log.aiSeq ||
-        !Array.isArray(log.ids) || log.ids.length > REFERENCE_LIMITS.operations || !log.ids.every(ref) || new Set(log.ids).size !== log.ids.length) invalid();
+        log.appliedAtTurn > maxSeq || log.appliedAtTurn > lastTurn ||
+        !Array.isArray(log.ids) || log.ids.length > REFERENCE_LIMITS.operations || new Set(log.ids).size !== log.ids.length ||
+        (["applied", "partial"].includes(log.status as string) ? log.ids.length === 0 : log.ids.length !== 0) ||
+        !log.ids.every(id => typeof id === "string" && id.startsWith(`${log.appliedAtTurn}:pub`) &&
+          /^[1-9]\d*:pub[1-9]\d*$/.test(id) && Number(id.split(":pub")[1]) <= 32)) invalid();
     sources.add(log.aiSeq);
   }
   const pending = value.pending;

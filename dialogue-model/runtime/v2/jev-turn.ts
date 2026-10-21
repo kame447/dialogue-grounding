@@ -500,6 +500,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
     research.observationMemo = { version: OBSERVATION_MEMO_VERSION, sha256: await observationHash(snapshot.observations) };
     if (fallback) { pending.status = "skipped_fallback"; pending.reasons = ["skipped_fallback"]; research.pending = pending; return pending; }
     const controller = new AbortController();
+    let settled = false;
     let timer: ReturnType<typeof setTimeout> | undefined, stage: keyof AiPublicResearch["stages"] = "ai_extraction";
     let abort = () => {};
     const callOptions = () => {
@@ -513,18 +514,24 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
           findLocalPublicationViolations(raw, privateInstructions).some(c => ["internal_image", "internal_credential", "internal_prompt_echo"].includes(c))) throw new AiPublicError("invalid_response");
     };
     const capture = (name: "ai_function" | "ai_support", adapter: { readonly lastEvidence: JevChoiceEvidence | null }, before: number) => {
+      if (settled) return;
       const e = adapter.lastEvidence;
-      research.stages[name] = e?.callIndex === before + 1 ? { status: e.status === "skipped" ? "skipped" : e.status,
-        calls: 1, model: e.model, responseId: e.responseId, callIndex: e.callIndex, costUsd: e.costUsd, error: e.error, choices: [] }
-        : { ...emptyAiEvidence(), status: "error", calls: 1 };
+      if (e?.callIndex === before + 1) research.stages[name] = { status: e.status === "skipped" ? "skipped" : e.status,
+        calls: 1, model: e.model, responseId: e.responseId, callIndex: e.callIndex, costUsd: e.costUsd, error: e.error, choices: [] };
+    };
+    const started = (name: "ai_function" | "ai_support", callIndex: number) => {
+      // Completion evidence may never arrive before the shared phase deadline.
+      research.stages[name] = { ...emptyAiEvidence(), status: "error", calls: 1, callIndex };
     };
     const work = async () => {
       checkPayload(snapshot);
       let segments;
-      try { segments = await aiExtractor!.extract(snapshot, callOptions()); }
-      finally { research.stages.ai_extraction = aiExtractor!.lastEvidence; }
+      const extractionCall = aiExtractor!.start(snapshot, callOptions());
+      research.stages.ai_extraction = extractionCall.evidence;
+      try { segments = await extractionCall.result; }
+      finally { if (!settled) research.stages.ai_extraction = extractionCall.evidence; }
       callOptions();
-      pending.reasons.push(...aiExtractor!.lastDiagnostics.rejected.map(r => r.reason));
+      pending.reasons.push(...extractionCall.diagnostics.rejected.map(r => r.reason));
       if (!segments.length) { pending.reasons.push("empty_extraction"); research.stages.ai_function.status = "skipped"; research.stages.ai_support.status = "skipped"; return; }
       const functionInput = { turn: snapshot.turn, aiSeq: snapshot.aiSeq, candidateText: snapshot.candidateText,
         publicTurns: snapshot.publicTurns, segments, priorClaims: priorClaimViews(graph, { limit: REFERENCE_LIMITS.records }) };
@@ -532,8 +539,13 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       stage = "ai_function";
       const beforeFunction = aiFunction!.callCount;
       let verdicts;
-      try { verdicts = await aiFunction!.classify(functionInput, callOptions()); }
+      try {
+        const work = aiFunction!.classify(functionInput, callOptions());
+        started("ai_function", aiFunction!.callCount);
+        verdicts = await work;
+      }
       finally { capture("ai_function", aiFunction!, beforeFunction); }
+      callOptions();
       research.stages.ai_function.choices = verdicts.map((v, index) => ({ segmentId: `segment_${index + 1}`, act: v.act as import("../local-grounding/contract.ts").AiPublicAct,
         respondsToClaimId: v.respondsToClaimId, rawScore: v.rawScore }));
       callOptions();
@@ -542,8 +554,13 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       if (checkedSegments.length) {
         stage = "ai_support";
         const beforeSupport = aiSupport!.callCount;
-        try { supports = await aiSupport!.check({ ...functionInput, segments: checkedSegments, verdicts }, callOptions()); }
+        try {
+          const work = aiSupport!.check({ ...functionInput, segments: checkedSegments, verdicts }, callOptions());
+          started("ai_support", aiSupport!.callCount);
+          supports = await work;
+        }
         finally { capture("ai_support", aiSupport!, beforeSupport); }
+        callOptions();
         research.stages.ai_support.choices = supports.map(v => ({ segmentId: `segment_${segments.findIndex(s => s.segmentId === v.segmentId) + 1}`,
           support: v.support, rawScore: v.rawScore }));
         callOptions();
@@ -577,6 +594,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       pending.status = "failed"; pending.candidates = []; pending.reasons = [stage + "_" + code];
       research.stages[stage].status = "error"; research.stages[stage].error = code; research.stages[stage].choices = [];
     } finally {
+      settled = true;
       clearTimeout(timer); signal?.removeEventListener("abort", abort); controller.abort();
     }
     pending.reasons = [...new Set(pending.reasons)]; research.pending = structuredClone(pending);
