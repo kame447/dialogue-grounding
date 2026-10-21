@@ -1,6 +1,6 @@
 // Import-safe Node harness. Only the parent supplies/executes real clients.
 import { createHash, randomUUID } from "node:crypto";
-import { readFile, appendFile, writeFile, rename, lstat } from "node:fs/promises";
+import { readFile, appendFile, writeFile, rename, lstat, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { researchTrialProfile, researchHash } from "../../v2/research-profile.ts";
 import type { LunaRequestSettings } from "../../v2/research-profile.ts";
@@ -54,6 +54,12 @@ const fail = (code: string): never => { throw new HarnessError(code); };
 const digestBytes = (v: Uint8Array) => createHash("sha256").update(v).digest("hex");
 const modelName = (v: unknown): v is string => typeof v === "string" && /^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/u.test(v);
 const tokens = (v: unknown): number | null => Number.isSafeInteger(v) && (v as number) >= 0 ? v as number : null;
+type SavedField = "profile" | "manifest" | "cost" | "usage" | "model_ids";
+type RecordReceipt = { file: string; status: "pending" | "saved" | "failed"; fields: SavedField[] };
+export type SaveAudit = { status: "auditable" | "save_failed"; firstSaveFailure: string | null; requiredWritesComplete: boolean;
+  fields: Record<SavedField, boolean>; recordReceipts: RecordReceipt[];
+  evidencePresent: boolean; billingPresent: boolean; evidenceWriteFailed: boolean; billingWriteFailed: boolean;
+  evidenceRevision: number; savedEvidenceRevision: number; billingRevision: number; savedBillingRevision: number };
 
 /** Labels are metadata only. No semantic oracle or approved script catalog here. */
 export async function runParityLive(options: Options, deps: Dependencies) {
@@ -90,8 +96,26 @@ export async function runParityLive(options: Options, deps: Dependencies) {
       s.includes(image.base64) || secrets.some(key => key.length >= 8 && s.includes(key.normalize("NFKC"))) ||
       [...promptSpans].some(span => compact(s).includes(compact(span)));
   };
-  const persist = async (file: string, value: unknown) => {
-    if (await privateWrite(directory, file, value, unsafe)) privacyRejected = true;
+  let firstSaveFailure: string | null = null;
+  const requiredRecords: RecordReceipt[] = [];
+  const recordWrites = new Set<Promise<{ saved: boolean; redacted: boolean }>>();
+  const saveFailed = (file: string) => { firstSaveFailure ??= file; };
+  const persist = (file: string, value: unknown, fields: SavedField[] = [], trackRequired = true) => {
+    const receipt: RecordReceipt = { file, status: "pending", fields: [...fields] };
+    if (trackRequired) requiredRecords.push(receipt);
+    const pending = `.record-${randomUUID()}.pending.json`;
+    const work = (async () => {
+      let redacted = false;
+      try {
+        redacted = await privateWrite(directory, pending, value, unsafe);
+        await rename(join(directory, pending), join(directory, file));
+        receipt.status = "saved";
+        if (redacted) privacyRejected = true;
+      } catch { receipt.status = "failed"; saveFailed(file); }
+      finally { await unlink(join(directory, pending)).catch(() => {}); }
+      return { saved: receipt.status === "saved", redacted };
+    })();
+    recordWrites.add(work); void work.finally(() => recordWrites.delete(work)); return work;
   };
   let billingWrites = Promise.resolve(), billingWriteFailed = false;
   let billingRevision = 0, savedBillingRevision = 0;
@@ -112,23 +136,41 @@ export async function runParityLive(options: Options, deps: Dependencies) {
       await writeFile(pending, JSON.stringify(snapshot) + "\n", { mode: 0o600 });
       await rename(pending, join(directory, "verifier-evidence.private.json"));
       savedEvidenceRevision = revision;
-    }).catch(() => { evidenceWriteFailed = true; });
+    }).catch(() => { evidenceWriteFailed = true; saveFailed("verifier-evidence.private.json"); });
   };
   evidence.onChange = () => { if (evidencePublished) writeEvidence(); };
-  const auditability = async () => {
+  const auditability = async (): Promise<SaveAudit> => {
     for (;;) {
+      await Promise.all([...recordWrites]);
       const bills = billingWrites, records = evidenceWrites;
       await bills; await records;
-      if (bills !== billingWrites || records !== evidenceWrites) continue;
+      if (recordWrites.size || bills !== billingWrites || records !== evidenceWrites) continue;
       const revision = evidenceRevision;
       let evidencePresent = false;
       try { const info = await lstat(join(directory, "verifier-evidence.private.json"));
         evidencePresent = info.isFile() && !info.isSymbolicLink() && (info.mode & 0o777) === 0o600 &&
           !evidenceWriteFailed && savedEvidenceRevision === evidenceRevision;
       } catch { /* Missing mandatory evidence is a save failure. */ }
+      let billingPresent = billingRevision === 0;
+      if (billingRevision > 0) try { const info = await lstat(join(directory, "billing.private.jsonl"));
+        billingPresent = info.isFile() && !info.isSymbolicLink() && (info.mode & 0o777) === 0o600;
+      } catch { /* A required billing journal is absent. */ }
+      if (!billingPresent) { billingWriteFailed = true; saveFailed("billing.private.jsonl"); }
+      await Promise.all(requiredRecords.filter(r => r.status === "saved").map(async receipt => {
+        try { const info = await lstat(join(directory, receipt.file));
+          if (!info.isFile() || info.isSymbolicLink() || (info.mode & 0o777) !== 0o600) throw new Error("invalid_record");
+        } catch { receipt.status = "failed"; saveFailed(receipt.file); }
+      }));
       if (revision !== evidenceRevision) continue;
-      return { status: evidencePresent && !billingWriteFailed && savedBillingRevision === billingRevision ? "auditable" : "save_failed",
-        evidencePresent, evidenceWriteFailed, billingWriteFailed, evidenceRevision, savedEvidenceRevision, billingRevision, savedBillingRevision };
+      if (!evidencePresent) saveFailed("verifier-evidence.private.json");
+      const recordReceipts = structuredClone(requiredRecords);
+      const fields = { profile: false, manifest: false, cost: evidencePresent, usage: evidencePresent, model_ids: evidencePresent };
+      for (const r of recordReceipts) if (r.status === "saved") for (const field of r.fields) fields[field] = true;
+      const requiredWritesComplete = recordReceipts.every(r => r.status === "saved") && Object.values(fields).every(Boolean) &&
+        evidencePresent && !billingWriteFailed && savedBillingRevision === billingRevision && !firstSaveFailure;
+      return { status: requiredWritesComplete && !firstSaveFailure ? "auditable" : "save_failed", firstSaveFailure,
+        requiredWritesComplete, fields, recordReceipts,
+        evidencePresent, billingPresent, evidenceWriteFailed, billingWriteFailed, evidenceRevision, savedEvidenceRevision, billingRevision, savedBillingRevision };
     }
   };
   budget.onLedgerEvent = event => {
@@ -157,7 +199,7 @@ export async function runParityLive(options: Options, deps: Dependencies) {
       await privateDirectory(directory);
       await appendFile(join(directory, "billing.private.jsonl"), JSON.stringify(safe) + "\n", { mode: 0o600 });
       savedBillingRevision = revision;
-    }).catch(() => { billingWriteFailed = true; });
+    }).catch(() => { billingWriteFailed = true; saveFailed("billing.private.jsonl"); });
   };
   budget.onRefusal = refusal => {
     const revision = ++billingRevision;
@@ -167,7 +209,7 @@ export async function runParityLive(options: Options, deps: Dependencies) {
       await privateDirectory(directory);
       await appendFile(join(directory, "billing.private.jsonl"), JSON.stringify({ refused: refusal, stops: budget.stops }) + "\n", { mode: 0o600 });
       savedBillingRevision = revision;
-    }).catch(() => { billingWriteFailed = true; });
+    }).catch(() => { billingWriteFailed = true; saveFailed("billing.private.jsonl"); });
   };
   const freshClient = async (label: Label | "warmup", signal?: AbortSignal, trialOrder: number | null = null) => {
     const identity = { provider: "luna" as const, instanceId: `luna-${++instanceSequence}`, trialOrder, label, requestedModel: expectedModel };
@@ -308,9 +350,11 @@ export async function runParityLive(options: Options, deps: Dependencies) {
   await persist("run.private.json", { runId, manifest, manifestSha256: researchHash(manifest), execution: deps.execution, profile: PROFILE, profileSha256: RESEARCH_TRIAL_PROFILE_SHA256,
     promptSources, scripts: scripts.map(s => ({ id: s.id, sha256: researchHash(s), turns: s.humanTurns.length })),
     engineeringLimits: { ...ENGINEERING_LIMITS, ...budget.limits }, comparison: "not_implemented_pending_researcher_decision",
-    semantic: "not_installed_pending_auditor_approval", coverage: "not_measured_by_wiring_harness" });
+    semantic: "not_installed_pending_auditor_approval", coverage: "not_measured_by_wiring_harness" }, ["profile", "manifest"]);
   evidencePublished = true; writeEvidence(); await evidenceWrites;
+  let warmupSaving: Awaited<ReturnType<typeof auditability>> | null = null, plannedIndex = 0;
   try {
+    if (firstSaveFailure) fail("save_failed");
     const warm = await freshClient("warmup"); expectedModel = warm.policy.model;
     const controller = new AbortController();
     activeRunStop = reason => { fatal ??= reason; controller.abort(); };
@@ -330,9 +374,15 @@ export async function runParityLive(options: Options, deps: Dependencies) {
     cacheHash = digestBytes(await readFile(cacheFile));
     evidence.cache({ trialOrder: null, status: warmAudit.status, beforeSha256: warmBefore, afterSha256: cacheHash,
       memo: initial.memo, memoSha256: researchHash(initial.memo), validated: true, requestedModel: expectedModel, returnedModel: warm.policy.model });
-    await persist("warmup.private.json", { audit: warmAudit, memoSha256: researchHash(initial.memo), fileSha256: cacheHash, calls: warmCalls, http: warmHttp.records, policy: warm.policy });
+    await persist("warmup.private.json", { audit: warmAudit, memoSha256: researchHash(initial.memo), fileSha256: cacheHash, calls: warmCalls, http: warmHttp.records, policy: warm.policy }, ["usage", "model_ids"]);
+    warmupSaving = await auditability();
     for (const planned of manifest.trials) {
+        plannedIndex++;
         const script = scripts.find(s => s.id === planned.scriptId)!, label = planned.label;
+        const beforeTrial = await auditability();
+        if (beforeTrial.status === "save_failed") {
+          skipped.push({ scriptId: script.id, label, reason: `save_failed:${beforeTrial.firstSaveFailure ?? "required_records"}`, status: "not_reached" }); continue;
+        }
         if (planned.stage === "main" && manifest.trials.some(t => t.stage === "smoke") &&
             !trials.filter(t => t.stage === "smoke").some(t => t.gates?.passed)) {
           skipped.push({ scriptId: script.id, label, reason: "smoke_stage_not_ready", status: "not_reached" }); continue;
@@ -482,44 +532,57 @@ export async function runParityLive(options: Options, deps: Dependencies) {
         if (trialAfter !== cacheHash) { cacheStable = false; trial.failure = "cache_changed"; trial.completed = false; fatal = "cache_changed"; }
         const saved = await auditability();
         trial.gates = stageGates(trial, { warmAudit, warmCalls, warmHttp: warmHttpRecords, measuredHttp: warmMeasured,
-          evidencePresent: saved.evidencePresent,
+          saving: saved,
           cacheStable, privacyRejected, jevUnknown: budget.jevUnknown, execution: deps.execution });
         const coverage = wiringCoverage(trial, deps.execution, own);
         const failureCategory = !trial.failure ? null : budget.jevUnknown ? "sent_result_unknown_run_halted" :
           /budget|cost_cap|trial_timeout/u.test(trial.failure) ? "budget_or_time_stop" : "validation_or_pipeline_failure_known_billing";
-        if (await privateWrite(directory, `trial-${trial.order}.private.json`, { ...trial, failureCategory, coverage, publicTurns: events }, unsafe)) { trial.completed = false; trial.failure = "privacy_rejected"; privacyRejected = true; }
+        const trialSave = await persist(`trial-${trial.order}.private.json`, { ...trial, failureCategory, coverage, publicTurns: events }, ["profile", "cost", "usage", "model_ids"]);
+        if (!trialSave.saved) {
+          // No published gate file exists: the atomic trial-record save failed.
+          // Other completed trials' historical gates are never revised.
+          trial.gates.G3.passed = false; trial.gates.G3.saving = await auditability(); trial.gates.passed = false;
+        }
+        if (trialSave.redacted) { trial.completed = false; trial.failure = "privacy_rejected"; privacyRejected = true; }
         // A primary wiring failure is retained; do not repeat the same script/input.
         if (trial.failure) { fatal ??= trial.failure; budget.stop(trial.failure); }
     }
-  } catch (error) { fatal ??= budget.haltReason ?? (error instanceof HarnessError ? error.code : "warmup_failed");
-    budget.stop(fatal);
-    await persist("failure.private.json", { code: fatal, calls: warmCalls, cache: warmAudit }); }
+  } catch (error) {
+    if (!(error instanceof HarnessError && error.code === "save_failed" && firstSaveFailure)) {
+      fatal ??= budget.haltReason ?? (error instanceof HarnessError ? error.code : "warmup_failed"); budget.stop(fatal);
+    }
+    await persist("failure.private.json", { code: fatal ?? "save_failed", calls: warmCalls, cache: warmAudit }); }
+  warmupSaving ??= await auditability();
+  if (firstSaveFailure) for (const planned of manifest.trials.slice(plannedIndex)) skipped.push({ scriptId: planned.scriptId, label: planned.label,
+    reason: `save_failed:${firstSaveFailure}`, status: "not_reached" });
   const pairs = scripts.map(s => {
     const pair = trials.filter(t => t.scriptId === s.id && t.stage === "main");
     return { scriptId: s.id, result: pair.length === 2 ? compareParity(pair[0], pair[1]) : { status: "not_reached" } };
   });
   await billingWrites;
   writeEvidence(); await evidenceWrites;
-  if (billingWriteFailed) fatal ??= "billing_record_failed";
-  const savedAtSummary = await auditability(), budgetAtSummary = budget.snapshot();
-  const saveFailure = savedAtSummary.status === "save_failed" ? evidenceWriteFailed || !savedAtSummary.evidencePresent ? "evidence_record_failed" : "billing_record_failed" : null;
-  for (const t of trials) if (t.gates) {
-    t.gates.G3.evidencePresent = savedAtSummary.evidencePresent;
-    t.gates.G3.passed = !!t.profileSha256 && t.cache !== null && savedAtSummary.evidencePresent;
-    t.gates.passed = t.gates.G1.passed && t.gates.G2.passed && t.gates.G3.passed && t.gates.G4.passed && !t.failure;
-  }
+  let savedAtSummary = await auditability();
+  const budgetAtSummary = budget.snapshot();
+  const saveFailure = savedAtSummary.status === "save_failed" ? firstSaveFailure === "verifier-evidence.private.json" ? "evidence_record_failed"
+    : firstSaveFailure === "billing.private.jsonl" ? "billing_record_failed" : "required_record_failed" : null;
   const summary = { runId, manifestSha256: researchHash(manifest), execution: deps.execution, profile: PROFILE, profileSha256: RESEARCH_TRIAL_PROFILE_SHA256,
     status: saveFailure ? "save_failed" : !fatal && !privacyRejected && trials.length === manifest.trials.length && trials.every(t => t.completed) ? "wiring_passed" : "wiring_failed",
-    failure: saveFailure ?? fatal, executionFailure: fatal, auditability: savedAtSummary, privacyRejected, runOrder: trials.map(t => ({ scriptId: t.scriptId, label: t.label })), pairs, skipped,
+    failure: saveFailure ?? fatal, executionFailure: fatal, auditability: savedAtSummary, warmupSaving, privacyRejected, runOrder: trials.map(t => ({ scriptId: t.scriptId, label: t.label })), pairs, skipped,
     budget: budgetAtSummary, cacheAudit: warmAudit, cacheFileSha256: cacheHash, comparison: "not_implemented_pending_researcher_decision",
     semantic: "independent_blind_packets_no_automated_scoring", gates: trials.map(t => t.gates), coverage: trials.map(t => wiringCoverage(t, deps.execution, own)),
     billingJournal: "billing.private.jsonl; late_consumption_revisions_do_not_commit_dialogue", billingWriteFailed,
     verifierEvidence: "verifier-evidence.private.json", evidenceWriteFailed };
-  await persist("summary.private.json", summary);
+  // The summary cannot include a receipt for its own not-yet-completed write.
+  // Its transport result is returned directly; it never rewrites historical G3.
+  const summarySave = await persist("summary.private.json", summary, [], false);
+  if (!summarySave.saved) {
+    summary.status = "save_failed"; summary.failure = "required_record_failed";
+    savedAtSummary = await auditability(); summary.auditability = savedAtSummary;
+  }
   await billingWrites;
   return { directory, summary, trials: structuredClone(trials), async flushBilling() {
     const current = await auditability(), latest = budget.snapshot();
-    const diff = Object.fromEntries(Object.keys(current).filter(k => current[k as keyof typeof current] !== savedAtSummary[k as keyof typeof current])
+    const diff = Object.fromEntries(Object.keys(current).filter(k => researchHash(current[k as keyof typeof current]) !== researchHash(savedAtSummary[k as keyof typeof current]))
       .map(k => [k, { snapshot: savedAtSummary[k as keyof typeof current], current: current[k as keyof typeof current] }]));
     return { ...latest, billingWriteFailed, evidenceWriteFailed,
       auditability: { ...current, snapshotStatus: savedAtSummary.status, changedSinceSnapshot: Object.keys(diff).length > 0,

@@ -616,3 +616,105 @@ for (const key of ["temperature", "model", "top_p", "unknown_body_key"]) test(`P
   const refusal = e.events.find((v: any) => v.type === "refused" && v.reason === "invalid_luna_wire");
   assert.ok(refusal); assert.ok(!e.events.some((v: any) => v.seq > refusal.seq && ["send", "commit"].includes(v.type)));
 });
+
+async function saveGateFixture(t: { after(fn: () => Promise<void>): void }) {
+  const options = await fixture(t); options.scripts[0].humanTurns = [options.scripts[0].humanTurns[0]];
+  options.manifest.trials = [{ stage: "smoke", scriptId: "probe", label: "repair-first" }, ...alternatingTrials(["probe"])];
+  return options;
+}
+
+test("PL-3 warm-up billing save failure starts zero trials and records separate warm-up saving failure", async t => {
+  const options = await saveGateFixture(t), h = instrumentedDependencies(), create = h.deps.createLunaClient;
+  h.deps.createLunaClient = async (label, settings) => {
+    if (label === "warmup") await mkdir(join(options.outputDir, (await readdir(options.outputDir))[0], "billing.private.jsonl"));
+    return create(label, settings);
+  };
+  const result = await runParityLive(options, h.deps);
+  assert.equal(result.summary.status, "save_failed"); assert.equal(result.summary.failure, "billing_record_failed");
+  assert.deepEqual(h.labels, ["warmup"]); assert.equal(result.trials.length, 0); assert.deepEqual(result.summary.gates, []);
+  assert.equal(result.summary.warmupSaving.status, "save_failed"); assert.equal(result.summary.warmupSaving.billingWriteFailed, true);
+  assert.equal(result.summary.warmupSaving.evidencePresent, true);
+  assert.equal(result.summary.skipped.length, 3);
+  assert.ok(result.summary.skipped.every((s: any) => s.status === "not_reached" && s.reason === "save_failed:billing.private.jsonl"));
+});
+
+test("PL-3 probe A: billing failure in smoke fails historical G3 and prevents all mains", async t => {
+  const options = await saveGateFixture(t), h = instrumentedDependencies(), create = h.deps.createLunaClient;
+  h.deps.createLunaClient = async (label, settings) => {
+    if (label !== "warmup") {
+      const file = join(options.outputDir, (await readdir(options.outputDir))[0], "billing.private.jsonl");
+      await rm(file); await mkdir(file);
+    }
+    return create(label, settings);
+  };
+  const result = await runParityLive(options, h.deps), smoke = result.trials[0];
+  assert.deepEqual(h.labels, ["warmup", "repair-first"]); assert.equal(result.trials.length, 1);
+  assert.equal(smoke.completed, true); assert.equal(smoke.failure, null); assert.equal(result.summary.budget.jevUnknown, false);
+  assert.equal(smoke.gates!.G3.passed, false); assert.equal(smoke.gates!.G3.evidencePresent, true);
+  assert.equal(smoke.gates!.G3.saving.billingWriteFailed, true); assert.equal(smoke.gates!.G3.saving.requiredWritesComplete, false);
+  assert.ok(Object.values(smoke.gates!.G3.saving.fields).every(Boolean));
+  assert.equal(result.summary.status, "save_failed"); assert.equal(result.summary.executionFailure, null);
+  const saved = JSON.parse(await readFile(join(result.directory, "trial-0.private.json"), "utf8"));
+  assert.deepEqual(saved.gates, smoke.gates); assert.deepEqual(saved.gates, result.summary.gates[0]);
+  assert.equal(result.summary.skipped.length, 2);
+  assert.ok(result.summary.skipped.every((s: any) => s.status === "not_reached" && s.reason === "save_failed:billing.private.jsonl"));
+});
+
+test("PL-3 probe B: later main evidence failure stops the next main without rewriting good smoke G3", async t => {
+  const options = await saveGateFixture(t), h = instrumentedDependencies(), create = h.deps.createLunaClient;
+  h.deps.createLunaClient = async (label, settings) => {
+    if (label === "bypass-enabled") await mkdir(join(options.outputDir, (await readdir(options.outputDir))[0], "verifier-evidence.private.pending.json"));
+    return create(label, settings);
+  };
+  const result = await runParityLive(options, h.deps);
+  assert.deepEqual(h.labels, ["warmup", "repair-first", "bypass-enabled"]); assert.equal(result.trials.length, 2);
+  assert.equal(result.summary.warmupSaving.status, "auditable");
+  const smoke = JSON.parse(await readFile(join(result.directory, "trial-0.private.json"), "utf8"));
+  const main = JSON.parse(await readFile(join(result.directory, "trial-1.private.json"), "utf8"));
+  assert.equal(smoke.gates.G3.passed, true); assert.equal(main.gates.G3.passed, false);
+  assert.deepEqual(smoke.gates, result.trials[0].gates); assert.deepEqual(smoke.gates, result.summary.gates[0]);
+  assert.deepEqual(main.gates, result.trials[1].gates); assert.deepEqual(main.gates, result.summary.gates[1]);
+  assert.equal(result.summary.status, "save_failed"); assert.equal(result.summary.auditability.status, "save_failed");
+  assert.equal(result.summary.executionFailure, null);
+  assert.equal(result.summary.skipped.length, 1);
+  assert.equal((result.summary.skipped[0] as any).reason, "save_failed:verifier-evidence.private.json");
+  const final = await result.flushBilling(); assert.equal(final.auditability.status, "save_failed");
+  assert.equal(final.auditability.changedSinceSnapshot, false); assert.equal(result.summary.gates[0]!.G3.passed, true);
+});
+
+for (const file of ["run.private.json", "warmup.private.json", "public-0-2.packet.json", "trial-0.private.json"]) test(`PL-3 required record ${file} failure blocks the next trial`, async t => {
+  const options = await saveGateFixture(t), h = instrumentedDependencies(), create = h.deps.createLunaClient;
+  const warmFault = file === "run.private.json" || file === "warmup.private.json";
+  let injected = false;
+  h.deps.createLunaClient = async (label, settings) => {
+    if (!injected && (warmFault ? label === "warmup" : label !== "warmup")) {
+      injected = true; const target = join(options.outputDir, (await readdir(options.outputDir))[0], file);
+      if (file === "run.private.json") await rm(target);
+      await mkdir(target);
+    }
+    return create(label, settings);
+  };
+  const result = await runParityLive(options, h.deps);
+  assert.equal(result.summary.status, "save_failed"); assert.equal(result.summary.failure, "required_record_failed");
+  assert.equal(result.summary.executionFailure, null); assert.equal(result.summary.auditability.requiredWritesComplete, false);
+  assert.ok(result.summary.auditability.recordReceipts.some(r => r.file === file && r.status === "failed"));
+  assert.equal(result.trials.length, warmFault ? 0 : 1); assert.equal(h.labels.length, warmFault ? 1 : 2);
+  if (!warmFault) assert.equal(result.trials[0].gates!.G3.passed, false);
+  assert.ok(result.summary.skipped.every((s: any) => s.reason === `save_failed:${file}`));
+  if (file === "run.private.json") assert.equal(result.summary.warmupSaving.fields.manifest, false);
+});
+
+test("PL-3 final summary write failure preserves historical G3 and returns a matching auditability snapshot", async t => {
+  const options = await saveGateFixture(t), h = instrumentedDependencies(), create = h.deps.createLunaClient;
+  h.deps.createLunaClient = async (label, settings) => {
+    if (label === "warmup") await mkdir(join(options.outputDir, (await readdir(options.outputDir))[0], "summary.private.json"));
+    return create(label, settings);
+  };
+  const result = await runParityLive(options, h.deps);
+  assert.equal(result.summary.status, "save_failed"); assert.equal(result.summary.failure, "required_record_failed");
+  assert.equal(result.summary.executionFailure, null); assert.equal(result.summary.auditability.status, "save_failed");
+  assert.ok(result.summary.gates.every(g => g!.G3.passed));
+  for (const trial of result.trials) assert.deepEqual(JSON.parse(await readFile(join(result.directory, `trial-${trial.order}.private.json`), "utf8")).gates, trial.gates);
+  const final = await result.flushBilling(); assert.equal(final.auditability.snapshotStatus, "save_failed");
+  assert.equal(final.auditability.changedSinceSnapshot, false);
+});
