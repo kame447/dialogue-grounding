@@ -26,10 +26,14 @@ export const RESEARCH_TRIAL_PROFILE_V1 = frozen({
 } as const);
 export const RESEARCH_TRIAL_PROFILE_SHA256 = researchHash(RESEARCH_TRIAL_PROFILE_V1);
 export type LunaRequestSettings = { timeoutMs: number | null; maxCompletionTokens: number | null };
+export type PhaseTimeouts = { observationMs: number; localMs: number };
 /** Explicit parent-selected execution values; no pending example becomes a live default. */
-export function researchTrialProfile(lunaRequest: LunaRequestSettings) {
+export function researchTrialProfile(lunaRequest: LunaRequestSettings, phaseTimeouts?: PhaseTimeouts) {
   if (!lunaRequest || lunaRequest.timeoutMs !== null && (!Number.isSafeInteger(lunaRequest.timeoutMs) || lunaRequest.timeoutMs < 1 || lunaRequest.timeoutMs > 120000) ||
       lunaRequest.maxCompletionTokens !== null && (!Number.isSafeInteger(lunaRequest.maxCompletionTokens) || lunaRequest.maxCompletionTokens < 1 || lunaRequest.maxCompletionTokens > 8192)) throw new Error("invalid_luna_settings");
-  return frozen({ ...RESEARCH_TRIAL_PROFILE_V1, lunaRequest: { ...lunaRequest },
+  if (phaseTimeouts !== undefined && (!phaseTimeouts || Object.getPrototypeOf(phaseTimeouts) !== Object.prototype ||
+      Object.keys(phaseTimeouts).sort().join(",") !== "localMs,observationMs" ||
+      Object.values(phaseTimeouts).some(ms => !Number.isSafeInteger(ms) || ms < 1 || ms > 60000))) throw new Error("invalid_phase_timeouts");
+  return frozen({ ...RESEARCH_TRIAL_PROFILE_V1, timeouts: { ...RESEARCH_TRIAL_PROFILE_V1.timeouts, ...phaseTimeouts }, lunaRequest: { ...lunaRequest },
     outputLimit: lunaRequest.maxCompletionTokens === null ? "worker_dependent_effective_value_unverified" : "explicit_client_request" });
 }

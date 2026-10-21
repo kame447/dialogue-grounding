@@ -63,7 +63,7 @@ export type SaveAudit = { status: "auditable" | "save_failed"; firstSaveFailure:
 
 /** Labels are metadata only. No semantic oracle or approved script catalog here. */
 export async function runParityLive(options: Options, deps: Dependencies) {
-  const manifest = validateRunManifest(options.manifest), PROFILE = researchTrialProfile(manifest.lunaRequest), RESEARCH_TRIAL_PROFILE_SHA256 = researchHash(PROFILE);
+  const manifest = validateRunManifest(options.manifest), PROFILE = researchTrialProfile(manifest.lunaRequest, manifest.phaseTimeouts), RESEARCH_TRIAL_PROFILE_SHA256 = researchHash(PROFILE);
   const labels = [...new Set(manifest.trials.map(t => t.label))];
   const secrets = [...(deps.secrets ?? [])];
   if (!["mock", "live"].includes(deps.execution) || deps.execution === "live" && manifest.approval !== "approved" ||

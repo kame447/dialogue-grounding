@@ -1,20 +1,22 @@
 import { readFile, lstat } from "node:fs/promises";
 import { outsideRepositoryDirectory } from "../../naming-task.mjs";
 import { researchTrialProfile } from "../../v2/research-profile.ts";
-import type { LunaRequestSettings } from "../../v2/research-profile.ts";
+import type { LunaRequestSettings, PhaseTimeouts } from "../../v2/research-profile.ts";
 import { RunBudget } from "./audit.ts";
 import type { Label, BudgetLimits } from "./audit.ts";
-export type RunManifest = { id: string; seed: number; figureSets: 1; lunaRequest: LunaRequestSettings; caps: BudgetLimits;
+export type RunManifest = { id: string; seed: number; figureSets: 1; lunaRequest: LunaRequestSettings; phaseTimeouts?: PhaseTimeouts; caps: BudgetLimits;
   trials: ReadonlyArray<{ stage: "smoke" | "main"; scriptId: string; label: Label }>; approval: "pending" | "approved" };
 export function validateRunManifest(value: RunManifest): RunManifest {
-  if (!value || Object.keys(value).sort().join(",") !== "approval,caps,figureSets,id,lunaRequest,seed,trials" ||
+  if (!value || Object.keys(value).sort().join(",") !== (Object.hasOwn(value, "phaseTimeouts")
+      ? "approval,caps,figureSets,id,lunaRequest,phaseTimeouts,seed,trials" : "approval,caps,figureSets,id,lunaRequest,seed,trials") ||
+      Object.hasOwn(value, "phaseTimeouts") && value.phaseTimeouts === undefined ||
       !/^[a-zA-Z0-9_-]{1,80}$/u.test(value.id) || !Number.isSafeInteger(value.seed) || value.figureSets !== 1 ||
       !["pending", "approved"].includes(value.approval) || !Array.isArray(value.trials) || !value.trials.length || value.trials.length > 100 ||
       value.trials.some(t => Object.keys(t).sort().join(",") !== "label,scriptId,stage" || !["smoke", "main"].includes(t.stage) ||
         !["repair-first", "bypass-enabled"].includes(t.label) || !/^[a-zA-Z0-9_-]{1,80}$/u.test(t.scriptId))) throw new Error("invalid_manifest");
   if (Object.keys(value.lunaRequest).sort().join(",") !== "maxCompletionTokens,timeoutMs" ||
       Object.keys(value.caps).sort().join(",") !== "jevPosts,jevUsd,lunaCalls,lunaPosts,lunaTokens") throw new Error("invalid_manifest");
-  researchTrialProfile(value.lunaRequest); new RunBudget(value.caps);
+  researchTrialProfile(value.lunaRequest, value.phaseTimeouts); new RunBudget(value.caps);
   return structuredClone(value);
 }
 export async function loadRunManifest(file: string): Promise<RunManifest> {

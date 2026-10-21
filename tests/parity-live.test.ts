@@ -17,6 +17,7 @@ import { SYNTHETIC_PROBES } from "../dialogue-model/runtime/diagnostics/parity-l
 import { APPROVED_RUN_MANIFEST } from "../dialogue-model/runtime/diagnostics/parity-live/manifest.ts";
 import { createHash } from "node:crypto";
 import { EVIDENCE_NORMALIZED_ENVELOPE_FIELDS, projectReplayValue } from "../dialogue-model/runtime/diagnostics/parity-live/evidence.ts";
+import type { TestContext } from "node:test";
 
 const MODEL = "synthetic-luna", KEY = "sk-or-SYNTHETIC-parity-local-key-0000", TEXT = "細長い部分があります。";
 const caps = { jevUsd: 2, jevPosts: 208, lunaCalls: 131, lunaPosts: 393, lunaTokens: 1500000 };
@@ -717,4 +718,182 @@ test("PL-3 final summary write failure preserves historical G3 and returns a mat
   for (const trial of result.trials) assert.deepEqual(JSON.parse(await readFile(join(result.directory, `trial-${trial.order}.private.json`), "utf8")).gates, trial.gates);
   const final = await result.flushBilling(); assert.equal(final.auditability.snapshotStatus, "save_failed");
   assert.equal(final.auditability.changedSinceSnapshot, false);
+});
+
+// PREAPPROVAL-15: explicit phase settings only; these values select no live run.
+function phaseClock(t: TestContext) {
+  let now = 0;
+  t.mock.method(performance, "now", () => now);
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const scheduled: Array<{ at: number; ms: number }> = [], timer = globalThis.setTimeout;
+  t.mock.method(globalThis, "setTimeout", ((fn: (...args: any[]) => void, ms?: number, ...args: any[]) => {
+    scheduled.push({ at: now, ms: ms ?? 0 }); return timer(fn, ms, ...args);
+  }) as typeof setTimeout);
+  return { scheduled, now: () => now, advance(ms: number) { now += ms; t.mock.timers.tick(ms); } };
+}
+function phaseDependencies(config: any = {}, hooks: {
+  luna?(label: string, options: any): Promise<void> | void;
+  jev?(phase: string, init: RequestInit): Promise<void> | void;
+} = {}) {
+  const h = dependencies(config), createLuna = h.deps.createLunaClient, createJev = h.deps.createJevTransport;
+  const luna: Array<{ label: string; phase: string; timeoutMs: number; signal: AbortSignal }> = [];
+  h.deps.createLunaClient = async (label, settings) => {
+    const base = await createLuna(label, settings);
+    return { getModelPolicy: () => base.getModelPolicy(), async complete(messages, options) {
+      luna.push({ label, phase: options!.phase!, timeoutMs: options!.timeoutMs!, signal: options!.signal! });
+      await hooks.luna?.(label, options);
+      return base.complete(messages, options);
+    } };
+  };
+  h.deps.createJevTransport = label => {
+    const base = createJev(label);
+    return { ...base, async fetchImpl(url, init) {
+      const p = JSON.parse(String(init.body)), state = JSON.parse(p.state);
+      const phase = p.questions.human_referent ? "human_referent" : Object.keys(p.questions).some(k => k.endsWith("_support"))
+        ? "ai_support" : Object.keys(p.questions).some(k => k.endsWith("_act")) ? state.aiSeq ? "ai_function" : "local_function" : "decision";
+      await hooks.jev?.(phase, init); return base.fetchImpl(url, init);
+    } };
+  };
+  return { ...h, luna };
+}
+
+test("phaseTimeouts: omission preserves literal V1/effective/approved-manifest hashes; explicit profiles are detached and frozen", () => {
+  const defaults = researchTrialProfile({ timeoutMs: null, maxCompletionTokens: null });
+  assert.equal(researchHash(RESEARCH_TRIAL_PROFILE_V1), "b3025144c8048d4ff0f77e8689d7572bd67b967291dd3e7cc802b6e80a843229");
+  assert.equal(researchHash(defaults), "926ff7b7fb7c75a7003b97d0a68358a955c38427fc4743baf4284e769af54a58");
+  assert.equal(researchHash(APPROVED_RUN_MANIFEST), "2341321ef82803d2da21aaf46529eac5252ca9a9cd8c34c59f66534e0a38ea50");
+  assert.deepEqual(validateRunManifest(APPROVED_RUN_MANIFEST), APPROVED_RUN_MANIFEST);
+  assert.equal(Object.hasOwn(validateRunManifest(APPROVED_RUN_MANIFEST), "phaseTimeouts"), false);
+  const selected = { observationMs: 60000, localMs: 59000 }, profile = researchTrialProfile(defaults.lunaRequest, selected);
+  assert.deepEqual(profile.timeouts, { observationMs: 60000, localMs: 59000, decisionMs: 15000, generationMs: 40000 });
+  assert.ok(Object.isFrozen(profile) && Object.isFrozen(profile.timeouts) && Object.isFrozen(profile.lunaRequest));
+  selected.observationMs = 1; assert.equal(profile.timeouts.observationMs, 60000);
+  assert.notEqual(researchHash(profile), researchHash(defaults));
+  assert.notEqual(researchHash(profile), researchHash(researchTrialProfile(defaults.lunaRequest, { observationMs: 60000, localMs: 60000 })));
+  assert.notEqual(researchHash(profile), researchHash(researchTrialProfile(defaults.lunaRequest, { observationMs: 59000, localMs: 59000 })));
+  assert.deepEqual(defaults.timeouts, { observationMs: 20000, localMs: 20000, decisionMs: 15000, generationMs: 40000 });
+});
+
+test("phaseTimeouts: strict nested and top-level validation, accepted endpoints and private manifest round-trip", async t => {
+  const { loadRunManifest } = await import("../dialogue-model/runtime/diagnostics/parity-live/manifest.ts");
+  const options = await fixture(t), file = join(options.outputDir, "..", "phase-manifest.private.json");
+  for (const phaseTimeouts of [{ observationMs: 1, localMs: 60000 }, { observationMs: 60000, localMs: 1 }]) {
+    const value = { ...options.manifest, phaseTimeouts };
+    assert.deepEqual(validateRunManifest(value), value);
+    await writeFile(file, JSON.stringify(value), { mode: 0o600 }); assert.deepEqual(await loadRunManifest(file), value);
+    const before = { ...phaseTimeouts }, detached = validateRunManifest(value);
+    detached.phaseTimeouts!.localMs = 2; assert.deepEqual(value.phaseTimeouts, before);
+  }
+  const invalid: unknown[] = [null, undefined, [], [60000, 60000], {}, { observationMs: 1 }, { localMs: 1 }, "60000",
+    { observationMs: 1, localMs: 1, aiPublicMs: 1 }, { observationMs: 1, localMs: 1, decisionMs: 1 }];
+  for (const field of ["observationMs", "localMs"]) for (const value of [null, "60000", 0, -1, 60001, 1.5, NaN, Infinity, -Infinity, true]) {
+    invalid.push({ observationMs: 60000, localMs: 60000, [field]: value });
+  }
+  for (const phaseTimeouts of invalid) assert.throws(() => validateRunManifest({ ...options.manifest, phaseTimeouts } as any));
+  for (const phaseTimeouts of invalid.filter(v => v !== undefined)) {
+    assert.throws(() => researchTrialProfile(options.manifest.lunaRequest, phaseTimeouts as any));
+  }
+  assert.throws(() => validateRunManifest({ ...options.manifest, phaseTimeouts: { observationMs: 1, localMs: 1 }, extra: 1 } as any));
+});
+
+test("phaseTimeouts: both labels, saved records, timeout identities and native paired replay bind the same effective profile", async t => {
+  const options = await fixture(t), selected = { ...options, manifest: { ...options.manifest,
+    lunaRequest: { timeoutMs: 60000, maxCompletionTokens: null }, phaseTimeouts: { observationMs: 60000, localMs: 59000 } } };
+  const result = await runParityLive(selected, instrumentedDependencies({ observe: true, localSegment: true }).deps);
+  assert.equal(result.summary.status, "wiring_passed");
+  const expected = researchTrialProfile(selected.manifest.lunaRequest, selected.manifest.phaseTimeouts), hash = researchHash(expected);
+  const run = JSON.parse(await readFile(join(result.directory, "run.private.json"), "utf8"));
+  const summary = JSON.parse(await readFile(join(result.directory, "summary.private.json"), "utf8"));
+  const evidence = JSON.parse(await readFile(join(result.directory, "verifier-evidence.private.json"), "utf8"));
+  assert.deepEqual(run.manifest, selected.manifest); assert.equal(run.manifestSha256, researchHash(selected.manifest));
+  for (const record of [run, summary, ...result.trials]) { assert.deepEqual(record.profile, expected); assert.equal(record.profileSha256, hash); }
+  assert.deepEqual(result.trials.map(v => v.label), ["bypass-enabled", "repair-first"]);
+  for (const trial of result.trials) {
+    const saved = JSON.parse(await readFile(join(result.directory, `trial-${trial.order}.private.json`), "utf8"));
+    assert.deepEqual(saved.profile, expected); assert.equal(saved.profileSha256, hash);
+    assert.equal(trial.identity.profile, hash); assert.equal(trial.identity.timeouts, researchHash(expected.timeouts));
+    assert.ok(trial.replay.every(r => r.result.status === "same_material_same_payload"));
+  }
+  for (const pair of evidence.pairedReplay) {
+    assert.deepEqual(pair.left.material.profile, expected); assert.deepEqual(pair.right.material.profile, expected);
+  }
+});
+
+test("phaseTimeouts: warm-up/reobservation and human/AI work cross 20s; later checks receive residual shared budgets", async t => {
+  const clock = phaseClock(t), checks: Array<{ phase: string; timer: number }> = [];
+  const h = phaseDependencies({ observe: true, localSegment: true }, {
+    luna(_label, options) {
+      if (["observation_initial", "observation_targeted"].includes(options.phase)) clock.advance(25000);
+      if (["local_extraction", "ai_extraction"].includes(options.phase)) clock.advance(50000);
+    },
+    jev(phase) {
+      checks.push({ phase, timer: clock.scheduled.at(-1)!.ms });
+      if (phase === "local_function") clock.advance(2000);
+      if (phase === "ai_function") clock.advance(4000);
+    },
+  });
+  const options = await fixture(t), result = await runParityLive({ ...options, manifest: { ...options.manifest,
+    phaseTimeouts: { observationMs: 60000, localMs: 60000 } } }, h.deps);
+  assert.equal(result.summary.status, "wiring_passed");
+  assert.ok(clock.now() > 20000);
+  for (const phase of ["observation_initial", "observation_targeted", "local_extraction", "ai_extraction"]) {
+    const calls = h.luna.filter(c => c.phase === phase); assert.ok(calls.length > 0);
+    assert.ok(calls.every(c => c.timeoutMs === 60000), phase);
+  }
+  assert.ok(h.luna.filter(c => c.phase === "generation").every(c => c.timeoutMs === 40000));
+  for (const [phase, expected] of [["local_function", 10000], ["ai_function", 10000], ["ai_support", 6000]] as const) {
+    const calls = checks.filter(c => c.phase === phase); assert.ok(calls.length > 0); assert.ok(calls.every(c => c.timer === expected), JSON.stringify(calls));
+  }
+  assert.ok(checks.filter(c => ["human_referent", "decision"].includes(c.phase)).every(c => c.timer === 15000));
+});
+
+for (const phase of ["observation_initial", "observation_targeted", "local_extraction", "ai_extraction"]) {
+  test(`phaseTimeouts: ${phase} continues beyond 20s and aborts at its explicit 60s deadline`, async t => {
+    const clock = phaseClock(t), entered = pause(), hold = pause(); let stalled = false;
+    const h = phaseDependencies({ observe: true }, { async luna(_label, options) {
+      if (options.phase === phase && !stalled) { stalled = true; entered.release(); await hold.promise; }
+    } });
+    const options = await fixture(t), work = runParityLive({ ...options, manifest: { ...options.manifest,
+      phaseTimeouts: { observationMs: 60000, localMs: 60000 } } }, h.deps);
+    try {
+      await entered.promise;
+      const active = h.luna.find(c => c.phase === phase)!; assert.equal(active.timeoutMs, 60000);
+      clock.advance(20001); assert.equal(active.signal.aborted, false);
+      clock.advance(39998); assert.equal(active.signal.aborted, false);
+      clock.advance(1); assert.equal(active.signal.aborted, true);
+      const result = await work;
+      assert.equal(result.summary.status, "wiring_failed");
+      assert.ok(result.trials.every(trial => trial.turns.length === 0));
+      if (phase === "observation_initial") assert.equal(result.trials.length, 0);
+    } finally { hold.release(); await new Promise<void>(resolve => setImmediate(resolve)); }
+  });
+}
+
+for (const [clientMs, callMs, expected] of [[20000, 60000, 20000], [60000, 20000, 20000],
+  [null, 60000, 45000], [60000, 40000, 40000]] as const) {
+  test(`phaseTimeouts: native client actually aborts fetch at min(${clientMs ?? "text default"}, ${callMs})=${expected}`, async t => {
+    const clock = phaseClock(t), entered = pause(); let signal!: AbortSignal;
+    const client = createChatClient({ provider: "cloudflare", apiKey: "synthetic-private-key", purpose: "dialogue_turn",
+      baseUrl: "http://synthetic.invalid/v1", timeoutMs: clientMs ?? undefined }, async (_url, init) => {
+      signal = init!.signal!; entered.release(); return new Promise<Response>(() => {});
+    });
+    const work = client.complete([{ role: "user", content: "synthetic" }], { timeoutMs: callMs });
+    const rejected = assert.rejects(work, (error: any) => error.code === "timeout" && error.timeoutMs === expected);
+    await entered.promise; clock.advance(expected - 1); assert.equal(signal.aborted, false);
+    clock.advance(1); assert.equal(signal.aborted, true); await rejected;
+  });
+}
+
+test("phaseTimeouts: selecting 60s phases never extends the native Jev 15s transport deadline", async t => {
+  const clock = phaseClock(t), entered = pause(), hold = pause(); let signal!: AbortSignal;
+  const h = phaseDependencies({}, { async jev(phase, init) {
+    if (phase === "human_referent") { signal = init.signal!; entered.release(); await hold.promise; }
+  } });
+  const options = await fixture(t), work = runParityLive({ ...options, manifest: { ...options.manifest,
+    phaseTimeouts: { observationMs: 60000, localMs: 60000 } } }, h.deps);
+  try {
+    await entered.promise; clock.advance(14999); assert.equal(signal.aborted, false);
+    clock.advance(1); assert.equal(signal.aborted, true);
+    const result = await work; assert.equal(result.summary.status, "wiring_failed"); assert.equal(result.trials[0].turns.length, 0);
+  } finally { hold.release(); await new Promise<void>(resolve => setImmediate(resolve)); }
 });
