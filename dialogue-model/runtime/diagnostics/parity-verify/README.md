@@ -39,6 +39,13 @@ or `not_reached` (required evidence absent). Missing evidence never counts as su
   model and usage records. G4: public leakage checks and no unknown Jev billing;
   budget consistency and stop discipline are additional independent checks. Compare claimed
   gates with these recomputations; do not use claimed gate booleans as evidence.
+- Astra RULING-C7-G2: a committed turn's valid G2 evidence survives a later
+  finalization failure. Recorded in-turn call, attempt, validation, stage and image
+  failures still block G2. Independently, `gate.claim.execution` rejects overall
+  passed=true with primary failure, and `gate.primary_error_progression` rejects
+  main started after a warmup or earlier-trial primary failure. These checks do not
+  combine G1–G4. Missing failure order is unresolved; error-code names never prove
+  timing. A good earlier smoke's snapshots are not invalidated by later main errors.
 - Coverage requires each path's actual execution, validation, commit and subsequent
   application evidence. AI partial application is candidate-level `partial_demonstrated`;
   approved conservative rejection needs contract evidence, not a reason string alone.
@@ -63,12 +70,21 @@ invalid input, and 3 means unresolved/not-comparable evidence without a mismatch
 The importable APIs are `loadRecords`, `verifyRecords`, and `verifyDirectory` in
 `index.ts`. They have no network, runtime-pipeline, credential or harness dependencies.
 
-The loader reads only `run.private.json`, `summary.private.json`, `warmup.private.json`,
+The loader reads only `run.private.json`, `summary.private.json`, `warmup.private.json`, `failure.private.json`,
 `trial-N.private.json`, `public-N-S.packet.json`, `billing.private.jsonl`, and the optional
 `verifier-evidence.private.json` described in [evidence-schema.md](evidence-schema.md).
 It reads no paths embedded in those files, rejects symlinks/oversized files, and checks
 actual record permissions/external location. The report contains check IDs, closed
 reason codes, hashes/counts, and technical classifications, never prompt/response text.
+
+Failure-record integrity and execution success are separate. The verifier independently
+checks the closed warmup/after_warmup v1 schemas and exact legacy code/calls/cache shape.
+Legacy calls count toward the ledger; unrecorded HTTP/policy/deadlines stay unknown.
+The four statuses are unchanged: output_missing and legacy_unrecorded are not_reached
+reasons; schema_violation, scope_contradiction, duplicate_ownership, planned_mapping,
+version_contradiction and unknown_version identify mismatches. See the fixed contract
+in [evidence-schema.md](evidence-schema.md) and the check/test correspondence in
+[failure-audit-map.md](failure-audit-map.md). A saved failure never excuses real violations.
 
 Native v1 records retain useful profile, call, usage, trace, graph and packet evidence.
 Their one-sided replay hash list plus `labelsEqual`, gate `passed`, and `cacheStable`

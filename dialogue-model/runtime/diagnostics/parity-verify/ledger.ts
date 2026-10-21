@@ -1,4 +1,4 @@
-import { allCalls, allHttp, amount, assertion, check, count, equal, list, missing, row, rows } from "./core.ts";
+import { allCalls, allHttp, amount, assertion, callsComplete, check, count, equal, httpComplete, httpMissingReason, list, missing, row, rows } from "./core.ts";
 import type { Check, Records, Row } from "./core.ts";
 
 const close = (a: unknown, b: number): boolean => amount(a) && Math.abs(a - b) < 1e-10;
@@ -13,9 +13,12 @@ export function ledger(records: Records): Accounting {
   const effective = Object.fromEntries(Object.entries(LIMITS).map(([k, maximum]) => [k, amount(configured[k]) && (configured[k] as number) > 0 ? Math.min(configured[k] as number, maximum) : maximum])) as typeof LIMITS;
   const jev = sends.filter(s => s.provider === "jev"), luna = sends.filter(s => s.provider === "luna");
   const calls = allCalls(records), http = allHttp(records), posts = http.filter(h => h.kind === "completion_post");
+  const snapshotPresent = Array.isArray(budget.sends);
   const lunaCalls = calls.filter(c => c.provider === "luna");
-  const totals: Row = { jevPosts: jev.length, lunaPosts: luna.length, lunaComplete: lunaCalls.length,
-    policyGets: http.filter(h => h.kind === "policy_get").length,
+  const totals: Row = { jevPosts: records.summary?.budget ? jev.length : null, lunaPosts: records.summary?.budget ? luna.length : null, lunaComplete: lunaCalls.length,
+    policyGets: httpComplete(records) ? http.filter(h => h.kind === "policy_get").length : null,
+    recordedPolicyGets: http.filter(h => h.kind === "policy_get").length,
+    recordedLunaPosts: posts.length,
     knownJevUsd: sum(jev, "costUsd"), unknownJevCosts: unknown(jev, "costUsd"),
     knownInputTokens: sum(luna, "inputTokens"), knownOutputTokens: sum(luna, "outputTokens"),
     unknownInputTokens: unknown(luna, "inputTokens"), unknownOutputTokens: unknown(luna, "outputTokens"),
@@ -28,7 +31,8 @@ export function ledger(records: Records): Accounting {
       ["observedInputTokens", sum(luna, "inputTokens")], ["observedOutputTokens", sum(luna, "outputTokens")],
       ["observedLunaTokens", sum(luna, "inputTokens") + sum(luna, "outputTokens")],
       ["missingInputTokens", unknown(luna, "inputTokens")], ["missingOutputTokens", unknown(luna, "outputTokens")], ["lunaCalls", lunaCalls.length]];
-    values.forEach(([key, expected]) => checks.push(assertion(`ledger.total.${key}`, close(budget[key], expected), "recomputed_snapshot_total", { expected })));
+    values.forEach(([key, expected]) => checks.push(key === "lunaCalls" && !callsComplete(records) && amount(budget[key]) && budget[key] > expected ?
+      missing(`ledger.total.${key}`, "output_missing") : assertion(`ledger.total.${key}`, close(budget[key], expected), "recomputed_snapshot_total", { expected })));
     checks.push(assertion("ledger.unknown_cost", budget.lunaCostUsd === null && budget.totalUsd === null &&
       (unknown(jev, "costUsd") === 0 || budget.jevUnknown === true && budget.halted === true), "unknown_never_reported_as_zero"));
     checks.push(assertion("ledger.unresolved", equal(list(budget.unresolvedJevSends).slice().sort(), jev.filter(s => !amount(s.costUsd)).map(s => s.id).sort()), "unresolved_jev_ids"));
@@ -40,23 +44,30 @@ export function ledger(records: Records): Accounting {
     checks.push(cap ? assertion("ledger.configured_caps", Object.entries(LIMITS).every(([k, v]) => amount(row(cap)[k]) && (row(cap)[k] as number) > 0 && (row(cap)[k] as number) <= v) &&
       equal(budget.limits, cap), "manifest_does_not_raise_approved_caps_and_matches_ledger") : missing("ledger.configured_caps"));
   }
-  const measured = records.run?.execution === "live" || posts.length > 0;
-  checks.push(measured ? assertion("ledger.reserved_actual", luna.length >= posts.length && jev.length >= calls.filter(c => c.provider === "jev").reduce((n, c) => n + list(c.sendIds).length, 0), "reserved_counts_cover_http_attempts")
+  const measured = records.run?.execution === "live" || posts.length > 0 || row(records.failure?.http).measured === true;
+  const covered = luna.length >= posts.length && jev.length >= calls.filter(c => c.provider === "jev").reduce((n, c) => n + list(c.sendIds).length, 0);
+  checks.push(!snapshotPresent ? missing("ledger.reserved_actual", "output_missing") : !covered ? assertion("ledger.reserved_actual", false, "reserved_counts_cover_http_attempts") : !httpComplete(records) ? missing("ledger.reserved_actual", httpMissingReason(records)) : measured ? assertion("ledger.reserved_actual", true, "reserved_counts_cover_http_attempts")
     : missing("ledger.reserved_actual", "mock_http_not_measured"));
-  checks.push(measured ? assertion("ledger.complete_post", lunaCalls.length <= posts.length && posts.length <= lunaCalls.length * 3, "complete_entries_separate_from_post_retries")
+  // Only sent complete calls owe a POST. A recorded pre-send failure can have zero sends.
+  const sentComplete = lunaCalls.filter(c => list(c.sendIds).length > 0 || c.status === "ok").length;
+  checks.push(callsComplete(records) && posts.length > lunaCalls.length * 3 ? assertion("ledger.complete_post", false, "complete_entries_separate_from_post_retries") :
+    !httpComplete(records) ? missing("ledger.complete_post", httpMissingReason(records)) : measured ? assertion("ledger.complete_post", sentComplete <= posts.length && posts.length <= lunaCalls.length * 3, "complete_entries_separate_from_post_retries")
     : missing("ledger.complete_post", "http_post_evidence_missing"));
   const owned = new Set<unknown>();
   calls.forEach((c, i) => {
-    const ids = list(c.sendIds), valid = ids.every(id => {
+    const ids = list(c.sendIds), noDuplicates = ids.every(id => !owned.has(id)) && new Set(ids).size === ids.length;
+    const valid = ids.every(id => {
       const match = sends.find(s => s.id === id);
       return !owned.has(id) && !!match && match.provider === c.provider && match.logicalCallId === c.id && match.phase === c.phase;
     });
     ids.forEach(id => owned.add(id));
-    checks.push(assertion(`ledger.call.${i}`, valid && new Set(ids).size === ids.length && (c.provider !== "luna" || ids.length <= 3), "call_send_ownership_and_retry_limit"));
-    if (c.provider === "jev" && ids.length) checks.push(assertion(`ledger.call_cost.${i}`, ids.every(id => amount(sends.find(s => s.id === id)?.costUsd)) ?
+    checks.push(!snapshotPresent && noDuplicates && (c.provider !== "luna" || ids.length <= 3) ? missing(`ledger.call.${i}`, "output_missing") :
+      assertion(`ledger.call.${i}`, valid && noDuplicates && (c.provider !== "luna" || ids.length <= 3), "call_send_ownership_and_retry_limit"));
+    if (c.provider === "jev" && ids.length) checks.push(!snapshotPresent ? missing(`ledger.call_cost.${i}`, "output_missing") : assertion(`ledger.call_cost.${i}`, ids.every(id => amount(sends.find(s => s.id === id)?.costUsd)) ?
       close(c.costUsd, sum(sends.filter(s => ids.includes(s.id)), "costUsd")) : c.costUsd === null, "logical_jev_cost_matches_send_costs"));
   });
-  if (measured) checks.push(assertion("ledger.send_ownership", sends.every(s => owned.has(s.id)), "each_reserved_send_has_logical_call"));
+  if (measured) checks.push(!callsComplete(records) && sends.some(s => !owned.has(s.id)) ? missing("ledger.send_ownership", "output_missing") :
+    assertion("ledger.send_ownership", sends.every(s => owned.has(s.id)), "each_reserved_send_has_logical_call"));
   const events = rows(records.evidence?.events);
   if (!events.length) {
     checks.push(missing("ledger.events", "ordered_reserve_send_response_events_missing"), missing("ledger.instance_cap", "jev_instance_identity_missing"),
@@ -190,9 +201,12 @@ export function ledger(records: Records): Accounting {
   checks.push(assertion("ledger.event_order", ordered, "strict_seq_nondecreasing_timestamp"));
   checks.push(instanceEvidence ? assertion("ledger.instance_cap", true, "per_instance_checks_in_event_report") : missing("ledger.instance_cap", "instance_id_missing"));
   const eventSends = [...sent.values()];
-  checks.push(assertion("ledger.event_reconciliation", eventSends.length === posts.length + jev.length &&
-    sends.every(s => reserved.has(s.id)) && eventSends.every(s => sends.some(r => r.id === s.sendId && r.provider === s.provider)) && completeCount === lunaCalls.length,
-    "events_reconcile_native_http_and_complete_records"));
+  const eventKnown = sends.every(s => reserved.has(s.id)) && eventSends.every(s => sends.some(r => r.id === s.sendId && r.provider === s.provider)) &&
+    (callsComplete(records) ? completeCount === lunaCalls.length : completeCount >= lunaCalls.length) && eventSends.length >= posts.length + jev.length;
+  checks.push(!snapshotPresent ? missing("ledger.event_reconciliation", "output_missing") : !eventKnown ? assertion("ledger.event_reconciliation", false, "events_reconcile_native_http_and_complete_records") :
+    !httpComplete(records) ? missing("ledger.event_reconciliation", httpMissingReason(records)) :
+      assertion("ledger.event_reconciliation", eventSends.length === posts.length + jev.length && completeCount === lunaCalls.length,
+        "events_reconcile_native_http_and_complete_records"));
   sends.forEach((s, i) => {
     const response = responses.get(s.id), fields = s.provider === "jev" ? ["costUsd"] : ["inputTokens", "outputTokens"];
     if (response) checks.push(assertion(`ledger.response_snapshot.${i}`, fields.every(field => s[field] === null || s[field] === response[field]),

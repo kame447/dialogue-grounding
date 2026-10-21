@@ -12,9 +12,41 @@ function stageError(trace: Row): boolean {
   return ["error", "aborted"].includes(String(trace.status)) || row(row(trace.aiPublic).pending).status === "failed" ||
     Object.values(row(row(trace.aiPublic).stages)).some(s => ["error", "timeout"].includes(String(row(s).status)));
 }
-export function primaryFailure(trial: Row): boolean {
-  return !!trial.failure || rows(trial.calls).some(c => c.status === "error") || rows(trial.attempts).some(stageError) ||
+function turnFailure(trial: Row): boolean {
+  return rows(trial.calls).some(c => c.status === "error") || rows(trial.attempts).some(stageError) ||
     rows(trial.turns).some(t => rows(t.trace).some(stageError));
+}
+export function primaryFailure(trial: Row): boolean { return !!trial.failure || turnFailure(trial); }
+
+/** Primary execution failures are independent of G1–G4 turn/cache evidence. */
+function executionChecks(records: Records): Check[] {
+  const failed = records.trials.filter(primaryFailure), mains = records.trials.filter(t => t.stage === "main");
+  const runFailed = !!records.failure || !!records.run?.failure || !!records.summary?.failure || !!records.summary?.executionFailure;
+  const warmFailed = rows(records.warmup?.calls).some(c => c.status === "error") ||
+    !!records.failure && records.failure.scope !== "after_warmup";
+  const topPassed = [records.run?.passed, row(records.run?.gates).passed, records.summary?.passed, row(records.summary?.gates).passed].some(v => v === true);
+  // summary.gates is the ordered list of per-trial gate snapshots, not a global
+  // success claim that would retroactively invalidate an earlier good smoke.
+  const falseTrialClaim = records.trials.some(t => primaryFailure(t) && row(t.gates).passed === true) ||
+    rows(records.summary?.gates).some((g, order) => g.passed === true && records.trials.some(t => t.order === order && primaryFailure(t)));
+  const claims = assertion("gate.claim.execution", !falseTrialClaim && !(topPassed && (runFailed || failed.length > 0 || warmFailed)),
+    "overall_passed_requires_no_primary_execution_failure");
+  const afterError = warmFailed && mains.length > 0 || mains.some(main => failed.some(t => Number(t.order) < Number(main.order)));
+  const progression = !mains.length ? missing("gate.primary_error_progression", "stage_two_not_entered") : afterError ?
+    assertion("gate.primary_error_progression", false, "main_started_after_primary_execution_failure") :
+    runFailed && !failed.length && !warmFailed ? missing("gate.primary_error_progression", "primary_failure_order_unrecorded") :
+      assertion("gate.primary_error_progression", true, "no_primary_execution_failure_before_main");
+  // Inspect each saved snapshot on its own. A missing trial cannot erase a
+  // contradiction already visible inside summary.gates, or reconstruct its gaps.
+  const snapshots = [...records.trials.map(t => row(t.gates)), ...rows(records.summary?.gates),
+    row(records.summary?.gates), row(records.run?.gates)].filter(s => Object.keys(s).length > 0);
+  const components = ["G1", "G2", "G3", "G4"];
+  const contradiction = snapshots.some(s => s.passed === true && components.some(k => row(s[k]).passed === false));
+  const incomplete = snapshots.some(s => s.passed === true && components.some(k => typeof row(s[k]).passed !== "boolean"));
+  const snapshotCheck = contradiction ? assertion("gate.claim.snapshot", false, "overall_passed_contradicts_component_gate") :
+    !snapshots.length ? missing("gate.claim.snapshot", "gate_snapshots_missing") : incomplete ? missing("gate.claim.snapshot", "gate_components_missing") :
+      assertion("gate.claim.snapshot", true, "recorded_gate_snapshots_have_no_component_contradiction");
+  return [claims, progression, snapshotCheck];
 }
 
 export function coverage(records: Records): { cells: Coverage[]; checks: Check[] } {
@@ -109,8 +141,8 @@ export function coverage(records: Records): { cells: Coverage[]; checks: Check[]
 }
 
 export function gates(records: Records, independent: Check[]): Check[] {
-  const smoke = records.trials.filter(t => t.stage === "smoke"), output: Check[] = [];
-  if (!smoke.length) return [missing("gate.G1"), missing("gate.G2"), missing("gate.G3"), missing("gate.G4")];
+  const smoke = records.trials.filter(t => t.stage === "smoke"), output: Check[] = executionChecks(records);
+  if (!smoke.length) return [...output, missing("gate.G1"), missing("gate.G2"), missing("gate.G3"), missing("gate.G4")];
   for (const trial of smoke) {
     const suffix = smoke.length === 1 ? "" : `.${trial.order}`;
     const scoped: Records = { ...records, trials: [trial], summary: { ...records.summary, budget: trial.budget },
@@ -129,7 +161,7 @@ export function gates(records: Records, independent: Check[]): Check[] {
         hr.model === calls.find(c => c.phase === "human_referent")?.requestedModel &&
         decisions.length > 0 && decisions.every(d => d.decisionKind === "jev_local_test" && rows(row(d.evidence).stages).length > 0);
     });
-    let g2 = primaryFailure(trial) ? check(`gate.G2${suffix}`, "mismatch", "stage_one_primary_error_blocks_transition") :
+    let g2 = turnFailure(trial) ? check(`gate.G2${suffix}`, "mismatch", "stage_one_turn_primary_error") :
       imageCheck.status === "mismatch" ? check(`gate.G2${suffix}`, "mismatch", "image_boundary_failed") :
       !turns.length ? missing(`gate.G2${suffix}`, "smoke_turns_not_reached") : assertion(`gate.G2${suffix}`, success, "one_turn_both_jev_stages_response_model_validation_public_commit");
     const rawValidation = independent.filter(c => c.id.startsWith(`validation.jev.${trial.order}.`));

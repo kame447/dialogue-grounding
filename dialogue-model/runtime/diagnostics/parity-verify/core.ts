@@ -4,7 +4,7 @@ export type Row = Record<string, unknown>;
 export type Status = "pass" | "mismatch" | "not_comparable" | "not_reached";
 export type Check = { id: string; status: Status; reason: string; detail?: Row };
 export type Storage = { name: string; mode: number; external: boolean; regular: boolean };
-export type Records = { run?: Row; summary?: Row; warmup?: Row; trials: Row[];
+export type Records = { run?: Row; summary?: Row; warmup?: Row; failure?: Row; trials: Row[];
   billing?: Row[]; packets?: Array<{ name: string; value: Row }>; storage?: Storage[]; evidence?: Row };
 export const row = (value: unknown): Row => value !== null && typeof value === "object" && !Array.isArray(value) ? value as Row : {};
 export const list = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
@@ -46,8 +46,20 @@ export function combine(id: string, checks: Check[], reason: string): Check {
   return check(id, status, reason, { components: checks.map(c => c.id) });
 }
 export function allCalls(records: Records): Row[] {
-  return [...rows(records.warmup?.calls), ...records.trials.flatMap(t => rows(t.calls))];
+  return [...rows(records.failure?.calls), ...rows(records.warmup?.calls), ...records.trials.flatMap(t => rows(t.calls))];
 }
 export function allHttp(records: Records): Row[] {
-  return [...rows(records.warmup?.http), ...records.trials.flatMap(t => rows(t.http))];
+  return [...rows(row(records.failure?.http).records), ...rows(records.warmup?.http), ...records.trials.flatMap(t => rows(t.http))];
 }
+/** runOrder describes started trials even when their own file could not be saved. */
+export function missingTrialOrders(records: Records): number[] {
+  return list(records.summary?.runOrder).map((_, i) => i).filter(i => !records.trials.some(t => t.order === i));
+}
+export function callsComplete(records: Records): boolean {
+  return missingTrialOrders(records).length === 0 && !!(records.warmup || Array.isArray(records.failure?.calls));
+}
+export function httpComplete(records: Records): boolean {
+  return callsComplete(records) && (!records.failure || records.failure.scope === "after_warmup" || row(records.failure.http).measured === true);
+}
+export const httpMissingReason = (records: Records): string => records.failure && !Object.hasOwn(records.failure, "schemaVersion")
+  ? "legacy_unrecorded" : "output_missing";
