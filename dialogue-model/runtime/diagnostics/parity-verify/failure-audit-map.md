@@ -102,3 +102,32 @@ three focused verifier files gave 173/173 pass. GREEN log:
 
 C7 does not certify actual late producer delivery or timer operation; late-usage
 accounting remains covered by the independent contract tests.
+
+## POSTAUDIT-22: strict types, policy consistency and saved gate contradictions
+
+Regression file: `tests/parity-verify-schema-audit.test.ts`. Existing tests, producer
+code and fixtures are unchanged. Enum membership now requires an actual string;
+there is no coercion, trimming, case conversion or recursive normalization.
+
+| Item | Check / fixed boundary | Regression family |
+| --- | --- | --- |
+| R121-1 strict enums, including nested legacy records | `failure.schema` mismatch / schema_violation; normal strings retained | `R121-1 …: genuine string remains valid`; `R121-1 …: rejects … without coercion` (both stages, HTTP outcome/kind/method, call provider/status, cache status/reason/observation, policy.status, nested legacy call/cache) |
+| R121-1 other scalar boundaries | Booleans and integers cannot be strings, arrays, objects, null or the wrong numeric kind | `R121-1 …: boolean rejects …`; `R121-1 …: integer rejects …` |
+| R121-2 obtained policy | `failure.policy` mismatch / obtained_policy_matches_contract_and_requested_model; purpose dialogue_turn, ready true, provider openai/gemini, existing model syntax/length, match every recorded warmup Luna requestedModel | `R121-2 obtained policy rejects … independently of JSON types`; `R121-2 obtained policy rejects malformed model …` |
+| R121-2 known state contradiction | `failure.policy` mismatch / policy_required_before_observation when cache_get/post_cache or complete-start evidence coexists with failed/not_requested policy | `R121-2 cache_get before complete still requires obtained policy`; `R121-2 observed complete requires policy even when the stage is unknown` |
+| R121-2 normal failures and model choice | No model ID pinned; policy GET/client setup failures remain unresolved, legacy policy remains legacy_unrecorded | `R121-2 policy follows recorded requested model instead of pinning a research model ID`; existing-provider cases; `R121-2 genuine policy GET failure, client setup and legacy stay distinct` |
+| R121-3 known contradiction inside a saved snapshot | `gate.claim.snapshot` mismatch / overall_passed_contradicts_component_gate; independent of trial-file presence and execution claims | `R121-3 missing trial cannot hide a summary overall/component contradiction`; trial-snapshot variant; known-false/other-missing variant |
+| R121-3 missing evidence and temporal scope | Missing components without a known contradiction are not_reached; absent trial remains output_missing; later failure cannot invalidate an earlier good snapshot | `R121-3 unchanged save-failure capture keeps missing output and zero mismatches`; `R121-3 unknown components are not guessed false`; `R121-3 later failure does not invalidate an earlier good smoke snapshot or G4` |
+
+Policy vocabulary comes from the existing native getModelPolicy contract
+(`dialogue-model/runtime/client.mjs`); model syntax/maximum length comes from the
+existing Worker model-policy contract (`workers/research-ai-proxy/src/modelPolicy.mjs`).
+The verifier reimplements these validations and imports neither implementation.
+It compares the recorded model to recorded requests, never a new research model ID.
+
+TDD RED: `node --test tests/parity-verify-schema-audit.test.ts` against 6eb2d7b,
+156 tests, 127 pass / 29 fail (13 strict-enum coercions, 11 policy checks, 5 snapshot
+checks). Log: `/private/tmp/sol3-r121-red.log`. After the minimum implementation,
+the same 156 tests pass; log: `/private/tmp/sol3-r121-green-focused.log`.
+All four focused verifier files then pass 329/329, including the unchanged 173
+existing regressions; log: `/private/tmp/sol3-r121-green.log`. Strict typecheck passes.

@@ -6,6 +6,7 @@ const object = (v: unknown): v is Row => v !== null && typeof v === "object" && 
 const keys = (v: unknown, required: string[], optional: string[] = []): boolean => object(v) &&
   required.every(k => Object.hasOwn(v, k)) && Object.keys(v).every(k => required.includes(k) || optional.includes(k));
 const text = (v: unknown): v is string => typeof v === "string" && v.length > 0;
+const oneOf = (v: unknown, allowed: readonly string[]): v is string => typeof v === "string" && allowed.includes(v);
 const nullable = (v: unknown, predicate: (v: unknown) => boolean) => v === null || predicate(v);
 const positive = (v: unknown) => count(v) && v > 0;
 const safeCode = (v: unknown) => typeof v === "string" && /^[a-zA-Z0-9_:.\-]{1,160}$/u.test(v);
@@ -15,15 +16,16 @@ function callSchema(v: unknown): boolean {
   if (!keys(v, callKeys, ["expectedHttpRequestSha256", "httpRequestSha256"])) return false;
   const c = row(v);
   return positive(c.id) && Array.isArray(c.sendIds) && c.sendIds.every(positive) && text(c.phase) && nullable(c.turn, count) &&
-    ["luna", "jev"].includes(String(c.provider)) && shaLike(c.requestSha256) && nullable(c.instructionSha256, shaLike) &&
-    text(c.requestedModel) && nullable(c.model, text) && ["started", "ok", "error"].includes(String(c.status)) && nullable(c.error, safeCode) &&
+    oneOf(c.provider, ["luna", "jev"]) && shaLike(c.requestSha256) && nullable(c.instructionSha256, shaLike) &&
+    text(c.requestedModel) && nullable(c.model, text) && oneOf(c.status, ["started", "ok", "error"]) && nullable(c.error, safeCode) &&
     nullable(c.costUsd, amount) && nullable(c.inputTokens, count) && nullable(c.outputTokens, count) && count(c.imageCount) && nullable(c.latencyMs, amount) &&
     ["expectedHttpRequestSha256", "httpRequestSha256"].every(k => !Object.hasOwn(c, k) || nullable(c[k], shaLike));
 }
 function httpSchema(v: unknown): boolean {
   if (!keys(v, ["method", "kind", "phase", "callId", "sendId", "hashScheme", "requestSha256", "status", "outcome"])) return false;
   const h = row(v), get = h.kind === "policy_get" && h.method === "GET", post = h.kind === "completion_post" && h.method === "POST";
-  return (get || post) && h.hashScheme === "canonical_json_sha256" && ["returned", "unknown"].includes(String(h.outcome)) &&
+  return oneOf(h.kind, ["policy_get", "completion_post"]) && oneOf(h.method, ["GET", "POST"]) &&
+    (get || post) && h.hashScheme === "canonical_json_sha256" && oneOf(h.outcome, ["returned", "unknown"]) &&
     nullable(h.status, v => count(v) && v >= 100 && v <= 599) && (get ? h.phase === null && h.callId === null && h.sendId === null && h.requestSha256 === null :
       text(h.phase) && positive(h.callId) && positive(h.sendId) && shaLike(h.requestSha256));
 }
@@ -31,14 +33,14 @@ function cacheSchema(v: unknown): boolean {
   if (v === null) return true;
   if (!keys(v, ["status", "reason", "key", "source", "observation", "elapsedMs"])) return false;
   const c = row(v), k = row(c.key), s = row(c.source);
-  return ["HIT", "MISS"].includes(String(c.status)) && ["match", "not_found", "invalid_json", "invalid_entry", "content_hash_mismatch",
+  return oneOf(c.status, ["HIT", "MISS"]) && oneOf(c.reason, ["match", "not_found", "invalid_json", "invalid_entry", "content_hash_mismatch",
     "image_mismatch", "anchors_mismatch", "model_mismatch", "instructions_mismatch", "format_mismatch", "invalid_memo",
-    "unsafe_path", "unsafe_permissions", "io_error"].includes(String(c.reason)) &&
+    "unsafe_path", "unsafe_permissions", "io_error"]) &&
     keys(k, ["id", "image", "anchors", "model", "instructions", "formatVersion"]) &&
     ["id", "image", "anchors", "model", "instructions"].every(name => text(k[name])) && positive(k.formatVersion) &&
     (c.source === null || keys(s, ["createdAt", "modelId", "instructionHash", "formatVersion", "durationMs"]) &&
       text(s.createdAt) && Number.isFinite(Date.parse(s.createdAt)) && text(s.modelId) && shaLike(s.instructionHash) && positive(s.formatVersion) && amount(s.durationMs)) &&
-    ["reused", "created", "none"].includes(String(c.observation)) && amount(c.elapsedMs);
+    oneOf(c.observation, ["reused", "created", "none"]) && amount(c.elapsedMs);
 }
 export function failureKind(f: Row): "legacy_v0" | "warmup" | "after_warmup" | "invalid" {
   if (!object(f)) return "invalid";
@@ -46,13 +48,13 @@ export function failureKind(f: Row): "legacy_v0" | "warmup" | "after_warmup" | "
     Array.isArray(f.calls) && f.calls.every(callSchema) && cacheSchema(f.cache) ? "legacy_v0" : "invalid";
   if (f.schemaVersion !== "parity_live_failure_v1" || !safeCode(f.code)) return "invalid";
   if (f.scope === "after_warmup") return keys(f, ["schemaVersion", "scope", "code", "stage"]) &&
-    ["trial_loop", "unknown"].includes(String(f.stage)) ? "after_warmup" : "invalid";
+    oneOf(f.stage, ["trial_loop", "unknown"]) ? "after_warmup" : "invalid";
   if (f.scope !== "warmup" || !keys(f, ["schemaVersion", "scope", "code", "stage", "calls", "cache", "observationCallStarted", "policy", "http", "deadlines"]) ||
-    !["client_setup", "policy_get", "cache_get", "post_cache", "unknown"].includes(String(f.stage)) || !Array.isArray(f.calls) ||
+    !oneOf(f.stage, ["client_setup", "policy_get", "cache_get", "post_cache", "unknown"]) || !Array.isArray(f.calls) ||
     !f.calls.every(callSchema) || !cacheSchema(f.cache) || typeof f.observationCallStarted !== "boolean" ||
     f.observationCallStarted !== (f.calls.filter(c => row(c).provider === "luna" && row(c).phase === "observation_initial").length > 0)) return "invalid";
   const p = row(f.policy), h = row(f.http), d = row(f.deadlines), configured = row(d.configured), applied = row(d.applied);
-  if (!keys(p, ["status", "value"]) || !["not_requested", "failed", "obtained"].includes(String(p.status)) ||
+  if (!keys(p, ["status", "value"]) || !oneOf(p.status, ["not_requested", "failed", "obtained"]) ||
     (p.status === "obtained" ? !keys(p.value, ["purpose", "ready", "model", "provider"]) || !text(row(p.value).purpose) ||
       typeof row(p.value).ready !== "boolean" || !text(row(p.value).model) || !text(row(p.value).provider) : p.value !== null) ||
     !keys(h, ["measured", "records"]) || typeof h.measured !== "boolean" || !Array.isArray(h.records) || !h.records.every(httpSchema) ||
@@ -60,8 +62,8 @@ export function failureKind(f: Row): "legacy_v0" | "warmup" | "after_warmup" | "
     !keys(configured, ["observationMs", "lunaClientTimeoutMs"]) || !positive(configured.observationMs) || !nullable(configured.lunaClientTimeoutMs, positive) ||
     !keys(applied, ["observationOuterMs", "completeCalls"]) || !nullable(applied.observationOuterMs, positive) || !Array.isArray(applied.completeCalls) ||
     !applied.completeCalls.every(c => keys(c, ["callId", "callOptionTimeoutMs"]) && positive(row(c).callId) && nullable(row(c).callOptionTimeoutMs, positive))) return "invalid";
-  if (["client_setup", "policy_get"].includes(String(f.stage)) && applied.observationOuterMs !== null ||
-    ["cache_get", "post_cache"].includes(String(f.stage)) && applied.observationOuterMs === null ||
+  if (oneOf(f.stage, ["client_setup", "policy_get"]) && applied.observationOuterMs !== null ||
+    oneOf(f.stage, ["cache_get", "post_cache"]) && applied.observationOuterMs === null ||
     applied.completeCalls.length > 0 && applied.observationOuterMs === null) return "invalid";
   const targets = f.calls.filter(c => row(c).provider === "luna").map(c => row(c).id), actual = applied.completeCalls.map(c => row(c).callId);
   return new Set(actual).size === actual.length && equal([...actual].sort(), [...targets].sort()) ? "warmup" : "invalid";
@@ -77,6 +79,16 @@ export function failureChecks(records: Records): Check[] {
     if (kind === "warmup" || kind === "after_warmup") out.push(assertion("failure.scope",
       kind === "warmup" ? !records.warmup : !!records.warmup, "scope_contradiction"));
     if (kind === "warmup") {
+      const policy = row(f.policy), value = row(policy.value), completeCalls = rows(f.calls).filter(c => c.provider === "luna");
+      const policyRequired = oneOf(f.stage, ["cache_get", "post_cache"]) || f.observationCallStarted === true || completeCalls.length > 0;
+      if (policy.status === "obtained") {
+        // Existing Worker model syntax and native policy provider vocabulary; no research model is pinned.
+        const valid = value.purpose === "dialogue_turn" && value.ready === true && oneOf(value.provider, ["openai", "gemini"]) &&
+          typeof value.model === "string" && value.model.length <= 128 && /^[a-zA-Z0-9._:/-]+$/u.test(value.model) &&
+          completeCalls.every(c => c.requestedModel === value.model);
+        out.push(assertion("failure.policy", valid, "obtained_policy_matches_contract_and_requested_model"));
+      } else out.push(policyRequired ? assertion("failure.policy", false, "policy_required_before_observation") :
+        missing("failure.policy", "policy_not_obtained"));
       const d = row(f.deadlines), configured = row(d.configured), applied = row(d.applied);
       const observation = row(row(records.run?.profile).timeouts).observationMs, client = row(row(records.run?.manifest).lunaRequest).timeoutMs;
       out.push(observation === undefined || client === undefined ? missing("failure.deadlines", "output_missing") :

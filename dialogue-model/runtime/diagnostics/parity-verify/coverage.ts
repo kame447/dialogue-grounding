@@ -36,7 +36,17 @@ function executionChecks(records: Records): Check[] {
     assertion("gate.primary_error_progression", false, "main_started_after_primary_execution_failure") :
     runFailed && !failed.length && !warmFailed ? missing("gate.primary_error_progression", "primary_failure_order_unrecorded") :
       assertion("gate.primary_error_progression", true, "no_primary_execution_failure_before_main");
-  return [claims, progression];
+  // Inspect each saved snapshot on its own. A missing trial cannot erase a
+  // contradiction already visible inside summary.gates, or reconstruct its gaps.
+  const snapshots = [...records.trials.map(t => row(t.gates)), ...rows(records.summary?.gates),
+    row(records.summary?.gates), row(records.run?.gates)].filter(s => Object.keys(s).length > 0);
+  const components = ["G1", "G2", "G3", "G4"];
+  const contradiction = snapshots.some(s => s.passed === true && components.some(k => row(s[k]).passed === false));
+  const incomplete = snapshots.some(s => s.passed === true && components.some(k => typeof row(s[k]).passed !== "boolean"));
+  const snapshotCheck = contradiction ? assertion("gate.claim.snapshot", false, "overall_passed_contradicts_component_gate") :
+    !snapshots.length ? missing("gate.claim.snapshot", "gate_snapshots_missing") : incomplete ? missing("gate.claim.snapshot", "gate_components_missing") :
+      assertion("gate.claim.snapshot", true, "recorded_gate_snapshots_have_no_component_contradiction");
+  return [claims, progression, snapshotCheck];
 }
 
 export function coverage(records: Records): { cells: Coverage[]; checks: Check[] } {
