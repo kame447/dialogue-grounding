@@ -9,6 +9,10 @@ type Event = {value: Data; source: SourcePointer};
 const positive = (v: unknown): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v > 0;
 const natural = (v: unknown): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0;
 const plain = (v: unknown): v is Data => !!v && typeof v === 'object' && Object.getPrototypeOf(v) === Object.prototype;
+// Optional source arrays need every own position. A hole is missing evidence,
+// not a value at that index and not proof that no work took place.
+const dense = (v: unknown): v is any[] => Array.isArray(v) && Reflect.ownKeys(v).length === v.length + 1 &&
+  Reflect.ownKeys(v).every(k => k === 'length' || typeof k === 'string' && /^(?:0|[1-9][0-9]*)$(?![\s\S])/u.test(k) && Number(k) < v.length);
 const ptr = (file: string, pointer = ''): SourcePointer => ({file, pointer});
 const textOrder = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;
 const mergeSources = (xs: readonly SourcePointer[]) => [...new Map(xs.map(x => [JSON.stringify(x), {...x}])).values()]
@@ -44,8 +48,11 @@ function collect(records: Records): ModelObservationSet {
   const out: {schemaVersion: 'model_observation_set_v1'; observations: ClassifiedModelObservation[]; lateObservations: ClassifiedModelObservation[];
     missing: ObservationIssue[]; inconsistent: ObservationIssue[]; rejected: ObservationIssue[]; notSent: SourcePointer[]} = {
     schemaVersion: 'model_observation_set_v1', observations: [], lateObservations: [], missing: [], inconsistent: [], rejected: [], notSent: []};
-  const roots = ['run', 'summary', 'warmup', 'failure', 'evidence'].filter(k => Object.hasOwn(r, k) && r[k] !== undefined)
-    .map(k => ptr(k === 'evidence' ? 'verifier-evidence.private.json' : k + '.private.json'));
+  const mappedTrials = r.trials.filter((t: unknown) => plain(t) && natural(t.order));
+  const roots = [...['run', 'summary', 'warmup', 'failure', 'evidence'].filter(k => Object.hasOwn(r, k) && r[k] !== undefined)
+    .map(k => ptr(k === 'evidence' ? 'verifier-evidence.private.json' : k + '.private.json')),
+    ...mappedTrials.filter((t: Data) => mappedTrials.filter((other: Data) => other.order === t.order).length === 1)
+      .map((t: Data) => ptr('trial-' + t.order + '.private.json'))];
   const anchor = (xs: SourcePointer[]) => xs.length ? xs : roots.length ? roots.slice(0, 1) : [];
   const add = (kind: 'missing' | 'inconsistent' | 'rejected', reason: ObservationIssueReason, xs: SourcePointer[],
     callId: unknown = null, sendId: unknown = null, responseSeq: unknown = null, rejectionCode: ModelRejectionCode | null = null) => {
@@ -54,9 +61,9 @@ function collect(records: Records): ModelObservationSet {
   };
   const gap = (xs: SourcePointer[], callId?: unknown, sendId?: unknown, seq?: unknown) => add('missing', 'source_missing', xs, callId, sendId, seq);
   const run = plain(r.run) ? r.run : {}, summary = plain(r.summary) ? r.summary : {};
-  const plan = plain(run.manifest) && Array.isArray(run.manifest.trials) ? run.manifest.trials : null;
-  const runOrder = Array.isArray(summary.runOrder) ? summary.runOrder : null;
-  const skipped = Array.isArray(summary.skipped) ? summary.skipped : null;
+  const plan = plain(run.manifest) && dense(run.manifest.trials) ? run.manifest.trials : null;
+  const runOrder = dense(summary.runOrder) ? summary.runOrder : null;
+  const skipped = dense(summary.skipped) ? summary.skipped : null;
   let completePlan = !!plan && !!runOrder && !!skipped;
   if (!plan || typeof run.runId !== 'string') gap(Object.hasOwn(r, 'run') ? [ptr('run.private.json')] : []);
   if (!runOrder || !skipped || typeof summary.runId !== 'string') gap(Object.hasOwn(r, 'summary') ? [ptr('summary.private.json')] : []);
@@ -92,7 +99,7 @@ function collect(records: Records): ModelObservationSet {
       if (exact) { exact.sources.push(source); return; }
       if (previous.length) add('inconsistent', 'owner_conflict', [...previous.map(o => ptr(o.file, o.pointer)), source], call.id);
       owners.set(call.id, [...previous, owner]);
-      if (!Array.isArray(call.sendIds)) gap([source], call.id);
+      if (!dense(call.sendIds)) gap([source], call.id);
       else if (call.sendIds.some((id: unknown) => !positive(id)) || new Set(call.sendIds).size !== call.sendIds.length)
         add('inconsistent', 'owner_conflict', [ptr(file, source.pointer + '/sendIds')], call.id);
     });
@@ -106,15 +113,15 @@ function collect(records: Records): ModelObservationSet {
     const p = plan?.[t.plannedIndex], started = runOrder?.[t.order];
     if (completePlan && (!started || t.plannedIndex !== remaining[t.order] || t.scriptId !== p?.scriptId || t.label !== p?.label))
       add('inconsistent', 'owner_conflict', [ptr(file), ptr('summary.private.json', '/runOrder')]);
-    if (!Array.isArray(t.calls)) { ownerFiles.set(t.order, {file, calls: null}); gap([ptr(file)]); }
+    if (!dense(t.calls)) { ownerFiles.set(t.order, {file, calls: null}); gap([ptr(file)]); }
     else addCalls(t.calls, t.order, file);
   }
   runOrder?.forEach((_: unknown, i: number) => { if (!seenOrders.has(i)) gap([ptr('summary.private.json', '/runOrder/' + i)]); });
-  if (plain(r.warmup) && Array.isArray(r.warmup.calls)) addCalls(r.warmup.calls, null, 'warmup.private.json');
-  else if (plain(r.failure) && ['warmup', 'legacy_v0'].includes(failureKind(r.failure)) && Array.isArray(r.failure.calls)) addCalls(r.failure.calls, null, 'failure.private.json');
+  if (plain(r.warmup) && dense(r.warmup.calls)) addCalls(r.warmup.calls, null, 'warmup.private.json');
+  else if (plain(r.failure) && ['warmup', 'legacy_v0'].includes(failureKind(r.failure)) && dense(r.failure.calls)) addCalls(r.failure.calls, null, 'failure.private.json');
   else gap(Object.hasOwn(r, 'warmup') ? [ptr('warmup.private.json')] : Object.hasOwn(r, 'failure') ? [ptr('failure.private.json')] : []);
   const evidence = plain(r.evidence) ? r.evidence : {}, events: Event[] = [];
-  let ordered = Array.isArray(evidence.events);
+  let ordered = dense(evidence.events);
   if (!ordered) gap(Object.hasOwn(r, 'evidence') ? [ptr('verifier-evidence.private.json')] : []);
   else {
     const seqs = new Set<number>();
@@ -154,7 +161,7 @@ function collect(records: Records): ModelObservationSet {
     }
     const owner = candidates[0], call = owner.call;
     xs.push(...owner.sources);
-    if (!Array.isArray(call.sendIds)) { gap(xs, e.callId, e.sendId, e.seq); continue; }
+    if (!dense(call.sendIds)) { gap(xs, e.callId, e.sendId, e.seq); continue; }
     if (call.sendIds.filter((s: unknown) => s === e.sendId).length !== 1) { add('inconsistent', 'owner_conflict', xs, e.callId, e.sendId, e.seq); continue; }
     const reservations = events.filter(x => x.value.type === 'reserve' && x.value.sendId === e.sendId);
     if (!reservations.length) add('missing', 'binding_missing', xs, e.callId, e.sendId, e.seq);

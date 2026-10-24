@@ -4,3 +4,4 @@ process.env.S2_SOURCE_ROOT = fileURLToPath(new URL('../', import.meta.url));
 await import('./support/s2-integration/profile-aggregate.test.ts');
 await import('./support/s2-integration/collector.test.ts');
 await import('./support/s2-integration/integration.test.ts');
+await import('./support/s2-integration/sparse-completeness.test.ts');
