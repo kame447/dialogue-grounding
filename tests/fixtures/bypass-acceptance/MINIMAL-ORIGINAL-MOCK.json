@@ -1,0 +1,19 @@
+{
+  "action": "accept",
+  "target": {
+    "kind": "none"
+  },
+  "name": null,
+  "feature": null,
+  "observe": null,
+  "evidence": {
+    "model": null,
+    "responseId": null,
+    "choices": {},
+    "scores": {},
+    "latencyMs": 0,
+    "costUsd": 0
+  },
+  "decisionKind": "mock",
+  "calibrated": false
+}

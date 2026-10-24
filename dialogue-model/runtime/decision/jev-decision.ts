@@ -8,7 +8,7 @@ import { literalSpan } from "../judgment/public-evidence.mjs";
 import { JEV_ACTIONS, OBSERVATION_ASPECTS } from "./contract.ts";
 import type { JevAction, JevDecision, JevDecisionClient, JevDecisionInput, JevDecisionEvidence, JevObservationRequest,
   JevQuestionLayout, JevTarget, RepairHistoryEntry, DecisionInputBudget, JevDecisionStageEvidence, JevDecisionCallOptions,
-  HumanReferentEstimate, HumanReferentMaterial } from "./contract.ts";
+  HumanReferentEstimate, HumanReferentMaterial, JevExecutedDecision, JevDetailResult } from "./contract.ts";
 
 export const JEV_DECISION_MODEL = "typesafe/jev-1.14";
 /** Finite ingestion guards, separate from the smaller retained working windows. */
@@ -386,6 +386,57 @@ function closedEvidence(value: unknown, p: { payload: JevDecisionPayload; budget
   return structuredClone(value) as JevDecisionStageEvidence;
 }
 
+// New selected-detail boundary only; legacy input whitelist/defaults stay intact.
+function detailJsonData(value: unknown, seen = new Set<object>()): void {
+  if (value === null || typeof value === "string" || typeof value === "boolean" || typeof value === "number" && Number.isFinite(value)) return;
+  if (!value || typeof value !== "object" || seen.has(value)) fail("invalid_input");
+  const array = Array.isArray(value), keys = Reflect.ownKeys(value);
+  if (Object.getPrototypeOf(value) !== (array ? Array.prototype : Object.prototype) ||
+      array && (keys.length !== (value as unknown[]).length + 1 || !keys.includes("length"))) fail("invalid_input");
+  seen.add(value);
+  for (const key of keys) {
+    if (array && key === "length") continue;
+    const d = Object.getOwnPropertyDescriptor(value, key)!;
+    if (typeof key !== "string" || !d.enumerable || !Object.hasOwn(d, "value") ||
+        array && (!/^(0|[1-9][0-9]*)$/.test(key) || Number(key) >= (value as unknown[]).length)) fail("invalid_input");
+    detailJsonData(d.value, seen);
+  }
+  seen.delete(value);
+}
+function prepareExecutedDetail(input: JevDecisionInput, selected: JevActionTarget) {
+  try {
+    detailJsonData(input); detailJsonData(selected);
+    const optional = ["reobservationAllowed", "humanReferent"].filter(key => Object.hasOwn(input, key));
+    if (!exact(input, ["turn", "publicTurns", "ownSlots", "observations", "issueSummary", "priorClaims", "repairHistory", "previousAction", "publicNames", ...optional])) fail("invalid_input");
+    if (!exact(selected, ["action", "target"]) || !includes(["propose_name", "agree", "confirm", "repair"], selected.action)) fail("invalid_input");
+    const snapshot = structuredClone(input), selection = structuredClone(selected);
+    return { input: snapshot, selected: selection, prepared: prepareDetail(snapshot, selection)! };
+  } catch (error) { throw new JevDecisionError(detailErrorCode(error, "invalid_input")); }
+}
+function detailErrorCode(error: unknown, fallback: JevDecisionErrorCode): JevDecisionErrorCode {
+  try {
+    const d = error && typeof error === "object" ? Object.getOwnPropertyDescriptor(error, "code") : undefined;
+    if (error instanceof JevDecisionError && d && Object.hasOwn(d, "value") && CODES.some(code => code === d.value)) return d.value;
+  } catch { /* Do not inspect arbitrary exception text or invoke a code getter. */ }
+  return fallback;
+}
+function freezeDetail<T>(value: T): T {
+  if (value && typeof value === "object") { Object.values(value).forEach(freezeDetail); Object.freeze(value); }
+  return value;
+}
+/** A separate detail proof, never a forged original action_target decision. */
+export function parseJevExecutedDetail(input: JevDecisionInput, selected: JevActionTarget, value: unknown): JevExecutedDecision {
+  const detail = prepareExecutedDetail(input, selected);
+  try {
+    detailJsonData(value);
+    const evidence = closedEvidence(value, detail.prepared, "detail");
+    return freezeDetail(decodeDetail(detail.selected, detail.prepared, evidence.choices) as JevExecutedDecision);
+  } catch (error) {
+    const code = detailErrorCode(error, "invalid_response");
+    throw new JevDecisionError(code === "invalid_input" ? "invalid_response" : code);
+  }
+}
+
 /** Also validates injected clients at C's publication boundary; never repairs a malformed decision. */
 export function validateJevDecision(value: unknown, input: JevDecisionInput): JevDecision {
   const p = prepare(input);
@@ -442,6 +493,7 @@ export type JevDecisionClientOptions = { enabled?: boolean; readKey?: () => Prom
  * One deadline per decision, no retry or fallback; unknown billable outcomes stop the instance. */
 export function createJevDecisionClient(options: JevDecisionClientOptions = {}): (JevDecisionClient & {
   estimateReferent(input: JevDecisionInput, options?: JevDecisionCallOptions): Promise<HumanReferentEstimate>;
+  completeDetail(input: JevDecisionInput, selected: JevActionTarget, options?: JevDecisionCallOptions): Promise<JevDetailResult>;
   readonly lastReferentEvidence: HumanReferentEstimate | null; readonly referentCallCount: number;
   readonly lastEvidence: JevDecisionCallEvidence | null; readonly spentUsd: number; readonly callCount: number;
   readonly metadata: Readonly<{ decisionKind: "jev_local_test"; calibrated: false; model: typeof JEV_DECISION_MODEL; questionLayout: JevQuestionLayout }>;
@@ -458,7 +510,14 @@ export function createJevDecisionClient(options: JevDecisionClientOptions = {}):
   let lastReferentEvidence: HumanReferentEstimate | null = null;
   let halted = false, busy = false;
   const leaks = (v: string) => key !== null && v.includes(key);
-  async function execute(input: JevDecisionInput, callOptions: JevDecisionCallOptions = {}, referent = false): Promise<JevDecision | HumanReferentEstimate> {
+  async function completeDetail(input: JevDecisionInput, selected: JevActionTarget, callOptions?: JevDecisionCallOptions): Promise<JevDetailResult> {
+    try {
+      const detail = prepareExecutedDetail(input, selected);
+      return freezeDetail(await execute(detail.input, callOptions, false, detail) as JevDetailResult);
+    } catch (error) { throw new JevDecisionError(detailErrorCode(error, "invalid_response")); }
+  }
+  async function execute(input: JevDecisionInput, callOptions: JevDecisionCallOptions = {}, referent = false,
+    detail?: ReturnType<typeof prepareExecutedDetail>): Promise<JevDecision | HumanReferentEstimate | JevDetailResult> {
       const callIndex = referent ? ++referentCallCount : ++callCount, started = performance.now();
       let referentSlots: string[] = [];
       let referentResult: HumanReferentEstimate | null = null;
@@ -568,6 +627,13 @@ export function createJevDecisionClient(options: JevDecisionClientOptions = {}):
           }
         };
         const run = async () => {
+          if (detail) {
+            evidence.inputBudget = structuredClone(detail.prepared.budget);
+            const stage = await perform("detail", detail.prepared);
+            check();
+            evidence.status = "ok";
+            return { executed: decodeDetail(detail.selected, detail.prepared, stage.choices) as JevExecutedDecision, evidence: stage };
+          }
           const first = await perform("action_target", p);
           check();
           if (referent) {
@@ -622,5 +688,6 @@ export function createJevDecisionClient(options: JevDecisionClientOptions = {}):
     get lastReferentEvidence() { return structuredClone(lastReferentEvidence); }, get referentCallCount() { return referentCallCount; },
     decide(input: JevDecisionInput, callOptions?: JevDecisionCallOptions) { return execute(input, callOptions, false) as Promise<JevDecision>; },
     estimateReferent(input: JevDecisionInput, callOptions?: JevDecisionCallOptions) { return execute(input, callOptions, true) as Promise<HumanReferentEstimate>; },
+    completeDetail,
   });
 }
