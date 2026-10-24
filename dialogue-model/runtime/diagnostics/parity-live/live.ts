@@ -2,6 +2,8 @@ import { createResearchDeadlineScope } from './research-deadlines.ts';
 import type { ResearchDeadlineScope, ResearchDeadlines } from './research-deadlines.ts';
 import { AIConnectionError } from '../../client.mjs';
 import { RESEARCH_MAX_DEADLINE_MS } from '../../v2/research-timeouts.ts';
+import { resolveModelPolicy } from '../../model-policy.ts';
+import { checkModelIdentity } from '../../model-identity-contract.ts';
 // Import-safe Node harness. Only the parent supplies/executes real clients.
 import { createHash, randomUUID } from "node:crypto";
 import { readFile, appendFile, writeFile, rename, lstat, unlink } from "node:fs/promises";
@@ -68,6 +70,7 @@ export type SaveAudit = { status: "auditable" | "save_failed"; firstSaveFailure:
 /** Labels are metadata only. No semantic oracle or approved script catalog here. */
 export async function runParityLive(options: Options, deps: Dependencies) {
   const manifest = validateAnyRunManifest(options.manifest), PROFILE = "schemaVersion" in manifest ? researchTrialProfileV2(manifest.lunaRequest, manifest.timeouts) : researchTrialProfile(manifest.lunaRequest, manifest.phaseTimeouts), RESEARCH_TRIAL_PROFILE_SHA256 = researchHash(PROFILE);
+  const modelPolicy = resolveModelPolicy(PROFILE);
   const research = PROFILE.id === "research_trial_profile_v2";
   const limits = research ? { researchLimits: { maxDeadlineMs: RESEARCH_MAX_DEADLINE_MS } } : {};
   const effectiveRequest = research ? { ...manifest.lunaRequest, timeoutMs: PROFILE.timeouts.lunaAttemptMs } : manifest.lunaRequest;
@@ -347,6 +350,7 @@ export async function runParityLive(options: Options, deps: Dependencies) {
     } };
     const fetchImpl = async (url: string, init: RequestInit) => {
       const payload = JSON.parse(String(init.body)), questions = Object.keys(payload.questions ?? {});
+      if (modelPolicy.mode === 'explicit' && payload.model !== PROFILE.modelPolicy.jevModel) fail('model_requested_mismatch');
       const state = JSON.parse(payload.state);
       const phase: Phase = questions.includes("human_referent") ? "human_referent" : questions.some(k => k.endsWith("_support")) ? "ai_support"
         : questions.some(k => k.endsWith("_act")) ? (Object.hasOwn(state, "aiSeq") ? "ai_function" : "local_function") : "decision";
@@ -371,12 +375,19 @@ export async function runParityLive(options: Options, deps: Dependencies) {
         const data = await response.clone().json() as { model?: unknown; id?: unknown; answers?: unknown; usage?: { cost?: unknown } };
         const cost = data.usage?.cost;
         const costUsd = typeof cost === "number" && Number.isFinite(cost) && cost >= 0 ? cost : null;
-        const modelMatches = isGroundingModel(data.model, PROFILE.modelPolicy.jevModel);
+        const identity = modelPolicy.mode === 'explicit' ? checkModelIdentity(payload.model, data.model) : null;
+        const modelMatches = identity ? identity.status === 'accepted' : isGroundingModel(data.model, PROFILE.modelPolicy.jevModel);
         budget.observe(send, { costUsd, model: modelMatches ? data.model as string : null, modelMatches });
-        if (isClosed() || signal.aborted) fail("aborted");
+        if (isClosed() || (modelPolicy.mode === 'explicit' ? callSignal.aborted : signal.aborted)) fail("aborted");
         if (typeof cost !== "number" || !Number.isFinite(cost) || cost < 0) { budget.jevUnknown = true; stop("jev_cost_unknown"); fail("jev_cost_unknown"); }
         record.costUsd = cost as number;
-        if (!isGroundingModel(data.model, PROFILE.modelPolicy.jevModel)) { stop("model_changed"); fail("model_changed"); }
+        if (!modelMatches) {
+          const code = identity ? identity.status === 'invalid' ? 'model_invalid' : identity.status === 'unknown_version' ? 'model_unknown_version' : 'model_not_allowed' : 'model_changed';
+          // Stop closes and freezes the trial. Record the fixed rejection first;
+          // budget.observe above may already have established an earlier cause.
+          if (modelPolicy.mode === 'explicit') { record.status = 'error'; record.error = code; }
+          stop(code); fail(code);
+        }
         record.model = data.model as string; record.status = "ok";
         getTape()?.jev.push({ model: data.model, id: typeof data.id === "string" ? data.id : null, answers: data.answers, usage: { cost } });
         return response;

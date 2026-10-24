@@ -1,6 +1,7 @@
 import { allCalls, allHttp, amount, assertion, check, count, equal, hash, list, missing, profileHash, row, rows, shaLike } from "./core.ts";
 import type { Check, Records } from "./core.ts";
 import { replayChecks } from "./replay-records.ts";
+import { explicitModelPolicy, requestedReturnedModel } from './model-checks.ts';
 
 export function fairness(records: Records): Check[] {
   const out: Check[] = [];
@@ -51,7 +52,7 @@ export function fairness(records: Records): Check[] {
   calls.forEach((c, i) => {
     out.push(c.status === "started" ? missing(`identity.model.${i}`, "response_not_reached") :
       c.model === null && c.status === "error" ? missing(`identity.model.${i}`, "response_model_unavailable") :
-      assertion(`identity.model.${i}`, typeof c.requestedModel === "string" && c.model === c.requestedModel, "exact_requested_response_model"));
+      assertion(`identity.model.${i}`, requestedReturnedModel(records, c), "exact_requested_response_model"));
   });
   out.push(assertion("identity.images", calls.every(c => c.imageCount === 0 || ["observation_initial", "observation_targeted"].includes(String(c.phase))), "images_only_observation"));
   return out;
@@ -68,8 +69,11 @@ export function wireValidation(records: Records): Check[] {
     out.push(assertion(`validation.jev.${trial.order}.${turn}.count`, requests.length === responses.length && requests.length > 0, "recorded_questions_responses_paired"));
     requests.forEach((request, j) => {
       const payload = row(request.payload), response = responses[j] ?? {}, questions = row(payload.questions), answers = row(response.answers);
+      const call = rows(trial.calls).filter(c => c.provider === "jev" && c.turn === turn)[j];
+      const relation = explicitModelPolicy(records) ? requestedReturnedModel(records, {provider: 'jev', requestedModel: payload.model, model: response.model}) &&
+        !!call && response.model === call.model : response.model === payload.model;
       const keys = Object.keys(questions).sort();
-      const valid = keys.length > 0 && equal(keys, Object.keys(answers).sort()) && response.model === payload.model &&
+      const valid = keys.length > 0 && equal(keys, Object.keys(answers).sort()) && relation &&
         keys.every(key => {
           const q = row(questions[key]), a = row(answers[key]), probabilities = row(a.probabilities), labels = Object.keys(row(q.criteria)).sort();
           return q.type === "choice" && labels.length > 0 && a.type === "choice" && typeof a.choice === "string" && labels.includes(a.choice) &&
@@ -78,7 +82,6 @@ export function wireValidation(records: Records): Check[] {
             Object.keys(a).every(k => ["type", "choice", "probabilities", "confidence"].includes(k));
         });
       out.push(assertion(`validation.jev.${trial.order}.${turn}.${i}.${j}`, valid, "exact_model_question_keys_choice_and_probability_shape"));
-      const call = rows(trial.calls).filter(c => c.provider === "jev" && c.turn === turn)[j];
       const cost = row(response.usage).cost;
       out.push(assertion(`validation.jev_cost.${trial.order}.${turn}.${j}`, !!call && (amount(cost) ? call.costUsd === cost : call.costUsd === null),
         "recorded_raw_usage_cost_matches_call_receipt"));
