@@ -1,3 +1,4 @@
+import { privateBaseOptions } from './support/s5-private-options.mjs';
 // Independent engineering-only adversarial checks. No real API calls.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -163,25 +164,21 @@ test('active audit: reference is applied once after successful generation, never
 });
 
 test('active audit: participant start payload cannot choose the judge mode; server startup option is private and v2-only', async t => {
-  for (const configured of [null, { purpose: 'decision_jev', client: { async chooseAction() { throw new Error('not called by fake task'); } } }]) {
+  for (const configured of [null, { purpose: 'decision_jev', client: { async chooseAction() { throw new Error('not called during initial construction'); } } }]) {
     const calls = [];
-    const factory = version => async options => { calls.push({ version, options }); return { version, getState: () => ({ version, busy: false, status: 'dialogue' }) }; };
-    const server = createNamingServer({ client: {}, runDir: '', activeDecision: configured, createTask: factory(1), createTaskV2: factory(2) });
-    server.listen(0, '127.0.0.1'); await once(server, 'listening');
-    t.after(() => new Promise(done => server.close(done)));
-    const origin = 'http://127.0.0.1:' + server.address().port;
-    const page = await fetch(origin + '/'), cookie = page.headers.get('set-cookie').split(';')[0];
-    assert.doesNotMatch(await page.text(), /activeDecision|active-decision-judge|decision_jev|decision_luna/);
-    for (const version of [2, 1]) {
-      const response = await fetch(origin + '/api/start', { method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ version, seed: 64, strategy: 'repair-first', activeDecision: { purpose: 'decision_luna' },
-          activeDecisionJudge: 'decision_luna', activeJudge: 'decision_luna' }) });
-      assert.equal(response.status, 200); assert.doesNotMatch(await response.text(), /activeDecision|activeJudge|decision_luna|decision_jev/);
-      const last = calls.at(-1);
-      if (version === 2) assert.equal(last.options.activeDecision, configured);
-      else assert.equal(Object.hasOwn(last.options, 'activeDecision'), false);
+    const server = createNamingServer({client:{},...(await privateBaseOptions(t,{seed:64})),activeDecision:configured,
+      createTask:async()=>{throw new Error('v1 must not construct')},
+      createTaskV2:async options=>{calls.push(options);return createNamingTaskV2(options)}});
+    server.listen(0,'127.0.0.1');await once(server,'listening');t.after(()=>new Promise(done=>server.close(done)));
+    const origin='http://127.0.0.1:'+server.address().port,page=await fetch(origin+'/'),cookie=page.headers.get('set-cookie').split(';')[0];
+    assert.doesNotMatch(await page.text(),/activeDecision|active-decision-judge|decision_jev|decision_luna/);
+    const start=body=>fetch(origin+'/api/start',{method:'POST',headers:{Cookie:cookie,'Content-Type':'application/json'},body:JSON.stringify(body)});
+    for(const version of [2,1]){
+      const response=await start({version,seed:64,strategy:'repair-first',activeDecision:{purpose:'decision_luna'},activeDecisionJudge:'decision_luna',activeJudge:'decision_luna'});
+      assert.equal(response.status,400);assert.deepEqual(await response.json(),{error:'invalid_request'});assert.equal(calls.length,0);
     }
-    const state = await fetch(origin + '/api/state', { headers: { Cookie: cookie } });
-    assert.doesNotMatch(await state.text(), /activeDecision|activeJudge|decision_luna|decision_jev/);
+    const clean=await start({version:2});assert.equal(clean.status,200);assert.doesNotMatch(await clean.text(),/activeDecision|activeJudge|decision_luna|decision_jev/);
+    assert.equal(calls.length,1);assert.equal(calls[0].activeDecision,configured);
+    const state=await fetch(origin+'/api/state',{headers:{Cookie:cookie}});assert.doesNotMatch(await state.text(),/activeDecision|activeJudge|decision_luna|decision_jev/);
   }
 });

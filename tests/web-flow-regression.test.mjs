@@ -5,7 +5,7 @@ import { once } from "node:events";
 import { readFile } from "node:fs/promises";
 import { runInNewContext } from "node:vm";
 import { createChatClient } from "../dialogue-model/runtime/client.mjs";
-import { startNamingServer } from "../dialogue-model/runtime/web/server.mjs";
+import { startNamingServer } from "./support/legacy-web-v1-fa84980/server.mjs";
 import { createTrial } from "../dialogue-model/runtime/stimuli/board.mjs";
 import { SLOTS, STRATEGIES } from "../dialogue-model/runtime/naming-task.mjs";
 

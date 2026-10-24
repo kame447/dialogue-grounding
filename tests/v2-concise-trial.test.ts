@@ -1,3 +1,4 @@
+import { privateBaseOptions } from './support/s5-private-options.mjs';
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createNamingTaskV2 } from "../dialogue-model/runtime/v2/naming-task-v2.mjs";
@@ -65,9 +66,9 @@ test("unknown styles are rejected", async () => {
   assert.throws(() => createNamingServer({ client: harness().client, utteranceStyle: "short" } as any), /utterance style/);
 });
 
-test("the local server passes the style to new v2 trials only", async () => {
+test("the local server passes the style to new v2 trials only", async (t) => {
   const seen: Record<string, unknown>[] = [];
-  const server: any = createNamingServer({ client: harness().client, runDir: "", utteranceStyle: "concise",
+  const server: any = createNamingServer({ client: harness().client, ...(await privateBaseOptions(t,{seed:3,strategy:"bypass-enabled"})), utteranceStyle: "concise",
     createTaskV2: async (options: Record<string, unknown>) => { seen.push(options); throw new Error("stop"); } } as any);
   assert.equal(typeof server.listen, "function");
   const { once } = await import("node:events");
@@ -76,7 +77,7 @@ test("the local server passes the style to new v2 trials only", async () => {
     const base = "http://127.0.0.1:" + server.address().port;
     const cookie = (await fetch(base)).headers.get("set-cookie")!.split(";")[0];
     await fetch(base + "/api/start", { method: "POST", headers: { cookie, "Content-Type": "application/json" },
-      body: JSON.stringify({ version: 2, strategy: "bypass-enabled", seed: 3 }) });
+      body: JSON.stringify({ version: 2 }) });
     assert.equal(seen[0]?.utteranceStyle, "concise");
   } finally { await new Promise((resolve) => server.close(resolve)); }
 });

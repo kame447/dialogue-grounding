@@ -1,3 +1,4 @@
+import { privateBaseOptions } from './support/s5-private-options.mjs';
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
@@ -6,6 +7,7 @@ import { join } from "node:path";
 import { resolveActiveJudgment } from "../dialogue-model/runtime/v2/active-judge.mjs";
 import { createDialogueV2 } from "../dialogue-model/runtime/v2/dialogue-v2.mjs";
 import { createNamingTaskV2 } from "../dialogue-model/runtime/v2/naming-task-v2.mjs";
+import { startNamingServer as startLegacyNamingServer } from "./support/legacy-web-v1-fa84980/server.mjs";
 import { startNamingServer, main as serverMain } from "../dialogue-model/runtime/web/server.mjs";
 import { createOwnLedger, SAFE_JUDGMENT, applyJudgment, validateJudgment } from "../dialogue-model/runtime/judgment/schema.mjs";
 import { DECISION_ACTIONS, DECISION_MODELS } from "../workers/research-ai-proxy/src/decisions.mjs";
@@ -186,22 +188,26 @@ function modelClient() {
 }
 async function app(t, options = {}) {
   let task;
+  const constructors = [];
   const client = modelClient();
-  const server = await startNamingServer({ port: 0, client, runDir: "", ...options,
-    async createTaskV2(args) { task = await createNamingTaskV2(args); return task; } });
+  const privateOptions = await privateBaseOptions(t, {seed:options.assignmentSeed ?? 81});
+  const server = await startNamingServer({ port: 0, client, ...options, ...privateOptions,
+    async createTaskV2(args) { constructors.push(args); task = await createNamingTaskV2(args); return task; } });
   t.after(() => new Promise((done) => { server.closeAllConnections(); server.close(done); }));
   const base = "http://127.0.0.1:" + server.address().port;
   const cookie = (await fetch(base)).headers.get("set-cookie").split(";")[0];
   const request = (path, body) => fetch(base + path, { headers: { cookie, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
     ...(body === undefined ? {} : { method: "POST", body: JSON.stringify(body) }) });
-  return { request, client, task: () => task };
+  return { request, client, constructors, task: () => task, download: id => fetch(base+"/admin/record/"+id+".json", {headers:{Authorization:"Bearer "+privateOptions.adminToken}}).then(r=>r.json()) };
 }
 
 test("mock active v2 HTTP session reaches submissions/scoring without exposing mode, records or credentials", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "active-v2-record-")); t.after(() => rm(directory, { recursive: true, force: true }));
   const requests = [];
   const web = await app(t, { runDir: directory, activeDecision: { purpose: "decision_jev", client: { apiKey: "PRIVATE-KEY", async chooseAction(request) { requests.push(request); return decision("defer", undefined, { token: "PRIVATE-TOKEN" }); } } } });
-  const started = await web.request("/api/start", { version: 2, strategy: "repair-first", seed: 81, activeDecision: "participant-cannot-override" });
+  const forged = await web.request("/api/start", { version: 2, strategy: "repair-first", seed: 81, activeDecision: "participant-cannot-override" });
+  assert.equal(forged.status,400); assert.equal(web.task(),undefined); assert.equal(web.constructors.length,0);
+  const started = await web.request("/api/start", {version:2});
   assert.equal(started.status, 200);
   assert.equal((await web.request("/api/message", { text: "鳥みたいな形があります" })).status, 202);
   await web.task().whenIdle();
@@ -215,16 +221,17 @@ test("mock active v2 HTTP session reaches submissions/scoring without exposing m
   assert.equal(state.trial.result, undefined); assert.equal(state.trial.resultLocked, true);
   assert.equal((await web.request(`/api/records/${state.trial.sessionId}/questionnaire`, { answers: { mental_effort: 4, task_difficulty: 4, smoothness: 4, bothersome: 4 }, submit: true })).status, 200);
   state = await (await web.request("/api/state")).json(); assert.equal(state.trial.resultLocked, false); assert.equal(state.trial.result.total, 6);
-  const [filename] = (await readdir(directory)).filter((name) => name.endsWith(".json"));
-  const record = JSON.parse(await readFile(join(directory, filename), "utf8"));
+  const record = await web.download(state.trial.sessionId);
   assert.equal(record.options.activeDecision, "decision_jev"); assert.equal(record.judgments[0].activeJudge.finalAction, "defer");
   assert.ok(record.scoring); assert.doesNotMatch(JSON.stringify(record), /PRIVATE-KEY|PRIVATE-TOKEN|apiKey/);
   for (const request of requests) for (const humanId of Object.keys(names)) assert.ok(!request.state.includes(humanId));
 });
 
 test("participants cannot turn active mode on through API fields when researcher configuration is absent", async (t) => {
-  const web = await app(t);
-  assert.equal((await web.request("/api/start", { version: 2, strategy: "repair-first", seed: 82, activeDecision: { purpose: "decision_jev" }, "active-decision-judge": "decision_jev" })).status, 200);
+  const web = await app(t,{assignmentSeed:82});
+  assert.equal((await web.request("/api/start", { version: 2, strategy: "repair-first", seed: 82, activeDecision: { purpose: "decision_jev" }, "active-decision-judge": "decision_jev" })).status, 400);
+  assert.equal(web.task(),undefined); assert.equal(web.constructors.length,0);
+  assert.equal((await web.request("/api/start",{version:2})).status,200);
   await web.request("/api/message", { text: "これは鳥かな" }); await web.task().whenIdle();
   assert.equal(web.task().researcherView().attempts[0].activeJudge, undefined);
   assert.doesNotMatch(JSON.stringify(await (await web.request("/api/state")).json()), /activeDecision|activeJudge|decision_jev/);
@@ -247,7 +254,7 @@ test("CLI builds a decision client only for the researcher flag and never logs c
 
 test("v1 task factory never receives the active option", async (t) => {
   let received;
-  const server = await startNamingServer({ port: 0, client: {}, runDir: "",
+  const server = await startLegacyNamingServer({ port: 0, client: {}, runDir: "",
     activeDecision: { purpose: "decision_jev", client: { chooseAction() {} } },
     async createTask(options) { received = options; return { getState: () => ({ status: "dialogue", busy: false }) }; } });
   t.after(() => new Promise((done) => { server.closeAllConnections(); server.close(done); }));

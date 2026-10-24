@@ -23,6 +23,8 @@ export type AdminDeps = {
   deleteRecord(summary: AdminSummary): Promise<void>;
   audit(): Promise<AuditEntry[]>;
   summarizeLatency(record: unknown): LatencySummary;
+  /** Optional S5 operator action; participant cookies do not authorize it. */
+  prepareNext?(summary: AdminSummary): Promise<{ kind: 'created' | 'existing'; recordId: string; participantPath: '/' }>;
 };
 
 export const ADMIN_HEADERS: Readonly<Record<string, string>> = Object.freeze({
@@ -73,7 +75,8 @@ export async function handleAdmin(request: Request, deps: AdminDeps): Promise<Re
   const url = new URL(request.url);
   // Deletion is POST-only; a GET to the same path is an unknown page with no side effect.
   const deletePath = request.method === "POST" ? url.pathname.match(/^\/admin\/record\/([^/]+)\/delete$/) : null;
-  if (request.method === "POST" ? !deletePath : request.method !== "GET" && request.method !== "HEAD") return notFound();
+  const nextPath = request.method === 'POST' && deps.prepareNext ? url.pathname.match(/^\/admin\/record\/([^/]+)\/prepare-next$/) : null;
+  if (request.method === "POST" ? !deletePath && !nextPath : request.method !== "GET" && request.method !== "HEAD") return notFound();
   const header = request.headers.get("Authorization");
   // Every credentialed attempt (right or wrong) counts, so guessing is capped per visitor.
   if (presentedToken(header) !== null && !(await deps.limiter.limit({ key: visitorKey(request) })).success) {
@@ -82,6 +85,33 @@ export async function handleAdmin(request: Request, deps: AdminDeps): Promise<Re
   const auth = await checkAdmin(header, deps.token);
   if (auth === "unconfigured") return notFound();
   if (auth !== "ok") return plain(401, "Authentication required", { "WWW-Authenticate": REALM });
+
+  if (nextPath) {
+    if (!sameOrigin(request, url)) return plain(403, 'Forbidden');
+    const id = nextPath[1]; if (!RECORD_ID.test(id)) return notFound();
+    try {
+      if (request.headers.get('Content-Type')?.split(';')[0].trim() !== 'application/json') throw new Error();
+      // Bound before JSON parsing, including streaming/chunked requests.
+      const reader = request.body?.getReader(); let length = 0; const chunks: Uint8Array[] = [];
+      if (reader) { for (;;) { const {done,value} = await reader.read(); if (done) break; length += value.byteLength;
+        if (length > MAX_FORM_BYTES) { await reader.cancel(); throw new Error(); } chunks.push(value); } }
+      const bytes = new Uint8Array(length); let offset = 0; for (const c of chunks) { bytes.set(c,offset); offset += c.length; }
+      const body = JSON.parse(new TextDecoder().decode(bytes));
+      if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).length !== 0) throw new Error();
+    } catch { return respond(400, JSON.stringify({error:'invalid_request'}), 'application/json; charset=utf-8'); }
+    const summary = await deps.getSummary(id);
+    if (!summary || summary.recordId !== id || !OBJECT_ID.test(summary.objectId)) return notFound();
+    try {
+      const next = await deps.prepareNext!(summary);
+      return respond(next.kind === 'created' ? 201 : 200, JSON.stringify({recordId:next.recordId,participantPath:next.participantPath}), 'application/json; charset=utf-8');
+    } catch (error) {
+      // Only the typed coordinator boundary may choose these machine codes.
+      const { BaseSessionError } = await import('../../../../dialogue-model/runtime/v2/base-assignment-session.ts');
+      const code = error instanceof BaseSessionError ? error.code : 'trial_unavailable';
+      const mapped = code === 'owner_expired' ? 'not_found' : code;
+      return respond(mapped === 'not_found' ? 404 : 409, JSON.stringify({error:mapped}), 'application/json; charset=utf-8');
+    }
+  }
 
   if (deletePath) {
     if (!sameOrigin(request, url)) return plain(403, "Forbidden");

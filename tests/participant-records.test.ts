@@ -1,10 +1,11 @@
+import { privateBaseOptions } from './support/s5-private-options.mjs';
 // Participant-side records: read-only review, the PROVISIONAL questionnaire
 // (研究者未承認の仮項目), per-record archive storage and the admin view of answers.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { once } from "node:events";
-import { readFile } from "node:fs/promises";
+import { writeFile, readFile } from "node:fs/promises";
 import { startNamingServer } from "../dialogue-model/runtime/web/server.mjs";
 import { createChatClient } from "../dialogue-model/runtime/client.mjs";
 import { applyQuestionnaire, lockResult, participantReview, QUESTIONNAIRE_FORM, questionnaireStatus } from "../dialogue-model/runtime/v2/participant-records.ts";
@@ -193,8 +194,11 @@ test("the participant cookie is persistent for the retention period and keeps Ht
   assert.equal(sessionId("tangram_session=short"), null);
   const source = await readFile(new URL("../workers/tangram-experiment/src/index.ts", import.meta.url), "utf8");
   assert.doesNotMatch(source, /tangram_session=\$\{/, "every Set-Cookie goes through sessionCookie()");
-  // A page load re-sends the existing id (never a new one) with a fresh Max-Age.
-  assert.match(source, /sessionCookie\(sessionId\(request\.headers\.get\("Cookie"\)\) \?\? newSessionId\(\), retentionDays\(env\.RECORD_RETENTION_DAYS\)\)/);
+  // Known owners keep their id after durable lookup; absent/expired pages register before Cookie.
+  // Actual Worker order/error behavior is covered by the separate S5 Worker tests.
+  assert.match(source, /baseOwnerStatus\(\)/);
+  assert.match(source, /registerBaseOwner\(\)/);
+  assert.match(source, /sessionCookie\(cookie!,retentionDays\(env\.RECORD_RETENTION_DAYS\)\)/);
 });
 
 test("questionnaire saves have their own 30/60s per-session rate limit namespace in wrangler", async () => {
@@ -208,7 +212,7 @@ test("questionnaire saves have their own 30/60s per-session rate limit namespace
 test("Worker routes: one indistinguishable not_found, own records only, and names/scoring never written", async () => {
   const source = await readFile(new URL("../workers/tangram-experiment/src/index.ts", import.meta.url), "utf8");
   const route = source.slice(source.indexOf("private async recordRoute("), source.indexOf("private state()"));
-  assert.match(route, /RECORD_ID\.test\(recordId\) \? await readArchived\(this\.ctx\.storage, recordId\)/);
+  assert.match(route, /RECORD_ID\.test\(recordId\) \? await this\.readOwnedArchive\(recordId\)/);
   assert.match(route, /this\.serialized\(async \(\) => \{[\s\S]*writeQuestionnaire\(/);
   // Only a submission refreshes retention (draft saves never extend a record's life).
   assert.match(route, /writeQuestionnaire\(this\.ctx\.storage, recordId, next\.questionnaire, Date\.now\(\),\s+next\.questionnaire\.status === "submitted"\)/);
@@ -242,19 +246,31 @@ async function setup(t: any) {
   upstream.listen(0, "127.0.0.1"); await once(upstream, "listening");
   const client = createChatClient({ provider: "cloudflare", purpose: "dialogue_turn", apiKey: "PRIVATE-TEST-KEY",
     baseUrl: "http://127.0.0.1:" + (upstream.address() as any).port + "/v1" });
-  const server = await (startNamingServer as any)({ port: 0, client, runDir: "", hideStrategy: true });
+  const privateOptions = await privateBaseOptions(t,{seed:31});
+  const server = await (startNamingServer as any)({ port: 0, client, ...privateOptions, hideStrategy: true });
   t.after(async () => { await Promise.all([new Promise((r) => server.close(r)), new Promise((r) => upstream.close(r))]); });
   const base = "http://127.0.0.1:" + (server.address() as any).port;
   const browser = async () => {
     const cookie = (await fetch(base)).headers.get("set-cookie")!.split(";")[0];
-    return (path: string, body?: unknown) => fetch(base + path, { headers: { cookie, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
+    const request = (path: string, body?: unknown) => fetch(base + path, { headers: { cookie, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
       ...(body === undefined ? {} : { method: "POST", body: JSON.stringify(body) }) });
+    return Object.assign(request,{async operatorPrepare(seed:number){
+      const saved=JSON.parse(await readFile(privateOptions.baseAssignmentFile,"utf8"));
+      await writeFile(privateOptions.baseAssignmentFile,JSON.stringify({...saved,seed,revision:saved.revision+1}),{mode:0o600});
+      const current=await (await request("/api/state")).json();
+      if(current.trial?.status==="completed"){
+        const next=await fetch(base+"/admin/record/"+current.trial.sessionId+"/prepare-next",{method:"POST",headers:{Authorization:"Bearer "+privateOptions.adminToken,Origin:base,"Content-Type":"application/json"},body:"{}"});
+        assert.equal(next.status,201);
+      }
+    }});
   };
   return { browser };
 }
 
 async function completeTrial(request: (path: string, body?: unknown) => Promise<Response>, seed: number) {
-  let state = await (await request("/api/start", { version: 2, strategy: "repair-first", seed })).json();
+  await (request as typeof request & {operatorPrepare(seed:number):Promise<void>}).operatorPrepare(seed);
+  let state = await (await request("/api/state")).json();
+  if(!state.trial)state=await (await request("/api/start",{version:2})).json();
   assert.equal((await request("/api/message", { text: "細長いのから" })).status, 202);
   for (let i = 0; i < 200 && (state.trial.aiStatus !== "idle" || state.trial.events.length < 3); i++) {
     await new Promise((r) => setTimeout(r, 10));
@@ -271,7 +287,7 @@ test("local server: own completed trials are listed and reviewable; other browse
   const alice = await browser(), bob = await browser();
   const before = await (await alice("/api/records")).json();
   assert.deepEqual(before, { records: [] });
-  let state = await (await alice("/api/start", { version: 2, strategy: "repair-first", seed: 31 })).json();
+  let state = await (await alice("/api/start", { version: 2 })).json();
   const id = state.trial.sessionId;
   assert.equal((await alice(`/api/records/${id}/review`)).status, 409);
   assert.deepEqual(await (await alice(`/api/records/${id}/questionnaire`, { answers: {}, submit: false })).json(), { error: "trial_not_completed" });

@@ -66,8 +66,6 @@ async function ui(initial = trial(), handler) {
   const { root, ids: e } = makeDOM();
   let state = { trial: initial }, timerId = 0, now = 10000, clientSequence = 0;
   const timers = new Map(), calls = [];
-  e.setup.elements.strategy.value = "repair-first";
-  e.setup.elements.seed.value = "1";
   runInNewContext(script, {
     Date: class extends Date { static now() { return now; } },
     crypto: { randomUUID: () => "browser-client-" + ++clientSequence },
@@ -155,12 +153,12 @@ test("the unanswered-figure warning survives polling until every figure is answe
   e["finish-conversation"].fire("click");
   await nameAll(e, 2);
   e.submission.fire("submit");
-  assert.match(e["submission-status"].textContent, /未回答の図形があります/u);
+  assert.match(e["submission-status"].textContent, /名前が未入力の図形があります/u);
   await poll(); await poll();
-  assert.match(e["submission-status"].textContent, /未回答の図形があります/u, "a state refresh must not erase the warning");
+  assert.match(e["submission-status"].textContent, /名前が未入力の図形があります/u, "a state refresh must not erase the warning");
   paths(e)[2].fire("click"); e["name-unknown"].fire("click"); await tick();
   await poll();
-  assert.doesNotMatch(e["submission-status"].textContent, /未回答/u);
+  assert.doesNotMatch(e["submission-status"].textContent, /未入力/u);
 });
 
 test("confirmation and results add a readable thumbnail list with the same names, never figure ids", async () => {
@@ -180,8 +178,8 @@ test("confirmation and results add a readable thumbnail list with the same names
   assert.equal(e.results.hidden, false);
   const texts = itemTexts(e["result-list"]);
   assert.equal(texts.length, 6);
-  assert.equal(texts[0], "あなた：名前0\nAI：未合意 · 一致");
-  assert.equal(texts[5], "あなた：未合意\nAI：鳥 · 不一致");
+  assert.equal(texts[0], "あなた：名前0\nAI：未合意・わからない · 一致");
+  assert.equal(texts[5], "あなた：未合意・わからない\nAI：鳥 · 不一致");
   const visible = e["result-list"].textContent + e["confirm-list"].textContent;
   for (const id of ["s-a81c", "s-f120", "s-119e", "s-cc02", "s-a620", "s-67b4"]) assert.ok(!visible.includes(id));
 });

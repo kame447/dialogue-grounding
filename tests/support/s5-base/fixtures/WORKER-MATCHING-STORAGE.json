@@ -1,0 +1,1926 @@
+{
+  "base:owner:v1": {
+    "schemaVersion": "base_owner_v1",
+    "ownerId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "revision": 2,
+    "activeKey": "initial",
+    "admissions": {
+      "initial": {
+        "schemaVersion": "base_assigned_session_v1",
+        "assignment": {
+          "schemaVersion": "base_assignment_v1",
+          "assignmentId": "40eed1db-2433-43c9-9c1d-14d02174aabd",
+          "strategy": "repair-first",
+          "seed": 731,
+          "referenceMemory": false,
+          "source": {
+            "kind": "server_config_v1",
+            "adapter": "worker_binding",
+            "configId": "658b1964-a5e5-4bde-97d6-d1775c40d635",
+            "revision": 1,
+            "configSha256": "0aeb6cd06bd0d6626fa73481903ea634757263178276d67add030eab6234fb79"
+          },
+          "createdAt": "2026-10-24T18:16:35.609Z"
+        },
+        "status": "active",
+        "record": {
+          "recordId": "b9771f3f-39e6-4c4a-bfa7-6499de23959f",
+          "version": 2,
+          "trialId": "tangram-prototype-v2-504c33e3d616b9b2",
+          "seed": 731,
+          "strategy": "repair-first",
+          "startedAt": "2026-10-24T18:16:35.898Z",
+          "updatedAt": "2026-10-24T18:16:36.004Z",
+          "options": {
+            "visualAid": false,
+            "referenceMemory": false,
+            "decisionShadow": false,
+            "activeDecision": null,
+            "utteranceStyle": "default"
+          },
+          "status": "completed",
+          "events": [
+            {
+              "id": "event-1",
+              "speaker": "ai",
+              "text": "まず、どの図形から話しましょうか？",
+              "at": "2026-10-24T18:16:35.897Z",
+              "seq": 1,
+              "turn": 1,
+              "origin": "scripted_opening"
+            },
+            {
+              "id": "event-2",
+              "speaker": "human",
+              "text": "Let us call the first shape sample-one.",
+              "at": "2026-10-24T18:16:35.935Z",
+              "seq": 2,
+              "turn": 2,
+              "clientId": "doc04-message-01"
+            },
+            {
+              "id": "event-3",
+              "speaker": "ai",
+              "text": "Sample acknowledgement.",
+              "at": "2026-10-24T18:16:35.943Z",
+              "seq": 3,
+              "turn": 3
+            }
+          ],
+          "publicHistory": [
+            {
+              "role": "assistant",
+              "content": "まず、どの図形から話しましょうか？"
+            },
+            {
+              "role": "user",
+              "content": "Let us call the first shape sample-one."
+            },
+            {
+              "role": "assistant",
+              "content": "Sample acknowledgement."
+            }
+          ],
+          "judgments": [
+            {
+              "turnIndex": 2,
+              "lastEventId": "event-2",
+              "humanEventIds": [
+                "event-2"
+              ],
+              "judgment": {
+                "action": "accept",
+                "targetSlot": null,
+                "candidateName": null,
+                "discriminatingFeature": null,
+                "note": null
+              },
+              "ownLedgerBefore": {
+                "s-a340": {
+                  "status": "unassigned",
+                  "name": null
+                },
+                "s-25e7": {
+                  "status": "unassigned",
+                  "name": null
+                },
+                "s-22b9": {
+                  "status": "unassigned",
+                  "name": null
+                },
+                "s-bbe5": {
+                  "status": "unassigned",
+                  "name": null
+                },
+                "s-fc81": {
+                  "status": "unassigned",
+                  "name": null
+                },
+                "s-92ec": {
+                  "status": "unassigned",
+                  "name": null
+                }
+              },
+              "ownLedgerAfter": {
+                "s-a340": {
+                  "status": "unassigned",
+                  "name": null
+                },
+                "s-25e7": {
+                  "status": "unassigned",
+                  "name": null
+                },
+                "s-22b9": {
+                  "status": "unassigned",
+                  "name": null
+                },
+                "s-bbe5": {
+                  "status": "unassigned",
+                  "name": null
+                },
+                "s-fc81": {
+                  "status": "unassigned",
+                  "name": null
+                },
+                "s-92ec": {
+                  "status": "unassigned",
+                  "name": null
+                }
+              },
+              "validation": {
+                "attempts": 1,
+                "fallback": false,
+                "failures": []
+              },
+              "status": "committed",
+              "generationGuard": {
+                "violations": [],
+                "regenerated": false,
+                "fallback": false
+              }
+            }
+          ],
+          "attempts": [
+            {
+              "turnIndex": 2,
+              "lastEventId": "event-2",
+              "humanEventIds": [
+                "event-2"
+              ],
+              "judgment": {
+                "action": "accept",
+                "targetSlot": null,
+                "candidateName": null,
+                "discriminatingFeature": null,
+                "note": null
+              },
+              "ownLedgerBefore": {
+                "s-a340": {
+                  "status": "unassigned",
+                  "name": null
+                },
+                "s-25e7": {
+                  "status": "unassigned",
+                  "name": null
+                },
+                "s-22b9": {
+                  "status": "unassigned",
+                  "name": null
+                },
+                "s-bbe5": {
+                  "status": "unassigned",
+                  "name": null
+                },
+                "s-fc81": {
+                  "status": "unassigned",
+                  "name": null
+                },
+                "s-92ec": {
+                  "status": "unassigned",
+                  "name": null
+                }
+              },
+              "ownLedgerAfter": {
+                "s-a340": {
+                  "status": "unassigned",
+                  "name": null
+                },
+                "s-25e7": {
+                  "status": "unassigned",
+                  "name": null
+                },
+                "s-22b9": {
+                  "status": "unassigned",
+                  "name": null
+                },
+                "s-bbe5": {
+                  "status": "unassigned",
+                  "name": null
+                },
+                "s-fc81": {
+                  "status": "unassigned",
+                  "name": null
+                },
+                "s-92ec": {
+                  "status": "unassigned",
+                  "name": null
+                }
+              },
+              "validation": {
+                "attempts": 1,
+                "fallback": false,
+                "failures": []
+              },
+              "status": "staged",
+              "generationGuard": {
+                "violations": [],
+                "regenerated": false,
+                "fallback": false
+              }
+            }
+          ],
+          "ownLedger": {
+            "s-a340": {
+              "status": "unassigned",
+              "name": null
+            },
+            "s-25e7": {
+              "status": "unassigned",
+              "name": null
+            },
+            "s-22b9": {
+              "status": "unassigned",
+              "name": null
+            },
+            "s-bbe5": {
+              "status": "unassigned",
+              "name": null
+            },
+            "s-fc81": {
+              "status": "unassigned",
+              "name": null
+            },
+            "s-92ec": {
+              "status": "unassigned",
+              "name": null
+            }
+          },
+          "humanSubmission": {
+            "s-fc46": "sample-human-1",
+            "s-2f1b": "sample-human-2",
+            "s-0404": "sample-human-3",
+            "s-df36": "sample-human-4",
+            "s-6ca4": "sample-human-5",
+            "s-23ea": "sample-human-6"
+          },
+          "aiSubmission": {
+            "s-a340": "sample-ai-1",
+            "s-25e7": "sample-ai-2",
+            "s-22b9": "sample-ai-3",
+            "s-bbe5": "sample-ai-4",
+            "s-fc81": "sample-ai-5",
+            "s-92ec": "sample-ai-6"
+          },
+          "closed": true,
+          "finalError": null,
+          "queueState": {
+            "events": [
+              {
+                "id": "event-1",
+                "speaker": "ai",
+                "text": "まず、どの図形から話しましょうか？",
+                "at": "2026-10-24T18:16:35.897Z",
+                "seq": 1,
+                "turn": 1,
+                "nonReferential": true
+              },
+              {
+                "id": "event-2",
+                "speaker": "human",
+                "text": "Let us call the first shape sample-one.",
+                "at": "2026-10-24T18:16:35.935Z",
+                "seq": 2,
+                "turn": 2,
+                "clientId": "doc04-message-01"
+              },
+              {
+                "id": "event-3",
+                "speaker": "ai",
+                "text": "Sample acknowledgement.",
+                "at": "2026-10-24T18:16:35.943Z",
+                "seq": 3,
+                "turn": 3
+              }
+            ],
+            "pendingHumanEventIds": [],
+            "privateState": {
+              "ledger": {
+                "s-a340": {
+                  "status": "unassigned",
+                  "name": null
+                },
+                "s-25e7": {
+                  "status": "unassigned",
+                  "name": null
+                },
+                "s-22b9": {
+                  "status": "unassigned",
+                  "name": null
+                },
+                "s-bbe5": {
+                  "status": "unassigned",
+                  "name": null
+                },
+                "s-fc81": {
+                  "status": "unassigned",
+                  "name": null
+                },
+                "s-92ec": {
+                  "status": "unassigned",
+                  "name": null
+                }
+              },
+              "judgments": [
+                {
+                  "turnIndex": 2,
+                  "lastEventId": "event-2",
+                  "humanEventIds": [
+                    "event-2"
+                  ],
+                  "judgment": {
+                    "action": "accept",
+                    "targetSlot": null,
+                    "candidateName": null,
+                    "discriminatingFeature": null,
+                    "note": null
+                  },
+                  "ownLedgerBefore": {
+                    "s-a340": {
+                      "status": "unassigned",
+                      "name": null
+                    },
+                    "s-25e7": {
+                      "status": "unassigned",
+                      "name": null
+                    },
+                    "s-22b9": {
+                      "status": "unassigned",
+                      "name": null
+                    },
+                    "s-bbe5": {
+                      "status": "unassigned",
+                      "name": null
+                    },
+                    "s-fc81": {
+                      "status": "unassigned",
+                      "name": null
+                    },
+                    "s-92ec": {
+                      "status": "unassigned",
+                      "name": null
+                    }
+                  },
+                  "ownLedgerAfter": {
+                    "s-a340": {
+                      "status": "unassigned",
+                      "name": null
+                    },
+                    "s-25e7": {
+                      "status": "unassigned",
+                      "name": null
+                    },
+                    "s-22b9": {
+                      "status": "unassigned",
+                      "name": null
+                    },
+                    "s-bbe5": {
+                      "status": "unassigned",
+                      "name": null
+                    },
+                    "s-fc81": {
+                      "status": "unassigned",
+                      "name": null
+                    },
+                    "s-92ec": {
+                      "status": "unassigned",
+                      "name": null
+                    }
+                  },
+                  "validation": {
+                    "attempts": 1,
+                    "fallback": false,
+                    "failures": []
+                  },
+                  "status": "committed",
+                  "generationGuard": {
+                    "violations": [],
+                    "regenerated": false,
+                    "fallback": false
+                  }
+                }
+              ],
+              "graph": null
+            },
+            "clients": [
+              [
+                "doc04-message-01",
+                "event-2"
+              ]
+            ],
+            "closed": true,
+            "errorCode": null,
+            "requestSeq": 1,
+            "lastMillis": 1792865795943
+          },
+          "scoring": {
+            "key": {
+              "human": {
+                "s-fc46": "F1",
+                "s-2f1b": "F2",
+                "s-0404": "F5",
+                "s-df36": "F3",
+                "s-6ca4": "F4",
+                "s-23ea": "F6"
+              },
+              "ai": {
+                "s-a340": "F5",
+                "s-25e7": "F6",
+                "s-22b9": "F4",
+                "s-bbe5": "F2",
+                "s-fc81": "F3",
+                "s-92ec": "F1"
+              }
+            },
+            "result": {
+              "provisional": true,
+              "normalization": "NFKC・前後空白除去・内部空白除去・カタカナ→ひらがな（暫定）",
+              "success": false,
+              "matchedCount": 0,
+              "total": 6,
+              "figures": [
+                {
+                  "figureId": "F1",
+                  "human": {
+                    "slot": "s-fc46",
+                    "rawName": "sample-human-1",
+                    "name": "sample-human-1"
+                  },
+                  "ai": {
+                    "slot": "s-92ec",
+                    "rawName": "sample-ai-6",
+                    "name": "sample-ai-6"
+                  },
+                  "matched": false
+                },
+                {
+                  "figureId": "F2",
+                  "human": {
+                    "slot": "s-2f1b",
+                    "rawName": "sample-human-2",
+                    "name": "sample-human-2"
+                  },
+                  "ai": {
+                    "slot": "s-bbe5",
+                    "rawName": "sample-ai-4",
+                    "name": "sample-ai-4"
+                  },
+                  "matched": false
+                },
+                {
+                  "figureId": "F5",
+                  "human": {
+                    "slot": "s-0404",
+                    "rawName": "sample-human-3",
+                    "name": "sample-human-3"
+                  },
+                  "ai": {
+                    "slot": "s-a340",
+                    "rawName": "sample-ai-1",
+                    "name": "sample-ai-1"
+                  },
+                  "matched": false
+                },
+                {
+                  "figureId": "F3",
+                  "human": {
+                    "slot": "s-df36",
+                    "rawName": "sample-human-4",
+                    "name": "sample-human-4"
+                  },
+                  "ai": {
+                    "slot": "s-fc81",
+                    "rawName": "sample-ai-5",
+                    "name": "sample-ai-5"
+                  },
+                  "matched": false
+                },
+                {
+                  "figureId": "F4",
+                  "human": {
+                    "slot": "s-6ca4",
+                    "rawName": "sample-human-5",
+                    "name": "sample-human-5"
+                  },
+                  "ai": {
+                    "slot": "s-22b9",
+                    "rawName": "sample-ai-3",
+                    "name": "sample-ai-3"
+                  },
+                  "matched": false
+                },
+                {
+                  "figureId": "F6",
+                  "human": {
+                    "slot": "s-23ea",
+                    "rawName": "sample-human-6",
+                    "name": "sample-human-6"
+                  },
+                  "ai": {
+                    "slot": "s-25e7",
+                    "rawName": "sample-ai-2",
+                    "name": "sample-ai-2"
+                  },
+                  "matched": false
+                }
+              ],
+              "duplicateNames": {
+                "human": [],
+                "ai": []
+              },
+              "unnamed": {
+                "human": [],
+                "ai": []
+              }
+            }
+          },
+          "requests": [
+            {
+              "kind": "judgment",
+              "status": "ok",
+              "model": "synthetic-offline-luna",
+              "usage": null,
+              "latencyMs": 0,
+              "retryCount": 0,
+              "requestSeq": 1
+            },
+            {
+              "kind": "generation",
+              "status": "ok",
+              "model": "synthetic-offline-luna",
+              "usage": null,
+              "latencyMs": 1,
+              "retryCount": 0,
+              "requestSeq": 1
+            },
+            {
+              "kind": "final_submission",
+              "status": "ok",
+              "model": "synthetic-offline-luna",
+              "usage": null,
+              "latencyMs": 0,
+              "retryCount": 0,
+              "requestSeq": null
+            }
+          ],
+          "turnTimings": [
+            {
+              "requestSeq": 1,
+              "lastEventId": "event-2",
+              "pendingEventIds": [
+                "event-2"
+              ],
+              "startedAtMs": 1792865795936,
+              "endedAtMs": 1792865795942,
+              "outcome": "returned",
+              "errorCode": null,
+              "judgeAttempts": 1,
+              "validationFailures": [],
+              "judgeFallback": false,
+              "guardRegenerated": false,
+              "guardFallback": false
+            }
+          ],
+          "diagnostics": {
+            "ledgerFinalMismatch": {
+              "count": 6,
+              "slots": [
+                "s-a340",
+                "s-25e7",
+                "s-22b9",
+                "s-bbe5",
+                "s-fc81",
+                "s-92ec"
+              ]
+            },
+            "ledgerStatusCounts": {
+              "unassigned": 6,
+              "tentative": 0,
+              "agreed": 0,
+              "deferred": 0
+            }
+          },
+          "assignment": {
+            "schemaVersion": "base_assignment_v1",
+            "assignmentId": "40eed1db-2433-43c9-9c1d-14d02174aabd",
+            "strategy": "repair-first",
+            "seed": 731,
+            "referenceMemory": false,
+            "source": {
+              "kind": "server_config_v1",
+              "adapter": "worker_binding",
+              "configId": "658b1964-a5e5-4bde-97d6-d1775c40d635",
+              "revision": 1,
+              "configSha256": "0aeb6cd06bd0d6626fa73481903ea634757263178276d67add030eab6234fb79"
+            },
+            "createdAt": "2026-10-24T18:16:35.609Z"
+          },
+          "questionnaire": {
+            "version": "provisional-v0",
+            "status": "submitted",
+            "answers": {
+              "mental_effort": 4,
+              "task_difficulty": 4,
+              "smoothness": 4,
+              "bothersome": 4
+            },
+            "comment": "Synthetic documentation exercise.",
+            "createdAt": "2026-10-24T18:16:36.320Z",
+            "updatedAt": "2026-10-24T18:16:36.320Z",
+            "submittedAt": "2026-10-24T18:16:36.320Z"
+          }
+        },
+        "errorCode": null
+      }
+    }
+  },
+  "active": {
+    "recordId": "b9771f3f-39e6-4c4a-bfa7-6499de23959f",
+    "version": 2,
+    "trialId": "tangram-prototype-v2-504c33e3d616b9b2",
+    "seed": 731,
+    "strategy": "repair-first",
+    "startedAt": "2026-10-24T18:16:35.898Z",
+    "updatedAt": "2026-10-24T18:16:36.004Z",
+    "options": {
+      "visualAid": false,
+      "referenceMemory": false,
+      "decisionShadow": false,
+      "activeDecision": null,
+      "utteranceStyle": "default"
+    },
+    "status": "completed",
+    "events": [
+      {
+        "id": "event-1",
+        "speaker": "ai",
+        "text": "まず、どの図形から話しましょうか？",
+        "at": "2026-10-24T18:16:35.897Z",
+        "seq": 1,
+        "turn": 1,
+        "origin": "scripted_opening"
+      },
+      {
+        "id": "event-2",
+        "speaker": "human",
+        "text": "Let us call the first shape sample-one.",
+        "at": "2026-10-24T18:16:35.935Z",
+        "seq": 2,
+        "turn": 2,
+        "clientId": "doc04-message-01"
+      },
+      {
+        "id": "event-3",
+        "speaker": "ai",
+        "text": "Sample acknowledgement.",
+        "at": "2026-10-24T18:16:35.943Z",
+        "seq": 3,
+        "turn": 3
+      }
+    ],
+    "publicHistory": [
+      {
+        "role": "assistant",
+        "content": "まず、どの図形から話しましょうか？"
+      },
+      {
+        "role": "user",
+        "content": "Let us call the first shape sample-one."
+      },
+      {
+        "role": "assistant",
+        "content": "Sample acknowledgement."
+      }
+    ],
+    "judgments": [
+      {
+        "turnIndex": 2,
+        "lastEventId": "event-2",
+        "humanEventIds": [
+          "event-2"
+        ],
+        "judgment": {
+          "action": "accept",
+          "targetSlot": null,
+          "candidateName": null,
+          "discriminatingFeature": null,
+          "note": null
+        },
+        "ownLedgerBefore": {
+          "s-a340": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-25e7": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-22b9": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-bbe5": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-fc81": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-92ec": {
+            "status": "unassigned",
+            "name": null
+          }
+        },
+        "ownLedgerAfter": {
+          "s-a340": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-25e7": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-22b9": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-bbe5": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-fc81": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-92ec": {
+            "status": "unassigned",
+            "name": null
+          }
+        },
+        "validation": {
+          "attempts": 1,
+          "fallback": false,
+          "failures": []
+        },
+        "status": "committed",
+        "generationGuard": {
+          "violations": [],
+          "regenerated": false,
+          "fallback": false
+        }
+      }
+    ],
+    "attempts": [
+      {
+        "turnIndex": 2,
+        "lastEventId": "event-2",
+        "humanEventIds": [
+          "event-2"
+        ],
+        "judgment": {
+          "action": "accept",
+          "targetSlot": null,
+          "candidateName": null,
+          "discriminatingFeature": null,
+          "note": null
+        },
+        "ownLedgerBefore": {
+          "s-a340": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-25e7": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-22b9": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-bbe5": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-fc81": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-92ec": {
+            "status": "unassigned",
+            "name": null
+          }
+        },
+        "ownLedgerAfter": {
+          "s-a340": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-25e7": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-22b9": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-bbe5": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-fc81": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-92ec": {
+            "status": "unassigned",
+            "name": null
+          }
+        },
+        "validation": {
+          "attempts": 1,
+          "fallback": false,
+          "failures": []
+        },
+        "status": "staged",
+        "generationGuard": {
+          "violations": [],
+          "regenerated": false,
+          "fallback": false
+        }
+      }
+    ],
+    "ownLedger": {
+      "s-a340": {
+        "status": "unassigned",
+        "name": null
+      },
+      "s-25e7": {
+        "status": "unassigned",
+        "name": null
+      },
+      "s-22b9": {
+        "status": "unassigned",
+        "name": null
+      },
+      "s-bbe5": {
+        "status": "unassigned",
+        "name": null
+      },
+      "s-fc81": {
+        "status": "unassigned",
+        "name": null
+      },
+      "s-92ec": {
+        "status": "unassigned",
+        "name": null
+      }
+    },
+    "humanSubmission": {
+      "s-fc46": "sample-human-1",
+      "s-2f1b": "sample-human-2",
+      "s-0404": "sample-human-3",
+      "s-df36": "sample-human-4",
+      "s-6ca4": "sample-human-5",
+      "s-23ea": "sample-human-6"
+    },
+    "aiSubmission": {
+      "s-a340": "sample-ai-1",
+      "s-25e7": "sample-ai-2",
+      "s-22b9": "sample-ai-3",
+      "s-bbe5": "sample-ai-4",
+      "s-fc81": "sample-ai-5",
+      "s-92ec": "sample-ai-6"
+    },
+    "closed": true,
+    "finalError": null,
+    "queueState": {
+      "events": [
+        {
+          "id": "event-1",
+          "speaker": "ai",
+          "text": "まず、どの図形から話しましょうか？",
+          "at": "2026-10-24T18:16:35.897Z",
+          "seq": 1,
+          "turn": 1,
+          "nonReferential": true
+        },
+        {
+          "id": "event-2",
+          "speaker": "human",
+          "text": "Let us call the first shape sample-one.",
+          "at": "2026-10-24T18:16:35.935Z",
+          "seq": 2,
+          "turn": 2,
+          "clientId": "doc04-message-01"
+        },
+        {
+          "id": "event-3",
+          "speaker": "ai",
+          "text": "Sample acknowledgement.",
+          "at": "2026-10-24T18:16:35.943Z",
+          "seq": 3,
+          "turn": 3
+        }
+      ],
+      "pendingHumanEventIds": [],
+      "privateState": {
+        "ledger": {
+          "s-a340": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-25e7": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-22b9": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-bbe5": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-fc81": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-92ec": {
+            "status": "unassigned",
+            "name": null
+          }
+        },
+        "judgments": [
+          {
+            "turnIndex": 2,
+            "lastEventId": "event-2",
+            "humanEventIds": [
+              "event-2"
+            ],
+            "judgment": {
+              "action": "accept",
+              "targetSlot": null,
+              "candidateName": null,
+              "discriminatingFeature": null,
+              "note": null
+            },
+            "ownLedgerBefore": {
+              "s-a340": {
+                "status": "unassigned",
+                "name": null
+              },
+              "s-25e7": {
+                "status": "unassigned",
+                "name": null
+              },
+              "s-22b9": {
+                "status": "unassigned",
+                "name": null
+              },
+              "s-bbe5": {
+                "status": "unassigned",
+                "name": null
+              },
+              "s-fc81": {
+                "status": "unassigned",
+                "name": null
+              },
+              "s-92ec": {
+                "status": "unassigned",
+                "name": null
+              }
+            },
+            "ownLedgerAfter": {
+              "s-a340": {
+                "status": "unassigned",
+                "name": null
+              },
+              "s-25e7": {
+                "status": "unassigned",
+                "name": null
+              },
+              "s-22b9": {
+                "status": "unassigned",
+                "name": null
+              },
+              "s-bbe5": {
+                "status": "unassigned",
+                "name": null
+              },
+              "s-fc81": {
+                "status": "unassigned",
+                "name": null
+              },
+              "s-92ec": {
+                "status": "unassigned",
+                "name": null
+              }
+            },
+            "validation": {
+              "attempts": 1,
+              "fallback": false,
+              "failures": []
+            },
+            "status": "committed",
+            "generationGuard": {
+              "violations": [],
+              "regenerated": false,
+              "fallback": false
+            }
+          }
+        ],
+        "graph": null
+      },
+      "clients": [
+        [
+          "doc04-message-01",
+          "event-2"
+        ]
+      ],
+      "closed": true,
+      "errorCode": null,
+      "requestSeq": 1,
+      "lastMillis": 1792865795943
+    },
+    "scoring": {
+      "key": {
+        "human": {
+          "s-fc46": "F1",
+          "s-2f1b": "F2",
+          "s-0404": "F5",
+          "s-df36": "F3",
+          "s-6ca4": "F4",
+          "s-23ea": "F6"
+        },
+        "ai": {
+          "s-a340": "F5",
+          "s-25e7": "F6",
+          "s-22b9": "F4",
+          "s-bbe5": "F2",
+          "s-fc81": "F3",
+          "s-92ec": "F1"
+        }
+      },
+      "result": {
+        "provisional": true,
+        "normalization": "NFKC・前後空白除去・内部空白除去・カタカナ→ひらがな（暫定）",
+        "success": false,
+        "matchedCount": 0,
+        "total": 6,
+        "figures": [
+          {
+            "figureId": "F1",
+            "human": {
+              "slot": "s-fc46",
+              "rawName": "sample-human-1",
+              "name": "sample-human-1"
+            },
+            "ai": {
+              "slot": "s-92ec",
+              "rawName": "sample-ai-6",
+              "name": "sample-ai-6"
+            },
+            "matched": false
+          },
+          {
+            "figureId": "F2",
+            "human": {
+              "slot": "s-2f1b",
+              "rawName": "sample-human-2",
+              "name": "sample-human-2"
+            },
+            "ai": {
+              "slot": "s-bbe5",
+              "rawName": "sample-ai-4",
+              "name": "sample-ai-4"
+            },
+            "matched": false
+          },
+          {
+            "figureId": "F5",
+            "human": {
+              "slot": "s-0404",
+              "rawName": "sample-human-3",
+              "name": "sample-human-3"
+            },
+            "ai": {
+              "slot": "s-a340",
+              "rawName": "sample-ai-1",
+              "name": "sample-ai-1"
+            },
+            "matched": false
+          },
+          {
+            "figureId": "F3",
+            "human": {
+              "slot": "s-df36",
+              "rawName": "sample-human-4",
+              "name": "sample-human-4"
+            },
+            "ai": {
+              "slot": "s-fc81",
+              "rawName": "sample-ai-5",
+              "name": "sample-ai-5"
+            },
+            "matched": false
+          },
+          {
+            "figureId": "F4",
+            "human": {
+              "slot": "s-6ca4",
+              "rawName": "sample-human-5",
+              "name": "sample-human-5"
+            },
+            "ai": {
+              "slot": "s-22b9",
+              "rawName": "sample-ai-3",
+              "name": "sample-ai-3"
+            },
+            "matched": false
+          },
+          {
+            "figureId": "F6",
+            "human": {
+              "slot": "s-23ea",
+              "rawName": "sample-human-6",
+              "name": "sample-human-6"
+            },
+            "ai": {
+              "slot": "s-25e7",
+              "rawName": "sample-ai-2",
+              "name": "sample-ai-2"
+            },
+            "matched": false
+          }
+        ],
+        "duplicateNames": {
+          "human": [],
+          "ai": []
+        },
+        "unnamed": {
+          "human": [],
+          "ai": []
+        }
+      }
+    },
+    "requests": [
+      {
+        "kind": "judgment",
+        "status": "ok",
+        "model": "synthetic-offline-luna",
+        "usage": null,
+        "latencyMs": 0,
+        "retryCount": 0,
+        "requestSeq": 1
+      },
+      {
+        "kind": "generation",
+        "status": "ok",
+        "model": "synthetic-offline-luna",
+        "usage": null,
+        "latencyMs": 1,
+        "retryCount": 0,
+        "requestSeq": 1
+      },
+      {
+        "kind": "final_submission",
+        "status": "ok",
+        "model": "synthetic-offline-luna",
+        "usage": null,
+        "latencyMs": 0,
+        "retryCount": 0,
+        "requestSeq": null
+      }
+    ],
+    "turnTimings": [
+      {
+        "requestSeq": 1,
+        "lastEventId": "event-2",
+        "pendingEventIds": [
+          "event-2"
+        ],
+        "startedAtMs": 1792865795936,
+        "endedAtMs": 1792865795942,
+        "outcome": "returned",
+        "errorCode": null,
+        "judgeAttempts": 1,
+        "validationFailures": [],
+        "judgeFallback": false,
+        "guardRegenerated": false,
+        "guardFallback": false
+      }
+    ],
+    "diagnostics": {
+      "ledgerFinalMismatch": {
+        "count": 6,
+        "slots": [
+          "s-a340",
+          "s-25e7",
+          "s-22b9",
+          "s-bbe5",
+          "s-fc81",
+          "s-92ec"
+        ]
+      },
+      "ledgerStatusCounts": {
+        "unassigned": 6,
+        "tentative": 0,
+        "agreed": 0,
+        "deferred": 0
+      }
+    },
+    "assignment": {
+      "schemaVersion": "base_assignment_v1",
+      "assignmentId": "40eed1db-2433-43c9-9c1d-14d02174aabd",
+      "strategy": "repair-first",
+      "seed": 731,
+      "referenceMemory": false,
+      "source": {
+        "kind": "server_config_v1",
+        "adapter": "worker_binding",
+        "configId": "658b1964-a5e5-4bde-97d6-d1775c40d635",
+        "revision": 1,
+        "configSha256": "0aeb6cd06bd0d6626fa73481903ea634757263178276d67add030eab6234fb79"
+      },
+      "createdAt": "2026-10-24T18:16:35.609Z"
+    },
+    "questionnaire": {
+      "version": "provisional-v0",
+      "status": "submitted",
+      "answers": {
+        "mental_effort": 4,
+        "task_difficulty": 4,
+        "smoothness": 4,
+        "bothersome": 4
+      },
+      "comment": "Synthetic documentation exercise.",
+      "createdAt": "2026-10-24T18:16:36.320Z",
+      "updatedAt": "2026-10-24T18:16:36.320Z",
+      "submittedAt": "2026-10-24T18:16:36.320Z"
+    }
+  },
+  "record:b9771f3f-39e6-4c4a-bfa7-6499de23959f": {
+    "recordId": "b9771f3f-39e6-4c4a-bfa7-6499de23959f",
+    "version": 2,
+    "trialId": "tangram-prototype-v2-504c33e3d616b9b2",
+    "seed": 731,
+    "strategy": "repair-first",
+    "startedAt": "2026-10-24T18:16:35.898Z",
+    "updatedAt": "2026-10-24T18:16:36.004Z",
+    "options": {
+      "visualAid": false,
+      "referenceMemory": false,
+      "decisionShadow": false,
+      "activeDecision": null,
+      "utteranceStyle": "default"
+    },
+    "status": "completed",
+    "events": [
+      {
+        "id": "event-1",
+        "speaker": "ai",
+        "text": "まず、どの図形から話しましょうか？",
+        "at": "2026-10-24T18:16:35.897Z",
+        "seq": 1,
+        "turn": 1,
+        "origin": "scripted_opening"
+      },
+      {
+        "id": "event-2",
+        "speaker": "human",
+        "text": "Let us call the first shape sample-one.",
+        "at": "2026-10-24T18:16:35.935Z",
+        "seq": 2,
+        "turn": 2,
+        "clientId": "doc04-message-01"
+      },
+      {
+        "id": "event-3",
+        "speaker": "ai",
+        "text": "Sample acknowledgement.",
+        "at": "2026-10-24T18:16:35.943Z",
+        "seq": 3,
+        "turn": 3
+      }
+    ],
+    "publicHistory": [
+      {
+        "role": "assistant",
+        "content": "まず、どの図形から話しましょうか？"
+      },
+      {
+        "role": "user",
+        "content": "Let us call the first shape sample-one."
+      },
+      {
+        "role": "assistant",
+        "content": "Sample acknowledgement."
+      }
+    ],
+    "judgments": [
+      {
+        "turnIndex": 2,
+        "lastEventId": "event-2",
+        "humanEventIds": [
+          "event-2"
+        ],
+        "judgment": {
+          "action": "accept",
+          "targetSlot": null,
+          "candidateName": null,
+          "discriminatingFeature": null,
+          "note": null
+        },
+        "ownLedgerBefore": {
+          "s-a340": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-25e7": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-22b9": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-bbe5": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-fc81": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-92ec": {
+            "status": "unassigned",
+            "name": null
+          }
+        },
+        "ownLedgerAfter": {
+          "s-a340": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-25e7": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-22b9": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-bbe5": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-fc81": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-92ec": {
+            "status": "unassigned",
+            "name": null
+          }
+        },
+        "validation": {
+          "attempts": 1,
+          "fallback": false,
+          "failures": []
+        },
+        "status": "committed",
+        "generationGuard": {
+          "violations": [],
+          "regenerated": false,
+          "fallback": false
+        }
+      }
+    ],
+    "attempts": [
+      {
+        "turnIndex": 2,
+        "lastEventId": "event-2",
+        "humanEventIds": [
+          "event-2"
+        ],
+        "judgment": {
+          "action": "accept",
+          "targetSlot": null,
+          "candidateName": null,
+          "discriminatingFeature": null,
+          "note": null
+        },
+        "ownLedgerBefore": {
+          "s-a340": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-25e7": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-22b9": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-bbe5": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-fc81": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-92ec": {
+            "status": "unassigned",
+            "name": null
+          }
+        },
+        "ownLedgerAfter": {
+          "s-a340": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-25e7": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-22b9": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-bbe5": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-fc81": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-92ec": {
+            "status": "unassigned",
+            "name": null
+          }
+        },
+        "validation": {
+          "attempts": 1,
+          "fallback": false,
+          "failures": []
+        },
+        "status": "staged",
+        "generationGuard": {
+          "violations": [],
+          "regenerated": false,
+          "fallback": false
+        }
+      }
+    ],
+    "ownLedger": {
+      "s-a340": {
+        "status": "unassigned",
+        "name": null
+      },
+      "s-25e7": {
+        "status": "unassigned",
+        "name": null
+      },
+      "s-22b9": {
+        "status": "unassigned",
+        "name": null
+      },
+      "s-bbe5": {
+        "status": "unassigned",
+        "name": null
+      },
+      "s-fc81": {
+        "status": "unassigned",
+        "name": null
+      },
+      "s-92ec": {
+        "status": "unassigned",
+        "name": null
+      }
+    },
+    "humanSubmission": {
+      "s-fc46": "sample-human-1",
+      "s-2f1b": "sample-human-2",
+      "s-0404": "sample-human-3",
+      "s-df36": "sample-human-4",
+      "s-6ca4": "sample-human-5",
+      "s-23ea": "sample-human-6"
+    },
+    "aiSubmission": {
+      "s-a340": "sample-ai-1",
+      "s-25e7": "sample-ai-2",
+      "s-22b9": "sample-ai-3",
+      "s-bbe5": "sample-ai-4",
+      "s-fc81": "sample-ai-5",
+      "s-92ec": "sample-ai-6"
+    },
+    "closed": true,
+    "finalError": null,
+    "queueState": {
+      "events": [
+        {
+          "id": "event-1",
+          "speaker": "ai",
+          "text": "まず、どの図形から話しましょうか？",
+          "at": "2026-10-24T18:16:35.897Z",
+          "seq": 1,
+          "turn": 1,
+          "nonReferential": true
+        },
+        {
+          "id": "event-2",
+          "speaker": "human",
+          "text": "Let us call the first shape sample-one.",
+          "at": "2026-10-24T18:16:35.935Z",
+          "seq": 2,
+          "turn": 2,
+          "clientId": "doc04-message-01"
+        },
+        {
+          "id": "event-3",
+          "speaker": "ai",
+          "text": "Sample acknowledgement.",
+          "at": "2026-10-24T18:16:35.943Z",
+          "seq": 3,
+          "turn": 3
+        }
+      ],
+      "pendingHumanEventIds": [],
+      "privateState": {
+        "ledger": {
+          "s-a340": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-25e7": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-22b9": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-bbe5": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-fc81": {
+            "status": "unassigned",
+            "name": null
+          },
+          "s-92ec": {
+            "status": "unassigned",
+            "name": null
+          }
+        },
+        "judgments": [
+          {
+            "turnIndex": 2,
+            "lastEventId": "event-2",
+            "humanEventIds": [
+              "event-2"
+            ],
+            "judgment": {
+              "action": "accept",
+              "targetSlot": null,
+              "candidateName": null,
+              "discriminatingFeature": null,
+              "note": null
+            },
+            "ownLedgerBefore": {
+              "s-a340": {
+                "status": "unassigned",
+                "name": null
+              },
+              "s-25e7": {
+                "status": "unassigned",
+                "name": null
+              },
+              "s-22b9": {
+                "status": "unassigned",
+                "name": null
+              },
+              "s-bbe5": {
+                "status": "unassigned",
+                "name": null
+              },
+              "s-fc81": {
+                "status": "unassigned",
+                "name": null
+              },
+              "s-92ec": {
+                "status": "unassigned",
+                "name": null
+              }
+            },
+            "ownLedgerAfter": {
+              "s-a340": {
+                "status": "unassigned",
+                "name": null
+              },
+              "s-25e7": {
+                "status": "unassigned",
+                "name": null
+              },
+              "s-22b9": {
+                "status": "unassigned",
+                "name": null
+              },
+              "s-bbe5": {
+                "status": "unassigned",
+                "name": null
+              },
+              "s-fc81": {
+                "status": "unassigned",
+                "name": null
+              },
+              "s-92ec": {
+                "status": "unassigned",
+                "name": null
+              }
+            },
+            "validation": {
+              "attempts": 1,
+              "fallback": false,
+              "failures": []
+            },
+            "status": "committed",
+            "generationGuard": {
+              "violations": [],
+              "regenerated": false,
+              "fallback": false
+            }
+          }
+        ],
+        "graph": null
+      },
+      "clients": [
+        [
+          "doc04-message-01",
+          "event-2"
+        ]
+      ],
+      "closed": true,
+      "errorCode": null,
+      "requestSeq": 1,
+      "lastMillis": 1792865795943
+    },
+    "scoring": {
+      "key": {
+        "human": {
+          "s-fc46": "F1",
+          "s-2f1b": "F2",
+          "s-0404": "F5",
+          "s-df36": "F3",
+          "s-6ca4": "F4",
+          "s-23ea": "F6"
+        },
+        "ai": {
+          "s-a340": "F5",
+          "s-25e7": "F6",
+          "s-22b9": "F4",
+          "s-bbe5": "F2",
+          "s-fc81": "F3",
+          "s-92ec": "F1"
+        }
+      },
+      "result": {
+        "provisional": true,
+        "normalization": "NFKC・前後空白除去・内部空白除去・カタカナ→ひらがな（暫定）",
+        "success": false,
+        "matchedCount": 0,
+        "total": 6,
+        "figures": [
+          {
+            "figureId": "F1",
+            "human": {
+              "slot": "s-fc46",
+              "rawName": "sample-human-1",
+              "name": "sample-human-1"
+            },
+            "ai": {
+              "slot": "s-92ec",
+              "rawName": "sample-ai-6",
+              "name": "sample-ai-6"
+            },
+            "matched": false
+          },
+          {
+            "figureId": "F2",
+            "human": {
+              "slot": "s-2f1b",
+              "rawName": "sample-human-2",
+              "name": "sample-human-2"
+            },
+            "ai": {
+              "slot": "s-bbe5",
+              "rawName": "sample-ai-4",
+              "name": "sample-ai-4"
+            },
+            "matched": false
+          },
+          {
+            "figureId": "F5",
+            "human": {
+              "slot": "s-0404",
+              "rawName": "sample-human-3",
+              "name": "sample-human-3"
+            },
+            "ai": {
+              "slot": "s-a340",
+              "rawName": "sample-ai-1",
+              "name": "sample-ai-1"
+            },
+            "matched": false
+          },
+          {
+            "figureId": "F3",
+            "human": {
+              "slot": "s-df36",
+              "rawName": "sample-human-4",
+              "name": "sample-human-4"
+            },
+            "ai": {
+              "slot": "s-fc81",
+              "rawName": "sample-ai-5",
+              "name": "sample-ai-5"
+            },
+            "matched": false
+          },
+          {
+            "figureId": "F4",
+            "human": {
+              "slot": "s-6ca4",
+              "rawName": "sample-human-5",
+              "name": "sample-human-5"
+            },
+            "ai": {
+              "slot": "s-22b9",
+              "rawName": "sample-ai-3",
+              "name": "sample-ai-3"
+            },
+            "matched": false
+          },
+          {
+            "figureId": "F6",
+            "human": {
+              "slot": "s-23ea",
+              "rawName": "sample-human-6",
+              "name": "sample-human-6"
+            },
+            "ai": {
+              "slot": "s-25e7",
+              "rawName": "sample-ai-2",
+              "name": "sample-ai-2"
+            },
+            "matched": false
+          }
+        ],
+        "duplicateNames": {
+          "human": [],
+          "ai": []
+        },
+        "unnamed": {
+          "human": [],
+          "ai": []
+        }
+      }
+    },
+    "requests": [
+      {
+        "kind": "judgment",
+        "status": "ok",
+        "model": "synthetic-offline-luna",
+        "usage": null,
+        "latencyMs": 0,
+        "retryCount": 0,
+        "requestSeq": 1
+      },
+      {
+        "kind": "generation",
+        "status": "ok",
+        "model": "synthetic-offline-luna",
+        "usage": null,
+        "latencyMs": 1,
+        "retryCount": 0,
+        "requestSeq": 1
+      },
+      {
+        "kind": "final_submission",
+        "status": "ok",
+        "model": "synthetic-offline-luna",
+        "usage": null,
+        "latencyMs": 0,
+        "retryCount": 0,
+        "requestSeq": null
+      }
+    ],
+    "turnTimings": [
+      {
+        "requestSeq": 1,
+        "lastEventId": "event-2",
+        "pendingEventIds": [
+          "event-2"
+        ],
+        "startedAtMs": 1792865795936,
+        "endedAtMs": 1792865795942,
+        "outcome": "returned",
+        "errorCode": null,
+        "judgeAttempts": 1,
+        "validationFailures": [],
+        "judgeFallback": false,
+        "guardRegenerated": false,
+        "guardFallback": false
+      }
+    ],
+    "diagnostics": {
+      "ledgerFinalMismatch": {
+        "count": 6,
+        "slots": [
+          "s-a340",
+          "s-25e7",
+          "s-22b9",
+          "s-bbe5",
+          "s-fc81",
+          "s-92ec"
+        ]
+      },
+      "ledgerStatusCounts": {
+        "unassigned": 6,
+        "tentative": 0,
+        "agreed": 0,
+        "deferred": 0
+      }
+    },
+    "assignment": {
+      "schemaVersion": "base_assignment_v1",
+      "assignmentId": "40eed1db-2433-43c9-9c1d-14d02174aabd",
+      "strategy": "repair-first",
+      "seed": 731,
+      "referenceMemory": false,
+      "source": {
+        "kind": "server_config_v1",
+        "adapter": "worker_binding",
+        "configId": "658b1964-a5e5-4bde-97d6-d1775c40d635",
+        "revision": 1,
+        "configSha256": "0aeb6cd06bd0d6626fa73481903ea634757263178276d67add030eab6234fb79"
+      },
+      "createdAt": "2026-10-24T18:16:35.609Z"
+    },
+    "questionnaire": {
+      "version": "provisional-v0",
+      "status": "submitted",
+      "answers": {
+        "mental_effort": 4,
+        "task_difficulty": 4,
+        "smoothness": 4,
+        "bothersome": 4
+      },
+      "comment": "Synthetic documentation exercise.",
+      "createdAt": "2026-10-24T18:16:36.320Z",
+      "updatedAt": "2026-10-24T18:16:36.320Z",
+      "submittedAt": "2026-10-24T18:16:36.320Z"
+    }
+  },
+  "ledger": {
+    "b9771f3f-39e6-4c4a-bfa7-6499de23959f": 946684800000
+  },
+  "tombstones": [],
+  "questionnaire:b9771f3f-39e6-4c4a-bfa7-6499de23959f": {
+    "version": "provisional-v0",
+    "status": "submitted",
+    "answers": {
+      "mental_effort": 4,
+      "task_difficulty": 4,
+      "smoothness": 4,
+      "bothersome": 4
+    },
+    "comment": "Synthetic documentation exercise.",
+    "createdAt": "2026-10-24T18:16:36.320Z",
+    "updatedAt": "2026-10-24T18:16:36.320Z",
+    "submittedAt": "2026-10-24T18:16:36.320Z"
+  }
+}
