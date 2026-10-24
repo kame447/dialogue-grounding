@@ -1,3 +1,6 @@
+import { researchGenerationClient } from '../../v2/research-generation-client.ts';
+import { RESEARCH_MAX_DEADLINE_MS } from '../../v2/research-timeouts.ts';
+import type { ResearchTrialProfileV2 } from '../../v2/research-profile.ts';
 // Offline native-pipeline replay. Recorded model results are fixed materials,
 // never semantic expectations, and this module performs no network/key reads.
 import { createDialogueV2 } from "../../v2/dialogue-v2.mjs";
@@ -5,14 +8,14 @@ import { createJevDecisionClient } from "../../decision/jev-decision.ts";
 import { createJevLocalTestClassifier } from "../../local-grounding/jev-local-test.ts";
 import { researchHash } from "../../v2/research-profile.ts";
 import type { researchTrialProfile } from "../../v2/research-profile.ts";
-import type { JevPrivateState } from "../../v2/jev-turn.ts";
+import type { JevPrivateState, JevTurnLocalOptions } from "../../v2/jev-turn.ts";
 import type { ObservationInput, ReobservationResult } from "../../observation/contract.ts";
 import type { LunaClient } from "./live.ts";
 import { buildReobservationMessages } from "../../observation/observe.ts";
 import { EVIDENCE_NORMALIZED_ENVELOPE_FIELDS, imageProjection, projectReplayValue } from "./evidence.ts";
 import type { ReplaySide } from "./evidence.ts";
 import { createChatClient } from "../../client.mjs";
-export type Profile = ReturnType<typeof researchTrialProfile>;
+export type Profile = ReturnType<typeof researchTrialProfile> | ResearchTrialProfileV2;
 export type ReplayTape = { state: JevPrivateState; events: Array<{ id: string; seq: number; speaker: "human" | "ai"; text: string }>;
   luna: Array<{ phase: string; response: Awaited<ReturnType<LunaClient["complete"]>> }>;
   jev: Array<Record<string, unknown>>; reobservations: ReobservationResult[];
@@ -22,9 +25,12 @@ export type ReplayTape = { state: JevPrivateState; events: Array<{ id: string; s
 // body is excluded; phase deadlines remain represented by the effective profile.
 export const REPLAY_EXCLUDED_ENVELOPE_FIELDS = EVIDENCE_NORMALIZED_ENVELOPE_FIELDS;
 export function createProfileDialogue(profile: Profile, options: Parameters<typeof createDialogueV2>[0]) {
-  return createDialogueV2({ ...options, referenceMemory: profile.referenceMemory, decisionMode: profile.decisionMode,
+  const local = options.localGrounding as JevTurnLocalOptions | undefined;
+  const research = profile.id === "research_trial_profile_v2";
+  const researchLimits = research ? { maxDeadlineMs: RESEARCH_MAX_DEADLINE_MS } : undefined;
+  return createDialogueV2({ ...options, client: research ? researchGenerationClient(options.client, profile.timeouts.generationMs) : options.client, referenceMemory: profile.referenceMemory, decisionMode: profile.decisionMode,
     utteranceStyle: profile.utteranceStyle, maxReobservations: profile.maxReobservations,
-    localGrounding: { ...options.localGrounding!, timeoutMs: profile.timeouts.localMs, aiPublicClaims: profile.localGrounding.aiPublicClaims } });
+    localGrounding: { ...options.localGrounding!, ...(research ? { researchLimits, aiPublicTransport: { ...local?.aiPublicTransport, timeoutMs: profile.timeouts.decisionMs, researchLimits } } : {}), timeoutMs: profile.timeouts.localMs, aiPublicClaims: profile.localGrounding.aiPublicClaims } });
 }
 export async function pairedReplay(tape: ReplayTape, own: ObservationInput, expectedModel: string, profile: Profile) {
   const sides: ReplaySide[] = [];
@@ -47,17 +53,17 @@ export async function pairedReplay(tape: ReplayTape, own: ObservationInput, expe
     // Use the native serializer offline; no additional generation parameters.
     const httpClient = createChatClient({ provider: "cloudflare", apiKey: "synthetic-offline-replay-key",
       purpose: profile.modelPolicy.purpose, baseUrl: "http://offline.invalid/v1",
-      timeoutMs: profile.lunaRequest.timeoutMs ?? undefined, maxCompletionTokens: profile.lunaRequest.maxCompletionTokens ?? undefined },
+      timeoutMs: profile.id === "research_trial_profile_v2" ? profile.timeouts.lunaAttemptMs : profile.lunaRequest.timeoutMs ?? undefined, maxCompletionTokens: profile.lunaRequest.maxCompletionTokens ?? undefined },
     async (_url, init) => {
       capture("luna", lunaPhase, JSON.parse(String(init?.body)));
       return Response.json({ model: lunaResponse.model, choices: [{ message: { content: lunaResponse.text } }],
         usage: { prompt_tokens: lunaResponse.usage?.inputTokens, completion_tokens: lunaResponse.usage?.outputTokens } });
     });
-    const client = { async complete(messages: object[], opts: { phase: string }) {
+    const client = { async complete(messages: object[], opts: { phase: string; timeoutMs?: number; signal?: AbortSignal }) {
       const next = frozen.luna[lunaIndex++];
       if (!next || next.phase !== opts.phase) throw new Error("replay_luna_unreached");
       lunaPhase = opts.phase; lunaResponse = structuredClone(next.response);
-      return httpClient.complete(messages);
+      return profile.id === "research_trial_profile_v2" ? httpClient.complete(messages, opts) : httpClient.complete(messages);
     } };
     const fetchImpl = async (_url: string, init: RequestInit) => {
       const body = JSON.parse(String(init.body)), keys = Object.keys(body.questions), state = JSON.parse(body.state);
@@ -68,7 +74,7 @@ export async function pairedReplay(tape: ReplayTape, own: ObservationInput, expe
       return Response.json(response);
     };
     const readKey = async () => "sk-or-SYNTHETIC-offline-replay-key-0000";
-    const jev = { enabled: true, readKey, fetchImpl, timeoutMs: profile.timeouts.decisionMs };
+    const jev = { enabled: true, readKey, fetchImpl, timeoutMs: profile.timeouts.decisionMs, ...(profile.id === "research_trial_profile_v2" ? { researchLimits: { maxDeadlineMs: RESEARCH_MAX_DEADLINE_MS } } : {}) };
     const runtime = createProfileDialogue(profile, { client, image: own.ownImage, anchors: [...own.ownAnchors], strategy: label,
       observer: { async observeAll() { return structuredClone(frozen.state.observationMemo!); }, async reobserve(input) {
         const next = frozen.reobservations[observationIndex++]; if (!next) throw new Error("replay_observation_unreached");

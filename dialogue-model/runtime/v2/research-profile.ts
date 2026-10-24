@@ -1,3 +1,6 @@
+import { MODEL_CONTRACT_V2, MODEL_CONTRACT_V2_TABLE_SHA256 } from '../model-identity-contract.ts';
+import { validateResearchTimeouts } from './research-timeouts.ts';
+import type { ResearchTimeoutsV2 } from './research-timeouts.ts';
 // Node-only research harness profile. Historical runtime defaults are untouched.
 import { createHash } from "node:crypto";
 import { GENERATION_TIMEOUT_MS } from "./dialogue-v2.mjs";
@@ -36,4 +39,17 @@ export function researchTrialProfile(lunaRequest: LunaRequestSettings, phaseTime
       Object.values(phaseTimeouts).some(ms => !Number.isSafeInteger(ms) || ms < 1 || ms > 60000))) throw new Error("invalid_phase_timeouts");
   return frozen({ ...RESEARCH_TRIAL_PROFILE_V1, timeouts: { ...RESEARCH_TRIAL_PROFILE_V1.timeouts, ...phaseTimeouts }, lunaRequest: { ...lunaRequest },
     outputLimit: lunaRequest.maxCompletionTokens === null ? "worker_dependent_effective_value_unverified" : "explicit_client_request" });
+}
+
+
+export type ResearchTrialProfileV2 = Omit<ReturnType<typeof researchTrialProfile>, 'id' | 'timeouts'> & {
+  id: 'research_trial_profile_v2'; timeouts: ResearchTimeoutsV2;
+  modelContract: Readonly<{version: typeof MODEL_CONTRACT_V2.version; tableSha256: typeof MODEL_CONTRACT_V2_TABLE_SHA256}>;
+};
+export function researchTrialProfileV2(lunaRequest: LunaRequestSettings, timeouts: ResearchTimeoutsV2): ResearchTrialProfileV2 {
+  const validated = validateResearchTimeouts(timeouts);
+  if (lunaRequest && lunaRequest.timeoutMs !== null) throw new Error('duplicate_luna_timeout');
+  const legacy = researchTrialProfile(lunaRequest);
+  return frozen({ ...legacy, id: 'research_trial_profile_v2' as const, timeouts: validated,
+    modelContract: { version: MODEL_CONTRACT_V2.version, tableSha256: MODEL_CONTRACT_V2_TABLE_SHA256 } });
 }

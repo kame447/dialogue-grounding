@@ -1,3 +1,5 @@
+import { deadlineLimit, deadlineValue } from '../v2/research-deadline-options.ts';
+import type { ResearchLimits } from '../v2/research-timeouts.ts';
 // Researcher-authorized local experiment (2026-10-20), explicitly enabled only.
 // No .env credentials, Worker changes, automatic retries or calibration claims.
 import { keychainKeyReader, DEFAULT_COST_CAP_USD, UPSTREAM_TIMEOUT_MS } from "../diagnostics/jev-shadow-eval/local-openrouter.ts";
@@ -84,6 +86,7 @@ export type JevLocalTestOptions = {
   fetchImpl?: (url: string, init: RequestInit) => Promise<Response>;
   costCapUsd?: number;
   timeoutMs?: number;
+  researchLimits?: ResearchLimits;
 };
 
 const INSTRUCTIONS = [
@@ -141,9 +144,10 @@ function parseChoices(raw: unknown, payload: JevLocalTestPayload): LocalFunction
  * This is a stop rule, not a guaranteed provider-side prepaid spending limit. */
 export function createJevChoiceTransport(options: JevChoiceTransportOptions = {}): JevChoiceTransport {
   const { readKey = keychainKeyReader(), fetchImpl = globalThis.fetch, costCapUsd = DEFAULT_COST_CAP_USD,
-    timeoutMs = UPSTREAM_TIMEOUT_MS } = options;
+    timeoutMs = UPSTREAM_TIMEOUT_MS, researchLimits } = options;
+  const limit = deadlineLimit(researchLimits);
   if (typeof readKey !== "function" || typeof fetchImpl !== "function" || !finite(costCapUsd) || costCapUsd <= 0 ||
-      costCapUsd > DEFAULT_COST_CAP_USD || !timeout(timeoutMs)) fail("invalid_options");
+      costCapUsd > DEFAULT_COST_CAP_USD || !deadlineValue(timeoutMs, limit)) fail("invalid_options");
   let key: string | null = null;
   let spentUsd = 0, maxCost = 0, callCount = 0;
   let halted = false, busy = false;
@@ -168,8 +172,10 @@ export function createJevChoiceTransport(options: JevChoiceTransportOptions = {}
       try {
         if (callOptions.signal?.aborted) fail("aborted");
         if (busy) fail("busy");
-        const deadline = callOptions.timeoutMs === undefined ? timeoutMs : Math.min(timeoutMs, callOptions.timeoutMs);
-        if (!timeout(callOptions.timeoutMs ?? timeoutMs) || !timeout(deadline)) fail("invalid_options");
+        const raw = researchLimits === undefined ? callOptions.timeoutMs ?? timeoutMs : callOptions.timeoutMs === undefined ? timeoutMs : callOptions.timeoutMs;
+        if (!deadlineValue(raw, limit)) fail("invalid_options");
+        const deadline = callOptions.timeoutMs === undefined ? timeoutMs : Math.min(timeoutMs, researchLimits === undefined ? callOptions.timeoutMs : raw);
+        if (!deadlineValue(deadline, limit)) fail("invalid_options");
         const built = typeof input === "function" ? input() : input;
         if (!object(built) || typeof built.state !== "string" || !object(built.questions)) fail("invalid_request");
         // Whitelist the body and fix the model here, even for untyped callers.

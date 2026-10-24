@@ -7,6 +7,7 @@ import { cacheChecks, fairness, publicPrivacy, wireValidation } from "./fairness
 import { coverage, gates } from "./coverage.ts";
 import { ledger } from "./ledger.ts";
 import { packetChecks } from "./packets.ts";
+import { researchDeadlineChecks } from './research-records.ts';
 import { failureChecks, plannedMapping } from "./failure-records.ts";
 
 export { canonical, hash, sha256, profileHash, META_KEYS } from "./core.ts";
@@ -41,7 +42,7 @@ export function verifyRecords(records: Records) {
       records.summary ? check("records.summary", "pass", "present") : missing("records.summary"));
     if (records.run && records.summary) checks.push(assertion("records.run_id", typeof records.run.runId === "string" && records.run.runId === records.summary.runId, "run_summary_identity"));
     if (records.evidence) checks.push(assertion("records.evidence", records.evidence.version === 1 && records.evidence.runId === records.run?.runId, "evidence_version_run_identity"));
-    checks.push(...failureChecks(records), ...plannedMapping(records));
+    checks.push(...failureChecks(records), ...researchDeadlineChecks(records), ...plannedMapping(records));
     if (records.trials.length === 0) checks.push(missing("records.trials"));
     const orders = records.trials.map(t => t.order);
     checks.push(assertion("records.trial_orders", orders.every(v => Number.isSafeInteger(v) && Number(v) >= 0) && new Set(orders).size === orders.length, "unique_trial_orders"));
@@ -70,7 +71,7 @@ function statusCounts(checks: Check[]) {
   return Object.fromEntries(["pass", "mismatch", "not_comparable", "not_reached"].map(status => [status, checks.filter(c => c.status === status).length]));
 }
 
-const acceptedName = /^(?:run\.private\.json|summary\.private\.json|warmup\.private\.json|failure\.private\.json|trial-\d+\.private\.json|public-\d+-\d+\.packet\.json|billing\.private\.jsonl|verifier-evidence\.private\.json)$/u;
+const acceptedName = /^(?:run\.private\.json|summary\.private\.json|warmup\.private\.json|failure\.private\.json|trial-\d+\.private\.json|public-\d+-\d+\.packet\.json|billing\.private\.jsonl|deadlines\.private\.jsonl|verifier-evidence\.private\.json)$/u;
 async function insideRepository(path: string): Promise<boolean> {
   for (let current = path; ; current = dirname(current)) {
     try { await lstat(join(current, ".git")); return true; }
@@ -91,6 +92,11 @@ export async function loadRecords(directory: string): Promise<Records> {
     if (!info.isFile() || info.isSymbolicLink() || info.size > 64 * 1024 * 1024) throw new Error("unsafe_or_oversized_record_file");
     result.storage!.push({ name, mode: info.mode & 0o777, external: !inRepository && (dirInfo.mode & 0o777) === 0o700, regular: info.nlink === 1 });
     const raw = await readFile(file, "utf8");
+    if (name === "deadlines.private.jsonl") {
+      try { result.deadlineRevisions = (raw.trim() ? raw.trim().split(/\r?\n/u) : []).map(line => parsedObject(line)); }
+      catch { throw new Error('invalid_deadline_records'); }
+      continue;
+    }
     if (name === "billing.private.jsonl") {
       const lines = raw.trim() ? raw.trim().split(/\r?\n/u) : [];
       result.billing = lines.map(line => parsedObject(line)); continue;

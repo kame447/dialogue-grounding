@@ -1,3 +1,5 @@
+import { deadlineLimit, deadlineValue } from '../v2/research-deadline-options.ts';
+import type { ResearchLimits } from '../v2/research-timeouts.ts';
 // Decision 0002 opt-in prototype. No Luna action, strategy intervention or fallback.
 import { keychainKeyReader, DEFAULT_COST_CAP_USD, UPSTREAM_TIMEOUT_MS } from "../diagnostics/jev-shadow-eval/local-openrouter.ts";
 import { isGroundingModel, OPENROUTER_DECISIONS_URL } from "../../../workers/research-ai-proxy/src/grounding.ts";
@@ -434,7 +436,7 @@ export type JevDecisionStageCallEvidence = JevDecisionStageEvidence & { status: 
 export type JevDecisionCallEvidence = Omit<JevDecisionEvidence, "stages"> & { callIndex: number; status: "ok" | "error"; error: JevDecisionErrorCode | null;
   rejectionCode: JevDecisionRejectionCode | null; stages: JevDecisionStageCallEvidence[] };
 export type JevDecisionClientOptions = { enabled?: boolean; readKey?: () => Promise<string>; fetchImpl?: (url: string, init: RequestInit) => Promise<Response>;
-  costCapUsd?: number; timeoutMs?: number; questionLayout?: JevQuestionLayout };
+  costCapUsd?: number; timeoutMs?: number; researchLimits?: ResearchLimits; questionLayout?: JevQuestionLayout };
 
 /** Approved Keychain/transport/observed-cost stop rule, shared across both stages.
  * One deadline per decision, no retry or fallback; unknown billable outcomes stop the instance. */
@@ -447,9 +449,10 @@ export function createJevDecisionClient(options: JevDecisionClientOptions = {}):
 }) | null {
   if (options.enabled !== true) return null;
   const { readKey = keychainKeyReader(), fetchImpl = globalThis.fetch, costCapUsd = DEFAULT_COST_CAP_USD, timeoutMs = UPSTREAM_TIMEOUT_MS,
-    questionLayout = "two_stage_v1" } = options;
+    questionLayout = "two_stage_v1", researchLimits } = options;
+  const limit = deadlineLimit(researchLimits);
   if (typeof readKey !== "function" || typeof fetchImpl !== "function" || !finite(costCapUsd) || costCapUsd <= 0 ||
-      costCapUsd > DEFAULT_COST_CAP_USD || !deadlineValid(timeoutMs) || questionLayout !== "two_stage_v1") fail("invalid_options");
+      costCapUsd > DEFAULT_COST_CAP_USD || !deadlineValue(timeoutMs, limit) || questionLayout !== "two_stage_v1") fail("invalid_options");
   let key: string | null = null, lastEvidence: JevDecisionCallEvidence | null = null;
   let spentUsd = 0, maxCost = 0, callCount = 0, referentCallCount = 0;
   let lastReferentEvidence: HumanReferentEstimate | null = null;
@@ -481,8 +484,9 @@ export function createJevDecisionClient(options: JevDecisionClientOptions = {}):
       try {
         if (callOptions.signal?.aborted) fail("aborted");
         if (busy) fail("busy");
-        if (!deadlineValid(callOptions.timeoutMs ?? timeoutMs)) fail("invalid_options");
-        const deadline = Math.min(timeoutMs, callOptions.timeoutMs ?? timeoutMs);
+        const raw = researchLimits === undefined ? callOptions.timeoutMs ?? timeoutMs : callOptions.timeoutMs === undefined ? timeoutMs : callOptions.timeoutMs;
+        if (!deadlineValue(raw, limit)) fail("invalid_options");
+        const deadline = Math.min(timeoutMs, raw);
         const p = referent ? prepareReferent(input) : prepare(input, questionLayout);
         referentSlots = p.slots;
         const snapshot = structuredClone(input);
