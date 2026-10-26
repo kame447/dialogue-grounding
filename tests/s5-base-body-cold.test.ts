@@ -1,13 +1,14 @@
+import {tmpdir} from 'node:os';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, rm, readFile } from 'node:fs/promises';
+import { realpath, mkdtemp, mkdir, writeFile, rm, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { root, config } from './support/s5-base/support.ts';
 const { startNamingServer }: any = await import(pathToFileURL(join(root, 'dialogue-model/runtime/web/server.mjs')).href);
 const { createNamingTaskV2 }: any = await import(pathToFileURL(join(root, 'dialogue-model/runtime/v2/naming-task-v2.mjs')).href);
 async function cold(t: any) {
-  const dir = await mkdtemp('/private/tmp/SandyNoether-s5-body-'), owners = join(dir, 'owners'), file = join(dir, 'config.json');
+  const dir = await mkdtemp(join(await realpath(tmpdir()),'SandyNoether-s5-body-')), owners = join(dir, 'owners'), file = join(dir, 'config.json');
   await mkdir(owners, { mode: 0o700 }); await writeFile(file, JSON.stringify(config()), { mode: 0o600 });
   const counts = { factory: 0, restore: 0, model: 0 }; let server: any;
   const options = { port: 0, baseStoreRoot: owners, baseAssignmentFile: file,

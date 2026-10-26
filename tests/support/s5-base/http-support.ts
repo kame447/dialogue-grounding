@@ -1,11 +1,12 @@
-import {mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {realpath,mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';
 import {join} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {root,config,raw,load,clone} from './support.ts';
 export const serverModule=await import(pathToFileURL(join(root,'dialogue-model/runtime/web/server.mjs')).href);
 export const ADMIN='synthetic-admin-only-token-01234567890123456789';
 export async function web(t:any,extra:any={}){
- const dir=await mkdtemp('/private/tmp/SandyNoether-s5-http-');const file=join(dir,'config.json'),storeRoot=join(dir,'owners');await mkdir(storeRoot,{mode:0o700});await writeFile(file,JSON.stringify(config()),{mode:0o600});
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'SandyNoether-s5-http-'));const file=join(dir,'config.json'),storeRoot=join(dir,'owners');await mkdir(storeRoot,{mode:0o700});await writeFile(file,JSON.stringify(config()),{mode:0o600});
  const tasks:any[]=[],inputs:any[]=[],limiterKeys:string[]=[];let server:any,counter=0;
  const options:any={port:0,client:{},runDir:null,now:()=>946684800000,hideStrategy:true,baseAssignmentFile:file,baseStoreRoot:storeRoot,adminToken:ADMIN,adminLimiter:{async limit({key}:any){limiterKeys.push(key);return{success:true}}},
   createTaskV2:async(o:any)=>{inputs.push(o);const r=clone(o.restore??raw());if(!o.restore){counter++;r.recordId=counter===1?'33333333-3333-4333-8333-333333333333':'44444444-4444-4444-8444-444444444444';r.seed=o.seed;r.strategy=o.strategy;r.options.referenceMemory=o.referenceMemory}
