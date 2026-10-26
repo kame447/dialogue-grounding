@@ -49,6 +49,7 @@ export type LocalStore = BaseFileStore & {
   inspect(): Promise<BaseLocalContainer>;
   touch(): Promise<void>;
   saveQuestionnaire(id: string, value: unknown): Promise<void>;
+  deleteRecord(id: string): Promise<boolean>;
 };
 export async function registerBaseOwner(root: string, ownerId: string, now: number): Promise<void> {
   await privateDirectory(root); if (!OWNER.test(ownerId) || !safeInt(now) || now < 0) throw fail();
@@ -111,9 +112,32 @@ export async function openBaseFileStore({root, ownerId, now}: {root: string; own
       if (!c.archives[id] || c.tombstones.includes(id)) throw new BaseSessionError('not_found');
       c.questionnaires[id] = structuredClone(value); c.lastAccessMs = now(); await save(c);
     }),
+    deleteRecord: id => queued(async () => {
+      try {
+        if (typeof id !== 'string' || !UUID.test(id)) throw fail();
+        const c = await load();
+        if (expired(c)) throw new BaseSessionError('owner_expired');
+        if (c.tombstones.includes(id) || !Object.hasOwn(c.archives, id)) return false;
+        const record = c.archives[id];
+        const envelope = Object.values(c.owner.admissions).find(e => e?.record?.recordId === id);
+        if (!envelope) throw fail();
+        validateBoundBaseRecord(record, envelope.assignment);
+        delete c.archives[id]; delete c.questionnaires[id]; delete c.ledger[id];
+        c.tombstones.push(id);
+        envelope.record = null; envelope.status = 'failed'; envelope.errorCode = 'record_deleted';
+        c.owner.revision += 1;
+        await save(c); return true;
+      } catch (error) {
+        if (error instanceof BaseSessionError && error.code === 'owner_expired') throw error;
+        throw fail();
+      }
+    }),
     close: () => queued(async () => {
       if (closed) return; closed = true; await locked.close();
-      const s = await lstat(lock).catch(() => null);
+      const s = await lstat(lock).catch((error:NodeJS.ErrnoException) => {
+        if (error.code === 'ENOENT') return null;
+        throw fail();
+      });
       if (s && s.ino === lockStat.ino && s.dev === lockStat.dev) await unlink(lock);
     }),
   };

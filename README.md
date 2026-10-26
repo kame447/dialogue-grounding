@@ -6,6 +6,14 @@
 
 現在の操作確認ページは [タングラム共同命名 v2](https://tangram-grounding-experiment.kame-website.workers.dev/) です（認証不要）。Cloudflare上のTypeScriptエントリポイント、デプロイ手順と制約は [公開版README](workers/tangram-experiment/README.md) を参照してください。
 
+### BASE の参加者用起動と研究者の操作
+
+この作業版の参加者ページには、方略・seed を選ぶ開始フォームはありません。ローカルWebサーバー（`server.mjs`）では、研究者が用意した private な設定ファイルを `--base-assignment-file` で、既存の private な保存先ディレクトリを `--base-store-root` で明示的に指定します。Worker版Webは `BASE_ASSIGNMENT_JSON` を使います。設定が無い場合、新しい試行は開始できません。条件の割当方式をソフトウェアが決める仕組みではありません。
+
+ローカルWebサーバーの管理機能は、起動時の環境変数 `ADMIN_TOKEN` で有効にします。token の値を CLI 引数、URL、Cookie、参加者の入力には渡しません。連絡先の表示には `PARTICIPANT_CONTACT_TEXT` を使います。研究者は認証済みの `/admin` から記録を書き出し、完了した記録の `prepare-next` で次の試行を用意できます。ローカルWebサーバーの設定、保存先の指定、同じ Cookie での復元、lock の復旧については [runtime の手順](dialogue-model/runtime/README.md#base-web-の設定保存と研究者操作) を参照してください。
+
+これは作業版の技術的な操作手順です。公開デモへの反映、本実験の開始、割当方式や質問紙の採用を意味しません。
+
 ## 研究領域
 
 `annotation/` は既存の人間対話で観察された表象のずれと調整を記述する領域です。発話機能 a1–a30、ずれ状態 M0–M4、調整過程 P1–P6、エピソード結果 ER0/ER1、局所問題の後続処理を扱います。

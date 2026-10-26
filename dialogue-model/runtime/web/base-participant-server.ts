@@ -1,4 +1,5 @@
 import { createServer } from 'node:http';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { readFile, lstat } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -11,7 +12,7 @@ import { openBaseFileStore, privateDirectory, registerBaseOwner, readPrivateAssi
 import type { LocalStore } from './base-assignment-store.ts';
 import type { BaseSession, BaseTask } from '../v2/base-assignment.ts';
 import { lockResult, participantReview, recordListEntry, sortRecordList, QUESTIONNAIRE_FORM, applyQuestionnaire } from '../v2/participant-records.ts';
-import { handleAdmin, isAdminPath } from '../../../workers/tangram-experiment/src/admin/routes.ts';
+import { handleAdmin, isAdminPath, ADMIN_HEADERS } from '../../../workers/tangram-experiment/src/admin/routes.ts';
 import { summarizeRecord } from '../../../workers/tangram-experiment/src/admin/summary.ts';
 import { summarizeLatency } from '../v2/latency.ts';
 import { participantContactHTML } from '../v2/participant-contact.ts';
@@ -20,20 +21,32 @@ const STATIC: Record<string, [string,string]> = {'/':['index.html','text/html'],
 const ID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/u;
 const failure = () => new BaseSessionError('trial_unavailable');
 type Entry = {store: LocalStore; coordinator: BaseSession};
+type DrainableServer = ReturnType<typeof createServer> & { drainAndClose(): Promise<void> };
 export function createBaseParticipantServer(options: Record<string, any> = {}) {
   if (Object.hasOwn(options,'baseAssignment')) throw failure();
   const {client,baseAssignmentFile,baseStoreRoot,now=Date.now,createTaskV2=createNamingTaskV2,utteranceStyle='default',activeDecision=null,groundingShadow=null,adminToken,adminLimiter}=options;
   if (!['default','concise'].includes(utteranceStyle)) throw new Error('Invalid utterance style');
   if (activeDecision !== null && (!['decision_jev','decision_luna'].includes(activeDecision?.purpose) || typeof activeDecision.client?.chooseAction !== 'function')) throw new Error('Invalid active decision client');
   const entries = new Map<string,Promise<Entry>>();
+  const loadedStores = new Set<LocalStore>();
+  const handlers = new Set<Promise<void>>(), persists = new Set<Promise<void>>();
+  let draining = false, persistSealed = false, drainFailed = false;
+  let drainPromise: Promise<void> | undefined;
   async function entry(ownerId: string) {
     let p = entries.get(ownerId);
     if (!p) {
       p = (async()=>{
         const store=await openBaseFileStore({root:baseStoreRoot,ownerId,now});
+        loadedStores.add(store);
         const coordinator=createBaseAssignmentSession({ownerId,store,now,newId:randomUUID,adapter:'local_private_file',
           readConfig:async()=>baseAssignmentFile ? readPrivateAssignment(baseAssignmentFile) : null,
-          makeTask:async value=>createTaskV2({client,...value,activeDecision,utteranceStyle,...(groundingShadow?{groundingShadow}:{})})});
+          makeTask:async value=>createTaskV2({client,...value,activeDecision,utteranceStyle,...(groundingShadow?{groundingShadow}:{}),
+            onPersist:async (record:Parameters<typeof value.onPersist>[0])=>{
+              if(persistSealed)throw new NamingTaskError('record_write_failed');
+              const work=Promise.resolve().then(()=>value.onPersist(record));persists.add(work);
+              work.then(()=>persists.delete(work),()=>{if(draining)drainFailed=true;persists.delete(work);});
+              await work;
+            }})});
         return {store,coordinator};
       })(); entries.set(ownerId,p); p.catch(()=>entries.delete(ownerId));
     }
@@ -51,10 +64,19 @@ export function createBaseParticipantServer(options: Record<string, any> = {}) {
     }
     return null;
   }
-  const server=createServer(async(req,res)=>{
+  const server=createServer((req,res)=>{
+    const accepted=!draining,work=handle(req,res);
+    if(accepted)handlers.add(work);
+    work.then(()=>handlers.delete(work),()=>{
+      if(draining)drainFailed=true;handlers.delete(work);
+      try{if(!res.headersSent)res.writeHead(500,{'Content-Type':'application/json'});res.end('{"error":"trial_unavailable"}');}catch{/* disconnected socket */}
+    });
+  }) as DrainableServer;
+  async function handle(req:IncomingMessage,res:ServerResponse):Promise<void>{
     res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','no-referrer');
     res.setHeader('Content-Security-Policy',"default-src 'self'; img-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
     const json=(status:number,value:unknown)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(value));};
+    if(draining)return json(503,{error:'trial_unavailable'});
     async function body(max=65536) {
       if(req.headers['content-type']?.split(';')[0].trim()!=='application/json')throw new BaseSessionError('invalid_request');
       const chunks=[];let size=0;for await(const c of req){size+=c.length;if(size>max)throw new BaseSessionError('invalid_request');chunks.push(c);}
@@ -73,12 +95,33 @@ export function createBaseParticipantServer(options: Record<string, any> = {}) {
         headers.set('CF-Connecting-IP',req.socket.remoteAddress??'ip-unavailable');
         const init:any={method:req.method,headers}; if(req.method!=='GET'&&req.method!=='HEAD'){init.body=req;init.duplex='half';}
         const request=new Request(url,init);
-        const response=await handleAdmin(request,{token:adminToken,limiter:adminLimiter,retentionDays:0,
+        const preparingNext=req.method==='POST'&&/^\/admin\/record\/[^/]+\/prepare-next$/u.test(url.pathname);
+        let response: Response;
+        try { response=await handleAdmin(request,{token:adminToken,limiter:adminLimiter,retentionDays:0,
           listPage:async()=>{const items=[];for(const owner of await listBaseOwners(baseStoreRoot)){const e=await entry(owner),c=await e.store.inspect();for(const id of Object.keys(c.archives)){const r=await e.store.readRecord(id);if(r)items.push(summarizeRecord({...r,questionnaire:c.questionnaires[id]??null},owner,summarizeLatency(r)));}}return {items,next:null};},
-          getSummary:async id=>{const found=await lookupRecord(id);return found?summarizeRecord(found.r,found.owner,summarizeLatency(found.r)):null;},
+          getSummary:async id=>{
+            const found=await lookupRecord(id);
+            if(!found&&preparingNext)for(const owner of await listBaseOwners(baseStoreRoot)){
+              const saved=await (await entry(owner)).store.inspect();
+              if(saved.tombstones.includes(id))throw new BaseSessionError('not_found');
+            }
+            return found?summarizeRecord(found.r,found.owner,summarizeLatency(found.r)):null;
+          },
           getRecord:async summary=>{const e=await entry(summary.objectId),r=await e.store.readRecord(summary.recordId),c=await e.store.inspect();return r?{...r,questionnaire:c.questionnaires[summary.recordId]??null}:null;},
-          deleteRecord:async()=>{throw failure();},audit:async()=>[],summarizeLatency,
+          deleteRecord:async summary=>{
+            try { if (!await (await entry(summary.objectId)).store.deleteRecord(summary.recordId)) throw new BaseSessionError('not_found'); }
+            catch(error) {
+              if(error instanceof BaseSessionError && (error.code==='owner_expired'||error.code==='not_found')) throw error;
+              throw failure();
+            }
+          },audit:async()=>[],summarizeLatency,
           prepareNext:async summary=>(await entry(summary.objectId)).coordinator.prepareNext(summary.recordId)});
+        } catch(error) {
+          if (!(error instanceof BaseSessionError) || (error.code!=='owner_expired'&&error.code!=='not_found')) throw error;
+          response=preparingNext
+            ? new Response(JSON.stringify({error:'not_found'}),{status:404,headers:{...ADMIN_HEADERS,'Content-Type':'application/json; charset=utf-8'}})
+            : new Response('Not found',{status:404,headers:{...ADMIN_HEADERS,'Content-Type':'text/plain; charset=utf-8'}});
+        }
         res.writeHead(response.status,Object.fromEntries(response.headers));res.end(Buffer.from(await response.arrayBuffer()));return;
       }
       if(req.headers.origin&&req.headers.origin!==origin)return json(403,{error:'request_forbidden'});
@@ -144,8 +187,27 @@ export function createBaseParticipantServer(options: Record<string, any> = {}) {
       const code=error instanceof NamingTaskError&&allowed.includes(error.code)?error.code:'trial_unavailable';
       return json(['scoring_error','record_write_failed'].includes(code)?500:['ai_unavailable','invalid_ai_submission'].includes(code)?502:['busy','ai_busy','ai_retry_required','questionnaire_submitted','trial_not_completed','trial_unavailable'].includes(code)?409:400,{error:code});
     }
-  });
+  }
   const close=server.close.bind(server);
+  server.drainAndClose=()=>{
+    if(drainPromise)return drainPromise;
+    draining=true;
+    const sockets=new Promise<void>((resolve,reject)=>close(error=>error?reject(error):resolve()));
+    drainPromise=(async()=>{
+      while(handlers.size)await Promise.all([...handlers]);
+      // A request can become idle after close()'s initial idle-connection sweep.
+      // Let end()/pipelined response finish events run before testing for idleness.
+      await new Promise<void>(resolve=>setImmediate(resolve));
+      server.closeIdleConnections();
+      await sockets;
+      while(persists.size)await Promise.all([...persists]);
+      // No await between observing no started writers and sealing the callback entry.
+      persistSealed=true;
+      if(drainFailed)throw new Error('shutdown_incomplete');
+      await Promise.all([...loadedStores].map(store=>store.close()));
+    })();
+    return drainPromise;
+  };
   server.close=((callback?: (e?:Error)=>void)=>close((error?:Error)=>{Promise.allSettled([...entries.values()].map(async p=>(await p).store.close())).then(()=>callback?.(error));})) as typeof server.close;
   return server;
 }

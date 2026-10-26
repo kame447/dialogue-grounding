@@ -54,11 +54,65 @@ npm test でローカルHTTP模擬APIとWorker契約を検証します。本物�
 
 実際のタングラム刺激を画像として提示し、AI自身の画像・公開された会話・自身の作業メモで対話します。両者の配置・向きは異なります。同じ整数seed（JavaScriptの安全な整数範囲）を指定すると刺激を再現できます。方略比較では、同じseed、Workerの同じモデル、同じ生成設定を使用してください。方略以外の差を統制する模擬テストはありますが、実際の方略操作の有効性は未検証です。
 
-ローカルWeb UI:
+この手順では、実行形態を次のように呼び分けます。参加者用Web（BASE）は、開始時の割当をサーバー側で管理するWebアプリを指します。
 
-    node --env-file=.env dialogue-model/runtime/web/server.mjs --port 8787 --hide-strategy
+| 呼び方 | 実行する入口 | 用途 |
+|---|---|---|
+| ローカルWebサーバー | `web/server.mjs` | ローカルのブラウザで参加者用Webを使う。コマンドラインから直接起動する場合と、関数を呼ぶラッパーから起動する場合がある。 |
+| Worker版Web | `workers/tangram-experiment/src/index.ts` | WorkerとDurable Objectで参加者用Webを動かす。 |
+| 対話CLI | `naming-cli.mjs` | ターミナル上で対話する従来の入口。Webサーバーの起動コマンドとは別。 |
 
-ブラウザで http://127.0.0.1:8787 を開き、研究者が方略と整数seedを選んで開始します。開始後は人間側画像、公開チャット、自分の6位置への名称入力フォームが表示されます。`--hide-strategy` は試行状態のAPI応答からも方略名を除きます。開始画面は研究者用なので、設定後に参加者へ渡してください。サーバーは127.0.0.1のみにbindし、同じブラウザのCookieで試行を保持します。サーバー再起動時の復旧はありません。
+ローカルWebサーバーの起動例:
+
+    node --env-file=/path/to/private/operator.env dialogue-model/runtime/web/server.mjs --port 8787 --base-assignment-file /path/to/private/assignment.json --base-store-root /path/to/private/owners
+
+ブラウザで http://127.0.0.1:8787 を開きます。参加者には方略・seed の開始フォームを表示せず、サーバーが研究者の設定を検証して試行を用意します。人間側画像、公開チャット、自分の6位置への名称入力フォームが表示されます。方略・seed・assignment は参加者の状態に含めません。サーバーは127.0.0.1のみにbindし、同じブラウザの Cookie と保存済み owner を結び付けます。保存先と設定の詳細は下記を参照してください。上のコマンドは起動方法の例であり、実 API への接続や本実験の開始を承認するものではありません。
+
+### BASE Web の設定・保存と研究者操作
+
+ローカルWebサーバーには、リポジトリ外の既存ディレクトリを明示します。`--base-store-root` で指定する保存先ディレクトリそのものと、`--base-assignment-file` で指定する設定ファイルの親ディレクトリを0700にします。設定ファイルと保存先内の owner ファイルは0600にし、symlink・hardlink を使いません。`--base-assignment-file` と `--base-store-root` に既定の保存先や条件はありません。未設定・不正な設定では新規 admission を拒否し、保存先が不正なときは復元も行いません。メモリだけの保存へ切り替えることはありません。
+
+`assignment.json` の合成例です。研究条件として採用された値ではありません。
+
+```json
+{"schemaVersion":"base_assignment_config_v1","configId":"b5d3bff2-121e-4573-9fc3-f7d6e43e30ce","revision":1,"strategy":"repair-first","seed":73,"referenceMemory":false}
+```
+
+新しい admission のたびに設定を読みます。ファイルを変えても、既存の試行の割当は変わりません。`POST /api/start` の body は `{"version":2}` だけです。参加者が strategy や seed などを追加すると400になり、試行を差し替えません。公開の `/v1/` と旧 API は404です。対話CLI（`naming-cli.mjs`）は別の入口です。
+
+起動用の環境変数 `ADMIN_TOKEN` が未設定なら `/admin` は404です。設定する場合は32〜512文字の空白を含まない ASCII 文字列を、研究者が管理する環境から渡します。token の値をコマンド引数、URL、Cookie、参加者の body、通常ログには含めません。上の `--env-file` は private なファイルのパスだけを渡す例です。実際に誰が token を保持するかは運用者が決めます。連絡先には公開してよい `PARTICIPANT_CONTACT_TEXT` を設定できます。未設定なら暫定の案内文を使い、不正な型・長さ・制御文字などが設定されていれば、ローカルWebサーバーは起動を拒否します。token と連絡先を試行の割当情報へ保存することはありません。
+
+管理者の認証は HTTP の Authorization（Bearer、またはユーザー名 `researcher` の Basic）を使います。parse できる認証情報を伴う要求は、正誤にかかわらず同じ socket 接続元ごとに30回／60秒までです。超えると429と `Retry-After: 60` を返します。これは local プロセス内の制限で、複数プロセスにまたがる保証はありません。クライアントが送った転送元ヘッダーは管理者の識別に使いません。
+
+完了した記録に対する研究者の操作は `POST /admin/record/<recordId>/prepare-next`、JSON body は `{}` です。認証と同一 Origin の確認を通った場合だけ次の試行を作り、最初は201、同じ完了記録への再要求は、同じ after-key（引き継ぎ元の記録IDに結び付けた、次の試行の保存キー）を使い、同じ次の記録IDで200を返します。参加者の画面操作から条件を選び直すことはできません。質問紙が未提出でも技術的には次へ進めますが、その引き継ぎの運用と質問紙の採用は研究者の判断が必要です。
+
+記録を書き出すには、認証後に `GET /admin/record/<recordId>.json` にアクセスします。削除するには、管理画面 `/admin` の一覧から対象の記録の詳細を開き、削除の確認欄にその `<recordId>` を入力して実行します。ローカルWebサーバーの削除は、archive・質問紙・ledger と owner 内の当該 snapshot を同じ更新で取り除き、tombstone と `record_deleted` を残します。遅れた保存で復活させず、削除した試行の割当を新しく作り直しません。次の試行が削除済みの場合、引き継ぎ元への after-key 再要求は404です。現在の試行が削除済みの場合、参加者の start/restore は409です。外部のバックアップや書き出し済みファイル、ディスクの物理的な消去までを保証する処理ではありません。
+
+ローカルWebサーバーは会話・提出・暫定採点・割当を、private な owner container に保存します。`RESEARCH_RUN_DIR` による従来の個別ファイル出力とは別です。保存済み owner と同じ Cookie で再起動後も同じ試行を復元し、メモリの状態が無いことを新規割当の理由にしません。ローカルWebサーバーの既存の30分 idle 期限は維持します。期限切れや削除、壊れた binding は復元しません。質問紙提出前の結果は引き続き伏せます。
+
+`record_deleted` を保存した root は、この marker を理解する更新版だけで開いてください。更新版は従来の有効な記録を移行なしで読みますが、旧版は新 marker を拒否します。旧版へ戻して不明な owner として扱ったり、marker を消して新しい割当を作ったりしてはいけません。異なる版の writer を混在させません。
+
+### local lock の停止・復旧
+
+同じ owner に複数の writer を立てないでください。ローカルWebサーバーをコマンドラインから直接起動した場合は、Ctrl-C（SIGINT）または SIGTERM で新規リクエストの受理を止めます。受理済みの HTTP handler と開始済みの保存の完了を待ち、そのサーバーが保持する store と lock を閉じて exit 0 で終了します。切断された request の handler も完了まで追跡します。二重の signal で処理や期限をやり直すことはありません。programmatic な `main()` や `startNamingServer()` は process の signal handler を自動登録しません。ラッパー側で `drainAndClose()` を待つか、明示的に `attachLocalShutdown()` を使います。
+
+協調停止の既定の期限は30秒です。期限切れや保存・close の失敗では、固定の `shutdown_incomplete` と exit 1 で終了します。保留中の保存の lock を強制的に外しません。これは AI の生成や採点の完走を保証する処理ではなく、開始済みの保存を待つ境界です。受理済みで未完了の queue は、保存済みの範囲で従来の復元処理に委ねます。停止の期限は AI の timeout や研究条件の時間制限を変更しません。event loop が停止している場合の厳密な実時間の保証もありません。
+
+SIGKILL、期限切れなどで lock が残っている場合は API が409、ページが503になることがあります。lock の古さや接続失敗だけでは回収しません。exit 1 のときに成功扱いで次の writer を起動せず、停止を確認してから下記の条件を満たす復旧手順を使います。
+
+強制終了などの後は、単一マシンの共有されていない private 保存先に限り、次の順で手動復旧します。
+
+1. この保存先を使う全 writer と自動再起動を停止し、新しい writer が起動しない排他的な保守区間を確保します。運用者が起動した既知の対象プロセス（PID）と、その子プロセスの終了を確認します。不明な writer が存在する場合や、権限不足により確認・停止ができない場合は中止します。`pkill` は使いません。
+2. 正準の0700保存先と、非公開記録から確認した64桁の owner ID を使います。`<ownerId>.owner.json` と `.<ownerId>.lock` は通常ファイル0600・link数1とし、symlink は認めません。
+3. 保存先の外に0700の別のバックアップ先ディレクトリを作り、owner と lock のコピーを0600で保存します。owner ファイルと lock ファイルそれぞれの SHA256、および lock ファイルの dev/ino/size を private な記録に残します。
+4. writer を止めたまま、owner ファイルの SHA256 と、lock ファイルの dev/ino/size/SHA256 を再確認します。変化があれば中止します。確認したlockの完全なパス1件だけを削除します。owner、tombstone、他のlock、一時ファイルは消しません。ワイルドカードを使いません。
+5. writer を1つだけ起動し、同じ Cookie・公開sessionId・保存済み assignment の結び付きを確認します。保存済み preparing は従来どおり `start_interrupted` になり、active へ昇格させません。失敗した場合に別の条件で置き換えません。
+
+この手順は全 writer を止めて新規起動を防ぐ運用が前提です。runtime が未知の writer の不存在を保証する仕組みではありません。共有・複数ホストの保存先や、途中の AI キュー、電源断からの完全復旧は保証しません。稼働中や二重起動時の lock 回収は認めません。
+
+### Worker の BASE 設定
+
+Worker版Webでは `BASE_ASSIGNMENT_JSON` に、上述の `assignment.json` と同形式の設定を JSON 文字列として設定します。`PARTICIPANT_CONTACT_TEXT` は公開してよい連絡先の表示に使います。`ADMIN_TOKEN` は既存の Secret、管理用 limiter は既存の binding です。ローカルWebサーバーの環境変数を Worker に自動転送する仕組みではありません。保存先は Durable Object であり、ローカルWebサーバーの owner ファイルや手動 lock 復旧を流用しません。この説明は deploy や実 API の利用の指示ではありません。
 
 対話CLI:
 
@@ -76,7 +130,7 @@ npm test でローカルHTTP模擬APIとWorker契約を検証します。本物�
 
 ### 研究記録
 
-既定では会話・提出・採点をディスクに保存しません。保存する場合だけ、リポジトリ外の `RESEARCH_RUN_DIR` を `.env` に設定します。例えば `/Users/your-name/ResearchRuns/naming` のような専用ディレクトリを使います。Gitリポジトリ内、ignore対象ディレクトリ、リポジトリ内へ向くシンボリックリンクは拒否します。
+対話CLI（`naming-cli.mjs`）では、保存する場合だけリポジトリ外の `RESEARCH_RUN_DIR` を設定します。例えば `/Users/your-name/ResearchRuns/naming` のような専用ディレクトリを使います。Gitリポジトリ内、ignore対象ディレクトリ、リポジトリ内へ向くシンボリックリンクは拒否します。ローカルWebサーバーは上記の必須の private owner 保存先を使い、この任意保存の説明とは区別します。
 
 試行ごとにランダムな記録IDのJSONを作り、各操作後に更新します。方略、seed、公開発話、各自の非公開提出、暫定採点、各リクエストの応答モデル名・トークン数・レイテンシ・再試行回数を含みます。判断履歴には各ターンのJudgment、検証・フォールバックの有無、作業メモの更新前後のスナップショットも保存します。対応表 `key` は双方提出後の `scoring` 内にのみ保存し、画像本文・APIキー・プロンプト全文・上流の生エラーは保存しません。途中終了した試行も、最後の確定状態まで記録します。記録には非公開の提出も含まれるので、参加者用画面ではなく研究者が管理してください。
 
