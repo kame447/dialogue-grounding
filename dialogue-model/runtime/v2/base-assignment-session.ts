@@ -175,6 +175,7 @@ export function createBaseAssignmentSession(options: BaseSessionOptions): BaseSe
         if (predecessor.status !== 'completed') return fail('busy');
         const key: AdmissionKey = `after:${id}`, existing = old.admissions[key];
         if (existing) {
+          if (existing.status === 'failed' && existing.record === null && existing.errorCode === 'record_deleted') return fail('not_found');
           if (existing.status === 'preparing') return fail('busy');
           if (existing.status === 'failed' || !existing.record) return fail();
           if (!await archived(existing.record.recordId)) return fail('not_found');

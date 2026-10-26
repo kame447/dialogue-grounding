@@ -11,6 +11,8 @@ import { createNamingTask, NamingTaskError, outsideRepositoryDirectory } from ".
 import { createNamingTaskV2 } from "../v2/naming-task-v2.mjs";
 import { createDecisionComparisonClient } from "../decisions-client.mjs";
 import { createGroundingJudgeClient } from "../grounding/client.ts";
+import { readLocalOperatorOptions } from "./local-operator-options.ts";
+import { attachLocalShutdown } from "./local-shutdown.ts";
 import { applyQuestionnaire, lockResult, participantReview, QUESTIONNAIRE_FORM, recordListEntry, sortRecordList } from "../v2/participant-records.ts";
 
 const PUBLIC = dirname(fileURLToPath(import.meta.url));
@@ -79,12 +81,13 @@ export async function main(argv = process.argv.slice(2), env = process.env,
   }
   const purpose = values["active-decision-judge"];
   if (purpose !== undefined && !["decision_jev", "decision_luna"].includes(purpose)) throw new Error("Invalid active decision purpose");
+  const operatorOptions = readLocalOperatorOptions(env);
   const config = loadConfig(env);
   const client = createClient(config);
   const activeDecision = purpose === undefined ? null : { client: createDecisionClient(config), purpose };
   // Research-only shadow (default off): records two-axis grounding evidence privately, never changes the dialogue.
   const groundingShadow = values["grounding-shadow"] ? { judge: createGroundingClient(config) } : null;
-  const server = await startServer({ port: Number(values.port), client, runDir: env.RESEARCH_RUN_DIR, hideStrategy: values["hide-strategy"], activeDecision,
+  const server = await startServer({ port: Number(values.port), client, runDir: env.RESEARCH_RUN_DIR, hideStrategy: values["hide-strategy"], activeDecision, ...operatorOptions,
     baseAssignmentFile: values["base-assignment-file"], baseStoreRoot: values["base-store-root"],
     utteranceStyle: values["utterance-style"] ?? "default", ...(groundingShadow ? { groundingShadow } : {}) });
   console.log("共同命名課題: http://127.0.0.1:" + server.address().port);
@@ -92,5 +95,6 @@ export async function main(argv = process.argv.slice(2), env = process.env,
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  main().catch(() => { console.error("起動できませんでした。接続設定とポートを確認してください。"); process.exitCode = 1; });
+  main().then(server => { if (server) attachLocalShutdown(server); })
+    .catch(() => { console.error("起動できませんでした。接続設定とポートを確認してください。"); process.exitCode = 1; });
 }

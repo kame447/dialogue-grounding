@@ -82,7 +82,8 @@ export function readOwner(value: unknown, ownerId: string): BaseOwnerState {
       const e = data(v, ['schemaVersion', 'assignment', 'status', 'record', 'errorCode']), a = readAssignment(e.assignment);
       if (e.schemaVersion !== 'base_assigned_session_v1' || assignmentIds.has(a.assignmentId)) throw new Error('assignment'); assignmentIds.add(a.assignmentId);
       if (e.status === 'active' ? e.record === null || e.errorCode !== null : e.status === 'preparing' ? e.errorCode !== null :
-          e.status !== 'failed' || !['start_interrupted', 'initialization_failed', 'record_write_failed', 'assignment_record_invalid'].some(c => c === e.errorCode)) throw new Error('status');
+          e.status !== 'failed' || !['start_interrupted', 'initialization_failed', 'record_write_failed', 'assignment_record_invalid', 'record_deleted'].some(c => c === e.errorCode)) throw new Error('status');
+      if (e.errorCode === 'record_deleted' && e.record !== null) throw new Error('deleted');
       if (e.record !== null) { validateBoundBaseRecord(e.record, a); const id = (e.record as BaseRecord).recordId; if (recordIds.has(id)) throw new Error('record'); recordIds.add(id); }
     }
     return structuredClone(value) as BaseOwnerState;

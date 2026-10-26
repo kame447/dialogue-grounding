@@ -14,7 +14,7 @@ export type RawBaseRecord = { recordId: string; version: 2; seed: number; strate
   options: { referenceMemory: boolean; [key: string]: unknown }; status: 'dialogue' | 'submitting' | 'completed';
   queueState: { pendingHumanEventIds: string[]; errorCode: string | null; [key: string]: unknown }; [key: string]: unknown };
 export type BaseRecord = RawBaseRecord & { assignment: BaseAssignment };
-export type FailureCode = 'start_interrupted' | 'initialization_failed' | 'record_write_failed' | 'assignment_record_invalid';
+export type FailureCode = 'start_interrupted' | 'initialization_failed' | 'record_write_failed' | 'assignment_record_invalid' | 'record_deleted';
 export type BaseAssignedEnvelope = { schemaVersion: 'base_assigned_session_v1'; assignment: BaseAssignment;
   status: 'preparing' | 'active' | 'failed'; record: BaseRecord | null; errorCode: FailureCode | null };
 export type AdmissionKey = 'initial' | `after:${string}`;
