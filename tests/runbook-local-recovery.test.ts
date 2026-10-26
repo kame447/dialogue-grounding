@@ -4,6 +4,10 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdtemp, mkdir, writeFile, readFile, readdir, stat, copyFile, chmod, unlink, rm } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import { realpathSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+// Portable private temp root (macOS /private/tmp is absent on Linux CI).
+const PRIVATE_TMP = realpathSync(tmpdir());
 
 // New documentary G2 controls. This is NOT automatic runtime lock reclamation.
 const moduleURL = new URL('../dialogue-model/runtime/web/server.mjs', import.meta.url).href;
@@ -32,7 +36,7 @@ async function start(file: string, owners: string) {
   finally { clearTimeout(timer!); }
 }
 test('G2 owned crash, live double-writer refusal, exclusive backup/recheck/recovery and same Cookie', { timeout: 45000 }, async t => {
-  const root = await mkdtemp('/private/tmp/SandyNoether-g6-recovery-'), owners = root + '/owners';
+  const root = await mkdtemp(PRIVATE_TMP + '/SandyNoether-g6-recovery-'), owners = root + '/owners';
   const config = root + '/assignment.json'; await mkdir(owners, { mode: 0o700 });
   await writeFile(config, JSON.stringify({ schemaVersion: 'base_assignment_config_v1', configId: 'b5d3bff2-121e-4573-9fc3-f7d6e43e30ce',
     revision: 1, strategy: 'repair-first', seed: 73, referenceMemory: false }), { mode: 0o600 });

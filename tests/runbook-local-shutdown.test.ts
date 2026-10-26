@@ -9,12 +9,16 @@ import { createConnection } from 'node:net';
 import { startNamingServer, main } from '../dialogue-model/runtime/web/server.mjs';
 import { createNamingTaskV2 } from '../dialogue-model/runtime/v2/naming-task-v2.mjs';
 import { registerBaseOwner } from '../dialogue-model/runtime/web/base-assignment-store.ts';
+import { realpathSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+// Portable private temp root (macOS /private/tmp is absent on Linux CI).
+const PRIVATE_TMP = realpathSync(tmpdir());
 const modulePath = '../dialogue-model/runtime/web/local-shutdown.ts';
 const api: any = await import(modulePath).catch(() => null);
 const delay = (ms: number) => new Promise(r => setTimeout(r, ms));
 const gate = () => { let release!: () => void; const promise = new Promise<void>(r => { release = r; }); return { promise, release }; };
 async function directory(t: any) {
-  const root = await fs.mkdtemp('/private/tmp/SandyNoether-g5-test-'); await fs.mkdir(root + '/owners', { mode: 0o700 });
+  const root = await fs.mkdtemp(PRIVATE_TMP + '/SandyNoether-g5-test-'); await fs.mkdir(root + '/owners', { mode: 0o700 });
   await fs.writeFile(root + '/assignment.json', JSON.stringify({ schemaVersion: 'base_assignment_config_v1',
     configId: '91bccb79-039e-4196-a336-717fe071a55d', revision: 1, strategy: 'repair-first', seed: 937, referenceMemory: false }), { mode: 0o600 });
   t.after(() => fs.rm(root, { recursive: true, force: true })); return root;

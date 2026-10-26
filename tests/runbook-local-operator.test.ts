@@ -2,6 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, rm } from 'node:fs/promises';
 import { main, startNamingServer } from '../dialogue-model/runtime/web/server.mjs';
+import { realpathSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+// Portable private temp root (macOS /private/tmp is absent on Linux CI).
+const PRIVATE_TMP = realpathSync(tmpdir());
 
 // A missing preimplementation export is an assertion failure, not a skipped suite.
 // Test dependency stubs use only the public callbacks exercised here.
@@ -145,7 +149,7 @@ test('no CLI token argument ingress', async () => {
 
 test('public HTTP enforces real CLI limiter, socket key, auth and contact escaping', async t => {
   // Start via actual main/startNamingServer. The injected client cannot call an upstream.
-  const root = await mkdtemp('/private/tmp/SandyNoether-g6-http-');
+  const root = await mkdtemp(PRIVATE_TMP + '/SandyNoether-g6-http-');
   const owners = root + '/owners'; await mkdir(owners, { mode: 0o700 });
   let server: any;
   t.after(async () => { if (server) await new Promise<void>(r => server.close(() => r())); await rm(root, { recursive: true, force: true }); });

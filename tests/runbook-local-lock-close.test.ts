@@ -6,9 +6,13 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { openBaseFileStore, registerBaseOwner } from '../dialogue-model/runtime/web/base-assignment-store.ts';
 import { startNamingServer } from '../dialogue-model/runtime/web/server.mjs';
+import { realpathSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+// Portable private temp root (macOS /private/tmp is absent on Linux CI).
+const PRIVATE_TMP = realpathSync(tmpdir());
 
 async function root(t: any) {
-  const path = await fs.mkdtemp('/private/tmp/SandyNoether-g5f1-');
+  const path = await fs.mkdtemp(PRIVATE_TMP + '/SandyNoether-g5f1-');
   t.after(() => fs.rm(path, { recursive: true, force: true })); return path;
 }
 for (const layer of ['store', 'drain']) for (const fault of ['none', 'ENOENT', 'EACCES', 'EIO']) {

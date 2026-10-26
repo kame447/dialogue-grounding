@@ -7,6 +7,10 @@ import { openBaseFileStore } from '../dialogue-model/runtime/web/base-assignment
 import { createBaseAssignmentSession } from '../dialogue-model/runtime/v2/base-assignment-session.ts';
 import { web, ADMIN } from './support/s5-base/http-support.ts';
 import { load, clone, harness, sessionError } from './support/s5-base/support.ts';
+import { realpathSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+// Portable private temp root (macOS /private/tmp is absent on Linux CI).
+const PRIVATE_TMP = realpathSync(tmpdir());
 
 const idle = 30 * 60 * 1000, epoch = 946684800000;
 function marked(code = 'record_deleted', record: any = null, status = 'failed') {
@@ -32,7 +36,7 @@ for (const [label, owner] of [
 });
 
 async function store(t: any) {
-  const root = await fs.mkdtemp('/private/tmp/SandyNoether-g6-delete-store-'), owner = load('OWNER-ACTIVE.json');
+  const root = await fs.mkdtemp(PRIVATE_TMP + '/SandyNoether-g6-delete-store-'), owner = load('OWNER-ACTIVE.json');
   const record = owner.admissions.initial.record, id = record.recordId, path = root + '/' + owner.ownerId + '.owner.json';
   const container = { schemaVersion: 'base_local_owner_v1', owner, archives: { [id]: record },
     questionnaires: { [id]: { synthetic: true } }, ledger: { [id]: epoch }, tombstones: [], lastAccessMs: epoch };
