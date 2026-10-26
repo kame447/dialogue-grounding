@@ -23,7 +23,7 @@ export function stageGates(trial: Trial, context: { warmAudit: ObservationCacheA
       modelMatch: referent.every(c => c.model !== null), validation: trace?.humanReferent?.status === "ok" },
       decision: { sent: decisions.length >= 1, response: decisions.every(c => c.status === "ok"), modelMatch: decisions.every(c => c.model !== null),
         validation: !!trace?.decisions.length && trace.decisions.every(d => d.decisionKind === "jev_local_test" && !!d.evidence.stages?.length) },
-      committed: trace?.status === "committed", imagesOnlyInObservation: calls.every(c => c.imageCount === 0 || c.phase === "observation_targeted") };
+      committed: trace?.status === "committed"&&(trial.profile.id!=='research_trial_profile_v3'||trace.schemaVersion==='jev_turn_trace_v2'&&!!trace.executed&&!!trace.intervention&&typeof trace.intervention==='object'&&trace.finalAction?.action===trace.executed.action), imagesOnlyInObservation: calls.every(c => c.imageCount === 0 || c.phase === "observation_targeted") };
   });
   const G1 = { passed: context.warmAudit?.status === "MISS" && context.warmCalls.length === 1 &&
       (context.execution === "mock" && !context.measuredHttp || posts >= 1 && posts <= 3) && trial.cache?.status === "HIT" &&
@@ -31,7 +31,7 @@ export function stageGates(trial: Trial, context: { warmAudit: ObservationCacheA
     warmup: context.warmAudit, completeCount: context.warmCalls.length, actualPosts: context.measuredHttp ? posts : null,
     trialInitialPosts: trial.http.filter(h => h.phase === "observation_initial").length, cacheStable: context.cacheStable };
   const G2 = { passed: perTurn.some(t => t.committed && t.imagesOnlyInObservation && Object.values(t.referent).every(Boolean) && Object.values(t.decision).every(Boolean)), perTurn };
-  const G3 = { passed: !!trial.profileSha256 && trial.cache !== null && context.saving.status === "auditable" && context.saving.requiredWritesComplete,
+  const G3 = { passed: (trial.profile.id!=='research_trial_profile_v3'||trial.replay.length>0&&trial.replay.every(r=>r.result.status==='same_material_intervention_verified'))&&!!trial.profileSha256 && trial.cache !== null && context.saving.status === "auditable" && context.saving.requiredWritesComplete,
     evidencePresent: context.saving.evidencePresent, saving: structuredClone(context.saving), judgment: "trial_end_before_next_trial",
     storage: "repo_external_directory_0700_records_0600", profileSha256: trial.profileSha256 };
   const G4 = { passed: !context.privacyRejected && !context.jevUnknown, privacyRejected: context.privacyRejected, unknownJevBilling: context.jevUnknown };
@@ -47,7 +47,8 @@ export function wiringCoverage(trial: Trial, execution: "mock" | "live", own: Ob
       const log = state?.aiPublic?.log.find(l => l.aiSeq === p?.aiSeq);
       const next = trial.turns.find(t => t.turn > turn.turn), application = next?.trace.find(t => t.status === "committed")?.aiPublic?.application;
       const primaryError = Object.values(trace?.aiPublic?.stages ?? {}).some(s => s.status === "error");
-      const tape = trial.replay.find(r => r.tape.events.at(-1)?.seq === turn.turn)?.tape;
+      const savedTape = trial.replay.find(r => r.tape.events.at(-1)?.seq === turn.turn)?.tape;
+      const tape=savedTape&&'schemaVersion' in savedTape?{...savedTape,luna:[...savedTape.common.luna,...(savedTape.tails[savedTape.recorded.label]?.luna??[])],jev:[...savedTape.common.jev,...(savedTape.tails[savedTape.recorded.label]?.jev??[])],expectedRequests:savedTape.recorded.expectedRequests}:savedTape;
       let candidateValidation: unknown = { status: primaryError ? "stage_failed" : "not_reached" };
       // Reproduce the already approved deterministic verifier, without another
       // semantic model or fabricated attribution of source-level reasons.

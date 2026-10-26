@@ -9,6 +9,7 @@ import { ledger } from "./ledger.ts";
 import { packetChecks } from "./packets.ts";
 import { researchDeadlineChecks } from './research-records.ts';
 import { failureChecks, plannedMapping } from "./failure-records.ts";
+import {interventionChecks} from './intervention-records.ts';
 import { modelChecks } from './model-checks.ts';
 
 export { canonical, hash, sha256, profileHash, META_KEYS } from "./core.ts";
@@ -37,6 +38,11 @@ function journal(records: Records): Check[] {
 export function verifyRecords(records: Records) {
   const checks: Check[] = [];
   try {
+    const interventions=interventionChecks(records);
+    checks.push(...interventions);
+    // Descriptor-invalid attempted-v3 inputs have already received closed
+    // diagnostics. Do not invoke their getters through legacy canonicalization.
+    if(interventions.some(c=>c.status==='mismatch'&&c.reason==='intervention_trace_invalid'))throw new TypeError('invalid_intervention_records');
     canonical(records);
     if (!Array.isArray(records.trials)) throw new TypeError("trials_required");
     checks.push(records.run ? check("records.run", "pass", "present") : missing("records.run"),

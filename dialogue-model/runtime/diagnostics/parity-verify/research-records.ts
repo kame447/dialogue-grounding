@@ -83,7 +83,7 @@ function transition(prior:any,next:any):boolean{
 }
 export function researchDeadlineChecks(records:Records):Check[]{
   if(records===null||typeof records!=='object'||Array.isArray(records))return [assertion('research.deadlines.failure',false,'invalid_deadline_records')];
-  const r=records as any;if(r.run?.profile?.id!=='research_trial_profile_v2'&&r.failure?.schemaVersion!=='parity_live_failure_v2'&&r.run?.manifest?.schemaVersion!==2)return [];
+  const r=records as any;if(!['research_trial_profile_v2','research_trial_profile_v3'].includes(r.run?.profile?.id)&&r.failure?.schemaVersion!=='parity_live_failure_v2'&&![2,3].includes(r.run?.manifest?.schemaVersion))return [];
   const out:Check[]=[],add=(id:string,ok:boolean,reason='invalid_deadline_records')=>out.push(assertion(id,ok,ok?'deadline_records_consistent':reason));
   if(!Array.isArray(r.trials)||r.trials.some((t:any)=>t===null||typeof t!=='object'||Array.isArray(t)||!num(t.order))||new Set(r.trials.map((t:any)=>t.order)).size!==r.trials.length){add('research.deadlines.failure',false);return out;}
   const cfg=r.run?.profile?.timeouts;add('research.deadlines.configured',config(cfg),cfg===undefined?'deadline_required_records_missing':'invalid_deadline_records');

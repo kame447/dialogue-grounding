@@ -1,3 +1,5 @@
+import {interventionForStrategy,BYPASS_ACCEPTANCE_V1_TABLE_SHA256} from '../decision/bypass-acceptance.ts';
+import {JevTurnError} from './jev-turn.ts';
 // v2 dialogue: unlabeled scattered boards, opaque own ids, asynchronous human
 // messages. This module is a pure adapter for the human message queue: each
 // runAiTurn works on one immutable public snapshot plus a detached private state
@@ -97,7 +99,7 @@ function abortIf(signal) {
  *   localGrounding?: import('../local-grounding/contract.ts').LocalGroundingOptions | import('./jev-turn.ts').JevTurnLocalOptions | null,
  *   onLocalGroundingTrace?: ((record: import('./local-grounding-turn.ts').LocalGroundingResearchRecord) => unknown) | null,
  *   decisionMode?: 'jev' | null, observer?: import('../observation/contract.ts').ObservationObserver | null,
- *   jevDecision?: import('../decision/contract.ts').JevDecisionClient | null, maxReobservations?: number,
+ *   jevDecision?: import('../decision/contract.ts').JevDecisionClient | null, maxReobservations?: number, interventionPolicy?: import('./research-profile.ts').InterventionPolicyReference, decisionTimeoutMs?:number,
  *   onJevTurnTrace?: ((record: import('./jev-turn.ts').JevTurnTrace) => unknown) | null }} options
  * @returns {{slots: readonly string[], initialPrivateState(): any,
  *   initializePrivateState?: (options?: {signal?: AbortSignal}) => Promise<import('./jev-turn.ts').JevPrivateState>,
@@ -108,10 +110,23 @@ function abortIf(signal) {
  *   onLocalGroundingTrace is private and default off. It emits staged/error/aborted attempts;
  *   settleLocalTraces(records, installedPrivateState) confirms publication after the queue settles.
  */
-export function createDialogueV2({ client, strategy, image, anchors, judge = null, referenceMemory = false,
+export function createDialogueV2(options) {
+ const { client, strategy, image, anchors, judge = null, referenceMemory = false,
   decisionShadowClient = null, onResearchUpdate = null, activeDecision = null, utteranceStyle = "default",
   groundingShadow = null, onGroundingShadow = null, localGrounding = null, onLocalGroundingTrace = null,
-  decisionMode = null, observer = null, jevDecision = null, onJevTurnTrace = null, maxReobservations = 1 }) {
+  decisionMode = null, observer = null, jevDecision = null, onJevTurnTrace = null, maxReobservations = 1 }=options;
+  let interventionPolicy, decisionTimeoutMs;
+  const integrated=Object.hasOwn(options,'interventionPolicy')||Object.hasOwn(options,'decisionTimeoutMs');
+  let intervention;
+  if(integrated){
+   try{
+    const p=Object.getOwnPropertyDescriptor(options,'interventionPolicy'),t=Object.getOwnPropertyDescriptor(options,'decisionTimeoutMs');
+    if(decisionMode!=='jev'||!referenceMemory||!p?.enumerable||!Object.hasOwn(p,'value')||!t?.enumerable||!Object.hasOwn(t,'value'))throw Error();
+    interventionPolicy=p.value;decisionTimeoutMs=t.value;if(!interventionPolicy||Object.getPrototypeOf(interventionPolicy)!==Object.prototype)throw Error();
+    const r=Object.getOwnPropertyDescriptors(interventionPolicy);if(Reflect.ownKeys(r).length!==2||['version','tableSha256'].some(k=>!r[k]?.enumerable||!Object.hasOwn(r[k],'value'))||r.version.value!=='bypass_acceptance_v1'||r.tableSha256.value!==BYPASS_ACCEPTANCE_V1_TABLE_SHA256||!Number.isSafeInteger(decisionTimeoutMs)||decisionTimeoutMs<1||decisionTimeoutMs>600000)throw Error();
+    intervention=interventionForStrategy(strategy);
+   }catch{throw new JevTurnError('invalid_intervention');}
+  }
   if (!client || typeof client.complete !== "function") throw new Error("A chat client is required");
   if (!STRATEGIES.includes(strategy)) throw new Error("Unsupported dialogue strategy");
   if (typeof referenceMemory !== "boolean") throw new Error("Invalid memory option");
@@ -137,7 +152,7 @@ export function createDialogueV2({ client, strategy, image, anchors, judge = nul
   if (decisionMode === "jev") {
     if (!referenceMemory || !localGrounding) throw new Error("Jev decision mode requires local reference memory");
     if (activeDecision || decisionShadowClient || groundingShadow) throw new Error("Jev decision mode cannot combine legacy decision paths");
-    return createJevTurnRuntime({ client, ownImage, ownAnchors, observer, jevDecision, localGrounding,
+    return createJevTurnRuntime({ client, ownImage, ownAnchors, observer, jevDecision, localGrounding, ...(integrated?{intervention,decisionTimeoutMs}:{}),
       onJevTurnTrace, onLocalGroundingTrace, maxReobservations,
       generation: { task: TASK_INSTRUCTIONS_V2, instructions: GENERATOR_INSTRUCTIONS_V2,
         ...(concise ? { concise: CONCISE_INSTRUCTIONS_V2 } : {}), actionScope: ACTION_SCOPE_V2,

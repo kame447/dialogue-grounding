@@ -1,3 +1,4 @@
+import { BYPASS_ACCEPTANCE_V1_TABLE_SHA256 } from '../decision/bypass-acceptance.ts';
 import { MODEL_CONTRACT_V2, MODEL_CONTRACT_V2_TABLE_SHA256 } from '../model-identity-contract.ts';
 import { validateResearchTimeouts } from './research-timeouts.ts';
 import type { ResearchTimeoutsV2 } from './research-timeouts.ts';
@@ -52,4 +53,11 @@ export function researchTrialProfileV2(lunaRequest: LunaRequestSettings, timeout
   const legacy = researchTrialProfile(lunaRequest);
   return frozen({ ...legacy, id: 'research_trial_profile_v2' as const, timeouts: validated,
     modelContract: { version: MODEL_CONTRACT_V2.version, tableSha256: MODEL_CONTRACT_V2_TABLE_SHA256 } });
+}
+
+export type InterventionPolicyReference = Readonly<{version:'bypass_acceptance_v1';tableSha256:string}>;
+export type ResearchTrialProfileV3 = Omit<ResearchTrialProfileV2,'id'> & {id:'research_trial_profile_v3';interventionPolicy:InterventionPolicyReference};
+export function researchTrialProfileV3(lunaRequest:LunaRequestSettings,timeouts:ResearchTimeoutsV2):Readonly<ResearchTrialProfileV3> {
+ return frozen({...researchTrialProfileV2(lunaRequest,timeouts),id:'research_trial_profile_v3' as const,
+  interventionPolicy:{version:'bypass_acceptance_v1' as const,tableSha256:BYPASS_ACCEPTANCE_V1_TABLE_SHA256}});
 }

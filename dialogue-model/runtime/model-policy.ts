@@ -3,7 +3,7 @@ import { validateResearchTimeouts } from './v2/research-timeouts.ts';
 
 export type ModelContractReference = Readonly<{version: 'model-contract-v2'; tableSha256: string}>;
 export type ResolvedModelPolicy = Readonly<{
-  profileId: 'research_trial_profile_v1' | 'research_trial_profile_v2';
+  profileId: 'research_trial_profile_v1' | 'research_trial_profile_v2' | 'research_trial_profile_v3';
   mode: 'legacy' | 'explicit'; modelContract: ModelContractReference | null;
 }>;
 export type ModelIntegrationErrorCode = 'model_profile_invalid' | 'model_contract_missing' |
@@ -37,11 +37,23 @@ export function resolveModelPolicy(profile: unknown): ResolvedModelPolicy {
       if (Object.hasOwn(d, 'modelContract')) throw Error();
       return Object.freeze({profileId: 'research_trial_profile_v1', mode: 'legacy', modelContract: null});
     }
-    if (d.id.value !== 'research_trial_profile_v2') throw Error();
+    if (d.id.value !== 'research_trial_profile_v2' && d.id.value !== 'research_trial_profile_v3') throw Error();
+    const integrated = d.id.value === 'research_trial_profile_v3';
     const keys = Reflect.ownKeys(d);
-    if (keys.some(k => typeof k !== 'string' || !rootKeys.includes(k)) ||
+    if (keys.some(k => typeof k !== 'string' || !rootKeys.includes(k) && !(integrated && k === 'interventionPolicy')) ||
         rootKeys.filter(k => k !== 'modelContract').some(k => !d[k] || !Object.hasOwn(d[k], 'value'))) throw Error();
     const v = Object.fromEntries(rootKeys.filter(k => k !== 'modelContract').map(k => [k, d[k].value]));
+    if (integrated) {
+      const data = (x: unknown, seen = new Set<object>()): void => {
+        if (x === null || typeof x === 'string' || typeof x === 'boolean' || typeof x === 'number' && Number.isFinite(x)) return;
+        if (!x || typeof x !== 'object' || seen.has(x)) throw Error();
+        const array=Array.isArray(x), keys=Reflect.ownKeys(x);
+        if (Object.getPrototypeOf(x)!==(array?Array.prototype:Object.prototype) || array && keys.length!==(x as unknown[]).length+1) throw Error();
+        seen.add(x); for (const k of keys) { if(array && k==='length') continue; const p=Object.getOwnPropertyDescriptor(x,k)!;
+          if(typeof k!=='string'||!p.enumerable||!Object.hasOwn(p,'value') || array && (!/^(0|[1-9][0-9]*)$/.test(k)||Number(k)>=(x as unknown[]).length)) throw Error(); data(p.value,seen); } seen.delete(x);
+      };
+      if(rootKeys.filter(k=>k!=='modelContract').some(k=>!d[k].enumerable)) throw Error(); data(v);
+    }
     if (v.referenceMemory !== true || v.decisionMode !== 'jev' || v.humanReferent !== true ||
         v.initialObservation !== 'cache_required' || v.questionLayout !== 'two_stage_v1' || v.utteranceStyle !== 'default' || v.maxReobservations !== 1) throw Error();
     fixed(v.localGrounding, {enabled: true, aiPublicClaims: true});
@@ -55,13 +67,13 @@ export function resolveModelPolicy(profile: unknown): ResolvedModelPolicy {
   if (!Object.hasOwn(d, 'modelContract')) throw new ModelIntegrationError('model_contract_missing');
   let ref: Record<string, unknown>;
   try {
-    if (!Object.hasOwn(d.modelContract, 'value')) throw Error();
+    if (!Object.hasOwn(d.modelContract, 'value') || d.id.value === 'research_trial_profile_v3' && !d.modelContract.enumerable) throw Error();
     ref = fields(d.modelContract.value, ['version', 'tableSha256']);
     if (typeof ref.version !== 'string' || ref.version.length === 0 || typeof ref.tableSha256 !== 'string' ||
         ref.tableSha256.length !== 64 || /[^0-9a-f]/u.test(ref.tableSha256)) throw Error();
   } catch { throw new ModelIntegrationError('model_contract_invalid'); }
   if (ref.version !== MODEL_CONTRACT_V2.version) throw new ModelIntegrationError('model_contract_unknown');
   if (ref.tableSha256 !== MODEL_CONTRACT_V2_TABLE_SHA256) throw new ModelIntegrationError('model_table_mismatch');
-  return Object.freeze({profileId: 'research_trial_profile_v2', mode: 'explicit',
+  return Object.freeze({profileId: d.id.value as 'research_trial_profile_v2'|'research_trial_profile_v3', mode: 'explicit',
     modelContract: Object.freeze({version: MODEL_CONTRACT_V2.version, tableSha256: MODEL_CONTRACT_V2_TABLE_SHA256})});
 }

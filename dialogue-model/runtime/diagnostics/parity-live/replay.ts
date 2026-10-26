@@ -1,7 +1,9 @@
+import {resolveInterventionPolicy} from '../../intervention-policy.ts';
+import {JevTurnError} from '../../v2/jev-turn.ts';
 import { researchGenerationClient } from '../../v2/research-generation-client.ts';
 import { RESEARCH_MAX_DEADLINE_MS } from '../../v2/research-timeouts.ts';
 import { resolveModelPolicy } from '../../model-policy.ts';
-import type { ResearchTrialProfileV2 } from '../../v2/research-profile.ts';
+import type { ResearchTrialProfileV2, ResearchTrialProfileV3 } from '../../v2/research-profile.ts';
 // Offline native-pipeline replay. Recorded model results are fixed materials,
 // never semantic expectations, and this module performs no network/key reads.
 import { createDialogueV2 } from "../../v2/dialogue-v2.mjs";
@@ -16,7 +18,7 @@ import { buildReobservationMessages } from "../../observation/observe.ts";
 import { EVIDENCE_NORMALIZED_ENVELOPE_FIELDS, imageProjection, projectReplayValue } from "./evidence.ts";
 import type { ReplaySide } from "./evidence.ts";
 import { createChatClient } from "../../client.mjs";
-export type Profile = ReturnType<typeof researchTrialProfile> | ResearchTrialProfileV2;
+export type Profile = ReturnType<typeof researchTrialProfile> | ResearchTrialProfileV2 | ResearchTrialProfileV3;
 export type ReplayTape = { state: JevPrivateState; events: Array<{ id: string; seq: number; speaker: "human" | "ai"; text: string }>;
   luna: Array<{ phase: string; response: Awaited<ReturnType<LunaClient["complete"]>> }>;
   jev: Array<Record<string, unknown>>; reobservations: ReobservationResult[];
@@ -26,16 +28,18 @@ export type ReplayTape = { state: JevPrivateState; events: Array<{ id: string; s
 // body is excluded; phase deadlines remain represented by the effective profile.
 export const REPLAY_EXCLUDED_ENVELOPE_FIELDS = EVIDENCE_NORMALIZED_ENVELOPE_FIELDS;
 export function createProfileDialogue(profile: Profile, options: Parameters<typeof createDialogueV2>[0]) {
-  resolveModelPolicy(profile);
+  const intervention=resolveInterventionPolicy(profile);
+  if(Object.hasOwn(options,'interventionPolicy')||Object.hasOwn(options,'decisionTimeoutMs'))throw new JevTurnError('invalid_intervention');
   const local = options.localGrounding as JevTurnLocalOptions | undefined;
-  const research = profile.id === "research_trial_profile_v2";
+  const research = profile.id !== "research_trial_profile_v1";
   const researchLimits = research ? { maxDeadlineMs: RESEARCH_MAX_DEADLINE_MS } : undefined;
-  return createDialogueV2({ ...options, client: research ? researchGenerationClient(options.client, profile.timeouts.generationMs) : options.client, referenceMemory: profile.referenceMemory, decisionMode: profile.decisionMode,
+  return createDialogueV2({ ...options, ...(intervention.mode==='explicit'?{interventionPolicy:intervention.interventionPolicy!,decisionTimeoutMs:profile.timeouts.decisionMs}:{}), client: research ? researchGenerationClient(options.client, profile.timeouts.generationMs) : options.client, referenceMemory: profile.referenceMemory, decisionMode: profile.decisionMode,
     utteranceStyle: profile.utteranceStyle, maxReobservations: profile.maxReobservations,
     localGrounding: { ...options.localGrounding!, ...(research ? { researchLimits, aiPublicTransport: { ...local?.aiPublicTransport, timeoutMs: profile.timeouts.decisionMs, researchLimits } } : {}), timeoutMs: profile.timeouts.localMs, aiPublicClaims: profile.localGrounding.aiPublicClaims } });
 }
 export async function pairedReplay(tape: ReplayTape, own: ObservationInput, expectedModel: string, profile: Profile) {
   const sides: ReplaySide[] = [];
+  if(profile.id==='research_trial_profile_v3')return {status:'not_reached',error:'replay_pipeline_failed',requests:[],reproducedRecordedPayloads:false,actualLunaHttpMeasured:false,hashScheme:'canonical_json_sha256_not_raw_body_bytes',labelsEqual:false,sides,excludedEnvelopeFields:REPLAY_EXCLUDED_ENVELOPE_FIELDS};
   const replay = async (label: "repair-first" | "bypass-enabled") => {
     const frozen = structuredClone(tape), requests: ReplayTape["expectedRequests"] = [];
     const material = { state: structuredClone(frozen.state), events: structuredClone(frozen.events),
