@@ -9,6 +9,7 @@ import { loadConfig } from "../config.mjs";
 import { createChatClient } from "../client.mjs";
 import { createNamingTask, NamingTaskError, outsideRepositoryDirectory } from "../naming-task.mjs";
 import { createNamingTaskV2 } from "../v2/naming-task-v2.mjs";
+import { prepareParticipantJev } from "./participant-jev-wiring.ts";
 import { createDecisionComparisonClient } from "../decisions-client.mjs";
 import { createGroundingJudgeClient } from "../grounding/client.ts";
 import { readLocalOperatorOptions } from "./local-operator-options.ts";
@@ -73,10 +74,11 @@ export async function main(argv = process.argv.slice(2), env = process.env,
     startServer = startNamingServer } = {}) {
   const { values } = parseArgs({ args: argv, options: { port: { type: "string", default: "8787" },
     "base-assignment-file": { type: "string" }, "base-store-root": { type: "string" },
+    "participant-jev-config": { type: "string" },
     "hide-strategy": { type: "boolean", default: false }, "active-decision-judge": { type: "string" }, "utterance-style": { type: "string" },
     "grounding-shadow": { type: "boolean", default: false }, help: { type: "boolean" } } });
   if (values.help) {
-    console.log("node --env-file=.env dialogue-model/runtime/web/server.mjs --port 8787 [--base-assignment-file <private-file>] [--base-store-root <private-directory>] [--hide-strategy] [--active-decision-judge decision_jev|decision_luna] [--utterance-style default|concise] [--grounding-shadow]");
+    console.log("node --env-file=.env dialogue-model/runtime/web/server.mjs --port 8787 [--base-assignment-file <private-file>] [--base-store-root <private-directory>] [--participant-jev-config <private-file>] [--hide-strategy] [--active-decision-judge decision_jev|decision_luna] [--utterance-style default|concise] [--grounding-shadow]");
     return;
   }
   const purpose = values["active-decision-judge"];
@@ -87,7 +89,11 @@ export async function main(argv = process.argv.slice(2), env = process.env,
   const activeDecision = purpose === undefined ? null : { client: createDecisionClient(config), purpose };
   // Research-only shadow (default off): records two-axis grounding evidence privately, never changes the dialogue.
   const groundingShadow = values["grounding-shadow"] ? { judge: createGroundingClient(config) } : null;
-  const server = await startServer({ port: Number(values.port), client, runDir: env.RESEARCH_RUN_DIR, hideStrategy: values["hide-strategy"], activeDecision, ...operatorOptions,
+  const participantJev = values["participant-jev-config"] ? await prepareParticipantJev({
+    configFile: resolve(values["participant-jev-config"]), baseAssignmentFile: values["base-assignment-file"],
+    clientConfig: config, utteranceStyle: values["utterance-style"] ?? "default", activeDecision, groundingShadow,
+  }) : null;
+  const server = await startServer({ port: Number(values.port), client, participantJev, runDir: env.RESEARCH_RUN_DIR, hideStrategy: values["hide-strategy"], activeDecision, ...operatorOptions,
     baseAssignmentFile: values["base-assignment-file"], baseStoreRoot: values["base-store-root"],
     utteranceStyle: values["utterance-style"] ?? "default", ...(groundingShadow ? { groundingShadow } : {}) });
   console.log("共同命名課題: http://127.0.0.1:" + server.address().port);

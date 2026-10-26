@@ -24,7 +24,7 @@ type Entry = {store: LocalStore; coordinator: BaseSession};
 type DrainableServer = ReturnType<typeof createServer> & { drainAndClose(): Promise<void> };
 export function createBaseParticipantServer(options: Record<string, any> = {}) {
   if (Object.hasOwn(options,'baseAssignment')) throw failure();
-  const {client,baseAssignmentFile,baseStoreRoot,now=Date.now,createTaskV2=createNamingTaskV2,utteranceStyle='default',activeDecision=null,groundingShadow=null,adminToken,adminLimiter}=options;
+  const {client,baseAssignmentFile,baseStoreRoot,now=Date.now,createTaskV2=createNamingTaskV2,utteranceStyle='default',activeDecision=null,groundingShadow=null,participantJev=null,adminToken,adminLimiter}=options;
   if (!['default','concise'].includes(utteranceStyle)) throw new Error('Invalid utterance style');
   if (activeDecision !== null && (!['decision_jev','decision_luna'].includes(activeDecision?.purpose) || typeof activeDecision.client?.chooseAction !== 'function')) throw new Error('Invalid active decision client');
   const entries = new Map<string,Promise<Entry>>();
@@ -41,6 +41,7 @@ export function createBaseParticipantServer(options: Record<string, any> = {}) {
         const coordinator=createBaseAssignmentSession({ownerId,store,now,newId:randomUUID,adapter:'local_private_file',
           readConfig:async()=>baseAssignmentFile ? readPrivateAssignment(baseAssignmentFile) : null,
           makeTask:async value=>createTaskV2({client,...value,activeDecision,utteranceStyle,...(groundingShadow?{groundingShadow}:{}),
+            ...(participantJev?await participantJev.taskOptions(value):{}),
             onPersist:async (record:Parameters<typeof value.onPersist>[0])=>{
               if(persistSealed)throw new NamingTaskError('record_write_failed');
               const work=Promise.resolve().then(()=>value.onPersist(record));persists.add(work);
