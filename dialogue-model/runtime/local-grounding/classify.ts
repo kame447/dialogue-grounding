@@ -1,3 +1,5 @@
+import { deadlineLimit, deadlineValue } from '../v2/research-deadline-options.ts';
+import type { ResearchLimits } from '../v2/research-timeouts.ts';
 // Closed-set interpretation only; this module never promotes claims or changes policy.
 import { LOCAL_ACTS, LOCAL_ASPECTS, LOCAL_SOURCES } from "./contract.ts";
 import type { LocalAct, LocalClassificationInput, LocalFunctionClassifier, LocalFunctionVerdict } from "./contract.ts";
@@ -118,15 +120,18 @@ type ClassifierCall = (state: string, options: CallOptions) => Promise<unknown>;
 
 /** Transport-independent call returns the strict verdict array (or its JSON text).
  * Unverified injections cannot select the separate, model-checked Jev test adapter's kind. */
-export function createLocalFunctionClassifier({ call, classifierKind, timeoutMs = 15000 }:
-  { call: ClassifierCall; classifierKind: "luna_standin" | "unverified_injected"; timeoutMs?: number }): IdentifiedLocalClassifier {
-  if (typeof call !== "function" || !includes(["luna_standin", "unverified_injected"], classifierKind) || !positive(timeoutMs) || timeoutMs > 60000) fail("invalid_input");
+export function createLocalFunctionClassifier({ call, classifierKind, timeoutMs = 15000, researchLimits }:
+  { call: ClassifierCall; classifierKind: "luna_standin" | "unverified_injected"; timeoutMs?: number; researchLimits?: ResearchLimits }): IdentifiedLocalClassifier {
+  const limit = deadlineLimit(researchLimits);
+  if (typeof call !== "function" || !includes(["luna_standin", "unverified_injected"], classifierKind) || !positive(timeoutMs) || timeoutMs > limit) fail("invalid_input");
   return Object.freeze({
     metadata: Object.freeze({ classifierKind, calibrated: false as const }),
     async classify(input: LocalClassificationInput, options: { signal?: AbortSignal; timeoutMs?: number } = {}) {
       if (options.signal?.aborted) fail("aborted");
-      const deadline = options.timeoutMs ?? timeoutMs;
-      if (!positive(deadline) || deadline > 60000) fail("invalid_input");
+      const raw = researchLimits === undefined ? options.timeoutMs ?? timeoutMs : options.timeoutMs === undefined ? timeoutMs : options.timeoutMs;
+      if (!deadlineValue(raw, limit)) fail("invalid_input");
+      const deadline = researchLimits === undefined ? raw : Math.min(timeoutMs, raw);
+      if (!positive(deadline) || deadline > limit) fail("invalid_input");
       const state = buildLocalClassificationState(input);
       const snapshot = JSON.parse(state) as LocalClassificationInput;
       if (!snapshot.segments.length) return [];
@@ -158,9 +163,9 @@ export function createLocalFunctionClassifier({ call, classifierKind, timeoutMs 
 
 export function createLunaLocalClassifier(client: {
   complete(messages: { role: "system" | "user"; content: string }[], options: CallOptions & { phase: string }): Promise<{ text: string }>;
-}): IdentifiedLocalClassifier {
+}, options: { timeoutMs?: number; researchLimits?: ResearchLimits } = {}): IdentifiedLocalClassifier {
   if (!client || typeof client.complete !== "function") fail("invalid_input");
-  return createLocalFunctionClassifier({ classifierKind: "luna_standin", call: async (state, options) => {
+  return createLocalFunctionClassifier({ ...options, classifierKind: "luna_standin", call: async (state, options) => {
     const response = await client.complete([{ role: "system", content: LOCAL_CLASSIFICATION_INSTRUCTIONS },
       { role: "user", content: state }], { ...options, phase: "local_classification" });
     return response?.text;

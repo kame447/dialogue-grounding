@@ -90,8 +90,14 @@ export type JevDecision = {
   calibrated: false;
 };
 export type JevDecisionCallOptions = { signal?: AbortSignal; timeoutMs?: number };
+/** Execution projection, independently evidenced after an opt-in acceptance step. */
+export type JevExecutedDecision = Omit<Pick<JevDecision, "action" | "target" | "name" | "feature" | "observe" | "detailFigureIds">,
+  "action" | "observe"> & { action: Exclude<JevAction, "request_observation">; observe: null };
+export type JevDetailResult = { executed: JevExecutedDecision; evidence: JevDecisionStageEvidence };
 export type JevDecisionClient = {
   decide(input: JevDecisionInput, options?: JevDecisionCallOptions): Promise<JevDecision>;
   estimateReferent?(input: JevDecisionInput, options?: JevDecisionCallOptions): Promise<HumanReferentEstimate>;
+  completeDetail?(input: JevDecisionInput, selected: Pick<JevDecision, "action" | "target">,
+    options?: JevDecisionCallOptions): Promise<JevDetailResult>;
 };
 export type JevQuestionLayout = "two_stage_v1";

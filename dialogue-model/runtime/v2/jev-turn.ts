@@ -32,7 +32,7 @@ type ChatClient = { complete(messages: Message[], options: { phase: string; time
 type Guard = { violations: string[]; regenerated: boolean; fallback: false };
 const ACT_INSTRUCTIONS = "Jevが選んだ行動だけを文章にしてください。行動・対象・名前・特徴を変更しないでください。観察メモは仮説で、局所的な支持を図形全体の理解や名称決定へ拡張しないでください。";
 const DETAIL_INSTRUCTIONS = "対象は複数候補のままです。detailFigureIdsは選ばれた特徴の出典図形であり、対象の確定ではありません。その特徴を候補すべての性質にせず、候補を勝手に一つに絞らずに確認・修復を表現してください。";
-export type JevTurnLocalOptions = Pick<LocalGroundingOptions, "classifier" | "timeoutMs"> & {
+export type JevTurnLocalOptions = Pick<LocalGroundingOptions, "classifier" | "timeoutMs" | "researchLimits"> & {
   aiPublicClaims?: boolean;
   /** Dependency injection for mock/local HTTP. The model and URL remain fixed. */
   aiPublicTransport?: JevChoiceTransportOptions;
@@ -238,8 +238,8 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   validateLocalGroundingOptions({ ...options.localGrounding, extractor: { async extract() { return []; } } });
   const aiEnabled = options.localGrounding.aiPublicClaims === true;
   const aiExtractor = aiEnabled ? createMemoAiExtractor(client) : null;
-  const aiFunction = aiEnabled ? createJevAiFunctionClassifier(options.localGrounding.aiPublicTransport) : null;
-  const aiSupport = aiEnabled ? createJevAiSupportChecker(options.localGrounding.aiPublicTransport) : null;
+  const aiFunction = aiEnabled ? createJevAiFunctionClassifier({ ...options.localGrounding.aiPublicTransport, ...(options.localGrounding.researchLimits === undefined ? {} : { researchLimits: options.localGrounding.researchLimits }) }) : null;
+  const aiSupport = aiEnabled ? createJevAiSupportChecker({ ...options.localGrounding.aiPublicTransport, ...(options.localGrounding.researchLimits === undefined ? {} : { researchLimits: options.localGrounding.researchLimits }) }) : null;
   const aiPromptBodies = [MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS, AI_FUNCTION_INSTRUCTIONS + "\n" + JSON.stringify(AI_FUNCTION_CRITERIA),
     AI_SUPPORT_INSTRUCTIONS + "\n" + AI_RESPONSE_SUPPORT_INSTRUCTIONS + "\n" + JSON.stringify({ AI_SUPPORT_CHOICES, AI_ACT_DESCRIPTIONS })];
   const attempts: JevTurnTrace[] = [];
@@ -314,7 +314,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       const local = { ...options.localGrounding, extractor: createMemoLocalExtractor({ complete(messages, options) {
         if (messages.some(message => typeof message.content !== "string")) throw new JevTurnError("invalid_state");
         return client.complete(messages as Message[], options);
-      } }, { getMemo: () => structuredClone(memo) }) };
+      } }, { getMemo: () => structuredClone(memo), ...(options.localGrounding.researchLimits === undefined ? {} : { researchLimits: options.localGrounding.researchLimits, timeoutMs: options.localGrounding.timeoutMs }) }) };
       const priorAct = previousAi ? { ...previous.judgment, turn: previousAi.turn, publishedFallback: previous.generationGuard.fallback,
         ...(previous.jevTurn.decision.target.kind === "multiple" ? { targetCandidates: [...previous.jevTurn.decision.target.figureIds] } : {}) } : undefined;
       let initialUpdate = stageMemory(state.graph, latest.seq, null, publicTurns);

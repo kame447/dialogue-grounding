@@ -1,0 +1,191 @@
+{
+  "turn": 1,
+  "publicTurns": [
+    {
+      "turn": 1,
+      "speaker": "human",
+      "text": "Please check the visible shape."
+    }
+  ],
+  "ownSlots": [
+    "own-0",
+    "own-1",
+    "own-2",
+    "own-3",
+    "own-4",
+    "own-5"
+  ],
+  "observations": {
+    "observedAt": "2000-01-01T00:00:00.000Z",
+    "figures": [
+      {
+        "id": "own-0",
+        "region": {
+          "x": 0,
+          "y": 0,
+          "w": 9,
+          "h": 9
+        },
+        "holistic": [
+          {
+            "construal": "name-0",
+            "basis": [
+              "visible part"
+            ],
+            "status": "hypothesis"
+          }
+        ],
+        "analytic": {
+          "shapes": [
+            "feature-0"
+          ],
+          "composition": "",
+          "relations": []
+        },
+        "unknowns": [],
+        "reobservations": []
+      },
+      {
+        "id": "own-1",
+        "region": {
+          "x": 10,
+          "y": 0,
+          "w": 9,
+          "h": 9
+        },
+        "holistic": [
+          {
+            "construal": "name-1",
+            "basis": [
+              "visible part"
+            ],
+            "status": "hypothesis"
+          }
+        ],
+        "analytic": {
+          "shapes": [
+            "feature-1"
+          ],
+          "composition": "",
+          "relations": []
+        },
+        "unknowns": [],
+        "reobservations": []
+      },
+      {
+        "id": "own-2",
+        "region": {
+          "x": 20,
+          "y": 0,
+          "w": 9,
+          "h": 9
+        },
+        "holistic": [
+          {
+            "construal": "name-2",
+            "basis": [
+              "visible part"
+            ],
+            "status": "hypothesis"
+          }
+        ],
+        "analytic": {
+          "shapes": [
+            "feature-2"
+          ],
+          "composition": "",
+          "relations": []
+        },
+        "unknowns": [],
+        "reobservations": []
+      },
+      {
+        "id": "own-3",
+        "region": {
+          "x": 30,
+          "y": 0,
+          "w": 9,
+          "h": 9
+        },
+        "holistic": [
+          {
+            "construal": "name-3",
+            "basis": [
+              "visible part"
+            ],
+            "status": "hypothesis"
+          }
+        ],
+        "analytic": {
+          "shapes": [
+            "feature-3"
+          ],
+          "composition": "",
+          "relations": []
+        },
+        "unknowns": [],
+        "reobservations": []
+      },
+      {
+        "id": "own-4",
+        "region": {
+          "x": 40,
+          "y": 0,
+          "w": 9,
+          "h": 9
+        },
+        "holistic": [
+          {
+            "construal": "name-4",
+            "basis": [
+              "visible part"
+            ],
+            "status": "hypothesis"
+          }
+        ],
+        "analytic": {
+          "shapes": [
+            "feature-4"
+          ],
+          "composition": "",
+          "relations": []
+        },
+        "unknowns": [],
+        "reobservations": []
+      },
+      {
+        "id": "own-5",
+        "region": {
+          "x": 50,
+          "y": 0,
+          "w": 9,
+          "h": 9
+        },
+        "holistic": [
+          {
+            "construal": "name-5",
+            "basis": [
+              "visible part"
+            ],
+            "status": "hypothesis"
+          }
+        ],
+        "analytic": {
+          "shapes": [
+            "feature-5"
+          ],
+          "composition": "",
+          "relations": []
+        },
+        "unknowns": [],
+        "reobservations": []
+      }
+    ]
+  },
+  "issueSummary": "",
+  "priorClaims": [],
+  "repairHistory": [],
+  "previousAction": null,
+  "publicNames": [],
+  "reobservationAllowed": false
+}

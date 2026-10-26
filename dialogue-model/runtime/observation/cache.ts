@@ -1,3 +1,5 @@
+import { deadlineLimit, deadlineValue } from '../v2/research-deadline-options.ts';
+import type { ResearchLimits } from '../v2/research-timeouts.ts';
 // Node-only, opt-in initial observation storage. No API accepts dialogue memos.
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
@@ -167,11 +169,12 @@ async function storeEntry(directory: string, key: ObservationCacheKey, memo: Obs
 /** Reads validated initial memos. Only the explicit MISS branch can create a file.
  * modelId is the exact model ID reported by the completion client, never an alias match.
  */
-export async function createObservationCache({ directory, modelId, client, onMiss = "error", timeoutMs = 20000 }: {
-  directory: string; modelId: string; client?: ObservationClient; onMiss?: "error" | "observe"; timeoutMs?: number;
+export async function createObservationCache({ directory, modelId, client, onMiss = "error", timeoutMs = 20000, researchLimits }: {
+  directory: string; modelId: string; client?: ObservationClient; onMiss?: "error" | "observe"; timeoutMs?: number; researchLimits?: ResearchLimits;
 }): Promise<ObservationCache> {
+  const limit = deadlineLimit(researchLimits);
   if (typeof directory !== "string" || !directory.trim() || !isAbsolute(directory) || !model(modelId) ||
-      !["error", "observe"].includes(onMiss) || !version(timeoutMs) || timeoutMs > 60000 ||
+      !["error", "observe"].includes(onMiss) || !version(timeoutMs) || timeoutMs > limit ||
       (onMiss === "observe" && (!client || typeof client.complete !== "function"))) fail("invalid_input");
   let root: string;
   try { root = await outsideRepositoryDirectory(directory); } catch { return fail("unsafe_path"); }
@@ -187,7 +190,7 @@ export async function createObservationCache({ directory, modelId, client, onMis
         observation: ObservationCacheAudit["observation"]): ObservationCacheAudit => ({ status, reason, key: summary(key),
           source: source === null ? null : structuredClone(source), observation, elapsedMs: Math.max(0, Math.round(performance.now() - started)) });
       if (options.signal?.aborted) throw new ObservationCacheError("aborted", audit("MISS", "not_found", null, "none"));
-      if (options.timeoutMs !== undefined && (!version(options.timeoutMs) || options.timeoutMs > 60000)) fail("invalid_input");
+      if (options.timeoutMs !== undefined && (!version(options.timeoutMs) || options.timeoutMs > limit)) fail("invalid_input");
       let loaded = await readEntry(root, key, own);
       if (options.signal?.aborted) throw new ObservationCacheError("aborted", audit("MISS", loaded.reason, null, "none"));
       if (loaded.entry) return { memo: structuredClone(loaded.entry.memo), audit: audit("HIT", "match", loaded.entry.source, "reused") };
@@ -208,7 +211,7 @@ export async function createObservationCache({ directory, modelId, client, onMis
           const response = await client!.complete(messages, requestOptions);
           returnedModel = (response as { model?: unknown })?.model;
           return response;
-        } }, { timeoutMs });
+        } }, { timeoutMs, ...(researchLimits === undefined ? {} : { researchLimits }) });
         const observed = performance.now();
         const memo = initialMemo(await observer.observeAll(own, options), own);
         if (options.signal?.aborted) fail("aborted");
