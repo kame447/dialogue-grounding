@@ -45,7 +45,8 @@ export type RunManifestV2 = Omit<RunManifest, 'phaseTimeouts' | 'lunaRequest'> &
   schemaVersion: 2; timeouts: ResearchTimeoutsV2;
   lunaRequest: { timeoutMs: null; maxCompletionTokens: number | null };
 };
-export type AnyRunManifest = RunManifest | RunManifestV2;
+export type RunManifestV3 = Omit<RunManifestV2, 'schemaVersion'> & {schemaVersion:3};
+export type AnyRunManifest = RunManifest | RunManifestV2 | RunManifestV3;
 export function validateRunManifestV2(value: unknown): RunManifestV2 {
   if (!value || typeof value !== 'object' || (value as {schemaVersion?:unknown}).schemaVersion !== 2) throw Error('invalid_manifest_version');
   const v = value as RunManifestV2;
@@ -79,10 +80,25 @@ export function validateRunManifestV2(value: unknown): RunManifestV2 {
   return structuredClone({ ...v, timeouts });
 }
 export function validateAnyRunManifest(value: unknown): AnyRunManifest {
+  if(value!==null&&typeof value==='object'&&Object.getOwnPropertyDescriptor(value,'schemaVersion')?.value===3)return validateRunManifestV3(value);
   return value !== null && typeof value === 'object' && Object.hasOwn(value, 'schemaVersion') ? validateRunManifestV2(value) : validateRunManifest(value as RunManifest);
 }
 export async function loadAnyRunManifest(file: string): Promise<AnyRunManifest> {
   const path = await outsideRepositoryDirectory(file), info = await lstat(path);
   if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1 || (info.mode & 0o777) !== 0o600 || info.size > 32000) throw Error('unsafe_manifest');
   return validateAnyRunManifest(JSON.parse(await readFile(path, 'utf8')));
+}
+
+export function validateRunManifestV3(value:unknown):RunManifestV3 {
+ if(!value||typeof value!=='object'||Object.getOwnPropertyDescriptor(value,'schemaVersion')?.value!==3)throw Error('invalid_manifest_version');
+ const data=(x:unknown,seen=new Set<object>()):void=>{
+  // Numeric bounds belong to the existing staged validators, including the
+  // timeout error precedence. This walk only rejects unsafe object structure.
+  if(x===null||typeof x==='string'||typeof x==='boolean'||typeof x==='number')return;
+  if(!x||typeof x!=='object'||seen.has(x))throw Error();const array=Array.isArray(x),keys=Reflect.ownKeys(x);
+  if(Object.getPrototypeOf(x)!==(array?Array.prototype:Object.prototype)||array&&keys.length!==(x as unknown[]).length+1)throw Error();
+  seen.add(x);for(const k of keys){if(array&&k==='length')continue;const d=Object.getOwnPropertyDescriptor(x,k)!;if(typeof k!=='string'||!d.enumerable||!Object.hasOwn(d,'value'))throw Error();data(d.value,seen);}seen.delete(x);
+ };
+ try{data(value);}catch{throw Error('invalid_manifest');}
+ return {...validateRunManifestV2({...value as Record<string,unknown>,schemaVersion:2}),schemaVersion:3};
 }

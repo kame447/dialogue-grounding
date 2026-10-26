@@ -2,13 +2,16 @@ import { createResearchDeadlineScope } from './research-deadlines.ts';
 import type { ResearchDeadlineScope, ResearchDeadlines } from './research-deadlines.ts';
 import { AIConnectionError } from '../../client.mjs';
 import { RESEARCH_MAX_DEADLINE_MS } from '../../v2/research-timeouts.ts';
+import {resolveInterventionPolicy} from '../../intervention-policy.ts';
+import {pairedInterventionReplay} from './intervention-replay.ts';
+import type {InterventionReplayTape,InterventionReplayResult} from './intervention-replay.ts';
 import { resolveModelPolicy } from '../../model-policy.ts';
 import { checkModelIdentity } from '../../model-identity-contract.ts';
 // Import-safe Node harness. Only the parent supplies/executes real clients.
 import { createHash, randomUUID } from "node:crypto";
 import { readFile, appendFile, writeFile, rename, lstat, unlink } from "node:fs/promises";
 import { join } from "node:path";
-import { researchTrialProfile, researchTrialProfileV2, researchHash } from "../../v2/research-profile.ts";
+import { researchTrialProfile, researchTrialProfileV2, researchTrialProfileV3, researchHash } from "../../v2/research-profile.ts";
 import type { LunaRequestSettings } from "../../v2/research-profile.ts";
 import { createTrialV2, modelView } from "../../stimuli/scatter-v2.mjs";
 import { createObservationCache, createObservationCacheKey, observationCacheFileName } from "../../observation/cache.ts";
@@ -23,6 +26,7 @@ import { isGroundingModel } from "../../../../workers/research-ai-proxy/src/grou
 import { RunBudget, ENGINEERING_LIMITS, CALL_CAPS, compareParity, privateDirectory, privateWrite, publicText, promptSourceManifest } from "./audit.ts";
 import type { Label, Phase, CallReceipt, ComparableTrial, IdentityTurn } from "./audit.ts";
 import { validateAnyRunManifest, loadAnyRunManifest } from "./manifest.ts";
+import type {RunManifest,RunManifestV2} from "./manifest.ts";
 import type { AnyRunManifest } from "./manifest.ts";
 import { canonicalLunaPayload, LunaWireError, lunaWire } from "./luna-wire.ts";
 import type { HttpReceipt } from "./luna-wire.ts";
@@ -53,7 +57,7 @@ export type Trial = Omit<ComparableTrial, "turns"> & { order: number; plannedInd
   failure: string | null; cache: ObservationCacheAudit | null; calls: CallReceipt[];
   turns: Array<IdentityTurn & { trace: JevTurnTrace[]; state: JevPrivateState; wiring: unknown }>;
   notReached: number[]; aiPublicSettlement: unknown; durationMs: number; budget: unknown; http: HttpReceipt[]; attempts: JevTurnTrace[];
-  replay: Array<{ tape: ReplayTape; result: Omit<Awaited<ReturnType<typeof pairedReplay>>, "sides"> }>; gates?: ReturnType<typeof stageGates>;
+  replay: Array<{ tape: ReplayTape | InterventionReplayTape; result: Omit<Awaited<ReturnType<typeof pairedReplay>>, "sides"> | InterventionReplayResult }>; gates?: ReturnType<typeof stageGates>;
   deadlines?: ResearchDeadlines; lastCommittedState: JevPrivateState | null; failureAtTurn: number | null };
 class HarnessError extends Error { constructor(readonlyCode: string) { super(readonlyCode); this.code = readonlyCode; } code: string; }
 const fail = (code: string): never => { throw new HarnessError(code); };
@@ -68,10 +72,16 @@ export type SaveAudit = { status: "auditable" | "save_failed"; firstSaveFailure:
   evidenceRevision: number; savedEvidenceRevision: number; billingRevision: number; savedBillingRevision: number };
 
 /** Labels are metadata only. No semantic oracle or approved script catalog here. */
-export async function runParityLive(options: Options, deps: Dependencies) {
-  const manifest = validateAnyRunManifest(options.manifest), PROFILE = "schemaVersion" in manifest ? researchTrialProfileV2(manifest.lunaRequest, manifest.timeouts) : researchTrialProfile(manifest.lunaRequest, manifest.phaseTimeouts), RESEARCH_TRIAL_PROFILE_SHA256 = researchHash(PROFILE);
+type ParityResult=Awaited<ReturnType<typeof runParityLiveImpl>>;
+type LegacyParityResult=Omit<ParityResult,'trials'>&{trials:Array<Omit<Trial,'replay'>&{replay:Array<{tape:ReplayTape;result:Omit<Awaited<ReturnType<typeof pairedReplay>>,'sides'>}>}>};
+export function runParityLive(options:Omit<Options,'manifest'>&{manifest:RunManifest|RunManifestV2},deps:Dependencies):Promise<LegacyParityResult>;
+export function runParityLive(options:Options,deps:Dependencies):Promise<ParityResult>;
+export function runParityLive(options:Options,deps:Dependencies):Promise<ParityResult>{return runParityLiveImpl(options,deps);}
+async function runParityLiveImpl(options: Options, deps: Dependencies) {
+  const manifest = validateAnyRunManifest(options.manifest), PROFILE = "schemaVersion" in manifest ? manifest.schemaVersion===3?researchTrialProfileV3(manifest.lunaRequest,manifest.timeouts):researchTrialProfileV2(manifest.lunaRequest, manifest.timeouts) : researchTrialProfile(manifest.lunaRequest, manifest.phaseTimeouts), RESEARCH_TRIAL_PROFILE_SHA256 = researchHash(PROFILE);
   const modelPolicy = resolveModelPolicy(PROFILE);
-  const research = PROFILE.id === "research_trial_profile_v2";
+  const interventionPolicy=resolveInterventionPolicy(PROFILE),integrated=interventionPolicy.mode==='explicit';
+  const research = PROFILE.id !== "research_trial_profile_v1";
   const limits = research ? { researchLimits: { maxDeadlineMs: RESEARCH_MAX_DEADLINE_MS } } : {};
   const effectiveRequest = research ? { ...manifest.lunaRequest, timeoutMs: PROFILE.timeouts.lunaAttemptMs } : manifest.lunaRequest;
   const trialMs = research ? PROFILE.timeouts.trialMs : ENGINEERING_LIMITS.trialMs;
@@ -241,7 +251,7 @@ export async function runParityLive(options: Options, deps: Dependencies) {
     }).catch(() => { deadlineWriteFailed = true; saveFailed('deadlines.private.jsonl'); });
   };
   const newDeadlineScope = (trialOrder: number | null, originAtMs?: number) => {
-    if (PROFILE.id !== 'research_trial_profile_v2') return undefined;
+    if (PROFILE.id === 'research_trial_profile_v1') return undefined;
     let scope!: ResearchDeadlineScope;
     scope = createResearchDeadlineScope({ timeouts: PROFILE.timeouts, origin: trialOrder === null ? 'warmup_start' : 'trial_start',
       ...(originAtMs === undefined ? {} : { originAtMs }), onChange: snapshot => recordDeadline(trialOrder, scope, snapshot) });
@@ -490,6 +500,7 @@ export async function runParityLive(options: Options, deps: Dependencies) {
           const rawJev = deps.createJevTransport(label);
           if (!rawJev || typeof rawJev.readKey !== "function" || typeof rawJev.fetchImpl !== "function") fail("missing_jev_dependency");
           let tape: ReplayTape | null = null;
+          let commonBoundary:{luna:number;jev:number;reobservations:number}|null=null;
           setupStage = "native_runtime";
           const wire = wireScope(fresh.client, rawJev, trial.calls, controller.signal, () => turn, () => closed, stop, () => tape);
           const cached = await createObservationCache({ directory: cacheDir, modelId: expectedModel, onMiss: "error", ...limits });
@@ -506,10 +517,14 @@ export async function runParityLive(options: Options, deps: Dependencies) {
             },
             async decide(input, opts) {
               inputs.actionMaterial.push(researchHash(input)); inputs.actionInputs.push(researchHash(buildJevDecisionPayload(input)));
-              try { return await core.decide(input, opts); }
+              try { const decision=await core.decide(input, opts);if(integrated&&decision.action!=='request_observation'&&tape)commonBoundary={luna:tape.luna.length,jev:tape.jev.length,reobservations:tape.reobservations.length};return decision; }
               catch (error) { wire.adapterResult("decision", error instanceof JevDecisionError ? error.code : "decision_error");
                 if (error instanceof JevDecisionError && error.code === "cost_cap") stop("cost_cap"); throw error; }
             },
+            ...(integrated?{async completeDetail(input,selected,opts){
+              try{return await core.completeDetail!(input,selected,opts);}
+              catch(error){wire.adapterResult('decision',error instanceof JevDecisionError?error.code:'decision_error');if(error instanceof JevDecisionError&&error.code==='cost_cap')stop('cost_cap');throw error;}
+            }}:{}),
           };
           const classifier = createJevLocalTestClassifier({ enabled: true, readKey: wire.readKey, fetchImpl: wire.fetchImpl, timeoutMs: PROFILE.timeouts.decisionMs, ...limits })!;
           const runtime = createProfileDialogue(PROFILE, { client: wire.client, strategy: label, image, anchors, referenceMemory: PROFILE.referenceMemory,
@@ -541,6 +556,7 @@ export async function runParityLive(options: Options, deps: Dependencies) {
             const publicPrefix = events.map(e => ({ turn: e.seq, speaker: e.speaker, text: e.text }));
             await persist(`public-${trial.order}-${turn}.packet.json`, { prefix: publicPrefix, sha256: researchHash(publicPrefix) });
             const prefixSha256 = researchHash(events), callStart = trial.calls.length, traceStart = traces.length;
+            commonBoundary=null;
             tape = { state: structuredClone(state!), events: structuredClone(events), luna: [], jev: [], reobservations: [], expectedRequests: [] };
             const result = await runtime.runAiTurn({ events: structuredClone(events), privateState: state, lastEventId: events.at(-1)!.id,
               requestSeq: turn, signal: controller.signal });
@@ -548,20 +564,32 @@ export async function runParityLive(options: Options, deps: Dependencies) {
             publicText(result.text, secrets); if (unsafe(result.text)) fail("privacy_rejected");
             const settled = settleJevTurnTraces(traces.slice(traceStart), result.privateState);
             const trace = settled.find(t => t.status === "committed");
-            if (!trace || trace.redacted || trace.publicSpeech !== result.text || trace.intervention !== "none_pending_researcher_decision") fail("trace_mismatch");
+            if (!trace || trace.redacted || trace.publicSpeech !== result.text || (integrated?trace.schemaVersion!=='jev_turn_trace_v2'||trace.executed===null||!trace.intervention:trace.intervention !== "none_pending_researcher_decision")) fail("trace_mismatch");
             const calls = trial.calls.slice(callStart), counts = Object.fromEntries(Object.keys(CALL_CAPS).map(phase => [phase, calls.filter(c => c.phase === phase).length]));
             if (trace!.aiPublic?.pending?.reasons.some(r => r.endsWith("_cost_cap"))) fail("cost_cap");
             if (calls.some(c => c.status !== "ok") || trace!.local?.localStatus !== "ok" || trace!.humanReferent?.status !== "ok" ||
                 trace!.aiPublic?.pending?.status === "failed") fail("stage_wiring_failed");
             tape.expectedRequests = calls.map(c => ({ provider: c.provider, phase: c.phase,
               requestSha256: c.provider === "luna" ? c.httpRequestSha256 ?? c.expectedHttpRequestSha256! : c.requestSha256,
+              ...(integrated&&c.provider==='jev'?{actualSendMeasured:c.sendIds.length>0,sendIds:[...c.sendIds]}:{}),
               ...(c.provider === "luna" ? { actualSendMeasured: !!c.httpRequestSha256, messagesSha256: c.requestSha256,
                 sendIds: [...c.sendIds] } : {}) }));
-            const { sides, ...replayResult } = await pairedReplay(tape, own, expectedModel, PROFILE);
+            if(integrated){
+              const cut=commonBoundary as {luna:number;jev:number;reobservations:number}|null;
+              const common={luna:tape.luna.slice(0,cut?.luna??tape.luna.length),jev:tape.jev.slice(0,cut?.jev??tape.jev.length),reobservations:tape.reobservations.slice(0,cut?.reobservations??tape.reobservations.length)};
+              const tail={luna:tape.luna.slice(cut?.luna??tape.luna.length),jev:tape.jev.slice(cut?.jev??tape.jev.length),reobservations:tape.reobservations.slice(cut?.reobservations??tape.reobservations.length)};
+              const versioned:InterventionReplayTape={schemaVersion:'parity_intervention_replay_v1',state:structuredClone(tape.state) as InterventionReplayTape['state'],events:structuredClone(tape.events),common,tails:{'repair-first':label==='repair-first'?tail:null,'bypass-enabled':label==='bypass-enabled'?tail:null},recorded:{label,expectedRequests:structuredClone(tape.expectedRequests)}};
+              const replayResult=await pairedInterventionReplay(versioned,own,expectedModel,PROFILE as import('../../v2/research-profile.ts').ResearchTrialProfileV3);
+              trial.replay.push({tape:versioned,result:replayResult});
+              if(replayResult.sides.length===2)evidence.pair(trial.order,turn,replayResult.sides[0],replayResult.sides[1]);
+              if(replayResult.status!=='same_material_intervention_verified')fail('replay_not_verified');
+            }else{
+              const {sides,...replayResult}=await pairedReplay(tape,own,expectedModel,PROFILE);
+              trial.replay.push({tape:structuredClone(tape),result:replayResult});
+              if(sides.length===2)evidence.pair(trial.order,turn,sides[0],sides[1]);
+              if(replayResult.status!=='same_material_same_payload')fail('replay_not_verified');
+            }
             if (closed || controller.signal.aborted || budget.halted || fatal) fail(trial.failure ?? budget.haltReason ?? fatal ?? "aborted");
-            trial.replay.push({ tape: structuredClone(tape), result: replayResult });
-            if (sides.length === 2) evidence.pair(trial.order, turn, sides[0], sides[1]);
-            if (trial.replay.at(-1)!.result.status !== "same_material_same_payload") fail("replay_not_verified");
             if (closed || controller.signal.aborted || budget.halted || fatal) fail(trial.failure ?? budget.haltReason ?? fatal ?? "aborted");
             state = result.privateState;
             evidence.event({ type: "commit", trialOrder: trial.order, label, turn });

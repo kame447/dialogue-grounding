@@ -3,6 +3,7 @@ import type { Check, Records, Row } from "./core.ts";
 import { cacheChecks, publicPrivacy } from "./fairness.ts";
 import { ledger } from "./ledger.ts";
 import { requiredPackets } from "./packets.ts";
+import {interventionChecks} from './intervention-records.ts';
 import { explicitModelPolicy, requestedReturnedModel, scopedModelCheck } from './model-checks.ts';
 import type { ModelCheckContext } from './model-checks.ts';
 
@@ -153,6 +154,8 @@ export function gates(records: Records, independent: Check[], models?: ModelChec
     const g1 = combine(`gate.G1${suffix}`, cacheChecks(scoped), "warmup_trial_cache_evidence");
     const imageCheck = assertion("smoke.images", rows(trial.calls).every(c => c.imageCount === 0 || c.phase === "observation_targeted"), "smoke_images_only_observation");
     const turns = rows(trial.turns);
+    const trialIndex=records.trials.indexOf(trial),iprefix=`intervention.trial.${trialIndex}.attempt.`,components=independent.filter(c=>c.id.startsWith(iprefix));
+    const integrated=row(records.run?.profile).id==='research_trial_profile_v3'||rows(trial.attempts).some(t=>t.schemaVersion==='jev_turn_trace_v2');
     const success = turns.some(turn => {
       const trace = committedTrace(turn), calls = rows(trial.calls).filter(c => c.turn === turn.turn);
       const good = (phase: string) => calls.some(c => c.phase === phase) && calls.filter(c => c.phase === phase).every(c => c.status === "ok" &&
@@ -161,7 +164,8 @@ export function gates(records: Records, independent: Check[], models?: ModelChec
       return trace.status === "committed" && typeof trace.publicSpeech === "string" && trace.publicSpeech === turn.publicText &&
         good("human_referent") && good("decision") && ["ok", "unknown"].includes(String(hr.status)) &&
         hr.model === calls.find(c => c.phase === "human_referent")?.[explicitModelPolicy(records) ? 'model' : 'requestedModel'] &&
-        decisions.length > 0 && decisions.every(d => d.decisionKind === "jev_local_test" && rows(row(d.evidence).stages).length > 0);
+        decisions.length > 0 && decisions.every(d => d.decisionKind === "jev_local_test" && rows(row(d.evidence).stages).length > 0)&&
+        (!integrated||rows(trial.attempts).some((t,i)=>t.status==='committed'&&t.turnIndex===turn.turn&&t.lastEventId===trace.lastEventId&&t.attemptNumber===trace.attemptNumber&&['shape','binding','execution'].every(k=>components.some(c=>c.id===iprefix+i+'.'+k&&c.status==='pass'))));
     });
     let g2 = turnFailure(trial) ? check(`gate.G2${suffix}`, "mismatch", "stage_one_turn_primary_error") :
       imageCheck.status === "mismatch" ? check(`gate.G2${suffix}`, "mismatch", "image_boundary_failed") :
@@ -181,7 +185,14 @@ export function gates(records: Records, independent: Check[], models?: ModelChec
     const stageLedger = trial.budget ? ledger(scoped).checks.filter(c => c.id.startsWith("ledger.total.") || c.id === "ledger.field_types") : [missing("smoke.budget", "stage_one_budget_snapshot_missing")];
     const modelComponent = models?.explicit ? scopedModelCheck(records, models.observations, Number(trial.order), models.error) : null;
     if (modelComponent) output.push(modelComponent);
-    const g3 = combine(`gate.G3${suffix}`, [storageCheck, packetCheck, stageModels, stageProfile, ...stageLedger, ...(modelComponent ? [modelComponent] : []),
+    // Recompute only the profile's underlying shared + target sources. A later
+    // exclusively main-owned profile fault remains global, and is not projected
+    // into an earlier smoke. Structural/shared/unknown issues remain included.
+    const policy=integrated?interventionChecks({...records,trials:[trial]}).find(c=>c.id==='identity.intervention_policy'):undefined;
+    const scopedPolicy=policy?{...policy,id:'smoke.intervention_policy.'+trial.order}:null;
+    const unresolved=independent.filter(c=>c.id==='identity.intervention_policy'&&c.reason==='intervention_trace_invalid');
+    const s4=integrated?[...(scopedPolicy?[scopedPolicy]:[missing('smoke.intervention_policy.'+trial.order)]),...(components.length?components:[missing(iprefix+'0.shape','intervention_trace_missing')]),...unresolved]:[];
+    const g3 = combine(`gate.G3${suffix}`, [...s4,storageCheck, packetCheck, stageModels, stageProfile, ...stageLedger, ...(modelComponent ? [modelComponent] : []),
       independent.find(c => c.id === "identity.manifest") ?? missing("identity.manifest")], "persisted_manifest_profile_models_billing_and_permissions");
     const privacy = publicPrivacy(scoped);
     const jevUnknown = rows(row(trial.budget).sends).some(s => s.provider === "jev" && s.costUsd === null);
