@@ -25,7 +25,7 @@ const rawMemo={figures:model.anchors.map((a:any)=>({id:a.id,holistic:[],analytic
 const assignment={schemaVersion:'base_assignment_config_v1',configId:'11111111-1111-4111-8111-111111111111',revision:1,strategy:'repair-first',seed,referenceMemory:true};
 const clientConfig={provider:'cloudflare',purpose:'dialogue_turn',baseUrl:'https://synthetic.invalid/v1',apiKey:'synthetic-private-proxy-key'};
 const syntheticKey='sk-or-synthetic-only-private-key-0123456789';
-function tape(action='accept',localSegment=false) {
+function tape(action='accept',localSegment=false,aiClaim=false) {
   const posts:any[]=[];let gets=0, keyReads=0;
   const fetchImpl:typeof fetch=async(_url,init:any={})=>{
     if(init.method==='GET'){gets++;return Response.json({ready:true,purpose:'dialogue_turn',provider:'openai',model:modelId});}
@@ -40,9 +40,10 @@ function tape(action='accept',localSegment=false) {
     const state=body.messages[1]?.content;
     let parsed:any;try{parsed=JSON.parse(state);}catch{}
     const final=String(body.messages.at(-1)?.content).includes('JSON')&&!parsed?.candidateText&&!parsed?.publicTurns;
-    const segment=parsed?.publicTurns&&!parsed?.candidateText&&localSegment?JSON.stringify([{segmentId:'s1',quote:parsed.publicTurns.at(-1).text,
+    const claim=parsed?.candidateText&&aiClaim;
+    const segment=claim||parsed?.publicTurns&&!parsed?.candidateText&&localSegment?JSON.stringify([{segmentId:'s1',quote:claim?parsed.candidateText:parsed.publicTurns.at(-1).text,
       targets:[model.anchors[0].id],aspect:'part',proposition:'細い部分がある',name:null,linkedIssueId:null,respondsToTurn:null}]):'[]';
-    const text=parsed?.candidateText||parsed?.publicTurns?segment:final?JSON.stringify(Object.fromEntries(model.anchors.map((a:any)=>[a.id,null]))):'なるほど。';
+    const text=parsed?.candidateText||parsed?.publicTurns?segment:final?JSON.stringify(Object.fromEntries(model.anchors.map((a:any)=>[a.id,null]))):aiClaim?'細い部分が見えます。':'なるほど。';
     return Response.json({model:modelId,choices:[{message:{content:text}}],usage:{prompt_tokens:3,completion_tokens:2}});
   };
   return{fetchImpl,posts,counts:()=>({gets,keyReads,posts:posts.length}),readKey:async()=>{keyReads++;return syntheticKey;}};
@@ -219,8 +220,8 @@ function pairedEvidence(a:any,b:any):'verified'|'mismatch'|'unverifiable'{
 }
 test('J-C1/C2/C3/P1: paired adoption and veto share common inputs; each tail follows its executed act',async t=>{
   const h=await fixture(t);
-  async function pair(action:string){
-    const upstream=tape(action),prepared=await prepareParticipantJev({...h.options,fetchImpl:upstream.fetchImpl,readKey:upstream.readKey});
+  async function pair(action:string,claims=false){
+    const upstream=tape(action,claims,claims),prepared=await prepareParticipantJev({...h.options,fetchImpl:upstream.fetchImpl,readKey:upstream.readKey});
     const runs=[];
     for(const strategy of ['repair-first','bypass-enabled']){
       const made=await makeTask(prepared,{strategy});
@@ -231,7 +232,7 @@ test('J-C1/C2/C3/P1: paired adoption and veto share common inputs; each tail fol
     const evidenceDirectory=process.env.PARTICIPANT_JEV_TEST_EVIDENCE_DIR;
     if(evidenceDirectory){
       await mkdir(evidenceDirectory,{recursive:true,mode:0o700});
-      for(let i=0;i<runs.length;i++)await writeFile(join(evidenceDirectory,action+'-'+i+'.private.json'),JSON.stringify(runs[i],null,2)+'\n',{mode:0o600});
+      for(let i=0;i<runs.length;i++)await writeFile(join(evidenceDirectory,action+(claims?'-claim':'')+'-'+i+'.private.json'),JSON.stringify(runs[i],null,2)+'\n',{mode:0o600});
     }
     assert.equal(pairedEvidence(runs[0],runs[1]),'verified');return runs;
   }
@@ -248,6 +249,15 @@ test('J-C1/C2/C3/P1: paired adoption and veto share common inputs; each tail fol
   assert.deepEqual(generation(vetoed[0]),generation(adopted[0]),'same executed act has the same entire generation body');
   const missing=structuredClone(vetoed[0]);missing.jevLedger.sends=missing.jevLedger.sends.filter((s:any)=>s.boundary==='common');
   assert.equal(pairedEvidence(missing,vetoed[1]),'unverifiable');
+  const withClaims=await pair('move_on',true);
+  for(const record of withClaims){
+    assert.equal(record.jevTraces[0].local.classifier.status,'ok');
+    assert.equal(record.jevTraces[0].aiPublic.stages.ai_function.status,'ok');
+    assert.equal(record.jevTraces[0].aiPublic.stages.ai_support.status,'ok');
+    const sends=record.jevLedger.sends,generationIndex=sends.findIndex((s:any)=>s.phase==='generation');
+    assert.ok(sends.slice(0,generationIndex).some((s:any)=>s.provider==='jev'&&s.phase==='jev'&&s.boundary==='common'),'human local remains common');
+    assert.deepEqual(sends.slice(generationIndex+1).filter((s:any)=>s.provider==='jev').map((s:any)=>[s.phase,s.boundary]),[['ai_function','tail'],['ai_support','tail']]);
+  }
 });
 
 test('J-R1/F1/L1/L2: loopback start/message/reload/final/questionnaire/review keeps the BASE contract',async t=>{

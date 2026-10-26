@@ -258,6 +258,11 @@ export async function prepareParticipantJev(options:{configFile:string;baseAssig
       const jevFetch=participantLedgerFetch(ledger,'jev',config.modelId,fetchImpl);
       const transport={...(options.readKey?{readKey:options.readKey}:{}),fetchImpl:jevFetch,costCapUsd:config.limits.jevUsd,
         timeoutMs:profile.timeouts.decisionMs,researchLimits};
+      const aiPublicTransport={...transport,fetchImpl:(url:string,init:RequestInit)=>{
+        const parent=scope(ledger).getStore(),questions=JSON.parse(String(init.body)).questions;
+        const phase=Object.keys(questions).some(key=>key.endsWith('_support'))?'ai_support':'ai_function';
+        return scope(ledger).run({turn:parent?.turn??null,phase,boundary:'tail'},()=>jevFetch(url,init));
+      }};
       const nativeDecision=createJevDecisionClient({enabled:true,...transport,questionLayout:profile.questionLayout})!;
       const jevDecision={...nativeDecision,
         get lastEvidence(){return nativeDecision.lastEvidence;},get lastReferentEvidence(){return nativeDecision.lastReferentEvidence;},
@@ -277,7 +282,7 @@ export async function prepareParticipantJev(options:{configFile:string;baseAssig
       const jevResearch:JevResearchOptions={profile,observer,jevDecision,
         localGrounding:{classifier:{...classifier,get lastEvidence(){return classifier.lastEvidence;},get spentUsd(){return classifier.spentUsd;},
           get callCount(){return classifier.callCount;},classify:(...args:Parameters<typeof classifier.classify>)=>jevOperation(ledger,'jev_local',()=>classifier.classify(...args))},timeoutMs:profile.timeouts.localMs,
-          researchLimits,aiPublicClaims:profile.localGrounding.aiPublicClaims,aiPublicTransport:transport},ledger};
+          researchLimits,aiPublicClaims:profile.localGrounding.aiPublicClaims,aiPublicTransport},ledger};
       return {client,jevResearch};
     }};
   }catch{throw new ParticipantJevError('invalid_config');}
