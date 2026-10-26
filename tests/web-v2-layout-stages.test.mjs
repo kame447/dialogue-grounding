@@ -66,8 +66,6 @@ async function ui(initial = trial(), handler, storage = new Map()) {
   const { root, ids: e } = makeDOM();
   let state = { trial: initial }, timerId = 0;
   const timers = new Map(), calls = [];
-  e.setup.elements.strategy.value = "repair-first";
-  e.setup.elements.seed.value = "1";
   runInNewContext(script, {
     document: { getElementById: (id) => e[id], createElement: (tag) => new Element(tag), createElementNS: (_, tag) => {
       const node = new Element(tag);
@@ -113,7 +111,7 @@ test("chat opens with an upcoming questionnaire step and a hidden final form", a
   assert.equal(e["step-questionnaire"].getAttribute("data-state"), "upcoming");
   assert.equal(e["review-bar"].hidden, true, "review navigation appears only after submission");
   assert.equal(e["name-list"].children.length, 6);
-  assert.equal(e.setup.hidden, true);
+  assert.equal(e.setup, undefined, "research setup is absent");
   assert.equal(calls.filter((call) => call.path !== "/api/records").length, 1);
 });
 

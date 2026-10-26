@@ -12,7 +12,7 @@ const raw = await readFile(new URL("producer-records.json", directory), "utf8");
 const frozen: Captures = JSON.parse(raw);
 const metadata = JSON.parse(await readFile(new URL("capture-metadata.json", directory), "utf8"));
 // R2-D Option B: retain historical bytes; bind current comparisons to the approved integrated capture.
-const currentDirectory = new URL("./fixtures/parity-verify/failure-path-s1-s4-2ce098d/", import.meta.url);
+const currentDirectory = new URL("./fixtures/parity-verify/failure-path-s2-1b10f5c/", import.meta.url);
 const currentRaw = await readFile(new URL("producer-records.json", currentDirectory), "utf8");
 const currentFrozen: Captures = JSON.parse(currentRaw);
 const currentMetadata = JSON.parse(await readFile(new URL("capture-metadata.json", currentDirectory), "utf8"));
@@ -114,7 +114,7 @@ test("failure fixture source SHA and literal digest require explicit regeneratio
   assert.equal(sha256(raw), "5b25db524986d2313e631735dfb53d9ef216f0ae850e5c140084f58c902bd5c8");
   assert.equal(sha256(JSON.stringify(metadata.sourceFiles)), "0bb6a47fcf5ddfe74b871bb690405a6a1a82a50cd194fb800f37acf10c0c3c0a");
   assert.equal(currentMetadata.schemaVersion, metadata.schemaVersion);
-  assert.equal(currentMetadata.baseCommit, "2ce098d4d7fb0af2e65de7a564b8846fef327a79");
+  assert.equal(currentMetadata.baseCommit, "1b10f5c6e8543849ca276e16a2a76e4b8c9ab315");
   assert.equal(sha256(currentRaw), currentMetadata.fixtureSha256);
   assert.deepEqual(currentMetadata.scenarios, metadata.scenarios);
   assert.deepEqual(currentMetadata.comparisonExclusions, metadata.comparisonExclusions);

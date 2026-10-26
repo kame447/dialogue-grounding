@@ -326,14 +326,14 @@ test("earlier completed trials are reachable while a newer trial is in dialogue;
   assert.equal(e.chat.hidden, false);
 });
 
-test("preparing a new trial with an open questionnaire needs a second press (no browser dialog)", async () => {
+test("an open questionnaire has no participant next/start control or admission request", async () => {
   const app = await ui({ initial: completed() });
-  const { e } = app;
-  assert.equal(e["new-trial"].hidden, false);
-  e["new-trial"].fire("click");
-  assert.equal(e["new-trial-warning"].hidden, false);
-  assert.equal(e.setup.hidden, true);
-  e["new-trial"].fire("click");
-  assert.equal(e.setup.hidden, false);
+  const { e, calls } = app;
+  assert.equal(e["new-trial"], undefined);
+  assert.equal(e["new-trial-warning"], undefined);
+  assert.equal(e.setup, undefined);
+  await app.poll();
+  assert.equal(calls.some(call => call.path === "/api/start" || call.path.includes("prepare-next")), false);
+  assert.equal(app.backend.state.trial.sessionId, "rec-active");
   assert.doesNotMatch(script, /window\.(confirm|alert)|\balert\(|\bconfirm\(/u);
 });

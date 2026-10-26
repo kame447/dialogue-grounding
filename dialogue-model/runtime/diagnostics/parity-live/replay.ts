@@ -1,5 +1,6 @@
 import { researchGenerationClient } from '../../v2/research-generation-client.ts';
 import { RESEARCH_MAX_DEADLINE_MS } from '../../v2/research-timeouts.ts';
+import { resolveModelPolicy } from '../../model-policy.ts';
 import type { ResearchTrialProfileV2 } from '../../v2/research-profile.ts';
 // Offline native-pipeline replay. Recorded model results are fixed materials,
 // never semantic expectations, and this module performs no network/key reads.
@@ -25,6 +26,7 @@ export type ReplayTape = { state: JevPrivateState; events: Array<{ id: string; s
 // body is excluded; phase deadlines remain represented by the effective profile.
 export const REPLAY_EXCLUDED_ENVELOPE_FIELDS = EVIDENCE_NORMALIZED_ENVELOPE_FIELDS;
 export function createProfileDialogue(profile: Profile, options: Parameters<typeof createDialogueV2>[0]) {
+  resolveModelPolicy(profile);
   const local = options.localGrounding as JevTurnLocalOptions | undefined;
   const research = profile.id === "research_trial_profile_v2";
   const researchLimits = research ? { maxDeadlineMs: RESEARCH_MAX_DEADLINE_MS } : undefined;

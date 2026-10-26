@@ -1,3 +1,4 @@
+import { privateBaseOptions } from './support/s5-private-options.mjs';
 // v2 two-axis grounding shadow: default off, never changes the dialogue, private records only. Mock judges, synthetic text.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -206,9 +207,9 @@ test("the web server passes the shadow only from researcher start-up options, ne
     const calls: Any[] = [];
     const createTaskV2 = async (options: Any) => {
       calls.push(options);
-      return { getState: () => ({ version: 2, sessionId: "s", scene: { png, mimeType: "image/png", shapes: [] }, events: [], busy: false, status: "dialogue" }) };
+      return createNamingTaskV2(options as Any);
     };
-    const server: Any = await startNamingServer({ port: 0, client: model(), createTaskV2, runDir: "", ...(configured ? { groundingShadow: configured } : {}) } as Any);
+    const server: Any = await startNamingServer({ port: 0, client: model(), createTaskV2, ...(await privateBaseOptions(t,{seed:1})), ...(configured ? { groundingShadow: configured } : {}) } as Any);
     t.after(() => new Promise((resolve) => { server.closeAllConnections(); server.close(resolve); }));
     const base = "http://127.0.0.1:" + server.address().port;
     const page = await fetch(base);
@@ -217,6 +218,9 @@ test("the web server passes the shadow only from researcher start-up options, ne
     const response = await fetch(base + "/api/start", { method: "POST", headers: { cookie, "Content-Type": "application/json" },
       body: JSON.stringify({ version: 2, strategy: "repair-first", seed: 1, groundingShadow: { judge: "x" } }) });
     await response.text();
+    assert.equal(response.status,400);assert.equal(calls.length,0);
+    const clean=await fetch(base+"/api/start",{method:"POST",headers:{cookie,"Content-Type":"application/json"},body:JSON.stringify({version:2})});
+    assert.equal(clean.status,200);await clean.text();
     assert.equal(calls.length, 1);
     assert.equal(calls[0].groundingShadow, configured ?? undefined);
   }

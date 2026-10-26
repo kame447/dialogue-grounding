@@ -62,14 +62,15 @@ function restoreDraft(trial) {
     reviewStage = STAGES.includes(draft.review) ? draft.review : null;
   } catch { /* Ignore unavailable or invalid browser drafts. */ }
 }
+const defaultContact = "実験の案内に記載された連絡先へお問い合わせください。";
+const contact = document.querySelector?.('meta[name="participant-contact"]')?.content || defaultContact;
 const errors = {
-  ai_unavailable: "AIに接続できませんでした。公開された会話を確認してください。メッセージは自動で再送しません。",
-  scoring_error: "採点でエラーが発生しました。提出内容を保持しています。採点を再試行できます。",
-  invalid_ai_submission: "AIの最終提出を検証できませんでした。研究者がこの試行を確認してください。",
-  repository_output_forbidden: "記録先はリポジトリ外に設定してください。",
-  record_write_failed: "研究記録を保存できませんでした。研究者が保存先を確認してください。",
-  invalid_seed: "Seedを安全な整数で入力してください。",
-  busy: "処理中です。完了を待ってください。",
+  trial_unavailable: "試行を開始できませんでした。" + contact,
+  ai_unavailable: "AIに接続できませんでした。会話履歴を確認してください。送り直すには、そのメッセージの「再送」を押してください。メッセージは自動では再送されません。",
+  scoring_error: "採点でエラーが発生しました。提出内容は保存されています。採点を再試行できます。",
+  invalid_ai_submission: "AIが提出した名前を確認できませんでした。" + contact,
+  record_write_failed: "回答を保存できませんでした。" + contact,
+  busy: "処理中です。完了までお待ちください。",
   rate_limited: "短時間に送信が集中しています。1分ほど待ってからもう一度送信してください。",
   invalid_questionnaire: "アンケートの回答を確認してください。すべての質問に回答が必要です。",
   questionnaire_submitted: "このアンケートは提出済みです。",
@@ -82,7 +83,7 @@ async function api(path, body, signal) {
   });
   const value = await response.json();
   if (!response.ok) {
-    const error = new Error(errors[value.error] || "操作を完了できませんでした。研究者が試行状態を確認してください。");
+    const error = new Error(errors[value.error] || "操作を完了できませんでした。" + contact);
     error.status = response.status;
     error.code = value?.error;
     throw error;
@@ -192,12 +193,12 @@ function updateSceneLabels(target) {
     // AI names and matches appear only on the results stage, so the
     // questionnaire and the read-only review are answered before seeing them.
     const result = renderedStage === "results" && resultsUnlocked() ? rowFor(shape.id) : null;
-    path.setAttribute("aria-label", result ? `図形。あなた：${result.human.rawName || "未合意"}。AI：${result.ai?.rawName || "未合意"}。${result.matched ? "一致" : "不一致"}` :
+    path.setAttribute("aria-label", result ? `図形。あなた：${result.human.rawName || "未合意・わからない"}。AI：${result.ai?.rawName || "未合意・わからない"}。${result.matched ? "一致" : "不一致"}` :
       name ? `図形。メモ：${name}。選択して拡大・修正` : "図形を選択して拡大・名前を入力");
     const label = path.shapeName;
     label.replaceChildren();
     if (result) {
-      ["あなた：" + displayName(result.human.rawName || "未合意"), "AI：" + displayName(result.ai?.rawName || "未合意") + (result.matched ? " · 一致" : " · 不一致")].forEach((text, i) => {
+      ["あなた：" + displayName(result.human.rawName || "未合意・わからない"), "AI：" + displayName(result.ai?.rawName || "未合意・わからない") + (result.matched ? " · 一致" : " · 不一致")].forEach((text, i) => {
         const line = svgNode("tspan", { x: label.getAttribute("x"), dy: i ? "1.3em" : "0" });
         line.textContent = text; label.append(line);
       });
@@ -216,7 +217,7 @@ function openFigure(shape, target) {
   preview.setAttribute("viewBox", box?.width > 0 ? `${box.x - 24} ${box.y - 24} ${box.width + 48} ${box.height + 48}` : `0 0 ${data.width} ${data.height}`);
   $("figure-name").disabled = !dialogueOpen();
   $("name-unknown").disabled = !dialogueOpen();
-  $("name-form").querySelectorAll('button[type="submit"]').forEach((button) => { button.disabled = !dialogueOpen(); });
+  $("name-form").querySelectorAll('button[type="submit"]').forEach((button) => { button.disabled = !dialogueOpen(); button.textContent = participantStage() === "names" ? "名前を保存" : "メモを保存"; });
   $("name-dialog").showModal();
   $("figure-name").focus({ preventScroll: true });
 }
@@ -229,7 +230,7 @@ function saveAnswer(value) {
 }
 function updateNameCount() {
   const count = scene()?.shapes?.filter((shape) => answers.has(shape.id)).length ?? 0;
-  $("name-count").textContent = scene()?.shapes?.length ? `回答 ${count} / ${scene().shapes.length}` : "";
+  $("name-count").textContent = scene()?.shapes?.length ? `入力済み ${count} / ${scene().shapes.length}` : "";
 }
 function renderNameList() {
   const signature = JSON.stringify([scene(), [...answers], submitted()]);
@@ -273,7 +274,7 @@ function renderSummary(target, text) {
 }
 const resultSummary = (shape) => {
   const row = rowFor(shape.id);
-  return row ? `あなた：${row.human.rawName || "未合意"}\nAI：${row.ai?.rawName || "未合意"} · ${row.matched ? "一致" : "不一致"}` : "";
+  return row ? `あなた：${row.human.rawName || "未合意・わからない"}\nAI：${row.ai?.rawName || "未合意・わからない"} · ${row.matched ? "一致" : "不一致"}` : "";
 };
 function renderStage(focus = false) {
   const stage = participantStage();
@@ -292,7 +293,7 @@ function renderStage(focus = false) {
   }
   // An older deployment without the questionnaire API keeps the planned label.
   if (surveyState === "unavailable" && stage !== "questionnaire") $("step-questionnaire").setAttribute("data-state", "planned");
-  $("step-questionnaire-note").textContent = surveyState === "unavailable" ? "予定" : "試行用";
+  $("step-questionnaire-note").textContent = surveyState === "unavailable" ? "利用できません" : "試行用";
   renderReviewBar(stage);
   updateSceneLabels($("board"));
   // A display:none log loses its offset; returning to the chat shows the newest.
@@ -366,7 +367,7 @@ function renderChatActivity() {
   $("chat-recovery-message").textContent = aiError ? "返答を取得できませんでした。" : "会話の更新を確認できません。";
   $("retry-chat").textContent = aiError ? "AIの返答を再試行" : "状態を確認";
   $("retry-chat").disabled = working || checkingChat || sending || !chatOpen();
-  $("chat-status").textContent = failed ? "送信を確認できません。メッセージの再送ボタンで再試行できます。" :
+  $("chat-status").textContent = failed ? "送信を確認できませんでした。送り直すには、そのメッセージの「再送」を押してください。" :
     aiError ? "AIの返答を取得できませんでした。再試行できます。" :
       chatStalled || chatDisconnected ? "会話の更新を確認できません。状態を確認してください。" :
         showDots ? "AIが返答を作成しています" : "";
@@ -400,7 +401,7 @@ function renderHistory() {
           const status = document.createElement("small"); status.className = "message-failure";
           const mark = document.createElement("span"); mark.textContent = "!"; mark.setAttribute("aria-hidden", "true");
           const explanation = document.createElement("span"); explanation.className = "sr-only";
-          explanation.textContent = "送信を確認できません。自動では再送しません。";
+          explanation.textContent = "送信を確認できませんでした。自動では再送されないため、「再送」を押してください。";
           const retry = document.createElement("button"); retry.type = "button"; retry.className = "retry-message";
           retry.textContent = "再送"; retry.setAttribute("aria-label", "このメッセージを再送");
           retry.disabled = working || sending || !chatOpen();
@@ -420,7 +421,6 @@ function render(state) {
   // Events are append-only; a state response started earlier must not remove newer events.
   if (trial && trialIdentity(current) === trialIdentity(trial) && (trial.events?.length ?? 0) < (current?.events?.length ?? 0)) return;
   current = trial; serverBusy = Boolean(state.busy);
-  $("setup").hidden = Boolean(trial) && !preparing;
   $("trial").hidden = !trial || preparing;
   if (!trial) { loadRecords(); renderRecords(); setControls(); return; }
   const data = scene();
@@ -433,7 +433,7 @@ function render(state) {
   if (submitted() || data?.shapes?.every((shape) => answers.has(shape.id))) submissionWarning = "";
   $("submission-status").textContent = submissionWarning || (trial.status === "submission_error" || trial.finalError === "invalid_ai_submission" ? errors.invalid_ai_submission :
     trial.status === "scoring_error" ? errors.scoring_error : trial.result ? "双方の提出が完了しました。" :
-      submitted() ? "あなたの回答を確定しました。AIの提出を待っています。" : "メモはこのブラウザのタブに保存されます。相手には届きません。");
+      submitted() ? "名前を提出しました。AIの提出を待っています。" : "入力した名前（メモ）はこの画面に一時保存されます。会話相手のAIには見えません。");
   if (trialCompleted()) loadSurvey();
   loadRecords();
   const previousStage = renderedStage;
@@ -442,8 +442,6 @@ function render(state) {
   if (trialCompleted() && previousStage !== participantStage() && ["questionnaire", "results"].includes(participantStage())) stageFocusTarget(participantStage()).focus({ preventScroll: true });
   renderSurvey(); renderRecords();
   renderResults();
-  $("new-trial").hidden = Boolean(reviewing) || (!trial.result && !["completed", "submission_error"].includes(trial.status));
-  if ($("new-trial").hidden) disarmNewTrial();
   retrySubmission.hidden = !canRetrySubmission();
   retrySubmission.textContent = trial.status === "scoring_error" ? "採点を再試行" : "AIの提出を再試行";
   setControls(); scheduleRefresh();
@@ -461,7 +459,6 @@ function setControls() {
   renderChatActivity();
   $("history").querySelectorAll("button").forEach((node) => { node.disabled = working || sending || !chatOpen(); });
   for (const id of ["utterance", "send-message"]) $(id).disabled = working || !chatOpen();
-  $("setup").querySelectorAll("input,select,button").forEach((node) => { node.disabled = working; });
   $("finish-conversation").disabled = working || sending || pending.some((item) => item.status === "queued") || !dialogueOpen() || !scene()?.shapes?.length;
   $("back-to-chat").disabled = working;
   $("finish-conversation").hidden = submitted();
@@ -472,7 +469,6 @@ function setControls() {
   $("names-help").textContent = submitted() ? "提出済みの名前です。変更はできません。図形を選ぶと拡大して確認できます。" : "会話で共有した名前を確認してください。図形を選ぶと修正できます。";
   $("review-names").disabled = working || aiThinking() || sending || pending.some((item) => item.status === "queued") || !dialogueOpen() || !scene()?.shapes?.length;
   $("confirm-submit").disabled = working || aiThinking() || sending || !dialogueOpen();
-  $("new-trial").disabled = working || serverBusy;
   retrySubmission.disabled = working || serverBusy || !canRetrySubmission();
 }
 function scheduleRefresh() {
@@ -560,7 +556,6 @@ async function drainMessages() {
 const STAGES = ["chat", "names", "questionnaire", "results"];
 let renderedStage = null;
 let reviewing = null;
-let newTrialArmed = false;
 let survey = { recordId: null, status: "idle", form: null, questionnaire: null };
 let surveyAnswers = {};
 let surveyComment = "";
@@ -659,7 +654,6 @@ function resetSurvey() {
   surveyAnswers = {}; surveyComment = ""; surveyRevision = 0; surveySyncedRevision = 0;
   surveySave = null; surveySaveError = false; surveySubmitting = false; surveyMessage = ""; surveySignature = "";
   records = { loadedFor: null, items: [], token: records.token + 1 };
-  newTrialArmed = false;
 }
 // "pending" before a result, "loading" until the form arrives, then
 // "open", "submitted" or "unavailable" (an older server without the API).
@@ -784,7 +778,7 @@ async function submitSurvey() {
     surveySubmitting = false;
     if (error.code === "questionnaire_submitted") loadSurvey(true);
     // Answers stay on screen and in this browser; nothing is cleared on failure.
-    surveyMessage = `${error.message} 回答内容は保持しています。`;
+    surveyMessage = `${error.message} 入力した回答はこの画面に残っています。`;
     renderSurvey();
   }
 }
@@ -860,7 +854,7 @@ function renderSurveyPrompt() {
   const started = Object.keys(surveyAnswers).length > 0 || Boolean(surveyComment);
   $("open-survey").textContent = started ? "アンケートの回答を再開する" : "アンケートに回答する";
   $("survey-prompt-detail").textContent = reviewing ? "以前の試行のアンケートです。提出するまで回答・変更できます。" :
-    started ? "途中の回答は保存されています。提出するまで変更できます。" : "この試行について、数問の質問に回答してください。";
+    started ? "途中の回答は保存されています。提出するまで変更できます。" : "この試行について、いくつかの質問に回答してください。";
 }
 function renderReviewBar(stage) {
   renderedStage = stage;
@@ -906,7 +900,7 @@ function loadRecords(force = false) {
 }
 function formatRecordTime(value) {
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "以前";
+  if (Number.isNaN(date.getTime())) return "以前の試行";
   return `${date.getMonth() + 1}月${date.getDate()}日 ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 function earlierRecords() {
@@ -991,9 +985,6 @@ function exitReview() {
     return state;
   });
 }
-function disarmNewTrial() {
-  newTrialArmed = false; $("new-trial-warning").hidden = true;
-}
 function canRetrySubmission() {
   return Boolean(submitted() && (current?.status === "scoring_error" || (current?.status === "submitting" && !current?.aiSubmitted)));
 }
@@ -1021,15 +1012,6 @@ if (viewport) {
   };
   viewport.addEventListener("resize", fitViewport); fitViewport();
 }
-$("setup").addEventListener("submit", (event) => {
-  event.preventDefault();
-  const data = new FormData(event.target);
-  operate(async () => {
-    const state = await api("/api/start", { strategy: data.get("strategy"), seed: Number(data.get("seed")),
-      referenceMemory: data.get("referenceMemory") === "on", version: 2 });
-    generation++; clearDraft(); resetLocal(); preparing = false; return state;
-  });
-});
 $("chat").addEventListener("submit", (event) => {
   event.preventDefault();
   if (working || !chatOpen()) return;
@@ -1066,7 +1048,7 @@ $("submission").addEventListener("submit", (event) => {
   event.preventDefault();
   if (working || sending || aiThinking() || !dialogueOpen()) return;
   if (!scene()?.shapes?.length || scene().shapes.some((shape) => !answers.has(shape.id))) {
-    submissionWarning = "未回答の図形があります。図形を選んで名前か「未合意・わからない」を入力してください。";
+    submissionWarning = "名前が未入力の図形があります。図形を選択し、名前を入力するか「未合意・わからない」を選んでください。";
     $("submission-status").textContent = submissionWarning; return;
   }
   addScene($("confirm-scene"), false);
@@ -1111,13 +1093,12 @@ const sendSurveyOnHide = () => {
 };
 globalThis.addEventListener?.("pagehide", sendSurveyOnHide);
 document.addEventListener?.("visibilitychange", () => { if (document.visibilityState === "hidden") sendSurveyOnHide(); });
-$("new-trial").addEventListener("click", () => {
-  // Confirm-free safeguard: an unsubmitted questionnaire needs a second press.
-  if (!newTrialArmed && trialCompleted() && surveyAvailability() === "open") {
-    newTrialArmed = true; $("new-trial-warning").hidden = false; return;
+// One admission attempt per page load; failures stay on the neutral screen.
+operate(async () => {
+  let state = await api("/api/state");
+  if (!state.trial) {
+    $("notice").textContent = "試行を準備しています。しばらくお待ちください。";
+    state = await api("/api/start", { version: 2 });
   }
-  flushSurveyDraft(); disarmNewTrial();
-  preparing = true; clearTimeout(refreshTimer);
-  $("setup").hidden = false; $("trial").hidden = true; $("setup").elements.seed.focus();
+  return state;
 });
-operate(() => api("/api/state"));

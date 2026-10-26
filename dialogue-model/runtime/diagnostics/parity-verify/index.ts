@@ -9,6 +9,7 @@ import { ledger } from "./ledger.ts";
 import { packetChecks } from "./packets.ts";
 import { researchDeadlineChecks } from './research-records.ts';
 import { failureChecks, plannedMapping } from "./failure-records.ts";
+import { modelChecks } from './model-checks.ts';
 
 export { canonical, hash, sha256, profileHash, META_KEYS } from "./core.ts";
 export type { Check, Records, Row, Status } from "./core.ts";
@@ -53,7 +54,9 @@ export function verifyRecords(records: Records) {
     checks.push(...packetChecks(records));
     const accounting = ledger(records), technical = coverage(records);
     checks.push(...fairness(records), ...wireValidation(records), ...cacheChecks(records), ...accounting.checks, ...journal(records), publicPrivacy(records));
-    checks.push(...gates(records, checks));
+    const models = modelChecks(records);
+    checks.push(...models.checks);
+    checks.push(...gates(records, checks, models));
     checks.push(...technical.checks);
     const report = combine("overall", checks, "independent_record_evidence_only");
     return { version: 1, status: report.status, counts: statusCounts(checks), checks, totals: accounting.totals,

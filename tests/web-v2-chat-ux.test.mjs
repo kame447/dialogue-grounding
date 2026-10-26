@@ -66,8 +66,6 @@ async function ui(initial = trial(), handler) {
   const { root, ids: e } = makeDOM();
   let state = { trial: initial }, timerId = 0, now = 10000, clientSequence = 0;
   const timers = new Map(), calls = [];
-  e.setup.elements.strategy.value = "repair-first";
-  e.setup.elements.seed.value = "1";
   runInNewContext(script, {
     Date: class extends Date { static now() { return now; } },
     crypto: { randomUUID: () => "browser-client-" + ++clientSequence },

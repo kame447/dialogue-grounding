@@ -2,6 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8">
+  <meta name="participant-contact" content="実験の案内に記載された連絡先へお問い合わせください。">
   <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content">
   <title>6図形の共同命名</title>
   <link rel="stylesheet" href="/style.css">
@@ -24,24 +25,13 @@
       <p class="muted">以前の試行の会話・名前・結果は閲覧のみです。アンケートは提出するまで回答できます。</p>
       <ul id="record-list" class="record-list"></ul>
     </details>
-    <form id="setup" class="panel">
-      <h2>研究者用：試行の開始</h2>
-      <label>方略<select name="strategy"><option value="repair-first">確認・修復を優先</option><option value="bypass-enabled">保留・後からの調整を許容</option></select></label>
-      <label>Seed<input name="seed" type="number" step="1" required value="1"></label>
-      <fieldset class="research-options">
-        <legend>研究者用：補助機能（既定OFF）</legend>
-        <label class="option-toggle" for="reference-memory"><input id="reference-memory" name="referenceMemory" type="checkbox" value="on">参照メモリ</label>
-      </fieldset>
-      <button>開始</button>
-      <p class="muted">実験条件・採点規則は暫定です。研究者が開始してから参加者に画面を渡してください。</p>
-    </form>
     <section id="trial" hidden>
       <div class="workspace">
         <section class="panel board" aria-labelledby="board-title">
           <div class="panel-head"><h2 id="board-title">あなたの図形</h2><span id="name-count" class="muted" role="status"></span></div>
           <div id="scene-area" class="scene-area"><svg id="board" viewBox="0 0 1200 800" aria-label="あなたの図形。選択して拡大・名前を入力" xmlns="http://www.w3.org/2000/svg"></svg></div>
           <p id="scene-status" role="status" class="muted"></p>
-          <p class="privacy-note">図形を選んで拡大・名前をメモできます。メモは相手に届きません。</p>
+          <p class="privacy-note">図形を選んで拡大・名前をメモできます。メモは会話相手のAIには見えません。</p>
         </section>
         <aside class="panel dialogue" aria-label="会話と名前の確認">
           <!-- Survey/review navigation (after the names are submitted). -->
@@ -53,7 +43,7 @@
             <button id="exit-review" type="button" class="secondary" hidden>現在の試行に戻る</button>
           </div>
           <div id="survey-prompt" class="survey-prompt" role="region" aria-label="未回答のアンケート" hidden>
-            <p><strong>アンケートが未回答です。</strong><span id="survey-prompt-detail">数問の質問に回答してください。</span></p>
+            <p><strong>アンケートが未回答です。</strong><span id="survey-prompt-detail">いくつかの質問に回答してください。</span></p>
             <button id="open-survey" type="button">アンケートに回答する</button>
           </div>
           <section id="conversation-stage" class="stage" aria-labelledby="dialogue-title">
@@ -62,7 +52,7 @@
               <button id="finish-conversation" type="button" class="secondary">会話を終了して名前を決める <span aria-hidden="true">→</span></button>
             </div>
             <div class="transcript">
-              <ol id="history" role="log" tabindex="0" aria-live="polite" aria-label="公開された会話"></ol>
+              <ol id="history" role="log" tabindex="0" aria-live="polite" aria-label="AIとの会話履歴"></ol>
               <button id="new-messages" type="button" class="new-messages" hidden><span aria-hidden="true">↓</span> 新しいメッセージ</button>
             </div>
             <form id="chat"><div class="composer-status"><div id="typing-indicator" class="typing-indicator" aria-hidden="true" hidden><span></span><span></span><span></span></div>
@@ -75,7 +65,7 @@
             <div class="panel-head"><h2 id="names-title" tabindex="-1"><span id="names-title-text">名前を決める</span></h2><button id="back-to-chat" type="button" class="quiet">会話に戻る</button></div>
             <p id="names-help" class="muted">会話で共有した名前を確認してください。図形を選ぶと修正できます。</p>
             <div id="name-list" class="name-list" aria-label="提出する名前"></div>
-            <form id="submission"><button id="review-names">回答を確認する</button></form>
+            <form id="submission"><button id="review-names">提出する名前を確認する</button></form>
             <p id="submission-status" role="status" aria-live="polite"></p>
           </section>
           <section id="questionnaire-stage" class="stage" aria-labelledby="questionnaire-title" hidden>
@@ -93,12 +83,10 @@
           </section>
           <section id="results" class="stage" aria-labelledby="results-title" hidden>
             <h2 id="results-title" tabindex="-1">照合結果（暫定）</h2>
-            <p class="muted">図形のそばに、あなたとAIの名称・暫定照合を表示しています。正式な採点規則は検討中です。</p>
+            <p class="muted">各図形のそばに、あなたとAIが提出した名前と照合結果（暫定）を表示しています。正式な採点規則は検討中です。</p>
             <div id="result-body"></div>
             <div id="result-list" class="summary-list" aria-label="照合結果の一覧"></div>
           </section>
-          <p id="new-trial-warning" class="new-trial-warning" role="status" hidden>この試行のアンケートは未提出です。もう一度押すと次の試行を準備します。この試行は後から「以前の試行」で回答できます。</p>
-          <button id="new-trial" type="button" class="secondary" hidden>研究者用：次の試行を準備</button>
         </aside>
       </div>
     </section>
@@ -107,18 +95,18 @@
     <form id="name-form">
       <h2 id="name-title">この図形の名前</h2>
       <svg id="figure-preview" class="figure-preview" aria-label="選択した図形の拡大" xmlns="http://www.w3.org/2000/svg"></svg>
-      <p id="name-privacy" class="muted">会話で共有できたと思う名前を入力してください。この入力は相手には届きません。</p>
+      <p id="name-privacy" class="muted">会話で共有できたと思う名前を入力してください。この入力は会話相手のAIには見えません。</p>
       <label for="figure-name">会話で共有した名前<input id="figure-name" maxlength="200" autocomplete="off" aria-describedby="name-error"></label>
       <p id="name-error" class="field-error" role="alert"></p>
       <div class="modal-actions"><button id="name-unknown" type="button" class="secondary">未合意・わからない</button><button id="name-cancel" type="button" class="quiet">キャンセル</button><button type="submit">メモを保存</button></div>
     </form>
   </dialog>
   <dialog id="confirm-dialog" aria-labelledby="confirm-title">
-    <h2 id="confirm-title">この回答を提出しますか？</h2>
-    <p>図形のそばの名前を確認してください。提出すると対話を終了し、回答を変更できなくなります。</p>
+    <h2 id="confirm-title">名前を提出しますか？</h2>
+    <p>各図形の名前を確認してください。提出すると会話を終了し、名前を変更できなくなります。</p>
     <svg id="confirm-scene" viewBox="0 0 1200 800" aria-label="提出する図形と名前" xmlns="http://www.w3.org/2000/svg"></svg>
     <div id="confirm-list" class="summary-list" aria-label="提出する名前の一覧"></div>
-    <div class="modal-actions"><button id="confirm-cancel" type="button" class="secondary">修正する</button><button id="confirm-submit" type="button">この回答で提出する</button></div>
+    <div class="modal-actions"><button id="confirm-cancel" type="button" class="secondary">修正する</button><button id="confirm-submit" type="button">この名前で提出する</button></div>
   </dialog>
 </body>
 </html>

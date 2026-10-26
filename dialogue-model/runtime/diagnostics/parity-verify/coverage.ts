@@ -3,6 +3,8 @@ import type { Check, Records, Row } from "./core.ts";
 import { cacheChecks, publicPrivacy } from "./fairness.ts";
 import { ledger } from "./ledger.ts";
 import { requiredPackets } from "./packets.ts";
+import { explicitModelPolicy, requestedReturnedModel, scopedModelCheck } from './model-checks.ts';
+import type { ModelCheckContext } from './model-checks.ts';
 
 export type CoverageClass = "live_demonstrated" | "partial_demonstrated" | "conservative_reject" | "not_observed" | "not_reached" | "wiring_failed";
 export type Coverage = { trialOrder: unknown; turn: unknown; path: string; classification: CoverageClass; reason: string;
@@ -69,7 +71,7 @@ export function coverage(records: Records): { cells: Coverage[]; checks: Check[]
         const accepted = rows(app.claims).filter(c => candidates.some(p => p.candidateKey === c.candidateKey) &&
           rows(row(row(next.state).graph).records).some(r => r.id === c.id && r.speaker === "ai" && r.sourceTurn === pending.aiSeq));
         const allStages = ["ai_extraction", "ai_function", "ai_support"].every(name => row(stages[name]).status === "ok" &&
-          rows(trial.calls).some(c => c.turn === turn.turn && c.phase === name && c.status === "ok" && list(c.sendIds).length > 0 && c.model === c.requestedModel));
+          rows(trial.calls).some(c => c.turn === turn.turn && c.phase === name && c.status === "ok" && list(c.sendIds).length > 0 && requestedReturnedModel(records, c)));
         if (allStages && accepted.length && trace.status === "committed" && app.aiSeq === pending.aiSeq) {
           add(turn.turn, "aiPublic", accepted.length < candidates.length || pending.status === "partial" || app.status === "partial" ? "partial_demonstrated" : "live_demonstrated",
             "committed_candidates_present_in_next_graph", accepted.length);
@@ -140,7 +142,7 @@ export function coverage(records: Records): { cells: Coverage[]; checks: Check[]
   return { cells, checks };
 }
 
-export function gates(records: Records, independent: Check[]): Check[] {
+export function gates(records: Records, independent: Check[], models?: ModelCheckContext): Check[] {
   const smoke = records.trials.filter(t => t.stage === "smoke"), output: Check[] = executionChecks(records);
   if (!smoke.length) return [...output, missing("gate.G1"), missing("gate.G2"), missing("gate.G3"), missing("gate.G4")];
   for (const trial of smoke) {
@@ -154,11 +156,11 @@ export function gates(records: Records, independent: Check[]): Check[] {
     const success = turns.some(turn => {
       const trace = committedTrace(turn), calls = rows(trial.calls).filter(c => c.turn === turn.turn);
       const good = (phase: string) => calls.some(c => c.phase === phase) && calls.filter(c => c.phase === phase).every(c => c.status === "ok" &&
-        typeof c.model === "string" && c.model === c.requestedModel && list(c.sendIds).length > 0);
+        typeof c.model === "string" && requestedReturnedModel(records, c) && list(c.sendIds).length > 0);
       const hr = row(trace.humanReferent), decisions = rows(trace.decisions);
       return trace.status === "committed" && typeof trace.publicSpeech === "string" && trace.publicSpeech === turn.publicText &&
         good("human_referent") && good("decision") && ["ok", "unknown"].includes(String(hr.status)) &&
-        hr.model === calls.find(c => c.phase === "human_referent")?.requestedModel &&
+        hr.model === calls.find(c => c.phase === "human_referent")?.[explicitModelPolicy(records) ? 'model' : 'requestedModel'] &&
         decisions.length > 0 && decisions.every(d => d.decisionKind === "jev_local_test" && rows(row(d.evidence).stages).length > 0);
     });
     let g2 = turnFailure(trial) ? check(`gate.G2${suffix}`, "mismatch", "stage_one_turn_primary_error") :
@@ -173,11 +175,13 @@ export function gates(records: Records, independent: Check[]): Check[] {
       storage.every(s => s.external && s.regular && s.mode === 0o600), "external_private_regular_record_files");
     const packetCheck = requiredPackets(records, trial);
     const stageModels = assertion("smoke.models", [...rows(records.warmup?.calls), ...rows(trial.calls)].every(c => c.status !== "ok" ||
-      typeof c.model === "string" && c.model === c.requestedModel), "smoke_requested_returned_models");
+      typeof c.model === "string" && requestedReturnedModel(records, c)), "smoke_requested_returned_models");
     const stageProfile = trial.profile ? assertion("smoke.profile", profileHash(row(trial.profile)) === trial.profileSha256 &&
       trial.profileSha256 === records.run?.profileSha256, "effective_smoke_profile_hash") : missing("smoke.profile");
     const stageLedger = trial.budget ? ledger(scoped).checks.filter(c => c.id.startsWith("ledger.total.") || c.id === "ledger.field_types") : [missing("smoke.budget", "stage_one_budget_snapshot_missing")];
-    const g3 = combine(`gate.G3${suffix}`, [storageCheck, packetCheck, stageModels, stageProfile, ...stageLedger,
+    const modelComponent = models?.explicit ? scopedModelCheck(records, models.observations, Number(trial.order), models.error) : null;
+    if (modelComponent) output.push(modelComponent);
+    const g3 = combine(`gate.G3${suffix}`, [storageCheck, packetCheck, stageModels, stageProfile, ...stageLedger, ...(modelComponent ? [modelComponent] : []),
       independent.find(c => c.id === "identity.manifest") ?? missing("identity.manifest")], "persisted_manifest_profile_models_billing_and_permissions");
     const privacy = publicPrivacy(scoped);
     const jevUnknown = rows(row(trial.budget).sends).some(s => s.provider === "jev" && s.costUsd === null);
