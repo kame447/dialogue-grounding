@@ -1,0 +1,7 @@
+# Synthetic failure capture after the Luna public-act consistency fix
+
+Source commit 320a192bd3c32bc0e1259a9b08aa219b89082f4d (Luna participant path: agree needs an unrevoked public name source, name acts withheld from the ledger unless the name is shown, Luna-only generator text; on main 0fe6e52). Two independent captures were made on a clean tree with the generator (`node tests/support/generate-failure-fixture.ts <dir>`); they differ from each other only at 15 run-ID leaves.
+
+Compared with the adopted failure-path-memory-default-8e8910b capture, records differ only at 26 leaves: 15 run IDs, 10 instruction-source hash leaves (`v2/dialogue-v2.mjs` and `v2/generation-guard.ts` in each of the 5 scenarios) and the derived `identity.prompts` digest. The source map also changes for `judgment/luna.mjs`, `judgment/memory.mjs` and the new `judgment/name-evidence.mjs`; interim captures at 5e28a2c and b2c566b, made earlier in this change, are replaced; this one differs from the b2c566b capture only at run IDs, the dialogue-v2.mjs hashes and identity.prompts. These failure paths run the Jev pipeline, whose generator text is unchanged, so request payloads, behavior, schema, failure, clocks, policy, calls/sends and storage are unchanged. Existing 3 run-ID exclusions are unchanged. Metadata records the actual base commit instead of the generator's historical `3071720` literal.
+
+Earlier fixture directories remain byte-identical. Only the current provenance target URL and its baseCommit literal move. No real API, Keychain, .env, study data or live run was used.

@@ -1,8 +1,8 @@
 {
   "schemaVersion": "parity_live_failure_capture_v1",
-  "baseCommit": "b2c566b9508ba4c6a47809d659d934aa15f40a2c",
+  "baseCommit": "320a192bd3c32bc0e1259a9b08aa219b89082f4d",
   "execution": "mock",
-  "fixtureSha256": "c487df99c9503ba1d5d71d3613c5adcba9aae3556e96d9eeb009a9f4d44093ea",
+  "fixtureSha256": "02a167b86cce007642a9b4e4dcb7f8b7bc94d2f11ace9c82da9f31685777aeec",
   "sourceFiles": {
     "dialogue-model/runtime/client.mjs": "8392f8843365b22bbf802a66365823d8b9598df6288e108b53810b21544a17ed",
     "dialogue-model/runtime/config.mjs": "2b6a4ea7a18c088e6ca6bf519537ef51039d71e81872ef26b93eba3739aa98ca",
@@ -30,7 +30,7 @@
     "dialogue-model/runtime/judgment/instructions.mjs": "aa8b84ba60f10780328521457fc3abf4bfaa6db6efd32a725924075a9584f884",
     "dialogue-model/runtime/judgment/luna.mjs": "e66a72534888eb4b99970f4bb9d55a4913c4e72c9ca097b015a7277c906003f4",
     "dialogue-model/runtime/judgment/memory.mjs": "08ea1259b01ebf8a5d39f98d42d37713fe03a72b1948639751e0bf8296121dcd",
-    "dialogue-model/runtime/judgment/name-evidence.mjs": "b03eaee40a7ec393b0ad57eca6daaf05045ad6cb49eb14e47293a2248ab802f5",
+    "dialogue-model/runtime/judgment/name-evidence.mjs": "35de13601bcd3d1f5954569332dc0ba2d8f9dc6949e5b7b774db824bbd5ec456",
     "dialogue-model/runtime/judgment/public-evidence.mjs": "a09287a5ac7ef55df739d9731a76d6d465d6859b9673a984593e3091950e413d",
     "dialogue-model/runtime/judgment/schema.mjs": "d3ddc437174f697451da4cd181869010572207889f3b9a0b58dca2caaefe602c",
     "dialogue-model/runtime/local-grounding/classify.ts": "ef6c9aeea3c1920ba11cfdf07d9a8d4a57c84ab495627960dac95ef06889a0f6",
@@ -62,7 +62,7 @@
     "dialogue-model/runtime/v2/agreement-gate.ts": "04b6927967a2f30287dbc99bf30cdd612b368a8dee3a43aa183e2b8261fcfd3e",
     "dialogue-model/runtime/v2/candidate-conflict.ts": "6c7bd78f3a12205cfb1e8332514b8a027844da378487699a494fc3c6bbabd92d",
     "dialogue-model/runtime/v2/decision-evidence.mjs": "7b0f7497d142d2e72f1b4952667082888f5ddb2fc3982e84bfb6efc53df86bdc",
-    "dialogue-model/runtime/v2/dialogue-v2.mjs": "7c4bfdf9082a530520812a009a8039e3911f1ecdfbab7f13b1853f3356ca794f",
+    "dialogue-model/runtime/v2/dialogue-v2.mjs": "5e57134cf89c4b10545ed92e12ae1474a1a319fca11f3eff106e7579978f26d3",
     "dialogue-model/runtime/v2/generation-guard.ts": "f1641117798e1538a6db4ebb97e8ac33a2da14e926c405f4a7c7f6c8b751ad46",
     "dialogue-model/runtime/v2/grounding-shadow.ts": "0ea88381322e7d8af01131dfe27788848057854386c7e364f782fc0bcc5a6921",
     "dialogue-model/runtime/v2/jev-turn.ts": "06cf17a9249afe8fbfab9104d7a722b85cf4c39b2423781375929296c702271f",
