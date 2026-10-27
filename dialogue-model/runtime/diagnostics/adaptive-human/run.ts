@@ -6,11 +6,11 @@ import {runOffline} from './offline.ts';
 export async function main(args = process.argv.slice(2)) {
   const {values} = parseArgs({args, options: {out: {type: 'string'}, chrome: {type: 'string'}, cdp: {type: 'string'}, turns: {type: 'string'},
     mode: {type: 'string', default: 'offline'}, app: {type: 'string'}, 'persona-seed': {type: 'string', default: '20261027'}, 'before-turn-module': {type: 'string'},
-    'technical-trial': {type: 'boolean'}, strategy: {type: 'string'}, 'jev-actions': {type: 'string'}}});
+    'technical-trial': {type: 'boolean'}, 'trial-version': {type: 'string'}, strategy: {type: 'string'}, 'jev-actions': {type: 'string'}}});
   if (!values.out || !['offline', 'live'].includes(values.mode!)) throw new Error('invalid_adaptive_human_arguments');
   const shared = values.turns === undefined ? {} : {maxTurns: Number(values.turns)};
   if (values.mode === 'offline') return runOffline({directory: resolve(values.out), chrome: values.chrome, cdpOrigin: values.cdp,
-    personaSeed: Number(values['persona-seed']), technicalTrial: values['technical-trial'] === true,
+    personaSeed: Number(values['persona-seed']), technicalTrial: values['trial-version'] === 'adaptive_repair_v2' ? 'adaptive_repair_v2' as const : values['technical-trial'] === true,
     ...(values.strategy === 'bypass-enabled' ? {strategy: 'bypass-enabled' as const} : {}),
     ...(values['jev-actions'] ? {jevActions: values['jev-actions'].split(',')} : {}), ...shared});
   if (!values.app || !values.cdp) throw new Error('live_requires_app_and_cdp');

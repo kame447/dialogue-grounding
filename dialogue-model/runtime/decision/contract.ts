@@ -47,7 +47,8 @@ export type RepairProspectMaterial =
       prospect: typeof REPAIR_PROSPECTS[number]; basis: typeof REPAIR_PROSPECT_BASES[number];
       scores: { repair_issue: Record<string, number>; prospect: Record<string, number>; basis: Record<string, number> } }
   | { status: "unknown"; issue: null; prospect: null; basis: null; scores: null };
-export type AdaptiveRepairTrial = { version: "adaptive_repair_v1" };
+/** v2 adds the agreement gate: repair issues closed by a later agree are left out of Jev's inference. */
+export type AdaptiveRepairTrial = { version: "adaptive_repair_v1" | "adaptive_repair_v2" };
 export type JevDecisionInput = {
   turn: number;
   publicTurns: readonly PublicTurn[];

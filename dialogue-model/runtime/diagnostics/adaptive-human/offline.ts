@@ -12,7 +12,7 @@ import {createPersona, mockHuman} from './simulator.ts';
 import type {HumanInput, HumanOutput} from './simulator.ts';
 
 /** Optional synthetic controls: the technical-trial option, the assignment label and Jev's stage-one actions in call order. */
-export type OfflineOptions = {technicalTrial?: boolean; strategy?: 'repair-first' | 'bypass-enabled'; jevActions?: readonly string[]};
+export type OfflineOptions = {technicalTrial?: boolean | 'adaptive_repair_v1' | 'adaptive_repair_v2'; strategy?: 'repair-first' | 'bypass-enabled'; jevActions?: readonly string[]};
 export async function startOfflineParticipant(outputDirectory: string, {technicalTrial = false, strategy = 'repair-first', jevActions = []}: OfflineOptions = {}) {
   await mkdir(outputDirectory, {recursive: true, mode: 0o700});
   const directory = await realpath(outputDirectory);
@@ -30,7 +30,7 @@ export async function startOfflineParticipant(outputDirectory: string, {technica
     timeouts: {observationMs: 20000, localMs: 20000, decisionMs: 20000, lunaAttemptMs: 80000, generationMs: 40000, trialMs: 600000},
     cacheDirectory, modelId, memoSha256: researchHash(hit.memo), seed,
     limits: {lunaCalls: 100, lunaTokens: 100000, lunaPosts: 100, jevPosts: 100, jevUsd: 0.05},
-    ...(technicalTrial ? {technicalTrial: {version: 'adaptive_repair_v1'}} : {})};
+    ...(technicalTrial ? {technicalTrial: {version: technicalTrial === true ? 'adaptive_repair_v1' : technicalTrial}} : {})};
   const configFile = join(directory, 'participant-jev.json'), baseAssignmentFile = join(directory, 'assignment.json');
   await writeFile(configFile, JSON.stringify(config), {mode: 0o600});
   await writeFile(baseAssignmentFile, JSON.stringify(assignment), {mode: 0o600});
