@@ -433,7 +433,7 @@ function render(state) {
   if (submitted() || data?.shapes?.every((shape) => answers.has(shape.id))) submissionWarning = "";
   $("submission-status").textContent = submissionWarning || (trial.status === "submission_error" || trial.finalError === "invalid_ai_submission" ? errors.invalid_ai_submission :
     trial.status === "scoring_error" ? errors.scoring_error : trial.result ? "双方の提出が完了しました。" :
-      submitted() ? "名前を提出しました。AIの提出を待っています。" : "入力した名前（メモ）はこの画面に一時保存されます。会話相手のAIには見えません。");
+      submitted() ? "名前を提出しました。AIの提出を待っています。" : "");
   if (trialCompleted()) loadSurvey();
   loadRecords();
   const previousStage = renderedStage;

@@ -27,7 +27,6 @@ p{margin:8px 0 16px}
 .silhouette[role=button]{cursor:pointer;pointer-events:visibleFill;transition:fill .15s}
 .silhouette[role=button]:hover,.silhouette[role=button]:focus-visible{fill:#484d43;outline:none;stroke:#868d7d;stroke-width:5px;stroke-linejoin:round}
 .shape-name{font-family:inherit;font-size:21px;font-weight:500;fill:#464b40;paint-order:stroke;stroke:#fff;stroke-width:6px;stroke-linejoin:round;pointer-events:none}
-.privacy-note{font-size:.75rem;color:var(--muted);margin:10px 0 0;flex-shrink:0}
 #scene-status:empty{display:none}
 .muted{font-size:.82rem;color:var(--muted)}
 label{display:block;font-weight:500;margin-bottom:12px}
@@ -113,7 +112,7 @@ dialog::backdrop{background:#24252260}
 [hidden]{display:none!important}
 :focus-visible{outline:3px solid #858f77;outline-offset:3px}
 @media(max-width:1000px){main{padding:0 20px 20px}.workspace{grid-template-columns:minmax(0,2fr) minmax(300px,1fr);gap:14px}.topbar{gap:20px}.progress li+li:before{width:16px;margin:0 10px 0 4px}}
-@media(max-width:760px){main{padding:0 12px 20px}.topbar{min-height:110px;align-items:flex-start;justify-content:center;flex-direction:column;gap:14px;padding:16px 0;margin-bottom:14px}h1{font-size:.94rem}.topbar nav{width:100%}.progress{justify-content:space-between;font-size:.72rem}.progress li{gap:5px}.progress li+li:before{width:10px;margin:0 5px 0 0}.step-number{width:21px;height:21px;font-size:.65rem}.progress small{font-size:.57rem}.workspace{height:auto;min-height:0;grid-template-columns:1fr;gap:12px}.board{height:38dvh;min-height:260px;max-height:400px;padding:16px 16px 12px}.board .panel-head h2{font-size:.88rem}.scene-area{min-height:0}.privacy-note{font-size:.65rem;line-height:1.5}.dialogue{height:76dvh;min-height:460px;max-height:820px}.conversation-head{padding:16px}.shape-name{font-size:25px}dialog{padding:20px}.modal-actions button{padding:10px 12px}.name-list{grid-template-columns:1fr 1fr;gap:8px}.name-choice{padding:8px;gap:8px;flex-direction:column;align-items:flex-start}.name-choice svg{width:42px;height:38px}#confirm-list{grid-template-columns:1fr 1fr}#confirm-scene{max-height:30dvh}#setup{margin:24px auto}.panel{border-radius:8px}}
+@media(max-width:760px){main{padding:0 12px 20px}.topbar{min-height:110px;align-items:flex-start;justify-content:center;flex-direction:column;gap:14px;padding:16px 0;margin-bottom:14px}h1{font-size:.94rem}.topbar nav{width:100%}.progress{justify-content:space-between;font-size:.72rem}.progress li{gap:5px}.progress li+li:before{width:10px;margin:0 5px 0 0}.step-number{width:21px;height:21px;font-size:.65rem}.progress small{font-size:.57rem}.workspace{height:auto;min-height:0;grid-template-columns:1fr;gap:12px}.board{height:38dvh;min-height:260px;max-height:400px;padding:16px 16px 12px}.board .panel-head h2{font-size:.88rem}.scene-area{min-height:0}.dialogue{height:76dvh;min-height:460px;max-height:820px}.conversation-head{padding:16px}.shape-name{font-size:25px}dialog{padding:20px}.modal-actions button{padding:10px 12px}.name-list{grid-template-columns:1fr 1fr;gap:8px}.name-choice{padding:8px;gap:8px;flex-direction:column;align-items:flex-start}.name-choice svg{width:42px;height:38px}#confirm-list{grid-template-columns:1fr 1fr}#confirm-scene{max-height:30dvh}#setup{margin:24px auto}.panel{border-radius:8px}}
 /* Phones, conversation stage only: the page is one viewport tall, so the board
    stays visible above an independently scrolling log and the composer. The
    figures keep the same scene and viewBox; only the layout box changes. */
@@ -124,7 +123,6 @@ main:has(#trial:not([hidden]) #conversation-stage:not([hidden])) .topbar{min-hei
 main:has(#trial:not([hidden]) #conversation-stage:not([hidden])) #trial{flex:1;min-height:0}
 main:has(#trial:not([hidden]) #conversation-stage:not([hidden])) .workspace{height:100%;display:flex;flex-direction:column;gap:10px}
 main:has(#trial:not([hidden]) #conversation-stage:not([hidden])) .board{flex:0 0 auto;height:35dvh;min-height:0;max-height:none;padding:10px 12px 8px}
-main:has(#trial:not([hidden]) #conversation-stage:not([hidden])) .privacy-note{margin-top:4px}
 main:has(#trial:not([hidden]) #conversation-stage:not([hidden])) .dialogue{flex:1;height:auto;min-height:0;max-height:none}
 main:has(#trial:not([hidden]) #conversation-stage:not([hidden])) .conversation-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 12px}
 main:has(#trial:not([hidden]) #conversation-stage:not([hidden])) #finish-conversation{width:auto;margin-top:0;font-size:.72rem;padding:6px 10px}
