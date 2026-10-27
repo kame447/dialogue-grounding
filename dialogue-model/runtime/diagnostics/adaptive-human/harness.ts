@@ -59,6 +59,9 @@ export async function driveParticipant(options: HarnessOptions) {
     await call('Page.enable'); await call('Runtime.enable');
     await call('Emulation.setDeviceMetricsOverride', {width: 1280, height: 800, deviceScaleFactor: 1, mobile: false});
     await call('Page.navigate', {url: options.appOrigin + '/'});
+    // A new trial starts only from the participant's explicit Start button (#139).
+    await until(`document.querySelectorAll('#board path[role=button]').length===6||(()=>{const b=document.getElementById('start-trial');return !!b&&!b.disabled&&!document.getElementById('start-stage').hidden})()`);
+    await js(`(()=>{const b=document.getElementById('start-trial');if(b&&!b.disabled&&!document.getElementById('start-stage').hidden)b.click();return true})()`);
     await until(`document.querySelectorAll('#board path[role=button]').length===6`);
     sessionId = (await state()).trial.sessionId;
     log.push({stage: 'loaded'});
