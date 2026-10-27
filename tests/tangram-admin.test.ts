@@ -430,8 +430,8 @@ test("every record value is escaped in the list and detail pages", () => {
     [{ recordHash: XSS, deletedAt: XSS, reason: "admin" }], 30);
   assert.doesNotMatch(list, /<script/i);
   assert.match(list, new RegExp(`href="/admin/record/${RECORD}"`));
-  assert.match(list, /自動削除なし（明示の削除のみ）/);
-  assert.match(html, /自動削除なし（明示の削除のみ）/);
+  assert.match(list, /自動では削除されません（手動での削除のみ）/);
+  assert.match(html, /この記録は自動では削除されません。/);
   assert.doesNotMatch(list + html, /日後に自動削除/);
 });
 

@@ -184,7 +184,7 @@ for (const days of [30, 31, 400]) test(`${days} days: archive-only trial keeps i
 });
 
 test("questionnaire notice explains that answers are saved without automatic deletion", () => {
-  assert.equal(QUESTIONNAIRE_FORM.notice, "試行用の仮の質問です（研究者未承認）。正式な尺度ではありません。回答は実験記録とともに保存され、自動では削除されません。");
+  assert.equal(QUESTIONNAIRE_FORM.notice, "試行用の仮の質問です（研究者未承認）。正式な尺度ではありません。回答は実験記録とともに保存され、研究者が削除するまで残ります（自動では削除されません）。");
 });
 
 test("explicit authenticated deletion still removes record, questionnaire and index, audits and prevents resurrection", async (t) => {

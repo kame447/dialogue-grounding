@@ -69,7 +69,7 @@ export function renderList(summaries: AdminSummary[], filter: ListFilter, next: 
 <label>参照メモリ <select name="memory">${option("any", filter.memory, "すべて")}${option("on", filter.memory, "ON")}${option("off", filter.memory, "OFF")}</select></label>
 <button>絞り込み</button></form>
 ${deleted ? `<p class="bad">記録を削除しました。</p>` : ""}
-<p class="muted">試行ごとの一覧（同じブラウザの過去の試行も含む）。更新が新しい順に ${PAGE_LIMIT_NOTE}。絞り込みはこのページ内に適用します。記録は自動削除なし（明示の削除のみ）です。</p>
+<p class="muted">試行ごとの一覧（同じブラウザの過去の試行も含む）。更新が新しい順に ${PAGE_LIMIT_NOTE}。絞り込みはこのページ内に適用します。記録は自動では削除されません（手動での削除のみ）。</p>
 ${summaries.length ? `<div class="wrap"><table>${head(["記録", "更新", "方略", "メモリ", "発話様式", "状態", "AI", "人/AI発話", "確定/試行", "要求エラー", "エラーコード", "応答 p50/p95 ms", "最遅段階", "仮アンケート"])}${rows}</table></div>` : `<p class="muted">該当なし</p>`}
 ${next ? `<p><a href="/admin${escapeHtml(query({ after: next }))}">次のページ →</a></p>` : ""}
 <h2>削除の記録（内容なし）</h2>${table(["削除日時", "理由", "記録IDのハッシュ"], audit.map((a) => [a.deletedAt, a.reason, a.recordHash]))}`);
@@ -135,7 +135,7 @@ ${grounding.length ? `<h2>根拠の影判定（Jev 2軸・研究用・未校正�
 <h2>提出と採点</h2>${table(["項目", "値"], [["人間の提出", r.humanSubmission ?? null], ["AIの提出", r.aiSubmission ?? null],
   ["診断", r.diagnostics ?? null], ["採点", r.scoring ?? null]])}
 ${questionnaireSection(r.questionnaire)}
-<h2>削除</h2><p class="muted">この記録は自動削除なし（明示の削除のみ）です。削除する場合は、記録IDを確認欄に入力してください。削除は取り消せません。</p>
+<h2>削除</h2><p class="muted">この記録は自動では削除されません。削除する場合は、記録IDを確認欄に入力してください（仮アンケートの回答も削除されます）。削除は取り消せません。</p>
 <form method="post" action="/admin/record/${escapeHtml(summary.recordId)}/delete"><label>確認（記録ID） <input name="confirm" autocomplete="off" required></label>
 <button>この記録を削除</button></form>`);
 }
