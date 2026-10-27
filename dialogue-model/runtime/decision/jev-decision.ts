@@ -41,7 +41,7 @@ const unique = (v: readonly string[]) => [...new Set(v)];
 const ref = (v: unknown): v is string => text(v, 128);
 type Question = { type: "choice"; instructions: string; criteria: Record<string, string> };
 export type JevDecisionPayload = { model: typeof JEV_DECISION_MODEL; state: string; questions: Record<string, Question> };
-type Catalog = { names: string[][]; features: string[][] };
+type Catalog = { names: string[][]; agreeNames?: string[][]; features: string[][] };
 
 export const JEV_ACTION_CRITERIA: Readonly<Record<JevAction, string>> = Object.freeze({
   accept: "通常の受け止め・応答。理解成立や名称採用を宣言せず、これだけをやり過ごしと数えない。",
@@ -105,6 +105,7 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
       !Array.isArray(input.publicTurns) || input.publicTurns.length > JEV_DECISION_INPUT_LIMITS.publicTurns || !text(input.issueSummary, 12000, true) ||
       !Array.isArray(input.priorClaims) || input.priorClaims.length > 160 || !Array.isArray(input.repairHistory) || input.repairHistory.length > JEV_DECISION_INPUT_LIMITS.repairHistory ||
       !Array.isArray(input.publicNames) || input.publicNames.length > JEV_DECISION_INPUT_LIMITS.publicNames ||
+      !(input.agreeNames === undefined || Array.isArray(input.agreeNames) && input.agreeNames.length <= JEV_DECISION_INPUT_LIMITS.publicNames) ||
       !(input.reobservationAllowed === undefined || typeof input.reobservationAllowed === "boolean")) fail("invalid_input");
   const slots = [...input.ownSlots];
   const ownIds = (v: unknown): v is string[] => strings(v, 6, 160) && unique(v).length === v.length && v.every(s => slots.includes(s));
@@ -146,13 +147,15 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
     return { id: c.id, turn: c.turn, issueId: c.issueId, targets: [...c.targets], aspect: c.aspect, act: c.act, proposition: c.proposition,
       name: c.name, speaker: c.speaker, sourceTurn: c.sourceTurn, quote: c.quote, respondsTo: c.respondsTo, source: c.source };
   });
-  const publicNames = input.publicNames.filter(n => n?.sourceTurn <= input.turn).map(n => {
+  const cleanNames = (names: JevDecisionInput['publicNames']) => names.filter(n => n?.sourceTurn <= input.turn).map(n => {
     if (!text(n.name, 80) || !(n.figureId === null || slots.includes(n.figureId)) || !positive(n.sourceTurn)) fail("invalid_input");
     const source = publicTurns.find(t => t.turn === n.sourceTurn && literalSpan(t.text, n.name));
     const span = source && literalSpan(source.text, n.name);
     if (!span || span.text.length > 80) fail("invalid_input");
     return { name: span.text, figureId: n.figureId, sourceTurn: n.sourceTurn };
   });
+  const publicNames = cleanNames(input.publicNames);
+  const agreeNames = input.agreeNames === undefined ? undefined : cleanNames(input.agreeNames);
   const repairHistory = input.repairHistory.filter(r => r?.turn < input.turn).map(r => {
     if (!positive(r.turn) || !(r.issueId === null || ref(r.issueId)) || !includes(["repair", "confirm", "revisit"], r.action) ||
         !text(r.question, 400, true) || !ownIds(r.candidatesBefore) || !ownIds(r.candidatesAfter) ||
@@ -236,16 +239,18 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
   const budget: DecisionInputBudget = { maxChars: 20000, stateChars: state.length, omitted: structuredClone(omitted) };
   const catalog: Catalog = { names: observations.map(o => unique([...o.holistic.map(h => h.construal).filter(n => n.length <= 80),
     ...publicNames.filter(n => n.figureId === null || n.figureId === o.figureId).map(n => n.name)])),
+  ...(agreeNames === undefined ? {} : { agreeNames: observations.map(o => unique(agreeNames.filter(n => n.figureId === null || n.figureId === o.figureId).map(n => n.name))) }),
   features: observations.map(o => unique([...o.analytic.shapes, o.analytic.composition, ...o.analytic.relations,
     ...o.reobservations.flatMap(r => r.supports)].filter(v => !!v.trim() && v.length <= 400))) };
-  if ([...catalog.names, ...catalog.features].some(v => v.length > 254)) fail("invalid_input");
+  if ([...catalog.names, ...(catalog.agreeNames ?? []), ...catalog.features].some(v => v.length > 254)) fail("invalid_input");
   const slotCriteria = Object.fromEntries(slots.map((id, i) => [`figure_${i}`, `自分の候補図形 ${JSON.stringify(id)}。観察メモを参照。` ]));
   const questions: Record<string, Question> = {};
   const add = (key: string, instructions: string, criteria: Record<string, string>) => {
     questions[key] = { type: "choice", instructions: decisionInstructions(input, true) + "\n" + instructions, criteria };
   };
   add("action", "次の行動を一つ選んでください。request_observationは公開発話を生成する前の追加観察要求です。", Object.fromEntries(
-    JEV_ACTIONS.filter(a => a !== "request_observation" || reobservationAllowed).map(a => [a, JEV_ACTION_CRITERIA[a]])));
+    JEV_ACTIONS.filter(a => (a !== "request_observation" || reobservationAllowed) &&
+      (a !== "agree" || catalog.agreeNames === undefined || catalog.agreeNames.some(names => names.length > 0))).map(a => [a, JEV_ACTION_CRITERIA[a]])));
   add("target", "次の行動が扱う対象を選んでください。none=対象なし、multiple=一つに絞れない。", { none: "対象なし・未特定。", multiple: "複数の可能性があり一つには絞れない。", ...slotCriteria });
   slots.forEach((id, i) => {
     add(`candidate_${i}`, `対象がmultipleの場合の候補集合: 図形 ${JSON.stringify(id)} を候補に含めますか。multipleでは2図形以上を含めてください。単一対象やnoneならこの回答は使いません。`,
@@ -374,7 +379,9 @@ function prepareDetail(input: JevDecisionInput, selected: JevActionTarget, rejec
   if (selected.action !== "request_observation") {
     for (const id of scope) {
       const index = p.slots.indexOf(id);
-      for (const value of (["propose_name", "agree"].includes(selected.action) ? p.catalog.names : p.catalog.features)[index]) {
+      const catalog = selected.action === "agree" && p.catalog.agreeNames !== undefined ? p.catalog.agreeNames
+        : ["propose_name", "agree"].includes(selected.action) ? p.catalog.names : p.catalog.features;
+      for (const value of catalog[index]) {
         const old = candidates.find(c => c.value === value);
         if (old) old.figureIds.push(id); else candidates.push({ value, figureIds: [id] });
       }
@@ -453,7 +460,7 @@ function detailJsonData(value: unknown, seen = new Set<object>()): void {
 function prepareExecutedDetail(input: JevDecisionInput, selected: JevActionTarget) {
   try {
     detailJsonData(input); detailJsonData(selected);
-    const optional = ["reobservationAllowed", "humanReferent", "repairProspect"].filter(key => Object.hasOwn(input, key));
+    const optional = ["reobservationAllowed", "humanReferent", "repairProspect", "agreeNames"].filter(key => Object.hasOwn(input, key));
     if (!exact(input, ["turn", "publicTurns", "ownSlots", "observations", "issueSummary", "priorClaims", "repairHistory", "previousAction", "publicNames", ...optional])) fail("invalid_input");
     if (!exact(selected, ["action", "target"]) || !includes(["propose_name", "agree", "confirm", "repair"], selected.action)) fail("invalid_input");
     const snapshot = structuredClone(input), selection = structuredClone(selected);
