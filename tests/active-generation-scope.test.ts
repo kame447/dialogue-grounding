@@ -2,7 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { createDialogueV2, GENERATION_TIMEOUT_MS, ACTION_SCOPE_V2 } from "../dialogue-model/runtime/v2/dialogue-v2.mjs";
+import { createDialogueV2, GENERATION_TIMEOUT_MS, LUNA_ACTION_SCOPE_V2, LUNA_NOTE_PREFIX } from "../dialogue-model/runtime/v2/dialogue-v2.mjs";
 import { SAFE_JUDGMENT } from "../dialogue-model/runtime/judgment/schema.mjs";
 import { DECISION_ACTIONS, DECISION_MODELS } from "../workers/research-ai-proxy/src/decisions.mjs";
 
@@ -41,7 +41,11 @@ async function capture(options: CaptureOptions = {}) {
     // The local per-call deadline is never sent upstream; the pinned digest covers messages and phase.
     client: { async complete(messages: Message[], { timeoutMs, ...config }: { phase?: string; timeoutMs?: number }) {
       assert.equal(timeoutMs, GENERATION_TIMEOUT_MS);
-      calls.push(structuredClone({ messages, options: config })); return { text: "公開応答" }; } },
+      calls.push(structuredClone({ messages, options: config }));
+      // One public reply per final action handed to the generator (never the hidden pre-override action);
+      // name acts show the name, as the Luna publication rule requires.
+      const finalAction = String(messages.find((m) => typeof m.content === "string" && m.content.startsWith("この発話の判断（非公開）"))?.content).match(/"action":"(\w+)"/)?.[1];
+      return { text: finalAction === "agree" ? "「鳥」にしましょう。" : finalAction === "propose_name" ? "「鳥」と呼ぶのはどうでしょう？" : "公開応答" }; } },
     activeDecision: active ? { purpose: "decision_jev", client: { async chooseAction() {
       if (failDecision) throw Object.assign(new Error("PRIVATE-DECISION-ERROR"), { code: "payment_required" });
       return selected;
@@ -58,7 +62,7 @@ test("changed accept adds a private final-action directive before history, using
   const [extra] = directive(calls[0]); assert.ok(extra); assert.equal(extra.role, "system");
   assert.equal(typeof extra.content, "string");
   const text = extra.content as string;
-  assert.ok(text.includes(ACTION_SCOPE_V2.accept));
+  assert.ok(text.includes(LUNA_ACTION_SCOPE_V2.accept));
   assert.match(text, /この発話のactionはacceptです/);
   assert.match(text, /名称への合意・決定を表す表現/);
   assert.match(text, /呼びましょう／でいいですね／決まり/);
@@ -85,11 +89,12 @@ test("changed-action directive and whole generator request are identical across 
   assert.deepEqual(repairFirst.calls, bypass.calls);
 });
 
-test("normal mode remains exactly the pre-fix byte sequence and same-action active/fallback add no directive", async () => {
+test("normal mode keeps its pinned byte sequence and same-action active/fallback add no directive", async () => {
   const normal = await capture({ active: false });
   assert.equal(directive(normal.calls[0]).length, 0);
-  // Captured from the unmodified ed943ba/171ced7 assembly before this fix.
-  assert.equal(createHash("sha256").update(JSON.stringify(normal.calls)).digest("hex"), "3e14fc325190a047767d7b38be902c3968daee27d14094eed8943bc5f33b3f47");
+  // Re-pinned for the Luna public-act consistency change after checking the only input differences from 0fe6e52 are the Luna generator
+  // text, the Luna agree scope and the private judge memo (image, history and directives unchanged).
+  assert.equal(createHash("sha256").update(JSON.stringify(normal.calls)).digest("hex"), "424724952da9b432146beada558f4cf00dc87acb80accdc40026510f6d76b04a");
   const unchanged = await capture(), fallback = await capture({ failDecision: true });
   assert.deepEqual(unchanged.calls, normal.calls); assert.deepEqual(fallback.calls, normal.calls);
   assert.equal(directive(unchanged.calls[0]).length, 0); assert.equal(directive(fallback.calls[0]).length, 0);
@@ -112,7 +117,7 @@ test("changed non-agree actions retain their own dialogue functions instead of b
   for (const action of actions) {
     const { calls, result } = await capture({ lunaAction: "agree", selectedAction: action, feature: "細長い部分がある" });
     const extra = directive(calls[0])[0].content as string;
-    assert.ok(extra.includes(`actionは${action}です`)); assert.ok(extra.includes(ACTION_SCOPE_V2[action]));
+    assert.ok(extra.includes(`actionは${action}です`)); assert.ok(extra.includes(LUNA_ACTION_SCOPE_V2[action]));
     assert.doesNotMatch(extra, /受け止めや見立ての共有にとどめて/);
     assert.match(extra, /内部の判断・処理・ラベルを相手に説明せず/);
     assert.equal(result.privateState.judgments[0].judgment.action, action);
@@ -125,5 +130,10 @@ test("unchanged accept and same final judgment in normal mode contain no hidden 
   const sameAccept = await capture({ lunaAction: "accept" });
   assert.deepEqual(normalAccept.calls, sameAccept.calls);
   const withoutExtra = changed.calls.map((call) => ({ ...call, messages: call.messages.filter((message) => !directive(call).includes(message)) }));
-  assert.deepEqual(withoutExtra, normalAccept.calls, "only the final-action directive is added; no hidden intent enters any existing message");
+  // The judge memo belongs to the pre-override act, so a changed action never receives it; normal accept does.
+  const isMemo = (message: Message) => typeof message.content === "string" && message.content.startsWith(LUNA_NOTE_PREFIX);
+  assert.equal(changed.calls[0].messages.filter(isMemo).length, 0);
+  assert.deepEqual(normalAccept.calls[0].messages.filter(isMemo).map((m) => m.content), [LUNA_NOTE_PREFIX + JSON.stringify("PRIVATE-SOURCE-NOTE")]);
+  const normalWithoutMemo = normalAccept.calls.map((call) => ({ ...call, messages: call.messages.filter((message) => !isMemo(message)) }));
+  assert.deepEqual(withoutExtra, normalWithoutMemo, "only the final-action directive is added and the memo withheld; no hidden intent enters any existing message");
 });

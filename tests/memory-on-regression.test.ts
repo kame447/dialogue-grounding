@@ -214,15 +214,25 @@ test("memory ON: a judge timeout or upstream error falls back without a memory w
   }
 });
 
-test("memory ON: an invalid memory interpretation keeps the valid act (memory fallback) and writes nothing", async () => {
-  const steps = SCRIPT.slice(0, 2).map((step, i) => i === 1 ? { ...step,
-    // Grounded on two slots is structurally impossible; the act itself is valid.
-    judgeReplies: Array(2).fill(JSON.stringify({ ...step.act, reference: { ...step.reference, slots: [A, B] } })) } : step);
-  const { perTurn } = await runScript(steps);
+test("memory ON: an invalid memory interpretation keeps a valid non-agree act (memory fallback) and writes nothing", async () => {
+  // Grounded on two slots is structurally impossible; the act itself is valid.
+  const invalid = (step: typeof SCRIPT[number]) => ({ ...step,
+    judgeReplies: Array(2).fill(JSON.stringify({ ...step.act, reference: { ...step.reference, slots: [A, B], epistemic: "grounded" } })) });
+  const proposal = await runScript([invalid(SCRIPT[0])]);
+  const kept = proposal.perTurn[0].judgments.at(-1);
+  assert.equal(kept.validation.memoryFallback, true);
+  assert.equal(kept.judgment.action, "propose_name");
+  assert.deepEqual(proposal.perTurn[0].ownLedger[A], { status: "tentative", name: "鳥" });
+  assert.equal(proposal.perTurn[0].referenceGraph.ownSlots[A].candidate, null, "nothing is written for the broken interpretation");
+  proposal.perTurn.forEach((record, i) => assertGraphInvariants(record, "memory fallback proposal turn " + i));
+  // An agree with a broken interpretation cannot be checked against retraction this turn (B3): the existing
+  // validation fallback is used instead, so the ledger is not agreed.
+  const { perTurn } = await runScript([SCRIPT[0], invalid(SCRIPT[1])]);
   const trace = perTurn[1].judgments.at(-1);
-  assert.equal(trace.validation.memoryFallback, true);
-  assert.equal(trace.judgment.action, "agree");
-  assert.deepEqual(perTurn[1].ownLedger[A], { status: "agreed", name: "鳥" });
+  assert.equal(trace.validation.fallback, true);
+  assert.equal(trace.validation.memoryFallback, false);
+  assert.equal(trace.judgment.action, "accept");
+  assert.deepEqual(perTurn[1].ownLedger[A], { status: "tentative", name: "鳥" });
   assert.equal(perTurn[1].referenceGraph.ownSlots[A].status, "tentative", "the ledger act never fabricates an explicit memory agreement");
   assert.equal(perTurn[1].referenceGraph.ownSlots[A].candidate.agreement, "none");
   perTurn.forEach((record, i) => assertGraphInvariants(record, "memory fallback turn " + i));

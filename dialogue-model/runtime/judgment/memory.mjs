@@ -29,7 +29,7 @@ export const MEMORY_INSTRUCTIONS = [
   "AI自身の参照メモは正解表ではなく、自分の画像と公開発話に基づく作業メモです。ledgerとの矛盾は自分で吟味してください。",
   "今回の人間発話の解釈を任意キーreferenceに指定してください。解釈しない場合はnullです。解釈する場合は次の7キーをすべて持つ1個のオブジェクトだけを返してください。",
   "slots: 自分の候補位置の配列。epistemic: unresolved（slots=[]）、hypothesis（1候補以上）、grounded（1候補のみ）。intent: " + REFERENCE_INTENTS.join(" | ") + "。相手の位置や正解対応ではありません。",
-  "feature: null、または{slot,feature,polarity}。featureは今回の人間発話に現れる特徴160字以内、polarityはconfirmedかdenied。nameAcceptance: null、または{slot,name}（名前80字以内）。nameAcceptanceは話題の名前の欄です。相手や自分が名前を提案した公開発話でもslotとnameを入れ、intent=name_proposalにしてください。合意かどうかはintentで表します。今回の人間発話または直前の公開AI発話で述べられた名前だけを指定し、特徴への肯定を名前の受入れと混同しないでください。",
+  "feature: null、または{slot,feature,polarity}。featureは今回の人間発話に現れる特徴160字以内、polarityはconfirmedかdenied。nameAcceptance: null、または{slot,name}（名前80字以内）。nameAcceptanceは話題の名前の欄です。相手や自分が名前を提案した公開発話でもslotとnameを入れ、intent=name_proposalにしてください。合意かどうかはintentで表します。今回の人間発話または直前の公開AI発話で述べられた名前だけを指定し、特徴への肯定を名前の受入れと混同しないでください。名前の提案にはname_proposal、名前の提案への受け入れにはname_acceptanceを付け、形の特徴への同意（feature_acceptance）や見立ての共有と区別してください。名前を取り消す・否定する発話でも、intentをdenialまたはcorrectionにし、話題の名前をnameAcceptanceに入れてください。",
   "deferSlotとrevisitSlot: それぞれ自分の位置1つまたはnull。解釈に不要なfeature/nameAcceptance/deferSlot/revisitSlotはnull。例えば{slots:[],epistemic:\"unresolved\",intent:\"refer\",feature:null,nameAcceptance:null,deferSlot:null,revisitSlot:null}です。",
   "発話の引用・ID・操作配列・発話番号・confidence・antecedentは生成しないでください。環境が今回の人間発話から出典を付けます。過去の発話や未生成のAI発話の内容を今回の発話として記録しないでください。「はい」「それ」だけでは対象や名称合意を確定しないでください。",
 ].join("\n");
