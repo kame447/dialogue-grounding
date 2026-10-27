@@ -2,7 +2,7 @@ import { ACTIONS, FOLLOW_UP_ACTIONS, SAFE_JUDGMENT, validateJudgment, validateOw
 import { STRATEGIES, taskInstructionsFor, JUDGE_POLICIES, ownImageMessage, ownRotationMessage, publicMessages } from "./instructions.mjs";
 import { summarizeForJudge, ReferenceGraphError } from "../memory/reference-graph.mjs";
 import { agreeNameEvidence, humanNamingRecord } from "./name-evidence.mjs";
-import { MEMORY_INSTRUCTIONS, stageMemory } from "./memory.mjs";
+import { MEMORY_INSTRUCTIONS, MEMORY_NAME_INTENTS_V2, stageMemory } from "./memory.mjs";
 import { CANDIDATE_CONFLICT_INSTRUCTIONS, CONFLICT_RETRY_HINTS, CandidateConflictError, splitConflict, validateCandidateConflict } from "../v2/candidate-conflict.ts";
 
 // Robustness bound, identical for both strategies: one upstream stall must not
@@ -105,7 +105,7 @@ export function createLunaJudge(client, { candidateConflict = false, timeBudgetM
         { role: "system", content: JUDGE_POLICIES[strategy] },
         { role: "system", content: judgeInstructionsFor(version) },
         ...(candidateConflict ? [{ role: "system", content: CANDIDATE_CONFLICT_INSTRUCTIONS }] : []),
-        ...(referenceContext ? [{ role: "system", content: MEMORY_INSTRUCTIONS }] : []),
+        ...(referenceContext ? [{ role: "system", content: MEMORY_INSTRUCTIONS }, ...(version === 2 ? [{ role: "system", content: MEMORY_NAME_INTENTS_V2 }] : [])] : []),
         ...ownImageMessage(image), ...ownRotationMessage(rotationImage),
         ...ownAnchorMessage(ownAnchors, ledger),
         { role: "system", content: "AI自身の作業メモ（公開発話ではない）:\n" + JSON.stringify({ ownLedger: ledger, ownJudgmentHistory: previous }) },

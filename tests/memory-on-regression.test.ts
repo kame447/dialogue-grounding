@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { snapshotReferenceGraph, summarizeForJudge } from "../dialogue-model/runtime/memory/reference-graph.mjs";
-import { MEMORY_INSTRUCTIONS } from "../dialogue-model/runtime/judgment/memory.mjs";
+import { MEMORY_INSTRUCTIONS, MEMORY_NAME_INTENTS_V2 } from "../dialogue-model/runtime/judgment/memory.mjs";
 import { JUDGE_TIME_BUDGET_MS } from "../dialogue-model/runtime/judgment/luna.mjs";
 import { GENERATION_TIMEOUT_MS } from "../dialogue-model/runtime/v2/dialogue-v2.mjs";
 import {
@@ -18,7 +18,7 @@ import { SCRIPT } from "./helpers/memory-script.ts";
 type Rec = Record<string, any>;
 const MEMORY_SUMMARY_PREFIX = "AI自身の参照メモと公開発話の出典番号";
 const isMemoryMessage = (message: { role: string; content: unknown }) => message.role === "system" && typeof message.content === "string" &&
-  (message.content === MEMORY_INSTRUCTIONS || message.content.startsWith(MEMORY_SUMMARY_PREFIX));
+  (message.content === MEMORY_INSTRUCTIONS || message.content === MEMORY_NAME_INTENTS_V2 || message.content.startsWith(MEMORY_SUMMARY_PREFIX));
 const CONFIDENCE: Record<string, number> = { unresolved: 0, hypothesis: 0.5, grounded: 0.9 };
 const BARE = /^(それ|これ|あれ|はい|うん|そう|そうです|了解|yes|ok)[。！!？?\s]*$/iu;
 // Annotation-label shapes (M0-M4, P1-P5, ER0-ER1, a-series) and the researcher key's figure ids.
@@ -136,7 +136,7 @@ test("memory ON: each judge request carries exactly the pre-turn graph summary, 
   }
 });
 
-test("memory OFF regression: identical public behaviour and byte-identical requests apart from the two memory messages", async () => {
+test("memory OFF regression: identical public behaviour and byte-identical requests apart from the three memory messages", async () => {
   for (const strategy of ["repair-first", "bypass-enabled"]) {
     const on = await runScript(SCRIPT, { referenceMemory: true, strategy });
     const off = await runScript(SCRIPT, { referenceMemory: false, strategy });
@@ -152,7 +152,8 @@ test("memory OFF regression: identical public behaviour and byte-identical reque
       assertSameBudget(request.options, other.options, JUDGE_TIME_BUDGET_MS);
       const stripped = request.messages.filter((m) => !isMemoryMessage(m));
       assert.equal(JSON.stringify(stripped), JSON.stringify(other.messages), strategy + " request " + index + " differs beyond memory");
-      if (request.phase === "judgment") assert.equal(request.messages.length - stripped.length, 2);
+      // MEMORY_INSTRUCTIONS, the v2-only name-intent message and the graph summary.
+      if (request.phase === "judgment") assert.equal(request.messages.length - stripped.length, 3);
       else assert.equal(stripped.length, request.messages.length);
     }
     const offRecord = off.perTurn.at(-1)!;

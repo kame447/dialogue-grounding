@@ -92,8 +92,9 @@ async function run(steps: Step[], { referenceMemory = true, strategy = "repair-f
 // 2 and 4, 6-7 impressions/defer/revisit with no proposal on record yet for that figure; 5 no target;
 // 3 the current human denial, judged before the AI repair is published: 棒 was publicly proposed in the AI's
 //   turn-2 reply (a propose_name now shows its name), so a proposal is on record (unclear);
-// 8 「波でいいです」 follows the AI's 「波」でどうでしょう？, a name offer the stand-in PROPOSAL regex does not
-//   match; it stays a borderline case: unclear or no_name, never agreed / not_agreed (no single level asserted);
+// 8 「波でいいです」 follows the AI's 「波」でどうでしょう？: a public name offer in a form the stand-in PROPOSAL
+//   regex does not handle (a stand-in coverage gap, not a semantic borderline). Its label and oracle are
+//   unchanged here: unclear or no_name, never agreed / not_agreed (no single level asserted);
 // 9 a feature description only.
 const BORDERLINE = "borderline";
 const EXPECTED_SCRIPT_LEVELS = ["no_name", "unclear", "no_name", "unclear", "no_name", "unknown", "no_name", "no_name", BORDERLINE, "no_name"];

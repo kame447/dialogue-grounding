@@ -45,10 +45,11 @@ test("local grounding omitted and null keep requests, private state and traces b
   assert.equal(JSON.stringify(a), JSON.stringify(b));
   assert.equal(JSON.stringify(implicit.calls), JSON.stringify(explicit.calls));
   assert.equal(JSON.stringify(implicit.dialogue.getAttempts()), JSON.stringify(explicit.dialogue.getAttempts()));
-  // Captured from the pre-integration e06b04e implementation with this synthetic
-  // fixture: guards the request, output state and trace bytes, not just null's alias.
+  // Originally captured from e06b04e; re-captured for the Luna public-act change after checking the only
+  // differences are humanNaming/publication on traces, the Luna generator text and the Luna accept scope.
+  // Guards the request, output state and trace bytes, not just null's alias.
   const bytes = JSON.stringify({ result: a, calls: implicit.calls, attempts: implicit.dialogue.getAttempts() });
-  assert.equal(createHash("sha256").update(bytes).digest("hex"), "9e7bdb6acab26c266a2bcf8a33f838acff172815f15b6c2964a7be524b88a442");
+  assert.equal(createHash("sha256").update(bytes).digest("hex"), "3bea3cb9b5e96f764d3f83b932a407be14a9a148d47161aa2d8571257c07feb0");
   assert.ok(!JSON.stringify(implicit.dialogue.getAttempts()).includes("localGrounding"));
   assert.ok(!JSON.stringify(implicit.calls).includes("局所問題の作業メモ"));
 });
@@ -558,7 +559,7 @@ test("committed fallback turns produce no AI claims, while ordinary and rewritte
   for (const publication of ["ordinary", "rewritten", "fallback"]) {
     const records: LocalGroundingResearchRecord[] = [], local = options(); let generations = 0, judgments = 0;
     local.extractor.extract = async () => [];
-    const publicText = "船と呼ぶのはどうでしょう？四角い部分があります。";
+    const publicText = "「船」と呼ぶのはどうでしょう？四角い部分があります。";
     const h = harness({ localGrounding: local, onLocalGroundingTrace: (record: LocalGroundingResearchRecord) => records.push(record),
       judge: { async judge() { return ++judgments === 1 ? { ...core, action: "propose_name", targetSlot: ids[0], candidateName: "船", discriminatingFeature: "四角い部分" } : core; } },
       client: { async complete() {
