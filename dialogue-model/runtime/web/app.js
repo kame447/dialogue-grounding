@@ -1,6 +1,7 @@
 const $ = (id) => document.getElementById(id);
 const SVG = "http://www.w3.org/2000/svg";
 let current = null;
+let startReady = false;
 let working = false;
 let serverBusy = false;
 let refreshTimer;
@@ -415,12 +416,23 @@ function renderHistory() {
   renderChatActivity();
   keepPosition(scrollTop);
 }
+function renderStartStage(state) {
+  // No researcher-permission API exists yet. A loaded no-trial state permits
+  // explicit start; a future pending/approved projection belongs here.
+  startReady = !state.trial;
+  $("start-stage").hidden = Boolean(state.trial);
+  $("trial-progress").hidden = !state.trial;
+}
+function canStart() {
+  return startReady && !current && !working && !serverBusy && !reviewing;
+}
 function render(state) {
   const trial = state.trial;
   if (trialIdentity(trial) !== trialIdentity(current)) { generation++; resetLocal(); if (trial) restoreDraft(trial); }
   // Events are append-only; a state response started earlier must not remove newer events.
   if (trial && trialIdentity(current) === trialIdentity(trial) && (trial.events?.length ?? 0) < (current?.events?.length ?? 0)) return;
   current = trial; serverBusy = Boolean(state.busy);
+  renderStartStage(state);
   $("trial").hidden = !trial || preparing;
   if (!trial) { loadRecords(); renderRecords(); setControls(); return; }
   const data = scene();
@@ -456,6 +468,7 @@ function renderResults() {
   }
 }
 function setControls() {
+  $("start-trial").disabled = !canStart();
   renderChatActivity();
   $("history").querySelectorAll("button").forEach((node) => { node.disabled = working || sending || !chatOpen(); });
   for (const id of ["utterance", "send-message"]) $(id).disabled = working || !chatOpen();
@@ -1093,12 +1106,9 @@ const sendSurveyOnHide = () => {
 };
 globalThis.addEventListener?.("pagehide", sendSurveyOnHide);
 document.addEventListener?.("visibilitychange", () => { if (document.visibilityState === "hidden") sendSurveyOnHide(); });
-// One admission attempt per page load; failures stay on the neutral screen.
-operate(async () => {
-  let state = await api("/api/state");
-  if (!state.trial) {
-    $("notice").textContent = "試行を準備しています。しばらくお待ちください。";
-    state = await api("/api/start", { version: 2 });
-  }
-  return state;
+$("start-trial").addEventListener("click", () => {
+  if (!canStart()) return;
+  operate(() => api("/api/start", { version: 2 }));
 });
+// Opening or reloading the page only restores state. Starting is explicit.
+operate(() => api("/api/state"));

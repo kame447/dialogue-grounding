@@ -12,7 +12,7 @@
   <main>
     <header class="topbar">
       <h1>6図形の共同命名</h1>
-      <nav aria-label="課題の進行"><ol class="progress">
+      <nav id="trial-progress" aria-label="課題の進行" hidden><ol class="progress">
         <li id="step-chat" data-state="active" aria-current="step"><span class="step-number">1</span>会話</li>
         <li id="step-names" data-state="upcoming"><span class="step-number">2</span>名前</li>
         <li id="step-questionnaire" data-state="upcoming"><span class="step-number">3</span>アンケート<small id="step-questionnaire-note">試行用</small></li>
@@ -20,6 +20,11 @@
       </ol></nav>
     </header>
     <p id="notice" role="status" aria-live="polite"></p>
+    <section id="start-stage" class="panel" aria-labelledby="start-title" hidden>
+      <h2 id="start-title">課題を始める</h2>
+      <p>案内を確認してから、スタートを押してください。</p>
+      <button id="start-trial" type="button" disabled>スタート</button>
+    </section>
     <details id="record-history" class="record-history" hidden>
       <summary id="record-summary">このブラウザの以前の試行</summary>
       <p class="muted">以前の試行の会話・名前・結果は閲覧のみです。アンケートは提出するまで回答できます。</p>
