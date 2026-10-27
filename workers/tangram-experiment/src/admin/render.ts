@@ -4,6 +4,9 @@
 import type { AdminSummary } from "./summary";
 import type { LatencySummary } from "./latency";
 import type { AuditEntry } from "./index-store";
+import type { ReceptionAdminRow, ReceptionProtocolStatus } from './reception-port.ts';
+import { RECORD_ID } from './summary.ts';
+import { renderQrSvg } from './qr.ts';
 
 export const ADMIN_CSS = `:root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans JP",sans-serif;font-size:14px;color:#222;background:#f7f7f4}
 body{margin:0;padding:16px 24px 48px}h1{font-size:1.2rem}h2{font-size:1rem;margin-top:28px}
@@ -54,7 +57,7 @@ const option = (value: string, current: string, label = value) =>
 const ms = (value: number | null | undefined) => typeof value === "number" ? `${Math.round(value)}` : "—";
 
 export function renderList(summaries: AdminSummary[], filter: ListFilter, next: string | null, audit: AuditEntry[],
-  _retentionDays?: number, deleted = false): string {
+  _retentionDays?: number, deleted = false, receptions = false): string {
   const query = (extra: Record<string, string>) => "?" + new URLSearchParams({ status: filter.status, error: filter.error, memory: filter.memory, ...extra });
   const rows = summaries.map((s) => `<tr><td><a href="/admin/record/${escapeHtml(s.recordId)}">${escapeHtml(s.recordId.slice(0, 8))}</a></td>
 <td>${escapeHtml(s.updatedAt)}</td><td>${escapeHtml(s.strategy)}</td><td>${s.referenceMemory ? "ON" : "OFF"}</td><td>${escapeHtml(s.utteranceStyle)}</td>
@@ -64,6 +67,7 @@ export function renderList(summaries: AdminSummary[], filter: ListFilter, next: 
 <td>${ms(s.latency.turn.p50Ms)} / ${ms(s.latency.turn.p95Ms)}</td><td>${escapeHtml(s.latency.slowestPhase?.phase ?? "")}</td>
 <td>${escapeHtml(QUESTIONNAIRE_LABELS[s.questionnaire] ?? QUESTIONNAIRE_LABELS.none)}</td></tr>`).join("");
   return page("実験ログ（研究者用）", `<h1>実験ログ（研究者用・読み取り専用）</h1>
+${receptions ? '<nav><a href="/admin/receptions">受付一覧</a> · <a href="/admin/entry">参加用URL・QRコード</a></nav>' : ''}
 <form method="get" action="/admin"><label>状態 <select name="status">${STATUS_FILTERS.map((v) => option(v, filter.status)).join("")}</select></label>
 <label>エラー <select name="error">${option("any", filter.error, "すべて")}${option("with", filter.error, "あり")}${option("without", filter.error, "なし")}</select></label>
 <label>参照メモリ <select name="memory">${option("any", filter.memory, "すべて")}${option("on", filter.memory, "ON")}${option("off", filter.memory, "OFF")}</select></label>
@@ -144,4 +148,38 @@ ${questionnaireSection(r.questionnaire)}
 
 export function renderMessage(title: string, message: string): string {
   return page(title, `<h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p><p><a href="/admin">一覧へ</a></p>`);
+}
+
+const RECEPTION_LABELS = { pending: '許可待ち', approved: '許可済み', in_progress: '実施中', finished: '終了', cancelled: '取消済み' };
+const receptionNav = '<nav><a href="/admin/receptions">受付一覧</a> · <a href="/admin/entry">参加用URL・QRコード</a> · <a href="/admin">実験ログ</a></nav>';
+
+export function renderReceptions(items: ReceptionAdminRow[], next: string | null, protocol: ReceptionProtocolStatus): string {
+  const form = (entry: ReceptionAdminRow, action: 'approve' | 'cancel') => {
+    const choices = action === 'approve' && protocol.configured
+      ? `<label>条件順序 <select name="order">${protocol.allowedOrders.map((order, index) =>
+        `<option value="${index}">${escapeHtml(order.join(' → '))}</option>`).join('')}</select></label>` : '';
+    return `<form method="post" action="/admin/reception/${escapeHtml(entry.receptionId)}/${action}">
+<input type="hidden" name="expectedRevision" value="${escapeHtml(entry.revision)}">${choices}
+<label>確認（${escapeHtml(entry.number ?? entry.receptionId.slice(0, 8))} を入力） <input name="confirm" autocomplete="off" required></label>
+<button>${action === 'approve' ? '許可' : '受付を取消'}</button></form>`;
+  };
+  const rows = [...items].sort((a, b) => Number(b.status === 'pending') - Number(a.status === 'pending')).map(entry => {
+    const unstarted = !entry.trials.some(trial => trial.recordId !== null);
+    const cancel = unstarted && (entry.status === 'pending' || entry.status === 'approved');
+    return `<tr><td>${escapeHtml(entry.number ?? '未割当')}</td><td>${escapeHtml(entry.createdAt)}</td>
+<td>${escapeHtml(RECEPTION_LABELS[entry.status] ?? entry.status)}</td><td>${escapeHtml(entry.plan?.order.join(' → ') ?? '')}</td>
+<td>${entry.trials.filter(trial => trial.recordId && RECORD_ID.test(trial.recordId)).map(trial =>
+      `<a href="/admin/record/${escapeHtml(trial.recordId)}">${escapeHtml(trial.recordId)}</a>`).join('<br>')}</td>
+<td>${entry.status === 'pending' && unstarted && protocol.configured ? form(entry, 'approve') : ''}${cancel ? form(entry, 'cancel') : ''}</td></tr>`;
+  }).join('');
+  return page('受付一覧', `${receptionNav}<h1>受付一覧</h1>
+${protocol.configured ? `<p>プロトコル設定済み: ${escapeHtml(protocol.protocolId)} / revision ${escapeHtml(protocol.revision)}</p>`
+    : '<p class="bad">プロトコルが未設定のため、許可できません</p>'}
+${items.length ? `<div class="wrap"><table>${head(['受付番号', '受付時刻', '状態', '条件順序', '試行記録', '操作'])}${rows}</table></div>` : '<p>受付はありません</p>'}
+${next ? `<p><a href="/admin/receptions?${escapeHtml(new URLSearchParams({ after: next }).toString())}">次のページ →</a></p>` : ''}`);
+}
+
+export function renderEntry(entryUrl: string): string {
+  return page('参加用URL・QRコード', `${receptionNav}<h1>参加用URL・QRコード</h1>
+<p><a href="${escapeHtml(entryUrl)}">${escapeHtml(entryUrl)}</a></p>${renderQrSvg(entryUrl)}`);
 }
