@@ -13,6 +13,11 @@ export type HarnessOptions = {
   beforeSimulatorTurn?: () => Promise<void>;
 };
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+/** A failure as a closed code only (e.g. participant_ui_timeout); any other message is never printed. */
+export const failureCode = (error: unknown) => {
+  const message = error instanceof Error ? error.message : '';
+  return /^[a-z][a-z0-9_]{0,63}$/u.test(message) ? message : 'unexpected_error';
+};
 const counts = (state: any) => ({human: state.trial.events.filter((e: any) => e.speaker === 'human').length,
   ai: state.trial.events.filter((e: any) => e.speaker === 'ai').length});
 
@@ -109,6 +114,10 @@ export async function driveParticipant(options: HarnessOptions) {
     await writeFile(join(options.outputDirectory, 'page.public.html'), await js('document.documentElement.outerHTML'), {mode: 0o600});
     log.push({stage: 'reload', sameTrial: true, stopReason, syntheticSubmission: true});
     return {sessionId, stopReason, turns: turns.length, surfaces: surfaces.length};
+  } catch (error) {
+    // The stage before the failure is already logged; add only a closed code (#141).
+    log.push({stage: 'failed', code: failureCode(error)});
+    throw error;
   } finally {
     // Private human assessments are never mixed into the scanner's public-surface file.
     await writeFile(join(options.outputDirectory, 'surfaces.private.json'), JSON.stringify(surfaces, null, 2), {mode: 0o600});
