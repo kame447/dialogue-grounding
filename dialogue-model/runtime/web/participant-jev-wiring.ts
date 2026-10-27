@@ -26,6 +26,7 @@ import { RunBudget } from '../diagnostics/parity-live/audit.ts';
 import type { BudgetLimits, SendReceipt } from '../diagnostics/parity-live/audit.ts';
 import { checkModelIdentity, MODEL_CONTRACT_V2 } from '../model-identity-contract.ts';
 import { DEFAULT_COST_CAP_USD } from '../diagnostics/jev-shadow-eval/local-openrouter.ts';
+import { inferenceHistory } from '../v2/agreement-gate.ts';
 
 export type JevResearchLedger = RunBudget;
 export type JevResearchOptions = Readonly<{ profile: ResearchTrialProfileV3; observer: ObservationObserver;
@@ -48,8 +49,8 @@ function jsonData(value: unknown): unknown {
 }
 function checkedTechnicalTrial(value: unknown): AdaptiveRepairTrial {
   const trial = data(value, ['version']);
-  if (trial.version !== 'adaptive_repair_v1') throw Error();
-  return { version: 'adaptive_repair_v1' };
+  if (trial.version !== 'adaptive_repair_v1' && trial.version !== 'adaptive_repair_v2') throw Error();
+  return { version: trial.version };
 }
 function checkedProfile(value: unknown): ResearchTrialProfileV3 {
   const profile = jsonData(value) as ResearchTrialProfileV3;
@@ -101,9 +102,12 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
           restore.jevTraces.some((trace:any)=>trace?.schemaVersion!=='jev_turn_trace_v2'||
             trace.intervention!==null&&!['bypass_acceptance_v1:accept','bypass_acceptance_v1:veto'].includes(trace.intervention?.policy)||
             !technicalTrial&&trace.intervention?.rerank?.policyId==='saved_action_scores_open_issue_v1')) return invalid();
+      // Only adaptive_repair_v2 traces carry the agreement gate; their prospect was asked over the open entries.
+      const v2 = technicalTrial?.version === 'adaptive_repair_v2';
+      if (restore.jevTraces.some((trace:any)=>Object.hasOwn(trace,'repairGate') ? !v2 : v2 && Object.hasOwn(trace,'repairProspect'))) return invalid();
       for (const trace of restore.jevTraces) if (Object.hasOwn(trace,'repairProspect')) {
         if (!technicalTrial) return invalid();
-        validateRepairProspectMaterial(trace.repairProspect,trace.repairHistory,trace.turnIndex);
+        validateRepairProspectMaterial(trace.repairProspect,Object.hasOwn(trace,'repairGate')?inferenceHistory(trace.repairHistory,trace.repairGate):trace.repairHistory,trace.turnIndex);
       }
     }
     return {profile,observer,jevDecision,localGrounding:local,ledger:v.ledger,...(technicalTrial?{technicalTrial}:{})};

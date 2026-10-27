@@ -28,6 +28,8 @@ import type { AiPublicState, AiPublicPending, AiPublicResearch, AiStageEvidence,
 import { JevLocalTestError } from "../local-grounding/jev-local-test.ts";
 import type { JevChoiceTransportOptions, JevChoiceEvidence } from "../local-grounding/jev-local-test.ts";
 import { AIConnectionError } from "../client.mjs";
+import { agreementGate, inferenceHistory, checkRepairGate } from "./agreement-gate.ts";
+import type { RepairGate } from "./agreement-gate.ts";
 
 type Graph = Parameters<typeof prepareLocalGroundingTurn>[1]["graph"];
 type Event = { id: string; seq: number; speaker: "human" | "ai"; text: string; nonReferential?: boolean };
@@ -99,6 +101,7 @@ export type JevTurnTrace = {
   local: LocalGroundingResearchRecord | null;
   humanReferent: JevHumanReferentTrace | null;
   repairProspect?: RepairProspectMaterial;
+  repairGate?: RepairGate;
   decisions: JevDecision[];
   intervention: "none_pending_researcher_decision" | InterventionTrace | null;
   schemaVersion?: "jev_turn_trace_v2"; executed?: ExecutedDecision | null;
@@ -117,7 +120,7 @@ export type JevTurnTrace = {
 };
 type CommittedAct = {
   turnIndex: number; lastEventId: string | null; status: "committed"; judgment: Judgment;
-  generationGuard: Guard; jevTurn: { attemptNumber: number; decision: JevDecision; executed?:ExecutedDecision; intervention?:InterventionTrace; humanReferent?: JevHumanReferentTrace; repairProspect?: RepairProspectMaterial };
+  generationGuard: Guard; jevTurn: { attemptNumber: number; decision: JevDecision; executed?:ExecutedDecision; intervention?:InterventionTrace; humanReferent?: JevHumanReferentTrace; repairProspect?: RepairProspectMaterial; repairGate?: RepairGate };
   localGrounding: LocalGroundingTrace;
   aiPublic?: { aiSeq: number; textSha256: string };
 };
@@ -288,8 +291,10 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
   const seen=new Set<string>();
   for(const j of s.judgments){
    if(!stateExact(j,['turnIndex','lastEventId','status','judgment','generationGuard','jevTurn','localGrounding',...(Object.hasOwn(j,'aiPublic')?['aiPublic']:[])])||j.status!=='committed'||!Number.isSafeInteger(j.turnIndex)||j.turnIndex<1||!(j.lastEventId===null||typeof j.lastEventId==='string'&&j.lastEventId.length<=160))throw Error();
-   const z=j.jevTurn;if(!stateExact(z,['attemptNumber','decision','executed','intervention',...(Object.hasOwn(z??{},'humanReferent')?['humanReferent']:[]),...(Object.hasOwn(z??{},'repairProspect')?['repairProspect']:[])])||!Number.isSafeInteger(z.attemptNumber)||z.attemptNumber<1)throw Error();
-   if(Object.hasOwn(z,'repairProspect'))validateRepairProspectMaterial(z.repairProspect,s.repairHistory,j.turnIndex);
+   const z=j.jevTurn;if(!stateExact(z,['attemptNumber','decision','executed','intervention',...(Object.hasOwn(z??{},'humanReferent')?['humanReferent']:[]),...(Object.hasOwn(z??{},'repairProspect')?['repairProspect']:[]),...(Object.hasOwn(z??{},'repairGate')?['repairGate']:[])])||!Number.isSafeInteger(z.attemptNumber)||z.attemptNumber<1)throw Error();
+   // v2: closures must be justified by agrees saved before this turn; the prospect was asked over the open entries only.
+   if(Object.hasOwn(z,'repairGate')&&!checkRepairGate(z.repairGate,s.repairHistory,s.judgments,j.turnIndex))throw Error();
+   if(Object.hasOwn(z,'repairProspect'))validateRepairProspectMaterial(z.repairProspect,Object.hasOwn(z,'repairGate')?inferenceHistory(s.repairHistory,z.repairGate):s.repairHistory,j.turnIndex);
    const key=JSON.stringify([j.turnIndex,j.lastEventId,z.attemptNumber]);if(seen.has(key))throw Error();seen.add(key);
    const d=z.decision;if(!stateExact(d,['action','target','name','feature','observe','evidence','decisionKind','calibrated',...(Object.hasOwn(d??{},'detailFigureIds')?['detailFigureIds']:[])])||!['mock','jev_local_test'].includes(d.decisionKind)||d.calibrated!==false)throw Error();
    persistedEvidence(d.evidence);
@@ -338,9 +343,12 @@ function interventionDeadline(ms:number,caller?:AbortSignal){
 
 export function createJevTurnRuntime(options: JevTurnOptions) {
   const adaptive = Object.hasOwn(options,'technicalTrial');
-  if(adaptive){try{stateJson(options.technicalTrial);if(!stateExact(options.technicalTrial,['version'])||options.technicalTrial!.version!=='adaptive_repair_v1')throw Error();}catch{throw new JevTurnError('invalid_state');}}
+  if(adaptive){try{stateJson(options.technicalTrial);if(!stateExact(options.technicalTrial,['version'])||!['adaptive_repair_v1','adaptive_repair_v2'].includes(options.technicalTrial!.version))throw Error();}catch{throw new JevTurnError('invalid_state');}}
+  const gated=adaptive&&options.technicalTrial!.version==='adaptive_repair_v2';
   const checkProspectMode=(s:JevPrivateState)=>{
     if(!adaptive&&s.judgments?.some(j=>Object.hasOwn(j.jevTurn??{},'repairProspect')||j.jevTurn?.intervention?.rerank?.policyId==='saved_action_scores_open_issue_v1'))throw new JevTurnError('invalid_state');
+    // Each version restores only its own records: v2 judgments always carry the gate, older ones never do.
+    if(s.judgments?.some(j=>Object.hasOwn(j.jevTurn??{},'repairGate')!==gated))throw new JevTurnError('invalid_state');
   };
   const integrated=Object.hasOwn(options,'intervention')||Object.hasOwn(options,'decisionTimeoutMs');
   let intervention:InterventionConfig|null=null,decisionTimeoutMs:number|undefined;
@@ -467,8 +475,11 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
           ...(aiEnabled ? { aiPublic: { humanOk: prepared.trace.status === "ok", rejected: prepared.trace.rejected,
             aiComplete: state.aiPublic!.log.some(log => log.aiSeq === previousAi.turn && log.status === "applied") } } : {}) }
           : aiEnabled ? { answeredRepairTurn: -1, aiPublic: { humanOk: prepared.trace.status === "ok", rejected: prepared.trace.rejected, aiComplete: false } } : undefined);
+      // v2: decide the gate from the judgments and claims as they stand now; Jev infers over the open entries only.
+      const gate = gated ? agreementGate(repairHistory, state.judgments, claims, latest.seq, state.ledger) : null;
+      if (gate) record.repairGate = structuredClone(gate);
       const baseInput: JevDecisionInput = { turn: latest.seq, publicTurns, ownSlots: [...slots], observations: memo,
-        issueSummary: summarizeLocalIssues(graph), priorClaims: claims, repairHistory,
+        issueSummary: summarizeLocalIssues(graph), priorClaims: claims, repairHistory: gate ? inferenceHistory(repairHistory, gate) : repairHistory,
         previousAction: previous && previousAi ? { turn: previousAi.turn, action: previousExecution!.action, target: previousExecution!.target,
           name: previousExecution!.name, feature: previousExecution!.feature } : null,
         publicNames: claims.filter(c => c.name !== null && publicTurns.some(t => t.turn === c.sourceTurn && t.text.includes(c.name!)))
@@ -500,7 +511,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       abortIf(signal);
       record.humanReferent = { ...estimate, turnIndex: latest.seq, observationMemo };
       baseInput.humanReferent = { status: estimate.status, scores: structuredClone(estimate.scores) };
-      if (adaptive && repairHistory.length && typeof jevDecision.estimateRepairProspect === "function") {
+      if (adaptive && baseInput.repairHistory.length && typeof jevDecision.estimateRepairProspect === "function") {
         record.repairHistory = structuredClone(repairHistory);
         let prospect = unknownRepairProspect();
         const prospectInput = structuredClone({ ...baseInput, reobservationAllowed: maxReobservations > 0 });
@@ -624,7 +635,8 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       const nextState: JevPrivateState = { ...(integrated?{schemaVersion:'jev_private_state_v2' as const,interventionPolicy:state.interventionPolicy}:{}), ledger: ambiguousDefer || multipleFeature || featureOnlyRepair ? structuredClone(state.ledger) : applyJudgment(state.ledger, judgment),
         graph: applyReferenceUpdate(state.graph, prepared.update, { publicTurns, generationSucceeded: true }) as Graph,
         observationMemo: memo, repairHistory, judgments: [...state.judgments, { turnIndex: latest.seq, lastEventId, status: "committed", judgment,
-          generationGuard: structuredClone(record.generationGuard), jevTurn: { attemptNumber, decision, ...(integrated?{executed:execution,intervention:record.intervention as InterventionTrace}:{}), humanReferent: structuredClone(record.humanReferent), ...(record.repairProspect === undefined ? {} : { repairProspect: structuredClone(record.repairProspect) }) },
+          generationGuard: structuredClone(record.generationGuard), jevTurn: { attemptNumber, decision, ...(integrated?{executed:execution,intervention:record.intervention as InterventionTrace}:{}), humanReferent: structuredClone(record.humanReferent), ...(record.repairProspect === undefined ? {} : { repairProspect: structuredClone(record.repairProspect) }),
+            ...(gate ? { repairGate: structuredClone(gate) } : {}) },
           localGrounding: { ...prepared.trace, attemptNumber }, ...(aiEnabled ? { aiPublic: { aiSeq: aiPending!.aiSeq, textSha256: aiPending!.textSha256 } } : {}) }],
         ...(aiEnabled ? { aiPublic: state.aiPublic } : {}) };
       record.status = "staged"; record.publicSpeech = result.text; record.local.status = "staged";
