@@ -102,7 +102,7 @@ async function receptionMutation(request: Request, port: ReceptionAdminPort, id:
   const allowed = action === 'approve' ? ['order', 'expectedRevision', 'confirm'] : ['expectedRevision', 'confirm'];
   if (!form || [...form.keys()].some(key => !allowed.includes(key) || form.getAll(key).length !== 1)) return receptionError(400, 'invalid_request');
   const expectedRevision = unsigned(form.get('expectedRevision'));
-  if (expectedRevision === null || expectedRevision < 1) return receptionError(400, 'invalid_request');
+  if (expectedRevision === null) return receptionError(400, 'invalid_request');
   try {
     const entry = await port.get(id);
     if (!entry || entry.receptionId !== id) return receptionError(404, 'not_found');

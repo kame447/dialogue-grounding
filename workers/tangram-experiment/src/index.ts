@@ -6,6 +6,7 @@ import { NamingTaskError } from "../../../dialogue-model/runtime/naming-error.mj
 import { sessionCookie, sessionId } from "./session-cookie.ts";
 import { isExcessiveTraffic, type SoftLimitBindings } from "./soft-limits";
 import { AdminIndex } from "./admin/index-do";
+import { createReceptionAdminPort } from './admin/reception-adapter.ts';
 import { handleAdmin, isAdminPath, type AdminLimiter } from "./admin/routes.ts";
 import { summarizeRecord, type AdminSummary } from "./admin/summary.ts";
 import type { AuditEntry } from "./admin/index-store.ts";
@@ -627,6 +628,13 @@ export default {
       return handleAdmin(request, {
         token: index ? env.ADMIN_TOKEN : undefined,
         limiter: env.ADMIN_RATE_LIMIT,
+        receptions: index && env.RECEPTION_REQUIRED === 'on' ? createReceptionAdminPort({
+          index,
+          readProtocol:() => env.RECEPTION_PROTOCOL_JSON === undefined ? null : JSON.parse(env.RECEPTION_PROTOCOL_JSON),
+          owner:objectId => {
+            try { return env.NAMING_SESSIONS.get(env.NAMING_SESSIONS.idFromString(objectId)); } catch { return null; }
+          },
+        }) : undefined,
         listPage: async (after) => (await index!.page(after)) as { items: AdminSummary[]; next: string | null },
         getSummary: async (recordId) => (await index!.get(recordId)) as AdminSummary | null,
         getRecord: async (summary) => (await owner(summary)?.adminRecord(summary.recordId)) ?? null,

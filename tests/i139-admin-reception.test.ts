@@ -157,11 +157,18 @@ test('valid percent-encoded forms accept exactly 1024 bytes and reject 1025 byte
 test('invalid order, revision, confirmation and oversized/non-form bodies never mutate', async () => {
   for (const order of ['-1', '2', '1.0', '1e0', 'NaN', '', '999999999999999999999999']) { const f = fixture(); await error(await handleAdmin(post('approve', { order }), f.deps), 400, 'invalid_order'); assert.equal(mutations(f).length, 0); }
   for (const action of ['approve', 'cancel']) {
-    for (const expectedRevision of ['-1', '0', '3.5', 'NaN', '3e0', '']) { const f = fixture(); await error(await handleAdmin(post(action, { expectedRevision }), f.deps), 400, 'invalid_request'); assert.equal(mutations(f).length, 0); }
+    for (const expectedRevision of ['-1', '3.5', 'NaN', '3e0', '', '9007199254740992']) { const f = fixture(); await error(await handleAdmin(post(action, { expectedRevision }), f.deps), 400, 'invalid_request'); assert.equal(mutations(f).length, 0); }
     for (const confirm of ['', 'wrong', 'synthetic-007 ']) { const f = fixture(); await error(await handleAdmin(post(action, { confirm }), f.deps), 400, 'invalid_confirmation'); assert.equal(mutations(f).length, 0); }
     for (const request of [post(action, { extra: 'x'.repeat(1100) }), post(action, {}, { 'Content-Type': 'application/json' })]) { const f = fixture(); await error(await handleAdmin(request, f.deps), 400, 'invalid_request'); assert.equal(mutations(f).length, 0); }
     const duplicate = post(action); const text = await duplicate.text(); const f = fixture();
     await error(await handleAdmin(new Request(duplicate, { body: text + '&expectedRevision=4' }), f.deps), 400, 'invalid_request'); assert.equal(mutations(f).length, 0);
+  }
+});
+test('initial reception revision zero is accepted and passed unchanged to approval and cancellation', async () => {
+  for (const action of ['approve', 'cancel']) {
+    const f = fixture(); f.row.revision = 0;
+    assert.equal((await handleAdmin(post(action, { expectedRevision: '0' }), f.deps)).status, 303);
+    assert.deepEqual(mutations(f), [{ op: action, args: [ID, action === 'approve' ? { order: 1, expectedRevision: 0 } : { expectedRevision: 0 }] }]);
   }
 });
 test('unknown IDs return 404; port conflicts include double approval and revision races, closed errors only', async () => {

@@ -1148,6 +1148,7 @@ $("start-trial").addEventListener("click", () => {
 // An explicit admission POST creates only the reception; trial start is a click.
 operate(async () => {
   const state = await api("/api/state");
+  if (!state.reception) return state;
   try { return await api("/api/reception", {}); }
   catch (error) { if (error.status === 404) return state; throw error; }
 });

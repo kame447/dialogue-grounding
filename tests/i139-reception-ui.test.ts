@@ -95,11 +95,18 @@ test('waiting reception polling stops while hidden and resumes on visibility', a
   await x.hide(false); await x.poll(); assert.ok(x.calls.length > before);
 });
 
-test('optional reception 404 preserves legacy explicit start and does not create background trials', async () => {
+test('legacy state without reception mode preserves explicit start with no admission request', async () => {
   const x = await ui({ trial: null }, { legacy: true });
-  assert.equal(x.receptionCalls, 1); assert.equal(x.e['start-trial'].disabled, false);
+  assert.equal(x.receptionCalls, 0); assert.equal(x.e['start-trial'].disabled, false);
   x.e['start-trial'].fire('click'); await tick();
   assert.deepEqual(x.calls.filter(c => c.path === '/api/start'), [{ path: '/api/start', method: 'POST', body: { version: 2 } }]);
+});
+
+test('reception mode with an optional admission 404 preserves the known state and explicit start', async () => {
+  const x = await ui({ trial: null, reception: { number: '007', status: 'ready', revision: 4 } }, { legacy: true });
+  assert.equal(x.receptionCalls, 1); assert.equal(x.e['start-trial'].disabled, false);
+  x.e['start-trial'].fire('click'); await tick();
+  assert.deepEqual(x.calls.filter(c => c.path === '/api/start'), [{ path: '/api/start', method: 'POST', body: { version: 2, expectedReceptionRevision: 4 } }]);
 });
 
 test('unavailable reception never enables start', async () => {
