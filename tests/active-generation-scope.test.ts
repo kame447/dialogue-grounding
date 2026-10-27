@@ -88,8 +88,9 @@ test("changed-action directive and whole generator request are identical across 
 test("normal mode remains exactly the pre-fix byte sequence and same-action active/fallback add no directive", async () => {
   const normal = await capture({ active: false });
   assert.equal(directive(normal.calls[0]).length, 0);
-  // Captured from the unmodified ed943ba/171ced7 assembly before this fix.
-  assert.equal(createHash("sha256").update(JSON.stringify(normal.calls)).digest("hex"), "3e14fc325190a047767d7b38be902c3968daee27d14094eed8943bc5f33b3f47");
+  // Captured from the unmodified ed943ba/171ced7 assembly before this fix; re-pinned for the shared
+  // joint-reference text (HUMANLIKE-REFERENCE-2026-10-19), which is the same in every mode.
+  assert.equal(createHash("sha256").update(JSON.stringify(normal.calls)).digest("hex"), "ba9694a87d98f40d718cf01d3e5d3110048ee3dba8f2c0a2783f93a143b8f298");
   const unchanged = await capture(), fallback = await capture({ failDecision: true });
   assert.deepEqual(unchanged.calls, normal.calls); assert.deepEqual(fallback.calls, normal.calls);
   assert.equal(directive(unchanged.calls[0]).length, 0); assert.equal(directive(fallback.calls[0]).length, 0);
