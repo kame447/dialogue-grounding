@@ -18,8 +18,8 @@ import { createObservationCache } from '../observation/cache.ts';
 import type { ObservationCacheAudit } from '../observation/cache.ts';
 import { createLunaObserver } from '../observation/observe.ts';
 import type { ObservationInput, ObservationObserver } from '../observation/contract.ts';
-import { createJevDecisionClient, JevDecisionError } from '../decision/jev-decision.ts';
-import type { JevDecisionClient } from '../decision/contract.ts';
+import { createJevDecisionClient, JevDecisionError, validateRepairProspectMaterial } from '../decision/jev-decision.ts';
+import type { JevDecisionClient, AdaptiveRepairTrial } from '../decision/contract.ts';
 import { createJevLocalTestClassifier, JevLocalTestError } from '../local-grounding/jev-local-test.ts';
 import type { JevTurnLocalOptions } from '../v2/jev-turn.ts';
 import { RunBudget } from '../diagnostics/parity-live/audit.ts';
@@ -29,7 +29,7 @@ import { DEFAULT_COST_CAP_USD } from '../diagnostics/jev-shadow-eval/local-openr
 
 export type JevResearchLedger = RunBudget;
 export type JevResearchOptions = Readonly<{ profile: ResearchTrialProfileV3; observer: ObservationObserver;
-  jevDecision: JevDecisionClient; localGrounding: JevTurnLocalOptions; ledger: JevResearchLedger }>;
+  jevDecision: JevDecisionClient; localGrounding: JevTurnLocalOptions; ledger: JevResearchLedger; technicalTrial?: AdaptiveRepairTrial }>;
 export class ParticipantJevError extends Error {
   readonly code: string;
   constructor(code: 'invalid_config' | 'wrong_own_material' | 'initialization_failed' | 'model_mismatch') {
@@ -45,6 +45,11 @@ function jsonData(value: unknown): unknown {
   if (value === null || ['string','boolean'].includes(typeof value) || typeof value === 'number' && Number.isFinite(value)) return value;
   if (Array.isArray(value)) return value.map(jsonData);
   return Object.fromEntries(Object.entries(data(value)).map(([k,v]) => [k,jsonData(v)]));
+}
+function checkedTechnicalTrial(value: unknown): AdaptiveRepairTrial {
+  const trial = data(value, ['version']);
+  if (trial.version !== 'adaptive_repair_v1') throw Error();
+  return { version: 'adaptive_repair_v1' };
 }
 function checkedProfile(value: unknown): ResearchTrialProfileV3 {
   const profile = jsonData(value) as ResearchTrialProfileV3;
@@ -64,7 +69,7 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
       if (marker !== undefined && marker !== true && marker !== false) return invalid();
       if (marker !== true) {
         const state = restore.queueState?.privateState;
-        if (['profileSha256','interventionPolicy'].some(k => Object.hasOwn(restore.options ?? {},k)) ||
+        if (['profileSha256','interventionPolicy','technicalTrial'].some(k => Object.hasOwn(restore.options ?? {},k)) ||
             ['jevTraces','aiPublicSettlement','initialObservation','jevLedger'].some(k => Object.hasOwn(restore,k)) ||
             state && (['schemaVersion','interventionPolicy','observationMemo','repairHistory','aiPublic'].some(k=>Object.hasOwn(state,k)) ||
               state.judgments?.some((j: any) => j.jevTurn))) return invalid();
@@ -72,7 +77,9 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
       }
     }
     if (provided === null || provided === undefined) return marker === true ? invalid() : null;
-    const v = data(provided,['profile','observer','jevDecision','localGrounding','ledger']);
+    const raw = data(provided);
+    const v = data(raw,['profile','observer','jevDecision','localGrounding','ledger',...(Object.hasOwn(raw,'technicalTrial')?['technicalTrial']:[])]);
+    const technicalTrial = Object.hasOwn(v,'technicalTrial') ? checkedTechnicalTrial(v.technicalTrial) : undefined;
     // The frozen order is outer shape, explicit profile, memory, strategy.
     const profile = checkedProfile(v.profile);
     if (context.referenceMemory !== true) return invalid();
@@ -84,15 +91,22 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
         typeof local?.classifier?.classify !== 'function' || local.timeoutMs !== profile.timeouts.localMs ||
         local.aiPublicClaims !== profile.localGrounding.aiPublicClaims || !(v.ledger instanceof RunBudget)) return invalid();
     if (restore) {
+      const savedTrial = Object.hasOwn(restore.options,'technicalTrial') ? checkedTechnicalTrial(restore.options.technicalTrial) : undefined;
+      if (JSON.stringify(savedTrial) !== JSON.stringify(technicalTrial)) return invalid();
       if (restore.options.profileSha256 !== researchHash(profile) ||
           researchHash(jsonData(restore.options.interventionPolicy)) !== researchHash(profile.interventionPolicy) ||
           restore.queueState?.privateState?.schemaVersion !== 'jev_private_state_v2' ||
           !restore.queueState?.privateState?.observationMemo || !Array.isArray(restore.jevTraces) ||
           !digest(restore.initialObservation?.memoSha256) || !Object.hasOwn(restore,'aiPublicSettlement') || !restore.jevLedger ||
           restore.jevTraces.some((trace:any)=>trace?.schemaVersion!=='jev_turn_trace_v2'||
-            trace.intervention!==null&&!['bypass_acceptance_v1:accept','bypass_acceptance_v1:veto'].includes(trace.intervention?.policy))) return invalid();
+            trace.intervention!==null&&!['bypass_acceptance_v1:accept','bypass_acceptance_v1:veto'].includes(trace.intervention?.policy)||
+            !technicalTrial&&trace.intervention?.rerank?.policyId==='saved_action_scores_open_issue_v1')) return invalid();
+      for (const trace of restore.jevTraces) if (Object.hasOwn(trace,'repairProspect')) {
+        if (!technicalTrial) return invalid();
+        validateRepairProspectMaterial(trace.repairProspect,trace.repairHistory,trace.turnIndex);
+      }
     }
-    return {profile,observer,jevDecision,localGrounding:local,ledger:v.ledger};
+    return {profile,observer,jevDecision,localGrounding:local,ledger:v.ledger,...(technicalTrial?{technicalTrial}:{})};
   } catch { return invalid(); }
 }
 
@@ -208,10 +222,12 @@ export function restoreParticipantJevLedger(ledger:RunBudget,saved:any):void {
 }
 
 export type ParticipantJevConfig = {schemaVersion:'participant_jev_config_v1';lunaRequest:ResearchTrialProfileV3['lunaRequest'];
-  timeouts:ResearchTrialProfileV3['timeouts'];cacheDirectory:string;modelId:string;memoSha256:string;seed:number;limits:BudgetLimits};
+  timeouts:ResearchTrialProfileV3['timeouts'];cacheDirectory:string;modelId:string;memoSha256:string;seed:number;limits:BudgetLimits;technicalTrial?:AdaptiveRepairTrial};
 export function validateParticipantJevConfig(value:unknown):{config:ParticipantJevConfig;profile:ResearchTrialProfileV3} {
   try {
-    const c=jsonData(data(value,['schemaVersion','lunaRequest','timeouts','cacheDirectory','modelId','memoSha256','seed','limits'])) as ParticipantJevConfig;
+    const raw=data(value);
+    const c=jsonData(data(raw,['schemaVersion','lunaRequest','timeouts','cacheDirectory','modelId','memoSha256','seed','limits',...(Object.hasOwn(raw,'technicalTrial')?['technicalTrial']:[])])) as ParticipantJevConfig;
+    if(Object.hasOwn(c,'technicalTrial'))c.technicalTrial=checkedTechnicalTrial(c.technicalTrial);
     if(c.schemaVersion!=='participant_jev_config_v1'||typeof c.cacheDirectory!=='string'||!safeModel(c.modelId)||!digest(c.memoSha256)||!Number.isSafeInteger(c.seed))throw Error();
     const limits=data(c.limits,['lunaCalls','lunaTokens','lunaPosts','jevPosts','jevUsd']);
     if(!['lunaCalls','lunaTokens','lunaPosts','jevPosts'].every(k=>positive(limits[k]))||typeof limits.jevUsd!=='number'||!Number.isFinite(limits.jevUsd)||limits.jevUsd<=0||limits.jevUsd>DEFAULT_COST_CAP_USD)throw Error();
@@ -264,12 +280,18 @@ export async function prepareParticipantJev(options:{configFile:string;baseAssig
         return scope(ledger).run({turn:parent?.turn??null,phase,boundary:'tail'},()=>jevFetch(url,init));
       }};
       const nativeDecision=createJevDecisionClient({enabled:true,...transport,questionLayout:profile.questionLayout})!;
-      const jevDecision={...nativeDecision,
+      const {estimateRepairProspect:_prospect,...nativeWithoutProspect}=nativeDecision;
+      const jevDecision={...nativeWithoutProspect,
         get lastEvidence(){return nativeDecision.lastEvidence;},get lastReferentEvidence(){return nativeDecision.lastReferentEvidence;},
         get spentUsd(){return nativeDecision.spentUsd;},get callCount(){return nativeDecision.callCount;},
         get referentCallCount(){return nativeDecision.referentCallCount;},
         decide:(...args:Parameters<typeof nativeDecision.decide>)=>jevOperation(ledger,'jev_decision',()=>nativeDecision.decide(...args)),
         estimateReferent:(...args:Parameters<typeof nativeDecision.estimateReferent>)=>jevOperation(ledger,'jev_referent',()=>nativeDecision.estimateReferent(...args)),
+        ...(config.technicalTrial ? {estimateRepairProspect:(...args:Parameters<typeof nativeDecision.estimateRepairProspect>)=>{
+          const parent=scope(ledger).getStore();
+          return scope(ledger).run({turn:parent?.turn??null,phase:'jev_prospect',boundary:'common'},
+            ()=>jevOperation(ledger,'jev_prospect',()=>nativeDecision.estimateRepairProspect(...args)));
+        }} : {}),
         completeDetail:(...args:Parameters<typeof nativeDecision.completeDetail>)=>{
         const parent=scope(ledger).getStore();
         return scope(ledger).run({turn:parent?.turn??null,phase:'alternative_detail',boundary:'tail'},()=>jevOperation(ledger,'jev_detail',()=>nativeDecision.completeDetail(...args)));
@@ -282,7 +304,7 @@ export async function prepareParticipantJev(options:{configFile:string;baseAssig
       const jevResearch:JevResearchOptions={profile,observer,jevDecision,
         localGrounding:{classifier:{...classifier,get lastEvidence(){return classifier.lastEvidence;},get spentUsd(){return classifier.spentUsd;},
           get callCount(){return classifier.callCount;},classify:(...args:Parameters<typeof classifier.classify>)=>jevOperation(ledger,'jev_local',()=>classifier.classify(...args))},timeoutMs:profile.timeouts.localMs,
-          researchLimits,aiPublicClaims:profile.localGrounding.aiPublicClaims,aiPublicTransport},ledger};
+          researchLimits,aiPublicClaims:profile.localGrounding.aiPublicClaims,aiPublicTransport},ledger,...(config.technicalTrial?{technicalTrial:config.technicalTrial}:{})};
       return {client,jevResearch};
     }};
   }catch{throw new ParticipantJevError('invalid_config');}

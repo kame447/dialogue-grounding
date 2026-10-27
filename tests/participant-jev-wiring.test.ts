@@ -309,3 +309,59 @@ test('J-P1: a real local classification keeps its live adapter evidence in the p
   assert.equal(made.record().jevTraces[0].local.classifier.model,'typesafe/jev-1.14-20261014');
   assert.ok(made.record().jevTraces[0].local.classifier.callIndex>0);
 });
+
+test('adaptive repair technicalTrial accepts only its exact version and stays absent by default',async t=>{
+  const h=await fixture(t);
+  assert.ok(!Object.hasOwn(validateParticipantJevConfig(h.config).config,'technicalTrial'));
+  assert.deepEqual(validateParticipantJevConfig({...h.config,technicalTrial:{version:'adaptive_repair_v1'}}).config.technicalTrial,{version:'adaptive_repair_v1'});
+  for(const value of [undefined,null,false,{},'adaptive_repair_v1',{version:'unknown'},{version:'adaptive_repair_v1',extra:true}]){
+    assert.throws(()=>validateParticipantJevConfig({...h.config,technicalTrial:value}),{code:'invalid_config'});
+  }
+});
+
+test('adaptive repair wiring exposes estimator only ON and accounts its POST as jev_prospect',async t=>{
+  const off=await fixture(t),offPrepared=await prepareParticipantJev(off.options);
+  const offOptions=await offPrepared.taskOptions({seed,referenceMemory:true,strategy:'repair-first'});
+  assert.ok(!Object.hasOwn(offOptions.jevResearch!,'technicalTrial'));
+  assert.ok(!Object.hasOwn(offOptions.jevResearch!.jevDecision,'estimateRepairProspect'));
+  const on=await fixture(t,{technicalTrial:{version:'adaptive_repair_v1'}}),prepared=await prepareParticipantJev(on.options);
+  const options=await prepared.taskOptions({seed,referenceMemory:true,strategy:'repair-first'}),research=options.jevResearch!;
+  const slots=model.anchors.map((a:any)=>a.id);
+  const result=await research.jevDecision.estimateRepairProspect!({turn:3,ownSlots:slots,observations:on.hit.memo,
+    publicTurns:[{turn:3,speaker:'human',text:'まだ分かりません'}],issueSummary:'',priorClaims:[],previousAction:null,publicNames:[],
+    repairHistory:[{turn:1,issueId:null,action:'repair',question:'細い部分がありますか',partnerClaims:[],candidatesBefore:slots.slice(0,2),
+      candidatesAfter:slots.slice(0,2),addedClaimIds:[],removedClaimIds:[],progress:'unchanged'}]});
+  assert.equal(result.status,'ok');
+  assert.equal(research.ledger.sends.length,1);
+  assert.equal(research.ledger.sends[0].phase,'jev_prospect');
+  assert.equal(research.ledger.sends[0].provider,'jev');
+  assert.equal(research.ledger.sends[0].status,'observed_response');
+  assert.equal(research.ledger.sends[0].costUsd,0.001);
+  assert.deepEqual(research.technicalTrial,{version:'adaptive_repair_v1'});
+});
+
+test('adaptive repair option is private, recorded and requires the same config at restore',async t=>{
+  const h=await fixture(t,{technicalTrial:{version:'adaptive_repair_v1'}}),prepared=await prepareParticipantJev(h.options);
+  const made=await makeTask(prepared),saved=made.record();
+  assert.deepEqual(saved.options.technicalTrial,{version:'adaptive_repair_v1'});
+  assert.ok(!JSON.stringify(made.task.getState()).includes('technicalTrial'));
+  const restored=await makeTask(prepared,{restore:saved});
+  assert.deepEqual(restored.record().options.technicalTrial,saved.options.technicalTrial);
+  const options=await prepared.taskOptions({seed,referenceMemory:true,strategy:'repair-first'});
+  const {technicalTrial:_trial,...without}=options.jevResearch!;
+  await assert.rejects(createNamingTaskV2({seed,referenceMemory:true,strategy:'repair-first',...options,client:options.client!,jevResearch:without,restore:saved,runDir:null,createTrial:()=>trial}),{code:'invalid_options'});
+  const offSaved=structuredClone(saved);delete offSaved.options.technicalTrial;
+  await assert.rejects(makeTask(prepared,{restore:offSaved}),{code:'invalid_options'});
+  const invalidTrace=structuredClone(saved);
+  invalidTrace.jevTraces=[{schemaVersion:'jev_turn_trace_v2',intervention:null,turnIndex:1,repairHistory:[],repairProspect:{status:'unknown',issue:null,prospect:null,basis:null,scores:{}}}];
+  await assert.rejects(makeTask(prepared,{restore:invalidTrace}),{code:'invalid_options'});
+  const invalidSaved=structuredClone(saved);invalidSaved.options.technicalTrial.version='unknown';
+  await assert.rejects(makeTask(prepared,{restore:invalidSaved}),{code:'invalid_options'});
+});
+
+test('an OFF restore rejects an open-issue rerank trace',async t=>{
+  const h=await fixture(t),prepared=await prepareParticipantJev(h.options),saved=(await makeTask(prepared)).record();
+  const mixed=structuredClone(saved);
+  mixed.jevTraces=[{schemaVersion:'jev_turn_trace_v2',turnIndex:1,intervention:{policy:'bypass_acceptance_v1:veto',rerank:{policyId:'saved_action_scores_open_issue_v1'}}}];
+  await assert.rejects(makeTask(prepared,{restore:mixed}),{code:'invalid_options'});
+});

@@ -39,6 +39,15 @@ export type HumanReferentEstimate = HumanReferentMaterial & {
   inputBudget: DecisionInputBudget | null;
   calibrated: false;
 };
+export const REPAIR_PROSPECTS = ["progressing", "stalled", "uncertain", "no_open_issue"] as const;
+export const REPAIR_PROSPECT_BASES = ["new_information", "candidate_narrowed", "candidate_widened", "repetition", "partner_uncertain", "other_figure_benefit", "none"] as const;
+/** Uncalibrated Jev material. Never a threshold, a score or a forced branch. */
+export type RepairProspectMaterial =
+  | { status: "ok"; issue: { choice: "issue"; turn: number; issueId: string | null } | { choice: "none" } | { choice: "unknown" };
+      prospect: typeof REPAIR_PROSPECTS[number]; basis: typeof REPAIR_PROSPECT_BASES[number];
+      scores: { repair_issue: Record<string, number>; prospect: Record<string, number>; basis: Record<string, number> } }
+  | { status: "unknown"; issue: null; prospect: null; basis: null; scores: null };
+export type AdaptiveRepairTrial = { version: "adaptive_repair_v1" };
 export type JevDecisionInput = {
   turn: number;
   publicTurns: readonly PublicTurn[];
@@ -54,6 +63,7 @@ export type JevDecisionInput = {
   /** C sets false after its engineering limit for targeted reobservation is reached. */
   reobservationAllowed?: boolean;
   humanReferent?: HumanReferentMaterial;
+  repairProspect?: RepairProspectMaterial;
 };
 export type DecisionInputBudget = {
   maxChars: 20000;
@@ -96,6 +106,7 @@ export type JevExecutedDecision = Omit<Pick<JevDecision, "action" | "target" | "
 export type JevDetailResult = { executed: JevExecutedDecision; evidence: JevDecisionStageEvidence };
 export type JevDecisionClient = {
   decide(input: JevDecisionInput, options?: JevDecisionCallOptions): Promise<JevDecision>;
+  estimateRepairProspect?(input: JevDecisionInput, options?: JevDecisionCallOptions): Promise<RepairProspectMaterial>;
   estimateReferent?(input: JevDecisionInput, options?: JevDecisionCallOptions): Promise<HumanReferentEstimate>;
   completeDetail?(input: JevDecisionInput, selected: Pick<JevDecision, "action" | "target">,
     options?: JevDecisionCallOptions): Promise<JevDetailResult>;
