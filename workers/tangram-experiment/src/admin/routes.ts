@@ -14,7 +14,8 @@ export type AdminLimiter = { limit(options: { key: string }): Promise<{ success:
 export type AdminDeps = {
   token: string | undefined;
   limiter: AdminLimiter | undefined;
-  retentionDays: number;
+  // Legacy injected callers may still pass this; it no longer controls record retention.
+  retentionDays?: number;
   listPage(after: string | null): Promise<{ items: AdminSummary[]; next: string | null }>;
   getSummary(recordId: string): Promise<AdminSummary | null>;
   /** Reads record:<recordId> from the owning session object over internal RPC, never the participant API. */
