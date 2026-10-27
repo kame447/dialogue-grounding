@@ -289,12 +289,13 @@ test('HTTP reload/polling keeps one opening and duplicate clientId POST returns 
     ...(body === undefined ? {} : { method: 'POST', body: JSON.stringify(body) }) });
   const start = await request('/api/start', { version: 2 });
   assert.equal(start.status, 200);
-  const first = (await start.json()).trial.events;
+  const startedTrial = (await start.json()).trial;
+  const first = startedTrial.events;
   assert.equal(first.length, 1); assert.equal(first[0].text, OPENING);
   await (await request('/')).text();
   for (let i = 0; i < 3; i++) assert.deepEqual((await (await request('/api/state')).json()).trial.events, first);
   assert.equal(client.calls.length, 0);
-  const post = async (body) => { const response = await request('/api/message', body); assert.equal(response.status, 202); return response.json(); };
+  const post = async (body) => { const response = await request('/api/message', {...body,expectedRecordId:startedTrial.sessionId}); assert.equal(response.status, 202); return response.json(); };
   const accepted = await post({ text: 'synthetic HTTP human', clientId: 'browser-http-1' });
   await hold.entered;
   const repeated = await post({ text: 'synthetic HTTP human', clientId: 'browser-http-1' });

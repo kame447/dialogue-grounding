@@ -24,7 +24,7 @@ test('offline synthetic P1 HTTP: mock turn, public state, six names, questionnai
   assert.deepEqual(server.counts(), {lunaPosts: 0, jevPosts: 0});
   const persona = createPersona(20261027), human = mockHuman({persona,
     history: first.trial.events.map((v: any) => ({speaker: v.speaker, text: v.text}))});
-  await request('/api/message', {text: human.utterance, clientId: 'adaptive-human-http-1'});
+  await request('/api/message', {text: human.utterance, clientId: 'adaptive-human-http-1', expectedRecordId:first.trial.sessionId});
   let state: any;
   const end = Date.now() + 10000;
   do {
@@ -38,7 +38,7 @@ test('offline synthetic P1 HTTP: mock turn, public state, six names, questionnai
   const next = mockHuman({persona, history: state.trial.events.map((v: any) => ({speaker: v.speaker, text: v.text}))});
   assert.match(next.utterance, /細い部分/);
   const id = state.trial.sessionId;
-  const submitted = await request('/api/names', {confirm: true,
+  const submitted = await request('/api/names', {confirm: true, expectedRecordId:id,
     names: Object.fromEntries(state.trial.scene.shapes.map((v: any, index: number) => [v.id, '合成の名前' + (index + 1)]))});
   assert.equal(submitted.trial.status, 'completed');
   const locked = await request(`/api/records/${id}/review`);

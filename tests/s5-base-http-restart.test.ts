@@ -72,7 +72,7 @@ test('BASE HTTP restart preserves a message receipt and resending it does not re
     const started = await request('/api/start', { version: 2 });
     assert.equal(started.status, 200);
     assert.equal(modelCalls, 0, 'scripted opening uses no model');
-    const message = { text: 'Synthetic first shape description.', clientId: 'restart-stable-message' };
+    const message = { text: 'Synthetic first shape description.', clientId: 'restart-stable-message', expectedRecordId:started.json.trial.sessionId };
     const accepted = await request('/api/message', message);
     assert.equal(accepted.status, 202);
     const before = await idle();
@@ -93,7 +93,7 @@ test('BASE HTTP restart preserves a message receipt and resending it does not re
     assert.equal(deduplicated.events.filter((event: any) => event.speaker === 'human' && event.text === message.text).length, 1);
     assert.equal(modelCalls, 2, 'same clientId cannot generate another model request');
 
-    const continued = await request('/api/message', { text: 'Synthetic next shape description.', clientId: 'restart-next-message' });
+    const continued = await request('/api/message', { text: 'Synthetic next shape description.', clientId: 'restart-next-message', expectedRecordId:restored.sessionId });
     assert.equal(continued.status, 202);
     assert.notEqual(continued.json.eventId, accepted.json.eventId);
     const final = await idle();

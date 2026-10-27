@@ -104,8 +104,8 @@ test('real held save survives signal and duplicate, release commits before clean
   const root = await directory(t), c = launch(t, [childScript, 'save', root, '3000'], {}, true), ready = await c.waitFor('ready');
   const base = 'http://127.0.0.1:' + ready.port, page = await fetch(base + '/'); const cookie = page.headers.get('set-cookie')!.split(';')[0]; await page.text();
   const post = (path: string, value: any) => fetch(base + path, { method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify(value) });
-  assert.equal((await post('/api/start', { version: 2 })).status, 200);
-  c.child.send('arm'); await c.waitFor('armed'); const response = post('/api/message', { text: 'shutdown_synthetic_message', clientId: 'g5-message' });
+  const started=await post('/api/start', { version: 2 });assert.equal(started.status, 200);const recordId=(await started.json()).trial.sessionId;
+  c.child.send('arm'); await c.waitFor('armed'); const response = post('/api/message', { text: 'shutdown_synthetic_message', clientId: 'g5-message', expectedRecordId:recordId });
   await c.waitFor('held'); c.child.kill('SIGINT'); await delay(50); c.child.kill('SIGTERM');
   assert.equal(c.finished, false); assert.equal((await fs.readdir(root + '/owners')).filter(x => x.endsWith('.lock')).length, 1);
   c.child.send('release'); assert.equal((await response).status, 202);
@@ -118,10 +118,10 @@ test('held actual save past deadline leaves lock and valid old committed bytes',
   const root = await directory(t), c = launch(t, [childScript, 'save', root, '200'], {}, true), ready = await c.waitFor('ready');
   const base = 'http://127.0.0.1:' + ready.port, page = await fetch(base + '/'); const cookie = page.headers.get('set-cookie')!.split(';')[0]; await page.text();
   const headers = { Cookie: cookie, 'Content-Type': 'application/json' };
-  assert.equal((await fetch(base + '/api/start', { method: 'POST', headers, body: '{"version":2}' })).status, 200);
+  const started=await fetch(base + '/api/start', { method: 'POST', headers, body: '{"version":2}' });assert.equal(started.status, 200);const recordId=(await started.json()).trial.sessionId;
   const path = root + '/owners/' + (await fs.readdir(root + '/owners')).find(x => x.endsWith('.owner.json'));
   c.child.send('arm'); await c.waitFor('armed');
-  const response = fetch(base + '/api/message', { method: 'POST', headers, body: '{"text":"shutdown_synthetic_message"}' }).catch(() => null);
+  const response = fetch(base + '/api/message', { method: 'POST', headers, body: JSON.stringify({text:'shutdown_synthetic_message',expectedRecordId:recordId}) }).catch(() => null);
   await c.waitFor('held'); const before = await fs.readFile(path); c.child.kill('SIGINT');
   assert.deepEqual(await c.exited, { code: 1, signal: null }); await response;
   assert.equal(c.stderr.trim(), 'shutdown_incomplete'); assert.deepEqual(await fs.readFile(path), before);
