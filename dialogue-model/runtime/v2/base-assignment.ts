@@ -1,4 +1,5 @@
 /** Participant assignment API. Researcher values only; never an allocation method. */
+import type { ReceptionPlan } from './reception.ts';
 export { BaseAssignmentError, validateBaseAssignmentConfig, validateBaseStart,
   canonicalBaseAssignmentConfig, validateBoundBaseRecord } from './base-assignment-data.ts';
 export type Strategy = 'repair-first' | 'bypass-enabled';
@@ -7,7 +8,9 @@ export type BaseAssignmentConfig = Readonly<{ schemaVersion: 'base_assignment_co
   revision: number; strategy: Strategy; seed: number; referenceMemory: boolean }>;
 export type BaseAssignment = Readonly<{ schemaVersion: 'base_assignment_v1'; assignmentId: string;
   strategy: Strategy; seed: number; referenceMemory: boolean;
-  source: Readonly<{ kind: 'server_config_v1'; adapter: SourceAdapter; configId: string; revision: number; configSha256: string }>;
+  source: Readonly<{ kind: 'server_config_v1'; adapter: SourceAdapter; configId: string; revision: number; configSha256: string }> |
+    Readonly<{ kind: 'reception_plan_v1'; adapter: SourceAdapter; receptionId: string; protocolId: string; protocolRevision: number;
+      protocolSha256: string; trialIndex: number; plan: ReceptionPlan }>;
   createdAt: string }>;
 /** Minimum coordinator projection; the existing task owns its complete snapshot. */
 export type RawBaseRecord = { recordId: string; version: 2; seed: number; strategy: Strategy;
@@ -31,6 +34,7 @@ export type BaseTask = { getState(): Record<string, unknown>; persistNow(): Prom
 export type MakeBaseTask = (options: { strategy: Strategy; seed: number; referenceMemory: boolean; runDir: null;
   restore: BaseRecord | null; now: () => number; onPersist: (record: RawBaseRecord) => Promise<void> }) => Promise<BaseTask>;
 export type BaseSessionOptions = { ownerId: string; store: BaseStore; readConfig: () => Promise<BaseAssignmentConfig | null>;
+  readPlan?: () => Promise<{ receptionId: string; plan: ReceptionPlan; trialIndex: number }>;
   makeTask: MakeBaseTask; newId: () => string; now: () => number; adapter: SourceAdapter };
 export type StartResult = { kind: 'started' | 'completed'; task: BaseTask };
 export type RestoreResult = { kind: 'empty'; task: null } | { kind: 'restored'; task: BaseTask };

@@ -2,6 +2,7 @@
 // under its existing nodejs_compat flag (also used by the stimulus generator).
 import { createHash } from 'node:crypto';
 import type { BaseAssignmentConfig, BaseAssignment, BaseRecord, BaseOwnerState } from './base-assignment.ts';
+import { validateReceptionPlan } from './reception.ts';
 export type BaseAssignmentErrorCode = 'invalid_request' | 'assignment_unconfigured' | 'assignment_invalid' |
   'assignment_conflict' | 'assignment_record_invalid';
 export class BaseAssignmentError extends Error {
@@ -44,13 +45,31 @@ export function validateBaseStart(value: unknown): Readonly<{ version: 2 }> {
 }
 export function canonicalBaseAssignmentConfig(value: unknown): string { return JSON.stringify(validateBaseAssignmentConfig(value)); }
 export function configFromAssignment(a: BaseAssignment): BaseAssignmentConfig {
+  if (a.source.kind !== 'server_config_v1') throw new BaseAssignmentError('assignment_record_invalid');
   return validateBaseAssignmentConfig({ schemaVersion: 'base_assignment_config_v1', configId: a.source.configId,
     revision: a.source.revision, strategy: a.strategy, seed: a.seed, referenceMemory: a.referenceMemory });
 }
 export function readAssignment(value: unknown): BaseAssignment {
   return guard('assignment_record_invalid', () => {
     const a = data(value, ['schemaVersion', 'assignmentId', 'strategy', 'seed', 'referenceMemory', 'source', 'createdAt']);
-    const s = data(a.source, ['kind', 'adapter', 'configId', 'revision', 'configSha256']);
+    const rawSource = data(a.source);
+    if (rawSource.kind === 'reception_plan_v1') {
+      const s = data(rawSource, ['kind','adapter','receptionId','protocolId','protocolRevision','protocolSha256','trialIndex','plan']);
+      const plan = validateReceptionPlan(s.plan);
+      if (!safeInt(s.trialIndex) || s.trialIndex < 0 || s.trialIndex >= plan.trials.length) throw new Error('index');
+      const t = plan.trials[s.trialIndex];
+      if (a.schemaVersion !== 'base_assignment_v1' || typeof a.assignmentId !== 'string' || !V4.test(a.assignmentId) ||
+        s.adapter !== 'worker_binding' || typeof s.receptionId !== 'string' || !V4.test(s.receptionId) ||
+        s.protocolId !== plan.protocolId || s.protocolRevision !== plan.protocolRevision || s.protocolSha256 !== plan.protocolSha256 ||
+        a.strategy !== t.strategy || a.seed !== t.seed || a.referenceMemory !== t.referenceMemory ||
+        typeof a.createdAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(a.createdAt) || new Date(a.createdAt).toISOString() !== a.createdAt) throw new Error('assignment');
+      return Object.freeze({ schemaVersion:'base_assignment_v1', assignmentId:a.assignmentId, strategy:a.strategy,
+        seed:a.seed, referenceMemory:a.referenceMemory, source:Object.freeze({ kind:'reception_plan_v1', adapter:s.adapter,
+          receptionId:s.receptionId, protocolId:s.protocolId, protocolRevision:s.protocolRevision, protocolSha256:s.protocolSha256,
+          trialIndex:s.trialIndex, plan }), createdAt:a.createdAt }) as BaseAssignment;
+    }
+    // Preserve every existing server_config_v1 field and digest validation.
+    const s = data(rawSource, ['kind', 'adapter', 'configId', 'revision', 'configSha256']);
     if (a.schemaVersion !== 'base_assignment_v1' || typeof a.assignmentId !== 'string' || !V4.test(a.assignmentId) ||
         !strategy(a.strategy) || !safeInt(a.seed) || typeof a.referenceMemory !== 'boolean' || s.kind !== 'server_config_v1' ||
         !['local_private_file', 'worker_binding'].some(v => v === s.adapter) || typeof s.configId !== 'string' || !V4.test(s.configId) ||

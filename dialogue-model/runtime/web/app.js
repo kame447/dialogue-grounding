@@ -2,6 +2,7 @@ const $ = (id) => document.getElementById(id);
 const SVG = "http://www.w3.org/2000/svg";
 let current = null;
 let startReady = false;
+let reception = null;
 let working = false;
 let serverBusy = false;
 let refreshTimer;
@@ -67,6 +68,12 @@ const defaultContact = "実験の案内に記載された連絡先へお問い�
 const contact = document.querySelector?.('meta[name="participant-contact"]')?.content || defaultContact;
 const errors = {
   trial_unavailable: "試行を開始できませんでした。" + contact,
+  reception_not_approved: "開始の案内があるまでお待ちください。",
+  protocol_unconfigured: "開始の案内があるまでお待ちください。",
+  reception_conflict: "状態が変わりました。画面を確認してください。",
+  reception_unavailable: "受付を確認できませんでした。" + contact,
+  reception_finished: "すべての課題が完了しました。",
+  trial_changed: "状態が変わりました。画面を確認してください。",
   ai_unavailable: "AIに接続できませんでした。会話履歴を確認してください。送り直すには、そのメッセージの「再送」を押してください。メッセージは自動では再送されません。",
   scoring_error: "採点でエラーが発生しました。提出内容は保存されています。採点を再試行できます。",
   invalid_ai_submission: "AIが提出した名前を確認できませんでした。" + contact,
@@ -417,14 +424,20 @@ function renderHistory() {
   keepPosition(scrollTop);
 }
 function renderStartStage(state) {
-  // No researcher-permission API exists yet. A loaded no-trial state permits
-  // explicit start; a future pending/approved projection belongs here.
-  startReady = !state.trial;
-  $("start-stage").hidden = Boolean(state.trial);
+  reception = state.reception ?? null;
+  const next = Boolean(state.trial && trialCompleted() && reception?.status === "in_progress");
+  startReady = reception ? (!state.trial && reception.status === "ready") || next : !state.trial;
+  $("start-stage").hidden = Boolean(state.trial) && !next;
   $("trial-progress").hidden = !state.trial;
+  $("start-trial").textContent = next ? "次の課題を開始" : "スタート";
+  $("reception-number").hidden = !reception?.number;
+  $("reception-number").textContent = reception?.number ? `受付番号 ${reception.number}` : "";
+  $("start-message").textContent = !reception ? "案内を確認してから、スタートを押してください。"
+    : next ? "" : reception.status === "ready" ? "準備ができました。スタートを押してください。"
+      : reception.status === "finished" ? "すべての課題が完了しました。" : "開始の案内があるまでお待ちください。";
 }
 function canStart() {
-  return startReady && !current && !working && !serverBusy && !reviewing;
+  return startReady && (!current || trialCompleted() && reception?.status === "in_progress") && !working && !serverBusy && !reviewing;
 }
 function render(state) {
   const trial = state.trial;
@@ -434,7 +447,7 @@ function render(state) {
   current = trial; serverBusy = Boolean(state.busy);
   renderStartStage(state);
   $("trial").hidden = !trial || preparing;
-  if (!trial) { loadRecords(); renderRecords(); setControls(); return; }
+  if (!trial) { loadRecords(); renderRecords(); setControls(); scheduleRefresh(); return; }
   const data = scene();
   const nextSignature = JSON.stringify(data);
   if (nextSignature !== sceneSignature) { sceneSignature = nextSignature; addScene($("board"), true); }
@@ -486,6 +499,8 @@ function setControls() {
 }
 function scheduleRefresh() {
   clearTimeout(refreshTimer);
+  if (document.visibilityState === "hidden") return;
+  if (!current && reception && !reviewing) { refreshTimer = setTimeout(() => refreshState(), 5000); return; }
   if (current && !preparing && !reviewing) refreshTimer = setTimeout(() => refreshState(), aiThinking() || pending.length ? 700 : 2000);
 }
 async function refreshState() {
@@ -1105,10 +1120,18 @@ const sendSurveyOnHide = () => {
   } catch { /* The browser copy is resent after reload. */ }
 };
 globalThis.addEventListener?.("pagehide", sendSurveyOnHide);
-document.addEventListener?.("visibilitychange", () => { if (document.visibilityState === "hidden") sendSurveyOnHide(); });
+document.addEventListener?.("visibilitychange", () => {
+  if (document.visibilityState === "hidden") { sendSurveyOnHide(); clearTimeout(refreshTimer); }
+  else { if (reception) refreshState(); else scheduleRefresh(); }
+});
 $("start-trial").addEventListener("click", () => {
   if (!canStart()) return;
-  operate(() => api("/api/start", { version: 2 }));
+  const expectation = reception ? { expectedReceptionRevision: reception.revision, ...(current ? { expectedRecordId: current.sessionId } : {}) } : {};
+  operate(() => api("/api/start", { version: 2, ...expectation }));
 });
-// Opening or reloading the page only restores state. Starting is explicit.
-operate(() => api("/api/state"));
+// An explicit admission POST creates only the reception; trial start is a click.
+operate(async () => {
+  const state = await api("/api/state");
+  try { return await api("/api/reception", {}); }
+  catch (error) { if (error.status === 404) return state; throw error; }
+});
