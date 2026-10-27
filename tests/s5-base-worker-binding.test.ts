@@ -43,6 +43,7 @@ function fixture(kind = 'matching') {
     delete input['base:owner:v1']; delete input.active.assignment; delete record.assignment;
   }
   if (kind === 'expired') input.ledger[target] = 0;
+  if (kind === 'missing_ledger') delete input.ledger[target];
   if (kind === 'tombstoned') input.tombstones = [target];
   let values = new Map<string, any>(Object.entries(input)); const pending: Promise<unknown>[] = [];
   const counters = { reads: 0, writes: 0, model: 0 };
@@ -80,7 +81,10 @@ test('Worker legacy archive-only metadata/export remains readable', async () => 
 test('Worker unknown private archive remains null', async () => {
   const x = fixture(); assert.equal(await x.o.adminRecord('55555555-5555-4555-8555-555555555555'), null); await x.done();
 });
-for (const kind of ['expired', 'tombstoned']) test('Worker ' + kind + ' active metadata stays expired', async () => {
+test('Worker old ledger timestamp does not expire owner metadata', async () => {
+  const x = fixture('expired'); assert.equal(await x.o.baseOwnerStatus(), 'registered'); await x.done();
+});
+for (const kind of ['missing_ledger', 'tombstoned']) test('Worker ' + kind + ' active metadata stays expired', async () => {
   const x = fixture(kind); assert.equal(await x.o.baseOwnerStatus(), 'expired'); await x.done();
 });
 test('Worker matching completed review is actually reached', async () => {

@@ -264,14 +264,14 @@ test("deleting removes the record and its index entry, writes a content-free aud
   assert.equal((await listAudit(index)).length, 1);
 });
 
-// --- Archive and retention (fake clock) ----------------------------------
+// --- Archive and legacy expiry helpers (never called by the Worker) -------
 
 test("RECORD_RETENTION_DAYS: integer 1-365, otherwise 30", () => {
   assert.equal(retentionDays("30"), 30); assert.equal(retentionDays("1"), 1); assert.equal(retentionDays("365"), 365); assert.equal(retentionDays(7), 7);
   for (const bad of [undefined, "", "0", "366", "-5", "7.5", "abc", "1e2", 0, 400, 3.5, null]) assert.equal(retentionDays(bad), 30, String(bad));
 });
 
-test("two trials in one browser are each kept until their own expiry, and both are listed meanwhile", async () => {
+test("legacy expiry helper removes archives and index entries only when explicitly called", async () => {
   const session = memoryStorage(), index = memoryStorage();
   const retired = new Set<string>();
   const persist = async (id: string, ms: number, status = "dialogue") => {
@@ -303,7 +303,7 @@ test("two trials in one browser are each kept until their own expiry, and both a
   assert.deepEqual((await listAudit(index)).map((a) => a.reason), ["retention", "retention"]);
 });
 
-test("an update refreshes the expiry; a failing index removal deletes nothing", async () => {
+test("legacy expiry helper observes updates and refuses removal if its index callback fails", async () => {
   const session = memoryStorage();
   await archiveSnapshot(session, record({ updatedAt: iso(T0) }), new Set(), T0);
   assert.equal(await nextExpiry(session, 30), T0 + 30 * DAY);
@@ -315,7 +315,7 @@ test("an update refreshes the expiry; a failing index removal deletes nothing", 
   assert.equal(await nextExpiry(session, 7), T0 + 12 * DAY, "a shorter configured period applies on the next schedule");
 });
 
-test("restore after eviction keeps the archive; a legacy active-only session is backfilled once with expiry from its last update", async () => {
+test("restore after eviction keeps the archive; legacy backfill preserves its original timestamp", async () => {
   const session = memoryStorage();
   await archiveSnapshot(session, record({ updatedAt: iso(T0) }), new Set(), T0);
   // Eviction drops memory only: a new instance sees the same storage and needs no backfill.
@@ -335,28 +335,17 @@ test("restore after eviction keeps the archive; a legacy active-only session is 
   assert.equal(await backfillActive(odd, T0), null);
 });
 
-test("a legacy active-only session older than retention is backfilled, then expired before restore: never resumed, never listed", async () => {
+test("a legacy active-only session older than the Cookie lifetime is backfilled and listed without expiry", async () => {
   const session = memoryStorage(), index = memoryStorage();
   await session.put({ [ACTIVE_KEY]: record({ recordId: SECOND, updatedAt: iso(T0 - 45 * DAY) }) });
-  // Same order as TangramSession.initialize(): backfill -> expiry -> schedule -> restore.
+  // Initialization backfills and registers without calling the legacy expiry helper.
   assert.equal((await backfillActive(session, T0))?.recordId, SECOND);
-  const removed = await expireRecords(session, T0, 30, async (ids) => { await removeSummaries(index, ids, "retention", T0); });
-  assert.deepEqual(removed, [SECOND]);
-  assert.equal(await session.get(ACTIVE_KEY), undefined, "nothing left to restore");
-  assert.equal(await readArchived(session, SECOND), null);
-  assert.equal(await nextExpiry(session, 30), null);
-  assert.equal(await getSummary(index, SECOND), null);
-  assert.equal(await upsertSummary(index, summaryOf(record({ recordId: SECOND }))), false, "never indexed again");
-  assert.equal(await archiveSnapshot(session, record({ recordId: SECOND, updatedAt: iso(T0) }), new Set(), T0), false,
-    "a late write cannot recreate an expired record");
-  assert.deepEqual((await listAudit(index)).map((a) => a.reason), ["retention"]);
-  // Inside the window it is kept and restorable.
-  const fresh = memoryStorage();
-  await fresh.put({ [ACTIVE_KEY]: record({ recordId: FIRST, updatedAt: iso(T0 - 10 * DAY) }) });
-  await backfillActive(fresh, T0);
-  assert.deepEqual(await expireRecords(fresh, T0, 30, async () => {}), []);
-  assert.equal((await fresh.get<any>(ACTIVE_KEY)).recordId, FIRST);
-  assert.equal(await nextExpiry(fresh, 30), T0 + 20 * DAY);
+  const archived = await readArchived(session, SECOND);
+  assert.ok(archived);
+  await upsertSummary(index, summaryOf(archived as ReturnType<typeof record>));
+  assert.equal((await session.get<any>(ACTIVE_KEY))?.recordId, SECOND);
+  assert.deepEqual((await listPage(index)).items.map(s => s.recordId), [SECOND]);
+  assert.deepEqual(await listAudit(index), []);
 });
 
 test("a stale ordering key never shows a duplicate or a deleted row", async () => {
@@ -439,7 +428,10 @@ test("every record value is escaped in the list and detail pages", () => {
     [{ recordHash: XSS, deletedAt: XSS, reason: "admin" }], 30);
   assert.doesNotMatch(list, /<script/i);
   assert.match(list, new RegExp(`href="/admin/record/${RECORD}"`));
-  assert.match(list, /30 日後に自動削除/);
+  for (const page of [list, html]) {
+    assert.match(page, /自動では削除されません/);
+    assert.doesNotMatch(page, /日後に自動削除/);
+  }
 });
 
 test("a failed turn's sanitized cause (v2 errorCode/errorPhase/errorStatus/errorElapsedMs) is shown and indexed as a code", () => {
@@ -479,7 +471,7 @@ test("the admin page uses the shared latency summary, which is text-free and nev
 
 // --- Configuration and participant boundary -------------------------------
 
-test("wrangler keeps migration v1 unchanged, adds AdminIndex under v2, sets 30-day retention and holds no admin secret", async () => {
+test("wrangler keeps migration v1 unchanged, adds AdminIndex under v2, sets 30-day Cookie lifetime and holds no admin secret", async () => {
   const raw = await readFile(new URL("../workers/tangram-experiment/wrangler.jsonc", import.meta.url), "utf8");
   const config = JSON.parse(raw.split("\n").filter((line) => !line.trim().startsWith("//")).join("\n"));
   assert.deepEqual(config.migrations, [{ tag: "v1", new_sqlite_classes: ["TangramSession"] }, { tag: "v2", new_sqlite_classes: ["AdminIndex"] }]);
@@ -500,7 +492,7 @@ test("participant state is unchanged and /admin is routed before the participant
   const initStart=source.indexOf("private async initialize()"),initEnd=source.indexOf("/** Narrow metadata RPCs",initStart);
   assert.ok(initStart>=0&&initEnd>initStart,"initialization slice boundaries exist");
   const init = source.slice(initStart,initEnd);
-  const order=["backfillActive(","await this.runExpiry();","await this.scheduleExpiry();","const record = await this.ctx.storage.get<StoredTrial>(ACTIVE_KEY)","this.registerSummary(record)"].map(n=>init.indexOf(n));
+  const order=["backfillActive(","await this.scheduleExpiry();","const record = await this.ctx.storage.get<StoredTrial>(ACTIVE_KEY)","this.registerSummary(record)"].map(n=>init.indexOf(n));
   assert.ok(order.every(at=>at>=0)&&order.every((at,i)=>i===0||at>order[i-1]),String(order));
   assert.doesNotMatch(init,/this\.createTrial\(/);
   const assertStartBeforeInitialize=(text:string)=>{
@@ -518,11 +510,13 @@ test("participant state is unchanged and /admin is routed before the participant
   assert.throws(()=>assertStartBeforeInitialize("validateBaseStart(body);await this.initialize()"),"missing slice boundaries fail");
   assert.match(source,/await binding\.onPersist\([\s\S]*?await this\.scheduleExpiry\(\)/);
   assert.match(source,/compareAndSwap:[\s\S]*?this\.serialized\(\(\)=>this\.ctx\.storage\.transaction\(/);
-  for (const call of ["deleteArchived(","expireRecords(","backfillActive("]) {
+  for (const call of ["deleteArchived(","backfillActive("]) {
     const uses=source.split(call).length-1,wrapped=source.split("this.serialized(() => "+call).length-1;
     assert.ok(uses>=1&&uses===wrapped,`${call} ${wrapped}/${uses}`);
   }
   // The alarm re-registers remaining records, repairing a missed best-effort index write (audit L2).
   assert.match(source.slice(source.indexOf("async alarm()")), /^async alarm\(\)[\s\S]*?ledgerIds\(this\.ctx\.storage\)[\s\S]*?this\.registerSummary\(/);
+  assert.doesNotMatch(source, /runExpiry|expireRecords|nextExpiry|\.setAlarm\(/, "no Worker entrypoint invokes expiry or schedules it");
+  assert.match(source, /private async scheduleExpiry\(\)[\s\S]*?await this\.ctx\.storage\.deleteAlarm\(\)/);
   assert.doesNotMatch(source, /deleteAll/);
 });
