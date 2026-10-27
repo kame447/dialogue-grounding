@@ -10,8 +10,7 @@
   // Trial: concise AI utterances for every new v2 session (both strategies). Set "default" to revert.
   "vars": {
     "V2_UTTERANCE_STYLE": "concise",
-    // Records are deleted automatically this many days after their last update (integer 1-365; invalid -> 30).
-    // Provisional default until the researcher decides the retention policy.
+    // Session cookie Max-Age in days (integer 1-365; invalid -> 30). Records are not deleted automatically (#140).
     "RECORD_RETENTION_DAYS": "30"
   },
   "observability": {

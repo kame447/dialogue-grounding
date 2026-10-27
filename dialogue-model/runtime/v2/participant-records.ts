@@ -33,7 +33,7 @@ const item = (id: string, text: string, minLabel: string, maxLabel: string): Que
 export const QUESTIONNAIRE_FORM: QuestionnaireForm = Object.freeze({
   version: QUESTIONNAIRE_VERSION,
   provisional: true,
-  notice: "試行用の仮の質問です（研究者未承認）。正式な尺度ではありません。回答は実験記録と同じ期間保存され、その後自動的に削除されます。",
+  notice: "試行用の仮の質問です（研究者未承認）。正式な尺度ではありません。回答は実験記録とともに保存され、研究者が削除するまで残ります（自動では削除されません）。",
   items: [
     item("mental_effort", "この課題に取り組むあいだ、どの程度頭を使いましたか。", "ほとんど使わなかった", "非常に多く使った"),
     item("task_difficulty", "この課題はどの程度難しかったですか。", "とても易しかった", "とても難しかった"),

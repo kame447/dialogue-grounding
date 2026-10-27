@@ -10,7 +10,7 @@ import { handleAdmin, isAdminPath, type AdminLimiter } from "./admin/routes.ts";
 import { summarizeRecord, type AdminSummary } from "./admin/summary.ts";
 import type { AuditEntry } from "./admin/index-store.ts";
 import { summarizeLatency } from "./admin/latency.ts";
-import { ACTIVE_KEY, archiveSnapshot, backfillActive, deleteArchived, expireRecords, ledgerIds, nextExpiry, readArchived,
+import { ACTIVE_KEY, backfillActive, deleteArchived, ledgerIds, readArchived,
   readQuestionnaire, retentionDays, writeQuestionnaire } from "./admin/archive.ts";
 import { RECORD_ID } from "./admin/summary.ts";
 import { applyQuestionnaire, lockResult, participantReview, QUESTIONNAIRE_FORM, recordListEntry, sortRecordList,
@@ -65,7 +65,7 @@ export interface Env extends SoftLimitBindings {
   ADMIN_TOKEN?: string;
   ADMIN_INDEX?: DurableObjectNamespace<AdminIndex>;
   ADMIN_RATE_LIMIT?: AdminLimiter;
-  // Days after a record's last update before automatic deletion (integer 1-365; invalid -> 30).
+  // Participant Cookie Max-Age in days only (integer 1-365; invalid -> 30). Records never expire automatically.
   RECORD_RETENTION_DAYS?: string;
 }
 
@@ -157,9 +157,8 @@ export class TangramSession extends DurableObject<Env> {
     return existed;
   }
 
-  /** Retention: the alarm deletes records RECORD_RETENTION_DAYS after their last update, never earlier. */
+  /** Old deployments may have scheduled an expiry alarm. Clear it without deleting evidence. */
   async alarm(): Promise<void> {
-    await this.runExpiry();
     await this.scheduleExpiry();
     // Re-register the remaining records, so a missed best-effort index write is repaired.
     for (const id of await ledgerIds(this.ctx.storage)) {
@@ -168,7 +167,7 @@ export class TangramSession extends DurableObject<Env> {
     }
   }
 
-  // Archive mutations (persist, delete, expiry, backfill) run one at a time in this
+  // Archive mutations (persist, delete, backfill) run one at a time in this
   // object, so ledger read-modify-writes never interleave. A Durable Object is single
   // threaded, so this chain covers every writer of this session's storage.
   private archiveQueue: Promise<unknown> = Promise.resolve();
@@ -178,18 +177,8 @@ export class TangramSession extends DurableObject<Env> {
     return run;
   }
 
-  private retention(): number { return retentionDays(this.env.RECORD_RETENTION_DAYS); }
-
   private index() {
     return this.env.ADMIN_INDEX ? this.env.ADMIN_INDEX.get(this.env.ADMIN_INDEX.idFromName(ADMIN_INDEX_NAME)) : null;
-  }
-
-  /** Index entries go first: if that fails, nothing is deleted and the alarm retries. */
-  private async runExpiry(): Promise<void> {
-    const removed = await this.serialized(() => expireRecords(this.ctx.storage, Date.now(), this.retention(), async (ids) => {
-      await this.index()?.remove(ids, "retention");
-    }));
-    this.forget(removed);
   }
 
   private forget(recordIds: string[]): void {
@@ -198,11 +187,9 @@ export class TangramSession extends DurableObject<Env> {
     if (typeof current === "string" && recordIds.includes(current)) this.trial = null;
   }
 
-  /** One alarm per session at its earliest expiry; refreshed on every write. */
+  /** Cancel legacy expiry alarms; saving or accessing a record never schedules deletion. */
   private async scheduleExpiry(): Promise<void> {
-    const next = await nextExpiry(this.ctx.storage, this.retention());
-    if (next === null) await this.ctx.storage.deleteAlarm();
-    else await this.ctx.storage.setAlarm(next);
+    await this.ctx.storage.deleteAlarm();
   }
 
   /** Best effort: an index failure never affects the participant's trial or its record. */
@@ -225,11 +212,9 @@ export class TangramSession extends DurableObject<Env> {
     this.initialized = (async () => {
       const active = await this.ctx.storage.get<StoredTrial>(ACTIVE_KEY);
       if (active) await this.validateArchiveBinding(active);
-      // Order matters: backfill, then expiry, then the alarm, then restore. A legacy
-      // active-only session older than the retention period is archived with its own
-      // last update and immediately expired, so it is never resumed.
+      // Additive backfill keeps even old active-only evidence, with its original
+      // update time. No record is expired during initialization.
       await this.serialized(() => backfillActive(this.ctx.storage, Date.now()));
-      await this.runExpiry();
       await this.scheduleExpiry();
       // Legacy active records may be archived/indexed but never restored into a task.
       const record = await this.ctx.storage.get<StoredTrial>(ACTIVE_KEY);
@@ -261,7 +246,7 @@ export class TangramSession extends DurableObject<Env> {
     if (!RECORD_ID.test(id)) return null;
     const tombstones = await this.ctx.storage.get<string[]>('tombstones') ?? [];
     const ledger = await this.ctx.storage.get<Record<string,number>>('ledger') ?? {};
-    if (tombstones.includes(id) || !Object.hasOwn(ledger,id) || ledger[id] + this.retention()*86400000 <= Date.now()) return null;
+    if (tombstones.includes(id) || !Object.hasOwn(ledger,id)) return null;
     return await this.readOwnedArchive(id) as BaseRecord | null;
   }
   private assignmentSession(): BaseSession {
@@ -291,9 +276,9 @@ export class TangramSession extends DurableObject<Env> {
             validateBoundBaseRecord(w.record,w.record.assignment);
             if (w.assignmentId !== w.record.assignment.assignmentId || tombstones.includes(w.record.recordId) ||
                 !Object.values(owner.admissions).some(e=>e?.assignment.assignmentId===w.assignmentId&&e.record?.recordId===w.record.recordId)) throw new BaseSessionError('trial_unavailable');
-            // A retired expired/deleted archive cannot be recreated by a delayed callback.
+            // A deleted archive cannot be recreated by a delayed callback.
             const existed = Object.values(old.admissions).some(e=>e?.record?.recordId===w.record.recordId);
-            if (existed && (!Object.hasOwn(ledger,w.record.recordId) || ledger[w.record.recordId]+this.retention()*86400000<=Date.now())) throw new BaseSessionError('trial_unavailable');
+            if (existed && !Object.hasOwn(ledger,w.record.recordId)) throw new BaseSessionError('trial_unavailable');
             updates['record:'+w.record.recordId] = w.record;
             const stamp = typeof w.record.updatedAt === 'string' ? Date.parse(w.record.updatedAt) : Date.now();
             ledger[w.record.recordId] = Number.isFinite(stamp) ? stamp : Date.now();
@@ -363,7 +348,7 @@ export class TangramSession extends DurableObject<Env> {
 
   /**
    * Read-only review and the provisional questionnaire of one of this browser's
-   * trials. Any other id (unknown, malformed, another browser's, expired or
+   * trials. Any other id (unknown, malformed, another browser's or
    * deleted) gets the same not_found. Never touches names, the key or scoring.
    */
   private async recordRoute(request: Request, recordId: string, view: string): Promise<Response> {
@@ -455,7 +440,6 @@ export default {
       return handleAdmin(request, {
         token: index ? env.ADMIN_TOKEN : undefined,
         limiter: env.ADMIN_RATE_LIMIT,
-        retentionDays: retentionDays(env.RECORD_RETENTION_DAYS),
         listPage: async (after) => (await index!.page(after)) as { items: AdminSummary[]; next: string | null },
         getSummary: async (recordId) => (await index!.get(recordId)) as AdminSummary | null,
         getRecord: async (summary) => (await owner(summary)?.adminRecord(summary.recordId)) ?? null,

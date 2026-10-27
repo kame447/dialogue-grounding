@@ -9,7 +9,7 @@ import { writeFile, readFile } from "node:fs/promises";
 import { startNamingServer } from "../dialogue-model/runtime/web/server.mjs";
 import { createChatClient } from "../dialogue-model/runtime/client.mjs";
 import { applyQuestionnaire, lockResult, participantReview, QUESTIONNAIRE_FORM, questionnaireStatus } from "../dialogue-model/runtime/v2/participant-records.ts";
-import { archiveSnapshot, backfillActive, deleteArchived, expiredIds, expireRecords, readArchived, readQuestionnaire,
+import { archiveSnapshot, backfillActive, deleteArchived, readArchived, readQuestionnaire,
   writeQuestionnaire } from "../workers/tangram-experiment/src/admin/archive.ts";
 import { summarizeRecord } from "../workers/tangram-experiment/src/admin/summary.ts";
 import { renderDetail, renderList, parseFilter } from "../workers/tangram-experiment/src/admin/render.ts";
@@ -94,26 +94,22 @@ function completed(overrides: Record<string, unknown> = {}) {
     queueState: { pendingHumanEventIds: [], errorCode: null }, ...overrides };
 }
 
-test("a questionnaire can be added later to a trial completed before this change, and refreshes its retention", async () => {
+test("a legacy completed trial accepts a questionnaire and updates its ledger only on submission", async () => {
   const storage = memoryStorage();
   // A pre-archive session: only "active" exists (as written by the first deployed Worker).
   await storage.put({ active: completed() });
   await backfillActive(storage, T0 + DAY);
   const answers = applyQuestionnaire(null, { answers: full(3), submit: true }, NOW).questionnaire;
-  // A draft never extends retention; the submission does (once).
+  // Preserve the original update time on draft saves; a submission updates the ledger.
+  const originalLedger = await storage.get('ledger');
   const draft = applyQuestionnaire(null, { answers: {}, submit: false }, NOW).questionnaire;
   assert.equal(await writeQuestionnaire(storage, RECORD, draft, T0 + 25 * DAY, false), true);
-  assert.deepEqual(await expiredIds(storage, T0 + 30 * DAY + 10 * 60 * 1000, 30), [RECORD], "a draft save does not extend retention");
+  assert.deepEqual(await storage.get('ledger'), originalLedger);
   assert.equal(await writeQuestionnaire(storage, RECORD, answers, T0 + 20 * DAY, true), true);
   assert.deepEqual(await readQuestionnaire(storage, RECORD), answers);
   // The record itself is untouched: names, key and scoring are byte-identical.
   assert.deepEqual(await readArchived(storage, RECORD), completed());
-  const removed = await expireRecords(storage, T0 + 31 * DAY, 30, async () => {});
-  assert.deepEqual(removed, [], "the questionnaire save counts as an update for retention");
-  assert.deepEqual(await expireRecords(storage, T0 + 51 * DAY, 30, async () => {}), [RECORD]);
-  assert.equal(await readQuestionnaire(storage, RECORD), null, "expiry removes the answers with the record");
-  assert.equal(await writeQuestionnaire(storage, RECORD, answers, T0 + 52 * DAY, true), false, "never recreated after expiry");
-  assert.equal([...storage.map.keys()].some((key) => key.includes(RECORD)), false);
+  assert.deepEqual(await storage.get('ledger'), { [RECORD]: T0 + 20 * DAY });
 });
 
 test("questionnaire writes are refused for unknown, malformed or deleted records; deletion removes the answers", async () => {
@@ -185,7 +181,7 @@ test("admin shows the questionnaire escaped in the detail and only its state in 
 
 // --- Session cookie ---------------------------------------------------------------
 
-test("the participant cookie is persistent for the retention period and keeps HttpOnly, Secure and SameSite=Lax (Issue #136)", async () => {
+test("the participant cookie has its own lifetime and keeps HttpOnly, Secure and SameSite=Lax (Issue #136)", async () => {
   const id = "c".repeat(64);
   assert.equal(sessionCookie(id, 30), `tangram_session=${id}; Max-Age=2592000; Path=/; Secure; HttpOnly; SameSite=Lax`);
   assert.match(sessionCookie(id, 7), /Max-Age=604800;/);
@@ -214,7 +210,7 @@ test("Worker routes: one indistinguishable not_found, own records only, and name
   const route = source.slice(source.indexOf("private async recordRoute("), source.indexOf("private state()"));
   assert.match(route, /RECORD_ID\.test\(recordId\) \? await this\.readOwnedArchive\(recordId\)/);
   assert.match(route, /this\.serialized\(async \(\) => \{[\s\S]*writeQuestionnaire\(/);
-  // Only a submission refreshes retention (draft saves never extend a record's life).
+  // Only a submission updates the ledger timestamp; this never sets an expiry.
   assert.match(route, /writeQuestionnaire\(this\.ctx\.storage, recordId, next\.questionnaire, Date\.now\(\),\s+next\.questionnaire\.status === "submitted"\)/);
   assert.doesNotMatch(route, /archiveSnapshot|storage\.put|humanSubmission|scoring/);
   // The review's result is withheld until that record's questionnaire is submitted.
