@@ -2,15 +2,8 @@ name: Dialogue AI runtime tests
 
 on:
   push:
-    paths:
-      - "dialogue-model/runtime/**"
-      - "tests/**"
-      - "package.json"
-      - "package-lock.json"
-      - "tsconfig.runtime.json"
-      - "workers/research-ai-proxy/**"
-      - "workers/tangram-experiment/**"
-      - ".github/workflows/dialogue-runtime-tests.yml"
+    branches:
+      - main
   pull_request:
     paths:
       - "dialogue-model/runtime/**"
@@ -21,6 +14,7 @@ on:
       - "workers/research-ai-proxy/**"
       - "workers/tangram-experiment/**"
       - ".github/workflows/dialogue-runtime-tests.yml"
+      - ".github/workflows/deploy-tangram.yml"
 
 jobs:
   test:

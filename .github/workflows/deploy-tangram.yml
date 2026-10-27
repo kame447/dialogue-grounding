@@ -1,0 +1,108 @@
+name: Deploy Tangram experiment
+
+on:
+  workflow_run:
+    workflows:
+      - Dialogue AI runtime tests
+    types:
+      - completed
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+# Serialize production updates. A superseded commit is skipped just before upload.
+concurrency:
+  group: tangram-experiment-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >-
+      ${{
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_branch == 'main' &&
+        github.event.workflow_run.head_repository.full_name == github.repository
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: production
+      url: https://tangram-grounding-experiment.kame-website.workers.dev/
+    steps:
+      - name: Checkout the commit that passed CI
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - run: npm ci
+
+      - name: Build public assets
+        run: npm run build:tangram
+
+      - name: Skip superseded commits
+        id: freshness
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PASSED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          current_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')"
+          test -n "$current_sha"
+          if [ "$current_sha" = "$PASSED_SHA" ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping superseded commit $PASSED_SHA; latest main is $current_sha"
+          fi
+
+      - name: Deploy only the Tangram Worker
+        if: steps.freshness.outputs.publish == 'true'
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$CLOUDFLARE_ACCOUNT_ID" ] || [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "::error::Configure CLOUDFLARE_ACCOUNT_ID (variable) and CLOUDFLARE_API_TOKEN (secret) in the production environment."
+            exit 1
+          fi
+          npx wrangler deploy --config workers/tangram-experiment/wrangler.jsonc --keep-vars
+
+      - name: Verify public assets match the tested commit
+        if: steps.freshness.outputs.publish == 'true'
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFile } from 'node:fs/promises';
+
+          const origin = 'https://tangram-grounding-experiment.kame-website.workers.dev';
+          const assets = [['/', 'index.html'], ['/app.js', 'app.js'], ['/style.css', 'style.css']];
+          const expected = await Promise.all(assets.map(([, file]) =>
+            readFile('workers/tangram-experiment/dist/' + file)));
+
+          for (let attempt = 1; attempt <= 8; attempt++) {
+            const mismatches = [];
+            for (const [[url, file], bytes] of assets.map((asset, i) => [asset, expected[i]])) {
+              try {
+                const response = await fetch(origin + url, { headers: { 'Cache-Control': 'no-cache' }, signal: AbortSignal.timeout(15000) });
+                if (!response.ok) throw new Error('HTTP ' + response.status);
+                if (!Buffer.from(await response.arrayBuffer()).equals(bytes)) throw new Error('content mismatch');
+              } catch (error) {
+                mismatches.push(file + ': ' + error.message);
+              }
+            }
+            if (mismatches.length === 0) {
+              console.log('All three public assets match the deployed commit.');
+              break;
+            }
+            if (attempt === 8) throw new Error('Production verification failed: ' + mismatches.join('; '));
+            await new Promise((resolve) => setTimeout(resolve, 3000));
+          }
+          NODE

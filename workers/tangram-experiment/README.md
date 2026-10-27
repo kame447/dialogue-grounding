@@ -16,6 +16,12 @@ AIは同一Cloudflareアカウント内のサービスバインディング `AI_
 
 ## デプロイ
 
+`main` へのpush後、GitHub Actionsの `Dialogue AI runtime tests` が成功した場合に限り、`Deploy Tangram experiment` が本番Workerを自動更新します。最新の `main` と一致するコミットだけを配信し、公開したHTML・JS・CSSがビルド成果物と一致することまで検証します。失敗時は自動公開しません。対象は `tangram-grounding-experiment` のみで、研究用AIプロキシは自動更新しません。
+
+GitHubのEnvironment `production` に、変数 `CLOUDFLARE_ACCOUNT_ID` とSecret `CLOUDFLARE_API_TOKEN` が必要です。環境は `main` からのデプロイに限定します。Cloudflareでは対象アカウントに限定したWorkers編集用APIトークンを発行し、GitHubへSecretとして登録してください。トークンをコード・ログに記載しないでください。Secretが未登録の場合、デプロイ処理は失敗して公開環境を変更しません。既存のWorker Secret・環境変数はデプロイ時に保持します。
+
+手動デプロイ時は、次の既存コマンドを利用できます。
+
 ```sh
 npm ci
 npm run build:tangram
