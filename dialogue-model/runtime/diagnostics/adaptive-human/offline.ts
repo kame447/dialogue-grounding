@@ -11,7 +11,9 @@ import {driveParticipant} from './harness.ts';
 import {createPersona, mockHuman} from './simulator.ts';
 import type {HumanInput, HumanOutput} from './simulator.ts';
 
-export async function startOfflineParticipant(outputDirectory: string) {
+/** Optional synthetic controls: the technical-trial option, the assignment label and Jev's stage-one actions in call order. */
+export type OfflineOptions = {technicalTrial?: boolean; strategy?: 'repair-first' | 'bypass-enabled'; jevActions?: readonly string[]};
+export async function startOfflineParticipant(outputDirectory: string, {technicalTrial = false, strategy = 'repair-first', jevActions = []}: OfflineOptions = {}) {
   await mkdir(outputDirectory, {recursive: true, mode: 0o700});
   const directory = await realpath(outputDirectory);
   const seed = 919, modelId = 'synthetic-luna-20261020', trial = createTrialV2({seed}), model = modelView(trial);
@@ -23,24 +25,28 @@ export async function startOfflineParticipant(outputDirectory: string) {
     client: {async complete() { return {text: JSON.stringify(rawMemo), model: modelId}; }}});
   const hit = await warm.get(own);
   const assignment = {schemaVersion: 'base_assignment_config_v1', configId: '11111111-1111-4111-8111-111111111111',
-    revision: 1, strategy: 'repair-first', seed, referenceMemory: true};
+    revision: 1, strategy, seed, referenceMemory: true};
   const config = {schemaVersion: 'participant_jev_config_v1', lunaRequest: {timeoutMs: null, maxCompletionTokens: 1000},
     timeouts: {observationMs: 20000, localMs: 20000, decisionMs: 20000, lunaAttemptMs: 80000, generationMs: 40000, trialMs: 600000},
     cacheDirectory, modelId, memoSha256: researchHash(hit.memo), seed,
-    limits: {lunaCalls: 100, lunaTokens: 100000, lunaPosts: 100, jevPosts: 100, jevUsd: 0.05}};
+    limits: {lunaCalls: 100, lunaTokens: 100000, lunaPosts: 100, jevPosts: 100, jevUsd: 0.05},
+    ...(technicalTrial ? {technicalTrial: {version: 'adaptive_repair_v1'}} : {})};
   const configFile = join(directory, 'participant-jev.json'), baseAssignmentFile = join(directory, 'assignment.json');
   await writeFile(configFile, JSON.stringify(config), {mode: 0o600});
   await writeFile(baseAssignmentFile, JSON.stringify(assignment), {mode: 0o600});
-  let generations = 0, lunaPosts = 0, jevPosts = 0;
+  let generations = 0, lunaPosts = 0, jevPosts = 0, decisions = 0;
   // This transport NEVER calls native fetch, regardless of the requested upstream URL.
   const fetchImpl: typeof fetch = async (_url, init = {}) => {
     if (init.method === 'GET') return Response.json({ready: true, purpose: 'dialogue_turn', provider: 'openai', model: modelId});
     const body = JSON.parse(String(init.body));
     if (body.questions) {
       jevPosts++;
+      const action = 'action' in body.questions ? jevActions[decisions++] ?? 'accept' : 'accept';
+      const targeted = ['propose_name', 'agree', 'confirm', 'repair'].includes(action);
       const answers = Object.fromEntries(Object.entries(body.questions).map(([name, q]: [string, any]) => {
         const choices = Object.keys(q.criteria);
-        const chosen = name === 'action' ? 'accept' : name === 'target' || name === 'human_referent' || name.endsWith('_antecedent') ? 'none' :
+        const chosen = name === 'action' ? action : name === 'target' && targeted ? 'figure_0' :
+          name === 'target' || name === 'human_referent' || name.endsWith('_antecedent') ? 'none' :
           name.startsWith('candidate_') ? 'exclude' : name.endsWith('_act') ? 'assert' : choices[0];
         if (!choices.includes(chosen)) throw new Error('synthetic_jev_fixture_mismatch');
         return [name, {type: 'choice', choice: chosen,
@@ -74,9 +80,9 @@ export async function startOfflineParticipant(outputDirectory: string) {
 }
 
 export async function runOffline(options: {directory: string; chrome?: string; cdpOrigin?: string; maxTurns?: number; personaSeed?: number;
-  simulator?: (input: HumanInput) => HumanOutput; beforeSimulatorTurn?: () => Promise<void>}) {
+  simulator?: (input: HumanInput) => HumanOutput; beforeSimulatorTurn?: () => Promise<void>} & OfflineOptions) {
   if (!options.chrome && !options.cdpOrigin) throw new Error('chrome_or_cdp_required');
-  const offline = await startOfflineParticipant(options.directory);
+  const offline = await startOfflineParticipant(options.directory, options);
   const {directory, appOrigin} = offline;
   const profile = join(directory, 'chrome-profile');
   const chrome = options.cdpOrigin ? undefined : spawn(options.chrome!, ['--headless=new', '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1',
