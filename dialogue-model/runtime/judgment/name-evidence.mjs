@@ -45,10 +45,12 @@ export function humanNamingRecord(reference, turn, publicTurns) {
  * @param {{ judgment: {action: string, targetSlot: string|null, candidateName: string|null},
  *   ledger: Record<string, {status: string, name: string|null}>,
  *   history: ({kind: "human", turn: number, intent: string|null, slots: string[], nameSlot: string|null, name: string|null, nameInHuman: boolean}
- *     | {kind: "ai", aiSeq: number, evidence: boolean, acts: {action: string, targetSlot: string|null, candidateName: string|null, nameShown: boolean}[]})[],
+ *     | {kind: "ai", aiSeq: number, aiText?: string|null, evidence: boolean, acts: {action: string, targetSlot: string|null, candidateName: string|null, nameShown: boolean}[]})[],
  *   publicTurns: {turn: number, speaker: string, text: string}[] }} input
  *   history: oldest first, ending with this turn's provisional human record. A human
  *   record with intent=null is unknown: nothing before it can be verified as unrevoked.
+ *   aiText: the AI event published at aiSeq, from all public events (null: none there). When the
+ *   field is absent, the bounded publicTurns are searched instead.
  * @returns {{ok: boolean, source: "human"|"ai"|null, reason: string|null}}
  */
 export function agreeNameEvidence({ judgment, ledger, history = [], publicTurns = [] }) {
@@ -83,7 +85,7 @@ export function agreeNameEvidence({ judgment, ledger, history = [], publicTurns 
   for (const entry of [...ais].reverse()) {
     const act = entry.acts.find((a) => a.targetSlot === slot && NAME_ACTS.includes(a.action) && normalizeName(a.candidateName) === name);
     if (!act || !entry.evidence || !act.nameShown) continue;
-    const published = publicTurns.find((t) => t.turn === entry.aiSeq && t.speaker === "ai")?.text;
+    const published = Object.hasOwn(entry, "aiText") ? entry.aiText : publicTurns.find((t) => t.turn === entry.aiSeq && t.speaker === "ai")?.text;
     if (typeof published !== "string" || !nameShown(published, name) || revokedAfter(entry.aiSeq)) continue;
     // An acceptance naming a slot/name must match the offer exactly; an unnamed one relies on its slots.
     if (humans.some((h) => h.turn > at(entry) && h.intent === "name_acceptance" &&

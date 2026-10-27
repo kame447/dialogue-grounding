@@ -116,14 +116,21 @@ export function appliedActs(trace) {
   return [judgment, ...(judgment.followUp ? [judgment.followUp] : [])].map(({ action, targetSlot, candidateName }) => ({ action, targetSlot, candidateName }));
 }
 
-/** Committed naming history for the agree source check, oldest first. Legacy traces are unknown. */
+/**
+ * Committed naming history for the agree source check, oldest first. Legacy traces are unknown.
+ * aiText is the AI event actually published at aiSeq, looked up in ALL public events (not the bounded
+ * reference window), so a valid offer never lapses merely by scrolling out of that window.
+ */
 export function committedNameHistory(judgments, events) {
-  return judgments.flatMap((trace) => [
-    { kind: "human", ...(trace.humanNaming ?? { turn: trace.turnIndex, intent: null, slots: [], nameSlot: null, name: null, nameInHuman: false }) },
-    { kind: "ai", aiSeq: trace.publication?.aiSeq ?? ((events.find((event) => event.id === trace.lastEventId)?.seq ?? trace.turnIndex) + 1),
-      evidence: Boolean(trace.publication),
-      acts: trace.publication ? trace.publication.appliedActs.map((act) => ({ ...act })) : appliedActs(trace).map((act) => ({ ...act, nameShown: false })) },
-  ]);
+  return judgments.flatMap((trace) => {
+    const aiSeq = trace.publication?.aiSeq ?? ((events.find((event) => event.id === trace.lastEventId)?.seq ?? trace.turnIndex) + 1);
+    const published = events.find((event) => event.seq === aiSeq && event.speaker === "ai");
+    return [
+      { kind: "human", ...(trace.humanNaming ?? { turn: trace.turnIndex, intent: null, slots: [], nameSlot: null, name: null, nameInHuman: false }) },
+      { kind: "ai", aiSeq, aiText: typeof published?.text === "string" ? published.text : null, evidence: Boolean(trace.publication),
+        acts: trace.publication ? trace.publication.appliedActs.map((act) => ({ ...act })) : appliedActs(trace).map((act) => ({ ...act, nameShown: false })) },
+    ];
+  });
 }
 
 function abortIf(signal) {
