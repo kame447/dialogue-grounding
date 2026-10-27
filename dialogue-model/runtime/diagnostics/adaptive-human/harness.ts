@@ -13,10 +13,15 @@ export type HarnessOptions = {
   beforeSimulatorTurn?: () => Promise<void>;
 };
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-/** A failure as a closed code only (e.g. participant_ui_timeout); any other message is never printed. */
+/** Codes this diagnostic throws itself; any other message, however code-like, is never printed. */
+export const FAILURE_CODES: ReadonlySet<string> = new Set(['browser_evaluation_failed', 'cdp_closed', 'cdp_command_failed',
+  'cdp_command_timeout', 'cdp_connect_failed', 'cdp_connect_timeout', 'chrome_or_cdp_required', 'chrome_start_failed',
+  'chrome_start_timeout', 'invalid_adaptive_human_arguments', 'invalid_adaptive_human_data', 'invalid_adaptive_human_response',
+  'invalid_before_turn_hook', 'live_requires_app_and_cdp', 'live_requires_research_worker', 'participant_ai_error',
+  'participant_ui_timeout', 'synthetic_jev_fixture_mismatch', 'synthetic_record_export_failed']);
 export const failureCode = (error: unknown) => {
   const message = error instanceof Error ? error.message : '';
-  return /^[a-z][a-z0-9_]{0,63}$/u.test(message) ? message : 'unexpected_error';
+  return FAILURE_CODES.has(message) ? message : 'unexpected_error';
 };
 const counts = (state: any) => ({human: state.trial.events.filter((e: any) => e.speaker === 'human').length,
   ai: state.trial.events.filter((e: any) => e.speaker === 'ai').length});

@@ -9,3 +9,9 @@ test('failure codes pass through; any other message is replaced', () => {
   for (const value of [new Error('Bearer secret-token'), new Error('Unexpected token < in JSON at position 0'), new Error(''), 'participant_ui_timeout', null])
     assert.equal(failureCode(value), 'unexpected_error');
 });
+
+test('a code-shaped message outside the closed set is replaced too', () => {
+  // Secrets or model text can look like a code; only registered codes pass.
+  for (const message of ['synthetic_private_token_123', 'synthetic_model_response', 'not_a_registered_code', 'participant_ui_timeout_x'])
+    assert.equal(failureCode(new Error(message)), 'unexpected_error');
+});
