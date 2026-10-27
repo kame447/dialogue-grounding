@@ -45,7 +45,7 @@
     "dialogue-model/runtime/model-identity-contract.ts": "6709323470d7f578d60573e6c87de3a5f47cb1473ad7b42a5adf8152a75398ff",
     "dialogue-model/runtime/model-policy.ts": "2bcb83edb6a6eb4453651eac146a328f9bca1ae7131d973fd225e523b42fcb09",
     "dialogue-model/runtime/naming-error.mjs": "ce43da93189bd097b53840b9e161ac0bee39a307d30ab27d9ab09e6877f3be08",
-    "dialogue-model/runtime/naming-task.mjs": "21de4eb7fd145f677756ccf6d21fa93844220c11909c468f0bf7f60d06ebe6ad",
+    "dialogue-model/runtime/naming-task.mjs": "f8c989a9139a6fe2e2ed89acbb5cb65bb17ab7ccc414196ad03ea66a9d2522c7",
     "dialogue-model/runtime/observation/cache.ts": "8d3a7dadec9a5973984b57818c25a5c18c0eb4a4f342752dd422e83728960a97",
     "dialogue-model/runtime/observation/contract.ts": "92398a7dcf5d38684b555f5f14adc021a8576a29c996f2fafa079674f9a7a2a5",
     "dialogue-model/runtime/observation/observe.ts": "469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad",
