@@ -30,7 +30,9 @@ const strategy = (v: unknown) => v === 'repair-first' || v === 'bypass-enabled';
 function guard<T>(code: BaseAssignmentErrorCode, fn: () => T): T { try { return fn(); } catch { throw new BaseAssignmentError(code); } }
 export function validateBaseAssignmentConfig(value: unknown): BaseAssignmentConfig {
   return guard(value === null || value === undefined ? 'assignment_unconfigured' : 'assignment_invalid', () => {
-    const c = data(value, ['schemaVersion', 'configId', 'revision', 'strategy', 'seed', 'referenceMemory']);
+    const c = data(value);
+    if (!Object.hasOwn(c, 'referenceMemory')) c.referenceMemory = true;
+    data(c, ['schemaVersion', 'configId', 'revision', 'strategy', 'seed', 'referenceMemory']);
     if (c.schemaVersion !== 'base_assignment_config_v1' || typeof c.configId !== 'string' || !V4.test(c.configId) ||
         !positive(c.revision) || !strategy(c.strategy) || !safeInt(c.seed) || typeof c.referenceMemory !== 'boolean') throw new Error('value');
     return Object.freeze({ schemaVersion: 'base_assignment_config_v1', configId: c.configId, revision: c.revision,

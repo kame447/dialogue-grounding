@@ -112,7 +112,7 @@ function abortIf(signal) {
  *   settleLocalTraces(records, installedPrivateState) confirms publication after the queue settles.
  */
 export function createDialogueV2(options) {
- const { client, strategy, image, anchors, judge = null, referenceMemory = false,
+ const { client, strategy, image, anchors, judge = null, referenceMemory = true,
   decisionShadowClient = null, onResearchUpdate = null, activeDecision = null, utteranceStyle = "default",
   groundingShadow = null, onGroundingShadow = null, localGrounding = null, onLocalGroundingTrace = null,
   decisionMode = null, observer = null, jevDecision = null, onJevTurnTrace = null, maxReobservations = 1 }=options;
