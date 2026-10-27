@@ -510,7 +510,11 @@ test("participant state is unchanged and /admin is routed before the participant
   assert.throws(()=>assertStartBeforeInitialize("validateBaseStart(body);await this.initialize()"),"missing slice boundaries fail");
   assert.match(source,/await binding\.onPersist\([\s\S]*?await this\.scheduleExpiry\(\)/);
   assert.match(source,/compareAndSwap:[\s\S]*?this\.serialized\(\(\)=>this\.ctx\.storage\.transaction\(/);
-  for (const call of ["deleteArchived(","backfillActive("]) {
+  // Explicit deletion also removes the owner's embedded copy in the same transaction.
+  const deletion = source.slice(source.indexOf('async adminDelete('), source.indexOf('async alarm()'));
+  assert.match(deletion, /this\.serialized\(\(\) => this\.ctx\.storage\.transaction\(async tx => \{/);
+  assert.match(deletion, /return deleteArchived\(tx, recordId\)/);
+  for (const call of ["backfillActive("]) {
     const uses=source.split(call).length-1,wrapped=source.split("this.serialized(() => "+call).length-1;
     assert.ok(uses>=1&&uses===wrapped,`${call} ${wrapped}/${uses}`);
   }

@@ -151,7 +151,29 @@ export class TangramSession extends DurableObject<Env> {
 
   /** Researcher deletion (authenticated /admin only): removes the record now and tombstones its id. */
   async adminDelete(recordId: string): Promise<boolean> {
-    const existed = await this.serialized(() => deleteArchived(this.ctx.storage, recordId));
+    const existed = await this.serialized(() => this.ctx.storage.transaction(async tx => {
+      const raw = await tx.get<BaseOwnerState>('base:owner:v1');
+      if (raw) {
+        const owner = readOwner(raw, this.ctx.id.toString());
+        let changed = false;
+        for (const entry of Object.values(owner.admissions)) {
+          if (entry?.record?.recordId !== recordId) continue;
+          // Keep the admission/after key: retries must never create a replacement
+          // for this deleted trial. This marker is part of the strict owner schema.
+          entry.record = null;
+          entry.status = 'failed';
+          entry.errorCode = 'record_deleted';
+          changed = true;
+        }
+        if (changed) {
+          owner.revision += 1; // Invalidate any assignment CAS read before deletion.
+          await tx.put({ 'base:owner:v1': readOwner(owner, this.ctx.id.toString()) });
+        }
+      }
+      // Owner copies, archive, questionnaire, active, ledger and tombstone commit
+      // together; a failed write cannot leave a partial deletion behind.
+      return deleteArchived(tx, recordId);
+    }));
     this.forget([recordId]);
     await this.scheduleExpiry();
     return existed;
@@ -232,7 +254,9 @@ export class TangramSession extends DurableObject<Env> {
       return active ? 'registered' : 'absent';
     }
     readOwner(owner, this.ctx.id.toString());
-    const r = owner.activeKey && owner.admissions[owner.activeKey]?.record;
+    const current = owner.activeKey && owner.admissions[owner.activeKey];
+    if (current && current.errorCode === 'record_deleted') return 'expired';
+    const r = current && current.record;
     return r && !await this.baseReadRecord(r.recordId) ? 'expired' : 'registered';
   }
   async registerBaseOwner(): Promise<boolean> {
@@ -259,7 +283,9 @@ export class TangramSession extends DurableObject<Env> {
           const raw = await this.ctx.storage.get<BaseOwnerState>('base:owner:v1');
           if (!raw) return await this.ctx.storage.get(ACTIVE_KEY) ? {kind:'legacy_active'} : {kind:'expired'};
           const owner = readOwner(raw,this.ctx.id.toString());
-          const r = owner.activeKey && owner.admissions[owner.activeKey]?.record;
+          const current = owner.activeKey && owner.admissions[owner.activeKey];
+          if (current && current.errorCode === 'record_deleted') return {kind:'expired'};
+          const r = current && current.record;
           if (r && !await this.baseReadRecord(r.recordId)) return {kind:'expired'};
           return {kind:'state',state:owner};
         },
