@@ -15,8 +15,8 @@ import type { LocalGroundingOptions, LocalOwnImage, LocalOwnAnchor, PublicTurn, 
 import type { ObservationMemo, ObservationObserver, ReobservationResult } from "../observation/contract.ts";
 import { validateObservationMemo, mergeReobservation, observationContextMessages, ObservationError, type ObservationErrorCode,
   OBSERVATION_INITIAL_INSTRUCTIONS, OBSERVATION_TARGETED_INSTRUCTIONS, OBSERVATION_MEMO_VERSION } from "../observation/observe.ts";
-import type { JevDecision, JevDecisionClient, JevDecisionInput, JevObservationRequest, RepairHistoryEntry, HumanReferentEstimate, RepairProspectMaterial, AdaptiveRepairTrial } from "../decision/contract.ts";
-import { validateJevDecision, validateHumanReferentEstimate, validateRepairProspectEstimate, validateRepairProspectMaterial, unknownRepairProspect, JevDecisionError } from "../decision/jev-decision.ts";
+import type { JevDecision, JevDecisionClient, JevDecisionInput, JevObservationRequest, RepairHistoryEntry, HumanReferentEstimate, RepairProspectMaterial, AdaptiveRepairTrial, PublicNameCandidate } from "../decision/contract.ts";
+import { validateJevDecision, validateHumanReferentEstimate, validateRepairProspectEstimate, validateRepairProspectMaterial, unknownRepairProspect, JevDecisionError, JEV_DECISION_INPUT_LIMITS } from "../decision/jev-decision.ts";
 import { prepareLocalGroundingTurn, validateLocalGroundingOptions, findLocalPublicationViolations } from "./local-grounding-turn.ts";
 import type { LocalGroundingResearchRecord, LocalGroundingTrace } from "./local-grounding-turn.ts";
 import { findGuardViolations, rewriteReasons } from "./generation-guard.ts";
@@ -120,7 +120,7 @@ export type JevTurnTrace = {
 };
 type CommittedAct = {
   turnIndex: number; lastEventId: string | null; status: "committed"; judgment: Judgment;
-  generationGuard: Guard; jevTurn: { attemptNumber: number; decision: JevDecision; executed?:ExecutedDecision; intervention?:InterventionTrace; humanReferent?: JevHumanReferentTrace; repairProspect?: RepairProspectMaterial; repairGate?: RepairGate };
+  generationGuard: Guard; jevTurn: { attemptNumber: number; decision: JevDecision; executed?:ExecutedDecision; intervention?:InterventionTrace; humanReferent?: JevHumanReferentTrace; repairProspect?: RepairProspectMaterial; repairGate?: RepairGate; agreeNames?: PublicNameCandidate[] };
   localGrounding: LocalGroundingTrace;
   aiPublic?: { aiSeq: number; textSha256: string };
 };
@@ -195,6 +195,9 @@ const contentKey = (claim: LocalClaimView) => JSON.stringify([claim.aspect, clai
 const INFORMATION_ACTS = new Set(["assert", "agree", "deny", "construe", "name_propose", "name_accept", "name_reject"]);
 const figureInformation = (claim: LocalClaimView) => INFORMATION_ACTS.has(claim.act) && !["question", "progress"].includes(claim.aspect);
 const sameSet = (a: readonly string[], b: readonly string[]) => a.length === b.length && new Set(a).size === a.length && a.every(id => b.includes(id));
+// Shared with the publication rejection below; no new semantic acceptance rule.
+const eligibleAgreeClaim = (c: LocalClaimView) => c.aspect === "name" && c.name !== null && c.targets.length === 1 &&
+  (c.speaker === "human" && c.act === "name_propose" || c.act === "name_accept");
 
 /** Decision 0002: new figure information or strict candidate narrowing only.
  * Difficulty, backchannels, repeated content and record pruning add no progress. */
@@ -291,7 +294,13 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
   const seen=new Set<string>();
   for(const j of s.judgments){
    if(!stateExact(j,['turnIndex','lastEventId','status','judgment','generationGuard','jevTurn','localGrounding',...(Object.hasOwn(j,'aiPublic')?['aiPublic']:[])])||j.status!=='committed'||!Number.isSafeInteger(j.turnIndex)||j.turnIndex<1||!(j.lastEventId===null||typeof j.lastEventId==='string'&&j.lastEventId.length<=160))throw Error();
-   const z=j.jevTurn;if(!stateExact(z,['attemptNumber','decision','executed','intervention',...(Object.hasOwn(z??{},'humanReferent')?['humanReferent']:[]),...(Object.hasOwn(z??{},'repairProspect')?['repairProspect']:[]),...(Object.hasOwn(z??{},'repairGate')?['repairGate']:[])])||!Number.isSafeInteger(z.attemptNumber)||z.attemptNumber<1)throw Error();
+   const z=j.jevTurn;if(!stateExact(z,['attemptNumber','decision','executed','intervention',...(Object.hasOwn(z??{},'humanReferent')?['humanReferent']:[]),...(Object.hasOwn(z??{},'repairProspect')?['repairProspect']:[]),...(Object.hasOwn(z??{},'repairGate')?['repairGate']:[]),...(Object.hasOwn(z??{},'agreeNames')?['agreeNames']:[])])||!Number.isSafeInteger(z.attemptNumber)||z.attemptNumber<1)throw Error();
+   const hasAgreeNames=Object.hasOwn(z,'agreeNames');
+   // Historical evidence retains the candidate catalog, not the original request's public turns.
+   if(hasAgreeNames&&(!Array.isArray(z.agreeNames)||z.agreeNames.length>JEV_DECISION_INPUT_LIMITS.publicNames||z.agreeNames.some((n:any)=>!stateExact(n,['name','figureId','sourceTurn'])||
+     typeof n.name!=='string'||!n.name.trim()||n.name.length>80||!(n.figureId===null||ownSlots.includes(n.figureId))||!Number.isSafeInteger(n.sourceTurn)||n.sourceTurn<1||n.sourceTurn>j.turnIndex)))throw Error();
+   const hasAgreeFor=(ids:readonly string[])=>hasAgreeNames&&z.agreeNames.some((n:PublicNameCandidate)=>ids.some(id=>n.figureId===null||n.figureId===id));
+   const actionLabels=JEV_ACTIONS.filter(a=>a!=='agree'||!hasAgreeNames||hasAgreeFor(ownSlots));
    // v2: closures must be justified by agrees saved before this turn; the prospect was asked over the open entries only.
    if(Object.hasOwn(z,'repairGate')&&!checkRepairGate(z.repairGate,s.repairHistory,s.judgments,j.turnIndex))throw Error();
    if(Object.hasOwn(z,'repairProspect'))validateRepairProspectMaterial(z.repairProspect,Object.hasOwn(z,'repairGate')?inferenceHistory(s.repairHistory,z.repairGate):s.repairHistory,j.turnIndex);
@@ -301,7 +310,7 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
    if(d.decisionKind==='jev_local_test'){
     const es=d.evidence.stages;if(!Array.isArray(es)||es.length!==(['propose_name','agree','confirm','repair'].includes(d.action)?2:1))throw Error();
     persistedEvidence(es[0],'action_target');if(es.length===2)persistedEvidence(es[1],'detail');
-    if(!stateSame(Object.keys(es[0].scores.action??{}).sort(),[...JEV_ACTIONS].sort())||!stateSame(d.evidence.choices,es[0].choices)||!stateSame(d.evidence.scores,es[0].scores)||es[0].choices.action!==d.action||d.evidence.model!==es.at(-1).model||d.evidence.responseId!==es.at(-1).responseId||d.evidence.costUsd!==es.reduce((n:number,e:any)=>n+e.costUsd,0))throw Error();
+    if(!stateSame(Object.keys(es[0].scores.action??{}).sort(),[...actionLabels].sort())||!stateSame(d.evidence.choices,es[0].choices)||!stateSame(d.evidence.scores,es[0].scores)||es[0].choices.action!==d.action||d.evidence.model!==es.at(-1).model||d.evidence.responseId!==es.at(-1).responseId||d.evidence.costUsd!==es.reduce((n:number,e:any)=>n+e.costUsd,0))throw Error();
    }else if(d.evidence.model!==null||Object.keys(d.evidence.choices).length||Object.keys(d.evidence.scores).length||d.evidence.stages?.length)throw Error();
    const original=executionProjection(d);persistedExecution(original,ownSlots);persistedExecution(z.executed,ownSlots);
    const t=z.intervention;if(!stateExact(t,['schemaVersion','policy','disposition','reasonCode','original','rerank','alternative','detailEvidence','failure'])||t.schemaVersion!=='jev_intervention_v1'||t.failure!==null||!stateSame(t.original,original))throw Error();
@@ -313,14 +322,16 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
     // Provenance: Jev's own explicit issue choice in this turn names an earlier repair entry.
     if(!veto||m?.status!=='ok'||m.issue.choice!=='issue'||m.issue.turn!==src?.issueTurn||m.issue.issueId!==src?.issueId||
        !s.repairHistory.some((r:RepairHistoryEntry)=>r.turn===src.issueTurn&&r.issueId===src.issueId&&r.turn<j.turnIndex)||
-       !isOpenIssueRerankRecord(t,d,z.executed,ownSlots,p&&{action:p.action,target:p.target}))throw Error();
+       !isOpenIssueRerankRecord(t,d,z.executed,ownSlots,p&&{action:p.action,target:p.target},hasAgreeNames?z.agreeNames:undefined))throw Error();
     if(['confirm','repair'].includes(z.executed.action))persistedEvidence(t.detailEvidence,'detail');else if(t.detailEvidence!==null)throw Error();
    }
    else if(t.disposition==='rejected'){
     if(!veto||!['defer','move_on'].includes(d.action)||t.reasonCode!=='vetoed_bypass_action'||!stateSame(t.alternative,z.executed)||!stateSame(z.executed.target,original.target)||['defer','move_on'].includes(z.executed.action))throw Error();
     const r=t.rerank;if(!stateExact(r,['policyId','ranking','selected'])||r.policyId!=='saved_action_scores_v1'||!Array.isArray(r.ranking)||!r.ranking.length||!stateSame(r.selected,{action:z.executed.action,target:z.executed.target}))throw Error();
     const actions=new Set<string>();let previous:any=null;for(const a of r.ranking){if(!stateExact(a,['action','score'])||!JEV_ACTIONS.includes(a.action)||['defer','move_on','request_observation'].includes(a.action)||actions.has(a.action)||typeof a.score!=='number'||a.score<0||a.score>1||a.score!==d.evidence?.stages?.[0]?.scores?.action?.[a.action]||previous&&(a.score>previous.score||a.score===previous.score&&JEV_ACTIONS.indexOf(a.action)<JEV_ACTIONS.indexOf(previous.action)))throw Error();actions.add(a.action);previous=a;}
-    if(!actions.has('accept')||!actions.has('close')||r.ranking[0].action!==z.executed.action||actions.has('confirm')!==actions.has('repair')||actions.has('propose_name')!==actions.has('agree')||actions.has('revisit')!==(original.target.kind!=='none')||original.target.kind!=='single'&&(actions.has('agree')||actions.has('propose_name')))throw Error();
+    const restrictedAgree=hasAgreeNames&&original.target.kind==='single'&&!hasAgreeFor([original.target.figureId]);
+    if(!actions.has('accept')||!actions.has('close')||r.ranking[0].action!==z.executed.action||actions.has('confirm')!==actions.has('repair')||
+      (restrictedAgree?actions.has('agree'):actions.has('propose_name')!==actions.has('agree'))||actions.has('revisit')!==(original.target.kind!=='none')||original.target.kind!=='single'&&(actions.has('agree')||actions.has('propose_name')))throw Error();
     const detail=['propose_name','agree','confirm','repair'].includes(z.executed.action);if(detail){persistedEvidence(t.detailEvidence,'detail');}else if(t.detailEvidence!==null)throw Error();
    }else throw Error();
    const e=z.executed,g=j.judgment;if(g.action!==e.action||g.targetSlot!==(e.target.kind==='single'?e.target.figureId:null)||g.candidateName!==e.name||g.discriminatingFeature!==e.feature)throw Error();
@@ -346,7 +357,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   if(adaptive){try{stateJson(options.technicalTrial);if(!stateExact(options.technicalTrial,['version'])||!['adaptive_repair_v1','adaptive_repair_v2'].includes(options.technicalTrial!.version))throw Error();}catch{throw new JevTurnError('invalid_state');}}
   const gated=adaptive&&options.technicalTrial!.version==='adaptive_repair_v2';
   const checkProspectMode=(s:JevPrivateState)=>{
-    if(!adaptive&&s.judgments?.some(j=>Object.hasOwn(j.jevTurn??{},'repairProspect')||j.jevTurn?.intervention?.rerank?.policyId==='saved_action_scores_open_issue_v1'))throw new JevTurnError('invalid_state');
+    if(!adaptive&&s.judgments?.some(j=>Object.hasOwn(j.jevTurn??{},'repairProspect')||Object.hasOwn(j.jevTurn??{},'agreeNames')||j.jevTurn?.intervention?.rerank?.policyId==='saved_action_scores_open_issue_v1'))throw new JevTurnError('invalid_state');
     // Each version restores only its own records: v2 judgments always carry the gate, older ones never do.
     if(s.judgments?.some(j=>Object.hasOwn(j.jevTurn??{},'repairGate')!==gated))throw new JevTurnError('invalid_state');
   };
@@ -484,6 +495,12 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
           name: previousExecution!.name, feature: previousExecution!.feature } : null,
         publicNames: claims.filter(c => c.name !== null && publicTurns.some(t => t.turn === c.sourceTurn && t.text.includes(c.name!)))
           .map(c => ({ name: c.name!, figureId: c.targets.length === 1 ? c.targets[0] : null, sourceTurn: c.sourceTurn })) };
+      if (adaptive) baseInput.agreeNames = claims.filter(eligibleAgreeClaim).flatMap(c => {
+        // A name_accept may inherit a name without repeating its literal text.
+        const source = publicTurns.find(t => t.turn === c.sourceTurn && t.text.includes(c.name!)) ??
+          publicTurns.filter(t => t.text.includes(c.name!)).sort((a, b) => a.turn - b.turn)[0];
+        return source ? [{ name: c.name!, figureId: c.targets[0], sourceTurn: source.turn }] : [];
+      });
       // Estimate the HUMAN utterance's referent once, before any action choice.
       // It is private evidence, never a target selection or a graph operation.
       errorCode = "decision_failed";
@@ -579,8 +596,8 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       // the decision trace; no arbitrary slot is chosen or ledger entry changed.
       const judgment: Judgment = ambiguousDefer ? { ...act, action: "defer" }
         : multipleFeature ? { ...act, action: execution.action as "confirm" | "repair" } : validateJudgment(act, { ownLedger: state.ledger });
-      if (judgment.action === "agree" && !claims.some(c => c.aspect === "name" && c.name === judgment.candidateName && c.targets.length === 1 &&
-        c.targets[0] === judgment.targetSlot && (c.speaker === "human" && c.act === "name_propose" || c.act === "name_accept"))) {
+      if (judgment.action === "agree" && !claims.some(c => eligibleAgreeClaim(c) && c.name === judgment.candidateName &&
+        c.targets[0] === judgment.targetSlot)) {
         record.decisionRejectionCode = "agree_without_public_proposal";
         throw new JevTurnError("invalid_decision");
       }
@@ -636,6 +653,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         graph: applyReferenceUpdate(state.graph, prepared.update, { publicTurns, generationSucceeded: true }) as Graph,
         observationMemo: memo, repairHistory, judgments: [...state.judgments, { turnIndex: latest.seq, lastEventId, status: "committed", judgment,
           generationGuard: structuredClone(record.generationGuard), jevTurn: { attemptNumber, decision, ...(integrated?{executed:execution,intervention:record.intervention as InterventionTrace}:{}), humanReferent: structuredClone(record.humanReferent), ...(record.repairProspect === undefined ? {} : { repairProspect: structuredClone(record.repairProspect) }),
+            ...(adaptive ? { agreeNames: structuredClone(baseInput.agreeNames!) } : {}),
             ...(gate ? { repairGate: structuredClone(gate) } : {}) },
           localGrounding: { ...prepared.trace, attemptNumber }, ...(aiEnabled ? { aiPublic: { aiSeq: aiPending!.aiSeq, textSha256: aiPending!.textSha256 } } : {}) }],
         ...(aiEnabled ? { aiPublic: state.aiPublic } : {}) };
