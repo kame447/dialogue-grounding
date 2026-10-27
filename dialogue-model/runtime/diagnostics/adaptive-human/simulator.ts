@@ -101,7 +101,7 @@ export function mockHuman<T extends HumanInput>(input: ExactInput<T>): HumanOutp
 export const HUMAN_SYSTEM = `あなたは共同命名課題の人間役です。協力的ですが理解に不確かさがあります。
 見える盤面と公開対話だけを使い、短い自然な日本語で答えてください。質問には分かる特徴を一つ答え、
 分からなければ質問や確認を試み、理解できた名前は自然に確認・同意してください。
-混乱、拒否、飛ばす、次へ進むことを必ず起こす台本にはしません。全体が終わったと自分で判断したら done=true。
+混乱や拒否、保留して次へ進むことを無理に演じる必要はありません。全体が終わったと自分で判断したら done=true。
 次の閉じた JSON だけを返してください（余分な key 不可）:
 {"utterance":"公開発話","done":false,"private":{"beliefs":[{"referent":"自分の画面上の位置や公開の特徴","name":null,"understanding":0.3}],"uncertainty":0.7,"question":null,"understandingChange":"unchanged"}}
 understanding/uncertainty は0〜1の主観的な仮値で正答確率ではありません。understandingChange は increased/unchanged/decreased。

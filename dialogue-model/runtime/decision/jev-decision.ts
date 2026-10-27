@@ -66,7 +66,7 @@ const COMMON = [
   "inputBudget.omittedは入力予算による省略件数です。省略された履歴や論点が無い、解決した、合意したとは判断しないでください。",
 ].join("\n");
 const HUMAN_REFERENT_GUIDANCE = "humanReferentは今回の人間発話が指す図形の候補分布で、次の行動の対象targetとは別です。未校正の判断材料であり、最大値を正解としたり、行動の対象で分布を書き換えたりしないでください。unknownは不明のまま扱ってください。";
-const REPAIR_PROSPECT_GUIDANCE = "repairProspectは未校正の見込みと根拠の材料です。正解や閾値ではありません。進捗があれば修復を続け、停滞して別の対象に明確な利点があるときだけ保留や移行を検討し、不確かなら確認してください。";
+const REPAIR_PROSPECT_GUIDANCE = "repairProspectは未校正の見込みと根拠の材料です。正解や閾値ではありません。進捗が見込めれば修復の継続、停滞して別の対象に明確な利点があれば保留や移行、不確かなら確認、といった判断の目安にしてください。";
 const decisionInstructions = (input: JevDecisionInput, prospect = false) => COMMON + (input.humanReferent === undefined ? "" : "\n" + HUMAN_REFERENT_GUIDANCE) + (!prospect || input.repairProspect === undefined ? "" : "\n" + REPAIR_PROSPECT_GUIDANCE);
 const OBSERVE_QUESTIONS = {
   orientation: "指定図形の向き・部分間の方向関係について、公開発話を支える根拠・反証・不明点を確認してください。",
@@ -307,7 +307,7 @@ function prepareRepairProspect(input: JevDecisionInput) {
     prospect: { type: "choice", instructions: instructions + "現在の局所問題の修復を続けた場合の見込みを選んでください。",
       criteria: { progressing: "修復が進む見込みがある。", stalled: "修復が停滞する見込みがある。", uncertain: "見込みは不確か。", no_open_issue: "修復する対象がない。" } },
     basis: { type: "choice", instructions: instructions + "現在の修復の見込みについて主な根拠を一つ選んでください。網羅的な因果説明ではありません。",
-      criteria: { new_information: "新しい情報。", candidate_narrowed: "候補が狭まった。", candidate_widened: "候補が広がった。", repetition: "反復。", partner_uncertain: "相手の不確かさ。", other_figure_benefit: "別の図形を扱う利点。", none: "根拠なし。" } },
+      criteria: { new_information: "新しい情報が得られた。", candidate_narrowed: "候補が狭まった。", candidate_widened: "候補が広がった。", repetition: "同じやり取りの反復。", partner_uncertain: "相手の不確かさ。", other_figure_benefit: "別の図形を扱う利点がある。", none: "該当する根拠なし（修復対象がない場合を含む）。" } },
   };
   return { ...p, issues, payload: { ...p.payload, questions } };
 }

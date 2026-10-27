@@ -147,19 +147,21 @@ for (const previous of ['confirm', 'repair', null] as const) {
   }
 }
 
-test('open issue fallback: absent repairHistory preserves current behavior', async () => {
-    const i = input(null);
-    i.issueSummary = '';
-    i.repairHistory = [];
-    i.repairProspect = material();
+// The decision input boundary rejects an issue choice that names no saved history entry,
+// so these never reach the rerank's defensive fallback.
+for (const [name, edit] of [
+  ['absent repairHistory', (i: BypassAcceptanceInput) => { i.issueSummary = ''; i.repairHistory = []; i.repairProspect = material(); }],
+  ['unmatched turn', (i: BypassAcceptanceInput) => { i.repairProspect = material({choice: 'issue', turn: 2, issueId: 'synthetic-open-issue'}); }],
+  ['unmatched issueId', (i: BypassAcceptanceInput) => { i.repairProspect = material({choice: 'issue', turn: 1, issueId: 'another-issue'}); }],
+] as const) {
+  test(`open issue boundary: ${name} is rejected before any rerank`, async () => {
+    const i = input(name === 'absent repairHistory' ? null : 'confirm');
     const c = client(none, {accept: 0.01}), original = await c.decide(i);
-    const plan = planBypassAcceptance(i, original, repairFirst, openIssueOptions);
-    assert.deepEqual(plan.rerank!.selected, {action: 'accept', target: none});
-    assert.equal(plan.rerank!.policyId, 'saved_action_scores_v1');
-    const result = await applyBypassAcceptance(i, original, repairFirst, c.completeDetail, openIssueOptions);
-    assert.equal(result.executed.action, 'accept');
-    assert.deepEqual(result.executed.target, none);
+    edit(i);
+    await assert.rejects(c.decide(i));
+    assert.throws(() => planBypassAcceptance(i, original, repairFirst, openIssueOptions), {code: 'invalid_input'});
   });
+}
 
 for (const action of ['move_on', 'defer'] as const) {
   test(`open issue: vetoed ${action} uses saved scores and JEV_ACTIONS ties, including zero`, async () => {
@@ -229,8 +231,6 @@ for (const [name, prospect] of [
   ['failed estimate', {status: 'unknown', issue: null, prospect: null, basis: null, scores: null}],
   ['none choice', material({choice: 'none'})],
   ['unknown choice', material({choice: 'unknown'})],
-  ['unmatched turn', material({choice: 'issue', turn: 2, issueId: 'synthetic-open-issue'})],
-  ['unmatched issueId', material({choice: 'issue', turn: 1, issueId: 'another-issue'})],
 ] as const) {
   test(`open issue fallback: ${name} is byte-identical to saved-action rerank`, async () => {
     const i = input();

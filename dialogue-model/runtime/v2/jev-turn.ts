@@ -1,4 +1,4 @@
-import {applyBypassAcceptance,interventionForStrategy,BypassAcceptanceError,BYPASS_ACCEPTANCE_V1_TABLE_SHA256} from '../decision/bypass-acceptance.ts';
+import {applyBypassAcceptance,interventionForStrategy,BypassAcceptanceError,BYPASS_ACCEPTANCE_V1_TABLE_SHA256,isOpenIssueRerankRecord} from '../decision/bypass-acceptance.ts';
 import type {ExecutedDecision,InterventionConfig,InterventionTrace} from '../decision/bypass-acceptance.ts';
 import {JEV_ACTIONS} from '../decision/contract.ts';
 import {validateOwnLedger} from '../judgment/schema.mjs';
@@ -302,6 +302,12 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
    const t=z.intervention;if(!stateExact(t,['schemaVersion','policy','disposition','reasonCode','original','rerank','alternative','detailEvidence','failure'])||t.schemaVersion!=='jev_intervention_v1'||t.failure!==null||!stateSame(t.original,original))throw Error();
    const accept=t.policy==='bypass_acceptance_v1:accept',veto=t.policy==='bypass_acceptance_v1:veto';if(!accept&&!veto)throw Error();
    if(t.disposition==='adopted'){if(t.reasonCode!==(accept?'no_intervention':'not_in_veto_set')||veto&&['defer','move_on'].includes(d.action)||!stateSame(z.executed,original)||[t.rerank,t.alternative,t.detailEvidence].some(v=>v!==null))throw Error();}
+   else if(t.disposition==='rejected'&&t.rerank?.policyId==='saved_action_scores_open_issue_v1'){
+    // adaptive_repair_v1 only; the saved_action_scores_v1 branch below is unchanged.
+    const i=s.judgments.indexOf(j),p=i>0?s.judgments[i-1].jevTurn.executed:null;
+    if(!veto||!isOpenIssueRerankRecord(t,d,z.executed,ownSlots,p&&{action:p.action,target:p.target}))throw Error();
+    if(['confirm','repair'].includes(z.executed.action))persistedEvidence(t.detailEvidence,'detail');else if(t.detailEvidence!==null)throw Error();
+   }
    else if(t.disposition==='rejected'){
     if(!veto||!['defer','move_on'].includes(d.action)||t.reasonCode!=='vetoed_bypass_action'||!stateSame(t.alternative,z.executed)||!stateSame(z.executed.target,original.target)||['defer','move_on'].includes(z.executed.action))throw Error();
     const r=t.rerank;if(!stateExact(r,['policyId','ranking','selected'])||r.policyId!=='saved_action_scores_v1'||!Array.isArray(r.ranking)||!r.ranking.length||!stateSame(r.selected,{action:z.executed.action,target:z.executed.target}))throw Error();
