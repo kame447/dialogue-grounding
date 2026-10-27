@@ -59,11 +59,13 @@ export function parseAiNamesV2(text, slots) {
  *   groundingShadow is a researcher-only, default-off shadow; a restored trial keeps it only if it started with it.
  */
 export async function createNamingTaskV2({
-  client, strategy, seed, referenceMemory = false, runDir = process.env.RESEARCH_RUN_DIR,
+  client, strategy, seed, referenceMemory = true, runDir = process.env.RESEARCH_RUN_DIR,
   createTrial = createTrialV2, scoreTrial = defaultScoreTrial, judge = null, now = () => Date.now(),
   restore = null, onPersist = null, decisionShadowClient = null, activeDecision = null, utteranceStyle = "default",
   groundingShadow = null, localGrounding = null, onLocalGroundingTrace = null, jevResearch = null,
 }) {
+  // Restored trials retain their recorded condition, including legacy memory-off trials.
+  if (restore) referenceMemory = restore.options?.referenceMemory === undefined ? false : restore.options.referenceMemory;
   const style = restore?.options?.utteranceStyle ?? utteranceStyle;
   const jev = selectParticipantJev(restore, jevResearch, { referenceMemory, strategy, style,
     legacy: [localGrounding, activeDecision, decisionShadowClient, groundingShadow] });

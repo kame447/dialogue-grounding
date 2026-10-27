@@ -36,7 +36,7 @@ test('restored pending queue finishes once, without losing an accepted message',
   assert.equal(restored.enqueue({ clientId: 'client-1', text: '候補の説明' }).duplicate, true);
 });
 
-test('v2 naming task restores a trial and its AI judgment history from persisted storage', async () => {
+for (const referenceMemory of [false, true]) test(`v2 restore retains its memory condition and judgment history: ${referenceMemory}`, async () => {
   let latest;
   const client = { async complete(messages) {
     if (messages.some((m) => typeof m.content === 'string' && m.content.includes('判断JSON'))) {
@@ -47,11 +47,11 @@ test('v2 naming task restores a trial and its AI judgment history from persisted
   // An injected judge avoids coupling this recovery test to prompt text.
   const judge = { judge: async () => ({ action: 'accept', targetSlot: null, candidateName: null, discriminatingFeature: null, note: null }) };
   const save = async (record) => { latest = structuredClone(record); };
-  const first = await createNamingTaskV2({ client, judge, strategy: 'repair-first', seed: 35, runDir: null, onPersist: save });
+  const first = await createNamingTaskV2({ client, judge, strategy: 'repair-first', seed: 35, referenceMemory, runDir: null, onPersist: save });
   first.message('鳥に見える', 'trial-message-1');
   await first.whenIdle();
   assert.equal(first.getState().events.length, 3);
-  const restored = await createNamingTaskV2({ client, judge, strategy: 'repair-first', seed: 35, runDir: null, onPersist: save, restore: latest });
+  const restored = await createNamingTaskV2({ client, judge, strategy: 'repair-first', seed: 35, referenceMemory: !referenceMemory, runDir: null, onPersist: save, restore: latest });
   assert.deepEqual(restored.getState().events, first.getState().events);
   assert.deepEqual(restored.researcherView().privateState, first.researcherView().privateState);
   assert.equal(restored.getState().sessionId, first.getState().sessionId);
@@ -59,6 +59,9 @@ test('v2 naming task restores a trial and its AI judgment history from persisted
   await restored.whenIdle();
   assert.equal(restored.getState().events.length, 5);
   assert.equal(latest.queueState.pendingHumanEventIds.length, 0);
+  assert.equal(latest.options.referenceMemory, referenceMemory);
+  assert.equal(Object.hasOwn(latest, 'referenceGraph'), referenceMemory);
+  assert.equal(Boolean(restored.researcherView().privateState.graph), referenceMemory);
 });
 
 const OPENING = 'まず、どの図形から話しましょうか？';

@@ -75,8 +75,10 @@ npm test でローカルHTTP模擬APIとWorker契約を検証します。本物�
 `assignment.json` の合成例です。研究条件として採用された値ではありません。
 
 ```json
-{"schemaVersion":"base_assignment_config_v1","configId":"b5d3bff2-121e-4573-9fc3-f7d6e43e30ce","revision":1,"strategy":"repair-first","seed":73,"referenceMemory":false}
+{"schemaVersion":"base_assignment_config_v1","configId":"b5d3bff2-121e-4573-9fc3-f7d6e43e30ce","revision":1,"strategy":"repair-first","seed":73,"referenceMemory":true}
 ```
+
+6図形の共同命名 v2 は、両方略とも参照メモリを標準で有効にします。`referenceMemory` を省略した設定は `true` として保存します。機能を外した比較では `false` を明示してください。保存済みの試行を再開する場合は、保存時の設定を引き継ぎます。
 
 新しい admission のたびに設定を読みます。ファイルを変えても、既存の試行の割当は変わりません。`POST /api/start` の body は `{"version":2}` だけです。参加者が strategy や seed などを追加すると400になり、試行を差し替えません。公開の `/v1/` と旧 API は404です。対話CLI（`naming-cli.mjs`）は別の入口です。
 
