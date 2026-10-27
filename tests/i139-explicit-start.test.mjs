@@ -72,7 +72,9 @@ async function ui(initial = null, handler) {
   const { root, e } = makeDOM();
   let state = { trial: initial }, timerId = 0;
   const calls = [], timers = new Map();
+  const storage = new Map();
   runInNewContext(script, {
+    sessionStorage: { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: (key) => storage.delete(key) },
     document: { getElementById: (id) => e[id], createElement: (tag) => new Element(tag), createElementNS: (_, tag) => new Element(tag) },
     setTimeout: (callback) => { timers.set(++timerId, callback); return timerId; },
     clearTimeout: (id) => timers.delete(id),
@@ -187,3 +189,41 @@ test("a failed start stays on waiting and never retries without another click", 
   assert.equal(e["start-stage"].hidden, true);
   assert.equal(e.trial.hidden, false);
 });
+
+const actions = [
+  ["/api/message", (e) => { e.utterance.value = "送ろうとした下書き"; e.chat.fire("submit"); }],
+  ["/api/names", (e) => e["confirm-submit"].fire("click")],
+  ["/api/retry", (e) => e["retry-chat"].fire("click")],
+  ["/api/ai-submit", (e) => e.submission.children.find((node) => node.tagName === "button" && node.handlers.click)?.fire("click")],
+];
+for (const [path, fire] of actions) {
+  const initial = () => ({ ...trial(), ...(path === "/api/retry" ? { aiStatus: "error" } : {}),
+    ...(path === "/api/ai-submit" ? { submitted: true, status: "scoring_error" } : {}) });
+  test(`i139 UI ${path} includes the displayed trial's sessionId`, async () => {
+    const { e, calls } = await ui(initial());
+    fire(e); await tick();
+    const sent = calls.find((call) => call.path === path);
+    assert.ok(sent, "actual shipped action dispatched its POST");
+    assert.equal(sent.body.expectedRecordId, "private-session-id");
+  });
+  test(`i139 UI ${path} trial_changed refreshes the trial and preserves unsent text`, async () => {
+    const next = { ...trial(), sessionId: "next-private-trial", events: [{ id: "next-public", speaker: "ai", text: "次の試行の会話" }] };
+    const held = gate();
+    const { e, calls, poll } = await ui(initial(), async ({ path: requested, setState }) => {
+      if (requested !== path) return;
+      await held.wait; setState({ trial: next });
+      return { status: 409, body: { error: "trial_changed" } };
+    });
+    fire(e); await tick();
+    // The user can keep composing while the first message awaits its receipt.
+    e.utterance.value = "さらに入力した下書き";
+    held.release(); await tick();
+    assert.ok(calls.slice(calls.findIndex((call) => call.path === path) + 1).some((call) => call.path === "/api/state"));
+    assert.match(e.history.textContent, /次の試行の会話/u);
+    assert.match(e.utterance.value, /さらに入力した下書き/u);
+    if (path === "/api/message") assert.match(e.utterance.value, /送ろうとした下書き/u);
+    await poll(); await poll();
+    assert.equal(calls.filter((call) => call.path === path).length, 1, "an old-trial action is never replayed into the new trial");
+    assert.doesNotMatch(e.history.textContent, /送ろうとした下書き/u, "the draft is not a message in the new trial");
+  });
+}

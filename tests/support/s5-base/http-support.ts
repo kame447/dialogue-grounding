@@ -16,7 +16,11 @@ export async function web(t:any,extra:any={}){
  const stop=async()=>{if(server){const s=server;server=null;await new Promise<void>((r,j)=>s.close((e:any)=>e?j(e):r()))}};
  t.after(async()=>{await stop();await rm(dir,{recursive:true,force:true})});
  let cookie='';const base=()=>`http://127.0.0.1:${server.address().port}`;
- const request=(path:string,body?:unknown,headers:any={},useCookie=true)=>fetch(base()+path,{headers:{...(useCookie&&cookie?{Cookie:cookie}:{}),...(body!==undefined?{'Content-Type':'application/json'}:{}),...headers},...(body!==undefined?{method:'POST',body:JSON.stringify(body)}:{})});
+ const request=(path:string,body?:unknown,headers:any={},useCookie=true)=>{
+  const input=body&&typeof body==='object'&&!Array.isArray(body)&&['/api/message','/api/names','/api/retry','/api/ai-submit'].includes(path)
+   ?{...body,expectedRecordId:tasks.at(-1)?.getState().sessionId}:body;
+  return fetch(base()+path,{headers:{...(useCookie&&cookie?{Cookie:cookie}:{}),...(body!==undefined?{'Content-Type':'application/json'}:{}),...headers},...(body!==undefined?{method:'POST',body:JSON.stringify(input)}:{})});
+ };
  const page=async()=>{const r=await request('/');const c=r.headers.get('set-cookie');if(c)cookie=c.split(';')[0];return r};
  return{dir,file,storeRoot,inputs,tasks,limiterKeys,options,base,request,page,stop,restart:async()=>{await stop();await start()},get cookie(){return cookie},set cookie(v:string){cookie=v}};
 }

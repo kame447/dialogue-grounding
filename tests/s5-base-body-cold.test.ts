@@ -20,10 +20,10 @@ async function cold(t: any) {
   await open(); let base = 'http://127.0.0.1:' + server.address().port;
   const page = await fetch(base), cookie = page.headers.get('set-cookie')!.split(';')[0];
   const request = (path: string, body: unknown) => fetch(base + path, { method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  assert.equal((await request('/api/start', { version: 2 })).status, 200); assert.equal(counts.factory, 1);
+  const started=await request('/api/start', { version: 2 });assert.equal(started.status, 200);const recordId=(await started.json()).trial.sessionId;assert.equal(counts.factory, 1);
   await close(); counts.factory = counts.restore = 0; await open(); base = 'http://127.0.0.1:' + server.address().port;
   const ownerFile = join(owners, cookie.split('=')[1] + '.owner.json');
-  return { counts, request, bytes: () => readFile(ownerFile, 'utf8') };
+  return { counts, request, recordId, bytes: () => readFile(ownerFile, 'utf8') };
 }
 for (const [label, value] of [['null', null], ['array', []], ['number', 42], ['string', 'synthetic'], ['true', true], ['false', false]] as [string, unknown][]) {
   test('local cold nonobject message rejects before restore: ' + label, async t => {
@@ -38,7 +38,7 @@ for (const path of ['/api/start', '/api/retry', '/api/names', '/api/ai-submit'])
   assert.equal(h.counts.factory, 0); assert.equal(h.counts.restore, 0); assert.equal(h.counts.model, 0);
 });
 test('local valid object field-error control reaches one real cold restore', async t => {
-  const h = await cold(t); const r = await h.request('/api/message', {});
+  const h = await cold(t); const r = await h.request('/api/message', {expectedRecordId:h.recordId});
   assert.equal(r.status, 400); assert.deepEqual(await r.json(), { error: 'invalid_message' });
   assert.equal(h.counts.factory, 1); assert.equal(h.counts.restore, 1); assert.equal(h.counts.model, 0);
 });

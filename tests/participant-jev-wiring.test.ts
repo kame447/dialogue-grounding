@@ -277,7 +277,7 @@ test('J-R1/F1/L1/L2: loopback start/message/reload/final/questionnaire/review ke
     ...(body===undefined?{}:{method:'POST',body:JSON.stringify(body)})});
   const start=await request('/api/start',{version:2});assert.equal(start.status,200);
   const first=await start.json();assert.equal(first.hideStrategy,true);assert.equal(h.upstream.counts().posts,0);
-  const message={text:'形の話を続けます',clientId:'http-duplicate'};
+  const message={text:'形の話を続けます',clientId:'http-duplicate',expectedRecordId:first.trial.sessionId};
   const receipt=await (await request('/api/message',message)).json();await current.whenIdle();
   const repeated=await (await request('/api/message',message)).json();assert.equal(receipt.eventId,repeated.eventId);
   const sends=h.upstream.counts().posts,before=structuredClone(lastRecord);
@@ -289,7 +289,7 @@ test('J-R1/F1/L1/L2: loopback start/message/reload/final/questionnaire/review ke
   assert.deepEqual(lastRecord.jevLedger.sends,before.jevLedger.sends);
   assert.deepEqual(lastRecord.jevTraces,before.jevTraces);
   assert.deepEqual(lastRecord.attempts,before.attempts);
-  const submitted=await request('/api/names',{confirm:true,names:Object.fromEntries(restored.trial.scene.shapes.map((s:any)=>[s.id,null]))});
+  const submitted=await request('/api/names',{confirm:true,expectedRecordId:restored.trial.sessionId,names:Object.fromEntries(restored.trial.scene.shapes.map((s:any)=>[s.id,null]))});
   assert.equal(submitted.status,200);assert.equal((await submitted.json()).trial.status,'completed');
   const id=restored.trial.sessionId;
   const questionnaire=await request('/api/records/'+id+'/questionnaire',{submit:true,answers:Object.fromEntries(QUESTIONNAIRE_FORM.items.map(item=>[item.id,4])),comment:''});

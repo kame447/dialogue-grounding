@@ -171,6 +171,7 @@ export function createBaseParticipantServer(options: Record<string, any> = {}) {
         const c=await e.store.inspect();return {trial:v?lockResult(v,c.questionnaires[v.sessionId as string]??null):null,hideStrategy:true,busy:Boolean(v?.busy)};};
       if(path==='/api/state'||path==='/api/start')return json(200,await state());
       if(!task)throw new NamingTaskError('trial_required');
+      if(typeof input.expectedRecordId!=='string'||input.expectedRecordId!==task.getState().sessionId)return json(409,{error:'trial_changed'});
       if(path==='/api/message'){
         const receipt=task.message(input.text,typeof input.clientId==='string'?input.clientId.slice(0,80):undefined);
         try { await task.persistNow(); } catch { throw new NamingTaskError('record_write_failed'); }

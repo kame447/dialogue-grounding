@@ -431,21 +431,25 @@ export class TangramSession extends DurableObject<Env> {
         return json(200,await this.state());
       }
       if (!this.trial) throw new NamingTaskError("trial_required");
+      const trial = this.trial;
+      if (typeof body!.expectedRecordId !== "string" || body!.expectedRecordId !== trial.getState().sessionId) {
+        return json(409, { error: "trial_changed" });
+      }
       if (pathname === "/api/message") {
         if (typeof body!.text !== "string" || !body!.text.trim() || body!.text.length > 2000) throw new NamingTaskError("invalid_message");
         const clientId = typeof body!.clientId === "string" ? body!.clientId.slice(0, 80) : undefined;
-        const receipt = this.trial.message(body!.text, clientId);
-        await this.trial.persistNow();
-        this.ctx.waitUntil(this.trial.whenIdle().catch(() => {}));
+        const receipt = trial.message(body!.text, clientId);
+        await trial.persistNow();
+        this.ctx.waitUntil(trial.whenIdle().catch(() => {}));
         return json(202, { eventId: receipt.eventId, ...await this.state() as object });
       }
-      if (pathname === "/api/retry") await this.trial.retry();
+      if (pathname === "/api/retry") await trial.retry();
       if (pathname === "/api/names") {
         if (body!.confirm !== true) throw new NamingTaskError("invalid_submission");
-        await this.trial.submitHuman({ names: body!.names });
-        if (!this.trial.getState().aiSubmitted) await this.trial.submitAI();
+        await trial.submitHuman({ names: body!.names });
+        if (!trial.getState().aiSubmitted) await trial.submitAI();
       }
-      if (pathname === "/api/ai-submit") await this.trial.submitAI();
+      if (pathname === "/api/ai-submit") await trial.submitAI();
       return json(200, await this.state());
     } catch (error) {
       return sanitizedError(error);

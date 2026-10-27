@@ -32,6 +32,7 @@ let chatDisconnected = false;
 let checkingChat = false;
 let retryingAI = false;
 let submissionWarning = "";
+let restoreComposerOnChange = false;
 // Presentation/network safeguards only; these never close a research trial or
 // cancel backend generation. A stalled state is refreshed, never auto-retried.
 const CHAT_STALL_MS = 60000;
@@ -51,7 +52,7 @@ function clearDraft() {
   if (reviewing) return;
   try { sessionStorage.removeItem(draftKey); } catch { /* Storage may be disabled. */ }
 }
-function restoreDraft(trial) {
+function restoreDraft(trial, composer = "") {
   if (reviewing) return;
   try {
     const draft = JSON.parse(sessionStorage.getItem(draftKey));
@@ -62,6 +63,7 @@ function restoreDraft(trial) {
     localStage = draft.stage === "names" ? "names" : "chat";
     reviewStage = STAGES.includes(draft.review) ? draft.review : null;
   } catch { /* Ignore unavailable or invalid browser drafts. */ }
+  finally { if (composer) $("utterance").value = composer; }
 }
 const defaultContact = "実験の案内に記載された連絡先へお問い合わせください。";
 const contact = document.querySelector?.('meta[name="participant-contact"]')?.content || defaultContact;
@@ -76,14 +78,19 @@ const errors = {
   invalid_questionnaire: "アンケートの回答を確認してください。すべての質問に回答が必要です。",
   questionnaire_submitted: "このアンケートは提出済みです。",
   trial_not_completed: "試行が完了してからアンケートに回答できます。",
+  trial_changed: "画面を現在の試行に更新したため、直前の操作は送信されませんでした。画面と入力欄を確認し、必要ならもう一度操作してください。",
   not_found: "この試行は表示できません。保存期間が過ぎたか、このブラウザの試行ではありません。",
 };
 async function api(path, body, signal) {
+  if (body !== undefined && ["/api/message", "/api/retry", "/api/names", "/api/ai-submit"].includes(path)) {
+    body = { ...body, expectedRecordId: current?.sessionId };
+  }
   const response = await fetch(path, body === undefined ? (signal ? { signal } : {}) : {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), ...(signal ? { signal } : {}),
   });
   const value = await response.json();
   if (!response.ok) {
+    if (response.status === 409 && value.error === "trial_changed" && body?.expectedRecordId === current?.sessionId) restoreComposerOnChange = true;
     const error = new Error(errors[value.error] || "操作を完了できませんでした。" + contact);
     error.status = response.status;
     error.code = value?.error;
@@ -428,7 +435,15 @@ function canStart() {
 }
 function render(state) {
   const trial = state.trial;
-  if (trialIdentity(trial) !== trialIdentity(current)) { generation++; resetLocal(); if (trial) restoreDraft(trial); }
+  if (trialIdentity(trial) !== trialIdentity(current)) {
+    // A poll can observe the switch before the in-flight POST returns 409.
+    // Keep unconfirmed text editable; names restore only for their own trial.
+    const composer = (restoreComposerOnChange || sending || working) && !reviewing ? [...pending.filter((item) => item.status !== "accepted").map((item) => item.text), $("utterance").value].filter(Boolean).join("\n") : "";
+    restoreComposerOnChange = false;
+    generation++; resetLocal();
+    if (trial) restoreDraft(trial, composer);
+    else $("utterance").value = composer;
+  }
   // Events are append-only; a state response started earlier must not remove newer events.
   if (trial && trialIdentity(current) === trialIdentity(trial) && (trial.events?.length ?? 0) < (current?.events?.length ?? 0)) return;
   current = trial; serverBusy = Boolean(state.busy);
@@ -548,8 +563,9 @@ async function drainMessages() {
         item.status = "accepted";
         if (state?.trial !== undefined) render(state);
         else await refreshState();
-      } catch {
+      } catch (error) {
         if (epoch !== generation) break;
+        if (error.code === "trial_changed") $("notice").textContent = error.message;
         if (pending.includes(item)) item.status = "failed";
         renderHistory(); setControls();
         // The server may already have accepted it. Refresh without resending.
