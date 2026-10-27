@@ -100,6 +100,7 @@ function abortIf(signal) {
  *   onLocalGroundingTrace?: ((record: import('./local-grounding-turn.ts').LocalGroundingResearchRecord) => unknown) | null,
  *   decisionMode?: 'jev' | null, observer?: import('../observation/contract.ts').ObservationObserver | null,
  *   jevDecision?: import('../decision/contract.ts').JevDecisionClient | null, maxReobservations?: number, interventionPolicy?: import('./research-profile.ts').InterventionPolicyReference, decisionTimeoutMs?:number,
+ *   technicalTrial?: import('../decision/contract.ts').AdaptiveRepairTrial,
  *   onJevTurnTrace?: ((record: import('./jev-turn.ts').JevTurnTrace) => unknown) | null }} options
  * @returns {{slots: readonly string[], initialPrivateState(): any,
  *   initializePrivateState?: (options?: {signal?: AbortSignal}) => Promise<import('./jev-turn.ts').JevPrivateState>,
@@ -153,9 +154,10 @@ export function createDialogueV2(options) {
     if (!referenceMemory || !localGrounding) throw new Error("Jev decision mode requires local reference memory");
     if (activeDecision || decisionShadowClient || groundingShadow) throw new Error("Jev decision mode cannot combine legacy decision paths");
     return createJevTurnRuntime({ client, ownImage, ownAnchors, observer, jevDecision, localGrounding, ...(integrated?{intervention,decisionTimeoutMs}:{}),
+      ...(Object.hasOwn(options,'technicalTrial')?{technicalTrial:options.technicalTrial}:{}),
       onJevTurnTrace, onLocalGroundingTrace, maxReobservations,
       generation: { task: TASK_INSTRUCTIONS_V2, instructions: GENERATOR_INSTRUCTIONS_V2,
-        ...(concise ? { concise: CONCISE_INSTRUCTIONS_V2 } : {}), actionScope: ACTION_SCOPE_V2,
+        ...(concise ? { concise: CONCISE_INSTRUCTIONS_V2 } : {}), actionScope: options.technicalTrial ? { ...ACTION_SCOPE_V2, repair: "公開上の食い違いを局所的に確かめ直す・直す。自分の取り違えや決めた名前の訂正のときはそう明示する" } : ACTION_SCOPE_V2,
         final: FINAL_INSTRUCTIONS_V2, timeoutMs: GENERATION_TIMEOUT_MS } });
   }
   const dialogueJudge = judge ?? createLunaJudge(client);
