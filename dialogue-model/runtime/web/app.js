@@ -70,11 +70,11 @@ const defaultContact = "実験の案内に記載された連絡先へお問い�
 const contact = document.querySelector?.('meta[name="participant-contact"]')?.content || defaultContact;
 const errors = {
   trial_unavailable: "試行を開始できませんでした。" + contact,
-  reception_not_approved: "開始の案内があるまでお待ちください。",
-  protocol_unconfigured: "開始の案内があるまでお待ちください。",
-  reception_conflict: "状態が変わりました。画面を確認してください。",
+  reception_not_approved: "この画面を開いたまま、開始の案内があるまでお待ちください。",
+  protocol_unconfigured: "この画面を開いたまま、開始の案内があるまでお待ちください。",
+  reception_conflict: "画面が更新されたため、直前の操作を完了できませんでした。現在の表示を確認し、必要ならもう一度操作してください。",
   reception_unavailable: "受付を確認できませんでした。" + contact,
-  reception_finished: "すべての課題が完了しました。",
+  reception_finished: "すべての課題が完了しました。ご協力ありがとうございました。",
   ai_unavailable: "AIに接続できませんでした。会話履歴を確認してください。送り直すには、そのメッセージの「再送」を押してください。メッセージは自動では再送されません。",
   scoring_error: "採点でエラーが発生しました。提出内容は保存されています。採点を再試行できます。",
   invalid_ai_submission: "AIが提出した名前を確認できませんでした。" + contact,
@@ -439,8 +439,8 @@ function renderStartStage(state) {
   $("reception-number").hidden = !reception?.number;
   $("reception-number").textContent = reception?.number ? `受付番号 ${reception.number}` : "";
   $("start-message").textContent = !reception ? "案内を確認してから、スタートを押してください。"
-    : next ? "" : reception.status === "ready" ? "準備ができました。スタートを押してください。"
-      : reception.status === "finished" ? "すべての課題が完了しました。" : "開始の案内があるまでお待ちください。";
+    : next ? "前の課題が終わったら、「次の課題を開始」を押してください。" : reception.status === "ready" ? "準備ができました。スタートを押してください。"
+      : reception.status === "finished" ? "すべての課題が完了しました。ご協力ありがとうございました。" : "この画面を開いたまま、開始の案内があるまでお待ちください。";
 }
 function canStart() {
   return startReady && (!current || trialCompleted() && reception?.status === "in_progress") && !working && !serverBusy && !reviewing;
