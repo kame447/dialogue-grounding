@@ -184,9 +184,9 @@ test("admin shows the questionnaire escaped in the detail and only its state in 
 
 // --- Session cookie ---------------------------------------------------------------
 
-test("the participant cookie is persistent for the retention period and keeps HttpOnly, Secure and SameSite=Strict", async () => {
+test("the participant cookie is persistent for the retention period and keeps HttpOnly, Secure and SameSite=Lax (Issue #136)", async () => {
   const id = "c".repeat(64);
-  assert.equal(sessionCookie(id, 30), `tangram_session=${id}; Max-Age=2592000; Path=/; Secure; HttpOnly; SameSite=Strict`);
+  assert.equal(sessionCookie(id, 30), `tangram_session=${id}; Max-Age=2592000; Path=/; Secure; HttpOnly; SameSite=Lax`);
   assert.match(sessionCookie(id, 7), /Max-Age=604800;/);
   assert.throws(() => sessionCookie("x;Domain=evil", 30));
   assert.equal(sessionId(`a=b; tangram_session=${id}`), id);
