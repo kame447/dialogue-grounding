@@ -54,7 +54,7 @@ const option = (value: string, current: string, label = value) =>
 const ms = (value: number | null | undefined) => typeof value === "number" ? `${Math.round(value)}` : "—";
 
 export function renderList(summaries: AdminSummary[], filter: ListFilter, next: string | null, audit: AuditEntry[],
-  retentionDays: number, deleted = false): string {
+  _retentionDays?: number, deleted = false): string {
   const query = (extra: Record<string, string>) => "?" + new URLSearchParams({ status: filter.status, error: filter.error, memory: filter.memory, ...extra });
   const rows = summaries.map((s) => `<tr><td><a href="/admin/record/${escapeHtml(s.recordId)}">${escapeHtml(s.recordId.slice(0, 8))}</a></td>
 <td>${escapeHtml(s.updatedAt)}</td><td>${escapeHtml(s.strategy)}</td><td>${s.referenceMemory ? "ON" : "OFF"}</td><td>${escapeHtml(s.utteranceStyle)}</td>
@@ -69,7 +69,7 @@ export function renderList(summaries: AdminSummary[], filter: ListFilter, next: 
 <label>参照メモリ <select name="memory">${option("any", filter.memory, "すべて")}${option("on", filter.memory, "ON")}${option("off", filter.memory, "OFF")}</select></label>
 <button>絞り込み</button></form>
 ${deleted ? `<p class="bad">記録を削除しました。</p>` : ""}
-<p class="muted">試行ごとの一覧（同じブラウザの過去の試行も含む）。更新が新しい順に ${PAGE_LIMIT_NOTE}。絞り込みはこのページ内に適用します。記録は最終更新から ${retentionDays} 日後に自動削除されます。</p>
+<p class="muted">試行ごとの一覧（同じブラウザの過去の試行も含む）。更新が新しい順に ${PAGE_LIMIT_NOTE}。絞り込みはこのページ内に適用します。記録は自動では削除されません（手動での削除のみ）。</p>
 ${summaries.length ? `<div class="wrap"><table>${head(["記録", "更新", "方略", "メモリ", "発話様式", "状態", "AI", "人/AI発話", "確定/試行", "要求エラー", "エラーコード", "応答 p50/p95 ms", "最遅段階", "仮アンケート"])}${rows}</table></div>` : `<p class="muted">該当なし</p>`}
 ${next ? `<p><a href="/admin${escapeHtml(query({ after: next }))}">次のページ →</a></p>` : ""}
 <h2>削除の記録（内容なし）</h2>${table(["削除日時", "理由", "記録IDのハッシュ"], audit.map((a) => [a.deletedAt, a.reason, a.recordHash]))}`);
@@ -101,7 +101,7 @@ ${latency.turns.length ? `<h2>ターン別の遅延</h2>${table(["AI seq", "要�
 }
 
 /** Full researcher view of one stored record: public events, judged acts, traces, requests and scoring. */
-export function renderDetail(record: unknown, summary: AdminSummary, latency: LatencySummary, retentionDays: number): string {
+export function renderDetail(record: unknown, summary: AdminSummary, latency: LatencySummary, _retentionDays?: number): string {
   const r = isPlain(record) ? record : {};
   const events = list(r.events).filter(isPlain).map((e) => [e.seq, e.speaker, e.at, e.origin ?? "", e.text]);
   const judgments = list(r.judgments).filter(isPlain).map((j) => [j.turnIndex, j.judgment?.action, j.judgment?.targetSlot,
@@ -135,7 +135,7 @@ ${grounding.length ? `<h2>根拠の影判定（Jev 2軸・研究用・未校正�
 <h2>提出と採点</h2>${table(["項目", "値"], [["人間の提出", r.humanSubmission ?? null], ["AIの提出", r.aiSubmission ?? null],
   ["診断", r.diagnostics ?? null], ["採点", r.scoring ?? null]])}
 ${questionnaireSection(r.questionnaire)}
-<h2>削除</h2><p class="muted">この記録は最終更新から ${retentionDays} 日後に自動削除されます。今すぐ削除する場合は、記録IDを確認欄に入力してください。削除は取り消せません。</p>
+<h2>削除</h2><p class="muted">この記録は自動では削除されません。削除する場合は、記録IDを確認欄に入力してください（仮アンケートの回答も削除されます）。削除は取り消せません。</p>
 <form method="post" action="/admin/record/${escapeHtml(summary.recordId)}/delete"><label>確認（記録ID） <input name="confirm" autocomplete="off" required></label>
 <button>この記録を削除</button></form>`);
 }

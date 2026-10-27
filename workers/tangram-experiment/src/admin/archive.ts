@@ -1,14 +1,13 @@
-// Per-trial archive and retention inside each session Durable Object.
+// Per-trial archive inside each session Durable Object. Records do not expire.
 //   "active"            the trial this browser resumes
 //   "record:<recordId>" every trial's latest record, so a new trial never erases an earlier log
-//   "ledger"            recordId -> last update (ms), which drives retention
+//   "ledger"            recordId -> last update (ms)
 //   "questionnaire:<recordId>"  the participant's provisional questionnaire for that trial;
-//                       deleted together with its record (expiry or researcher deletion)
+//                       deleted together with its record (researcher deletion)
 //   "tombstones"        recordIds deleted by a researcher (ids only), so a still-running
 //                       trial cannot write its record back after deletion
-// Records expire RECORD_RETENTION_DAYS after their last update; nothing is deleted
-// earlier. Pure over a minimal storage interface with an injected clock, so the
-// Durable Object only wires it up (alarm, index notification).
+// Old expiry helpers remain for compatibility tests only; the Worker never calls
+// them. RECORD_RETENTION_DAYS now configures only the session cookie's Max-Age.
 
 export type ArchiveStorage = {
   get<T = unknown>(key: string): Promise<T | undefined>;
@@ -92,10 +91,9 @@ export async function readQuestionnaire<T = unknown>(storage: ArchiveStorage, re
 }
 
 /**
- * Stores the questionnaire beside its record. Only a submission (refreshRetention)
- * counts as an update for retention; draft saves never extend the record's life,
- * and a submission happens once. Refused (false) when the record is missing,
- * expired or deleted, so answers never outlive it.
+ * Stores the questionnaire beside its record. A submission (refreshRetention)
+ * updates the ledger timestamp for compatibility; no timestamp expires records.
+ * Refused (false) when the record or ledger is missing or the id is tombstoned.
  */
 export async function writeQuestionnaire(storage: ArchiveStorage, recordId: string, questionnaire: unknown, now: number,
   refreshRetention: boolean): Promise<boolean> {

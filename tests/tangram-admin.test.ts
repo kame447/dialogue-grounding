@@ -264,7 +264,9 @@ test("deleting removes the record and its index entry, writes a content-free aud
   assert.equal((await listAudit(index)).length, 1);
 });
 
-// --- Archive and retention (fake clock) ----------------------------------
+// --- Archive compatibility helpers (fake clock) --------------------------
+// Expiry helpers below are exercised explicitly for legacy compatibility only.
+// Production never invokes them; i140-no-auto-delete.test.ts covers that boundary.
 
 test("RECORD_RETENTION_DAYS: integer 1-365, otherwise 30", () => {
   assert.equal(retentionDays("30"), 30); assert.equal(retentionDays("1"), 1); assert.equal(retentionDays("365"), 365); assert.equal(retentionDays(7), 7);
@@ -335,28 +337,17 @@ test("restore after eviction keeps the archive; a legacy active-only session is 
   assert.equal(await backfillActive(odd, T0), null);
 });
 
-test("a legacy active-only session older than retention is backfilled, then expired before restore: never resumed, never listed", async () => {
+test("a legacy active-only session older than 30 days is backfilled and indexed without deletion", async () => {
   const session = memoryStorage(), index = memoryStorage();
   await session.put({ [ACTIVE_KEY]: record({ recordId: SECOND, updatedAt: iso(T0 - 45 * DAY) }) });
-  // Same order as TangramSession.initialize(): backfill -> expiry -> schedule -> restore.
+  // Same order as TangramSession.initialize(): backfill -> cancel alarm -> restore/index.
   assert.equal((await backfillActive(session, T0))?.recordId, SECOND);
-  const removed = await expireRecords(session, T0, 30, async (ids) => { await removeSummaries(index, ids, "retention", T0); });
-  assert.deepEqual(removed, [SECOND]);
-  assert.equal(await session.get(ACTIVE_KEY), undefined, "nothing left to restore");
-  assert.equal(await readArchived(session, SECOND), null);
-  assert.equal(await nextExpiry(session, 30), null);
-  assert.equal(await getSummary(index, SECOND), null);
-  assert.equal(await upsertSummary(index, summaryOf(record({ recordId: SECOND }))), false, "never indexed again");
-  assert.equal(await archiveSnapshot(session, record({ recordId: SECOND, updatedAt: iso(T0) }), new Set(), T0), false,
-    "a late write cannot recreate an expired record");
-  assert.deepEqual((await listAudit(index)).map((a) => a.reason), ["retention"]);
-  // Inside the window it is kept and restorable.
-  const fresh = memoryStorage();
-  await fresh.put({ [ACTIVE_KEY]: record({ recordId: FIRST, updatedAt: iso(T0 - 10 * DAY) }) });
-  await backfillActive(fresh, T0);
-  assert.deepEqual(await expireRecords(fresh, T0, 30, async () => {}), []);
-  assert.equal((await fresh.get<any>(ACTIVE_KEY)).recordId, FIRST);
-  assert.equal(await nextExpiry(fresh, 30), T0 + 20 * DAY);
+  assert.equal((await session.get<any>(ACTIVE_KEY)).recordId, SECOND);
+  const restored = await readArchived(session, SECOND);
+  assert.ok(restored);
+  assert.equal(await upsertSummary(index, summaryOf(restored as ReturnType<typeof record>)), true);
+  assert.equal((await getSummary(index, SECOND))?.recordId, SECOND);
+  assert.deepEqual(await listAudit(index), []);
 });
 
 test("a stale ordering key never shows a duplicate or a deleted row", async () => {
@@ -439,7 +430,9 @@ test("every record value is escaped in the list and detail pages", () => {
     [{ recordHash: XSS, deletedAt: XSS, reason: "admin" }], 30);
   assert.doesNotMatch(list, /<script/i);
   assert.match(list, new RegExp(`href="/admin/record/${RECORD}"`));
-  assert.match(list, /30 日後に自動削除/);
+  assert.match(list, /自動では削除されません（手動での削除のみ）/);
+  assert.match(html, /この記録は自動では削除されません。/);
+  assert.doesNotMatch(list + html, /日後に自動削除/);
 });
 
 test("a failed turn's sanitized cause (v2 errorCode/errorPhase/errorStatus/errorElapsedMs) is shown and indexed as a code", () => {
@@ -479,7 +472,7 @@ test("the admin page uses the shared latency summary, which is text-free and nev
 
 // --- Configuration and participant boundary -------------------------------
 
-test("wrangler keeps migration v1 unchanged, adds AdminIndex under v2, sets 30-day retention and holds no admin secret", async () => {
+test("wrangler keeps migration v1 unchanged, adds AdminIndex under v2, sets 30-day cookie lifetime and holds no admin secret", async () => {
   const raw = await readFile(new URL("../workers/tangram-experiment/wrangler.jsonc", import.meta.url), "utf8");
   const config = JSON.parse(raw.split("\n").filter((line) => !line.trim().startsWith("//")).join("\n"));
   assert.deepEqual(config.migrations, [{ tag: "v1", new_sqlite_classes: ["TangramSession"] }, { tag: "v2", new_sqlite_classes: ["AdminIndex"] }]);
@@ -496,14 +489,15 @@ test("participant state is unchanged and /admin is routed before the participant
   // Participant state is the live state, with only the result withheld until the questionnaire is submitted.
   assert.match(source, /private async state\(\): Promise<unknown> \{\n\s+const live = this\.trial\?\.getState\(\) \?\? null;\n\s+const trial = live && typeof live\.sessionId === "string"\n\s+\? lockResult\(live, await readQuestionnaire\(this\.ctx\.storage, live\.sessionId\)\) : live;\n\s+return \{ trial, hideStrategy: true, busy: Boolean\(live\?\.busy\) \};/);
   assert.ok(source.indexOf("isAdminPath(url.pathname)") < source.indexOf('url.pathname.startsWith("/api/")'));
-  // initialize(): backfill -> expiry -> schedule -> restore (audit M2).
+  // initialize(): backfill -> cancel old alarm -> restore (no expiry).
   const init = source.slice(source.indexOf("private async initialize()"));
-  const order = ["backfillActive(", "await this.runExpiry();", "await this.scheduleExpiry();", "const record = await this.ctx.storage.get<StoredTrial>(ACTIVE_KEY)",
+  const order = ["backfillActive(", "await this.scheduleExpiry();", "const record = await this.ctx.storage.get<StoredTrial>(ACTIVE_KEY)",
     "this.registerSummary(record)", "this.createTrial("].map((needle) => init.indexOf(needle));
   assert.ok(order.every((at) => at >= 0) && order.every((at, i) => i === 0 || at > order[i - 1]), String(order));
-  // Persist refreshes the alarm; every archive mutation is serialized (audit L4).
+  assert.doesNotMatch(source, /runExpiry|expireRecords|nextExpiry|setAlarm\(/);
+  // Persist cancels old alarms; every archive mutation is serialized (audit L4).
   assert.match(source, /archiveSnapshot\(this\.ctx\.storage, snapshot, this\.retired, Date\.now\(\)\)\)\) return;\n\s+await this\.scheduleExpiry\(\);/);
-  for (const call of ["archiveSnapshot(", "deleteArchived(", "expireRecords(", "backfillActive("]) {
+  for (const call of ["archiveSnapshot(", "deleteArchived(", "backfillActive("]) {
     const uses = source.split(call).length - 1;
     const wrapped = source.split("this.serialized(() => " + call).length - 1;
     assert.ok(uses >= 1 && uses === wrapped, `${call} ${wrapped}/${uses}`);
