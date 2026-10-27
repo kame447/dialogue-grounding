@@ -158,7 +158,7 @@
       }
     },
     "run": {
-      "runId": "parity-df10b8ca-d0bc-4cb3-9f91-357f4ffae1f2",
+      "runId": "parity-84a5e229-d8c8-4ae6-a3dd-c89a1ad95f7c",
       "plannedMappingVersion": 1,
       "manifest": {
         "id": "synthetic-wiring",
@@ -231,7 +231,7 @@
         "scheme": "complete_instruction_source_sha256",
         "files": {
           "v2/dialogue-v2.mjs": "8581a6de609249967b290aad18bab9d09fc7304165779eab8164bdbb06869363",
-          "v2/jev-turn.ts": "86304f2d829d003016bb294aa8b6ee6bd9580b02a5420f4197bf5af31d7610d8",
+          "v2/jev-turn.ts": "9cd12e867af95e6edfa77063d5674da27651c9430a694ddcb8410e905a917da1",
           "v2/generation-guard.ts": "57c4034aff8d9a7a9c3d35920dc76050fb2cff3dd6a8ab86fc91657ca91e392e",
           "judgment/instructions.mjs": "aa8b84ba60f10780328521457fc3abf4bfaa6db6efd32a725924075a9584f884",
           "observation/observe.ts": "469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad",
@@ -262,7 +262,7 @@
       "coverage": "not_measured_by_wiring_harness"
     },
     "summary": {
-      "runId": "parity-df10b8ca-d0bc-4cb3-9f91-357f4ffae1f2",
+      "runId": "parity-84a5e229-d8c8-4ae6-a3dd-c89a1ad95f7c",
       "manifestSha256": "bebb4da64e2dba993696edc8cb515c0f2ed1017ff8b0367bc50249dff33dac48",
       "execution": "mock",
       "profile": {
@@ -479,7 +479,7 @@
     },
     "evidence": {
       "version": 1,
-      "runId": "parity-df10b8ca-d0bc-4cb3-9f91-357f4ffae1f2",
+      "runId": "parity-84a5e229-d8c8-4ae6-a3dd-c89a1ad95f7c",
       "normalizedEnvelopeFields": [
         "label",
         "runId",
@@ -667,7 +667,7 @@
       }
     },
     "run": {
-      "runId": "parity-8ad4462e-8aa6-4739-bbeb-842d5a5f00b8",
+      "runId": "parity-e12f5b72-eb6f-4b74-a656-cef4a694b9a3",
       "plannedMappingVersion": 1,
       "manifest": {
         "id": "synthetic-wiring",
@@ -740,7 +740,7 @@
         "scheme": "complete_instruction_source_sha256",
         "files": {
           "v2/dialogue-v2.mjs": "8581a6de609249967b290aad18bab9d09fc7304165779eab8164bdbb06869363",
-          "v2/jev-turn.ts": "86304f2d829d003016bb294aa8b6ee6bd9580b02a5420f4197bf5af31d7610d8",
+          "v2/jev-turn.ts": "9cd12e867af95e6edfa77063d5674da27651c9430a694ddcb8410e905a917da1",
           "v2/generation-guard.ts": "57c4034aff8d9a7a9c3d35920dc76050fb2cff3dd6a8ab86fc91657ca91e392e",
           "judgment/instructions.mjs": "aa8b84ba60f10780328521457fc3abf4bfaa6db6efd32a725924075a9584f884",
           "observation/observe.ts": "469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad",
@@ -771,7 +771,7 @@
       "coverage": "not_measured_by_wiring_harness"
     },
     "summary": {
-      "runId": "parity-8ad4462e-8aa6-4739-bbeb-842d5a5f00b8",
+      "runId": "parity-e12f5b72-eb6f-4b74-a656-cef4a694b9a3",
       "manifestSha256": "bebb4da64e2dba993696edc8cb515c0f2ed1017ff8b0367bc50249dff33dac48",
       "execution": "mock",
       "profile": {
@@ -960,7 +960,7 @@
     },
     "evidence": {
       "version": 1,
-      "runId": "parity-8ad4462e-8aa6-4739-bbeb-842d5a5f00b8",
+      "runId": "parity-e12f5b72-eb6f-4b74-a656-cef4a694b9a3",
       "normalizedEnvelopeFields": [
         "label",
         "runId",
@@ -1123,7 +1123,7 @@
       }
     },
     "run": {
-      "runId": "parity-8d07fbbd-96fe-47f1-9e0b-d6ad1c78bf81",
+      "runId": "parity-7bc376ed-b9c6-4c8e-99ef-c9779c1cf1d2",
       "plannedMappingVersion": 1,
       "manifest": {
         "id": "synthetic-wiring",
@@ -1196,7 +1196,7 @@
         "scheme": "complete_instruction_source_sha256",
         "files": {
           "v2/dialogue-v2.mjs": "8581a6de609249967b290aad18bab9d09fc7304165779eab8164bdbb06869363",
-          "v2/jev-turn.ts": "86304f2d829d003016bb294aa8b6ee6bd9580b02a5420f4197bf5af31d7610d8",
+          "v2/jev-turn.ts": "9cd12e867af95e6edfa77063d5674da27651c9430a694ddcb8410e905a917da1",
           "v2/generation-guard.ts": "57c4034aff8d9a7a9c3d35920dc76050fb2cff3dd6a8ab86fc91657ca91e392e",
           "judgment/instructions.mjs": "aa8b84ba60f10780328521457fc3abf4bfaa6db6efd32a725924075a9584f884",
           "observation/observe.ts": "469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad",
@@ -1227,7 +1227,7 @@
       "coverage": "not_measured_by_wiring_harness"
     },
     "summary": {
-      "runId": "parity-8d07fbbd-96fe-47f1-9e0b-d6ad1c78bf81",
+      "runId": "parity-7bc376ed-b9c6-4c8e-99ef-c9779c1cf1d2",
       "manifestSha256": "bebb4da64e2dba993696edc8cb515c0f2ed1017ff8b0367bc50249dff33dac48",
       "execution": "mock",
       "profile": {
@@ -1436,7 +1436,7 @@
     },
     "evidence": {
       "version": 1,
-      "runId": "parity-8d07fbbd-96fe-47f1-9e0b-d6ad1c78bf81",
+      "runId": "parity-7bc376ed-b9c6-4c8e-99ef-c9779c1cf1d2",
       "normalizedEnvelopeFields": [
         "label",
         "runId",
@@ -4775,7 +4775,7 @@
           "image": "79e8e5b3c71603c231cc7dd61a61d77a71a8472a6823660e0a4247076b9473d6",
           "anchors": "50cc62ed3696b77d7b8680ce480969c7e3c2c43ef25e39e09a5091a9d6c25ffe",
           "memo": "013a427dabca9fa943a7ca300e201f39fbfd775adf2f8fe8a89b6ae06642c0d4",
-          "prompts": "f53d942e931c1849a583989a0450766b06b3f4f62f4cd40f792a3caa81cddd16",
+          "prompts": "9102bd830ba19caddd98675dea71bc618fc3793e7aa56660e942fe42d576202a",
           "profile": "926ff7b7fb7c75a7003b97d0a68358a955c38427fc4743baf4284e769af54a58",
           "timeouts": "38488f1b33bb5138212c215dc6d08e51c03142b94ba34b628cd6f7754c61d957",
           "requestedModels": "65deee855372dd825641934f04ad83b312c29515679fb5e7794267b076a454cb",
@@ -5408,7 +5408,7 @@
       "stage": "trial_loop"
     },
     "run": {
-      "runId": "parity-81518043-6449-45fc-b752-594f52e58bc0",
+      "runId": "parity-05c49f2a-2b60-4ab8-bc5c-b6626cdae3ae",
       "plannedMappingVersion": 1,
       "manifest": {
         "id": "synthetic-wiring",
@@ -5481,7 +5481,7 @@
         "scheme": "complete_instruction_source_sha256",
         "files": {
           "v2/dialogue-v2.mjs": "8581a6de609249967b290aad18bab9d09fc7304165779eab8164bdbb06869363",
-          "v2/jev-turn.ts": "86304f2d829d003016bb294aa8b6ee6bd9580b02a5420f4197bf5af31d7610d8",
+          "v2/jev-turn.ts": "9cd12e867af95e6edfa77063d5674da27651c9430a694ddcb8410e905a917da1",
           "v2/generation-guard.ts": "57c4034aff8d9a7a9c3d35920dc76050fb2cff3dd6a8ab86fc91657ca91e392e",
           "judgment/instructions.mjs": "aa8b84ba60f10780328521457fc3abf4bfaa6db6efd32a725924075a9584f884",
           "observation/observe.ts": "469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad",
@@ -5512,7 +5512,7 @@
       "coverage": "not_measured_by_wiring_harness"
     },
     "summary": {
-      "runId": "parity-81518043-6449-45fc-b752-594f52e58bc0",
+      "runId": "parity-05c49f2a-2b60-4ab8-bc5c-b6626cdae3ae",
       "manifestSha256": "bebb4da64e2dba993696edc8cb515c0f2ed1017ff8b0367bc50249dff33dac48",
       "execution": "mock",
       "profile": {
@@ -6104,7 +6104,7 @@
     },
     "evidence": {
       "version": 1,
-      "runId": "parity-81518043-6449-45fc-b752-594f52e58bc0",
+      "runId": "parity-05c49f2a-2b60-4ab8-bc5c-b6626cdae3ae",
       "normalizedEnvelopeFields": [
         "label",
         "runId",
@@ -8689,7 +8689,7 @@
       "stage": "trial_loop"
     },
     "run": {
-      "runId": "parity-fa9983c5-eda7-4cae-a97b-3c341c237a1b",
+      "runId": "parity-ec13443a-8c99-4417-92c2-97bfd9568221",
       "plannedMappingVersion": 1,
       "manifest": {
         "id": "synthetic-wiring",
@@ -8762,7 +8762,7 @@
         "scheme": "complete_instruction_source_sha256",
         "files": {
           "v2/dialogue-v2.mjs": "8581a6de609249967b290aad18bab9d09fc7304165779eab8164bdbb06869363",
-          "v2/jev-turn.ts": "86304f2d829d003016bb294aa8b6ee6bd9580b02a5420f4197bf5af31d7610d8",
+          "v2/jev-turn.ts": "9cd12e867af95e6edfa77063d5674da27651c9430a694ddcb8410e905a917da1",
           "v2/generation-guard.ts": "57c4034aff8d9a7a9c3d35920dc76050fb2cff3dd6a8ab86fc91657ca91e392e",
           "judgment/instructions.mjs": "aa8b84ba60f10780328521457fc3abf4bfaa6db6efd32a725924075a9584f884",
           "observation/observe.ts": "469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad",
@@ -8793,7 +8793,7 @@
       "coverage": "not_measured_by_wiring_harness"
     },
     "summary": {
-      "runId": "parity-fa9983c5-eda7-4cae-a97b-3c341c237a1b",
+      "runId": "parity-ec13443a-8c99-4417-92c2-97bfd9568221",
       "manifestSha256": "bebb4da64e2dba993696edc8cb515c0f2ed1017ff8b0367bc50249dff33dac48",
       "execution": "mock",
       "profile": {
@@ -9395,7 +9395,7 @@
     },
     "evidence": {
       "version": 1,
-      "runId": "parity-fa9983c5-eda7-4cae-a97b-3c341c237a1b",
+      "runId": "parity-ec13443a-8c99-4417-92c2-97bfd9568221",
       "normalizedEnvelopeFields": [
         "label",
         "runId",
