@@ -139,7 +139,7 @@ for (const previous of ['confirm', 'repair', null] as const) {
         assert.deepEqual(plan.rerank!.ranking, [{action: 'confirm', score: 0.06}, {action: 'repair', score: 0}]);
         assert.equal(plan.rerank!.policyId, 'saved_action_scores_open_issue_v1');
         assert.ok(plan.rerank!.policyId === 'saved_action_scores_open_issue_v1');
-        assert.deepEqual(plan.rerank!.source, {issueTurn: 1, issueId: 'synthetic-open-issue', choice: 'issue'});
+        assert.deepEqual(plan.rerank!.source, {issueTurn: 1, issueId: 'synthetic-open-issue', choice: 'issue', candidates: ['own-0']});
         assert.deepEqual(plan.original.target, target);
         assert.deepEqual({i, original}, before);
         assert.ok(Object.isFrozen(plan.rerank!.selected!.target));
@@ -193,7 +193,7 @@ test('open issue: the chosen history entry, including a null issueId, overrides 
   const p = planBypassAcceptance(i, original, repairFirst, openIssueOptions);
   assert.deepEqual(p.rerank!.selected, {action: 'confirm', target: openTarget});
   assert.ok(p.rerank!.policyId === 'saved_action_scores_open_issue_v1');
-  assert.deepEqual(p.rerank!.source, {issueTurn: 1, issueId: null, choice: 'issue'});
+  assert.deepEqual(p.rerank!.source, {issueTurn: 1, issueId: null, choice: 'issue', candidates: ['own-0']});
 });
 
 for (const previous of [null, 'confirm', 'repair', 'defer-other', 'defer-same'] as const) {

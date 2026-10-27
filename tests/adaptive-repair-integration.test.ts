@@ -50,7 +50,7 @@ test('ON repair-first: the Jev-chosen open issue redirects the vetoed move_on an
   assert.equal(z.executed.action, 'confirm');
   assert.deepEqual(z.executed.target, {kind: 'single', figureId: 's-0002'});
   assert.equal(z.intervention.rerank.policyId, 'saved_action_scores_open_issue_v1');
-  assert.deepEqual(z.intervention.rerank.source, {issueTurn: 2, issueId: null, choice: 'issue'});
+  assert.deepEqual(z.intervention.rerank.source, {issueTurn: 2, issueId: null, choice: 'issue', candidates: ['s-0002']});
   const saved = JSON.parse(JSON.stringify(privateState));
   assert.deepEqual(validateJevPrivateStateV2(saved, ids, interventionForStrategy('repair-first')), saved);
   for (const tamper of [(s: any) => { s.judgments[0].jevTurn.executed.target.figureId = 's-0000'; },
@@ -60,6 +60,28 @@ test('ON repair-first: the Jev-chosen open issue redirects the vetoed move_on an
     assert.throws(() => validateJevPrivateStateV2(bad, ids, interventionForStrategy('repair-first')), {code: 'invalid_state'});
   }
   assert.ok(!JSON.stringify(r.generated).includes('repairProspect'));
+});
+
+test('ON restore requires the same-turn issue choice, a prior history entry and the recorded candidates; OFF rejects the new policy', async () => {
+  const {privateState} = await run().result, saved = JSON.parse(JSON.stringify(privateState));
+  const z = (s: any) => s.judgments[0].jevTurn;
+  for (const [name, tamper] of [
+    ['source turn', (s: any) => { z(s).intervention.rerank.source.issueTurn = 999; }],
+    ['source issueId', (s: any) => { z(s).intervention.rerank.source.issueId = 'nonexistent'; }],
+    ['prospect removed', (s: any) => { delete z(s).repairProspect; }],
+    ['prospect unknown', (s: any) => { z(s).repairProspect = {status: 'unknown', issue: null, prospect: null, basis: null, scores: null}; }],
+    ['recorded candidates', (s: any) => { z(s).intervention.rerank.source.candidates = ['s-0003']; }],
+    ['history entry missing', (s: any) => { s.repairHistory = []; }],
+  ] as const) {
+    const bad = structuredClone(saved); tamper(bad);
+    assert.throws(() => validateJevPrivateStateV2(bad, ids, interventionForStrategy('repair-first')), {code: 'invalid_state'}, name);
+  }
+  const off = structuredClone(saved); delete z(off).repairProspect;
+  const offRuntime = createProfileDialogue(profile(), {strategy: 'repair-first', image, anchors, referenceMemory: true, decisionMode: 'jev',
+    jevDecision: {async decide() { throw Error('unused'); }}, client: {async complete() { throw Error('unused'); }},
+    observer: {async observeAll() { return memo(); }, async reobserve() { throw Error('unused'); }},
+    localGrounding: {classifier: {async classify() { return []; }}}} as any);
+  assert.throws(() => offRuntime.snapshotGraph(off), {code: 'invalid_state'});
 });
 
 test('ON bypass-enabled sends the same Jev wire and adopts move_on', async () => {

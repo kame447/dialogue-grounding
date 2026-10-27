@@ -23,7 +23,7 @@ export type BypassAcceptanceInput=JevDecisionInput&{repairProspect?:RepairProspe
 export type BypassAcceptanceOptions={rerank?:'saved_action_scores_v1'|'open_issue_v1'};
 type Ranking=readonly {action:ExecutedDecision['action'];score:number}[];
 type Selection={action:ExecutedDecision['action'];target:JevTarget}|null;
-export type OpenIssueRerank={policyId:'saved_action_scores_open_issue_v1';ranking:Ranking;selected:Selection;source:{issueTurn:number;issueId:string|null;choice:'issue'}};
+export type OpenIssueRerank={policyId:'saved_action_scores_open_issue_v1';ranking:Ranking;selected:Selection;source:{issueTurn:number;issueId:string|null;choice:'issue';candidates:string[]}};
 export type Rerank={policyId:'saved_action_scores_v1';ranking:Ranking;selected:Selection}|OpenIssueRerank;
 export type AcceptancePlan={original:ExecutedDecision;policy:InterventionConfig['policy'];disposition:'adopted'|'rejected';reasonCode:'no_intervention'|'not_in_veto_set'|'vetoed_bypass_action';rerank:Rerank|null};
 const DETAIL_CODES=['invalid_options','invalid_input','invalid_response','invalid_decision','inconsistent_decision','model_mismatch','key_unavailable','key_leak','unauthorized','payment_required','not_found','rate_limited','upstream_error','network_error','timeout','aborted','cost_cap','cost_unreported','busy'] as const;
@@ -123,7 +123,7 @@ function openIssueRerank(input:BypassAcceptanceInput,scores:Record<string,number
   ranking.push({action,score:scores[action]});
  }
  ranking.sort((a,b)=>b.score-a.score||JEV_ACTIONS.indexOf(a.action)-JEV_ACTIONS.indexOf(b.action));
- return ranking.length?{policyId:'saved_action_scores_open_issue_v1',ranking,selected:{action:ranking[0].action,target},source:{issueTurn:entry.turn,issueId:entry.issueId,choice:'issue'}}:null;
+ return ranking.length?{policyId:'saved_action_scores_open_issue_v1',ranking,selected:{action:ranking[0].action,target},source:{issueTurn:entry.turn,issueId:entry.issueId,choice:'issue',candidates:[...entry.candidatesAfter]}}:null;
 }
 /** Checks only the new rerank proof. Restore still validates native evidence,
  * executions and detail evidence in the surrounding private-state validator.
@@ -148,7 +148,9 @@ export function isOpenIssueRerankRecord(intervention:unknown,decision:unknown,ex
    !ownTarget(d.target,true)||!equal(t.original,project(d))||!equal(t.alternative,e))return false;
   const r=t.rerank;
   if(!r||r.policyId!=='saved_action_scores_open_issue_v1'||!exact(r,['policyId','ranking','selected','source'])||
-   !exact(r.source,['issueTurn','issueId','choice'])||r.source.choice!=='issue'||!Number.isSafeInteger(r.source.issueTurn)||r.source.issueTurn<1||
+   !exact(r.source,['issueTurn','issueId','choice','candidates'])||r.source.choice!=='issue'||!Number.isSafeInteger(r.source.issueTurn)||r.source.issueTurn<1||
+   // The issue's candidates are recorded at decision time; later history updates never redefine the target.
+   !Array.isArray(r.source.candidates)||!ownTarget(e?.target)||!equal(e.target,r.source.candidates.length===1?{kind:'single',figureId:r.source.candidates[0]}:{kind:'multiple',figureIds:r.source.candidates})||
    !(r.source.issueId===null||typeof r.source.issueId==='string'&&r.source.issueId.length>0&&r.source.issueId.length<=128)||
    !e||!ownTarget(e.target)||!equal(r.selected,{action:e.action,target:e.target})||!Array.isArray(r.ranking)||!r.ranking.length)return false;
   const scores=d.evidence?.stages?.[0]?.scores?.action;

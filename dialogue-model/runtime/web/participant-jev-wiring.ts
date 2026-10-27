@@ -99,7 +99,8 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
           !restore.queueState?.privateState?.observationMemo || !Array.isArray(restore.jevTraces) ||
           !digest(restore.initialObservation?.memoSha256) || !Object.hasOwn(restore,'aiPublicSettlement') || !restore.jevLedger ||
           restore.jevTraces.some((trace:any)=>trace?.schemaVersion!=='jev_turn_trace_v2'||
-            trace.intervention!==null&&!['bypass_acceptance_v1:accept','bypass_acceptance_v1:veto'].includes(trace.intervention?.policy))) return invalid();
+            trace.intervention!==null&&!['bypass_acceptance_v1:accept','bypass_acceptance_v1:veto'].includes(trace.intervention?.policy)||
+            !technicalTrial&&trace.intervention?.rerank?.policyId==='saved_action_scores_open_issue_v1')) return invalid();
       for (const trace of restore.jevTraces) if (Object.hasOwn(trace,'repairProspect')) {
         if (!technicalTrial) return invalid();
         validateRepairProspectMaterial(trace.repairProspect,trace.repairHistory,trace.turnIndex);

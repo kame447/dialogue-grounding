@@ -358,3 +358,10 @@ test('adaptive repair option is private, recorded and requires the same config a
   const invalidSaved=structuredClone(saved);invalidSaved.options.technicalTrial.version='unknown';
   await assert.rejects(makeTask(prepared,{restore:invalidSaved}),{code:'invalid_options'});
 });
+
+test('an OFF restore rejects an open-issue rerank trace',async t=>{
+  const h=await fixture(t),prepared=await prepareParticipantJev(h.options),saved=(await makeTask(prepared)).record();
+  const mixed=structuredClone(saved);
+  mixed.jevTraces=[{schemaVersion:'jev_turn_trace_v2',turnIndex:1,intervention:{policy:'bypass_acceptance_v1:veto',rerank:{policyId:'saved_action_scores_open_issue_v1'}}}];
+  await assert.rejects(makeTask(prepared,{restore:mixed}),{code:'invalid_options'});
+});

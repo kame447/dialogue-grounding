@@ -304,8 +304,11 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
    if(t.disposition==='adopted'){if(t.reasonCode!==(accept?'no_intervention':'not_in_veto_set')||veto&&['defer','move_on'].includes(d.action)||!stateSame(z.executed,original)||[t.rerank,t.alternative,t.detailEvidence].some(v=>v!==null))throw Error();}
    else if(t.disposition==='rejected'&&t.rerank?.policyId==='saved_action_scores_open_issue_v1'){
     // adaptive_repair_v1 only; the saved_action_scores_v1 branch below is unchanged.
-    const i=s.judgments.indexOf(j),p=i>0?s.judgments[i-1].jevTurn.executed:null;
-    if(!veto||!isOpenIssueRerankRecord(t,d,z.executed,ownSlots,p&&{action:p.action,target:p.target}))throw Error();
+    const i=s.judgments.indexOf(j),p=i>0?s.judgments[i-1].jevTurn.executed:null,m=z.repairProspect,src=t.rerank.source;
+    // Provenance: Jev's own explicit issue choice in this turn names an earlier repair entry.
+    if(!veto||m?.status!=='ok'||m.issue.choice!=='issue'||m.issue.turn!==src?.issueTurn||m.issue.issueId!==src?.issueId||
+       !s.repairHistory.some((r:RepairHistoryEntry)=>r.turn===src.issueTurn&&r.issueId===src.issueId&&r.turn<j.turnIndex)||
+       !isOpenIssueRerankRecord(t,d,z.executed,ownSlots,p&&{action:p.action,target:p.target}))throw Error();
     if(['confirm','repair'].includes(z.executed.action))persistedEvidence(t.detailEvidence,'detail');else if(t.detailEvidence!==null)throw Error();
    }
    else if(t.disposition==='rejected'){
@@ -337,7 +340,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   const adaptive = Object.hasOwn(options,'technicalTrial');
   if(adaptive){try{stateJson(options.technicalTrial);if(!stateExact(options.technicalTrial,['version'])||options.technicalTrial!.version!=='adaptive_repair_v1')throw Error();}catch{throw new JevTurnError('invalid_state');}}
   const checkProspectMode=(s:JevPrivateState)=>{
-    if(!adaptive&&s.judgments?.some(j=>Object.hasOwn(j.jevTurn??{},'repairProspect')))throw new JevTurnError('invalid_state');
+    if(!adaptive&&s.judgments?.some(j=>Object.hasOwn(j.jevTurn??{},'repairProspect')||j.jevTurn?.intervention?.rerank?.policyId==='saved_action_scores_open_issue_v1'))throw new JevTurnError('invalid_state');
   };
   const integrated=Object.hasOwn(options,'intervention')||Object.hasOwn(options,'decisionTimeoutMs');
   let intervention:InterventionConfig|null=null,decisionTimeoutMs:number|undefined;
