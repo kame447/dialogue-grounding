@@ -128,6 +128,7 @@ export async function createNamingTaskV2({
     groundingShadow: grounding, onGroundingShadow: grounding ? (record) => { groundingRecords.push(record); } : null,
     localGrounding: local, onLocalGroundingTrace,
     ...(jev ? { decisionMode: "jev", observer: jev.observer, jevDecision: jev.jevDecision,
+      ...(jev.technicalTrial ? { technicalTrial: clone(jev.technicalTrial) } : {}),
       localGrounding: jev.localGrounding, maxReobservations: jev.profile.maxReobservations,
       interventionPolicy: jev.profile.interventionPolicy, decisionTimeoutMs: jev.profile.timeouts.decisionMs,
       onJevTurnTrace: (record) => {
@@ -207,7 +208,7 @@ export async function createNamingTaskV2({
         // Present only when on, so default-off records keep their previous shape.
         ...(grounding ? { groundingShadow: true } : {}), ...(local ? { localGrounding: true } : {}),
         ...(!jev && restore?.options?.jevResearch === false ? { jevResearch: false } : {}),
-        ...(jev ? { jevResearch: true, profileSha256: researchHash(jev.profile), interventionPolicy: clone(jev.profile.interventionPolicy) } : {}) },
+        ...(jev ? { jevResearch: true, profileSha256: researchHash(jev.profile), interventionPolicy: clone(jev.profile.interventionPolicy), ...(jev.technicalTrial ? { technicalTrial: clone(jev.technicalTrial) } : {}) } : {}) },
       status: result ? "completed" : closed ? "submitting" : "dialogue",
       // Origin is research metadata only; queue/model/participant events stay ordinary public speech.
       events: snapshot.events.map((event) => event.seq === 1 && event.speaker === "ai" && event.text === SCRIPTED_OPENING
