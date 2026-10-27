@@ -75,7 +75,6 @@ const errors = {
   reception_conflict: "状態が変わりました。画面を確認してください。",
   reception_unavailable: "受付を確認できませんでした。" + contact,
   reception_finished: "すべての課題が完了しました。",
-  trial_changed: "状態が変わりました。画面を確認してください。",
   ai_unavailable: "AIに接続できませんでした。会話履歴を確認してください。送り直すには、そのメッセージの「再送」を押してください。メッセージは自動では再送されません。",
   scoring_error: "採点でエラーが発生しました。提出内容は保存されています。採点を再試行できます。",
   invalid_ai_submission: "AIが提出した名前を確認できませんでした。" + contact,
