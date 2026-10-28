@@ -11,8 +11,8 @@ export const MIN_RETRY_AFTER_S = 60;
 export const MAX_RETRY_AFTER_S = 600;
 /** The version comes from the best-effort index, so a visible page is refetched at least this often anyway. */
 export const FORCED_REFRESH_MS = 120000;
-/** A reception created this long before the page was rendered can still be new (it may have been indexed late). */
-export const NEW_MARGIN_MS = 5000;
+/** Network timeout for each request; a fallback timer covers browsers without AbortSignal.timeout. */
+export const REQUEST_TIMEOUT_MS = 10000;
 
 export const RECEPTIONS_LIVE_JS = `(function () {
   'use strict';
@@ -24,8 +24,9 @@ export const RECEPTIONS_LIVE_JS = `(function () {
   var HEX = /^[a-f0-9]{64}$/;
   var baseTitle = document.title;
   var sinceText = root.getAttribute('data-since') || '';
-  // Only receptions created after this page was rendered can be new, so rows that slide in from another page never are.
-  var since = Date.parse(sinceText) - ${NEW_MARGIN_MS};
+  // Only receptions created at or after this page was rendered can be new, so rows that slide in from another page
+  // never are. (A reception indexed only after the render, but created before it, is listed but not announced.)
+  var since = Date.parse(sinceText);
   // A later page cannot show new receptions (they sort first), so it shows the server's count of them instead.
   var laterPage = /(^|[?&])after=/.test(location.search.slice(1));
   var known = new Set(), latest = new Map();
@@ -115,15 +116,21 @@ export const RECEPTIONS_LIVE_JS = `(function () {
 
   function request(url, type) {
     var options = { headers: { Accept: type }, credentials: 'same-origin', cache: 'no-store', redirect: 'error' };
-    if (typeof AbortSignal === 'function' && typeof AbortSignal.timeout === 'function') options.signal = AbortSignal.timeout(10000);
-    return fetch(url, options).then(function (response) {
+    var controller = typeof AbortController === 'function' ? new AbortController() : null, timeout = null;
+    if (controller) options.signal = controller.signal;
+    // Even without an abortable fetch, a request that never settles must not hold the single check slot forever.
+    var expired = new Promise(function (resolve, reject) {
+      timeout = setTimeout(function () { if (controller) controller.abort(); reject(new Error('timeout')); }, ${REQUEST_TIMEOUT_MS});
+    });
+    return Promise.race([fetch(url, options), expired]).then(function (response) {
+      clearTimeout(timeout);
       var kind = (response.headers.get('Content-Type') || '').split(';')[0].trim();
       if (response.ok && kind === type) return response;
       var error = new Error('http');
       error.status = response.ok ? 0 : response.status;
       error.retryAfter = Number(response.headers.get('Retry-After'));
       throw error;
-    });
+    }, function (error) { clearTimeout(timeout); throw error; });
   }
 
   function refresh() {

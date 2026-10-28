@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { handleAdmin, ADMIN_HEADERS, LIVE_CSP } from '../workers/tangram-experiment/src/admin/routes.ts';
 import type { AdminDeps } from '../workers/tangram-experiment/src/admin/routes.ts';
-import { RECEPTIONS_LIVE_JS, VISIBLE_POLL_MS, HIDDEN_POLL_MS, FORCED_REFRESH_MS } from '../workers/tangram-experiment/src/admin/receptions-live.ts';
+import { RECEPTIONS_LIVE_JS, VISIBLE_POLL_MS, HIDDEN_POLL_MS, FORCED_REFRESH_MS, REQUEST_TIMEOUT_MS } from '../workers/tangram-experiment/src/admin/receptions-live.ts';
 import { createReceptionAdminPort } from '../workers/tangram-experiment/src/admin/reception-adapter.ts';
 import { summarizeLatency } from '../workers/tangram-experiment/src/admin/latency.ts';
 import type { ReceptionAdminRow, ReceptionProtocolStatus } from '../workers/tangram-experiment/src/admin/reception-port.ts';
@@ -115,28 +115,29 @@ test('a version that cannot be read at render time still starts the live list, w
 
 // ---- The client script, run in node:vm against the real admin routes ----
 type Timer = { fn: () => void; ms: number };
-async function client(f: ReturnType<typeof fixture>, path = '/admin/receptions') {
+async function client(f: ReturnType<typeof fixture>, path = '/admin/receptions', options: { noAbort?: boolean } = {}) {
   const document = new FakeDocument(await (await handleAdmin(get(path), f.deps)).text());
-  const timers: Timer[] = []; const requests: { url: string; init: any }[] = [];
+  // Poll timers and per-request timeout timers are kept apart, so a test can drive each.
+  const timers: Timer[] = [], requestTimers: Timer[] = []; const requests: { url: string; init: any }[] = [];
   const windowListeners = new Map<string, () => void>();
   let reply: ((url: string) => Response | Promise<Response> | null) = () => null;
   const context = vm.createContext({
     document, navigator: { onLine: true }, location: { pathname: new URL(ORIGIN + path).pathname, search: new URL(ORIGIN + path).search },
     window: { addEventListener: (type: string, fn: () => void) => windowListeners.set(type, fn) },
-    setTimeout: (fn: () => void, ms: number) => { const t = { fn, ms }; timers.push(t); return t; },
-    clearTimeout: (t: Timer) => { const i = timers.indexOf(t); if (i >= 0) timers.splice(i, 1); },
+    setTimeout: (fn: () => void, ms: number) => { const t = { fn, ms }; (ms === REQUEST_TIMEOUT_MS ? requestTimers : timers).push(t); return t; },
+    clearTimeout: (t: Timer) => { for (const list of [timers, requestTimers]) { const i = list.indexOf(t); if (i >= 0) list.splice(i, 1); } },
     fetch: async (url: string, init: any) => {
       requests.push({ url, init });
       return reply(url) ?? handleAdmin(new Request(ORIGIN + url, { headers: { Authorization: 'Bearer ' + TOKEN, ...init.headers } }), f.deps);
     },
     DOMParser: class { parseFromString(html: string) { const root = parse(html, new FakeDocument('')); return { getElementById: (x: string) => root.getElementById(x) }; } },
-    Set, Map, Date, Math, Number, Boolean, Error, Array, AbortSignal,
+    Set, Map, Date, Math, Number, Boolean, Error, Array, Promise, ...(options.noAbort ? {} : { AbortController }),
   });
   vm.runInContext(RECEPTIONS_LIVE_JS, context);
   // A poll cycle ends by scheduling the next one (or by stopping); wait for that rather than a fixed number of turns.
   const settle = async (done: () => boolean) => { for (let i = 0; i < 1000 && !done(); i++) await new Promise(r => setTimeout(r, 2)); };
   return {
-    document, timers, requests, windowListeners,
+    document, timers, requestTimers, requests, windowListeners,
     reply(fn: (url: string) => Response | Promise<Response> | null) { reply = fn; },
     settle,
     async tick() {
@@ -211,8 +212,11 @@ test('a protocol or mode change redraws every row form; the status paragraphs fo
 test('rows that were not on this page and are older than it are not counted as new (paging)', async () => {
   const f = fixture(); const c = await client(f);
   f.rows.push({ receptionId: id(4), number: 'synthetic-004', createdAt: old, status: 'pending', revision: 1, plan: null, trials: [] });
+  // Created moments before the page was rendered, but not on it: still an existing reception.
+  const since = Date.parse(c.document.getElementById('reception-list')!.getAttribute('data-since')!);
+  f.rows.push({ receptionId: id(7), number: 'synthetic-007', createdAt: new Date(since - 1).toISOString(), status: 'pending', revision: 1, plan: null, trials: [] });
   f.change(); await c.tick();
-  assert.ok(c.row(4)); assert.equal(c.notice(), ''); assert.ok(!c.row(4)!.classList.contains('new'));
+  assert.ok(c.row(4) && c.row(7)); assert.equal(c.notice(), ''); assert.ok(!c.row(4)!.classList.contains('new') && !c.row(7)!.classList.contains('new'));
 });
 
 test('from zero receptions to one: the list appears and the new one is announced', async () => {
@@ -333,4 +337,16 @@ test('one check at a time: events during a slow request add no second request; 4
   assert.equal(c.timers.length, 1); assert.equal(c.timers[0].ms, 60000, 'missing Retry-After waits a minute');
   c.document.dispatch('visibilitychange'); assert.ok(c.timers[0].ms > 55000, 'returning to the tab does not skip Retry-After');
   c.reply(() => new Response('', { status: 429, headers: { 'Retry-After': '99999' } })); await c.tick(); assert.equal(c.timers[0].ms, 600000);
+});
+
+for (const noAbort of [false, true]) test('a request that never settles times out and frees the check slot' + (noAbort ? ' (no AbortController)' : ''), async () => {
+  const f = fixture(); const c = await client(f, '/admin/receptions', { noAbort });
+  c.reply(() => new Promise<Response>(() => {}));
+  const first = c.timers.shift()!; first.fn(); await new Promise(r => setImmediate(r));
+  assert.equal(c.requestTimers.length, 1); assert.equal(c.requestTimers[0].ms, REQUEST_TIMEOUT_MS); assert.equal(c.timers.length, 0);
+  if (!noAbort) assert.equal(c.requests[0].init.signal.aborted, false);
+  c.requestTimers.shift()!.fn(); await c.settle(() => c.timers.length > 0);
+  assert.equal(c.timers[0].ms, VISIBLE_POLL_MS); assert.notEqual(c.sync(), '');
+  if (!noAbort) assert.equal(c.requests[0].init.signal.aborted, true);
+  c.reply(() => null); await c.tick(); assert.equal(c.sync(), ''); assert.equal(c.requestTimers.length, 0, 'finished requests clear their timeout');
 });
