@@ -360,7 +360,13 @@ test("D1/D2/D3/D4: the Luna generator gets its own text, the judge memo as data,
     assert.ok(LUNA_GENERATOR_INSTRUCTIONS_V2.includes(line));
   }
   assert.ok(!LUNA_GENERATOR_INSTRUCTIONS_V2.includes("その特徴に短く触れて自分がどの図形のことと理解したかを相手に示してください"));
-  assert.ok(LUNA_CONCISE_INSTRUCTIONS_V2.includes("必要な部分には短く応じてください") && LUNA_CONCISE_INSTRUCTIONS_V2.includes("指定されたaction以外で"));
+  assert.ok(LUNA_CONCISE_INSTRUCTIONS_V2.includes("必要な部分には短く応じてください"));
+  // Argon's review: a short acknowledgement may complete the act (only a bare greeting is ruled out), and a
+  // name proposal always shows the name (identifying the shape is optional, never an alternative to the name).
+  assert.ok(LUNA_CONCISE_INSTRUCTIONS_V2.includes("挨拶だけで終えず、指定されたactionの機能を果たしてください") && LUNA_CONCISE_INSTRUCTIONS_V2.includes("指定されたactionが求める場合を除き"));
+  assert.ok(!LUNA_CONCISE_INSTRUCTIONS_V2.includes("相槌だけで終えず"));
+  assert.ok(LUNA_ACTION_SCOPE_V2.propose_name.startsWith("名前を「」で示して候補として出す"));
+  assert.doesNotMatch(LUNA_ACTION_SCOPE_V2.propose_name, /出すか/u);
   assert.ok(!LUNA_CONCISE_INSTRUCTIONS_V2.includes("1つだけ実現"));
   assert.deepEqual(Object.keys(LUNA_ACTION_SCOPE_V2).sort(), Object.keys(ACTION_SCOPE_V2).sort());
   for (const action of ["accept", "propose_name", "confirm", "defer", "revisit", "move_on"]) assert.match(LUNA_ACTION_SCOPE_V2[action], /とは言わない/u);

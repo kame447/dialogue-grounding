@@ -1,8 +1,8 @@
 {
   "schemaVersion": "parity_live_failure_capture_v1",
-  "baseCommit": "320a192bd3c32bc0e1259a9b08aa219b89082f4d",
+  "baseCommit": "74923ab47ffa240ed615c7f2212c5fdde4badb33",
   "execution": "mock",
-  "fixtureSha256": "02a167b86cce007642a9b4e4dcb7f8b7bc94d2f11ace9c82da9f31685777aeec",
+  "fixtureSha256": "13ad647a2227dc5b5d6d23834e781a5319253c98fdc5db7f9d05432d9927862f",
   "sourceFiles": {
     "dialogue-model/runtime/client.mjs": "8392f8843365b22bbf802a66365823d8b9598df6288e108b53810b21544a17ed",
     "dialogue-model/runtime/config.mjs": "2b6a4ea7a18c088e6ca6bf519537ef51039d71e81872ef26b93eba3739aa98ca",
@@ -62,7 +62,7 @@
     "dialogue-model/runtime/v2/agreement-gate.ts": "04b6927967a2f30287dbc99bf30cdd612b368a8dee3a43aa183e2b8261fcfd3e",
     "dialogue-model/runtime/v2/candidate-conflict.ts": "6c7bd78f3a12205cfb1e8332514b8a027844da378487699a494fc3c6bbabd92d",
     "dialogue-model/runtime/v2/decision-evidence.mjs": "7b0f7497d142d2e72f1b4952667082888f5ddb2fc3982e84bfb6efc53df86bdc",
-    "dialogue-model/runtime/v2/dialogue-v2.mjs": "5e57134cf89c4b10545ed92e12ae1474a1a319fca11f3eff106e7579978f26d3",
+    "dialogue-model/runtime/v2/dialogue-v2.mjs": "f59c26b6a54cc165552ddf9f74811a64ef95e0882905650d57c1689ef9980b1a",
     "dialogue-model/runtime/v2/generation-guard.ts": "f1641117798e1538a6db4ebb97e8ac33a2da14e926c405f4a7c7f6c8b751ad46",
     "dialogue-model/runtime/v2/grounding-shadow.ts": "0ea88381322e7d8af01131dfe27788848057854386c7e364f782fc0bcc5a6921",
     "dialogue-model/runtime/v2/jev-turn.ts": "06cf17a9249afe8fbfab9104d7a722b85cf4c39b2423781375929296c702271f",

@@ -125,7 +125,7 @@ test("generator gets holistic/no-invented-counts guidance without changing final
     assert.equal(result.privateState.judgments[0].judgment.discriminatingFeature, null);
     // The Luna path uses its own generator text (public-act consistency change); the paraphrase-as-understanding sentence is gone on purpose.
     assert.equal(calls[0].messages[1].content, LUNA_GENERATOR_INSTRUCTIONS_V2);
-    assert.match(calls[0].messages[1].content, /相手の見立てには短く受け止め、必要なら自分の画像の全体の見立てを1つ返せます/);
+    assert.match(calls[0].messages[1].content, /相手の見立ては短く受け止め、必要なら自分の画像の全体の見立てを1つ返せます/);
     assert.match(calls[0].messages[1].content, /相手の説明を言い換えて繰り返すことを、自分も見た・理解した証拠として示さないでください/);
     assert.match(calls[0].messages[1].content, /判断にない尖り・四角・くぼみなどの形の数や特徴を作って補わない/);
     assert.doesNotMatch(calls[0].messages[1].content, /質問にせず、その特徴に短く触れて/);
