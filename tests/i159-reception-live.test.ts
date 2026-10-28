@@ -43,7 +43,7 @@ function fixture(options: { version?: boolean } = {}) {
     async listPage() { return { items: [], next: null }; }, async getSummary() { return null; }, async getRecord() { return null; },
     async deleteRecord() {}, async audit() { return []; }, summarizeLatency, receptions };
   return { deps, rows, calls, change() { counter++; }, setProtocol(p: ReceptionProtocolStatus) { protocol = p; counter++; },
-    failVersion() { versionFails = true; }, limit(on: boolean) { allowed = !on; } };
+    failVersion() { versionFails = true; }, recoverVersion() { versionFails = false; }, limit(on: boolean) { allowed = !on; } };
 }
 const get = (path: string, headers: Record<string, string> = {}) => new Request(ORIGIN + path, { headers: { Authorization: 'Bearer ' + TOKEN, ...headers } });
 
@@ -96,12 +96,21 @@ test('live page: version is read before the list, one self-hosted script, CSP ad
   for (const path of ['/admin/entry', '/admin']) assert.equal((await handleAdmin(get(path), f.deps)).headers.get('Content-Security-Policy'), ADMIN_HEADERS['Content-Security-Policy']);
 });
 
-test('without a usable version the list renders as before: no script, no live regions, the strict CSP', async () => {
-  for (const f of [fixture({ version: false }), (() => { const x = fixture(); x.failVersion(); return x; })()]) {
-    const response = await handleAdmin(get('/admin/receptions'), f.deps); const html = await response.text();
-    assert.equal(response.status, 200); assert.equal(response.headers.get('Content-Security-Policy'), ADMIN_HEADERS['Content-Security-Policy']);
-    assert.doesNotMatch(html, /<script|data-version|reception-new/);
-  }
+test('without the version port the list renders as before: no script, no live regions, the strict CSP', async () => {
+  const response = await handleAdmin(get('/admin/receptions'), fixture({ version: false }).deps); const html = await response.text();
+  assert.equal(response.status, 200); assert.equal(response.headers.get('Content-Security-Policy'), ADMIN_HEADERS['Content-Security-Policy']);
+  assert.doesNotMatch(html, /<script|data-version|reception-new/);
+});
+
+test('a version that cannot be read at render time still starts the live list, which recovers on the first good version', async () => {
+  const f = fixture(); f.failVersion();
+  const response = await handleAdmin(get('/admin/receptions'), f.deps); const html = await response.text();
+  assert.equal(response.status, 200); assert.equal(response.headers.get('Content-Security-Policy'), LIVE_CSP);
+  assert.match(html, /data-version=""/); assert.match(html, /<script src="\/admin\/receptions.js" defer><\/script>/);
+  const c = await client(f); f.recoverVersion();
+  await c.tick(); assert.deepEqual(c.requests.map(r => r.url), ['/admin/receptions/version', '/admin/receptions']);
+  assert.match(c.document.getElementById('reception-list')!.getAttribute('data-version')!, /^[a-f0-9]{64}$/);
+  await c.tick(); assert.equal(c.requests.length, 3, 'then back to version checks only');
 });
 
 // ---- The client script, run in node:vm against the real admin routes ----
@@ -250,11 +259,21 @@ test('errors back off; 429 waits for Retry-After; lost authentication stops poll
 test('adapter version changes with index rows and settings, and never calls a participant object', async () => {
   let rows: unknown[] = [{ receptionId: id(1), objectId: 'a'.repeat(64), createdAt: old, number: '001', status: 'pending', revision: 1, trials: [] }];
   let settings: unknown = { protocol: null, mode: { value: 'unset', revision: 0 } };
+  // The owner is the authority for the few rows that could be new; it is consulted only when `since` is given.
+  let ownerCalls = 0, ownerStatus = 'pending';
+  const owner = () => ({ async adminReception() { ownerCalls++; return { schemaVersion: 'reception_v1', ...(rows[0] as object), status: ownerStatus, plan: null } as never; },
+    async adminApproveReception() { throw new Error('no write'); }, async adminCancelReception() { throw new Error('no write'); } });
   const port = createReceptionAdminPort({ index: { async listReceptions() { return rows as never; }, async getReception() { return null; } },
-    owner() { throw new Error('owner must not be called'); }, async readSettings() { return settings; } });
+    owner, async readSettings() { return settings; } });
   const v = async (since: string | null = null) => (await port.version!(since));
   const a = (await v()).version; assert.match(a, /^[a-f0-9]{64}$/); assert.equal((await v()).version, a); assert.equal((await v()).newPending, null);
-  assert.equal((await v(old)).newPending, 1); assert.equal((await v('2026-10-28T00:00:00.000Z')).newPending, 0); assert.equal((await v(old)).version, a);
+  assert.equal(ownerCalls, 0, 'no owner call without since');
+  assert.equal((await v(old)).newPending, 1); assert.equal(ownerCalls, 1);
+  assert.equal((await v('2026-10-28T00:00:00.000Z')).newPending, 0); assert.equal(ownerCalls, 1, 'older rows are not looked up');
+  assert.equal((await v(old)).version, a);
+  // The owner already cancelled it but the index update was lost: it is not counted as new.
+  ownerStatus = 'cancelled'; assert.equal((await v(old)).newPending, 0);
+  ownerStatus = 'pending';
   rows = [{ ...(rows[0] as object), status: 'approved', revision: 2 }]; const b = (await v()).version; assert.notEqual(b, a); assert.equal((await v(old)).newPending, 0);
   settings = { protocol: null, mode: { value: 'off', revision: 1, savedAt: old } }; const c = (await v()).version; assert.notEqual(c, b);
   settings = { protocol: null, mode: { value: 'on', revision: 1, savedAt: 'not a date' } };
@@ -263,10 +282,10 @@ test('adapter version changes with index rows and settings, and never calls a pa
 
 test('version endpoint: a valid since adds only a count of newer pending receptions; anything else is ignored', async () => {
   const f = fixture(); f.rows.push({ receptionId: id(6), number: 'synthetic-006', createdAt: '2026-10-29T01:00:00.000Z', status: 'pending', revision: 1, plan: null, trials: [] });
-  const body = async (q: string) => (await handleAdmin(get('/admin/receptions/version' + q), f.deps)).json();
+  const body = async (q: string) => { const r = await handleAdmin(get('/admin/receptions/version' + q), f.deps); assert.equal(r.status, 200, q); return r.json(); };
   assert.deepEqual(Object.keys(await body('?since=2026-10-29T00:00:00.000Z')), ['version', 'newPending']);
   assert.equal((await body('?since=2026-10-29T00:00:00.000Z')).newPending, 1);
-  for (const bad of ['?since=yesterday', '?since=2026-10-29', '?since=2026-02-30T00:00:00.000Z', '?since=%3Cscript%3E']) {
+  for (const bad of ['?since=yesterday', '?since=2026-10-29', '?since=2026-02-30T00:00:00.000Z', '?since=2026-99-99T00:00:00.000Z', '?since=%3Cscript%3E']) {
     const text = JSON.stringify(await body(bad)); assert.deepEqual(Object.keys(JSON.parse(text)), ['version'], bad); assert.doesNotMatch(text, /script|yesterday/);
   }
 });

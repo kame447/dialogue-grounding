@@ -29,7 +29,8 @@ export const RECEPTIONS_LIVE_JS = `(function () {
   // A later page cannot show new receptions (they sort first), so it shows the server's count of them instead.
   var laterPage = /(^|[?&])after=/.test(location.search.slice(1));
   var known = new Set(), latest = new Map();
-  var version = root.getAttribute('data-version');
+  // Empty when the server could not read it; the first good version then differs and the page is fetched again.
+  var version = root.getAttribute('data-version') || '';
   var stale = false, force = false, stopped = false, busy = false, failures = 0, timer = null, blockedUntil = 0, shown = -1;
   var serverNew = 0, refreshedAt = Date.now();
 
@@ -134,6 +135,7 @@ export const RECEPTIONS_LIVE_JS = `(function () {
       remember(next);
       stale = !apply(next);
       version = nextVersion;
+      root.setAttribute('data-version', version);
       refreshedAt = Date.now();
       force = false;
     });

@@ -258,14 +258,17 @@ export async function handleAdmin(request: Request, deps: AdminDeps): Promise<Re
       if (deps.receptions.version) { try { version = (await deps.receptions.version(null)).version; } catch { version = null; } }
       const protocol = await deps.receptions.protocol();
       const page = await deps.receptions.listPage(url.searchParams.get('after'));
-      const live = version !== null && /^[a-f0-9]{64}$/u.test(version) ? { version, since } : null;
+      // An unreadable version still starts the live list: an empty version differs from the first good one,
+      // so the page is fetched again as soon as the version can be read.
+      const live = deps.receptions.version ? { version: version !== null && /^[a-f0-9]{64}$/u.test(version) ? version : '', since } : null;
       return respond(200, renderReceptions(page.items, page.next, protocol, live), undefined, live ? { 'Content-Security-Policy': LIVE_CSP } : {});
     } catch { return receptionFailure(request, '受付一覧', 503, 'reception_unavailable'); }
   }
   if (deps.receptions?.version && url.pathname === '/admin/receptions/version') {
     // `since` is the render time the page carries; anything else is ignored rather than reflected.
     const sinceParam = url.searchParams.get('since');
-    const since = sinceParam !== null && ISO_MS.test(sinceParam) && new Date(sinceParam).toISOString() === sinceParam ? sinceParam : null;
+    const since = sinceParam !== null && ISO_MS.test(sinceParam) && Number.isFinite(Date.parse(sinceParam)) &&
+      new Date(sinceParam).toISOString() === sinceParam ? sinceParam : null;
     try {
       const { version, newPending } = await deps.receptions.version(since);
       if (!/^[a-f0-9]{64}$/u.test(version) || newPending !== null && !Number.isSafeInteger(newPending)) throw new Error();
