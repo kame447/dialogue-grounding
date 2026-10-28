@@ -267,13 +267,13 @@ async function completeTrial(request: (path: string, body?: unknown) => Promise<
   await (request as typeof request & {operatorPrepare(seed:number):Promise<void>}).operatorPrepare(seed);
   let state = await (await request("/api/state")).json();
   if(!state.trial)state=await (await request("/api/start",{version:2})).json();
-  assert.equal((await request("/api/message", { text: "細長いのから" })).status, 202);
+  assert.equal((await request("/api/message", { text: "細長いのから", expectedRecordId:state.trial.sessionId })).status, 202);
   for (let i = 0; i < 200 && (state.trial.aiStatus !== "idle" || state.trial.events.length < 3); i++) {
     await new Promise((r) => setTimeout(r, 10));
     state = await (await request("/api/state")).json();
   }
   const names = Object.fromEntries(state.trial.scene.shapes.map((s: any, i: number) => [s.id, i ? "名前" + i : null]));
-  const response = await request("/api/names", { names, confirm: true });
+  const response = await request("/api/names", { names, confirm: true, expectedRecordId:state.trial.sessionId });
   assert.equal(response.status, 200);
   return { state: (await response.json()).trial, names };
 }

@@ -197,7 +197,7 @@ async function app(t, options = {}) {
   const base = "http://127.0.0.1:" + server.address().port;
   const cookie = (await fetch(base)).headers.get("set-cookie").split(";")[0];
   const request = (path, body) => fetch(base + path, { headers: { cookie, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
-    ...(body === undefined ? {} : { method: "POST", body: JSON.stringify(body) }) });
+    ...(body === undefined ? {} : { method: "POST", body: JSON.stringify(['/api/message','/api/names','/api/retry','/api/ai-submit'].includes(path) ? {...body,expectedRecordId:task?.getState().sessionId} : body) }) });
   return { request, client, constructors, task: () => task, download: id => fetch(base+"/admin/record/"+id+".json", {headers:{Authorization:"Bearer "+privateOptions.adminToken}}).then(r=>r.json()) };
 }
 

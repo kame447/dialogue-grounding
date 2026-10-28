@@ -63,18 +63,18 @@ test("v2 over HTTP: own scene only, immediate consecutive messages, private name
   assert.equal((await request("/api/turn", { utterance: "x" })).status, 404, "v1 routes are not served for a v2 trial");
 
   try {
-    const first = await request("/api/message", { text: "なんかサンダーみたいなの" });
+    const first = await request("/api/message", { text: "なんかサンダーみたいなの", expectedRecordId:state.trial.sessionId });
     assert.equal(first.status, 202);
-    const second = await request("/api/message", { text: "あ、違う、人っぽいのかも" });
+    const second = await request("/api/message", { text: "あ、違う、人っぽいのかも", expectedRecordId:state.trial.sessionId });
     assert.equal(second.status, 202, "a second message is accepted while the AI is thinking");
   } finally { releaseGeneration(); }
   state = await waitIdle();
   assert.deepEqual(state.trial.events.map((e) => e.speaker), ["ai", "human", "human", "ai"]);
 
   const ids = state.trial.scene.shapes.map((s) => s.id);
-  response = await request("/api/names", { names: Object.fromEntries(ids.map((id, i) => [id, i === 0 ? null : "人名" + i])), confirm: false });
+  response = await request("/api/names", { names: Object.fromEntries(ids.map((id, i) => [id, i === 0 ? null : "人名" + i])), confirm: false, expectedRecordId:state.trial.sessionId });
   assert.equal(response.status, 400, "explicit confirmation is required");
-  response = await request("/api/names", { names: Object.fromEntries(ids.map((id, i) => [id, i === 0 ? null : "人名" + i])), confirm: true });
+  response = await request("/api/names", { names: Object.fromEntries(ids.map((id, i) => [id, i === 0 ? null : "人名" + i])), confirm: true, expectedRecordId:state.trial.sessionId });
   assert.equal(response.status, 200);
   state = await response.json();
   assert.equal(state.trial.status, "completed");
@@ -85,7 +85,7 @@ test("v2 over HTTP: own scene only, immediate consecutive messages, private name
   assert.equal(state.trial.resultLocked, false);
   assert.equal(state.trial.result.total, 6);
   assert.ok(!JSON.stringify(state).includes("figureId"));
-  assert.equal((await request("/api/message", { text: "まだ？" })).status, 400);
+  assert.equal((await request("/api/message", { text: "まだ？", expectedRecordId:state.trial.sessionId })).status, 400);
 
   for (const body of payloads) {
     const urls = body.messages.flatMap((m) => Array.isArray(m.content) ? m.content.filter((p) => p.type === "image_url").map((p) => p.image_url.url) : []);

@@ -6,6 +6,7 @@ import { NamingTaskError } from "../../../dialogue-model/runtime/naming-error.mj
 import { sessionCookie, sessionId } from "./session-cookie.ts";
 import { isExcessiveTraffic, type SoftLimitBindings } from "./soft-limits";
 import { AdminIndex } from "./admin/index-do";
+import { createReceptionAdminPort } from './admin/reception-adapter.ts';
 import { handleAdmin, isAdminPath, type AdminLimiter } from "./admin/routes.ts";
 import { summarizeRecord, type AdminSummary } from "./admin/summary.ts";
 import type { AuditEntry } from "./admin/index-store.ts";
@@ -21,6 +22,9 @@ import { validateBaseStart, validateBaseAssignmentConfig, BaseAssignmentError } 
 import { readOwner, validateBoundBaseRecord } from "../../../dialogue-model/runtime/v2/base-assignment-data.ts";
 import type { BaseOwnerState, BaseRecord, BaseSession, MakeBaseTask, OwnerRead } from "../../../dialogue-model/runtime/v2/base-assignment.ts";
 import { participantContactHTML } from "../../../dialogue-model/runtime/v2/participant-contact.ts";
+import { ReceptionError, validateReceptionProtocol, validateReception, createReception, approveReception, cancelReception,
+  participantReception, receptionSummary } from '../../../dialogue-model/runtime/v2/reception.ts';
+import type { Reception } from '../../../dialogue-model/runtime/v2/reception.ts';
 export { AdminIndex };
 
 type Strategy = "repair-first" | "bypass-enabled";
@@ -48,6 +52,8 @@ type NamingTask = {
 
 export interface Env extends SoftLimitBindings {
   BASE_ASSIGNMENT_JSON?: string;
+  RECEPTION_REQUIRED?: string;
+  RECEPTION_PROTOCOL_JSON?: string;
   PARTICIPANT_CONTACT_TEXT?: string;
   // Deployment-wide AI utterance style for new trials; identical for both strategies.
   V2_UTTERANCE_STYLE?: string;
@@ -98,6 +104,7 @@ async function readBody(request: Request): Promise<ApiBody> {
 }
 
 function sanitizedError(error: unknown): Response {
+  if (error instanceof ReceptionError) return json(409, { error:error.code === 'protocol_unconfigured' ? 'reception_not_approved' : error.code });
   if (error instanceof BaseSessionError) { const code = error.code === 'owner_expired' ? 'session_required' : error.code;
     return json(code === 'session_required' ? 401 : code === 'not_found' ? 404 : code === 'invalid_request' ? 400 : 409, {error:code}); }
   if (error instanceof BaseAssignmentError) return json(error.code === 'invalid_request' ? 400 : 409, {error:error.code === 'invalid_request' ? 'invalid_request' : 'trial_unavailable'});
@@ -115,6 +122,93 @@ export class TangramSession extends DurableObject<Env> {
   private lastIndexed = new Map<string, string>();
   // Trials replaced by /api/start in this browser: their late writes go only to their own archive key.
   private retired = new Set<string>();
+  private receptionQueue: Promise<unknown> = Promise.resolve();
+  private receptionAdmission: { receptionId: string; expectedRevision: number; index: number } | null = null;
+
+  private receptionRequired(): boolean { return this.env.RECEPTION_REQUIRED === 'on'; }
+  private protocol() {
+    try { return validateReceptionProtocol(this.env.RECEPTION_PROTOCOL_JSON === undefined ? null : JSON.parse(this.env.RECEPTION_PROTOCOL_JSON)); }
+    catch { throw new ReceptionError('protocol_unconfigured'); }
+  }
+  private receptionSerial<T>(fn: () => Promise<T>): Promise<T> {
+    const result = this.receptionQueue.then(fn,fn); this.receptionQueue = result.catch(() => {}); return result;
+  }
+  private async readReception(): Promise<Reception | null> {
+    const raw = await this.ctx.storage.get('reception:v1');
+    if (raw === undefined) return null;
+    const r = validateReception(raw);
+    if (r.objectId !== this.ctx.id.toString()) throw new ReceptionError('reception_unavailable');
+    return r;
+  }
+  private async indexReception(reception: Reception): Promise<void> {
+    try { await this.index()?.upsertReception(receptionSummary(reception)); } catch { /* Best effort; the owner remains authoritative. */ }
+  }
+  private async receive(): Promise<void> {
+    await this.receptionSerial(async () => {
+      const previous = await this.readReception();
+      if (previous) { await this.indexReception(previous); return; }
+      let number: string | null = null;
+      try { const p = this.protocol(); number = await this.index()?.allocateReceptionNumber(p.receptionNumberFormat,Date.now()) ?? null; }
+      catch { /* Unconfigured protocol or unavailable index still admits a waiting reception. */ }
+      const r = createReception({ receptionId:crypto.randomUUID(), objectId:this.ctx.id.toString(), createdAt:new Date().toISOString(), number });
+      const saved = await this.serialized(() => this.ctx.storage.transaction(async tx => {
+        const old = await tx.get('reception:v1');
+        if (old !== undefined) return validateReception(old);
+        await tx.put({ 'reception:v1':r }); return r;
+      }));
+      await this.indexReception(saved);
+    });
+  }
+  /** Researcher-only RPCs. The management adapter supplies authorization. */
+  async adminReception(): Promise<Reception | null> { return this.readReception(); }
+  async adminApproveReception(input: { expectedRevision: number; order: number }): Promise<Reception> {
+    return this.receptionSerial(async () => {
+      const protocol = this.protocol();
+      const r = await this.serialized(() => this.ctx.storage.transaction(async tx => {
+        const raw = await tx.get('reception:v1'); if (!raw) throw new ReceptionError('reception_unavailable');
+        const next = await approveReception(raw, { ...input, protocol, approvedAt:new Date().toISOString(),
+          randomSeed:() => crypto.getRandomValues(new Uint32Array(1))[0] });
+        await tx.put({ 'reception:v1':next }); return next;
+      }));
+      await this.indexReception(r); return r;
+    });
+  }
+  async adminCancelReception(input: { expectedRevision: number }): Promise<Reception> {
+    return this.receptionSerial(async () => {
+      const r = await this.serialized(() => this.ctx.storage.transaction(async tx => {
+        const raw = await tx.get('reception:v1'); if (!raw) throw new ReceptionError('reception_unavailable');
+        const next = cancelReception(raw,input.expectedRevision); await tx.put({ 'reception:v1':next }); return next;
+      }));
+      await this.indexReception(r); return r;
+    });
+  }
+  private async receptionStart(body: ApiBody): Promise<void> {
+    await this.receptionSerial(async () => {
+      this.protocol(); // A saved plan never bypasses an unconfigured deployment.
+      const r = await this.readReception();
+      if (!r || !r.plan || !['approved','in_progress'].includes(r.status)) throw new ReceptionError('reception_not_approved');
+      if (!Number.isSafeInteger(body.expectedReceptionRevision) || body.expectedReceptionRevision !== r.revision) throw new ReceptionError('trial_changed');
+      const index = r.trials.length;
+      if (index >= r.plan.trials.length) throw new ReceptionError('reception_finished');
+      let predecessor: string | undefined;
+      if (index === 0) {
+        if (r.status !== 'approved' || Object.hasOwn(body,'expectedRecordId')) throw new ReceptionError('trial_changed');
+      } else {
+        const last = r.trials[index-1];
+        if (typeof body.expectedRecordId !== 'string' || body.expectedRecordId !== last.recordId) throw new ReceptionError('trial_changed');
+        predecessor = body.expectedRecordId;
+        const record = await this.baseReadRecord(predecessor);
+        if (!record || record.status !== 'completed') throw new ReceptionError('reception_conflict');
+      }
+      this.receptionAdmission = { receptionId:r.receptionId, expectedRevision:r.revision, index };
+      try {
+        if (predecessor) {
+          await this.assignmentSession().prepareNext(predecessor);
+          this.trial = (await this.assignmentSession().restore()).task;
+        } else this.trial = (await this.assignmentSession().start({version:2})).task;
+      } finally { this.receptionAdmission = null; }
+    });
+  }
 
   /** Researcher-only read of one archived trial for /admin. It neither restores nor resumes a trial. */
   async adminRecord(recordId: string): Promise<StoredTrial | null> {
@@ -277,6 +371,11 @@ export class TangramSession extends DurableObject<Env> {
     if (this.base) return this.base;
     this.base = createBaseAssignmentSession({ownerId:this.ctx.id.toString(),adapter:'worker_binding',now:Date.now,newId:()=>crypto.randomUUID(),
       readConfig:async()=>this.env.BASE_ASSIGNMENT_JSON === undefined ? null : validateBaseAssignmentConfig(JSON.parse(this.env.BASE_ASSIGNMENT_JSON)),
+      ...(this.receptionRequired() ? { readPlan:async () => {
+        const r = await this.readReception(), binding = this.receptionAdmission;
+        if (!r?.plan || !binding || r.receptionId !== binding.receptionId || r.revision !== binding.expectedRevision) throw new ReceptionError('trial_changed');
+        return { receptionId:r.receptionId, plan:r.plan, trialIndex:binding.index };
+      } } : {}),
       makeTask:async binding=>this.createTrial(binding),
       store:{
         read:async():Promise<OwnerRead>=>{
@@ -290,7 +389,9 @@ export class TangramSession extends DurableObject<Env> {
           return {kind:'state',state:owner};
         },
         readRecord:id=>this.baseReadRecord(id),
-        compareAndSwap:(revision,next,writes)=>this.serialized(()=>this.ctx.storage.transaction(async tx=>{
+        compareAndSwap:(revision,next,writes)=>{
+          let indexed: Reception | null = null;
+          return this.serialized(()=>this.ctx.storage.transaction(async tx=>{
           const raw = await tx.get<BaseOwnerState>('base:owner:v1');
           if (!raw) throw new BaseSessionError('trial_unavailable');
           const old = readOwner(raw,this.ctx.id.toString()); if (old.revision !== revision) return false;
@@ -312,13 +413,49 @@ export class TangramSession extends DurableObject<Env> {
           updates.ledger = ledger;
           const active = owner.activeKey && owner.admissions[owner.activeKey]?.record;
           if (active) updates[ACTIVE_KEY] = active;
+          let reception: Reception | null = null;
+          const current = owner.activeKey && owner.admissions[owner.activeKey];
+          if (current && current.assignment.source.kind === 'reception_plan_v1') {
+            const rawReception = await tx.get('reception:v1');
+            reception = validateReception(rawReception);
+            const source = current.assignment.source;
+            if (source.receptionId !== reception.receptionId || reception.objectId !== owner.ownerId ||
+              JSON.stringify(source.plan) !== JSON.stringify(reception.plan)) throw new ReceptionError('reception_unavailable');
+            let changed = false;
+            if (!old.admissions[owner.activeKey!]) {
+              const expected = this.receptionAdmission;
+              if (!expected || expected.expectedRevision !== reception.revision || expected.index !== source.trialIndex ||
+                expected.receptionId !== reception.receptionId || reception.trials.length !== source.trialIndex ||
+                !['approved','in_progress'].includes(reception.status)) throw new ReceptionError('trial_changed');
+              reception.trials.push({ index:source.trialIndex, recordId:null }); reception.status = 'in_progress'; changed = true;
+            }
+            for (const entry of Object.values(owner.admissions)) {
+              if (!entry?.record || entry.assignment.source.kind !== 'reception_plan_v1') continue;
+              const slot = reception.trials[entry.assignment.source.trialIndex];
+              if (!slot || entry.assignment.source.receptionId !== reception.receptionId || slot.recordId !== null && slot.recordId !== entry.record.recordId) throw new ReceptionError('reception_unavailable');
+              if (slot.recordId === null) { slot.recordId = entry.record.recordId; changed = true; }
+            }
+            if (reception.status !== 'finished' && reception.trials.length === reception.plan!.trials.length && reception.trials.every(t =>
+              Object.values(owner.admissions).some(e => e?.record?.recordId === t.recordId && e?.record?.status === 'completed'))) {
+              reception.status = 'finished'; changed = true;
+            }
+            if (changed) { reception.revision++; reception = validateReception(reception); updates['reception:v1'] = reception; }
+          }
           await tx.put(updates); if (!active) await tx.delete(ACTIVE_KEY);
+          indexed = reception;
           return true;
-        }))
+        })).then(applied => {
+          // Publish only committed owner/reception state, including when a
+          // transaction callback was retried or its commit failed.
+          if (applied && indexed) this.ctx.waitUntil(this.indexReception(indexed));
+          return applied;
+        });
+        }
       }});
     return this.base;
   }
   async adminPrepareNext(id: string) {
+    if (this.receptionRequired()) throw new ReceptionError('reception_not_approved');
     const next = await this.assignmentSession().prepareNext(id);
     this.trial = null; // Next participant request obtains the coordinator's bound current handle.
     return next;
@@ -411,42 +548,67 @@ export class TangramSession extends DurableObject<Env> {
     return { trial, hideStrategy: true, busy: Boolean(live?.busy) };
   }
 
+  private async participantState(): Promise<unknown> {
+    const state = await this.state();
+    if (!this.receptionRequired()) return state;
+    const r = await this.readReception();
+    const reception = r ? participantReception(r) : { number:null, status:'waiting', revision:0 };
+    if (r?.status === 'approved' || r?.status === 'in_progress') {
+      try { this.protocol(); } catch { reception.status = 'unavailable'; }
+    }
+    return { ...state as object, reception };
+  }
+
   async fetch(request: Request): Promise<Response> {
     try {
       const pathname = new URL(request.url).pathname;
       const body = request.method === 'POST' && ['/api/start','/api/message','/api/retry','/api/names','/api/ai-submit'].includes(pathname) ? await readBody(request) : null;
-      if (pathname === '/api/start' && request.method === 'POST') validateBaseStart(body);
+      if (pathname === '/api/start' && request.method === 'POST') {
+        if (this.receptionRequired()) {
+          if (body?.version !== 2 || Object.keys(body).some(k => !['version','expectedReceptionRevision','expectedRecordId'].includes(k))) throw new NamingTaskError('invalid_request');
+        } else validateBaseStart(body);
+      }
       const ownerStatus = await this.baseOwnerStatus();
       if (ownerStatus !== 'registered') return json(401,{error:'session_required'});
       await this.initialize();
+      if (pathname === '/api/reception' && request.method === 'POST') {
+        if (!this.receptionRequired()) return json(404,{error:'not_found'});
+        await this.receive(); this.trial = (await this.assignmentSession().restore()).task;
+        return json(200,await this.participantState());
+      }
       if (request.method === "GET" && pathname === "/api/records") return json(200, { records: await this.ownRecords() });
       const recordPath = pathname.match(/^\/api\/records\/([^/]+)\/(review|questionnaire)$/);
       if (recordPath) return await this.recordRoute(request, recordPath[1], recordPath[2]);
       if (pathname !== '/api/start') this.trial = (await this.assignmentSession().restore()).task;
-      if (request.method === 'GET' && pathname === '/api/state') return json(200,await this.state());
+      if (request.method === 'GET' && pathname === '/api/state') return json(200,await this.participantState());
       if (request.method !== "POST") return json(404, { error: "not_found" });
       if (!["/api/start", "/api/message", "/api/retry", "/api/names", "/api/ai-submit"].includes(pathname)) return json(404, { error: "not_found" });
       if (pathname === '/api/start') {
-        this.trial = (await this.assignmentSession().start(body)).task;
-        return json(200,await this.state());
+        if (this.receptionRequired()) await this.receptionStart(body!);
+        else this.trial = (await this.assignmentSession().start(body)).task;
+        return json(200,await this.participantState());
       }
       if (!this.trial) throw new NamingTaskError("trial_required");
+      const trial = this.trial;
+      if (typeof body!.expectedRecordId !== "string" || body!.expectedRecordId !== trial.getState().sessionId) {
+        return json(409, { error: "trial_changed" });
+      }
       if (pathname === "/api/message") {
         if (typeof body!.text !== "string" || !body!.text.trim() || body!.text.length > 2000) throw new NamingTaskError("invalid_message");
         const clientId = typeof body!.clientId === "string" ? body!.clientId.slice(0, 80) : undefined;
-        const receipt = this.trial.message(body!.text, clientId);
-        await this.trial.persistNow();
-        this.ctx.waitUntil(this.trial.whenIdle().catch(() => {}));
-        return json(202, { eventId: receipt.eventId, ...await this.state() as object });
+        const receipt = trial.message(body!.text, clientId);
+        await trial.persistNow();
+        this.ctx.waitUntil(trial.whenIdle().catch(() => {}));
+        return json(202, { eventId: receipt.eventId, ...await this.participantState() as object });
       }
-      if (pathname === "/api/retry") await this.trial.retry();
+      if (pathname === "/api/retry") await trial.retry();
       if (pathname === "/api/names") {
         if (body!.confirm !== true) throw new NamingTaskError("invalid_submission");
-        await this.trial.submitHuman({ names: body!.names });
-        if (!this.trial.getState().aiSubmitted) await this.trial.submitAI();
+        await trial.submitHuman({ names: body!.names });
+        if (!trial.getState().aiSubmitted) await trial.submitAI();
       }
-      if (pathname === "/api/ai-submit") await this.trial.submitAI();
-      return json(200, await this.state());
+      if (pathname === "/api/ai-submit") await trial.submitAI();
+      return json(200, await this.participantState());
     } catch (error) {
       return sanitizedError(error);
     }
@@ -466,6 +628,13 @@ export default {
       return handleAdmin(request, {
         token: index ? env.ADMIN_TOKEN : undefined,
         limiter: env.ADMIN_RATE_LIMIT,
+        receptions: index && env.RECEPTION_REQUIRED === 'on' ? createReceptionAdminPort({
+          index,
+          readProtocol:() => env.RECEPTION_PROTOCOL_JSON === undefined ? null : JSON.parse(env.RECEPTION_PROTOCOL_JSON),
+          owner:objectId => {
+            try { return env.NAMING_SESSIONS.get(env.NAMING_SESSIONS.idFromString(objectId)); } catch { return null; }
+          },
+        }) : undefined,
         listPage: async (after) => (await index!.page(after)) as { items: AdminSummary[]; next: string | null },
         getSummary: async (recordId) => (await index!.get(recordId)) as AdminSummary | null,
         getRecord: async (summary) => (await owner(summary)?.adminRecord(summary.recordId)) ?? null,
@@ -509,7 +678,7 @@ export default {
     try {
       if (url.pathname.startsWith("/api/")) {
         const allowed = request.method === 'GET' && ['/api/state','/api/records'].includes(url.pathname) ||
-          request.method === 'POST' && ['/api/start','/api/message','/api/retry','/api/names','/api/ai-submit'].includes(url.pathname) ||
+          request.method === 'POST' && ['/api/reception','/api/start','/api/message','/api/retry','/api/names','/api/ai-submit'].includes(url.pathname) ||
           ['GET','POST'].includes(request.method) && /^\/api\/records\/[^/]+\/(review|questionnaire)$/u.test(url.pathname);
         if (!allowed) return withHeaders(json(404,{error:'not_found'}));
         const cookie = sessionId(request.headers.get('Cookie'));

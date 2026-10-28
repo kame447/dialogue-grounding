@@ -2,6 +2,7 @@ const $ = (id) => document.getElementById(id);
 const SVG = "http://www.w3.org/2000/svg";
 let current = null;
 let startReady = false;
+let reception = null;
 let working = false;
 let serverBusy = false;
 let refreshTimer;
@@ -32,6 +33,7 @@ let chatDisconnected = false;
 let checkingChat = false;
 let retryingAI = false;
 let submissionWarning = "";
+let restoreComposerOnChange = false;
 // Presentation/network safeguards only; these never close a research trial or
 // cancel backend generation. A stalled state is refreshed, never auto-retried.
 const CHAT_STALL_MS = 60000;
@@ -51,7 +53,7 @@ function clearDraft() {
   if (reviewing) return;
   try { sessionStorage.removeItem(draftKey); } catch { /* Storage may be disabled. */ }
 }
-function restoreDraft(trial) {
+function restoreDraft(trial, composer = "") {
   if (reviewing) return;
   try {
     const draft = JSON.parse(sessionStorage.getItem(draftKey));
@@ -62,11 +64,17 @@ function restoreDraft(trial) {
     localStage = draft.stage === "names" ? "names" : "chat";
     reviewStage = STAGES.includes(draft.review) ? draft.review : null;
   } catch { /* Ignore unavailable or invalid browser drafts. */ }
+  finally { if (composer) $("utterance").value = composer; }
 }
 const defaultContact = "実験の案内に記載された連絡先へお問い合わせください。";
 const contact = document.querySelector?.('meta[name="participant-contact"]')?.content || defaultContact;
 const errors = {
   trial_unavailable: "試行を開始できませんでした。" + contact,
+  reception_not_approved: "この画面を開いたまま、開始の案内があるまでお待ちください。",
+  protocol_unconfigured: "この画面を開いたまま、開始の案内があるまでお待ちください。",
+  reception_conflict: "画面が更新されたため、直前の操作を完了できませんでした。現在の表示を確認し、必要ならもう一度操作してください。",
+  reception_unavailable: "受付を確認できませんでした。" + contact,
+  reception_finished: "すべての課題が完了しました。ご協力ありがとうございました。",
   ai_unavailable: "AIに接続できませんでした。会話履歴を確認してください。送り直すには、そのメッセージの「再送」を押してください。メッセージは自動では再送されません。",
   scoring_error: "採点でエラーが発生しました。提出内容は保存されています。採点を再試行できます。",
   invalid_ai_submission: "AIが提出した名前を確認できませんでした。" + contact,
@@ -76,14 +84,19 @@ const errors = {
   invalid_questionnaire: "アンケートの回答を確認してください。すべての質問に回答が必要です。",
   questionnaire_submitted: "このアンケートは提出済みです。",
   trial_not_completed: "試行が完了してからアンケートに回答できます。",
+  trial_changed: "画面を現在の試行に更新したため、直前の操作は送信されませんでした。画面と入力欄を確認し、必要ならもう一度操作してください。",
   not_found: "この試行は表示できません。保存期間が過ぎたか、このブラウザの試行ではありません。",
 };
 async function api(path, body, signal) {
+  if (body !== undefined && ["/api/message", "/api/retry", "/api/names", "/api/ai-submit"].includes(path)) {
+    body = { ...body, expectedRecordId: current?.sessionId };
+  }
   const response = await fetch(path, body === undefined ? (signal ? { signal } : {}) : {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), ...(signal ? { signal } : {}),
   });
   const value = await response.json();
   if (!response.ok) {
+    if (response.status === 409 && value.error === "trial_changed" && body?.expectedRecordId === current?.sessionId) restoreComposerOnChange = true;
     const error = new Error(errors[value.error] || "操作を完了できませんでした。" + contact);
     error.status = response.status;
     error.code = value?.error;
@@ -417,24 +430,38 @@ function renderHistory() {
   keepPosition(scrollTop);
 }
 function renderStartStage(state) {
-  // No researcher-permission API exists yet. A loaded no-trial state permits
-  // explicit start; a future pending/approved projection belongs here.
-  startReady = !state.trial;
-  $("start-stage").hidden = Boolean(state.trial);
+  reception = state.reception ?? null;
+  const next = Boolean(state.trial && trialCompleted() && reception?.status === "in_progress");
+  startReady = reception ? (!state.trial && reception.status === "ready") || next : !state.trial;
+  $("start-stage").hidden = Boolean(state.trial) && !next;
   $("trial-progress").hidden = !state.trial;
+  $("start-trial").textContent = next ? "次の課題を開始" : "スタート";
+  $("reception-number").hidden = !reception?.number;
+  $("reception-number").textContent = reception?.number ? `受付番号 ${reception.number}` : "";
+  $("start-message").textContent = !reception ? "案内を確認してから、スタートを押してください。"
+    : next ? "前の課題が終わったら、「次の課題を開始」を押してください。" : reception.status === "ready" ? "準備ができました。スタートを押してください。"
+      : reception.status === "finished" ? "すべての課題が完了しました。ご協力ありがとうございました。" : "この画面を開いたまま、開始の案内があるまでお待ちください。";
 }
 function canStart() {
-  return startReady && !current && !working && !serverBusy && !reviewing;
+  return startReady && (!current || trialCompleted() && reception?.status === "in_progress") && !working && !serverBusy && !reviewing;
 }
 function render(state) {
   const trial = state.trial;
-  if (trialIdentity(trial) !== trialIdentity(current)) { generation++; resetLocal(); if (trial) restoreDraft(trial); }
+  if (trialIdentity(trial) !== trialIdentity(current)) {
+    // A poll can observe the switch before the in-flight POST returns 409.
+    // Keep unconfirmed text editable; names restore only for their own trial.
+    const composer = (restoreComposerOnChange || sending || working) && !reviewing ? [...pending.filter((item) => item.status !== "accepted").map((item) => item.text), $("utterance").value].filter(Boolean).join("\n") : "";
+    restoreComposerOnChange = false;
+    generation++; resetLocal();
+    if (trial) restoreDraft(trial, composer);
+    else $("utterance").value = composer;
+  }
   // Events are append-only; a state response started earlier must not remove newer events.
   if (trial && trialIdentity(current) === trialIdentity(trial) && (trial.events?.length ?? 0) < (current?.events?.length ?? 0)) return;
   current = trial; serverBusy = Boolean(state.busy);
   renderStartStage(state);
   $("trial").hidden = !trial || preparing;
-  if (!trial) { loadRecords(); renderRecords(); setControls(); return; }
+  if (!trial) { loadRecords(); renderRecords(); setControls(); scheduleRefresh(); return; }
   const data = scene();
   const nextSignature = JSON.stringify(data);
   if (nextSignature !== sceneSignature) { sceneSignature = nextSignature; addScene($("board"), true); }
@@ -486,6 +513,8 @@ function setControls() {
 }
 function scheduleRefresh() {
   clearTimeout(refreshTimer);
+  if (document.visibilityState === "hidden") return;
+  if (!current && reception && !reviewing) { refreshTimer = setTimeout(() => refreshState(), 5000); return; }
   if (current && !preparing && !reviewing) refreshTimer = setTimeout(() => refreshState(), aiThinking() || pending.length ? 700 : 2000);
 }
 async function refreshState() {
@@ -548,8 +577,9 @@ async function drainMessages() {
         item.status = "accepted";
         if (state?.trial !== undefined) render(state);
         else await refreshState();
-      } catch {
+      } catch (error) {
         if (epoch !== generation) break;
+        if (error.code === "trial_changed") $("notice").textContent = error.message;
         if (pending.includes(item)) item.status = "failed";
         renderHistory(); setControls();
         // The server may already have accepted it. Refresh without resending.
@@ -1105,10 +1135,19 @@ const sendSurveyOnHide = () => {
   } catch { /* The browser copy is resent after reload. */ }
 };
 globalThis.addEventListener?.("pagehide", sendSurveyOnHide);
-document.addEventListener?.("visibilitychange", () => { if (document.visibilityState === "hidden") sendSurveyOnHide(); });
+document.addEventListener?.("visibilitychange", () => {
+  if (document.visibilityState === "hidden") { sendSurveyOnHide(); clearTimeout(refreshTimer); }
+  else { if (reception) refreshState(); else scheduleRefresh(); }
+});
 $("start-trial").addEventListener("click", () => {
   if (!canStart()) return;
-  operate(() => api("/api/start", { version: 2 }));
+  const expectation = reception ? { expectedReceptionRevision: reception.revision, ...(current ? { expectedRecordId: current.sessionId } : {}) } : {};
+  operate(() => api("/api/start", { version: 2, ...expectation }));
 });
-// Opening or reloading the page only restores state. Starting is explicit.
-operate(() => api("/api/state"));
+// An explicit admission POST creates only the reception; trial start is a click.
+operate(async () => {
+  const state = await api("/api/state");
+  if (!state.reception) return state;
+  try { return await api("/api/reception", {}); }
+  catch (error) { if (error.status === 404) return state; throw error; }
+});

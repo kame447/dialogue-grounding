@@ -45,6 +45,17 @@ export function createBaseAssignmentSession(options: BaseSessionOptions): BaseSe
     try { validateBoundBaseRecord(value, value.assignment); return copy(value); } catch { return fail(); }
   }
   async function assignment(): Promise<BaseAssignment> {
+    if (options.readPlan) {
+      const binding = await port(() => options.readPlan!());
+      try {
+        const t = binding.plan.trials[binding.trialIndex];
+        return readAssignment({ schemaVersion:'base_assignment_v1', assignmentId:options.newId(), strategy:t.strategy,
+          seed:t.seed, referenceMemory:t.referenceMemory, createdAt:new Date(options.now()).toISOString(),
+          source:{ kind:'reception_plan_v1', adapter:options.adapter, receptionId:binding.receptionId,
+            protocolId:binding.plan.protocolId, protocolRevision:binding.plan.protocolRevision, protocolSha256:binding.plan.protocolSha256,
+            trialIndex:binding.trialIndex, plan:binding.plan } });
+      } catch { return fail(); }
+    }
     const raw = await port(() => options.readConfig());
     try {
       const config = validateBaseAssignmentConfig(raw);
