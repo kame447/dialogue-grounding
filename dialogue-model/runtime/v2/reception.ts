@@ -1,12 +1,13 @@
 import { createHash } from 'node:crypto';
 import type { Strategy } from './base-assignment.ts';
+import { ROTATION_MODES as STIMULUS_ROTATION_MODES } from '../stimuli/scatter-v2.mjs';
 
 export type ReceptionProtocol = { schemaVersion: 'reception_protocol_v1'; protocolId: string; revision: number;
   allowedOrders: Strategy[][]; seedPolicy: 'shared' | 'per_trial'; referenceMemory: boolean;
   betweenTrials: 'none'; receptionNumberFormat: 'daily_seq3' };
-/** Temporary copy of implementer A's ROTATION_MODES (scatter-v2.mjs); the integration replaces it with A's export. */
-export const ROTATION_MODES = Object.freeze(['relative_pm90', 'relative_0'] as const);
-export type RotationMode = typeof ROTATION_MODES[number];
+export type RotationMode = 'relative_pm90' | 'relative_0';
+/** The stimulus generator's own list, so the protocol never offers a mode the generator cannot produce. */
+export const ROTATION_MODES = STIMULUS_ROTATION_MODES as readonly RotationMode[];
 export type BetweenTrials = 'none' | 'questionnaire_required';
 /** Researcher-saved protocol. Every value is an explicit selection; nothing is defaulted. */
 export type ReceptionProtocolV2 = { schemaVersion: 'reception_protocol_v2'; protocolId: string; revision: number;
