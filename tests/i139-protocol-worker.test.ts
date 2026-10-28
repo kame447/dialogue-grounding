@@ -120,14 +120,98 @@ const state = async (h: H, cookie: string) => (await h.edge(req('/api/state', un
 const errorOf = async (r: Response) => (await r.json()).error;
 async function configured(patch: Record<string, unknown> = {}) { const h = harness(); await h.protocol(patch); await h.mode('on'); return h; }
 
-test('env reception values are ignored: unsaved settings keep the legacy flow even with RECEPTION_REQUIRED=on', async () => {
-  const h = harness(), cookie = await h.browser();
-  assert.equal(Object.hasOwn(await state(h, cookie), 'reception'), false);
-  assert.equal((await receive(h, cookie)).status, 404);
-  const r = await h.edge(req('/api/start', { version: 2 }, cookie)); assert.equal(r.status, 200);
-  const record = h.snapshot(cookie)['base:owner:v1'].admissions.initial.record;
-  assert.equal(record.assignment.source.kind, 'server_config_v1'); assert.equal(h.inputs[0].rotationMode, 'relative_pm90');
-  assert.equal(reception(h, cookie), undefined); await h.done();
+test('env reception values are ignored: unsaved settings mean the default-on reception, even with no protocol and whatever the env says', async () => {
+  for (const env of [{ RECEPTION_REQUIRED: 'on' }, { RECEPTION_REQUIRED: 'off', RECEPTION_PROTOCOL_JSON: '{"schemaVersion":"reception_protocol_v1"}' }]) {
+    const h = harness(), cookie = await h.browser();
+    h.object(cookie).env = { ...h.object(cookie).env, ...env };
+    assert.equal((await state(h, cookie)).reception?.status, 'waiting');
+    assert.equal((await h.edge(req('/api/start', { version: 2 }, cookie))).status, 409, 'no start before a reception and approval');
+    assert.equal((await receive(h, cookie)).status, 200);
+    assert.equal((await errorOf(await start(h, cookie))), 'reception_not_approved');
+    assert.equal(h.inputs.length, 0); assert.equal(h.snapshot(cookie)['base:owner:v1'].activeKey, null);
+    assert.equal(reception(h, cookie).plan, null); assert.equal(reception(h, cookie).number, '001');
+    assert.deepEqual((await h.index.readReceptionSettings()).mode, { value: 'unset', revision: 0 }); await h.done();
+  }
+});
+
+test('N1 default on, nothing saved: two browsers wait with numbers, one reception per browser, and nothing can start', async () => {
+  const h = harness(), a = await h.browser(), b = await h.browser();
+  const [ra1, ra2] = await Promise.all([receive(h, a), receive(h, a)]); assert.equal(ra1.status, 200); assert.equal(ra2.status, 200);
+  assert.equal((await receive(h, b)).status, 200);
+  const first = reception(h, a), second = reception(h, b);
+  assert.notEqual(first.receptionId, second.receptionId); assert.deepEqual([first.number, second.number].sort(), ['001', '002']);
+  h.evict(); assert.equal((await receive(h, a)).status, 200); assert.deepEqual(reception(h, a), first, 'reload keeps the same reception and number');
+  for (const cookie of [a, b]) {
+    assert.equal((await state(h, cookie)).reception.status, 'waiting');
+    assert.equal(await errorOf(await start(h, cookie)), 'reception_not_approved');
+    assert.equal(reception(h, cookie).plan, null); assert.equal(h.snapshot(cookie)['base:owner:v1'].activeKey, null);
+  }
+  await assert.rejects(async () => h.object(a).adminApproveReception({ expectedRevision: 0, order: 0, protocol: { protocolId: 'x', revision: 1, sha256: '0'.repeat(64) } }),
+    (e: any) => e.message === 'protocol_unconfigured');
+  assert.equal(reception(h, a).status, 'pending'); assert.equal(h.inputs.length, 0);
+  const s = await h.index.readReceptionSettings(); assert.equal(s.protocol, null); assert.deepEqual(s.mode, { value: 'unset', revision: 0 });
+  assert.deepEqual([...(await h.indexStorage.list({ prefix: 'reception-' })).keys()], [], 'nothing was saved on the researcher\'s behalf');
+  await h.done();
+});
+
+test('N2 the mode is never saved: saving a protocol lets the researcher approve the waiting reception, and the plan reaches the trial', async () => {
+  for (const rotationMode of ['relative_0', 'relative_pm90']) {
+    const h = harness(), cookie = await h.browser(); assert.equal((await receive(h, cookie)).status, 200);
+    await h.protocol({ rotationMode, allowedOrders: [[BE, RF]] });
+    await h.object(cookie).adminApproveReception({ expectedRevision: 0, order: 0, protocol: await h.displayed() });
+    assert.equal(reception(h, cookie).status, 'approved'); assert.deepEqual(reception(h, cookie).plan.trials.map((t: any) => t.rotationMode), [rotationMode, rotationMode]);
+    const [s1, s2] = await Promise.all([start(h, cookie), start(h, cookie)]);
+    assert.deepEqual([s1.status, s2.status].sort(), [200, 409], 'a double start makes one trial');
+    assert.equal(h.inputs.filter(i => !i.restore).length, 1); assert.equal(h.inputs[0].rotationMode, rotationMode); assert.equal(h.inputs[0].strategy, BE);
+    const first = reception(h, cookie).trials[0].recordId, admitted = h.snapshot(cookie)['base:owner:v1'].admissions.initial.record;
+    assert.equal(admitted.recordId, first); assert.equal(admitted.options.rotationMode, rotationMode); assert.equal(admitted.stimulus.rotationMode, rotationMode);
+    await h.tasks.get(first).complete();
+    const next = await start(h, cookie, { expectedRecordId: first }); assert.equal(next.status, 200);
+    assert.equal(h.inputs.filter(i => !i.restore).at(-1).strategy, RF);
+    assert.deepEqual((await h.index.readReceptionSettings()).mode, { value: 'unset', revision: 0 }); await h.done();
+  }
+});
+
+test('N3 explicit off: a new browser uses the legacy start, and a reception made before off never falls back to it', async () => {
+  const h = harness(), waiting = await h.browser(); assert.equal((await receive(h, waiting)).status, 200);
+  await h.mode('off');
+  const fresh = await h.browser();
+  assert.equal(Object.hasOwn(await state(h, fresh), 'reception'), false); assert.equal((await receive(h, fresh)).status, 404);
+  const r = await h.edge(req('/api/start', { version: 2 }, fresh)); assert.equal(r.status, 200);
+  assert.equal(h.snapshot(fresh)['base:owner:v1'].admissions.initial.record.assignment.source.kind, 'server_config_v1');
+  const before = h.snapshot(waiting), factories = h.inputs.length;
+  assert.equal((await h.edge(req('/api/start', { version: 2 }, waiting))).status, 409);
+  assert.equal(await errorOf(await start(h, waiting)), 'reception_not_approved');
+  assert.deepEqual(h.snapshot(waiting), before); assert.equal(h.inputs.length, factories); await h.done();
+});
+
+test('N4 off then on without a protocol: new browsers wait again, and approval and start stay closed', async () => {
+  const h = harness(); await h.mode('off'); await h.mode('on');
+  const cookie = await h.browser(); assert.equal((await state(h, cookie)).reception.status, 'waiting'); assert.equal((await receive(h, cookie)).status, 200);
+  assert.equal(await errorOf(await start(h, cookie)), 'reception_not_approved');
+  await assert.rejects(async () => h.object(cookie).adminApproveReception({ expectedRevision: 0, order: 0, protocol: { protocolId: 'x', revision: 1, sha256: '0'.repeat(64) } }),
+    (e: any) => e.message === 'protocol_unconfigured');
+  assert.equal(h.inputs.length, 0); assert.equal(reception(h, cookie).status, 'pending'); await h.done();
+});
+
+test('R2 a previous-version legacy owner with an in-progress trial keeps it under the unsaved default: long-lived and recreated, no second trial', async () => {
+  const h = harness(), old = harness(); await old.mode('off'); const cookie = await old.browser();
+  const r = await old.edge(req('/api/start', { version: 2 }, cookie)); assert.equal(r.status, 200); const recordId = (await r.json()).trial.sessionId; await old.done();
+  const id = cookie.split('=')[1]; h.get(id); for (const [k, v] of Object.entries(old.snapshot(cookie))) h.stores.get(id)!.set(k, v);
+  const before = h.snapshot(cookie);
+  for (const evicted of [false, true]) {
+    if (evicted) h.evict();
+    const s = await state(h, cookie); assert.equal(s.trial.sessionId, recordId); assert.equal(Object.hasOwn(s, 'reception'), false);
+    const again = await h.edge(req('/api/start', { version: 2 }, cookie)); assert.equal(again.status, 409); assert.equal(await errorOf(again), 'reception_required');
+  }
+  assert.equal(h.inputs.filter(i => !i.restore).length, 0, 'no new trial');
+  assert.equal(Object.hasOwn(h.snapshot(cookie), 'reception:v1'), false, 'never converted to a reception owner');
+  // Restoring re-persists the same trial (the owner revision may advance); identity, admissions and assignment never change.
+  const owner = h.snapshot(cookie)['base:owner:v1'], was = before['base:owner:v1'];
+  assert.equal(owner.ownerId, was.ownerId); assert.equal(owner.activeKey, was.activeKey); assert.deepEqual(Object.keys(owner.admissions), Object.keys(was.admissions));
+  assert.equal(owner.admissions.initial.record.recordId, recordId); assert.deepEqual(owner.admissions.initial.assignment, was.admissions.initial.assignment);
+  assert.notEqual((await receive(h, cookie)).status, 200);
+  await h.done();
 });
 
 test('D1: approval uses one snapshot; a stale protocol version or stale reception revision creates no plan', async () => {
@@ -196,18 +280,34 @@ test('records whose mode or stimulus disagrees with the plan are rejected in bot
 // D2: the owner class comes from stored state; the global mode matters only for new starts, new receptions,
 // approvals and prepare-next. Existing trials never read the settings.
 type Owner = 'unused' | 'pending' | 'cancelled' | 'approved' | 'in_progress' | 'finished' | 'legacy' | 'legacy_active';
-async function build(owner: Owner) {
+/** A legacy owner whose trial was made by the previous version, where the mode was never saved: it is built in a
+ * separate deployment under an explicit off, then only its stored state moves into `h` (which keeps its own settings). */
+async function previousVersionLegacyOwner(h: H) {
+  const old = harness(); await old.mode('off'); const cookie = await old.browser();
+  const r = await old.edge(req('/api/start', { version: 2 }, cookie)); assert.equal(r.status, 200);
+  const recordId: string = (await r.json()).trial.sessionId; await old.tasks.get(recordId).complete(); await old.done();
+  const id = cookie.split('=')[1]; h.get(id);
+  for (const [k, v] of Object.entries(old.snapshot(cookie))) h.stores.get(id)!.set(k, v);
+  return { cookie, recordId };
+}
+async function build(owner: Owner, unset = false) {
   const h = harness(); await h.protocol(); let cookie: string, recordId: string | null = null;
-  if (owner === 'legacy' || owner === 'unused') {
+  // `unset` never saves a mode: the state every deployment of this change starts from.
+  const on = async () => { if (!unset) await h.mode('on'); };
+  if (owner === 'legacy' && unset) ({ cookie, recordId } = await previousVersionLegacyOwner(h));
+  else if (owner === 'legacy' || owner === 'unused') {
     cookie = await h.browser();
-    if (owner === 'legacy') { const r = await h.edge(req('/api/start', { version: 2 }, cookie)); assert.equal(r.status, 200); recordId = (await r.json()).trial.sessionId; await h.tasks.get(recordId!).complete(); }
-    await h.mode('on');
+    if (owner === 'legacy') {
+      await h.mode('off');
+      const r = await h.edge(req('/api/start', { version: 2 }, cookie)); assert.equal(r.status, 200); recordId = (await r.json()).trial.sessionId; await h.tasks.get(recordId!).complete();
+    }
+    await on();
   } else if (owner === 'legacy_active') {
-    await h.mode('on'); const id = 'b'.repeat(64); cookie = 'tangram_session=' + id; h.get(id);
+    await on(); const id = 'b'.repeat(64); cookie = 'tangram_session=' + id; h.get(id);
     const record = clone(raw()); recordId = record.recordId = crypto.randomUUID();
     h.stores.get(id)!.set('active', record);
   } else {
-    await h.mode('on'); cookie = await h.browser();
+    await on(); cookie = await h.browser();
     if (owner === 'pending' || owner === 'cancelled') assert.equal((await receive(h, cookie)).status, 200);
     else await approve(h, cookie, owner === 'finished' ? 1 : 0);
     if (owner === 'cancelled') await h.object(cookie).adminCancelReception({ expectedRevision: 0 });
@@ -215,7 +315,7 @@ async function build(owner: Owner) {
   }
   return { h, cookie: cookie!, recordId };
 }
-const expectations: Record<Owner, Record<'on' | 'off' | 'fail', { state: string | null; start: number; prepare?: number }>> = {
+const expectations: Record<Owner, Record<'on' | 'off' | 'fail' | 'unset', { state: string | null; start: number; prepare?: number }>> = {
   unused: { on: { state: 'waiting', start: 409 }, off: { state: null, start: 200 }, fail: { state: 'unavailable', start: 409 } },
   pending: { on: { state: 'waiting', start: 409 }, off: { state: 'waiting', start: 409 }, fail: { state: 'waiting', start: 409 } },
   cancelled: { on: { state: 'unavailable', start: 409 }, off: { state: 'unavailable', start: 409 }, fail: { state: 'unavailable', start: 409 } },
@@ -224,9 +324,12 @@ const expectations: Record<Owner, Record<'on' | 'off' | 'fail', { state: string 
   finished: { on: { state: 'finished', start: 409, prepare: 409 }, off: { state: 'finished', start: 409, prepare: 409 }, fail: { state: 'finished', start: 409, prepare: 409 } },
   legacy: { on: { state: null, start: 409, prepare: 409 }, off: { state: null, start: 200, prepare: 201 }, fail: { state: null, start: 409, prepare: 409 } },
   legacy_active: { on: { state: null, start: 409 }, off: { state: null, start: 409 }, fail: { state: null, start: 409 } },
-};
-for (const owner of Object.keys(expectations) as Owner[]) for (const mode of ['on', 'off', 'fail'] as const) test(`D2 ${owner} owner with settings ${mode}`, async () => {
-  const { h, cookie, recordId } = await build(owner), expected = expectations[owner][mode];
+} as any;
+// Reception is the default: an unsaved mode behaves exactly like an explicit on.
+for (const owner of Object.keys(expectations) as Owner[]) expectations[owner].unset = expectations[owner].on;
+for (const owner of Object.keys(expectations) as Owner[]) for (const mode of ['on', 'off', 'fail', 'unset'] as const) test(`D2 ${owner} owner with settings ${mode}`, async () => {
+  const { h, cookie, recordId } = await build(owner, mode === 'unset'), expected = expectations[owner][mode];
+  if (mode === 'unset') assert.deepEqual((await h.index.readReceptionSettings()).mode, { value: 'unset', revision: 0 }, 'the mode is never saved');
   if (mode === 'off') await h.mode('off');
   if (mode === 'fail') h.control.down = true;
   for (const evicted of [false, true]) {
@@ -246,7 +349,7 @@ for (const owner of Object.keys(expectations) as Owner[]) for (const mode of ['o
     const after = h.snapshot(cookie);
     assert.equal(h.inputs.filter(i => !i.restore).length, factories, 'no new task'); assert.deepEqual(after['reception:v1'], before['reception:v1']);
     assert.equal(Object.hasOwn(after, 'reception:v1'), hadReception, 'no reception created'); assert.equal(Object.hasOwn(after, 'base:owner:v1'), hadOwner, 'no owner promotion');
-    if (owner === 'legacy' && mode === 'on') assert.equal(await errorOf(r), 'reception_required');
+    if (owner === 'legacy' && (mode === 'on' || mode === 'unset')) assert.equal(await errorOf(r), 'reception_required');
   }
   if (expected.prepare !== undefined && recordId) {
     const p = await h.object(cookie).adminPrepareNext(recordId).then(() => 201, () => 409);
@@ -254,7 +357,7 @@ for (const owner of Object.keys(expectations) as Owner[]) for (const mode of ['o
   }
   // A reception is never created for an owner that is not unused, nor while settings are off or unreadable.
   const created = await receive(h, cookie);
-  if (owner === 'unused' && mode === 'on') assert.equal(created.status, 200);
+  if (owner === 'unused' && (mode === 'on' || mode === 'unset')) assert.equal(created.status, 200);
   else if (!hadReception) { assert.notEqual(created.status, 200); assert.equal(Object.hasOwn(h.snapshot(cookie), 'reception:v1'), false); }
   if (recordId && owner !== 'legacy_active') assert.equal((await h.edge(req(`/api/records/${recordId}/questionnaire`, { answers, comment: '', submit: true }, cookie))).status, 200, 'existing questionnaire never reads settings');
   if (owner === 'legacy_active') assert.ok(await h.object(cookie).adminRecord(recordId!), 'legacy evidence stays readable');
@@ -349,6 +452,7 @@ test('D2: a deployment without the AdminIndex binding never falls back to the le
   assert.equal((await o.fetch(new Request('https://i139.invalid/api/reception', { method: 'POST' }))).status, 409);
   assert.equal(Object.hasOwn(h.snapshot(cookie), 'reception:v1'), false);
   // A legacy owner with a completed predecessor: prepare-next is refused and nothing changes.
+  await h.mode('off'); // a legacy owner exists only where the researcher turned reception off
   const legacy = await h.browser(), started = await h.edge(req('/api/start', { version: 2 }, legacy)); assert.equal(started.status, 200);
   const predecessor = (await started.json()).trial.sessionId; await h.tasks.get(predecessor).complete();
   const lo = h.object(legacy); lo.env = { ...lo.env, ADMIN_INDEX: undefined };

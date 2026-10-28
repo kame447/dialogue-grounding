@@ -19,6 +19,8 @@ export type ProtocolEntry = { revision: number; savedAt: string; sha256: string;
 export type ModeEntry = { revision: number; value: 'on' | 'off'; savedAt: string; protocolRevision: number | null };
 export type ModeState = { value: 'unset'; revision: 0 } | { value: 'on' | 'off'; revision: number; savedAt: string };
 export type ReceptionSettings = { protocol: ProtocolEntry | null; mode: ModeState };
+/** Reception is the default: only a researcher's explicit "off" closes it. The stored value is never rewritten. */
+export const receptionOpen = (mode: ModeState): boolean => mode.value !== 'off';
 export type ProtocolFields = Pick<ReceptionProtocolV2, 'allowedOrders' | 'seedPolicy' | 'referenceMemory' | 'betweenTrials' | 'receptionNumberFormat' | 'rotationMode'>;
 export type SaveResult = { ok: true; revision: number } | { ok: false; error: 'conflict' | 'invalid' | 'protocol_unconfigured' | 'unavailable' };
 
@@ -69,7 +71,10 @@ export async function readSettings(storage: SettingsStorage): Promise<ReceptionS
     if (m === undefined) { if (await hasAny(storage, MODE_REV)) broken(); }
     else {
       const entry = modeEntry(m), saved = modeEntry(await storage.get(revKey(MODE_REV, entry.revision)));
-      if (JSON.stringify(saved) !== JSON.stringify(entry) || entry.value === 'on' && !protocol) broken();
+      // "on" without a protocol is normal (reception is the default), but a mode saved against a protocol
+      // revision that is now missing or older is evidence of lost settings, never "unsaved".
+      if (JSON.stringify(saved) !== JSON.stringify(entry) ||
+        entry.protocolRevision !== null && (!protocol || protocol.revision < entry.protocolRevision)) broken();
       mode = { value: entry.value, revision: entry.revision, savedAt: entry.savedAt };
     }
     return { protocol, mode };
@@ -86,7 +91,7 @@ export function validateReceptionSettings(value: unknown): ReceptionSettings {
     let mode: ModeState;
     if (m.value === 'unset') { if (m.revision !== 0) broken(); mode = { value: 'unset', revision: 0 }; }
     else {
-      if ((m.value !== 'on' && m.value !== 'off') || !positive(m.revision) || !iso(m.savedAt) || m.value === 'on' && !protocol) broken();
+      if ((m.value !== 'on' && m.value !== 'off') || !positive(m.revision) || !iso(m.savedAt)) broken();
       mode = { value: m.value as 'on' | 'off', revision: m.revision as number, savedAt: m.savedAt as string };
     }
     return { protocol, mode };
@@ -127,7 +132,6 @@ export async function saveMode(storage: SettingsStorage, input: { expectedRevisi
   try { settings = await readSettings(storage); } catch { return { ok: false, error: 'unavailable' }; }
   if (!expected(input?.expectedRevision) || (input.value !== 'on' && input.value !== 'off')) return { ok: false, error: 'invalid' };
   if (input.expectedRevision !== settings.mode.revision) return { ok: false, error: 'conflict' };
-  if (input.value === 'on' && !settings.protocol) return { ok: false, error: 'protocol_unconfigured' };
   const revision = settings.mode.revision + 1;
   if (await storage.get(revKey(MODE_REV, revision)) !== undefined) return { ok: false, error: 'unavailable' };
   const entry: ModeEntry = { revision, value: input.value, savedAt: new Date(now).toISOString(), protocolRevision: settings.protocol?.revision ?? null };

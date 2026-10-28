@@ -25,7 +25,7 @@ import { participantContactHTML } from "../../../dialogue-model/runtime/v2/parti
 import { ReceptionError, validateReception, createReception, approveReception, cancelReception,
   participantReception, receptionSummary, effectiveBetweenTrials } from '../../../dialogue-model/runtime/v2/reception.ts';
 import { isSubmittedQuestionnaire } from '../../../dialogue-model/runtime/v2/questionnaire-gate.ts';
-import { validateReceptionSettings } from './admin/reception-settings.ts';
+import { receptionOpen, validateReceptionSettings } from './admin/reception-settings.ts';
 import type { ProtocolEntry, ReceptionSettings } from './admin/reception-settings.ts';
 import type { RotationMode } from '../../../dialogue-model/runtime/v2/reception.ts';
 import type { Reception } from '../../../dialogue-model/runtime/v2/reception.ts';
@@ -170,12 +170,14 @@ export class TangramSession extends DurableObject<Env> {
     await this.receptionSerial(async () => {
       const previous = await this.readReception();
       if (previous) { await this.indexReception(previous); return; }
-      // Only an unused owner may become a reception owner, and only while the researcher has turned reception on.
+      // Only an unused owner may become a reception owner, and only unless the researcher has turned reception off.
+      // Waiting needs no protocol; approval and start still do.
       if (await this.ownerKind() !== 'unused') throw new NamingTaskError('not_found');
       const settings = await this.settings();
-      if (settings.mode.value !== 'on' || !settings.protocol) throw new NamingTaskError('not_found');
+      if (!receptionOpen(settings.mode)) throw new NamingTaskError('not_found');
       let number: string | null = null;
-      try { number = await this.index()?.allocateReceptionNumber(settings.protocol.protocol.receptionNumberFormat,Date.now()) ?? null; }
+      // daily_seq3 is the only supported number format, not a research condition.
+      try { number = await this.index()?.allocateReceptionNumber(settings.protocol?.protocol.receptionNumberFormat ?? 'daily_seq3',Date.now()) ?? null; }
       catch { /* An unavailable number counter still admits an unnumbered waiting reception. */ }
       const r = createReception({ receptionId:crypto.randomUUID(), objectId:this.ctx.id.toString(), createdAt:new Date().toISOString(), number });
       const saved = await this.serialized(() => this.ctx.storage.transaction(async tx => {
@@ -194,7 +196,7 @@ export class TangramSession extends DurableObject<Env> {
     return this.receptionSerial(async () => {
       // One settings read is the fixed point: the same snapshot is compared and copied into the plan.
       const settings = await this.settings();
-      if (settings.mode.value !== 'on') throw new ReceptionError('reception_closed');
+      if (!receptionOpen(settings.mode)) throw new ReceptionError('reception_closed');
       if (!settings.protocol) throw new ReceptionError('protocol_unconfigured');
       const protocol = settings.protocol.protocol, expected = input?.protocol;
       const r = await this.serialized(() => this.ctx.storage.transaction(async tx => {
@@ -223,7 +225,7 @@ export class TangramSession extends DurableObject<Env> {
       if (kind === 'unused' || kind === 'legacy') {
         // A new start reads the current setting; unreadable settings never count as off.
         const settings = await this.settings();
-        if (settings.mode.value === 'on') throw new ReceptionError(kind === 'unused' ? 'reception_not_approved' : 'reception_required');
+        if (receptionOpen(settings.mode)) throw new ReceptionError(kind === 'unused' ? 'reception_not_approved' : 'reception_required');
       }
       validateBaseStart(body);
       this.admission = { kind:'legacy' };
@@ -516,7 +518,7 @@ export class TangramSession extends DurableObject<Env> {
       // The researcher's legacy next-trial action follows the same authorization as a new start.
       const kind = await this.ownerKind();
       if (kind === 'reception') throw new ReceptionError('reception_conflict');
-      if (kind === 'legacy' && (await this.settings()).mode.value === 'on') throw new ReceptionError('reception_required');
+      if (kind === 'legacy' && receptionOpen((await this.settings()).mode)) throw new ReceptionError('reception_required');
       this.admission = { kind:'legacy' };
       try {
         const next = await this.assignmentSession().prepareNext(id);
@@ -620,9 +622,9 @@ export class TangramSession extends DurableObject<Env> {
     const kind = await this.ownerKind();
     if (kind === 'unused') {
       // Only a browser that has nothing yet depends on the global mode; reasons are never shown.
-      let mode: string;
-      try { mode = (await this.settings()).mode.value; } catch { return { ...state as object, reception:{ number:null, status:'unavailable', revision:0 } }; }
-      return mode === 'on' ? { ...state as object, reception:{ number:null, status:'waiting', revision:0 } } : state;
+      let open: boolean;
+      try { open = receptionOpen((await this.settings()).mode); } catch { return { ...state as object, reception:{ number:null, status:'unavailable', revision:0 } }; }
+      return open ? { ...state as object, reception:{ number:null, status:'waiting', revision:0 } } : state;
     }
     if (kind !== 'reception') return state;
     const r = (await this.readReception())!;

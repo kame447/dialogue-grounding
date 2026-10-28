@@ -113,7 +113,8 @@ test('save outcomes are closed: conflict, unconfigured protocol and backend fail
 
 test('unsaved page preselects nothing; saved page preselects the current values and shows complete history', async () => {
   const unsaved = await (await handleAdmin(get(), fixture('unsaved').deps)).text();
-  assert.doesNotMatch(unsaved, /\b(checked|selected)\b/); assert.match(unsaved, /未設定のため、受付を許可できません/); assert.match(unsaved, /未設定（使わない）/);
+  assert.doesNotMatch(unsaved, /\b(checked|selected)\b/); assert.match(unsaved, /未設定のため、受付を許可できません/); assert.match(unsaved, /既定（使う）/);
+  assert.match(unsaved, /受付は既定で使います。試行の開始には、プロトコルの保存と研究者の許可が必要です。/); assert.doesNotMatch(unsaved, /未設定（使わない）/);
   assert.match(unsaved, /name="expectedRevision" value="0"/);
   for (const name of ['orders', 'seedPolicy', 'referenceMemory', 'betweenTrials', 'rotationMode', 'receptionNumberFormat']) assert.match(unsaved, new RegExp(`name="${name}"`));
   assert.match(unsaved, /provisional-v0/);

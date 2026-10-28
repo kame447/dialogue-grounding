@@ -58,12 +58,13 @@ function memory() {
     async setAlarm() {}, async deleteAlarm() {},
   };
 }
-function harness(overrides: Record<string, unknown> = {}, settings: 'on' | 'unset' = 'on') {
+function harness(overrides: Record<string, unknown> = {}, settings: 'on' | 'unset' | 'off' = 'on') {
   const stores = new Map<string, ReturnType<typeof memory>>(), objects = new Map<string, any>();
   const tasks = new Map<string, any>(), pending: Promise<unknown>[] = []; let modelCalls = 0, factories = 0;
   const indexStorage = memory();
   const index = new AdminIndex({ storage: indexStorage }, {});
-  const configured = settings === 'unset' ? Promise.resolve() : (async () => {
+  const configured = settings === 'unset' ? Promise.resolve()
+    : settings === 'off' ? (async () => { assert.equal((await index.saveReceptionMode({ expectedRevision: 0, value: 'off' })).ok, true); })() : (async () => {
     assert.equal((await index.saveReceptionProtocol({ expectedRevision: 0, fields: settingsFields() })).ok, true);
     assert.equal((await index.saveReceptionMode({ expectedRevision: 0, value: 'on' })).ok, true);
   })();
@@ -409,8 +410,8 @@ test('AdminIndex reception namespace isolates record summaries, CAS revisions an
   await h.done();
 });
 
-test('legacy mode with unsaved reception settings keeps exact BASE admission behavior and reception API is optional', async () => {
-  const h = harness({ RECEPTION_REQUIRED: 'on' }, 'unset'), cookie = await h.browser();
+test('legacy mode with reception explicitly off keeps exact BASE admission behavior and reception API is optional', async () => {
+  const h = harness({ RECEPTION_REQUIRED: 'on' }, 'off'), cookie = await h.browser();
   const r = await h.object(cookie).fetch(req('/api/start', { version: 2 })); assert.equal(r.status, 200);
   const state = await r.json(), record = h.snapshot(cookie)['record:' + state.trial.sessionId];
   assert.equal(record.strategy, config().strategy); assert.equal(record.seed, config().seed);

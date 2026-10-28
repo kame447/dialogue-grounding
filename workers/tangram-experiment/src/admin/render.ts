@@ -175,12 +175,12 @@ export function renderReceptions(items: ReceptionAdminRow[], next: string | null
 <td>${escapeHtml(entry.plan ? ROTATION_LABELS[entry.plan.rotationMode] ?? '' : '')}</td><td>${escapeHtml(entry.plan ? BETWEEN_LABELS[entry.plan.betweenTrials] ?? '' : '')}</td>
 <td>${entry.trials.filter(trial => trial.recordId && RECORD_ID.test(trial.recordId)).map(trial =>
       `<a href="/admin/record/${escapeHtml(trial.recordId)}">${escapeHtml(trial.recordId)}</a>`).join('<br>')}</td>
-<td>${entry.status === 'pending' && unstarted && protocol.configured && protocol.mode === 'on' ? form(entry, 'approve') : ''}${cancel ? form(entry, 'cancel') : ''}</td></tr>`;
+<td>${entry.status === 'pending' && unstarted && protocol.configured && protocol.mode !== 'off' ? form(entry, 'approve') : ''}${cancel ? form(entry, 'cancel') : ''}</td></tr>`;
   }).join('');
   return page('受付一覧', `${receptionNav}<h1>受付一覧</h1>
 ${protocol.configured ? `<p>プロトコル設定済み: ${escapeHtml(protocol.protocolId)} / revision ${escapeHtml(protocol.revision)}</p>`
     : '<p class="bad">プロトコルが未設定のため、許可できません（<a href="/admin/reception-settings">受付の設定</a>）</p>'}
-${protocol.configured && protocol.mode !== 'on' ? '<p>受付を使わない設定です。許可済みの受付は、計画どおり続けられます。</p>' : ''}
+${protocol.mode === 'off' ? '<p>受付を使わない設定です。許可済みの受付は、計画どおり続けられます。</p>' : ''}
 ${items.length ? `<div class="wrap"><table>${head(['受付番号', '受付時刻', '状態', '条件順序', '回転', '試行の間', '試行記録', '操作'])}${rows}</table></div>` : '<p>受付はありません</p>'}
 ${next ? `<p><a href="/admin/receptions?${escapeHtml(new URLSearchParams({ after: next }).toString())}">次のページ →</a></p>` : ''}`);
 }
@@ -199,7 +199,7 @@ const SETTING_CHOICES: [string, string, [string, string][]][] = [
   ['rotationMode', '回転', [['relative_pm90', '相対 ±90°（従来）'], ['relative_0', '相対 0°（向きを一致）']]],
   ['receptionNumberFormat', '受付番号', [['daily_seq3', '日ごとの3桁の連番']]],
 ];
-const MODE_LABELS: Record<string, string> = { on: '現在：使う', off: '現在：使わない', unset: '未設定（使わない）' };
+const MODE_LABELS: Record<string, string> = { on: '現在：使う', off: '現在：使わない', unset: '既定（使う）' };
 
 /** Researcher settings form. Unsaved settings preselect nothing; saved settings preselect the current values. */
 export function renderSettings(view: SettingsView): string {
@@ -213,6 +213,7 @@ export function renderSettings(view: SettingsView): string {
   const status = view.protocol ? `<p>revision ${escapeHtml(view.protocol.revision)}（${escapeHtml(view.protocol.savedAt)} に保存）</p>` : '<p class="bad">未設定のため、受付を許可できません</p>';
   return page('受付の設定', `${receptionNav}<h1>受付の設定</h1>
 <h2>受付モード</h2><p>${escapeHtml(MODE_LABELS[view.mode.value])}</p>
+<p>受付は既定で使います。試行の開始には、プロトコルの保存と研究者の許可が必要です。</p>
 <form method="post" action="/admin/reception-settings/mode"><input type="hidden" name="expectedRevision" value="${escapeHtml(view.mode.revision)}">
 <button name="value" value="on">受付を使う</button> <button name="value" value="off">受付を使わない</button></form>
 <h2>プロトコル</h2>${status}

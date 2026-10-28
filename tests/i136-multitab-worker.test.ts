@@ -4,7 +4,7 @@ import { registerHooks } from 'node:module';
 import { existsSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { clone, config, load } from './support/s5-base/support.ts';
-import { emptyAdminIndex } from './support/i139-empty-admin-index.ts';
+import { researcherOffAdminIndex } from './support/i139-researcher-off-admin-index.ts';
 
 // Same in-process Cloudflare shim used by s5-base-worker.test.ts. No browser,
 // network, real AI proxy, production data, or real credentials are involved.
@@ -35,7 +35,19 @@ const request = (path: string, cookie?: string, body?: unknown, site?: string) =
 });
 const responseCookie = (response: Response) => response.headers.get('set-cookie')?.split(';')[0] ?? null;
 
-function harness() {
+/** A real AdminIndex with nothing saved: the default-on deployment the reception change ships into. */
+function unsavedAdminIndex() {
+  const values = new Map<string, unknown>();
+  const storage = {
+    async get(key: string) { return clone(values.get(key)); },
+    async put(entries: Record<string, unknown>) { for (const [k, v] of Object.entries(entries)) values.set(k, clone(v)); },
+    async list({ prefix }: { prefix: string }) { return new Map([...values].filter(([k]) => k.startsWith(prefix))); },
+    async transaction(fn: (tx: unknown) => Promise<unknown>) { return fn(storage); },
+  };
+  return { idFromName: (name: string) => name, get: () => new AdminIndex({ storage }, {}), values };
+}
+// settings 'off' is the legacy deployment; 'unset' is the unsaved default-on one. `reply` scripts the model for sends.
+function harness({ settings = 'off', reply = null }: { settings?: 'off' | 'unset'; reply?: string | null } = {}) {
   const stores = new Map<string, Map<string, any>>();
   const objects = new Map<string, any>();
   const pending: Promise<unknown>[] = [];
@@ -45,9 +57,13 @@ function harness() {
     ['record:' + originalRecord.recordId]: originalRecord,
     ledger: { [originalRecord.recordId]: 946684800000 },
   }))));
+  const adminIndex = settings === 'unset' ? unsavedAdminIndex() : researcherOffAdminIndex(AdminIndex);
   const objectEnv = {
-    BASE_ASSIGNMENT_JSON: JSON.stringify(config()), RECORD_RETENTION_DAYS: '30', ADMIN_INDEX: emptyAdminIndex(AdminIndex),
-    AI_PROXY: { async chat() { modelCalls++; throw Error('unexpected synthetic model call'); } },
+    BASE_ASSIGNMENT_JSON: JSON.stringify(config()), RECORD_RETENTION_DAYS: '30', ADMIN_INDEX: adminIndex,
+    AI_PROXY: { async chat() {
+      if (reply === null) { modelCalls++; throw Error('unexpected synthetic model call'); }
+      return { status: 200, data: { model: 'synthetic', choices: [{ index: 0, message: { role: 'assistant', content: reply }, finish_reason: 'stop' }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } } };
+    } },
   };
   const getObject = (id: string) => {
     if (!stores.has(id)) stores.set(id, new Map());
@@ -76,6 +92,7 @@ function harness() {
     fetch: (input: Request) => edge.fetch(input, env) as Promise<Response>,
     sessionFetch: (input: Request) => getObject(originalId).fetch(input) as Promise<Response>,
     evict() { objects.clear(); },
+    adminKeys: () => [...((adminIndex as any).values?.keys() ?? [])],
     originalSnapshot: () => clone(Object.fromEntries(stores.get(originalId)!)),
     async done() { await Promise.all(pending); assert.equal(modelCalls, 0); },
   };
@@ -139,6 +156,42 @@ test('i136 DO repeated start from second tab refuses replacement of active trial
   assert.deepEqual(await start.json(), { error: 'busy' });
   assert.deepEqual(await (await h.fetch(request('/api/state', originalCookie))).json(), before);
   assert.deepEqual(h.originalSnapshot(), snapshot);
+  await h.done();
+});
+
+test('the researcher-off helper reads through the real AdminIndex as an explicit off at revision 1 with no protocol', async () => {
+  const index = researcherOffAdminIndex(AdminIndex).get();
+  const s = await index.readReceptionSettings();
+  assert.equal(s.protocol, null); assert.deepEqual({ value: s.mode.value, revision: s.mode.revision }, { value: 'off', revision: 1 });
+  assert.deepEqual((await index.receptionModeHistory()).map((m: any) => [m.revision, m.value, m.protocolRevision]), [[1, 'off', null]]);
+});
+
+// R2 (reception default on): a previous-version owner with an active trial, in a deployment where the mode was never saved.
+test('i136 under the unsaved default-on settings, a previous-version active trial keeps its transcript and record, continues, and no second trial starts', async () => {
+  const h = harness({ settings: 'unset', reply: '合成の応答です。' });
+  const before = await (await h.fetch(request('/api/state', originalCookie))).json();
+  assert.equal(before.trial.sessionId, originalRecord.recordId); assert.ok(before.trial.events.length > 0, 'synthetic transcript restored');
+  assert.equal(Object.hasOwn(before, 'reception'), false, 'never shown a reception');
+  const snapshot = h.originalSnapshot();
+  for (const evicted of [false, true]) {
+    if (evicted) h.evict();
+    assert.deepEqual(await (await h.fetch(request('/api/state', originalCookie))).json(), before, evicted ? 'cold restore' : 'long-lived');
+    const now = h.originalSnapshot();
+    assert.deepEqual(now.active, snapshot.active); assert.deepEqual(now['record:' + originalRecord.recordId], snapshot['record:' + originalRecord.recordId]);
+    assert.equal(now['base:owner:v1'].activeKey, snapshot['base:owner:v1'].activeKey);
+    assert.deepEqual(now['base:owner:v1'].admissions, snapshot['base:owner:v1'].admissions);
+    const again = await h.sessionFetch(request('/api/start', originalCookie, { version: 2 }));
+    assert.equal(again.status, 409); assert.equal(Object.hasOwn(h.originalSnapshot(), 'reception:v1'), false, 'never converted to a reception owner');
+    assert.deepEqual(h.originalSnapshot()['base:owner:v1'].admissions, snapshot['base:owner:v1'].admissions, 'no second trial');
+  }
+  // The existing trial continues: a send is accepted and appended after the original transcript.
+  const sent = await h.sessionFetch(request('/api/message', originalCookie, { text: '続きの発話です', expectedRecordId: originalRecord.recordId, clientId: 'r2-continue' }));
+  assert.ok(sent.status === 200 || sent.status === 202, 'send accepted: ' + sent.status);
+  const after = await (await h.fetch(request('/api/state', originalCookie))).json();
+  assert.equal(after.trial.sessionId, originalRecord.recordId);
+  assert.deepEqual(after.trial.events.slice(0, before.trial.events.length), before.trial.events, 'the original transcript is a prefix');
+  assert.ok(after.trial.events.some((e: any) => e.speaker === 'human' && e.text === '続きの発話です'));
+  assert.deepEqual(h.adminKeys(), [], 'no setting was saved on the researcher\'s behalf');
   await h.done();
 });
 

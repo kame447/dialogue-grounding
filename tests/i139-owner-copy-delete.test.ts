@@ -4,7 +4,7 @@ import { registerHooks } from 'node:module';
 import { existsSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { load, clone, harness, sessionError } from './support/s5-base/support.ts';
-import { emptyAdminIndex } from './support/i139-empty-admin-index.ts';
+import { researcherOffAdminIndex } from './support/i139-researcher-off-admin-index.ts';
 registerHooks({ resolve(s, c, next) {
   if (s === 'cloudflare:workers') return { url: 'data:text/javascript,export class DurableObject {constructor(ctx,env){this.ctx=ctx;this.env=env}}', shortCircuit: true };
   if (s.startsWith('.') && c.parentURL?.startsWith('file:')) {
@@ -63,7 +63,7 @@ function fixture(legacy = false) {
   };
   const object = () => {
     const o = new TangramSession({ storage, id: { toString: () => owner.ownerId }, waitUntil(p: Promise<unknown>) { pending.push(p); } },
-      { RECORD_RETENTION_DAYS: '30', ADMIN_INDEX: emptyAdminIndex(AdminIndex), AI_PROXY: { async chat() { assert.fail('no real or mock upstream call expected'); } } });
+      { RECORD_RETENTION_DAYS: '30', ADMIN_INDEX: researcherOffAdminIndex(AdminIndex), AI_PROXY: { async chat() { assert.fail('no real or mock upstream call expected'); } } });
     o.createTrial = factory.options.makeTask;
     return o;
   };
