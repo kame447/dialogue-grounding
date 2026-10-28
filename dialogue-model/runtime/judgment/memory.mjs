@@ -34,6 +34,9 @@ export const MEMORY_INSTRUCTIONS = [
   "発話の引用・ID・操作配列・発話番号・confidence・antecedentは生成しないでください。環境が今回の人間発話から出典を付けます。過去の発話や未生成のAI発話の内容を今回の発話として記録しないでください。「はい」「それ」だけでは対象や名称合意を確定しないでください。",
 ].join("\n");
 
+// v2 Luna only, identical across strategies, sent as its own message so v1 requests stay byte-stable.
+export const MEMORY_NAME_INTENTS_V2 = "参照メモの名前の欄について: " + "名前の提案にはname_proposal、名前の提案への受け入れにはname_acceptanceを付け、形の特徴への同意（feature_acceptance）や見立ての共有と区別してください。名前を取り消す・否定する発話でも、intentをdenialまたはcorrectionにし、話題の名前をnameAcceptanceに入れてください。";
+
 /** Build and validate each optional operation without discarding a valid mention. */
 export function prepareMemory(graph, turn, interpretation = null, publicTurns) {
   const reference = validateReferenceInterpretation(interpretation ?? null, graph.slots ?? SLOTS);

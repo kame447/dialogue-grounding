@@ -2,7 +2,7 @@ import { privateBaseOptions } from './support/s5-private-options.mjs';
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createNamingTaskV2 } from "../dialogue-model/runtime/v2/naming-task-v2.mjs";
-import { CONCISE_INSTRUCTIONS_V2 } from "../dialogue-model/runtime/v2/dialogue-v2.mjs";
+import { LUNA_CONCISE_INSTRUCTIONS_V2 } from "../dialogue-model/runtime/v2/dialogue-v2.mjs";
 import { createNamingServer } from "../dialogue-model/runtime/web/server.mjs";
 
 type Message = { role: string; content: unknown };
@@ -20,7 +20,7 @@ function harness() {
   return { client, judge, generations };
 }
 
-const hasConcise = (messages: Message[]) => messages.some((m) => m.role === "system" && m.content === CONCISE_INSTRUCTIONS_V2);
+const hasConcise = (messages: Message[]) => messages.some((m) => m.role === "system" && m.content === LUNA_CONCISE_INSTRUCTIONS_V2);
 
 async function oneTurn(options: Record<string, unknown>) {
   const h = harness();
@@ -48,7 +48,7 @@ for (const strategy of ["repair-first", "bypass-enabled"]) {
 
 test("both strategies receive the identical concise instruction", async () => {
   const [a, b] = await Promise.all(["repair-first", "bypass-enabled"].map((strategy) => oneTurn({ strategy, utteranceStyle: "concise" })));
-  const pick = (messages: Message[]) => messages.find((m) => m.content === CONCISE_INSTRUCTIONS_V2);
+  const pick = (messages: Message[]) => messages.find((m) => m.content === LUNA_CONCISE_INSTRUCTIONS_V2);
   assert.deepEqual(pick(a.generations[0]), pick(b.generations[0]));
 });
 

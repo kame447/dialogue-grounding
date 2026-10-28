@@ -1,7 +1,8 @@
 import { ACTIONS, FOLLOW_UP_ACTIONS, SAFE_JUDGMENT, validateJudgment, validateOwnLedger, JudgmentValidationError } from "./schema.mjs";
 import { STRATEGIES, taskInstructionsFor, JUDGE_POLICIES, ownImageMessage, ownRotationMessage, publicMessages } from "./instructions.mjs";
 import { summarizeForJudge, ReferenceGraphError } from "../memory/reference-graph.mjs";
-import { MEMORY_INSTRUCTIONS, stageMemory } from "./memory.mjs";
+import { agreeNameEvidence, humanNamingRecord } from "./name-evidence.mjs";
+import { MEMORY_INSTRUCTIONS, MEMORY_NAME_INTENTS_V2, stageMemory } from "./memory.mjs";
 import { CANDIDATE_CONFLICT_INSTRUCTIONS, CONFLICT_RETRY_HINTS, CandidateConflictError, splitConflict, validateCandidateConflict } from "../v2/candidate-conflict.ts";
 
 // Robustness bound, identical for both strategies: one upstream stall must not
@@ -9,6 +10,11 @@ import { CANDIDATE_CONFLICT_INSTRUCTIONS, CONFLICT_RETRY_HINTS, CandidateConflic
 // retry needs a minimum window; otherwise the existing safe fallback applies.
 export const JUDGE_TIME_BUDGET_MS = 50000;
 export const JUDGE_MIN_RETRY_MS = 12000;
+
+// v2 only, identical across strategies: the judge's own condition for agree, and the
+// retry hint when name-evidence.mjs finds no unrevoked public name source.
+export const AGREE_PUBLIC_NAME_RULE = "agreeは、公開発話で名前として提案され、まだ撤回されていない名前について、相手がその名前を使う意図（相手自身の提案、またはこちらの提案への受け入れ）が公開対話から読み取れるときだけ選んでください。見立ての語や形の説明への同意だけでは、名前の提案・受諾になりません。";
+export const AGREE_PUBLIC_NAME_HINT = "この名前には、公開発話での名前の提案と、相手がその名前を使う意図の出典が確認できませんでした。" + AGREE_PUBLIC_NAME_RULE + "名前をまだ公開の場で提案していなければ、propose_nameで名前を示して提案するか、accept・confirm、または方略に応じたdefer・move_on・revisitを選んでください。";
 
 const judgeInstructionsFor = (version) => [
   "【非公開の対話判断】次の公開発話を生成するために、対話上の判断をJSONだけで返してください。これは対話相手への発話ではありません。",
@@ -27,6 +33,8 @@ const judgeInstructionsFor = (version) => [
     "agreeの前に、自分の画像と公開対話から対象を1つに絞れるか確かめてください。相手が述べた形の特徴があれば、自分の対象に実際にあるかを自分の画像で確かめてください。対象を絞れないときはagreeしないでください。対象と名称採用の意思が明確なら追加の確認質問や特徴の付加は不要です。",
     "作業メモでまだunassignedかdeferredの対象には、その返答でagreeできません。相手が名前を出していても、相手の見立てを短く受け止め、自分の画像の全体の見立てと結び付けて理解を表し、必要なら自分の見立ても1つ返してください。名前はpropose_nameの候補として保持できます。discriminatingFeatureは原則nullとし、共通教示の分析トリガーがあるときだけ1特徴を入れてください。tentativeの対象でも、公開対話から対象を1つに絞れ、相手がその名前を使う意図を示し、曖昧さや矛盾が残っていない場合だけagreeしてください。内部に候補が複数あるだけでconfirmにせず、まだ名前を確定しない見立ての共有を続けられます。deferredの対象はrevisitしてから扱ってください。",
     "相手の返答が相槌だけ（はい・うん・それ等）のときにagreeできるのは、自分の直前の名称提案が相手が導入または受け入れた対象についてのもので、その提案への受入れと読め、公開対話に曖昧さや矛盾が残っていないときだけです。識別特徴の付加は条件ではありません。対象や名称採用の意思が不明ならacceptとし、分析トリガーがあるときだけconfirmを選べます。新たな特徴を付け足すことで合意の根拠を代用しないでください。",
+    "相手が述べた形・数・部分の関係は相手の画面についての説明であり、自分の画像にあることの証拠ではありません。noteには、自分の画像で確かめたことと相手の説明を分けて書いてください。相手の説明に合わせて自分の観察を誤りとせず、根拠に応じて自分の候補を保つ・変える・まだ分からないとすることができます。相手が尋ねた部分や関係を別の部分や関係に置き換えて答えず、相手の言葉を意味の違う自分の言葉に言い換えてdiscriminatingFeatureにしないでください。",
+    AGREE_PUBLIC_NAME_RULE,
   ] : []),
   "followUpは不要なら省略またはnull、必要ならaction, targetSlot, candidateName, discriminatingFeatureだけを持つ1個のオブジェクトです。followUp.actionは " + FOLLOW_UP_ACTIONS.join(" | ") + " のいずれかで、noteや入れ子のfollowUpは含めないでください。",
   version === 2
@@ -74,7 +82,7 @@ export function createLunaJudge(client, { candidateConflict = false, timeBudgetM
   const diagnostics = [];
   return {
     getDiagnostics() { return structuredClone(diagnostics); },
-    async judge({ image = null, rotationImage = null, referenceContext = null, publicHistory, strategy, ownLedger, ownJudgmentHistory = [], version = 1, ownAnchors = null }) {
+    async judge({ image = null, rotationImage = null, referenceContext = null, publicHistory, strategy, ownLedger, ownJudgmentHistory = [], version = 1, ownAnchors = null, nameHistory = [] }) {
       if (!STRATEGIES.includes(strategy)) throw new Error("Unsupported dialogue strategy");
       if (candidateConflict && version !== 2) throw new Error("Candidate conflict requires version 2");
       const taskInstructions = taskInstructionsFor(version);
@@ -87,12 +95,17 @@ export function createLunaJudge(client, { candidateConflict = false, timeBudgetM
       });
       const publicTurns = referenceContext?.publicTurns.map(({ turn, speaker, text }) => ({ turn, speaker, text }));
       if (referenceContext) stageMemory(referenceContext.graph, referenceContext.turn, null, publicTurns);
+      if (!Array.isArray(nameHistory)) throw new Error("Invalid name history");
+      // v2 with reference memory: an agree needs an unrevoked public name source (name-evidence.mjs),
+      // judged with this turn's own interpretation appended (null = unknown).
+      const nameGate = version === 2 && referenceContext ? (judgment, reference) => agreeNameEvidence({ judgment, ledger, publicTurns,
+        history: [...nameHistory, { kind: "human", ...humanNamingRecord(reference, referenceContext.turn, publicTurns) }] }).ok : () => true;
       const messages = [
         { role: "system", content: taskInstructions },
         { role: "system", content: JUDGE_POLICIES[strategy] },
         { role: "system", content: judgeInstructionsFor(version) },
         ...(candidateConflict ? [{ role: "system", content: CANDIDATE_CONFLICT_INSTRUCTIONS }] : []),
-        ...(referenceContext ? [{ role: "system", content: MEMORY_INSTRUCTIONS }] : []),
+        ...(referenceContext ? [{ role: "system", content: MEMORY_INSTRUCTIONS }, ...(version === 2 ? [{ role: "system", content: MEMORY_NAME_INTENTS_V2 }] : [])] : []),
         ...ownImageMessage(image), ...ownRotationMessage(rotationImage),
         ...ownAnchorMessage(ownAnchors, ledger),
         { role: "system", content: "AI自身の作業メモ（公開発話ではない）:\n" + JSON.stringify({ ownLedger: ledger, ownJudgmentHistory: previous }) },
@@ -124,7 +137,7 @@ export function createLunaJudge(client, { candidateConflict = false, timeBudgetM
         calls++;
         try {
           response = await client.complete(attempt ? [...messages,
-          { role: "system", content: "前回の判断は検証できませんでした。検証理由: " + failures.at(-1) + "。tentativeの同じ対象の言い換えはagree/confirm/propose_nameで新しい名前を指定できます。合意済み名の訂正や対象の付け替えはrepairを使ってください。同名が別枠にある場合は元の枠をrepairとcandidateName=nullで空にしてから再割当してください。" + (failures.at(-1) === "agree_requires_shared_identification" ? version === 2 ? "作業メモでunassignedかdeferredの対象にはまだagreeできません。全体の見立てで理解を示すpropose_nameやaccept、または方略に応じたdefer・move_on・revisitを選んでください。discriminatingFeatureは原則nullで、共通教示の分析トリガーがあるときだけ1特徴を添えるかconfirmを選んでください。" : "作業メモでunassignedかdeferredの対象にはまだagreeできません。識別特徴1つを添えたpropose_name、confirm、accept、または方略に応じたdefer・move_on・revisitを選んでください。" : "") + (candidateConflict ? CONFLICT_RETRY_HINTS[failures.at(-1)] ?? "" : "") + "上記JSON形式と制約を守って再提出してください。" }] : messages,
+          { role: "system", content: "前回の判断は検証できませんでした。検証理由: " + failures.at(-1) + "。tentativeの同じ対象の言い換えはagree/confirm/propose_nameで新しい名前を指定できます。合意済み名の訂正や対象の付け替えはrepairを使ってください。同名が別枠にある場合は元の枠をrepairとcandidateName=nullで空にしてから再割当してください。" + (failures.at(-1) === "agree_requires_shared_identification" ? version === 2 ? "作業メモでunassignedかdeferredの対象にはまだagreeできません。全体の見立てで理解を示すpropose_nameやaccept、または方略に応じたdefer・move_on・revisitを選んでください。discriminatingFeatureは原則nullで、共通教示の分析トリガーがあるときだけ1特徴を添えるかconfirmを選んでください。" : "作業メモでunassignedかdeferredの対象にはまだagreeできません。識別特徴1つを添えたpropose_name、confirm、accept、または方略に応じたdefer・move_on・revisitを選んでください。" : failures.at(-1) === "agree_requires_public_name" ? AGREE_PUBLIC_NAME_HINT : "") + (candidateConflict ? CONFLICT_RETRY_HINTS[failures.at(-1)] ?? "" : "") + "上記JSON形式と制約を守って再提出してください。" }] : messages,
         { phase: "judgment", timeoutMs: Math.max(1, remaining) });
         } catch (error) {
           if (error?.name !== "AIConnectionError") throw error;
@@ -151,6 +164,7 @@ export function createLunaJudge(client, { candidateConflict = false, timeBudgetM
             memoryFailure = Boolean(referenceContext && validCore);
             throw error;
           }
+          if (!nameGate(judgment, judgment.reference ?? null)) throw new JudgmentValidationError("agree_requires_public_name");
           const outcome = candidateConflict ? conflictOutcome(conflictPresent, rawConflict, judgment) : null;
           // A non-discriminating feature gets one corrective retry; the valid act is kept either way.
           if (outcome?.nonDiscriminating && attempt === 0) {
@@ -169,7 +183,8 @@ export function createLunaJudge(client, { candidateConflict = false, timeBudgetM
         diagnostics.push({ attempts: calls, fallback: false, failures, ...(referenceContext ? { memoryFallback: false } : {}), ...pending.outcome });
         return pending.judgment;
       }
-      if (memoryFailure && validCore) {
+      // Without this turn's interpretation, an agree still needs a source in prior memory.
+      if (memoryFailure && validCore && nameGate(validCore, null)) {
         diagnostics.push({ attempts: calls, fallback: false, failures, memoryFallback: true,
           ...(candidateConflict ? conflictOutcome(conflictPresent, rawConflict, validCore) : {}) });
         return { ...validCore, reference: null };
