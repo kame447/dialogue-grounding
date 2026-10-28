@@ -20,9 +20,11 @@ globalThis.Request = class extends NativeRequest {
 };
 const token = 'synthetic-adapter-admin-01234567890123456789';
 const origin = 'https://i139-adapter.invalid';
-const protocol = { schemaVersion:'reception_protocol_v1', protocolId:'22222222-2222-4222-8222-222222222222', revision:7,
-  allowedOrders:[['bypass-enabled','repair-first'],['repair-first']], seedPolicy:'shared', referenceMemory:false,
-  betweenTrials:'none', receptionNumberFormat:'daily_seq3' };
+// Saved through the researcher settings store; env values are no longer read.
+const protocol = { allowedOrders:[['bypass-enabled','repair-first'],['repair-first']], seedPolicy:'shared', referenceMemory:false,
+  betweenTrials:'none', receptionNumberFormat:'daily_seq3', rotationMode:'relative_pm90' };
+// The protocol version displayed in the management list; approval forms echo it.
+let shown: { protocolId: string; protocolRevision: string; protocolSha256: string } = { protocolId:'', protocolRevision:'', protocolSha256:'' };
 const clone = <T>(value: T): T => structuredClone(value);
 function memory() {
   let values = new Map<string, any>(), queue: Promise<unknown> = Promise.resolve();
@@ -43,7 +45,13 @@ function memory() {
 function harness(patch: Record<string, unknown> = {}) {
   const stores = new Map<string, ReturnType<typeof memory>>(), objects = new Map<string, any>(), pending: Promise<unknown>[] = [];
   const indexStorage = memory(), index = new AdminIndex({ storage:indexStorage },{}); let modelCalls = 0, receptionReads = 0;
-  const env: any = { RECEPTION_REQUIRED:'on', RECEPTION_PROTOCOL_JSON:JSON.stringify(protocol), ADMIN_TOKEN:token,
+  const configured = (async () => {
+    assert.equal((await index.saveReceptionProtocol({ expectedRevision:0, fields:protocol })).ok,true);
+    assert.equal((await index.saveReceptionMode({ expectedRevision:0, value:'on' })).ok,true);
+    const p = (await index.readReceptionSettings()).protocol;
+    shown = { protocolId:p.protocol.protocolId, protocolRevision:String(p.revision), protocolSha256:p.sha256 };
+  })();
+  const env: any = { ADMIN_TOKEN:token,
     ADMIN_INDEX:{ idFromName:(id:string) => id, get:() => index },
     ADMIN_RATE_LIMIT:{ async limit() { return { success:true }; } }, START_RATE_LIMIT:{ async limit() { return { success:true }; } },
     AI_PROXY:{ async chat() { modelCalls++; throw Error('synthetic test must not call a model'); } },
@@ -63,6 +71,7 @@ function harness(patch: Record<string, unknown> = {}) {
   return { env,index,indexStorage,fetch, get receptionReads() { return receptionReads; },
     object:(cookie:string) => get(cookie.split('=')[1]), snapshot:(cookie:string) => stores.get(cookie.split('=')[1])!.snapshot(),
     async browser() {
+      await configured;
       const page = await fetch(new Request(origin+'/')); assert.equal(page.status,200);
       const cookie = page.headers.get('set-cookie')!.split(';')[0];
       const r = await fetch(new Request(origin+'/api/reception',{ method:'POST',headers:{Cookie:cookie} })); assert.equal(r.status,200);
@@ -75,7 +84,7 @@ const adminGet = (path = '/admin/receptions') => new Request(origin+path,{ heade
 function adminPost(id: string, action: 'approve'|'cancel', revision: number, confirm: string, order = 0) {
   return new Request(`${origin}/admin/reception/${id}/${action}`,{ method:'POST',headers:{ Authorization:'Bearer '+token,
     Origin:origin, 'Sec-Fetch-Site':'same-origin', 'Content-Type':'application/x-www-form-urlencoded', Accept:'application/json' },
-    body:new URLSearchParams({ expectedRevision:String(revision),confirm,...(action === 'approve' ? {order:String(order)} : {}) }) });
+    body:new URLSearchParams({ expectedRevision:String(revision),confirm,...(action === 'approve' ? {order:String(order),...shown} : {}) }) });
 }
 const rec = (h: ReturnType<typeof harness>, cookie: string) => h.snapshot(cookie)['reception:v1'];
 const confirm = (r:any) => r.number ?? r.receptionId.slice(0,8);
@@ -86,7 +95,7 @@ test('edge adapter lists real pending revision zero and approves it through auth
   assert.equal(r.revision,0);
   const list = await h.fetch(adminGet()); assert.equal(list.status,200); const html = await list.text();
   assert.ok(html.includes(r.number)); assert.ok(html.includes(`/admin/reception/${r.receptionId}/approve`));
-  assert.ok(html.includes('value="0"')); assert.ok(html.includes(protocol.protocolId));
+  assert.ok(html.includes('value="0"')); assert.ok(html.includes(shown.protocolId));
   const approved = await h.fetch(adminPost(r.receptionId,'approve',0,confirm(r)));
   assert.equal(approved.status,200); assert.deepEqual(await approved.json(),{ok:true});
   const saved = rec(h,cookie); assert.equal(saved.status,'approved'); assert.deepEqual(saved.plan.order,protocol.allowedOrders[0]);
@@ -97,7 +106,7 @@ test('edge adapter lists real pending revision zero and approves it through auth
     body:JSON.stringify({version:2,expectedReceptionRevision:state.reception.revision})}));
   assert.equal(start.status,200); const id = (await start.json()).trial.sessionId;
   const record = h.snapshot(cookie)['record:'+id]; assert.equal(record.strategy,'bypass-enabled'); assert.equal(record.seed,saved.plan.trials[0].seed);
-  assert.equal(record.assignment.source.protocolId,protocol.protocolId); await h.done();
+  assert.equal(record.assignment.source.protocolId,shown.protocolId); await h.done();
 });
 
 // workerd attaches a non-enumerable, function-valued Symbol.dispose to every object returned over DO RPC.
@@ -141,7 +150,7 @@ test('normalizing RPC values never admits an unknown enumerable field from the o
 
 test('management list resolves authoritative status, revision and order rather than trusting stale index extras', async () => {
   const h = harness(), cookie = await h.browser(), r = rec(h,cookie);
-  await h.object(cookie).adminApproveReception({expectedRevision:0,order:0});
+  await h.object(cookie).adminApproveReception({expectedRevision:0,order:0,protocol:{ protocolId:shown.protocolId, revision:Number(shown.protocolRevision), sha256:shown.protocolSha256 }});
   const authoritative = rec(h,cookie);
   const key = 'reception:'+r.receptionId, row = await h.indexStorage.get(key);
   await h.indexStorage.put({[key]:{...row,status:'pending',revision:0,plan:{order:['repair-first']}}});
@@ -160,11 +169,14 @@ test('management list resolves authoritative status, revision and order rather t
   assert.ok(h.receptionReads > 0,'the management port actually reads the owning DO'); await h.done();
 });
 
-for (const bad of [undefined,'{broken',JSON.stringify({...protocol,rotation:true})]) test('adapter reports unconfigured protocol without defaults and rejects approval: '+bad, async () => {
-  const h = harness({RECEPTION_PROTOCOL_JSON:bad}), cookie = await h.browser(), r = rec(h,cookie), before = h.snapshot(cookie);
-  const response = await h.fetch(adminGet()); assert.equal(response.status,200);
-  assert.match(await response.text(),/プロトコルが未設定のため、許可できません/u);
-  await expectError(await h.fetch(adminPost(r.receptionId,'approve',0,confirm(r))),409,'protocol_unconfigured');
+for (const bad of ['index unavailable','current removed','content damaged']) test('adapter never substitutes defaults for unreadable settings and rejects approval: '+bad, async () => {
+  const h = harness(), cookie = await h.browser(), r = rec(h,cookie), before = h.snapshot(cookie);
+  if (bad === 'index unavailable') h.index.readReceptionSettings = async () => { throw Error('synthetic index outage'); };
+  else if (bad === 'current removed') await h.indexStorage.delete('reception-protocol:current');
+  else { const snap = h.indexStorage.snapshot(), key = Object.keys(snap).find(k => k.startsWith('reception-protocol:rev:'))!;
+    await h.indexStorage.put({ [key]:{ ...snap[key], protocol:{ ...snap[key].protocol, rotationMode:'x' } } }); }
+  await expectError(await h.fetch(adminGet()),503,'reception_unavailable');
+  await expectError(await h.fetch(adminPost(r.receptionId,'approve',0,confirm(r))),503,'reception_unavailable');
   assert.deepEqual(h.snapshot(cookie),before); await h.done();
 });
 
@@ -199,6 +211,7 @@ test('adapter remains behind admin authentication, CSRF, configured token and li
 
 for (const [code,status,error] of [
   ['reception_conflict',409,'conflict'],['invalid_order',400,'invalid_order'],['protocol_unconfigured',409,'protocol_unconfigured'],
+  ['protocol_changed',409,'protocol_changed'],['reception_closed',409,'reception_closed'],
   ['reception_unavailable',503,'reception_unavailable'],['PRIVATE prompt/token',503,'reception_unavailable'],
 ] as const) test('adapter normalizes RPC errors to closed management result: '+error+'/'+code, async () => {
   const h = harness(), cookie = await h.browser(), r = rec(h,cookie), before = h.snapshot(cookie);

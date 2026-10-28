@@ -14,25 +14,31 @@ const OTHER = '22222222-2222-4222-8222-222222222222';
 const RECORD = '33333333-3333-4333-8333-333333333333';
 const PROTOCOL = '44444444-4444-4444-8444-444444444444';
 const ORIGIN = 'https://example.test';
+const SHA = 'c'.repeat(64);
+const VERSION = { protocolId: PROTOCOL, protocolRevision: '7', protocolSha256: SHA };
+const DISPLAYED = { protocolId: PROTOCOL, revision: 7, sha256: SHA };
 type Strategy = 'repair-first' | 'bypass-enabled';
 type Row = { receptionId: string; number: string | null; createdAt: string; status: 'pending' | 'approved' | 'in_progress' | 'finished' | 'cancelled'; revision: number;
-  plan: { order: Strategy[] } | null; trials: { index: number; recordId: string | null }[] };
-type Protocol = { configured: false } | { configured: true; protocolId: string; revision: number; allowedOrders: Strategy[][] };
-type Result = { ok: true } | { ok: false; error: 'not_found' | 'conflict' | 'invalid_order' | 'protocol_unconfigured' | 'reception_unavailable' };
+  plan: { order: Strategy[]; rotationMode: 'relative_pm90' | 'relative_0'; betweenTrials: 'none' | 'questionnaire_required' } | null; trials: { index: number; recordId: string | null }[] };
+type Mode = 'on' | 'off' | 'unset';
+type Protocol = { configured: false; mode: Mode } | { configured: true; mode: Mode; protocolId: string; revision: number; sha256: string; allowedOrders: Strategy[][];
+  rotationMode: 'relative_pm90' | 'relative_0'; betweenTrials: 'none' | 'questionnaire_required' };
+type Result = { ok: true } | { ok: false; error: 'not_found' | 'conflict' | 'invalid_order' | 'protocol_unconfigured' | 'protocol_changed' | 'reception_closed' | 'reception_unavailable' };
 // This structural fake is the proposed ReceptionAdminPort contract, audited before implementation.
 function fixture() {
   const row: Row = { receptionId: ID, number: 'synthetic-007', createdAt: '2026-10-27T00:00:00.000Z', status: 'pending', revision: 3, plan: null, trials: [] };
-  let protocol: Protocol = { configured: true, protocolId: PROTOCOL, revision: 7, allowedOrders: [['bypass-enabled'], ['repair-first', 'bypass-enabled']] };
+  let protocol: Protocol = { configured: true, mode: 'on', protocolId: PROTOCOL, revision: 7, sha256: SHA, allowedOrders: [['bypass-enabled'], ['repair-first', 'bypass-enabled']],
+    rotationMode: 'relative_pm90', betweenTrials: 'none' };
   const calls: { op: string; args: unknown[] }[] = [];
   let result: Result = { ok: true };
   let failure: Error | null = null;
   const receptions = {
     async protocol() { calls.push({ op: 'protocol', args: [] }); return protocol; },
     async listPage(after: string | null) { calls.push({ op: 'listPage', args: [after] }); return { items: [
-      { ...row, receptionId: OTHER, number: 'synthetic-008', status: 'in_progress' as const, plan: { order: ['bypass-enabled'] as Strategy[] }, trials: [{ index: 0, recordId: RECORD }] }, row,
+      { ...row, receptionId: OTHER, number: 'synthetic-008', status: 'in_progress' as const, plan: { order: ['bypass-enabled'] as Strategy[], rotationMode: 'relative_pm90' as const, betweenTrials: 'none' as const }, trials: [{ index: 0, recordId: RECORD }] }, row,
     ], next: 'cursor<&' }; },
     async get(id: string) { calls.push({ op: 'get', args: [id] }); return id === ID ? row : null; },
-    async approve(id: string, input: { order: number; expectedRevision: number }): Promise<Result> { calls.push({ op: 'approve', args: [id, input] }); if (failure) throw failure; return result; },
+    async approve(id: string, input: { order: number; expectedRevision: number; protocol: typeof DISPLAYED }): Promise<Result> { calls.push({ op: 'approve', args: [id, input] }); if (failure) throw failure; return result; },
     async cancel(id: string, input: { expectedRevision: number }): Promise<Result> { calls.push({ op: 'cancel', args: [id, input] }); if (failure) throw failure; return result; },
   };
   const deps: AdminDeps & { receptions: typeof receptions } = { token: TOKEN, limiter: { async limit() { return { success: true }; } },
@@ -44,7 +50,7 @@ function get(path = '/admin/receptions', headers: Record<string, string> = {}) {
 function post(action = 'approve', values: Record<string, string> = {}, headers: Record<string, string> = {}, id = ID) {
   return new Request(`${ORIGIN}/admin/reception/${id}/${action}`, { method: 'POST', headers: { Authorization: 'Bearer ' + TOKEN, Origin: ORIGIN,
     'Sec-Fetch-Site': 'same-origin', 'Content-Type': 'application/x-www-form-urlencoded', ...headers },
-    body: new URLSearchParams({ expectedRevision: '3', confirm: 'synthetic-007', ...(action === 'approve' ? { order: '1' } : {}), ...values }) });
+    body: new URLSearchParams({ expectedRevision: '3', confirm: 'synthetic-007', ...(action === 'approve' ? { order: '1', ...VERSION } : {}), ...values }) });
 }
 async function error(response: Response, status: number, code: string) { assert.equal(response.status, status); assert.deepEqual(await response.json(), { error: code }); }
 const mutations = (f: ReturnType<typeof fixture>) => f.calls.filter(c => c.op === 'approve' || c.op === 'cancel');
@@ -112,7 +118,7 @@ test('list has pending first, escaped values/cursors, configured order choices a
   assert.ok(labels[1][1].indexOf('repair-first') >= 0); assert.ok(labels[1][1].indexOf('bypass-enabled') > labels[1][1].indexOf('repair-first'));
 });
 test('unconfigured protocol hides approval form and rejects POST, but permits cancellation', async () => {
-  const f = fixture(); f.setProtocol({ configured: false }); const html = await (await handleAdmin(get(), f.deps)).text();
+  const f = fixture(); f.setProtocol({ configured: false, mode: 'on' }); const html = await (await handleAdmin(get(), f.deps)).text();
   assert.match(html, /プロトコルが未設定のため、許可できません/); assert.doesNotMatch(html, /\/approve"/); assert.match(html, /\/cancel"/);
   await error(await handleAdmin(post(), f.deps), 409, 'protocol_unconfigured'); assert.equal(mutations(f).length, 0);
   assert.equal((await handleAdmin(post('cancel'), f.deps)).status, 303);
@@ -120,7 +126,7 @@ test('unconfigured protocol hides approval form and rejects POST, but permits ca
 test('approval passes only selected index and expected revision to the port; HTML redirects and JSON returns ok', async () => {
   for (const json of [false, true]) {
     const f = fixture(); const r = await handleAdmin(post('approve', {}, json ? { Accept: 'application/json' } : {}), f.deps);
-    assert.deepEqual(mutations(f), [{ op: 'approve', args: [ID, { order: 1, expectedRevision: 3 }] }]);
+    assert.deepEqual(mutations(f), [{ op: 'approve', args: [ID, { order: 1, expectedRevision: 3, protocol: DISPLAYED }] }]);
     if (json) { assert.equal(r.status, 200); assert.deepEqual(await r.json(), { ok: true }); }
     else { assert.equal(r.status, 303); assert.equal(r.headers.get('Location'), '/admin/receptions'); }
   }
@@ -131,7 +137,7 @@ test('UUID prefix confirms unnumbered reception and cancellation uses compare-an
   assert.deepEqual(mutations(f), [{ op: 'cancel', args: [ID, { expectedRevision: 3 }] }]);
 });
 test('approved but unstarted may cancel; started receptions and CAS conflicts never delete records', async () => {
-  const unstarted = fixture(); unstarted.row.status = 'approved'; unstarted.row.plan = { order: ['bypass-enabled'] }; unstarted.row.trials = [{ index: 0, recordId: null }];
+  const unstarted = fixture(); unstarted.row.status = 'approved'; unstarted.row.plan = { order: ['bypass-enabled'], rotationMode: 'relative_pm90', betweenTrials: 'none' }; unstarted.row.trials = [{ index: 0, recordId: null }];
   assert.equal((await handleAdmin(post('cancel'), unstarted.deps)).status, 303); assert.equal(mutations(unstarted).length, 1);
   for (const status of ['in_progress', 'finished'] as const) {
     const f = fixture(); f.row.status = status; f.row.trials = [{ index: 0, recordId: RECORD }];
@@ -143,7 +149,7 @@ test('approved but unstarted may cancel; started receptions and CAS conflicts ne
 test('valid percent-encoded forms accept exactly 1024 bytes and reject 1025 bytes without mutation', async () => {
   for (const action of ['approve', 'cancel']) for (const length of [1024, 1025]) {
     const f = fixture();
-    const fields = { expectedRevision: '3', confirm: 'x'.repeat(400), ...(action === 'approve' ? { order: '1' } : {}) };
+    const fields = { expectedRevision: '3', confirm: 'x'.repeat(400), ...(action === 'approve' ? { order: '1', ...VERSION } : {}) };
     let raw = new URLSearchParams(fields).toString();
     if ((length - raw.length) % 2 !== 0) { fields.confirm += 'x'; raw = new URLSearchParams(fields).toString(); }
     f.row.number = fields.confirm; let remaining = (length - raw.length) / 2;
@@ -168,13 +174,13 @@ test('initial reception revision zero is accepted and passed unchanged to approv
   for (const action of ['approve', 'cancel']) {
     const f = fixture(); f.row.revision = 0;
     assert.equal((await handleAdmin(post(action, { expectedRevision: '0' }), f.deps)).status, 303);
-    assert.deepEqual(mutations(f), [{ op: action, args: [ID, action === 'approve' ? { order: 1, expectedRevision: 0 } : { expectedRevision: 0 }] }]);
+    assert.deepEqual(mutations(f), [{ op: action, args: [ID, action === 'approve' ? { order: 1, expectedRevision: 0, protocol: DISPLAYED } : { expectedRevision: 0 }] }]);
   }
 });
 test('unknown IDs return 404; port conflicts include double approval and revision races, closed errors only', async () => {
   for (const action of ['approve', 'cancel']) {
     const unknown = fixture(); await error(await handleAdmin(post(action, {}, {}, OTHER), unknown.deps), 404, 'not_found'); assert.equal(mutations(unknown).length, 0);
-    for (const [code, status] of [['not_found', 404], ['conflict', 409], ['invalid_order', 400], ['protocol_unconfigured', 409], ['reception_unavailable', 503]] as const) {
+    for (const [code, status] of [['not_found', 404], ['conflict', 409], ['invalid_order', 400], ['protocol_unconfigured', 409], ['protocol_changed', 409], ['reception_closed', 409], ['reception_unavailable', 503]] as const) {
       const f = fixture(); f.setResult({ ok: false, error: code }); await error(await handleAdmin(post(action), f.deps), status, code);
     }
     const f = fixture(); f.fail(); await error(await handleAdmin(post(action), f.deps), 503, 'reception_unavailable');
@@ -238,4 +244,51 @@ test('all new response paths retain exact ADMIN_HEADERS without CORS or cookie w
     const r = await handleAdmin(request, f.deps); assert.equal(r.status, status); for (const [name, value] of Object.entries(expected)) assert.equal(r.headers.get(name), value);
     assert.equal(r.headers.get('Set-Cookie'), null); assert.equal(r.headers.get('Access-Control-Allow-Origin'), null);
   }
+});
+
+test('approval form has no preselected order and carries the displayed protocol version; empty or missing order is 400', async () => {
+  const f = fixture(); const html = await (await handleAdmin(get(), f.deps)).text();
+  const select = html.match(/<select\b[^>]*name="order"[^>]*>([\s\S]*?)<\/select>/)?.[0]; assert.ok(select);
+  assert.match(select, /<select\b[^>]*\brequired\b/); assert.doesNotMatch(select, /\bselected\b/);
+  assert.match(select, /^<select\b[^>]*>\s*<option value="">選んでください<\/option>/);
+  for (const [name, value] of [['protocolId', PROTOCOL], ['protocolRevision', '7'], ['protocolSha256', SHA]])
+    assert.match(html, new RegExp(`<input type="hidden" name="${name}" value="${value}">`));
+  for (const order of ['', undefined]) {
+    const g = fixture(); const request = post('approve', order === '' ? { order: '' } : {});
+    const body = new URLSearchParams(await request.text()); if (order === undefined) body.delete('order');
+    await error(await handleAdmin(new Request(request, { body: body.toString() }), g.deps), 400, 'invalid_order'); assert.equal(mutations(g).length, 0);
+  }
+});
+test('a stale displayed protocol version is 409 protocol_changed before the order is read against the new protocol', async () => {
+  for (const patch of [{ protocolId: OTHER }, { protocolRevision: '6' }, { protocolSha256: 'd'.repeat(64) }] as Record<string, string>[]) {
+    const f = fixture(); await error(await handleAdmin(post('approve', { ...patch, order: '5' }), f.deps), 409, 'protocol_changed'); assert.equal(mutations(f).length, 0);
+  }
+  for (const patch of [{ protocolRevision: '' }, { protocolRevision: '7.0' }, { protocolSha256: 'C'.repeat(64) }, { protocolId: 'not-a-uuid' }] as Record<string, string>[]) {
+    const f = fixture(); await error(await handleAdmin(post('approve', patch), f.deps), 400, 'invalid_request'); assert.equal(mutations(f).length, 0);
+  }
+  for (const name of ['protocolId', 'protocolRevision', 'protocolSha256']) {
+    const request = post('approve'); const text = await request.text();
+    const missing = new URLSearchParams(text); missing.delete(name);
+    for (const body of [missing.toString(), text + '&' + name + '=' + encodeURIComponent(new URLSearchParams(text).get(name)!)]) {
+      const f = fixture(); await error(await handleAdmin(new Request(request, { body }), f.deps), 400, 'invalid_request'); assert.equal(mutations(f).length, 0);
+    }
+  }
+});
+test('while reception mode is not on, pending approval is closed and the list says approved receptions continue', async () => {
+  for (const mode of ['off', 'unset'] as const) {
+    const f = fixture(); f.setProtocol({ configured: true, mode, protocolId: PROTOCOL, revision: 7, sha256: SHA, allowedOrders: [['bypass-enabled']], rotationMode: 'relative_pm90', betweenTrials: 'none' });
+    const html = await (await handleAdmin(get(), f.deps)).text();
+    assert.doesNotMatch(html, /\/approve"/); assert.match(html, /受付を使わない設定です。許可済みの受付は、計画どおり続けられます。/);
+    await error(await handleAdmin(post(), f.deps), 409, 'reception_closed'); assert.equal(mutations(f).length, 0);
+    assert.equal((await handleAdmin(post('cancel'), f.deps)).status, 303);
+  }
+});
+test('researcher-only list shows the frozen plan rotation and between-trial values; legacy plans read as the old mechanism', async () => {
+  const f = fixture();
+  f.deps.receptions.listPage = (async () => ({ items: [
+    { ...f.row, receptionId: OTHER, status: 'in_progress', plan: { order: ['bypass-enabled'], rotationMode: 'relative_0', betweenTrials: 'questionnaire_required' } as any, trials: [{ index: 0, recordId: RECORD }] },
+    { ...f.row, receptionId: RECORD, status: 'finished', plan: { order: ['repair-first'], rotationMode: 'relative_pm90', betweenTrials: 'none' } as any, trials: [{ index: 0, recordId: RECORD }] },
+  ], next: null })) as any;
+  const html = await (await handleAdmin(get(), f.deps)).text();
+  for (const text of ['回転', '試行の間', '0°', '±90°', 'アンケート必須', '指定なし', '/admin/reception-settings']) assert.ok(html.includes(text), text);
 });

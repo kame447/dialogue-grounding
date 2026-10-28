@@ -1,7 +1,7 @@
 /** Participant assignment API. Researcher values only; never an allocation method. */
-import type { ReceptionPlan } from './reception.ts';
+import type { ReceptionPlan, ReceptionPlanV1, ReceptionPlanV2, RotationMode } from './reception.ts';
 export { BaseAssignmentError, validateBaseAssignmentConfig, validateBaseStart,
-  canonicalBaseAssignmentConfig, validateBoundBaseRecord } from './base-assignment-data.ts';
+  canonicalBaseAssignmentConfig, validateBoundBaseRecord, assignmentRotationMode } from './base-assignment-data.ts';
 export type Strategy = 'repair-first' | 'bypass-enabled';
 export type SourceAdapter = 'local_private_file' | 'worker_binding';
 export type BaseAssignmentConfig = Readonly<{ schemaVersion: 'base_assignment_config_v1'; configId: string;
@@ -10,7 +10,9 @@ export type BaseAssignment = Readonly<{ schemaVersion: 'base_assignment_v1'; ass
   strategy: Strategy; seed: number; referenceMemory: boolean;
   source: Readonly<{ kind: 'server_config_v1'; adapter: SourceAdapter; configId: string; revision: number; configSha256: string }> |
     Readonly<{ kind: 'reception_plan_v1'; adapter: SourceAdapter; receptionId: string; protocolId: string; protocolRevision: number;
-      protocolSha256: string; trialIndex: number; plan: ReceptionPlan }>;
+      protocolSha256: string; trialIndex: number; plan: ReceptionPlanV1 }> |
+    Readonly<{ kind: 'reception_plan_v2'; adapter: SourceAdapter; receptionId: string; protocolId: string; protocolRevision: number;
+      protocolSha256: string; trialIndex: number; plan: ReceptionPlanV2 }>;
   createdAt: string }>;
 /** Minimum coordinator projection; the existing task owns its complete snapshot. */
 export type RawBaseRecord = { recordId: string; version: 2; seed: number; strategy: Strategy;
@@ -31,10 +33,12 @@ export type BaseStore = { read(): Promise<OwnerRead>;
 export type BaseTask = { getState(): Record<string, unknown>; persistNow(): Promise<void>; whenIdle(): Promise<void>;
   message(text: string, clientId?: string): { eventId: string; duplicate: boolean }; retry(): Promise<void>;
   submitHuman(options: { names: unknown }): Promise<unknown>; submitAI(): Promise<unknown> };
+/** rotationMode is present for new tasks only; a restored task takes its mode from the record. */
 export type MakeBaseTask = (options: { strategy: Strategy; seed: number; referenceMemory: boolean; runDir: null;
-  restore: BaseRecord | null; now: () => number; onPersist: (record: RawBaseRecord) => Promise<void> }) => Promise<BaseTask>;
+  restore: BaseRecord | null; now: () => number; onPersist: (record: RawBaseRecord) => Promise<void>; rotationMode?: RotationMode }) => Promise<BaseTask>;
 export type BaseSessionOptions = { ownerId: string; store: BaseStore; readConfig: () => Promise<BaseAssignmentConfig | null>;
-  readPlan?: () => Promise<{ receptionId: string; plan: ReceptionPlan; trialIndex: number }>;
+  /** null explicitly declines a plan, so the configured (non-reception) assignment is used. */
+  readPlan?: () => Promise<{ receptionId: string; plan: ReceptionPlan; trialIndex: number } | null>;
   makeTask: MakeBaseTask; newId: () => string; now: () => number; adapter: SourceAdapter };
 export type StartResult = { kind: 'started' | 'completed'; task: BaseTask };
 export type RestoreResult = { kind: 'empty'; task: null } | { kind: 'restored'; task: BaseTask };

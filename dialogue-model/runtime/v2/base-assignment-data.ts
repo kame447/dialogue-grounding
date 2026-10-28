@@ -2,7 +2,8 @@
 // under its existing nodejs_compat flag (also used by the stimulus generator).
 import { createHash } from 'node:crypto';
 import type { BaseAssignmentConfig, BaseAssignment, BaseRecord, BaseOwnerState } from './base-assignment.ts';
-import { validateReceptionPlan } from './reception.ts';
+import { validateReceptionPlan, effectiveRotationMode, ROTATION_MODES } from './reception.ts';
+import type { RotationMode } from './reception.ts';
 export type BaseAssignmentErrorCode = 'invalid_request' | 'assignment_unconfigured' | 'assignment_invalid' |
   'assignment_conflict' | 'assignment_record_invalid';
 export class BaseAssignmentError extends Error {
@@ -53,9 +54,11 @@ export function readAssignment(value: unknown): BaseAssignment {
   return guard('assignment_record_invalid', () => {
     const a = data(value, ['schemaVersion', 'assignmentId', 'strategy', 'seed', 'referenceMemory', 'source', 'createdAt']);
     const rawSource = data(a.source);
-    if (rawSource.kind === 'reception_plan_v1') {
+    if (rawSource.kind === 'reception_plan_v1' || rawSource.kind === 'reception_plan_v2') {
       const s = data(rawSource, ['kind','adapter','receptionId','protocolId','protocolRevision','protocolSha256','trialIndex','plan']);
       const plan = validateReceptionPlan(s.plan);
+      // The provenance kind names the embedded plan version; mixing them is never accepted.
+      if (s.kind !== plan.schemaVersion) throw new Error('version');
       if (!safeInt(s.trialIndex) || s.trialIndex < 0 || s.trialIndex >= plan.trials.length) throw new Error('index');
       const t = plan.trials[s.trialIndex];
       if (a.schemaVersion !== 'base_assignment_v1' || typeof a.assignmentId !== 'string' || !V4.test(a.assignmentId) ||
@@ -64,7 +67,7 @@ export function readAssignment(value: unknown): BaseAssignment {
         a.strategy !== t.strategy || a.seed !== t.seed || a.referenceMemory !== t.referenceMemory ||
         typeof a.createdAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(a.createdAt) || new Date(a.createdAt).toISOString() !== a.createdAt) throw new Error('assignment');
       return Object.freeze({ schemaVersion:'base_assignment_v1', assignmentId:a.assignmentId, strategy:a.strategy,
-        seed:a.seed, referenceMemory:a.referenceMemory, source:Object.freeze({ kind:'reception_plan_v1', adapter:s.adapter,
+        seed:a.seed, referenceMemory:a.referenceMemory, source:Object.freeze({ kind:plan.schemaVersion, adapter:s.adapter,
           receptionId:s.receptionId, protocolId:s.protocolId, protocolRevision:s.protocolRevision, protocolSha256:s.protocolSha256,
           trialIndex:s.trialIndex, plan }), createdAt:a.createdAt }) as BaseAssignment;
     }
@@ -81,9 +84,27 @@ export function readAssignment(value: unknown): BaseAssignment {
     return Object.freeze(result);
   });
 }
+/** The stimulus mode an assignment requires. server_config_v1 and v1 plans predate the setting. */
+export function assignmentRotationMode(a: BaseAssignment): RotationMode {
+  return a.source.kind === 'server_config_v1' ? 'relative_pm90' : effectiveRotationMode(a.source.plan, a.source.trialIndex);
+}
+const angles = (value: unknown) => { const o = data(value); if (Object.values(o).some(v => typeof v !== 'number' || !Number.isFinite(v))) throw new Error('angle'); };
+/**
+ * New records carry both options.rotationMode and the generated stimulus; only
+ * records from server_config_v1 or v1 plans may predate both. Nothing is filled in.
+ */
+function checkRotation(r: Record<string, unknown>, options: Record<string, unknown>, a: BaseAssignment): void {
+  const hasMode = Object.hasOwn(options, 'rotationMode'), hasStimulus = Object.hasOwn(r, 'stimulus');
+  if (!hasMode && !hasStimulus && a.source.kind !== 'reception_plan_v2') return;
+  if (!hasMode || !hasStimulus || !ROTATION_MODES.some(m => m === options.rotationMode) || options.rotationMode !== assignmentRotationMode(a)) throw new Error('mode');
+  const stimulus = data(r.stimulus), recorded = data(stimulus.angles, ['human', 'ai']);
+  if (typeof stimulus.version !== 'string' || !stimulus.version || stimulus.rotationMode !== options.rotationMode) throw new Error('stimulus');
+  angles(recorded.human); angles(recorded.ai);
+}
 export function validateBoundBaseRecord(record: unknown, assignment: unknown): void {
   guard('assignment_record_invalid', () => {
     const a = readAssignment(assignment), r = data(record), own = readAssignment(r.assignment), options = data(r.options), queue = data(r.queueState);
+    checkRotation(r, options, a);
     if (typeof r.recordId !== 'string' || !UUID.test(r.recordId) || r.version !== 2 || r.seed !== a.seed || r.strategy !== a.strategy ||
         options.referenceMemory !== a.referenceMemory || !['dialogue', 'submitting', 'completed'].some(v => v === r.status) ||
         !Array.isArray(queue.pendingHumanEventIds) || queue.pendingHumanEventIds.some(v => typeof v !== 'string') ||

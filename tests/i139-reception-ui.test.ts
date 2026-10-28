@@ -125,3 +125,18 @@ test('completed trial offers the participant next start with both expected revis
   assert.deepEqual(x.calls.filter(c => c.path === '/api/start'), [{ path: '/api/start', method: 'POST',
     body: { version: 2, expectedReceptionRevision: 5, expectedRecordId: current.sessionId } }]);
 });
+
+test('a reception waiting for the predecessor questionnaire never offers the next start until the server state changes', async () => {
+  const current = { version: 2, sessionId: '33333333-3333-4333-8333-333333333333', status: 'completed',
+    submitted: true, aiSubmitted: true, resultLocked: true, events: [], scene: { width: 1200, height: 800, shapes: [] } };
+  const x = await ui({ trial: current, reception: { number: '007', status: 'questionnaire', revision: 5 } });
+  assert.equal(x.e['start-trial'].disabled, true);
+  assert.match(x.e['start-message'].textContent, /アンケートを提出すると、次の課題を開始できます。/u);
+  x.e['start-trial'].fire('click'); await tick();
+  assert.equal(x.calls.filter(c => c.path === '/api/start').length, 0);
+  x.setState({ trial: current, reception: { number: '007', status: 'in_progress', revision: 5 } });
+  await x.poll(); assert.equal(x.e['start-trial'].disabled, false);
+  // The server-side refusal maps to the same participant sentence; reception_required reuses the existing contact sentence.
+  assert.match(script, /questionnaire_required: "アンケートを提出すると、次の課題を開始できます。"/u);
+  assert.match(script, /reception_required: "受付を確認できませんでした。" \+ contact/u);
+});
