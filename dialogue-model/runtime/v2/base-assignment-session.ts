@@ -1,5 +1,5 @@
 import { validateBaseStart, validateBaseAssignmentConfig, canonicalBaseAssignmentConfig, validateBoundBaseRecord } from './base-assignment.ts';
-import { BaseAssignmentError, data, readAssignment, readOwner, UUID, OWNER, safeInt } from './base-assignment-data.ts';
+import { BaseAssignmentError, data, readAssignment, readOwner, UUID, OWNER, safeInt, assignmentRotationMode } from './base-assignment-data.ts';
 import type { BaseSessionOptions, BaseSession, BaseSessionErrorCode, BaseOwnerState, BaseAssignment,
   AdmissionKey, BaseRecord, RawBaseRecord, BaseTask, BaseArchiveWrite, FailureCode, RestoreResult } from './base-assignment.ts';
 export class BaseSessionError extends Error {
@@ -45,13 +45,13 @@ export function createBaseAssignmentSession(options: BaseSessionOptions): BaseSe
     try { validateBoundBaseRecord(value, value.assignment); return copy(value); } catch { return fail(); }
   }
   async function assignment(): Promise<BaseAssignment> {
-    if (options.readPlan) {
-      const binding = await port(() => options.readPlan!());
+    const binding = options.readPlan ? await port(() => options.readPlan!()) : null;
+    if (binding !== null) {
       try {
         const t = binding.plan.trials[binding.trialIndex];
         return readAssignment({ schemaVersion:'base_assignment_v1', assignmentId:options.newId(), strategy:t.strategy,
           seed:t.seed, referenceMemory:t.referenceMemory, createdAt:new Date(options.now()).toISOString(),
-          source:{ kind:'reception_plan_v1', adapter:options.adapter, receptionId:binding.receptionId,
+          source:{ kind:binding.plan.schemaVersion, adapter:options.adapter, receptionId:binding.receptionId,
             protocolId:binding.plan.protocolId, protocolRevision:binding.plan.protocolRevision, protocolSha256:binding.plan.protocolSha256,
             trialIndex:binding.trialIndex, plan:binding.plan } });
       } catch { return fail(); }
@@ -114,7 +114,8 @@ export function createBaseAssignmentSession(options: BaseSessionOptions): BaseSe
     try {
       let task: BaseTask;
       try { task = await options.makeTask({ strategy: a.strategy, seed: a.seed, referenceMemory: a.referenceMemory,
-        runDir: null, restore: restore ? copy(restore) : null, now: options.now, onPersist }); }
+        runDir: null, restore: restore ? copy(restore) : null, now: options.now, onPersist,
+        ...(restore ? {} : { rotationMode: assignmentRotationMode(a) }) }); }
       catch (error) { if (error === token.internal && error instanceof BaseSessionError) throw error; return fail(); }
       if (!task || ['getState', 'persistNow', 'whenIdle', 'message', 'retry', 'submitHuman', 'submitAI'].some(k => typeof (task as unknown as Record<string, unknown>)[k] !== 'function')) return fail();
       const view = await port(() => task.getState());

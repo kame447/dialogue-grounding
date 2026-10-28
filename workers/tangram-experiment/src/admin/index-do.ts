@@ -4,6 +4,8 @@ import { getSummary, listAudit, listPage, removeSummaries, upsertSummary } from 
 import type { AuditEntry, DeletionReason } from "./index-store.ts";
 import { formatReceptionNumber, receptionNumberDay } from '../../../../dialogue-model/runtime/v2/reception.ts';
 import type { ReceptionSummary } from '../../../../dialogue-model/runtime/v2/reception.ts';
+import { modeHistory, protocolHistory, readSettings, saveMode, saveProtocol } from './reception-settings.ts';
+import type { ModeEntry, ProtocolEntry, ReceptionSettings, SaveResult } from './reception-settings.ts';
 
 /**
  * One global, researcher-only index of trial summaries keyed by recordId
@@ -11,6 +13,16 @@ import type { ReceptionSummary } from '../../../../dialogue-model/runtime/v2/rec
  * see index-store.ts for the storage layout and the audit log.
  */
 export class AdminIndex extends DurableObject {
+  /** Researcher reception settings: one consistent snapshot of protocol and mode (see reception-settings.ts). */
+  async readReceptionSettings(): Promise<ReceptionSettings> { return this.ctx.storage.transaction(tx => readSettings(tx)); }
+  async saveReceptionProtocol(input: { expectedRevision: unknown; fields: unknown }): Promise<SaveResult> {
+    return this.ctx.storage.transaction(tx => saveProtocol(tx, input, Date.now(), () => crypto.randomUUID()));
+  }
+  async saveReceptionMode(input: { expectedRevision: unknown; value: unknown }): Promise<SaveResult> {
+    return this.ctx.storage.transaction(tx => saveMode(tx, input, Date.now()));
+  }
+  async receptionProtocolHistory(): Promise<ProtocolEntry[]> { return protocolHistory(this.ctx.storage); }
+  async receptionModeHistory(): Promise<ModeEntry[]> { return modeHistory(this.ctx.storage); }
   async upsertReception(summary: ReceptionSummary): Promise<boolean> {
     return this.ctx.storage.transaction(async tx => {
       const key = 'reception:' + summary.receptionId, old = await tx.get<ReceptionSummary>(key);

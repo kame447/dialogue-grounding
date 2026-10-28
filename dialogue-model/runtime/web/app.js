@@ -75,6 +75,8 @@ const errors = {
   reception_conflict: "画面が更新されたため、直前の操作を完了できませんでした。現在の表示を確認し、必要ならもう一度操作してください。",
   reception_unavailable: "受付を確認できませんでした。" + contact,
   reception_finished: "すべての課題が完了しました。ご協力ありがとうございました。",
+  reception_required: "受付を確認できませんでした。" + contact,
+  questionnaire_required: "アンケートを提出すると、次の課題を開始できます。",
   ai_unavailable: "AIに接続できませんでした。会話履歴を確認してください。送り直すには、そのメッセージの「再送」を押してください。メッセージは自動では再送されません。",
   scoring_error: "採点でエラーが発生しました。提出内容は保存されています。採点を再試行できます。",
   invalid_ai_submission: "AIが提出した名前を確認できませんでした。" + contact,
@@ -432,14 +434,16 @@ function renderHistory() {
 function renderStartStage(state) {
   reception = state.reception ?? null;
   const next = Boolean(state.trial && trialCompleted() && reception?.status === "in_progress");
+  // The plan waits for this trial's questionnaire: show the next step, but it cannot start yet.
+  const awaitingSurvey = Boolean(state.trial && trialCompleted() && reception?.status === "questionnaire");
   startReady = reception ? (!state.trial && reception.status === "ready") || next : !state.trial;
-  $("start-stage").hidden = Boolean(state.trial) && !next;
+  $("start-stage").hidden = Boolean(state.trial) && !next && !awaitingSurvey;
   $("trial-progress").hidden = !state.trial;
-  $("start-trial").textContent = next ? "次の課題を開始" : "スタート";
+  $("start-trial").textContent = next || awaitingSurvey ? "次の課題を開始" : "スタート";
   $("reception-number").hidden = !reception?.number;
   $("reception-number").textContent = reception?.number ? `受付番号 ${reception.number}` : "";
   $("start-message").textContent = !reception ? "案内を確認してから、スタートを押してください。"
-    : next ? "前の課題が終わったら、「次の課題を開始」を押してください。" : reception.status === "ready" ? "準備ができました。スタートを押してください。"
+    : awaitingSurvey ? errors.questionnaire_required : next ? "前の課題が終わったら、「次の課題を開始」を押してください。" : reception.status === "ready" ? "準備ができました。スタートを押してください。"
       : reception.status === "finished" ? "すべての課題が完了しました。ご協力ありがとうございました。" : "この画面を開いたまま、開始の案内があるまでお待ちください。";
 }
 function canStart() {

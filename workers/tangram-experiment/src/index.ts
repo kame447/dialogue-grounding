@@ -6,7 +6,7 @@ import { NamingTaskError } from "../../../dialogue-model/runtime/naming-error.mj
 import { sessionCookie, sessionId } from "./session-cookie.ts";
 import { isExcessiveTraffic, type SoftLimitBindings } from "./soft-limits";
 import { AdminIndex } from "./admin/index-do";
-import { createReceptionAdminPort } from './admin/reception-adapter.ts';
+import { createReceptionAdminPort, createReceptionSettingsPort } from './admin/reception-adapter.ts';
 import { handleAdmin, isAdminPath, type AdminLimiter } from "./admin/routes.ts";
 import { summarizeRecord, type AdminSummary } from "./admin/summary.ts";
 import type { AuditEntry } from "./admin/index-store.ts";
@@ -22,8 +22,12 @@ import { validateBaseStart, validateBaseAssignmentConfig, BaseAssignmentError } 
 import { readOwner, validateBoundBaseRecord } from "../../../dialogue-model/runtime/v2/base-assignment-data.ts";
 import type { BaseOwnerState, BaseRecord, BaseSession, MakeBaseTask, OwnerRead } from "../../../dialogue-model/runtime/v2/base-assignment.ts";
 import { participantContactHTML } from "../../../dialogue-model/runtime/v2/participant-contact.ts";
-import { ReceptionError, validateReceptionProtocol, validateReception, createReception, approveReception, cancelReception,
-  participantReception, receptionSummary } from '../../../dialogue-model/runtime/v2/reception.ts';
+import { ReceptionError, validateReception, createReception, approveReception, cancelReception,
+  participantReception, receptionSummary, effectiveBetweenTrials } from '../../../dialogue-model/runtime/v2/reception.ts';
+import { isSubmittedQuestionnaire } from '../../../dialogue-model/runtime/v2/questionnaire-gate.ts';
+import { validateReceptionSettings } from './admin/reception-settings.ts';
+import type { ProtocolEntry, ReceptionSettings } from './admin/reception-settings.ts';
+import type { RotationMode } from '../../../dialogue-model/runtime/v2/reception.ts';
 import type { Reception } from '../../../dialogue-model/runtime/v2/reception.ts';
 export { AdminIndex };
 
@@ -52,8 +56,8 @@ type NamingTask = {
 
 export interface Env extends SoftLimitBindings {
   BASE_ASSIGNMENT_JSON?: string;
-  RECEPTION_REQUIRED?: string;
-  RECEPTION_PROTOCOL_JSON?: string;
+  // Reception mode and protocol are researcher settings saved in ADMIN_INDEX (/admin/reception-settings);
+  // RECEPTION_REQUIRED and RECEPTION_PROTOCOL_JSON are no longer read.
   PARTICIPANT_CONTACT_TEXT?: string;
   // Deployment-wide AI utterance style for new trials; identical for both strategies.
   V2_UTTERANCE_STYLE?: string;
@@ -86,6 +90,8 @@ const errors = new Set([
 ]);
 
 const json = (status: number, body: unknown): Response => Response.json(body, { status });
+/** How this browser's stored state decides its flow; the global mode matters only for new starts. */
+type OwnerKind = 'reception' | 'legacy_active' | 'absent' | 'unused' | 'legacy';
 
 function newSessionId(): string {
   return [...crypto.getRandomValues(new Uint8Array(32))].map((x) => x.toString(16).padStart(2, "0")).join("");
@@ -123,12 +129,29 @@ export class TangramSession extends DurableObject<Env> {
   // Trials replaced by /api/start in this browser: their late writes go only to their own archive key.
   private retired = new Set<string>();
   private receptionQueue: Promise<unknown> = Promise.resolve();
-  private receptionAdmission: { receptionId: string; expectedRevision: number; index: number } | null = null;
+  // The explicit intent of the admission in progress: a reception plan trial, or the configured legacy assignment.
+  private admission: { kind: 'reception'; receptionId: string; expectedRevision: number; index: number } | { kind: 'legacy' } | null = null;
 
-  private receptionRequired(): boolean { return this.env.RECEPTION_REQUIRED === 'on'; }
-  private protocol() {
-    try { return validateReceptionProtocol(this.env.RECEPTION_PROTOCOL_JSON === undefined ? null : JSON.parse(this.env.RECEPTION_PROTOCOL_JSON)); }
-    catch { throw new ReceptionError('protocol_unconfigured'); }
+  /** One consistent settings snapshot from the global index. Unreadable or damaged settings fail closed. */
+  private async settings(): Promise<ReceptionSettings> {
+    const index = this.index();
+    if (!index) throw new ReceptionError('reception_unavailable');
+    let raw: unknown;
+    try { raw = await index.readReceptionSettings(); } catch { throw new ReceptionError('reception_unavailable'); }
+    // workerd adds a non-enumerable Symbol.dispose to RPC results; keep only the structured data, then validate it.
+    return validateReceptionSettings(structuredClone(raw));
+  }
+  private async currentProtocol(): Promise<ProtocolEntry> {
+    const s = await this.settings();
+    if (!s.protocol) throw new ReceptionError('protocol_unconfigured');
+    return s.protocol;
+  }
+  /** Classified from stored state only: a reception owner stays one even when the global mode is off. */
+  private async ownerKind(): Promise<OwnerKind> {
+    if (await this.readReception()) return 'reception';
+    const raw = await this.ctx.storage.get<BaseOwnerState>('base:owner:v1');
+    if (!raw) return await this.ctx.storage.get(ACTIVE_KEY) ? 'legacy_active' : 'absent';
+    return readOwner(raw, this.ctx.id.toString()).activeKey === null ? 'unused' : 'legacy';
   }
   private receptionSerial<T>(fn: () => Promise<T>): Promise<T> {
     const result = this.receptionQueue.then(fn,fn); this.receptionQueue = result.catch(() => {}); return result;
@@ -147,13 +170,19 @@ export class TangramSession extends DurableObject<Env> {
     await this.receptionSerial(async () => {
       const previous = await this.readReception();
       if (previous) { await this.indexReception(previous); return; }
+      // Only an unused owner may become a reception owner, and only while the researcher has turned reception on.
+      if (await this.ownerKind() !== 'unused') throw new NamingTaskError('not_found');
+      const settings = await this.settings();
+      if (settings.mode.value !== 'on' || !settings.protocol) throw new NamingTaskError('not_found');
       let number: string | null = null;
-      try { const p = this.protocol(); number = await this.index()?.allocateReceptionNumber(p.receptionNumberFormat,Date.now()) ?? null; }
-      catch { /* Unconfigured protocol or unavailable index still admits a waiting reception. */ }
+      try { number = await this.index()?.allocateReceptionNumber(settings.protocol.protocol.receptionNumberFormat,Date.now()) ?? null; }
+      catch { /* An unavailable number counter still admits an unnumbered waiting reception. */ }
       const r = createReception({ receptionId:crypto.randomUUID(), objectId:this.ctx.id.toString(), createdAt:new Date().toISOString(), number });
       const saved = await this.serialized(() => this.ctx.storage.transaction(async tx => {
         const old = await tx.get('reception:v1');
         if (old !== undefined) return validateReception(old);
+        const owner = await tx.get<BaseOwnerState>('base:owner:v1');
+        if (!owner || readOwner(owner, this.ctx.id.toString()).activeKey !== null) throw new ReceptionError('reception_unavailable');
         await tx.put({ 'reception:v1':r }); return r;
       }));
       await this.indexReception(saved);
@@ -161,12 +190,16 @@ export class TangramSession extends DurableObject<Env> {
   }
   /** Researcher-only RPCs. The management adapter supplies authorization. */
   async adminReception(): Promise<Reception | null> { return this.readReception(); }
-  async adminApproveReception(input: { expectedRevision: number; order: number }): Promise<Reception> {
+  async adminApproveReception(input: { expectedRevision: number; order: number; protocol: unknown }): Promise<Reception> {
     return this.receptionSerial(async () => {
-      const protocol = this.protocol();
+      // One settings read is the fixed point: the same snapshot is compared and copied into the plan.
+      const settings = await this.settings();
+      if (settings.mode.value !== 'on') throw new ReceptionError('reception_closed');
+      if (!settings.protocol) throw new ReceptionError('protocol_unconfigured');
+      const protocol = settings.protocol.protocol, expected = input?.protocol;
       const r = await this.serialized(() => this.ctx.storage.transaction(async tx => {
         const raw = await tx.get('reception:v1'); if (!raw) throw new ReceptionError('reception_unavailable');
-        const next = await approveReception(raw, { ...input, protocol, approvedAt:new Date().toISOString(),
+        const next = await approveReception(raw, { expectedRevision:input.expectedRevision, order:input.order, protocol, expected, approvedAt:new Date().toISOString(),
           randomSeed:() => crypto.getRandomValues(new Uint32Array(1))[0] });
         await tx.put({ 'reception:v1':next }); return next;
       }));
@@ -182,32 +215,53 @@ export class TangramSession extends DurableObject<Env> {
       await this.indexReception(r); return r;
     });
   }
-  private async receptionStart(body: ApiBody): Promise<void> {
+  /** Every new trial is admitted here, serialized with reception creation and approval. */
+  private async startTrial(body: ApiBody): Promise<void> {
     await this.receptionSerial(async () => {
-      this.protocol(); // A saved plan never bypasses an unconfigured deployment.
-      const r = await this.readReception();
-      if (!r || !r.plan || !['approved','in_progress'].includes(r.status)) throw new ReceptionError('reception_not_approved');
-      if (!Number.isSafeInteger(body.expectedReceptionRevision) || body.expectedReceptionRevision !== r.revision) throw new ReceptionError('trial_changed');
-      const index = r.trials.length;
-      if (index >= r.plan.trials.length) throw new ReceptionError('reception_finished');
-      let predecessor: string | undefined;
-      if (index === 0) {
-        if (r.status !== 'approved' || Object.hasOwn(body,'expectedRecordId')) throw new ReceptionError('trial_changed');
-      } else {
-        const last = r.trials[index-1];
-        if (typeof body.expectedRecordId !== 'string' || body.expectedRecordId !== last.recordId) throw new ReceptionError('trial_changed');
-        predecessor = body.expectedRecordId;
-        const record = await this.baseReadRecord(predecessor);
-        if (!record || record.status !== 'completed') throw new ReceptionError('reception_conflict');
+      const kind = await this.ownerKind();
+      if (kind === 'reception') return this.receptionStart(body);
+      if (kind === 'unused' || kind === 'legacy') {
+        // A new start reads the current setting; unreadable settings never count as off.
+        const settings = await this.settings();
+        if (settings.mode.value === 'on') throw new ReceptionError(kind === 'unused' ? 'reception_not_approved' : 'reception_required');
       }
-      this.receptionAdmission = { receptionId:r.receptionId, expectedRevision:r.revision, index };
-      try {
-        if (predecessor) {
-          await this.assignmentSession().prepareNext(predecessor);
-          this.trial = (await this.assignmentSession().restore()).task;
-        } else this.trial = (await this.assignmentSession().start({version:2})).task;
-      } finally { this.receptionAdmission = null; }
+      validateBaseStart(body);
+      this.admission = { kind:'legacy' };
+      try { this.trial = (await this.assignmentSession().start(body)).task; } finally { this.admission = null; }
     });
+  }
+  /** Caller holds receptionSerial. The approved plan decides the trial; the current protocol must still be valid. */
+  private async receptionStart(body: ApiBody): Promise<void> {
+    await this.currentProtocol(); // A saved plan never bypasses unreadable or unconfigured settings.
+    const r = await this.readReception();
+    if (!r || !r.plan || !['approved','in_progress'].includes(r.status)) throw new ReceptionError('reception_not_approved');
+    if (!Number.isSafeInteger(body.expectedReceptionRevision) || body.expectedReceptionRevision !== r.revision) throw new ReceptionError('trial_changed');
+    const index = r.trials.length;
+    if (index >= r.plan.trials.length) throw new ReceptionError('reception_finished');
+    let predecessor: string | undefined;
+    if (index === 0) {
+      if (r.status !== 'approved' || Object.hasOwn(body,'expectedRecordId')) throw new ReceptionError('trial_changed');
+    } else {
+      const last = r.trials[index-1];
+      if (typeof body.expectedRecordId !== 'string' || body.expectedRecordId !== last.recordId) throw new ReceptionError('trial_changed');
+      predecessor = body.expectedRecordId;
+      const record = await this.baseReadRecord(predecessor);
+      if (!record || record.status !== 'completed') throw new ReceptionError('reception_conflict');
+      // Frozen at approval: a later protocol change never adds or removes this requirement.
+      if (effectiveBetweenTrials(r.plan) === 'questionnaire_required' && !await this.questionnaireSubmitted(predecessor)) {
+        throw new ReceptionError('questionnaire_required');
+      }
+    }
+    this.admission = { kind:'reception', receptionId:r.receptionId, expectedRevision:r.revision, index };
+    try {
+      if (predecessor) {
+        await this.assignmentSession().prepareNext(predecessor);
+        this.trial = (await this.assignmentSession().restore()).task;
+      } else this.trial = (await this.assignmentSession().start({version:2})).task;
+    } finally { this.admission = null; }
+  }
+  private async questionnaireSubmitted(recordId: string): Promise<boolean> {
+    try { return isSubmittedQuestionnaire(await readQuestionnaire(this.ctx.storage, recordId)); } catch { return false; }
   }
 
   /** Researcher-only read of one archived trial for /admin. It neither restores nor resumes a trial. */
@@ -371,11 +425,14 @@ export class TangramSession extends DurableObject<Env> {
     if (this.base) return this.base;
     this.base = createBaseAssignmentSession({ownerId:this.ctx.id.toString(),adapter:'worker_binding',now:Date.now,newId:()=>crypto.randomUUID(),
       readConfig:async()=>this.env.BASE_ASSIGNMENT_JSON === undefined ? null : validateBaseAssignmentConfig(JSON.parse(this.env.BASE_ASSIGNMENT_JSON)),
-      ...(this.receptionRequired() ? { readPlan:async () => {
-        const r = await this.readReception(), binding = this.receptionAdmission;
-        if (!r?.plan || !binding || r.receptionId !== binding.receptionId || r.revision !== binding.expectedRevision) throw new ReceptionError('trial_changed');
+      // Every admission names its intent explicitly; without one, nothing is admitted.
+      readPlan:async () => {
+        const binding = this.admission;
+        if (binding?.kind === 'legacy') return null;
+        const r = await this.readReception();
+        if (!r?.plan || binding?.kind !== 'reception' || r.receptionId !== binding.receptionId || r.revision !== binding.expectedRevision) throw new ReceptionError('trial_changed');
         return { receptionId:r.receptionId, plan:r.plan, trialIndex:binding.index };
-      } } : {}),
+      },
       makeTask:async binding=>this.createTrial(binding),
       store:{
         read:async():Promise<OwnerRead>=>{
@@ -415,7 +472,7 @@ export class TangramSession extends DurableObject<Env> {
           if (active) updates[ACTIVE_KEY] = active;
           let reception: Reception | null = null;
           const current = owner.activeKey && owner.admissions[owner.activeKey];
-          if (current && current.assignment.source.kind === 'reception_plan_v1') {
+          if (current && current.assignment.source.kind !== 'server_config_v1') {
             const rawReception = await tx.get('reception:v1');
             reception = validateReception(rawReception);
             const source = current.assignment.source;
@@ -423,14 +480,14 @@ export class TangramSession extends DurableObject<Env> {
               JSON.stringify(source.plan) !== JSON.stringify(reception.plan)) throw new ReceptionError('reception_unavailable');
             let changed = false;
             if (!old.admissions[owner.activeKey!]) {
-              const expected = this.receptionAdmission;
+              const expected = this.admission?.kind === 'reception' ? this.admission : null;
               if (!expected || expected.expectedRevision !== reception.revision || expected.index !== source.trialIndex ||
                 expected.receptionId !== reception.receptionId || reception.trials.length !== source.trialIndex ||
                 !['approved','in_progress'].includes(reception.status)) throw new ReceptionError('trial_changed');
               reception.trials.push({ index:source.trialIndex, recordId:null }); reception.status = 'in_progress'; changed = true;
             }
             for (const entry of Object.values(owner.admissions)) {
-              if (!entry?.record || entry.assignment.source.kind !== 'reception_plan_v1') continue;
+              if (!entry?.record || entry.assignment.source.kind === 'server_config_v1') continue;
               const slot = reception.trials[entry.assignment.source.trialIndex];
               if (!slot || entry.assignment.source.receptionId !== reception.receptionId || slot.recordId !== null && slot.recordId !== entry.record.recordId) throw new ReceptionError('reception_unavailable');
               if (slot.recordId === null) { slot.recordId = entry.record.recordId; changed = true; }
@@ -455,14 +512,24 @@ export class TangramSession extends DurableObject<Env> {
     return this.base;
   }
   async adminPrepareNext(id: string) {
-    if (this.receptionRequired()) throw new ReceptionError('reception_not_approved');
-    const next = await this.assignmentSession().prepareNext(id);
-    this.trial = null; // Next participant request obtains the coordinator's bound current handle.
-    return next;
+    return this.receptionSerial(async () => {
+      // The researcher's legacy next-trial action follows the same authorization as a new start.
+      const kind = await this.ownerKind();
+      if (kind === 'reception') throw new ReceptionError('reception_conflict');
+      if (kind === 'legacy' && (await this.settings()).mode.value === 'on') throw new ReceptionError('reception_required');
+      this.admission = { kind:'legacy' };
+      try {
+        const next = await this.assignmentSession().prepareNext(id);
+        this.trial = null; // Next participant request obtains the coordinator's bound current handle.
+        return next;
+      } finally { this.admission = null; }
+    });
   }
 
   private async createTrial(binding: Parameters<MakeBaseTask>[0]): Promise<NamingTask> {
     const {seed,strategy,referenceMemory,restore} = binding;
+    // New trials take the assignment's mode; a restored trial takes its mode from its own record only.
+    const rotation: { rotationMode?: RotationMode } = restore ? {} : { rotationMode: binding.rotationMode };
     // New trials follow the deployment setting; a restored trial keeps its recorded style.
     const savedStyle = restore?.options.utteranceStyle ?? 'default';
     if (savedStyle !== 'default' && savedStyle !== 'concise') throw new NamingTaskError('invalid_options');
@@ -487,7 +554,7 @@ export class TangramSession extends DurableObject<Env> {
           return new Response(JSON.stringify(response.data), { status: response.status, headers: { "Content-Type": "application/json" } });
         }),
     } : null;
-    return await createNamingTaskV2(({ client, seed, strategy, referenceMemory, utteranceStyle, runDir: null, groundingShadow,
+    return await createNamingTaskV2(({ client, seed, strategy, referenceMemory, utteranceStyle, runDir: null, groundingShadow, ...rotation,
       ...(restore ? { restore } : {}),
       // Every write also keeps record:<recordId>, so a later trial never erases this one.
       onPersist: async (snapshot: StoredTrial) => {
@@ -550,11 +617,22 @@ export class TangramSession extends DurableObject<Env> {
 
   private async participantState(): Promise<unknown> {
     const state = await this.state();
-    if (!this.receptionRequired()) return state;
-    const r = await this.readReception();
-    const reception = r ? participantReception(r) : { number:null, status:'waiting', revision:0 };
-    if (r?.status === 'approved' || r?.status === 'in_progress') {
-      try { this.protocol(); } catch { reception.status = 'unavailable'; }
+    const kind = await this.ownerKind();
+    if (kind === 'unused') {
+      // Only a browser that has nothing yet depends on the global mode; reasons are never shown.
+      let mode: string;
+      try { mode = (await this.settings()).mode.value; } catch { return { ...state as object, reception:{ number:null, status:'unavailable', revision:0 } }; }
+      return mode === 'on' ? { ...state as object, reception:{ number:null, status:'waiting', revision:0 } } : state;
+    }
+    if (kind !== 'reception') return state;
+    const r = (await this.readReception())!;
+    // Settings are read only when a start is possible; an existing trial never depends on them.
+    const last = r.status === 'in_progress' ? r.trials.at(-1) : undefined;
+    const next = last?.recordId && r.plan && r.trials.length < r.plan.trials.length && (await this.baseReadRecord(last.recordId))?.status === 'completed';
+    const awaitingQuestionnaire = Boolean(next && r.plan && effectiveBetweenTrials(r.plan) === 'questionnaire_required' && !await this.questionnaireSubmitted(last!.recordId!));
+    const reception = participantReception(r, { awaitingQuestionnaire });
+    if (r.status === 'approved' || next) {
+      try { await this.currentProtocol(); } catch { reception.status = 'unavailable'; }
     }
     return { ...state as object, reception };
   }
@@ -564,15 +642,16 @@ export class TangramSession extends DurableObject<Env> {
       const pathname = new URL(request.url).pathname;
       const body = request.method === 'POST' && ['/api/start','/api/message','/api/retry','/api/names','/api/ai-submit'].includes(pathname) ? await readBody(request) : null;
       if (pathname === '/api/start' && request.method === 'POST') {
-        if (this.receptionRequired()) {
-          if (body?.version !== 2 || Object.keys(body).some(k => !['version','expectedReceptionRevision','expectedRecordId'].includes(k))) throw new NamingTaskError('invalid_request');
+        // A body with reception expectations is checked by shape here and by the reception owner later;
+        // any other body must be exactly the legacy start (a legacy owner never accepts expectations).
+        if (Object.hasOwn(body!,'expectedReceptionRevision') || Object.hasOwn(body!,'expectedRecordId')) {
+          if (body!.version !== 2 || Object.keys(body!).some(k => !['version','expectedReceptionRevision','expectedRecordId'].includes(k))) throw new NamingTaskError('invalid_request');
         } else validateBaseStart(body);
       }
       const ownerStatus = await this.baseOwnerStatus();
       if (ownerStatus !== 'registered') return json(401,{error:'session_required'});
       await this.initialize();
       if (pathname === '/api/reception' && request.method === 'POST') {
-        if (!this.receptionRequired()) return json(404,{error:'not_found'});
         await this.receive(); this.trial = (await this.assignmentSession().restore()).task;
         return json(200,await this.participantState());
       }
@@ -584,8 +663,7 @@ export class TangramSession extends DurableObject<Env> {
       if (request.method !== "POST") return json(404, { error: "not_found" });
       if (!["/api/start", "/api/message", "/api/retry", "/api/names", "/api/ai-submit"].includes(pathname)) return json(404, { error: "not_found" });
       if (pathname === '/api/start') {
-        if (this.receptionRequired()) await this.receptionStart(body!);
-        else this.trial = (await this.assignmentSession().start(body)).task;
+        await this.startTrial(body!);
         return json(200,await this.participantState());
       }
       if (!this.trial) throw new NamingTaskError("trial_required");
@@ -628,13 +706,14 @@ export default {
       return handleAdmin(request, {
         token: index ? env.ADMIN_TOKEN : undefined,
         limiter: env.ADMIN_RATE_LIMIT,
-        receptions: index && env.RECEPTION_REQUIRED === 'on' ? createReceptionAdminPort({
+        receptions: index ? createReceptionAdminPort({
           index,
-          readProtocol:() => env.RECEPTION_PROTOCOL_JSON === undefined ? null : JSON.parse(env.RECEPTION_PROTOCOL_JSON),
+          readSettings:() => index.readReceptionSettings(),
           owner:objectId => {
             try { return env.NAMING_SESSIONS.get(env.NAMING_SESSIONS.idFromString(objectId)); } catch { return null; }
           },
         }) : undefined,
+        receptionSettings: index ? createReceptionSettingsPort(index) : undefined,
         listPage: async (after) => (await index!.page(after)) as { items: AdminSummary[]; next: string | null },
         getSummary: async (recordId) => (await index!.get(recordId)) as AdminSummary | null,
         getRecord: async (summary) => (await owner(summary)?.adminRecord(summary.recordId)) ?? null,

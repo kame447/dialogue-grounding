@@ -1,24 +1,26 @@
-import { ReceptionError, validateReception, validateReceptionProtocol } from '../../../../dialogue-model/runtime/v2/reception.ts';
+import { ReceptionError, validateReception, effectiveRotationMode, effectiveBetweenTrials } from '../../../../dialogue-model/runtime/v2/reception.ts';
+import { validateReceptionSettings } from './reception-settings.ts';
 import type { Reception, ReceptionSummary } from '../../../../dialogue-model/runtime/v2/reception.ts';
-import type { ReceptionAdminPort, ReceptionAdminRow, ReceptionAdminResult } from './reception-port.ts';
+import type { DisplayedProtocol, ReceptionAdminPort, ReceptionAdminRow, ReceptionAdminResult, ReceptionSettingsPort } from './reception-port.ts';
 import { OBJECT_ID, RECORD_ID } from './summary.ts';
 
 type Owner = {
   adminReception(): Promise<Reception | null>;
-  adminApproveReception(input: { expectedRevision: number; order: number }): Promise<Reception>;
+  adminApproveReception(input: { expectedRevision: number; order: number; protocol: DisplayedProtocol }): Promise<Reception>;
   adminCancelReception(input: { expectedRevision: number }): Promise<Reception>;
 };
 type Index = {
   listReceptions(): Promise<ReceptionSummary[]>;
   getReception(id: string): Promise<ReceptionSummary | null>;
 };
-type Options = { index: Index; owner(objectId: string): Owner | null; readProtocol(): unknown };
+type Options = { index: Index; owner(objectId: string): Owner | null; readSettings(): Promise<unknown> };
 const PAGE_SIZE = 100;
 
 /** Management values always come from the owning DO, never from index extras. */
 function project(r: Reception): ReceptionAdminRow {
   return { receptionId:r.receptionId, number:r.number, createdAt:r.createdAt, status:r.status, revision:r.revision,
-    plan:r.plan ? { order:[...r.plan.order] } : null, trials:r.trials.map(t => ({...t})) };
+    plan:r.plan ? { order:[...r.plan.order], rotationMode:effectiveRotationMode(r.plan, 0), betweenTrials:effectiveBetweenTrials(r.plan) } : null,
+    trials:r.trials.map(t => ({...t})) };
 }
 function failure(error: unknown): ReceptionAdminResult {
   // RPC Error objects need not preserve custom .code properties. Accept only
@@ -29,6 +31,8 @@ function failure(error: unknown): ReceptionAdminResult {
     case 'reception_conflict': return { ok:false, error:'conflict' };
     case 'invalid_order': return { ok:false, error:'invalid_order' };
     case 'protocol_unconfigured': return { ok:false, error:'protocol_unconfigured' };
+    case 'protocol_changed': return { ok:false, error:'protocol_changed' };
+    case 'reception_closed': return { ok:false, error:'reception_closed' };
     default: return { ok:false, error:'reception_unavailable' };
   }
 }
@@ -57,10 +61,12 @@ export function createReceptionAdminPort(options: Options): ReceptionAdminPort {
   }
   return {
     async protocol() {
-      try {
-        const p = validateReceptionProtocol(options.readProtocol());
-        return { configured:true, protocolId:p.protocolId, revision:p.revision, allowedOrders:p.allowedOrders };
-      } catch { return { configured:false }; }
+      // Transport attributes (workerd's Symbol.dispose) are dropped before strict validation; damage throws.
+      const s = validateReceptionSettings(structuredClone(await options.readSettings()));
+      if (!s.protocol) return { configured:false, mode:s.mode.value };
+      const p = s.protocol.protocol;
+      return { configured:true, mode:s.mode.value, protocolId:p.protocolId, revision:s.protocol.revision, sha256:s.protocol.sha256,
+        allowedOrders:p.allowedOrders, rotationMode:p.rotationMode, betweenTrials:p.betweenTrials };
     },
     async listPage(after) {
       const summaries = await options.index.listReceptions();
@@ -78,5 +84,27 @@ export function createReceptionAdminPort(options: Options): ReceptionAdminPort {
     async get(id) { const result = await lookup(id); return result ? project(result.reception) : null; },
     approve:(id,input) => mutate(id,owner => owner.adminApproveReception(input)),
     cancel:(id,input) => mutate(id,owner => owner.adminCancelReception(input)),
+  };
+}
+
+type SettingsIndex = {
+  readReceptionSettings(): Promise<unknown>; receptionProtocolHistory(): Promise<unknown>; receptionModeHistory(): Promise<unknown>;
+  saveReceptionProtocol(input: unknown): Promise<unknown>; saveReceptionMode(input: unknown): Promise<unknown>;
+};
+const SAVE_ERRORS = ['conflict', 'invalid', 'protocol_unconfigured', 'unavailable'];
+function saveResult(value: unknown) {
+  const v = structuredClone(value) as { ok?: unknown; error?: unknown };
+  if (v?.ok === true) return { ok:true as const };
+  return { ok:false as const, error:typeof v?.error === 'string' && SAVE_ERRORS.includes(v.error) ? v.error : 'unavailable' };
+}
+export function createReceptionSettingsPort(index: SettingsIndex): ReceptionSettingsPort {
+  return {
+    async read() {
+      const settings = validateReceptionSettings(structuredClone(await index.readReceptionSettings()));
+      return { ...settings, protocolHistory:structuredClone(await index.receptionProtocolHistory()) as never,
+        modeHistory:structuredClone(await index.receptionModeHistory()) as never };
+    },
+    async saveProtocol(input) { return saveResult(await index.saveReceptionProtocol(input)); },
+    async saveMode(input) { return saveResult(await index.saveReceptionMode(input)); },
   };
 }
