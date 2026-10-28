@@ -124,11 +124,17 @@ async function client(f: ReturnType<typeof fixture>, path = '/admin/receptions')
     Set, Map, Date, Math, Number, Boolean, Error, Array, AbortSignal,
   });
   vm.runInContext(RECEPTIONS_LIVE_JS, context);
-  const flush = async () => { for (let i = 0; i < 30; i++) await new Promise(r => setImmediate(r)); };
+  // A poll cycle ends by scheduling the next one (or by stopping); wait for that rather than a fixed number of turns.
+  const settle = async (done: () => boolean) => { for (let i = 0; i < 1000 && !done(); i++) await new Promise(r => setTimeout(r, 2)); };
   return {
     document, timers, requests, windowListeners,
     reply(fn: (url: string) => Response | Promise<Response> | null) { reply = fn; },
-    async tick() { const t = timers.shift(); assert.ok(t, 'a poll is scheduled'); t.fn(); await flush(); return t.ms; },
+    settle,
+    async tick() {
+      const t = timers.shift(); assert.ok(t, 'a poll is scheduled'); const sent = requests.length; t.fn();
+      await settle(() => timers.length > 0 || (requests.length > sent && document.getElementById('reception-sync')!.textContent.includes('開き直して')));
+      return t.ms;
+    },
     row: (n: number) => document.root.querySelector(`tr[data-id="${id(n)}"]`) as FakeElement | null,
     notice: () => document.getElementById('reception-new')!.textContent,
     sync: () => document.getElementById('reception-sync')!.textContent,
@@ -304,7 +310,7 @@ test('one check at a time: events during a slow request add no second request; 4
   const first = c.timers.shift()!; first.fn(); await new Promise(r => setImmediate(r));
   c.document.dispatch('visibilitychange'); c.windowListeners.get('online')!(); for (const t of c.timers.splice(0)) t.fn();
   assert.equal(c.requests.length, 1);
-  release(new Response('', { status: 429 })); for (let i = 0; i < 30; i++) await new Promise(r => setImmediate(r));
+  release(new Response('', { status: 429 })); await c.settle(() => c.timers.length > 0);
   assert.equal(c.timers.length, 1); assert.equal(c.timers[0].ms, 60000, 'missing Retry-After waits a minute');
   c.document.dispatch('visibilitychange'); assert.ok(c.timers[0].ms > 55000, 'returning to the tab does not skip Retry-After');
   c.reply(() => new Response('', { status: 429, headers: { 'Retry-After': '99999' } })); await c.tick(); assert.equal(c.timers[0].ms, 600000);
