@@ -73,7 +73,7 @@ export const ACTION_SCOPE_V2 = Object.freeze({
 // as they are for the Jev path. Own-image claims need a basis in the judgment or its memo;
 // a name act shows its name in 「」 (a format rule that never certifies the act).
 const LUNA_REPLACED = new Map([
-  ["propose_nameやagreeにdiscriminatingFeatureがあるときは、", "propose_nameやagreeでは、判断や判断メモにある自分側の特徴があれば、それに短く触れてどの図形のことかを示せます。相手の説明を言い換えて繰り返すことを、自分も見た・理解した証拠として示さないでください。相手の見立てには短く受け止め、必要なら自分の画像の全体の見立てを1つ返せます。判断にない尖り・四角・くぼみなどの形の数や特徴を作って補わないでください。propose_nameでは名前を候補として示すだけにし、合意は表明しないでください。"],
+  ["propose_nameやagreeにdiscriminatingFeatureがあるときは、", "propose_nameやagreeでは、判断や判断メモにある自分側の特徴があれば、それに短く触れてどの図形のことかを示せます。相手の説明を言い換えて繰り返すことを、自分も見た・理解した証拠として示さないでください。相手の見立ては短く受け止め、必要なら自分の画像の全体の見立てを1つ返せます。判断にない尖り・四角・くぼみなどの形の数や特徴を作って補わないでください。propose_nameでは名前を候補として示すだけにし、合意は表明しないでください。"],
 ]);
 export const LUNA_GENERATOR_INSTRUCTIONS_V2 = [
   ...GENERATOR_INSTRUCTIONS_V2.split("\n").map((line) => [...LUNA_REPLACED].find(([prefix]) => line.startsWith(prefix))?.[1] ?? line),
@@ -81,13 +81,13 @@ export const LUNA_GENERATOR_INSTRUCTIONS_V2 = [
   "名前を提案するとき（propose_name）や名前に合意するとき（agree）は、その名前を「」で囲んで示してください。",
 ].join("\n");
 export const LUNA_CONCISE_INSTRUCTIONS_V2 = [
-  "【短いチャット】この発話では、指定されたactionの機能を中心に、原則として1つの論点を扱ってください。同じ論点なら、受け止めに判断メモにある自分の観察や、まだ確かめていない点を短く添えても構いません。相手の発話に複数の問いがあれば、必要な部分には短く応じてください。挨拶や相槌だけで終えず相手の発話の内容に応じ、相槌は短い一言までにし、指定されたaction以外で次の図形・次の名前・別の話題は出さないでください。",
+  "【短いチャット】この発話では、指定されたactionの機能を中心に、原則として1つの論点を扱ってください。同じ論点なら、受け止めに判断メモにある自分の観察や、まだ確かめていない点を短く添えても構いません。相手の発話に複数の問いがあれば、必要な部分には短く応じてください。挨拶だけで終えず、指定されたactionの機能を果たしてください。相槌は短い一言までにし、指定されたactionが求める場合を除き、次の図形・次の名前・別の話題は出さないでください。",
   "人間同士のチャットのように、多くは1〜2文で、相手の発話と同じくらいの長さにしてください。相手の言葉の言い直しや自分の見立ての繰り返しはしないでください。確認したい特徴などの必要な内容は削らず、短さのために不自然にしないでください。",
 ].join("\n");
 export const LUNA_ACTION_SCOPE_V2 = Object.freeze({
   ...ACTION_SCOPE_V2,
   accept: "受け止める。判断メモにある同じ論点の自分の観察は短く添えてよい。名前に決まったとは言わない",
-  propose_name: "名前を「」で示して候補として出すか、どの図形と理解したかを示す。決まった・それでいこうとは言わない",
+  propose_name: "名前を「」で示して候補として出す（どの図形と理解したかを短く添えてもよい）。決まった・それでいこうとは言わない",
   confirm: "確かめたい点を尋ねる・確かめる。根拠のない見落としや発見は言わない。決まった・それでいこうとは言わない",
   agree: "名前を「」で示して、この名前に決まったことを伝えてよい",
   defer: "その対象をいったん保留し、後で戻ることを伝える。自分の説明を誤りとは言わない。決まったとは言わない",
