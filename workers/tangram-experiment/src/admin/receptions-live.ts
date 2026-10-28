@@ -114,27 +114,29 @@ export const RECEPTIONS_LIVE_JS = `(function () {
     return complete;
   }
 
+  // Resolves with the whole body (parsed JSON or text). The timer covers headers and body alike, so a response
+  // that stalls at any point frees the single check slot, with or without an abortable fetch.
   function request(url, type) {
     var options = { headers: { Accept: type }, credentials: 'same-origin', cache: 'no-store', redirect: 'error' };
     var controller = typeof AbortController === 'function' ? new AbortController() : null, timeout = null;
     if (controller) options.signal = controller.signal;
-    // Even without an abortable fetch, a request that never settles must not hold the single check slot forever.
     var expired = new Promise(function (resolve, reject) {
       timeout = setTimeout(function () { if (controller) controller.abort(); reject(new Error('timeout')); }, ${REQUEST_TIMEOUT_MS});
     });
-    return Promise.race([fetch(url, options), expired]).then(function (response) {
-      clearTimeout(timeout);
+    var whole = fetch(url, options).then(function (response) {
       var kind = (response.headers.get('Content-Type') || '').split(';')[0].trim();
-      if (response.ok && kind === type) return response;
+      if (response.ok && kind === type) return type === 'application/json' ? response.json() : response.text();
       var error = new Error('http');
       error.status = response.ok ? 0 : response.status;
       error.retryAfter = Number(response.headers.get('Retry-After'));
       throw error;
-    }, function (error) { clearTimeout(timeout); throw error; });
+    });
+    return Promise.race([whole, expired]).then(function (body) { clearTimeout(timeout); return body; },
+      function (error) { clearTimeout(timeout); throw error; });
   }
 
   function refresh() {
-    return request(location.pathname + location.search, 'text/html').then(function (response) { return response.text(); }).then(function (html) {
+    return request(location.pathname + location.search, 'text/html').then(function (html) {
       var next = new DOMParser().parseFromString(html, 'text/html').getElementById('reception-list');
       var nextVersion = next && next.getAttribute('data-version');
       if (!next || !HEX.test(nextVersion || '')) throw new Error('page');
@@ -149,7 +151,7 @@ export const RECEPTIONS_LIVE_JS = `(function () {
   }
   function check() {
     var url = '/admin/receptions/version' + (laterPage ? '?since=' + encodeURIComponent(sinceText) : '');
-    return request(url, 'application/json').then(function (response) { return response.json(); }).then(function (data) {
+    return request(url, 'application/json').then(function (data) {
       if (!data || !HEX.test(typeof data.version === 'string' ? data.version : '')) throw new Error('version');
       if (laterPage) serverNew = typeof data.newPending === 'number' && data.newPending >= 0 ? data.newPending : 0;
       var due = document.visibilityState !== 'hidden' && Date.now() - refreshedAt >= FORCED;

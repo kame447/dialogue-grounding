@@ -350,3 +350,19 @@ for (const noAbort of [false, true]) test('a request that never settles times ou
   if (!noAbort) assert.equal(c.requests[0].init.signal.aborted, true);
   c.reply(() => null); await c.tick(); assert.equal(c.sync(), ''); assert.equal(c.requestTimers.length, 0, 'finished requests clear their timeout');
 });
+
+// A body that starts and then stalls: headers arrive, the stream never ends.
+const stalled = (type: string) => new Response(new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode(type === 'text/html' ? '<html>' : '{"vers')); } }),
+  { status: 200, headers: { 'Content-Type': type + '; charset=utf-8' } });
+for (const noAbort of [false, true]) for (const which of ['version', 'page'] as const) test(`a ${which} body that stalls after its headers times out${noAbort ? ' (no AbortController)' : ''}`, async () => {
+  const f = fixture(); const c = await client(f, '/admin/receptions', { noAbort });
+  const row = c.row(1)!, input = row.querySelector('input[name="confirm"]') as FakeElement; input.value = 'x';
+  if (which === 'page') f.change();
+  c.reply(url => (which === 'version') === url.startsWith('/admin/receptions/version') ? stalled(which === 'version' ? 'application/json' : 'text/html') : null);
+  const first = c.timers.shift()!; first.fn(); await c.settle(() => c.requests.length === (which === 'version' ? 1 : 2) && c.requestTimers.length === 1);
+  for (let i = 0; i < 20; i++) await new Promise(r => setImmediate(r));
+  assert.equal(c.timers.length, 0, 'still waiting for the body'); assert.equal(c.requestTimers.length, 1, 'the body is still under the timeout');
+  c.requestTimers.shift()!.fn(); await c.settle(() => c.timers.length > 0);
+  assert.equal(c.timers[0].ms, VISIBLE_POLL_MS); assert.notEqual(c.sync(), ''); assert.equal(c.row(1), row); assert.equal(input.value, 'x');
+  c.reply(() => null); await c.tick(); assert.equal(c.sync(), ''); assert.equal(c.requestTimers.length, 0);
+});
