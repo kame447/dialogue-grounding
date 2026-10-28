@@ -5,7 +5,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { createTrialV2, participantView, modelView } from "../stimuli/scatter-v2.mjs";
+import { createTrialV2, participantView, modelView, ROTATION_MODES, trialStimulusV2 } from "../stimuli/scatter-v2.mjs";
 import { scoreTrial as defaultScoreTrial, normalizeName } from "../scoring.mjs";
 import { createHumanMessageQueue } from "../web/human-message-queue.mjs";
 import { createDialogueV2 } from "./dialogue-v2.mjs";
@@ -38,6 +38,28 @@ export function validateNamesV2(value, slots) {
   }));
 }
 
+const plain = (value) => value !== null && typeof value === "object" && !Array.isArray(value)
+  && [Object.prototype, null].includes(Object.getPrototypeOf(value));
+
+/**
+ * The rotation a trial uses. A restore keeps the mode its record was generated with; only a record
+ * written before the field existed (no own options.rotationMode) is relative_pm90. A restore never
+ * takes the caller's mode.
+ */
+function trialRotation(restore, rotationMode) {
+  if (!restore) {
+    if (!ROTATION_MODES.includes(rotationMode)) throw new NamingTaskError("invalid_options");
+    return { mode: rotationMode, legacy: false };
+  }
+  if (!plain(restore.options)) throw new NamingTaskError("invalid_options");
+  if (!Object.hasOwn(restore.options, "rotationMode")) {
+    if (Object.hasOwn(restore, "stimulus")) throw new NamingTaskError("invalid_options");
+    return { mode: "relative_pm90", legacy: true };
+  }
+  if (!ROTATION_MODES.includes(restore.options.rotationMode)) throw new NamingTaskError("invalid_options");
+  return { mode: restore.options.rotationMode, legacy: false };
+}
+
 export function parseAiNamesV2(text, slots) {
   let value;
   try { value = JSON.parse(String(text).replace(/^\s*```(?:json)?|```\s*$/g, "").trim()); } catch { return null; }
@@ -52,7 +74,7 @@ export function parseAiNamesV2(text, slots) {
  *   judge?: import('../judgment/schema.mjs').DialogueJudge | null, now?: () => number, restore?: object | null, onPersist?: Function | null,
  *   decisionShadowClient?: {chooseAction(request: object): Promise<any>} | null,
  *   activeDecision?: {purpose: string, client: {chooseAction(request: object): Promise<any>}} | null,
- *   utteranceStyle?: string, groundingShadow?: import('./grounding-shadow.ts').GroundingShadowOptions | null,
+ *   utteranceStyle?: string, rotationMode?: string, groundingShadow?: import('./grounding-shadow.ts').GroundingShadowOptions | null,
  *   localGrounding?: import('../local-grounding/contract.ts').LocalGroundingOptions | null,
  *   jevResearch?: import('../web/participant-jev-wiring.ts').JevResearchOptions | null,
  *   onLocalGroundingTrace?: ((record: import('./local-grounding-turn.ts').LocalGroundingResearchRecord) => unknown) | null }} options
@@ -62,8 +84,10 @@ export async function createNamingTaskV2({
   client, strategy, seed, referenceMemory = true, runDir = process.env.RESEARCH_RUN_DIR,
   createTrial = createTrialV2, scoreTrial = defaultScoreTrial, judge = null, now = () => Date.now(),
   restore = null, onPersist = null, decisionShadowClient = null, activeDecision = null, utteranceStyle = "default",
-  groundingShadow = null, localGrounding = null, onLocalGroundingTrace = null, jevResearch = null,
+  groundingShadow = null, localGrounding = null, onLocalGroundingTrace = null, jevResearch = null, rotationMode = "relative_pm90",
 }) {
+  // Checked before any generation, observation or persist.
+  const rotation = trialRotation(restore, rotationMode);
   // Restored trials retain their recorded condition, including legacy memory-off trials.
   if (restore) referenceMemory = restore.options?.referenceMemory === undefined ? false : restore.options.referenceMemory;
   const style = restore?.options?.utteranceStyle ?? utteranceStyle;
@@ -79,7 +103,13 @@ export async function createNamingTaskV2({
   const local = restore && restore.options?.localGrounding !== true ? null : localGrounding;
   const groundingRecords = Array.isArray(restore?.groundingShadow) ? clone(restore.groundingShadow) : [];
   const directory = runDir ? await (await import("../naming-task.mjs")).outsideRepositoryDirectory(runDir) : null;
-  const trial = createTrial({ seed });
+  const trial = createTrial({ seed, rotationMode: rotation.mode });
+  // Generation-time angles; a restored record must match what is shown again.
+  const stimulus = trialStimulusV2(trial);
+  if (!stimulus || stimulus.rotationMode !== rotation.mode) throw new NamingTaskError("invalid_options");
+  if (restore && !rotation.legacy && (JSON.stringify(restore.stimulus) !== JSON.stringify(stimulus) || restore.trialId !== trial.trialId)) {
+    throw new NamingTaskError("invalid_options");
+  }
   const scene = participantView(trial);
   const model = modelView(trial);
   const humanSlots = scene.shapes.map((shape) => shape.id);
@@ -207,10 +237,13 @@ export async function createNamingTaskV2({
     const record = {
       recordId, version: VERSION, trialId: trial.trialId, seed, strategy, startedAt, updatedAt: new Date(now()).toISOString(),
       options: { visualAid: false, referenceMemory, decisionShadow: Boolean(decisionShadowClient), activeDecision: activeDecision?.purpose ?? null, utteranceStyle: style,
+        // Legacy records keep their original shape; they never gain rotation fields on restore.
+        ...(rotation.legacy ? {} : { rotationMode: rotation.mode }),
         // Present only when on, so default-off records keep their previous shape.
         ...(grounding ? { groundingShadow: true } : {}), ...(local ? { localGrounding: true } : {}),
         ...(!jev && restore?.options?.jevResearch === false ? { jevResearch: false } : {}),
         ...(jev ? { jevResearch: true, profileSha256: researchHash(jev.profile), interventionPolicy: clone(jev.profile.interventionPolicy), ...(jev.technicalTrial ? { technicalTrial: clone(jev.technicalTrial) } : {}) } : {}) },
+      ...(rotation.legacy ? {} : { stimulus: clone(stimulus) }),
       status: result ? "completed" : closed ? "submitting" : "dialogue",
       // Origin is research metadata only; queue/model/participant events stay ordinary public speech.
       events: snapshot.events.map((event) => event.seq === 1 && event.speaker === "ai" && event.text === SCRIPTED_OPENING

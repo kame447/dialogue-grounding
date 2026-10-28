@@ -253,7 +253,8 @@ export async function prepareParticipantJev(options:{configFile:string;baseAssig
     if((options.utteranceStyle??'default')!==profile.utteranceStyle||options.activeDecision||options.groundingShadow)throw Error();
     const assignment=await readPrivateAssignment(options.baseAssignmentFile);
     if(!assignment.referenceMemory||assignment.seed!==config.seed||!STRATEGIES.includes(assignment.strategy))throw Error();
-    const model=modelView(createTrialV2({seed:config.seed}));
+    // The P1 cache holds the relative_pm90 board; other rotation modes are refused per task below.
+    const model=modelView(createTrialV2({seed:config.seed,rotationMode:'relative_pm90'}));
     const own:ObservationInput={ownImage:{mimeType:model.mimeType,base64:model.png.toString('base64')},ownAnchors:model.anchors};
     const absent:ObservationObserver={async observeAll(){throw Error();},async reobserve(){throw Error();}};
     const startup=await createParticipantCacheObserver({directory:config.cacheDirectory,modelId:config.modelId,memoSha256:config.memoSha256,own,profile,reobserver:absent});
@@ -266,9 +267,12 @@ export async function prepareParticipantJev(options:{configFile:string;baseAssig
     if(!response.ok)throw Error();
     const policy=data(await response.json());
     if(policy.ready!==true||policy.purpose!=='dialogue_turn'||typeof policy.provider!=='string'||!['openai','gemini'].includes(policy.provider)||policy.model!==config.modelId)throw Error();
-    return {config,profile,async taskOptions(value:{seed:number;referenceMemory:boolean;strategy:string;restore?:any}) {
+    return {config,profile,async taskOptions(value:{seed:number;referenceMemory:boolean;strategy:string;rotationMode?:string;restore?:any}) {
       // An old assigned record stays on the original caller's client and options.
       if(value.restore&&value.restore.options?.jevResearch!==true)return {};
+      const saved=value.restore?.options;
+      const rotationMode=value.restore?(saved&&typeof saved==='object'&&Object.hasOwn(saved,'rotationMode')?saved.rotationMode:'relative_pm90'):value.rotationMode??'relative_pm90';
+      if(rotationMode!=='relative_pm90')throw new ParticipantJevError('invalid_config');
       if(value.seed!==config.seed||value.referenceMemory!==true||!STRATEGIES.includes(value.strategy))throw new ParticipantJevError('invalid_config');
       const ledger=new RunBudget(config.limits);
       const {maxCompletionTokens:_oldOutputLimit,...baseClientConfig}=options.clientConfig;
