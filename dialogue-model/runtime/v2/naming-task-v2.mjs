@@ -94,6 +94,8 @@ export async function createNamingTaskV2({
   const jev = selectParticipantJev(restore, jevResearch, { referenceMemory, strategy, style,
     legacy: [localGrounding, activeDecision, decisionShadowClient, groundingShadow] });
   if (!STRATEGIES.includes(strategy)) throw new NamingTaskError("invalid_strategy");
+  // Luna records keep their attempts across restores; a malformed list is refused, never replaced.
+  if (restore && !jev && Object.hasOwn(restore, "attempts") && !Array.isArray(restore.attempts)) throw new NamingTaskError("invalid_options");
   if (!Number.isSafeInteger(seed)) throw new NamingTaskError("invalid_seed");
   if (typeof referenceMemory !== "boolean") throw new NamingTaskError("invalid_options");
   // A restored trial keeps the style it started with, whatever the deployment now says.
@@ -117,7 +119,9 @@ export async function createNamingTaskV2({
   // Private per-attempt timings; they survive restore with the record.
   const turnTimings = Array.isArray(restore?.turnTimings) ? clone(restore.turnTimings) : [];
   const jevTraces = jev && restore ? clone(restore.jevTraces) : [];
-  const priorJevAttempts = jev && Array.isArray(restore?.attempts) ? clone(restore.attempts) : [];
+  // Attempts recorded before a restore; this construction's dialogue starts its own list from empty.
+  const priorAttempts = Array.isArray(restore?.attempts) ? clone(restore.attempts) : [];
+  const allAttempts = () => [...clone(priorAttempts), ...dialogue.getAttempts()];
   let aiPublicSettlement = jev && restore ? clone(restore.aiPublicSettlement) : null;
   let initialObservation = jev && restore ? clone(restore.initialObservation) : null;
   if (jev && restore) restoreParticipantJevLedger(jev.ledger, restore.jevLedger);
@@ -250,7 +254,7 @@ export async function createNamingTaskV2({
         ? { ...event, origin: "scripted_opening" } : event),
       // Same role/content shape as v1 so offline metrics apply unchanged.
       publicHistory: snapshot.events.map((e) => ({ role: e.speaker === "human" ? "user" : "assistant", content: e.text })),
-      judgments: privateState.judgments, attempts: jev ? [...priorJevAttempts, ...dialogue.getAttempts()] : dialogue.getAttempts(), ownLedger: privateState.ledger,
+      judgments: privateState.judgments, attempts: allAttempts(), ownLedger: privateState.ledger,
       ...(grounding || groundingRecords.length ? { groundingShadow: clone(groundingRecords) } : {}),
       ...(referenceMemory ? { referenceGraph: dialogue.snapshotGraph(privateState) } : {}),
       ...(jev ? { jevTraces: settleJevTurnTraces(jevTraces, privateState), aiPublicSettlement: clone(aiPublicSettlement),
@@ -348,7 +352,7 @@ export async function createNamingTaskV2({
       return aiSubmitting;
     },
     // Researcher-only; never returned over the participant API.
-    researcherView() { return { key: clone(trial.key), privateState: queue.getPrivateState(), attempts: jev ? [...priorJevAttempts, ...dialogue.getAttempts()] : dialogue.getAttempts(),
+    researcherView() { return { key: clone(trial.key), privateState: queue.getPrivateState(), attempts: allAttempts(),
       groundingShadow: clone(groundingRecords) }; },
   };
 
