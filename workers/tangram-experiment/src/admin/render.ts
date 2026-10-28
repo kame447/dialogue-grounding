@@ -146,8 +146,8 @@ ${questionnaireSection(r.questionnaire)}
 <button>この記録を削除</button></form>`);
 }
 
-export function renderMessage(title: string, message: string): string {
-  return page(title, `<h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p><p><a href="/admin">一覧へ</a></p>`);
+export function renderMessage(title: string, message: string, back: { href: string; label: string } = { href: '/admin', label: '一覧へ' }): string {
+  return page(title, `<h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p><p><a href="${escapeHtml(back.href)}">${escapeHtml(back.label)}</a></p>`);
 }
 
 const RECEPTION_LABELS = { pending: '許可待ち', approved: '許可済み', in_progress: '実施中', finished: '終了', cancelled: '取消済み' };
