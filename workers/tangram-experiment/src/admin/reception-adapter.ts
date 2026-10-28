@@ -81,6 +81,27 @@ export function createReceptionAdminPort(options: Options): ReceptionAdminPort {
       }
       return { items, next:start+PAGE_SIZE < summaries.length ? page.at(-1)!.receptionId : null };
     },
+    async version(since) {
+      // Change detection only: index rows and settings are hashed, never shown; management values still come from the owner.
+      const [rows, settings] = await Promise.all([options.index.listReceptions(), options.readSettings()]);
+      const s = validateReceptionSettings(structuredClone(settings)), list = structuredClone(rows);
+      if (!Array.isArray(list)) throw new Error('reception_unavailable');
+      const material = JSON.stringify({ receptions: list.map(r => [r?.receptionId, r?.number, r?.status, r?.revision,
+        Array.isArray(r?.trials) ? r.trials.map(t => t?.recordId ?? null) : null]),
+        protocol: s.protocol ? [s.protocol.revision, s.protocol.sha256] : null, mode: [s.mode.value, s.mode.revision] });
+      const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(material)));
+      // Only the few index rows that could be new are confirmed with their owner, so a lost index update
+      // (e.g. a cancellation) does not keep counting them.
+      let newPending: number | null = null;
+      if (since !== null) {
+        newPending = 0;
+        for (const row of list) {
+          if (row?.status !== 'pending' || typeof row?.createdAt !== 'string' || row.createdAt < since) continue;
+          if ((await resolve(row, row.receptionId))?.reception.status === 'pending') newPending++;
+        }
+      }
+      return { version: [...digest].map(b => b.toString(16).padStart(2, '0')).join(''), newPending };
+    },
     async get(id) { const result = await lookup(id); return result ? project(result.reception) : null; },
     approve:(id,input) => mutate(id,owner => owner.adminApproveReception(input)),
     cancel:(id,input) => mutate(id,owner => owner.adminCancelReception(input)),
