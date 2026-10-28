@@ -3,6 +3,7 @@
 // Cloudflare. Fails closed: no token (or no rate limiter) means 404.
 // GET /admin/record/<recordId>.json downloads that one full record as JSON.
 import { checkAdmin, presentedToken } from "./auth.ts";
+import { RECEPTIONS_LIVE_JS } from './receptions-live.ts';
 import { ADMIN_CSS, applyFilter, parseFilter, renderDetail, renderList, renderMessage, renderReceptions, renderEntry, renderSettings } from "./render.ts";
 import { OBJECT_ID, RECORD_ID } from "./summary.ts";
 import type { AdminSummary } from "./summary.ts";
@@ -41,6 +42,8 @@ export const ADMIN_HEADERS: Readonly<Record<string, string>> = Object.freeze({
   "Content-Security-Policy": "default-src 'none'; style-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
   "Cross-Origin-Resource-Policy": "same-origin",
 });
+/** Only the self-updating reception list may run its own same-origin script and fetch from this origin. */
+export const LIVE_CSP = ADMIN_HEADERS["Content-Security-Policy"] + "; script-src 'self'; connect-src 'self'";
 const REALM = 'Basic realm="tangram-admin", charset="UTF-8"';
 const MAX_FORM_BYTES = 1024;
 
@@ -119,6 +122,7 @@ const unsigned = (text: string | null): number | null => {
   const n = Number(text); return Number.isSafeInteger(n) ? n : null;
 };
 
+const ISO_MS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const UUID_V4 = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
 async function receptionMutation(request: Request, port: ReceptionAdminPort, id: string, action: string): Promise<Response> {
   // A 503 may follow a write whose reply was lost, so it says the outcome is unknown rather than "not done".
@@ -221,7 +225,8 @@ export async function handleAdmin(request: Request, deps: AdminDeps): Promise<Re
   const nextPath = request.method === 'POST' && deps.prepareNext ? url.pathname.match(/^\/admin\/record\/([^/]+)\/prepare-next$/) : null;
   const receptionPath = request.method === 'POST' && deps.receptions ? url.pathname.match(/^\/admin\/reception\/([^/]+)\/(approve|cancel)$/) : null;
   const settingsPath = request.method === 'POST' && deps.receptionSettings ? url.pathname.match(/^\/admin\/reception-settings\/(protocol|mode)$/) : null;
-  if (!deps.receptions && (url.pathname === '/admin/receptions' || url.pathname === '/admin/entry')) return notFound();
+  if (!deps.receptions && (url.pathname === '/admin/receptions' || url.pathname === '/admin/entry' || url.pathname === '/admin/receptions.js')) return notFound();
+  if (!deps.receptions?.version && url.pathname === '/admin/receptions/version') return notFound();
   if (!deps.receptionSettings && url.pathname === '/admin/reception-settings') return notFound();
   if (request.method === "POST" ? !deletePath && !nextPath && !receptionPath && !settingsPath : request.method !== "GET" && request.method !== "HEAD") return notFound();
   const header = request.headers.get("Authorization");
@@ -247,11 +252,27 @@ export async function handleAdmin(request: Request, deps: AdminDeps): Promise<Re
   }
   if (deps.receptions && url.pathname === '/admin/receptions') {
     try {
+      // Version first, then content: a change in between makes the next version check differ, so none is missed.
+      const since = new Date().toISOString();
+      let version: string | null = null;
+      if (deps.receptions.version) { try { version = (await deps.receptions.version(null)).version; } catch { version = null; } }
       const protocol = await deps.receptions.protocol();
       const page = await deps.receptions.listPage(url.searchParams.get('after'));
-      return respond(200, renderReceptions(page.items, page.next, protocol));
+      const live = version !== null && /^[a-f0-9]{64}$/u.test(version) ? { version, since } : null;
+      return respond(200, renderReceptions(page.items, page.next, protocol, live), undefined, live ? { 'Content-Security-Policy': LIVE_CSP } : {});
     } catch { return receptionFailure(request, '受付一覧', 503, 'reception_unavailable'); }
   }
+  if (deps.receptions?.version && url.pathname === '/admin/receptions/version') {
+    // `since` is the render time the page carries; anything else is ignored rather than reflected.
+    const sinceParam = url.searchParams.get('since');
+    const since = sinceParam !== null && ISO_MS.test(sinceParam) && new Date(sinceParam).toISOString() === sinceParam ? sinceParam : null;
+    try {
+      const { version, newPending } = await deps.receptions.version(since);
+      if (!/^[a-f0-9]{64}$/u.test(version) || newPending !== null && !Number.isSafeInteger(newPending)) throw new Error();
+      return respond(200, JSON.stringify(since === null ? { version } : { version, newPending }), 'application/json; charset=utf-8');
+    } catch { return receptionError(503, 'reception_unavailable'); }
+  }
+  if (deps.receptions && url.pathname === '/admin/receptions.js') return respond(200, RECEPTIONS_LIVE_JS, 'text/javascript; charset=utf-8');
   if (deps.receptions && url.pathname === '/admin/entry') {
     try { return respond(200, renderEntry(new URL('/', url).href)); }
     catch { return receptionFailure(request, '参加用URL・QRコード', 503, 'reception_unavailable'); }

@@ -37,6 +37,12 @@ export type ReceptionAdminPort = {
   approve(receptionId: string, input: { order: number; expectedRevision: number; protocol: DisplayedProtocol }): Promise<ReceptionAdminResult>;
   /** The owning DO must CAS revision and reject cancellation after any trial exists. Never delete trial records. */
   cancel(receptionId: string, input: { expectedRevision: number }): Promise<ReceptionAdminResult>;
+  /**
+   * Change hint for the live reception list (#159): an opaque version that changes whenever the index rows or
+   * the settings change, and, with `since`, how many indexed receptions created at or after it are pending.
+   * Read from the best-effort index only, without any owner RPC. Without it the list does not update itself.
+   */
+  version?(since: string | null): Promise<{ version: string; newPending: number | null }>;
 };
 
 export type ProtocolFields = { allowedOrders: ReceptionStrategy[][]; seedPolicy: 'shared' | 'per_trial'; referenceMemory: boolean;

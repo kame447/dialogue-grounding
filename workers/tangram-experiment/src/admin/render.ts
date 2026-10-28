@@ -1,4 +1,5 @@
-// Researcher-only admin pages, rendered on the server without any script.
+// Researcher-only admin pages, rendered on the server. Only the reception list loads a script, the
+// self-hosted /admin/receptions.js (receptions-live.ts); every other page has none.
 // Every value from a record is escaped; unknown nested values are shown as
 // escaped JSON, so new record fields cannot break the page or inject markup.
 import type { AdminSummary } from "./summary";
@@ -8,11 +9,36 @@ import type { ReceptionAdminRow, ReceptionProtocolStatus, SettingsView } from '.
 import { RECORD_ID } from './summary.ts';
 import { renderQrSvg } from './qr.ts';
 
-export const ADMIN_CSS = `:root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans JP",sans-serif;font-size:14px;color:#222;background:#f7f7f4}
-body{margin:0;padding:16px 24px 48px}h1{font-size:1.2rem}h2{font-size:1rem;margin-top:28px}
-table{border-collapse:collapse;width:100%;background:#fff;font-size:.82rem}th,td{border:1px solid #ddd;padding:4px 6px;text-align:left;vertical-align:top}
-th{background:#eee}pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:0;font-size:.78rem}.bad{color:#9b2c1f;font-weight:600}.muted{color:#777}
-form{margin:12px 0}label{margin-right:12px}a{color:#2a5d8f}.wrap{overflow-x:auto}`;
+export const ADMIN_CSS = `:root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans JP",sans-serif;font-size:14px;line-height:1.5;color:#222;background:#f7f7f4;--line:#d8d8d2;--accent:#2a5d8f;--tint:#eaf1f8}
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0 auto;max-width:1120px;padding:12px 16px 48px}h1{font-size:1.25rem;margin:16px 0 12px}
+h2{font-size:1.05rem;margin:32px 0 10px;padding-bottom:4px;border-bottom:1px solid var(--line)}h3{font-size:.95rem;margin:20px 0 6px}
+table{border-collapse:collapse;width:100%;background:#fff;font-size:.82rem}th,td{border:1px solid #ddd;padding:5px 7px;text-align:left;vertical-align:top}
+th{background:#eee}pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:0;font-size:.78rem}.bad{color:#9b2c1f;font-weight:600}.muted{color:#666}
+form{margin:12px 0}label{margin-right:12px}a{color:var(--accent)}.wrap{overflow-x:auto}
+nav{display:flex;flex-wrap:wrap;gap:0 20px;border-bottom:1px solid var(--line)}nav a{display:inline-block;padding:10px 0}
+nav a[aria-current="page"]{color:#222;font-weight:600;text-decoration:none;box-shadow:inset 0 -2px 0 var(--accent)}
+button,input,select{font:inherit}input:not([type="radio"]):not([type="checkbox"]),select{min-height:40px;padding:6px 8px;border:1px solid #8c8c86;border-radius:6px;background:#fff;color:#222;max-width:100%}
+button{min-height:40px;padding:6px 16px;border:1px solid #8c8c86;border-radius:6px;background:#fff;color:#222;cursor:pointer}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.filters{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center}.filters label{display:inline-flex;gap:6px;align-items:center;margin:0;white-space:nowrap}
+.state{font-weight:600}.actions{display:flex;flex-wrap:wrap;gap:8px}
+fieldset{margin:0;padding:6px 12px 8px;border:1px solid var(--line);border-radius:6px;background:#fff;min-width:0}legend{font-weight:600;padding:0 4px}
+fieldset label{display:flex;gap:8px;align-items:flex-start;margin:0;padding:6px 0}
+input[type="radio"],input[type="checkbox"]{width:18px;height:18px;margin:2px 0 0;flex:none;accent-color:var(--accent)}
+.fields{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));margin-bottom:12px}
+.ops form{display:grid;gap:6px;margin:0 0 10px;max-width:300px}.ops form:last-child{margin-bottom:0}.ops label{display:grid;gap:2px;margin:0}
+.ops form+form{padding-top:10px;border-top:1px solid #eee}
+#reception-new{margin:12px 0;padding:8px 12px;border-left:3px solid var(--accent);background:var(--tint);font-weight:600}
+#reception-new:empty,#reception-sync:empty{display:none}tr.new>td{background:var(--tint)}
+.history table{min-width:720px}.history td{overflow-wrap:anywhere}.entry-url{overflow-wrap:anywhere}.qr svg{display:block;width:100%;max-width:264px;height:auto}
+@media (max-width:699px){input:not([type="radio"]):not([type="checkbox"]),select{font-size:16px;min-height:44px}button{min-height:44px}
+.cards table,.cards tbody,.cards tr,.cards td{display:block;width:100%}.cards table{background:none}.cards thead{display:none}
+.cards tr{margin:0 0 12px;padding:6px 12px;border:1px solid var(--line);border-radius:6px;background:#fff}.cards tr.new{border-color:var(--accent)}
+.cards td{display:grid;grid-template-columns:6.5em minmax(0,1fr);gap:8px;padding:4px 0;border:0;font-size:.9rem;background:none!important;overflow-wrap:anywhere}
+.cards td::before{content:attr(data-label);color:#666}.cards td:empty{display:none}.cards td.ops{display:block;padding:8px 0 4px}.cards td.ops::before{content:none}
+.ops form{max-width:none}}`;
 
 const ENTITIES: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" };
 export function escapeHtml(value: unknown): string {
@@ -66,9 +92,8 @@ export function renderList(summaries: AdminSummary[], filter: ListFilter, next: 
 <td${s.errorCodes.length ? ' class="bad"' : ""}>${escapeHtml(s.errorCodes.join(", "))}</td>
 <td>${ms(s.latency.turn.p50Ms)} / ${ms(s.latency.turn.p95Ms)}</td><td>${escapeHtml(s.latency.slowestPhase?.phase ?? "")}</td>
 <td>${escapeHtml(QUESTIONNAIRE_LABELS[s.questionnaire] ?? QUESTIONNAIRE_LABELS.none)}</td></tr>`).join("");
-  return page("実験ログ（研究者用）", `<h1>実験ログ（研究者用・読み取り専用）</h1>
-${receptions ? '<nav><a href="/admin/receptions">受付一覧</a> · <a href="/admin/entry">参加用URL・QRコード</a> · <a href="/admin/reception-settings">受付の設定</a></nav>' : ''}
-<form method="get" action="/admin"><label>状態 <select name="status">${STATUS_FILTERS.map((v) => option(v, filter.status)).join("")}</select></label>
+  return page("実験ログ（研究者用）", `${receptions ? adminNav('/admin') : ''}<h1>実験ログ（研究者用・読み取り専用）</h1>
+<form method="get" action="/admin" class="filters"><label>状態 <select name="status">${STATUS_FILTERS.map((v) => option(v, filter.status)).join("")}</select></label>
 <label>エラー <select name="error">${option("any", filter.error, "すべて")}${option("with", filter.error, "あり")}${option("without", filter.error, "なし")}</select></label>
 <label>参照メモリ <select name="memory">${option("any", filter.memory, "すべて")}${option("on", filter.memory, "ON")}${option("off", filter.memory, "OFF")}</select></label>
 <button>絞り込み</button></form>
@@ -151,11 +176,17 @@ export function renderMessage(title: string, message: string, back: { href: stri
 }
 
 const RECEPTION_LABELS = { pending: '許可待ち', approved: '許可済み', in_progress: '実施中', finished: '終了', cancelled: '取消済み' };
-const receptionNav = '<nav><a href="/admin/receptions">受付一覧</a> · <a href="/admin/entry">参加用URL・QRコード</a> · <a href="/admin/reception-settings">受付の設定</a> · <a href="/admin">実験ログ</a></nav>';
+const NAV: [string, string][] = [['/admin/receptions', '受付一覧'], ['/admin/entry', '参加用URL・QRコード'], ['/admin/reception-settings', '受付の設定'], ['/admin', '実験ログ']];
+function adminNav(current: string): string {
+  return `<nav>${NAV.map(([href, label]) => `<a href="${href}"${href === current ? ' aria-current="page"' : ''}>${escapeHtml(label)}</a>`).join('')}</nav>`;
+}
 const ROTATION_LABELS: Record<string, string> = { relative_pm90: '±90°', relative_0: '0°' };
 const BETWEEN_LABELS: Record<string, string> = { none: '指定なし', questionnaire_required: 'アンケート必須' };
 
-export function renderReceptions(items: ReceptionAdminRow[], next: string | null, protocol: ReceptionProtocolStatus): string {
+/** Present only when the reception list updates itself: the version it was rendered from and the render time. */
+export type ReceptionLive = { version: string; since: string };
+
+export function renderReceptions(items: ReceptionAdminRow[], next: string | null, protocol: ReceptionProtocolStatus, live: ReceptionLive | null = null): string {
   const form = (entry: ReceptionAdminRow, action: 'approve' | 'cancel') => {
     // No preselected order: the researcher chooses one, and the form carries the protocol version it was shown with.
     const choices = action === 'approve' && protocol.configured
@@ -165,29 +196,36 @@ export function renderReceptions(items: ReceptionAdminRow[], next: string | null
     return `<form method="post" action="/admin/reception/${escapeHtml(entry.receptionId)}/${action}">
 <input type="hidden" name="expectedRevision" value="${escapeHtml(entry.revision)}">${choices}
 <label>確認（${escapeHtml(entry.number ?? entry.receptionId.slice(0, 8))} を入力） <input name="confirm" autocomplete="off" required></label>
-<button>${action === 'approve' ? '許可' : '受付を取消'}</button></form>`;
+<button${action === 'approve' ? ' class="primary"' : ''}>${action === 'approve' ? '許可' : '受付を取消'}</button></form>`;
   };
+  // A row is redrawn by the live update only when this key changes, so it covers everything its forms carry.
+  const protocolKey = protocol.configured ? `${protocol.mode}:${protocol.protocolId}:${protocol.revision}:${protocol.sha256}` : `${protocol.mode}:none`;
+  const td = (label: string, content: string, extra = '') => `<td data-label="${escapeHtml(label)}"${extra}>${content}</td>`;
   const rows = [...items].sort((a, b) => Number(b.status === 'pending') - Number(a.status === 'pending')).map(entry => {
     const unstarted = !entry.trials.some(trial => trial.recordId !== null);
     const cancel = unstarted && (entry.status === 'pending' || entry.status === 'approved');
-    return `<tr><td>${escapeHtml(entry.number ?? '未割当')}</td><td>${escapeHtml(entry.createdAt)}</td>
-<td>${escapeHtml(RECEPTION_LABELS[entry.status] ?? entry.status)}</td><td>${escapeHtml(entry.plan?.order.join(' → ') ?? '')}</td>
-<td>${escapeHtml(entry.plan ? ROTATION_LABELS[entry.plan.rotationMode] ?? '' : '')}</td><td>${escapeHtml(entry.plan ? BETWEEN_LABELS[entry.plan.betweenTrials] ?? '' : '')}</td>
-<td>${entry.trials.filter(trial => trial.recordId && RECORD_ID.test(trial.recordId)).map(trial =>
-      `<a href="/admin/record/${escapeHtml(trial.recordId)}">${escapeHtml(trial.recordId)}</a>`).join('<br>')}</td>
-<td>${entry.status === 'pending' && unstarted && protocol.configured && protocol.mode !== 'off' ? form(entry, 'approve') : ''}${cancel ? form(entry, 'cancel') : ''}</td></tr>`;
+    return `<tr data-id="${escapeHtml(entry.receptionId)}" data-status="${escapeHtml(entry.status)}" data-created="${escapeHtml(entry.createdAt)}" data-key="${escapeHtml(entry.revision + ':' + protocolKey)}">${td('受付番号', escapeHtml(entry.number ?? '未割当'))}${td('受付時刻', escapeHtml(entry.createdAt))}
+${td('状態', escapeHtml(RECEPTION_LABELS[entry.status] ?? entry.status))}${td('条件順序', escapeHtml(entry.plan?.order.join(' → ') ?? ''))}
+${td('回転', escapeHtml(entry.plan ? ROTATION_LABELS[entry.plan.rotationMode] ?? '' : ''))}${td('試行の間', escapeHtml(entry.plan ? BETWEEN_LABELS[entry.plan.betweenTrials] ?? '' : ''))}
+${td('試行記録', entry.trials.filter(trial => trial.recordId && RECORD_ID.test(trial.recordId)).map(trial =>
+      `<a href="/admin/record/${escapeHtml(trial.recordId)}">${escapeHtml(trial.recordId)}</a>`).join('<br>'))}
+${td('操作', `${entry.status === 'pending' && unstarted && protocol.configured && protocol.mode !== 'off' ? form(entry, 'approve') : ''}${cancel ? form(entry, 'cancel') : ''}`, ' class="ops"')}</tr>`;
   }).join('');
-  return page('受付一覧', `${receptionNav}<h1>受付一覧</h1>
-${protocol.configured ? `<p>プロトコル設定済み: ${escapeHtml(protocol.protocolId)} / revision ${escapeHtml(protocol.revision)}</p>`
+  const names = ['受付番号', '受付時刻', '状態', '条件順序', '回転', '試行の間', '試行記録', '操作'];
+  const list = `<div id="reception-list"${live ? ` data-version="${escapeHtml(live.version)}" data-since="${escapeHtml(live.since)}"` : ''}>
+<div data-part="status">${protocol.configured ? `<p>プロトコル設定済み: ${escapeHtml(protocol.protocolId)} / revision ${escapeHtml(protocol.revision)}</p>`
     : '<p class="bad">プロトコルが未設定のため、許可できません（<a href="/admin/reception-settings">受付の設定</a>）</p>'}
-${protocol.mode === 'off' ? '<p>受付を使わない設定です。許可済みの受付は、計画どおり続けられます。</p>' : ''}
-${items.length ? `<div class="wrap"><table>${head(['受付番号', '受付時刻', '状態', '条件順序', '回転', '試行の間', '試行記録', '操作'])}${rows}</table></div>` : '<p>受付はありません</p>'}
-${next ? `<p><a href="/admin/receptions?${escapeHtml(new URLSearchParams({ after: next }).toString())}">次のページ →</a></p>` : ''}`);
+${protocol.mode === 'off' ? '<p>受付を使わない設定です。許可済みの受付は、計画どおり続けられます。</p>' : ''}</div>
+${items.length ? `<div class="wrap cards" data-part="table"><table><thead>${head(names)}</thead><tbody>${rows}</tbody></table></div>` : '<p data-part="empty">受付はありません</p>'}
+${next ? `<p data-part="more"><a href="/admin/receptions?${escapeHtml(new URLSearchParams({ after: next }).toString())}">次のページ →</a></p>` : ''}</div>`;
+  return page('受付一覧', `${adminNav('/admin/receptions')}<h1>受付一覧</h1>
+${live ? '<p id="reception-new" role="status" aria-live="polite"></p><p id="reception-sync" class="muted" role="status"></p>' : ''}
+${list}${live ? '<script src="/admin/receptions.js" defer></script>' : ''}`);
 }
 
 export function renderEntry(entryUrl: string): string {
-  return page('参加用URL・QRコード', `${receptionNav}<h1>参加用URL・QRコード</h1>
-<p><a href="${escapeHtml(entryUrl)}">${escapeHtml(entryUrl)}</a></p>${renderQrSvg(entryUrl)}`);
+  return page('参加用URL・QRコード', `${adminNav('/admin/entry')}<h1>参加用URL・QRコード</h1>
+<p class="entry-url"><a href="${escapeHtml(entryUrl)}">${escapeHtml(entryUrl)}</a></p><div class="qr">${renderQrSvg(entryUrl)}</div>`);
 }
 
 const ORDER_CHOICES: [string, string, string][] = [['rf-be', 'repair-first,bypass-enabled', 'repair-first → bypass-enabled'],
@@ -210,18 +248,18 @@ export function renderSettings(view: SettingsView): string {
   const mark = (on: boolean) => on ? ' checked' : '';
   const fieldset = (name: string, legend: string, choices: [string, string][]) => `<fieldset><legend>${escapeHtml(legend)}</legend>${choices.map(([value, label]) =>
     `<label><input type="radio" name="${name}" value="${escapeHtml(value)}" required${mark(current[name] === value)}> ${escapeHtml(label)}</label>`).join('')}</fieldset>`;
-  const status = view.protocol ? `<p>revision ${escapeHtml(view.protocol.revision)}（${escapeHtml(view.protocol.savedAt)} に保存）</p>` : '<p class="bad">未設定のため、受付を許可できません</p>';
-  return page('受付の設定', `${receptionNav}<h1>受付の設定</h1>
-<h2>受付モード</h2><p>${escapeHtml(MODE_LABELS[view.mode.value])}</p>
+  const status = view.protocol ? `<p class="state">revision ${escapeHtml(view.protocol.revision)}（${escapeHtml(view.protocol.savedAt)} に保存）</p>` : '<p class="bad">未設定のため、受付を許可できません</p>';
+  return page('受付の設定', `${adminNav('/admin/reception-settings')}<h1>受付の設定</h1>
+<h2>受付モード</h2><p class="state">${escapeHtml(MODE_LABELS[view.mode.value])}</p>
 <p>受付は既定で使います。試行の開始には、プロトコルの保存と研究者の許可が必要です。</p>
-<form method="post" action="/admin/reception-settings/mode"><input type="hidden" name="expectedRevision" value="${escapeHtml(view.mode.revision)}">
+<form method="post" action="/admin/reception-settings/mode" class="actions"><input type="hidden" name="expectedRevision" value="${escapeHtml(view.mode.revision)}">
 <button name="value" value="on">受付を使う</button> <button name="value" value="off">受付を使わない</button></form>
 <h2>プロトコル</h2>${status}
 <form method="post" action="/admin/reception-settings/protocol"><input type="hidden" name="expectedRevision" value="${escapeHtml(view.protocol?.revision ?? 0)}">
-<fieldset><legend>条件順序</legend>${ORDER_CHOICES.map(([token, key, label]) =>
+<div class="fields"><fieldset><legend>条件順序</legend>${ORDER_CHOICES.map(([token, key, label]) =>
     `<label><input type="checkbox" name="orders" value="${token}"${mark(orders.has(key))}> ${escapeHtml(label)}</label>`).join('')}</fieldset>
-${SETTING_CHOICES.map(([name, legend, choices]) => fieldset(name, legend, choices)).join('\n')}
-<p>保存しても、許可済みの受付の計画は変わりません。</p><button>保存</button></form>
-<h2>履歴</h2>${table(['revision', '保存日時', '内容', 'SHA-256'], view.protocolHistory.map(h => [h.revision, h.savedAt, h.protocol, h.sha256]))}
-${table(['revision', '保存日時', '受付モード', 'プロトコル revision'], view.modeHistory.map(h => [h.revision, h.savedAt, h.value, h.protocolRevision]))}`);
+${SETTING_CHOICES.map(([name, legend, choices]) => fieldset(name, legend, choices)).join('\n')}</div>
+<p>保存しても、許可済みの受付の計画は変わりません。</p><button class="primary">保存</button></form>
+<h2>履歴</h2><div class="history"><h3>プロトコル</h3>${table(['revision', '保存日時', '内容', 'SHA-256'], view.protocolHistory.map(h => [h.revision, h.savedAt, h.protocol, h.sha256]))}
+<h3>受付モード</h3>${table(['revision', '保存日時', '受付モード', 'プロトコル revision'], view.modeHistory.map(h => [h.revision, h.savedAt, h.value, h.protocolRevision]))}</div>`);
 }
