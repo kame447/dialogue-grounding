@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import { createLunaJudge } from "../dialogue-model/runtime/judgment/luna.mjs";
 import { TASK_INSTRUCTIONS, TASK_INSTRUCTIONS_V2, JUDGE_POLICIES, STRATEGIES } from "../dialogue-model/runtime/judgment/instructions.mjs";
 import { createOwnLedger, SAFE_JUDGMENT, validateJudgment } from "../dialogue-model/runtime/judgment/schema.mjs";
-import { createDialogueV2, GENERATOR_INSTRUCTIONS_V2 } from "../dialogue-model/runtime/v2/dialogue-v2.mjs";
+import { createDialogueV2, GENERATOR_INSTRUCTIONS_V2, LUNA_GENERATOR_INSTRUCTIONS_V2 } from "../dialogue-model/runtime/v2/dialogue-v2.mjs";
 import { createReferenceGraph } from "../dialogue-model/runtime/memory/reference-graph.mjs";
 
 const ids = Array.from({ length: 6 }, (_, i) => `s-000${i + 1}`);
@@ -108,6 +108,8 @@ test("explicit difficulty/detail/contradiction and pre-agreement risk keep typed
 });
 
 test("generator gets holistic/no-invented-counts guidance without changing final typed actions or strategy inputs", async () => {
+  // The shared constant is the Jev generator text; the Luna text below must keep the same triggers.
+  for (const text of [GENERATOR_INSTRUCTIONS_V2, LUNA_GENERATOR_INSTRUCTIONS_V2]) for (const trigger of triggers) assert.ok(text.includes(trigger));
   assert.doesNotMatch(GENERATOR_INSTRUCTIONS_V2, /複数候補が残る/);
   for (const trigger of triggers) assert.ok(GENERATOR_INSTRUCTIONS_V2.includes(trigger));
   assert.match(GENERATOR_INSTRUCTIONS_V2, /discriminatingFeature があるときだけ/);
@@ -121,10 +123,12 @@ test("generator gets holistic/no-invented-counts guidance without changing final
       lastEventId: "event-1", privateState: session.initialPrivateState(), signal: new AbortController().signal });
     assert.equal(result.privateState.ledger[ids[0]].status, "tentative");
     assert.equal(result.privateState.judgments[0].judgment.discriminatingFeature, null);
-    assert.equal(calls[0].messages[1].content, GENERATOR_INSTRUCTIONS_V2);
-    assert.match(calls[0].messages[1].content, /discriminatingFeatureがないときは、相手の見立てを短く受け止め/);
+    // The Luna path uses its own generator text (public-act consistency change); the paraphrase-as-understanding sentence is gone on purpose.
+    assert.equal(calls[0].messages[1].content, LUNA_GENERATOR_INSTRUCTIONS_V2);
+    assert.match(calls[0].messages[1].content, /相手の見立ては短く受け止め、必要なら自分の画像の全体の見立てを1つ返せます/);
+    assert.match(calls[0].messages[1].content, /相手の説明を言い換えて繰り返すことを、自分も見た・理解した証拠として示さないでください/);
     assert.match(calls[0].messages[1].content, /判断にない尖り・四角・くぼみなどの形の数や特徴を作って補わない/);
-    assert.match(calls[0].messages[1].content, /discriminatingFeatureがあるときは、質問にせず、その特徴に短く触れて/);
+    assert.doesNotMatch(calls[0].messages[1].content, /質問にせず、その特徴に短く触れて/);
     outputs.push({ calls, result });
   }
   assert.deepEqual(outputs[0], outputs[1]);

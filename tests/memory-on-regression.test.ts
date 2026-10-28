@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { snapshotReferenceGraph, summarizeForJudge } from "../dialogue-model/runtime/memory/reference-graph.mjs";
-import { MEMORY_INSTRUCTIONS } from "../dialogue-model/runtime/judgment/memory.mjs";
+import { MEMORY_INSTRUCTIONS, MEMORY_NAME_INTENTS_V2 } from "../dialogue-model/runtime/judgment/memory.mjs";
 import { JUDGE_TIME_BUDGET_MS } from "../dialogue-model/runtime/judgment/luna.mjs";
 import { GENERATION_TIMEOUT_MS } from "../dialogue-model/runtime/v2/dialogue-v2.mjs";
 import {
@@ -18,7 +18,7 @@ import { SCRIPT } from "./helpers/memory-script.ts";
 type Rec = Record<string, any>;
 const MEMORY_SUMMARY_PREFIX = "AI自身の参照メモと公開発話の出典番号";
 const isMemoryMessage = (message: { role: string; content: unknown }) => message.role === "system" && typeof message.content === "string" &&
-  (message.content === MEMORY_INSTRUCTIONS || message.content.startsWith(MEMORY_SUMMARY_PREFIX));
+  (message.content === MEMORY_INSTRUCTIONS || message.content === MEMORY_NAME_INTENTS_V2 || message.content.startsWith(MEMORY_SUMMARY_PREFIX));
 const CONFIDENCE: Record<string, number> = { unresolved: 0, hypothesis: 0.5, grounded: 0.9 };
 const BARE = /^(それ|これ|あれ|はい|うん|そう|そうです|了解|yes|ok)[。！!？?\s]*$/iu;
 // Annotation-label shapes (M0-M4, P1-P5, ER0-ER1, a-series) and the researcher key's figure ids.
@@ -136,7 +136,7 @@ test("memory ON: each judge request carries exactly the pre-turn graph summary, 
   }
 });
 
-test("memory OFF regression: identical public behaviour and byte-identical requests apart from the two memory messages", async () => {
+test("memory OFF regression: identical public behaviour and byte-identical requests apart from the three memory messages", async () => {
   for (const strategy of ["repair-first", "bypass-enabled"]) {
     const on = await runScript(SCRIPT, { referenceMemory: true, strategy });
     const off = await runScript(SCRIPT, { referenceMemory: false, strategy });
@@ -152,7 +152,8 @@ test("memory OFF regression: identical public behaviour and byte-identical reque
       assertSameBudget(request.options, other.options, JUDGE_TIME_BUDGET_MS);
       const stripped = request.messages.filter((m) => !isMemoryMessage(m));
       assert.equal(JSON.stringify(stripped), JSON.stringify(other.messages), strategy + " request " + index + " differs beyond memory");
-      if (request.phase === "judgment") assert.equal(request.messages.length - stripped.length, 2);
+      // MEMORY_INSTRUCTIONS, the v2-only name-intent message and the graph summary.
+      if (request.phase === "judgment") assert.equal(request.messages.length - stripped.length, 3);
       else assert.equal(stripped.length, request.messages.length);
     }
     const offRecord = off.perTurn.at(-1)!;
@@ -214,15 +215,25 @@ test("memory ON: a judge timeout or upstream error falls back without a memory w
   }
 });
 
-test("memory ON: an invalid memory interpretation keeps the valid act (memory fallback) and writes nothing", async () => {
-  const steps = SCRIPT.slice(0, 2).map((step, i) => i === 1 ? { ...step,
-    // Grounded on two slots is structurally impossible; the act itself is valid.
-    judgeReplies: Array(2).fill(JSON.stringify({ ...step.act, reference: { ...step.reference, slots: [A, B] } })) } : step);
-  const { perTurn } = await runScript(steps);
+test("memory ON: an invalid memory interpretation keeps a valid non-agree act (memory fallback) and writes nothing", async () => {
+  // Grounded on two slots is structurally impossible; the act itself is valid.
+  const invalid = (step: typeof SCRIPT[number]) => ({ ...step,
+    judgeReplies: Array(2).fill(JSON.stringify({ ...step.act, reference: { ...step.reference, slots: [A, B], epistemic: "grounded" } })) });
+  const proposal = await runScript([invalid(SCRIPT[0])]);
+  const kept = proposal.perTurn[0].judgments.at(-1);
+  assert.equal(kept.validation.memoryFallback, true);
+  assert.equal(kept.judgment.action, "propose_name");
+  assert.deepEqual(proposal.perTurn[0].ownLedger[A], { status: "tentative", name: "鳥" });
+  assert.equal(proposal.perTurn[0].referenceGraph.ownSlots[A].candidate, null, "nothing is written for the broken interpretation");
+  proposal.perTurn.forEach((record, i) => assertGraphInvariants(record, "memory fallback proposal turn " + i));
+  // An agree with a broken interpretation cannot be checked against retraction this turn (B3): the existing
+  // validation fallback is used instead, so the ledger is not agreed.
+  const { perTurn } = await runScript([SCRIPT[0], invalid(SCRIPT[1])]);
   const trace = perTurn[1].judgments.at(-1);
-  assert.equal(trace.validation.memoryFallback, true);
-  assert.equal(trace.judgment.action, "agree");
-  assert.deepEqual(perTurn[1].ownLedger[A], { status: "agreed", name: "鳥" });
+  assert.equal(trace.validation.fallback, true);
+  assert.equal(trace.validation.memoryFallback, false);
+  assert.equal(trace.judgment.action, "accept");
+  assert.deepEqual(perTurn[1].ownLedger[A], { status: "tentative", name: "鳥" });
   assert.equal(perTurn[1].referenceGraph.ownSlots[A].status, "tentative", "the ledger act never fabricates an explicit memory agreement");
   assert.equal(perTurn[1].referenceGraph.ownSlots[A].candidate.agreement, "none");
   perTurn.forEach((record, i) => assertGraphInvariants(record, "memory fallback turn " + i));

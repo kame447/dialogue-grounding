@@ -3,7 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { findRepairClaims, findInternalLeaks, findGuardViolations, fallbackUtterance, rewriteReasons } from "../dialogue-model/runtime/v2/generation-guard.ts";
-import { createDialogueV2, ACTION_SCOPE_V2 } from "../dialogue-model/runtime/v2/dialogue-v2.mjs";
+import { createDialogueV2, LUNA_ACTION_SCOPE_V2 } from "../dialogue-model/runtime/v2/dialogue-v2.mjs";
 import { SAFE_JUDGMENT, applyJudgment } from "../dialogue-model/runtime/judgment/schema.mjs";
 
 type Action = "accept" | "propose_name" | "confirm" | "agree" | "repair" | "defer" | "revisit" | "move_on" | "close";
@@ -104,17 +104,19 @@ test("self-repair under non-repair regenerates once with a reason; ledger follow
   assert.equal(result.text, "鳥みたいですね。"); assert.equal(s.calls.length, 2);
   assert.deepEqual(result.privateState.judgments[0].generationGuard, { violations: ["self_repair"], regenerated: true, fallback: false });
   const retry = String(s.calls[1].at(-1)!.content);
-  assert.ok(retry.includes(ACTION_SCOPE_V2.accept)); assert.match(retry, /訂正を表明せず/u); assert.doesNotMatch(retry, /取り違えていました|鳥ですね/u);
+  assert.ok(retry.includes(LUNA_ACTION_SCOPE_V2.accept)); assert.match(retry, /訂正を表明せず/u); assert.doesNotMatch(retry, /取り違えていました|鳥ですね/u);
   assert.deepEqual(result.privateState.ledger, applyJudgment(s.state.ledger, s.raw));
 });
 
-test("leaks under agree are rewritten, and a second leak falls back without retaining the draft", async () => {
+test("leaks under agree are rewritten, and a second leak falls back without retaining the draft or the unshown agreement", async () => {
   const s = setup("agree", [{ text: "s-000a は「鳥」で決まりですね。" }, { text: '{"targetSlot":"s-000a"}' }]);
   const result = await s.run();
   assert.equal(result.text, fallbackUtterance(s.raw)); assert.equal(s.calls.length, 2);
-  assert.deepEqual(result.privateState.judgments[0].generationGuard, { violations: ["internal_id", "internal_field"], regenerated: true, fallback: true });
+  // The second draft also lacks the name; the neutral fallback does not show the agreement, so it is withheld.
+  assert.deepEqual(result.privateState.judgments[0].generationGuard, { violations: ["internal_id", "internal_field", "name_not_shown"], regenerated: true, fallback: true });
   assert.doesNotMatch(JSON.stringify(result.privateState.judgments), /決まりですね/u);
-  assert.equal(result.privateState.ledger[ids[0]].status, "agreed");
+  assert.equal(result.privateState.judgments[0].publication.primary, "withheld");
+  assert.equal(result.privateState.ledger[ids[0]].status, "tentative");
 });
 
 test("both strategies regenerate and fall back identically for the extended rules", async () => {

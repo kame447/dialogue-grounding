@@ -2,7 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { findAgreementClaims, fallbackUtterance } from "../dialogue-model/runtime/v2/generation-guard.ts";
-import { createDialogueV2, ACTION_SCOPE_V2 } from "../dialogue-model/runtime/v2/dialogue-v2.mjs";
+import { createDialogueV2, ACTION_SCOPE_V2, LUNA_ACTION_SCOPE_V2 } from "../dialogue-model/runtime/v2/dialogue-v2.mjs";
 import { createHumanMessageQueue } from "../dialogue-model/runtime/web/human-message-queue.mjs";
 import { createNamingTaskV2 } from "../dialogue-model/runtime/v2/naming-task-v2.mjs";
 import { SAFE_JUDGMENT, applyJudgment } from "../dialogue-model/runtime/judgment/schema.mjs";
@@ -219,7 +219,7 @@ test("one violation regenerates once; successful rewrite alone is published and 
   assert.deepEqual(s.calls[1].messages.slice(0, -1), s.calls[0].messages);
   const retry = s.calls[1].messages.at(-1)!;
   assert.equal(retry.role, "system"); assert.match(String(retry.content), /actionはaccept/);
-  assert.ok(String(retry.content).includes(ACTION_SCOPE_V2.accept));
+  assert.ok(String(retry.content).includes(LUNA_ACTION_SCOPE_V2.accept));
   assert.doesNotMatch(String(retry.content), /Luna|Jev|probabilities|s-000|鳥|呼びましょう/);
   assert.equal(result.privateState.judgments[0].memory.opsApplied, 0);
 });
@@ -288,12 +288,14 @@ test("active override uses the final action; hostile validated fields cannot inj
   }
 });
 
-test("followUp and graph are applied once after a successful guarded generation", async () => {
+test("after a guarded fallback that does not show the followUp name, the planned followUp is kept but not applied", async () => {
   const followUp = { action: "propose_name", targetSlot: ids[1], candidateName: "猫", discriminatingFeature: null };
   const s = setup({ referenceMemory: true, followUp, replies: [{ text: violating }] }); const r = await s.run();
-  assert.deepEqual(r.privateState.ledger, applyJudgment(s.state.ledger, s.raw));
+  // The planned act stays in the judgment record; only the published part reaches the ledger.
   assert.deepEqual(r.privateState.judgments[0].judgment.followUp, followUp);
-  assert.equal(r.privateState.ledger[ids[1]].name, "猫");
+  assert.deepEqual(r.privateState.ledger, applyJudgment(s.state.ledger, { ...s.raw, followUp: null }));
+  assert.equal(r.privateState.ledger[ids[1]].status, "unassigned");
+  assert.deepEqual([r.privateState.judgments[0].publication.primary, r.privateState.judgments[0].publication.followUp], ["applied", "withheld"]);
   assert.equal(r.privateState.judgments.length, 1);
 });
 
