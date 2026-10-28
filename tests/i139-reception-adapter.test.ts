@@ -100,6 +100,45 @@ test('edge adapter lists real pending revision zero and approves it through auth
   assert.equal(record.assignment.source.protocolId,protocol.protocolId); await h.done();
 });
 
+// workerd attaches a non-enumerable, function-valued Symbol.dispose to every object returned over DO RPC.
+function rpcValue<T>(value: T): T {
+  if (value && typeof value === 'object') {
+    for (const item of Object.values(value)) rpcValue(item);
+    Object.defineProperty(value,Symbol.dispose,{ value() {}, enumerable:false, configurable:true });
+  }
+  return value;
+}
+function workerdRpc(h: ReturnType<typeof harness>, cookie: string, extra: Record<string, unknown> = {}) {
+  const o = h.object(cookie), read = o.adminReception;
+  o.adminReception = async () => { const v = await read(); return v === null ? v : rpcValue({ ...clone(v), ...extra }); };
+  for (const name of ['getReception','listReceptions'] as const) {
+    const original = h.index[name].bind(h.index);
+    h.index[name] = async (...args: unknown[]) => rpcValue(clone(await original(...args)));
+  }
+}
+
+test('management list and approval accept workerd RPC values carrying Symbol.dispose', async () => {
+  const h = harness(), cookie = await h.browser(), r = rec(h,cookie);
+  workerdRpc(h,cookie);
+  const list = await h.fetch(adminGet()); assert.equal(list.status,200); const html = await list.text();
+  assert.ok(html.includes(r.number)); assert.ok(html.includes(`/admin/reception/${r.receptionId}/approve`));
+  const approved = await h.fetch(adminPost(r.receptionId,'approve',0,confirm(r)));
+  assert.equal(approved.status,200); assert.deepEqual(await approved.json(),{ok:true});
+  const saved = rec(h,cookie); assert.equal(saved.status,'approved'); assert.deepEqual(saved.plan.order,protocol.allowedOrders[0]);
+  assert.equal(h.snapshot(cookie)['base:owner:v1'].activeKey,null,'approval never starts a trial');
+  // The approved reception now has a nested plan, which also carries the symbol.
+  const after = await h.fetch(adminGet()); assert.equal(after.status,200);
+  assert.ok((await after.text()).includes(`/admin/reception/${r.receptionId}/cancel`)); await h.done();
+});
+
+test('normalizing RPC values never admits an unknown enumerable field from the owner', async () => {
+  const h = harness(), cookie = await h.browser(), r = rec(h,cookie), before = h.snapshot(cookie);
+  workerdRpc(h,cookie,{ unexpected:true });
+  await expectError(await h.fetch(adminGet()),503,'reception_unavailable');
+  await expectError(await h.fetch(adminPost(r.receptionId,'approve',0,confirm(r))),503,'reception_unavailable');
+  assert.deepEqual(h.snapshot(cookie),before); await h.done();
+});
+
 test('management list resolves authoritative status, revision and order rather than trusting stale index extras', async () => {
   const h = harness(), cookie = await h.browser(), r = rec(h,cookie);
   await h.object(cookie).adminApproveReception({expectedRevision:0,order:0});

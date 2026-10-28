@@ -39,7 +39,8 @@ export function createReceptionAdminPort(options: Options): ReceptionAdminPort {
     if (!owner) return null;
     const raw = await owner.adminReception();
     if (raw === null) return null;
-    const reception = validateReception(raw);
+    // workerd adds a non-enumerable Symbol.dispose to RPC results; keep only the structured data, then validate it as before.
+    const reception = validateReception(structuredClone(raw));
     if (reception.receptionId !== requestedId || reception.objectId !== summary.objectId) return null;
     return { owner, reception };
   }
