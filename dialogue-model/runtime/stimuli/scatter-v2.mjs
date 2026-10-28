@@ -11,6 +11,9 @@ const SCALE = 48;
 const MARGIN = 32;
 const GAP = 28;
 const AXIS_SEPARATION = 36;
+// relative_pm90: the AI side turns each figure a further ±90° (the original, and legacy-record, mode).
+// relative_0: the AI side shows each figure at the same angle as the human side's same figure.
+export const ROTATION_MODES = Object.freeze(['relative_pm90', 'relative_0']);
 
 function digest(seed, scope) {
   if (!Number.isSafeInteger(seed)) throw new TypeError('seed must be a safe integer');
@@ -156,9 +159,15 @@ function localIds(seed, side, used) {
   return ids;
 }
 
+function rotationModeOf(rotationMode) {
+  if (!ROTATION_MODES.includes(rotationMode)) throw new TypeError('unknown rotation mode');
+  return rotationMode;
+}
+
 /** Researcher-only geometry and correspondence. Never send this to a participant/model. */
-export function createLayoutsV2({ seed }) {
+export function createLayoutsV2({ seed, rotationMode = 'relative_pm90' }) {
   digest(seed, 'validate');
+  const mode = rotationModeOf(rotationMode);
   const used = new Set();
   const rotations = randomSource(seed, 'orientations');
   const humanRotations = new Map(FIGURES.map(f => [f.id, Math.floor(rotations() * 4) * 90]));
@@ -168,8 +177,7 @@ export function createLayoutsV2({ seed }) {
     const figures = shuffle(FIGURES, randomSource(seed, `${side}:identity`));
     result.definitions = figures.map((f, i) => ({
       id: ids[i], figureId: f.id,
-      rotation: side === 'human' ? humanRotations.get(f.id)
-        : (humanRotations.get(f.id) + (rotations() < 0.5 ? 90 : 270)) % 360,
+      rotation: side === 'human' ? humanRotations.get(f.id) : aiRotation(humanRotations.get(f.id), rotations(), mode),
     }));
   }
   const humanLayout = placeSide(human.definitions, randomSource(seed, 'human:placement'));
@@ -179,19 +187,27 @@ export function createLayoutsV2({ seed }) {
   };
 }
 
+// The ±90° draw is consumed in both modes so every later draw keeps its position.
+const aiRotation = (human, draw, mode) => mode === 'relative_0' ? human : (human + (draw < 0.5 ? 90 : 270)) % 360;
+
 const pathOf = outlines => outlines.map(p => `M${p.map(([x, y]) => `${x},${y}`).join('L')}Z`).join('');
 const sceneOf = layout => ({
   width: BOARD_WIDTH, height: BOARD_HEIGHT,
   shapes: layout.map(p => ({ id: p.id, path: pathOf(p.outlines), centroid: { ...p.centroid } })),
 });
 
+// Generation-time stimulus metadata, kept off the trial object so its relative_pm90 bytes stay unchanged.
+const stimuli = new WeakMap();
+
 /** Researcher-owned trial. Project it with participantView/modelView before sending it. */
-export function createTrialV2({ seed }) {
-  const layouts = createLayoutsV2({ seed });
+export function createTrialV2({ seed, rotationMode = 'relative_pm90' }) {
+  const mode = rotationModeOf(rotationMode);
+  const layouts = createLayoutsV2({ seed, rotationMode: mode });
   const render = layout => renderPolygons(layout.flatMap(p => p.polygons), { width: BOARD_WIDTH, height: BOARD_HEIGHT });
-  return {
+  const trial = {
     version: 2,
-    trialId: `${VERSION}-${digest(seed, 'trial').toString('hex').slice(0, 16)}`,
+    // relative_pm90 keeps its original id; other modes get an equally opaque id of their own.
+    trialId: `${VERSION}-${digest(seed, mode === 'relative_pm90' ? 'trial' : `trial:${mode}`).toString('hex').slice(0, 16)}`,
     seed,
     human: { png: render(layouts.human), mimeType: 'image/png', scene: sceneOf(layouts.human) },
     ai: {
@@ -202,6 +218,19 @@ export function createTrialV2({ seed }) {
       Object.fromEntries(layouts[side].map(p => [p.id, p.figureId])),
     ])),
   };
+  stimuli.set(trial, { version: VERSION, rotationMode: mode, angles: Object.fromEntries(['human', 'ai'].map(side => [side,
+    Object.fromEntries(layouts[side].map(p => [p.id, p.rotation])),
+  ])) });
+  return trial;
+}
+
+/**
+ * Researcher-only: the version, rotation mode and per-slot angles this exact trial object was
+ * generated with; null for anything createTrialV2 did not return (including copies).
+ */
+export function trialStimulusV2(trial) {
+  const stimulus = trial !== null && typeof trial === 'object' ? stimuli.get(trial) : undefined;
+  return stimulus ? structuredClone(stimulus) : null;
 }
 
 /** Human-only scene: no PNG of the opposite side, seed, or researcher key. */

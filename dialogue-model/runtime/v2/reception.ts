@@ -1,18 +1,34 @@
 import { createHash } from 'node:crypto';
 import type { Strategy } from './base-assignment.ts';
+import { ROTATION_MODES as STIMULUS_ROTATION_MODES } from '../stimuli/scatter-v2.mjs';
 
 export type ReceptionProtocol = { schemaVersion: 'reception_protocol_v1'; protocolId: string; revision: number;
   allowedOrders: Strategy[][]; seedPolicy: 'shared' | 'per_trial'; referenceMemory: boolean;
   betweenTrials: 'none'; receptionNumberFormat: 'daily_seq3' };
-export type ReceptionPlan = { schemaVersion: 'reception_plan_v1'; protocolId: string; protocolRevision: number;
+export type RotationMode = 'relative_pm90' | 'relative_0';
+/** The stimulus generator's own list, so the protocol never offers a mode the generator cannot produce. */
+export const ROTATION_MODES = STIMULUS_ROTATION_MODES as readonly RotationMode[];
+export type BetweenTrials = 'none' | 'questionnaire_required';
+/** Researcher-saved protocol. Every value is an explicit selection; nothing is defaulted. */
+export type ReceptionProtocolV2 = { schemaVersion: 'reception_protocol_v2'; protocolId: string; revision: number;
+  allowedOrders: Strategy[][]; seedPolicy: 'shared' | 'per_trial'; referenceMemory: boolean;
+  betweenTrials: BetweenTrials; receptionNumberFormat: 'daily_seq3'; rotationMode: RotationMode };
+export type ReceptionPlanV1 = { schemaVersion: 'reception_plan_v1'; protocolId: string; protocolRevision: number;
   protocolSha256: string; order: Strategy[]; trials: { index: number; strategy: Strategy; seed: number; referenceMemory: boolean }[]; approvedAt: string };
+export type ReceptionPlanV2 = { schemaVersion: 'reception_plan_v2'; protocolId: string; protocolRevision: number;
+  protocolSha256: string; order: Strategy[]; betweenTrials: BetweenTrials; approvedAt: string;
+  trials: { index: number; strategy: Strategy; seed: number; referenceMemory: boolean; rotationMode: RotationMode }[] };
+export type ReceptionPlan = ReceptionPlanV1 | ReceptionPlanV2;
+/** The protocol version a researcher saw when choosing an order. */
+export type DisplayedProtocol = { protocolId: string; revision: number; sha256: string };
 export type ReceptionStatus = 'pending' | 'approved' | 'in_progress' | 'finished' | 'cancelled';
 export type Reception = { schemaVersion: 'reception_v1'; receptionId: string; objectId: string; createdAt: string;
   number: string | null; status: ReceptionStatus; plan: ReceptionPlan | null; revision: number;
   trials: { index: number; recordId: string | null }[] };
 export type ReceptionSummary = Pick<Reception, 'receptionId' | 'objectId' | 'createdAt' | 'number' | 'status' | 'revision' | 'trials'>;
 export type ReceptionErrorCode = 'protocol_unconfigured' | 'reception_conflict' | 'invalid_order' | 'reception_unavailable' |
-  'reception_not_approved' | 'trial_changed' | 'reception_finished';
+  'reception_not_approved' | 'trial_changed' | 'reception_finished' | 'protocol_changed' | 'reception_closed' |
+  'reception_required' | 'questionnaire_required';
 export class ReceptionError extends Error {
   readonly code: ReceptionErrorCode;
   constructor(code: ReceptionErrorCode) { super(code); this.name = 'ReceptionError'; this.code = code; }
@@ -47,8 +63,42 @@ export function validateReceptionProtocol(value: unknown): ReceptionProtocol {
   } catch { return fail('protocol_unconfigured'); }
 }
 export function canonicalReceptionProtocol(value: unknown): string { return JSON.stringify(validateReceptionProtocol(value)); }
+const rotation = (v: unknown): v is RotationMode => ROTATION_MODES.some(mode => mode === v);
+const between = (v: unknown): v is BetweenTrials => v === 'none' || v === 'questionnaire_required';
+/** v2 has no defaults either: a missing, null or unknown value fails closed (never the v1 meaning). */
+export function validateReceptionProtocolV2(value: unknown): ReceptionProtocolV2 {
+  try {
+    const p = object(value, ['schemaVersion','protocolId','revision','allowedOrders','seedPolicy','referenceMemory','betweenTrials','receptionNumberFormat','rotationMode']);
+    if (p.schemaVersion !== 'reception_protocol_v2' || !uuid.test(p.protocolId) || !int(p.revision) || p.revision < 1 ||
+      !Array.isArray(p.allowedOrders) || !p.allowedOrders.length || !['shared','per_trial'].includes(p.seedPolicy) ||
+      typeof p.referenceMemory !== 'boolean' || !between(p.betweenTrials) || p.receptionNumberFormat !== 'daily_seq3' || !rotation(p.rotationMode)) return fail();
+    const allowedOrders = p.allowedOrders.map(order);
+    if (new Set(allowedOrders.map(o => o.join(','))).size !== allowedOrders.length) return fail();
+    return { schemaVersion: 'reception_protocol_v2', protocolId: p.protocolId, revision: p.revision, allowedOrders,
+      seedPolicy: p.seedPolicy, referenceMemory: p.referenceMemory, betweenTrials: p.betweenTrials,
+      receptionNumberFormat: p.receptionNumberFormat, rotationMode: p.rotationMode };
+  } catch { return fail('protocol_unconfigured'); }
+}
+export function canonicalReceptionProtocolV2(value: unknown): string { return JSON.stringify(validateReceptionProtocolV2(value)); }
+export const receptionProtocolSha256 = (canonical: string): string => createHash('sha256').update(canonical).digest('hex');
+function validatePlanV2(value: unknown): ReceptionPlanV2 {
+  const p = object(value, ['schemaVersion','protocolId','protocolRevision','protocolSha256','order','betweenTrials','trials','approvedAt']);
+  const strategies = order(p.order);
+  if (p.schemaVersion !== 'reception_plan_v2' || !uuid.test(p.protocolId) || !int(p.protocolRevision) || p.protocolRevision < 1 ||
+    typeof p.protocolSha256 !== 'string' || !owner.test(p.protocolSha256) || !iso(p.approvedAt) || !between(p.betweenTrials) ||
+    !Array.isArray(p.trials) || p.trials.length !== strategies.length) return fail();
+  const trials = p.trials.map((raw: unknown, index: number) => {
+    const t = object(raw, ['index','strategy','seed','referenceMemory','rotationMode']);
+    if (t.index !== index || t.strategy !== strategies[index] || !int(t.seed) || typeof t.referenceMemory !== 'boolean' || !rotation(t.rotationMode)) return fail();
+    return { index, strategy: strategies[index], seed: t.seed, referenceMemory: t.referenceMemory, rotationMode: t.rotationMode as RotationMode };
+  });
+  return { schemaVersion: 'reception_plan_v2', protocolId: p.protocolId, protocolRevision: p.protocolRevision,
+    protocolSha256: p.protocolSha256, order: strategies, betweenTrials: p.betweenTrials, approvedAt: p.approvedAt, trials };
+}
+/** Each saved plan version is validated strictly by its own schema; v1 keeps its exact shape. */
 export function validateReceptionPlan(value: unknown): ReceptionPlan {
   try {
+    if (value && typeof value === 'object' && (value as { schemaVersion?: unknown }).schemaVersion === 'reception_plan_v2') return validatePlanV2(value);
     const p = object(value, ['schemaVersion','protocolId','protocolRevision','protocolSha256','order','trials','approvedAt']);
     const strategies = order(p.order);
     if (p.schemaVersion !== 'reception_plan_v1' || !uuid.test(p.protocolId) || !int(p.protocolRevision) || p.protocolRevision < 1 ||
@@ -62,6 +112,14 @@ export function validateReceptionPlan(value: unknown): ReceptionPlan {
     return { schemaVersion: 'reception_plan_v1', protocolId: p.protocolId, protocolRevision: p.protocolRevision,
       protocolSha256: p.protocolSha256, order: strategies, trials, approvedAt: p.approvedAt };
   } catch { return fail(); }
+}
+/** Effective values: a v1 plan predates these settings and means the old mechanism. */
+export function effectiveRotationMode(plan: ReceptionPlan, index: number): RotationMode {
+  if (!int(index) || index < 0 || index >= plan.trials.length) return fail();
+  return plan.schemaVersion === 'reception_plan_v2' ? plan.trials[index].rotationMode : 'relative_pm90';
+}
+export function effectiveBetweenTrials(plan: ReceptionPlan): BetweenTrials {
+  return plan.schemaVersion === 'reception_plan_v2' ? plan.betweenTrials : 'none';
 }
 export function validateReception(value: unknown): Reception {
   try {
@@ -85,8 +143,32 @@ export function validateReception(value: unknown): Reception {
 export function createReception(input: { receptionId: string; objectId: string; createdAt: string; number: string | null }): Reception {
   return validateReception({ schemaVersion:'reception_v1', ...input, status:'pending', plan:null, revision:0, trials:[] });
 }
-export async function approveReception(value: unknown, options: { expectedRevision: number; order: number; protocol: unknown; approvedAt: string; randomSeed: () => number }): Promise<Reception> {
-  const r = validateReception(value), p = validateReceptionProtocol(options.protocol);
+function displayed(value: unknown): DisplayedProtocol {
+  try {
+    const d = object(value, ['protocolId','revision','sha256']);
+    if (!uuid.test(d.protocolId) || !int(d.revision) || d.revision < 1 || typeof d.sha256 !== 'string' || !owner.test(d.sha256)) return fail();
+    return { protocolId: d.protocolId, revision: d.revision, sha256: d.sha256 };
+  } catch { return fail('protocol_changed'); }
+}
+/**
+ * v1 (pure, legacy) freezes a v1 plan exactly as before. v2 requires the displayed
+ * version and compares it with the same protocol snapshot the plan is copied from.
+ */
+export async function approveReception(value: unknown, options: { expectedRevision: number; order: number; protocol: unknown; expected?: unknown; approvedAt: string; randomSeed: () => number }): Promise<Reception> {
+  const r = validateReception(value);
+  if (options.protocol && typeof options.protocol === 'object' && (options.protocol as { schemaVersion?: unknown }).schemaVersion === 'reception_protocol_v2') {
+    const p = validateReceptionProtocolV2(options.protocol), canonical = JSON.stringify(p), sha256 = receptionProtocolSha256(canonical);
+    if (r.status !== 'pending' || r.revision !== options.expectedRevision) return fail('reception_conflict');
+    const shown = displayed(options.expected);
+    if (shown.protocolId !== p.protocolId || shown.revision !== p.revision || shown.sha256 !== sha256) return fail('protocol_changed');
+    if (!int(options.order) || !p.allowedOrders[options.order]) return fail('invalid_order');
+    const selected = p.allowedOrders[options.order], seeds = selected.map((_, i) => i === 0 || p.seedPolicy === 'per_trial' ? options.randomSeed() : null);
+    const plan = validateReceptionPlan({ schemaVersion:'reception_plan_v2', protocolId:p.protocolId, protocolRevision:p.revision,
+      protocolSha256:sha256, order:selected, betweenTrials:p.betweenTrials, approvedAt:options.approvedAt,
+      trials:selected.map((strategy, index) => ({ index, strategy, seed:seeds[index] ?? seeds[0], referenceMemory:p.referenceMemory, rotationMode:p.rotationMode })) });
+    return validateReception({ ...r, status:'approved', plan, revision:r.revision+1 });
+  }
+  const p = validateReceptionProtocol(options.protocol);
   if (r.status !== 'pending' || r.revision !== options.expectedRevision) return fail('reception_conflict');
   if (!int(options.order) || !p.allowedOrders[options.order]) return fail('invalid_order');
   const selected = p.allowedOrders[options.order], seeds = selected.map((_, i) => i === 0 || p.seedPolicy === 'per_trial' ? options.randomSeed() : null);
@@ -100,9 +182,11 @@ export function cancelReception(value: unknown, expectedRevision: number): Recep
   if (!['pending','approved'].includes(r.status) || r.trials.length || r.revision !== expectedRevision) return fail('reception_conflict');
   return validateReception({ ...r, status:'cancelled', revision:r.revision+1 });
 }
-export function participantReception(value: unknown) {
+/** Public projection: three fields only. `questionnaire` means the plan waits for the predecessor's questionnaire. */
+export function participantReception(value: unknown, context: { awaitingQuestionnaire?: boolean } = {}) {
   const r = validateReception(value);
-  const status = ({ pending:'waiting', approved:'ready', in_progress:'in_progress', finished:'finished', cancelled:'unavailable' } as const)[r.status];
+  const status = r.status === 'in_progress' && context.awaitingQuestionnaire === true ? 'questionnaire'
+    : ({ pending:'waiting', approved:'ready', in_progress:'in_progress', finished:'finished', cancelled:'unavailable' } as const)[r.status];
   return { number:r.number, status, revision:r.revision };
 }
 export function receptionSummary(value: unknown): ReceptionSummary {

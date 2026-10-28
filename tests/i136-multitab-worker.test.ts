@@ -4,6 +4,7 @@ import { registerHooks } from 'node:module';
 import { existsSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { clone, config, load } from './support/s5-base/support.ts';
+import { emptyAdminIndex } from './support/i139-empty-admin-index.ts';
 
 // Same in-process Cloudflare shim used by s5-base-worker.test.ts. No browser,
 // network, real AI proxy, production data, or real credentials are involved.
@@ -18,7 +19,7 @@ registerHooks({ resolve(specifier, context, next) {
   return next(specifier, context);
 } });
 const root = process.env.S5_SOURCE_ROOT ?? fileURLToPath(new URL('../', import.meta.url));
-const { default: edge, TangramSession }: any = await import(pathToFileURL(root + '/workers/tangram-experiment/src/index.ts').href);
+const { default: edge, TangramSession, AdminIndex }: any = await import(pathToFileURL(root + '/workers/tangram-experiment/src/index.ts').href);
 const oldNow = Date.now;
 Date.now = () => 946684800001;
 after(() => { Date.now = oldNow; });
@@ -45,7 +46,7 @@ function harness() {
     ledger: { [originalRecord.recordId]: 946684800000 },
   }))));
   const objectEnv = {
-    BASE_ASSIGNMENT_JSON: JSON.stringify(config()), RECORD_RETENTION_DAYS: '30',
+    BASE_ASSIGNMENT_JSON: JSON.stringify(config()), RECORD_RETENTION_DAYS: '30', ADMIN_INDEX: emptyAdminIndex(AdminIndex),
     AI_PROXY: { async chat() { modelCalls++; throw Error('unexpected synthetic model call'); } },
   };
   const getObject = (id: string) => {

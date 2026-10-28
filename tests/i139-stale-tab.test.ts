@@ -7,6 +7,7 @@ import { once } from 'node:events';
 import { createNamingServer } from '../dialogue-model/runtime/web/server.mjs';
 import { privateBaseOptions } from './support/s5-private-options.mjs';
 import { config, clone } from './support/s5-base/support.ts';
+import { emptyAdminIndex } from './support/i139-empty-admin-index.ts';
 
 registerHooks({ resolve(specifier, context, next) {
   if (specifier === 'cloudflare:workers') return { url: 'data:text/javascript,export class DurableObject {constructor(ctx,env){this.ctx=ctx;this.env=env}}', shortCircuit: true };
@@ -17,7 +18,7 @@ registerHooks({ resolve(specifier, context, next) {
   return next(specifier, context);
 } });
 const sourceRoot = fileURLToPath(new URL('../', import.meta.url));
-const { TangramSession }: any = await import(pathToFileURL(sourceRoot + '/workers/tangram-experiment/src/index.ts').href);
+const { TangramSession, AdminIndex }: any = await import(pathToFileURL(sourceRoot + '/workers/tangram-experiment/src/index.ts').href);
 type Requester = (path: string, body?: unknown) => Promise<Response>;
 
 // Only model I/O is synthetic. Both adapters use real tasks, assignment state,
@@ -66,7 +67,7 @@ async function harness(t: any, adapter: string) {
     async setAlarm() {}, async deleteAlarm() {},
   };
   const object = new TangramSession({ storage, id: { toString: () => 'a'.repeat(64) }, waitUntil(p: Promise<unknown>) { pending.push(p); } }, {
-    BASE_ASSIGNMENT_JSON: JSON.stringify(config()), AI_PROXY: { async chat(payload: any) {
+    BASE_ASSIGNMENT_JSON: JSON.stringify(config()), ADMIN_INDEX: emptyAdminIndex(AdminIndex), AI_PROXY: { async chat(payload: any) {
       const reply = await client.complete(payload.messages);
       return { status: 200, data: { model: reply.model, choices: [{ message: { content: reply.text } }] } };
     } },

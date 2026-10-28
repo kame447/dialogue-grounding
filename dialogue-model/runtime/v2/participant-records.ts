@@ -7,7 +7,7 @@
 // The questionnaire items are trial items written for operation checks only
 // (研究者未承認の仮項目). They are not NASA-TLX, Paas or any validated scale, and
 // no total score is computed. See dialogue-model/README.md: the scales are undecided.
-import { createTrialV2, participantView } from "../stimuli/scatter-v2.mjs";
+import { createTrialV2, participantView, ROTATION_MODES } from "../stimuli/scatter-v2.mjs";
 import { NamingTaskError } from "../naming-error.mjs";
 
 export const QUESTIONNAIRE_VERSION = "provisional-v0";
@@ -135,12 +135,17 @@ export function participantResult(result: any) {
 export function participantReview(record: Record<string, any>) {
   if (record.status !== "completed" || !isPlain(record.scoring) || !isPlain(record.scoring.result)) throw new NamingTaskError("trial_not_completed");
   if (!Number.isSafeInteger(record.seed)) throw new NamingTaskError("operation_failed");
+  // The recorded rotation; records from before the field existed are relative_pm90.
+  if (Object.hasOwn(record, "options") && !isPlain(record.options)) throw new NamingTaskError("operation_failed");
+  const options = isPlain(record.options) ? record.options : {};
+  const rotationMode = Object.hasOwn(options, "rotationMode") ? options.rotationMode : "relative_pm90";
+  if (typeof rotationMode !== "string" || !ROTATION_MODES.includes(rotationMode)) throw new NamingTaskError("operation_failed");
   const events = (Array.isArray(record.events) ? record.events : []).filter(isPlain)
     .map(({ id, speaker, text, at }) => ({ id, speaker, text, at }));
   const human = isPlain(record.humanSubmission) ? record.humanSubmission : {};
   return {
     recordId: String(record.recordId), status: "completed" as const, startedAt: iso(record.startedAt), updatedAt: iso(record.updatedAt),
-    scene: participantView(createTrialV2({ seed: record.seed })), events,
+    scene: participantView(createTrialV2({ seed: record.seed, rotationMode })), events,
     humanSubmission: Object.fromEntries(Object.entries(human).map(([slot, name]) => [slot, typeof name === "string" ? name : null])),
     result: participantResult(record.scoring.result),
   };

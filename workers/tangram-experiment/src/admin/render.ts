@@ -4,7 +4,7 @@
 import type { AdminSummary } from "./summary";
 import type { LatencySummary } from "./latency";
 import type { AuditEntry } from "./index-store";
-import type { ReceptionAdminRow, ReceptionProtocolStatus } from './reception-port.ts';
+import type { ReceptionAdminRow, ReceptionProtocolStatus, SettingsView } from './reception-port.ts';
 import { RECORD_ID } from './summary.ts';
 import { renderQrSvg } from './qr.ts';
 
@@ -67,7 +67,7 @@ export function renderList(summaries: AdminSummary[], filter: ListFilter, next: 
 <td>${ms(s.latency.turn.p50Ms)} / ${ms(s.latency.turn.p95Ms)}</td><td>${escapeHtml(s.latency.slowestPhase?.phase ?? "")}</td>
 <td>${escapeHtml(QUESTIONNAIRE_LABELS[s.questionnaire] ?? QUESTIONNAIRE_LABELS.none)}</td></tr>`).join("");
   return page("実験ログ（研究者用）", `<h1>実験ログ（研究者用・読み取り専用）</h1>
-${receptions ? '<nav><a href="/admin/receptions">受付一覧</a> · <a href="/admin/entry">参加用URL・QRコード</a></nav>' : ''}
+${receptions ? '<nav><a href="/admin/receptions">受付一覧</a> · <a href="/admin/entry">参加用URL・QRコード</a> · <a href="/admin/reception-settings">受付の設定</a></nav>' : ''}
 <form method="get" action="/admin"><label>状態 <select name="status">${STATUS_FILTERS.map((v) => option(v, filter.status)).join("")}</select></label>
 <label>エラー <select name="error">${option("any", filter.error, "すべて")}${option("with", filter.error, "あり")}${option("without", filter.error, "なし")}</select></label>
 <label>参照メモリ <select name="memory">${option("any", filter.memory, "すべて")}${option("on", filter.memory, "ON")}${option("off", filter.memory, "OFF")}</select></label>
@@ -146,17 +146,21 @@ ${questionnaireSection(r.questionnaire)}
 <button>この記録を削除</button></form>`);
 }
 
-export function renderMessage(title: string, message: string): string {
-  return page(title, `<h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p><p><a href="/admin">一覧へ</a></p>`);
+export function renderMessage(title: string, message: string, back: { href: string; label: string } = { href: '/admin', label: '一覧へ' }): string {
+  return page(title, `<h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p><p><a href="${escapeHtml(back.href)}">${escapeHtml(back.label)}</a></p>`);
 }
 
 const RECEPTION_LABELS = { pending: '許可待ち', approved: '許可済み', in_progress: '実施中', finished: '終了', cancelled: '取消済み' };
-const receptionNav = '<nav><a href="/admin/receptions">受付一覧</a> · <a href="/admin/entry">参加用URL・QRコード</a> · <a href="/admin">実験ログ</a></nav>';
+const receptionNav = '<nav><a href="/admin/receptions">受付一覧</a> · <a href="/admin/entry">参加用URL・QRコード</a> · <a href="/admin/reception-settings">受付の設定</a> · <a href="/admin">実験ログ</a></nav>';
+const ROTATION_LABELS: Record<string, string> = { relative_pm90: '±90°', relative_0: '0°' };
+const BETWEEN_LABELS: Record<string, string> = { none: '指定なし', questionnaire_required: 'アンケート必須' };
 
 export function renderReceptions(items: ReceptionAdminRow[], next: string | null, protocol: ReceptionProtocolStatus): string {
   const form = (entry: ReceptionAdminRow, action: 'approve' | 'cancel') => {
+    // No preselected order: the researcher chooses one, and the form carries the protocol version it was shown with.
     const choices = action === 'approve' && protocol.configured
-      ? `<label>条件順序 <select name="order">${protocol.allowedOrders.map((order, index) =>
+      ? `<input type="hidden" name="protocolId" value="${escapeHtml(protocol.protocolId)}"><input type="hidden" name="protocolRevision" value="${escapeHtml(protocol.revision)}"><input type="hidden" name="protocolSha256" value="${escapeHtml(protocol.sha256)}">
+<label>条件順序 <select name="order" required><option value="">選んでください</option>${protocol.allowedOrders.map((order, index) =>
         `<option value="${index}">${escapeHtml(order.join(' → '))}</option>`).join('')}</select></label>` : '';
     return `<form method="post" action="/admin/reception/${escapeHtml(entry.receptionId)}/${action}">
 <input type="hidden" name="expectedRevision" value="${escapeHtml(entry.revision)}">${choices}
@@ -168,18 +172,55 @@ export function renderReceptions(items: ReceptionAdminRow[], next: string | null
     const cancel = unstarted && (entry.status === 'pending' || entry.status === 'approved');
     return `<tr><td>${escapeHtml(entry.number ?? '未割当')}</td><td>${escapeHtml(entry.createdAt)}</td>
 <td>${escapeHtml(RECEPTION_LABELS[entry.status] ?? entry.status)}</td><td>${escapeHtml(entry.plan?.order.join(' → ') ?? '')}</td>
+<td>${escapeHtml(entry.plan ? ROTATION_LABELS[entry.plan.rotationMode] ?? '' : '')}</td><td>${escapeHtml(entry.plan ? BETWEEN_LABELS[entry.plan.betweenTrials] ?? '' : '')}</td>
 <td>${entry.trials.filter(trial => trial.recordId && RECORD_ID.test(trial.recordId)).map(trial =>
       `<a href="/admin/record/${escapeHtml(trial.recordId)}">${escapeHtml(trial.recordId)}</a>`).join('<br>')}</td>
-<td>${entry.status === 'pending' && unstarted && protocol.configured ? form(entry, 'approve') : ''}${cancel ? form(entry, 'cancel') : ''}</td></tr>`;
+<td>${entry.status === 'pending' && unstarted && protocol.configured && protocol.mode === 'on' ? form(entry, 'approve') : ''}${cancel ? form(entry, 'cancel') : ''}</td></tr>`;
   }).join('');
   return page('受付一覧', `${receptionNav}<h1>受付一覧</h1>
 ${protocol.configured ? `<p>プロトコル設定済み: ${escapeHtml(protocol.protocolId)} / revision ${escapeHtml(protocol.revision)}</p>`
-    : '<p class="bad">プロトコルが未設定のため、許可できません</p>'}
-${items.length ? `<div class="wrap"><table>${head(['受付番号', '受付時刻', '状態', '条件順序', '試行記録', '操作'])}${rows}</table></div>` : '<p>受付はありません</p>'}
+    : '<p class="bad">プロトコルが未設定のため、許可できません（<a href="/admin/reception-settings">受付の設定</a>）</p>'}
+${protocol.configured && protocol.mode !== 'on' ? '<p>受付を使わない設定です。許可済みの受付は、計画どおり続けられます。</p>' : ''}
+${items.length ? `<div class="wrap"><table>${head(['受付番号', '受付時刻', '状態', '条件順序', '回転', '試行の間', '試行記録', '操作'])}${rows}</table></div>` : '<p>受付はありません</p>'}
 ${next ? `<p><a href="/admin/receptions?${escapeHtml(new URLSearchParams({ after: next }).toString())}">次のページ →</a></p>` : ''}`);
 }
 
 export function renderEntry(entryUrl: string): string {
   return page('参加用URL・QRコード', `${receptionNav}<h1>参加用URL・QRコード</h1>
 <p><a href="${escapeHtml(entryUrl)}">${escapeHtml(entryUrl)}</a></p>${renderQrSvg(entryUrl)}`);
+}
+
+const ORDER_CHOICES: [string, string, string][] = [['rf-be', 'repair-first,bypass-enabled', 'repair-first → bypass-enabled'],
+  ['be-rf', 'bypass-enabled,repair-first', 'bypass-enabled → repair-first'], ['rf', 'repair-first', 'repair-first のみ'], ['be', 'bypass-enabled', 'bypass-enabled のみ']];
+const SETTING_CHOICES: [string, string, [string, string][]][] = [
+  ['seedPolicy', 'seed', [['shared', '全試行で同じ'], ['per_trial', '試行ごとに別']]],
+  ['referenceMemory', '参照メモリ', [['on', 'ON'], ['off', 'OFF']]],
+  ['betweenTrials', '試行の間', [['none', '指定なし'], ['questionnaire_required', 'アンケートの提出後に次へ（対象：provisional-v0、研究者未承認の仮項目）']]],
+  ['rotationMode', '回転', [['relative_pm90', '相対 ±90°（従来）'], ['relative_0', '相対 0°（向きを一致）']]],
+  ['receptionNumberFormat', '受付番号', [['daily_seq3', '日ごとの3桁の連番']]],
+];
+const MODE_LABELS: Record<string, string> = { on: '現在：使う', off: '現在：使わない', unset: '未設定（使わない）' };
+
+/** Researcher settings form. Unsaved settings preselect nothing; saved settings preselect the current values. */
+export function renderSettings(view: SettingsView): string {
+  const p = view.protocol?.protocol;
+  const current: Record<string, string> = p ? { seedPolicy: p.seedPolicy, referenceMemory: p.referenceMemory ? 'on' : 'off', betweenTrials: p.betweenTrials,
+    rotationMode: p.rotationMode, receptionNumberFormat: p.receptionNumberFormat } : {};
+  const orders = new Set(p ? p.allowedOrders.map(o => o.join(',')) : []);
+  const mark = (on: boolean) => on ? ' checked' : '';
+  const fieldset = (name: string, legend: string, choices: [string, string][]) => `<fieldset><legend>${escapeHtml(legend)}</legend>${choices.map(([value, label]) =>
+    `<label><input type="radio" name="${name}" value="${escapeHtml(value)}" required${mark(current[name] === value)}> ${escapeHtml(label)}</label>`).join('')}</fieldset>`;
+  const status = view.protocol ? `<p>revision ${escapeHtml(view.protocol.revision)}（${escapeHtml(view.protocol.savedAt)} に保存）</p>` : '<p class="bad">未設定のため、受付を許可できません</p>';
+  return page('受付の設定', `${receptionNav}<h1>受付の設定</h1>
+<h2>受付モード</h2><p>${escapeHtml(MODE_LABELS[view.mode.value])}</p>
+<form method="post" action="/admin/reception-settings/mode"><input type="hidden" name="expectedRevision" value="${escapeHtml(view.mode.revision)}">
+<button name="value" value="on">受付を使う</button> <button name="value" value="off">受付を使わない</button></form>
+<h2>プロトコル</h2>${status}
+<form method="post" action="/admin/reception-settings/protocol"><input type="hidden" name="expectedRevision" value="${escapeHtml(view.protocol?.revision ?? 0)}">
+<fieldset><legend>条件順序</legend>${ORDER_CHOICES.map(([token, key, label]) =>
+    `<label><input type="checkbox" name="orders" value="${token}"${mark(orders.has(key))}> ${escapeHtml(label)}</label>`).join('')}</fieldset>
+${SETTING_CHOICES.map(([name, legend, choices]) => fieldset(name, legend, choices)).join('\n')}
+<p>保存しても、許可済みの受付の計画は変わりません。</p><button>保存</button></form>
+<h2>履歴</h2>${table(['revision', '保存日時', '内容', 'SHA-256'], view.protocolHistory.map(h => [h.revision, h.savedAt, h.protocol, h.sha256]))}
+${table(['revision', '保存日時', '受付モード', 'プロトコル revision'], view.modeHistory.map(h => [h.revision, h.savedAt, h.value, h.protocolRevision]))}`);
 }

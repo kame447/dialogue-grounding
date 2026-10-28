@@ -3,12 +3,12 @@
 // Cloudflare. Fails closed: no token (or no rate limiter) means 404.
 // GET /admin/record/<recordId>.json downloads that one full record as JSON.
 import { checkAdmin, presentedToken } from "./auth.ts";
-import { ADMIN_CSS, applyFilter, parseFilter, renderDetail, renderList, renderMessage, renderReceptions, renderEntry } from "./render.ts";
+import { ADMIN_CSS, applyFilter, parseFilter, renderDetail, renderList, renderMessage, renderReceptions, renderEntry, renderSettings } from "./render.ts";
 import { OBJECT_ID, RECORD_ID } from "./summary.ts";
 import type { AdminSummary } from "./summary.ts";
 import type { LatencySummary } from "./latency.ts";
 import type { AuditEntry } from "./index-store.ts";
-import type { ReceptionAdminPort } from './reception-port.ts';
+import type { ProtocolFields, ReceptionAdminPort, ReceptionSettingsPort } from './reception-port.ts';
 
 export type AdminLimiter = { limit(options: { key: string }): Promise<{ success: boolean }> };
 export type AdminDeps = {
@@ -27,6 +27,8 @@ export type AdminDeps = {
   /** Optional S5 operator action; participant cookies do not authorize it. */
   prepareNext?(summary: AdminSummary): Promise<{ kind: 'created' | 'existing'; recordId: string; participantPath: '/' }>;
   receptions?: ReceptionAdminPort;
+  /** Researcher reception settings (protocol and reception mode). */
+  receptionSettings?: ReceptionSettingsPort;
 };
 
 export const ADMIN_HEADERS: Readonly<Record<string, string>> = Object.freeze({
@@ -91,50 +93,124 @@ async function receptionForm(request: Request): Promise<URLSearchParams | null> 
   try { return new URLSearchParams(new TextDecoder('utf-8', { fatal: true }).decode(bytes)); } catch { return null; }
 }
 const receptionError = (status: number, error: string) => respond(status, JSON.stringify({ error }), 'application/json; charset=utf-8');
+/** Browser pages (Accept: text/html without application/json) get a short page; other clients keep the JSON contract. */
+function wantsHtml(request: Request): boolean {
+  const types = (request.headers.get('Accept') ?? '').split(',').map(value => value.split(';')[0].trim().toLowerCase());
+  return types.includes('text/html') && !types.includes('application/json');
+}
+const RECEPTION_MESSAGES: Readonly<Record<string, string>> = Object.freeze({
+  not_found: '受付が見つかりません。',
+  invalid_request: 'フォームの内容を確認できませんでした。開き直してから操作してください。',
+  invalid_confirmation: '確認欄に、表示された番号を正確に入力してください。',
+  conflict: '受付の状態が変わりました。開き直してから操作してください。',
+  invalid_order: '条件順序を選んでください。',
+  protocol_unconfigured: 'プロトコルが未設定のため、許可できません。',
+  protocol_changed: '設定が変わりました。開き直してから許可してください。',
+  reception_closed: '受付を使わない設定のため、許可できません。',
+  reception_unavailable: '受付を確認できませんでした。開き直してから操作してください。',
+});
+/** The same status either way; the page names only the closed code's message, never the submitted or backend values. */
+function receptionFailure(request: Request, title: string, status: number, error: string, message = RECEPTION_MESSAGES[error]): Response {
+  if (!wantsHtml(request)) return receptionError(status, error);
+  return respond(status, renderMessage(title, message ?? RECEPTION_MESSAGES.reception_unavailable, { href: '/admin/receptions', label: '受付一覧へ' }));
+}
 const unsigned = (text: string | null): number | null => {
   if (text === null || !/^(0|[1-9][0-9]*)$/.test(text)) return null;
   const n = Number(text); return Number.isSafeInteger(n) ? n : null;
 };
 
+const UUID_V4 = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
 async function receptionMutation(request: Request, port: ReceptionAdminPort, id: string, action: string): Promise<Response> {
-  if (!RECORD_ID.test(id)) return receptionError(404, 'not_found');
+  // A 503 may follow a write whose reply was lost, so it says the outcome is unknown rather than "not done".
+  const fail = (status: number, error: string) => status === 503
+    ? receptionFailure(request, action === 'approve' ? '許可の結果を確認できません' : '取消の結果を確認できません', status, error,
+      '受付を確認できませんでした。受付一覧を開き直して、状態を確認してください。')
+    : receptionFailure(request, action === 'approve' ? '許可していません' : '取り消していません', status, error);
+  if (!RECORD_ID.test(id)) return fail(404, 'not_found');
   const form = await receptionForm(request);
-  const allowed = action === 'approve' ? ['order', 'expectedRevision', 'confirm'] : ['expectedRevision', 'confirm'];
-  if (!form || [...form.keys()].some(key => !allowed.includes(key) || form.getAll(key).length !== 1)) return receptionError(400, 'invalid_request');
+  const allowed = action === 'approve' ? ['order', 'expectedRevision', 'confirm', 'protocolId', 'protocolRevision', 'protocolSha256'] : ['expectedRevision', 'confirm'];
+  if (!form || [...form.keys()].some(key => !allowed.includes(key) || form.getAll(key).length !== 1)) return fail(400, 'invalid_request');
   const expectedRevision = unsigned(form.get('expectedRevision'));
-  if (expectedRevision === null) return receptionError(400, 'invalid_request');
+  if (expectedRevision === null) return fail(400, 'invalid_request');
+  // The protocol version shown with the order choices; it is compared before the order is interpreted.
+  const shown = { protocolId: form.get('protocolId') ?? '', revision: unsigned(form.get('protocolRevision')), sha256: form.get('protocolSha256') ?? '' };
+  if (action === 'approve' && (!UUID_V4.test(shown.protocolId) || shown.revision === null || shown.revision < 1 || !/^[a-f0-9]{64}$/u.test(shown.sha256))) return fail(400, 'invalid_request');
   try {
     const entry = await port.get(id);
-    if (!entry || entry.receptionId !== id) return receptionError(404, 'not_found');
-    if (form.get('confirm') !== entry.receptionId.slice(0, 8) && (entry.number === null || form.get('confirm') !== entry.number)) return receptionError(400, 'invalid_confirmation');
-    if (entry.revision !== expectedRevision) return receptionError(409, 'conflict');
+    if (!entry || entry.receptionId !== id) return fail(404, 'not_found');
+    if (form.get('confirm') !== entry.receptionId.slice(0, 8) && (entry.number === null || form.get('confirm') !== entry.number)) return fail(400, 'invalid_confirmation');
+    if (entry.revision !== expectedRevision) return fail(409, 'conflict');
     let result;
     if (action === 'approve') {
       const protocol = await port.protocol();
-      if (!protocol.configured) return receptionError(409, 'protocol_unconfigured');
+      if (!protocol.configured) return fail(409, 'protocol_unconfigured');
+      if (protocol.mode !== 'on') return fail(409, 'reception_closed');
+      if (protocol.protocolId !== shown.protocolId || protocol.revision !== shown.revision || protocol.sha256 !== shown.sha256) return fail(409, 'protocol_changed');
       const order = unsigned(form.get('order'));
-      if (order === null || order >= protocol.allowedOrders.length) return receptionError(400, 'invalid_order');
-      if (entry.status !== 'pending' || entry.trials.some(trial => trial.recordId !== null)) return receptionError(409, 'conflict');
-      result = await port.approve(id, { order, expectedRevision });
+      if (order === null || order >= protocol.allowedOrders.length) return fail(400, 'invalid_order');
+      if (entry.status !== 'pending' || entry.trials.some(trial => trial.recordId !== null)) return fail(409, 'conflict');
+      result = await port.approve(id, { order, expectedRevision, protocol: { protocolId: shown.protocolId, revision: shown.revision!, sha256: shown.sha256 } });
     } else {
-      if ((entry.status !== 'pending' && entry.status !== 'approved') || entry.trials.some(trial => trial.recordId !== null)) return receptionError(409, 'conflict');
+      if ((entry.status !== 'pending' && entry.status !== 'approved') || entry.trials.some(trial => trial.recordId !== null)) return fail(409, 'conflict');
       result = await port.cancel(id, { expectedRevision });
     }
     if (!result.ok) {
       // The result remains allowlisted at runtime: never reflect an arbitrary backend error.
       switch (result.error) {
-        case 'not_found': return receptionError(404, 'not_found');
-        case 'invalid_order': return receptionError(400, 'invalid_order');
-        case 'conflict': return receptionError(409, 'conflict');
-        case 'protocol_unconfigured': return receptionError(409, 'protocol_unconfigured');
-        default: return receptionError(503, 'reception_unavailable');
+        case 'not_found': return fail(404, 'not_found');
+        case 'invalid_order': return fail(400, 'invalid_order');
+        case 'conflict': return fail(409, 'conflict');
+        case 'protocol_unconfigured': return fail(409, 'protocol_unconfigured');
+        case 'protocol_changed': return fail(409, 'protocol_changed');
+        case 'reception_closed': return fail(409, 'reception_closed');
+        default: return fail(503, 'reception_unavailable');
       }
     }
     if (request.headers.get('Accept')?.split(',').some(value => value.split(';')[0].trim() === 'application/json')) {
       return respond(200, JSON.stringify({ ok: true }), 'application/json; charset=utf-8');
     }
     return plain(303, '', { Location: '/admin/receptions' });
-  } catch { return receptionError(503, 'reception_unavailable'); }
+  } catch { return fail(503, 'reception_unavailable'); }
+}
+
+const ORDER_TOKENS: Readonly<Record<string, ProtocolFields['allowedOrders'][number]>> = Object.freeze({
+  'rf-be': ['repair-first', 'bypass-enabled'], 'be-rf': ['bypass-enabled', 'repair-first'], rf: ['repair-first'], be: ['bypass-enabled'] });
+const SINGLE: Readonly<Record<string, readonly string[]>> = Object.freeze({ seedPolicy: ['shared', 'per_trial'], referenceMemory: ['on', 'off'],
+  betweenTrials: ['none', 'questionnaire_required'], rotationMode: ['relative_pm90', 'relative_0'], receptionNumberFormat: ['daily_seq3'] });
+/** Every field must be selected explicitly; nothing missing is filled with a default. */
+function protocolForm(form: URLSearchParams): { expectedRevision: number; fields: ProtocolFields } | null {
+  const keys = [...new Set(form.keys())];
+  if (keys.some(k => k !== 'orders' && k !== 'expectedRevision' && !Object.hasOwn(SINGLE, k))) return null;
+  if (['expectedRevision', ...Object.keys(SINGLE)].some(k => form.getAll(k).length !== 1)) return null;
+  const expectedRevision = unsigned(form.get('expectedRevision')), orders = form.getAll('orders');
+  if (expectedRevision === null || !orders.length || new Set(orders).size !== orders.length || orders.some(o => !Object.hasOwn(ORDER_TOKENS, o))) return null;
+  for (const [k, values] of Object.entries(SINGLE)) if (!values.includes(form.get(k)!)) return null;
+  return { expectedRevision, fields: { allowedOrders: Object.keys(ORDER_TOKENS).filter(t => orders.includes(t)).map(t => [...ORDER_TOKENS[t]]),
+    seedPolicy: form.get('seedPolicy') as ProtocolFields['seedPolicy'], referenceMemory: form.get('referenceMemory') === 'on',
+    betweenTrials: form.get('betweenTrials') as ProtocolFields['betweenTrials'], receptionNumberFormat: 'daily_seq3',
+    rotationMode: form.get('rotationMode') as ProtocolFields['rotationMode'] } };
+}
+function modeForm(form: URLSearchParams): { expectedRevision: number; value: 'on' | 'off' } | null {
+  const keys = [...form.keys()];
+  if (keys.length !== 2 || ['expectedRevision', 'value'].some(k => form.getAll(k).length !== 1)) return null;
+  const expectedRevision = unsigned(form.get('expectedRevision')), value = form.get('value');
+  return expectedRevision !== null && (value === 'on' || value === 'off') ? { expectedRevision, value } : null;
+}
+const NOT_SAVED = '保存していません';
+async function settingsMutation(request: Request, port: ReceptionSettingsPort, kind: string): Promise<Response> {
+  const form = await receptionForm(request);
+  const input = form && (kind === 'protocol' ? protocolForm(form) : modeForm(form));
+  if (!input) return respond(400, renderMessage(NOT_SAVED, 'すべての項目を選んでください。'));
+  let result;
+  try { result = 'fields' in input ? await port.saveProtocol(input) : await port.saveMode(input); }
+  catch { return respond(503, renderMessage(NOT_SAVED, '設定を保存できませんでした。')); }
+  if (result.ok) return plain(303, '', { Location: '/admin/reception-settings' });
+  switch (result.error) {
+    case 'conflict': return respond(409, renderMessage(NOT_SAVED, '他の画面で設定が変わりました。開き直してから保存してください。'));
+    case 'invalid': return respond(400, renderMessage(NOT_SAVED, 'すべての項目を選んでください。'));
+    case 'protocol_unconfigured': return respond(409, renderMessage(NOT_SAVED, 'プロトコルを保存してから、受付を使ってください。'));
+    default: return respond(503, renderMessage(NOT_SAVED, '設定を保存できませんでした。'));
+  }
 }
 
 export async function handleAdmin(request: Request, deps: AdminDeps): Promise<Response> {
@@ -144,8 +220,10 @@ export async function handleAdmin(request: Request, deps: AdminDeps): Promise<Re
   const deletePath = request.method === "POST" ? url.pathname.match(/^\/admin\/record\/([^/]+)\/delete$/) : null;
   const nextPath = request.method === 'POST' && deps.prepareNext ? url.pathname.match(/^\/admin\/record\/([^/]+)\/prepare-next$/) : null;
   const receptionPath = request.method === 'POST' && deps.receptions ? url.pathname.match(/^\/admin\/reception\/([^/]+)\/(approve|cancel)$/) : null;
+  const settingsPath = request.method === 'POST' && deps.receptionSettings ? url.pathname.match(/^\/admin\/reception-settings\/(protocol|mode)$/) : null;
   if (!deps.receptions && (url.pathname === '/admin/receptions' || url.pathname === '/admin/entry')) return notFound();
-  if (request.method === "POST" ? !deletePath && !nextPath && !receptionPath : request.method !== "GET" && request.method !== "HEAD") return notFound();
+  if (!deps.receptionSettings && url.pathname === '/admin/reception-settings') return notFound();
+  if (request.method === "POST" ? !deletePath && !nextPath && !receptionPath && !settingsPath : request.method !== "GET" && request.method !== "HEAD") return notFound();
   const header = request.headers.get("Authorization");
   // Every credentialed attempt (right or wrong) counts, so guessing is capped per visitor.
   if (presentedToken(header) !== null && !(await deps.limiter.limit({ key: visitorKey(request) })).success) {
@@ -155,6 +233,14 @@ export async function handleAdmin(request: Request, deps: AdminDeps): Promise<Re
   if (auth === "unconfigured") return notFound();
   if (auth !== "ok") return plain(401, "Authentication required", { "WWW-Authenticate": REALM });
 
+  if (settingsPath) {
+    if (!sameOrigin(request, url)) return plain(403, 'Forbidden');
+    return settingsMutation(request, deps.receptionSettings!, settingsPath[1]);
+  }
+  if (deps.receptionSettings && url.pathname === '/admin/reception-settings') {
+    try { return respond(200, renderSettings(await deps.receptionSettings.read())); }
+    catch { return respond(503, renderMessage('受付の設定', '設定を読み込めませんでした。')); }
+  }
   if (receptionPath) {
     if (!sameOrigin(request, url)) return plain(403, 'Forbidden');
     return receptionMutation(request, deps.receptions!, receptionPath[1], receptionPath[2]);
@@ -164,11 +250,11 @@ export async function handleAdmin(request: Request, deps: AdminDeps): Promise<Re
       const protocol = await deps.receptions.protocol();
       const page = await deps.receptions.listPage(url.searchParams.get('after'));
       return respond(200, renderReceptions(page.items, page.next, protocol));
-    } catch { return receptionError(503, 'reception_unavailable'); }
+    } catch { return receptionFailure(request, '受付一覧', 503, 'reception_unavailable'); }
   }
   if (deps.receptions && url.pathname === '/admin/entry') {
     try { return respond(200, renderEntry(new URL('/', url).href)); }
-    catch { return receptionError(503, 'reception_unavailable'); }
+    catch { return receptionFailure(request, '参加用URL・QRコード', 503, 'reception_unavailable'); }
   }
 
   if (nextPath) {

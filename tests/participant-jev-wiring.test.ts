@@ -365,3 +365,15 @@ test('an OFF restore rejects an open-issue rerank trace',async t=>{
   mixed.jevTraces=[{schemaVersion:'jev_turn_trace_v2',turnIndex:1,intervention:{policy:'bypass_acceptance_v1:veto',rerank:{policyId:'saved_action_scores_open_issue_v1'}}}];
   await assert.rejects(makeTask(prepared,{restore:mixed}),{code:'invalid_options'});
 });
+
+test('#142 J1: the P1 path is relative_pm90 only; relative_0 tasks and records fail closed before any POST',async t=>{
+  const h=await fixture(t),prepared=await prepareParticipantJev(h.options);
+  await assert.rejects(prepared.taskOptions({strategy:'repair-first',seed,referenceMemory:true,rotationMode:'relative_0'}),{code:'invalid_config'});
+  await prepared.taskOptions({strategy:'repair-first',seed,referenceMemory:true,rotationMode:'relative_pm90'});
+  const saved=(await makeTask(prepared)).record();
+  assert.equal(saved.options.rotationMode,'relative_pm90');
+  await prepared.taskOptions({strategy:'repair-first',seed,referenceMemory:true,rotationMode:'relative_0',restore:saved});
+  const zero=structuredClone(saved);zero.options.rotationMode='relative_0';
+  await assert.rejects(prepared.taskOptions({strategy:'repair-first',seed,referenceMemory:true,restore:zero}),{code:'invalid_config'});
+  assert.equal(h.upstream.counts().posts,0);
+});
