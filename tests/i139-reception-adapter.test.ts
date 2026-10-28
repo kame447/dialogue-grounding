@@ -42,12 +42,13 @@ function memory() {
     async deleteAlarm() {}, async setAlarm() {},
   };
 }
-function harness(patch: Record<string, unknown> = {}) {
+// settings: 'on' saves a protocol and mode on; 'unset' saves only a protocol; 'none' saves nothing.
+function harness(patch: Record<string, unknown> = {}, settings: 'on' | 'unset' | 'none' = 'on') {
   const stores = new Map<string, ReturnType<typeof memory>>(), objects = new Map<string, any>(), pending: Promise<unknown>[] = [];
   const indexStorage = memory(), index = new AdminIndex({ storage:indexStorage },{}); let modelCalls = 0, receptionReads = 0;
-  const configured = (async () => {
+  const configured = settings === 'none' ? Promise.resolve() : (async () => {
     assert.equal((await index.saveReceptionProtocol({ expectedRevision:0, fields:protocol })).ok,true);
-    assert.equal((await index.saveReceptionMode({ expectedRevision:0, value:'on' })).ok,true);
+    if (settings === 'on') assert.equal((await index.saveReceptionMode({ expectedRevision:0, value:'on' })).ok,true);
     const p = (await index.readReceptionSettings()).protocol;
     shown = { protocolId:p.protocol.protocolId, protocolRevision:String(p.revision), protocolSha256:p.sha256 };
   })();
@@ -219,4 +220,23 @@ for (const [code,status,error] of [
   h.object(cookie).adminApproveReception = async () => { throw new Error(code); };
   await expectError(await h.fetch(adminPost(r.receptionId,'approve',0,confirm(r))),status,error);
   assert.deepEqual(h.snapshot(cookie),before); await h.done();
+});
+
+test('N5 default on through edge → adapter → render: no protocol lists the reception without an approval form; a saved protocol (mode never saved) allows approval', async () => {
+  const none = harness({}, 'none'), c = await none.browser(), r = rec(none,c);
+  assert.ok(r.number, 'the waiting reception has a number before any protocol');
+  const html = await (await none.fetch(adminGet())).text();
+  assert.ok(html.includes(r.number)); assert.ok(!html.includes(`/admin/reception/${r.receptionId}/approve`));
+  assert.match(html,/プロトコルが未設定のため、許可できません/u); assert.doesNotMatch(html,/受付を使わない設定です/u);
+  const before = none.snapshot(c);
+  const refused = await none.fetch(new Request(`${origin}/admin/reception/${r.receptionId}/approve`,{ method:'POST',headers:{ Authorization:'Bearer '+token,
+    Origin:origin, 'Sec-Fetch-Site':'same-origin', 'Content-Type':'application/x-www-form-urlencoded', Accept:'application/json' },
+    body:new URLSearchParams({ expectedRevision:'0', confirm:confirm(r), order:'0', protocolId:'55555555-5555-4555-8555-555555555555', protocolRevision:'1', protocolSha256:'0'.repeat(64) }) }));
+  assert.equal(refused.status,409); assert.deepEqual(none.snapshot(c),before); await none.done();
+  const unset = harness({}, 'unset'), cookie = await unset.browser(), row = rec(unset,cookie);
+  assert.deepEqual((await unset.index.readReceptionSettings()).mode,{ value:'unset', revision:0 });
+  const list = await (await unset.fetch(adminGet())).text(); assert.ok(list.includes(`/admin/reception/${row.receptionId}/approve`));
+  const approved = await unset.fetch(adminPost(row.receptionId,'approve',0,confirm(row)));
+  assert.equal(approved.status,200); assert.deepEqual(await approved.json(),{ok:true}); assert.equal(rec(unset,cookie).status,'approved');
+  assert.equal(unset.snapshot(cookie)['base:owner:v1'].activeKey,null,'approval never starts a trial'); await unset.done();
 });

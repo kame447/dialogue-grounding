@@ -274,14 +274,24 @@ test('a stale displayed protocol version is 409 protocol_changed before the orde
     }
   }
 });
-test('while reception mode is not on, pending approval is closed and the list says approved receptions continue', async () => {
-  for (const mode of ['off', 'unset'] as const) {
-    const f = fixture(); f.setProtocol({ configured: true, mode, protocolId: PROTOCOL, revision: 7, sha256: SHA, allowedOrders: [['bypass-enabled']], rotationMode: 'relative_pm90', betweenTrials: 'none' });
-    const html = await (await handleAdmin(get(), f.deps)).text();
-    assert.doesNotMatch(html, /\/approve"/); assert.match(html, /受付を使わない設定です。許可済みの受付は、計画どおり続けられます。/);
-    await error(await handleAdmin(post(), f.deps), 409, 'reception_closed'); assert.equal(mutations(f).length, 0);
-    assert.equal((await handleAdmin(post('cancel'), f.deps)).status, 303);
-  }
+test('while reception mode is explicitly off, pending approval is closed and the list says approved receptions continue', async () => {
+  const f = fixture(); f.setProtocol({ configured: true, mode: 'off', protocolId: PROTOCOL, revision: 7, sha256: SHA, allowedOrders: [['bypass-enabled']], rotationMode: 'relative_pm90', betweenTrials: 'none' });
+  const html = await (await handleAdmin(get(), f.deps)).text();
+  assert.doesNotMatch(html, /\/approve"/); assert.match(html, /受付を使わない設定です。許可済みの受付は、計画どおり続けられます。/);
+  await error(await handleAdmin(post(), f.deps), 409, 'reception_closed'); assert.equal(mutations(f).length, 0);
+  assert.equal((await handleAdmin(post('cancel'), f.deps)).status, 303);
+});
+test('unsaved reception mode is the default on: a configured protocol shows the approval form and approval reaches the port', async () => {
+  const f = fixture(); f.setProtocol({ configured: true, mode: 'unset', protocolId: PROTOCOL, revision: 7, sha256: SHA, allowedOrders: [['bypass-enabled']], rotationMode: 'relative_pm90', betweenTrials: 'none' });
+  const html = await (await handleAdmin(get(), f.deps)).text();
+  assert.match(html, new RegExp(`/admin/reception/${ID}/approve"`)); assert.doesNotMatch(html, /受付を使わない設定です/);
+  const r = await handleAdmin(post('approve', { order: '0' }), f.deps); assert.equal(r.status, 303);
+  assert.deepEqual(mutations(f), [{ op: 'approve', args: [ID, { order: 0, expectedRevision: 3, protocol: DISPLAYED }] }]);
+  assert.equal((await handleAdmin(post('cancel'), f.deps)).status, 303);
+  // Without a saved protocol, unset still offers no approval and approval stays fail-closed.
+  const g = fixture(); g.setProtocol({ configured: false, mode: 'unset' });
+  assert.doesNotMatch(await (await handleAdmin(get(), g.deps)).text(), /\/approve"/);
+  await error(await handleAdmin(post('approve', { order: '0' }), g.deps), 409, 'protocol_unconfigured'); assert.equal(mutations(g).length, 0);
 });
 test('researcher-only list shows the frozen plan rotation and between-trial values; legacy plans read as the old mechanism', async () => {
   const f = fixture();

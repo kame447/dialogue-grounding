@@ -7,7 +7,7 @@ import { once } from 'node:events';
 import { createNamingServer } from '../dialogue-model/runtime/web/server.mjs';
 import { privateBaseOptions } from './support/s5-private-options.mjs';
 import { config, clone } from './support/s5-base/support.ts';
-import { emptyAdminIndex } from './support/i139-empty-admin-index.ts';
+import { researcherOffAdminIndex } from './support/i139-researcher-off-admin-index.ts';
 
 registerHooks({ resolve(specifier, context, next) {
   if (specifier === 'cloudflare:workers') return { url: 'data:text/javascript,export class DurableObject {constructor(ctx,env){this.ctx=ctx;this.env=env}}', shortCircuit: true };
@@ -67,7 +67,7 @@ async function harness(t: any, adapter: string) {
     async setAlarm() {}, async deleteAlarm() {},
   };
   const object = new TangramSession({ storage, id: { toString: () => 'a'.repeat(64) }, waitUntil(p: Promise<unknown>) { pending.push(p); } }, {
-    BASE_ASSIGNMENT_JSON: JSON.stringify(config()), ADMIN_INDEX: emptyAdminIndex(AdminIndex), AI_PROXY: { async chat(payload: any) {
+    BASE_ASSIGNMENT_JSON: JSON.stringify(config()), ADMIN_INDEX: researcherOffAdminIndex(AdminIndex), AI_PROXY: { async chat(payload: any) {
       const reply = await client.complete(payload.messages);
       return { status: 200, data: { model: reply.model, choices: [{ message: { content: reply.text } }] } };
     } },

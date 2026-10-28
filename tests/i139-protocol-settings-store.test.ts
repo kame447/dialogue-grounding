@@ -82,18 +82,54 @@ test('protocol fields are explicit: missing, defaulted, unknown or extra values 
   }
 });
 
-test('mode on requires a saved protocol; mode saves are compare-and-swap with their own history', async () => {
+test('mode on and off save without a protocol (reception is the default); mode saves are compare-and-swap with their own history', async () => {
   const { index, storage } = fresh();
-  assert.deepEqual(await index.saveReceptionMode({ expectedRevision: 0, value: 'on' }), { ok: false, error: 'protocol_unconfigured' });
-  assert.deepEqual(storage.snapshot(), {});
   assert.deepEqual(await index.saveReceptionMode({ expectedRevision: 0, value: 'off' }), { ok: true, revision: 1 });
-  await index.saveReceptionProtocol({ expectedRevision: 0, fields: fields() });
   assert.deepEqual(await index.saveReceptionMode({ expectedRevision: 0, value: 'on' }), { ok: false, error: 'conflict' });
+  const before = storage.snapshot();
+  for (const bad of ['', 'ON', 'unset', null, true]) assert.deepEqual(await index.saveReceptionMode({ expectedRevision: 1, value: bad }), { ok: false, error: 'invalid' });
+  assert.deepEqual(storage.snapshot(), before, 'rejected saves change nothing');
   assert.deepEqual(await index.saveReceptionMode({ expectedRevision: 1, value: 'on' }), { ok: true, revision: 2 });
-  for (const bad of ['', 'ON', null, true]) assert.deepEqual(await index.saveReceptionMode({ expectedRevision: 2, value: bad }), { ok: false, error: 'invalid' });
+  const noProtocol = settings.validateReceptionSettings(clone(await index.readReceptionSettings()));
+  assert.deepEqual({ protocol: noProtocol.protocol, value: noProtocol.mode.value, revision: noProtocol.mode.revision }, { protocol: null, value: 'on', revision: 2 });
+  assert.equal(settings.receptionOpen(noProtocol.mode), true);
+  await index.saveReceptionProtocol({ expectedRevision: 0, fields: fields() });
+  assert.deepEqual(await index.saveReceptionMode({ expectedRevision: 2, value: 'off' }), { ok: true, revision: 3 });
   const s = settings.validateReceptionSettings(clone(await index.readReceptionSettings()));
-  assert.deepEqual({ value: s.mode.value, revision: s.mode.revision }, { value: 'on', revision: 2 });
-  assert.deepEqual((await index.receptionModeHistory()).map((h: any) => [h.revision, h.value, h.protocolRevision]), [[2, 'on', 1], [1, 'off', null]]);
+  assert.deepEqual({ value: s.mode.value, revision: s.mode.revision }, { value: 'off', revision: 3 });
+  assert.equal(settings.receptionOpen(s.mode), false);
+  assert.deepEqual((await index.receptionModeHistory()).map((h: any) => [h.revision, h.value, h.protocolRevision]), [[3, 'off', 1], [2, 'on', null], [1, 'off', null]]);
+});
+
+test('the effective mode: unset and on are open, only an explicit off is closed; the stored value is never rewritten', async () => {
+  const { index, storage } = fresh();
+  const unset = settings.validateReceptionSettings(clone(await index.readReceptionSettings()));
+  assert.deepEqual(unset.mode, { value: 'unset', revision: 0 }); assert.equal(settings.receptionOpen(unset.mode), true);
+  assert.deepEqual(storage.snapshot(), {}, 'reading never writes a mode');
+});
+
+test('a protocol lost after a mode was saved against it is damage, never "unsaved": reads and saves fail closed', async () => {
+  const { index, storage } = fresh();
+  await index.saveReceptionProtocol({ expectedRevision: 0, fields: fields() });
+  assert.deepEqual(await index.saveReceptionMode({ expectedRevision: 0, value: 'on' }), { ok: true, revision: 1 });
+  assert.equal((await index.receptionModeHistory())[0].protocolRevision, 1);
+  for (const k of [...storage.raw.keys()]) if (k.startsWith('reception-protocol:')) storage.remove(k);
+  await assert.rejects(async () => settings.validateReceptionSettings(clone(await index.readReceptionSettings())), broken);
+  const before = storage.snapshot();
+  for (const write of [() => index.saveReceptionMode({ expectedRevision: 1, value: 'on' }), () => index.saveReceptionMode({ expectedRevision: 1, value: 'off' }),
+    () => index.saveReceptionProtocol({ expectedRevision: 0, fields: fields() })]) {
+    assert.equal((await write()).ok, false, 'no repair-by-overwrite');
+  }
+  assert.deepEqual(storage.snapshot(), before);
+  // The same check for a protocol rolled back below the revision the mode was saved against.
+  const second = fresh();
+  await second.index.saveReceptionProtocol({ expectedRevision: 0, fields: fields() });
+  await second.index.saveReceptionProtocol({ expectedRevision: 1, fields: fields({ seedPolicy: 'shared' }) });
+  await second.index.saveReceptionMode({ expectedRevision: 0, value: 'on' });
+  const rev1 = second.storage.raw.get('reception-protocol:rev:0000000001');
+  second.storage.set('reception-protocol:current', { revision: 1, protocolId: rev1.protocol.protocolId, sha256: rev1.sha256, savedAt: rev1.savedAt });
+  second.storage.remove('reception-protocol:rev:0000000002');
+  await assert.rejects(async () => settings.validateReceptionSettings(clone(await second.index.readReceptionSettings())), broken);
 });
 
 test('corruption is never read as unsaved or off: history without current, mismatched versions and damaged values fail closed', async () => {

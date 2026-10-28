@@ -144,7 +144,7 @@ async function receptionMutation(request: Request, port: ReceptionAdminPort, id:
     if (action === 'approve') {
       const protocol = await port.protocol();
       if (!protocol.configured) return fail(409, 'protocol_unconfigured');
-      if (protocol.mode !== 'on') return fail(409, 'reception_closed');
+      if (protocol.mode === 'off') return fail(409, 'reception_closed');
       if (protocol.protocolId !== shown.protocolId || protocol.revision !== shown.revision || protocol.sha256 !== shown.sha256) return fail(409, 'protocol_changed');
       const order = unsigned(form.get('order'));
       if (order === null || order >= protocol.allowedOrders.length) return fail(400, 'invalid_order');

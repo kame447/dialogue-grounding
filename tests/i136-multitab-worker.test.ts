@@ -4,7 +4,7 @@ import { registerHooks } from 'node:module';
 import { existsSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { clone, config, load } from './support/s5-base/support.ts';
-import { emptyAdminIndex } from './support/i139-empty-admin-index.ts';
+import { researcherOffAdminIndex } from './support/i139-researcher-off-admin-index.ts';
 
 // Same in-process Cloudflare shim used by s5-base-worker.test.ts. No browser,
 // network, real AI proxy, production data, or real credentials are involved.
@@ -46,7 +46,7 @@ function harness() {
     ledger: { [originalRecord.recordId]: 946684800000 },
   }))));
   const objectEnv = {
-    BASE_ASSIGNMENT_JSON: JSON.stringify(config()), RECORD_RETENTION_DAYS: '30', ADMIN_INDEX: emptyAdminIndex(AdminIndex),
+    BASE_ASSIGNMENT_JSON: JSON.stringify(config()), RECORD_RETENTION_DAYS: '30', ADMIN_INDEX: researcherOffAdminIndex(AdminIndex),
     AI_PROXY: { async chat() { modelCalls++; throw Error('unexpected synthetic model call'); } },
   };
   const getObject = (id: string) => {
