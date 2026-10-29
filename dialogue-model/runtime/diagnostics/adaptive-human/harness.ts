@@ -13,6 +13,16 @@ export type HarnessOptions = {
   beforeSimulatorTurn?: () => Promise<void>;
 };
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+/** Codes this diagnostic throws itself; any other message, however code-like, is never printed. */
+export const FAILURE_CODES: ReadonlySet<string> = new Set(['browser_evaluation_failed', 'cdp_closed', 'cdp_command_failed',
+  'cdp_command_timeout', 'cdp_connect_failed', 'cdp_connect_timeout', 'chrome_or_cdp_required', 'chrome_start_failed',
+  'chrome_start_timeout', 'invalid_adaptive_human_arguments', 'invalid_adaptive_human_data', 'invalid_adaptive_human_response',
+  'invalid_before_turn_hook', 'live_requires_app_and_cdp', 'live_requires_research_worker', 'participant_ai_error',
+  'participant_ui_timeout', 'synthetic_jev_fixture_mismatch', 'synthetic_record_export_failed']);
+export const failureCode = (error: unknown) => {
+  const message = error instanceof Error ? error.message : '';
+  return FAILURE_CODES.has(message) ? message : 'unexpected_error';
+};
 const counts = (state: any) => ({human: state.trial.events.filter((e: any) => e.speaker === 'human').length,
   ai: state.trial.events.filter((e: any) => e.speaker === 'ai').length});
 
@@ -109,6 +119,10 @@ export async function driveParticipant(options: HarnessOptions) {
     await writeFile(join(options.outputDirectory, 'page.public.html'), await js('document.documentElement.outerHTML'), {mode: 0o600});
     log.push({stage: 'reload', sameTrial: true, stopReason, syntheticSubmission: true});
     return {sessionId, stopReason, turns: turns.length, surfaces: surfaces.length};
+  } catch (error) {
+    // The stage before the failure is already logged; add only a closed code (#141).
+    log.push({stage: 'failed', code: failureCode(error)});
+    throw error;
   } finally {
     // Private human assessments are never mixed into the scanner's public-surface file.
     await writeFile(join(options.outputDirectory, 'surfaces.private.json'), JSON.stringify(surfaces, null, 2), {mode: 0o600});

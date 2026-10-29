@@ -26,7 +26,8 @@ export async function main(args = process.argv.slice(2)) {
     persona: createPersona(Number(values['persona-seed'])), simulator: liveHuman(config), beforeSimulatorTurn, ...shared});
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  main().then(result => console.log(JSON.stringify(result))).catch(() => {
-    console.error('adaptive_human_offline_failed'); process.exitCode = 1;
+  main().then(result => console.log(JSON.stringify(result))).catch(async (error) => {
+    const {failureCode} = await import('./harness.ts');
+    console.error('adaptive_human_failed:' + failureCode(error)); process.exitCode = 1;
   });
 }
