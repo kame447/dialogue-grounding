@@ -6,7 +6,7 @@ import { buildRepairProspectPayload, buildJevDecisionPayload, buildJevDecisionDe
 import { REPAIR_PROSPECTS, REPAIR_PROSPECT_BASES } from '../dialogue-model/runtime/decision/contract.ts';
 import type { JevDecisionInput, RepairHistoryEntry, RepairProspectMaterial, JevDecisionClient } from '../dialogue-model/runtime/decision/contract.ts';
 import type { JevDecisionPayload } from '../dialogue-model/runtime/decision/jev-decision.ts';
-import { createDialogueV2, ACTION_SCOPE_V2 } from '../dialogue-model/runtime/v2/dialogue-v2.mjs';
+import { createDialogueV2, ACTION_SCOPE_V2, GENERATOR_INSTRUCTIONS_V2 } from '../dialogue-model/runtime/v2/dialogue-v2.mjs';
 import { validateJevPrivateStateV2 } from '../dialogue-model/runtime/v2/jev-turn.ts';
 import { interventionForStrategy } from '../dialogue-model/runtime/decision/bypass-acceptance.ts';
 import { researchTrialProfileV3 } from '../dialogue-model/runtime/v2/research-profile.ts';
@@ -185,8 +185,14 @@ test('repair generation scope switches only ON, identically for both conditions'
   for (const strategy of ['repair-first', 'bypass-enabled']) for (const enabled of [false, true]) {
     const h = harness({ enabled, strategy, action: 'repair' }); await h.run();
     const generation = JSON.stringify(h.messages.filter(m => m.phase === 'generation'));
-    const expected = '公開上の食い違いを局所的に確かめ直す・直す。自分の取り違えや決めた名前の訂正のときはそう明示する';
+    const expected = '公開上の食い違いを局所的に確かめ直す・直す。自分の取り違えや決めた名前の訂正だと言うのは、公開の発話でそれが示されたときだけにする';
     assert.ok(generation.includes(enabled ? expected : ACTION_SCOPE_V2.repair));
+    // #141 b: ON also replaces the shared self-correction sentence; OFF keeps it.
+    const selfCorrection = 'repairでは自己訂正を明示し、repair以外では取り違えや取り消しを表明しないでください。';
+    const grounded = '取り違えや取り消しは、repairで公開の発話にその根拠があるときだけ表明してください。';
+    assert.equal(generation.includes(selfCorrection), !enabled);
+    assert.equal(generation.includes(grounded), enabled);
+    assert.ok(GENERATOR_INSTRUCTIONS_V2.includes(selfCorrection));
     assert.ok(!generation.includes(strategy));
   }
 });
