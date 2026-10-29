@@ -372,19 +372,22 @@ function followToBottom() {
 // Failures are shown by state, never by cause. The trial has stopped when the
 // server reports a failure, or when something is awaited (an AI reply, a send
 // acknowledgement, the final submission or a failed state read) without
-// confirmed progress for CHAT_STALL_MS. A shorter interruption stays invisible
-// while polling recovers it. Either way the participant sees STOPPED and one
-// recovery action; nothing is retried automatically.
+// confirmed progress for CHAT_STALL_MS; without a trial (waiting for the
+// reception) only a lasting failed state read counts. A shorter interruption
+// stays invisible while polling recovers it. The participant sees STOPPED where
+// the current screen shows it, with one recovery action in the trial view;
+// nothing is retried automatically.
 const dialogueFailed = () => Boolean(dialogueOpen() && current?.aiStatus === "error" && !resuming);
 const submissionFailed = () => Boolean(submitted() && !trialCompleted() && !resuming &&
   (current?.finalError || ["scoring_error", "submission_error"].includes(current?.status)));
 const chatWaiting = () => Boolean(current && !submitted() && (aiThinking() || resuming || pending.some((item) => item.status !== "failed")));
-const progressStopped = () => Boolean(current && !reviewing && (dialogueFailed() || submissionFailed() || chatStalled));
-// Where the trial view itself shows the stop: beside the composer or the submission.
-const stopShownInView = () => progressStopped() && participantStage() === (submitted() ? "names" : "chat");
+const progressStopped = () => Boolean(!reviewing && (chatStalled || (current && (dialogueFailed() || submissionFailed()))));
+// Where the current screen itself shows the stop: beside the composer or the
+// submission, or the top notice while no trial is shown.
+const stopShownInView = () => progressStopped() && (!current || participantStage() === (submitted() ? "names" : "chat"));
 function renderProgress() {
   const failed = pending.some((item) => item.status === "failed");
-  const awaited = Boolean(current && !reviewing && !trialCompleted() && (submitted() || chatWaiting() || chatDisconnected));
+  const awaited = Boolean(!reviewing && (current ? !trialCompleted() && (submitted() || chatWaiting() || chatDisconnected) : chatDisconnected));
   const signature = JSON.stringify([trialIdentity(current), events().at(-1)?.id, current?.aiStatus, resuming,
     submitted(), current?.status, current?.aiSubmitted, current?.finalError]);
   clearTimeout(typingTimer);
@@ -409,6 +412,10 @@ function renderProgress() {
   }
   retrySubmission.hidden = !(submitted() && stopped);
   retrySubmission.disabled = working || checking;
+  if (!current && !reviewing) {
+    if (stopped) $("notice").textContent = STOPPED;
+    else if ($("notice").textContent === STOPPED) $("notice").textContent = "";
+  }
 }
 // The one recovery action. It first re-reads the state, which is idempotent.
 // Only a stop that the refreshed server state itself reports resumes the same
@@ -418,8 +425,10 @@ function renderProgress() {
 async function checkProgress() {
   if (working || checking || sending) return;
   checking = true; renderProgress();
+  const trial = trialIdentity(current);
   try {
-    await refreshState();
+    // Only a fresh state of the same trial decides; a failed read resumes nothing.
+    if (!await refreshState() || trialIdentity(current) !== trial) return;
     const path = dialogueOpen() ? (current?.aiStatus === "error" && !serverBusy ? "/api/retry" : null)
       : submitted() && !trialCompleted() && (submissionFailed() || !current?.aiSubmitted) ? "/api/ai-submit" : null;
     if (path && !reviewing) { resuming = true; renderProgress(); await operate(() => api(path, {})); }
@@ -557,8 +566,11 @@ async function refreshState() {
   const epoch = generation;
   const requestEpoch = stateEpoch;
   refreshRequest = (async () => {
-    try { const state = await boundedRequest("/api/state", undefined, STATE_REFRESH_MS); if (epoch === generation && requestEpoch === stateEpoch && !reviewing) { chatDisconnected = false; render(state); } }
-    catch { if (epoch === generation) { chatDisconnected = true; renderProgress(); } }
+    try {
+      const state = await boundedRequest("/api/state", undefined, STATE_REFRESH_MS);
+      if (epoch !== generation || requestEpoch !== stateEpoch || reviewing) return false;
+      chatDisconnected = false; render(state); return true;
+    } catch { if (epoch === generation) { chatDisconnected = true; renderProgress(); } return false; }
     finally { refreshRequest = null; scheduleRefresh(); }
   })();
   return refreshRequest;

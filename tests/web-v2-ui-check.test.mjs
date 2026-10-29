@@ -304,3 +304,30 @@ test("i161: 状態を確認 on a stalled AI turn only re-reads the state; a doub
   assert.equal(second.e["chat-recovery"].hidden, true);
 });
 
+test("i161: while waiting for the reception, a lasting failed state read shows the neutral stop on the visible screen", async () => {
+  let offline = false;
+  const waiting = { trial: null, reception: { status: "waiting", revision: 1 } };
+  const { e, advance } = await ui(null, ({ path }) => {
+    if (offline && path === "/api/state") throw new TypeError("Failed to fetch");
+    if (["/api/state", "/api/reception"].includes(path)) return { status: 200, body: waiting };
+  });
+  assert.equal(e["start-stage"].hidden, false);
+  assert.equal(e.trial.hidden, true);
+  offline = true; await advance(10000);
+  assert.equal(e.notice.textContent, "", "a short interruption stays invisible");
+  await advance(60000);
+  assert.equal(e.notice.textContent, STOPPED);
+  offline = false; await advance(6000);
+  assert.equal(e.notice.textContent, "", "a successful read clears it");
+});
+
+test("i161: 状態を確認 resumes nothing when the fresh state read fails", async () => {
+  let offline = false;
+  const stopped = trial(); stopped.aiStatus = "error";
+  const { e, calls } = await ui(stopped, ({ path }) => { if (offline && path === "/api/state") throw new TypeError("Failed to fetch"); });
+  offline = true; e["retry-chat"].fire("click"); await tick();
+  assert.equal(calls.filter((call) => call.path === "/api/retry").length, 0, "a cached error state is not enough");
+  offline = false; e["retry-chat"].fire("click"); await tick();
+  assert.equal(calls.filter((call) => call.path === "/api/retry").length, 1);
+});
+
