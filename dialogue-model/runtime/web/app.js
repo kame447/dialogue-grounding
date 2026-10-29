@@ -30,8 +30,9 @@ let activitySignature = "";
 let activitySince = 0;
 let chatStalled = false;
 let chatDisconnected = false;
-let checkingChat = false;
-let retryingAI = false;
+let checking = false;
+// An explicit resume of stopped server work is in flight (shown as activity).
+let resuming = false;
 let submissionWarning = "";
 let restoreComposerOnChange = false;
 // Presentation/network safeguards only; these never close a research trial or
@@ -68,6 +69,11 @@ function restoreDraft(trial, composer = "") {
 }
 const defaultContact = "実験の案内に記載された連絡先へお問い合わせください。";
 const contact = document.querySelector?.('meta[name="participant-contact"]')?.content || defaultContact;
+// Participant copy for neutral or participant-actionable outcomes only. Any
+// other failure (AI, scoring, records, transport, an unreadable response or an
+// unknown code) is shown as STOPPED; its cause stays in error.code and the
+// server's private records, never on the page.
+const STOPPED = "進行を確認できません。実験担当者にお知らせください。";
 const errors = {
   trial_unavailable: "試行を開始できませんでした。" + contact,
   reception_not_approved: "この画面を開いたまま、開始の案内があるまでお待ちください。",
@@ -77,10 +83,6 @@ const errors = {
   reception_finished: "すべての課題が完了しました。ご協力ありがとうございました。",
   reception_required: "受付を確認できませんでした。" + contact,
   questionnaire_required: "アンケートを提出すると、次の課題を開始できます。",
-  ai_unavailable: "AIに接続できませんでした。会話履歴を確認してください。送り直すには、そのメッセージの「再送」を押してください。メッセージは自動では再送されません。",
-  scoring_error: "採点でエラーが発生しました。提出内容は保存されています。採点を再試行できます。",
-  invalid_ai_submission: "AIが提出した名前を確認できませんでした。" + contact,
-  record_write_failed: "回答を保存できませんでした。" + contact,
   busy: "処理中です。完了までお待ちください。",
   rate_limited: "短時間に送信が集中しています。1分ほど待ってからもう一度送信してください。",
   invalid_questionnaire: "アンケートの回答を確認してください。すべての質問に回答が必要です。",
@@ -89,6 +91,8 @@ const errors = {
   trial_changed: "画面を現在の試行に更新したため、直前の操作は送信されませんでした。画面と入力欄を確認し、必要ならもう一度操作してください。",
   not_found: "この試行は表示できません。保存期間が過ぎたか、このブラウザの試行ではありません。",
 };
+const knownOutcome = (code) => typeof errors[code] === "string";
+const participantMessage = (code) => knownOutcome(code) ? errors[code] : STOPPED;
 async function api(path, body, signal) {
   if (body !== undefined && ["/api/message", "/api/retry", "/api/names", "/api/ai-submit"].includes(path)) {
     body = { ...body, expectedRecordId: current?.sessionId };
@@ -96,12 +100,13 @@ async function api(path, body, signal) {
   const response = await fetch(path, body === undefined ? (signal ? { signal } : {}) : {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), ...(signal ? { signal } : {}),
   });
-  const value = await response.json();
-  if (!response.ok) {
-    if (response.status === 409 && value.error === "trial_changed" && body?.expectedRecordId === current?.sessionId) restoreComposerOnChange = true;
-    const error = new Error(errors[value.error] || "操作を完了できませんでした。" + contact);
+  // A proxy error page is not JSON; it is an unreadable response, not a message.
+  const value = await response.json().catch(() => null);
+  if (!response.ok || !value) {
+    if (response.status === 409 && value?.error === "trial_changed" && body?.expectedRecordId === current?.sessionId) restoreComposerOnChange = true;
+    const error = new Error(participantMessage(value?.error));
     error.status = response.status;
-    error.code = value?.error;
+    error.code = typeof value?.error === "string" ? value.error : undefined;
     throw error;
   }
   return value;
@@ -141,7 +146,7 @@ function resetLocal() {
   answers = new Map(); selected = null; selectedTarget = null;
   pending = []; sceneSignature = ""; followHistory = true; seenMessages = 0;
   clearTimeout(typingTimer); activitySignature = ""; activitySince = 0;
-  chatStalled = false; chatDisconnected = false; checkingChat = false; submissionWarning = "";
+  chatStalled = false; chatDisconnected = false; checking = false; submissionWarning = "";
   $("utterance").value = "";
   $("history").replaceChildren();
   $("history").historySignature = undefined;
@@ -363,30 +368,62 @@ function keepPosition(scrollTop) {
 function followToBottom() {
   followHistory = true; keepPosition();
 }
-function renderChatActivity() {
+// ---- Participant-facing progress (display layer) ----------------------------
+// Failures are shown by state, never by cause. The trial has stopped when the
+// server reports a failure, or when something is awaited (an AI reply, a send
+// acknowledgement, the final submission or a failed state read) without
+// confirmed progress for CHAT_STALL_MS. A shorter interruption stays invisible
+// while polling recovers it. Either way the participant sees STOPPED and one
+// recovery action; nothing is retried automatically.
+const dialogueFailed = () => Boolean(dialogueOpen() && current?.aiStatus === "error" && !resuming);
+const submissionFailed = () => Boolean(submitted() && !trialCompleted() && !resuming &&
+  (current?.finalError || ["scoring_error", "submission_error"].includes(current?.status)));
+const chatWaiting = () => Boolean(current && !submitted() && (aiThinking() || resuming || pending.some((item) => item.status !== "failed")));
+const progressStopped = () => Boolean(current && !reviewing && (dialogueFailed() || submissionFailed() || chatStalled));
+// Where the trial view itself shows the stop: beside the composer or the submission.
+const stopShownInView = () => progressStopped() && participantStage() === (submitted() ? "names" : "chat");
+function renderProgress() {
   const failed = pending.some((item) => item.status === "failed");
-  // A retry in flight is shown as AI activity, not as the error it replaces.
-  const aiError = current?.aiStatus === "error" && !retryingAI;
-  const waiting = Boolean(current && !submitted() && (aiThinking() || retryingAI || pending.some((item) => item.status !== "failed")));
-  const signature = JSON.stringify([trialIdentity(current), events().at(-1)?.id, current?.aiStatus, retryingAI]);
+  const awaited = Boolean(current && !reviewing && !trialCompleted() && (submitted() || chatWaiting() || chatDisconnected));
+  const signature = JSON.stringify([trialIdentity(current), events().at(-1)?.id, current?.aiStatus, resuming,
+    submitted(), current?.status, current?.aiSubmitted, current?.finalError]);
   clearTimeout(typingTimer);
-  if (!waiting) { activitySignature = ""; chatStalled = false; }
+  if (!awaited) { activitySignature = ""; chatStalled = false; }
   else {
     if (signature !== activitySignature) { activitySignature = signature; activitySince = Date.now(); chatStalled = false; }
     const remaining = CHAT_STALL_MS - (Date.now() - activitySince);
     if (remaining <= 0) chatStalled = true;
-    else if (!failed && !aiError && !chatDisconnected) typingTimer = setTimeout(renderChatActivity, remaining);
+    else if (!dialogueFailed() && !submissionFailed()) typingTimer = setTimeout(renderProgress, remaining);
   }
-  const showDots = waiting && !failed && !aiError && !chatStalled && !chatDisconnected;
+  const stopped = progressStopped();
+  const showDots = chatWaiting() && !failed && !stopped;
   $("typing-indicator").hidden = !showDots;
-  $("chat-recovery").hidden = !(aiError || chatStalled || chatDisconnected);
-  $("chat-recovery-message").textContent = aiError ? "返答を取得できませんでした。" : "会話の更新を確認できません。";
-  $("retry-chat").textContent = aiError ? "AIの返答を再試行" : "状態を確認";
-  $("retry-chat").disabled = working || checkingChat || sending || !chatOpen();
+  $("chat-recovery").hidden = !stopped;
+  $("chat-recovery-message").textContent = STOPPED;
+  $("retry-chat").disabled = working || checking || sending || !chatOpen();
   $("chat-status").textContent = failed ? "送信を確認できませんでした。送り直すには、そのメッセージの「再送」を押してください。" :
-    aiError ? "AIの返答を取得できませんでした。再試行できます。" :
-      chatStalled || chatDisconnected ? "会話の更新を確認できません。状態を確認してください。" :
-        showDots ? "AIが返答を作成しています" : "";
+    stopped ? STOPPED : showDots ? "AIが返答を作成しています" : "";
+  if (current) {
+    $("submission-status").textContent = submissionWarning || (!submitted() ? "" : stopped ? STOPPED :
+      trialCompleted() ? "双方の提出が完了しました。" : "名前を提出しました。AIの提出を待っています。");
+  }
+  retrySubmission.hidden = !(submitted() && stopped);
+  retrySubmission.disabled = working || checking;
+}
+// The one recovery action. It first re-reads the state, which is idempotent.
+// Only a stop that the refreshed server state itself reports resumes the same
+// retained work: /api/retry re-runs the pending turn without re-enqueuing any
+// message, and /api/ai-submit is single-flight with one stored AI submission.
+// A stall while the server still reports work in progress is only re-read.
+async function checkProgress() {
+  if (working || checking || sending) return;
+  checking = true; renderProgress();
+  try {
+    await refreshState();
+    const path = dialogueOpen() ? (current?.aiStatus === "error" && !serverBusy ? "/api/retry" : null)
+      : submitted() && !trialCompleted() && (submissionFailed() || !current?.aiSubmitted) ? "/api/ai-submit" : null;
+    if (path && !reviewing) { resuming = true; renderProgress(); await operate(() => api(path, {})); }
+  } finally { checking = false; resuming = false; renderProgress(); }
 }
 function retryMessage(item) {
   if (working || sending || !chatOpen() || item.status !== "failed" || !pending.includes(item)) return;
@@ -428,7 +465,7 @@ function renderHistory() {
       log.append(li);
     }
   }
-  renderChatActivity();
+  renderProgress();
   keepPosition(scrollTop);
 }
 function renderStartStage(state) {
@@ -474,9 +511,6 @@ function render(state) {
   updateSceneLabels($("board")); updateNameCount(); renderNameList(); renderHistory();
   // Polling must not erase the unanswered-figure warning before it is resolved.
   if (submitted() || data?.shapes?.every((shape) => answers.has(shape.id))) submissionWarning = "";
-  $("submission-status").textContent = submissionWarning || (trial.status === "submission_error" || trial.finalError === "invalid_ai_submission" ? errors.invalid_ai_submission :
-    trial.status === "scoring_error" ? errors.scoring_error : trial.result ? "双方の提出が完了しました。" :
-      submitted() ? "名前を提出しました。AIの提出を待っています。" : "");
   if (trialCompleted()) loadSurvey();
   loadRecords();
   const previousStage = renderedStage;
@@ -485,8 +519,6 @@ function render(state) {
   if (trialCompleted() && previousStage !== participantStage() && ["questionnaire", "results"].includes(participantStage())) stageFocusTarget(participantStage()).focus({ preventScroll: true });
   renderSurvey(); renderRecords();
   renderResults();
-  retrySubmission.hidden = !canRetrySubmission();
-  retrySubmission.textContent = trial.status === "scoring_error" ? "採点を再試行" : "AIの提出を再試行";
   setControls(); scheduleRefresh();
 }
 // Nothing of the result is put into the page while it is locked.
@@ -500,7 +532,7 @@ function renderResults() {
 }
 function setControls() {
   $("start-trial").disabled = !canStart();
-  renderChatActivity();
+  renderProgress();
   $("history").querySelectorAll("button").forEach((node) => { node.disabled = working || sending || !chatOpen(); });
   for (const id of ["utterance", "send-message"]) $(id).disabled = working || !chatOpen();
   $("finish-conversation").disabled = working || sending || pending.some((item) => item.status === "queued") || !dialogueOpen() || !scene()?.shapes?.length;
@@ -513,7 +545,6 @@ function setControls() {
   $("names-help").textContent = submitted() ? "提出済みの名前です。変更はできません。図形を選ぶと拡大して確認できます。" : "会話で共有した名前を確認してください。図形を選ぶと修正できます。";
   $("review-names").disabled = working || aiThinking() || sending || pending.some((item) => item.status === "queued") || !dialogueOpen() || !scene()?.shapes?.length;
   $("confirm-submit").disabled = working || aiThinking() || sending || !dialogueOpen();
-  retrySubmission.disabled = working || serverBusy || !canRetrySubmission();
 }
 function scheduleRefresh() {
   clearTimeout(refreshTimer);
@@ -527,7 +558,7 @@ async function refreshState() {
   const requestEpoch = stateEpoch;
   refreshRequest = (async () => {
     try { const state = await boundedRequest("/api/state", undefined, STATE_REFRESH_MS); if (epoch === generation && requestEpoch === stateEpoch && !reviewing) { chatDisconnected = false; render(state); } }
-    catch { if (epoch === generation) { chatDisconnected = true; renderChatActivity(); } }
+    catch { if (epoch === generation) { chatDisconnected = true; renderProgress(); } }
     finally { refreshRequest = null; scheduleRefresh(); }
   })();
   return refreshRequest;
@@ -537,7 +568,13 @@ async function operate(action) {
   stateEpoch++;
   working = true; setControls();
   try { const state = await action(); if (state?.trial !== undefined) render(state); $("notice").textContent = ""; }
-  catch (error) { $("notice").textContent = error.message; await refreshState(); }
+  catch (error) {
+    // A failed resume shows the stop it was resuming, not activity.
+    resuming = false;
+    await refreshState();
+    // A stop the trial view already shows is not repeated at the top.
+    $("notice").textContent = !knownOutcome(error?.code) && stopShownInView() ? "" : participantMessage(error?.code);
+  }
   finally { working = false; setControls(); }
 }
 async function boundedRequest(path, body, timeoutMs = MESSAGE_ACK_MS) {
@@ -546,7 +583,7 @@ async function boundedRequest(path, body, timeoutMs = MESSAGE_ACK_MS) {
   try {
     return await Promise.race([api(path, body, controller?.signal), new Promise((_, reject) => {
       timer = setTimeout(() => {
-        controller?.abort(); reject(new Error("通信を確認できませんでした。"));
+        controller?.abort(); reject(Object.assign(new Error(STOPPED), { code: "timeout" }));
       }, timeoutMs);
     })]);
   } finally { clearTimeout(timer); }
@@ -583,7 +620,7 @@ async function drainMessages() {
         else await refreshState();
       } catch (error) {
         if (epoch !== generation) break;
-        if (error.code === "trial_changed") $("notice").textContent = error.message;
+        if (error.code === "trial_changed") $("notice").textContent = participantMessage(error.code);
         if (pending.includes(item)) item.status = "failed";
         renderHistory(); setControls();
         // The server may already have accepted it. Refresh without resending.
@@ -809,7 +846,7 @@ async function submitSurvey() {
   try {
     const value = await boundedRequest(recordPath(recordId, "questionnaire"), { answers: fullSurveyAnswers(), comment: surveyComment, submit: true });
     if (token !== surveyToken) return;
-    if (value?.questionnaire?.status !== "submitted") throw new Error(errors.invalid_questionnaire);
+    if (value?.questionnaire?.status !== "submitted") throw new Error("questionnaire_not_submitted");
     survey.questionnaire = value.questionnaire; surveySyncedRevision = surveyRevision;
     removeLocalSurvey(recordId);
     surveySubmitting = false;
@@ -825,7 +862,7 @@ async function submitSurvey() {
     surveySubmitting = false;
     if (error.code === "questionnaire_submitted") loadSurvey(true);
     // Answers stay on screen and in this browser; nothing is cleared on failure.
-    surveyMessage = `${error.message} 入力した回答はこの画面に残っています。`;
+    surveyMessage = `${participantMessage(error.code)} 入力した回答はこの画面に残っています。`;
     renderSurvey();
   }
 }
@@ -833,7 +870,7 @@ function renderSurveyStatus() {
   const submittedSurvey = survey.questionnaire?.status === "submitted";
   $("questionnaire-status").textContent = surveyMessage || (submittedSurvey ? "アンケートは提出済みです。ご協力ありがとうございました。" :
     surveySubmitting ? "提出しています…" :
-      surveySaveError ? "このブラウザには保存しました。サーバーへの保存は自動で再試行します。" :
+      surveySaveError ? "入力した回答はこの画面に残っています。" :
         surveyRevision !== surveySyncedRevision ? "途中の回答を保存しています…" :
           "途中の回答は自動で保存されます。提出するまで何度でも変更できます。");
 }
@@ -843,7 +880,7 @@ function renderSurvey() {
   const submittedSurvey = survey.questionnaire?.status === "submitted";
   $("questionnaire-notice").textContent = form?.notice ?? "";
   $("questionnaire-loading").textContent = !trialCompleted() ? "AIの提出が終わり、試行が完了するとアンケートに回答できます。" :
-    status === "error" ? "アンケートを読み込めませんでした。通信を確認して、上の「アンケート」をもう一度選んでください。" :
+    status === "error" ? "アンケートを表示できませんでした。上の「アンケート」をもう一度選んでください。" :
       status === "unavailable" ? "この試行ではアンケートを表示できません。" : status === "ready" ? "" : "アンケートを読み込んでいます…";
   $("questionnaire-form").hidden = !form;
   $("questionnaire-to-results").hidden = !resultsUnlocked();
@@ -997,7 +1034,7 @@ async function openRecord(recordId, stage) {
   const composer = { trial: trialIdentity(current), text: $("utterance").value };
   await operate(async () => {
     const review = await api(recordPath(recordId, "review"));
-    if (!review || review.recordId !== recordId || !review.scene?.shapes?.length) throw new Error(errors.not_found);
+    if (!review || review.recordId !== recordId || !review.scene?.shapes?.length) throw Object.assign(new Error("not_found"), { code: "not_found" });
     clearTimeout(refreshTimer); stateEpoch++;
     reviewing = { recordId }; stashedComposer = composer.text ? composer : null;
     preparing = false;
@@ -1032,12 +1069,9 @@ function exitReview() {
     return state;
   });
 }
-function canRetrySubmission() {
-  return Boolean(submitted() && (current?.status === "scoring_error" || (current?.status === "submitting" && !current?.aiSubmitted)));
-}
 const retrySubmission = document.createElement("button");
-retrySubmission.type = "button"; retrySubmission.hidden = true;
-retrySubmission.addEventListener("click", () => { if (!working && !serverBusy && canRetrySubmission()) operate(() => api("/api/ai-submit", {})); });
+retrySubmission.type = "button"; retrySubmission.hidden = true; retrySubmission.textContent = "状態を確認";
+retrySubmission.addEventListener("click", checkProgress);
 $("submission").append(retrySubmission);
 $("history").addEventListener("scroll", () => {
   const log = $("history"); followHistory = log.scrollHeight - log.scrollTop - log.clientHeight < AT_BOTTOM_PX;
@@ -1070,16 +1104,7 @@ $("chat").addEventListener("submit", (event) => {
 });
 // Textarea Enter (including IME) is left to native multiline editing. Sending
 // is an explicit form action; no keydown handler turns Enter into a request.
-$("retry-chat").addEventListener("click", async () => {
-  if (working || checkingChat || sending || !chatOpen()) return;
-  if (current?.aiStatus === "error" && !serverBusy) {
-    retryingAI = true; renderChatActivity();
-    try { await operate(() => api("/api/retry", {})); } finally { retryingAI = false; renderChatActivity(); }
-  } else {
-    checkingChat = true; renderChatActivity();
-    try { await refreshState(); } finally { checkingChat = false; renderChatActivity(); }
-  }
-});
+$("retry-chat").addEventListener("click", () => { if (chatOpen()) checkProgress(); });
 $("finish-conversation").addEventListener("click", () => changeStage("names"));
 $("back-to-chat").addEventListener("click", () => changeStage("chat"));
 $("name-form").addEventListener("submit", (event) => {
