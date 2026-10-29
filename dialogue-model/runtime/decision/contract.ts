@@ -61,6 +61,8 @@ export type JevDecisionInput = {
   previousAction: JevPriorAction | null;
   /** Literal public spans only, validated against their public source turn. */
   publicNames: readonly PublicNameCandidate[];
+  /** Opt-in agreement candidates backed by eligible public naming claims. */
+  agreeNames?: PublicNameCandidate[];
   /** C sets false after its engineering limit for targeted reobservation is reached. */
   reobservationAllowed?: boolean;
   humanReferent?: HumanReferentMaterial;

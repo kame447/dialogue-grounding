@@ -1,7 +1,7 @@
 // Explicit technical R policy. The original remains Jev's decision; no semantic oracle.
 import {JEV_ACTIONS} from './contract.ts';
-import type {JevAction,JevDecision,JevDecisionInput,JevTarget,JevExecutedDecision,JevDetailResult,JevDecisionStageEvidence} from './contract.ts';
-import {buildJevDecisionPayload,buildJevDecisionDetailPayload,validateJevDecision,parseJevExecutedDetail,JevDecisionError} from './jev-decision.ts';
+import type {JevAction,JevDecision,JevDecisionInput,JevTarget,JevExecutedDecision,JevDetailResult,JevDecisionStageEvidence,PublicNameCandidate} from './contract.ts';
+import {buildJevDecisionPayload,buildJevDecisionDetailPayload,validateJevDecision,parseJevExecutedDetail,JevDecisionError,JEV_DECISION_INPUT_LIMITS} from './jev-decision.ts';
 
 export const BYPASS_ACCEPTANCE_V1_CANONICAL_JSON = '{"policies":{"bypass-enabled":{"policy":"bypass_acceptance_v1:accept","vetoActions":[]},"repair-first":{"policy":"bypass_acceptance_v1:veto","vetoActions":["defer","move_on"]}},"version":"bypass_acceptance_v1"}';
 export const BYPASS_ACCEPTANCE_V1_TABLE_SHA256 = '376d569120ca36a3eceaf5ab95410f7eb83f25fbb681e7566a684b97c35165c8';
@@ -85,7 +85,7 @@ function checkRepairProspect(value:unknown):void {
 }
 function prepare(input:unknown,original:unknown,intervention:unknown){
  const policy=config(intervention);
- const i=boundary(input,'invalid_input',value=>{const optional=['reobservationAllowed','humanReferent','repairProspect'].filter(k=>!!value&&typeof value==='object'&&Object.hasOwn(value,k));
+ const i=boundary(input,'invalid_input',value=>{const optional=['reobservationAllowed','humanReferent','repairProspect','agreeNames'].filter(k=>!!value&&typeof value==='object'&&Object.hasOwn(value,k));
   if(!exact(value,['turn','publicTurns','ownSlots','observations','issueSummary','priorClaims','repairHistory','previousAction','publicNames',...optional]))fail('invalid_input');
   if(Object.hasOwn(value,'repairProspect'))checkRepairProspect(value.repairProspect);
   buildJevDecisionPayload(value as JevDecisionInput);return structuredClone(value) as BypassAcceptanceInput;});
@@ -131,10 +131,12 @@ function openIssueRerank(input:BypassAcceptanceInput,scores:Record<string,number
  * be reconstructed here. Revisit requires the preceding committed execution.
  */
 export function isOpenIssueRerankRecord(intervention:unknown,decision:unknown,executed:unknown,ownSlots:readonly string[],
- previousAction?:{action:JevAction;target:JevTarget}|null):boolean {
+ previousAction?:{action:JevAction;target:JevTarget}|null,agreeNames?:readonly PublicNameCandidate[]):boolean {
  try{
-  jsonData([intervention,decision,executed,ownSlots,previousAction??null]);
+  jsonData([intervention,decision,executed,ownSlots,previousAction??null,agreeNames??null]);
   if(!Array.isArray(ownSlots)||!ownSlots.length||ownSlots.some(id=>typeof id!=='string'||!id.length)||new Set(ownSlots).size!==ownSlots.length)return false;
+  if(agreeNames!==undefined&&(!Array.isArray(agreeNames)||agreeNames.length>JEV_DECISION_INPUT_LIMITS.publicNames||agreeNames.some(n=>!exact(n,['name','figureId','sourceTurn'])||
+    typeof n.name!=='string'||!n.name.trim()||n.name.length>80||!(n.figureId===null||ownSlots.includes(n.figureId))||typeof n.sourceTurn!=='number'||!Number.isSafeInteger(n.sourceTurn)||n.sourceTurn<1)))return false;
   const ownTarget=(v:unknown,allowNone=false):v is JevTarget=>{
    if(exact(v,['kind']))return allowNone&&v.kind==='none';
    if(exact(v,['kind','figureId']))return v.kind==='single'&&ownSlots.includes(v.figureId as string);
@@ -154,7 +156,8 @@ export function isOpenIssueRerankRecord(intervention:unknown,decision:unknown,ex
    !(r.source.issueId===null||typeof r.source.issueId==='string'&&r.source.issueId.length>0&&r.source.issueId.length<=128)||
    !e||!ownTarget(e.target)||!equal(r.selected,{action:e.action,target:e.target})||!Array.isArray(r.ranking)||!r.ranking.length)return false;
   const scores=d.evidence?.stages?.[0]?.scores?.action;
-  if(d.evidence?.stages?.[0]?.stage!=='action_target'||!(exact(scores,[...JEV_ACTIONS])||exact(scores,JEV_ACTIONS.filter(a=>a!=='request_observation')))||
+  const actionsWithEvidence=JEV_ACTIONS.filter(a=>a!=='agree'||agreeNames===undefined||agreeNames.some(n=>n.figureId===null||ownSlots.includes(n.figureId)));
+  if(d.evidence?.stages?.[0]?.stage!=='action_target'||!(exact(scores,actionsWithEvidence)||exact(scores,actionsWithEvidence.filter(a=>a!=='request_observation')))||
    Object.values(scores).some(n=>typeof n!=='number'||!Number.isFinite(n)||n<0||n>1))return false;
   const revisit=previousAction?.action==='defer'&&ownTarget(previousAction.target)&&sameTarget(previousAction.target,e.target);
   const actions=new Set<string>();let previous:Ranking[number]|null=null;
