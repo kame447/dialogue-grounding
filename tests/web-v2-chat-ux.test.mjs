@@ -113,6 +113,7 @@ async function ui(initial = trial(), handler) {
 const send = (e, text) => { e.utterance.value = text; e.chat.fire("submit"); };
 const messageBodies = (e) => e.history.children.map((node) => node.querySelectorAll("p")[0]?.textContent);
 const messageCalls = (calls) => calls.filter((call) => call.path === "/api/message");
+const STOPPED = "進行を確認できません。実験担当者にお知らせください。";
 const gate = () => { let release; const wait = new Promise((resolve) => { release = resolve; }); return { wait, release }; };
 
 test("opening is the first ordinary AI bubble; send immediately clears, refocuses and appends before acknowledgement", async () => {
@@ -229,13 +230,16 @@ test("three decorative dots and hidden polite status show during thinking, then 
   assert.equal(e["chat-status"].textContent, "");
 });
 
-test("AI errors replace dots with an explicit generation retry without replaying human messages", async () => {
+test("AI errors replace dots with the neutral stop; checking the state resumes the turn without replaying human messages", async () => {
   const state = trial(); state.aiStatus = "thinking";
   const { e, getState, calls, poll } = await ui(state);
   getState().trial.aiStatus = "error"; await poll();
   assert.equal(e["typing-indicator"].hidden, true);
   assert.equal(e["chat-recovery"].hidden, false);
-  assert.equal(e["retry-chat"].textContent, "AIの返答を再試行");
+  assert.equal(e["chat-recovery-message"].textContent, STOPPED);
+  assert.equal(e["chat-status"].textContent, STOPPED);
+  assert.match(html, /<button id="retry-chat" type="button" class="quiet">状態を確認<\/button>/u, "one fixed label for every stop");
+  assert.doesNotMatch(e["chat-recovery"].textContent + e["chat-status"].textContent + e.notice.textContent, /AI|返答|再試行|取得/u);
   assert.equal(calls.filter((call) => call.path === "/api/retry").length, 0);
   e["retry-chat"].fire("click"); await tick();
   assert.equal(calls.filter((call) => call.path === "/api/retry").length, 1);
@@ -250,7 +254,8 @@ test("no-progress watchdog stops animation after one minute; checking state cann
   await advance(60001);
   assert.equal(e["typing-indicator"].hidden, true);
   assert.equal(e["chat-recovery"].hidden, false);
-  assert.equal(e["retry-chat"].textContent, "状態を確認");
+  assert.equal(e["chat-recovery-message"].textContent, STOPPED);
+  assert.match(html, /<button id="retry-chat" type="button" class="quiet">状態を確認<\/button>/u, "one fixed label for every stop");
   e["retry-chat"].fire("click"); await tick();
   assert.equal(e["typing-indicator"].hidden, true);
   assert.equal(calls.filter((call) => call.path === "/api/retry").length, 0);
@@ -259,16 +264,28 @@ test("no-progress watchdog stops animation after one minute; checking state cann
   assert.equal(e["chat-recovery"].hidden, true);
 });
 
-test("a disconnected poll stops dots and offers read-only state recovery", async () => {
+// Issue #161: a short disconnection is not shown; polling recovers it. Only a
+// disconnection that outlasts the watchdog shows the neutral stop.
+test("a short disconnection stays invisible; a lasting one shows the neutral stop and recovery only re-reads", async () => {
   let disconnected = false;
   const state = trial(); state.aiStatus = "thinking";
-  const { e, calls, poll } = await ui(state, ({ path }) => { if (path === "/api/state" && disconnected) throw new Error("offline"); });
+  const { e, calls, poll, advance, getState } = await ui(state, ({ path }) => { if (path === "/api/state" && disconnected) throw new Error("offline"); });
   disconnected = true; await poll();
+  assert.equal(e["typing-indicator"].hidden, false);
+  assert.equal(e["chat-recovery"].hidden, true);
+  disconnected = false; await poll();
+  assert.equal(e["chat-recovery"].hidden, true);
+  disconnected = true; await advance(60001);
   assert.equal(e["typing-indicator"].hidden, true);
   assert.equal(e["chat-recovery"].hidden, false);
+  assert.equal(e["chat-recovery-message"].textContent, STOPPED);
   disconnected = false; e["retry-chat"].fire("click"); await tick();
-  assert.equal(e["typing-indicator"].hidden, false);
+  assert.equal(e["typing-indicator"].hidden, true, "unchanged dots do not restart after the stall");
+  assert.equal(e["chat-recovery"].hidden, false, "no progress has been confirmed yet");
   assert.equal(calls.filter((call) => call.path === "/api/retry").length, 0);
+  getState().trial.events.push({ id: "event-2", speaker: "ai", text: "遅れて届いた返答" });
+  getState().trial.aiStatus = "idle"; await poll();
+  assert.equal(e["chat-recovery"].hidden, true);
 });
 
 test("a missing POST acknowledgement times out to a retained retryable bubble without replay", async () => {
@@ -333,6 +350,8 @@ test("a hung recovery poll is bounded and cannot strand a failed-send retry butt
   await advance(10001);
   assert.equal(e.history.querySelectorAll("button")[0].disabled, false);
   assert.equal(messageCalls(calls).length, 1);
+  await advance(50000);
   assert.equal(e["chat-recovery"].hidden, false);
+  assert.equal(e["chat-recovery-message"].textContent, STOPPED);
   held.release(); await tick();
 });

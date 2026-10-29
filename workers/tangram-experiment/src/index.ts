@@ -22,6 +22,7 @@ import { validateBaseStart, validateBaseAssignmentConfig, BaseAssignmentError } 
 import { readOwner, validateBoundBaseRecord } from "../../../dialogue-model/runtime/v2/base-assignment-data.ts";
 import type { BaseOwnerState, BaseRecord, BaseSession, MakeBaseTask, OwnerRead } from "../../../dialogue-model/runtime/v2/base-assignment.ts";
 import { participantContactHTML } from "../../../dialogue-model/runtime/v2/participant-contact.ts";
+import { PARTICIPANT_STOP_HTML } from "../../../dialogue-model/runtime/v2/participant-stop-page.ts";
 import { ReceptionError, validateReception, createReception, approveReception, cancelReception,
   participantReception, receptionSummary, effectiveBetweenTrials } from '../../../dialogue-model/runtime/v2/reception.ts';
 import { isSubmittedQuestionnaire } from '../../../dialogue-model/runtime/v2/questionnaire-gate.ts';
@@ -788,7 +789,11 @@ export default {
           result = new Response(participantContactHTML(await result.text(), env.PARTICIPANT_CONTACT_TEXT), {status:result.status,headers:h});
         }
       }
-    } catch { return withHeaders(json(url.pathname.startsWith('/api/') ? 409 : 503,{error:'trial_unavailable'})); }
+    } catch {
+      if (url.pathname.startsWith('/api/')) return withHeaders(json(409,{error:'trial_unavailable'}));
+      // A page request has no app to translate a code: it gets the neutral stop page.
+      return withHeaders(new Response(PARTICIPANT_STOP_HTML,{status:503,headers:{'Content-Type':'text/html; charset=utf-8'}}));
+    }
     return withHeaders(result, setCookie);
   },
 } satisfies ExportedHandler<Env>;

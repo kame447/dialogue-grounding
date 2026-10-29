@@ -16,6 +16,7 @@ import { handleAdmin, isAdminPath, ADMIN_HEADERS } from '../../../workers/tangra
 import { summarizeRecord } from '../../../workers/tangram-experiment/src/admin/summary.ts';
 import { summarizeLatency } from '../v2/latency.ts';
 import { participantContactHTML } from '../v2/participant-contact.ts';
+import { PARTICIPANT_STOP_HTML } from '../v2/participant-stop-page.ts';
 const PUBLIC = fileURLToPath(new URL('./', import.meta.url));
 const STATIC: Record<string, [string,string]> = {'/':['index.html','text/html'], '/index.html':['index.html','text/html'], '/app.js':['app.js','text/javascript'], '/style.css':['style.css','text/css']};
 const ID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/u;
@@ -131,16 +132,18 @@ export function createBaseParticipantServer(options: Record<string, any> = {}) {
       if(req.method==='GET'&&Object.hasOwn(STATIC,path)){
         if(path==='/'||path==='/index.html'){
           let e;
+          // A page request has no app to translate a code: it gets the neutral stop page.
+          const stopPage=()=>{res.writeHead(503,{'Content-Type':'text/html; charset=utf-8'});res.end(PARTICIPANT_STOP_HTML);};
           try{
             e=cookie?await known(cookie):null;
             if(!e){
               await privateDirectory(baseStoreRoot);
-              if((await listBaseOwners(baseStoreRoot)).length>=64)return json(503,{error:'session_limit'});
+              if((await listBaseOwners(baseStoreRoot)).length>=64)return stopPage();
               const id=randomBytes(32).toString('hex');await registerBaseOwner(baseStoreRoot,id,now());e=await entry(id);
               res.setHeader('Set-Cookie','naming_session='+id+'; HttpOnly; SameSite=Strict; Path=/');
             }
             await e.store.touch();
-          }catch{return json(503,{error:'trial_unavailable'});}
+          }catch{return stopPage();}
         }
         const [file,type]=STATIC[path];res.writeHead(200,{'Content-Type':type+'; charset=utf-8'});
         const bytes=await readFile(join(PUBLIC,file));res.end(type==='text/html'?participantContactHTML(bytes.toString('utf8'),options.participantContactText):bytes);return;

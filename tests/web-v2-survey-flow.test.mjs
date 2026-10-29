@@ -260,12 +260,13 @@ test("reload restores the unsynced browser draft over the server draft and resen
   assert.equal(local.has("joint-naming-survey:rec-active"), false, "the browser copy is dropped once the server has it");
 });
 
-test("server draft failures keep the answers in the browser and say so", async () => {
+// Issue #161: the participant hears that the answers are kept, not why saving failed.
+test("server draft failures keep the answers in the browser and say so without the cause", async () => {
   const app = await ui({ initial: completed(), server: { failDraft: true } });
   const { e, local } = app;
   choose(e, 0, 5);
   await app.flushSave();
-  assert.match(e["questionnaire-status"].textContent, /このブラウザには保存しました/u);
+  assert.equal(e["questionnaire-status"].textContent, "入力した回答はこの画面に残っています。");
   assert.equal(JSON.parse(local.get("joint-naming-survey:rec-active")).answers.q_one, 5);
   assert.equal(radios(e, 0)[4].checked, true);
 });
@@ -337,3 +338,22 @@ test("an open questionnaire has no participant next/start control or admission r
   assert.equal(app.backend.state.trial.sessionId, "rec-active");
   assert.doesNotMatch(script, /window\.(confirm|alert)|\balert\(|\bconfirm\(/u);
 });
+
+test("i161: questionnaire load and submit failures show no transport or server detail and keep the answers", async () => {
+  const app = await ui({ initial: completed() });
+  const { e, context } = app;
+  choose(e, 0, 5); choose(e, 1, 3);
+  const realFetch = context.fetch;
+  context.fetch = async (path, options) => {
+    if (path.endsWith("/questionnaire") && options?.body && JSON.parse(options.body).submit) throw new TypeError("Failed to fetch");
+    return realFetch(path, options);
+  };
+  e["questionnaire-form"].fire("submit"); await tick();
+  assert.equal(e["questionnaire-status"].textContent, "進行を確認できません。実験担当者にお知らせください。 入力した回答はこの画面に残っています。");
+  assert.equal(radios(e, 0)[4].checked, true);
+  context.fetch = async (path, options) => path.endsWith("/questionnaire") && !options?.body ? { ok: false, status: 502, json: async () => { throw new SyntaxError("Unexpected token <"); } } : realFetch(path, options);
+  context.loadSurvey(true); await tick();
+  assert.equal(e["questionnaire-loading"].textContent, "アンケートを表示できませんでした。上の「アンケート」をもう一度選んでください。");
+  assert.doesNotMatch(e["questionnaire-status"].textContent + e["questionnaire-loading"].textContent + e.notice.textContent, /通信|サーバー|再試行|Failed|Unexpected|エラー/u);
+});
+
