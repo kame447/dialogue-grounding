@@ -69,6 +69,15 @@ export const ACTION_SCOPE_V2 = Object.freeze({
   close: "終わりにしてよいか相談する",
 });
 
+// Technical-trial Jev path only (#141 b): Jev's repair is a local fix of a public discrepancy, not
+// necessarily the AI's own mistake. Both strategies get the same text; the constants above are unchanged.
+const SELF_CORRECTION_V2 = "repairでは自己訂正を明示し、repair以外では取り違えや取り消しを表明しないでください。";
+const TRIAL_GENERATOR_INSTRUCTIONS_V2 = GENERATOR_INSTRUCTIONS_V2.replace(SELF_CORRECTION_V2,
+  "取り違えや取り消しは、行動がrepairであり、かつこれまでの発話にその根拠があるときだけ表明してください。");
+if (TRIAL_GENERATOR_INSTRUCTIONS_V2 === GENERATOR_INSTRUCTIONS_V2) throw new Error("trial generator instructions out of sync");
+const TRIAL_ACTION_SCOPE_V2 = Object.freeze({ ...ACTION_SCOPE_V2,
+  repair: "公開上の食い違いを局所的に確かめ直す・直す。自分の取り違えや決めた名前の訂正を明示するのは、これまでの発話にその根拠があるときだけにする" });
+
 // Luna participant path (public-act consistency), identical across strategies. The constants above stay
 // as they are for the Jev path. Own-image claims need a basis in the judgment or its memo;
 // a name act shows its name in 「」 (a format rule that never certifies the act).
@@ -207,8 +216,8 @@ export function createDialogueV2(options) {
     return createJevTurnRuntime({ client, ownImage, ownAnchors, observer, jevDecision, localGrounding, ...(integrated?{intervention,decisionTimeoutMs}:{}),
       ...(Object.hasOwn(options,'technicalTrial')?{technicalTrial:options.technicalTrial}:{}),
       onJevTurnTrace, onLocalGroundingTrace, maxReobservations,
-      generation: { task: TASK_INSTRUCTIONS_V2, instructions: GENERATOR_INSTRUCTIONS_V2,
-        ...(concise ? { concise: CONCISE_INSTRUCTIONS_V2 } : {}), actionScope: options.technicalTrial ? { ...ACTION_SCOPE_V2, repair: "公開上の食い違いを局所的に確かめ直す・直す。自分の取り違えや決めた名前の訂正のときはそう明示する" } : ACTION_SCOPE_V2,
+      generation: { task: TASK_INSTRUCTIONS_V2, instructions: options.technicalTrial ? TRIAL_GENERATOR_INSTRUCTIONS_V2 : GENERATOR_INSTRUCTIONS_V2,
+        ...(concise ? { concise: CONCISE_INSTRUCTIONS_V2 } : {}), actionScope: options.technicalTrial ? TRIAL_ACTION_SCOPE_V2 : ACTION_SCOPE_V2,
         final: FINAL_INSTRUCTIONS_V2, timeoutMs: GENERATION_TIMEOUT_MS } });
   }
   const dialogueJudge = judge ?? createLunaJudge(client);
