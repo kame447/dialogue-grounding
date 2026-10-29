@@ -42,7 +42,7 @@ export async function startOfflineParticipant(outputDirectory: string, {technica
     if (body.questions) {
       jevPosts++;
       const action = 'action' in body.questions ? jevActions[decisions++] ?? 'accept' : 'accept';
-      const targeted = ['propose_name', 'agree', 'confirm', 'repair'].includes(action);
+      const targeted = ['propose_name', 'agree', 'confirm', 'repair', 'request_observation'].includes(action);
       const answers = Object.fromEntries(Object.entries(body.questions).map(([name, q]: [string, any]) => {
         const choices = Object.keys(q.criteria);
         const chosen = name === 'action' ? action : name === 'target' && targeted ? 'figure_0' :
@@ -55,6 +55,12 @@ export async function startOfflineParticipant(outputDirectory: string, {technica
       return Response.json({model: 'typesafe/jev-1.14-20261014', id: 'gen-synthetic', usage: {cost: 0.00001}, answers});
     }
     lunaPosts++;
+    // A targeted reobservation answers the requested figures only (synthetic, no image reading).
+    if (String(body.messages[0]?.content).startsWith('Jevから指定されたfigureIds')) {
+      const figureIds: string[] = JSON.parse(String(body.messages[1]?.content).match(/\{"figureIds".*$/su)?.[0] ?? '{}').figureIds ?? [];
+      return Response.json({model: modelId, choices: [{message: {content: JSON.stringify({figures: figureIds.map(figureId =>
+        ({figureId, supports: ['合成の根拠'], contradicts: [], unknown: []}))})}}], usage: {prompt_tokens: 3, completion_tokens: 2}});
+    }
     let parsed: any; try { parsed = JSON.parse(body.messages[1]?.content); } catch { /* generation may be prose */ }
     const final = String(body.messages.at(-1)?.content).includes('JSON') && !parsed?.candidateText && !parsed?.publicTurns;
     const text = parsed?.candidateText || parsed?.publicTurns ? '[]' : final ?
