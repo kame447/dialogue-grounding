@@ -42,7 +42,7 @@ const sLike = () => record([
   { turn: 2, issueId: "2:local2", action: "confirm", before: ["s-a", "s-b", "s-c"], after: ["s-a", "s-c", "s-b"], progress: "changed", missing: [] },
   { turn: 4, issueId: "4:local3", action: "repair", before: ["s-a", "s-b", "s-c"], after: ["s-a", "s-c", "s-b"], progress: "changed", missing: [] },
   { turn: 6, issueId: "4:local3", action: "repair", before: ["s-a"], after: ["s-a", "s-c", "s-b"], progress: "changed", missing: [] },
-  { turn: 8, issueId: "4:local3", action: "repair", before: ["s-a"], after: ["s-a"], progress: "changed", missing: [] },
+  { turn: 8, issueId: "4:local3", action: "repair", before: ["s-a"], after: ["s-a", "s-c", "s-b"], progress: "changed", missing: [] },
 ]);
 
 test("a run of repairs on one issue is a same-issue run, not separate local repairs", () => {
@@ -55,7 +55,7 @@ test("a run of repairs on one issue is a same-issue run, not separate local repa
 
 test("progress labels are split by what happened to the candidate set", () => {
   const s = repairRunSummary(sLike())!;
-  assert.deepEqual(s.progress, { changed_narrowed: 0, changed_same_candidates: 3, changed_widened_or_shifted: 1,
+  assert.deepEqual(s.progress, { changed_narrowed: 0, changed_same_candidates: 2, changed_widened_or_shifted: 2,
     unchanged: 0, unknown_missing: 0, unknown: 0 });
   const narrowed = repairRunSummary(record([{ turn: 2, action: "confirm" }, { turn: 4, action: "accept" }],
     [{ turn: 2, issueId: "2:local1", action: "confirm", before: ["s-a", "s-b"], after: ["s-b"], progress: "changed", missing: [] }]))!;

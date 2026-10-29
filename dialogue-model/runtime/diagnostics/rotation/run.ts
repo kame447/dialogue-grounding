@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // RESEARCHER ONLY. Entry point for the rotation discrimination diagnostics.
-//   offline                  geometry tables, no network
+//   offline [--rotation-mode relative_pm90|relative_0]  geometry tables, no network
 //   plan  [--bench ...]      dry-run request count, no network
 //   live  --bench ... --out <dir outside the repository>
 // Live runs go only through the research Worker (createChatClient(loadConfig())).
@@ -13,6 +13,7 @@ import { loadConfig } from "../../config.mjs";
 import { binomialTail, wilson } from "./bench-common.ts";
 import type { ChatClient } from "./bench-common.ts";
 import { FIGURE_IDS, pairwiseInvariant, rankPairs, seedAnalysis } from "./shape-similarity.ts";
+import type { RotationMode } from "./shape-similarity.ts";
 import { planVerbal, runVerbalItem } from "./verbal-bench.ts";
 import type { VerbalItem, VerbalResult } from "./verbal-bench.ts";
 import { planVision, runVisionItem } from "./vision-bench.ts";
@@ -36,10 +37,10 @@ export function planAll(benches: readonly string[]): Item[] {
   return [...(benches.includes("vision") ? planVision() : []), ...(benches.includes("verbal") ? planVerbal() : [])];
 }
 
-export function offlineReport(seeds: readonly number[] = OFFLINE_SEEDS) {
+export function offlineReport(seeds: readonly number[] = OFFLINE_SEEDS, rotationMode: RotationMode = "relative_pm90") {
   const pairs = rankPairs(pairwiseInvariant());
-  const perSeed = seeds.map((seed) => seedAnalysis(seed));
-  return { figures: FIGURE_IDS, pairs, perSeed };
+  const perSeed = seeds.map((seed) => seedAnalysis(seed, 64, rotationMode));
+  return { rotationMode, figures: FIGURE_IDS, pairs, perSeed };
 }
 
 /** Group results by named keys; rows carry chance level and Wilson 95% CI. */
@@ -115,15 +116,18 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
     out: { type: "string" },
     concurrency: { type: "string", default: "3" },
     seeds: { type: "string" },
+    "rotation-mode": { type: "string" },
   } });
   const benches = values.bench!.split(",");
   if (!benches.every((b) => (BENCHES as readonly string[]).includes(b))) throw new Error("Unknown bench");
   if (command === "offline") {
     const seeds = values.seeds ? values.seeds.split(",").map(Number) : OFFLINE_SEEDS;
     if (!seeds.every(Number.isSafeInteger)) throw new Error("--seeds must be integers");
-    console.log(JSON.stringify(offlineReport(seeds), null, 1));
+    console.log(JSON.stringify(offlineReport(seeds, (values["rotation-mode"] ?? "relative_pm90") as RotationMode), null, 1));
     return;
   }
+  // The vision/verbal benches draw their own fixed boards, not scatter-v2 layouts.
+  if (values["rotation-mode"] !== undefined) throw new Error("--rotation-mode applies to offline only");
   const items = planAll(benches);
   const counts = Object.fromEntries(["same_different", "identify", "verbal"].map((k) => [k, items.filter((i) => i.kind === k).length]));
   if (command === "plan") {

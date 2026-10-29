@@ -74,6 +74,10 @@ test("offline report names its rotation mode", async () => {
   const report = JSON.parse(logs.join("\n"));
   assert.equal(report.rotationMode, "relative_0");
   assert.equal(report.perSeed[0].presentedMisranked, 0);
+  // live/plan benches do not use scatter-v2 layouts, so the flag must not be silently ignored there.
+  for (const command of ["plan", "live"]) {
+    await assert.rejects(main([command, "--rotation-mode", "relative_0"]), /offline only/u);
+  }
 });
 
 test("dry-run plan stays within the 300-call budget and is deterministic", () => {
