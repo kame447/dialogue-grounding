@@ -33,6 +33,9 @@ let chatDisconnected = false;
 let checking = false;
 // An explicit resume of stopped server work is in flight (shown as activity).
 let resuming = false;
+// Progress at the moment a failed operation put STOPPED in the top notice; the
+// notice stays until the server confirms that progress has changed.
+let operationStop = null;
 let submissionWarning = "";
 let restoreComposerOnChange = false;
 // Presentation/network safeguards only; these never close a research trial or
@@ -382,14 +385,15 @@ const submissionFailed = () => Boolean(submitted() && !trialCompleted() && !resu
   (current?.finalError || ["scoring_error", "submission_error"].includes(current?.status)));
 const chatWaiting = () => Boolean(current && !submitted() && (aiThinking() || resuming || pending.some((item) => item.status !== "failed")));
 const progressStopped = () => Boolean(!reviewing && (chatStalled || (current && (dialogueFailed() || submissionFailed()))));
-// Where the current screen itself shows the stop: beside the composer or the
-// submission, or the top notice while no trial is shown.
-const stopShownInView = () => progressStopped() && (!current || participantStage() === (submitted() ? "names" : "chat"));
+// Where the trial view itself shows the stop (beside the composer or the
+// submission); anywhere else the top notice shows it.
+const stopShownInView = () => progressStopped() && Boolean(current) && participantStage() === (submitted() ? "names" : "chat");
+const progressSignature = () => JSON.stringify([trialIdentity(current), events().at(-1)?.id, current?.aiStatus,
+  submitted(), current?.status, current?.aiSubmitted, current?.finalError]);
 function renderProgress() {
   const failed = pending.some((item) => item.status === "failed");
   const awaited = Boolean(!reviewing && (current ? !trialCompleted() && (submitted() || chatWaiting() || chatDisconnected) : chatDisconnected));
-  const signature = JSON.stringify([trialIdentity(current), events().at(-1)?.id, current?.aiStatus, resuming,
-    submitted(), current?.status, current?.aiSubmitted, current?.finalError]);
+  const signature = progressSignature() + resuming;
   clearTimeout(typingTimer);
   if (!awaited) { activitySignature = ""; chatStalled = false; }
   else {
@@ -412,9 +416,11 @@ function renderProgress() {
   }
   retrySubmission.hidden = !(submitted() && stopped);
   retrySubmission.disabled = working || checking;
-  if (!current && !reviewing) {
-    if (stopped) $("notice").textContent = STOPPED;
-    else if ($("notice").textContent === STOPPED) $("notice").textContent = "";
+  if (!reviewing) {
+    if (stopped && !stopShownInView()) $("notice").textContent = STOPPED;
+    else if ($("notice").textContent === STOPPED && (stopped || operationStop !== progressSignature())) {
+      $("notice").textContent = ""; operationStop = null;
+    }
   }
 }
 // The one recovery action. It first re-reads the state, which is idempotent.
@@ -586,6 +592,7 @@ async function operate(action) {
     await refreshState();
     // A stop the trial view already shows is not repeated at the top.
     $("notice").textContent = !knownOutcome(error?.code) && stopShownInView() ? "" : participantMessage(error?.code);
+    operationStop = $("notice").textContent === STOPPED ? progressSignature() : null;
   }
   finally { working = false; setControls(); }
 }

@@ -331,3 +331,36 @@ test("i161: 状態を確認 resumes nothing when the fresh state read fails", as
   assert.equal(calls.filter((call) => call.path === "/api/retry").length, 1);
 });
 
+test("i161: a stopped dialogue is shown on the names stage too, and cleared once the reply arrives", async () => {
+  const thinking = trial(); thinking.aiStatus = "thinking";
+  const { e, getState, advance, poll } = await ui(thinking);
+  e["finish-conversation"].fire("click");
+  assert.equal(e["name-stage"].hidden, false);
+  await advance(61000);
+  assert.equal(e.notice.textContent, STOPPED, "the chat-side notice is hidden on this stage");
+  getState().trial.events.push({ id: "event-2", speaker: "ai", text: "遅れて届いた返答" });
+  getState().trial.aiStatus = "idle"; await poll();
+  assert.equal(e.notice.textContent, "");
+});
+
+test("i161: a lost names response leaves no stale stop once the server confirms completion", async () => {
+  const { e, getState, poll, calls } = await ui(trial(), async ({ path, state }) => {
+    if (path !== "/api/names") return;
+    Object.assign(state.trial, { submitted: true, closed: true, status: "submitting", aiSubmitted: false,
+      humanSubmission: Object.fromEntries(state.trial.scene.shapes.map((shape, i) => [shape.id, "名前" + i])) });
+    throw new TypeError("Failed to fetch");
+  });
+  e["finish-conversation"].fire("click");
+  await nameAll(e);
+  e.submission.fire("submit"); e["confirm-submit"].fire("click"); await tick();
+  assert.equal(e.notice.textContent, STOPPED);
+  await poll();
+  assert.equal(e.notice.textContent, STOPPED, "an unchanged state does not count as recovery");
+  Object.assign(getState().trial, { status: "completed", aiSubmitted: true, resultLocked: true });
+  await poll();
+  assert.equal(e.notice.textContent, "");
+  assert.equal(e["submission-status"].textContent, "双方の提出が完了しました。");
+  assert.equal(calls.filter((call) => call.path === "/api/names").length, 1);
+  assert.equal(calls.filter((call) => call.path === "/api/ai-submit").length, 0);
+});
+
