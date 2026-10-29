@@ -73,10 +73,10 @@ export const ACTION_SCOPE_V2 = Object.freeze({
 // necessarily the AI's own mistake. Both strategies get the same text; the constants above are unchanged.
 const SELF_CORRECTION_V2 = "repairでは自己訂正を明示し、repair以外では取り違えや取り消しを表明しないでください。";
 const TRIAL_GENERATOR_INSTRUCTIONS_V2 = GENERATOR_INSTRUCTIONS_V2.replace(SELF_CORRECTION_V2,
-  "取り違えや取り消しは、repairで公開の発話にその根拠があるときだけ表明してください。");
+  "取り違えや取り消しは、行動がrepairであり、かつこれまでの発話にその根拠があるときだけ表明してください。");
 if (TRIAL_GENERATOR_INSTRUCTIONS_V2 === GENERATOR_INSTRUCTIONS_V2) throw new Error("trial generator instructions out of sync");
 const TRIAL_ACTION_SCOPE_V2 = Object.freeze({ ...ACTION_SCOPE_V2,
-  repair: "公開上の食い違いを局所的に確かめ直す・直す。自分の取り違えや決めた名前の訂正だと言うのは、公開の発話でそれが示されたときだけにする" });
+  repair: "公開上の食い違いを局所的に確かめ直す・直す。自分の取り違えや決めた名前の訂正を明示するのは、これまでの発話にその根拠があるときだけにする" });
 
 // Luna participant path (public-act consistency), identical across strategies. The constants above stay
 // as they are for the Jev path. Own-image claims need a basis in the judgment or its memo;

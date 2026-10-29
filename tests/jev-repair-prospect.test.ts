@@ -185,11 +185,11 @@ test('repair generation scope switches only ON, identically for both conditions'
   for (const strategy of ['repair-first', 'bypass-enabled']) for (const enabled of [false, true]) {
     const h = harness({ enabled, strategy, action: 'repair' }); await h.run();
     const generation = JSON.stringify(h.messages.filter(m => m.phase === 'generation'));
-    const expected = '公開上の食い違いを局所的に確かめ直す・直す。自分の取り違えや決めた名前の訂正だと言うのは、公開の発話でそれが示されたときだけにする';
+    const expected = '公開上の食い違いを局所的に確かめ直す・直す。自分の取り違えや決めた名前の訂正を明示するのは、これまでの発話にその根拠があるときだけにする';
     assert.ok(generation.includes(enabled ? expected : ACTION_SCOPE_V2.repair));
     // #141 b: ON also replaces the shared self-correction sentence; OFF keeps it.
     const selfCorrection = 'repairでは自己訂正を明示し、repair以外では取り違えや取り消しを表明しないでください。';
-    const grounded = '取り違えや取り消しは、repairで公開の発話にその根拠があるときだけ表明してください。';
+    const grounded = '取り違えや取り消しは、行動がrepairであり、かつこれまでの発話にその根拠があるときだけ表明してください。';
     assert.equal(generation.includes(selfCorrection), !enabled);
     assert.equal(generation.includes(grounded), enabled);
     assert.ok(GENERATOR_INSTRUCTIONS_V2.includes(selfCorrection));
