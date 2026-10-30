@@ -7,6 +7,12 @@
 // program's own (decision 0002); the split by candidate set and the Jev prospect
 // cross-tab describe them, not ground truth. A changed label is kept even with
 // missingReasons; unknown_missing is unknown progress with non-empty reasons.
+// A sequence is consecutive executed clarifications whatever their issue ids.
+// Within it, each reply is compared with the previous reply by the AI-side
+// extractor's figure targets (narrowed/same/widened_or_shifted), whether the
+// executed feature was re-asked verbatim (a catalog item, so equality is not
+// a semantic judgment), and what Jev originally chose after a same-set reply.
+// None of these is a stagnation verdict or a threshold.
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -24,13 +30,29 @@ type Counts = Record<string, number>;
 const bump = (counts: Counts, key: string) => { counts[key] = (counts[key] ?? 0) + 1; };
 const isPlain = (v: unknown): v is Record<string, any> => Boolean(v) && typeof v === "object" && !Array.isArray(v);
 const emptyProgress = () => ({ changed_narrowed: 0, changed_same_candidates: 0, changed_widened_or_shifted: 0, unchanged: 0, unknown_missing: 0, unknown: 0 });
+// jev-turn's information acts; partnerClaims carry no aspect, so question/progress aspects are not excluded here.
+const INFORMATION_ACTS = new Set(["assert", "agree", "deny", "construe", "name_propose", "name_accept", "name_reject"]);
+type ReplyKind = "narrowed" | "same" | "widened_or_shifted" | "no_reply";
+const replyTargets = (entry: any): Set<string> => new Set((Array.isArray(entry?.partnerClaims) ? entry.partnerClaims : [])
+  .filter((c: any) => isPlain(c) && INFORMATION_ACTS.has(c.act) && Array.isArray(c.targets)).flatMap((c: any) => c.targets));
+function replyKind(previous: Set<string>, current: Set<string>): ReplyKind {
+  if (!previous.size || !current.size) return "no_reply";
+  if (![...current].every(id => previous.has(id))) return "widened_or_shifted";
+  return current.size < previous.size ? "narrowed" : "same";
+}
+const emptyLengths = () => ({ lengths: { "1": 0, "2": 0, "3+": 0 }, longest: 0 });
+const emptySummary = (): RepairRunSummary => ({ clarificationSteps: 0, runs: { ...emptyLengths(), issueSwitches: 0 }, sequences: emptyLengths(),
+  progress: emptyProgress(), prospect: {}, prospectDiscordant: 0, programVsProspect: {}, originalActions: {}, dispositions: {},
+  replyVsPrevious: {}, progressVsReply: {}, repeatedAsk: 0, afterSameReply: {} });
 
 export type RepairRunSummary = {
   clarificationSteps: number;
   runs: { lengths: { "1": number; "2": number; "3+": number }; longest: number; issueSwitches: number };
+  sequences: { lengths: { "1": number; "2": number; "3+": number }; longest: number };
   progress: ReturnType<typeof emptyProgress>;
   prospect: Counts; prospectDiscordant: number; programVsProspect: Counts;
   originalActions: Counts; dispositions: Counts;
+  replyVsPrevious: Counts; progressVsReply: Counts; repeatedAsk: number; afterSameReply: Counts;
 };
 
 export function conditionKey(record: any): string {
@@ -55,24 +77,36 @@ export function repairRunSummary(record: unknown): RepairRunSummary | null {
   // Later turns settle earlier entries, so the final trace's history is authoritative.
   const history: any[] = (traces.at(-1)?.repairHistory ?? []).filter(isPlain);
   const byTurn = new Map(history.map(entry => [entry.turn, entry]));
-  const summary: RepairRunSummary = { clarificationSteps: 0, runs: { lengths: { "1": 0, "2": 0, "3+": 0 }, longest: 0, issueSwitches: 0 },
-    progress: emptyProgress(), prospect: {}, prospectDiscordant: 0, programVsProspect: {}, originalActions: {}, dispositions: {} };
-  const close = (length: number) => {
+  const summary = emptySummary();
+  const closeIn = (into: ReturnType<typeof emptyLengths>, length: number) => {
     if (!length) return;
-    summary.runs.lengths[length >= 3 ? "3+" : String(length) as "1" | "2"]++;
-    summary.runs.longest = Math.max(summary.runs.longest, length);
+    into.lengths[length >= 3 ? "3+" : String(length) as "1" | "2"]++;
+    into.longest = Math.max(into.longest, length);
   };
-  let run = 0, issue: string | null = null;
+  const close = (length: number) => closeIn(summary.runs, length);
+  let run = 0, issue: string | null = null, sequence = 0, previous: { entry: any; feature: unknown } | null = null, afterSame = false;
   for (const trace of traces) {
     const action = trace.executed?.action ?? trace.finalAction?.action;
     const entry = byTurn.get(trace.turnIndex);
+    if (afterSame) bump(summary.afterSameReply, String(trace.intervention?.original?.action ?? action));
+    afterSame = false;
     if (CLARIFY.has(action) && entry) {
       summary.clarificationSteps++;
       const next = typeof entry.issueId === "string" ? entry.issueId : null;
       if (run && next !== null && next === issue) run++;
       else { if (run && issue !== null && next !== null) summary.runs.issueSwitches++; close(run); run = 1; }
       issue = next;
-    } else { close(run); run = 0; issue = null; }
+      sequence++;
+      const feature = trace.executed?.feature ?? null;
+      if (previous) {
+        const kind = replyKind(replyTargets(previous.entry), replyTargets(entry));
+        bump(summary.replyVsPrevious, kind);
+        bump(summary.progressVsReply, `${entry.progress}|${kind}`);
+        if (typeof feature === "string" && feature === previous.feature) summary.repeatedAsk++;
+        afterSame = kind === "same";
+      }
+      previous = { entry, feature };
+    } else { close(run); run = 0; issue = null; closeIn(summary.sequences, sequence); sequence = 0; previous = null; }
     const prospect = trace.repairProspect;
     if (isPlain(prospect) && prospect.status === "ok") {
       const key = `${prospect.prospect}|${prospect.basis}`;
@@ -88,6 +122,7 @@ export function repairRunSummary(record: unknown): RepairRunSummary | null {
     }
   }
   close(run);
+  closeIn(summary.sequences, sequence);
   for (const entry of history) summary.progress[progressKind(entry)]++;
   return summary;
 }
@@ -102,19 +137,24 @@ export function aggregateRepairRuns(records: readonly unknown[]) {
     const s = repairRunSummary(record);
     if (!s) { skipped++; continue; }
     const key = conditionKey(record);
-    const g = groups[key] ??= { records: 0, clarificationSteps: 0, runs: { lengths: { "1": 0, "2": 0, "3+": 0 }, longest: 0, issueSwitches: 0 },
-      progress: emptyProgress(), prospect: {}, prospectDiscordant: 0, programVsProspect: {}, originalActions: {}, dispositions: {} };
+    const g = groups[key] ??= { records: 0, ...emptySummary() };
     g.records++;
     g.clarificationSteps += s.clarificationSteps;
     add(g.runs.lengths, s.runs.lengths);
     g.runs.longest = Math.max(g.runs.longest, s.runs.longest);
     g.runs.issueSwitches += s.runs.issueSwitches;
+    add(g.sequences.lengths, s.sequences.lengths);
+    g.sequences.longest = Math.max(g.sequences.longest, s.sequences.longest);
     add(g.progress, s.progress);
     add(g.prospect, s.prospect);
     g.prospectDiscordant += s.prospectDiscordant;
     add(g.programVsProspect, s.programVsProspect);
     add(g.originalActions, s.originalActions);
     add(g.dispositions, s.dispositions);
+    add(g.replyVsPrevious, s.replyVsPrevious);
+    add(g.progressVsReply, s.progressVsReply);
+    g.repeatedAsk += s.repeatedAsk;
+    add(g.afterSameReply, s.afterSameReply);
   }
   return { records: records.length - skipped, skipped, groups: Object.fromEntries(Object.entries(groups).sort(([a], [b]) => a.localeCompare(b))) };
 }
