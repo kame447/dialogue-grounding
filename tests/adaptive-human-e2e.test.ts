@@ -36,7 +36,9 @@ for(const mode of modes) test(`offline P1 browser ${'strategy' in mode?mode.stra
     const human = JSON.parse(await readFile(join(directory, 'human.private.json'), 'utf8'));
     assert.deepEqual(human.turns.map((v: any) => v.historyLength), [1, 3, 5]);
     assert.match(human.turns[1].output.utterance, /細い部分/);
-    assert.equal(human.turns[2].output.private.understandingChange, 'increased');
+    // The synthetic Luna alternates a question with an unsanctioned name proposal. The generation guard
+    // rejects the proposal (naming_decision) and regenerates, so no name reaches the public or the mock.
+    assert.ok(human.turns.every((v: any) => v.output.private.understandingChange === 'unchanged'));
     for (const surface of surfaces) {
       assert.equal(surface.status, 200);
       for (const key of ['"private"', 'understandingChange', 'repair-first', 'bypass-enabled', '"seed"', 'configId', 'jevLedger', 'jevTraces', 'repairFacts', 'replyVsPrevious', 'technicalTrial', 'synthetic-luna'])
@@ -45,6 +47,8 @@ for(const mode of modes) test(`offline P1 browser ${'strategy' in mode?mode.stra
     for (const file of ['surfaces.private.json', 'human.private.json', 'record.private.json'])
       assert.equal((await stat(join(directory, file))).mode & 0o777, 0o600);
     const record=JSON.parse(await readFile(join(directory,'record.private.json'),'utf8'));
+    assert.ok(record.jevTraces.some((r:any)=>r.generationGuard.violations.includes('naming_decision')&&r.generationGuard.regenerated));
+    assert.ok(!surfaces.some((s:any)=>s.text.includes('合図')));
     if('technicalTrial' in mode){
       assert.deepEqual(record.options.technicalTrial,{version:mode.technicalTrial});
       assert.ok(record.jevTraces.some((r:any)=>r.repairFacts.length>0));
