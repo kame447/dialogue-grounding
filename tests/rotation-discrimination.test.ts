@@ -53,6 +53,33 @@ test("v2 seed analysis: the two screens always differ by a quarter turn", () => 
   }
 });
 
+test("v2 seed analysis follows the researcher-selected rotation mode", () => {
+  assert.deepEqual(seedAnalysis(137, 32, "relative_pm90"), seedAnalysis(137, 32));
+  const aligned = seedAnalysis(137, 32, "relative_0");
+  assert.equal(aligned.rotationMode, "relative_0");
+  for (const row of aligned.figures) {
+    assert.equal(row.relativeRotation, 0);
+    assert.equal(row.presentedRank, 1);
+  }
+  assert.equal(aligned.presentedMisranked, 0);
+  assert.throws(() => seedAnalysis(137, 32, "relative_45" as never), /unknown rotation mode/u);
+});
+
+test("offline report names its rotation mode", async () => {
+  const logs: string[] = [];
+  const original = console.log;
+  console.log = (line: string) => { logs.push(line); };
+  try { await main(["offline", "--seeds", "137", "--rotation-mode", "relative_0"]); }
+  finally { console.log = original; }
+  const report = JSON.parse(logs.join("\n"));
+  assert.equal(report.rotationMode, "relative_0");
+  assert.equal(report.perSeed[0].presentedMisranked, 0);
+  // live/plan benches do not use scatter-v2 layouts, so the flag must not be silently ignored there.
+  for (const command of ["plan", "live"]) {
+    await assert.rejects(main([command, "--rotation-mode", "relative_0"]), /offline only/u);
+  }
+});
+
 test("dry-run plan stays within the 300-call budget and is deterministic", () => {
   const items = planAll(["vision", "verbal"]);
   assert.equal(items.length, 168);

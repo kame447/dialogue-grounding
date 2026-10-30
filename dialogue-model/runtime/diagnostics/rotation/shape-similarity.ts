@@ -6,6 +6,8 @@ import { FIGURES } from "../../stimuli/figures.mjs";
 import { boundarySegments } from "../../stimuli/geometry.mjs";
 import { createLayoutsV2 } from "../../stimuli/scatter-v2.mjs";
 
+export type RotationMode = "relative_pm90" | "relative_0";
+
 export type Point = readonly [number, number];
 export type Figure = { id: string; pieces: ReadonlyArray<{ points: ReadonlyArray<Point> }> };
 
@@ -214,9 +216,10 @@ export type SeedFigureRow = {
 
 /** Per-seed v2 board geometry: for each human-view figure, how its presented
  * silhouette overlaps every AI-view silhouette as presented (orientation-
- * dependent appearance) versus after rotation search (shape identity). */
-export function seedAnalysis(seed: number, size = 64): { seed: number; figures: SeedFigureRow[]; presentedMisranked: number } {
-  const layouts = createLayoutsV2({ seed }) as { human: Array<{ figureId: string; rotation: number }>; ai: Array<{ figureId: string; rotation: number }> };
+ * dependent appearance) versus after rotation search (shape identity).
+ * rotationMode is the researcher-selected mode of scatter-v2 (#142). */
+export function seedAnalysis(seed: number, size = 64, rotationMode: RotationMode = "relative_pm90"): { seed: number; rotationMode: RotationMode; figures: SeedFigureRow[]; presentedMisranked: number } {
+  const layouts = createLayoutsV2({ seed, rotationMode }) as { human: Array<{ figureId: string; rotation: number }>; ai: Array<{ figureId: string; rotation: number }> };
   const aiRot = new Map(layouts.ai.map((p) => [p.figureId, p.rotation]));
   const huRot = new Map(layouts.human.map((p) => [p.figureId, p.rotation]));
   const invariant = new Map<string, number>();
@@ -237,7 +240,7 @@ export function seedAnalysis(seed: number, size = 64): { seed: number; figures: 
       invariantRank: invScores.indexOf(1) + 1,
     };
   });
-  return { seed, figures: rows, presentedMisranked: rows.filter((r) => r.presentedRank > 1).length };
+  return { seed, rotationMode, figures: rows, presentedMisranked: rows.filter((r) => r.presentedRank > 1).length };
 }
 
 /** Appearance margin at a relative rotation: overlap of a figure with itself
