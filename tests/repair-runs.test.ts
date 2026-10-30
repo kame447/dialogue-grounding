@@ -6,13 +6,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { aggregateRepairRuns, conditionKey, main, repairRunSummary } from "../dialogue-model/runtime/diagnostics/repair-runs.ts";
 
-type Step = { turn: number; action: string; original?: string; disposition?: string; prospect?: [string, string, number] };
-type Entry = { turn: number; issueId: string | null; action: string; before: string[]; after: string[]; progress: string; missing?: string[] | null };
+type Step = { turn: number; action: string; original?: string; disposition?: string; prospect?: [string, string, number]; feature?: string };
+type Entry = { turn: number; issueId: string | null; action: string; before: string[]; after: string[]; progress: string; missing?: string[] | null;
+  reply?: { act: string; targets: string[] }[] };
 
 const SECRET_TEXT = "合成の秘密の発話";
 function record(steps: Step[], history: Entry[], extra: Record<string, unknown> = {}) {
   const repairHistory = history.map(h => ({ turn: h.turn, issueId: h.issueId, action: h.action, question: SECRET_TEXT,
-    partnerClaims: [{ id: "x:local1", act: "assert", proposition: SECRET_TEXT, targets: ["s-aaaa"] }],
+    partnerClaims: (h.reply ?? [{ act: "assert", targets: ["s-aaaa"] }]).map((c, i) => ({ id: `x:local${i + 1}`, proposition: SECRET_TEXT, ...c })),
     candidatesBefore: h.before, candidatesAfter: h.after, addedClaimIds: [], removedClaimIds: [], progress: h.progress,
     ...(h.missing === undefined ? {} : { missingReasons: h.missing }) }));
   return {
@@ -20,7 +21,7 @@ function record(steps: Step[], history: Entry[], extra: Record<string, unknown> 
     events: [{ speaker: "human", text: SECRET_TEXT, seq: 2 }],
     jevTraces: steps.map(s => ({
       turnIndex: s.turn,
-      executed: { action: s.action, target: { kind: "single", figureId: "s-aaaa" } },
+      executed: { action: s.action, target: { kind: "single", figureId: "s-aaaa" }, feature: s.feature ?? null },
       intervention: { disposition: s.disposition ?? "adopted", reasonCode: "no_intervention", original: { action: s.original ?? s.action } },
       repairProspect: s.prospect ? { status: "ok", issue: { choice: "issue", turn: s.prospect[2], issueId: "4:local3" }, prospect: s.prospect[0], basis: s.prospect[1], scores: {} } : null,
       publicSpeech: SECRET_TEXT,
@@ -84,6 +85,40 @@ test("strategy divergence is read from Jev's original action and the interventio
   assert.deepEqual(s.dispositions, { rejected: 1, adopted: 1 });
 });
 
+test("each reply is compared with the previous reply in a clarification sequence, across issue ids", () => {
+  const s = repairRunSummary(sLike())!;
+  assert.deepEqual(s.sequences, { lengths: { "1": 0, "2": 0, "3+": 1 }, longest: 4 });
+  // The 10/30 S shape: every reply fits the same figures, yet each is labelled changed.
+  assert.deepEqual(s.replyVsPrevious, { same: 3 });
+  assert.deepEqual(s.progressVsReply, { "changed|same": 3 });
+  assert.deepEqual(s.afterSameReply, { repair: 2, accept: 1 });
+  assert.equal(s.repeatedAsk, 0);
+
+  const ab = ["s-a", "s-b"], info = (targets: string[]) => [{ act: "assert", targets }];
+  const mixed = repairRunSummary(record([
+    { turn: 2, action: "confirm", feature: "f1" },
+    { turn: 4, action: "repair", feature: "f1" },
+    { turn: 6, action: "repair", feature: "f2" },
+    { turn: 8, action: "confirm", feature: "f2" },
+    { turn: 10, action: "move_on", original: "move_on" },
+    { turn: 12, action: "repair", feature: "f2" },
+  ], [
+    { turn: 2, issueId: "2:local1", action: "confirm", before: ab, after: ab, progress: "changed", reply: info(ab) },
+    { turn: 4, issueId: "4:local1", action: "repair", before: ab, after: ["s-a"], progress: "changed", reply: info(["s-a"]) },
+    { turn: 6, issueId: "6:local1", action: "repair", before: ["s-a"], after: ab, progress: "changed", reply: info(ab) },
+    { turn: 8, issueId: "8:local1", action: "confirm", before: ab, after: ab, progress: "unchanged", reply: [{ act: "acknowledge", targets: [] }] },
+    { turn: 12, issueId: "12:local1", action: "repair", before: ["s-a"], after: ["s-a"], progress: "unknown", reply: info(["s-a"]) },
+  ]))!;
+  // Four issue ids, one sequence; the post-move_on repair starts a new one with nothing to compare.
+  assert.deepEqual(mixed.sequences, { lengths: { "1": 1, "2": 0, "3+": 1 }, longest: 4 });
+  assert.equal(mixed.runs.longest, 1);
+  assert.deepEqual(mixed.replyVsPrevious, { narrowed: 1, widened_or_shifted: 1, no_reply: 1 });
+  assert.deepEqual(mixed.progressVsReply, { "changed|narrowed": 1, "changed|widened_or_shifted": 1, "unchanged|no_reply": 1 });
+  // Verbatim re-asks of the catalog feature: 4 after 2, 8 after 6; 12 follows a break.
+  assert.equal(mixed.repeatedAsk, 2);
+  assert.deepEqual(mixed.afterSameReply, {});
+});
+
 test("records without Jev traces are skipped, and groups keep rotation mode and trial version apart", () => {
   assert.equal(repairRunSummary({ strategy: "repair-first", judgments: [] }), null);
   assert.equal(repairRunSummary({ strategy: "other", jevTraces: [] }), null);
@@ -99,6 +134,9 @@ test("records without Jev traces are skipped, and groups keep rotation mode and 
   assert.deepEqual(pm90.runs.lengths, { "1": 2, "2": 0, "3+": 2 });
   assert.equal(pm90.runs.longest, 3);
   assert.equal(pm90.prospectDiscordant, 4);
+  assert.deepEqual(pm90.replyVsPrevious, { same: 6 });
+  assert.deepEqual(pm90.afterSameReply, { repair: 4, accept: 2 });
+  assert.equal(pm90.sequences.longest, 4);
   assert.equal(Object.keys(result.groups).length, 3);
 });
 
