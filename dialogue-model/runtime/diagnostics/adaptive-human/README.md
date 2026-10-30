@@ -44,3 +44,5 @@ offline は `--cdp` の代わりに `--chrome <executable>` でも起動でき�
 - オフラインでは `assignment.json`、`participant-jev.json`、`record.private.json` も保存し、既存 `scan-live.mjs <out> <assignment> <config>` に渡せる。実試行の researcher record は親が既存の管理経路で別途 export する。
 
 scanner の実行と研究上の自然さ・条件差の評価は別の検証。harness 自体の成功を scanner v3 の合格や研究上の成功とはみなさない。
+
+Issue #14 案A2（`adaptive_repair_v3` の repairFacts）の offline 比較と、承認後の実モデル試運転の手順・停止・指標は [RUNBOOK-repair-facts.md](RUNBOOK-repair-facts.md)。

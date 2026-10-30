@@ -2,16 +2,21 @@ import {parseArgs} from 'node:util';
 import {resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {runOffline} from './offline.ts';
+import type {OfflineOptions} from './offline.ts';
 
 export async function main(args = process.argv.slice(2)) {
   const {values} = parseArgs({args, options: {out: {type: 'string'}, chrome: {type: 'string'}, cdp: {type: 'string'}, turns: {type: 'string'},
     mode: {type: 'string', default: 'offline'}, app: {type: 'string'}, 'persona-seed': {type: 'string', default: '20261027'}, 'before-turn-module': {type: 'string'},
     'technical-trial': {type: 'boolean'}, 'trial-version': {type: 'string'}, strategy: {type: 'string'}, 'jev-actions': {type: 'string'}}});
   if (!values.out || !['offline', 'live'].includes(values.mode!)) throw new Error('invalid_adaptive_human_arguments');
+  if (values['trial-version'] !== undefined && !['adaptive_repair_v1', 'adaptive_repair_v2', 'adaptive_repair_v3'].includes(values['trial-version']) ||
+      values.strategy !== undefined && !['repair-first', 'bypass-enabled'].includes(values.strategy)) throw new Error('invalid_adaptive_human_arguments');
+  if (values.mode === 'live' && (values['trial-version'] !== undefined || values['technical-trial'] || values.strategy !== undefined || values['jev-actions'] !== undefined))
+    throw new Error('invalid_adaptive_human_arguments');
   const shared = values.turns === undefined ? {} : {maxTurns: Number(values.turns)};
   if (values.mode === 'offline') return runOffline({directory: resolve(values.out), chrome: values.chrome, cdpOrigin: values.cdp,
-    personaSeed: Number(values['persona-seed']), technicalTrial: values['trial-version'] === 'adaptive_repair_v2' ? 'adaptive_repair_v2' as const : values['technical-trial'] === true,
-    ...(values.strategy === 'bypass-enabled' ? {strategy: 'bypass-enabled' as const} : {}),
+    personaSeed: Number(values['persona-seed']), technicalTrial: values['trial-version'] as OfflineOptions['technicalTrial'] ?? values['technical-trial'] === true,
+    ...(values.strategy ? {strategy: values.strategy as OfflineOptions['strategy']} : {}),
     ...(values['jev-actions'] ? {jevActions: values['jev-actions'].split(',')} : {}), ...shared});
   if (!values.app || !values.cdp) throw new Error('live_requires_app_and_cdp');
   // Only the parent executes this branch, with its existing guard imported before this module.

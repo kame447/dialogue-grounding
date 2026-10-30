@@ -26,6 +26,20 @@ export type RepairHistoryEntry = {
   removedClaimIds: readonly string[];
   /** Descriptive change only; not a stagnation threshold or command to move on. */
   progress: "changed" | "unchanged" | "unknown";
+  missingReasons?: string[];
+  humanRejections?: { segmentId: string; reason: string }[];
+};
+export const REPAIR_REPLY_COMPARISONS = ["same", "narrowed", "widened_or_shifted", "not_comparable"] as const;
+export const REPAIR_LOCAL_GAPS = ["human_local_missing", "human_capacity_dropped", "ai_source_incomplete"] as const;
+/** adaptive_repair_v3 only. Mechanical record facts, never semantic identity,
+ * a progress verdict, a threshold or a command to select an action. */
+export type RepairFact = {
+  turn: number;
+  previousTurn: number | null;
+  replyVsPrevious: typeof REPAIR_REPLY_COMPARISONS[number];
+  sameQuestionAsPrevious: boolean;
+  localGaps: (typeof REPAIR_LOCAL_GAPS[number])[];
+  localRejections: number;
 };
 export type PublicNameCandidate = { name: string; figureId: string | null; sourceTurn: number };
 export type JevPriorAction = { turn: number; action: JevAction; target: JevTarget; name: string | null; feature: string | null };
@@ -48,7 +62,7 @@ export type RepairProspectMaterial =
       scores: { repair_issue: Record<string, number>; prospect: Record<string, number>; basis: Record<string, number> } }
   | { status: "unknown"; issue: null; prospect: null; basis: null; scores: null };
 /** v2 adds the agreement gate: repair issues closed by a later agree are left out of Jev's inference. */
-export type AdaptiveRepairTrial = { version: "adaptive_repair_v1" | "adaptive_repair_v2" };
+export type AdaptiveRepairTrial = { version: "adaptive_repair_v1" | "adaptive_repair_v2" | "adaptive_repair_v3" };
 export type JevDecisionInput = {
   turn: number;
   publicTurns: readonly PublicTurn[];
@@ -67,6 +81,7 @@ export type JevDecisionInput = {
   reobservationAllowed?: boolean;
   humanReferent?: HumanReferentMaterial;
   repairProspect?: RepairProspectMaterial;
+  repairFacts?: RepairFact[];
 };
 export type DecisionInputBudget = {
   maxChars: 20000;

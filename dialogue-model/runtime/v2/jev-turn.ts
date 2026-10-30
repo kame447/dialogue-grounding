@@ -15,7 +15,8 @@ import type { LocalGroundingOptions, LocalOwnImage, LocalOwnAnchor, PublicTurn, 
 import type { ObservationMemo, ObservationObserver, ReobservationResult } from "../observation/contract.ts";
 import { validateObservationMemo, mergeReobservation, observationContextMessages, ObservationError, type ObservationErrorCode,
   OBSERVATION_INITIAL_INSTRUCTIONS, OBSERVATION_TARGETED_INSTRUCTIONS, OBSERVATION_MEMO_VERSION } from "../observation/observe.ts";
-import type { JevDecision, JevDecisionClient, JevDecisionInput, JevObservationRequest, RepairHistoryEntry, HumanReferentEstimate, RepairProspectMaterial, AdaptiveRepairTrial, PublicNameCandidate } from "../decision/contract.ts";
+import type { JevDecision, JevDecisionClient, JevDecisionInput, JevObservationRequest, RepairHistoryEntry, HumanReferentEstimate, RepairProspectMaterial, AdaptiveRepairTrial, PublicNameCandidate, RepairFact } from "../decision/contract.ts";
+import { deriveRepairFacts, validateRepairFacts } from "../decision/repair-facts.ts";
 import { validateJevDecision, validateHumanReferentEstimate, validateRepairProspectEstimate, validateRepairProspectMaterial, unknownRepairProspect, JevDecisionError, JEV_DECISION_INPUT_LIMITS } from "../decision/jev-decision.ts";
 import { prepareLocalGroundingTurn, validateLocalGroundingOptions, findLocalPublicationViolations } from "./local-grounding-turn.ts";
 import type { LocalGroundingResearchRecord, LocalGroundingTrace } from "./local-grounding-turn.ts";
@@ -102,6 +103,7 @@ export type JevTurnTrace = {
   humanReferent: JevHumanReferentTrace | null;
   repairProspect?: RepairProspectMaterial;
   repairGate?: RepairGate;
+  repairFacts?: RepairFact[];
   decisions: JevDecision[];
   intervention: "none_pending_researcher_decision" | InterventionTrace | null;
   schemaVersion?: "jev_turn_trace_v2"; executed?: ExecutedDecision | null;
@@ -120,7 +122,7 @@ export type JevTurnTrace = {
 };
 type CommittedAct = {
   turnIndex: number; lastEventId: string | null; status: "committed"; judgment: Judgment;
-  generationGuard: Guard; jevTurn: { attemptNumber: number; decision: JevDecision; executed?:ExecutedDecision; intervention?:InterventionTrace; humanReferent?: JevHumanReferentTrace; repairProspect?: RepairProspectMaterial; repairGate?: RepairGate; agreeNames?: PublicNameCandidate[] };
+  generationGuard: Guard; jevTurn: { attemptNumber: number; decision: JevDecision; executed?:ExecutedDecision; intervention?:InterventionTrace; humanReferent?: JevHumanReferentTrace; repairProspect?: RepairProspectMaterial; repairGate?: RepairGate; agreeNames?: PublicNameCandidate[]; repairFacts?: RepairFact[] };
   localGrounding: LocalGroundingTrace;
   aiPublic?: { aiSeq: number; textSha256: string };
 };
@@ -294,7 +296,7 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
   const seen=new Set<string>();
   for(const j of s.judgments){
    if(!stateExact(j,['turnIndex','lastEventId','status','judgment','generationGuard','jevTurn','localGrounding',...(Object.hasOwn(j,'aiPublic')?['aiPublic']:[])])||j.status!=='committed'||!Number.isSafeInteger(j.turnIndex)||j.turnIndex<1||!(j.lastEventId===null||typeof j.lastEventId==='string'&&j.lastEventId.length<=160))throw Error();
-   const z=j.jevTurn;if(!stateExact(z,['attemptNumber','decision','executed','intervention',...(Object.hasOwn(z??{},'humanReferent')?['humanReferent']:[]),...(Object.hasOwn(z??{},'repairProspect')?['repairProspect']:[]),...(Object.hasOwn(z??{},'repairGate')?['repairGate']:[]),...(Object.hasOwn(z??{},'agreeNames')?['agreeNames']:[])])||!Number.isSafeInteger(z.attemptNumber)||z.attemptNumber<1)throw Error();
+   const z=j.jevTurn;if(!stateExact(z,['attemptNumber','decision','executed','intervention',...(Object.hasOwn(z??{},'humanReferent')?['humanReferent']:[]),...(Object.hasOwn(z??{},'repairProspect')?['repairProspect']:[]),...(Object.hasOwn(z??{},'repairGate')?['repairGate']:[]),...(Object.hasOwn(z??{},'agreeNames')?['agreeNames']:[]),...(Object.hasOwn(z??{},'repairFacts')?['repairFacts']:[])])||!Number.isSafeInteger(z.attemptNumber)||z.attemptNumber<1)throw Error();
    const hasAgreeNames=Object.hasOwn(z,'agreeNames');
    // Historical evidence retains the candidate catalog, not the original request's public turns.
    if(hasAgreeNames&&(!Array.isArray(z.agreeNames)||z.agreeNames.length>JEV_DECISION_INPUT_LIMITS.publicNames||z.agreeNames.some((n:any)=>!stateExact(n,['name','figureId','sourceTurn'])||
@@ -304,6 +306,7 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
    // v2: closures must be justified by agrees saved before this turn; the prospect was asked over the open entries only.
    if(Object.hasOwn(z,'repairGate')&&!checkRepairGate(z.repairGate,s.repairHistory,s.judgments,j.turnIndex))throw Error();
    if(Object.hasOwn(z,'repairProspect'))validateRepairProspectMaterial(z.repairProspect,Object.hasOwn(z,'repairGate')?inferenceHistory(s.repairHistory,z.repairGate):s.repairHistory,j.turnIndex);
+   if(Object.hasOwn(z,'repairFacts'))validateRepairFacts(z.repairFacts,Object.hasOwn(z,'repairGate')?inferenceHistory(s.repairHistory,z.repairGate):s.repairHistory,j.turnIndex);
    const key=JSON.stringify([j.turnIndex,j.lastEventId,z.attemptNumber]);if(seen.has(key))throw Error();seen.add(key);
    const d=z.decision;if(!stateExact(d,['action','target','name','feature','observe','evidence','decisionKind','calibrated',...(Object.hasOwn(d??{},'detailFigureIds')?['detailFigureIds']:[])])||!['mock','jev_local_test'].includes(d.decisionKind)||d.calibrated!==false)throw Error();
    persistedEvidence(d.evidence);
@@ -356,12 +359,14 @@ function interventionDeadline(ms:number,caller?:AbortSignal){
 
 export function createJevTurnRuntime(options: JevTurnOptions) {
   const adaptive = Object.hasOwn(options,'technicalTrial');
-  if(adaptive){try{stateJson(options.technicalTrial);if(!stateExact(options.technicalTrial,['version'])||!['adaptive_repair_v1','adaptive_repair_v2'].includes(options.technicalTrial!.version))throw Error();}catch{throw new JevTurnError('invalid_state');}}
-  const gated=adaptive&&options.technicalTrial!.version==='adaptive_repair_v2';
+  if(adaptive){try{stateJson(options.technicalTrial);if(!stateExact(options.technicalTrial,['version'])||!['adaptive_repair_v1','adaptive_repair_v2','adaptive_repair_v3'].includes(options.technicalTrial!.version))throw Error();}catch{throw new JevTurnError('invalid_state');}}
+  const gated=adaptive&&['adaptive_repair_v2','adaptive_repair_v3'].includes(options.technicalTrial!.version);
+  const factored=adaptive&&options.technicalTrial!.version==='adaptive_repair_v3';
   const checkProspectMode=(s:JevPrivateState)=>{
     if(!adaptive&&s.judgments?.some(j=>Object.hasOwn(j.jevTurn??{},'repairProspect')||Object.hasOwn(j.jevTurn??{},'agreeNames')||j.jevTurn?.intervention?.rerank?.policyId==='saved_action_scores_open_issue_v1'))throw new JevTurnError('invalid_state');
     // Each version restores only its own records: v2 judgments always carry the gate, older ones never do.
     if(s.judgments?.some(j=>Object.hasOwn(j.jevTurn??{},'repairGate')!==gated))throw new JevTurnError('invalid_state');
+    if(s.judgments?.some(j=>Object.hasOwn(j.jevTurn??{},'repairFacts')!==factored))throw new JevTurnError('invalid_state');
   };
   const integrated=Object.hasOwn(options,'intervention')||Object.hasOwn(options,'decisionTimeoutMs');
   let intervention:InterventionConfig|null=null,decisionTimeoutMs:number|undefined;
@@ -435,7 +440,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
     const attemptNumber = Number.isSafeInteger(requestSeq) && requestSeq! > 0 ? requestSeq! : ordinal;
     const record: JevTurnTrace = { turnIndex: latest.seq, lastEventId, attemptNumber, status: "error", initialObservation: null,
       reobservations: [], local: null, humanReferent: null, decisions: [], intervention: integrated?null:"none_pending_researcher_decision", ...(integrated?{schemaVersion:"jev_turn_trace_v2" as const,executed:null}:{}), finalAction: null,
-      publicSpeech: null, observationMemo: null, repairHistory: [], generationGuard: { violations: [], regenerated: false, fallback: false } };
+      publicSpeech: null, observationMemo: null, repairHistory: [], ...(factored ? { repairFacts: [] } : {}), generationGuard: { violations: [], regenerated: false, fallback: false } };
     let errorCode: JevTurnErrorCode = "invalid_state";
     let observationPhase: ObservationFailure["observationPhase"] | null = null;
     try {
@@ -503,6 +508,10 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
           publicTurns.filter(t => t.text.includes(c.name!)).sort((a, b) => a.turn - b.turn)[0];
         return source ? [{ name: c.name!, figureId: c.targets[0], sourceTurn: source.turn }] : [];
       });
+      if (factored) {
+        baseInput.repairFacts = deriveRepairFacts(repairHistory, state.judgments, baseInput.repairHistory);
+        record.repairFacts = structuredClone(baseInput.repairFacts);
+      }
       // Estimate the HUMAN utterance's referent once, before any action choice.
       // It is private evidence, never a target selection or a graph operation.
       errorCode = "decision_failed";
@@ -623,6 +632,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         ...publicTurns.map(t => ({ role: t.speaker === "human" ? "user" as const : "assistant" as const, content: t.text }))];
       const violations = (text: string, context: Message[]) => [...new Set([...findGuardViolations(text, judgment.action), ...findLocalPublicationViolations(text, context),
         ...(adaptive && /repair[_-]?prospect|repair_issue|candidate_narrowed|candidate_widened|other_figure_benefit|no_open_issue|issue_\d+/iu.test(text.normalize("NFKC").replace(/\s/gu, "")) ? ["internal_field"] : []),
+        ...(factored && /repair_?facts|reply_?vs_?previous|not_comparable|widened_or_shifted|same_?question|local_?gaps/iu.test(text.normalize("NFKC").replace(/\s/gu, "")) ? ["internal_field"] : []),
         ...(/human[_-]?referent/iu.test(text.normalize("NFKC").replace(/\s/gu, "")) ? ["internal_field"] : []),
         ...(aiEnabled && /\d+:pub\d+/u.test(text.normalize("NFKC").replace(/[\s\u200b-\u200d\ufeff]+/gu, "")) ? ["internal_id"] : []),
         ...(aiEnabled ? findLocalPublicationViolations(text, privateInstructions) : [])])];
@@ -656,6 +666,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         observationMemo: memo, repairHistory, judgments: [...state.judgments, { turnIndex: latest.seq, lastEventId, status: "committed", judgment,
           generationGuard: structuredClone(record.generationGuard), jevTurn: { attemptNumber, decision, ...(integrated?{executed:execution,intervention:record.intervention as InterventionTrace}:{}), humanReferent: structuredClone(record.humanReferent), ...(record.repairProspect === undefined ? {} : { repairProspect: structuredClone(record.repairProspect) }),
             ...(adaptive ? { agreeNames: structuredClone(baseInput.agreeNames!) } : {}),
+            ...(factored ? { repairFacts: structuredClone(baseInput.repairFacts!) } : {}),
             ...(gate ? { repairGate: structuredClone(gate) } : {}) },
           localGrounding: { ...prepared.trace, attemptNumber }, ...(aiEnabled ? { aiPublic: { aiSeq: aiPending!.aiSeq, textSha256: aiPending!.textSha256 } } : {}) }],
         ...(aiEnabled ? { aiPublic: state.aiPublic } : {}) };

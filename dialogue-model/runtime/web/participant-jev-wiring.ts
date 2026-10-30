@@ -49,7 +49,7 @@ function jsonData(value: unknown): unknown {
 }
 function checkedTechnicalTrial(value: unknown): AdaptiveRepairTrial {
   const trial = data(value, ['version']);
-  if (trial.version !== 'adaptive_repair_v1' && trial.version !== 'adaptive_repair_v2') throw Error();
+  if (trial.version !== 'adaptive_repair_v1' && trial.version !== 'adaptive_repair_v2' && trial.version !== 'adaptive_repair_v3') throw Error();
   return { version: trial.version };
 }
 function checkedProfile(value: unknown): ResearchTrialProfileV3 {
@@ -102,9 +102,11 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
           restore.jevTraces.some((trace:any)=>trace?.schemaVersion!=='jev_turn_trace_v2'||
             trace.intervention!==null&&!['bypass_acceptance_v1:accept','bypass_acceptance_v1:veto'].includes(trace.intervention?.policy)||
             !technicalTrial&&trace.intervention?.rerank?.policyId==='saved_action_scores_open_issue_v1')) return invalid();
-      // Only adaptive_repair_v2 traces carry the agreement gate; their prospect was asked over the open entries.
-      const v2 = technicalTrial?.version === 'adaptive_repair_v2';
+      // v2/v3 prospects are asked over open entries; v1 retains the full history.
+      const v2 = technicalTrial?.version === 'adaptive_repair_v2' || technicalTrial?.version === 'adaptive_repair_v3';
       if (restore.jevTraces.some((trace:any)=>Object.hasOwn(trace,'repairGate') ? !v2 : v2 && Object.hasOwn(trace,'repairProspect'))) return invalid();
+      const v3 = technicalTrial?.version === 'adaptive_repair_v3';
+      if (restore.jevTraces.some((trace:any)=>Object.hasOwn(trace,'repairFacts') !== v3)) return invalid();
       for (const trace of restore.jevTraces) if (Object.hasOwn(trace,'repairProspect')) {
         if (!technicalTrial) return invalid();
         validateRepairProspectMaterial(trace.repairProspect,Object.hasOwn(trace,'repairGate')?inferenceHistory(trace.repairHistory,trace.repairGate):trace.repairHistory,trace.turnIndex);

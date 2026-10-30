@@ -85,7 +85,7 @@ function checkRepairProspect(value:unknown):void {
 }
 function prepare(input:unknown,original:unknown,intervention:unknown){
  const policy=config(intervention);
- const i=boundary(input,'invalid_input',value=>{const optional=['reobservationAllowed','humanReferent','repairProspect','agreeNames'].filter(k=>!!value&&typeof value==='object'&&Object.hasOwn(value,k));
+ const i=boundary(input,'invalid_input',value=>{const optional=['reobservationAllowed','humanReferent','repairProspect','agreeNames','repairFacts'].filter(k=>!!value&&typeof value==='object'&&Object.hasOwn(value,k));
   if(!exact(value,['turn','publicTurns','ownSlots','observations','issueSummary','priorClaims','repairHistory','previousAction','publicNames',...optional]))fail('invalid_input');
   if(Object.hasOwn(value,'repairProspect'))checkRepairProspect(value.repairProspect);
   buildJevDecisionPayload(value as JevDecisionInput);return structuredClone(value) as BypassAcceptanceInput;});
