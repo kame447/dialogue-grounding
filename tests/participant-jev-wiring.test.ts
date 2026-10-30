@@ -313,7 +313,8 @@ test('J-P1: a real local classification keeps its live adapter evidence in the p
 test('adaptive repair technicalTrial accepts only its exact version and stays absent by default',async t=>{
   const h=await fixture(t);
   assert.ok(!Object.hasOwn(validateParticipantJevConfig(h.config).config,'technicalTrial'));
-  assert.deepEqual(validateParticipantJevConfig({...h.config,technicalTrial:{version:'adaptive_repair_v1'}}).config.technicalTrial,{version:'adaptive_repair_v1'});
+  for(const version of ['adaptive_repair_v1','adaptive_repair_v2','adaptive_repair_v3'])
+    assert.deepEqual(validateParticipantJevConfig({...h.config,technicalTrial:{version}}).config.technicalTrial,{version});
   for(const value of [undefined,null,false,{},'adaptive_repair_v1',{version:'unknown'},{version:'adaptive_repair_v1',extra:true}]){
     assert.throws(()=>validateParticipantJevConfig({...h.config,technicalTrial:value}),{code:'invalid_config'});
   }
@@ -340,13 +341,22 @@ test('adaptive repair wiring exposes estimator only ON and accounts its POST as 
   assert.deepEqual(research.technicalTrial,{version:'adaptive_repair_v1'});
 });
 
-test('adaptive repair option is private, recorded and requires the same config at restore',async t=>{
-  const h=await fixture(t,{technicalTrial:{version:'adaptive_repair_v1'}}),prepared=await prepareParticipantJev(h.options);
+for(const version of ['adaptive_repair_v1','adaptive_repair_v2','adaptive_repair_v3']) test(`${version} is private, recorded and requires the same config at restore`,async t=>{
+  const h=await fixture(t,{technicalTrial:{version}}),prepared=await prepareParticipantJev(h.options);
   const made=await makeTask(prepared),saved=made.record();
-  assert.deepEqual(saved.options.technicalTrial,{version:'adaptive_repair_v1'});
+  made.task.message('この形について話しましょう','restore-version');await made.task.whenIdle();
+  assert.equal(made.task.getState().aiStatus,'idle');
+  const committed=made.record();
+  assert.deepEqual(saved.options.technicalTrial,{version});
   assert.ok(!JSON.stringify(made.task.getState()).includes('technicalTrial'));
-  const restored=await makeTask(prepared,{restore:saved});
+  const sends=h.upstream.counts().posts;
+  const restored=await makeTask(prepared,{restore:committed});
+  assert.equal(h.upstream.counts().posts,sends,'restore sends no POST');
   assert.deepEqual(restored.record().options.technicalTrial,saved.options.technicalTrial);
+  assert.deepEqual(restored.record().jevTraces,committed.jevTraces);
+  assert.deepEqual(restored.record().queueState.privateState,committed.queueState.privateState);
+  assert.equal(Object.hasOwn(committed.jevTraces[0],'repairFacts'),version==='adaptive_repair_v3');
+  assert.equal(Object.hasOwn(committed.queueState.privateState.judgments[0].jevTurn,'repairFacts'),version==='adaptive_repair_v3');
   const options=await prepared.taskOptions({seed,referenceMemory:true,strategy:'repair-first'});
   const {technicalTrial:_trial,...without}=options.jevResearch!;
   await assert.rejects(createNamingTaskV2({seed,referenceMemory:true,strategy:'repair-first',...options,client:options.client!,jevResearch:without,restore:saved,runDir:null,createTrial:()=>trial}),{code:'invalid_options'});
@@ -357,6 +367,36 @@ test('adaptive repair option is private, recorded and requires the same config a
   await assert.rejects(makeTask(prepared,{restore:invalidTrace}),{code:'invalid_options'});
   const invalidSaved=structuredClone(saved);invalidSaved.options.technicalTrial.version='unknown';
   await assert.rejects(makeTask(prepared,{restore:invalidSaved}),{code:'invalid_options'});
+  const mixedTrace=structuredClone(committed);
+  if(version==='adaptive_repair_v3')delete mixedTrace.jevTraces[0].repairFacts;
+  else mixedTrace.jevTraces[0].repairFacts=[];
+  await assert.rejects(makeTask(prepared,{restore:mixedTrace}),{code:'invalid_options'});
+});
+
+test('v2 and v3 participant records cannot be opened under the other version',async t=>{
+  const prepared=[];
+  for(const version of ['adaptive_repair_v2','adaptive_repair_v3'])prepared.push(await prepareParticipantJev((await fixture(t,{technicalTrial:{version}})).options));
+  const records=await Promise.all(prepared.map(p=>makeTask(p)));
+  for(const i of [0,1])await assert.rejects(makeTask(prepared[1-i],{restore:records[i].record()}),{code:'invalid_options'});
+});
+
+for(const strategy of ['repair-first','bypass-enabled']) test(`v3 ${strategy}: exhausted budget survives restore and retry sends no POST`,async t=>{
+  const h=await fixture(t,{technicalTrial:{version:'adaptive_repair_v3'},limits:{...limits,jevPosts:1}});
+  const prepared=await prepareParticipantJev(h.options),made=await makeTask(prepared,{strategy});
+  made.task.message('この形について話しましょう','budget-stop');await made.task.whenIdle();
+  assert.equal(made.task.getState().aiStatus,'error');
+  const saved=made.record();
+  assert.equal(saved.jevLedger.halted,true);
+  assert.equal(saved.jevLedger.haltReason,'jev_http_budget');
+  assert.equal(saved.jevLedger.jevPosts,1);
+  assert.deepEqual(saved.jevTraces[0].repairFacts,[],'failed v3 attempt still has its version marker');
+  const sends=h.upstream.counts().posts;
+  const restored=await makeTask(prepared,{strategy,restore:saved});
+  assert.equal(h.upstream.counts().posts,sends);
+  assert.deepEqual(restored.record().jevLedger.sends,saved.jevLedger.sends);
+  await restored.task.retry();await restored.task.whenIdle();
+  assert.equal(restored.task.getState().aiStatus,'error');
+  assert.equal(h.upstream.counts().posts,sends,'halted retry has no Luna or Jev POST');
 });
 
 test('an OFF restore rejects an open-issue rerank trace',async t=>{

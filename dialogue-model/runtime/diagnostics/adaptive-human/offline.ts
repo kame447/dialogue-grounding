@@ -10,10 +10,14 @@ import {startNamingServer} from '../../web/server.mjs';
 import {driveParticipant} from './harness.ts';
 import {createPersona, mockHuman} from './simulator.ts';
 import type {HumanInput, HumanOutput} from './simulator.ts';
+import type {AdaptiveRepairTrial} from '../../decision/contract.ts';
+import type {BudgetLimits} from '../parity-live/audit.ts';
 
 /** Optional synthetic controls: the technical-trial option, the assignment label and Jev's stage-one actions in call order. */
-export type OfflineOptions = {technicalTrial?: boolean | 'adaptive_repair_v1' | 'adaptive_repair_v2'; strategy?: 'repair-first' | 'bypass-enabled'; jevActions?: readonly string[]};
-export async function startOfflineParticipant(outputDirectory: string, {technicalTrial = false, strategy = 'repair-first', jevActions = []}: OfflineOptions = {}) {
+export type OfflineOptions = {technicalTrial?: boolean | AdaptiveRepairTrial['version']; strategy?: 'repair-first' | 'bypass-enabled';
+  jevActions?: readonly string[]; limits?: Partial<BudgetLimits>; onJevRequest?: (payload: unknown) => void};
+export async function startOfflineParticipant(outputDirectory: string, {technicalTrial = false, strategy = 'repair-first', jevActions = [],
+  limits = {}, onJevRequest}: OfflineOptions = {}) {
   await mkdir(outputDirectory, {recursive: true, mode: 0o700});
   const directory = await realpath(outputDirectory);
   const seed = 919, modelId = 'synthetic-luna-20261020', trial = createTrialV2({seed}), model = modelView(trial);
@@ -29,7 +33,7 @@ export async function startOfflineParticipant(outputDirectory: string, {technica
   const config = {schemaVersion: 'participant_jev_config_v1', lunaRequest: {timeoutMs: null, maxCompletionTokens: 1000},
     timeouts: {observationMs: 20000, localMs: 20000, decisionMs: 20000, lunaAttemptMs: 80000, generationMs: 40000, trialMs: 600000},
     cacheDirectory, modelId, memoSha256: researchHash(hit.memo), seed,
-    limits: {lunaCalls: 100, lunaTokens: 100000, lunaPosts: 100, jevPosts: 100, jevUsd: 0.05},
+    limits: {lunaCalls: 100, lunaTokens: 100000, lunaPosts: 100, jevPosts: 100, jevUsd: 0.05, ...limits},
     ...(technicalTrial ? {technicalTrial: {version: technicalTrial === true ? 'adaptive_repair_v1' : technicalTrial}} : {})};
   const configFile = join(directory, 'participant-jev.json'), baseAssignmentFile = join(directory, 'assignment.json');
   await writeFile(configFile, JSON.stringify(config), {mode: 0o600});
@@ -41,6 +45,7 @@ export async function startOfflineParticipant(outputDirectory: string, {technica
     const body = JSON.parse(String(init.body));
     if (body.questions) {
       jevPosts++;
+      onJevRequest?.(structuredClone(body));
       const action = 'action' in body.questions ? jevActions[decisions++] ?? 'accept' : 'accept';
       const targeted = ['propose_name', 'agree', 'confirm', 'repair', 'request_observation'].includes(action);
       const answers = Object.fromEntries(Object.entries(body.questions).map(([name, q]: [string, any]) => {
@@ -73,13 +78,18 @@ export async function startOfflineParticipant(outputDirectory: string, {technica
     fetchImpl, readKey: async () => 'sk-or-synthetic-only-private-key-0123456789'});
   const baseStoreRoot = join(directory, 'owners'); await mkdir(baseStoreRoot, {mode: 0o700});
   const adminToken = 'synthetic-adaptive-human-admin-0000000000000000';
-  const server = await startNamingServer({port: 0, client: {}, participantJev: prepared, baseAssignmentFile, baseStoreRoot, adminToken,
-    adminLimiter: {async limit() { return {success: true}; }}} as any);
-  const appOrigin = 'http://127.0.0.1:' + (server.address() as {port: number}).port;
-  return {directory, appOrigin, counts: () => ({lunaPosts, jevPosts}),
+  const serverOptions = {port: 0, client: {}, participantJev: prepared, baseAssignmentFile, baseStoreRoot, adminToken,
+    adminLimiter: {async limit() { return {success: true}; }}};
+  let server = await startNamingServer(serverOptions as any);
+  const origin = () => 'http://127.0.0.1:' + (server.address() as {port: number}).port;
+  return {directory, get appOrigin() { return origin(); }, counts: () => ({lunaPosts, jevPosts}),
     close: () => (server as any).drainAndClose() as Promise<void>,
+    async restart() {
+      await (server as any).drainAndClose();
+      server = await startNamingServer(serverOptions as any);
+    },
     async exportRecord(id: string) {
-      const exported = await fetch(appOrigin + '/admin/record/' + id + '.json', {headers: {Authorization: 'Bearer ' + adminToken}});
+      const exported = await fetch(origin() + '/admin/record/' + id + '.json', {headers: {Authorization: 'Bearer ' + adminToken}});
       if (!exported.ok) throw new Error('synthetic_record_export_failed');
       await writeFile(join(directory, 'record.private.json'), await exported.text(), {mode: 0o600});
     }};
