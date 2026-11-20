@@ -514,8 +514,9 @@ function prepareDetail(input: JevDecisionInput, selected: JevActionTarget, rejec
   if (!exact(selected, ["action", "target"]) || !includes(JEV_ACTIONS, selected.action)) fail("invalid_input");
   const base = prepare(input, layout);
   selected = { action: selected.action as JevAction, target: cleanTarget(selected.target, base.slots) };
-  checkSelection(selected, reject);
+  // two_stage_v3 names its own table first, so a refused pair always records action_target_not_allowed; the v1/v2 rules stay behind it as a backstop.
   if (layout === "two_stage_v3" && !legalActionTargetV3(selected.action, selected.target, base)) reject("action_target_not_allowed", "invalid_decision");
+  checkSelection(selected, reject);
   if (!needsDetail(selected.action)) return null;
   const p = prepare(input, layout, selected);
   const scope = targetIds(selected.target);

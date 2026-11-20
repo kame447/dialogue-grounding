@@ -311,3 +311,47 @@ test('restore after a failed generation then a retry never publishes twice', asy
   assert.equal(restored.record().queueState.privateState.judgments.length, 1);
   assert.equal(restored.record().jevTraces.filter((r: any) => r.status === 'committed').length, 1);
 });
+
+// ---- audit/06 F2 (participant entry) and F5 (restore side)
+test('F2: v3 without the adaptive trial offers no agree without a public proposal, saves agreeNames=[] and fails a forced agree at the action stage', async t => {
+  const first = await turn(t, V3, { action: 'accept', target: 'none' }, 'bypass-enabled', '二つのどちらかです', NAMED);
+  assert.deepEqual(first.record.queueState.privateState.judgments[0].jevTurn.agreeNames, []);
+  const stageOne = first.h.upstream.posts.filter((b: any) => b.questions?.action).at(-1);
+  assert.ok(!('agree' in stageOne.questions.action.criteria));
+  assert.ok('propose_name' in stageOne.questions.action.criteria, 'observation-based naming stays available');
+  const forced = await turn(t, V3, { action: 'agree', target: 'figure_2' }, 'bypass-enabled', '二つのどちらかです', NAMED);
+  assert.equal(forced.trace.status, 'error');
+  assert.deepEqual(forced.trace.decisionFailure.evidence.stages.map((s: any) => [s.stage, s.status]), [['action', 'error']]);
+  assert.equal(forced.h.upstream.posts.filter((b: any) => b.questions?.target || b.questions?.name).length, 0);
+  assert.equal(forced.record.queueState.privateState.judgments.length, 0);
+  // A saved v3 state restores under v3 with its agreeNames.
+  await makeTask(first.prepared, { restore: first.record });
+});
+
+test('F5 (restore): a multiple revisit record with an unofferable target score or a damaged repair history is refused; a genuine later record restores', async t => {
+  const first = await turn(t, V3, REVISIT_MULTIPLE);
+  const saved = first.record;
+  await makeTask(first.prepared, { restore: saved });
+  const variants: Array<[string, (r: any) => void]> = [
+    ['target score for none on a revisit', r => { const s = r.queueState.privateState.judgments[0].jevTurn.decision.evidence.stages[1]; s.scores.target.none = 0; }],
+    ['target score for none in the top-level copy only', r => { r.queueState.privateState.judgments[0].jevTurn.decision.evidence.stages[1].scores.target = { none: 0.1, ...r.queueState.privateState.judgments[0].jevTurn.decision.evidence.stages[1].scores.target }; }],
+    ['repair history candidatesAfter exchanged for another set', r => { r.queueState.privateState.repairHistory[0].candidatesAfter = [ids[1], ids[2]]; }],
+    ['repair history candidatesBefore exchanged for another set', r => { r.queueState.privateState.repairHistory[0].candidatesBefore = [ids[1], ids[2]]; }],
+    ['repair history candidates reordered', r => { const h = r.queueState.privateState.repairHistory[0]; h.candidatesBefore = [...h.candidatesBefore].reverse(); h.candidatesAfter = [...h.candidatesAfter].reverse(); }],
+    ['repair history entry removed', r => { r.queueState.privateState.repairHistory = []; }],
+    ['repair history action changed', r => { r.queueState.privateState.repairHistory[0].action = 'confirm'; }],
+  ];
+  for (const [name, mutate] of variants) {
+    const r = structuredClone(saved); mutate(r);
+    await assert.rejects(makeTask(first.prepared, { restore: r }), { code: 'invalid_options' }, name);
+  }
+  // A genuine second turn updates the first entry through the human reply; that record still restores.
+  first.h.upstream.plan.answers = { action: 'accept', target: 'none' };
+  first.made.task.message('もう一度見てみます', 'turn-2'); await first.made.task.whenIdle();
+  const later = first.made.record();
+  assert.equal(later.jevTraces.length, 2);
+  await makeTask(first.prepared, { restore: later });
+  // Exchanging the set of the old entry is still caught after the history moved on.
+  const tampered = structuredClone(later); tampered.queueState.privateState.repairHistory[0].candidatesBefore = [ids[1], ids[2]];
+  await assert.rejects(makeTask(first.prepared, { restore: tampered }), { code: 'invalid_options' });
+});
