@@ -44,15 +44,17 @@ async function runJudge({ version = 2, strategy = "repair-first" as Strategy, me
 // Pinned against origin/main 6377de9 (two invalid replies: first request + retry).
 // Update only when the DEFAULT prompt is intentionally changed elsewhere. v2 re-pinned for the Luna
 // public-act change: judge instructions (source/agree paragraphs) and, with memory, the v2-only name-intent message; v1 unchanged.
+// v2 re-pinned for #172: the only change is the partner-position sentence in TASK_INSTRUCTIONS_V2 (putting the previous
+// task text back into these requests reproduces each previous v2 digest); v1 unchanged.
 const DEFAULT_DIGESTS: Record<string, string> = {
   "v1:repair-first:false": "3242732e6fbcaa6e8bf3cec1a4c933a45a2414a460133681c79223fd610f1f21",
   "v1:repair-first:true": "163310d0bf8c4f6188bf9dd4749b37eb387c82dd4c02f846764c1fdf7052dc21",
   "v1:bypass-enabled:false": "fc441bbe543472aa57303455cb557b24cc069afd457b77dcfb719e602f835024",
   "v1:bypass-enabled:true": "bbeb4824b2f286e72b2aad4ebc2bfd1a9201032efc66f9679733ad2c49e0091f",
-  "v2:repair-first:false": "eafd464c688a2be7b9d80499ad2a068b37f34a19799ea354f5e2817c9113a969",
-  "v2:repair-first:true": "bea9a6e47c18f729fef52f7bb21ea1e5d3586c54a0d991f721d63cc8b63086c5",
-  "v2:bypass-enabled:false": "812ca4b4b4c629dc84e300ab1d8543ad8db1cf04b7c9b3ae5f4c39332ebe430c",
-  "v2:bypass-enabled:true": "f2de102783034c0863dabae8358d485d2a288b7d1bdb6ffaa0dafbb29ceb281d",
+  "v2:repair-first:false": "9934dde7aa0a13181070ccd369567c6570c7dcf4854e84d001eff62d1b62ea1a",
+  "v2:repair-first:true": "c7628033c844290398e071f810035196d4c1dca24f47a3ca107d861f880accde",
+  "v2:bypass-enabled:false": "df1dca359bef3a3ac1e76abb0fd558be98c75a310261a131886c2d54b71ed8a1",
+  "v2:bypass-enabled:true": "02cbcadd59c1eb92975d354d1537a6bf3bf504ddb30d7073950b8aac37e062cf",
 };
 
 test("default v1 and v2 judge requests, including the retry, stay byte-identical", async () => {
