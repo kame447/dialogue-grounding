@@ -33,7 +33,7 @@ const TARGETS = (action: string) => ['accept', 'defer', 'move_on', 'close'].incl
 const answer = (choice: string, keys: string[], override: Record<string, number> = {}) => ({ type: 'choice', choice,
   probabilities: Object.fromEntries(keys.map(k => [k, override[k] ?? (k === choice ? 1 : 0)])) });
 const jevResponse = (id: string, answers: Record<string, unknown>) => ({ model: 'typesafe/jev-1.14', id: 'gen-s4v3-' + id, usage: { cost: 0 }, answers });
-const stageOne = (id: string, action: string, override: Record<string, number> = {}, keys = ACTIONS) => jevResponse(id + '-action', { action: answer(action, keys, override) });
+const stageOne = (id: string, action: string, override: Record<string, number> = {}, keys = ACTIONS.filter(a => a !== 'agree')) => jevResponse(id + '-action', { action: answer(action, keys, override) });
 const stageTwo = (id: string, action: string, target: string) => jevResponse(id + '-target', { target: answer(target, TARGETS(action)) });
 
 async function recordedRun(profile: any, tape: any, label: 'repair-first' | 'bypass-enabled', learn?: (input: any) => any) {
@@ -130,7 +130,7 @@ test('v3 detail actions: confirm / single (feature) and propose_name / single (n
 });
 
 test('v3 reobservation: request_observation / multiple -> target -> observe detail -> observation_targeted -> accept passes all checks', async () => {
-  const keysAfter = ACTIONS.filter(a => a !== 'request_observation');
+  const keysAfter = ACTIONS.filter(a => a !== 'request_observation' && a !== 'agree');
   const n = await records('two_stage_v3', [stageOne('o', 'request_observation'), stageTwo('o', 'request_observation', 'figures_0_2'),
     jevResponse('o-detail', { observe_targets: answer('subset_0', subsets(2)), observe_aspect: answer('orientation', ASPECTS) }),
     stageOne('o2', 'accept', {}, keysAfter), stageTwo('o2', 'accept', 'none')], { reobservation: true });
@@ -184,7 +184,7 @@ test('v3 tampering: swapped candidate set, dropped stage, label outside the offe
 test('v3 request tampering: an action offered without a legal target, or a reduced target question, fails the replay', async () => {
   const n = await normalV3();
   for (const [name, edit] of [
-    ['agree removed from the action question', (q: any) => { delete q.action.criteria.agree; }],
+    ['agree offered without any saved public evidence', (q: any) => { q.action.criteria.agree = 'x'; }],
     ['target question gains a label', (q: any) => { q.target.criteria.extra = 'x'; }],
     ['target question loses none', (q: any) => { delete q.target.criteria.none; }],
   ] as Array<[string, (q: any) => void]>) {
