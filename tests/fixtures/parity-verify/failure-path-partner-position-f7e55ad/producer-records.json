@@ -158,7 +158,7 @@
       }
     },
     "run": {
-      "runId": "parity-05251a9a-9511-4685-b03d-5ab7eced8632",
+      "runId": "parity-f051d39d-4d3f-45ec-9ac3-93c971f03d38",
       "plannedMappingVersion": 1,
       "manifest": {
         "id": "synthetic-wiring",
@@ -230,7 +230,7 @@
       "promptSources": {
         "scheme": "complete_instruction_source_sha256",
         "files": {
-          "v2/dialogue-v2.mjs": "bae8edc3a45524716ad41e69e9bf6050dbcef11ec57db489a269a891a04f4c7d",
+          "v2/dialogue-v2.mjs": "7740298e05d1f4de4d5e4b34a3519e61772cc8f44c0a5ae091ad43201ba09552",
           "v2/jev-turn.ts": "1e21cb640669562a7ac6aa2fae414c58b41561930235cb5b0639fd3c8bc6a91a",
           "v2/generation-guard.ts": "f1641117798e1538a6db4ebb97e8ac33a2da14e926c405f4a7c7f6c8b751ad46",
           "judgment/instructions.mjs": "9d686330aa34a516a1e2d95df94d0b030e7308a6463757861b9c94e561e5197a",
@@ -262,7 +262,7 @@
       "coverage": "not_measured_by_wiring_harness"
     },
     "summary": {
-      "runId": "parity-05251a9a-9511-4685-b03d-5ab7eced8632",
+      "runId": "parity-f051d39d-4d3f-45ec-9ac3-93c971f03d38",
       "manifestSha256": "bebb4da64e2dba993696edc8cb515c0f2ed1017ff8b0367bc50249dff33dac48",
       "execution": "mock",
       "profile": {
@@ -479,7 +479,7 @@
     },
     "evidence": {
       "version": 1,
-      "runId": "parity-05251a9a-9511-4685-b03d-5ab7eced8632",
+      "runId": "parity-f051d39d-4d3f-45ec-9ac3-93c971f03d38",
       "normalizedEnvelopeFields": [
         "label",
         "runId",
@@ -667,7 +667,7 @@
       }
     },
     "run": {
-      "runId": "parity-798fd4a9-d3c2-431b-9330-e3d243a2b817",
+      "runId": "parity-f51b2a23-1ffe-444b-b51e-4614a03f281a",
       "plannedMappingVersion": 1,
       "manifest": {
         "id": "synthetic-wiring",
@@ -739,7 +739,7 @@
       "promptSources": {
         "scheme": "complete_instruction_source_sha256",
         "files": {
-          "v2/dialogue-v2.mjs": "bae8edc3a45524716ad41e69e9bf6050dbcef11ec57db489a269a891a04f4c7d",
+          "v2/dialogue-v2.mjs": "7740298e05d1f4de4d5e4b34a3519e61772cc8f44c0a5ae091ad43201ba09552",
           "v2/jev-turn.ts": "1e21cb640669562a7ac6aa2fae414c58b41561930235cb5b0639fd3c8bc6a91a",
           "v2/generation-guard.ts": "f1641117798e1538a6db4ebb97e8ac33a2da14e926c405f4a7c7f6c8b751ad46",
           "judgment/instructions.mjs": "9d686330aa34a516a1e2d95df94d0b030e7308a6463757861b9c94e561e5197a",
@@ -771,7 +771,7 @@
       "coverage": "not_measured_by_wiring_harness"
     },
     "summary": {
-      "runId": "parity-798fd4a9-d3c2-431b-9330-e3d243a2b817",
+      "runId": "parity-f51b2a23-1ffe-444b-b51e-4614a03f281a",
       "manifestSha256": "bebb4da64e2dba993696edc8cb515c0f2ed1017ff8b0367bc50249dff33dac48",
       "execution": "mock",
       "profile": {
@@ -960,7 +960,7 @@
     },
     "evidence": {
       "version": 1,
-      "runId": "parity-798fd4a9-d3c2-431b-9330-e3d243a2b817",
+      "runId": "parity-f51b2a23-1ffe-444b-b51e-4614a03f281a",
       "normalizedEnvelopeFields": [
         "label",
         "runId",
@@ -1123,7 +1123,7 @@
       }
     },
     "run": {
-      "runId": "parity-dcadec67-9234-48e8-9a2c-9300ab95ca4f",
+      "runId": "parity-1c107c48-dc75-42c1-9d45-93cd4bcdb08b",
       "plannedMappingVersion": 1,
       "manifest": {
         "id": "synthetic-wiring",
@@ -1195,7 +1195,7 @@
       "promptSources": {
         "scheme": "complete_instruction_source_sha256",
         "files": {
-          "v2/dialogue-v2.mjs": "bae8edc3a45524716ad41e69e9bf6050dbcef11ec57db489a269a891a04f4c7d",
+          "v2/dialogue-v2.mjs": "7740298e05d1f4de4d5e4b34a3519e61772cc8f44c0a5ae091ad43201ba09552",
           "v2/jev-turn.ts": "1e21cb640669562a7ac6aa2fae414c58b41561930235cb5b0639fd3c8bc6a91a",
           "v2/generation-guard.ts": "f1641117798e1538a6db4ebb97e8ac33a2da14e926c405f4a7c7f6c8b751ad46",
           "judgment/instructions.mjs": "9d686330aa34a516a1e2d95df94d0b030e7308a6463757861b9c94e561e5197a",
@@ -1227,7 +1227,7 @@
       "coverage": "not_measured_by_wiring_harness"
     },
     "summary": {
-      "runId": "parity-dcadec67-9234-48e8-9a2c-9300ab95ca4f",
+      "runId": "parity-1c107c48-dc75-42c1-9d45-93cd4bcdb08b",
       "manifestSha256": "bebb4da64e2dba993696edc8cb515c0f2ed1017ff8b0367bc50249dff33dac48",
       "execution": "mock",
       "profile": {
@@ -1436,7 +1436,7 @@
     },
     "evidence": {
       "version": 1,
-      "runId": "parity-dcadec67-9234-48e8-9a2c-9300ab95ca4f",
+      "runId": "parity-1c107c48-dc75-42c1-9d45-93cd4bcdb08b",
       "normalizedEnvelopeFields": [
         "label",
         "runId",
@@ -1618,8 +1618,8 @@
             "phase": "generation",
             "turn": 1,
             "provider": "luna",
-            "requestSha256": "fb47a7f84f8fc6991600cff582925b8cbeff7009a37118fcb008467d78548428",
-            "instructionSha256": "cd6d4b7419322b91d804b43f9c61e7fd7ada2fd9effca30ec6c38bd38187fe32",
+            "requestSha256": "e3acb6ec8b13b79eefc9fa3be643e016c4b456b1c41b31ca84dae395491fa9a5",
+            "instructionSha256": "000b491a33ba401a6cae09b766a22e3963013982d981986cab59fa64bd088f9d",
             "requestedModel": "synthetic-luna",
             "model": "synthetic-luna",
             "status": "ok",
@@ -1629,8 +1629,8 @@
             "outputTokens": 2,
             "imageCount": 0,
             "latencyMs": 0,
-            "expectedHttpRequestSha256": "25b6846943189f5afc36b650335aa38d2bb26c6edc63893f7a577dd6d4a3cff5",
-            "httpRequestSha256": "25b6846943189f5afc36b650335aa38d2bb26c6edc63893f7a577dd6d4a3cff5"
+            "expectedHttpRequestSha256": "ae93ff9b7eaaecd3ce8ef8093538d952f055e8b2dba2eafa00cb12bf61f47c78",
+            "httpRequestSha256": "ae93ff9b7eaaecd3ce8ef8093538d952f055e8b2dba2eafa00cb12bf61f47c78"
           },
           {
             "id": 6,
@@ -2843,8 +2843,8 @@
                     "phase": "generation",
                     "turn": 1,
                     "provider": "luna",
-                    "requestSha256": "fb47a7f84f8fc6991600cff582925b8cbeff7009a37118fcb008467d78548428",
-                    "instructionSha256": "cd6d4b7419322b91d804b43f9c61e7fd7ada2fd9effca30ec6c38bd38187fe32",
+                    "requestSha256": "e3acb6ec8b13b79eefc9fa3be643e016c4b456b1c41b31ca84dae395491fa9a5",
+                    "instructionSha256": "000b491a33ba401a6cae09b766a22e3963013982d981986cab59fa64bd088f9d",
                     "requestedModel": "synthetic-luna",
                     "model": "synthetic-luna",
                     "status": "ok",
@@ -2854,8 +2854,8 @@
                     "outputTokens": 2,
                     "imageCount": 0,
                     "latencyMs": 0,
-                    "expectedHttpRequestSha256": "25b6846943189f5afc36b650335aa38d2bb26c6edc63893f7a577dd6d4a3cff5",
-                    "httpRequestSha256": "25b6846943189f5afc36b650335aa38d2bb26c6edc63893f7a577dd6d4a3cff5"
+                    "expectedHttpRequestSha256": "ae93ff9b7eaaecd3ce8ef8093538d952f055e8b2dba2eafa00cb12bf61f47c78",
+                    "httpRequestSha256": "ae93ff9b7eaaecd3ce8ef8093538d952f055e8b2dba2eafa00cb12bf61f47c78"
                   }
                 ],
                 "ai_extraction": [
@@ -3218,7 +3218,7 @@
             "callId": 5,
             "sendId": 5,
             "hashScheme": "canonical_json_sha256",
-            "requestSha256": "25b6846943189f5afc36b650335aa38d2bb26c6edc63893f7a577dd6d4a3cff5",
+            "requestSha256": "ae93ff9b7eaaecd3ce8ef8093538d952f055e8b2dba2eafa00cb12bf61f47c78",
             "status": 200,
             "outcome": "returned"
           },
@@ -4244,9 +4244,9 @@
                 {
                   "provider": "luna",
                   "phase": "generation",
-                  "requestSha256": "25b6846943189f5afc36b650335aa38d2bb26c6edc63893f7a577dd6d4a3cff5",
+                  "requestSha256": "ae93ff9b7eaaecd3ce8ef8093538d952f055e8b2dba2eafa00cb12bf61f47c78",
                   "actualSendMeasured": true,
-                  "messagesSha256": "fb47a7f84f8fc6991600cff582925b8cbeff7009a37118fcb008467d78548428",
+                  "messagesSha256": "e3acb6ec8b13b79eefc9fa3be643e016c4b456b1c41b31ca84dae395491fa9a5",
                   "sendIds": [
                     5
                   ]
@@ -4294,7 +4294,7 @@
                 {
                   "provider": "luna",
                   "phase": "generation",
-                  "requestSha256": "25b6846943189f5afc36b650335aa38d2bb26c6edc63893f7a577dd6d4a3cff5"
+                  "requestSha256": "ae93ff9b7eaaecd3ce8ef8093538d952f055e8b2dba2eafa00cb12bf61f47c78"
                 },
                 {
                   "provider": "luna",
@@ -4775,7 +4775,7 @@
           "image": "79e8e5b3c71603c231cc7dd61a61d77a71a8472a6823660e0a4247076b9473d6",
           "anchors": "50cc62ed3696b77d7b8680ce480969c7e3c2c43ef25e39e09a5091a9d6c25ffe",
           "memo": "013a427dabca9fa943a7ca300e201f39fbfd775adf2f8fe8a89b6ae06642c0d4",
-          "prompts": "75c0234c5edf417bbce6d347748bc01f0b69df8b8c2a64cd485248d725cf7ea1",
+          "prompts": "a36180c34628973a1d35303a8b14a4466fa72fa988a5a87ff30738ea6471e5a4",
           "profile": "926ff7b7fb7c75a7003b97d0a68358a955c38427fc4743baf4284e769af54a58",
           "timeouts": "38488f1b33bb5138212c215dc6d08e51c03142b94ba34b628cd6f7754c61d957",
           "requestedModels": "65deee855372dd825641934f04ad83b312c29515679fb5e7794267b076a454cb",
@@ -5408,7 +5408,7 @@
       "stage": "trial_loop"
     },
     "run": {
-      "runId": "parity-05541855-dffa-4b65-a06d-9faf5302e6f4",
+      "runId": "parity-caef4c50-fd35-4c5d-93fd-c9a0bf447993",
       "plannedMappingVersion": 1,
       "manifest": {
         "id": "synthetic-wiring",
@@ -5480,7 +5480,7 @@
       "promptSources": {
         "scheme": "complete_instruction_source_sha256",
         "files": {
-          "v2/dialogue-v2.mjs": "bae8edc3a45524716ad41e69e9bf6050dbcef11ec57db489a269a891a04f4c7d",
+          "v2/dialogue-v2.mjs": "7740298e05d1f4de4d5e4b34a3519e61772cc8f44c0a5ae091ad43201ba09552",
           "v2/jev-turn.ts": "1e21cb640669562a7ac6aa2fae414c58b41561930235cb5b0639fd3c8bc6a91a",
           "v2/generation-guard.ts": "f1641117798e1538a6db4ebb97e8ac33a2da14e926c405f4a7c7f6c8b751ad46",
           "judgment/instructions.mjs": "9d686330aa34a516a1e2d95df94d0b030e7308a6463757861b9c94e561e5197a",
@@ -5512,7 +5512,7 @@
       "coverage": "not_measured_by_wiring_harness"
     },
     "summary": {
-      "runId": "parity-05541855-dffa-4b65-a06d-9faf5302e6f4",
+      "runId": "parity-caef4c50-fd35-4c5d-93fd-c9a0bf447993",
       "manifestSha256": "bebb4da64e2dba993696edc8cb515c0f2ed1017ff8b0367bc50249dff33dac48",
       "execution": "mock",
       "profile": {
@@ -6104,7 +6104,7 @@
     },
     "evidence": {
       "version": 1,
-      "runId": "parity-05541855-dffa-4b65-a06d-9faf5302e6f4",
+      "runId": "parity-caef4c50-fd35-4c5d-93fd-c9a0bf447993",
       "normalizedEnvelopeFields": [
         "label",
         "runId",
@@ -6787,11 +6787,11 @@
                     },
                     {
                       "role": "system",
-                      "content": "【公開発話の生成】与えられた判断を、相手に向けた自然な日本語のチャット発話にしてください。\nまず相手の発話に短く応じ、必要なら全体の印象・身近なものへの見立てを1つ伝えてください。形の分析は、共通教示の分析トリガー（相手が迷い・曖昧さ・食い違いを表明したか特徴・詳細を求めた、公開対話の矛盾が未解決、または名前を確定しようとする時点で対象を1つに絞れず誤った合意の実害がある）に基づく判断に discriminatingFeature があるときだけにし、その場合も特徴は1つに絞って相手の反応を待ってください。内部に候補が複数残るだけでは分析を始めないでください。\n挨拶や「どれからにしますか」のような漠然とした開始には、短く受け止めて相手に選んでもらうか、簡単な見立てを1つだけ出してください。先回りして詳しい形の説明や名前の一括提案をしないでください。\n1回は1〜2文、親しみやすいです・ます調で返してください。講義調、長い前置き、特徴の列挙は避けてください。短さ自体は目的ではありません。\n「合意」「候補」「案」「受け取りました」のような手続きを説明する言葉は避け、普段のチャットのように言ってください。合意した後に同じ特徴の説明を繰り返さないでください。\n指定されたactionの対話機能を実現し、自分で別のactionに置き換えないでください。followUpがあれば主actionを先に、両方を全体で1〜2文にまとめてください。\npropose_nameやagreeにdiscriminatingFeatureがあるときは、質問にせず、その特徴に短く触れて自分がどの図形のことと理解したかを相手に示してください。discriminatingFeatureがないときは、相手の見立てを短く受け止め、自分の画像の全体の見立てと結び付けて理解を表してください。必要なら自分の見立てを1つ返せます。判断にない尖り・四角・くぼみなどの形の数や特徴を作って補わないでください。propose_nameでは相手が出した名前を候補として受けるだけにし、合意は表明しないでください。\nconfirmは相手への短い確認、propose_nameは命名の提案として表現し、どちらも合意を表明しないでください。合意を表明できるのはagreeのときだけです。repairでは自己訂正を明示し、repair以外では取り違えや取り消しを表明しないでください。defer/revisitは保留・再訪であることが分かるように伝えてください。acceptでは受け止めるだけにしてください。\ntargetSlotや内部参照ID、画像内の座標・範囲は自分だけの作業メモです。相手に言わず、位置での指定も求めないでください。相手の画面では配置も向きも異なります。\n自分の画面の向きに依存する上下左右・右向き・上端・下端などの語で形を説明しないでください。特徴を伝えるときは、回転しても変わらない尖りの数や大小・くぼみ・細長さ・四角の有無・部分同士のつながりから選んでください。\n公開履歴と矛盾する説明、同じ確認の言い換え反復、画像にない特徴の追加をしないでください。判断JSON、作業メモ、方略の説明、思考過程は出力せず、公開する発話だけを返してください。"
+                      "content": "【公開発話の生成】与えられた判断を、相手に向けた自然な日本語のチャット発話にしてください。\nまず相手の発話に短く応じ、必要なら全体の印象・身近なものへの見立てを1つ伝えてください。形の分析は、共通教示の分析トリガー（相手が迷い・曖昧さ・食い違いを表明したか特徴・詳細を求めた、公開対話の矛盾が未解決、または名前を確定しようとする時点で対象を1つに絞れず誤った合意の実害がある）に基づく判断に discriminatingFeature があるときだけにし、その場合も特徴は1つに絞って相手の反応を待ってください。内部に候補が複数残るだけでは分析を始めないでください。\n挨拶や「どれからにしますか」のような漠然とした開始には、短く受け止めて相手に選んでもらうか、簡単な見立てを1つだけ出してください。先回りして詳しい形の説明や名前の一括提案をしないでください。\n1回は1〜2文、親しみやすいです・ます調で返してください。講義調、長い前置き、特徴の列挙は避けてください。短さ自体は目的ではありません。\n「合意」「候補」「案」「受け取りました」のような手続きを説明する言葉は避け、普段のチャットのように言ってください。合意した後に同じ特徴の説明を繰り返さないでください。\n指定されたactionの対話機能を実現し、自分で別のactionに置き換えないでください。followUpがあれば主actionを先に、両方を全体で1〜2文にまとめてください。\npropose_nameやagreeにdiscriminatingFeatureがあるときは、質問にせず、その特徴に短く触れて自分がどの図形のことと理解したかを相手に示してください。discriminatingFeatureがないときは、相手の見立てを短く受け止め、自分の画像の全体の見立てと結び付けて理解を表してください。必要なら自分の見立てを1つ返せます。判断にない尖り・四角・くぼみなどの形の数や特徴を作って補わないでください。propose_nameでは相手が出した名前を候補として受けるだけにし、合意は表明しないでください。\nconfirmは相手への短い確認、propose_nameは命名の提案として表現し、どちらも合意を表明しないでください。合意を表明できるのはagreeのときだけです。repairでは自己訂正を明示し、repair以外では取り違えや取り消しを表明しないでください。defer/revisitは保留・再訪であることが分かるように伝えてください。acceptでは、相手が場所だけで図形を示したときは形の特徴を尋ね、それ以外は受け止めるだけにしてください。\ntargetSlotや内部参照ID、画像内の座標・範囲は自分だけの作業メモです。相手に言わず、位置での指定も求めないでください。相手の画面では配置も向きも異なります。\n自分の画面の向きに依存する上下左右・右向き・上端・下端などの語で形を説明しないでください。特徴を伝えるときは、回転しても変わらない尖りの数や大小・くぼみ・細長さ・四角の有無・部分同士のつながりから選んでください。\n公開履歴と矛盾する説明、同じ確認の言い換え反復、画像にない特徴の追加をしないでください。判断JSON、作業メモ、方略の説明、思考過程は出力せず、公開する発話だけを返してください。"
                     },
                     {
                       "role": "system",
-                      "content": "Jevが選んだ行動だけを文章にしてください。行動・対象・名前・特徴を変更しないでください。観察メモは仮説で、局所的な支持を図形全体の理解や名称決定へ拡張しないでください。\n受け止めるだけ。名前に決まったとは言わない\n{\"action\":\"accept\",\"targetSlot\":null,\"candidateName\":null,\"discriminatingFeature\":null,\"note\":null,\"target\":{\"kind\":\"none\"},\"detailFigureIds\":[]}"
+                      "content": "Jevが選んだ行動だけを文章にしてください。行動・対象・名前・特徴を変更しないでください。観察メモは仮説で、局所的な支持を図形全体の理解や名称決定へ拡張しないでください。\n相手が場所だけで図形を示したときは、場所だけでは分からないことを短く伝えて形の特徴を尋ねる。それ以外は受け止めるだけ。名前に決まったとは言わない\n{\"action\":\"accept\",\"targetSlot\":null,\"candidateName\":null,\"discriminatingFeature\":null,\"note\":null,\"target\":{\"kind\":\"none\"},\"detailFigureIds\":[]}"
                     },
                     {
                       "role": "user",
@@ -6808,9 +6808,9 @@
                   ]
                 },
                 "payloadDomain": "canonical_http_json",
-                "payloadSha256": "25b6846943189f5afc36b650335aa38d2bb26c6edc63893f7a577dd6d4a3cff5",
-                "preProjectionPayloadSha256": "25b6846943189f5afc36b650335aa38d2bb26c6edc63893f7a577dd6d4a3cff5",
-                "completeMessagesSha256": "fb47a7f84f8fc6991600cff582925b8cbeff7009a37118fcb008467d78548428"
+                "payloadSha256": "ae93ff9b7eaaecd3ce8ef8093538d952f055e8b2dba2eafa00cb12bf61f47c78",
+                "preProjectionPayloadSha256": "ae93ff9b7eaaecd3ce8ef8093538d952f055e8b2dba2eafa00cb12bf61f47c78",
+                "completeMessagesSha256": "e3acb6ec8b13b79eefc9fa3be643e016c4b456b1c41b31ca84dae395491fa9a5"
               },
               {
                 "provider": "luna",
@@ -7561,11 +7561,11 @@
                     },
                     {
                       "role": "system",
-                      "content": "【公開発話の生成】与えられた判断を、相手に向けた自然な日本語のチャット発話にしてください。\nまず相手の発話に短く応じ、必要なら全体の印象・身近なものへの見立てを1つ伝えてください。形の分析は、共通教示の分析トリガー（相手が迷い・曖昧さ・食い違いを表明したか特徴・詳細を求めた、公開対話の矛盾が未解決、または名前を確定しようとする時点で対象を1つに絞れず誤った合意の実害がある）に基づく判断に discriminatingFeature があるときだけにし、その場合も特徴は1つに絞って相手の反応を待ってください。内部に候補が複数残るだけでは分析を始めないでください。\n挨拶や「どれからにしますか」のような漠然とした開始には、短く受け止めて相手に選んでもらうか、簡単な見立てを1つだけ出してください。先回りして詳しい形の説明や名前の一括提案をしないでください。\n1回は1〜2文、親しみやすいです・ます調で返してください。講義調、長い前置き、特徴の列挙は避けてください。短さ自体は目的ではありません。\n「合意」「候補」「案」「受け取りました」のような手続きを説明する言葉は避け、普段のチャットのように言ってください。合意した後に同じ特徴の説明を繰り返さないでください。\n指定されたactionの対話機能を実現し、自分で別のactionに置き換えないでください。followUpがあれば主actionを先に、両方を全体で1〜2文にまとめてください。\npropose_nameやagreeにdiscriminatingFeatureがあるときは、質問にせず、その特徴に短く触れて自分がどの図形のことと理解したかを相手に示してください。discriminatingFeatureがないときは、相手の見立てを短く受け止め、自分の画像の全体の見立てと結び付けて理解を表してください。必要なら自分の見立てを1つ返せます。判断にない尖り・四角・くぼみなどの形の数や特徴を作って補わないでください。propose_nameでは相手が出した名前を候補として受けるだけにし、合意は表明しないでください。\nconfirmは相手への短い確認、propose_nameは命名の提案として表現し、どちらも合意を表明しないでください。合意を表明できるのはagreeのときだけです。repairでは自己訂正を明示し、repair以外では取り違えや取り消しを表明しないでください。defer/revisitは保留・再訪であることが分かるように伝えてください。acceptでは受け止めるだけにしてください。\ntargetSlotや内部参照ID、画像内の座標・範囲は自分だけの作業メモです。相手に言わず、位置での指定も求めないでください。相手の画面では配置も向きも異なります。\n自分の画面の向きに依存する上下左右・右向き・上端・下端などの語で形を説明しないでください。特徴を伝えるときは、回転しても変わらない尖りの数や大小・くぼみ・細長さ・四角の有無・部分同士のつながりから選んでください。\n公開履歴と矛盾する説明、同じ確認の言い換え反復、画像にない特徴の追加をしないでください。判断JSON、作業メモ、方略の説明、思考過程は出力せず、公開する発話だけを返してください。"
+                      "content": "【公開発話の生成】与えられた判断を、相手に向けた自然な日本語のチャット発話にしてください。\nまず相手の発話に短く応じ、必要なら全体の印象・身近なものへの見立てを1つ伝えてください。形の分析は、共通教示の分析トリガー（相手が迷い・曖昧さ・食い違いを表明したか特徴・詳細を求めた、公開対話の矛盾が未解決、または名前を確定しようとする時点で対象を1つに絞れず誤った合意の実害がある）に基づく判断に discriminatingFeature があるときだけにし、その場合も特徴は1つに絞って相手の反応を待ってください。内部に候補が複数残るだけでは分析を始めないでください。\n挨拶や「どれからにしますか」のような漠然とした開始には、短く受け止めて相手に選んでもらうか、簡単な見立てを1つだけ出してください。先回りして詳しい形の説明や名前の一括提案をしないでください。\n1回は1〜2文、親しみやすいです・ます調で返してください。講義調、長い前置き、特徴の列挙は避けてください。短さ自体は目的ではありません。\n「合意」「候補」「案」「受け取りました」のような手続きを説明する言葉は避け、普段のチャットのように言ってください。合意した後に同じ特徴の説明を繰り返さないでください。\n指定されたactionの対話機能を実現し、自分で別のactionに置き換えないでください。followUpがあれば主actionを先に、両方を全体で1〜2文にまとめてください。\npropose_nameやagreeにdiscriminatingFeatureがあるときは、質問にせず、その特徴に短く触れて自分がどの図形のことと理解したかを相手に示してください。discriminatingFeatureがないときは、相手の見立てを短く受け止め、自分の画像の全体の見立てと結び付けて理解を表してください。必要なら自分の見立てを1つ返せます。判断にない尖り・四角・くぼみなどの形の数や特徴を作って補わないでください。propose_nameでは相手が出した名前を候補として受けるだけにし、合意は表明しないでください。\nconfirmは相手への短い確認、propose_nameは命名の提案として表現し、どちらも合意を表明しないでください。合意を表明できるのはagreeのときだけです。repairでは自己訂正を明示し、repair以外では取り違えや取り消しを表明しないでください。defer/revisitは保留・再訪であることが分かるように伝えてください。acceptでは、相手が場所だけで図形を示したときは形の特徴を尋ね、それ以外は受け止めるだけにしてください。\ntargetSlotや内部参照ID、画像内の座標・範囲は自分だけの作業メモです。相手に言わず、位置での指定も求めないでください。相手の画面では配置も向きも異なります。\n自分の画面の向きに依存する上下左右・右向き・上端・下端などの語で形を説明しないでください。特徴を伝えるときは、回転しても変わらない尖りの数や大小・くぼみ・細長さ・四角の有無・部分同士のつながりから選んでください。\n公開履歴と矛盾する説明、同じ確認の言い換え反復、画像にない特徴の追加をしないでください。判断JSON、作業メモ、方略の説明、思考過程は出力せず、公開する発話だけを返してください。"
                     },
                     {
                       "role": "system",
-                      "content": "Jevが選んだ行動だけを文章にしてください。行動・対象・名前・特徴を変更しないでください。観察メモは仮説で、局所的な支持を図形全体の理解や名称決定へ拡張しないでください。\n受け止めるだけ。名前に決まったとは言わない\n{\"action\":\"accept\",\"targetSlot\":null,\"candidateName\":null,\"discriminatingFeature\":null,\"note\":null,\"target\":{\"kind\":\"none\"},\"detailFigureIds\":[]}"
+                      "content": "Jevが選んだ行動だけを文章にしてください。行動・対象・名前・特徴を変更しないでください。観察メモは仮説で、局所的な支持を図形全体の理解や名称決定へ拡張しないでください。\n相手が場所だけで図形を示したときは、場所だけでは分からないことを短く伝えて形の特徴を尋ねる。それ以外は受け止めるだけ。名前に決まったとは言わない\n{\"action\":\"accept\",\"targetSlot\":null,\"candidateName\":null,\"discriminatingFeature\":null,\"note\":null,\"target\":{\"kind\":\"none\"},\"detailFigureIds\":[]}"
                     },
                     {
                       "role": "user",
@@ -7582,9 +7582,9 @@
                   ]
                 },
                 "payloadDomain": "canonical_http_json",
-                "payloadSha256": "25b6846943189f5afc36b650335aa38d2bb26c6edc63893f7a577dd6d4a3cff5",
-                "preProjectionPayloadSha256": "25b6846943189f5afc36b650335aa38d2bb26c6edc63893f7a577dd6d4a3cff5",
-                "completeMessagesSha256": "fb47a7f84f8fc6991600cff582925b8cbeff7009a37118fcb008467d78548428"
+                "payloadSha256": "ae93ff9b7eaaecd3ce8ef8093538d952f055e8b2dba2eafa00cb12bf61f47c78",
+                "preProjectionPayloadSha256": "ae93ff9b7eaaecd3ce8ef8093538d952f055e8b2dba2eafa00cb12bf61f47c78",
+                "completeMessagesSha256": "e3acb6ec8b13b79eefc9fa3be643e016c4b456b1c41b31ca84dae395491fa9a5"
               },
               {
                 "provider": "luna",
@@ -8689,7 +8689,7 @@
       "stage": "trial_loop"
     },
     "run": {
-      "runId": "parity-2d1db03f-63e0-4be5-a54b-5833728ca34c",
+      "runId": "parity-79ff25ea-a6b6-4ed2-ba79-dfc458b294cf",
       "plannedMappingVersion": 1,
       "manifest": {
         "id": "synthetic-wiring",
@@ -8761,7 +8761,7 @@
       "promptSources": {
         "scheme": "complete_instruction_source_sha256",
         "files": {
-          "v2/dialogue-v2.mjs": "bae8edc3a45524716ad41e69e9bf6050dbcef11ec57db489a269a891a04f4c7d",
+          "v2/dialogue-v2.mjs": "7740298e05d1f4de4d5e4b34a3519e61772cc8f44c0a5ae091ad43201ba09552",
           "v2/jev-turn.ts": "1e21cb640669562a7ac6aa2fae414c58b41561930235cb5b0639fd3c8bc6a91a",
           "v2/generation-guard.ts": "f1641117798e1538a6db4ebb97e8ac33a2da14e926c405f4a7c7f6c8b751ad46",
           "judgment/instructions.mjs": "9d686330aa34a516a1e2d95df94d0b030e7308a6463757861b9c94e561e5197a",
@@ -8793,7 +8793,7 @@
       "coverage": "not_measured_by_wiring_harness"
     },
     "summary": {
-      "runId": "parity-2d1db03f-63e0-4be5-a54b-5833728ca34c",
+      "runId": "parity-79ff25ea-a6b6-4ed2-ba79-dfc458b294cf",
       "manifestSha256": "bebb4da64e2dba993696edc8cb515c0f2ed1017ff8b0367bc50249dff33dac48",
       "execution": "mock",
       "profile": {
@@ -9395,7 +9395,7 @@
     },
     "evidence": {
       "version": 1,
-      "runId": "parity-2d1db03f-63e0-4be5-a54b-5833728ca34c",
+      "runId": "parity-79ff25ea-a6b6-4ed2-ba79-dfc458b294cf",
       "normalizedEnvelopeFields": [
         "label",
         "runId",
@@ -10078,11 +10078,11 @@
                     },
                     {
                       "role": "system",
-                      "content": "【公開発話の生成】与えられた判断を、相手に向けた自然な日本語のチャット発話にしてください。\nまず相手の発話に短く応じ、必要なら全体の印象・身近なものへの見立てを1つ伝えてください。形の分析は、共通教示の分析トリガー（相手が迷い・曖昧さ・食い違いを表明したか特徴・詳細を求めた、公開対話の矛盾が未解決、または名前を確定しようとする時点で対象を1つに絞れず誤った合意の実害がある）に基づく判断に discriminatingFeature があるときだけにし、その場合も特徴は1つに絞って相手の反応を待ってください。内部に候補が複数残るだけでは分析を始めないでください。\n挨拶や「どれからにしますか」のような漠然とした開始には、短く受け止めて相手に選んでもらうか、簡単な見立てを1つだけ出してください。先回りして詳しい形の説明や名前の一括提案をしないでください。\n1回は1〜2文、親しみやすいです・ます調で返してください。講義調、長い前置き、特徴の列挙は避けてください。短さ自体は目的ではありません。\n「合意」「候補」「案」「受け取りました」のような手続きを説明する言葉は避け、普段のチャットのように言ってください。合意した後に同じ特徴の説明を繰り返さないでください。\n指定されたactionの対話機能を実現し、自分で別のactionに置き換えないでください。followUpがあれば主actionを先に、両方を全体で1〜2文にまとめてください。\npropose_nameやagreeにdiscriminatingFeatureがあるときは、質問にせず、その特徴に短く触れて自分がどの図形のことと理解したかを相手に示してください。discriminatingFeatureがないときは、相手の見立てを短く受け止め、自分の画像の全体の見立てと結び付けて理解を表してください。必要なら自分の見立てを1つ返せます。判断にない尖り・四角・くぼみなどの形の数や特徴を作って補わないでください。propose_nameでは相手が出した名前を候補として受けるだけにし、合意は表明しないでください。\nconfirmは相手への短い確認、propose_nameは命名の提案として表現し、どちらも合意を表明しないでください。合意を表明できるのはagreeのときだけです。repairでは自己訂正を明示し、repair以外では取り違えや取り消しを表明しないでください。defer/revisitは保留・再訪であることが分かるように伝えてください。acceptでは受け止めるだけにしてください。\ntargetSlotや内部参照ID、画像内の座標・範囲は自分だけの作業メモです。相手に言わず、位置での指定も求めないでください。相手の画面では配置も向きも異なります。\n自分の画面の向きに依存する上下左右・右向き・上端・下端などの語で形を説明しないでください。特徴を伝えるときは、回転しても変わらない尖りの数や大小・くぼみ・細長さ・四角の有無・部分同士のつながりから選んでください。\n公開履歴と矛盾する説明、同じ確認の言い換え反復、画像にない特徴の追加をしないでください。判断JSON、作業メモ、方略の説明、思考過程は出力せず、公開する発話だけを返してください。"
+                      "content": "【公開発話の生成】与えられた判断を、相手に向けた自然な日本語のチャット発話にしてください。\nまず相手の発話に短く応じ、必要なら全体の印象・身近なものへの見立てを1つ伝えてください。形の分析は、共通教示の分析トリガー（相手が迷い・曖昧さ・食い違いを表明したか特徴・詳細を求めた、公開対話の矛盾が未解決、または名前を確定しようとする時点で対象を1つに絞れず誤った合意の実害がある）に基づく判断に discriminatingFeature があるときだけにし、その場合も特徴は1つに絞って相手の反応を待ってください。内部に候補が複数残るだけでは分析を始めないでください。\n挨拶や「どれからにしますか」のような漠然とした開始には、短く受け止めて相手に選んでもらうか、簡単な見立てを1つだけ出してください。先回りして詳しい形の説明や名前の一括提案をしないでください。\n1回は1〜2文、親しみやすいです・ます調で返してください。講義調、長い前置き、特徴の列挙は避けてください。短さ自体は目的ではありません。\n「合意」「候補」「案」「受け取りました」のような手続きを説明する言葉は避け、普段のチャットのように言ってください。合意した後に同じ特徴の説明を繰り返さないでください。\n指定されたactionの対話機能を実現し、自分で別のactionに置き換えないでください。followUpがあれば主actionを先に、両方を全体で1〜2文にまとめてください。\npropose_nameやagreeにdiscriminatingFeatureがあるときは、質問にせず、その特徴に短く触れて自分がどの図形のことと理解したかを相手に示してください。discriminatingFeatureがないときは、相手の見立てを短く受け止め、自分の画像の全体の見立てと結び付けて理解を表してください。必要なら自分の見立てを1つ返せます。判断にない尖り・四角・くぼみなどの形の数や特徴を作って補わないでください。propose_nameでは相手が出した名前を候補として受けるだけにし、合意は表明しないでください。\nconfirmは相手への短い確認、propose_nameは命名の提案として表現し、どちらも合意を表明しないでください。合意を表明できるのはagreeのときだけです。repairでは自己訂正を明示し、repair以外では取り違えや取り消しを表明しないでください。defer/revisitは保留・再訪であることが分かるように伝えてください。acceptでは、相手が場所だけで図形を示したときは形の特徴を尋ね、それ以外は受け止めるだけにしてください。\ntargetSlotや内部参照ID、画像内の座標・範囲は自分だけの作業メモです。相手に言わず、位置での指定も求めないでください。相手の画面では配置も向きも異なります。\n自分の画面の向きに依存する上下左右・右向き・上端・下端などの語で形を説明しないでください。特徴を伝えるときは、回転しても変わらない尖りの数や大小・くぼみ・細長さ・四角の有無・部分同士のつながりから選んでください。\n公開履歴と矛盾する説明、同じ確認の言い換え反復、画像にない特徴の追加をしないでください。判断JSON、作業メモ、方略の説明、思考過程は出力せず、公開する発話だけを返してください。"
                     },
                     {
                       "role": "system",
-                      "content": "Jevが選んだ行動だけを文章にしてください。行動・対象・名前・特徴を変更しないでください。観察メモは仮説で、局所的な支持を図形全体の理解や名称決定へ拡張しないでください。\n受け止めるだけ。名前に決まったとは言わない\n{\"action\":\"accept\",\"targetSlot\":null,\"candidateName\":null,\"discriminatingFeature\":null,\"note\":null,\"target\":{\"kind\":\"none\"},\"detailFigureIds\":[]}"
+                      "content": "Jevが選んだ行動だけを文章にしてください。行動・対象・名前・特徴を変更しないでください。観察メモは仮説で、局所的な支持を図形全体の理解や名称決定へ拡張しないでください。\n相手が場所だけで図形を示したときは、場所だけでは分からないことを短く伝えて形の特徴を尋ねる。それ以外は受け止めるだけ。名前に決まったとは言わない\n{\"action\":\"accept\",\"targetSlot\":null,\"candidateName\":null,\"discriminatingFeature\":null,\"note\":null,\"target\":{\"kind\":\"none\"},\"detailFigureIds\":[]}"
                     },
                     {
                       "role": "user",
@@ -10099,9 +10099,9 @@
                   ]
                 },
                 "payloadDomain": "canonical_http_json",
-                "payloadSha256": "25b6846943189f5afc36b650335aa38d2bb26c6edc63893f7a577dd6d4a3cff5",
-                "preProjectionPayloadSha256": "25b6846943189f5afc36b650335aa38d2bb26c6edc63893f7a577dd6d4a3cff5",
-                "completeMessagesSha256": "fb47a7f84f8fc6991600cff582925b8cbeff7009a37118fcb008467d78548428"
+                "payloadSha256": "ae93ff9b7eaaecd3ce8ef8093538d952f055e8b2dba2eafa00cb12bf61f47c78",
+                "preProjectionPayloadSha256": "ae93ff9b7eaaecd3ce8ef8093538d952f055e8b2dba2eafa00cb12bf61f47c78",
+                "completeMessagesSha256": "e3acb6ec8b13b79eefc9fa3be643e016c4b456b1c41b31ca84dae395491fa9a5"
               },
               {
                 "provider": "luna",
@@ -10852,11 +10852,11 @@
                     },
                     {
                       "role": "system",
-                      "content": "【公開発話の生成】与えられた判断を、相手に向けた自然な日本語のチャット発話にしてください。\nまず相手の発話に短く応じ、必要なら全体の印象・身近なものへの見立てを1つ伝えてください。形の分析は、共通教示の分析トリガー（相手が迷い・曖昧さ・食い違いを表明したか特徴・詳細を求めた、公開対話の矛盾が未解決、または名前を確定しようとする時点で対象を1つに絞れず誤った合意の実害がある）に基づく判断に discriminatingFeature があるときだけにし、その場合も特徴は1つに絞って相手の反応を待ってください。内部に候補が複数残るだけでは分析を始めないでください。\n挨拶や「どれからにしますか」のような漠然とした開始には、短く受け止めて相手に選んでもらうか、簡単な見立てを1つだけ出してください。先回りして詳しい形の説明や名前の一括提案をしないでください。\n1回は1〜2文、親しみやすいです・ます調で返してください。講義調、長い前置き、特徴の列挙は避けてください。短さ自体は目的ではありません。\n「合意」「候補」「案」「受け取りました」のような手続きを説明する言葉は避け、普段のチャットのように言ってください。合意した後に同じ特徴の説明を繰り返さないでください。\n指定されたactionの対話機能を実現し、自分で別のactionに置き換えないでください。followUpがあれば主actionを先に、両方を全体で1〜2文にまとめてください。\npropose_nameやagreeにdiscriminatingFeatureがあるときは、質問にせず、その特徴に短く触れて自分がどの図形のことと理解したかを相手に示してください。discriminatingFeatureがないときは、相手の見立てを短く受け止め、自分の画像の全体の見立てと結び付けて理解を表してください。必要なら自分の見立てを1つ返せます。判断にない尖り・四角・くぼみなどの形の数や特徴を作って補わないでください。propose_nameでは相手が出した名前を候補として受けるだけにし、合意は表明しないでください。\nconfirmは相手への短い確認、propose_nameは命名の提案として表現し、どちらも合意を表明しないでください。合意を表明できるのはagreeのときだけです。repairでは自己訂正を明示し、repair以外では取り違えや取り消しを表明しないでください。defer/revisitは保留・再訪であることが分かるように伝えてください。acceptでは受け止めるだけにしてください。\ntargetSlotや内部参照ID、画像内の座標・範囲は自分だけの作業メモです。相手に言わず、位置での指定も求めないでください。相手の画面では配置も向きも異なります。\n自分の画面の向きに依存する上下左右・右向き・上端・下端などの語で形を説明しないでください。特徴を伝えるときは、回転しても変わらない尖りの数や大小・くぼみ・細長さ・四角の有無・部分同士のつながりから選んでください。\n公開履歴と矛盾する説明、同じ確認の言い換え反復、画像にない特徴の追加をしないでください。判断JSON、作業メモ、方略の説明、思考過程は出力せず、公開する発話だけを返してください。"
+                      "content": "【公開発話の生成】与えられた判断を、相手に向けた自然な日本語のチャット発話にしてください。\nまず相手の発話に短く応じ、必要なら全体の印象・身近なものへの見立てを1つ伝えてください。形の分析は、共通教示の分析トリガー（相手が迷い・曖昧さ・食い違いを表明したか特徴・詳細を求めた、公開対話の矛盾が未解決、または名前を確定しようとする時点で対象を1つに絞れず誤った合意の実害がある）に基づく判断に discriminatingFeature があるときだけにし、その場合も特徴は1つに絞って相手の反応を待ってください。内部に候補が複数残るだけでは分析を始めないでください。\n挨拶や「どれからにしますか」のような漠然とした開始には、短く受け止めて相手に選んでもらうか、簡単な見立てを1つだけ出してください。先回りして詳しい形の説明や名前の一括提案をしないでください。\n1回は1〜2文、親しみやすいです・ます調で返してください。講義調、長い前置き、特徴の列挙は避けてください。短さ自体は目的ではありません。\n「合意」「候補」「案」「受け取りました」のような手続きを説明する言葉は避け、普段のチャットのように言ってください。合意した後に同じ特徴の説明を繰り返さないでください。\n指定されたactionの対話機能を実現し、自分で別のactionに置き換えないでください。followUpがあれば主actionを先に、両方を全体で1〜2文にまとめてください。\npropose_nameやagreeにdiscriminatingFeatureがあるときは、質問にせず、その特徴に短く触れて自分がどの図形のことと理解したかを相手に示してください。discriminatingFeatureがないときは、相手の見立てを短く受け止め、自分の画像の全体の見立てと結び付けて理解を表してください。必要なら自分の見立てを1つ返せます。判断にない尖り・四角・くぼみなどの形の数や特徴を作って補わないでください。propose_nameでは相手が出した名前を候補として受けるだけにし、合意は表明しないでください。\nconfirmは相手への短い確認、propose_nameは命名の提案として表現し、どちらも合意を表明しないでください。合意を表明できるのはagreeのときだけです。repairでは自己訂正を明示し、repair以外では取り違えや取り消しを表明しないでください。defer/revisitは保留・再訪であることが分かるように伝えてください。acceptでは、相手が場所だけで図形を示したときは形の特徴を尋ね、それ以外は受け止めるだけにしてください。\ntargetSlotや内部参照ID、画像内の座標・範囲は自分だけの作業メモです。相手に言わず、位置での指定も求めないでください。相手の画面では配置も向きも異なります。\n自分の画面の向きに依存する上下左右・右向き・上端・下端などの語で形を説明しないでください。特徴を伝えるときは、回転しても変わらない尖りの数や大小・くぼみ・細長さ・四角の有無・部分同士のつながりから選んでください。\n公開履歴と矛盾する説明、同じ確認の言い換え反復、画像にない特徴の追加をしないでください。判断JSON、作業メモ、方略の説明、思考過程は出力せず、公開する発話だけを返してください。"
                     },
                     {
                       "role": "system",
-                      "content": "Jevが選んだ行動だけを文章にしてください。行動・対象・名前・特徴を変更しないでください。観察メモは仮説で、局所的な支持を図形全体の理解や名称決定へ拡張しないでください。\n受け止めるだけ。名前に決まったとは言わない\n{\"action\":\"accept\",\"targetSlot\":null,\"candidateName\":null,\"discriminatingFeature\":null,\"note\":null,\"target\":{\"kind\":\"none\"},\"detailFigureIds\":[]}"
+                      "content": "Jevが選んだ行動だけを文章にしてください。行動・対象・名前・特徴を変更しないでください。観察メモは仮説で、局所的な支持を図形全体の理解や名称決定へ拡張しないでください。\n相手が場所だけで図形を示したときは、場所だけでは分からないことを短く伝えて形の特徴を尋ねる。それ以外は受け止めるだけ。名前に決まったとは言わない\n{\"action\":\"accept\",\"targetSlot\":null,\"candidateName\":null,\"discriminatingFeature\":null,\"note\":null,\"target\":{\"kind\":\"none\"},\"detailFigureIds\":[]}"
                     },
                     {
                       "role": "user",
@@ -10873,9 +10873,9 @@
                   ]
                 },
                 "payloadDomain": "canonical_http_json",
-                "payloadSha256": "25b6846943189f5afc36b650335aa38d2bb26c6edc63893f7a577dd6d4a3cff5",
-                "preProjectionPayloadSha256": "25b6846943189f5afc36b650335aa38d2bb26c6edc63893f7a577dd6d4a3cff5",
-                "completeMessagesSha256": "fb47a7f84f8fc6991600cff582925b8cbeff7009a37118fcb008467d78548428"
+                "payloadSha256": "ae93ff9b7eaaecd3ce8ef8093538d952f055e8b2dba2eafa00cb12bf61f47c78",
+                "preProjectionPayloadSha256": "ae93ff9b7eaaecd3ce8ef8093538d952f055e8b2dba2eafa00cb12bf61f47c78",
+                "completeMessagesSha256": "e3acb6ec8b13b79eefc9fa3be643e016c4b456b1c41b31ca84dae395491fa9a5"
               },
               {
                 "provider": "luna",
