@@ -389,6 +389,24 @@ function keepPosition(scrollTop) {
 function followToBottom() {
   followHistory = true; keepPosition();
 }
+// The AI's reply in progress: a transient AI bubble at the end of the log. It
+// is display only, never an event, a pending message or a counted message.
+// #chat-status announces the wait, so the bubble is hidden from screen readers.
+// A history rebuild detaches it; renderProgress puts it back at the end.
+const typingBubble = (() => {
+  const li = document.createElement("li"); li.className = "ai typing-message"; li.setAttribute("aria-hidden", "true");
+  const who = document.createElement("strong"); who.textContent = "AI";
+  const dots = document.createElement("div"); dots.className = "typing-indicator";
+  dots.append(...[0, 1, 2].map(() => document.createElement("span")));
+  li.append(who, dots); return li;
+})();
+function renderTyping(show) {
+  const log = $("history");
+  if (show === (log.children[log.children.length - 1] === typingBubble)) return;
+  if (show) log.append(typingBubble); else typingBubble.remove();
+  // A following reader sees the bubble come and go; a reader who scrolled up stays put.
+  keepPosition();
+}
 // ---- Participant-facing progress (display layer) ----------------------------
 // Failures are shown by state, never by cause. The trial has stopped when the
 // server reports a failure, or when something is awaited (an AI reply, a send
@@ -422,7 +440,7 @@ function renderProgress() {
   }
   const stopped = progressStopped();
   const showDots = chatWaiting() && !failed && !stopped;
-  $("typing-indicator").hidden = !showDots;
+  renderTyping(showDots);
   $("chat-recovery").hidden = !stopped;
   $("chat-recovery-message").textContent = STOPPED;
   $("retry-chat").disabled = working || checking || sending || !chatOpen();
