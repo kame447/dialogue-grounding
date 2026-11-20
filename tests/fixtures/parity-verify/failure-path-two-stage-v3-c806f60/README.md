@@ -1,5 +1,0 @@
-# Synthetic failure capture after the audit/06 R3 complete-history check for the opt-in two_stage_v3 layout
-
-Source commit c806f60c7b05bd2f7ca30e5fec75482ccc806f65 (the later-turn repair-history restore check now validates candidatesAfter against every information claim applied by the update, resolving each partner claim in the live graph). Two independent captures were made on a clean tree with the generator (`node tests/support/generate-failure-fixture.ts <dir>`); they differ from each other only at 15 run-ID leaves.
-
-Compared with the replaced failure-path-two-stage-v3-40401bd capture (never adopted outside this branch, removed), records differ only at 21 leaves: 15 run IDs, 5 instruction-source hash leaves (`v2/jev-turn.ts` in each of the 5 scenarios) and the derived `identity.prompts` digest. Every request payload, behavior, schema, failure, clock, policy, call/send and storage is unchanged. The generator writes a stale baseCommit literal; it was set by hand to the source commit above. Earlier adopted fixture directories (including failure-path-repair-facts-e6e2c67) remain byte-identical. No real API, Keychain, .env, study data or live run was used.
