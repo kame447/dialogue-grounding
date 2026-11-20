@@ -12,7 +12,7 @@ import { createObservationCache } from '../dialogue-model/runtime/observation/ca
 import { researchHash } from '../dialogue-model/runtime/v2/research-profile.ts';
 import { createNamingTaskV2 } from '../dialogue-model/runtime/v2/naming-task-v2.mjs';
 import { prepareParticipantJev, validateParticipantJevConfig } from '../dialogue-model/runtime/web/participant-jev-wiring.ts';
-import { REVISIT_MULTIPLE_INSTRUCTIONS } from '../dialogue-model/runtime/v2/jev-turn.ts';
+import { REVISIT_MULTIPLE_INSTRUCTIONS, updateRepairHistory } from '../dialogue-model/runtime/v2/jev-turn.ts';
 
 const seed = 919, modelId = 'synthetic-luna-20261020';
 const trial = createTrialV2({ seed }), model = modelView(trial);
@@ -409,5 +409,90 @@ test('R4: a zero-stage local-rule failure record restores only with the rule nam
   for (const [name, mutate] of bad) {
     const r = structuredClone(name === 'rule name on a native failure' ? failed.record : good); mutate(r);
     await assert.rejects(makeTask(failed.prepared, { restore: r }), { code: 'invalid_options' }, name);
+  }
+});
+
+// ---- audit/06 R3 (later turns): the restore check follows updateRepairHistory exactly. Entries below are produced by the real generator.
+const humanClaim = (id: string, targets: string[], act = 'assert', aspect = 'part') => ({ id, turn: 0, issueId: id, targets, aspect, act, proposition: '上の角が目印です', name: null,
+  speaker: 'human', sourceTurn: 0, quote: '上の角が目印です', respondsTo: null, source: 'human_text' }) as any;
+/** Two genuine v3 turns (revisit x set, then accept); returns the saved record and a generator-made replacement for the first history entry. */
+async function laterRecord(t: any) {
+  const first = await turn(t, V3, REVISIT_MULTIPLE);
+  first.h.upstream.plan.answers = { action: 'accept', target: 'none' };
+  first.made.task.message('もう一度見てみます', 'turn-2'); await first.made.task.whenIdle();
+  const later = first.made.record(), turn2 = later.queueState.privateState.judgments[1].turnIndex, turn1 = later.queueState.privateState.judgments[0].turnIndex;
+  const entry0 = later.queueState.privateState.repairHistory[0];
+  const regenerate = (claims: any[], context: any) => {
+    const history = [{ ...structuredClone(entry0), progress: 'unknown', candidatesAfter: [...entry0.candidatesBefore], partnerClaims: [], addedClaimIds: [], removedClaimIds: [] }];
+    for (const k of ['missingReasons', 'humanRejections']) delete (history[0] as any)[k];
+    return updateRepairHistory(history, [], claims.map(c => ({ ...c, sourceTurn: turn2, turn: turn2 })), turn2, { answeredRepairTurn: turn1, ...context })[0];
+  };
+  const withEntry = (e: any) => { const r = structuredClone(later); r.queueState.privateState.repairHistory[0] = structuredClone(e); return r; };
+  return { first, later, regenerate, withEntry };
+}
+const AI_PUBLIC_UNKNOWN = { aiPublic: { humanOk: true, rejected: [], aiComplete: false } };
+
+test('R3 later turns: a regular entry whose reply names no figure (candidatesAfter=[], unchanged) is a valid state and restores', async t => {
+  const { first, regenerate, withEntry } = await laterRecord(t);
+  const empty = regenerate([humanClaim('9:h1', [], 'assert', 'part')], {});
+  assert.deepEqual(empty.candidatesAfter, []); assert.equal(empty.progress, 'unchanged');
+  await makeTask(first.prepared, { restore: withEntry(empty) });
+  // The same with the AI-public context: missingReasons=[] stays unchanged.
+  const emptyPublic = regenerate([humanClaim('9:h1', [], 'assert', 'part')], { aiPublic: { humanOk: true, rejected: [], aiComplete: true } });
+  assert.equal(emptyPublic.progress, 'unchanged'); assert.deepEqual(emptyPublic.missingReasons, []);
+  await makeTask(first.prepared, { restore: withEntry(emptyPublic) });
+  // A claim naming one figure of the set narrows it: that figure, changed.
+  const single = regenerate([humanClaim('9:h2', [ids[3]])], {});
+  assert.deepEqual(single.candidatesAfter, [ids[3]]); assert.equal(single.progress, 'changed');
+  await makeTask(first.prepared, { restore: withEntry(single) });
+  // An empty set cannot be forged when every information claim names a figure.
+  const named = structuredClone(single); named.candidatesAfter = [];
+  await assert.rejects(makeTask(first.prepared, { restore: withEntry(named) }), { code: 'invalid_options' });
+  // Nor a set that no information claim backs.
+  const other = structuredClone(single); other.candidatesAfter = [ids[2]];
+  await assert.rejects(makeTask(first.prepared, { restore: withEntry(other) }), { code: 'invalid_options' });
+});
+
+test('R3 later turns: missingReasons never open the candidate set; no information claim keeps the original set (OFF, and the AI-public path that ON uses)', async t => {
+  const { first, later, regenerate, withEntry } = await laterRecord(t);
+  const unknown = regenerate([], AI_PUBLIC_UNKNOWN);
+  assert.equal(unknown.progress, 'unknown'); assert.deepEqual(unknown.missingReasons, ['ai_source_incomplete']); assert.deepEqual(unknown.partnerClaims, []);
+  await makeTask(first.prepared, { restore: withEntry(unknown) });
+  const stored = later.queueState.privateState.repairHistory[0];
+  await makeTask(first.prepared, { restore: later });
+  for (const [name, source] of [['regenerated unknown entry', unknown], ['entry saved by the second turn', stored]] as const) {
+    const forged = structuredClone(source); forged.candidatesAfter = [ids[2], ids[5]];
+    await assert.rejects(makeTask(first.prepared, { restore: withEntry(forged) }), { code: 'invalid_options' }, name);
+  }
+  // Information claims that all name a figure outside the forged set do not back it either, whatever the progress label says.
+  const changed = regenerate([humanClaim('9:h3', [ids[3]])], {});
+  for (const progress of ['changed', 'unchanged', 'unknown'] as const) {
+    const forged = structuredClone(changed); forged.candidatesAfter = [ids[2], ids[5]]; forged.progress = progress; forged.missingReasons = ['ai_source_incomplete'];
+    await assert.rejects(makeTask(first.prepared, { restore: withEntry(forged) }), { code: 'invalid_options' }, progress);
+  }
+  // The accepted original sends the executed set to Jev on the next turn; nothing of a forged set does.
+  first.h.upstream.plan.answers = { action: 'accept', target: 'none' };
+  const restored = await makeTask(first.prepared, { restore: withEntry(unknown) });
+  restored.task.message('もう一度見てみます', 'turn-3'); await restored.task.whenIdle();
+  const sent = JSON.stringify(JSON.parse(first.h.upstream.posts.filter((b: any) => b.questions?.action).at(-1).state).repairHistory);
+  assert.ok(!sent.includes(ids[5]) && !sent.includes(ids[2]));
+});
+
+test('R3 later turns: progress labels follow the generator (changed needs novelty or narrowing; unchanged forbids reasons)', async t => {
+  const { first, regenerate, withEntry } = await laterRecord(t);
+  const novel = regenerate([humanClaim('9:h4', [ids[1]])], {});
+  assert.equal(novel.progress, 'changed'); assert.deepEqual(novel.candidatesAfter, [ids[1]]);
+  await makeTask(first.prepared, { restore: withEntry(novel) });
+  const bad: Array<[string, (e: any) => void]> = [
+    ['changed without added claims or narrowing', e => { e.addedClaimIds = []; e.candidatesAfter = [...e.candidatesBefore]; e.partnerClaims = []; }],
+    ['unchanged although a claim was added', e => { e.progress = 'unchanged'; e.candidatesAfter = [...e.candidatesBefore]; }],
+    ['added id that is no information claim', e => { e.addedClaimIds = ['not-a-claim']; }],
+    ['unchanged with missing reasons', e => { e.progress = 'unchanged'; e.addedClaimIds = []; e.candidatesAfter = [...e.candidatesBefore]; e.missingReasons = ['ai_source_incomplete']; }],
+    ['duplicate candidates', e => { e.candidatesAfter = [ids[1], ids[1]]; }],
+    ['unknown member', e => { e.candidatesAfter = ['not-a-slot']; }],
+  ];
+  for (const [name, mutate] of bad) {
+    const e = structuredClone(novel); mutate(e);
+    await assert.rejects(makeTask(first.prepared, { restore: withEntry(e) }), { code: 'invalid_options' }, name);
   }
 });

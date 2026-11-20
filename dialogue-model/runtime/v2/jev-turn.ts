@@ -386,19 +386,32 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
     const ids=z.executed.target.kind==='single'?[z.executed.target.figureId]:z.executed.target.kind==='multiple'?z.executed.target.figureIds:[];
     const entry=s.repairHistory.find((r:any)=>r?.turn===j.turnIndex);
     if(!entry||entry.action!==j.judgment.action||!stateSame(entry.candidatesBefore,ids))throw Error();
-    const after=entry.candidatesAfter,same=stateSame(after,ids);
+    const after=entry.candidatesAfter,same=stateSame(after,ids),claimsOf=Array.isArray(entry.partnerClaims)?entry.partnerClaims:[];
+    if(!Array.isArray(after)||new Set(after).size!==after.length||!after.every((id:string)=>ownSlots.includes(id)))throw Error();
     if(s.judgments.at(-1)===j){
-     // No later turn exists, so no human reply could have updated this entry yet: it is exactly as created. A progress label alone never opens it.
-     if(entry.progress!=='unknown'||!same||entry.partnerClaims?.length||entry.addedClaimIds?.length||entry.removedClaimIds?.length||Object.hasOwn(entry,'missingReasons')||Object.hasOwn(entry,'humanRejections'))throw Error();
-    }else if(entry.progress==='unknown'){
-     if(!same&&!(Array.isArray(entry.missingReasons)&&entry.missingReasons.length))throw Error();
+     // No later turn exists, so no human reply could have updated this entry yet: it is exactly as created. A progress label never opens it.
+     if(entry.progress!=='unknown'||!same||claimsOf.length||entry.addedClaimIds?.length||entry.removedClaimIds?.length||Object.hasOwn(entry,'missingReasons')||Object.hasOwn(entry,'humanRejections'))throw Error();
     }else{
-     // A later committed turn exists. The label and any changed set must be backed by the partner claims and added claims the update records.
-     const union=new Set((entry.partnerClaims??[]).flatMap((c:any)=>c.targets));
-     if(!same&&!(after.length&&entry.partnerClaims?.length&&after.every((id:string)=>union.has(id))))throw Error();
+     // A later committed turn exists. Mirror updateRepairHistory exactly: the candidate set is the union of the targets of the information claims among the
+     // partner claims, or the original set when there is none; missingReasons only ever turn the progress into unknown and never change the set.
+     const info=claimsOf.filter((c:any)=>INFORMATION_ACTS.has(c?.act)&&Array.isArray(c.targets));
+     if(!same){
+      // Some non-empty subset of the information claims must give exactly this set (an empty set needs a claim that names no figure).
+      const usable=info.filter((c:any)=>c.targets.every((id:string)=>after.includes(id)));
+      if(!info.length||!usable.length||!after.every((id:string)=>usable.some((c:any)=>c.targets.includes(id))))throw Error();
+     }
+     const added=Array.isArray(entry.addedClaimIds)?entry.addedClaimIds:[];
+     const named=new Set(info.filter((c:any)=>c.targets.length>0).map((c:any)=>c.id));
+     if(new Set(added).size!==added.length||!added.every((id:string)=>named.has(id)))throw Error();
      const narrowed=after.length>0&&after.length<ids.length&&after.every((id:string)=>ids.includes(id));
-     if(entry.progress==='changed'&&!(entry.addedClaimIds?.length||narrowed))throw Error();
-     if(entry.progress==='unchanged'&&(entry.addedClaimIds?.length||narrowed))throw Error();
+     const reasons=Array.isArray(entry.missingReasons)?entry.missingReasons.length:0;
+     if(entry.progress==='changed'){if(!(added.length||narrowed))throw Error();}
+     else if(entry.progress==='unchanged'){if(added.length||narrowed||reasons)throw Error();}
+     else{
+      // unknown: untouched since creation, or an update that the AI-public reasons turned back to unknown (so it had no novel claim and no narrowing).
+      const untouched=same&&!claimsOf.length&&!added.length&&!entry.removedClaimIds?.length&&!Object.hasOwn(entry,'missingReasons')&&!Object.hasOwn(entry,'humanRejections');
+      if(!untouched&&!(reasons&&!added.length&&!narrowed))throw Error();
+     }
     }
    }
    const e=z.executed,g=j.judgment;if(g.action!==e.action||g.targetSlot!==(e.target.kind==='single'?e.target.figureId:null)||g.candidateName!==e.name||g.discriminatingFeature!==e.feature)throw Error();
