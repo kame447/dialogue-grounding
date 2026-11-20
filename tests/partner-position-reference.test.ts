@@ -5,6 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { TASK_INSTRUCTIONS_V2, JUDGE_POLICIES, STRATEGIES } from "../dialogue-model/runtime/judgment/instructions.mjs";
 import { createNamingTaskV2 } from "../dialogue-model/runtime/v2/naming-task-v2.mjs";
+import { GENERATOR_INSTRUCTIONS_V2, LUNA_GENERATOR_INSTRUCTIONS_V2, ACTION_SCOPE_V2, LUNA_ACTION_SCOPE_V2 } from "../dialogue-model/runtime/v2/dialogue-v2.mjs";
 import { createTrialV2, modelView } from "../dialogue-model/runtime/stimuli/scatter-v2.mjs";
 import { MEMO_LOCAL_EXTRACTION_INSTRUCTIONS } from "../dialogue-model/runtime/local-grounding/extract.ts";
 import { buildJevDecisionPayload, buildJevDecisionDetailPayload, buildHumanReferentPayload, createJevDecisionClient } from "../dialogue-model/runtime/decision/jev-decision.ts";
@@ -31,6 +32,15 @@ function assertPlaceRule(text: string, label: string) {
   assert.match(text, /場所しか手がかり/, label + ": a place alone never selects one own figure");
   assert.match(text, /図形の中の部分の位置や向き（右に突き出た部分など）/, label + ": parts inside a figure stay usable");
   assert.doesNotMatch(text, FIXED_POSITIONS, label + ": no fixed position vocabulary in instructions");
+}
+// A place-only turn realized as accept: the request asks for the shape, and "only receive" remains solely as the
+// explicit branch for every other case, so no instruction in the same request opposes asking.
+function assertCoherentAccept(messages: Message[], label: string) {
+  const text = textOf(messages);
+  assert.match(text, /場所しか手がかりがなければ[^。]*場所だけでは分からないことを短く伝えて形の特徴を尋ねてください/, label + ": common rule");
+  assert.match(text, /acceptでは、相手が場所だけで図形を示したときは形の特徴を尋ね、それ以外は受け止めるだけにしてください/, label + ": generator rule");
+  assert.match(text, /相手が場所だけで図形を示したときは、場所だけでは分からないことを短く伝えて形の特徴を尋ね/, label + ": accept scope");
+  assert.equal(text.split("受け止めるだけ").length, text.split("それ以外は受け止めるだけ").length, label + ": no unconditional 'only receive'");
 }
 
 test("each prompt that reads the human turn separates a partner's board place from shape features", () => {
@@ -59,6 +69,13 @@ test("each prompt that reads the human turn separates a partner's board place fr
   assertPlaceRule(referent, "jev human_referent");
   assert.match(referent, /複数や判定不能ならmultiple/);
   assert.doesNotMatch(referent, /accept/, "estimating the human referent never chooses an action");
+  // Jev's recommended act and Luna's accept wording agree; every other accept keeps its original wording.
+  for (const text of [GENERATOR_INSTRUCTIONS_V2, LUNA_GENERATOR_INSTRUCTIONS_V2]) {
+    assert.match(text, /acceptでは、相手が場所だけで図形を示したときは形の特徴を尋ね、それ以外は受け止めるだけにしてください。/);
+    assert.doesNotMatch(text, /acceptでは受け止めるだけにしてください/);
+  }
+  assert.match(ACTION_SCOPE_V2.accept, /^相手が場所だけで図形を示したときは、場所だけでは分からないことを短く伝えて形の特徴を尋ねる。それ以外は受け止めるだけ。名前に決まったとは言わない$/);
+  assert.match(LUNA_ACTION_SCOPE_V2.accept, /形の特徴を尋ね、自分の図形の観察は添えない。それ以外は受け止め、判断メモにある同じ論点の自分の観察は短く添えてよい。名前に決まったとは言わない$/);
 });
 
 // The Luna v2 path, as the public Worker builds it (createNamingTaskV2 without Jev research).
@@ -86,6 +103,7 @@ test("Luna v2 path: judge and generator get the same place rule, strategies diff
     for (const { phase, messages } of run.calls) {
       assert.equal(messages[0].content, TASK_INSTRUCTIONS_V2, phase + ": the shared task text is the first message");
       assertPlaceRule(messages[0].content, phase);
+      if (phase === "generation") assertCoherentAccept(messages, "luna generation");
       assert.deepEqual(imagesOf(messages), [aiImage]); assert.ok(!imagesOf(messages).includes(humanImage));
       const all = textOf(messages);
       for (const id of Object.keys(trial.key.human)) assert.ok(!all.includes(id), "human id leaked: " + id);
@@ -155,6 +173,8 @@ test("Jev path: a place-only turn carries the rule to extraction, referent, deci
     assert.equal(generation.messages[0].content, TASK_INSTRUCTIONS_V2);
     const decision = generation.messages.find(m => typeof m.content === "string" && m.content.includes('"action":"accept"'))!;
     assert.match(decision.content, /"targetSlot":null/); assert.match(decision.content, /"target":\{"kind":"none"\}/);
+    assert.ok(decision.content.includes(ACTION_SCOPE_V2.accept), "the act line carries the place-only accept wording");
+    assertCoherentAccept(generation.messages, "jev generation");
     assert.deepEqual(run.bodies.map(body => Object.keys(body.questions).includes("human_referent") ? "referent" : "decision"), ["referent", "decision"]);
     for (const body of run.bodies) for (const [key, question] of Object.entries(body.questions) as Array<[string, any]>) assertPlaceRule(question.instructions, key);
     // The place-only claim stays without a target; no program rule maps it to a figure.

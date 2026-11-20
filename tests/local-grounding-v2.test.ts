@@ -48,10 +48,11 @@ test("local grounding omitted and null keep requests, private state and traces b
   // Originally captured from e06b04e; re-captured for the Luna public-act change after checking the only
   // differences are humanNaming/publication on traces, the Luna generator text and the Luna accept scope;
   // re-captured again for Argon's Japanese review, which changes only one particle here (見立てには → 見立ては);
-  // re-captured for #172, whose only change here is the partner-position sentence in TASK_INSTRUCTIONS_V2.
+  // re-captured for #172, whose only changes here are the partner-position sentence in TASK_INSTRUCTIONS_V2 and the
+  // place-only branch of the accept wording.
   // Guards the request, output state and trace bytes, not just null's alias.
   const bytes = JSON.stringify({ result: a, calls: implicit.calls, attempts: implicit.dialogue.getAttempts() });
-  assert.equal(createHash("sha256").update(bytes).digest("hex"), "7fb39ee693d5dac1155f54744a458669d85aa04275dc77c88b9afe12b96482d6");
+  assert.equal(createHash("sha256").update(bytes).digest("hex"), "bf0739bda0b2bc396c9c689861a0ebe2498e75dd31fc09351ebdab35b29a4ded");
   assert.ok(!JSON.stringify(implicit.dialogue.getAttempts()).includes("localGrounding"));
   assert.ok(!JSON.stringify(implicit.calls).includes("局所問題の作業メモ"));
 });
