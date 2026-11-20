@@ -12,6 +12,7 @@ import { hash } from '../dialogue-model/runtime/diagnostics/parity-verify/core.t
 import { createJevDecisionClient, TWO_STAGE_V2_CANDIDATE_SETS, candidateSetLabel } from '../dialogue-model/runtime/decision/jev-decision.ts';
 import { createJevLocalTestClassifier } from '../dialogue-model/runtime/local-grounding/jev-local-test.ts';
 import { createChatClient } from '../dialogue-model/runtime/client.mjs';
+import { buildReobservationMessages } from '../dialogue-model/runtime/observation/observe.ts';
 import { harness, image } from './support/s4-integration/harness.ts';
 
 const normal = JSON.parse(await readFile(new URL('./support/s4-integration/NORMAL-RECORDS.json', import.meta.url), 'utf8'));
@@ -55,19 +56,19 @@ test('F1 v1: a canonical decide() failure record passes the S4 shape, older reco
 const OWN = { ownImage: image, ownAnchors: normal.trials[0].replay[0].result.sides[0].material.own.ownAnchors };
 const MODEL = normal.trials[0].replay[0].result.sides[0].material.model;
 const SET_LABELS = TWO_STAGE_V2_CANDIDATE_SETS.map(candidateSetLabel);
+const ASPECTS = ['orientation', 'part', 'contour', 'construal', 'referent'];
+const OLD = normal.trials[0].replay[0].tape;
+const ACTIONS = Object.keys(OLD.common.jev[0].answers.action.probabilities), TARGETS = Object.keys(OLD.common.jev[0].answers.target.probabilities);
+const AFTER_REOBSERVATION = ACTIONS.filter(a => a !== 'request_observation');
 const answer = (choice: string, keys: string[]) => ({ type: 'choice', choice, probabilities: Object.fromEntries(keys.map(k => [k, k === choice ? 1 : 0])) });
-/** NORMAL's material with v2 answers: stage one (accept, multiple), then the candidate set figures_0_2. */
-function v2Tape() {
-  const old = normal.trials[0].replay[0].tape, first = old.common.jev[0];
-  const actions = Object.keys(first.answers.action.probabilities), targets = Object.keys(first.answers.target.probabilities);
-  return { ...structuredClone(old), common: { ...structuredClone(old.common), jev: [
-    { model: 'typesafe/jev-1.14', id: 'gen-s4-v2-stage-one', usage: { cost: 0 }, answers: { action: answer('accept', actions), target: answer('multiple', targets) } },
-    { model: 'typesafe/jev-1.14', id: 'gen-s4-v2-candidate-set', usage: { cost: 0 }, answers: { candidate_set: answer('figures_0_2', SET_LABELS) } }] },
-    recorded: { label: 'bypass-enabled', expectedRequests: [] as any[] } };
-}
-/** The recorded side's own run: the same native serializers and fixed responses as the replay, keeping the trace and state. */
-async function recordedRun(profile: any, tape: any, label: 'repair-first' | 'bypass-enabled') {
-  const luna = [...tape.common.luna, ...tape.tails[label].luna], jev = [...tape.common.jev, ...tape.tails[label].jev], traces: any[] = [];
+const jevResponse = (id: string, answers: Record<string, unknown>) => ({ model: 'typesafe/jev-1.14', id: 'gen-s4-' + id, usage: { cost: 0 }, answers });
+const candidates = (included: number[]) => Object.fromEntries([0, 1, 2, 3, 4, 5].map(i => ['candidate_' + i, answer(included.includes(i) ? 'include' : 'exclude', ['include', 'exclude'])]));
+const subsets = (n: number) => Array.from({ length: 2 ** n - 1 }, (_, i) => 'subset_' + i);
+/** The recorded side's own run: the same native serializers and fixed responses as the replay, keeping the trace and state.
+ * `learn` answers a reobservation from the runtime's own request once; otherwise the tape's fixed result is returned. */
+async function recordedRun(profile: any, tape: any, label: 'repair-first' | 'bypass-enabled', learn?: (input: any) => any) {
+  const luna = [...tape.common.luna, ...tape.tails[label].luna], jev = [...tape.common.jev, ...tape.tails[label].jev];
+  const fixed = [...tape.common.reobservations], made: any[] = [], traces: any[] = [];
   let next: any;
   const http = createChatClient({ provider: 'cloudflare', apiKey: 'synthetic-offline-replay-key', purpose: profile.modelPolicy.purpose,
     baseUrl: 'http://offline.invalid/v1', timeoutMs: profile.timeouts.lunaAttemptMs },
@@ -78,29 +79,42 @@ async function recordedRun(profile: any, tape: any, label: 'repair-first' | 'byp
   const native = createJevDecisionClient({ enabled: true, readKey, fetchImpl, timeoutMs: profile.timeouts.decisionMs,
     researchLimits: { maxDeadlineMs: 600000 }, questionLayout: profile.questionLayout })!;
   const runtime = createProfileDialogue(profile, { client, image: OWN.ownImage, anchors: [...OWN.ownAnchors], strategy: label,
-    observer: { async observeAll() { return structuredClone(tape.state.observationMemo); }, async reobserve() { throw Error('unused'); } },
+    observer: { async observeAll() { return structuredClone(tape.state.observationMemo); },
+      async reobserve(input: any) { const result = learn ? learn(input) : structuredClone(fixed.shift()); made.push(structuredClone(result));
+        await client.complete(buildReobservationMessages(input), { phase: 'observation_targeted' }); return result; } },
     jevDecision: { decide: (i: any, o: any) => native.decide(i, o), completeDetail: (i: any, s: any, o: any) => native.completeDetail!(i, s, o) },
     localGrounding: { classifier: createJevLocalTestClassifier({ enabled: true, readKey, fetchImpl, timeoutMs: profile.timeouts.localMs, researchLimits: { maxDeadlineMs: 600000 } })!,
       aiPublicTransport: { readKey, fetchImpl, timeoutMs: profile.timeouts.decisionMs } },
     onJevTurnTrace: (t: any) => traces.push(t) } as any);
   const result: any = await runtime.runAiTurn({ events: tape.events, privateState: tape.state, lastEventId: tape.events.at(-1).id, requestSeq: tape.events.at(-1).seq });
   assert.deepEqual([luna.length, jev.length], [0, 0]);
-  return { trace: { ...structuredClone(traces.at(-1)), status: 'committed' }, state: structuredClone(result.privateState) };
+  return { trace: { ...structuredClone(traces.at(-1)), status: 'committed' }, state: structuredClone(result.privateState), reobservations: made };
 }
-/** NORMAL rebuilt as one canonical v2 trial: profile, attempt, turn, state, calls, POSTs and the paired replay evidence. */
-async function v2Records() {
+/** NORMAL rebuilt as one canonical trial of the given layout and Jev responses: profile, attempt, turn, state, calls, POSTs and
+ * the paired replay evidence. A reobservation turn adds the observation_targeted Luna call and records the runtime's own request. */
+async function records(layout: 'two_stage_v1' | 'two_stage_v2', jev: any[], reobservation = false) {
   const n = structuredClone(normal), tr = n.trials[0], m = n.run.manifest;
-  const profile = JSON.parse(JSON.stringify(researchTrialProfileV3(m.lunaRequest, m.timeouts, 'two_stage_v2'))), digest = hash(profile);
-  for (const s of [n.run, n.summary, tr]) { s.profile = structuredClone(profile); s.profileSha256 = digest; }
-  tr.identity.profile = digest;
-  const tape = v2Tape();
-  const probe: any = await pairedInterventionReplay(tape as any, OWN as any, MODEL, profile);
+  let profile = structuredClone(n.run.profile);
+  if (layout === 'two_stage_v2') {
+    profile = JSON.parse(JSON.stringify(researchTrialProfileV3(m.lunaRequest, m.timeouts, 'two_stage_v2')));
+    const digest = hash(profile);
+    for (const s of [n.run, n.summary, tr]) { s.profile = structuredClone(profile); s.profileSha256 = digest; }
+    tr.identity.profile = digest;
+  }
+  const tape: any = { ...structuredClone(OLD), common: { ...structuredClone(OLD.common), jev }, recorded: { label: 'bypass-enabled', expectedRequests: [] } };
+  if (reobservation) {
+    tape.common.luna = [...tape.common.luna, { ...structuredClone(OLD.common.luna[0]), phase: 'observation_targeted' }];
+    const learned = await recordedRun(profile, tape, 'bypass-enabled', (input: any) => ({ observedAt: '2026-01-01T00:00:01.000Z', issue: structuredClone(input.issue),
+      figures: input.figureIds.map((figureId: string) => ({ figureId, supports: ['control-feature'], contradicts: [], unknown: [] })) }));
+    tape.common.reobservations = learned.reobservations;
+  }
+  const probe: any = await pairedInterventionReplay(tape, OWN as any, MODEL, profile);
   const recorded = probe.sides.find((s: any) => s.label === tape.recorded.label);
   tape.recorded.expectedRequests = recorded.requests.map((r: any, i: number) => ({ provider: r.provider, phase: r.phase, requestSha256: r.preProjectionPayloadSha256,
     actualSendMeasured: true, sendIds: [i + 1], ...(r.provider === 'luna' ? { messagesSha256: r.completeMessagesSha256 } : {}) }));
-  const result: any = await pairedInterventionReplay(tape as any, OWN as any, MODEL, profile);
+  const result: any = await pairedInterventionReplay(tape, OWN as any, MODEL, profile);
   assert.equal(result.status, 'same_material_intervention_verified', String(result.error));
-  const { trace, state } = await recordedRun(profile, tape, tape.recorded.label as 'bypass-enabled');
+  const { trace, state } = await recordedRun(profile, tape, tape.recorded.label);
   const template = (provider: string) => normal.trials[0].calls.find((c: any) => c.provider === provider);
   tr.calls = recorded.requests.map((r: any, i: number) => ({ ...structuredClone(template(r.provider)), id: i + 1, sendIds: [i + 1], phase: r.phase, turn: 1,
     requestSha256: r.provider === 'luna' ? r.completeMessagesSha256 : r.preProjectionPayloadSha256,
@@ -113,6 +127,9 @@ async function v2Records() {
   n.evidence.pairedReplay = [{ trialOrder: 0, turn: 1, left: result.sides[0], right: result.sides[1] }];
   return JSON.parse(JSON.stringify(n));
 }
+/** Canonical v2 decision: stage one (accept, multiple), then the candidate set figures_0_2. */
+const v2Records = () => records('two_stage_v2', [jevResponse('v2-stage-one', { action: answer('accept', ACTIONS), target: answer('multiple', TARGETS) }),
+  jevResponse('v2-candidate-set', { candidate_set: answer('figures_0_2', SET_LABELS) })]);
 /** Every copy of the committed decision in the record: attempt, turn trace, turn state and last state. */
 const decisions = (n: any) => { const tr = n.trials[0]; return [tr.attempts[0].decisions[0], tr.turns[0].trace[0].decisions[0],
   tr.turns[0].state.judgments[0].jevTurn.decision, tr.lastCommittedState.judgments[0].jevTurn.decision]; };
@@ -146,4 +163,50 @@ test('F1 v2: corrupt candidate-set evidence fails the S4 shape or replay', async
   for (const d of decisions(relabelled)) d.evidence.stages[1].choices.candidate_set = 'figures_0_3';
   assert.equal(shape(relabelled), 'pass');
   assert.equal(status(relabelled, 'replay'), 'mismatch');
+});
+
+/** Both copies of the turn's decisions in the record (attempt and turn trace); the private state keeps only the final one. */
+const traceDecisions = (n: any, index: number) => [n.trials[0].attempts[0].decisions[index], n.trials[0].turns[0].trace[0].decisions[index]];
+/** Every side copy of the replayed requests: the replay result and the paired evidence. */
+const sideCopies = (n: any) => [...n.trials[0].replay[0].result.sides, n.evidence.pairedReplay[0].left, n.evidence.pairedReplay[0].right];
+
+test('F1 v2 reobservation: request_observation / multiple -> candidate_set -> observe detail -> observation_targeted -> accept passes all five checks', async () => {
+  const n = await records('two_stage_v2', [
+    jevResponse('ro-stage-one', { action: answer('request_observation', ACTIONS), target: answer('multiple', TARGETS) }),
+    jevResponse('ro-candidate-set', { candidate_set: answer('figures_0_2', SET_LABELS) }),
+    jevResponse('ro-detail', { observe_targets: answer('subset_0', subsets(2)), observe_aspect: answer('orientation', ASPECTS) }),
+    jevResponse('after-stage-one', { action: answer('accept', AFTER_REOBSERVATION), target: answer('none', TARGETS) })], true);
+  const t = n.trials[0].attempts[0];
+  assert.deepEqual(t.decisions.map((d: any) => [d.action, d.evidence.stages.map((s: any) => s.stage)]),
+    [['request_observation', ['action_target', 'multiple_candidates', 'detail']], ['accept', ['action_target']]]);
+  assert.deepEqual(t.decisions[0].observe.figureIds, ['s-0000']); assert.equal(t.reobservations.length, 1);
+  // The targeted observation carries the own image: its projected messages cannot hash to the sent messages.
+  const targeted = n.trials[0].replay[0].result.sides[0].requests.find((r: any) => r.phase === 'observation_targeted');
+  assert.notEqual(hash(targeted.payload.messages), targeted.completeMessagesSha256);
+  for (const c of interventionChecks(n)) assert.equal(c.status, 'pass', c.id + ' ' + c.reason);
+  const variants: Array<[string, (n: any) => void]> = [
+    ['candidate set of the first decision swapped', n => { for (const d of traceDecisions(n, 0)) d.evidence.stages[1].choices.candidate_set = 'figures_0_3'; }],
+    ['first decision target swapped with its set', n => { for (const d of traceDecisions(n, 0)) { d.evidence.stages[1].choices.candidate_set = 'figures_0_3'; d.target.figureIds = ['s-0000', 's-0003']; } }],
+    ['observation target swapped', n => { for (const d of traceDecisions(n, 0)) d.observe.figureIds = ['s-0002']; }],
+    ['observation aspect swapped', n => { for (const d of traceDecisions(n, 0)) d.observe.aspect = 'part'; }],
+    ['projected image not the own image', n => { for (const side of sideCopies(n)) { const r = side.requests.find((r: any) => r.phase === 'observation_targeted');
+      const swap = (v: any): void => { if (v && typeof v === 'object') { if (v.projection) v.byteSha256 = '0'.repeat(64); else Object.values(v).forEach(swap); } };
+      swap(r.payload); r.payloadSha256 = hash(r.payload); } }],
+  ];
+  for (const [name, mutate] of variants) {
+    const copy = structuredClone(n); mutate(copy);
+    assert.equal(status(copy, 'shape'), 'pass', name);
+    assert.equal(status(copy, 'replay'), 'mismatch', name);
+  }
+});
+
+test('F1 v1 reobservation: request_observation / single -> observe detail -> observation_targeted -> accept passes all five checks', async () => {
+  const n = await records('two_stage_v1', [
+    jevResponse('v1-ro-stage-one', { action: answer('request_observation', ACTIONS), target: answer('figure_0', TARGETS), ...candidates([]) }),
+    jevResponse('v1-ro-detail', { observe_targets: answer('subset_0', subsets(1)), observe_aspect: answer('contour', ASPECTS) }),
+    jevResponse('v1-after-stage-one', { action: answer('accept', AFTER_REOBSERVATION), target: answer('figure_0', TARGETS), ...candidates([]) })], true);
+  assert.deepEqual(n.trials[0].attempts[0].decisions.map((d: any) => d.action), ['request_observation', 'accept']);
+  for (const c of interventionChecks(n)) assert.equal(c.status, 'pass', c.id + ' ' + c.reason);
+  const copy = structuredClone(n); for (const d of traceDecisions(copy, 0)) d.observe.aspect = 'part';
+  assert.equal(status(copy, 'replay'), 'mismatch');
 });
