@@ -61,8 +61,8 @@ export type ResearchTrialProfileV3 = Omit<ResearchTrialProfileV2,'id'|'questionL
 /** two_stage_v1 (the default) returns the unchanged profile. An explicit two_stage_v2 changes only questionLayout,
  * so its profileSha256 differs and records of one layout cannot be restored under the other. */
 export function researchTrialProfileV3(lunaRequest:LunaRequestSettings,timeouts:ResearchTimeoutsV2,questionLayout:JevQuestionLayout='two_stage_v1'):Readonly<ResearchTrialProfileV3> {
- if(questionLayout!=='two_stage_v1'&&questionLayout!=='two_stage_v2')throw new Error('invalid_question_layout');
+ if(questionLayout!=='two_stage_v1'&&questionLayout!=='two_stage_v2'&&questionLayout!=='two_stage_v3')throw new Error('invalid_question_layout');
  return frozen({...researchTrialProfileV2(lunaRequest,timeouts),id:'research_trial_profile_v3' as const,
   interventionPolicy:{version:'bypass_acceptance_v1' as const,tableSha256:BYPASS_ACCEPTANCE_V1_TABLE_SHA256},
-  ...(questionLayout==='two_stage_v2'?{questionLayout}:{})});
+  ...(questionLayout!=='two_stage_v1'?{questionLayout}:{})});
 }

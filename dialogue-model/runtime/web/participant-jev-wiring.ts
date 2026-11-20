@@ -106,7 +106,7 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
       if (JSON.stringify(savedTrial) !== JSON.stringify(technicalTrial)) return invalid();
       // A v2 record names its layout; a v1 record never does. profileSha256 below also differs between layouts.
       const savedLayout = Object.hasOwn(restore.options,'questionLayout') ? restore.options.questionLayout : 'two_stage_v1';
-      if (savedLayout !== profile.questionLayout || Object.hasOwn(restore.options,'questionLayout') && savedLayout !== 'two_stage_v2') return invalid();
+      if (savedLayout !== profile.questionLayout || Object.hasOwn(restore.options,'questionLayout') && savedLayout !== 'two_stage_v2' && savedLayout !== 'two_stage_v3') return invalid();
       if (restore.jevTraces?.some?.((trace:any)=>!checkedDecisionFailure(trace,profile.questionLayout))) return invalid();
       if (restore.options.profileSha256 !== researchHash(profile) ||
           researchHash(jsonData(restore.options.interventionPolicy)) !== researchHash(profile.interventionPolicy) ||
@@ -251,7 +251,7 @@ export function validateParticipantJevConfig(value:unknown):{config:ParticipantJ
     const c=jsonData(data(raw,['schemaVersion','lunaRequest','timeouts','cacheDirectory','modelId','memoSha256','seed','limits',...(Object.hasOwn(raw,'technicalTrial')?['technicalTrial']:[]),
       ...(Object.hasOwn(raw,'questionLayout')?['questionLayout']:[])])) as ParticipantJevConfig;
     if(Object.hasOwn(c,'technicalTrial'))c.technicalTrial=checkedTechnicalTrial(c.technicalTrial);
-    if(Object.hasOwn(c,'questionLayout')&&c.questionLayout!=='two_stage_v1'&&c.questionLayout!=='two_stage_v2')throw Error();
+    if(Object.hasOwn(c,'questionLayout')&&c.questionLayout!=='two_stage_v1'&&c.questionLayout!=='two_stage_v2'&&c.questionLayout!=='two_stage_v3')throw Error();
     if(c.schemaVersion!=='participant_jev_config_v1'||typeof c.cacheDirectory!=='string'||!safeModel(c.modelId)||!digest(c.memoSha256)||!Number.isSafeInteger(c.seed))throw Error();
     const limits=data(c.limits,['lunaCalls','lunaTokens','lunaPosts','jevPosts','jevUsd']);
     // The explicit per-trial research Jev budget may exceed the 0.05 default, never RESEARCH_MAX_JEV_USD; the same

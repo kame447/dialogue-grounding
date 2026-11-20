@@ -189,7 +189,7 @@ export function createDialogueV2(options) {
    }catch{throw new JevTurnError('invalid_intervention');}
   }
   // two_stage_v2 exists only for the integrated research profile; every other dialogue keeps two_stage_v1.
-  if (Object.hasOwn(options, "questionLayout") && options.questionLayout !== "two_stage_v1" && !integrated) throw new Error("two_stage_v2 requires the integrated Jev profile");
+  if (Object.hasOwn(options, "questionLayout") && options.questionLayout !== "two_stage_v1" && !integrated) throw new Error(options.questionLayout + " requires the integrated Jev profile");
   if (!client || typeof client.complete !== "function") throw new Error("A chat client is required");
   if (!STRATEGIES.includes(strategy)) throw new Error("Unsupported dialogue strategy");
   if (typeof referenceMemory !== "boolean") throw new Error("Invalid memory option");

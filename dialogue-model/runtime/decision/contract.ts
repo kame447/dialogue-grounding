@@ -90,8 +90,9 @@ export type DecisionInputBudget = {
     reobservations: number; observationDetails: number; observationChars: number; issueSummaryChars: number };
 };
 export type JevDecisionStageEvidence = {
-  /** multiple_candidates exists only in two_stage_v2, between action_target and detail. */
-  stage: "action_target" | "multiple_candidates" | "detail";
+  /** multiple_candidates exists only in two_stage_v2, between action_target and detail.
+   * action and target exist only in two_stage_v3 (action, then the target the chosen action may take, then detail). */
+  stage: "action_target" | "multiple_candidates" | "detail" | "action" | "target";
   model: string | null;
   responseId: string | null;
   /** Wire choice labels, with complete uncalibrated score maps for research only. */
@@ -135,4 +136,7 @@ export type JevDecisionClient = {
 };
 /** two_stage_v1 is the default and is unchanged. two_stage_v2 is explicit opt-in only: stage one asks
  * action and target kind, and a multiple target is followed by one closed choice among the 2-6 figure subsets. */
-export type JevQuestionLayout = "two_stage_v1" | "two_stage_v2";
+export type JevQuestionLayout = "two_stage_v1" | "two_stage_v2" | "two_stage_v3";
+/** two_stage_v3 is explicit opt-in only (integrated profile). Stage one is one closed question over the actions that have at
+ * least one legal target and detail in the material; stage two is one closed question over the targets that action may take
+ * (none, one figure, or a 2-6 figure candidate set); the detail stage is unchanged. At most 3 POSTs per decision. */

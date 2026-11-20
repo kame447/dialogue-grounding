@@ -154,7 +154,7 @@ test('B2/C2-4: committed turns carry no failure record; a v2 multiple decision c
   await assert.rejects(makeTask(v2Prepared,{strategy:'bypass-enabled',restore:unnamed}),{code:'invalid_options'});
   // Explicit two_stage_v1 is the default profile; unknown layouts refuse startup.
   assert.equal(researchHash(validateParticipantJevConfig({...v1.config,questionLayout:'two_stage_v1'}).profile),researchHash(validateParticipantJevConfig(v1.config).profile));
-  assert.throws(()=>validateParticipantJevConfig({...v1.config,questionLayout:'two_stage_v3'}),{code:'invalid_config'});
+  assert.throws(()=>validateParticipantJevConfig({...v1.config,questionLayout:'two_stage_v9'}),{code:'invalid_config'});
 });
 
 test('B3/F3: a failure record restores unchanged; misplaced, foreign-layout, contradictory or tampered records fail closed; older records still restore',async t=>{

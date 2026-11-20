@@ -122,7 +122,7 @@ test("C2-1: two_stage_v1 request bodies stay byte-identical to the base commit",
   assert.equal(researchTrialProfileV3(lunaRequest, timeouts).questionLayout, "two_stage_v1");
   assert.equal(researchTrialProfileV3(lunaRequest, timeouts, "two_stage_v2").questionLayout, "two_stage_v2");
   assert.notEqual(researchHash(researchTrialProfileV3(lunaRequest, timeouts)), researchHash(researchTrialProfileV3(lunaRequest, timeouts, "two_stage_v2")));
-  assert.throws(() => researchTrialProfileV3(lunaRequest, timeouts, "two_stage_v3" as never), /invalid_question_layout/);
+  assert.throws(() => researchTrialProfileV3(lunaRequest, timeouts, "two_stage_v9" as never), /invalid_question_layout/);
 });
 
 test("C2-2: v2 stage one asks action and target only; the candidate set lists exactly the 57 subsets of 2-6 own figures", () => {
@@ -335,8 +335,8 @@ test("E: ten Jev actions; request_observation is offered only while reobservatio
     assert.equal(Object.hasOwn(buildJevDecisionPayload(rich(), { questionLayout: layout }).questions.action.criteria, "request_observation"), true);
   }
   assert.throws(() => buildJevCandidateSetPayload({ ...rich(), reobservationAllowed: false }, "request_observation"), code("invalid_input"));
-  assert.throws(() => buildJevDecisionPayload(base(), { questionLayout: "two_stage_v3" as never }), code("invalid_options"));
-  assert.throws(() => createJevDecisionClient({ enabled: true, readKey, questionLayout: "two_stage_v3" as never }), code("invalid_options"));
+  assert.throws(() => buildJevDecisionPayload(base(), { questionLayout: "two_stage_v9" as never }), code("invalid_options"));
+  assert.throws(() => createJevDecisionClient({ enabled: true, readKey, questionLayout: "two_stage_v9" as never }), code("invalid_options"));
 });
 
 test("budget ceiling: research callers may set up to 0.15 USD; the default path keeps 0.05", () => {
