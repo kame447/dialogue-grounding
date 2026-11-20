@@ -1,8 +1,8 @@
 {
   "schemaVersion": "parity_live_failure_capture_v1",
-  "baseCommit": "3c8b71f2c8cd7c0133d647dec755e2691dff9720",
+  "baseCommit": "606efdf2d526c9fd53e66c2fb7e87d0d102a4505",
   "execution": "mock",
-  "fixtureSha256": "9696848c963c4e5d4befed5f4a13e4f870f44fab9775af3ae7468d04480051af",
+  "fixtureSha256": "fa53fbbc82be543b79bad338c1d439f0150814858b3ed26a0d55bf5363b13575",
   "sourceFiles": {
     "dialogue-model/runtime/client.mjs": "8392f8843365b22bbf802a66365823d8b9598df6288e108b53810b21544a17ed",
     "dialogue-model/runtime/config.mjs": "2b6a4ea7a18c088e6ca6bf519537ef51039d71e81872ef26b93eba3739aa98ca",
@@ -37,7 +37,7 @@
     "dialogue-model/runtime/local-grounding/classify.ts": "ef6c9aeea3c1920ba11cfdf07d9a8d4a57c84ab495627960dac95ef06889a0f6",
     "dialogue-model/runtime/local-grounding/contract.ts": "b9cd4e0bb14722aa7a0731ce2b89f7db04a3d87fb2b53f291ce3b241b3921764",
     "dialogue-model/runtime/local-grounding/derive.ts": "699d0d49a09120dd1ce53ea0795631754388557ea00f7e0efcaae65afc90e454",
-    "dialogue-model/runtime/local-grounding/extract-ai.ts": "61c88803ddd0dd8690dadbd707afdb1111e894fb8dcc396562cd6eb85217ebd5",
+    "dialogue-model/runtime/local-grounding/extract-ai.ts": "e489b7ff573fdbe9e4f0adc9b6ee5f0828bd3c6835dcd8cd6555e191161594a6",
     "dialogue-model/runtime/local-grounding/extract.ts": "1f3af472bca173e83bcb0bf07e4b98c15fb98bc1b960aedc28e0a4970563764e",
     "dialogue-model/runtime/local-grounding/jev-ai-public.ts": "6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7",
     "dialogue-model/runtime/local-grounding/jev-local-test.ts": "ad4cc001f2a0921407bb1879ec76f7c5014997ffb6a2ba25d1d6fc04c8f1790e",
