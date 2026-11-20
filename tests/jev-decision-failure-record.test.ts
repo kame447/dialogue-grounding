@@ -157,7 +157,7 @@ test('B2/C2-4: committed turns carry no failure record; a v2 multiple decision c
   assert.throws(()=>validateParticipantJevConfig({...v1.config,questionLayout:'two_stage_v3'}),{code:'invalid_config'});
 });
 
-test('B3: a failure record restores unchanged; misplaced, foreign-layout or tampered records fail closed; older records still restore',async t=>{
+test('B3/F3: a failure record restores unchanged; misplaced, foreign-layout, contradictory or tampered records fail closed; older records still restore',async t=>{
   const {prepared,record}=await failedTurn(t,{},MULTIPLE_ONE);
   const restored=await makeTask(prepared,{restore:record});
   assert.deepEqual(restored.record().jevTraces[0].decisionFailure,record.jevTraces[0].decisionFailure);
@@ -169,14 +169,16 @@ test('B3: a failure record restores unchanged; misplaced, foreign-layout or tamp
     ['v1 record carrying a v2 stage',r=>{r.jevTraces[0].decisionFailure.evidence.stages[0].stage='multiple_candidates';}],
     ['foreign layout',r=>{r.jevTraces[0].decisionFailure.evidence.questionLayout='two_stage_v2';}],
     ['not a decision failure',r=>{r.jevTraces[0].errorCode='generation_failed';}],
-    ['changed value',r=>{r.jevTraces[0].decisionFailure.evidence.costUsd=0.5;r.jevTraces[0].decisionFailure.evidence.callIndex=99;r.jevTraces[0].decisionFailure.evidence.stages[0].choices.action='close';}],
+    // F3: contradictions inside the record are detectable without the original response.
+    ['total cost not the sum of the stages',r=>{r.jevTraces[0].decisionFailure.evidence.costUsd=0.12;}],
+    ['always-offered action scores removed',r=>{r.jevTraces[0].decisionFailure.evidence.stages[0].scores.action={confirm:1};}],
+    ['multiple_requires_candidates with target none',r=>{r.jevTraces[0].decisionFailure.evidence.stages[0].choices.target='none';}],
+    ['rule raised with another outward code',r=>{const e=r.jevTraces[0].decisionFailure.evidence;e.error='invalid_decision';e.stages[0].error='invalid_decision';}],
+    ['response id of no stage',r=>{r.jevTraces[0].decisionFailure.evidence.responseId='gen-not-a-stage';}],
+    ['call budget not the stage-one budget',r=>{r.jevTraces[0].decisionFailure.evidence.inputBudget.stateChars+=1;}],
   ];
   for(const [name,mutate] of variants){
     const r=structuredClone(record);mutate(r);
-    if(name==='changed value'){
-      // Closed values that are still well formed restore as written: the record is evidence, not a recomputation.
-      await makeTask(prepared,{restore:r});continue;
-    }
     await assert.rejects(makeTask(prepared,{restore:r}),{code:'invalid_options'},name);
   }
   const older=structuredClone(record);delete older.jevTraces[0].decisionFailure;
@@ -303,6 +305,16 @@ test('D (v2): paired strategies share stage one and the candidate set; a veto ke
   assert.ok(partner.length>0,'the partner view uses its own figure IDs');
   for(const body of setBodies){const text=JSON.stringify(body);
     for(const word of ['repair-first','bypass-enabled','veto','strategy','seed',...partner])assert.ok(!text.includes(word),word);}
+  // F4: a committed v2 set stage restores only as the single candidate_set question over exactly the 57 subsets.
+  const tampered:Array<[string,(stage:any)=>void]>=[
+    ['scores cut to the chosen subset',stage=>{stage.scores.candidate_set={figures_1_3:1};}],
+    ['an extra question beside candidate_set',stage=>{stage.choices.extra='include';stage.scores.extra={include:1,exclude:0};}],
+    ['a label outside the 57 subsets',stage=>{stage.scores.candidate_set.figures_9=0;}],
+  ];
+  for(const [name,mutate] of tampered){
+    const r=structuredClone(runs[0]);mutate(r.queueState.privateState.judgments[0].jevTurn.decision.evidence.stages[1]);
+    await assert.rejects(makeTask(prepared,{strategy:'repair-first',restore:r}),{code:'invalid_options'},name);
+  }
 });
 
 test('§5 (v2): the set-stage POST is reserved and charged like v1 follow-up stages; at the post limit it is never sent',async t=>{

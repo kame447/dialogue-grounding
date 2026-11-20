@@ -204,6 +204,8 @@ const contentKey = (claim: LocalClaimView) => JSON.stringify([claim.aspect, clai
 const INFORMATION_ACTS = new Set(["assert", "agree", "deny", "construe", "name_propose", "name_accept", "name_reject"]);
 const figureInformation = (claim: LocalClaimView) => INFORMATION_ACTS.has(claim.act) && !["question", "progress"].includes(claim.aspect);
 const sameSet = (a: readonly string[], b: readonly string[]) => a.length === b.length && new Set(a).size === a.length && a.every(id => b.includes(id));
+/** two_stage_v2: the only labels a saved candidate-set stage may score (fixed 2-6 own-figure subsets). */
+const CANDIDATE_SET_LABELS = TWO_STAGE_V2_CANDIDATE_SETS.map(candidateSetLabel);
 // Shared with the publication rejection below; no new semantic acceptance rule.
 const eligibleAgreeClaim = (c: LocalClaimView) => c.aspect === "name" && c.name !== null && c.targets.length === 1 &&
   (c.speaker === "human" && c.act === "name_propose" || c.act === "name_accept");
@@ -325,6 +327,8 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
     persistedEvidence(es[0],'action_target');
     if(setStage){
      persistedEvidence(es[1],'multiple_candidates');
+     // The set stage asked exactly one closed question over all 57 subsets; anything else was never a Jev answer.
+     if(!sameSet(Object.keys(es[1].choices),['candidate_set'])||!sameSet(Object.keys(es[1].scores),['candidate_set'])||!sameSet(Object.keys(es[1].scores.candidate_set),CANDIDATE_SET_LABELS))throw Error();
      const set=TWO_STAGE_V2_CANDIDATE_SETS.find(s=>candidateSetLabel(s)===es[1].choices.candidate_set);
      if(!set||es[0].choices.target!=='multiple'||!stateSame(set.map(i=>ownSlots[i]),d.target.figureIds))throw Error();
     }
@@ -395,6 +399,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   // One layout per runtime: validation, acceptance, restore and the client's own requests must agree.
   const questionLayout: JevQuestionLayout = options.questionLayout ?? "two_stage_v1";
   if (questionLayout !== "two_stage_v1" && questionLayout !== "two_stage_v2") throw new Error("Invalid Jev question layout");
+  if (questionLayout === "two_stage_v2" && !integrated) throw new Error("two_stage_v2 requires the integrated Jev profile");
   const declaredLayout = (jevDecision as { metadata?: { questionLayout?: unknown } } | undefined)?.metadata?.questionLayout;
   if (declaredLayout !== undefined && declaredLayout !== questionLayout) throw new Error("Jev question layout mismatch");
   const rejectNewLegacyState=(s:JevPrivateState)=>{

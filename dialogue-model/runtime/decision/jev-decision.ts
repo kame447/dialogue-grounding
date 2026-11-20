@@ -684,6 +684,56 @@ function failureStage(s: unknown, layout: JevQuestionLayout, last: boolean): Jev
     choices: Object.fromEntries(questions.map(q => [q, choices[q] as string])),
     scores: Object.fromEntries(questions.map(q => [q, Object.fromEntries(Object.entries(scores[q] as Record<string, number>))])) };
 }
+/** The stage-one actions every layout always offers; agree and request_observation depend on the input. */
+const ALWAYS_OFFERED_ACTIONS = JEV_ACTIONS.filter(a => a !== "agree" && a !== "request_observation");
+/** Rules decide() can name, with the outward code each one raises. The other rejection codes never come from decide(). */
+const DECIDE_RULE_ERRORS: Partial<Record<JevDecisionRejectionCode, JevDecisionErrorCode>> = { multiple_requires_candidates: "inconsistent_decision",
+  name_required: "inconsistent_decision", feature_required: "inconsistent_decision", name_requires_single_target: "invalid_decision",
+  detail_target_required: "invalid_decision" };
+/** Where decide() goes after a parsed stage one, in the order of decodeSelection, checkSelection/checkTargetKind and prepareDetail. */
+function stageOneOutcome(layout: JevQuestionLayout, choices: Record<string, string>): JevDecisionRejectionCode | "set" | "detail" | "done" {
+  const action = choices.action as JevAction, target = choices.target;
+  const included = Array.from({ length: 6 }, (_, i) => choices[`candidate_${i}`]).filter(c => c === "include").length;
+  if (layout === "two_stage_v1" && target === "multiple" && included < 2) return "multiple_requires_candidates";
+  const kind = target === "none" ? "none" : target === "multiple" ? "multiple" : "single";
+  if (["propose_name", "agree"].includes(action) && kind !== "single") return "name_requires_single_target";
+  if (needsDetail(action) && kind === "none") return "detail_target_required";
+  if (layout === "two_stage_v2" && kind === "multiple") return "set";
+  return needsDetail(action) ? "detail" : "done";
+}
+/** The record's own internal consistency: totals derived from its stages, the rule against the stage-one answer and the
+ * stages that answer leads to. Needs no original prompt or response; an unknown cost stays null, never zero. */
+function failureConsistent(e: JevDecisionFailureEvidence): boolean {
+  const { stages } = e, last = stages.at(-1);
+  // The client accumulates cost in stage order and keeps the model/response of the last verified stage.
+  let costUsd: number | null = null, model: string | null = null, responseId: string | null = null;
+  for (const s of stages) {
+    if (s.costUsd !== null) costUsd = (costUsd ?? 0) + s.costUsd;
+    if (s.model !== null) { model = s.model; responseId = s.responseId; }
+  }
+  if (e.costUsd !== costUsd || e.model !== model || e.responseId !== responseId) return false;
+  if (stages.length && JSON.stringify(e.inputBudget) !== JSON.stringify(stages[0].inputBudget)) return false;
+  // A failed last stage carries the call's outward error; only reject() names a rule, and only on the last stage.
+  if (last?.status === "error" && last.error !== e.error || (last?.rejectionCode ?? null) !== e.rejectionCode) return false;
+  if (e.rejectionCode !== null && DECIDE_RULE_ERRORS[e.rejectionCode] !== e.error) return false;
+  // A stage holds answers only once parsed; afterwards it can fail only through a rule.
+  if (stages.some(s => Object.keys(s.choices).length > 0 && s.status === "error" && s.rejectionCode === null)) return false;
+  const first = stages[0];
+  if (!first || !Object.keys(first.choices).length) return stages.length <= 1 && e.rejectionCode === null;
+  if (!ALWAYS_OFFERED_ACTIONS.every(a => Object.hasOwn(first.scores.action, a))) return false;
+  const action = first.choices.action, outcome = stageOneOutcome(e.questionLayout, first.choices), [, second, third] = stages;
+  if (outcome === "set") {
+    if (!second) return e.rejectionCode === null;
+    if (second.stage !== "multiple_candidates") return false;
+    // The detail stage never names a rule (decodeDetail cannot reject).
+    if (third) return needsDetail(action as JevAction) && third.stage === "detail" && stages.length === 3 && e.rejectionCode === null;
+    return e.rejectionCode === null || e.rejectionCode === "feature_required" && ["confirm", "repair"].includes(action) && Object.keys(second.choices).length > 0;
+  }
+  if (second) return outcome === "detail" && second.stage === "detail" && stages.length === 2 && e.rejectionCode === null;
+  if (outcome === "detail") return e.rejectionCode === null || e.rejectionCode === (["propose_name", "agree"].includes(action) ? "name_required"
+    : ["confirm", "repair"].includes(action) ? "feature_required" : null);
+  return outcome === "done" ? e.rejectionCode === null : e.rejectionCode === outcome;
+}
 /** Restore-time check of a saved failure record. Returns a rebuilt copy, or null for any key, label or value outside the closed shape. */
 export function checkDecisionFailureEvidence(value: unknown): JevDecisionFailureEvidence | null {
   try {
@@ -699,10 +749,11 @@ export function checkDecisionFailureEvidence(value: unknown): JevDecisionFailure
     if (!orders.includes(order) || value.inputBudget !== null && !inputBudget) return null;
     const stages = raw.map((s, i) => failureStage(s, layout, i === raw.length - 1));
     if (stages.some(s => s === null)) return null;
-    if (value.rejectionCode !== null && stages.at(-1)?.rejectionCode !== value.rejectionCode) return null;
-    return { schemaVersion: "jev_decision_failure_v1", questionLayout: layout, callIndex: value.callIndex as number, error: value.error as JevDecisionErrorCode,
-      rejectionCode: value.rejectionCode as JevDecisionRejectionCode | null, model: value.model as string | null, responseId: value.responseId as string | null,
-      costUsd: value.costUsd as number | null, latencyMs: value.latencyMs as number, inputBudget, stages: stages as JevDecisionFailureStage[] };
+    const checked: JevDecisionFailureEvidence = { schemaVersion: "jev_decision_failure_v1", questionLayout: layout, callIndex: value.callIndex as number,
+      error: value.error as JevDecisionErrorCode, rejectionCode: value.rejectionCode as JevDecisionRejectionCode | null, model: value.model as string | null,
+      responseId: value.responseId as string | null, costUsd: value.costUsd as number | null, latencyMs: value.latencyMs as number, inputBudget,
+      stages: stages as JevDecisionFailureStage[] };
+    return failureConsistent(checked) ? checked : null;
   } catch { return null; }
 }
 /** Projects the evidence a decide() call handed to onFailureEvidence. Untrusted input: anything outside the closed
