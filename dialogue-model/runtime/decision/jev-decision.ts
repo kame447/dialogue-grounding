@@ -812,7 +812,7 @@ function failureConsistent(e: JevDecisionFailureEvidence): boolean {
   const { stages } = e, last = stages.at(-1);
   // two_stage_v3: a decision the local table refused before any publication has no provider stage, response or cost.
   if (e.questionLayout === "two_stage_v3" && stages.length === 0 && e.rejectionCode === "action_target_not_allowed")
-    return e.error === "invalid_decision" && e.model === null && e.responseId === null && e.costUsd === null && e.inputBudget === null;
+    return e.error === "invalid_decision" && e.model === null && e.responseId === null && e.costUsd === null && e.inputBudget === null && e.latencyMs === 0;
   // The client accumulates cost in stage order and keeps the model/response of the last verified stage.
   let costUsd: number | null = null, model: string | null = null, responseId: string | null = null;
   for (const s of stages) {

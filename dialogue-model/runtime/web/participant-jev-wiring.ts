@@ -61,13 +61,18 @@ function checkedProfile(value: unknown): ResearchTrialProfileV3 {
 }
 /** Plan O records exist only on failed decide() attempts and must re-validate to the identical closed record. */
 function checkedDecisionFailure(trace: any, layout: JevQuestionLayout): boolean {
-  if (!Object.hasOwn(trace, 'decisionFailure')) return true;
+  // The local v3 rule is recorded together with its evidence; a bare rule name on a trace is a damaged record.
+  if (!Object.hasOwn(trace, 'decisionFailure')) return trace.decisionRejectionCode !== 'action_target_not_allowed';
   const f = trace.decisionFailure;
   if (trace.status !== 'error' || !['decision_failed', 'invalid_decision'].includes(trace.errorCode) || !f || typeof f !== 'object' ||
       Object.getPrototypeOf(f) !== Object.prototype || Reflect.ownKeys(f).length !== 1 || !Object.hasOwn(f, 'evidence')) return false;
-  if (f.evidence === null) return true;
+  if (f.evidence === null) return trace.decisionRejectionCode !== 'action_target_not_allowed';
   const checked = checkDecisionFailureEvidence(f.evidence);
-  return checked !== null && checked.questionLayout === layout && researchHash(checked) === researchHash(jsonData(f.evidence));
+  if (checked === null || checked.questionLayout !== layout || researchHash(checked) !== researchHash(jsonData(f.evidence))) return false;
+  // A decision the local v3 table refused names its rule twice, in the turn and in the evidence, and in no other way; no native failure may carry it.
+  const local = checked.rejectionCode === 'action_target_not_allowed' && checked.stages.length === 0;
+  if (local) return trace.errorCode === 'invalid_decision' && trace.decisionRejectionCode === 'action_target_not_allowed';
+  return trace.decisionRejectionCode !== 'action_target_not_allowed';
 }
 
 /** R2: classify restore before any queue, initial observer, or model work. */

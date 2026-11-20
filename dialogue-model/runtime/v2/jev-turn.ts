@@ -385,7 +385,21 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
     // The repair-history entry created for this judgment keeps the executed candidate set; only a later human reply may update it (progress leaves unknown).
     const ids=z.executed.target.kind==='single'?[z.executed.target.figureId]:z.executed.target.kind==='multiple'?z.executed.target.figureIds:[];
     const entry=s.repairHistory.find((r:any)=>r?.turn===j.turnIndex);
-    if(!entry||entry.action!==j.judgment.action||!stateSame(entry.candidatesBefore,ids)||entry.progress==='unknown'&&!stateSame(entry.candidatesAfter,ids))throw Error();
+    if(!entry||entry.action!==j.judgment.action||!stateSame(entry.candidatesBefore,ids))throw Error();
+    const after=entry.candidatesAfter,same=stateSame(after,ids);
+    if(s.judgments.at(-1)===j){
+     // No later turn exists, so no human reply could have updated this entry yet: it is exactly as created. A progress label alone never opens it.
+     if(entry.progress!=='unknown'||!same||entry.partnerClaims?.length||entry.addedClaimIds?.length||entry.removedClaimIds?.length||Object.hasOwn(entry,'missingReasons')||Object.hasOwn(entry,'humanRejections'))throw Error();
+    }else if(entry.progress==='unknown'){
+     if(!same&&!(Array.isArray(entry.missingReasons)&&entry.missingReasons.length))throw Error();
+    }else{
+     // A later committed turn exists. The label and any changed set must be backed by the partner claims and added claims the update records.
+     const union=new Set((entry.partnerClaims??[]).flatMap((c:any)=>c.targets));
+     if(!same&&!(after.length&&entry.partnerClaims?.length&&after.every((id:string)=>union.has(id))))throw Error();
+     const narrowed=after.length>0&&after.length<ids.length&&after.every((id:string)=>ids.includes(id));
+     if(entry.progress==='changed'&&!(entry.addedClaimIds?.length||narrowed))throw Error();
+     if(entry.progress==='unchanged'&&(entry.addedClaimIds?.length||narrowed))throw Error();
+    }
    }
    const e=z.executed,g=j.judgment;if(g.action!==e.action||g.targetSlot!==(e.target.kind==='single'?e.target.figureId:null)||g.candidateName!==e.name||g.discriminatingFeature!==e.feature)throw Error();
   }

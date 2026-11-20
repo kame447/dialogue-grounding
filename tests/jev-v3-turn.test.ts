@@ -355,3 +355,59 @@ test('F5 (restore): a multiple revisit record with an unofferable target score o
   const tampered = structuredClone(later); tampered.queueState.privateState.repairHistory[0].candidatesBefore = [ids[1], ids[2]];
   await assert.rejects(makeTask(first.prepared, { restore: tampered }), { code: 'invalid_options' });
 });
+
+// ---- audit/06 R3 (history lock right after the turn) and R4 (local-rule failure record contract at restore)
+test('R3: right after a multiple revisit the repair-history entry is exactly as created; a progress label never opens it', async t => {
+  const first = await turn(t, V3, REVISIT_MULTIPLE);
+  const saved = first.record;
+  await makeTask(first.prepared, { restore: saved });
+  const variants: Array<[string, (r: any) => void]> = [
+    ['candidatesAfter exchanged and progress=changed', r => { const e = r.queueState.privateState.repairHistory[0]; e.candidatesAfter = [ids[2], ids[5]]; e.progress = 'changed'; }],
+    ['same plus forged added claim ids', r => { const e = r.queueState.privateState.repairHistory[0]; e.candidatesAfter = [ids[2], ids[5]]; e.progress = 'changed'; e.addedClaimIds = ['x:ai1']; }],
+    ['progress=unchanged alone', r => { r.queueState.privateState.repairHistory[0].progress = 'unchanged'; }],
+    ['partner claims injected', r => { r.queueState.privateState.repairHistory[0].partnerClaims = [{ id: 'x', act: 'assert', proposition: 'p', targets: [ids[2]] }]; }],
+  ];
+  for (const [name, mutate] of variants) {
+    const r = structuredClone(saved); mutate(r);
+    await assert.rejects(makeTask(first.prepared, { restore: r }), { code: 'invalid_options' }, name);
+  }
+  // Nothing of a rejected set reaches the Jev input: the accepted original sends the executed set, as before.
+  first.h.upstream.plan.answers = { action: 'accept', target: 'none' };
+  const restored = await makeTask(first.prepared, { restore: saved });
+  restored.task.message('もう一度見てみます', 'turn-2'); await restored.task.whenIdle();
+  const stageOne = first.h.upstream.posts.filter((b: any) => b.questions?.action).at(-1);
+  assert.deepEqual(JSON.parse(stageOne.state).repairHistory[0].candidatesBefore, SET);
+  assert.ok(!JSON.stringify(JSON.parse(stageOne.state).repairHistory).includes(ids[5]));
+  // After a genuine later turn the entry may have moved on, but a set exchange still needs backing partner claims.
+  const later = restored.record();
+  await makeTask(first.prepared, { restore: later });
+  const forged = structuredClone(later); const e = forged.queueState.privateState.repairHistory[0];
+  e.progress = 'changed'; e.candidatesAfter = [ids[2], ids[5]]; e.partnerClaims = []; e.addedClaimIds = ['x:ai1'];
+  await assert.rejects(makeTask(first.prepared, { restore: forged }), { code: 'invalid_options' });
+});
+
+test('R4: a zero-stage local-rule failure record restores only with the rule named in the turn and the evidence, null model/cost/budget and latency 0', async t => {
+  const failed = await turn(t, V3, { action: 'agree', target: 'figure_2' }, 'bypass-enabled', '二つのどちらかです', NAMED);
+  const rule = 'action_target_not_allowed';
+  const local = (r: any) => {
+    const tr = r.jevTraces[0];
+    tr.errorCode = 'invalid_decision'; tr.decisionRejectionCode = rule;
+    tr.decisionFailure = { evidence: { schemaVersion: 'jev_decision_failure_v1', questionLayout: 'two_stage_v3', callIndex: 1, error: 'invalid_decision', rejectionCode: rule,
+      model: null, responseId: null, costUsd: null, latencyMs: 0, inputBudget: null, stages: [] } };
+  };
+  const good = structuredClone(failed.record); local(good);
+  await makeTask(failed.prepared, { restore: good });
+  // The native failure evidence of the original record keeps restoring.
+  await makeTask(failed.prepared, { restore: failed.record });
+  const bad: Array<[string, (r: any) => void]> = [
+    ['rule name of the turn deleted', r => { delete r.jevTraces[0].decisionRejectionCode; }],
+    ['turn rule changed to agree_without_public_proposal', r => { r.jevTraces[0].decisionRejectionCode = 'agree_without_public_proposal'; }],
+    ['stage-zero latency 0 -> 19', r => { r.jevTraces[0].decisionFailure.evidence.latencyMs = 19; }],
+    ['bare rule name without evidence', r => { delete r.jevTraces[0].decisionFailure; }],
+    ['rule name on a native failure', r => { r.jevTraces[0].decisionRejectionCode = rule; }],
+  ];
+  for (const [name, mutate] of bad) {
+    const r = structuredClone(name === 'rule name on a native failure' ? failed.record : good); mutate(r);
+    await assert.rejects(makeTask(failed.prepared, { restore: r }), { code: 'invalid_options' }, name);
+  }
+});
