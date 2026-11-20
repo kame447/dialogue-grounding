@@ -1121,8 +1121,72 @@ $("chat").addEventListener("submit", (event) => {
   $("utterance").value = ""; followHistory = true; renderHistory();
   $("utterance").focus({ preventScroll: true }); drainMessages();
 });
-// Textarea Enter (including IME) is left to native multiline editing. Sending
-// is an explicit form action; no keydown handler turns Enter into a request.
+// ---- Space+Enter send (Issue #171) -------------------------------------------
+// Pure: holding a plain Space (no modifier, outside IME input) and then
+// pressing Enter sends once. Everything else stays native editing: Enter alone,
+// a Space released before Enter, modifiers or another key in between, and every
+// IME key (composition, isComposing, keyCode 229, and the confirming key right
+// after compositionend), so a Space pressed for IME conversion is never held.
+// A sent chord latches until both keys are released: auto-repeat or another
+// Enter never sends twice or edits the cleared composer.
+const SPACE_ENTER_IDLE = { composing: false, settling: false, space: null, latch: null };
+const isSpaceKey = (event) => event.code === "Space" || event.key === " ";
+const withModifier = (event) => Boolean(event.shiftKey || event.ctrlKey || event.altKey || event.metaKey);
+function spaceEnterStep(state, type, event = {}, field = { value: "", start: 0, end: 0 }) {
+  const native = (next) => ({ state: next, action: "native" });
+  if (type === "compositionstart") return native({ ...SPACE_ENTER_IDLE, composing: true });
+  if (type === "compositionend") return native({ ...SPACE_ENTER_IDLE, settling: true });
+  if (type === "settled") return native({ ...state, settling: false });
+  if (type === "keyup") {
+    const latch = state.latch && { space: state.latch.space && !isSpaceKey(event), enter: state.latch.enter && event.key !== "Enter" };
+    return native({ ...state, space: isSpaceKey(event) ? null : state.space, latch: latch?.space || latch?.enter ? latch : null });
+  }
+  // focus, blur or a hidden page: no key is known to be held any more.
+  if (type !== "keydown") return native(SPACE_ENTER_IDLE);
+  if (state.composing || state.settling || event.isComposing || event.keyCode === 229) {
+    return native({ ...SPACE_ENTER_IDLE, composing: state.composing, settling: state.settling });
+  }
+  if (isSpaceKey(event)) {
+    if (event.repeat) return { state, action: state.latch?.space ? "suppress" : "native" };
+    // A new press; its native input follows this event, so this is the text before it.
+    const latch = state.latch?.enter ? { space: false, enter: true } : null;
+    return native({ ...state, latch, space: withModifier(event) ? null : { value: field.value, start: field.start, end: field.end } });
+  }
+  if (event.key !== "Enter") return native({ ...state, space: null });
+  // An Enter pressed during the latch joins it until that Enter is released.
+  if (state.latch?.space || (state.latch?.enter && event.repeat)) return { state: { ...state, latch: { ...state.latch, enter: true } }, action: "suppress" };
+  const idle = { ...state, space: null, latch: null };
+  const restore = state.space && !event.repeat && !withModifier(event) ? spaceEnterRestore(state.space, field.value) : null;
+  return restore ? { state: { ...idle, latch: { space: true, enter: true } }, action: "send", restore } : native(idle);
+}
+// Pure: the text and selection before the chord's Space press when the only
+// change since is that press's own input at the selection (spaces from
+// auto-repeat, or an IME's full-width space); otherwise null, and the chord
+// stays a newline rather than guess which character to remove.
+function spaceEnterRestore(before, value) {
+  const head = before.value.slice(0, before.start), tail = before.value.slice(before.end);
+  if (value.length < head.length + tail.length || !value.startsWith(head) || !value.endsWith(tail)) return null;
+  return /^[ \u3000]*$/u.test(value.slice(head.length, value.length - tail.length)) ? before : null;
+}
+let spaceEnter = SPACE_ENTER_IDLE;
+function onSpaceEnter(type, event) {
+  const node = $("utterance");
+  const step = spaceEnterStep(spaceEnter, type, event, { value: node.value, start: node.selectionStart ?? node.value.length, end: node.selectionEnd ?? node.value.length });
+  spaceEnter = step.state;
+  // Safari dispatches the confirming key after compositionend in the same task.
+  if (type === "compositionend") setTimeout(() => { spaceEnter = spaceEnterStep(spaceEnter, "settled").state; }, 0);
+  if (step.action === "native") return;
+  event.preventDefault();
+  if (step.action !== "send") return;
+  // Undo only the chord's own Space input, then submit as the send button does.
+  // A blank composer is not submitted (and gets no required-field bubble).
+  node.value = step.restore.value; node.setSelectionRange?.(step.restore.start, step.restore.end);
+  if (node.value.trim()) $("chat").requestSubmit();
+}
+for (const type of ["keydown", "keyup", "compositionstart", "compositionend", "focus", "blur"]) {
+  $("utterance").addEventListener(type, (event) => onSpaceEnter(type, event));
+}
+document.addEventListener?.("visibilitychange", () => { spaceEnter = SPACE_ENTER_IDLE; });
 $("retry-chat").addEventListener("click", () => { if (chatOpen()) checkProgress(); });
 $("finish-conversation").addEventListener("click", () => changeStage("names"));
 $("back-to-chat").addEventListener("click", () => changeStage("chat"));
