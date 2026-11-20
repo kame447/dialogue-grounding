@@ -18,7 +18,7 @@ import { validateObservationMemo, mergeReobservation, observationContextMessages
 import type { JevDecision, JevDecisionClient, JevDecisionInput, JevObservationRequest, RepairHistoryEntry, HumanReferentEstimate, RepairProspectMaterial, AdaptiveRepairTrial, PublicNameCandidate, RepairFact, JevQuestionLayout } from "../decision/contract.ts";
 import { deriveRepairFacts, validateRepairFacts } from "../decision/repair-facts.ts";
 import { validateJevDecision, validateHumanReferentEstimate, validateRepairProspectEstimate, validateRepairProspectMaterial, unknownRepairProspect, JevDecisionError, JEV_DECISION_INPUT_LIMITS,
-  projectDecisionFailureEvidence, TWO_STAGE_V2_CANDIDATE_SETS, candidateSetLabel, V3_TARGET_LABEL_SET } from "../decision/jev-decision.ts";
+  projectDecisionFailureEvidence, checkDecisionFailureEvidence, TWO_STAGE_V2_CANDIDATE_SETS, candidateSetLabel, V3_TARGET_LABEL_SET } from "../decision/jev-decision.ts";
 import type { JevDecisionFailureEvidence } from "../decision/jev-decision.ts";
 import { prepareLocalGroundingTurn, validateLocalGroundingOptions, findLocalPublicationViolations } from "./local-grounding-turn.ts";
 import type { LocalGroundingResearchRecord, LocalGroundingTrace } from "./local-grounding-turn.ts";
@@ -54,7 +54,7 @@ export type ObservationFailure = { observationErrorCode: ObservationErrorCode; o
 export const JEV_GENERATION_ERROR_CODES = Object.freeze(["timeout", "network_error", "invalid_json", "empty_response", "provider_http_error",
   "policy_http_error", "invalid_policy_response", "invalid_response", "unavailable"] as const);
 export type JevGenerationErrorCode = typeof JEV_GENERATION_ERROR_CODES[number];
-export type JevTurnFailureDetails = { decisionRejectionCode?: "agree_without_public_proposal"; generationErrorCode?: JevGenerationErrorCode };
+export type JevTurnFailureDetails = { decisionRejectionCode?: "agree_without_public_proposal" | "action_target_not_allowed"; generationErrorCode?: JevGenerationErrorCode };
 export type JevHumanReferentTrace = HumanReferentEstimate & {
   turnIndex: number;
   /** SHA-256 of JSON.stringify of the validated memo supplied to estimation. */
@@ -74,7 +74,7 @@ export class JevTurnError extends Error {
       this.observationPhase = observation.observationPhase;
       this.observationErrorCode = new ObservationError(observation.observationErrorCode).code;
     }
-    if (details.decisionRejectionCode === "agree_without_public_proposal") this.decisionRejectionCode = details.decisionRejectionCode;
+    if (details.decisionRejectionCode === "agree_without_public_proposal" || details.decisionRejectionCode === "action_target_not_allowed") this.decisionRejectionCode = details.decisionRejectionCode;
     if (details.generationErrorCode !== undefined) this.generationErrorCode = JEV_GENERATION_ERROR_CODES.includes(details.generationErrorCode)
       ? details.generationErrorCode : "unavailable";
   }
@@ -256,6 +256,9 @@ export function updateRepairHistory(history: readonly RepairHistoryEntry[], befo
 }
 
 // New state boundary only. Historical catalogs require the recorded tape.
+/** two_stage_v3: the target kinds each action may take (a literal copy of the contract table; never read from a question). */
+const V3_ACTION_KINDS={accept:['none','single','multiple'],defer:['none','single','multiple'],move_on:['none','single','multiple'],close:['none','single','multiple'],
+  propose_name:['single'],agree:['single'],confirm:['single','multiple'],repair:['single','multiple'],revisit:['single','multiple']} as const;
 const stateExact=(x:any,keys:string[])=>!!x&&Object.getPrototypeOf(x)===Object.prototype&&Reflect.ownKeys(x).length===keys.length&&keys.every(k=>Object.hasOwn(x,k));
 function stateJson(x:unknown,seen=new Set<object>()):void {
  if(x===null||typeof x==='string'||typeof x==='boolean'||typeof x==='number'&&Number.isFinite(x))return;
@@ -336,6 +339,9 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
      const expected=t?.kind==='none'?'none':t?.kind==='single'?'figure_'+ownSlots.indexOf(t.figureId):t?.kind==='multiple'?candidateSetLabel(idx(t.figureIds)):null;
      const offered=Object.keys(es[1].scores.target);
      if(expected===null||es[1].choices.target!==expected||offered.length!==new Set(offered).size||!offered.every(k=>V3_TARGET_LABEL_SET.includes(k)))throw Error();
+     // The target question can only ever have offered kinds this action may take (audit/06 F5: a saved `none: 0` for revisit was never offerable).
+     const allowed=(V3_ACTION_KINDS as Record<string,readonly string[]>)[d.action];
+     if(!allowed||!offered.every(k=>allowed.includes(k==='none'?'none':k.startsWith('figure_')?'single':'multiple')))throw Error();
      if(t.kind==='multiple'&&!TWO_STAGE_V2_CANDIDATE_SETS.some(s=>candidateSetLabel(s)===expected))throw Error();
     }
     if(setStage){
@@ -375,6 +381,12 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
       (restrictedAgree?actions.has('agree'):actions.has('propose_name')!==actions.has('agree'))||actions.has('revisit')!==(original.target.kind!=='none')||original.target.kind!=='single'&&(actions.has('agree')||actions.has('propose_name')))throw Error();
     const detail=['propose_name','agree','confirm','repair'].includes(z.executed.action);if(detail){persistedEvidence(t.detailEvidence,'detail');}else if(t.detailEvidence!==null)throw Error();
    }else throw Error();
+   if(questionLayout==='two_stage_v3'&&['repair','confirm','revisit'].includes(j.judgment?.action)){
+    // The repair-history entry created for this judgment keeps the executed candidate set; only a later human reply may update it (progress leaves unknown).
+    const ids=z.executed.target.kind==='single'?[z.executed.target.figureId]:z.executed.target.kind==='multiple'?z.executed.target.figureIds:[];
+    const entry=s.repairHistory.find((r:any)=>r?.turn===j.turnIndex);
+    if(!entry||entry.action!==j.judgment.action||!stateSame(entry.candidatesBefore,ids)||entry.progress==='unknown'&&!stateSame(entry.candidatesAfter,ids))throw Error();
+   }
    const e=z.executed,g=j.judgment;if(g.action!==e.action||g.targetSlot!==(e.target.kind==='single'?e.target.figureId:null)||g.candidateName!==e.name||g.discriminatingFeature!==e.feature)throw Error();
   }
   return structuredClone(s);
@@ -399,7 +411,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   const gated=adaptive&&['adaptive_repair_v2','adaptive_repair_v3'].includes(options.technicalTrial!.version);
   const factored=adaptive&&options.technicalTrial!.version==='adaptive_repair_v3';
   const checkProspectMode=(s:JevPrivateState)=>{
-    if(!adaptive&&s.judgments?.some(j=>Object.hasOwn(j.jevTurn??{},'repairProspect')||Object.hasOwn(j.jevTurn??{},'agreeNames')||j.jevTurn?.intervention?.rerank?.policyId==='saved_action_scores_open_issue_v1'))throw new JevTurnError('invalid_state');
+    if(!adaptive&&s.judgments?.some(j=>Object.hasOwn(j.jevTurn??{},'repairProspect')||Object.hasOwn(j.jevTurn??{},'agreeNames')&&questionLayout!=='two_stage_v3'||j.jevTurn?.intervention?.rerank?.policyId==='saved_action_scores_open_issue_v1'))throw new JevTurnError('invalid_state');
     // Each version restores only its own records: v2 judgments always carry the gate, older ones never do.
     if(s.judgments?.some(j=>Object.hasOwn(j.jevTurn??{},'repairGate')!==gated))throw new JevTurnError('invalid_state');
     if(s.judgments?.some(j=>Object.hasOwn(j.jevTurn??{},'repairFacts')!==factored))throw new JevTurnError('invalid_state');
@@ -485,6 +497,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       publicSpeech: null, observationMemo: null, repairHistory: [], ...(factored ? { repairFacts: [] } : {}), generationGuard: { violations: [], regenerated: false, fallback: false } };
     let errorCode: JevTurnErrorCode = "invalid_state";
     const decideFailure: { failed: boolean; evidence?: unknown } = { failed: false };
+    let localRule: "action_target_not_allowed" | null = null;
     let observationPhase: ObservationFailure["observationPhase"] | null = null;
     try {
       abortIf(signal);
@@ -545,7 +558,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
           name: previousExecution!.name, feature: previousExecution!.feature } : null,
         publicNames: claims.filter(c => c.name !== null && publicTurns.some(t => t.turn === c.sourceTurn && t.text.includes(c.name!)))
           .map(c => ({ name: c.name!, figureId: c.targets.length === 1 ? c.targets[0] : null, sourceTurn: c.sourceTurn })) };
-      if (adaptive) baseInput.agreeNames = claims.filter(eligibleAgreeClaim).flatMap(c => {
+      if (adaptive || questionLayout === "two_stage_v3") baseInput.agreeNames = claims.filter(eligibleAgreeClaim).flatMap(c => {
         // A name_accept may inherit a name without repeating its literal text.
         const source = publicTurns.find(t => t.turn === c.sourceTurn && t.text.includes(c.name!)) ??
           publicTurns.filter(t => t.text.includes(c.name!)).sort((a, b) => a.turn - b.turn)[0];
@@ -617,7 +630,12 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         } catch (error) { decideFailure.failed = true; decideFailure.evidence = sink.evidence; throw error; }
         abortIf(signal);
         errorCode = "invalid_decision";
-        decision = validateJevDecision(raw, input, { questionLayout });
+        try { decision = validateJevDecision(raw, input, { questionLayout }); }
+        catch (error) {
+          // two_stage_v3 only: a decision the local table refuses names its rule; no provider response or cost record is invented for it.
+          if (questionLayout === "two_stage_v3" && error instanceof JevDecisionError && error.rule === "action_target_not_allowed") localRule = error.rule;
+          throw error;
+        }
         record.decisions.push(structuredClone(decision));
         if (decision.action !== "request_observation") {finalInput=input;break;}
         deadline?.close();
@@ -724,7 +742,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         graph: applyReferenceUpdate(state.graph, prepared.update, { publicTurns, generationSucceeded: true }) as Graph,
         observationMemo: memo, repairHistory, judgments: [...state.judgments, { turnIndex: latest.seq, lastEventId, status: "committed", judgment,
           generationGuard: structuredClone(record.generationGuard), jevTurn: { attemptNumber, decision, ...(integrated?{executed:execution,intervention:record.intervention as InterventionTrace}:{}), humanReferent: structuredClone(record.humanReferent), ...(record.repairProspect === undefined ? {} : { repairProspect: structuredClone(record.repairProspect) }),
-            ...(adaptive ? { agreeNames: structuredClone(baseInput.agreeNames!) } : {}),
+            ...(adaptive || questionLayout === "two_stage_v3" ? { agreeNames: structuredClone(baseInput.agreeNames!) } : {}),
             ...(factored ? { repairFacts: structuredClone(baseInput.repairFacts!) } : {}),
             ...(gate ? { repairGate: structuredClone(gate) } : {}) },
           localGrounding: { ...prepared.trace, attemptNumber }, ...(aiEnabled ? { aiPublic: { aiSeq: aiPending!.aiSeq, textSha256: aiPending!.textSha256 } } : {}) }],
@@ -745,6 +763,11 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       }
       record.status = code === "aborted" ? "aborted" : "error"; record.errorCode = code;
       if (decideFailure.failed && record.status === "error") record.decisionFailure = { evidence: projectDecisionFailureEvidence(decideFailure.evidence, questionLayout) };
+      else if (localRule !== null && record.status === "error") {
+        record.decisionRejectionCode = localRule;
+        record.decisionFailure = { evidence: checkDecisionFailureEvidence({ schemaVersion: "jev_decision_failure_v1", questionLayout, callIndex: attemptNumber, error: "invalid_decision",
+          rejectionCode: localRule, model: null, responseId: null, costUsd: null, latencyMs: 0, inputBudget: null, stages: [] }) };
+      }
       if (code === "generation_failed") record.generationErrorCode = normalizeGenerationErrorCode(error);
       const observation = observationPhase ? observationFailure(error, observationPhase, signal?.aborted) : undefined;
       if (observation) Object.assign(record, observation);

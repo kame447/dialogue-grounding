@@ -23,9 +23,11 @@ export const JEV_DECISION_REJECTION_CODES = Object.freeze(["observation_target_r
 export type JevDecisionRejectionCode = typeof JEV_DECISION_REJECTION_CODES[number];
 export class JevDecisionError extends Error {
   code: JevDecisionErrorCode;
-  constructor(code: JevDecisionErrorCode) {
+  /** The local validation rule that refused a decision before any publication; null for transport and response errors. */
+  rule: JevDecisionRejectionCode | null;
+  constructor(code: JevDecisionErrorCode, rule: JevDecisionRejectionCode | null = null) {
     const safe = CODES.includes(code) ? code : "invalid_response";
-    super(safe); this.name = safe === "aborted" ? "AbortError" : "JevDecisionError"; this.code = safe;
+    super(safe); this.name = safe === "aborted" ? "AbortError" : "JevDecisionError"; this.code = safe; this.rule = rule;
   }
 }
 function fail(code: JevDecisionErrorCode): never { throw new JevDecisionError(code); }
@@ -111,7 +113,8 @@ function legalActionTargetV3(action: JevAction, target: JevTarget, m: V3Material
   if (action === "request_observation") return m.reobservationAllowed;
   if (action === "propose_name" || action === "agree") {
     if (target.kind !== "single") return false;
-    const names = action === "agree" && m.catalog.agreeNames !== undefined ? m.catalog.agreeNames : m.catalog.names;
+    // two_stage_v3: agree rests on explicit public agree evidence only; without it (no agreeNames) agree is never legal.
+    const names = action === "agree" ? m.catalog.agreeNames ?? m.slots.map(() => []) : m.catalog.names;
     return names[m.slots.indexOf(ids[0])].length > 0;
   }
   return ids.some(id => m.catalog.features[m.slots.indexOf(id)].length > 0); // confirm, repair
@@ -270,7 +273,14 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
     ...(!referentOnly && input.repairProspect !== undefined ? { repairProspect: validateRepairProspectMaterial(input.repairProspect, input.repairHistory, input.turn) } : {}),
     inputBudget: { maxChars: 20000, omitted } };
   let state = "";
-  const over = () => { state = JSON.stringify(material); return state.length > 20000; };
+  // two_stage_v3: compaction is decided once, for every stage. It measures the material without `selected` plus the longest
+  // `selected` any later stage can add, so the action, target and detail requests all derive candidates from the same retained material.
+  const v3 = layout === "two_stage_v3";
+  const reserve = v3 ? JSON.stringify({ selected: { action: "request_observation", target: { kind: "multiple", figureIds: slots } } }).length : 0;
+  const over = () => {
+    state = JSON.stringify(material);
+    return (v3 && selection ? JSON.stringify({ ...material, selected: undefined }).length : state.length) + reserve > 20000;
+  };
   const latestAi = [...publicTurns].reverse().find(t => t.speaker === "ai")?.turn;
   const dropPublic = (count = 1) => {
     const removable = publicTurns.filter(t => t.turn !== input.turn && t.turn !== latestAi && t.turn !== previousAction?.turn);
@@ -317,9 +327,12 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
   while (over() && priorClaims.length) { priorClaims.shift(); omitted.claims++; }
   if (over()) fail("invalid_input"); // Never truncate the indispensable public source utterances.
   const budget: DecisionInputBudget = { maxChars: 20000, stateChars: state.length, omitted: structuredClone(omitted) };
+  // Public agree evidence whose source turn did not survive compaction can no longer be shown as evidence (two_stage_v3).
+  const liveTurns = new Set(publicTurns.map(t => t.turn));
+  const agreeLive = agreeNames === undefined ? undefined : v3 ? agreeNames.filter(n => liveTurns.has(n.sourceTurn)) : agreeNames;
   const catalog: Catalog = { names: observations.map(o => unique([...o.holistic.map(h => h.construal).filter(n => n.length <= 80),
     ...publicNames.filter(n => n.figureId === null || n.figureId === o.figureId).map(n => n.name)])),
-  ...(agreeNames === undefined ? {} : { agreeNames: observations.map(o => unique(agreeNames.filter(n => n.figureId === null || n.figureId === o.figureId).map(n => n.name))) }),
+  ...(agreeLive === undefined ? {} : { agreeNames: observations.map(o => unique(agreeLive.filter(n => n.figureId === null || n.figureId === o.figureId).map(n => n.name))) }),
   features: observations.map(o => unique([...o.analytic.shapes, o.analytic.composition, ...o.analytic.relations,
     ...o.reobservations.flatMap(r => r.supports)].filter(v => !!v.trim() && v.length <= 400))) };
   if ([...catalog.names, ...(catalog.agreeNames ?? []), ...catalog.features].some(v => v.length > 254)) fail("invalid_input");
@@ -427,7 +440,7 @@ export function validateHumanReferentEstimate(value: unknown, input: JevDecision
 }
 
 type Reject = (rule: JevDecisionRejectionCode, code?: JevDecisionErrorCode) => never;
-const rejectDecision: Reject = (_rule, code = "inconsistent_decision") => fail(code);
+const rejectDecision: Reject = (rule, code = "inconsistent_decision") => { throw new JevDecisionError(code, rule); };
 const needsDetail = (action: JevAction) => ["propose_name", "agree", "confirm", "repair", "request_observation"].includes(action);
 const targetIds = (target: JevTarget): string[] => target.kind === "single" ? [target.figureId] : target.kind === "multiple" ? [...target.figureIds] : [];
 function checkSelection(selected: JevActionTarget, reject: Reject = rejectDecision) {
@@ -796,6 +809,9 @@ function failureConsistentV3(e: JevDecisionFailureEvidence): boolean {
  * stages that answer leads to. Needs no original prompt or response; an unknown cost stays null, never zero. */
 function failureConsistent(e: JevDecisionFailureEvidence): boolean {
   const { stages } = e, last = stages.at(-1);
+  // two_stage_v3: a decision the local table refused before any publication has no provider stage, response or cost.
+  if (e.questionLayout === "two_stage_v3" && stages.length === 0 && e.rejectionCode === "action_target_not_allowed")
+    return e.error === "invalid_decision" && e.model === null && e.responseId === null && e.costUsd === null && e.inputBudget === null;
   // The client accumulates cost in stage order and keeps the model/response of the last verified stage.
   let costUsd: number | null = null, model: string | null = null, responseId: string | null = null;
   for (const s of stages) {
