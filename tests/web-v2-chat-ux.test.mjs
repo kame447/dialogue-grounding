@@ -65,11 +65,12 @@ const tick = async () => { for (let i = 0; i < 40; i++) await Promise.resolve();
 async function ui(initial = trial(), handler) {
   const { root, ids: e } = makeDOM();
   let state = { trial: initial }, timerId = 0, now = 10000, clientSequence = 0;
-  const timers = new Map(), calls = [];
-  runInNewContext(script, {
+  const timers = new Map(), calls = [], documentEvents = new Element("document");
+  const context = {
     Date: class extends Date { static now() { return now; } },
     crypto: { randomUUID: () => "browser-client-" + ++clientSequence },
-    document: { getElementById: (id) => e[id], createElement: (tag) => new Element(tag), createElementNS: (_, tag) => new Element(tag) },
+    document: { getElementById: (id) => e[id], createElement: (tag) => new Element(tag), createElementNS: (_, tag) => new Element(tag),
+      addEventListener: (type, handler) => documentEvents.addEventListener(type, handler) },
     FormData: class {
       constructor(form) { this.values = Object.entries(form.elements).map(([name, node]) => [name, node.value]); }
       get(name) { return this.values.find(([key]) => key === name)?.[1] ?? null; }
@@ -93,7 +94,8 @@ async function ui(initial = trial(), handler) {
       }
       return { ok: true, status: path === "/api/message" ? 202 : 200, json: async () => structuredClone(value) };
     },
-  });
+  };
+  runInNewContext(script, context);
   await tick();
   const advance = async (millis) => {
     const target = now + millis;
@@ -104,7 +106,7 @@ async function ui(initial = trial(), handler) {
     }
     assert.fail("fixture timer did not settle");
   };
-  return { e, root, calls, getState: () => state, advance,
+  return { e, root, calls, context, documentEvents, getState: () => state, advance,
     poll: async () => {
       const timer = [...timers.values()].filter((entry) => entry.delay === 700 || entry.delay === 2000).sort((a, b) => a.at - b.at)[0];
       assert.ok(timer, "a state refresh is scheduled"); await advance(timer.at - now);
@@ -312,6 +314,153 @@ test("Enter, Shift+Enter and IME never submit; clicking send preserves the exact
   assert.equal(messageBodies(e).at(-1), text);
 });
 
+// ---- Space+Enter send (Issue #171) ------------------------------------------
+const SPACE = { key: " ", code: "Space", keyCode: 32 }, ENTER = { key: "Enter", code: "Enter", keyCode: 13 };
+// The fixture has no native editing: an unprevented keydown inserts its text at
+// the selection, as a textarea does (IME keys pass the text the IME inserts).
+function keydown(e, fields, input = fields.key === "Enter" ? "\n" : fields.key) {
+  const node = e.utterance, event = node.fire("keydown", fields);
+  if (!event.prevented && input) {
+    const start = node.selectionStart ?? node.value.length, end = node.selectionEnd ?? node.value.length;
+    node.value = node.value.slice(0, start) + input + node.value.slice(end);
+    node.selectionStart = node.selectionEnd = start + input.length;
+  }
+  return event;
+}
+const keyup = (e, fields) => e.utterance.fire("keyup", fields);
+const type = (e, text) => { e.utterance.value = text; e.utterance.selectionStart = e.utterance.selectionEnd = text.length; };
+const messageTexts = (calls) => messageCalls(calls).map((call) => call.body.text);
+
+test("Space held then Enter sends once without the chord's own space; Enter alone and Space released first stay newlines", async () => {
+  const { e, calls } = await ui();
+  type(e, "こんにちは");
+  assert.equal(keydown(e, ENTER).prevented, false); keyup(e, ENTER);
+  keydown(e, SPACE); keyup(e, SPACE);
+  assert.equal(keydown(e, ENTER).prevented, false); keyup(e, ENTER);
+  assert.equal(e.utterance.value, "こんにちは\n \n");
+  assert.equal(messageCalls(calls).length, 0);
+  type(e, "左上の図形かな");
+  assert.equal(keydown(e, SPACE).prevented, false, "the held Space is still typed natively");
+  assert.equal(keydown(e, ENTER).prevented, true);
+  keyup(e, ENTER); keyup(e, SPACE); await tick();
+  assert.deepEqual(messageTexts(calls), ["左上の図形かな"]);
+  assert.equal(messageBodies(e).at(-1), "左上の図形かな");
+  assert.equal(e.utterance.value, "");
+});
+
+test("Space+Enter mid-text removes only its own space; text changed any other way is never trimmed by guess", async () => {
+  const { e, calls, context: c } = await ui();
+  type(e, "左上の図形"); e.utterance.selectionStart = e.utterance.selectionEnd = 2;
+  keydown(e, SPACE);
+  assert.equal(e.utterance.value, "左上 の図形");
+  assert.equal(keydown(e, ENTER).prevented, true); keyup(e, ENTER); keyup(e, SPACE); await tick();
+  assert.deepEqual(messageTexts(calls), ["左上の図形"]);
+  type(e, "右下"); keydown(e, SPACE); type(e, "右下 と貼り付け");
+  assert.equal(keydown(e, ENTER).prevented, false, "an unexpected change keeps Enter a newline");
+  assert.equal(messageCalls(calls).length, 1);
+  const before = { value: "左上の図形", start: 2, end: 2 };
+  for (const value of ["左上 の図形", "左上　の図形", "左上   の図形", "左上の図形"]) assert.equal(c.spaceEnterRestore(before, value), before, value);
+  for (const value of ["左上 xの図形", "左上の図", "左 上の図形", "左上 の図形 "]) assert.equal(c.spaceEnterRestore(before, value), null, value);
+  const selection = { value: "abcdef", start: 1, end: 3 };
+  assert.equal(c.spaceEnterRestore(selection, "a def"), selection, "a Space that replaced a selection is undone too");
+});
+
+test("Space+Enter never sends a blank composer and leaves no stray space; it keeps the send button's guards", async () => {
+  const { e, calls } = await ui();
+  let submits = 0; e.chat.addEventListener("submit", () => submits++);
+  for (const text of ["", "　 \n"]) {
+    type(e, text); keydown(e, SPACE);
+    assert.equal(keydown(e, ENTER).prevented, true); keyup(e, ENTER); keyup(e, SPACE);
+    assert.equal(e.utterance.value, text);
+  }
+  assert.equal(submits, 0, "a blank composer is not submitted, so no required-field bubble");
+  type(e, "名前の段階では送らない"); e["finish-conversation"].fire("click");
+  assert.equal(e.utterance.disabled, true);
+  keydown(e, SPACE); keydown(e, ENTER); keyup(e, ENTER); keyup(e, SPACE); await tick();
+  assert.equal(e.utterance.value, "名前の段階では送らない");
+  assert.equal(messageCalls(calls).length, 0);
+});
+
+test("IME never sends: composition, isComposing, keyCode 229 and a key right after compositionend; a conversion Space is never held", async () => {
+  const { e, calls, advance } = await ui();
+  type(e, "かんじ");
+  e.utterance.fire("compositionstart");
+  assert.equal(keydown(e, { ...SPACE, isComposing: true }, "").prevented, false);
+  assert.equal(keydown(e, { ...ENTER, isComposing: true, keyCode: 229 }, "").prevented, false);
+  e.utterance.fire("compositionend"); await advance(0);
+  assert.equal(keydown(e, ENTER).prevented, false, "the conversion Space, still held, does not arm the chord");
+  keyup(e, ENTER); keyup(e, SPACE);
+  // Between compositionstart and compositionend every key is IME input, even without isComposing.
+  e.utterance.fire("compositionstart"); keydown(e, SPACE, "");
+  assert.equal(keydown(e, ENTER, "").prevented, false);
+  keyup(e, ENTER); keyup(e, SPACE); e.utterance.fire("compositionend"); await advance(0);
+  // Safari dispatches the confirming key after compositionend, in the same task.
+  e.utterance.fire("compositionstart"); e.utterance.fire("compositionend");
+  assert.equal(keydown(e, SPACE, "").prevented, false);
+  assert.equal(keydown(e, ENTER, "").prevented, false);
+  keyup(e, SPACE); keyup(e, ENTER); await advance(0);
+  // keyCode 229 or isComposing without a composition event (e.g. a Windows IME).
+  keydown(e, { ...SPACE, keyCode: 229 }, "　");
+  assert.equal(keydown(e, ENTER).prevented, false); keyup(e, ENTER); keyup(e, SPACE);
+  for (const ime of [{ keyCode: 229 }, { isComposing: true }]) {
+    keydown(e, SPACE);
+    assert.equal(keydown(e, { ...ENTER, ...ime }, "").prevented, false); keyup(e, ENTER); keyup(e, SPACE);
+  }
+  await tick();
+  assert.equal(messageCalls(calls).length, 0);
+  type(e, "漢字です"); keydown(e, SPACE);
+  assert.equal(keydown(e, ENTER).prevented, true, "after the IME the chord works again");
+  await tick();
+  assert.deepEqual(messageTexts(calls), ["漢字です"]);
+});
+
+test("Enter auto-repeat, another Enter or Space auto-repeat during a sent chord never send twice or edit the cleared composer", async () => {
+  const { e, calls } = await ui();
+  type(e, "一回だけ"); keydown(e, SPACE);
+  assert.equal(keydown(e, ENTER).prevented, true);
+  for (let i = 0; i < 3; i++) assert.equal(keydown(e, { ...ENTER, repeat: true }).prevented, true);
+  assert.equal(keydown(e, { ...SPACE, repeat: true }).prevented, true);
+  keyup(e, ENTER);
+  assert.equal(keydown(e, ENTER).prevented, true, "Enter again while the same Space is held");
+  keyup(e, SPACE);
+  assert.equal(keydown(e, { ...ENTER, repeat: true }).prevented, true, "that Enter stays latched until released");
+  keyup(e, ENTER);
+  assert.equal(e.utterance.value, "");
+  assert.equal(keydown(e, ENTER).prevented, false, "released keys: Enter is a newline again"); keyup(e, ENTER);
+  type(e, "二回目"); keydown(e, SPACE); keydown(e, ENTER); keyup(e, SPACE);
+  assert.equal(keydown(e, { ...ENTER, repeat: true }).prevented, true, "Space released first: Enter auto-repeat adds no newline");
+  keyup(e, ENTER); await tick();
+  assert.deepEqual(messageTexts(calls), ["一回だけ", "二回目"]);
+  assert.equal(e.utterance.value, "");
+});
+
+test("keyup, blur, focus and a hidden page release a held Space; a modifier or another key in between cancels the chord", async () => {
+  const { e, calls, documentEvents } = await ui();
+  const cases = [
+    [() => { keydown(e, SPACE); keyup(e, SPACE); }, ENTER],
+    [() => { keydown(e, SPACE); e.utterance.fire("blur"); }, ENTER],
+    [() => { keydown(e, SPACE); e.utterance.fire("focus"); }, ENTER],
+    [() => { keydown(e, SPACE); documentEvents.fire("visibilitychange"); }, ENTER],
+    [() => { keydown(e, SPACE); keydown(e, { key: "a", code: "KeyA", keyCode: 65 }); }, ENTER],
+    [() => { keydown(e, SPACE); keydown(e, { key: "ArrowLeft", code: "ArrowLeft", keyCode: 37 }, ""); }, ENTER],
+    [() => { keydown(e, SPACE); keydown(e, { key: "Shift", code: "ShiftLeft", keyCode: 16, shiftKey: true }, ""); keyup(e, { key: "Shift" }); }, ENTER],
+    [() => { keydown(e, ENTER); keydown(e, SPACE); }, { ...ENTER, repeat: true }],
+    [() => keydown(e, { ...SPACE, ctrlKey: true }, ""), ENTER],
+    ...["shiftKey", "ctrlKey", "altKey", "metaKey"].map((modifier) => [() => keydown(e, SPACE), { ...ENTER, [modifier]: true }]),
+  ];
+  for (const [before, enter] of cases) {
+    type(e, "送らない"); before();
+    assert.equal(keydown(e, enter).prevented, false);
+    keyup(e, ENTER); keyup(e, SPACE);
+  }
+  await tick();
+  assert.equal(messageCalls(calls).length, 0);
+});
+
+test("the composer hint names the Enter newline and the Space+Enter send beside the kept send button", () => {
+  assert.match(html, /<span id="send-hint" class="muted">Enterで改行・Space＋Enterで送信<\/span><button id="send-message">/u);
+});
+
 // Updated 2026-10-19 (E1): the reader's own send now jumps to the bottom, as
 // in ordinary chat apps; arrivals still never move a scrolled-up reader.
 test("own send jumps to the bottom; scrolled-up readers retain their position during authoritative refresh", async () => {
@@ -334,7 +483,8 @@ test("own send jumps to the bottom; scrolled-up readers retain their position du
 test("typing motion is disabled by reduced-motion and old visible wait/Enter hints are absent", () => {
   assert.match(css, /@keyframes typing-bounce/u);
   assert.match(css, /@media\(prefers-reduced-motion:reduce\)\{\.typing-indicator span\{animation:none\}/u);
-  assert.doesNotMatch(html + script, /AIが考えています|受理済み・会話を更新中|送信中…|Enterで送信/u);
+  // Plain Enter never sends; the only send key is the Space+Enter chord (Issue #171).
+  assert.doesNotMatch(html + script, /AIが考えています|受理済み・会話を更新中|送信中…|(?<!Space＋)Enterで送信/u);
   assert.match(css, /#chat textarea\{[^}]*overflow-y:auto/u);
 });
 
