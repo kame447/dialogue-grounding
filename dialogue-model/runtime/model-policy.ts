@@ -55,7 +55,9 @@ export function resolveModelPolicy(profile: unknown): ResolvedModelPolicy {
       if(rootKeys.filter(k=>k!=='modelContract').some(k=>!d[k].enumerable)) throw Error(); data(v);
     }
     if (v.referenceMemory !== true || v.decisionMode !== 'jev' || v.humanReferent !== true ||
-        v.initialObservation !== 'cache_required' || v.questionLayout !== 'two_stage_v1' || v.utteranceStyle !== 'default' || v.maxReobservations !== 1) throw Error();
+        v.initialObservation !== 'cache_required' ||
+        // Only the integrated profile may name the explicit two_stage_v2 layout; v2 profiles stay two_stage_v1.
+        v.questionLayout !== 'two_stage_v1' && !(integrated && v.questionLayout === 'two_stage_v2') || v.utteranceStyle !== 'default' || v.maxReobservations !== 1) throw Error();
     fixed(v.localGrounding, {enabled: true, aiPublicClaims: true});
     fixed(v.modelPolicy, {purpose: 'dialogue_turn', resolver: 'research_worker', jevModel: MODEL_CONTRACT_V2.requested});
     validateResearchTimeouts(fields(v.timeouts, ['observationMs', 'localMs', 'decisionMs', 'lunaAttemptMs', 'generationMs', 'trialMs']));

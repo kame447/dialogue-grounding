@@ -90,7 +90,8 @@ export type DecisionInputBudget = {
     reobservations: number; observationDetails: number; observationChars: number; issueSummaryChars: number };
 };
 export type JevDecisionStageEvidence = {
-  stage: "action_target" | "detail";
+  /** multiple_candidates exists only in two_stage_v2, between action_target and detail. */
+  stage: "action_target" | "multiple_candidates" | "detail";
   model: string | null;
   responseId: string | null;
   /** Wire choice labels, with complete uncalibrated score maps for research only. */
@@ -117,7 +118,10 @@ export type JevDecision = {
   decisionKind: "jev_local_test" | "mock";
   calibrated: false;
 };
-export type JevDecisionCallOptions = { signal?: AbortSignal; timeoutMs?: number };
+export type JevDecisionCallOptions = { signal?: AbortSignal; timeoutMs?: number;
+  /** decide() only: receives a copy of this call's own evidence when the call fails. Untrusted until
+   * validated by projectDecisionFailureEvidence; never invoked for referent, prospect or detail calls. */
+  onFailureEvidence?: (evidence: unknown) => void };
 /** Execution projection, independently evidenced after an opt-in acceptance step. */
 export type JevExecutedDecision = Omit<Pick<JevDecision, "action" | "target" | "name" | "feature" | "observe" | "detailFigureIds">,
   "action" | "observe"> & { action: Exclude<JevAction, "request_observation">; observe: null };
@@ -129,4 +133,6 @@ export type JevDecisionClient = {
   completeDetail?(input: JevDecisionInput, selected: Pick<JevDecision, "action" | "target">,
     options?: JevDecisionCallOptions): Promise<JevDetailResult>;
 };
-export type JevQuestionLayout = "two_stage_v1";
+/** two_stage_v1 is the default and is unchanged. two_stage_v2 is explicit opt-in only: stage one asks
+ * action and target kind, and a multiple target is followed by one closed choice among the 2-6 figure subsets. */
+export type JevQuestionLayout = "two_stage_v1" | "two_stage_v2";

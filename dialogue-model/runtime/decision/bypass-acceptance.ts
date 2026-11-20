@@ -1,6 +1,6 @@
 // Explicit technical R policy. The original remains Jev's decision; no semantic oracle.
 import {JEV_ACTIONS} from './contract.ts';
-import type {JevAction,JevDecision,JevDecisionInput,JevTarget,JevExecutedDecision,JevDetailResult,JevDecisionStageEvidence,PublicNameCandidate} from './contract.ts';
+import type {JevAction,JevDecision,JevDecisionInput,JevTarget,JevExecutedDecision,JevDetailResult,JevDecisionStageEvidence,PublicNameCandidate,JevQuestionLayout} from './contract.ts';
 import {buildJevDecisionPayload,buildJevDecisionDetailPayload,validateJevDecision,parseJevExecutedDetail,JevDecisionError,JEV_DECISION_INPUT_LIMITS} from './jev-decision.ts';
 
 export const BYPASS_ACCEPTANCE_V1_CANONICAL_JSON = '{"policies":{"bypass-enabled":{"policy":"bypass_acceptance_v1:accept","vetoActions":[]},"repair-first":{"policy":"bypass_acceptance_v1:veto","vetoActions":["defer","move_on"]}},"version":"bypass_acceptance_v1"}';
@@ -20,7 +20,8 @@ export type RepairProspectMaterial=
     scores:{repair_issue:Record<string,number>;prospect:Record<string,number>;basis:Record<string,number>}}
  | {status:'unknown';issue:null;prospect:null;basis:null;scores:null};
 export type BypassAcceptanceInput=JevDecisionInput&{repairProspect?:RepairProspectMaterial};
-export type BypassAcceptanceOptions={rerank?:'saved_action_scores_v1'|'open_issue_v1'};
+/** questionLayout only selects how the original decision's evidence is validated; the table and its SHA-256 are unchanged. */
+export type BypassAcceptanceOptions={rerank?:'saved_action_scores_v1'|'open_issue_v1';questionLayout?:JevQuestionLayout};
 type Ranking=readonly {action:ExecutedDecision['action'];score:number}[];
 type Selection={action:ExecutedDecision['action'];target:JevTarget}|null;
 export type OpenIssueRerank={policyId:'saved_action_scores_open_issue_v1';ranking:Ranking;selected:Selection;source:{issueTurn:number;issueId:string|null;choice:'issue';candidates:string[]}};
@@ -83,13 +84,13 @@ function checkRepairProspect(value:unknown):void {
   if(!scores||Object.getPrototypeOf(scores)!==Object.prototype||Array.isArray(scores)||Object.values(scores).some(n=>typeof n!=='number'||!Number.isFinite(n)||n<0||n>1))fail('invalid_input');
  }
 }
-function prepare(input:unknown,original:unknown,intervention:unknown){
+function prepare(input:unknown,original:unknown,intervention:unknown,questionLayout:JevQuestionLayout='two_stage_v1'){
  const policy=config(intervention);
  const i=boundary(input,'invalid_input',value=>{const optional=['reobservationAllowed','humanReferent','repairProspect','agreeNames','repairFacts'].filter(k=>!!value&&typeof value==='object'&&Object.hasOwn(value,k));
   if(!exact(value,['turn','publicTurns','ownSlots','observations','issueSummary','priorClaims','repairHistory','previousAction','publicNames',...optional]))fail('invalid_input');
   if(Object.hasOwn(value,'repairProspect'))checkRepairProspect(value.repairProspect);
   buildJevDecisionPayload(value as JevDecisionInput);return structuredClone(value) as BypassAcceptanceInput;});
- const d=boundary(original,'invalid_original',value=>{const valid=validateJevDecision(value,i);if(valid.action==='request_observation')fail('invalid_original');return valid;});
+ const d=boundary(original,'invalid_original',value=>{const valid=validateJevDecision(value,i,{questionLayout});if(valid.action==='request_observation')fail('invalid_original');return valid;});
  return {input:i,decision:d,config:policy,original:project(d)};
 }
 type Context=ReturnType<typeof prepare>;
@@ -98,9 +99,14 @@ function alternativeFailed(p:AcceptancePlan,inner:InterventionInner):never {thro
 function rerankOption(options:BypassAcceptanceOptions|undefined):BypassAcceptanceOptions['rerank'] {
  if(options===undefined)return 'saved_action_scores_v1';
  return boundary(options,'invalid_options',v=>{
-  if(!exact(v,Object.hasOwn(v as object,'rerank')?['rerank']:[])||Object.hasOwn(v,'rerank')&&!['saved_action_scores_v1','open_issue_v1'].includes(v.rerank as string))fail('invalid_options');
+  const keys=['rerank','questionLayout'].filter(k=>Object.hasOwn(v as object,k));
+  if(!exact(v,keys)||Object.hasOwn(v,'rerank')&&!['saved_action_scores_v1','open_issue_v1'].includes(v.rerank as string)||
+   Object.hasOwn(v,'questionLayout')&&!['two_stage_v1','two_stage_v2'].includes(v.questionLayout as string))fail('invalid_options');
   return v.rerank as BypassAcceptanceOptions['rerank']??'saved_action_scores_v1';
  });
+}
+function layoutOption(options:BypassAcceptanceOptions|undefined):JevQuestionLayout {
+ rerankOption(options);return options?.questionLayout??'two_stage_v1';
 }
 function sameTarget(a:JevTarget,b:JevTarget):boolean {
  if(a.kind!==b.kind)return false;
@@ -194,7 +200,7 @@ function plan(ctx:Context,rerank:BypassAcceptanceOptions['rerank']):AcceptancePl
  if(!p.rerank.selected)alternativeFailed(p,{stage:'rerank',code:'no_valid_alternative'});
  return freeze(p);
 }
-export function planBypassAcceptance(input:unknown,original:unknown,intervention:unknown,options?:BypassAcceptanceOptions):AcceptancePlan{return plan(prepare(input,original,intervention),rerankOption(options));}
+export function planBypassAcceptance(input:unknown,original:unknown,intervention:unknown,options?:BypassAcceptanceOptions):AcceptancePlan{return plan(prepare(input,original,intervention,layoutOption(options)),rerankOption(options));}
 function detailCode(e:unknown):InterventionInner {
  try {
   const d=e&&typeof e==='object'?Object.getOwnPropertyDescriptor(e,'code'):undefined;
@@ -203,7 +209,7 @@ function detailCode(e:unknown):InterventionInner {
  return {stage:'detail',code:'invalid_response'};
 }
 export async function applyBypassAcceptance(input:unknown,original:unknown,intervention:unknown,completeDetail?:CompleteDetail,options?:BypassAcceptanceOptions):Promise<AcceptanceResult>{
- const ctx=prepare(input,original,intervention);
+ const ctx=prepare(input,original,intervention,layoutOption(options));
  if(completeDetail!==undefined&&typeof completeDetail!=='function')fail('invalid_detail_callback');
  const p=plan(ctx,rerankOption(options));
  if(p.disposition==='adopted')return freeze({executed:p.original,intervention:trace(p)});
@@ -219,7 +225,7 @@ export async function applyBypassAcceptance(input:unknown,original:unknown,inter
  try{jsonData(raw);if(!exact(raw,['executed','evidence']))throw Error();checked=structuredClone(raw) as DetailResult;}
  catch{alternativeFailed(p,{stage:'detail',code:'invalid_response'});}
  let expected:ExecutedDecision;
- try{expected=parseJevExecutedDetail(ctx.input,selected,checked.evidence);}catch(e){alternativeFailed(p,detailCode(e));}
+ try{expected=parseJevExecutedDetail(ctx.input,selected,checked.evidence,{questionLayout:layoutOption(options)});}catch(e){alternativeFailed(p,detailCode(e));}
  if(!equal(checked.executed,expected))alternativeFailed(p,{stage:'executed',code:'invalid_executed'});
  return freeze({executed:expected,intervention:trace(p,expected,checked.evidence)});
 }

@@ -1,7 +1,7 @@
 import { deadlineLimit, deadlineValue } from '../v2/research-deadline-options.ts';
 import type { ResearchLimits } from '../v2/research-timeouts.ts';
 // Decision 0002 opt-in prototype. No Luna action, strategy intervention or fallback.
-import { keychainKeyReader, DEFAULT_COST_CAP_USD, UPSTREAM_TIMEOUT_MS } from "../diagnostics/jev-shadow-eval/local-openrouter.ts";
+import { keychainKeyReader, DEFAULT_COST_CAP_USD, UPSTREAM_TIMEOUT_MS, maxJevCostCapUsd } from "../diagnostics/jev-shadow-eval/local-openrouter.ts";
 import { isGroundingModel, OPENROUTER_DECISIONS_URL } from "../../../workers/research-ai-proxy/src/grounding.ts";
 import { LOCAL_ACTS, LOCAL_ASPECTS, LOCAL_SOURCES } from "../local-grounding/contract.ts";
 import { literalSpan } from "../judgment/public-evidence.mjs";
@@ -70,7 +70,31 @@ const HUMAN_REFERENT_GUIDANCE = "humanReferentは今回の人間発話が指す�
 const REPAIR_PROSPECT_GUIDANCE = "repairProspectは未校正の見込みと根拠の材料です。正解や閾値ではありません。進捗が見込めれば修復の継続、停滞して別の対象に明確な利点があれば保留や移行、不確かなら確認、といった判断の目安にしてください。";
 export const REPAIR_FACTS_GUIDANCE = "repairHistoryの各項目のfactsは、プログラムが記録から機械的に数えた事実です（直前の明確化への返答と比べた候補集合、同じ特徴の文の再提示、局所記録の欠落と棄却の件数）。抽出の誤差を含む未検証の材料で、意味が同じか、修復が進んだか停滞したか、次に何をすべきかを判定したものではありません。閾値や規則にせず、公開発話と照合して判断してください。";
 const factsGuidance = (input: JevDecisionInput) => input.repairFacts === undefined ? "" : "\n" + REPAIR_FACTS_GUIDANCE;
-const decisionInstructions = (input: JevDecisionInput, prospect = false) => COMMON + (input.humanReferent === undefined ? "" : "\n" + HUMAN_REFERENT_GUIDANCE) + (!prospect || input.repairProspect === undefined ? "" : "\n" + REPAIR_PROSPECT_GUIDANCE) + factsGuidance(input);
+// two_stage_v2 changes only the sentence that describes the stages; every other v1 sentence is shared.
+const COMMON_V1_STAGES = "第1段で行動と対象・候補集合を決め、第2段は確定した行動に必要な事柄だけを候補の範囲で問います。同一リクエストの他の回答は見えません。スコアは未校正で正答確率や合意昇格の閾値には使いません。";
+export const TWO_STAGE_V2_STAGES = "第1段で行動と対象の種類（単一の図形・none・multiple）を決めます。multipleを選んだ場合だけ、次の段で2図形以上の候補集合を一つ選びます。最後の段は確定した行動に必要な事柄だけを候補の範囲で問います。同一リクエストの他の回答は見えません。スコアは未校正で正答確率や合意昇格の閾値には使いません。";
+const COMMON_V2 = COMMON.replace(COMMON_V1_STAGES, TWO_STAGE_V2_STAGES);
+if (COMMON_V2 === COMMON) throw new Error("two_stage_v2_instructions_out_of_sync");
+export const TWO_STAGE_V2_CANDIDATE_SET_INSTRUCTIONS = "第1段で対象をmultiple（一つに絞れない）としました。この行動で対象候補として扱う自分の図形の集合を、2図形以上の組合せから一つ選んでください。公開発話と観察メモに根拠がある図形を含め、根拠のない図形は含めないでください。";
+export const TWO_STAGE_V2_CANDIDATE_SET_CRITERION = (figureIds: readonly string[]) => `自分の候補図形の集合 ${JSON.stringify(figureIds)}。観察メモを参照。`;
+const decisionInstructions = (input: JevDecisionInput, prospect = false, layout: JevQuestionLayout = "two_stage_v1") =>
+  (layout === "two_stage_v2" ? COMMON_V2 : COMMON) + (input.humanReferent === undefined ? "" : "\n" + HUMAN_REFERENT_GUIDANCE) + (!prospect || input.repairProspect === undefined ? "" : "\n" + REPAIR_PROSPECT_GUIDANCE) + factsGuidance(input);
+const LAYOUTS: readonly JevQuestionLayout[] = Object.freeze(["two_stage_v1", "two_stage_v2"]);
+/** Closed two_stage_v2 candidate sets: every subset of the six own slots with 2-6 members (15+20+15+6+1 = 57),
+ * ordered by size, then lexicographically by slot index. Labels name the slot indices, so they are reconstructable. */
+export const TWO_STAGE_V2_CANDIDATE_SETS: readonly (readonly number[])[] = Object.freeze((() => {
+  const sets: number[][] = [];
+  for (let size = 2; size <= 6; size++) {
+    const walk = (start: number, chosen: number[]) => {
+      if (chosen.length === size) { sets.push(chosen); return; }
+      for (let i = start; i < 6; i++) walk(i + 1, [...chosen, i]);
+    };
+    walk(0, []);
+  }
+  return sets.map(set => Object.freeze(set));
+})());
+export const candidateSetLabel = (indices: readonly number[]) => "figures_" + indices.join("_");
+export const TWO_STAGE_V2_OBSERVE_TARGETS = "選択済みの対象候補の範囲で、再観察が必要な図形の集合を選んでください。";
 const OBSERVE_QUESTIONS = {
   orientation: "指定図形の向き・部分間の方向関係について、公開発話を支える根拠・反証・不明点を確認してください。",
   part: "指定図形の部分と構成について、公開発話を支える根拠・反証・不明点を確認してください。",
@@ -102,8 +126,9 @@ function cleanHumanReferentMaterial(value: unknown, slots: readonly string[]): H
 
 /** Whitelist at every level. No images, strategy names, gold, future turns or current pre-action. */
 export type JevActionTarget = Pick<JevDecision, "action" | "target">;
-function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage_v1", selected?: JevActionTarget, referentOnly = false) {
-  if (layout !== "two_stage_v1") fail("invalid_options");
+function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage_v1", selected?: JevActionTarget, referentOnly = false,
+  pendingMultiple?: JevAction) {
+  if (!includes(LAYOUTS, layout) || pendingMultiple !== undefined && (layout !== "two_stage_v2" || selected !== undefined)) fail("invalid_options");
   if (!input || !positive(input.turn) || !strings(input.ownSlots, 6, 160) || input.ownSlots.length !== 6 || unique(input.ownSlots).length !== 6 ||
       !Array.isArray(input.publicTurns) || input.publicTurns.length > JEV_DECISION_INPUT_LIMITS.publicTurns || !text(input.issueSummary, 12000, true) ||
       !Array.isArray(input.priorClaims) || input.priorClaims.length > 160 || !Array.isArray(input.repairHistory) || input.repairHistory.length > JEV_DECISION_INPUT_LIMITS.repairHistory ||
@@ -187,11 +212,16 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
     previousAction = { turn: p.turn, action: p.action, target: cleanTarget(p.target, slots), name: p.name, feature: p.feature };
   }
   const reobservationAllowed = input.reobservationAllowed ?? true;
-  let selection: JevActionTarget | undefined;
+  let selection: JevActionTarget | { action: JevAction; target: { kind: "multiple" } } | undefined;
   if (selected !== undefined) {
     if (!exact(selected, ["action", "target"]) || !includes(JEV_ACTIONS, selected.action) ||
         selected.action === "request_observation" && !reobservationAllowed) fail("invalid_input");
     selection = { action: selected.action as JevAction, target: cleanTarget(selected.target, slots) };
+  }
+  // two_stage_v2 candidate-set stage: the stage-one action with a multiple target whose members are not chosen yet.
+  if (pendingMultiple !== undefined) {
+    if (!includes(JEV_ACTIONS, pendingMultiple) || pendingMultiple === "request_observation" && !reobservationAllowed) fail("invalid_input");
+    selection = { action: pendingMultiple, target: { kind: "multiple" } };
   }
   const omitted: DecisionInputBudget["omitted"] = { publicTurns: 0, claims: 0, publicNames: 0, repairHistory: 0,
     reobservations: 0, observationDetails: 0, observationChars: 0, issueSummaryChars: 0 };
@@ -257,17 +287,18 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
   const slotCriteria = Object.fromEntries(slots.map((id, i) => [`figure_${i}`, `自分の候補図形 ${JSON.stringify(id)}。観察メモを参照。` ]));
   const questions: Record<string, Question> = {};
   const add = (key: string, instructions: string, criteria: Record<string, string>) => {
-    questions[key] = { type: "choice", instructions: decisionInstructions(input, true) + "\n" + instructions, criteria };
+    questions[key] = { type: "choice", instructions: decisionInstructions(input, true, layout) + "\n" + instructions, criteria };
   };
   add("action", "次の行動を一つ選んでください。request_observationは公開発話を生成する前の追加観察要求です。", Object.fromEntries(
     JEV_ACTIONS.filter(a => (a !== "request_observation" || reobservationAllowed) &&
       (a !== "agree" || catalog.agreeNames === undefined || catalog.agreeNames.some(names => names.length > 0))).map(a => [a, JEV_ACTION_CRITERIA[a]])));
   add("target", "次の行動が扱う対象を選んでください。none=対象なし、multiple=一つに絞れない。", { none: "対象なし・未特定。", multiple: "複数の可能性があり一つには絞れない。", ...slotCriteria });
-  slots.forEach((id, i) => {
+  // two_stage_v2 asks the candidate set separately, only after a multiple target (prepareCandidateSet).
+  if (layout === "two_stage_v1") slots.forEach((id, i) => {
     add(`candidate_${i}`, `対象がmultipleの場合の候補集合: 図形 ${JSON.stringify(id)} を候補に含めますか。multipleでは2図形以上を含めてください。単一対象やnoneならこの回答は使いません。`,
       { include: "公開発話の対象候補に含む。", exclude: "対象候補に含まない。" });
   });
-  return { payload: { model: JEV_DECISION_MODEL, state, questions } as JevDecisionPayload, slots, catalog, human: humans[0].text, reobservationAllowed, budget };
+  return { payload: { model: JEV_DECISION_MODEL, state, questions } as JevDecisionPayload, slots, catalog, human: humans[0].text, reobservationAllowed, budget, layout };
 }
 
 export function buildJevDecisionPayload(input: JevDecisionInput, { questionLayout = "two_stage_v1" }: { questionLayout?: JevQuestionLayout } = {}): JevDecisionPayload {
@@ -377,14 +408,36 @@ export function parseJevActionTargetChoices(input: JevDecisionInput, value: unkn
   return decodeSelection(value as Record<string, string>, p);
 }
 
+/** two_stage_v2, right after stage one: rules decidable from the action and the target kind alone, before any candidate-set POST. */
+function checkTargetKind(action: JevAction, kind: JevTarget["kind"], reject: Reject = rejectDecision) {
+  if (["propose_name", "agree"].includes(action) && kind !== "single") reject("name_requires_single_target", "invalid_decision");
+  if (needsDetail(action) && kind === "none") reject("detail_target_required", "invalid_decision");
+}
+/** two_stage_v2 candidate-set stage: one closed choice among the 57 subsets of 2-6 own figures. */
+function prepareCandidateSet(input: JevDecisionInput, action: JevAction) {
+  const p = prepare(input, "two_stage_v2", undefined, false, action);
+  const questions: Record<string, Question> = { candidate_set: { type: "choice",
+    instructions: decisionInstructions(input, false, "two_stage_v2") + "\n" + TWO_STAGE_V2_CANDIDATE_SET_INSTRUCTIONS,
+    criteria: Object.fromEntries(TWO_STAGE_V2_CANDIDATE_SETS.map(set => [candidateSetLabel(set), TWO_STAGE_V2_CANDIDATE_SET_CRITERION(set.map(i => p.slots[i]))])) } };
+  return { ...p, payload: { ...p.payload, questions } };
+}
+function decodeCandidateSet(label: unknown, slots: readonly string[]): string[] {
+  const set = TWO_STAGE_V2_CANDIDATE_SETS.find(s => candidateSetLabel(s) === label);
+  if (!set) fail("invalid_response");
+  return set!.map(i => slots[i]);
+}
+export function buildJevCandidateSetPayload(input: JevDecisionInput, action: JevAction): JevDecisionPayload {
+  return prepareCandidateSet(input, action).payload;
+}
+
 type DetailCandidate = { value: string; figureIds: string[] };
-function prepareDetail(input: JevDecisionInput, selected: JevActionTarget, reject: Reject = rejectDecision) {
+function prepareDetail(input: JevDecisionInput, selected: JevActionTarget, reject: Reject = rejectDecision, layout: JevQuestionLayout = "two_stage_v1") {
   if (!exact(selected, ["action", "target"]) || !includes(JEV_ACTIONS, selected.action)) fail("invalid_input");
-  const base = prepare(input);
+  const base = prepare(input, layout);
   selected = { action: selected.action as JevAction, target: cleanTarget(selected.target, base.slots) };
   checkSelection(selected, reject);
   if (!needsDetail(selected.action)) return null;
-  const p = prepare(input, "two_stage_v1", selected);
+  const p = prepare(input, layout, selected);
   const scope = targetIds(selected.target);
   const candidates: DetailCandidate[] = [];
   if (selected.action !== "request_observation") {
@@ -404,21 +457,23 @@ function prepareDetail(input: JevDecisionInput, selected: JevActionTarget, rejec
   const questions: Record<string, Question> = {};
   if (selected.action === "request_observation") {
     for (let mask = 1; mask < 2 ** scope.length; mask++) subsets.push(scope.filter((_id, i) => mask & (1 << i)));
-    questions.observe_targets = { type: "choice", instructions: decisionInstructions(input) + "\n第1段の候補の範囲で、再観察が必要な図形の集合を選んでください。",
+    questions.observe_targets = { type: "choice", instructions: decisionInstructions(input, false, layout) +
+      (layout === "two_stage_v2" ? "\n" + TWO_STAGE_V2_OBSERVE_TARGETS : "\n第1段の候補の範囲で、再観察が必要な図形の集合を選んでください。"),
       criteria: Object.fromEntries(subsets.map((ids, i) => [`subset_${i}`, JSON.stringify(ids)])) };
-    questions.observe_aspect = { type: "choice", instructions: decisionInstructions(input) + "\n第1段の再観察要求について、確認する視覚論点を選んでください。",
+    questions.observe_aspect = { type: "choice", instructions: decisionInstructions(input, false, layout) + "\n第1段の再観察要求について、確認する視覚論点を選んでください。",
       criteria: Object.fromEntries(OBSERVATION_ASPECTS.map(a => [a, OBSERVE_QUESTIONS[a]])) };
   } else {
     const kind = ["propose_name", "agree"].includes(selected.action) ? "name" : "feature";
-    questions[kind] = { type: "choice", instructions: decisionInstructions(input) + `\n第1段の${selected.action}に必要な${kind === "name" ? "名称" : "確認特徴"}だけを選んでください。出典図形は特徴の出所であり、対象候補を単一に確定するものではありません。`,
+    questions[kind] = { type: "choice", instructions: decisionInstructions(input, false, layout) + `\n第1段の${selected.action}に必要な${kind === "name" ? "名称" : "確認特徴"}だけを選んでください。出典図形は特徴の出所であり、対象候補を単一に確定するものではありません。`,
       criteria: Object.fromEntries(candidates.map((c, i) => [`${kind}_${i}`, JSON.stringify({ value: c.value, figureIds: c.figureIds })])) };
   }
   return { ...p, candidates, subsets, payload: { ...p.payload, questions } };
 }
 
 /** Stage two is conditional on stage one's closed action/target selection. */
-export function buildJevDecisionDetailPayload(input: JevDecisionInput, selected: JevActionTarget): JevDecisionPayload | null {
-  return prepareDetail(input, selected)?.payload ?? null;
+export function buildJevDecisionDetailPayload(input: JevDecisionInput, selected: JevActionTarget,
+  { questionLayout = "two_stage_v1" }: { questionLayout?: JevQuestionLayout } = {}): JevDecisionPayload | null {
+  return prepareDetail(input, selected, rejectDecision, questionLayout)?.payload ?? null;
 }
 function decodeDetail(selected: JevActionTarget, p: ReturnType<typeof prepareDetail>, choices: Record<string, string>) {
   let name: string | null = null, feature: string | null = null, observe: JevObservationRequest | null = null;
@@ -468,14 +523,14 @@ function detailJsonData(value: unknown, seen = new Set<object>()): void {
   }
   seen.delete(value);
 }
-function prepareExecutedDetail(input: JevDecisionInput, selected: JevActionTarget) {
+function prepareExecutedDetail(input: JevDecisionInput, selected: JevActionTarget, layout: JevQuestionLayout = "two_stage_v1") {
   try {
     detailJsonData(input); detailJsonData(selected);
     const optional = ["reobservationAllowed", "humanReferent", "repairProspect", "agreeNames", "repairFacts"].filter(key => Object.hasOwn(input, key));
     if (!exact(input, ["turn", "publicTurns", "ownSlots", "observations", "issueSummary", "priorClaims", "repairHistory", "previousAction", "publicNames", ...optional])) fail("invalid_input");
     if (!exact(selected, ["action", "target"]) || !includes(["propose_name", "agree", "confirm", "repair"], selected.action)) fail("invalid_input");
     const snapshot = structuredClone(input), selection = structuredClone(selected);
-    return { input: snapshot, selected: selection, prepared: prepareDetail(snapshot, selection)! };
+    return { input: snapshot, selected: selection, prepared: prepareDetail(snapshot, selection, rejectDecision, layout)! };
   } catch (error) { throw new JevDecisionError(detailErrorCode(error, "invalid_input")); }
 }
 function detailErrorCode(error: unknown, fallback: JevDecisionErrorCode): JevDecisionErrorCode {
@@ -490,8 +545,9 @@ function freezeDetail<T>(value: T): T {
   return value;
 }
 /** A separate detail proof, never a forged original action_target decision. */
-export function parseJevExecutedDetail(input: JevDecisionInput, selected: JevActionTarget, value: unknown): JevExecutedDecision {
-  const detail = prepareExecutedDetail(input, selected);
+export function parseJevExecutedDetail(input: JevDecisionInput, selected: JevActionTarget, value: unknown,
+  { questionLayout = "two_stage_v1" }: { questionLayout?: JevQuestionLayout } = {}): JevExecutedDecision {
+  const detail = prepareExecutedDetail(input, selected, includes(LAYOUTS, questionLayout) ? questionLayout : fail("invalid_input"));
   try {
     detailJsonData(value);
     const evidence = closedEvidence(value, detail.prepared, "detail");
@@ -503,15 +559,17 @@ export function parseJevExecutedDetail(input: JevDecisionInput, selected: JevAct
 }
 
 /** Also validates injected clients at C's publication boundary; never repairs a malformed decision. */
-export function validateJevDecision(value: unknown, input: JevDecisionInput): JevDecision {
-  const p = prepare(input);
+export function validateJevDecision(value: unknown, input: JevDecisionInput,
+  { questionLayout = "two_stage_v1" }: { questionLayout?: JevQuestionLayout } = {}): JevDecision {
+  if (!includes(LAYOUTS, questionLayout)) fail("invalid_input");
+  const p = prepare(input, questionLayout);
   const optional = object(value) && Object.hasOwn(value, "detailFigureIds") ? ["detailFigureIds"] : [];
   if (!exact(value, ["action", "target", "name", "feature", "observe", "evidence", "decisionKind", "calibrated", ...optional]) ||
       !includes(JEV_ACTIONS, value.action) || value.calibrated !== false || !includes(["jev_local_test", "mock"], value.decisionKind) ||
       !(value.name === null || text(value.name, 80)) || !(value.feature === null || text(value.feature, 400))) fail("invalid_response");
   const selected: JevActionTarget = { action: value.action as JevAction, target: cleanTarget(value.target, p.slots, "invalid_response") };
   if (selected.action === "request_observation" && !p.reobservationAllowed) fail("inconsistent_decision");
-  const d = prepareDetail(input, selected);
+  const d = prepareDetail(input, selected, rejectDecision, questionLayout);
   const e = value.evidence;
   const evidenceKeys = ["model", "responseId", "choices", "scores", "latencyMs", "costUsd",
     ...(object(e) && Object.hasOwn(e, "inputBudget") ? ["inputBudget"] : []), ...(object(e) && Object.hasOwn(e, "stages") ? ["stages"] : [])];
@@ -533,14 +591,22 @@ export function validateJevDecision(value: unknown, input: JevDecisionInput): Je
     if (optional.length && JSON.stringify(value.detailFigureIds) !== JSON.stringify(candidate?.figureIds ?? [])) fail("inconsistent_decision");
   } else {
     if (!isGroundingModel(e.model, JEV_DECISION_MODEL)) fail("model_mismatch");
-    if (!Array.isArray(e.stages) || e.stages.length !== (d ? 2 : 1)) fail("invalid_response");
+    // two_stage_v2 inserts the candidate-set stage only for a multiple target: action_target, [multiple_candidates], [detail].
+    const setStage = questionLayout === "two_stage_v2" && selected.target.kind === "multiple";
+    if (!Array.isArray(e.stages) || e.stages.length !== 1 + (setStage ? 1 : 0) + (d ? 1 : 0)) fail("invalid_response");
     const first = closedEvidence(e.stages[0], p, "action_target");
-    const actual = decodeSelection(first.choices, p);
+    let actual: JevActionTarget, set: JevDecisionStageEvidence | null = null;
+    if (setStage) {
+      if (first.choices.action !== selected.action || first.choices.target !== "multiple") fail("inconsistent_decision");
+      const s = prepareCandidateSet(input, selected.action);
+      set = closedEvidence(e.stages[1], s, "multiple_candidates");
+      actual = { action: selected.action, target: { kind: "multiple", figureIds: decodeCandidateSet(set.choices.candidate_set, s.slots) } };
+    } else actual = decodeSelection(first.choices, p);
     if (JSON.stringify(actual) !== JSON.stringify(selected)) fail("inconsistent_decision");
-    const last = d ? closedEvidence(e.stages[1], d, "detail") : first;
+    const last = d ? closedEvidence(e.stages.at(-1), d, "detail") : set ?? first;
     const expected = decodeDetail(actual, d, d ? last.choices : {});
     if (JSON.stringify({ ...selected, name: value.name, feature: value.feature, observe: value.observe, detailFigureIds: value.detailFigureIds }) !== JSON.stringify(expected)) fail("inconsistent_decision");
-    if (e.model !== last.model || e.responseId !== last.responseId || e.costUsd !== first.costUsd! + (d ? last.costUsd! : 0) ||
+    if (e.model !== last.model || e.responseId !== last.responseId || e.costUsd !== first.costUsd! + (set ? set.costUsd! : 0) + (d ? last.costUsd! : 0) ||
         JSON.stringify(e.choices) !== JSON.stringify(first.choices) || JSON.stringify(e.scores) !== JSON.stringify(first.scores) ||
         JSON.stringify(e.inputBudget) !== JSON.stringify(p.budget)) fail("invalid_response");
   }
@@ -551,6 +617,107 @@ export function validateJevDecision(value: unknown, input: JevDecisionInput): Je
 export type JevDecisionStageCallEvidence = JevDecisionStageEvidence & { status: "ok" | "error"; error: JevDecisionErrorCode | null; rejectionCode: JevDecisionRejectionCode | null };
 export type JevDecisionCallEvidence = Omit<JevDecisionEvidence, "stages"> & { callIndex: number; status: "ok" | "error"; error: JevDecisionErrorCode | null;
   rejectionCode: JevDecisionRejectionCode | null; stages: JevDecisionStageCallEvidence[] };
+/** Closed record of one failed decide() call for the owner's private failed-attempt trace (plan O). Only closed codes,
+ * closed labels with finite scores, verified model/response identifiers and numeric cost/latency/budget are kept. */
+export type JevDecisionFailureStage = { stage: JevDecisionStageEvidence["stage"]; status: "ok" | "error"; error: JevDecisionErrorCode | null;
+  rejectionCode: JevDecisionRejectionCode | null; model: string | null; responseId: string | null; costUsd: number | null; latencyMs: number;
+  inputBudget: DecisionInputBudget; choices: Record<string, string>; scores: Record<string, Record<string, number>> };
+export type JevDecisionFailureEvidence = { schemaVersion: "jev_decision_failure_v1"; questionLayout: JevQuestionLayout; callIndex: number;
+  error: JevDecisionErrorCode; rejectionCode: JevDecisionRejectionCode | null; model: string | null; responseId: string | null;
+  costUsd: number | null; latencyMs: number; inputBudget: DecisionInputBudget | null; stages: JevDecisionFailureStage[] };
+const FAILURE_KEYS = ["schemaVersion", "questionLayout", "callIndex", "error", "rejectionCode", "model", "responseId", "costUsd", "latencyMs", "inputBudget", "stages"];
+const FAILURE_STAGE_KEYS = ["stage", "status", "error", "rejectionCode", "model", "responseId", "costUsd", "latencyMs", "inputBudget", "choices", "scores"];
+const BUDGET_OMITTED_KEYS = ["publicTurns", "claims", "publicNames", "repairHistory", "reobservations", "observationDetails", "observationChars", "issueSummaryChars"];
+const TARGET_LABELS = ["none", "multiple", ...Array.from({ length: 6 }, (_, i) => `figure_${i}`)];
+const CANDIDATE_SET_LABELS = TWO_STAGE_V2_CANDIDATE_SETS.map(candidateSetLabel);
+const responseIdValue = (v: unknown) => v === null || typeof v === "string" && /^gen-[A-Za-z0-9_-]{1,124}$/.test(v);
+const nonNegative = (v: unknown): v is number => finite(v) && v >= 0;
+const count = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 0;
+const sameLabels = (keys: readonly string[], expected: readonly string[]) => keys.length === expected.length && expected.every(k => keys.includes(k));
+const indexedLabels = (prefix: string, keys: readonly string[], sizes: readonly number[]) =>
+  sizes.includes(keys.length) && sameLabels(keys, Array.from({ length: keys.length }, (_, i) => `${prefix}_${i}`));
+function closedBudget(v: unknown): DecisionInputBudget | null {
+  if (!exact(v, ["maxChars", "stateChars", "omitted"]) || v.maxChars !== 20000 || !count(v.stateChars) || v.stateChars > 20000 ||
+      !exact(v.omitted, BUDGET_OMITTED_KEYS) || !BUDGET_OMITTED_KEYS.every(k => count((v.omitted as Record<string, unknown>)[k]))) return null;
+  const omitted = v.omitted as Record<string, number>;
+  return { maxChars: 20000, stateChars: v.stateChars, omitted: Object.fromEntries(BUDGET_OMITTED_KEYS.map(k => [k, omitted[k]])) as DecisionInputBudget["omitted"] };
+}
+/** The question sets each stage may carry under a layout; labels are checked per question below. */
+function failureQuestionSets(stage: unknown, layout: JevQuestionLayout): string[][] {
+  if (stage === "action_target") return [layout === "two_stage_v1" ? ["action", "target", ...Array.from({ length: 6 }, (_, i) => `candidate_${i}`)] : ["action", "target"]];
+  if (stage === "multiple_candidates") return layout === "two_stage_v2" ? [["candidate_set"]] : [];
+  if (stage === "detail") return [["name"], ["feature"], ["observe_targets", "observe_aspect"]];
+  return [];
+}
+function failureLabelsValid(question: string, labels: readonly string[]): boolean {
+  if (question === "action") return labels.length > 0 && labels.every(l => includes(JEV_ACTIONS, l)) && unique(labels).length === labels.length;
+  if (question === "target") return sameLabels(labels, TARGET_LABELS);
+  if (/^candidate_[0-5]$/.test(question)) return sameLabels(labels, ["include", "exclude"]);
+  if (question === "candidate_set") return sameLabels(labels, CANDIDATE_SET_LABELS);
+  if (question === "name" || question === "feature") return indexedLabels(question, labels, Array.from({ length: 255 }, (_, i) => i + 1));
+  if (question === "observe_targets") return indexedLabels("subset", labels, [1, 3, 7, 15, 31, 63]);
+  if (question === "observe_aspect") return sameLabels(labels, [...OBSERVATION_ASPECTS]);
+  return false;
+}
+function failureStage(s: unknown, layout: JevQuestionLayout, last: boolean): JevDecisionFailureStage | null {
+  if (!exact(s, FAILURE_STAGE_KEYS) || !includes(["ok", "error"], s.status) || !(s.error === null || includes(CODES, s.error)) ||
+      !(s.rejectionCode === null || includes(JEV_DECISION_REJECTION_CODES, s.rejectionCode)) ||
+      !(s.model === null || isGroundingModel(s.model, JEV_DECISION_MODEL)) || !responseIdValue(s.responseId) ||
+      !(s.costUsd === null || nonNegative(s.costUsd)) || !nonNegative(s.latencyMs) || !object(s.choices) || !object(s.scores)) return null;
+  const inputBudget = closedBudget(s.inputBudget);
+  // The client stops at the first failing stage; an ok stage never carries an error or a rejection.
+  if (!inputBudget || !last && s.status !== "ok" || s.status === "ok" && (s.error !== null || s.rejectionCode !== null)) return null;
+  const choices = s.choices as Record<string, unknown>, scores = s.scores as Record<string, unknown>, questions = Object.keys(choices);
+  if (!exact(scores, questions)) return null;
+  if (!questions.length) { if (s.status === "ok") return null; }
+  else {
+    if (s.model === null || s.costUsd === null || !failureQuestionSets(s.stage, layout).some(set => sameLabels(questions, set))) return null;
+    for (const q of questions) {
+      const labels = scores[q];
+      if (!object(labels) || !failureLabelsValid(q, Object.keys(labels)) || !includes(Object.keys(labels), choices[q]) ||
+          !Object.values(labels).every(probability)) return null;
+    }
+  }
+  return { stage: s.stage as JevDecisionFailureStage["stage"], status: s.status as "ok" | "error", error: s.error as JevDecisionErrorCode | null,
+    rejectionCode: s.rejectionCode as JevDecisionRejectionCode | null, model: s.model as string | null, responseId: s.responseId as string | null,
+    costUsd: s.costUsd as number | null, latencyMs: s.latencyMs as number, inputBudget,
+    choices: Object.fromEntries(questions.map(q => [q, choices[q] as string])),
+    scores: Object.fromEntries(questions.map(q => [q, Object.fromEntries(Object.entries(scores[q] as Record<string, number>))])) };
+}
+/** Restore-time check of a saved failure record. Returns a rebuilt copy, or null for any key, label or value outside the closed shape. */
+export function checkDecisionFailureEvidence(value: unknown): JevDecisionFailureEvidence | null {
+  try {
+    if (!exact(value, FAILURE_KEYS) || value.schemaVersion !== "jev_decision_failure_v1" || !includes(LAYOUTS, value.questionLayout) ||
+        !positive(value.callIndex) || !includes(CODES, value.error) || !(value.rejectionCode === null || includes(JEV_DECISION_REJECTION_CODES, value.rejectionCode)) ||
+        !(value.model === null || isGroundingModel(value.model, JEV_DECISION_MODEL)) || !responseIdValue(value.responseId) ||
+        !(value.costUsd === null || nonNegative(value.costUsd)) || !nonNegative(value.latencyMs) || !Array.isArray(value.stages)) return null;
+    const layout = value.questionLayout as JevQuestionLayout, raw = value.stages as unknown[];
+    const order = raw.map(s => object(s) ? s.stage : null).join(",");
+    const orders = layout === "two_stage_v1" ? ["", "action_target", "action_target,detail"]
+      : ["", "action_target", "action_target,multiple_candidates", "action_target,detail", "action_target,multiple_candidates,detail"];
+    const inputBudget = value.inputBudget === null ? null : closedBudget(value.inputBudget);
+    if (!orders.includes(order) || value.inputBudget !== null && !inputBudget) return null;
+    const stages = raw.map((s, i) => failureStage(s, layout, i === raw.length - 1));
+    if (stages.some(s => s === null)) return null;
+    if (value.rejectionCode !== null && stages.at(-1)?.rejectionCode !== value.rejectionCode) return null;
+    return { schemaVersion: "jev_decision_failure_v1", questionLayout: layout, callIndex: value.callIndex as number, error: value.error as JevDecisionErrorCode,
+      rejectionCode: value.rejectionCode as JevDecisionRejectionCode | null, model: value.model as string | null, responseId: value.responseId as string | null,
+      costUsd: value.costUsd as number | null, latencyMs: value.latencyMs as number, inputBudget, stages: stages as JevDecisionFailureStage[] };
+  } catch { return null; }
+}
+/** Projects the evidence a decide() call handed to onFailureEvidence. Untrusted input: anything outside the closed
+ * client evidence shape yields null, which the caller records as an unknown breakdown. */
+export function projectDecisionFailureEvidence(raw: unknown, questionLayout: JevQuestionLayout): JevDecisionFailureEvidence | null {
+  try {
+    if (!object(raw) || !includes(LAYOUTS, questionLayout)) return null;
+    const keys = ["model", "responseId", "choices", "scores", "latencyMs", "costUsd", "callIndex", "status", "error", "rejectionCode", "stages",
+      ...(Object.hasOwn(raw, "inputBudget") ? ["inputBudget"] : [])];
+    if (!exact(raw, keys) || raw.status !== "error" || !Array.isArray(raw.stages)) return null;
+    return checkDecisionFailureEvidence({ schemaVersion: "jev_decision_failure_v1", questionLayout, callIndex: raw.callIndex, error: raw.error,
+      rejectionCode: raw.rejectionCode, model: raw.model, responseId: raw.responseId, costUsd: raw.costUsd, latencyMs: raw.latencyMs,
+      inputBudget: raw.inputBudget ?? null, stages: raw.stages });
+  } catch { return null; }
+}
 export type JevDecisionClientOptions = { enabled?: boolean; readKey?: () => Promise<string>; fetchImpl?: (url: string, init: RequestInit) => Promise<Response>;
   costCapUsd?: number; timeoutMs?: number; researchLimits?: ResearchLimits; questionLayout?: JevQuestionLayout };
 
@@ -570,7 +737,7 @@ export function createJevDecisionClient(options: JevDecisionClientOptions = {}):
     questionLayout = "two_stage_v1", researchLimits } = options;
   const limit = deadlineLimit(researchLimits);
   if (typeof readKey !== "function" || typeof fetchImpl !== "function" || !finite(costCapUsd) || costCapUsd <= 0 ||
-      costCapUsd > DEFAULT_COST_CAP_USD || !deadlineValue(timeoutMs, limit) || questionLayout !== "two_stage_v1") fail("invalid_options");
+      costCapUsd > maxJevCostCapUsd(researchLimits) || !deadlineValue(timeoutMs, limit) || !includes(LAYOUTS, questionLayout)) fail("invalid_options");
   let key: string | null = null, lastEvidence: JevDecisionCallEvidence | null = null;
   let spentUsd = 0, maxCost = 0, callCount = 0, referentCallCount = 0, prospectCallCount = 0;
   let lastReferentEvidence: HumanReferentEstimate | null = null;
@@ -578,7 +745,7 @@ export function createJevDecisionClient(options: JevDecisionClientOptions = {}):
   const leaks = (v: string) => key !== null && v.includes(key);
   async function completeDetail(input: JevDecisionInput, selected: JevActionTarget, callOptions?: JevDecisionCallOptions): Promise<JevDetailResult> {
     try {
-      const detail = prepareExecutedDetail(input, selected);
+      const detail = prepareExecutedDetail(input, selected, questionLayout);
       return freezeDetail(await execute(detail.input, callOptions, false, detail) as JevDetailResult);
     } catch (error) { throw new JevDecisionError(detailErrorCode(error, "invalid_response")); }
   }
@@ -715,12 +882,22 @@ export function createJevDecisionClient(options: JevDecisionClientOptions = {}):
             referentResult = referentEstimate();
             return referentResult;
           }
-          const selected = decodeSelection(first.choices, p, reject);
-          const d = prepareDetail(snapshot, selected, reject);
+          let selected: JevActionTarget;
           const stages = [first];
+          if (questionLayout === "two_stage_v2" && first.choices.target === "multiple") {
+            // Rules decidable from the action and target kind stop here, before any candidate-set POST.
+            const action = first.choices.action as JevAction;
+            checkTargetKind(action, "multiple", reject);
+            const s = prepareCandidateSet(snapshot, action);
+            const set = await perform("multiple_candidates", s);
+            stages.push(set);
+            check();
+            selected = { action, target: { kind: "multiple", figureIds: decodeCandidateSet(set.choices.candidate_set, s.slots) } };
+          } else selected = decodeSelection(first.choices, p, reject);
+          const d = prepareDetail(snapshot, selected, reject, questionLayout);
           if (d) stages.push(await perform("detail", d));
           check();
-          const core = decodeDetail(selected, d, d ? stages[1].choices : {});
+          const core = decodeDetail(selected, d, d ? stages.at(-1)!.choices : {});
           const measured: JevDecisionEvidence = { model: evidence.model, responseId: evidence.responseId, choices: first.choices, scores: first.scores,
             latencyMs: Math.max(0, Math.round(performance.now() - started)), costUsd: evidence.costUsd, inputBudget: p.budget, stages };
           evidence.status = "ok";
@@ -747,6 +924,11 @@ export function createJevDecisionClient(options: JevDecisionClientOptions = {}):
           if (referentResult) referentResult.latencyMs = evidence.latencyMs;
           if (callIndex === referentCallCount) lastReferentEvidence = structuredClone(referentResult);
         } else if (!referent && callIndex === callCount) lastEvidence = structuredClone(evidence);
+        // decide() only: this call's own failed evidence goes to this call's caller. Detail, referent and
+        // prospect calls never use it, so a later or concurrent call cannot be mistaken for this one.
+        if (referent === false && detail === undefined && evidence.status !== "ok" && typeof callOptions.onFailureEvidence === "function") {
+          try { callOptions.onFailureEvidence(structuredClone(evidence)); } catch { /* Observation only: never changes this call's outcome. */ }
+        }
       }
       function referentEstimate(): HumanReferentEstimate {
         return { status: evidence.status === "ok" ? "ok" : "unknown",

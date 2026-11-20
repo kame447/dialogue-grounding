@@ -21,6 +21,14 @@ export const KEYCHAIN_ACCOUNT = "research";
 /** Same upstream timeout as the proxy (index.mjs). */
 export const UPSTREAM_TIMEOUT_MS = 15_000;
 export const DEFAULT_COST_CAP_USD = 0.05;
+/** Ceiling for an explicit per-trial research Jev budget (participant_jev_config_v1 limits.jevUsd). Not a default:
+ * callers without research limits keep DEFAULT_COST_CAP_USD, and every research value is chosen before a trial. */
+export const RESEARCH_MAX_JEV_USD = 0.15;
+/** Largest costCapUsd a Jev adapter accepts. Only research-harness callers (which always pass researchLimits) may
+ * exceed the default, and never beyond RESEARCH_MAX_JEV_USD. */
+export function maxJevCostCapUsd(researchLimits: unknown): number {
+  return researchLimits === undefined ? DEFAULT_COST_CAP_USD : RESEARCH_MAX_JEV_USD;
+}
 
 export type LocalErrorCode = "key_unavailable" | "key_leak" | "invalid_request" | "unauthorized" | "payment_required" |
   "not_found" | "rate_limited" | "upstream_error" | "invalid_response" | "timeout" | "network_error" | "cost_cap" | "cost_unreported";

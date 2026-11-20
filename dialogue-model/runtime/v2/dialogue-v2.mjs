@@ -215,6 +215,7 @@ export function createDialogueV2(options) {
     if (activeDecision || decisionShadowClient || groundingShadow) throw new Error("Jev decision mode cannot combine legacy decision paths");
     return createJevTurnRuntime({ client, ownImage, ownAnchors, observer, jevDecision, localGrounding, ...(integrated?{intervention,decisionTimeoutMs}:{}),
       ...(Object.hasOwn(options,'technicalTrial')?{technicalTrial:options.technicalTrial}:{}),
+      ...(Object.hasOwn(options,'questionLayout')?{questionLayout:options.questionLayout}:{}),
       onJevTurnTrace, onLocalGroundingTrace, maxReobservations,
       generation: { task: TASK_INSTRUCTIONS_V2, instructions: options.technicalTrial ? TRIAL_GENERATOR_INSTRUCTIONS_V2 : GENERATOR_INSTRUCTIONS_V2,
         ...(concise ? { concise: CONCISE_INSTRUCTIONS_V2 } : {}), actionScope: options.technicalTrial ? TRIAL_ACTION_SCOPE_V2 : ACTION_SCOPE_V2,
