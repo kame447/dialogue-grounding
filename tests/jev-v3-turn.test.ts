@@ -26,7 +26,7 @@ const rawMemo = { figures: model.anchors.map((a: any) => ({ id: a.id, holistic: 
 const assignment = { schemaVersion: 'base_assignment_config_v1', configId: '11111111-1111-4111-8111-111111111111', revision: 1, strategy: 'repair-first', seed, referenceMemory: true };
 const clientConfig = { provider: 'cloudflare', purpose: 'dialogue_turn', baseUrl: 'https://synthetic.invalid/v1', apiKey: 'synthetic-private-proxy-key' };
 const syntheticKey = 'sk-or-synthetic-only-private-key-0123456789';
-type Plan = { answers: Record<string, string>; cost?: number; failGeneration?: number };
+type Plan = { answers: Record<string, string>; cost?: number; failGeneration?: number; segmentText?: string; segments?: any[] };
 /** Synthetic upstream. Every Jev question is answered by its key (action, target, candidate_set, ...); Luna never proposes segments. */
 function tape(plan: Plan) {
   const posts: any[] = [], generations: any[] = [];
@@ -49,6 +49,8 @@ function tape(plan: Plan) {
       if (failures > 0) { failures--; return new Response('{}', { status: 500 }); }
     }
     const state = body.messages[1]?.content; let parsed: any; try { parsed = JSON.parse(state); } catch { /* not JSON */ }
+    if (plan.segmentText && parsed?.publicTurns && !parsed.candidateText && parsed.publicTurns.filter((t: any) => t.speaker === 'human').at(-1)?.text === plan.segmentText)
+      return Response.json({ model: modelId, choices: [{ message: { content: JSON.stringify(plan.segments) } }], usage: { prompt_tokens: 3, completion_tokens: 2 } });
     const final = String(body.messages.at(-1)?.content).includes('JSON') && !parsed?.candidateText && !parsed?.publicTurns;
     const text = parsed?.candidateText || parsed?.publicTurns ? '[]' : final ? JSON.stringify(Object.fromEntries(model.anchors.map((a: any) => [a.id, null]))) : 'もう一度、先ほどの点に戻りたいです。';
     return Response.json({ model: modelId, choices: [{ message: { content: text } }], usage: { prompt_tokens: 3, completion_tokens: 2 } });
@@ -494,5 +496,47 @@ test('R3 later turns: progress labels follow the generator (changed needs novelt
   for (const [name, mutate] of bad) {
     const e = structuredClone(novel); mutate(e);
     await assert.rejects(makeTask(first.prepared, { restore: withEntry(e) }), { code: 'invalid_options' }, name);
+  }
+});
+
+// ---- audit/06 R3 (complete check against every applied information claim): real claims extracted from a real second turn
+const REPLY = '上の角が目印です。右の端は丸いです。';
+const seg = (id: string, quote: string, targets: string[], aspect = 'contour') => ({ segmentId: id, quote, targets, aspect, proposition: quote, name: null, linkedIssueId: null, respondsToTurn: null });
+const R3_CASES: Array<[string, any[], string[], string]> = [
+  ['one claim naming figure 3', [seg('s1', '上の角が目印です', [ids[3]])], [ids[3]], 'changed'],
+  // With AI-public claims on, a reply that names no figure is recorded as unknown (missing AI source) with its empty set.
+  ['one claim naming no figure', [seg('s1', '上の角が目印です', [])], [], 'unknown'],
+  ['two claims naming 3 and 1+2', [seg('s1', '上の角が目印です', [ids[3]]), seg('s2', '右の端は丸いです', [ids[1], ids[2]])], [ids[3], ids[1], ids[2]], 'changed'],
+];
+for (const [name, segments, expectedAfter, progress] of R3_CASES) test(`R3 complete check (${name}): the original restores and reaches the next Jev input unchanged; any single-field rewrite of candidatesAfter is refused before a POST`, async t => {
+  const h = await fixture(t, V3, { answers: REVISIT_MULTIPLE, segmentText: REPLY, segments });
+  const prepared = await prepareParticipantJev(h.options), made = await makeTask(prepared);
+  made.task.message('二つのどちらかです', 'turn-1'); await made.task.whenIdle();
+  h.upstream.plan.answers = { action: 'accept', target: 'none' };
+  made.task.message(REPLY, 'turn-2'); await made.task.whenIdle();
+  const saved = made.record();
+  const entry = saved.queueState.privateState.repairHistory[0];
+  assert.deepEqual(entry.candidatesAfter, expectedAfter); assert.equal(entry.progress, progress);
+  assert.equal(entry.partnerClaims.length, segments.length);
+  const nextInput = async (record: any) => {
+    const before = h.upstream.posts.length;
+    const restored = await makeTask(prepared, { restore: record });
+    restored.task.message('もう少し教えてください', 'turn-3'); await restored.task.whenIdle();
+    const stageOne = h.upstream.posts.slice(before).filter((b: any) => b.questions?.action).at(-1);
+    return JSON.parse(stageOne.state).repairHistory.find((r: any) => r.turn === entry.turn).candidatesAfter;
+  };
+  h.upstream.plan.answers = { action: 'accept', target: 'none' };
+  assert.deepEqual(await nextInput(saved), expectedAfter);
+  const rewrites: string[][] = [[...SET], [ids[3]], [ids[3], ids[1]], [ids[0]], [ids[1], ids[2], ids[3]], []].filter(r => JSON.stringify(r) !== JSON.stringify(expectedAfter));
+  for (const rewrite of rewrites) {
+    const r = structuredClone(saved); r.queueState.privateState.repairHistory[0].candidatesAfter = rewrite;
+    const posts = h.upstream.posts.length;
+    await assert.rejects(makeTask(prepared, { restore: r }), { code: 'invalid_options' }, JSON.stringify(rewrite));
+    assert.equal(h.upstream.posts.length, posts, 'no request before the refusal');
+  }
+  // The added claim ids must be claims that name figures, all of whose targets stay in the set.
+  if (expectedAfter.length) {
+    const r = structuredClone(saved); r.queueState.privateState.repairHistory[0].addedClaimIds = [...r.queueState.privateState.repairHistory[0].addedClaimIds, 'no-such-claim'];
+    await assert.rejects(makeTask(prepared, { restore: r }), { code: 'invalid_options' });
   }
 });

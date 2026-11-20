@@ -308,6 +308,7 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
   validateOwnLedger(s.ledger);if(!sameSet(Object.keys(s.ledger),ownSlots))throw Error();const graph=snapshotReferenceGraph(s.graph);if(!sameSet(Object.keys(graph.ownSlots),ownSlots)||!Array.isArray(s.judgments)||!Array.isArray(s.repairHistory))throw Error();
   if(s.observationMemo!==null){const m=validateObservationMemo(s.observationMemo);if(!sameSet(m.figures.map(f=>f.id),ownSlots))throw Error();}
   if(Object.hasOwn(s,'aiPublic'))validateAiPublicState(s.aiPublic,ownSlots,Number.MAX_SAFE_INTEGER,s.graph);
+  const liveClaims=new Map<string,any>(priorClaimViews(s.graph,{limit:REFERENCE_LIMITS.records}).map((c:any)=>[c.id,c]));
   const seen=new Set<string>();
   for(const j of s.judgments){
    if(!stateExact(j,['turnIndex','lastEventId','status','judgment','generationGuard','jevTurn','localGrounding',...(Object.hasOwn(j,'aiPublic')?['aiPublic']:[])])||j.status!=='committed'||!Number.isSafeInteger(j.turnIndex)||j.turnIndex<1||!(j.lastEventId===null||typeof j.lastEventId==='string'&&j.lastEventId.length<=160))throw Error();
@@ -394,15 +395,23 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
     }else{
      // A later committed turn exists. Mirror updateRepairHistory exactly: the candidate set is the union of the targets of the information claims among the
      // partner claims, or the original set when there is none; missingReasons only ever turn the progress into unknown and never change the set.
-     const info=claimsOf.filter((c:any)=>INFORMATION_ACTS.has(c?.act)&&Array.isArray(c.targets));
-     if(!same){
-      // Some non-empty subset of the information claims must give exactly this set (an empty set needs a claim that names no figure).
-      const usable=info.filter((c:any)=>c.targets.every((id:string)=>after.includes(id)));
-      if(!info.length||!usable.length||!after.every((id:string)=>usable.some((c:any)=>c.targets.includes(id))))throw Error();
+     // Resolve every partner claim against the live graph: a claim still there is judged exactly as the generator did (figureInformation);
+     // a pruned one is judged by its act alone, and every way it could count is allowed.
+     const resolved:any[]=[],unresolved:any[]=[],named:Set<string>=new Set();
+     for(const c of claimsOf){
+      if(!c||!Array.isArray(c.targets)||typeof c.id!=='string')throw Error();
+      const g=liveClaims.get(c.id);
+      if(g){if(g.act!==c.act||!stateSame(g.targets,c.targets))throw Error();if(figureInformation(g)){resolved.push(c);if(c.targets.length)named.add(c.id);}}
+      else if(INFORMATION_ACTS.has(c.act)){unresolved.push(c);if(c.targets.length)named.add(c.id);}
      }
+     const expected=(list:any[])=>list.length?[...new Set(list.flatMap((c:any)=>c.targets))]:[...ids];
+     let setOk:boolean;
+     if(!unresolved.length)setOk=stateSame(after,expected(resolved));
+     else if(unresolved.length>8)setOk=true;
+     else{setOk=false;for(let mask=0;mask<1<<unresolved.length&&!setOk;mask++){const exp=expected([...resolved,...unresolved.filter((_:any,n:number)=>mask>>n&1)]);setOk=exp.length===after.length&&exp.every((id:string)=>after.includes(id));}}
+     if(!setOk)throw Error();
      const added=Array.isArray(entry.addedClaimIds)?entry.addedClaimIds:[];
-     const named=new Set(info.filter((c:any)=>c.targets.length>0).map((c:any)=>c.id));
-     if(new Set(added).size!==added.length||!added.every((id:string)=>named.has(id)))throw Error();
+     if(new Set(added).size!==added.length||!added.every((id:string)=>named.has(id)&&claimsOf.find((c:any)=>c.id===id).targets.every((t:string)=>after.includes(t))))throw Error();
      const narrowed=after.length>0&&after.length<ids.length&&after.every((id:string)=>ids.includes(id));
      const reasons=Array.isArray(entry.missingReasons)?entry.missingReasons.length:0;
      if(entry.progress==='changed'){if(!(added.length||narrowed))throw Error();}
