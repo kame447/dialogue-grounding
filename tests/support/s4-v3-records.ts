@@ -10,6 +10,7 @@ import { hash } from '../../dialogue-model/runtime/diagnostics/parity-verify/cor
 import { createJevDecisionClient } from '../../dialogue-model/runtime/decision/jev-decision.ts';
 import { createJevLocalTestClassifier } from '../../dialogue-model/runtime/local-grounding/jev-local-test.ts';
 import { createChatClient } from '../../dialogue-model/runtime/client.mjs';
+import { buildReobservationMessages } from '../../dialogue-model/runtime/observation/observe.ts';
 import { image } from './s4-integration/harness.ts';
 
 export const normal = JSON.parse(await readFile(new URL('./s4-integration/NORMAL-RECORDS.json', import.meta.url), 'utf8'));
@@ -19,26 +20,33 @@ export const OLD = normal.trials[0].replay[0].tape;
 export type Label = 'repair-first' | 'bypass-enabled';
 export type TrialVersion = 'adaptive_repair_v1' | 'adaptive_repair_v2' | 'adaptive_repair_v3';
 /** What one scripted turn answers. `target` is a v3 target label; `issue` answers the repair prospect's issue question. */
-export type Plan = { action: string; target: string; issue?: string; prospect?: string; actionScores?: Record<string, number>; speech?: string; inject?: any };
+export type Plan = { action: string; target: string; issue?: string; prospect?: string; actionScores?: Record<string, number>; speech?: string; inject?: any;
+  /** Raw JSON text the local-extraction request returns (public name proposals etc.); `act` answers the classifier's `*_act` questions (default assert). */
+  extraction?: string; act?: string;
+  /** The turn's first decision is a request_observation of figure_0 (one self-side reobservation); `action`/`target` are the terminal decision after it. */
+  reobserve?: boolean;
+  /** The action question is answered with this label even when it is not offered (a corrupt native response). */
+  forceAction?: string };
 const TEXTS: Record<string, string> = { local_extraction: '[]', ai_extraction: '[]' };
 
 export async function runTurn(profile: any, label: Label, state: any, events: any[], plan: Plan, technicalTrial: { version: TrialVersion } | undefined) {
-  const luna: any[] = [], jev: any[] = [], traces: any[] = [], boundary = { luna: -1, jev: -1 };
-  let next: any, count = 0;
+  const luna: any[] = [], jev: any[] = [], traces: any[] = [], reobservations: any[] = [], boundary = { luna: -1, jev: -1 };
+  let next: any, count = 0, actionCalls = 0, lastAction = '';
   const http = createChatClient({ provider: 'cloudflare', apiKey: 'synthetic-offline-replay-key', purpose: profile.modelPolicy.purpose,
     baseUrl: 'http://offline.invalid/v1', timeoutMs: profile.timeouts.lunaAttemptMs },
   async () => Response.json({ model: next.model, choices: [{ message: { content: next.text } }], usage: { prompt_tokens: 0, completion_tokens: 0 } }));
   const client = { async complete(messages: any[], options: any) {
-    const response = { text: TEXTS[options.phase] ?? plan.speech ?? 'もう一度、確かめてみますね。', model: 'synthetic-luna-model', usage: { inputTokens: 0, outputTokens: 0 } };
+    const response = { text: options.phase === 'local_extraction' && plan.extraction !== undefined ? plan.extraction : TEXTS[options.phase] ?? plan.speech ?? 'もう一度、確かめてみますね。', model: 'synthetic-luna-model', usage: { inputTokens: 0, outputTokens: 0 } };
     luna.push({ phase: options.phase, response }); next = response; return http.complete(messages, options); } };
   const readKey = async () => 'sk-or-SYNTHETIC-offline-replay-key-0000';
   const fetchImpl = async (_url: any, init: any) => {
     const body = JSON.parse(init.body), answers: any = {};
     for (const [key, q] of Object.entries(body.questions) as any) {
       const labels = Object.keys(q.criteria);
-      const choice = key === 'action' ? plan.action : key === 'target' ? plan.target : key === 'repair_issue' ? plan.issue ?? 'none' : key === 'prospect' ? plan.prospect ?? 'uncertain'
-        : key === 'basis' ? 'partner_uncertain' : key.endsWith('_antecedent') ? 'none' : key.endsWith('_act') ? 'assert' : key === 'observe_aspect' ? 'orientation' : labels[0];
-      if (!labels.includes(choice)) throw new Error(`scripted choice ${choice} is not offered for ${key}: ${labels.slice(0, 8)}`);
+      if (key === 'action') lastAction = plan.forceAction ?? (plan.reobserve && ++actionCalls === 1 ? 'request_observation' : plan.action);
+      const choice = key === 'action' ? lastAction : key === 'target' ? (lastAction === 'request_observation' ? 'figure_0' : plan.target) : key === 'repair_issue' ? plan.issue ?? 'none' : key === 'prospect' ? plan.prospect ?? 'uncertain'
+        : key === 'basis' ? 'partner_uncertain' : key.endsWith('_antecedent') ? 'none' : key.endsWith('_act') ? (plan.act && labels.includes(plan.act) ? plan.act : 'assert') : key === 'observe_aspect' ? 'orientation' : labels[0];
+      if (!labels.includes(choice) && !(key === 'action' && plan.forceAction)) throw new Error(`scripted choice ${choice} is not offered for ${key}: ${labels.slice(0, 8)}`);
       answers[key] = { type: 'choice', choice, probabilities: Object.fromEntries(labels.map(l => [l, key === 'action' ? plan.actionScores?.[l] ?? (l === choice ? 1 : 0) : l === choice ? 1 : 0])) };
     }
     const response = { model: 'typesafe/jev-1.14', id: 'gen-s4a-' + ++count, usage: { cost: 0 }, answers };
@@ -51,7 +59,10 @@ export async function runTurn(profile: any, label: Label, state: any, events: an
     completeDetail: (i: any, s: any, o: any) => native.completeDetail!(i, s, o),
     ...(technicalTrial ? { estimateRepairProspect: (i: any, o: any) => native.estimateRepairProspect!(i, o) } : {}) };
   const runtime = createProfileDialogue(profile, { client, image: OWN.ownImage, anchors: [...OWN.ownAnchors], strategy: label,
-    observer: { async observeAll() { return structuredClone(OLD.state.observationMemo); }, async reobserve() { throw new Error('unused'); } }, jevDecision,
+    observer: { async observeAll() { return structuredClone(OLD.state.observationMemo); },
+      async reobserve(input: any) { const result = { observedAt: '2026-01-01T00:00:01.000Z', issue: structuredClone(input.issue),
+        figures: input.figureIds.map((figureId: string) => ({ figureId, supports: ['control-feature'], contradicts: [], unknown: [] })) };
+        reobservations.push(structuredClone(result)); await client.complete(buildReobservationMessages(input), { phase: 'observation_targeted' }); return result; } }, jevDecision,
     localGrounding: { classifier: createJevLocalTestClassifier({ enabled: true, readKey, fetchImpl, timeoutMs: profile.timeouts.localMs, researchLimits: { maxDeadlineMs: 600000 } })!,
       aiPublicTransport: { readKey, fetchImpl, timeoutMs: profile.timeouts.decisionMs } },
     onJevTurnTrace: (t: any) => traces.push(t), ...(technicalTrial ? { technicalTrial } : {}) } as any);
@@ -59,7 +70,7 @@ export async function runTurn(profile: any, label: Label, state: any, events: an
   try { result = await runtime.runAiTurn({ events, privateState: state, lastEventId: events.at(-1).id, requestSeq: events.at(-1).seq }); }
   catch (error) { (error as any).traces = traces; throw error; }
   assert.ok(boundary.luna >= 0);
-  return { state: structuredClone(result.privateState), trace: { ...structuredClone(traces.at(-1)), status: 'committed' }, luna, jev, boundary, speech: result.text as string };
+  return { state: structuredClone(result.privateState), trace: { ...structuredClone(traces.at(-1)), status: 'committed' }, luna, jev, reobservations, boundary, speech: result.text as string };
 }
 
 export type Turn = { human: string; plan: Plan };
@@ -82,9 +93,10 @@ export async function buildRecords({ label = 'repair-first' as Label, technicalT
       'bypass-enabled': await runTurn(profile, 'bypass-enabled', run.state, run.events, turns[i].plan, technicalTrial) };
     const a = runs['repair-first'], b = runs['bypass-enabled'];
     assert.deepEqual([a.luna.slice(0, a.boundary.luna), a.jev.slice(0, a.boundary.jev)], [b.luna.slice(0, b.boundary.luna), b.jev.slice(0, b.boundary.jev)]);
+    assert.deepEqual(a.reobservations, b.reobservations);
     const seg = (r: any) => ({ luna: r.luna.slice(r.boundary.luna), jev: r.jev.slice(r.boundary.jev), reobservations: [] });
     const tape: any = { schemaVersion: 'parity_intervention_replay_v1', state: run.state, events: run.events,
-      common: { luna: a.luna.slice(0, a.boundary.luna), jev: a.jev.slice(0, a.boundary.jev), reobservations: [] },
+      common: { luna: a.luna.slice(0, a.boundary.luna), jev: a.jev.slice(0, a.boundary.jev), reobservations: structuredClone(a.reobservations) },
       tails: { 'repair-first': seg(a), 'bypass-enabled': seg(b) }, recorded: { label, expectedRequests: [] }, ...(technicalTrial ? { technicalTrial } : {}) };
     const probe: any = await pairedInterventionReplay(tape, OWN as any, MODEL, profile);
     assert.equal(probe.status === 'not_reached', false, String(probe.error));
@@ -94,9 +106,7 @@ export async function buildRecords({ label = 'repair-first' as Label, technicalT
     const result: any = await pairedInterventionReplay(tape, OWN as any, MODEL, profile);
     assert.equal(result.status, 'same_material_intervention_verified', String(result.error));
     const { trace, state: after } = runs[label];
-    // The measured latency inside the alternative's detail evidence differs between two runs; the record carries the replay's own (canonical) intervention.
-    const own = result.sides.find((s: any) => s.label === label);
-    trace.intervention = structuredClone(own.intervention); after.judgments.at(-1).jevTurn.intervention = structuredClone(own.intervention);
+    // The record keeps its own run's intervention, including the measured latency of the alternative's detail evidence (audit/06 R2).
     const template = (provider: string) => normal.trials[0].calls.find((c: any) => c.provider === provider);
     const turn = trace.turnIndex;
     tr.calls = recorded.requests.map((r: any, k: number) => ({ ...structuredClone(template(r.provider)), id: k + 1, sendIds: [k + 1], phase: r.phase, turn,

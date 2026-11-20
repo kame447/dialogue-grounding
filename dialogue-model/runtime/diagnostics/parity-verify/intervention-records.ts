@@ -300,7 +300,15 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
      if(pendingSet||pendingTarget)return'invalid';
      const d=current=t.decisions[++turnDecision],a=answer.answers,final=turnDecision===t.decisions.length-1;currentInput=st;
       // The prospect in this request is exactly the one the recorded prospect request answered (and the trace carries); none without such a request.
-      if(prospect){const x={...prospect.state},y={...st};delete x.repairProspect;delete y.repairProspect;const sm=sameMaterial(x,y);if(sm===false)return'invalid';if(sm===null)missing=true;
+      if(prospect){const x={...prospect.state},y={...st};delete x.repairProspect;delete y.repairProspect;
+        // The first decision is the prospect-time material. A later decision of the turn (after a reobservation) differs from it only by the merged
+        // observation memo (the preceding results appended to the prospect-time entries) and the used reobservation allowance.
+        if(turnDecision>0){const k=turnDecision,done:any[]=(tape.common?.reobservations??[]).slice(0,k);
+         if(done.length!==k||!equal(done,(t.reobservations??[]).slice(0,k).map((r:any)=>r?.result))||y.reobservationAllowed!==(k<(tr.profile?.maxReobservations??1)))return'invalid';
+         const merged=(x.observations??[]).map((o:any)=>({...o,reobservations:[...o.reobservations,...done.flatMap((r:any)=>(r.figures??[]).filter((f:any)=>f.figureId===o.figureId).map((f:any)=>({figureId:f.figureId,issue:{aspect:r.issue?.aspect,question:r.issue?.question,partnerConstrual:r.issue?.partnerConstrual},supports:f.supports,contradicts:f.contradicts,unknown:f.unknown})))]}));
+         if(!equal(y.observations,merged)){const a=x.inputBudget?.omitted,b=y.inputBudget?.omitted;if(a&&b&&Object.keys(a).some(q=>b[q]>a[q]))missing=true;else return'invalid';}
+         delete x.observations;delete y.observations;delete x.reobservationAllowed;delete y.reobservationAllowed;}
+        const sm=sameMaterial(x,y);if(sm===false)return'invalid';if(sm===null)missing=true;
        if(!Object.hasOwn(st,'repairProspect')||!equal(st.repairProspect,prospect.material)||!equal(t.repairProspect,prospect.material))return'invalid';}
       else if(Object.hasOwn(st,'repairProspect')||Object.hasOwn(t,'repairProspect'))return'invalid';
      if(!d||(a.action.choice==='request_observation')===final)return'invalid';
@@ -353,7 +361,11 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
    const hs=posts.filter((h:any)=>h.callId===call.id||e.sendIds.includes(h.sendId));if(hs.length!==e.sendIds.length||hs.some((h:any)=>h.callId!==call.id||h.phase!==r.phase||!e.sendIds.includes(h.sendId)||h.requestSha256!==e.requestSha256))return'invalid';
   }else if(call.requestSha256!==e.requestSha256)return'invalid';
  }
- if(!equal(actual.executed,t.executed)||!equal(actual.intervention,t.intervention))return'invalid';
+ // The measured latency of the alternative's detail evidence is a wall-clock of one run: the recorded and the replayed value are each
+ // finite and non-negative in their own run, and are not required to be equal; every other leaf (choice, response, source, score, cost, ranking) is.
+ const latencyOk=(i:any)=>!i?.detailEvidence||Number.isFinite(i.detailEvidence.latencyMs)&&i.detailEvidence.latencyMs>=0;
+ const withoutLatency=(i:any)=>i?.detailEvidence?{...i,detailEvidence:{...i.detailEvidence,latencyMs:0}}:i;
+ if(!equal(actual.executed,t.executed)||!latencyOk(actual.intervention)||!latencyOk(t.intervention)||!equal(withoutLatency(actual.intervention),withoutLatency(t.intervention)))return'invalid';
  return missing?'missing':'ok';
 }
 // Every supplied actual POST belongs to exactly one call of its own phase and send, and
@@ -378,9 +390,18 @@ function catalog(input:any,target:any,kind:'name'|'feature'):{value:string;figur
 // Detail availability uses the same name/feature catalogs as the detail proof; agree uses the saved per-figure agreeNames when the attempt had any.
 const unique=(xs:any[])=>[...new Set(xs)];
 function nameValues(input:any,id:string,agree:boolean):string[]{
- if(agree&&CTX.agree!==undefined)return unique(CTX.agree.filter((n:any)=>n.figureId===null||n.figureId===id).map((n:any)=>n.name));
+  // two_stage_v3 filters the saved evidence by the public turns that survived the 20,000-character compaction of THIS request's own state.
+  if(agree&&CTX.agree!==undefined){const live=CTX.v3&&Array.isArray(input?.publicTurns)?new Set(input.publicTurns.map((t:any)=>t.turn)):null;
+   return unique(CTX.agree.filter((n:any)=>(n.figureId===null||n.figureId===id)&&(!live||live.has(n.sourceTurn))).map((n:any)=>n.name));}
  if(agree&&CTX.v3)return [];
  return catalog(input,{kind:'single',figureId:id},'name').map(c=>c.value);
+}
+// The agree detail catalog: per figure of the target, that figure's public agree candidates only (the propose_name list keeps the observation names).
+function agreeCatalog(input:any,target:any):{value:string;figureIds:string[]}[]{
+  const ids=target.kind==='single'?[target.figureId]:target.kind==='multiple'?target.figureIds:[],out:{value:string;figureIds:string[]}[]=[];
+  for(const id of ids){if(!input.observations.some((o:any)=>o.figureId===id))continue;
+   for(const value of nameValues(input,id,true)){const old=out.find(c=>c.value===value);if(old){if(!old.figureIds.includes(id))old.figureIds.push(id);}else out.push({value,figureIds:[id]});}}
+  return out;
 }
 function legal(action:string,target:any,input:any):boolean{
  if(ANY_TARGET.includes(action))return true;
@@ -506,7 +527,9 @@ function observationRequestProof(messages:any[],d:any,m:any):boolean{
 function detailProof(body:any,response:any,selection:any,original:any,evidence:any,layout='two_stage_v1'):boolean|null{
  const input=JSON.parse(body.state);if(!original||!equal(input.selected,{action:selection.action,target:selection.target}))return false;
  const same=sameMaterial(input,original);if(same!==true)return same;
- const kind=['propose_name','agree'].includes(selection.action)?'name':'feature',cs=catalog(input,selection.target,kind),criteria=Object.fromEntries(cs.map((c,i)=>[kind+'_'+i,JSON.stringify(c)])),questions={[kind]:{type:'choice',instructions:nativeInstructions(input,layout)+`\n第1段の${selection.action}に必要な${kind==='name'?'名称':'確認特徴'}だけを選んでください。出典図形は特徴の出所であり、対象候補を単一に確定するものではありません。`,criteria}};
+ // agree under a v3 attempt without a known saved evidence source cannot be told from forgery.
+ if(selection.action==='agree'&&CTX.v3&&!CTX.known)return null;
+ const kind=['propose_name','agree'].includes(selection.action)?'name':'feature',cs=selection.action==='agree'&&CTX.agree!==undefined?agreeCatalog(input,selection.target):catalog(input,selection.target,kind),criteria=Object.fromEntries(cs.map((c,i)=>[kind+'_'+i,JSON.stringify(c)])),questions={[kind]:{type:'choice',instructions:nativeInstructions(input,layout)+`\n第1段の${selection.action}に必要な${kind==='name'?'名称':'確認特徴'}だけを選んでください。出典図形は特徴の出所であり、対象候補を単一に確定するものではありません。`,criteria}};
  if(!equal(body.questions,questions)||!evidence||evidence.stage!=='detail'||evidence.model!==response.model||evidence.responseId!==response.id||evidence.costUsd!==response.usage?.cost||evidence.inputBudget?.stateChars!==body.state.length||!equal(evidence.inputBudget?.omitted,input.inputBudget?.omitted)||!equal(evidence.choices,Object.fromEntries(Object.entries(response.answers).map(([k,v]:any)=>[k,v.choice])))||!equal(evidence.scores,Object.fromEntries(Object.entries(response.answers).map(([k,v]:any)=>[k,v.probabilities]))))return false;
  const c=cs[Number(response.answers[kind].choice.slice(kind.length+1))];return !!c&&selection[kind]===c.value&&selection[kind==='name'?'feature':'name']===null&&equal(selection.detailFigureIds,c.figureIds);
 }
