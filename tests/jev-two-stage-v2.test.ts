@@ -349,7 +349,8 @@ test("budget ceiling: research callers may set up to 0.15 USD; the default path 
   for (const [name, make] of adapters) {
     assert.ok(make({ costCapUsd: 0.15, researchLimits }), name);
     assert.ok(make({ costCapUsd: 0.05 }), name);
-    for (const costCapUsd of [0.150001, 0, -0.01, Number.NaN, Number.POSITIVE_INFINITY])
+    assert.ok(make({}), `${name} unspecified uses the 0.05 default`);
+    for (const costCapUsd of [0.150001, 0, -0.01, Number.NaN, Number.POSITIVE_INFINITY, "0.1", null])
       assert.throws(() => make({ costCapUsd, researchLimits }), (e: unknown) => (e as { code?: string })?.code === "invalid_options", `${name} ${costCapUsd}`);
     assert.throws(() => make({ costCapUsd: 0.06 }), (e: unknown) => (e as { code?: string })?.code === "invalid_options", `${name} without research limits`);
   }

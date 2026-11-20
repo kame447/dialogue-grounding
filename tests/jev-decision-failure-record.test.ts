@@ -212,7 +212,10 @@ test('A9/D3: both strategies fail identically before acceptance and send identic
 
 test('budget: an explicit 0.15 USD research cap reaches RunBudget and every Jev adapter; another cap cannot restore the record',async t=>{
   const base=(await fixture(t)).config;
-  for(const jevUsd of [0.150001,0,-0.01,null,Number.NaN,Infinity])assert.throws(()=>validateParticipantJevConfig({...base,limits:{...limits,jevUsd}}),{code:'invalid_config'},String(jevUsd));
+  for(const jevUsd of [0.150001,0,-0.01,null,Number.NaN,Infinity,'0.1'])assert.throws(()=>validateParticipantJevConfig({...base,limits:{...limits,jevUsd}}),{code:'invalid_config'},String(jevUsd));
+  // Unspecified: the research config has no implicit Jev budget; a missing jevUsd refuses startup.
+  const {jevUsd:_unspecified,...withoutJevUsd}=limits;
+  assert.throws(()=>validateParticipantJevConfig({...base,limits:withoutJevUsd}),{code:'invalid_config'});
   assert.equal(validateParticipantJevConfig({...base,limits:{...limits,jevUsd:0.15}}).config.limits.jevUsd,0.15);
   // Two 0.04 USD Jev calls in one turn exceed 0.05 but fit 0.15, in the decision client and in the ledger alike.
   const low=await fixture(t,{},{stage1:{action:'accept',target:'none'},cost:0.04});
