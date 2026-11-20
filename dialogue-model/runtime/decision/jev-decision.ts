@@ -525,7 +525,7 @@ function prepareDetail(input: JevDecisionInput, selected: JevActionTarget, rejec
   if (selected.action === "request_observation") {
     for (let mask = 1; mask < 2 ** scope.length; mask++) subsets.push(scope.filter((_id, i) => mask & (1 << i)));
     questions.observe_targets = { type: "choice", instructions: decisionInstructions(input, false, layout) +
-      (layout === "two_stage_v2" ? "\n" + TWO_STAGE_V2_OBSERVE_TARGETS : "\n第1段の候補の範囲で、再観察が必要な図形の集合を選んでください。"),
+      (layout !== "two_stage_v1" ? "\n" + TWO_STAGE_V2_OBSERVE_TARGETS : "\n第1段の候補の範囲で、再観察が必要な図形の集合を選んでください。"),
       criteria: Object.fromEntries(subsets.map((ids, i) => [`subset_${i}`, JSON.stringify(ids)])) };
     questions.observe_aspect = { type: "choice", instructions: decisionInstructions(input, false, layout) + "\n第1段の再観察要求について、確認する視覚論点を選んでください。",
       criteria: Object.fromEntries(OBSERVATION_ASPECTS.map(a => [a, OBSERVE_QUESTIONS[a]])) };

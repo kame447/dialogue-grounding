@@ -21,6 +21,7 @@ const own = { ownImage: { mimeType: model.mimeType, base64: model.png.toString('
 const timeouts = { observationMs: 20000, localMs: 20000, decisionMs: 20000, lunaAttemptMs: 80000, generationMs: 40000, trialMs: 600000 };
 const limits = { lunaCalls: 100, lunaTokens: 100000, lunaPosts: 100, jevPosts: 100, jevUsd: 0.05 };
 // No holistic construal and no public names (no name candidates, no agree evidence); every figure has a feature.
+const rawMemoWith = (holistic: any[]) => ({ figures: model.anchors.map((a: any) => ({ id: a.id, holistic, analytic: { shapes: ['三角'], composition: '二つの部分が接する', relations: [] }, unknowns: [] })) });
 const rawMemo = { figures: model.anchors.map((a: any) => ({ id: a.id, holistic: [], analytic: { shapes: ['三角'], composition: '二つの部分が接する', relations: [] }, unknowns: [] })) };
 const assignment = { schemaVersion: 'base_assignment_config_v1', configId: '11111111-1111-4111-8111-111111111111', revision: 1, strategy: 'repair-first', seed, referenceMemory: true };
 const clientConfig = { provider: 'cloudflare', purpose: 'dialogue_turn', baseUrl: 'https://synthetic.invalid/v1', apiKey: 'synthetic-private-proxy-key' };
@@ -54,10 +55,10 @@ function tape(plan: Plan) {
   };
   return { fetchImpl, posts, generations, plan, readKey: async () => syntheticKey };
 }
-async function fixture(t: any, changes: any = {}, plan: Plan = { answers: { action: 'accept', target: 'none' } }) {
+async function fixture(t: any, changes: any = {}, plan: Plan = { answers: { action: 'accept', target: 'none' } }, memoValue: any = rawMemo) {
   const dir = await mkdtemp(join(await realpath(tmpdir()), 'jev-v3-turn-')); t.after(() => rm(dir, { recursive: true, force: true }));
   const cacheDirectory = join(dir, 'cache'); await mkdir(cacheDirectory, { mode: 0o700 });
-  const warm = await createObservationCache({ directory: cacheDirectory, modelId, onMiss: 'observe', client: { async complete() { return { text: JSON.stringify(rawMemo), model: modelId }; } } });
+  const warm = await createObservationCache({ directory: cacheDirectory, modelId, onMiss: 'observe', client: { async complete() { return { text: JSON.stringify(memoValue), model: modelId }; } } });
   const hit = await warm.get(own);
   const config = { schemaVersion: 'participant_jev_config_v1', lunaRequest: { timeoutMs: null, maxCompletionTokens: 1000 }, timeouts,
     cacheDirectory, modelId, memoSha256: researchHash(hit.memo), seed, limits, ...changes };
@@ -72,8 +73,8 @@ async function makeTask(prepared: any, extra: any = {}) {
   const task = await createNamingTaskV2({ ...value, ...await prepared.taskOptions(value), runDir: null, createTrial: () => trial, onPersist: async (r: any) => { saved = structuredClone(r); } });
   return { task, record: () => saved };
 }
-async function turn(t: any, changes: any, answers: Record<string, string>, strategy = 'bypass-enabled', text = '二つのどちらかです') {
-  const h = await fixture(t, changes, { answers }); const prepared = await prepareParticipantJev(h.options);
+async function turn(t: any, changes: any, answers: Record<string, string>, strategy = 'bypass-enabled', text = '二つのどちらかです', memoValue: any = rawMemo) {
+  const h = await fixture(t, changes, { answers }, memoValue); const prepared = await prepareParticipantJev(h.options);
   const made = await makeTask(prepared, { strategy });
   made.task.message(text, 'turn-1'); await made.task.whenIdle();
   return { h, prepared, made, record: made.record(), trace: made.record().jevTraces[0], strategy };
@@ -270,4 +271,43 @@ test('both strategies send byte-identical stage-one and stage-two requests; only
   assert.equal(a.trace.decisions[0].action, 'move_on'); assert.equal(b.trace.executed.action, 'move_on');
   assert.notEqual(a.trace.executed.action, 'move_on');
   for (const word of ['repair-first', 'bypass-enabled', 'veto', 'bypass_acceptance']) assert.ok(!jev(a.h).join('').includes(word), word);
+});
+
+// ---- turn-level 30-cell table (literal oracle). agree needs a public human proposal the classifier stub never produces, and
+// request_observation needs the observer; both are covered at the client boundary and by the v1/v2 turn tests.
+const NAMED = rawMemoWith([{ construal: '船', basis: ['細い部分'], status: 'hypothesis' }]);
+const TURN_CELLS: Array<[string, 'none' | 'single' | 'multiple', string]> = [];
+for (const action of ['accept', 'defer', 'move_on', 'close']) for (const [kind, label] of [['none', 'none'], ['single', 'figure_2'], ['multiple', 'figures_1_3']] as const) TURN_CELLS.push([action, kind, label]);
+for (const action of ['confirm', 'repair', 'revisit']) for (const [kind, label] of [['single', 'figure_2'], ['multiple', 'figures_1_3']] as const) TURN_CELLS.push([action, kind, label]);
+TURN_CELLS.push(['propose_name', 'single', 'figure_2']);
+test('turn level: every reachable legal cell commits with the right target projection, judgment and ledger effect', async t => {
+  assert.equal(TURN_CELLS.length, 12 + 6 + 1);
+  for (const [action, kind, label] of TURN_CELLS) {
+    const { trace, record } = await turn(t, V3, { action, target: label }, 'bypass-enabled', '二つのどちらかです', NAMED);
+    const name = `${action}x${kind}`;
+    assert.equal(trace.status, 'committed', name + ' ' + JSON.stringify([trace.errorCode, trace.decisionRejectionCode]));
+    assert.equal(trace.executed.action, action, name); assert.equal(trace.executed.target.kind, kind, name);
+    assert.equal(trace.finalAction.targetSlot, kind === 'single' ? ids[2] : null, name);
+    const changed = Object.entries(record.queueState.privateState.ledger).filter(([, e]: any) => e.status !== 'unassigned' || e.name !== null);
+    // Only a single-target defer (status deferred) or propose_name (tentative name) moves a ledger entry; revisit x single of an unnamed slot stays unassigned.
+    const expectChange = (action === 'defer' && kind === 'single') || action === 'propose_name';
+    assert.equal(changed.length, expectChange ? 1 : 0, name);
+    if (action === 'defer' && kind === 'single') assert.equal((changed[0][1] as any).status, 'deferred');
+    if (action === 'propose_name') assert.equal((changed[0][1] as any).status, 'tentative');
+    assert.equal(record.jevTraces.length, 1);
+    assert.equal(record.events.filter((e: any) => e.speaker === 'ai').length, GREETING + 1, name);
+  }
+});
+
+test('restore after a failed generation then a retry never publishes twice', async t => {
+  const h = await fixture(t, V3, { answers: REVISIT_MULTIPLE, failGeneration: 1 });
+  const prepared = await prepareParticipantJev(h.options), made = await makeTask(prepared);
+  made.task.message('二つのどちらかです', 'turn-1'); await made.task.whenIdle();
+  const failed = made.record();
+  assert.equal(aiEvents(failed).length, GREETING);
+  const restored = await makeTask(prepared, { restore: failed });
+  await restored.task.retry(); await restored.task.whenIdle();
+  assert.equal(aiEvents(restored.record()).length, GREETING + 1);
+  assert.equal(restored.record().queueState.privateState.judgments.length, 1);
+  assert.equal(restored.record().jevTraces.filter((r: any) => r.status === 'committed').length, 1);
 });

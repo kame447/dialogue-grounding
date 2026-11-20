@@ -266,7 +266,7 @@ test("a stage-two failure carries a closed failure record that restores; tampere
     ["rule named on the action stage of a longer record", r => { r.rejectionCode = "name_required"; r.error = "inconsistent_decision"; }],
   ];
   for (const [name, mutate] of mutations) {
-    const clone = structuredClone(record);
+    const clone: any = structuredClone(record as object);
     mutate(clone);
     assert.equal(checkDecisionFailureEvidence(clone), null, name);
   }
