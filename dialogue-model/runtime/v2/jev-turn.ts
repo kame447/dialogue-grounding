@@ -308,7 +308,8 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
   validateOwnLedger(s.ledger);if(!sameSet(Object.keys(s.ledger),ownSlots))throw Error();const graph=snapshotReferenceGraph(s.graph);if(!sameSet(Object.keys(graph.ownSlots),ownSlots)||!Array.isArray(s.judgments)||!Array.isArray(s.repairHistory))throw Error();
   if(s.observationMemo!==null){const m=validateObservationMemo(s.observationMemo);if(!sameSet(m.figures.map(f=>f.id),ownSlots))throw Error();}
   if(Object.hasOwn(s,'aiPublic'))validateAiPublicState(s.aiPublic,ownSlots,Number.MAX_SAFE_INTEGER,s.graph);
-  const liveClaims=new Map<string,any>(priorClaimViews(s.graph,{limit:REFERENCE_LIMITS.records}).map((c:any)=>[c.id,c]));
+  // Every claim record still held by the graph, withdrawn or not (the live view alone drops a claim as soon as it is withdrawn).
+  const graphClaims=new Map<string,any>((s.graph.records as any[]).filter((r:any)=>r?.kind==='claim').map((r:any)=>[r.id,r]));
   const seen=new Set<string>();
   for(const j of s.judgments){
    if(!stateExact(j,['turnIndex','lastEventId','status','judgment','generationGuard','jevTurn','localGrounding',...(Object.hasOwn(j,'aiPublic')?['aiPublic']:[])])||j.status!=='committed'||!Number.isSafeInteger(j.turnIndex)||j.turnIndex<1||!(j.lastEventId===null||typeof j.lastEventId==='string'&&j.lastEventId.length<=160))throw Error();
@@ -397,17 +398,21 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
      // partner claims, or the original set when there is none; missingReasons only ever turn the progress into unknown and never change the set.
      // Resolve every partner claim against the live graph: a claim still there is judged exactly as the generator did (figureInformation);
      // a pruned one is judged by its act alone, and every way it could count is allowed.
+     // The generator puts only novel information claims into addedClaimIds, so an id listed there was an information claim then, even when a later
+     // withdrawal or pruning removed the claim from the graph; a withdrawn claim that is still recorded resolves from its record.
+     const addedSet=new Set<string>(Array.isArray(entry.addedClaimIds)?entry.addedClaimIds:[]);
      const resolved:any[]=[],unresolved:any[]=[],named:Set<string>=new Set();
      for(const c of claimsOf){
       if(!c||!Array.isArray(c.targets)||typeof c.id!=='string')throw Error();
-      const g=liveClaims.get(c.id);
+      const g=graphClaims.get(c.id);
       if(g){if(g.act!==c.act||!stateSame(g.targets,c.targets))throw Error();if(figureInformation(g)){resolved.push(c);if(c.targets.length)named.add(c.id);}}
+      else if(addedSet.has(c.id)){if(!INFORMATION_ACTS.has(c.act)||!c.targets.length)throw Error();resolved.push(c);named.add(c.id);}
       else if(INFORMATION_ACTS.has(c.act)){unresolved.push(c);if(c.targets.length)named.add(c.id);}
      }
      const expected=(list:any[])=>list.length?[...new Set(list.flatMap((c:any)=>c.targets))]:[...ids];
      let setOk:boolean;
      if(!unresolved.length)setOk=stateSame(after,expected(resolved));
-     else if(unresolved.length>8)setOk=true;
+     else if(unresolved.length>8)setOk=resolved.every((c:any)=>c.targets.every((id:string)=>after.includes(id)))&&after.every((id:string)=>[...resolved,...unresolved].some((c:any)=>c.targets.includes(id)));
      else{setOk=false;for(let mask=0;mask<1<<unresolved.length&&!setOk;mask++){const exp=expected([...resolved,...unresolved.filter((_:any,n:number)=>mask>>n&1)]);setOk=exp.length===after.length&&exp.every((id:string)=>after.includes(id));}}
      if(!setOk)throw Error();
      const added=Array.isArray(entry.addedClaimIds)?entry.addedClaimIds:[];

@@ -540,3 +540,56 @@ for (const [name, segments, expectedAfter, progress] of R3_CASES) test(`R3 compl
     await assert.rejects(makeTask(prepared, { restore: r }), { code: 'invalid_options' });
   }
 });
+
+// ---- audit/06 R3 (withdrawal and pruning): addedClaimIds fix the information claims of the update even when the graph no longer shows them
+const WITHDRAW = '直前の上の角という説明は取り消します。';
+async function withdrawnRecord(t: any, claimTargets: string[]) {
+  const h = await fixture(t, V3, { answers: REVISIT_MULTIPLE, segmentText: REPLY, segments: [seg('s1', '上の角が目印です', claimTargets)] });
+  const prepared = await prepareParticipantJev(h.options), made = await makeTask(prepared);
+  made.task.message('二つのどちらかです', 'turn-1'); await made.task.whenIdle();
+  h.upstream.plan.answers = { action: 'accept', target: 'none' };
+  made.task.message(REPLY, 'turn-2'); await made.task.whenIdle();
+  const afterReply = structuredClone(made.record());
+  h.upstream.plan.answers = { action: 'accept', target: 'none', segment_0_act: 'withdraw', segment_0_antecedent: 'claim_0' };
+  h.upstream.plan.segmentText = WITHDRAW; h.upstream.plan.segments = [seg('s1', '取り消します', claimTargets, 'contour')];
+  made.task.message(WITHDRAW, 'turn-3'); await made.task.whenIdle();
+  h.upstream.plan.answers = { action: 'accept', target: 'none' };
+  return { h, prepared, made, afterReply, withdrawn: made.record() };
+}
+const nextCandidatesAfter = async (h: any, prepared: any, record: any, turn: number, text: string) => {
+  const before = h.upstream.posts.length;
+  const restored = await makeTask(prepared, { restore: record });
+  restored.task.message(text, 'next-' + before); await restored.task.whenIdle();
+  const stageOne = h.upstream.posts.slice(before).filter((b: any) => b.questions?.action).at(-1);
+  return JSON.parse(stageOne.state).repairHistory.find((r: any) => r.turn === turn).candidatesAfter;
+};
+
+test('R3 withdrawal: after the participant withdrew the feature claim, the entry still restores and cannot be rewritten to the original set', async t => {
+  const { h, prepared, afterReply, withdrawn } = await withdrawnRecord(t, [ids[3]]);
+  const entry = withdrawn.queueState.privateState.repairHistory[0];
+  assert.deepEqual(entry.candidatesAfter, [ids[3]]); assert.equal(entry.progress, 'changed'); assert.equal(entry.addedClaimIds.length, 1);
+  const records = withdrawn.queueState.privateState.graph.records;
+  assert.ok(records.some((r: any) => r.act === 'withdraw' && r.respondsTo === entry.addedClaimIds[0]), 'the withdrawal reached the graph');
+  assert.deepEqual(await nextCandidatesAfter(h, prepared, withdrawn, entry.turn, 'まだ迷っています'), [ids[3]]);
+  for (const record of [afterReply, withdrawn]) {
+    const r = structuredClone(record); r.queueState.privateState.repairHistory[0].candidatesAfter = [...SET];
+    const posts = h.upstream.posts.length;
+    await assert.rejects(makeTask(prepared, { restore: r }), { code: 'invalid_options' });
+    assert.equal(h.upstream.posts.length, posts);
+  }
+});
+
+test('R3 pruning: once the claim and its withdrawal are gone from the graph, the added claim id still pins the candidate set', async t => {
+  const { h, prepared, withdrawn } = await withdrawnRecord(t, [ids[3]]);
+  const pruned = structuredClone(withdrawn);
+  const entry = pruned.queueState.privateState.repairHistory[0], gone = new Set<string>([...entry.addedClaimIds]);
+  pruned.queueState.privateState.graph.records = pruned.queueState.privateState.graph.records.filter((r: any) => !(r.kind === 'claim' && (gone.has(r.id) || gone.has(r.respondsTo))));
+  assert.ok(!pruned.queueState.privateState.graph.records.some((r: any) => gone.has(r.id)));
+  assert.deepEqual(await nextCandidatesAfter(h, prepared, pruned, entry.turn, 'まだ迷っています'), [ids[3]]);
+  for (const rewrite of [[...SET], [], [ids[1]], [ids[3], ids[1]]]) {
+    const r = structuredClone(pruned); r.queueState.privateState.repairHistory[0].candidatesAfter = rewrite;
+    const posts = h.upstream.posts.length;
+    await assert.rejects(makeTask(prepared, { restore: r }), { code: 'invalid_options' }, JSON.stringify(rewrite));
+    assert.equal(h.upstream.posts.length, posts);
+  }
+});
