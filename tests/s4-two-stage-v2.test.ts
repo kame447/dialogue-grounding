@@ -169,6 +169,14 @@ test('F1 v2: corrupt candidate-set evidence fails the S4 shape or replay', async
 const traceDecisions = (n: any, index: number) => [n.trials[0].attempts[0].decisions[index], n.trials[0].turns[0].trace[0].decisions[index]];
 /** Every side copy of the replayed requests: the replay result and the paired evidence. */
 const sideCopies = (n: any) => [...n.trials[0].replay[0].result.sides, n.evidence.pairedReplay[0].left, n.evidence.pairedReplay[0].right];
+/** Edits the projected observation_targeted request JSON in every side copy and keeps each payload hash consistent. */
+const lunaRequest = (n: any, edit: (request: any) => void) => {
+  for (const side of sideCopies(n)) {
+    const r = side.requests.find((x: any) => x.phase === 'observation_targeted');
+    const message = r.payload.messages.find((x: any) => x.role === 'user' && typeof x.content === 'string');
+    const request = JSON.parse(message.content); edit(request); message.content = JSON.stringify(request); r.payloadSha256 = hash(r.payload);
+  }
+};
 
 test('F1 v2 reobservation: request_observation / multiple -> candidate_set -> observe detail -> observation_targeted -> accept passes all five checks', async () => {
   const n = await records('two_stage_v2', [
@@ -192,6 +200,9 @@ test('F1 v2 reobservation: request_observation / multiple -> candidate_set -> ob
     ['projected image not the own image', n => { for (const side of sideCopies(n)) { const r = side.requests.find((r: any) => r.phase === 'observation_targeted');
       const swap = (v: any): void => { if (v && typeof v === 'object') { if (v.projection) v.byteSha256 = '0'.repeat(64); else Object.values(v).forEach(swap); } };
       swap(r.payload); r.payloadSha256 = hash(r.payload); } }],
+    // The Luna request alone differs from the Jev decision; its own hash, the sent hash and the image projection stay consistent.
+    ['Luna request moved to another figure', n => lunaRequest(n, req => { req.figureIds = ['s-0002']; })],
+    ['Luna request aspect changed to contour', n => lunaRequest(n, req => { req.issue.aspect = 'contour'; })],
   ];
   for (const [name, mutate] of variants) {
     const copy = structuredClone(n); mutate(copy);
