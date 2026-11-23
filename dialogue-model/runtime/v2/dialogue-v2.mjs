@@ -188,6 +188,8 @@ export function createDialogueV2(options) {
     intervention=interventionForStrategy(strategy);
    }catch{throw new JevTurnError('invalid_intervention');}
   }
+  // two_stage_v2 exists only for the integrated research profile; every other dialogue keeps two_stage_v1.
+  if (Object.hasOwn(options, "questionLayout") && options.questionLayout !== "two_stage_v1" && !integrated) throw new Error(options.questionLayout + " requires the integrated Jev profile");
   if (!client || typeof client.complete !== "function") throw new Error("A chat client is required");
   if (!STRATEGIES.includes(strategy)) throw new Error("Unsupported dialogue strategy");
   if (typeof referenceMemory !== "boolean") throw new Error("Invalid memory option");
@@ -215,6 +217,7 @@ export function createDialogueV2(options) {
     if (activeDecision || decisionShadowClient || groundingShadow) throw new Error("Jev decision mode cannot combine legacy decision paths");
     return createJevTurnRuntime({ client, ownImage, ownAnchors, observer, jevDecision, localGrounding, ...(integrated?{intervention,decisionTimeoutMs}:{}),
       ...(Object.hasOwn(options,'technicalTrial')?{technicalTrial:options.technicalTrial}:{}),
+      ...(Object.hasOwn(options,'questionLayout')?{questionLayout:options.questionLayout}:{}),
       onJevTurnTrace, onLocalGroundingTrace, maxReobservations,
       generation: { task: TASK_INSTRUCTIONS_V2, instructions: options.technicalTrial ? TRIAL_GENERATOR_INSTRUCTIONS_V2 : GENERATOR_INSTRUCTIONS_V2,
         ...(concise ? { concise: CONCISE_INSTRUCTIONS_V2 } : {}), actionScope: options.technicalTrial ? TRIAL_ACTION_SCOPE_V2 : ACTION_SCOPE_V2,

@@ -18,14 +18,14 @@ import { createObservationCache } from '../observation/cache.ts';
 import type { ObservationCacheAudit } from '../observation/cache.ts';
 import { createLunaObserver } from '../observation/observe.ts';
 import type { ObservationInput, ObservationObserver } from '../observation/contract.ts';
-import { createJevDecisionClient, JevDecisionError, validateRepairProspectMaterial } from '../decision/jev-decision.ts';
-import type { JevDecisionClient, AdaptiveRepairTrial } from '../decision/contract.ts';
+import { createJevDecisionClient, JevDecisionError, validateRepairProspectMaterial, checkDecisionFailureEvidence } from '../decision/jev-decision.ts';
+import type { JevDecisionClient, AdaptiveRepairTrial, JevQuestionLayout } from '../decision/contract.ts';
 import { createJevLocalTestClassifier, JevLocalTestError } from '../local-grounding/jev-local-test.ts';
 import type { JevTurnLocalOptions } from '../v2/jev-turn.ts';
 import { RunBudget } from '../diagnostics/parity-live/audit.ts';
 import type { BudgetLimits, SendReceipt } from '../diagnostics/parity-live/audit.ts';
 import { checkModelIdentity, MODEL_CONTRACT_V2 } from '../model-identity-contract.ts';
-import { DEFAULT_COST_CAP_USD } from '../diagnostics/jev-shadow-eval/local-openrouter.ts';
+import { RESEARCH_MAX_JEV_USD } from '../diagnostics/jev-shadow-eval/local-openrouter.ts';
 import { inferenceHistory } from '../v2/agreement-gate.ts';
 
 export type JevResearchLedger = RunBudget;
@@ -55,9 +55,24 @@ function checkedTechnicalTrial(value: unknown): AdaptiveRepairTrial {
 function checkedProfile(value: unknown): ResearchTrialProfileV3 {
   const profile = jsonData(value) as ResearchTrialProfileV3;
   if (resolveInterventionPolicy(profile).mode !== 'explicit') return invalid();
-  const expected = researchTrialProfileV3(profile.lunaRequest, profile.timeouts);
+  const expected = researchTrialProfileV3(profile.lunaRequest, profile.timeouts, profile.questionLayout);
   if (researchHash(profile) !== researchHash(expected)) return invalid();
   return expected;
+}
+/** Plan O records exist only on failed decide() attempts and must re-validate to the identical closed record. */
+function checkedDecisionFailure(trace: any, layout: JevQuestionLayout): boolean {
+  // The local v3 rule is recorded together with its evidence; a bare rule name on a trace is a damaged record.
+  if (!Object.hasOwn(trace, 'decisionFailure')) return trace.decisionRejectionCode !== 'action_target_not_allowed';
+  const f = trace.decisionFailure;
+  if (trace.status !== 'error' || !['decision_failed', 'invalid_decision'].includes(trace.errorCode) || !f || typeof f !== 'object' ||
+      Object.getPrototypeOf(f) !== Object.prototype || Reflect.ownKeys(f).length !== 1 || !Object.hasOwn(f, 'evidence')) return false;
+  if (f.evidence === null) return trace.decisionRejectionCode !== 'action_target_not_allowed';
+  const checked = checkDecisionFailureEvidence(f.evidence);
+  if (checked === null || checked.questionLayout !== layout || researchHash(checked) !== researchHash(jsonData(f.evidence))) return false;
+  // A decision the local v3 table refused names its rule twice, in the turn and in the evidence, and in no other way; no native failure may carry it.
+  const local = checked.rejectionCode === 'action_target_not_allowed' && checked.stages.length === 0;
+  if (local) return trace.errorCode === 'invalid_decision' && trace.decisionRejectionCode === 'action_target_not_allowed';
+  return trace.decisionRejectionCode !== 'action_target_not_allowed';
 }
 
 /** R2: classify restore before any queue, initial observer, or model work. */
@@ -70,7 +85,7 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
       if (marker !== undefined && marker !== true && marker !== false) return invalid();
       if (marker !== true) {
         const state = restore.queueState?.privateState;
-        if (['profileSha256','interventionPolicy','technicalTrial'].some(k => Object.hasOwn(restore.options ?? {},k)) ||
+        if (['profileSha256','interventionPolicy','technicalTrial','questionLayout'].some(k => Object.hasOwn(restore.options ?? {},k)) ||
             ['jevTraces','aiPublicSettlement','initialObservation','jevLedger'].some(k => Object.hasOwn(restore,k)) ||
             state && (['schemaVersion','interventionPolicy','observationMemo','repairHistory','aiPublic'].some(k=>Object.hasOwn(state,k)) ||
               state.judgments?.some((j: any) => j.jevTurn))) return invalid();
@@ -94,6 +109,10 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
     if (restore) {
       const savedTrial = Object.hasOwn(restore.options,'technicalTrial') ? checkedTechnicalTrial(restore.options.technicalTrial) : undefined;
       if (JSON.stringify(savedTrial) !== JSON.stringify(technicalTrial)) return invalid();
+      // A v2 record names its layout; a v1 record never does. profileSha256 below also differs between layouts.
+      const savedLayout = Object.hasOwn(restore.options,'questionLayout') ? restore.options.questionLayout : 'two_stage_v1';
+      if (savedLayout !== profile.questionLayout || Object.hasOwn(restore.options,'questionLayout') && savedLayout !== 'two_stage_v2' && savedLayout !== 'two_stage_v3') return invalid();
+      if (restore.jevTraces?.some?.((trace:any)=>!checkedDecisionFailure(trace,profile.questionLayout))) return invalid();
       if (restore.options.profileSha256 !== researchHash(profile) ||
           researchHash(jsonData(restore.options.interventionPolicy)) !== researchHash(profile.interventionPolicy) ||
           restore.queueState?.privateState?.schemaVersion !== 'jev_private_state_v2' ||
@@ -228,17 +247,23 @@ export function restoreParticipantJevLedger(ledger:RunBudget,saved:any):void {
 }
 
 export type ParticipantJevConfig = {schemaVersion:'participant_jev_config_v1';lunaRequest:ResearchTrialProfileV3['lunaRequest'];
-  timeouts:ResearchTrialProfileV3['timeouts'];cacheDirectory:string;modelId:string;memoSha256:string;seed:number;limits:BudgetLimits;technicalTrial?:AdaptiveRepairTrial};
+  timeouts:ResearchTrialProfileV3['timeouts'];cacheDirectory:string;modelId:string;memoSha256:string;seed:number;limits:BudgetLimits;technicalTrial?:AdaptiveRepairTrial;
+  /** Optional; omitted means two_stage_v1. two_stage_v2 must be chosen explicitly per trial. */
+  questionLayout?:JevQuestionLayout};
 export function validateParticipantJevConfig(value:unknown):{config:ParticipantJevConfig;profile:ResearchTrialProfileV3} {
   try {
     const raw=data(value);
-    const c=jsonData(data(raw,['schemaVersion','lunaRequest','timeouts','cacheDirectory','modelId','memoSha256','seed','limits',...(Object.hasOwn(raw,'technicalTrial')?['technicalTrial']:[])])) as ParticipantJevConfig;
+    const c=jsonData(data(raw,['schemaVersion','lunaRequest','timeouts','cacheDirectory','modelId','memoSha256','seed','limits',...(Object.hasOwn(raw,'technicalTrial')?['technicalTrial']:[]),
+      ...(Object.hasOwn(raw,'questionLayout')?['questionLayout']:[])])) as ParticipantJevConfig;
     if(Object.hasOwn(c,'technicalTrial'))c.technicalTrial=checkedTechnicalTrial(c.technicalTrial);
+    if(Object.hasOwn(c,'questionLayout')&&c.questionLayout!=='two_stage_v1'&&c.questionLayout!=='two_stage_v2'&&c.questionLayout!=='two_stage_v3')throw Error();
     if(c.schemaVersion!=='participant_jev_config_v1'||typeof c.cacheDirectory!=='string'||!safeModel(c.modelId)||!digest(c.memoSha256)||!Number.isSafeInteger(c.seed))throw Error();
     const limits=data(c.limits,['lunaCalls','lunaTokens','lunaPosts','jevPosts','jevUsd']);
-    if(!['lunaCalls','lunaTokens','lunaPosts','jevPosts'].every(k=>positive(limits[k]))||typeof limits.jevUsd!=='number'||!Number.isFinite(limits.jevUsd)||limits.jevUsd<=0||limits.jevUsd>DEFAULT_COST_CAP_USD)throw Error();
+    // The explicit per-trial research Jev budget may exceed the 0.05 default, never RESEARCH_MAX_JEV_USD; the same
+    // value reaches RunBudget and every Jev adapter (they receive researchLimits, see maxJevCostCapUsd).
+    if(!['lunaCalls','lunaTokens','lunaPosts','jevPosts'].every(k=>positive(limits[k]))||typeof limits.jevUsd!=='number'||!Number.isFinite(limits.jevUsd)||limits.jevUsd<=0||limits.jevUsd>RESEARCH_MAX_JEV_USD)throw Error();
     data(c.lunaRequest,['timeoutMs','maxCompletionTokens']);
-    return {config:c,profile:researchTrialProfileV3(c.lunaRequest,c.timeouts)};
+    return {config:c,profile:researchTrialProfileV3(c.lunaRequest,c.timeouts,c.questionLayout??'two_stage_v1')};
   }catch{throw new ParticipantJevError('invalid_config');}
 }
 

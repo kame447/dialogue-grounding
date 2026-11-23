@@ -167,6 +167,7 @@ export async function createNamingTaskV2({
       ...(jev.technicalTrial ? { technicalTrial: clone(jev.technicalTrial) } : {}),
       localGrounding: jev.localGrounding, maxReobservations: jev.profile.maxReobservations,
       interventionPolicy: jev.profile.interventionPolicy, decisionTimeoutMs: jev.profile.timeouts.decisionMs,
+      ...(jev.profile.questionLayout !== "two_stage_v1" ? { questionLayout: jev.profile.questionLayout } : {}),
       onJevTurnTrace: (record) => {
         jevTraces.push(clone(record));
         if (Object.values(record.aiPublic?.stages ?? {}).some(stage => stage.error === "cost_cap")) jev.ledger.stop("cost_cap");
@@ -246,7 +247,9 @@ export async function createNamingTaskV2({
         // Present only when on, so default-off records keep their previous shape.
         ...(grounding ? { groundingShadow: true } : {}), ...(local ? { localGrounding: true } : {}),
         ...(!jev && restore?.options?.jevResearch === false ? { jevResearch: false } : {}),
-        ...(jev ? { jevResearch: true, profileSha256: researchHash(jev.profile), interventionPolicy: clone(jev.profile.interventionPolicy), ...(jev.technicalTrial ? { technicalTrial: clone(jev.technicalTrial) } : {}) } : {}) },
+        ...(jev ? { jevResearch: true, profileSha256: researchHash(jev.profile), interventionPolicy: clone(jev.profile.interventionPolicy), ...(jev.technicalTrial ? { technicalTrial: clone(jev.technicalTrial) } : {}),
+          // two_stage_v2 records name their layout; two_stage_v1 records keep their previous shape.
+          ...(jev.profile.questionLayout !== "two_stage_v1" ? { questionLayout: jev.profile.questionLayout } : {}) } : {}) },
       ...(rotation.legacy ? {} : { stimulus: clone(stimulus) }),
       status: result ? "completed" : closed ? "submitting" : "dialogue",
       // Origin is research metadata only; queue/model/participant events stay ordinary public speech.
