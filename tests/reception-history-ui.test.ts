@@ -50,16 +50,24 @@ const completedTrial = (id = 'r1') => ({ version: 2, sessionId: id, status: 'com
   events: [{ id: 0, speaker: 'human', text: 'hello' }], humanSubmission: { s1: 'a' }, result: { provisional: true, success: true, matchedCount: 1, total: 1, figures: [{ human: { slot: 's1', rawName: 'a' }, ai: { rawName: 'a' }, matched: true }] } });
 const FORM = { version: 'v', notice: '', items: [{ id: 'q1', text: 'Q1', min: 1, max: 7, minLabel: 'a', maxLabel: 'b' }] };
 
-type Server = { mode?: string; sessions?: any[]; states?: Record<string, any>; reviews?: Record<string, any>; questionnaire?: any; saveStatus?: number; legacySessions404?: boolean };
+type Server = { mode?: string; sessions?: any[]; states?: Record<string, any>; reviews?: Record<string, any>; questionnaire?: any; saveStatus?: number; legacySessions404?: boolean; receptionStatus?: number; stateStatus?: Record<string, number>; local?: Map<string, string> };
 async function ui(resolved: any, server: Server = {}) {
   const { root, e } = makeDOM();
   const calls: { path: string; method: string; body: any; session: string | null }[] = [], timers = new Map<number, { callback: Function; delay: number }>();
   const tabCalls: string[] = []; let timerId = 0, counter = 0;
   const srv = { mode: 'on', sessions: [], states: {}, reviews: {}, ...server };
+  const store = srv.local ?? new Map<string, string>();
+  const localStorage = {
+    get length() { return store.size; },
+    key: (i: number) => [...store.keys()][i] ?? null,
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => store.set(k, String(v)),
+    removeItem: (k: string) => store.delete(k),
+  };
   const document = { visibilityState: 'visible', getElementById: (id: string) => e[id], createElement: (tag: string) => new Element(tag),
     createElementNS: (_: unknown, tag: string) => new Element(tag), addEventListener() {} };
   const reply = (status: number, value: any) => ({ ok: status < 400, status, json: async () => structuredClone(value) });
-  runInNewContext(script, { document,
+  runInNewContext(script, { document, localStorage,
     TangramTabSession: resolved === null ? undefined : { resolve: async () => resolved, bind: (id: string) => tabCalls.push('bind:' + id), clear: () => tabCalls.push('clear'), current: () => null, dispose() {} },
     setTimeout: (callback: Function, delay: number) => { timers.set(++timerId, { callback, delay }); return timerId; }, clearTimeout: (id: number) => timers.delete(id),
     fetch: async (path: string, opts: any) => {
@@ -67,8 +75,16 @@ async function ui(resolved: any, server: Server = {}) {
       calls.push({ path, method, body, session });
       if (path === '/api/sessions' && method === 'GET') return srv.legacySessions404 ? reply(404, { error: 'not_found' }) : reply(200, { receptionMode: srv.mode, sessions: srv.sessions });
       if (path === '/api/sessions') { const sessionId = '00000000-0000-4000-8000-00000000000' + ++counter; srv.states[sessionId] = { trial: null, ...(srv.mode === 'on' ? { reception: { number: null, status: 'waiting', revision: 0 } } : {}) }; return reply(200, { sessionId, state: srv.states[sessionId] }); }
-      if (path === '/api/reception') { const state = srv.states[session!] ?? { trial: null }; state.reception = { number: '042', status: 'waiting', revision: 1 }; return reply(200, state); }
-      if (path === '/api/state') return srv.states[session ?? 'cookie'] ? reply(200, srv.states[session ?? 'cookie']) : reply(404, { error: 'not_found' });
+      if (path === '/api/reception') {
+        if (srv.receptionStatus) return reply(srv.receptionStatus, { error: 'reception_unavailable' });
+        const state = srv.states[session!] ?? { trial: null }; state.reception = { number: '042', status: 'waiting', revision: 1 }; return reply(200, state);
+      }
+      if (path === '/api/state') {
+        const key = session ?? 'cookie';
+        if (srv.stateStatus?.[key]) return reply(srv.stateStatus[key], { error: srv.stateStatus[key] === 401 ? 'session_required' : 'not_found' });
+        return srv.states[key] ? reply(200, srv.states[key]) : reply(404, { error: 'not_found' });
+      }
+      if (path === '/api/names') return reply(200, srv.states[session ?? 'cookie'] ?? { trial: null });
       if (path === '/api/records') return reply(200, { records: [] });
       const m = path.match(/^\/api\/records\/([^/]+)\/(review|questionnaire)$/u);
       if (m?.[2] === 'review') return srv.reviews[m[1]] ? reply(200, srv.reviews[m[1]]) : reply(404, { error: 'not_found' });
@@ -82,7 +98,7 @@ async function ui(resolved: any, server: Server = {}) {
   await tick();
   const text = (node: Element = root): string => node._text + node.children.map(text).join('');
   const rows = () => e['session-list'].children.map(li => ({ li, text: text(li), buttons: li.querySelectorAll('button') }));
-  return { root, e, calls, timers, tabCalls, srv, text, rows, session: (n: number) => '00000000-0000-4000-8000-00000000000' + n };
+  return { root, e, calls, timers, tabCalls, srv, store, text, rows, session: (n: number) => '00000000-0000-4000-8000-00000000000' + n };
 }
 const fresh = { kind: 'fresh', reason: 'new_tab', sessionId: null, tabToken: 't' };
 const ALL = ['waiting', 'ready', 'in_progress', 'submitting', 'questionnaire_waiting', 'ready_next', 'finished', 'cancelled', 'unavailable'];
@@ -227,4 +243,92 @@ test('a questionnaire save carries the version it was based on; a 409 shows the 
   const reads = x.calls.filter(c => c.method === 'GET' && c.path === '/api/records/r1/questionnaire');
   assert.ok(reads.length >= 2, 'the conflict re-reads the questionnaire');
   assert.match(x.e['questionnaire-status'].textContent, /最新の回答/u);
+});
+
+test('tab-scoped /api/records never prunes another tab session unsynced survey draft from localStorage', async () => {
+  const local = new Map([['joint-naming-survey:other-tab-rec', JSON.stringify({ answers: { q1: 5 }, comment: 'tab-b', synced: false, baseUpdatedAt: null })]]);
+  const id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const x = await ui({ kind: 'restored', reason: 'reload', sessionId: id, tabToken: 't' }, {
+    local, states: { [id]: { trial: null, reception: { number: '007', status: 'waiting', revision: 1 } } },
+  });
+  assert.ok(x.calls.some(c => c.path === '/api/records'), 'tab A loaded its own empty record list');
+  assert.ok(local.has('joint-naming-survey:other-tab-rec'), 'tab B unsynced draft survives tab A scoped record fetch');
+});
+
+test('offline local survey draft sends its own baseUpdatedAt rather than borrowing a newer server updatedAt', async () => {
+  const id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const local = new Map([['joint-naming-survey:r1', JSON.stringify({ answers: { q1: 2 }, comment: 'stale', synced: false, baseUpdatedAt: 'T0' })]]);
+  const x = await ui({ kind: 'restored', reason: 'reload', sessionId: id, tabToken: 't' }, {
+    local, states: { [id]: { trial: completedTrial('r1'), reception: { number: '007', status: 'in_progress', revision: 2 } } },
+    questionnaire: { status: 'draft', answers: { q1: 6 }, comment: 'newer-tab-b', updatedAt: 'T1' },
+    saveStatus: 409,
+  });
+  for (const [timerKey, timer] of [...x.timers]) if (timer.delay === 0) { x.timers.delete(timerKey); timer.callback(); } await tick();
+  const save = x.calls.find(c => c.method === 'POST' && c.path === '/api/records/r1/questionnaire')!;
+  assert.equal(save.body.expectedUpdatedAt, 'T0', 'must send baseUpdatedAt from local edit, never T1');
+});
+
+test('a finished multi-trial reception exposes every completed trial individually in chronological order', async () => {
+  const multi = summary('sess-multi', 'finished', {
+    hasUnansweredQuestionnaire: true,
+    // Server sortRecordList delivers newest first; UI must still reach both trials.
+    records: [
+      { recordId: 'r-second', status: 'completed', startedAt: '2026-11-23T02:00:00Z', updatedAt: '2026-11-23T02:10:00Z', active: true, questionnaire: 'submitted' },
+      { recordId: 'r-first', status: 'completed', startedAt: '2026-11-23T01:00:00Z', updatedAt: '2026-11-23T01:10:00Z', active: false, questionnaire: 'none' },
+    ],
+  });
+  const x = await ui(fresh, {
+    sessions: [multi],
+    reviews: {
+      'r-first': { recordId: 'r-first', scene: SHAPES, events: [], humanSubmission: { s1: 'first' }, result: null, resultLocked: true },
+      'r-second': { recordId: 'r-second', scene: SHAPES, events: [], humanSubmission: { s1: 'second' }, result: null, resultLocked: false },
+    },
+  });
+  const buttons = x.rows()[0].buttons;
+  assert.deepEqual(buttons.map(b => b.textContent), ['1回目を見る', '1回目アンケート', '2回目を見る']);
+  buttons[2].fire('click'); await tick();
+  assert.ok(x.calls.some(c => c.path === '/api/records/r-second/review' && c.session === 'sess-multi'), 'newest completed trial is reachable');
+});
+
+test('confirm-names dialog closes and preserves snapshot eventCount if conversation advances before submit', async () => {
+  const id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const live = { version: 2, sessionId: 'r-live', status: 'dialogue', submitted: false, aiSubmitted: false, aiStatus: 'idle', scene: SHAPES,
+    events: [{ id: 1, speaker: 'ai', text: 'first' }] };
+  const x = await ui({ kind: 'restored', reason: 'reload', sessionId: id, tabToken: 't' }, {
+    states: { [id]: { trial: live, reception: { number: '007', status: 'in_progress', revision: 2 } } },
+  });
+  // Enter name for the single figure and open confirmation dialog at 1 event.
+  x.e.board.querySelectorAll('path')[0].fire('click');
+  x.e['figure-name'].value = '三角';
+  x.e['name-form'].fire('submit');
+  x.e.submission.fire('submit');
+  assert.equal(x.e['confirm-dialog'].open, true);
+  // Another tab adds a second event and poll delivers it while dialog is open.
+  x.srv.states[id] = { trial: { ...live, events: [...live.events, { id: 2, speaker: 'human', text: 'new msg' }] }, reception: { number: '007', status: 'in_progress', revision: 2 } };
+  for (const [k, t] of [...x.timers]) if (t.delay === 2000) { x.timers.delete(k); t.callback(); } await tick();
+  assert.equal(x.e['confirm-dialog'].open, false, 'dialog closes on conversation change');
+  assert.match(x.e.notice.textContent, /更新したため/u);
+});
+
+test('newSession 503 reception failure recovers to entry and reuses child slot; 401 deleted child returns to entry', async () => {
+  const x = await ui(fresh, { sessions: history(), receptionStatus: 503 });
+  x.e['new-session'].fire('click'); await tick();
+  assert.equal(x.e['entry-stage'].hidden, false, 'user is never stranded on a blank screen');
+  assert.equal(x.e['new-session'].disabled, false);
+  assert.match(x.e.notice.textContent, /受付を確認できませんでした/u);
+  const createdCount = x.calls.filter(c => c.method === 'POST' && c.path === '/api/sessions').length;
+  assert.equal(createdCount, 1);
+  // Retry succeeds and reuses the same empty child without creating a second one.
+  x.srv.receptionStatus = undefined;
+  x.e['new-session'].fire('click'); await tick();
+  assert.equal(x.calls.filter(c => c.method === 'POST' && c.path === '/api/sessions').length, 1);
+  assert.equal(x.e['start-stage'].hidden, false);
+
+  const deletedId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+  const y = await ui({ kind: 'restored', reason: 'reload', sessionId: deletedId, tabToken: 't' }, {
+    sessions: history(), stateStatus: { [deletedId]: 401 },
+  });
+  assert.ok(y.tabCalls.includes('clear'), '401 clears dead child binding');
+  assert.equal(y.e['entry-stage'].hidden, false, 'returns to entry screen instead of looping');
+  assert.equal([...y.timers.values()].some(t => t.delay === 5000), false, 'no infinite 5s retry loop');
 });

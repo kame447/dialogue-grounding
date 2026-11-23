@@ -41,7 +41,9 @@ let restoreComposerOnChange = false;
 // Tab-isolated sessions (tab-session.js + /api/sessions). null without that
 // script or before a session is chosen; then the single cookie session is used.
 let activeTabSessionId = null;
+let pendingEmptySessionId = null;
 let sessionsReceptionMode = null;
+let confirmSnapshot = null;
 const tabSession = () => globalThis.TangramTabSession ?? null;
 // Without tab-session.js (or on a server without /api/sessions) the single
 // cookie session is used and nothing below changes its behavior.
@@ -111,8 +113,8 @@ const knownOutcome = (code) => typeof errors[code] === "string";
 const participantMessage = (code) => knownOutcome(code) ? errors[code] : STOPPED;
 async function api(path, body, signal, sessionId) {
   if (body !== undefined && ["/api/message", "/api/retry", "/api/names", "/api/ai-submit"].includes(path)) {
-    body = { ...body, expectedRecordId: current?.sessionId };
-    if (path === "/api/names" && requestSession()) body.expectedEventCount = events().length;
+    body = { ...body, expectedRecordId: Object.hasOwn(body, "expectedRecordId") ? body.expectedRecordId : current?.sessionId };
+    if (path === "/api/names" && requestSession() && !Object.hasOwn(body, "expectedEventCount")) body.expectedEventCount = events().length;
   }
   const headers = sessionHeaders(sessionId === undefined ? requestSession() : sessionId);
   const response = await fetch(path, body === undefined ? (signal || headers["X-Tab-Session"] ? { ...(headers["X-Tab-Session"] ? { headers } : {}), ...(signal ? { signal } : {}) } : {}) : {
@@ -154,6 +156,7 @@ function svgNode(tag, attributes = {}) {
 }
 function closeDialog(id, restore = true) {
   const dialog = $(id);
+  if (id === "confirm-dialog") confirmSnapshot = null;
   if (dialog.open) dialog.close();
   if (restore) (id === "name-dialog" ? selectedTarget : $("review-names"))?.focus({ preventScroll: true });
 }
@@ -529,6 +532,10 @@ function render(state) {
   }
   // Events are append-only; a state response started earlier must not remove newer events.
   if (trial && trialIdentity(current) === trialIdentity(trial) && (trial.events?.length ?? 0) < (current?.events?.length ?? 0)) return;
+  if (confirmSnapshot && $("confirm-dialog").open && (!trial || trialIdentity(trial) !== confirmSnapshot.recordId || eventsFor(trial).length !== confirmSnapshot.eventCount)) {
+    closeDialog("confirm-dialog", false);
+    $("notice").textContent = participantMessage("trial_changed");
+  }
   current = trial; serverBusy = Boolean(state.busy);
   renderStartStage(state);
   $("trial").hidden = !trial || preparing;
@@ -741,8 +748,9 @@ function sanitizeSurveyAnswers(form, values) {
 }
 // A save or submit carries the draft version it was based on, so another tab's
 // newer answers are never overwritten (409 trial_changed re-reads the server copy).
+let surveyBaseUpdatedAt = null;
 const surveyBody = (submit) => ({ answers: fullSurveyAnswers(), comment: surveyComment, submit,
-  ...(requestSession() ? { expectedUpdatedAt: survey.questionnaire?.updatedAt ?? null } : {}) });
+  ...(requestSession() ? { expectedUpdatedAt: surveyBaseUpdatedAt } : {}) });
 function surveyConflict(recordId) {
   removeLocalSurvey(recordId);
   surveyMessage = "別の画面で回答が更新されたため、最新の回答を表示しました。";
@@ -759,7 +767,7 @@ function readLocalSurvey(recordId) {
 }
 function writeLocalSurvey(recordId, synced) {
   if (!recordId) return;
-  try { localStorage.setItem(surveyKey(recordId), JSON.stringify({ answers: surveyAnswers, comment: surveyComment, synced })); } catch { /* Storage may be disabled. */ }
+  try { localStorage.setItem(surveyKey(recordId), JSON.stringify({ answers: surveyAnswers, comment: surveyComment, synced, baseUpdatedAt: surveyBaseUpdatedAt })); } catch { /* Storage may be disabled. */ }
 }
 function removeLocalSurvey(recordId) {
   try { localStorage.removeItem(surveyKey(recordId)); } catch { /* Storage may be disabled. */ }
@@ -780,7 +788,7 @@ function pruneLocalSurveys(recordIds) {
 function resetSurvey() {
   clearTimeout(surveyTimer); surveyToken++;
   survey = { recordId: null, status: "idle", form: null, questionnaire: null };
-  surveyAnswers = {}; surveyComment = ""; surveyRevision = 0; surveySyncedRevision = 0;
+  surveyAnswers = {}; surveyComment = ""; surveyBaseUpdatedAt = null; surveyRevision = 0; surveySyncedRevision = 0;
   surveySave = null; surveySaveError = false; surveySubmitting = false; surveyMessage = ""; surveySignature = "";
   records = { loadedFor: null, items: [], token: records.token + 1 };
 }
@@ -822,12 +830,18 @@ function applySurvey(recordId, form, questionnaire) {
   survey = { recordId, status: "ready", form, questionnaire: questionnaire && typeof questionnaire === "object" ? questionnaire : null };
   surveySignature = "";
   if (survey.questionnaire?.status === "submitted") {
+    surveyBaseUpdatedAt = survey.questionnaire.updatedAt ?? null;
     surveyAnswers = sanitizeSurveyAnswers(form, survey.questionnaire.answers);
     surveyComment = String(survey.questionnaire.comment ?? "");
     removeLocalSurvey(recordId); return;
   }
   const local = readLocalSurvey(recordId);
   const chosen = pickSurveyDraft(local, survey.questionnaire);
+  // Keep the base revision the unsynced local draft actually edited from so
+  // reloading cannot borrow another tab's newer updatedAt and overwrite it.
+  surveyBaseUpdatedAt = chosen && chosen === local
+    ? (Object.hasOwn(local, "baseUpdatedAt") ? local.baseUpdatedAt : null)
+    : (survey.questionnaire?.updatedAt ?? null);
   surveyAnswers = sanitizeSurveyAnswers(form, chosen?.answers);
   surveyComment = String(chosen?.comment ?? "").slice(0, form.commentMaxLength);
   surveySyncedRevision = surveyRevision;
@@ -860,10 +874,14 @@ async function saveSurveyDraft() {
       if (token !== surveyToken) return;
       surveySaveError = false;
       surveySyncedRevision = Math.max(surveySyncedRevision, revision);
-      if (value?.questionnaire && typeof value.questionnaire === "object") survey.questionnaire = value.questionnaire;
+      if (value?.questionnaire && typeof value.questionnaire === "object") {
+        survey.questionnaire = value.questionnaire;
+        surveyBaseUpdatedAt = value.questionnaire.updatedAt ?? surveyBaseUpdatedAt;
+      }
       // The browser copy exists only while unsynced: the server copy follows
       // the record's retention and deletion, a browser copy would not.
       if (surveyRevision === revision) removeLocalSurvey(recordId);
+      else writeLocalSurvey(recordId, false);
     } catch (error) {
       if (token !== surveyToken) return;
       if (error.code === "questionnaire_submitted") { loadSurvey(true); return; }
@@ -893,7 +911,9 @@ async function submitSurvey() {
     const value = await boundedRequest(recordPath(recordId, "questionnaire"), surveyBody(true));
     if (token !== surveyToken) return;
     if (value?.questionnaire?.status !== "submitted") throw new Error("questionnaire_not_submitted");
-    survey.questionnaire = value.questionnaire; surveySyncedRevision = surveyRevision;
+    survey.questionnaire = value.questionnaire;
+    surveyBaseUpdatedAt = value.questionnaire.updatedAt ?? surveyBaseUpdatedAt;
+    surveySyncedRevision = surveyRevision;
     removeLocalSurvey(recordId);
     surveySubmitting = false;
     reviewStage = "results"; storeDraft();
@@ -1019,14 +1039,18 @@ function loadRecords(force = false) {
   records.loadedFor = key;
   (async () => {
     let items = [];
+    let loaded = false;
     try {
       const value = await boundedRequest("/api/records", undefined, STATE_REFRESH_MS);
       if (Array.isArray(value?.records)) {
         items = value.records.filter((item) => item && typeof item.recordId === "string");
-        pruneLocalSurveys(items.map((item) => item.recordId));
+        loaded = true;
       }
     } catch { /* An older server has no record list; only the active trial is shown. */ }
     if (token !== records.token) return;
+    // Only cookie-wide lists may prune shared localStorage; tab-scoped lists
+    // only know one session and would otherwise erase another tab's draft.
+    if (loaded && cookieMode) pruneLocalSurveys(items.map((item) => item.recordId));
     records.items = items; renderRecords();
   })();
 }
@@ -1175,15 +1199,18 @@ $("submission").addEventListener("submit", (event) => {
   }
   addScene($("confirm-scene"), false);
   renderSummary($("confirm-list"), (shape) => answers.get(shape.id) ?? "未合意・わからない");
+  confirmSnapshot = { recordId: trialIdentity(current), eventCount: events().length };
   $("confirm-dialog").showModal(); $("confirm-cancel").focus({ preventScroll: true });
 });
 $("confirm-cancel").addEventListener("click", () => closeDialog("confirm-dialog"));
 $("confirm-submit").addEventListener("click", () => {
   if (working || sending || aiThinking() || !dialogueOpen()) return;
+  const snapshot = confirmSnapshot;
   const names = Object.fromEntries(scene().shapes.map((shape) => [shape.id, answers.get(shape.id)]));
   closeDialog("confirm-dialog");
   reviewStage = null;
-  operate(() => api("/api/names", { names, confirm: true }));
+  const expectation = snapshot ? { expectedRecordId: snapshot.recordId, ...(requestSession() ? { expectedEventCount: snapshot.eventCount } : {}) } : {};
+  operate(() => api("/api/names", { names, confirm: true, ...expectation }));
 });
 for (const button of $("stage-nav").querySelectorAll("button")) {
   button.addEventListener("click", () => {
@@ -1239,7 +1266,9 @@ const SESSION_STATES = {
   unavailable: ["確認不可", []],
 };
 const sessionTime = (session) => session.updatedAt || session.createdAt ? formatRecordTime(session.updatedAt || session.createdAt) : "";
-const completedRecords = (session) => (Array.isArray(session.records) ? session.records : []).filter((item) => item?.status === "completed" && typeof item.recordId === "string");
+const completedRecords = (session) => (Array.isArray(session.records) ? session.records : [])
+  .filter((item) => item?.status === "completed" && typeof item.recordId === "string")
+  .sort((a, b) => String(a.startedAt ?? a.updatedAt ?? "").localeCompare(String(b.startedAt ?? b.updatedAt ?? "")) || a.recordId.localeCompare(b.recordId));
 function sessionRow(session) {
   const [baseLabel, baseActions] = SESSION_STATES[session.status] ?? SESSION_STATES.unavailable;
   const unanswered = session.status === "finished" && session.hasUnansweredQuestionnaire === true;
@@ -1259,12 +1288,17 @@ function sessionRow(session) {
     // A finished session is only viewed; it is never bound to this tab or resumed.
     if (kind === "view") {
       const done = completedRecords(session);
-      if (done.length) add(label, () => openRecord(done.at(-1).recordId, "chat", { sessionId: session.sessionId, fromEntry: true }), false);
+      if (done.length === 1) {
+        add(label, () => openRecord(done[0].recordId, "chat", { sessionId: session.sessionId, fromEntry: true }), false);
+        if (done[0].questionnaire !== "submitted") add("アンケート", () => openRecord(done[0].recordId, "questionnaire", { sessionId: session.sessionId, fromEntry: true }), true);
+      } else {
+        done.forEach((item, index) => {
+          const prefix = `${index + 1}回目`;
+          add(`${prefix}を見る`, () => openRecord(item.recordId, "chat", { sessionId: session.sessionId, fromEntry: true }), false);
+          if (item.questionnaire !== "submitted") add(`${prefix}アンケート`, () => openRecord(item.recordId, "questionnaire", { sessionId: session.sessionId, fromEntry: true }), true);
+        });
+      }
     }
-  }
-  if (unanswered) {
-    const target = completedRecords(session).filter((item) => item.questionnaire !== "submitted").at(-1);
-    if (target) add("アンケート", () => openRecord(target.recordId, "questionnaire", { sessionId: session.sessionId, fromEntry: true }), true);
   }
   row.append(meta, actions);
   return row;
@@ -1290,7 +1324,14 @@ function leaveSession() {
 async function loadSessions() {
   const value = await api("/api/sessions", undefined, undefined, null);
   sessionsReceptionMode = ["on", "off", "unavailable"].includes(value?.receptionMode) ? value.receptionMode : "off";
-  return Array.isArray(value?.sessions) ? value.sessions.filter((item) => item && typeof item.sessionId === "string") : [];
+  const list = Array.isArray(value?.sessions) ? value.sessions.filter((item) => item && typeof item.sessionId === "string") : [];
+  const browserRecordIds = list.flatMap((item) => [
+    ...(typeof item.activeRecordId === "string" ? [item.activeRecordId] : []),
+    ...(Array.isArray(item.records) ? item.records.map((r) => r?.recordId).filter((id) => typeof id === "string") : []),
+  ]);
+  if (trialIdentity(current)) browserRecordIds.push(trialIdentity(current));
+  pruneLocalSurveys(browserRecordIds);
+  return list;
 }
 async function showEntry() {
   leaveSession();
@@ -1305,20 +1346,34 @@ function bindSession(sessionId) {
 async function newSession() {
   if (working) return;
   stateEpoch++; working = true; $("new-session").disabled = true; setControls();
+  let reusedId = pendingEmptySessionId;
+  const createdNow = !reusedId;
+  let state = { trial: null };
   try {
-    const created = await api("/api/sessions", {}, undefined, null);
-    if (typeof created?.sessionId !== "string") throw new Error("session_unavailable");
-    bindSession(created.sessionId);
+    if (createdNow) {
+      const created = await api("/api/sessions", {}, undefined, null);
+      if (typeof created?.sessionId !== "string") throw new Error("session_unavailable");
+      reusedId = created.sessionId;
+      pendingEmptySessionId = reusedId;
+      state = created.state ?? { trial: null };
+    }
+    bindSession(reusedId);
     $("entry-stage").hidden = true; $("notice").textContent = "";
-    let state = created.state ?? { trial: null };
     if (sessionsReceptionMode === "on" || (sessionsReceptionMode === null && state.reception)) {
       try { state = await api("/api/reception", {}); }
       catch (error) { if (error.status !== 404) throw error; }
+    } else if (!createdNow) {
+      state = await api("/api/state");
     }
+    pendingEmptySessionId = null;
     render(state);
   } catch (error) {
+    // Keep the already-created empty child for retry without stranding the user on a blank page.
+    try { tabSession()?.clear(); } catch { /* No binding to forget. */ }
+    activeTabSessionId = null;
+    $("entry-stage").hidden = false;
+    $("new-session").disabled = false;
     $("notice").textContent = participantMessage(error?.code);
-    if (!activeTabSessionId) { $("entry-stage").hidden = false; $("new-session").disabled = false; }
   } finally { working = false; setControls(); }
 }
 // An explicit resume binds this tab to that session and shows its server state.
@@ -1327,6 +1382,7 @@ async function resumeSession(sessionId) {
   stateEpoch++; working = true; setControls();
   try {
     const state = await api("/api/state", undefined, undefined, sessionId);
+    pendingEmptySessionId = null;
     bindSession(sessionId);
     $("entry-stage").hidden = true; $("notice").textContent = "";
     render(state);
@@ -1340,7 +1396,7 @@ let leaveAction = null;
 function renderLeave() {
   const done = Boolean(activeTabSessionId && !reviewing && !working && (reception?.status === "finished" ||
     (current && trialCompleted() && !reception && ["submitted", "unavailable"].includes(surveyAvailability()))));
-  const back = Boolean(activeTabSessionId && !reviewing && !current && reception && reception.status !== "finished");
+  const back = Boolean(activeTabSessionId && !reviewing && !current && (!reception || reception.status !== "finished"));
   leaveAction = done ? "new" : back ? "back" : null;
   $("leave-session").hidden = !leaveAction;
   $("leave-session").textContent = leaveAction === "new" ? "新しく始める" : "受付に戻る";
@@ -1370,7 +1426,7 @@ async function startup() {
       render(next); setControls();
       return;
     } catch (error) {
-      if (![403, 404, 410].includes(error.status)) {
+      if (![401, 403, 404, 410].includes(error.status)) {
         // A passing failure keeps the binding and tries again.
         $("notice").textContent = participantMessage(error.code);
         setTimeout(startup, 5000); return;

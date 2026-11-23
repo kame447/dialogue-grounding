@@ -524,13 +524,12 @@ export class TangramSession extends DurableObject<Env> {
     const settings = await this.settings().catch(() => null);
     const protocolAvailable = Boolean(settings?.protocol);
     const entries = await this.browserSessions();
-    const summaries = [];
-    const legacy = await this.tabHistorySummary('legacy', null, protocolAvailable);
-    if (legacy) summaries.push(legacy);
-    for (const { sessionId, doName, createdAt } of entries) {
-      const summary = await this.tabObject(doName).tabHistorySummary(sessionId, createdAt, protocolAvailable);
-      if (summary) summaries.push(summary);
-    }
+    const results = await Promise.all([
+      this.tabHistorySummary('legacy', null, protocolAvailable),
+      ...entries.map(({ sessionId, doName, createdAt }) =>
+        this.tabObject(doName).tabHistorySummary(sessionId, createdAt, protocolAvailable)),
+    ]);
+    const summaries = results.filter((summary): summary is BrowserSessionSummary => summary !== null);
     return { receptionMode: settings ? receptionOpen(settings.mode) ? 'on' : 'off' : 'unavailable',
       sessions: sortBrowserSessions(summaries) };
   }

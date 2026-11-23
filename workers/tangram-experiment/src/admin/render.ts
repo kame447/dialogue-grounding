@@ -235,6 +235,8 @@ export function renderMessage(title: string, message: string, back: { href: stri
 }
 
 const RECEPTION_LABELS = { pending: '許可待ち', approved: '許可済み', in_progress: '実施中', finished: '終了', cancelled: '取消済み' };
+const receptionBadge = (status: string) => badge(RECEPTION_LABELS[status as keyof typeof RECEPTION_LABELS] ?? status,
+  status === 'finished' ? 'done' : status === 'in_progress' || status === 'approved' ? 'live' : status === 'pending' ? 'warn' : '');
 const NAV: [string, string][] = [['/admin/receptions', '受付一覧'], ['/admin/entry', '参加用URL・QRコード'], ['/admin/reception-settings', '受付の設定'], ['/admin', '実験ログ']];
 function adminNav(current: string): string {
   return `<nav>${NAV.map(([href, label]) => `<a href="${href}"${href === current ? ' aria-current="page"' : ''}>${escapeHtml(label)}</a>`).join('')}</nav>`;
@@ -263,8 +265,8 @@ export function renderReceptions(items: ReceptionAdminRow[], next: string | null
   const rows = [...items].sort((a, b) => Number(b.status === 'pending') - Number(a.status === 'pending')).map(entry => {
     const unstarted = !entry.trials.some(trial => trial.recordId !== null);
     const cancel = unstarted && (entry.status === 'pending' || entry.status === 'approved');
-    return `<tr data-id="${escapeHtml(entry.receptionId)}" data-status="${escapeHtml(entry.status)}" data-created="${escapeHtml(entry.createdAt)}" data-key="${escapeHtml(entry.revision + ':' + protocolKey)}">${td('受付番号', escapeHtml(entry.number ?? '未割当'))}${td('受付時刻', escapeHtml(entry.createdAt))}
-${td('状態', escapeHtml(RECEPTION_LABELS[entry.status] ?? entry.status))}${td('条件順序', escapeHtml(entry.plan?.order.join(' → ') ?? ''))}
+    return `<tr data-id="${escapeHtml(entry.receptionId)}" data-status="${escapeHtml(entry.status)}" data-created="${escapeHtml(entry.createdAt)}" data-key="${escapeHtml(entry.revision + ':' + protocolKey)}">${td('受付番号', escapeHtml(entry.number ?? '未割当'))}${td('受付時刻', timeTag(entry.createdAt))}
+${td('状態', receptionBadge(entry.status))}${td('条件順序', escapeHtml(entry.plan?.order.join(' → ') ?? ''))}
 ${td('回転', escapeHtml(entry.plan ? ROTATION_LABELS[entry.plan.rotationMode] ?? '' : ''))}${td('試行の間', escapeHtml(entry.plan ? BETWEEN_LABELS[entry.plan.betweenTrials] ?? '' : ''))}
 ${td('試行記録', entry.trials.filter(trial => trial.recordId && RECORD_ID.test(trial.recordId)).map(trial =>
       `<a href="/admin/record/${escapeHtml(trial.recordId)}">${escapeHtml(trial.recordId)}</a>`).join('<br>'))}
