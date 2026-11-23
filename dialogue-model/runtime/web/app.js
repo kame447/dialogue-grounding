@@ -38,6 +38,19 @@ let resuming = false;
 let operationStop = null;
 let submissionWarning = "";
 let restoreComposerOnChange = false;
+// Tab-isolated sessions (tab-session.js + /api/sessions). null without that
+// script or before a session is chosen; then the single cookie session is used.
+let activeTabSessionId = null;
+let sessionsReceptionMode = null;
+const tabSession = () => globalThis.TangramTabSession ?? null;
+// Without tab-session.js (or on a server without /api/sessions) the single
+// cookie session is used and nothing below changes its behavior.
+let cookieMode = !globalThis.TangramTabSession;
+// The entry screen has no session: it must never read the cookie session's state.
+const entryMode = () => !cookieMode && !activeTabSessionId && !reviewing;
+// An earlier trial opened from the entry screen belongs to its own session.
+const requestSession = () => reviewing?.sessionId ?? activeTabSessionId;
+const sessionHeaders = (sessionId) => sessionId ? { "X-Tab-Session": sessionId } : {};
 // Presentation/network safeguards only; these never close a research trial or
 // cancel backend generation. A stalled state is refreshed, never auto-retried.
 const CHAT_STALL_MS = 60000;
@@ -96,12 +109,14 @@ const errors = {
 };
 const knownOutcome = (code) => typeof errors[code] === "string";
 const participantMessage = (code) => knownOutcome(code) ? errors[code] : STOPPED;
-async function api(path, body, signal) {
+async function api(path, body, signal, sessionId) {
   if (body !== undefined && ["/api/message", "/api/retry", "/api/names", "/api/ai-submit"].includes(path)) {
     body = { ...body, expectedRecordId: current?.sessionId };
+    if (path === "/api/names" && requestSession()) body.expectedEventCount = events().length;
   }
-  const response = await fetch(path, body === undefined ? (signal ? { signal } : {}) : {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), ...(signal ? { signal } : {}),
+  const headers = sessionHeaders(sessionId === undefined ? requestSession() : sessionId);
+  const response = await fetch(path, body === undefined ? (signal || headers["X-Tab-Session"] ? { ...(headers["X-Tab-Session"] ? { headers } : {}), ...(signal ? { signal } : {}) } : {}) : {
+    method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(body), ...(signal ? { signal } : {}),
   });
   // A proxy error page is not JSON; it is an unreadable response, not a message.
   const value = await response.json().catch(() => null);
@@ -546,6 +561,7 @@ function renderResults() {
   }
 }
 function setControls() {
+  renderLeave();
   $("start-trial").disabled = !canStart();
   renderProgress();
   $("history").querySelectorAll("button").forEach((node) => { node.disabled = working || sending || !chatOpen(); });
@@ -569,6 +585,7 @@ function scheduleRefresh() {
 }
 async function refreshState() {
   if (refreshRequest) return refreshRequest;
+  if (entryMode()) return false;
   const epoch = generation;
   const requestEpoch = stateEpoch;
   refreshRequest = (async () => {
@@ -722,6 +739,15 @@ function sanitizeSurveyAnswers(form, values) {
   }
   return clean;
 }
+// A save or submit carries the draft version it was based on, so another tab's
+// newer answers are never overwritten (409 trial_changed re-reads the server copy).
+const surveyBody = (submit) => ({ answers: fullSurveyAnswers(), comment: surveyComment, submit,
+  ...(requestSession() ? { expectedUpdatedAt: survey.questionnaire?.updatedAt ?? null } : {}) });
+function surveyConflict(recordId) {
+  removeLocalSurvey(recordId);
+  surveyMessage = "別の画面で回答が更新されたため、最新の回答を表示しました。";
+  loadSurvey(true);
+}
 const recordPath = (recordId, leaf) => `/api/records/${encodeURIComponent(recordId)}/${leaf}`;
 const surveyKey = (recordId) => `joint-naming-survey:${recordId}`;
 // Browser fallback only: the server draft is the primary copy. Removed on submit.
@@ -826,7 +852,7 @@ async function saveSurveyDraft() {
   if (surveySave) { await surveySave; }
   if (!surveyEditable() || surveyRevision === surveySyncedRevision) return;
   const recordId = survey.recordId, revision = surveyRevision, token = surveyToken;
-  const body = { answers: fullSurveyAnswers(), comment: surveyComment, submit: false };
+  const body = surveyBody(false);
   renderSurveyStatus();
   surveySave = (async () => {
     try {
@@ -841,6 +867,7 @@ async function saveSurveyDraft() {
     } catch (error) {
       if (token !== surveyToken) return;
       if (error.code === "questionnaire_submitted") { loadSurvey(true); return; }
+      if (error.status === 409 && error.code === "trial_changed") { surveyConflict(recordId); return; }
       // The browser copy stays; the next edit or the timer retries.
       surveySaveError = true; scheduleSurveySave(SURVEY_RETRY_MS);
     }
@@ -863,7 +890,7 @@ async function submitSurvey() {
   surveySubmitting = true; clearTimeout(surveyTimer); surveyMessage = ""; renderSurvey();
   if (surveySave) await surveySave;
   try {
-    const value = await boundedRequest(recordPath(recordId, "questionnaire"), { answers: fullSurveyAnswers(), comment: surveyComment, submit: true });
+    const value = await boundedRequest(recordPath(recordId, "questionnaire"), surveyBody(true));
     if (token !== surveyToken) return;
     if (value?.questionnaire?.status !== "submitted") throw new Error("questionnaire_not_submitted");
     survey.questionnaire = value.questionnaire; surveySyncedRevision = surveyRevision;
@@ -880,6 +907,7 @@ async function submitSurvey() {
     if (token !== surveyToken) return;
     surveySubmitting = false;
     if (error.code === "questionnaire_submitted") loadSurvey(true);
+    else if (error.status === 409 && error.code === "trial_changed") { surveyConflict(recordId); renderSurvey(); return; }
     // Answers stay on screen and in this browser; nothing is cleared on failure.
     surveyMessage = `${participantMessage(error.code)} 入力した回答はこの画面に残っています。`;
     renderSurvey();
@@ -964,6 +992,7 @@ function renderReviewBar(stage) {
   const show = submitted();
   $("review-bar").hidden = !show;
   $("exit-review").hidden = !reviewing;
+  $("exit-review").textContent = reviewing?.fromEntry ? "受付に戻る" : "現在の試行に戻る";
   if (!show) { $("survey-prompt").hidden = true; return; }
   const surveyState = surveyAvailability();
   const surveyText = surveyState === "submitted" ? "アンケートも提出済みです。" : surveyState === "pending" ? "試行が完了するとアンケートと結果を表示します。" :
@@ -1046,16 +1075,17 @@ function renderRecords() {
 // pauses so the active trial's state never replaces it; the active trial's
 // name memo (tab storage) and unsent composer text are kept for the return.
 let stashedComposer = null;
-async function openRecord(recordId, stage) {
+async function openRecord(recordId, stage, origin = {}) {
   if (working || reviewing) return;
   if (sending || pending.length) { $("notice").textContent = "送信中または未送信のメッセージがあります。送信を確認してから以前の試行を開いてください。"; return; }
   flushSurveyDraft();
   const composer = { trial: trialIdentity(current), text: $("utterance").value };
   await operate(async () => {
-    const review = await api(recordPath(recordId, "review"));
+    const sessionId = origin.sessionId ?? activeTabSessionId;
+    const review = await api(recordPath(recordId, "review"), undefined, undefined, sessionId);
     if (!review || review.recordId !== recordId || !review.scene?.shapes?.length) throw Object.assign(new Error("not_found"), { code: "not_found" });
     clearTimeout(refreshTimer); stateEpoch++;
-    reviewing = { recordId }; stashedComposer = composer.text ? composer : null;
+    reviewing = { recordId, sessionId, fromEntry: Boolean(origin.fromEntry) }; $("entry-stage").hidden = true; stashedComposer = composer.text ? composer : null;
     preparing = false;
     return { busy: false, trial: reviewTrial(recordId, review) };
   });
@@ -1078,6 +1108,7 @@ async function reloadReview(recordId) {
 function exitReview() {
   if (!reviewing || working) return;
   flushSurveyDraft();
+  if (reviewing.fromEntry) { reviewing = null; showEntry(); return; }
   reviewing = null;
   operate(async () => {
     const state = await api("/api/state");
@@ -1178,8 +1209,8 @@ $("questionnaire-comment").addEventListener("input", () => {
 const sendSurveyOnHide = () => {
   if (!surveyEditable() || surveyRevision === surveySyncedRevision) return;
   try {
-    fetch(recordPath(survey.recordId, "questionnaire"), { method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ answers: fullSurveyAnswers(), comment: surveyComment, submit: false }) }).catch(() => {});
+    fetch(recordPath(survey.recordId, "questionnaire"), { method: "POST", keepalive: true, headers: { "Content-Type": "application/json", ...sessionHeaders(requestSession()) },
+      body: JSON.stringify(surveyBody(false)) }).catch(() => {});
   } catch { /* The browser copy is resent after reload. */ }
 };
 globalThis.addEventListener?.("pagehide", sendSurveyOnHide);
@@ -1192,10 +1223,180 @@ $("start-trial").addEventListener("click", () => {
   const expectation = reception ? { expectedReceptionRevision: reception.revision, ...(current ? { expectedRecordId: current.sessionId } : {}) } : {};
   operate(() => api("/api/start", { version: 2, ...expectation }));
 });
-// An explicit admission POST creates only the reception; trial start is a click.
-operate(async () => {
+// ---- Entry screen and tab-isolated sessions -------------------------------
+// A new tab starts here, never inside another participant's conversation. The
+// list shows only the server state of each session (reception number, time,
+// state, questionnaire): no conversation, names, answers or internal IDs.
+const SESSION_STATES = {
+  waiting: ["受付待ち", [["開く", "resume"]]],
+  ready: ["開始可能", [["開く", "resume"]]],
+  in_progress: ["実施中", [["再開", "resume"]]],
+  submitting: ["提出中", [["再開", "resume"]]],
+  questionnaire_waiting: ["アンケート待ち", [["アンケートへ", "resume"]]],
+  ready_next: ["次の課題待ち", [["再開", "resume"]]],
+  finished: ["終了", [["閲覧", "view"]]],
+  cancelled: ["取消済み", []],
+  unavailable: ["確認不可", []],
+};
+const sessionTime = (session) => session.updatedAt || session.createdAt ? formatRecordTime(session.updatedAt || session.createdAt) : "";
+const completedRecords = (session) => (Array.isArray(session.records) ? session.records : []).filter((item) => item?.status === "completed" && typeof item.recordId === "string");
+function sessionRow(session) {
+  const [baseLabel, baseActions] = SESSION_STATES[session.status] ?? SESSION_STATES.unavailable;
+  const unanswered = session.status === "finished" && session.hasUnansweredQuestionnaire === true;
+  const row = document.createElement("li"); row.setAttribute("data-status", SESSION_STATES[session.status] ? session.status : "unavailable");
+  const meta = document.createElement("span"); meta.className = "session-meta";
+  const number = document.createElement("span"); number.textContent = [session.reception?.number ? `受付番号 ${session.reception.number}` : "", sessionTime(session)].filter(Boolean).join(" · ") || "受付";
+  const state = document.createElement("span"); state.className = "status-badge"; state.textContent = unanswered ? "終了・アンケート未回答" : baseLabel;
+  meta.append(number, state);
+  const actions = document.createElement("span"); actions.className = "record-actions";
+  const add = (label, handler, primary) => {
+    const button = document.createElement("button"); button.type = "button"; button.textContent = label;
+    if (!primary) button.className = "secondary";
+    button.addEventListener("click", handler); actions.append(button);
+  };
+  for (const [label, kind] of baseActions) {
+    if (kind === "resume" && session.resumable !== false) add(label, () => resumeSession(session.sessionId), true);
+    // A finished session is only viewed; it is never bound to this tab or resumed.
+    if (kind === "view") {
+      const done = completedRecords(session);
+      if (done.length) add(label, () => openRecord(done.at(-1).recordId, "chat", { sessionId: session.sessionId, fromEntry: true }), false);
+    }
+  }
+  if (unanswered) {
+    const target = completedRecords(session).filter((item) => item.questionnaire !== "submitted").at(-1);
+    if (target) add("アンケート", () => openRecord(target.recordId, "questionnaire", { sessionId: session.sessionId, fromEntry: true }), true);
+  }
+  row.append(meta, actions);
+  return row;
+}
+function renderEntry(sessions) {
+  const sorted = [...sessions].sort((a, b) => String(b.updatedAt ?? b.createdAt ?? "").localeCompare(String(a.updatedAt ?? a.createdAt ?? "")));
+  $("session-history").hidden = !sorted.length;
+  $("session-list").replaceChildren(...sorted.map(sessionRow));
+  $("new-session").disabled = sessionsReceptionMode === "unavailable";
+  if (sessionsReceptionMode === "unavailable") $("notice").textContent = errors.reception_unavailable;
+  $("entry-stage").hidden = false;
+}
+// Forget the bound session and the screen of the previous participant.
+function leaveSession() {
+  try { tabSession()?.clear(); } catch { /* The tab keeps no binding. */ }
+  activeTabSessionId = null; reviewing = null; current = null; reception = null; startReady = false; preparing = false;
+  generation++; stateEpoch++; clearTimeout(refreshTimer); clearTimeout(typingTimer);
+  resetLocal(); clearDraft();
+  $("notice").textContent = "";
+  for (const id of ["start-stage", "trial", "trial-progress", "record-history", "entry-stage", "survey-prompt", "review-bar"]) $(id).hidden = true;
+  setControls();
+}
+async function loadSessions() {
+  const value = await api("/api/sessions", undefined, undefined, null);
+  sessionsReceptionMode = ["on", "off", "unavailable"].includes(value?.receptionMode) ? value.receptionMode : "off";
+  return Array.isArray(value?.sessions) ? value.sessions.filter((item) => item && typeof item.sessionId === "string") : [];
+}
+async function showEntry() {
+  leaveSession();
+  try { renderEntry(await loadSessions()); }
+  catch (error) { $("notice").textContent = participantMessage(error.code); }
+}
+function bindSession(sessionId) {
+  try { tabSession()?.bind(sessionId); } catch { /* The binding is only a reload convenience. */ }
+  activeTabSessionId = sessionId;
+}
+// An explicit choice: a new session and, when receptions are on, a new reception.
+async function newSession() {
+  if (working) return;
+  stateEpoch++; working = true; $("new-session").disabled = true; setControls();
+  try {
+    const created = await api("/api/sessions", {}, undefined, null);
+    if (typeof created?.sessionId !== "string") throw new Error("session_unavailable");
+    bindSession(created.sessionId);
+    $("entry-stage").hidden = true; $("notice").textContent = "";
+    let state = created.state ?? { trial: null };
+    if (sessionsReceptionMode === "on" || (sessionsReceptionMode === null && state.reception)) {
+      try { state = await api("/api/reception", {}); }
+      catch (error) { if (error.status !== 404) throw error; }
+    }
+    render(state);
+  } catch (error) {
+    $("notice").textContent = participantMessage(error?.code);
+    if (!activeTabSessionId) { $("entry-stage").hidden = false; $("new-session").disabled = false; }
+  } finally { working = false; setControls(); }
+}
+// An explicit resume binds this tab to that session and shows its server state.
+async function resumeSession(sessionId) {
+  if (working) return;
+  stateEpoch++; working = true; setControls();
+  try {
+    const state = await api("/api/state", undefined, undefined, sessionId);
+    bindSession(sessionId);
+    $("entry-stage").hidden = true; $("notice").textContent = "";
+    render(state);
+  } catch (error) {
+    $("notice").textContent = participantMessage(error?.code);
+    try { renderEntry(await loadSessions()); } catch { /* The list stays as shown. */ }
+  } finally { working = false; setControls(); }
+}
+// "受付に戻る" before the end, "新しく始める" once the participant is done.
+let leaveAction = null;
+function renderLeave() {
+  const done = Boolean(activeTabSessionId && !reviewing && !working && (reception?.status === "finished" ||
+    (current && trialCompleted() && !reception && ["submitted", "unavailable"].includes(surveyAvailability()))));
+  const back = Boolean(activeTabSessionId && !reviewing && !current && reception && reception.status !== "finished");
+  leaveAction = done ? "new" : back ? "back" : null;
+  $("leave-session").hidden = !leaveAction;
+  $("leave-session").textContent = leaveAction === "new" ? "新しく始める" : "受付に戻る";
+  $("leave-session").disabled = working;
+}
+async function startupAdmission() {
   const state = await api("/api/state");
   if (!state.reception) return state;
   try { return await api("/api/reception", {}); }
   catch (error) { if (error.status === 404) return state; throw error; }
+}
+async function startup() {
+  const TS = tabSession();
+  // Without tab-session.js the single cookie session is used as before.
+  if (!TS) { cookieMode = true; operate(startupAdmission); return; }
+  let resolved = null;
+  try { resolved = await TS.resolve(); } catch { /* A tab that cannot be resolved starts fresh. */ }
+  if (resolved?.kind === "restored" && typeof resolved.sessionId === "string") {
+    // Same tab, reload: keep this tab's session where it was.
+    try {
+      const state = await api("/api/state", undefined, undefined, resolved.sessionId);
+      activeTabSessionId = resolved.sessionId;
+      let next = state;
+      if (!state.trial && state.reception && !state.reception.number) {
+        try { next = await api("/api/reception", {}); } catch (error) { if (error.status !== 404) throw error; }
+      }
+      render(next); setControls();
+      return;
+    } catch (error) {
+      if (![403, 404, 410].includes(error.status)) {
+        // A passing failure keeps the binding and tries again.
+        $("notice").textContent = participantMessage(error.code);
+        setTimeout(startup, 5000); return;
+      }
+      try { TS.clear(); } catch { /* No binding to forget. */ }
+    }
+  }
+  clearDraft();
+  let sessions;
+  try { sessions = await loadSessions(); }
+  catch (error) {
+    // An older server has no session list: the single cookie session as before.
+    if ([404, 405].includes(error.status)) { cookieMode = true; operate(startupAdmission); return; }
+    $("notice").textContent = participantMessage(error.code); return;
+  }
+  // The first visit of a browser keeps the QR experience: a number right away.
+  if (!sessions.length && sessionsReceptionMode !== "unavailable") { await newSession(); return; }
+  renderEntry(sessions);
+}
+$("new-session").addEventListener("click", newSession);
+$("leave-session").addEventListener("click", async () => {
+  if (working || !leaveAction) return;
+  const action = leaveAction;
+  if (action === "back") { showEntry(); return; }
+  leaveSession(); sessionsReceptionMode = null;
+  try { await loadSessions(); } catch { /* Falls back to the new state's reception. */ }
+  await newSession();
 });
+startup();

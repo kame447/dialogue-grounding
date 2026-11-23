@@ -38,7 +38,20 @@ input[type="radio"],input[type="checkbox"]{width:18px;height:18px;margin:2px 0 0
 .cards tr{margin:0 0 12px;padding:6px 12px;border:1px solid var(--line);border-radius:6px;background:#fff}.cards tr.new{border-color:var(--accent)}
 .cards td{display:grid;grid-template-columns:6.5em minmax(0,1fr);gap:8px;padding:4px 0;border:0;font-size:.9rem;background:none!important;overflow-wrap:anywhere}
 .cards td::before{content:attr(data-label);color:#666}.cards td:empty{display:none}.cards td.ops{display:block;padding:8px 0 4px}.cards td.ops::before{content:none}
-.ops form{max-width:none}}`;
+.ops form{max-width:none}}
+.badge{display:inline-block;padding:1px 8px;border:1px solid var(--line);border-radius:999px;background:#fff;font-size:.78rem;white-space:nowrap}
+.badge.live{background:var(--tint);border-color:var(--accent);color:var(--accent)}.badge.done{background:#eef6ee;border-color:#9bbf9b;color:#2d5a2d}
+.badge.warn{background:#fdf3dc;border-color:#d4a64a;color:#6f4b00}.badge.bad{background:#fbe9e6;border-color:#d99a91;color:#9b2c1f}
+.log td.id a{font-weight:600}.log td>div+div{margin-top:2px}.log time{white-space:nowrap}
+dl.summary{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px 16px;margin:12px 0;padding:12px;background:#fff;border:1px solid var(--line);border-radius:6px}
+dl.summary div{min-width:0}dl.summary dt{color:#666;font-size:.78rem}dl.summary dd{margin:0;overflow-wrap:anywhere}
+ol.chat{list-style:none;margin:0;padding:0;display:grid;gap:8px}ol.chat li{padding:8px 12px;border:1px solid var(--line);border-radius:6px;background:#fff;max-width:760px}
+ol.chat li.ai{background:#f1f3f0}ol.chat li.human{margin-left:auto;background:var(--tint)}
+ol.chat .meta{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center;color:#666;font-size:.78rem}ol.chat p{margin:4px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}
+details.diag{margin:12px 0;background:#fff;border:1px solid var(--line);border-radius:6px}details.diag>summary{cursor:pointer;padding:10px 12px;font-weight:600;min-height:40px}
+details.diag[open]>summary{border-bottom:1px solid var(--line)}details.diag>.body{padding:4px 12px 12px;overflow-x:auto}details.diag h3:first-child{margin-top:10px}
+details.danger>summary{color:#9b2c1f}
+@media (max-width:699px){ol.chat li,ol.chat li.human{max-width:none;margin-left:0}dl.summary{grid-template-columns:1fr 1fr}}`;
 
 const ENTITIES: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" };
 export function escapeHtml(value: unknown): string {
@@ -61,7 +74,11 @@ function page(title: string, body: string): string {
 }
 
 export type ListFilter = { status: string; error: "any" | "with" | "without"; memory: "any" | "on" | "off" };
-export const STATUS_FILTERS = ["any", "dialogue", "submitting", "completed"] as const;
+export const STATUS_FILTERS = ["any", "active", "dialogue", "submitting", "completed"] as const;
+// The log and the reception list share one vocabulary: 実施中 / 提出中 / 終了.
+const STATUS_LABELS: Record<string, string> = { dialogue: "実施中", submitting: "提出中", completed: "終了" };
+const STATUS_FILTER_LABELS: Record<string, string> = { any: "すべて", active: "進行中（実施中・提出中）", dialogue: "実施中", submitting: "提出中", completed: "終了" };
+const statusLabel = (status: string) => STATUS_LABELS[status] ?? status;
 
 /** Unknown filter values fall back to "any"; the filter never reaches storage queries. */
 export function parseFilter(params: URLSearchParams): ListFilter {
@@ -73,7 +90,7 @@ export function parseFilter(params: URLSearchParams): ListFilter {
 }
 
 export function applyFilter(summaries: AdminSummary[], filter: ListFilter): AdminSummary[] {
-  return summaries.filter((s) => (filter.status === "any" || s.status === filter.status) &&
+  return summaries.filter((s) => (filter.status === "any" || (filter.status === "active" ? s.status === "dialogue" || s.status === "submitting" : s.status === filter.status)) &&
     (filter.error === "any" || (filter.error === "with") === s.errorCodes.length > 0) &&
     (filter.memory === "any" || (filter.memory === "on") === s.referenceMemory));
 }
@@ -82,24 +99,37 @@ const option = (value: string, current: string, label = value) =>
   `<option value="${escapeHtml(value)}"${value === current ? " selected" : ""}>${escapeHtml(label)}</option>`;
 const ms = (value: number | null | undefined) => typeof value === "number" ? `${Math.round(value)}` : "—";
 
+/** JST "YYYY-MM-DD HH:mm:ss"; the stored ISO value stays in datetime/title. Unparseable values are shown as they are. */
+function timeTag(value: unknown): string {
+  if (typeof value !== "string" || !value) return "";
+  const at = Date.parse(value);
+  if (Number.isNaN(at)) return escapeHtml(value);
+  const label = new Date(at + 9 * 3600_000).toISOString().replace("T", " ").slice(0, 19);
+  return `<time datetime="${escapeHtml(value)}" title="${escapeHtml(value)}">${label}</time>`;
+}
+const badge = (text: string, tone = "") => `<span class="badge${tone ? " " + tone : ""}">${escapeHtml(text)}</span>`;
+const statusBadge = (status: string) => badge(statusLabel(status), status === "completed" ? "done" : status === "dialogue" || status === "submitting" ? "live" : "");
+const aiBadge = (aiStatus: string) => badge("AI " + aiStatus, aiStatus === "error" ? "bad" : "");
+const surveyBadge = (value: string) => badge("アンケート" + (QUESTIONNAIRE_LABELS[value] ?? QUESTIONNAIRE_LABELS.none), value === "submitted" ? "done" : value === "draft" ? "warn" : "");
+
 export function renderList(summaries: AdminSummary[], filter: ListFilter, next: string | null, audit: AuditEntry[],
   _retentionDays?: number, deleted = false, receptions = false): string {
   const query = (extra: Record<string, string>) => "?" + new URLSearchParams({ status: filter.status, error: filter.error, memory: filter.memory, ...extra });
-  const rows = summaries.map((s) => `<tr><td><a href="/admin/record/${escapeHtml(s.recordId)}">${escapeHtml(s.recordId.slice(0, 8))}</a></td>
-<td>${escapeHtml(s.updatedAt)}</td><td>${escapeHtml(s.strategy)}</td><td>${s.referenceMemory ? "ON" : "OFF"}</td><td>${escapeHtml(s.utteranceStyle)}</td>
-<td>${escapeHtml(s.status)}</td><td${s.aiStatus === "error" ? ' class="bad"' : ""}>${escapeHtml(s.aiStatus)}</td>
-<td>${s.counts.humanMessages}/${s.counts.aiMessages}</td><td>${s.counts.committedTurns}/${s.counts.attempts}</td><td>${s.counts.requestErrors}</td>
-<td${s.errorCodes.length ? ' class="bad"' : ""}>${escapeHtml(s.errorCodes.join(", "))}</td>
-<td>${ms(s.latency.turn.p50Ms)} / ${ms(s.latency.turn.p95Ms)}</td><td>${escapeHtml(s.latency.slowestPhase?.phase ?? "")}</td>
-<td>${escapeHtml(QUESTIONNAIRE_LABELS[s.questionnaire] ?? QUESTIONNAIRE_LABELS.none)}</td></tr>`).join("");
+  const td = (label: string, content: string, cls = "") => `<td data-label="${escapeHtml(label)}"${cls ? ` class="${cls}"` : ""}>${content}</td>`;
+  const rows = summaries.map((s) => `<tr>${td("記録", `<a href="/admin/record/${escapeHtml(s.recordId)}">${escapeHtml(s.recordId.slice(0, 8))}</a><div class="muted">${timeTag(s.updatedAt)}</div>`, "id")}
+${td("状態", `${statusBadge(s.status)} ${aiBadge(s.aiStatus)} ${surveyBadge(s.questionnaire)}`)}
+${td("条件", `<div>${escapeHtml(s.strategy)}</div><div class="muted">メモリ ${s.referenceMemory ? "ON" : "OFF"} · ${escapeHtml(s.utteranceStyle)}</div>`)}
+${td("発話・確定", `<div>人/AI ${s.counts.humanMessages}/${s.counts.aiMessages}</div><div class="muted">確定/試行 ${s.counts.committedTurns}/${s.counts.attempts}</div>`)}
+${td("応答・エラー", `<div>p50/p95 ${ms(s.latency.turn.p50Ms)} / ${ms(s.latency.turn.p95Ms)} ms${s.latency.slowestPhase ? ` · 最遅 ${escapeHtml(s.latency.slowestPhase.phase)}` : ""}</div>
+<div class="muted">要求エラー ${s.counts.requestErrors}</div>${s.errorCodes.length ? `<div class="bad">${escapeHtml(s.errorCodes.join(", "))}</div>` : ""}`)}</tr>`).join("");
   return page("実験ログ（研究者用）", `${receptions ? adminNav('/admin') : ''}<h1>実験ログ（研究者用・読み取り専用）</h1>
-<form method="get" action="/admin" class="filters"><label>状態 <select name="status">${STATUS_FILTERS.map((v) => option(v, filter.status)).join("")}</select></label>
+<form method="get" action="/admin" class="filters"><label>状態 <select name="status">${STATUS_FILTERS.map((v) => option(v, filter.status, STATUS_FILTER_LABELS[v])).join("")}</select></label>
 <label>エラー <select name="error">${option("any", filter.error, "すべて")}${option("with", filter.error, "あり")}${option("without", filter.error, "なし")}</select></label>
 <label>参照メモリ <select name="memory">${option("any", filter.memory, "すべて")}${option("on", filter.memory, "ON")}${option("off", filter.memory, "OFF")}</select></label>
 <button>絞り込み</button></form>
 ${deleted ? `<p class="bad">記録を削除しました。</p>` : ""}
-<p class="muted">試行ごとの一覧（同じブラウザの過去の試行も含む）。更新が新しい順に ${PAGE_LIMIT_NOTE}。絞り込みはこのページ内に適用します。記録は自動では削除されません（手動での削除のみ）。</p>
-${summaries.length ? `<div class="wrap"><table>${head(["記録", "更新", "方略", "メモリ", "発話様式", "状態", "AI", "人/AI発話", "確定/試行", "要求エラー", "エラーコード", "応答 p50/p95 ms", "最遅段階", "仮アンケート"])}${rows}</table></div>` : `<p class="muted">該当なし</p>`}
+<p class="muted">更新が新しい順に ${PAGE_LIMIT_NOTE}（同じブラウザの過去の試行を含む）。絞り込みはこのページ内に適用します。記録は自動では削除されません（手動での削除のみ）。</p>
+${summaries.length ? `<div class="wrap cards log"><table><thead>${head(["記録", "状態", "条件", "発話・確定", "応答・エラー"])}</thead><tbody>${rows}</tbody></table></div>` : `<p class="muted">該当なし</p>`}
 ${next ? `<p><a href="/admin${escapeHtml(query({ after: next }))}">次のページ →</a></p>` : ""}
 <h2>削除の記録（内容なし）</h2>${table(["削除日時", "理由", "記録IDのハッシュ"], audit.map((a) => [a.deletedAt, a.reason, a.recordHash]))}`);
 }
@@ -124,19 +154,37 @@ function latencySection(latency: LatencySummary): string {
     t.calls.map((c) => `${c.phase} ${Math.round(c.latencyMs)}ms ${c.status}${c.errorCode ? " " + c.errorCode : ""}`).join("\n"),
     t.judgeRetries, t.validationFailures.join(", "), [t.judgeFallback && "judge_fallback", t.guardRegenerated && "guard_regenerated",
       t.guardFallback && "guard_fallback"].filter(Boolean).join(", "), t.supersededBefore]);
-  return `<h2>遅延</h2><p>要求 ${latency.requests}・エラー ${latency.errors}・タイムアウト ${latency.timeouts}・応答 p50 ${ms(latency.turn.p50Ms)} ms / p95 ${ms(latency.turn.p95Ms)} ms（${latency.turn.count} 回）・最初の未応答から p50 ${ms(latency.firstPending.p50Ms)} ms</p>
+  return `<p>要求 ${latency.requests}・エラー ${latency.errors}・タイムアウト ${latency.timeouts}・応答 p50 ${ms(latency.turn.p50Ms)} ms / p95 ${ms(latency.turn.p95Ms)} ms（${latency.turn.count} 回）・最初の未応答から p50 ${ms(latency.firstPending.p50Ms)} ms</p>
 ${table(["段階", "回数", "エラー", "p50", "p90", "p95", "max", "合計 ms"], phases)}
-${latency.turns.length ? `<h2>ターン別の遅延</h2>${table(["AI seq", "要求 seq", "最新の発話から ms", "最初の未応答から ms", "実行 ms", "呼び出し", "判断再試行", "検証失敗", "代替・書き直し", "直前の中断"], turns)}` : ""}`;
+${latency.turns.length ? `<h3>ターン別の遅延</h3>${table(["AI seq", "要求 seq", "最新の発話から ms", "最初の未応答から ms", "実行 ms", "呼び出し", "判断再試行", "検証失敗", "代替・書き直し", "直前の中断"], turns)}` : ""}`;
 }
 
-/** Full researcher view of one stored record: public events, judged acts, traces, requests and scoring. */
+/** A section that opens on demand: plain HTML, no script. */
+const fold = (title: string, body: string, extra = "", open = false) =>
+  `<details class="diag${extra ? " " + extra : ""}"${open ? " open" : ""}><summary>${escapeHtml(title)}</summary><div class="body">${body}</div></details>`;
+const chatSpeaker = (value: unknown) => value === "ai" ? "AI" : value === "human" ? "人間" : String(value ?? "");
+
+/** Human/AI names and the match per figure; the raw submission, diagnostics and scoring stay in the fold below. */
+function outcomeSection(r: Record<string, any>): string {
+  const scoring = isPlain(r.scoring) ? r.scoring : {};
+  const figures = [scoring.figures, isPlain(scoring.result) ? scoring.result.figures : undefined].find(Array.isArray) as any[] | undefined;
+  const result = isPlain(scoring.result) ? scoring.result : scoring;
+  const rows = figures ? figures.filter(isPlain).map((f) => [isPlain(f.human) ? f.human.slot : "", isPlain(f.human) ? f.human.rawName ?? "未合意" : "",
+    isPlain(f.ai) ? f.ai.rawName ?? "未合意" : "", f.matched === true ? "一致" : f.matched === false ? "不一致" : ""])
+    : isPlain(r.humanSubmission) ? Object.entries(r.humanSubmission).map(([slot, name]) => [slot, name ?? "未合意", isPlain(r.aiSubmission) ? (r.aiSubmission as any)[slot] ?? "" : "", ""]) : [];
+  const counts = typeof result.matchedCount === "number" && typeof result.total === "number" ? `<p>一致 ${result.matchedCount} / ${result.total}（暫定）</p>` : "";
+  return `<h2>提出と結果</h2>${counts}${table(["図形", "人間の名前", "AIの名前", "照合"], rows)}`;
+}
+
+/** Full researcher view of one stored record: identity and outcome first, every diagnostic one click away. */
 export function renderDetail(record: unknown, summary: AdminSummary, latency: LatencySummary, _retentionDays?: number): string {
   const r = isPlain(record) ? record : {};
-  const events = list(r.events).filter(isPlain).map((e) => [e.seq, e.speaker, e.at, e.origin ?? "", e.text]);
+  const rawEvents = list(r.events).filter(isPlain);
   const judgments = list(r.judgments).filter(isPlain).map((j) => [j.turnIndex, j.judgment?.action, j.judgment?.targetSlot,
     j.judgment?.candidateName, j.judgment?.discriminatingFeature, j.judgment?.followUp ?? null, j.activeJudge ?? null]);
   // errorCode/errorPhase/errorStatus/errorElapsedMs and generationRetried are written by the v2 turn on failure.
-  const attempts = list(r.attempts).filter(isPlain).map((a) => [a.turnIndex, a.status,
+  const attemptList = list(r.attempts).filter(isPlain);
+  const attempts = attemptList.map((a) => [a.turnIndex, a.status,
     a.errorCode ? [a.errorCode, a.errorPhase, a.errorStatus === null || a.errorStatus === undefined ? "" : "HTTP " + a.errorStatus,
       a.errorElapsedMs === undefined ? "" : ms(a.errorElapsedMs) + " ms"].filter((part) => part !== "" && part !== undefined).join(" / ") : "",
     a.generationRetried === true ? "あり" : "", a.validation ?? null, a.memory ?? null,
@@ -148,27 +196,38 @@ export function renderDetail(record: unknown, summary: AdminSummary, latency: La
     isPlain(g.usage) && typeof g.usage.costUsd === "number" ? g.usage.costUsd : "", list(g.inputGaps).join(", "),
     // Records made before the 5-level name axis carry no version (v1: "no name yet" was not_agreed).
     typeof g.criteriaVersion === "string" ? g.criteriaVersion : "v1（版記録なし）"]);
-  const requests = list(r.requests).filter(isPlain).map((q, i) => [i + 1, q.kind, q.status, q.httpStatus ?? "", q.errorCode ?? "",
+  const requestList = list(r.requests).filter(isPlain);
+  const requests = requestList.map((q, i) => [i + 1, q.kind, q.status, q.httpStatus ?? "", q.errorCode ?? "",
     ms(q.latencyMs), q.retryCount ?? "", q.model ?? ""]);
+  const attemptErrors = attemptList.filter((a) => a.errorCode).length;
+  const requestErrors = requestList.filter((q) => q.errorCode || (typeof q.httpStatus === "number" && q.httpStatus >= 400)).length;
+  const conversation = rawEvents.length ? `<ol class="chat">${rawEvents.map((e) => `<li class="${e.speaker === "ai" ? "ai" : "human"}"><div class="meta">${badge(chatSpeaker(e.speaker))}<span>seq ${escapeHtml(e.seq)}</span>${timeTag(e.at)}${e.origin ? `<span>${escapeHtml(e.origin)}</span>` : ""}</div><p>${escapeHtml(e.text)}</p></li>`).join("")}</ol>` : `<p class="muted">なし</p>`;
+  const dl = (items: [string, string][]) => `<dl class="summary">${items.map(([k, v]) => `<div><dt>${escapeHtml(k)}</dt><dd>${v}</dd></div>`).join("")}</dl>`;
+  const id = escapeHtml(summary.recordId);
   return page(`記録 ${summary.recordId.slice(0, 8)}`, `<p><a href="/admin">← 一覧</a></p>
-<h1>記録 ${escapeHtml(summary.recordId)}</h1>
-<p><a href="/admin/record/${escapeHtml(summary.recordId)}.json">JSONで保存（この記録の全項目）</a></p>
-${table(["項目", "値"], [["Durable Object", summary.objectId], ["開始", summary.startedAt], ["更新", summary.updatedAt], ["方略", summary.strategy],
-  ["参照メモリ", summary.referenceMemory ? "ON" : "OFF"], ["発話様式", summary.utteranceStyle], ["状態", summary.status], ["AI", summary.aiStatus],
-  ["キュー", r.queueState ? { errorCode: r.queueState.errorCode ?? null, pending: list(r.queueState.pendingHumanEventIds).length, closed: r.queueState.closed ?? false } : null],
-  ["最終エラー", r.finalError ?? null], ["エラーコード", summary.errorCodes.join(", ")], ["件数", summary.counts]])}
-${latencySection(latency)}
-<h2>公開発話</h2>${table(["seq", "話者", "時刻", "由来", "本文"], events)}
-<h2>確定した判断（ターンごと）</h2>${table(["ターン", "行為", "対象", "名前", "弁別特徴", "followUp", "active 判断"], judgments)}
-<h2>実行の記録（中断・失敗を含む）</h2>${table(["ターン", "状態", "エラー（コード / 段階 / HTTP / 経過）", "生成の再試行", "検証", "参照メモリ", "生成ガード", "active 判断", "影の判断", "発話様式"], attempts)}
-${grounding.length ? `<h2>根拠の影判定（Jev 2軸・研究用・未校正）</h2>${table(["ターン", "対象", "結果", "対象同定の根拠", "名称合意の根拠", "エラー", "ms", "費用 USD", "入力の不足", "判定基準の版"], grounding)}` : ""}
-<h2>外部要求</h2>${table(["#", "段階", "結果", "HTTP", "コード", "ms", "再送", "モデル"], requests)}
-<h2>提出と採点</h2>${table(["項目", "値"], [["人間の提出", r.humanSubmission ?? null], ["AIの提出", r.aiSubmission ?? null],
-  ["診断", r.diagnostics ?? null], ["採点", r.scoring ?? null]])}
+<h1>記録 ${id}</h1>
+<p><a href="/admin/record/${id}.json">JSONで保存（この記録の全項目）</a></p>
+${dl([["状態", `${statusBadge(summary.status)} ${aiBadge(summary.aiStatus)} ${surveyBadge(summary.questionnaire)}`], ["開始", timeTag(summary.startedAt)], ["更新", timeTag(summary.updatedAt)],
+  ["方略", escapeHtml(summary.strategy)], ["参照メモリ", summary.referenceMemory ? "ON" : "OFF"], ["発話様式", escapeHtml(summary.utteranceStyle)],
+  ["発話 人/AI", `${summary.counts.humanMessages}/${summary.counts.aiMessages}`], ["確定/試行", `${summary.counts.committedTurns}/${summary.counts.attempts}`],
+  ["応答 p50/p95", `${ms(latency.turn.p50Ms)} / ${ms(latency.turn.p95Ms)} ms`],
+  ["エラーコード", summary.errorCodes.length ? `<span class="bad">${escapeHtml(summary.errorCodes.join(", "))}</span>` : "なし"]])}
+<h2>会話（公開発話）</h2>${conversation}
+${outcomeSection(r)}
 ${questionnaireSection(r.questionnaire)}
-<h2>削除</h2><p class="muted">この記録は自動では削除されません。削除する場合は、記録IDを確認欄に入力してください（仮アンケートの回答も削除されます）。削除は取り消せません。</p>
-<form method="post" action="/admin/record/${escapeHtml(summary.recordId)}/delete"><label>確認（記録ID） <input name="confirm" autocomplete="off" required></label>
-<button>この記録を削除</button></form>`);
+<h2>診断</h2>
+${fold(`確定した判断（ターンごと）（${judgments.length}件）`, table(["ターン", "行為", "対象", "名前", "弁別特徴", "followUp", "active 判断"], judgments))}
+${fold(`実行の記録（中断・失敗を含む）（${attempts.length}件・エラー ${attemptErrors}件）`, table(["ターン", "状態", "エラー（コード / 段階 / HTTP / 経過）", "生成の再試行", "検証", "参照メモリ", "生成ガード", "active 判断", "影の判断", "発話様式"], attempts))}
+${fold(`遅延・ターン別の遅延（p50 ${ms(latency.turn.p50Ms)} / p95 ${ms(latency.turn.p95Ms)} ms）`, latencySection(latency))}
+${grounding.length ? fold(`根拠の影判定（Jev 2軸・研究用・未校正）（${grounding.length}件）`, table(["ターン", "対象", "結果", "対象同定の根拠", "名称合意の根拠", "エラー", "ms", "費用 USD", "入力の不足", "判定基準の版"], grounding)) : ""}
+${fold(`外部要求（${requests.length}回・エラー ${requestErrors}件）`, table(["#", "段階", "結果", "HTTP", "コード", "ms", "再送", "モデル"], requests))}
+${fold("詳細メタデータ・キュー・提出と採点の生データ", table(["項目", "値"], [["Durable Object", summary.objectId], ["開始", summary.startedAt], ["更新", summary.updatedAt],
+  ["キュー", r.queueState ? { errorCode: r.queueState.errorCode ?? null, pending: list(r.queueState.pendingHumanEventIds).length, closed: r.queueState.closed ?? false } : null],
+  ["最終エラー", r.finalError ?? null], ["件数", summary.counts], ["人間の提出", r.humanSubmission ?? null], ["AIの提出", r.aiSubmission ?? null],
+  ["診断", r.diagnostics ?? null], ["採点", r.scoring ?? null]]))}
+${fold("削除", `<p class="muted">この記録は自動では削除されません。削除する場合は、記録IDを確認欄に入力してください（仮アンケートの回答も削除されます）。削除は取り消せません。</p>
+<form method="post" action="/admin/record/${id}/delete"><label>確認（記録ID） <input name="confirm" autocomplete="off" required></label>
+<button>この記録を削除</button></form>`, "danger")}`);
 }
 
 export function renderMessage(title: string, message: string, back: { href: string; label: string } = { href: '/admin', label: '一覧へ' }): string {
