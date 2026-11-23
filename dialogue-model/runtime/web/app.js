@@ -539,7 +539,7 @@ function render(state) {
     if (submitted() && !incomingSubmitted) return;
     if (trialCompleted() && !incomingCompleted) return;
   }
-  if (confirmSnapshot && $("confirm-dialog").open && (!trial || trialIdentity(trial) !== confirmSnapshot.recordId || eventsFor(trial).length !== confirmSnapshot.eventCount)) {
+  if (confirmSnapshot && $("confirm-dialog").open && (!trial || trialIdentity(trial) !== confirmSnapshot.identity || eventsFor(trial).length !== confirmSnapshot.eventCount)) {
     closeDialog("confirm-dialog", false);
     $("notice").textContent = participantMessage("trial_changed");
   }
@@ -1211,7 +1211,7 @@ $("submission").addEventListener("submit", (event) => {
   }
   addScene($("confirm-scene"), false);
   renderSummary($("confirm-list"), (shape) => answers.get(shape.id) ?? "未合意・わからない");
-  confirmSnapshot = { recordId: trialIdentity(current), eventCount: events().length };
+  confirmSnapshot = { recordId: current?.sessionId, identity: trialIdentity(current), eventCount: events().length };
   $("confirm-dialog").showModal(); $("confirm-cancel").focus({ preventScroll: true });
 });
 $("confirm-cancel").addEventListener("click", () => closeDialog("confirm-dialog"));
@@ -1221,7 +1221,7 @@ $("confirm-submit").addEventListener("click", () => {
   const names = Object.fromEntries(scene().shapes.map((shape) => [shape.id, answers.get(shape.id)]));
   closeDialog("confirm-dialog");
   reviewStage = null;
-  const expectation = snapshot ? { expectedRecordId: snapshot.recordId, ...(requestSession() ? { expectedEventCount: snapshot.eventCount } : {}) } : {};
+  const expectation = snapshot ? { ...(snapshot.recordId !== undefined ? { expectedRecordId: snapshot.recordId } : {}), ...(requestSession() ? { expectedEventCount: snapshot.eventCount } : {}) } : {};
   operate(() => api("/api/names", { names, confirm: true, ...expectation }));
 });
 for (const button of $("stage-nav").querySelectorAll("button")) {

@@ -111,7 +111,7 @@ function timeTag(value: unknown): string {
 const badge = (text: string, tone = "") => `<span class="badge${tone ? " " + tone : ""}">${escapeHtml(text)}</span>`;
 const statusBadge = (status: string) => badge(statusLabel(status), status === "completed" ? "done" : status === "dialogue" || status === "submitting" ? "live" : "");
 const aiBadge = (aiStatus: string) => badge("AI " + aiStatus, aiStatus === "error" ? "bad" : "");
-const surveyBadge = (value: string) => badge("アンケート" + (QUESTIONNAIRE_LABELS[value] ?? QUESTIONNAIRE_LABELS.none), value === "submitted" ? "done" : value === "draft" ? "warn" : "");
+const surveyBadge = (value: string) => badge("仮アンケート" + (QUESTIONNAIRE_LABELS[value] ?? QUESTIONNAIRE_LABELS.none), value === "submitted" ? "done" : value === "draft" ? "warn" : "");
 
 export function renderList(summaries: AdminSummary[], filter: ListFilter, next: string | null, audit: AuditEntry[],
   _retentionDays?: number, deleted = false, receptions = false): string {
