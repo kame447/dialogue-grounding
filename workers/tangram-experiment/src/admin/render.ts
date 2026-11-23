@@ -40,9 +40,10 @@ input[type="radio"],input[type="checkbox"]{width:18px;height:18px;margin:2px 0 0
 .cards td::before{content:attr(data-label);color:#666}.cards td:empty{display:none}.cards td.ops{display:block;padding:8px 0 4px}.cards td.ops::before{content:none}
 .ops form{max-width:none}}
 .badge{display:inline-block;padding:1px 8px;border:1px solid var(--line);border-radius:999px;background:#fff;font-size:.78rem;white-space:nowrap}
+.badges{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
 .badge.live{background:var(--tint);border-color:var(--accent);color:var(--accent)}.badge.done{background:#eef6ee;border-color:#9bbf9b;color:#2d5a2d}
 .badge.warn{background:#fdf3dc;border-color:#d4a64a;color:#6f4b00}.badge.bad{background:#fbe9e6;border-color:#d99a91;color:#9b2c1f}
-.log td.id a{font-weight:600}.log td>div+div{margin-top:2px}.log time{white-space:nowrap}
+.log td.id a{font-weight:600}.log .cell>div+div{margin-top:2px}.log time{white-space:nowrap}
 dl.summary{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px 16px;margin:12px 0;padding:12px;background:#fff;border:1px solid var(--line);border-radius:6px}
 dl.summary div{min-width:0}dl.summary dt{color:#666;font-size:.78rem}dl.summary dd{margin:0;overflow-wrap:anywhere}
 ol.chat{list-style:none;margin:0;padding:0;display:grid;gap:8px}ol.chat li{padding:8px 12px;border:1px solid var(--line);border-radius:6px;background:#fff;max-width:760px}
@@ -115,9 +116,9 @@ const surveyBadge = (value: string) => badge("アンケート" + (QUESTIONNAIRE_
 export function renderList(summaries: AdminSummary[], filter: ListFilter, next: string | null, audit: AuditEntry[],
   _retentionDays?: number, deleted = false, receptions = false): string {
   const query = (extra: Record<string, string>) => "?" + new URLSearchParams({ status: filter.status, error: filter.error, memory: filter.memory, ...extra });
-  const td = (label: string, content: string, cls = "") => `<td data-label="${escapeHtml(label)}"${cls ? ` class="${cls}"` : ""}>${content}</td>`;
-  const rows = summaries.map((s) => `<tr>${td("記録", `<a href="/admin/record/${escapeHtml(s.recordId)}">${escapeHtml(s.recordId.slice(0, 8))}</a><div class="muted">${timeTag(s.updatedAt)}</div>`, "id")}
-${td("状態", `${statusBadge(s.status)} ${aiBadge(s.aiStatus)} ${surveyBadge(s.questionnaire)}`)}
+  const td = (label: string, content: string, cls = "") => `<td data-label="${escapeHtml(label)}"${cls ? ` class="${cls}"` : ""}><div class="cell">${content}</div></td>`;
+  const rows = summaries.map((s) => `<tr>${td("記録", `<div><a href="/admin/record/${escapeHtml(s.recordId)}">${escapeHtml(s.recordId.slice(0, 8))}</a></div><div class="muted">${timeTag(s.updatedAt)}</div>`, "id")}
+${td("状態", `<div class="badges">${statusBadge(s.status)}${aiBadge(s.aiStatus)}${surveyBadge(s.questionnaire)}</div>`)}
 ${td("条件", `<div>${escapeHtml(s.strategy)}</div><div class="muted">メモリ ${s.referenceMemory ? "ON" : "OFF"} · ${escapeHtml(s.utteranceStyle)}</div>`)}
 ${td("発話・確定", `<div>人/AI ${s.counts.humanMessages}/${s.counts.aiMessages}</div><div class="muted">確定/試行 ${s.counts.committedTurns}/${s.counts.attempts}</div>`)}
 ${td("応答・エラー", `<div>p50/p95 ${ms(s.latency.turn.p50Ms)} / ${ms(s.latency.turn.p95Ms)} ms${s.latency.slowestPhase ? ` · 最遅 ${escapeHtml(s.latency.slowestPhase.phase)}` : ""}</div>
@@ -204,10 +205,11 @@ export function renderDetail(record: unknown, summary: AdminSummary, latency: La
   const conversation = rawEvents.length ? `<ol class="chat">${rawEvents.map((e) => `<li class="${e.speaker === "ai" ? "ai" : "human"}"><div class="meta">${badge(chatSpeaker(e.speaker))}<span>seq ${escapeHtml(e.seq)}</span>${timeTag(e.at)}${e.origin ? `<span>${escapeHtml(e.origin)}</span>` : ""}</div><p>${escapeHtml(e.text)}</p></li>`).join("")}</ol>` : `<p class="muted">なし</p>`;
   const dl = (items: [string, string][]) => `<dl class="summary">${items.map(([k, v]) => `<div><dt>${escapeHtml(k)}</dt><dd>${v}</dd></div>`).join("")}</dl>`;
   const id = escapeHtml(summary.recordId);
+  const surveyState = isPlain(r.questionnaire) && typeof r.questionnaire.status === "string" ? r.questionnaire.status : summary.questionnaire;
   return page(`記録 ${summary.recordId.slice(0, 8)}`, `<p><a href="/admin">← 一覧</a></p>
 <h1>記録 ${id}</h1>
 <p><a href="/admin/record/${id}.json">JSONで保存（この記録の全項目）</a></p>
-${dl([["状態", `${statusBadge(summary.status)} ${aiBadge(summary.aiStatus)} ${surveyBadge(summary.questionnaire)}`], ["開始", timeTag(summary.startedAt)], ["更新", timeTag(summary.updatedAt)],
+${dl([["状態", `<div class="badges">${statusBadge(summary.status)}${aiBadge(summary.aiStatus)}${surveyBadge(surveyState)}</div>`], ["開始", timeTag(summary.startedAt)], ["更新", timeTag(summary.updatedAt)],
   ["方略", escapeHtml(summary.strategy)], ["参照メモリ", summary.referenceMemory ? "ON" : "OFF"], ["発話様式", escapeHtml(summary.utteranceStyle)],
   ["発話 人/AI", `${summary.counts.humanMessages}/${summary.counts.aiMessages}`], ["確定/試行", `${summary.counts.committedTurns}/${summary.counts.attempts}`],
   ["応答 p50/p95", `${ms(latency.turn.p50Ms)} / ${ms(latency.turn.p95Ms)} ms`],

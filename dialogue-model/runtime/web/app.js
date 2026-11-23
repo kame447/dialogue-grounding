@@ -530,8 +530,15 @@ function render(state) {
     if (trial) restoreDraft(trial, composer);
     else $("utterance").value = composer;
   }
-  // Events are append-only; a state response started earlier must not remove newer events.
-  if (trial && trialIdentity(current) === trialIdentity(trial) && (trial.events?.length ?? 0) < (current?.events?.length ?? 0)) return;
+  // Events and trial lifecycle are monotonic: a stale poll response started earlier
+  // must never drop newer events or regress a submitted/completed trial back to dialogue.
+  if (trial && trialIdentity(current) === trialIdentity(trial)) {
+    if ((trial.events?.length ?? 0) < (current?.events?.length ?? 0)) return;
+    const incomingSubmitted = Boolean(trial.submitted ?? trial.humanSubmitted);
+    const incomingCompleted = Boolean(incomingSubmitted && (trial.status === "completed" || trial.resultLocked === true || (trial.result && trial.aiSubmitted !== false)));
+    if (submitted() && !incomingSubmitted) return;
+    if (trialCompleted() && !incomingCompleted) return;
+  }
   if (confirmSnapshot && $("confirm-dialog").open && (!trial || trialIdentity(trial) !== confirmSnapshot.recordId || eventsFor(trial).length !== confirmSnapshot.eventCount)) {
     closeDialog("confirm-dialog", false);
     $("notice").textContent = participantMessage("trial_changed");
@@ -609,7 +616,12 @@ async function operate(action) {
   if (working) return;
   stateEpoch++;
   working = true; setControls();
-  try { const state = await action(); if (state?.trial !== undefined) render(state); $("notice").textContent = ""; }
+  try {
+    const state = await action();
+    stateEpoch++;
+    if (state?.trial !== undefined) render(state);
+    $("notice").textContent = "";
+  }
   catch (error) {
     // A failed resume shows the stop it was resuming, not activity.
     resuming = false;
@@ -1318,6 +1330,7 @@ function leaveSession() {
   generation++; stateEpoch++; clearTimeout(refreshTimer); clearTimeout(typingTimer);
   resetLocal(); clearDraft();
   $("notice").textContent = "";
+  $("session-history").open = false;
   for (const id of ["start-stage", "trial", "trial-progress", "record-history", "entry-stage", "survey-prompt", "review-bar"]) $(id).hidden = true;
   setControls();
 }

@@ -332,3 +332,56 @@ test('newSession 503 reception failure recovers to entry and reuses child slot; 
   assert.equal(y.e['entry-stage'].hidden, false, 'returns to entry screen instead of looping');
   assert.equal([...y.timers.values()].some(t => t.delay === 5000), false, 'no infinite 5s retry loop');
 });
+
+test('a delayed dialogue poll arriving after names submission never regresses a completed trial back to active chat', async () => {
+  const id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const live = { version: 2, sessionId: 'r-live', status: 'dialogue', submitted: false, aiSubmitted: false, aiStatus: 'idle', scene: SHAPES,
+    events: [{ id: 1, speaker: 'ai', text: 'hello' }] };
+  const done = { ...live, status: 'completed', submitted: true, aiSubmitted: true, resultLocked: true, humanSubmission: { s1: '三角' } };
+  let releaseStalePoll!: () => void;
+  let holdNextState = false;
+  const { root, e } = makeDOM();
+  const timers = new Map<number, { callback: Function; delay: number }>(); let timerId = 0;
+  let stateToServe: any = { trial: live, reception: { number: '007', status: 'in_progress', revision: 2 } };
+  const reply = (status: number, value: any) => ({ ok: status < 400, status, json: async () => structuredClone(value) });
+  const document = { visibilityState: 'visible', getElementById: (k: string) => e[k], createElement: (tag: string) => new Element(tag),
+    createElementNS: (_: unknown, tag: string) => new Element(tag), addEventListener() {} };
+  runInNewContext(script, { document,
+    TangramTabSession: { resolve: async () => ({ kind: 'restored', reason: 'reload', sessionId: id, tabToken: 't' }), bind() {}, clear() {}, current: () => id, dispose() {} },
+    setTimeout: (callback: Function, delay: number) => { timers.set(++timerId, { callback, delay }); return timerId; }, clearTimeout: (k: number) => timers.delete(k),
+    fetch: async (path: string, opts: any) => {
+      if (path === '/api/state') {
+        const snapshot = structuredClone(stateToServe);
+        if (holdNextState) {
+          holdNextState = false;
+          await new Promise<void>((r) => { releaseStalePoll = r; });
+        }
+        return reply(200, snapshot);
+      }
+      if (path === '/api/names') {
+        stateToServe = { trial: done, reception: { number: '007', status: 'finished', revision: 3 } };
+        return reply(200, stateToServe);
+      }
+      if (path === '/api/records') return reply(200, { records: [] });
+      if (path.endsWith('/questionnaire')) return reply(200, { recordId: 'r-live', form: FORM, questionnaire: null });
+      return reply(404, { error: 'not_found' });
+    } });
+  await tick();
+  e.board.querySelectorAll('path')[0].fire('click');
+  e['figure-name'].value = '三角';
+  e['name-form'].fire('submit');
+  e.submission.fire('submit');
+  // Start a poll while still dialogue, hold its response until after /api/names completes.
+  holdNextState = true;
+  for (const [k, t] of [...timers]) if (t.delay === 2000) { timers.delete(k); t.callback(); }
+  await Promise.resolve();
+  e['confirm-submit'].fire('click');
+  await tick();
+  assert.equal(e.chat.hidden, true, 'completed trial hides composer');
+  // Now release the older dialogue poll response.
+  releaseStalePoll();
+  await tick();
+  assert.equal(e.chat.hidden, true, 'delayed dialogue poll must not re-open composer');
+  assert.equal(e.utterance.disabled, true, 'composer remains disabled');
+  assert.ok(root);
+});
