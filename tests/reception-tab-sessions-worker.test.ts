@@ -19,7 +19,7 @@ registerHooks({ resolve(specifier, context, next) {
   }
   return next(specifier, context);
 } });
-const { default: worker, TangramSession, AdminIndex }: any = await import('../workers/tangram-experiment/src/index.ts');
+const { default: worker, TangramSession, AdminIndex }: any = await import(new URL('../workers/tangram-experiment/src/index.ts', import.meta.url).href);
 
 // The Worker accepts a forwarded request-body stream without Node's duplex flag.
 const NativeRequest = globalThis.Request;
