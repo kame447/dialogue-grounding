@@ -744,6 +744,16 @@ for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
     assert.notEqual(denied.state.ledger[ids[0]].status, 'agreed');
     checkS4AgreeSource(before, denied);
 
+    // Asking about the referent is not an answer: the denial stands for the candidates, the request and the ledger.
+    const reask = '今も、さっきの形のことを尋ねていますか？';
+    before = structuredClone(f.state());
+    const requeried = await f.exchange(reask + ask, { action: 'confirm', target: 1, drafts: ['別の形を確かめますね。'],
+      segments: [{ quote: reask, name: null, targets: [ids[0]], aspect: 'referent' as const, proposition: '同じ形か', act: 'ask' as const }, { ...askSegment, quote: ask }] });
+    assert.deepEqual(requeried.input.agreeNames, [], 'a question about the referent does not lift the denial');
+    assert.equal(Object.hasOwn(requeried.requests.find(r => r.questions.action)!.questions.action.criteria, 'agree'), false);
+    assert.notEqual(requeried.state.ledger[ids[0]].status, 'agreed');
+    checkS4AgreeSource(before, requeried);
+
     // Forged evidence is refused: an extra candidate the generation rules never produce.
     const forged = structuredClone(denied);
     forged.state.judgments.at(-1)!.jevTurn.agreeNames = [{ name, figureId: ids[0], sourceTurn: 1 }];
@@ -756,6 +766,10 @@ for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
     assert.deepEqual(affirmed.input.agreeNames, [{ name, figureId: ids[0], sourceTurn: 1 }]);
     assert.deepEqual(affirmed.state.ledger[ids[0]], { status: 'agreed', name });
     checkS4AgreeSource(before, affirmed);
+    // S4 rebuilds the local-issue summary of the generation request with the graph's own values (lastTurn survives the trace's repeated claims).
+    const summary = JSON.parse(s4Probe.issueSummary(affirmed.state.graph, affirmed.trace)) as { issues: { lastTurn?: unknown }[] };
+    assert.ok(summary.issues.length > 0);
+    for (const issue of summary.issues) assert.equal(typeof issue.lastTurn, 'number');
   });
 }
 

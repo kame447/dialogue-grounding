@@ -241,8 +241,9 @@ function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns: reado
   // blocks agreement on that figure until a later referent claim of theirs re-affirms it. This is about the target, not about the proposed name.
   const claimTargets = (c: LocalClaimView) => c.targets.length ? c.targets : claims.find(p => p.id === c.respondsTo)?.targets ?? [];
   const referentClaims = claims.filter(c => c.speaker === "human" && c.aspect === "referent" && c.sourceTurn > lastBoundary);
+  // Only an explicit referent answer counts: a denial stands until a later agree/assert on the same figure; questions, backchannels and other acts keep it.
   const referentDenied = (id: string) => {
-    const last = referentClaims.filter(c => claimTargets(c).includes(id)).at(-1);
+    const last = referentClaims.filter(c => ["deny", "agree", "assert"].includes(c.act) && claimTargets(c).includes(id)).at(-1);
     return last?.act === "deny";
   };
   const aiSharedIds = new Set(claims.filter(c => c.speaker === "ai" && c.sourceTurn > lastBoundary && c.sourceTurn < turn).flatMap(c => c.targets));

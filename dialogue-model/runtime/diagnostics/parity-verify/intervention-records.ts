@@ -369,7 +369,8 @@ function agreeSource(tr:any,t:any,key:string,tape:any,legacyV3=false):'invalid'|
    const aiSharedIds=new Set(live.filter((c:any)=>c.speaker==='ai'&&c.sourceTurn>lastBoundary&&c.sourceTurn<t.turnIndex).flatMap((c:any)=>c.targets));
    const claimTargets=(c:any):string[]=>Array.isArray(c.targets)&&c.targets.length?c.targets:live.find((p:any)=>p.id===c.respondsTo)?.targets??[];
    const referentClaims=live.filter((c:any)=>c.speaker==='human'&&c.aspect==='referent'&&c.sourceTurn>lastBoundary);
-   const referentDenied=(id:string)=>referentClaims.filter((c:any)=>claimTargets(c).includes(id)).at(-1)?.act==='deny';
+   // Only an explicit referent answer counts: a denial stands until a later agree/assert on the same figure; questions, backchannels and other acts keep it.
+   const referentDenied=(id:string)=>referentClaims.filter((c:any)=>['deny','agree','assert'].includes(c.act)&&claimTargets(c).includes(id)).at(-1)?.act==='deny';
    const expectedAt=(level:number):string[]=>openClaims.flatMap((c:any)=>{
     const name=c.name as string;
     if(!isHumanProposal(c)&&c.act!=='name_accept')return[];
@@ -764,7 +765,9 @@ function generationMessagesWith(messages:any[],trace:any,execution:any,tape:any,
  return false;
 }
 function issueSummary(graph:any,trace:any):string{
- const claims=[...new Map([...(graph.records??[]).filter((r:any)=>r.kind==='claim'),...(trace.local?.claims??[]).filter((r:any)=>r.kind==='claim'),...(trace.local?.aiClaims??[]).filter((r:any)=>r.kind==='claim')].map((c:any)=>[c.id,c])).values()].sort((a:any,b:any)=>a.sourceTurn-b.sourceTurn||a.turn-b.turn);
+ // A trace's local update repeats a claim without its commit turn; keep every field the saved graph already holds (the summary's lastTurn is the graph's turn).
+ const byId=new Map<string,any>();for(const c of [...(graph.records??[]).filter((r:any)=>r.kind==='claim'),...(trace.local?.claims??[]).filter((r:any)=>r.kind==='claim'),...(trace.local?.aiClaims??[]).filter((r:any)=>r.kind==='claim')])byId.set(c.id,{...(byId.get(c.id)??{}),...c});
+ const claims=[...byId.values()].sort((a:any,b:any)=>a.sourceTurn-b.sourceTurn||a.turn-b.turn);
  const dead=new Set((graph.records??[]).filter((r:any)=>r.kind==='retract').map((r:any)=>r.targetId));for(const c of claims)if(c.act==='withdraw'&&c.respondsTo&&!dead.has(c.id))dead.add(c.respondsTo);
  let changed=true;while(changed){changed=false;for(const c of claims)if(c.act!=='withdraw'&&c.respondsTo&&dead.has(c.respondsTo)&&!dead.has(c.id)){dead.add(c.id);changed=true;}}
  const groups=new Map<string,any[]>();for(const c of claims){const g=groups.get(c.issueId)??[];g.push(c);groups.set(c.issueId,g);}
@@ -800,7 +803,7 @@ function prospectMaterial(input:any,answers:any){
   scores:{repair_issue:answers.repair_issue.probabilities,prospect:answers.prospect.probabilities,basis:answers.basis.probabilities}};
 }
 /** Test hook for the independent reconstructions; changes no verdict. */
-export const s4Probe={originalQuestions,targetQuestion,targetProof,rankProof,expectedRerank,agreeSource,legal,decisionShape,traceShape,relation,s4HasNonOrientationLeak,
+export const s4Probe={issueSummary,originalQuestions,targetQuestion,targetProof,rankProof,expectedRerank,agreeSource,legal,decisionShape,traceShape,relation,s4HasNonOrientationLeak,
  setContext:(c:Partial<typeof CTX>)=>Object.assign(CTX,defaultContext,c),prospectQuestions:(input:any,facts:boolean)=>prospectQuestions(input,facts),prospectMaterial:(input:any,answers:any)=>prospectMaterial(input,answers),trialVersion:(t:any,claim:any)=>trialVersion(t,claim)};
 export function interventionChecks(records:Records):Check[]{
  const broken=(reason='intervention_trace_invalid')=>{
