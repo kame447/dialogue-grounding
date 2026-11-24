@@ -39,6 +39,7 @@ const protocol = {
 };
 const sha256 = receptionProtocolSha256(canonicalReceptionProtocolV2(protocol));
 const displayed = { protocolId: protocol.protocolId, revision: protocol.revision, sha256 };
+const approvedLimits = { lunaCalls: 60, lunaTokens: 300_000, lunaPosts: 60, jevPosts: 60, jevUsd: 0.05 };
 const chatResponse = (model: unknown, content: string) => ({
   model, choices: [{ message: { content }, finish_reason: 'stop' }], usage: { prompt_tokens: 5, completion_tokens: 3 },
 });
@@ -83,7 +84,7 @@ function harness(enabled = true) {
   let slots: string[] = [];
   const env = {
     PARTICIPANT_TERRA_ENABLED: enabled ? 'on' : 'off',
-    PARTICIPANT_TERRA_LIMITS_JSON: JSON.stringify({ lunaCalls: 60, lunaTokens: 300_000, lunaPosts: 60, jevPosts: 60, jevUsd: 0.05 }),
+    PARTICIPANT_TERRA_LIMITS_JSON: JSON.stringify(approvedLimits),
     V2_UTTERANCE_STYLE: 'concise',
     AI_PROXY: { async chat() { controlled.legacyCalls++; throw new Error('synthetic legacy call'); } },
     PARTICIPANT_AI_PROXY: {
@@ -221,13 +222,58 @@ test('Worker approval persists one private pin, both trial conditions use it, an
   assert.doesNotMatch(JSON.stringify(state), /gpt-6|typesafe\/jev|participantModelPin|ownAnchors|observationMemo|data:image/u);
 });
 
+test('approved trial limits survive Worker recreation and apply to both conditions after an env change', async () => {
+  const h = harness();
+  await h.receive();
+  await h.approve();
+  const first = await jsonOk(await h.start());
+  const recordId = first.trial.sessionId;
+  assert.deepEqual((await h.storage.get('record:' + recordId)).jevLedger.limits, approvedLimits);
+
+  h.env.PARTICIPANT_TERRA_LIMITS_JSON = JSON.stringify({ ...approvedLimits, jevPosts: 59 });
+  h.evict();
+  const restored = await jsonOk(await h.request('state'));
+  assert.equal(restored.trial.sessionId, recordId);
+  assert.deepEqual((await h.storage.get('record:' + recordId)).jevLedger.limits, approvedLimits);
+
+  await h.complete(recordId, restored.trial);
+  const second = await jsonOk(await h.start(recordId));
+  const secondRecord = await h.storage.get('record:' + second.trial.sessionId);
+  assert.equal(secondRecord.strategy, 'repair-first');
+  assert.deepEqual(secondRecord.jevLedger.limits, approvedLimits);
+  assert.deepEqual((await h.storage.get('reception:v1')).plan.participantLimits, approvedLimits);
+  assert.doesNotMatch(JSON.stringify(second), /participantLimits|jevPosts/u);
+});
+
+test('an existing trial from a model-only plan restores with its recorded limits', async () => {
+  const h = harness();
+  await h.receive();
+  await h.approve();
+  await h.storage.transaction(async tx => {
+    const reception = await tx.get('reception:v1');
+    delete reception.plan.participantLimits;
+    await tx.put({ 'reception:v1': reception });
+  });
+  const first = await jsonOk(await h.start());
+  const recordId = first.trial.sessionId;
+  assert.deepEqual((await h.storage.get('record:' + recordId)).jevLedger.limits, approvedLimits);
+
+  h.env.PARTICIPANT_TERRA_LIMITS_JSON = 'invalid';
+  h.evict();
+  const restored = await jsonOk(await h.request('state'));
+  assert.equal(restored.trial.sessionId, recordId);
+  assert.equal(h.calls.filter(({ kind }) => kind === 'visual_observation').length, 1);
+});
+
 test('Worker legacy approval still starts and restores through legacy options after Terra opt-in', async () => {
   const h = harness(false);
   await h.receive();
   const approved = await h.approve();
   assert.equal(Object.hasOwn(approved.plan, 'participantModelPin'), false);
+  assert.equal(Object.hasOwn(approved.plan, 'participantLimits'), false);
   h.env.PARTICIPANT_TERRA_ENABLED = 'on';
   h.controlled.policy = null;
+  h.env.PARTICIPANT_TERRA_LIMITS_JSON = 'invalid';
   const started = await jsonOk(await h.start());
   h.evict();
   const restored = await jsonOk(await h.request('state'));

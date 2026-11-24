@@ -112,6 +112,38 @@ test('both phases use the Terra purpose and only the bound AI projection and tar
   assert.equal(calls.length, 2);
 });
 
+test('Terra text parts accepted by the proxy are read for initial and targeted observation', async () => {
+  const env = {
+    RESEARCH_PROXY_TOKEN: 'synthetic-only-proxy-token-for-tests-184',
+    UPSTREAM_API_KEY: 'synthetic-only-upstream-key',
+    DIALOGUE_MODEL: pin.lunaModelId,
+    VISION_MODEL: pin.terraModelId,
+  };
+  const observer = createWorkerTerraObserver({ own, modelPin: pin, now, async visual(payload) {
+    const request = new Request('https://mock.invalid/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + env.RESEARCH_PROXY_TOKEN },
+      body: JSON.stringify(payload),
+    });
+    const isTargeted = Object.hasOwn(JSON.parse(String(payload.messages[1].content)), 'figureIds');
+    const json = JSON.stringify(isTargeted ? targeted : initial);
+    const reply = await handleRequest(request, env, async () => Response.json({
+      model: pin.terraModelId, choices: [{ message: { content: [
+        { type: 'text', text: json.slice(0, 13) },
+        { type: 'refusal', refusal: 'ignored non-text part' },
+        { type: 'text', text: json.slice(13) },
+      ] } }],
+    }), pin.terraModelId);
+    assert.equal(reply.status, 200);
+    return { status: reply.status, data: await reply.json() };
+  } });
+  const memo = await observer.observeAll(own);
+  assert.deepEqual(memo.figures.map(({ id }) => id), own.ownAnchors.map(({ id }) => id));
+  const result = await observer.reobserve({ ...own, memo, figureIds: [selected],
+    issue: { aspect: 'part', question: '小さい三角はありますか？', partnerConstrual: null } });
+  assert.deepEqual(result.figures, targeted.figures);
+});
+
 test('missing actual Terra ID and mismatched build never become initial or targeted evidence', async () => {
   let call = 0;
   const observer = createWorkerTerraObserver({ own, modelPin: pin, now,

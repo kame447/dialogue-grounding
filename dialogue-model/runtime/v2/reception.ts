@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { Strategy } from './base-assignment.ts';
+import type { BudgetLimits } from '../diagnostics/parity-live/audit.ts';
+import { DEFAULT_COST_CAP_USD } from '../diagnostics/jev-shadow-eval/local-openrouter.ts';
 import { validateParticipantModelPin } from './participant-model-pin.ts';
 import type { ParticipantModelPin } from './participant-model-pin.ts';
 import { ROTATION_MODES as STIMULUS_ROTATION_MODES } from '../stimuli/scatter-v2.mjs';
@@ -20,6 +22,7 @@ export type ReceptionPlanV1 = { schemaVersion: 'reception_plan_v1'; protocolId: 
 export type ReceptionPlanV2 = { schemaVersion: 'reception_plan_v2'; protocolId: string; protocolRevision: number;
   protocolSha256: string; order: Strategy[]; betweenTrials: BetweenTrials; approvedAt: string;
   participantModelPin?: ParticipantModelPin;
+  participantLimits?: Readonly<BudgetLimits>;
   trials: { index: number; strategy: Strategy; seed: number; referenceMemory: boolean; rotationMode: RotationMode }[] };
 export type ReceptionPlan = ReceptionPlanV1 | ReceptionPlanV2;
 /** The protocol version a researcher saw when choosing an order. */
@@ -48,6 +51,12 @@ function object(value: unknown, keys: string[]): Record<string, any> {
   if (names.length !== keys.length || names.some(k => typeof k !== 'string' || !keys.includes(k))) return fail();
   for (const key of keys) { const d = Object.getOwnPropertyDescriptor(value, key); if (!d || !Object.hasOwn(d, 'value') || !d.enumerable) return fail(); }
   return value as Record<string, any>;
+}
+export function validateParticipantLimits(value: unknown): Readonly<BudgetLimits> {
+  const { lunaCalls, lunaTokens, lunaPosts, jevPosts, jevUsd } = object(value, ['lunaCalls','lunaTokens','lunaPosts','jevPosts','jevUsd']);
+  if ([lunaCalls, lunaTokens, lunaPosts, jevPosts].some(v => !int(v) || v < 1) ||
+      typeof jevUsd !== 'number' || !Number.isFinite(jevUsd) || jevUsd <= 0 || jevUsd > DEFAULT_COST_CAP_USD) return fail();
+  return Object.freeze({ lunaCalls, lunaTokens, lunaPosts, jevPosts, jevUsd });
 }
 function order(value: unknown): Strategy[] {
   if (!Array.isArray(value) || value.length < 1 || value.length > 2 || value.some(v => !strategy(v)) || new Set(value).size !== value.length) return fail();
@@ -85,10 +94,14 @@ export function validateReceptionProtocolV2(value: unknown): ReceptionProtocolV2
 export function canonicalReceptionProtocolV2(value: unknown): string { return JSON.stringify(validateReceptionProtocolV2(value)); }
 export const receptionProtocolSha256 = (canonical: string): string => createHash('sha256').update(canonical).digest('hex');
 function validatePlanV2(value: unknown): ReceptionPlanV2 {
-  const hasPin = !!value && typeof value === 'object' && Object.hasOwn(value, 'participantModelPin');
+  const fields = value && typeof value === 'object' ? value : {};
+  const hasPin = Object.hasOwn(fields, 'participantModelPin');
+  const hasLimits = Object.hasOwn(fields, 'participantLimits');
+  if (hasLimits && !hasPin) return fail();
   const p = object(value, ['schemaVersion','protocolId','protocolRevision','protocolSha256','order','betweenTrials','trials','approvedAt',
-    ...(hasPin ? ['participantModelPin'] : [])]);
+    ...(hasPin ? ['participantModelPin'] : []), ...(hasLimits ? ['participantLimits'] : [])]);
   const pin = hasPin ? validateParticipantModelPin(p.participantModelPin) : undefined;
+  const limits = hasLimits ? validateParticipantLimits(p.participantLimits) : undefined;
   const strategies = order(p.order);
   if (p.schemaVersion !== 'reception_plan_v2' || !uuid.test(p.protocolId) || !int(p.protocolRevision) || p.protocolRevision < 1 ||
     typeof p.protocolSha256 !== 'string' || !owner.test(p.protocolSha256) || !iso(p.approvedAt) || !between(p.betweenTrials) ||
@@ -100,7 +113,7 @@ function validatePlanV2(value: unknown): ReceptionPlanV2 {
   });
   return { schemaVersion: 'reception_plan_v2', protocolId: p.protocolId, protocolRevision: p.protocolRevision,
     protocolSha256: p.protocolSha256, order: strategies, betweenTrials: p.betweenTrials, approvedAt: p.approvedAt, trials,
-    ...(pin ? { participantModelPin: pin } : {}) };
+    ...(pin ? { participantModelPin: pin } : {}), ...(limits ? { participantLimits: limits } : {}) };
 }
 /** Each saved plan version is validated strictly by its own schema; v1 keeps its exact shape. */
 export function validateReceptionPlan(value: unknown): ReceptionPlan {
@@ -164,7 +177,10 @@ function displayed(value: unknown): DisplayedProtocol {
  * v1 (pure, legacy) freezes a v1 plan exactly as before. v2 requires the displayed
  * version and compares it with the same protocol snapshot the plan is copied from.
  */
-export async function approveReception(value: unknown, options: { expectedRevision: number; order: number; protocol: unknown; expected?: unknown; approvedAt: string; randomSeed: () => number; participantModelPin?: ParticipantModelPin }): Promise<Reception> {
+export async function approveReception(value: unknown, options: {
+  expectedRevision: number; order: number; protocol: unknown; expected?: unknown; approvedAt: string; randomSeed: () => number;
+  participantModelPin?: ParticipantModelPin; participantLimits?: Readonly<BudgetLimits>;
+}): Promise<Reception> {
   const r = validateReception(value);
   if (options.protocol && typeof options.protocol === 'object' && (options.protocol as { schemaVersion?: unknown }).schemaVersion === 'reception_protocol_v2') {
     const p = validateReceptionProtocolV2(options.protocol), canonical = JSON.stringify(p), sha256 = receptionProtocolSha256(canonical);
@@ -176,10 +192,11 @@ export async function approveReception(value: unknown, options: { expectedRevisi
     const plan = validateReceptionPlan({ schemaVersion:'reception_plan_v2', protocolId:p.protocolId, protocolRevision:p.revision,
       protocolSha256:sha256, order:selected, betweenTrials:p.betweenTrials, approvedAt:options.approvedAt,
       ...(options.participantModelPin !== undefined ? { participantModelPin: options.participantModelPin } : {}),
+      ...(options.participantLimits !== undefined ? { participantLimits: options.participantLimits } : {}),
       trials:selected.map((strategy, index) => ({ index, strategy, seed:seeds[index] ?? seeds[0], referenceMemory:p.referenceMemory, rotationMode:p.rotationMode })) });
     return validateReception({ ...r, status:'approved', plan, revision:r.revision+1 });
   }
-  if (options.participantModelPin !== undefined) return fail('protocol_unconfigured');
+  if (options.participantModelPin !== undefined || options.participantLimits !== undefined) return fail('protocol_unconfigured');
   const p = validateReceptionProtocol(options.protocol);
   if (r.status !== 'pending' || r.revision !== options.expectedRevision) return fail('reception_conflict');
   if (!int(options.order) || !p.allowedOrders[options.order]) return fail('invalid_order');

@@ -19,12 +19,12 @@ import { lockResult, participantReview, QUESTIONNAIRE_FORM, recordListEntry, sor
 
 import { createBaseAssignmentSession, BaseSessionError } from "../../../dialogue-model/runtime/v2/base-assignment-session.ts";
 import { validateBaseStart, validateBaseAssignmentConfig, BaseAssignmentError } from "../../../dialogue-model/runtime/v2/base-assignment.ts";
-import { readOwner, validateBoundBaseRecord } from "../../../dialogue-model/runtime/v2/base-assignment-data.ts";
+import { data, readOwner, validateBoundBaseRecord } from "../../../dialogue-model/runtime/v2/base-assignment-data.ts";
 import type { BaseOwnerState, BaseRecord, BaseSession, MakeBaseTask, OwnerRead } from "../../../dialogue-model/runtime/v2/base-assignment.ts";
 import { participantContactHTML } from "../../../dialogue-model/runtime/v2/participant-contact.ts";
 import { PARTICIPANT_STOP_HTML } from "../../../dialogue-model/runtime/v2/participant-stop-page.ts";
 import { ReceptionError, validateReception, createReception, approveReception, cancelReception,
-  participantReception, receptionSummary, effectiveBetweenTrials } from '../../../dialogue-model/runtime/v2/reception.ts';
+  participantReception, receptionSummary, effectiveBetweenTrials, validateParticipantLimits } from '../../../dialogue-model/runtime/v2/reception.ts';
 import { isSubmittedQuestionnaire } from '../../../dialogue-model/runtime/v2/questionnaire-gate.ts';
 import { receptionOpen, validateReceptionSettings } from './admin/reception-settings.ts';
 import type { ProtocolEntry, ReceptionSettings } from './admin/reception-settings.ts';
@@ -35,8 +35,8 @@ import { BROWSER_SESSIONS_KEY, EMPTY_TAB_SESSION_MAX_AGE_MS, MAX_EMPTY_TAB_SESSI
   validateCreateTabSession, validateEventCount } from './tab-sessions.ts';
 import type { BrowserSession, BrowserSessionSummary, ReceptionMode } from './tab-sessions.ts';
 import { createTrialV2, modelView } from "../../../dialogue-model/runtime/stimuli/scatter-v2.mjs";
-import { resolveWorkerParticipantModelPin, type ParticipantModelPin } from "../../../dialogue-model/runtime/v2/participant-model-pin.ts";
-import { createWorkerParticipantRuntime, workerParticipantSettings, type ParticipantService } from "./participant-runtime.ts";
+import { resolveWorkerParticipantModelPin } from "../../../dialogue-model/runtime/v2/participant-model-pin.ts";
+import { createWorkerParticipantRuntime, workerParticipantPolicy, type ParticipantService } from "./participant-runtime.ts";
 export { AdminIndex };
 
 type Strategy = "repair-first" | "bypass-enabled";
@@ -218,10 +218,12 @@ export class TangramSession extends DurableObject<Env> {
       if (!receptionOpen(settings.mode)) throw new ReceptionError('reception_closed');
       if (!settings.protocol) throw new ReceptionError('protocol_unconfigured');
       const protocol = settings.protocol.protocol, expected = input?.protocol;
-      let participantModelPin: ParticipantModelPin | undefined;
+      let participant: Pick<Parameters<typeof approveReception>[1], 'participantModelPin' | 'participantLimits'> = {};
       if (this.env.PARTICIPANT_TERRA_ENABLED === 'on') {
         try {
-          ({ pin: participantModelPin } = await workerParticipantSettings(this.env.PARTICIPANT_AI_PROXY, this.env.PARTICIPANT_TERRA_LIMITS_JSON));
+          const participantLimits = validateParticipantLimits(JSON.parse(this.env.PARTICIPANT_TERRA_LIMITS_JSON ?? 'null'));
+          const { pin: participantModelPin } = await workerParticipantPolicy(this.env.PARTICIPANT_AI_PROXY);
+          participant = { participantModelPin, participantLimits };
         } catch {
           throw new ReceptionError('reception_unavailable');
         }
@@ -229,7 +231,7 @@ export class TangramSession extends DurableObject<Env> {
       const r = await this.serialized(() => this.ctx.storage.transaction(async tx => {
         const raw = await tx.get('reception:v1'); if (!raw) throw new ReceptionError('reception_unavailable');
         const next = await approveReception(raw, { expectedRevision:input.expectedRevision, order:input.order, protocol, expected, approvedAt:new Date().toISOString(),
-          randomSeed:() => crypto.getRandomValues(new Uint32Array(1))[0], participantModelPin });
+          randomSeed:() => crypto.getRandomValues(new Uint32Array(1))[0], ...participant });
         await tx.put({ 'reception:v1':next }); return next;
       }));
       await this.indexReception(r); return r;
@@ -662,12 +664,12 @@ export class TangramSession extends DurableObject<Env> {
 
   private async createTrial(binding: Parameters<MakeBaseTask>[0]): Promise<NamingTask> {
     const {seed,strategy,referenceMemory,restore} = binding;
-    const settings = binding.participantModelPin === undefined ? null
-      : await workerParticipantSettings(this.env.PARTICIPANT_AI_PROXY, this.env.PARTICIPANT_TERRA_LIMITS_JSON);
+    const policy = binding.participantModelPin === undefined ? null
+      : await workerParticipantPolicy(this.env.PARTICIPANT_AI_PROXY);
     let pin;
     try {
       pin = resolveWorkerParticipantModelPin({
-        approvedPin: binding.participantModelPin, configuredPin: settings?.pin, restoredOptions: restore?.options,
+        approvedPin: binding.participantModelPin, configuredPin: policy?.pin, restoredOptions: restore?.options,
       });
     } catch {
       throw new NamingTaskError('invalid_options');
@@ -678,13 +680,16 @@ export class TangramSession extends DurableObject<Env> {
       await this.scheduleExpiry();
       this.ctx.waitUntil(this.registerSummary(record));
     };
-    if (pin && settings) {
+    if (pin && policy) {
+      // Pin-only plans predate reception-level limits. Their existing trials have a ledger snapshot.
+      const limits = binding.participantLimits ?? validateParticipantLimits(restore
+        ? data(restore.jevLedger).limits : JSON.parse(this.env.PARTICIPANT_TERRA_LIMITS_JSON ?? 'null'));
       const rotationMode = restore?.options.rotationMode ?? binding.rotationMode ?? 'relative_pm90';
       if (rotationMode !== 'relative_pm90' && rotationMode !== 'relative_0') throw new NamingTaskError('invalid_options');
       const trial = createTrialV2({ seed, rotationMode });
       const model = modelView(trial);
       const runtime = createWorkerParticipantRuntime({
-        ...settings, pin, own: { ownImage: { mimeType: model.mimeType, base64: model.png.toString('base64') }, ownAnchors: model.anchors },
+        proxy: policy.proxy, pin, limits, own: { ownImage: { mimeType: model.mimeType, base64: model.png.toString('base64') }, ownAnchors: model.anchors },
         cache: {
           read: key => this.ctx.storage.get(key),
           putIfAbsent: (key, entry) => this.ctx.storage.transaction(async tx => {

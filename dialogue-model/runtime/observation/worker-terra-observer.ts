@@ -1,3 +1,4 @@
+import { responseText } from '../client.mjs';
 import {
   createLunaObserver, ObservationError, OBSERVATION_INITIAL_INSTRUCTIONS,
   OBSERVATION_MEMO_VERSION, snapshotObservationInput, validateObservationMemo,
@@ -53,8 +54,8 @@ function providerText(raw: unknown, modelId: string): string {
   try { requireExactParticipantModel(modelId, data?.model); }
   catch { throw new ObservationError('invalid_response'); }
   const first = Array.isArray(data?.choices) ? object(data.choices[0]) : null;
-  const text = object(first?.message)?.content;
-  if (typeof text !== 'string') throw new ObservationError('invalid_response');
+  const text = responseText(object(first?.message)?.content);
+  if (!text.trim()) throw new ObservationError('invalid_response');
   return text;
 }
 

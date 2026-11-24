@@ -114,9 +114,11 @@ export function createBaseAssignmentSession(options: BaseSessionOptions): BaseSe
     try {
       let task: BaseTask;
       const pin = assignmentParticipantModelPin(a);
+      const limits = a.source.kind === 'reception_plan_v2' ? a.source.plan.participantLimits : undefined;
       try { task = await options.makeTask({ strategy: a.strategy, seed: a.seed, referenceMemory: a.referenceMemory,
         runDir: null, restore: restore ? copy(restore) : null, now: options.now, onPersist,
         ...(pin ? { participantModelPin: pin } : {}),
+        ...(limits ? { participantLimits: limits } : {}),
         ...(restore ? {} : { rotationMode: assignmentRotationMode(a) }) }); }
       catch (error) { if (error === token.internal && error instanceof BaseSessionError) throw error; return fail(); }
       if (!task || ['getState', 'persistNow', 'whenIdle', 'message', 'retry', 'submitHuman', 'submitAI'].some(k => typeof (task as unknown as Record<string, unknown>)[k] !== 'function')) return fail();

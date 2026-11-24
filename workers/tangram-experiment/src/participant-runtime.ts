@@ -6,7 +6,6 @@ import { createJevLocalTestClassifier } from '../../../dialogue-model/runtime/lo
 import { createWorkerTerraObserver, type WorkerTerraCache } from '../../../dialogue-model/runtime/observation/worker-terra-observer.ts';
 import type { ObservationInput } from '../../../dialogue-model/runtime/observation/contract.ts';
 import { ENGINEERING_LIMITS, RunBudget, type BudgetLimits } from '../../../dialogue-model/runtime/diagnostics/parity-live/audit.ts';
-import { DEFAULT_COST_CAP_USD } from '../../../dialogue-model/runtime/diagnostics/jev-shadow-eval/local-openrouter.ts';
 import { participantLedgerFetch, type JevResearchOptions } from '../../../dialogue-model/runtime/web/participant-jev-wiring.ts';
 import { requireExactParticipantModel, validateParticipantModelPin, type ParticipantModelPin } from '../../../dialogue-model/runtime/v2/participant-model-pin.ts';
 import { researchTrialProfileV3, RESEARCH_TRIAL_PROFILE_V1 } from '../../../dialogue-model/runtime/v2/research-profile.ts';
@@ -20,7 +19,6 @@ export interface ParticipantService {
   participantChoices: Dispatch;
 }
 
-const limitKeys = ['lunaCalls', 'lunaTokens', 'lunaPosts', 'jevPosts', 'jevUsd'] as const;
 const profile = researchTrialProfileV3({ timeoutMs: null, maxCompletionTokens: null }, {
   ...RESEARCH_TRIAL_PROFILE_V1.timeouts,
   lunaAttemptMs: RESEARCH_MAX_LUNA_ATTEMPT_MS,
@@ -28,18 +26,13 @@ const profile = researchTrialProfileV3({ timeoutMs: null, maxCompletionTokens: n
 });
 const researchLimits = { maxDeadlineMs: RESEARCH_MAX_DEADLINE_MS };
 
-export async function workerParticipantSettings(proxy: ParticipantService | undefined, limitsJson?: string) {
+export async function workerParticipantPolicy(proxy: ParticipantService | undefined) {
   try {
     if (typeof proxy?.participantPolicy !== 'function' || typeof proxy.participantChat !== 'function' ||
         typeof proxy.participantChoices !== 'function') throw new Error();
-    const limits = JSON.parse(limitsJson ?? 'null');
-    if (!limits || Object.getPrototypeOf(limits) !== Object.prototype ||
-        Object.keys(limits).length !== limitKeys.length || !limitKeys.every(key => Object.hasOwn(limits, key)) ||
-        limits.jevUsd > DEFAULT_COST_CAP_USD) throw new Error();
-    const ledger = new RunBudget(limits);
     const pin = validateParticipantModelPin(structuredClone(await proxy.participantPolicy()));
     if (!MODEL_CONTRACT_V2.acceptedReturned.includes(pin.jevModelId)) throw new Error();
-    return { pin, limits: ledger.limits, proxy };
+    return { pin, proxy };
   } catch {
     throw new NamingTaskError('ai_unavailable');
   }
@@ -71,7 +64,7 @@ export function createWorkerParticipantRuntime({ pin, own, proxy, cache, limits 
   own: ObservationInput;
   proxy: ParticipantService;
   cache: WorkerTerraCache;
-  limits: BudgetLimits;
+  limits: Readonly<BudgetLimits>;
 }) {
   const ledger = new RunBudget(limits);
   const chat: Dispatch = (payload, expected) => proxy.participantChat(payload, expected);
