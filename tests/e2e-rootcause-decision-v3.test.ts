@@ -33,6 +33,7 @@ function fixture(strategy: 'bypass-enabled' | 'repair-first' = 'bypass-enabled',
   { aiPublic?: boolean; observations?: ReturnType<typeof memo>; historicalNameScope?: boolean; holistic?: boolean } = {}) {
   const intervention = interventionForStrategy(strategy);
   const inputs: JevDecisionInput[] = [];
+  const extractionSystem: string[] = [];
   const wire: JevDecisionPayload[] = [];
   const events: Parameters<ReturnType<typeof createJevTurnRuntime>['runAiTurn']>[0]['events'] = [];
   let plan: Plan;
@@ -96,6 +97,7 @@ function fixture(strategy: 'bypass-enabled' | 'repair-first' = 'bypass-enabled',
     } },
     client: {
       async complete(_messages, { phase }) {
+        if (phase === 'local_extraction') extractionSystem.push(String(_messages[0]?.content));
         if (phase === 'ai_extraction') return { text: JSON.stringify(plan.aiSegments ?? []) };
         if (phase === 'local_extraction') return { text: JSON.stringify((plan.segments ?? []).map(({ act, respondsTo, ...segment }, index) => ({
           ...segment, segmentId: `segment-${index}`, linkedIssueId: null,
@@ -122,7 +124,7 @@ function fixture(strategy: 'bypass-enabled' | 'repair-first' = 'bypass-enabled',
     return { input: inputs.at(-1)!, requests: wire.slice(start), text: result.text, state, events: events.slice(0, -1),
       trace: runtime.getAttempts().at(-1)!, saved: state.judgments.at(-1)!.jevTurn };
   }
-  return { exchange, state: () => state, attempt: () => runtime.getAttempts().at(-1), intervention };
+  return { exchange, state: () => state, attempt: () => runtime.getAttempts().at(-1), intervention, extractionSystem };
 }
 
 function naming(quote: string, name: string, targets: string[] = [], act: LocalAct = 'name_propose'): Segment {
@@ -1061,4 +1063,20 @@ test('holistic_v1 (05d-2): only an agreed name is excluded from the quoted-strin
   assert.equal(g.state().ledger[ids[0]].status, 'agreed');
   const mention2 = await g.exchange('その形の特徴は？', { action: 'accept', target: 0, drafts: [`「${UNRELATED_NAME}」の細い部分のことですね。`] });
   assert.equal(mention2.trace.draftActs, undefined);
+});
+
+import { MEMO_LOCAL_EXTRACTION_INSTRUCTIONS, MEMO_LOCAL_EXTRACTION_INSTRUCTIONS_HOLISTIC } from '../dialogue-model/runtime/local-grounding/extract.ts';
+test('holistic_v1 (extraction): a casual naming proposal or approval question is an aspect-name matter in new trials only; earlier requests keep their bytes', async () => {
+  const casual = 'これ、かかしとかどう？';
+  const seg = (): Segment => ({ quote: casual, name: 'かかし', targets: [ids[3]], act: 'name_propose', aspect: 'name', proposition: casual });
+  const f = fixture('bypass-enabled', { aiPublic: true, holistic: true });
+  await share(f, 3);
+  const r = await f.exchange(casual, { action: 'accept', target: 3, draftActs: ['none'], segments: [seg()], drafts: ['どの図形の話か確かめたいです。'] });
+  assert.equal(r.input.priorClaims.find(c => c.name === 'かかし')?.act, 'name_propose');
+  assert.equal(f.extractionSystem.at(-1), MEMO_LOCAL_EXTRACTION_INSTRUCTIONS_HOLISTIC);
+  assert.match(MEMO_LOCAL_EXTRACTION_INSTRUCTIONS_HOLISTIC, /aspectをnameにします/u);
+  assert.ok(MEMO_LOCAL_EXTRACTION_INSTRUCTIONS_HOLISTIC.startsWith(MEMO_LOCAL_EXTRACTION_INSTRUCTIONS));
+  const old = fixture('bypass-enabled', { aiPublic: true });
+  await share(old, 3);
+  assert.equal(old.extractionSystem.at(-1), MEMO_LOCAL_EXTRACTION_INSTRUCTIONS);
 });

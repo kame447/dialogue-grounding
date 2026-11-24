@@ -11,7 +11,7 @@ import { normalizeName } from "../judgment/name-evidence.mjs";
 import { stageMemory } from "../judgment/memory.mjs";
 import { createReferenceGraph, applyReferenceUpdate, previewReferenceUpdate, snapshotReferenceGraph, REFERENCE_LIMITS } from "../memory/reference-graph.mjs";
 import { priorClaimViews, summarizeLocalIssues } from "../local-grounding/derive.ts";
-import { createMemoLocalExtractor, LOCAL_EXTRACTION_INSTRUCTIONS, MEMO_LOCAL_EXTRACTION_INSTRUCTIONS } from "../local-grounding/extract.ts";
+import { createMemoLocalExtractor, LOCAL_EXTRACTION_INSTRUCTIONS, MEMO_LOCAL_EXTRACTION_INSTRUCTIONS, MEMO_LOCAL_EXTRACTION_INSTRUCTIONS_HOLISTIC } from "../local-grounding/extract.ts";
 import { LOCAL_CLASSIFICATION_INSTRUCTIONS } from "../local-grounding/classify.ts";
 import type { LocalGroundingOptions, LocalOwnImage, LocalOwnAnchor, PublicTurn, LocalClaimView } from "../local-grounding/contract.ts";
 import type { ObservationMemo, ObservationObserver, ReobservationResult } from "../observation/contract.ts";
@@ -622,7 +622,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   let attemptsStarted = 0;
   let initialMemo: Promise<ObservationMemo> | null = null, initialRecorded = false;
   const privateInstructions = [generation.task, generation.instructions, generation.concise ?? "", ACT_INSTRUCTIONS, DETAIL_INSTRUCTIONS, REVISIT_MULTIPLE_INSTRUCTIONS, LOCAL_EXTRACTION_INSTRUCTIONS,
-    MEMO_LOCAL_EXTRACTION_INSTRUCTIONS, LOCAL_CLASSIFICATION_INSTRUCTIONS, OBSERVATION_INITIAL_INSTRUCTIONS,
+    MEMO_LOCAL_EXTRACTION_INSTRUCTIONS, ...(holistic ? [MEMO_LOCAL_EXTRACTION_INSTRUCTIONS_HOLISTIC] : []), LOCAL_CLASSIFICATION_INSTRUCTIONS, OBSERVATION_INITIAL_INSTRUCTIONS,
     OBSERVATION_TARGETED_INSTRUCTIONS, ...(aiEnabled ? aiPromptBodies : [])].map(content => ({ role: "system", content }));
   function project<T>(value: T): T {
     let redacted = false;
@@ -695,7 +695,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       const local = { ...options.localGrounding, extractor: createMemoLocalExtractor({ complete(messages, options) {
         if (messages.some(message => typeof message.content !== "string")) throw new JevTurnError("invalid_state");
         return client.complete(messages as Message[], options);
-      } }, { getMemo: () => structuredClone(memo), ...(options.localGrounding.researchLimits === undefined ? {} : { researchLimits: options.localGrounding.researchLimits, timeoutMs: options.localGrounding.timeoutMs }) }) };
+      } }, { getMemo: () => structuredClone(memo), holistic, ...(options.localGrounding.researchLimits === undefined ? {} : { researchLimits: options.localGrounding.researchLimits, timeoutMs: options.localGrounding.timeoutMs }) }) };
       const priorAct = previousAi ? { ...previous.judgment, turn: previousAi.turn, publishedFallback: previous.generationGuard.fallback,
         ...(previousExecution!.target.kind === "multiple" ? { targetCandidates: [...previousExecution!.target.figureIds] } : {}) } : undefined;
       let initialUpdate = stageMemory(state.graph, latest.seq, null, publicTurns);

@@ -187,24 +187,28 @@ export const MEMO_LOCAL_EXTRACTION_INSTRUCTIONS = [
   "メモとissueSummaryはAI側の材料で公開上の証拠や正解ではありません。相手画像・正解表・gold label・未来発話を推測して補わず、初期見立てと異なる相手の見立てを直ちに対象や名称の不一致と決めないでください。",
 ].join("\n");
 
-export function buildMemoExtractionMessages(input: LocalExtractionInput, memo: ObservationMemo): TextMessage[] {
+// holistic_v1 only: the extraction states the same criterion as the v3 classification, so act and aspect agree. A casual naming proposal or a question asking
+// whether an earlier name is fine is a name matter; a bare reading (「〜みたい」) stays a construal.
+export const MEMO_LOCAL_EXTRACTION_INSTRUCTIONS_HOLISTIC = MEMO_LOCAL_EXTRACTION_INSTRUCTIONS + "\n" +
+  "くだけた命名の提案（「〜とかどう？」「〜でいい？」など呼び名を提案する疑問形）と、先行する呼び名についての承認の質問（「さっきの〜でいい？」）は、aspectをnameにします。nameには今回の発話で提案された名称の字句を入れ、今回の発話に名称の字句がない承認の質問ではnullにします。見立てだけの部分はconstrualのままにします。";
+export function buildMemoExtractionMessages(input: LocalExtractionInput, memo: ObservationMemo, holistic = false): TextMessage[] {
   const { ownImage: _image, ...context } = extractionSnapshot(input);
   let observations: ObservationMemo;
   try { observations = validateObservationMemo(memo, { ownAnchors: context.ownAnchors }); }
   catch { return fail("invalid_input"); }
   const state = JSON.stringify({ ...context, observations });
   if (state.length > 192000) fail("invalid_input");
-  return [{ role: "system", content: MEMO_LOCAL_EXTRACTION_INSTRUCTIONS }, ...observationContextMessages(state)];
+  return [{ role: "system", content: holistic ? MEMO_LOCAL_EXTRACTION_INSTRUCTIONS_HOLISTIC : MEMO_LOCAL_EXTRACTION_INSTRUCTIONS }, ...observationContextMessages(state)];
 }
 
 /** Opt-in memo interpretation. No image content is sent; the legacy input stays compatible. */
-export function createMemoLocalExtractor(client: Client, { getMemo, timeoutMs, researchLimits }: {
-  getMemo: () => ObservationMemo; timeoutMs?: number; researchLimits?: ResearchLimits;
+export function createMemoLocalExtractor(client: Client, { getMemo, timeoutMs, researchLimits, holistic = false }: {
+  getMemo: () => ObservationMemo; timeoutMs?: number; researchLimits?: ResearchLimits; holistic?: boolean;
 }): DiagnosedLocalExtractor {
   if (typeof getMemo !== "function") fail("invalid_input");
   return createLocalExtractor(client, { timeoutMs, researchLimits }, input => {
     let memo: ObservationMemo;
     try { memo = getMemo(); } catch { return fail("invalid_input"); }
-    return buildMemoExtractionMessages(input, memo);
+    return buildMemoExtractionMessages(input, memo, holistic);
   });
 }
