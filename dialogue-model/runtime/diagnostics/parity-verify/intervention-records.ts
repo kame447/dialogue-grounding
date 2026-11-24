@@ -630,7 +630,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
      for(const [k,q] of Object.entries(p.questions) as any){
       if(/^segment_\d+_act$/.test(k)&&!Object.hasOwn(st,'aiSeq')){
        // The saved version decides the whole set: holistic_v3 its own, holistic_v1/v2 the V3 set, a version-less two_stage_v3 either the set of the legacy/style commits
-       // (58a9511, 07116ae, and the loop commit before the V3 set existed: the layout-independent one) or the V3 set, any other layout the layout-independent set.
+       // (58a9511, 07116ae: the layout-independent one; the loop lineage from feec037 on: the V3 set; the lineage is matched where the request text is identified) or the V3 set, any other layout the layout-independent set.
        // Whatever the kind, every segment of every request of the turn carries the same whole set.
        const kind=equal(q?.criteria,LOCAL_CRITERIA_V1_S4)?'V1':equal(q?.criteria,LOCAL_CRITERIA_V3_S4)?'V3':equal(q?.criteria,LOCAL_CRITERIA_H3_S4)?'H3':null;
        const allowed=CTX.v3?(H3_ONLY()?['H3']:CTX.policy===null?['V1','V3']:['V3']):['V1'];
@@ -918,6 +918,9 @@ function originalQuestions(body:any,input:any,layout='two_stage_v1'):boolean|nul
     if(was!==null&&was!==version)continue;
     // The version is the trial's recorded policy (holistic_v1) or its absence; the request text only has to match that version's text.
     if(H()!==(version==='holistic'))continue;
+    // A version-less two_stage_v3 record sent the layout-independent set under the legacy and style texts (58a9511, 07116ae) and the V3 set under the loop text (feec037 on):
+    // once the classification set of the turn is known, the request text has to be of the lineage that sent it. A turn whose lineage cannot be identified keeps both sets allowed.
+    if(CTX.v3&&CTX.policy===null&&CTX.critKind!=null&&CTX.critKind!==(version==='legacy'||version==='style'?'V1':'V3'))continue;
     CTX.style=version;
     if(equal({action:make(actions)},body.questions)){
      // The saved agree candidates must follow the rule of this very criteria version: the current text only the grounded, undenied figures; older texts the earlier one.

@@ -1081,35 +1081,43 @@ test('05u: S4 derives the typed target inheritance: an explicit single target de
 });
 
 import { execFileSync } from 'node:child_process';
-/** The layout-independent criteria of an old commit, read from git byte for byte. */
-function criteriaAt(commit: string): Record<string, string> {
-  const source = execFileSync('git', ['show', `${commit}:dialogue-model/runtime/local-grounding/classify.ts`], { encoding: 'utf8', cwd: new URL('..', import.meta.url) });
-  const body = /export const LOCAL_FUNCTION_CRITERIA: [^=]*= Object\.freeze\((\{[\s\S]*?\n\})\);/u.exec(source);
-  assert.ok(body, commit);
-  return new Function('return ' + body[1])();
-}
-test('05v-2: S4 accepts the layout-independent criteria of the legacy (58a9511) and style (07116ae) commits on a version-less two_stage_v3 record, and refuses them on any versioned one', async () => {
+import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+/** The legacy/style (58a9511, 07116ae) criteria, pinned with source and fingerprint: a shallow checkout has no such commits. */
+const LEGACY_FIXTURE = JSON.parse(readFileSync(new URL('./fixtures/s4/local-function-criteria-legacy.json', import.meta.url), 'utf8'));
+const sha256 = (value: unknown) => createHash('sha256').update(JSON.stringify(value), 'utf8').digest('hex');
+test('05v-2a: the pinned legacy criteria keep their fingerprint, equal the layout-independent set, and equal the commits\' bytes where the history exists', () => {
+  assert.equal(sha256(LEGACY_FIXTURE.criteria), '6928dac5034e64294c2308c18671e2820c67ea9f7e2af721f66b56d9792769fc');
+  assert.equal(LEGACY_FIXTURE.fingerprint.sha256, sha256(LEGACY_FIXTURE.criteria));
+  assert.equal(JSON.stringify(LEGACY_FIXTURE.criteria), JSON.stringify(LOCAL_FUNCTION_CRITERIA));
+  for (const commit of LEGACY_FIXTURE.source.commits) {
+    let source: string;
+    try { source = execFileSync('git', ['show', `${commit}:${LEGACY_FIXTURE.source.file}`], { encoding: 'utf8', cwd: new URL('..', import.meta.url), stdio: ['ignore', 'pipe', 'ignore'] }); }
+    catch { continue; /* no history here (a shallow checkout) */ }
+    const body = /export const LOCAL_FUNCTION_CRITERIA: [^=]*= Object\.freeze\((\{[\s\S]*?\n\})\);/u.exec(source);
+    assert.ok(body, commit);
+    assert.equal(JSON.stringify(new Function('return ' + body[1])()), JSON.stringify(LEGACY_FIXTURE.criteria), commit);
+  }
+});
+test('05v-2: S4 matches the criteria set to the lineage it identifies on a version-less two_stage_v3 record: the loop text sent the V3 set, the old set is refused; any versioned record refuses the old set', async () => {
   const named = (policy?: 'holistic_v1' | 'holistic_v2' | 'holistic_v3') => buildRecords({ dialoguePolicy: policy ?? null, turns: [{ human: 'これ、かかしとかどう？',
     plan: policy === 'holistic_v3' ? { action: 'confirm', target: 'figure_3', act: 'name_propose', extraction: unboundSeg, speech: 'どの形のことですか？' }
       : { action: 'accept', target: 'none', act: 'name_propose', extraction: unboundSeg, speech: 'そう見えるんですね。' } }] });
-  for (const commit of ['58a9511', '07116ae']) {
-    const old = criteriaAt(commit);
-    assert.equal(JSON.stringify(old), JSON.stringify(LOCAL_FUNCTION_CRITERIA), commit + ': the same bytes as the layout-independent set');
-    for (const label of ['repair-first', 'bypass-enabled']) {
-      const record = await named();
-      assert.ok(finalChecks(record).length >= 4 && finalChecks(record).every((c: any) => c.status === 'pass'), 'regular');
-      const sent = structuredClone(record);
-      assert.ok(changeClassification(sent, label, old) > 0);
-      assert.ok(finalChecks(sent).length >= 4 && finalChecks(sent).every((c: any) => c.status === 'pass'), `${commit} ${label} version-less: ` + JSON.stringify(finalChecks(sent).filter((c: any) => c.status !== 'pass').map((c: any) => [c.id, c.reason])));
-      for (const policy of ['holistic_v1', 'holistic_v2', 'holistic_v3'] as const) {
-        const versioned = await named(policy);
-        assert.ok(changeClassification(versioned, label, old) > 0);
-        assert.ok(!finalChecks(versioned).every((c: any) => c.status === 'pass'), `${commit} ${label} ${policy}: the old set is not that version's`);
-      }
-      const mixed = await named();
-      assert.ok(changeClassification(mixed, label, { ...old, ask: LOCAL_FUNCTION_CRITERIA_HOLISTIC_V3.ask }) > 0);
-      assert.ok(!finalChecks(mixed).every((c: any) => c.status === 'pass'), `${commit} ${label}: a mixed set`);
+  const old = LEGACY_FIXTURE.criteria as Record<string, string>;
+  for (const label of ['repair-first', 'bypass-enabled']) {
+    const record = await named();
+    assert.ok(finalChecks(record).length >= 4 && finalChecks(record).every((c: any) => c.status === 'pass'), 'regular (the V3 set)');
+    const swapped = await named();
+    assert.ok(changeClassification(swapped, label, old) > 0);
+    assert.ok(!finalChecks(swapped).every((c: any) => c.status === 'pass'), `${label}: the loop text with the old set`);
+    for (const policy of ['holistic_v1', 'holistic_v2', 'holistic_v3'] as const) {
+      const versioned = await named(policy);
+      assert.ok(changeClassification(versioned, label, old) > 0);
+      assert.ok(!finalChecks(versioned).every((c: any) => c.status === 'pass'), `${label} ${policy}: the old set is not that version's`);
     }
+    const mixed = await named();
+    assert.ok(changeClassification(mixed, label, { ...LOCAL_FUNCTION_CRITERIA_V3, ask: LOCAL_FUNCTION_CRITERIA_HOLISTIC_V3.ask }) > 0);
+    assert.ok(!finalChecks(mixed).every((c: any) => c.status === 'pass'), `${label}: a mixed set`);
   }
 });
 
