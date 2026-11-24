@@ -4,7 +4,7 @@
 // GET /admin/record/<recordId>.json downloads that one full record as JSON.
 import { checkAdmin, presentedToken } from "./auth.ts";
 import { RECEPTIONS_LIVE_JS } from './receptions-live.ts';
-import { ADMIN_CSS, applyFilter, parseFilter, renderDetail, renderList, renderMessage, renderReceptions, renderEntry, renderSettings } from "./render.ts";
+import { ADMIN_CSS, applyFilter, parseFilter, renderDetail, renderList, renderMessage, renderReceptions, renderEntry, renderSettings, renderExperimentPreview } from "./render.ts";
 import { OBJECT_ID, RECORD_ID } from "./summary.ts";
 import type { AdminSummary } from "./summary.ts";
 import type { LatencySummary } from "./latency.ts";
@@ -27,6 +27,8 @@ export type AdminDeps = {
   summarizeLatency(record: unknown): LatencySummary;
   /** Optional S5 operator action; participant cookies do not authorize it. */
   prepareNext?(summary: AdminSummary): Promise<{ kind: 'created' | 'existing'; recordId: string; participantPath: '/' }>;
+  /** True only when the request's participant browser already owns this exact active trial. */
+  canResumeParticipant?(request: Request, recordId: string): Promise<boolean>;
   receptions?: ReceptionAdminPort;
   /** Researcher reception settings (protocol and reception mode). */
   receptionSettings?: ReceptionSettingsPort;
@@ -324,6 +326,19 @@ export async function handleAdmin(request: Request, deps: AdminDeps): Promise<Re
     const page = await deps.listPage(url.searchParams.get("after"));
     return respond(200, renderList(applyFilter(page.items, filter), filter, page.next, await deps.audit(), deps.retentionDays,
       url.searchParams.get("deleted") === "1", Boolean(deps.receptions)));
+  }
+  const experiment = url.pathname.match(/^\/admin\/record\/([^/]+)\/experiment$/u);
+  if (experiment) {
+    const id = experiment[1];
+    if (!RECORD_ID.test(id)) return notFound();
+    const summary = await deps.getSummary(id);
+    if (!summary || summary.recordId !== id || !OBJECT_ID.test(summary.objectId)) return notFound();
+    const record = await deps.getRecord(summary);
+    if (!record || typeof record !== 'object' || (record as {recordId?: unknown}).recordId !== id) return notFound();
+    if (request.method === 'GET' && await deps.canResumeParticipant?.(request, id)) {
+      return plain(303, '', { Location: '/#resume=' + id });
+    }
+    return respond(200, renderExperimentPreview(record, summary));
   }
   const match = url.pathname.match(/^\/admin\/record\/([^/.]+)(\.json)?$/);
   if (!match || !RECORD_ID.test(match[1])) return notFound();

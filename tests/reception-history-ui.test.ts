@@ -51,7 +51,7 @@ const completedTrial = (id = 'r1') => ({ version: 2, sessionId: id, status: 'com
 const FORM = { version: 'v', notice: '', items: [{ id: 'q1', text: 'Q1', min: 1, max: 7, minLabel: 'a', maxLabel: 'b' }] };
 
 type Server = { mode?: string; sessions?: any[]; states?: Record<string, any>; reviews?: Record<string, any>; questionnaire?: any; saveStatus?: number; legacySessions404?: boolean; receptionStatus?: number; stateStatus?: Record<string, number>; local?: Map<string, string> };
-async function ui(resolved: any, server: Server = {}) {
+async function ui(resolved: any, server: Server = {}, hash = '') {
   const { root, e } = makeDOM();
   const calls: { path: string; method: string; body: any; session: string | null }[] = [], timers = new Map<number, { callback: Function; delay: number }>();
   const tabCalls: string[] = []; let timerId = 0, counter = 0;
@@ -67,7 +67,7 @@ async function ui(resolved: any, server: Server = {}) {
   const document = { visibilityState: 'visible', getElementById: (id: string) => e[id], createElement: (tag: string) => new Element(tag),
     createElementNS: (_: unknown, tag: string) => new Element(tag), addEventListener() {} };
   const reply = (status: number, value: any) => ({ ok: status < 400, status, json: async () => structuredClone(value) });
-  runInNewContext(script, { document, localStorage,
+  runInNewContext(script, { document, localStorage, location: { hash, pathname: '/', search: '' },
     TangramTabSession: resolved === null ? undefined : { resolve: async () => resolved, bind: (id: string) => tabCalls.push('bind:' + id), clear: () => tabCalls.push('clear'), current: () => null, dispose() {} },
     setTimeout: (callback: Function, delay: number) => { timers.set(++timerId, { callback, delay }); return timerId; }, clearTimeout: (id: number) => timers.delete(id),
     fetch: async (path: string, opts: any) => {
@@ -384,4 +384,34 @@ test('a delayed dialogue poll arriving after names submission never regresses a 
   assert.equal(e.chat.hidden, true, 'delayed dialogue poll must not re-open composer');
   assert.equal(e.utterance.disabled, true, 'composer remains disabled');
   assert.ok(root);
+});
+
+const LINK_RECORD = '11111111-1111-4111-8111-111111111111';
+const LINK_SESSION = '22222222-2222-4222-8222-222222222222';
+const linkedTrial = { ...completedTrial(LINK_RECORD), status: 'dialogue', submitted: false, aiSubmitted: false, result: null };
+const linkedSession = summary(LINK_SESSION, 'in_progress', { activeRecordId: LINK_RECORD });
+
+test('explicit active-record link opens exactly the selected session without a new reception', async () => {
+  const x = await ui(fresh, { sessions: [linkedSession, summary('unrelated', 'in_progress', { activeRecordId: 'other' })],
+    states: { [LINK_SESSION]: { trial: linkedTrial } } }, '#resume=' + LINK_RECORD);
+  assert.deepEqual(x.calls.filter(c => ['/api/sessions', '/api/state'].includes(c.path)).map(c => [c.method, c.path, c.session]),
+    [['GET', '/api/sessions', null], ['GET', '/api/state', LINK_SESSION]]);
+  assert.deepEqual(x.tabCalls, ['clear', 'bind:' + LINK_SESSION]);
+  assert.equal(x.e.trial.hidden, false);
+  assert.equal(x.calls.some(c => c.method === 'POST'), false);
+});
+
+test('foreign, finished, malformed or changed record links never open another trial or create a session', async () => {
+  for (const [sessions, states, hash] of [
+    [[], {}, '#resume=' + LINK_RECORD],
+    [[summary(LINK_SESSION, 'finished', { activeRecordId: LINK_RECORD })], {}, '#resume=' + LINK_RECORD],
+    [[linkedSession], { [LINK_SESSION]: { trial: completedTrial('changed') } }, '#resume=' + LINK_RECORD],
+    [[linkedSession], {}, '#resume=invalid'],
+  ] as const) {
+    const x = await ui(fresh, { sessions: [...sessions], states }, hash);
+    assert.equal(x.e.trial.hidden, true);
+    assert.match(x.e.notice.textContent, /この試行を開けませんでした/u);
+    assert.equal(x.tabCalls.some(c => c.startsWith('bind:')), false);
+    assert.equal(x.calls.some(c => c.method === 'POST'), false);
+  }
 });

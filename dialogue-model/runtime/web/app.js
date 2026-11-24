@@ -1421,8 +1421,36 @@ async function startupAdmission() {
   try { return await api("/api/reception", {}); }
   catch (error) { if (error.status === 404) return state; throw error; }
 }
+// An explicit record link never starts an unrelated trial, even on a clean browser.
+async function resumeLinkedRecord(recordId, TS) {
+  try { TS?.clear(); } catch { /* No binding to retain. */ }
+  clearDraft();
+  try {
+    if (!TS || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/u.test(recordId)) throw new Error('not_found');
+    const sessions = await loadSessions();
+    const matches = sessions.filter(session => session.resumable === true && session.activeRecordId === recordId);
+    if (matches.length !== 1) throw new Error('not_found');
+    const sessionId = matches[0].sessionId;
+    const state = await api('/api/state', undefined, undefined, sessionId);
+    if (state?.trial?.sessionId !== recordId) throw new Error('trial_changed');
+    bindSession(sessionId);
+    $("entry-stage").hidden = true;
+    $("notice").textContent = "";
+    render(state); setControls();
+    // Following ordinary reloads and transitions uses the tab binding, not a stale record link.
+    try { globalThis.history?.replaceState(globalThis.history.state, '', globalThis.location.pathname + globalThis.location.search); } catch { /* The binding still works. */ }
+  } catch {
+    $("notice").textContent = "この試行を開けませんでした。受付一覧から開き直してください。";
+  }
+}
 async function startup() {
   const TS = tabSession();
+  const linked = globalThis.location?.hash?.startsWith('#resume=') ? globalThis.location.hash.slice(8) : null;
+  if (linked !== null) {
+    try { await TS?.resolve(); } catch { /* Fail closed rather than creating a trial. */ }
+    await resumeLinkedRecord(linked, TS);
+    return;
+  }
   // Without tab-session.js the single cookie session is used as before.
   if (!TS) { cookieMode = true; operate(startupAdmission); return; }
   let resolved = null;

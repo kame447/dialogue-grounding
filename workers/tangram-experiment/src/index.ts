@@ -846,6 +846,17 @@ export default {
           },
         }) : undefined,
         receptionSettings: index ? createReceptionSettingsPort(index) : undefined,
+        canResumeParticipant: async (request, recordId) => {
+          // Admin credentials never grant participant ownership or a participant cookie.
+          const cookie = sessionId(request.headers.get('Cookie'));
+          if (!cookie) return false;
+          try {
+            const root = env.NAMING_SESSIONS.get(env.NAMING_SESSIONS.idFromName(cookie));
+            if (await root.baseOwnerStatus(true) !== 'registered') return false;
+            const history = await root.browserHistory();
+            return history.sessions.some(session => session.resumable && session.activeRecordId === recordId);
+          } catch { return false; }
+        },
         listPage: async (after) => (await index!.page(after)) as { items: AdminSummary[]; next: string | null },
         getSummary: async (recordId) => (await index!.get(recordId)) as AdminSummary | null,
         getRecord: async (summary) => (await owner(summary)?.adminRecord(summary.recordId)) ?? null,

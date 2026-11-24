@@ -111,6 +111,7 @@ test('list has pending first, escaped values/cursors, configured order choices a
   for (const expected of [PROTOCOL, '2026-10-27T00:00:00.000Z', 'expectedRevision', 'value="3"', 'name="confirm"', 'name="order"', 'value="0"', 'value="1"', 'bypass-enabled', 'repair-first', `/admin/record/${RECORD}`, '/admin/entry']) assert.ok(html.includes(expected), expected);
   assert.match(html, /after=cursor%3C%26/); assert.match(html, /&lt;script&gt;/); assert.doesNotMatch(html, /<script|\son\w+=/i);
   assert.match(html, /revision\s*7/);
+  assert.ok(html.includes(`/admin/record/${RECORD}/experiment" target="_blank" rel="noopener noreferrer">実験画面を開く`));
   const select = html.match(/<select\b[^>]*name="order"[^>]*>([\s\S]*?)<\/select>/)?.[1]; assert.ok(select);
   const labels = [...select.matchAll(/<option\b[^>]*value="(\d+)"[^>]*>([^<]*)<\/option>/g)].map(m => [m[1], m[2]]);
   assert.deepEqual(labels.map(([index]) => index), ['0', '1']);
