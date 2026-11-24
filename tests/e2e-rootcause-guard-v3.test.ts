@@ -2,7 +2,7 @@
 // Local mocks only; no model or network access.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { findAgreeNameMismatch, findDeferralClaims, findGuardViolations, rewriteReasons } from "../dialogue-model/runtime/v2/generation-guard.ts";
+import { findOrientationLeaks, findAgreeNameMismatch, findDeferralClaims, findGuardViolations, rewriteReasons } from "../dialogue-model/runtime/v2/generation-guard.ts";
 import { createDialogueV2 } from "../dialogue-model/runtime/v2/dialogue-v2.mjs";
 import { SAFE_JUDGMENT } from "../dialogue-model/runtime/judgment/schema.mjs";
 
@@ -119,4 +119,54 @@ test("agree wording must adopt the judged name", () => {
   assert.deepEqual(findAgreeNameMismatch("はい、呼びましょう。", "  "), []);
   assert.match(rewriteReasons(["name_mismatch"]), /別の名前/u);
   assert.equal(rewriteReasons(["naming_decision"]), "前の下書きは名称の決定・合意を表していました。決定・合意を表明せず、このactionの範囲で書き直してください。");
+});
+
+test("orientation-dependent wording is detected outside quotes", () => {
+  for (const text of ["この形は上部に突起があります。", "下端が平らな形ですか？", "右側にくぼみがありますか？", "右向きに尖っていますか？", "左上に四角い部分があります。",
+    "上の辺がまっすぐですか？", "横長の形ですか？", "縦長の部分がありますか？", "上の突起は小さいですか？", "右に伸びる部分がありますか？",
+    "斜め上に向かう辺がありますか？", "「灯台」の左側が尖っていますか？", "輪が上方向にありますか？", "左寄りに四角い部分がありますか？"]) {
+    assert.deepEqual(findOrientationLeaks(text), ["orientation_leak"], text);
+  }
+});
+
+test("idioms, quotes and rotation-invariant geometry are not orientation leaks", () => {
+  for (const text of ["その上、尖りが二つあります。", "以上です。", "以下の形ですか？", "上手に見分けられますね。", "下手でしたら教えてください。", "上下関係はありません。",
+    "左右対称な形ですか？", "確認の上でお答えします。", "相手側の画面では違うかもしれません。", "こちら側から見た形です。", "両側に尖りがあります。",
+    "片側だけ小さいですか？", "反対側にくぼみがありますか？", "外側が丸い形ですか？", "内側にくぼみがありますか？", "向きが違うかもしれません。", "回転すると同じ形でしょうか。",
+    "「上の辺がまっすぐ」とおっしゃった部分ですか？", "『右向き』という部分ですね。",
+    "長い辺の端に四角い張り出しがあり、その反対側にV字のくぼみがある形ですか？", "尖りが二つあって片方が小さい形ですか？", "以上に広がる形ではありません。"]) {
+    assert.deepEqual(findOrientationLeaks(text), [], text);
+  }
+  assert.deepEqual(findGuardViolations("この形は上部に突起があります。", "confirm"), [], "findGuardViolations itself is unchanged");
+});
+
+test("orientation retry reason does not echo the draft", () => {
+  const reason = rewriteReasons(["orientation_leak"]);
+  assert.match(reason, /画面の向きに依存する語/u); assert.match(reason, /回転しても変わらない特徴/u);
+  assert.doesNotMatch(reason, /灯台|上部に突起/u);
+  assert.equal(rewriteReasons(["naming_decision"]), "前の下書きは名称の決定・合意を表していました。決定・合意を表明せず、このactionの範囲で書き直してください。");
+});
+
+test("orientation wording with a stated viewpoint or quotation is allowed; an unqualified sentence is still a leak", () => {
+  for (const text of ["こちらの画面では上側に突起が見えますが、向きが違うと見え方が変わりますか？", "相手の画面では右側に見える部分でしょうか？",
+    "私から見ると、左端に小さな角があります。", "こちらでは下端が平らです。",
+    "「上の辺がまっすぐ」とおっしゃった部分ですか？"]) {
+    assert.deepEqual(findOrientationLeaks(text), [], text);
+  }
+  for (const text of ["上部の突起の右側が右向きの張り出しになっていますか？", "下端が平らな形ですか？", "横長の図形に見えます。",
+    "向きが違うかもしれません。右側に小さな角がありますか？", "こちらでは尖りが二つあります。下端が平らですか？"]) {
+    assert.deepEqual(findOrientationLeaks(text), ["orientation_leak"], text);
+  }
+});
+
+test("viewpoint clauses are exempt, bare rotation mentions and later unqualified clauses are not", () => {
+  for (const text of ["こちらから見ると、右側に四角い突起があります。", "私から見ると、左端に小さな角があります。",
+    "こちらの画面では上側に突起が見えますが、向きが違うと見え方が変わりますか？", "相手の画面では右側に見える部分でしょうか？",
+    "向きが違うので、尖りの数で確かめましょう。", "回転しても変わらないくぼみがありますか？"]) {
+    assert.deepEqual(findOrientationLeaks(text), [], text);
+  }
+  for (const text of ["相手の図形は回転していますが、右側に四角い突起があります。", "向きが違うかもしれませんが、上端に突起がありますか？",
+    "相手の画面では向きが違うと思いますが、右側に四角い突起があります。", "向きが違うかもしれません。右側に小さな角がありますか？"]) {
+    assert.deepEqual(findOrientationLeaks(text), ["orientation_leak"], text);
+  }
 });

@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { interventionForStrategy, isOpenIssueRerankRecord } from '../dialogue-model/runtime/decision/bypass-acceptance.ts';
-import { buildJevDecisionDetailPayload, createJevDecisionClient, JEV_DECISION_MODEL } from '../dialogue-model/runtime/decision/jev-decision.ts';
+import { buildJevDecisionDetailPayload, buildJevDecisionPayload, buildJevTargetPayload, createJevDecisionClient, JEV_DECISION_MODEL } from '../dialogue-model/runtime/decision/jev-decision.ts';
 import type { JevDecisionPayload } from '../dialogue-model/runtime/decision/jev-decision.ts';
 import type { JevAction, JevDecisionInput, RepairHistoryEntry } from '../dialogue-model/runtime/decision/contract.ts';
+import { s4Probe } from '../dialogue-model/runtime/diagnostics/parity-verify/intervention-records.ts';
 import type { LocalAct, LocalSegmentProposal } from '../dialogue-model/runtime/local-grounding/contract.ts';
 import { validateObservationMemo } from '../dialogue-model/runtime/observation/observe.ts';
 import { createJevTurnRuntime, validateJevPrivateStateV2 } from '../dialogue-model/runtime/v2/jev-turn.ts';
@@ -20,10 +21,13 @@ type Plan = {
   name?: string;
   drafts: string[];
   segments?: Segment[];
+  aiSegments?: LocalSegmentProposal[];
+  actionScores?: Partial<Record<JevAction, number>>;
   prospect?: 'uncertain' | 'no_open_issue';
 };
 
-function fixture(strategy: 'bypass-enabled' | 'repair-first' = 'bypass-enabled') {
+function fixture(strategy: 'bypass-enabled' | 'repair-first' = 'bypass-enabled',
+  { aiPublic = false, observations = memo() }: { aiPublic?: boolean; observations?: ReturnType<typeof memo> } = {}) {
   const intervention = interventionForStrategy(strategy);
   const inputs: JevDecisionInput[] = [];
   const wire: JevDecisionPayload[] = [];
@@ -45,7 +49,7 @@ function fixture(strategy: 'bypass-enabled' | 'repair-first' = 'bypass-enabled')
           : labels[0];
         assert.ok(choice && labels.includes(choice), `scripted answer is unavailable for ${key}`);
         const probabilities = Object.fromEntries(labels.map(label => [label,
-          label === choice ? 1 : key === 'action' && label === 'confirm' ? 0.8 : 0]));
+          label === choice ? 1 : key === 'action' ? plan.actionScores?.[label as JevAction] ?? (label === 'confirm' ? 0.8 : 0) : 0]));
         return [key, { type: 'choice', choice, probabilities }];
       }));
       return Response.json({ model: JEV_DECISION_MODEL, id: `gen-rootcause-${wire.length}`, usage: { cost: 0 }, answers });
@@ -55,12 +59,23 @@ function fixture(strategy: 'bypass-enabled' | 'repair-first' = 'bypass-enabled')
     ...V3, intervention, decisionTimeoutMs: 3000,
     ...(strategy === 'repair-first' ? { technicalTrial: { version: 'adaptive_repair_v3' as const } } : {}),
     ownAnchors: anchors, ownImage: { ...image, mimeType: 'image/png' }, maxReobservations: 0,
-    observer: { async observeAll() { return validateObservationMemo(memo()); }, async reobserve() { throw Error('no reobservation expected'); } },
+    observer: { async observeAll() { return validateObservationMemo(observations); }, async reobserve() { throw Error('no reobservation expected'); } },
     jevDecision: {
       async decide(input, options) { inputs.push(structuredClone(input)); return native.decide(input, options); },
       estimateReferent: native.estimateReferent, estimateRepairProspect: native.estimateRepairProspect, completeDetail: native.completeDetail,
     },
-    localGrounding: { classifier: {
+    localGrounding: { ...(aiPublic ? { aiPublicClaims: true, aiPublicTransport: {
+      readKey: async () => 'sk-or-SYNTHETIC-ai-public-rootcause-key',
+      fetchImpl: async (_url, init) => {
+        const { questions } = JSON.parse(String(init.body)) as JevDecisionPayload;
+        const answers = Object.fromEntries(Object.entries(questions).map(([key, q]) => {
+          const choice = key.endsWith('_act') ? 'assert' : key.endsWith('_antecedent') ? 'none' : 'expressed';
+          assert.ok(Object.hasOwn(q.criteria, choice));
+          return [key, { type: 'choice', choice, probabilities: Object.fromEntries(Object.keys(q.criteria).map(label => [label, Number(label === choice)])) }];
+        }));
+        return Response.json({ model: JEV_DECISION_MODEL, id: 'gen-rootcause-ai-public', usage: { cost: 0 }, answers });
+      },
+    } } : {}), classifier: {
       async classify({ segments, priorClaims }) {
         return segments.map(({ segmentId }, index) => {
           const act = plan.segments![index].act;
@@ -72,6 +87,7 @@ function fixture(strategy: 'bypass-enabled' | 'repair-first' = 'bypass-enabled')
     } },
     client: {
       async complete(_messages, { phase }) {
+        if (phase === 'ai_extraction') return { text: JSON.stringify(plan.aiSegments ?? []) };
         if (phase === 'local_extraction') return { text: JSON.stringify((plan.segments ?? []).map(({ act, ...segment }, index) => ({
           ...segment, segmentId: `segment-${index}`, linkedIssueId: null,
           respondsToTurn: act === 'deny' || act === 'name_accept' ? events.at(-2)!.seq : null,
@@ -93,7 +109,7 @@ function fixture(strategy: 'bypass-enabled' | 'repair-first' = 'bypass-enabled')
     const result = await runtime.runAiTurn({ events, privateState: state, lastEventId: id, requestSeq: seq });
     state = result.privateState;
     events.push({ id: `ai-${seq + 1}`, seq: seq + 1, text: result.text, speaker: 'ai' });
-    return { input: inputs.at(-1)!, requests: wire.slice(start), text: result.text, state,
+    return { input: inputs.at(-1)!, requests: wire.slice(start), text: result.text, state, events: events.slice(0, -1),
       trace: runtime.getAttempts().at(-1)!, saved: state.judgments.at(-1)!.jevTurn };
   }
   return { exchange, state: () => state, attempt: () => runtime.getAttempts().at(-1), intervention };
@@ -366,6 +382,183 @@ test('v3 confirm offers a different feature when the previous and answered recen
     partnerClaims: [{ id: '3:synthetic', act: 'agree', proposition: '同じ特徴です。', targets: [ids[2]] }] };
   input.repairHistory = [answered, ...currentHistory];
   assert.deepEqual(features(), ['another-feature']);
+  answered.partnerClaims[0].act = 'deny';
+  assert.deepEqual(features(), ['another-feature'], 'a denied feature still counts as asked');
   input.previousAction!.target = single(4);
   assert.deepEqual(features(), ['control-feature', 'answered-feature', 'another-feature'], 'questions about another target do not limit this one');
+});
+
+const values = (criteria: Record<string, string>) => Object.values(criteria).map(value => JSON.parse(value).value);
+type Exchange = Awaited<ReturnType<ReturnType<typeof fixture>['exchange']>>;
+
+function checkS4AgreeSource(previous: Exchange['state'], result: Exchange) {
+  const { state, trace, events, input } = result;
+  const profile = { id: 'research_trial_profile_v3', ...V3, localGrounding: { aiPublicClaims: !!previous.aiPublic } };
+  const turnIndex = trace.turnIndex;
+  const trial = { profile, turns: [{ turn: turnIndex, state }] };
+  const key = JSON.stringify([turnIndex, trace.lastEventId, trace.attemptNumber]);
+  assert.deepEqual(s4Probe.agreeSource(trial, trace, key, { state: previous, events }), { known: true, names: input.agreeNames });
+}
+
+function proposalMemo() {
+  const observations = memo();
+  const names = [[UNRELATED_NAME, '水車'], ['ツ バ メ', '別名'], ['かめ', NEW_NAME], ['かめ'], ['時計'], []];
+  observations.figures.forEach((figure, index) => {
+    figure.holistic = names[index].map(construal => ({ construal, basis: ['合成の観察'], status: 'hypothesis' }));
+  });
+  return observations;
+}
+
+for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
+  test(`v3 ${strategy} offers only ledger-legal proposal names, targets and actions`, async () => {
+    const f = fixture(strategy, { observations: proposalMemo() });
+    Object.assign(f.state().ledger, {
+      [ids[0]]: { status: 'agreed', name: UNRELATED_NAME },
+      [ids[1]]: { status: 'deferred', name: 'つばめ' },
+      [ids[2]]: { status: 'tentative', name: '四角' },
+      [ids[5]]: { status: 'tentative', name: 'カメ' },
+    });
+    const proposal = { action: 'propose_name' } as const;
+    const next = await f.exchange('この形の呼び名はどうしますか？', { ...proposal, target: 2, name: NEW_NAME, drafts: [`「${NEW_NAME}」はどうですか？`] });
+    const nameDetails = (index: number) => buildJevDecisionDetailPayload(next.input, { ...proposal, target: single(index) }, V3)!.questions.name.criteria;
+    assert.deepEqual(Object.keys(next.requests.find(r => r.questions.target)!.questions.target.criteria), ['figure_1', 'figure_2', 'figure_4']);
+    for (const index of [0, 3, 5]) assert.throws(() => nameDetails(index), { rule: 'action_target_not_allowed' });
+    assert.deepEqual(values(nameDetails(1)), ['ツ バ メ']);
+    assert.deepEqual(values(nameDetails(2)), [NEW_NAME]);
+    assert.deepEqual(values(nameDetails(4)), ['時計']);
+    assert.equal(next.state.ledger[ids[2]].name, NEW_NAME);
+    assert.deepEqual(next.input.nameLedger?.[ids[2]], { status: 'tentative', name: '四角' });
+    assert.ok(next.requests.every(r => !Object.hasOwn(JSON.parse(r.state), 'nameLedger')));
+
+    const allAgreed = structuredClone(next.input);
+    allAgreed.nameLedger = Object.fromEntries(ids.map((id, i) => [id, { status: 'agreed', name: `合成名${i}` }]));
+    assert.ok(!Object.hasOwn(buildJevDecisionPayload(allAgreed, V3).questions.action.criteria, 'propose_name'));
+    assert.throws(() => buildJevTargetPayload(allAgreed, 'propose_name'), { code: 'invalid_decision' });
+    const wrongSlots = structuredClone(next.input);
+    wrongSlots.nameLedger!['s-abcd'] = wrongSlots.nameLedger![ids[0]];
+    delete wrongSlots.nameLedger![ids[0]];
+    assert.throws(() => buildJevDecisionPayload(wrongSlots, V3), { code: 'invalid_input' });
+    for (const questionLayout of ['two_stage_v1', 'two_stage_v2'] as const) {
+      const old = buildJevDecisionDetailPayload(next.input, { ...proposal, target: single(0) }, { questionLayout });
+      assert.deepEqual(values(old!.questions.name.criteria), [UNRELATED_NAME, '水車']);
+    }
+  });
+
+  test(`v3 ${strategy} uses a new feature across confirm and repair until the scope exhausts its list`, async () => {
+    const observations = memo();
+    const features = ['小さい角が二つ', '四角が一つ', 'くぼみが一つ'];
+    observations.figures[1].analytic = { shapes: features.slice(0, 2), composition: features[2], relations: [] };
+    const f = fixture(strategy, { observations });
+    const turns = [
+      ['confirm', 'この形はどんな形ですか？', '小さい角が二つありますか？'],
+      ['repair', '角は一つに見えます。', '四角い部分が一つありますか？'],
+      ['confirm', '四角い部分も見えません。', 'くぼみが一つありますか？'],
+      ['repair', 'そこも平らに見えます。', '小さい角が二つありますか？'],
+    ] as const;
+    const catalogs = [features, features.slice(1), features.slice(2), features];
+    for (const [index, [action, human, draft]] of turns.entries()) {
+      const result = await f.exchange(human, { action, target: 1, drafts: [draft] });
+      assert.equal(result.saved.executed?.feature, features[index % features.length]);
+      assert.deepEqual(values(result.requests.find(r => r.questions.feature)!.questions.feature.criteria), catalogs[index]);
+    }
+  });
+
+  test(`v3 ${strategy} does not agree to a current proposal that jumps to an unseen figure`, async () => {
+    const proposal = 'この形を「時計」と呼んでもいいですか？';
+    const segments = [naming(proposal, '時計', [ids[3]])];
+    const f = fixture(strategy);
+    await f.exchange('尖った形のことです。', { action: 'confirm', target: 1, drafts: ['細い部分がつながっていますか？'] });
+    const previous = f.state();
+    const jumped = await f.exchange(proposal, { action: 'accept', drafts: ['呼び名の話ですね。'], segments });
+    assert.ok(jumped.input.priorClaims.some(c => c.act === 'name_propose' && c.targets.includes(ids[3])));
+    assert.deepEqual(jumped.input.agreeNames, []);
+    assert.ok(!Object.hasOwn(jumped.requests.find(r => r.questions.action)!.questions.action.criteria, 'agree'));
+    checkS4AgreeSource(previous, jumped);
+
+    const focused = fixture(strategy);
+    await focused.exchange('丸みのある形のことです。', { action: 'accept', target: 3, drafts: ['丸みがある形ですね。'] });
+    await focused.exchange('もう一つは尖っています。', { action: 'confirm', target: 1, drafts: ['細い部分がつながっていますか？'] });
+    const agreed = await focused.exchange(proposal, { action: 'agree', target: 3, drafts: [agreeSpeech('時計')], segments });
+    assert.deepEqual(agreed.saved.executed?.target, single(3));
+  });
+
+  test(`v3 ${strategy} checks the live AI public targets for bound and unbound agreement`, async () => {
+    const speech = '細い部分が二つつながっていますか？';
+    const proposal = `この形は「${NEW_NAME}」と呼びましょうか？`;
+    const aiSegment = (target: number): LocalSegmentProposal => ({ segmentId: 'shape', quote: speech, targets: [ids[target]],
+      aspect: 'part', proposition: '細い部分が二つつながる', name: null, linkedIssueId: null, respondsToTurn: null });
+    const confirm = async (target: number) => {
+      const f = fixture(strategy, { aiPublic: true });
+      const prior = await f.exchange('二つの部分がある形のことです。', { action: 'confirm', target: 1, drafts: [speech], aiSegments: [aiSegment(target)] });
+      assert.deepEqual(prior.saved.executed?.target, single(1));
+      return f;
+    };
+    for (const bound of [true, false]) {
+      const f = await confirm(3);
+      const previous = f.state();
+      const result = await f.exchange(proposal, { action: 'accept', drafts: ['少し確かめましょう。'],
+        segments: [naming(proposal, NEW_NAME, bound ? [ids[1]] : [])] });
+      const publicEvidence = result.input.priorClaims.filter(c => c.speaker === 'ai' && c.sourceTurn === 2);
+      assert.deepEqual(publicEvidence.map(c => c.targets), [[ids[3]]]);
+      assert.deepEqual(result.input.agreeNames?.map(n => n.figureId), bound ? [] : [ids[3]]);
+      checkS4AgreeSource(previous, result);
+    }
+
+    const matched = await confirm(1);
+    await matched.exchange(proposal, { action: 'agree', target: 1, drafts: [agreeSpeech(NEW_NAME)], segments: [naming(proposal, NEW_NAME)] });
+    const newProposal = '次の形は「水車」でどうですか？';
+    const next = await matched.exchange(newProposal, { action: 'agree', target: 4, drafts: [agreeSpeech('水車')], segments: [naming(newProposal, '水車', [ids[4]])] });
+    assert.deepEqual(next.saved.executed?.target, single(4));
+  });
+
+  test(`v3 ${strategy} regenerates a public draft that leaks its orientation`, async () => {
+    const f = fixture(strategy);
+    const revision = '尖った部分が二つありますか？';
+    const result = await f.exchange('形をもう少し確かめたいです。', { action: 'confirm', target: 1,
+      drafts: ['上端が尖っていますか？', revision] });
+    assert.equal(result.text, revision);
+    assert.deepEqual(result.trace.generationGuard, { violations: ['orientation_leak'], regenerated: true, fallback: false });
+  });
+}
+
+test('v3 veto rerank excludes an agreed slot and completes legal proposal detail on an unassigned slot', async () => {
+  for (const target of [0, 4]) {
+    const f = fixture('repair-first', { observations: proposalMemo() });
+    f.state().ledger[ids[0]] = { status: 'agreed', name: UNRELATED_NAME };
+    const result = await f.exchange('別の形も見てみましょうか？', { action: 'move_on', target, actionScores: { propose_name: 0.9 },
+      name: '時計', drafts: [target === 0 ? '細い部分がつながっていますか？' : '「時計」はどうですか？'] });
+    const { saved, state, trace } = result;
+    assert.equal(saved.executed?.action, target === 0 ? 'confirm' : 'propose_name');
+    assert.equal(saved.intervention?.rerank?.ranking.some(r => r.action === 'propose_name'), target === 4);
+    assert.deepEqual(validateJevPrivateStateV2(state, ids, f.intervention, V3.questionLayout), state);
+    assert.equal(s4Probe.relation(trace, 'repair-first', ids, V3.questionLayout), true);
+    s4Probe.setContext({ v3: true, ledger: result.input.nameLedger, agree: [], facts: Array.isArray(trace.repairFacts) });
+    try {
+      const actionRequest = result.requests.find(r => r.questions.action)!;
+      const actionState = JSON.parse(actionRequest.state);
+      assert.equal(s4Probe.originalQuestions(actionRequest, actionState, V3.questionLayout), true);
+      assert.equal(s4Probe.originalQuestions(actionRequest, { ...actionState, nameLedger: result.input.nameLedger }, V3.questionLayout), false);
+      assert.equal(s4Probe.rankProof(saved.intervention, saved.decision, actionState), true);
+    } finally { s4Probe.setContext({}); }
+  }
+});
+
+test('v3 records a closed schema rejection on judgment validation without publishing', async () => {
+  const f = fixture();
+  // Older states can restore two entries with an equivalent name; revisit reads the stored name.
+  f.state().ledger[ids[0]] = { status: 'deferred', name: 'ツ バ メ' };
+  f.state().ledger[ids[1]] = { status: 'tentative', name: 'つばめ' };
+  const previous = structuredClone(f.state());
+  const code = 'duplicate_name_requires_repair';
+  await assert.rejects(f.exchange('保留していた呼び名に戻りましょう。', { action: 'revisit', target: 0, drafts: [] }),
+    { name: 'JevTurnError', message: 'invalid_decision', code: 'invalid_decision', decisionRejectionCode: code });
+  assert.deepEqual(f.state(), previous);
+  const trace = f.attempt()!;
+  assert.equal(trace.errorCode, 'invalid_decision');
+  assert.equal(trace.decisionRejectionCode, code);
+  assert.equal(trace.publicSpeech, null);
+  assert.equal(trace.finalAction, null);
+  assert.equal(trace.decisionFailure, undefined);
+  assert.equal(s4Probe.traceShape(trace, V3.questionLayout), true);
+  assert.equal(s4Probe.traceShape({ ...trace, decisionRejectionCode: 'synthetic arbitrary message' }, V3.questionLayout), false);
 });

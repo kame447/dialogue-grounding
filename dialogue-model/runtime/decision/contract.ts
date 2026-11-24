@@ -2,6 +2,7 @@
 // observations and repair progress are materials, never an answer key or policy.
 import type { ObservationMemo } from "../observation/contract.ts";
 import type { LocalAct, LocalClaimView, PublicTurn } from "../local-grounding/contract.ts";
+import type { OwnLedger } from "../judgment/schema.mjs";
 
 export const JEV_ACTIONS = Object.freeze(["accept", "propose_name", "confirm", "repair", "defer", "revisit", "agree", "move_on", "close", "request_observation"] as const);
 export type JevAction = typeof JEV_ACTIONS[number];
@@ -77,6 +78,8 @@ export type JevDecisionInput = {
   publicNames: readonly PublicNameCandidate[];
   /** Opt-in agreement candidates backed by eligible public naming claims. */
   agreeNames?: PublicNameCandidate[];
+  /** Local v3 proposal legality only. The request never serializes the ledger. */
+  nameLedger?: OwnLedger;
   /** C sets false after its engineering limit for targeted reobservation is reached. */
   reobservationAllowed?: boolean;
   humanReferent?: HumanReferentMaterial;

@@ -153,6 +153,24 @@ export function findInternalLeaks(text: string): string[] {
   return [...(internalId.test(normalized) ? ["internal_id"] : []), ...(internalField.test(normalized) ? ["internal_field"] : [])];
 }
 
+// Screen-orientation wording: a rotated partner's screen makes it wrong. Quoted spans (the partner's own words)
+// are exempt; idioms (その上・以上・左右対称・両側・片側・反対側…) and rotation-invariant geometry never match.
+const orientationWords = /上部|下部|上端|下端|左端|右端|左側|右側|上側|下側|右上|左上|右下|左下|右向き|左向き|上向き|下向き|斜め[上下左右]|[上下左右]の辺|横長|縦長|[上下左右]方向|[上下左右]寄り|[上下左右]の(?:突起|角|隅|端|部分|張り出し|くぼみ|切り欠き|三角|四角|脚|棒|腕|頭|耳|側)|(?<!以)[上下左右][へに](?:伸び|突き出|出っ張|張|向か|傾|広が|すぼま)/u;
+
+// A clause that says whose screen/viewpoint it describes (こちらの画面では…／私から見ると…) is not a flat claim.
+// A bare mention of rotation or a different orientation does not say whose view the direction word belongs to.
+const viewpointStated = /(?:こちら|私|わたし|自分|相手|そちら)(?:の(?:画面|側|向き|見方)|側)?(?:では|で見ると|から見ると|から見れば|から見たら|から見て)/u;
+// Sentence ends and adversative conjunctions start a new clause, so a viewpoint cannot cover a later unqualified claim.
+const clauseBreak = /(?<=[。!?]|(?:ですが|ますが|ませんが|ましたが|でしたが|けど|けれど|けれども|のに)、)/u;
+
+/** Orientation-dependent wording in public text; codes only, independent of the act. Clause-local: quoted spans
+ * and clauses that state their viewpoint are exempt. */
+export function findOrientationLeaks(text: string): string[] {
+  const unquoted = normalize(text).replace(/「[^」]*」|『[^』]*』/gu, "「」");
+  return unquoted.split(clauseBreak).some((clause) => orientationWords.test(clause) && !viewpointStated.test(clause))
+    ? ["orientation_leak"] : [];
+}
+
 /** All publication rules for the committed primary act; codes only. */
 export function findGuardViolations(text: string, action: Action): string[] {
   return [...(action === "agree" ? [] : findAgreementClaims(text)), ...(action === "repair" ? [] : findRepairClaims(text)),
@@ -167,6 +185,7 @@ export function rewriteReasons(codes: readonly string[]): string {
     codes.includes("self_repair") ? "前の下書きは自分の取り違え・訂正・取り消しを表していました。このactionでは訂正を表明せず、このactionの範囲で書き直してください。" : "",
     codes.includes("name_mismatch") ? "前の下書きは、このactionで扱う名前とは別の名前を決定・合意として述べていました。このactionで扱う名前だけを「」で示して書き直してください。" : "",
     codes.includes("unsolicited_deferral") ? "前の下書きは未解決の図形について保留や先送りを提案していました。保留・先送りを提案せず、このactionの範囲で書き直してください。" : "",
+    codes.includes("orientation_leak") ? "前の下書きに画面の向きに依存する語（上下左右・上端・下端・右向き等）が含まれていました。相手の画面では図形が回転しているため、上下左右を使わず、尖りの数・大小・くぼみ・四角い部分とのつながりなど回転しても変わらない特徴だけで書き直してください。" : "",
     codes.some((code) => code.startsWith("internal_")) ? "前の下書きには内部の参照IDや作業メモの項目が含まれていました。それらを出さずに書き直してください。" : "",
     codes.includes("name_not_shown") ? "このactionで扱う名前を、「」で囲んで発話の中に示してください。" : "",
   ].join("");

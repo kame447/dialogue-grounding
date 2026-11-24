@@ -5,7 +5,7 @@ import {validateOwnLedger} from '../judgment/schema.mjs';
 // Decision 0002, opt-in only. The queue owns publication; this module returns a
 // detached candidate state and never turns a model score into shared evidence.
 import type { Judgment, OwnLedger } from "../judgment/schema.mjs";
-import { createOwnLedger, validateJudgment, applyJudgment } from "../judgment/schema.mjs";
+import { createOwnLedger, validateJudgment, applyJudgment, JudgmentValidationError } from "../judgment/schema.mjs";
 import { normalizeName } from "../judgment/name-evidence.mjs";
 import { stageMemory } from "../judgment/memory.mjs";
 import { createReferenceGraph, applyReferenceUpdate, previewReferenceUpdate, snapshotReferenceGraph, REFERENCE_LIMITS } from "../memory/reference-graph.mjs";
@@ -23,7 +23,7 @@ import { validateJevDecision, validateHumanReferentEstimate, validateRepairProsp
 import type { JevDecisionFailureEvidence } from "../decision/jev-decision.ts";
 import { prepareLocalGroundingTurn, validateLocalGroundingOptions, findLocalPublicationViolations } from "./local-grounding-turn.ts";
 import type { LocalGroundingResearchRecord, LocalGroundingTrace } from "./local-grounding-turn.ts";
-import { findAgreeNameMismatch, findGuardViolations, rewriteReasons } from "./generation-guard.ts";
+import { findAgreeNameMismatch, findGuardViolations, findOrientationLeaks, rewriteReasons } from "./generation-guard.ts";
 import { createMemoAiExtractor, MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS, AiPublicError, aiHash, emptyAiEvidence } from "../local-grounding/extract-ai.ts";
 import { createJevAiFunctionClassifier, createJevAiSupportChecker, AI_FUNCTION_INSTRUCTIONS, AI_SUPPORT_INSTRUCTIONS,
   AI_RESPONSE_SUPPORT_INSTRUCTIONS, AI_FUNCTION_CRITERIA, AI_SUPPORT_CHOICES, AI_ACT_DESCRIPTIONS } from "../local-grounding/jev-ai-public.ts";
@@ -55,7 +55,9 @@ export type ObservationFailure = { observationErrorCode: ObservationErrorCode; o
 export const JEV_GENERATION_ERROR_CODES = Object.freeze(["timeout", "network_error", "invalid_json", "empty_response", "provider_http_error",
   "policy_http_error", "invalid_policy_response", "invalid_response", "unavailable"] as const);
 export type JevGenerationErrorCode = typeof JEV_GENERATION_ERROR_CODES[number];
-export type JevTurnFailureDetails = { decisionRejectionCode?: "agree_without_public_proposal" | "action_target_not_allowed"; generationErrorCode?: JevGenerationErrorCode };
+const JUDGMENT_REJECTION_CODES = ["reassignment_requires_repair", "duplicate_name_requires_repair", "inconsistent_action", "agree_requires_shared_identification"] as const;
+const TURN_REJECTION_CODES = ["agree_without_public_proposal", "action_target_not_allowed", ...JUDGMENT_REJECTION_CODES] as const;
+export type JevTurnFailureDetails = { decisionRejectionCode?: typeof TURN_REJECTION_CODES[number]; generationErrorCode?: JevGenerationErrorCode };
 export type JevHumanReferentTrace = HumanReferentEstimate & {
   turnIndex: number;
   /** SHA-256 of JSON.stringify of the validated memo supplied to estimation. */
@@ -75,7 +77,7 @@ export class JevTurnError extends Error {
       this.observationPhase = observation.observationPhase;
       this.observationErrorCode = new ObservationError(observation.observationErrorCode).code;
     }
-    if (details.decisionRejectionCode === "agree_without_public_proposal" || details.decisionRejectionCode === "action_target_not_allowed") this.decisionRejectionCode = details.decisionRejectionCode;
+    if (details.decisionRejectionCode && TURN_REJECTION_CODES.includes(details.decisionRejectionCode)) this.decisionRejectionCode = details.decisionRejectionCode;
     if (details.generationErrorCode !== undefined) this.generationErrorCode = JEV_GENERATION_ERROR_CODES.includes(details.generationErrorCode)
       ? details.generationErrorCode : "unavailable";
   }
@@ -227,10 +229,17 @@ function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns: reado
     const ids = jevTurn.executed ? targets(jevTurn.executed) : [];
     return turnIndex > lastBoundary && ids.length ? [{ turnIndex, ids }] : [];
   });
+  const prevJudgment = judgments.at(-1);
+  const prevIds = prevJudgment && prevJudgment.turnIndex > lastBoundary && prevJudgment.jevTurn.executed &&
+    ["confirm", "repair", "propose_name"].includes(prevJudgment.judgment.action) ? targets(prevJudgment.jevTurn.executed) : [];
+  const prevPublicIds = new Set(prevJudgment && prevIds.length ? claims.filter(c => c.speaker === "ai" &&
+    c.sourceTurn > prevJudgment.turnIndex && c.sourceTurn < turn).flatMap(c => c.targets) : []);
 
   return openClaims.flatMap(c => {
     const name = c.name!;
     if (!isHumanProposal(c) && c.act !== "name_accept") return [];
+    if (prevIds.length && c.sourceTurn === turn && isHumanProposal(c) && c.targets.length &&
+      c.targets.every(id => !prevIds.includes(id) && !focusedTurns.some(j => j.ids.includes(id)))) return [];
     const normalized = normalizeName(name);
     if (c.sourceTurn < turn) {
       const focusMoved = c.targets.length > 0 && focusedTurns.some(j =>
@@ -247,6 +256,7 @@ function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns: reado
     if (!source) return [];
     const occupied = slots.filter(id => ledger[id].name !== null && normalizeName(ledger[id].name) === normalized);
     return candidates.filter(id => {
+      if (prevPublicIds.size && !prevPublicIds.has(id)) return false;
       const entry = ledger[id];
       if (entry.status === "agreed" || entry.status === "deferred" && entry.name !== null && !occupied.includes(id) ||
         occupied.some(other => other !== id)) return false;
@@ -429,8 +439,11 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
     const r=t.rerank;if(!stateExact(r,['policyId','ranking','selected'])||r.policyId!=='saved_action_scores_v1'||!Array.isArray(r.ranking)||!r.ranking.length||!stateSame(r.selected,{action:z.executed.action,target:z.executed.target}))throw Error();
     const actions=new Set<string>();let previous:any=null;for(const a of r.ranking){if(!stateExact(a,['action','score'])||!JEV_ACTIONS.includes(a.action)||['defer','move_on','request_observation'].includes(a.action)||actions.has(a.action)||typeof a.score!=='number'||a.score<0||a.score>1||a.score!==d.evidence?.stages?.[0]?.scores?.action?.[a.action]||previous&&(a.score>previous.score||a.score===previous.score&&JEV_ACTIONS.indexOf(a.action)<JEV_ACTIONS.indexOf(previous.action)))throw Error();actions.add(a.action);previous=a;}
     const restrictedAgree=hasAgreeNames&&original.target.kind==='single'&&!hasAgreeFor([original.target.figureId]);
+    // v3 independently qualifies proposal and agreement names. Old records retain their original catalogs.
+    const invalidNames=questionLayout==='two_stage_v3'?restrictedAgree&&actions.has('agree'):
+      restrictedAgree?actions.has('agree'):actions.has('propose_name')!==actions.has('agree');
     if(!actions.has('accept')||!actions.has('close')||r.ranking[0].action!==z.executed.action||actions.has('confirm')!==actions.has('repair')||
-      (restrictedAgree?actions.has('agree'):actions.has('propose_name')!==actions.has('agree'))||actions.has('revisit')!==(original.target.kind!=='none')||original.target.kind!=='single'&&(actions.has('agree')||actions.has('propose_name')))throw Error();
+      invalidNames||actions.has('revisit')!==(original.target.kind!=='none')||original.target.kind!=='single'&&(actions.has('agree')||actions.has('propose_name')))throw Error();
     const detail=['propose_name','agree','confirm','repair'].includes(z.executed.action);if(detail){persistedEvidence(t.detailEvidence,'detail');}else if(t.detailEvidence!==null)throw Error();
    }else throw Error();
    if(questionLayout==='two_stage_v3'&&['repair','confirm','revisit'].includes(j.judgment?.action)){
@@ -649,7 +662,10 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
           name: previousExecution!.name, feature: previousExecution!.feature } : null,
         publicNames: claims.filter(c => c.name !== null && publicTurns.some(t => t.turn === c.sourceTurn && t.text.includes(c.name!)))
           .map(c => ({ name: c.name!, figureId: c.targets.length === 1 ? c.targets[0] : null, sourceTurn: c.sourceTurn })) };
-      if (questionLayout === "two_stage_v3") baseInput.agreeNames = buildAgreeNamesV3(claims, publicTurns, latest.seq, slots, state);
+      if (questionLayout === "two_stage_v3") {
+        baseInput.agreeNames = buildAgreeNamesV3(claims, publicTurns, latest.seq, slots, state);
+        baseInput.nameLedger = structuredClone(state.ledger);
+      }
       else if (adaptive) baseInput.agreeNames = claims.filter(eligibleAgreeClaim).flatMap(c => {
         // A name_accept may inherit a name without repeating its literal text.
         const source = publicTurns.find(t => t.turn === c.sourceTurn && t.text.includes(c.name!)) ??
@@ -770,9 +786,18 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         candidateName: execution.name, discriminatingFeature: execution.feature, note: null };
       // P3 can retain an unresolved referent. Keep its whole candidate set in
       // the decision trace; no arbitrary slot is chosen or ledger entry changed.
-      const judgment: Judgment = ambiguousDefer ? { ...act, action: "defer" }
-        : ambiguousRevisit ? { ...act, action: "revisit" }
-        : multipleFeature ? { ...act, action: execution.action as "confirm" | "repair" } : validateJudgment(act, { ownLedger: state.ledger });
+      let judgment: Judgment;
+      try {
+        judgment = ambiguousDefer ? { ...act, action: "defer" }
+          : ambiguousRevisit ? { ...act, action: "revisit" }
+          : multipleFeature ? { ...act, action: execution.action as "confirm" | "repair" } : validateJudgment(act, { ownLedger: state.ledger });
+      } catch (error) {
+        if (questionLayout === "two_stage_v3" && error instanceof JudgmentValidationError) {
+          const rejection = JUDGMENT_REJECTION_CODES.find(code => code === error.code);
+          if (rejection) record.decisionRejectionCode = rejection;
+        }
+        throw error;
+      }
       if (judgment.action === "agree" && !(questionLayout === "two_stage_v3"
         ? hasAgreeNameV3(baseInput.agreeNames!, judgment.candidateName, judgment.targetSlot)
         : claims.some(c => eligibleAgreeClaim(c) && c.name === judgment.candidateName && c.targets[0] === judgment.targetSlot))) {
@@ -801,6 +826,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         { role: "system", content: "局所問題（非公開）:\n" + summarizeLocalIssues(graph) },
         ...publicTurns.map(t => ({ role: t.speaker === "human" ? "user" as const : "assistant" as const, content: t.text }))];
       const violations = (text: string, context: Message[]) => [...new Set([...findGuardViolations(text, judgment.action), ...findLocalPublicationViolations(text, context),
+        ...(questionLayout === "two_stage_v3" ? findOrientationLeaks(text) : []),
         ...(questionLayout === "two_stage_v3" && judgment.action === "agree" && judgment.candidateName !== null
           ? findAgreeNameMismatch(text, judgment.candidateName) : []),
         ...(adaptive && /repair[_-]?prospect|repair_issue|candidate_narrowed|candidate_widened|other_figure_benefit|no_open_issue|issue_\d+/iu.test(text.normalize("NFKC").replace(/\s/gu, "")) ? ["internal_field"] : []),

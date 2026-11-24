@@ -80,6 +80,14 @@ const TRIAL_ACTION_SCOPE_V2 = Object.freeze({ ...ACTION_SCOPE_V2,
   confirm: "判断に示された特徴（discriminatingFeature）を短く確かめる。未解決の図形について保留や命名の先送りを提案しない。決まった・それでいこうとは言わない",
   repair: "公開上の食い違いを局所的に確かめ直す・直す。自分の取り違えや決めた名前の訂正を明示するのは、これまでの発話にその根拠があるときだけにする" });
 
+// two_stage_v3 technical trial only: additionally rotation-independent wording and no affirmative assertions in confirm.
+const TRIAL_V3_GENERATOR_INSTRUCTIONS_V2 = GENERATOR_INSTRUCTIONS_V2.replace(SELF_CORRECTION_V2,
+  "取り違えや取り消しは、行動がrepairであり、かつこれまでの発話にその根拠があるときだけ表明してください。行動がdeferでもmove_onでもないときは、未解決の図形について保留・先送り・別の図形への移行を提案しないでください。discriminatingFeatureには自分側の画面の向きに依存する語（上下左右・上端・下端・右向き等）が含まれることがあるため、公開発話にはそのまま写さず、回転しても変わらない尖り・くぼみ・四角い部分・つながりなどの表現に言い換えて伝えてください。");
+if (TRIAL_V3_GENERATOR_INSTRUCTIONS_V2 === GENERATOR_INSTRUCTIONS_V2) throw new Error("v3 trial generator instructions out of sync");
+const TRIAL_V3_ACTION_SCOPE_V2 = Object.freeze({ ...TRIAL_ACTION_SCOPE_V2,
+  confirm: "判断に示された特徴（discriminatingFeature）を回転に依存しない表現で短く尋ねて確かめる。観察メモにない特徴を肯定したり、同じ図形だと断定したりしない。未解決の図形について保留や命名の先送りを提案しない。決まった・それでいこうとは言わない",
+  repair: "公開上の食い違いを回転に依存しない表現で局所的に確かめ直す・直す。自分の取り違えや決めた名前の訂正を明示するのは、これまでの発話にその根拠があるときだけにする" });
+
 // Luna participant path (public-act consistency), identical across strategies. The constants above stay
 // as they are for the Jev path. Own-image claims need a basis in the judgment or its memo;
 // a name act shows its name in 「」 (a format rule that never certifies the act).
@@ -215,14 +223,15 @@ export function createDialogueV2(options) {
   const slots = anchors.map((anchor) => anchor.id);
   const ownAnchors = anchors.map(({ id, bbox, centroid }) => ({ id, bbox: { ...bbox }, centroid: { ...centroid } }));
   if (decisionMode === "jev") {
+    const v3Trial = Boolean(options.technicalTrial) && options.questionLayout === "two_stage_v3";
     if (!referenceMemory || !localGrounding) throw new Error("Jev decision mode requires local reference memory");
     if (activeDecision || decisionShadowClient || groundingShadow) throw new Error("Jev decision mode cannot combine legacy decision paths");
     return createJevTurnRuntime({ client, ownImage, ownAnchors, observer, jevDecision, localGrounding, ...(integrated?{intervention,decisionTimeoutMs}:{}),
       ...(Object.hasOwn(options,'technicalTrial')?{technicalTrial:options.technicalTrial}:{}),
       ...(Object.hasOwn(options,'questionLayout')?{questionLayout:options.questionLayout}:{}),
       onJevTurnTrace, onLocalGroundingTrace, maxReobservations,
-      generation: { task: TASK_INSTRUCTIONS_V2, instructions: options.technicalTrial ? TRIAL_GENERATOR_INSTRUCTIONS_V2 : GENERATOR_INSTRUCTIONS_V2,
-        ...(concise ? { concise: CONCISE_INSTRUCTIONS_V2 } : {}), actionScope: options.technicalTrial ? TRIAL_ACTION_SCOPE_V2 : ACTION_SCOPE_V2,
+      generation: { task: TASK_INSTRUCTIONS_V2, instructions: v3Trial ? TRIAL_V3_GENERATOR_INSTRUCTIONS_V2 : options.technicalTrial ? TRIAL_GENERATOR_INSTRUCTIONS_V2 : GENERATOR_INSTRUCTIONS_V2,
+        ...(concise ? { concise: CONCISE_INSTRUCTIONS_V2 } : {}), actionScope: v3Trial ? TRIAL_V3_ACTION_SCOPE_V2 : options.technicalTrial ? TRIAL_ACTION_SCOPE_V2 : ACTION_SCOPE_V2,
         final: FINAL_INSTRUCTIONS_V2, timeoutMs: GENERATION_TIMEOUT_MS } });
   }
   const dialogueJudge = judge ?? createLunaJudge(client);
