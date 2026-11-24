@@ -36,3 +36,17 @@ test('the shared response contract: confidence and probabilities in 0..1, exact 
   assert.equal(jevResponseId({ id: 'gen-abc_1' }), 'gen-abc_1');
   assert.equal(jevResponseId({ id: 'other' }), null);
 });
+
+import { buildJevDecisionPayload } from '../dialogue-model/runtime/decision/jev-decision.ts';
+test('holistic_v1 (names): the memo readings are not propose_name candidates; public names are; an earlier input is unchanged', () => {
+  const slots = Array.from({ length: 6 }, (_, i) => `s-000${i}`);
+  const input = (extra: object = {}, publicNames: object[] = []) => ({ turn: 2, ownSlots: slots,
+    publicTurns: [{ turn: 1, speaker: 'ai', text: 'どの図形から話しましょうか？' }, { turn: 2, speaker: 'human', text: '船という見方もありますね。' }],
+    observations: { observedAt: '2026-10-20T00:00:00.000Z', figures: slots.map((id, i) => ({ id, region: { x: i * 10, y: 0, w: 9, h: 9 },
+      holistic: [{ construal: `折れ曲がった帯という見立て${i}`, basis: ['丸み'], status: 'hypothesis' }], analytic: { shapes: ['三角'], composition: '構成', relations: [] }, unknowns: [], reobservations: [] })) },
+    issueSummary: '', priorClaims: [], publicNames, repairHistory: [], previousAction: null, ...extra }) as never;
+  const actions = (i: never) => Object.keys(buildJevDecisionPayload(i, { questionLayout: 'two_stage_v3', dialoguePolicy: 'holistic_v1' }).questions.action.criteria);
+  assert.ok(actions(input()).includes('propose_name'), 'earlier input: the readings are candidates');
+  assert.ok(!actions(input({ nameSource: 'public_only' })).includes('propose_name'));
+  assert.ok(actions(input({ nameSource: 'public_only' }, [{ name: '船', figureId: slots[0], sourceTurn: 2 }])).includes('propose_name'));
+});

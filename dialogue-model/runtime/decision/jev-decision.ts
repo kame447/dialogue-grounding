@@ -236,6 +236,8 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
       !Array.isArray(input.publicNames) || input.publicNames.length > JEV_DECISION_INPUT_LIMITS.publicNames ||
       !(input.agreeNames === undefined || Array.isArray(input.agreeNames) && input.agreeNames.length <= JEV_DECISION_INPUT_LIMITS.publicNames) ||
       !(input.reobservationAllowed === undefined || typeof input.reobservationAllowed === "boolean")) fail("invalid_input");
+  if (!(input.nameSource === undefined || input.nameSource === "public_only")) fail("invalid_input");
+  const publicOnlyNames = input.nameSource === "public_only";
   const slots = [...input.ownSlots];
   let nameLedger: JevDecisionInput["nameLedger"];
   if (input.nameLedger !== undefined) {
@@ -401,7 +403,7 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
   // Public agree evidence whose source turn did not survive compaction can no longer be shown as evidence (two_stage_v3).
   const liveTurns = new Set(publicTurns.map(t => t.turn));
   const agreeLive = agreeNames === undefined ? undefined : v3 ? agreeNames.filter(n => liveTurns.has(n.sourceTurn)) : agreeNames;
-  const catalog: Catalog = { names: observations.map(o => unique([...o.holistic.map(h => h.construal).filter(n => n.length <= 80),
+  const catalog: Catalog = { names: observations.map(o => unique([...(publicOnlyNames ? [] : o.holistic.map(h => h.construal).filter(n => n.length <= 80)),
     ...publicNames.filter(n => n.figureId === null || n.figureId === o.figureId).map(n => n.name)])),
   ...(agreeLive === undefined ? {} : { agreeNames: observations.map(o => unique(agreeLive.filter(n => n.figureId === null || n.figureId === o.figureId).map(n => n.name))) }),
   features: observations.map(o => unique([...o.analytic.shapes, o.analytic.composition, ...o.analytic.relations,
@@ -728,7 +730,7 @@ function detailJsonData(value: unknown, seen = new Set<object>()): void {
 function prepareExecutedDetail(input: JevDecisionInput, selected: JevActionTarget, layout: JevQuestionLayout = "two_stage_v1") {
   try {
     detailJsonData(input); detailJsonData(selected);
-    const optional = ["reobservationAllowed", "humanReferent", "repairProspect", "agreeNames", "repairFacts", "nameLedger"].filter(key => Object.hasOwn(input, key));
+    const optional = ["reobservationAllowed", "humanReferent", "repairProspect", "agreeNames", "repairFacts", "nameLedger", "nameSource"].filter(key => Object.hasOwn(input, key));
     if (!exact(input, ["turn", "publicTurns", "ownSlots", "observations", "issueSummary", "priorClaims", "repairHistory", "previousAction", "publicNames", ...optional])) fail("invalid_input");
     if (!exact(selected, ["action", "target"]) || !includes(["propose_name", "agree", "confirm", "repair"], selected.action)) fail("invalid_input");
     const snapshot = structuredClone(input), selection = structuredClone(selected);

@@ -80,6 +80,8 @@ export type JevDecisionInput = {
   agreeNames?: PublicNameCandidate[];
   /** Local v3 proposal legality only. The request never serializes the ledger. */
   nameLedger?: OwnLedger;
+  /** holistic_v1 only, local like nameLedger (never serialized): the observation memo's readings (holistic construals) are explanations, not names, so only public names are name candidates. */
+  nameSource?: "public_only";
   /** C sets false after its engineering limit for targeted reobservation is reached. */
   reobservationAllowed?: boolean;
   humanReferent?: HumanReferentMaterial;

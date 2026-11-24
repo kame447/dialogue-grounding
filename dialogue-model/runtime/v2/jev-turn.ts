@@ -734,6 +734,8 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       if (questionLayout === "two_stage_v3") {
         baseInput.agreeNames = buildAgreeNamesV3(claims, publicTurns, latest.seq, slots, state);
         baseInput.nameLedger = structuredClone(state.ledger);
+        // holistic_v1: the memo's readings are explanations, never AI-proposed names (the candidates are then only names that were said in public).
+        if (holistic) baseInput.nameSource = "public_only";
       }
       else if (adaptive) baseInput.agreeNames = claims.filter(eligibleAgreeClaim).flatMap(c => {
         // A name_accept may inherit a name without repeating its literal text.

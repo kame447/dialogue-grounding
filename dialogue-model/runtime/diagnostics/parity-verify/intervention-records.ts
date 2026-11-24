@@ -758,7 +758,7 @@ const ledgerName=(name:string)=>name.normalize('NFKC').trim().replace(/\s/gu,'')
 function catalog(input:any,target:any,kind:'name'|'feature'):{value:string;figureIds:string[]}[]{
  const ids=target.kind==='single'?[target.figureId]:target.kind==='multiple'?target.figureIds:[],out:{value:string;figureIds:string[]}[]=[];
  for(const id of ids){const o=input.observations.find((o:any)=>o.figureId===id);if(!o)continue;
-  const values:string[]=kind==='name'?[...o.holistic.map((h:any)=>h.construal).filter((v:any)=>typeof v==='string'&&v.length<=80),...input.publicNames.filter((n:any)=>n.figureId===null||n.figureId===id).map((n:any)=>n.name)]:[...o.analytic.shapes,o.analytic.composition,...o.analytic.relations,...o.reobservations.flatMap((r:any)=>r.supports)].filter((v:any)=>typeof v==='string'&&v.trim()&&v.length<=400);
+  const values:string[]=kind==='name'?[...(CTX.policy==='holistic_v1'?[]:o.holistic.map((h:any)=>h.construal).filter((v:any)=>typeof v==='string'&&v.length<=80)),...input.publicNames.filter((n:any)=>n.figureId===null||n.figureId===id).map((n:any)=>n.name)]:[...o.analytic.shapes,o.analytic.composition,...o.analytic.relations,...o.reobservations.flatMap((r:any)=>r.supports)].filter((v:any)=>typeof v==='string'&&v.trim()&&v.length<=400);
   const ledger=kind==='name'&&CTX.v3&&!CTX.legacyV3?CTX.ledger:undefined;
   const partner=kind==='name'&&CTX.v3&&(CTX.style==='loop'||CTX.style==='holistic')?(Array.isArray(input.priorClaims)?input.priorClaims:[]).filter((c:any)=>c?.speaker==='human'&&c.act==='name_propose'&&typeof c.name==='string'&&c.name!==''&&c.turn<=input.turn&&c.sourceTurn<=input.turn&&Array.isArray(c.targets)):[];
   const entry=ledger?.[id];if(entry?.status==='agreed')continue;
@@ -850,7 +850,7 @@ function originalQuestions(body:any,input:any,layout='two_stage_v1'):boolean|nul
    }
    CTX.style=was;
    // A record without the policy whose request text is the holistic text cannot be identified as any earlier version: never a reproduction success.
-   if(CTX.policy!=='holistic_v1'&&CTX.style===null&&equal({action:make(NATIVE_V3_HOLISTIC.actions)},body.questions))return null;
+   if(CTX.policy!=='holistic_v1'&&CTX.style===null){const was2=CTX.policy;CTX.policy='holistic_v1';const same=equal({action:make(NATIVE_V3_HOLISTIC.actions)},body.questions);CTX.policy=was2;if(same)return null;}
    return false;
   }
   add('action',text,Object.fromEntries(ACTIONS.filter(a=>(a!=='request_observation'||input.reobservationAllowed)&&(a!=='agree'||agreeOffered)).map(a=>[a,(NATIVE.actions as any)[a]])));

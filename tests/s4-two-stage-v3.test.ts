@@ -34,6 +34,8 @@ const answer = (choice: string, keys: string[], override: Record<string, number>
   probabilities: Object.fromEntries(keys.map(k => [k, override[k] ?? (k === choice ? 1 : 0)])) });
 const jevResponse = (id: string, answers: Record<string, unknown>) => ({ model: 'typesafe/jev-1.14', id: 'gen-s4v3-' + id, usage: { cost: 0 }, answers });
 const stageOne = (id: string, action: string, override: Record<string, number> = {}, keys = ACTIONS.filter(a => a !== 'agree')) => jevResponse(id + '-action', { action: answer(action, keys, override) });
+// holistic_v1: the memo's readings are not name candidates, so propose_name is not offered unless a public name exists.
+const stageOneH = (id: string, action: string, override: Record<string, number> = {}) => stageOne(id, action, override, ACTIONS.filter(a => !['agree', 'propose_name'].includes(a)));
 const stageTwo = (id: string, action: string, target: string) => jevResponse(id + '-target', { target: answer(target, TARGETS(action)) });
 
 async function recordedRun(profile: any, tape: any, label: 'repair-first' | 'bypass-enabled', learn?: (input: any) => any) {
@@ -557,7 +559,7 @@ test('the comparison condition must carry exactly the reasons its own draft show
 
 const DRAFT_MISMATCH = '前の下書きの命名に関する行為が、選んだ行動と合っていませんでした。選んだ行動の範囲で、命名に関する行為を行動に合わせて書き直してください。';
 test('holistic_v1: a naming-wording draft is asked, a mismatch regenerates, and S4 requires the reason on both conditions', async () => {
-  const decisions = [stageOne('retry', 'accept'), stageTwo('retry', 'accept', 'none')];
+  const decisions = [stageOneH('retry', 'accept'), stageTwo('retry', 'accept', 'none')];
   const record = await records('two_stage_v3', decisions, { policy: 'holistic_v1', draftAnswers: ['adopt_chosen'],
     retry: { current: true, drafts: ['この形は「name-0」で呼びましょう。', 'そう見えるんですね。'] } });
   pass(record);
@@ -572,7 +574,7 @@ test('holistic_v1: a naming-wording draft is asked, a mismatch regenerates, and 
   }
 });
 test('holistic_v1: S4 refuses an altered or dropped question record', async () => {
-  const decisions = [stageOne('retry', 'accept'), stageTwo('retry', 'accept', 'none')];
+  const decisions = [stageOneH('retry', 'accept'), stageTwo('retry', 'accept', 'none')];
   const record = await records('two_stage_v3', decisions, { policy: 'holistic_v1', draftAnswers: ['adopt_chosen'],
     retry: { current: true, drafts: ['この形は「name-0」で呼びましょう。', 'そう見えるんですね。'] } });
   pass(record);
@@ -588,7 +590,7 @@ test('holistic_v1: S4 refuses an altered or dropped question record', async () =
 });
 
 test('holistic_v1: an orientation-only fallback record passes with no question, and one that carries a question record is refused', async () => {
-  const decisions = [stageOne('fallback', 'accept'), stageTwo('fallback', 'accept', 'none')];
+  const decisions = [stageOneH('fallback', 'accept'), stageTwo('fallback', 'accept', 'none')];
   const drafts: [string, string] = ['右側に張り出しがあります。', '上端がとがっています。'];
   const original = await records('two_stage_v3', decisions, { policy: 'holistic_v1', retry: { current: true, drafts, fallback: true } });
   assert.deepEqual(original.trials[0].attempts[0].generationGuard, { violations: ['orientation_leak'], regenerated: true, fallback: true });
@@ -602,7 +604,7 @@ test('holistic_v1: an orientation-only fallback record passes with no question, 
 });
 
 const ACTS6 = ['adopt_chosen', 'adopt_other', 'decline_or_hold', 'propose_question', 'recount_only', 'none'];
-const decisionsAccept = () => [stageOne('retry', 'accept'), stageTwo('retry', 'accept', 'none')];
+const decisionsAccept = () => [stageOneH('retry', 'accept'), stageTwo('retry', 'accept', 'none')];
 const traceCopies = (n: any) => [n.trials[0].attempts[0], n.trials[0].turns[0].trace[0]];
 
 test('05d-3: a regular record whose first draft is not a question target and only the retry is asked is accepted', async () => {
@@ -699,7 +701,14 @@ test('05e-4: a comparison retry that can neither publish nor fall back (naming f
 
 const forgeGeneration = (record: any, label: string, index: number, text: string) =>
   forgeBoth(record, label, tail => { tail.luna.filter((l: any) => l.phase === 'generation')[index].response.text = text; });
-const proposeName = () => [stageOne('p', 'propose_name'), stageTwo('p', 'propose_name', 'figure_2'), jevResponse('p-detail', { name: answer('name_0', ['name_0']) })];
+import { buildRecords } from './support/s4-v3-records.ts';
+// holistic_v1: the only name candidate is a name said in public (the memo's readings are explanations); a partner mention is such a name.
+const mentionQuote = '船という見方もありますね。';
+const finalChecks = (n: any) => checksOf(n).filter((c: any) => c.id.includes('.attempt.0.'));
+const namedRecords = () => buildRecords({ turns: [
+  { human: mentionQuote, plan: { action: 'accept', target: 'none', act: 'assert', extraction: JSON.stringify([{ segmentId: 's1', quote: '船', targets: [Object.keys(OLD.state.ledger)[2]],
+    aspect: 'name', proposition: '船という見方', name: '船', linkedIssueId: null, respondsToTurn: null }]) } },
+  { human: 'どう呼びましょうか。', plan: { action: 'propose_name', target: 'figure_2', speech: '「船」と呼ぶのはどうでしょう？' } }] });
 
 test('05f-1: when both drafts are orientation-only the derived fallback is required, in the flag and in the published text', async () => {
   const drafts: [string, string] = ['右側が尖っています。', '上端が尖っています。'];
@@ -712,11 +721,11 @@ test('05f-1: when both drafts are orientation-only the derived fallback is requi
 });
 
 test('05f-2: a comparison propose_name draft must show the chosen name; one that does is accepted', async () => {
-  const shown = '「name-2」と呼ぶのはどうでしょう？';
-  const record = await records('two_stage_v3', proposeName(), { policy: 'holistic_v1', generationText: shown });
-  pass(record);
+  const record = await namedRecords();
+  assert.equal(record.trials[0].attempts[0].executed.action, 'propose_name');
+  assert.ok(finalChecks(record).length >= 4 && finalChecks(record).every((c: any) => c.status === 'pass'));
   for (const label of ['bypass-enabled', 'repair-first']) {
-    assert.ok(checksOf(forgeGeneration(record, label, 0, '呼び名をひとつ考えてみました。')).some((c: any) => c.status !== 'pass'), label + ' (name not shown)');
+    assert.ok(finalChecks(forgeGeneration(record, label, 0, '呼び名をひとつ考えてみました。')).some((c: any) => c.status !== 'pass'), label + ' (name not shown)');
   }
 });
 
@@ -739,10 +748,10 @@ test('05f: the run, its dynamic replay and S4 agree on the deferral and name-not
   assert.equal(await dynamic(followed), 'same_material_intervention_verified');
   pass(followed);
   assert.ok(checksOf(deferral).some((c: any) => c.status !== 'pass'));
-  const named = await records('two_stage_v3', proposeName(), { policy: 'holistic_v1', generationText: '「name-2」と呼ぶのはどうでしょう？' });
+  const named = await namedRecords();
   const hidden = forgeGeneration(named, 'repair-first', 0, '呼び名をひとつ考えてみました。');
   assert.notEqual(await dynamic(hidden), 'same_material_intervention_verified');
-  assert.ok(checksOf(hidden).some((c: any) => c.status !== 'pass'));
+  assert.ok(finalChecks(hidden).some((c: any) => c.status !== 'pass'));
 });
 
 test('05g: internal items (field names, local ids, an echo of the send\'s own instructions) in a first draft rewritten safely are accepted; one such comparison draft alone is refused', async () => {
