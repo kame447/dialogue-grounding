@@ -170,6 +170,8 @@ test('propose_name guard rejects both omitting the chosen name and substituting 
     '「舟」に見えますが、「鳥」って呼ぶのはどうですか？',
     '「舟」というより「鳥」と呼ぶのはどうでしょう？',
     '「舟」ですね。この形は「鳥」ですか？',
+    '「舟」にも見えますが、呼び名は「鳥」を提案します。',
+    '「舟」にも見えますが、候補は「鳥」です。',
   ]) {
     assert.deepEqual(findProposeNameMismatch(draft, '舟'), ['name_mismatch'], draft);
   }
@@ -182,6 +184,7 @@ test('propose_name guard rejects both omitting the chosen name and substituting 
     'さっきの「犬」という名前とは別に、「舟」と呼ぶのはどうでしょう？',
     '相手が言った「丸い形」のことなら、「舟」と呼ぶのはどうでしょう？',
     '「鳥」ではなく「舟」と呼ぶのはどうでしょう？',
+    '名前は「鳥」ではなく「舟」にしませんか？',
     '「横長の犬」と呼ぶのはどうでしょう？',
   ]) {
     assert.deepEqual(findProposeNameMismatch(ok, ok.includes('横長の犬') ? '横長の犬' : '舟'), [], ok);

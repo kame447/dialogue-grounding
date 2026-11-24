@@ -329,4 +329,7 @@ test('S4 orientation fallback rejects mixed name_mismatch on agree alongside sel
   assert.equal(s4Probe.s4HasNonOrientationLeak('右側の「舟」と呼ぶのはどうでしょう？', propBoat), false, 'pure orientation_leak on propose_name passes');
   assert.equal(s4Probe.s4HasNonOrientationLeak('右側に突起があります。', propBoat), true, 'missing name on propose_name rejected');
   assert.equal(s4Probe.s4HasNonOrientationLeak('右側です。「舟」に見えますが、「キリン」と呼ぶのはどうでしょう？', propBoat), true, 'substituted name on propose_name rejected');
+  assert.equal(s4Probe.s4HasNonOrientationLeak('右側です。「舟」にも見えますが、呼び名は「鳥」を提案します。', propBoat), true, 'propose verb with label noun rejected');
+  assert.equal(s4Probe.s4HasNonOrientationLeak('右側です。「舟」にも見えますが、候補は「鳥」です。', propBoat), true, 'candidate noun substitution rejected');
+  assert.equal(s4Probe.s4HasNonOrientationLeak('右側の形ですが、名前は「鳥」ではなく「舟」にしませんか？', propBoat), false, 'negated correction to judged name allowed');
 });

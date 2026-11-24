@@ -102,12 +102,14 @@ const proposePatterns: ReadonlyArray<RegExp> = [
   /(?:と|って)呼(?:ぶのは|んで(?:みるのは|みませんか|みますか)?|びませんか|びますか|ばない|ぶの|ぶこと|ぼうか|びましょうか)/gu,
   /に(?:しませんか|しない|してみませんか|するのは|しようか|しましょうか)/gu,
   /で(?:どう|いかが|いいですか|よいですか|大丈夫ですか|いきましょうか|いこうか|いってみませんか)/gu,
+  /を(?:提案|おすすめ)(?:します|したい|させて|しよう|しましょう|してみます)/gu,
   /(?:は|って|なんて|とか|も)(?:どう|いかが)/gu,
 ];
 const proposeNounPatterns: ReadonlyArray<RegExp> = [
-  /(?:この|その|こちら|そちら)?(?:図形|形)?(?:の)?名前(?:は|を)[^。!?、,]{0,16}?(?:「[^」]+」|『[^』]+』)/gu,
-  /(?:「[^」]+」|『[^』]+』)(?:という|って(?:いう)?)(?:名前|呼び名|呼び方)(?!とは別)/gu,
+  /(?:この|その|こちら|そちら)?(?:図形|形)?(?:の)?(?:名前|呼び名|呼び方|名称|候補(?:名)?)(?:は|を)[^。!?、,]{0,16}?(?:「[^」]+」|『[^』]+』)/gu,
+  /(?:「[^」]+」|『[^』]+』)(?:という|って(?:いう)?)(?:名前|呼び名|呼び方|名称|候補(?:名)?)(?!とは別)/gu,
 ];
+const negatedNameTail = /^(?:では(?:なく|ない|なくて)|じゃ(?:なく|ない|なくて)|より(?:も)?|から|ではなく)/u;
 
 /** For a `propose_name` draft: the judged candidate name must be shown, and no other quoted name
  * may be proposed in its place. Codes only; never decides state. */
@@ -140,6 +142,7 @@ export function findProposeNameMismatch(text: string, candidateName: string): st
     for (const pattern of proposeNounPatterns) {
       pattern.lastIndex = 0;
       for (const match of normalized.matchAll(pattern)) {
+        if (negatedNameTail.test(normalized.slice(match.index! + match[0].length))) continue;
         const clause = clauseBefore(match.index! + match[0].length);
         if (priorFigureClause.test(clause)) continue;
         if (differs(quotedNames(match[0]))) { mismatch = true; break; }
@@ -151,6 +154,7 @@ export function findProposeNameMismatch(text: string, candidateName: string): st
     for (const pattern of copulaNaming) {
       pattern.lastIndex = 0;
       for (const match of normalized.matchAll(pattern)) {
+        if (negatedNameTail.test(normalized.slice(match.index! + match[0].length))) continue;
         const clause = clauseBefore(match.index! + match[0].length);
         if (priorFigureClause.test(clause)) continue;
         if (differs(quotedNames(match[0]))) { mismatch = true; break; }

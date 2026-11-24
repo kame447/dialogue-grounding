@@ -86,11 +86,12 @@ function s4HasNonOrientationLeak(text:string,action:any):boolean{
   const deferred=(index:number)=>(/(?:後|あと|後日|今度|別の機会|保留|後回し|先送り|先延ばし)$/u).test(compact.slice(0,index));
   const priorFigure=/(?:前の|さっきの|先ほどの|以前の|別の|他の)(?:図形|形|名前|呼び名)/u;
   const differs=(qs:string[])=>qs.length>0&&qs.at(-1)!==target;
-  for(const re of [/(?:と|って)呼(?:ぶのは|んで(?:みるのは|みませんか|みますか)?|びませんか|びますか|ばない|ぶの|ぶこと|ぼうか|びましょうか)/gu,/に(?:しませんか|しない|してみませんか|するのは|しようか|しましょうか)/gu,/で(?:どう|いかが|いいですか|よいですか|大丈夫ですか|いきましょうか|いこうか|いってみませんか)/gu,/(?:は|って|なんて|とか|も)(?:どう|いかが)/gu]){
+  const negTail=/^(?:では(?:なく|ない|なくて)|じゃ(?:なく|ない|なくて)|より(?:も)?|から)/u;
+  for(const re of [/(?:と|って)呼(?:ぶのは|んで(?:みるのは|みませんか|みますか)?|びませんか|びますか|ばない|ぶの|ぶこと|ぼうか|びましょうか)/gu,/に(?:しませんか|しない|してみませんか|するのは|しようか|しましょうか)/gu,/で(?:どう|いかが|いいですか|よいですか|大丈夫ですか|いきましょうか|いこうか|いってみませんか)/gu,/を(?:提案|おすすめ)(?:します|したい|させて|しよう|しましょう|してみます)/gu,/(?:は|って|なんて|とか|も)(?:どう|いかが)/gu]){
    for(const m of compact.matchAll(re)){if(re.source.startsWith('に')&&deferred(m.index!))continue;const c=clauseBefore(m.index!);if(priorFigure.test(c))continue;if(differs(quoted(c)))return true;}
   }
-  for(const re of [/(?:この|その|こちら|そちら)?(?:図形|形)?(?:の)?名前(?:は|を)[^。!?、,]{0,16}?(?:「[^」]+」|『[^』]+』)/gu,/(?:「[^」]+」|『[^』]+』)(?:という|って(?:いう)?)(?:名前|呼び名|呼び方)(?!とは別)/gu,/(?:この|その|こちら|そちら)?(?:図形|形)?(?:の)?名前(?:は|を)[^。!?、,]{0,16}?(?:「[^」]+」|『[^』]+』)(?:です|だ|ですね|ですよ)/gu,/(?:この|その|こちら|そちら)の?(?:図形|形)は[^。!?、,]{0,16}?(?:「[^」]+」|『[^』]+』)(?:です|だ|ですね|ですよ)/gu]){
-   for(const m of compact.matchAll(re)){if(priorFigure.test(clauseBefore(m.index!+m[0].length)))continue;if(differs(quoted(m[0])))return true;}
+  for(const re of [/(?:この|その|こちら|そちら)?(?:図形|形)?(?:の)?(?:名前|呼び名|呼び方|名称|候補(?:名)?)(?:は|を)[^。!?、,]{0,16}?(?:「[^」]+」|『[^』]+』)/gu,/(?:「[^」]+」|『[^』]+』)(?:という|って(?:いう)?)(?:名前|呼び名|呼び方|名称|候補(?:名)?)(?!とは別)/gu,/(?:この|その|こちら|そちら)?(?:図形|形)?(?:の)?名前(?:は|を)[^。!?、,]{0,16}?(?:「[^」]+」|『[^』]+』)(?:です|だ|ですね|ですよ)/gu,/(?:この|その|こちら|そちら)の?(?:図形|形)は[^。!?、,]{0,16}?(?:「[^」]+」|『[^』]+』)(?:です|だ|ですね|ですよ)/gu]){
+   for(const m of compact.matchAll(re)){if(negTail.test(compact.slice(m.index!+m[0].length)))continue;if(priorFigure.test(clauseBefore(m.index!+m[0].length)))continue;if(differs(quoted(m[0])))return true;}
   }
  }
  return false;
