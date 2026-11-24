@@ -166,8 +166,8 @@ const ALWAYS_V3=['accept','defer','revisit','move_on','close'];
 const ANY_TARGET=['accept','defer','move_on','close'];
 // Adaptive-only context of the attempt being replayed, set at the start of the (synchronous) replay proof: whether repairFacts
 // existed (its guidance sentence is part of every instruction), and the saved per-figure agreeNames (known=false: no source).
-type ReplayContext={policy:string|null;agreeMatch:{l0:boolean;l2:boolean}|null;facts:boolean;agree:any[]|undefined;known:boolean;v3:boolean;trial:boolean;ledger:Record<string,{status:string;name:string|null}>|undefined;legacyV3:boolean;style:null|'legacy'|'style'|'loop'|'holistic'};
-const defaultContext:ReplayContext={policy:null,agreeMatch:null,facts:false,agree:undefined,known:true,v3:false,trial:false,ledger:undefined,legacyV3:false,style:null};
+type ReplayContext={policy:string|null;agreeMatch:{l0:boolean;l2:boolean}|null;facts:boolean;agree:any[]|undefined;known:boolean;v3:boolean;trial:boolean;ledger:Record<string,{status:string;name:string|null}>|undefined;legacyV3:boolean;style:null|'legacy'|'style'|'loop'|'holistic';humanNames?:Set<string>|null};
+const defaultContext:ReplayContext={policy:null,agreeMatch:null,facts:false,agree:undefined,known:true,v3:false,trial:false,ledger:undefined,legacyV3:false,style:null,humanNames:null};
 const CTX={...defaultContext};
 const H=()=>CTX.policy==='holistic_v1'||CTX.policy==='holistic_v2';
 // Only the verified integrated profile can name two_stage_v2; every other record is read as two_stage_v1.
@@ -349,6 +349,12 @@ function s4DraftTriggers(text:string,action:string,openProposal:boolean,agreed:S
  return[...(openProposal?['typed_context']:[]),...(wording?['naming_words']:[]),...(quoted.some(q=>!agreed.has(ledgerName(q))&&ledgerName(q)!==chosen)?['quoted_other']:[])];
 }
 // This turn's human utterance carries a name proposal / approval request (a name_propose claim of this very turn).
+// holistic_v2: every name the partner proposed by this turn, from the turn's own claims before any input limit (the saved graph plus this turn's local claims).
+function s4HumanProposedNames(tape:any,trace:any):Set<string>{
+ const graph=tape.generationGraph??tape.state?.graph;
+ const claims=[...(graph?.records??[]).filter((c:any)=>c.kind==='claim'),...(trace.local?.claims??[]).filter((c:any)=>c.kind==='claim')];
+ return new Set(claims.filter((c:any)=>c.speaker==='human'&&c.act==='name_propose'&&typeof c.name==='string'&&c.name!==''&&c.sourceTurn<=trace.turnIndex).map((c:any)=>ledgerName(c.name)));
+}
 function s4OpenHumanProposal(tape:any,trace:any):boolean{
  const graph=tape.generationGraph??tape.state?.graph;
  const claims=[...(graph?.records??[]).filter((c:any)=>c.kind==='claim'),...(trace.local?.claims??[]).filter((c:any)=>c.kind==='claim')];
@@ -551,7 +557,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
     typeof instructions==='string'&&instructions.endsWith('\n'+LEGACY_V3_TARGET));
   const src=agreeSource(tr,t,key,tape,legacyV3);if(src==='invalid')return'invalid';
    const trial=trialVersion(t,tape.technicalTrial);if(trial==='invalid')return'invalid';
-   Object.assign(CTX,{facts:Array.isArray(t.repairFacts),agree:src.names,known:src.known,v3:layout==='two_stage_v3',trial:trial!==null,ledger:tape.state?.ledger,legacyV3,style:null,policy:tr.profile?.dialoguePolicy??null});
+   Object.assign(CTX,{facts:Array.isArray(t.repairFacts),agree:src.names,known:src.known,v3:layout==='two_stage_v3',trial:trial!==null,ledger:tape.state?.ledger,legacyV3,style:null,policy:tr.profile?.dialoguePolicy??null,humanNames:tr.profile?.dialoguePolicy==='holistic_v2'?s4HumanProposedNames(tape,t):null});
  if(!exact(tape,['schemaVersion','state','events','common','tails','recorded',...(Object.hasOwn(tape??{},'technicalTrial')?['technicalTrial']:[]),...(Object.hasOwn(tape??{},'generationRetryVersion')?['generationRetryVersion']:[])])||tape.schemaVersion!=='parity_intervention_replay_v1'||!exact(result,['schemaVersion','status','error','commonEqual','policyConformant','recordedPayloadsReproduced','actualLunaHttpMeasured','hashScheme','excludedEnvelopeFields','sides'])||result.schemaVersion!=='parity_intervention_replay_result_v1'||result.status!=='same_material_intervention_verified'||result.error!==null||result.commonEqual!==true||result.policyConformant!==true||result.recordedPayloadsReproduced!==true||typeof result.actualLunaHttpMeasured!=='boolean'||result.hashScheme!=='canonical_json_sha256_not_raw_body_bytes'||!equal(result.excludedEnvelopeFields,META_KEYS)||!Array.isArray(result.sides)||result.sides.length!==2)return'invalid';
  // The replay plan declares a shared version. An attempt without a retry has no retry wire text to bind.
  if(Object.hasOwn(tape,'generationRetryVersion')&&(layout!=='two_stage_v3'||tape.generationRetryVersion!=='jev_generation_retry_v2')||
@@ -770,6 +776,7 @@ function catalog(input:any,target:any,kind:'name'|'feature'):{value:string;figur
   for(const value of new Set(values)){
    if(ledger&&entry){const name=ledgerName(value);if(entry.status==='deferred'&&entry.name!==null&&ledgerName(entry.name)!==name||
       Object.entries(ledger).some(([other,e])=>other!==id&&e.name!==null&&ledgerName(e.name)===name))continue;}
+   if(CTX.policy==='holistic_v2'&&CTX.humanNames&&CTX.humanNames.has(ledgerName(value)))continue;
    if(partner.some((c:any)=>ledgerName(c.name)===ledgerName(value)&&(CTX.policy==='holistic_v2'||c.targets.length===0||c.targets.includes(id))))continue;
    const old=out.find(c=>c.value===value);if(old){if(!old.figureIds.includes(id))old.figureIds.push(id);}else out.push({value,figureIds:[id]});
   }
@@ -828,6 +835,8 @@ function rankProof(i:any,d:any,input:any):boolean{
 const nativeInstructions=(s:any,layout='two_stage_v1',prospect=false)=>(layout==='two_stage_v3'?NATIVE.common.replace(NATIVE_V2.v1Stages,NATIVE_V3.stages):layout==='two_stage_v2'?NATIVE.common.replace(NATIVE_V2.v1Stages,NATIVE_V2.stages):NATIVE.common)+(Object.hasOwn(s,'humanReferent')?'\n'+NATIVE.referent:'')+(prospect&&Object.hasOwn(s,'repairProspect')?'\n'+ADAPT.prospect:'')+(CTX.facts?'\n'+ADAPT.facts:'');
 function originalQuestions(body:any,input:any,layout='two_stage_v1'):boolean|null{
   if(body.model!=='typesafe/jev-1.14'||!Array.isArray(input.ownSlots)||input.ownSlots.length!==6||!Array.isArray(input.observations)||!Array.isArray(input.publicNames)||Object.hasOwn(input,'nameLedger'))return false;
+  // holistic_v2 never sends a name the partner proposed among the public names (decided from the turn's full claims, not from the shortened ones).
+  if(CTX.policy==='holistic_v2'&&CTX.humanNames&&input.publicNames.some((n:any)=>CTX.humanNames!.has(ledgerName(String(n?.name)))))return false;
   // An agree label can be missing only for want of eligible saved agreeNames; with no saved source that cannot be told from forgery.
   if(!CTX.known&&body.questions?.action?.criteria&&!Object.hasOwn(body.questions.action.criteria,'agree'))return null;
   // two_stage_v3 offers agree only from saved explicit public evidence: without a known source neither its presence nor its absence can be told from forgery.

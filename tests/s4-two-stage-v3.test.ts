@@ -845,3 +845,27 @@ test('05k-B1: the extraction instruction of a holistic record is checked against
     }
   }
 });
+
+test('05l: a human-proposed name left in the public names or candidates is refused by S4 for holistic_v2 (full claims decide), and accepted where the earlier rule allowed it', async () => {
+  const [s0, s1] = Object.keys(OLD.state.ledger);
+  const build = (policy: 'holistic_v1' | 'holistic_v2' | null) => buildRecords({ dialoguePolicy: policy, turns: [
+    { human: 'この二つのどちらかに、帆って呼び名はどう？', plan: { action: 'accept', target: 'none', act: 'name_propose', extraction: JSON.stringify([{ segmentId: 's1', quote: '帆', targets: [s0, s1],
+      aspect: 'name', proposition: '帆と呼ぶ提案', name: '帆', linkedIssueId: null, respondsToTurn: null }]) } },
+    { human: '他の図形はどう呼びますか。', plan: { action: 'propose_name', target: 'figure_2', name: '帆', speech: '「帆」と呼ぶのはどうでしょう？' } }] });
+  // The earlier rule only excludes the figures the proposal named, so this is a valid holistic_v1 record: AI proposes the partner's name for figure 2.
+  const v1 = await build('holistic_v1');
+  assert.equal(v1.trials[0].attempts[0].executed.name, '帆');
+  assert.ok(finalChecks(v1).length >= 4 && finalChecks(v1).every((c: any) => c.status === 'pass'), 'holistic_v1 positive control');
+  const asV2 = relabel(v1, 'holistic_v2');
+  assert.ok(finalChecks(asV2).some((c: any) => c.status === 'mismatch'), 'the same record under holistic_v2');
+  // The regular v2 record (the partner name is not offered) still passes.
+  const v2 = await namedRecords();
+  assert.ok(finalChecks(v2).every((c: any) => c.status === 'pass'));
+  // A regular v2 record whose turn carries the partner proposal: the full claims name it and the request does not offer it.
+  const withProposal = await buildRecords({ turns: [
+    { human: 'この二つのどちらかに、帆って呼び名はどう？', plan: { action: 'accept', target: 'none', act: 'name_propose', extraction: JSON.stringify([{ segmentId: 's1', quote: '帆', targets: [s0, s1],
+      aspect: 'name', proposition: '帆と呼ぶ提案', name: '帆', linkedIssueId: null, respondsToTurn: null }]) } },
+    { human: 'どうですか。', plan: { action: 'accept', target: 'none' } }] });
+  assert.equal(withProposal.trials[0].profile.dialoguePolicy, 'holistic_v2');
+  assert.ok(finalChecks(withProposal).length >= 4 && finalChecks(withProposal).every((c: any) => c.status === 'pass'));
+});
