@@ -1,3 +1,4 @@
+import { verifiedParticipantUsage } from './participant-usage-fields.ts';
 import { resolvePurposeModel } from "./modelPolicy.mjs";
 import { OPENROUTER_DECISIONS_URL, DECISION_MODELS, decisionConfig, buildDecisionPayload, sanitizeDecision } from "./decisions.mjs";
 import { GROUNDING_CRITERIA_VERSION, GROUNDING_MODELS, GROUNDING_LEVELS, groundingConfig, buildGroundingPayload, sanitizeGroundingVerdict } from "./grounding.ts";
@@ -205,7 +206,8 @@ async function handleDecisions(request, env, fetchImpl, route = DECISION_ROUTE) 
   }
 }
 
-export async function handleRequest(request, env, fetchImpl = globalThis.fetch, expectedModel = /** @type {string|null} */ (null), usageOnly = false) {
+export async function handleRequest(request, env, fetchImpl = globalThis.fetch, expectedModel = /** @type {string|null} */ (null), usageOnly = false,
+  /** @type {((usage: import('./participant-usage-fields.ts').VerifiedParticipantUsage) => void) | undefined} */ onRejectedUsage = undefined) {
   const pathname = new URL(request.url).pathname;
   if (!["/health", "/v1/chat/completions", "/v1/model-policy", "/v1/decisions", "/v1/decision-policy", "/v1/grounding-evidence", "/v1/grounding-policy"].includes(pathname)) {
     return reply(404, { error: "not_found" });
@@ -314,6 +316,10 @@ export async function handleRequest(request, env, fetchImpl = globalThis.fetch, 
           (data.model.startsWith(selected.model + "-") && /^\d{4}-\d{2}-\d{2}$|^\d{8}$/.test(data.model.slice(selected.model.length + 1)))))) {
       return reply(502, { error: "invalid_upstream_model" });
     }
+    const rejected = (status, error) => {
+      if (expectedModel !== null && usageOnly) onRejectedUsage?.(verifiedParticipantUsage(expectedModel, data?.usage));
+      return reply(status, { error });
+    };
     const result = sanitizeResult(data, selected.model, expectedModel !== null && usageOnly);
     if (result && expectedModel !== null) {
       const { message, finish_reason } = result.choices[0];
@@ -325,15 +331,15 @@ export async function handleRequest(request, env, fetchImpl = globalThis.fetch, 
         ? finish_reason : null;
       const output = JSON.stringify(result);
       if ([env.RESEARCH_PROXY_TOKEN, env.UPSTREAM_API_KEY].some(secret => secret && output.includes(secret))) {
-        return reply(502, { error: "invalid_upstream_response" });
+        return rejected(502, "invalid_upstream_response");
       }
     }
     if (result) return reply(200, result);
     // Empty text after hitting the cap is deterministic for the same request,
     // so it is reported as non-retryable instead of a transient upstream error.
     return data?.choices?.[0]?.finish_reason === "length" ?
-      reply(422, { error: "upstream_output_limit" }) :
-      reply(502, { error: "invalid_upstream_response" });
+      rejected(422, "upstream_output_limit") :
+      rejected(502, "invalid_upstream_response");
   } catch {
     return reply(controller.signal.aborted ? 504 : 502, {
       error: controller.signal.aborted ? "upstream_timeout" : "upstream_unavailable",

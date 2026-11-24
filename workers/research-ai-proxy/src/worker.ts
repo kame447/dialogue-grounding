@@ -1,4 +1,5 @@
 import { WorkerEntrypoint } from 'cloudflare:workers';
+import type { VerifiedParticipantUsage } from './participant-usage-fields.ts';
 import { handleRequest } from './index.mjs';
 import { configuredParticipantPin, participantChoices, participantUsageChoices } from './participant-transport.ts';
 
@@ -18,6 +19,7 @@ interface ProxyEnvironment {
 interface InternalResult {
   status: number;
   data: unknown;
+  verifiedUsage?: VerifiedParticipantUsage;
 }
 
 // A module function, not a method: every public method of the entrypoint is callable over RPC.
@@ -37,8 +39,9 @@ async function forward(env: ProxyEnvironment, path: '/v1/chat/completions' | '/v
     },
     body,
   });
-  const result = await handleRequest(request, env, globalThis.fetch, expectedModel, usageOnly);
-  return { status: result.status, data: await result.json() };
+  let verifiedUsage: VerifiedParticipantUsage | undefined;
+  const result = await handleRequest(request, env, globalThis.fetch, expectedModel, usageOnly, value => { verifiedUsage = value; });
+  return { status: result.status, data: await result.json(), ...(verifiedUsage ? { verifiedUsage } : {}) };
 }
 
 /**

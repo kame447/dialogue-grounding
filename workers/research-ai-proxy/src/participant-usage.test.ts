@@ -45,3 +45,41 @@ test('private chat accounting exposes only the optional normalized cost and publ
     assert.deepEqual(result.usage, { prompt_tokens: 7, completion_tokens: 4, ...(expectedCost === undefined ? {} : { cost: expectedCost }) });
   }
 });
+
+test('choice rejection accounts only sanitized usage from a pinned successful upstream response', async () => {
+  const rejected = { model: pin.jevModelId, answers: {}, usage: {
+    cost: 0.012, input_tokens: 18, output_tokens: 5, private: 'RAW_CANARY',
+  } };
+  assert.deepEqual(await participantUsageChoices(env, body, pin.jevModelId, async () => Response.json(rejected)), {
+    status: 502, data: { error: 'invalid_upstream_response' },
+    verifiedUsage: { model: pin.jevModelId, costUsd: 0.012, inputTokens: 18, outputTokens: 5 },
+  });
+  assert.deepEqual(await participantChoices(env, body, pin.jevModelId, async () => Response.json(rejected)), {
+    status: 502, data: { error: 'invalid_upstream_response' },
+  });
+  assert.deepEqual(await participantUsageChoices(env, body, pin.jevModelId, async () => Response.json({
+    ...rejected, model: pin.lunaModelId,
+  })), { status: 502, data: { error: 'model_mismatch' } });
+  for (const status of [402, 429]) {
+    assert.deepEqual(await participantUsageChoices(env, body, pin.jevModelId, async () => Response.json(rejected, { status })),
+      { status, data: { error: 'upstream_error' } });
+  }
+});
+
+test('output-limit metadata reaches only the pinned private caller and never the HTTP body', async () => {
+  for (const [expected, usageOnly] of [[null, true], [pin.lunaModelId, false], [pin.lunaModelId, true]] as const) {
+    const request = new Request('https://proxy.invalid/v1/chat/completions', { method: 'POST',
+      headers: { Authorization: 'Bearer ' + env.RESEARCH_PROXY_TOKEN, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ purpose: 'dialogue_turn', messages: [{ role: 'user', content: 'synthetic' }] }),
+    });
+    const received: unknown[] = [];
+    const response = await handleRequest(request, env, async () => Response.json({
+      model: pin.lunaModelId, choices: [{ message: { content: '' }, finish_reason: 'length' }],
+      usage: { cost: 0.037, prompt_tokens: 70, completion_tokens: 'malformed', extra: 'RAW_CANARY' },
+    }), expected, usageOnly, usage => received.push(usage));
+    assert.equal(response.status, 422);
+    assert.deepEqual(await response.json(), { error: 'upstream_output_limit' });
+    assert.deepEqual(received, expected && usageOnly ?
+      [{ model: pin.lunaModelId, costUsd: 0.037, inputTokens: 70, outputTokens: null }] : []);
+  }
+});

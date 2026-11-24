@@ -1,3 +1,4 @@
+import { verifiedParticipantUsage } from './participant-usage-fields.ts';
 import { MODEL_CONTRACT_V2 } from '../../../dialogue-model/runtime/model-identity-contract.ts';
 // Private Service-binding transport. Never exposed through the Worker's fetch handler.
 import { DECISION_MODELS, OPENROUTER_DECISIONS_URL, decisionConfig } from './decisions.mjs';
@@ -112,7 +113,10 @@ async function choices(env: ParticipantEnvironment, input: unknown, expectedId: 
     try { requireExactParticipantModel(expectedId, record(raw)?.model); }
     catch { return failure(502, 'model_mismatch'); }
     const data = choiceReply(raw, request.payload.questions, usageOnly);
-    if (!data || JSON.stringify(data).includes(env.OPENROUTER_DECISIONS_API_KEY!)) return failure(502, 'invalid_upstream_response');
+    if (!data || JSON.stringify(data).includes(env.OPENROUTER_DECISIONS_API_KEY!)) {
+      const rejected = failure(502, 'invalid_upstream_response');
+      return usageOnly ? { ...rejected, verifiedUsage: verifiedParticipantUsage(expectedId, record(raw)?.usage) } : rejected;
+    }
     return { status: 200, data };
   } catch { return failure(signal.aborted ? 504 : 502, 'upstream_unavailable'); }
 }
