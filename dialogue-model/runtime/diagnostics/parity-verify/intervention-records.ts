@@ -67,13 +67,18 @@ function s4HasOrientationLeak(text:unknown):boolean{
  const unquoted=text.normalize('NFKC').replace(/[\s\u200b-\u200d\ufeff]/gu,'').replace(/「[^」]*」|『[^』]*』/gu,'「」');
  return unquoted.split(S4_CLAUSE_BREAK).some(clause=>S4_ORIENT_WORDS.test(clause)&&!S4_VIEWPOINT.test(clause));
 }
-// Generation working text in the public utterance (v3): three or more English words in a row outside quotes, not counting English words the partner used in public.
+// Generation working text (v3): runs of unpublished English words, labelled alternatives or complete quoted replies absent from the public history.
 function s4HasWorkingNote(text:unknown,publicTexts:readonly string[]):boolean{
  if(typeof text!=='string')return false;
- const allowed=new Set(publicTexts.flatMap(t=>String(t).normalize('NFKC').match(/[A-Za-z][A-Za-z'’-]*/gu)??[]).map(w=>w.toLowerCase()));
- const unquoted=text.normalize('NFKC').replace(/「[^」]*」|『[^』]*』|"[^"]*"|“[^”]*”/gu,' ');
- const nfkc=text.normalize('NFKC'),alternatives=(nfkc.match(/(?:^|\n|[。!?])\s*(?:案|候補|パターン|返答|Option|Draft|Alt)\s*[0-9A-Za-z一二三]\s*[:.)]/gu)??[]).length>=2||(nfkc.match(/^\s*(?:[0-9]+[.)]|[-・*•])?\s*[「『][^」』\r\n]{3,}[。.!?][」』]\s*$/gmu)??[]).length>=2;
- return alternatives||(unquoted.match(/[A-Za-z][A-Za-z'’-]*(?:[\s,.;:?!]+[A-Za-z][A-Za-z'’-]*){2,}/gu)??[]).some(run=>run.split(/[^A-Za-z'’-]+/u).filter(w=>w&&!allowed.has(w.toLowerCase())).length>=3);
+ const history=publicTexts.map(t=>String(t).normalize('NFKC'));
+ const allowed=new Set(history.flatMap(t=>t.match(/[A-Za-z][A-Za-z'’-]*/gu)??[]).map(w=>w.toLowerCase()));
+ const nfkc=text.normalize('NFKC');
+ const unquoted=nfkc.replace(/「[^」]*」|『[^』]*』|"[^"]*"|“[^”]*”/gu,' ');
+ const labelled=nfkc.match(/(?:^|\n|[。!?])\s*(?:案|候補|パターン|返答|Option|Draft|Alt)\s*[0-9A-Za-z一二三]\s*[:.)]/gu)??[];
+ if(labelled.length>=2)return true;
+ const quoted=nfkc.matchAll(/^\s*(?:[0-9]+[.)]|[-・*•])?\s*[「『]([^」』\r\n]{3,}[。.!?])[」』]\s*$/gmu);
+ const newReplies=[...quoted].filter(([,reply])=>!history.some(publicText=>publicText.includes(reply)));
+ return newReplies.length>=2||(unquoted.match(/[A-Za-z][A-Za-z'’-]*(?:[\s,.;:?!]+[A-Za-z][A-Za-z'’-]*){2,}/gu)??[]).some(run=>run.split(/[^A-Za-z'’-]+/u).filter(w=>w&&!allowed.has(w.toLowerCase())).length>=3);
 }
 const qTail=(tail:string)=>/^[」』”"]*(?:(?:です|ます|でした|でしょう|だろう|なの|なんです|できます|できる|しました|します|しましょう|しません|する|した|してよいです|してもよいです|しています|されています)?か(?:[?。!、,]|$)|(?:です|ます|でしょう)?(?:ね|よ)?[?])/u.test(tail);
 // Pure functions of the draft text (and the executed action) that mirror two guard families exactly: internal ids/fields and name/agreement-decision wording.

@@ -243,19 +243,20 @@ export function findOrientationLeaks(text: string): string[] {
  * (a reasoning note, an alternative reply). A format check, not a reading of the Japanese: short names, symbols and a name the partner used in public
  * (any English word of a public turn) are never counted. Codes only. */
 export function findWorkingNoteLeaks(text: string, publicTexts: readonly string[] = []): string[] {
-  const allowed = new Set(publicTexts.flatMap(t => t.normalize("NFKC").match(/[A-Za-z][A-Za-z'’-]*/gu) ?? []).map(w => w.toLowerCase()));
+  const history = publicTexts.map(t => t.normalize("NFKC"));
+  const allowed = new Set(history.flatMap(t => t.match(/[A-Za-z][A-Za-z'’-]*/gu) ?? []).map(w => w.toLowerCase()));
   const unquoted = text.normalize("NFKC").replace(/「[^」]*」|『[^』]*』|"[^"]*"|“[^”]*”/gu, " ");
   const runs = unquoted.match(/[A-Za-z][A-Za-z'’-]*(?:[\s,.;:?!]+[A-Za-z][A-Za-z'’-]*){2,}/gu) ?? [];
   const english = runs.some(run => run.split(/[^A-Za-z'’-]+/u).filter(w => w && !allowed.has(w.toLowerCase())).length >= 3);
-  return english || enumeratesAlternatives(text) ? ["working_note"] : [];
+  return english || enumeratesAlternatives(text, history) ? ["working_note"] : [];
 }
-/** Two or more independent alternative replies: labelled ones (案1：… 案2：…), or lines that are each a whole quoted reply. A list of features that
- * belongs to one question or explanation (a bulleted or numbered list of plain items) is one reply and is not counted. */
-function enumeratesAlternatives(text: string): boolean {
+/** Two or more labelled alternatives (案1：… 案2：…) or complete quoted replies whose text is absent from the public history. */
+function enumeratesAlternatives(text: string, history: readonly string[]): boolean {
   const t = text.normalize("NFKC");
   const labelled = t.match(/(?:^|\n|[。!?])\s*(?:案|候補|パターン|返答|Option|Draft|Alt)\s*[0-9A-Za-z一二三]\s*[:.)]/gu) ?? [];
-  const quotedReplies = t.match(/^\s*(?:[0-9]+[.)]|[-・*•])?\s*[「『][^」』\r\n]{3,}[。.!?][」』]\s*$/gmu) ?? [];
-  return labelled.length >= 2 || quotedReplies.length >= 2;
+  if (labelled.length >= 2) return true;
+  const quotedReplies = t.matchAll(/^\s*(?:[0-9]+[.)]|[-・*•])?\s*[「『]([^」』\r\n]{3,}[。.!?])[」』]\s*$/gmu);
+  return [...quotedReplies].filter(([, reply]) => !history.some(publicText => publicText.includes(reply))).length >= 2;
 }
 
 /** All publication rules for the committed primary act; codes only. */

@@ -62,7 +62,7 @@ async function recordedRun(profile: any, tape: any, label: 'repair-first' | 'byp
   return { trace: { ...structuredClone(traces.at(-1)), status: 'committed' }, state: structuredClone(result.privateState), reobservations: made };
 }
 /** NORMAL rebuilt as one canonical trial of the given layout, label and Jev responses (the s4-two-stage-v2 pattern). */
-async function records(layout: 'two_stage_v2' | 'two_stage_v3', jev: any[], { reobservation = false, label = 'bypass-enabled' as 'repair-first' | 'bypass-enabled', generationText = null as string | null,
+async function records(layout: 'two_stage_v2' | 'two_stage_v3', jev: any[], { reobservation = false, label = 'bypass-enabled' as 'repair-first' | 'bypass-enabled', generationText = null as string | null, humanText = null as string | null,
   retry = null as { drafts: [string, string]; current: boolean; fallback?: boolean } | null } = {}) {
   const n = structuredClone(normal), tr = n.trials[0], m = n.run.manifest;
   const profile = JSON.parse(JSON.stringify(researchTrialProfileV3(m.lunaRequest, m.timeouts, layout)));
@@ -71,6 +71,7 @@ async function records(layout: 'two_stage_v2' | 'two_stage_v3', jev: any[], { re
   tr.identity.profile = digest;
   tr.label = label; m.trials[0].label = label; n.summary.runOrder[0].label = label;
   const tape: any = { ...structuredClone(OLD), common: { ...structuredClone(OLD.common), jev }, recorded: { label, expectedRequests: [] } };
+  if (humanText !== null) tape.events.at(-1).text = humanText;
   if (generationText !== null) {
     for (const side of Object.values(tape.tails ?? {}) as any[]) {
       for (const l of side.luna ?? []) if (l.phase === 'generation') l.response = { ...l.response, text: generationText };
@@ -486,6 +487,29 @@ test('quoted features are one reply, while two complete quoted questions require
     const retried = await records('two_stage_v3', decisions, { label, retry: { current: true, drafts: [alternatives, features] } });
     pass(retried);
     assert.deepEqual(retried.trials[0].attempts[0].generationGuard, { violations: ['working_note'], regenerated: true, fallback: false });
+  }
+});
+
+test('quoted observations from the public history retain their punctuation in publication and S4 replay', async () => {
+  const decisions = [stageOne('public-quote', 'accept'), stageTwo('public-quote', 'accept', 'none')];
+  const first = '輪に切れ目がある。', second = '細い棒が輪に接している。';
+  const humanText = '特徴は「' + first + '」「' + second + '」です。';
+  const quotes = '・「' + first + '」\n・『' + second + '』\nこの二つがそろう形ですか？';
+  const workReason = '前の下書きに、英語の作業メモや複数の返答案が混じっていました。日本語の一つの返答だけにして書き直してください。';
+  for (const label of ['bypass-enabled', 'repair-first'] as const) {
+    const plain = await records('two_stage_v3', decisions, { label, humanText, generationText: quotes });
+    pass(plain);
+    assert.deepEqual(plain.trials[0].attempts[0].generationGuard, { violations: [], regenerated: false, fallback: false });
+    assert.equal(plain.trials[0].attempts[0].publicSpeech, quotes);
+
+    const retried = await records('two_stage_v3', decisions, { label, humanText,
+      retry: { current: true, drafts: ['右側に張り出しがあります。\n' + quotes, quotes] } });
+    pass(retried);
+    assert.deepEqual(retried.trials[0].attempts[0].generationGuard, { violations: ['orientation_leak'], regenerated: true, fallback: false });
+    assert.equal(retried.trials[0].attempts[0].publicSpeech, quotes);
+    const other = label === 'repair-first' ? 'bypass-enabled' : 'repair-first';
+    changeRetry(retried, other, content => content + workReason);
+    assert.equal(status(retried, 'replay'), 'mismatch');
   }
 });
 
