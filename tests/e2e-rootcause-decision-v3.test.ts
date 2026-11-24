@@ -1000,3 +1000,15 @@ test('S4 rebuilds the propose_name targets without the name the partner proposed
     finally { s4Probe.setContext({}); }
   }
 });
+
+test('holistic_v1: a propose_name draft quoting only the chosen name is not asked; another quoted string, or a typed proposal this turn, is', async () => {
+  const f = fixture('bypass-enabled', { holistic: true });
+  const mention = `この形には「${UNRELATED_NAME}」という見方もありますね。`;
+  const r = await f.exchange(mention, { action: 'propose_name', target: 0, name: UNRELATED_NAME, drafts: [`「${UNRELATED_NAME}」という呼び名はどうですか？`],
+    segments: [naming(mention, UNRELATED_NAME, [ids[0]], 'assert')] });
+  assert.equal(r.trace.draftActs, undefined);
+  assert.equal(r.requests.some(q => Object.hasOwn(q.questions, 'draft_naming')), false);
+  const g = fixture('bypass-enabled', { holistic: true });
+  const asked = await g.exchange('丸い形のことです。', { action: 'accept', target: 3, draftActs: ['recount_only'], drafts: ['それは「時計」とは違います。'] });
+  assert.equal(asked.trace.draftActs!.length, 1);
+});

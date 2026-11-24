@@ -328,7 +328,7 @@ function draftActVerdict(choice:string,action:string):string|null{
 }
 // Independent trigger recomputation: an agree draft is always asked; any other draft on a typed naming context, a naming-act wording hit, or a quoted string
 // that is not the agreed name in the executed figure's ledger.
-function s4DraftTriggers(text:string,action:string,openProposal:boolean,agreed:Set<string>):string[]{
+function s4DraftTriggers(text:string,action:string,openProposal:boolean,agreed:Set<string>,chosen:string|null=null):string[]{
  if(action==='agree')return['agree_action'];
  const compact=text.normalize('NFKC').replace(/[\s\u200b-\u200d\ufeff]/gu,'');
  const families=[/と呼(?:ぼう|びましょう|ぶことに(?:しよう|しましょう|します)|びます)/gu,/(?:で|そう)呼(?:ぼう|びましょう|ぶことに(?:しよう|しましょう|します)|びます)/gu,/で決め(?:よう|ましょう|ます)/gu,/に(?:しよう|しましょう|します|決めよう|決めましょう|決めます)/gu,/で(?:いこう|行こう|いきましょう|行きましょう|いきます|行きます)/gu,/[でに](?:決まり|決定|確定)/gu,/で(?:いい|良い|よい|大丈夫)/gu,/合意/gu];
@@ -336,14 +336,13 @@ function s4DraftTriggers(text:string,action:string,openProposal:boolean,agreed:S
  for(const re of families)for(const m of compact.matchAll(re)){const tail=compact.slice(m.index!+m[0].length);if(qTail(tail))continue;if(m[0]==='合意'&&/^(?:していません|していない|しません|ではありません|ではない|はしていません|はしていない)/u.test(tail))continue;if((re.source.startsWith('に(')||re.source==='に(?:しよう|しましょう|します|決めよう|決めましょう|決めます)')&&/(?:後|あと|後日|今度|別の機会|保留|後回し|先送り|先延ばし)$/u.test(compact.slice(0,m.index)))continue;wording=true;}
  for(const re of [/(?:呼び名|呼称|名前)(?:は|を)[^。!?、,]{0,16}?(?:「[^」]+」|『[^』]+』)(?:です|だ|ですね|ですよ)/gu,/(?:この|その|こちら|そちら)?(?:図形|形)?(?:の)?名前(?:は|を)[^。!?、,]{0,16}?(?:「[^」]+」|『[^』]+』)(?:です|だ|ですね|ですよ)/gu,/(?:この|その|こちら|そちら)の?(?:図形|形)は[^。!?、,]{0,16}?(?:「[^」]+」|『[^』]+』)(?:です|だ|ですね|ですよ)/gu])if(re.test(compact))wording=true;
  const quoted=[...compact.matchAll(/「([^」]+)」|『([^』]+)』/gu)].map(m=>m[1]??m[2]);
- return[...(openProposal?['typed_context']:[]),...(wording?['naming_words']:[]),...(quoted.some(q=>!agreed.has(ledgerName(q)))?['quoted_other']:[])];
+ return[...(openProposal?['typed_context']:[]),...(wording?['naming_words']:[]),...(quoted.some(q=>!agreed.has(ledgerName(q))&&ledgerName(q)!==chosen)?['quoted_other']:[])];
 }
-// A human name proposal since the last committed agree/defer/move_on (claims of the saved graph plus this turn's own local claims).
+// This turn's human utterance carries a name proposal / approval request (a name_propose claim of this very turn).
 function s4OpenHumanProposal(tape:any,trace:any):boolean{
- const boundary=(tape.state?.judgments??[]).filter((j:any)=>['agree','defer','move_on'].includes(j.judgment?.action)).at(-1)?.turnIndex??0;
  const graph=tape.generationGraph??tape.state?.graph;
  const claims=[...(graph?.records??[]).filter((c:any)=>c.kind==='claim'),...(trace.local?.claims??[]).filter((c:any)=>c.kind==='claim')];
- return claims.some((c:any)=>c.speaker==='human'&&c.act==='name_propose'&&typeof c.name==='string'&&c.sourceTurn>boundary);
+ return claims.some((c:any)=>c.speaker==='human'&&c.act==='name_propose'&&typeof c.name==='string'&&c.sourceTurn===trace.turnIndex);
 }
 function traceShape(t:any,layout='two_stage_v1'):boolean{
  const req=['schemaVersion','turnIndex','lastEventId','attemptNumber','status','initialObservation','reobservations','local','humanReferent','decisions','intervention','executed','finalAction','publicSpeech','observationMemo','repairHistory','generationGuard'];
@@ -584,7 +583,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
       if(CTX.policy!=='holistic_v1'||r.role!=='post_generation'||gi<0||!ex||typeof prevDraft!=='string'||askedDrafts.includes(gi)||!equal(p.questions,DRAFT_NAMING_QUESTIONS_S4)||p.model!=='typesafe/jev-1.14')return'invalid';
       const ids:string[]=ex.target.kind==='single'?[ex.target.figureId]:ex.target.kind==='multiple'?ex.target.figureIds:[];
       const agreed=new Set<string>(ids.map((id:string)=>tape.state.ledger?.[id]?.name).filter((n:any)=>typeof n==='string').map(ledgerName));
-      const trig=s4DraftTriggers(prevDraft,ex.action,s4OpenHumanProposal(tape,t),agreed);
+      const trig=s4DraftTriggers(prevDraft,ex.action,s4OpenHumanProposal(tape,t),agreed,ex.action==='propose_name'&&typeof ex.name==='string'?ledgerName(ex.name):null);
       const turns=(tape.events??[]).filter((e:any)=>e.seq<=t.turnIndex).slice(-12).map((e:any)=>({turn:e.seq,speaker:e.speaker,text:String(e.text).slice(0,400)}));
       if(!trig.length||p.state!==JSON.stringify({turn:t.turnIndex,publicTurns:turns,reasons:trig,selected:{action:ex.action,target:ex.target,name:ex.name},draft:prevDraft}))return'invalid';
       const v=draftActVerdict(answer.answers.draft_naming.choice,ex.action);draftVerdicts.push(v);lastVerdict=v;askedDrafts.push(gi);
@@ -664,7 +663,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
     if(t.generationGuard?.fallback!==true&&typeof t.publicSpeech==='string'&&ex){
      const ids:string[]=ex.target.kind==='single'?[ex.target.figureId]:ex.target.kind==='multiple'?ex.target.figureIds:[];
      const agreed=new Set<string>(ids.map((id:string)=>tape.state.ledger?.[id]?.name).filter((n:any)=>typeof n==='string').map(ledgerName));
-     const target=s4DraftTriggers(t.publicSpeech,ex.action,s4OpenHumanProposal(tape,t),agreed).length>0,final=acts.find(a=>a.draft===fin);
+     const target=s4DraftTriggers(t.publicSpeech,ex.action,s4OpenHumanProposal(tape,t),agreed,ex.action==='propose_name'&&typeof ex.name==='string'?ledgerName(ex.name):null).length>0,final=acts.find(a=>a.draft===fin);
      if(target!==Boolean(final)||final&&(final.status!=='ok'||draftActVerdict(final.choice,ex.action)!==null))return'invalid';
     }
    }

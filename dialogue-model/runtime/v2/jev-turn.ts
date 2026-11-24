@@ -912,14 +912,15 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         ...(aiEnabled ? findLocalPublicationViolations(text, privateInstructions) : [])])];
       // holistic_v1: a closed-set question about the draft's naming act. An agree draft is always asked; any other draft only on a typed naming context,
       // a naming-act wording hit or a quoted string that is not the figure's agreed name. A failed question is "unconfirmed", never a pass.
-      const boundary = state.judgments.filter(j => ["agree", "defer", "move_on"].includes(j.judgment.action)).at(-1)?.turnIndex ?? 0;
-      const openHumanProposal = claims.some(c => c.speaker === "human" && c.act === "name_propose" && c.name !== null && c.sourceTurn > boundary);
+      // Typed context: this turn's human utterance carries a name proposal or a request for approval of a name (both are name_propose claims).
+      const openHumanProposal = claims.some(c => c.speaker === "human" && c.act === "name_propose" && c.name !== null && c.sourceTurn === latest.seq);
+      const chosenName = judgment.action === "propose_name" && typeof judgment.candidateName === "string" ? normalizeName(judgment.candidateName) : null;
       const agreedNames = new Set(targets(execution).map(id => state.ledger[id]?.name).filter((n): n is string => typeof n === "string").map(normalizeName));
       const draftTriggers = (text: string) => {
         if (judgment.action === "agree") return ["agree_action"];
         const hints = findNamingActHints(text);
         return [...(openHumanProposal ? ["typed_context"] : []), ...(hints.wording ? ["naming_words"] : []),
-          ...(hints.quoted.some(q => !agreedNames.has(normalizeName(q))) ? ["quoted_other"] : [])];
+          ...(hints.quoted.some(q => !agreedNames.has(normalizeName(q)) && normalizeName(q) !== chosenName) ? ["quoted_other"] : [])];
       };
       const confirmDraft = async (text: string, draft: "initial" | "retry", found: string[]): Promise<string[]> => {
         if (!holistic || found.length) return found;
