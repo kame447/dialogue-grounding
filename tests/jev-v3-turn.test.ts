@@ -51,8 +51,13 @@ function tape(plan: Plan) {
     const state = body.messages[1]?.content; let parsed: any; try { parsed = JSON.parse(state); } catch { /* not JSON */ }
     if (plan.segmentText && parsed?.publicTurns && !parsed.candidateText && parsed.publicTurns.filter((t: any) => t.speaker === 'human').at(-1)?.text === plan.segmentText)
       return Response.json({ model: modelId, choices: [{ message: { content: JSON.stringify(plan.segments) } }], usage: { prompt_tokens: 3, completion_tokens: 2 } });
+    const actMsg = body.messages.find((m: any) => typeof m.content === 'string' && m.content.startsWith('Jevが選んだ行動'));
+    let chosenAct: any = null;
+    if (actMsg) { try { chosenAct = JSON.parse(actMsg.content.split('\n').at(-1)); } catch { /* ignore */ } }
+    const defaultReply = chosenAct?.action === 'propose_name' && typeof chosenAct.candidateName === 'string' && chosenAct.candidateName
+      ? `「${chosenAct.candidateName}」と呼ぶのはどうでしょう？` : 'もう一度、先ほどの点に戻りたいです。';
     const final = String(body.messages.at(-1)?.content).includes('JSON') && !parsed?.candidateText && !parsed?.publicTurns;
-    const text = parsed?.candidateText || parsed?.publicTurns ? '[]' : final ? JSON.stringify(Object.fromEntries(model.anchors.map((a: any) => [a.id, null]))) : 'もう一度、先ほどの点に戻りたいです。';
+    const text = parsed?.candidateText || parsed?.publicTurns ? '[]' : final ? JSON.stringify(Object.fromEntries(model.anchors.map((a: any) => [a.id, null]))) : defaultReply;
     return Response.json({ model: modelId, choices: [{ message: { content: text } }], usage: { prompt_tokens: 3, completion_tokens: 2 } });
   };
   return { fetchImpl, posts, generations, plan, readKey: async () => syntheticKey };
