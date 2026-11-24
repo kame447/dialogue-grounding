@@ -351,13 +351,14 @@ function s4DraftTriggers(text:string,action:string,openProposal:boolean,agreed:S
 // This turn's human utterance carries a name proposal / approval request (a name_propose claim of this very turn).
 // holistic_v2: every name the partner proposed by this turn, from the turn's own claims before any input limit (the saved graph plus this turn's local claims).
 function s4HumanProposedNames(tape:any,trace:any):Set<string>{
+ // The live claims after this turn's own update, as the run derives them: a withdrawn proposal (and what answered it) is no longer a proposal.
  const graph=tape.generationGraph??tape.state?.graph;
- const claims=[...(graph?.records??[]).filter((c:any)=>c.kind==='claim'),...(trace.local?.claims??[]).filter((c:any)=>c.kind==='claim')];
+ const claims=liveClaims({records:[...(graph?.records??[]),...(trace.local?.claims??[]).filter((c:any)=>c.kind==='claim')]});
  return new Set(claims.filter((c:any)=>c.speaker==='human'&&c.act==='name_propose'&&typeof c.name==='string'&&c.name!==''&&c.sourceTurn<=trace.turnIndex).map((c:any)=>ledgerName(c.name)));
 }
 function s4OpenHumanProposal(tape:any,trace:any):boolean{
  const graph=tape.generationGraph??tape.state?.graph;
- const claims=[...(graph?.records??[]).filter((c:any)=>c.kind==='claim'),...(trace.local?.claims??[]).filter((c:any)=>c.kind==='claim')];
+ const claims=liveClaims({records:[...(graph?.records??[]),...(trace.local?.claims??[]).filter((c:any)=>c.kind==='claim')]});
  return claims.some((c:any)=>c.speaker==='human'&&c.sourceTurn===trace.turnIndex&&(c.act==='name_propose'&&typeof c.name==='string'||c.act==='ask'&&c.aspect==='name'&&claims.some((q:any)=>q.id===c.respondsTo&&q.act==='name_propose'&&typeof q.name==='string')));
 }
 function traceShape(t:any,layout='two_stage_v1'):boolean{

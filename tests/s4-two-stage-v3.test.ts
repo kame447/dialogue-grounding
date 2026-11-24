@@ -869,3 +869,24 @@ test('05l: a human-proposed name left in the public names or candidates is refus
   assert.equal(withProposal.trials[0].profile.dialoguePolicy, 'holistic_v2');
   assert.ok(finalChecks(withProposal).length >= 4 && finalChecks(withProposal).every((c: any) => c.status === 'pass'));
 });
+
+test('05m: a withdrawn partner proposal is no longer a proposal: the regular holistic_v2 record (both strategies) is accepted', async () => {
+  const [s0, s1, , s3] = Object.keys(OLD.state.ledger);
+  const seg = (quote: string, targets: string[], name: string | null) => JSON.stringify([{ segmentId: 's1', quote, targets, aspect: 'name', proposition: quote, name, linkedIssueId: null, respondsToTurn: null }]);
+  const proposal = { human: 'この二つのどちらかに、帆って呼び名はどう？', plan: { action: 'accept', target: 'none', act: 'name_propose', extraction: seg('帆', [s0, s1], '帆') } };
+  for (const label of ['repair-first', 'bypass-enabled'] as const) {
+    // two turns: the partner withdraws the named proposal, then the AI may propose that name (the proposal no longer exists).
+    const named = await buildRecords({ label, turns: [proposal,
+      { human: 'さっきの「帆」という私の案は取り下げます。', plan: { action: 'accept', target: 'none', act: 'withdraw', antecedent: 'claim_0', extraction: seg('帆', [s0, s1], '帆'), respondsToTurn: 3 } as any },
+      { human: 'どう呼びましょう。', plan: { action: 'propose_name', target: 'figure_2', name: '帆', speech: '「帆」と呼ぶのはどうでしょう？' } }] });
+    assert.equal(named.trials[0].attempts[0].executed.name, '帆', label);
+    assert.ok(finalChecks(named).length >= 4 && finalChecks(named).every((c: any) => c.status === 'pass'), label + ' (named withdrawal)');
+    // three turns: a withdrawal that omits the name, then a neutral mention of the same name for another figure and the AI's proposal of it.
+    const nameless = await buildRecords({ label, turns: [proposal,
+      { human: 'さっきの案は取り下げます。', plan: { action: 'accept', target: 'none', act: 'withdraw', antecedent: 'claim_0', extraction: seg('取り下げます', [s0, s1], null) } },
+      { human: 'こちらには「帆」という見方もありますね。', plan: { action: 'propose_name', target: 'figure_3', name: '帆', act: 'assert', speech: '「帆」と呼ぶのはどうでしょう？',
+        extraction: seg('帆', [s3], '帆') } }] });
+    assert.equal(nameless.trials[0].attempts[0].executed.name, '帆', label);
+    assert.ok(finalChecks(nameless).length >= 4 && finalChecks(nameless).every((c: any) => c.status === 'pass'), label + ' (nameless withdrawal)');
+  }
+});
