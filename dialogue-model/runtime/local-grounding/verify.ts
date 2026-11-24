@@ -103,8 +103,10 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     // Independent statements do not require an antecedent. Check before target
     // inheritance so discarding a pointer cannot transfer its figure candidates.
     // An approval question about a name, linked by the classifier to an earlier name proposal while neither names a figure, has no figure to contradict: the link stays.
-    const unboundApproval = keepUnboundApproval && !!prior && act === "ask" && aspect === "name" && prior.aspect === "name" && prior.act === "name_propose" &&
-      prior.targets.length === 0 && targets.length === 0;
+    // An approval request ("is that name fine?") is a name proposal that carries the earlier proposal's name; neither names a figure, so there is none to contradict.
+    const approvalRequest = keepUnboundApproval && !!prior && act === "name_propose" && name === null && aspect === "name" && prior.aspect === "name" &&
+      prior.act === "name_propose" && prior.speaker === "human" && prior.name !== null;
+    const unboundApproval = approvalRequest && prior!.targets.length === 0 && targets.length === 0;
     if (prior && independentActs.has(act) && prior.sourceTurn < turn &&
         (prior.aspect !== aspect || !unboundApproval && !overlap(prior.targets, targets.length ? targets : prior.targets) ||
           (segment.respondsToTurn !== null && segment.respondsToTurn !== prior.sourceTurn))) {
@@ -130,7 +132,8 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     if (act === "construe" && aspect !== "construal" || act.startsWith("name_") && aspect !== "name") {
       reject("act_aspect_mismatch"); continue;
     }
-    if (act === "name_propose") {
+    if (act === "name_propose" && approvalRequest) name = prior!.name;
+    else if (act === "name_propose") {
       const span = name === null ? null : literalSpan(quote, name);
       if (!span) { reject("nonpublic_name"); continue; }
       name = span.text;

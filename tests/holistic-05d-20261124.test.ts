@@ -69,3 +69,38 @@ test('05l: S4 judges the partner-name exclusion from the turn\'s full claims, no
   ctx(new Set(['帆']));
   assert.equal(s4Probe.originalQuestions(body as never, JSON.parse(body.state), 'two_stage_v3'), false, 'the full claims show a partner proposal: refused');
 });
+
+import { nameBindsFigure, meaningfulEstimate } from '../dialogue-model/runtime/decision/referent-binding.ts';
+import { buildJevLocalTestPayload } from '../dialogue-model/runtime/local-grounding/jev-local-test.ts';
+import { LOCAL_FUNCTION_CRITERIA, LOCAL_FUNCTION_CRITERIA_V3, LOCAL_FUNCTION_CRITERIA_HOLISTIC_V3 } from '../dialogue-model/runtime/local-grounding/classify.ts';
+test('05q-A: the binding rule reads the newest meaningful estimate; none-first, all-zero, failed and missing estimates say nothing', () => {
+  const ids = ['s3', 's4'];
+  const est = (scores: Record<string, number>, status = 'ok') => ({ status, scores: { s0: 0, s1: 0, s2: 0, s3: 0, s4: 0, s5: 0, none: 0, multiple: 0, ...scores } });
+  assert.equal(nameBindsFigure('s3', []), false, 'no estimate: nothing binds');
+  assert.equal(nameBindsFigure('s3', [est({ s3: 0.97, none: 0.03 })]), true);
+  assert.equal(nameBindsFigure('s3', [est({ multiple: 1 })]), false);
+  assert.equal(nameBindsFigure('s3', [est({ multiple: 1 }), est({ s3: 1 })]), true, 'a later estimate that singles it out binds');
+  assert.equal(nameBindsFigure('s3', [est({ s3: 1 }), est({ multiple: 1 })]), false, 'a later contesting estimate unbinds');
+  // none first (even with small positive scores elsewhere), all zero and failed estimates are skipped: they neither bind nor unbind.
+  assert.equal(nameBindsFigure('s3', [est({ multiple: 1 }), est({ none: 0.91, s3: 0.09 })]), false, 'none=.91, s3=.09 after multiple=1 does not rebind');
+  assert.equal(nameBindsFigure('s3', [est({ s3: 1 }), est({ none: 0.91, s4: 0.09 })]), true, 'none=.91, s4=.09 after s3=1 does not unbind');
+  assert.equal(nameBindsFigure('s3', [est({ s3: 1 }), est({}), { status: 'unknown', scores: null }, null, undefined]), true);
+  assert.equal(meaningfulEstimate(est({ none: 1 })), false);
+  assert.equal(meaningfulEstimate(est({ s3: 0.5, none: 0.5 })), false, 'a tie with none points nowhere');
+  assert.equal(meaningfulEstimate(est({ s3: 0.5 }, 'unknown')), false);
+  void ids;
+});
+
+test('05q-B: only holistic_v3 carries the classification criteria that separate an approval request from a question about a name; every earlier set is byte for byte', () => {
+  const input = { turn: 3, publicTurns: [{ turn: 1, speaker: 'human', text: 'これ、かかしとかどう？' }, { turn: 2, speaker: 'ai', text: 'どの形ですか？' }, { turn: 3, speaker: 'human', text: 'その呼び名でよいですか？' }],
+    segments: [{ segmentId: 's1', quote: 'その呼び名でよいですか？', targets: [], aspect: 'name', proposition: 'p', name: null, linkedIssueId: null, respondsToTurn: null }], priorClaims: [], ownSlots: ['s-0000', 's-0001', 's-0002', 's-0003', 's-0004', 's-0005'] } as never;
+  const criteria = (layout: 'two_stage_v1' | 'two_stage_v3', policy?: string) => buildJevLocalTestPayload(input, layout, policy).questions.segment_0_act.criteria;
+  assert.deepEqual(criteria('two_stage_v1'), { ...LOCAL_FUNCTION_CRITERIA });
+  assert.deepEqual(criteria('two_stage_v3'), { ...LOCAL_FUNCTION_CRITERIA_V3 });
+  assert.deepEqual(criteria('two_stage_v3', 'holistic_v1'), { ...LOCAL_FUNCTION_CRITERIA_V3 });
+  assert.deepEqual(criteria('two_stage_v3', 'holistic_v2'), { ...LOCAL_FUNCTION_CRITERIA_V3 });
+  assert.deepEqual(criteria('two_stage_v3', 'holistic_v3'), { ...LOCAL_FUNCTION_CRITERIA_HOLISTIC_V3 });
+  assert.match(LOCAL_FUNCTION_CRITERIA_HOLISTIC_V3.name_propose, /受け入れてよいか尋ねる質問/u);
+  assert.match(LOCAL_FUNCTION_CRITERIA_HOLISTIC_V3.ask, /名前の出所/u);
+  assert.deepEqual(Object.keys(LOCAL_FUNCTION_CRITERIA_HOLISTIC_V3), Object.keys(LOCAL_FUNCTION_CRITERIA_V3), 'the closed set is the same set of labels');
+});

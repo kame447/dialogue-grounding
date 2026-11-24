@@ -214,7 +214,10 @@ function validateSupport(record, records, historical = false) {
     const responseActs = ["agree", "deny", "name_accept", "name_reject", "withdraw"];
     if (records.some((r) => r.kind === "claim" && r.issueId === record.issueId && r.aspect !== record.aspect)) fail("inconsistent_claim_issue");
     if (responseActs.includes(record.act) && !record.respondsTo) fail("missing_claim_response");
-    if (record.act === "name_propose" && (!record.name || !record.quote.includes(record.name))) fail("unsupported_claim_name");
+    // holistic_v3: an approval request carries the name of the human proposal it answers, without repeating it.
+    const inheritsName = record.act === "name_propose" && !!record.respondsTo && byId.get(record.respondsTo)?.kind === "claim" && byId.get(record.respondsTo).act === "name_propose" &&
+      byId.get(record.respondsTo).name === record.name;
+    if (record.act === "name_propose" && (!record.name || !inheritsName && !record.quote.includes(record.name))) fail("unsupported_claim_name");
     if (!record.respondsTo) return;
     const prior = byId.get(record.respondsTo);
     if (prior?.kind !== "claim" || (!historical && dead.has(prior.id))) fail("missing_provenance");
@@ -222,7 +225,7 @@ function validateSupport(record, records, historical = false) {
         prior.aspect !== record.aspect || prior.issueId !== record.issueId ||
         !(prior.targets.some((slot) => record.targets.includes(slot)) ||
           // holistic_v3: an approval question about a name that answers an unbound name proposal (neither names a figure).
-          record.act === "ask" && record.aspect === "name" && prior.act === "name_propose" && prior.targets.length === 0 && record.targets.length === 0)) fail("inconsistent_claim_response");
+          record.act === "name_propose" && record.aspect === "name" && prior.act === "name_propose" && prior.targets.length === 0 && record.targets.length === 0)) fail("inconsistent_claim_response");
     const visited = new Set([record.id]);
     let cursor = prior;
     while (cursor) {

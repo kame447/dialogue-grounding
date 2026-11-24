@@ -876,13 +876,13 @@ test('05m: a withdrawn partner proposal is no longer a proposal: the regular hol
   const proposal = { human: 'この二つのどちらかに、帆って呼び名はどう？', plan: { action: 'accept', target: 'none', act: 'name_propose', extraction: seg('帆', [s0, s1], '帆') } };
   for (const label of ['repair-first', 'bypass-enabled'] as const) {
     // two turns: the partner withdraws the named proposal, then the AI may propose that name (the proposal no longer exists).
-    const named = await buildRecords({ label, turns: [proposal,
+    const named = await buildRecords({ label, dialoguePolicy: 'holistic_v2', turns: [proposal,
       { human: 'さっきの「帆」という私の案は取り下げます。', plan: { action: 'accept', target: 'none', act: 'withdraw', antecedent: 'claim_0', extraction: seg('帆', [s0, s1], '帆'), respondsToTurn: 3 } as any },
       { human: 'どう呼びましょう。', plan: { action: 'propose_name', target: 'figure_2', name: '帆', speech: '「帆」と呼ぶのはどうでしょう？' } }] });
     assert.equal(named.trials[0].attempts[0].executed.name, '帆', label);
     assert.ok(finalChecks(named).length >= 4 && finalChecks(named).every((c: any) => c.status === 'pass'), label + ' (named withdrawal)');
     // three turns: a withdrawal that omits the name, then a neutral mention of the same name for another figure and the AI's proposal of it.
-    const nameless = await buildRecords({ label, turns: [proposal,
+    const nameless = await buildRecords({ label, dialoguePolicy: 'holistic_v2', turns: [proposal,
       { human: 'さっきの案は取り下げます。', plan: { action: 'accept', target: 'none', act: 'withdraw', antecedent: 'claim_0', extraction: seg('取り下げます', [s0, s1], null) } },
       { human: 'こちらには「帆」という見方もありますね。', plan: { action: 'propose_name', target: 'figure_3', name: '帆', act: 'assert', speech: '「帆」と呼ぶのはどうでしょう？',
         extraction: seg('帆', [s3], '帆') } }] });
@@ -929,12 +929,12 @@ for (const original of ['defer', 'move_on'] as const) {
   });
 }
 
-test('05p-B3: S4 reads the linked unbound approval question as a typed naming request: the regular holistic_v3 record (both strategies) passes without accept', async () => {
+test('05q-B: S4 reads the approval request (a name proposal that carries the earlier name) as a typed naming request: the regular holistic_v3 record (both strategies) passes without accept', async () => {
   const askSeg = JSON.stringify([{ segmentId: 's1', quote: 'その呼び名でよいですか？', targets: [], aspect: 'name', proposition: 'その呼び名でよいですか', name: null, linkedIssueId: null, respondsToTurn: 1 }]);
   for (const label of ['repair-first', 'bypass-enabled'] as const) {
     const record = await buildRecords({ label, dialoguePolicy: 'holistic_v3', turns: [
       { human: 'これ、かかしとかどう？', plan: { action: 'confirm', target: 'figure_3', act: 'name_propose', extraction: unboundSeg, speech: 'どの形のことですか？' } },
-      { human: 'その呼び名でよいですか？', plan: { action: 'confirm', target: 'figure_3', act: 'ask', antecedent: 'claim_0', extraction: askSeg, speech: 'どの形のことか、もう少し教えてください。' } }] });
+      { human: 'その呼び名でよいですか？', plan: { action: 'confirm', target: 'figure_3', act: 'name_propose', antecedent: 'claim_0', extraction: askSeg, speech: 'どの形のことか、もう少し教えてください。' } }] });
     const offered = Object.keys(sideCopies(record)[0].requests.find((q: any) => q.provider === 'jev' && q.payload.questions.action).payload.questions.action.criteria);
     assert.ok(!offered.includes('accept') && !offered.includes('agree'), label + ': ' + offered.join());
     assert.ok(finalChecks(record).length >= 4 && finalChecks(record).every((c: any) => c.status === 'pass'), label);
@@ -961,5 +961,29 @@ test('05p-B2: S4 applies the same referent-contest rule to the agree candidates:
       { human: 'これ、かかしとかどう？', plan: { action: 'agree', target: 'figure_3', name: 'かかし', act: 'name_propose', referent: 'figure_3', extraction: unboundSeg, speech: '「かかし」と呼びましょう。' } }] });
     assert.equal(single.trials[0].attempts[0].executed.action, 'agree', label);
     assert.ok(finalChecks(single).length >= 4 && finalChecks(single).every((c: any) => c.status === 'pass'), label + ' (single)');
+  }
+});
+
+test('05q-C: the copies of a committed turn (trace and saved state) agree in every shared field, the estimate agrees with the tape\'s Jev response, and the marker is recomputed', async () => {
+  const stateCopies = (n: any) => [n.trials[0].turns[0].state, n.trials[0].lastCommittedState];
+  const lastJudgment = (state: any) => state.judgments.at(-1).jevTurn;
+  for (const label of ['repair-first', 'bypass-enabled'] as const) {
+    const record = await buildRecords({ label, dialoguePolicy: 'holistic_v3', turns: [{ human: 'そうそう、それです。', plan: { action: 'accept', target: 'figure_3', referent: 'figure_3' } }] });
+    assert.ok(finalChecks(record).length >= 4 && finalChecks(record).every((c: any) => c.status === 'pass'), label + ' (regular)');
+    const flip = (hr: any) => { hr.scores = Object.fromEntries(Object.keys(hr.scores).map(k => [k, Number(k === 'multiple')])); };
+    const bad = (n: any) => !finalChecks(n).every((c: any) => c.status === 'pass');
+    const traceOnly = structuredClone(record); for (const t of traceCopies(traceOnly)) flip(t.humanReferent);
+    assert.ok(bad(traceOnly), label + ': the trace says another estimate than the saved turn');
+    const stateOnly = structuredClone(record); for (const st of stateCopies(stateOnly)) flip(lastJudgment(st).humanReferent);
+    assert.ok(bad(stateOnly), label + ': the saved turn says another estimate than the trace');
+    const bothNotTape = structuredClone(record); for (const t of traceCopies(bothNotTape)) flip(t.humanReferent); for (const st of stateCopies(bothNotTape)) flip(lastJudgment(st).humanReferent);
+    assert.ok(bad(bothNotTape), label + ': consistent copies that differ from the tape response');
+    // The marker: forged on a turn without a naming request, in the saved state only.
+    const forged = structuredClone(record); for (const st of stateCopies(forged)) lastJudgment(st).namingRequest = true;
+    assert.ok(bad(forged), label + ': a marker forged in the saved state');
+    const named = await buildRecords({ label, dialoguePolicy: 'holistic_v3', turns: [{ human: 'これ、かかしとかどう？', plan: { action: 'confirm', target: 'figure_3', act: 'name_propose', extraction: unboundSeg, speech: 'どの形のことですか？' } }] });
+    assert.ok(finalChecks(named).every((c: any) => c.status === 'pass'), label + ' (named, regular)');
+    const removed = structuredClone(named); for (const st of stateCopies(removed)) delete lastJudgment(st).namingRequest;
+    assert.ok(bad(removed), label + ': a marker removed from the saved state only');
   }
 });

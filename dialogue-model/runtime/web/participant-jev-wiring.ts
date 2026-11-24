@@ -21,6 +21,7 @@ import type { ObservationInput, ObservationObserver } from '../observation/contr
 import { createJevDecisionClient, JevDecisionError, validateRepairProspectMaterial, checkDecisionFailureEvidence } from '../decision/jev-decision.ts';
 import type { JevDecisionClient, AdaptiveRepairTrial, JevQuestionLayout } from '../decision/contract.ts';
 import { isHolisticPolicy } from '../decision/contract.ts';
+import { hasNamingRequest } from '../decision/naming-request.ts';
 import { createJevLocalTestClassifier, JevLocalTestError } from '../local-grounding/jev-local-test.ts';
 import type { JevTurnLocalOptions } from '../v2/jev-turn.ts';
 import { RunBudget } from '../diagnostics/parity-live/audit.ts';
@@ -70,7 +71,7 @@ function checkedDecisionFailure(trace: any, layout: JevQuestionLayout): boolean 
       Object.getPrototypeOf(f) !== Object.prototype || Reflect.ownKeys(f).length !== 1 || !Object.hasOwn(f, 'evidence')) return false;
   if (f.evidence === null) return trace.decisionRejectionCode !== 'action_target_not_allowed';
   // The trace names its own condition (a typed naming request of a holistic_v3 turn): only then may accept be missing from the first stage.
-  const checked = checkDecisionFailureEvidence(f.evidence, { acceptOptional: trace.namingRequest === true });
+  const checked = checkDecisionFailureEvidence(f.evidence, { acceptOptional: trace.namingRequest === true && Array.isArray(trace.local?.claims) && hasNamingRequest(trace.local.claims, trace.turnIndex) });
   if (checked === null || checked.questionLayout !== layout || researchHash(checked) !== researchHash(jsonData(f.evidence))) return false;
   // A decision the local v3 table refused names its rule twice, in the turn and in the evidence, and in no other way; no native failure may carry it.
   const local = checked.rejectionCode === 'action_target_not_allowed' && checked.stages.length === 0;
@@ -131,6 +132,21 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
           restore.jevTraces.some((trace:any)=>trace?.schemaVersion!=='jev_turn_trace_v2'||
             trace.intervention!==null&&!['bypass_acceptance_v1:accept','bypass_acceptance_v1:veto'].includes(trace.intervention?.policy)||
             !technicalTrial&&trace.intervention?.rerank?.policyId==='saved_action_scores_open_issue_v1')) return invalid();
+      // The typed-naming-request marker is recomputed from the turn's verified claims and the stored version, and the copies of a committed turn (trace and saved state)
+      // must be equal in every field they share.
+      const savedJudgments: any[] = Array.isArray(restore.queueState?.privateState?.judgments) ? restore.queueState.privateState.judgments : [];
+      for (const trace of restore.jevTraces) {
+        const marked = Object.hasOwn(trace,'namingRequest');
+        if (marked && (trace.namingRequest !== true || profile.dialoguePolicy !== 'holistic_v3' || profile.questionLayout !== 'two_stage_v3' ||
+            !Array.isArray(trace.local?.claims) || !hasNamingRequest(trace.local.claims, trace.turnIndex))) return invalid();
+        if (!marked && profile.dialoguePolicy === 'holistic_v3' && trace.status === 'committed' && Array.isArray(trace.local?.claims) && hasNamingRequest(trace.local.claims, trace.turnIndex)) return invalid();
+        if (trace.status === 'committed') {
+          const judgment = savedJudgments.find((j: any) => j?.turnIndex === trace.turnIndex && j?.jevTurn?.attemptNumber === trace.attemptNumber);
+          if (!judgment) return invalid();
+          for (const key of ['humanReferent','repairProspect','repairGate','repairFacts','draftActs','namingRequest'])
+            if (Object.hasOwn(trace, key) !== Object.hasOwn(judgment.jevTurn, key) || Object.hasOwn(trace, key) && researchHash(jsonData(trace[key])) !== researchHash(jsonData(judgment.jevTurn[key]))) return invalid();
+        }
+      }
       // v2/v3 prospects are asked over open entries; v1 retains the full history.
       const v2 = technicalTrial?.version === 'adaptive_repair_v2' || technicalTrial?.version === 'adaptive_repair_v3';
       if (restore.jevTraces.some((trace:any)=>Object.hasOwn(trace,'repairGate') ? !v2 : v2 && Object.hasOwn(trace,'repairProspect'))) return invalid();
@@ -354,7 +370,7 @@ export async function prepareParticipantJev(options:{configFile:string;baseAssig
       const client:ChatClient={complete:(messages,callOptions={})=>native.complete(messages,{...callOptions,timeoutMs:profile.timeouts.lunaAttemptMs})};
       const observer=await createParticipantCacheObserver({directory:config.cacheDirectory,modelId:config.modelId,memoSha256:config.memoSha256,own,profile,
         reobserver:createLunaObserver(participantLunaClient(client,ledger,profile),{timeoutMs:profile.timeouts.observationMs,researchLimits})});
-      const classifier=createJevLocalTestClassifier({enabled:true,...transport,questionLayout:profile.questionLayout})!;
+      const classifier=createJevLocalTestClassifier({enabled:true,...transport,questionLayout:profile.questionLayout,...(profile.dialoguePolicy==='holistic_v3'?{dialoguePolicy:'holistic_v3'}:{})})!;
       const jevResearch:JevResearchOptions={profile,observer,jevDecision,
         localGrounding:{classifier:{...classifier,get lastEvidence(){return classifier.lastEvidence;},get spentUsd(){return classifier.spentUsd;},
           get callCount(){return classifier.callCount;},classify:(...args:Parameters<typeof classifier.classify>)=>jevOperation(ledger,'jev_local',()=>classifier.classify(...args))},timeoutMs:profile.timeouts.localMs,

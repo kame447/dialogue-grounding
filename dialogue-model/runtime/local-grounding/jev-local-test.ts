@@ -4,7 +4,7 @@ import type { ResearchLimits } from '../v2/research-timeouts.ts';
 // No .env credentials, Worker changes, automatic retries or calibration claims.
 import { keychainKeyReader, DEFAULT_COST_CAP_USD, UPSTREAM_TIMEOUT_MS, maxJevCostCapUsd } from "../diagnostics/jev-shadow-eval/local-openrouter.ts";
 import { isGroundingModel, OPENROUTER_DECISIONS_URL } from "../../../workers/research-ai-proxy/src/grounding.ts";
-import { buildLocalClassificationState, LOCAL_FUNCTION_CRITERIA, LOCAL_FUNCTION_CRITERIA_V3, parseLocalFunctionVerdicts } from "./classify.ts";
+import { buildLocalClassificationState, LOCAL_FUNCTION_CRITERIA, LOCAL_FUNCTION_CRITERIA_V3, LOCAL_FUNCTION_CRITERIA_HOLISTIC_V3, parseLocalFunctionVerdicts } from "./classify.ts";
 import type { JevQuestionLayout } from "../decision/contract.ts";
 import { LOCAL_ACTS } from "./contract.ts";
 import type { LocalClassificationInput, LocalFunctionClassifier, LocalFunctionVerdict } from "./contract.ts";
@@ -90,6 +90,8 @@ export type JevLocalTestOptions = {
   researchLimits?: ResearchLimits;
   /** The profile's Jev layout; only two_stage_v3 carries the casual-proposal criterion. */
   questionLayout?: JevQuestionLayout;
+  /** holistic_v3 only: the classification criteria that separate an approval-requesting name proposal from a plain question about a name. */
+  dialoguePolicy?: string;
 };
 
 const INSTRUCTIONS = [
@@ -102,7 +104,7 @@ const INSTRUCTIONS = [
 /** The original classifier's whitelist, with safe aliases for graph IDs containing ':'.
  * Choice <=255: https://openrouter.ai/blog/tutorials/how-to-use-jev/
  * Existing input bounds give <=64 questions and <=161 antecedent choices. */
-export function buildJevLocalTestPayload(input: LocalClassificationInput, questionLayout: JevQuestionLayout = "two_stage_v1"): JevLocalTestPayload {
+export function buildJevLocalTestPayload(input: LocalClassificationInput, questionLayout: JevQuestionLayout = "two_stage_v1", dialoguePolicy?: string): JevLocalTestPayload {
   let state: string;
   try { state = buildLocalClassificationState(input); } catch { fail("invalid_request"); }
   const snapshot = JSON.parse(state) as State;
@@ -113,7 +115,7 @@ export function buildJevLocalTestPayload(input: LocalClassificationInput, questi
   snapshot.segments.forEach((_s, i) => {
     const scope = `\n判定対象はstate内のsegments[${i}]だけです。`;
     questions[`segment_${i}_act`] = { type: "choice", instructions: INSTRUCTIONS + scope +
-      "\nこの部分の局所機能を選んでください。根拠不足ならunknownです。", criteria: { ...(questionLayout === "two_stage_v3" ? LOCAL_FUNCTION_CRITERIA_V3 : LOCAL_FUNCTION_CRITERIA) } };
+      "\nこの部分の局所機能を選んでください。根拠不足ならunknownです。", criteria: { ...(questionLayout === "two_stage_v3" ? dialoguePolicy === "holistic_v3" ? LOCAL_FUNCTION_CRITERIA_HOLISTIC_V3 : LOCAL_FUNCTION_CRITERIA_V3 : LOCAL_FUNCTION_CRITERIA) } };
     questions[`segment_${i}_antecedent`] = { type: "choice", instructions: INSTRUCTIONS + scope +
       "\nこの部分が応答する先行命題を選んでください。前の質問の回答は参照できません。曖昧ならnone。", criteria: { ...antecedents } };
   });
@@ -280,7 +282,7 @@ export function createJevLocalTestClassifier(options: JevLocalTestOptions = {}):
     leaks: transport.leaks,
     async classify(input, callOptions = {}) {
       const callIndex = transport.callCount + 1;
-      return await transport.request(() => buildJevLocalTestPayload(input, options.questionLayout), callOptions, (raw, payload) => {
+      return await transport.request(() => buildJevLocalTestPayload(input, options.questionLayout, options.dialoguePolicy), callOptions, (raw, payload) => {
         const choices = parseChoices(raw, payload);
         // Keep the published result until transport finally publishes its successor.
         // At most the completed snapshot and this in-flight parse are retained.

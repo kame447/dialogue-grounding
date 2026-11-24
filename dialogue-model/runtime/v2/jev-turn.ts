@@ -10,7 +10,8 @@ import { createOwnLedger, validateJudgment, applyJudgment, JudgmentValidationErr
 import { normalizeName } from "../judgment/name-evidence.mjs";
 import { stageMemory } from "../judgment/memory.mjs";
 import { createReferenceGraph, applyReferenceUpdate, previewReferenceUpdate, snapshotReferenceGraph, REFERENCE_LIMITS } from "../memory/reference-graph.mjs";
-import { unboundNameBindsFigure } from "../decision/referent-binding.ts";
+import { nameBindsFigure } from "../decision/referent-binding.ts";
+import { hasNamingRequest } from "../decision/naming-request.ts";
 import { priorClaimViews, summarizeLocalIssues } from "../local-grounding/derive.ts";
 import { createMemoLocalExtractor, LOCAL_EXTRACTION_INSTRUCTIONS, MEMO_LOCAL_EXTRACTION_INSTRUCTIONS, MEMO_LOCAL_EXTRACTION_INSTRUCTIONS_HOLISTIC } from "../local-grounding/extract.ts";
 import { LOCAL_CLASSIFICATION_INSTRUCTIONS } from "../local-grounding/classify.ts";
@@ -231,9 +232,9 @@ const eligibleAgreeClaim = (c: LocalClaimView) => c.aspect === "name" && c.name 
   (c.speaker === "human" && c.act === "name_propose" || c.act === "name_accept");
 
 /** This turn's human utterance carries a typed naming request: a name proposal, or an approval question that answers an earlier name proposal. */
-function hasTypedNamingRequest(claims: readonly LocalClaimView[], turn: number): boolean {
+export function hasTypedNamingRequest(claims: readonly LocalClaimView[], turn: number, askCounts = true): boolean {
   return claims.some(c => c.speaker === "human" && c.sourceTurn === turn && (c.act === "name_propose" && c.name !== null ||
-    c.act === "ask" && c.aspect === "name" && claims.some(p => p.id === c.respondsTo && p.act === "name_propose" && p.name !== null)));
+    askCounts && c.act === "ask" && c.aspect === "name" && claims.some(p => p.id === c.respondsTo && p.act === "name_propose" && p.name !== null)));
 }
 function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns: readonly PublicTurn[], turn: number,
   slots: readonly string[], { ledger, judgments, agreeNameScopeVersion }: Pick<JevPrivateState, "ledger" | "judgments" | "agreeNameScopeVersion">,
@@ -259,13 +260,9 @@ function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns: reado
   const prevPublicIds = new Set(prevJudgment && prevIds.length ? claims.filter(c => c.speaker === "ai" &&
     c.sourceTurn > prevJudgment.turnIndex && c.sourceTurn < turn).flatMap(c => c.targets) : []);
   const wasFocused = (id: string) => prevIds.includes(id) || focusedTurns.some(j => j.ids.includes(id));
-  // holistic_v3: an unbound proposal binds to a figure the AI shared and focused only while the partner's own referent estimates since the AI's last claim about it
-  // do not contest it (decision/referent-binding.ts).
-  const bindsByReferent = (id: string) => {
-    if (!referentRule) return true;
-    const lastAiClaim = Math.max(0, ...claims.filter(c => c.speaker === "ai" && c.sourceTurn < turn && c.targets.includes(id)).map(c => c.sourceTurn));
-    return unboundNameBindsFigure(id, [...judgments.filter(j => j.turnIndex > lastAiClaim && j.turnIndex < turn).map(j => j.jevTurn.humanReferent ?? null), current]);
-  };
+  // holistic_v3: a name that does not itself name exactly one figure (unbound, or proposed for several) binds to a figure only when the partner's own referent estimate
+  // of the current naming interval singles it out (decision/referent-binding.ts); nothing the AI said or asked moves it.
+  const bindsByReferent = (id: string) => nameBindsFigure(id, [...judgments.filter(j => j.turnIndex > lastBoundary && j.turnIndex < turn).map(j => j.jevTurn.humanReferent ?? null), current]);
   // The partner's own latest word on whether a figure is the one meant: a referent denial (targets taken from the claim it answers when it has none)
   // blocks agreement on that figure until a later referent claim of theirs re-affirms it. This is about the target, not about the proposed name.
   const claimTargets = (c: LocalClaimView) => c.targets.length ? c.targets : claims.find(p => p.id === c.respondsTo)?.targets ?? [];
@@ -305,14 +302,14 @@ function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns: reado
     const currentUnbound = c.sourceTurn === turn || isHumanProposal(c) && c.sourceTurn === latestProposal;
     // An unbound partner proposal can be agreed only for a figure the AI has already shared publicly (a public AI claim about it) and executed on;
     // otherwise the approval request is answered by confirming which figure is meant.
-    const candidates = c.targets.length ? c.targets : currentUnbound ? slots.filter(id => aiSharedIds.has(id) && wasFocused(id) && bindsByReferent(id)) : [];
+    const candidates = c.targets.length ? c.targets : currentUnbound ? slots.filter(id => aiSharedIds.has(id) && wasFocused(id)) : [];
     const antecedent = c.act === "name_accept" ? publicClaims.find(p => p.id === c.respondsTo && p.name === name) : undefined;
     const source = publicTurns.find(t => t.turn === c.sourceTurn && t.text.includes(name)) ??
       (antecedent && publicTurns.find(t => t.turn === antecedent.sourceTurn && t.text.includes(name))) ??
       (c.act === "name_accept" ? publicTurns.filter(t => t.text.includes(name)).sort((a, b) => a.turn - b.turn)[0] : undefined);
     if (!source) return [];
     const occupied = slots.filter(id => ledger[id].name !== null && normalizeName(ledger[id].name) === normalized);
-    return candidates.filter(id => {
+    return (referentRule && c.targets.length !== 1 ? candidates.filter(bindsByReferent) : candidates).filter(id => {
       // Supersession applies to this candidate, using a verified reply or an explicitly bound target.
       if (scoped && proposals.some(p => {
         if (p.sourceTurn <= c.sourceTurn) return false;
@@ -429,7 +426,7 @@ function persistedEvidence(value:any,stage?:'action_target'|'multiple_candidates
 }
 export type JevPrivateStateV2=JevPrivateState & {schemaVersion:'jev_private_state_v2';interventionPolicy:{version:'bypass_acceptance_v1';tableSha256:string}};
 export type JevTurnTraceV2=Omit<JevTurnTrace,'schemaVersion'|'executed'|'intervention'>&{schemaVersion:'jev_turn_trace_v2';executed:ExecutedDecision|null;intervention:InterventionTrace|null};
-export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string[],intervention:InterventionConfig,questionLayout:JevQuestionLayout='two_stage_v1'):JevPrivateStateV2 {
+export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string[],intervention:InterventionConfig,questionLayout:JevQuestionLayout='two_stage_v1',policy?:string):JevPrivateStateV2 {
  checkedIntervention(intervention);
  if(questionLayout!=='two_stage_v1'&&questionLayout!=='two_stage_v2'&&questionLayout!=='two_stage_v3')throw new JevTurnError('invalid_state');
  try{
@@ -447,7 +444,10 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
    if(!stateExact(j,['turnIndex','lastEventId','status','judgment','generationGuard','jevTurn','localGrounding',...(Object.hasOwn(j,'aiPublic')?['aiPublic']:[])])||j.status!=='committed'||!Number.isSafeInteger(j.turnIndex)||j.turnIndex<1||!(j.lastEventId===null||typeof j.lastEventId==='string'&&j.lastEventId.length<=160))throw Error();
    const z=j.jevTurn;if(!stateExact(z,['attemptNumber','decision','executed','intervention',...(Object.hasOwn(z??{},'humanReferent')?['humanReferent']:[]),...(Object.hasOwn(z??{},'repairProspect')?['repairProspect']:[]),...(Object.hasOwn(z??{},'repairGate')?['repairGate']:[]),...(Object.hasOwn(z??{},'draftActs')?['draftActs']:[]),...(Object.hasOwn(z??{},'namingRequest')?['namingRequest']:[]),...(Object.hasOwn(z??{},'agreeNames')?['agreeNames']:[]),...(Object.hasOwn(z??{},'repairFacts')?['repairFacts']:[])])||!Number.isSafeInteger(z.attemptNumber)||z.attemptNumber<1)throw Error();
    // The saved turn names its own condition: accept may be missing from its scores and ranking only for a typed naming request (holistic_v3), and only on v3.
-   if(Object.hasOwn(z,'namingRequest')&&(z.namingRequest!==true||questionLayout!=='two_stage_v3'))throw Error();
+   // The marker is derived from typed values the state itself holds: the version and the turn's name proposals in the graph. It is present exactly for a holistic_v3 turn
+   // that carries one, so a marker can be neither forged, removed nor moved to another turn.
+   const markerExpected=policy==='holistic_v3'&&questionLayout==='two_stage_v3'&&hasNamingRequest((s.graph?.records??[]).filter((r:any)=>r?.kind==='claim'),j.turnIndex);
+   if(Object.hasOwn(z,'namingRequest')?z.namingRequest!==true||!markerExpected:markerExpected)throw Error();
    const acceptOptional=z.namingRequest===true;
    const hasAgreeNames=Object.hasOwn(z,'agreeNames');
    // Historical evidence retains the candidate catalog, not the original request's public turns.
@@ -696,7 +696,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
     let observationPhase: ObservationFailure["observationPhase"] | null = null;
     try {
       abortIf(signal);
-      const state = integrated?validateJevPrivateStateV2(privateState,slots,intervention!,questionLayout):structuredClone(privateState);
+      const state = integrated?validateJevPrivateStateV2(privateState,slots,intervention!,questionLayout,options.dialoguePolicy):structuredClone(privateState);
       if(!integrated&&(Object.hasOwn(state,'schemaVersion')||Object.hasOwn(state,'interventionPolicy')||state.judgments?.some(j=>Object.hasOwn(j.jevTurn??{},'executed')||Object.hasOwn(j.jevTurn??{},'intervention'))))throw new JevTurnError('invalid_state');
       checkProspectMode(state);
       snapshotReferenceGraph(state.graph);
@@ -757,7 +757,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         baseInput.agreeNames = buildAgreeNamesV3(claims, publicTurns, latest.seq, slots, state, null, holisticV3);
         baseInput.nameLedger = structuredClone(state.ledger);
         // holistic_v1: the memo's readings are explanations, never AI-proposed names (the candidates are then only names that were said in public).
-        if (holisticV3 && hasTypedNamingRequest(claims, latest.seq)) { baseInput.namingRequest = true; record.namingRequest = true; }
+        if (holisticV3 && hasNamingRequest(claims, latest.seq)) { baseInput.namingRequest = true; record.namingRequest = true; }
         if (holisticV2) {
           baseInput.nameSource = "public_only";
           // A name the partner proposed is decided from every claim, not from the claims that survive the input's size limit: it never reaches the candidate list.
@@ -935,7 +935,8 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       // a naming-act wording hit or a quoted string that is not the figure's agreed name. A failed question is "unconfirmed", never a pass.
       // Typed context: this turn's human utterance carries a name proposal or a request for approval of a name (both are name_propose claims).
       // An approval question of this turn that answers an earlier name proposal (an ask about the name linked to that proposal) counts the same.
-      const openHumanProposal = hasTypedNamingRequest(claims, latest.seq);
+      // holistic_v3: the classifier separates an approval request (a name proposal) from a plain question about a name, so an ask is never a naming request.
+      const openHumanProposal = hasTypedNamingRequest(claims, latest.seq, !holisticV3);
       const chosenName = judgment.action === "propose_name" && typeof judgment.candidateName === "string" ? normalizeName(judgment.candidateName) : null;
       // Only an agreed name is excluded from the quoted-string hint; a tentative name is not.
       const agreedNames = new Set(targets(execution).map(id => state.ledger[id]).filter(e => e?.status === "agreed" && typeof e.name === "string").map(e => normalizeName(e.name as string)));
@@ -1165,7 +1166,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   }
   async function finalRequest({ events, privateState }: { events: Event[]; privateState: JevPrivateState }, retry = false) {
     checkProspectMode(privateState);
-    if(integrated)privateState=validateJevPrivateStateV2(privateState,slots,intervention!,questionLayout);else rejectNewLegacyState(privateState);
+    if(integrated)privateState=validateJevPrivateStateV2(privateState,slots,intervention!,questionLayout,options.dialoguePolicy);else rejectNewLegacyState(privateState);
     if (!privateState.observationMemo) throw new JevTurnError("invalid_state");
     const memo = validateObservationMemo(privateState.observationMemo, { ownAnchors });
     const agreed = retry && questionLayout === "two_stage_v3" ? agreedNamesFromLedger(privateState.ledger) : {};
@@ -1176,5 +1177,5 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       { role: "user", content: generation.final + (retry ? "\n指定JSON形式で再提出してください。" + confirmed : "") }], { phase: "final_submission", timeoutMs: generation.timeoutMs });
   }
   return Object.freeze({ slots: Object.freeze([...slots]), initialPrivateState, initializePrivateState, runAiTurn, finalRequest,
-    getAttempts: () => structuredClone(attempts), snapshotGraph: (state: JevPrivateState) => {checkProspectMode(state);if(!integrated)rejectNewLegacyState(state);return snapshotReferenceGraph((integrated?validateJevPrivateStateV2(state,slots,intervention!,questionLayout):state).graph);} });
+    getAttempts: () => structuredClone(attempts), snapshotGraph: (state: JevPrivateState) => {checkProspectMode(state);if(!integrated)rejectNewLegacyState(state);return snapshotReferenceGraph((integrated?validateJevPrivateStateV2(state,slots,intervention!,questionLayout,options.dialoguePolicy):state).graph);} });
 }
