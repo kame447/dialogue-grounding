@@ -24,7 +24,7 @@ import { validateJevDecision, validateHumanReferentEstimate, validateRepairProsp
 import type { JevDecisionFailureEvidence } from "../decision/jev-decision.ts";
 import { prepareLocalGroundingTurn, validateLocalGroundingOptions, findLocalPublicationViolations } from "./local-grounding-turn.ts";
 import type { LocalGroundingResearchRecord, LocalGroundingTrace } from "./local-grounding-turn.ts";
-import { findAgreeNameMismatch, findProposeNameMismatch, findGuardViolations, findOrientationLeaks, orientationSafeFallback, rewriteReasons } from "./generation-guard.ts";
+import { findAgreeNameMismatch, findProposeNameMismatch, findGuardViolations, findOrientationLeaks, findWorkingNoteLeaks, orientationSafeFallback, rewriteReasons } from "./generation-guard.ts";
 import { createMemoAiExtractor, MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS, AiPublicError, aiHash, emptyAiEvidence } from "../local-grounding/extract-ai.ts";
 import { createJevAiFunctionClassifier, createJevAiSupportChecker, AI_FUNCTION_INSTRUCTIONS, AI_SUPPORT_INSTRUCTIONS,
   AI_RESPONSE_SUPPORT_INSTRUCTIONS, AI_FUNCTION_CRITERIA, AI_SUPPORT_CHOICES, AI_ACT_DESCRIPTIONS } from "../local-grounding/jev-ai-public.ts";
@@ -41,6 +41,7 @@ type Event = { id: string; seq: number; speaker: "human" | "ai"; text: string; n
 type Message = { role: "system" | "user" | "assistant"; content: string };
 type ChatClient = { complete(messages: Message[], options: { phase: string; timeoutMs: number; signal?: AbortSignal }): Promise<{ text: string }> };
 type Guard = { violations: string[]; regenerated: boolean; fallback: boolean };
+export type GenerationRetryVersion = "jev_generation_retry_v1" | "jev_generation_retry_v2";
 const ACT_INSTRUCTIONS = "Jevが選んだ行動だけを文章にしてください。行動と対象は変更せず、選択済みの名前・特徴があればそれに従ってください。選択済みの特徴がないacceptでは、相手の問いに観察メモで確かめられる範囲（ある・ない・確かめられない）で直接答えてよく、新しい名前や特徴の確認質問は足さないでください。観察メモは仮説で、局所的な支持を図形全体の理解や名称決定へ拡張しないでください。";
 // two_stage_v3 only (new text, not yet reviewed by Argon): a revisit whose target stays a candidate set.
 export const REVISIT_MULTIPLE_INSTRUCTIONS = "対象は複数候補のままです。選ばれた行動は、先ほどの未解決の区別に戻ることだけです。どの候補かを勝手に一つに絞らず、名前に決まったとは言わないでください。候補の数や内部の参照IDは相手に伝えず、相手が知らないことを知っているかのようにも話さないでください。";
@@ -122,6 +123,7 @@ export type JevTurnTrace = {
   observationMemo: ObservationMemo | null;
   repairHistory: RepairHistoryEntry[];
   generationGuard: Guard;
+  generationRetryVersion?: "jev_generation_retry_v2";
   errorCode?: JevTurnErrorCode;
   observationErrorCode?: ObservationErrorCode;
   observationPhase?: ObservationFailure["observationPhase"];
@@ -149,6 +151,8 @@ export type JevTurnOptions = {
   intervention?: InterventionConfig; decisionTimeoutMs?:number; technicalTrial?: AdaptiveRepairTrial;
   /** Omitted means two_stage_v1. Must match the decision client's own layout when it declares one. */
   questionLayout?: JevQuestionLayout;
+  /** Offline replay can request the original retry wire text for a historical tape. */
+  generationRetryVersion?: GenerationRetryVersion;
   client: ChatClient; ownImage: LocalOwnImage; ownAnchors: readonly LocalOwnAnchor[];
   observer: ObservationObserver; jevDecision: JevDecisionClient; localGrounding: JevTurnLocalOptions;
   maxReobservations?: number;
@@ -219,7 +223,8 @@ const eligibleAgreeClaim = (c: LocalClaimView) => c.aspect === "name" && c.name 
   (c.speaker === "human" && c.act === "name_propose" || c.act === "name_accept");
 
 function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns: readonly PublicTurn[], turn: number,
-  slots: readonly string[], { ledger, judgments }: Pick<JevPrivateState, "ledger" | "judgments">): PublicNameCandidate[] {
+  slots: readonly string[], { ledger, judgments }: Pick<JevPrivateState, "ledger" | "judgments">,
+  current: { status: string; scores: Record<string, number> | null } | null = null): PublicNameCandidate[] {
   const isHumanProposal = (c: LocalClaimView) => c.speaker === "human" && c.act === "name_propose";
   const publicClaims = claims.filter(c => c.aspect === "name" && c.name !== null &&
     publicTurns.some(t => t.turn === c.sourceTurn));
@@ -244,10 +249,19 @@ function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns: reado
   // blocks agreement on that figure until a later referent claim of theirs re-affirms it. This is about the target, not about the proposed name.
   const claimTargets = (c: LocalClaimView) => c.targets.length ? c.targets : claims.find(p => p.id === c.respondsTo)?.targets ?? [];
   const referentClaims = claims.filter(c => c.speaker === "human" && c.aspect === "referent" && c.sourceTurn > lastBoundary);
-  // Only an explicit referent answer counts: a denial stands until a later agree/assert on the same figure; questions, backchannels and other acts keep it.
+  // A denial stands until the partner re-affirms that very figure: a later agree/assert that names it alone (one target, or the one its answer concerns)
+  // AND whose own exchange's referent estimate also points at it. Keeping it as one candidate among several, narrowing to a set of figures, asking,
+  // backchannels and every other act leave the denial in place.
+  const referentAt = (at: number) => at === turn ? current : judgments.find(j => j.turnIndex === at)?.jevTurn.humanReferent ?? null;
+  const selects = (m: { status: string; scores: Record<string, number> | null } | null, id: string) =>
+    !!m && m.status === "ok" && !!m.scores && typeof m.scores[id] === "number" && Object.entries(m.scores).every(([key, value]) => key === id || m.scores![id] > value);
   const referentDenied = (id: string) => {
-    const last = referentClaims.filter(c => ["deny", "agree", "assert"].includes(c.act) && claimTargets(c).includes(id)).at(-1);
-    return last?.act === "deny";
+    const relevant = referentClaims.filter(c => c.act === "deny" ? claimTargets(c).includes(id) : false);
+    const lastDeny = relevant.at(-1);
+    if (!lastDeny) return false;
+    const after = referentClaims.filter(c => referentClaims.indexOf(c) > referentClaims.indexOf(lastDeny) && ["agree", "assert"].includes(c.act) &&
+      claimTargets(c).length === 1 && claimTargets(c)[0] === id);
+    return !after.some(c => selects(referentAt(c.sourceTurn), id));
   };
   const aiSharedIds = new Set(claims.filter(c => c.speaker === "ai" && c.sourceTurn > lastBoundary && c.sourceTurn < turn).flatMap(c => c.targets));
 
@@ -570,6 +584,13 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   const questionLayout: JevQuestionLayout = options.questionLayout ?? "two_stage_v1";
   if (questionLayout !== "two_stage_v1" && questionLayout !== "two_stage_v2" && questionLayout !== "two_stage_v3") throw new Error("Invalid Jev question layout");
   if (questionLayout !== "two_stage_v1" && !integrated) throw new Error(questionLayout + " requires the integrated Jev profile");
+  const generationRetryVersion = options.generationRetryVersion ??
+    (questionLayout === "two_stage_v3" ? "jev_generation_retry_v2" : "jev_generation_retry_v1");
+  if (generationRetryVersion !== "jev_generation_retry_v1" &&
+      (generationRetryVersion !== "jev_generation_retry_v2" || questionLayout !== "two_stage_v3")) {
+    throw new Error("Invalid Jev generation retry version");
+  }
+  const restateJudgment = generationRetryVersion === "jev_generation_retry_v2";
   const declaredLayout = (jevDecision as { metadata?: { questionLayout?: unknown } } | undefined)?.metadata?.questionLayout;
   if (declaredLayout !== undefined && declaredLayout !== questionLayout) throw new Error("Jev question layout mismatch");
   const rejectNewLegacyState=(s:JevPrivateState)=>{
@@ -743,6 +764,8 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       abortIf(signal);
       record.humanReferent = { ...estimate, turnIndex: latest.seq, observationMemo };
       baseInput.humanReferent = { status: estimate.status, scores: structuredClone(estimate.scores) };
+      // The estimate of this very exchange backs a re-affirmation of a denied figure, so the candidates are completed only now.
+      if (questionLayout === "two_stage_v3") baseInput.agreeNames = buildAgreeNamesV3(claims, publicTurns, latest.seq, slots, state, baseInput.humanReferent);
       if (adaptive && baseInput.repairHistory.length && typeof jevDecision.estimateRepairProspect === "function") {
         record.repairHistory = structuredClone(repairHistory);
         let prospect = unknownRepairProspect();
@@ -856,10 +879,12 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       record.observationMemo = memo; record.repairHistory = repairHistory;
       const generationMemo = aiEnabled ? structuredClone(memo) : null;
       const generationIssues = aiEnabled ? summarizeLocalIssues(graph) : null;
+      const actionMessage: Message = { role: "system",
+        content: ACT_INSTRUCTIONS + "\n" + generation.actionScope[judgment.action] + "\n" + JSON.stringify({ ...judgment, target: execution.target,
+          ...(execution.detailFigureIds ? { detailFigureIds: execution.detailFigureIds } : {}) }) };
       const messages: Message[] = [{ role: "system", content: generation.task }, { role: "system", content: generation.instructions },
         ...(generation.concise ? [{ role: "system" as const, content: generation.concise }] : []),
-        { role: "system", content: ACT_INSTRUCTIONS + "\n" + generation.actionScope[judgment.action] + "\n" + JSON.stringify({ ...judgment, target: execution.target,
-          ...(execution.detailFigureIds ? { detailFigureIds: execution.detailFigureIds } : {}) }) },
+        actionMessage,
         ...(execution.sharedClaimIds ? [{ role: "system" as const, content: SHARED_CONSTRUAL_INSTRUCTIONS + "\n" + JSON.stringify({ sharedConstrual:
           baseInput.sharedConstruals!.find(f => JSON.stringify(f.claimIds) === JSON.stringify(execution.sharedClaimIds))!.construal }) }] : []),
         ...(multipleFeature ? [{ role: "system" as const, content: DETAIL_INSTRUCTIONS }] : []),
@@ -869,6 +894,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         ...publicTurns.map(t => ({ role: t.speaker === "human" ? "user" as const : "assistant" as const, content: t.text }))];
       const violations = (text: string, context: Message[]) => [...new Set([...findGuardViolations(text, judgment.action), ...findLocalPublicationViolations(text, context),
         ...(questionLayout === "two_stage_v3" ? findOrientationLeaks(text) : []),
+        ...(questionLayout === "two_stage_v3" ? findWorkingNoteLeaks(text, publicTurns.map(t => t.text)) : []),
         ...(questionLayout === "two_stage_v3" && judgment.action === "agree" && judgment.candidateName !== null
           ? findAgreeNameMismatch(text, judgment.candidateName) : []),
         ...(questionLayout === "two_stage_v3" && judgment.action === "propose_name" && judgment.candidateName !== null
@@ -885,7 +911,10 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       record.generationGuard.violations = violations(result.text, messages);
       if (record.generationGuard.violations.length) {
         record.generationGuard.regenerated = true;
-        const retry: Message[] = [...messages, { role: "system", content: "公開発話を書き直してください。選択済みの行動を変更しないでください。" + rewriteReasons(record.generationGuard.violations) }];
+        if (restateJudgment) record.generationRetryVersion = generationRetryVersion;
+        const retry: Message[] = [...messages, { role: "system",
+          content: "公開発話を書き直してください。選択済みの行動を変更しないでください。" +
+            (restateJudgment ? "\n" + actionMessage.content + "\n" : "") + rewriteReasons(record.generationGuard.violations) }];
         result = await interruptible(client.complete(retry, { phase: "generation", timeoutMs: generation.timeoutMs, signal }), signal);
         abortIf(signal);
         const codes = typeof result?.text === "string" && result.text.trim() ? violations(result.text, retry) : ["empty_utterance"];

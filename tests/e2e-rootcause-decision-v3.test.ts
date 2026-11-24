@@ -562,6 +562,17 @@ for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
     assert.deepEqual(result.trace.generationGuard, { violations: ['orientation_leak'], regenerated: true, fallback: false });
   });
 
+  test(`v3 ${strategy} does not turn an orientation retry with a naming violation into a fallback`, async () => {
+    const f = fixture(strategy);
+    const before = structuredClone(f.state());
+    await assert.rejects(f.exchange('この形につける名前を相談できますか？', { action: 'confirm', target: 1,
+      drafts: ['上端が尖っていますか？', 'その形を「風車」と呼びましょう。'] }), { code: 'unsafe_generation' });
+    assert.equal(f.attempt()?.generationRetryVersion, 'jev_generation_retry_v2');
+    assert.deepEqual(f.attempt()?.generationGuard, { violations: ['orientation_leak', 'naming_decision'], regenerated: true, fallback: false });
+    assert.equal(f.attempt()?.publicSpeech, null);
+    assert.deepEqual(f.state(), before);
+  });
+
   test(`v3 ${strategy} recovers safely from repeated orientation_leak without publishing orientation words or marking the feature asked`, async () => {
     const f = fixture(strategy, { aiPublic: true });
     const result = await f.exchange('形をもう少し確かめたいです。', { action: 'confirm', target: 1,
@@ -757,6 +768,17 @@ for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
     assert.equal(Object.hasOwn(requeried.requests.find(r => r.questions.action)!.questions.action.criteria, 'agree'), false);
     assert.notEqual(requeried.state.ledger[ids[0]].status, 'agreed');
     checkS4AgreeSource(before, requeried);
+
+    // Keeping the figure as one candidate, or narrowing to a set, is not choosing it: the denial stays (the estimate of that exchange also says none).
+    for (const [text, targets, proposition] of [['その形も候補の一つです。', [ids[0]], '候補の一つ'], ['探しているのはその二つのどちらかです。', [ids[0], ids[1]], '二つのどちらか']] as const) {
+      before = structuredClone(f.state());
+      const candidate = await f.exchange(text + ask, { action: 'confirm', target: 1, drafts: ['どちらなのか確かめますね。'],
+        segments: [{ quote: text, name: null, targets: [...targets], aspect: 'referent' as const, proposition, act: 'assert' as const }, { ...askSegment, quote: ask }] });
+      assert.deepEqual(candidate.input.agreeNames, [], proposition);
+      assert.equal(Object.hasOwn(candidate.requests.find(r => r.questions.action)!.questions.action.criteria, 'agree'), false);
+      assert.notEqual(candidate.state.ledger[ids[0]].status, 'agreed');
+      checkS4AgreeSource(before, candidate);
+    }
 
     // Forged evidence is refused: an extra candidate the generation rules never produce.
     const forged = structuredClone(denied);
@@ -984,4 +1006,41 @@ test('shared construal: S4 rebuilds the saved facts from the graph and refuses a
   assert.equal(verdict(facts => { facts[0].figureIds = [ids[0], ids[1]]; }), 'invalid', 'a figure the AI never described');
   assert.equal(verdict(facts => { facts[0].construal = '別の見立て'; }), 'invalid', 'an altered reading');
   assert.equal(verdict(facts => { facts.push({ ...facts[0], id: 'sc:forged' }); }), 'invalid', 'an added fact');
+});
+
+const NOTE = 'そう見えるんですね。same? Need Japanese natural, ask confirm. Avoid confusing target.';
+for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
+  test(`v3 ${strategy}: a working note in the draft is regenerated; a note that stays is not published and nothing is saved`, async () => {
+    const f = fixture(strategy);
+    const regenerated = await f.exchange('丸い形のことです。', { action: 'accept', target: 3, drafts: [NOTE, 'そう見えるんですね。'] });
+    assert.equal(regenerated.text, 'そう見えるんですね。');
+    assert.deepEqual(regenerated.trace.generationGuard, { violations: ['working_note'], regenerated: true, fallback: false });
+
+    const stuck = fixture(strategy), previous = structuredClone(stuck.state());
+    await assert.rejects(stuck.exchange('丸い形のことです。', { action: 'accept', target: 3, drafts: [NOTE, NOTE] }), { code: 'unsafe_generation' });
+    assert.deepEqual(stuck.state(), previous);
+    assert.equal(stuck.attempt()?.publicSpeech, null);
+
+    // A mixed violation is never passed through the orientation-only fallback sentence.
+    const mixed = fixture(strategy), before = structuredClone(mixed.state());
+    const both = '右側に出ています。Need Japanese natural, ask confirm.';
+    await assert.rejects(mixed.exchange('丸い形のことです。', { action: 'accept', target: 3, drafts: [both, both] }), { code: 'unsafe_generation' });
+    assert.deepEqual(mixed.state(), before);
+    assert.deepEqual(mixed.attempt()?.generationGuard.violations.sort(), ['orientation_leak', 'working_note']);
+  });
+}
+
+test('shared construal and the regeneration path together: a working note on the adoption turn is regenerated and the adoption stays recorded', async () => {
+  for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
+    const f = fixture(strategy, { aiPublic: true });
+    const o = await offerConstrual(f);
+    const before = structuredClone(f.state().ledger);
+    const r = await f.exchange(ROUGH, { action: 'accept', target: 0, shared: 0, segments: [roughAsk(o.issue)],
+      drafts: ['うん、その鳥っぽいやつね。same? Need Japanese natural, ask confirm. Avoid confusing target.', 'うん、その鳥っぽいやつね。'] });
+    assert.deepEqual(r.trace.generationGuard, { violations: ['working_note'], regenerated: true, fallback: false });
+    assert.equal(r.text, 'うん、その鳥っぽいやつね。');
+    assert.deepEqual(r.saved.executed?.sharedClaimIds, r.input.sharedConstruals![0].claimIds);
+    assert.deepEqual(r.state.ledger, before);
+    assert.deepEqual(validateJevPrivateStateV2(r.state, ids, f.intervention, V3.questionLayout), r.state);
+  }
 });

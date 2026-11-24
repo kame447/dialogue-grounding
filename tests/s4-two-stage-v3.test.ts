@@ -49,6 +49,7 @@ async function recordedRun(profile: any, tape: any, label: 'repair-first' | 'byp
   const native = createJevDecisionClient({ enabled: true, readKey, fetchImpl, timeoutMs: profile.timeouts.decisionMs,
     researchLimits: { maxDeadlineMs: 600000 }, questionLayout: profile.questionLayout })!;
   const runtime = createProfileDialogue(profile, { client, image: OWN.ownImage, anchors: [...OWN.ownAnchors], strategy: label,
+    ...(tape.generationRetryVersion ? {} : { generationRetryVersion: 'jev_generation_retry_v1' }),
     observer: { async observeAll() { return structuredClone(tape.state.observationMemo); },
       async reobserve(input: any) { const result = learn ? learn(input) : structuredClone(fixed.shift()); made.push(structuredClone(result));
         await client.complete(buildReobservationMessages(input), { phase: 'observation_targeted' }); return result; } },
@@ -61,7 +62,8 @@ async function recordedRun(profile: any, tape: any, label: 'repair-first' | 'byp
   return { trace: { ...structuredClone(traces.at(-1)), status: 'committed' }, state: structuredClone(result.privateState), reobservations: made };
 }
 /** NORMAL rebuilt as one canonical trial of the given layout, label and Jev responses (the s4-two-stage-v2 pattern). */
-async function records(layout: 'two_stage_v2' | 'two_stage_v3', jev: any[], { reobservation = false, label = 'bypass-enabled' as 'repair-first' | 'bypass-enabled', generationText = null as string | null } = {}) {
+async function records(layout: 'two_stage_v2' | 'two_stage_v3', jev: any[], { reobservation = false, label = 'bypass-enabled' as 'repair-first' | 'bypass-enabled', generationText = null as string | null,
+  retry = null as { drafts: [string, string]; current: boolean } | null } = {}) {
   const n = structuredClone(normal), tr = n.trials[0], m = n.run.manifest;
   const profile = JSON.parse(JSON.stringify(researchTrialProfileV3(m.lunaRequest, m.timeouts, layout)));
   const digest = hash(profile);
@@ -74,6 +76,13 @@ async function records(layout: 'two_stage_v2' | 'two_stage_v3', jev: any[], { re
       for (const l of side.luna ?? []) if (l.phase === 'generation') l.response = { ...l.response, text: generationText };
     }
     for (const l of tape.common.luna ?? []) if (l.phase === 'generation') l.response = { ...l.response, text: generationText };
+  }
+  if (retry) {
+    if (retry.current) tape.generationRetryVersion = 'jev_generation_retry_v2';
+    for (const side of Object.values(tape.tails) as any[]) {
+      side.luna = side.luna.flatMap((l: any) => l.phase === 'generation'
+        ? retry.drafts.map(text => ({ ...l, response: { ...l.response, text } })) : [l]);
+    }
   }
   if (reobservation) {
     tape.common.luna = [...tape.common.luna, { ...structuredClone(OLD.common.luna[0]), phase: 'observation_targeted' }];
@@ -107,6 +116,95 @@ const copies = (n: any, index = 0) => { const tr = n.trials[0]; return [tr.attem
   tr.turns[0].state.judgments[0].jevTurn.decision, tr.lastCommittedState.judgments[0].jevTurn.decision]; };
 
 const normalV3 = () => records('two_stage_v3', [stageOne('n', 'accept'), stageTwo('n', 'accept', 'none')]);
+
+const generationRequests = (side: any) => side.requests.filter((request: any) => request.role === 'generation');
+const retryInstruction = '公開発話を書き直してください。選択済みの行動を変更しないでください。';
+const retryVersion = 'jev_generation_retry_v2';
+
+function changeRetry(records: any, label: string, edit: (content: string) => string) {
+  for (const side of sideCopies(records).filter(side => side.label === label)) {
+    const request = generationRequests(side)[1], body = request.payload;
+    body.messages.at(-1).content = edit(body.messages.at(-1).content);
+    request.completeMessagesSha256 = hash(body.messages);
+    request.preProjectionPayloadSha256 = request.payloadSha256 = hash(body);
+    // Synchronize all wire hashes so only the independently reconstructed prompt can fail.
+    const trial = records.trials[0];
+    if (trial.label === label) {
+      const index = side.requests.indexOf(request);
+      const expected = trial.replay[0].tape.recorded.expectedRequests[index];
+      expected.messagesSha256 = request.completeMessagesSha256;
+      expected.requestSha256 = request.preProjectionPayloadSha256;
+      const call = trial.calls[index];
+      call.requestSha256 = request.completeMessagesSha256;
+      call.expectedHttpRequestSha256 = call.httpRequestSha256 = request.preProjectionPayloadSha256;
+      trial.http.find((receipt: any) => receipt.callId === call.id).requestSha256 = request.preProjectionPayloadSha256;
+    }
+  }
+}
+
+test('both strategies get the same validated initial action block again, including candidate name or feature and target', async () => {
+  for (const action of ['confirm', 'propose_name'] as const) {
+    const isName = action === 'propose_name';
+    const detail = isName ? { name: answer('name_0', ['name_0']) }
+      : { feature: answer('feature_0', ['feature_0', 'feature_1']) };
+    const n = await records('two_stage_v3', [
+      stageOne('retry', action), stageTwo('retry', action, 'figure_2'), jevResponse('retry-detail', detail),
+    ], { retry: { current: true, drafts: isName
+      ? ['上端の形は「name-2」と呼ぶのはどうでしょう？', '「name-2」と呼ぶのはどうでしょう？']
+      : ['上端が尖っていますか？', '尖った部分がありますか？'] } });
+    pass(n);
+    const trial = n.trials[0];
+    assert.equal(trial.attempts[0].generationRetryVersion, retryVersion);
+    const captured = trial.replay[0].result.sides.map((side: any) => {
+      const [initial, retry] = generationRequests(side).map((request: any) => request.payload.messages);
+      const actionMessage = initial.find((message: any) => message.role === 'system' && message.content.includes('"targetSlot"'));
+      const judgment = JSON.parse(actionMessage.content.split('\n').at(-1));
+      assert.deepEqual(judgment, { ...trial.attempts[0].finalAction, target: side.executed.target, detailFigureIds: side.executed.detailFigureIds });
+      assert.equal(judgment.action, action);
+      assert.equal(judgment.candidateName, isName ? 'name-2' : null);
+      assert.equal(judgment.discriminatingFeature, isName ? null : 'feature-2');
+      assert.deepEqual(retry.slice(0, -1), initial);
+      const expected = retryInstruction + '\n' + actionMessage.content + '\n';
+      assert.ok(retry.at(-1).content.startsWith(expected));
+      assert.match(retry.at(-1).content.slice(expected.length), /^前の下書きに画面の向き/u);
+      return retry;
+    });
+    assert.deepEqual(captured[0], captured[1]);
+  }
+});
+
+test('historical and current retry records pass only their own S4 version and reject byte edits', async () => {
+  const decisions = [stageOne('retry', 'accept'), stageTwo('retry', 'accept', 'none')];
+  const drafts: [string, string] = ['右側に張り出しがあります。', 'そう見えるんですね。'];
+  const legacy = await records('two_stage_v3', decisions, { retry: { current: false, drafts } });
+  const current = await records('two_stage_v3', decisions, { retry: { current: true, drafts } });
+  pass(legacy);
+  pass(current);
+  assert.equal(Object.hasOwn(legacy.trials[0].attempts[0], 'generationRetryVersion'), false);
+  const readRetry = (n: any) => generationRequests(n.trials[0].replay[0].result.sides[0])[1].payload.messages.at(-1).content;
+  for (const [record, transform] of [
+    [legacy, () => readRetry(current)],
+    [current, () => readRetry(legacy)],
+    [legacy, (text: string) => text.replace('尖りの数', '尖りの量')],
+    [current, (text: string) => text.replace('尖りの数', '尖りの量')],
+    [current, (text: string) => text.replace('"action":"accept"', '"action":"agree"')],
+  ] as const) {
+    // Test the actual request and the counterfactual condition independently.
+    for (const label of ['bypass-enabled', 'repair-first']) {
+      const tampered = structuredClone(record);
+      changeRetry(tampered, label, transform);
+      assert.deepEqual(['shape', 'binding', 'execution', 'replay'].map(k => status(tampered, k)), ['pass', 'pass', 'pass', 'mismatch']);
+    }
+  }
+  const earlyOrientationReason = '前の下書きに画面の向きに依存する語（上下左右・上端・下端・右向き等）が含まれていました。相手の画面では図形が回転しているため、上下左右を使わず、尖りの数・大小・くぼみ・四角い部分とのつながりなど回転しても変わらない特徴だけで書き直してください。';
+  const earlyLegacy = structuredClone(legacy);
+  changeRetry(earlyLegacy, 'bypass-enabled', () => retryInstruction + earlyOrientationReason);
+  changeRetry(earlyLegacy, 'repair-first', () => retryInstruction + earlyOrientationReason);
+  pass(earlyLegacy);
+  const versionDrift = structuredClone(current);
+  delete versionDrift.trials[0].replay[0].tape.generationRetryVersion;
+  assert.equal(status(versionDrift, 'replay'), 'mismatch');
+});
 
 test('v3 normal: accept / none passes all S4 checks with stages action, target', async () => {
   const n = await normalV3(); pass(n);
@@ -332,4 +430,45 @@ test('S4 orientation fallback rejects mixed name_mismatch on agree alongside sel
   assert.equal(s4Probe.s4HasNonOrientationLeak('右側です。「舟」にも見えますが、呼び名は「鳥」を提案します。', propBoat), true, 'propose verb with label noun rejected');
   assert.equal(s4Probe.s4HasNonOrientationLeak('右側です。「舟」にも見えますが、候補は「鳥」です。', propBoat), true, 'candidate noun substitution rejected');
   assert.equal(s4Probe.s4HasNonOrientationLeak('右側の形ですが、名前は「鳥」ではなく「舟」にしませんか？', propBoat), false, 'negated correction to judged name allowed');
+});
+
+test('a retry reason is checked against the draft of the condition that wrote it, whichever condition is the recorded one', async () => {
+  const decisions = [stageOne('retry', 'accept'), stageTwo('retry', 'accept', 'none')];
+  const namingReason = '前の下書きは名称の決定・合意を表していました。決定・合意を表明せず、このactionの範囲で書き直してください。';
+  const orientationOnly = await records('two_stage_v3', decisions, { retry: { current: true, drafts: ['右側に張り出しがあります。', 'そう見えるんですね。'] } });
+  pass(orientationOnly);
+  const read = (n: any, label: string) => generationRequests(n.trials[0].replay[0].result.sides.find((s: any) => s.label === label))[1].payload.messages.at(-1).content as string;
+  // The draft only had an orientation leak: a name/agreement-decision reason is wrong on either side, recorded or comparison.
+  for (const label of ['bypass-enabled', 'repair-first']) {
+    const wrong = structuredClone(orientationOnly);
+    changeRetry(wrong, label, (text: string) => text + namingReason);
+    assert.equal(status(wrong, 'replay'), 'mismatch', label);
+  }
+  // Both drafts really contain an orientation leak and a name decision: the reasons that follow from them are accepted on both sides.
+  const both = await records('two_stage_v3', decisions, { retry: { current: true, drafts: ['右側に張り出しがあります。この形は「name-0」にしましょう。', 'そう見えるんですね。'] } });
+  pass(both);
+  for (const label of ['bypass-enabled', 'repair-first']) assert.ok(read(both, label).includes(namingReason), label);
+});
+
+test('a working-note retry reason is accepted only for a draft that has one, on either condition; older records carry none', async () => {
+  const decisions = [stageOne('retry', 'accept'), stageTwo('retry', 'accept', 'none')];
+  const noteReason = '前の下書きに、英語の作業メモや複数の返答案が混じっていました。日本語の一つの返答だけにして書き直してください。';
+  const genuine = await records('two_stage_v3', decisions, { retry: { current: true, drafts: ['そう見えるんですね。same? Need Japanese natural, ask confirm. Avoid confusing target.', 'そう見えるんですね。'] } });
+  pass(genuine);
+  const read = (n: any, label: string) => generationRequests(n.trials[0].replay[0].result.sides.find((s: any) => s.label === label))[1].payload.messages.at(-1).content as string;
+  for (const label of ['bypass-enabled', 'repair-first']) assert.ok(read(genuine, label).endsWith(noteReason), label);
+  // The draft has no working note: adding the reason is wrong on the recorded and on the comparison condition alike.
+  const plain = await records('two_stage_v3', decisions, { retry: { current: true, drafts: ['右側に張り出しがあります。', 'そう見えるんですね。'] } });
+  pass(plain);
+  for (const label of ['bypass-enabled', 'repair-first']) {
+    const wrong = structuredClone(plain);
+    changeRetry(wrong, label, (text: string) => text + noteReason);
+    assert.equal(status(wrong, 'replay'), 'mismatch', label);
+  }
+  // Dropping the reason the draft requires is refused too.
+  for (const label of ['bypass-enabled', 'repair-first']) {
+    const dropped = structuredClone(genuine);
+    changeRetry(dropped, label, (text: string) => text.slice(0, -noteReason.length));
+    assert.equal(status(dropped, 'replay'), 'mismatch', label);
+  }
 });
