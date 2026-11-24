@@ -6,6 +6,7 @@ interface ProxyEnvironment {
   UPSTREAM_PROVIDER?: string;
   UPSTREAM_API_KEY: string;
   DIALOGUE_MODEL: string;
+  VISION_MODEL?: string;
   MAX_COMPLETION_TOKENS: string;
   RESEARCH_DECISIONS_ENABLED?: string;
   OPENROUTER_DECISIONS_API_KEY?: string;

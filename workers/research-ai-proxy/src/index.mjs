@@ -245,12 +245,12 @@ export async function handleRequest(request, env, fetchImpl = globalThis.fetch) 
   const policy = resolvePurposeModel({ purpose: "dialogue_turn" }, env);
   const ready = Boolean(endpoint && env.UPSTREAM_API_KEY && "model" in policy);
   if (pathname === "/v1/model-policy") {
-    return request.method === "GET" ? reply(200, {
-      purpose: "dialogue_turn",
-      provider,
-      model: "model" in policy ? policy.model : null,
-      ready,
-    }) : reply(405, { error: "method_not_allowed" });
+    if (request.method !== "GET") return reply(405, { error: "method_not_allowed" });
+    const purpose = new URL(request.url).searchParams.get("purpose") ?? "dialogue_turn";
+    const selected = resolvePurposeModel({ purpose }, env);
+    if (selected.error === "unsupported_purpose") return reply(400, { error: selected.error });
+    return reply(200, { purpose, provider, model: "model" in selected ? selected.model : null,
+      ready: Boolean(endpoint && env.UPSTREAM_API_KEY && "model" in selected) });
   }
   if (!ready) {
     return reply(503, { error: "provider_unconfigured" });
@@ -291,6 +291,9 @@ export async function handleRequest(request, env, fetchImpl = globalThis.fetch) 
       },
       body: JSON.stringify(payload),
       signal: controller.signal,
+      // Cloudflare Workers may forward Authorization across redirects. A
+      // visual request must never leave the configured upstream endpoint.
+      ...(selected.purpose === "visual_observation" ? { redirect: "manual" } : {}),
     });
     if (!response.ok) {
       return reply(response.status === 429 ? 429 : 502, {
@@ -298,6 +301,13 @@ export async function handleRequest(request, env, fetchImpl = globalThis.fetch) 
       });
     }
     const data = await response.json();
+    // Vision provenance must be reported by the upstream itself. Never label
+    // missing or unexpected identity as the configured model.
+    if (selected.purpose === "visual_observation" &&
+        !(typeof data?.model === "string" && (data.model === selected.model ||
+          (data.model.startsWith(selected.model + "-") && /^\d{4}-\d{2}-\d{2}$|^\d{8}$/.test(data.model.slice(selected.model.length + 1)))))) {
+      return reply(502, { error: "invalid_upstream_model" });
+    }
     const result = sanitizeResult(data, selected.model);
     if (result) return reply(200, result);
     // Empty text after hitting the cap is deterministic for the same request,
