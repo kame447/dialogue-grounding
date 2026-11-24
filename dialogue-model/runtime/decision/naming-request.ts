@@ -51,10 +51,10 @@ export function namingTurnKind(claims: readonly NamingClaimLike[], turn: number,
   return proposals.every(p => reconfirmsAgreedName(p, ledger, estimates, inherited)) ? "reconfirm" : "request";
 }
 /** Whether figure `id` may be an agree candidate of claim `c` (holistic_v3). `estimates` is the naming interval's estimates, oldest first, this turn's last.
- * A claim that does not name exactly one figure needs the interval's binding (nameBindsFigure). A single-target claim is free outside a naming request. In a turn
- * that holds a partner name proposal it is free only when it is the partner's own single target of this very turn; otherwise, when this turn's estimate is
- * meaningful, the figure must be strictly first in it, and when it is not, a single target of an earlier turn keeps standing while a target inherited this turn
- * is decided by the interval like an unbound one. */
+ * A claim that does not name exactly one figure needs the interval's binding (nameBindsFigure). A single-target claim is free outside a naming request, and in one
+ * when it is the partner's own single target of this very turn. Every other candidate of a naming request (an earlier turn's proposal, single-target or not, or a
+ * target inherited this turn) must be strictly first in the newest meaningful estimate: this turn's if it has one, else the interval's latest. With no meaningful
+ * estimate in the interval an earlier turn's single target stands as before, and a target inherited this turn does not. */
 export function agreeCandidateAllowed(c: NamingClaimLike, id: string, turn: number, turnHasProposal: boolean, inherited: ReadonlySet<string>,
   estimates: readonly ReferentEstimateValue[]): boolean {
   const n = Array.isArray(c.targets) ? c.targets.length : 0;
@@ -62,9 +62,7 @@ export function agreeCandidateAllowed(c: NamingClaimLike, id: string, turn: numb
   if (!turnHasProposal) return true;
   const own = c.sourceTurn === turn;
   if (own && !inherited.has(c.id as string)) return true;
-  const current = estimates.at(-1);
-  if (meaningfulEstimate(current)) return nameBindsFigure(id, [current]);
-  return own ? nameBindsFigure(id, estimates) : true;
+  return estimates.some(meaningfulEstimate) ? nameBindsFigure(id, estimates) : !own;
 }
 /** A name proposal that answers an earlier name proposal and carries its name (the approval request of local-grounding/verify.ts). */
 export function inheritsProposalName(c: NamingClaimLike, claims: readonly NamingClaimLike[]): boolean {

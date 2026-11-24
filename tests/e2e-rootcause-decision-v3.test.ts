@@ -1437,6 +1437,30 @@ test('05u-2 (holistic_v3): a short approval request for a name that is still pen
   }
 });
 
+test('05v-1 (holistic_v3): a short approval with no estimate of its own is judged by the interval\'s latest meaningful estimate: a pending name cannot be registered for a figure the partner moved away from (both strategies)', async () => {
+  const offered = (r: { requests: Array<{ questions: Record<string, { criteria: Record<string, string> }> }> }) =>
+    Object.keys(r.requests.find(q => q.questions.action)!.questions.action.criteria);
+  const proposal = 'これ、しおりとかどう？';
+  const again = 'さっき提案した呼び名でいい？';
+  // [between-turn estimate, final estimate, whether agree for figure 3 is allowed]
+  const scenes: Array<[string, string | null, string, boolean]> = [
+    ['two figures, then none', 'multiple', 'none', false], ['another figure, then none', 'figure_4', 'none', false],
+    ['narrowed back to figure 3', 'multiple', 'figure_3', true], ['no turn in between, none', null, 'none', true]];
+  for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
+    for (const [label, between, last, allowed] of scenes) {
+      const f = fixture(strategy, { aiPublic: true, holistic: 'holistic_v3' });
+      await share(f, 3);
+      const first = await f.exchange(proposal, { action: 'confirm', target: 3, referent: 'figure_3', segments: [naming(proposal, 'しおり', [ids[3]])], draftActs: ['none'], drafts: ['どの形のことですか？'] });
+      if (between !== null) await f.exchange('丸い台が二つあって、まだどちらか分かりません。', { action: 'confirm', target: 3, referent: between, drafts: ['どちらの形ですか？'] });
+      const second = await f.exchange(again, { action: allowed ? 'agree' : 'confirm', target: 3, referent: last, draftActs: allowed ? ['adopt_chosen'] : ['none'],
+        drafts: [allowed ? agreeSpeech('しおり') : 'どの形のことですか？'],
+        segments: [{ respondsTo: first.input.turn, quote: again, name: null, targets: [], act: 'name_propose', aspect: 'name', proposition: again }] });
+      assert.equal(offered(second).includes('agree'), allowed, `${strategy} ${label}: ${offered(second).join()}`);
+      assert.equal(second.state.ledger[ids[3]].name, allowed ? 'しおり' : null, `${strategy} ${label}: ledger`);
+    }
+  }
+});
+
 test('05r-2 (holistic_v3): a short re-approval that carries an earlier unbound name takes that proposal\'s turn as the name\'s public source, so agree is offered once the partner\'s estimate singles the figure out (both strategies)', async () => {
   const offered = (r: { requests: Array<{ questions: Record<string, { criteria: Record<string, string> }> }> }) =>
     Object.keys(r.requests.find(q => q.questions.action)!.questions.action.criteria);

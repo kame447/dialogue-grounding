@@ -171,8 +171,8 @@ const alwaysV3=()=>CTX.acceptOptional?ALWAYS_V3_ALL.filter(a=>a!=='accept'):ALWA
 const ANY_TARGET=['accept','defer','move_on','close'];
 // Adaptive-only context of the attempt being replayed, set at the start of the (synchronous) replay proof: whether repairFacts
 // existed (its guidance sentence is part of every instruction), and the saved per-figure agreeNames (known=false: no source).
-type ReplayContext={policy:string|null;agreeMatch:{l0:boolean;l2:boolean}|null;facts:boolean;agree:any[]|undefined;known:boolean;v3:boolean;trial:boolean;ledger:Record<string,{status:string;name:string|null}>|undefined;legacyV3:boolean;style:null|'legacy'|'style'|'loop'|'holistic';humanNames?:Set<string>|null;namingRequest?:boolean;namingReconfirm?:boolean;acceptOptional?:boolean};
-const defaultContext:ReplayContext={policy:null,agreeMatch:null,facts:false,agree:undefined,known:true,v3:false,trial:false,ledger:undefined,legacyV3:false,style:null,humanNames:null};
+type ReplayContext={policy:string|null;agreeMatch:{l0:boolean;l2:boolean}|null;facts:boolean;agree:any[]|undefined;known:boolean;v3:boolean;trial:boolean;ledger:Record<string,{status:string;name:string|null}>|undefined;legacyV3:boolean;style:null|'legacy'|'style'|'loop'|'holistic';humanNames?:Set<string>|null;namingRequest?:boolean;namingReconfirm?:boolean;acceptOptional?:boolean;critKind?:'V1'|'V3'|'H3'|null};
+const defaultContext:ReplayContext={policy:null,agreeMatch:null,facts:false,agree:undefined,known:true,v3:false,trial:false,ledger:undefined,legacyV3:false,style:null,humanNames:null,critKind:null};
 const CTX={...defaultContext};
 const H=()=>CTX.policy==='holistic_v1'||CTX.policy==='holistic_v2'||CTX.policy==='holistic_v3';
 const H2=()=>CTX.policy==='holistic_v2'||CTX.policy==='holistic_v3';
@@ -588,7 +588,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
     typeof instructions==='string'&&instructions.endsWith('\n'+LEGACY_V3_TARGET));
   const src=agreeSource(tr,t,key,tape,legacyV3);if(src==='invalid')return'invalid';
    const trial=trialVersion(t,tape.technicalTrial);if(trial==='invalid')return'invalid';
-   Object.assign(CTX,{facts:Array.isArray(t.repairFacts),agree:src.names,known:src.known,v3:layout==='two_stage_v3',trial:trial!==null,ledger:tape.state?.ledger,legacyV3,style:null,policy:tr.profile?.dialoguePolicy??null,humanNames:['holistic_v2','holistic_v3'].includes(tr.profile?.dialoguePolicy)?s4HumanProposedNames(tape,t):null,namingRequest:tr.profile?.dialoguePolicy==='holistic_v3'&&s4NamingKind(tape,t)==='request',namingReconfirm:tr.profile?.dialoguePolicy==='holistic_v3'&&s4NamingKind(tape,t)==='reconfirm',acceptOptional:t.namingRequest===true});
+   Object.assign(CTX,{critKind:null,facts:Array.isArray(t.repairFacts),agree:src.names,known:src.known,v3:layout==='two_stage_v3',trial:trial!==null,ledger:tape.state?.ledger,legacyV3,style:null,policy:tr.profile?.dialoguePolicy??null,humanNames:['holistic_v2','holistic_v3'].includes(tr.profile?.dialoguePolicy)?s4HumanProposedNames(tape,t):null,namingRequest:tr.profile?.dialoguePolicy==='holistic_v3'&&s4NamingKind(tape,t)==='request',namingReconfirm:tr.profile?.dialoguePolicy==='holistic_v3'&&s4NamingKind(tape,t)==='reconfirm',acceptOptional:t.namingRequest===true});
    // The trace's own marker of a typed naming request is checked against the request recomputed from the turn's claims: only a holistic_v3 trial carries it, and exactly then.
    if(H3()?(t.namingRequest===true)!==!!CTX.namingRequest||(t.namingReconfirm===true)!==!!CTX.namingReconfirm:Object.hasOwn(t,'namingRequest')||Object.hasOwn(t,'namingReconfirm'))return'invalid';
  if(!exact(tape,['schemaVersion','state','events','common','tails','recorded',...(Object.hasOwn(tape??{},'technicalTrial')?['technicalTrial']:[]),...(Object.hasOwn(tape??{},'generationRetryVersion')?['generationRetryVersion']:[])])||tape.schemaVersion!=='parity_intervention_replay_v1'||!exact(result,['schemaVersion','status','error','commonEqual','policyConformant','recordedPayloadsReproduced','actualLunaHttpMeasured','hashScheme','excludedEnvelopeFields','sides'])||result.schemaVersion!=='parity_intervention_replay_result_v1'||result.status!=='same_material_intervention_verified'||result.error!==null||result.commonEqual!==true||result.policyConformant!==true||result.recordedPayloadsReproduced!==true||typeof result.actualLunaHttpMeasured!=='boolean'||result.hashScheme!=='canonical_json_sha256_not_raw_body_bytes'||!equal(result.excludedEnvelopeFields,META_KEYS)||!Array.isArray(result.sides)||result.sides.length!==2)return'invalid';
@@ -628,7 +628,15 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
     if(hash(p)!==r.preProjectionPayloadSha256||!(Object.hasOwn(p.questions,'draft_naming')||choiceResponse(p,answer))||checkModelIdentity(p.model,answer.model).status!=='accepted')return'invalid';
     const st=JSON.parse(p.state);
      for(const [k,q] of Object.entries(p.questions) as any){
-      if(/^segment_\d+_act$/.test(k)&&!Object.hasOwn(st,'aiSeq')&&!equal(q?.criteria,CTX.v3?(H3_ONLY()?LOCAL_CRITERIA_H3_S4:LOCAL_CRITERIA_V3_S4):LOCAL_CRITERIA_V1_S4))return'invalid';
+      if(/^segment_\d+_act$/.test(k)&&!Object.hasOwn(st,'aiSeq')){
+       // The saved version decides the whole set: holistic_v3 its own, holistic_v1/v2 the V3 set, a version-less two_stage_v3 either the set of the legacy/style commits
+       // (58a9511, 07116ae, and the loop commit before the V3 set existed: the layout-independent one) or the V3 set, any other layout the layout-independent set.
+       // Whatever the kind, every segment of every request of the turn carries the same whole set.
+       const kind=equal(q?.criteria,LOCAL_CRITERIA_V1_S4)?'V1':equal(q?.criteria,LOCAL_CRITERIA_V3_S4)?'V3':equal(q?.criteria,LOCAL_CRITERIA_H3_S4)?'H3':null;
+       const allowed=CTX.v3?(H3_ONLY()?['H3']:CTX.policy===null?['V1','V3']:['V3']):['V1'];
+       if(kind===null||!allowed.includes(kind)||(CTX.critKind!=null&&CTX.critKind!==kind))return'invalid';
+       CTX.critKind=kind;
+      }
      }
      if(Object.hasOwn(p.questions,'draft_naming')){
       // holistic_v1: the closed question about the draft's naming act, rebuilt exactly from this material and the previous generation draft.

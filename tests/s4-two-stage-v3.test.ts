@@ -1080,6 +1080,59 @@ test('05u: S4 derives the typed target inheritance: an explicit single target de
   }
 });
 
+import { execFileSync } from 'node:child_process';
+/** The layout-independent criteria of an old commit, read from git byte for byte. */
+function criteriaAt(commit: string): Record<string, string> {
+  const source = execFileSync('git', ['show', `${commit}:dialogue-model/runtime/local-grounding/classify.ts`], { encoding: 'utf8', cwd: new URL('..', import.meta.url) });
+  const body = /export const LOCAL_FUNCTION_CRITERIA: [^=]*= Object\.freeze\((\{[\s\S]*?\n\})\);/u.exec(source);
+  assert.ok(body, commit);
+  return new Function('return ' + body[1])();
+}
+test('05v-2: S4 accepts the layout-independent criteria of the legacy (58a9511) and style (07116ae) commits on a version-less two_stage_v3 record, and refuses them on any versioned one', async () => {
+  const named = (policy?: 'holistic_v1' | 'holistic_v2' | 'holistic_v3') => buildRecords({ dialoguePolicy: policy ?? null, turns: [{ human: 'これ、かかしとかどう？',
+    plan: policy === 'holistic_v3' ? { action: 'confirm', target: 'figure_3', act: 'name_propose', extraction: unboundSeg, speech: 'どの形のことですか？' }
+      : { action: 'accept', target: 'none', act: 'name_propose', extraction: unboundSeg, speech: 'そう見えるんですね。' } }] });
+  for (const commit of ['58a9511', '07116ae']) {
+    const old = criteriaAt(commit);
+    assert.equal(JSON.stringify(old), JSON.stringify(LOCAL_FUNCTION_CRITERIA), commit + ': the same bytes as the layout-independent set');
+    for (const label of ['repair-first', 'bypass-enabled']) {
+      const record = await named();
+      assert.ok(finalChecks(record).length >= 4 && finalChecks(record).every((c: any) => c.status === 'pass'), 'regular');
+      const sent = structuredClone(record);
+      assert.ok(changeClassification(sent, label, old) > 0);
+      assert.ok(finalChecks(sent).length >= 4 && finalChecks(sent).every((c: any) => c.status === 'pass'), `${commit} ${label} version-less: ` + JSON.stringify(finalChecks(sent).filter((c: any) => c.status !== 'pass').map((c: any) => [c.id, c.reason])));
+      for (const policy of ['holistic_v1', 'holistic_v2', 'holistic_v3'] as const) {
+        const versioned = await named(policy);
+        assert.ok(changeClassification(versioned, label, old) > 0);
+        assert.ok(!finalChecks(versioned).every((c: any) => c.status === 'pass'), `${commit} ${label} ${policy}: the old set is not that version's`);
+      }
+      const mixed = await named();
+      assert.ok(changeClassification(mixed, label, { ...old, ask: LOCAL_FUNCTION_CRITERIA_HOLISTIC_V3.ask }) > 0);
+      assert.ok(!finalChecks(mixed).every((c: any) => c.status === 'pass'), `${commit} ${label}: a mixed set`);
+    }
+  }
+});
+
+test('05v-3: S4 recomputes the agree candidates of a short approval with the interval\'s latest meaningful estimate (the run\'s shared function)', async () => {
+  const s3 = Object.keys(OLD.state.ledger)[3], s4 = Object.keys(OLD.state.ledger)[4];
+  const speech = '角ばった塊に細い脚が付いた形のように見えます。';
+  const ai = JSON.stringify([{ segmentId: 'shape', quote: speech, targets: [s3], aspect: 'construal', proposition: 'x', name: null, linkedIssueId: null, respondsToTurn: null }]);
+  const seg = (quote: string, name: string | null, targets: string[] = []) => JSON.stringify([{ segmentId: 's1', quote, targets, aspect: 'name', proposition: quote, name, linkedIssueId: null, respondsToTurn: null }]);
+  const describe = { human: 'どんな図形がありますか？', plan: { action: 'confirm', target: 'figure_3', speech, aiExtraction: ai } };
+  const proposal = { human: 'これ、しおりとかどう？', plan: { action: 'confirm', target: 'figure_3', act: 'name_propose', referent: 'figure_3', extraction: seg('しおり', 'しおり', [s3]), speech: 'どの形のことですか？' } };
+  const between = (referent: string) => ({ human: '丸い台が二つあって、まだどちらか分かりません。', plan: { action: 'confirm', target: 'figure_3', referent, speech: 'どちらの形ですか？' } });
+  const approval = (action: string, speechText: string, extra: any = {}) => ({ human: 'さっき提案した呼び名でいい？', plan: { action, target: 'figure_3', act: 'name_propose', antecedent: 'claim_1', referent: 'none',
+    extraction: seg('さっき提案した呼び名でいい？', null), ...(action === 'agree' ? { name: 'しおり' } : {}), speech: speechText, ...extra } });
+  for (const label of ['repair-first', 'bypass-enabled'] as const) {
+    for (const [name, turns] of [
+      ['two figures then none: no agree candidate, a confirm', [describe, proposal, between('multiple'), approval('confirm', 'どの形のことですか？')]],
+      ['proposal then none: the proposal\'s figure stands, agree', [describe, proposal, approval('agree', '「しおり」と呼びましょう。')]]] as const) {
+      const record = await buildRecords({ label, dialoguePolicy: 'holistic_v3', turns: turns as any });
+      assert.ok(finalChecks(record).length >= 4 && finalChecks(record).every((c: any) => c.status === 'pass'), `${label} ${name} ` + JSON.stringify(finalChecks(record).filter((c: any) => c.status !== 'pass').map((c: any) => [c.id, c.reason])));
+    }
+  }
+});
+
 test('05s: S4 derives the question triggers of a reconfirmation without the wording trigger: the affirming draft carries no question record, a question record on it is refused', async () => {
   const s3 = Object.keys(OLD.state.ledger)[3];
   const speech = '角ばった塊に細い脚が付いた形のように見えます。';
