@@ -180,14 +180,28 @@ for (const strategy of strategies) {
     assert.deepEqual(result.result!.privateState.ledger, result.before.ledger);
   });
 
-  for (const quoted of [false, true]) test(`v3 ${strategy} publishes a single question with a list of ${quoted ? 'quoted' : 'plain'} features on the first draft`, async () => {
-    const human = '照らし合わせるため、手がかりを箇条書きで教えてください。';
-    const speech = [
-      '手がかりは次の二つです。',
-      quoted ? '・「輪に切れ目がある」' : '・輪に切れ目がある',
-      quoted ? '・『細い棒が輪に接している』' : '・細い棒が輪に接している',
-      'この二つがそろう形ですか？',
-    ].join('\n');
+  const observations = ['輪の縁が途中で途切れています。', '細い棒が輪の縁に触れています。'];
+  const askToQuote = `私には「${observations[0]}」「${observations[1]}」と見えます。` +
+    'この二点を私の言い方で並べて、同じ特徴のある形か尋ねてください。';
+  const askForFeatures = '照らし合わせるため、手がかりを箇条書きで教えてください。';
+  const featureList = (first: string, second: string) =>
+    ['手がかりは次の二つです。', `・${first}`, `・${second}`, 'この二つがそろう形ですか？'].join('\n');
+
+  test(`v3 ${strategy} still retries new quoted replies when the participant has supplied observations`, async () => {
+    const draft = featureList('「輪の開いたところが見えますか？」', '『棒は輪の縁に届いていますか？』');
+    const result = await run(strategy, { human: askToQuote, drafts: [draft, clean] });
+    checkPublished(result, clean);
+    checkRetry(result, draft);
+    assert.ok(result.trace.generationGuard.violations.includes('working_note'));
+    assert.deepEqual(result.result!.privateState.ledger, result.before.ledger);
+  });
+
+  for (const { label, human, speech } of [
+    { label: 'plain features', human: askForFeatures, speech: featureList('輪に切れ目がある', '細い棒が輪に接している') },
+    { label: 'quoted features', human: askForFeatures, speech: featureList('「輪に切れ目がある」', '『細い棒が輪に接している』') },
+    { label: 'the participant’s full observation sentences', human: askToQuote,
+      speech: featureList(`「${observations[0]}」`, `『${observations[1]}』`) },
+  ]) test(`v3 ${strategy} publishes one question listing ${label} on the first draft`, async () => {
     const result = await run(strategy, { human, drafts: [speech, speech] });
     assert.equal(result.requests.length, 1, JSON.stringify(result.trace.generationGuard));
     checkPublished(result, speech);
