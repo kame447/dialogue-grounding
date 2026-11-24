@@ -12,10 +12,11 @@ import { createDialogueV2 } from "./dialogue-v2.mjs";
 import { NamingTaskError } from "../naming-error.mjs";
 import { STRATEGIES } from "../judgment/instructions.mjs";
 import { STATUSES } from "../judgment/schema.mjs";
+import { normalizeName as normalizeAgreedName } from "../judgment/name-evidence.mjs";
 import { selectParticipantJev, participantLunaClient, withParticipantJevTurn, restoreParticipantJevLedger,
   participantInitialObservation } from "../web/participant-jev-wiring.ts";
 import { researchHash } from "./research-profile.ts";
-import { settleJevTurnTraces, settleAiPublicClaims } from "./jev-turn.ts";
+import { agreedNamesFromLedger, settleJevTurnTraces, settleAiPublicClaims } from "./jev-turn.ts";
 
 export const VERSION = 2;
 const SCRIPTED_OPENING = "まず、どの図形から話しましょうか？";
@@ -367,11 +368,16 @@ export async function createNamingTaskV2({
     closed = true;
     queue.close();
     const snapshot = { events: queue.getSnapshot().events, privateState: queue.getPrivateState() };
+    const agreed = jev?.profile.questionLayout === "two_stage_v3"
+      ? Object.entries(agreedNamesFromLedger(snapshot.privateState.ledger)) : [];
     for (let attempt = 0; attempt < 2 && !aiSubmission; attempt++) {
       let response;
       try { response = await dialogue.finalRequest(snapshot, attempt > 0); }
       catch { finalError = "ai_unavailable"; await persist(); throw new NamingTaskError("ai_unavailable"); }
-      aiSubmission = parseAiNamesV2(response.text, dialogue.slots);
+      const names = parseAiNamesV2(response.text, dialogue.slots);
+      if (names && agreed.every(([slot, name]) => normalizeAgreedName(names[slot]) === normalizeAgreedName(name))) {
+        aiSubmission = names;
+      }
     }
     if (!aiSubmission) { finalError = "submission_error"; await persist(); throw new NamingTaskError("submission_error"); }
     finalError = null;

@@ -140,6 +140,7 @@ type CommittedAct = {
 };
 export type JevPrivateState = {
   schemaVersion?: "jev_private_state_v2"; interventionPolicy?: {version:"bypass_acceptance_v1";tableSha256:string};
+  agreeNameScopeVersion?: "scoped_v1";
   ledger: OwnLedger; graph: Graph; judgments: CommittedAct[];
   observationMemo: ObservationMemo | null; repairHistory: RepairHistoryEntry[];
   aiPublic?: AiPublicState;
@@ -220,7 +221,7 @@ const eligibleAgreeClaim = (c: LocalClaimView) => c.aspect === "name" && c.name 
   (c.speaker === "human" && c.act === "name_propose" || c.act === "name_accept");
 
 function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns: readonly PublicTurn[], turn: number,
-  slots: readonly string[], { ledger, judgments }: Pick<JevPrivateState, "ledger" | "judgments">,
+  slots: readonly string[], { ledger, judgments, agreeNameScopeVersion }: Pick<JevPrivateState, "ledger" | "judgments" | "agreeNameScopeVersion">,
   current: { status: string; scores: Record<string, number> | null } | null = null): PublicNameCandidate[] {
   const isHumanProposal = (c: LocalClaimView) => c.speaker === "human" && c.act === "name_propose";
   const publicClaims = claims.filter(c => c.aspect === "name" && c.name !== null &&
@@ -229,7 +230,8 @@ function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns: reado
   const lastBoundary = judgments.filter(j => ["agree", "defer", "move_on"].includes(j.judgment.action)).at(-1)?.turnIndex ?? 0;
   const openClaims = publicClaims.filter(c => c.sourceTurn > lastBoundary);
   const proposals = openClaims.filter(isHumanProposal);
-  const latestProposal = proposals.at(-1)?.sourceTurn;
+  const scoped = agreeNameScopeVersion === "scoped_v1";
+  const latestProposal = (scoped ? proposals.filter(p => p.targets.length === 0) : proposals).at(-1)?.sourceTurn;
   const focusedTurns = judgments.flatMap(({ turnIndex, jevTurn }) => {
     const ids = jevTurn.executed ? targets(jevTurn.executed) : [];
     return turnIndex > lastBoundary && ids.length ? [{ turnIndex, ids }] : [];
@@ -275,7 +277,7 @@ function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns: reado
     if (c.sourceTurn < turn) {
       const focusMoved = c.targets.length > 0 && focusedTurns.some(j =>
         j.turnIndex >= c.sourceTurn && !c.targets.some(id => j.ids.includes(id)));
-      const replaced = proposals.some(p => p.sourceTurn > c.sourceTurn && normalizeName(p.name!) !== normalized);
+      const replaced = !scoped && proposals.some(p => p.sourceTurn > c.sourceTurn && normalizeName(p.name!) !== normalized);
       if (focusMoved || replaced) return [];
     }
     const currentUnbound = c.sourceTurn === turn || isHumanProposal(c) && c.sourceTurn === latestProposal;
@@ -289,6 +291,14 @@ function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns: reado
     if (!source) return [];
     const occupied = slots.filter(id => ledger[id].name !== null && normalizeName(ledger[id].name) === normalized);
     return candidates.filter(id => {
+      // Supersession applies to this candidate, using a verified reply or an explicitly bound target.
+      if (scoped && proposals.some(p => {
+        if (p.sourceTurn <= c.sourceTurn) return false;
+        const linked = p.respondsTo === c.id || (antecedent !== undefined && p.respondsTo === antecedent.id);
+        const slot = p.targets.length === 1 ? p.targets[0] : null;
+        if (normalizeName(p.name!) !== normalized) return linked || slot === id;
+        return slot !== null && slot !== id && (linked || c.targets.length === 1);
+      })) return false;
       if (referentDenied(id)) return false;
       if (requiresFocus && !wasFocused(id)) return false;
       if (prevPublicIds.size && !prevPublicIds.has(id)) return false;
@@ -299,6 +309,12 @@ function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns: reado
         (r.act === "deny" || r.act === "name_reject") && r.name === name && (r.respondsTo === c.id || r.targets.includes(id)));
     }).map(figureId => ({ name, figureId, sourceTurn: source.turn }));
   });
+}
+
+/** The names already agreed in this committed snapshot, keyed only by own figure IDs. */
+export function agreedNamesFromLedger(ledger: OwnLedger): Record<string, string> {
+  return Object.fromEntries(Object.entries(ledger).flatMap(([slot, entry]) =>
+    entry.status === "agreed" && entry.name !== null ? [[slot, entry.name]] : []));
 }
 
 const hasAgreeNameV3 = (names: readonly PublicNameCandidate[], name: string | null, figureId: string | null) =>
@@ -396,7 +412,9 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
  if(questionLayout!=='two_stage_v1'&&questionLayout!=='two_stage_v2'&&questionLayout!=='two_stage_v3')throw new JevTurnError('invalid_state');
  try{
   stateJson(value);const s=value as any;validateOwnLedger(Object.fromEntries(ownSlots.map(k=>[k,{status:'unassigned',name:null}])));
-  if(!stateExact(s,['schemaVersion','interventionPolicy','ledger','graph','judgments','observationMemo','repairHistory',...(Object.hasOwn(s??{},'aiPublic')?['aiPublic']:[])])||s.schemaVersion!=='jev_private_state_v2'||!stateSame(s.interventionPolicy,{version:'bypass_acceptance_v1',tableSha256:BYPASS_ACCEPTANCE_V1_TABLE_SHA256}))throw Error();
+  const hasAgreeNameScope=Object.hasOwn(s??{},'agreeNameScopeVersion');
+  if(!stateExact(s,['schemaVersion','interventionPolicy','ledger','graph','judgments','observationMemo','repairHistory',...(Object.hasOwn(s??{},'aiPublic')?['aiPublic']:[]),...(hasAgreeNameScope?['agreeNameScopeVersion']:[])])||s.schemaVersion!=='jev_private_state_v2'||!stateSame(s.interventionPolicy,{version:'bypass_acceptance_v1',tableSha256:BYPASS_ACCEPTANCE_V1_TABLE_SHA256}))throw Error();
+  if(hasAgreeNameScope&&(questionLayout!=='two_stage_v3'||s.agreeNameScopeVersion!=='scoped_v1'))throw Error();
   validateOwnLedger(s.ledger);if(!sameSet(Object.keys(s.ledger),ownSlots))throw Error();const graph=snapshotReferenceGraph(s.graph);if(!sameSet(Object.keys(graph.ownSlots),ownSlots)||!Array.isArray(s.judgments)||!Array.isArray(s.repairHistory))throw Error();
   if(s.observationMemo!==null){const m=validateObservationMemo(s.observationMemo);if(!sameSet(m.figures.map(f=>f.id),ownSlots))throw Error();}
   if(Object.hasOwn(s,'aiPublic'))validateAiPublicState(s.aiPublic,ownSlots,Number.MAX_SAFE_INTEGER,s.graph);
@@ -617,6 +635,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   }
   function initialPrivateState(): JevPrivateState {
     return { ...(integrated?{schemaVersion:'jev_private_state_v2' as const,interventionPolicy:{version:'bypass_acceptance_v1' as const,tableSha256:BYPASS_ACCEPTANCE_V1_TABLE_SHA256}}:{}), ledger: createOwnLedger(slots), judgments: [], graph: createReferenceGraph({ slots }) as Graph, observationMemo: null, repairHistory: [],
+      ...(questionLayout === "two_stage_v3" ? { agreeNameScopeVersion: "scoped_v1" as const } : {}),
       ...(aiEnabled ? { aiPublic: initialAiPublicState() } : {}) };
   }
   async function memoOnce(signal?: AbortSignal) {
@@ -934,6 +953,8 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
             ...(gate ? { repairGate: structuredClone(gate) } : {}) },
           localGrounding: { ...prepared.trace, attemptNumber }, ...(aiEnabled ? { aiPublic: { aiSeq: aiPending!.aiSeq, textSha256: aiPending!.textSha256 } } : {}) }],
         ...(aiEnabled ? { aiPublic: state.aiPublic } : {}) };
+      // Keep the naming policy from the original snapshot, including its absence on historical v3 tapes.
+      if (state.agreeNameScopeVersion) nextState.agreeNameScopeVersion = state.agreeNameScopeVersion;
       record.status = "staged"; record.publicSpeech = result.text; record.local.status = "staged";
       return { text: result.text, privateState: nextState };
       } finally {deadline?.close();}
@@ -1080,10 +1101,12 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
     if(integrated)privateState=validateJevPrivateStateV2(privateState,slots,intervention!,questionLayout);else rejectNewLegacyState(privateState);
     if (!privateState.observationMemo) throw new JevTurnError("invalid_state");
     const memo = validateObservationMemo(privateState.observationMemo, { ownAnchors });
+    const agreed = retry && questionLayout === "two_stage_v3" ? agreedNamesFromLedger(privateState.ledger) : {};
+    const confirmed = Object.keys(agreed).length ? "\n次の確定済みの図形IDと名前の組を維持してください。\n" + JSON.stringify(agreed) : "";
     return client.complete([{ role: "system", content: generation.task },
       ...observationContextMessages(JSON.stringify({ scope: "private_observations_not_ground_truth", memo, ownLedger: privateState.ledger })),
       ...events.map(e => ({ role: e.speaker === "human" ? "user" as const : "assistant" as const, content: e.text })),
-      { role: "user", content: generation.final + (retry ? "\n指定JSON形式で再提出してください。" : "") }], { phase: "final_submission", timeoutMs: generation.timeoutMs });
+      { role: "user", content: generation.final + (retry ? "\n指定JSON形式で再提出してください。" + confirmed : "") }], { phase: "final_submission", timeoutMs: generation.timeoutMs });
   }
   return Object.freeze({ slots: Object.freeze([...slots]), initialPrivateState, initializePrivateState, runAiTurn, finalRequest,
     getAttempts: () => structuredClone(attempts), snapshotGraph: (state: JevPrivateState) => {checkProspectMode(state);if(!integrated)rejectNewLegacyState(state);return snapshotReferenceGraph((integrated?validateJevPrivateStateV2(state,slots,intervention!,questionLayout):state).graph);} });

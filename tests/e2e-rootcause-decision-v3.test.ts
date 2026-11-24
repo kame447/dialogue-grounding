@@ -27,7 +27,8 @@ type Plan = {
 };
 
 function fixture(strategy: 'bypass-enabled' | 'repair-first' = 'bypass-enabled',
-  { aiPublic = false, observations = memo() }: { aiPublic?: boolean; observations?: ReturnType<typeof memo> } = {}) {
+  { aiPublic = false, observations = memo(), historicalNameScope = false }:
+  { aiPublic?: boolean; observations?: ReturnType<typeof memo>; historicalNameScope?: boolean } = {}) {
   const intervention = interventionForStrategy(strategy);
   const inputs: JevDecisionInput[] = [];
   const wire: JevDecisionPayload[] = [];
@@ -104,6 +105,7 @@ function fixture(strategy: 'bypass-enabled' | 'repair-first' = 'bypass-enabled',
     generation: { task: '共同命名', instructions: '公開の返答を書いてください。', actionScope: {}, final: '', timeoutMs: 3000 },
   });
   let state = runtime.initialPrivateState();
+  if (historicalNameScope) delete state.agreeNameScopeVersion;
   async function exchange(text: string, next: Plan) {
     plan = next;
     drafts = [...plan.drafts];
@@ -235,6 +237,70 @@ test('v3 moving focus with accept expires a bound proposal before another name i
   const next = await f.exchange('この形はどう見えますか？', { action: 'accept', target: 3, drafts: ['丸みがある形ですね。'] });
   assert.ok(next.input.priorClaims.some(c => c.name === NEW_NAME));
   assert.deepEqual(next.input.agreeNames, []);
+});
+
+for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
+  test('v3 scopes prior naming evidence to the proposed figure (' + strategy + ')', async () => {
+    for (const historicalNameScope of [false, true]) {
+      const f = fixture(strategy, { historicalNameScope });
+      const first = 'この形の名前は台座がよさそうです。';
+      const second = '別の形の呼び名には歯車がよさそうです。';
+      await f.exchange(first, { action: 'accept', drafts: ['呼び名の候補ですね。'],
+        segments: [naming(first, '台座', [ids[2]])] });
+      await f.exchange(second, { action: 'accept', drafts: ['別の候補も出ましたね。'],
+        segments: [naming(second, '歯車', [ids[3]])] });
+      const before = structuredClone(f.state());
+      const checked = await f.exchange('先ほどの候補についてどう思いますか？',
+        { action: 'accept', drafts: ['呼び名を考えています。'] });
+      const firstCandidate = { name: '台座', figureId: ids[2], sourceTurn: 1 };
+      const secondCandidate = { name: '歯車', figureId: ids[3], sourceTurn: 3 };
+      assert.deepEqual(checked.input.agreeNames, historicalNameScope ? [secondCandidate] : [firstCandidate, secondCandidate]);
+      assert.equal(checked.state.agreeNameScopeVersion, historicalNameScope ? undefined : 'scoped_v1');
+      const key = JSON.stringify([checked.trace.turnIndex, checked.trace.lastEventId, checked.trace.attemptNumber]);
+      const trial = { profile: { id: 'research_trial_profile_v3', ...V3 }, turns: [{ turn: checked.trace.turnIndex, state: checked.state }] };
+      const material = { state: before, events: checked.events };
+      try {
+        assert.notEqual(s4Probe.agreeSource(trial, checked.trace, key, material), 'invalid');
+        const changed = structuredClone(material);
+        if (historicalNameScope) changed.state.agreeNameScopeVersion = 'scoped_v1';
+        else delete changed.state.agreeNameScopeVersion;
+        assert.equal(s4Probe.agreeSource(trial, checked.trace, key, changed), 'invalid');
+        const forged = structuredClone(trial);
+        forged.turns[0].state.judgments.at(-1)!.jevTurn.agreeNames = historicalNameScope ? [firstCandidate, secondCandidate] : [secondCandidate];
+        assert.equal(s4Probe.agreeSource(forged, checked.trace, key, material), 'invalid');
+      } finally { s4Probe.setContext({}); }
+      if (!historicalNameScope) {
+        const agreed = await f.exchange('では、最初の名前でどうでしょうか？',
+          { action: 'agree', target: 2, name: '台座', drafts: [agreeSpeech('台座')] });
+        assert.deepEqual(agreed.state.ledger[ids[2]], { status: 'agreed', name: '台座' });
+        assert.equal(agreed.state.ledger[ids[3]].status, 'unassigned');
+      }
+    }
+  });
+}
+
+test('v3 retires the old proposal after an explicit rename or assignment of the same name elsewhere', async () => {
+  for (const { slot, name } of [{ slot: 2, name: '歯車' }, { slot: 3, name: '台座' }]) {
+    const f = fixture();
+    const first = 'この図形の呼び名は台座がよさそうです。';
+    const second = name + 'にする案を出します。';
+    await f.exchange(first, { action: 'accept', drafts: ['候補ですね。'], segments: [naming(first, '台座', [ids[2]])] });
+    const updated = await f.exchange(second, { action: 'accept', drafts: ['呼び名の話ですね。'],
+      segments: [naming(second, name, [ids[slot]])] });
+    assert.deepEqual(updated.input.agreeNames, [{ name, figureId: ids[slot], sourceTurn: 3 }]);
+  }
+});
+
+test('v3 preserves a grounded unbound proposal across a later bound proposal for another figure', async () => {
+  const f = await groundedFixture(2);
+  const first = '呼び名の案は台座です。';
+  const second = '別の図形に歯車という呼び名を提案します。';
+  await f.exchange(first, { action: 'accept', drafts: ['呼び名の候補ですね。'], segments: [naming(first, '台座')] });
+  const next = await f.exchange(second, { action: 'accept', drafts: ['別の候補も出ましたね。'],
+    segments: [naming(second, '歯車', [ids[3]])] });
+  assert.deepEqual(next.input.agreeNames, [
+    { name: '台座', figureId: ids[2], sourceTurn: 3 }, { name: '歯車', figureId: ids[3], sourceTurn: 5 },
+  ]);
 });
 
 for (const target of [2, undefined]) test(`v3 keeps a bound proposal after accept(${target ?? 'none'}) without a competing name`, async () => {
@@ -799,7 +865,7 @@ for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
 // undenied candidates; the older texts (up to the prompt-style version) accept only the earlier all-slot rule. No other pairing is genuine.
 for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
   test(`v3 ${strategy} S4 binds the agree-candidate rule to the criteria version of the record`, async () => {
-    const f = fixture(strategy, { aiPublic: true });
+    const f = fixture(strategy, { aiPublic: true, historicalNameScope: true });
     const name = '鍵';
     const proposal = `これは「${name}」とかどうかな？`;
     await f.exchange(proposal, { action: 'accept', drafts: ['どの形のことか確かめますね。'], segments: [naming(proposal, name)] });
