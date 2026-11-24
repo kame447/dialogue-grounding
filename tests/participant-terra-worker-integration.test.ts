@@ -5,7 +5,7 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { MEMO_LOCAL_EXTRACTION_INSTRUCTIONS } from '../dialogue-model/runtime/local-grounding/extract.ts';
 import { MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS } from '../dialogue-model/runtime/local-grounding/extract-ai.ts';
-import { canonicalReceptionProtocolV2, canonicalReceptionProtocolV3, receptionProtocolSha256 } from '../dialogue-model/runtime/v2/reception.ts';
+import { canonicalReceptionProtocolV2, canonicalReceptionProtocolV3, receptionProtocolSha256, validateReceptionPlan } from '../dialogue-model/runtime/v2/reception.ts';
 import { createTrialV2, modelView } from '../dialogue-model/runtime/stimuli/scatter-v2.mjs';
 import { FIGURE_SETS } from '../dialogue-model/runtime/stimuli/figure-bank.ts';
 import { validateParticipantModelPin } from '../dialogue-model/runtime/v2/participant-model-pin.ts';
@@ -263,14 +263,26 @@ test('Worker approval persists one private pin, both trial conditions use it, an
   assert.doesNotMatch(JSON.stringify(state), /gpt-6|typesafe\/jev|participantModelPin|participantRuntimeProfile|participant_production_usage|missingCostPosts|knownUsd|ownAnchors|observationMemo|data:image/u);
 });
 
-test('a v3 figure-bank reception freezes both the stimulus and Terra runtime through both conditions and restore', async () => {
+for (const profile of [undefined, PARTICIPANT_PRODUCTION_PROFILE]) test(
+  `v3 figure-bank and ${profile ? 'production usage' : 'saved limits'} remain fixed across conditions and restore`, async () => {
   const h = harness(true, { ...protocol, schemaVersion: 'reception_protocol_v3',
     figureSelection: { mode: 'preset', setId: 'bank-set-b' }, figureSetPolicy: 'shared' });
+  h.env.PARTICIPANT_TERRA_PROFILE = profile;
   await h.receive();
   const approved = await h.approve();
   assert.equal(approved.plan.schemaVersion, 'reception_plan_v3');
   assert.deepEqual(approved.plan.participantModelPin, pin);
-  assert.deepEqual(approved.plan.participantLimits, approvedLimits);
+  if (profile) {
+    assert.equal(approved.plan.participantRuntimeProfile, profile);
+    assert.equal(Object.hasOwn(approved.plan, 'participantLimits'), false);
+    assert.throws(() => validateReceptionPlan({ ...approved.plan, participantLimits: approvedLimits }));
+    assert.throws(() => validateReceptionPlan({ ...approved.plan, participantRuntimeProfile: 'future_profile' }));
+    const { participantModelPin: _pin, ...withoutPin } = approved.plan;
+    assert.throws(() => validateReceptionPlan(withoutPin));
+  } else {
+    assert.deepEqual(approved.plan.participantLimits, approvedLimits);
+    assert.equal(Object.hasOwn(approved.plan, 'participantRuntimeProfile'), false);
+  }
   assert.equal(h.calls.length, 0);
 
   const check = async (trial: { sessionId: string }, index: number) => {
@@ -278,10 +290,18 @@ test('a v3 figure-bank reception freezes both the stimulus and Terra runtime thr
     const expected = approved.plan.trials[index];
     assert.equal(record.strategy, expected.strategy);
     assert.deepEqual(record.options.participantModelPin, pin);
-    assert.deepEqual(record.jevLedger.limits, approvedLimits);
+    if (profile) {
+      assert.equal(record.options.participantRuntimeProfile, profile);
+      assert.equal(record.jevLedger.schemaVersion, profile);
+      assert.equal(record.jevLedger.assignmentId, record.assignment.assignmentId);
+      assert.equal(Object.hasOwn(record.jevLedger, 'limits'), false);
+    } else {
+      assert.deepEqual(record.jevLedger.limits, approvedLimits);
+      assert.equal(Object.hasOwn(record.options, 'participantRuntimeProfile'), false);
+    }
     assert.deepEqual(record.options.figureSelection, expected.figureSelection);
     assert.deepEqual(record.stimulus.figureIds, FIGURE_SETS['bank-set-b']);
-    assert.doesNotMatch(JSON.stringify(trial), /bank-set-b|figureSelection|figureIds|participantModelPin|participantLimits|observationMemo|gpt-6/u);
+    assert.doesNotMatch(JSON.stringify(trial), /bank-set-b|figureSelection|figureIds|participantModelPin|participantLimits|participantRuntimeProfile|knownUsd|observationMemo|gpt-6/u);
     return record;
   };
   const first = (await jsonOk(await h.start())).trial;
@@ -294,6 +314,7 @@ test('a v3 figure-bank reception freezes both the stimulus and Terra runtime thr
   assert.ok(image?.image_url.url === 'data:' + model.mimeType + ';base64,' + model.png.toString('base64'));
 
   h.env.PARTICIPANT_TERRA_ENABLED = 'off';
+  h.env.PARTICIPANT_TERRA_PROFILE = profile ? undefined : PARTICIPANT_PRODUCTION_PROFILE;
   h.env.PARTICIPANT_TERRA_LIMITS_JSON = 'invalid';
   h.evict();
   const restored = (await jsonOk(await h.request('state'))).trial;
