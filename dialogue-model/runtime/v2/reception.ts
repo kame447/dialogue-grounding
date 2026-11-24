@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { Strategy } from './base-assignment.ts';
+import { validateParticipantModelPin } from './participant-model-pin.ts';
+import type { ParticipantModelPin } from './participant-model-pin.ts';
 import { ROTATION_MODES as STIMULUS_ROTATION_MODES } from '../stimuli/scatter-v2.mjs';
 
 export type ReceptionProtocol = { schemaVersion: 'reception_protocol_v1'; protocolId: string; revision: number;
@@ -17,6 +19,7 @@ export type ReceptionPlanV1 = { schemaVersion: 'reception_plan_v1'; protocolId: 
   protocolSha256: string; order: Strategy[]; trials: { index: number; strategy: Strategy; seed: number; referenceMemory: boolean }[]; approvedAt: string };
 export type ReceptionPlanV2 = { schemaVersion: 'reception_plan_v2'; protocolId: string; protocolRevision: number;
   protocolSha256: string; order: Strategy[]; betweenTrials: BetweenTrials; approvedAt: string;
+  participantModelPin?: ParticipantModelPin;
   trials: { index: number; strategy: Strategy; seed: number; referenceMemory: boolean; rotationMode: RotationMode }[] };
 export type ReceptionPlan = ReceptionPlanV1 | ReceptionPlanV2;
 /** The protocol version a researcher saw when choosing an order. */
@@ -82,18 +85,22 @@ export function validateReceptionProtocolV2(value: unknown): ReceptionProtocolV2
 export function canonicalReceptionProtocolV2(value: unknown): string { return JSON.stringify(validateReceptionProtocolV2(value)); }
 export const receptionProtocolSha256 = (canonical: string): string => createHash('sha256').update(canonical).digest('hex');
 function validatePlanV2(value: unknown): ReceptionPlanV2 {
-  const p = object(value, ['schemaVersion','protocolId','protocolRevision','protocolSha256','order','betweenTrials','trials','approvedAt']);
+  const hasPin = !!value && typeof value === 'object' && Object.hasOwn(value, 'participantModelPin');
+  const p = object(value, ['schemaVersion','protocolId','protocolRevision','protocolSha256','order','betweenTrials','trials','approvedAt',
+    ...(hasPin ? ['participantModelPin'] : [])]);
+  const pin = hasPin ? validateParticipantModelPin(p.participantModelPin) : undefined;
   const strategies = order(p.order);
   if (p.schemaVersion !== 'reception_plan_v2' || !uuid.test(p.protocolId) || !int(p.protocolRevision) || p.protocolRevision < 1 ||
     typeof p.protocolSha256 !== 'string' || !owner.test(p.protocolSha256) || !iso(p.approvedAt) || !between(p.betweenTrials) ||
     !Array.isArray(p.trials) || p.trials.length !== strategies.length) return fail();
   const trials = p.trials.map((raw: unknown, index: number) => {
     const t = object(raw, ['index','strategy','seed','referenceMemory','rotationMode']);
-    if (t.index !== index || t.strategy !== strategies[index] || !int(t.seed) || typeof t.referenceMemory !== 'boolean' || !rotation(t.rotationMode)) return fail();
+    if (t.index !== index || t.strategy !== strategies[index] || !int(t.seed) || typeof t.referenceMemory !== 'boolean' || pin && !t.referenceMemory || !rotation(t.rotationMode)) return fail();
     return { index, strategy: strategies[index], seed: t.seed, referenceMemory: t.referenceMemory, rotationMode: t.rotationMode as RotationMode };
   });
   return { schemaVersion: 'reception_plan_v2', protocolId: p.protocolId, protocolRevision: p.protocolRevision,
-    protocolSha256: p.protocolSha256, order: strategies, betweenTrials: p.betweenTrials, approvedAt: p.approvedAt, trials };
+    protocolSha256: p.protocolSha256, order: strategies, betweenTrials: p.betweenTrials, approvedAt: p.approvedAt, trials,
+    ...(pin ? { participantModelPin: pin } : {}) };
 }
 /** Each saved plan version is validated strictly by its own schema; v1 keeps its exact shape. */
 export function validateReceptionPlan(value: unknown): ReceptionPlan {
@@ -120,6 +127,9 @@ export function effectiveRotationMode(plan: ReceptionPlan, index: number): Rotat
 }
 export function effectiveBetweenTrials(plan: ReceptionPlan): BetweenTrials {
   return plan.schemaVersion === 'reception_plan_v2' ? plan.betweenTrials : 'none';
+}
+export function effectiveParticipantModelPin(plan: ReceptionPlan): ParticipantModelPin | undefined {
+  return plan.schemaVersion === 'reception_plan_v2' ? plan.participantModelPin : undefined;
 }
 export function validateReception(value: unknown): Reception {
   try {
@@ -154,7 +164,7 @@ function displayed(value: unknown): DisplayedProtocol {
  * v1 (pure, legacy) freezes a v1 plan exactly as before. v2 requires the displayed
  * version and compares it with the same protocol snapshot the plan is copied from.
  */
-export async function approveReception(value: unknown, options: { expectedRevision: number; order: number; protocol: unknown; expected?: unknown; approvedAt: string; randomSeed: () => number }): Promise<Reception> {
+export async function approveReception(value: unknown, options: { expectedRevision: number; order: number; protocol: unknown; expected?: unknown; approvedAt: string; randomSeed: () => number; participantModelPin?: ParticipantModelPin }): Promise<Reception> {
   const r = validateReception(value);
   if (options.protocol && typeof options.protocol === 'object' && (options.protocol as { schemaVersion?: unknown }).schemaVersion === 'reception_protocol_v2') {
     const p = validateReceptionProtocolV2(options.protocol), canonical = JSON.stringify(p), sha256 = receptionProtocolSha256(canonical);
@@ -165,9 +175,11 @@ export async function approveReception(value: unknown, options: { expectedRevisi
     const selected = p.allowedOrders[options.order], seeds = selected.map((_, i) => i === 0 || p.seedPolicy === 'per_trial' ? options.randomSeed() : null);
     const plan = validateReceptionPlan({ schemaVersion:'reception_plan_v2', protocolId:p.protocolId, protocolRevision:p.revision,
       protocolSha256:sha256, order:selected, betweenTrials:p.betweenTrials, approvedAt:options.approvedAt,
+      ...(options.participantModelPin !== undefined ? { participantModelPin: options.participantModelPin } : {}),
       trials:selected.map((strategy, index) => ({ index, strategy, seed:seeds[index] ?? seeds[0], referenceMemory:p.referenceMemory, rotationMode:p.rotationMode })) });
     return validateReception({ ...r, status:'approved', plan, revision:r.revision+1 });
   }
+  if (options.participantModelPin !== undefined) return fail('protocol_unconfigured');
   const p = validateReceptionProtocol(options.protocol);
   if (r.status !== 'pending' || r.revision !== options.expectedRevision) return fail('reception_conflict');
   if (!int(options.order) || !p.allowedOrders[options.order]) return fail('invalid_order');

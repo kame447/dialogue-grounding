@@ -2,7 +2,8 @@
 // under its existing nodejs_compat flag (also used by the stimulus generator).
 import { createHash } from 'node:crypto';
 import type { BaseAssignmentConfig, BaseAssignment, BaseRecord, BaseOwnerState } from './base-assignment.ts';
-import { validateReceptionPlan, effectiveRotationMode, ROTATION_MODES } from './reception.ts';
+import { validateReceptionPlan, effectiveRotationMode, effectiveParticipantModelPin, ROTATION_MODES } from './reception.ts';
+import { validateParticipantModelPin } from './participant-model-pin.ts';
 import type { RotationMode } from './reception.ts';
 export type BaseAssignmentErrorCode = 'invalid_request' | 'assignment_unconfigured' | 'assignment_invalid' |
   'assignment_conflict' | 'assignment_record_invalid';
@@ -88,6 +89,9 @@ export function readAssignment(value: unknown): BaseAssignment {
 export function assignmentRotationMode(a: BaseAssignment): RotationMode {
   return a.source.kind === 'server_config_v1' ? 'relative_pm90' : effectiveRotationMode(a.source.plan, a.source.trialIndex);
 }
+export function assignmentParticipantModelPin(a: BaseAssignment) {
+  return a.source.kind === 'server_config_v1' ? undefined : effectiveParticipantModelPin(a.source.plan);
+}
 const angles = (value: unknown) => { const o = data(value); if (Object.values(o).some(v => typeof v !== 'number' || !Number.isFinite(v))) throw new Error('angle'); };
 /**
  * New records carry both options.rotationMode and the generated stimulus; only
@@ -105,6 +109,10 @@ export function validateBoundBaseRecord(record: unknown, assignment: unknown): v
   guard('assignment_record_invalid', () => {
     const a = readAssignment(assignment), r = data(record), own = readAssignment(r.assignment), options = data(r.options), queue = data(r.queueState);
     checkRotation(r, options, a);
+    const pin = assignmentParticipantModelPin(a);
+    const recordedPin = Object.hasOwn(options, 'participantModelPin')
+      ? validateParticipantModelPin(options.participantModelPin) : undefined;
+    if (JSON.stringify(pin) !== JSON.stringify(recordedPin) || pin && options.jevResearch !== true) throw new Error('model_pin');
     if (typeof r.recordId !== 'string' || !UUID.test(r.recordId) || r.version !== 2 || r.seed !== a.seed || r.strategy !== a.strategy ||
         options.referenceMemory !== a.referenceMemory || !['dialogue', 'submitting', 'completed'].some(v => v === r.status) ||
         !Array.isArray(queue.pendingHumanEventIds) || queue.pendingHumanEventIds.some(v => typeof v !== 'string') ||

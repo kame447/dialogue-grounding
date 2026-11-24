@@ -204,7 +204,7 @@ async function handleDecisions(request, env, fetchImpl, route = DECISION_ROUTE) 
   }
 }
 
-export async function handleRequest(request, env, fetchImpl = globalThis.fetch) {
+export async function handleRequest(request, env, fetchImpl = globalThis.fetch, expectedModel = /** @type {string|null} */ (null)) {
   const pathname = new URL(request.url).pathname;
   if (!["/health", "/v1/chat/completions", "/v1/model-policy", "/v1/decisions", "/v1/decision-policy", "/v1/grounding-evidence", "/v1/grounding-policy"].includes(pathname)) {
     return reply(404, { error: "not_found" });
@@ -277,6 +277,10 @@ export async function handleRequest(request, env, fetchImpl = globalThis.fetch) 
   if ("error" in selected) return reply(400, { error: selected.error });
   const payload = validatedPayload(body, selected.model, env);
   if (!payload) return reply(400, { error: "invalid_request" });
+  if (expectedModel !== null && selected.purpose === "dialogue_turn" &&
+      payload.messages.some(message => typeof message.content !== "string")) {
+    return reply(400, { error: "invalid_request" });
+  }
 
   const controller = new AbortController();
   // Reasoning models spend completion tokens before visible text; keep this
@@ -293,7 +297,7 @@ export async function handleRequest(request, env, fetchImpl = globalThis.fetch) 
       signal: controller.signal,
       // Cloudflare Workers may forward Authorization across redirects. A
       // visual request must never leave the configured upstream endpoint.
-      ...(selected.purpose === "visual_observation" ? { redirect: "manual" } : {}),
+      ...(expectedModel !== null || selected.purpose === "visual_observation" ? { redirect: "manual" } : {}),
     });
     if (!response.ok) {
       return reply(response.status === 429 ? 429 : 502, {
@@ -301,6 +305,7 @@ export async function handleRequest(request, env, fetchImpl = globalThis.fetch) 
       });
     }
     const data = await response.json();
+    if (expectedModel !== null && data?.model !== expectedModel) return reply(502, { error: "model_mismatch" });
     // Vision provenance must be reported by the upstream itself. Never label
     // missing or unexpected identity as the configured model.
     if (selected.purpose === "visual_observation" &&
@@ -309,6 +314,19 @@ export async function handleRequest(request, env, fetchImpl = globalThis.fetch) 
       return reply(502, { error: "invalid_upstream_model" });
     }
     const result = sanitizeResult(data, selected.model);
+    if (result && expectedModel !== null) {
+      const { message, finish_reason } = result.choices[0];
+      if (Array.isArray(message.content)) {
+        message.content = message.content.filter(part => part?.type === "text" && typeof part.text === "string")
+          .map(({ text }) => ({ type: "text", text }));
+      }
+      result.choices[0].finish_reason = typeof finish_reason === "string" && /^[a-z_]{1,32}$/u.test(finish_reason)
+        ? finish_reason : null;
+      const output = JSON.stringify(result);
+      if ([env.RESEARCH_PROXY_TOKEN, env.UPSTREAM_API_KEY].some(secret => secret && output.includes(secret))) {
+        return reply(502, { error: "invalid_upstream_response" });
+      }
+    }
     if (result) return reply(200, result);
     // Empty text after hitting the cap is deterministic for the same request,
     // so it is reported as non-retryable instead of a transient upstream error.

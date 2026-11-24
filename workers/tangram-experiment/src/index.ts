@@ -34,6 +34,9 @@ import { BROWSER_SESSIONS_KEY, EMPTY_TAB_SESSION_MAX_AGE_MS, MAX_EMPTY_TAB_SESSI
   questionnaireUpdate, sortBrowserSessions, summarizeBrowserSession, tabSessionRoute,
   validateCreateTabSession, validateEventCount } from './tab-sessions.ts';
 import type { BrowserSession, BrowserSessionSummary, ReceptionMode } from './tab-sessions.ts';
+import { createTrialV2, modelView } from "../../../dialogue-model/runtime/stimuli/scatter-v2.mjs";
+import { resolveWorkerParticipantModelPin, type ParticipantModelPin } from "../../../dialogue-model/runtime/v2/participant-model-pin.ts";
+import { createWorkerParticipantRuntime, workerParticipantSettings, type ParticipantService } from "./participant-runtime.ts";
 export { AdminIndex };
 
 type Strategy = "repair-first" | "bypass-enabled";
@@ -64,6 +67,9 @@ export interface Env extends SoftLimitBindings {
   // Reception mode and protocol are researcher settings saved in ADMIN_INDEX (/admin/reception-settings);
   // RECEPTION_REQUIRED and RECEPTION_PROTOCOL_JSON are no longer read.
   PARTICIPANT_CONTACT_TEXT?: string;
+  // Add the private proxy's verified pin to new approvals only.
+  PARTICIPANT_TERRA_ENABLED?: string;
+  PARTICIPANT_TERRA_LIMITS_JSON?: string;
   // Deployment-wide AI utterance style for new trials; identical for both strategies.
   V2_UTTERANCE_STYLE?: string;
   NAMING_SESSIONS: DurableObjectNamespace<TangramSession>;
@@ -73,6 +79,7 @@ export interface Env extends SoftLimitBindings {
     // Absent on proxy deployments without the grounding route; the shadow then records not_found.
     grounding?(payload: unknown): Promise<{ status: number; data: unknown }>;
   };
+  PARTICIPANT_AI_PROXY?: ParticipantService;
   // Researcher-only shadow of two-axis grounding evidence for new trials: "on" enables it; unset or anything else is off.
   // It writes private research records only and never changes the dialogue, for either strategy.
   GROUNDING_SHADOW?: string;
@@ -211,10 +218,18 @@ export class TangramSession extends DurableObject<Env> {
       if (!receptionOpen(settings.mode)) throw new ReceptionError('reception_closed');
       if (!settings.protocol) throw new ReceptionError('protocol_unconfigured');
       const protocol = settings.protocol.protocol, expected = input?.protocol;
+      let participantModelPin: ParticipantModelPin | undefined;
+      if (this.env.PARTICIPANT_TERRA_ENABLED === 'on') {
+        try {
+          ({ pin: participantModelPin } = await workerParticipantSettings(this.env.PARTICIPANT_AI_PROXY, this.env.PARTICIPANT_TERRA_LIMITS_JSON));
+        } catch {
+          throw new ReceptionError('reception_unavailable');
+        }
+      }
       const r = await this.serialized(() => this.ctx.storage.transaction(async tx => {
         const raw = await tx.get('reception:v1'); if (!raw) throw new ReceptionError('reception_unavailable');
         const next = await approveReception(raw, { expectedRevision:input.expectedRevision, order:input.order, protocol, expected, approvedAt:new Date().toISOString(),
-          randomSeed:() => crypto.getRandomValues(new Uint32Array(1))[0] });
+          randomSeed:() => crypto.getRandomValues(new Uint32Array(1))[0], participantModelPin });
         await tx.put({ 'reception:v1':next }); return next;
       }));
       await this.indexReception(r); return r;
@@ -647,6 +662,44 @@ export class TangramSession extends DurableObject<Env> {
 
   private async createTrial(binding: Parameters<MakeBaseTask>[0]): Promise<NamingTask> {
     const {seed,strategy,referenceMemory,restore} = binding;
+    const settings = binding.participantModelPin === undefined ? null
+      : await workerParticipantSettings(this.env.PARTICIPANT_AI_PROXY, this.env.PARTICIPANT_TERRA_LIMITS_JSON);
+    let pin;
+    try {
+      pin = resolveWorkerParticipantModelPin({
+        approvedPin: binding.participantModelPin, configuredPin: settings?.pin, restoredOptions: restore?.options,
+      });
+    } catch {
+      throw new NamingTaskError('invalid_options');
+    }
+    const onPersist = async (snapshot: StoredTrial) => {
+      const record = pin ? { ...snapshot, options: { ...snapshot.options, participantModelPin: pin } } : snapshot;
+      await binding.onPersist(record as unknown as BaseRecord);
+      await this.scheduleExpiry();
+      this.ctx.waitUntil(this.registerSummary(record));
+    };
+    if (pin && settings) {
+      const rotationMode = restore?.options.rotationMode ?? binding.rotationMode ?? 'relative_pm90';
+      if (rotationMode !== 'relative_pm90' && rotationMode !== 'relative_0') throw new NamingTaskError('invalid_options');
+      const trial = createTrialV2({ seed, rotationMode });
+      const model = modelView(trial);
+      const runtime = createWorkerParticipantRuntime({
+        ...settings, pin, own: { ownImage: { mimeType: model.mimeType, base64: model.png.toString('base64') }, ownAnchors: model.anchors },
+        cache: {
+          read: key => this.ctx.storage.get(key),
+          putIfAbsent: (key, entry) => this.ctx.storage.transaction(async tx => {
+            const found = await tx.get(key);
+            if (found !== undefined) return found;
+            await tx.put({ [key]: entry });
+            return entry;
+          }),
+        },
+      });
+      return await createNamingTaskV2(({ ...runtime, seed, strategy, referenceMemory, rotationMode,
+        utteranceStyle: runtime.jevResearch.profile.utteranceStyle, createTrial: () => trial, onPersist,
+        runDir: null, ...(restore ? { restore } : {}),
+      }) as unknown as Parameters<typeof createNamingTaskV2>[0]) as NamingTask;
+    }
     // New trials take the assignment's mode; a restored trial takes its mode from its own record only.
     const rotation: { rotationMode?: RotationMode } = restore ? {} : { rotationMode: binding.rotationMode };
     // New trials follow the deployment setting; a restored trial keeps its recorded style.
@@ -676,11 +729,7 @@ export class TangramSession extends DurableObject<Env> {
     return await createNamingTaskV2(({ client, seed, strategy, referenceMemory, utteranceStyle, runDir: null, groundingShadow, ...rotation,
       ...(restore ? { restore } : {}),
       // Every write also keeps record:<recordId>, so a later trial never erases this one.
-      onPersist: async (snapshot: StoredTrial) => {
-        await binding.onPersist(snapshot as unknown as BaseRecord);
-        await this.scheduleExpiry();
-        this.ctx.waitUntil(this.registerSummary(snapshot));
-      },
+      onPersist,
     }) as unknown as Parameters<typeof createNamingTaskV2>[0]) as NamingTask;
   }
 
