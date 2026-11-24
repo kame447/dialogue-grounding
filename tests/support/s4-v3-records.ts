@@ -47,7 +47,7 @@ export async function runTurn(profile: any, label: Label, state: any, events: an
       const labels = Object.keys(q.criteria);
       if (key === 'action') lastAction = plan.forceAction ?? (plan.reobserve && ++actionCalls === 1 ? 'request_observation' : plan.action);
       const choice = key === 'action' ? lastAction : key === 'target' ? (lastAction === 'request_observation' ? 'figure_0' : plan.target) : key === 'repair_issue' ? plan.issue ?? 'none' : key === 'prospect' ? plan.prospect ?? 'uncertain'
-        : key === 'name' && plan.name ? labels.find(l => JSON.parse(q.criteria[l]).value === plan.name)
+        : key === 'name' && plan.name ? (labels.find(l => JSON.parse(q.criteria[l]).value === plan.name) ?? labels[0])
         : key === 'draft_naming' ? (plan.action === 'agree' ? 'adopt_chosen' : 'none') : key === 'basis' ? 'partner_uncertain' : key.endsWith('_antecedent') ? 'none' : key.endsWith('_act') ? (plan.act && labels.includes(plan.act) ? plan.act : 'assert') : key === 'observe_aspect' ? 'orientation' : labels[0];
       if (!labels.includes(choice) && !(key === 'action' && plan.forceAction)) throw new Error(`scripted choice ${choice} is not offered for ${key}: ${labels.slice(0, 8)}`);
       answers[key] = { type: 'choice', choice, probabilities: Object.fromEntries(labels.map(l => [l, key === 'action' ? plan.actionScores?.[l] ?? (l === choice ? 1 : 0) : l === choice ? 1 : 0])) };
@@ -80,7 +80,7 @@ export async function runTurn(profile: any, label: Label, state: any, events: an
 export type Turn = { human: string; plan: Plan };
 /** NORMAL rebuilt as one canonical trial whose final turn follows the earlier scripted turns (all of them under `label`). */
 /** dialoguePolicy: omitted = the creation default (holistic_v1); null = the earlier version (no policy), for controls of the older lineages. */
-export async function buildRecords({ label = 'repair-first' as Label, technicalTrial, turns, ledger, dialoguePolicy }: { label?: Label; technicalTrial?: { version: TrialVersion }; turns: Turn[]; ledger?: Record<string, any>; dialoguePolicy?: 'holistic_v1' | null }) {
+export async function buildRecords({ label = 'repair-first' as Label, technicalTrial, turns, ledger, dialoguePolicy }: { label?: Label; technicalTrial?: { version: TrialVersion }; turns: Turn[]; ledger?: Record<string, any>; dialoguePolicy?: 'holistic_v1' | 'holistic_v2' | null }) {
   const n = structuredClone(normal), tr = n.trials[0], m = n.run.manifest;
   const profile = JSON.parse(JSON.stringify(researchTrialProfileV3(m.lunaRequest, m.timeouts, 'two_stage_v3', dialoguePolicy)));
   const digest = hash(profile);
