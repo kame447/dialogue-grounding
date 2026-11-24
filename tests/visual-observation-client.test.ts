@@ -25,3 +25,12 @@ test('visual client refuses a success response lacking an actual model ID', asyn
     async () => Response.json({ choices: [{ message: { content: 'synthetic observation' } }] }));
   await assert.rejects(client.complete([{ role: 'user', content: 'synthetic' }]), /provider_http_error/);
 });
+
+
+test('visual client explicitly disables authenticated redirect following', async () => {
+  let calls = 0;
+  const client = createVisualObservationClient({ provider: 'cloudflare', baseUrl: 'https://mock.invalid/v1', apiKey: 'synthetic' },
+    async (_input, init) => { calls++; assert.equal(init?.redirect, 'error'); return new Response(null, { status: 307, headers: { Location: 'https://untrusted.invalid/' } }); });
+  await assert.rejects(client.complete([{ role: 'user', content: 'synthetic' }]), /provider_http_error/);
+  assert.equal(calls, 1);
+});

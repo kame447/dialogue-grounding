@@ -262,3 +262,21 @@ test("vision route fails closed on missing or substituted upstream model identit
   assert.equal(legacy.status, 200);
   assert.equal((await legacy.json()).model, env.DIALOGUE_MODEL);
 });
+
+
+test("visual upstream redirects fail closed without forwarding authorization or location", async () => {
+  const configured = { ...env, VISION_MODEL: "synthetic-terra" };
+  let calls = 0;
+  const response = await handleRequest(request("/v1/chat/completions", env.RESEARCH_PROXY_TOKEN,
+    bodyWith(simpleMessages, { purpose: "visual_observation" })), configured,
+    async (url, options) => {
+      calls++;
+      assert.equal(url, "https://api.openai.com/v1/chat/completions");
+      assert.equal(options.redirect, "manual");
+      return new Response(null, { status: 307, headers: { Location: "https://untrusted.invalid/" } });
+    });
+  assert.equal(calls, 1);
+  assert.equal(response.status, 502);
+  assert.equal(response.headers.get("location"), null);
+  assert.deepEqual(await response.json(), { error: "upstream_error" });
+});

@@ -291,6 +291,9 @@ export async function handleRequest(request, env, fetchImpl = globalThis.fetch) 
       },
       body: JSON.stringify(payload),
       signal: controller.signal,
+      // Cloudflare Workers may forward Authorization across redirects. A
+      // visual request must never leave the configured upstream endpoint.
+      ...(selected.purpose === "visual_observation" ? { redirect: "manual" } : {}),
     });
     if (!response.ok) {
       return reply(response.status === 429 ? 429 : 502, {
