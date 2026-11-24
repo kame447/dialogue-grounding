@@ -40,6 +40,7 @@ type Event = { id: string; seq: number; speaker: "human" | "ai"; text: string; n
 type Message = { role: "system" | "user" | "assistant"; content: string };
 type ChatClient = { complete(messages: Message[], options: { phase: string; timeoutMs: number; signal?: AbortSignal }): Promise<{ text: string }> };
 type Guard = { violations: string[]; regenerated: boolean; fallback: boolean };
+export type GenerationRetryVersion = "jev_generation_retry_v1" | "jev_generation_retry_v2";
 const ACT_INSTRUCTIONS = "Jevが選んだ行動だけを文章にしてください。行動と対象は変更せず、選択済みの名前・特徴があればそれに従ってください。選択済みの特徴がないacceptでは、相手の問いに観察メモで確かめられる範囲（ある・ない・確かめられない）で直接答えてよく、新しい名前や特徴の確認質問は足さないでください。観察メモは仮説で、局所的な支持を図形全体の理解や名称決定へ拡張しないでください。";
 // two_stage_v3 only (new text, not yet reviewed by Argon): a revisit whose target stays a candidate set.
 export const REVISIT_MULTIPLE_INSTRUCTIONS = "対象は複数候補のままです。選ばれた行動は、先ほどの未解決の区別に戻ることだけです。どの候補かを勝手に一つに絞らず、名前に決まったとは言わないでください。候補の数や内部の参照IDは相手に伝えず、相手が知らないことを知っているかのようにも話さないでください。";
@@ -119,6 +120,7 @@ export type JevTurnTrace = {
   observationMemo: ObservationMemo | null;
   repairHistory: RepairHistoryEntry[];
   generationGuard: Guard;
+  generationRetryVersion?: "jev_generation_retry_v2";
   errorCode?: JevTurnErrorCode;
   observationErrorCode?: ObservationErrorCode;
   observationPhase?: ObservationFailure["observationPhase"];
@@ -146,6 +148,8 @@ export type JevTurnOptions = {
   intervention?: InterventionConfig; decisionTimeoutMs?:number; technicalTrial?: AdaptiveRepairTrial;
   /** Omitted means two_stage_v1. Must match the decision client's own layout when it declares one. */
   questionLayout?: JevQuestionLayout;
+  /** Offline replay can request the original retry wire text for a historical tape. */
+  generationRetryVersion?: GenerationRetryVersion;
   client: ChatClient; ownImage: LocalOwnImage; ownAnchors: readonly LocalOwnAnchor[];
   observer: ObservationObserver; jevDecision: JevDecisionClient; localGrounding: JevTurnLocalOptions;
   maxReobservations?: number;
@@ -551,6 +555,13 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   const questionLayout: JevQuestionLayout = options.questionLayout ?? "two_stage_v1";
   if (questionLayout !== "two_stage_v1" && questionLayout !== "two_stage_v2" && questionLayout !== "two_stage_v3") throw new Error("Invalid Jev question layout");
   if (questionLayout !== "two_stage_v1" && !integrated) throw new Error(questionLayout + " requires the integrated Jev profile");
+  const generationRetryVersion = options.generationRetryVersion ??
+    (questionLayout === "two_stage_v3" ? "jev_generation_retry_v2" : "jev_generation_retry_v1");
+  if (generationRetryVersion !== "jev_generation_retry_v1" &&
+      (generationRetryVersion !== "jev_generation_retry_v2" || questionLayout !== "two_stage_v3")) {
+    throw new Error("Invalid Jev generation retry version");
+  }
+  const restateJudgment = generationRetryVersion === "jev_generation_retry_v2";
   const declaredLayout = (jevDecision as { metadata?: { questionLayout?: unknown } } | undefined)?.metadata?.questionLayout;
   if (declaredLayout !== undefined && declaredLayout !== questionLayout) throw new Error("Jev question layout mismatch");
   const rejectNewLegacyState=(s:JevPrivateState)=>{
@@ -835,10 +846,12 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       record.observationMemo = memo; record.repairHistory = repairHistory;
       const generationMemo = aiEnabled ? structuredClone(memo) : null;
       const generationIssues = aiEnabled ? summarizeLocalIssues(graph) : null;
+      const actionMessage: Message = { role: "system",
+        content: ACT_INSTRUCTIONS + "\n" + generation.actionScope[judgment.action] + "\n" + JSON.stringify({ ...judgment, target: execution.target,
+          ...(execution.detailFigureIds ? { detailFigureIds: execution.detailFigureIds } : {}) }) };
       const messages: Message[] = [{ role: "system", content: generation.task }, { role: "system", content: generation.instructions },
         ...(generation.concise ? [{ role: "system" as const, content: generation.concise }] : []),
-        { role: "system", content: ACT_INSTRUCTIONS + "\n" + generation.actionScope[judgment.action] + "\n" + JSON.stringify({ ...judgment, target: execution.target,
-          ...(execution.detailFigureIds ? { detailFigureIds: execution.detailFigureIds } : {}) }) },
+        actionMessage,
         ...(multipleFeature ? [{ role: "system" as const, content: DETAIL_INSTRUCTIONS }] : []),
         ...(ambiguousRevisit ? [{ role: "system" as const, content: REVISIT_MULTIPLE_INSTRUCTIONS }] : []),
         ...observationContextMessages(JSON.stringify({ scope: "private_observations_not_ground_truth", memo })),
@@ -862,7 +875,10 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       record.generationGuard.violations = violations(result.text, messages);
       if (record.generationGuard.violations.length) {
         record.generationGuard.regenerated = true;
-        const retry: Message[] = [...messages, { role: "system", content: "公開発話を書き直してください。選択済みの行動を変更しないでください。" + rewriteReasons(record.generationGuard.violations) }];
+        if (restateJudgment) record.generationRetryVersion = generationRetryVersion;
+        const retry: Message[] = [...messages, { role: "system",
+          content: "公開発話を書き直してください。選択済みの行動を変更しないでください。" +
+            (restateJudgment ? "\n" + actionMessage.content + "\n" : "") + rewriteReasons(record.generationGuard.violations) }];
         result = await interruptible(client.complete(retry, { phase: "generation", timeoutMs: generation.timeoutMs, signal }), signal);
         abortIf(signal);
         const codes = typeof result?.text === "string" && result.text.trim() ? violations(result.text, retry) : ["empty_utterance"];

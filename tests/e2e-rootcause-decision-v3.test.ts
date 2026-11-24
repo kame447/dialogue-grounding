@@ -558,6 +558,17 @@ for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
     assert.deepEqual(result.trace.generationGuard, { violations: ['orientation_leak'], regenerated: true, fallback: false });
   });
 
+  test(`v3 ${strategy} does not turn an orientation retry with a naming violation into a fallback`, async () => {
+    const f = fixture(strategy);
+    const before = structuredClone(f.state());
+    await assert.rejects(f.exchange('この形につける名前を相談できますか？', { action: 'confirm', target: 1,
+      drafts: ['上端が尖っていますか？', 'その形を「風車」と呼びましょう。'] }), { code: 'unsafe_generation' });
+    assert.equal(f.attempt()?.generationRetryVersion, 'jev_generation_retry_v2');
+    assert.deepEqual(f.attempt()?.generationGuard, { violations: ['orientation_leak', 'naming_decision'], regenerated: true, fallback: false });
+    assert.equal(f.attempt()?.publicSpeech, null);
+    assert.deepEqual(f.state(), before);
+  });
+
   test(`v3 ${strategy} recovers safely from repeated orientation_leak without publishing orientation words or marking the feature asked`, async () => {
     const f = fixture(strategy, { aiPublic: true });
     const result = await f.exchange('形をもう少し確かめたいです。', { action: 'confirm', target: 1,
