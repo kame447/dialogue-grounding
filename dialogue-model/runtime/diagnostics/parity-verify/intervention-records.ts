@@ -159,7 +159,7 @@ const ALWAYS_V3=['accept','defer','revisit','move_on','close'];
 const ANY_TARGET=['accept','defer','move_on','close'];
 // Adaptive-only context of the attempt being replayed, set at the start of the (synchronous) replay proof: whether repairFacts
 // existed (its guidance sentence is part of every instruction), and the saved per-figure agreeNames (known=false: no source).
-type ReplayContext={agreeMatch:{l0:boolean;l2:boolean}|null;facts:boolean;agree:any[]|undefined;known:boolean;v3:boolean;trial:boolean;ledger:Record<string,{status:string;name:string|null}>|undefined;legacyV3:boolean;style:null|'legacy'|'style'|'loop'};
+type ReplayContext={agreeMatch:{l0:boolean;l2:boolean}|null;facts:boolean;agree:any[]|undefined;known:boolean;v3:boolean;trial:boolean;ledger:Record<string,{status:string;name:string|null}>|undefined;legacyV3:boolean;style:null|'legacy'|'style'|'loop'|'holistic'};
 const defaultContext:ReplayContext={agreeMatch:null,facts:false,agree:undefined,known:true,v3:false,trial:false,ledger:undefined,legacyV3:false,style:null};
 const CTX={...defaultContext};
 // Only the verified integrated profile can name two_stage_v2; every other record is read as two_stage_v1.
@@ -700,12 +700,12 @@ function originalQuestions(body:any,input:any,layout='two_stage_v1'):boolean|nul
     [a,CTX.legacyV3&&a==='request_observation'?NATIVE.actions.request_observation:actions[a]])));return q.action;};
    // One saved attempt is wholly one text version; the loop version also drops the partner's own proposed names from the propose_name catalog.
    const was=CTX.style;
-   for(const [version,actions] of [['loop',NATIVE_V3_LOOP.actions],['style',NATIVE_V3_STYLE.actions],['legacy',NATIVE_V3.actions]] as const){
+   for(const [version,actions] of [['holistic',NATIVE_V3_HOLISTIC.actions],['loop',NATIVE_V3_LOOP.actions],['style',NATIVE_V3_STYLE.actions],['legacy',NATIVE_V3.actions]] as const){
     if(was!==null&&was!==version)continue;
     CTX.style=version;
     if(equal({action:make(actions)},body.questions)){
      // The saved agree candidates must follow the rule of this very criteria version: the current text only the grounded, undenied figures; older texts the earlier one.
-     if(CTX.agreeMatch&&!(version==='loop'?CTX.agreeMatch.l2:CTX.agreeMatch.l0)){CTX.style=was;return false;}
+     if(CTX.agreeMatch&&!(version==='loop'||version==='holistic'?CTX.agreeMatch.l2:CTX.agreeMatch.l0)){CTX.style=was;return false;}
      return true;
     }
    }
@@ -820,6 +820,8 @@ function choiceResponse(body:any,response:any):boolean{
 // executed while checking a record. No condition or original decision is input.
 // Prompt-style update (prompt-style-20261124): the current text and the prior text are both verified exactly.
 function generationMessages(messages:any[],trace:any,execution:any,tape:any,profile:any,index:number,codes?:readonly string[],draft?:{orientation:boolean;naming:boolean;workingNote:boolean}):boolean{
+ // holistic-first: the new generation text applies to a technical trial only; a non-trial v3 attempt keeps the style text under the same criteria version.
+ if(CTX.style==='holistic')return tape.technicalTrial?generationMessagesWith(messages,trace,execution,tape,profile,FIXED_HOLISTIC,{v3:[TRIAL_HOLISTIC],legacy:LEGACY_TRIAL_STYLE},index,codes,draft):generationMessagesWith(messages,trace,execution,tape,profile,FIXED_STYLE,{v3:[TRIAL_STYLE],legacy:LEGACY_TRIAL_STYLE},index,codes,draft);
  if(CTX.style==='style'||CTX.style==='loop')return generationMessagesWith(messages,trace,execution,tape,profile,FIXED_STYLE,{v3:[TRIAL_STYLE],legacy:LEGACY_TRIAL_STYLE},index,codes,draft);
  if(CTX.style==='legacy')return generationMessagesWith(messages,trace,execution,tape,profile,FIXED,{v3:[TRIAL,TRIAL_V3_PREV],legacy:LEGACY_TRIAL},index,codes,draft);
  return generationMessagesWith(messages,trace,execution,tape,profile,FIXED,{v3:[TRIAL,TRIAL_V3_PREV],legacy:LEGACY_TRIAL},index,codes,draft)||generationMessagesWith(messages,trace,execution,tape,profile,FIXED_STYLE,{v3:[TRIAL_STYLE],legacy:LEGACY_TRIAL_STYLE},index,codes,draft);
@@ -1004,6 +1006,8 @@ const NATIVE_V3={"stages": "第1段で、いま選べる行動を一つ選びま
 const NATIVE_V3_STYLE={actions:{...NATIVE_V3.actions,"accept":NATIVE_V3.actions.accept+"相手が図形の見た目や特徴を尋ねただけで、観察メモで確かめられる（ある・ない・不明のいずれか）なら、質問を返すconfirmにせず、このacceptで直接答える。","confirm":NATIVE_V3.actions.confirm+"特徴を尋ねられただけでは選ばず、対象や特徴に未解決の曖昧さが残るときだけ、その点を一つ具体的に確かめる。","propose_name":NATIVE.actions.propose_name+"対象が公開上で相手に伝わり、命名の流れに入ってから選ぶ。見た目や特徴を尋ねられた段階の見立ての説明はacceptで行う。"}};
 // accept-loop update (human-name-accept-loop-20261124): two_stage_v3 only; mirrors V3_ACTION_CRITERIA in jev-decision.ts.
 const NATIVE_V3_LOOP={actions:{...NATIVE_V3_STYLE.actions,"accept":NATIVE_V3_STYLE.actions.accept+"相手の発話が相槌だけ（新しい情報も問いもない）で、直前のAI行動もacceptだった場合は、同じ受け止めを繰り返さない。見立てを否定された後などで対象がまだ特定できていないなら、観察に根拠のある別の説明や弁別特徴の確認など、対象探しを進める行動を選ぶ。相槌は名称採用や対象同定の根拠にならない。","propose_name":NATIVE_V3_STYLE.actions.propose_name+"相手が先に公開した呼び名はAIの新しい提案として出し直さない。","agree":NATIVE_V3.actions.agree+"相手が公開上で提案した呼び名に異議や未解決点がなければ、その案への同意・採用として選ぶ。相手が自分の出した呼び名でよいかを尋ねている間は、その問いは答えるまで未回答のままで、相槌や見立ての説明では答えたことにならない。異議や不確実性があるときは、その理由を具体的に確かめるconfirmかrepairで答える。"}};
+// holistic-first update (holistic-first-20261124), two_stage_v3 only; mirrors V3_ACTION_CRITERIA in jev-decision.ts.
+const NATIVE_V3_HOLISTIC={actions:{...NATIVE_V3_LOOP.actions,"accept":NATIVE_V3_LOOP.actions.accept+"図形全体や見た目を初めて尋ねられたとき、複数の図形をまとめて尋ねられたとき、全体の見立てだけで相手が対象をつかめるときは、部品の確認を重ねず、このacceptで観察に根拠のある全体の見立てを先に（求められた図形すべてについて）答える。見立ては説明であり、名前の提案・採用ではない。","confirm":NATIVE_V3_LOOP.actions.confirm+"全体の見立てだけで対象が共有され命名に進めるとき、すでに肯定された特徴については選ばない。相手が絞れない・相手との間で似た候補が残る・見立てが食い違う・細部を尋ねられたときに、区別に必要な特徴を一つ尋ねる。","defer":NATIVE_V3_LOOP.actions.defer+"残りの数だけで保留を一律に禁止も許可もせず、その時点で有効な修復の手がかりと、後で再開できる見込みを考える。十分に共有できているのに話を延ばす目的では選ばない。","revisit":NATIVE_V3_LOOP.actions.revisit+"十分に共有できていて命名に進める場面で、話を延ばすためだけには選ばない。残りの数だけで決めず、その時点で有効な修復の手がかりと、再開できる見込みを考える。"}};
 // Prompt-style update snapshot (prompt-style-20261124), derived from the prior literals above by exact replacement.
 const rep=(text:string,from:string,to:string)=>{if(text.split(from).length!==2)throw Error('prompt snapshot out of sync');return text.replace(from,()=>to);};
 const FIXED_STYLE={...FIXED,
@@ -1012,6 +1016,9 @@ const FIXED_STYLE={...FIXED,
  scope:{...FIXED.scope,accept:"受け止める。特徴を尋ねられたときは、確かめられる範囲で直接答えてよい。名前に決まった・対象を共同で特定できたとは言わない",propose_name:"対象が公開上で相手に伝わり命名の流れに入ったときに、判断の名前を「」で候補として示す。決まった・それでいこうとは言わない"}};
 const LEGACY_TRIAL_STYLE={...LEGACY_TRIAL,scope:{...LEGACY_TRIAL.scope,accept:"受け止める。特徴を尋ねられたときは、確かめられる範囲で直接答えてよい。直前の図形が合意済みで相手が次の図形へ進むときは自然に応じてよいが、未解決の図形について保留・先送り・別の図形への移行を提案しない。名前に決まった・対象を共同で特定できたとは言わない",propose_name:"対象が公開上で相手に伝わり命名の流れに入ったときに、判断の名前を「」で候補として示す。決まった・それでいこうとは言わない"}};
 const TRIAL_STYLE={...TRIAL,scope:{...TRIAL.scope,accept:"受け止める。特徴を尋ねられたときは、確かめられる範囲で直接答えてよい。直前の図形が合意済みで相手が次の図形へ進むときは自然に応じてよいが、未解決の図形について保留・先送り・別の図形への移行を提案しない。名前に決まった・対象を共同で特定できたとは言わない",propose_name:"対象が公開上で相手に伝わり命名の流れに入ったときに、判断の名前を「」で候補として示す。決まった・それでいこうとは言わない"}};
+// holistic-first generation text snapshot: derived from the style literals above by exact replacement (v3 technical trial only).
+const FIXED_HOLISTIC={...FIXED_STYLE,generator:rep(rep(FIXED_STYLE.generator,"まず相手の発話に短く応じ、必要なら全体の印象・身近なものへの見立てを1つ伝えてください。形の分析は、共通教示の分析トリガー（相手が迷い・曖昧さ・食い違いを表明したか特徴・詳細を求めた、公開対話の矛盾が未解決、または名前を確定しようとする時点で対象を1つに絞れず誤った合意の実害がある）に基づく判断に discriminatingFeature があるときだけにし、その場合も特徴は1つに絞って相手の反応を待ってください。内部に候補が複数残るだけでは分析を始めないでください。","図形全体を尋ねられた最初の説明（どんな図形か、残りはどんな形かなど）では、まず自分の観察と公開対話に根拠のある全体の見立て・印象・大まかな形を短く先に伝えてください。見立ては相手が対象の候補をつかむためのもので、特定の見立てを決まりにせず、自然な見立てが作れないときは無理に物の名前を当てはめず全体の形を伝えてかまいません。全体の見立てを述べることは、名前の提案や採用ではありません。形の分析（部分の形・つながり・配置）は、相手が対象を絞れない、相手との間で似た候補が残る、見立てが食い違う、細部を尋ねられた、のいずれかのときに、区別に必要な範囲だけ、特徴を1つに絞って述べて相手の反応を待ってください。これは決まった順序ではなく、会話の進み方で選びます。最初から細部を尋ねられたときはその質問に直接答え、毎回先頭へ見立てを付けないでください。全体の見立てだけで対象が共有できているときは部品の確認を必須にせず、すでに肯定された特徴を再確認せず、否定された見立てを新しい根拠なく繰り返さないでください。相手との食い違いがなく、内部に候補が複数残るだけでは分析を始めないでください。"),"1回は1〜2文で返してください。口調は","1回は1〜2文で返してください（複数の図形をまとめて尋ねられたときは、求められた図形それぞれに短く答えてください）。口調は")};
+const TRIAL_HOLISTIC={...TRIAL_STYLE,scope:{...TRIAL_STYLE.scope,accept:rep(TRIAL_STYLE.scope.accept,"受け止める。特徴を尋ねられたときは、確かめられる範囲で直接答えてよい。","受け止める。図形の見た目や特徴を尋ねられたときは、確かめられる範囲で直接答えてよい。図形全体を初めて尋ねられたときは全体の見立てを先に短く、複数の図形を尋ねられたときは求められた図形それぞれに短く答える。"),confirm:rep(TRIAL_STYLE.scope.confirm,"決まった・それでいこうとは言わない","確かめる特徴は、相手が絞れない・相手との間で似た候補が残る・見立てが食い違う・細部を尋ねられたときの区別に必要な範囲に限り、全体の見立てだけで足りるときは部品の確認に進まない。"+"決まった・それでいこうとは言わない")}};
 
 const ADAPT={"prospect": "repairProspectは未校正の見込みと根拠の材料です。正解や閾値ではありません。進捗が見込めれば修復の継続、停滞して別の対象に明確な利点があれば保留や移行、不確かなら確認、といった判断の目安にしてください。", "facts": "repairHistoryの各項目のfactsは、プログラムが記録から機械的に数えた事実です（直前の明確化への返答と比べた候補集合、同じ特徴の文の再提示、局所記録の欠落と棄却の件数）。抽出の誤差を含む未検証の材料で、意味が同じか、修復が進んだか停滞したか、次に何をすべきかを判定したものではありません。閾値や規則にせず、公開発話と照合して判断してください。"};
 // Observation-request detail text snapshot (2dbf7e2): the v1 targets sentence, the aspect question and the five aspects.

@@ -819,6 +819,10 @@ for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
     c.accept = c.accept.replace(/相手の発話が相槌だけ.*$/u, '');
     c.propose_name = c.propose_name.replace('相手が先に公開した呼び名はAIの新しい提案として出し直さない。', '');
     c.agree = JEV_ACTION_CRITERIA.agree;
+    // ...and without the holistic-first sentences (a record of the loop text has none of them).
+    c.confirm = c.confirm.replace(/全体の見立てだけで対象が共有され命名に進めるとき、すでに肯定された特徴.*$/u, '');
+    c.defer = c.defer.replace(/残りの数だけで保留を一律に.*$/u, '');
+    c.revisit = c.revisit.replace(/十分に共有できていて命名に進める場面で.*$/u, '');
     const verdict = (savedNames: unknown[], body: typeof request) => {
       const tampered = structuredClone(state);
       tampered.judgments.at(-1)!.jevTurn.agreeNames = savedNames as never;

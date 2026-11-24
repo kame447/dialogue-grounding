@@ -66,12 +66,20 @@ const CONFIRM_UNRESOLVED_V3 = "特徴を尋ねられただけでは選ばず、�
 const PROPOSE_NAME_STAGE_V3 = "対象が公開上で相手に伝わり、命名の流れに入ってから選ぶ。見た目や特徴を尋ねられた段階の見立ての説明はacceptで行う。相手が先に公開した呼び名はAIの新しい提案として出し直さない。";
 const ACCEPT_BACKCHANNEL_V3 = "相手の発話が相槌だけ（新しい情報も問いもない）で、直前のAI行動もacceptだった場合は、同じ受け止めを繰り返さない。見立てを否定された後などで対象がまだ特定できていないなら、観察に根拠のある別の説明や弁別特徴の確認など、対象探しを進める行動を選ぶ。相槌は名称採用や対象同定の根拠にならない。";
 const AGREE_PARTNER_NAME_V3 = "相手が公開上で提案した呼び名に異議や未解決点がなければ、その案への同意・採用として選ぶ。相手が自分の出した呼び名でよいかを尋ねている間は、その問いは答えるまで未回答のままで、相槌や見立ての説明では答えたことにならない。異議や不確実性があるときは、その理由を具体的に確かめるconfirmかrepairで答える。";
+// two_stage_v3, holistic-first (holistic-first-20261124): the whole reading first, parts only when they tell figures apart, and no stalling once enough is shared.
+// Mirrored in the S4 verifier (NATIVE_V3_HOLISTIC.actions). Identical for both strategies; defer/move_on and the intervention table are untouched.
+const HOLISTIC_ACCEPT_V3 = "図形全体や見た目を初めて尋ねられたとき、複数の図形をまとめて尋ねられたとき、全体の見立てだけで相手が対象をつかめるときは、部品の確認を重ねず、このacceptで観察に根拠のある全体の見立てを先に（求められた図形すべてについて）答える。見立ては説明であり、名前の提案・採用ではない。";
+const HOLISTIC_CONFIRM_V3 = "全体の見立てだけで対象が共有され命名に進めるとき、すでに肯定された特徴については選ばない。相手が絞れない・相手との間で似た候補が残る・見立てが食い違う・細部を尋ねられたときに、区別に必要な特徴を一つ尋ねる。";
+const HOLISTIC_DEFER_V3 = "残りの数だけで保留を一律に禁止も許可もせず、その時点で有効な修復の手がかりと、後で再開できる見込みを考える。十分に共有できているのに話を延ばす目的では選ばない。";
+const HOLISTIC_REVISIT_V3 = "十分に共有できていて命名に進める場面で、話を延ばすためだけには選ばない。残りの数だけで決めず、その時点で有効な修復の手がかりと、再開できる見込みを考える。";
 const V3_ACTION_CRITERIA: Readonly<Record<JevAction, string>> = Object.freeze({
   ...JEV_ACTION_CRITERIA,
-  accept: JEV_ACTION_CRITERIA.accept + "直前の図形で合意が成立したり問題が解決したりした後、相手が新しい図形へ進む場合の受け止めも含める。" + ACCEPT_DIRECT_ANSWER_V3 + ACCEPT_BACKCHANNEL_V3,
-  confirm: JEV_ACTION_CRITERIA.confirm + "相手が直前の確認特徴を明確に肯定し、矛盾なく呼び名を提案・確認した場合は、同じ特徴の確認を繰り返さず、公開の名称提案に基づくagreeなど次の段階へ進む。不確実な点が残る場合は別の弁別特徴を選ぶ。" + CONFIRM_UNRESOLVED_V3,
+  accept: JEV_ACTION_CRITERIA.accept + "直前の図形で合意が成立したり問題が解決したりした後、相手が新しい図形へ進む場合の受け止めも含める。" + ACCEPT_DIRECT_ANSWER_V3 + ACCEPT_BACKCHANNEL_V3 + HOLISTIC_ACCEPT_V3,
+  confirm: JEV_ACTION_CRITERIA.confirm + "相手が直前の確認特徴を明確に肯定し、矛盾なく呼び名を提案・確認した場合は、同じ特徴の確認を繰り返さず、公開の名称提案に基づくagreeなど次の段階へ進む。不確実な点が残る場合は別の弁別特徴を選ぶ。" + CONFIRM_UNRESOLVED_V3 + HOLISTIC_CONFIRM_V3,
   propose_name: JEV_ACTION_CRITERIA.propose_name + PROPOSE_NAME_STAGE_V3,
   agree: JEV_ACTION_CRITERIA.agree + AGREE_PARTNER_NAME_V3,
+  defer: JEV_ACTION_CRITERIA.defer + HOLISTIC_DEFER_V3,
+  revisit: JEV_ACTION_CRITERIA.revisit + HOLISTIC_REVISIT_V3,
   move_on: JEV_ACTION_CRITERIA.move_on + "合意・解決済みの図形から次の図形に進む通常の進行では選ばない。",
   request_observation: JEV_ACTION_CRITERIA.request_observation + "相手の描写と初期観察メモの向き・見え方が食い違い、メモの文言だけでは別候補との弁別や回転下での照合ができないときに優先して選ぶ。",
 });

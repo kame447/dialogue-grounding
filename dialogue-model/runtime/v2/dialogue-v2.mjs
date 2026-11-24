@@ -90,6 +90,19 @@ const TRIAL_V3_ACTION_SCOPE_V2 = Object.freeze({ ...TRIAL_ACTION_SCOPE_V2,
   confirm: "判断に示された特徴（discriminatingFeature）を回転に依存しない表現で短く尋ねて確かめる。観察メモにない特徴を肯定したり、同じ図形だと断定したりしない。未解決の図形について保留や命名の先送りを提案しない。決まった・それでいこうとは言わない",
   repair: "公開上の食い違いを回転に依存しない表現で局所的に確かめ直す・直す。自分の取り違えや決めた名前の訂正を明示するのは、これまでの発話にその根拠があるときだけにする" });
 
+// two_stage_v3 technical trial, holistic-first (holistic-first-20261124): the whole reading first and the parts only when they are needed to tell figures apart; a new text
+// added beside the older v3 trial constants above, which stay as they are. Identical for both strategies; neither names a specific reading nor gives a fixed sentence.
+const replaceOnce = (text, from, to) => {
+  if (text.split(from).length !== 2) throw new Error("holistic-first text out of sync");
+  return text.replace(from, () => to);
+};
+const HOLISTIC_V3_GENERATOR_INSTRUCTIONS_V2 = replaceOnce(replaceOnce(TRIAL_V3_GENERATOR_INSTRUCTIONS_V2,
+  'まず相手の発話に短く応じ、必要なら全体の印象・身近なものへの見立てを1つ伝えてください。形の分析は、共通教示の分析トリガー（相手が迷い・曖昧さ・食い違いを表明したか特徴・詳細を求めた、公開対話の矛盾が未解決、または名前を確定しようとする時点で対象を1つに絞れず誤った合意の実害がある）に基づく判断に discriminatingFeature があるときだけにし、その場合も特徴は1つに絞って相手の反応を待ってください。内部に候補が複数残るだけでは分析を始めないでください。', '図形全体を尋ねられた最初の説明（どんな図形か、残りはどんな形かなど）では、まず自分の観察と公開対話に根拠のある全体の見立て・印象・大まかな形を短く先に伝えてください。見立ては相手が対象の候補をつかむためのもので、特定の見立てを決まりにせず、自然な見立てが作れないときは無理に物の名前を当てはめず全体の形を伝えてかまいません。全体の見立てを述べることは、名前の提案や採用ではありません。形の分析（部分の形・つながり・配置）は、相手が対象を絞れない、相手との間で似た候補が残る、見立てが食い違う、細部を尋ねられた、のいずれかのときに、区別に必要な範囲だけ、特徴を1つに絞って述べて相手の反応を待ってください。これは決まった順序ではなく、会話の進み方で選びます。最初から細部を尋ねられたときはその質問に直接答え、毎回先頭へ見立てを付けないでください。全体の見立てだけで対象が共有できているときは部品の確認を必須にせず、すでに肯定された特徴を再確認せず、否定された見立てを新しい根拠なく繰り返さないでください。相手との食い違いがなく、内部に候補が複数残るだけでは分析を始めないでください。'),
+  '1回は1〜2文で返してください。口調は', '1回は1〜2文で返してください（複数の図形をまとめて尋ねられたときは、求められた図形それぞれに短く答えてください）。口調は');
+const HOLISTIC_V3_ACTION_SCOPE_V2 = Object.freeze({ ...TRIAL_V3_ACTION_SCOPE_V2,
+  accept: replaceOnce(TRIAL_V3_ACTION_SCOPE_V2.accept, '受け止める。特徴を尋ねられたときは、確かめられる範囲で直接答えてよい。', '受け止める。図形の見た目や特徴を尋ねられたときは、確かめられる範囲で直接答えてよい。図形全体を初めて尋ねられたときは全体の見立てを先に短く、複数の図形を尋ねられたときは求められた図形それぞれに短く答える。'),
+  confirm: TRIAL_V3_ACTION_SCOPE_V2.confirm.replace("決まった・それでいこうとは言わない", () => '確かめる特徴は、相手が絞れない・相手との間で似た候補が残る・見立てが食い違う・細部を尋ねられたときの区別に必要な範囲に限り、全体の見立てだけで足りるときは部品の確認に進まない。' + "決まった・それでいこうとは言わない") });
+
 // Luna participant path (public-act consistency), identical across strategies. The constants above stay
 // as they are for the Jev path. Own-image claims need a basis in the judgment or its memo;
 // a name act shows its name in 「」 (a format rule that never certifies the act).
@@ -234,8 +247,8 @@ export function createDialogueV2(options) {
       ...(Object.hasOwn(options,'questionLayout')?{questionLayout:options.questionLayout}:{}),
       generationRetryVersion: options.generationRetryVersion,
       onJevTurnTrace, onLocalGroundingTrace, maxReobservations,
-      generation: { task: TASK_INSTRUCTIONS_V2, instructions: v3Trial ? TRIAL_V3_GENERATOR_INSTRUCTIONS_V2 : options.technicalTrial ? TRIAL_GENERATOR_INSTRUCTIONS_V2 : GENERATOR_INSTRUCTIONS_V2,
-        ...(concise ? { concise: CONCISE_INSTRUCTIONS_V2 } : {}), actionScope: v3Trial ? TRIAL_V3_ACTION_SCOPE_V2 : options.technicalTrial ? TRIAL_ACTION_SCOPE_V2 : ACTION_SCOPE_V2,
+      generation: { task: TASK_INSTRUCTIONS_V2, instructions: v3Trial ? HOLISTIC_V3_GENERATOR_INSTRUCTIONS_V2 : options.technicalTrial ? TRIAL_GENERATOR_INSTRUCTIONS_V2 : GENERATOR_INSTRUCTIONS_V2,
+        ...(concise ? { concise: CONCISE_INSTRUCTIONS_V2 } : {}), actionScope: v3Trial ? HOLISTIC_V3_ACTION_SCOPE_V2 : options.technicalTrial ? TRIAL_ACTION_SCOPE_V2 : ACTION_SCOPE_V2,
         final: FINAL_INSTRUCTIONS_V2, timeoutMs: GENERATION_TIMEOUT_MS } });
   }
   const dialogueJudge = judge ?? createLunaJudge(client);
