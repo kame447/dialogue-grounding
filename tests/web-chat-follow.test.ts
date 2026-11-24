@@ -321,10 +321,10 @@ test("a shrinking log keeps followers at the bottom but never moves a scrolled-u
   assert.equal(e.history.scrollTop, 300);
 });
 
-test("Enter stays a newline (IME safe) and names stage round trip returns to the bottom", async () => {
+test("Shift+Enter stays a newline (IME safe) and names stage round trip returns to the bottom", async () => {
   const { e, arrive, scrollUp } = await ui(trial(30));
   e.utterance.value = "一行目";
-  for (const fields of [{}, { isComposing: true }, { keyCode: 229 }]) assert.equal(e.utterance.fire("keydown", { key: "Enter", ...fields }).prevented, false);
+  for (const fields of [{ shiftKey: true }, { isComposing: true }, { keyCode: 229 }]) assert.equal(e.utterance.fire("keydown", { key: "Enter", ...fields }).prevented, false);
   scrollUp(0);
   e["finish-conversation"].fire("click");
   assert.equal(e["conversation-stage"].hidden, true);

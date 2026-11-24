@@ -1206,7 +1206,7 @@ $("chat").addEventListener("submit", (event) => {
   $("utterance").value = ""; followHistory = true; renderHistory();
   $("utterance").focus({ preventScroll: true }); drainMessages();
 });
-// Plain Enter remains native multiline input. Shift+Enter uses the same
+// Shift+Enter remains native multiline input. Plain Enter uses the same
 // form action as the send button, except during IME confirmation.
 let composingUtterance = false;
 let settlingComposition = false;
@@ -1223,7 +1223,7 @@ $("utterance").addEventListener("compositionend", () => {
   compositionTimer = setTimeout(() => { settlingComposition = false; }, 0);
 });
 $("utterance").addEventListener("keydown", (event) => {
-  if (event.key !== "Enter" || !event.shiftKey || event.ctrlKey || event.altKey || event.metaKey ||
+  if (event.key !== "Enter" || event.shiftKey || event.ctrlKey || event.altKey || event.metaKey ||
       event.defaultPrevented || event.isComposing || event.keyCode === 229 ||
       composingUtterance || settlingComposition) return;
   event.preventDefault();

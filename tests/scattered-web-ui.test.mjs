@@ -174,13 +174,13 @@ test("uncertain send failure is never retried or sent through legacy fallback", 
   assert.equal(e.utterance.disabled, false);
 });
 
-test("IME, plain Enter and repeated Shift+Enter do not accidentally send", async () => {
+test("IME, Shift+Enter and repeated Enter do not accidentally send", async () => {
   const { e, calls } = await ui(); e.utterance.value = "日本語";
-  for (const fields of [{}, { shiftKey: true, isComposing: true }, { shiftKey: true, keyCode: 229 }]) {
+  for (const fields of [{ shiftKey: true }, { isComposing: true }, { keyCode: 229 }]) {
     assert.equal(e.utterance.fire("keydown", { key: "Enter", ...fields }).prevented, false);
   }
-  e.utterance.fire("compositionstart"); e.utterance.fire("keydown", { key: "Enter", shiftKey: true }); e.utterance.fire("compositionend");
-  e.utterance.fire("keydown", { key: "Enter", shiftKey: true, repeat: true });
+  e.utterance.fire("compositionstart"); e.utterance.fire("keydown", { key: "Enter" }); e.utterance.fire("compositionend");
+  e.utterance.fire("keydown", { key: "Enter", repeat: true });
   assert.equal(calls.filter((call) => call.path !== "/api/records").length, 1);
 });
 
