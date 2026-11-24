@@ -3,6 +3,7 @@ import {createHash as nodeSha256} from 'node:crypto';
 // producer validator or replay executor. Only supplied data and code-owned
 // version constants are evidence; successful producer flags are not an oracle.
 import {jevChoiceAnswersValid,jevReportedCost,jevResponseId} from '../../decision/jev-choice-response.ts';
+import {generationGuardCodes,deriveGenerationOutcome,orientationSafeFallback} from '../../v2/generation-guard.ts';
 import {checkModelIdentity} from '../../model-identity-contract.ts';
 import {resolveModelPolicy} from '../../model-policy.ts';
 import {check,hash,equal,row,rows,list,META_KEYS} from './core.ts';
@@ -325,6 +326,7 @@ function draftActsShape(v:any):boolean{
   Number.isFinite(a.latencyMs)&&a.latencyMs>=0);
 }
 const s4AgreedNames=(tape:any,ex:any):Set<string>=>new Set<string>((ex.target.kind==='single'?[ex.target.figureId]:ex.target.kind==='multiple'?ex.target.figureIds:[]).map((id:string)=>tape.state.ledger?.[id]).filter((e:any)=>e&&e.status==='agreed'&&typeof e.name==='string').map((e:any)=>ledgerName(e.name)));
+const generationCodesClean=(text:string,cc:any)=>generationGuardCodes(text,cc).length===0;
 const s4Sha256=(text:string)=>nodeSha256('sha256').update(text,'utf8').digest('hex');
 // The verdict is a pure function of the label and the executed action: agree publishes only adopt_chosen, any other act never adopts a name.
 function draftActVerdict(choice:string,action:string):string|null{
@@ -667,13 +669,21 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
     if(!target&&row)return'invalid';
     if(row&&row.verdict!==null&&i===generationCount-1)return'invalid';
    }
-   // The outcome of each side follows from its own drafts and answers: a draft that fits publishes; a draft with an orientation-only fault may fall back
-   // only when both drafts are orientation-only with every asked question successful and fitting; any other combination stops the turn (never a commit).
+   // The outcome of each side is derived from its own drafts and question answers by the run's own pure functions (generation-guard): publish the first,
+   // publish the rewrite, the derived orientation-only fallback, or stop (a stop is never a committed turn).
    {
-    const bad=(i:number)=>{const x=draftTexts[i],row=askedRows.find(y=>y.draft===(i===0?'initial':'retry'));return typeof x!=='string'||s4HasOrientationLeak(x)||s4HasNonOrientationLeak(x,ex)||s4HasWorkingNote(x,publicTexts)||Boolean(row&&row.verdict!==null);};
-    const orientOnly=(i:number)=>{const x=draftTexts[i],row=askedRows.find(y=>y.draft===(i===0?'initial':'retry'));return typeof x==='string'&&s4HasOrientationLeak(x)&&!s4HasNonOrientationLeak(x,ex)&&!s4HasWorkingNote(x,publicTexts)&&!(row&&row.verdict!==null);};
-    if(generationCount===1&&bad(0))return'invalid';
-    if(generationCount===2&&bad(1)&&!(orientOnly(0)&&orientOnly(1)))return'invalid';
+    const aiOn=tr.profile?.localGrounding?.aiPublicClaims===true||Object.hasOwn(tr.lastCommittedState??{},'aiPublic'),cc={action:ex.action as any,candidateName:typeof ex.name==='string'?ex.name:null,v3:true,holistic:true,adaptive:!!CTX.trial,factored:!!CTX.facts,ai:aiOn,publicTexts};
+    const actCode=(i:number)=>{const row=askedRows.find(y=>y.draft===(i===0?'initial':'retry'));return row&&row.verdict!==null?[row.verdict as string]:[];};
+    const codes=(i:number)=>typeof draftTexts[i]==='string'?[...new Set([...generationGuardCodes(draftTexts[i],cc),...actCode(i)])]:['empty_utterance'];
+    const fb=orientationSafeFallback({action:ex.action,candidateName:cc.candidateName,discriminatingFeature:typeof ex.feature==='string'?ex.feature:null} as any);
+    const out=deriveGenerationOutcome(codes(0),generationCount===2?codes(1):null,fb,fb!==null&&generationCodesClean(fb,cc));
+    if(out.kind==='stop'||out.regenerated!==(generationCount===2))return'invalid';
+    if(label===tr.label){
+     const g=t.generationGuard,derived=new Set(out.violations),recorded:string[]=g?.violations??[];
+     const extra=recorded.filter(c=>!derived.has(c));
+     if(g?.fallback!==(out.kind==='fallback')||g?.regenerated!==out.regenerated||[...derived].some(c=>!recorded.includes(c))||extra.some(c=>!['internal_image','internal_credential','internal_prompt_echo'].includes(c)))return'invalid';
+     if(out.kind==='fallback'?t.publicSpeech!==fb:t.publicSpeech!==draftTexts.at(-1))return'invalid';
+    }
    }
   }
   if(label===tr.label&&t.status==='committed'){
@@ -693,8 +703,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
     if(acts.some(a=>a.status==='error')!==guardCodes.includes('draft_act_unconfirmed')||acts.some(a=>a.status==='ok'&&draftActVerdict(a.choice,s.executed?.action)!==null)!==guardCodes.includes('draft_act_mismatch'))return'invalid';
     // Fallback sentence: both drafts were orientation-only and every question asked of them succeeded and fit the act.
     if(t.generationGuard?.fallback===true&&(draftTexts.length!==2||guardCodes.length>0||acts.some(a=>a.status!=='ok')))return'invalid';
-    // A normal publication is the last checked draft itself; the fallback sentence is derived (see the published-record check).
-    if(t.generationGuard?.fallback!==true&&t.publicSpeech!==draftTexts.at(-1))return'invalid';
+
    }
   }
   if(indices.luna!==response.luna.length||indices.jev!==response.jev.length||pendingSet||pendingTarget||turnDecision!==t.decisions.length-1)return'invalid';

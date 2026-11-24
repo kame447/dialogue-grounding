@@ -24,7 +24,7 @@ import { validateJevDecision, validateHumanReferentEstimate, validateRepairProsp
 import type { JevDecisionFailureEvidence } from "../decision/jev-decision.ts";
 import { prepareLocalGroundingTurn, validateLocalGroundingOptions, findLocalPublicationViolations } from "./local-grounding-turn.ts";
 import type { LocalGroundingResearchRecord, LocalGroundingTrace } from "./local-grounding-turn.ts";
-import { findAgreeNameMismatch, findProposeNameMismatch, findGuardViolations, findOrientationLeaks, findWorkingNoteLeaks, findNamingActHints, isAgreementWordCode, orientationSafeFallback, rewriteReasons } from "./generation-guard.ts";
+import { findNamingActHints, generationGuardCodes, deriveGenerationOutcome, orientationSafeFallback, rewriteReasons } from "./generation-guard.ts";
 import { createMemoAiExtractor, MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS, AiPublicError, aiHash, emptyAiEvidence } from "../local-grounding/extract-ai.ts";
 import { createJevAiFunctionClassifier, createJevAiSupportChecker, AI_FUNCTION_INSTRUCTIONS, AI_SUPPORT_INSTRUCTIONS,
   AI_RESPONSE_SUPPORT_INSTRUCTIONS, AI_FUNCTION_CRITERIA, AI_SUPPORT_CHOICES, AI_ACT_DESCRIPTIONS } from "../local-grounding/jev-ai-public.ts";
@@ -898,17 +898,9 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         ...observationContextMessages(JSON.stringify({ scope: "private_observations_not_ground_truth", memo })),
         { role: "system", content: "局所問題（非公開）:\n" + summarizeLocalIssues(graph) },
         ...publicTurns.map(t => ({ role: t.speaker === "human" ? "user" as const : "assistant" as const, content: t.text }))];
-      const violations = (text: string, context: Message[]) => [...new Set([...findGuardViolations(text, judgment.action).filter(code => !(holistic && isAgreementWordCode(code))), ...findLocalPublicationViolations(text, context),
-        ...(questionLayout === "two_stage_v3" ? findOrientationLeaks(text) : []),
-        ...(questionLayout === "two_stage_v3" ? findWorkingNoteLeaks(text, events.filter(e => e.seq <= latest.seq).map(e => e.text)) : []),
-        ...(questionLayout === "two_stage_v3" && judgment.action === "agree" && judgment.candidateName !== null
-          ? findAgreeNameMismatch(text, judgment.candidateName) : []),
-        ...(questionLayout === "two_stage_v3" && judgment.action === "propose_name" && judgment.candidateName !== null
-          ? findProposeNameMismatch(text, judgment.candidateName) : []),
-        ...(adaptive && /repair[_-]?prospect|repair_issue|candidate_narrowed|candidate_widened|other_figure_benefit|no_open_issue|issue_\d+/iu.test(text.normalize("NFKC").replace(/\s/gu, "")) ? ["internal_field"] : []),
-        ...(factored && /repair_?facts|reply_?vs_?previous|not_comparable|widened_or_shifted|same_?question|local_?gaps/iu.test(text.normalize("NFKC").replace(/\s/gu, "")) ? ["internal_field"] : []),
-        ...(/human[_-]?referent/iu.test(text.normalize("NFKC").replace(/\s/gu, "")) ? ["internal_field"] : []),
-        ...(aiEnabled && /\d+:pub\d+/u.test(text.normalize("NFKC").replace(/[\s\u200b-\u200d\ufeff]+/gu, "")) ? ["internal_id"] : []),
+      const codeContext = { action: judgment.action, candidateName: judgment.candidateName ?? null, v3: questionLayout === "two_stage_v3", holistic, adaptive, factored, ai: aiEnabled,
+        publicTexts: events.filter(e => e.seq <= latest.seq).map(e => e.text) };
+      const violations = (text: string, context: Message[]) => [...new Set([...generationGuardCodes(text, codeContext), ...findLocalPublicationViolations(text, context),
         ...(aiEnabled ? findLocalPublicationViolations(text, privateInstructions) : [])])];
       // holistic_v1: a closed-set question about the draft's naming act. An agree draft is always asked; any other draft only on a typed naming context,
       // a naming-act wording hit or a quoted string that is not the figure's agreed name. A failed question is "unconfirmed", never a pass.
@@ -954,6 +946,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       abortIf(signal);
       if (typeof result?.text !== "string" || !result.text.trim()) throw new JevTurnError("generation_failed", undefined, { generationErrorCode: "invalid_response" });
       record.generationGuard.violations = await confirmDraft(result.text, "initial", violations(result.text, messages));
+      const firstCodes = [...record.generationGuard.violations];
       if (record.generationGuard.violations.length) {
         record.generationGuard.regenerated = true;
         if (restateJudgment) record.generationRetryVersion = generationRetryVersion;
@@ -965,11 +958,10 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         const codes = typeof result?.text === "string" && result.text.trim() ? await confirmDraft(result.text, "retry", violations(result.text, retry)) : ["empty_utterance"];
         record.generationGuard.violations = [...new Set([...record.generationGuard.violations, ...codes])];
         if (codes.length) {
-          const orientationOnly = questionLayout === "two_stage_v3" &&
-            record.generationGuard.violations.length === 1 && record.generationGuard.violations[0] === "orientation_leak" &&
-            codes.length === 1 && codes[0] === "orientation_leak";
-          const safeText = orientationOnly ? orientationSafeFallback(judgment) : null;
-          if (!safeText || violations(safeText, retry).length) throw new JevTurnError("unsafe_generation");
+          const safeText = questionLayout === "two_stage_v3" ? orientationSafeFallback(judgment) : null;
+          // The same pure derivation S4 applies: only an orientation-only pair of drafts, with a clean derived sentence, may fall back.
+          const outcome = deriveGenerationOutcome(firstCodes, codes, safeText, safeText !== null && violations(safeText, retry).length === 0);
+          if (outcome.kind !== "fallback" || !safeText) throw new JevTurnError("unsafe_generation");
           result = { text: safeText };
           record.generationGuard.fallback = true;
           if (["confirm", "repair"].includes(judgment.action) && repairHistory.length && repairHistory.at(-1)?.turn === latest.seq) {

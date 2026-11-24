@@ -327,6 +327,34 @@ function safeSpan(value: unknown): value is string {
     findRepairClaims(value).length === 0 && findInternalLeaks(value).length === 0;
 }
 
+export type GenerationCodeContext = { action: Action; candidateName: string | null; v3: boolean; holistic: boolean; adaptive: boolean; factored: boolean; ai: boolean;
+  publicTexts: readonly string[] };
+/** Every publication rule for one draft that does not need the private prompts (those are added by the runtime): the single source for the run and for S4.
+ * In holistic_v1 the naming-act wording never blocks here; it only triggers the draft_naming question. */
+export function generationGuardCodes(text: string, c: GenerationCodeContext): string[] {
+  const squeezed = text.normalize("NFKC").replace(/\s/gu, "");
+  return [...new Set([...findGuardViolations(text, c.action).filter((code) => !(c.holistic && isAgreementWordCode(code))),
+    ...(c.v3 ? findOrientationLeaks(text) : []),
+    ...(c.v3 ? findWorkingNoteLeaks(text, c.publicTexts) : []),
+    ...(c.v3 && c.action === "agree" && c.candidateName !== null ? findAgreeNameMismatch(text, c.candidateName) : []),
+    ...(c.v3 && c.action === "propose_name" && c.candidateName !== null ? findProposeNameMismatch(text, c.candidateName) : []),
+    ...(c.adaptive && /repair[_-]?prospect|repair_issue|candidate_narrowed|candidate_widened|other_figure_benefit|no_open_issue|issue_\d+/iu.test(squeezed) ? ["internal_field"] : []),
+    ...(c.factored && /repair_?facts|reply_?vs_?previous|not_comparable|widened_or_shifted|same_?question|local_?gaps/iu.test(squeezed) ? ["internal_field"] : []),
+    ...(/human[_-]?referent/iu.test(squeezed) ? ["internal_field"] : []),
+    ...(c.ai && /\d+:pub\d+/u.test(text.normalize("NFKC").replace(/[\s\u200b-\u200d\ufeff]+/gu, "")) ? ["internal_id"] : [])])];
+}
+export type GenerationOutcome = { kind: "publish_first" | "publish_retry" | "fallback" | "stop"; regenerated: boolean; violations: string[] };
+/** What a draft (and its one rewrite) lead to, from their violation codes alone: publish the first, publish the rewrite, the orientation-only fallback, or stop.
+ * `fallbackText` is the derived fallback sentence and `fallbackClean` says it has no violation of its own. */
+export function deriveGenerationOutcome(first: readonly string[], retry: readonly string[] | null, fallbackText: string | null, fallbackClean: boolean): GenerationOutcome {
+  if (!first.length) return { kind: "publish_first", regenerated: false, violations: [] };
+  const union = [...new Set([...first, ...(retry ?? [])])];
+  if (retry === null) return { kind: "stop", regenerated: false, violations: union };
+  if (!retry.length) return { kind: "publish_retry", regenerated: true, violations: union };
+  const orientationOnly = union.length === 1 && union[0] === "orientation_leak" && retry.length === 1 && retry[0] === "orientation_leak";
+  return { kind: orientationOnly && fallbackText !== null && fallbackClean ? "fallback" : "stop", regenerated: true, violations: union };
+}
+
 /** Fail closed on unsafe bounded strings: schema-valid text is still untrusted. */
 export function fallbackUtterance(judgment: Judgment): string {
   let text = neutral[judgment.action];

@@ -696,3 +696,51 @@ test('05e-4: a comparison retry that can neither publish nor fall back (naming f
     assert.ok(checksOf(forged).some((c: any) => c.status !== 'pass'), label);
   }
 });
+
+const forgeGeneration = (record: any, label: string, index: number, text: string) =>
+  forgeBoth(record, label, tail => { tail.luna.filter((l: any) => l.phase === 'generation')[index].response.text = text; });
+const proposeName = () => [stageOne('p', 'propose_name'), stageTwo('p', 'propose_name', 'figure_2'), jevResponse('p-detail', { name: answer('name_0', ['name_0']) })];
+
+test('05f-1: when both drafts are orientation-only the derived fallback is required, in the flag and in the published text', async () => {
+  const drafts: [string, string] = ['右側が尖っています。', '上端が尖っています。'];
+  const original = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v1', retry: { current: true, drafts, fallback: true } });
+  pass(original);
+  const forged = structuredClone(original);
+  for (const t of traceCopies(forged)) { t.generationGuard.fallback = false; t.publicSpeech = drafts[1]; }
+  forged.trials[0].turns[0].publicText = drafts[1];
+  assert.ok(checksOf(forged).some((c: any) => c.status !== 'pass'));
+});
+
+test('05f-2: a comparison propose_name draft must show the chosen name; one that does is accepted', async () => {
+  const shown = '「name-2」と呼ぶのはどうでしょう？';
+  const record = await records('two_stage_v3', proposeName(), { policy: 'holistic_v1', generationText: shown });
+  pass(record);
+  for (const label of ['bypass-enabled', 'repair-first']) {
+    assert.ok(checksOf(forgeGeneration(record, label, 0, '呼び名をひとつ考えてみました。')).some((c: any) => c.status !== 'pass'), label + ' (name not shown)');
+  }
+});
+
+test('05f-3: a comparison draft that defers naming is unsolicited unless a question about the same figure follows', async () => {
+  const record = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v1', generationText: '輪の部分が見えます。' });
+  pass(record);
+  for (const label of ['bypass-enabled', 'repair-first']) {
+    assert.ok(checksOf(forgeGeneration(record, label, 0, '名前を決めるのは待ちましょう。')).some((c: any) => c.status !== 'pass'), label + ' (deferral)');
+  }
+  // The recorded condition is bypass-enabled; the comparison condition's draft that keeps asking about the same figure is allowed.
+  pass(forgeGeneration(record, 'repair-first', 0, '名前を決めるのは待ちましょう。輪に切れ目がありますか？'));
+});
+
+test('05f: the run, its dynamic replay and S4 agree on the deferral and name-not-shown contrasts', async () => {
+  const dynamic = async (record: any) => (await pairedInterventionReplay(structuredClone(record.trials[0].replay[0].tape), OWN as any, MODEL, record.trials[0].profile) as any).status;
+  const accept = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v1', generationText: '輪の部分が見えます。' });
+  const deferral = forgeGeneration(accept, 'repair-first', 0, '名前を決めるのは待ちましょう。');
+  const followed = forgeGeneration(accept, 'repair-first', 0, '名前を決めるのは待ちましょう。輪に切れ目がありますか？');
+  assert.notEqual(await dynamic(deferral), 'same_material_intervention_verified');
+  assert.equal(await dynamic(followed), 'same_material_intervention_verified');
+  pass(followed);
+  assert.ok(checksOf(deferral).some((c: any) => c.status !== 'pass'));
+  const named = await records('two_stage_v3', proposeName(), { policy: 'holistic_v1', generationText: '「name-2」と呼ぶのはどうでしょう？' });
+  const hidden = forgeGeneration(named, 'repair-first', 0, '呼び名をひとつ考えてみました。');
+  assert.notEqual(await dynamic(hidden), 'same_material_intervention_verified');
+  assert.ok(checksOf(hidden).some((c: any) => c.status !== 'pass'));
+});
