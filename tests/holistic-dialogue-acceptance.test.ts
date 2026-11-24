@@ -2,9 +2,10 @@
 // The published drafts establish reachability and state effects. Actual wording,
 // action choice and conversational progress require the scripted live evaluation.
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
 import { createJevDecisionClient } from '../dialogue-model/runtime/decision/jev-decision.ts';
-import type { JevAction, JevTarget } from '../dialogue-model/runtime/decision/contract.ts';
+import type { DraftAct, JevAction, JevTarget } from '../dialogue-model/runtime/decision/contract.ts';
 import type { JevDecisionPayload } from '../dialogue-model/runtime/decision/jev-decision.ts';
 import { RunBudget } from '../dialogue-model/runtime/diagnostics/parity-live/audit.ts';
 import { interventionChecks, s4Probe } from '../dialogue-model/runtime/diagnostics/parity-verify/intervention-records.ts';
@@ -64,6 +65,7 @@ type Turn = {
   feature?: string;
   name?: string;
   drafts: string[];
+  draftActs?: Readonly<Record<string, DraftAct>>;
 };
 type Names = Record<string, string | null>;
 type SavedTrial = {
@@ -110,10 +112,9 @@ function session(strategy: Strategy, observation: Memo = memo) {
           if (key === 'action') choice = turn.action;
           if (key === 'target') choice = targetLabel(turn.target);
           if (key === 'draft_naming') {
-            // A synthetic stand-in for the model that judges the draft's naming act; the program under test only compares its label with the action.
-            const asked = JSON.parse(request.state) as { draft: string; selected: { action: string } };
-            choice = /賛成できません/u.test(asked.draft) ? 'decline_or_hold'
-              : asked.selected.action === 'agree' || /呼びましょう|[「『][^」』]+[」』]です/u.test(asked.draft) ? 'adopt_chosen' : 'none';
+            const { draft } = JSON.parse(request.state) as { draft: string };
+            assert.equal(draft, turn.drafts[generationRequests.length - 1], 'judge the draft just generated');
+            choice = turn.draftActs?.[draft] ?? 'none';
           }
           if (key === 'human_referent') choice = typeof turn.target === 'number' ? targetLabel(turn.target) : turn.target ? 'multiple' : 'none';
           if (key === 'repair_issue' || key === 'basis') choice = 'none';
@@ -229,6 +230,14 @@ function published(turn: Outcome, action: JevAction, target: JevTarget, speech: 
 function unchanged(turn: Outcome) {
   assert.deepEqual(turn.after.ownLedger, turn.before.ownLedger);
 }
+function checkedDrafts(turn: Outcome, expected: ReadonlyArray<readonly ['initial' | 'retry', string, DraftAct]>) {
+  const actual = turn.trace.draftActs;
+  assert.deepEqual(actual?.map(record => [record.draft, record.draftSha256, record.status, record.choice]),
+    expected.map(([draft, text, choice]) => [draft, createHash('sha256').update(text).digest('hex'), 'ok', choice]));
+  if (turn.trace.status === 'committed') {
+    assert.deepEqual(turn.after.queueState.privateState.judgments.at(-1)?.jevTurn.draftActs, actual);
+  }
+}
 function offered(turn: Outcome, key: 'action' | 'target' | 'feature' | 'name') {
   return turn.actionRequests.find(request => request.questions[key])?.questions[key].criteria ?? {};
 }
@@ -251,6 +260,7 @@ const acknowledgeProposal: Turn = {
 };
 const adopt: Turn = {
   human: approval, local: [approvalClaim], action: 'agree', target: 0, name: originalName, drafts: [agreeSpeech],
+  draftActs: { [agreeSpeech]: 'adopt_chosen' },
 };
 
 async function paired(check: (trial: ReturnType<typeof session>, strategy: Strategy) => Promise<void>, observation?: Memo) {
@@ -585,11 +595,14 @@ test('An agree draft showing the expected name but refusing it is regenerated be
     await trial.say(broad);
     await trial.say(acknowledgeProposal);
     const refusal = `「${originalName}」という呼び名を使うことには賛成できません。`;
-    const turn = await trial.say({ ...adopt, drafts: [refusal, agreeSpeech] });
+    const turn = await trial.say({ ...adopt, drafts: [refusal, agreeSpeech],
+      draftActs: { ...adopt.draftActs, [refusal]: 'decline_or_hold' } });
     assert.equal(turn.before.ownLedger[first].status, 'unassigned');
     published(turn, 'agree', single(first), agreeSpeech);
     assert.equal(turn.generationRequests.length, 2);
     assert.equal(turn.trace.generationGuard.regenerated, true);
+    assert.deepEqual(turn.trace.generationGuard.violations, ['draft_act_mismatch']);
+    checkedDrafts(turn, [['initial', refusal, 'decline_or_hold'], ['retry', agreeSpeech, 'adopt_chosen']]);
     assert.ok(!trial.publicState().events.some((event: { text: string }) => event.text === refusal));
     assert.deepEqual(turn.after.ownLedger[first], { status: 'agreed', name: originalName });
   });
@@ -601,16 +614,73 @@ for (const [kind, declaration] of [
 ] as const) {
   test('An accept draft making ' + kind + ' is regenerated without installing agreement', async () => {
     await paired(async trial => {
-      const turn = await trial.say({ ...broad, drafts: [declaration, fullShape] });
+      const turn = await trial.say({ ...broad, drafts: [declaration, fullShape], draftActs: { [declaration]: 'adopt_other' } });
       published(turn, 'accept', single(first), fullShape);
       assert.equal(turn.generationRequests.length, 2);
       assert.equal(turn.trace.generationGuard.regenerated, true);
+      assert.deepEqual(turn.trace.generationGuard.violations, ['draft_act_mismatch']);
+      checkedDrafts(turn, [['initial', declaration, 'adopt_other']]);
       assert.ok(!trial.publicState().events.some((event: { text: string }) => event.text === declaration));
       assert.equal(turn.after.ownLedger[first].status, 'unassigned');
       unchanged(turn);
     });
   });
 }
+
+test('A natural acceptance and a factual report quoting adoption wording both publish on the first draft', async () => {
+  await paired(async trial => {
+    await trial.say(broad);
+    await trial.say(acknowledgeProposal);
+    const recount = `「${originalName}」で呼びましょうと提案したのは、そちらです。`;
+    const query = 'その名前を提案したのはどちらでしたか？';
+    const report = await trial.say({ human: query, action: 'accept', target: 0,
+      drafts: [recount], draftActs: { [recount]: 'recount_only' } });
+    published(report, 'accept', single(first), recount);
+    assert.equal(report.generationRequests.length, 1);
+    checkedDrafts(report, [['initial', recount, 'recount_only']]);
+    unchanged(report);
+
+    const accepted = `はい、「${originalName}」でお願いします。`;
+    const agreement = await trial.say({ ...adopt, drafts: [accepted], draftActs: { [accepted]: 'adopt_chosen' } });
+    published(agreement, 'agree', single(first), accepted);
+    assert.equal(agreement.generationRequests.length, 1);
+    checkedDrafts(agreement, [['initial', accepted, 'adopt_chosen']]);
+    assert.deepEqual(agreement.after.ownLedger[first], { status: 'agreed', name: originalName });
+  });
+});
+
+test('Two orientation violations allow the existing fallback when both drafts adopt the chosen name', async () => {
+  await paired(async trial => {
+    await trial.say(broad);
+    await trial.say(acknowledgeProposal);
+    const initial = '上端に切れ目があります。' + agreeSpeech;
+    const second = '右側に切れ目があります。' + agreeSpeech;
+    const turn = await trial.say({ ...adopt, drafts: [initial, second],
+      draftActs: { [initial]: 'adopt_chosen', [second]: 'adopt_chosen' } });
+    published(turn, 'agree', single(first), `「${originalName}」にしましょう。`);
+    assert.equal(turn.generationRequests.length, 2);
+    assert.deepEqual(turn.trace.generationGuard, { violations: ['orientation_leak'], regenerated: true, fallback: true });
+    assert.deepEqual(turn.after.ownLedger[first], { status: 'agreed', name: originalName });
+  });
+});
+
+test('An orientation retry refusing the chosen name cannot be published as an agreement fallback', async () => {
+  await paired(async trial => {
+    await trial.say(broad);
+    await trial.say(acknowledgeProposal);
+    const initial = '上端に切れ目があります。' + agreeSpeech;
+    const refusal = `右側に切れ目があります。「${originalName}」という呼び名を使うことには賛成できません。`;
+    const turn = await trial.say({ ...adopt, drafts: [initial, refusal],
+      draftActs: { [initial]: 'adopt_chosen', [refusal]: 'decline_or_hold' } });
+    assert.equal(turn.trace.errorCode, 'unsafe_generation');
+    assert.equal(turn.trace.generationGuard.fallback, false);
+    assert.equal(turn.trace.publicSpeech, null);
+    assert.equal(turn.speech, null);
+    assert.equal(turn.generationRequests.length, 2);
+    unchanged(turn);
+    assert.deepEqual(turn.after.queueState.privateState.judgments, turn.before.queueState.privateState.judgments);
+  });
+});
 
 const finalNames = (): Names => Object.fromEntries(figureIds.map(figureId => [
   figureId, figureId === first ? originalName : figureId === second ? differentName : null,
