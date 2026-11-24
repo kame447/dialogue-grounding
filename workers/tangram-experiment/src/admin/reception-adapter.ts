@@ -1,4 +1,4 @@
-import { ReceptionError, validateReception, effectiveRotationMode, effectiveBetweenTrials } from '../../../../dialogue-model/runtime/v2/reception.ts';
+import { ReceptionError, validateReception, effectiveRotationMode, effectiveBetweenTrials, effectiveFigureSelection } from '../../../../dialogue-model/runtime/v2/reception.ts';
 import { validateReceptionSettings } from './reception-settings.ts';
 import type { Reception, ReceptionSummary } from '../../../../dialogue-model/runtime/v2/reception.ts';
 import type { DisplayedProtocol, ReceptionAdminPort, ReceptionAdminRow, ReceptionAdminResult, ReceptionSettingsPort } from './reception-port.ts';
@@ -19,7 +19,8 @@ const PAGE_SIZE = 100;
 /** Management values always come from the owning DO, never from index extras. */
 function project(r: Reception): ReceptionAdminRow {
   return { receptionId:r.receptionId, number:r.number, createdAt:r.createdAt, status:r.status, revision:r.revision,
-    plan:r.plan ? { order:[...r.plan.order], rotationMode:effectiveRotationMode(r.plan, 0), betweenTrials:effectiveBetweenTrials(r.plan) } : null,
+    plan:r.plan ? { order:[...r.plan.order], rotationMode:effectiveRotationMode(r.plan, 0), betweenTrials:effectiveBetweenTrials(r.plan),
+      figureSets:r.plan.trials.map((_, index) => effectiveFigureSelection(r.plan!, index).setId ?? '') } : null,
     trials:r.trials.map(t => ({...t})) };
 }
 function failure(error: unknown): ReceptionAdminResult {
@@ -66,7 +67,8 @@ export function createReceptionAdminPort(options: Options): ReceptionAdminPort {
       if (!s.protocol) return { configured:false, mode:s.mode.value };
       const p = s.protocol.protocol;
       return { configured:true, mode:s.mode.value, protocolId:p.protocolId, revision:s.protocol.revision, sha256:s.protocol.sha256,
-        allowedOrders:p.allowedOrders, rotationMode:p.rotationMode, betweenTrials:p.betweenTrials };
+        allowedOrders:p.allowedOrders, rotationMode:p.rotationMode, betweenTrials:p.betweenTrials,
+        ...(p.schemaVersion === 'reception_protocol_v3' ? { figureSelection:p.figureSelection, figureSetPolicy:p.figureSetPolicy } : {}) };
     },
     async listPage(after) {
       const summaries = await options.index.listReceptions();

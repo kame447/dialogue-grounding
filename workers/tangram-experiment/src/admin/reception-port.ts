@@ -8,10 +8,16 @@ export type ReceptionAdminRow = {
   status: ReceptionStatus;
   revision: number;
   /** Frozen plan values; a v1 plan reads as relative_pm90 / none. */
-  plan: { order: ReceptionStrategy[]; rotationMode: 'relative_pm90' | 'relative_0'; betweenTrials: 'none' | 'questionnaire_required' } | null;
+  plan: { order: ReceptionStrategy[]; rotationMode: 'relative_pm90' | 'relative_0'; betweenTrials: 'none' | 'questionnaire_required';
+    /** Frozen figure set id per trial; plans before the figure bank read as the legacy set. */ figureSets?: string[] } | null;
   trials: { index: number; recordId: string | null }[];
 };
 export type ReceptionMode = 'on' | 'off' | 'unset';
+export type FigureSetPolicy = 'shared' | 'per_trial';
+export type ProtocolFigureSelection =
+  | { mode: 'preset'; setId: string }
+  | { mode: 'seeded_random'; selectionSeed: number | null }
+  | { mode: 'custom'; figureIds: readonly string[] };
 export type ReceptionProtocolStatus = { configured: false; mode: ReceptionMode } | {
   configured: true;
   mode: ReceptionMode;
@@ -21,6 +27,9 @@ export type ReceptionProtocolStatus = { configured: false; mode: ReceptionMode }
   allowedOrders: ReceptionStrategy[][];
   rotationMode: 'relative_pm90' | 'relative_0';
   betweenTrials: 'none' | 'questionnaire_required';
+  /** Absent for a protocol saved before the figure bank (v2). */
+  figureSelection?: ProtocolFigureSelection;
+  figureSetPolicy?: FigureSetPolicy;
 };
 export type ReceptionAdminError = 'not_found' | 'conflict' | 'invalid_order' | 'protocol_unconfigured' | 'protocol_changed' | 'reception_closed' | 'reception_unavailable';
 /** The protocol version shown in the approval form. */
@@ -47,8 +56,11 @@ export type ReceptionAdminPort = {
 };
 
 export type ProtocolFields = { allowedOrders: ReceptionStrategy[][]; seedPolicy: 'shared' | 'per_trial'; referenceMemory: boolean;
-  betweenTrials: 'none' | 'questionnaire_required'; receptionNumberFormat: 'daily_seq3'; rotationMode: 'relative_pm90' | 'relative_0' };
-export type SavedProtocol = { revision: number; savedAt: string; sha256: string; protocol: ProtocolFields & { protocolId: string } };
+  betweenTrials: 'none' | 'questionnaire_required'; receptionNumberFormat: 'daily_seq3'; rotationMode: 'relative_pm90' | 'relative_0';
+  figureSelection: ProtocolFigureSelection; figureSetPolicy: FigureSetPolicy };
+/** A saved v2 protocol has no figure fields; they are shown as unselected, never filled in. */
+export type SavedProtocol = { revision: number; savedAt: string; sha256: string;
+  protocol: Omit<ProtocolFields, 'figureSelection' | 'figureSetPolicy'> & Partial<Pick<ProtocolFields, 'figureSelection' | 'figureSetPolicy'>> & { protocolId: string } };
 export type SettingsView = {
   protocol: SavedProtocol | null;
   mode: { value: 'unset'; revision: 0 } | { value: 'on' | 'off'; revision: number; savedAt: string };

@@ -686,7 +686,10 @@ export class TangramSession extends DurableObject<Env> {
         ? data(restore.jevLedger).limits : JSON.parse(this.env.PARTICIPANT_TERRA_LIMITS_JSON ?? 'null'));
       const rotationMode = restore?.options.rotationMode ?? binding.rotationMode ?? 'relative_pm90';
       if (rotationMode !== 'relative_pm90' && rotationMode !== 'relative_0') throw new NamingTaskError('invalid_options');
-      const trial = createTrialV2({ seed, rotationMode });
+      // The observer and dialogue must see the same board. A restore uses the validated record's selection.
+      const figureSelection = restore ? restore.options.figureSelection : binding.figureSelection;
+      const figures = figureSelection === undefined ? {} : { figureSelection };
+      const trial = createTrialV2({ seed, rotationMode, ...figures });
       const model = modelView(trial);
       const runtime = createWorkerParticipantRuntime({
         proxy: policy.proxy, pin, limits, own: { ownImage: { mimeType: model.mimeType, base64: model.png.toString('base64') }, ownAnchors: model.anchors },
@@ -700,13 +703,15 @@ export class TangramSession extends DurableObject<Env> {
           }),
         },
       });
-      return await createNamingTaskV2(({ ...runtime, seed, strategy, referenceMemory, rotationMode,
+      return await createNamingTaskV2(({ ...runtime, seed, strategy, referenceMemory, rotationMode, ...figures,
         utteranceStyle: runtime.jevResearch.profile.utteranceStyle, createTrial: () => trial, onPersist,
         runDir: null, ...(restore ? { restore } : {}),
       }) as unknown as Parameters<typeof createNamingTaskV2>[0]) as NamingTask;
     }
     // New trials take the assignment's mode; a restored trial takes its mode from its own record only.
-    const rotation: { rotationMode?: RotationMode } = restore ? {} : { rotationMode: binding.rotationMode };
+    // A new reception_plan_v3 trial also takes its frozen figure selection; a restored one keeps its record's.
+    const rotation: { rotationMode?: RotationMode; figureSelection?: NonNullable<typeof binding.figureSelection> } = restore ? {}
+      : { rotationMode: binding.rotationMode, ...(binding.figureSelection ? { figureSelection: binding.figureSelection } : {}) };
     // New trials follow the deployment setting; a restored trial keeps its recorded style.
     const savedStyle = restore?.options.utteranceStyle ?? 'default';
     if (savedStyle !== 'default' && savedStyle !== 'concise') throw new NamingTaskError('invalid_options');
