@@ -159,7 +159,7 @@ const orientationWords = /上部|下部|上端|下端|左端|右端|左側|右�
 
 // A clause that says whose screen/viewpoint it describes (こちらの画面では…／私から見ると…) is not a flat claim.
 // A bare mention of rotation or a different orientation does not say whose view the direction word belongs to.
-const viewpointStated = /(?:こちら|私|わたし|自分|相手|そちら)(?:の(?:画面|側|向き|見方|図形|方)|側)?(?:では(?!な|じゃ)|で見ると|から見ると|から見れば|から見たら|から見て)/u;
+const viewpointStated = /(?:こちら|私|わたし|自分|相手|そちら)(?:の(?:画面|側|向き|見方|図形|方)|側)?(?:では(?!なく|ない|なかっ|なけれ|じゃな)|で見ると|から見ると|から見れば|から見たら|から見て)/u;
 // Sentence ends and adversative conjunctions start a new clause, so a viewpoint cannot cover a later unqualified claim.
 const clauseBreak = /(?<=[。!?]|(?:ですが|ますが|ませんが|ましたが|でしたが|けど|けれど|けれども|のに)、)/u;
 

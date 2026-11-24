@@ -162,7 +162,7 @@ test("orientation wording with a stated viewpoint or quotation is allowed; an un
 test("viewpoint clauses are exempt, bare rotation mentions and later unqualified clauses are not", () => {
   for (const text of ["こちらから見ると、右側に四角い突起があります。", "私から見ると、左端に小さな角があります。",
     "こちらの画面では上側に突起が見えますが、向きが違うと見え方が変わりますか？", "相手の画面では右側に見える部分でしょうか？",
-    "こちらの図形では上側が尖っています。", "私の方では縦長に見えます。",
+    "こちらの図形では上側が尖っています。", "私の方では縦長に見えます。", "私の方ではなんとなく横長に見えます。",
     "向きが違うので、尖りの数で確かめましょう。", "回転しても変わらないくぼみがありますか？"]) {
     assert.deepEqual(findOrientationLeaks(text), [], text);
   }

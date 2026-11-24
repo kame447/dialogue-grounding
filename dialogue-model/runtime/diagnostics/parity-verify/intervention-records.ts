@@ -16,10 +16,21 @@ const RULE_ERRORS:Record<string,string>={multiple_requires_candidates:'inconsist
 const DETAIL_ACTIONS=['propose_name','agree','confirm','repair','request_observation'];
 const JUDGMENT_REJECTION_CODES=['reassignment_requires_repair','duplicate_name_requires_repair','inconsistent_action','agree_requires_shared_identification'];
 const ORIENTATION_SAFE_FALLBACK:Record<string,string>={accept:'なるほど、そう見えるんですね。',confirm:'その形の特徴について、もう少し詳しく教えてもらえますか？',repair:'すみません、どの形の特徴かもう一度確認させてください。',defer:'この形の話には、あとで戻りたいです。',revisit:'先ほどの形について、もう一度お話しできますか？',move_on:'別の形についても、見立てを聞かせてもらえますか？',close:'ここでお話を終えてもよいですか？'};
+const ORIENTATION_RETRY_MSGS=[
+ '公開発話を書き直してください。選択済みの行動を変更しないでください。前の下書きに画面の向きに依存する語（上下左右・側・端・向き・斜め上/下/左/右・縦長・横長等）が含まれていました。非公開メモや判断の方位語をそのまま写さず、尖りの数・大小・くぼみ・四角い部分とのつながりなど回転しても変わらない特徴へ言い換えるか、同じ節で「こちらの画面では〜」と視点を明示して書き直してください。',
+ '公開発話を書き直してください。選択済みの行動を変更しないでください。前の下書きに画面の向きに依存する語（上下左右・上端・下端・右向き等）が含まれていました。相手の画面では図形が回転しているため、上下左右を使わず、尖りの数・大小・くぼみ・四角い部分とのつながりなど回転しても変わらない特徴だけで書き直してください。',
+];
+function safeFallbackName(value:unknown):string|null{
+ if(typeof value!=='string')return null;
+ const trimmed=value.trim(),nfkc=value.normalize('NFKC'),compact=nfkc.replace(/[\s\u200b-\u200d\ufeff]/gu,'');
+ if(!trimmed||value.length>40||/[。.!！?？「」『』"“”\r\n\u2028\u2029]/u.test(nfkc))return null;
+ if(/(?<![A-Za-z0-9])s-[0-9a-f]{4}(?![A-Za-z0-9])/iu.test(compact)||/(?<![A-Za-z])(?:targetSlot|candidateName|discriminatingFeature|ownLedger|ledger|judgment)(?![A-Za-z])|\{"[^"]{1,40}":/u.test(compact))return null;
+ return trimmed;
+}
 function expectedOrientationFallback(action:any):string|null{
  if(!action||typeof action!=='object')return null;
- if(action.action==='agree')return typeof action.candidateName==='string'&&action.candidateName.trim()?`「${action.candidateName.trim()}」にしましょう。`:null;
- if(action.action==='propose_name')return typeof action.candidateName==='string'&&action.candidateName.trim()?`「${action.candidateName.trim()}」と呼ぶのはどうでしょう？`:null;
+ if(action.action==='agree'){const name=safeFallbackName(action.candidateName);return name?`「${name}」にしましょう。`:null;}
+ if(action.action==='propose_name'){const name=safeFallbackName(action.candidateName);return name?`「${name}」と呼ぶのはどうでしょう？`:null;}
  return Object.hasOwn(ORIENTATION_SAFE_FALLBACK,action.action)?ORIENTATION_SAFE_FALLBACK[action.action]:null;
 }
 const SETS:number[][]=[];for(let n=2;n<=6;n++){const walk=(at:number,chosen:number[]):void=>{if(chosen.length===n){SETS.push(chosen);return;}for(let i=at;i<6;i++)walk(i+1,[...chosen,i]);};walk(0,[]);}
@@ -411,7 +422,9 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
  if(actual.requests.length!==expected.length||calls.length!==expected.length)return'invalid';const used=new Set();
  if(t.generationGuard?.fallback===true){
   const gens=actual.requests.filter((r:any)=>r.provider==='luna'&&r.role==='generation');
-  if(gens.length!==2||!String(gens[1]?.payload?.messages?.at(-1)?.content??'').startsWith('公開発話を書き直してください。選択済みの行動を変更しないでください。'))return'invalid';
+  const retryMsg=gens[1]?.payload?.messages?.at(-1)?.content;
+  const genTexts=[...(tape.common?.luna??[]),...(tape.tails?.[tr.label]?.luna??[])].filter((x:any)=>x?.phase==='generation').map((x:any)=>x?.text);
+  if(gens.length!==2||typeof retryMsg!=='string'||!ORIENTATION_RETRY_MSGS.includes(retryMsg)||genTexts.length!==2||genTexts[1]===t.publicSpeech)return'invalid';
  }
  // M is recomputed: at least one recorded Luna request, all of them with measured sends. A label is either wholly measured or wholly synthetic.
  const luna=expected.filter((e:any)=>e?.provider==='luna'),measured=luna.map((e:any)=>e.actualSendMeasured);
@@ -736,7 +749,7 @@ export function interventionChecks(records:Records):Check[]{
      if(ownTurns.some((v:any)=>v.turn!==t.turnIndex||v.publicText!==t.publicSpeech))conflict=true;
      if(t.generationGuard?.fallback===true){
       const expectedFallback=expectedOrientationFallback(t.finalAction);
-      const aiOn=Object.hasOwn(tr.lastCommittedState??{},'aiPublic')||js.some((j:any)=>Object.hasOwn(j,'aiPublic'))||Boolean(t.aiPublic);
+      const aiOn=tr.profile?.localGrounding?.aiPublicClaims===true||Object.hasOwn(tr.lastCommittedState??{},'aiPublic')||js.some((j:any)=>Object.hasOwn(j,'aiPublic'))||Boolean(t.aiPublic);
       if(layout!=='two_stage_v3'||!expectedFallback||t.publicSpeech!==expectedFallback||(aiOn&&t.aiPublic?.pending?.status!=='skipped_fallback'))conflict=true;
      }
      const first=js[0];if(js.some((j:any)=>j.status!=='committed'||!equal(j,first)||!equal(j.jevTurn.decision,t.decisions.at(-1))||!equal(j.jevTurn.executed,t.executed)||!equal(j.jevTurn.intervention,t.intervention)||!equal(j.judgment,t.finalAction)))conflict=true;
