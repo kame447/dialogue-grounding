@@ -66,7 +66,7 @@ async function recordedRun(profile: any, tape: any, label: 'repair-first' | 'byp
 }
 /** NORMAL rebuilt as one canonical trial of the given layout, label and Jev responses (the s4-two-stage-v2 pattern). */
 async function records(layout: 'two_stage_v2' | 'two_stage_v3', jev: any[], { reobservation = false, label = 'bypass-enabled' as 'repair-first' | 'bypass-enabled', generationText = null as string | null, humanText = null as string | null,
-  retry = null as { drafts: [string, string]; current: boolean; fallback?: boolean } | null, policy = null as 'holistic_v1' | 'holistic_v2' | null, draftAnswers = [] as Array<string | { choice: string; extra: Record<string, unknown> }> } = {}) {
+  retry = null as { drafts: [string, string]; current: boolean; fallback?: boolean } | null, policy = null as 'holistic_v1' | 'holistic_v2' | 'holistic_v3' | null, draftAnswers = [] as Array<string | { choice: string; extra: Record<string, unknown> }> } = {}) {
   const n = structuredClone(normal), tr = n.trials[0], m = n.run.manifest;
   const profile = JSON.parse(JSON.stringify(researchTrialProfileV3(m.lunaRequest, m.timeouts, layout, policy)));
   const digest = hash(profile);
@@ -705,7 +705,7 @@ import { MEMO_LOCAL_EXTRACTION_INSTRUCTIONS, MEMO_LOCAL_EXTRACTION_INSTRUCTIONS_
 // holistic_v1: the only name candidate is a name said in public (the memo's readings are explanations); a partner mention is such a name.
 const mentionQuote = '船という見方もありますね。';
 const finalChecks = (n: any) => checksOf(n).filter((c: any) => c.id.includes('.attempt.0.'));
-const namedRecords = () => buildRecords({ turns: [
+const namedRecords = (policy: 'holistic_v1' | 'holistic_v2' | 'holistic_v3' = 'holistic_v2') => buildRecords({ dialoguePolicy: policy, turns: [
   { human: mentionQuote, plan: { action: 'accept', target: 'none', act: 'assert', extraction: JSON.stringify([{ segmentId: 's1', quote: '船', targets: [Object.keys(OLD.state.ledger)[2]],
     aspect: 'name', proposition: '船という見方', name: '船', linkedIssueId: null, respondsToTurn: null }]) } },
   { human: 'どう呼びましょうか。', plan: { action: 'propose_name', target: 'figure_2', speech: '「船」と呼ぶのはどうでしょう？' } }] });
@@ -790,7 +790,7 @@ test('05h: not_reached only where material outside the record is needed; provabl
 });
 
 // 05j-B1: each policy version reproduces its own requests; a record relabelled with the other version (profile, digests, materials) is refused.
-function relabel(record: any, policy: 'holistic_v1' | 'holistic_v2') {
+function relabel(record: any, policy: 'holistic_v1' | 'holistic_v2' | 'holistic_v3') {
   const forged = structuredClone(record), oldProfile = forged.trials[0].profile, oldDigest = forged.trials[0].profileSha256;
   const profile = { ...oldProfile, dialoguePolicy: policy }, digest = hash(profile);
   const walk = (x: any): any => {
@@ -862,7 +862,7 @@ test('05l: a human-proposed name left in the public names or candidates is refus
   const v2 = await namedRecords();
   assert.ok(finalChecks(v2).every((c: any) => c.status === 'pass'));
   // A regular v2 record whose turn carries the partner proposal: the full claims name it and the request does not offer it.
-  const withProposal = await buildRecords({ turns: [
+  const withProposal = await buildRecords({ dialoguePolicy: 'holistic_v2', turns: [
     { human: 'この二つのどちらかに、帆って呼び名はどう？', plan: { action: 'accept', target: 'none', act: 'name_propose', extraction: JSON.stringify([{ segmentId: 's1', quote: '帆', targets: [s0, s1],
       aspect: 'name', proposition: '帆と呼ぶ提案', name: '帆', linkedIssueId: null, respondsToTurn: null }]) } },
     { human: 'どうですか。', plan: { action: 'accept', target: 'none' } }] });
@@ -889,4 +889,23 @@ test('05m: a withdrawn partner proposal is no longer a proposal: the regular hol
     assert.equal(nameless.trials[0].attempts[0].executed.name, '帆', label);
     assert.ok(finalChecks(nameless).length >= 4 && finalChecks(nameless).every((c: any) => c.status === 'pass'), label + ' (nameless withdrawal)');
   }
+});
+
+test('05p: holistic_v3 leaves accept out of a typed naming request with no agree candidate; S4 applies the same table and refuses a record of another version', async () => {
+  const s3 = Object.keys(OLD.state.ledger)[3];
+  const proposal = 'これ、かかしとかどう？';
+  const seg = JSON.stringify([{ segmentId: 's1', quote: 'かかし', targets: [], aspect: 'name', proposition: 'かかしと呼ぶ提案', name: 'かかし', linkedIssueId: null, respondsToTurn: null }]);
+  const turn = (action: string, target: string, speech: string) => ({ human: proposal, plan: { action, target, act: 'name_propose', speech, extraction: seg } });
+  for (const label of ['repair-first', 'bypass-enabled'] as const) {
+    const v3 = await buildRecords({ label, dialoguePolicy: 'holistic_v3', turns: [turn('confirm', 'figure_3', 'どの形のことですか？')] });
+    assert.equal(v3.trials[0].attempts[0].executed.action, 'confirm', label);
+    const offered = Object.keys(sideCopies(v3)[0].requests.find((q: any) => q.provider === 'jev' && q.payload.questions.action).payload.questions.action.criteria);
+    assert.ok(!offered.includes('accept') && offered.includes('confirm'), label + ': accept is not offered');
+    assert.ok(finalChecks(v3).length >= 4 && finalChecks(v3).every((c: any) => c.status === 'pass'), label + ' (v3 record)');
+    assert.ok(!finalChecks(relabel(v3, 'holistic_v2')).every((c: any) => c.status === 'pass'), label + ': a v3 record under v2');
+    const v2 = await buildRecords({ label, dialoguePolicy: 'holistic_v2', turns: [turn('accept', 'none', 'そう見えるんですね。')] });
+    assert.ok(finalChecks(v2).length >= 4 && finalChecks(v2).every((c: any) => c.status === 'pass'), label + ' (v2 keeps accept)');
+    assert.ok(!finalChecks(relabel(v2, 'holistic_v3')).every((c: any) => c.status === 'pass'), label + ': a v2 record under v3');
+  }
+  void s3;
 });

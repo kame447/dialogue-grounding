@@ -1,6 +1,6 @@
 import {applyBypassAcceptance,interventionForStrategy,BypassAcceptanceError,BYPASS_ACCEPTANCE_V1_TABLE_SHA256,isOpenIssueRerankRecord} from '../decision/bypass-acceptance.ts';
 import type {ExecutedDecision,InterventionConfig,InterventionTrace} from '../decision/bypass-acceptance.ts';
-import {JEV_ACTIONS} from '../decision/contract.ts';
+import {JEV_ACTIONS,isHolisticPolicy,isHolisticV2Plus} from '../decision/contract.ts';
 import type {DraftAct} from '../decision/contract.ts';
 import {validateOwnLedger} from '../judgment/schema.mjs';
 // Decision 0002, opt-in only. The queue owns publication; this module returns a
@@ -227,6 +227,11 @@ const CANDIDATE_SET_LABELS = TWO_STAGE_V2_CANDIDATE_SETS.map(candidateSetLabel);
 const eligibleAgreeClaim = (c: LocalClaimView) => c.aspect === "name" && c.name !== null && c.targets.length === 1 &&
   (c.speaker === "human" && c.act === "name_propose" || c.act === "name_accept");
 
+/** This turn's human utterance carries a typed naming request: a name proposal, or an approval question that answers an earlier name proposal. */
+function hasTypedNamingRequest(claims: readonly LocalClaimView[], turn: number): boolean {
+  return claims.some(c => c.speaker === "human" && c.sourceTurn === turn && (c.act === "name_propose" && c.name !== null ||
+    c.act === "ask" && c.aspect === "name" && claims.some(p => p.id === c.respondsTo && p.act === "name_propose" && p.name !== null)));
+}
 function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns: readonly PublicTurn[], turn: number,
   slots: readonly string[], { ledger, judgments, agreeNameScopeVersion }: Pick<JevPrivateState, "ledger" | "judgments" | "agreeNameScopeVersion">,
   current: { status: string; scores: Record<string, number> | null } | null = null): PublicNameCandidate[] {
@@ -475,7 +480,7 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
     // After the turn's one reobservation the stage-one question omits request_observation (as in isOpenIssueRerankRecord).
     const keys=Object.keys(es[0].scores.action??{}).sort();
     // v3 scores only the actions that had a legal target and detail: any subset of the offerable labels that holds the always-legal ones and the chosen action.
-    const actionKeysOk=v3?keys.every(k=>actionLabels.includes(k as any))&&['accept','defer','revisit','move_on','close',d.action].every(k=>keys.includes(k))
+    const actionKeysOk=v3?keys.every(k=>actionLabels.includes(k as any))&&['defer','revisit','move_on','close',d.action].every(k=>keys.includes(k))
       :stateSame(keys,[...actionLabels].sort())||stateSame(keys,actionLabels.filter(a=>a!=='request_observation').sort());
     if(!actionKeysOk||!stateSame(d.evidence.choices,es[0].choices)||!stateSame(d.evidence.scores,es[0].scores)||es[0].choices.action!==d.action||d.evidence.model!==es.at(-1).model||d.evidence.responseId!==es.at(-1).responseId||d.evidence.costUsd!==es.reduce((n:number,e:any)=>n+e.costUsd,0))throw Error();
    }else if(d.evidence.model!==null||Object.keys(d.evidence.choices).length||Object.keys(d.evidence.scores).length||d.evidence.stages?.length)throw Error();
@@ -590,9 +595,11 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   const { client, observer, jevDecision, generation } = options;
   // One layout per runtime: validation, acceptance, restore and the client's own requests must agree.
   const questionLayout: JevQuestionLayout = options.questionLayout ?? "two_stage_v1";
-  const holistic = questionLayout === "two_stage_v3" && (options.dialoguePolicy === "holistic_v1" || options.dialoguePolicy === "holistic_v2");
+  const holistic = questionLayout === "two_stage_v3" && isHolisticPolicy(options.dialoguePolicy);
   // holistic_v2 (new trials): the casual-naming extraction criterion and the name rules; a recorded holistic_v1 keeps the earlier extraction text and memo-reading candidates.
-  const holisticV2 = questionLayout === "two_stage_v3" && options.dialoguePolicy === "holistic_v2";
+  const holisticV2 = questionLayout === "two_stage_v3" && isHolisticV2Plus(options.dialoguePolicy);
+  // holistic_v3 (new trials): a typed naming request with no agree candidate leaves accept out of the legal actions.
+  const holisticV3 = questionLayout === "two_stage_v3" && options.dialoguePolicy === "holistic_v3";
   if (questionLayout !== "two_stage_v1" && questionLayout !== "two_stage_v2" && questionLayout !== "two_stage_v3") throw new Error("Invalid Jev question layout");
   if (questionLayout !== "two_stage_v1" && !integrated) throw new Error(questionLayout + " requires the integrated Jev profile");
   const generationRetryVersion = options.generationRetryVersion ??
@@ -737,6 +744,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         baseInput.agreeNames = buildAgreeNamesV3(claims, publicTurns, latest.seq, slots, state);
         baseInput.nameLedger = structuredClone(state.ledger);
         // holistic_v1: the memo's readings are explanations, never AI-proposed names (the candidates are then only names that were said in public).
+        if (holisticV3 && hasTypedNamingRequest(claims, latest.seq)) baseInput.namingRequest = true;
         if (holisticV2) {
           baseInput.nameSource = "public_only";
           // A name the partner proposed is decided from every claim, not from the claims that survive the input's size limit: it never reaches the candidate list.
@@ -914,8 +922,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       // a naming-act wording hit or a quoted string that is not the figure's agreed name. A failed question is "unconfirmed", never a pass.
       // Typed context: this turn's human utterance carries a name proposal or a request for approval of a name (both are name_propose claims).
       // An approval question of this turn that answers an earlier name proposal (an ask about the name linked to that proposal) counts the same.
-      const openHumanProposal = claims.some(c => c.speaker === "human" && c.sourceTurn === latest.seq && (c.act === "name_propose" && c.name !== null ||
-        c.act === "ask" && c.aspect === "name" && claims.some(p => p.id === c.respondsTo && p.act === "name_propose" && p.name !== null)));
+      const openHumanProposal = hasTypedNamingRequest(claims, latest.seq);
       const chosenName = judgment.action === "propose_name" && typeof judgment.candidateName === "string" ? normalizeName(judgment.candidateName) : null;
       // Only an agreed name is excluded from the quoted-string hint; a tentative name is not.
       const agreedNames = new Set(targets(execution).map(id => state.ledger[id]).filter(e => e?.status === "agreed" && typeof e.name === "string").map(e => normalizeName(e.name as string)));

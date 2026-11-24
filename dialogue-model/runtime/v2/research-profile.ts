@@ -60,11 +60,11 @@ export type InterventionPolicyReference = Readonly<{version:'bypass_acceptance_v
 export type ResearchTrialProfileV3 = Omit<ResearchTrialProfileV2,'id'|'questionLayout'> & {id:'research_trial_profile_v3';interventionPolicy:InterventionPolicyReference;dialoguePolicy?:DialoguePolicy;questionLayout:JevQuestionLayout};
 /** two_stage_v1 (the default) returns the unchanged profile. An explicit two_stage_v2 changes only questionLayout,
  * so its profileSha256 differs and records of one layout cannot be restored under the other. */
-/** dialoguePolicy: undefined = the creation default (holistic_v2 for a new two_stage_v3 profile; a stored holistic_v1 is reproduced as it was); null = none (a restored record or tape that carries no policy). */
+/** dialoguePolicy: undefined = the creation default (holistic_v3 for a new two_stage_v3 profile; a stored holistic_v1 is reproduced as it was); null = none (a restored record or tape that carries no policy). */
 export function researchTrialProfileV3(lunaRequest:LunaRequestSettings,timeouts:ResearchTimeoutsV2,questionLayout:JevQuestionLayout='two_stage_v1',dialoguePolicy?:DialoguePolicy|null):Readonly<ResearchTrialProfileV3> {
  if(questionLayout!=='two_stage_v1'&&questionLayout!=='two_stage_v2'&&questionLayout!=='two_stage_v3')throw new Error('invalid_question_layout');
  return frozen({...researchTrialProfileV2(lunaRequest,timeouts),id:'research_trial_profile_v3' as const,
   interventionPolicy:{version:'bypass_acceptance_v1' as const,tableSha256:BYPASS_ACCEPTANCE_V1_TABLE_SHA256},
   ...(questionLayout!=='two_stage_v1'?{questionLayout}:{}),
-  ...(questionLayout==='two_stage_v3'&&dialoguePolicy!==null&&(dialoguePolicy===undefined||dialoguePolicy==='holistic_v1'||dialoguePolicy==='holistic_v2')?{dialoguePolicy:(dialoguePolicy??'holistic_v2') as DialoguePolicy}:{})});
+  ...(questionLayout==='two_stage_v3'&&dialoguePolicy!==null&&(dialoguePolicy===undefined||dialoguePolicy==='holistic_v1'||dialoguePolicy==='holistic_v2'||dialoguePolicy==='holistic_v3')?{dialoguePolicy:(dialoguePolicy??'holistic_v3') as DialoguePolicy}:{})});
 }

@@ -86,7 +86,7 @@ function checkRepairProspect(value:unknown):void {
 }
 function prepare(input:unknown,original:unknown,intervention:unknown,questionLayout:JevQuestionLayout='two_stage_v1'){
  const policy=config(intervention);
- const i=boundary(input,'invalid_input',value=>{const optional=['reobservationAllowed','humanReferent','repairProspect','agreeNames','repairFacts','nameLedger','nameSource'].filter(k=>!!value&&typeof value==='object'&&Object.hasOwn(value,k));
+ const i=boundary(input,'invalid_input',value=>{const optional=['reobservationAllowed','humanReferent','repairProspect','agreeNames','repairFacts','nameLedger','nameSource','namingRequest'].filter(k=>!!value&&typeof value==='object'&&Object.hasOwn(value,k));
   if(!exact(value,['turn','publicTurns','ownSlots','observations','issueSummary','priorClaims','repairHistory','previousAction','publicNames',...optional]))fail('invalid_input');
   if(Object.hasOwn(value,'repairProspect'))checkRepairProspect(value.repairProspect);
   buildJevDecisionPayload(value as JevDecisionInput);return structuredClone(value) as BypassAcceptanceInput;});
@@ -173,7 +173,7 @@ export function isOpenIssueRerankRecord(intervention:unknown,decision:unknown,ex
   // two_stage_v3 scores only the actions that had a legal target and detail, so the label set is a subset that must hold the always-legal ones.
   const v3=questionLayout==='two_stage_v3';
   if(!scores||typeof scores!=='object')return false;
-  const labelsOk=v3?Object.keys(scores).every(k=>(JEV_ACTIONS as readonly string[]).includes(k))&&['accept','defer','revisit','move_on','close'].every(k=>Object.hasOwn(scores,k))
+  const labelsOk=v3?Object.keys(scores).every(k=>(JEV_ACTIONS as readonly string[]).includes(k))&&['defer','revisit','move_on','close'].every(k=>Object.hasOwn(scores,k))
     :(exact(scores,actionsWithEvidence)||exact(scores,actionsWithEvidence.filter(a=>a!=='request_observation')));
   if(d.evidence?.stages?.[0]?.stage!==(v3?'action':'action_target')||!labelsOk||
    Object.values(scores).some(n=>typeof n!=='number'||!Number.isFinite(n)||n<0||n>1))return false;

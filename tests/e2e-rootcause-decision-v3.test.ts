@@ -30,7 +30,7 @@ type Plan = {
 
 function fixture(strategy: 'bypass-enabled' | 'repair-first' = 'bypass-enabled',
   { aiPublic = false, observations = memo(), historicalNameScope = false, holistic = false }:
-  { aiPublic?: boolean; observations?: ReturnType<typeof memo>; historicalNameScope?: boolean; holistic?: boolean | 'holistic_v1' } = {}) {
+  { aiPublic?: boolean; observations?: ReturnType<typeof memo>; historicalNameScope?: boolean; holistic?: boolean | 'holistic_v1' | 'holistic_v2' | 'holistic_v3' } = {}) {
   const intervention = interventionForStrategy(strategy);
   const inputs: JevDecisionInput[] = [];
   const extractionSystem: string[] = [];
@@ -1122,5 +1122,40 @@ test('holistic_v2 (names, 05k-B2): a partner name stays out of the candidates wh
       assert.ok(!seen.publicNames.includes('帆'), `${strategy} ${long ? 'shortened' : 'full'}: the partner name is not a public-name candidate`);
       assert.ok(!seen.actions.includes('propose_name'), `${strategy} ${long ? 'shortened' : 'full'}: the partner name is not offered`);
     }
+  }
+});
+
+test('holistic_v3 (typed naming request): with no agree candidate accept is not offered and the request is answered by asking; with an agree candidate or no request nothing changes (both strategies)', async () => {
+  const offered = (r: { requests: Array<{ questions: Record<string, { criteria: Record<string, string> }> }> }) =>
+    Object.keys(r.requests.find(q => q.questions.action)!.questions.action.criteria);
+  const proposal = 'これ、かかしとかどう？';
+  for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
+    for (const policy of ['holistic_v2', 'holistic_v3'] as const) {
+      // As in the real record: the AI's public reading claim has no target, so nothing is shared when the partner proposes a name.
+      const f = fixture(strategy, { aiPublic: true, holistic: policy });
+      const speech = '角ばった塊に細い脚が付いた形のように見えます。';
+      const reading: LocalSegmentProposal = { segmentId: 'shape', quote: speech, targets: [], aspect: 'construal', proposition: '角ばった塊に脚が付く', name: null, linkedIssueId: null, respondsToTurn: null };
+      await f.exchange('どんな図形がありますか？', { action: 'accept', drafts: [speech], aiSegments: [reading] });
+      const that = 'そうそう、それ。二つのどちらかです。';
+      const referent: Segment = { quote: that, name: null, targets: [ids[0], ids[1]], act: 'agree', aspect: 'referent', proposition: that };
+      await f.exchange(that, { action: 'accept', drafts: ['はい。'], segments: [referent] });
+      const request = await f.exchange(proposal, policy === 'holistic_v3'
+        ? { action: 'confirm', target: 3, draftActs: ['none'], drafts: ['どの形のことですか？'], segments: [naming(proposal, 'かかし')] }
+        : { action: 'accept', draftActs: ['none'], drafts: ['図形の話ですね。'], segments: [naming(proposal, 'かかし')] });
+      const actions = offered(request);
+      assert.equal(actions.includes('accept'), policy !== 'holistic_v3', `${strategy} ${policy}: accept`);
+      assert.ok(!actions.includes('agree'), `${strategy} ${policy}: no agree candidate`);
+      assert.ok(actions.includes('confirm'), `${strategy} ${policy}: the request can be answered by asking`);
+      assert.equal(request.state.ledger[ids[3]].status, 'unassigned', `${strategy} ${policy}: no name is fixed`);
+      assert.ok(Object.values(request.state.ledger).every(e => e.name === null), `${strategy} ${policy}: no name anywhere`);
+    }
+    // A shared figure: agree is legal, so accept stays offered next to it. No typed request: nothing changes.
+    const g = fixture(strategy, { aiPublic: true, holistic: 'holistic_v3' });
+    await share(g, 3);
+    const shared = await g.exchange(proposal, { action: 'accept', draftActs: ['none'], drafts: ['図形の話ですね。'], segments: [naming(proposal, 'かかし')] });
+    assert.ok(offered(shared).includes('agree') && offered(shared).includes('accept'), `${strategy}: shared figure`);
+    const h = fixture(strategy, { aiPublic: true, holistic: 'holistic_v3' });
+    const plain = await h.exchange('どんな図形がありますか？', { action: 'accept', drafts: ['全体は丸みのある形です。'] });
+    assert.ok(offered(plain).includes('accept'), `${strategy}: no naming request`);
   }
 });

@@ -272,7 +272,7 @@ export function validateParticipantJevConfig(value:unknown):{config:ParticipantJ
     // value reaches RunBudget and every Jev adapter (they receive researchLimits, see maxJevCostCapUsd).
     if(!['lunaCalls','lunaTokens','lunaPosts','jevPosts'].every(k=>positive(limits[k]))||typeof limits.jevUsd!=='number'||!Number.isFinite(limits.jevUsd)||limits.jevUsd<=0||limits.jevUsd>RESEARCH_MAX_JEV_USD)throw Error();
     data(c.lunaRequest,['timeoutMs','maxCompletionTokens']);
-    // holistic_v2 (the creation default) is recorded for a technical-trial v3 only; a plain v3 keeps its original decision, generation, guards and requests.
+    // holistic_v3 (the creation default) is recorded for a technical-trial v3 only; a plain v3 keeps its original decision, generation, guards and requests.
     return {config:c,profile:researchTrialProfileV3(c.lunaRequest,c.timeouts,c.questionLayout??'two_stage_v1',c.technicalTrial?undefined:null)};
   }catch{throw new ParticipantJevError('invalid_config');}
 }

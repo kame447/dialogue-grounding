@@ -162,14 +162,17 @@ const SETS:number[][]=[];for(let n=2;n<=6;n++){const walk=(at:number,chosen:numb
 const SET_LABELS=SETS.map(set=>'figures_'+set.join('_'));
 // two_stage_v3: the target labels a target question can carry, and the actions stage one always offers (any target or a figure always exists).
 const TARGET_V3_LABELS=['none',...[0,1,2,3,4,5].map(i=>'figure_'+i),...SET_LABELS];
-const ALWAYS_V3=['accept','defer','revisit','move_on','close'];
+// accept is legal for every target except in a holistic_v3 typed naming request without an agree candidate, where it is not offered; the exact request text is checked separately.
+const ALWAYS_V3=['defer','revisit','move_on','close'];
 const ANY_TARGET=['accept','defer','move_on','close'];
 // Adaptive-only context of the attempt being replayed, set at the start of the (synchronous) replay proof: whether repairFacts
 // existed (its guidance sentence is part of every instruction), and the saved per-figure agreeNames (known=false: no source).
-type ReplayContext={policy:string|null;agreeMatch:{l0:boolean;l2:boolean}|null;facts:boolean;agree:any[]|undefined;known:boolean;v3:boolean;trial:boolean;ledger:Record<string,{status:string;name:string|null}>|undefined;legacyV3:boolean;style:null|'legacy'|'style'|'loop'|'holistic';humanNames?:Set<string>|null};
+type ReplayContext={policy:string|null;agreeMatch:{l0:boolean;l2:boolean}|null;facts:boolean;agree:any[]|undefined;known:boolean;v3:boolean;trial:boolean;ledger:Record<string,{status:string;name:string|null}>|undefined;legacyV3:boolean;style:null|'legacy'|'style'|'loop'|'holistic';humanNames?:Set<string>|null;namingRequest?:boolean};
 const defaultContext:ReplayContext={policy:null,agreeMatch:null,facts:false,agree:undefined,known:true,v3:false,trial:false,ledger:undefined,legacyV3:false,style:null,humanNames:null};
 const CTX={...defaultContext};
-const H=()=>CTX.policy==='holistic_v1'||CTX.policy==='holistic_v2';
+const H=()=>CTX.policy==='holistic_v1'||CTX.policy==='holistic_v2'||CTX.policy==='holistic_v3';
+const H2=()=>CTX.policy==='holistic_v2'||CTX.policy==='holistic_v3';
+const H3=()=>CTX.policy==='holistic_v3';
 // Only the verified integrated profile can name two_stage_v2; every other record is read as two_stage_v1.
 const layoutOf=(profile:any)=>profile?.id==='research_trial_profile_v3'&&['two_stage_v2','two_stage_v3'].includes(profile?.questionLayout)?profile.questionLayout as string:'two_stage_v1';
 const probability=(n:any)=>typeof n==='number'&&Number.isFinite(n)&&n>=0&&n<=1;
@@ -190,7 +193,7 @@ function fullProfile(p:any):string|null{
   if(!id?.enumerable||!Object.hasOwn(id,'value')||typeof id.value!=='string'||!profiles.includes(id.value))return'intervention_profile_invalid';
   const v3=id.value==='research_trial_profile_v3',allowed=['id','referenceMemory','decisionMode','humanReferent','localGrounding','initialObservation','questionLayout','utteranceStyle','maxReobservations','modelPolicy','timeouts','lunaRequest','outputLimit','modelContract','interventionPolicy','dialoguePolicy'];
   // dialoguePolicy (holistic_v1) exists only on a two_stage_v3 profile; its absence is the older text.
-  if(v3&&Object.hasOwn(p,'dialoguePolicy')&&(!['holistic_v1','holistic_v2'].includes(p.dialoguePolicy)||p.questionLayout!=='two_stage_v3'))return'intervention_profile_invalid';
+  if(v3&&Object.hasOwn(p,'dialoguePolicy')&&(!['holistic_v1','holistic_v2','holistic_v3'].includes(p.dialoguePolicy)||p.questionLayout!=='two_stage_v3'))return'intervention_profile_invalid';
   if(v3&&Reflect.ownKeys(p).some(k=>typeof k!=='string'||!allowed.includes(k))||!v3&&Object.hasOwn(p,'interventionPolicy'))return'intervention_profile_invalid';
   resolveModelPolicy(p);if(!v3)return null;
   const d=ds.interventionPolicy;if(!d)return'intervention_contract_missing';
@@ -558,7 +561,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
     typeof instructions==='string'&&instructions.endsWith('\n'+LEGACY_V3_TARGET));
   const src=agreeSource(tr,t,key,tape,legacyV3);if(src==='invalid')return'invalid';
    const trial=trialVersion(t,tape.technicalTrial);if(trial==='invalid')return'invalid';
-   Object.assign(CTX,{facts:Array.isArray(t.repairFacts),agree:src.names,known:src.known,v3:layout==='two_stage_v3',trial:trial!==null,ledger:tape.state?.ledger,legacyV3,style:null,policy:tr.profile?.dialoguePolicy??null,humanNames:tr.profile?.dialoguePolicy==='holistic_v2'?s4HumanProposedNames(tape,t):null});
+   Object.assign(CTX,{facts:Array.isArray(t.repairFacts),agree:src.names,known:src.known,v3:layout==='two_stage_v3',trial:trial!==null,ledger:tape.state?.ledger,legacyV3,style:null,policy:tr.profile?.dialoguePolicy??null,humanNames:['holistic_v2','holistic_v3'].includes(tr.profile?.dialoguePolicy)?s4HumanProposedNames(tape,t):null,namingRequest:tr.profile?.dialoguePolicy==='holistic_v3'?s4OpenHumanProposal(tape,t):false});
  if(!exact(tape,['schemaVersion','state','events','common','tails','recorded',...(Object.hasOwn(tape??{},'technicalTrial')?['technicalTrial']:[]),...(Object.hasOwn(tape??{},'generationRetryVersion')?['generationRetryVersion']:[])])||tape.schemaVersion!=='parity_intervention_replay_v1'||!exact(result,['schemaVersion','status','error','commonEqual','policyConformant','recordedPayloadsReproduced','actualLunaHttpMeasured','hashScheme','excludedEnvelopeFields','sides'])||result.schemaVersion!=='parity_intervention_replay_result_v1'||result.status!=='same_material_intervention_verified'||result.error!==null||result.commonEqual!==true||result.policyConformant!==true||result.recordedPayloadsReproduced!==true||typeof result.actualLunaHttpMeasured!=='boolean'||result.hashScheme!=='canonical_json_sha256_not_raw_body_bytes'||!equal(result.excludedEnvelopeFields,META_KEYS)||!Array.isArray(result.sides)||result.sides.length!==2)return'invalid';
  // The replay plan declares a shared version. An attempt without a retry has no retry wire text to bind.
  if(Object.hasOwn(tape,'generationRetryVersion')&&(layout!=='two_stage_v3'||tape.generationRetryVersion!=='jev_generation_retry_v2')||
@@ -578,7 +581,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
   const response={luna:[...tape.common.luna,...tape.tails[label].luna],jev:[...tape.common.jev,...tape.tails[label].jev]},indices={luna:0,jev:0};
   for(const r of s.requests){if(!exact(r,['provider','phase','payload','payloadDomain','payloadSha256','preProjectionPayloadSha256','role',...(Object.hasOwn(r,'completeMessagesSha256')?['completeMessagesSha256']:[])])||!['luna','jev'].includes(r.provider)||!['common','alternative_detail','generation','post_generation'].includes(r.role)||r.payloadDomain!=='canonical_http_json'||hash(r.payload)!==r.payloadSha256||typeof r.preProjectionPayloadSha256!=='string'||!/^[a-f0-9]{64}$/.test(r.preProjectionPayloadSha256))return'invalid';
    const p=r.payload,provider=r.provider as 'luna'|'jev',answer=response[provider][indices[provider]++];if(!answer)return'missing';
-   if(provider==='luna'&&H()&&r.phase==='local_extraction'&&!(Array.isArray(p?.messages)&&p.messages[0]?.role==='system'&&p.messages[0].content===(CTX.policy==='holistic_v2'?EXTRACTION_V2_S4:EXTRACTION_V1_S4)))return'invalid';
+   if(provider==='luna'&&H()&&r.phase==='local_extraction'&&!(Array.isArray(p?.messages)&&p.messages[0]?.role==='system'&&p.messages[0].content===(H2()?EXTRACTION_V2_S4:EXTRACTION_V1_S4)))return'invalid';
    if(provider==='luna'){if(answer.phase!==r.phase||!exact(p,['purpose','messages',...(tr.profile.lunaRequest.maxCompletionTokens===null?[]:['max_completion_tokens'])])||p.purpose!=='dialogue_turn'||!Array.isArray(p.messages)||hash(p.messages)!==r.completeMessagesSha256&&!projectedOwnImage(p.messages,m.own?.ownImage)||r.phase==='observation_targeted'&&!observationRequestProof(p.messages,current,m))return'invalid';
     if((r.phase==='generation')!==(r.role==='generation'))return'invalid';
     if(r.role==='generation'){
@@ -770,15 +773,15 @@ const ledgerName=(name:string)=>name.normalize('NFKC').trim().replace(/\s/gu,'')
 function catalog(input:any,target:any,kind:'name'|'feature'):{value:string;figureIds:string[]}[]{
  const ids=target.kind==='single'?[target.figureId]:target.kind==='multiple'?target.figureIds:[],out:{value:string;figureIds:string[]}[]=[];
  for(const id of ids){const o=input.observations.find((o:any)=>o.figureId===id);if(!o)continue;
-  const values:string[]=kind==='name'?[...(CTX.policy==='holistic_v2'?[]:o.holistic.map((h:any)=>h.construal).filter((v:any)=>typeof v==='string'&&v.length<=80)),...input.publicNames.filter((n:any)=>n.figureId===null||n.figureId===id).map((n:any)=>n.name)]:[...o.analytic.shapes,o.analytic.composition,...o.analytic.relations,...o.reobservations.flatMap((r:any)=>r.supports)].filter((v:any)=>typeof v==='string'&&v.trim()&&v.length<=400);
+  const values:string[]=kind==='name'?[...(H2()?[]:o.holistic.map((h:any)=>h.construal).filter((v:any)=>typeof v==='string'&&v.length<=80)),...input.publicNames.filter((n:any)=>n.figureId===null||n.figureId===id).map((n:any)=>n.name)]:[...o.analytic.shapes,o.analytic.composition,...o.analytic.relations,...o.reobservations.flatMap((r:any)=>r.supports)].filter((v:any)=>typeof v==='string'&&v.trim()&&v.length<=400);
   const ledger=kind==='name'&&CTX.v3&&!CTX.legacyV3?CTX.ledger:undefined;
   const partner=kind==='name'&&CTX.v3&&(CTX.style==='loop'||CTX.style==='holistic')?(Array.isArray(input.priorClaims)?input.priorClaims:[]).filter((c:any)=>c?.speaker==='human'&&c.act==='name_propose'&&typeof c.name==='string'&&c.name!==''&&c.turn<=input.turn&&c.sourceTurn<=input.turn&&Array.isArray(c.targets)):[];
   const entry=ledger?.[id];if(entry?.status==='agreed')continue;
   for(const value of new Set(values)){
    if(ledger&&entry){const name=ledgerName(value);if(entry.status==='deferred'&&entry.name!==null&&ledgerName(entry.name)!==name||
       Object.entries(ledger).some(([other,e])=>other!==id&&e.name!==null&&ledgerName(e.name)===name))continue;}
-   if(CTX.policy==='holistic_v2'&&CTX.humanNames&&CTX.humanNames.has(ledgerName(value)))continue;
-   if(partner.some((c:any)=>ledgerName(c.name)===ledgerName(value)&&(CTX.policy==='holistic_v2'||c.targets.length===0||c.targets.includes(id))))continue;
+   if(H2()&&CTX.humanNames&&CTX.humanNames.has(ledgerName(value)))continue;
+   if(partner.some((c:any)=>ledgerName(c.name)===ledgerName(value)&&(H2()||c.targets.length===0||c.targets.includes(id))))continue;
    const old=out.find(c=>c.value===value);if(old){if(!old.figureIds.includes(id))old.figureIds.push(id);}else out.push({value,figureIds:[id]});
   }
  }return out;
@@ -837,7 +840,7 @@ const nativeInstructions=(s:any,layout='two_stage_v1',prospect=false)=>(layout==
 function originalQuestions(body:any,input:any,layout='two_stage_v1'):boolean|null{
   if(body.model!=='typesafe/jev-1.14'||!Array.isArray(input.ownSlots)||input.ownSlots.length!==6||!Array.isArray(input.observations)||!Array.isArray(input.publicNames)||Object.hasOwn(input,'nameLedger'))return false;
   // holistic_v2 never sends a name the partner proposed among the public names (decided from the turn's full claims, not from the shortened ones).
-  if(CTX.policy==='holistic_v2'&&CTX.humanNames&&input.publicNames.some((n:any)=>CTX.humanNames!.has(ledgerName(String(n?.name)))))return false;
+  if(H2()&&CTX.humanNames&&input.publicNames.some((n:any)=>CTX.humanNames!.has(ledgerName(String(n?.name)))))return false;
   // An agree label can be missing only for want of eligible saved agreeNames; with no saved source that cannot be told from forgery.
   if(!CTX.known&&body.questions?.action?.criteria&&!Object.hasOwn(body.questions.action.criteria,'agree'))return null;
   // two_stage_v3 offers agree only from saved explicit public evidence: without a known source neither its presence nor its absence can be told from forgery.
@@ -848,7 +851,9 @@ function originalQuestions(body:any,input:any,layout='two_stage_v1'):boolean|nul
   if(layout==='two_stage_v3'){
    // Only actions with at least one legal target and detail in this very material; the target is asked afterwards (targetQuestion).
    const targets=v3Targets(input);
-   const make=(actions:any)=>{add('action',text,Object.fromEntries(ACTIONS.filter(a=>targets.some(o=>legal(a,o.target,input))).map(a=>
+   // holistic_v3: a typed naming request with no legal agree leaves accept out (the same table as the run's).
+   const noAccept=H3()&&!!CTX.namingRequest&&!targets.some(o=>legal('agree',o.target,input));
+   const make=(actions:any)=>{add('action',text,Object.fromEntries(ACTIONS.filter(a=>!(noAccept&&a==='accept')&&targets.some(o=>legal(a,o.target,input))).map(a=>
     [a,CTX.legacyV3&&a==='request_observation'?NATIVE.actions.request_observation:actions[a]])));return q.action;};
    // One saved attempt is wholly one text version; the loop version also drops the partner's own proposed names from the propose_name catalog.
    const was=CTX.style;
@@ -865,7 +870,7 @@ function originalQuestions(body:any,input:any,layout='two_stage_v1'):boolean|nul
    }
    CTX.style=was;
    // A record without the policy whose request text is the holistic text cannot be identified as any earlier version: never a reproduction success.
-   if(!H()&&CTX.style===null){const was2=CTX.policy;let same=false;for(const pol of ['holistic_v1','holistic_v2'] as const){CTX.policy=pol;if(equal({action:make(NATIVE_V3_HOLISTIC.actions)},body.questions))same=true;}CTX.policy=was2;if(same)return null;}
+   if(!H()&&CTX.style===null){const was2=CTX.policy;let same=false;for(const pol of ['holistic_v1','holistic_v2','holistic_v3'] as const){CTX.policy=pol;if(equal({action:make(NATIVE_V3_HOLISTIC.actions)},body.questions))same=true;}CTX.policy=was2;if(same)return null;}
    return false;
   }
   add('action',text,Object.fromEntries(ACTIONS.filter(a=>(a!=='request_observation'||input.reobservationAllowed)&&(a!=='agree'||agreeOffered)).map(a=>[a,(NATIVE.actions as any)[a]])));

@@ -38,7 +38,7 @@ export function createProfileDialogue(profile: Profile, options: Parameters<type
   const research = profile.id !== "research_trial_profile_v1";
   const researchLimits = research ? { maxDeadlineMs: RESEARCH_MAX_DEADLINE_MS } : undefined;
   return createDialogueV2({ ...options, ...(intervention.mode==='explicit'?{interventionPolicy:intervention.interventionPolicy!,decisionTimeoutMs:profile.timeouts.decisionMs}:{}),
-    ...(layout!=='two_stage_v1'?{questionLayout:layout}:{}), ...((profile as {dialoguePolicy?:'holistic_v1'|'holistic_v2'}).dialoguePolicy?{dialoguePolicy:(profile as {dialoguePolicy:'holistic_v1'|'holistic_v2'}).dialoguePolicy}:{}), client: research ? researchGenerationClient(options.client, profile.timeouts.generationMs) : options.client, referenceMemory: profile.referenceMemory, decisionMode: profile.decisionMode,
+    ...(layout!=='two_stage_v1'?{questionLayout:layout}:{}), ...((profile as {dialoguePolicy?:'holistic_v1'|'holistic_v2'|'holistic_v3'}).dialoguePolicy?{dialoguePolicy:(profile as {dialoguePolicy:'holistic_v1'|'holistic_v2'|'holistic_v3'}).dialoguePolicy}:{}), client: research ? researchGenerationClient(options.client, profile.timeouts.generationMs) : options.client, referenceMemory: profile.referenceMemory, decisionMode: profile.decisionMode,
     utteranceStyle: profile.utteranceStyle, maxReobservations: profile.maxReobservations,
     localGrounding: { ...options.localGrounding!, ...(research ? { researchLimits, aiPublicTransport: { ...local?.aiPublicTransport, timeoutMs: profile.timeouts.decisionMs, researchLimits } } : {}), timeoutMs: profile.timeouts.localMs, aiPublicClaims: profile.localGrounding.aiPublicClaims } });
 }

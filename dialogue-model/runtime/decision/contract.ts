@@ -82,6 +82,8 @@ export type JevDecisionInput = {
   nameLedger?: OwnLedger;
   /** holistic_v1 only, local like nameLedger (never serialized): the observation memo's readings (holistic construals) are explanations, not names, so only public names are name candidates. */
   nameSource?: "public_only";
+  /** holistic_v3 only, local (never serialized): this turn's human utterance carries a typed naming request; with no agree candidate, accept is not offered. */
+  namingRequest?: true;
   /** C sets false after its engineering limit for targeted reobservation is reached. */
   reobservationAllowed?: boolean;
   humanReferent?: HumanReferentMaterial;
@@ -148,8 +150,12 @@ export type JevDecisionClient = {
 /** Version of the dialogue policy a trial was created with (recorded in its profile and options). Absent = the text before holistic-first. */
 /** holistic_v1: the whole-reading prompts and the draft-naming question. holistic_v2 adds, for new trials only, the casual-naming extraction criterion and the
  * name rules (the memo readings and the partner's proposed names are never AI propose_name candidates). A recorded policy is reproduced as it was created. */
-export type DialoguePolicy = "holistic_v1" | "holistic_v2";
-export const isHolisticPolicy = (p: unknown): p is DialoguePolicy => p === "holistic_v1" || p === "holistic_v2";
+/** holistic_v3 adds, for new trials only, the typed naming-request rule: a turn whose human utterance asks for a name (a proposal or an approval question) and in which
+ * agree is not legal does not offer accept. */
+export type DialoguePolicy = "holistic_v1" | "holistic_v2" | "holistic_v3";
+export const isHolisticPolicy = (p: unknown): p is DialoguePolicy => p === "holistic_v1" || p === "holistic_v2" || p === "holistic_v3";
+/** The name rules and the extraction criterion of holistic_v2 carry on into holistic_v3. */
+export const isHolisticV2Plus = (p: unknown): boolean => p === "holistic_v2" || p === "holistic_v3";
 /** What a draft does about naming (holistic_v1): a closed set judged by Jev for the executed target and name. */
 export const DRAFT_ACTS = ["adopt_chosen", "adopt_other", "decline_or_hold", "propose_question", "recount_only", "none"] as const;
 export type DraftAct = typeof DRAFT_ACTS[number];
