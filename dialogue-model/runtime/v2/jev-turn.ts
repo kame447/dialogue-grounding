@@ -232,6 +232,8 @@ function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns: reado
   const prevJudgment = judgments.at(-1);
   const prevIds = prevJudgment && prevJudgment.turnIndex > lastBoundary && prevJudgment.jevTurn.executed &&
     ["confirm", "repair", "propose_name"].includes(prevJudgment.judgment.action) ? targets(prevJudgment.jevTurn.executed) : [];
+  const prevFallbackConfirm = prevIds.length > 0 && prevJudgment?.generationGuard?.fallback === true &&
+    ["confirm", "repair"].includes(prevJudgment.judgment.action);
   const prevPublicIds = new Set(prevJudgment && prevIds.length ? claims.filter(c => c.speaker === "ai" &&
     c.sourceTurn > prevJudgment.turnIndex && c.sourceTurn < turn).flatMap(c => c.targets) : []);
   const wasFocused = (id: string) => prevIds.includes(id) || focusedTurns.some(j => j.ids.includes(id));
@@ -239,6 +241,8 @@ function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns: reado
   return openClaims.flatMap(c => {
     const name = c.name!;
     if (!isHumanProposal(c) && c.act !== "name_accept") return [];
+    // A generic fallback confirm/repair did not publicly ground any figure; never let an unbound human proposal jump to immediate agree.
+    if (prevFallbackConfirm && c.sourceTurn === turn && isHumanProposal(c) && c.targets.length === 0) return [];
     const requiresFocus = prevPublicIds.size > 0 ||
       (prevIds.length > 0 && c.sourceTurn === turn && isHumanProposal(c) && c.targets.length > 0);
     const normalized = normalizeName(name);

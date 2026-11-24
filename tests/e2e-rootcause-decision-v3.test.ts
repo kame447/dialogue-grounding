@@ -537,6 +537,16 @@ for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
     assert.equal(result.trace.aiPublic?.pending?.status, 'skipped_fallback');
     assert.equal(result.state.repairHistory.at(-1)?.question, '');
     assert.equal(s4Probe.traceShape(result.trace, V3.questionLayout), true);
+    // Subsequent turn: after fallback confirm(1) with skipped_fallback, an unbound human proposal must NOT allow immediate agree on unseen figure 3.
+    const previous = f.state();
+    const proposal = `この形は「${NEW_NAME}」と呼びましょうか？`;
+    const next = await f.exchange(proposal, { action: 'accept', drafts: ['もう少し特徴を確かめましょう。'],
+      segments: [naming(proposal, NEW_NAME, [])] });
+    assert.deepEqual(next.input.agreeNames, []);
+    assert.ok(!Object.hasOwn(next.requests.find(r => r.questions.action)!.questions.action.criteria, 'agree'));
+    assert.equal(next.state.ledger[ids[3]].status, 'unassigned');
+    assert.equal(next.state.ledger[ids[1]].status, 'unassigned');
+    checkS4AgreeSource(previous, next);
   });
 
   test(`v3 ${strategy} allows quoted orientation-word names in agree fallback and fails closed on internal/mixed violations`, async () => {

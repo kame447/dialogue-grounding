@@ -24,8 +24,26 @@ function safeFallbackName(value:unknown):string|null{
  if(typeof value!=='string')return null;
  const trimmed=value.trim(),nfkc=value.normalize('NFKC'),compact=nfkc.replace(/[\s\u200b-\u200d\ufeff]/gu,'');
  if(!trimmed||value.length>40||/[。.!！?？「」『』"“”\r\n\u2028\u2029]/u.test(nfkc))return null;
- if(/(?<![A-Za-z0-9])s-[0-9a-f]{4}(?![A-Za-z0-9])/iu.test(compact)||/(?<![A-Za-z])(?:targetSlot|candidateName|discriminatingFeature|ownLedger|ledger|judgment)(?![A-Za-z])|\{"[^"]{1,40}":/u.test(compact))return null;
+ if(/(?<![A-Za-z0-9])s-[0-9a-f]{4}(?![A-Za-z0-9])/iu.test(compact)||/\d+:pub\d+/u.test(compact)||
+  /(?<![A-Za-z])(?:targetSlot|candidateName|discriminatingFeature|ownLedger|ledger|judgment)(?![A-Za-z])|\{"[^"]{1,40}":/u.test(compact)||
+  /human[_-]?referent|repair[_-]?prospect|repair_issue|candidate_narrowed|candidate_widened|other_figure_benefit|no_open_issue|issue_\d+|repair_?facts|reply_?vs_?previous|not_comparable|widened_or_shifted|same_?question|local_?gaps/iu.test(compact)||
+  /と呼(?:ぼう|びましょう|ぶことに(?:しよう|しましょう|します)|びます)|に(?:しよう|しましょう|します|決めよう|決めましょう|決めます)|で(?:いこう|行こう|いきましょう|行きましょう|いきます|行きます)|[でに](?:決まり|決定|確定)|で(?:いい|良い|よい|大丈夫)|合意/u.test(compact)||
+  /(?:訂正|撤回)(?:します|しました|させてください|させて下さい)|取り消(?:します|しました|させてください)|(?:取り違え|勘違い|見間違え|間違え)(?:ました|ていました|てました)|見間違いでした/u.test(compact))return null;
  return trimmed;
+}
+const S4_ORIENT_WORDS=/上部|下部|上端|下端|左端|右端|左側|右側|上側|下側|右上|左上|右下|左下|右向き|左向き|上向き|下向き|斜め[上下左右]|[上下左右]の辺|横長|縦長|[上下左右]方向|[上下左右]寄り|[上下左右]の(?:突起|角|隅|端|部分|張り出し|くぼみ|切り欠き|三角|四角|脚|棒|腕|頭|耳|側)|(?<!以)[上下左右][へに](?:伸び|突き出|出っ張|張|向か|傾|広が|すぼま)/u;
+const S4_VIEWPOINT=/(?:こちら|私|わたし|自分|相手|そちら)(?:の(?:画面|側|向き|見方|図形|方)|側)?(?:では(?!なく|ない|なかっ|なけれ|じゃな)|で見ると|から見ると|から見れば|から見たら|から見て)/u;
+const S4_CLAUSE_BREAK=/(?<=[。!?]|(?:ですが|ますが|ませんが|ましたが|でしたが|けど|けれど|けれども|のに)、)/u;
+function s4HasOrientationLeak(text:unknown):boolean{
+ if(typeof text!=='string'||!text.trim())return false;
+ const unquoted=text.normalize('NFKC').replace(/[\s\u200b-\u200d\ufeff]/gu,'').replace(/「[^」]*」|『[^』]*』/gu,'「」');
+ return unquoted.split(S4_CLAUSE_BREAK).some(clause=>S4_ORIENT_WORDS.test(clause)&&!S4_VIEWPOINT.test(clause));
+}
+function s4HasNonOrientationLeak(text:string):boolean{
+ const compact=text.normalize('NFKC').replace(/[\s\u200b-\u200d\ufeff]/gu,'');
+ return /(?<![A-Za-z0-9])s-[0-9a-f]{4}(?![A-Za-z0-9])/iu.test(compact)||/\d+:pub\d+/u.test(compact)||
+  /(?<![A-Za-z])(?:targetSlot|candidateName|discriminatingFeature|ownLedger|ledger|judgment)(?![A-Za-z])|\{"[^"]{1,40}":/u.test(compact)||
+  /human[_-]?referent|repair[_-]?prospect|repair_issue|candidate_narrowed|candidate_widened|other_figure_benefit|no_open_issue|issue_\d+|repair_?facts|reply_?vs_?previous|not_comparable|widened_or_shifted|same_?question|local_?gaps/iu.test(compact);
 }
 function expectedOrientationFallback(action:any):string|null{
  if(!action||typeof action!=='object')return null;
@@ -289,6 +307,7 @@ function agreeSource(tr:any,t:any,key:string,tape:any,legacyV3=false):'invalid'|
    const focusedTurns=preJudgments.filter((x:any)=>x.turnIndex>lastBoundary).map((x:any)=>({turnIndex:x.turnIndex,ids:idsOfJudgment(x)}));
    const prevJudgment=preJudgments.at(-1);
    const prevIds=!legacyV3&&prevJudgment?.turnIndex>lastBoundary&&['confirm','repair','propose_name'].includes(prevJudgment.judgment?.action)?idsOfJudgment(prevJudgment):[];
+   const prevFallbackConfirm=prevIds.length>0&&prevJudgment?.generationGuard?.fallback===true&&['confirm','repair'].includes(prevJudgment.judgment?.action);
    const prevPublicIds=new Set(prevIds.length?live.filter((c:any)=>c.speaker==='ai'&&c.sourceTurn>prevJudgment.turnIndex&&c.sourceTurn<t.turnIndex).flatMap((c:any)=>c.targets):[]);
    const wasFocused=(id:string)=>prevIds.includes(id)||focusedTurns.some((j:any)=>j.ids.includes(id));
    const slotAllowed=(id:string,name:string)=>preLedger[id]?.status!=='agreed'&&!(preLedger[id]?.status==='deferred'&&preLedger[id].name!==null&&norm(preLedger[id].name)!==norm(name))&&!slots.some(other=>other!==id&&preLedger[other]?.name!==null&&norm(preLedger[other].name)===norm(name));
@@ -296,6 +315,7 @@ function agreeSource(tr:any,t:any,key:string,tape:any,legacyV3=false):'invalid'|
     const name=c.name as string;
     if(!isHumanProposal(c)&&c.act!=='name_accept')return[];
     const targets:string[]=Array.isArray(c.targets)?c.targets:[];
+    if(prevFallbackConfirm&&c.sourceTurn===t.turnIndex&&isHumanProposal(c)&&targets.length===0)return[];
     const requiresFocus=prevPublicIds.size>0||(prevIds.length>0&&c.sourceTurn===t.turnIndex&&isHumanProposal(c)&&targets.length>0);
     if(c.sourceTurn<t.turnIndex){
      if(targets.length>0&&focusedTurns.some((j:any)=>j.turnIndex>=c.sourceTurn&&j.ids.length&&!targets.some(id=>j.ids.includes(id))))return[];
@@ -423,8 +443,9 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
  if(t.generationGuard?.fallback===true){
   const gens=actual.requests.filter((r:any)=>r.provider==='luna'&&r.role==='generation');
   const retryMsg=gens[1]?.payload?.messages?.at(-1)?.content;
-  const genTexts=[...(tape.common?.luna??[]),...(tape.tails?.[tr.label]?.luna??[])].filter((x:any)=>x?.phase==='generation').map((x:any)=>x?.text);
-  if(gens.length!==2||typeof retryMsg!=='string'||!ORIENTATION_RETRY_MSGS.includes(retryMsg)||genTexts.length!==2||genTexts[1]===t.publicSpeech)return'invalid';
+  const genTexts=[...(tape.common?.luna??[]),...(tape.tails?.[tr.label]?.luna??[])].filter((x:any)=>x?.phase==='generation').map((x:any)=>x?.response?.text??x?.text);
+  if(gens.length!==2||typeof retryMsg!=='string'||!ORIENTATION_RETRY_MSGS.includes(retryMsg)||genTexts.length!==2||
+   !genTexts.every((tx:unknown)=>typeof tx==='string'&&s4HasOrientationLeak(tx)&&!s4HasNonOrientationLeak(tx)))return'invalid';
  }
  // M is recomputed: at least one recorded Luna request, all of them with measured sends. A label is either wholly measured or wholly synthetic.
  const luna=expected.filter((e:any)=>e?.provider==='luna'),measured=luna.map((e:any)=>e.actualSendMeasured);
