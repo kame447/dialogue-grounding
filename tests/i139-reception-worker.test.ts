@@ -29,7 +29,7 @@ const p = () => ({ schemaVersion: 'reception_protocol_v1', protocolId: '22222222
   referenceMemory: false, betweenTrials: 'none', receptionNumberFormat: 'daily_seq3' });
 // Saved through the researcher settings store (env values are no longer read).
 const settingsFields = () => ({ allowedOrders: [['bypass-enabled', 'repair-first'], ['repair-first']], seedPolicy: 'per_trial',
-  referenceMemory: false, betweenTrials: 'none', receptionNumberFormat: 'daily_seq3', rotationMode: 'relative_pm90' });
+  referenceMemory: false, betweenTrials: 'none', receptionNumberFormat: 'daily_seq3', rotationMode: 'relative_pm90', figureSelection: { mode: 'preset', setId: 'legacy-v1' }, figureSetPolicy: 'shared' });
 const req = (path: string, body?: unknown, cookie?: string) => new Request('https://i139.invalid' + path, {
   method: body === undefined ? 'GET' : 'POST', headers: { ...(cookie ? { Cookie: cookie } : {}),
     ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -83,6 +83,7 @@ function harness(overrides: Record<string, unknown> = {}, settings: 'on' | 'unse
         if (!input.restore) { record.recordId = crypto.randomUUID(); record.seed = input.seed; record.strategy = input.strategy; record.options.referenceMemory = input.referenceMemory;
           // Stands in for implementer A's task: new records carry the mode and generated stimulus.
           record.options.rotationMode = input.rotationMode;
+          if (input.figureSelection) record.options.figureSelection = input.figureSelection; // frozen by a v3 plan; legacy-v1 needs no stimulus metadata
           record.stimulus = { version: 'synthetic-stimulus-v1', rotationMode: input.rotationMode, angles: { human: { h1: 0 }, ai: { a1: 0 } } }; }
         const task = { getState: () => ({ version: 2, sessionId: record.recordId, status: record.status, events: [], submitted: record.status === 'completed', aiSubmitted: record.status === 'completed' }),
           persistNow: async () => input.onPersist(clone(record)), whenIdle: async () => {}, message: () => ({ eventId: 'synthetic', duplicate: false }),
@@ -302,7 +303,7 @@ test('approved explicit start uses plan, records its provenance, survives protoc
   assert.deepEqual(Object.keys(state.reception).sort(), ['number', 'revision', 'status']);
   assert.equal(first.strategy, plan.trials[0].strategy); assert.equal(first.seed, plan.trials[0].seed);
   assert.equal(first.options.referenceMemory, plan.trials[0].referenceMemory);
-  assert.equal(first.assignment.source.kind, 'reception_plan_v2');
+  assert.equal(first.assignment.source.kind, 'reception_plan_v3');
   assert.equal(first.assignment.source.protocolId, plan.protocolId);
   assert.equal(first.assignment.source.protocolRevision, plan.protocolRevision);
   assert.equal(first.assignment.source.protocolSha256, plan.protocolSha256);

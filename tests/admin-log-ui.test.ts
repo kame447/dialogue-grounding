@@ -67,8 +67,8 @@ test('the record page shows identity, conversation and outcome first and folds e
   const html = detail();
   const first = (needle: string) => html.indexOf(needle);
   assert.ok(first('class="summary"') < first('<h2>会話（公開発話）</h2>') && first('<h2>会話（公開発話）</h2>') < first('<h2>提出と結果</h2>') && first('<h2>提出と結果</h2>') < first('<h2>診断</h2>'));
-  assert.match(html, /<ol class="chat"><li class="ai"><div class="meta"><span class="badge">AI<\/span><span>seq 1<\/span>[\s\S]*scripted_opening/);
-  assert.match(html, /<li class="human">[\s\S]*HUMAN-LINE &lt;script&gt;/);
+  assert.match(html, /<div class="turn-sheet"><table><thead>[\s\S]*<tr id="utterance-1"><td class="seq">1<\/td><td class="speaker">AI<\/td>[\s\S]*scripted_opening/);
+  assert.match(html, /<tr id="utterance-2"><td class="seq">2<\/td><td class="speaker">人間<\/td>[\s\S]*HUMAN-LINE &lt;script&gt;/);
   assert.match(html, /<a href="\/admin\/record\/0f8fad5b-d9cb-469f-a165-70867728950e\.json">JSONで保存/);
   // Outcome: names and the match, readable without opening anything.
   const outcome = html.slice(first('<h2>提出と結果</h2>'), first('<h2>診断</h2>'));
@@ -107,7 +107,7 @@ test('hostile values are escaped everywhere and the pages carry no script, handl
   assert.doesNotMatch(ADMIN_CSS, /@import|url\(|https?:/);
 });
 
-test('narrow layout: the conversation and summary reflow without horizontal page scroll', () => {
+test('narrow layout: the sheet scrolls within its container; the experiment preview still reflows', () => {
   assert.match(ADMIN_CSS, /@media \(max-width:699px\)\{ol\.chat li,ol\.chat li\.human\{max-width:none;margin-left:0\}/);
-  assert.match(ADMIN_CSS, /ol\.chat p\{[^}]*overflow-wrap:anywhere/); assert.match(ADMIN_CSS, /details\.diag>\.body\{[^}]*overflow-x:auto/);
+  assert.match(ADMIN_CSS, /ol\.chat p\{[^}]*overflow-wrap:anywhere/); assert.match(ADMIN_CSS, /\.turn-sheet\{[^}]*overflow:auto/); assert.match(ADMIN_CSS, /\.turn-sheet th\{position:sticky;top:0/); assert.match(ADMIN_CSS, /details\.diag>\.body\{[^}]*overflow-x:auto/);
 });

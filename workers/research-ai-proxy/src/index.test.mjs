@@ -219,3 +219,64 @@ test("Worker picks the internal model for the same client request after a config
   assert.deepEqual(seen.map((row) => row.model), ["vision-A", "vision-B", "gemini-vision-C"]);
   assert.ok(seen[2].url.startsWith("https://generativelanguage.googleapis.com/"));
 });
+
+
+test("separate vision purpose selects only the configured vision model and leaves dialogue unchanged", async () => {
+  const configured = { ...env, VISION_MODEL: "vision-terra-for-test" };
+  const seen = [];
+  const upstream = async (_url, options) => { const body = JSON.parse(options.body); seen.push(body.model);
+    return Response.json({ ...result, model: body.model }); };
+  for (const purpose of ["dialogue_turn", "visual_observation"]) {
+    const policy = await handleRequest(request("/v1/model-policy?purpose=" + purpose, env.RESEARCH_PROXY_TOKEN, undefined, "GET"), configured, upstream);
+    assert.equal(policy.status, 200);
+    const model = purpose === "dialogue_turn" ? env.DIALOGUE_MODEL : configured.VISION_MODEL;
+    assert.deepEqual(await policy.json(), { purpose, provider: "openai", model, ready: true });
+    const response = await handleRequest(request("/v1/chat/completions", env.RESEARCH_PROXY_TOKEN, bodyWith(simpleMessages, { purpose, model: "ignored" })), configured, upstream);
+    assert.equal(response.status, 200); assert.equal((await response.json()).model, model);
+  }
+  assert.deepEqual(seen, [env.DIALOGUE_MODEL, configured.VISION_MODEL]);
+  const absent = await handleRequest(request("/v1/chat/completions", env.RESEARCH_PROXY_TOKEN, bodyWith(simpleMessages, { purpose: "visual_observation" })), env, upstream);
+  assert.equal(absent.status, 400); assert.equal(seen.length, 2);
+});
+
+
+test("vision route fails closed on missing or substituted upstream model identity", async () => {
+  const model = "synthetic-terra";
+  const configured = { ...env, VISION_MODEL: model };
+  for (const returned of [undefined, null, "", "synthetic-luna", model + "-latest", model + "-20261124-extra"]) {
+    const response = await handleRequest(request("/v1/chat/completions", env.RESEARCH_PROXY_TOKEN,
+      bodyWith(simpleMessages, { purpose: "visual_observation" })), configured,
+      async () => Response.json({ ...result, model: returned }));
+    assert.equal(response.status, 502);
+    assert.deepEqual(await response.json(), { error: "invalid_upstream_model" });
+  }
+  for (const returned of [model, model + "-20261124", model + "-2026-11-24"]) {
+    const response = await handleRequest(request("/v1/chat/completions", env.RESEARCH_PROXY_TOKEN,
+      bodyWith(simpleMessages, { purpose: "visual_observation" })), configured,
+      async () => Response.json({ ...result, model: returned }));
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).model, returned);
+  }
+  const legacy = await handleRequest(request("/v1/chat/completions", env.RESEARCH_PROXY_TOKEN,
+    bodyWith(simpleMessages)), configured, async () => Response.json({ ...result, model: undefined }));
+  assert.equal(legacy.status, 200);
+  assert.equal((await legacy.json()).model, env.DIALOGUE_MODEL);
+});
+
+
+test("visual upstream redirects fail closed without forwarding authorization or location", async () => {
+  const configured = { ...env, VISION_MODEL: "synthetic-terra" };
+  let calls = 0;
+  const response = await handleRequest(request("/v1/chat/completions", env.RESEARCH_PROXY_TOKEN,
+    bodyWith(simpleMessages, { purpose: "visual_observation" })), configured,
+    async (url, options) => {
+      calls++;
+      assert.equal(url, "https://api.openai.com/v1/chat/completions");
+      assert.equal(options.redirect, "manual");
+      return new Response(null, { status: 307, headers: { Location: "https://untrusted.invalid/" } });
+    });
+  assert.equal(calls, 1);
+  assert.equal(response.status, 502);
+  assert.equal(response.headers.get("location"), null);
+  assert.deepEqual(await response.json(), { error: "upstream_error" });
+});

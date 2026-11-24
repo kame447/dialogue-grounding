@@ -14,8 +14,9 @@ class Element {
   }
   set textContent(value) { this._text = String(value); this.children = []; }
   get textContent() { return this._text + this.children.map((child) => child.textContent).join(""); }
-  append(...children) { this.children.push(...children); }
+  append(...children) { for (const child of children) child.parentNode = this; this.children.push(...children); }
   replaceChildren(...children) { this._text = ""; this.children = [...children]; this.scrollTop = 0; }
+  remove() { if (this.parentNode) this.parentNode.children = this.parentNode.children.filter((child) => child !== this); this.parentNode = null; }
   setAttribute(name, value) { this.attributes[name] = String(value); }
   getAttribute(name) { return this.attributes[name] ?? null; }
   get scrollHeight() { return this.children.length * 200; }
@@ -111,7 +112,13 @@ async function ui(initial = trial(), handler) {
     } };
 }
 const send = (e, text) => { e.utterance.value = text; e.chat.fire("submit"); };
-const messageBodies = (e) => e.history.children.map((node) => node.querySelectorAll("p")[0]?.textContent);
+// The AI's typing bubble (Issue #170) is display only and always last; it is
+// not a message. Anywhere else it would show up below as a message without text.
+const isTyping = (node) => node?.className === "ai typing-message";
+const typingShown = (e) => isTyping(e.history.children.at(-1));
+const typingCount = (e) => e.history.children.filter(isTyping).length;
+const messageNodes = (e) => typingShown(e) ? e.history.children.slice(0, -1) : e.history.children;
+const messageBodies = (e) => messageNodes(e).map((node) => node.querySelectorAll("p")[0]?.textContent);
 const messageCalls = (calls) => calls.filter((call) => call.path === "/api/message");
 const STOPPED = "進行を確認できません。実験担当者にお知らせください。";
 const gate = () => { let release; const wait = new Promise((resolve) => { release = resolve; }); return { wait, release }; };
@@ -127,7 +134,7 @@ test("opening is the first ordinary AI bubble; send immediately clears, refocuse
   assert.equal(messageCalls(calls).length, 1);
   assert.equal(messageCalls(calls)[0].body.clientId, "browser-client-1");
   held.release(); await tick();
-  assert.equal(e.history.children.length, 2);
+  assert.equal(messageNodes(e).length, 2);
 });
 
 test("202 with state reconciles the optimistic human once by clientId", async () => {
@@ -187,7 +194,7 @@ test("failed send retains a subtle failure action, stops dots, and never automat
   const initial = trial(); initial.aiStatus = "thinking";
   const { e, calls, poll } = await ui(initial, ({ path }) => path === "/api/message" && failed ? { status: 502, body: { error: "ai_unavailable" } } : undefined);
   send(e, "失われない発話"); await tick(); await poll();
-  assert.equal(e["typing-indicator"].hidden, true);
+  assert.equal(typingCount(e), 0);
   assert.equal(messageBodies(e).at(-1), "失われない発話");
   assert.equal(messageCalls(calls).length, 1);
   const retry = e.history.querySelectorAll("button")[0];
@@ -216,17 +223,17 @@ test("an ambiguous response failure that was publicly accepted keeps one canonic
 
 test("three decorative dots and hidden polite status show during thinking, then disappear after a reply", async () => {
   const { e, getState, poll } = await ui();
-  assert.equal(e["typing-indicator"].hidden, true);
+  assert.equal(typingCount(e), 0);
   getState().trial.aiStatus = "thinking"; await poll();
-  assert.equal(e["typing-indicator"].hidden, false);
-  assert.equal(e["typing-indicator"].children.length, 3);
-  assert.equal(e["typing-indicator"].getAttribute("aria-hidden"), "true");
+  assert.ok(typingShown(e));
+  assert.equal(e.history.children.at(-1).querySelectorAll("span").length, 3);
+  assert.equal(e.history.children.at(-1).getAttribute("aria-hidden"), "true");
   assert.equal(e["chat-status"].textContent, "AIが返答を作成しています");
   assert.equal(e["chat-status"].getAttribute("class"), "sr-only");
   assert.equal(e["chat-status"].getAttribute("aria-live"), "polite");
   getState().trial.events.push({ id: "event-2", speaker: "ai", text: "新しい返答" });
   getState().trial.aiStatus = "idle"; await poll();
-  assert.equal(e["typing-indicator"].hidden, true);
+  assert.equal(typingCount(e), 0);
   assert.equal(e["chat-status"].textContent, "");
 });
 
@@ -234,7 +241,7 @@ test("AI errors replace dots with the neutral stop; checking the state resumes t
   const state = trial(); state.aiStatus = "thinking";
   const { e, getState, calls, poll } = await ui(state);
   getState().trial.aiStatus = "error"; await poll();
-  assert.equal(e["typing-indicator"].hidden, true);
+  assert.equal(typingCount(e), 0);
   assert.equal(e["chat-recovery"].hidden, false);
   assert.equal(e["chat-recovery-message"].textContent, STOPPED);
   assert.equal(e["chat-status"].textContent, STOPPED);
@@ -250,14 +257,14 @@ test("AI errors replace dots with the neutral stop; checking the state resumes t
 test("no-progress watchdog stops animation after one minute; checking state cannot restart unchanged dots", async () => {
   const state = trial(); state.aiStatus = "thinking";
   const { e, calls, advance, getState, poll } = await ui(state);
-  assert.equal(e["typing-indicator"].hidden, false);
+  assert.ok(typingShown(e));
   await advance(60001);
-  assert.equal(e["typing-indicator"].hidden, true);
+  assert.equal(typingCount(e), 0);
   assert.equal(e["chat-recovery"].hidden, false);
   assert.equal(e["chat-recovery-message"].textContent, STOPPED);
   assert.match(html, /<button id="retry-chat" type="button" class="quiet">状態を確認<\/button>/u, "one fixed label for every stop");
   e["retry-chat"].fire("click"); await tick();
-  assert.equal(e["typing-indicator"].hidden, true);
+  assert.equal(typingCount(e), 0);
   assert.equal(calls.filter((call) => call.path === "/api/retry").length, 0);
   getState().trial.events.push({ id: "event-2", speaker: "ai", text: "遅れて届いた返答" });
   getState().trial.aiStatus = "idle"; await poll();
@@ -271,16 +278,16 @@ test("a short disconnection stays invisible; a lasting one shows the neutral sto
   const state = trial(); state.aiStatus = "thinking";
   const { e, calls, poll, advance, getState } = await ui(state, ({ path }) => { if (path === "/api/state" && disconnected) throw new Error("offline"); });
   disconnected = true; await poll();
-  assert.equal(e["typing-indicator"].hidden, false);
+  assert.ok(typingShown(e));
   assert.equal(e["chat-recovery"].hidden, true);
   disconnected = false; await poll();
   assert.equal(e["chat-recovery"].hidden, true);
   disconnected = true; await advance(60001);
-  assert.equal(e["typing-indicator"].hidden, true);
+  assert.equal(typingCount(e), 0);
   assert.equal(e["chat-recovery"].hidden, false);
   assert.equal(e["chat-recovery-message"].textContent, STOPPED);
   disconnected = false; e["retry-chat"].fire("click"); await tick();
-  assert.equal(e["typing-indicator"].hidden, true, "unchanged dots do not restart after the stall");
+  assert.equal(typingCount(e), 0, "unchanged dots do not restart after the stall");
   assert.equal(e["chat-recovery"].hidden, false, "no progress has been confirmed yet");
   assert.equal(calls.filter((call) => call.path === "/api/retry").length, 0);
   getState().trial.events.push({ id: "event-2", speaker: "ai", text: "遅れて届いた返答" });
@@ -293,23 +300,41 @@ test("a missing POST acknowledgement times out to a retained retryable bubble wi
   const { e, calls, advance, poll } = await ui(trial(), async ({ path }) => { if (path === "/api/message") { await held.wait; return { status: 502, body: {} }; } });
   send(e, "確認が返らない発話"); await tick(); await advance(20001); await poll();
   assert.equal(messageBodies(e).at(-1), "確認が返らない発話");
-  assert.equal(e["typing-indicator"].hidden, true);
+  assert.equal(typingCount(e), 0);
   assert.equal(e.history.querySelectorAll("button")[0].disabled, false);
   assert.equal(messageCalls(calls).length, 1);
   held.release(); await tick();
 });
 
-test("Enter, Shift+Enter and IME never submit; clicking send preserves the exact multiline text", async () => {
-  const { e, calls } = await ui();
+test("Shift+Enter and IME do not submit; plain Enter sends exact multiline text once", async () => {
+  const { e, calls, advance } = await ui();
   const text = "  第一行\n第二行\n";
   e.utterance.value = text;
-  for (const fields of [{}, { shiftKey: true }, { isComposing: true }, { keyCode: 229 }, { repeat: true }]) {
+  for (const fields of [{ shiftKey: true }, { isComposing: true }, { keyCode: 229 },
+    { ctrlKey: true }, { altKey: true }, { metaKey: true }]) {
     assert.equal(e.utterance.fire("keydown", { key: "Enter", ...fields }).prevented, false);
   }
+  e.utterance.fire("compositionstart");
+  assert.equal(e.utterance.fire("keydown", { key: "Enter" }).prevented, false);
+  e.utterance.fire("compositionend");
+  assert.equal(e.utterance.fire("keydown", { key: "Enter" }).prevented, false);
+  await advance(0);
+  assert.equal(e.utterance.fire("keydown", { key: "Enter", repeat: true }).prevented, true);
   assert.equal(messageCalls(calls).length, 0);
-  e.chat.fire("submit"); await tick();
-  assert.equal(messageCalls(calls)[0].body.text, text);
+  assert.equal(e.utterance.fire("keydown", { key: "Enter" }).prevented, true);
+  assert.equal(e.utterance.value, "");
+  assert.equal(e.utterance.fire("keydown", { key: "Enter", repeat: true }).prevented, true);
+  await tick();
+  assert.deepEqual(messageCalls(calls).map((call) => call.body.text), [text]);
   assert.equal(messageBodies(e).at(-1), text);
+  e.utterance.value = "   ";
+  e.utterance.fire("keydown", { key: "Enter" });
+  await tick();
+  assert.equal(messageCalls(calls).length, 1);
+  e.utterance.value = "ボタン送信";
+  e.chat.fire("submit");
+  await tick();
+  assert.deepEqual(messageCalls(calls).map((call) => call.body.text), [text, "ボタン送信"]);
 });
 
 // Updated 2026-10-19 (E1): the reader's own send now jumps to the bottom, as
@@ -331,10 +356,11 @@ test("own send jumps to the bottom; scrolled-up readers retain their position du
   assert.equal(e.history.scrollTop, e.history.scrollHeight);
 });
 
-test("typing motion is disabled by reduced-motion and old visible wait/Enter hints are absent", () => {
+test("typing motion is disabled by reduced-motion and the shortcut hint matches behavior", () => {
   assert.match(css, /@keyframes typing-bounce/u);
   assert.match(css, /@media\(prefers-reduced-motion:reduce\)\{\.typing-indicator span\{animation:none\}/u);
-  assert.doesNotMatch(html + script, /AIが考えています|受理済み・会話を更新中|送信中…|Enterで送信/u);
+  assert.doesNotMatch(html + script, /AIが考えています|受理済み・会話を更新中|送信中…/u);
+  assert.match(html, /Enterで送信・Shift＋Enterで改行/u);
   assert.match(css, /#chat textarea\{[^}]*overflow-y:auto/u);
 });
 
@@ -346,7 +372,7 @@ test("a hung recovery poll is bounded and cannot strand a failed-send retry butt
     if (path === "/api/state" && ++reads > 1) await held.wait;
   });
   send(e, "失敗後の通信も止まった"); await tick();
-  assert.equal(e["typing-indicator"].hidden, true, "a POST failure immediately stops dots before recovery GET finishes");
+  assert.equal(typingCount(e), 0, "a POST failure immediately stops dots before recovery GET finishes");
   await advance(10001);
   assert.equal(e.history.querySelectorAll("button")[0].disabled, false);
   assert.equal(messageCalls(calls).length, 1);

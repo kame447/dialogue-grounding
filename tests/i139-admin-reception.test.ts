@@ -111,6 +111,7 @@ test('list has pending first, escaped values/cursors, configured order choices a
   for (const expected of [PROTOCOL, '2026-10-27T00:00:00.000Z', 'expectedRevision', 'value="3"', 'name="confirm"', 'name="order"', 'value="0"', 'value="1"', 'bypass-enabled', 'repair-first', `/admin/record/${RECORD}`, '/admin/entry']) assert.ok(html.includes(expected), expected);
   assert.match(html, /after=cursor%3C%26/); assert.match(html, /&lt;script&gt;/); assert.doesNotMatch(html, /<script|\son\w+=/i);
   assert.match(html, /revision\s*7/);
+  assert.ok(html.includes(`/admin/record/${RECORD}/experiment" target="_blank" rel="noopener noreferrer">実験画面を開く`));
   const select = html.match(/<select\b[^>]*name="order"[^>]*>([\s\S]*?)<\/select>/)?.[1]; assert.ok(select);
   const labels = [...select.matchAll(/<option\b[^>]*value="(\d+)"[^>]*>([^<]*)<\/option>/g)].map(m => [m[1], m[2]]);
   assert.deepEqual(labels.map(([index]) => index), ['0', '1']);
@@ -146,17 +147,17 @@ test('approved but unstarted may cancel; started receptions and CAS conflicts ne
   const raced = fixture(); raced.setResult({ ok: false, error: 'conflict' });
   await error(await handleAdmin(post('cancel'), raced.deps), 409, 'conflict'); assert.equal(mutations(raced).length, 1); assert.equal(raced.calls.some(c => c.op === 'deleteRecord'), false);
 });
-test('valid percent-encoded forms accept exactly 1024 bytes and reject 1025 bytes without mutation', async () => {
-  for (const action of ['approve', 'cancel']) for (const length of [1024, 1025]) {
+test('valid percent-encoded forms accept exactly 4096 bytes and reject 4097 bytes without mutation', async () => {
+  for (const action of ['approve', 'cancel']) for (const length of [4096, 4097]) {
     const f = fixture();
-    const fields = { expectedRevision: '3', confirm: 'x'.repeat(400), ...(action === 'approve' ? { order: '1', ...VERSION } : {}) };
+    const fields = { expectedRevision: '3', confirm: 'x'.repeat(1700), ...(action === 'approve' ? { order: '1', ...VERSION } : {}) };
     let raw = new URLSearchParams(fields).toString();
     if ((length - raw.length) % 2 !== 0) { fields.confirm += 'x'; raw = new URLSearchParams(fields).toString(); }
     f.row.number = fields.confirm; let remaining = (length - raw.length) / 2;
     raw = raw.replace(/[A-Za-z0-9-]/g, c => remaining-- > 0 ? '%' + c.charCodeAt(0).toString(16).padStart(2, '0') : c);
     assert.equal(new TextEncoder().encode(raw).byteLength, length); assert.deepEqual(Object.fromEntries(new URLSearchParams(raw)), fields);
     const r = await handleAdmin(new Request(post(action), { body: raw }), f.deps);
-    if (length === 1024) { assert.equal(r.status, 303); assert.equal(mutations(f).length, 1); }
+    if (length === 4096) { assert.equal(r.status, 303); assert.equal(mutations(f).length, 1); }
     else { await error(r, 400, 'invalid_request'); assert.equal(mutations(f).length, 0); }
   }
 });
