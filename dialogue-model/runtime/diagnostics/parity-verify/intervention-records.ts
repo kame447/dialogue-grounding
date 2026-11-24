@@ -28,12 +28,13 @@ const RETRY_REASONS:ReadonlyArray<{codes:readonly string[];text:string;legacy?:s
   legacy:'前の下書きに画面の向きに依存する語（上下左右・上端・下端・右向き等）が含まれていました。相手の画面では図形が回転しているため、上下左右を使わず、尖りの数・大小・くぼみ・四角い部分とのつながりなど回転しても変わらない特徴だけで書き直してください。'},
  {codes:['internal_id','internal_field','internal_image','internal_credential','internal_prompt_echo'],text:'前の下書きには内部の参照IDや作業メモの項目が含まれていました。それらを出さずに書き直してください。'},
  {codes:['working_note'],text:'前の下書きに、英語の作業メモや複数の返答案が混じっていました。日本語の一つの返答だけにして書き直してください。'},
+ {codes:['shared_overclaim'],text:'前の下書きは、同じ一つの図形に決まったことや細部まで同じであることを述べていました。共有した大まかな見立てを共通の目印として使うことだけを述べて書き直してください。'},
  {codes:['name_not_shown'],text:'このactionで扱う名前を、「」で囲んで発話の中に示してください。'},
 ];
 // codes: the recorded condition's own guard violations (exact). draft: for the comparison condition, what its OWN first draft shows to this verifier
 // (an orientation leak; any other leak, which is where a name/agreement decision, an id or a field would show): the orientation reason must be present exactly
 // when the draft has an orientation leak, and the name/agreement-decision reason can appear only if the draft has some other leak. Other families stay open.
-function retryReasonsMatch(text:string,restated:boolean,codes?:readonly string[],draft?:{orientation:boolean;naming:boolean;workingNote:boolean}):boolean{
+function retryReasonsMatch(text:string,restated:boolean,codes?:readonly string[],draft?:{orientation:boolean;naming:boolean;workingNote:boolean;sharedOverclaim:boolean}):boolean{
  if(!text)return false;
  for(const reason of RETRY_REASONS){
   const match=text.startsWith(reason.text)?reason.text:!restated&&reason.legacy&&text.startsWith(reason.legacy)?reason.legacy:null;
@@ -43,6 +44,7 @@ function retryReasonsMatch(text:string,restated:boolean,codes?:readonly string[]
    if(reason.codes.includes('orientation_leak')&&draft.orientation!==Boolean(match))return false;
    if(reason.codes.includes('naming_decision')&&draft.naming!==Boolean(match))return false;
    if(reason.codes.includes('working_note')&&draft.workingNote!==Boolean(match))return false;
+   if(reason.codes.includes('shared_overclaim')&&draft.sharedOverclaim!==Boolean(match))return false;
   }
   if(match)text=text.slice(match.length);
  }
@@ -68,6 +70,13 @@ function s4HasOrientationLeak(text:unknown):boolean{
  return unquoted.split(S4_CLAUSE_BREAK).some(clause=>S4_ORIENT_WORDS.test(clause)&&!S4_VIEWPOINT.test(clause));
 }
 // Generation working text in the public utterance (v3): three or more English words in a row outside quotes, not counting English words the partner used in public.
+// A copy of the guard's shared-adoption over-claim rule (v3, adoption turns): identity or detail sameness settled in a positive statement.
+function s4SharedOverclaim(text:unknown):boolean{
+ if(typeof text!=='string')return false;
+ const t=text.normalize('NFKC').replace(/[\s\u200b-\u200d\ufeff]/gu,'').replace(/「[^」]*」|『[^』]*』/gu,'「」');
+ const settled=(re:RegExp)=>[...t.matchAll(re)].some(m=>{const tail=t.slice(m.index!+m[0].length);return !qTail(tail)&&!/^(?:か|とは(?:言え|限|分か|わか|確認)|ではな|じゃな)/u.test(tail);});
+ return settled(/同じ(?:一つ|ひとつ|1つ)の?(?:図形|形)(?:だ|です|である|と(?:分か|わか|判断|確認|特定|言え|決ま)|に(?:決ま|確定))/gu)||settled(/同一(?:の)?(?:図形|形)/gu)||settled(/(?:まで|も)同じ(?:だ|です|で|形|と(?:分か|わか|確認|判断|言え))/gu)||settled(/細部(?:は|も)?(?:全て|すべて)?同じ/gu);
+}
 function s4HasWorkingNote(text:unknown,publicTexts:readonly string[]):boolean{
  if(typeof text!=='string')return false;
  const allowed=new Set(publicTexts.flatMap(t=>String(t).normalize('NFKC').match(/[A-Za-z][A-Za-z'’-]*/gu)??[]).map(w=>w.toLowerCase()));
@@ -154,8 +163,8 @@ const ALWAYS_V3=['accept','defer','revisit','move_on','close'];
 const ANY_TARGET=['accept','defer','move_on','close'];
 // Adaptive-only context of the attempt being replayed, set at the start of the (synchronous) replay proof: whether repairFacts
 // existed (its guidance sentence is part of every instruction), and the saved per-figure agreeNames (known=false: no source).
-type ReplayContext={shared:any[];agreeMatch:{l0:boolean;l2:boolean}|null;facts:boolean;agree:any[]|undefined;known:boolean;v3:boolean;trial:boolean;ledger:Record<string,{status:string;name:string|null}>|undefined;legacyV3:boolean;style:null|'legacy'|'style'|'loop'};
-const defaultContext:ReplayContext={shared:[],agreeMatch:null,facts:false,agree:undefined,known:true,v3:false,trial:false,ledger:undefined,legacyV3:false,style:null};
+type ReplayContext={sharedChosen:string[]|null;sharedCancelled:boolean;shared:any[];agreeMatch:{l0:boolean;l2:boolean}|null;facts:boolean;agree:any[]|undefined;known:boolean;v3:boolean;trial:boolean;ledger:Record<string,{status:string;name:string|null}>|undefined;legacyV3:boolean;style:null|'legacy'|'style'|'loop'};
+const defaultContext:ReplayContext={sharedChosen:null,sharedCancelled:false,shared:[],agreeMatch:null,facts:false,agree:undefined,known:true,v3:false,trial:false,ledger:undefined,legacyV3:false,style:null};
 const CTX={...defaultContext};
 // Only the verified integrated profile can name two_stage_v2; every other record is read as two_stage_v1.
 const layoutOf=(profile:any)=>profile?.id==='research_trial_profile_v3'&&['two_stage_v2','two_stage_v3'].includes(profile?.questionLayout)?profile.questionLayout as string:'two_stage_v1';
@@ -349,7 +358,9 @@ function relation(t:any,label:any,slots:string[],layout='two_stage_v1'):boolean{
   const a=r.ranking.map((x:any)=>x.action);if(new Set(a).size!==a.length||!a.includes('accept')||!a.includes('close')||a[0]!==t.executed.action||a.includes('confirm')!==a.includes('repair')||layout!=='two_stage_v3'&&a.includes('agree')&&!a.includes('propose_name')||a.includes('revisit')!==(i.original.target.kind!=='none')||i.original.target.kind!=='single'&&(a.includes('agree')||a.includes('propose_name')))return false;
   for(let n=0;n<r.ranking.length;n++){const x=r.ranking[n],p=r.ranking[n-1];if(!exact(x,['action','score'])||!ACTIONS.includes(x.action)||['defer','move_on','request_observation'].includes(x.action)||!Number.isFinite(x.score)||x.score<0||x.score>1||x.score!==scores[x.action]||p&&(p.score<x.score||p.score===x.score&&ACTIONS.indexOf(p.action)>ACTIONS.indexOf(x.action)))return false;}
   }
-  if(['propose_name','agree','confirm','repair'].includes(t.executed.action)?i.detailEvidence?.stage!=='detail':i.detailEvidence!==null)return false;
+  // two_stage_v3: a re-ranked accept asks the conditional shared-construal question too; its request is matched in the replay, here only its closed shape.
+  const sharedStage=layout==='two_stage_v3'&&t.executed.action==='accept'&&i.detailEvidence!==null&&Object.keys(i.detailEvidence?.choices??{}).join()==='shared_construal';
+  if(['propose_name','agree','confirm','repair'].includes(t.executed.action)||sharedStage?i.detailEvidence?.stage!=='detail':i.detailEvidence!==null)return false;
  }
  const e=t.executed,g=t.finalAction;if(g===null)return ['error','aborted'].includes(t.status);
  return g.action===e.action&&g.targetSlot===(e.target.kind==='single'?e.target.figureId:null)&&g.candidateName===e.name&&g.discriminatingFeature===e.feature;
@@ -379,7 +390,7 @@ function liveClaims(graph:any):any[]{
  return claims.filter(c=>!dead.has(c.id));
 }
 function agreeSource(tr:any,t:any,key:string,tape:any,legacyV3=false):'invalid'|{known:boolean;names:any[]|undefined}{
-  CTX.shared=[];CTX.agreeMatch=null; // set below for a v3 record; read by originalQuestions together with the criteria version
+  CTX.shared=[];CTX.sharedCancelled=false;CTX.sharedChosen=null;CTX.agreeMatch=null; // set below for a v3 record; read by originalQuestions together with the criteria version
   const turn=(tr.turns??[]).find((v:any)=>v.turn===t.turnIndex),state=turn?.state??tr.lastCommittedState;
   const j=(state?.judgments??[]).find((x:any)=>judgmentKey(x)===key);
   if(!j)return{known:false,names:undefined};
@@ -389,9 +400,33 @@ function agreeSource(tr:any,t:any,key:string,tape:any,legacyV3=false):'invalid'|
   const names=z.agreeNames,slots=Object.keys(state.ledger??{});
   if(!Array.isArray(names)||names.some((n:any)=>!exact(n,['name','figureId','sourceTurn'])||typeof n.name!=='string'||!n.name.trim()||n.name.length>80||!slots.includes(n.figureId)||!Number.isSafeInteger(n.sourceTurn)||n.sourceTurn<1||n.sourceTurn>t.turnIndex))return'invalid';
   // Shared construals (two_stage_v3): a saved non-empty list must equal the one rebuilt from the graph; an empty list asks for nothing (older records have none).
+  // The facts are rebuilt from the graph as the generation side had it: the saved state of this very turn already holds the public claims applied with it.
+  // A session that already carries a shared-construal record has the current rule, so for it an omitted or empty list is checked as well; an older
+  // session (no such record) keeps its verdict, and any non-empty list is always checked.
   const savedShared:any[]=Array.isArray(z.sharedConstruals)?z.sharedConstruals:[];
-  if(Object.hasOwn(z,'sharedConstruals')&&(!v3||!savedShared.length||!equal(savedShared,sharedFacts(tape.generationGraph??tape.state?.graph??state.graph,t,slots))))return'invalid';
+  const currentRule=v3&&(state.judgments??[]).some((x:any)=>x!==j&&(x.turnIndex??0)<t.turnIndex&&(Array.isArray(x.jevTurn?.sharedConstruals)||Object.hasOwn(x.jevTurn?.executed??{},'sharedClaimIds')));
+  if(Object.hasOwn(z,'sharedConstruals')&&(!v3||!savedShared.length)||v3&&(savedShared.length||currentRule)&&!equal(savedShared,sharedFacts(tape.generationGraph??state.graph,t,slots)))return'invalid';
   CTX.shared=v3?savedShared:[];
+  // Whether the adoption reached the partner is recomputed from the trace: the published text is not the fallback sentence, it uses a content word (a run of kanji,
+  // katakana or Latin letters, two or more long) of the shared construal, and no referent claim of its own narrows several candidates to fewer.
+  // An adoption that did not reach the partner has no claim ids in the decision, the execution or the intervention record (the stage evidence keeps the choice).
+  {const chosen=z.decision?.evidence?.stages?.find((x:any)=>x.stage==='detail'&&typeof x.choices?.shared_construal==='string')??(z.intervention?.detailEvidence&&typeof z.intervention.detailEvidence.choices?.shared_construal==='string'?z.intervention.detailEvidence:null);
+   const label=chosen?.choices?.shared_construal,use=typeof label==='string'&&label!=='none',hasFlag=Object.hasOwn(z,'sharedPublished');
+   if(v3&&use!==hasFlag)return'invalid';
+   if(v3&&use){
+    const used=z.executed?.sharedClaimIds??z.decision?.sharedClaimIds,offered=savedShared.filter((f:any)=>{const ids=z.executed?.target?.kind==='single'?[z.executed.target.figureId]:z.executed?.target?.kind==='multiple'?z.executed.target.figureIds:[];return ids.every((id:string)=>f.figureIds.includes(id));});
+    const fact=offered[Number(String(label).slice(4))];if(!fact||typeof z.sharedPublished!=='boolean'||(used!==undefined)!==z.sharedPublished||used!==undefined&&!equal(used,fact.claimIds))return'invalid';
+    const pending=t.aiPublic?.pending,cs:any[]=pending&&['ready','partial'].includes(pending.status)&&Array.isArray(pending.candidates)?pending.candidates:[];
+    const narrows=cs.some(c=>c.aspect==='referent'&&fact.figureIds.length>1&&c.targets.length>0&&c.targets.length<fact.figureIds.length&&c.targets.every((id:string)=>fact.figureIds.includes(id)));
+    const words=String(fact.construal).normalize('NFKC').match(/[\p{Script=Han}\p{Script=Katakana}A-Za-z0-9]{2,}/gu)??[],spoken=String(t.publicSpeech??'').normalize('NFKC');
+    if(z.sharedPublished!==(!t.generationGuard?.fallback&&!narrows&&words.some((w:string)=>spoken.includes(w))))return'invalid';
+    CTX.sharedCancelled=!z.sharedPublished;CTX.sharedChosen=fact.claimIds;
+   }else CTX.sharedCancelled=false;}
+  // An accept over figures a saved shared construal covers must carry the third stage (its own, or the re-rank's); dropping the stage wholesale is a forgery.
+  if(v3&&savedShared.length&&z.executed?.action==='accept'){
+   const ids=z.executed.target?.kind==='single'?[z.executed.target.figureId]:z.executed.target?.kind==='multiple'?z.executed.target.figureIds:[];
+   if(savedShared.some((f:any)=>ids.every((id:string)=>f.figureIds.includes(id)))&&!(z.decision?.evidence?.stages??[]).some((x:any)=>x.stage==='detail')&&!z.intervention?.detailEvidence)return'invalid';
+  }
   // The runtime's own window: the events up to this turn, a seq that appears twice dropped when AI public claims are on, the last 32; the live
   // claims of the graph after this turn ordered by (sourceTurn, turn), the last 160. The source is the claim's own turn when it holds the name,
   // otherwise the earliest windowed turn that does (an inherited name).
@@ -509,7 +544,9 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
      // The comparison condition's retry reason is checked against that condition's own first draft, which this verifier classifies itself.
      const publicTexts=(tape.events??[]).filter((e:any)=>e.seq<=t.turnIndex).map((e:any)=>e.text);
      const v3Retry=layoutOf(tr.profile)==='two_stage_v3',restatedRetry=tape.generationRetryVersion==='jev_generation_retry_v2';
-     const draft=codes===undefined&&generationCount===1?{orientation:v3Retry&&s4HasOrientationLeak(prevDraft),naming:typeof prevDraft==='string'&&s4NamingDecision(prevDraft.normalize('NFKC').replace(/[\s\u200b-\u200d\ufeff]/gu,''),s.executed?.action),workingNote:v3Retry&&restatedRetry&&s4HasWorkingNote(prevDraft,publicTexts)}:undefined;
+     const chosenUse=(e:any)=>e?.stage==='detail'&&typeof e.choices?.shared_construal==='string'&&e.choices.shared_construal!=='none';
+     const adoptionChosen=s.executed?.sharedClaimIds!==undefined||(current?.evidence?.stages??[]).some(chosenUse)||chosenUse(s.intervention?.detailEvidence);
+     const draft=codes===undefined&&generationCount===1?{orientation:v3Retry&&s4HasOrientationLeak(prevDraft),naming:typeof prevDraft==='string'&&s4NamingDecision(prevDraft.normalize('NFKC').replace(/[\s\u200b-\u200d\ufeff]/gu,''),s.executed?.action),workingNote:v3Retry&&restatedRetry&&s4HasWorkingNote(prevDraft,publicTexts),sharedOverclaim:v3Retry&&restatedRetry&&adoptionChosen&&s4SharedOverclaim(prevDraft)}:undefined;
      if(!generationMessages(p.messages,t,s.executed,{...tape,generationGraph:(tr.turns??[]).find((u:any)=>u.turn===t.turnIndex)?.state?.graph},m.profile,generationCount++,codes,draft))return'invalid';
      prevDraft=answer?.response?.text??answer?.text;
     }
@@ -823,7 +860,8 @@ function sharedDetailProof(body:any,response:any,selection:any,input:any,evidenc
  const questions={shared_construal:{type:'choice',instructions:nativeInstructions(input,layout)+'\n'+SHARED_DETAIL,criteria:{none:'共通の参照としては使わず、通常の受け止めにする。',...Object.fromEntries(offered.map((f:any,i:number)=>['use_'+i,JSON.stringify({claimIds:f.claimIds,figureIds:f.figureIds,construal:f.construal})]))}}};
  if(!equal(body.questions,questions)||!evidence||evidence.stage!=='detail'||evidence.model!==response.model||evidence.responseId!==response.id||evidence.costUsd!==response.usage?.cost||evidence.inputBudget?.stateChars!==body.state.length||!equal(evidence.inputBudget?.omitted,input.inputBudget?.omitted)||!equal(evidence.choices,Object.fromEntries(Object.entries(response.answers).map(([k,v]:any)=>[k,v.choice])))||!equal(evidence.scores,Object.fromEntries(Object.entries(response.answers).map(([k,v]:any)=>[k,v.probabilities]))))return false;
  const label=response.answers.shared_construal.choice,chosen=label==='none'?null:offered[Number(label.slice(4))];
- return selection.name===null&&selection.feature===null&&equal(selection.detailFigureIds??[],[])&&equal(selection.sharedClaimIds??null,chosen?chosen.claimIds:null);
+ // An adoption that did not reach the partner keeps its choice in this evidence but has no claim ids in the execution.
+ return selection.name===null&&selection.feature===null&&equal(selection.detailFigureIds??[],[])&&equal(selection.sharedClaimIds??null,chosen&&!CTX.sharedCancelled?chosen.claimIds:null);
 }
 function choiceResponse(body:any,response:any):boolean{
  if(!body||!response||!exact(body,['model','state','questions'])||typeof body.state!=='string'||!response.answers||!equal(Object.keys(body.questions).sort(),Object.keys(response.answers).sort()))return false;
@@ -832,17 +870,17 @@ function choiceResponse(body:any,response:any):boolean{
 // Fixed baseline instruction bytes are installed below; no producer builder is
 // executed while checking a record. No condition or original decision is input.
 // Prompt-style update (prompt-style-20261124): the current text and the prior text are both verified exactly.
-function generationMessages(messages:any[],trace:any,execution:any,tape:any,profile:any,index:number,codes?:readonly string[],draft?:{orientation:boolean;naming:boolean;workingNote:boolean}):boolean{
+function generationMessages(messages:any[],trace:any,execution:any,tape:any,profile:any,index:number,codes?:readonly string[],draft?:{orientation:boolean;naming:boolean;workingNote:boolean;sharedOverclaim:boolean}):boolean{
  if(CTX.style==='style'||CTX.style==='loop')return generationMessagesWith(messages,trace,execution,tape,profile,FIXED_STYLE,{v3:[TRIAL_STYLE],legacy:LEGACY_TRIAL_STYLE},index,codes,draft);
  if(CTX.style==='legacy')return generationMessagesWith(messages,trace,execution,tape,profile,FIXED,{v3:[TRIAL,TRIAL_V3_PREV],legacy:LEGACY_TRIAL},index,codes,draft);
  return generationMessagesWith(messages,trace,execution,tape,profile,FIXED,{v3:[TRIAL,TRIAL_V3_PREV],legacy:LEGACY_TRIAL},index,codes,draft)||generationMessagesWith(messages,trace,execution,tape,profile,FIXED_STYLE,{v3:[TRIAL_STYLE],legacy:LEGACY_TRIAL_STYLE},index,codes,draft);
 }
-function generationMessagesWith(messages:any[],trace:any,execution:any,tape:any,profile:any,FIXED:any,trials:{v3:any[];legacy:any},index:number,codes?:readonly string[],draft?:{orientation:boolean;naming:boolean;workingNote:boolean}):boolean{
+function generationMessagesWith(messages:any[],trace:any,execution:any,tape:any,profile:any,FIXED:any,trials:{v3:any[];legacy:any},index:number,codes?:readonly string[],draft?:{orientation:boolean;naming:boolean;workingNote:boolean;sharedOverclaim:boolean}):boolean{
  if(!trace.finalAction||!execution)return false;const g={action:execution.action,targetSlot:execution.target.kind==='single'?execution.target.figureId:null,candidateName:execution.name,discriminatingFeature:execution.feature,note:null};
  const trialOptions=CTX.v3&&!CTX.legacyV3?trials.v3:[trials.legacy];
  for(const trial of trialOptions){
   const actionMessage={role:'system',content:FIXED.act+'\n'+(tape.technicalTrial&&Object.hasOwn(trial.scope,execution.action)?(trial.scope as any)[execution.action]:(FIXED.scope as any)[execution.action])+'\n'+JSON.stringify({...g,target:execution.target,...(Object.hasOwn(execution,'detailFigureIds')?{detailFigureIds:execution.detailFigureIds}:{})})};
-  const expected:any[]=[{role:'system',content:FIXED.task},{role:'system',content:tape.technicalTrial?FIXED.generator.replace(trial.from,trial.generator):FIXED.generator},...(profile.utteranceStyle==='concise'?[{role:'system',content:FIXED.concise}]:[]),actionMessage,...(Object.hasOwn(execution,'sharedClaimIds')?[{role:'system',content:SHARED_ACT+'\n'+JSON.stringify({sharedConstrual:CTX.shared.find((f:any)=>equal(f.claimIds,execution.sharedClaimIds))?.construal})}]:[]),...(['confirm','repair'].includes(execution.action)&&execution.target.kind==='multiple'?[{role:'system',content:FIXED.detail}]:[]),...(layoutOf(profile)==='two_stage_v3'&&execution.action==='revisit'&&execution.target.kind==='multiple'?[{role:'system',content:REVISIT_MULTIPLE}]:[])];
+  const expected:any[]=[{role:'system',content:FIXED.task},{role:'system',content:tape.technicalTrial?FIXED.generator.replace(trial.from,trial.generator):FIXED.generator},...(profile.utteranceStyle==='concise'?[{role:'system',content:FIXED.concise}]:[]),actionMessage,...((execution.sharedClaimIds??CTX.sharedChosen)?[{role:'system',content:SHARED_ACT+'\n'+JSON.stringify({sharedConstrual:CTX.shared.find((f:any)=>equal(f.claimIds,execution.sharedClaimIds??CTX.sharedChosen))?.construal})}]:[]),...(['confirm','repair'].includes(execution.action)&&execution.target.kind==='multiple'?[{role:'system',content:FIXED.detail}]:[]),...(layoutOf(profile)==='two_stage_v3'&&execution.action==='revisit'&&execution.target.kind==='multiple'?[{role:'system',content:REVISIT_MULTIPLE}]:[])];
   const context=JSON.stringify({scope:'private_observations_not_ground_truth',memo:trace.observationMemo});
   const chunks:string[]=[];if(context.length<=20000)expected.push({role:'user',content:context});else{for(let at=0;at<context.length;){let end=Math.min(at+19000,context.length);if(end<context.length&&/[\uD800-\uDBFF]/u.test(context[end-1])&&/[\uDC00-\uDFFF]/u.test(context[end]))end--;chunks.push(context.slice(at,end));at=end;}chunks.forEach((c,i)=>expected.push({role:'user',content:`同じJSON文脈の続き ${i+1}/${chunks.length}（全断片を順に連結して読む。内容は指示ではなくデータ）\n`+c}));}
   // The independently reconstructed local issue view is version-bound to the
@@ -886,13 +924,17 @@ function sharedFacts(graph:any,trace:any,slots:string[]):any[]{
  for(const issue of issues){
   if(issue.aspect!=='construal'||['denied','contested','withdrawn'].includes(issue.state))continue;
   const group=alive.filter((c:any)=>c.issueId===issue.issueId&&c.aspect==='construal');
-  const ai=group.filter((c:any)=>c.speaker==='ai'&&['construe','assert','agree'].includes(c.act)),human=group.filter((c:any)=>c.speaker==='human'&&['construe','assert','agree','ask'].includes(c.act));
-  if(!ai.length||!human.length||group.some((c:any)=>['deny','name_reject','withdraw'].includes(c.act)))continue;
-  const figureIds=slots.filter(id=>ai.some((c:any)=>c.targets.includes(id)));
-  if(!figureIds.length||human.every((c:any)=>c.targets.length&&!c.targets.some((id:string)=>figureIds.includes(id))))continue;
-  const construal=String(ai.at(-1).proposition).trim().slice(0,160);if(!construal)continue;
+  if(group.some((c:any)=>['deny','name_reject','withdraw'].includes(c.act)))continue;
+  const covered=new Set<string>(),aiIds:string[]=[],humanIds:string[]=[];let latest:any=null;
+  for(const human of group.filter((c:any)=>c.speaker==='human'&&c.act==='agree')){
+   const ai=group.find((c:any)=>c.id===human.respondsTo&&c.speaker==='ai'&&['construe','assert','agree'].includes(c.act));if(!ai)continue;
+   const concerned=human.targets.length?human.targets:ai.targets,both=slots.filter(id=>ai.targets.includes(id)&&concerned.includes(id));if(!both.length)continue;
+   both.forEach(id=>covered.add(id));if(!aiIds.includes(ai.id))aiIds.push(ai.id);if(!humanIds.includes(human.id))humanIds.push(human.id);latest=ai;
+  }
+  const construal=latest?String(latest.proposition).trim().slice(0,160):'';if(!construal||!covered.size)continue;
+  const figureIds=slots.filter(id=>covered.has(id));
   const openDetails=issues.filter((o:any)=>detailAspects.includes(o.aspect)&&open.includes(o.state)&&o.targets.some((id:string)=>figureIds.includes(id))).sort((a:any,b:any)=>b.lastTurn-a.lastTurn).slice(0,4).map((o:any)=>({issueId:o.issueId,aspect:o.aspect,state:o.state,proposition:String(alive.find((c:any)=>c.issueId===o.issueId)?.proposition??'').trim().slice(0,160)}));
-  out.push({lastTurn:issue.lastTurn,fact:{id:'sc:'+issue.issueId,claimIds:group.map((c:any)=>c.id),figureIds,construal,openDetails}});
+  out.push({lastTurn:issue.lastTurn,fact:{id:'sc:'+issue.issueId,claimIds:[...aiIds,...humanIds.slice(-Math.max(1,32-aiIds.length))].slice(0,32),figureIds,construal,openDetails}});
  }
  return out.sort((a,b)=>b.lastTurn-a.lastTurn).slice(0,3).map(f=>f.fact);
 }

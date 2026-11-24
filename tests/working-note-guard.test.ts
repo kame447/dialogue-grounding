@@ -1,7 +1,7 @@
 // Synthetic only. A generation working note that leaks into the public utterance is a publication violation (two_stage_v3).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { findWorkingNoteLeaks, rewriteReasons } from '../dialogue-model/runtime/v2/generation-guard.ts';
+import { findSharedOverclaims, findWorkingNoteLeaks, rewriteReasons } from '../dialogue-model/runtime/v2/generation-guard.ts';
 
 test('an English working note or an alternative reply mixed into the utterance is a violation', () => {
   for (const text of [
@@ -30,4 +30,14 @@ test('a list of alternative replies is a violation, an ordinary sentence with a 
   // Features listed for one question or explanation are one reply.
   for (const text of ['見えている特徴は二つです。\n・輪に小さな切れ目がある\n・輪に細い棒がついている\nこの二つがそろう形ですか？', '1. 輪がある\n2. 棒がある\nどちらも合っていますか？',
     '案が二つあります。', '1つ目の形に切れ目がありますか？', '案1の形でしょうか？']) assert.deepEqual(findWorkingNoteLeaks(text), [], text);
+});
+
+test('an adoption turn may use the rough reading but not settle identity or detail sameness; questions and denials are fine', () => {
+  for (const text of ['風車らしさを目印に話せます。これで同じ一つの図形だと分かりました。', '風車らしさを目印に話せます。輪の切れ目まで同じだと確認できました。', '細部も同じ形です。']) {
+    assert.deepEqual(findSharedOverclaims(text), ['shared_overclaim'], text);
+  }
+  for (const text of ['風車らしい形を目印に話を進められます。切れ目の形はまだ照合できていません。', '同じ一つの図形かどうかは、まだ分かりません。', '同じ図形だとは言えません。', '細部まで同じですか？']) {
+    assert.deepEqual(findSharedOverclaims(text), [], text);
+  }
+  assert.match(rewriteReasons(['shared_overclaim']), /同じ一つの図形に決まったことや細部まで同じ/u);
 });

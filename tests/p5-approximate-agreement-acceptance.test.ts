@@ -47,6 +47,7 @@ type Turn = {
   referent?: string;
   speech: string;
   adopt?: string;
+  retry?: string;
 };
 type Event = InterventionReplayTape['events'][number];
 type Material = InterventionReplayTape['common'];
@@ -65,6 +66,7 @@ async function play(strategy: Label, turns: Turn[]) {
   let cut: { luna: number; jev: number };
   let choiceId = 0;
   let adopted: string | null;
+  let generationCount: number;
   const readKey = async () => 'sk-or-SYNTHETIC-offline-replay-key-0000';
   const http = createChatClient({
     provider: 'cloudflare', purpose: profile.modelPolicy.purpose, apiKey: 'synthetic-offline-replay-key',
@@ -130,6 +132,7 @@ async function play(strategy: Label, turns: Turn[]) {
       phase = options.phase;
       const text = phase === 'local_extraction' ? extraction(current.local)
         : phase === 'ai_extraction' ? extraction(current.ai)
+        : generationCount++ > 0 && current.retry !== undefined ? current.retry
         : adopted && current.adopt ? current.adopt : current.speech;
       response = { text, model: 'synthetic-luna-model', usage: { inputTokens: 0, outputTokens: 0 } };
       raw.luna.push({ phase, response });
@@ -155,17 +158,18 @@ async function play(strategy: Label, turns: Turn[]) {
     raw = { luna: [], jev: [], reobservations: [] };
     wire = [];
     adopted = null;
+    generationCount = 0;
     const before = state;
     const seq = events.length + 1;
     const human = { id: 'human-' + seq, seq, speaker: 'human' as const, text: turn.human };
     events.push(human);
     const result = await runtime.runAiTurn({ events, privateState: before, lastEventId: human.id, requestSeq: human.seq });
-    assert.deepEqual(trace!.generationGuard.violations, []);
+    if (turn.retry === undefined) assert.deepEqual(trace!.generationGuard.violations, []);
     state = JSON.parse(JSON.stringify(result.privateState)) as InterventionReplayTape['state'];
     const judgment = state.judgments.at(-1)!;
     assert.equal(judgment.judgment.action, turn.action ?? 'accept');
     assert.equal(trace!.publicSpeech, result.text);
-    assert.equal(result.text, adopted ? turn.adopt : turn.speech);
+    if (turn.retry === undefined) assert.equal(result.text, adopted ? turn.adopt : turn.speech);
     const common = { luna: raw.luna.slice(0, cut!.luna), jev: raw.jev.slice(0, cut!.jev), reobservations: [] };
     const tail = { luna: raw.luna.slice(cut!.luna), jev: raw.jev.slice(cut!.jev), reobservations: [] };
     snapshots.push({ before, state, judgment, trace: { ...trace!, status: 'committed' as const }, wire, common, tail,
@@ -193,10 +197,12 @@ async function checkS4(pair: Awaited<ReturnType<typeof paired>>, turn = -1) {
   const a = pair['repair-first'].at(turn)!;
   const b = pair['bypass-enabled'].at(turn)!;
   assert.deepEqual(a.common, b.common);
+  const failures = [];
   for (const label of strategies) {
     const item = pair[label].at(turn)!;
     const tape: InterventionReplayTape = {
       schemaVersion: 'parity_intervention_replay_v1', state: item.before, events: item.events, technicalTrial, common: item.common,
+      ...(item.trace.generationRetryVersion ? { generationRetryVersion: item.trace.generationRetryVersion } : {}),
       tails: { 'repair-first': a.tail, 'bypass-enabled': b.tail },
       recorded: { label, expectedRequests: item.wire.map(({ provider, phase, body }, index) => ({
         provider, phase, requestSha256: hash(body), actualSendMeasured: true, sendIds: [index + 1],
@@ -236,9 +242,10 @@ async function checkS4(pair: Awaited<ReturnType<typeof paired>>, turn = -1) {
     const checks = interventionChecks(JSON.parse(JSON.stringify(records)));
     for (const check of ['shape', 'binding', 'execution', 'replay']) {
       const observed = checks.find(result => result.id === 'intervention.trial.0.attempt.0.' + check);
-      assert.equal(observed?.status, 'pass', JSON.stringify({ label, check, observed }));
+      if (observed?.status !== 'pass') failures.push({ label, check, observed });
     }
   }
+  assert.deepEqual(failures, []);
 }
 
 const broad = '全体は風車のように見えます。';
@@ -265,8 +272,7 @@ function coarseAgreement(): Turn {
     ], speech: neutral, adopt: adoption,
   };
 }
-// The reference claims are committed before this checkpoint. The original
-// verifier can replay those claims from the graph with their insertion turns.
+// This checkpoint exercises reuse after the reference claims have been committed.
 const checkpoint: Turn = { human: 'この話を続けられそうですか？', speech: neutral };
 const coarsePrefix = () => [introducesConstrual(), { ...coarseAgreement(), adopt: undefined }];
 function questionOptions(turn: Snapshot, key: string) {
@@ -284,11 +290,13 @@ function noAdoption(turn: Snapshot) {
   assert.equal(savedSources(turn), undefined);
   assert.equal(Reflect.get(turn.judgment.jevTurn, 'sharedConstruals'), undefined);
 }
+function chosenSharedConstrual(turn: Snapshot) {
+  return turn.trace.decisions.at(-1)?.evidence.stages?.find(stage => stage.stage === 'detail')?.choices.shared_construal;
+}
 function checkedAdoption(turn: Snapshot) {
   assert.deepEqual(Object.keys(questionOptions(turn, 'shared_construal') ?? {}), ['none', 'use_0'],
     'a shared public construal offers a closed choice between acknowledgment and adoption');
-  const detail = turn.trace.decisions.at(-1)?.evidence.stages?.find(stage => stage.stage === 'detail');
-  assert.equal(detail?.choices.shared_construal, 'use_0');
+  assert.equal(chosenSharedConstrual(turn), 'use_0');
   const actions = Object.keys(questionOptions(turn, 'action') ?? {}).sort();
   assert.deepEqual(actions, [
     'accept', 'close', 'confirm', 'defer', 'move_on', 'propose_name', 'repair', 'request_observation', 'revisit',
@@ -392,24 +400,131 @@ test('P5 control (3): a backchannel or a one-sided construal supplies no adoptio
   }
 });
 
+for (const [act, text] of [
+  ['ask', 'どんなところから風車を連想したんですか？'],
+  ['construe', '私は帆船のように見えます。'],
+] as const) {
+  test('P5 audit (1) change: no shared evidence from a reply classified as ' + act, async () => {
+    const reply: Turn = { human: text, local: [{ text, act, aspect: 'construal', antecedent: aiBroad }],
+      speech: neutral, adopt: adoption };
+    const pair = await paired([introducesConstrual(), reply, { ...checkpoint, adopt: adoption }]);
+    const [, immediate, later] = pair['repair-first'];
+    const claims = priorClaimViews(immediate.state.graph);
+    const human = claims.find(claim => claim.speaker === 'human' && claim.quote === text);
+    const ai = claims.find(aiBroad);
+    assert.ok(human && ai);
+    assert.equal(human.act, act);
+    assert.equal(human.issueId, ai.issueId);
+    assert.equal(human.respondsTo, ai.id);
+    for (const turn of [immediate, later]) {
+      noAdoption(turn);
+      assert.equal(turn.speech, neutral);
+      unchangedLedger(turn);
+    }
+    await checkS4(pair, 1);
+    await checkS4(pair);
+  });
+}
+
+test('P5 audit (2) change: support scoped to the first figure cannot be used on the second', async () => {
+  const supported = '輪のあるほうなら、ざっくり風車に見えます。';
+  const askOther = 'もう一つの形についてはどう見えますか？';
+  const pair = await paired([introducesConstrual([figure, other]), {
+    human: supported + 'もう一方はまだ判断できません。',
+    local: [{ text: supported, aspect: 'construal', act: 'agree', targets: [figure], antecedent: aiBroad }], speech: neutral,
+  }, {
+    human: askOther, local: [{ text: askOther, aspect: 'referent', act: 'ask', targets: [other] }],
+    target: 'figure_1', referent: 'figure_1', speech: neutral, adopt: 'こちらも風車らしさを目印に進めましょう。',
+  }]);
+  const later = pair['repair-first'].at(-1)!;
+  const claims = priorClaimViews(later.state.graph);
+  assert.deepEqual(claims.find(aiBroad)?.targets, [figure, other]);
+  assert.deepEqual(claims.find(humanCoarse)?.targets, [figure]);
+  assert.deepEqual(later.trace.executed?.target, { kind: 'single', figureId: other });
+  assert.equal(questionOptions(later, 'shared_construal'), undefined);
+  assert.equal(savedSources(later), undefined);
+  assert.equal(later.speech, neutral);
+  unchangedLedger(later);
+  await checkS4(pair);
+});
+
+const bothLookAlike = 'どちらも風車っぽく見えます。';
+const ambiguous = 'どちらを指すかは、これだけでは決められません。';
+const twoFigures = { target: 'figures_0_1', referent: 'multiple' } as const;
+const twoAdoption = '風車らしさは共通の目印にできます。' + ambiguous;
+function twoFigurePrefix(): Turn[] {
+  return [{ ...introducesConstrual([figure, other]), ...twoFigures }, {
+    human: bothLookAlike, local: [{ text: bothLookAlike, aspect: 'construal', act: 'agree', antecedent: aiBroad }],
+    speech: ambiguous, ...twoFigures,
+  }];
+}
+
 test('P5 control (4): two figures sharing a description do not become a single named referent', async () => {
-  const shared = 'どちらも風車っぽく見えます。';
-  const ambiguity = 'どちらを指すかは、これだけでは決められません。';
-  const scope = { target: 'figures_0_1', referent: 'multiple' };
-  const pair = await paired([{ ...introducesConstrual([figure, other]), ...scope }, {
-    human: shared, local: [{ text: shared, aspect: 'construal', act: 'agree', antecedent: aiBroad }],
-    speech: ambiguity, ...scope,
-  }, { ...checkpoint, speech: ambiguity, adopt: '風車らしさは共通の目印にできます。' + ambiguity, ...scope }]);
+  const pair = await paired([...twoFigurePrefix(), { ...checkpoint, speech: ambiguous, adopt: twoAdoption, ...twoFigures }]);
   const response = pair['repair-first'].at(-1)!;
   assert.deepEqual(response.trace.executed?.target, { kind: 'multiple', figureIds: [figure, other] });
-  assert.ok(response.speech.includes(ambiguity));
+  assert.equal(response.speech, twoAdoption);
   assert.deepEqual(response.judgment.jevTurn.agreeNames, []);
-  if (savedSources(response)) {
-    const chosen = priorClaimViews(response.state.graph).filter(c => savedSources(response)?.includes(c.id));
-    assert.ok(chosen.length >= 2);
-    assert.ok(chosen.every(c => c.targets.includes(figure) && c.targets.includes(other)));
-  }
+  assert.equal(chosenSharedConstrual(response), 'use_0');
+  const chosen = priorClaimViews(response.state.graph).filter(c => savedSources(response)?.includes(c.id));
+  assert.deepEqual(chosen.map(claim => claim.speaker).sort(), ['ai', 'human']);
+  assert.ok(chosen.every(claim => claim.targets.includes(figure) && claim.targets.includes(other)));
+  assert.deepEqual(JSON.parse(questionOptions(response, 'shared_construal')!.use_0).figureIds, [figure, other]);
   unchangedLedger(response);
+  await checkS4(pair);
+});
+
+test('P5 audit (3) change: selecting use and publishing only a backchannel records no adoption', async () => {
+  const ack = 'なるほど。';
+  const pair = await paired([...coarsePrefix(), { ...checkpoint, adopt: ack, retry: ack }]);
+  const turn = pair['repair-first'].at(-1)!;
+  assert.equal(chosenSharedConstrual(turn), 'use_0');
+  assert.equal(turn.speech, ack);
+  assert.equal(savedSources(turn), undefined);
+  assert.equal(Reflect.get(turn.trace.executed ?? {}, 'sharedClaimIds'), undefined);
+  unchangedLedger(turn);
+  await checkS4(pair);
+});
+
+test('P5 audit (3) change: the orientation fallback does not record the selected adoption', async () => {
+  const draft = '風車らしさを目印に進めましょう。輪の右側に切れ目があるかは、まだ分かりません。';
+  const pair = await paired([...coarsePrefix(), { ...checkpoint, adopt: draft, retry: draft }]);
+  const turn = pair['repair-first'].at(-1)!;
+  assert.equal(chosenSharedConstrual(turn), 'use_0');
+  assert.deepEqual(turn.trace.generationGuard, { violations: ['orientation_leak'], regenerated: true, fallback: true });
+  assert.doesNotMatch(turn.speech, /風車|右側/u);
+  assert.equal(savedSources(turn), undefined);
+  assert.equal(Reflect.get(turn.trace.executed ?? {}, 'sharedClaimIds'), undefined);
+  unchangedLedger(turn);
+  await checkS4(pair);
+});
+
+for (const [kind, draft] of [
+  ['identity', '風車らしさを目印に話せます。これで同じ一つの図形だと分かりました。'],
+  ['detail', '風車らしさを目印に話せます。輪の切れ目まで同じだと確認できました。'],
+] as const) {
+  test('P5 audit (3) change: the public reply does not settle unverified ' + kind, async () => {
+    const ready = kind === 'identity' ? twoFigurePrefix() : coarsePrefix();
+    const scope = kind === 'identity' ? { referent: 'multiple' } : {};
+    const corrected = kind === 'identity' ? twoAdoption : adoption;
+    const pair = await paired([...ready, { ...checkpoint, ...scope, adopt: draft, retry: corrected }]);
+    const turn = pair['repair-first'].at(-1)!;
+    assert.equal(chosenSharedConstrual(turn), 'use_0');
+    assert.equal(turn.speech, corrected);
+    assert.equal(turn.trace.generationGuard.regenerated, true);
+    unchangedLedger(turn);
+    await checkS4(pair);
+  });
+}
+
+test('P5 audit (4) change: S4 verifies an adoption on the turn that supplies the human agreement', async () => {
+  const pair = await paired([introducesConstrual(), coarseAgreement()]);
+  const turn = pair['repair-first'].at(-1)!;
+  assert.equal(turn.trace.turnIndex, 3);
+  checkedAdoption(turn);
+  const newSupport = priorClaimViews(turn.state.graph).find(humanCoarse);
+  assert.equal(newSupport?.sourceTurn, turn.trace.turnIndex);
+  assert.ok(!priorClaimViews(turn.before.graph).some(humanCoarse));
   await checkS4(pair);
 });
 

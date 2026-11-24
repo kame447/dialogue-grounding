@@ -24,7 +24,7 @@ import { validateJevDecision, validateHumanReferentEstimate, validateRepairProsp
 import type { JevDecisionFailureEvidence } from "../decision/jev-decision.ts";
 import { prepareLocalGroundingTurn, validateLocalGroundingOptions, findLocalPublicationViolations } from "./local-grounding-turn.ts";
 import type { LocalGroundingResearchRecord, LocalGroundingTrace } from "./local-grounding-turn.ts";
-import { findAgreeNameMismatch, findProposeNameMismatch, findGuardViolations, findOrientationLeaks, findWorkingNoteLeaks, orientationSafeFallback, rewriteReasons } from "./generation-guard.ts";
+import { findAgreeNameMismatch, findProposeNameMismatch, findGuardViolations, findOrientationLeaks, findWorkingNoteLeaks, findSharedOverclaims, orientationSafeFallback, rewriteReasons } from "./generation-guard.ts";
 import { createMemoAiExtractor, MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS, AiPublicError, aiHash, emptyAiEvidence } from "../local-grounding/extract-ai.ts";
 import { createJevAiFunctionClassifier, createJevAiSupportChecker, AI_FUNCTION_INSTRUCTIONS, AI_SUPPORT_INSTRUCTIONS,
   AI_RESPONSE_SUPPORT_INSTRUCTIONS, AI_FUNCTION_CRITERIA, AI_SUPPORT_CHOICES, AI_ACT_DESCRIPTIONS } from "../local-grounding/jev-ai-public.ts";
@@ -137,7 +137,7 @@ export type JevTurnTrace = {
 };
 type CommittedAct = {
   turnIndex: number; lastEventId: string | null; status: "committed"; judgment: Judgment;
-  generationGuard: Guard; jevTurn: { attemptNumber: number; decision: JevDecision; executed?:ExecutedDecision; intervention?:InterventionTrace; humanReferent?: JevHumanReferentTrace; repairProspect?: RepairProspectMaterial; repairGate?: RepairGate; agreeNames?: PublicNameCandidate[]; repairFacts?: RepairFact[]; sharedConstruals?: SharedConstrual[] };
+  generationGuard: Guard; jevTurn: { attemptNumber: number; decision: JevDecision; executed?:ExecutedDecision; intervention?:InterventionTrace; humanReferent?: JevHumanReferentTrace; repairProspect?: RepairProspectMaterial; repairGate?: RepairGate; agreeNames?: PublicNameCandidate[]; repairFacts?: RepairFact[]; sharedConstruals?: SharedConstrual[]; sharedPublished?: boolean };
   localGrounding: LocalGroundingTrace;
   aiPublic?: { aiSeq: number; textSha256: string };
 };
@@ -407,12 +407,14 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
   const seen=new Set<string>();
   for(const j of s.judgments){
    if(!stateExact(j,['turnIndex','lastEventId','status','judgment','generationGuard','jevTurn','localGrounding',...(Object.hasOwn(j,'aiPublic')?['aiPublic']:[])])||j.status!=='committed'||!Number.isSafeInteger(j.turnIndex)||j.turnIndex<1||!(j.lastEventId===null||typeof j.lastEventId==='string'&&j.lastEventId.length<=160))throw Error();
-   const z=j.jevTurn;if(!stateExact(z,['attemptNumber','decision','executed','intervention',...(Object.hasOwn(z??{},'humanReferent')?['humanReferent']:[]),...(Object.hasOwn(z??{},'repairProspect')?['repairProspect']:[]),...(Object.hasOwn(z??{},'repairGate')?['repairGate']:[]),...(Object.hasOwn(z??{},'agreeNames')?['agreeNames']:[]),...(Object.hasOwn(z??{},'repairFacts')?['repairFacts']:[]),...(Object.hasOwn(z??{},'sharedConstruals')?['sharedConstruals']:[])])||!Number.isSafeInteger(z.attemptNumber)||z.attemptNumber<1)throw Error();
+   const z=j.jevTurn;if(!stateExact(z,['attemptNumber','decision','executed','intervention',...(Object.hasOwn(z??{},'humanReferent')?['humanReferent']:[]),...(Object.hasOwn(z??{},'repairProspect')?['repairProspect']:[]),...(Object.hasOwn(z??{},'repairGate')?['repairGate']:[]),...(Object.hasOwn(z??{},'agreeNames')?['agreeNames']:[]),...(Object.hasOwn(z??{},'repairFacts')?['repairFacts']:[]),...(Object.hasOwn(z??{},'sharedConstruals')?['sharedConstruals']:[]),...(Object.hasOwn(z??{},'sharedPublished')?['sharedPublished']:[])])||!Number.isSafeInteger(z.attemptNumber)||z.attemptNumber<1)throw Error();
    const hasAgreeNames=Object.hasOwn(z,'agreeNames');
    // two_stage_v3 only, saved only when a shared construal existed this turn; a used one must be one of them (accept only).
    if(Object.hasOwn(z,'sharedConstruals')&&(questionLayout!=='two_stage_v3'||!Array.isArray(z.sharedConstruals)||!z.sharedConstruals.length||z.sharedConstruals.length>3||
      z.sharedConstruals.some((f:any)=>!stateExact(f,['id','claimIds','figureIds','construal','openDetails'])||typeof f.id!=='string'||!f.id||!Array.isArray(f.claimIds)||!f.claimIds.length||f.claimIds.some((c:any)=>typeof c!=='string')||
       !Array.isArray(f.figureIds)||!f.figureIds.length||f.figureIds.some((id:string)=>!ownSlots.includes(id))||typeof f.construal!=='string'||!f.construal.trim()||f.construal.length>160||!Array.isArray(f.openDetails)||f.openDetails.length>4)))throw Error();
+   // sharedPublished exists exactly when an adoption was chosen: true keeps the claim ids in the decision and the execution, false (not what reached the partner) drops them.
+   if(Object.hasOwn(z,'sharedPublished')&&(typeof z.sharedPublished!=='boolean'||Object.hasOwn(z.executed??z.decision??{},'sharedClaimIds')!==z.sharedPublished))throw Error();
    for(const e of [z.executed,z.decision])if(e&&Object.hasOwn(e,'sharedClaimIds')&&!(z.sharedConstruals??[]).some((f:any)=>JSON.stringify(f.claimIds)===JSON.stringify(e.sharedClaimIds)))throw Error();
    // Historical evidence retains the candidate catalog, not the original request's public turns.
    if(questionLayout==='two_stage_v3'&&!hasAgreeNames||hasAgreeNames&&(!Array.isArray(z.agreeNames)||z.agreeNames.length>JEV_DECISION_INPUT_LIMITS.publicNames||z.agreeNames.some((n:any)=>!stateExact(n,['name','figureId','sourceTurn'])||
@@ -462,8 +464,10 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
      const last=es.at(-1),label=last.choices?.shared_construal;
      if(!stateSame(Object.keys(last.choices),['shared_construal'])||!stateSame(Object.keys(last.scores.shared_construal),['none',...sharedOffered.map((_f:any,i:number)=>'use_'+i)])||typeof label!=='string')throw Error();
      const chosen=label==='none'?null:sharedOffered[Number(label.slice(4))];
-     if(label!=='none'&&!chosen||!stateSame(Object.hasOwn(d,'sharedClaimIds')?d.sharedClaimIds:null,chosen?chosen.claimIds:null))throw Error();
-    }else if(Object.hasOwn(d,'sharedClaimIds'))throw Error();
+     if(label!=='none'&&!chosen||Object.hasOwn(z,'sharedPublished')!==(label!=='none'))throw Error();
+     if(chosen&&z.sharedPublished&&!stateSame(Object.hasOwn(d,'sharedClaimIds')?d.sharedClaimIds:null,chosen.claimIds))throw Error();
+     if(!chosen||!z.sharedPublished){if(Object.hasOwn(d,'sharedClaimIds'))throw Error();}
+    }else if(Object.hasOwn(d,'sharedClaimIds')||Object.hasOwn(z,'sharedPublished')&&!(z.executed?.action==='accept'&&z.intervention?.detailEvidence))throw Error();
     // After the turn's one reobservation the stage-one question omits request_observation (as in isOpenIssueRerankRecord).
     const keys=Object.keys(es[0].scores.action??{}).sort();
     // v3 scores only the actions that had a legal target and detail: any subset of the offerable labels that holds the always-legal ones and the chosen action.
@@ -895,6 +899,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       const violations = (text: string, context: Message[]) => [...new Set([...findGuardViolations(text, judgment.action), ...findLocalPublicationViolations(text, context),
         ...(questionLayout === "two_stage_v3" ? findOrientationLeaks(text) : []),
         ...(questionLayout === "two_stage_v3" ? findWorkingNoteLeaks(text, events.filter(e => e.seq <= latest.seq).map(e => e.text)) : []),
+        ...(questionLayout === "two_stage_v3" && execution.sharedClaimIds ? findSharedOverclaims(text) : []),
         ...(questionLayout === "two_stage_v3" && judgment.action === "agree" && judgment.candidateName !== null
           ? findAgreeNameMismatch(text, judgment.candidateName) : []),
         ...(questionLayout === "two_stage_v3" && judgment.action === "propose_name" && judgment.candidateName !== null
@@ -941,6 +946,31 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         abortIf(signal);
         state.aiPublic!.pending = aiPending;
       }
+      // The adoption is a Jev decision; whether what reached the partner actually carries the shared reading is recorded apart from it: the published text must
+      // not be the program's fallback sentence, its own public claims must state a construal over the shared figures, and it must not narrow several
+      // candidates to one by a referent claim. A bare backchannel or a substituted sentence is therefore never an executed adoption.
+      let sharedPublished: boolean | undefined;
+      if (execution.sharedClaimIds) {
+        const fact = baseInput.sharedConstruals!.find(f => JSON.stringify(f.claimIds) === JSON.stringify(execution.sharedClaimIds))!;
+        const cs = aiPending && ["ready", "partial"].includes(aiPending.status) ? aiPending.candidates : [];
+        const narrows = cs.some(c => c.aspect === "referent" && fact.figureIds.length > 1 && c.targets.length > 0 && c.targets.length < fact.figureIds.length &&
+          c.targets.every(id => fact.figureIds.includes(id)));
+        // The text carries the reading when it uses a content word (a run of kanji, katakana or Latin letters, two or more long) of the shared construal.
+        const words = fact.construal.normalize("NFKC").match(/[\p{Script=Han}\p{Script=Katakana}A-Za-z0-9]{2,}/gu) ?? [];
+        const spoken = result.text.normalize("NFKC");
+        sharedPublished = !record.generationGuard.fallback && !narrows && words.some(w => spoken.includes(w));
+        if (!sharedPublished) {
+          // Not an executed adoption: the choice stays in the stage evidence, the decision, the execution and the intervention record lose the claim ids.
+          const drop = <T>(x: T): T => { if (x && typeof x === "object" && Object.hasOwn(x, "sharedClaimIds")) { const { sharedClaimIds: _dropped, ...rest } = x as Record<string, unknown>; return rest as T; } return x; };
+          decision = drop(decision!); execution = drop(execution); if (record.executed) record.executed = execution;
+          if (record.decisions.length) record.decisions[record.decisions.length - 1] = drop(record.decisions[record.decisions.length - 1]);
+          if (record.intervention && typeof record.intervention === "object") {
+            const i = structuredClone(record.intervention) as unknown as Record<string, unknown>;
+            if (i.original) i.original = drop(i.original); if (i.alternative) i.alternative = drop(i.alternative);
+            record.intervention = i as never;
+          }
+        }
+      }
       // A validated feature-only repair preserves both the current name and its
       // status. Keep the legacy applyJudgment default outside this Jev boundary.
       const featureOnlyRepair = judgment.action === "repair" && judgment.candidateName === null && judgment.discriminatingFeature !== null;
@@ -951,6 +981,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
             ...(adaptive || questionLayout === "two_stage_v3" ? { agreeNames: structuredClone(baseInput.agreeNames!) } : {}),
             ...(factored ? { repairFacts: structuredClone(baseInput.repairFacts!) } : {}),
             ...(baseInput.sharedConstruals?.length ? { sharedConstruals: structuredClone(baseInput.sharedConstruals) } : {}),
+            ...(sharedPublished === undefined ? {} : { sharedPublished }),
             ...(gate ? { repairGate: structuredClone(gate) } : {}) },
           localGrounding: { ...prepared.trace, attemptNumber }, ...(aiEnabled ? { aiPublic: { aiSeq: aiPending!.aiSeq, textSha256: aiPending!.textSha256 } } : {}) }],
         ...(aiEnabled ? { aiPublic: state.aiPublic } : {}) };

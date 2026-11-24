@@ -258,6 +258,19 @@ function enumeratesAlternatives(text: string): boolean {
   return labelled.length >= 2 || quotedReplies.length >= 2;
 }
 
+/** two_stage_v3, only on a turn that adopts a shared construal: the draft may use the rough reading as a common reference, but must not settle that the figures
+ * are one and the same, or that the details are the same. Positive statements only (a question or a denial is fine). Codes only. */
+export function findSharedOverclaims(text: string): string[] {
+  const t = normalize(text).replace(/「[^」]*」|『[^』]*』/gu, "「」");
+  const settled = (re: RegExp) => [...t.matchAll(re)].some(m => {
+    const tail = t.slice(m.index! + m[0].length);
+    return !questionTail(tail) && !/^(?:か|とは(?:言え|限|分か|わか|確認)|ではな|じゃな)/u.test(tail);
+  });
+  return settled(/同じ(?:一つ|ひとつ|1つ)の?(?:図形|形)(?:だ|です|である|と(?:分か|わか|判断|確認|特定|言え|決ま)|に(?:決ま|確定))/gu) ||
+    settled(/同一(?:の)?(?:図形|形)/gu) || settled(/(?:まで|も)同じ(?:だ|です|で|形|と(?:分か|わか|確認|判断|言え))/gu) || settled(/細部(?:は|も)?(?:全て|すべて)?同じ/gu)
+    ? ["shared_overclaim"] : [];
+}
+
 /** All publication rules for the committed primary act; codes only. */
 export function findGuardViolations(text: string, action: Action): string[] {
   return [...(action === "agree" ? [] : findAgreementClaims(text)), ...(action === "repair" ? [] : findRepairClaims(text)),
@@ -275,6 +288,7 @@ export function rewriteReasons(codes: readonly string[]): string {
     codes.includes("orientation_leak") ? "前の下書きに画面の向きに依存する語（上下左右・側・端・向き・斜め上/下/左/右・縦長・横長等）が含まれていました。非公開メモや判断の方位語をそのまま写さず、尖りの数・大小・くぼみ・四角い部分とのつながりなど回転しても変わらない特徴へ言い換えるか、同じ節で「こちらの画面では〜」と視点を明示して書き直してください。" : "",
     codes.some((code) => code.startsWith("internal_")) ? "前の下書きには内部の参照IDや作業メモの項目が含まれていました。それらを出さずに書き直してください。" : "",
     codes.includes("working_note") ? "前の下書きに、英語の作業メモや複数の返答案が混じっていました。日本語の一つの返答だけにして書き直してください。" : "",
+    codes.includes("shared_overclaim") ? "前の下書きは、同じ一つの図形に決まったことや細部まで同じであることを述べていました。共有した大まかな見立てを共通の目印として使うことだけを述べて書き直してください。" : "",
     codes.includes("name_not_shown") ? "このactionで扱う名前を、「」で囲んで発話の中に示してください。" : "",
   ].join("");
 }
