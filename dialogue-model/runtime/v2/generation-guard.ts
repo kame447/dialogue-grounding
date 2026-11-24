@@ -98,6 +98,70 @@ export function findAgreeNameMismatch(text: string, candidateName: string): stri
   return [];
 }
 
+const proposePatterns: ReadonlyArray<RegExp> = [
+  /(?:と|って)呼(?:ぶのは|んで(?:みるのは|みませんか|みますか)?|びませんか|びますか|ばない|ぶの|ぶこと|ぼうか|びましょうか)/gu,
+  /に(?:しませんか|しない|してみませんか|するのは|しようか|しましょうか)/gu,
+  /で(?:どう|いかが|いいですか|よいですか|大丈夫ですか|いきましょうか|いこうか|いってみませんか)/gu,
+  /(?:は|って|なんて|とか|も)(?:どう|いかが)/gu,
+];
+const proposeNounPatterns: ReadonlyArray<RegExp> = [
+  /(?:この|その|こちら|そちら)?(?:図形|形)?(?:の)?名前(?:は|を)[^。!?、,]{0,16}?(?:「[^」]+」|『[^』]+』)/gu,
+  /(?:「[^」]+」|『[^』]+』)(?:という|って(?:いう)?)(?:名前|呼び名|呼び方)(?!とは別)/gu,
+];
+
+/** For a `propose_name` draft: the judged candidate name must be shown, and no other quoted name
+ * may be proposed in its place. Codes only; never decides state. */
+export function findProposeNameMismatch(text: string, candidateName: string): string[] {
+  const target = normalize(candidateName);
+  if (!target) return [];
+  const nfkc = text.normalize("NFKC"), name = candidateName.normalize("NFKC").trim();
+  const codes: string[] = [];
+  if (!nfkc.includes(`「${name}」`) && !nfkc.includes(`『${name}』`)) codes.push("name_not_shown");
+  const normalized = normalize(text);
+  const clauseBefore = (index: number) => {
+    const before = normalized.slice(0, index);
+    return before.slice(Math.max(before.lastIndexOf("。"), before.lastIndexOf("!"), before.lastIndexOf("?"), before.lastIndexOf("、"), before.lastIndexOf(",")) + 1);
+  };
+  const deferred = (index: number) => /(?:後|あと|後日|今度|別の機会|保留|後回し|先送り|先延ばし)$/u.test(normalized.slice(0, index));
+  const priorFigureClause = /(?:前の|さっきの|先ほどの|以前の|別の|他の)(?:図形|形|名前|呼び名)/u;
+  const differs = (quoted: string[]) => quoted.length > 0 && quoted.at(-1) !== target;
+  let mismatch = false;
+  for (const pattern of proposePatterns) {
+    pattern.lastIndex = 0;
+    for (const match of normalized.matchAll(pattern)) {
+      if (pattern.source.startsWith("に") && deferred(match.index!)) continue;
+      const clause = clauseBefore(match.index!);
+      if (priorFigureClause.test(clause)) continue;
+      if (differs(quotedNames(clause))) { mismatch = true; break; }
+    }
+    if (mismatch) break;
+  }
+  if (!mismatch) {
+    for (const pattern of proposeNounPatterns) {
+      pattern.lastIndex = 0;
+      for (const match of normalized.matchAll(pattern)) {
+        const clause = clauseBefore(match.index! + match[0].length);
+        if (priorFigureClause.test(clause)) continue;
+        if (differs(quotedNames(match[0]))) { mismatch = true; break; }
+      }
+      if (mismatch) break;
+    }
+  }
+  if (!mismatch) {
+    for (const pattern of copulaNaming) {
+      pattern.lastIndex = 0;
+      for (const match of normalized.matchAll(pattern)) {
+        const clause = clauseBefore(match.index! + match[0].length);
+        if (priorFigureClause.test(clause)) continue;
+        if (differs(quotedNames(match[0]))) { mismatch = true; break; }
+      }
+      if (mismatch) break;
+    }
+  }
+  if (mismatch) codes.push("name_mismatch");
+  return codes;
+}
+
 // First-person self-correction of the AI's own earlier statement only: speaker
 // performatives (訂正します), past self-error verbs (取り違えていました), or an error
 // noun owned by the speaker (私の間違いでした). A judgment about the partner's guess
@@ -183,7 +247,7 @@ export function rewriteReasons(codes: readonly string[]): string {
   return [
     codes.some((code) => AGREEMENT_CODES.has(code)) ? "前の下書きは名称の決定・合意を表していました。決定・合意を表明せず、このactionの範囲で書き直してください。" : "",
     codes.includes("self_repair") ? "前の下書きは自分の取り違え・訂正・取り消しを表していました。このactionでは訂正を表明せず、このactionの範囲で書き直してください。" : "",
-    codes.includes("name_mismatch") ? "前の下書きは、このactionで扱う名前とは別の名前を決定・合意として述べていました。このactionで扱う名前だけを「」で示して書き直してください。" : "",
+    codes.includes("name_mismatch") ? "前の下書きは、このactionで扱う名前とは別の名前を提案・決定・合意として述べていました。このactionで扱う名前だけを「」で示して書き直してください。" : "",
     codes.includes("unsolicited_deferral") ? "前の下書きは未解決の図形について保留や先送りを提案していました。保留・先送りを提案せず、このactionの範囲で書き直してください。" : "",
     codes.includes("orientation_leak") ? "前の下書きに画面の向きに依存する語（上下左右・上端・下端・右向き等）が含まれていました。相手の画面では図形が回転しているため、上下左右を使わず、尖りの数・大小・くぼみ・四角い部分とのつながりなど回転しても変わらない特徴だけで書き直してください。" : "",
     codes.some((code) => code.startsWith("internal_")) ? "前の下書きには内部の参照IDや作業メモの項目が含まれていました。それらを出さずに書き直してください。" : "",

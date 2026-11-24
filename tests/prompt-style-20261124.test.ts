@@ -8,7 +8,7 @@ import type { JevDecisionInput } from '../dialogue-model/runtime/decision/contra
 import { interventionForStrategy, BYPASS_ACCEPTANCE_V1_TABLE_SHA256 } from '../dialogue-model/runtime/decision/bypass-acceptance.ts';
 import { createDialogueV2 } from '../dialogue-model/runtime/v2/dialogue-v2.mjs';
 import { createJevDecisionClient } from '../dialogue-model/runtime/decision/jev-decision.ts';
-import { findGuardViolations, findOrientationLeaks } from '../dialogue-model/runtime/v2/generation-guard.ts';
+import { findGuardViolations, findOrientationLeaks, findProposeNameMismatch, rewriteReasons } from '../dialogue-model/runtime/v2/generation-guard.ts';
 import { findLocalPublicationViolations } from '../dialogue-model/runtime/v2/local-grounding-turn.ts';
 import { anchors as s4Anchors, image as s4Image, memo as s4Memo } from './support/s4-integration/harness.ts';
 
@@ -147,5 +147,110 @@ test('runtime two_stage_v3: both strategies deliver identical prompts across 5 c
     assert.doesNotMatch(systemText, /親しみやすい|受け止めるだけ/);
     assert.match(systemText, /敬語には自然な敬語で、くだけた口調には自然なくだけた口調/);
     assert.match(systemText, /直接答えてよい/);
+  }
+});
+
+test('propose_name guard rejects both omitting the chosen name and substituting another name', () => {
+  // Exact synthetic pattern observed live on 58a9511 T46->U47 (ledger name omitted + different name proposed)
+  assert.deepEqual(
+    findProposeNameMismatch('V字の切れ込みと、斜めの部分に四角い突起がある形ですね。「キリン」と呼ぶのはどうでしょう。', '折れ曲がった帯が上下に戻る形という見立て'),
+    ['name_not_shown', 'name_mismatch'],
+  );
+  // Omitting candidateName alone
+  assert.deepEqual(findProposeNameMismatch('ええ、その形のことです。', '舟'), ['name_not_shown']);
+  // Including candidateName in passing while proposing a DIFFERENT name
+  for (const draft of [
+    '「舟」にも見えますが、「キリン」と呼ぶのはどうでしょう？',
+    '「舟」に見えますが、「鳥」はどうですか？',
+    '「舟」に見えますが、「鳥」にしませんか？',
+    '「舟」に見えますが、「鳥」でどうでしょう？',
+    '「舟」に見えますが、名前は「鳥」がいいですか？',
+    '「舟」に見えますが、「鳥」という名前はどうでしょう？',
+    '「舟」に見えますが、「鳥」なんてどう？',
+    '「舟」に見えますが、「鳥」って呼ぶのはどうですか？',
+    '「舟」というより「鳥」と呼ぶのはどうでしょう？',
+    '「舟」ですね。この形は「鳥」ですか？',
+  ]) {
+    assert.deepEqual(findProposeNameMismatch(draft, '舟'), ['name_mismatch'], draft);
+  }
+  // Valid propose_name drafts (including prior-figure contrast and negation correction)
+  for (const ok of [
+    '「舟」と呼ぶのはどうでしょう？',
+    '細長い形ですね。「舟」にしませんか？',
+    '「舟」はどうでしょう？',
+    'さっきの「犬」とは別の形ですね。「舟」と呼ぶのはどうでしょう？',
+    'さっきの「犬」という名前とは別に、「舟」と呼ぶのはどうでしょう？',
+    '相手が言った「丸い形」のことなら、「舟」と呼ぶのはどうでしょう？',
+    '「鳥」ではなく「舟」と呼ぶのはどうでしょう？',
+    '「横長の犬」と呼ぶのはどうでしょう？',
+  ]) {
+    assert.deepEqual(findProposeNameMismatch(ok, ok.includes('横長の犬') ? '横長の犬' : '舟'), [], ok);
+  }
+  assert.match(rewriteReasons(['name_mismatch']), /別の名前.*提案/);
+});
+
+test('runtime two_stage_v3 propose_name rejects omitted or substituted names across both strategies and retries to match ledger', async () => {
+  const cases = [
+    { label: 'omitted_name', badDraft: 'ええ、その形のことです。', expectedViolations: ['name_not_shown'] },
+    { label: 'substituted_name_with_omission', badDraft: 'V字の切れ込みと四角い突起がある形ですね。「キリン」と呼ぶのはどうでしょう。', expectedViolations: ['name_not_shown', 'name_mismatch'] },
+    { label: 'substituted_name_mentioning_chosen', badDraft: '「control-name」にも見えますが、「キリン」と呼ぶのはどうでしょう？', expectedViolations: ['name_mismatch'] },
+  ];
+  for (const c of cases) {
+    for (const strategy of ['repair-first', 'bypass-enabled'] as const) {
+      const makeDialogue = (replies: string[]) => {
+        let genIdx = 0;
+        const jevDecision = createJevDecisionClient({
+          enabled: true, questionLayout: 'two_stage_v3', readKey: async () => 'sk-or-SYNTHETIC-propose-name-guard-key',
+          fetchImpl: async (_url: string, init?: RequestInit) => {
+            const body = JSON.parse(String(init?.body ?? '{}'));
+            const answers: Record<string, { type: 'choice'; choice: string; probabilities: Record<string, number> }> = {};
+            for (const [k, q] of Object.entries(body.questions as Record<string, { criteria: Record<string, string> }>)) {
+              const keys = Object.keys(q.criteria);
+              const choice = k === 'action' ? 'propose_name' : k === 'target' ? 'figure_0' : keys[0];
+              answers[k] = { type: 'choice', choice, probabilities: Object.fromEntries(keys.map(opt => [opt, opt === choice ? 1 : 0])) };
+            }
+            return new Response(JSON.stringify({ id: 'resp-p', model: body.model, answers, usage: { cost: 0 } }), { status: 200, headers: { 'content-type': 'application/json' } });
+          },
+        })!;
+        const traces: any[] = [];
+        const dialogue = createDialogueV2({
+          client: {
+            async complete(_messages: unknown[], options?: { phase?: string }) {
+              if (options?.phase === 'generation') return { text: replies[genIdx++] ?? replies.at(-1)! };
+              return { text: JSON.stringify({ segments: [] }) };
+            },
+          },
+          strategy, image: s4Image, anchors: s4Anchors, referenceMemory: true, decisionMode: 'jev', questionLayout: 'two_stage_v3',
+          technicalTrial: { version: 'adaptive_repair_v3' },
+          interventionPolicy: { version: 'bypass_acceptance_v1', tableSha256: BYPASS_ACCEPTANCE_V1_TABLE_SHA256 },
+          decisionTimeoutMs: 5000,
+          observer: { async observeAll() { return s4Memo() as unknown as import('../dialogue-model/runtime/observation/contract.ts').ObservationMemo; }, async reobserve() { throw new Error('unused'); } },
+          jevDecision,
+          onJevTurnTrace: (t: any) => { traces.push(t); },
+          localGrounding: { classifier: { async classify() { return []; } } },
+        } as unknown as Parameters<typeof createDialogueV2>[0]);
+        return { dialogue, traces };
+      };
+      const events = [
+        { id: 'e1', seq: 1, speaker: 'ai', text: 'まず、どの図形から話しましょうか？', nonReferential: true },
+        { id: 'e2', seq: 2, speaker: 'human', text: 'その形、どんな名前にしましょうか？' },
+      ];
+      // 1) First draft violates -> retry shows judged candidateName -> succeeds and matches ledger
+      const okRun = makeDialogue([c.badDraft, '「control-name」と呼ぶのはどうでしょう？']);
+      const init1 = await okRun.dialogue.initializePrivateState!();
+      const res = await okRun.dialogue.runAiTurn({ events, privateState: init1, lastEventId: 'e2', requestSeq: 1 });
+      assert.equal(res.text, '「control-name」と呼ぶのはどうでしょう？', `${strategy}/${c.label}`);
+      assert.deepEqual(res.privateState.judgments.at(-1).generationGuard, { violations: c.expectedViolations, regenerated: true, fallback: false }, `${strategy}/${c.label}`);
+      assert.equal(res.privateState.ledger[s4Anchors[0].id].name, 'control-name');
+      // 2) Both drafts violate -> fails closed with unsafe_generation (never publishes mismatched name)
+      const failRun = makeDialogue([c.badDraft, c.badDraft]);
+      const init2 = await failRun.dialogue.initializePrivateState!();
+      await assert.rejects(
+        () => failRun.dialogue.runAiTurn({ events, privateState: init2, lastEventId: 'e2', requestSeq: 1 }),
+        (err: any) => err?.code === 'unsafe_generation',
+        `${strategy}/${c.label} fail closed`,
+      );
+      assert.deepEqual(failRun.traces.at(-1)?.generationGuard, { violations: c.expectedViolations, regenerated: true, fallback: false });
+    }
   }
 });
