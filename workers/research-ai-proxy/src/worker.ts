@@ -1,6 +1,6 @@
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { handleRequest } from './index.mjs';
-import { configuredParticipantPin, participantChoices } from './participant-transport.ts';
+import { configuredParticipantPin, participantChoices, participantUsageChoices } from './participant-transport.ts';
 
 interface ProxyEnvironment {
   RESEARCH_PROXY_TOKEN: string;
@@ -21,7 +21,7 @@ interface InternalResult {
 }
 
 // A module function, not a method: every public method of the entrypoint is callable over RPC.
-async function forward(env: ProxyEnvironment, path: '/v1/chat/completions' | '/v1/grounding-evidence', payload: unknown, expectedModel: string | null = null): Promise<InternalResult> {
+async function forward(env: ProxyEnvironment, path: '/v1/chat/completions' | '/v1/grounding-evidence', payload: unknown, expectedModel: string | null = null, usageOnly = false): Promise<InternalResult> {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return { status: 400, data: { error: 'invalid_request' } };
   }
@@ -37,7 +37,7 @@ async function forward(env: ProxyEnvironment, path: '/v1/chat/completions' | '/v
     },
     body,
   });
-  const result = await handleRequest(request, env, globalThis.fetch, expectedModel);
+  const result = await handleRequest(request, env, globalThis.fetch, expectedModel, usageOnly);
   return { status: result.status, data: await result.json() };
 }
 
@@ -57,6 +57,16 @@ export class InternalResearchProxy extends WorkerEntrypoint<ProxyEnvironment> {
   }
 }
 
+async function participantChat(env: ProxyEnvironment, payload: unknown, expectedModel: string, usageOnly: boolean): Promise<InternalResult> {
+  const pin = configuredParticipantPin(env);
+  if (!pin) return { status: 503, data: { error: 'service_unconfigured' } };
+  const purpose = payload && typeof payload === 'object' && Object.hasOwn(payload, 'purpose')
+    ? (payload as { purpose: unknown }).purpose : undefined;
+  const expected = purpose === 'dialogue_turn' ? pin.lunaModelId : purpose === 'visual_observation' ? pin.terraModelId : null;
+  if (expected === null || expected !== expectedModel) return { status: 409, data: { error: 'model_mismatch' } };
+  return forward(env, '/v1/chat/completions', payload, expected, usageOnly);
+}
+
 /** Named capability for pinned participant trials only. */
 export class InternalParticipantProxy extends WorkerEntrypoint<ProxyEnvironment> {
   async participantPolicy() {
@@ -64,13 +74,19 @@ export class InternalParticipantProxy extends WorkerEntrypoint<ProxyEnvironment>
   }
 
   async participantChat(payload: unknown, expectedModel: string): Promise<InternalResult> {
-    const pin = configuredParticipantPin(this.env);
-    if (!pin) return { status: 503, data: { error: 'service_unconfigured' } };
-    const purpose = payload && typeof payload === 'object' && Object.hasOwn(payload, 'purpose')
-      ? (payload as { purpose: unknown }).purpose : undefined;
-    const expected = purpose === 'dialogue_turn' ? pin.lunaModelId : purpose === 'visual_observation' ? pin.terraModelId : null;
-    if (expected === null || expected !== expectedModel) return { status: 409, data: { error: 'model_mismatch' } };
-    return forward(this.env, '/v1/chat/completions', payload, expected);
+    return participantChat(this.env, payload, expectedModel, false);
+  }
+
+  async participantUsagePolicy() {
+    return configuredParticipantPin(this.env);
+  }
+
+  async participantUsageChat(payload: unknown, expectedModel: string): Promise<InternalResult> {
+    return participantChat(this.env, payload, expectedModel, true);
+  }
+
+  async participantUsageChoices(payload: unknown, expectedModel: string): Promise<InternalResult> {
+    return participantUsageChoices(this.env, payload, expectedModel);
   }
 
   async participantChoices(payload: unknown, expectedModel: string): Promise<InternalResult> {

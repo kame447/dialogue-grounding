@@ -124,7 +124,7 @@ function validatedPayload(body, selectedModel, env) {
   return { model: selectedModel, messages, max_completion_tokens: requested };
 }
 
-function sanitizeResult(data, model) {
+function sanitizeResult(data, model, usageOnly) {
   const choice = data?.choices?.[0];
   const content = choice?.message?.content;
   if (!(typeof content === "string" && content.trim()) &&
@@ -143,6 +143,7 @@ function sanitizeResult(data, model) {
         data.usage.prompt_tokens : null,
       completion_tokens: Number.isFinite(data?.usage?.completion_tokens) ?
         data.usage.completion_tokens : null,
+      ...(usageOnly ? { cost: Number.isFinite(data?.usage?.cost) && data.usage.cost >= 0 ? data.usage.cost : null } : {}),
     },
   };
 }
@@ -204,7 +205,7 @@ async function handleDecisions(request, env, fetchImpl, route = DECISION_ROUTE) 
   }
 }
 
-export async function handleRequest(request, env, fetchImpl = globalThis.fetch, expectedModel = /** @type {string|null} */ (null)) {
+export async function handleRequest(request, env, fetchImpl = globalThis.fetch, expectedModel = /** @type {string|null} */ (null), usageOnly = false) {
   const pathname = new URL(request.url).pathname;
   if (!["/health", "/v1/chat/completions", "/v1/model-policy", "/v1/decisions", "/v1/decision-policy", "/v1/grounding-evidence", "/v1/grounding-policy"].includes(pathname)) {
     return reply(404, { error: "not_found" });
@@ -313,7 +314,7 @@ export async function handleRequest(request, env, fetchImpl = globalThis.fetch, 
           (data.model.startsWith(selected.model + "-") && /^\d{4}-\d{2}-\d{2}$|^\d{8}$/.test(data.model.slice(selected.model.length + 1)))))) {
       return reply(502, { error: "invalid_upstream_model" });
     }
-    const result = sanitizeResult(data, selected.model);
+    const result = sanitizeResult(data, selected.model, expectedModel !== null && usageOnly);
     if (result && expectedModel !== null) {
       const { message, finish_reason } = result.choices[0];
       if (Array.isArray(message.content)) {
