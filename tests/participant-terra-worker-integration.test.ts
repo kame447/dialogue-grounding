@@ -5,7 +5,7 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { MEMO_LOCAL_EXTRACTION_INSTRUCTIONS } from '../dialogue-model/runtime/local-grounding/extract.ts';
 import { MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS } from '../dialogue-model/runtime/local-grounding/extract-ai.ts';
-import { canonicalReceptionProtocolV2, canonicalReceptionProtocolV3, receptionProtocolSha256, validateReceptionPlan } from '../dialogue-model/runtime/v2/reception.ts';
+import { canonicalReceptionProtocolV2, canonicalReceptionProtocolV3, receptionProtocolSha256, receptionSummary, validateReceptionPlan } from '../dialogue-model/runtime/v2/reception.ts';
 import { createTrialV2, modelView } from '../dialogue-model/runtime/stimuli/scatter-v2.mjs';
 import { FIGURE_SETS } from '../dialogue-model/runtime/stimuli/figure-bank.ts';
 import { validateParticipantModelPin } from '../dialogue-model/runtime/v2/participant-model-pin.ts';
@@ -23,8 +23,10 @@ registerHooks({ resolve(name, context, next) {
   }
   return next(name, context);
 } });
-const { TangramSession }: any = await import(new URL('../workers/tangram-experiment/src/index.ts', import.meta.url).href);
+const { TangramSession, default: participantWorker }: any = await import(new URL('../workers/tangram-experiment/src/index.ts', import.meta.url).href);
 
+const { InternalParticipantProxy }: any = await import(new URL('../workers/research-ai-proxy/src/worker.ts', import.meta.url).href);
+const adminToken = 'synthetic-admin-token-for-offline-test-only';
 const pin = validateParticipantModelPin({
   schemaVersion: 'participant_model_pin_v1', terraModelId: 'gpt-6.1-terra-2026-11-01',
   lunaModelId: 'gpt-6-luna-2026-10-01', jevModelId: 'typesafe/jev-1.14-20261014',
@@ -40,6 +42,8 @@ const protocol = {
   allowedOrders: [['bypass-enabled', 'repair-first']], seedPolicy: 'shared', referenceMemory: true,
   betweenTrials: 'none', receptionNumberFormat: 'daily_seq3', rotationMode: 'relative_pm90',
 };
+const figureBankProtocol = { ...protocol, schemaVersion: 'reception_protocol_v3',
+  figureSelection: { mode: 'preset', setId: 'bank-set-b' }, figureSetPolicy: 'shared' };
 const approvedLimits = { lunaCalls: 60, lunaTokens: 300_000, lunaPosts: 60, jevPosts: 60, jevUsd: 0.05 };
 const chatResponse = (model: unknown, content: string) => ({
   model, choices: [{ message: { content }, finish_reason: 'stop' }], usage: { prompt_tokens: 5, completion_tokens: 3 },
@@ -86,7 +90,8 @@ function harness(enabled = true, selectedProtocol: typeof protocol & {
   const sha256 = receptionProtocolSha256(canonical);
   const displayed = { protocolId: selectedProtocol.protocolId, revision: selectedProtocol.revision, sha256 };
   const storage = memory(), calls: Array<{ kind: string; expected: string; body: any }> = [];
-  const controlled: { policy: unknown; terra: unknown; luna: unknown; jev: unknown; legacyCalls: number; observe: boolean; mixedUsage: boolean; holdChoice?: () => Promise<void> } =
+  const controlled: { policy: unknown; terra: unknown; luna: unknown; jev: unknown; legacyCalls: number; observe: boolean; mixedUsage: boolean; invalidTerra?: boolean; rejectJev?: boolean;
+    usageChat?: (body: any, expected: string) => Promise<any>; holdChoice?: () => Promise<void> } =
     { policy: { ...pin }, terra: pin.terraModelId, luna: pin.lunaModelId, jev: pin.jevModelId, legacyCalls: 0, observe: false, mixedUsage: false };
   let slots: string[] = [];
   const env = {
@@ -107,6 +112,9 @@ function harness(enabled = true, selectedProtocol: typeof protocol & {
         };
         if (body.purpose === 'visual_observation') {
           const args = JSON.parse(body.messages[1].content);
+          if (controlled.invalidTerra && !args.figureIds) return { status: 200, data: {
+            ...chatResponse(controlled.terra, '{}'), usage: { cost: 0.021, prompt_tokens: 17, completion_tokens: 6 },
+          } };
           if (args.figureIds) {
             return mock(controlled.terra, JSON.stringify({ figures: args.figureIds.map((figureId: string) =>
               ({ figureId, supports: ['三角を含む'], contradicts: [], unknown: [] })) }));
@@ -121,7 +129,10 @@ function harness(enabled = true, selectedProtocol: typeof protocol & {
         return mock(controlled.luna, text);
       },
       async participantUsagePolicy() { return this.participantPolicy(); },
-      async participantUsageChat(body: any, expected: string) { return this.participantChat(body, expected); },
+      async participantUsageChat(body: any, expected: string) {
+        const overridden = await controlled.usageChat?.(body, expected);
+        return overridden ?? this.participantChat(body, expected);
+      },
       async participantUsageChoices(body: { state: string; questions: Choices }, expected: string) {
         return this.participantChoices(body, expected, true);
       },
@@ -130,6 +141,11 @@ function harness(enabled = true, selectedProtocol: typeof protocol & {
         await controlled.holdChoice?.();
         const observe = controlled.observe && Object.hasOwn(body.questions.action?.criteria ?? {}, 'request_observation');
         if (observe) controlled.observe = false;
+        if (controlled.rejectJev && body.questions.action) {
+          return participantUsageChoices(settings, body, expected, async () => Response.json({
+            model: pin.jevModelId, answers: {}, usage: { cost: 0.012, input_tokens: 18, output_tokens: 5 },
+          }));
+        }
         const data = { id: 'gen-synthetic', model: controlled.jev, usage: controlled.mixedUsage ? { cost: body.questions.action ? 0.07 : null, input_tokens: 5, output_tokens: 3 } : { cost: 0 },
           answers: answers(body.questions, observe) };
         // Exercise the proxy's real validation of each positive Jev stage.
@@ -153,6 +169,23 @@ function harness(enabled = true, selectedProtocol: typeof protocol & {
     storage, calls, controlled, env, request,
     evict() { session = makeSession(); },
     adminRecord(recordId: string) { return session.adminRecord(recordId); },
+    admin(path: string, authenticated = true) {
+      const index = {
+        async getReception() { return receptionSummary(await storage.get('reception:v1')); },
+        async listReceptions() { return [await this.getReception()]; },
+        async readReceptionSettings() {
+          const savedAt = '2026-01-01T00:00:00.000Z';
+          return { mode: { value: 'on', revision: 1, savedAt }, protocol: { protocol: selectedProtocol, revision: selectedProtocol.revision, sha256, savedAt } };
+        },
+      };
+      return participantWorker.fetch(new Request('https://session.invalid' + path, { headers:
+        authenticated ? { Authorization: 'Bearer ' + adminToken } : { Cookie: 'tangram_session=' + 'c'.repeat(64) },
+      }), { ...env,
+        ADMIN_TOKEN: adminToken, ADMIN_RATE_LIMIT: { async limit() { return { success: true }; } },
+        ADMIN_INDEX: { idFromName: () => 'index', get: () => index },
+        NAMING_SESSIONS: { idFromString: () => 'owner', get: () => session },
+      }) as Promise<Response>;
+    },
     async receive() {
       assert.equal(await session.registerBaseOwner(), true);
       const result = await request('reception', undefined, 'POST');
@@ -176,6 +209,152 @@ async function jsonOk(response: Response) {
   assert.ok(response.status === 200 || response.status === 202, JSON.stringify(result));
   return result;
 }
+
+test('an output-limited Luna answer remains unpublished and its known usage is counted once', async t => {
+  const h = harness();
+  const proxy = new InternalParticipantProxy({}, settings);
+  let outputs = 0;
+  t.mock.method(globalThis, 'fetch', async () => {
+    outputs++;
+    return Response.json({ model: pin.lunaModelId, choices: [{ message: { content: '' }, finish_reason: 'length' }],
+      usage: { cost: 0.037, prompt_tokens: 70, completion_tokens: 24 }, raw: 'RAW_CANARY' });
+  });
+  h.controlled.usageChat = async (body, expected) => {
+    const first = body.messages[0].content;
+    if (body.purpose === 'dialogue_turn' && first !== MEMO_LOCAL_EXTRACTION_INSTRUCTIONS && first !== MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS) {
+      return proxy.participantUsageChat(body, expected);
+    }
+  };
+  await h.receive();
+  await h.approve();
+  const { trial } = await jsonOk(await h.start());
+  await jsonOk(await h.request('message', { expectedRecordId: trial.sessionId, text: '合成の手掛かりです。' }));
+  await h.idle();
+  const record = await h.adminRecord(trial.sessionId);
+  const meter = record.jevLedger.phases.luna.generation;
+  assert.deepEqual([outputs, meter.posts, meter.knownUsd, meter.inputTokens, meter.outputTokens], [1, 1, 0.037, 70, 24]);
+  assert.deepEqual([meter.unknownPosts, meter.missingCostPosts, meter.missingInputTokenPosts, meter.missingOutputTokenPosts], [0, 0, 0, 0]);
+  assert.equal(record.jevLedger.latest.luna.status, 'failed');
+  assert.ok(record.requests.some((request: any) => request.httpStatus === 422));
+  assert.equal(record.queueState.errorCode, 'ai_unavailable');
+  assert.equal(record.events.filter((event: any) => event.speaker === 'ai').length, 1);
+  h.evict();
+  const state = await jsonOk(await h.request('state'));
+  assert.doesNotMatch(JSON.stringify(state), /0\.037|RAW_CANARY|verifiedUsage|knownUsd|prompt_tokens/u);
+  assert.deepEqual((await h.adminRecord(trial.sessionId)).jevLedger, record.jevLedger);
+  assert.equal(outputs, 1);
+});
+
+test('a Jev response without answers is rejected and its known usage remains in the action ledger', async () => {
+  const h = harness();
+  h.controlled.rejectJev = true;
+  await h.receive();
+  await h.approve();
+  const { trial } = await jsonOk(await h.start());
+  await jsonOk(await h.request('message', { expectedRecordId: trial.sessionId, text: '合成の手掛かりです。' }));
+  await h.idle();
+  const record = await h.adminRecord(trial.sessionId);
+  const meter = record.jevLedger.phases.jev.action_target;
+  assert.deepEqual([meter.posts, meter.knownUsd, meter.inputTokens, meter.outputTokens], [1, 0.012, 18, 5]);
+  assert.deepEqual([meter.unknownPosts, meter.missingCostPosts, meter.missingInputTokenPosts, meter.missingOutputTokenPosts], [0, 0, 0, 0]);
+  assert.equal(record.jevLedger.latest.jev.status, 'failed');
+  assert.equal(record.queueState.errorCode, 'ai_unavailable');
+  assert.equal(record.events.filter((event: any) => event.speaker === 'ai').length, 1);
+});
+
+for (const selected of [protocol, figureBankProtocol]) test(
+  `${selected.schemaVersion} exports a failed first observation by reception and assignment after Worker recreation`, async () => {
+  const h = harness(true, selected);
+  h.controlled.invalidTerra = true;
+  await h.receive();
+  const { receptionId, plan } = await h.approve();
+  const bank = selected.schemaVersion === 'reception_protocol_v3';
+  assert.equal(plan.schemaVersion, bank ? 'reception_plan_v3' : 'reception_plan_v2');
+  if (bank) assert.deepEqual(plan.trials[0].figureSelection.figureIds, FIGURE_SETS['bank-set-b']);
+  const error = await h.start();
+  assert.equal(error.status, 409);
+  assert.deepEqual(await error.json(), { error: 'trial_unavailable' });
+  const owner = await h.storage.get('base:owner:v1');
+  const entry = owner.admissions[owner.activeKey];
+  const assignmentId = entry.assignment.assignmentId;
+  assert.equal(entry.status, 'failed');
+  assert.equal(entry.errorCode, 'initialization_failed');
+  assert.equal(entry.record, null);
+  assert.deepEqual(await h.storage.get('ledger'), {});
+  assert.deepEqual(h.calls.map(call => call.kind), ['visual_observation']);
+  const path = '/admin/reception/' + receptionId + '/usage.json';
+  h.evict();
+  const denied = await h.admin(path, false);
+  assert.equal(denied.status, 401);
+  const unknown = await h.admin('/admin/reception/74c43c3b-0b83-4622-aa85-62c760f13ebb/usage.json');
+  assert.equal(unknown.status, 404);
+  const listing = await h.admin('/admin/receptions');
+  assert.equal(listing.status, 200);
+  const html = await listing.text();
+  assert.ok(html.includes(`href="${path}"`));
+  assert.ok(html.includes(bank ? 'bank-set-b' : 'legacy-v1'));
+  assert.doesNotMatch(html, /knownUsd|initialization_failed/u);
+  const exported = await h.admin(path);
+  assert.equal(exported.headers.get('Cache-Control'), 'no-store');
+  assert.match(exported.headers.get('Content-Disposition') ?? '', /attachment/u);
+  const snapshot = await jsonOk(exported);
+  assert.equal(snapshot.receptionId, receptionId);
+  const [failed] = snapshot.failedStarts;
+  assert.deepEqual(snapshot.failedStarts.map(({ usage: _usage, ...value }: any) => value),
+    [{ assignmentId, trialIndex: 0, errorCode: 'initialization_failed' }]);
+  assert.deepEqual(failed.usage, await h.storage.get('participant-usage:' + assignmentId));
+  const meter = failed.usage.phases.terra.initial_observation;
+  assert.deepEqual([meter.posts, meter.knownUsd, meter.inputTokens, meter.outputTokens, meter.missingCostPosts], [1, 0.021, 17, 6, 0]);
+  assert.equal((await h.request('state')).status, 409);
+  assert.equal((await h.start()).status, 409);
+  assert.equal(h.calls.length, 1);
+});
+
+test('a reserved initial observation can settle after its assignment is marked interrupted', async () => {
+  const h = harness();
+  let signalStarted!: () => void;
+  let reply!: (value: unknown) => void;
+  const started = new Promise<void>(resolve => { signalStarted = resolve; });
+  const upstream = new Promise(resolve => { reply = resolve; });
+  let sends = 0;
+  h.controlled.usageChat = async () => { sends++; signalStarted(); return upstream; };
+  await h.receive();
+  const { receptionId } = await h.approve();
+  const pending = h.start();
+  await started;
+  h.evict();
+  assert.equal((await h.request('state')).status, 409);
+  const path = '/admin/reception/' + receptionId + '/usage.json';
+  const before = (await jsonOk(await h.admin(path))).failedStarts[0];
+  assert.equal(before.errorCode, 'start_interrupted');
+  assert.equal(before.usage.latest.terra.status, 'reserved');
+  reply({ status: 200, data: { ...chatResponse(pin.terraModelId, '{}'), usage: {
+    cost: 0.021, prompt_tokens: 17, completion_tokens: 6,
+  } } });
+  assert.equal((await pending).status, 409);
+  const after = (await jsonOk(await h.admin(path))).failedStarts[0];
+  assert.equal(after.assignmentId, before.assignmentId);
+  assert.equal(after.errorCode, before.errorCode);
+  assert.equal(after.usage.latest.terra.costUsd, 0.021);
+  assert.equal(after.usage.phases.terra.initial_observation.posts, 1);
+  assert.deepEqual(await h.storage.get('ledger'), {});
+  assert.equal(sends, 1);
+});
+
+test('a failed start before reservation has no usage journal in the reception export', async () => {
+  const h = harness();
+  await h.receive();
+  const { receptionId } = await h.approve();
+  h.controlled.policy = null;
+  assert.equal((await h.start()).status, 409);
+  h.evict();
+  const snapshot = await jsonOk(await h.admin('/admin/reception/' + receptionId + '/usage.json'));
+  const { assignmentId, trialIndex, errorCode, usage } = snapshot.failedStarts[0];
+  assert.equal(snapshot.failedStarts.length, 1);
+  assert.match(assignmentId, /^[0-9a-f-]+$/u);
+  assert.deepEqual({ trialIndex, errorCode, usage }, { trialIndex: 0, errorCode: 'initialization_failed', usage: null });
+  assert.equal(h.calls.length, 0);
+});
 
 test('Worker approval persists one private pin, both trial conditions use it, and eviction restores the same record', async () => {
   const h = harness();
@@ -265,8 +444,7 @@ test('Worker approval persists one private pin, both trial conditions use it, an
 
 for (const profile of [undefined, PARTICIPANT_PRODUCTION_PROFILE]) test(
   `v3 figure-bank and ${profile ? 'production usage' : 'saved limits'} remain fixed across conditions and restore`, async () => {
-  const h = harness(true, { ...protocol, schemaVersion: 'reception_protocol_v3',
-    figureSelection: { mode: 'preset', setId: 'bank-set-b' }, figureSetPolicy: 'shared' });
+  const h = harness(true, figureBankProtocol);
   h.env.PARTICIPANT_TERRA_PROFILE = profile;
   await h.receive();
   const approved = await h.approve();

@@ -285,6 +285,16 @@ export async function handleAdmin(request: Request, deps: AdminDeps): Promise<Re
     if (!sameOrigin(request, url)) return plain(403, 'Forbidden');
     return receptionMutation(request, deps.receptions!, receptionPath[1], receptionPath[2]);
   }
+  const failedUsagePath = url.pathname.match(/^\/admin\/reception\/([^/]+)\/usage\.json$/u);
+  if (failedUsagePath) {
+    const id = failedUsagePath[1];
+    if (!deps.receptions?.failedStartUsage || !RECORD_ID.test(id)) return notFound();
+    try {
+      const usage = await deps.receptions.failedStartUsage(id);
+      return usage === null ? notFound() : respond(200, JSON.stringify(usage, null, 2), 'application/json; charset=utf-8',
+        { 'Content-Disposition': `attachment; filename="tangram-reception-usage-${id}.json"` });
+    } catch { return receptionError(503, 'reception_unavailable'); }
+  }
   if (deps.receptions && url.pathname === '/admin/receptions') {
     try {
       // Version first, then content: a change in between makes the next version check differ, so none is missed.

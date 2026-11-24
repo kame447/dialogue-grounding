@@ -67,3 +67,28 @@ test('missing cost is distinct from failed POST and an already-aborted call send
   assert.equal(view.phases.jev.action_target.knownUsd, 0);
   assert.equal(view.halted, false);
 });
+
+test('402, 429 and timeout remain unobserved while a verified rejected reply settles once', async () => {
+  const store = memory();
+  const ledger = await ParticipantUsageLedger.open(store, 'synthetic-assignment', pin);
+  const body = { questions: { action: {} } };
+  const verifiedUsage = { model: pin.jevModelId, costUsd: 0.012, inputTokens: 18, outputTokens: 5 };
+  for (const status of [402, 429, 504, 502]) {
+    const result = await ledger.dispatch('jev', async () => ({
+      status, data: { error: 'upstream_error', usage: { cost: 99 } },
+      ...(status === 502 ? { verifiedUsage: { ...verifiedUsage, model: pin.lunaModelId } } : { verifiedUsage }),
+    }), body);
+    assert.equal(result.status, status);
+  }
+  const unobserved = ledger.snapshot().phases.jev.action_target;
+  assert.deepEqual([unobserved.posts, unobserved.unknownPosts, unobserved.missingCostPosts, unobserved.knownUsd], [4, 4, 4, 0]);
+
+  await ledger.dispatch('jev', async () => ({ status: 502, data: { error: 'invalid_upstream_response' }, verifiedUsage }), body);
+  const saved = ledger.snapshot();
+  const restored = await ParticipantUsageLedger.open(store, 'synthetic-assignment', pin, saved);
+  const measured = restored.snapshot().phases.jev.action_target;
+  assert.deepEqual([measured.posts, measured.unknownPosts, measured.missingCostPosts, measured.knownUsd,
+    measured.inputTokens, measured.outputTokens], [5, 4, 4, 0.012, 18, 5]);
+  assert.equal(restored.snapshot().latest.jev?.model, pin.jevModelId);
+  assert.equal(restored.halted, false);
+});

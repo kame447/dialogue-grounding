@@ -1,4 +1,4 @@
-import { ParticipantUsageLedger } from '../../../dialogue-model/runtime/web/participant-usage.ts';
+import { ParticipantUsageLedger, type ParticipantDispatchResult } from '../../../dialogue-model/runtime/web/participant-usage.ts';
 import { PARTICIPANT_USAGE_ONLY } from '../../../dialogue-model/runtime/web/participant-usage-policy.ts';
 import { MODEL_CONTRACT_V2 } from '../../../dialogue-model/runtime/model-identity-contract.ts';
 import { createChatClient } from '../../../dialogue-model/runtime/client.mjs';
@@ -13,8 +13,7 @@ import { requireExactParticipantModel, validateParticipantModelPin, type Partici
 import { researchTrialProfileV3, RESEARCH_TRIAL_PROFILE_V1 } from '../../../dialogue-model/runtime/v2/research-profile.ts';
 import { RESEARCH_MAX_DEADLINE_MS, RESEARCH_MAX_LUNA_ATTEMPT_MS } from '../../../dialogue-model/runtime/v2/research-timeouts.ts';
 
-type Result = { status: number; data: unknown };
-type Dispatch = (payload: unknown, expectedModelId: string) => Promise<Result>;
+type Dispatch = (payload: unknown, expectedModelId: string) => Promise<ParticipantDispatchResult>;
 export interface ParticipantService {
   participantPolicy(): Promise<unknown>;
   participantChat: Dispatch;

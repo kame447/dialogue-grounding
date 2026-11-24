@@ -6,6 +6,7 @@ import { NamingTaskError } from "../../../dialogue-model/runtime/naming-error.mj
 import { sessionCookie, sessionId } from "./session-cookie.ts";
 import { isExcessiveTraffic, type SoftLimitBindings } from "./soft-limits";
 import { AdminIndex } from "./admin/index-do";
+import type { ReceptionFailedStartUsage } from './admin/reception-port.ts';
 import { createReceptionAdminPort, createReceptionSettingsPort } from './admin/reception-adapter.ts';
 import { handleAdmin, isAdminPath, type AdminLimiter } from "./admin/routes.ts";
 import { summarizeRecord, type AdminSummary } from "./admin/summary.ts";
@@ -216,6 +217,29 @@ export class TangramSession extends DurableObject<Env> {
   }
   /** Researcher-only RPCs. The management adapter supplies authorization. */
   async adminReception(): Promise<Reception | null> { return this.readReception(); }
+  async adminFailedStartUsage(receptionId: string): Promise<ReceptionFailedStartUsage | null> {
+    return this.ctx.storage.transaction(async tx => {
+      const rawReception = await tx.get('reception:v1');
+      if (rawReception === undefined) return null;
+      const reception = validateReception(rawReception), plan = reception.plan;
+      const ownerId = this.ctx.id.toString();
+      if (reception.receptionId !== receptionId || reception.objectId !== ownerId ||
+          !plan || plan.schemaVersion === 'reception_plan_v1' || plan.participantRuntimeProfile !== PARTICIPANT_PRODUCTION_PROFILE) return null;
+      const owner = readOwner(await tx.get('base:owner:v1'), ownerId);
+      const failedStarts: ReceptionFailedStartUsage['failedStarts'] = [];
+      for (const entry of Object.values(owner.admissions)) {
+        if (entry?.status !== 'failed' || entry.record !== null || entry.errorCode === null || entry.errorCode === 'record_deleted') continue;
+        const { assignmentId, source } = entry.assignment;
+        if (source.kind !== plan.schemaVersion || source.receptionId !== receptionId ||
+            JSON.stringify(source.plan) !== JSON.stringify(plan) || reception.trials[source.trialIndex]?.recordId !== null ||
+            !plan.participantModelPin) throw new ReceptionError('reception_unavailable');
+        const journal = await tx.get(participantUsageKey(assignmentId));
+        failedStarts.push({ assignmentId, trialIndex: source.trialIndex, errorCode: entry.errorCode,
+          usage: journal === undefined ? null : ParticipantUsageLedger.readSnapshot(journal, assignmentId, plan.participantModelPin) });
+      }
+      return { receptionId, failedStarts };
+    });
+  }
   async adminApproveReception(input: { expectedRevision: number; order: number; protocol: unknown }): Promise<Reception> {
     return this.receptionSerial(async () => {
       // One settings read is the fixed point: the same snapshot is compared and copied into the plan.
@@ -695,7 +719,10 @@ export class TangramSession extends DurableObject<Env> {
         const entry = kind === 'settle'
           ? Object.values(owner?.admissions ?? {}).find(entry => entry?.assignment.assignmentId === assignmentId)
           : owner?.activeKey && owner.admissions[owner.activeKey];
-        if (!entry || entry.assignment.assignmentId !== assignmentId || entry.status === 'failed') {
+        // A reserved RPC can finish after initialization failed. Settle it
+        // without reopening the assignment or recreating a deleted journal.
+        if (!entry || entry.assignment.assignmentId !== assignmentId ||
+            entry.status === 'failed' && (kind !== 'settle' || entry.errorCode === 'record_deleted')) {
           throw new NamingTaskError('ai_unavailable');
         }
         const result = write(await tx.get(key));

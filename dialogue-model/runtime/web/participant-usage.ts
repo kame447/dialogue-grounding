@@ -5,7 +5,8 @@ import { PARTICIPANT_PRODUCTION_PROFILE } from './participant-usage-policy.ts';
 import type { ParticipantModelPin } from '../v2/participant-model-pin.ts';
 
 type Provider = 'jev' | 'luna' | 'terra';
-type Dispatch = (payload: unknown, expected: string) => Promise<{ status: number; data: unknown }>;
+export type ParticipantDispatchResult = { status: number; data: unknown; verifiedUsage?: unknown };
+type Dispatch = (payload: unknown, expected: string) => Promise<ParticipantDispatchResult>;
 const phases = {
   jev: ['action_target', 'detail', 'human_referent', 'local', 'ai_function', 'ai_support', 'choice'],
   luna: ['generation', 'final_submission', 'ai_extraction', 'dialogue'],
@@ -23,9 +24,10 @@ type Meter = {
 };
 const empty = (): Meter => ({ calls: 0, posts: 0, unknownPosts: 0, cancelledBeforeSend: 0, cacheHits: 0,
   knownUsd: 0, missingCostPosts: 0, inputTokens: 0, missingInputTokenPosts: 0, outputTokens: 0, missingOutputTokenPosts: 0 });
-type Receipt = {
+type Usage = { costUsd: number | null; inputTokens: number | null; outputTokens: number | null };
+type Receipt = Usage & {
   post: number; phase: string; status: 'reserved' | 'cancelled' | 'failed' | 'ok' | 'model_mismatch';
-  model: string | null; costUsd: number | null; inputTokens: number | null; outputTokens: number | null;
+  model: string | null;
 };
 export type ParticipantUsageSnapshot = {
   schemaVersion: typeof PARTICIPANT_PRODUCTION_PROFILE; assignmentId: string; pin: ParticipantModelPin;
@@ -71,7 +73,9 @@ function read(value: unknown, assignmentId: string, pin: ParticipantModelPin): P
     const r = data(latest[provider], ['post', 'phase', 'status', 'model', 'costUsd', 'inputTokens', 'outputTokens']);
     if (r.post !== posts || !phases[provider].includes(r.phase as string) ||
         !['reserved', 'cancelled', 'failed', 'ok', 'model_mismatch'].includes(r.status as string) ||
-        r.model !== (r.status === 'ok' ? modelFor(pin, provider) : null) ||
+        (r.status === 'ok' ? r.model !== modelFor(pin, provider) :
+          r.model !== null && (r.status !== 'failed' || r.model !== modelFor(pin, provider))) ||
+        (r.model === null && [r.costUsd, r.inputTokens, r.outputTokens].some(n => n !== null)) ||
         !(r.costUsd === null || amount(r.costUsd)) || !(r.inputTokens === null || count(r.inputTokens)) ||
         !(r.outputTokens === null || count(r.outputTokens))) return fail();
   }
@@ -89,6 +93,10 @@ export class ParticipantUsageLedger {
   private constructor(store: ParticipantUsageStore, persisted: ParticipantUsageSnapshot) {
     this.store = store;
     this.current = persisted;
+  }
+
+  static readSnapshot(value: unknown, assignmentId: string, pin: ParticipantModelPin) {
+    return read(value, assignmentId, pin);
   }
 
   static async open(store: ParticipantUsageStore, assignmentId: string, pin: ParticipantModelPin, restored?: unknown) {
@@ -164,13 +172,11 @@ export class ParticipantUsageLedger {
       if (context) state.lastHumanSeq = Math.max(state.lastHumanSeq, context.humanSeq);
       state.latest[provider] = { post, phase, status: 'reserved', model: null, costUsd: null, inputTokens: null, outputTokens: null };
     });
-    const finish = (status: Receipt['status'], raw?: any) => this.change(state => {
+    const finish = (status: Receipt['status'], measured: Usage | null = null) => this.change(state => {
       const m = state.phases[provider][phase];
-      const receipt: Receipt = { post, phase, status, model: status === 'ok' ? expected : null,
-        costUsd: amount(raw?.usage?.cost) ? raw.usage.cost : null,
-        inputTokens: count(raw?.usage?.prompt_tokens) ? raw.usage.prompt_tokens : null,
-        outputTokens: count(raw?.usage?.completion_tokens) ? raw.usage.completion_tokens : null };
-      if (status === 'ok' || status === 'cancelled') m.unknownPosts--;
+      const receipt: Receipt = { post, phase, status, model: measured ? expected : null,
+        costUsd: measured?.costUsd ?? null, inputTokens: measured?.inputTokens ?? null, outputTokens: measured?.outputTokens ?? null };
+      if (measured || status === 'cancelled') m.unknownPosts--;
       if (status === 'cancelled') m.cancelledBeforeSend++;
       if (receipt.costUsd !== null || status === 'cancelled') { m.missingCostPosts--; m.knownUsd += receipt.costUsd ?? 0; }
       if (receipt.inputTokens !== null || status === 'cancelled') { m.missingInputTokenPosts--; m.inputTokens += receipt.inputTokens ?? 0; }
@@ -182,15 +188,35 @@ export class ParticipantUsageLedger {
     let response;
     try { response = await invoke(payload, expected); }
     catch (error) { await finish('failed'); throw error; }
-    const raw = response.data as { error?: unknown; model?: unknown } | null;
+    const raw = response.data as { error?: unknown; model?: unknown;
+      usage?: { cost?: unknown; prompt_tokens?: unknown; completion_tokens?: unknown } } | null;
     if (raw?.error === 'model_mismatch' || response.status === 200 && raw?.model !== expected) {
       await finish('model_mismatch');
       return fail();
     }
-    if (response.status === 200) await finish('ok', raw);
-    else await finish('failed');
+    if (response.status === 200) {
+      await finish('ok', {
+        costUsd: amount(raw?.usage?.cost) ? raw.usage.cost : null,
+        inputTokens: count(raw?.usage?.prompt_tokens) ? raw.usage.prompt_tokens : null,
+        outputTokens: count(raw?.usage?.completion_tokens) ? raw.usage.completion_tokens : null,
+      });
+    } else {
+      // No metering body is trusted from an HTTP error. Only the private RPC can
+      // report identity-verified usage for a successfully received but rejected answer.
+      await finish('failed', response.status === 422 || response.status === 502 ? rejectedUsage(response.verifiedUsage, expected) : null);
+    }
     return response;
   }
+}
+
+function rejectedUsage(raw: unknown, expected: string): Usage | null {
+  if (raw === undefined) return null;
+  try {
+    const { model, costUsd, inputTokens, outputTokens } = data(structuredClone(raw), ['model', 'costUsd', 'inputTokens', 'outputTokens']);
+    if (model !== expected || (costUsd !== null && !amount(costUsd)) ||
+        (inputTokens !== null && !count(inputTokens)) || (outputTokens !== null && !count(outputTokens))) return null;
+    return { costUsd, inputTokens, outputTokens } as Usage;
+  } catch { return null; }
 }
 
 function choicePhase(payload: unknown): string {
