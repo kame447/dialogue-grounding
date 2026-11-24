@@ -39,11 +39,32 @@ function s4HasOrientationLeak(text:unknown):boolean{
  const unquoted=text.normalize('NFKC').replace(/[\s\u200b-\u200d\ufeff]/gu,'').replace(/「[^」]*」|『[^』]*』/gu,'「」');
  return unquoted.split(S4_CLAUSE_BREAK).some(clause=>S4_ORIENT_WORDS.test(clause)&&!S4_VIEWPOINT.test(clause));
 }
-function s4HasNonOrientationLeak(text:string):boolean{
- const compact=text.normalize('NFKC').replace(/[\s\u200b-\u200d\ufeff]/gu,'');
- return /(?<![A-Za-z0-9])s-[0-9a-f]{4}(?![A-Za-z0-9])/iu.test(compact)||/\d+:pub\d+/u.test(compact)||
+function s4HasNonOrientationLeak(text:string,action:any):boolean{
+ const nfkc=text.normalize('NFKC'),compact=nfkc.replace(/[\s\u200b-\u200d\ufeff]/gu,''),act=action?.action;
+ if(/(?<![A-Za-z0-9])s-[0-9a-f]{4}(?![A-Za-z0-9])/iu.test(compact)||/\d+:pub\d+/u.test(compact)||
   /(?<![A-Za-z])(?:targetSlot|candidateName|discriminatingFeature|ownLedger|ledger|judgment)(?![A-Za-z])|\{"[^"]{1,40}":/u.test(compact)||
-  /human[_-]?referent|repair[_-]?prospect|repair_issue|candidate_narrowed|candidate_widened|other_figure_benefit|no_open_issue|issue_\d+|repair_?facts|reply_?vs_?previous|not_comparable|widened_or_shifted|same_?question|local_?gaps/iu.test(compact);
+  /human[_-]?referent|repair[_-]?prospect|repair_issue|candidate_narrowed|candidate_widened|other_figure_benefit|no_open_issue|issue_\d+|repair_?facts|reply_?vs_?previous|not_comparable|widened_or_shifted|same_?question|local_?gaps/iu.test(compact))return true;
+ const qTail=(tail:string)=>/^[」』”"]*(?:(?:です|ます|でした|でしょう|だろう|なの|なんです|できます|できる|しました|します|しましょう|しません|する|した|してよいです|してもよいです|しています|されています)?か(?:[?。!、,]|$)|(?:です|ます|でしょう)?(?:ね|よ)?[?])/u.test(tail);
+ if(act!=='agree'){
+  for(const re of [/と呼(?:ぼう|びましょう|ぶことに(?:しよう|しましょう|します)|びます)/gu,/に(?:しよう|しましょう|します|決めよう|決めましょう|決めます)/gu,/で(?:いこう|行こう|いきましょう|行きましょう|いきます|行きます)/gu,/[でに](?:決まり|決定|確定)/gu,/で(?:いい|良い|よい|大丈夫)/gu,/合意/gu]){
+   for(const m of compact.matchAll(re)){const tail=compact.slice(m.index!+m[0].length);if(qTail(tail))continue;if(m[0]==='合意'&&/^(?:していません|していない|しません|ではありません|ではない|はしていません|はしていない)/u.test(tail))continue;if(re.source.startsWith('に')&&/(?:後|あと|後日|今度|別の機会|保留|後回し|先送り|先延ばし)$/u.test(compact.slice(0,m.index)))continue;return true;}
+  }
+ }
+ if(act!=='repair'){
+  for(const m of compact.matchAll(/(?:訂正|撤回)(?:します|しました|させてください|させて下さい)|取り消(?:します|しました|させてください)|(?:取り違え|勘違い|見間違え|間違え)(?:ました|ていました|てました)|(?:私|わたし|自分|こちら)の[^。!?、,]{0,12}?(?:取り違え|勘違い|見間違い|間違い|誤り)(?:でした|です)|見間違いでした|(?:さっき|先ほど|前)の(?:は|も)[^。!?]{0,12}?違いました/gu)){
+   if(!qTail(compact.slice(m.index!+m[0].length)))return true;
+  }
+ }
+ if(act!=='defer'&&act!=='move_on'){
+  const sents=compact.replace(/「[^」]*」|『[^』]*』/gu,'「」').split(/(?<=[。!?])/u);
+  const dep=[/(?:保留|後回し|先送り|先延ばし)に(?:し(?:よう|ましょう|ます|たい|てもい|てもよ|ても大丈夫)|しておき(?:ましょう|ます|たい|ませんか)|しておこう|させて)/u,/(?:いったん|ひとまず|一旦|とりあえず)(?:保留|後回し|先送り|置い(?:て)?|飛ばし(?:て)?)(?:に(?:し|して))?(?:おき(?:ましょう|ます|たい|ませんか)|おこう|いきましょう|いきます|いこう|ましょ|よう|たい|ます|ください|ほしい)/u,/(?:あとで|後で)(?:考え|確認し|決め|見|扱い)(?:ましょう|よう|たい|ます)/u,/(?:あとで|後で)戻り(?:たい|ましょう|ます)/u,/未解決のまま[^。!?]{0,12}?(?:次に|別|次へ|先に進)(?![^。!?]{0,6}(?:ません|ない|ず))/u,/(?:分から|わから|絞れ(?:て)?|決められ|特定でき(?:て)?)(?:い)?な(?:い|く)(?:ので|から|ため)[^。!?]{0,16}?(?:次の図形|別の図形|他の図形|次の形|別の形|次へ|先に進)(?![^。!?]{0,6}(?:ません|ない|ず))/u];
+  if(sents.some(s=>dep.some(r=>r.test(s))))return true;
+ }
+ if(act==='agree'&&typeof action?.candidateName==='string'&&action.candidateName.trim()){
+  const name=action.candidateName.normalize('NFKC').trim();
+  if(!nfkc.includes(`「${name}」`)&&!nfkc.includes(`『${name}』`))return true;
+ }
+ return false;
 }
 function expectedOrientationFallback(action:any):string|null{
  if(!action||typeof action!=='object')return null;
@@ -445,7 +466,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
   const retryMsg=gens[1]?.payload?.messages?.at(-1)?.content;
   const genTexts=[...(tape.common?.luna??[]),...(tape.tails?.[tr.label]?.luna??[])].filter((x:any)=>x?.phase==='generation').map((x:any)=>x?.response?.text??x?.text);
   if(gens.length!==2||typeof retryMsg!=='string'||!ORIENTATION_RETRY_MSGS.includes(retryMsg)||genTexts.length!==2||
-   !genTexts.every((tx:unknown)=>typeof tx==='string'&&s4HasOrientationLeak(tx)&&!s4HasNonOrientationLeak(tx)))return'invalid';
+   !genTexts.every((tx:unknown)=>typeof tx==='string'&&s4HasOrientationLeak(tx)&&!s4HasNonOrientationLeak(tx,t.finalAction)))return'invalid';
  }
  // M is recomputed: at least one recorded Luna request, all of them with measured sends. A label is either wholly measured or wholly synthetic.
  const luna=expected.filter((e:any)=>e?.provider==='luna'),measured=luna.map((e:any)=>e.actualSendMeasured);
