@@ -923,7 +923,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
           ...(hints.quoted.some(q => !agreedNames.has(normalizeName(q)) && normalizeName(q) !== chosenName) ? ["quoted_other"] : [])];
       };
       const confirmDraft = async (text: string, draft: "initial" | "retry", found: string[]): Promise<string[]> => {
-        if (!holistic || found.length) return found;
+        if (!holistic) return found;
         const triggers = draftTriggers(text);
         if (!triggers.length) return found;
         let res: Awaited<ReturnType<NonNullable<JevDecisionClient["classifyDraftAct"]>>>;
@@ -940,9 +940,11 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         (record.draftActs ??= []).push({ draft, draftSha256: await aiHash(text), triggers, status: res.status === "ok" && res.choice ? "ok" : "error", choice: res.status === "ok" ? res.choice : null,
           scores: res.status === "ok" ? res.scores : null, model: res.model ?? null, responseId: res.responseId ?? null, costUsd: res.costUsd ?? null,
           latencyMs: Number.isFinite(res.latencyMs) ? res.latencyMs : 0, error: res.status === "ok" ? null : res.error ?? "invalid_response" });
-        if (res.status !== "ok" || !res.choice) return ["draft_act_unconfirmed"];
+        // Other violations (orientation etc.) never excuse the question: the orientation-only fallback needs both drafts' questions to succeed and fit the act.
+        if (res.status !== "ok" || !res.choice) return [...found, "draft_act_unconfirmed"];
         const adopts = res.choice === "adopt_chosen" || res.choice === "adopt_other";
-        return judgment.action === "agree" ? (res.choice === "adopt_chosen" ? [] : ["draft_act_mismatch"]) : (adopts ? ["draft_act_mismatch"] : []);
+        const wrong = judgment.action === "agree" ? res.choice !== "adopt_chosen" : adopts;
+        return wrong ? [...found, "draft_act_mismatch"] : found;
       };
       errorCode = "generation_failed";
       let result = await interruptible(client.complete(messages, { phase: "generation", timeoutMs: generation.timeoutMs, signal }), signal);

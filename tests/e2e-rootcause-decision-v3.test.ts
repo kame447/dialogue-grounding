@@ -1012,3 +1012,22 @@ test('holistic_v1: a propose_name draft quoting only the chosen name is not aske
   const asked = await g.exchange('丸い形のことです。', { action: 'accept', target: 3, draftActs: ['recount_only'], drafts: ['それは「時計」とは違います。'] });
   assert.equal(asked.trace.draftActs!.length, 1);
 });
+
+test('holistic_v1: the orientation-only fallback needs both drafts asked, successful and fitting the act; any refusal, failure or mismatch is unsafe_generation', async () => {
+  const proposal = `こちらの形は「${NEW_NAME}」でどうですか？`;
+  const draft = `右側の形は「${NEW_NAME}」と呼びましょう。`;
+  const attempt = async (draftActs: string[]) => {
+    const f = fixture('bypass-enabled', { aiPublic: true, holistic: true });
+    await share(f, 3);
+    return { f, run: f.exchange(proposal, { action: 'agree', target: 3, draftActs, segments: [naming(proposal, NEW_NAME)], drafts: [draft, draft] }) };
+  };
+  const ok = await attempt(['adopt_chosen', 'adopt_chosen']);
+  const r = await ok.run;
+  assert.deepEqual(r.trace.generationGuard, { violations: ['orientation_leak'], regenerated: true, fallback: true });
+  assert.deepEqual(r.trace.draftActs!.map(a => a.choice), ['adopt_chosen', 'adopt_chosen']);
+  for (const acts of [['adopt_chosen', 'decline_or_hold'], ['decline_or_hold', 'adopt_chosen'], ['adopt_chosen', 'fail'], ['fail', 'adopt_chosen']]) {
+    const bad = await attempt(acts);
+    await assert.rejects(bad.run, { code: 'unsafe_generation' }, acts.join());
+    assert.equal(bad.f.state().ledger[ids[3]].status, 'unassigned');
+  }
+});

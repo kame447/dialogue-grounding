@@ -557,7 +557,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
  for(const [n,label]of ['repair-first','bypass-enabled'].entries()){
   const s=result.sides[n],m=s?.material;if(!exact(s,['label','material','materialSha256','requests','executed','intervention'])||s.label!==label||!exact(m,['state','events','common','tail','own','model','profile','boundary',...(CTX.trial?['technicalTrial']:[]),...(tape.generationRetryVersion?['generationRetryVersion']:[])])||m.generationRetryVersion!==tape.generationRetryVersion||hash(m)!==s.materialSha256||(CTX.trial&&!equal(m.technicalTrial,tape.technicalTrial))||!equal(m.state,tape.state)||!equal(m.events,tape.events)||!equal(m.common,tape.common)||!equal(m.tail,tape.tails[label])||!equal(m.profile,tr.profile)||!Array.isArray(s.requests)||!equal(m.boundary,{luna:'canonical_http_json',jev:'canonical_http_json',hashScheme:'canonical_json_sha256_not_raw_body_bytes'}))return'invalid';
   if(!relation({...t,executed:s.executed,intervention:s.intervention,finalAction:s.executed?{action:s.executed.action,targetSlot:s.executed.target.kind==='single'?s.executed.target.figureId:null,candidateName:s.executed.name,discriminatingFeature:s.executed.feature}:null},label,Object.keys(tape.state.ledger),layout))return'invalid';
-  let originalInput:any=null,pendingSet=false,pendingTarget=false,current:any=null,currentInput:any=null,turnDecision=-1,prospect:any=null,generationCount=0,prevDraft:any=null,lastVerdict:string|null=null;const askedDrafts:number[]=[],askedRows:any[]=[],draftVerdicts:(string|null)[]=[];
+  let originalInput:any=null,pendingSet=false,pendingTarget=false,current:any=null,currentInput:any=null,turnDecision=-1,prospect:any=null,generationCount=0,prevDraft:any=null,lastVerdict:string|null=null;const draftTexts:any[]=[],askedDrafts:number[]=[],askedRows:any[]=[],draftVerdicts:(string|null)[]=[];
   const response={luna:[...tape.common.luna,...tape.tails[label].luna],jev:[...tape.common.jev,...tape.tails[label].jev]},indices={luna:0,jev:0};
   for(const r of s.requests){if(!exact(r,['provider','phase','payload','payloadDomain','payloadSha256','preProjectionPayloadSha256','role',...(Object.hasOwn(r,'completeMessagesSha256')?['completeMessagesSha256']:[])])||!['luna','jev'].includes(r.provider)||!['common','alternative_detail','generation','post_generation'].includes(r.role)||r.payloadDomain!=='canonical_http_json'||hash(r.payload)!==r.payloadSha256||typeof r.preProjectionPayloadSha256!=='string'||!/^[a-f0-9]{64}$/.test(r.preProjectionPayloadSha256))return'invalid';
    const p=r.payload,provider=r.provider as 'luna'|'jev',answer=response[provider][indices[provider]++];if(!answer)return'missing';
@@ -571,7 +571,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
      const v3Retry=layout==='two_stage_v3';
      const draft=codes===undefined&&generationCount===1?{orientation:v3Retry&&s4HasOrientationLeak(prevDraft),naming:typeof prevDraft==='string'&&s4NamingDecision(prevDraft.normalize('NFKC').replace(/[\s\u200b-\u200d\ufeff]/gu,''),s.executed?.action),workingNote:v3Retry&&restatedRetry&&s4HasWorkingNote(prevDraft,publicTexts),...(CTX.policy==='holistic_v1'?{draftAct:lastVerdict}:{})}:undefined;
      if(!generationMessages(p.messages,t,s.executed,{...tape,generationGraph:(tr.turns??[]).find((u:any)=>u.turn===t.turnIndex)?.state?.graph},m.profile,generationCount++,codes,draft))return'invalid';
-     prevDraft=answer?.response?.text??answer?.text;lastVerdict=null;
+     prevDraft=answer?.response?.text??answer?.text;draftTexts.push(prevDraft);lastVerdict=null;
     }
    }
    else{
@@ -657,7 +657,16 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
      askedRows.some(x=>x.verdict!==null)!==guardCodes.includes('draft_act_mismatch'))return'invalid';
    if(CTX.policy==='holistic_v1'){
     // Current-version fallback sentence: both drafts were orientation-only, so no draft was asked; any naming-question record contradicts it.
-    if(t.generationGuard?.fallback===true&&acts.length>0)return'invalid';
+    // Fallback sentence: both drafts (orientation-only) that are question targets must each carry a successful question whose label fits the executed act.
+    if(t.generationGuard?.fallback===true){
+     const ex0=s.executed,ids0:string[]=ex0?(ex0.target.kind==='single'?[ex0.target.figureId]:ex0.target.kind==='multiple'?ex0.target.figureIds:[]):[];
+     const agreed0=new Set<string>(ids0.map((id:string)=>tape.state.ledger?.[id]?.name).filter((n:any)=>typeof n==='string').map(ledgerName));
+     if(!ex0||draftTexts.length!==2||guardCodes.length>0||errActs.length>0)return'invalid';
+     for(const [i,txt] of draftTexts.entries()){
+      const target=typeof txt==='string'&&s4DraftTriggers(txt,ex0.action,s4OpenHumanProposal(tape,t),agreed0,ex0.action==='propose_name'&&typeof ex0.name==='string'?ledgerName(ex0.name):null).length>0,act=acts.find(a=>a.draft===(i===0?'initial':'retry'));
+      if(target!==Boolean(act)||act&&(act.status!=='ok'||draftActVerdict(act.choice,ex0.action)!==null))return'invalid';
+     }
+    }
     // The published draft is asked exactly when it is a question target, and only a passing label may publish.
     const fin=t.generationGuard?.regenerated?'retry':'initial',ex=s.executed;
     if(t.generationGuard?.fallback!==true&&typeof t.publicSpeech==='string'&&ex){
