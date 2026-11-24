@@ -92,9 +92,7 @@ export function createChatClient(config, fetchImpl = globalThis.fetch, {
   return {
     async getModelPolicy() {
       if (config.provider !== "cloudflare") throw new Error("Model policy is only available through Cloudflare");
-      const policyUrl = new URL(config.baseUrl + "/model-policy");
-      if (config.purpose && config.purpose !== "dialogue_turn") policyUrl.searchParams.set("purpose", config.purpose);
-      return request(policyUrl, {
+      return request(new URL(config.baseUrl + "/model-policy"), {
         headers: { Authorization: "Bearer " + config.apiKey },
       }, config.timeoutMs ?? 45000, (data) => {
         if (data?.purpose !== config.purpose || typeof data.model !== "string" ||
