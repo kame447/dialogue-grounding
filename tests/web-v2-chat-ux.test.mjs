@@ -306,17 +306,35 @@ test("a missing POST acknowledgement times out to a retained retryable bubble wi
   held.release(); await tick();
 });
 
-test("Enter, Shift+Enter and IME never submit; clicking send preserves the exact multiline text", async () => {
-  const { e, calls } = await ui();
+test("plain Enter and IME do not submit; Shift+Enter sends exact multiline text once", async () => {
+  const { e, calls, advance } = await ui();
   const text = "  第一行\n第二行\n";
   e.utterance.value = text;
-  for (const fields of [{}, { shiftKey: true }, { isComposing: true }, { keyCode: 229 }, { repeat: true }]) {
+  for (const fields of [{}, { shiftKey: true, isComposing: true }, { shiftKey: true, keyCode: 229 },
+    { shiftKey: true, ctrlKey: true }, { shiftKey: true, altKey: true }, { shiftKey: true, metaKey: true }]) {
     assert.equal(e.utterance.fire("keydown", { key: "Enter", ...fields }).prevented, false);
   }
+  e.utterance.fire("compositionstart");
+  assert.equal(e.utterance.fire("keydown", { key: "Enter", shiftKey: true }).prevented, false);
+  e.utterance.fire("compositionend");
+  assert.equal(e.utterance.fire("keydown", { key: "Enter", shiftKey: true }).prevented, false);
+  await advance(0);
+  assert.equal(e.utterance.fire("keydown", { key: "Enter", shiftKey: true, repeat: true }).prevented, true);
   assert.equal(messageCalls(calls).length, 0);
-  e.chat.fire("submit"); await tick();
-  assert.equal(messageCalls(calls)[0].body.text, text);
+  assert.equal(e.utterance.fire("keydown", { key: "Enter", shiftKey: true }).prevented, true);
+  assert.equal(e.utterance.value, "");
+  assert.equal(e.utterance.fire("keydown", { key: "Enter", shiftKey: true, repeat: true }).prevented, true);
+  await tick();
+  assert.deepEqual(messageCalls(calls).map((call) => call.body.text), [text]);
   assert.equal(messageBodies(e).at(-1), text);
+  e.utterance.value = "   ";
+  e.utterance.fire("keydown", { key: "Enter", shiftKey: true });
+  await tick();
+  assert.equal(messageCalls(calls).length, 1);
+  e.utterance.value = "ボタン送信";
+  e.chat.fire("submit");
+  await tick();
+  assert.deepEqual(messageCalls(calls).map((call) => call.body.text), [text, "ボタン送信"]);
 });
 
 // Updated 2026-10-19 (E1): the reader's own send now jumps to the bottom, as
@@ -338,10 +356,11 @@ test("own send jumps to the bottom; scrolled-up readers retain their position du
   assert.equal(e.history.scrollTop, e.history.scrollHeight);
 });
 
-test("typing motion is disabled by reduced-motion and old visible wait/Enter hints are absent", () => {
+test("typing motion is disabled by reduced-motion and the shortcut hint matches behavior", () => {
   assert.match(css, /@keyframes typing-bounce/u);
   assert.match(css, /@media\(prefers-reduced-motion:reduce\)\{\.typing-indicator span\{animation:none\}/u);
-  assert.doesNotMatch(html + script, /AIが考えています|受理済み・会話を更新中|送信中…|Enterで送信/u);
+  assert.doesNotMatch(html + script, /AIが考えています|受理済み・会話を更新中|送信中…/u);
+  assert.match(html, /Enterで改行・Shift＋Enterで送信/u);
   assert.match(css, /#chat textarea\{[^}]*overflow-y:auto/u);
 });
 
