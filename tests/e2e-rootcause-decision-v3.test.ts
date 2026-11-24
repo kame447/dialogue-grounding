@@ -482,7 +482,7 @@ for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
     assert.deepEqual(agreed.saved.executed?.target, single(3));
   });
 
-  test(`v3 ${strategy} checks the live AI public targets for bound and unbound agreement`, async () => {
+  test(`v3 ${strategy} requires public evidence and execution focus to support immediate agreement`, async () => {
     const speech = '細い部分が二つつながっていますか？';
     const proposal = `この形は「${NEW_NAME}」と呼びましょうか？`;
     const aiSegment = (target: number): LocalSegmentProposal => ({ segmentId: 'shape', quote: speech, targets: [ids[target]],
@@ -493,22 +493,30 @@ for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
       assert.deepEqual(prior.saved.executed?.target, single(1));
       return f;
     };
-    for (const bound of [true, false]) {
+    for (const humanTargets of [[ids[3]], [], [ids[1], ids[3]]]) {
       const f = await confirm(3);
       const previous = f.state();
       const result = await f.exchange(proposal, { action: 'accept', drafts: ['少し確かめましょう。'],
-        segments: [naming(proposal, NEW_NAME, bound ? [ids[1]] : [])] });
+        segments: [naming(proposal, NEW_NAME, humanTargets)] });
       const publicEvidence = result.input.priorClaims.filter(c => c.speaker === 'ai' && c.sourceTurn === 2);
       assert.deepEqual(publicEvidence.map(c => c.targets), [[ids[3]]]);
-      assert.deepEqual(result.input.agreeNames?.map(n => n.figureId), bound ? [] : [ids[3]]);
+      assert.deepEqual(result.input.priorClaims.find(c => c.speaker === 'human' && c.act === 'name_propose')?.targets, humanTargets);
+      assert.deepEqual(result.input.agreeNames, []);
+      assert.ok(!Object.hasOwn(result.requests.find(r => r.questions.action)!.questions.action.criteria, 'agree'));
       checkS4AgreeSource(previous, result);
     }
 
     const matched = await confirm(1);
-    await matched.exchange(proposal, { action: 'agree', target: 1, drafts: [agreeSpeech(NEW_NAME)], segments: [naming(proposal, NEW_NAME)] });
+    const beforeAgreement = matched.state();
+    const agreement = await matched.exchange(proposal, { action: 'agree', target: 1, drafts: [agreeSpeech(NEW_NAME)], segments: [naming(proposal, NEW_NAME)] });
+    assert.deepEqual(agreement.input.agreeNames?.map(n => n.figureId), [ids[1]]);
+    assert.deepEqual(agreement.saved.executed?.target, single(1));
+    checkS4AgreeSource(beforeAgreement, agreement);
     const newProposal = '次の形は「水車」でどうですか？';
+    const afterAgreement = matched.state();
     const next = await matched.exchange(newProposal, { action: 'agree', target: 4, drafts: [agreeSpeech('水車')], segments: [naming(newProposal, '水車', [ids[4]])] });
     assert.deepEqual(next.saved.executed?.target, single(4));
+    checkS4AgreeSource(afterAgreement, next);
   });
 
   test(`v3 ${strategy} regenerates a public draft that leaks its orientation`, async () => {

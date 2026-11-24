@@ -269,13 +269,13 @@ function agreeSource(tr:any,t:any,key:string,tape:any,legacyV3=false):'invalid'|
    const prevJudgment=preJudgments.at(-1);
    const prevIds=!legacyV3&&prevJudgment?.turnIndex>lastBoundary&&['confirm','repair','propose_name'].includes(prevJudgment.judgment?.action)?idsOfJudgment(prevJudgment):[];
    const prevPublicIds=new Set(prevIds.length?live.filter((c:any)=>c.speaker==='ai'&&c.sourceTurn>prevJudgment.turnIndex&&c.sourceTurn<t.turnIndex).flatMap((c:any)=>c.targets):[]);
+   const wasFocused=(id:string)=>prevIds.includes(id)||focusedTurns.some((j:any)=>j.ids.includes(id));
    const slotAllowed=(id:string,name:string)=>preLedger[id]?.status!=='agreed'&&!(preLedger[id]?.status==='deferred'&&preLedger[id].name!==null&&norm(preLedger[id].name)!==norm(name))&&!slots.some(other=>other!==id&&preLedger[other]?.name!==null&&norm(preLedger[other].name)===norm(name));
    expected=openClaims.flatMap((c:any)=>{
     const name=c.name as string;
     if(!isHumanProposal(c)&&c.act!=='name_accept')return[];
     const targets:string[]=Array.isArray(c.targets)?c.targets:[];
-    if(prevIds.length&&c.sourceTurn===t.turnIndex&&isHumanProposal(c)&&targets.length&&
-       targets.every(id=>!prevIds.includes(id)&&!focusedTurns.some((j:any)=>j.ids.includes(id))))return[];
+    const requiresFocus=prevPublicIds.size>0||(prevIds.length>0&&c.sourceTurn===t.turnIndex&&isHumanProposal(c)&&targets.length>0);
     if(c.sourceTurn<t.turnIndex){
      if(targets.length>0&&focusedTurns.some((j:any)=>j.turnIndex>=c.sourceTurn&&j.ids.length&&!targets.some(id=>j.ids.includes(id))))return[];
      if(proposals.some((p:any)=>p.sourceTurn>c.sourceTurn&&norm(p.name)!==norm(name)))return[];
@@ -285,7 +285,11 @@ function agreeSource(tr:any,t:any,key:string,tape:any,legacyV3=false):'invalid'|
     const antecedent=c.act==='name_accept'?publicClaims.find((p:any)=>p.id===c.respondsTo&&p.name===name):undefined;
     const s=win.find((e:any)=>e.seq===c.sourceTurn&&e.text.includes(name))??(antecedent&&win.find((e:any)=>e.seq===antecedent.sourceTurn&&e.text.includes(name)))??(c.act==='name_accept'?win.filter((e:any)=>e.text.includes(name)).sort((a:any,b:any)=>a.seq-b.seq)[0]:undefined);
     if(!s)return[];
-    return eligibleSlots.filter(id=>(!prevPublicIds.size||prevPublicIds.has(id))&&!openClaims.some((r:any)=>r.speaker==='human'&&r.sourceTurn>c.sourceTurn&&(r.act==='deny'||r.act==='name_reject')&&r.name===name&&(r.respondsTo===c.id||(Array.isArray(r.targets)&&r.targets.includes(id))))).map(figureId=>JSON.stringify([name,figureId,s.seq]));
+    return eligibleSlots.filter(id=>{
+     if(requiresFocus&&!wasFocused(id))return false;
+     if(prevPublicIds.size&&!prevPublicIds.has(id))return false;
+     return !openClaims.some((r:any)=>r.speaker==='human'&&r.sourceTurn>c.sourceTurn&&(r.act==='deny'||r.act==='name_reject')&&r.name===name&&(r.respondsTo===c.id||(Array.isArray(r.targets)&&r.targets.includes(id))));
+    }).map(figureId=>JSON.stringify([name,figureId,s.seq]));
    }).sort();
   }else{
    const source=(c:any)=>win.find((e:any)=>e.seq===c.sourceTurn&&e.text.includes(c.name))??win.filter((e:any)=>e.text.includes(c.name)).sort((a:any,b:any)=>a.seq-b.seq)[0];

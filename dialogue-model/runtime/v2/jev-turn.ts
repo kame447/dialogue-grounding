@@ -234,12 +234,13 @@ function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns: reado
     ["confirm", "repair", "propose_name"].includes(prevJudgment.judgment.action) ? targets(prevJudgment.jevTurn.executed) : [];
   const prevPublicIds = new Set(prevJudgment && prevIds.length ? claims.filter(c => c.speaker === "ai" &&
     c.sourceTurn > prevJudgment.turnIndex && c.sourceTurn < turn).flatMap(c => c.targets) : []);
+  const wasFocused = (id: string) => prevIds.includes(id) || focusedTurns.some(j => j.ids.includes(id));
 
   return openClaims.flatMap(c => {
     const name = c.name!;
     if (!isHumanProposal(c) && c.act !== "name_accept") return [];
-    if (prevIds.length && c.sourceTurn === turn && isHumanProposal(c) && c.targets.length &&
-      c.targets.every(id => !prevIds.includes(id) && !focusedTurns.some(j => j.ids.includes(id)))) return [];
+    const requiresFocus = prevPublicIds.size > 0 ||
+      (prevIds.length > 0 && c.sourceTurn === turn && isHumanProposal(c) && c.targets.length > 0);
     const normalized = normalizeName(name);
     if (c.sourceTurn < turn) {
       const focusMoved = c.targets.length > 0 && focusedTurns.some(j =>
@@ -256,6 +257,7 @@ function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns: reado
     if (!source) return [];
     const occupied = slots.filter(id => ledger[id].name !== null && normalizeName(ledger[id].name) === normalized);
     return candidates.filter(id => {
+      if (requiresFocus && !wasFocused(id)) return false;
       if (prevPublicIds.size && !prevPublicIds.has(id)) return false;
       const entry = ledger[id];
       if (entry.status === "agreed" || entry.status === "deferred" && entry.name !== null && !occupied.includes(id) ||
