@@ -288,7 +288,7 @@ ${list}${live ? '<script src="/admin/receptions.js" defer></script>' : ''}`);
 
 export function renderEntry(entryUrl: string): string {
   return page('参加用URL・QRコード', `${adminNav('/admin/entry')}<h1>参加用URL・QRコード</h1>
-<p class="entry-url"><a href="${escapeHtml(entryUrl)}">${escapeHtml(entryUrl)}</a></p><div class="qr">${renderQrSvg(entryUrl)}</div>`);
+<p class="entry-url"><a href="${escapeHtml(entryUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(entryUrl)}</a></p><div class="qr">${renderQrSvg(entryUrl)}</div>`);
 }
 
 const ORDER_CHOICES: [string, string, string][] = [['rf-be', 'repair-first,bypass-enabled', 'repair-first → bypass-enabled'],
