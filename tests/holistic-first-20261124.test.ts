@@ -107,3 +107,20 @@ test('a naming decision written as 「X」で呼びましょう / そう呼び�
   }
   for (const text of ['「名前」で呼びましょうか？', '「名前」で呼ぶのはどうでしょう？', '全体は丸い形です。']) assert.deepEqual(findExtendedNamingDecisions(text), [], text);
 });
+
+test('the agree-adoption check: refusals and bare restatements are violations, each natural adoption wording and questions-with-adoption are not', async () => {
+  const { findAgreeNotAdopted } = await import('../dialogue-model/runtime/v2/generation-guard.ts');
+  for (const text of ['今回は「名前」にはしません。', '「名前」は少し違う気がします。', '「名前」という呼び名ですね。']) assert.deepEqual(findAgreeNotAdopted(text), ['agree_not_adopted'], text);
+  for (const text of ['はい、「名前」と呼びましょう。', '「名前」で呼びましょう。', '「名前」にしましょう。', '「名前」で決まりです。', '「名前」でいいですよ。', '「名前」で決めましょう。', '「名前」で決めます。', 'そう呼びます。', '「名前」にしました。']) {
+    assert.deepEqual(findAgreeNotAdopted(text), [], text);
+  }
+});
+
+test('a flat statement of the call name is a naming decision under a non-agree act and counts as the adoption in an agree draft; its question form is neither', async () => {
+  const { findExtendedNamingDecisions, findAgreeNotAdopted } = await import('../dialogue-model/runtime/v2/generation-guard.ts');
+  for (const text of ['この形の呼び名は「名前」です。', 'この図形の名前は「名前」だ。', '「名前」で決めましょう。']) {
+    assert.deepEqual(findExtendedNamingDecisions(text), ['naming_decision'], text);
+    assert.deepEqual(findAgreeNotAdopted(text), [], text);
+  }
+  for (const text of ['この形の呼び名は「名前」ですか？', '呼び名は「名前」でしょうか？']) assert.deepEqual(findExtendedNamingDecisions(text), [], text);
+});

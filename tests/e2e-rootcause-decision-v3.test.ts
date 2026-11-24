@@ -881,3 +881,27 @@ test('a naming decision in the 「X」で呼びましょう form is regenerated 
     assert.equal(r.text, 'そう見えるんですね。');
   }
 });
+
+// An agree draft must state the adoption in the existing wording family (questions not counting). Synthetic wordings, both strategies.
+for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
+  test(`v3 ${strategy}: an agree draft that only refuses the quoted name is regenerated; each natural adoption wording is published on the first draft`, async () => {
+    const quote = `この形は「${NEW_NAME}」でいいですか？`;
+    const refusal = await (await groundedFixture(3, strategy)).exchange(quote, { action: 'agree', target: 3, segments: [naming(quote, NEW_NAME)],
+      drafts: [`今回は「${NEW_NAME}」にはしません。`, agreeSpeech(NEW_NAME)] });
+    assert.deepEqual(refusal.trace.generationGuard, { violations: ['agree_not_adopted'], regenerated: true, fallback: false });
+    assert.equal(refusal.text, agreeSpeech(NEW_NAME));
+    assert.deepEqual(refusal.state.ledger[ids[3]], { status: 'agreed', name: NEW_NAME });
+    for (const wording of [`はい、「${NEW_NAME}」と呼びましょう。`, `じゃあ「${NEW_NAME}」で呼びましょう。`, `うん、「${NEW_NAME}」にしましょう。`, `「${NEW_NAME}」で決まりですね。`,
+      `うん、「${NEW_NAME}」でいいですよ。`, `はい、「${NEW_NAME}」で決めましょう。`, `「${NEW_NAME}」で決めます。`, `ではそう呼びます。「${NEW_NAME}」ですね。`, `「${NEW_NAME}」にしました。`]) {
+      const r = await (await groundedFixture(3, strategy)).exchange(quote, { action: 'agree', target: 3, segments: [naming(quote, NEW_NAME)], drafts: [wording] });
+      assert.deepEqual(r.trace.generationGuard, { violations: [], regenerated: false, fallback: false }, wording);
+      assert.equal(r.text, wording);
+    }
+  });
+}
+
+test('a non-agree act may not publish the 「X」で決めましょう form either', async () => {
+  const f = fixture('bypass-enabled');
+  const r = await f.exchange('丸い形のことです。', { action: 'accept', target: 3, drafts: ['この形は「時計」で決めましょう。', 'そう見えるんですね。'] });
+  assert.deepEqual(r.trace.generationGuard, { violations: ['naming_decision'], regenerated: true, fallback: false });
+});

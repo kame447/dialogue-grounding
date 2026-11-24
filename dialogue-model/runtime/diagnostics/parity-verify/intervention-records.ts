@@ -28,12 +28,13 @@ const RETRY_REASONS:ReadonlyArray<{codes:readonly string[];text:string;legacy?:s
   legacy:'前の下書きに画面の向きに依存する語（上下左右・上端・下端・右向き等）が含まれていました。相手の画面では図形が回転しているため、上下左右を使わず、尖りの数・大小・くぼみ・四角い部分とのつながりなど回転しても変わらない特徴だけで書き直してください。'},
  {codes:['internal_id','internal_field','internal_image','internal_credential','internal_prompt_echo'],text:'前の下書きには内部の参照IDや作業メモの項目が含まれていました。それらを出さずに書き直してください。'},
  {codes:['working_note'],text:'前の下書きに、英語の作業メモや複数の返答案が混じっていました。日本語の一つの返答だけにして書き直してください。'},
+ {codes:['agree_not_adopted'],text:'前の下書きは、選ばれた名前に決まったことを述べていませんでした。この名前に決まったことを、名前を「」で示して伝えてください。'},
  {codes:['name_not_shown'],text:'このactionで扱う名前を、「」で囲んで発話の中に示してください。'},
 ];
 // codes: the recorded condition's own guard violations (exact). draft: for the comparison condition, what its OWN first draft shows to this verifier
 // (an orientation leak; any other leak, which is where a name/agreement decision, an id or a field would show): the orientation reason must be present exactly
 // when the draft has an orientation leak, and the name/agreement-decision reason can appear only if the draft has some other leak. Other families stay open.
-function retryReasonsMatch(text:string,restated:boolean,codes?:readonly string[],draft?:{orientation:boolean;naming:boolean;workingNote:boolean}):boolean{
+function retryReasonsMatch(text:string,restated:boolean,codes?:readonly string[],draft?:{orientation:boolean;naming:boolean;workingNote:boolean;agreeNotAdopted:boolean}):boolean{
  if(!text)return false;
  for(const reason of RETRY_REASONS){
   const match=text.startsWith(reason.text)?reason.text:!restated&&reason.legacy&&text.startsWith(reason.legacy)?reason.legacy:null;
@@ -43,6 +44,7 @@ function retryReasonsMatch(text:string,restated:boolean,codes?:readonly string[]
    if(reason.codes.includes('orientation_leak')&&draft.orientation!==Boolean(match))return false;
    if(reason.codes.includes('naming_decision')&&draft.naming!==Boolean(match))return false;
    if(reason.codes.includes('working_note')&&draft.workingNote!==Boolean(match))return false;
+   if(reason.codes.includes('agree_not_adopted')&&draft.agreeNotAdopted!==Boolean(match))return false;
   }
   if(match)text=text.slice(match.length);
  }
@@ -68,6 +70,16 @@ function s4HasOrientationLeak(text:unknown):boolean{
  return unquoted.split(S4_CLAUSE_BREAK).some(clause=>S4_ORIENT_WORDS.test(clause)&&!S4_VIEWPOINT.test(clause));
 }
 // Generation working text (v3): runs of unpublished English words, labelled alternatives or complete quoted replies absent from the public history.
+// holistic-first (v3): an agree draft must state the adoption in the same wording family (questions not counting); a copy of the guard's rule.
+function s4AgreeNotAdopted(text:string):boolean{
+ const compact=text.normalize('NFKC').replace(/[\s\u200b-\u200d\ufeff]/gu,'');
+ if(s4NamingDecision(compact,'accept'))return false;
+ for(const re of [/と呼(?:びました|んだ|ぶことにしました|ぶことにした)/gu,/に(?:決めました|決めた|しました|した)/gu,/で(?:いきました|行きました|決まりました|決まった|決定しました|確定しました)/gu])
+  for(const m of compact.matchAll(re))if(!qTail(compact.slice(m.index!+m[0].length)))return false;
+ for(const re of [/(?:この|その|こちら|そちら)?(?:図形|形)?(?:の)?名前(?:は|を)[^。!?、,]{0,16}?(?:「[^」]+」|『[^』]+』)(?:です|だ|ですね|ですよ)/gu,/(?:この|その|こちら|そちら)の?(?:図形|形)は[^。!?、,]{0,16}?(?:「[^」]+」|『[^』]+』)(?:です|だ|ですね|ですよ)/gu])
+  for(const m of compact.matchAll(re))if(!qTail(compact.slice(m.index!+m[0].length)))return false;
+ return true;
+}
 function s4HasWorkingNote(text:unknown,publicTexts:readonly string[]):boolean{
  if(typeof text!=='string')return false;
  const history=publicTexts.map(t=>String(t).normalize('NFKC'));
@@ -90,7 +102,8 @@ function s4InternalLeak(compact:string):boolean{
 function s4NamingDecision(compact:string,act:string):boolean{
  if(act!=='agree'){
   // holistic-first: 「X」で呼びましょう / そう呼びます are naming decisions too (a record of the holistic text); older versions keep the narrower family.
-  for(const re of [CTX.style==='holistic'?/(?:と|で|そう)呼(?:ぼう|びましょう|ぶことに(?:しよう|しましょう|します)|びます)/gu:/と呼(?:ぼう|びましょう|ぶことに(?:しよう|しましょう|します)|びます)/gu,/に(?:しよう|しましょう|します|決めよう|決めましょう|決めます)/gu,/で(?:いこう|行こう|いきましょう|行きましょう|いきます|行きます)/gu,/[でに](?:決まり|決定|確定)/gu,/で(?:いい|良い|よい|大丈夫)/gu,/合意/gu]){
+  const flatCall=/(?:呼び名|名前|呼び方|名称)(?:は|を)[^。!?、,]{0,16}?(?:「[^」]+」|『[^』]+』)(?:です|だ|ですね|ですよ)/gu;
+  for(const re of [...(CTX.style==='holistic'?[flatCall]:[]),CTX.style==='holistic'?/(?:と|で|そう)呼(?:ぼう|びましょう|ぶことに(?:しよう|しましょう|します)|びます)|で決め(?:よう|ましょう|ます)/gu:/と呼(?:ぼう|びましょう|ぶことに(?:しよう|しましょう|します)|びます)/gu,/に(?:しよう|しましょう|します|決めよう|決めましょう|決めます)/gu,/で(?:いこう|行こう|いきましょう|行きましょう|いきます|行きます)/gu,/[でに](?:決まり|決定|確定)/gu,/で(?:いい|良い|よい|大丈夫)/gu,/合意/gu]){
    for(const m of compact.matchAll(re)){const tail=compact.slice(m.index!+m[0].length);if(qTail(tail))continue;if(m[0]==='合意'&&/^(?:していません|していない|しません|ではありません|ではない|はしていません|はしていない)/u.test(tail))continue;if(re.source.startsWith('に')&&/(?:後|あと|後日|今度|別の機会|保留|後回し|先送り|先延ばし)$/u.test(compact.slice(0,m.index)))continue;return true;}
   }
  }
@@ -511,7 +524,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
      const codes=label===tr.label&&t.status==='committed'?t.generationGuard.violations:undefined;
      // The comparison condition's retry reason is checked against that condition's own first draft, which this verifier classifies itself.
      const v3Retry=layout==='two_stage_v3';
-     const draft=codes===undefined&&generationCount===1?{orientation:v3Retry&&s4HasOrientationLeak(prevDraft),naming:typeof prevDraft==='string'&&s4NamingDecision(prevDraft.normalize('NFKC').replace(/[\s\u200b-\u200d\ufeff]/gu,''),s.executed?.action),workingNote:v3Retry&&restatedRetry&&s4HasWorkingNote(prevDraft,publicTexts)}:undefined;
+     const draft=codes===undefined&&generationCount===1?{orientation:v3Retry&&s4HasOrientationLeak(prevDraft),naming:typeof prevDraft==='string'&&s4NamingDecision(prevDraft.normalize('NFKC').replace(/[\s\u200b-\u200d\ufeff]/gu,''),s.executed?.action),workingNote:v3Retry&&restatedRetry&&s4HasWorkingNote(prevDraft,publicTexts),agreeNotAdopted:v3Retry&&CTX.style==='holistic'&&s.executed?.action==='agree'&&typeof prevDraft==='string'&&s4AgreeNotAdopted(prevDraft)}:undefined;
      if(!generationMessages(p.messages,t,s.executed,{...tape,generationGraph:(tr.turns??[]).find((u:any)=>u.turn===t.turnIndex)?.state?.graph},m.profile,generationCount++,codes,draft))return'invalid';
      prevDraft=answer?.response?.text??answer?.text;
     }
@@ -820,14 +833,14 @@ function choiceResponse(body:any,response:any):boolean{
 // Fixed baseline instruction bytes are installed below; no producer builder is
 // executed while checking a record. No condition or original decision is input.
 // Prompt-style update (prompt-style-20261124): the current text and the prior text are both verified exactly.
-function generationMessages(messages:any[],trace:any,execution:any,tape:any,profile:any,index:number,codes?:readonly string[],draft?:{orientation:boolean;naming:boolean;workingNote:boolean}):boolean{
+function generationMessages(messages:any[],trace:any,execution:any,tape:any,profile:any,index:number,codes?:readonly string[],draft?:{orientation:boolean;naming:boolean;workingNote:boolean;agreeNotAdopted:boolean}):boolean{
  // holistic-first: the new generation text applies to a technical trial only; a non-trial v3 attempt keeps the style text under the same criteria version.
  if(CTX.style==='holistic')return tape.technicalTrial?generationMessagesWith(messages,trace,execution,tape,profile,FIXED_HOLISTIC,{v3:[TRIAL_HOLISTIC],legacy:LEGACY_TRIAL_STYLE},index,codes,draft):generationMessagesWith(messages,trace,execution,tape,profile,FIXED_STYLE,{v3:[TRIAL_STYLE],legacy:LEGACY_TRIAL_STYLE},index,codes,draft);
  if(CTX.style==='style'||CTX.style==='loop')return generationMessagesWith(messages,trace,execution,tape,profile,FIXED_STYLE,{v3:[TRIAL_STYLE],legacy:LEGACY_TRIAL_STYLE},index,codes,draft);
  if(CTX.style==='legacy')return generationMessagesWith(messages,trace,execution,tape,profile,FIXED,{v3:[TRIAL,TRIAL_V3_PREV],legacy:LEGACY_TRIAL},index,codes,draft);
  return generationMessagesWith(messages,trace,execution,tape,profile,FIXED,{v3:[TRIAL,TRIAL_V3_PREV],legacy:LEGACY_TRIAL},index,codes,draft)||generationMessagesWith(messages,trace,execution,tape,profile,FIXED_STYLE,{v3:[TRIAL_STYLE],legacy:LEGACY_TRIAL_STYLE},index,codes,draft);
 }
-function generationMessagesWith(messages:any[],trace:any,execution:any,tape:any,profile:any,FIXED:any,trials:{v3:any[];legacy:any},index:number,codes?:readonly string[],draft?:{orientation:boolean;naming:boolean;workingNote:boolean}):boolean{
+function generationMessagesWith(messages:any[],trace:any,execution:any,tape:any,profile:any,FIXED:any,trials:{v3:any[];legacy:any},index:number,codes?:readonly string[],draft?:{orientation:boolean;naming:boolean;workingNote:boolean;agreeNotAdopted:boolean}):boolean{
  if(!trace.finalAction||!execution)return false;const g={action:execution.action,targetSlot:execution.target.kind==='single'?execution.target.figureId:null,candidateName:execution.name,discriminatingFeature:execution.feature,note:null};
  const trialOptions=CTX.v3&&!CTX.legacyV3?trials.v3:[trials.legacy];
  for(const trial of trialOptions){

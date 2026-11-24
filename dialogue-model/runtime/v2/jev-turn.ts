@@ -23,7 +23,7 @@ import { validateJevDecision, validateHumanReferentEstimate, validateRepairProsp
 import type { JevDecisionFailureEvidence } from "../decision/jev-decision.ts";
 import { prepareLocalGroundingTurn, validateLocalGroundingOptions, findLocalPublicationViolations } from "./local-grounding-turn.ts";
 import type { LocalGroundingResearchRecord, LocalGroundingTrace } from "./local-grounding-turn.ts";
-import { findAgreeNameMismatch, findProposeNameMismatch, findGuardViolations, findOrientationLeaks, findWorkingNoteLeaks, findExtendedNamingDecisions, orientationSafeFallback, rewriteReasons } from "./generation-guard.ts";
+import { findAgreeNameMismatch, findProposeNameMismatch, findGuardViolations, findOrientationLeaks, findWorkingNoteLeaks, findExtendedNamingDecisions, findAgreeNotAdopted, orientationSafeFallback, rewriteReasons } from "./generation-guard.ts";
 import { createMemoAiExtractor, MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS, AiPublicError, aiHash, emptyAiEvidence } from "../local-grounding/extract-ai.ts";
 import { createJevAiFunctionClassifier, createJevAiSupportChecker, AI_FUNCTION_INSTRUCTIONS, AI_SUPPORT_INSTRUCTIONS,
   AI_RESPONSE_SUPPORT_INSTRUCTIONS, AI_FUNCTION_CRITERIA, AI_SUPPORT_CHOICES, AI_ACT_DESCRIPTIONS } from "../local-grounding/jev-ai-public.ts";
@@ -874,6 +874,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       const violations = (text: string, context: Message[]) => [...new Set([...findGuardViolations(text, judgment.action), ...findLocalPublicationViolations(text, context),
         ...(questionLayout === "two_stage_v3" ? findOrientationLeaks(text) : []),
         ...(questionLayout === "two_stage_v3" && judgment.action !== "agree" ? findExtendedNamingDecisions(text) : []),
+        ...(questionLayout === "two_stage_v3" && judgment.action === "agree" ? findAgreeNotAdopted(text) : []),
         ...(questionLayout === "two_stage_v3" ? findWorkingNoteLeaks(text, events.filter(e => e.seq <= latest.seq).map(e => e.text)) : []),
         ...(questionLayout === "two_stage_v3" && judgment.action === "agree" && judgment.candidateName !== null
           ? findAgreeNameMismatch(text, judgment.candidateName) : []),
