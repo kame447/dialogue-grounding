@@ -1,4 +1,6 @@
 /** Participant assignment API. Researcher values only; never an allocation method. */
+import type { BudgetLimits } from '../diagnostics/parity-live/audit.ts';
+import type { ParticipantModelPin } from './participant-model-pin.ts';
 import type { ReceptionPlan, ReceptionPlanV1, ReceptionPlanV2, RotationMode } from './reception.ts';
 export { BaseAssignmentError, validateBaseAssignmentConfig, validateBaseStart,
   canonicalBaseAssignmentConfig, validateBoundBaseRecord, assignmentRotationMode } from './base-assignment-data.ts';
@@ -35,7 +37,8 @@ export type BaseTask = { getState(): Record<string, unknown>; persistNow(): Prom
   submitHuman(options: { names: unknown }): Promise<unknown>; submitAI(): Promise<unknown> };
 /** rotationMode is present for new tasks only; a restored task takes its mode from the record. */
 export type MakeBaseTask = (options: { strategy: Strategy; seed: number; referenceMemory: boolean; runDir: null;
-  restore: BaseRecord | null; now: () => number; onPersist: (record: RawBaseRecord) => Promise<void>; rotationMode?: RotationMode }) => Promise<BaseTask>;
+  restore: BaseRecord | null; now: () => number; onPersist: (record: RawBaseRecord) => Promise<void>; rotationMode?: RotationMode;
+  participantModelPin?: ParticipantModelPin; participantLimits?: Readonly<BudgetLimits> }) => Promise<BaseTask>;
 export type BaseSessionOptions = { ownerId: string; store: BaseStore; readConfig: () => Promise<BaseAssignmentConfig | null>;
   /** null explicitly declines a plan, so the configured (non-reception) assignment is used. */
   readPlan?: () => Promise<{ receptionId: string; plan: ReceptionPlan; trialIndex: number } | null>;
