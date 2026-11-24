@@ -197,7 +197,7 @@ async function replay(strategy: Strategy, scenario: Turn[], onFailure?: (attempt
       return result;
     } },
     localGrounding: {
-      classifier: createJevLocalTestClassifier({ ...transport, questionLayout: trialProfile.questionLayout })!,
+      classifier: createJevLocalTestClassifier({ ...transport, questionLayout: trialProfile.questionLayout, dialoguePolicy: trialProfile.dialoguePolicy })!,
       aiPublicTransport: transport,
     },
     onJevTurnTrace(record: JevTurnTrace) { trace = structuredClone(record); },

@@ -177,7 +177,7 @@ function session(strategy: Strategy, observation: Memo = memo) {
           async reobserve(): Promise<never> { throw new Error('unexpected reobservation'); },
         },
         localGrounding: {
-          classifier: createJevLocalTestClassifier({ ...transport, timeoutMs: profile.timeouts.localMs })!,
+          classifier: createJevLocalTestClassifier({ ...transport, timeoutMs: profile.timeouts.localMs, dialoguePolicy: profile.dialoguePolicy })!,
           aiPublicTransport: transport, aiPublicClaims: profile.localGrounding.aiPublicClaims,
           timeoutMs: profile.timeouts.localMs,
         },
