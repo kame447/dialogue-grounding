@@ -1,8 +1,8 @@
 {
   "schemaVersion": "parity_live_failure_capture_v1",
-  "baseCommit": "4eb77baf4878c0f0077484b20a408349b04722b3",
+  "baseCommit": "0ce23bf9c205151ce3f00b5c2517c6fc1f4246f3",
   "execution": "mock",
-  "fixtureSha256": "d8658b2054e85b5f997527097de630d985fe0103a3d74c2086e6f48cea9e002c",
+  "fixtureSha256": "5b4cb233f76bcc7323ed21adc91a31bc3ddc2f881b5280802a76eafd3fd4584c",
   "sourceFiles": {
     "dialogue-model/runtime/client.mjs": "5a45abbdf6f2b9978185075df7f11c3d2d898b2b0b2ecf70962fccb21136e0b7",
     "dialogue-model/runtime/config.mjs": "2b6a4ea7a18c088e6ca6bf519537ef51039d71e81872ef26b93eba3739aa98ca",
