@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { PARTICIPANT_PRODUCTION_PROFILE, type ParticipantProductionProfile } from '../web/participant-usage-policy.ts';
 import type { Strategy } from './base-assignment.ts';
 import type { BudgetLimits } from '../diagnostics/parity-live/audit.ts';
 import { DEFAULT_COST_CAP_USD } from '../diagnostics/jev-shadow-eval/local-openrouter.ts';
@@ -24,6 +25,7 @@ export type ReceptionPlanV1 = { schemaVersion: 'reception_plan_v1'; protocolId: 
 type ParticipantPlanSettings = {
   participantModelPin?: ParticipantModelPin;
   participantLimits?: Readonly<BudgetLimits>;
+  participantRuntimeProfile?: ParticipantProductionProfile;
 };
 export type ReceptionPlanV2 = ParticipantPlanSettings & { schemaVersion: 'reception_plan_v2'; protocolId: string; protocolRevision: number;
   protocolSha256: string; order: Strategy[]; betweenTrials: BetweenTrials; approvedAt: string;
@@ -150,13 +152,18 @@ function participantPlan(value: unknown) {
   const fields = value && typeof value === 'object' ? value : {};
   const hasPin = Object.hasOwn(fields, 'participantModelPin');
   const hasLimits = Object.hasOwn(fields, 'participantLimits');
-  if (hasLimits && !hasPin) return fail();
-  const p = object(value, [...PLAN_KEYS, ...(hasPin ? ['participantModelPin'] : []), ...(hasLimits ? ['participantLimits'] : [])]);
+  const hasProfile = Object.hasOwn(fields, 'participantRuntimeProfile');
+  if ((hasLimits || hasProfile) && !hasPin || hasLimits && hasProfile) return fail();
+  const p = object(value, [...PLAN_KEYS,
+    ...(hasPin ? ['participantModelPin'] : []), ...(hasLimits ? ['participantLimits'] : []),
+    ...(hasProfile ? ['participantRuntimeProfile'] : [])]);
+  if (hasProfile && p.participantRuntimeProfile !== PARTICIPANT_PRODUCTION_PROFILE) return fail();
   const pin = hasPin ? validateParticipantModelPin(p.participantModelPin) : undefined;
   const limits = hasLimits ? validateParticipantLimits(p.participantLimits) : undefined;
   const participant: ParticipantPlanSettings = {
     ...(pin ? { participantModelPin: pin } : {}),
     ...(limits ? { participantLimits: limits } : {}),
+    ...(hasProfile ? { participantRuntimeProfile: PARTICIPANT_PRODUCTION_PROFILE } : {}),
   };
   return { p, participant };
 }
@@ -269,6 +276,7 @@ export async function approveReception(value: unknown, options: ParticipantPlanS
   const participant = {
     ...(options.participantModelPin !== undefined ? { participantModelPin: options.participantModelPin } : {}),
     ...(options.participantLimits !== undefined ? { participantLimits: options.participantLimits } : {}),
+    ...(options.participantRuntimeProfile !== undefined ? { participantRuntimeProfile: options.participantRuntimeProfile } : {}),
   };
   if (options.protocol && typeof options.protocol === 'object' && (options.protocol as { schemaVersion?: unknown }).schemaVersion === 'reception_protocol_v3') {
     const p = validateReceptionProtocolV3(options.protocol), canonical = JSON.stringify(p), sha256 = receptionProtocolSha256(canonical);
@@ -322,7 +330,7 @@ export async function approveReception(value: unknown, options: ParticipantPlanS
       ...participant, trials:selected.map((strategy, index) => ({ index, strategy, seed:seeds[index] ?? seeds[0], referenceMemory:p.referenceMemory, rotationMode:p.rotationMode })) });
     return validateReception({ ...r, status:'approved', plan, revision:r.revision+1 });
   }
-  if (options.participantModelPin !== undefined || options.participantLimits !== undefined) return fail('protocol_unconfigured');
+  if (options.participantModelPin !== undefined || options.participantLimits !== undefined || options.participantRuntimeProfile !== undefined) return fail('protocol_unconfigured');
   const p = validateReceptionProtocol(options.protocol);
   if (r.status !== 'pending' || r.revision !== options.expectedRevision) return fail('reception_conflict');
   if (!int(options.order) || !p.allowedOrders[options.order]) return fail('invalid_order');

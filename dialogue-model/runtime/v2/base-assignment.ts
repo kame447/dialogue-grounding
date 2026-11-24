@@ -1,4 +1,5 @@
 /** Participant assignment API. Researcher values only; never an allocation method. */
+import type { ParticipantProductionProfile } from '../web/participant-usage-policy.ts';
 import type { BudgetLimits } from '../diagnostics/parity-live/audit.ts';
 import type { ParticipantModelPin } from './participant-model-pin.ts';
 import type { ReceptionPlan, ReceptionPlanV1, ReceptionPlanV2, ReceptionPlanV3, RotationMode } from './reception.ts';
@@ -42,7 +43,8 @@ export type BaseTask = { getState(): Record<string, unknown>; persistNow(): Prom
  * figureSelection is passed for new reception_plan_v3 tasks only; older sources keep the legacy record shape. */
 export type MakeBaseTask = (options: { strategy: Strategy; seed: number; referenceMemory: boolean; runDir: null;
   restore: BaseRecord | null; now: () => number; onPersist: (record: RawBaseRecord) => Promise<void>; rotationMode?: RotationMode;
-  figureSelection?: ResolvedFigureSelection; participantModelPin?: ParticipantModelPin; participantLimits?: Readonly<BudgetLimits> }) => Promise<BaseTask>;
+  figureSelection?: ResolvedFigureSelection; participantModelPin?: ParticipantModelPin; participantLimits?: Readonly<BudgetLimits>;
+  participantRuntime?: { profile: ParticipantProductionProfile; assignmentId: string } }) => Promise<BaseTask>;
 export type BaseSessionOptions = { ownerId: string; store: BaseStore; readConfig: () => Promise<BaseAssignmentConfig | null>;
   /** null explicitly declines a plan, so the configured (non-reception) assignment is used. */
   readPlan?: () => Promise<{ receptionId: string; plan: ReceptionPlan; trialIndex: number } | null>;

@@ -1,3 +1,5 @@
+import { ParticipantUsageLedger } from '../web/participant-usage.ts';
+import { PARTICIPANT_USAGE_ONLY } from '../web/participant-usage-policy.ts';
 // v2 naming task: scattered unlabeled boards with opaque per-side ids, immediate
 // asynchronous human messages, and private submissions scored only after both
 // sides submit. The participant sees only their own scene and public events;
@@ -98,7 +100,7 @@ export function parseAiNamesV2(text, slots) {
  *   activeDecision?: {purpose: string, client: {chooseAction(request: object): Promise<any>}} | null,
  *   utteranceStyle?: string, rotationMode?: string, groundingShadow?: import('./grounding-shadow.ts').GroundingShadowOptions | null,
  *   localGrounding?: import('../local-grounding/contract.ts').LocalGroundingOptions | null,
- *   jevResearch?: import('../web/participant-jev-wiring.ts').JevResearchOptions | null,
+ *   jevResearch?: import('../web/participant-jev-wiring.ts').JevResearchOptions<import('../web/participant-jev-wiring.ts').JevResearchLedger> | null,
  *   onLocalGroundingTrace?: ((record: import('./local-grounding-turn.ts').LocalGroundingResearchRecord) => unknown) | null }} options
  *   groundingShadow is a researcher-only, default-off shadow; a restored trial keeps it only if it started with it.
  */
@@ -147,7 +149,8 @@ export async function createNamingTaskV2({
   const allAttempts = () => [...clone(priorAttempts), ...dialogue.getAttempts()];
   let aiPublicSettlement = jev && restore ? clone(restore.aiPublicSettlement) : null;
   let initialObservation = jev && restore ? clone(restore.initialObservation) : null;
-  if (jev && restore) restoreParticipantJevLedger(jev.ledger, restore.jevLedger);
+  const usage = jev?.ledger instanceof ParticipantUsageLedger ? jev.ledger : null;
+  if (jev && restore && !usage) restoreParticipantJevLedger(jev.ledger, restore.jevLedger);
   const effectiveClient = jev ? participantLunaClient(client, jev.ledger, jev.profile) : client;
   // The queue runs one AI turn at a time, so every upstream call starts inside the
   // current attempt (requestSeq) or outside any turn (final submission: null).
@@ -188,11 +191,11 @@ export async function createNamingTaskV2({
     localGrounding: local, onLocalGroundingTrace,
     ...(jev ? { decisionMode: "jev", observer: jev.observer, jevDecision: jev.jevDecision,
       ...(jev.technicalTrial ? { technicalTrial: clone(jev.technicalTrial) } : {}),
-      localGrounding: jev.localGrounding, maxReobservations: jev.profile.maxReobservations,
+      localGrounding: jev.localGrounding, ...(usage ? { usagePolicy: PARTICIPANT_USAGE_ONLY } : {}), maxReobservations: jev.profile.maxReobservations,
       interventionPolicy: jev.profile.interventionPolicy, decisionTimeoutMs: jev.profile.timeouts.decisionMs,
       onJevTurnTrace: (record) => {
         jevTraces.push(clone(record));
-        if (Object.values(record.aiPublic?.stages ?? {}).some(stage => stage.error === "cost_cap")) jev.ledger.stop("cost_cap");
+        if (!usage && Object.values(record.aiPublic?.stages ?? {}).some(stage => stage.error === "cost_cap")) jev.ledger.stop("cost_cap");
       } } : {}),
     onResearchUpdate: () => persist().catch(() => {}) });
   // The queue must never see an uninitialized Jev state, even on a zero-turn submission.
@@ -214,7 +217,8 @@ export async function createNamingTaskV2({
     turnTimings.push(timing);
     currentRequestSeq = input.requestSeq;
     try {
-      const result = await (jev ? withParticipantJevTurn(jev.ledger, input.requestSeq, () => dialogue.runAiTurn(input)) : dialogue.runAiTurn(input));
+      if (usage) await persist(); // Ensure the accepted input and clientId are durable before any RPC.
+      const result = await (usage ? usage.runTurn(input.lastEventId, input.signal, () => dialogue.runAiTurn(input)) : jev ? withParticipantJevTurn(jev.ledger, input.requestSeq, () => dialogue.runAiTurn(input)) : dialogue.runAiTurn(input));
       if (jev?.ledger.halted) throw new NamingTaskError("ai_unavailable");
       timing.outcome = "returned";
       return result;
@@ -235,10 +239,15 @@ export async function createNamingTaskV2({
       }
     }
   }
+  let initialQueue = restore?.queueState;
+  if (initialQueue && usage?.needsExplicitRetry(initialQueue.pendingHumanEventIds.at(-1))) {
+    // A restored POST may already have reached the provider. Reuse the existing queue error/retry path.
+    initialQueue = { ...initialQueue, errorCode: 'ai_unavailable' };
+  }
   const queue = createHumanMessageQueue({ runAiTurn: timedAiTurn,
     initialPrivateState, now,
     initialEvents: [{ speaker: "ai", text: SCRIPTED_OPENING, nonReferential: true }],
-    ...(restore?.queueState ? { initialState: restore.queueState } : {}) });
+    ...(initialQueue ? { initialState: initialQueue } : {}) });
   const recordId = restore?.recordId ?? randomUUID();
   const startedAt = restore?.startedAt ?? new Date(now()).toISOString();
   let humanSubmission = restore?.humanSubmission ?? null, aiSubmission = restore?.aiSubmission ?? null,

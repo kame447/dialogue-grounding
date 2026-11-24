@@ -3,6 +3,7 @@
 import { createHash } from 'node:crypto';
 import type { BaseAssignmentConfig, BaseAssignment, BaseRecord, BaseOwnerState } from './base-assignment.ts';
 import { validateReceptionPlan, effectiveRotationMode, effectiveFigureSelection, effectiveParticipantModelPin, ROTATION_MODES } from './reception.ts';
+import { PARTICIPANT_PRODUCTION_PROFILE } from '../web/participant-usage-policy.ts';
 import { validateParticipantModelPin } from './participant-model-pin.ts';
 import { resolveFigureSelection, validateResolvedFigureSelection, isLegacyFigureSelection } from '../stimuli/figure-bank.ts';
 import type { ResolvedFigureSelection } from '../stimuli/figure-bank.ts';
@@ -146,6 +147,12 @@ export function validateBoundBaseRecord(record: unknown, assignment: unknown): v
     const recordedPin = Object.hasOwn(options, 'participantModelPin')
       ? validateParticipantModelPin(options.participantModelPin) : undefined;
     if (JSON.stringify(pin) !== JSON.stringify(recordedPin) || pin && options.jevResearch !== true) throw new Error('model_pin');
+    const profile = a.source.kind === 'reception_plan_v2' || a.source.kind === 'reception_plan_v3'
+      ? a.source.plan.participantRuntimeProfile : undefined;
+    const ledger = r.jevLedger && typeof r.jevLedger === 'object' ? data(r.jevLedger) : null;
+    if (profile ? options.participantRuntimeProfile !== profile || ledger?.schemaVersion !== PARTICIPANT_PRODUCTION_PROFILE ||
+        ledger.assignmentId !== a.assignmentId || Object.hasOwn(ledger, 'limits')
+      : Object.hasOwn(options, 'participantRuntimeProfile') || ledger?.schemaVersion === PARTICIPANT_PRODUCTION_PROFILE) throw new Error('runtime_profile');
     if (typeof r.recordId !== 'string' || !UUID.test(r.recordId) || r.version !== 2 || r.seed !== a.seed || r.strategy !== a.strategy ||
         options.referenceMemory !== a.referenceMemory || !['dialogue', 'submitting', 'completed'].some(v => v === r.status) ||
         !Array.isArray(queue.pendingHumanEventIds) || queue.pendingHumanEventIds.some(v => typeof v !== 'string') ||
