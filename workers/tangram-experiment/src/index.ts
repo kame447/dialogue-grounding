@@ -14,7 +14,7 @@ import { summarizeLatency } from "./admin/latency.ts";
 import { ACTIVE_KEY, backfillActive, deleteArchived, ledgerIds, readArchived,
   readQuestionnaire, retentionDays, writeQuestionnaire } from "./admin/archive.ts";
 import { RECORD_ID } from "./admin/summary.ts";
-import { applyQuestionnaire, lockResult, participantReview, QUESTIONNAIRE_FORM, recordListEntry, sortRecordList,
+import { lockResult, participantReview, QUESTIONNAIRE_FORM, recordListEntry, sortRecordList,
   type Questionnaire } from "../../../dialogue-model/runtime/v2/participant-records.ts";
 
 import { createBaseAssignmentSession, BaseSessionError } from "../../../dialogue-model/runtime/v2/base-assignment-session.ts";
@@ -30,6 +30,10 @@ import { receptionOpen, validateReceptionSettings } from './admin/reception-sett
 import type { ProtocolEntry, ReceptionSettings } from './admin/reception-settings.ts';
 import type { RotationMode } from '../../../dialogue-model/runtime/v2/reception.ts';
 import type { Reception } from '../../../dialogue-model/runtime/v2/reception.ts';
+import { BROWSER_SESSIONS_KEY, EMPTY_TAB_SESSION_MAX_AGE_MS, MAX_EMPTY_TAB_SESSIONS, TAB_SESSION_HEADER, TAB_SESSION_ID,
+  questionnaireUpdate, sortBrowserSessions, summarizeBrowserSession, tabSessionRoute,
+  validateCreateTabSession, validateEventCount } from './tab-sessions.ts';
+import type { BrowserSession, BrowserSessionSummary, ReceptionMode } from './tab-sessions.ts';
 export { AdminIndex };
 
 type Strategy = "repair-first" | "bypass-enabled";
@@ -81,13 +85,14 @@ export interface Env extends SoftLimitBindings {
 }
 
 const ADMIN_INDEX_NAME = "global";
+const TAB_OWNER_KEY = "browser:tab-owner:v1";
 
 const MAX_BODY_BYTES = 64 * 1024;
 const errors = new Set([
   "invalid_strategy", "invalid_seed", "invalid_submission", "invalid_request", "busy", "trial_required",
   "ai_unavailable", "scoring_error", "invalid_message", "invalid_options", "ai_busy", "ai_retry_required",
   "submission_error", "already_submitted", "dialogue_closed", "record_write_failed",
-  "not_found", "invalid_questionnaire", "questionnaire_submitted", "trial_not_completed",
+  "not_found", "invalid_questionnaire", "questionnaire_submitted", "trial_not_completed", "trial_changed",
 ]);
 
 const json = (status: number, body: unknown): Response => Response.json(body, { status });
@@ -98,11 +103,16 @@ function newSessionId(): string {
   return [...crypto.getRandomValues(new Uint8Array(32))].map((x) => x.toString(16).padStart(2, "0")).join("");
 }
 
-async function readBody(request: Request): Promise<ApiBody> {
-  if (request.headers.get("content-type")?.split(";")[0] !== "application/json") throw new NamingTaskError("invalid_request");
+async function readBodyText(request: Request): Promise<string> {
   if (Number(request.headers.get("content-length") ?? 0) > MAX_BODY_BYTES) throw new NamingTaskError("invalid_request");
   const value = await request.text();
   if (new TextEncoder().encode(value).byteLength > MAX_BODY_BYTES) throw new NamingTaskError("invalid_request");
+  return value;
+}
+
+async function readBody(request: Request): Promise<ApiBody> {
+  if (request.headers.get("content-type")?.split(";")[0] !== "application/json") throw new NamingTaskError("invalid_request");
+  const value = await readBodyText(request);
   try {
     const data: unknown = JSON.parse(value);
     if (data && typeof data === "object" && !Array.isArray(data)) return data as ApiBody;
@@ -118,7 +128,7 @@ function sanitizedError(error: unknown): Response {
   const code = error instanceof NamingTaskError && errors.has(error.code) ? error.code : "operation_failed";
   const status = code === "scoring_error" || code === "record_write_failed" ? 500
     : code === "ai_unavailable" ? 502 : code === "not_found" ? 404
-    : ["ai_busy", "ai_retry_required", "busy", "questionnaire_submitted", "trial_not_completed"].includes(code) ? 409 : 400;
+    : ["ai_busy", "ai_retry_required", "busy", "questionnaire_submitted", "trial_not_completed", "trial_changed"].includes(code) ? 409 : 400;
   return json(status, { error: code });
 }
 
@@ -130,6 +140,7 @@ export class TangramSession extends DurableObject<Env> {
   // Trials replaced by /api/start in this browser: their late writes go only to their own archive key.
   private retired = new Set<string>();
   private receptionQueue: Promise<unknown> = Promise.resolve();
+  private browserQueue: Promise<unknown> = Promise.resolve();
   // The explicit intent of the admission in progress: a reception plan trial, or the configured legacy assignment.
   private admission: { kind: 'reception'; receptionId: string; expectedRevision: number; index: number } | { kind: 'legacy' } | null = null;
 
@@ -219,7 +230,7 @@ export class TangramSession extends DurableObject<Env> {
     });
   }
   /** Every new trial is admitted here, serialized with reception creation and approval. */
-  private async startTrial(body: ApiBody): Promise<void> {
+  private async startTrial(body: ApiBody, isolated: boolean): Promise<void> {
     await this.receptionSerial(async () => {
       const kind = await this.ownerKind();
       if (kind === 'reception') return this.receptionStart(body);
@@ -230,7 +241,11 @@ export class TangramSession extends DurableObject<Env> {
       }
       validateBaseStart(body);
       this.admission = { kind:'legacy' };
-      try { this.trial = (await this.assignmentSession().start(body)).task; } finally { this.admission = null; }
+      try {
+        const result = await this.assignmentSession().start(body);
+        if (isolated && result.kind === 'completed') throw new NamingTaskError('trial_changed');
+        this.trial = result.task;
+      } finally { this.admission = null; }
     });
   }
   /** Caller holds receptionSerial. The approved plan decides the trial; the current protocol must still be valid. */
@@ -397,25 +412,126 @@ export class TangramSession extends DurableObject<Env> {
   }
 
   /** Narrow metadata RPCs; neither constructs tasks nor selects conditions. */
-  async baseOwnerStatus(): Promise<'absent'|'registered'|'expired'> {
+  async baseOwnerStatus(browserProfile = false): Promise<'absent'|'registered'|'expired'> {
+    if (browserProfile && await this.ctx.storage.get(TAB_OWNER_KEY)) return 'absent';
     const owner = await this.ctx.storage.get<BaseOwnerState>('base:owner:v1');
     if (!owner) {
       const active = await this.ctx.storage.get<StoredTrial>(ACTIVE_KEY);
       if (active) await this.validateArchiveBinding(active);
-      return active ? 'registered' : 'absent';
+      return active || browserProfile && ((await this.ctx.storage.get('reception:v1')) !== undefined ||
+        (await ledgerIds(this.ctx.storage)).length > 0) ? 'registered' : 'absent';
     }
     readOwner(owner, this.ctx.id.toString());
+    if (browserProfile) return 'registered';
     const current = owner.activeKey && owner.admissions[owner.activeKey];
     if (current && current.errorCode === 'record_deleted') return 'expired';
     const r = current && current.record;
     return r && !await this.baseReadRecord(r.recordId) ? 'expired' : 'registered';
   }
-  async registerBaseOwner(): Promise<boolean> {
+  async registerBaseOwner(tabOwner = false): Promise<boolean> {
     return this.serialized(() => this.ctx.storage.transaction(async tx => {
       if (await tx.get('base:owner:v1') || await tx.get(ACTIVE_KEY)) return false;
       const owner: BaseOwnerState = {schemaVersion:'base_owner_v1',ownerId:this.ctx.id.toString(),revision:0,activeKey:null,admissions:{}};
-      await tx.put({'base:owner:v1':owner}); return true;
+      await tx.put({'base:owner:v1':owner, ...(tabOwner ? { [TAB_OWNER_KEY]: true } : {})}); return true;
     }));
+  }
+
+  private async browserSessions(): Promise<BrowserSession[]> {
+    return await this.ctx.storage.get<BrowserSession[]>(BROWSER_SESSIONS_KEY) ?? [];
+  }
+
+  async resolveTabSession(sessionId: string): Promise<string | null> {
+    if (!TAB_SESSION_ID.test(sessionId)) return null;
+    return (await this.browserSessions()).find(session => session.sessionId === sessionId)?.doName ?? null;
+  }
+
+  private tabObject(doName: string) {
+    return this.env.NAMING_SESSIONS.get(this.env.NAMING_SESSIONS.idFromName(doName));
+  }
+
+  /** Reclaim only an unstarted, unused owner, atomically with reception and admission writes. */
+  async inspectEmptyTabSession(reclaim: boolean): Promise<boolean> {
+    const empty = async (storage: Pick<DurableObjectStorage, 'get'>) => {
+      const owner = await storage.get<BaseOwnerState>('base:owner:v1');
+      const ledger = await storage.get<Record<string, number>>('ledger');
+      return (!owner || readOwner(owner, this.ctx.id.toString()).activeKey === null) &&
+        !await storage.get('reception:v1') && !await storage.get(ACTIVE_KEY) && !Object.keys(ledger ?? {}).length;
+    };
+    if (!reclaim) return empty(this.ctx.storage);
+    return this.serialized(() => this.ctx.storage.transaction(async tx => {
+      if (!await empty(tx)) return false;
+      await tx.delete(['base:owner:v1', TAB_OWNER_KEY]);
+      return true;
+    }));
+  }
+
+  async createTabSession(): Promise<{ sessionId: string; state: unknown } | null> {
+    const run = this.browserQueue.then(async () => {
+      const now = Date.now(), retained: BrowserSession[] = [];
+      let empty = 0;
+      for (const saved of await this.browserSessions()) {
+        const reclaim = now - Date.parse(saved.createdAt) >= EMPTY_TAB_SESSION_MAX_AGE_MS;
+        if (await this.tabObject(saved.doName).inspectEmptyTabSession(reclaim)) {
+          if (reclaim) continue;
+          empty++;
+        }
+        retained.push(saved);
+      }
+      if (empty >= MAX_EMPTY_TAB_SESSIONS) {
+        await this.ctx.storage.put({ [BROWSER_SESSIONS_KEY]: retained });
+        return null;
+      }
+      const session = { sessionId: crypto.randomUUID(), doName: newSessionId(), createdAt: new Date(now).toISOString() };
+      const child = this.tabObject(session.doName);
+      if (!await child.registerBaseOwner(true)) throw new BaseSessionError('trial_unavailable');
+      try {
+        const initial = await child.fetch(new Request('https://session.internal/api/state', { headers: { [TAB_SESSION_HEADER]: session.sessionId } }));
+        if (!initial.ok) throw new BaseSessionError('trial_unavailable');
+        const state = await initial.json();
+        await this.ctx.storage.put({ [BROWSER_SESSIONS_KEY]: [...retained, session] });
+        return { sessionId: session.sessionId, state };
+      } catch (error) {
+        await child.inspectEmptyTabSession(true);
+        throw error;
+      }
+    });
+    this.browserQueue = run.catch(() => {});
+    return run;
+  }
+
+  /** Read only history metadata, leaving dialogue restoration and model calls to explicit routes. */
+  async tabHistorySummary(sessionId: string, createdAt: string | null, protocolAvailable: boolean): Promise<BrowserSessionSummary | null> {
+    await this.initialize();
+    let reception: Reception | null = null, receptionUnreadable = false;
+    try { reception = await this.readReception(); }
+    catch (error) {
+      if (!(error instanceof ReceptionError)) throw error;
+      receptionUnreadable = true;
+    }
+    const active = await this.ctx.storage.get<StoredTrial>(ACTIVE_KEY);
+    const records = [];
+    for (const id of await ledgerIds(this.ctx.storage)) {
+      const record = await this.readOwnedArchive(id);
+      if (!record) continue;
+      const questionnaire = await readQuestionnaire<Questionnaire>(this.ctx.storage, id);
+      records.push({ entry: recordListEntry(record, id === active?.recordId, questionnaire), questionnaireUpdatedAt: questionnaire?.updatedAt });
+    }
+    return summarizeBrowserSession({ sessionId, createdAt, reception, receptionUnreadable, protocolAvailable,
+      activeRecordId: active?.recordId ?? null, records });
+  }
+
+  async browserHistory(): Promise<{ receptionMode: ReceptionMode; sessions: BrowserSessionSummary[] }> {
+    const settings = await this.settings().catch(() => null);
+    const protocolAvailable = Boolean(settings?.protocol);
+    const entries = await this.browserSessions();
+    const results = await Promise.all([
+      this.tabHistorySummary('legacy', null, protocolAvailable),
+      ...entries.map(({ sessionId, doName, createdAt }) =>
+        this.tabObject(doName).tabHistorySummary(sessionId, createdAt, protocolAvailable)),
+    ]);
+    const summaries = results.filter((summary): summary is BrowserSessionSummary => summary !== null);
+    return { receptionMode: settings ? receptionOpen(settings.mode) ? 'on' : 'off' : 'unavailable',
+      sessions: sortBrowserSessions(summaries) };
   }
   private async baseReadRecord(id: string): Promise<BaseRecord|null> {
     if (!RECORD_ID.test(id)) return null;
@@ -595,12 +711,12 @@ export class TangramSession extends DurableObject<Env> {
       return json(200, { recordId, form: QUESTIONNAIRE_FORM, questionnaire: await readQuestionnaire(this.ctx.storage, recordId) });
     }
     if (request.method !== "POST") throw new NamingTaskError("not_found");
-    const body = await readBody(request);
+    const update = questionnaireUpdate(await readBody(request));
     if (record.status !== "completed") throw new NamingTaskError("trial_not_completed");
     // Read-modify-write inside the archive queue, so concurrent saves never interleave.
     const questionnaire = await this.serialized(async () => {
       const previous = await readQuestionnaire<Questionnaire>(this.ctx.storage, recordId);
-      const next = applyQuestionnaire(previous, body, new Date().toISOString());
+      const next = update(previous, Date.now());
       if (next.changed && !await writeQuestionnaire(this.ctx.storage, recordId, next.questionnaire, Date.now(),
         next.questionnaire.status === "submitted")) throw new NamingTaskError("not_found");
       return next.questionnaire;
@@ -651,27 +767,35 @@ export class TangramSession extends DurableObject<Env> {
           if (body!.version !== 2 || Object.keys(body!).some(k => !['version','expectedReceptionRevision','expectedRecordId'].includes(k))) throw new NamingTaskError('invalid_request');
         } else validateBaseStart(body);
       }
+      const isolated = TAB_SESSION_ID.test(request.headers.get(TAB_SESSION_HEADER) ?? '');
+      if (!isolated && await this.ctx.storage.get(TAB_OWNER_KEY)) return json(404,{error:'not_found'});
       const ownerStatus = await this.baseOwnerStatus();
-      if (ownerStatus !== 'registered') return json(401,{error:'session_required'});
+      const recordPath = pathname.match(/^\/api\/records\/([^/]+)\/(review|questionnaire)$/);
+      const records = request.method === 'GET' && pathname === '/api/records';
+      // A deleted active trial does not revoke access to this session's other archives.
+      if (ownerStatus !== 'registered' && (!(records || recordPath) ||
+        !(isolated && ownerStatus === 'expired') && !await this.baseOwnerStatus(true))) {
+        return json(401,{error:'session_required'});
+      }
       await this.initialize();
       if (pathname === '/api/reception' && request.method === 'POST') {
         await this.receive(); this.trial = (await this.assignmentSession().restore()).task;
         return json(200,await this.participantState());
       }
-      if (request.method === "GET" && pathname === "/api/records") return json(200, { records: await this.ownRecords() });
-      const recordPath = pathname.match(/^\/api\/records\/([^/]+)\/(review|questionnaire)$/);
+      if (records) return json(200, { records: await this.ownRecords() });
       if (recordPath) return await this.recordRoute(request, recordPath[1], recordPath[2]);
       if (pathname !== '/api/start') this.trial = (await this.assignmentSession().restore()).task;
       if (request.method === 'GET' && pathname === '/api/state') return json(200,await this.participantState());
       if (request.method !== "POST") return json(404, { error: "not_found" });
       if (!["/api/start", "/api/message", "/api/retry", "/api/names", "/api/ai-submit"].includes(pathname)) return json(404, { error: "not_found" });
       if (pathname === '/api/start') {
-        await this.startTrial(body!);
+        await this.startTrial(body!, isolated);
         return json(200,await this.participantState());
       }
       if (!this.trial) throw new NamingTaskError("trial_required");
       const trial = this.trial;
-      if (typeof body!.expectedRecordId !== "string" || body!.expectedRecordId !== trial.getState().sessionId) {
+      const live = trial.getState();
+      if (typeof body!.expectedRecordId !== "string" || body!.expectedRecordId !== live.sessionId) {
         return json(409, { error: "trial_changed" });
       }
       if (pathname === "/api/message") {
@@ -685,10 +809,15 @@ export class TangramSession extends DurableObject<Env> {
       if (pathname === "/api/retry") await trial.retry();
       if (pathname === "/api/names") {
         if (body!.confirm !== true) throw new NamingTaskError("invalid_submission");
+        validateEventCount(body!, live.events);
+        if (live.status === 'completed') throw new NamingTaskError('already_submitted');
         await trial.submitHuman({ names: body!.names });
         if (!trial.getState().aiSubmitted) await trial.submitAI();
       }
-      if (pathname === "/api/ai-submit") await trial.submitAI();
+      if (pathname === "/api/ai-submit") {
+        if (isolated && live.status === 'completed') throw new NamingTaskError('trial_changed');
+        await trial.submitAI();
+      }
       return json(200, await this.participantState());
     } catch (error) {
       return sanitizedError(error);
@@ -759,23 +888,42 @@ export default {
     if (decoded === '/v1' || decoded.startsWith('/v1/') || ['/api/turn','/api/submit'].includes(decoded)) return withHeaders(json(404,{error:'not_found'}));
     try {
       if (url.pathname.startsWith("/api/")) {
-        const allowed = request.method === 'GET' && ['/api/state','/api/records'].includes(url.pathname) ||
+        const browserHistory = url.pathname === '/api/sessions' && ['GET','POST'].includes(request.method);
+        const allowed = browserHistory || request.method === 'GET' && ['/api/state','/api/records'].includes(url.pathname) ||
           request.method === 'POST' && ['/api/reception','/api/start','/api/message','/api/retry','/api/names','/api/ai-submit'].includes(url.pathname) ||
           ['GET','POST'].includes(request.method) && /^\/api\/records\/[^/]+\/(review|questionnaire)$/u.test(url.pathname);
         if (!allowed) return withHeaders(json(404,{error:'not_found'}));
         const cookie = sessionId(request.headers.get('Cookie'));
         if (!cookie) return withHeaders(json(401,{error:'session_required'}));
+        const rootId = env.NAMING_SESSIONS.idFromName(cookie);
+        if (browserHistory) {
+          const root = env.NAMING_SESSIONS.get(rootId);
+          if (await root.baseOwnerStatus(true) !== 'registered') return withHeaders(json(401,{error:'session_required'}));
+          if (request.method === 'GET') return withHeaders(json(200,await root.browserHistory()));
+          try { validateCreateTabSession(await readBodyText(request), request.headers.get('Content-Type')); }
+          catch (error) { return withHeaders(sanitizedError(error)); }
+          const session = await root.createTabSession();
+          return withHeaders(session ? json(201,session) : json(429,{error:'rate_limited'}));
+        }
+        const tab = tabSessionRoute(request.headers.get(TAB_SESSION_HEADER));
+        if (tab === null) return withHeaders(json(404,{error:'not_found'}));
+        let target = rootId;
+        if (tab !== 'legacy') {
+          const doName = await env.NAMING_SESSIONS.get(rootId).resolveTabSession(tab);
+          if (!doName) return withHeaders(json(404,{error:'not_found'}));
+          target = env.NAMING_SESSIONS.idFromName(doName);
+        }
         if (request.method === 'POST' && await isExcessiveTraffic(request,env,cookie)) {
           const limited = json(429,{error:'rate_limited'});limited.headers.set('Retry-After','60');return withHeaders(limited);
         }
-        const object = env.NAMING_SESSIONS.get(env.NAMING_SESSIONS.idFromName(cookie));
+        const object = env.NAMING_SESSIONS.get(target);
         const forwardHeaders = new Headers(request.headers);forwardHeaders.delete('Authorization');forwardHeaders.delete('Cookie');
         result = await object.fetch(new Request(`https://session.internal${url.pathname}${url.search}`,{method:request.method,headers:forwardHeaders,body:['GET','HEAD'].includes(request.method)?null:request.body}));
       } else {
-        if (!['/','/index.html','/app.js','/style.css'].includes(url.pathname) || request.method !== 'GET') return withHeaders(json(404,{error:'not_found'}));
+        if (!['/','/index.html','/app.js','/style.css','/tab-session.js'].includes(url.pathname) || request.method !== 'GET') return withHeaders(json(404,{error:'not_found'}));
         if (url.pathname === '/' || url.pathname === '/index.html') {
           let cookie = sessionId(request.headers.get('Cookie'));
-          let status = cookie ? await env.NAMING_SESSIONS.get(env.NAMING_SESSIONS.idFromName(cookie)).baseOwnerStatus() : 'absent';
+          const status = cookie ? await env.NAMING_SESSIONS.get(env.NAMING_SESSIONS.idFromName(cookie)).baseOwnerStatus(true) : 'absent';
           if (status !== 'registered') {
             cookie = newSessionId();
             const registered = await env.NAMING_SESSIONS.get(env.NAMING_SESSIONS.idFromName(cookie)).registerBaseOwner();

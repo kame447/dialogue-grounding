@@ -83,7 +83,7 @@ jobs:
           import { readFile } from 'node:fs/promises';
 
           const origin = 'https://tangram-grounding-experiment.kame-website.workers.dev';
-          const assets = [['/', 'index.html'], ['/app.js', 'app.js'], ['/style.css', 'style.css']];
+          const assets = [['/', 'index.html'], ['/app.js', 'app.js'], ['/style.css', 'style.css'], ['/tab-session.js', 'tab-session.js']];
           const expected = await Promise.all(assets.map(([, file]) =>
             readFile('workers/tangram-experiment/dist/' + file)));
 
@@ -99,7 +99,7 @@ jobs:
               }
             }
             if (mismatches.length === 0) {
-              console.log('All three public assets match the deployed commit.');
+              console.log('All four public assets match the deployed commit.');
               break;
             }
             if (attempt === 8) throw new Error('Production verification failed: ' + mismatches.join('; '));

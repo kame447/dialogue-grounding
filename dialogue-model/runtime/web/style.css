@@ -204,3 +204,16 @@ main:has(#trial:not([hidden]) #conversation-stage:not([hidden])):has(#review-bar
 main:has(#trial:not([hidden]) #conversation-stage:not([hidden])):has(#review-bar:not([hidden])) .dialogue{height:auto;max-height:none}
 main:has(#trial:not([hidden]) #conversation-stage:not([hidden])):has(#review-bar:not([hidden])) #history{min-height:240px;max-height:60dvh}
 }
+
+/* Entry screen: a new tab starts here; earlier sessions are listed by state only. */
+.entry{max-width:560px;margin:24px auto;display:grid;gap:18px}
+#new-session{width:100%;padding:14px 16px;font-size:1rem}
+#leave-session{margin:0 0 14px;font-size:.8rem}
+.session-history{border-top:1px solid var(--line);padding-top:12px;font-size:.82rem}
+.session-history summary{cursor:pointer;font-weight:600;min-height:32px;display:flex;align-items:center}
+.session-history .record-list{margin-top:8px}
+.session-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}
+.status-badge{font-size:.72rem;border:1px solid var(--line);border-radius:999px;padding:1px 9px;background:#f3f4ef;color:#51564c;white-space:nowrap}
+.record-list li[data-status=in_progress] .status-badge,.record-list li[data-status=submitting] .status-badge,.record-list li[data-status=questionnaire_waiting] .status-badge{background:#fdf1d8;border-color:#e6c88a;color:#7a4f12}
+.record-list li[data-status=cancelled] .status-badge,.record-list li[data-status=unavailable] .status-badge{color:var(--muted)}
+@media(max-width:760px){.entry{margin:12px auto}}
