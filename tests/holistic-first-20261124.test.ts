@@ -23,7 +23,9 @@ test('Jev v3 criteria: whole reading first, parts only when needed, no stalling 
   const v3 = criteria('two_stage_v3');
   assert.match(v3.accept, /全体の見立てを先に/u);
   assert.match(v3.accept, /見立ては説明であり、名前の提案・採用ではない/u);
-  assert.match(v3.confirm, /相手が絞れない・相手との間で似た候補が残る・見立てが食い違う・細部を尋ねられたとき/u);
+  assert.match(v3.confirm, /観察で答えられる細部の質問にはconfirmで聞き返さず、acceptで直接答える（分からない点は分からないと述べる）/u);
+  assert.match(v3.confirm, /聞き返すのは、対象や論点に具体的な未解決点があり、相手から情報を得る必要があるとき/u);
+  assert.doesNotMatch(v3.confirm, /細部を尋ねられたときに/u, 'a detail question that observation can answer is not a reason to ask back');
   assert.match(v3.confirm, /すでに肯定された特徴については選ばない/u);
   assert.match(v3.defer, /残りの数だけで保留を一律に禁止も許可もせず/u);
   assert.match(v3.revisit, /話を延ばすためだけには選ばない/u);
@@ -95,4 +97,13 @@ test('the v3 trial generation text puts the whole reading first and answers seve
     assert.doesNotMatch(system, /必要なら全体の印象/u);
     assert.doesNotMatch(system, READINGS, 'the instruction names no specific reading and gives no fixed sentence');
   }
+});
+
+test('a naming decision written as 「X」で呼びましょう / そう呼びます is not published under a non-agree act (two_stage_v3), questions are fine', async () => {
+  const { findExtendedNamingDecisions, findGuardViolations } = await import('../dialogue-model/runtime/v2/generation-guard.ts');
+  for (const text of ['はい、「名前」で呼びましょう。', 'じゃあそう呼びます。']) {
+    assert.deepEqual(findGuardViolations(text, 'accept'), [], 'the shared guard keeps its narrower family (v1/v2 unchanged)');
+    assert.deepEqual(findExtendedNamingDecisions(text), ['naming_decision'], text);
+  }
+  for (const text of ['「名前」で呼びましょうか？', '「名前」で呼ぶのはどうでしょう？', '全体は丸い形です。']) assert.deepEqual(findExtendedNamingDecisions(text), [], text);
 });

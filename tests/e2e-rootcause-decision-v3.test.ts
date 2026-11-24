@@ -872,3 +872,12 @@ test('an English name the partner used in public is allowed however long ago it 
   assert.deepEqual(r.trace.generationGuard, { violations: [], regenerated: false, fallback: false });
   assert.equal(r.text, 'Golden Gate Bridge のような形ですね。');
 });
+
+test('a naming decision in the 「X」で呼びましょう form is regenerated under accept in both strategies', async () => {
+  for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
+    const f = fixture(strategy);
+    const r = await f.exchange('丸い形のことです。', { action: 'accept', target: 3, drafts: ['この形は「時計」で呼びましょう。', 'そう見えるんですね。'] });
+    assert.deepEqual(r.trace.generationGuard, { violations: ['naming_decision'], regenerated: true, fallback: false });
+    assert.equal(r.text, 'そう見えるんですね。');
+  }
+});

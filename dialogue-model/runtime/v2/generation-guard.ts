@@ -43,6 +43,20 @@ export function findAgreementClaims(text: string): string[] {
   return codes;
 }
 
+// two_stage_v3 only (holistic-first): the same wording family also covers 「X」で呼びましょう / そう呼びます, so a naming decision there is not published under a
+// non-agree act. Detection never changes the act; it only decides whether the draft may be published (codes only).
+const extendedNaming: ReadonlyArray<readonly [string, RegExp]> = [
+  ["naming_decision", /(?:で|そう)呼(?:ぼう|びましょう|ぶことに(?:しよう|しましょう|します)|びます)/gu],
+];
+export function findExtendedNamingDecisions(text: string): string[] {
+  const normalized = normalize(text);
+  for (const [code, pattern] of extendedNaming) {
+    pattern.lastIndex = 0;
+    for (const match of normalized.matchAll(pattern)) if (!exemptMatch(code, normalized, match)) return [code];
+  }
+  return [];
+}
+
 // Completed/past adoption and explicit copula naming; used only to check an `agree` draft against the judged name.
 const completedAdoption: ReadonlyArray<readonly [string, RegExp]> = [
   ["past_call", /と呼(?:びました|んだ|ぶことにしました|ぶことにした)/gu],

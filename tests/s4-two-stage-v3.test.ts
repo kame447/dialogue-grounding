@@ -549,3 +549,15 @@ test('the comparison condition must carry exactly the reasons its own draft show
     assert.equal(status(dropped, 'replay'), 'mismatch', `${label}: the name-decision reason may not be dropped`);
   }
 });
+
+test('S4 knows the 「X」で呼びましょう naming decision for the holistic text: the reason is required on both conditions and a record without it is refused', async () => {
+  const decisions = [stageOne('retry', 'accept'), stageTwo('retry', 'accept', 'none')];
+  const namingReason = '前の下書きは名称の決定・合意を表していました。決定・合意を表明せず、このactionの範囲で書き直してください。';
+  const record = await records('two_stage_v3', decisions, { retry: { current: true, drafts: ['この形は「name-0」で呼びましょう。', 'そう見えるんですね。'] } });
+  pass(record);
+  for (const label of ['bypass-enabled', 'repair-first']) {
+    const dropped = structuredClone(record);
+    changeRetry(dropped, label, (text: string) => text.replace(namingReason, ''));
+    assert.equal(status(dropped, 'replay'), 'mismatch', label);
+  }
+});

@@ -69,7 +69,7 @@ const AGREE_PARTNER_NAME_V3 = "相手が公開上で提案した呼び名に異�
 // two_stage_v3, holistic-first (holistic-first-20261124): the whole reading first, parts only when they tell figures apart, and no stalling once enough is shared.
 // Mirrored in the S4 verifier (NATIVE_V3_HOLISTIC.actions). Identical for both strategies; defer/move_on and the intervention table are untouched.
 const HOLISTIC_ACCEPT_V3 = "図形全体や見た目を初めて尋ねられたとき、複数の図形をまとめて尋ねられたとき、全体の見立てだけで相手が対象をつかめるときは、部品の確認を重ねず、このacceptで観察に根拠のある全体の見立てを先に（求められた図形すべてについて）答える。見立ては説明であり、名前の提案・採用ではない。";
-const HOLISTIC_CONFIRM_V3 = "全体の見立てだけで対象が共有され命名に進めるとき、すでに肯定された特徴については選ばない。相手が絞れない・相手との間で似た候補が残る・見立てが食い違う・細部を尋ねられたときに、区別に必要な特徴を一つ尋ねる。";
+const HOLISTIC_CONFIRM_V3 = "全体の見立てだけで対象が共有され命名に進めるとき、すでに肯定された特徴については選ばない。観察で答えられる細部の質問にはconfirmで聞き返さず、acceptで直接答える（分からない点は分からないと述べる）。聞き返すのは、対象や論点に具体的な未解決点があり、相手から情報を得る必要があるとき（相手が絞れない・相手との間で似た候補が残る・見立てが食い違うとき）に限り、区別に必要な特徴を一つ尋ねる。";
 const HOLISTIC_DEFER_V3 = "残りの数だけで保留を一律に禁止も許可もせず、その時点で有効な修復の手がかりと、後で再開できる見込みを考える。十分に共有できているのに話を延ばす目的では選ばない。";
 const HOLISTIC_REVISIT_V3 = "十分に共有できていて命名に進める場面で、話を延ばすためだけには選ばない。残りの数だけで決めず、その時点で有効な修復の手がかりと、再開できる見込みを考える。";
 const V3_ACTION_CRITERIA: Readonly<Record<JevAction, string>> = Object.freeze({

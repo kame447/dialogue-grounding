@@ -89,7 +89,8 @@ function s4InternalLeak(compact:string):boolean{
 }
 function s4NamingDecision(compact:string,act:string):boolean{
  if(act!=='agree'){
-  for(const re of [/と呼(?:ぼう|びましょう|ぶことに(?:しよう|しましょう|します)|びます)/gu,/に(?:しよう|しましょう|します|決めよう|決めましょう|決めます)/gu,/で(?:いこう|行こう|いきましょう|行きましょう|いきます|行きます)/gu,/[でに](?:決まり|決定|確定)/gu,/で(?:いい|良い|よい|大丈夫)/gu,/合意/gu]){
+  // holistic-first: 「X」で呼びましょう / そう呼びます are naming decisions too (a record of the holistic text); older versions keep the narrower family.
+  for(const re of [CTX.style==='holistic'?/(?:と|で|そう)呼(?:ぼう|びましょう|ぶことに(?:しよう|しましょう|します)|びます)/gu:/と呼(?:ぼう|びましょう|ぶことに(?:しよう|しましょう|します)|びます)/gu,/に(?:しよう|しましょう|します|決めよう|決めましょう|決めます)/gu,/で(?:いこう|行こう|いきましょう|行きましょう|いきます|行きます)/gu,/[でに](?:決まり|決定|確定)/gu,/で(?:いい|良い|よい|大丈夫)/gu,/合意/gu]){
    for(const m of compact.matchAll(re)){const tail=compact.slice(m.index!+m[0].length);if(qTail(tail))continue;if(m[0]==='合意'&&/^(?:していません|していない|しません|ではありません|ではない|はしていません|はしていない)/u.test(tail))continue;if(re.source.startsWith('に')&&/(?:後|あと|後日|今度|別の機会|保留|後回し|先送り|先延ばし)$/u.test(compact.slice(0,m.index)))continue;return true;}
   }
  }
@@ -1007,7 +1008,7 @@ const NATIVE_V3_STYLE={actions:{...NATIVE_V3.actions,"accept":NATIVE_V3.actions.
 // accept-loop update (human-name-accept-loop-20261124): two_stage_v3 only; mirrors V3_ACTION_CRITERIA in jev-decision.ts.
 const NATIVE_V3_LOOP={actions:{...NATIVE_V3_STYLE.actions,"accept":NATIVE_V3_STYLE.actions.accept+"相手の発話が相槌だけ（新しい情報も問いもない）で、直前のAI行動もacceptだった場合は、同じ受け止めを繰り返さない。見立てを否定された後などで対象がまだ特定できていないなら、観察に根拠のある別の説明や弁別特徴の確認など、対象探しを進める行動を選ぶ。相槌は名称採用や対象同定の根拠にならない。","propose_name":NATIVE_V3_STYLE.actions.propose_name+"相手が先に公開した呼び名はAIの新しい提案として出し直さない。","agree":NATIVE_V3.actions.agree+"相手が公開上で提案した呼び名に異議や未解決点がなければ、その案への同意・採用として選ぶ。相手が自分の出した呼び名でよいかを尋ねている間は、その問いは答えるまで未回答のままで、相槌や見立ての説明では答えたことにならない。異議や不確実性があるときは、その理由を具体的に確かめるconfirmかrepairで答える。"}};
 // holistic-first update (holistic-first-20261124), two_stage_v3 only; mirrors V3_ACTION_CRITERIA in jev-decision.ts.
-const NATIVE_V3_HOLISTIC={actions:{...NATIVE_V3_LOOP.actions,"accept":NATIVE_V3_LOOP.actions.accept+"図形全体や見た目を初めて尋ねられたとき、複数の図形をまとめて尋ねられたとき、全体の見立てだけで相手が対象をつかめるときは、部品の確認を重ねず、このacceptで観察に根拠のある全体の見立てを先に（求められた図形すべてについて）答える。見立ては説明であり、名前の提案・採用ではない。","confirm":NATIVE_V3_LOOP.actions.confirm+"全体の見立てだけで対象が共有され命名に進めるとき、すでに肯定された特徴については選ばない。相手が絞れない・相手との間で似た候補が残る・見立てが食い違う・細部を尋ねられたときに、区別に必要な特徴を一つ尋ねる。","defer":NATIVE_V3_LOOP.actions.defer+"残りの数だけで保留を一律に禁止も許可もせず、その時点で有効な修復の手がかりと、後で再開できる見込みを考える。十分に共有できているのに話を延ばす目的では選ばない。","revisit":NATIVE_V3_LOOP.actions.revisit+"十分に共有できていて命名に進める場面で、話を延ばすためだけには選ばない。残りの数だけで決めず、その時点で有効な修復の手がかりと、再開できる見込みを考える。"}};
+const NATIVE_V3_HOLISTIC={actions:{...NATIVE_V3_LOOP.actions,"accept":NATIVE_V3_LOOP.actions.accept+"図形全体や見た目を初めて尋ねられたとき、複数の図形をまとめて尋ねられたとき、全体の見立てだけで相手が対象をつかめるときは、部品の確認を重ねず、このacceptで観察に根拠のある全体の見立てを先に（求められた図形すべてについて）答える。見立ては説明であり、名前の提案・採用ではない。","confirm":NATIVE_V3_LOOP.actions.confirm+"全体の見立てだけで対象が共有され命名に進めるとき、すでに肯定された特徴については選ばない。観察で答えられる細部の質問にはconfirmで聞き返さず、acceptで直接答える（分からない点は分からないと述べる）。聞き返すのは、対象や論点に具体的な未解決点があり、相手から情報を得る必要があるとき（相手が絞れない・相手との間で似た候補が残る・見立てが食い違うとき）に限り、区別に必要な特徴を一つ尋ねる。","defer":NATIVE_V3_LOOP.actions.defer+"残りの数だけで保留を一律に禁止も許可もせず、その時点で有効な修復の手がかりと、後で再開できる見込みを考える。十分に共有できているのに話を延ばす目的では選ばない。","revisit":NATIVE_V3_LOOP.actions.revisit+"十分に共有できていて命名に進める場面で、話を延ばすためだけには選ばない。残りの数だけで決めず、その時点で有効な修復の手がかりと、再開できる見込みを考える。"}};
 // Prompt-style update snapshot (prompt-style-20261124), derived from the prior literals above by exact replacement.
 const rep=(text:string,from:string,to:string)=>{if(text.split(from).length!==2)throw Error('prompt snapshot out of sync');return text.replace(from,()=>to);};
 const FIXED_STYLE={...FIXED,
