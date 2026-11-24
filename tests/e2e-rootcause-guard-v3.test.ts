@@ -167,7 +167,8 @@ test("viewpoint clauses are exempt, bare rotation mentions and later unqualified
     assert.deepEqual(findOrientationLeaks(text), [], text);
   }
   for (const text of ["相手の図形は回転していますが、右側に四角い突起があります。", "向きが違うかもしれませんが、上端に突起がありますか？",
-    "相手の画面では向きが違うと思いますが、右側に四角い突起があります。", "向きが違うかもしれません。右側に小さな角がありますか？"]) {
+    "相手の画面では向きが違うと思いますが、右側に四角い突起があります。", "向きが違うかもしれません。右側に小さな角がありますか？",
+    "こちらの図形ではなく、右側に突起がある形です。", "こちらの画面ではないですが、上端が尖っています。"]) {
     assert.deepEqual(findOrientationLeaks(text), ["orientation_leak"], text);
   }
 });

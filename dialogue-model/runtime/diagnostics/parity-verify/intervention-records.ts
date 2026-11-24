@@ -409,6 +409,10 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
  }
  if(!equal(result.sides[0].requests.filter((r:any)=>r.role==='common'),result.sides[1].requests.filter((r:any)=>r.role==='common')))return'invalid';
  if(actual.requests.length!==expected.length||calls.length!==expected.length)return'invalid';const used=new Set();
+ if(t.generationGuard?.fallback===true){
+  const gens=actual.requests.filter((r:any)=>r.provider==='luna'&&r.role==='generation');
+  if(gens.length!==2||!String(gens[1]?.payload?.messages?.at(-1)?.content??'').startsWith('公開発話を書き直してください。選択済みの行動を変更しないでください。'))return'invalid';
+ }
  // M is recomputed: at least one recorded Luna request, all of them with measured sends. A label is either wholly measured or wholly synthetic.
  const luna=expected.filter((e:any)=>e?.provider==='luna'),measured=luna.map((e:any)=>e.actualSendMeasured);
  if(measured.some((v:any)=>typeof v!=='boolean')||new Set(measured).size>1||result.actualLunaHttpMeasured!==(luna.length>0&&measured[0]===true))return'invalid';
@@ -732,7 +736,8 @@ export function interventionChecks(records:Records):Check[]{
      if(ownTurns.some((v:any)=>v.turn!==t.turnIndex||v.publicText!==t.publicSpeech))conflict=true;
      if(t.generationGuard?.fallback===true){
       const expectedFallback=expectedOrientationFallback(t.finalAction);
-      if(layout!=='two_stage_v3'||!expectedFallback||t.publicSpeech!==expectedFallback||t.aiPublic&&t.aiPublic.pending?.status!=='skipped_fallback')conflict=true;
+      const aiOn=Object.hasOwn(tr.lastCommittedState??{},'aiPublic')||js.some((j:any)=>Object.hasOwn(j,'aiPublic'))||Boolean(t.aiPublic);
+      if(layout!=='two_stage_v3'||!expectedFallback||t.publicSpeech!==expectedFallback||(aiOn&&t.aiPublic?.pending?.status!=='skipped_fallback'))conflict=true;
      }
      const first=js[0];if(js.some((j:any)=>j.status!=='committed'||!equal(j,first)||!equal(j.jevTurn.decision,t.decisions.at(-1))||!equal(j.jevTurn.executed,t.executed)||!equal(j.jevTurn.intervention,t.intervention)||!equal(j.judgment,t.finalAction)))conflict=true;
      const last=turns.at(-1)?.state;if(last&&tr.lastCommittedState&&!equal(last,tr.lastCommittedState))conflict=true;
