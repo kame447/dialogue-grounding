@@ -913,9 +913,12 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       // holistic_v1: a closed-set question about the draft's naming act. An agree draft is always asked; any other draft only on a typed naming context,
       // a naming-act wording hit or a quoted string that is not the figure's agreed name. A failed question is "unconfirmed", never a pass.
       // Typed context: this turn's human utterance carries a name proposal or a request for approval of a name (both are name_propose claims).
-      const openHumanProposal = claims.some(c => c.speaker === "human" && c.act === "name_propose" && c.name !== null && c.sourceTurn === latest.seq);
+      // An approval question of this turn that answers an earlier name proposal (an ask about the name linked to that proposal) counts the same.
+      const openHumanProposal = claims.some(c => c.speaker === "human" && c.sourceTurn === latest.seq && (c.act === "name_propose" && c.name !== null ||
+        c.act === "ask" && c.aspect === "name" && claims.some(p => p.id === c.respondsTo && p.act === "name_propose" && p.name !== null)));
       const chosenName = judgment.action === "propose_name" && typeof judgment.candidateName === "string" ? normalizeName(judgment.candidateName) : null;
-      const agreedNames = new Set(targets(execution).map(id => state.ledger[id]?.name).filter((n): n is string => typeof n === "string").map(normalizeName));
+      // Only an agreed name is excluded from the quoted-string hint; a tentative name is not.
+      const agreedNames = new Set(targets(execution).map(id => state.ledger[id]).filter(e => e?.status === "agreed" && typeof e.name === "string").map(e => normalizeName(e.name as string)));
       const draftTriggers = (text: string) => {
         if (judgment.action === "agree") return ["agree_action"];
         const hints = findNamingActHints(text);

@@ -599,3 +599,46 @@ test('holistic_v1: an orientation-only fallback record passes with no question, 
     model: 'typesafe/jev-1.14', responseId: 'gen-x', costUsd: 0, latencyMs: 1, error: null }];
   assert.ok(checksOf(mixed).some((c: any) => c.status !== 'pass'));
 });
+
+const ACTS6 = ['adopt_chosen', 'adopt_other', 'decline_or_hold', 'propose_question', 'recount_only', 'none'];
+const decisionsAccept = () => [stageOne('retry', 'accept'), stageTwo('retry', 'accept', 'none')];
+const traceCopies = (n: any) => [n.trials[0].attempts[0], n.trials[0].turns[0].trace[0]];
+
+test('05d-3: a regular record whose first draft is not a question target and only the retry is asked is accepted', async () => {
+  const record = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v1', draftAnswers: ['recount_only'],
+    retry: { current: true, drafts: ['右側が尖っています。', 'さっきの「name-0」は相手の案ですね。'] } });
+  pass(record);
+  assert.deepEqual(record.trials[0].attempts[0].draftActs.map((a: any) => a.draft), ['retry']);
+});
+
+test('05d-4: an unusable first answer recovered by a good retry answer is accepted; the unconfirmed draft stays unpublished', async () => {
+  const drafts: [string, string] = ['この形は「name-0」で呼びましょう。', 'さっきの「name-0」は相手の案ですね。'];
+  const record = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v1', draftAnswers: ['bogus', 'recount_only'], retry: { current: true, drafts } });
+  pass(record);
+  const t = record.trials[0].attempts[0];
+  assert.deepEqual(t.draftActs.map((a: any) => [a.draft, a.status, a.choice]), [['initial', 'error', null], ['retry', 'ok', 'recount_only']]);
+  assert.deepEqual(t.generationGuard, { violations: ['draft_act_unconfirmed'], regenerated: true, fallback: false });
+  const forged = structuredClone(record);
+  for (const c of traceCopies(forged)) c.draftActs = c.draftActs.slice(1);
+  assert.ok(checksOf(forged).some((c: any) => c.status !== 'pass'), 'a dropped error act');
+});
+
+test('05d-5: the comparison side is verified against its own final draft and answer', async () => {
+  const record = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v1', draftAnswers: ['recount_only'], generationText: 'さっきの「name-0」は相手の案ですね。' });
+  pass(record);
+  for (const label of ['bypass-enabled', 'repair-first']) {
+    const forged = structuredClone(record), other = label === 'bypass-enabled' ? 'repair-first' : 'bypass-enabled';
+    const bad = (tail: any) => { const a = tail.jev.find((j: any) => j.answers?.draft_naming).answers.draft_naming; a.choice = 'adopt_other'; a.probabilities = Object.fromEntries(ACTS6.map(k => [k, Number(k === 'adopt_other')])); };
+    bad(forged.trials[0].replay[0].tape.tails[other]);
+    for (const side of sideCopies(forged).filter((x: any) => x.label === other)) { bad(side.material.tail); side.materialSha256 = hash(side.material); }
+    assert.ok(checksOf(forged).some((c: any) => c.status !== 'pass'), other + ' final draft refused');
+  }
+});
+
+test('05d-6: draftSha256 is recomputed from the draft text', async () => {
+  const record = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v1', draftAnswers: ['recount_only'], generationText: 'さっきの「name-0」は相手の案ですね。' });
+  pass(record);
+  const forged = structuredClone(record);
+  for (const c of traceCopies(forged)) c.draftActs[0].draftSha256 = '0'.repeat(64);
+  assert.ok(checksOf(forged).some((c: any) => c.status !== 'pass'));
+});

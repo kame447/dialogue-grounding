@@ -85,11 +85,11 @@ function fixture(strategy: 'bypass-enabled' | 'repair-first' = 'bypass-enabled',
       async classify({ segments, priorClaims }) {
         return segments.map(({ segmentId }, index) => {
           const act = plan.segments![index].act;
-          const antecedentAct = act === 'deny' ? 'name_accept' : act === 'name_accept' ? 'name_propose' : null;
+          const antecedentAct = act === 'deny' ? 'name_accept' : act === 'name_accept' || (act === 'ask' && plan.segments![index].aspect === 'name') ? 'name_propose' : null;
           // A referent denial answers the AI's latest public claim about the figure.
           const referentDenial = (act === 'deny' || act === 'agree') && plan.segments![index].aspect === 'referent';
           const antecedent = referentDenial ? priorClaims.filter(c => c.speaker === 'ai').at(-1)
-            : antecedentAct && priorClaims.find(c => c.speaker === 'ai' && c.act === antecedentAct);
+            : antecedentAct && priorClaims.filter(c => c.speaker === (act === 'ask' ? 'human' : 'ai') && c.act === antecedentAct).at(-1);
           return { segmentId, act, respondsToClaimId: antecedent?.id ?? null, rawScore: null };
         });
       },
@@ -1030,4 +1030,35 @@ test('holistic_v1: the orientation-only fallback needs both drafts asked, succes
     await assert.rejects(bad.run, { code: 'unsafe_generation' }, acts.join());
     assert.equal(bad.f.state().ledger[ids[3]].status, 'unassigned');
   }
+});
+
+const askApproval = (quote: string, respondsTo: number): Segment => ({ respondsTo, quote, name: null, targets: [ids[3]], act: 'ask', aspect: 'name', proposition: quote });
+test('holistic_v1 (05d-1): an approval question answering an earlier name proposal is a typed naming context; adopting under accept is not published', async () => {
+  const f = fixture('bypass-enabled', { aiPublic: true, holistic: true });
+  await share(f, 3);
+  const quote = `この形を「${NEW_NAME}」と呼びましょう。`;
+  await f.exchange(quote, { action: 'accept', target: 3, draftActs: ['none'], drafts: ['どの図形の話か確かめたいです。'], segments: [naming(quote, NEW_NAME, [ids[3]])] });
+  const approval = 'さっきの呼び方で大丈夫ですか？';
+  const r = await f.exchange(approval, { action: 'accept', target: 3, draftActs: ['adopt_chosen', 'none'], segments: [askApproval(approval, 3)],
+    drafts: ['はい、その呼び名に賛成です。', '提案してくれた呼び名ですね。'] });
+  assert.deepEqual(r.trace.generationGuard, { violations: ['draft_act_mismatch'], regenerated: true, fallback: false });
+  assert.equal(r.text, '提案してくれた呼び名ですね。');
+  assert.equal(r.state.ledger[ids[3]].status, 'unassigned');
+});
+
+test('holistic_v1 (05d-2): only an agreed name is excluded from the quoted-string hint; a tentative name is asked, an agreed one and the chosen propose_name candidate are not', async () => {
+  const f = fixture('bypass-enabled', { holistic: true });
+  const mention = `この形には「${UNRELATED_NAME}」という見方もありますね。`;
+  await f.exchange(mention, { action: 'propose_name', target: 0, name: UNRELATED_NAME, drafts: [`「${UNRELATED_NAME}」という呼び名はどうですか？`],
+    segments: [naming(mention, UNRELATED_NAME, [ids[0]], 'assert')] });
+  assert.equal(f.state().ledger[ids[0]].status, 'tentative');
+  const r = await f.exchange('そうなんですね。', { action: 'accept', target: 0, draftActs: ['adopt_chosen', 'none'], drafts: [`はい、「${UNRELATED_NAME}」に賛成です。`, 'そう見えるんですね。'] });
+  assert.deepEqual(r.trace.generationGuard, { violations: ['draft_act_mismatch'], regenerated: true, fallback: false });
+  const g = fixture('bypass-enabled', { aiPublic: true, holistic: true });
+  await share(g, 0);
+  const q = `この形を「${UNRELATED_NAME}」と呼びましょう。`;
+  await g.exchange(q, { action: 'agree', target: 0, draftActs: ['adopt_chosen'], drafts: [agreeSpeech(UNRELATED_NAME)], segments: [naming(q, UNRELATED_NAME, [ids[0]])] });
+  assert.equal(g.state().ledger[ids[0]].status, 'agreed');
+  const mention2 = await g.exchange('その形の特徴は？', { action: 'accept', target: 0, drafts: [`「${UNRELATED_NAME}」の細い部分のことですね。`] });
+  assert.equal(mention2.trace.draftActs, undefined);
 });

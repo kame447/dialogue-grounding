@@ -1,3 +1,4 @@
+import {createHash as nodeSha256} from 'node:crypto';
 // Independent record-only S4 checks. Never imports an online runtime, transport,
 // producer validator or replay executor. Only supplied data and code-owned
 // version constants are evidence; successful producer flags are not an oracle.
@@ -317,11 +318,13 @@ const DRAFT_NAMING_QUESTIONS_S4={draft_naming:{type:'choice',instructions:DRAFT_
 }}};
 const DRAFT_TRIGGERS_S4=['agree_action','typed_context','naming_words','quoted_other'];
 function draftActsShape(v:any):boolean{
- return Array.isArray(v)&&v.length>=1&&v.length<=2&&v.every((a:any,i:number)=>exact(a,['draft','draftSha256','triggers','status','choice','scores','model','responseId','costUsd','latencyMs','error'])&&a.draft===(i===0?'initial':'retry')&&
+ return Array.isArray(v)&&v.length>=1&&v.length<=2&&v.every((a:any,i:number)=>exact(a,['draft','draftSha256','triggers','status','choice','scores','model','responseId','costUsd','latencyMs','error'])&&(a.draft==='initial'&&i===0||a.draft==='retry'&&(i===0||v[i-1].draft==='initial'))&&
   typeof a.draftSha256==='string'&&/^[a-f0-9]{64}$/.test(a.draftSha256)&&Array.isArray(a.triggers)&&a.triggers.length>=1&&a.triggers.every((x:any)=>DRAFT_TRIGGERS_S4.includes(x))&&
   (a.status==='ok'?DRAFT_ACTS_S4.includes(a.choice)&&a.error===null&&!!a.scores&&Object.keys(a.scores).sort().join()===[...DRAFT_ACTS_S4].sort().join():a.status==='error'&&a.choice===null&&a.scores===null&&typeof a.error==='string'&&a.error.length<=64)&&
   Number.isFinite(a.latencyMs)&&a.latencyMs>=0);
 }
+const s4AgreedNames=(tape:any,ex:any):Set<string>=>new Set<string>((ex.target.kind==='single'?[ex.target.figureId]:ex.target.kind==='multiple'?ex.target.figureIds:[]).map((id:string)=>tape.state.ledger?.[id]).filter((e:any)=>e&&e.status==='agreed'&&typeof e.name==='string').map((e:any)=>ledgerName(e.name)));
+const s4Sha256=(text:string)=>nodeSha256('sha256').update(text,'utf8').digest('hex');
 // The verdict is a pure function of the label and the executed action: agree publishes only adopt_chosen, any other act never adopts a name.
 function draftActVerdict(choice:string,action:string):string|null{
  return action==='agree'?(choice==='adopt_chosen'?null:'draft_act_mismatch'):(choice==='adopt_chosen'||choice==='adopt_other'?'draft_act_mismatch':null);
@@ -342,7 +345,7 @@ function s4DraftTriggers(text:string,action:string,openProposal:boolean,agreed:S
 function s4OpenHumanProposal(tape:any,trace:any):boolean{
  const graph=tape.generationGraph??tape.state?.graph;
  const claims=[...(graph?.records??[]).filter((c:any)=>c.kind==='claim'),...(trace.local?.claims??[]).filter((c:any)=>c.kind==='claim')];
- return claims.some((c:any)=>c.speaker==='human'&&c.act==='name_propose'&&typeof c.name==='string'&&c.sourceTurn===trace.turnIndex);
+ return claims.some((c:any)=>c.speaker==='human'&&c.sourceTurn===trace.turnIndex&&(c.act==='name_propose'&&typeof c.name==='string'||c.act==='ask'&&c.aspect==='name'&&claims.some((q:any)=>q.id===c.respondsTo&&q.act==='name_propose'&&typeof q.name==='string')));
 }
 function traceShape(t:any,layout='two_stage_v1'):boolean{
  const req=['schemaVersion','turnIndex','lastEventId','attemptNumber','status','initialObservation','reobservations','local','humanReferent','decisions','intervention','executed','finalAction','publicSpeech','observationMemo','repairHistory','generationGuard'];
@@ -575,19 +578,19 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
     }
    }
    else{
-    if(hash(p)!==r.preProjectionPayloadSha256||!choiceResponse(p,answer)||checkModelIdentity(p.model,answer.model).status!=='accepted')return'invalid';
+    if(hash(p)!==r.preProjectionPayloadSha256||!(Object.hasOwn(p.questions,'draft_naming')||choiceResponse(p,answer))||checkModelIdentity(p.model,answer.model).status!=='accepted')return'invalid';
     const st=JSON.parse(p.state);
      if(Object.hasOwn(p.questions,'draft_naming')){
       // holistic_v1: the closed question about the draft's naming act, rebuilt exactly from this material and the previous generation draft.
       const gi=generationCount-1,ex=s.executed;
       if(CTX.policy!=='holistic_v1'||r.role!=='post_generation'||gi<0||!ex||typeof prevDraft!=='string'||askedDrafts.includes(gi)||!equal(p.questions,DRAFT_NAMING_QUESTIONS_S4)||p.model!=='typesafe/jev-1.14')return'invalid';
-      const ids:string[]=ex.target.kind==='single'?[ex.target.figureId]:ex.target.kind==='multiple'?ex.target.figureIds:[];
-      const agreed=new Set<string>(ids.map((id:string)=>tape.state.ledger?.[id]?.name).filter((n:any)=>typeof n==='string').map(ledgerName));
+      const agreed=s4AgreedNames(tape,ex);
       const trig=s4DraftTriggers(prevDraft,ex.action,s4OpenHumanProposal(tape,t),agreed,ex.action==='propose_name'&&typeof ex.name==='string'?ledgerName(ex.name):null);
       const turns=(tape.events??[]).filter((e:any)=>e.seq<=t.turnIndex).slice(-12).map((e:any)=>({turn:e.seq,speaker:e.speaker,text:String(e.text).slice(0,400)}));
       if(!trig.length||p.state!==JSON.stringify({turn:t.turnIndex,publicTurns:turns,reasons:trig,selected:{action:ex.action,target:ex.target,name:ex.name},draft:prevDraft}))return'invalid';
-      const v=draftActVerdict(answer.answers.draft_naming.choice,ex.action);draftVerdicts.push(v);lastVerdict=v;askedDrafts.push(gi);
-      askedRows.push({draft:gi===0?'initial':'retry',triggers:trig,choice:answer.answers.draft_naming.choice,scores:answer.answers.draft_naming.probabilities,model:answer.model,responseId:answer.id,costUsd:answer.usage?.cost??null,verdict:v});
+      // A response the client cannot use (a label outside the six) is recorded as an error act: that send is unconfirmed, never a pass.
+      const usable=choiceResponse(p,answer),v=usable?draftActVerdict(answer.answers.draft_naming.choice,ex.action):'draft_act_unconfirmed';draftVerdicts.push(v);lastVerdict=v;askedDrafts.push(gi);
+      askedRows.push({draft:gi===0?'initial':'retry',triggers:trig,invalid:!usable,choice:usable?answer.answers.draft_naming.choice:null,scores:usable?answer.answers.draft_naming.probabilities:null,model:answer.model,responseId:answer.id,costUsd:answer.usage?.cost??null,verdict:v});
       continue;
      }
      if(Object.hasOwn(p.questions,'repair_issue')){
@@ -649,32 +652,34 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
    }
   }
   if(label===tr.label&&t.status==='committed'&&generationCount!==(t.generationGuard.regenerated?2:1))return'invalid';
+  if(CTX.policy==='holistic_v1'&&t.status==='committed'){
+   // Each side (recorded or comparison) is checked against its own drafts and answers: every question-target draft is asked, a draft that fits the act may
+   // publish, and one that does not (or is unconfirmed) must be followed by a regeneration.
+   const ex=s.executed;if(!ex||draftTexts.length!==generationCount)return'invalid';
+   const agreed=s4AgreedNames(tape,ex),open=s4OpenHumanProposal(tape,t),chosen=ex.action==='propose_name'&&typeof ex.name==='string'?ledgerName(ex.name):null;
+   for(const [i,txt] of draftTexts.entries()){
+    const name=i===0?'initial':'retry',row=askedRows.find(x=>x.draft===name),target=typeof txt==='string'&&s4DraftTriggers(txt,ex.action,open,agreed,chosen).length>0;
+    const lostAct=label===tr.label?(t.draftActs??[]).find((a:any)=>a.draft===name&&a.status==='error'):undefined;
+    if(target&&!row){if(lostAct){missing=true;continue;}return'invalid';}
+    if(!target&&row)return'invalid';
+    if(row&&row.verdict!==null&&i===generationCount-1)return'invalid';
+   }
+  }
   if(label===tr.label&&t.status==='committed'){
-   const acts:any[]=t.draftActs??[],okActs=acts.filter(a=>a.status==='ok'),errActs=acts.filter(a=>a.status==='error'),guardCodes:string[]=(t.generationGuard?.violations??[]).filter((c:string)=>c.startsWith('draft_act_'));
-   if(CTX.policy!=='holistic_v1'?acts.length>0||askedRows.length>0:
-     okActs.length!==askedRows.length||okActs.some((a,i)=>a.draft!==askedRows[i].draft||!equal(a.triggers,askedRows[i].triggers)||a.choice!==askedRows[i].choice||!equal(a.scores,askedRows[i].scores)||a.model!==askedRows[i].model||a.responseId!==askedRows[i].responseId||a.costUsd!==askedRows[i].costUsd)||
-     errActs.length>0&&!guardCodes.includes('draft_act_unconfirmed')||errActs.length===0&&guardCodes.includes('draft_act_unconfirmed')||
-     askedRows.some(x=>x.verdict!==null)!==guardCodes.includes('draft_act_mismatch'))return'invalid';
-   if(CTX.policy==='holistic_v1'){
-    // Current-version fallback sentence: both drafts were orientation-only, so no draft was asked; any naming-question record contradicts it.
-    // Fallback sentence: both drafts (orientation-only) that are question targets must each carry a successful question whose label fits the executed act.
-    if(t.generationGuard?.fallback===true){
-     const ex0=s.executed,ids0:string[]=ex0?(ex0.target.kind==='single'?[ex0.target.figureId]:ex0.target.kind==='multiple'?ex0.target.figureIds:[]):[];
-     const agreed0=new Set<string>(ids0.map((id:string)=>tape.state.ledger?.[id]?.name).filter((n:any)=>typeof n==='string').map(ledgerName));
-     if(!ex0||draftTexts.length!==2||guardCodes.length>0||errActs.length>0)return'invalid';
-     for(const [i,txt] of draftTexts.entries()){
-      const target=typeof txt==='string'&&s4DraftTriggers(txt,ex0.action,s4OpenHumanProposal(tape,t),agreed0,ex0.action==='propose_name'&&typeof ex0.name==='string'?ledgerName(ex0.name):null).length>0,act=acts.find(a=>a.draft===(i===0?'initial':'retry'));
-      if(target!==Boolean(act)||act&&(act.status!=='ok'||draftActVerdict(act.choice,ex0.action)!==null))return'invalid';
-     }
+   const acts:any[]=t.draftActs??[],guardCodes:string[]=(t.generationGuard?.violations??[]).filter((c:string)=>c.startsWith('draft_act_'));
+   if(CTX.policy!=='holistic_v1'){if(acts.length>0||askedRows.length>0)return'invalid';}
+   else{
+    for(const a of acts){
+     const idx=a.draft==='initial'?0:1;
+     if(typeof draftTexts[idx]!=='string'||a.draftSha256!==s4Sha256(draftTexts[idx]))return'invalid';
+     const row=askedRows.find(x=>x.draft===a.draft);
+     if(!row){if(a.status!=='error')return'invalid';missing=true;continue;}
+     if(row.invalid?a.status!=='error'||a.choice!==null:a.status!=='ok'||!equal(a.triggers,row.triggers)||a.choice!==row.choice||!equal(a.scores,row.scores)||a.model!==row.model||a.responseId!==row.responseId||a.costUsd!==row.costUsd)return'invalid';
     }
-    // The published draft is asked exactly when it is a question target, and only a passing label may publish.
-    const fin=t.generationGuard?.regenerated?'retry':'initial',ex=s.executed;
-    if(t.generationGuard?.fallback!==true&&typeof t.publicSpeech==='string'&&ex){
-     const ids:string[]=ex.target.kind==='single'?[ex.target.figureId]:ex.target.kind==='multiple'?ex.target.figureIds:[];
-     const agreed=new Set<string>(ids.map((id:string)=>tape.state.ledger?.[id]?.name).filter((n:any)=>typeof n==='string').map(ledgerName));
-     const target=s4DraftTriggers(t.publicSpeech,ex.action,s4OpenHumanProposal(tape,t),agreed,ex.action==='propose_name'&&typeof ex.name==='string'?ledgerName(ex.name):null).length>0,final=acts.find(a=>a.draft===fin);
-     if(target!==Boolean(final)||final&&(final.status!=='ok'||draftActVerdict(final.choice,ex.action)!==null))return'invalid';
-    }
+    if(askedRows.some(x=>!acts.some(a=>a.draft===x.draft)))return'invalid';
+    if(acts.some(a=>a.status==='error')!==guardCodes.includes('draft_act_unconfirmed')||acts.some(a=>a.status==='ok'&&draftActVerdict(a.choice,s.executed?.action)!==null)!==guardCodes.includes('draft_act_mismatch'))return'invalid';
+    // Fallback sentence: both drafts were orientation-only and every question asked of them succeeded and fit the act.
+    if(t.generationGuard?.fallback===true&&(draftTexts.length!==2||guardCodes.length>0||acts.some(a=>a.status!=='ok')))return'invalid';
    }
   }
   if(indices.luna!==response.luna.length||indices.jev!==response.jev.length||pendingSet||pendingTarget||turnDecision!==t.decisions.length-1)return'invalid';
