@@ -21,7 +21,7 @@ import type { ObservationInput, ObservationObserver } from '../observation/contr
 import { createJevDecisionClient, JevDecisionError, validateRepairProspectMaterial, checkDecisionFailureEvidence } from '../decision/jev-decision.ts';
 import type { JevDecisionClient, AdaptiveRepairTrial, JevQuestionLayout } from '../decision/contract.ts';
 import { isHolisticPolicy } from '../decision/contract.ts';
-import { hasNamingRequest } from '../decision/naming-request.ts';
+import { hasNameProposal } from '../decision/naming-request.ts';
 import { createJevLocalTestClassifier, JevLocalTestError } from '../local-grounding/jev-local-test.ts';
 import type { JevTurnLocalOptions } from '../v2/jev-turn.ts';
 import { RunBudget } from '../diagnostics/parity-live/audit.ts';
@@ -71,7 +71,7 @@ function checkedDecisionFailure(trace: any, layout: JevQuestionLayout): boolean 
       Object.getPrototypeOf(f) !== Object.prototype || Reflect.ownKeys(f).length !== 1 || !Object.hasOwn(f, 'evidence')) return false;
   if (f.evidence === null) return trace.decisionRejectionCode !== 'action_target_not_allowed';
   // The trace names its own condition (a typed naming request of a holistic_v3 turn): only then may accept be missing from the first stage.
-  const checked = checkDecisionFailureEvidence(f.evidence, { acceptOptional: trace.namingRequest === true && Array.isArray(trace.local?.claims) && hasNamingRequest(trace.local.claims, trace.turnIndex) });
+  const checked = checkDecisionFailureEvidence(f.evidence, { acceptOptional: trace.namingRequest === true && Array.isArray(trace.local?.claims) && hasNameProposal(trace.local.claims, trace.turnIndex) });
   if (checked === null || checked.questionLayout !== layout || researchHash(checked) !== researchHash(jsonData(f.evidence))) return false;
   // A decision the local v3 table refused names its rule twice, in the turn and in the evidence, and in no other way; no native failure may carry it.
   const local = checked.rejectionCode === 'action_target_not_allowed' && checked.stages.length === 0;
@@ -136,14 +136,14 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
       // must be equal in every field they share.
       const savedJudgments: any[] = Array.isArray(restore.queueState?.privateState?.judgments) ? restore.queueState.privateState.judgments : [];
       for (const trace of restore.jevTraces) {
-        const marked = Object.hasOwn(trace,'namingRequest');
-        if (marked && (trace.namingRequest !== true || profile.dialoguePolicy !== 'holistic_v3' || profile.questionLayout !== 'two_stage_v3' ||
-            !Array.isArray(trace.local?.claims) || !hasNamingRequest(trace.local.claims, trace.turnIndex))) return invalid();
-        if (!marked && profile.dialoguePolicy === 'holistic_v3' && trace.status === 'committed' && Array.isArray(trace.local?.claims) && hasNamingRequest(trace.local.claims, trace.turnIndex)) return invalid();
+        const requested = Object.hasOwn(trace,'namingRequest'), reconfirmed = Object.hasOwn(trace,'namingReconfirm'), marked = requested || reconfirmed;
+        if (marked && (requested && trace.namingRequest !== true || reconfirmed && trace.namingReconfirm !== true || requested && reconfirmed || profile.dialoguePolicy !== 'holistic_v3' ||
+            profile.questionLayout !== 'two_stage_v3' || !Array.isArray(trace.local?.claims) || !hasNameProposal(trace.local.claims, trace.turnIndex))) return invalid();
+        if (!marked && profile.dialoguePolicy === 'holistic_v3' && trace.status === 'committed' && Array.isArray(trace.local?.claims) && hasNameProposal(trace.local.claims, trace.turnIndex)) return invalid();
         if (trace.status === 'committed') {
           const judgment = savedJudgments.find((j: any) => j?.turnIndex === trace.turnIndex && j?.jevTurn?.attemptNumber === trace.attemptNumber);
           if (!judgment) return invalid();
-          for (const key of ['humanReferent','repairProspect','repairGate','repairFacts','draftActs','namingRequest'])
+          for (const key of ['humanReferent','repairProspect','repairGate','repairFacts','draftActs','namingRequest','namingReconfirm'])
             if (Object.hasOwn(trace, key) !== Object.hasOwn(judgment.jevTurn, key) || Object.hasOwn(trace, key) && researchHash(jsonData(trace[key])) !== researchHash(jsonData(judgment.jevTurn[key]))) return invalid();
         }
       }

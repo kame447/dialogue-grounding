@@ -1325,3 +1325,56 @@ test('05q-C3 (holistic_v3): a failed turn\'s evidence without accept is accepted
     assert.equal(s4Probe.traceShape(unmarked, 'two_stage_v3'), false, `${strategy}: evidence without accept and without a marker`);
   }
 });
+
+test('05r-1 (holistic_v3): asking again about a name that is already agreed for the figure it binds to is a reconfirmation, not an open request; the same name for another figure still is one (both strategies)', async () => {
+  const offered = (r: { requests: Array<{ questions: Record<string, { criteria: Record<string, string> }> }> }) =>
+    Object.keys(r.requests.find(q => q.questions.action)!.questions.action.criteria);
+  const proposal = 'これ、かかしとかどう？';
+  const agreed = async (strategy: 'bypass-enabled' | 'repair-first') => {
+    const f = fixture(strategy, { aiPublic: true, holistic: 'holistic_v3' });
+    await share(f, 3);
+    const r = await f.exchange(proposal, { action: 'agree', target: 3, referent: 'figure_3', segments: [naming(proposal, 'かかし')], draftActs: ['adopt_chosen'], drafts: [agreeSpeech('かかし')] });
+    assert.equal(r.state.ledger[ids[3]].name, 'かかし');
+    return { f, proposalTurn: r };
+  };
+  const reapproval = (respondsTo: number): Segment => ({ respondsTo, quote: 'その呼び名でいい？', name: null, targets: [], act: 'name_propose', aspect: 'name', proposition: 'その呼び名でいい？' });
+  for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
+    // A short re-approval (the name carried over) and a literal one: both answer with a plain yes, which is not an adoption.
+    for (const literal of [false, true]) {
+      const { f, proposalTurn } = await agreed(strategy);
+      const human = literal ? 'で、さっきのかかしでいい？' : 'その呼び名でいい？';
+      const seg = literal ? naming(human, 'かかし') : reapproval(proposalTurn.events.at(-1)!.seq);
+      const r = await f.exchange(human, { action: 'accept', referent: 'none', segments: [seg], drafts: ['うん、いいよ。'] });
+      assert.ok(offered(r).includes('accept'), `${strategy} ${literal}: accept is offered`);
+      assert.equal(r.text, 'うん、いいよ。', `${strategy} ${literal}: the plain yes is published`);
+      assert.equal(r.trace.draftActs, undefined, `${strategy} ${literal}: no naming-act question is opened`);
+      assert.equal(r.saved.namingReconfirm, true, `${strategy} ${literal}: marked as a reconfirmation`);
+      assert.equal(r.saved.namingRequest, undefined);
+      assert.equal(r.state.ledger[ids[3]].name, 'かかし');
+    }
+    // The same name for another figure is an open request: no agree, no accept.
+    const { f } = await agreed(strategy);
+    const other = 'こっちもかかしでどう？';
+    const r = await f.exchange(other, { action: 'confirm', target: 4, referent: 'figure_4', segments: [naming(other, 'かかし', [ids[4]])], draftActs: ['none'], drafts: ['どの形のことですか？'] });
+    assert.ok(!offered(r).includes('accept') && !offered(r).includes('agree'), `${strategy}: ${offered(r).join()}`);
+    assert.equal(r.saved.namingRequest, true, `${strategy}: still an open request`);
+    assert.equal(r.state.ledger[ids[4]].name, null);
+  }
+});
+
+test('05r-2 (holistic_v3): a short re-approval that carries an earlier unbound name takes that proposal\'s turn as the name\'s public source, so agree is offered once the partner\'s estimate singles the figure out (both strategies)', async () => {
+  const offered = (r: { requests: Array<{ questions: Record<string, { criteria: Record<string, string> }> }> }) =>
+    Object.keys(r.requests.find(q => q.questions.action)!.questions.action.criteria);
+  for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
+    const f = fixture(strategy, { aiPublic: true, holistic: 'holistic_v3' });
+    await share(f, 3);
+    const proposal = 'これ、かかしとかどう？';
+    const first = await f.exchange(proposal, { action: 'confirm', target: 3, referent: 'figure_3', segments: [naming(proposal, 'かかし')], draftActs: ['none'], drafts: ['どの形のことですか？'] });
+    const again = 'その呼び名でいい？';
+    const second = await f.exchange(again, { action: 'agree', target: 3, referent: 'figure_3', draftActs: ['adopt_chosen'], drafts: [agreeSpeech('かかし')],
+      segments: [{ respondsTo: first.events.at(-1)!.seq, quote: again, name: null, targets: [], act: 'name_propose', aspect: 'name', proposition: again }] });
+    assert.ok(offered(second).includes('agree'), `${strategy}: ${offered(second).join()}`);
+    assert.deepEqual(second.input.agreeNames, [{ name: 'かかし', figureId: ids[3], sourceTurn: first.input.turn }], `${strategy}: one candidate, sourced at the proposal's turn`);
+    assert.equal(second.state.ledger[ids[3]].name, 'かかし');
+  }
+});

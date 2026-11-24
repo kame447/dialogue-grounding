@@ -4,7 +4,7 @@ import {createHash as nodeSha256} from 'node:crypto';
 // version constants are evidence; successful producer flags are not an oracle.
 import {jevChoiceAnswersValid,jevReportedCost,jevResponseId} from '../../decision/jev-choice-response.ts';
 import {nameBindsFigure} from '../../decision/referent-binding.ts';
-import {hasNamingRequest} from '../../decision/naming-request.ts';
+import {hasNameProposal,namingTurnKind,inheritsProposalName} from '../../decision/naming-request.ts';
 import {generationGuardCodes,draftViolationCodes,deriveGenerationOutcome,orientationSafeFallback} from '../../v2/generation-guard.ts';
 import {checkModelIdentity} from '../../model-identity-contract.ts';
 import {resolveModelPolicy} from '../../model-policy.ts';
@@ -171,7 +171,7 @@ const alwaysV3=()=>CTX.acceptOptional?ALWAYS_V3_ALL.filter(a=>a!=='accept'):ALWA
 const ANY_TARGET=['accept','defer','move_on','close'];
 // Adaptive-only context of the attempt being replayed, set at the start of the (synchronous) replay proof: whether repairFacts
 // existed (its guidance sentence is part of every instruction), and the saved per-figure agreeNames (known=false: no source).
-type ReplayContext={policy:string|null;agreeMatch:{l0:boolean;l2:boolean}|null;facts:boolean;agree:any[]|undefined;known:boolean;v3:boolean;trial:boolean;ledger:Record<string,{status:string;name:string|null}>|undefined;legacyV3:boolean;style:null|'legacy'|'style'|'loop'|'holistic';humanNames?:Set<string>|null;namingRequest?:boolean;acceptOptional?:boolean};
+type ReplayContext={policy:string|null;agreeMatch:{l0:boolean;l2:boolean}|null;facts:boolean;agree:any[]|undefined;known:boolean;v3:boolean;trial:boolean;ledger:Record<string,{status:string;name:string|null}>|undefined;legacyV3:boolean;style:null|'legacy'|'style'|'loop'|'holistic';humanNames?:Set<string>|null;namingRequest?:boolean;namingReconfirm?:boolean;acceptOptional?:boolean};
 const defaultContext:ReplayContext={policy:null,agreeMatch:null,facts:false,agree:undefined,known:true,v3:false,trial:false,ledger:undefined,legacyV3:false,style:null,humanNames:null};
 const CTX={...defaultContext};
 const H=()=>CTX.policy==='holistic_v1'||CTX.policy==='holistic_v2'||CTX.policy==='holistic_v3';
@@ -363,6 +363,12 @@ function s4HumanProposedNames(tape:any,trace:any):Set<string>{
  const claims=liveClaims({records:[...(graph?.records??[]),...(trace.local?.claims??[]).filter((c:any)=>c.kind==='claim')]});
  return new Set(claims.filter((c:any)=>c.speaker==='human'&&c.act==='name_propose'&&typeof c.name==='string'&&c.name!==''&&c.sourceTurn<=trace.turnIndex).map((c:any)=>ledgerName(c.name)));
 }
+// holistic_v3: the turn kind from the turn's claims (saved graph plus this turn's local claims) and the ledger before the turn, by the shared function.
+function s4NamingKind(tape:any,trace:any):'none'|'request'|'reconfirm'{
+ const graph=tape.generationGraph??tape.state?.graph;
+ return namingTurnKind([...(graph?.records??[]).filter((c:any)=>c.kind==='claim'),...(trace.local?.claims??[]).filter((c:any)=>c.kind==='claim')],trace.turnIndex,tape.state?.ledger??{});
+}
+const s4TypedContext=(tape:any,trace:any)=>H3()?!!CTX.namingRequest:s4OpenHumanProposal(tape,trace,true);
 function s4OpenHumanProposal(tape:any,trace:any,askCounts=true):boolean{
  const graph=tape.generationGraph??tape.state?.graph;
  const claims=liveClaims({records:[...(graph?.records??[]),...(trace.local?.claims??[]).filter((c:any)=>c.kind==='claim')]});
@@ -370,9 +376,10 @@ function s4OpenHumanProposal(tape:any,trace:any,askCounts=true):boolean{
 }
 function traceShape(t:any,layout='two_stage_v1'):boolean{
  const req=['schemaVersion','turnIndex','lastEventId','attemptNumber','status','initialObservation','reobservations','local','humanReferent','decisions','intervention','executed','finalAction','publicSpeech','observationMemo','repairHistory','generationGuard'];
- const opt=['errorCode','observationErrorCode','observationPhase','decisionRejectionCode','generationErrorCode','redacted','aiPublic','decisionFailure','repairProspect','repairGate','repairFacts','generationRetryVersion','draftActs','namingRequest'];
+ const opt=['errorCode','observationErrorCode','observationPhase','decisionRejectionCode','generationErrorCode','redacted','aiPublic','decisionFailure','repairProspect','repairGate','repairFacts','generationRetryVersion','draftActs','namingRequest','namingReconfirm'];
  if(!exact(t,[...req,...opt.filter(k=>Object.hasOwn(t??{},k))])||t.schemaVersion!=='jev_turn_trace_v2'||!ident(t)||!['committed','staged','superseded','error','aborted'].includes(t.status)||!Array.isArray(t.decisions)||!Array.isArray(t.reobservations)||!Array.isArray(t.repairHistory)||!primitiveText(t.publicSpeech,10000))return false;
- if(Object.hasOwn(t,'namingRequest')&&(layout!=='two_stage_v3'||t.namingRequest!==true||!hasNamingRequest(t.local?.claims??[],t.turnIndex)))return false;
+ if(Object.hasOwn(t,'namingRequest')&&(layout!=='two_stage_v3'||t.namingRequest!==true||Object.hasOwn(t,'namingReconfirm')||!hasNameProposal(t.local?.claims??[],t.turnIndex)))return false;
+ if(Object.hasOwn(t,'namingReconfirm')&&(layout!=='two_stage_v3'||t.namingReconfirm!==true||!hasNameProposal(t.local?.claims??[],t.turnIndex)))return false;
  CTX.acceptOptional=t?.namingRequest===true;
  if(Object.hasOwn(t,'generationRetryVersion')&&(layout!=='two_stage_v3'||t.generationRetryVersion!=='jev_generation_retry_v2'||t.generationGuard?.regenerated!==true))return false;
  if(Object.hasOwn(t,'draftActs')&&(layout!=='two_stage_v3'||!draftActsShape(t.draftActs)))return false;
@@ -510,7 +517,7 @@ function agreeSource(tr:any,t:any,key:string,tape:any,legacyV3=false):'invalid'|
       (c.targets.length===0||c.targets.length===1&&c.targets[0]===id)&&selects(referentAt(c.sourceTurn),id);
     });
    };
-   const expectedAt=(level:number):string[]=>openClaims.flatMap((c:any)=>{
+   const expectedAt=(level:number):string[]=>{const tagged=openClaims.flatMap((c:any)=>{
     const name=c.name as string;
     const perFigure=scoped&&level===2;
     if(!isHumanProposal(c)&&c.act!=='name_accept')return[];
@@ -524,7 +531,7 @@ function agreeSource(tr:any,t:any,key:string,tape:any,legacyV3=false):'invalid'|
     const currentUnbound=c.sourceTurn===t.turnIndex||isHumanProposal(c)&&c.sourceTurn===(perFigure?latestUnboundProposal:latestProposal);
     const baseSlots=targets.length>=1?targets.filter(id=>slotAllowed(id,name)):currentUnbound?slots.filter(id=>slotAllowed(id,name)&&(level<1||aiSharedIds.has(id)&&wasFocused(id))):[];
     const eligibleSlots=level>=2&&tr.profile?.dialoguePolicy==='holistic_v3'&&targets.length!==1?baseSlots.filter(bindsByInterval):baseSlots;
-    const antecedent=c.act==='name_accept'?publicClaims.find((p:any)=>p.id===c.respondsTo&&p.name===name):undefined;
+    const antecedent=c.act==='name_accept'||inheritsProposalName(c,publicClaims)?publicClaims.find((p:any)=>p.id===c.respondsTo&&p.name===name):undefined;
     const s=win.find((e:any)=>e.seq===c.sourceTurn&&e.text.includes(name))??(antecedent&&win.find((e:any)=>e.seq===antecedent.sourceTurn&&e.text.includes(name)))??(c.act==='name_accept'?win.filter((e:any)=>e.text.includes(name)).sort((a:any,b:any)=>a.seq-b.seq)[0]:undefined);
     if(!s)return[];
     return eligibleSlots.filter(id=>{
@@ -539,8 +546,11 @@ function agreeSource(tr:any,t:any,key:string,tape:any,legacyV3=false):'invalid'|
      if(requiresFocus&&!wasFocused(id))return false;
      if(prevPublicIds.size&&!prevPublicIds.has(id))return false;
      return !openClaims.some((r:any)=>r.speaker==='human'&&r.sourceTurn>c.sourceTurn&&(r.act==='deny'||r.act==='name_reject')&&r.name===name&&(r.respondsTo===c.id||(Array.isArray(r.targets)&&r.targets.includes(id))));
-    }).map(figureId=>JSON.stringify([name,figureId,s.seq]));
-   }).sort();
+    }).map(figureId=>({key:JSON.stringify([name,figureId,s.seq]),inherited:inheritsProposalName(c,publicClaims)}));
+   });
+   // The same de-duplication as the run's: a name-carrying proposal never repeats a candidate an earlier proposal (or another such proposal) already lists.
+   const direct=new Set(tagged.filter((x:any)=>!x.inherited).map((x:any)=>x.key)),seen=new Set<string>();
+   return tagged.filter((x:any)=>{if(!x.inherited)return true;if(direct.has(x.key)||seen.has(x.key))return false;seen.add(x.key);return true;}).map((x:any)=>x.key).sort();};
    expected=[];levels=[expectedAt(0),expectedAt(2)];
   }else{
    const source=(c:any)=>win.find((e:any)=>e.seq===c.sourceTurn&&e.text.includes(c.name))??win.filter((e:any)=>e.text.includes(c.name)).sort((a:any,b:any)=>a.seq-b.seq)[0];
@@ -570,9 +580,9 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
     typeof instructions==='string'&&instructions.endsWith('\n'+LEGACY_V3_TARGET));
   const src=agreeSource(tr,t,key,tape,legacyV3);if(src==='invalid')return'invalid';
    const trial=trialVersion(t,tape.technicalTrial);if(trial==='invalid')return'invalid';
-   Object.assign(CTX,{facts:Array.isArray(t.repairFacts),agree:src.names,known:src.known,v3:layout==='two_stage_v3',trial:trial!==null,ledger:tape.state?.ledger,legacyV3,style:null,policy:tr.profile?.dialoguePolicy??null,humanNames:['holistic_v2','holistic_v3'].includes(tr.profile?.dialoguePolicy)?s4HumanProposedNames(tape,t):null,namingRequest:tr.profile?.dialoguePolicy==='holistic_v3'?hasNamingRequest([...((tape.generationGraph??tape.state?.graph)?.records??[]).filter((c:any)=>c.kind==='claim'),...(t.local?.claims??[]).filter((c:any)=>c.kind==='claim')],t.turnIndex):false,acceptOptional:t.namingRequest===true});
+   Object.assign(CTX,{facts:Array.isArray(t.repairFacts),agree:src.names,known:src.known,v3:layout==='two_stage_v3',trial:trial!==null,ledger:tape.state?.ledger,legacyV3,style:null,policy:tr.profile?.dialoguePolicy??null,humanNames:['holistic_v2','holistic_v3'].includes(tr.profile?.dialoguePolicy)?s4HumanProposedNames(tape,t):null,namingRequest:tr.profile?.dialoguePolicy==='holistic_v3'&&s4NamingKind(tape,t)==='request',namingReconfirm:tr.profile?.dialoguePolicy==='holistic_v3'&&s4NamingKind(tape,t)==='reconfirm',acceptOptional:t.namingRequest===true});
    // The trace's own marker of a typed naming request is checked against the request recomputed from the turn's claims: only a holistic_v3 trial carries it, and exactly then.
-   if(H3()?(t.namingRequest===true)!==!!CTX.namingRequest:Object.hasOwn(t,'namingRequest'))return'invalid';
+   if(H3()?(t.namingRequest===true)!==!!CTX.namingRequest||(t.namingReconfirm===true)!==!!CTX.namingReconfirm:Object.hasOwn(t,'namingRequest')||Object.hasOwn(t,'namingReconfirm'))return'invalid';
  if(!exact(tape,['schemaVersion','state','events','common','tails','recorded',...(Object.hasOwn(tape??{},'technicalTrial')?['technicalTrial']:[]),...(Object.hasOwn(tape??{},'generationRetryVersion')?['generationRetryVersion']:[])])||tape.schemaVersion!=='parity_intervention_replay_v1'||!exact(result,['schemaVersion','status','error','commonEqual','policyConformant','recordedPayloadsReproduced','actualLunaHttpMeasured','hashScheme','excludedEnvelopeFields','sides'])||result.schemaVersion!=='parity_intervention_replay_result_v1'||result.status!=='same_material_intervention_verified'||result.error!==null||result.commonEqual!==true||result.policyConformant!==true||result.recordedPayloadsReproduced!==true||typeof result.actualLunaHttpMeasured!=='boolean'||result.hashScheme!=='canonical_json_sha256_not_raw_body_bytes'||!equal(result.excludedEnvelopeFields,META_KEYS)||!Array.isArray(result.sides)||result.sides.length!==2)return'invalid';
  // The replay plan declares a shared version. An attempt without a retry has no retry wire text to bind.
  if(Object.hasOwn(tape,'generationRetryVersion')&&(layout!=='two_stage_v3'||tape.generationRetryVersion!=='jev_generation_retry_v2')||
@@ -614,7 +624,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
       const gi=generationCount-1,ex=s.executed;
       if(!H()||r.role!=='post_generation'||gi<0||!ex||typeof prevDraft!=='string'||askedDrafts.includes(gi)||!equal(p.questions,DRAFT_NAMING_QUESTIONS_S4)||p.model!=='typesafe/jev-1.14')return'invalid';
       const agreed=s4AgreedNames(tape,ex);
-      const trig=s4DraftTriggers(prevDraft,ex.action,s4OpenHumanProposal(tape,t,!H3()),agreed,ex.action==='propose_name'&&typeof ex.name==='string'?ledgerName(ex.name):null);
+      const trig=s4DraftTriggers(prevDraft,ex.action,s4TypedContext(tape,t),agreed,ex.action==='propose_name'&&typeof ex.name==='string'?ledgerName(ex.name):null);
       const turns=(tape.events??[]).filter((e:any)=>e.seq<=t.turnIndex).slice(-12).map((e:any)=>({turn:e.seq,speaker:e.speaker,text:String(e.text).slice(0,400)}));
       if(!trig.length||p.state!==JSON.stringify({turn:t.turnIndex,publicTurns:turns,reasons:trig,selected:{action:ex.action,target:ex.target,name:ex.name},draft:prevDraft}))return'invalid';
       // A response the client cannot use (a label outside the six) is recorded as an error act: that send is unconfirmed, never a pass.
@@ -688,7 +698,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
    // Each side (recorded or comparison) is checked against its own drafts and answers: every question-target draft is asked, a draft that fits the act may
    // publish, and one that does not (or is unconfirmed) must be followed by a regeneration.
    const ex=s.executed;if(!ex||draftTexts.length!==generationCount)return'invalid';
-   const agreed=s4AgreedNames(tape,ex),open=s4OpenHumanProposal(tape,t,!H3()),chosen=ex.action==='propose_name'&&typeof ex.name==='string'?ledgerName(ex.name):null;
+   const agreed=s4AgreedNames(tape,ex),open=s4TypedContext(tape,t),chosen=ex.action==='propose_name'&&typeof ex.name==='string'?ledgerName(ex.name):null;
    for(const [i,txt] of draftTexts.entries()){
     const name=i===0?'initial':'retry',row=askedRows.find(x=>x.draft===name),target=typeof txt==='string'&&s4DraftTriggers(txt,ex.action,open,agreed,chosen).length>0;
     const lostAct=label===tr.label?(t.draftActs??[]).find((a:any)=>a.draft===name&&a.status==='error'):undefined;
@@ -1133,7 +1143,7 @@ export function interventionChecks(records:Records):Check[]{
      }
      const first=js[0];if(js.some((j:any)=>j.status!=='committed'||!equal(j,first)||!equal(j.jevTurn.decision,t.decisions.at(-1))||!equal(j.jevTurn.executed,t.executed)||!equal(j.jevTurn.intervention,t.intervention)||!equal(j.judgment,t.finalAction)||
       // Every field the trace and the saved turn share is equal in both copies (an absent field in one and present in the other is a difference).
-      ['humanReferent','repairProspect','repairGate','repairFacts','draftActs','namingRequest'].some((k:string)=>Object.hasOwn(j.jevTurn,k)!==Object.hasOwn(t,k)||Object.hasOwn(t,k)&&!equal(j.jevTurn[k],t[k]))))conflict=true;
+      ['humanReferent','repairProspect','repairGate','repairFacts','draftActs','namingRequest','namingReconfirm'].some((k:string)=>Object.hasOwn(j.jevTurn,k)!==Object.hasOwn(t,k)||Object.hasOwn(t,k)&&!equal(j.jevTurn[k],t[k]))))conflict=true;
      const last=turns.at(-1)?.state;if(last&&tr.lastCommittedState&&!equal(last,tr.lastCommittedState))conflict=true;
       // An ambiguous action (a multiple revisit or confirm/repair, an unresolved defer) never rewrites a slot: every slot's name and status after the turn,
       // in the turn state and in the last committed state when that is this turn, equals the ledger before it.

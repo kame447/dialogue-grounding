@@ -987,3 +987,33 @@ test('05q-C: the copies of a committed turn (trace and saved state) agree in eve
     assert.ok(bad(removed), label + ': a marker removed from the saved state only');
   }
 });
+
+test('05r: S4 recomputes the reconfirmation marker and the inherited-name source with the same shared functions: the regular holistic_v3 records (both strategies) pass, tampered markers do not', async () => {
+  const s3 = Object.keys(OLD.state.ledger)[3];
+  const speech = '角ばった塊に細い脚が付いた形のように見えます。';
+  const ai = JSON.stringify([{ segmentId: 'shape', quote: speech, targets: [s3], aspect: 'construal', proposition: 'x', name: null, linkedIssueId: null, respondsToTurn: null }]);
+  const seg = (quote: string, name: string | null) => JSON.stringify([{ segmentId: 's1', quote, targets: [], aspect: 'name', proposition: quote, name, linkedIssueId: null, respondsToTurn: null }]);
+  const describe = { human: 'どんな図形がありますか？', plan: { action: 'confirm', target: 'figure_3', speech, aiExtraction: ai } };
+  const agreedTurn = { human: 'これ、かかしとかどう？', plan: { action: 'agree', target: 'figure_3', name: 'かかし', act: 'name_propose', referent: 'figure_3', extraction: seg('かかし', 'かかし'), speech: '「かかし」と呼びましょう。' } };
+  for (const label of ['repair-first', 'bypass-enabled'] as const) {
+    // A reconfirmation of the agreed name: marked, accept stays, no naming-act question.
+    const again = await buildRecords({ label, dialoguePolicy: 'holistic_v3', turns: [describe, agreedTurn,
+      { human: 'で、さっきのかかしでいい？', plan: { action: 'accept', target: 'none', act: 'name_propose', referent: 'none', extraction: seg('かかし', 'かかし'), speech: 'うん、いいよ。' } }] });
+    const t = again.trials[0].attempts[0];
+    assert.equal(t.namingReconfirm, true, label);
+    assert.equal(t.namingRequest, undefined);
+    assert.ok(finalChecks(again).length >= 4 && finalChecks(again).every((c: any) => c.status === 'pass'), label + ' (reconfirm) ' + JSON.stringify(finalChecks(again).filter((c: any) => c.status !== 'pass').map((c: any) => [c.id, c.reason])));
+    const noMarker = structuredClone(again);
+    for (const x of traceCopies(noMarker)) delete x.namingReconfirm;
+    assert.ok(!finalChecks(noMarker).every((c: any) => c.status === 'pass'), label + ': the marker removed');
+    const asRequest = structuredClone(again);
+    for (const x of traceCopies(asRequest)) { delete x.namingReconfirm; x.namingRequest = true; }
+    assert.ok(!finalChecks(asRequest).every((c: any) => c.status === 'pass'), label + ': a reconfirmation passed off as an open request');
+    // A short re-approval after an unbound proposal: the carried name takes the proposal's turn as its source, so agree is offered and regular.
+    const short = await buildRecords({ label, dialoguePolicy: 'holistic_v3', turns: [describe,
+      { human: 'これ、かかしとかどう？', plan: { action: 'confirm', target: 'figure_3', act: 'name_propose', referent: 'figure_3', extraction: seg('かかし', 'かかし'), speech: 'どの形のことですか？' } },
+      { human: 'その呼び名でいい？', plan: { action: 'agree', target: 'figure_3', name: 'かかし', act: 'name_propose', antecedent: 'claim_1', referent: 'figure_3', extraction: seg('その呼び名でいい？', null), speech: '「かかし」と呼びましょう。' } }] });
+    assert.equal(short.trials[0].attempts[0].executed.action, 'agree', label);
+    assert.ok(finalChecks(short).length >= 4 && finalChecks(short).every((c: any) => c.status === 'pass'), label + ' (short re-approval) ' + JSON.stringify(finalChecks(short).filter((c: any) => c.status !== 'pass').map((c: any) => [c.id, c.reason])));
+  }
+});
