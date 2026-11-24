@@ -115,7 +115,7 @@ export function buildJevLocalTestPayload(input: LocalClassificationInput, questi
   snapshot.segments.forEach((_s, i) => {
     const scope = `\n判定対象はstate内のsegments[${i}]だけです。`;
     questions[`segment_${i}_act`] = { type: "choice", instructions: INSTRUCTIONS + scope +
-      "\nこの部分の局所機能を選んでください。根拠不足ならunknownです。", criteria: { ...(questionLayout === "two_stage_v3" ? dialoguePolicy === "holistic_v3" ? LOCAL_FUNCTION_CRITERIA_HOLISTIC_V3 : LOCAL_FUNCTION_CRITERIA_V3 : LOCAL_FUNCTION_CRITERIA) } };
+      "\nこの部分の局所機能を選んでください。根拠不足ならunknownです。", criteria: { ...(questionLayout === "two_stage_v3" ? dialoguePolicy === "holistic_v3" || dialoguePolicy === "holistic_v4" ? LOCAL_FUNCTION_CRITERIA_HOLISTIC_V3 : LOCAL_FUNCTION_CRITERIA_V3 : LOCAL_FUNCTION_CRITERIA) } };
     questions[`segment_${i}_antecedent`] = { type: "choice", instructions: INSTRUCTIONS + scope +
       "\nこの部分が応答する先行命題を選んでください。前の質問の回答は参照できません。曖昧ならnone。", criteria: { ...antecedents } };
   });

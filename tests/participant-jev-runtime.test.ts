@@ -134,7 +134,7 @@ test('J-F1: a generation failure requires retry; explicit retry can then complet
   assert.deepEqual(h.record().jevTraces.map((r:any)=>r.status),['error','committed']);
 });
 
-const v3 = researchTrialProfileV3(profile.lunaRequest, timeouts, 'two_stage_v3');
+const v3 = researchTrialProfileV3(profile.lunaRequest, timeouts, 'two_stage_v3', 'holistic_v3');
 const ownSlots: string[] = own.anchors.map(({ id }: { id: string }) => id);
 const [agreedSlot, otherSlot] = ownSlots;
 const agreedName = '札A';

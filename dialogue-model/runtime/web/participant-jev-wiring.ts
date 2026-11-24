@@ -20,7 +20,7 @@ import { createLunaObserver } from '../observation/observe.ts';
 import type { ObservationInput, ObservationObserver } from '../observation/contract.ts';
 import { createJevDecisionClient, JevDecisionError, validateRepairProspectMaterial, checkDecisionFailureEvidence } from '../decision/jev-decision.ts';
 import type { JevDecisionClient, AdaptiveRepairTrial, JevQuestionLayout } from '../decision/contract.ts';
-import { isHolisticPolicy } from '../decision/contract.ts';
+import { isHolisticPolicy, isHolisticV3Plus } from '../decision/contract.ts';
 import { hasNameProposal } from '../decision/naming-request.ts';
 import { createJevLocalTestClassifier, JevLocalTestError } from '../local-grounding/jev-local-test.ts';
 import type { JevTurnLocalOptions } from '../v2/jev-turn.ts';
@@ -137,9 +137,9 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
       const savedJudgments: any[] = Array.isArray(restore.queueState?.privateState?.judgments) ? restore.queueState.privateState.judgments : [];
       for (const trace of restore.jevTraces) {
         const requested = Object.hasOwn(trace,'namingRequest'), reconfirmed = Object.hasOwn(trace,'namingReconfirm'), marked = requested || reconfirmed;
-        if (marked && (requested && trace.namingRequest !== true || reconfirmed && trace.namingReconfirm !== true || requested && reconfirmed || profile.dialoguePolicy !== 'holistic_v3' ||
+        if (marked && (requested && trace.namingRequest !== true || reconfirmed && trace.namingReconfirm !== true || requested && reconfirmed || !isHolisticV3Plus(profile.dialoguePolicy) ||
             profile.questionLayout !== 'two_stage_v3' || !Array.isArray(trace.local?.claims) || !hasNameProposal(trace.local.claims, trace.turnIndex))) return invalid();
-        if (!marked && profile.dialoguePolicy === 'holistic_v3' && trace.status === 'committed' && Array.isArray(trace.local?.claims) && hasNameProposal(trace.local.claims, trace.turnIndex)) return invalid();
+        if (!marked && isHolisticV3Plus(profile.dialoguePolicy) && trace.status === 'committed' && Array.isArray(trace.local?.claims) && hasNameProposal(trace.local.claims, trace.turnIndex)) return invalid();
         if (trace.status === 'committed') {
           const judgment = savedJudgments.find((j: any) => j?.turnIndex === trace.turnIndex && j?.jevTurn?.attemptNumber === trace.attemptNumber);
           if (!judgment) return invalid();
@@ -376,7 +376,7 @@ export async function prepareParticipantJev(options:{configFile:string;baseAssig
       // The classification criteria follow the version of the trial that really runs: a restored record keeps its stored version, so the classifier is rebuilt for the
       // selected profile (forPolicy, called by selectParticipantJev once the stored version is known) instead of being reused from the creation default.
       const makeClassifier=(policy:string|undefined):any=>{
-        const classifier=createJevLocalTestClassifier({enabled:true,...transport,questionLayout:profile.questionLayout,...(policy==='holistic_v3'?{dialoguePolicy:'holistic_v3'}:{})})!;
+        const classifier=createJevLocalTestClassifier({enabled:true,...transport,questionLayout:profile.questionLayout,...(isHolisticV3Plus(policy)?{dialoguePolicy:policy as string}:{})})!;
         return {...classifier,get lastEvidence(){return classifier.lastEvidence;},get spentUsd(){return classifier.spentUsd;},
           get callCount(){return classifier.callCount;},classify:(...args:Parameters<typeof classifier.classify>)=>jevOperation(ledger,'jev_local',()=>classifier.classify(...args)),
           forPolicy:(next:string|undefined)=>next===policy?undefined:makeClassifier(next)};

@@ -83,7 +83,7 @@ export function validateLocalGroundingOptions(value: unknown): LocalGroundingOpt
     throw new Error("Invalid local grounding options");
   }
   return { extractor: options.extractor, classifier: options.classifier, timeoutMs: options.timeoutMs ?? LOCAL_GROUNDING_TIMEOUT_MS,
-    ...(options.keepUnboundApproval === true ? { keepUnboundApproval: true } : {}) };
+    ...(options.keepUnboundApproval === true ? { keepUnboundApproval: true } : {}), ...(options.approvalFromNamedClaim === true ? { approvalFromNamedClaim: true } : {}) };
 }
 
 // Never copy untrusted segment IDs or exception/provider messages into traces.
@@ -263,7 +263,7 @@ export async function prepareLocalGroundingTurn(options: LocalGroundingOptions, 
       });
     }
     phase = "verification_failed";
-    const verified = verifyLocalUpdate({ graph, turn: input.update.turn, publicTurns, segments, verdicts, keepUnboundApproval: options.keepUnboundApproval === true });
+    const verified = verifyLocalUpdate({ graph, turn: input.update.turn, publicTurns, segments, verdicts, keepUnboundApproval: options.keepUnboundApproval === true, approvalFromNamedClaim: options.approvalFromNamedClaim === true });
     if (research && verified.diagnostics?.length) research.verification.diagnostics = verified.diagnostics
       .flatMap((diagnostic, index): LocalVerificationDiagnostic[] => {
         const segmentId = segmentCode(diagnostic.segmentId, index);

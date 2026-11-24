@@ -64,7 +64,7 @@ export function agreeCandidateAllowed(c: NamingClaimLike, id: string, turn: numb
   if (own && !inherited.has(c.id as string)) return true;
   return estimates.some(meaningfulEstimate) ? nameBindsFigure(id, estimates) : !own;
 }
-/** A name proposal that answers an earlier name proposal and carries its name (the approval request of local-grounding/verify.ts). */
-export function inheritsProposalName(c: NamingClaimLike, claims: readonly NamingClaimLike[]): boolean {
-  return c.act === "name_propose" && typeof c.respondsTo === "string" && claims.some(p => p.id === c.respondsTo && (p.act === "name_propose" || p.act === "name_accept") && p.name === c.name);
+/** A name proposal that answers an earlier name proposal and carries its name (the approval request of local-grounding/verify.ts); from holistic_v4 the answered claim may also be a public adoption (name_accept) that carries the name. */
+export function inheritsProposalName(c: NamingClaimLike, claims: readonly NamingClaimLike[], fromNamedClaim = false): boolean {
+  return c.act === "name_propose" && typeof c.respondsTo === "string" && claims.some(p => p.id === c.respondsTo && (p.act === "name_propose" || fromNamedClaim && p.act === "name_accept") && p.name === c.name);
 }

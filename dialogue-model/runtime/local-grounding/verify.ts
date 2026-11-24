@@ -37,6 +37,8 @@ export type LocalVerifiedUpdate = LocalVerificationResult & { diagnostics?: Loca
 type VerificationInput = {
   /** holistic_v3 only: see LocalGroundingOptions.keepUnboundApproval. */
   keepUnboundApproval?: boolean;
+  /** holistic_v4 only: see LocalGroundingOptions.approvalFromNamedClaim. */
+  approvalFromNamedClaim?: boolean;
   graph: LocalGraph;
   turn: number;
   publicTurns: readonly PublicTurn[];
@@ -52,7 +54,7 @@ const independentActs = new Set(["assert", "construe", "name_propose", "ask"]);
 const overlap = (a: readonly string[], b: readonly string[]) => a.some(slot => b.includes(slot));
 
 /** Only the CURRENT public human turn may supply a new segment's quote. */
-export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts, keepUnboundApproval = false }: VerificationInput): LocalVerifiedUpdate {
+export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts, keepUnboundApproval = false, approvalFromNamedClaim = false }: VerificationInput): LocalVerifiedUpdate {
   const result: LocalVerifiedUpdate = { operations: [], rejected: [] };
   // Revalidate JSON-restored graphs before using any model-selected pointer.
   snapshotReferenceGraph(graph);
@@ -99,7 +101,7 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     // The antecedent is the claim the classifier chose: the partner's own name proposal, or a public AI claim that carries a name (an adoption, a named confirmation).
     // The name is public either way. The extraction's respondsToTurn names the AI turn that was just answered, so for this act it does not have to be the claim's turn.
     const approvalRequest = keepUnboundApproval && !!prior && act === "name_propose" && name === null && aspect === "name" && prior.aspect === "name" &&
-      ["name_propose", "name_accept"].includes(prior.act) && prior.name !== null;
+      (approvalFromNamedClaim ? ["name_propose", "name_accept"].includes(prior.act) : prior.act === "name_propose" && prior.speaker === "human") && prior.name !== null;
     if (isBareDeictic(quote) || /^(?:それ|これ|あれ)で(?:いい|良い|よい)(?:です)?[。！!？?\s]*$/u.test(quote.normalize("NFKC").trim())) {
       // ai1 is the program-owned primary act. A secondary feature (ai2) cannot
       // receive a bare acknowledgment, even if the classifier selected its ID.
@@ -121,7 +123,7 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     const unboundApproval = (approvalRequest || unboundNameQuestion) && prior!.targets.length === 0 && targets.length === 0;
     if (prior && independentActs.has(act) && prior.sourceTurn < turn &&
         (prior.aspect !== aspect || !unboundApproval && !overlap(prior.targets, targets.length ? targets : prior.targets) ||
-          (!approvalRequest && segment.respondsToTurn !== null && segment.respondsToTurn !== prior.sourceTurn))) {
+          (!(approvalRequest && approvalFromNamedClaim) && segment.respondsToTurn !== null && segment.respondsToTurn !== prior.sourceTurn))) {
       droppedAntecedent = prior.id; prior = null;
     }
     // Only absence of a target can inherit the verified antecedent's candidates.
@@ -132,7 +134,7 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     // supplied generic progress. Explicit semantic disagreements remain invalid.
     if (prior && aspect === "progress" && ["defer", "revisit"].includes(act)) aspect = prior.aspect;
     if (prior && (prior.sourceTurn >= turn || prior.aspect !== aspect || !unboundApproval && !overlap(prior.targets, targets) ||
-        (!approvalRequest && segment.respondsToTurn !== null && segment.respondsToTurn !== prior.sourceTurn))) {
+        (!(approvalRequest && approvalFromNamedClaim) && segment.respondsToTurn !== null && segment.respondsToTurn !== prior.sourceTurn))) {
       reject("inconsistent_claim_response"); continue;
     }
     if (prior && (act === "withdraw" ? prior.speaker !== "human" : responses.has(act) && prior.speaker === "human")) {

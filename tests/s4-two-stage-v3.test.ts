@@ -1148,7 +1148,7 @@ test('05w: S4 recomputes an approval request that answers a public AI adoption (
   const seg = (quote: string, name: string | null, targets: string[] = [], respondsToTurn: number | null = null) => JSON.stringify([{ segmentId: 's1', quote, targets, aspect: 'name', proposition: quote, name, linkedIssueId: null, respondsToTurn }]);
   for (const label of ['repair-first', 'bypass-enabled'] as const) {
     for (const antecedent of ['claim_1', 'claim_2']) {
-      const record = await buildRecords({ label, dialoguePolicy: 'holistic_v3', turns: [
+      const record = await buildRecords({ label, dialoguePolicy: 'holistic_v4', turns: [
         { human: 'どんな図形がありますか？', plan: { action: 'confirm', target: 'figure_3', speech, aiExtraction: ai } },
         { human: 'これ、かかしとかどう？', plan: { action: 'agree', target: 'figure_3', name: 'かかし', act: 'name_propose', referent: 'figure_3', extraction: seg('かかし', 'かかし', [s3]), speech: '「かかし」と呼びましょう。' } },
         { human: 'その呼び名でいい？', plan: { action: 'accept', target: 'none', act: 'name_propose', antecedent, referent: 'figure_3', extraction: seg('その呼び名でいい？', null, [], 4), speech: 'うん、いいよ。' } }] });

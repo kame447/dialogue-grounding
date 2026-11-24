@@ -612,7 +612,7 @@ test('05t-6: a restored record keeps the classification criteria of its stored v
   const fresh = await makeTask(prepared, { strategy: 'bypass-enabled' });
   fresh.task.message('どんな図形がありますか？', 'turn-1'); await fresh.task.whenIdle();
   const saved = fresh.record();
-  assert.equal(saved.options.dialoguePolicy, 'holistic_v3');
+  assert.equal(saved.options.dialoguePolicy, 'holistic_v4');
   fresh.task.message(proposal, 'turn-2'); await fresh.task.whenIdle();
   const created = criteriaOf(first);
   assert.ok(created.length > 0 && created.every((c: any) => JSON.stringify(c) === JSON.stringify({ ...LOCAL_FUNCTION_CRITERIA_HOLISTIC_V3 })), 'a new record sends the holistic_v3 criteria');
@@ -626,4 +626,27 @@ test('05t-6: a restored record keeps the classification criteria of its stored v
   restored.task.message(proposal, 'turn-r'); await restored.task.whenIdle();
   const kept = criteriaOf(second);
   assert.ok(kept.length > 0 && kept.every((c: any) => JSON.stringify(c) === JSON.stringify({ ...LOCAL_FUNCTION_CRITERIA_V3 })), 'a restored holistic_v2 record keeps its criteria');
+});
+
+test('05y-1: a record stored as holistic_v3 (cqab3) is restored as holistic_v3 with the holistic_v3 classification text, and a new one is created as holistic_v4', async t => {
+  const proposal = 'これ、かかしとかどう？';
+  const segment = { segmentId: 'name', quote: 'かかし', targets: [], aspect: 'name', proposition: 'かかしと呼ぶ提案', name: 'かかし', linkedIssueId: null, respondsToTurn: null };
+  const config = { questionLayout: 'two_stage_v3', technicalTrial: { version: 'adaptive_repair_v3' } };
+  const criteriaOf = (h: any) => h.upstream.posts.map((p: any) => p.questions?.segment_0_act?.criteria).filter(Boolean);
+  const first = await fixture(t, config, { answers: { action: 'accept', target: 'none' }, segmentText: proposal, segments: [segment] });
+  const prepared = await prepareParticipantJev(first.options);
+  const fresh = await makeTask(prepared, { strategy: 'bypass-enabled' });
+  fresh.task.message('どんな図形がありますか？', 'turn-1'); await fresh.task.whenIdle();
+  const saved = fresh.record();
+  assert.equal(saved.options.dialoguePolicy, 'holistic_v4');
+  const stored = structuredClone(saved);
+  stored.options.dialoguePolicy = 'holistic_v3';
+  stored.options.profileSha256 = researchHash(researchTrialProfileV3({ timeoutMs: null, maxCompletionTokens: 1000 }, timeouts, 'two_stage_v3', 'holistic_v3'));
+  const second = await fixture(t, config, { answers: { action: 'accept', target: 'none' }, segmentText: proposal, segments: [segment] });
+  const preparedAgain = await prepareParticipantJev(second.options);
+  const restored = await makeTask(preparedAgain, { strategy: 'bypass-enabled', restore: stored });
+  restored.task.message(proposal, 'turn-r'); await restored.task.whenIdle();
+  assert.equal(restored.record().options.dialoguePolicy, 'holistic_v3');
+  const kept = criteriaOf(second);
+  assert.ok(kept.length > 0 && kept.every((c: any) => JSON.stringify(c) === JSON.stringify({ ...LOCAL_FUNCTION_CRITERIA_HOLISTIC_V3 })));
 });

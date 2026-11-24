@@ -84,6 +84,8 @@ export type JevDecisionInput = {
   nameSource?: "public_only";
   /** holistic_v3 only, local (never serialized): this turn's human utterance carries a typed naming request; with no agree candidate, accept is not offered. */
   namingRequest?: true;
+  /** holistic_v4 only, local with namingRequest: accept is never offered for the typed naming request, even when an agree is legal. */
+  namingRequestStrict?: true;
   /** C sets false after its engineering limit for targeted reobservation is reached. */
   reobservationAllowed?: boolean;
   humanReferent?: HumanReferentMaterial;
@@ -152,10 +154,14 @@ export type JevDecisionClient = {
  * name rules (the memo readings and the partner's proposed names are never AI propose_name candidates). A recorded policy is reproduced as it was created. */
 /** holistic_v3 adds, for new trials only, the typed naming-request rule: a turn whose human utterance asks for a name (a proposal or an approval question) and in which
  * agree is not legal does not offer accept. */
-export type DialoguePolicy = "holistic_v1" | "holistic_v2" | "holistic_v3";
-export const isHolisticPolicy = (p: unknown): p is DialoguePolicy => p === "holistic_v1" || p === "holistic_v2" || p === "holistic_v3";
+/** holistic_v4 adds, for new trials only, to holistic_v3: an approval request may answer the claim the classifier chose when that claim carries a name (a human proposal or a public AI
+ * adoption) whatever turn the extraction points at, and a typed naming request (an unadopted name) never offers accept, even when agree is legal. holistic_v3 is reproduced as it was. */
+export type DialoguePolicy = "holistic_v1" | "holistic_v2" | "holistic_v3" | "holistic_v4";
+export const isHolisticPolicy = (p: unknown): p is DialoguePolicy => p === "holistic_v1" || p === "holistic_v2" || p === "holistic_v3" || p === "holistic_v4";
 /** The name rules and the extraction criterion of holistic_v2 carry on into holistic_v3. */
-export const isHolisticV2Plus = (p: unknown): boolean => p === "holistic_v2" || p === "holistic_v3";
+export const isHolisticV2Plus = (p: unknown): boolean => p === "holistic_v2" || p === "holistic_v3" || p === "holistic_v4";
+/** The typed naming-request machinery, the classifier criteria and the markers of holistic_v3 carry on into holistic_v4. */
+export const isHolisticV3Plus = (p: unknown): boolean => p === "holistic_v3" || p === "holistic_v4";
 /** What a draft does about naming (holistic_v1): a closed set judged by Jev for the executed target and name. */
 export const DRAFT_ACTS = ["adopt_chosen", "adopt_other", "decline_or_hold", "propose_question", "recount_only", "none"] as const;
 export type DraftAct = typeof DRAFT_ACTS[number];
