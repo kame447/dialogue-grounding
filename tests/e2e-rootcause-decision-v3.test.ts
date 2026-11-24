@@ -81,7 +81,7 @@ function fixture(strategy: 'bypass-enabled' | 'repair-first' = 'bypass-enabled',
           const act = plan.segments![index].act;
           const antecedentAct = act === 'deny' ? 'name_accept' : act === 'name_accept' ? 'name_propose' : null;
           // A referent denial answers the AI's latest public claim about the figure.
-          const referentDenial = act === 'deny' && plan.segments![index].aspect === 'referent';
+          const referentDenial = (act === 'deny' || act === 'agree') && plan.segments![index].aspect === 'referent';
           const antecedent = referentDenial ? priorClaims.filter(c => c.speaker === 'ai').at(-1)
             : antecedentAct && priorClaims.find(c => c.speaker === 'ai' && c.act === antecedentAct);
           return { segmentId, act, respondsToClaimId: antecedent?.id ?? null, rawScore: null };
@@ -93,7 +93,7 @@ function fixture(strategy: 'bypass-enabled' | 'repair-first' = 'bypass-enabled',
         if (phase === 'ai_extraction') return { text: JSON.stringify(plan.aiSegments ?? []) };
         if (phase === 'local_extraction') return { text: JSON.stringify((plan.segments ?? []).map(({ act, respondsTo, ...segment }, index) => ({
           ...segment, segmentId: `segment-${index}`, linkedIssueId: null,
-          respondsToTurn: respondsTo ?? (act === 'deny' || act === 'name_accept' ? events.at(-2)!.seq : null),
+          respondsToTurn: respondsTo ?? (act === 'deny' || act === 'name_accept' || act === 'agree' ? events.at(-2)!.seq : null),
         }))) };
         assert.equal(phase, 'generation');
         const text = drafts.shift();
@@ -782,7 +782,7 @@ for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
     assert.throws(() => checkS4AgreeSource(before, forged));
 
     const affirm = 'やっぱりその形です。';
-    const affirmSegment = { quote: affirm, name: null, targets: [ids[0]], aspect: 'referent' as const, proposition: 'その形である', act: 'assert' as const };
+    const affirmSegment = { quote: affirm, name: null, targets: [ids[0]], aspect: 'referent' as const, proposition: 'その形である', act: 'agree' as const, respondsTo: shared.input.turn + 1 /* the AI turn that said which figure it meant */ };
     before = structuredClone(f.state());
     const affirmed = await f.exchange(affirm + ask, { action: 'agree', target: 0, drafts: [agreeSpeech(name)], segments: [affirmSegment, { ...askSegment, quote: ask }] });
     assert.deepEqual(affirmed.input.agreeNames, [{ name, figureId: ids[0], sourceTurn: 1 }]);
@@ -859,3 +859,12 @@ for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
     assert.deepEqual(mixed.attempt()?.generationGuard.violations.sort(), ['orientation_leak', 'working_note']);
   });
 }
+
+test('an English name the partner used in public is allowed however long ago it was said', async () => {
+  const f = fixture('bypass-enabled');
+  await f.exchange('これは Golden Gate Bridge みたいな形ですか？', { action: 'accept', target: 3, drafts: ['そうですね。'] });
+  for (let i = 0; i < 20; i++) await f.exchange('うん、続けてください。', { action: 'accept', target: 3, drafts: ['はい。'] });
+  const r = await f.exchange('その形はどうですか？', { action: 'accept', target: 3, drafts: ['Golden Gate Bridge のような形ですね。'] });
+  assert.deepEqual(r.trace.generationGuard, { violations: [], regenerated: false, fallback: false });
+  assert.equal(r.text, 'Golden Gate Bridge のような形ですね。');
+});

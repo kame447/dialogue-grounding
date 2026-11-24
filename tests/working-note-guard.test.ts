@@ -26,6 +26,8 @@ test('the retry instruction names the violation only when it occurred', () => {
 
 test('a list of alternative replies is a violation, an ordinary sentence with a number is not', () => {
   assert.deepEqual(findWorkingNoteLeaks('案1：輪に切れ目がある形ですか？\n案2：切れ目のある輪がついていますか？'), ['working_note']);
-  assert.deepEqual(findWorkingNoteLeaks('1. 輪がありますか？\n2. 棒がありますか？'), ['working_note']);
-  for (const text of ['案が二つあります。', '1つ目の形に切れ目がありますか？', '案1の形でしょうか？']) assert.deepEqual(findWorkingNoteLeaks(text), [], text);
+  assert.deepEqual(findWorkingNoteLeaks('「輪に切れ目がある形ですか？」\n「切れ目のある輪がついていますか？」'), ['working_note'], 'quoted whole replies, one per line');
+  // Features listed for one question or explanation are one reply.
+  for (const text of ['見えている特徴は二つです。\n・輪に小さな切れ目がある\n・輪に細い棒がついている\nこの二つがそろう形ですか？', '1. 輪がある\n2. 棒がある\nどちらも合っていますか？',
+    '案が二つあります。', '1つ目の形に切れ目がありますか？', '案1の形でしょうか？']) assert.deepEqual(findWorkingNoteLeaks(text), [], text);
 });

@@ -33,15 +33,16 @@ const RETRY_REASONS:ReadonlyArray<{codes:readonly string[];text:string;legacy?:s
 // codes: the recorded condition's own guard violations (exact). draft: for the comparison condition, what its OWN first draft shows to this verifier
 // (an orientation leak; any other leak, which is where a name/agreement decision, an id or a field would show): the orientation reason must be present exactly
 // when the draft has an orientation leak, and the name/agreement-decision reason can appear only if the draft has some other leak. Other families stay open.
-function retryReasonsMatch(text:string,restated:boolean,codes?:readonly string[],draft?:{orientation:boolean;nonOrientation:boolean;workingNote?:boolean}):boolean{
+function retryReasonsMatch(text:string,restated:boolean,codes?:readonly string[],draft?:{orientation:boolean;naming:boolean;workingNote:boolean}):boolean{
  if(!text)return false;
  for(const reason of RETRY_REASONS){
   const match=text.startsWith(reason.text)?reason.text:!restated&&reason.legacy&&text.startsWith(reason.legacy)?reason.legacy:null;
   if(codes&&reason.codes.some(code=>codes.includes(code))!==Boolean(match))return false;
   if(!codes&&draft){
+   // Each family this verifier can decide from the draft alone is checked exactly (present iff the draft shows it); the others stay open.
    if(reason.codes.includes('orientation_leak')&&draft.orientation!==Boolean(match))return false;
-   if(reason.codes.includes('naming_decision')&&match&&!draft.nonOrientation)return false;
-   if(reason.codes.includes('working_note')&&Boolean(match)!==Boolean(draft.workingNote))return false;
+   if(reason.codes.includes('naming_decision')&&draft.naming!==Boolean(match))return false;
+   if(reason.codes.includes('working_note')&&draft.workingNote!==Boolean(match))return false;
   }
   if(match)text=text.slice(match.length);
  }
@@ -71,20 +72,28 @@ function s4HasWorkingNote(text:unknown,publicTexts:readonly string[]):boolean{
  if(typeof text!=='string')return false;
  const allowed=new Set(publicTexts.flatMap(t=>String(t).normalize('NFKC').match(/[A-Za-z][A-Za-z'’-]*/gu)??[]).map(w=>w.toLowerCase()));
  const unquoted=text.normalize('NFKC').replace(/「[^」]*」|『[^』]*』|"[^"]*"|“[^”]*”/gu,' ');
- const nfkc=text.normalize('NFKC'),alternatives=(nfkc.match(/(?:^|\n|[。!?])\s*(?:案|候補|パターン|返答|Option|Draft|Alt)\s*[0-9A-Za-z一二三]\s*[:.)]/gu)??[]).length>=2||(nfkc.match(/^\s*(?:[0-9]+[.)]|[-・*•])\s*\S/gmu)??[]).length>=2;
+ const nfkc=text.normalize('NFKC'),alternatives=(nfkc.match(/(?:^|\n|[。!?])\s*(?:案|候補|パターン|返答|Option|Draft|Alt)\s*[0-9A-Za-z一二三]\s*[:.)]/gu)??[]).length>=2||(nfkc.match(/^\s*(?:[0-9]+[.)]|[-・*•])?\s*[「『][^」』\n]{4,}[」』]\s*$/gmu)??[]).length>=2;
  return alternatives||(unquoted.match(/[A-Za-z][A-Za-z'’-]*(?:[\s,.;:?!]+[A-Za-z][A-Za-z'’-]*){2,}/gu)??[]).some(run=>run.split(/[^A-Za-z'’-]+/u).filter(w=>w&&!allowed.has(w.toLowerCase())).length>=3);
 }
-function s4HasNonOrientationLeak(text:string,action:any):boolean{
- const nfkc=text.normalize('NFKC'),compact=nfkc.replace(/[\s\u200b-\u200d\ufeff]/gu,''),act=action?.action;
- if(/(?<![A-Za-z0-9])s-[0-9a-f]{4}(?![A-Za-z0-9])/iu.test(compact)||/\d+:pub\d+/u.test(compact)||
+const qTail=(tail:string)=>/^[」』”"]*(?:(?:です|ます|でした|でしょう|だろう|なの|なんです|できます|できる|しました|します|しましょう|しません|する|した|してよいです|してもよいです|しています|されています)?か(?:[?。!、,]|$)|(?:です|ます|でしょう)?(?:ね|よ)?[?])/u.test(tail);
+// Pure functions of the draft text (and the executed action) that mirror two guard families exactly: internal ids/fields and name/agreement-decision wording.
+function s4InternalLeak(compact:string):boolean{
+ return /(?<![A-Za-z0-9])s-[0-9a-f]{4}(?![A-Za-z0-9])/iu.test(compact)||/\d+:pub\d+/u.test(compact)||
   /(?<![A-Za-z])(?:targetSlot|candidateName|discriminatingFeature|ownLedger|ledger|judgment)(?![A-Za-z])|\{"[^"]{1,40}":/u.test(compact)||
-  /human[_-]?referent|repair[_-]?prospect|repair_issue|candidate_narrowed|candidate_widened|other_figure_benefit|no_open_issue|issue_\d+|repair_?facts|reply_?vs_?previous|not_comparable|widened_or_shifted|same_?question|local_?gaps/iu.test(compact))return true;
- const qTail=(tail:string)=>/^[」』”"]*(?:(?:です|ます|でした|でしょう|だろう|なの|なんです|できます|できる|しました|します|しましょう|しません|する|した|してよいです|してもよいです|しています|されています)?か(?:[?。!、,]|$)|(?:です|ます|でしょう)?(?:ね|よ)?[?])/u.test(tail);
+  /human[_-]?referent|repair[_-]?prospect|repair_issue|candidate_narrowed|candidate_widened|other_figure_benefit|no_open_issue|issue_\d+|repair_?facts|reply_?vs_?previous|not_comparable|widened_or_shifted|same_?question|local_?gaps/iu.test(compact);
+}
+function s4NamingDecision(compact:string,act:string):boolean{
  if(act!=='agree'){
   for(const re of [/と呼(?:ぼう|びましょう|ぶことに(?:しよう|しましょう|します)|びます)/gu,/に(?:しよう|しましょう|します|決めよう|決めましょう|決めます)/gu,/で(?:いこう|行こう|いきましょう|行きましょう|いきます|行きます)/gu,/[でに](?:決まり|決定|確定)/gu,/で(?:いい|良い|よい|大丈夫)/gu,/合意/gu]){
    for(const m of compact.matchAll(re)){const tail=compact.slice(m.index!+m[0].length);if(qTail(tail))continue;if(m[0]==='合意'&&/^(?:していません|していない|しません|ではありません|ではない|はしていません|はしていない)/u.test(tail))continue;if(re.source.startsWith('に')&&/(?:後|あと|後日|今度|別の機会|保留|後回し|先送り|先延ばし)$/u.test(compact.slice(0,m.index)))continue;return true;}
   }
  }
+
+ return false;
+}
+function s4HasNonOrientationLeak(text:string,action:any):boolean{
+ const nfkc=text.normalize('NFKC'),compact=nfkc.replace(/[\s\u200b-\u200d\ufeff]/gu,''),act=action?.action;
+ if(s4InternalLeak(compact)||s4NamingDecision(compact,act))return true;
  if(act!=='repair'){
   for(const m of compact.matchAll(/(?:訂正|撤回)(?:します|しました|させてください|させて下さい)|取り消(?:します|しました|させてください)|(?:取り違え|勘違い|見間違え|間違え)(?:ました|ていました|てました)|(?:私|わたし|自分|こちら)の[^。!?、,]{0,12}?(?:取り違え|勘違い|見間違い|間違い|誤り)(?:でした|です)|見間違いでした|(?:さっき|先ほど|前)の(?:は|も)[^。!?]{0,12}?違いました/gu)){
    if(!qTail(compact.slice(m.index!+m[0].length)))return true;
@@ -405,14 +414,14 @@ function agreeSource(tr:any,t:any,key:string,tape:any,legacyV3=false):'invalid'|
    const aiSharedIds=new Set(live.filter((c:any)=>c.speaker==='ai'&&c.sourceTurn>lastBoundary&&c.sourceTurn<t.turnIndex).flatMap((c:any)=>c.targets));
    const claimTargets=(c:any):string[]=>Array.isArray(c.targets)&&c.targets.length?c.targets:live.find((p:any)=>p.id===c.respondsTo)?.targets??[];
    const referentClaims=live.filter((c:any)=>c.speaker==='human'&&c.aspect==='referent'&&c.sourceTurn>lastBoundary);
-   // A denial stands until the partner re-affirms that very figure: a later agree/assert naming it alone whose own exchange's referent estimate also points at it
-   // (strictly above every other label). Candidates, narrowing, questions, backchannels and other acts keep it.
+   // A denial stands until the partner re-affirms that very figure: a later referent agree answering the AI's own public claim about it, whose own exchange's
+   // referent estimate puts it strictly first. An assert, a candidate, a narrowing, a question, a backchannel and other acts keep it.
    const referentAt=(at:number)=>at===t.turnIndex?z.humanReferent:preJudgments.find((x:any)=>x.turnIndex===at)?.jevTurn?.humanReferent??null;
    const selects=(m:any,id:string)=>!!m&&m.status==='ok'&&!!m.scores&&typeof m.scores[id]==='number'&&Object.entries(m.scores).every(([k,v]:any)=>k===id||m.scores[id]>v);
    const referentDenied=(id:string)=>{
     const lastDeny=referentClaims.filter((c:any)=>c.act==='deny'&&claimTargets(c).includes(id)).at(-1);if(!lastDeny)return false;
     const at=referentClaims.indexOf(lastDeny);
-    return !referentClaims.some((c:any,i:number)=>i>at&&['agree','assert'].includes(c.act)&&claimTargets(c).length===1&&claimTargets(c)[0]===id&&selects(referentAt(c.sourceTurn),id));
+    return !referentClaims.some((c:any,i:number)=>i>at&&c.act==='agree'&&live.find((p:any)=>p.id===c.respondsTo)?.speaker==='ai'&&claimTargets(c).length===1&&claimTargets(c)[0]===id&&selects(referentAt(c.sourceTurn),id));
    };
    const expectedAt=(level:number):string[]=>openClaims.flatMap((c:any)=>{
     const name=c.name as string;
@@ -491,7 +500,8 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
      const codes=label===tr.label&&t.status==='committed'?t.generationGuard.violations:undefined;
      // The comparison condition's retry reason is checked against that condition's own first draft, which this verifier classifies itself.
      const publicTexts=(tape.events??[]).filter((e:any)=>e.seq<=t.turnIndex).map((e:any)=>e.text);
-     const draft=codes===undefined&&generationCount===1?{orientation:s4HasOrientationLeak(prevDraft),nonOrientation:typeof prevDraft==='string'&&s4HasNonOrientationLeak(prevDraft,s.executed),workingNote:layoutOf(tr.profile)==='two_stage_v3'&&s4HasWorkingNote(prevDraft,publicTexts)}:undefined;
+     const v3Retry=layoutOf(tr.profile)==='two_stage_v3',restatedRetry=tape.generationRetryVersion==='jev_generation_retry_v2';
+     const draft=codes===undefined&&generationCount===1?{orientation:v3Retry&&s4HasOrientationLeak(prevDraft),naming:typeof prevDraft==='string'&&s4NamingDecision(prevDraft.normalize('NFKC').replace(/[\s\u200b-\u200d\ufeff]/gu,''),s.executed?.action),workingNote:v3Retry&&restatedRetry&&s4HasWorkingNote(prevDraft,publicTexts)}:undefined;
      if(!generationMessages(p.messages,t,s.executed,{...tape,generationGraph:(tr.turns??[]).find((u:any)=>u.turn===t.turnIndex)?.state?.graph},m.profile,generationCount++,codes,draft))return'invalid';
      prevDraft=answer?.response?.text??answer?.text;
     }
@@ -799,12 +809,12 @@ function choiceResponse(body:any,response:any):boolean{
 // Fixed baseline instruction bytes are installed below; no producer builder is
 // executed while checking a record. No condition or original decision is input.
 // Prompt-style update (prompt-style-20261124): the current text and the prior text are both verified exactly.
-function generationMessages(messages:any[],trace:any,execution:any,tape:any,profile:any,index:number,codes?:readonly string[],draft?:{orientation:boolean;nonOrientation:boolean;workingNote?:boolean}):boolean{
+function generationMessages(messages:any[],trace:any,execution:any,tape:any,profile:any,index:number,codes?:readonly string[],draft?:{orientation:boolean;naming:boolean;workingNote:boolean}):boolean{
  if(CTX.style==='style'||CTX.style==='loop')return generationMessagesWith(messages,trace,execution,tape,profile,FIXED_STYLE,{v3:[TRIAL_STYLE],legacy:LEGACY_TRIAL_STYLE},index,codes,draft);
  if(CTX.style==='legacy')return generationMessagesWith(messages,trace,execution,tape,profile,FIXED,{v3:[TRIAL,TRIAL_V3_PREV],legacy:LEGACY_TRIAL},index,codes,draft);
  return generationMessagesWith(messages,trace,execution,tape,profile,FIXED,{v3:[TRIAL,TRIAL_V3_PREV],legacy:LEGACY_TRIAL},index,codes,draft)||generationMessagesWith(messages,trace,execution,tape,profile,FIXED_STYLE,{v3:[TRIAL_STYLE],legacy:LEGACY_TRIAL_STYLE},index,codes,draft);
 }
-function generationMessagesWith(messages:any[],trace:any,execution:any,tape:any,profile:any,FIXED:any,trials:{v3:any[];legacy:any},index:number,codes?:readonly string[],draft?:{orientation:boolean;nonOrientation:boolean;workingNote?:boolean}):boolean{
+function generationMessagesWith(messages:any[],trace:any,execution:any,tape:any,profile:any,FIXED:any,trials:{v3:any[];legacy:any},index:number,codes?:readonly string[],draft?:{orientation:boolean;naming:boolean;workingNote:boolean}):boolean{
  if(!trace.finalAction||!execution)return false;const g={action:execution.action,targetSlot:execution.target.kind==='single'?execution.target.figureId:null,candidateName:execution.name,discriminatingFeature:execution.feature,note:null};
  const trialOptions=CTX.v3&&!CTX.legacyV3?trials.v3:[trials.legacy];
  for(const trial of trialOptions){
