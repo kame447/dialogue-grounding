@@ -701,6 +701,7 @@ test('05e-4: a comparison retry that can neither publish nor fall back (naming f
 const forgeGeneration = (record: any, label: string, index: number, text: string) =>
   forgeBoth(record, label, tail => { tail.luna.filter((l: any) => l.phase === 'generation')[index].response.text = text; });
 import { buildRecords } from './support/s4-v3-records.ts';
+import { MEMO_LOCAL_EXTRACTION_INSTRUCTIONS, MEMO_LOCAL_EXTRACTION_INSTRUCTIONS_HOLISTIC } from '../dialogue-model/runtime/local-grounding/extract.ts';
 // holistic_v1: the only name candidate is a name said in public (the memo's readings are explanations); a partner mention is such a name.
 const mentionQuote = '船という見方もありますね。';
 const finalChecks = (n: any) => checksOf(n).filter((c: any) => c.id.includes('.attempt.0.'));
@@ -814,4 +815,33 @@ test('05j-B1: holistic_v1 reproduces the earlier candidates, holistic_v2 the pub
   const v2 = await namedRecords();
   assert.equal(v2.trials[0].profile.dialoguePolicy, 'holistic_v2');
   assert.ok(!finalChecks(relabel(v2, 'holistic_v1')).every((c: any) => c.status === 'pass'), 'v2 record under v1');
+});
+
+function changeExtraction(records: any, label: string, content: string) {
+  let changed = 0;
+  for (const side of sideCopies(records).filter(x => x.label === label)) {
+    for (const request of side.requests.filter((q: any) => q.provider === 'luna' && q.phase === 'local_extraction')) {
+      const body = request.payload;
+      body.messages[0].content = content;
+      request.completeMessagesSha256 = hash(body.messages);
+      request.preProjectionPayloadSha256 = request.payloadSha256 = hash(body);
+      changed++;
+    }
+    side.materialSha256 = hash(side.material);
+  }
+  return changed;
+}
+test('05k-B1: the extraction instruction of a holistic record is checked against its policy version', async () => {
+  for (const [policy, own, other] of [['holistic_v1', MEMO_LOCAL_EXTRACTION_INSTRUCTIONS, MEMO_LOCAL_EXTRACTION_INSTRUCTIONS_HOLISTIC],
+    ['holistic_v2', MEMO_LOCAL_EXTRACTION_INSTRUCTIONS_HOLISTIC, MEMO_LOCAL_EXTRACTION_INSTRUCTIONS]] as const) {
+    const record = await records('two_stage_v3', policy === 'holistic_v1' ? [stageOne('x', 'accept'), stageTwo('x', 'accept', 'none')] : decisionsAccept(), { policy: policy as any });
+    pass(record);
+    const sent = sideCopies(record).flatMap((x: any) => x.requests).filter((q: any) => q.phase === 'local_extraction').map((q: any) => q.payload.messages[0].content);
+    assert.ok(sent.length > 0 && sent.every((c: string) => c === own), policy + ' sends its own extraction text');
+    for (const label of ['bypass-enabled', 'repair-first']) {
+      const forged = structuredClone(record);
+      assert.ok(changeExtraction(forged, label, other) > 0);
+      assert.ok(checksOf(forged).some((c: any) => c.status !== 'pass'), policy + ' / ' + label + ' with the other version\'s text');
+    }
+  }
 });

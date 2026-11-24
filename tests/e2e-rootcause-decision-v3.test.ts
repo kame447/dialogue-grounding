@@ -1098,3 +1098,29 @@ test('holistic_v2 (names, 05j-B2): a name the partner proposed for several figur
   assert.ok(actions(o).includes('propose_name'), 'holistic_v1 offers the memo readings');
   assert.equal(old.extractionSystem.at(-1), MEMO_LOCAL_EXTRACTION_INSTRUCTIONS, 'holistic_v1 keeps the earlier extraction text');
 });
+
+test('holistic_v2 (names, 05k-B2): a partner name stays out of the candidates when the input limit drops its source claim, with and without the shortening, in both strategies', async () => {
+  const names = (r: { requests: Array<{ state: string; questions: Record<string, { criteria: Record<string, string> }> }> }) => {
+    const wire = r.requests.find(q => q.questions.action)!;
+    const state = JSON.parse(wire.state) as { priorClaims: Array<{ name: string | null }>; publicNames: Array<{ name: string }> };
+    return { actions: Object.keys(wire.questions.action.criteria), claims: state.priorClaims.map(c => c.name), publicNames: state.publicNames.map(n => n.name) };
+  };
+  for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
+    for (const long of [false, true]) {
+      const f = fixture(strategy, { aiPublic: true, holistic: true });
+      const proposal = 'この二つのどちらかに、帆って呼び名はどう？';
+      await f.exchange(proposal, { action: 'accept', target: 0, draftActs: ['none'], segments: [naming(proposal, '帆', [ids[0], ids[1]])], drafts: ['どちらの形の話か確かめたいです。'] });
+      let last: Awaited<ReturnType<typeof f.exchange>> | undefined;
+      for (let i = 0; i < (long ? 9 : 1); i++) {
+        const text = long ? `${i}回目の続きです。` + 'この形の説明です。'.repeat(280) : '続けてください。';
+        last = await f.exchange(text, { action: 'accept', target: 0, drafts: ['そう見えるんですね。'] });
+      }
+      const seen = names(last!);
+      if (long) assert.ok(!seen.claims.includes('帆'), 'the partner proposal claim was shortened away from the request');
+      else assert.ok(seen.claims.includes('帆'), 'without shortening the claim is sent');
+      // The candidate list is decided from every claim before the size limit: the partner name is not in the public names that are sent at all.
+      assert.ok(!seen.publicNames.includes('帆'), `${strategy} ${long ? 'shortened' : 'full'}: the partner name is not a public-name candidate`);
+      assert.ok(!seen.actions.includes('propose_name'), `${strategy} ${long ? 'shortened' : 'full'}: the partner name is not offered`);
+    }
+  }
+});

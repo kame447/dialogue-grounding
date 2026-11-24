@@ -737,7 +737,12 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         baseInput.agreeNames = buildAgreeNamesV3(claims, publicTurns, latest.seq, slots, state);
         baseInput.nameLedger = structuredClone(state.ledger);
         // holistic_v1: the memo's readings are explanations, never AI-proposed names (the candidates are then only names that were said in public).
-        if (holisticV2) baseInput.nameSource = "public_only";
+        if (holisticV2) {
+          baseInput.nameSource = "public_only";
+          // A name the partner proposed is decided from every claim, not from the claims that survive the input's size limit: it never reaches the candidate list.
+          const proposed = new Set(claims.filter(c => c.speaker === "human" && c.act === "name_propose" && c.name !== null).map(c => normalizeName(c.name!)));
+          baseInput.publicNames = baseInput.publicNames.filter(n => !proposed.has(normalizeName(n.name)));
+        }
       }
       else if (adaptive) baseInput.agreeNames = claims.filter(eligibleAgreeClaim).flatMap(c => {
         // A name_accept may inherit a name without repeating its literal text.
