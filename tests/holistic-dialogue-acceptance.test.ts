@@ -472,12 +472,22 @@ for (const related of [false, true]) {
 test('7. Withdrawal, referent denial and unshared names do not make an agreement available', async () => {
   await paired(async trial => {
     const unbound = `呼び名には「${originalName}」がよさそうです。`;
-    await trial.say({ human: unbound, local: [proposal(unbound, originalName, [])],
-      action: 'accept', drafts: ['どの図形の話かを確かめたいです。'] });
-    const ambiguous = await trial.say({ human: approval, action: 'accept', drafts: ['この呼び名はどんな形を指していますか？'] });
-    published(ambiguous, 'accept', { kind: 'none' }, 'この呼び名はどんな形を指していますか？');
-    assert.ok(!Object.hasOwn(offered(ambiguous, 'action'), 'agree'));
-    unchanged(ambiguous);
+    const firstQuestion = ringGap + '形でしょうか？';
+    const secondQuestion = '同じ形か確かめたいです。' + baseWidth + '形でしょうか？';
+    const proposed = await trial.say({ human: unbound, local: [proposal(unbound, originalName, [])],
+      action: 'confirm', target: 0, feature: ringGap, drafts: [firstQuestion] });
+    const ambiguous = await trial.say({
+      human: approval, local: [{
+        text: approval, aspect: 'name', act: 'ask', antecedent: { speaker: 'human', proposition: unbound },
+      }], action: 'confirm', target: 0, feature: baseWidth, drafts: [secondQuestion],
+    });
+    published(proposed, 'confirm', single(first), firstQuestion);
+    published(ambiguous, 'confirm', single(first), secondQuestion);
+    assert.ok(!Object.hasOwn(offered(proposed, 'action'), 'accept'));
+    for (const turn of [proposed, ambiguous]) {
+      assert.ok(!Object.hasOwn(offered(turn, 'action'), 'agree'));
+      unchanged(turn);
+    }
   });
   for (const mode of ['withdrawal', 'denial'] as const) {
     await paired(async trial => {
