@@ -110,8 +110,8 @@ const ALWAYS_V3=['accept','defer','revisit','move_on','close'];
 const ANY_TARGET=['accept','defer','move_on','close'];
 // Adaptive-only context of the attempt being replayed, set at the start of the (synchronous) replay proof: whether repairFacts
 // existed (its guidance sentence is part of every instruction), and the saved per-figure agreeNames (known=false: no source).
-type ReplayContext={facts:boolean;agree:any[]|undefined;known:boolean;v3:boolean;trial:boolean;ledger:Record<string,{status:string;name:string|null}>|undefined;legacyV3:boolean;style:null|'legacy'|'style'|'loop'};
-const defaultContext:ReplayContext={facts:false,agree:undefined,known:true,v3:false,trial:false,ledger:undefined,legacyV3:false,style:null};
+type ReplayContext={agreeMatch:{l0:boolean;l2:boolean}|null;facts:boolean;agree:any[]|undefined;known:boolean;v3:boolean;trial:boolean;ledger:Record<string,{status:string;name:string|null}>|undefined;legacyV3:boolean;style:null|'legacy'|'style'|'loop'};
+const defaultContext:ReplayContext={agreeMatch:null,facts:false,agree:undefined,known:true,v3:false,trial:false,ledger:undefined,legacyV3:false,style:null};
 const CTX={...defaultContext};
 // Only the verified integrated profile can name two_stage_v2; every other record is read as two_stage_v1.
 const layoutOf=(profile:any)=>profile?.id==='research_trial_profile_v3'&&['two_stage_v2','two_stage_v3'].includes(profile?.questionLayout)?profile.questionLayout as string:'two_stage_v1';
@@ -330,6 +330,7 @@ function liveClaims(graph:any):any[]{
  return claims.filter(c=>!dead.has(c.id));
 }
 function agreeSource(tr:any,t:any,key:string,tape:any,legacyV3=false):'invalid'|{known:boolean;names:any[]|undefined}{
+  CTX.agreeMatch=null; // set below for a v3 record; read by originalQuestions together with the criteria version
   const turn=(tr.turns??[]).find((v:any)=>v.turn===t.turnIndex),state=turn?.state??tr.lastCommittedState;
   const j=(state?.judgments??[]).find((x:any)=>judgmentKey(x)===key);
   if(!j)return{known:false,names:undefined};
@@ -362,8 +363,9 @@ function agreeSource(tr:any,t:any,key:string,tape:any,legacyV3=false):'invalid'|
    const prevPublicIds=new Set(prevIds.length?live.filter((c:any)=>c.speaker==='ai'&&c.sourceTurn>prevJudgment.turnIndex&&c.sourceTurn<t.turnIndex).flatMap((c:any)=>c.targets):[]);
    const wasFocused=(id:string)=>prevIds.includes(id)||focusedTurns.some((j:any)=>j.ids.includes(id));
    const slotAllowed=(id:string,name:string)=>preLedger[id]?.status!=='agreed'&&!(preLedger[id]?.status==='deferred'&&preLedger[id].name!==null&&norm(preLedger[id].name)!==norm(name))&&!slots.some(other=>other!==id&&preLedger[other]?.name!==null&&norm(preLedger[other].name)===norm(name));
-   // Rule levels of the generation side: 0 = every ledger-allowed slot for an unbound proposal (older records), 1 = only figures the AI shared in public and
-   // executed on, 2 = level 1 plus no figure the partner last denied as the referent. A record is genuine when its saved list equals one level exactly.
+   // Two rule levels of the generation side, bound to the record's own Jev criteria version (originalQuestions): level 0 = every ledger-allowed slot for an
+   // unbound proposal (versions up to the prompt-style text), level 2 = only figures the AI shared in public and executed on, and none the partner last denied
+   // as the referent (the current version). The saved list must equal the level of its own version; the match is recorded in CTX.agreeMatch.
    const aiSharedIds=new Set(live.filter((c:any)=>c.speaker==='ai'&&c.sourceTurn>lastBoundary&&c.sourceTurn<t.turnIndex).flatMap((c:any)=>c.targets));
    const claimTargets=(c:any):string[]=>Array.isArray(c.targets)&&c.targets.length?c.targets:live.find((p:any)=>p.id===c.respondsTo)?.targets??[];
    const referentClaims=live.filter((c:any)=>c.speaker==='human'&&c.aspect==='referent'&&c.sourceTurn>lastBoundary);
@@ -390,13 +392,14 @@ function agreeSource(tr:any,t:any,key:string,tape:any,legacyV3=false):'invalid'|
      return !openClaims.some((r:any)=>r.speaker==='human'&&r.sourceTurn>c.sourceTurn&&(r.act==='deny'||r.act==='name_reject')&&r.name===name&&(r.respondsTo===c.id||(Array.isArray(r.targets)&&r.targets.includes(id))));
     }).map(figureId=>JSON.stringify([name,figureId,s.seq]));
    }).sort();
-   expected=[];levels=[0,1,2].map(expectedAt);
+   expected=[];levels=[expectedAt(0),expectedAt(2)];
   }else{
    const source=(c:any)=>win.find((e:any)=>e.seq===c.sourceTurn&&e.text.includes(c.name))??win.filter((e:any)=>e.text.includes(c.name)).sort((a:any,b:any)=>a.seq-b.seq)[0];
    expected=live.filter(eligibleAgree).flatMap((c:any)=>{const s=source(c);return s?[JSON.stringify([c.name,c.targets[0],s.seq])]:[];}).sort();
   }
   const saved=names.map((n:any)=>JSON.stringify([n.name,n.figureId,n.sourceTurn])).sort();
-  return (levels?levels.some(e=>equal(e,saved)):equal(expected,saved))?{known:true,names}:'invalid';
+  if(levels){const match={l0:equal(levels[0],saved),l2:equal(levels[1],saved)};if(!match.l0&&!match.l2)return'invalid';CTX.agreeMatch=match;return{known:true,names};}
+  return equal(expected,saved)?{known:true,names}:'invalid';
 }
 // Adaptive trial version of an attempt from its own record: the repair facts mark v3, the agreement gate v2; a bare adaptive v1 is told apart only by
 // the claim of the replay tape (the generation request proves it: only a trial uses the trial instruction text).
@@ -621,7 +624,11 @@ function originalQuestions(body:any,input:any,layout='two_stage_v1'):boolean|nul
    for(const [version,actions] of [['loop',NATIVE_V3_LOOP.actions],['style',NATIVE_V3_STYLE.actions],['legacy',NATIVE_V3.actions]] as const){
     if(was!==null&&was!==version)continue;
     CTX.style=version;
-    if(equal({action:make(actions)},body.questions))return true;
+    if(equal({action:make(actions)},body.questions)){
+     // The saved agree candidates must follow the rule of this very criteria version: the current text only the grounded, undenied figures; older texts the earlier one.
+     if(CTX.agreeMatch&&!(version==='loop'?CTX.agreeMatch.l2:CTX.agreeMatch.l0)){CTX.style=was;return false;}
+     return true;
+    }
    }
    CTX.style=was;return false;
   }

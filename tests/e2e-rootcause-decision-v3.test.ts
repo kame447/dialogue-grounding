@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { interventionForStrategy, isOpenIssueRerankRecord } from '../dialogue-model/runtime/decision/bypass-acceptance.ts';
-import { buildJevDecisionDetailPayload, buildJevDecisionPayload, buildJevTargetPayload, createJevDecisionClient, JEV_DECISION_MODEL } from '../dialogue-model/runtime/decision/jev-decision.ts';
+import { buildJevDecisionDetailPayload, buildJevDecisionPayload, buildJevTargetPayload, createJevDecisionClient, JEV_ACTION_CRITERIA, JEV_DECISION_MODEL } from '../dialogue-model/runtime/decision/jev-decision.ts';
 import type { JevDecisionPayload } from '../dialogue-model/runtime/decision/jev-decision.ts';
 import type { JevAction, JevDecisionInput, RepairHistoryEntry } from '../dialogue-model/runtime/decision/contract.ts';
 import { s4Probe } from '../dialogue-model/runtime/diagnostics/parity-verify/intervention-records.ts';
@@ -756,5 +756,48 @@ for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
     assert.deepEqual(affirmed.input.agreeNames, [{ name, figureId: ids[0], sourceTurn: 1 }]);
     assert.deepEqual(affirmed.state.ledger[ids[0]], { status: 'agreed', name });
     checkS4AgreeSource(before, affirmed);
+  });
+}
+
+// S4 ties the accepted agree-candidate rule to the Jev criteria version of the very same record: the current text accepts only the grounded,
+// undenied candidates; the older texts (up to the prompt-style version) accept only the earlier all-slot rule. No other pairing is genuine.
+for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
+  test(`v3 ${strategy} S4 binds the agree-candidate rule to the criteria version of the record`, async () => {
+    const f = fixture(strategy, { aiPublic: true });
+    const name = '鍵';
+    const proposal = `これは「${name}」とかどうかな？`;
+    await f.exchange(proposal, { action: 'accept', drafts: ['どの形のことか確かめますね。'], segments: [naming(proposal, name)] });
+    const ask = 'その名前でいいか聞いているんだ。';
+    const previous = structuredClone(f.state());
+    const result = await f.exchange(ask, { action: 'accept', drafts: ['まだ、どの形か確かめられていません。'],
+      segments: [{ quote: ask, name: null, targets: [], aspect: 'question', proposition: '呼び名でよいかの確認', act: 'ask' }] });
+    assert.deepEqual(result.input.agreeNames, []);
+    const { state, trace, events } = result;
+    const profile = { id: 'research_trial_profile_v3', ...V3, localGrounding: { aiPublicClaims: true } };
+    const key = JSON.stringify([trace.turnIndex, trace.lastEventId, trace.attemptNumber]);
+    const request = result.requests.find(r => r.questions.action)!;
+    const sent = JSON.parse(request.state);
+    // The same request body as an older version would have recorded it: the three texts of the current version removed.
+    const older = structuredClone(request);
+    const c = older.questions.action.criteria as Record<string, string>;
+    c.accept = c.accept.replace(/相手の発話が相槌だけ.*$/u, '');
+    c.propose_name = c.propose_name.replace('相手が先に公開した呼び名はAIの新しい提案として出し直さない。', '');
+    c.agree = JEV_ACTION_CRITERIA.agree;
+    const verdict = (savedNames: unknown[], body: typeof request) => {
+      const tampered = structuredClone(state);
+      tampered.judgments.at(-1)!.jevTurn.agreeNames = savedNames as never;
+      const trial = { profile, turns: [{ turn: trace.turnIndex, state: tampered }] };
+      s4Probe.setContext({ v3: true, ledger: result.input.nameLedger, agree: savedNames as never[], facts: Array.isArray(trace.repairFacts) });
+      try {
+        if (s4Probe.agreeSource(trial, trace, key, { state: previous, events }) === 'invalid') return 'invalid';
+        return s4Probe.originalQuestions(body, sent, V3.questionLayout);
+      } finally { s4Probe.setContext({}); }
+    };
+    const allSlots = ids.map(figureId => ({ name, figureId, sourceTurn: 1 }));
+    assert.equal(verdict([], request), true, 'a current record with the grounded rule (no candidate yet) is genuine');
+    assert.equal(verdict(allSlots, request), false, 'a current record carrying every slot is the B1 error and is refused');
+    assert.equal(verdict(allSlots, older), true, 'an older record keeps the earlier all-slot rule');
+    assert.equal(verdict([], older), false, 'an older record cannot carry the current grounded list');
+    assert.equal(verdict([{ name, figureId: ids[0], sourceTurn: 1 }], request), 'invalid', 'an unsupported single candidate matches no rule');
   });
 }
