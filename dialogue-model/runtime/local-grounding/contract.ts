@@ -163,6 +163,8 @@ export type LocalGroundingOptions = {
   extractor: LocalSegmentExtractor;
   classifier: LocalFunctionClassifier;
   timeoutMs?: number;
+  /** holistic_v3 only: an approval question about a name (ask, aspect name) that the classifier links to an earlier name proposal keeps that link when neither is bound to a figure. */
+  keepUnboundApproval?: boolean;
 };
 
 // Slice A: opt-in AI public claims. Candidate identity is public-source identity;

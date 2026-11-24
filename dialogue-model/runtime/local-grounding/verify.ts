@@ -29,6 +29,8 @@ export type LocalVerificationDiagnostic = {
 };
 export type LocalVerifiedUpdate = LocalVerificationResult & { diagnostics?: LocalVerificationDiagnostic[] };
 type VerificationInput = {
+  /** holistic_v3 only: see LocalGroundingOptions.keepUnboundApproval. */
+  keepUnboundApproval?: boolean;
   graph: LocalGraph;
   turn: number;
   publicTurns: readonly PublicTurn[];
@@ -44,7 +46,7 @@ const independentActs = new Set(["assert", "construe", "name_propose", "ask"]);
 const overlap = (a: readonly string[], b: readonly string[]) => a.some(slot => b.includes(slot));
 
 /** Only the CURRENT public human turn may supply a new segment's quote. */
-export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts }: VerificationInput): LocalVerifiedUpdate {
+export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts, keepUnboundApproval = false }: VerificationInput): LocalVerifiedUpdate {
   const result: LocalVerifiedUpdate = { operations: [], rejected: [] };
   // Revalidate JSON-restored graphs before using any model-selected pointer.
   snapshotReferenceGraph(graph);
@@ -100,8 +102,11 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     let droppedAntecedent: string | null = null;
     // Independent statements do not require an antecedent. Check before target
     // inheritance so discarding a pointer cannot transfer its figure candidates.
+    // An approval question about a name, linked by the classifier to an earlier name proposal while neither names a figure, has no figure to contradict: the link stays.
+    const unboundApproval = keepUnboundApproval && !!prior && act === "ask" && aspect === "name" && prior.aspect === "name" && prior.act === "name_propose" &&
+      prior.targets.length === 0 && targets.length === 0;
     if (prior && independentActs.has(act) && prior.sourceTurn < turn &&
-        (prior.aspect !== aspect || !overlap(prior.targets, targets.length ? targets : prior.targets) ||
+        (prior.aspect !== aspect || !unboundApproval && !overlap(prior.targets, targets.length ? targets : prior.targets) ||
           (segment.respondsToTurn !== null && segment.respondsToTurn !== prior.sourceTurn))) {
       droppedAntecedent = prior.id; prior = null;
     }
@@ -111,7 +116,7 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     // Deferring or revisiting an issue inherits its aspect only when extraction
     // supplied generic progress. Explicit semantic disagreements remain invalid.
     if (prior && aspect === "progress" && ["defer", "revisit"].includes(act)) aspect = prior.aspect;
-    if (prior && (prior.sourceTurn >= turn || prior.aspect !== aspect || !overlap(prior.targets, targets) ||
+    if (prior && (prior.sourceTurn >= turn || prior.aspect !== aspect || !unboundApproval && !overlap(prior.targets, targets) ||
         (segment.respondsToTurn !== null && segment.respondsToTurn !== prior.sourceTurn))) {
       reject("inconsistent_claim_response"); continue;
     }

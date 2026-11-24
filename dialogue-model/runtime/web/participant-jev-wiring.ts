@@ -69,7 +69,8 @@ function checkedDecisionFailure(trace: any, layout: JevQuestionLayout): boolean 
   if (trace.status !== 'error' || !['decision_failed', 'invalid_decision'].includes(trace.errorCode) || !f || typeof f !== 'object' ||
       Object.getPrototypeOf(f) !== Object.prototype || Reflect.ownKeys(f).length !== 1 || !Object.hasOwn(f, 'evidence')) return false;
   if (f.evidence === null) return trace.decisionRejectionCode !== 'action_target_not_allowed';
-  const checked = checkDecisionFailureEvidence(f.evidence);
+  // The trace names its own condition (a typed naming request of a holistic_v3 turn): only then may accept be missing from the first stage.
+  const checked = checkDecisionFailureEvidence(f.evidence, { acceptOptional: trace.namingRequest === true });
   if (checked === null || checked.questionLayout !== layout || researchHash(checked) !== researchHash(jsonData(f.evidence))) return false;
   // A decision the local v3 table refused names its rule twice, in the turn and in the evidence, and in no other way; no native failure may carry it.
   const local = checked.rejectionCode === 'action_target_not_allowed' && checked.stages.length === 0;

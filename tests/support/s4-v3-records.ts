@@ -30,7 +30,11 @@ export type Plan = { action: string; target: string; issue?: string; prospect?: 
   /** The name detail question is answered with the candidate whose value is this name (default: the first offered). */
   name?: string;
   /** The classifier's antecedent answer (`claim_0` etc.; default none), for a reply that must be linked to an earlier claim. */
-  antecedent?: string };
+  antecedent?: string;
+  /** Raw JSON text the AI-public extraction request returns (the AI's own claims about its public reply); default none. */
+  aiExtraction?: string;
+  /** The partner-referent estimate's top label (e.g. `multiple`, `figure_3`); default the first offered. */
+  referent?: string };
 const TEXTS: Record<string, string> = { local_extraction: '[]', ai_extraction: '[]' };
 
 export async function runTurn(profile: any, label: Label, state: any, events: any[], plan: Plan, technicalTrial: { version: TrialVersion } | undefined) {
@@ -40,7 +44,7 @@ export async function runTurn(profile: any, label: Label, state: any, events: an
     baseUrl: 'http://offline.invalid/v1', timeoutMs: profile.timeouts.lunaAttemptMs },
   async () => Response.json({ model: next.model, choices: [{ message: { content: next.text } }], usage: { prompt_tokens: 0, completion_tokens: 0 } }));
   const client = { async complete(messages: any[], options: any) {
-    const response = { text: options.phase === 'local_extraction' && plan.extraction !== undefined ? plan.extraction : TEXTS[options.phase] ?? plan.speech ?? 'もう一度、確かめてみますね。', model: 'synthetic-luna-model', usage: { inputTokens: 0, outputTokens: 0 } };
+    const response = { text: options.phase === 'local_extraction' && plan.extraction !== undefined ? plan.extraction : options.phase === 'ai_extraction' && plan.aiExtraction !== undefined ? plan.aiExtraction : TEXTS[options.phase] ?? plan.speech ?? 'もう一度、確かめてみますね。', model: 'synthetic-luna-model', usage: { inputTokens: 0, outputTokens: 0 } };
     luna.push({ phase: options.phase, response }); next = response; return http.complete(messages, options); } };
   const readKey = async () => 'sk-or-SYNTHETIC-offline-replay-key-0000';
   const fetchImpl = async (_url: any, init: any) => {
@@ -50,6 +54,7 @@ export async function runTurn(profile: any, label: Label, state: any, events: an
       if (key === 'action') lastAction = plan.forceAction ?? (plan.reobserve && ++actionCalls === 1 ? 'request_observation' : plan.action);
       const choice = key === 'action' ? lastAction : key === 'target' ? (lastAction === 'request_observation' ? 'figure_0' : plan.target) : key === 'repair_issue' ? plan.issue ?? 'none' : key === 'prospect' ? plan.prospect ?? 'uncertain'
         : key === 'name' && plan.name ? (labels.find(l => JSON.parse(q.criteria[l]).value === plan.name) ?? labels[0])
+        : key === 'human_referent' && plan.referent ? plan.referent
         : key === 'draft_naming' ? (plan.action === 'agree' ? 'adopt_chosen' : 'none') : key === 'basis' ? 'partner_uncertain' : key.endsWith('_antecedent') ? (plan.antecedent ?? 'none') : key.endsWith('_act') ? (plan.act && labels.includes(plan.act) ? plan.act : 'assert') : key === 'observe_aspect' ? 'orientation' : labels[0];
       if (!labels.includes(choice) && !(key === 'action' && plan.forceAction)) throw new Error(`scripted choice ${choice} is not offered for ${key}: ${labels.slice(0, 8)}`);
       answers[key] = { type: 'choice', choice, probabilities: Object.fromEntries(labels.map(l => [l, key === 'action' ? plan.actionScores?.[l] ?? (l === choice ? 1 : 0) : l === choice ? 1 : 0])) };
@@ -62,6 +67,8 @@ export async function runTurn(profile: any, label: Label, state: any, events: an
   const jevDecision: any = { async decide(input: any, options: any) { if (plan.inject) return structuredClone(plan.inject); const d = await native.decide(input, options);
       if (d.action !== 'request_observation') { boundary.luna = luna.length; boundary.jev = jev.length; } return d; },
     completeDetail: (i: any, s: any, o: any) => native.completeDetail!(i, s, o),
+    // The partner-referent estimate is asked only for a turn that scripts one (plan.referent), so every other record keeps its request stream.
+    ...(plan.referent ? { estimateReferent: (i: any, o: any) => native.estimateReferent!(i, o) } : {}),
     ...(profile.dialoguePolicy ? { classifyDraftAct: (i: any, o: any) => native.classifyDraftAct!(i, o) } : {}),
     ...(technicalTrial ? { estimateRepairProspect: (i: any, o: any) => native.estimateRepairProspect!(i, o) } : {}) };
   const runtime = createProfileDialogue(profile, { client, image: OWN.ownImage, anchors: [...OWN.ownAnchors], strategy: label,

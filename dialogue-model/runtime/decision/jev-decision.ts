@@ -911,6 +911,10 @@ const DECIDE_RULE_ERRORS: Partial<Record<JevDecisionRejectionCode, JevDecisionEr
   detail_target_required: "invalid_decision", action_target_not_allowed: "invalid_decision" };
 /** The stage-one actions two_stage_v3 always offers: any-target actions and revisit (a figure always exists). */
 const V3_ALWAYS_OFFERED_ACTIONS: readonly JevAction[] = Object.freeze(["accept", "defer", "revisit", "move_on", "close"]);
+/** The actions every two_stage_v3 stage-one question offers. The offered set is the one closed set legalActionsV3 builds; the readers of saved scores and rankings
+ * (this module's failure evidence, the state restore, the intervention ranking, S4) have no input to rebuild it from, so they use this table: accept is required
+ * unless the trial's version (holistic_v3) lets the typed-naming-request rule leave it out. */
+export const v3AlwaysOffered = (acceptOptional: boolean): readonly JevAction[] => acceptOptional ? V3_ALWAYS_OFFERED_ACTIONS.filter(a => a !== "accept") : V3_ALWAYS_OFFERED_ACTIONS;
 /** Where decide() goes after a parsed stage one, in the order of decodeSelection, checkSelection/checkTargetKind and prepareDetail. */
 function stageOneOutcome(layout: JevQuestionLayout, choices: Record<string, string>): JevDecisionRejectionCode | "set" | "detail" | "done" {
   const action = choices.action as JevAction, target = choices.target;
@@ -924,9 +928,9 @@ function stageOneOutcome(layout: JevQuestionLayout, choices: Record<string, stri
 }
 /** two_stage_v3: action, then target, then detail. A rule can only be named on the last stage; the target stage names none of
  * the v1/v2 rules except the closed legality rule and the detail-availability rules the detail preparation raises. */
-function failureConsistentV3(e: JevDecisionFailureEvidence): boolean {
+function failureConsistentV3(e: JevDecisionFailureEvidence, acceptOptional = false): boolean {
   const [first, second, third] = e.stages, action = first.choices.action as JevAction;
-  if (!V3_ALWAYS_OFFERED_ACTIONS.every(a => Object.hasOwn(first.scores.action, a)) || !Object.hasOwn(first.scores.action, action)) return false;
+  if (!v3AlwaysOffered(acceptOptional).every(a => Object.hasOwn(first.scores.action, a)) || !Object.hasOwn(first.scores.action, action)) return false;
   if (first.stage !== "action" || second && second.stage !== "target" || third && third.stage !== "detail") return false;
   if (!second) return e.rejectionCode === null || e.rejectionCode === "action_target_not_allowed";
   if (!Object.keys(second.choices).length) return e.stages.length === 2 && (e.rejectionCode === null);
@@ -936,7 +940,7 @@ function failureConsistentV3(e: JevDecisionFailureEvidence): boolean {
 }
 /** The record's own internal consistency: totals derived from its stages, the rule against the stage-one answer and the
  * stages that answer leads to. Needs no original prompt or response; an unknown cost stays null, never zero. */
-function failureConsistent(e: JevDecisionFailureEvidence): boolean {
+function failureConsistent(e: JevDecisionFailureEvidence, acceptOptional = false): boolean {
   const { stages } = e, last = stages.at(-1);
   // two_stage_v3: a decision the local table refused before any publication has no provider stage, response or cost.
   if (e.questionLayout === "two_stage_v3" && stages.length === 0 && e.rejectionCode === "action_target_not_allowed")
@@ -956,7 +960,7 @@ function failureConsistent(e: JevDecisionFailureEvidence): boolean {
   if (stages.some(s => Object.keys(s.choices).length > 0 && s.status === "error" && s.rejectionCode === null)) return false;
   const first = stages[0];
   if (!first || !Object.keys(first.choices).length) return stages.length <= 1 && e.rejectionCode === null;
-  if (e.questionLayout === "two_stage_v3") return failureConsistentV3(e);
+  if (e.questionLayout === "two_stage_v3") return failureConsistentV3(e, acceptOptional);
   if (!ALWAYS_OFFERED_ACTIONS.every(a => Object.hasOwn(first.scores.action, a))) return false;
   const action = first.choices.action, outcome = stageOneOutcome(e.questionLayout, first.choices), [, second, third] = stages;
   if (outcome === "set") {
@@ -972,7 +976,7 @@ function failureConsistent(e: JevDecisionFailureEvidence): boolean {
   return outcome === "done" ? e.rejectionCode === null : e.rejectionCode === outcome;
 }
 /** Restore-time check of a saved failure record. Returns a rebuilt copy, or null for any key, label or value outside the closed shape. */
-export function checkDecisionFailureEvidence(value: unknown): JevDecisionFailureEvidence | null {
+export function checkDecisionFailureEvidence(value: unknown, { acceptOptional = false }: { acceptOptional?: boolean } = {}): JevDecisionFailureEvidence | null {
   try {
     if (!exact(value, FAILURE_KEYS) || value.schemaVersion !== "jev_decision_failure_v1" || !includes(LAYOUTS, value.questionLayout) ||
         !positive(value.callIndex) || !includes(CODES, value.error) || !(value.rejectionCode === null || includes(JEV_DECISION_REJECTION_CODES, value.rejectionCode)) ||
@@ -991,12 +995,12 @@ export function checkDecisionFailureEvidence(value: unknown): JevDecisionFailure
       error: value.error as JevDecisionErrorCode, rejectionCode: value.rejectionCode as JevDecisionRejectionCode | null, model: value.model as string | null,
       responseId: value.responseId as string | null, costUsd: value.costUsd as number | null, latencyMs: value.latencyMs as number, inputBudget,
       stages: stages as JevDecisionFailureStage[] };
-    return failureConsistent(checked) ? checked : null;
+    return failureConsistent(checked, acceptOptional) ? checked : null;
   } catch { return null; }
 }
 /** Projects the evidence a decide() call handed to onFailureEvidence. Untrusted input: anything outside the closed
  * client evidence shape yields null, which the caller records as an unknown breakdown. */
-export function projectDecisionFailureEvidence(raw: unknown, questionLayout: JevQuestionLayout): JevDecisionFailureEvidence | null {
+export function projectDecisionFailureEvidence(raw: unknown, questionLayout: JevQuestionLayout, opts: { acceptOptional?: boolean } = {}): JevDecisionFailureEvidence | null {
   try {
     if (!object(raw) || !includes(LAYOUTS, questionLayout)) return null;
     const keys = ["model", "responseId", "choices", "scores", "latencyMs", "costUsd", "callIndex", "status", "error", "rejectionCode", "stages",
@@ -1004,7 +1008,7 @@ export function projectDecisionFailureEvidence(raw: unknown, questionLayout: Jev
     if (!exact(raw, keys) || raw.status !== "error" || !Array.isArray(raw.stages)) return null;
     return checkDecisionFailureEvidence({ schemaVersion: "jev_decision_failure_v1", questionLayout, callIndex: raw.callIndex, error: raw.error,
       rejectionCode: raw.rejectionCode, model: raw.model, responseId: raw.responseId, costUsd: raw.costUsd, latencyMs: raw.latencyMs,
-      inputBudget: raw.inputBudget ?? null, stages: raw.stages });
+      inputBudget: raw.inputBudget ?? null, stages: raw.stages }, opts);
   } catch { return null; }
 }
 export type JevDecisionClientOptions = { enabled?: boolean; readKey?: () => Promise<string>; fetchImpl?: (url: string, init: RequestInit) => Promise<Response>;

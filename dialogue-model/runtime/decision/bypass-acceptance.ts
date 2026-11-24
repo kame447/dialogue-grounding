@@ -1,7 +1,7 @@
 // Explicit technical R policy. The original remains Jev's decision; no semantic oracle.
 import {JEV_ACTIONS} from './contract.ts';
 import type {JevAction,JevDecision,JevDecisionInput,JevTarget,JevExecutedDecision,JevDetailResult,JevDecisionStageEvidence,PublicNameCandidate,JevQuestionLayout} from './contract.ts';
-import {buildJevDecisionPayload,buildJevDecisionDetailPayload,validateJevDecision,parseJevExecutedDetail,JevDecisionError,JEV_DECISION_INPUT_LIMITS} from './jev-decision.ts';
+import {buildJevDecisionPayload,buildJevDecisionDetailPayload,validateJevDecision,parseJevExecutedDetail,JevDecisionError,JEV_DECISION_INPUT_LIMITS,v3AlwaysOffered} from './jev-decision.ts';
 
 export const BYPASS_ACCEPTANCE_V1_CANONICAL_JSON = '{"policies":{"bypass-enabled":{"policy":"bypass_acceptance_v1:accept","vetoActions":[]},"repair-first":{"policy":"bypass_acceptance_v1:veto","vetoActions":["defer","move_on"]}},"version":"bypass_acceptance_v1"}';
 export const BYPASS_ACCEPTANCE_V1_TABLE_SHA256 = '376d569120ca36a3eceaf5ab95410f7eb83f25fbb681e7566a684b97c35165c8';
@@ -141,7 +141,7 @@ function openIssueRerank(input:BypassAcceptanceInput,scores:Record<string,number
  */
 export function isOpenIssueRerankRecord(intervention:unknown,decision:unknown,executed:unknown,ownSlots:readonly string[],
  previousAction?:{action:JevAction;target:JevTarget}|null,agreeNames?:readonly PublicNameCandidate[],questionLayout:JevQuestionLayout='two_stage_v1',
- repairProspect?:BypassAcceptanceInput['repairProspect']):boolean {
+ repairProspect?:BypassAcceptanceInput['repairProspect'],acceptOptional=false):boolean {
  try{
   jsonData([intervention,decision,executed,ownSlots,previousAction??null,agreeNames??null,repairProspect??null]);
   // Restore checks the recorded issue. Older v3 turns could rerank an explicit issue even with no_open_issue.
@@ -173,7 +173,7 @@ export function isOpenIssueRerankRecord(intervention:unknown,decision:unknown,ex
   // two_stage_v3 scores only the actions that had a legal target and detail, so the label set is a subset that must hold the always-legal ones.
   const v3=questionLayout==='two_stage_v3';
   if(!scores||typeof scores!=='object')return false;
-  const labelsOk=v3?Object.keys(scores).every(k=>(JEV_ACTIONS as readonly string[]).includes(k))&&['defer','revisit','move_on','close'].every(k=>Object.hasOwn(scores,k))
+  const labelsOk=v3?Object.keys(scores).every(k=>(JEV_ACTIONS as readonly string[]).includes(k))&&v3AlwaysOffered(acceptOptional).every(k=>Object.hasOwn(scores,k))
     :(exact(scores,actionsWithEvidence)||exact(scores,actionsWithEvidence.filter(a=>a!=='request_observation')));
   if(d.evidence?.stages?.[0]?.stage!==(v3?'action':'action_target')||!labelsOk||
    Object.values(scores).some(n=>typeof n!=='number'||!Number.isFinite(n)||n<0||n>1))return false;

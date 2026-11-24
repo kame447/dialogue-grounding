@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { interventionForStrategy, isOpenIssueRerankRecord } from '../dialogue-model/runtime/decision/bypass-acceptance.ts';
-import { buildJevDecisionDetailPayload, buildJevDecisionPayload, buildJevTargetPayload, createJevDecisionClient, JEV_ACTION_CRITERIA, JEV_DECISION_MODEL } from '../dialogue-model/runtime/decision/jev-decision.ts';
+import { checkDecisionFailureEvidence, buildJevDecisionDetailPayload, buildJevDecisionPayload, buildJevTargetPayload, createJevDecisionClient, JEV_ACTION_CRITERIA, JEV_DECISION_MODEL } from '../dialogue-model/runtime/decision/jev-decision.ts';
 import type { JevDecisionPayload } from '../dialogue-model/runtime/decision/jev-decision.ts';
 import type { JevAction, JevDecisionInput, RepairHistoryEntry } from '../dialogue-model/runtime/decision/contract.ts';
 import { s4Probe } from '../dialogue-model/runtime/diagnostics/parity-verify/intervention-records.ts';
@@ -26,6 +26,10 @@ type Plan = {
   prospect?: 'uncertain' | 'no_open_issue';
   /** holistic fixture only: the scripted answers of the draft-naming question, in order; 'fail' makes that POST fail. */
   draftActs?: string[];
+  /** The target question is answered outside its closed set (an invalid response on the second stage). */
+  badTarget?: boolean;
+  /** The partner-referent estimate's top label for this turn (default: the plan's target, else none). */
+  referent?: string;
 };
 
 function fixture(strategy: 'bypass-enabled' | 'repair-first' = 'bypass-enabled',
@@ -50,9 +54,10 @@ function fixture(strategy: 'bypass-enabled' | 'repair-first' = 'bypass-enabled',
           : key === 'repair_issue' ? (plan.prospect ? 'issue_0' : 'none')
           : key === 'prospect' ? plan.prospect ?? 'uncertain'
           : key === 'draft_naming' ? plan.draftActs!.shift()
-          : key === 'human_referent' ? (plan.target === undefined ? 'none' : `figure_${plan.target}`)
+          : key === 'human_referent' ? (plan.referent ?? (plan.target === undefined ? 'none' : `figure_${plan.target}`))
           : key === 'name' && plan.name ? labels.find(label => JSON.parse(question.criteria[label]).value === plan.name)
           : labels[0];
+        if (key === 'target' && plan.badTarget) return [key, { type: 'choice', choice: 'not_a_label', probabilities: Object.fromEntries(labels.map(label => [label, 0])) }];
         assert.ok(choice && labels.includes(choice), `scripted answer is unavailable for ${key}`);
         const probabilities = Object.fromEntries(labels.map(label => [label,
           label === choice ? 1 : key === 'action' ? plan.actionScores?.[label as JevAction] ?? (label === 'confirm' ? 0.8 : 0) : 0]));
@@ -1157,5 +1162,98 @@ test('holistic_v3 (typed naming request): with no agree candidate accept is not 
     const h = fixture(strategy, { aiPublic: true, holistic: 'holistic_v3' });
     const plain = await h.exchange('どんな図形がありますか？', { action: 'accept', drafts: ['全体は丸みのある形です。'] });
     assert.ok(offered(plain).includes('accept'), `${strategy}: no naming request`);
+  }
+});
+
+test('05p-B4 (holistic_v3): a failed target stage after an action stage without accept keeps both stages, their ids and costs, in both strategies', async () => {
+  for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
+    const f = fixture(strategy, { aiPublic: true, holistic: 'holistic_v3' });
+    const proposal = 'これ、かかしとかどう？';
+    await assert.rejects(f.exchange(proposal, { action: 'confirm', target: 3, badTarget: true, segments: [naming(proposal, 'かかし')], drafts: ['どの形のことですか？'] }), { code: 'decision_failed' });
+    const evidence = f.attempt()?.decisionFailure?.evidence;
+    assert.ok(evidence, `${strategy}: the failure evidence is kept`);
+    assert.deepEqual(evidence!.stages.map(s => [s.stage, s.status]), [['action', 'ok'], ['target', 'error']], strategy);
+    assert.ok(!Object.hasOwn(evidence!.stages[0].scores.action, 'accept'), `${strategy}: accept was not offered`);
+    assert.ok(evidence!.stages.every(s => s.responseId !== null && typeof s.costUsd === 'number'), `${strategy}: ids and costs`);
+    // It restores for a holistic_v3 trial; an earlier version, which always offered accept, still requires it.
+    assert.notEqual(checkDecisionFailureEvidence(structuredClone(evidence), { acceptOptional: true }), null, `${strategy}: restores`);
+    assert.equal(checkDecisionFailureEvidence(structuredClone(evidence)), null, `${strategy}: an earlier version keeps requiring accept`);
+  }
+});
+
+test('05p-B3 (holistic_v3): an approval question about an unbound name proposal keeps its link, so accept and agree are not offered and a verbal approval is not published (both strategies); other turns are unchanged', async () => {
+  const offered = (r: { requests: Array<{ questions: Record<string, { criteria: Record<string, string> }> }> }) =>
+    Object.keys(r.requests.find(q => q.questions.action)!.questions.action.criteria);
+  const approval = 'その呼び名でよいですか？';
+  const unboundApproval = (respondsTo: number): Segment => ({ respondsTo, quote: approval, name: null, targets: [], act: 'ask', aspect: 'name', proposition: approval });
+  for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
+    const f = fixture(strategy, { aiPublic: true, holistic: 'holistic_v3' });
+    const proposal = 'これ、かかしとかどう？';
+    const first = await f.exchange(proposal, { action: 'confirm', target: 3, draftActs: ['none'], segments: [naming(proposal, 'かかし')], drafts: ['どの形のことですか？'] });
+    assert.ok(!offered(first).includes('accept'), `${strategy}: the unbound proposal itself`);
+    const second = await f.exchange(approval, { action: 'confirm', target: 3, draftActs: ['adopt_chosen', 'none'], segments: [unboundApproval(first.events.at(-1)!.seq)],
+      drafts: ['ええ、その呼び方に賛成です。', 'どの形のことか、もう少し教えてください。'] });
+    const claim = second.input.priorClaims.find(c => c.act === 'ask' && c.aspect === 'name');
+    assert.ok(claim && claim.respondsTo !== null, `${strategy}: the approval question is linked to the proposal`);
+    const actions = offered(second);
+    assert.ok(!actions.includes('accept') && !actions.includes('agree') && actions.includes('confirm'), `${strategy}: ${actions.join()}`);
+    assert.equal(second.text, 'どの形のことか、もう少し教えてください。', `${strategy}: the verbal approval is not published`);
+    assert.ok(Object.values(second.state.ledger).every(e => e.name === null), `${strategy}: nothing is agreed`);
+    // A bare acknowledgement and a question about something else are not approval requests.
+    const g = fixture(strategy, { aiPublic: true, holistic: 'holistic_v3' });
+    await g.exchange(proposal, { action: 'confirm', target: 3, draftActs: ['none'], segments: [naming(proposal, 'かかし')], drafts: ['どの形のことですか？'] });
+    const other = 'その形には脚がありますか？';
+    const asked = await g.exchange(other, { action: 'accept', target: 3, segments: [{ quote: other, name: null, targets: [], act: 'ask', aspect: 'part', proposition: other }], drafts: ['はい、あります。'] });
+    assert.ok(offered(asked).includes('accept'), `${strategy}: another question`);
+  }
+});
+
+test('05p-B2 (holistic_v3): when the partner\'s own referent estimates contest the figure the AI described, an unbound name proposal is not bound to it; an estimate that singles it out binds it again (both strategies)', async () => {
+  const offered = (r: { requests: Array<{ questions: Record<string, { criteria: Record<string, string> }> }> }) =>
+    Object.keys(r.requests.find(q => q.questions.action)!.questions.action.criteria);
+  const proposal = 'これ、かかしとかどう？';
+  const run = async (strategy: 'bypass-enabled' | 'repair-first', policy: 'holistic_v2' | 'holistic_v3', between: string | null, atProposal: string, answerAs: 'agree' | 'ask') => {
+    const f = fixture(strategy, { aiPublic: true, holistic: policy });
+    await share(f, 3);
+    if (between !== null) await f.exchange('そう、その特徴がある図形です。', { action: 'accept', target: 3, referent: between, drafts: ['はい。'] });
+    const turn = await f.exchange(proposal, answerAs === 'agree' ? { action: 'agree', target: 3, referent: atProposal, segments: [naming(proposal, 'かかし')], draftActs: ['adopt_chosen'], drafts: [agreeSpeech('かかし')] }
+      : { action: 'confirm', target: 3, referent: atProposal, segments: [naming(proposal, 'かかし')], draftActs: ['none'], drafts: ['どの形のことですか？'] });
+    return { turn, actions: offered(turn) };
+  };
+  for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
+    // The reply says two figures remain possible: Jev's estimate is multiple. The earlier rule still binds the proposal to figure 3 and agrees; holistic_v3 does not.
+    const before = await run(strategy, 'holistic_v2', 'multiple', 'none', 'agree');
+    assert.ok(before.actions.includes('agree'), `${strategy}: before, the figure the AI described takes the name`);
+    assert.equal(before.turn.state.ledger[ids[3]].name, 'かかし');
+    const after = await run(strategy, 'holistic_v3', 'multiple', 'none', 'ask');
+    assert.ok(!after.actions.includes('agree') && !after.actions.includes('accept') && after.actions.includes('confirm'), `${strategy}: ${after.actions.join()}`);
+    assert.ok(Object.values(after.turn.state.ledger).every(e => e.name === null), `${strategy}: nothing is agreed`);
+    // Contested only at the proposal turn itself (this turn's estimate is current).
+    assert.ok(!(await run(strategy, 'holistic_v3', null, 'multiple', 'ask')).actions.includes('agree'), `${strategy}: contested now`);
+    // Controls: the estimates single the figure out (or there is no contest at all), and the agreement goes through.
+    for (const [between, now] of [[null, 'figure_3'], ['figure_3', 'figure_3'], ['multiple', 'figure_3']] as const) {
+      const ok = await run(strategy, 'holistic_v3', between, now, 'agree');
+      assert.ok(ok.actions.includes('agree'), `${strategy}: ${between}/${now} agree is offered`);
+      assert.equal(ok.turn.state.ledger[ids[3]].name, 'かかし', `${strategy}: ${between}/${now}`);
+    }
+  }
+});
+
+test('05p-B1 (holistic_v3): a veto over scores without accept leaves a state that validates (also through the graph snapshot) and a next turn that runs, in both strategies', async () => {
+  for (const original of ['defer', 'move_on'] as const) {
+    for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
+      const f = fixture(strategy, { aiPublic: true, holistic: 'holistic_v3' });
+      const proposal = 'これ、かかしとかどう？';
+      const r = await f.exchange(proposal, { action: original, target: 3, actionScores: { [original]: 0.6, confirm: 0.29, repair: 0.11 }, draftActs: ['none'], segments: [naming(proposal, 'かかし')],
+        drafts: [strategy === 'repair-first' ? 'どの形のことですか？' : 'この話は後にしましょう。'] });
+      assert.equal(r.saved.executed!.action, strategy === 'repair-first' ? 'confirm' : original, `${strategy} ${original}`);
+      validateJevPrivateStateV2(JSON.parse(JSON.stringify(f.state())), ids, f.intervention, 'two_stage_v3');
+      // The saved turn names its own condition; without that marker a score table lacking accept is read as an earlier version's and refused.
+      assert.equal(f.state().judgments.at(-1)!.jevTurn.namingRequest, true);
+      const unmarked = JSON.parse(JSON.stringify(f.state())); delete unmarked.judgments.at(-1).jevTurn.namingRequest;
+      assert.throws(() => validateJevPrivateStateV2(unmarked, ids, f.intervention, 'two_stage_v3'), { code: 'invalid_state' });
+      const next = await f.exchange('どうですか。', { action: 'accept', drafts: ['はい。'] });
+      assert.ok(next.text.length > 0, `${strategy} ${original}: the next turn runs`);
+    }
   }
 });

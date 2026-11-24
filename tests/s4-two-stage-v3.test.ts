@@ -909,3 +909,57 @@ test('05p: holistic_v3 leaves accept out of a typed naming request with no agree
   }
   void s3;
 });
+
+// 05p-B1/B4: the closed set offered is the one source; a saved score table or ranking without accept (holistic_v3 typed naming request) is read back, in both strategies.
+const unboundSeg = JSON.stringify([{ segmentId: 's1', quote: 'かかし', targets: [], aspect: 'name', proposition: 'かかしと呼ぶ提案', name: 'かかし', linkedIssueId: null, respondsToTurn: null }]);
+for (const original of ['defer', 'move_on'] as const) {
+  test(`05p-B1 (${original}): a veto over a score table without accept leaves a state that reads back, a next turn that runs and a record S4 and the replay accept`, async () => {
+    for (const label of ['repair-first', 'bypass-enabled'] as const) {
+      const veto = { human: 'これ、かかしとかどう？', plan: { action: original, target: 'figure_3', act: 'name_propose', extraction: unboundSeg,
+        speech: label === 'repair-first' ? 'どの形のことですか？' : 'この話は後にしましょう。', actionScores: { [original]: 0.6, confirm: 0.29, repair: 0.11 } } };
+      // The veto turn is the final turn: S4 and the dynamic replay (asserted inside buildRecords) read the ranking without accept.
+      const record = await buildRecords({ label, dialoguePolicy: 'holistic_v3', turns: [veto] });
+      assert.equal(record.trials[0].attempts[0].executed.action, label === 'repair-first' ? 'confirm' : original, label);
+      assert.ok(finalChecks(record).length >= 4 && finalChecks(record).every((c: any) => c.status === 'pass'),
+        label + ' ' + JSON.stringify(finalChecks(record).filter((c: any) => c.status !== 'pass').map((c: any) => [c.id, c.status, c.reason])));
+      // The state this turn leaves is read back by the next human turn (buildRecords runs it through the runtime's own state validation).
+      const next = await buildRecords({ label, dialoguePolicy: 'holistic_v3', turns: [veto, { human: 'どうですか。', plan: { action: 'accept', target: 'none' } }] });
+      assert.ok(finalChecks(next).every((c: any) => c.status === 'pass'), label + ' next turn');
+    }
+  });
+}
+
+test('05p-B3: S4 reads the linked unbound approval question as a typed naming request: the regular holistic_v3 record (both strategies) passes without accept', async () => {
+  const askSeg = JSON.stringify([{ segmentId: 's1', quote: 'その呼び名でよいですか？', targets: [], aspect: 'name', proposition: 'その呼び名でよいですか', name: null, linkedIssueId: null, respondsToTurn: 1 }]);
+  for (const label of ['repair-first', 'bypass-enabled'] as const) {
+    const record = await buildRecords({ label, dialoguePolicy: 'holistic_v3', turns: [
+      { human: 'これ、かかしとかどう？', plan: { action: 'confirm', target: 'figure_3', act: 'name_propose', extraction: unboundSeg, speech: 'どの形のことですか？' } },
+      { human: 'その呼び名でよいですか？', plan: { action: 'confirm', target: 'figure_3', act: 'ask', antecedent: 'claim_0', extraction: askSeg, speech: 'どの形のことか、もう少し教えてください。' } }] });
+    const offered = Object.keys(sideCopies(record)[0].requests.find((q: any) => q.provider === 'jev' && q.payload.questions.action).payload.questions.action.criteria);
+    assert.ok(!offered.includes('accept') && !offered.includes('agree'), label + ': ' + offered.join());
+    assert.ok(finalChecks(record).length >= 4 && finalChecks(record).every((c: any) => c.status === 'pass'), label);
+    assert.ok(!finalChecks(relabel(record, 'holistic_v2')).every((c: any) => c.status === 'pass'), label + ': under holistic_v2');
+  }
+});
+
+test('05p-B2: S4 applies the same referent-contest rule to the agree candidates: the regular holistic_v3 records (both strategies) pass, a record of another version is refused', async () => {
+  const s3 = Object.keys(OLD.state.ledger)[3];
+  const speech = '角ばった塊に細い脚が付いた形のように見えます。';
+  const ai = JSON.stringify([{ segmentId: 'shape', quote: speech, targets: [s3], aspect: 'construal', proposition: '角ばった塊に脚が付く', name: null, linkedIssueId: null, respondsToTurn: null }]);
+  const describe = { human: 'どんな図形がありますか？', plan: { action: 'confirm', target: 'figure_3', speech, aiExtraction: ai } };
+  const between = { human: 'そう、その特徴がある図形です。', plan: { action: 'accept', target: 'figure_3', referent: 'multiple' } };
+  for (const label of ['repair-first', 'bypass-enabled'] as const) {
+    // The partner said two figures remain possible: the proposal is not bound to the described figure, so agree is not offered and the AI asks.
+    const contested = await buildRecords({ label, dialoguePolicy: 'holistic_v3', turns: [describe, between,
+      { human: 'これ、かかしとかどう？', plan: { action: 'confirm', target: 'figure_3', act: 'name_propose', referent: 'none', extraction: unboundSeg, speech: 'どの形のことですか？' } }] });
+    const offered = Object.keys(sideCopies(contested)[0].requests.find((q: any) => q.provider === 'jev' && q.payload.questions.action).payload.questions.action.criteria);
+    assert.ok(!offered.includes('agree') && !offered.includes('accept'), label + ': ' + offered.join());
+    assert.ok(finalChecks(contested).length >= 4 && finalChecks(contested).every((c: any) => c.status === 'pass'), label + ' (contested)');
+    assert.ok(!finalChecks(relabel(contested, 'holistic_v2')).every((c: any) => c.status === 'pass'), label + ': under holistic_v2');
+    // The estimate singles the figure out: the proposal binds and the agreement is regular.
+    const single = await buildRecords({ label, dialoguePolicy: 'holistic_v3', turns: [describe, { ...between, plan: { ...between.plan, referent: 'figure_3' } },
+      { human: 'これ、かかしとかどう？', plan: { action: 'agree', target: 'figure_3', name: 'かかし', act: 'name_propose', referent: 'figure_3', extraction: unboundSeg, speech: '「かかし」と呼びましょう。' } }] });
+    assert.equal(single.trials[0].attempts[0].executed.action, 'agree', label);
+    assert.ok(finalChecks(single).length >= 4 && finalChecks(single).every((c: any) => c.status === 'pass'), label + ' (single)');
+  }
+});
