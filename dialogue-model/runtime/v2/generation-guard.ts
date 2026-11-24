@@ -254,7 +254,7 @@ export function findWorkingNoteLeaks(text: string, publicTexts: readonly string[
 function enumeratesAlternatives(text: string): boolean {
   const t = text.normalize("NFKC");
   const labelled = t.match(/(?:^|\n|[。!?])\s*(?:案|候補|パターン|返答|Option|Draft|Alt)\s*[0-9A-Za-z一二三]\s*[:.)]/gu) ?? [];
-  const quotedReplies = t.match(/^\s*(?:[0-9]+[.)]|[-・*•])?\s*[「『][^」』\n]{4,}[」』]\s*$/gmu) ?? [];
+  const quotedReplies = t.match(/^\s*(?:[0-9]+[.)]|[-・*•])?\s*[「『][^」』\r\n]{3,}[。.!?][」』]\s*$/gmu) ?? [];
   return labelled.length >= 2 || quotedReplies.length >= 2;
 }
 

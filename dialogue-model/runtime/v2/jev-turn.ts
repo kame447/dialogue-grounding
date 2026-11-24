@@ -246,19 +246,21 @@ function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns: reado
   // blocks agreement on that figure until a later referent claim of theirs re-affirms it. This is about the target, not about the proposed name.
   const claimTargets = (c: LocalClaimView) => c.targets.length ? c.targets : claims.find(p => p.id === c.respondsTo)?.targets ?? [];
   const referentClaims = claims.filter(c => c.speaker === "human" && c.aspect === "referent" && c.sourceTurn > lastBoundary);
-  // A denial stands until the partner re-affirms that very figure: a later referent AGREE that answers the AI's own public claim about it (one target,
-  // or the one that claim concerns) AND whose own exchange's referent estimate puts it strictly first. An assert (it cannot be told from merely keeping the
-  // figure as a possibility), keeping it as one candidate, narrowing to a set, asking, backchannels and every other act leave the denial in place.
+  // A denial stands until the partner agrees with an AI public claim that refers only to that figure, and the referent estimate puts it strictly first.
+  // An agree about one member of the AI's candidate set, a bare assert and other acts leave the denial in place.
   const referentAt = (at: number) => at === turn ? current : judgments.find(j => j.turnIndex === at)?.jevTurn.humanReferent ?? null;
   const selects = (m: { status: string; scores: Record<string, number> | null } | null, id: string) =>
     !!m && m.status === "ok" && !!m.scores && typeof m.scores[id] === "number" && Object.entries(m.scores).every(([key, value]) => key === id || m.scores![id] > value);
   const referentDenied = (id: string) => {
-    const relevant = referentClaims.filter(c => c.act === "deny" ? claimTargets(c).includes(id) : false);
-    const lastDeny = relevant.at(-1);
+    const lastDeny = referentClaims.filter(c => c.act === "deny" && claimTargets(c).includes(id)).at(-1);
     if (!lastDeny) return false;
-    const after = referentClaims.filter(c => referentClaims.indexOf(c) > referentClaims.indexOf(lastDeny) && c.act === "agree" &&
-      claims.find(p => p.id === c.respondsTo)?.speaker === "ai" && claimTargets(c).length === 1 && claimTargets(c)[0] === id);
-    return !after.some(c => selects(referentAt(c.sourceTurn), id));
+    const after = referentClaims.slice(referentClaims.indexOf(lastDeny) + 1);
+    return !after.some(c => {
+      if (c.act !== "agree") return false;
+      const antecedent = claims.find(p => p.id === c.respondsTo);
+      return antecedent?.speaker === "ai" && antecedent.targets.length === 1 && antecedent.targets[0] === id &&
+        (c.targets.length === 0 || c.targets.length === 1 && c.targets[0] === id) && selects(referentAt(c.sourceTurn), id);
+    });
   };
   const aiSharedIds = new Set(claims.filter(c => c.speaker === "ai" && c.sourceTurn > lastBoundary && c.sourceTurn < turn).flatMap(c => c.targets));
 
