@@ -169,7 +169,7 @@ test('v3 a move_on boundary retires the old bound proposal even when its ledger 
   const f = fixture();
   const old = `この形は「${UNRELATED_NAME}」でどうですか？`;
   await f.exchange(old, { action: 'propose_name', target: 0, name: UNRELATED_NAME, drafts: [`「${UNRELATED_NAME}」という呼び名はどうですか？`],
-    segments: [naming(old, UNRELATED_NAME, [ids[0]])] });
+    segments: [naming(old, UNRELATED_NAME, [ids[0]], 'assert')] });
   await f.exchange('次の形を見ましょう。', { action: 'move_on', target: 3, drafts: ['細長い形を見ましょう。'] });
   const proposal = `こちらの形は「${NEW_NAME}」でどうですか？`;
   const current = await f.exchange(proposal, { action: 'agree', target: 3, drafts: [agreeSpeech(NEW_NAME)], segments: [naming(proposal, NEW_NAME)] });
@@ -184,7 +184,8 @@ for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
     const f = fixture(strategy);
     const old = `この形を「${NEW_NAME}」と呼びましょうか？`;
     await f.exchange(old, { action: 'propose_name', target: 2, name: NEW_NAME, drafts: [old],
-      segments: [naming(old, NEW_NAME, [ids[2]])] });
+      // The partner only mentions the name; a partner name_propose would be answered, never re-proposed as the AI's own.
+      segments: [naming(old, NEW_NAME, [ids[2]], 'assert')] });
 
     const confirmation = `はい、「${NEW_NAME}」でいきましょう。`;
     const question = '次の細長い形はどうですか？';
@@ -611,3 +612,45 @@ test('v3 records a closed schema rejection on judgment validation without publis
   assert.equal(s4Probe.traceShape(trace, V3.questionLayout), true);
   assert.equal(s4Probe.traceShape({ ...trace, decisionRejectionCode: 'synthetic arbitrary message' }, V3.questionLayout), false);
 });
+
+// Synthetic paraphrase of a partner-proposed name whose approval request stays unanswered for several turns (no private log text).
+for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
+  test(`v3 ${strategy} keeps an unanswered approval request for the partner's own name across turns, then agrees explicitly`, async () => {
+    const f = fixture(strategy);
+    const name = '鍵';
+    const proposal = `この階段みたいな形は「${name}」とかどうかな？`;
+    const first = await f.exchange(proposal, { action: 'accept', target: 2, drafts: ['階段みたいな形ですね。'], segments: [naming(proposal, name, [ids[2]])] });
+    assert.deepEqual(first.input.agreeNames, [{ name, figureId: ids[2], sourceTurn: 1 }]);
+    const claimedBy = first.input.priorClaims.find(c => c.name === name)!;
+    assert.equal(claimedBy.speaker, 'human');
+    assert.equal(claimedBy.act, 'name_propose');
+
+    const reminder = 'その名前は自分が出した案だよ。';
+    const second = await f.exchange(reminder, { action: 'accept', target: 2, drafts: ['出してくれた案でしたね。'] });
+    assert.deepEqual(second.input.agreeNames, [{ name, figureId: ids[2], sourceTurn: 1 }]);
+    assert.notEqual(second.state.ledger[ids[2]].status, 'agreed');
+
+    const ask = 'だから、その名前でいいかどうか聞いているんだ。';
+    const third = await f.exchange(ask, { action: 'agree', target: 2, drafts: [agreeSpeech(name)],
+      segments: [{ quote: ask, name: null, targets: [], aspect: 'question', proposition: '呼び名でよいかの確認', act: 'ask' }] });
+    assert.deepEqual(third.input.agreeNames, [{ name, figureId: ids[2], sourceTurn: 1 }]);
+    assert.equal(third.saved.executed?.action, 'agree');
+    assert.equal(third.saved.executed?.name, name);
+    assert.equal(third.text, agreeSpeech(name));
+    assert.deepEqual(third.state.ledger[ids[2]], { status: 'agreed', name });
+    for (const other of ids.filter(id => id !== ids[2])) assert.notEqual(third.state.ledger[other].name, name);
+    const nameCatalogs = third.requests.flatMap(r => Object.entries(r.questions).filter(([k]) => k === 'name'));
+    for (const [, q] of nameCatalogs) assert.ok(Object.values(q.criteria).some(c => JSON.parse(c).value === name));
+  });
+
+  test(`v3 ${strategy} does not agree when the partner's approval request targets a figure the AI never grounded`, async () => {
+    const f = fixture(strategy);
+    const name = '鍵';
+    const proposal = `これは「${name}」でどうかな？`;
+    const first = await f.exchange(proposal, { action: 'accept', drafts: ['どの形のことか分かるように話しますね。'],
+      segments: [naming(proposal, name)] });
+    assert.equal(first.input.priorClaims.find(c => c.name === name)?.targets.length, 0);
+    assert.ok(first.saved.executed?.action !== 'agree');
+    assert.notEqual(first.state.ledger[ids[2]].status, 'agreed');
+  });
+}

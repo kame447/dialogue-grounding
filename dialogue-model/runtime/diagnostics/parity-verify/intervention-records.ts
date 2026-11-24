@@ -110,7 +110,7 @@ const ALWAYS_V3=['accept','defer','revisit','move_on','close'];
 const ANY_TARGET=['accept','defer','move_on','close'];
 // Adaptive-only context of the attempt being replayed, set at the start of the (synchronous) replay proof: whether repairFacts
 // existed (its guidance sentence is part of every instruction), and the saved per-figure agreeNames (known=false: no source).
-type ReplayContext={facts:boolean;agree:any[]|undefined;known:boolean;v3:boolean;trial:boolean;ledger:Record<string,{status:string;name:string|null}>|undefined;legacyV3:boolean;style:null|'legacy'|'style'};
+type ReplayContext={facts:boolean;agree:any[]|undefined;known:boolean;v3:boolean;trial:boolean;ledger:Record<string,{status:string;name:string|null}>|undefined;legacyV3:boolean;style:null|'legacy'|'style'|'loop'};
 const defaultContext:ReplayContext={facts:false,agree:undefined,known:true,v3:false,trial:false,ledger:undefined,legacyV3:false,style:null};
 const CTX={...defaultContext};
 // Only the verified integrated profile can name two_stage_v2; every other record is read as two_stage_v1.
@@ -533,10 +533,12 @@ function catalog(input:any,target:any,kind:'name'|'feature'):{value:string;figur
  for(const id of ids){const o=input.observations.find((o:any)=>o.figureId===id);if(!o)continue;
   const values:string[]=kind==='name'?[...o.holistic.map((h:any)=>h.construal).filter((v:any)=>typeof v==='string'&&v.length<=80),...input.publicNames.filter((n:any)=>n.figureId===null||n.figureId===id).map((n:any)=>n.name)]:[...o.analytic.shapes,o.analytic.composition,...o.analytic.relations,...o.reobservations.flatMap((r:any)=>r.supports)].filter((v:any)=>typeof v==='string'&&v.trim()&&v.length<=400);
   const ledger=kind==='name'&&CTX.v3&&!CTX.legacyV3?CTX.ledger:undefined;
+  const partner=kind==='name'&&CTX.v3&&CTX.style==='loop'?(Array.isArray(input.priorClaims)?input.priorClaims:[]).filter((c:any)=>c?.speaker==='human'&&c.act==='name_propose'&&typeof c.name==='string'&&c.name!==''&&c.turn<=input.turn&&c.sourceTurn<=input.turn&&Array.isArray(c.targets)):[];
   const entry=ledger?.[id];if(entry?.status==='agreed')continue;
   for(const value of new Set(values)){
    if(ledger&&entry){const name=ledgerName(value);if(entry.status==='deferred'&&entry.name!==null&&ledgerName(entry.name)!==name||
       Object.entries(ledger).some(([other,e])=>other!==id&&e.name!==null&&ledgerName(e.name)===name))continue;}
+   if(partner.some((c:any)=>ledgerName(c.name)===ledgerName(value)&&(c.targets.length===0||c.targets.includes(id))))continue;
    const old=out.find(c=>c.value===value);if(old){if(!old.figureIds.includes(id))old.figureIds.push(id);}else out.push({value,figureIds:[id]});
   }
  }return out;
@@ -606,11 +608,14 @@ function originalQuestions(body:any,input:any,layout='two_stage_v1'):boolean|nul
    const targets=v3Targets(input);
    const make=(actions:any)=>{add('action',text,Object.fromEntries(ACTIONS.filter(a=>targets.some(o=>legal(a,o.target,input))).map(a=>
     [a,CTX.legacyV3&&a==='request_observation'?NATIVE.actions.request_observation:actions[a]])));return q.action;};
-   const isStyle=equal({action:make(NATIVE_V3_STYLE.actions)},body.questions);
-   if(isStyle){if(CTX.style==='legacy')return false;CTX.style='style';return true;}
-   const isLegacy=equal({action:make(NATIVE_V3.actions)},body.questions);
-   if(isLegacy){if(CTX.style==='style')return false;CTX.style='legacy';return true;}
-   return false;
+   // One saved attempt is wholly one text version; the loop version also drops the partner's own proposed names from the propose_name catalog.
+   const was=CTX.style;
+   for(const [version,actions] of [['loop',NATIVE_V3_LOOP.actions],['style',NATIVE_V3_STYLE.actions],['legacy',NATIVE_V3.actions]] as const){
+    if(was!==null&&was!==version)continue;
+    CTX.style=version;
+    if(equal({action:make(actions)},body.questions))return true;
+   }
+   CTX.style=was;return false;
   }
   add('action',text,Object.fromEntries(ACTIONS.filter(a=>(a!=='request_observation'||input.reobservationAllowed)&&(a!=='agree'||agreeOffered)).map(a=>[a,(NATIVE.actions as any)[a]])));
   add('target','次の行動が扱う対象を選んでください。none=対象なし、multiple=一つに絞れない。',{none:'対象なし・未特定。',multiple:'複数の可能性があり一つには絞れない。',...Object.fromEntries(input.ownSlots.map((id:string,i:number)=>['figure_'+i,`自分の候補図形 ${JSON.stringify(id)}。観察メモを参照。`]))});
@@ -721,7 +726,7 @@ function choiceResponse(body:any,response:any):boolean{
 // executed while checking a record. No condition or original decision is input.
 // Prompt-style update (prompt-style-20261124): the current text and the prior text are both verified exactly.
 function generationMessages(messages:any[],trace:any,execution:any,tape:any,profile:any):boolean{
- if(CTX.style==='style')return generationMessagesWith(messages,trace,execution,tape,profile,FIXED_STYLE,{v3:[TRIAL_STYLE],legacy:LEGACY_TRIAL_STYLE});
+ if(CTX.style==='style'||CTX.style==='loop')return generationMessagesWith(messages,trace,execution,tape,profile,FIXED_STYLE,{v3:[TRIAL_STYLE],legacy:LEGACY_TRIAL_STYLE});
  if(CTX.style==='legacy')return generationMessagesWith(messages,trace,execution,tape,profile,FIXED,{v3:[TRIAL,TRIAL_V3_PREV],legacy:LEGACY_TRIAL});
  return generationMessagesWith(messages,trace,execution,tape,profile,FIXED,{v3:[TRIAL,TRIAL_V3_PREV],legacy:LEGACY_TRIAL})||generationMessagesWith(messages,trace,execution,tape,profile,FIXED_STYLE,{v3:[TRIAL_STYLE],legacy:LEGACY_TRIAL_STYLE});
 }
@@ -897,6 +902,8 @@ const REVISIT_MULTIPLE="対象は複数候補のままです。選ばれた行�
 const LEGACY_V3_TARGET="stateのselected.actionが第1段で選んだ行動です。その行動が扱う対象を一つ選んでください。none=対象なし・未特定、figure_*=その単一の図形、figures_*=一つに絞れず、その2図形以上の集合を候補として扱う。この問いに並ぶのは、選んだ行動で選べる対象だけです。公開発話と観察メモに根拠がある図形を選び、根拠のない図形は含めないでください。";
 const NATIVE_V3={"stages": "第1段で、いま選べる行動を一つ選びます。第2段で、選んだ行動が扱える対象だけから、対象を一つ選びます。対象は、対象なし（none）、単一の図形、または一つに絞れない2図形以上の候補集合のいずれかです。最後の段は確定した行動に必要な事柄だけを候補の範囲で問います。同一リクエストの他の回答は見えません。スコアは未校正で正答確率や合意昇格の閾値には使いません。", "target": LEGACY_V3_TARGET + "相手が直前の候補図形の特徴を明確に否定した場合や、humanReferentが単一図形に絞れていない場合は、否定された図形に固執せず、未合意の別候補や複数候補集合（figures_*）を検討してください。", "repairIssueGuidance": "未解決の局所問題がない（prospectでいうno_open_issue）場合はnoneを選んでください。解決済み、または検討をやめた候補に関する古い問題は選ばないでください。", "actions": {...NATIVE.actions, "accept": NATIVE.actions.accept + "直前の図形で合意が成立したり問題が解決したりした後、相手が新しい図形へ進む場合の受け止めも含める。", "confirm": NATIVE.actions.confirm + "相手が直前の確認特徴を明確に肯定し、矛盾なく呼び名を提案・確認した場合は、同じ特徴の確認を繰り返さず、公開の名称提案に基づくagreeなど次の段階へ進む。不確実な点が残る場合は別の弁別特徴を選ぶ。", "move_on": NATIVE.actions.move_on + "合意・解決済みの図形から次の図形に進む通常の進行では選ばない。", "request_observation": NATIVE.actions.request_observation + "相手の描写と初期観察メモの向き・見え方が食い違い、メモの文言だけでは別候補との弁別や回転下での照合ができないときに優先して選ぶ。"}};
 const NATIVE_V3_STYLE={actions:{...NATIVE_V3.actions,"accept":NATIVE_V3.actions.accept+"相手が図形の見た目や特徴を尋ねただけで、観察メモで確かめられる（ある・ない・不明のいずれか）なら、質問を返すconfirmにせず、このacceptで直接答える。","confirm":NATIVE_V3.actions.confirm+"特徴を尋ねられただけでは選ばず、対象や特徴に未解決の曖昧さが残るときだけ、その点を一つ具体的に確かめる。","propose_name":NATIVE.actions.propose_name+"対象が公開上で相手に伝わり、命名の流れに入ってから選ぶ。見た目や特徴を尋ねられた段階の見立ての説明はacceptで行う。"}};
+// accept-loop update (human-name-accept-loop-20261124): two_stage_v3 only; mirrors V3_ACTION_CRITERIA in jev-decision.ts.
+const NATIVE_V3_LOOP={actions:{...NATIVE_V3_STYLE.actions,"accept":NATIVE_V3_STYLE.actions.accept+"相手の発話が相槌だけ（新しい情報も問いもない）で、直前のAI行動もacceptだった場合は、同じ受け止めを繰り返さない。見立てを否定された後などで対象がまだ特定できていないなら、観察に根拠のある別の説明や弁別特徴の確認など、対象探しを進める行動を選ぶ。相槌は名称採用や対象同定の根拠にならない。","propose_name":NATIVE_V3_STYLE.actions.propose_name+"相手が先に公開した呼び名はAIの新しい提案として出し直さない。","agree":NATIVE_V3.actions.agree+"相手が公開上で提案した呼び名に異議や未解決点がなければ、その案への同意・採用として選ぶ。相手が自分の出した呼び名でよいかを尋ねている間は、その問いは答えるまで未回答のままで、相槌や見立ての説明では答えたことにならない。異議や不確実性があるときは、その理由を具体的に確かめるconfirmかrepairで答える。"}};
 // Prompt-style update snapshot (prompt-style-20261124), derived from the prior literals above by exact replacement.
 const rep=(text:string,from:string,to:string)=>{if(text.split(from).length!==2)throw Error('prompt snapshot out of sync');return text.replace(from,()=>to);};
 const FIXED_STYLE={...FIXED,

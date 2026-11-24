@@ -63,12 +63,15 @@ export const JEV_ACTION_CRITERIA: Readonly<Record<JevAction, string>> = Object.f
 // two_stage_v3 only (the shared two_stage_v1/v2 criteria stay byte-identical). Mirrored in the S4 verifier (NATIVE_V3.actions).
 const ACCEPT_DIRECT_ANSWER_V3 = "相手が図形の見た目や特徴を尋ねただけで、観察メモで確かめられる（ある・ない・不明のいずれか）なら、質問を返すconfirmにせず、このacceptで直接答える。";
 const CONFIRM_UNRESOLVED_V3 = "特徴を尋ねられただけでは選ばず、対象や特徴に未解決の曖昧さが残るときだけ、その点を一つ具体的に確かめる。";
-const PROPOSE_NAME_STAGE_V3 = "対象が公開上で相手に伝わり、命名の流れに入ってから選ぶ。見た目や特徴を尋ねられた段階の見立ての説明はacceptで行う。";
+const PROPOSE_NAME_STAGE_V3 = "対象が公開上で相手に伝わり、命名の流れに入ってから選ぶ。見た目や特徴を尋ねられた段階の見立ての説明はacceptで行う。相手が先に公開した呼び名はAIの新しい提案として出し直さない。";
+const ACCEPT_BACKCHANNEL_V3 = "相手の発話が相槌だけ（新しい情報も問いもない）で、直前のAI行動もacceptだった場合は、同じ受け止めを繰り返さない。見立てを否定された後などで対象がまだ特定できていないなら、観察に根拠のある別の説明や弁別特徴の確認など、対象探しを進める行動を選ぶ。相槌は名称採用や対象同定の根拠にならない。";
+const AGREE_PARTNER_NAME_V3 = "相手が公開上で提案した呼び名に異議や未解決点がなければ、その案への同意・採用として選ぶ。相手が自分の出した呼び名でよいかを尋ねている間は、その問いは答えるまで未回答のままで、相槌や見立ての説明では答えたことにならない。異議や不確実性があるときは、その理由を具体的に確かめるconfirmかrepairで答える。";
 const V3_ACTION_CRITERIA: Readonly<Record<JevAction, string>> = Object.freeze({
   ...JEV_ACTION_CRITERIA,
-  accept: JEV_ACTION_CRITERIA.accept + "直前の図形で合意が成立したり問題が解決したりした後、相手が新しい図形へ進む場合の受け止めも含める。" + ACCEPT_DIRECT_ANSWER_V3,
+  accept: JEV_ACTION_CRITERIA.accept + "直前の図形で合意が成立したり問題が解決したりした後、相手が新しい図形へ進む場合の受け止めも含める。" + ACCEPT_DIRECT_ANSWER_V3 + ACCEPT_BACKCHANNEL_V3,
   confirm: JEV_ACTION_CRITERIA.confirm + "相手が直前の確認特徴を明確に肯定し、矛盾なく呼び名を提案・確認した場合は、同じ特徴の確認を繰り返さず、公開の名称提案に基づくagreeなど次の段階へ進む。不確実な点が残る場合は別の弁別特徴を選ぶ。" + CONFIRM_UNRESOLVED_V3,
   propose_name: JEV_ACTION_CRITERIA.propose_name + PROPOSE_NAME_STAGE_V3,
+  agree: JEV_ACTION_CRITERIA.agree + AGREE_PARTNER_NAME_V3,
   move_on: JEV_ACTION_CRITERIA.move_on + "合意・解決済みの図形から次の図形に進む通常の進行では選ばない。",
   request_observation: JEV_ACTION_CRITERIA.request_observation + "相手の描写と初期観察メモの向き・見え方が食い違い、メモの文言だけでは別候補との弁別や回転下での照合ができないときに優先して選ぶ。",
 });
@@ -367,6 +370,13 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
           !assigned.some((otherName, other) => other !== index && otherName === normalized);
       });
     });
+  }
+  if (v3) {
+    // A name the partner proposed is theirs: the AI answers it (agree, confirm, repair), never re-proposes it as its own idea.
+    const partnerNames = input.priorClaims.filter(c => c?.speaker === "human" && c.act === "name_propose" && typeof c.name === "string" && c.name !== "" &&
+      c.turn <= input.turn && c.sourceTurn <= input.turn && Array.isArray(c.targets)).map(c => ({ name: normalizeName(c.name!), targets: c.targets }));
+    catalog.names = catalog.names.map((names, index) => names.filter(name => !partnerNames.some(p =>
+      p.name === normalizeName(name) && (p.targets.length === 0 || p.targets.includes(slots[index])))));
   }
   if ([...catalog.names, ...(catalog.agreeNames ?? []), ...catalog.features].some(v => v.length > 254)) fail("invalid_input");
   const slotCriteria = Object.fromEntries(slots.map((id, i) => [`figure_${i}`, `自分の候補図形 ${JSON.stringify(id)}。観察メモを参照。` ]));
