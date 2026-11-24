@@ -268,7 +268,9 @@ for (const policy of ['holistic_v3', 'holistic_v2'] as const) {
         }
         await t.test(label + ' state validates after JSON round trip', () => {
           const snapshot = JSON.parse(JSON.stringify(restored));
-          assert.deepEqual(validateJevPrivateStateV2(snapshot, ids, interventionForStrategy(label), 'two_stage_v3'), snapshot);
+          const intervention = interventionForStrategy(label);
+          assert.deepEqual(validateJevPrivateStateV2(snapshot, ids, intervention, 'two_stage_v3', policy), snapshot);
+          if (!older) assert.throws(() => validateJevPrivateStateV2(snapshot, ids, intervention, 'two_stage_v3'), { code: 'invalid_state' });
         });
         await t.test(label + ' processes the next public human turn', async () => {
           const seq = tape.events.at(-1).seq;
@@ -342,7 +344,7 @@ for (const strategy of strategies) {
 }
 
 const approval = 'いま出した呼び名を使ってもいいですか？';
-const approvalClaim: Segment = { text: approval, aspect: 'name', act: 'ask', antecedent: { speaker: 'human', quote: suggestion } };
+const approvalClaim: Segment = { text: approval, aspect: 'name', act: 'name_propose', antecedent: { speaker: 'human', quote: suggestion } };
 const approvalTurn: Turn = {
   human: approval, local: [approvalClaim], action: 'confirm', target: 'figure_0', feature: otherFeature, drafts: plain(clarifyAgain),
 };
@@ -361,8 +363,9 @@ for (const strategy of strategies) {
       response: requested.respondsTo, requestTargets: requested.targets, acceptOffered: Object.hasOwn(result.options, 'accept'),
       agreeOffered: Object.hasOwn(result.options, 'agree'),
     }, { response: proposed.id, requestTargets: [], acceptOffered: false, agreeOffered: false });
-    assert.equal(requested.act, 'ask');
+    assert.equal(requested.act, 'name_propose');
     assert.equal(requested.aspect, 'name');
+    assert.equal(requested.name, proposed.name);
     assert.deepEqual(proposed.targets, []);
     assert.deepEqual(result.after.ownLedger, result.before.ownLedger);
   });

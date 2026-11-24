@@ -252,7 +252,7 @@ const agreeSpeech = `この形は「${originalName}」と呼びましょう。`;
 const firstProposal = `この環飾りの呼び名に「${originalName}」を提案します。`;
 const approval = 'さっきの呼び方で大丈夫ですか？';
 const approvalClaim: Segment = {
-  text: approval, aspect: 'name', act: 'ask', targets: [first],
+  text: approval, aspect: 'name', act: 'name_propose', targets: [first],
   antecedent: { speaker: 'human', proposition: firstProposal },
 };
 const broad: Turn = {
@@ -454,7 +454,11 @@ for (const related of [false, true]) {
         human: newer, local: [proposal(newer, differentName, [related ? first : second])],
         action: 'accept', drafts: ['呼び名の案を聞きました。'],
       });
-      const waiting = await trial.say({ ...adopt, action: 'accept', name: undefined, drafts: ['先に出した案についての質問ですね。'] });
+      const query = 'その形について最初に出した呼び方は何でしたか？';
+      const waiting = await trial.say({
+        human: query, local: [{ ...approvalClaim, text: query, act: 'ask' }],
+        action: 'accept', target: 0, drafts: ['先に出した案についての質問ですね。'],
+      });
       published(waiting, 'accept', single(first), '先に出した案についての質問ですね。');
       const names = waiting.after.queueState.privateState.judgments.at(-1)?.jevTurn.agreeNames;
       assert.deepEqual(names?.filter(candidate => candidate.figureId === first).map(candidate => candidate.name),
@@ -478,13 +482,13 @@ test('7. Withdrawal, referent denial and unshared names do not make an agreement
       action: 'confirm', target: 0, feature: ringGap, drafts: [firstQuestion] });
     const ambiguous = await trial.say({
       human: approval, local: [{
-        text: approval, aspect: 'name', act: 'ask', antecedent: { speaker: 'human', proposition: unbound },
+        text: approval, aspect: 'name', act: 'name_propose', antecedent: { speaker: 'human', proposition: unbound },
       }], action: 'confirm', target: 0, feature: baseWidth, drafts: [secondQuestion],
     });
     published(proposed, 'confirm', single(first), firstQuestion);
     published(ambiguous, 'confirm', single(first), secondQuestion);
-    assert.ok(!Object.hasOwn(offered(proposed, 'action'), 'accept'));
     for (const turn of [proposed, ambiguous]) {
+      assert.ok(!Object.hasOwn(offered(turn, 'action'), 'accept'));
       assert.ok(!Object.hasOwn(offered(turn, 'action'), 'agree'));
       unchanged(turn);
     }
@@ -670,12 +674,13 @@ test('05d-1: a linked approval question checks an accept draft and publishes onl
     const askApproval = '先に挙げた呼び方でよさそうですか？';
     const assent = 'ええ、その呼び方に賛成です。';
     const account = 'その呼び方を提案したのはそちらです。';
-    // Neither draft quotes a name or uses a naming formula. The link in the
-    // current human claim is the only trigger for both questions.
+    // Neither draft quotes a name or uses a naming formula. The current
+    // approval claim is the only trigger for both questions.
     const turn = await trial.say({ human: askApproval, local: [{ ...approvalClaim, text: askApproval }],
       action: 'accept', target: 0, drafts: [assent, account],
       draftActs: { [assent]: 'adopt_other', [account]: 'recount_only' } });
     published(turn, 'accept', single(first), account);
+    assert.ok(Object.hasOwn(offered(turn, 'action'), 'agree'));
     assert.equal(turn.generationRequests.length, 2);
     assert.deepEqual(turn.draftRequests, [assent, account].map(draft => ({ draft, reasons: ['typed_context'] })));
     checkedDrafts(turn, [['initial', assent, 'adopt_other'], ['retry', account, 'recount_only']]);

@@ -407,7 +407,7 @@ test('holistic_v3 excludes memo-only proposals, keeps human agree, and preserves
 });
 
 const approvalQuestion = (text: string): Segment => ({
-  text, aspect: 'name', act: 'ask', antecedent: c => c.speaker === 'human' && c.act === 'name_propose' && c.name === name,
+  text, aspect: 'name', act: 'name_propose', antecedent: c => c.speaker === 'human' && c.act === 'name_propose' && c.name === name,
 });
 const clarifyUnboundName = {
   action: 'confirm', target: 0, feature: alternateFeature,
@@ -444,9 +444,16 @@ test('holistic_v3 narrows the naming-request catalog only when no agreement is g
   assert.deepEqual(proposed.state.ledger, proposed.before.ledger);
   assert.equal(profile.dialoguePolicy, 'holistic_v3');
 
-  const [, , agreed] = await sameScenario([describe([slot]), acknowledgmentOfReading, {
+  const identified = '探しているのは、細い柄が付いた環の形です。';
+  const narrowReferent: Turn = {
+    ...acknowledgment(identified, 0), referent: 0,
+    local: [{ text: identified, aspect: 'referent', act: 'assert', targets: [slot] }],
+  };
+  const [, shared, agreed] = await sameScenario([describe([slot]), narrowReferent, {
     ...unbound, action: 'agree', name, speech: `はい、「${name}」にしましょう。`,
   }]);
+  assert.equal(shared.input.humanReferent?.scores?.[slot], 1);
+  assert.equal(agreed.input.humanReferent?.scores?.none, 1);
   assert.equal(agreed.input.namingRequest, true);
   assert.deepEqual(agreed.input.agreeNames, [{ name, figureId: slot, sourceTurn: 5 }]);
   assert.ok(Object.hasOwn(actionOptions(agreed), 'agree') && Object.hasOwn(actionOptions(agreed), 'accept'));
@@ -491,6 +498,8 @@ test('holistic_v3 requires clarification for a linked approval request after the
   const linked = asked.input.priorClaims.find(c => c.quote === approval);
   assert.ok(source && linked);
   assert.equal(linked.respondsTo, source.id);
+  assert.equal(linked.act, 'name_propose');
+  assert.equal(linked.name, source.name);
   assert.deepEqual(linked.targets, [slot]);
   assert.equal(asked.input.namingRequest, true);
   assert.equal(asked.saved.judgment.action, 'confirm');
@@ -527,9 +536,11 @@ test('A2 control: paraphrased approval requests and a resumed discussion can ado
   for (const wording of ['この呼び名で決めて平気ですか？', '前に出した呼び名でよいでしょうか？']) {
     const [, , adopted] = await sameScenario([...namingContext(), approve(wording)]);
     const proposal = adopted.input.priorClaims.find(c => c.act === 'name_propose' && c.name === name);
-    const request = adopted.input.priorClaims.find(c => c.sourceTurn === adopted.input.turn && c.act === 'ask');
+    const request = adopted.input.priorClaims.find(c => c.sourceTurn === adopted.input.turn && c.quote === wording);
     assert.ok(proposal);
     assert.equal(request?.respondsTo, proposal.id);
+    assert.equal(request?.act, 'name_propose');
+    assert.equal(request?.name, proposal.name);
     assert.deepEqual(adopted.input.agreeNames, [{ name, figureId: slot, sourceTurn: 3 }]);
     assert.equal(adopted.saved.judgment.candidateName, name);
     assert.equal(adopted.state.ledger[slot].status, 'agreed');
@@ -548,7 +559,7 @@ test('A2 control: paraphrased approval requests and a resumed discussion can ado
   }]);
   const answered = interposed.at(-1)!;
   assert.equal(answered.input.priorClaims.find(c => c.sourceTurn === answered.input.turn)?.act, 'acknowledge');
-  assert.ok(answered.input.priorClaims.some(c => c.quote === request.human && c.act === 'ask'));
+  assert.ok(answered.input.priorClaims.some(c => c.quote === request.human && c.act === 'name_propose' && c.name === name));
   assert.equal(answered.state.ledger[slot].status, 'agreed');
   assert.deepEqual(answered.input.agreeNames, [{ name, figureId: slot, sourceTurn: 3 }]);
 });
@@ -586,7 +597,7 @@ test('A2 change: an unbound name cannot be adopted during a repeated approval re
   const offered: Turn = {
     human: proposal, local: [propose(proposal, 'name_propose')], ...clarifyUnboundName,
   };
-  const question = '先ほど挙げた名前で決めても構いませんか？';
+  const question = `先ほど挙げた「${name}」で決めても構いませんか？`;
   const agreement = { name, speech: 'はい、「鍵」にしましょう。' };
   const request: Turn = {
     human: question, local: [approvalQuestion(question)],
@@ -598,7 +609,13 @@ test('A2 change: an unbound name cannot be adopted during a repeated approval re
     ...offered, human: identified + proposal, ...ownFigure, action: 'accept', speech: '呼び名の候補ですね。',
     local: [{ text: identified, aspect: 'part', act: 'assert', targets: [slot] }, ...offered.local!],
   }, request]);
-  assert.equal(adopted.input.priorClaims.find(c => c.act === 'name_propose')?.targets.length, 0);
+  const source = adopted.input.priorClaims.find(c => c.quote === proposal);
+  const approval = adopted.input.priorClaims.find(c => c.quote === question);
+  assert.ok(source && approval);
+  assert.deepEqual(source.targets, []);
+  assert.deepEqual(approval.targets, []);
+  assert.equal(approval.respondsTo, source.id);
+  assert.equal(approval.name, source.name);
   assert.ok(adopted.input.priorClaims.some(c => c.speaker === 'ai' && c.act === 'ask' && c.targets.includes(slot)));
   assert.deepEqual(adopted.saved.jevTurn.executed?.target, { kind: 'single', figureId: slot });
   assert.equal(adopted.saved.judgment.action, 'agree');
@@ -612,7 +629,7 @@ test('A2 change: an unbound name cannot be adopted during a repeated approval re
     assert.ok(actionOptions(result), 'the native action question must be reached');
     assert.deepEqual(result.input.priorClaims.find(c => c.act === 'name_propose')?.targets, []);
     const question = result.input.priorClaims.find(c => c.sourceTurn === result.input.turn);
-    assert.equal(question?.act, 'ask');
+    assert.equal(question?.act, 'name_propose');
     assert.ok(result.input.priorClaims.every(c => c.targets.length === 0));
     assert.equal(result.input.humanReferent?.scores?.none, 1);
     const committed = result.state.judgments.at(-1)?.judgment.action;
@@ -634,7 +651,7 @@ const checkReferent: Turn[] = [
   { ...locate, human: '呼び名を決める前に、形を照らし合わせたいです。',
     ai: [{ text: locate.speech, aspect: 'referent', act: 'ask', targets: [slot] }] },
 ];
-const approvalRequest = '最初に出した呼び名で決めてよさそうですか？';
+const approvalRequest = `最初に出した「${name}」で決めてよさそうですか？`;
 const proposedAgreement = { name, speech: 'では「鍵」にしましょう。' };
 
 function referentResponse(text: string, act: 'agree' | 'deny'): Segment {
@@ -685,7 +702,7 @@ test('A2 change: a rejected figure cannot be named when the approval request is 
     assert.equal(result.input.humanReferent?.scores?.none, 1);
     const question = result.input.priorClaims.find(c => c.sourceTurn === result.input.turn && c.quote === approvalRequest);
     assert.equal(question?.aspect, 'name');
-    assert.equal(question?.act, 'ask');
+    assert.equal(question?.act, 'name_propose');
     return {
       strategy,
       licensed: Object.hasOwn(actionOptions(result), 'agree'),
@@ -759,7 +776,7 @@ for (const { label, text, aspect, act, targets, referent, referentTie, adopt } o
     const antecedent = aspect === 'referent' ? answerToPublicReferent : undefined;
     const reply: Segment = { text, aspect, act, targets: [...targets], antecedent };
     const final: Turn = {
-      human: reply.text + repeatApproval, local: [reply, propose(repeatApproval, 'ask')],
+      human: reply.text + repeatApproval, local: [reply, approvalQuestion(repeatApproval)],
       referent, referentTie, action: 'confirm', target: 0, feature: alternateFeature, speech: leaveOpen,
       agreeIfOffered: proposedAgreement,
     };
@@ -789,8 +806,9 @@ for (const { label, text, aspect, act, targets, referent, referentTie, adopt } o
       assert.ok(publicQuestion && proposal && incoming && approval);
       assert.deepEqual(proposal.targets, []);
       assert.equal(approval.aspect, 'name');
-      assert.equal(approval.act, 'ask');
+      assert.equal(approval.act, 'name_propose');
       assert.equal(approval.name, proposal.name);
+      assert.equal(approval.respondsTo, proposal.id);
       assert.equal(incoming.aspect, reply.aspect);
       assert.equal(incoming.act, reply.act);
       assert.deepEqual(incoming.targets, reply.targets);
@@ -812,7 +830,7 @@ for (const { label, text, aspect, act, targets, referent, referentTie, adopt } o
     });
     assert.deepEqual(outcomes, strategies.map(strategy => ({
       strategy, offered: Boolean(adopt),
-      names: adopt ? [{ name, figureId: slot, sourceTurn: 1 }] : [],
+      names: adopt ? [{ name, figureId: slot, sourceTurn: repair.input.turn }] : [],
       action: adopt ? 'agree' : 'confirm',
       speech: adopt ? proposedAgreement.speech : leaveOpen,
       feature: adopt ? null : alternateFeature,
@@ -836,7 +854,7 @@ for (const multiple of [true, false]) {
     const reply: Turn = {
       human: text + repeatApproval,
       local: [{ text, act: 'agree', aspect: 'referent', targets: [slot],
-        antecedent: claim => answerToPublicReferent(claim) && claim.proposition === question }, propose(repeatApproval, 'ask')],
+        antecedent: claim => answerToPublicReferent(claim) && claim.proposition === question }, approvalQuestion(repeatApproval)],
       action: 'confirm', target: 0, referent: 0, feature, speech: locate.speech,
       agreeIfOffered: { ...proposedAgreement, figureIndex: 0 },
     };
