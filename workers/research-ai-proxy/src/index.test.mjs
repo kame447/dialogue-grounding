@@ -238,3 +238,27 @@ test("separate vision purpose selects only the configured vision model and leave
   const absent = await handleRequest(request("/v1/chat/completions", env.RESEARCH_PROXY_TOKEN, bodyWith(simpleMessages, { purpose: "visual_observation" })), env, upstream);
   assert.equal(absent.status, 400); assert.equal(seen.length, 2);
 });
+
+
+test("vision route fails closed on missing or substituted upstream model identity", async () => {
+  const model = "synthetic-terra";
+  const configured = { ...env, VISION_MODEL: model };
+  for (const returned of [undefined, null, "", "synthetic-luna", model + "-latest", model + "-20261124-extra"]) {
+    const response = await handleRequest(request("/v1/chat/completions", env.RESEARCH_PROXY_TOKEN,
+      bodyWith(simpleMessages, { purpose: "visual_observation" })), configured,
+      async () => Response.json({ ...result, model: returned }));
+    assert.equal(response.status, 502);
+    assert.deepEqual(await response.json(), { error: "invalid_upstream_model" });
+  }
+  for (const returned of [model, model + "-20261124", model + "-2026-11-24"]) {
+    const response = await handleRequest(request("/v1/chat/completions", env.RESEARCH_PROXY_TOKEN,
+      bodyWith(simpleMessages, { purpose: "visual_observation" })), configured,
+      async () => Response.json({ ...result, model: returned }));
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).model, returned);
+  }
+  const legacy = await handleRequest(request("/v1/chat/completions", env.RESEARCH_PROXY_TOKEN,
+    bodyWith(simpleMessages)), configured, async () => Response.json({ ...result, model: undefined }));
+  assert.equal(legacy.status, 200);
+  assert.equal((await legacy.json()).model, env.DIALOGUE_MODEL);
+});

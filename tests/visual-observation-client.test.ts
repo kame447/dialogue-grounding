@@ -18,3 +18,10 @@ test('visual client uses the dedicated policy and model without changing the dia
   assert.equal((await client.complete(messages)).model, env.VISION_MODEL);
   assert.deepEqual(requests, [{ model: env.VISION_MODEL, messages, max_completion_tokens: 1024 }]);
 });
+
+
+test('visual client refuses a success response lacking an actual model ID', async () => {
+  const client = createVisualObservationClient({ provider: 'cloudflare', baseUrl: 'https://mock.invalid/v1', apiKey: 'synthetic' },
+    async () => Response.json({ choices: [{ message: { content: 'synthetic observation' } }] }));
+  await assert.rejects(client.complete([{ role: 'user', content: 'synthetic' }]), /provider_http_error/);
+});

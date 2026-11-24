@@ -298,6 +298,13 @@ export async function handleRequest(request, env, fetchImpl = globalThis.fetch) 
       });
     }
     const data = await response.json();
+    // Vision provenance must be reported by the upstream itself. Never label
+    // missing or unexpected identity as the configured model.
+    if (selected.purpose === "visual_observation" &&
+        !(typeof data?.model === "string" && (data.model === selected.model ||
+          (data.model.startsWith(selected.model + "-") && /^\d{4}-\d{2}-\d{2}$|^\d{8}$/.test(data.model.slice(selected.model.length + 1)))))) {
+      return reply(502, { error: "invalid_upstream_model" });
+    }
     const result = sanitizeResult(data, selected.model);
     if (result) return reply(200, result);
     // Empty text after hitting the cap is deterministic for the same request,
