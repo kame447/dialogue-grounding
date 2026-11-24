@@ -344,7 +344,7 @@ function agreeSource(tr:any,t:any,key:string,tape:any,legacyV3=false):'invalid'|
   const aiPublic=tr.profile?.localGrounding?.aiPublicClaims===true;
   const upTo:any[]=(tape.events??[]).filter((e:any)=>e.seq<=t.turnIndex),win=(aiPublic?upTo.filter((e:any)=>upTo.filter((o:any)=>o.seq===e.seq).length===1):upTo).slice(-32);
   const live=liveClaims(state.graph).sort((a:any,b:any)=>a.sourceTurn-b.sourceTurn||a.turn-b.turn).slice(-160);
-  let expected:string[];
+  let expected:string[],levels:string[][]|null=null;
   if(v3){
    const norm=(s:string)=>s.normalize('NFKC').trim();
    const isHumanProposal=(c:any)=>c.speaker==='human'&&c.act==='name_propose';
@@ -362,7 +362,13 @@ function agreeSource(tr:any,t:any,key:string,tape:any,legacyV3=false):'invalid'|
    const prevPublicIds=new Set(prevIds.length?live.filter((c:any)=>c.speaker==='ai'&&c.sourceTurn>prevJudgment.turnIndex&&c.sourceTurn<t.turnIndex).flatMap((c:any)=>c.targets):[]);
    const wasFocused=(id:string)=>prevIds.includes(id)||focusedTurns.some((j:any)=>j.ids.includes(id));
    const slotAllowed=(id:string,name:string)=>preLedger[id]?.status!=='agreed'&&!(preLedger[id]?.status==='deferred'&&preLedger[id].name!==null&&norm(preLedger[id].name)!==norm(name))&&!slots.some(other=>other!==id&&preLedger[other]?.name!==null&&norm(preLedger[other].name)===norm(name));
-   expected=openClaims.flatMap((c:any)=>{
+   // Rule levels of the generation side: 0 = every ledger-allowed slot for an unbound proposal (older records), 1 = only figures the AI shared in public and
+   // executed on, 2 = level 1 plus no figure the partner last denied as the referent. A record is genuine when its saved list equals one level exactly.
+   const aiSharedIds=new Set(live.filter((c:any)=>c.speaker==='ai'&&c.sourceTurn>lastBoundary&&c.sourceTurn<t.turnIndex).flatMap((c:any)=>c.targets));
+   const claimTargets=(c:any):string[]=>Array.isArray(c.targets)&&c.targets.length?c.targets:live.find((p:any)=>p.id===c.respondsTo)?.targets??[];
+   const referentClaims=live.filter((c:any)=>c.speaker==='human'&&c.aspect==='referent'&&c.sourceTurn>lastBoundary);
+   const referentDenied=(id:string)=>referentClaims.filter((c:any)=>claimTargets(c).includes(id)).at(-1)?.act==='deny';
+   const expectedAt=(level:number):string[]=>openClaims.flatMap((c:any)=>{
     const name=c.name as string;
     if(!isHumanProposal(c)&&c.act!=='name_accept')return[];
     const targets:string[]=Array.isArray(c.targets)?c.targets:[];
@@ -373,22 +379,24 @@ function agreeSource(tr:any,t:any,key:string,tape:any,legacyV3=false):'invalid'|
      if(proposals.some((p:any)=>p.sourceTurn>c.sourceTurn&&norm(p.name)!==norm(name)))return[];
     }
     const currentUnbound=c.sourceTurn===t.turnIndex||isHumanProposal(c)&&c.sourceTurn===latestProposal;
-    const eligibleSlots=targets.length>=1?targets.filter(id=>slotAllowed(id,name)):currentUnbound?slots.filter(id=>slotAllowed(id,name)):[];
+    const eligibleSlots=targets.length>=1?targets.filter(id=>slotAllowed(id,name)):currentUnbound?slots.filter(id=>slotAllowed(id,name)&&(level<1||aiSharedIds.has(id)&&wasFocused(id))):[];
     const antecedent=c.act==='name_accept'?publicClaims.find((p:any)=>p.id===c.respondsTo&&p.name===name):undefined;
     const s=win.find((e:any)=>e.seq===c.sourceTurn&&e.text.includes(name))??(antecedent&&win.find((e:any)=>e.seq===antecedent.sourceTurn&&e.text.includes(name)))??(c.act==='name_accept'?win.filter((e:any)=>e.text.includes(name)).sort((a:any,b:any)=>a.seq-b.seq)[0]:undefined);
     if(!s)return[];
     return eligibleSlots.filter(id=>{
+     if(level>=2&&referentDenied(id))return false;
      if(requiresFocus&&!wasFocused(id))return false;
      if(prevPublicIds.size&&!prevPublicIds.has(id))return false;
      return !openClaims.some((r:any)=>r.speaker==='human'&&r.sourceTurn>c.sourceTurn&&(r.act==='deny'||r.act==='name_reject')&&r.name===name&&(r.respondsTo===c.id||(Array.isArray(r.targets)&&r.targets.includes(id))));
     }).map(figureId=>JSON.stringify([name,figureId,s.seq]));
    }).sort();
+   expected=[];levels=[0,1,2].map(expectedAt);
   }else{
    const source=(c:any)=>win.find((e:any)=>e.seq===c.sourceTurn&&e.text.includes(c.name))??win.filter((e:any)=>e.text.includes(c.name)).sort((a:any,b:any)=>a.seq-b.seq)[0];
    expected=live.filter(eligibleAgree).flatMap((c:any)=>{const s=source(c);return s?[JSON.stringify([c.name,c.targets[0],s.seq])]:[];}).sort();
   }
   const saved=names.map((n:any)=>JSON.stringify([n.name,n.figureId,n.sourceTurn])).sort();
-  return equal(expected,saved)?{known:true,names}:'invalid';
+  return (levels?levels.some(e=>equal(e,saved)):equal(expected,saved))?{known:true,names}:'invalid';
 }
 // Adaptive trial version of an attempt from its own record: the repair facts mark v3, the agreement gate v2; a bare adaptive v1 is told apart only by
 // the claim of the replay tape (the generation request proves it: only a trial uses the trial instruction text).

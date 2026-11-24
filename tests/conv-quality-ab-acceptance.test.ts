@@ -190,6 +190,20 @@ async function sameScenario(scenario: Turn[]): Promise<Snapshot[]> {
 const actionOptions = (s: Attempt) => s.wire.find(packet => packet.questions.action)!.questions.action.criteria;
 const ownFigure = { target: 0, referent: 0 } as const;
 
+async function lastAgreementAttempt(strategy: Strategy, scenario: Turn[]): Promise<Attempt> {
+  let failure: Attempt | undefined;
+  try {
+    return (await replay(strategy, scenario, attempt => { failure = attempt; })).at(-1)!;
+  } catch (error) {
+    assert.ok(failure);
+    assert.ok(error instanceof Error);
+    assert.match(error.message, /^(decision_failed|invalid_decision)$/u);
+    assert.equal(failure.trace.status, 'error');
+    assert.equal(failure.trace.publicSpeech, null);
+    return failure;
+  }
+}
+
 const locate: Turn = {
   human: '輪に細い棒がついた形を探しています。',
   action: 'confirm', ...ownFigure, feature, speech: feature + '形ですか？',
@@ -364,17 +378,7 @@ test('A2 change: an unbound name cannot be adopted during a repeated approval re
   assert.equal(adopted.state.ledger[slot].name, name);
 
   const outcomes = await Promise.all(strategies.map(async strategy => {
-    let failure: Attempt | undefined;
-    const result = await replay(strategy, [offered, request], attempt => { failure = attempt; }).then(
-      turns => turns.at(-1)!, (error: unknown) => {
-        assert.ok(failure);
-        assert.ok(error instanceof Error);
-        assert.match(error.message, /^(decision_failed|invalid_decision)$/u);
-        assert.equal(failure.trace.status, 'error');
-        assert.equal(failure.trace.publicSpeech, null);
-        return failure;
-      },
-    );
+    const result = await lastAgreementAttempt(strategy, [offered, request]);
     assert.ok(actionOptions(result), 'the native action question must be reached');
     assert.deepEqual(result.input.priorClaims.find(c => c.act === 'name_propose')?.targets, []);
     assert.equal(result.input.priorClaims.find(c => c.sourceTurn === result.input.turn)?.act, 'ask');
@@ -391,6 +395,100 @@ test('A2 change: an unbound name cannot be adopted during a repeated approval re
   assert.deepEqual(outcomes.filter(({ committed, published, agreed }) =>
     committed === 'agree' || published === agreement.speech || agreed.length > 0), [],
   'name evidence alone cannot authorize publication or a ledger agreement');
+});
+
+const unboundName = '呼び名には鍵を提案します。';
+const checkReferent: Turn[] = [
+  { human: unboundName, local: [propose(unboundName, 'name_propose')], action: 'accept', speech: '呼び名の候補ですね。' },
+  { ...locate, human: '呼び名を決める前に、形を照らし合わせたいです。',
+    ai: [{ text: locate.speech, aspect: 'referent', act: 'ask', targets: [slot] }] },
+];
+const approvalRequest = '最初に出した呼び名で決めてよさそうですか？';
+const proposedAgreement = { name, speech: 'では「鍵」にしましょう。' };
+
+function referentResponse(text: string, act: 'agree' | 'deny'): Segment {
+  return { text, aspect: 'referent', act,
+    antecedent: c => c.speaker === 'ai' && c.aspect === 'referent' && c.act === 'ask' };
+}
+
+function checkReferentReply(response: Attempt, reply: Segment): void {
+  const claims = response.input.priorClaims;
+  assert.deepEqual(claims.find(c => c.act === 'name_propose' && c.name === name)?.targets, []);
+  const selection = claims.find(c => c.speaker === 'ai' && c.aspect === 'referent' && c.act === 'ask');
+  assert.ok(selection);
+  assert.deepEqual(selection.targets, [slot]);
+  const incoming = claims.find(c => c.sourceTurn === response.input.turn && c.quote === reply.text);
+  assert.ok(incoming);
+  assert.equal(incoming.aspect, 'referent');
+  assert.equal(incoming.act, reply.act);
+  assert.equal(incoming.respondsTo, selection.id);
+  assert.deepEqual(incoming.targets, [slot]);
+  assert.equal(incoming.name, null);
+}
+
+test('A2 change: a rejected figure cannot be named when the approval request is unchanged', async () => {
+  const confirmed = referentResponse('探していたのは、今の説明の形です。', 'agree');
+  const denied = referentResponse('今の説明は、私が指している形とは違います。', 'deny');
+  const response = (reply: Segment, referent?: number): Turn => ({
+    human: reply.text + approvalRequest, local: [reply, { text: approvalRequest, aspect: 'name', act: 'ask' }],
+    referent, action: 'accept', speech: '指している形は、まだ特定できません。', agreeIfOffered: proposedAgreement,
+  });
+  const [initial, confirmation, adopted] = await sameScenario([...checkReferent, response(confirmed, 0)]);
+  assert.equal(initial.saved.judgment.action, 'accept');
+  assert.deepEqual(initial.saved.jevTurn.executed?.target, { kind: 'none' });
+  assert.equal(confirmation.saved.judgment.action, 'confirm');
+  assert.deepEqual(confirmation.saved.jevTurn.executed?.target, { kind: 'single', figureId: slot });
+  checkReferentReply(adopted, confirmed);
+  assert.equal(adopted.input.humanReferent?.scores?.[slot], 1);
+  assert.deepEqual(adopted.saved.jevTurn.executed?.target, { kind: 'single', figureId: slot });
+  assert.equal(adopted.saved.judgment.action, 'agree');
+  assert.equal(adopted.speech, proposedAgreement.speech);
+  assert.equal(adopted.state.ledger[slot].status, 'agreed');
+  assert.equal(adopted.state.ledger[slot].name, name);
+
+  const outcomes = await Promise.all(strategies.map(async strategy => {
+    const result = await lastAgreementAttempt(strategy, [...checkReferent, response(denied)]);
+    checkReferentReply(result, denied);
+    assert.equal(result.input.humanReferent?.scores?.none, 1);
+    const question = result.input.priorClaims.find(c => c.sourceTurn === result.input.turn && c.quote === approvalRequest);
+    assert.equal(question?.aspect, 'name');
+    assert.equal(question?.act, 'ask');
+    return {
+      strategy,
+      licensed: Object.hasOwn(actionOptions(result), 'agree'),
+      committed: result.state.judgments.at(-1)?.judgment.action,
+      published: result.trace.publicSpeech,
+      agreed: Object.values(result.state.ledger).filter(entry => entry.status === 'agreed'),
+    };
+  }));
+  assert.deepEqual(outcomes.filter(({ committed, published, agreed }) =>
+    committed === 'agree' || published === proposedAgreement.speech || agreed.length > 0), [],
+  'a referent denial must block agreement even though the request still names the same proposal');
+});
+
+test('A2 control: rejecting a different name does not reject the shared figure or the remaining proposal', async () => {
+  const confirmed = referentResponse('探していたのは、今の説明の形です。', 'agree');
+  const rejectedName = 'その形をランプと呼ぶ案には賛成できません。';
+  const alternative: Turn = {
+    human: confirmed.text, local: [confirmed], ...ownFigure, action: 'propose_name',
+    name: 'ランプ', speech: '別案ですが、「ランプ」と呼ぶのはどうでしょう？',
+  };
+  const [, , , adopted] = await sameScenario([...checkReferent, alternative, {
+    human: rejectedName + approvalRequest,
+    local: [{ text: rejectedName, aspect: 'name', act: 'name_reject', antecedent: fromAi('name_propose') },
+      { text: approvalRequest, aspect: 'name', act: 'ask' }],
+    ...ownFigure, action: 'accept', speech: '呼び名は、まだ決まっていません。', agreeIfOffered: proposedAgreement,
+  }]);
+  assert.ok(adopted.input.priorClaims.some(c => c.speaker === 'human' && c.aspect === 'referent' && c.act === 'agree' && c.targets.includes(slot)));
+  const rejection = adopted.input.priorClaims.find(c => c.sourceTurn === adopted.input.turn && c.quote === rejectedName);
+  assert.equal(rejection?.aspect, 'name');
+  assert.equal(rejection?.act, 'name_reject');
+  assert.equal(rejection?.name, 'ランプ');
+  assert.deepEqual(rejection?.targets, [slot]);
+  assert.equal(adopted.saved.judgment.action, 'agree');
+  assert.equal(adopted.speech, proposedAgreement.speech);
+  assert.equal(adopted.state.ledger[slot].status, 'agreed');
+  assert.equal(adopted.state.ledger[slot].name, name);
 });
 
 const rejectedConstrual = 'フックのようには見えません。';

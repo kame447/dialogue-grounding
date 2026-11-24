@@ -80,7 +80,10 @@ function fixture(strategy: 'bypass-enabled' | 'repair-first' = 'bypass-enabled',
         return segments.map(({ segmentId }, index) => {
           const act = plan.segments![index].act;
           const antecedentAct = act === 'deny' ? 'name_accept' : act === 'name_accept' ? 'name_propose' : null;
-          const antecedent = antecedentAct && priorClaims.find(c => c.speaker === 'ai' && c.act === antecedentAct);
+          // A referent denial answers the AI's latest public claim about the figure.
+          const referentDenial = act === 'deny' && plan.segments![index].aspect === 'referent';
+          const antecedent = referentDenial ? priorClaims.filter(c => c.speaker === 'ai').at(-1)
+            : antecedentAct && priorClaims.find(c => c.speaker === 'ai' && c.act === antecedentAct);
           return { segmentId, act, respondsToClaimId: antecedent?.id ?? null, rawScore: null };
         });
       },
@@ -702,5 +705,56 @@ for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
     assert.deepEqual(shared.input.agreeNames, [{ name, figureId: ids[2], sourceTurn: 1 }]);
     assert.deepEqual(shared.state.ledger[ids[2]], { status: 'agreed', name });
     for (const other of ids.filter(id => id !== ids[2])) assert.notEqual(shared.state.ledger[other].name, name);
+  });
+}
+
+// A partner who explicitly denies the figure as the referent blocks agreement on it (the proposed name is not what is objected to);
+// re-affirming the figure reopens it. S4 rebuilds the same candidates from the saved record for every one of these turns.
+for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
+  test(`v3 ${strategy} does not agree on a figure the partner denied as the referent, adopts the same proposal once it is affirmed, and S4 agrees`, async () => {
+    const f = fixture(strategy, { aiPublic: true });
+    const name = '鍵';
+    const proposal = `これは「${name}」とかどうかな？`;
+    let before = structuredClone(f.state());
+    const first = await f.exchange(proposal, { action: 'accept', drafts: ['どの形のことか確かめますね。'], segments: [naming(proposal, name)] });
+    checkS4AgreeSource(before, first);
+
+    // Not shared yet: the request for approval is answered without agreeing (a genuine record that S4 must also accept).
+    const ask = 'その名前でいいか聞いているんだ。';
+    const askSegment = { quote: ask, name: null, targets: [], aspect: 'question' as const, proposition: '呼び名でよいかの確認', act: 'ask' as const };
+    before = structuredClone(f.state());
+    const unshared = await f.exchange(ask, { action: 'accept', drafts: ['まだ、どの形か確かめられていません。'], segments: [askSegment] });
+    assert.deepEqual(unshared.input.agreeNames, []);
+    checkS4AgreeSource(before, unshared);
+
+    before = structuredClone(f.state());
+    // The AI says in public which figure it means (a referent claim), so the partner can answer it, including with a denial.
+    const mean = '細い部分が二つつながった形のことですか？';
+    const shared = await f.exchange('形を教えてください。', { action: 'confirm', target: 0, drafts: [mean],
+      aiSegments: [{ segmentId: 'shape', quote: mean, targets: [ids[0]], aspect: 'referent', proposition: 'この形を指す', name: null, linkedIssueId: null, respondsToTurn: null }] });
+    assert.deepEqual(shared.input.agreeNames, []);
+    checkS4AgreeSource(before, shared);
+
+    const denial = 'いいえ、その形ではありません。';
+    const denySegment = { quote: denial, name: null, targets: [ids[0]], aspect: 'referent' as const, proposition: 'その形ではない', act: 'deny' as const };
+    before = structuredClone(f.state());
+    const denied = await f.exchange(denial + ask, { action: 'confirm', target: 1, drafts: ['別の形を確かめますね。'], segments: [denySegment, { ...askSegment, quote: ask }] });
+    assert.deepEqual(denied.input.agreeNames, [], 'a denied referent is no candidate for the partner proposal');
+    assert.equal(Object.hasOwn(denied.requests.find(r => r.questions.action)!.questions.action.criteria, 'agree'), false);
+    assert.notEqual(denied.state.ledger[ids[0]].status, 'agreed');
+    checkS4AgreeSource(before, denied);
+
+    // Forged evidence is refused: an extra candidate the generation rules never produce.
+    const forged = structuredClone(denied);
+    forged.state.judgments.at(-1)!.jevTurn.agreeNames = [{ name, figureId: ids[0], sourceTurn: 1 }];
+    assert.throws(() => checkS4AgreeSource(before, forged));
+
+    const affirm = 'やっぱりその形です。';
+    const affirmSegment = { quote: affirm, name: null, targets: [ids[0]], aspect: 'referent' as const, proposition: 'その形である', act: 'assert' as const };
+    before = structuredClone(f.state());
+    const affirmed = await f.exchange(affirm + ask, { action: 'agree', target: 0, drafts: [agreeSpeech(name)], segments: [affirmSegment, { ...askSegment, quote: ask }] });
+    assert.deepEqual(affirmed.input.agreeNames, [{ name, figureId: ids[0], sourceTurn: 1 }]);
+    assert.deepEqual(affirmed.state.ledger[ids[0]], { status: 'agreed', name });
+    checkS4AgreeSource(before, affirmed);
   });
 }

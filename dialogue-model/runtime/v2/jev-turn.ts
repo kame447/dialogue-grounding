@@ -237,6 +237,14 @@ function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns: reado
   const prevPublicIds = new Set(prevJudgment && prevIds.length ? claims.filter(c => c.speaker === "ai" &&
     c.sourceTurn > prevJudgment.turnIndex && c.sourceTurn < turn).flatMap(c => c.targets) : []);
   const wasFocused = (id: string) => prevIds.includes(id) || focusedTurns.some(j => j.ids.includes(id));
+  // The partner's own latest word on whether a figure is the one meant: a referent denial (targets taken from the claim it answers when it has none)
+  // blocks agreement on that figure until a later referent claim of theirs re-affirms it. This is about the target, not about the proposed name.
+  const claimTargets = (c: LocalClaimView) => c.targets.length ? c.targets : claims.find(p => p.id === c.respondsTo)?.targets ?? [];
+  const referentClaims = claims.filter(c => c.speaker === "human" && c.aspect === "referent" && c.sourceTurn > lastBoundary);
+  const referentDenied = (id: string) => {
+    const last = referentClaims.filter(c => claimTargets(c).includes(id)).at(-1);
+    return last?.act === "deny";
+  };
   const aiSharedIds = new Set(claims.filter(c => c.speaker === "ai" && c.sourceTurn > lastBoundary && c.sourceTurn < turn).flatMap(c => c.targets));
 
   return openClaims.flatMap(c => {
@@ -264,6 +272,7 @@ function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns: reado
     if (!source) return [];
     const occupied = slots.filter(id => ledger[id].name !== null && normalizeName(ledger[id].name) === normalized);
     return candidates.filter(id => {
+      if (referentDenied(id)) return false;
       if (requiresFocus && !wasFocused(id)) return false;
       if (prevPublicIds.size && !prevPublicIds.has(id)) return false;
       const entry = ledger[id];
