@@ -837,3 +837,25 @@ for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
     assert.equal(verdict([{ name, figureId: ids[0], sourceTurn: 1 }], request), 'invalid', 'an unsupported single candidate matches no rule');
   });
 }
+
+const NOTE = 'そう見えるんですね。same? Need Japanese natural, ask confirm. Avoid confusing target.';
+for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
+  test(`v3 ${strategy}: a working note in the draft is regenerated; a note that stays is not published and nothing is saved`, async () => {
+    const f = fixture(strategy);
+    const regenerated = await f.exchange('丸い形のことです。', { action: 'accept', target: 3, drafts: [NOTE, 'そう見えるんですね。'] });
+    assert.equal(regenerated.text, 'そう見えるんですね。');
+    assert.deepEqual(regenerated.trace.generationGuard, { violations: ['working_note'], regenerated: true, fallback: false });
+
+    const stuck = fixture(strategy), previous = structuredClone(stuck.state());
+    await assert.rejects(stuck.exchange('丸い形のことです。', { action: 'accept', target: 3, drafts: [NOTE, NOTE] }), { code: 'unsafe_generation' });
+    assert.deepEqual(stuck.state(), previous);
+    assert.equal(stuck.attempt()?.publicSpeech, null);
+
+    // A mixed violation is never passed through the orientation-only fallback sentence.
+    const mixed = fixture(strategy), before = structuredClone(mixed.state());
+    const both = '右側に出ています。Need Japanese natural, ask confirm.';
+    await assert.rejects(mixed.exchange('丸い形のことです。', { action: 'accept', target: 3, drafts: [both, both] }), { code: 'unsafe_generation' });
+    assert.deepEqual(mixed.state(), before);
+    assert.deepEqual(mixed.attempt()?.generationGuard.violations.sort(), ['orientation_leak', 'working_note']);
+  });
+}

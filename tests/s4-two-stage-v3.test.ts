@@ -449,3 +449,26 @@ test('a retry reason is checked against the draft of the condition that wrote it
   pass(both);
   for (const label of ['bypass-enabled', 'repair-first']) assert.ok(read(both, label).includes(namingReason), label);
 });
+
+test('a working-note retry reason is accepted only for a draft that has one, on either condition; older records carry none', async () => {
+  const decisions = [stageOne('retry', 'accept'), stageTwo('retry', 'accept', 'none')];
+  const noteReason = '前の下書きに、英語の作業メモや複数の返答案が混じっていました。日本語の一つの返答だけにして書き直してください。';
+  const genuine = await records('two_stage_v3', decisions, { retry: { current: true, drafts: ['そう見えるんですね。same? Need Japanese natural, ask confirm. Avoid confusing target.', 'そう見えるんですね。'] } });
+  pass(genuine);
+  const read = (n: any, label: string) => generationRequests(n.trials[0].replay[0].result.sides.find((s: any) => s.label === label))[1].payload.messages.at(-1).content as string;
+  for (const label of ['bypass-enabled', 'repair-first']) assert.ok(read(genuine, label).endsWith(noteReason), label);
+  // The draft has no working note: adding the reason is wrong on the recorded and on the comparison condition alike.
+  const plain = await records('two_stage_v3', decisions, { retry: { current: true, drafts: ['右側に張り出しがあります。', 'そう見えるんですね。'] } });
+  pass(plain);
+  for (const label of ['bypass-enabled', 'repair-first']) {
+    const wrong = structuredClone(plain);
+    changeRetry(wrong, label, (text: string) => text + noteReason);
+    assert.equal(status(wrong, 'replay'), 'mismatch', label);
+  }
+  // Dropping the reason the draft requires is refused too.
+  for (const label of ['bypass-enabled', 'repair-first']) {
+    const dropped = structuredClone(genuine);
+    changeRetry(dropped, label, (text: string) => text.slice(0, -noteReason.length));
+    assert.equal(status(dropped, 'replay'), 'mismatch', label);
+  }
+});

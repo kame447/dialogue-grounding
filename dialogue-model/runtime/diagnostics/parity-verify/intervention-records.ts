@@ -27,12 +27,13 @@ const RETRY_REASONS:ReadonlyArray<{codes:readonly string[];text:string;legacy?:s
  {codes:['orientation_leak'],text:'前の下書きに画面の向きに依存する語（上下左右・側・端・向き・斜め上/下/左/右・縦長・横長等）が含まれていました。非公開メモや判断の方位語をそのまま写さず、尖りの数・大小・くぼみ・四角い部分とのつながりなど回転しても変わらない特徴へ言い換えるか、同じ節で「こちらの画面では〜」と視点を明示して書き直してください。',
   legacy:'前の下書きに画面の向きに依存する語（上下左右・上端・下端・右向き等）が含まれていました。相手の画面では図形が回転しているため、上下左右を使わず、尖りの数・大小・くぼみ・四角い部分とのつながりなど回転しても変わらない特徴だけで書き直してください。'},
  {codes:['internal_id','internal_field','internal_image','internal_credential','internal_prompt_echo'],text:'前の下書きには内部の参照IDや作業メモの項目が含まれていました。それらを出さずに書き直してください。'},
+ {codes:['working_note'],text:'前の下書きに、英語の作業メモや複数の返答案が混じっていました。日本語の一つの返答だけにして書き直してください。'},
  {codes:['name_not_shown'],text:'このactionで扱う名前を、「」で囲んで発話の中に示してください。'},
 ];
 // codes: the recorded condition's own guard violations (exact). draft: for the comparison condition, what its OWN first draft shows to this verifier
 // (an orientation leak; any other leak, which is where a name/agreement decision, an id or a field would show): the orientation reason must be present exactly
 // when the draft has an orientation leak, and the name/agreement-decision reason can appear only if the draft has some other leak. Other families stay open.
-function retryReasonsMatch(text:string,restated:boolean,codes?:readonly string[],draft?:{orientation:boolean;nonOrientation:boolean}):boolean{
+function retryReasonsMatch(text:string,restated:boolean,codes?:readonly string[],draft?:{orientation:boolean;nonOrientation:boolean;workingNote?:boolean}):boolean{
  if(!text)return false;
  for(const reason of RETRY_REASONS){
   const match=text.startsWith(reason.text)?reason.text:!restated&&reason.legacy&&text.startsWith(reason.legacy)?reason.legacy:null;
@@ -40,6 +41,7 @@ function retryReasonsMatch(text:string,restated:boolean,codes?:readonly string[]
   if(!codes&&draft){
    if(reason.codes.includes('orientation_leak')&&draft.orientation!==Boolean(match))return false;
    if(reason.codes.includes('naming_decision')&&match&&!draft.nonOrientation)return false;
+   if(reason.codes.includes('working_note')&&Boolean(match)!==Boolean(draft.workingNote))return false;
   }
   if(match)text=text.slice(match.length);
  }
@@ -63,6 +65,14 @@ function s4HasOrientationLeak(text:unknown):boolean{
  if(typeof text!=='string'||!text.trim())return false;
  const unquoted=text.normalize('NFKC').replace(/[\s\u200b-\u200d\ufeff]/gu,'').replace(/「[^」]*」|『[^』]*』/gu,'「」');
  return unquoted.split(S4_CLAUSE_BREAK).some(clause=>S4_ORIENT_WORDS.test(clause)&&!S4_VIEWPOINT.test(clause));
+}
+// Generation working text in the public utterance (v3): three or more English words in a row outside quotes, not counting English words the partner used in public.
+function s4HasWorkingNote(text:unknown,publicTexts:readonly string[]):boolean{
+ if(typeof text!=='string')return false;
+ const allowed=new Set(publicTexts.flatMap(t=>String(t).normalize('NFKC').match(/[A-Za-z][A-Za-z'’-]*/gu)??[]).map(w=>w.toLowerCase()));
+ const unquoted=text.normalize('NFKC').replace(/「[^」]*」|『[^』]*』|"[^"]*"|“[^”]*”/gu,' ');
+ const nfkc=text.normalize('NFKC'),alternatives=(nfkc.match(/(?:^|\n|[。!?])\s*(?:案|候補|パターン|返答|Option|Draft|Alt)\s*[0-9A-Za-z一二三]\s*[:.)]/gu)??[]).length>=2||(nfkc.match(/^\s*(?:[0-9]+[.)]|[-・*•])\s*\S/gmu)??[]).length>=2;
+ return alternatives||(unquoted.match(/[A-Za-z][A-Za-z'’-]*(?:[\s,.;:?!]+[A-Za-z][A-Za-z'’-]*){2,}/gu)??[]).some(run=>run.split(/[^A-Za-z'’-]+/u).filter(w=>w&&!allowed.has(w.toLowerCase())).length>=3);
 }
 function s4HasNonOrientationLeak(text:string,action:any):boolean{
  const nfkc=text.normalize('NFKC'),compact=nfkc.replace(/[\s\u200b-\u200d\ufeff]/gu,''),act=action?.action;
@@ -480,7 +490,8 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
      // has no new violations, or the successful fallback has orientation alone.
      const codes=label===tr.label&&t.status==='committed'?t.generationGuard.violations:undefined;
      // The comparison condition's retry reason is checked against that condition's own first draft, which this verifier classifies itself.
-     const draft=codes===undefined&&generationCount===1?{orientation:s4HasOrientationLeak(prevDraft),nonOrientation:typeof prevDraft==='string'&&s4HasNonOrientationLeak(prevDraft,s.executed)}:undefined;
+     const publicTexts=(tape.events??[]).filter((e:any)=>e.seq<=t.turnIndex).map((e:any)=>e.text);
+     const draft=codes===undefined&&generationCount===1?{orientation:s4HasOrientationLeak(prevDraft),nonOrientation:typeof prevDraft==='string'&&s4HasNonOrientationLeak(prevDraft,s.executed),workingNote:layoutOf(tr.profile)==='two_stage_v3'&&s4HasWorkingNote(prevDraft,publicTexts)}:undefined;
      if(!generationMessages(p.messages,t,s.executed,{...tape,generationGraph:(tr.turns??[]).find((u:any)=>u.turn===t.turnIndex)?.state?.graph},m.profile,generationCount++,codes,draft))return'invalid';
      prevDraft=answer?.response?.text??answer?.text;
     }
@@ -555,7 +566,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
   const gens=actual.requests.filter((r:any)=>r.provider==='luna'&&r.role==='generation');
   const genTexts=[...(tape.common?.luna??[]),...(tape.tails?.[tr.label]?.luna??[])].filter((x:any)=>x?.phase==='generation').map((x:any)=>x?.response?.text??x?.text);
   if(gens.length!==2||genTexts.length!==2||
-   !genTexts.every((tx:unknown)=>typeof tx==='string'&&s4HasOrientationLeak(tx)&&!s4HasNonOrientationLeak(tx,t.finalAction)))return'invalid';
+   !genTexts.every((tx:unknown)=>typeof tx==='string'&&s4HasOrientationLeak(tx)&&!s4HasNonOrientationLeak(tx,t.finalAction)&&!s4HasWorkingNote(tx,(tape.events??[]).filter((e:any)=>e.seq<=t.turnIndex).map((e:any)=>e.text))))return'invalid';
  }
  // M is recomputed: at least one recorded Luna request, all of them with measured sends. A label is either wholly measured or wholly synthetic.
  const luna=expected.filter((e:any)=>e?.provider==='luna'),measured=luna.map((e:any)=>e.actualSendMeasured);
@@ -788,12 +799,12 @@ function choiceResponse(body:any,response:any):boolean{
 // Fixed baseline instruction bytes are installed below; no producer builder is
 // executed while checking a record. No condition or original decision is input.
 // Prompt-style update (prompt-style-20261124): the current text and the prior text are both verified exactly.
-function generationMessages(messages:any[],trace:any,execution:any,tape:any,profile:any,index:number,codes?:readonly string[],draft?:{orientation:boolean;nonOrientation:boolean}):boolean{
+function generationMessages(messages:any[],trace:any,execution:any,tape:any,profile:any,index:number,codes?:readonly string[],draft?:{orientation:boolean;nonOrientation:boolean;workingNote?:boolean}):boolean{
  if(CTX.style==='style'||CTX.style==='loop')return generationMessagesWith(messages,trace,execution,tape,profile,FIXED_STYLE,{v3:[TRIAL_STYLE],legacy:LEGACY_TRIAL_STYLE},index,codes,draft);
  if(CTX.style==='legacy')return generationMessagesWith(messages,trace,execution,tape,profile,FIXED,{v3:[TRIAL,TRIAL_V3_PREV],legacy:LEGACY_TRIAL},index,codes,draft);
  return generationMessagesWith(messages,trace,execution,tape,profile,FIXED,{v3:[TRIAL,TRIAL_V3_PREV],legacy:LEGACY_TRIAL},index,codes,draft)||generationMessagesWith(messages,trace,execution,tape,profile,FIXED_STYLE,{v3:[TRIAL_STYLE],legacy:LEGACY_TRIAL_STYLE},index,codes,draft);
 }
-function generationMessagesWith(messages:any[],trace:any,execution:any,tape:any,profile:any,FIXED:any,trials:{v3:any[];legacy:any},index:number,codes?:readonly string[],draft?:{orientation:boolean;nonOrientation:boolean}):boolean{
+function generationMessagesWith(messages:any[],trace:any,execution:any,tape:any,profile:any,FIXED:any,trials:{v3:any[];legacy:any},index:number,codes?:readonly string[],draft?:{orientation:boolean;nonOrientation:boolean;workingNote?:boolean}):boolean{
  if(!trace.finalAction||!execution)return false;const g={action:execution.action,targetSlot:execution.target.kind==='single'?execution.target.figureId:null,candidateName:execution.name,discriminatingFeature:execution.feature,note:null};
  const trialOptions=CTX.v3&&!CTX.legacyV3?trials.v3:[trials.legacy];
  for(const trial of trialOptions){

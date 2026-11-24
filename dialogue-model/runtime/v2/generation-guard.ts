@@ -239,6 +239,24 @@ export function findOrientationLeaks(text: string): string[] {
     ? ["orientation_leak"] : [];
 }
 
+/** two_stage_v3 only. Generation working text that leaked into the public utterance: a run of three or more English words outside quotes
+ * (a reasoning note, an alternative reply). A format check, not a reading of the Japanese: short names, symbols and a name the partner used in public
+ * (any English word of a public turn) are never counted. Codes only. */
+export function findWorkingNoteLeaks(text: string, publicTexts: readonly string[] = []): string[] {
+  const allowed = new Set(publicTexts.flatMap(t => t.normalize("NFKC").match(/[A-Za-z][A-Za-z'’-]*/gu) ?? []).map(w => w.toLowerCase()));
+  const unquoted = text.normalize("NFKC").replace(/「[^」]*」|『[^』]*』|"[^"]*"|“[^”]*”/gu, " ");
+  const runs = unquoted.match(/[A-Za-z][A-Za-z'’-]*(?:[\s,.;:?!]+[A-Za-z][A-Za-z'’-]*){2,}/gu) ?? [];
+  const english = runs.some(run => run.split(/[^A-Za-z'’-]+/u).filter(w => w && !allowed.has(w.toLowerCase())).length >= 3);
+  return english || enumeratesAlternatives(text) ? ["working_note"] : [];
+}
+/** Two or more labelled or listed alternatives (案1：… 案2：…, a numbered or bulleted list): a set of candidate replies, never one reply. */
+function enumeratesAlternatives(text: string): boolean {
+  const t = text.normalize("NFKC");
+  const labelled = t.match(/(?:^|\n|[。!?])\s*(?:案|候補|パターン|返答|Option|Draft|Alt)\s*[0-9A-Za-z一二三]\s*[:.)]/gu) ?? [];
+  const listed = t.match(/^\s*(?:[0-9]+[.)]|[-・*•])\s*\S/gmu) ?? [];
+  return labelled.length >= 2 || listed.length >= 2;
+}
+
 /** All publication rules for the committed primary act; codes only. */
 export function findGuardViolations(text: string, action: Action): string[] {
   return [...(action === "agree" ? [] : findAgreementClaims(text)), ...(action === "repair" ? [] : findRepairClaims(text)),
@@ -255,6 +273,7 @@ export function rewriteReasons(codes: readonly string[]): string {
     codes.includes("unsolicited_deferral") ? "前の下書きは未解決の図形について保留や先送りを提案していました。保留・先送りを提案せず、このactionの範囲で書き直してください。" : "",
     codes.includes("orientation_leak") ? "前の下書きに画面の向きに依存する語（上下左右・側・端・向き・斜め上/下/左/右・縦長・横長等）が含まれていました。非公開メモや判断の方位語をそのまま写さず、尖りの数・大小・くぼみ・四角い部分とのつながりなど回転しても変わらない特徴へ言い換えるか、同じ節で「こちらの画面では〜」と視点を明示して書き直してください。" : "",
     codes.some((code) => code.startsWith("internal_")) ? "前の下書きには内部の参照IDや作業メモの項目が含まれていました。それらを出さずに書き直してください。" : "",
+    codes.includes("working_note") ? "前の下書きに、英語の作業メモや複数の返答案が混じっていました。日本語の一つの返答だけにして書き直してください。" : "",
     codes.includes("name_not_shown") ? "このactionで扱う名前を、「」で囲んで発話の中に示してください。" : "",
   ].join("");
 }
