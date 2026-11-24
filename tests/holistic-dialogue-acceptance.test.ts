@@ -76,6 +76,7 @@ type SavedTrial = {
   finalError: string | null;
 };
 type Message = { role: string; content: unknown };
+type DraftRequest = { draft: string; reasons: string[] };
 const descriptions = (segments: Segment[]) => JSON.stringify(segments.map((segment, index): LocalSegmentProposal => ({
   segmentId: String(index + 1), quote: segment.text, proposition: segment.text, aspect: segment.aspect,
   targets: segment.targets ?? [], name: segment.name ?? null, linkedIssueId: null, respondsToTurn: null,
@@ -90,6 +91,7 @@ function targetLabel(target: Turn['target']) {
 function session(strategy: Strategy, observation: Memo = memo) {
   let current: Turn | undefined;
   let actionRequests: JevDecisionPayload[] = [];
+  let draftRequests: DraftRequest[] = [];
   let generationRequests: Message[][] = [];
   let finalDrafts: Names[] = [];
   let finalCalls = 0;
@@ -112,7 +114,8 @@ function session(strategy: Strategy, observation: Memo = memo) {
           if (key === 'action') choice = turn.action;
           if (key === 'target') choice = targetLabel(turn.target);
           if (key === 'draft_naming') {
-            const { draft } = JSON.parse(request.state) as { draft: string };
+            const { draft, reasons } = JSON.parse(request.state) as DraftRequest;
+            draftRequests.push({ draft, reasons });
             assert.equal(draft, turn.drafts[generationRequests.length - 1], 'judge the draft just generated');
             choice = turn.draftActs?.[draft] ?? 'none';
           }
@@ -193,6 +196,7 @@ function session(strategy: Strategy, observation: Memo = memo) {
     async say(turn: Turn) {
       current = turn;
       actionRequests = [];
+      draftRequests = [];
       generationRequests = [];
       const initial = record();
       const { eventId } = task.message(turn.human, 'synthetic-holistic-' + task.getState().events.length);
@@ -204,7 +208,7 @@ function session(strategy: Strategy, observation: Memo = memo) {
       const events = task.getState().events as Array<{ speaker: string; text: string }>;
       const latest = events.at(-1);
       const speech = latest?.speaker === 'ai' ? latest.text : null;
-      return { before: initial, after, trace, speech, actionRequests, generationRequests };
+      return { before: initial, after, trace, speech, actionRequests, draftRequests, generationRequests };
     },
     submit(drafts: Names[]) {
       finalDrafts = drafts;
@@ -646,6 +650,70 @@ test('A natural acceptance and a factual report quoting adoption wording both pu
     assert.equal(agreement.generationRequests.length, 1);
     checkedDrafts(agreement, [['initial', accepted, 'adopt_chosen']]);
     assert.deepEqual(agreement.after.ownLedger[first], { status: 'agreed', name: originalName });
+  });
+});
+
+test('05d-1: a linked approval question checks an accept draft and publishes only the proposal account', async () => {
+  await paired(async trial => {
+    await trial.say(broad);
+    await trial.say(acknowledgeProposal);
+    const askApproval = '先に挙げた呼び方でよさそうですか？';
+    const assent = 'ええ、その呼び方に賛成です。';
+    const account = 'その呼び方を提案したのはそちらです。';
+    // Neither draft quotes a name or uses a naming formula. The link in the
+    // current human claim is the only trigger for both questions.
+    const turn = await trial.say({ human: askApproval, local: [{ ...approvalClaim, text: askApproval }],
+      action: 'accept', target: 0, drafts: [assent, account],
+      draftActs: { [assent]: 'adopt_other', [account]: 'recount_only' } });
+    published(turn, 'accept', single(first), account);
+    assert.equal(turn.generationRequests.length, 2);
+    assert.deepEqual(turn.draftRequests, [assent, account].map(draft => ({ draft, reasons: ['typed_context'] })));
+    checkedDrafts(turn, [['initial', assent, 'adopt_other'], ['retry', account, 'recount_only']]);
+    assert.deepEqual(turn.trace.generationGuard, { violations: ['draft_act_mismatch'], regenerated: true, fallback: false });
+    assert.ok(!trial.publicState().events.some((event: { text: string }) => event.text === assent));
+    assert.equal(turn.after.ownLedger[first].status, 'unassigned');
+    unchanged(turn);
+  });
+});
+
+test('05d-2: the same name quote is checked while tentative and exempt after agreement', async () => {
+  await paired(async trial => {
+    await trial.say(broad);
+    const name = memo.figures[0].holistic[0].construal;
+    const suggestion = `「${name}」という呼び名はどうでしょう？`;
+    const proposed = await trial.say({ human: 'この輪郭はどんな印象ですか？', action: 'propose_name', target: 0,
+      name, drafts: [suggestion] });
+    published(proposed, 'propose_name', single(first), suggestion);
+    assert.deepEqual(proposed.after.ownLedger[first], { status: 'tentative', name });
+    assert.deepEqual(proposed.draftRequests, [], 'a quote of the selected proposal alone is exempt');
+    assert.equal(proposed.trace.draftActs, undefined);
+
+    const human = 'その形の縁について聞かせてください。';
+    const adoptTentative = `ええ、「${name}」に賛成です。`;
+    const mention = `「${name}」の縁の話ですね。`;
+    const tentative = await trial.say({ human, action: 'accept', target: 0, drafts: [adoptTentative, mention],
+      draftActs: { [adoptTentative]: 'adopt_other', [mention]: 'recount_only' } });
+    published(tentative, 'accept', single(first), mention);
+    assert.equal(tentative.generationRequests.length, 2);
+    assert.deepEqual(tentative.draftRequests, [adoptTentative, mention].map(draft => ({ draft, reasons: ['quoted_other'] })));
+    checkedDrafts(tentative, [['initial', adoptTentative, 'adopt_other'], ['retry', mention, 'recount_only']]);
+    assert.deepEqual(tentative.trace.generationGuard, { violations: ['draft_act_mismatch'], regenerated: true, fallback: false });
+    assert.ok(!trial.publicState().events.some((event: { text: string }) => event.text === adoptTentative));
+    unchanged(tentative);
+
+    const offer = `この図形に「${name}」という名前を提案します。`;
+    const adoption = `はい、「${name}」でお願いします。`;
+    const agreed = await trial.say({ human: offer, local: [proposal(offer, name)], action: 'agree', target: 0,
+      name, drafts: [adoption], draftActs: { [adoption]: 'adopt_chosen' } });
+    published(agreed, 'agree', single(first), adoption);
+    assert.deepEqual(agreed.after.ownLedger[first], { status: 'agreed', name });
+
+    const control = await trial.say({ human, action: 'accept', target: 0, drafts: [mention] });
+    published(control, 'accept', single(first), mention);
+    assert.equal(control.generationRequests.length, 1);
+    assert.deepEqual(control.draftRequests, []);
+    assert.equal(control.trace.draftActs, undefined);
+    unchanged(control);
   });
 });
 
