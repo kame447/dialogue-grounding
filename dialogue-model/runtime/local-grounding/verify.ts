@@ -89,11 +89,14 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     let aspect = segment.aspect;
     let linkedIssue = segment.linkedIssueId;
     let name = segment.name;
+    // An approval request ("is that name fine?") is a name proposal that carries the earlier proposal's name; it is decided before the bare-deictic rule so a short typed request is not turned into an acknowledgement.
+    const approvalRequest = keepUnboundApproval && !!prior && act === "name_propose" && name === null && aspect === "name" && prior.aspect === "name" &&
+      prior.act === "name_propose" && prior.speaker === "human" && prior.name !== null;
     if (isBareDeictic(quote) || /^(?:それ|これ|あれ)で(?:いい|良い|よい)(?:です)?[。！!？?\s]*$/u.test(quote.normalize("NFKC").trim())) {
       // ai1 is the program-owned primary act. A secondary feature (ai2) cannot
       // receive a bare acknowledgment, even if the classifier selected its ID.
       const primary = previousClaims.filter(c => c.id === `${c.turn}:ai1`);
-      if (primary.length !== 1 || !prior || prior.id !== primary[0].id || !responses.has(act)) {
+      if (!approvalRequest && (primary.length !== 1 || !prior || prior.id !== primary[0].id || !responses.has(act))) {
         act = "acknowledge"; prior = null; targets = []; linkedIssue = null; name = null;
       }
     }
@@ -104,8 +107,6 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     // inheritance so discarding a pointer cannot transfer its figure candidates.
     // An approval question about a name, linked by the classifier to an earlier name proposal while neither names a figure, has no figure to contradict: the link stays.
     // An approval request ("is that name fine?") is a name proposal that carries the earlier proposal's name; neither names a figure, so there is none to contradict.
-    const approvalRequest = keepUnboundApproval && !!prior && act === "name_propose" && name === null && aspect === "name" && prior.aspect === "name" &&
-      prior.act === "name_propose" && prior.speaker === "human" && prior.name !== null;
     // A question about a name (ask) that the classifier links to an earlier unbound name proposal keeps its link too: it asks about the same name, naming no figure.
     // It is a plain question, not an approval request (the typed naming request counts name proposals only).
     const unboundNameQuestion = keepUnboundApproval && !!prior && act === "ask" && aspect === "name" && prior.aspect === "name" && prior.act === "name_propose";
@@ -135,7 +136,7 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     if (act === "construe" && aspect !== "construal" || act.startsWith("name_") && aspect !== "name") {
       reject("act_aspect_mismatch"); continue;
     }
-    if (act === "name_propose" && approvalRequest) name = prior!.name;
+    if (act === "name_propose" && approvalRequest && prior) name = prior.name;
     else if (act === "name_propose") {
       const span = name === null ? null : literalSpan(quote, name);
       if (!span) { reject("nonpublic_name"); continue; }
