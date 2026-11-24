@@ -7,6 +7,7 @@ import type { LatencySummary } from "./latency";
 import type { AuditEntry } from "./index-store";
 import type { ReceptionAdminRow, ReceptionProtocolStatus, SettingsView } from './reception-port.ts';
 import { RECORD_ID } from './summary.ts';
+import { renderTurnSheet } from "./turn-sheet.ts";
 import { renderQrSvg } from './qr.ts';
 import { createTrialV2, participantView, ROTATION_MODES } from '../../../../dialogue-model/runtime/stimuli/scatter-v2.mjs';
 
@@ -54,6 +55,7 @@ ol.chat .meta{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center;color:#
 details.diag{margin:12px 0;background:#fff;border:1px solid var(--line);border-radius:6px}details.diag>summary{cursor:pointer;padding:10px 12px;font-weight:600;min-height:40px}
 details.diag[open]>summary{border-bottom:1px solid var(--line)}details.diag>.body{padding:4px 12px 12px;overflow-x:auto}details.diag h3:first-child{margin-top:10px}
 details.danger>summary{color:#9b2c1f}
+.turn-sheet{max-height:72vh;overflow:auto;border:1px solid var(--line);background:#fff}.turn-sheet table{border-collapse:separate;border-spacing:0;min-width:1300px;table-layout:fixed;font-size:.85rem}.turn-sheet th,.turn-sheet td{border:0;border-right:1px solid #ddd;border-bottom:1px solid #ddd;padding:8px;overflow-wrap:anywhere;white-space:pre-wrap}.turn-sheet th{position:sticky;top:0;z-index:2;white-space:normal;background:#eee}.turn-sheet tr:nth-child(even) td{background:#fafafa}.turn-sheet th:nth-child(1){width:44px}.turn-sheet th:nth-child(2){width:54px}.turn-sheet th:nth-child(3){width:105px}.turn-sheet th:nth-child(4){width:300px}.turn-sheet th:nth-child(5){width:170px}.turn-sheet th:nth-child(6){width:195px}.turn-sheet th:nth-child(7){width:180px}.turn-sheet th:nth-child(8){width:195px}.turn-sheet th:nth-child(9){width:100px}.turn-sheet .seq,.turn-sheet .speaker{font-weight:600}.turn-sheet .utterance{font-size:.95rem}.turn-sheet td:first-child,.turn-sheet th:first-child{position:sticky;left:0;background:#eee;z-index:1}.turn-sheet th:first-child{z-index:3}.turn-sheet time{font-variant-numeric:tabular-nums}.turn-sheet .turn-open{min-height:30px;padding:3px 7px;font-size:.8rem;white-space:nowrap}.turn-popover{width:min(840px,92vw);max-height:85vh;overflow:auto;border:1px solid var(--line);border-radius:6px;padding:16px 20px;color:#222;background:#fff;box-shadow:0 8px 32px #0002;white-space:normal}.turn-popover::backdrop{background:#0003}.turn-popover-head{display:flex;justify-content:space-between;align-items:center;gap:12px}.turn-popover-head h3{margin:0}.turn-popover .utterance{white-space:pre-wrap;overflow-wrap:anywhere}.turn-popover .turn-entry pre{font-size:.85rem;max-height:48vh}.turn-sheet .turn-block+.turn-block{border-top:1px solid #ddd;margin-top:5px;padding-top:5px}.turn-sheet tr:target td{background:var(--tint)}.turn-detail summary,.turn-entry summary{cursor:pointer;overflow-wrap:anywhere;color:var(--accent)}.turn-entry{padding:5px 0;border-top:1px solid var(--line)}.turn-entry pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:32vh;overflow:auto;background:#f5f5f5;padding:6px}.unlinked{margin:10px 0}.record-detail{max-width:none}
 @media (max-width:699px){ol.chat li,ol.chat li.human{max-width:none;margin-left:0}dl.summary{grid-template-columns:1fr 1fr}}`;
 
 const ENTITIES: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" };
@@ -70,10 +72,10 @@ const table = (names: string[], rows: unknown[][]) => rows.length
 const isPlain = (value: unknown): value is Record<string, any> => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 const list = (value: unknown): any[] => Array.isArray(value) ? value : [];
 
-function page(title: string, body: string): string {
+function page(title: string, body: string, wide = false): string {
   return `<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow"><title>${escapeHtml(title)}</title><link rel="stylesheet" href="/admin/style.css"></head>
-<body>${body}</body></html>`;
+<body${wide ? ' class="record-detail"' : ""}>${body}</body></html>`;
 }
 
 export type ListFilter = { status: string; error: "any" | "with" | "without"; memory: "any" | "on" | "off" };
@@ -182,7 +184,6 @@ function outcomeSection(r: Record<string, any>): string {
 /** Full researcher view of one stored record: identity and outcome first, every diagnostic one click away. */
 export function renderDetail(record: unknown, summary: AdminSummary, latency: LatencySummary, _retentionDays?: number): string {
   const r = isPlain(record) ? record : {};
-  const rawEvents = list(r.events).filter(isPlain);
   const judgments = list(r.judgments).filter(isPlain).map((j) => [j.turnIndex, j.judgment?.action, j.judgment?.targetSlot,
     j.judgment?.candidateName, j.judgment?.discriminatingFeature, j.judgment?.followUp ?? null, j.activeJudge ?? null]);
   // errorCode/errorPhase/errorStatus/errorElapsedMs and generationRetried are written by the v2 turn on failure.
@@ -204,7 +205,7 @@ export function renderDetail(record: unknown, summary: AdminSummary, latency: La
     ms(q.latencyMs), q.retryCount ?? "", q.model ?? ""]);
   const attemptErrors = attemptList.filter((a) => a.errorCode).length;
   const requestErrors = requestList.filter((q) => q.errorCode || (typeof q.httpStatus === "number" && q.httpStatus >= 400)).length;
-  const conversation = rawEvents.length ? `<ol class="chat">${rawEvents.map((e) => `<li class="${e.speaker === "ai" ? "ai" : "human"}"><div class="meta">${badge(chatSpeaker(e.speaker))}<span>seq ${escapeHtml(e.seq)}</span>${timeTag(e.at)}${e.origin ? `<span>${escapeHtml(e.origin)}</span>` : ""}</div><p>${escapeHtml(e.text)}</p></li>`).join("")}</ol>` : `<p class="muted">なし</p>`;
+  const conversation = renderTurnSheet(r, latency, { escape: escapeHtml, time: timeTag });
   const dl = (items: [string, string][]) => `<dl class="summary">${items.map(([k, v]) => `<div><dt>${escapeHtml(k)}</dt><dd>${v}</dd></div>`).join("")}</dl>`;
   const id = escapeHtml(summary.recordId);
   const surveyState = isPlain(r.questionnaire) && typeof r.questionnaire.status === "string" ? r.questionnaire.status : summary.questionnaire;
@@ -228,10 +229,10 @@ ${fold(`外部要求（${requests.length}回・エラー ${requestErrors}件）`
 ${fold("詳細メタデータ・キュー・提出と採点の生データ", table(["項目", "値"], [["Durable Object", summary.objectId], ["開始", summary.startedAt], ["更新", summary.updatedAt],
   ["キュー", r.queueState ? { errorCode: r.queueState.errorCode ?? null, pending: list(r.queueState.pendingHumanEventIds).length, closed: r.queueState.closed ?? false } : null],
   ["最終エラー", r.finalError ?? null], ["件数", summary.counts], ["人間の提出", r.humanSubmission ?? null], ["AIの提出", r.aiSubmission ?? null],
-  ["診断", r.diagnostics ?? null], ["採点", r.scoring ?? null]]))}
+  ["診断", r.diagnostics ?? null], ["採点", r.scoring ?? null], ["初回観察", r.initialObservation ?? null], ["最終参照グラフ", r.referenceGraph ?? null], ["最終参照台帳", r.ownLedger ?? null]]))}
 ${fold("削除", `<p class="muted">この記録は自動では削除されません。削除する場合は、記録IDを確認欄に入力してください（仮アンケートの回答も削除されます）。削除は取り消せません。</p>
 <form method="post" action="/admin/record/${id}/delete"><label>確認（記録ID） <input name="confirm" autocomplete="off" required></label>
-<button>この記録を削除</button></form>`, "danger")}`);
+<button>この記録を削除</button></form>`, "danger")}`, true);
 }
 
 export function renderMessage(title: string, message: string, back: { href: string; label: string } = { href: '/admin', label: '一覧へ' }): string {
