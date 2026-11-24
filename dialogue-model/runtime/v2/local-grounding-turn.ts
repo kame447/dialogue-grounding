@@ -271,6 +271,8 @@ export async function prepareLocalGroundingTurn(options: LocalGroundingOptions, 
           linkedIssueId: diagnostic.linkedIssueId, resolvedIssueId: diagnostic.resolvedIssueId }];
         if (diagnostic.reason === "antecedent_dropped") return [{ segmentId, reason: "antecedent_dropped",
           respondsToClaimId: diagnostic.respondsToClaimId, resolvedIssueId: diagnostic.resolvedIssueId }];
+        if (diagnostic.reason === "targets_inherited") return [{ segmentId, reason: "targets_inherited",
+          claimId: diagnostic.claimId, respondsToClaimId: diagnostic.respondsToClaimId }];
         if (diagnostic.reason === "antecedent_missing") return [{ segmentId, reason: "antecedent_missing",
           respondsToClaimId: diagnostic.respondsToClaimId, resolvedIssueId: diagnostic.resolvedIssueId }];
         return [];

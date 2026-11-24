@@ -22,6 +22,12 @@ export type LocalVerificationDiagnostic = {
   resolvedIssueId: string;
 } | {
   segmentId: string;
+  reason: "targets_inherited";
+  /** holistic_v3 only: the claim whose empty extracted targets were copied from the claim it answers. */
+  claimId: string;
+  respondsToClaimId: string;
+} | {
+  segmentId: string;
   reason: "antecedent_missing";
   /** Invalid model text is never retained; only graph-ref syntax can survive. */
   respondsToClaimId: string | null;
@@ -118,6 +124,7 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     }
     // Only absence of a target can inherit the verified antecedent's candidates.
     // A nonempty, contradictory target is never moved to a different figure.
+    const inheritedTargets = prior !== null && targets.length === 0 && prior.targets.length > 0;
     if (prior && targets.length === 0) targets = [...prior.targets];
     // Deferring or revisiting an issue inherits its aspect only when extraction
     // supplied generic progress. Explicit semantic disagreements remain invalid.
@@ -171,6 +178,7 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     result.operations.push({ kind: "claim", id, issueId,
       targets, aspect, act, proposition: segment.proposition, name,
       speaker: "human", sourceTurn: turn, quote, respondsTo: prior?.id ?? null, source: "partner_statement" });
+    if (keepUnboundApproval && inheritedTargets) (result.diagnostics ??= []).push({ segmentId: segment.segmentId, reason: "targets_inherited", claimId: id, respondsToClaimId: prior!.id });
     if (overriddenIssue || droppedIssue) (result.diagnostics ??= []).push({ segmentId: segment.segmentId, reason: "issue_link_overridden",
       linkedIssueId: ref(proposedIssue) ? proposedIssue : null, resolvedIssueId: issueId });
     if (droppedAntecedent !== null) (result.diagnostics ??= []).push({ segmentId: segment.segmentId, reason: "antecedent_dropped",

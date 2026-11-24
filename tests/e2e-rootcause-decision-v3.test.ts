@@ -14,7 +14,7 @@ const V3 = { questionLayout: 'two_stage_v3' } as const;
 const UNRELATED_NAME = '灯台';
 const NEW_NAME = '風車';
 const single = (index: number) => ({ kind: 'single' as const, figureId: ids[index] });
-type Segment = Omit<LocalSegmentProposal, 'segmentId' | 'linkedIssueId' | 'respondsToTurn'> & { act: LocalAct; respondsTo?: number };
+type Segment = Omit<LocalSegmentProposal, 'segmentId' | 'linkedIssueId' | 'respondsToTurn'> & { act: LocalAct; respondsTo?: number; linkPrior?: true };
 type Plan = {
   action: JevAction;
   target?: number;
@@ -91,7 +91,7 @@ function fixture(strategy: 'bypass-enabled' | 'repair-first' = 'bypass-enabled',
       async classify({ segments, priorClaims }) {
         return segments.map(({ segmentId }, index) => {
           const act = plan.segments![index].act;
-          const antecedentAct = act === 'deny' ? 'name_accept' : act === 'name_accept' || (act === 'ask' && plan.segments![index].aspect === 'name') || (act === 'name_propose' && plan.segments![index].name === null) ? 'name_propose' : null;
+          const antecedentAct = act === 'deny' ? 'name_accept' : act === 'name_accept' || (act === 'ask' && plan.segments![index].aspect === 'name') || (act === 'name_propose' && (plan.segments![index].name === null || plan.segments![index].linkPrior === true)) ? 'name_propose' : null;
           // A referent denial answers the AI's latest public claim about the figure.
           const referentDenial = (act === 'deny' || act === 'agree') && plan.segments![index].aspect === 'referent';
           const antecedent = referentDenial ? priorClaims.filter(c => c.speaker === 'ai').at(-1)
@@ -104,7 +104,7 @@ function fixture(strategy: 'bypass-enabled' | 'repair-first' = 'bypass-enabled',
       async complete(_messages, { phase }) {
         if (phase === 'local_extraction') extractionSystem.push(String(_messages[0]?.content));
         if (phase === 'ai_extraction') return { text: JSON.stringify(plan.aiSegments ?? []) };
-        if (phase === 'local_extraction') return { text: JSON.stringify((plan.segments ?? []).map(({ act, respondsTo, ...segment }, index) => ({
+        if (phase === 'local_extraction') return { text: JSON.stringify((plan.segments ?? []).map(({ act, respondsTo, linkPrior, ...segment }, index) => ({
           ...segment, segmentId: `segment-${index}`, linkedIssueId: null,
           respondsToTurn: respondsTo ?? (act === 'deny' || act === 'name_accept' || act === 'agree' ? events.at(-2)!.seq : null),
         }))) };
@@ -1393,6 +1393,46 @@ test('05t-1 (holistic_v3): a reconfirmation needs a determined figure whose agre
         segments: [reapproval(first.events.at(-1)!.seq)], draftActs: ['none'], drafts: [referent === 'figure_4' ? 'どの形のことですか？' : 'うん、いいよ。'] });
       assert.equal(r.saved[kind], true, `${strategy} inherited, estimate ${referent}`);
       assert.equal(r.saved[kind === 'namingRequest' ? 'namingReconfirm' : 'namingRequest'], undefined, `${strategy} inherited, estimate ${referent}`);
+    }
+  }
+});
+
+test('05u-1 (holistic_v3): a segment that names one figure itself decides the turn kind, with or without a link to the earlier proposal and whatever the estimate says (both strategies)', async () => {
+  const offered = (r: { requests: Array<{ questions: Record<string, { criteria: Record<string, string> }> }> }) =>
+    Object.keys(r.requests.find(q => q.questions.action)!.questions.action.criteria);
+  const proposal = 'これ、かかしとかどう？';
+  for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
+    for (const [label, linked, referent] of [['linked, estimate multiple', true, 'multiple'], ['unlinked, estimate multiple', false, 'multiple'], ['linked, estimate none', true, 'none']] as const) {
+      const f = fixture(strategy, { aiPublic: true, holistic: 'holistic_v3' });
+      await share(f, 3);
+      const first = await f.exchange(proposal, { action: 'agree', target: 3, referent: 'figure_3', segments: [naming(proposal, 'かかし', [ids[3]])], draftActs: ['adopt_chosen'], drafts: [agreeSpeech('かかし')] });
+      await f.exchange('ところで、別の形はどうですか？', { action: 'accept', referent: 'figure_4', drafts: ['丸みのある形が一つあります。'] });
+      const text = '細い弧の形の呼び名は、さっきの「かかし」でいい？';
+      const seg = { ...naming(text, 'かかし', [ids[3]]), ...(linked ? { respondsTo: first.input.turn, linkPrior: true as const } : {}) } as Segment;
+      const r = await f.exchange(text, { action: 'accept', referent, segments: [seg], drafts: ['うん、いいよ。'] });
+      if (linked) assert.ok((r.state.graph.records as any[]).some(c => c.kind === 'claim' && c.speaker === 'human' && c.sourceTurn === r.input.turn && c.respondsTo !== null), `${strategy} ${label}: the link is in the graph`);
+      assert.equal(r.saved.namingReconfirm, true, `${strategy} ${label}: a reconfirmation`);
+      assert.equal(r.saved.namingRequest, undefined, `${strategy} ${label}`);
+      assert.ok(offered(r).includes('accept'), `${strategy} ${label}: accept stays`);
+    }
+  }
+});
+
+test('05u-2 (holistic_v3): a short approval request for a name that is still pending cannot register it for a figure the partner\'s own evidence of this turn does not single out (both strategies)', async () => {
+  const offered = (r: { requests: Array<{ questions: Record<string, { criteria: Record<string, string> }> }> }) =>
+    Object.keys(r.requests.find(q => q.questions.action)!.questions.action.criteria);
+  const proposal = 'これ、しおりとかどう？';
+  const again = 'まだ二つのうちどちらか分からないけど、その呼び名でいい？';
+  for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
+    for (const [label, referent, expected] of [['estimate multiple', 'multiple', false], ['estimate on figure 4', 'figure_4', false], ['estimate on figure 3', 'figure_3', true]] as const) {
+      const f = fixture(strategy, { aiPublic: true, holistic: 'holistic_v3' });
+      await share(f, 3);
+      const first = await f.exchange(proposal, { action: 'confirm', target: 3, referent: 'figure_3', segments: [naming(proposal, 'しおり', [ids[3]])], draftActs: ['none'], drafts: ['どの形のことですか？'] });
+      const second = await f.exchange(again, { action: expected ? 'agree' : 'confirm', target: expected ? 3 : referent === 'figure_4' ? 4 : 3, referent,
+        draftActs: expected ? ['adopt_chosen'] : ['none'], drafts: [expected ? agreeSpeech('しおり') : 'どの形のことですか？'],
+        segments: [{ respondsTo: first.input.turn, quote: again, name: null, targets: [], act: 'name_propose', aspect: 'name', proposition: again }] });
+      assert.equal(offered(second).includes('agree'), expected, `${strategy} ${label}: ${offered(second).join()}`);
+      assert.equal(second.state.ledger[ids[3]].name, expected ? 'しおり' : null, `${strategy} ${label}: ledger`);
     }
   }
 });

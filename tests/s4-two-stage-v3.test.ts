@@ -1038,6 +1038,48 @@ test('05t-1: S4 recomputes the turn kind with the bound figure: a proposal whose
   }
 });
 
+test('05u-3: S4 requires the whole set of classification criteria that the record\'s version determines: a mixed set or another layout\'s set is refused, the regular send passes', async () => {
+  const named = (policy: 'holistic_v2' | 'holistic_v3') => buildRecords({ dialoguePolicy: policy, turns: [{ human: 'これ、かかしとかどう？',
+    plan: policy === 'holistic_v3' ? { action: 'confirm', target: 'figure_3', act: 'name_propose', extraction: unboundSeg, speech: 'どの形のことですか？' }
+      : { action: 'accept', target: 'none', act: 'name_propose', extraction: unboundSeg, speech: 'そう見えるんですね。' } }] });
+  const mixes = (own: any, other: any) => [{ ...own, ask: other.ask }, LOCAL_FUNCTION_CRITERIA];
+  for (const [policy, own, other] of [['holistic_v2', LOCAL_FUNCTION_CRITERIA_V3, LOCAL_FUNCTION_CRITERIA_HOLISTIC_V3], ['holistic_v3', LOCAL_FUNCTION_CRITERIA_HOLISTIC_V3, LOCAL_FUNCTION_CRITERIA_V3]] as const) {
+    const record = await named(policy);
+    assert.ok(finalChecks(record).length >= 4 && finalChecks(record).every((c: any) => c.status === 'pass'), policy + ' (regular)');
+    for (const label of ['repair-first', 'bypass-enabled']) for (const [n, criteria] of mixes(own, other).entries()) {
+      const forged = structuredClone(record);
+      assert.ok(changeClassification(forged, label, criteria) > 0);
+      assert.ok(!finalChecks(forged).every((c: any) => c.status === 'pass'), `${policy} / ${label} / ${n === 0 ? 'mixed' : 'two_stage_v1 set'}`);
+    }
+  }
+});
+
+test('05u: S4 derives the typed target inheritance: an explicit single target decides a reconfirmation, and a pending name is no agree candidate for a figure this turn\'s estimate does not single out', async () => {
+  const s3 = Object.keys(OLD.state.ledger)[3];
+  const speech = '角ばった塊に細い脚が付いた形のように見えます。';
+  const ai = JSON.stringify([{ segmentId: 'shape', quote: speech, targets: [s3], aspect: 'construal', proposition: 'x', name: null, linkedIssueId: null, respondsToTurn: null }]);
+  const seg = (quote: string, name: string | null, targets: string[] = []) => JSON.stringify([{ segmentId: 's1', quote, targets, aspect: 'name', proposition: quote, name, linkedIssueId: null, respondsToTurn: null }]);
+  const describe = { human: 'どんな図形がありますか？', plan: { action: 'confirm', target: 'figure_3', speech, aiExtraction: ai } };
+  for (const label of ['repair-first', 'bypass-enabled'] as const) {
+    // A pending name: the short approval request with an estimate on multiple figures offers no agree candidate for figure 3 (the run and S4 compute the same).
+    const pending = await buildRecords({ label, dialoguePolicy: 'holistic_v3', turns: [describe,
+      { human: 'これ、しおりとかどう？', plan: { action: 'confirm', target: 'figure_3', act: 'name_propose', referent: 'figure_3', extraction: seg('しおり', 'しおり', [s3]), speech: 'どの形のことですか？' } },
+      { human: 'まだ二つのうちどちらか分からないけど、その呼び名でいい？', plan: { action: 'confirm', target: 'figure_3', act: 'name_propose', antecedent: 'claim_1', referent: 'multiple',
+        extraction: seg('まだ二つのうちどちらか分からないけど、その呼び名でいい？', null), speech: 'どの形のことですか？' } }] });
+    assert.equal(pending.trials[0].attempts[0].namingRequest, true, label);
+    assert.ok(finalChecks(pending).length >= 4 && finalChecks(pending).every((c: any) => c.status === 'pass'), label + ' (pending) ' + JSON.stringify(finalChecks(pending).filter((c: any) => c.status !== 'pass').map((c: any) => [c.id, c.reason])));
+    // The agreed name named again for its figure, linked to the earlier proposal, with an estimate on multiple figures: a reconfirmation.
+    const reconfirm = await buildRecords({ label, dialoguePolicy: 'holistic_v3', turns: [describe,
+      { human: 'これ、かかしとかどう？', plan: { action: 'agree', target: 'figure_3', name: 'かかし', act: 'name_propose', referent: 'figure_3', extraction: seg('かかし', 'かかし', [s3]), speech: '「かかし」と呼びましょう。' } },
+      { human: 'さっきの「かかし」でいい？', plan: { action: 'accept', target: 'none', act: 'name_propose', antecedent: 'claim_1', referent: 'multiple', extraction: seg('さっきの「かかし」でいい？', 'かかし', [s3]), speech: 'うん、いいよ。' } }] });
+    assert.equal(reconfirm.trials[0].attempts[0].namingReconfirm, true, label);
+    assert.ok(finalChecks(reconfirm).length >= 4 && finalChecks(reconfirm).every((c: any) => c.status === 'pass'), label + ' (reconfirm) ' + JSON.stringify(finalChecks(reconfirm).filter((c: any) => c.status !== 'pass').map((c: any) => [c.id, c.reason])));
+    const asRequest = structuredClone(reconfirm);
+    for (const x of traceCopies(asRequest)) { delete x.namingReconfirm; x.namingRequest = true; }
+    assert.ok(!finalChecks(asRequest).every((c: any) => c.status === 'pass'), label + ': a reconfirmation passed off as an open request');
+  }
+});
+
 test('05s: S4 derives the question triggers of a reconfirmation without the wording trigger: the affirming draft carries no question record, a question record on it is refused', async () => {
   const s3 = Object.keys(OLD.state.ledger)[3];
   const speech = '角ばった塊に細い脚が付いた形のように見えます。';
@@ -1058,18 +1100,35 @@ test('05s: S4 derives the question triggers of a reconfirmation without the word
   }
 });
 
-import { LOCAL_FUNCTION_CRITERIA_V3, LOCAL_FUNCTION_CRITERIA_HOLISTIC_V3 } from '../dialogue-model/runtime/local-grounding/classify.ts';
-function changeClassification(records: any, label: string, criteria: Record<string, string>) {
+import { LOCAL_FUNCTION_CRITERIA_V3, LOCAL_FUNCTION_CRITERIA, LOCAL_FUNCTION_CRITERIA_HOLISTIC_V3 } from '../dialogue-model/runtime/local-grounding/classify.ts';
+function changeClassification(records: any, _label: string, criteria: Record<string, string>) {
   let changed = 0;
-  for (const side of sideCopies(records).filter(x => x.label === label)) {
+  // Every fingerprint that moves is carried to all places that repeat it (the recorded sends of the tape, the pair, the material), so the forgery is consistent.
+  const moved = new Map<string, string>();
+  const carry = (from: unknown, to: string) => { if (typeof from === 'string' && from !== to) moved.set(from, to); };
+  // Both strategies' sides share the common sends, so every side moves together.
+  for (const side of sideCopies(records)) {
     for (const request of side.requests.filter((q: any) => q.provider === 'jev' && Object.keys(q.payload.questions).some(k => /^segment_\d+_act$/.test(k)))) {
       const body = request.payload;
       for (const k of Object.keys(body.questions)) if (/^segment_\d+_act$/.test(k)) body.questions[k].criteria = { ...criteria };
-      request.preProjectionPayloadSha256 = request.payloadSha256 = hash(body);
+      const next = hash(body);
+      carry(request.preProjectionPayloadSha256, next); carry(request.payloadSha256, next);
+      request.preProjectionPayloadSha256 = request.payloadSha256 = next;
       changed++;
     }
-    side.materialSha256 = hash(side.material);
+    const material = hash(side.material);
+    carry(side.materialSha256, material);
+    side.materialSha256 = material;
   }
+  const walk = (value: any): void => {
+    if (!value || typeof value !== 'object') return;
+    for (const key of Object.keys(value)) {
+      const v = value[key];
+      if (typeof v === 'string' && moved.has(v)) value[key] = moved.get(v);
+      else walk(v);
+    }
+  };
+  walk(records);
   return changed;
 }
 test('05t-7: the human local-classification criteria of a request are checked against the record\'s version, in the dynamic replay and in S4', async () => {

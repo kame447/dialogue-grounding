@@ -24,26 +24,47 @@ export function namingIntervalEstimates(judgments: readonly NamingJudgmentLike[]
   return [...judgments.filter(j => typeof j?.turnIndex === "number" && j.turnIndex > lastBoundary && j.turnIndex < turn).map(j => (j.jevTurn?.humanReferent ?? null) as ReferentEstimateValue), current];
 }
 
-/** The proposal's name is agreed already for the figure it binds to. A single target is that figure, except a target the proposal inherited from the earlier proposal it
- * answers when the newest meaningful estimate does not select it. Otherwise (unbound, several figures, or such an inherited target) the figure is the one the partner's
- * estimate binds (nameBindsFigure) among the targets, or among all figures when unbound. No bound figure: not a reconfirmation. */
-function reconfirmsAgreedName(p: NamingClaimLike, claims: readonly NamingClaimLike[], ledger: NamingLedgerLike, estimates: readonly ReferentEstimateValue[]): boolean {
+/** The claim ids whose empty extracted targets the verifier copied from the claim they answer (typed diagnostics `targets_inherited` of the turn's verification). */
+export function inheritedTargetClaimIds(diagnostics: unknown): Set<string> {
+  return new Set(Array.isArray(diagnostics) ? diagnostics.flatMap(d => d?.reason === "targets_inherited" && typeof d.claimId === "string" ? [d.claimId] : []) : []);
+}
+
+/** The proposal's name is agreed already for the figure it binds to. The partner's own words of this turn decide first: a single target the segment itself named
+ * is that figure; a target carried over from the proposal it answers stands unless a meaningful estimate of the interval selects another. Otherwise (no target, several figures) the figure is the one the partner's estimate binds
+ * (nameBindsFigure, newest meaningful estimate of the naming interval) among the targets, or among all figures when there are none. No bound figure: not a reconfirmation. */
+function reconfirmsAgreedName(p: NamingClaimLike, ledger: NamingLedgerLike, estimates: readonly ReferentEstimateValue[], inherited: ReadonlySet<string>): boolean {
   const targets = Array.isArray(p.targets) ? p.targets.filter((t): t is string => typeof t === "string") : [];
   const key = namingNameKey(p.name as string);
   const agreed = (id: string) => ledger[id]?.status === "agreed" && typeof ledger[id]?.name === "string" && namingNameKey(ledger[id]!.name as string) === key;
-  const antecedent = typeof p.respondsTo === "string" ? claims.find(c => c.id === p.respondsTo) : undefined;
-  const antecedentTargets = Array.isArray(antecedent?.targets) ? antecedent!.targets as unknown[] : [];
-  const inherited = !!antecedent && inheritsProposalName(p, claims) && targets.length > 0 && targets.length === antecedentTargets.length && targets.every(t => antecedentTargets.includes(t));
-  const contradicted = inherited && estimates.some(meaningfulEstimate) && !nameBindsFigure(targets[0], estimates);
-  if (targets.length === 1 && !contradicted) return agreed(targets[0]);
-  const candidates = targets.length > 1 ? targets : Object.keys(ledger);
-  const figure = candidates.find(id => nameBindsFigure(id, estimates));
+  if (targets.length === 1) {
+    // The partner's own single target of this turn decides. A target carried over from the proposal answered stands until the partner's estimate says otherwise.
+    if (!inherited.has(p.id as string) || !estimates.some(meaningfulEstimate)) return agreed(targets[0]);
+    return nameBindsFigure(targets[0], estimates) && agreed(targets[0]);
+  }
+  const figure = (targets.length ? targets : Object.keys(ledger)).find(id => nameBindsFigure(id, estimates));
   return figure !== undefined && agreed(figure);
 }
-export function namingTurnKind(claims: readonly NamingClaimLike[], turn: number, ledger: NamingLedgerLike, estimates: readonly ReferentEstimateValue[]): "none" | "request" | "reconfirm" {
+export function namingTurnKind(claims: readonly NamingClaimLike[], turn: number, ledger: NamingLedgerLike, estimates: readonly ReferentEstimateValue[],
+  inherited: ReadonlySet<string> = new Set()): "none" | "request" | "reconfirm" {
   const proposals = turnNameProposals(claims, turn);
   if (!proposals.length) return "none";
-  return proposals.every(p => reconfirmsAgreedName(p, claims, ledger, estimates)) ? "reconfirm" : "request";
+  return proposals.every(p => reconfirmsAgreedName(p, ledger, estimates, inherited)) ? "reconfirm" : "request";
+}
+/** Whether figure `id` may be an agree candidate of claim `c` (holistic_v3). `estimates` is the naming interval's estimates, oldest first, this turn's last.
+ * A claim that does not name exactly one figure needs the interval's binding (nameBindsFigure). A single-target claim is free outside a naming request. In a turn
+ * that holds a partner name proposal it is free only when it is the partner's own single target of this very turn; otherwise, when this turn's estimate is
+ * meaningful, the figure must be strictly first in it, and when it is not, a single target of an earlier turn keeps standing while a target inherited this turn
+ * is decided by the interval like an unbound one. */
+export function agreeCandidateAllowed(c: NamingClaimLike, id: string, turn: number, turnHasProposal: boolean, inherited: ReadonlySet<string>,
+  estimates: readonly ReferentEstimateValue[]): boolean {
+  const n = Array.isArray(c.targets) ? c.targets.length : 0;
+  if (n !== 1) return nameBindsFigure(id, estimates);
+  if (!turnHasProposal) return true;
+  const own = c.sourceTurn === turn;
+  if (own && !inherited.has(c.id as string)) return true;
+  const current = estimates.at(-1);
+  if (meaningfulEstimate(current)) return nameBindsFigure(id, [current]);
+  return own ? nameBindsFigure(id, estimates) : true;
 }
 /** A name proposal that answers an earlier name proposal and carries its name (the approval request of local-grounding/verify.ts). */
 export function inheritsProposalName(c: NamingClaimLike, claims: readonly NamingClaimLike[]): boolean {

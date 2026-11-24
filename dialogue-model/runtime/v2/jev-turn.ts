@@ -11,7 +11,7 @@ import { normalizeName } from "../judgment/name-evidence.mjs";
 import { stageMemory } from "../judgment/memory.mjs";
 import { createReferenceGraph, applyReferenceUpdate, previewReferenceUpdate, snapshotReferenceGraph, REFERENCE_LIMITS } from "../memory/reference-graph.mjs";
 import { nameBindsFigure } from "../decision/referent-binding.ts";
-import { hasNameProposal, namingTurnKind, namingIntervalEstimates, inheritsProposalName, turnNameProposals, namingNameKey } from "../decision/naming-request.ts";
+import { hasNameProposal, namingTurnKind, namingIntervalEstimates, inheritedTargetClaimIds, agreeCandidateAllowed, inheritsProposalName, turnNameProposals, namingNameKey } from "../decision/naming-request.ts";
 import { priorClaimViews, summarizeLocalIssues } from "../local-grounding/derive.ts";
 import { createMemoLocalExtractor, LOCAL_EXTRACTION_INSTRUCTIONS, MEMO_LOCAL_EXTRACTION_INSTRUCTIONS, MEMO_LOCAL_EXTRACTION_INSTRUCTIONS_HOLISTIC } from "../local-grounding/extract.ts";
 import { LOCAL_CLASSIFICATION_INSTRUCTIONS } from "../local-grounding/classify.ts";
@@ -240,7 +240,8 @@ export function hasTypedNamingRequest(claims: readonly LocalClaimView[], turn: n
 }
 function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns: readonly PublicTurn[], turn: number,
   slots: readonly string[], { ledger, judgments, agreeNameScopeVersion }: Pick<JevPrivateState, "ledger" | "judgments" | "agreeNameScopeVersion">,
-  current: { status: string; scores: Record<string, number> | null } | null = null, referentRule = false): PublicNameCandidate[] {
+  current: { status: string; scores: Record<string, number> | null } | null = null, referentRule = false, inheritedIds: ReadonlySet<string> = new Set()): PublicNameCandidate[] {
+  const turnHasProposal = hasNameProposal(claims, turn);
   const isHumanProposal = (c: LocalClaimView) => c.speaker === "human" && c.act === "name_propose";
   const publicClaims = claims.filter(c => c.aspect === "name" && c.name !== null &&
     publicTurns.some(t => t.turn === c.sourceTurn));
@@ -264,7 +265,7 @@ function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns: reado
   const wasFocused = (id: string) => prevIds.includes(id) || focusedTurns.some(j => j.ids.includes(id));
   // holistic_v3: a name that does not itself name exactly one figure (unbound, or proposed for several) binds to a figure only when the partner's own referent estimate
   // of the current naming interval singles it out (decision/referent-binding.ts); nothing the AI said or asked moves it.
-  const bindsByReferent = (id: string) => nameBindsFigure(id, [...judgments.filter(j => j.turnIndex > lastBoundary && j.turnIndex < turn).map(j => j.jevTurn.humanReferent ?? null), current]);
+  const intervalEstimates = [...judgments.filter(j => j.turnIndex > lastBoundary && j.turnIndex < turn).map(j => j.jevTurn.humanReferent ?? null), current];
   // The partner's own latest word on whether a figure is the one meant: a referent denial (targets taken from the claim it answers when it has none)
   // blocks agreement on that figure until a later referent claim of theirs re-affirms it. This is about the target, not about the proposed name.
   const claimTargets = (c: LocalClaimView) => c.targets.length ? c.targets : claims.find(p => p.id === c.respondsTo)?.targets ?? [];
@@ -312,7 +313,7 @@ function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns: reado
       (c.act === "name_accept" ? publicTurns.filter(t => t.text.includes(name)).sort((a, b) => a.turn - b.turn)[0] : undefined);
     if (!source) return [];
     const occupied = slots.filter(id => ledger[id].name !== null && normalizeName(ledger[id].name) === normalized);
-    return (referentRule && c.targets.length !== 1 ? candidates.filter(bindsByReferent) : candidates).filter(id => {
+    return (referentRule ? candidates.filter(id => agreeCandidateAllowed(c, id, turn, turnHasProposal, inheritedIds, intervalEstimates)) : candidates).filter(id => {
       // Supersession applies to this candidate, using a verified reply or an explicitly bound target.
       if (scoped && proposals.some(p => {
         if (p.sourceTurn <= c.sourceTurn) return false;
@@ -770,7 +771,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         publicNames: claims.filter(c => c.name !== null && publicTurns.some(t => t.turn === c.sourceTurn && t.text.includes(c.name!)))
           .map(c => ({ name: c.name!, figureId: c.targets.length === 1 ? c.targets[0] : null, sourceTurn: c.sourceTurn })) };
       if (questionLayout === "two_stage_v3") {
-        baseInput.agreeNames = buildAgreeNamesV3(claims, publicTurns, latest.seq, slots, state, null, holisticV3);
+        baseInput.agreeNames = buildAgreeNamesV3(claims, publicTurns, latest.seq, slots, state, null, holisticV3, inheritedTargetClaimIds(prepared.research?.verification?.diagnostics));
         baseInput.nameLedger = structuredClone(state.ledger);
         // holistic_v1: the memo's readings are explanations, never AI-proposed names (the candidates are then only names that were said in public).
         if (holisticV2) {
@@ -819,11 +820,11 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       baseInput.humanReferent = { status: estimate.status, scores: structuredClone(estimate.scores) };
       // holistic_v3: the turn kind needs this very turn's estimate to bind a name that does not itself name one figure.
       if (holisticV3 && questionLayout === "two_stage_v3") {
-        const kind = namingTurnKind(claims, latest.seq, state.ledger, namingIntervalEstimates(state.judgments, latest.seq, baseInput.humanReferent));
+        const kind = namingTurnKind(claims, latest.seq, state.ledger, namingIntervalEstimates(state.judgments, latest.seq, baseInput.humanReferent), inheritedTargetClaimIds(prepared.research?.verification?.diagnostics));
         if (kind === "request") { baseInput.namingRequest = true; record.namingRequest = true; } else if (kind === "reconfirm") record.namingReconfirm = true;
       }
       // The estimate of this very exchange backs a re-affirmation of a denied figure, so the candidates are completed only now.
-      if (questionLayout === "two_stage_v3") baseInput.agreeNames = buildAgreeNamesV3(claims, publicTurns, latest.seq, slots, state, baseInput.humanReferent, holisticV3);
+      if (questionLayout === "two_stage_v3") baseInput.agreeNames = buildAgreeNamesV3(claims, publicTurns, latest.seq, slots, state, baseInput.humanReferent, holisticV3, inheritedTargetClaimIds(prepared.research?.verification?.diagnostics));
       if (adaptive && baseInput.repairHistory.length && typeof jevDecision.estimateRepairProspect === "function") {
         record.repairHistory = structuredClone(repairHistory);
         let prospect = unknownRepairProspect();
