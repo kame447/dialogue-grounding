@@ -599,3 +599,31 @@ test('R3 pruning: once the claim and its withdrawal are gone from the graph, the
     assert.equal(h.upstream.posts.length, posts);
   }
 });
+
+import { researchTrialProfileV3 } from '../dialogue-model/runtime/v2/research-profile.ts';
+import { LOCAL_FUNCTION_CRITERIA_V3, LOCAL_FUNCTION_CRITERIA_HOLISTIC_V3 } from '../dialogue-model/runtime/local-grounding/classify.ts';
+test('05t-6: a restored record keeps the classification criteria of its stored version; a new record uses the current one', async t => {
+  const proposal = 'これ、かかしとかどう？';
+  const segment = { segmentId: 'name', quote: 'かかし', targets: [], aspect: 'name', proposition: 'かかしと呼ぶ提案', name: 'かかし', linkedIssueId: null, respondsToTurn: null };
+  const config = { questionLayout: 'two_stage_v3', technicalTrial: { version: 'adaptive_repair_v3' } };
+  const criteriaOf = (h: any) => h.upstream.posts.map((p: any) => p.questions?.segment_0_act?.criteria).filter(Boolean);
+  const first = await fixture(t, config, { answers: { action: 'accept', target: 'none' }, segmentText: proposal, segments: [segment] });
+  const prepared = await prepareParticipantJev(first.options);
+  const fresh = await makeTask(prepared, { strategy: 'bypass-enabled' });
+  fresh.task.message('どんな図形がありますか？', 'turn-1'); await fresh.task.whenIdle();
+  const saved = fresh.record();
+  assert.equal(saved.options.dialoguePolicy, 'holistic_v3');
+  fresh.task.message(proposal, 'turn-2'); await fresh.task.whenIdle();
+  const created = criteriaOf(first);
+  assert.ok(created.length > 0 && created.every((c: any) => JSON.stringify(c) === JSON.stringify({ ...LOCAL_FUNCTION_CRITERIA_HOLISTIC_V3 })), 'a new record sends the holistic_v3 criteria');
+  // The same record stored under holistic_v2 (as cqab2 was): its next classification request carries the criteria of that version.
+  const second = await fixture(t, config, { answers: { action: 'accept', target: 'none' }, segmentText: proposal, segments: [segment] });
+  const preparedAgain = await prepareParticipantJev(second.options);
+  const older = structuredClone(saved);
+  older.options.dialoguePolicy = 'holistic_v2';
+  older.options.profileSha256 = researchHash(researchTrialProfileV3({ timeoutMs: null, maxCompletionTokens: 1000 }, timeouts, 'two_stage_v3', 'holistic_v2'));
+  const restored = await makeTask(preparedAgain, { strategy: 'bypass-enabled', restore: older });
+  restored.task.message(proposal, 'turn-r'); await restored.task.whenIdle();
+  const kept = criteriaOf(second);
+  assert.ok(kept.length > 0 && kept.every((c: any) => JSON.stringify(c) === JSON.stringify({ ...LOCAL_FUNCTION_CRITERIA_V3 })), 'a restored holistic_v2 record keeps its criteria');
+});

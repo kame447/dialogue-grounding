@@ -57,7 +57,7 @@ async function recordedRun(profile: any, tape: any, label: 'repair-first' | 'byp
         await client.complete(buildReobservationMessages(input), { phase: 'observation_targeted' }); return result; } },
     jevDecision: { decide: (i: any, o: any) => native.decide(i, o), completeDetail: (i: any, s: any, o: any) => native.completeDetail!(i, s, o),
       ...(profile.dialoguePolicy ? { classifyDraftAct: (i: any, o: any) => native.classifyDraftAct!(i, o) } : {}) },
-    localGrounding: { classifier: createJevLocalTestClassifier({ enabled: true, readKey, fetchImpl, timeoutMs: profile.timeouts.localMs, researchLimits: { maxDeadlineMs: 600000 } })!,
+    localGrounding: { classifier: createJevLocalTestClassifier({ enabled: true, readKey, fetchImpl, timeoutMs: profile.timeouts.localMs, researchLimits: { maxDeadlineMs: 600000 }, questionLayout: profile.questionLayout, ...(profile.dialoguePolicy === 'holistic_v3' ? { dialoguePolicy: 'holistic_v3' } : {}) })!,
       aiPublicTransport: { readKey, fetchImpl, timeoutMs: profile.timeouts.decisionMs } },
     onJevTurnTrace: (t: any) => traces.push(t) } as any);
   const result: any = await runtime.runAiTurn({ events: tape.events, privateState: tape.state, lastEventId: tape.events.at(-1).id, requestSeq: tape.events.at(-1).seq });
@@ -1035,5 +1035,36 @@ test('05s: S4 derives the question triggers of a reconfirmation without the word
     for (const x of traceCopies(extra)) x.draftActs = [row];
     for (const st of [extra.trials[0].turns[0].state, extra.trials[0].lastCommittedState]) st.judgments.at(-1).jevTurn.draftActs = [row];
     assert.ok(!finalChecks(extra).every((c: any) => c.status === 'pass'), label + ': a question the wording alone would have opened');
+  }
+});
+
+import { LOCAL_FUNCTION_CRITERIA_V3, LOCAL_FUNCTION_CRITERIA_HOLISTIC_V3 } from '../dialogue-model/runtime/local-grounding/classify.ts';
+function changeClassification(records: any, label: string, criteria: Record<string, string>) {
+  let changed = 0;
+  for (const side of sideCopies(records).filter(x => x.label === label)) {
+    for (const request of side.requests.filter((q: any) => q.provider === 'jev' && Object.keys(q.payload.questions).some(k => /^segment_\d+_act$/.test(k)))) {
+      const body = request.payload;
+      for (const k of Object.keys(body.questions)) if (/^segment_\d+_act$/.test(k)) body.questions[k].criteria = { ...criteria };
+      request.preProjectionPayloadSha256 = request.payloadSha256 = hash(body);
+      changed++;
+    }
+    side.materialSha256 = hash(side.material);
+  }
+  return changed;
+}
+test('05t-7: the human local-classification criteria of a request are checked against the record\'s version, in the dynamic replay and in S4', async () => {
+  const named = (policy: 'holistic_v2' | 'holistic_v3') => buildRecords({ dialoguePolicy: policy, turns: [{ human: 'これ、かかしとかどう？',
+    plan: policy === 'holistic_v3' ? { action: 'confirm', target: 'figure_3', act: 'name_propose', extraction: unboundSeg, speech: 'どの形のことですか？' }
+      : { action: 'accept', target: 'none', act: 'name_propose', extraction: unboundSeg, speech: 'そう見えるんですね。' } }] });
+  for (const [policy, own, other] of [['holistic_v3', LOCAL_FUNCTION_CRITERIA_HOLISTIC_V3, LOCAL_FUNCTION_CRITERIA_V3], ['holistic_v2', LOCAL_FUNCTION_CRITERIA_V3, LOCAL_FUNCTION_CRITERIA_HOLISTIC_V3]] as const) {
+    const record = await named(policy);
+    const sent = sideCopies(record).flatMap((x: any) => x.requests).filter((q: any) => q.provider === 'jev' && q.payload.questions.segment_0_act).map((q: any) => q.payload.questions.segment_0_act.criteria);
+    assert.ok(sent.length > 0 && sent.every((c: any) => JSON.stringify(c) === JSON.stringify({ ...own })), policy + ': the replay reproduces the version\'s own criteria');
+    assert.ok(finalChecks(record).length >= 4 && finalChecks(record).every((c: any) => c.status === 'pass'), policy);
+    for (const label of ['repair-first', 'bypass-enabled']) {
+      const forged = structuredClone(record);
+      assert.ok(changeClassification(forged, label, other) > 0);
+      assert.ok(!finalChecks(forged).every((c: any) => c.status === 'pass'), policy + ' / ' + label + ': the other version\'s criteria with consistent fingerprints');
+    }
   }
 });

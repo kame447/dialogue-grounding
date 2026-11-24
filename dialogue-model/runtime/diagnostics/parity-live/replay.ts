@@ -92,7 +92,7 @@ export async function pairedReplay(tape: ReplayTape, own: ObservationInput, expe
         await client.complete(buildReobservationMessages(input), { phase: "observation_targeted" });
         return structuredClone(next);
       } }, jevDecision: createJevDecisionClient({ ...jev, questionLayout: profile.questionLayout })!,
-      localGrounding: { classifier: createJevLocalTestClassifier({ ...jev, questionLayout: profile.questionLayout })!, aiPublicTransport: { readKey, fetchImpl, timeoutMs: profile.timeouts.decisionMs } } });
+      localGrounding: { classifier: createJevLocalTestClassifier({ ...jev, questionLayout: profile.questionLayout, ...((profile as { dialoguePolicy?: string }).dialoguePolicy === "holistic_v3" ? { dialoguePolicy: "holistic_v3" } : {}) })!, aiPublicTransport: { readKey, fetchImpl, timeoutMs: profile.timeouts.decisionMs } } });
     await runtime.runAiTurn({ events: frozen.events, privateState: frozen.state, lastEventId: frozen.events.at(-1)!.id, requestSeq: frozen.events.at(-1)!.seq });
     if (lunaIndex !== frozen.luna.length || jevIndex !== frozen.jev.length || observationIndex !== frozen.reobservations.length) throw new Error("replay_unused_material");
     return { requests, contextSha256: researchHash({ profile, requestedModels: { purpose: profile.modelPolicy.purpose, luna: expectedModel, jev: profile.modelPolicy.jevModel },

@@ -76,7 +76,7 @@ export async function runTurn(profile: any, label: Label, state: any, events: an
       async reobserve(input: any) { const result = { observedAt: '2026-01-01T00:00:01.000Z', issue: structuredClone(input.issue),
         figures: input.figureIds.map((figureId: string) => ({ figureId, supports: ['control-feature'], contradicts: [], unknown: [] })) };
         reobservations.push(structuredClone(result)); await client.complete(buildReobservationMessages(input), { phase: 'observation_targeted' }); return result; } }, jevDecision,
-    localGrounding: { classifier: createJevLocalTestClassifier({ enabled: true, readKey, fetchImpl, timeoutMs: profile.timeouts.localMs, researchLimits: { maxDeadlineMs: 600000 } })!,
+    localGrounding: { classifier: createJevLocalTestClassifier({ enabled: true, readKey, fetchImpl, timeoutMs: profile.timeouts.localMs, researchLimits: { maxDeadlineMs: 600000 }, questionLayout: profile.questionLayout, ...(profile.dialoguePolicy === 'holistic_v3' ? { dialoguePolicy: 'holistic_v3' } : {}) })!,
       aiPublicTransport: { readKey, fetchImpl, timeoutMs: profile.timeouts.decisionMs } },
     onJevTurnTrace: (t: any) => traces.push(t), ...(technicalTrial ? { technicalTrial } : {}) } as any);
   let result: any;

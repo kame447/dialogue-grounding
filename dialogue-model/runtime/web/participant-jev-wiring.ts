@@ -113,7 +113,7 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
     if (!STRATEGIES.includes(context.strategy)) return invalid();
     if (context.legacy.some(v => v !== null && v !== undefined) || context.style !== profile.utteranceStyle) return invalid();
     const observer = v.observer as ObservationObserver, jevDecision = v.jevDecision as JevDecisionClient;
-    const local = v.localGrounding as JevTurnLocalOptions;
+    let local = v.localGrounding as JevTurnLocalOptions;
     if (typeof observer?.observeAll !== 'function' || typeof observer.reobserve !== 'function' || typeof jevDecision?.decide !== 'function' ||
         typeof local?.classifier?.classify !== 'function' || local.timeoutMs !== profile.timeouts.localMs ||
         local.aiPublicClaims !== profile.localGrounding.aiPublicClaims || !(v.ledger instanceof RunBudget)) return invalid();
@@ -157,6 +157,9 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
         validateRepairProspectMaterial(trace.repairProspect,Object.hasOwn(trace,'repairGate')?inferenceHistory(trace.repairHistory,trace.repairGate):trace.repairHistory,trace.turnIndex);
       }
     }
+    // A classifier built for another version than the selected one is replaced by one for the selected version (a restored record keeps its stored criteria).
+    const rebuilt = typeof (local.classifier as any)?.forPolicy === 'function' ? (local.classifier as any).forPolicy(profile.dialoguePolicy) : undefined;
+    if (rebuilt) local = {...local,classifier:rebuilt};
     return {profile,observer,jevDecision,localGrounding:local,ledger:v.ledger,...(technicalTrial?{technicalTrial}:{})};
   } catch { return invalid(); }
 }
@@ -370,10 +373,16 @@ export async function prepareParticipantJev(options:{configFile:string;baseAssig
       const client:ChatClient={complete:(messages,callOptions={})=>native.complete(messages,{...callOptions,timeoutMs:profile.timeouts.lunaAttemptMs})};
       const observer=await createParticipantCacheObserver({directory:config.cacheDirectory,modelId:config.modelId,memoSha256:config.memoSha256,own,profile,
         reobserver:createLunaObserver(participantLunaClient(client,ledger,profile),{timeoutMs:profile.timeouts.observationMs,researchLimits})});
-      const classifier=createJevLocalTestClassifier({enabled:true,...transport,questionLayout:profile.questionLayout,...(profile.dialoguePolicy==='holistic_v3'?{dialoguePolicy:'holistic_v3'}:{})})!;
+      // The classification criteria follow the version of the trial that really runs: a restored record keeps its stored version, so the classifier is rebuilt for the
+      // selected profile (forPolicy, called by selectParticipantJev once the stored version is known) instead of being reused from the creation default.
+      const makeClassifier=(policy:string|undefined):any=>{
+        const classifier=createJevLocalTestClassifier({enabled:true,...transport,questionLayout:profile.questionLayout,...(policy==='holistic_v3'?{dialoguePolicy:'holistic_v3'}:{})})!;
+        return {...classifier,get lastEvidence(){return classifier.lastEvidence;},get spentUsd(){return classifier.spentUsd;},
+          get callCount(){return classifier.callCount;},classify:(...args:Parameters<typeof classifier.classify>)=>jevOperation(ledger,'jev_local',()=>classifier.classify(...args)),
+          forPolicy:(next:string|undefined)=>next===policy?undefined:makeClassifier(next)};
+      };
       const jevResearch:JevResearchOptions={profile,observer,jevDecision,
-        localGrounding:{classifier:{...classifier,get lastEvidence(){return classifier.lastEvidence;},get spentUsd(){return classifier.spentUsd;},
-          get callCount(){return classifier.callCount;},classify:(...args:Parameters<typeof classifier.classify>)=>jevOperation(ledger,'jev_local',()=>classifier.classify(...args))},timeoutMs:profile.timeouts.localMs,
+        localGrounding:{classifier:makeClassifier(profile.dialoguePolicy),timeoutMs:profile.timeouts.localMs,
           researchLimits,aiPublicClaims:profile.localGrounding.aiPublicClaims,aiPublicTransport},ledger,...(config.technicalTrial?{technicalTrial:config.technicalTrial}:{})};
       return {client,jevResearch};
     }};
