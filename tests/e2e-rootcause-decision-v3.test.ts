@@ -527,6 +527,28 @@ for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
     assert.equal(result.text, revision);
     assert.deepEqual(result.trace.generationGuard, { violations: ['orientation_leak'], regenerated: true, fallback: false });
   });
+
+  test(`v3 ${strategy} recovers safely from repeated orientation_leak without publishing orientation words or marking the feature asked`, async () => {
+    const f = fixture(strategy, { aiPublic: true });
+    const result = await f.exchange('形をもう少し確かめたいです。', { action: 'confirm', target: 1,
+      drafts: ['上端が尖っていますか？', '右側に張り出しがありますか？'] });
+    assert.equal(result.text, 'その形の特徴について、もう少し詳しく教えてもらえますか？');
+    assert.deepEqual(result.trace.generationGuard, { violations: ['orientation_leak'], regenerated: true, fallback: true });
+    assert.equal(result.trace.aiPublic?.pending?.status, 'skipped_fallback');
+    assert.equal(result.state.repairHistory.at(-1)?.question, '');
+    assert.equal(s4Probe.traceShape(result.trace, V3.questionLayout), true);
+  });
+
+  test(`v3 ${strategy} fails closed when orientation_leak is combined with another violation or unsafe agree name`, async () => {
+    const f = fixture(strategy);
+    await assert.rejects(f.exchange('形をもう少し確かめたいです。', { action: 'confirm', target: 1,
+      drafts: ['上端が尖っていて s-1111 のことですか？', '右側が尖っていますか？'] }), { code: 'unsafe_generation' });
+    const g = fixture(strategy);
+    const proposal = 'これを「右向きの鳥」と呼びましょう。';
+    await assert.rejects(g.exchange(proposal, { action: 'agree', target: 1,
+      drafts: ['上端の「右向きの鳥」で決まりです。', '右側の「右向きの鳥」にしましょう。'],
+      segments: [naming(proposal, '右向きの鳥', [ids[1]])] }), { code: 'unsafe_generation' });
+  });
 }
 
 test('v3 veto rerank excludes an agreed slot and completes legal proposal detail on an unassigned slot', async () => {

@@ -159,7 +159,7 @@ const orientationWords = /上部|下部|上端|下端|左端|右端|左側|右�
 
 // A clause that says whose screen/viewpoint it describes (こちらの画面では…／私から見ると…) is not a flat claim.
 // A bare mention of rotation or a different orientation does not say whose view the direction word belongs to.
-const viewpointStated = /(?:こちら|私|わたし|自分|相手|そちら)(?:の(?:画面|側|向き|見方)|側)?(?:では|で見ると|から見ると|から見れば|から見たら|から見て)/u;
+const viewpointStated = /(?:こちら|私|わたし|自分|相手|そちら)(?:の(?:画面|側|向き|見方|図形|方)|側)?(?:では|で見ると|から見ると|から見れば|から見たら|から見て)/u;
 // Sentence ends and adversative conjunctions start a new clause, so a viewpoint cannot cover a later unqualified claim.
 const clauseBreak = /(?<=[。!?]|(?:ですが|ますが|ませんが|ましたが|でしたが|けど|けれど|けれども|のに)、)/u;
 
@@ -185,7 +185,7 @@ export function rewriteReasons(codes: readonly string[]): string {
     codes.includes("self_repair") ? "前の下書きは自分の取り違え・訂正・取り消しを表していました。このactionでは訂正を表明せず、このactionの範囲で書き直してください。" : "",
     codes.includes("name_mismatch") ? "前の下書きは、このactionで扱う名前とは別の名前を決定・合意として述べていました。このactionで扱う名前だけを「」で示して書き直してください。" : "",
     codes.includes("unsolicited_deferral") ? "前の下書きは未解決の図形について保留や先送りを提案していました。保留・先送りを提案せず、このactionの範囲で書き直してください。" : "",
-    codes.includes("orientation_leak") ? "前の下書きに画面の向きに依存する語（上下左右・上端・下端・右向き等）が含まれていました。相手の画面では図形が回転しているため、上下左右を使わず、尖りの数・大小・くぼみ・四角い部分とのつながりなど回転しても変わらない特徴だけで書き直してください。" : "",
+    codes.includes("orientation_leak") ? "前の下書きに画面の向きに依存する語（上下左右・側・端・向き・斜め上/下/左/右・縦長・横長等）が含まれていました。非公開メモや判断の方位語をそのまま写さず、尖りの数・大小・くぼみ・四角い部分とのつながりなど回転しても変わらない特徴へ言い換えるか、同じ節で「こちらの画面では〜」と視点を明示して書き直してください。" : "",
     codes.some((code) => code.startsWith("internal_")) ? "前の下書きには内部の参照IDや作業メモの項目が含まれていました。それらを出さずに書き直してください。" : "",
     codes.includes("name_not_shown") ? "このactionで扱う名前を、「」で囲んで発話の中に示してください。" : "",
   ].join("");
@@ -218,4 +218,34 @@ export function fallbackUtterance(judgment: Judgment): string {
     text = `${judgment.discriminatingFeature.trim()}がある形のことですか？`;
   }
   return findGuardViolations(text, judgment.action).length ? neutral[judgment.action] : text;
+}
+
+// Orientation-free fallback for two_stage_v3 when both draft and rewrite fail orientation_leak alone.
+// Never copies memo features (which may contain orientation words), never makes baseless self-repair
+// claims, and never advances agree/propose_name without safely showing the target name (returns null).
+const orientationNeutral: Record<Action, string> = {
+  accept: "なるほど、そう見えるんですね。",
+  propose_name: "",
+  confirm: "その形の特徴について、もう少し詳しく教えてもらえますか？",
+  agree: "",
+  repair: "すみません、どの形の特徴かもう一度確認させてください。",
+  defer: "この形の話には、あとで戻りたいです。",
+  revisit: "先ほどの形について、もう一度お話しできますか？",
+  move_on: "別の形についても、見立てを聞かせてもらえますか？",
+  close: "ここでお話を終えてもよいですか？",
+};
+
+export function orientationSafeFallback(judgment: Judgment): string | null {
+  if (judgment.action === "agree") {
+    if (!safeSpan(judgment.candidateName) || findOrientationLeaks(judgment.candidateName).length) return null;
+    const text = `「${judgment.candidateName.trim()}」にしましょう。`;
+    return !findGuardViolations(text, "agree").length && !findAgreeNameMismatch(text, judgment.candidateName).length && !findOrientationLeaks(text).length ? text : null;
+  }
+  if (judgment.action === "propose_name") {
+    if (!safeSpan(judgment.candidateName) || findOrientationLeaks(judgment.candidateName).length) return null;
+    const text = `「${judgment.candidateName.trim()}」と呼ぶのはどうでしょう？`;
+    return !findGuardViolations(text, "propose_name").length && !findOrientationLeaks(text).length ? text : null;
+  }
+  const text = orientationNeutral[judgment.action];
+  return text && !findGuardViolations(text, judgment.action).length && !findOrientationLeaks(text).length ? text : null;
 }

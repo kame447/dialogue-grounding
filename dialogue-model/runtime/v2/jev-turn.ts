@@ -23,7 +23,7 @@ import { validateJevDecision, validateHumanReferentEstimate, validateRepairProsp
 import type { JevDecisionFailureEvidence } from "../decision/jev-decision.ts";
 import { prepareLocalGroundingTurn, validateLocalGroundingOptions, findLocalPublicationViolations } from "./local-grounding-turn.ts";
 import type { LocalGroundingResearchRecord, LocalGroundingTrace } from "./local-grounding-turn.ts";
-import { findAgreeNameMismatch, findGuardViolations, findOrientationLeaks, rewriteReasons } from "./generation-guard.ts";
+import { findAgreeNameMismatch, findGuardViolations, findOrientationLeaks, orientationSafeFallback, rewriteReasons } from "./generation-guard.ts";
 import { createMemoAiExtractor, MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS, AiPublicError, aiHash, emptyAiEvidence } from "../local-grounding/extract-ai.ts";
 import { createJevAiFunctionClassifier, createJevAiSupportChecker, AI_FUNCTION_INSTRUCTIONS, AI_SUPPORT_INSTRUCTIONS,
   AI_RESPONSE_SUPPORT_INSTRUCTIONS, AI_FUNCTION_CRITERIA, AI_SUPPORT_CHOICES, AI_ACT_DESCRIPTIONS } from "../local-grounding/jev-ai-public.ts";
@@ -39,7 +39,7 @@ type Graph = Parameters<typeof prepareLocalGroundingTurn>[1]["graph"];
 type Event = { id: string; seq: number; speaker: "human" | "ai"; text: string; nonReferential?: boolean };
 type Message = { role: "system" | "user" | "assistant"; content: string };
 type ChatClient = { complete(messages: Message[], options: { phase: string; timeoutMs: number; signal?: AbortSignal }): Promise<{ text: string }> };
-type Guard = { violations: string[]; regenerated: boolean; fallback: false };
+type Guard = { violations: string[]; regenerated: boolean; fallback: boolean };
 const ACT_INSTRUCTIONS = "Jevが選んだ行動だけを文章にしてください。行動・対象・名前・特徴を変更しないでください。観察メモは仮説で、局所的な支持を図形全体の理解や名称決定へ拡張しないでください。";
 // two_stage_v3 only (new text, not yet reviewed by Argon): a revisit whose target stays a candidate set.
 export const REVISIT_MULTIPLE_INSTRUCTIONS = "対象は複数候補のままです。選ばれた行動は、先ほどの未解決の区別に戻ることだけです。どの候補かを勝手に一つに絞らず、名前に決まったとは言わないでください。候補の数や内部の参照IDは相手に伝えず、相手が知らないことを知っているかのようにも話さないでください。";
@@ -848,7 +848,19 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         abortIf(signal);
         const codes = typeof result?.text === "string" && result.text.trim() ? violations(result.text, retry) : ["empty_utterance"];
         record.generationGuard.violations = [...new Set([...record.generationGuard.violations, ...codes])];
-        if (codes.length) throw new JevTurnError("unsafe_generation");
+        if (codes.length) {
+          const orientationOnly = questionLayout === "two_stage_v3" &&
+            record.generationGuard.violations.length === 1 && record.generationGuard.violations[0] === "orientation_leak" &&
+            codes.length === 1 && codes[0] === "orientation_leak";
+          const safeText = orientationOnly ? orientationSafeFallback(judgment) : null;
+          if (!safeText || violations(safeText, retry).length) throw new JevTurnError("unsafe_generation");
+          result = { text: safeText };
+          record.generationGuard.fallback = true;
+          if (["confirm", "repair"].includes(judgment.action) && repairHistory.length && repairHistory.at(-1)?.turn === latest.seq) {
+            repairHistory = [...repairHistory.slice(0, -1), { ...repairHistory.at(-1)!, question: "" }];
+            record.repairHistory = repairHistory;
+          }
+        }
       }
       let aiPending: AiPublicPending | null = null;
       if (aiEnabled) {

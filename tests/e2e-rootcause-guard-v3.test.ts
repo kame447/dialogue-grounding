@@ -2,7 +2,7 @@
 // Local mocks only; no model or network access.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { findOrientationLeaks, findAgreeNameMismatch, findDeferralClaims, findGuardViolations, rewriteReasons } from "../dialogue-model/runtime/v2/generation-guard.ts";
+import { findOrientationLeaks, findAgreeNameMismatch, findDeferralClaims, findGuardViolations, orientationSafeFallback, rewriteReasons } from "../dialogue-model/runtime/v2/generation-guard.ts";
 import { createDialogueV2 } from "../dialogue-model/runtime/v2/dialogue-v2.mjs";
 import { SAFE_JUDGMENT } from "../dialogue-model/runtime/judgment/schema.mjs";
 
@@ -162,6 +162,7 @@ test("orientation wording with a stated viewpoint or quotation is allowed; an un
 test("viewpoint clauses are exempt, bare rotation mentions and later unqualified clauses are not", () => {
   for (const text of ["こちらから見ると、右側に四角い突起があります。", "私から見ると、左端に小さな角があります。",
     "こちらの画面では上側に突起が見えますが、向きが違うと見え方が変わりますか？", "相手の画面では右側に見える部分でしょうか？",
+    "こちらの図形では上側が尖っています。", "私の方では縦長に見えます。",
     "向きが違うので、尖りの数で確かめましょう。", "回転しても変わらないくぼみがありますか？"]) {
     assert.deepEqual(findOrientationLeaks(text), [], text);
   }
@@ -169,4 +170,23 @@ test("viewpoint clauses are exempt, bare rotation mentions and later unqualified
     "相手の画面では向きが違うと思いますが、右側に四角い突起があります。", "向きが違うかもしれません。右側に小さな角がありますか？"]) {
     assert.deepEqual(findOrientationLeaks(text), ["orientation_leak"], text);
   }
+});
+
+test("orientation retry reason names all orientation families and orientationSafeFallback stays rotation-free", () => {
+  const reason = rewriteReasons(["orientation_leak"]);
+  assert.match(reason, /縦長・横長/u);
+  assert.match(reason, /斜め/u);
+  assert.match(reason, /非公開メモ/u);
+  assert.match(reason, /こちらの画面では/u);
+  const confirmFb = orientationSafeFallback({ action: "confirm", candidateName: null, discriminatingFeature: "上端の四角い張り出し" });
+  assert.ok(confirmFb && findOrientationLeaks(confirmFb).length === 0 && findGuardViolations(confirmFb, "confirm").length === 0);
+  assert.doesNotMatch(confirmFb!, /上端/u);
+  const repairFb = orientationSafeFallback({ action: "repair", candidateName: null, discriminatingFeature: "右側にくぼみ" });
+  assert.ok(repairFb && findOrientationLeaks(repairFb).length === 0 && findGuardViolations(repairFb, "repair").length === 0);
+  assert.doesNotMatch(repairFb!, /訂正/u);
+  assert.equal(orientationSafeFallback({ action: "agree", candidateName: "鳥", discriminatingFeature: null }), "「鳥」にしましょう。");
+  assert.equal(orientationSafeFallback({ action: "agree", candidateName: "右向きの鳥", discriminatingFeature: null }), null);
+  assert.equal(orientationSafeFallback({ action: "agree", candidateName: null, discriminatingFeature: null }), null);
+  assert.equal(orientationSafeFallback({ action: "propose_name", candidateName: "横長の船", discriminatingFeature: null }), null);
+  assert.equal(orientationSafeFallback({ action: "propose_name", candidateName: "船", discriminatingFeature: null }), "「船」と呼ぶのはどうでしょう？");
 });
