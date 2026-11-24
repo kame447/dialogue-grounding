@@ -50,7 +50,8 @@ test("local grounding omitted and null keep requests, private state and traces b
   // re-captured again for Argon's Japanese review, which changes only one particle here (見立てには → 見立ては).
   // Guards the request, output state and trace bytes, not just null's alias.
   const bytes = JSON.stringify({ result: a, calls: implicit.calls, attempts: implicit.dialogue.getAttempts() });
-  assert.equal(createHash("sha256").update(bytes).digest("hex"), "c4b7aeafdc0636ccd82cabc06476d49c63f879688142603d213764176be885cc");
+  // Re-pinned for prompt-style-20261124: restoring the prior dialogue-v2.mjs generator text reproduces the previous digest.
+  assert.equal(createHash("sha256").update(bytes).digest("hex"), "06bfa2b123612842034e58a17b4c3f49aadd44e0f014e1320f310f3f72d4ef1f");
   assert.ok(!JSON.stringify(implicit.dialogue.getAttempts()).includes("localGrounding"));
   assert.ok(!JSON.stringify(implicit.calls).includes("局所問題の作業メモ"));
 });

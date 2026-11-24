@@ -60,10 +60,15 @@ export const JEV_ACTION_CRITERIA: Readonly<Record<JevAction, string>> = Object.f
   close: "公開の課題進行を踏まえ終了を相談する。修復停滞の固定回数を終了規則にしない。",
   request_observation: "視覚に依存する新特徴・別の見立て・候補競合・修復のため、図形と論点を指定してLunaへ再観察を依頼する。呼び名の好みなど視覚に無関係な変更では再観察しない。",
 });
+// two_stage_v3 only (the shared two_stage_v1/v2 criteria stay byte-identical). Mirrored in the S4 verifier (NATIVE_V3.actions).
+const ACCEPT_DIRECT_ANSWER_V3 = "相手が図形の見た目や特徴を尋ねただけで、観察メモで確かめられる（ある・ない・不明のいずれか）なら、質問を返すconfirmにせず、このacceptで直接答える。";
+const CONFIRM_UNRESOLVED_V3 = "特徴を尋ねられただけでは選ばず、対象や特徴に未解決の曖昧さが残るときだけ、その点を一つ具体的に確かめる。";
+const PROPOSE_NAME_STAGE_V3 = "対象が公開上で相手に伝わり、命名の流れに入ってから選ぶ。見た目や特徴を尋ねられた段階の見立ての説明はacceptで行う。";
 const V3_ACTION_CRITERIA: Readonly<Record<JevAction, string>> = Object.freeze({
   ...JEV_ACTION_CRITERIA,
-  accept: JEV_ACTION_CRITERIA.accept + "直前の図形で合意が成立したり問題が解決したりした後、相手が新しい図形へ進む場合の受け止めも含める。",
-  confirm: JEV_ACTION_CRITERIA.confirm + "相手が直前の確認特徴を明確に肯定し、矛盾なく呼び名を提案・確認した場合は、同じ特徴の確認を繰り返さず、公開の名称提案に基づくagreeなど次の段階へ進む。不確実な点が残る場合は別の弁別特徴を選ぶ。",
+  accept: JEV_ACTION_CRITERIA.accept + "直前の図形で合意が成立したり問題が解決したりした後、相手が新しい図形へ進む場合の受け止めも含める。" + ACCEPT_DIRECT_ANSWER_V3,
+  confirm: JEV_ACTION_CRITERIA.confirm + "相手が直前の確認特徴を明確に肯定し、矛盾なく呼び名を提案・確認した場合は、同じ特徴の確認を繰り返さず、公開の名称提案に基づくagreeなど次の段階へ進む。不確実な点が残る場合は別の弁別特徴を選ぶ。" + CONFIRM_UNRESOLVED_V3,
+  propose_name: JEV_ACTION_CRITERIA.propose_name + PROPOSE_NAME_STAGE_V3,
   move_on: JEV_ACTION_CRITERIA.move_on + "合意・解決済みの図形から次の図形に進む通常の進行では選ばない。",
   request_observation: JEV_ACTION_CRITERIA.request_observation + "相手の描写と初期観察メモの向き・見え方が食い違い、メモの文言だけでは別候補との弁別や回転下での照合ができないときに優先して選ぶ。",
 });
