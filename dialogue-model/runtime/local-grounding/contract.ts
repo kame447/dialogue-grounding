@@ -163,6 +163,8 @@ export type LocalGroundingOptions = {
   extractor: LocalSegmentExtractor;
   classifier: LocalFunctionClassifier;
   timeoutMs?: number;
+  /** holistic_v2 only: a human referent reply (agree/deny) to an AI claim about one figure refers to that figure whatever the AI claim's aspect. */
+  referentAcrossAspects?: boolean;
 };
 
 // Slice A: opt-in AI public claims. Candidate identity is public-source identity;

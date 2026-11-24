@@ -30,7 +30,9 @@ export type Plan = { action: string; target: string; issue?: string; prospect?: 
   /** The name detail question is answered with the candidate whose value is this name (default: the first offered). */
   name?: string;
   /** The classifier's antecedent answer (`claim_0` etc.; default none), for a reply that must be linked to an earlier claim. */
-  antecedent?: string };
+  antecedent?: string;
+  /** Raw JSON text the AI-public extraction request returns (the AI's own claims about its public reply); default none. */
+  aiExtraction?: string };
 const TEXTS: Record<string, string> = { local_extraction: '[]', ai_extraction: '[]' };
 
 export async function runTurn(profile: any, label: Label, state: any, events: any[], plan: Plan, technicalTrial: { version: TrialVersion } | undefined) {
@@ -40,7 +42,7 @@ export async function runTurn(profile: any, label: Label, state: any, events: an
     baseUrl: 'http://offline.invalid/v1', timeoutMs: profile.timeouts.lunaAttemptMs },
   async () => Response.json({ model: next.model, choices: [{ message: { content: next.text } }], usage: { prompt_tokens: 0, completion_tokens: 0 } }));
   const client = { async complete(messages: any[], options: any) {
-    const response = { text: options.phase === 'local_extraction' && plan.extraction !== undefined ? plan.extraction : TEXTS[options.phase] ?? plan.speech ?? 'もう一度、確かめてみますね。', model: 'synthetic-luna-model', usage: { inputTokens: 0, outputTokens: 0 } };
+    const response = { text: options.phase === 'local_extraction' && plan.extraction !== undefined ? plan.extraction : options.phase === 'ai_extraction' && plan.aiExtraction !== undefined ? plan.aiExtraction : TEXTS[options.phase] ?? plan.speech ?? 'もう一度、確かめてみますね。', model: 'synthetic-luna-model', usage: { inputTokens: 0, outputTokens: 0 } };
     luna.push({ phase: options.phase, response }); next = response; return http.complete(messages, options); } };
   const readKey = async () => 'sk-or-SYNTHETIC-offline-replay-key-0000';
   const fetchImpl = async (_url: any, init: any) => {

@@ -480,7 +480,9 @@ function agreeSource(tr:any,t:any,key:string,tape:any,legacyV3=false):'invalid'|
    const prevIds=!legacyV3&&prevJudgment?.turnIndex>lastBoundary&&['confirm','repair','propose_name'].includes(prevJudgment.judgment?.action)?idsOfJudgment(prevJudgment):[];
    const prevFallbackConfirm=prevIds.length>0&&prevJudgment?.generationGuard?.fallback===true&&['confirm','repair'].includes(prevJudgment.judgment?.action);
    const prevPublicIds=new Set(prevIds.length?live.filter((c:any)=>c.speaker==='ai'&&c.sourceTurn>prevJudgment.turnIndex&&c.sourceTurn<t.turnIndex).flatMap((c:any)=>c.targets):[]);
-   const wasFocused=(id:string)=>prevIds.includes(id)||focusedTurns.some((j:any)=>j.ids.includes(id));
+   // holistic_v2: a live human referent agree answering an AI claim about exactly that figure shares it like an executed focus.
+   const referentAgreed=(id:string)=>tr.profile?.dialoguePolicy==='holistic_v2'&&live.some((c:any)=>c.speaker==='human'&&c.act==='agree'&&c.aspect==='referent'&&c.sourceTurn>lastBoundary&&Array.isArray(c.targets)&&c.targets.length===1&&c.targets[0]===id&&live.some((a:any)=>a.id===c.respondsTo&&a.speaker==='ai'&&Array.isArray(a.targets)&&a.targets.length===1&&a.targets[0]===id));
+   const wasFocused=(id:string)=>prevIds.includes(id)||focusedTurns.some((j:any)=>j.ids.includes(id))||referentAgreed(id);
    const slotAllowed=(id:string,name:string)=>preLedger[id]?.status!=='agreed'&&!(preLedger[id]?.status==='deferred'&&preLedger[id].name!==null&&norm(preLedger[id].name)!==norm(name))&&!slots.some(other=>other!==id&&preLedger[other]?.name!==null&&norm(preLedger[other].name)===norm(name));
    // The criteria version determines whether unbound proposals need public grounding (level 2). The state version independently
    // selects per-figure supersession within that grounded rule. Older states retain their recorded whole-interval supersession.
