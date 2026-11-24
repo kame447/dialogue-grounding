@@ -373,8 +373,9 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
   }
   if (v3) {
     // A name the partner proposed is theirs: the AI answers it (agree, confirm, repair), never re-proposes it as its own idea.
-    const partnerNames = input.priorClaims.filter(c => c?.speaker === "human" && c.act === "name_propose" && typeof c.name === "string" && c.name !== "" &&
-      c.turn <= input.turn && c.sourceTurn <= input.turn && Array.isArray(c.targets)).map(c => ({ name: normalizeName(c.name!), targets: c.targets }));
+    // Read the very list that is sent in the state (after claims whose source turn did not survive were dropped), so a replay from the request reaches the same catalog.
+    const partnerNames = priorClaims.filter(c => c.speaker === "human" && c.act === "name_propose" && c.name !== null)
+      .map(c => ({ name: normalizeName(c.name!), targets: c.targets }));
     catalog.names = catalog.names.map((names, index) => names.filter(name => !partnerNames.some(p =>
       p.name === normalizeName(name) && (p.targets.length === 0 || p.targets.includes(slots[index])))));
   }

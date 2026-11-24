@@ -526,7 +526,7 @@ async function runParityLiveImpl(options: Options, deps: Dependencies) {
               catch(error){wire.adapterResult('decision',error instanceof JevDecisionError?error.code:'decision_error');if(error instanceof JevDecisionError&&error.code==='cost_cap')stop('cost_cap');throw error;}
             }}:{}),
           };
-          const classifier = createJevLocalTestClassifier({ enabled: true, readKey: wire.readKey, fetchImpl: wire.fetchImpl, timeoutMs: PROFILE.timeouts.decisionMs, ...limits })!;
+          const classifier = createJevLocalTestClassifier({ enabled: true, readKey: wire.readKey, fetchImpl: wire.fetchImpl, timeoutMs: PROFILE.timeouts.decisionMs, questionLayout: PROFILE.questionLayout, ...limits })!;
           const runtime = createProfileDialogue(PROFILE, { client: wire.client, strategy: label, image, anchors, referenceMemory: PROFILE.referenceMemory,
             decisionMode: PROFILE.decisionMode, utteranceStyle: PROFILE.utteranceStyle, maxReobservations: PROFILE.maxReobservations,
             observer: { async reobserve(input, opts) { const result = await observer.reobserve(input, opts); tape?.reobservations.push(structuredClone(result)); return result; }, async observeAll(input, opts) {

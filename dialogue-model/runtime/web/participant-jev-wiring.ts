@@ -335,7 +335,7 @@ export async function prepareParticipantJev(options:{configFile:string;baseAssig
       const client:ChatClient={complete:(messages,callOptions={})=>native.complete(messages,{...callOptions,timeoutMs:profile.timeouts.lunaAttemptMs})};
       const observer=await createParticipantCacheObserver({directory:config.cacheDirectory,modelId:config.modelId,memoSha256:config.memoSha256,own,profile,
         reobserver:createLunaObserver(participantLunaClient(client,ledger,profile),{timeoutMs:profile.timeouts.observationMs,researchLimits})});
-      const classifier=createJevLocalTestClassifier({enabled:true,...transport})!;
+      const classifier=createJevLocalTestClassifier({enabled:true,...transport,questionLayout:profile.questionLayout})!;
       const jevResearch:JevResearchOptions={profile,observer,jevDecision,
         localGrounding:{classifier:{...classifier,get lastEvidence(){return classifier.lastEvidence;},get spentUsd(){return classifier.spentUsd;},
           get callCount(){return classifier.callCount;},classify:(...args:Parameters<typeof classifier.classify>)=>jevOperation(ledger,'jev_local',()=>classifier.classify(...args))},timeoutMs:profile.timeouts.localMs,

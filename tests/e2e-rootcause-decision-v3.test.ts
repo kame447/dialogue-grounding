@@ -14,7 +14,7 @@ const V3 = { questionLayout: 'two_stage_v3' } as const;
 const UNRELATED_NAME = '灯台';
 const NEW_NAME = '風車';
 const single = (index: number) => ({ kind: 'single' as const, figureId: ids[index] });
-type Segment = Omit<LocalSegmentProposal, 'segmentId' | 'linkedIssueId' | 'respondsToTurn'> & { act: LocalAct };
+type Segment = Omit<LocalSegmentProposal, 'segmentId' | 'linkedIssueId' | 'respondsToTurn'> & { act: LocalAct; respondsTo?: number };
 type Plan = {
   action: JevAction;
   target?: number;
@@ -88,9 +88,9 @@ function fixture(strategy: 'bypass-enabled' | 'repair-first' = 'bypass-enabled',
     client: {
       async complete(_messages, { phase }) {
         if (phase === 'ai_extraction') return { text: JSON.stringify(plan.aiSegments ?? []) };
-        if (phase === 'local_extraction') return { text: JSON.stringify((plan.segments ?? []).map(({ act, ...segment }, index) => ({
+        if (phase === 'local_extraction') return { text: JSON.stringify((plan.segments ?? []).map(({ act, respondsTo, ...segment }, index) => ({
           ...segment, segmentId: `segment-${index}`, linkedIssueId: null,
-          respondsToTurn: act === 'deny' || act === 'name_accept' ? events.at(-2)!.seq : null,
+          respondsToTurn: respondsTo ?? (act === 'deny' || act === 'name_accept' ? events.at(-2)!.seq : null),
         }))) };
         assert.equal(phase, 'generation');
         const text = drafts.shift();
@@ -119,8 +119,21 @@ function naming(quote: string, name: string, targets: string[] = [], act: LocalA
   return { quote, name, targets, act, aspect: 'name', proposition: quote };
 }
 const agreeSpeech = (name: string) => `はい、この形は「${name}」と呼びましょう。`;
+// An unbound partner proposal can be agreed only for a figure the AI already shared in public (a public AI claim) and executed on.
+const SHARE_SPEECH = '細い部分が二つつながっていますか？';
+async function share(f: ReturnType<typeof fixture>, target: number, human = 'その形について教えてください。') {
+  const aiSegment: LocalSegmentProposal = { segmentId: 'shape', quote: SHARE_SPEECH, targets: [ids[target]],
+    aspect: 'part', proposition: '細い部分が二つつながる', name: null, linkedIssueId: null, respondsToTurn: null };
+  return f.exchange(human, { action: 'confirm', target, drafts: [SHARE_SPEECH], aiSegments: [aiSegment] });
+}
+async function groundedFixture(target: number, strategy: 'bypass-enabled' | 'repair-first' = 'bypass-enabled') {
+  const f = fixture(strategy, { aiPublic: true });
+  await share(f, target);
+  return f;
+}
 async function agreedFixture() {
-  const f = fixture();
+  const f = fixture('bypass-enabled', { aiPublic: true });
+  await share(f, 0);
   const quote = `この形を「${UNRELATED_NAME}」と呼びましょう。`;
   await f.exchange(quote, { action: 'agree', target: 0, drafts: [agreeSpeech(UNRELATED_NAME)], segments: [naming(quote, UNRELATED_NAME, [ids[0]])] });
   return f;
@@ -128,12 +141,14 @@ async function agreedFixture() {
 
 test('v3 stages and publication bind an unbound polite naming proposal to an unagreed figure', async () => {
   const f = await agreedFixture();
+  // Only a figure the AI already shared in public (and executed on) can be agreed from an unbound proposal; the other unagreed figures cannot.
+  await share(f, 3);
   const quote = `では、この形を「${NEW_NAME}」と呼んでもいいですか？`;
   const next = await f.exchange(quote, { action: 'agree', target: 3, drafts: [agreeSpeech(NEW_NAME)], segments: [naming(quote, NEW_NAME)] });
   assert.equal(next.input.priorClaims.find(c => c.name === NEW_NAME)?.act, 'name_propose');
   assert.ok(next.input.publicNames.some(c => c.name === UNRELATED_NAME), 'old public evidence is retained');
-  assert.deepEqual(next.input.agreeNames, ids.slice(1).map(figureId => ({ name: NEW_NAME, figureId, sourceTurn: 3 })));
-  assert.deepEqual(Object.keys(next.requests.find(r => r.questions.target)!.questions.target.criteria), ['figure_1', 'figure_2', 'figure_3', 'figure_4', 'figure_5']);
+  assert.deepEqual(next.input.agreeNames, [{ name: NEW_NAME, figureId: ids[3], sourceTurn: next.input.turn }]);
+  assert.deepEqual(Object.keys(next.requests.find(r => r.questions.target)!.questions.target.criteria), ['figure_3']);
   assert.deepEqual(next.saved.executed?.target, single(3));
   assert.equal(next.text, agreeSpeech(NEW_NAME));
   assert.deepEqual(next.state.ledger[ids[3]], { status: 'agreed', name: NEW_NAME });
@@ -160,31 +175,35 @@ test('v3 respects ledger naming constraints across agreed and deferred slots', a
     segments: [naming(differentName, NEW_NAME, [ids[0]])] });
   assert.deepEqual(changed.input.agreeNames, []);
 
+  await share(f, 0, 'その形にもう一度戻って教えてください。');
   const original = `やはり「${UNRELATED_NAME}」でどうですか？`;
   const resumed = await f.exchange(original, { action: 'accept', drafts: ['元の呼び名の話ですね。'], segments: [naming(original, UNRELATED_NAME)] });
   assert.deepEqual(resumed.input.agreeNames, [{ name: UNRELATED_NAME, figureId: ids[0], sourceTurn: resumed.input.turn }]);
 });
 
 test('v3 a move_on boundary retires the old bound proposal even when its ledger entry is tentative', async () => {
-  const f = fixture();
-  const old = `この形は「${UNRELATED_NAME}」でどうですか？`;
+  const f = fixture('bypass-enabled', { aiPublic: true });
+  // The partner only mentions the word; the AI itself proposes it.
+  const old = `この形には「${UNRELATED_NAME}」という見方もありますね。`;
   await f.exchange(old, { action: 'propose_name', target: 0, name: UNRELATED_NAME, drafts: [`「${UNRELATED_NAME}」という呼び名はどうですか？`],
     segments: [naming(old, UNRELATED_NAME, [ids[0]], 'assert')] });
   await f.exchange('次の形を見ましょう。', { action: 'move_on', target: 3, drafts: ['細長い形を見ましょう。'] });
+  await share(f, 3);
   const proposal = `こちらの形は「${NEW_NAME}」でどうですか？`;
   const current = await f.exchange(proposal, { action: 'agree', target: 3, drafts: [agreeSpeech(NEW_NAME)], segments: [naming(proposal, NEW_NAME)] });
   assert.ok(current.input.priorClaims.some(c => c.name === UNRELATED_NAME && c.targets.includes(ids[0])));
-  assert.deepEqual(current.input.agreeNames, ids.map(figureId => ({ figureId, name: NEW_NAME, sourceTurn: current.input.turn })));
+  assert.deepEqual(current.input.agreeNames, [{ figureId: ids[3], name: NEW_NAME, sourceTurn: current.input.turn }]);
   assert.deepEqual(current.state.ledger[ids[0]], { status: 'tentative', name: UNRELATED_NAME });
   assert.deepEqual(current.state.ledger[ids[3]], { status: 'agreed', name: NEW_NAME });
 });
 
 for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
   for (const target of [3, undefined]) test(`v3 ${strategy} replaces older naming evidence after accept(${target ?? 'none'})`, async () => {
-    const f = fixture(strategy);
-    const old = `この形を「${NEW_NAME}」と呼びましょうか？`;
-    await f.exchange(old, { action: 'propose_name', target: 2, name: NEW_NAME, drafts: [old],
-      // The partner only mentions the name; a partner name_propose would be answered, never re-proposed as the AI's own.
+    const f = fixture(strategy, { aiPublic: true });
+    const proposed = `この形を「${NEW_NAME}」と呼びましょうか？`;
+    // The partner only mentions the word; a partner name_propose would be answered, never re-proposed as the AI's own.
+    const old = `この形には「${NEW_NAME}」という見方もありますね。`;
+    await f.exchange(old, { action: 'propose_name', target: 2, name: NEW_NAME, drafts: [proposed],
       segments: [naming(old, NEW_NAME, [ids[2]], 'assert')] });
 
     const confirmation = `はい、「${NEW_NAME}」でいきましょう。`;
@@ -196,9 +215,10 @@ for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
     assert.deepEqual(moved.saved.executed?.target, target === undefined ? { kind: 'none' } : single(target));
 
     const name = '時計';
+    await share(f, 3);
     const proposal = `この形を「${name}」と呼んでもいいですか？`;
     const next = await f.exchange(proposal, { action: 'agree', target: 3, drafts: [agreeSpeech(name)], segments: [naming(proposal, name)] });
-    assert.deepEqual(next.input.agreeNames, ids.map(figureId => ({ name, figureId, sourceTurn: 5 })));
+    assert.deepEqual(next.input.agreeNames, [{ name, figureId: ids[3], sourceTurn: next.input.turn }]);
     assert.equal(next.saved.executed?.name, name);
     assert.deepEqual(next.state.ledger[ids[2]], { status: 'tentative', name: NEW_NAME });
   });
@@ -261,10 +281,12 @@ test('v3 keeps an unbound proposal through a confirmation, and drops it once the
   const quote = `この形を「${NEW_NAME}」で決めてもいいですか？`;
   const proposal = [naming(quote, NEW_NAME)];
   const f = await agreedFixture();
-  await f.exchange(quote, { action: 'confirm', target: 2, drafts: ['二つの部分がつながっていますか？'], segments: proposal });
+  const asked = '二つの部分がつながっていますか？';
+  const confirmed = await f.exchange(quote, { action: 'confirm', target: 2, drafts: [asked], segments: proposal,
+    aiSegments: [{ segmentId: 'shape', quote: asked, targets: [ids[2]], aspect: 'part', proposition: '二つの部分がつながる', name: null, linkedIssueId: null, respondsToTurn: null }] });
   const agreed = await f.exchange('はい、その形です。', { action: 'agree', target: 2, drafts: [agreeSpeech(NEW_NAME)] });
   assert.equal(agreed.saved.executed?.name, NEW_NAME);
-  assert.equal(agreed.input.agreeNames?.find(n => n.figureId === ids[2])?.sourceTurn, 3);
+  assert.equal(agreed.input.agreeNames?.find(n => n.figureId === ids[2])?.sourceTurn, confirmed.input.turn);
 
   const moved = await agreedFixture();
   await moved.exchange(quote, { action: 'move_on', target: 4, drafts: ['別の形を見ましょう。'], segments: proposal });
@@ -275,6 +297,7 @@ test('v3 keeps an unbound proposal through a confirmation, and drops it once the
 
 test('v3 rewrites a mismatched agree and rejects two mismatched drafts without a ledger commit', async () => {
   const f = await agreedFixture();
+  await share(f, 3);
   const quote = `この形は「${NEW_NAME}」でいいですか？`;
   const plan = { action: 'agree', target: 3, segments: [naming(quote, NEW_NAME)] } satisfies Omit<Plan, 'drafts'>;
   const result = await f.exchange(quote, { ...plan, drafts: [agreeSpeech(UNRELATED_NAME), agreeSpeech(NEW_NAME)] });
@@ -282,6 +305,7 @@ test('v3 rewrites a mismatched agree and rejects two mismatched drafts without a
   assert.deepEqual(result.trace.generationGuard, { violations: ['name_not_shown'], regenerated: true, fallback: false });
 
   const denied = await agreedFixture();
+  await share(denied, 3);
   const previous = structuredClone(denied.state());
   await assert.rejects(denied.exchange(quote, { ...plan, drafts: [agreeSpeech(UNRELATED_NAME), 'はい、それで決まりです。'] }), { code: 'unsafe_generation' });
   assert.deepEqual(denied.state(), previous);
@@ -295,13 +319,13 @@ test('v3 mentioning the chosen name while adopting another triggers regeneration
   const mismatch = mention + `この形は「${NEW_NAME}」と呼びましょう。`;
 
   for (const draft of [mismatch, mention + `この形の名前は「${NEW_NAME}」に決めました。`, mention + `この形の名前は「${NEW_NAME}」です。`]) {
-    const corrected = await fixture().exchange(quote, { ...plan, drafts: [draft, agreeSpeech(UNRELATED_NAME)] });
+    const corrected = await (await groundedFixture(3)).exchange(quote, { ...plan, drafts: [draft, agreeSpeech(UNRELATED_NAME)] });
     assert.deepEqual(corrected.trace.generationGuard, { violations: ['name_mismatch'], regenerated: true, fallback: false }, draft);
     assert.equal(corrected.text, agreeSpeech(UNRELATED_NAME));
     assert.deepEqual(corrected.state.ledger[ids[3]], { status: 'agreed', name: UNRELATED_NAME });
   }
 
-  const denied = fixture();
+  const denied = await groundedFixture(3);
   const previous = structuredClone(denied.state());
   await assert.rejects(denied.exchange(quote, { ...plan, drafts: [mismatch, mismatch] }), { code: 'unsafe_generation' });
   assert.deepEqual(denied.state(), previous);
@@ -311,10 +335,12 @@ test('v3 mentioning the chosen name while adopting another triggers regeneration
 
 test('v3 a public denial plus an unbound replacement reaches an agree on the new figure', async () => {
   const f = await agreedFixture();
+  const agreedTurn = f.state().judgments.at(-1)!.turnIndex + 1; // the AI turn that agreed; the next AI turn only shares figure 4
+  await share(f, 4);
   const denial = `その形には「${UNRELATED_NAME}」は違います。`;
   const replacement = `この形は「${NEW_NAME}」でいいですか？`;
   const result = await f.exchange(denial + replacement, { action: 'agree', target: 4, drafts: [agreeSpeech(NEW_NAME)],
-    segments: [naming(denial, UNRELATED_NAME, [ids[0]], 'deny'), naming(replacement, NEW_NAME)] });
+    segments: [{ ...naming(denial, UNRELATED_NAME, [ids[0]], 'deny'), respondsTo: agreedTurn }, naming(replacement, NEW_NAME)] });
   assert.ok(result.input.priorClaims.some(c => c.act === 'deny' && c.name === UNRELATED_NAME));
   assert.ok(result.input.agreeNames!.every(n => n.name === NEW_NAME && n.figureId !== ids[0]));
   assert.equal(result.trace.publicSpeech, agreeSpeech(NEW_NAME));
@@ -652,5 +678,29 @@ for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
     assert.equal(first.input.priorClaims.find(c => c.name === name)?.targets.length, 0);
     assert.ok(first.saved.executed?.action !== 'agree');
     assert.notEqual(first.state.ledger[ids[2]].status, 'agreed');
+  });
+}
+
+// B1: an unbound partner proposal is never agreed for a figure the AI has not shared in public; sharing one makes exactly that figure agreeable.
+for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
+  test(`v3 ${strategy} confirms the referent instead of agreeing an unbound proposal on an unshared figure, then agrees once it is shared`, async () => {
+    const f = fixture(strategy, { aiPublic: true });
+    const name = '鍵';
+    const proposal = `これは「${name}」とかどうかな？`;
+    await f.exchange(proposal, { action: 'accept', drafts: ['どの形のことか確かめますね。'], segments: [naming(proposal, name)] });
+    const ask = 'その名前でいいか聞いているんだ。';
+    const open = await f.exchange(ask, { action: 'confirm', target: 2, drafts: [SHARE_SPEECH],
+      segments: [{ quote: ask, name: null, targets: [], aspect: 'question', proposition: '呼び名でよいかの確認', act: 'ask' }],
+      aiSegments: [{ segmentId: 'shape', quote: SHARE_SPEECH, targets: [ids[2]], aspect: 'part', proposition: '細い部分が二つつながる', name: null, linkedIssueId: null, respondsToTurn: null }] });
+    assert.deepEqual(open.input.agreeNames, [], 'nothing was publicly shared before this turn');
+    assert.equal(Object.hasOwn(open.requests.find(r => r.questions.action)!.questions.action.criteria, 'agree'), false);
+    assert.notEqual(open.state.ledger[ids[2]].status, 'agreed');
+
+    const again = 'はい、その形です。それでいいですか？';
+    const shared = await f.exchange(again, { action: 'agree', target: 2, drafts: [agreeSpeech(name)],
+      segments: [{ quote: again, name: null, targets: [ids[2]], aspect: 'question', proposition: '呼び名でよいかの確認', act: 'ask' }] });
+    assert.deepEqual(shared.input.agreeNames, [{ name, figureId: ids[2], sourceTurn: 1 }]);
+    assert.deepEqual(shared.state.ledger[ids[2]], { status: 'agreed', name });
+    for (const other of ids.filter(id => id !== ids[2])) assert.notEqual(shared.state.ledger[other].name, name);
   });
 }

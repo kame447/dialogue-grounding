@@ -1,4 +1,4 @@
-// Synthetic v3 acceptance tests. The "change" cases require feec037; the
+// Synthetic v3 acceptance tests. The "change" cases cover the fixes; the
 // "control" cases also pass on 07116ae. Scripted choices verify the prompts
 // and runtime effects. Whether the model stops the loop needs a live check.
 import assert from 'node:assert/strict';
@@ -38,6 +38,7 @@ type Turn = {
   feature?: string;
   name?: string;
   forceName?: boolean;
+  agreeIfOffered?: { name: string; speech: string };
   alternatives?: Partial<Record<JevAction, number>>;
 };
 type NativeRequest = {
@@ -46,7 +47,7 @@ type NativeRequest = {
   questions: Record<string, { criteria: Record<string, string> }>;
 };
 type ActionMessages = Array<{ role: string; content: unknown }>;
-type Attempt = { input: JevDecisionInput; wire: NativeRequest[]; generation: ActionMessages[]; trace: JevTurnTrace };
+type Attempt = { input: JevDecisionInput; wire: NativeRequest[]; generation: ActionMessages[]; trace: JevTurnTrace; state: JevPrivateState };
 
 const profile = researchTrialProfileV3({ timeoutMs: null, maxCompletionTokens: null },
   { ...deadlines(), localMs: 3000, decisionMs: 3000, generationMs: 3000 }, 'two_stage_v3');
@@ -74,6 +75,8 @@ async function replay(strategy: Strategy, scenario: Turn[], onFailure?: (attempt
   let current = scenario[0];
   let wire: NativeRequest[], generation: ActionMessages[], trace: JevTurnTrace, input: JevDecisionInput;
   let selectedAction: string;
+  const scriptedSpeech = () => selectedAction === 'agree' && current.agreeIfOffered
+    ? current.agreeIfOffered.speech : current.speech;
   let responseId = 0;
   const readKey = async () => 'sk-or-SYNTHETIC-offline-00000000000';
   const fetchImpl = async (_url: string, options: RequestInit) => {
@@ -83,15 +86,23 @@ async function replay(strategy: Strategy, scenario: Turn[], onFailure?: (attempt
     const answers = Object.fromEntries(Object.entries(request.questions).map(([key, { criteria }]) => {
       const labels = Object.keys(criteria);
       let choice = labels[0];
-      if (key === 'action') selectedAction = choice = current.action;
-      if (key === 'target') choice = current.target === undefined ? 'none' : 'figure_' + current.target;
+      if (key === 'action') {
+        selectedAction = choice = current.agreeIfOffered && labels.includes('agree') ? 'agree' : current.action;
+      }
+      const attemptingAgreement = selectedAction === 'agree' ? current.agreeIfOffered : undefined;
+      if (key === 'target') {
+        choice = attemptingAgreement
+          ? labels.find(label => /^figure_\d+$/u.test(label)) ?? labels[0]
+          : current.target === undefined ? 'none' : 'figure_' + current.target;
+      }
       if (key === 'human_referent') choice = current.referent === undefined ? 'none' : 'figure_' + current.referent;
       if (key === 'repair_issue') choice = labels.includes('issue_0') ? 'issue_0' : 'none';
       if (key === 'prospect') choice = 'uncertain';
       if (key === 'basis') choice = 'partner_uncertain';
       if (key === 'name' || key === 'feature') {
-        const want = key === 'name' ? current.name : current.feature;
-        if (want) choice = labels.find(label => JSON.parse(criteria[label]).value === want) ?? 'name_999';
+        const want = key === 'name' ? attemptingAgreement?.name ?? current.name : current.feature;
+        if (want) choice = labels.find(label => JSON.parse(criteria[label]).value === want)
+          ?? (attemptingAgreement ? labels[0] : 'name_999');
       }
       const match = /^segment_(\d+)_(act|antecedent|support)$/u.exec(key);
       if (match) {
@@ -125,7 +136,7 @@ async function replay(strategy: Strategy, scenario: Turn[], onFailure?: (attempt
       if (phase === 'ai_extraction') return { text: extract(current.ai) };
       assert.equal(phase, 'generation');
       generation.push(structuredClone(messages));
-      return { text: current.speech, model: 'synthetic-luna' };
+      return { text: scriptedSpeech(), model: 'synthetic-luna' };
     } },
     jevDecision: { ...decision, decide(next: JevDecisionInput, options?: Parameters<typeof decision.decide>[1]) {
       input = structuredClone(next);
@@ -142,12 +153,12 @@ async function replay(strategy: Strategy, scenario: Turn[], onFailure?: (attempt
     generation = [];
     const human = append('human', turn.human);
     const result = await runtime.runAiTurn({ events, privateState: state, lastEventId: human.id, requestSeq: human.seq }).catch((error: unknown) => {
-      onFailure?.({ input, wire, generation, trace });
+      onFailure?.({ input, wire, generation, trace, state });
       throw error;
     });
     assert.ok(trace! && input!, 'a native decision must execute');
     assert.equal(trace.publicSpeech, result.text);
-    assert.equal(result.text, turn.speech);
+    assert.equal(result.text, scriptedSpeech());
     assert.equal(trace.decisions.at(-1)?.action, selectedAction!);
     assert.ok(!trace.generationGuard.fallback, 'forecast could not be published');
     assert.deepEqual(trace.generationGuard.violations, []);
@@ -324,6 +335,62 @@ test('A2 control: a reasoned clarification leaves the ledger open and a backchan
   assert.match(unclear.speech, /指している形がまだ分からない/u);
   assert.equal(unclear.state.ledger[slot].name, null);
   assert.equal(unclear.state.repairHistory.at(-1)?.question, feature);
+});
+
+test('A2 change: an unbound name cannot be adopted during a repeated approval request without a publicly shared figure', async () => {
+  const proposal = '呼び名の候補に鍵を挙げます。';
+  const offered: Turn = {
+    human: proposal, local: [propose(proposal, 'name_propose')], action: 'accept', speech: '呼び名の候補ですね。',
+  };
+  const question = '先ほど挙げた名前で決めても構いませんか？';
+  const agreement = { name, speech: 'はい、「鍵」にしましょう。' };
+  const request: Turn = {
+    human: question, local: [{ text: question, aspect: 'name', act: 'ask' }],
+    action: 'accept', speech: 'どの形の呼び名か、まだ分かりません。',
+    agreeIfOffered: agreement,
+  };
+  const identified = '丸い輪に細い棒がついた形のことです。';
+  const [, , adopted] = await sameScenario([locate, {
+    ...offered, human: identified + proposal, ...ownFigure,
+    local: [{ text: identified, aspect: 'part', act: 'assert', targets: [slot] }, ...offered.local!],
+  }, request]);
+  assert.equal(adopted.input.priorClaims.find(c => c.act === 'name_propose')?.targets.length, 0);
+  assert.ok(adopted.input.priorClaims.some(c => c.speaker === 'ai' && c.act === 'ask' && c.targets.includes(slot)));
+  assert.deepEqual(adopted.saved.jevTurn.executed?.target, { kind: 'single', figureId: slot });
+  assert.equal(adopted.saved.judgment.action, 'agree');
+  assert.equal(adopted.saved.judgment.candidateName, name);
+  assert.equal(adopted.speech, agreement.speech);
+  assert.equal(adopted.state.ledger[slot].status, 'agreed');
+  assert.equal(adopted.state.ledger[slot].name, name);
+
+  const outcomes = await Promise.all(strategies.map(async strategy => {
+    let failure: Attempt | undefined;
+    const result = await replay(strategy, [offered, request], attempt => { failure = attempt; }).then(
+      turns => turns.at(-1)!, (error: unknown) => {
+        assert.ok(failure);
+        assert.ok(error instanceof Error);
+        assert.match(error.message, /^(decision_failed|invalid_decision)$/u);
+        assert.equal(failure.trace.status, 'error');
+        assert.equal(failure.trace.publicSpeech, null);
+        return failure;
+      },
+    );
+    assert.ok(actionOptions(result), 'the native action question must be reached');
+    assert.deepEqual(result.input.priorClaims.find(c => c.act === 'name_propose')?.targets, []);
+    assert.equal(result.input.priorClaims.find(c => c.sourceTurn === result.input.turn)?.act, 'ask');
+    assert.ok(result.input.priorClaims.every(c => c.targets.length === 0));
+    assert.equal(result.input.humanReferent?.scores?.none, 1);
+    const committed = result.state.judgments.at(-1)?.judgment.action;
+    const published = result.trace.publicSpeech;
+    return {
+      strategy, committed, published,
+      agreed: Object.entries(result.state.ledger).filter(([, entry]) => entry.status === 'agreed')
+        .map(([figureId, entry]) => ({ figureId, name: entry.name })),
+    };
+  }));
+  assert.deepEqual(outcomes.filter(({ committed, published, agreed }) =>
+    committed === 'agree' || published === agreement.speech || agreed.length > 0), [],
+  'name evidence alone cannot authorize publication or a ledger agreement');
 });
 
 const rejectedConstrual = 'フックのようには見えません。';

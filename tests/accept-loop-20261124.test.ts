@@ -68,15 +68,43 @@ test('v1/v2 action criteria are unchanged by the accept-loop text', () => {
   }
 });
 
-test('the casual naming question is a name_propose criterion, still distinct from asking about features', async () => {
-  const { LOCAL_FUNCTION_CRITERIA } = await import('../dialogue-model/runtime/local-grounding/classify.ts');
-  assert.match(LOCAL_FUNCTION_CRITERIA.name_propose, /〜とかどう？/);
-  assert.match(LOCAL_FUNCTION_CRITERIA.name_propose, /見立てだけは含めない/);
-  assert.match(LOCAL_FUNCTION_CRITERIA.ask, /呼び名を提案する疑問形はname_propose/);
+test('the casual naming question is a name_propose criterion in two_stage_v3 classification requests only', async () => {
+  const { LOCAL_FUNCTION_CRITERIA, LOCAL_FUNCTION_CRITERIA_V3, LOCAL_CLASSIFICATION_INSTRUCTIONS } = await import('../dialogue-model/runtime/local-grounding/classify.ts');
+  const { buildJevLocalTestPayload } = await import('../dialogue-model/runtime/local-grounding/jev-local-test.ts');
+  assert.match(LOCAL_FUNCTION_CRITERIA_V3.name_propose, /〜とかどう？/);
+  assert.match(LOCAL_FUNCTION_CRITERIA_V3.name_propose, /見立てだけは含めない/);
+  assert.match(LOCAL_FUNCTION_CRITERIA_V3.ask, /呼び名を提案する疑問形はname_propose/);
+  assert.equal(LOCAL_FUNCTION_CRITERIA.name_propose.includes('とかどう'), false);
+  assert.equal(LOCAL_CLASSIFICATION_INSTRUCTIONS.includes('とかどう'), false, 'the shared classifier instruction keeps its older bytes');
+  const input = { turn: 2, publicTurns: [{ turn: 1, speaker: 'ai' as const, text: '丸い部分があります' }, { turn: 2, speaker: 'human' as const, text: 'これは蝶とかどう？' }],
+    segments: [{ segmentId: 's1', quote: 'これは蝶とかどう？', targets: ['own-a'], aspect: 'name' as const, proposition: '蝶と呼ぶ', name: '蝶', linkedIssueId: null, respondsToTurn: null }],
+    priorClaims: [] };
+  const criteria = (layout?: 'two_stage_v1' | 'two_stage_v2' | 'two_stage_v3') => buildJevLocalTestPayload(input, layout).questions.segment_0_act.criteria;
+  assert.deepEqual(criteria(), LOCAL_FUNCTION_CRITERIA);
+  assert.deepEqual(criteria('two_stage_v2'), LOCAL_FUNCTION_CRITERIA);
+  assert.deepEqual(criteria('two_stage_v3'), LOCAL_FUNCTION_CRITERIA_V3);
+  assert.deepEqual(Object.keys(criteria('two_stage_v3')), Object.keys(LOCAL_FUNCTION_CRITERIA));
 });
 
 test('v3 agree criterion keeps the partner approval request open until answered, with reasons when not agreeing', () => {
   const c = actions(withPartnerName());
   assert.match(c.agree, /相手が自分の出した呼び名でよいかを尋ねている間は、その問いは答えるまで未回答/);
   assert.match(c.agree, /異議や不確実性があるときは、その理由を具体的に確かめるconfirmかrepair/);
+});
+
+test('the partner-name exclusion reads the claims that are actually sent: a proposal whose source turn was dropped leaves no exclusion', () => {
+  const build = (keepSource: boolean): JevDecisionInput => {
+    const v = withPartnerName();
+    v.observations.figures[0].holistic.push({ ...v.observations.figures[0].holistic[0], construal: '蝶' }); // the AI's own observation happens to use the same word
+    v.turn = 3;
+    v.publicTurns = [...(keepSource ? [{ turn: 1, speaker: 'human' as const, text: 'これは蝶とかどう？' }] : []),
+      { turn: 3, speaker: 'human', text: '続けましょう。' }];
+    if (!keepSource) { v.publicNames = []; v.agreeNames = []; }
+    return v;
+  };
+  const sent = (v: JevDecisionInput) => JSON.parse(buildJevDecisionPayload(v, V3).state).priorClaims.length;
+  assert.equal(sent(build(true)), 1);
+  assert.equal(sent(build(false)), 0, 'the claim without a retained source turn is not sent');
+  assert.equal(names(build(true), 'propose_name').includes('蝶'), false);
+  assert.equal(names(build(false), 'propose_name').includes('蝶'), true, 'catalog follows the sent list, so a replay from the request agrees');
 });

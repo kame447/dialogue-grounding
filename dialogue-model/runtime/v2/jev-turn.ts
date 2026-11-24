@@ -237,6 +237,7 @@ function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns: reado
   const prevPublicIds = new Set(prevJudgment && prevIds.length ? claims.filter(c => c.speaker === "ai" &&
     c.sourceTurn > prevJudgment.turnIndex && c.sourceTurn < turn).flatMap(c => c.targets) : []);
   const wasFocused = (id: string) => prevIds.includes(id) || focusedTurns.some(j => j.ids.includes(id));
+  const aiSharedIds = new Set(claims.filter(c => c.speaker === "ai" && c.sourceTurn > lastBoundary && c.sourceTurn < turn).flatMap(c => c.targets));
 
   return openClaims.flatMap(c => {
     const name = c.name!;
@@ -253,7 +254,9 @@ function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns: reado
       if (focusMoved || replaced) return [];
     }
     const currentUnbound = c.sourceTurn === turn || isHumanProposal(c) && c.sourceTurn === latestProposal;
-    const candidates = c.targets.length ? c.targets : currentUnbound ? slots : [];
+    // An unbound partner proposal can be agreed only for a figure the AI has already shared publicly (a public AI claim about it) and executed on;
+    // otherwise the approval request is answered by confirming which figure is meant.
+    const candidates = c.targets.length ? c.targets : currentUnbound ? slots.filter(id => aiSharedIds.has(id) && wasFocused(id)) : [];
     const antecedent = c.act === "name_accept" ? publicClaims.find(p => p.id === c.respondsTo && p.name === name) : undefined;
     const source = publicTurns.find(t => t.turn === c.sourceTurn && t.text.includes(name)) ??
       (antecedent && publicTurns.find(t => t.turn === antecedent.sourceTurn && t.text.includes(name))) ??
