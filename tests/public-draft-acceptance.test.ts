@@ -4,12 +4,13 @@ import test from 'node:test';
 import { createJevDecisionClient } from '../dialogue-model/runtime/decision/jev-decision.ts';
 import type { JevDecisionPayload } from '../dialogue-model/runtime/decision/jev-decision.ts';
 import { createProfileDialogue } from '../dialogue-model/runtime/diagnostics/parity-live/replay.ts';
-import { s4Probe } from '../dialogue-model/runtime/diagnostics/parity-verify/intervention-records.ts';
+import { interventionChecks, s4Probe } from '../dialogue-model/runtime/diagnostics/parity-verify/intervention-records.ts';
 import type { LocalSegmentProposal } from '../dialogue-model/runtime/local-grounding/contract.ts';
 import { validateObservationMemo } from '../dialogue-model/runtime/observation/observe.ts';
 import { researchTrialProfileV3 } from '../dialogue-model/runtime/v2/research-profile.ts';
 import type { JevPrivateState, JevTurnTrace } from '../dialogue-model/runtime/v2/jev-turn.ts';
 import { anchors, deadlines, ids, image, memo } from './support/s4-integration/harness.ts';
+import { buildRecords } from './support/s4-v3-records.ts';
 
 const strategies = ['repair-first', 'bypass-enabled'] as const;
 const profile = researchTrialProfileV3({ timeoutMs: null, maxCompletionTokens: null }, {
@@ -168,5 +169,37 @@ for (const strategy of strategies) {
     const outcome = await run(strategy, { human: 'どんな形か照合したいです。', drafts: [alternatives, clean] });
     checkPublished(outcome, clean);
     checkRetry(outcome, alternatives);
+  });
+
+  test(`v3 ${strategy} publishes a single question with a list of visual features on the first draft`, async () => {
+    const human = '照らし合わせるため、手がかりを箇条書きで教えてください。';
+    const speech = [
+      '手がかりは次の二つです。',
+      '・輪に切れ目がある',
+      '・細い棒が輪に接している',
+      'この二つがそろう形ですか？',
+    ].join('\n');
+    const result = await run(strategy, { human, drafts: [speech, speech] });
+    assert.equal(result.requests.length, 1, JSON.stringify(result.trace.generationGuard));
+    checkPublished(result, speech);
+    assert.deepEqual(result.trace.generationGuard, { violations: [], regenerated: false, fallback: false });
+    assert.deepEqual(result.result!.privateState.ledger, result.before.ledger);
+
+    // Exercise the same first draft in the paired replay harness and check the persisted turn.
+    const records = await buildRecords({ label: strategy, technicalTrial: { version: 'adaptive_repair_v3' },
+      turns: [{ human, plan: { action: 'confirm', target: 'figure_0', speech } }],
+    });
+    const trial = records.trials[0];
+    assert.equal(trial.turns[0].publicText, speech);
+    assert.deepEqual(trial.lastCommittedState.ledger, trial.replay[0].tape.state.ledger);
+    assert.equal(trial.replay[0].result.status, 'same_material_intervention_verified');
+    for (const side of trial.replay[0].result.sides) {
+      assert.equal(side.requests.filter((request: { phase: string }) => request.phase === 'generation').length, 1);
+    }
+    const checks = interventionChecks(records);
+    const required = ['identity.intervention_policy', ...['shape', 'binding', 'execution', 'replay']
+      .map(check => 'intervention.trial.0.attempt.0.' + check)];
+    assert.deepEqual(required.map(id => checks.find(check => check.id === id)?.status),
+      required.map(() => 'pass'), JSON.stringify(checks));
   });
 }

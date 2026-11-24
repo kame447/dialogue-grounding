@@ -249,9 +249,9 @@ function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns: reado
   // blocks agreement on that figure until a later referent claim of theirs re-affirms it. This is about the target, not about the proposed name.
   const claimTargets = (c: LocalClaimView) => c.targets.length ? c.targets : claims.find(p => p.id === c.respondsTo)?.targets ?? [];
   const referentClaims = claims.filter(c => c.speaker === "human" && c.aspect === "referent" && c.sourceTurn > lastBoundary);
-  // A denial stands until the partner re-affirms that very figure: a later agree/assert that names it alone (one target, or the one its answer concerns)
-  // AND whose own exchange's referent estimate also points at it. Keeping it as one candidate among several, narrowing to a set of figures, asking,
-  // backchannels and every other act leave the denial in place.
+  // A denial stands until the partner re-affirms that very figure: a later referent AGREE that answers the AI's own public claim about it (one target,
+  // or the one that claim concerns) AND whose own exchange's referent estimate puts it strictly first. An assert (it cannot be told from merely keeping the
+  // figure as a possibility), keeping it as one candidate, narrowing to a set, asking, backchannels and every other act leave the denial in place.
   const referentAt = (at: number) => at === turn ? current : judgments.find(j => j.turnIndex === at)?.jevTurn.humanReferent ?? null;
   const selects = (m: { status: string; scores: Record<string, number> | null } | null, id: string) =>
     !!m && m.status === "ok" && !!m.scores && typeof m.scores[id] === "number" && Object.entries(m.scores).every(([key, value]) => key === id || m.scores![id] > value);
@@ -259,8 +259,8 @@ function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns: reado
     const relevant = referentClaims.filter(c => c.act === "deny" ? claimTargets(c).includes(id) : false);
     const lastDeny = relevant.at(-1);
     if (!lastDeny) return false;
-    const after = referentClaims.filter(c => referentClaims.indexOf(c) > referentClaims.indexOf(lastDeny) && ["agree", "assert"].includes(c.act) &&
-      claimTargets(c).length === 1 && claimTargets(c)[0] === id);
+    const after = referentClaims.filter(c => referentClaims.indexOf(c) > referentClaims.indexOf(lastDeny) && c.act === "agree" &&
+      claims.find(p => p.id === c.respondsTo)?.speaker === "ai" && claimTargets(c).length === 1 && claimTargets(c)[0] === id);
     return !after.some(c => selects(referentAt(c.sourceTurn), id));
   };
   const aiSharedIds = new Set(claims.filter(c => c.speaker === "ai" && c.sourceTurn > lastBoundary && c.sourceTurn < turn).flatMap(c => c.targets));
@@ -894,7 +894,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         ...publicTurns.map(t => ({ role: t.speaker === "human" ? "user" as const : "assistant" as const, content: t.text }))];
       const violations = (text: string, context: Message[]) => [...new Set([...findGuardViolations(text, judgment.action), ...findLocalPublicationViolations(text, context),
         ...(questionLayout === "two_stage_v3" ? findOrientationLeaks(text) : []),
-        ...(questionLayout === "two_stage_v3" ? findWorkingNoteLeaks(text, publicTurns.map(t => t.text)) : []),
+        ...(questionLayout === "two_stage_v3" ? findWorkingNoteLeaks(text, events.filter(e => e.seq <= latest.seq).map(e => e.text)) : []),
         ...(questionLayout === "two_stage_v3" && judgment.action === "agree" && judgment.candidateName !== null
           ? findAgreeNameMismatch(text, judgment.candidateName) : []),
         ...(questionLayout === "two_stage_v3" && judgment.action === "propose_name" && judgment.candidateName !== null

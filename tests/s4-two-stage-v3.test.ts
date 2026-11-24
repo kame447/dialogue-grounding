@@ -472,3 +472,16 @@ test('a working-note retry reason is accepted only for a draft that has one, on 
     assert.equal(status(dropped, 'replay'), 'mismatch', label);
   }
 });
+
+test('the comparison condition must carry exactly the reasons its own draft shows (orientation and a name decision), and older layouts none of the v3 ones', async () => {
+  const decisions = [stageOne('retry', 'accept'), stageTwo('retry', 'accept', 'none')];
+  const namingReason = '前の下書きは名称の決定・合意を表していました。決定・合意を表明せず、このactionの範囲で書き直してください。';
+  const mixed = await records('two_stage_v3', decisions, { retry: { current: true, drafts: ['右側に出ています。この形は「name-0」にしましょう。', 'そう見えるんですね。'] } });
+  pass(mixed);
+  for (const label of ['bypass-enabled', 'repair-first']) {
+    assert.ok((generationRequests(mixed.trials[0].replay[0].result.sides.find((s: any) => s.label === label))[1].payload.messages.at(-1).content as string).includes(namingReason), label);
+    const dropped = structuredClone(mixed);
+    changeRetry(dropped, label, (text: string) => text.replace(namingReason, ''));
+    assert.equal(status(dropped, 'replay'), 'mismatch', `${label}: the name-decision reason may not be dropped`);
+  }
+});

@@ -249,12 +249,13 @@ export function findWorkingNoteLeaks(text: string, publicTexts: readonly string[
   const english = runs.some(run => run.split(/[^A-Za-z'’-]+/u).filter(w => w && !allowed.has(w.toLowerCase())).length >= 3);
   return english || enumeratesAlternatives(text) ? ["working_note"] : [];
 }
-/** Two or more labelled or listed alternatives (案1：… 案2：…, a numbered or bulleted list): a set of candidate replies, never one reply. */
+/** Two or more independent alternative replies: labelled ones (案1：… 案2：…), or lines that are each a whole quoted reply. A list of features that
+ * belongs to one question or explanation (a bulleted or numbered list of plain items) is one reply and is not counted. */
 function enumeratesAlternatives(text: string): boolean {
   const t = text.normalize("NFKC");
   const labelled = t.match(/(?:^|\n|[。!?])\s*(?:案|候補|パターン|返答|Option|Draft|Alt)\s*[0-9A-Za-z一二三]\s*[:.)]/gu) ?? [];
-  const listed = t.match(/^\s*(?:[0-9]+[.)]|[-・*•])\s*\S/gmu) ?? [];
-  return labelled.length >= 2 || listed.length >= 2;
+  const quotedReplies = t.match(/^\s*(?:[0-9]+[.)]|[-・*•])?\s*[「『][^」』\n]{4,}[」』]\s*$/gmu) ?? [];
+  return labelled.length >= 2 || quotedReplies.length >= 2;
 }
 
 /** All publication rules for the committed primary act; codes only. */

@@ -41,6 +41,7 @@ type Turn = {
   speech: string;
   target?: number;
   referent?: number;
+  referentTie?: 'multiple';
   feature?: string;
   name?: string;
   forceName?: boolean;
@@ -145,8 +146,12 @@ async function replay(strategy: Strategy, scenario: Turn[], onFailure?: (attempt
         }
       }
       if (key !== 'name' || !current.forceName) assert.ok(labels.includes(choice), key + ' does not offer ' + choice);
-      const probabilities = Object.fromEntries(labels.map(label =>
-        [label, label === choice ? 1 : key === 'action' ? current.alternatives?.[label as JevAction] ?? 0 : 0]));
+      const tie = key === 'human_referent' ? current.referentTie : undefined;
+      if (tie) assert.ok(labels.includes(tie) && tie !== choice, 'tied referent labels must both be offered');
+      const probabilities = Object.fromEntries(labels.map(label => [
+        label, tie ? Number(label === choice || label === tie) / 2
+          : label === choice ? 1 : key === 'action' ? current.alternatives?.[label as JevAction] ?? 0 : 0,
+      ]));
       return [key, { type: 'choice', choice, probabilities }];
     }));
     const response = { model: request.model, id: 'gen-conv-' + ++responseId, usage: { cost: 0 }, answers };
@@ -595,17 +600,23 @@ const afterReferentDenial: Turn[] = [...checkReferent, {
   human: earlierDenial.text, local: [earlierDenial], action: 'accept', speech: '候補をもう少し絞りましょう。',
 }];
 const repeatApproval = '先ほどの「鍵」という呼び名を使うことには賛成ですか？';
-const leaveOpen = '指している形をもう少し確かめてから、呼び名を決めたいです。';
+const leaveOpen = alternateFeature + '形のことですか？';
+const possibleFigure = 'その形も候補には入ると思います。';
+const explicitAgreement = 'はい、確かめ直しました。その形で合っています。';
 
-for (const { label, text, aspect, act, targets, identified } of [
+for (const { label, text, aspect, act, targets, referent, referentTie, adopt } of [
   { label: 'change (a) retains the rejected figure as one possibility',
-    text: 'さっきの形も可能性の一つには入ります。', aspect: 'referent', act: 'assert', targets: [slot] },
+    text: possibleFigure, aspect: 'referent', act: 'assert', targets: [slot] },
+  { label: 'change (a) retains the denial even when a possibility names the unique referent estimate',
+    text: possibleFigure, aspect: 'referent', act: 'assert', targets: [slot], referent: 0 },
   { label: 'change (b) narrows to two possibilities including the rejected figure',
     text: '見比べたところ、さっきの形か、輪に切れ目がある別の形のどちらかです。', aspect: 'referent', act: 'assert', targets: [slot, otherSlot] },
-  { label: 'control (c) explicitly identifies the same figure',
-    text: '確かめ直したら、指していたのはさっきの形でした。', aspect: 'referent', act: 'assert', targets: [slot], identified: true },
+  { label: 'change (c) an assertion pointing to the same figure does not lift the denial',
+    text: '確かめ直したら、指していたのはさっきの形でした。', aspect: 'referent', act: 'assert', targets: [slot], referent: 0 },
   { label: 'control (c) explicitly answers that the same figure is meant',
-    text: 'はい、確かめ直しました。その形で合っています。', aspect: 'referent', act: 'agree', targets: [slot], identified: true },
+    text: explicitAgreement, aspect: 'referent', act: 'agree', targets: [slot], referent: 0, adopt: true },
+  { label: 'control (c) explicit agreement still leaves a tied referent uncertain',
+    text: explicitAgreement, aspect: 'referent', act: 'agree', targets: [slot], referent: 0, referentTie: 'multiple' },
   { label: 'control (d) asks about the figure',
     text: 'さっき挙げた形のことを聞いているんですか？', aspect: 'referent', act: 'ask', targets: [slot] },
   { label: 'control (d) acknowledges the question',
@@ -618,7 +629,8 @@ for (const { label, text, aspect, act, targets, identified } of [
     const reply: Segment = { text, aspect, act, targets: [...targets], antecedent };
     const final: Turn = {
       human: reply.text + repeatApproval, local: [reply, propose(repeatApproval, 'ask')],
-      referent: identified ? 0 : undefined, action: 'accept', speech: leaveOpen, agreeIfOffered: proposedAgreement,
+      referent, referentTie, action: 'confirm', target: 0, feature: alternateFeature, speech: leaveOpen,
+      agreeIfOffered: proposedAgreement,
     };
     const pair = await Promise.all(strategies.map(strategy => replay(strategy, [...afterReferentDenial, final])));
     const [repair, bypass] = pair.map(turns => turns.at(-1)!);
@@ -649,21 +661,28 @@ for (const { label, text, aspect, act, targets, identified } of [
       assert.equal(incoming.act, reply.act);
       assert.deepEqual(incoming.targets, reply.targets);
       assert.equal(incoming.respondsTo, antecedent ? publicQuestion.id : null);
-      assert.equal(last.input.humanReferent?.scores?.[identified ? slot : 'none'], 1);
+      const scores = last.input.humanReferent?.scores;
+      assert.ok(scores);
+      const highest = Math.max(...Object.values(scores));
+      assert.deepEqual(Object.keys(scores).filter(id => scores[id] === highest),
+        referentTie ? [slot, referentTie] : [referent === undefined ? 'none' : slot]);
+      assert.equal(highest, referentTie ? 0.5 : 1);
       return {
         strategy: strategies[i], offered: Object.hasOwn(actionOptions(last), 'agree'),
         names: last.input.agreeNames,
         action: last.saved.judgment.action, speech: last.speech,
+        feature: last.saved.jevTurn.executed?.feature,
         agreed: Object.entries(last.state.ledger).filter(([, entry]) => entry.status === 'agreed')
           .map(([figureId, entry]) => ({ figureId, name: entry.name })),
       };
     });
     assert.deepEqual(outcomes, strategies.map(strategy => ({
-      strategy, offered: Boolean(identified),
-      names: identified ? [{ name, figureId: slot, sourceTurn: 1 }] : [],
-      action: identified ? 'agree' : 'accept',
-      speech: identified ? proposedAgreement.speech : leaveOpen,
-      agreed: identified ? [{ figureId: slot, name }] : [],
+      strategy, offered: Boolean(adopt),
+      names: adopt ? [{ name, figureId: slot, sourceTurn: 1 }] : [],
+      action: adopt ? 'agree' : 'confirm',
+      speech: adopt ? proposedAgreement.speech : leaveOpen,
+      feature: adopt ? null : alternateFeature,
+      agreed: adopt ? [{ figureId: slot, name }] : [],
     })));
   });
 }
