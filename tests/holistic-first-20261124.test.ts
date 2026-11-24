@@ -71,6 +71,12 @@ async function generation(strategy: 'repair-first' | 'bypass-enabled', human: st
   return lunaPayloads[0];
 }
 
+test('the confirm scope only checks the feature the decision chose', async () => {
+  const { HOLISTIC_V3_ACTION_SCOPE_V2: scope } = await import('../dialogue-model/runtime/v2/dialogue-v2.mjs') as unknown as { HOLISTIC_V3_ACTION_SCOPE_V2: Record<string, string> };
+  assert.match(scope.confirm, /判断で選ばれた特徴だけを確かめ、ほかの部品の確認を足さない/u);
+  assert.doesNotMatch(scope.confirm, /足りるときは部品の確認に進まない|相手が絞れない/u, 'whether to confirm is the decision\'s call, not the generator\'s');
+});
+
 test('the v3 trial generation text puts the whole reading first and answers several figures each, identically for both strategies', async () => {
   for (const [human, reply] of [['どんな図形がありますか？', '全体は丸みのある形です。'], ['先端に小さい四角ついてる？', 'うん、端に小さな四角がついてる。'],
     ['残りの三つはどんな形？', '一つ目は細長い形、二つ目は三角が重なった形、三つ目は角ばった形です。']] as const) {
@@ -78,7 +84,10 @@ test('the v3 trial generation text puts the whole reading first and answers seve
     assert.deepEqual(repair, bypass, human);
     const system = repair.filter(m => m.role === 'system').map(m => m.content).join('\n');
     assert.match(system, /図形全体を尋ねられた最初の説明/u);
-    assert.match(system, /形の分析（部分の形・つながり・配置）は、相手が対象を絞れない/u);
+    assert.match(system, /形の分析（部分の形・つながり・配置）は、判断にdiscriminatingFeatureがあるときだけ/u);
+    assert.match(system, /判断が求めていない部品の確認や、すでに肯定された特徴の再確認を自分から足さず/u);
+    // When to analyse is Jev's call (HOLISTIC_CONFIRM_V3), not the generator's.
+    assert.doesNotMatch(system, /相手が対象を絞れない|似た候補が残る|見立てが食い違う/u);
     assert.match(system, /最初から細部を尋ねられたときはその質問に直接答え、毎回先頭へ見立てを付けないでください/u);
     assert.match(system, /複数の図形をまとめて尋ねられたときは、求められた図形それぞれに短く答えてください/u);
     assert.match(system, /全体の見立てを述べることは、名前の提案や採用ではありません/u);
