@@ -760,3 +760,22 @@ test('05g: internal items (field names, local ids, an echo of the send\'s own in
     assert.notEqual(await dynamic(bad), 'same_material_intervention_verified', 'dynamic: ' + first);
   }
 });
+
+import { AI_FUNCTION_INSTRUCTIONS } from '../dialogue-model/runtime/local-grounding/jev-ai-public.ts';
+test('05h: not_reached only where material outside the record is needed; provable contradictions stay mismatch', async () => {
+  const hiddenLine = AI_FUNCTION_INSTRUCTIONS.split(/\r?\n/u).map((l: string) => l.trim()).find((l: string) => l.length >= 24)!;
+  const aiOn = (n: any) => n.trials[0].profile.localGrounding?.aiPublicClaims === true;
+  const hidden = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v1', retry: { current: true, drafts: [hiddenLine, 'そう見えるんですね。'] } });
+  const states = checksOf(hidden).map((c: any) => c.status);
+  assert.ok(aiOn(hidden), 'AI public claims are on in this material');
+  assert.ok(!states.includes('mismatch'), 'a regeneration only a hidden instruction explains is not a mismatch');
+  assert.ok(states.includes('not_reached'));
+  // issueId explains the regeneration; adding a text-decidable code afterwards is a provable contradiction.
+  const issue = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v1', retry: { current: true, drafts: ['この形のissueIdは違います。', 'そう見えるんですね。'] } });
+  pass(issue);
+  for (const code of ['internal_image', 'internal_credential']) {
+    const forged = structuredClone(issue);
+    for (const t of traceCopies(forged)) t.generationGuard.violations = [...t.generationGuard.violations, code];
+    assert.ok(checksOf(forged).some((c: any) => c.status === 'mismatch'), code);
+  }
+});

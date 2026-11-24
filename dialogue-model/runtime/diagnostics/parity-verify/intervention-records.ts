@@ -677,13 +677,18 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
     // The same composition as the run (guard codes + the local publication checks against that send's own recorded messages); no private instruction is stored.
     const codes=(i:number)=>typeof draftTexts[i]==='string'?[...new Set([...draftViolationCodes(draftTexts[i],cc,genMessages[i]??[]),...actCode(i)])]:['empty_utterance'];
     const fb=orientationSafeFallback({action:ex.action,candidateName:cc.candidateName,discriminatingFeature:typeof ex.feature==='string'?ex.feature:null} as any);
-    const out=deriveGenerationOutcome(codes(0),generationCount===2?codes(1):null,fb,fb!==null&&generationCodesClean(fb,cc,genMessages[generationCount-1]??[]));
+    const clean=fb!==null&&generationCodesClean(fb,cc,genMessages[generationCount-1]??[]);
+    let out=deriveGenerationOutcome(codes(0),generationCount===2?codes(1):null,fb,clean);
+    // A regeneration that the known drafts cannot explain is a contradiction, except where a hidden instruction (AI public claims on: the remaining private
+    // instructions are not in the recorded messages) could have been echoed: that needs material the record does not hold (not reached, not a mismatch).
+    if(out.kind==='publish_first'&&generationCount===2&&aiOn){out=deriveGenerationOutcome([...codes(0),'internal_prompt_echo'],codes(1),fb,clean);missing=true;}
     if(out.kind==='stop'||out.regenerated!==(generationCount===2))return'invalid';
     if(label===tr.label){
      const g=t.generationGuard,derived=new Set(out.violations),recorded:string[]=g?.violations??[];
      const extra=recorded.filter(c=>!derived.has(c));
-     if(g?.fallback!==(out.kind==='fallback')||g?.regenerated!==out.regenerated||[...derived].some(c=>!recorded.includes(c))||extra.some(c=>!['internal_image','internal_credential','internal_prompt_echo'].includes(c)))return'invalid';
-     // A prompt echo of an instruction that is not in this send's recorded messages (AI public claims on) cannot be re-derived: insufficient evidence, not a contradiction.
+     // Codes decided by a draft's own text (image, credential, ids, fields) are re-derived here: a recorded one absent from the text is a contradiction.
+     // Only a prompt echo of an instruction outside the recorded messages (AI public claims on) is beyond this record's material.
+     if(g?.fallback!==(out.kind==='fallback')||g?.regenerated!==out.regenerated||[...derived].some(c=>!recorded.includes(c))||extra.some(c=>c!=='internal_prompt_echo'||!aiOn))return'invalid';
      if(extra.length)missing=true;
      if(out.kind==='fallback'?t.publicSpeech!==fb:t.publicSpeech!==draftTexts.at(-1))return'invalid';
     }
