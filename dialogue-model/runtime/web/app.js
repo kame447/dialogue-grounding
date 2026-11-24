@@ -389,6 +389,24 @@ function keepPosition(scrollTop) {
 function followToBottom() {
   followHistory = true; keepPosition();
 }
+// The AI's reply in progress: a transient AI bubble at the end of the log. It
+// is display only, never an event, a pending message or a counted message.
+// #chat-status announces the wait, so the bubble is hidden from screen readers.
+// A history rebuild detaches it; renderProgress puts it back at the end.
+const typingBubble = (() => {
+  const li = document.createElement("li"); li.className = "ai typing-message"; li.setAttribute("aria-hidden", "true");
+  const who = document.createElement("strong"); who.textContent = "AI";
+  const dots = document.createElement("div"); dots.className = "typing-indicator";
+  dots.append(...[0, 1, 2].map(() => document.createElement("span")));
+  li.append(who, dots); return li;
+})();
+function renderTyping(show) {
+  const log = $("history");
+  if (show === (log.children[log.children.length - 1] === typingBubble)) return;
+  if (show) log.append(typingBubble); else typingBubble.remove();
+  // A following reader sees the bubble come and go; a reader who scrolled up stays put.
+  keepPosition();
+}
 // ---- Participant-facing progress (display layer) ----------------------------
 // Failures are shown by state, never by cause. The trial has stopped when the
 // server reports a failure, or when something is awaited (an AI reply, a send
@@ -422,7 +440,7 @@ function renderProgress() {
   }
   const stopped = progressStopped();
   const showDots = chatWaiting() && !failed && !stopped;
-  $("typing-indicator").hidden = !showDots;
+  renderTyping(showDots);
   $("chat-recovery").hidden = !stopped;
   $("chat-recovery-message").textContent = STOPPED;
   $("retry-chat").disabled = working || checking || sending || !chatOpen();
@@ -1188,8 +1206,29 @@ $("chat").addEventListener("submit", (event) => {
   $("utterance").value = ""; followHistory = true; renderHistory();
   $("utterance").focus({ preventScroll: true }); drainMessages();
 });
-// Textarea Enter (including IME) is left to native multiline editing. Sending
-// is an explicit form action; no keydown handler turns Enter into a request.
+// Plain Enter remains native multiline input. Shift+Enter uses the same
+// form action as the send button, except during IME confirmation.
+let composingUtterance = false;
+let settlingComposition = false;
+let compositionTimer;
+$("utterance").addEventListener("compositionstart", () => {
+  clearTimeout(compositionTimer);
+  composingUtterance = true;
+  settlingComposition = false;
+});
+$("utterance").addEventListener("compositionend", () => {
+  composingUtterance = false;
+  settlingComposition = true;
+  clearTimeout(compositionTimer);
+  compositionTimer = setTimeout(() => { settlingComposition = false; }, 0);
+});
+$("utterance").addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" || !event.shiftKey || event.ctrlKey || event.altKey || event.metaKey ||
+      event.defaultPrevented || event.isComposing || event.keyCode === 229 ||
+      composingUtterance || settlingComposition) return;
+  event.preventDefault();
+  if (!event.repeat) $("chat").requestSubmit();
+});
 $("retry-chat").addEventListener("click", () => { if (chatOpen()) checkProgress(); });
 $("finish-conversation").addEventListener("click", () => changeStage("names"));
 $("back-to-chat").addEventListener("click", () => changeStage("chat"));

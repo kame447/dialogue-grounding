@@ -14,8 +14,9 @@ class Element {
   }
   set textContent(value) { this._text = String(value); this.children = []; }
   get textContent() { return this._text + this.children.map((child) => child.textContent).join(""); }
-  append(...children) { this.children.push(...children); }
+  append(...children) { for (const child of children) child.parentNode = this; this.children.push(...children); }
   replaceChildren(...children) { this._text = ""; this.children = [...children]; this.scrollTop = 0; }
+  remove() { if (this.parentNode) this.parentNode.children = this.parentNode.children.filter((child) => child !== this); this.parentNode = null; }
   setAttribute(name, value) { this.attributes[name] = String(value); }
   getAttribute(name) { return this.attributes[name] ?? null; }
   get scrollHeight() { return this.children.length * 200; }
@@ -116,6 +117,9 @@ async function ui(initial = trial(), handler) {
 }
 const send = (e, text) => { e.utterance.value = text; e.chat.fire("submit"); };
 const messageBodies = (e) => e.history.children.map((node) => node.querySelectorAll("p")[0]?.textContent);
+// The AI's typing bubble (Issue #170): a transient last node of the log.
+const typingShown = (e) => e.history.children.at(-1)?.className === "ai typing-message";
+const typingCount = (e) => e.history.children.filter((node) => node.className === "ai typing-message").length;
 const messageCalls = (calls) => calls.filter((call) => call.path === "/api/message");
 const gate = () => { let release; const wait = new Promise((resolve) => { release = resolve; }); return { wait, release }; };
 const paths = (e) => e.board.children.filter((node) => node.tagName === "path");
@@ -141,12 +145,12 @@ test("an AI retry in flight shows typing dots instead of the stale error, then t
   const { e } = await ui(initial, async ({ path }) => { if (path === "/api/retry") await held.wait; });
   assert.equal(e["chat-recovery"].hidden, false);
   assert.equal(e["chat-recovery-message"].textContent, STOPPED, "a reloaded stopped trial shows the neutral notice at once");
-  assert.equal(e["typing-indicator"].hidden, true);
+  assert.equal(typingCount(e), 0);
   e["retry-chat"].fire("click"); await tick();
   assert.equal(e["chat-recovery"].hidden, true, "the old error is not shown while the retry runs");
-  assert.equal(e["typing-indicator"].hidden, false, "the retry is shown as AI activity");
+  assert.ok(typingShown(e), "the retry is shown as AI activity");
   held.release(); await tick();
-  assert.equal(e["typing-indicator"].hidden, true);
+  assert.equal(typingCount(e), 0);
   assert.equal(e["chat-recovery"].hidden, true);
   assert.ok(e.history.textContent.includes("再試行した応答"));
 });
@@ -160,7 +164,7 @@ test("a failed retry returns to the explicit error after the in-flight state", a
   assert.equal(e["chat-recovery"].hidden, false);
   assert.equal(e["chat-recovery-message"].textContent, STOPPED);
   assert.equal(e.notice.textContent, "", "the stop is shown once, beside the composer");
-  assert.equal(e["typing-indicator"].hidden, true);
+  assert.equal(typingCount(e), 0);
 });
 
 test("the unanswered-figure warning survives polling until every figure is answered", async () => {

@@ -1,6 +1,7 @@
 // v2 participant chat behaves like an ordinary chat app (E1, 2026-10-19):
 // bottom-anchored log, own send jumps, scrolled-up readers get a pill instead of
-// a jump, dots live in the composer, and the composer survives keyboards.
+// a jump, the AI's typing dots are a transient bubble at the end of the log
+// (Issue #170), and the composer survives keyboards.
 // DOM-only fixture with a clamped scroll model; synthetic stimuli; no network.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -15,7 +16,7 @@ type FakeEvent = { target: Element; prevented: boolean; preventDefault(): void; 
 const MESSAGE_PX = 100;
 class Element {
   tagName: string; children: Element[] = []; handlers: Record<string, Handler[]> = {}; attributes: Record<string, string> = {};
-  value = ""; _text = ""; disabled = false; open = false; hidden = false; focused = false;
+  value = ""; _text = ""; className = ""; disabled = false; open = false; hidden = false; focused = false; parentNode: Element | null = null;
   clientHeight = 400; scrollLog: number[] = []; #scrollTop = 0;
   style = { values: {} as Record<string, string>, setProperty(name: string, value: string) { this.values[name] = value; } };
   constructor(tag: string) { this.tagName = tag; }
@@ -26,8 +27,15 @@ class Element {
   get atBottom() { return this.scrollTop === Math.max(0, this.scrollHeight - this.clientHeight); }
   set textContent(value: string) { this._text = String(value); this.children = []; }
   get textContent(): string { return this._text + this.children.map((child) => child.textContent).join(""); }
-  append(...children: Element[]) { this.children.push(...children); }
+  append(...children: Element[]) { for (const child of children) child.parentNode = this; this.children.push(...children); }
   replaceChildren(...children: Element[]) { this._text = ""; this.children = [...children]; this.scrollTop = 0; }
+  // Removing the last bubble shortens the log; the browser then clamps the offset.
+  remove() {
+    const parent = this.parentNode;
+    if (!parent) return;
+    parent.children = parent.children.filter((child) => child !== this); this.parentNode = null;
+    parent.scrollTop = parent.scrollTop;
+  }
   setAttribute(name: string, value: unknown) { this.attributes[name] = String(value); if (name === "hidden") this.hidden = true; }
   getAttribute(name: string) { return this.attributes[name] ?? null; }
   get elements() { return Object.fromEntries(this.querySelectorAll("input,select,textarea").map((node) => [node.getAttribute("name"), node])); }
@@ -116,6 +124,10 @@ async function ui(initial: Trial, options: Options = {}) {
   return { e, state, poll, arrive, scrollUp, resize, documentElement };
 }
 const send = (e: Record<string, Element>, text: string) => { e.utterance.value = text; e.chat.fire("submit"); };
+const isTyping = (node?: Element) => node?.className === "ai typing-message";
+const typing = (e: Record<string, Element>) => e.history.children.filter((node) => isTyping(node));
+const typingShown = (e: Record<string, Element>) => isTyping(e.history.children.at(-1));
+const bodyOf = (node?: Element) => node?.querySelectorAll("p")[0]?.textContent;
 const ancestorsOf = (target: string) => {
   const { root } = makeDOM(), path: string[] = [];
   const visit = (node: Element, trail: string[]): boolean => {
@@ -155,7 +167,8 @@ test("own send and rapid sends always jump to the bottom, even from scrolled-up 
   for (const text of ["一つ目", "二つ目", "三つ目"]) { send(e, text); assert.ok(e.history.atBottom, text + " is visible after sending"); }
   await tick();
   assert.ok(e.history.atBottom);
-  assert.equal(e.history.children.length, 33, "rapid sends are kept once each and in order");
+  assert.equal(e.history.children.length, 34, "rapid sends are kept once each, then the AI's typing bubble");
+  assert.ok(typingShown(e));
   assert.equal(e["new-messages"].hidden, true);
 });
 
@@ -198,25 +211,73 @@ test("a scrolled-up reader with no new arrivals sees no pill; acknowledgement of
   assert.equal(e["new-messages"].hidden, true, "reconciling a pending bubble into the public log is not a new message");
 });
 
-test("typing dots live in the composer's speaking space, not in the log; status, reduced motion and stop rules hold", async () => {
-  assert.deepEqual(ancestorsOf("typing-indicator").slice(-2), ["chat", "composer-status"], "dots are inside the composer bar");
-  assert.ok(!ancestorsOf("typing-indicator").includes("history") && !ancestorsOf("typing-indicator").includes("transcript"));
-  assert.ok(ancestorsOf("chat-recovery").includes("chat"), "error/stall recovery replaces the dots in the same space");
+// Issue #170 (2026-11-20): the dots left the composer for the log, as the AI's
+// provisional message. The stop notice and its recovery stay beside the composer.
+test("typing dots are a transient AI bubble at the end of the log, not in the composer; status, reduced motion and stop rules hold", async () => {
+  assert.doesNotMatch(html, /typing|composer-status/u, "no dots and no reserved dots row in the composer");
+  assert.doesNotMatch(css, /composer-status/u);
+  assert.ok(ancestorsOf("chat-recovery").includes("chat"), "error/stall recovery stays beside the composer");
   const { e, state, poll, arrive } = await ui(trial(5));
-  assert.equal(e["typing-indicator"].hidden, true);
+  assert.equal(typing(e).length, 0);
   send(e, "質問");
-  assert.equal(e["typing-indicator"].hidden, false);
-  assert.ok(e.history.children.every((node) => !node.attributes.class?.includes("typing")), "no dots bubble in the log");
+  const bubble = e.history.children.at(-1)!;
+  assert.ok(isTyping(bubble), "the dots are the newest bubble, on the AI side");
+  assert.equal(bodyOf(e.history.children.at(-2)), "質問");
+  assert.equal(bubble.textContent, "AI", "labelled like every AI message; the dots carry no text");
+  assert.equal(bubble.querySelectorAll("span").length, 3);
+  assert.equal(bubble.getAttribute("aria-hidden"), "true", "#chat-status announces the wait instead");
   assert.equal(e["chat-status"].textContent, "AIが返答を作成しています");
-  await tick(); assert.equal(e["typing-indicator"].hidden, false);
+  assert.ok(e.history.atBottom);
+  await tick(); await poll();
+  assert.equal(typing(e).length, 1, "one bubble across acknowledgement and polling");
+  assert.ok(typingShown(e));
   state.trial.aiStatus = "error"; await poll();
-  assert.equal(e["typing-indicator"].hidden, true, "dots stop on error");
+  assert.equal(typing(e).length, 0, "dots stop on error");
+  assert.ok(e.history.atBottom);
   assert.equal(e["chat-recovery"].hidden, false);
   assert.equal(e["retry-chat"].disabled, false, "the composer-area retry is not disabled by composer locking");
   await arrive("返答");
-  assert.equal(e["typing-indicator"].hidden, true);
+  assert.equal(typing(e).length, 0);
+  assert.equal(bodyOf(e.history.children.at(-1)), "返答");
   assert.match(css, /@media\(prefers-reduced-motion:reduce\)\{\.typing-indicator span\{animation:none\}/u);
-  assert.match(css, /\.composer-status\{[^}]*min-height:20px/u, "the speaking space is reserved, so dots never shift the log");
+});
+
+test("the typing bubble keeps a following reader at the bottom and never moves or alerts a scrolled-up reader", async () => {
+  const { e, state, poll, arrive, scrollUp } = await ui(trial(30));
+  state.trial.aiStatus = "thinking"; await poll();
+  assert.ok(typingShown(e)); assert.ok(e.history.atBottom, "a following reader sees the bubble appear");
+  await arrive("一つ目の返答");
+  assert.equal(typing(e).length, 0);
+  assert.equal(e.history.children.length, 31, "the reply replaces the bubble; the bubble is never kept as a message");
+  assert.ok(e.history.atBottom);
+  scrollUp(500);
+  state.trial.aiStatus = "thinking"; await poll();
+  assert.ok(typingShown(e));
+  assert.equal(e.history.scrollTop, 500, "a reader who scrolled up is not moved");
+  assert.equal(e["new-messages"].hidden, true, "the bubble is not a new message");
+  await arrive("二つ目の返答");
+  assert.equal(e.history.scrollTop, 500);
+  assert.equal(e["new-messages"].hidden, false, "the reply is");
+  e["new-messages"].fire("click");
+  assert.ok(e.history.atBottom);
+  assert.equal(bodyOf(e.history.children.at(-1)), "二つ目の返答");
+});
+
+test("the typing bubble lasts only as long as the wait: stage switches, a new trial and submission", async () => {
+  const { e, state, poll, arrive } = await ui(trial(30));
+  send(e, "質問"); await tick();
+  e["finish-conversation"].fire("click"); e["back-to-chat"].fire("click");
+  assert.ok(typingShown(e), "still waiting after a stage round trip"); assert.ok(e.history.atBottom);
+  e["finish-conversation"].fire("click"); await arrive("名前段階中の返答"); e["back-to-chat"].fire("click");
+  assert.equal(typing(e).length, 0, "the reply replaced the bubble while the log was hidden");
+  assert.equal(bodyOf(e.history.children.at(-1)), "名前段階中の返答");
+  state.trial.aiStatus = "thinking"; await poll(); assert.ok(typingShown(e));
+  state.trial = { ...trial(2), sessionId: "next-trial" }; await poll();
+  assert.equal(typing(e).length, 0, "a new trial starts without the old bubble");
+  assert.equal(e.history.children.length, 2);
+  state.trial.aiStatus = "thinking"; await poll(); assert.ok(typingShown(e));
+  state.trial.submitted = true; await poll();
+  assert.equal(typing(e).length, 0, "a submitted trial's read-only log shows no bubble, even while the AI is busy");
 });
 
 test("composer stays at the bottom: transcript flexes, composer never shrinks; phone layout fits the visual viewport", async () => {

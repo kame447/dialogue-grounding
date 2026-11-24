@@ -160,7 +160,8 @@ test("AI thinking keeps composer active; consecutive sends are optimistic and po
   assert.deepEqual(messages.map((call) => call.body.text), ["最初の発話", "補足の発話"]);
   assert.ok(messages.every((call) => typeof call.body.clientId === "string" && call.body.clientId.length > 0));
   assert.notEqual(messages[0].body.clientId, messages[1].body.clientId);
-  assert.equal(e.history.children.length, 2, "accepted messages are not duplicated by poll reconciliation");
+  assert.equal(e.history.children.at(-1).className, "ai typing-message", "the AI is still answering");
+  assert.equal(e.history.children.length - 1, 2, "accepted messages are not duplicated by poll reconciliation");
   assert.doesNotMatch(JSON.stringify(calls), /秘密のローカルメモ/u);
 });
 
@@ -173,13 +174,13 @@ test("uncertain send failure is never retried or sent through legacy fallback", 
   assert.equal(e.utterance.disabled, false);
 });
 
-test("IME, Shift+Enter and repeated Enter do not accidentally send", async () => {
+test("IME, plain Enter and repeated Shift+Enter do not accidentally send", async () => {
   const { e, calls } = await ui(); e.utterance.value = "日本語";
-  for (const fields of [{ shiftKey: true }, { isComposing: true }, { keyCode: 229 }]) {
+  for (const fields of [{}, { shiftKey: true, isComposing: true }, { shiftKey: true, keyCode: 229 }]) {
     assert.equal(e.utterance.fire("keydown", { key: "Enter", ...fields }).prevented, false);
   }
-  e.utterance.fire("compositionstart"); e.utterance.fire("keydown", { key: "Enter" }); e.utterance.fire("compositionend");
-  e.utterance.fire("keydown", { key: "Enter", repeat: true });
+  e.utterance.fire("compositionstart"); e.utterance.fire("keydown", { key: "Enter", shiftKey: true }); e.utterance.fire("compositionend");
+  e.utterance.fire("keydown", { key: "Enter", shiftKey: true, repeat: true });
   assert.equal(calls.filter((call) => call.path !== "/api/records").length, 1);
 });
 
