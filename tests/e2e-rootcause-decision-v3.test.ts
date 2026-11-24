@@ -1204,8 +1204,10 @@ test('05q-B (holistic_v3): an approval request is a name proposal that carries t
     for (const [question, aspect] of [['その呼び名を先に提案したのはどちらでしたか？', 'name'], ['その形には脚がありますか？', 'part']] as const) {
       const g = fixture(strategy, { aiPublic: true, holistic: 'holistic_v3' });
       await g.exchange(proposal, { action: 'confirm', target: 3, draftActs: ['none'], segments: [naming(proposal, 'かかし')], drafts: ['どの形のことですか？'] });
-      const asked = await g.exchange(question, { action: 'accept', target: 3, segments: [{ quote: question, name: null, targets: [], act: 'ask', aspect, proposition: question }], drafts: ['はい、それは私の提案ではありません。'] });
+      const asked = await g.exchange(question, { action: 'accept', target: 3, segments: [{ respondsTo: 1, quote: question, name: null, targets: [], act: 'ask', aspect, proposition: question }], drafts: ['はい、それは私の提案ではありません。'] });
       assert.ok(offered(asked).includes('accept'), `${strategy}: ${question}`);
+      // The question about the name keeps its link to the earlier unbound proposal (it is about that name) without becoming an approval request.
+      if (aspect === 'name') assert.ok(asked.input.priorClaims.some(c => c.act === 'ask' && c.aspect === 'name' && c.respondsTo !== null), `${strategy}: the question keeps its link`);
     }
   }
 });

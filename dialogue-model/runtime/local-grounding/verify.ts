@@ -106,7 +106,10 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     // An approval request ("is that name fine?") is a name proposal that carries the earlier proposal's name; neither names a figure, so there is none to contradict.
     const approvalRequest = keepUnboundApproval && !!prior && act === "name_propose" && name === null && aspect === "name" && prior.aspect === "name" &&
       prior.act === "name_propose" && prior.speaker === "human" && prior.name !== null;
-    const unboundApproval = approvalRequest && prior!.targets.length === 0 && targets.length === 0;
+    // A question about a name (ask) that the classifier links to an earlier unbound name proposal keeps its link too: it asks about the same name, naming no figure.
+    // It is a plain question, not an approval request (the typed naming request counts name proposals only).
+    const unboundNameQuestion = keepUnboundApproval && !!prior && act === "ask" && aspect === "name" && prior.aspect === "name" && prior.act === "name_propose";
+    const unboundApproval = (approvalRequest || unboundNameQuestion) && prior!.targets.length === 0 && targets.length === 0;
     if (prior && independentActs.has(act) && prior.sourceTurn < turn &&
         (prior.aspect !== aspect || !unboundApproval && !overlap(prior.targets, targets.length ? targets : prior.targets) ||
           (segment.respondsToTurn !== null && segment.respondsToTurn !== prior.sourceTurn))) {
