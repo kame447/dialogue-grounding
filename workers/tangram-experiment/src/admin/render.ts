@@ -8,6 +8,7 @@ import type { AuditEntry } from "./index-store";
 import type { ReceptionAdminRow, ReceptionProtocolStatus, SettingsView } from './reception-port.ts';
 import { RECORD_ID } from './summary.ts';
 import { renderQrSvg } from './qr.ts';
+import { createTrialV2, participantView, ROTATION_MODES } from '../../../../dialogue-model/runtime/stimuli/scatter-v2.mjs';
 
 export const ADMIN_CSS = `:root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans JP",sans-serif;font-size:14px;line-height:1.5;color:#222;background:#f7f7f4;--line:#d8d8d2;--accent:#2a5d8f;--tint:#eaf1f8}
 *,*::before,*::after{box-sizing:border-box}
@@ -32,6 +33,7 @@ input[type="radio"],input[type="checkbox"]{width:18px;height:18px;margin:2px 0 0
 .ops form+form{padding-top:10px;border-top:1px solid #eee}
 #reception-new{margin:12px 0;padding:8px 12px;border-left:3px solid var(--accent);background:var(--tint);font-weight:600}
 #reception-new:empty,#reception-sync:empty{display:none}tr.new>td{background:var(--tint)}
+.experiment-preview{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:start}.experiment-preview section{min-width:0;background:#fff;border:1px solid var(--line);border-radius:6px;padding:12px}.experiment-preview h2{margin:0 0 12px}.experiment-preview svg{display:block;width:100%;height:auto;background:#fafafa}.experiment-preview svg path{fill:#333}.experiment-preview .chat{max-height:70vh;overflow:auto}@media(max-width:699px){.experiment-preview{grid-template-columns:1fr}}
 .history table{min-width:720px}.history td{overflow-wrap:anywhere}.entry-url{overflow-wrap:anywhere}.qr svg{display:block;width:100%;max-width:264px;height:auto}
 @media (max-width:699px){input:not([type="radio"]):not([type="checkbox"]),select{font-size:16px;min-height:44px}button{min-height:44px}
 .cards table,.cards tbody,.cards tr,.cards td{display:block;width:100%}.cards table{background:none}.cards thead{display:none}
@@ -267,12 +269,15 @@ export function renderReceptions(items: ReceptionAdminRow[], next: string | null
   const rows = [...items].sort((a, b) => Number(b.status === 'pending') - Number(a.status === 'pending')).map(entry => {
     const unstarted = !entry.trials.some(trial => trial.recordId !== null);
     const cancel = unstarted && (entry.status === 'pending' || entry.status === 'approved');
+    const lastRecord = entry.trials.at(-1)?.recordId;
+    const open = entry.status === 'in_progress' && lastRecord && RECORD_ID.test(lastRecord)
+      ? `<a href="/admin/record/${escapeHtml(lastRecord)}/experiment" target="_blank" rel="noopener noreferrer">実験画面を開く</a>` : '';
     return `<tr data-id="${escapeHtml(entry.receptionId)}" data-status="${escapeHtml(entry.status)}" data-created="${escapeHtml(entry.createdAt)}" data-key="${escapeHtml(entry.revision + ':' + protocolKey)}">${td('受付番号', escapeHtml(entry.number ?? '未割当'))}${td('受付時刻', timeTag(entry.createdAt))}
 ${td('状態', receptionBadge(entry.status))}${td('条件順序', escapeHtml(entry.plan?.order.join(' → ') ?? ''))}
 ${td('回転', escapeHtml(entry.plan ? ROTATION_LABELS[entry.plan.rotationMode] ?? '' : ''))}${td('試行の間', escapeHtml(entry.plan ? BETWEEN_LABELS[entry.plan.betweenTrials] ?? '' : ''))}
 ${td('試行記録', entry.trials.filter(trial => trial.recordId && RECORD_ID.test(trial.recordId)).map(trial =>
       `<a href="/admin/record/${escapeHtml(trial.recordId)}">${escapeHtml(trial.recordId)}</a>`).join('<br>'))}
-${td('操作', `${entry.status === 'pending' && unstarted && protocol.configured && protocol.mode !== 'off' ? form(entry, 'approve') : ''}${cancel ? form(entry, 'cancel') : ''}`, ' class="ops"')}</tr>`;
+${td('操作', `${entry.status === 'pending' && unstarted && protocol.configured && protocol.mode !== 'off' ? form(entry, 'approve') : ''}${cancel ? form(entry, 'cancel') : ''}${open}`, ' class="ops"')}</tr>`;
   }).join('');
   const names = ['受付番号', '受付時刻', '状態', '条件順序', '回転', '試行の間', '試行記録', '操作'];
   const list = `<div id="reception-list"${live ? ` data-version="${escapeHtml(live.version)}" data-since="${escapeHtml(live.since)}"` : ''}>
@@ -284,6 +289,26 @@ ${next ? `<p data-part="more"><a href="/admin/receptions?${escapeHtml(new URLSea
   return page('受付一覧', `${adminNav('/admin/receptions')}<h1>受付一覧</h1>
 ${live ? '<p id="reception-new" role="status" aria-live="polite"></p><p id="reception-sync" class="muted" role="status"></p>' : ''}
 ${list}${live ? '<script src="/admin/receptions.js" defer></script>' : ''}`);
+}
+
+/** Researcher-only snapshot of the participant's own scene and public conversation. */
+export function renderExperimentPreview(record: unknown, summary: AdminSummary): string {
+  const r = isPlain(record) ? record : {};
+  let board = '<p class="muted">図形を表示できません。</p>';
+  const options = isPlain(r.options) ? r.options : {};
+  const rotationMode = options.rotationMode ?? 'relative_pm90';
+  if (Number.isSafeInteger(r.seed) && ROTATION_MODES.includes(rotationMode)) {
+    try {
+      const scene = participantView(createTrialV2({ seed: r.seed, rotationMode }));
+      board = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${scene.width} ${scene.height}" aria-label="参加者の図形">${scene.shapes.map((shape: { path: string }) => `<path d="${escapeHtml(shape.path)}"/>`).join('')}</svg>`;
+    } catch { /* An older or unreadable stimulus must not prevent reading the conversation. */ }
+  }
+  const conversation = list(r.events).filter(e => isPlain(e) && ['ai', 'human'].includes(e.speaker)).map(e =>
+    `<li class="${e.speaker}"><div class="meta">${badge(chatSpeaker(e.speaker))}${timeTag(e.at)}</div><p>${escapeHtml(e.text)}</p></li>`).join('');
+  const id = escapeHtml(summary.recordId);
+  return page('実験画面（閲覧専用）', `<p><a href="/admin/receptions">受付一覧</a> · <a href="/admin/record/${id}">試行記録</a> · <a href="/admin/record/${id}/experiment">更新</a></p>
+<h1>実験画面（閲覧専用）</h1><p>${statusBadge(summary.status)} 保存時刻 ${timeTag(r.updatedAt ?? summary.updatedAt)}</p>
+<div class="experiment-preview"><section><h2>参加者の図形</h2>${board}</section><section><h2>会話</h2><ol class="chat">${conversation}</ol></section></div>`);
 }
 
 export function renderEntry(entryUrl: string): string {
