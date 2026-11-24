@@ -171,12 +171,21 @@ for (const strategy of strategies) {
     checkRetry(outcome, alternatives);
   });
 
-  test(`v3 ${strategy} publishes a single question with a list of visual features on the first draft`, async () => {
+  test(`v3 ${strategy} retries a list of fully quoted alternative replies`, async () => {
+    const drafts = ['・「切れ目のある輪が見えますか？」', '・『輪の途中が途切れているように見えます。』'].join('\n');
+    const result = await run(strategy, { human: '似た形をどう見分ければよいですか？', drafts: [drafts, clean] });
+    checkPublished(result, clean);
+    checkRetry(result, drafts);
+    assert.ok(result.trace.generationGuard.violations.includes('working_note'));
+    assert.deepEqual(result.result!.privateState.ledger, result.before.ledger);
+  });
+
+  for (const quoted of [false, true]) test(`v3 ${strategy} publishes a single question with a list of ${quoted ? 'quoted' : 'plain'} features on the first draft`, async () => {
     const human = '照らし合わせるため、手がかりを箇条書きで教えてください。';
     const speech = [
       '手がかりは次の二つです。',
-      '・輪に切れ目がある',
-      '・細い棒が輪に接している',
+      quoted ? '・「輪に切れ目がある」' : '・輪に切れ目がある',
+      quoted ? '・『細い棒が輪に接している』' : '・細い棒が輪に接している',
       'この二つがそろう形ですか？',
     ].join('\n');
     const result = await run(strategy, { human, drafts: [speech, speech] });

@@ -39,13 +39,13 @@ type Turn = {
   ai?: Segment[];
   action: JevAction;
   speech: string;
-  target?: number;
+  target?: number | 'figures_0_1';
   referent?: number;
   referentTie?: 'multiple';
   feature?: string;
   name?: string;
   forceName?: boolean;
-  agreeIfOffered?: { name: string; speech: string };
+  agreeIfOffered?: { name: string; speech: string; figureIndex?: number };
   alternatives?: Partial<Record<JevAction, number>>;
 };
 type NativeRequest = {
@@ -116,13 +116,17 @@ async function replay(strategy: Strategy, scenario: Turn[], onFailure?: (attempt
       const labels = Object.keys(criteria);
       let choice = labels[0];
       if (key === 'action') {
-        selectedAction = choice = current.agreeIfOffered && labels.includes('agree') ? 'agree' : current.action;
+        const proposed = current.agreeIfOffered;
+        const eligible = proposed && (proposed.figureIndex === undefined || input.agreeNames?.some(candidate =>
+          candidate.figureId === ids[proposed.figureIndex!] && candidate.name === proposed.name));
+        selectedAction = choice = eligible && labels.includes('agree') ? 'agree' : current.action;
       }
       const attemptingAgreement = selectedAction === 'agree' ? current.agreeIfOffered : undefined;
       if (key === 'target') {
         choice = attemptingAgreement
-          ? labels.find(label => /^figure_\d+$/u.test(label)) ?? labels[0]
-          : current.target === undefined ? 'none' : 'figure_' + current.target;
+          ? attemptingAgreement.figureIndex === undefined ? labels.find(label => /^figure_\d+$/u.test(label)) ?? labels[0]
+            : 'figure_' + attemptingAgreement.figureIndex
+          : typeof current.target === 'number' ? 'figure_' + current.target : current.target ?? 'none';
       }
       if (key === 'human_referent') choice = current.referent === undefined ? 'none' : 'figure_' + current.referent;
       if (key === 'repair_issue') choice = labels.includes('issue_0') ? 'issue_0' : 'none';
@@ -684,6 +688,55 @@ for (const { label, text, aspect, act, targets, referent, referentTie, adopt } o
       feature: adopt ? null : alternateFeature,
       agreed: adopt ? [{ figureId: slot, name }] : [],
     })));
+  });
+}
+
+for (const multiple of [true, false]) {
+  test('A2 after referent denial: a reply to a ' + (multiple ? 'two-figure question cannot' : 'single-figure question can') +
+    ' authorize naming the previously denied figure', async () => {
+    const question = multiple ? '輪に切れ目のある形と、輪に棒が接する形を見ています。どちらでしょう？'
+      : '輪に切れ目がある形のことを指していますか？';
+    const targets = multiple ? [slot, otherSlot] : [slot];
+    const ask: Turn = {
+      human: 'どの図形を見ているか、もう一度確かめてくれますか？',
+      action: 'confirm', target: multiple ? 'figures_0_1' : 0, feature: alternateFeature, speech: question,
+      ai: [{ text: question, aspect: 'referent', act: 'ask', targets }],
+    };
+    const text = 'はい、輪に切れ目のある形で合っています。';
+    const reply: Turn = {
+      human: text + repeatApproval,
+      local: [{ text, act: 'agree', aspect: 'referent', targets: [slot],
+        antecedent: claim => answerToPublicReferent(claim) && claim.proposition === question }, propose(repeatApproval, 'ask')],
+      action: 'confirm', target: 0, referent: 0, feature, speech: locate.speech,
+      agreeIfOffered: { ...proposedAgreement, figureIndex: 0 },
+    };
+    const runs = await Promise.all(strategies.map(strategy => replay(strategy, [...afterReferentDenial, ask, reply])));
+    const [repair, bypass] = runs.map(run => run.at(-1)!);
+    assert.deepEqual(repair.wire, bypass.wire);
+    await checkS4(repair, bypass);
+    const outcomes = runs.map(run => {
+      const [denied, asked, last] = run.slice(-3);
+      checkReferentReply(denied, earlierDenial);
+      assert.deepEqual(asked.saved.jevTurn.executed?.target,
+        multiple ? { kind: 'multiple', figureIds: targets } : { kind: 'single', figureId: slot });
+      assert.deepEqual(asked.state.ledger, denied.state.ledger);
+      const publicQuestion = last.input.priorClaims.find(claim => answerToPublicReferent(claim) && claim.quote === question);
+      assert.ok(publicQuestion);
+      assert.deepEqual(publicQuestion.targets, targets);
+      const answer = last.input.priorClaims.find(claim => claim.quote === text);
+      assert.equal(answer?.act, 'agree');
+      assert.equal(answer?.respondsTo, publicQuestion.id);
+      assert.deepEqual(answer?.targets, [slot]);
+      assert.equal(last.input.humanReferent?.scores?.[slot], 1);
+      return {
+        nameOffered: last.input.agreeNames?.some(item => item.figureId === slot && item.name === name),
+        action: last.saved.judgment.action, speech: last.speech, entry: last.state.ledger[slot],
+      };
+    });
+    const expected = multiple
+      ? { nameOffered: false, action: 'confirm', speech: locate.speech, entry: repair.before.ledger[slot] }
+      : { nameOffered: true, action: 'agree', speech: proposedAgreement.speech, entry: { status: 'agreed', name } };
+    assert.deepEqual(outcomes, [expected, expected]);
   });
 }
 
