@@ -237,12 +237,12 @@ const orientationNeutral: Record<Action, string> = {
 
 export function orientationSafeFallback(judgment: Judgment): string | null {
   if (judgment.action === "agree") {
-    if (!safeSpan(judgment.candidateName) || findOrientationLeaks(judgment.candidateName).length) return null;
+    if (!safeSpan(judgment.candidateName)) return null;
     const text = `「${judgment.candidateName.trim()}」にしましょう。`;
     return !findGuardViolations(text, "agree").length && !findAgreeNameMismatch(text, judgment.candidateName).length && !findOrientationLeaks(text).length ? text : null;
   }
   if (judgment.action === "propose_name") {
-    if (!safeSpan(judgment.candidateName) || findOrientationLeaks(judgment.candidateName).length) return null;
+    if (!safeSpan(judgment.candidateName)) return null;
     const text = `「${judgment.candidateName.trim()}」と呼ぶのはどうでしょう？`;
     return !findGuardViolations(text, "propose_name").length && !findOrientationLeaks(text).length ? text : null;
   }

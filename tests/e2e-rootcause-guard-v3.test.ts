@@ -185,8 +185,12 @@ test("orientation retry reason names all orientation families and orientationSaf
   assert.ok(repairFb && findOrientationLeaks(repairFb).length === 0 && findGuardViolations(repairFb, "repair").length === 0);
   assert.doesNotMatch(repairFb!, /訂正/u);
   assert.equal(orientationSafeFallback({ action: "agree", candidateName: "鳥", discriminatingFeature: null }), "「鳥」にしましょう。");
-  assert.equal(orientationSafeFallback({ action: "agree", candidateName: "右向きの鳥", discriminatingFeature: null }), null);
+  assert.equal(orientationSafeFallback({ action: "agree", candidateName: "横長の犬", discriminatingFeature: null }), "「横長の犬」にしましょう。");
+  assert.equal(orientationSafeFallback({ action: "agree", candidateName: "右向きの鳥", discriminatingFeature: null }), "「右向きの鳥」にしましょう。");
+  assert.equal(orientationSafeFallback({ action: "agree", candidateName: "s-1111", discriminatingFeature: null }), null);
+  assert.equal(orientationSafeFallback({ action: "agree", candidateName: "鳥」で決まり", discriminatingFeature: null }), null);
   assert.equal(orientationSafeFallback({ action: "agree", candidateName: null, discriminatingFeature: null }), null);
-  assert.equal(orientationSafeFallback({ action: "propose_name", candidateName: "横長の船", discriminatingFeature: null }), null);
+  assert.equal(orientationSafeFallback({ action: "propose_name", candidateName: "横長の船", discriminatingFeature: null }), "「横長の船」と呼ぶのはどうでしょう？");
+  assert.equal(orientationSafeFallback({ action: "propose_name", candidateName: "targetSlot", discriminatingFeature: null }), null);
   assert.equal(orientationSafeFallback({ action: "propose_name", candidateName: "船", discriminatingFeature: null }), "「船」と呼ぶのはどうでしょう？");
 });

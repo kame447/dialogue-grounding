@@ -539,15 +539,24 @@ for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
     assert.equal(s4Probe.traceShape(result.trace, V3.questionLayout), true);
   });
 
-  test(`v3 ${strategy} fails closed when orientation_leak is combined with another violation or unsafe agree name`, async () => {
+  test(`v3 ${strategy} allows quoted orientation-word names in agree fallback and fails closed on internal/mixed violations`, async () => {
     const f = fixture(strategy);
     await assert.rejects(f.exchange('形をもう少し確かめたいです。', { action: 'confirm', target: 1,
       drafts: ['上端が尖っていて s-1111 のことですか？', '右側が尖っていますか？'] }), { code: 'unsafe_generation' });
-    const g = fixture(strategy);
-    const proposal = 'これを「右向きの鳥」と呼びましょう。';
-    await assert.rejects(g.exchange(proposal, { action: 'agree', target: 1,
+    const g = fixture(strategy, { aiPublic: true });
+    const quotedProposal = 'これを「右向きの鳥」と呼びましょう。';
+    const agreed = await g.exchange(quotedProposal, { action: 'agree', target: 1,
       drafts: ['上端の「右向きの鳥」で決まりです。', '右側の「右向きの鳥」にしましょう。'],
-      segments: [naming(proposal, '右向きの鳥', [ids[1]])] }), { code: 'unsafe_generation' });
+      segments: [naming(quotedProposal, '右向きの鳥', [ids[1]])] });
+    assert.equal(agreed.text, '「右向きの鳥」にしましょう。');
+    assert.deepEqual(agreed.trace.generationGuard, { violations: ['orientation_leak'], regenerated: true, fallback: true });
+    assert.equal(agreed.trace.aiPublic?.pending?.status, 'skipped_fallback');
+    assert.equal(s4Probe.traceShape(agreed.trace, V3.questionLayout), true);
+    const h = fixture(strategy);
+    const badNameProposal = 'これを「s-1111」と呼びましょう。';
+    await assert.rejects(h.exchange(badNameProposal, { action: 'agree', target: 1,
+      drafts: ['上端の「s-1111」で決まりです。', '右側の「s-1111」にしましょう。'],
+      segments: [naming(badNameProposal, 's-1111', [ids[1]])] }), { code: 'unsafe_generation' });
   });
 }
 
