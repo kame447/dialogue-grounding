@@ -679,10 +679,12 @@ test('05d-1: a linked approval question checks an accept draft and publishes onl
 test('05d-2: the same name quote is checked while tentative and exempt after agreement', async () => {
   await paired(async trial => {
     await trial.say(broad);
-    const name = memo.figures[0].holistic[0].construal;
+    const name = '輪縁';
+    const remembered = `以前この形を「${name}」と呼んだ人がいました。`;
     const suggestion = `「${name}」という呼び名はどうでしょう？`;
-    const proposed = await trial.say({ human: 'この輪郭はどんな印象ですか？', action: 'propose_name', target: 0,
-      name, drafts: [suggestion] });
+    const proposed = await trial.say({ human: 'この輪郭はどんな印象ですか？' + remembered,
+      local: [{ text: remembered, aspect: 'name', act: 'assert', name, targets: [first] }],
+      action: 'propose_name', target: 0, name, drafts: [suggestion] });
     published(proposed, 'propose_name', single(first), suggestion);
     assert.deepEqual(proposed.after.ownLedger[first], { status: 'tentative', name });
     assert.deepEqual(proposed.draftRequests, [], 'a quote of the selected proposal alone is exempt');

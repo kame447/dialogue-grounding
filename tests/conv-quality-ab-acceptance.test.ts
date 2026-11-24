@@ -23,6 +23,8 @@ const [slot, otherSlot] = ids;
 const feature = '丸い輪に細い棒が接する';
 const alternateFeature = '輪に切れ目がある';
 const name = '鍵';
+const memoName = 'ランプ';
+const publicAlias = '環輪';
 const strategies = ['repair-first', 'bypass-enabled'] as const;
 type Strategy = typeof strategies[number];
 type Segment = {
@@ -57,24 +59,30 @@ type ActionMessages = Parameters<ReturnType<typeof createChatClient>['complete']
 type Attempt = { input: JevDecisionInput; wire: NativeRequest[]; generation: ActionMessages[]; trace: JevTurnTrace; state: JevPrivateState };
 type Send = InterventionReplayTape['recorded']['expectedRequests'][number];
 
-const profile = researchTrialProfileV3({ timeoutMs: null, maxCompletionTokens: null },
-  { ...deadlines(), localMs: 3000, decisionMs: 3000, generationMs: 3000 }, 'two_stage_v3');
+const lunaSettings = { timeoutMs: null, maxCompletionTokens: null };
+const timeouts = { ...deadlines(), localMs: 3000, decisionMs: 3000, generationMs: 3000 };
+const profile = researchTrialProfileV3(lunaSettings, timeouts, 'two_stage_v3');
+const versionlessProfile = researchTrialProfileV3(lunaSettings, timeouts, 'two_stage_v3', null);
 const technicalTrial = { version: 'adaptive_repair_v3' } as const;
 const own = { ownImage: { ...image, mimeType: 'image/png' as const }, ownAnchors: anchors };
 const observation = memo();
 observation.figures[0].analytic.shapes = [feature, alternateFeature];
-observation.figures[0].holistic = [{ construal: 'ランプ', basis: [feature], status: 'hypothesis' }];
+observation.figures[0].holistic = [{ construal: memoName, basis: [feature], status: 'hypothesis' }];
 const ownMemo = validateObservationMemo(observation, { ownAnchors: anchors });
 
 const fromAi = (act: LocalAct) => (claim: LocalClaimView) => claim.speaker === 'ai' && claim.act === act;
 const acknowledge = (text: string): Segment => ({ text, aspect: 'progress', act: 'acknowledge' });
+const priorPublicAlias: Segment = {
+  text: `以前この形を「${publicAlias}」と呼んだ人がいました。`,
+  aspect: 'name', act: 'assert', name: publicAlias, targets: [slot],
+};
 function extract(segments: Segment[] = []): string {
   return JSON.stringify(segments.map((s, i): LocalSegmentProposal => ({
     segmentId: String(i + 1), quote: s.text, proposition: s.text, aspect: s.aspect,
     targets: s.targets ?? [], name: s.name ?? null, linkedIssueId: null, respondsToTurn: null,
   })));
 }
-async function replay(strategy: Strategy, scenario: Turn[], onFailure?: (attempt: Attempt) => void) {
+async function replay(strategy: Strategy, scenario: Turn[], onFailure?: (attempt: Attempt) => void, trialProfile = profile) {
   const events: Array<{ id: string; seq: number; speaker: 'human' | 'ai'; text: string }> = [];
   const append = (speaker: 'human' | 'ai', text: string) => {
     const seq = events.length + 1;
@@ -96,8 +104,8 @@ async function replay(strategy: Strategy, scenario: Turn[], onFailure?: (attempt
   let responseId = 0;
   const readKey = async () => 'sk-or-SYNTHETIC-offline-00000000000';
   const luna = createChatClient({
-    provider: 'cloudflare', purpose: profile.modelPolicy.purpose, apiKey: 'synthetic-offline-replay-key',
-    baseUrl: 'https://offline.invalid/v1', timeoutMs: profile.timeouts.lunaAttemptMs,
+    provider: 'cloudflare', purpose: trialProfile.modelPolicy.purpose, apiKey: 'synthetic-offline-replay-key',
+    baseUrl: 'https://offline.invalid/v1', timeoutMs: trialProfile.timeouts.lunaAttemptMs,
   }, async (_url, options) => {
     recordSend('luna', lunaCall.phase, JSON.parse(String(options?.body)));
     return Response.json({ model: lunaCall.response.model, choices: [{ message: { content: lunaCall.response.text } }],
@@ -164,8 +172,8 @@ async function replay(strategy: Strategy, scenario: Turn[], onFailure?: (attempt
     return Response.json(response);
   };
   const transport = { enabled: true, readKey, fetchImpl, timeoutMs: 3000, researchLimits: { maxDeadlineMs: 600000 } };
-  const decision = createJevDecisionClient({ ...transport, questionLayout: profile.questionLayout })!;
-  const runtime = createProfileDialogue(profile, {
+  const decision = createJevDecisionClient({ ...transport, questionLayout: trialProfile.questionLayout })!;
+  const runtime = createProfileDialogue(trialProfile, {
     strategy, image, anchors, technicalTrial,
     observer: {
       async observeAll() { return structuredClone(ownMemo); },
@@ -188,7 +196,7 @@ async function replay(strategy: Strategy, scenario: Turn[], onFailure?: (attempt
       return result;
     } },
     localGrounding: {
-      classifier: createJevLocalTestClassifier({ ...transport, questionLayout: profile.questionLayout })!,
+      classifier: createJevLocalTestClassifier({ ...transport, questionLayout: trialProfile.questionLayout })!,
       aiPublicTransport: transport,
     },
     onJevTurnTrace(record: JevTurnTrace) { trace = structuredClone(record); },
@@ -230,8 +238,8 @@ async function replay(strategy: Strategy, scenario: Turn[], onFailure?: (attempt
 }
 
 type Snapshot = Awaited<ReturnType<typeof replay>>[number];
-async function sameScenario(scenario: Turn[]): Promise<Snapshot[]> {
-  const [repair, bypass] = await Promise.all(strategies.map(strategy => replay(strategy, scenario)));
+async function sameScenario(scenario: Turn[], trialProfile = profile): Promise<Snapshot[]> {
+  const [repair, bypass] = await Promise.all(strategies.map(strategy => replay(strategy, scenario, undefined, trialProfile)));
   for (const [i, left] of repair.entries()) {
     const right = bypass[i];
     assert.deepEqual(left.wire, right.wire, 'same native inputs, criteria, and requested model');
@@ -333,14 +341,15 @@ test('A change: the partner name is absent from propose_name and a fabricated ch
     const requests = await Promise.all(strategies.map(async strategy => {
       let attempt: Attempt | undefined;
       await assert.rejects(replay(strategy, [locate, {
-        ...proposal, action: 'propose_name', forceName: true, speech: '「鍵」と呼ぶのはどうでしょう？',
+        ...proposal, human: priorPublicAlias.text + proposal.human, local: [priorPublicAlias, ...proposal.local!],
+        action: 'propose_name', forceName: true, speech: '「鍵」と呼ぶのはどうでしょう？',
       }], failure => { attempt = failure; }), { code: 'decision_failed' });
       assert.ok(attempt);
       const options = attempt.wire.find(packet => packet.questions.name)?.questions.name.criteria;
       assert.ok(options, 'a native name question must be reached');
       const values = Object.values(options).map(option => JSON.parse(option).value);
-      assert.ok(values.includes('ランプ'), 'the AI’s own name remains eligible');
-      assert.ok(!values.includes(name), 'the partner’s name is unavailable for re-proposal');
+      assert.deepEqual(values, [publicAlias], 'the public mention remains eligible without the partner proposal or memo reading');
+      assert.ok(attempt.input.publicNames.some(candidate => candidate.name === publicAlias && candidate.figureId === slot));
       assert.deepEqual(attempt.input.agreeNames, [{ name, figureId: slot, sourceTurn: 3 }]);
       assert.equal(attempt.trace.errorCode, 'decision_failed');
       assert.equal(attempt.trace.publicSpeech, null);
@@ -369,6 +378,31 @@ test('A control: a grounded proposal can be adopted and a factual question grant
   assert.deepEqual(fact.input.agreeNames, []);
   assert.equal(Object.hasOwn(actionOptions(fact), 'agree'), false);
   assert.equal(fact.state.ledger[slot].name, null);
+});
+
+test('holistic_v1 excludes memo-only proposals, keeps the human agree path, and leaves the older proposal catalog intact', async () => {
+  const [unmentioned, agreed] = await sameScenario([locate, offeredName('この形に鍵ってどうかな？')]);
+  assert.ok(unmentioned.input.observations.figures[0].holistic.some(reading => reading.construal === memoName));
+  assert.deepEqual(unmentioned.input.publicNames, []);
+  assert.equal(Object.hasOwn(actionOptions(unmentioned), 'propose_name'), false);
+  assert.equal(agreed.input.nameSource, 'public_only');
+  assert.equal(Object.hasOwn(actionOptions(agreed), 'propose_name'), false, 'the human proposal is not reoffered as an AI proposal');
+  assert.equal(Object.hasOwn(actionOptions(agreed), 'agree'), true);
+  assert.deepEqual(agreed.input.agreeNames, [{ name, figureId: slot, sourceTurn: 3 }]);
+  assert.equal(agreed.saved.judgment.action, 'agree');
+  assert.equal(agreed.speech, 'いいですね。「鍵」にしましょう。');
+  assert.deepEqual(agreed.state.ledger[slot], { status: 'agreed', name });
+
+  const speech = `「${memoName}」と呼ぶのはどうでしょう？`;
+  const [legacy] = await sameScenario([{ ...locate, action: 'propose_name', name: memoName, speech, ai: [] }], versionlessProfile);
+  assert.deepEqual(legacy.input.publicNames, []);
+  assert.equal(legacy.input.nameSource, undefined);
+  assert.equal(Object.hasOwn(actionOptions(legacy), 'propose_name'), true);
+  const choices = legacy.wire.find(packet => packet.questions.name)?.questions.name.criteria;
+  assert.ok(choices);
+  assert.deepEqual(Object.values(choices).map(option => JSON.parse(option).value), [memoName]);
+  assert.equal(legacy.speech, speech);
+  assert.deepEqual(legacy.state.ledger[slot], { status: 'tentative', name: memoName });
 });
 
 const approvalQuestion = (text: string): Segment => ({
@@ -576,12 +610,12 @@ test('A2 change: a rejected figure cannot be named when the approval request is 
 
 test('A2 control: rejecting a different name does not reject the shared figure or the remaining proposal', async () => {
   const confirmed = referentResponse('探していたのは、今の説明の形です。', 'agree');
-  const rejectedName = 'その形をランプと呼ぶ案には賛成できません。';
+  const rejectedName = `その形を${publicAlias}と呼ぶ案には賛成できません。`;
   const alternative: Turn = {
-    human: confirmed.text, local: [confirmed], ...ownFigure, action: 'propose_name',
-    name: 'ランプ', speech: '別案ですが、「ランプ」と呼ぶのはどうでしょう？',
+    human: confirmed.text + priorPublicAlias.text, local: [confirmed, priorPublicAlias], ...ownFigure, action: 'propose_name',
+    name: publicAlias, speech: `別案ですが、「${publicAlias}」と呼ぶのはどうでしょう？`,
   };
-  const [, , , adopted] = await sameScenario([...checkReferent, alternative, {
+  const [, , proposed, adopted] = await sameScenario([...checkReferent, alternative, {
     human: rejectedName + approvalRequest,
     local: [{ text: rejectedName, aspect: 'name', act: 'name_reject', antecedent: fromAi('name_propose') },
       { text: approvalRequest, aspect: 'name', act: 'ask' }],
@@ -591,7 +625,8 @@ test('A2 control: rejecting a different name does not reject the shared figure o
   const rejection = adopted.input.priorClaims.find(c => c.sourceTurn === adopted.input.turn && c.quote === rejectedName);
   assert.equal(rejection?.aspect, 'name');
   assert.equal(rejection?.act, 'name_reject');
-  assert.equal(rejection?.name, 'ランプ');
+  assert.deepEqual(proposed.state.ledger[slot], { status: 'tentative', name: publicAlias });
+  assert.equal(rejection?.name, publicAlias);
   assert.deepEqual(rejection?.targets, [slot]);
   assert.equal(adopted.saved.judgment.action, 'agree');
   assert.equal(adopted.speech, proposedAgreement.speech);
@@ -771,13 +806,16 @@ test('B change: shared native criteria direct an unresolved backchannel toward g
 });
 
 test('B control: “うん” can support actual naming, but a feature question and a backchannel supply no name evidence', async () => {
-  const first: Turn = { ...locate, ai: [], action: 'propose_name', name: 'ランプ', speech: '「ランプ」と呼ぶのはどうでしょう？' };
+  const first: Turn = { ...locate, human: locate.human + priorPublicAlias.text, local: [priorPublicAlias],
+    ai: [], action: 'propose_name', name: publicAlias, speech: `「${publicAlias}」と呼ぶのはどうでしょう？` };
   const response: Turn = { human: 'うん', local: [{ text: 'うん', aspect: 'name', act: 'name_accept', antecedent: fromAi('name_propose') }],
-    action: 'agree', ...ownFigure, name: 'ランプ', speech: '「ランプ」にしましょう。' };
-  const [, named] = await sameScenario([first, response]);
+    action: 'agree', ...ownFigure, name: publicAlias, speech: `「${publicAlias}」にしましょう。` };
+  const [proposed, named] = await sameScenario([first, response]);
+  assert.deepEqual(proposed.input.agreeNames, []);
+  assert.deepEqual(proposed.state.ledger[slot], { status: 'tentative', name: publicAlias });
   const claim = named.input.priorClaims.find(c => c.act === 'name_accept');
   assert.match(claim?.respondsTo ?? '', /:ai1$/u);
-  assert.equal(named.state.ledger[slot].name, 'ランプ');
+  assert.equal(named.state.ledger[slot].name, publicAlias);
   assert.equal(named.state.ledger[slot].status, 'agreed');
 
   const [, featureReply] = await sameScenario([locate, {
