@@ -1,4 +1,4 @@
-// Synthetic cqab3 acceptance. Every extraction, classification, and generation reply is offline.
+// Synthetic cqab3 acceptance for holistic_v4. Every extraction, classification, and generation reply is offline.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { DraftAct, JevAction, JevDecisionInput } from '../dialogue-model/runtime/decision/contract.ts';
@@ -21,7 +21,7 @@ const anchors = modelView(scene).anchors;
 const first = anchors[0].id;
 const profile = researchTrialProfileV3({ timeoutMs: null, maxCompletionTokens: null }, {
   ...deadlines(), observationMs: 5000, localMs: 5000, decisionMs: 5000, generationMs: 5000,
-}, 'two_stage_v3', 'holistic_v3');
+}, 'two_stage_v3', 'holistic_v4');
 const feature = '丸い輪に小さな突起が付く';
 const otherFeature = '楕円の穴が一つある';
 const name = '輪かざり札';

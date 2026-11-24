@@ -22,6 +22,7 @@ import { MODEL, normal } from './support/s4-v3-records.ts';
 const [slot, otherSlot] = ids;
 const feature = '丸い輪に細い棒が接する';
 const alternateFeature = '輪に切れ目がある';
+const proposalFeature = '輪の縁に小さな突起がある';
 const name = '鍵';
 const memoName = 'ランプ';
 const publicAlias = '環輪';
@@ -63,11 +64,12 @@ const lunaSettings = { timeoutMs: null, maxCompletionTokens: null };
 const timeouts = { ...deadlines(), localMs: 3000, decisionMs: 3000, generationMs: 3000 };
 const profile = researchTrialProfileV3(lunaSettings, timeouts, 'two_stage_v3');
 const holisticV2Profile = researchTrialProfileV3(lunaSettings, timeouts, 'two_stage_v3', 'holistic_v2');
+const holisticV3Profile = researchTrialProfileV3(lunaSettings, timeouts, 'two_stage_v3', 'holistic_v3');
 const versionlessProfile = researchTrialProfileV3(lunaSettings, timeouts, 'two_stage_v3', null);
 const technicalTrial = { version: 'adaptive_repair_v3' } as const;
 const own = { ownImage: { ...image, mimeType: 'image/png' as const }, ownAnchors: anchors };
 const observation = memo();
-observation.figures[0].analytic.shapes = [feature, alternateFeature];
+observation.figures[0].analytic.shapes = [feature, alternateFeature, proposalFeature];
 observation.figures[0].holistic = [{ construal: memoName, basis: [feature], status: 'hypothesis' }];
 const ownMemo = validateObservationMemo(observation, { ownAnchors: anchors });
 
@@ -381,7 +383,7 @@ test('A control: a grounded proposal can be adopted and a factual question grant
   assert.equal(fact.state.ledger[slot].name, null);
 });
 
-test('holistic_v3 excludes memo-only proposals, keeps human agree, and preserves the versionless catalog', async () => {
+test('holistic_v4 excludes memo-only proposals, keeps human agree, and preserves the versionless catalog', async () => {
   const [unmentioned, agreed] = await sameScenario([locate, offeredName('この形に鍵ってどうかな？')]);
   assert.ok(unmentioned.input.observations.figures[0].holistic.some(reading => reading.construal === memoName));
   assert.deepEqual(unmentioned.input.publicNames, []);
@@ -413,6 +415,10 @@ const clarifyUnboundName = {
   action: 'confirm', target: 0, feature: alternateFeature,
   speech: 'どの形の呼び名か確かめたいです。' + alternateFeature + '形ですか？',
 } as const;
+const clarifyPendingProposal = {
+  action: 'confirm', target: 0, feature: proposalFeature,
+  speech: 'その呼び名を付ける候補には、輪の縁に小さな突起がありますか？',
+} as const;
 const acknowledgment = (human: string, target?: number): Turn => ({
   human, local: [acknowledge(human)], action: 'accept', target, speech: 'わかりました。',
 });
@@ -426,7 +432,7 @@ test('holistic_v3 narrows the naming-request catalog only when no agreement is g
   const acknowledgmentOfReading = acknowledgment('ええ、そんな感じの形です。');
   const suggestion = 'これを鍵と呼ぶのはどうかな？';
   const unbound: Turn = { human: suggestion, local: [propose(suggestion, 'name_propose')], ...clarifyUnboundName };
-  const [, plain, proposed] = await sameScenario([describe([]), acknowledgmentOfReading, unbound]);
+  const [, plain, proposed] = await sameScenario([describe([]), acknowledgmentOfReading, unbound], holisticV3Profile);
   assert.equal(plain.input.namingRequest, undefined);
   assert.ok(Object.hasOwn(actionOptions(plain), 'accept'));
   assert.equal(plain.saved.judgment.action, 'accept');
@@ -442,7 +448,7 @@ test('holistic_v3 narrows the naming-request catalog only when no agreement is g
   assert.equal(proposed.saved.judgment.action, 'confirm');
   assert.match(proposed.speech, /[？?]$/u);
   assert.deepEqual(proposed.state.ledger, proposed.before.ledger);
-  assert.equal(profile.dialoguePolicy, 'holistic_v3');
+  assert.equal(holisticV3Profile.dialoguePolicy, 'holistic_v3');
 
   const identified = '探しているのは、細い柄が付いた環の形です。';
   const narrowReferent: Turn = {
@@ -451,7 +457,7 @@ test('holistic_v3 narrows the naming-request catalog only when no agreement is g
   };
   const [, shared, agreed] = await sameScenario([describe([slot]), narrowReferent, {
     ...unbound, action: 'agree', name, speech: `はい、「${name}」にしましょう。`,
-  }]);
+  }], holisticV3Profile);
   assert.equal(shared.input.humanReferent?.scores?.[slot], 1);
   assert.equal(agreed.input.humanReferent?.scores?.none, 1);
   assert.equal(agreed.input.namingRequest, true);
@@ -471,14 +477,14 @@ test('holistic_v3 narrows the naming-request catalog only when no agreement is g
   assert.deepEqual(legacy.state.ledger, legacy.before.ledger);
 });
 
-test('holistic_v3 requires clarification for a linked approval request after the proposed figure is denied', async () => {
+test('holistic_v4 requires clarification for a linked approval request after the proposed figure is denied', async () => {
   const question: Turn = {
     ...locate, ai: [{ text: locate.speech, act: 'ask', aspect: 'referent', targets: [slot] }],
   };
   const suggestion = '呼び名には鍵を提案します。';
   const proposal: Turn = {
     human: suggestion, local: [propose(suggestion, 'name_propose', [slot])],
-    action: 'accept', target: 0, speech: '呼び名の候補ですね。',
+    ...clarifyPendingProposal,
   };
   const denial = '尋ねていたのは、今挙げた形ではありません。';
   const approval = '先ほどの呼び方を使っても構いませんか？';
@@ -494,6 +500,9 @@ test('holistic_v3 requires clarification for a linked approval request after the
   assert.ok(!Object.hasOwn(actionOptions(asked), 'accept') && !Object.hasOwn(actionOptions(asked), 'agree'));
   assert.equal(eligible.input.namingRequest, true);
   assert.deepEqual(eligible.input.agreeNames, [{ name, figureId: slot, sourceTurn: 3 }]);
+  assert.ok(Object.hasOwn(actionOptions(eligible), 'agree') && !Object.hasOwn(actionOptions(eligible), 'accept'));
+  assert.equal(eligible.trace.executed?.action, 'confirm');
+  assert.deepEqual(eligible.state.ledger, eligible.before.ledger);
   const source = asked.input.priorClaims.find(c => c.quote === suggestion);
   const linked = asked.input.priorClaims.find(c => c.quote === approval);
   assert.ok(source && linked);
@@ -516,8 +525,7 @@ function namingContext(): Turn[] {
     { human: grounded + first, local: [
       { text: grounded, act: 'assert', aspect: 'part', targets: [slot] },
       propose(first, 'name_propose', [slot]),
-    ], action: 'accept',
-      ...ownFigure, speech: '「鍵」が候補なんですね。' },
+    ], ...ownFigure, ...clarifyPendingProposal },
   ];
 }
 function approve(human: string): Turn {
@@ -606,7 +614,7 @@ test('A2 change: an unbound name cannot be adopted during a repeated approval re
   };
   const identified = '丸い輪に細い棒がついた形のことです。';
   const [, , adopted] = await sameScenario([locate, {
-    ...offered, human: identified + proposal, ...ownFigure, action: 'accept', speech: '呼び名の候補ですね。',
+    ...offered, human: identified + proposal, ...ownFigure, ...clarifyPendingProposal,
     local: [{ text: identified, aspect: 'part', act: 'assert', targets: [slot] }, ...offered.local!],
   }, request]);
   const source = adopted.input.priorClaims.find(c => c.quote === proposal);

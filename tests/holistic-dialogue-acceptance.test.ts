@@ -27,9 +27,10 @@ const trial = createTrialV2({ seed });
 const anchors: ObservationInput['ownAnchors'] = modelView(trial).anchors;
 const figureIds = anchors.map(anchor => anchor.id);
 const [first, second, ribbon, fan, cup] = figureIds;
-const profile = researchTrialProfileV3({ timeoutMs: null, maxCompletionTokens: null }, {
-  ...deadlines(), observationMs: 5000, localMs: 5000, decisionMs: 5000, generationMs: 5000,
-}, 'two_stage_v3');
+const lunaRequest = { timeoutMs: null, maxCompletionTokens: null };
+const timeouts = { ...deadlines(), observationMs: 5000, localMs: 5000, decisionMs: 5000, generationMs: 5000 };
+const profile = researchTrialProfileV3(lunaRequest, timeouts, 'two_stage_v3');
+const holisticV3Profile = researchTrialProfileV3(lunaRequest, timeouts, 'two_stage_v3', 'holistic_v3');
 const ringGap = '環に切れ目がある';
 const baseWidth = '台が環より細い';
 const originalName = '月枠';
@@ -62,6 +63,7 @@ type Turn = {
   publicClaims?: Segment[];
   action: JevAction;
   target?: number | readonly number[];
+  humanReferent?: number;
   feature?: string;
   name?: string;
   drafts: string[];
@@ -88,7 +90,7 @@ function targetLabel(target: Turn['target']) {
   return 'figures_' + target.join('_');
 }
 
-function session(strategy: Strategy, observation: Memo = memo) {
+function session(strategy: Strategy, observation: Memo = memo, trialProfile = profile) {
   let current: Turn | undefined;
   let actionRequests: JevDecisionPayload[] = [];
   let draftRequests: DraftRequest[] = [];
@@ -99,7 +101,7 @@ function session(strategy: Strategy, observation: Memo = memo) {
   let saved: SavedTrial | undefined;
   const create = async (restore?: SavedTrial) => {
     const transport = {
-      enabled: true, timeoutMs: profile.timeouts.decisionMs, questionLayout: profile.questionLayout,
+      enabled: true, timeoutMs: trialProfile.timeouts.decisionMs, questionLayout: trialProfile.questionLayout,
       readKey: async () => 'sk-or-SYNTHETIC-holistic-acceptance-key',
       async fetchImpl(_url: string, init: RequestInit) {
         const request = JSON.parse(String(init.body)) as JevDecisionPayload;
@@ -119,7 +121,10 @@ function session(strategy: Strategy, observation: Memo = memo) {
             assert.equal(draft, turn.drafts[generationRequests.length - 1], 'judge the draft just generated');
             choice = turn.draftActs?.[draft] ?? 'none';
           }
-          if (key === 'human_referent') choice = typeof turn.target === 'number' ? targetLabel(turn.target) : turn.target ? 'multiple' : 'none';
+          if (key === 'human_referent') {
+            const referent = turn.humanReferent ?? turn.target;
+            choice = typeof referent === 'number' ? targetLabel(referent) : referent ? 'multiple' : 'none';
+          }
           if (key === 'repair_issue' || key === 'basis') choice = 'none';
           if (key === 'prospect') choice = 'no_open_issue';
           if (key === 'name' || key === 'feature') {
@@ -152,7 +157,7 @@ function session(strategy: Strategy, observation: Memo = memo) {
     };
     return createNamingTaskV2({
       strategy, seed, runDir: null, createTrial: () => trial, restore: restore ?? null,
-      utteranceStyle: profile.utteranceStyle,
+      utteranceStyle: trialProfile.utteranceStyle,
       client: { async complete(messages: Message[], { phase }: { phase: string }) {
         if (phase === 'final_submission') {
           const draft = finalDrafts[finalCalls++];
@@ -169,7 +174,7 @@ function session(strategy: Strategy, observation: Memo = memo) {
         return { text: draft, model: 'synthetic-luna' };
       } },
       jevResearch: {
-        profile, technicalTrial,
+        profile: trialProfile, technicalTrial,
         ledger: new RunBudget({ lunaCalls: 90, lunaPosts: 90, lunaTokens: 100000, jevPosts: 90, jevUsd: 1 }),
         jevDecision: createJevDecisionClient(transport)!,
         observer: {
@@ -177,9 +182,9 @@ function session(strategy: Strategy, observation: Memo = memo) {
           async reobserve(): Promise<never> { throw new Error('unexpected reobservation'); },
         },
         localGrounding: {
-          classifier: createJevLocalTestClassifier({ ...transport, timeoutMs: profile.timeouts.localMs, dialoguePolicy: profile.dialoguePolicy })!,
-          aiPublicTransport: transport, aiPublicClaims: profile.localGrounding.aiPublicClaims,
-          timeoutMs: profile.timeouts.localMs,
+          classifier: createJevLocalTestClassifier({ ...transport, timeoutMs: trialProfile.timeouts.localMs, dialoguePolicy: trialProfile.dialoguePolicy })!,
+          aiPublicTransport: transport, aiPublicClaims: trialProfile.localGrounding.aiPublicClaims,
+          timeoutMs: trialProfile.timeouts.localMs,
         },
       },
       onPersist(record: unknown) { saved = structuredClone(record) as SavedTrial; },
@@ -259,17 +264,28 @@ const broad: Turn = {
   human: '見えている図形を一つ選んで、全体としてどんな形か教えてください。', action: 'accept', target: 0, drafts: [fullShape],
   publicClaims: [{ text: fullShape, aspect: 'referent', act: 'assert', targets: [first] }],
 };
-const acknowledgeProposal: Turn = {
-  human: firstProposal, local: [proposal(firstProposal)], action: 'accept', drafts: ['呼び名の候補ですね。'],
+const proposalQuestion = '呼び名を決める前に、環に切れ目がある形か確認してもいいですか？';
+const holdProposal: Turn = {
+  human: firstProposal, local: [proposal(firstProposal)], action: 'confirm', target: 0, feature: ringGap,
+  drafts: [proposalQuestion],
 };
+async function keepNamePending(trial: ReturnType<typeof session>) {
+  const turn = await trial.say(holdProposal);
+  published(turn, 'confirm', single(first), proposalQuestion);
+  unchanged(turn);
+}
 const adopt: Turn = {
   human: approval, local: [approvalClaim], action: 'agree', target: 0, name: originalName, drafts: [agreeSpeech],
   draftActs: { [agreeSpeech]: 'adopt_chosen' },
 };
 
-async function paired(check: (trial: ReturnType<typeof session>, strategy: Strategy) => Promise<void>, observation?: Memo) {
+async function paired(
+  check: (trial: ReturnType<typeof session>, strategy: Strategy) => Promise<void>,
+  observation?: Memo,
+  trialProfile = profile,
+) {
   const runs = await Promise.allSettled(strategies.map(async strategy => {
-    const trial = session(strategy, observation);
+    const trial = session(strategy, observation, trialProfile);
     await trial.start();
     await check(trial, strategy);
   }));
@@ -428,7 +444,7 @@ test('5. Shared impressions alone supply no naming action and leave the ledger o
 test('6. A short approval question can adopt the participant’s original name after an uninterpreted turn and restore', async () => {
   await paired(async trial => {
     await trial.say(broad);
-    await trial.say(acknowledgeProposal);
+    await keepNamePending(trial);
     const incomplete = 'ええと、あの……。';
     const ordinary = await trial.say({ human: incomplete, local: [{ text: incomplete, aspect: 'progress', act: 'unknown' }],
       action: 'accept', drafts: ['聞いています。'] });
@@ -447,13 +463,20 @@ for (const related of [false, true]) {
     : '6. An unrelated proposal preserves the bound name for the old figure', async () => {
     await paired(async trial => {
       await trial.say(broad);
-      await trial.say(acknowledgeProposal);
+      await keepNamePending(trial);
       const newer = related ? `同じ形の別案として「${differentName}」を出します。`
         : `閉じた環の方には「${differentName}」を提案します。`;
-      await trial.say({
+      const feature = related ? baseWidth : '環が閉じている';
+      const question = related ? '呼び名を決める前に、台が環より細い形か教えてください。'
+        : '二つの形を区別したいです。今回の案は環が閉じている方ですか？';
+      // A proposal for the second figure leaves both figures in the AI's question.
+      const next = await trial.say({
         human: newer, local: [proposal(newer, differentName, [related ? first : second])],
-        action: 'accept', drafts: ['呼び名の案を聞きました。'],
+        action: 'confirm', target: related ? 0 : [0, 1], humanReferent: related ? 0 : 1, feature, drafts: [question],
       });
+      published(next, 'confirm', related ? single(first) : multi([first, second]), question);
+      assert.equal(next.trace.humanReferent?.scores?.[related ? first : second], 1);
+      unchanged(next);
       const query = 'その形について最初に出した呼び方は何でしたか？';
       const waiting = await trial.say({
         human: query, local: [{ ...approvalClaim, text: query, act: 'ask' }],
@@ -496,7 +519,7 @@ test('7. Withdrawal, referent denial and unshared names do not make an agreement
   for (const mode of ['withdrawal', 'denial'] as const) {
     await paired(async trial => {
       await trial.say(broad);
-      await trial.say(acknowledgeProposal);
+      await keepNamePending(trial);
       const reply = mode === 'withdrawal' ? '先ほどの呼び方の案を取り下げます。' : '私が指しているのはその環飾りの形ではありません。';
       const segment: Segment = mode === 'withdrawal'
         ? { text: reply, aspect: 'name', act: 'withdraw', targets: [first],
@@ -592,7 +615,7 @@ test('Both v3 strategies receive the same whole-shape guidance and replay a comm
 test('A rejected public agreement commits no new name', async () => {
   await paired(async trial => {
     await trial.say(broad);
-    await trial.say(acknowledgeProposal);
+    await keepNamePending(trial);
     const before = trial.record();
     const rejected = await trial.say({
       ...adopt, drafts: [`「${differentName}」と呼びましょう。`, `この形は「${differentName}」にしましょう。`],
@@ -611,7 +634,7 @@ test('A rejected public agreement commits no new name', async () => {
 test('An agree draft showing the expected name but refusing it is regenerated before committing agreement', async () => {
   await paired(async trial => {
     await trial.say(broad);
-    await trial.say(acknowledgeProposal);
+    await keepNamePending(trial);
     const refusal = `「${originalName}」という呼び名を使うことには賛成できません。`;
     const turn = await trial.say({ ...adopt, drafts: [refusal, agreeSpeech],
       draftActs: { ...adopt.draftActs, [refusal]: 'decline_or_hold' } });
@@ -648,7 +671,7 @@ for (const [kind, declaration] of [
 test('A natural acceptance and a factual report quoting adoption wording both publish on the first draft', async () => {
   await paired(async trial => {
     await trial.say(broad);
-    await trial.say(acknowledgeProposal);
+    await keepNamePending(trial);
     const recount = `「${originalName}」で呼びましょうと提案したのは、そちらです。`;
     const query = 'その名前を提案したのはどちらでしたか？';
     const report = await trial.say({ human: query, action: 'accept', target: 0,
@@ -667,29 +690,35 @@ test('A natural acceptance and a factual report quoting adoption wording both pu
   });
 });
 
-test('05d-1: a linked approval question checks an accept draft and publishes only the proposal account', async () => {
-  await paired(async trial => {
-    await trial.say(broad);
-    await trial.say(acknowledgeProposal);
-    const askApproval = '先に挙げた呼び方でよさそうですか？';
-    const assent = 'ええ、その呼び方に賛成です。';
-    const account = 'その呼び方を提案したのはそちらです。';
-    // Neither draft quotes a name or uses a naming formula. The current
-    // approval claim is the only trigger for both questions.
-    const turn = await trial.say({ human: askApproval, local: [{ ...approvalClaim, text: askApproval }],
-      action: 'accept', target: 0, drafts: [assent, account],
-      draftActs: { [assent]: 'adopt_other', [account]: 'recount_only' } });
-    published(turn, 'accept', single(first), account);
-    assert.ok(Object.hasOwn(offered(turn, 'action'), 'agree'));
-    assert.equal(turn.generationRequests.length, 2);
-    assert.deepEqual(turn.draftRequests, [assent, account].map(draft => ({ draft, reasons: ['typed_context'] })));
-    checkedDrafts(turn, [['initial', assent, 'adopt_other'], ['retry', account, 'recount_only']]);
-    assert.deepEqual(turn.trace.generationGuard, { violations: ['draft_act_mismatch'], regenerated: true, fallback: false });
-    assert.ok(!trial.publicState().events.some((event: { text: string }) => event.text === assent));
-    assert.equal(turn.after.ownLedger[first].status, 'unassigned');
-    unchanged(turn);
+for (const [policy, activeProfile, action] of [
+  ['holistic_v3', holisticV3Profile, 'accept'],
+  ['holistic_v4', profile, 'confirm'],
+] as const) {
+  test('05d-1 ' + policy + ': a linked approval checks the draft before publishing the safe reply', async () => {
+    await paired(async trial => {
+      await trial.say(broad);
+      await keepNamePending(trial);
+      const askApproval = '先に挙げた呼び方でよさそうですか？';
+      const assent = 'ええ、その呼び方に賛成です。';
+      const account = 'その呼び方を提案したのはそちらです。';
+      const reply = action === 'accept' ? account : account + '台が環より細い形か教えてください。';
+      // The typed request triggers both checks without a name quote or naming formula in either draft.
+      const turn = await trial.say({ human: askApproval, local: [{ ...approvalClaim, text: askApproval }],
+        action, target: 0, ...(action === 'confirm' ? { feature: baseWidth } : {}), drafts: [assent, reply],
+        draftActs: { [assent]: 'adopt_other', [reply]: 'recount_only' } });
+      published(turn, action, single(first), reply);
+      assert.ok(Object.hasOwn(offered(turn, 'action'), 'agree'));
+      assert.equal(Object.hasOwn(offered(turn, 'action'), 'accept'), action === 'accept');
+      assert.equal(turn.generationRequests.length, 2);
+      assert.deepEqual(turn.draftRequests, [assent, reply].map(draft => ({ draft, reasons: ['typed_context'] })));
+      checkedDrafts(turn, [['initial', assent, 'adopt_other'], ['retry', reply, 'recount_only']]);
+      assert.deepEqual(turn.trace.generationGuard, { violations: ['draft_act_mismatch'], regenerated: true, fallback: false });
+      assert.ok(!trial.publicState().events.some((event: { text: string }) => event.text === assent));
+      assert.equal(turn.after.ownLedger[first].status, 'unassigned');
+      unchanged(turn);
+    }, undefined, activeProfile);
   });
-});
+}
 
 test('05d-2: the same name quote is checked while tentative and exempt after agreement', async () => {
   await paired(async trial => {
@@ -737,7 +766,7 @@ test('05d-2: the same name quote is checked while tentative and exempt after agr
 test('Two orientation violations allow the existing fallback when both drafts adopt the chosen name', async () => {
   await paired(async trial => {
     await trial.say(broad);
-    await trial.say(acknowledgeProposal);
+    await keepNamePending(trial);
     const initial = '上端に切れ目があります。' + agreeSpeech;
     const second = '右側に切れ目があります。' + agreeSpeech;
     const turn = await trial.say({ ...adopt, drafts: [initial, second],
@@ -752,7 +781,7 @@ test('Two orientation violations allow the existing fallback when both drafts ad
 test('An orientation retry refusing the chosen name cannot be published as an agreement fallback', async () => {
   await paired(async trial => {
     await trial.say(broad);
-    await trial.say(acknowledgeProposal);
+    await keepNamePending(trial);
     const initial = '上端に切れ目があります。' + agreeSpeech;
     const refusal = `右側に切れ目があります。「${originalName}」という呼び名を使うことには賛成できません。`;
     const turn = await trial.say({ ...adopt, drafts: [initial, refusal],
@@ -772,7 +801,7 @@ const finalNames = (): Names => Object.fromEntries(figureIds.map(figureId => [
 ]));
 async function prepareSubmission(trial: ReturnType<typeof session>) {
   await trial.say(broad);
-  await trial.say(acknowledgeProposal);
+  await keepNamePending(trial);
   const turn = await trial.say(adopt);
   published(turn, 'agree', single(first), agreeSpeech);
   assert.deepEqual(turn.after.ownLedger[first], { status: 'agreed', name: originalName });

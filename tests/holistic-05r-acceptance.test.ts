@@ -374,7 +374,7 @@ const participantLunaRequest = { timeoutMs: null, maxCompletionTokens: 1000 };
 const participantTimeouts = {
   observationMs: 20000, localMs: 20000, decisionMs: 20000, lunaAttemptMs: 80000, generationMs: 40000, trialMs: 600000,
 };
-const participantProfile = researchTrialProfileV3(participantLunaRequest, participantTimeouts, 'two_stage_v3', 'holistic_v3');
+const participantProfile = researchTrialProfileV3(participantLunaRequest, participantTimeouts, 'two_stage_v3', 'holistic_v4');
 const legacyProfile = researchTrialProfileV3(participantLunaRequest, participantTimeouts, 'two_stage_v3', 'holistic_v2');
 const factText = '呼び名を最初に挙げた人も記録するのですか？';
 async function participantSetup(t: TestContext, strategy: Strategy) {
@@ -437,7 +437,7 @@ async function participantSetup(t: TestContext, strategy: Strategy) {
       return Response.json({ model: modelId, choices: [{ message: { content: text } }], usage: { prompt_tokens: 1, completion_tokens: 1 } });
     },
   });
-  type ParticipantRecord = Saved & { options: { profileSha256: string } };
+  type ParticipantRecord = Saved & { options: { profileSha256: string; dialoguePolicy?: string } };
   async function makeTask(restore?: ParticipantRecord, earlier = false) {
     const value = { strategy, seed, referenceMemory: true, restore };
     const wiring = await prepared.taskOptions(value);
@@ -472,10 +472,12 @@ for (const strategy of strategies) {
     assert.equal(restarted.record().options.profileSha256, source.options.profileSha256);
     const fresh = await makeTask();
     assert.equal(fresh.record().options.profileSha256, researchHash(participantProfile));
+    assert.equal(restarted.record().options.dialoguePolicy, 'holistic_v2');
+    assert.equal(fresh.record().options.dialoguePolicy, 'holistic_v4');
 
     for (const [version, session, expected] of [
       ['holistic_v2', restarted, LOCAL_FUNCTION_CRITERIA_V3],
-      ['holistic_v3', fresh, LOCAL_FUNCTION_CRITERIA_HOLISTIC_V3],
+      ['holistic_v4', fresh, LOCAL_FUNCTION_CRITERIA_HOLISTIC_V3],
     ] as const) {
       await t.test(version + ' actual next send uses its own closed-set text', async () => {
         const before = localRequests.length;
