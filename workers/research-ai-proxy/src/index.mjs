@@ -245,12 +245,12 @@ export async function handleRequest(request, env, fetchImpl = globalThis.fetch) 
   const policy = resolvePurposeModel({ purpose: "dialogue_turn" }, env);
   const ready = Boolean(endpoint && env.UPSTREAM_API_KEY && "model" in policy);
   if (pathname === "/v1/model-policy") {
-    return request.method === "GET" ? reply(200, {
-      purpose: "dialogue_turn",
-      provider,
-      model: "model" in policy ? policy.model : null,
-      ready,
-    }) : reply(405, { error: "method_not_allowed" });
+    if (request.method !== "GET") return reply(405, { error: "method_not_allowed" });
+    const purpose = new URL(request.url).searchParams.get("purpose") ?? "dialogue_turn";
+    const selected = resolvePurposeModel({ purpose }, env);
+    if (selected.error === "unsupported_purpose") return reply(400, { error: selected.error });
+    return reply(200, { purpose, provider, model: "model" in selected ? selected.model : null,
+      ready: Boolean(endpoint && env.UPSTREAM_API_KEY && "model" in selected) });
   }
   if (!ready) {
     return reply(503, { error: "provider_unconfigured" });

@@ -219,3 +219,22 @@ test("Worker picks the internal model for the same client request after a config
   assert.deepEqual(seen.map((row) => row.model), ["vision-A", "vision-B", "gemini-vision-C"]);
   assert.ok(seen[2].url.startsWith("https://generativelanguage.googleapis.com/"));
 });
+
+
+test("separate vision purpose selects only the configured vision model and leaves dialogue unchanged", async () => {
+  const configured = { ...env, VISION_MODEL: "vision-terra-for-test" };
+  const seen = [];
+  const upstream = async (_url, options) => { const body = JSON.parse(options.body); seen.push(body.model);
+    return Response.json({ ...result, model: body.model }); };
+  for (const purpose of ["dialogue_turn", "visual_observation"]) {
+    const policy = await handleRequest(request("/v1/model-policy?purpose=" + purpose, env.RESEARCH_PROXY_TOKEN, undefined, "GET"), configured, upstream);
+    assert.equal(policy.status, 200);
+    const model = purpose === "dialogue_turn" ? env.DIALOGUE_MODEL : configured.VISION_MODEL;
+    assert.deepEqual(await policy.json(), { purpose, provider: "openai", model, ready: true });
+    const response = await handleRequest(request("/v1/chat/completions", env.RESEARCH_PROXY_TOKEN, bodyWith(simpleMessages, { purpose, model: "ignored" })), configured, upstream);
+    assert.equal(response.status, 200); assert.equal((await response.json()).model, model);
+  }
+  assert.deepEqual(seen, [env.DIALOGUE_MODEL, configured.VISION_MODEL]);
+  const absent = await handleRequest(request("/v1/chat/completions", env.RESEARCH_PROXY_TOKEN, bodyWith(simpleMessages, { purpose: "visual_observation" })), env, upstream);
+  assert.equal(absent.status, 400); assert.equal(seen.length, 2);
+});
