@@ -3,17 +3,23 @@
 // and runtime effects. Whether the model stops the loop needs a live check.
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createChatClient } from '../dialogue-model/runtime/client.mjs';
 import { createJevDecisionClient } from '../dialogue-model/runtime/decision/jev-decision.ts';
 import type { JevAction, JevDecisionInput } from '../dialogue-model/runtime/decision/contract.ts';
+import { pairedInterventionReplay } from '../dialogue-model/runtime/diagnostics/parity-live/intervention-replay.ts';
+import type { InterventionReplayTape, ReplaySegment } from '../dialogue-model/runtime/diagnostics/parity-live/intervention-replay.ts';
 import { createProfileDialogue } from '../dialogue-model/runtime/diagnostics/parity-live/replay.ts';
+import { hash } from '../dialogue-model/runtime/diagnostics/parity-verify/core.ts';
+import { interventionChecks } from '../dialogue-model/runtime/diagnostics/parity-verify/intervention-records.ts';
 import type { LocalAct, LocalClaimView, LocalSegmentProposal } from '../dialogue-model/runtime/local-grounding/contract.ts';
 import { createJevLocalTestClassifier } from '../dialogue-model/runtime/local-grounding/jev-local-test.ts';
 import { validateObservationMemo } from '../dialogue-model/runtime/observation/observe.ts';
 import { researchTrialProfileV3 } from '../dialogue-model/runtime/v2/research-profile.ts';
 import type { JevPrivateState, JevTurnTrace } from '../dialogue-model/runtime/v2/jev-turn.ts';
 import { anchors, deadlines, ids, image, memo } from './support/s4-integration/harness.ts';
+import { MODEL, normal } from './support/s4-v3-records.ts';
 
-const [slot] = ids;
+const [slot, otherSlot] = ids;
 const feature = '丸い輪に細い棒が接する';
 const alternateFeature = '輪に切れ目がある';
 const name = '鍵';
@@ -46,11 +52,14 @@ type NativeRequest = {
   state: string;
   questions: Record<string, { criteria: Record<string, string> }>;
 };
-type ActionMessages = Array<{ role: string; content: unknown }>;
+type ActionMessages = Parameters<ReturnType<typeof createChatClient>['complete']>[0];
 type Attempt = { input: JevDecisionInput; wire: NativeRequest[]; generation: ActionMessages[]; trace: JevTurnTrace; state: JevPrivateState };
+type Send = InterventionReplayTape['recorded']['expectedRequests'][number];
 
 const profile = researchTrialProfileV3({ timeoutMs: null, maxCompletionTokens: null },
   { ...deadlines(), localMs: 3000, decisionMs: 3000, generationMs: 3000 }, 'two_stage_v3');
+const technicalTrial = { version: 'adaptive_repair_v3' } as const;
+const own = { ownImage: { ...image, mimeType: 'image/png' as const }, ownAnchors: anchors };
 const observation = memo();
 observation.figures[0].analytic.shapes = [feature, alternateFeature];
 observation.figures[0].holistic = [{ construal: 'ランプ', basis: [feature], status: 'hypothesis' }];
@@ -75,14 +84,33 @@ async function replay(strategy: Strategy, scenario: Turn[], onFailure?: (attempt
   let current = scenario[0];
   let wire: NativeRequest[], generation: ActionMessages[], trace: JevTurnTrace, input: JevDecisionInput;
   let selectedAction: string;
+  let material: ReplaySegment, sends: Send[], cut: { luna: number; jev: number };
+  let lunaCall: ReplaySegment['luna'][number];
+  function recordSend(provider: Send['provider'], phase: string, body: Record<string, unknown>) {
+    sends.push({ provider, phase, requestSha256: hash(body), actualSendMeasured: true, sendIds: [sends.length + 1],
+      ...(provider === 'luna' ? { messagesSha256: hash(body.messages) } : {}) });
+  }
   const scriptedSpeech = () => selectedAction === 'agree' && current.agreeIfOffered
     ? current.agreeIfOffered.speech : current.speech;
   let responseId = 0;
   const readKey = async () => 'sk-or-SYNTHETIC-offline-00000000000';
+  const luna = createChatClient({
+    provider: 'cloudflare', purpose: profile.modelPolicy.purpose, apiKey: 'synthetic-offline-replay-key',
+    baseUrl: 'https://offline.invalid/v1', timeoutMs: profile.timeouts.lunaAttemptMs,
+  }, async (_url, options) => {
+    recordSend('luna', lunaCall.phase, JSON.parse(String(options?.body)));
+    return Response.json({ model: lunaCall.response.model, choices: [{ message: { content: lunaCall.response.text } }],
+      usage: { prompt_tokens: 0, completion_tokens: 0 } });
+  });
   const fetchImpl = async (_url: string, options: RequestInit) => {
     const request = JSON.parse(String(options.body)) as NativeRequest;
     wire.push(request);
     const state = JSON.parse(request.state) as { aiSeq?: number; priorClaims?: LocalClaimView[] };
+    const keys = Object.keys(request.questions);
+    const phase = keys.includes('human_referent') ? 'human_referent' : keys.includes('repair_issue') ? 'repair_prospect'
+      : keys.some(key => key.endsWith('_support')) ? 'ai_support'
+      : keys.some(key => key.endsWith('_act')) ? Object.hasOwn(state, 'aiSeq') ? 'ai_function' : 'local_function' : 'decision';
+    recordSend('jev', phase, request);
     const answers = Object.fromEntries(Object.entries(request.questions).map(([key, { criteria }]) => {
       const labels = Object.keys(criteria);
       let choice = labels[0];
@@ -121,36 +149,49 @@ async function replay(strategy: Strategy, scenario: Turn[], onFailure?: (attempt
         [label, label === choice ? 1 : key === 'action' ? current.alternatives?.[label as JevAction] ?? 0 : 0]));
       return [key, { type: 'choice', choice, probabilities }];
     }));
-    return Response.json({ model: request.model, id: 'gen-conv-' + ++responseId, usage: { cost: 0 }, answers });
+    const response = { model: request.model, id: 'gen-conv-' + ++responseId, usage: { cost: 0 }, answers };
+    material.jev.push(response);
+    return Response.json(response);
   };
   const transport = { enabled: true, readKey, fetchImpl, timeoutMs: 3000, researchLimits: { maxDeadlineMs: 600000 } };
   const decision = createJevDecisionClient({ ...transport, questionLayout: profile.questionLayout })!;
   const runtime = createProfileDialogue(profile, {
-    strategy, image, anchors, technicalTrial: { version: 'adaptive_repair_v3' },
+    strategy, image, anchors, technicalTrial,
     observer: {
       async observeAll() { return structuredClone(ownMemo); },
       async reobserve(): Promise<never> { throw new Error('unexpected reobservation'); },
     },
-    client: { async complete(messages: ActionMessages, { phase }: { phase: string }) {
-      if (phase === 'local_extraction') return { text: extract(current.local) };
-      if (phase === 'ai_extraction') return { text: extract(current.ai) };
-      assert.equal(phase, 'generation');
-      generation.push(structuredClone(messages));
-      return { text: scriptedSpeech(), model: 'synthetic-luna' };
+    client: { async complete(messages: Parameters<typeof luna.complete>[0], options: { phase: string; timeoutMs?: number }) {
+      const { phase } = options;
+      assert.ok(['local_extraction', 'ai_extraction', 'generation'].includes(phase));
+      if (phase === 'generation') generation.push(structuredClone(messages));
+      const text = phase === 'local_extraction' ? extract(current.local)
+        : phase === 'ai_extraction' ? extract(current.ai) : scriptedSpeech();
+      lunaCall = { phase, response: { text, model: 'synthetic-luna', usage: { inputTokens: 0, outputTokens: 0 } } };
+      material.luna.push(lunaCall);
+      return luna.complete(messages, options);
     } },
-    jevDecision: { ...decision, decide(next: JevDecisionInput, options?: Parameters<typeof decision.decide>[1]) {
+    jevDecision: { ...decision, async decide(next: JevDecisionInput, options?: Parameters<typeof decision.decide>[1]) {
       input = structuredClone(next);
-      return decision.decide(next, options);
+      const result = await decision.decide(next, options);
+      cut = { luna: material.luna.length, jev: material.jev.length };
+      return result;
     } },
-    localGrounding: { classifier: createJevLocalTestClassifier(transport)!, aiPublicTransport: transport },
+    localGrounding: {
+      classifier: createJevLocalTestClassifier({ ...transport, questionLayout: profile.questionLayout })!,
+      aiPublicTransport: transport,
+    },
     onJevTurnTrace(record: JevTurnTrace) { trace = structuredClone(record); },
   });
-  let state = runtime.initialPrivateState() as JevPrivateState;
+  let state = runtime.initialPrivateState() as InterventionReplayTape['state'];
   const snapshots = [];
   for (const turn of scenario) {
     current = turn;
     wire = [];
     generation = [];
+    sends = [];
+    material = { luna: [], jev: [], reobservations: [] };
+    const before = state;
     const human = append('human', turn.human);
     const result = await runtime.runAiTurn({ events, privateState: state, lastEventId: human.id, requestSeq: human.seq }).catch((error: unknown) => {
       onFailure?.({ input, wire, generation, trace, state });
@@ -163,14 +204,17 @@ async function replay(strategy: Strategy, scenario: Turn[], onFailure?: (attempt
     assert.ok(!trace.generationGuard.fallback, 'forecast could not be published');
     assert.deepEqual(trace.generationGuard.violations, []);
     // Simulate persistence between public turns, including restore validation.
-    state = JSON.parse(JSON.stringify(result.privateState)) as JevPrivateState;
+    state = JSON.parse(JSON.stringify(result.privateState)) as InterventionReplayTape['state'];
     const saved = (state.judgments ?? []).at(-1)!;
     assert.deepEqual(saved.jevTurn.agreeNames, input.agreeNames);
     assert.deepEqual(saved.jevTurn.repairFacts, input.repairFacts);
     assert.deepEqual(saved.jevTurn.executed, trace.executed);
     assert.deepEqual(saved.judgment, trace.finalAction);
+    const common = { luna: material.luna.slice(0, cut!.luna), jev: material.jev.slice(0, cut!.jev), reobservations: [] };
+    const tail = { luna: material.luna.slice(cut!.luna), jev: material.jev.slice(cut!.jev), reobservations: [] };
+    snapshots.push({ state, saved, input, trace, wire, generation, speech: result.text as string,
+      before, events: structuredClone(events), common, tail, sends });
     append('ai', result.text);
-    snapshots.push({ state, saved, input, trace, wire, generation, speech: result.text as string });
   }
   return snapshots;
 }
@@ -187,6 +231,60 @@ async function sameScenario(scenario: Turn[]): Promise<Snapshot[]> {
   }
   return repair;
 }
+
+async function checkS4(repair: Snapshot, bypass: Snapshot): Promise<void> {
+  assert.deepEqual(repair.common, bypass.common);
+  for (const [label, item] of [['repair-first', repair], ['bypass-enabled', bypass]] as const) {
+    const tape: InterventionReplayTape = {
+      schemaVersion: 'parity_intervention_replay_v1', state: item.before, events: item.events, technicalTrial,
+      common: item.common, tails: { 'repair-first': repair.tail, 'bypass-enabled': bypass.tail },
+      recorded: { label, expectedRequests: item.sends },
+    };
+    const result = await pairedInterventionReplay(tape, own, MODEL, JSON.parse(JSON.stringify(profile)));
+    const side = result.sides.find(side => side.label === label);
+    const mismatchedSends = item.sends.flatMap((send, i) => {
+      const replayed = side?.requests[i];
+      return replayed?.provider === send.provider && replayed.phase === send.phase &&
+        replayed.preProjectionPayloadSha256 === send.requestSha256 ? [] : [send.provider + '/' + send.phase];
+    });
+    assert.equal(result.status, 'same_material_intervention_verified', JSON.stringify({ label, error: result.error, mismatchedSends }));
+    assert.deepEqual(result.sides.map(side => side.executed), [repair.trace.executed, bypass.trace.executed]);
+
+    const records = structuredClone(normal);
+    const trial = records.trials[0];
+    const profileSha256 = hash(profile);
+    for (const source of [records.run, records.summary, trial, records.run.manifest]) {
+      Object.assign(source, { profile, profileSha256 });
+    }
+    Object.assign(records.run.manifest, { timeouts: profile.timeouts, lunaRequest: profile.lunaRequest });
+    trial.identity.profile = profileSha256;
+    trial.label = records.run.manifest.trials[0].label = records.summary.runOrder[0].label = label;
+    const turn = item.trace.turnIndex;
+    trial.calls = item.sends.map((send, index) => ({
+      ...structuredClone(normal.trials[0].calls.find((call: { provider: string }) => call.provider === send.provider)),
+      id: index + 1, sendIds: send.sendIds, phase: send.phase, turn,
+      requestSha256: send.messagesSha256 ?? send.requestSha256,
+      ...(send.provider === 'luna' ? { expectedHttpRequestSha256: send.requestSha256, httpRequestSha256: send.requestSha256 } : {}),
+    }));
+    trial.http = item.sends.flatMap((send, index) => send.provider === 'luna' ? [{
+      method: 'POST', kind: 'completion_post', phase: send.phase, callId: index + 1, sendId: index + 1,
+      hashScheme: 'canonical_json_sha256', requestSha256: send.requestSha256, status: 200, outcome: 'returned',
+    }] : []);
+    const trace = { ...item.trace, status: 'committed' as const };
+    trial.attempts = [trace];
+    trial.turns = [{ ...trial.turns[0], turn, publicText: item.speech, trace: [trace], state: item.state }];
+    trial.lastCommittedState = item.state;
+    trial.replay = [{ tape, result }];
+    records.evidence.pairedReplay = [{ trialOrder: 0, turn, left: result.sides[0], right: result.sides[1] }];
+    const checks = interventionChecks(JSON.parse(JSON.stringify(records)));
+    for (const id of ['identity.intervention_policy', ...['shape', 'binding', 'execution', 'replay']
+      .map(check => 'intervention.trial.0.attempt.0.' + check)]) {
+      const check = checks.find(candidate => candidate.id === id);
+      assert.equal(check?.status, 'pass', JSON.stringify({ label, id, check }));
+    }
+  }
+}
+
 const actionOptions = (s: Attempt) => s.wire.find(packet => packet.questions.action)!.questions.action.criteria;
 const ownFigure = { target: 0, referent: 0 } as const;
 
@@ -490,6 +588,85 @@ test('A2 control: rejecting a different name does not reject the shared figure o
   assert.equal(adopted.state.ledger[slot].status, 'agreed');
   assert.equal(adopted.state.ledger[slot].name, name);
 });
+
+const answerToPublicReferent = (claim: LocalClaimView) => claim.speaker === 'ai' && claim.aspect === 'referent' && claim.act === 'ask';
+const earlierDenial = referentResponse('私が探しているのは、今挙げてもらった形ではありません。', 'deny');
+const afterReferentDenial: Turn[] = [...checkReferent, {
+  human: earlierDenial.text, local: [earlierDenial], action: 'accept', speech: '候補をもう少し絞りましょう。',
+}];
+const repeatApproval = '先ほどの「鍵」という呼び名を使うことには賛成ですか？';
+const leaveOpen = '指している形をもう少し確かめてから、呼び名を決めたいです。';
+
+for (const { label, text, aspect, act, targets, identified } of [
+  { label: 'change (a) retains the rejected figure as one possibility',
+    text: 'さっきの形も可能性の一つには入ります。', aspect: 'referent', act: 'assert', targets: [slot] },
+  { label: 'change (b) narrows to two possibilities including the rejected figure',
+    text: '見比べたところ、さっきの形か、輪に切れ目がある別の形のどちらかです。', aspect: 'referent', act: 'assert', targets: [slot, otherSlot] },
+  { label: 'control (c) explicitly identifies the same figure',
+    text: '確かめ直したら、指していたのはさっきの形でした。', aspect: 'referent', act: 'assert', targets: [slot], identified: true },
+  { label: 'control (c) explicitly answers that the same figure is meant',
+    text: 'はい、確かめ直しました。その形で合っています。', aspect: 'referent', act: 'agree', targets: [slot], identified: true },
+  { label: 'control (d) asks about the figure',
+    text: 'さっき挙げた形のことを聞いているんですか？', aspect: 'referent', act: 'ask', targets: [slot] },
+  { label: 'control (d) acknowledges the question',
+    text: 'ええ、質問は分かりました。', aspect: 'referent', act: 'acknowledge', targets: [slot] },
+  { label: 'control (d) describes a feature of the figure',
+    text: 'その形の棒は細いです。', aspect: 'part', act: 'assert', targets: [slot] },
+] as const) {
+  test('A2 after referent denial: ' + label, async () => {
+    const antecedent = aspect === 'referent' ? answerToPublicReferent : undefined;
+    const reply: Segment = { text, aspect, act, targets: [...targets], antecedent };
+    const final: Turn = {
+      human: reply.text + repeatApproval, local: [reply, propose(repeatApproval, 'ask')],
+      referent: identified ? 0 : undefined, action: 'accept', speech: leaveOpen, agreeIfOffered: proposedAgreement,
+    };
+    const pair = await Promise.all(strategies.map(strategy => replay(strategy, [...afterReferentDenial, final])));
+    const [repair, bypass] = pair.map(turns => turns.at(-1)!);
+    assert.deepEqual(repair.wire, bypass.wire);
+    assert.deepEqual(repair.state.ledger, bypass.state.ledger);
+    assert.equal(repair.speech, bypass.speech);
+    await checkS4(repair, bypass);
+
+    const outcomes = pair.map(([initial, confirmed, denied, last], i) => {
+      assert.deepEqual(initial.saved.jevTurn.executed?.target, { kind: 'none' });
+      assert.equal(confirmed.saved.judgment.action, 'confirm');
+      assert.deepEqual(confirmed.saved.jevTurn.executed?.target, { kind: 'single', figureId: slot });
+      checkReferentReply(denied, earlierDenial);
+      assert.deepEqual(denied.input.agreeNames, []);
+      assert.equal(denied.state.ledger[slot].name, null);
+
+      const claims = last.input.priorClaims;
+      const publicQuestion = claims.find(answerToPublicReferent);
+      const proposal = claims.find(c => c.speaker === 'human' && c.act === 'name_propose' && c.name === name);
+      const incoming = claims.find(c => c.sourceTurn === last.input.turn && c.quote === reply.text);
+      const approval = claims.find(c => c.sourceTurn === last.input.turn && c.quote === repeatApproval);
+      assert.ok(publicQuestion && proposal && incoming && approval);
+      assert.deepEqual(proposal.targets, []);
+      assert.equal(approval.aspect, 'name');
+      assert.equal(approval.act, 'ask');
+      assert.equal(approval.name, proposal.name);
+      assert.equal(incoming.aspect, reply.aspect);
+      assert.equal(incoming.act, reply.act);
+      assert.deepEqual(incoming.targets, reply.targets);
+      assert.equal(incoming.respondsTo, antecedent ? publicQuestion.id : null);
+      assert.equal(last.input.humanReferent?.scores?.[identified ? slot : 'none'], 1);
+      return {
+        strategy: strategies[i], offered: Object.hasOwn(actionOptions(last), 'agree'),
+        names: last.input.agreeNames,
+        action: last.saved.judgment.action, speech: last.speech,
+        agreed: Object.entries(last.state.ledger).filter(([, entry]) => entry.status === 'agreed')
+          .map(([figureId, entry]) => ({ figureId, name: entry.name })),
+      };
+    });
+    assert.deepEqual(outcomes, strategies.map(strategy => ({
+      strategy, offered: Boolean(identified),
+      names: identified ? [{ name, figureId: slot, sourceTurn: 1 }] : [],
+      action: identified ? 'agree' : 'accept',
+      speech: identified ? proposedAgreement.speech : leaveOpen,
+      agreed: identified ? [{ figureId: slot, name }] : [],
+    })));
+  });
+}
 
 const rejectedConstrual = 'フックのようには見えません。';
 const construal: Turn = {

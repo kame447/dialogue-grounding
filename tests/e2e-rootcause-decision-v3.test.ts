@@ -765,6 +765,17 @@ for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
     assert.notEqual(requeried.state.ledger[ids[0]].status, 'agreed');
     checkS4AgreeSource(before, requeried);
 
+    // Keeping the figure as one candidate, or narrowing to a set, is not choosing it: the denial stays (the estimate of that exchange also says none).
+    for (const [text, targets, proposition] of [['その形も候補の一つです。', [ids[0]], '候補の一つ'], ['探しているのはその二つのどちらかです。', [ids[0], ids[1]], '二つのどちらか']] as const) {
+      before = structuredClone(f.state());
+      const candidate = await f.exchange(text + ask, { action: 'confirm', target: 1, drafts: ['どちらなのか確かめますね。'],
+        segments: [{ quote: text, name: null, targets: [...targets], aspect: 'referent' as const, proposition, act: 'assert' as const }, { ...askSegment, quote: ask }] });
+      assert.deepEqual(candidate.input.agreeNames, [], proposition);
+      assert.equal(Object.hasOwn(candidate.requests.find(r => r.questions.action)!.questions.action.criteria, 'agree'), false);
+      assert.notEqual(candidate.state.ledger[ids[0]].status, 'agreed');
+      checkS4AgreeSource(before, candidate);
+    }
+
     // Forged evidence is refused: an extra candidate the generation rules never produce.
     const forged = structuredClone(denied);
     forged.state.judgments.at(-1)!.jevTurn.agreeNames = [{ name, figureId: ids[0], sourceTurn: 1 }];

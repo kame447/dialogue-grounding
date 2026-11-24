@@ -220,7 +220,8 @@ const eligibleAgreeClaim = (c: LocalClaimView) => c.aspect === "name" && c.name 
   (c.speaker === "human" && c.act === "name_propose" || c.act === "name_accept");
 
 function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns: readonly PublicTurn[], turn: number,
-  slots: readonly string[], { ledger, judgments }: Pick<JevPrivateState, "ledger" | "judgments">): PublicNameCandidate[] {
+  slots: readonly string[], { ledger, judgments }: Pick<JevPrivateState, "ledger" | "judgments">,
+  current: { status: string; scores: Record<string, number> | null } | null = null): PublicNameCandidate[] {
   const isHumanProposal = (c: LocalClaimView) => c.speaker === "human" && c.act === "name_propose";
   const publicClaims = claims.filter(c => c.aspect === "name" && c.name !== null &&
     publicTurns.some(t => t.turn === c.sourceTurn));
@@ -245,10 +246,19 @@ function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns: reado
   // blocks agreement on that figure until a later referent claim of theirs re-affirms it. This is about the target, not about the proposed name.
   const claimTargets = (c: LocalClaimView) => c.targets.length ? c.targets : claims.find(p => p.id === c.respondsTo)?.targets ?? [];
   const referentClaims = claims.filter(c => c.speaker === "human" && c.aspect === "referent" && c.sourceTurn > lastBoundary);
-  // Only an explicit referent answer counts: a denial stands until a later agree/assert on the same figure; questions, backchannels and other acts keep it.
+  // A denial stands until the partner re-affirms that very figure: a later agree/assert that names it alone (one target, or the one its answer concerns)
+  // AND whose own exchange's referent estimate also points at it. Keeping it as one candidate among several, narrowing to a set of figures, asking,
+  // backchannels and every other act leave the denial in place.
+  const referentAt = (at: number) => at === turn ? current : judgments.find(j => j.turnIndex === at)?.jevTurn.humanReferent ?? null;
+  const selects = (m: { status: string; scores: Record<string, number> | null } | null, id: string) =>
+    !!m && m.status === "ok" && !!m.scores && typeof m.scores[id] === "number" && Object.entries(m.scores).every(([key, value]) => key === id || m.scores![id] > value);
   const referentDenied = (id: string) => {
-    const last = referentClaims.filter(c => ["deny", "agree", "assert"].includes(c.act) && claimTargets(c).includes(id)).at(-1);
-    return last?.act === "deny";
+    const relevant = referentClaims.filter(c => c.act === "deny" ? claimTargets(c).includes(id) : false);
+    const lastDeny = relevant.at(-1);
+    if (!lastDeny) return false;
+    const after = referentClaims.filter(c => referentClaims.indexOf(c) > referentClaims.indexOf(lastDeny) && ["agree", "assert"].includes(c.act) &&
+      claimTargets(c).length === 1 && claimTargets(c)[0] === id);
+    return !after.some(c => selects(referentAt(c.sourceTurn), id));
   };
   const aiSharedIds = new Set(claims.filter(c => c.speaker === "ai" && c.sourceTurn > lastBoundary && c.sourceTurn < turn).flatMap(c => c.targets));
 
@@ -733,6 +743,8 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       abortIf(signal);
       record.humanReferent = { ...estimate, turnIndex: latest.seq, observationMemo };
       baseInput.humanReferent = { status: estimate.status, scores: structuredClone(estimate.scores) };
+      // The estimate of this very exchange backs a re-affirmation of a denied figure, so the candidates are completed only now.
+      if (questionLayout === "two_stage_v3") baseInput.agreeNames = buildAgreeNamesV3(claims, publicTurns, latest.seq, slots, state, baseInput.humanReferent);
       if (adaptive && baseInput.repairHistory.length && typeof jevDecision.estimateRepairProspect === "function") {
         record.repairHistory = structuredClone(repairHistory);
         let prospect = unknownRepairProspect();

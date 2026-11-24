@@ -431,3 +431,21 @@ test('S4 orientation fallback rejects mixed name_mismatch on agree alongside sel
   assert.equal(s4Probe.s4HasNonOrientationLeak('右側です。「舟」にも見えますが、候補は「鳥」です。', propBoat), true, 'candidate noun substitution rejected');
   assert.equal(s4Probe.s4HasNonOrientationLeak('右側の形ですが、名前は「鳥」ではなく「舟」にしませんか？', propBoat), false, 'negated correction to judged name allowed');
 });
+
+test('a retry reason is checked against the draft of the condition that wrote it, whichever condition is the recorded one', async () => {
+  const decisions = [stageOne('retry', 'accept'), stageTwo('retry', 'accept', 'none')];
+  const namingReason = '前の下書きは名称の決定・合意を表していました。決定・合意を表明せず、このactionの範囲で書き直してください。';
+  const orientationOnly = await records('two_stage_v3', decisions, { retry: { current: true, drafts: ['右側に張り出しがあります。', 'そう見えるんですね。'] } });
+  pass(orientationOnly);
+  const read = (n: any, label: string) => generationRequests(n.trials[0].replay[0].result.sides.find((s: any) => s.label === label))[1].payload.messages.at(-1).content as string;
+  // The draft only had an orientation leak: a name/agreement-decision reason is wrong on either side, recorded or comparison.
+  for (const label of ['bypass-enabled', 'repair-first']) {
+    const wrong = structuredClone(orientationOnly);
+    changeRetry(wrong, label, (text: string) => text + namingReason);
+    assert.equal(status(wrong, 'replay'), 'mismatch', label);
+  }
+  // Both drafts really contain an orientation leak and a name decision: the reasons that follow from them are accepted on both sides.
+  const both = await records('two_stage_v3', decisions, { retry: { current: true, drafts: ['右側に張り出しがあります。この形は「name-0」にしましょう。', 'そう見えるんですね。'] } });
+  pass(both);
+  for (const label of ['bypass-enabled', 'repair-first']) assert.ok(read(both, label).includes(namingReason), label);
+});
