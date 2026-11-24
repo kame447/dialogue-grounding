@@ -79,7 +79,7 @@ test('R2b controls: after the prospect, a later decision must carry the precedin
 const PROPOSAL = (k: number, name = '船') => ({ human: `この形を${name}と呼びたいです`, plan: { ...NEUTRAL, act: 'name_propose',
   extraction: JSON.stringify([{ segmentId: 's1', quote: `この形を${name}と呼びたいです`, targets: [IDS[k]], aspect: 'name', proposition: `${name}と呼ぶ`, name, linkedIssueId: null, respondsToTurn: null }]) } as Plan });
 for (const adaptive of [false, true]) test(`R1 detail (${adaptive ? 'adaptive' : 'plain'}): agree over a figure with one public proposal and an observation-derived candidate verifies with the public name only`, async () => {
-  const n = await buildRecords({ ...(adaptive ? { technicalTrial: V3 } : {}), turns: [PROPOSAL(2), { human: 'そうですね', plan: { action: 'agree', target: 'figure_2' } }] });
+  const n = await buildRecords({ ...(adaptive ? { technicalTrial: V3 } : {}), turns: [PROPOSAL(2), { human: 'そうですね', plan: { action: 'agree', target: 'figure_2', speech: 'はい、「船」と呼びましょう。' } }] });
   const t = tr(n).attempts[0];
   assert.equal(t.executed.action, 'agree');
   assert.deepEqual(tr(n).lastCommittedState.judgments.at(-1).jevTurn.agreeNames.map((a: any) => [a.name, a.figureId]), [['船', IDS[2]]]);

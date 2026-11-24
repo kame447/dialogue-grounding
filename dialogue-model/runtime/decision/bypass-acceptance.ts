@@ -117,7 +117,7 @@ function sameTarget(a:JevTarget,b:JevTarget):boolean {
 const layoutArg=(layout:JevQuestionLayout)=>layout==='two_stage_v3'?{questionLayout:layout}:undefined;
 function openIssueRerank(input:BypassAcceptanceInput,scores:Record<string,number>,layout:JevQuestionLayout='two_stage_v1',missing:()=>never=()=>{throw Error();}):OpenIssueRerank|null {
  const material=input.repairProspect;
- if(material?.status!=='ok'||material.issue.choice!=='issue')return null;
+ if(material?.status!=='ok'||layout==='two_stage_v3'&&material.prospect==='no_open_issue'||material.issue.choice!=='issue')return null;
  const issue=material.issue;
  const entry=input.repairHistory.find(r=>r.turn<input.turn&&r.turn===issue.turn&&r.issueId===issue.issueId);
  if(!entry?.candidatesAfter.length)return null;
@@ -140,9 +140,12 @@ function openIssueRerank(input:BypassAcceptanceInput,scores:Record<string,number
  * be reconstructed here. Revisit requires the preceding committed execution.
  */
 export function isOpenIssueRerankRecord(intervention:unknown,decision:unknown,executed:unknown,ownSlots:readonly string[],
- previousAction?:{action:JevAction;target:JevTarget}|null,agreeNames?:readonly PublicNameCandidate[],questionLayout:JevQuestionLayout='two_stage_v1'):boolean {
+ previousAction?:{action:JevAction;target:JevTarget}|null,agreeNames?:readonly PublicNameCandidate[],questionLayout:JevQuestionLayout='two_stage_v1',
+ repairProspect?:BypassAcceptanceInput['repairProspect']):boolean {
  try{
-  jsonData([intervention,decision,executed,ownSlots,previousAction??null,agreeNames??null]);
+  jsonData([intervention,decision,executed,ownSlots,previousAction??null,agreeNames??null,repairProspect??null]);
+  // Restore checks the recorded issue. Older v3 turns could rerank an explicit issue even with no_open_issue.
+  if(repairProspect!==undefined&&(repairProspect.status!=='ok'||repairProspect.issue.choice!=='issue'))return false;
   if(!Array.isArray(ownSlots)||!ownSlots.length||ownSlots.some(id=>typeof id!=='string'||!id.length)||new Set(ownSlots).size!==ownSlots.length)return false;
   if(agreeNames!==undefined&&(!Array.isArray(agreeNames)||agreeNames.length>JEV_DECISION_INPUT_LIMITS.publicNames||agreeNames.some(n=>!exact(n,['name','figureId','sourceTurn'])||
     typeof n.name!=='string'||!n.name.trim()||n.name.length>80||!(n.figureId===null||ownSlots.includes(n.figureId))||typeof n.sourceTurn!=='number'||!Number.isSafeInteger(n.sourceTurn)||n.sourceTurn<1)))return false;
@@ -160,6 +163,7 @@ export function isOpenIssueRerankRecord(intervention:unknown,decision:unknown,ex
   const r=t.rerank;
   if(!r||r.policyId!=='saved_action_scores_open_issue_v1'||!exact(r,['policyId','ranking','selected','source'])||
    !exact(r.source,['issueTurn','issueId','choice','candidates'])||r.source.choice!=='issue'||!Number.isSafeInteger(r.source.issueTurn)||r.source.issueTurn<1||
+   repairProspect?.issue?.choice==='issue'&&(repairProspect.issue.turn!==r.source.issueTurn||repairProspect.issue.issueId!==r.source.issueId)||
    // The issue's candidates are recorded at decision time; later history updates never redefine the target.
    !Array.isArray(r.source.candidates)||!ownTarget(e?.target)||!equal(e.target,r.source.candidates.length===1?{kind:'single',figureId:r.source.candidates[0]}:{kind:'multiple',figureIds:r.source.candidates})||
    !(r.source.issueId===null||typeof r.source.issueId==='string'&&r.source.issueId.length>0&&r.source.issueId.length<=128)||

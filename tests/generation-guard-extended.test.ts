@@ -25,11 +25,18 @@ test("self-repair declarations are detected clause-locally", () => {
 test("legitimate holistic, proposal, question and partner-directed replies are not repair claims", () => {
   for (const text of ["鳥みたいに見えますね。", "「鳥」と呼ぶのはどうでしょう？", "訂正ありがとうございます。", "間違いないですか？",
     "間違えていたらすみません。", "取り違えないように確認させてください。", "それは勘違いですか？", "訂正しますか？",
-    "なるほど、家っぽい形ですね。", "尖りが二つある形のことですか？", "この形の話には、あとで戻りたいです。",
+    "なるほど、家っぽい形ですね。", "尖りが二つある形のことですか？",
     "それは誤りですか？", "誤りではないと思います。", "間違えやすい形ですね。",
     "それは違います。", "その見立ては誤りです。", "それは勘違いですね。", "訂正です。", "そちらの間違いではないです。", "[A:注意]"]) {
     assert.deepEqual(findGuardViolations(text, "accept"), [], text);
   }
+});
+
+test("a later-return wording is only a defer act: not repair, allowed under defer, an unsolicited deferral under accept", () => {
+  const text = "この形の話には、あとで戻りたいです。";
+  assert.deepEqual(findRepairClaims(text), []);
+  assert.deepEqual(findGuardViolations(text, "defer"), []);
+  assert.deepEqual(findGuardViolations(text, "accept"), ["unsolicited_deferral"]);
 });
 
 test("internal ids, field names and JSON leak under every action, plain chat does not", () => {
