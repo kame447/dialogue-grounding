@@ -14,7 +14,7 @@ test('every admin page has the same navigation with the current page marked', ()
     ['/admin/reception-settings', renderSettings(unsaved)], ['/admin', renderList([], { ...filter }, null, [], undefined, false, true)]];
   for (const [path, html] of pages) {
     const nav = html.match(/<nav>([\s\S]*?)<\/nav>/)?.[1]; assert.ok(nav, path);
-    assert.deepEqual([...nav.matchAll(/href="([^"]+)"/g)].map(m => m[1]), ['/admin/receptions', '/admin/entry', '/admin/reception-settings', '/admin']);
+    assert.deepEqual([...nav.matchAll(/href="([^"]+)"/g)].map(m => m[1]), ['/admin/receptions', '/admin/entry', '/admin/reception-settings', '/admin/figures', '/admin']);
     assert.deepEqual([...nav.matchAll(/<a href="([^"]+)" aria-current="page">/g)].map(m => m[1]), [path]);
   }
   assert.doesNotMatch(renderList([], { ...filter }, null, []), /<nav>/, 'without receptions the log has no navigation, as before');
@@ -25,7 +25,7 @@ test('reception rows label each cell with its column heading for the narrow layo
     { configured: false, mode: 'on' });
   const headings = [...(html.match(/<thead>([\s\S]*?)<\/thead>/)?.[1] ?? '').matchAll(/<th>([^<]*)<\/th>/g)].map(m => m[1]);
   const labels = [...(html.match(/<tbody>([\s\S]*?)<\/tbody>/)?.[1] ?? '').matchAll(/<td data-label="([^"]*)"/g)].map(m => m[1]);
-  assert.deepEqual(labels, headings); assert.equal(headings.length, 8);
+  assert.deepEqual(labels, headings); assert.equal(headings.length, 9);
 });
 
 test('settings: every input sits inside its label and fieldset, the two history tables are named', () => {
@@ -34,7 +34,7 @@ test('settings: every input sits inside its label and fieldset, the two history 
   for (const input of form.matchAll(/<input type="(radio|checkbox)"[^>]*>/g)) {
     const before = form.slice(0, input.index); assert.ok(before.lastIndexOf('<label>') > before.lastIndexOf('</label>'), input[0]);
   }
-  assert.equal((form.match(/<fieldset>/g) ?? []).length, 6); assert.equal((form.match(/<legend>/g) ?? []).length, 6);
+  assert.equal((form.match(/<fieldset[ >]/g) ?? []).length, 8); assert.equal((form.match(/<legend>/g) ?? []).length, 8);
   assert.match(html, /<h2>履歴<\/h2><div class="history"><h3>プロトコル<\/h3>[\s\S]*<h3>受付モード<\/h3>/);
 });
 

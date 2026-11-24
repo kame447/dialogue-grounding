@@ -4,7 +4,8 @@
 // GET /admin/record/<recordId>.json downloads that one full record as JSON.
 import { checkAdmin, presentedToken } from "./auth.ts";
 import { RECEPTIONS_LIVE_JS } from './receptions-live.ts';
-import { ADMIN_CSS, applyFilter, parseFilter, renderDetail, renderList, renderMessage, renderReceptions, renderEntry, renderSettings, renderExperimentPreview } from "./render.ts";
+import { ADMIN_CSS, applyFilter, parseFilter, renderDetail, renderList, renderMessage, renderReceptions, renderEntry, renderSettings, renderExperimentPreview, renderFigures } from "./render.ts";
+import { FIGURE_SETS, FIGURE_BANK } from '../../../../dialogue-model/runtime/stimuli/figure-bank.ts';
 import { OBJECT_ID, RECORD_ID } from "./summary.ts";
 import type { AdminSummary } from "./summary.ts";
 import type { LatencySummary } from "./latency.ts";
@@ -47,7 +48,8 @@ export const ADMIN_HEADERS: Readonly<Record<string, string>> = Object.freeze({
 /** Only the self-updating reception list may run its own same-origin script and fetch from this origin. */
 export const LIVE_CSP = ADMIN_HEADERS["Content-Security-Policy"] + "; script-src 'self'; connect-src 'self'";
 const REALM = 'Basic realm="tangram-admin", charset="UTF-8"';
-const MAX_FORM_BYTES = 1024;
+// Large enough for the settings form with six custom figure ids; still a hard stop for anything bigger.
+const MAX_FORM_BYTES = 4096;
 
 export const isAdminPath = (pathname: string) => pathname === "/admin" || pathname.startsWith("/admin/");
 
@@ -183,18 +185,49 @@ const ORDER_TOKENS: Readonly<Record<string, ProtocolFields['allowedOrders'][numb
   'rf-be': ['repair-first', 'bypass-enabled'], 'be-rf': ['bypass-enabled', 'repair-first'], rf: ['repair-first'], be: ['bypass-enabled'] });
 const SINGLE: Readonly<Record<string, readonly string[]>> = Object.freeze({ seedPolicy: ['shared', 'per_trial'], referenceMemory: ['on', 'off'],
   betweenTrials: ['none', 'questionnaire_required'], rotationMode: ['relative_pm90', 'relative_0'], receptionNumberFormat: ['daily_seq3'] });
+const FIGURE_KEYS = ['figureMode', 'figureSetPolicy', 'figureSetId', 'selectionSeed', 'figureIds'];
+const BANK_IDS = new Set(FIGURE_BANK.map(f => f.id));
+/** The figure source and its allocation, both explicit. Inputs that belong to another mode are ignored; per_trial needs the seeded mode. */
+function figureFields(form: URLSearchParams): Pick<ProtocolFields, 'figureSelection' | 'figureSetPolicy'> | null {
+  const mode = form.getAll('figureMode'), policy = form.getAll('figureSetPolicy');
+  if (mode.length !== 1 || policy.length !== 1 || (policy[0] !== 'shared' && policy[0] !== 'per_trial')) return null;
+  let figureSelection: ProtocolFields['figureSelection'];
+  if (mode[0] === 'preset') {
+    const set = form.getAll('figureSetId');
+    if (set.length !== 1 || !Object.hasOwn(FIGURE_SETS, set[0])) return null;
+    figureSelection = { mode: 'preset', setId: set[0] };
+  } else if (mode[0] === 'seeded_random') {
+    const seeds = form.getAll('selectionSeed');
+    if (seeds.length > 1) return null;
+    const raw = (seeds[0] ?? '').trim();
+    if (raw === '') figureSelection = { mode: 'seeded_random', selectionSeed: null };
+    else {
+      const seed = /^-?\d{1,16}$/u.test(raw) ? Number(raw) : NaN;
+      if (!Number.isSafeInteger(seed)) return null;
+      figureSelection = { mode: 'seeded_random', selectionSeed: seed };
+    }
+  } else if (mode[0] === 'custom') {
+    const ids = form.getAll('figureIds');
+    if (ids.length !== 6 || new Set(ids).size !== 6 || ids.some(id => !BANK_IDS.has(id))) return null;
+    figureSelection = { mode: 'custom', figureIds: FIGURE_BANK.map(f => f.id).filter(id => ids.includes(id)) };
+  } else return null;
+  if (policy[0] === 'per_trial' && figureSelection.mode !== 'seeded_random') return null;
+  return { figureSelection, figureSetPolicy: policy[0] };
+}
 /** Every field must be selected explicitly; nothing missing is filled with a default. */
 function protocolForm(form: URLSearchParams): { expectedRevision: number; fields: ProtocolFields } | null {
   const keys = [...new Set(form.keys())];
-  if (keys.some(k => k !== 'orders' && k !== 'expectedRevision' && !Object.hasOwn(SINGLE, k))) return null;
+  if (keys.some(k => k !== 'orders' && k !== 'expectedRevision' && !Object.hasOwn(SINGLE, k) && !FIGURE_KEYS.includes(k))) return null;
   if (['expectedRevision', ...Object.keys(SINGLE)].some(k => form.getAll(k).length !== 1)) return null;
+  const figures = figureFields(form);
+  if (!figures) return null;
   const expectedRevision = unsigned(form.get('expectedRevision')), orders = form.getAll('orders');
   if (expectedRevision === null || !orders.length || new Set(orders).size !== orders.length || orders.some(o => !Object.hasOwn(ORDER_TOKENS, o))) return null;
   for (const [k, values] of Object.entries(SINGLE)) if (!values.includes(form.get(k)!)) return null;
   return { expectedRevision, fields: { allowedOrders: Object.keys(ORDER_TOKENS).filter(t => orders.includes(t)).map(t => [...ORDER_TOKENS[t]]),
     seedPolicy: form.get('seedPolicy') as ProtocolFields['seedPolicy'], referenceMemory: form.get('referenceMemory') === 'on',
     betweenTrials: form.get('betweenTrials') as ProtocolFields['betweenTrials'], receptionNumberFormat: 'daily_seq3',
-    rotationMode: form.get('rotationMode') as ProtocolFields['rotationMode'] } };
+    rotationMode: form.get('rotationMode') as ProtocolFields['rotationMode'], ...figures } };
 }
 function modeForm(form: URLSearchParams): { expectedRevision: number; value: 'on' | 'off' } | null {
   const keys = [...form.keys()];
@@ -321,6 +354,7 @@ export async function handleAdmin(request: Request, deps: AdminDeps): Promise<Re
     return respond(303, "", "text/plain; charset=utf-8", { Location: "/admin?deleted=1" });
   }
   if (url.pathname === "/admin/style.css") return respond(200, ADMIN_CSS, "text/css; charset=utf-8");
+  if (url.pathname === "/admin/figures") return respond(200, renderFigures());
   if (url.pathname === "/admin" || url.pathname === "/admin/") {
     const filter = parseFilter(url.searchParams);
     const page = await deps.listPage(url.searchParams.get("after"));

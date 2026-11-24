@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, writeFile, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { createTrialV2, participantView, modelView, ROTATION_MODES, trialStimulusV2 } from "../stimuli/scatter-v2.mjs";
+import { resolveFigureSelection, validateResolvedFigureSelection } from "../stimuli/figure-bank.ts";
 import { scoreTrial as defaultScoreTrial, normalizeName } from "../scoring.mjs";
 import { createHumanMessageQueue } from "../web/human-message-queue.mjs";
 import { createDialogueV2 } from "./dialogue-v2.mjs";
@@ -60,6 +61,27 @@ function trialRotation(restore, rotationMode) {
   return { mode: restore.options.rotationMode, legacy: false };
 }
 
+const FIGURE_STIMULUS_KEYS = ["bankVersion", "figureSetId", "figureIds", "selectionSeed", "selectionMode"];
+/**
+ * The figure selection a trial uses. undefined (a new trial without one, or an older record) keeps the exact
+ * previous behavior and record shape. A restore takes only its own recorded selection, never the caller's.
+ */
+function trialFigures(restore, figureSelection, rotation) {
+  try {
+    if (!restore) {
+      if (figureSelection === undefined) return null;
+      return plain(figureSelection) && Object.hasOwn(figureSelection, "bankVersion")
+        ? validateResolvedFigureSelection(figureSelection) : resolveFigureSelection(figureSelection);
+    }
+    if (!Object.hasOwn(restore.options, "figureSelection")) {
+      if (plain(restore.stimulus) && FIGURE_STIMULUS_KEYS.some((key) => Object.hasOwn(restore.stimulus, key))) throw new Error("figures without selection");
+      return null;
+    }
+    if (rotation.legacy) throw new Error("selection without rotation");
+    return validateResolvedFigureSelection(restore.options.figureSelection);
+  } catch { throw new NamingTaskError("invalid_options"); }
+}
+
 export function parseAiNamesV2(text, slots) {
   let value;
   try { value = JSON.parse(String(text).replace(/^\s*```(?:json)?|```\s*$/g, "").trim()); } catch { return null; }
@@ -84,10 +106,11 @@ export async function createNamingTaskV2({
   client, strategy, seed, referenceMemory = true, runDir = process.env.RESEARCH_RUN_DIR,
   createTrial = createTrialV2, scoreTrial = defaultScoreTrial, judge = null, now = () => Date.now(),
   restore = null, onPersist = null, decisionShadowClient = null, activeDecision = null, utteranceStyle = "default",
-  groundingShadow = null, localGrounding = null, onLocalGroundingTrace = null, jevResearch = null, rotationMode = "relative_pm90",
+  groundingShadow = null, localGrounding = null, onLocalGroundingTrace = null, jevResearch = null, rotationMode = "relative_pm90", figureSelection = undefined,
 }) {
   // Checked before any generation, observation or persist.
   const rotation = trialRotation(restore, rotationMode);
+  const figures = trialFigures(restore, figureSelection, rotation);
   // Restored trials retain their recorded condition, including legacy memory-off trials.
   if (restore) referenceMemory = restore.options?.referenceMemory === undefined ? false : restore.options.referenceMemory;
   const style = restore?.options?.utteranceStyle ?? utteranceStyle;
@@ -105,7 +128,7 @@ export async function createNamingTaskV2({
   const local = restore && restore.options?.localGrounding !== true ? null : localGrounding;
   const groundingRecords = Array.isArray(restore?.groundingShadow) ? clone(restore.groundingShadow) : [];
   const directory = runDir ? await (await import("../naming-task.mjs")).outsideRepositoryDirectory(runDir) : null;
-  const trial = createTrial({ seed, rotationMode: rotation.mode });
+  const trial = createTrial({ seed, rotationMode: rotation.mode, ...(figures ? { figureSelection: figures } : {}) });
   // Generation-time angles; a restored record must match what is shown again.
   const stimulus = trialStimulusV2(trial);
   if (!stimulus || stimulus.rotationMode !== rotation.mode) throw new NamingTaskError("invalid_options");
@@ -243,6 +266,8 @@ export async function createNamingTaskV2({
       options: { visualAid: false, referenceMemory, decisionShadow: Boolean(decisionShadowClient), activeDecision: activeDecision?.purpose ?? null, utteranceStyle: style,
         // Legacy records keep their original shape; they never gain rotation fields on restore.
         ...(rotation.legacy ? {} : { rotationMode: rotation.mode }),
+        // Present only for a trial that selected figures, so earlier records keep their shape.
+        ...(figures ? { figureSelection: clone(figures) } : {}),
         // Present only when on, so default-off records keep their previous shape.
         ...(grounding ? { groundingShadow: true } : {}), ...(local ? { localGrounding: true } : {}),
         ...(!jev && restore?.options?.jevResearch === false ? { jevResearch: false } : {}),

@@ -5,7 +5,9 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { MEMO_LOCAL_EXTRACTION_INSTRUCTIONS } from '../dialogue-model/runtime/local-grounding/extract.ts';
 import { MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS } from '../dialogue-model/runtime/local-grounding/extract-ai.ts';
-import { canonicalReceptionProtocolV2, receptionProtocolSha256 } from '../dialogue-model/runtime/v2/reception.ts';
+import { canonicalReceptionProtocolV2, canonicalReceptionProtocolV3, receptionProtocolSha256 } from '../dialogue-model/runtime/v2/reception.ts';
+import { createTrialV2, modelView } from '../dialogue-model/runtime/stimuli/scatter-v2.mjs';
+import { FIGURE_SETS } from '../dialogue-model/runtime/stimuli/figure-bank.ts';
 import { validateParticipantModelPin } from '../dialogue-model/runtime/v2/participant-model-pin.ts';
 import { handleRequest } from '../workers/research-ai-proxy/src/index.mjs';
 import { configuredParticipantPin, participantChoices } from '../workers/research-ai-proxy/src/participant-transport.ts';
@@ -37,8 +39,6 @@ const protocol = {
   allowedOrders: [['bypass-enabled', 'repair-first']], seedPolicy: 'shared', referenceMemory: true,
   betweenTrials: 'none', receptionNumberFormat: 'daily_seq3', rotationMode: 'relative_pm90',
 };
-const sha256 = receptionProtocolSha256(canonicalReceptionProtocolV2(protocol));
-const displayed = { protocolId: protocol.protocolId, revision: protocol.revision, sha256 };
 const approvedLimits = { lunaCalls: 60, lunaTokens: 300_000, lunaPosts: 60, jevPosts: 60, jevUsd: 0.05 };
 const chatResponse = (model: unknown, content: string) => ({
   model, choices: [{ message: { content }, finish_reason: 'stop' }], usage: { prompt_tokens: 5, completion_tokens: 3 },
@@ -77,7 +77,13 @@ function memory() {
   };
 }
 
-function harness(enabled = true) {
+function harness(enabled = true, selectedProtocol: typeof protocol & {
+  figureSelection?: { mode: string; setId: string }; figureSetPolicy?: string;
+} = protocol) {
+  const canonical = selectedProtocol.schemaVersion === 'reception_protocol_v3'
+    ? canonicalReceptionProtocolV3(selectedProtocol) : canonicalReceptionProtocolV2(selectedProtocol);
+  const sha256 = receptionProtocolSha256(canonical);
+  const displayed = { protocolId: selectedProtocol.protocolId, revision: selectedProtocol.revision, sha256 };
   const storage = memory(), calls: Array<{ kind: string; expected: string; body: any }> = [];
   const controlled: { policy: unknown; terra: unknown; luna: unknown; jev: unknown; legacyCalls: number; observe: boolean } =
     { policy: { ...pin }, terra: pin.terraModelId, luna: pin.lunaModelId, jev: pin.jevModelId, legacyCalls: 0, observe: false };
@@ -120,7 +126,7 @@ function harness(enabled = true) {
 
   function makeSession() {
     const session = new TangramSession({ storage, id: { toString: () => 'c'.repeat(64) }, waitUntil() {} }, env);
-    session.settings = async () => ({ mode: { value: 'on', revision: 1 }, protocol: { protocol, revision: 1, sha256 } });
+    session.settings = async () => ({ mode: { value: 'on', revision: 1 }, protocol: { protocol: selectedProtocol, revision: selectedProtocol.revision, sha256 } });
     return session;
   }
   let session = makeSession();
@@ -220,6 +226,68 @@ test('Worker approval persists one private pin, both trial conditions use it, an
   }
   const state = await jsonOk(await h.request('state'));
   assert.doesNotMatch(JSON.stringify(state), /gpt-6|typesafe\/jev|participantModelPin|ownAnchors|observationMemo|data:image/u);
+});
+
+test('a v3 figure-bank reception freezes both the stimulus and Terra runtime through both conditions and restore', async () => {
+  const h = harness(true, { ...protocol, schemaVersion: 'reception_protocol_v3',
+    figureSelection: { mode: 'preset', setId: 'bank-set-b' }, figureSetPolicy: 'shared' });
+  await h.receive();
+  const approved = await h.approve();
+  assert.equal(approved.plan.schemaVersion, 'reception_plan_v3');
+  assert.deepEqual(approved.plan.participantModelPin, pin);
+  assert.deepEqual(approved.plan.participantLimits, approvedLimits);
+  assert.equal(h.calls.length, 0);
+
+  const check = async (trial: { sessionId: string }, index: number) => {
+    const record = await h.storage.get('record:' + trial.sessionId);
+    const expected = approved.plan.trials[index];
+    assert.equal(record.strategy, expected.strategy);
+    assert.deepEqual(record.options.participantModelPin, pin);
+    assert.deepEqual(record.jevLedger.limits, approvedLimits);
+    assert.deepEqual(record.options.figureSelection, expected.figureSelection);
+    assert.deepEqual(record.stimulus.figureIds, FIGURE_SETS['bank-set-b']);
+    assert.doesNotMatch(JSON.stringify(trial), /bank-set-b|figureSelection|figureIds|participantModelPin|participantLimits|observationMemo|gpt-6/u);
+    return record;
+  };
+  const first = (await jsonOk(await h.start())).trial;
+  const record = await check(first, 0);
+  const model = modelView(createTrialV2({ seed: record.seed, rotationMode: record.options.rotationMode,
+    figureSelection: record.options.figureSelection }));
+  assert.equal(h.calls[0].expected, pin.terraModelId);
+  const parts = h.calls[0].body.messages.flatMap((message: any) => Array.isArray(message.content) ? message.content : []);
+  const image = parts.find((part: any) => part.type === 'image_url');
+  assert.ok(image?.image_url.url === 'data:' + model.mimeType + ';base64,' + model.png.toString('base64'));
+
+  h.env.PARTICIPANT_TERRA_ENABLED = 'off';
+  h.env.PARTICIPANT_TERRA_LIMITS_JSON = 'invalid';
+  h.evict();
+  const restored = (await jsonOk(await h.request('state'))).trial;
+  assert.equal(restored.sessionId, first.sessionId);
+  assert.deepEqual(restored.scene, first.scene);
+  assert.equal(h.calls.length, 1);
+  await h.complete(first.sessionId, restored);
+  const scored = await h.storage.get('record:' + first.sessionId);
+  const expectedIds = [...FIGURE_SETS['bank-set-b']].sort();
+  assert.deepEqual(Object.values(scored.scoring.key.human).sort(), expectedIds);
+  assert.deepEqual(Object.values(scored.scoring.key.ai).sort(), expectedIds);
+  const sends = h.calls.length;
+  const second = (await jsonOk(await h.start(first.sessionId))).trial;
+  const secondRecord = await check(second, 1);
+  assert.equal(h.calls.length, sends, 'second condition reuses the observation of the same AI board');
+  assert.equal(secondRecord.initialObservation.memoSha256, record.initialObservation.memoSha256);
+  h.evict();
+  assert.equal((await jsonOk(await h.request('state'))).trial.sessionId, second.sessionId);
+  assert.equal(h.calls.length, sends);
+  h.controlled.observe = true;
+  await jsonOk(await h.request('message', { expectedRecordId: second.sessionId, text: '三角の部分があります。' }));
+  await h.idle();
+  const reviewed = await check(second, 1);
+  assert.equal(reviewed.queueState.errorCode, null);
+  assert.equal(reviewed.jevTraces[0].reobservations.length, 1);
+  const targeted = h.calls.filter(({ kind }) => kind === 'visual_observation').at(-1);
+  assert.equal(targeted?.expected, pin.terraModelId);
+  const targetedParts = targeted?.body.messages.flatMap((message: any) => Array.isArray(message.content) ? message.content : []);
+  assert.ok(targetedParts?.find((part: any) => part.type === 'image_url')?.image_url.url === image?.image_url.url);
 });
 
 test('approved trial limits survive Worker recreation and apply to both conditions after an env change', async () => {

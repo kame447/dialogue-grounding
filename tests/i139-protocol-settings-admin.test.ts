@@ -31,7 +31,8 @@ function fixture(state: 'unsaved' | 'saved' = 'saved') {
 const writes = (f: ReturnType<typeof fixture>) => f.calls.filter(c => c.op !== 'read');
 const get = (headers: Record<string, string> = {}) => new Request(ORIGIN + '/admin/reception-settings', { headers: { Authorization: 'Bearer ' + TOKEN, ...headers } });
 const protocolBody = () => new URLSearchParams([['expectedRevision', '2'], ['orders', 'be-rf'], ['orders', 'rf'], ['seedPolicy', 'shared'], ['referenceMemory', 'on'],
-  ['betweenTrials', 'none'], ['rotationMode', 'relative_pm90'], ['receptionNumberFormat', 'daily_seq3']]);
+  ['betweenTrials', 'none'], ['rotationMode', 'relative_pm90'], ['receptionNumberFormat', 'daily_seq3'],
+  ['figureMode', 'preset'], ['figureSetId', 'legacy-v1'], ['figureSetPolicy', 'shared']]);
 function post(kind: 'protocol' | 'mode', body: string | URLSearchParams = kind === 'protocol' ? protocolBody() : new URLSearchParams({ expectedRevision: '1', value: 'on' }),
   headers: Record<string, string> = {}) {
   return new Request(`${ORIGIN}/admin/reception-settings/${kind}`, { method: 'POST', headers: { Authorization: 'Bearer ' + TOKEN, Origin: ORIGIN,
@@ -72,7 +73,8 @@ test('a valid protocol form saves exactly the selected values in the fixed order
   const f = fixture(); const r = await handleAdmin(post('protocol'), f.deps);
   assert.equal(r.status, 303); assert.equal(r.headers.get('Location'), '/admin/reception-settings');
   assert.deepEqual(writes(f), [{ op: 'saveProtocol', args: [{ expectedRevision: 2, fields: { allowedOrders: [['bypass-enabled', 'repair-first'], ['repair-first']],
-    seedPolicy: 'shared', referenceMemory: true, betweenTrials: 'none', receptionNumberFormat: 'daily_seq3', rotationMode: 'relative_pm90' } }] }]);
+    seedPolicy: 'shared', referenceMemory: true, betweenTrials: 'none', receptionNumberFormat: 'daily_seq3', rotationMode: 'relative_pm90',
+    figureSelection: { mode: 'preset', setId: 'legacy-v1' }, figureSetPolicy: 'shared' } }] }]);
   const reversed = new URLSearchParams([...protocolBody()].sort(([a], [b]) => b.localeCompare(a)));
   const g = fixture(); assert.equal((await handleAdmin(post('protocol', reversed), g.deps)).status, 303);
   assert.deepEqual(writes(g), writes(f), 'submission order never changes the saved order list');

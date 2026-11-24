@@ -7,6 +7,7 @@ import { createChatClient } from '../client.mjs';
 import { NamingTaskError } from '../naming-error.mjs';
 import { createTrialV2, modelView } from '../stimuli/scatter-v2.mjs';
 import { STRATEGIES } from '../judgment/instructions.mjs';
+import { isLegacyFigureSelection, resolveFigureSelection, validateResolvedFigureSelection } from '../stimuli/figure-bank.ts';
 import { data } from '../v2/base-assignment-data.ts';
 import { privateDirectory, readPrivateAssignment } from './base-assignment-store.ts';
 import { researchHash, researchTrialProfileV3 } from '../v2/research-profile.ts';
@@ -269,10 +270,18 @@ export async function prepareParticipantJev(options:{configFile:string;baseAssig
     if(!response.ok)throw Error();
     const policy=data(await response.json());
     if(policy.ready!==true||policy.purpose!=='dialogue_turn'||typeof policy.provider!=='string'||!['openai','gemini'].includes(policy.provider)||policy.model!==config.modelId)throw Error();
-    return {config,profile,async taskOptions(value:{seed:number;referenceMemory:boolean;strategy:string;rotationMode?:string;restore?:any}) {
+    return {config,profile,async taskOptions(value:{seed:number;referenceMemory:boolean;strategy:string;rotationMode?:string;figureSelection?:unknown;restore?:any}) {
       // An old assigned record stays on the original caller's client and options.
       if(value.restore&&value.restore.options?.jevResearch!==true)return {};
       const saved=value.restore?.options;
+      // The P1 fixed cache was observed on the legacy figure set: any other selection fails closed.
+      for(const candidate of [value.figureSelection,saved&&typeof saved==='object'&&Object.hasOwn(saved,'figureSelection')?saved.figureSelection:undefined]){
+        if(candidate===undefined)continue;
+        try{
+          const selection=candidate&&typeof candidate==='object'&&Object.hasOwn(candidate,'bankVersion')?validateResolvedFigureSelection(candidate):resolveFigureSelection(candidate);
+          if(!isLegacyFigureSelection(selection))throw Error();
+        }catch{throw new ParticipantJevError('invalid_config');}
+      }
       const rotationMode=value.restore?(saved&&typeof saved==='object'&&Object.hasOwn(saved,'rotationMode')?saved.rotationMode:'relative_pm90'):value.rotationMode??'relative_pm90';
       if(rotationMode!=='relative_pm90')throw new ParticipantJevError('invalid_config');
       if(value.seed!==config.seed||value.referenceMemory!==true||!STRATEGIES.includes(value.strategy))throw new ParticipantJevError('invalid_config');
