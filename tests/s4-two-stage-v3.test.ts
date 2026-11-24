@@ -63,7 +63,7 @@ async function recordedRun(profile: any, tape: any, label: 'repair-first' | 'byp
 }
 /** NORMAL rebuilt as one canonical trial of the given layout, label and Jev responses (the s4-two-stage-v2 pattern). */
 async function records(layout: 'two_stage_v2' | 'two_stage_v3', jev: any[], { reobservation = false, label = 'bypass-enabled' as 'repair-first' | 'bypass-enabled', generationText = null as string | null,
-  retry = null as { drafts: [string, string]; current: boolean } | null } = {}) {
+  retry = null as { drafts: [string, string]; current: boolean; fallback?: boolean } | null } = {}) {
   const n = structuredClone(normal), tr = n.trials[0], m = n.run.manifest;
   const profile = JSON.parse(JSON.stringify(researchTrialProfileV3(m.lunaRequest, m.timeouts, layout)));
   const digest = hash(profile);
@@ -80,7 +80,7 @@ async function records(layout: 'two_stage_v2' | 'two_stage_v3', jev: any[], { re
   if (retry) {
     if (retry.current) tape.generationRetryVersion = 'jev_generation_retry_v2';
     for (const side of Object.values(tape.tails) as any[]) {
-      side.luna = side.luna.flatMap((l: any) => l.phase === 'generation'
+      side.luna = side.luna.filter((l: any) => !retry.fallback || l.phase !== 'ai_extraction').flatMap((l: any) => l.phase === 'generation'
         ? retry.drafts.map(text => ({ ...l, response: { ...l.response, text } })) : [l]);
     }
   }
@@ -470,6 +470,46 @@ test('a working-note retry reason is accepted only for a draft that has one, on 
     const dropped = structuredClone(genuine);
     changeRetry(dropped, label, (text: string) => text.slice(0, -noteReason.length));
     assert.equal(status(dropped, 'replay'), 'mismatch', label);
+  }
+});
+
+test('quoted features are one reply, while two complete quoted questions require a working-note retry', async () => {
+  const decisions = [stageOne('quoted', 'accept'), stageTwo('quoted', 'accept', 'none')];
+  const features = '・『切れ目のある輪』\n・『輪についた細い棒』\nこの両方がある形ですか？';
+  const alternatives = '・『輪には切れ目がありますか？』\n・「輪に細い棒がついていますか？」';
+  for (const label of ['bypass-enabled', 'repair-first'] as const) {
+    const plain = await records('two_stage_v3', decisions, { label, generationText: features });
+    pass(plain);
+    assert.deepEqual(plain.trials[0].attempts[0].generationGuard, { violations: [], regenerated: false, fallback: false });
+    assert.equal(plain.trials[0].attempts[0].publicSpeech, features);
+
+    const retried = await records('two_stage_v3', decisions, { label, retry: { current: true, drafts: [alternatives, features] } });
+    pass(retried);
+    assert.deepEqual(retried.trials[0].attempts[0].generationGuard, { violations: ['working_note'], regenerated: true, fallback: false });
+  }
+});
+
+test('S4 applies the working-note check to orientation-only fallback drafts from the current version', async () => {
+  const decisions = [stageOne('fallback', 'accept'), stageTwo('fallback', 'accept', 'none')];
+  const drafts: [string, string] = ['右側に張り出しがあります。', '上端がとがっています。'];
+  for (const label of ['bypass-enabled', 'repair-first'] as const) {
+    for (const current of [false, true]) {
+      const original = await records('two_stage_v3', decisions, { label, retry: { current, drafts, fallback: true } });
+      assert.deepEqual(original.trials[0].attempts[0].generationGuard, { violations: ['orientation_leak'], regenerated: true, fallback: true });
+      pass(original);
+      for (const index of [0, 1]) {
+        // Add text ignored by the historical runtime; keep the capture's two requests and final published fallback.
+        const edited = structuredClone(original), tape = edited.trials[0].replay[0].tape;
+        const addNote = (tail: any) => { tail.luna.filter((l: any) => l.phase === 'generation')[index].response.text += ' Need another reply.'; };
+        addNote(tape.tails[label]);
+        for (const side of sideCopies(edited).filter(s => s.label === label)) {
+          addNote(side.material.tail);
+          side.materialSha256 = hash(side.material);
+        }
+        if (current) assert.equal(status(edited, 'replay'), 'mismatch');
+        else pass(edited);
+      }
+    }
   }
 });
 

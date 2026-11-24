@@ -81,7 +81,7 @@ function s4HasWorkingNote(text:unknown,publicTexts:readonly string[]):boolean{
  if(typeof text!=='string')return false;
  const allowed=new Set(publicTexts.flatMap(t=>String(t).normalize('NFKC').match(/[A-Za-z][A-Za-z'’-]*/gu)??[]).map(w=>w.toLowerCase()));
  const unquoted=text.normalize('NFKC').replace(/「[^」]*」|『[^』]*』|"[^"]*"|“[^”]*”/gu,' ');
- const nfkc=text.normalize('NFKC'),alternatives=(nfkc.match(/(?:^|\n|[。!?])\s*(?:案|候補|パターン|返答|Option|Draft|Alt)\s*[0-9A-Za-z一二三]\s*[:.)]/gu)??[]).length>=2||(nfkc.match(/^\s*(?:[0-9]+[.)]|[-・*•])?\s*[「『][^」』\n]{4,}[」』]\s*$/gmu)??[]).length>=2;
+ const nfkc=text.normalize('NFKC'),alternatives=(nfkc.match(/(?:^|\n|[。!?])\s*(?:案|候補|パターン|返答|Option|Draft|Alt)\s*[0-9A-Za-z一二三]\s*[:.)]/gu)??[]).length>=2||(nfkc.match(/^\s*(?:[0-9]+[.)]|[-・*•])?\s*[「『][^」』\r\n]{3,}[。.!?][」』]\s*$/gmu)??[]).length>=2;
  return alternatives||(unquoted.match(/[A-Za-z][A-Za-z'’-]*(?:[\s,.;:?!]+[A-Za-z][A-Za-z'’-]*){2,}/gu)??[]).some(run=>run.split(/[^A-Za-z'’-]+/u).filter(w=>w&&!allowed.has(w.toLowerCase())).length>=3);
 }
 const qTail=(tail:string)=>/^[」』”"]*(?:(?:です|ます|でした|でしょう|だろう|なの|なんです|できます|できる|しました|します|しましょう|しません|する|した|してよいです|してもよいです|しています|されています)?か(?:[?。!、,]|$)|(?:です|ます|でしょう)?(?:ね|よ)?[?])/u.test(tail);
@@ -457,14 +457,17 @@ function agreeSource(tr:any,t:any,key:string,tape:any,legacyV3=false):'invalid'|
    const aiSharedIds=new Set(live.filter((c:any)=>c.speaker==='ai'&&c.sourceTurn>lastBoundary&&c.sourceTurn<t.turnIndex).flatMap((c:any)=>c.targets));
    const claimTargets=(c:any):string[]=>Array.isArray(c.targets)&&c.targets.length?c.targets:live.find((p:any)=>p.id===c.respondsTo)?.targets??[];
    const referentClaims=live.filter((c:any)=>c.speaker==='human'&&c.aspect==='referent'&&c.sourceTurn>lastBoundary);
-   // A denial stands until the partner re-affirms that very figure: a later referent agree answering the AI's own public claim about it, whose own exchange's
-   // referent estimate puts it strictly first. An assert, a candidate, a narrowing, a question, a backchannel and other acts keep it.
+   // A denial stands until the partner agrees with an AI public claim that refers only to that figure, and the referent estimate puts it strictly first.
    const referentAt=(at:number)=>at===t.turnIndex?z.humanReferent:preJudgments.find((x:any)=>x.turnIndex===at)?.jevTurn?.humanReferent??null;
    const selects=(m:any,id:string)=>!!m&&m.status==='ok'&&!!m.scores&&typeof m.scores[id]==='number'&&Object.entries(m.scores).every(([k,v]:any)=>k===id||m.scores[id]>v);
    const referentDenied=(id:string)=>{
     const lastDeny=referentClaims.filter((c:any)=>c.act==='deny'&&claimTargets(c).includes(id)).at(-1);if(!lastDeny)return false;
-    const at=referentClaims.indexOf(lastDeny);
-    return !referentClaims.some((c:any,i:number)=>i>at&&c.act==='agree'&&live.find((p:any)=>p.id===c.respondsTo)?.speaker==='ai'&&claimTargets(c).length===1&&claimTargets(c)[0]===id&&selects(referentAt(c.sourceTurn),id));
+    return !referentClaims.slice(referentClaims.indexOf(lastDeny)+1).some((c:any)=>{
+     if(c.act!=='agree')return false;
+     const antecedent=live.find((p:any)=>p.id===c.respondsTo);
+     return antecedent?.speaker==='ai'&&antecedent.targets.length===1&&antecedent.targets[0]===id&&
+      (c.targets.length===0||c.targets.length===1&&c.targets[0]===id)&&selects(referentAt(c.sourceTurn),id);
+    });
    };
    const expectedAt=(level:number):string[]=>openClaims.flatMap((c:any)=>{
     const name=c.name as string;
@@ -522,6 +525,8 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
  // The replay plan declares a shared version. An attempt without a retry has no retry wire text to bind.
  if(Object.hasOwn(tape,'generationRetryVersion')&&(layout!=='two_stage_v3'||tape.generationRetryVersion!=='jev_generation_retry_v2')||
     t.generationGuard.regenerated&&tape.generationRetryVersion!==t.generationRetryVersion)return'invalid';
+ const restatedRetry=tape.generationRetryVersion==='jev_generation_retry_v2';
+ const publicTexts=(tape.events??[]).filter((e:any)=>e.seq<=t.turnIndex).map((e:any)=>e.text);
  if(pairs.length===0)return'missing';
  if(!equal(result.sides,[pair.left,pair.right]))return'invalid';
  if(!tape.tails?.['repair-first']||!tape.tails?.['bypass-enabled'])return'missing';
@@ -542,8 +547,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
      // has no new violations, or the successful fallback has orientation alone.
      const codes=label===tr.label&&t.status==='committed'?t.generationGuard.violations:undefined;
      // The comparison condition's retry reason is checked against that condition's own first draft, which this verifier classifies itself.
-     const publicTexts=(tape.events??[]).filter((e:any)=>e.seq<=t.turnIndex).map((e:any)=>e.text);
-     const v3Retry=layoutOf(tr.profile)==='two_stage_v3',restatedRetry=tape.generationRetryVersion==='jev_generation_retry_v2';
+     const v3Retry=layout==='two_stage_v3';
      const chosenUse=(e:any)=>e?.stage==='detail'&&typeof e.choices?.shared_construal==='string'&&e.choices.shared_construal!=='none';
      const adoptionChosen=s.executed?.sharedClaimIds!==undefined||(current?.evidence?.stages??[]).some(chosenUse)||chosenUse(s.intervention?.detailEvidence);
      const draft=codes===undefined&&generationCount===1?{orientation:v3Retry&&s4HasOrientationLeak(prevDraft),naming:typeof prevDraft==='string'&&s4NamingDecision(prevDraft.normalize('NFKC').replace(/[\s\u200b-\u200d\ufeff]/gu,''),s.executed?.action),workingNote:v3Retry&&restatedRetry&&s4HasWorkingNote(prevDraft,publicTexts),sharedOverclaim:v3Retry&&restatedRetry&&adoptionChosen&&s4SharedOverclaim(prevDraft)}:undefined;
@@ -621,7 +625,8 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
   const gens=actual.requests.filter((r:any)=>r.provider==='luna'&&r.role==='generation');
   const genTexts=[...(tape.common?.luna??[]),...(tape.tails?.[tr.label]?.luna??[])].filter((x:any)=>x?.phase==='generation').map((x:any)=>x?.response?.text??x?.text);
   if(gens.length!==2||genTexts.length!==2||
-   !genTexts.every((tx:unknown)=>typeof tx==='string'&&s4HasOrientationLeak(tx)&&!s4HasNonOrientationLeak(tx,t.finalAction)&&!s4HasWorkingNote(tx,(tape.events??[]).filter((e:any)=>e.seq<=t.turnIndex).map((e:any)=>e.text))))return'invalid';
+   !genTexts.every((tx:unknown)=>typeof tx==='string'&&s4HasOrientationLeak(tx)&&!s4HasNonOrientationLeak(tx,t.finalAction)&&
+    (!restatedRetry||!s4HasWorkingNote(tx,publicTexts))))return'invalid';
  }
  // M is recomputed: at least one recorded Luna request, all of them with measured sends. A label is either wholly measured or wholly synthetic.
  const luna=expected.filter((e:any)=>e?.provider==='luna'),measured=luna.map((e:any)=>e.actualSendMeasured);
