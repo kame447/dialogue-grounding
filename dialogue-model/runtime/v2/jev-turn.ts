@@ -962,7 +962,8 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       const draftTriggers = (text: string) => {
         if (judgment.action === "agree") return ["agree_action"];
         const hints = findNamingActHints(text);
-        return [...(openHumanProposal ? ["typed_context"] : []), ...(hints.wording ? ["naming_words"] : []),
+        return [...(openHumanProposal ? ["typed_context"] : []), // A reconfirmation of an already agreed name (holistic_v3): affirming it matches the ledger, so wording alone does not open the question (a quoted other name still does).
+          ...(hints.wording && record.namingReconfirm !== true ? ["naming_words"] : []),
           ...(hints.quoted.some(q => !agreedNames.has(normalizeName(q)) && normalizeName(q) !== chosenName) ? ["quoted_other"] : [])];
       };
       const confirmDraft = async (text: string, draft: "initial" | "retry", found: string[]): Promise<string[]> => {

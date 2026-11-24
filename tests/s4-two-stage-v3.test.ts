@@ -1017,3 +1017,23 @@ test('05r: S4 recomputes the reconfirmation marker and the inherited-name source
     assert.ok(finalChecks(short).length >= 4 && finalChecks(short).every((c: any) => c.status === 'pass'), label + ' (short re-approval) ' + JSON.stringify(finalChecks(short).filter((c: any) => c.status !== 'pass').map((c: any) => [c.id, c.reason])));
   }
 });
+
+test('05s: S4 derives the question triggers of a reconfirmation without the wording trigger: the affirming draft carries no question record, a question record on it is refused', async () => {
+  const s3 = Object.keys(OLD.state.ledger)[3];
+  const speech = '角ばった塊に細い脚が付いた形のように見えます。';
+  const ai = JSON.stringify([{ segmentId: 'shape', quote: speech, targets: [s3], aspect: 'construal', proposition: 'x', name: null, linkedIssueId: null, respondsToTurn: null }]);
+  const seg = (quote: string, name: string | null) => JSON.stringify([{ segmentId: 's1', quote, targets: [], aspect: 'name', proposition: quote, name, linkedIssueId: null, respondsToTurn: null }]);
+  for (const label of ['repair-first', 'bypass-enabled'] as const) {
+    const record = await buildRecords({ label, dialoguePolicy: 'holistic_v3', turns: [{ human: 'どんな図形がありますか？', plan: { action: 'confirm', target: 'figure_3', speech, aiExtraction: ai } },
+      { human: 'これ、かかしとかどう？', plan: { action: 'agree', target: 'figure_3', name: 'かかし', act: 'name_propose', referent: 'figure_3', extraction: seg('かかし', 'かかし'), speech: '「かかし」と呼びましょう。' } },
+      { human: 'それで、さっきの「かかし」でいい？', plan: { action: 'accept', target: 'none', act: 'name_propose', referent: 'none', extraction: seg('かかし', 'かかし'), speech: 'はい、その呼び方で大丈夫です。' } }] });
+    assert.equal(record.trials[0].attempts[0].namingReconfirm, true, label);
+    assert.equal(record.trials[0].attempts[0].draftActs, undefined, label);
+    assert.ok(finalChecks(record).length >= 4 && finalChecks(record).every((c: any) => c.status === 'pass'), label);
+    const extra = structuredClone(record);
+    const row = { draft: 'initial', draftSha256: 'a'.repeat(64), triggers: ['naming_words'], status: 'ok', choice: 'none', scores: Object.fromEntries(['adopt_chosen', 'adopt_other', 'decline_or_hold', 'propose_question', 'recount_only', 'none'].map(k => [k, Number(k === 'none')])), model: 'typesafe/jev-1.14', responseId: 'gen-x', costUsd: 0, latencyMs: 1, error: null };
+    for (const x of traceCopies(extra)) x.draftActs = [row];
+    for (const st of [extra.trials[0].turns[0].state, extra.trials[0].lastCommittedState]) st.judgments.at(-1).jevTurn.draftActs = [row];
+    assert.ok(!finalChecks(extra).every((c: any) => c.status === 'pass'), label + ': a question the wording alone would have opened');
+  }
+});

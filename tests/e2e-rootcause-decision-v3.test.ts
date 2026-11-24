@@ -1378,3 +1378,29 @@ test('05r-2 (holistic_v3): a short re-approval that carries an earlier unbound n
     assert.equal(second.state.ledger[ids[3]].name, 'かかし');
   }
 });
+
+test('05s (holistic_v3): affirming a reconfirmed agreed name does not open the naming-act question on wording alone; a quoted other name still does (both strategies)', async () => {
+  for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
+    const make = async () => {
+      const f = fixture(strategy, { aiPublic: true, holistic: 'holistic_v3' });
+      await share(f, 3);
+      const proposal = 'これ、かかしとかどう？';
+      await f.exchange(proposal, { action: 'agree', target: 3, referent: 'figure_3', segments: [naming(proposal, 'かかし')], draftActs: ['adopt_chosen'], drafts: [agreeSpeech('かかし')] });
+      await f.exchange('ところで、他の形はどう見えますか？', { action: 'accept', referent: 'none', drafts: ['丸みのある形が一つあります。'] });
+      return f;
+    };
+    const again = 'それで、さっきの「かかし」でいい？';
+    const f = await make();
+    const yes = await f.exchange(again, { action: 'accept', referent: 'none', segments: [naming(again, 'かかし')], drafts: ['はい、その呼び方で大丈夫です。'] });
+    assert.equal(yes.saved.namingReconfirm, true, strategy);
+    assert.equal(yes.text, 'はい、その呼び方で大丈夫です。', `${strategy}: the affirmation is published`);
+    assert.equal(yes.trace.draftActs, undefined, `${strategy}: no question on wording alone`);
+    // Adopting another name in the same turn is still stopped: the quoted other name opens the question and the adoption is refused.
+    const g = await make();
+    const other = await g.exchange(again, { action: 'accept', referent: 'none', segments: [naming(again, 'かかし')], draftActs: ['adopt_other', 'none'],
+      drafts: ['はい、では「らいおん」にしましょう。', 'うん、いいよ。'] });
+    assert.deepEqual(other.trace.generationGuard, { violations: ['draft_act_mismatch'], regenerated: true, fallback: false }, strategy);
+    assert.equal(other.text, 'うん、いいよ。');
+    assert.deepEqual(other.trace.draftActs!.map(a => [a.draft, a.triggers, a.choice]), [['initial', ['quoted_other'], 'adopt_other']], strategy);
+  }
+});

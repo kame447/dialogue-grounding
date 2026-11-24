@@ -345,7 +345,7 @@ function draftActVerdict(choice:string,action:string):string|null{
 }
 // Independent trigger recomputation: an agree draft is always asked; any other draft on a typed naming context, a naming-act wording hit, or a quoted string
 // that is not the agreed name in the executed figure's ledger.
-function s4DraftTriggers(text:string,action:string,openProposal:boolean,agreed:Set<string>,chosen:string|null=null):string[]{
+function s4DraftTriggers(text:string,action:string,openProposal:boolean,agreed:Set<string>,chosen:string|null=null,reconfirm=false):string[]{
  if(action==='agree')return['agree_action'];
  const compact=text.normalize('NFKC').replace(/[\s\u200b-\u200d\ufeff]/gu,'');
  const families=[/と呼(?:ぼう|びましょう|ぶことに(?:しよう|しましょう|します)|びます)/gu,/(?:で|そう)呼(?:ぼう|びましょう|ぶことに(?:しよう|しましょう|します)|びます)/gu,/で決め(?:よう|ましょう|ます)/gu,/に(?:しよう|しましょう|します|決めよう|決めましょう|決めます)/gu,/で(?:いこう|行こう|いきましょう|行きましょう|いきます|行きます)/gu,/[でに](?:決まり|決定|確定)/gu,/で(?:いい|良い|よい|大丈夫)/gu,/合意/gu];
@@ -353,7 +353,7 @@ function s4DraftTriggers(text:string,action:string,openProposal:boolean,agreed:S
  for(const re of families)for(const m of compact.matchAll(re)){const tail=compact.slice(m.index!+m[0].length);if(qTail(tail))continue;if(m[0]==='合意'&&/^(?:していません|していない|しません|ではありません|ではない|はしていません|はしていない)/u.test(tail))continue;if((re.source.startsWith('に(')||re.source==='に(?:しよう|しましょう|します|決めよう|決めましょう|決めます)')&&/(?:後|あと|後日|今度|別の機会|保留|後回し|先送り|先延ばし)$/u.test(compact.slice(0,m.index)))continue;wording=true;}
  for(const re of [/(?:呼び名|呼称|名前)(?:は|を)[^。!?、,]{0,16}?(?:「[^」]+」|『[^』]+』)(?:です|だ|ですね|ですよ)/gu,/(?:この|その|こちら|そちら)?(?:図形|形)?(?:の)?名前(?:は|を)[^。!?、,]{0,16}?(?:「[^」]+」|『[^』]+』)(?:です|だ|ですね|ですよ)/gu,/(?:この|その|こちら|そちら)の?(?:図形|形)は[^。!?、,]{0,16}?(?:「[^」]+」|『[^』]+』)(?:です|だ|ですね|ですよ)/gu])if(re.test(compact))wording=true;
  const quoted=[...compact.matchAll(/「([^」]+)」|『([^』]+)』/gu)].map(m=>m[1]??m[2]);
- return[...(openProposal?['typed_context']:[]),...(wording?['naming_words']:[]),...(quoted.some(q=>!agreed.has(ledgerName(q))&&ledgerName(q)!==chosen)?['quoted_other']:[])];
+ return[...(openProposal?['typed_context']:[]),...(wording&&!reconfirm?['naming_words']:[]),...(quoted.some(q=>!agreed.has(ledgerName(q))&&ledgerName(q)!==chosen)?['quoted_other']:[])];
 }
 // This turn's human utterance carries a name proposal / approval request (a name_propose claim of this very turn).
 // holistic_v2: every name the partner proposed by this turn, from the turn's own claims before any input limit (the saved graph plus this turn's local claims).
@@ -624,7 +624,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
       const gi=generationCount-1,ex=s.executed;
       if(!H()||r.role!=='post_generation'||gi<0||!ex||typeof prevDraft!=='string'||askedDrafts.includes(gi)||!equal(p.questions,DRAFT_NAMING_QUESTIONS_S4)||p.model!=='typesafe/jev-1.14')return'invalid';
       const agreed=s4AgreedNames(tape,ex);
-      const trig=s4DraftTriggers(prevDraft,ex.action,s4TypedContext(tape,t),agreed,ex.action==='propose_name'&&typeof ex.name==='string'?ledgerName(ex.name):null);
+      const trig=s4DraftTriggers(prevDraft,ex.action,s4TypedContext(tape,t),agreed,ex.action==='propose_name'&&typeof ex.name==='string'?ledgerName(ex.name):null,!!CTX.namingReconfirm);
       const turns=(tape.events??[]).filter((e:any)=>e.seq<=t.turnIndex).slice(-12).map((e:any)=>({turn:e.seq,speaker:e.speaker,text:String(e.text).slice(0,400)}));
       if(!trig.length||p.state!==JSON.stringify({turn:t.turnIndex,publicTurns:turns,reasons:trig,selected:{action:ex.action,target:ex.target,name:ex.name},draft:prevDraft}))return'invalid';
       // A response the client cannot use (a label outside the six) is recorded as an error act: that send is unconfirmed, never a pass.
@@ -700,7 +700,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
    const ex=s.executed;if(!ex||draftTexts.length!==generationCount)return'invalid';
    const agreed=s4AgreedNames(tape,ex),open=s4TypedContext(tape,t),chosen=ex.action==='propose_name'&&typeof ex.name==='string'?ledgerName(ex.name):null;
    for(const [i,txt] of draftTexts.entries()){
-    const name=i===0?'initial':'retry',row=askedRows.find(x=>x.draft===name),target=typeof txt==='string'&&s4DraftTriggers(txt,ex.action,open,agreed,chosen).length>0;
+    const name=i===0?'initial':'retry',row=askedRows.find(x=>x.draft===name),target=typeof txt==='string'&&s4DraftTriggers(txt,ex.action,open,agreed,chosen,!!CTX.namingReconfirm).length>0;
     const lostAct=label===tr.label?(t.draftActs??[]).find((a:any)=>a.draft===name&&a.status==='error'):undefined;
     if(target&&!row){if(lostAct){missing=true;continue;}return'invalid';}
     if(!target&&row)return'invalid';
