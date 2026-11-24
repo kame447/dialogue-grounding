@@ -23,8 +23,8 @@ const ALWAYS_V3=['accept','defer','revisit','move_on','close'];
 const ANY_TARGET=['accept','defer','move_on','close'];
 // Adaptive-only context of the attempt being replayed, set at the start of the (synchronous) replay proof: whether repairFacts
 // existed (its guidance sentence is part of every instruction), and the saved per-figure agreeNames (known=false: no source).
-type ReplayContext={facts:boolean;agree:any[]|undefined;known:boolean;v3:boolean;trial:boolean;ledger:Record<string,{status:string;name:string|null}>|undefined;legacyV3:boolean};
-const defaultContext:ReplayContext={facts:false,agree:undefined,known:true,v3:false,trial:false,ledger:undefined,legacyV3:false};
+type ReplayContext={facts:boolean;agree:any[]|undefined;known:boolean;v3:boolean;trial:boolean;ledger:Record<string,{status:string;name:string|null}>|undefined;legacyV3:boolean;style:null|'legacy'|'style'};
+const defaultContext:ReplayContext={facts:false,agree:undefined,known:true,v3:false,trial:false,ledger:undefined,legacyV3:false,style:null};
 const CTX={...defaultContext};
 // Only the verified integrated profile can name two_stage_v2; every other record is read as two_stage_v1.
 const layoutOf=(profile:any)=>profile?.id==='research_trial_profile_v3'&&['two_stage_v2','two_stage_v3'].includes(profile?.questionLayout)?profile.questionLayout as string:'two_stage_v1';
@@ -318,7 +318,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
     typeof instructions==='string'&&instructions.endsWith('\n'+LEGACY_V3_TARGET));
   const src=agreeSource(tr,t,key,tape,legacyV3);if(src==='invalid')return'invalid';
    const trial=trialVersion(t,tape.technicalTrial);if(trial==='invalid')return'invalid';
-   Object.assign(CTX,{facts:Array.isArray(t.repairFacts),agree:src.names,known:src.known,v3:layout==='two_stage_v3',trial:trial!==null,ledger:tape.state?.ledger,legacyV3});
+   Object.assign(CTX,{facts:Array.isArray(t.repairFacts),agree:src.names,known:src.known,v3:layout==='two_stage_v3',trial:trial!==null,ledger:tape.state?.ledger,legacyV3,style:null});
  if(!exact(tape,['schemaVersion','state','events','common','tails','recorded',...(Object.hasOwn(tape??{},'technicalTrial')?['technicalTrial']:[])])||tape.schemaVersion!=='parity_intervention_replay_v1'||!exact(result,['schemaVersion','status','error','commonEqual','policyConformant','recordedPayloadsReproduced','actualLunaHttpMeasured','hashScheme','excludedEnvelopeFields','sides'])||result.schemaVersion!=='parity_intervention_replay_result_v1'||result.status!=='same_material_intervention_verified'||result.error!==null||result.commonEqual!==true||result.policyConformant!==true||result.recordedPayloadsReproduced!==true||typeof result.actualLunaHttpMeasured!=='boolean'||result.hashScheme!=='canonical_json_sha256_not_raw_body_bytes'||!equal(result.excludedEnvelopeFields,META_KEYS)||!Array.isArray(result.sides)||result.sides.length!==2)return'invalid';
  if(pairs.length===0)return'missing';
  if(!equal(result.sides,[pair.left,pair.right]))return'invalid';
@@ -507,7 +507,11 @@ function originalQuestions(body:any,input:any,layout='two_stage_v1'):boolean|nul
    const targets=v3Targets(input);
    const make=(actions:any)=>{add('action',text,Object.fromEntries(ACTIONS.filter(a=>targets.some(o=>legal(a,o.target,input))).map(a=>
     [a,CTX.legacyV3&&a==='request_observation'?NATIVE.actions.request_observation:actions[a]])));return q.action;};
-   return equal({action:make(NATIVE_V3.actions)},body.questions)||equal({action:make(NATIVE_V3_STYLE.actions)},body.questions);
+   const isStyle=equal({action:make(NATIVE_V3_STYLE.actions)},body.questions);
+   if(isStyle){if(CTX.style==='legacy')return false;CTX.style='style';return true;}
+   const isLegacy=equal({action:make(NATIVE_V3.actions)},body.questions);
+   if(isLegacy){if(CTX.style==='style')return false;CTX.style='legacy';return true;}
+   return false;
   }
   add('action',text,Object.fromEntries(ACTIONS.filter(a=>(a!=='request_observation'||input.reobservationAllowed)&&(a!=='agree'||agreeOffered)).map(a=>[a,(NATIVE.actions as any)[a]])));
   add('target','次の行動が扱う対象を選んでください。none=対象なし、multiple=一つに絞れない。',{none:'対象なし・未特定。',multiple:'複数の可能性があり一つには絞れない。',...Object.fromEntries(input.ownSlots.map((id:string,i:number)=>['figure_'+i,`自分の候補図形 ${JSON.stringify(id)}。観察メモを参照。`]))});
@@ -618,6 +622,8 @@ function choiceResponse(body:any,response:any):boolean{
 // executed while checking a record. No condition or original decision is input.
 // Prompt-style update (prompt-style-20261124): the current text and the prior text are both verified exactly.
 function generationMessages(messages:any[],trace:any,execution:any,tape:any,profile:any):boolean{
+ if(CTX.style==='style')return generationMessagesWith(messages,trace,execution,tape,profile,FIXED_STYLE,{v3:TRIAL_STYLE,legacy:LEGACY_TRIAL_STYLE});
+ if(CTX.style==='legacy')return generationMessagesWith(messages,trace,execution,tape,profile,FIXED,{v3:TRIAL,legacy:LEGACY_TRIAL});
  return generationMessagesWith(messages,trace,execution,tape,profile,FIXED,{v3:TRIAL,legacy:LEGACY_TRIAL})||generationMessagesWith(messages,trace,execution,tape,profile,FIXED_STYLE,{v3:TRIAL_STYLE,legacy:LEGACY_TRIAL_STYLE});
 }
 function generationMessagesWith(messages:any[],trace:any,execution:any,tape:any,profile:any,FIXED:any,trials:{v3:any;legacy:any}):boolean{
@@ -785,11 +791,11 @@ const NATIVE_V3_STYLE={actions:{...NATIVE_V3.actions,"accept":NATIVE_V3.actions.
 // Prompt-style update snapshot (prompt-style-20261124), derived from the prior literals above by exact replacement.
 const rep=(text:string,from:string,to:string)=>{if(text.split(from).length!==2)throw Error('prompt snapshot out of sync');return text.replace(from,()=>to);};
 const FIXED_STYLE={...FIXED,
- generator:rep(rep(FIXED.generator,"1回は1〜2文、親しみやすいです・ます調で返してください。講義調、長い前置き、特徴の列挙は避けてください。短さ自体は目的ではありません。","1回は1〜2文で返してください。口調は相手の直近の発話と会話の流れに合わせ、敬語には自然な敬語で、くだけた口調には自然なくだけた口調で返し、相槌や言い回しも合わせてください。講義調、長い前置き、特徴の列挙は避けてください。短さ自体は目的ではありません。\n相手が図形の見た目や特徴を尋ねたときは、まずその問いに直接答えてください。説明を求める発話を命名の依頼と取り違えず、相手がどの図形の話か把握できていない段階では、呼び名の提案や採用に進まないでください。見立てを説明に使うことと、名前を決めることは区別してください。見立ての説明はacceptで行い、propose_nameは対象が公開上で相手に伝わり命名の流れに入ったときに候補名を示すものです。\n特徴についての質問への直接の回答は、形の分析の開始には当たりません。自分の画像・判断メモで確かめられる範囲で、ある・ない・確かめられないを区別して答えてください。確かめられていない特徴を相手に合わせて肯定したり、はっきり肯定した直後に同じ特徴を「〜っぽい」のような曖昧な表現へ変えたりしないでください。すでに話題の図形の呼び名や質問内容を毎回言い直さず、答えた後に形式的な確認質問を付け足さないでください。対象や特徴に未解決の曖昧さがあるときだけ、その点を具体的に尋ねてください。「これなら分かりますか？」のように相手の理解を試す聞き方や、何を指すか曖昧な指示語を重ねた聞き返しは避けてください。"),"acceptでは受け止めるだけにしてください。","acceptでは相手の発話を受け止めます。相手が図形の見た目や特徴を尋ねているときは、確かめられる範囲でその問いに直接答えてよく、名前に決まった・対象を共同で特定できたとは言わないでください。"),
+ generator:rep(rep(rep(FIXED.generator,"1回は1〜2文、親しみやすいです・ます調で返してください。講義調、長い前置き、特徴の列挙は避けてください。短さ自体は目的ではありません。","1回は1〜2文で返してください。口調は相手の直近の発話と会話の流れに合わせ、敬語には自然な敬語で、くだけた口調には自然なくだけた口調で返し、相槌や言い回しも合わせてください。講義調、長い前置き、特徴の列挙は避けてください。短さ自体は目的ではありません。\n相手が図形の見た目や特徴を尋ねたときは、まずその問いに直接答えてください。説明を求める発話を命名の依頼と取り違えず、相手がどの図形の話か把握できていない段階では、呼び名の提案や採用に進まないでください。見立てを説明に使うことと、名前を決めることは区別してください。見立ての説明はacceptで行い、propose_nameは対象が公開上で相手に伝わり命名の流れに入ったときに候補名を示すものです。\n特徴についての質問への直接の回答は、形の分析の開始には当たりません。自分の画像や観察メモ・判断メモで確かめられる範囲で、ある・ない・確かめられないを区別して答えてください。確かめられていない特徴を相手に合わせて肯定したり、はっきり肯定した直後に同じ特徴を「〜っぽい」のような曖昧な表現へ変えたりしないでください。すでに話題の図形の呼び名や質問内容を毎回言い直さず、答えた後に形式的な確認質問を付け足さないでください。対象や特徴に未解決の曖昧さがあるときだけ、その点を具体的に尋ねてください。「これなら分かりますか？」のように相手の理解を試す聞き方や、何を指すか曖昧な指示語を重ねた聞き返しは避けてください。"),"propose_nameでは相手が出した名前を候補として受けるだけにし、合意は表明しないでください。","propose_nameでは判断に示された名前を「」で候補として示し、合意は表明しないでください。"),"acceptでは受け止めるだけにしてください。","acceptでは相手の発話を受け止めます。相手が図形の見た目や特徴を尋ねているときは、確かめられる範囲でその問いに直接答えてよく、名前に決まった・対象を共同で特定できたとは言わないでください。"),
  act:rep(FIXED.act,"行動・対象・名前・特徴を変更しないでください。観察メモは仮説で","行動と対象は変更せず、選択済みの名前・特徴があればそれに従ってください。選択済みの特徴がないacceptでは、相手の問いに観察メモで確かめられる範囲（ある・ない・確かめられない）で直接答えてよく、新しい名前や特徴の確認質問は足さないでください。観察メモは仮説で"),
- scope:{...FIXED.scope,accept:"受け止める。特徴を尋ねられたときは、確かめられる範囲で直接答えてよい。名前に決まった・対象を共同で特定できたとは言わない"}};
-const LEGACY_TRIAL_STYLE={...LEGACY_TRIAL,scope:{...LEGACY_TRIAL.scope,accept:"受け止める。特徴を尋ねられたときは、確かめられる範囲で直接答えてよい。直前の図形が合意済みで相手が次の図形へ進むときは自然に応じてよいが、未解決の図形について保留・先送り・別の図形への移行を提案しない。名前に決まった・対象を共同で特定できたとは言わない"}};
-const TRIAL_STYLE={...TRIAL,scope:{...TRIAL.scope,accept:"受け止める。特徴を尋ねられたときは、確かめられる範囲で直接答えてよい。直前の図形が合意済みで相手が次の図形へ進むときは自然に応じてよいが、未解決の図形について保留・先送り・別の図形への移行を提案しない。名前に決まった・対象を共同で特定できたとは言わない"}};
+ scope:{...FIXED.scope,accept:"受け止める。特徴を尋ねられたときは、確かめられる範囲で直接答えてよい。名前に決まった・対象を共同で特定できたとは言わない",propose_name:"対象が公開上で相手に伝わり命名の流れに入ったときに、判断の名前を「」で候補として示す。決まった・それでいこうとは言わない"}};
+const LEGACY_TRIAL_STYLE={...LEGACY_TRIAL,scope:{...LEGACY_TRIAL.scope,accept:"受け止める。特徴を尋ねられたときは、確かめられる範囲で直接答えてよい。直前の図形が合意済みで相手が次の図形へ進むときは自然に応じてよいが、未解決の図形について保留・先送り・別の図形への移行を提案しない。名前に決まった・対象を共同で特定できたとは言わない",propose_name:"対象が公開上で相手に伝わり命名の流れに入ったときに、判断の名前を「」で候補として示す。決まった・それでいこうとは言わない"}};
+const TRIAL_STYLE={...TRIAL,scope:{...TRIAL.scope,accept:"受け止める。特徴を尋ねられたときは、確かめられる範囲で直接答えてよい。直前の図形が合意済みで相手が次の図形へ進むときは自然に応じてよいが、未解決の図形について保留・先送り・別の図形への移行を提案しない。名前に決まった・対象を共同で特定できたとは言わない",propose_name:"対象が公開上で相手に伝わり命名の流れに入ったときに、判断の名前を「」で候補として示す。決まった・それでいこうとは言わない"}};
 
 const ADAPT={"prospect": "repairProspectは未校正の見込みと根拠の材料です。正解や閾値ではありません。進捗が見込めれば修復の継続、停滞して別の対象に明確な利点があれば保留や移行、不確かなら確認、といった判断の目安にしてください。", "facts": "repairHistoryの各項目のfactsは、プログラムが記録から機械的に数えた事実です（直前の明確化への返答と比べた候補集合、同じ特徴の文の再提示、局所記録の欠落と棄却の件数）。抽出の誤差を含む未検証の材料で、意味が同じか、修復が進んだか停滞したか、次に何をすべきかを判定したものではありません。閾値や規則にせず、公開発話と照合して判断してください。"};
 // Observation-request detail text snapshot (2dbf7e2): the v1 targets sentence, the aspect question and the five aspects.

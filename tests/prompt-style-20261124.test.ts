@@ -49,6 +49,10 @@ test('feature questions: direct answer, three-way observation honesty, no naming
 
 test('accept no longer forbids answering; naming and joint identification stay forbidden', () => {
   assert.doesNotMatch(GENERATOR_INSTRUCTIONS_V2, /受け止めるだけ/);
+  assert.doesNotMatch(GENERATOR_INSTRUCTIONS_V2, /相手が出した名前を候補として受けるだけ/);
+  assert.match(GENERATOR_INSTRUCTIONS_V2, /判断に示された名前を「」で候補として示/);
+  assert.doesNotMatch(ACTION_SCOPE_V2.propose_name, /どの図形と理解したかを示すか名前を出すだけ/);
+  assert.match(ACTION_SCOPE_V2.propose_name, /判断の名前を「」で候補として示す/);
   for (const scope of [ACTION_SCOPE_V2, LUNA_ACTION_SCOPE_V2]) {
     assert.doesNotMatch(scope.accept, /受け止めるだけ/);
     assert.match(scope.accept, /直接答えてよい/);

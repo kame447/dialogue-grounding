@@ -51,7 +51,7 @@ test("local grounding omitted and null keep requests, private state and traces b
   // Guards the request, output state and trace bytes, not just null's alias.
   const bytes = JSON.stringify({ result: a, calls: implicit.calls, attempts: implicit.dialogue.getAttempts() });
   // Re-pinned for prompt-style-20261124: restoring the prior dialogue-v2.mjs generator text reproduces the previous digest.
-  assert.equal(createHash("sha256").update(bytes).digest("hex"), "06bfa2b123612842034e58a17b4c3f49aadd44e0f014e1320f310f3f72d4ef1f");
+  assert.equal(createHash("sha256").update(bytes).digest("hex"), "457ff593e9738f38cdb27622de7c11735ecd7f4bb60da8dcb851702bcc0646fa");
   assert.ok(!JSON.stringify(implicit.dialogue.getAttempts()).includes("localGrounding"));
   assert.ok(!JSON.stringify(implicit.calls).includes("局所問題の作業メモ"));
 });
