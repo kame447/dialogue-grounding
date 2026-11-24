@@ -590,7 +590,9 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   const { client, observer, jevDecision, generation } = options;
   // One layout per runtime: validation, acceptance, restore and the client's own requests must agree.
   const questionLayout: JevQuestionLayout = options.questionLayout ?? "two_stage_v1";
-  const holistic = questionLayout === "two_stage_v3" && options.dialoguePolicy === "holistic_v1";
+  const holistic = questionLayout === "two_stage_v3" && (options.dialoguePolicy === "holistic_v1" || options.dialoguePolicy === "holistic_v2");
+  // holistic_v2 (new trials): the casual-naming extraction criterion and the name rules; a recorded holistic_v1 keeps the earlier extraction text and memo-reading candidates.
+  const holisticV2 = questionLayout === "two_stage_v3" && options.dialoguePolicy === "holistic_v2";
   if (questionLayout !== "two_stage_v1" && questionLayout !== "two_stage_v2" && questionLayout !== "two_stage_v3") throw new Error("Invalid Jev question layout");
   if (questionLayout !== "two_stage_v1" && !integrated) throw new Error(questionLayout + " requires the integrated Jev profile");
   const generationRetryVersion = options.generationRetryVersion ??
@@ -622,7 +624,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   let attemptsStarted = 0;
   let initialMemo: Promise<ObservationMemo> | null = null, initialRecorded = false;
   const privateInstructions = [generation.task, generation.instructions, generation.concise ?? "", ACT_INSTRUCTIONS, DETAIL_INSTRUCTIONS, REVISIT_MULTIPLE_INSTRUCTIONS, LOCAL_EXTRACTION_INSTRUCTIONS,
-    MEMO_LOCAL_EXTRACTION_INSTRUCTIONS, ...(holistic ? [MEMO_LOCAL_EXTRACTION_INSTRUCTIONS_HOLISTIC] : []), LOCAL_CLASSIFICATION_INSTRUCTIONS, OBSERVATION_INITIAL_INSTRUCTIONS,
+    MEMO_LOCAL_EXTRACTION_INSTRUCTIONS, ...(holisticV2 ? [MEMO_LOCAL_EXTRACTION_INSTRUCTIONS_HOLISTIC] : []), LOCAL_CLASSIFICATION_INSTRUCTIONS, OBSERVATION_INITIAL_INSTRUCTIONS,
     OBSERVATION_TARGETED_INSTRUCTIONS, ...(aiEnabled ? aiPromptBodies : [])].map(content => ({ role: "system", content }));
   function project<T>(value: T): T {
     let redacted = false;
@@ -695,7 +697,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       const local = { ...options.localGrounding, extractor: createMemoLocalExtractor({ complete(messages, options) {
         if (messages.some(message => typeof message.content !== "string")) throw new JevTurnError("invalid_state");
         return client.complete(messages as Message[], options);
-      } }, { getMemo: () => structuredClone(memo), holistic, ...(options.localGrounding.researchLimits === undefined ? {} : { researchLimits: options.localGrounding.researchLimits, timeoutMs: options.localGrounding.timeoutMs }) }) };
+      } }, { getMemo: () => structuredClone(memo), holistic: holisticV2, ...(options.localGrounding.researchLimits === undefined ? {} : { researchLimits: options.localGrounding.researchLimits, timeoutMs: options.localGrounding.timeoutMs }) }) };
       const priorAct = previousAi ? { ...previous.judgment, turn: previousAi.turn, publishedFallback: previous.generationGuard.fallback,
         ...(previousExecution!.target.kind === "multiple" ? { targetCandidates: [...previousExecution!.target.figureIds] } : {}) } : undefined;
       let initialUpdate = stageMemory(state.graph, latest.seq, null, publicTurns);
@@ -735,7 +737,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         baseInput.agreeNames = buildAgreeNamesV3(claims, publicTurns, latest.seq, slots, state);
         baseInput.nameLedger = structuredClone(state.ledger);
         // holistic_v1: the memo's readings are explanations, never AI-proposed names (the candidates are then only names that were said in public).
-        if (holistic) baseInput.nameSource = "public_only";
+        if (holisticV2) baseInput.nameSource = "public_only";
       }
       else if (adaptive) baseInput.agreeNames = claims.filter(eligibleAgreeClaim).flatMap(c => {
         // A name_accept may inherit a name without repeating its literal text.
@@ -807,7 +809,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         const onFailureEvidence = (evidence: unknown) => { sink.evidence = evidence; };
         let raw: unknown;
         try {
-          raw = deadline?await deadline.run(s=>jevDecision.decide(structuredClone(input),{signal:s,timeoutMs:options.decisionTimeoutMs,onFailureEvidence,...(holistic?{dialoguePolicy:'holistic_v1' as const}:{})})):await interruptible(jevDecision.decide(structuredClone(input), { signal, onFailureEvidence }), signal);
+          raw = deadline?await deadline.run(s=>jevDecision.decide(structuredClone(input),{signal:s,timeoutMs:options.decisionTimeoutMs,onFailureEvidence,...(holistic?{dialoguePolicy:options.dialoguePolicy!}:{})})):await interruptible(jevDecision.decide(structuredClone(input), { signal, onFailureEvidence }), signal);
         } catch (error) { decideFailure.failed = true; decideFailure.evidence = sink.evidence; throw error; }
         abortIf(signal);
         errorCode = "invalid_decision";
@@ -927,7 +929,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
           if (typeof jevDecision.classifyDraftAct !== "function") throw new Error("unavailable");
           res = await interruptible(jevDecision.classifyDraftAct({ turn: latest.seq, publicTurns, reasons: triggers,
             selected: { action: judgment.action, target: execution.target, name: judgment.candidateName ?? null }, draft: text },
-            { signal, timeoutMs: options.decisionTimeoutMs, dialoguePolicy: "holistic_v1" }), signal);
+            { signal, timeoutMs: options.decisionTimeoutMs, dialoguePolicy: options.dialoguePolicy }), signal);
         } catch (error) {
           abortIf(signal);
           res = { status: "error", choice: null, scores: null, model: null, responseId: null, costUsd: null, latencyMs: 0, error: "unavailable" };

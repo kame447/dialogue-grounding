@@ -94,7 +94,7 @@ function s4InternalLeak(compact:string):boolean{
   /human[_-]?referent|repair[_-]?prospect|repair_issue|candidate_narrowed|candidate_widened|other_figure_benefit|no_open_issue|issue_\d+|repair_?facts|reply_?vs_?previous|not_comparable|widened_or_shifted|same_?question|local_?gaps/iu.test(compact);
 }
 function s4NamingDecision(compact:string,act:string):boolean{
- if(act!=='agree'&&CTX.policy!=='holistic_v1'){
+ if(act!=='agree'&&!H()){
   // holistic-first: 「X」で呼びましょう / そう呼びます are naming decisions too (a record of the holistic text); older versions keep the narrower family.
   for(const re of [/と呼(?:ぼう|びましょう|ぶことに(?:しよう|しましょう|します)|びます)/gu,/に(?:しよう|しましょう|します|決めよう|決めましょう|決めます)/gu,/で(?:いこう|行こう|いきましょう|行きましょう|いきます|行きます)/gu,/[でに](?:決まり|決定|確定)/gu,/で(?:いい|良い|よい|大丈夫)/gu,/合意/gu]){
    for(const m of compact.matchAll(re)){const tail=compact.slice(m.index!+m[0].length);if(qTail(tail))continue;if(m[0]==='合意'&&/^(?:していません|していない|しません|ではありません|ではない|はしていません|はしていない)/u.test(tail))continue;if(re.source.startsWith('に')&&/(?:後|あと|後日|今度|別の機会|保留|後回し|先送り|先延ばし)$/u.test(compact.slice(0,m.index)))continue;return true;}
@@ -169,6 +169,7 @@ const ANY_TARGET=['accept','defer','move_on','close'];
 type ReplayContext={policy:string|null;agreeMatch:{l0:boolean;l2:boolean}|null;facts:boolean;agree:any[]|undefined;known:boolean;v3:boolean;trial:boolean;ledger:Record<string,{status:string;name:string|null}>|undefined;legacyV3:boolean;style:null|'legacy'|'style'|'loop'|'holistic'};
 const defaultContext:ReplayContext={policy:null,agreeMatch:null,facts:false,agree:undefined,known:true,v3:false,trial:false,ledger:undefined,legacyV3:false,style:null};
 const CTX={...defaultContext};
+const H=()=>CTX.policy==='holistic_v1'||CTX.policy==='holistic_v2';
 // Only the verified integrated profile can name two_stage_v2; every other record is read as two_stage_v1.
 const layoutOf=(profile:any)=>profile?.id==='research_trial_profile_v3'&&['two_stage_v2','two_stage_v3'].includes(profile?.questionLayout)?profile.questionLayout as string:'two_stage_v1';
 const probability=(n:any)=>typeof n==='number'&&Number.isFinite(n)&&n>=0&&n<=1;
@@ -189,7 +190,7 @@ function fullProfile(p:any):string|null{
   if(!id?.enumerable||!Object.hasOwn(id,'value')||typeof id.value!=='string'||!profiles.includes(id.value))return'intervention_profile_invalid';
   const v3=id.value==='research_trial_profile_v3',allowed=['id','referenceMemory','decisionMode','humanReferent','localGrounding','initialObservation','questionLayout','utteranceStyle','maxReobservations','modelPolicy','timeouts','lunaRequest','outputLimit','modelContract','interventionPolicy','dialoguePolicy'];
   // dialoguePolicy (holistic_v1) exists only on a two_stage_v3 profile; its absence is the older text.
-  if(v3&&Object.hasOwn(p,'dialoguePolicy')&&(p.dialoguePolicy!=='holistic_v1'||p.questionLayout!=='two_stage_v3'))return'intervention_profile_invalid';
+  if(v3&&Object.hasOwn(p,'dialoguePolicy')&&(!['holistic_v1','holistic_v2'].includes(p.dialoguePolicy)||p.questionLayout!=='two_stage_v3'))return'intervention_profile_invalid';
   if(v3&&Reflect.ownKeys(p).some(k=>typeof k!=='string'||!allowed.includes(k))||!v3&&Object.hasOwn(p,'interventionPolicy'))return'intervention_profile_invalid';
   resolveModelPolicy(p);if(!v3)return null;
   const d=ds.interventionPolicy;if(!d)return'intervention_contract_missing';
@@ -575,7 +576,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
      const codes=label===tr.label&&t.status==='committed'?t.generationGuard.violations:undefined;
      // The comparison condition's retry reason is checked against that condition's own first draft, which this verifier classifies itself.
      const v3Retry=layout==='two_stage_v3';
-     const draft=codes===undefined&&generationCount===1?{orientation:v3Retry&&s4HasOrientationLeak(prevDraft),naming:typeof prevDraft==='string'&&s4NamingDecision(prevDraft.normalize('NFKC').replace(/[\s\u200b-\u200d\ufeff]/gu,''),s.executed?.action),workingNote:v3Retry&&restatedRetry&&s4HasWorkingNote(prevDraft,publicTexts),...(CTX.policy==='holistic_v1'?{draftAct:lastVerdict}:{})}:undefined;
+     const draft=codes===undefined&&generationCount===1?{orientation:v3Retry&&s4HasOrientationLeak(prevDraft),naming:typeof prevDraft==='string'&&s4NamingDecision(prevDraft.normalize('NFKC').replace(/[\s\u200b-\u200d\ufeff]/gu,''),s.executed?.action),workingNote:v3Retry&&restatedRetry&&s4HasWorkingNote(prevDraft,publicTexts),...(H()?{draftAct:lastVerdict}:{})}:undefined;
      if(!generationMessages(p.messages,t,s.executed,{...tape,generationGraph:(tr.turns??[]).find((u:any)=>u.turn===t.turnIndex)?.state?.graph},m.profile,generationCount++,codes,draft))return'invalid';
      prevDraft=answer?.response?.text??answer?.text;draftTexts.push(prevDraft);genMessages.push(p.messages);lastVerdict=null;
     }
@@ -586,7 +587,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
      if(Object.hasOwn(p.questions,'draft_naming')){
       // holistic_v1: the closed question about the draft's naming act, rebuilt exactly from this material and the previous generation draft.
       const gi=generationCount-1,ex=s.executed;
-      if(CTX.policy!=='holistic_v1'||r.role!=='post_generation'||gi<0||!ex||typeof prevDraft!=='string'||askedDrafts.includes(gi)||!equal(p.questions,DRAFT_NAMING_QUESTIONS_S4)||p.model!=='typesafe/jev-1.14')return'invalid';
+      if(!H()||r.role!=='post_generation'||gi<0||!ex||typeof prevDraft!=='string'||askedDrafts.includes(gi)||!equal(p.questions,DRAFT_NAMING_QUESTIONS_S4)||p.model!=='typesafe/jev-1.14')return'invalid';
       const agreed=s4AgreedNames(tape,ex);
       const trig=s4DraftTriggers(prevDraft,ex.action,s4OpenHumanProposal(tape,t),agreed,ex.action==='propose_name'&&typeof ex.name==='string'?ledgerName(ex.name):null);
       const turns=(tape.events??[]).filter((e:any)=>e.seq<=t.turnIndex).slice(-12).map((e:any)=>({turn:e.seq,speaker:e.speaker,text:String(e.text).slice(0,400)}));
@@ -657,7 +658,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
    }
   }
   if(label===tr.label&&t.status==='committed'&&generationCount!==(t.generationGuard.regenerated?2:1))return'invalid';
-  if(CTX.policy==='holistic_v1'&&t.status==='committed'){
+  if(H()&&t.status==='committed'){
    // Each side (recorded or comparison) is checked against its own drafts and answers: every question-target draft is asked, a draft that fits the act may
    // publish, and one that does not (or is unconfirmed) must be followed by a regeneration.
    const ex=s.executed;if(!ex||draftTexts.length!==generationCount)return'invalid';
@@ -696,7 +697,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
   }
   if(label===tr.label&&t.status==='committed'){
    const acts:any[]=t.draftActs??[],guardCodes:string[]=(t.generationGuard?.violations??[]).filter((c:string)=>c.startsWith('draft_act_'));
-   if(CTX.policy!=='holistic_v1'){if(acts.length>0||askedRows.length>0)return'invalid';}
+   if(!H()){if(acts.length>0||askedRows.length>0)return'invalid';}
    else{
     for(const a of acts){
      const idx=a.draft==='initial'?0:1;
@@ -758,14 +759,14 @@ const ledgerName=(name:string)=>name.normalize('NFKC').trim().replace(/\s/gu,'')
 function catalog(input:any,target:any,kind:'name'|'feature'):{value:string;figureIds:string[]}[]{
  const ids=target.kind==='single'?[target.figureId]:target.kind==='multiple'?target.figureIds:[],out:{value:string;figureIds:string[]}[]=[];
  for(const id of ids){const o=input.observations.find((o:any)=>o.figureId===id);if(!o)continue;
-  const values:string[]=kind==='name'?[...(CTX.policy==='holistic_v1'?[]:o.holistic.map((h:any)=>h.construal).filter((v:any)=>typeof v==='string'&&v.length<=80)),...input.publicNames.filter((n:any)=>n.figureId===null||n.figureId===id).map((n:any)=>n.name)]:[...o.analytic.shapes,o.analytic.composition,...o.analytic.relations,...o.reobservations.flatMap((r:any)=>r.supports)].filter((v:any)=>typeof v==='string'&&v.trim()&&v.length<=400);
+  const values:string[]=kind==='name'?[...(CTX.policy==='holistic_v2'?[]:o.holistic.map((h:any)=>h.construal).filter((v:any)=>typeof v==='string'&&v.length<=80)),...input.publicNames.filter((n:any)=>n.figureId===null||n.figureId===id).map((n:any)=>n.name)]:[...o.analytic.shapes,o.analytic.composition,...o.analytic.relations,...o.reobservations.flatMap((r:any)=>r.supports)].filter((v:any)=>typeof v==='string'&&v.trim()&&v.length<=400);
   const ledger=kind==='name'&&CTX.v3&&!CTX.legacyV3?CTX.ledger:undefined;
   const partner=kind==='name'&&CTX.v3&&(CTX.style==='loop'||CTX.style==='holistic')?(Array.isArray(input.priorClaims)?input.priorClaims:[]).filter((c:any)=>c?.speaker==='human'&&c.act==='name_propose'&&typeof c.name==='string'&&c.name!==''&&c.turn<=input.turn&&c.sourceTurn<=input.turn&&Array.isArray(c.targets)):[];
   const entry=ledger?.[id];if(entry?.status==='agreed')continue;
   for(const value of new Set(values)){
    if(ledger&&entry){const name=ledgerName(value);if(entry.status==='deferred'&&entry.name!==null&&ledgerName(entry.name)!==name||
       Object.entries(ledger).some(([other,e])=>other!==id&&e.name!==null&&ledgerName(e.name)===name))continue;}
-   if(partner.some((c:any)=>ledgerName(c.name)===ledgerName(value)&&(c.targets.length===0||c.targets.includes(id))))continue;
+   if(partner.some((c:any)=>ledgerName(c.name)===ledgerName(value)&&(CTX.policy==='holistic_v2'||c.targets.length===0||c.targets.includes(id))))continue;
    const old=out.find(c=>c.value===value);if(old){if(!old.figureIds.includes(id))old.figureIds.push(id);}else out.push({value,figureIds:[id]});
   }
  }return out;
@@ -840,7 +841,7 @@ function originalQuestions(body:any,input:any,layout='two_stage_v1'):boolean|nul
    for(const [version,actions] of [['holistic',NATIVE_V3_HOLISTIC.actions],['loop',NATIVE_V3_LOOP.actions],['style',NATIVE_V3_STYLE.actions],['legacy',NATIVE_V3.actions]] as const){
     if(was!==null&&was!==version)continue;
     // The version is the trial's recorded policy (holistic_v1) or its absence; the request text only has to match that version's text.
-    if((CTX.policy==='holistic_v1')!==(version==='holistic'))continue;
+    if(H()!==(version==='holistic'))continue;
     CTX.style=version;
     if(equal({action:make(actions)},body.questions)){
      // The saved agree candidates must follow the rule of this very criteria version: the current text only the grounded, undenied figures; older texts the earlier one.
@@ -850,7 +851,7 @@ function originalQuestions(body:any,input:any,layout='two_stage_v1'):boolean|nul
    }
    CTX.style=was;
    // A record without the policy whose request text is the holistic text cannot be identified as any earlier version: never a reproduction success.
-   if(CTX.policy!=='holistic_v1'&&CTX.style===null){const was2=CTX.policy;CTX.policy='holistic_v1';const same=equal({action:make(NATIVE_V3_HOLISTIC.actions)},body.questions);CTX.policy=was2;if(same)return null;}
+   if(!H()&&CTX.style===null){const was2=CTX.policy;let same=false;for(const pol of ['holistic_v1','holistic_v2'] as const){CTX.policy=pol;if(equal({action:make(NATIVE_V3_HOLISTIC.actions)},body.questions))same=true;}CTX.policy=was2;if(same)return null;}
    return false;
   }
   add('action',text,Object.fromEntries(ACTIONS.filter(a=>(a!=='request_observation'||input.reobservationAllowed)&&(a!=='agree'||agreeOffered)).map(a=>[a,(NATIVE.actions as any)[a]])));

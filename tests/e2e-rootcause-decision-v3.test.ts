@@ -30,7 +30,7 @@ type Plan = {
 
 function fixture(strategy: 'bypass-enabled' | 'repair-first' = 'bypass-enabled',
   { aiPublic = false, observations = memo(), historicalNameScope = false, holistic = false }:
-  { aiPublic?: boolean; observations?: ReturnType<typeof memo>; historicalNameScope?: boolean; holistic?: boolean } = {}) {
+  { aiPublic?: boolean; observations?: ReturnType<typeof memo>; historicalNameScope?: boolean; holistic?: boolean | 'holistic_v1' } = {}) {
   const intervention = interventionForStrategy(strategy);
   const inputs: JevDecisionInput[] = [];
   const extractionSystem: string[] = [];
@@ -62,7 +62,7 @@ function fixture(strategy: 'bypass-enabled' | 'repair-first' = 'bypass-enabled',
     },
   })!;
   const runtime = createJevTurnRuntime({
-    ...V3, intervention, decisionTimeoutMs: 3000, ...(holistic ? { dialoguePolicy: 'holistic_v1' as const } : {}),
+    ...V3, intervention, decisionTimeoutMs: 3000, ...(holistic ? { dialoguePolicy: holistic === true ? 'holistic_v2' as const : holistic } : {}),
     ...(strategy === 'repair-first' ? { technicalTrial: { version: 'adaptive_repair_v3' as const } } : {}),
     ownAnchors: anchors, ownImage: { ...image, mimeType: 'image/png' }, maxReobservations: 0,
     observer: { async observeAll() { return validateObservationMemo(observations); }, async reobserve() { throw Error('no reobservation expected'); } },
@@ -1079,4 +1079,22 @@ test('holistic_v1 (extraction): a casual naming proposal or approval question is
   const old = fixture('bypass-enabled', { aiPublic: true });
   await share(old, 3);
   assert.equal(old.extractionSystem.at(-1), MEMO_LOCAL_EXTRACTION_INSTRUCTIONS);
+});
+
+test('holistic_v2 (names, 05j-B2): a name the partner proposed for several figures is never an AI propose_name candidate; a neutral mention still is', async () => {
+  const actions = (r: { requests: Array<{ questions: Record<string, { criteria: Record<string, string> }> }> }) =>
+    Object.keys(r.requests.find(q => q.questions.action)!.questions.action.criteria);
+  const f = fixture('bypass-enabled', { aiPublic: true, holistic: true });
+  const proposal = 'この二つのどちらかに、帆って呼び名はどう？';
+  const r = await f.exchange(proposal, { action: 'accept', target: 0, draftActs: ['none'], segments: [naming(proposal, '帆', [ids[0], ids[1]])], drafts: ['どちらの形の話か確かめたいです。'] });
+  assert.ok(!actions(r).includes('propose_name'), 'the partner name is offered to no figure');
+  const g = fixture('bypass-enabled', { aiPublic: true, holistic: true });
+  const mention = 'この二つには「船」という見方もありますね。';
+  const m = await g.exchange(mention, { action: 'accept', target: 0, segments: [naming(mention, '船', [ids[0], ids[1]], 'assert')], drafts: ['そう見えるんですね。'] });
+  assert.ok(actions(m).includes('propose_name'), 'a neutral mention stays a candidate');
+  // An earlier trial (holistic_v1) keeps the memo readings as candidates and the older partner-name rule.
+  const old = fixture('bypass-enabled', { aiPublic: true, holistic: 'holistic_v1' });
+  const o = await old.exchange('どんな図形がありますか？', { action: 'accept', target: 0, drafts: ['全体は丸みのある形です。'] });
+  assert.ok(actions(o).includes('propose_name'), 'holistic_v1 offers the memo readings');
+  assert.equal(old.extractionSystem.at(-1), MEMO_LOCAL_EXTRACTION_INSTRUCTIONS, 'holistic_v1 keeps the earlier extraction text');
 });

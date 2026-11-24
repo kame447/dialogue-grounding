@@ -56,7 +56,7 @@ async function recordedRun(profile: any, tape: any, label: 'repair-first' | 'byp
       async reobserve(input: any) { const result = learn ? learn(input) : structuredClone(fixed.shift()); made.push(structuredClone(result));
         await client.complete(buildReobservationMessages(input), { phase: 'observation_targeted' }); return result; } },
     jevDecision: { decide: (i: any, o: any) => native.decide(i, o), completeDetail: (i: any, s: any, o: any) => native.completeDetail!(i, s, o),
-      ...(profile.dialoguePolicy === 'holistic_v1' ? { classifyDraftAct: (i: any, o: any) => native.classifyDraftAct!(i, o) } : {}) },
+      ...(profile.dialoguePolicy ? { classifyDraftAct: (i: any, o: any) => native.classifyDraftAct!(i, o) } : {}) },
     localGrounding: { classifier: createJevLocalTestClassifier({ enabled: true, readKey, fetchImpl, timeoutMs: profile.timeouts.localMs, researchLimits: { maxDeadlineMs: 600000 } })!,
       aiPublicTransport: { readKey, fetchImpl, timeoutMs: profile.timeouts.decisionMs } },
     onJevTurnTrace: (t: any) => traces.push(t) } as any);
@@ -66,7 +66,7 @@ async function recordedRun(profile: any, tape: any, label: 'repair-first' | 'byp
 }
 /** NORMAL rebuilt as one canonical trial of the given layout, label and Jev responses (the s4-two-stage-v2 pattern). */
 async function records(layout: 'two_stage_v2' | 'two_stage_v3', jev: any[], { reobservation = false, label = 'bypass-enabled' as 'repair-first' | 'bypass-enabled', generationText = null as string | null, humanText = null as string | null,
-  retry = null as { drafts: [string, string]; current: boolean; fallback?: boolean } | null, policy = null as 'holistic_v1' | null, draftAnswers = [] as Array<string | { choice: string; extra: Record<string, unknown> }> } = {}) {
+  retry = null as { drafts: [string, string]; current: boolean; fallback?: boolean } | null, policy = null as 'holistic_v1' | 'holistic_v2' | null, draftAnswers = [] as Array<string | { choice: string; extra: Record<string, unknown> }> } = {}) {
   const n = structuredClone(normal), tr = n.trials[0], m = n.run.manifest;
   const profile = JSON.parse(JSON.stringify(researchTrialProfileV3(m.lunaRequest, m.timeouts, layout, policy)));
   const digest = hash(profile);
@@ -98,7 +98,6 @@ async function records(layout: 'two_stage_v2' | 'two_stage_v3', jev: any[], { re
     tape.common.reobservations = learned.reobservations;
   }
   const probe: any = await pairedInterventionReplay(tape, OWN as any, MODEL, profile);
-  if (!probe.sides?.length || process.env.DBG) console.log('PROBE', probe.status, probe.error);
   const recorded = probe.sides.find((s: any) => s.label === label);
   tape.recorded.expectedRequests = recorded.requests.map((r: any, i: number) => ({ provider: r.provider, phase: r.phase, requestSha256: r.preProjectionPayloadSha256,
     actualSendMeasured: true, sendIds: [i + 1], ...(r.provider === 'luna' ? { messagesSha256: r.completeMessagesSha256 } : {}) }));
@@ -560,7 +559,7 @@ test('the comparison condition must carry exactly the reasons its own draft show
 const DRAFT_MISMATCH = '前の下書きの命名に関する行為が、選んだ行動と合っていませんでした。選んだ行動の範囲で、命名に関する行為を行動に合わせて書き直してください。';
 test('holistic_v1: a naming-wording draft is asked, a mismatch regenerates, and S4 requires the reason on both conditions', async () => {
   const decisions = [stageOneH('retry', 'accept'), stageTwo('retry', 'accept', 'none')];
-  const record = await records('two_stage_v3', decisions, { policy: 'holistic_v1', draftAnswers: ['adopt_chosen'],
+  const record = await records('two_stage_v3', decisions, { policy: 'holistic_v2', draftAnswers: ['adopt_chosen'],
     retry: { current: true, drafts: ['この形は「name-0」で呼びましょう。', 'そう見えるんですね。'] } });
   pass(record);
   const t = record.trials[0].turns[0].trace[0];
@@ -575,7 +574,7 @@ test('holistic_v1: a naming-wording draft is asked, a mismatch regenerates, and 
 });
 test('holistic_v1: S4 refuses an altered or dropped question record', async () => {
   const decisions = [stageOneH('retry', 'accept'), stageTwo('retry', 'accept', 'none')];
-  const record = await records('two_stage_v3', decisions, { policy: 'holistic_v1', draftAnswers: ['adopt_chosen'],
+  const record = await records('two_stage_v3', decisions, { policy: 'holistic_v2', draftAnswers: ['adopt_chosen'],
     retry: { current: true, drafts: ['この形は「name-0」で呼びましょう。', 'そう見えるんですね。'] } });
   pass(record);
   const tr = record.trials[0];
@@ -592,7 +591,7 @@ test('holistic_v1: S4 refuses an altered or dropped question record', async () =
 test('holistic_v1: an orientation-only fallback record passes with no question, and one that carries a question record is refused', async () => {
   const decisions = [stageOneH('fallback', 'accept'), stageTwo('fallback', 'accept', 'none')];
   const drafts: [string, string] = ['右側に張り出しがあります。', '上端がとがっています。'];
-  const original = await records('two_stage_v3', decisions, { policy: 'holistic_v1', retry: { current: true, drafts, fallback: true } });
+  const original = await records('two_stage_v3', decisions, { policy: 'holistic_v2', retry: { current: true, drafts, fallback: true } });
   assert.deepEqual(original.trials[0].attempts[0].generationGuard, { violations: ['orientation_leak'], regenerated: true, fallback: true });
   assert.equal(original.trials[0].attempts[0].draftActs, undefined);
   pass(original);
@@ -608,7 +607,7 @@ const decisionsAccept = () => [stageOneH('retry', 'accept'), stageTwo('retry', '
 const traceCopies = (n: any) => [n.trials[0].attempts[0], n.trials[0].turns[0].trace[0]];
 
 test('05d-3: a regular record whose first draft is not a question target and only the retry is asked is accepted', async () => {
-  const record = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v1', draftAnswers: ['recount_only'],
+  const record = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v2', draftAnswers: ['recount_only'],
     retry: { current: true, drafts: ['右側が尖っています。', 'さっきの「name-0」は相手の案ですね。'] } });
   pass(record);
   assert.deepEqual(record.trials[0].attempts[0].draftActs.map((a: any) => a.draft), ['retry']);
@@ -616,7 +615,7 @@ test('05d-3: a regular record whose first draft is not a question target and onl
 
 test('05d-4: an unusable first answer recovered by a good retry answer is accepted; the unconfirmed draft stays unpublished', async () => {
   const drafts: [string, string] = ['この形は「name-0」で呼びましょう。', 'さっきの「name-0」は相手の案ですね。'];
-  const record = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v1', draftAnswers: ['bogus', 'recount_only'], retry: { current: true, drafts } });
+  const record = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v2', draftAnswers: ['bogus', 'recount_only'], retry: { current: true, drafts } });
   pass(record);
   const t = record.trials[0].attempts[0];
   assert.deepEqual(t.draftActs.map((a: any) => [a.draft, a.status, a.choice]), [['initial', 'error', null], ['retry', 'ok', 'recount_only']]);
@@ -627,7 +626,7 @@ test('05d-4: an unusable first answer recovered by a good retry answer is accept
 });
 
 test('05d-5: the comparison side is verified against its own final draft and answer', async () => {
-  const record = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v1', draftAnswers: ['recount_only'], generationText: 'さっきの「name-0」は相手の案ですね。' });
+  const record = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v2', draftAnswers: ['recount_only'], generationText: 'さっきの「name-0」は相手の案ですね。' });
   pass(record);
   for (const label of ['bypass-enabled', 'repair-first']) {
     const forged = structuredClone(record), other = label === 'bypass-enabled' ? 'repair-first' : 'bypass-enabled';
@@ -639,7 +638,7 @@ test('05d-5: the comparison side is verified against its own final draft and ans
 });
 
 test('05d-6: draftSha256 is recomputed from the draft text', async () => {
-  const record = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v1', draftAnswers: ['recount_only'], generationText: 'さっきの「name-0」は相手の案ですね。' });
+  const record = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v2', draftAnswers: ['recount_only'], generationText: 'さっきの「name-0」は相手の案ですね。' });
   pass(record);
   const forged = structuredClone(record);
   for (const c of traceCopies(forged)) c.draftActs[0].draftSha256 = '0'.repeat(64);
@@ -656,7 +655,7 @@ const forgeBoth = (record: any, label: string, edit: (tail: any) => void) => {
 const draftAnswerOf = (tail: any) => tail.jev.find((j: any) => j.answers?.draft_naming).answers.draft_naming;
 
 test('05e-1: a normally published text must be the last checked generation draft', async () => {
-  const record = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v1', generationText: '輪の部分が見えます。' });
+  const record = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v2', generationText: '輪の部分が見えます。' });
   pass(record);
   const forged = structuredClone(record);
   for (const t of traceCopies(forged)) t.publicSpeech = 'この形は「丸形」と呼びましょう。';
@@ -666,10 +665,10 @@ test('05e-1: a normally published text must be the last checked generation draft
 
 test('05e-2: an out-of-range optional confidence is an unusable answer in the run and in S4, on both the recorded and the comparison side', async () => {
   const bad = { choice: 'recount_only', extra: { confidence: 2 } };
-  const record = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v1', draftAnswers: [bad, 'recount_only'], retry: { current: true, drafts: [NAMING_DRAFT, RECOUNT_DRAFT] } });
+  const record = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v2', draftAnswers: [bad, 'recount_only'], retry: { current: true, drafts: [NAMING_DRAFT, RECOUNT_DRAFT] } });
   pass(record);
   assert.deepEqual(record.trials[0].attempts[0].draftActs.map((a: any) => [a.status, a.error]), [['error', 'invalid_response'], ['ok', null]]);
-  const single = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v1', draftAnswers: ['recount_only'], generationText: RECOUNT_DRAFT });
+  const single = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v2', draftAnswers: ['recount_only'], generationText: RECOUNT_DRAFT });
   pass(single);
   for (const label of ['bypass-enabled', 'repair-first']) {
     const forged = forgeBoth(single, label, tail => { draftAnswerOf(tail).confidence = 2; });
@@ -678,7 +677,7 @@ test('05e-2: an out-of-range optional confidence is an unusable answer in the ru
 });
 
 test('05e-3: a failed question answer is checked against its own send: id, cost, reason, triggers', async () => {
-  const record = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v1', draftAnswers: [{ choice: 'recount_only', extra: { confidence: 2 } }, 'recount_only'],
+  const record = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v2', draftAnswers: [{ choice: 'recount_only', extra: { confidence: 2 } }, 'recount_only'],
     retry: { current: true, drafts: [NAMING_DRAFT, RECOUNT_DRAFT] } });
   pass(record);
   const forgeries: Array<[string, (a: any) => void]> = [['cost', a => { a.costUsd = 0.034; }], ['response id', a => { a.responseId = 'gen-other'; }],
@@ -691,7 +690,7 @@ test('05e-3: a failed question answer is checked against its own send: id, cost,
 });
 
 test('05e-4: a comparison retry that can neither publish nor fall back (naming fault, then orientation fault) is never a success', async () => {
-  const record = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v1', draftAnswers: ['adopt_other'], retry: { current: true, drafts: [NAMING_DRAFT, 'そう見えるんですね。'] } });
+  const record = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v2', draftAnswers: ['adopt_other'], retry: { current: true, drafts: [NAMING_DRAFT, 'そう見えるんですね。'] } });
   pass(record);
   for (const label of ['bypass-enabled', 'repair-first']) {
     const forged = forgeBoth(record, label, tail => { tail.luna.filter((l: any) => l.phase === 'generation')[1].response.text = '右側が尖っています。'; });
@@ -712,7 +711,7 @@ const namedRecords = () => buildRecords({ turns: [
 
 test('05f-1: when both drafts are orientation-only the derived fallback is required, in the flag and in the published text', async () => {
   const drafts: [string, string] = ['右側が尖っています。', '上端が尖っています。'];
-  const original = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v1', retry: { current: true, drafts, fallback: true } });
+  const original = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v2', retry: { current: true, drafts, fallback: true } });
   pass(original);
   const forged = structuredClone(original);
   for (const t of traceCopies(forged)) { t.generationGuard.fallback = false; t.publicSpeech = drafts[1]; }
@@ -730,7 +729,7 @@ test('05f-2: a comparison propose_name draft must show the chosen name; one that
 });
 
 test('05f-3: a comparison draft that defers naming is unsolicited unless a question about the same figure follows', async () => {
-  const record = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v1', generationText: '輪の部分が見えます。' });
+  const record = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v2', generationText: '輪の部分が見えます。' });
   pass(record);
   for (const label of ['bypass-enabled', 'repair-first']) {
     assert.ok(checksOf(forgeGeneration(record, label, 0, '名前を決めるのは待ちましょう。')).some((c: any) => c.status !== 'pass'), label + ' (deferral)');
@@ -741,7 +740,7 @@ test('05f-3: a comparison draft that defers naming is unsolicited unless a quest
 
 test('05f: the run, its dynamic replay and S4 agree on the deferral and name-not-shown contrasts', async () => {
   const dynamic = async (record: any) => (await pairedInterventionReplay(structuredClone(record.trials[0].replay[0].tape), OWN as any, MODEL, record.trials[0].profile) as any).status;
-  const accept = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v1', generationText: '輪の部分が見えます。' });
+  const accept = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v2', generationText: '輪の部分が見えます。' });
   const deferral = forgeGeneration(accept, 'repair-first', 0, '名前を決めるのは待ちましょう。');
   const followed = forgeGeneration(accept, 'repair-first', 0, '名前を決めるのは待ちましょう。輪に切れ目がありますか？');
   assert.notEqual(await dynamic(deferral), 'same_material_intervention_verified');
@@ -758,12 +757,12 @@ test('05g: internal items (field names, local ids, an echo of the send\'s own in
   const dynamic = async (record: any) => (await pairedInterventionReplay(structuredClone(record.trials[0].replay[0].tape), OWN as any, MODEL, record.trials[0].profile) as any).status;
   const echo = '画像はあなた自身に提示された図形だけです。相手の画像・内部認識・正しい対応表は見えません。';
   for (const first of ['この形のissueIdは違います。', '2:local1 の話です。', echo]) {
-    const record = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v1', retry: { current: true, drafts: [first, 'そう見えるんですね。'] } });
+    const record = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v2', retry: { current: true, drafts: [first, 'そう見えるんですね。'] } });
     pass(record);
     assert.deepEqual(record.trials[0].attempts[0].generationGuard.regenerated, true);
     assert.ok(record.trials[0].attempts[0].generationGuard.violations.length >= 1, first);
     assert.equal(await dynamic(record), 'same_material_intervention_verified', first);
-    const single = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v1', generationText: 'そう見えるんですね。' });
+    const single = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v2', generationText: 'そう見えるんですね。' });
     const bad = forgeGeneration(single, 'repair-first', 0, first);
     assert.ok(checksOf(bad).some((c: any) => c.status !== 'pass'), 'comparison: ' + first);
     assert.notEqual(await dynamic(bad), 'same_material_intervention_verified', 'dynamic: ' + first);
@@ -774,17 +773,45 @@ import { AI_FUNCTION_INSTRUCTIONS } from '../dialogue-model/runtime/local-ground
 test('05h: not_reached only where material outside the record is needed; provable contradictions stay mismatch', async () => {
   const hiddenLine = AI_FUNCTION_INSTRUCTIONS.split(/\r?\n/u).map((l: string) => l.trim()).find((l: string) => l.length >= 24)!;
   const aiOn = (n: any) => n.trials[0].profile.localGrounding?.aiPublicClaims === true;
-  const hidden = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v1', retry: { current: true, drafts: [hiddenLine, 'そう見えるんですね。'] } });
+  const hidden = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v2', retry: { current: true, drafts: [hiddenLine, 'そう見えるんですね。'] } });
   const states = checksOf(hidden).map((c: any) => c.status);
   assert.ok(aiOn(hidden), 'AI public claims are on in this material');
   assert.ok(!states.includes('mismatch'), 'a regeneration only a hidden instruction explains is not a mismatch');
   assert.ok(states.includes('not_reached'));
   // issueId explains the regeneration; adding a text-decidable code afterwards is a provable contradiction.
-  const issue = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v1', retry: { current: true, drafts: ['この形のissueIdは違います。', 'そう見えるんですね。'] } });
+  const issue = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v2', retry: { current: true, drafts: ['この形のissueIdは違います。', 'そう見えるんですね。'] } });
   pass(issue);
   for (const code of ['internal_image', 'internal_credential']) {
     const forged = structuredClone(issue);
     for (const t of traceCopies(forged)) t.generationGuard.violations = [...t.generationGuard.violations, code];
     assert.ok(checksOf(forged).some((c: any) => c.status === 'mismatch'), code);
   }
+});
+
+// 05j-B1: each policy version reproduces its own requests; a record relabelled with the other version (profile, digests, materials) is refused.
+function relabel(record: any, policy: 'holistic_v1' | 'holistic_v2') {
+  const forged = structuredClone(record), oldProfile = forged.trials[0].profile, oldDigest = forged.trials[0].profileSha256;
+  const profile = { ...oldProfile, dialoguePolicy: policy }, digest = hash(profile);
+  const walk = (x: any): any => {
+    if (typeof x === 'string') return x === oldDigest ? digest : x;
+    if (Array.isArray(x)) return x.map(walk);
+    if (x && typeof x === 'object') {
+      if (x.id === 'research_trial_profile_v3' && x.dialoguePolicy !== undefined) return { ...Object.fromEntries(Object.entries(x).map(([k, v]) => [k, walk(v)])), dialoguePolicy: policy };
+      return Object.fromEntries(Object.entries(x).map(([k, v]) => [k, walk(v)]));
+    }
+    return x;
+  };
+  const out = walk(forged);
+  for (const side of sideCopies(out)) side.materialSha256 = hash(side.material);
+  return out;
+}
+test('05j-B1: holistic_v1 reproduces the earlier candidates, holistic_v2 the public-name rule, and a relabelled record is refused', async () => {
+  const v1 = await records('two_stage_v3', [stageOne('p', 'propose_name'), stageTwo('p', 'propose_name', 'figure_2'), jevResponse('p-detail', { name: answer('name_0', ['name_0']) })],
+    { policy: 'holistic_v1', generationText: '「name-2」と呼ぶのはどうでしょう？' });
+  pass(v1);
+  assert.equal(v1.trials[0].profile.dialoguePolicy, 'holistic_v1');
+  assert.ok(!checksOf(relabel(v1, 'holistic_v2')).every((c: any) => c.status === 'pass'), 'v1 record under v2');
+  const v2 = await namedRecords();
+  assert.equal(v2.trials[0].profile.dialoguePolicy, 'holistic_v2');
+  assert.ok(!finalChecks(relabel(v2, 'holistic_v1')).every((c: any) => c.status === 'pass'), 'v2 record under v1');
 });

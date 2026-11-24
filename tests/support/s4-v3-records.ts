@@ -57,7 +57,7 @@ export async function runTurn(profile: any, label: Label, state: any, events: an
   const jevDecision: any = { async decide(input: any, options: any) { if (plan.inject) return structuredClone(plan.inject); const d = await native.decide(input, options);
       if (d.action !== 'request_observation') { boundary.luna = luna.length; boundary.jev = jev.length; } return d; },
     completeDetail: (i: any, s: any, o: any) => native.completeDetail!(i, s, o),
-    ...(profile.dialoguePolicy === 'holistic_v1' ? { classifyDraftAct: (i: any, o: any) => native.classifyDraftAct!(i, o) } : {}),
+    ...(profile.dialoguePolicy ? { classifyDraftAct: (i: any, o: any) => native.classifyDraftAct!(i, o) } : {}),
     ...(technicalTrial ? { estimateRepairProspect: (i: any, o: any) => native.estimateRepairProspect!(i, o) } : {}) };
   const runtime = createProfileDialogue(profile, { client, image: OWN.ownImage, anchors: [...OWN.ownAnchors], strategy: label,
     observer: { async observeAll() { return structuredClone(OLD.state.observationMemo); },

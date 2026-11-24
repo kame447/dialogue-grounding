@@ -146,7 +146,10 @@ export type JevDecisionClient = {
 /** two_stage_v1 is the default and is unchanged. two_stage_v2 is explicit opt-in only: stage one asks
  * action and target kind, and a multiple target is followed by one closed choice among the 2-6 figure subsets. */
 /** Version of the dialogue policy a trial was created with (recorded in its profile and options). Absent = the text before holistic-first. */
-export type DialoguePolicy = "holistic_v1";
+/** holistic_v1: the whole-reading prompts and the draft-naming question. holistic_v2 adds, for new trials only, the casual-naming extraction criterion and the
+ * name rules (the memo readings and the partner's proposed names are never AI propose_name candidates). A recorded policy is reproduced as it was created. */
+export type DialoguePolicy = "holistic_v1" | "holistic_v2";
+export const isHolisticPolicy = (p: unknown): p is DialoguePolicy => p === "holistic_v1" || p === "holistic_v2";
 /** What a draft does about naming (holistic_v1): a closed set judged by Jev for the executed target and name. */
 export const DRAFT_ACTS = ["adopt_chosen", "adopt_other", "decline_or_hold", "propose_question", "recount_only", "none"] as const;
 export type DraftAct = typeof DRAFT_ACTS[number];

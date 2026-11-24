@@ -20,6 +20,7 @@ import { createLunaObserver } from '../observation/observe.ts';
 import type { ObservationInput, ObservationObserver } from '../observation/contract.ts';
 import { createJevDecisionClient, JevDecisionError, validateRepairProspectMaterial, checkDecisionFailureEvidence } from '../decision/jev-decision.ts';
 import type { JevDecisionClient, AdaptiveRepairTrial, JevQuestionLayout } from '../decision/contract.ts';
+import { isHolisticPolicy } from '../decision/contract.ts';
 import { createJevLocalTestClassifier, JevLocalTestError } from '../local-grounding/jev-local-test.ts';
 import type { JevTurnLocalOptions } from '../v2/jev-turn.ts';
 import { RunBudget } from '../diagnostics/parity-live/audit.ts';
@@ -102,9 +103,9 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
     // A restored record keeps the policy it was created with, or none: a record without dialoguePolicy never gains one on restore.
     if (restore) {
       const savedPolicy = Object.hasOwn(restore.options ?? {}, 'dialoguePolicy') ? restore.options.dialoguePolicy : undefined;
-      if (savedPolicy !== undefined && savedPolicy !== 'holistic_v1') return invalid();
-      if (savedPolicy === undefined && profile.dialoguePolicy !== undefined) profile = researchTrialProfileV3(profile.lunaRequest, profile.timeouts, profile.questionLayout, null);
-      else if (savedPolicy !== profile.dialoguePolicy) return invalid();
+      if (savedPolicy !== undefined && !isHolisticPolicy(savedPolicy)) return invalid();
+      // The stored value (or its absence) decides the version, whatever the creation default is now.
+      if (savedPolicy !== profile.dialoguePolicy) profile = researchTrialProfileV3(profile.lunaRequest, profile.timeouts, profile.questionLayout, savedPolicy ?? null);
     }
     if (context.referenceMemory !== true) return invalid();
     if (!STRATEGIES.includes(context.strategy)) return invalid();
@@ -271,7 +272,7 @@ export function validateParticipantJevConfig(value:unknown):{config:ParticipantJ
     // value reaches RunBudget and every Jev adapter (they receive researchLimits, see maxJevCostCapUsd).
     if(!['lunaCalls','lunaTokens','lunaPosts','jevPosts'].every(k=>positive(limits[k]))||typeof limits.jevUsd!=='number'||!Number.isFinite(limits.jevUsd)||limits.jevUsd<=0||limits.jevUsd>RESEARCH_MAX_JEV_USD)throw Error();
     data(c.lunaRequest,['timeoutMs','maxCompletionTokens']);
-    // holistic_v1 is recorded for a technical-trial v3 only; a plain v3 keeps its original decision, generation, guards and requests.
+    // holistic_v2 (the creation default) is recorded for a technical-trial v3 only; a plain v3 keeps its original decision, generation, guards and requests.
     return {config:c,profile:researchTrialProfileV3(c.lunaRequest,c.timeouts,c.questionLayout??'two_stage_v1',c.technicalTrial?undefined:null)};
   }catch{throw new ParticipantJevError('invalid_config');}
 }
@@ -336,7 +337,7 @@ export async function prepareParticipantJev(options:{configFile:string;baseAssig
           return scope(ledger).run({turn:parent?.turn??null,phase:'jev_prospect',boundary:'common'},
             ()=>jevOperation(ledger,'jev_prospect',()=>nativeDecision.estimateRepairProspect(...args)));
         }} : {}),
-        ...(profile.dialoguePolicy==='holistic_v1'&&nativeDecision.classifyDraftAct ? {classifyDraftAct:async(...args:Parameters<NonNullable<typeof nativeDecision.classifyDraftAct>>)=>{
+        ...(isHolisticPolicy(profile.dialoguePolicy)&&nativeDecision.classifyDraftAct ? {classifyDraftAct:async(...args:Parameters<NonNullable<typeof nativeDecision.classifyDraftAct>>)=>{
           ledger.beforeSend();
           const parent=scope(ledger).getStore();
           const res=await scope(ledger).run({turn:parent?.turn??null,phase:'jev_draft_act',boundary:'tail'},()=>nativeDecision.classifyDraftAct!(...args));
