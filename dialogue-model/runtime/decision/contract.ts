@@ -42,6 +42,10 @@ export type RepairFact = {
   localGaps: (typeof REPAIR_LOCAL_GAPS[number])[];
   localRejections: number;
 };
+/** two_stage_v3 only. A rough reading (見立て) that both sides have stated in public and nobody has denied, derived from verified claims only.
+ * It is a fact for Jev, never a decision, a name or an identification; details of the same figures that are still open ride along. */
+export type SharedConstrual = { id: string; claimIds: string[]; figureIds: string[]; construal: string;
+  openDetails: { issueId: string; aspect: string; proposition: string; state: string }[] };
 export type PublicNameCandidate = { name: string; figureId: string | null; sourceTurn: number };
 export type JevPriorAction = { turn: number; action: JevAction; target: JevTarget; name: string | null; feature: string | null };
 /** Human utterance referent, independent of the next action's target. No winner or calibration. */
@@ -85,6 +89,8 @@ export type JevDecisionInput = {
   humanReferent?: HumanReferentMaterial;
   repairProspect?: RepairProspectMaterial;
   repairFacts?: RepairFact[];
+  /** two_stage_v3 only; serialized into the request only when non-empty. */
+  sharedConstruals?: SharedConstrual[];
 };
 export type DecisionInputBudget = {
   maxChars: 20000;
@@ -117,6 +123,8 @@ export type JevDecision = {
   feature: string | null;
   /** Sources of the selected name/feature, within target; never a narrowed target. */
   detailFigureIds?: string[];
+  /** accept only (two_stage_v3, only when a shared construal was offered): the claim ids of the rough reading Jev chose to use as a common reference. */
+  sharedClaimIds?: string[];
   observe: JevObservationRequest | null;
   evidence: JevDecisionEvidence;
   decisionKind: "jev_local_test" | "mock";
@@ -127,7 +135,7 @@ export type JevDecisionCallOptions = { signal?: AbortSignal; timeoutMs?: number;
    * validated by projectDecisionFailureEvidence; never invoked for referent, prospect or detail calls. */
   onFailureEvidence?: (evidence: unknown) => void };
 /** Execution projection, independently evidenced after an opt-in acceptance step. */
-export type JevExecutedDecision = Omit<Pick<JevDecision, "action" | "target" | "name" | "feature" | "observe" | "detailFigureIds">,
+export type JevExecutedDecision = Omit<Pick<JevDecision, "action" | "target" | "name" | "feature" | "observe" | "detailFigureIds" | "sharedClaimIds">,
   "action" | "observe"> & { action: Exclude<JevAction, "request_observation">; observe: null };
 export type JevDetailResult = { executed: JevExecutedDecision; evidence: JevDecisionStageEvidence };
 export type JevDecisionClient = {

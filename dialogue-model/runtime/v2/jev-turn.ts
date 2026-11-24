@@ -9,14 +9,15 @@ import { createOwnLedger, validateJudgment, applyJudgment, JudgmentValidationErr
 import { normalizeName } from "../judgment/name-evidence.mjs";
 import { stageMemory } from "../judgment/memory.mjs";
 import { createReferenceGraph, applyReferenceUpdate, previewReferenceUpdate, snapshotReferenceGraph, REFERENCE_LIMITS } from "../memory/reference-graph.mjs";
-import { priorClaimViews, summarizeLocalIssues } from "../local-grounding/derive.ts";
+import { deriveLocalIssues, priorClaimViews, summarizeLocalIssues } from "../local-grounding/derive.ts";
+import { deriveSharedConstruals } from "../local-grounding/shared-construal.ts";
 import { createMemoLocalExtractor, LOCAL_EXTRACTION_INSTRUCTIONS, MEMO_LOCAL_EXTRACTION_INSTRUCTIONS } from "../local-grounding/extract.ts";
 import { LOCAL_CLASSIFICATION_INSTRUCTIONS } from "../local-grounding/classify.ts";
 import type { LocalGroundingOptions, LocalOwnImage, LocalOwnAnchor, PublicTurn, LocalClaimView } from "../local-grounding/contract.ts";
 import type { ObservationMemo, ObservationObserver, ReobservationResult } from "../observation/contract.ts";
 import { validateObservationMemo, mergeReobservation, observationContextMessages, ObservationError, type ObservationErrorCode,
   OBSERVATION_INITIAL_INSTRUCTIONS, OBSERVATION_TARGETED_INSTRUCTIONS, OBSERVATION_MEMO_VERSION } from "../observation/observe.ts";
-import type { JevDecision, JevDecisionClient, JevDecisionInput, JevObservationRequest, RepairHistoryEntry, HumanReferentEstimate, RepairProspectMaterial, AdaptiveRepairTrial, PublicNameCandidate, RepairFact, JevQuestionLayout } from "../decision/contract.ts";
+import type { JevDecision, JevDecisionClient, JevDecisionInput, JevObservationRequest, RepairHistoryEntry, HumanReferentEstimate, RepairProspectMaterial, AdaptiveRepairTrial, PublicNameCandidate, RepairFact, SharedConstrual, JevQuestionLayout } from "../decision/contract.ts";
 import { deriveRepairFacts, validateRepairFacts } from "../decision/repair-facts.ts";
 import { validateJevDecision, validateHumanReferentEstimate, validateRepairProspectEstimate, validateRepairProspectMaterial, unknownRepairProspect, JevDecisionError, JEV_DECISION_INPUT_LIMITS,
   projectDecisionFailureEvidence, checkDecisionFailureEvidence, TWO_STAGE_V2_CANDIDATE_SETS, candidateSetLabel, V3_TARGET_LABEL_SET } from "../decision/jev-decision.ts";
@@ -43,6 +44,8 @@ type Guard = { violations: string[]; regenerated: boolean; fallback: boolean };
 const ACT_INSTRUCTIONS = "Jevが選んだ行動だけを文章にしてください。行動と対象は変更せず、選択済みの名前・特徴があればそれに従ってください。選択済みの特徴がないacceptでは、相手の問いに観察メモで確かめられる範囲（ある・ない・確かめられない）で直接答えてよく、新しい名前や特徴の確認質問は足さないでください。観察メモは仮説で、局所的な支持を図形全体の理解や名称決定へ拡張しないでください。";
 // two_stage_v3 only (new text, not yet reviewed by Argon): a revisit whose target stays a candidate set.
 export const REVISIT_MULTIPLE_INSTRUCTIONS = "対象は複数候補のままです。選ばれた行動は、先ほどの未解決の区別に戻ることだけです。どの候補かを勝手に一つに絞らず、名前に決まったとは言わないでください。候補の数や内部の参照IDは相手に伝えず、相手が知らないことを知っているかのようにも話さないでください。";
+// two_stage_v3: only for an accept that chose to use a shared construal as a common reference. Mirrored in S4 (generationMessages).
+export const SHARED_CONSTRUAL_INSTRUCTIONS = "選ばれた行動はacceptで、双方の公開発話に共通する大まかな見立てを、共通の参照として自然に使うことです。相手の口調に合わせ、定型文にせず、見立ての言い回しは下の共有された見立てに沿ってください。細部が未確認であることを毎回付け足さないでください。細部の一致、名称に決まったこと、同一の図形に決まったことは言わないでください。対象が複数の候補のままなら、単一の図形を指すような言い方も避けてください。";
 const DETAIL_INSTRUCTIONS = "対象は複数候補のままです。detailFigureIdsは選ばれた特徴の出典図形であり、対象の確定ではありません。その特徴を候補すべての性質にせず、候補を勝手に一つに絞らずに確認・修復を表現してください。";
 export type JevTurnLocalOptions = Pick<LocalGroundingOptions, "classifier" | "timeoutMs" | "researchLimits"> & {
   aiPublicClaims?: boolean;
@@ -132,7 +135,7 @@ export type JevTurnTrace = {
 };
 type CommittedAct = {
   turnIndex: number; lastEventId: string | null; status: "committed"; judgment: Judgment;
-  generationGuard: Guard; jevTurn: { attemptNumber: number; decision: JevDecision; executed?:ExecutedDecision; intervention?:InterventionTrace; humanReferent?: JevHumanReferentTrace; repairProspect?: RepairProspectMaterial; repairGate?: RepairGate; agreeNames?: PublicNameCandidate[]; repairFacts?: RepairFact[] };
+  generationGuard: Guard; jevTurn: { attemptNumber: number; decision: JevDecision; executed?:ExecutedDecision; intervention?:InterventionTrace; humanReferent?: JevHumanReferentTrace; repairProspect?: RepairProspectMaterial; repairGate?: RepairGate; agreeNames?: PublicNameCandidate[]; repairFacts?: RepairFact[]; sharedConstruals?: SharedConstrual[] };
   localGrounding: LocalGroundingTrace;
   aiPublic?: { aiSeq: number; textSha256: string };
 };
@@ -350,15 +353,16 @@ function checkedIntervention(x:unknown):InterventionConfig {
  try{stateJson(x);const c=x as InterventionConfig;if(!stateSame(c,interventionForStrategy(c.policy==='bypass_acceptance_v1:accept'?'bypass-enabled':c.policy==='bypass_acceptance_v1:veto'?'repair-first':null)))throw Error();return structuredClone(c);}
  catch{throw new JevTurnError('invalid_intervention');}
 }
-function executionProjection(d:JevDecision):ExecutedDecision {return{action:d.action as ExecutedDecision['action'],target:structuredClone(d.target),name:d.name,feature:d.feature,observe:null,...(Object.hasOwn(d,'detailFigureIds')?{detailFigureIds:structuredClone(d.detailFigureIds!)}:{})};}
+function executionProjection(d:JevDecision):ExecutedDecision {return{action:d.action as ExecutedDecision['action'],target:structuredClone(d.target),name:d.name,feature:d.feature,observe:null,...(Object.hasOwn(d,'detailFigureIds')?{detailFigureIds:structuredClone(d.detailFigureIds!)}:{}),...(Object.hasOwn(d,'sharedClaimIds')?{sharedClaimIds:structuredClone(d.sharedClaimIds!)}:{})};}
 function persistedExecution(x:any,slots:readonly string[]):void {
- if(!stateExact(x,['action','target','name','feature','observe',...(Object.hasOwn(x??{},'detailFigureIds')?['detailFigureIds']:[])])||!JEV_ACTIONS.includes(x.action)||x.action==='request_observation'||x.observe!==null||
+ if(!stateExact(x,['action','target','name','feature','observe',...(Object.hasOwn(x??{},'detailFigureIds')?['detailFigureIds']:[]),...(Object.hasOwn(x??{},'sharedClaimIds')?['sharedClaimIds']:[])])||!JEV_ACTIONS.includes(x.action)||x.action==='request_observation'||x.observe!==null||
   ![x.name,x.feature].every(v=>v===null||typeof v==='string'&&v.trim().length>0&&v.length<=400))throw Error();
  const t=x.target;let selected:string[]=[];
  if(t?.kind==='none'){if(!stateExact(t,['kind']))throw Error();}
  else if(t?.kind==='single'){if(!stateExact(t,['kind','figureId'])||!slots.includes(t.figureId))throw Error();selected=[t.figureId];}
  else if(t?.kind==='multiple'){if(!stateExact(t,['kind','figureIds'])||!Array.isArray(t.figureIds)||t.figureIds.length<2||new Set(t.figureIds).size!==t.figureIds.length||t.figureIds.some((id:string)=>!slots.includes(id)))throw Error();selected=t.figureIds;}else throw Error();
  if(Object.hasOwn(x,'detailFigureIds')&&(!Array.isArray(x.detailFigureIds)||new Set(x.detailFigureIds).size!==x.detailFigureIds.length||x.detailFigureIds.some((id:string)=>!selected.includes(id))))throw Error();
+ if(Object.hasOwn(x,'sharedClaimIds')&&(x.action!=='accept'||!Array.isArray(x.sharedClaimIds)||!x.sharedClaimIds.length||x.sharedClaimIds.length>32||new Set(x.sharedClaimIds).size!==x.sharedClaimIds.length||x.sharedClaimIds.some((c:any)=>typeof c!=='string'||!c.length||c.length>128)))throw Error();
  if(['propose_name','agree'].includes(x.action)&&(t.kind!=='single'||x.name===null||x.feature!==null))throw Error();
  if(['confirm','repair'].includes(x.action)&&(t.kind==='none'||x.feature===null||x.name!==null))throw Error();
  if(['accept','defer','revisit','move_on','close'].includes(x.action)&&(x.name!==null||x.feature!==null))throw Error();
@@ -388,8 +392,13 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
   const seen=new Set<string>();
   for(const j of s.judgments){
    if(!stateExact(j,['turnIndex','lastEventId','status','judgment','generationGuard','jevTurn','localGrounding',...(Object.hasOwn(j,'aiPublic')?['aiPublic']:[])])||j.status!=='committed'||!Number.isSafeInteger(j.turnIndex)||j.turnIndex<1||!(j.lastEventId===null||typeof j.lastEventId==='string'&&j.lastEventId.length<=160))throw Error();
-   const z=j.jevTurn;if(!stateExact(z,['attemptNumber','decision','executed','intervention',...(Object.hasOwn(z??{},'humanReferent')?['humanReferent']:[]),...(Object.hasOwn(z??{},'repairProspect')?['repairProspect']:[]),...(Object.hasOwn(z??{},'repairGate')?['repairGate']:[]),...(Object.hasOwn(z??{},'agreeNames')?['agreeNames']:[]),...(Object.hasOwn(z??{},'repairFacts')?['repairFacts']:[])])||!Number.isSafeInteger(z.attemptNumber)||z.attemptNumber<1)throw Error();
+   const z=j.jevTurn;if(!stateExact(z,['attemptNumber','decision','executed','intervention',...(Object.hasOwn(z??{},'humanReferent')?['humanReferent']:[]),...(Object.hasOwn(z??{},'repairProspect')?['repairProspect']:[]),...(Object.hasOwn(z??{},'repairGate')?['repairGate']:[]),...(Object.hasOwn(z??{},'agreeNames')?['agreeNames']:[]),...(Object.hasOwn(z??{},'repairFacts')?['repairFacts']:[]),...(Object.hasOwn(z??{},'sharedConstruals')?['sharedConstruals']:[])])||!Number.isSafeInteger(z.attemptNumber)||z.attemptNumber<1)throw Error();
    const hasAgreeNames=Object.hasOwn(z,'agreeNames');
+   // two_stage_v3 only, saved only when a shared construal existed this turn; a used one must be one of them (accept only).
+   if(Object.hasOwn(z,'sharedConstruals')&&(questionLayout!=='two_stage_v3'||!Array.isArray(z.sharedConstruals)||!z.sharedConstruals.length||z.sharedConstruals.length>3||
+     z.sharedConstruals.some((f:any)=>!stateExact(f,['id','claimIds','figureIds','construal','openDetails'])||typeof f.id!=='string'||!f.id||!Array.isArray(f.claimIds)||!f.claimIds.length||f.claimIds.some((c:any)=>typeof c!=='string')||
+      !Array.isArray(f.figureIds)||!f.figureIds.length||f.figureIds.some((id:string)=>!ownSlots.includes(id))||typeof f.construal!=='string'||!f.construal.trim()||f.construal.length>160||!Array.isArray(f.openDetails)||f.openDetails.length>4)))throw Error();
+   for(const e of [z.executed,z.decision])if(e&&Object.hasOwn(e,'sharedClaimIds')&&!(z.sharedConstruals??[]).some((f:any)=>JSON.stringify(f.claimIds)===JSON.stringify(e.sharedClaimIds)))throw Error();
    // Historical evidence retains the candidate catalog, not the original request's public turns.
    if(questionLayout==='two_stage_v3'&&!hasAgreeNames||hasAgreeNames&&(!Array.isArray(z.agreeNames)||z.agreeNames.length>JEV_DECISION_INPUT_LIMITS.publicNames||z.agreeNames.some((n:any)=>!stateExact(n,['name','figureId','sourceTurn'])||
      typeof n.name!=='string'||!n.name.trim()||n.name.length>80||!(ownSlots.includes(n.figureId)||questionLayout!=='two_stage_v3'&&n.figureId===null)||!Number.isSafeInteger(n.sourceTurn)||n.sourceTurn<1||n.sourceTurn>j.turnIndex)))throw Error();
@@ -400,7 +409,7 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
    if(Object.hasOwn(z,'repairProspect'))validateRepairProspectMaterial(z.repairProspect,Object.hasOwn(z,'repairGate')?inferenceHistory(s.repairHistory,z.repairGate):s.repairHistory,j.turnIndex);
    if(Object.hasOwn(z,'repairFacts'))validateRepairFacts(z.repairFacts,Object.hasOwn(z,'repairGate')?inferenceHistory(s.repairHistory,z.repairGate):s.repairHistory,j.turnIndex);
    const key=JSON.stringify([j.turnIndex,j.lastEventId,z.attemptNumber]);if(seen.has(key))throw Error();seen.add(key);
-   const d=z.decision;if(!stateExact(d,['action','target','name','feature','observe','evidence','decisionKind','calibrated',...(Object.hasOwn(d??{},'detailFigureIds')?['detailFigureIds']:[])])||!['mock','jev_local_test'].includes(d.decisionKind)||d.calibrated!==false)throw Error();
+   const d=z.decision;if(!stateExact(d,['action','target','name','feature','observe','evidence','decisionKind','calibrated',...(Object.hasOwn(d??{},'detailFigureIds')?['detailFigureIds']:[]),...(Object.hasOwn(d??{},'sharedClaimIds')?['sharedClaimIds']:[])])||!['mock','jev_local_test'].includes(d.decisionKind)||d.calibrated!==false)throw Error();
    persistedEvidence(d.evidence);
    if(d.decisionKind==='jev_local_test'){
     // two_stage_v2 keeps a candidate-set stage between action_target and detail for every multiple target.
@@ -450,7 +459,7 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
     if(!veto||m?.status!=='ok'||m.issue.choice!=='issue'||m.issue.turn!==src?.issueTurn||m.issue.issueId!==src?.issueId||
        !s.repairHistory.some((r:RepairHistoryEntry)=>r.turn===src.issueTurn&&r.issueId===src.issueId&&r.turn<j.turnIndex)||
        !isOpenIssueRerankRecord(t,d,z.executed,ownSlots,p&&{action:p.action,target:p.target},hasAgreeNames?z.agreeNames:undefined,questionLayout,m))throw Error();
-    if(['confirm','repair'].includes(z.executed.action))persistedEvidence(t.detailEvidence,'detail');else if(t.detailEvidence!==null)throw Error();
+    if(['confirm','repair'].includes(z.executed.action)||z.executed.action==='accept'&&t.detailEvidence!==null&&Object.hasOwn(z,'sharedConstruals'))persistedEvidence(t.detailEvidence,'detail');else if(t.detailEvidence!==null)throw Error();
    }
    else if(t.disposition==='rejected'){
     if(!veto||!['defer','move_on'].includes(d.action)||t.reasonCode!=='vetoed_bypass_action'||!stateSame(t.alternative,z.executed)||!stateSame(z.executed.target,original.target)||['defer','move_on'].includes(z.executed.action))throw Error();
@@ -462,7 +471,7 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
       restrictedAgree?actions.has('agree'):actions.has('propose_name')!==actions.has('agree');
     if(!actions.has('accept')||!actions.has('close')||r.ranking[0].action!==z.executed.action||actions.has('confirm')!==actions.has('repair')||
       invalidNames||actions.has('revisit')!==(original.target.kind!=='none')||original.target.kind!=='single'&&(actions.has('agree')||actions.has('propose_name')))throw Error();
-    const detail=['propose_name','agree','confirm','repair'].includes(z.executed.action);if(detail){persistedEvidence(t.detailEvidence,'detail');}else if(t.detailEvidence!==null)throw Error();
+    const detail=['propose_name','agree','confirm','repair'].includes(z.executed.action)||z.executed.action==='accept'&&t.detailEvidence!==null&&Object.hasOwn(z,'sharedConstruals');if(detail){persistedEvidence(t.detailEvidence,'detail');}else if(t.detailEvidence!==null)throw Error();
    }else throw Error();
    if(questionLayout==='two_stage_v3'&&['repair','confirm','revisit'].includes(j.judgment?.action)){
     // The repair-history entry created for this judgment keeps the executed candidate set; only a later human reply may update it (progress leaves unknown).
@@ -571,7 +580,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   const attempts: JevTurnTrace[] = [];
   let attemptsStarted = 0;
   let initialMemo: Promise<ObservationMemo> | null = null, initialRecorded = false;
-  const privateInstructions = [generation.task, generation.instructions, generation.concise ?? "", ACT_INSTRUCTIONS, DETAIL_INSTRUCTIONS, REVISIT_MULTIPLE_INSTRUCTIONS, LOCAL_EXTRACTION_INSTRUCTIONS,
+  const privateInstructions = [generation.task, generation.instructions, generation.concise ?? "", ACT_INSTRUCTIONS, SHARED_CONSTRUAL_INSTRUCTIONS, DETAIL_INSTRUCTIONS, REVISIT_MULTIPLE_INSTRUCTIONS, LOCAL_EXTRACTION_INSTRUCTIONS,
     MEMO_LOCAL_EXTRACTION_INSTRUCTIONS, LOCAL_CLASSIFICATION_INSTRUCTIONS, OBSERVATION_INITIAL_INSTRUCTIONS,
     OBSERVATION_TARGETED_INSTRUCTIONS, ...(aiEnabled ? aiPromptBodies : [])].map(content => ({ role: "system", content }));
   function project<T>(value: T): T {
@@ -682,6 +691,8 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
           .map(c => ({ name: c.name!, figureId: c.targets.length === 1 ? c.targets[0] : null, sourceTurn: c.sourceTurn })) };
       if (questionLayout === "two_stage_v3") {
         baseInput.agreeNames = buildAgreeNamesV3(claims, publicTurns, latest.seq, slots, state);
+        const shared = deriveSharedConstruals(claims, deriveLocalIssues(graph), slots);
+        if (shared.length) baseInput.sharedConstruals = shared;
         baseInput.nameLedger = structuredClone(state.ledger);
       }
       else if (adaptive) baseInput.agreeNames = claims.filter(eligibleAgreeClaim).flatMap(c => {
@@ -838,6 +849,8 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         ...(generation.concise ? [{ role: "system" as const, content: generation.concise }] : []),
         { role: "system", content: ACT_INSTRUCTIONS + "\n" + generation.actionScope[judgment.action] + "\n" + JSON.stringify({ ...judgment, target: execution.target,
           ...(execution.detailFigureIds ? { detailFigureIds: execution.detailFigureIds } : {}) }) },
+        ...(execution.sharedClaimIds ? [{ role: "system" as const, content: SHARED_CONSTRUAL_INSTRUCTIONS + "\n" + JSON.stringify({ sharedConstrual:
+          baseInput.sharedConstruals!.find(f => JSON.stringify(f.claimIds) === JSON.stringify(execution.sharedClaimIds))!.construal }) }] : []),
         ...(multipleFeature ? [{ role: "system" as const, content: DETAIL_INSTRUCTIONS }] : []),
         ...(ambiguousRevisit ? [{ role: "system" as const, content: REVISIT_MULTIPLE_INSTRUCTIONS }] : []),
         ...observationContextMessages(JSON.stringify({ scope: "private_observations_not_ground_truth", memo })),
@@ -897,6 +910,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
           generationGuard: structuredClone(record.generationGuard), jevTurn: { attemptNumber, decision, ...(integrated?{executed:execution,intervention:record.intervention as InterventionTrace}:{}), humanReferent: structuredClone(record.humanReferent), ...(record.repairProspect === undefined ? {} : { repairProspect: structuredClone(record.repairProspect) }),
             ...(adaptive || questionLayout === "two_stage_v3" ? { agreeNames: structuredClone(baseInput.agreeNames!) } : {}),
             ...(factored ? { repairFacts: structuredClone(baseInput.repairFacts!) } : {}),
+            ...(baseInput.sharedConstruals?.length ? { sharedConstruals: structuredClone(baseInput.sharedConstruals) } : {}),
             ...(gate ? { repairGate: structuredClone(gate) } : {}) },
           localGrounding: { ...prepared.trace, attemptNumber }, ...(aiEnabled ? { aiPublic: { aiSeq: aiPending!.aiSeq, textSha256: aiPending!.textSha256 } } : {}) }],
         ...(aiEnabled ? { aiPublic: state.aiPublic } : {}) };

@@ -1,7 +1,7 @@
 // Explicit technical R policy. The original remains Jev's decision; no semantic oracle.
 import {JEV_ACTIONS} from './contract.ts';
 import type {JevAction,JevDecision,JevDecisionInput,JevTarget,JevExecutedDecision,JevDetailResult,JevDecisionStageEvidence,PublicNameCandidate,JevQuestionLayout} from './contract.ts';
-import {buildJevDecisionPayload,buildJevDecisionDetailPayload,validateJevDecision,parseJevExecutedDetail,JevDecisionError,JEV_DECISION_INPUT_LIMITS} from './jev-decision.ts';
+import {buildJevDecisionPayload,buildJevDecisionDetailPayload,validateJevDecision,parseJevExecutedDetail,jevSharedConstrualOffered,JevDecisionError,JEV_DECISION_INPUT_LIMITS} from './jev-decision.ts';
 
 export const BYPASS_ACCEPTANCE_V1_CANONICAL_JSON = '{"policies":{"bypass-enabled":{"policy":"bypass_acceptance_v1:accept","vetoActions":[]},"repair-first":{"policy":"bypass_acceptance_v1:veto","vetoActions":["defer","move_on"]}},"version":"bypass_acceptance_v1"}';
 export const BYPASS_ACCEPTANCE_V1_TABLE_SHA256 = '376d569120ca36a3eceaf5ab95410f7eb83f25fbb681e7566a684b97c35165c8';
@@ -67,7 +67,7 @@ function config(v:unknown):InterventionConfig {return boundary(v,'invalid_interv
  const expected=value.policy==='bypass_acceptance_v1:accept'?interventionForStrategy('bypass-enabled'):value.policy==='bypass_acceptance_v1:veto'?interventionForStrategy('repair-first'):null;
  if(!expected||!equal(value,expected))fail('invalid_intervention');return expected;
 });}
-function project(d:JevDecision):ExecutedDecision {return {action:d.action as ExecutedDecision['action'],target:structuredClone(d.target),name:d.name,feature:d.feature,observe:null,...(Object.hasOwn(d,'detailFigureIds')?{detailFigureIds:[...d.detailFigureIds!]}:{})};}
+function project(d:JevDecision):ExecutedDecision {return {action:d.action as ExecutedDecision['action'],target:structuredClone(d.target),name:d.name,feature:d.feature,observe:null,...(Object.hasOwn(d,'detailFigureIds')?{detailFigureIds:[...d.detailFigureIds!]}:{}),...(Object.hasOwn(d,'sharedClaimIds')?{sharedClaimIds:[...d.sharedClaimIds!]}:{})};}
 function checkRepairProspect(value:unknown):void {
  if(!exact(value,['status','issue','prospect','basis','scores']))fail('invalid_input');
  if(value.status==='unknown'){
@@ -86,7 +86,7 @@ function checkRepairProspect(value:unknown):void {
 }
 function prepare(input:unknown,original:unknown,intervention:unknown,questionLayout:JevQuestionLayout='two_stage_v1'){
  const policy=config(intervention);
- const i=boundary(input,'invalid_input',value=>{const optional=['reobservationAllowed','humanReferent','repairProspect','agreeNames','repairFacts','nameLedger'].filter(k=>!!value&&typeof value==='object'&&Object.hasOwn(value,k));
+ const i=boundary(input,'invalid_input',value=>{const optional=['reobservationAllowed','humanReferent','repairProspect','agreeNames','repairFacts','nameLedger','sharedConstruals'].filter(k=>!!value&&typeof value==='object'&&Object.hasOwn(value,k));
   if(!exact(value,['turn','publicTurns','ownSlots','observations','issueSummary','priorClaims','repairHistory','previousAction','publicNames',...optional]))fail('invalid_input');
   if(Object.hasOwn(value,'repairProspect'))checkRepairProspect(value.repairProspect);
   buildJevDecisionPayload(value as JevDecisionInput);return structuredClone(value) as BypassAcceptanceInput;});
@@ -227,7 +227,8 @@ export async function applyBypassAcceptance(input:unknown,original:unknown,inter
  const p=plan(ctx,rerankOption(options));
  if(p.disposition==='adopted')return freeze({executed:p.original,intervention:trace(p)});
  const selected=p.rerank!.selected!;
- if(!['propose_name','agree','confirm','repair'].includes(selected.action)){
+ // two_stage_v3: a rerank that lands on accept asks the same conditional third stage as the original accept, so both strategies treat it alike.
+ if(!['propose_name','agree','confirm','repair'].includes(selected.action)&&!jevSharedConstrualOffered(ctx.input,selected,{questionLayout:layoutOption(options)})){
   const executed:ExecutedDecision={...selected,name:null,feature:null,observe:null,detailFigureIds:[]};
   return freeze({executed,intervention:trace(p,executed)});
  }
