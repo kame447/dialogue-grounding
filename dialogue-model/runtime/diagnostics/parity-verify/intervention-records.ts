@@ -649,7 +649,7 @@ function catalog(input:any,target:any,kind:'name'|'feature'):{value:string;figur
  for(const id of ids){const o=input.observations.find((o:any)=>o.figureId===id);if(!o)continue;
   const values:string[]=kind==='name'?[...o.holistic.map((h:any)=>h.construal).filter((v:any)=>typeof v==='string'&&v.length<=80),...input.publicNames.filter((n:any)=>n.figureId===null||n.figureId===id).map((n:any)=>n.name)]:[...o.analytic.shapes,o.analytic.composition,...o.analytic.relations,...o.reobservations.flatMap((r:any)=>r.supports)].filter((v:any)=>typeof v==='string'&&v.trim()&&v.length<=400);
   const ledger=kind==='name'&&CTX.v3&&!CTX.legacyV3?CTX.ledger:undefined;
-  const partner=kind==='name'&&CTX.v3&&CTX.style==='loop'?(Array.isArray(input.priorClaims)?input.priorClaims:[]).filter((c:any)=>c?.speaker==='human'&&c.act==='name_propose'&&typeof c.name==='string'&&c.name!==''&&c.turn<=input.turn&&c.sourceTurn<=input.turn&&Array.isArray(c.targets)):[];
+  const partner=kind==='name'&&CTX.v3&&(CTX.style==='loop'||CTX.style==='holistic')?(Array.isArray(input.priorClaims)?input.priorClaims:[]).filter((c:any)=>c?.speaker==='human'&&c.act==='name_propose'&&typeof c.name==='string'&&c.name!==''&&c.turn<=input.turn&&c.sourceTurn<=input.turn&&Array.isArray(c.targets)):[];
   const entry=ledger?.[id];if(entry?.status==='agreed')continue;
   for(const value of new Set(values)){
    if(ledger&&entry){const name=ledgerName(value);if(entry.status==='deferred'&&entry.name!==null&&ledgerName(entry.name)!==name||

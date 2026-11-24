@@ -971,3 +971,18 @@ test('a non-agree act may not publish the 「X」で決めましょう form eith
   const r = await f.exchange('丸い形のことです。', { action: 'accept', target: 3, drafts: ['この形は「時計」で決めましょう。', 'そう見えるんですね。'] });
   assert.deepEqual(r.trace.generationGuard, { violations: ['naming_decision'], regenerated: true, fallback: false });
 });
+
+test('S4 rebuilds the propose_name targets without the name the partner proposed (current text version), the same as the request builder', async () => {
+  for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
+    const f = fixture(strategy, { observations: proposalMemo() });
+    // figure 4 has the single observed construal '時計'; the partner proposes exactly that name for it, so propose_name there is no longer offered.
+    const quote = 'この形は「時計」とかどう？';
+    const r = await f.exchange(quote, { action: 'accept', target: 4, drafts: ['そう見えますね。'], segments: [naming(quote, '時計', [ids[4]])] });
+    const built = Object.keys(buildJevTargetPayload(r.input, 'propose_name', V3).questions.target.criteria);
+    assert.equal(built.includes('figure_4'), false, 'the request builder offers no propose_name for the partner-named figure');
+    const sent = JSON.parse(r.requests.find(req => req.questions.action)!.state);
+    s4Probe.setContext({ v3: true, style: 'holistic', ledger: r.input.nameLedger, agree: r.input.agreeNames, facts: Array.isArray(r.trace.repairFacts) });
+    try { assert.deepEqual(s4Probe.targetQuestion(sent, 'propose_name').options.map((o: { label: string }) => o.label), built); }
+    finally { s4Probe.setContext({}); }
+  }
+});
