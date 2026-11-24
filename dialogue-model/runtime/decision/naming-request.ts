@@ -66,5 +66,5 @@ export function agreeCandidateAllowed(c: NamingClaimLike, id: string, turn: numb
 }
 /** A name proposal that answers an earlier name proposal and carries its name (the approval request of local-grounding/verify.ts). */
 export function inheritsProposalName(c: NamingClaimLike, claims: readonly NamingClaimLike[]): boolean {
-  return c.act === "name_propose" && typeof c.respondsTo === "string" && claims.some(p => p.id === c.respondsTo && p.act === "name_propose" && p.name === c.name);
+  return c.act === "name_propose" && typeof c.respondsTo === "string" && claims.some(p => p.id === c.respondsTo && (p.act === "name_propose" || p.act === "name_accept") && p.name === c.name);
 }

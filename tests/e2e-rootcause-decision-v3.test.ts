@@ -14,7 +14,7 @@ const V3 = { questionLayout: 'two_stage_v3' } as const;
 const UNRELATED_NAME = '灯台';
 const NEW_NAME = '風車';
 const single = (index: number) => ({ kind: 'single' as const, figureId: ids[index] });
-type Segment = Omit<LocalSegmentProposal, 'segmentId' | 'linkedIssueId' | 'respondsToTurn'> & { act: LocalAct; respondsTo?: number; linkPrior?: true };
+type Segment = Omit<LocalSegmentProposal, 'segmentId' | 'linkedIssueId' | 'respondsToTurn'> & { act: LocalAct; respondsTo?: number; linkPrior?: true; antecedentOf?: 'ai_name_accept' | 'ai_feature' };
 type Plan = {
   action: JevAction;
   target?: number;
@@ -94,7 +94,10 @@ function fixture(strategy: 'bypass-enabled' | 'repair-first' = 'bypass-enabled',
           const antecedentAct = act === 'deny' ? 'name_accept' : act === 'name_accept' || (act === 'ask' && plan.segments![index].aspect === 'name') || (act === 'name_propose' && (plan.segments![index].name === null || plan.segments![index].linkPrior === true)) ? 'name_propose' : null;
           // A referent denial answers the AI's latest public claim about the figure.
           const referentDenial = (act === 'deny' || act === 'agree') && plan.segments![index].aspect === 'referent';
-          const antecedent = referentDenial ? priorClaims.filter(c => c.speaker === 'ai').at(-1)
+          const chosen = plan.segments![index].antecedentOf;
+          const antecedent = chosen === 'ai_name_accept' ? priorClaims.filter(c => c.speaker === 'ai' && c.act === 'name_accept').at(-1)
+            : chosen === 'ai_feature' ? priorClaims.filter(c => c.speaker === 'ai' && c.aspect !== 'name').at(-1)
+            : referentDenial ? priorClaims.filter(c => c.speaker === 'ai').at(-1)
             : antecedentAct && priorClaims.filter(c => c.speaker === (act === 'ask' || act === 'name_propose' ? 'human' : 'ai') && c.act === antecedentAct).at(-1);
           return { segmentId, act, respondsToClaimId: antecedent?.id ?? null, rawScore: null };
         });
@@ -104,7 +107,7 @@ function fixture(strategy: 'bypass-enabled' | 'repair-first' = 'bypass-enabled',
       async complete(_messages, { phase }) {
         if (phase === 'local_extraction') extractionSystem.push(String(_messages[0]?.content));
         if (phase === 'ai_extraction') return { text: JSON.stringify(plan.aiSegments ?? []) };
-        if (phase === 'local_extraction') return { text: JSON.stringify((plan.segments ?? []).map(({ act, respondsTo, linkPrior, ...segment }, index) => ({
+        if (phase === 'local_extraction') return { text: JSON.stringify((plan.segments ?? []).map(({ act, respondsTo, linkPrior, antecedentOf, ...segment }, index) => ({
           ...segment, segmentId: `segment-${index}`, linkedIssueId: null,
           respondsToTurn: respondsTo ?? (act === 'deny' || act === 'name_accept' || act === 'agree' ? events.at(-2)!.seq : null),
         }))) };
@@ -1458,6 +1461,48 @@ test('05v-1 (holistic_v3): a short approval with no estimate of its own is judge
       assert.equal(offered(second).includes('agree'), allowed, `${strategy} ${label}: ${offered(second).join()}`);
       assert.equal(second.state.ledger[ids[3]].name, allowed ? 'しおり' : null, `${strategy} ${label}: ledger`);
     }
+  }
+});
+
+test('05w-1 (holistic_v3): an approval request answers the claim the classifier chose, a human proposal or a public AI claim that carries the name, although the extraction points at the AI turn just answered (both strategies)', async () => {
+  const offered = (r: { requests: Array<{ questions: Record<string, { criteria: Record<string, string> }> }> }) =>
+    Object.keys(r.requests.find(q => q.questions.action)!.questions.action.criteria);
+  const proposal = 'これ、かかしとかどう？';
+  const approval = (turn: number, antecedentOf?: 'ai_name_accept' | 'ai_feature'): Segment => ({ respondsTo: turn, quote: 'その呼び名でいい？', name: null, targets: [], act: 'name_propose', aspect: 'name',
+    proposition: 'その呼び名でいい？', ...(antecedentOf ? { antecedentOf } : {}) });
+  for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
+    // A name not adopted yet, answered by the classifier's link to the human proposal: an open request, accept withdrawn, nothing adopted by word.
+    for (const anchor of ['human proposal'] as const) {
+      const f = fixture(strategy, { aiPublic: true, holistic: 'holistic_v3' });
+      // No figure the AI shared in public yet: the name has no agree candidate, so only the request (and no accept) is left.
+      const first = await f.exchange(proposal, { action: 'confirm', target: 3, referent: 'figure_3', segments: [naming(proposal, 'かかし')], draftActs: ['none'], drafts: ['どの形のことですか？'] });
+      const r = await f.exchange('その呼び名でいい？', { action: 'confirm', target: 3, referent: 'figure_3', segments: [approval(first.input.turn + 1)], draftActs: ['none'], drafts: ['どの形のことですか？'] });
+      const claim = (r.state.graph.records as any[]).filter(c => c.kind === 'claim' && c.speaker === 'human' && c.sourceTurn === r.input.turn).at(-1);
+      assert.ok(claim && claim.name === 'かかし' && claim.respondsTo !== null, `${strategy} ${anchor}: the name is carried`);
+      assert.equal(r.saved.namingRequest, true, `${strategy} ${anchor}: an open request`);
+      assert.ok(!offered(r).includes('accept'), `${strategy} ${anchor}: ${offered(r).join()}`);
+      assert.equal(r.state.ledger[ids[3]].name, null, `${strategy} ${anchor}: nothing adopted`);
+    }
+    // An agreed name, answered by the classifier's link to the AI's own adoption (a public name_accept) or to the human proposal: a reconfirmation, accept stays.
+    for (const antecedentOf of ['ai_name_accept', undefined] as const) {
+      const f = fixture(strategy, { aiPublic: true, holistic: 'holistic_v3' });
+      await share(f, 3);
+      const first = await f.exchange(proposal, { action: 'agree', target: 3, referent: 'figure_3', segments: [naming(proposal, 'かかし', [ids[3]])], draftActs: ['adopt_chosen'], drafts: [agreeSpeech('かかし')] });
+      const r = await f.exchange('その呼び名でいい？', { action: 'accept', referent: 'figure_3', segments: [approval(first.input.turn + 1, antecedentOf)], drafts: ['うん、いいよ。'] });
+      const claim = (r.state.graph.records as any[]).filter(c => c.kind === 'claim' && c.speaker === 'human' && c.sourceTurn === r.input.turn).at(-1);
+      assert.ok(claim && claim.name === 'かかし' && claim.respondsTo !== null, `${strategy} ${antecedentOf ?? 'human'}: the name is carried`);
+      assert.equal(r.saved.namingReconfirm, true, `${strategy} ${antecedentOf ?? 'human'}: a reconfirmation`);
+      assert.ok(offered(r).includes('accept'), `${strategy} ${antecedentOf ?? 'human'}: accept stays`);
+      assert.equal(r.state.ledger[ids[3]].name, 'かかし');
+    }
+    // A name_propose without a name that is linked to a claim with no name creates no name.
+    const g = fixture(strategy, { aiPublic: true, holistic: 'holistic_v3' });
+    await share(g, 3);
+    const shared = await g.exchange('その形について、他に何かありますか？', { action: 'accept', referent: 'none', drafts: ['細い部分が見えます。'], aiSegments: [{ segmentId: 'shape', quote: '細い部分が見えます。', targets: [ids[3]], aspect: 'part', proposition: '細い部分がある', name: null, linkedIssueId: null, respondsToTurn: null }] });
+    const none = await g.exchange('その呼び名でいい？', { action: 'accept', referent: 'none', segments: [approval(shared.input.turn + 1, 'ai_feature')], drafts: ['はい。'] });
+    assert.ok(!(none.state.graph.records as any[]).some(c => c.kind === 'claim' && c.speaker === 'human' && c.sourceTurn === none.input.turn && c.act === 'name_propose'), `${strategy}: no name from a feature claim`);
+    assert.equal(none.saved.namingRequest, undefined);
+    assert.equal(none.saved.namingReconfirm, undefined);
   }
 });
 

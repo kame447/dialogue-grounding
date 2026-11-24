@@ -1141,6 +1141,24 @@ test('05v-3: S4 recomputes the agree candidates of a short approval with the int
   }
 });
 
+test('05w: S4 recomputes an approval request that answers a public AI adoption (the name carried, a reconfirmation), with the extraction pointing at the AI turn', async () => {
+  const s3 = Object.keys(OLD.state.ledger)[3];
+  const speech = '角ばった塊に細い脚が付いた形のように見えます。';
+  const ai = JSON.stringify([{ segmentId: 'shape', quote: speech, targets: [s3], aspect: 'construal', proposition: 'x', name: null, linkedIssueId: null, respondsToTurn: null }]);
+  const seg = (quote: string, name: string | null, targets: string[] = [], respondsToTurn: number | null = null) => JSON.stringify([{ segmentId: 's1', quote, targets, aspect: 'name', proposition: quote, name, linkedIssueId: null, respondsToTurn }]);
+  for (const label of ['repair-first', 'bypass-enabled'] as const) {
+    for (const antecedent of ['claim_1', 'claim_2']) {
+      const record = await buildRecords({ label, dialoguePolicy: 'holistic_v3', turns: [
+        { human: 'どんな図形がありますか？', plan: { action: 'confirm', target: 'figure_3', speech, aiExtraction: ai } },
+        { human: 'これ、かかしとかどう？', plan: { action: 'agree', target: 'figure_3', name: 'かかし', act: 'name_propose', referent: 'figure_3', extraction: seg('かかし', 'かかし', [s3]), speech: '「かかし」と呼びましょう。' } },
+        { human: 'その呼び名でいい？', plan: { action: 'accept', target: 'none', act: 'name_propose', antecedent, referent: 'figure_3', extraction: seg('その呼び名でいい？', null, [], 4), speech: 'うん、いいよ。' } }] });
+      const t = record.trials[0].attempts[0];
+      assert.equal(t.namingReconfirm, true, `${label} ${antecedent}`);
+      assert.ok(finalChecks(record).length >= 4 && finalChecks(record).every((c: any) => c.status === 'pass'), `${label} ${antecedent} ` + JSON.stringify(finalChecks(record).filter((c: any) => c.status !== 'pass').map((c: any) => [c.id, c.reason])));
+    }
+  }
+});
+
 test('05s: S4 derives the question triggers of a reconfirmation without the wording trigger: the affirming draft carries no question record, a question record on it is refused', async () => {
   const s3 = Object.keys(OLD.state.ledger)[3];
   const speech = '角ばった塊に細い脚が付いた形のように見えます。';

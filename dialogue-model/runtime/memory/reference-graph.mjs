@@ -215,7 +215,7 @@ function validateSupport(record, records, historical = false) {
     if (records.some((r) => r.kind === "claim" && r.issueId === record.issueId && r.aspect !== record.aspect)) fail("inconsistent_claim_issue");
     if (responseActs.includes(record.act) && !record.respondsTo) fail("missing_claim_response");
     // holistic_v3: an approval request carries the name of the human proposal it answers, without repeating it.
-    const inheritsName = record.act === "name_propose" && !!record.respondsTo && byId.get(record.respondsTo)?.kind === "claim" && byId.get(record.respondsTo).act === "name_propose" &&
+    const inheritsName = record.act === "name_propose" && !!record.respondsTo && byId.get(record.respondsTo)?.kind === "claim" && ["name_propose", "name_accept"].includes(byId.get(record.respondsTo).act) &&
       byId.get(record.respondsTo).name === record.name;
     if (record.act === "name_propose" && (!record.name || !inheritsName && !record.quote.includes(record.name))) fail("unsupported_claim_name");
     if (!record.respondsTo) return;

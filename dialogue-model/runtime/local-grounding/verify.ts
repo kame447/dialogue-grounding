@@ -96,8 +96,10 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     let linkedIssue = segment.linkedIssueId;
     let name = segment.name;
     // An approval request ("is that name fine?") is a name proposal that carries the earlier proposal's name; it is decided before the bare-deictic rule so a short typed request is not turned into an acknowledgement.
+    // The antecedent is the claim the classifier chose: the partner's own name proposal, or a public AI claim that carries a name (an adoption, a named confirmation).
+    // The name is public either way. The extraction's respondsToTurn names the AI turn that was just answered, so for this act it does not have to be the claim's turn.
     const approvalRequest = keepUnboundApproval && !!prior && act === "name_propose" && name === null && aspect === "name" && prior.aspect === "name" &&
-      prior.act === "name_propose" && prior.speaker === "human" && prior.name !== null;
+      ["name_propose", "name_accept"].includes(prior.act) && prior.name !== null;
     if (isBareDeictic(quote) || /^(?:それ|これ|あれ)で(?:いい|良い|よい)(?:です)?[。！!？?\s]*$/u.test(quote.normalize("NFKC").trim())) {
       // ai1 is the program-owned primary act. A secondary feature (ai2) cannot
       // receive a bare acknowledgment, even if the classifier selected its ID.
@@ -119,7 +121,7 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     const unboundApproval = (approvalRequest || unboundNameQuestion) && prior!.targets.length === 0 && targets.length === 0;
     if (prior && independentActs.has(act) && prior.sourceTurn < turn &&
         (prior.aspect !== aspect || !unboundApproval && !overlap(prior.targets, targets.length ? targets : prior.targets) ||
-          (segment.respondsToTurn !== null && segment.respondsToTurn !== prior.sourceTurn))) {
+          (!approvalRequest && segment.respondsToTurn !== null && segment.respondsToTurn !== prior.sourceTurn))) {
       droppedAntecedent = prior.id; prior = null;
     }
     // Only absence of a target can inherit the verified antecedent's candidates.
@@ -130,7 +132,7 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     // supplied generic progress. Explicit semantic disagreements remain invalid.
     if (prior && aspect === "progress" && ["defer", "revisit"].includes(act)) aspect = prior.aspect;
     if (prior && (prior.sourceTurn >= turn || prior.aspect !== aspect || !unboundApproval && !overlap(prior.targets, targets) ||
-        (segment.respondsToTurn !== null && segment.respondsToTurn !== prior.sourceTurn))) {
+        (!approvalRequest && segment.respondsToTurn !== null && segment.respondsToTurn !== prior.sourceTurn))) {
       reject("inconsistent_claim_response"); continue;
     }
     if (prior && (act === "withdraw" ? prior.speaker !== "human" : responses.has(act) && prior.speaker === "human")) {
