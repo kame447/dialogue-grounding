@@ -106,15 +106,16 @@ async function replay(strategy: Strategy, scenario: Turn[], onFailure?: (attempt
   const fetchImpl = async (_url: string, options: RequestInit) => {
     const request = JSON.parse(String(options.body)) as NativeRequest;
     wire.push(request);
-    const state = JSON.parse(request.state) as { aiSeq?: number; priorClaims?: LocalClaimView[] };
+    const state = JSON.parse(request.state) as { aiSeq?: number; priorClaims?: LocalClaimView[]; selected?: { action?: string } };
     const keys = Object.keys(request.questions);
-    const phase = keys.includes('human_referent') ? 'human_referent' : keys.includes('repair_issue') ? 'repair_prospect'
+    const phase = keys.includes('human_referent') ? 'human_referent' : keys.includes('draft_naming') ? 'draft_naming' : keys.includes('repair_issue') ? 'repair_prospect'
       : keys.some(key => key.endsWith('_support')) ? 'ai_support'
       : keys.some(key => key.endsWith('_act')) ? Object.hasOwn(state, 'aiSeq') ? 'ai_function' : 'local_function' : 'decision';
     recordSend('jev', phase, request);
     const answers = Object.fromEntries(Object.entries(request.questions).map(([key, { criteria }]) => {
       const labels = Object.keys(criteria);
       let choice = labels[0];
+      if (key === 'draft_naming') choice = state.selected?.action === 'agree' ? 'adopt_chosen' : 'none';
       if (key === 'action') {
         const proposed = current.agreeIfOffered;
         const eligible = proposed && (proposed.figureIndex === undefined || input.agreeNames?.some(candidate =>

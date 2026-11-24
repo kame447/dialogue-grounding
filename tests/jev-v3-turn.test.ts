@@ -39,6 +39,7 @@ function tape(plan: Plan) {
       const answers = Object.fromEntries(Object.entries(q).map(([name, question]: [string, any]) => {
         const choices = Object.keys(question.criteria);
         const chosen = plan.answers[name] ?? (name.startsWith('candidate_') && name !== 'candidate_set' ? 'exclude' : name === 'human_referent' ? 'none'
+          : name === 'draft_naming' ? (JSON.parse(body.state).selected?.action === 'agree' ? 'adopt_chosen' : 'propose_question')
           : name.endsWith('_antecedent') ? 'none' : name.endsWith('_act') ? 'assert' : choices[0]);
         return [name, { type: 'choice', choice: chosen, probabilities: Object.fromEntries(choices.map(v => [v, v === chosen ? 0.8 : 0.2 / (choices.length - 1 || 1)])), confidence: 1 }];
       }));

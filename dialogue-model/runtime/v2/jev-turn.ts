@@ -1,6 +1,7 @@
 import {applyBypassAcceptance,interventionForStrategy,BypassAcceptanceError,BYPASS_ACCEPTANCE_V1_TABLE_SHA256,isOpenIssueRerankRecord} from '../decision/bypass-acceptance.ts';
 import type {ExecutedDecision,InterventionConfig,InterventionTrace} from '../decision/bypass-acceptance.ts';
 import {JEV_ACTIONS} from '../decision/contract.ts';
+import type {DraftAct} from '../decision/contract.ts';
 import {validateOwnLedger} from '../judgment/schema.mjs';
 // Decision 0002, opt-in only. The queue owns publication; this module returns a
 // detached candidate state and never turns a model score into shared evidence.
@@ -16,14 +17,14 @@ import type { LocalGroundingOptions, LocalOwnImage, LocalOwnAnchor, PublicTurn, 
 import type { ObservationMemo, ObservationObserver, ReobservationResult } from "../observation/contract.ts";
 import { validateObservationMemo, mergeReobservation, observationContextMessages, ObservationError, type ObservationErrorCode,
   OBSERVATION_INITIAL_INSTRUCTIONS, OBSERVATION_TARGETED_INSTRUCTIONS, OBSERVATION_MEMO_VERSION } from "../observation/observe.ts";
-import type { JevDecision, JevDecisionClient, JevDecisionInput, JevObservationRequest, RepairHistoryEntry, HumanReferentEstimate, RepairProspectMaterial, AdaptiveRepairTrial, PublicNameCandidate, RepairFact, JevQuestionLayout } from "../decision/contract.ts";
+import type { JevDecision, JevDecisionClient, JevDecisionInput, JevObservationRequest, RepairHistoryEntry, HumanReferentEstimate, RepairProspectMaterial, AdaptiveRepairTrial, PublicNameCandidate, RepairFact, JevQuestionLayout, DialoguePolicy } from "../decision/contract.ts";
 import { deriveRepairFacts, validateRepairFacts } from "../decision/repair-facts.ts";
 import { validateJevDecision, validateHumanReferentEstimate, validateRepairProspectEstimate, validateRepairProspectMaterial, unknownRepairProspect, JevDecisionError, JEV_DECISION_INPUT_LIMITS,
   projectDecisionFailureEvidence, checkDecisionFailureEvidence, TWO_STAGE_V2_CANDIDATE_SETS, candidateSetLabel, V3_TARGET_LABEL_SET } from "../decision/jev-decision.ts";
 import type { JevDecisionFailureEvidence } from "../decision/jev-decision.ts";
 import { prepareLocalGroundingTurn, validateLocalGroundingOptions, findLocalPublicationViolations } from "./local-grounding-turn.ts";
 import type { LocalGroundingResearchRecord, LocalGroundingTrace } from "./local-grounding-turn.ts";
-import { findAgreeNameMismatch, findProposeNameMismatch, findGuardViolations, findOrientationLeaks, findWorkingNoteLeaks, findExtendedNamingDecisions, findAgreeNotAdopted, orientationSafeFallback, rewriteReasons } from "./generation-guard.ts";
+import { findAgreeNameMismatch, findProposeNameMismatch, findGuardViolations, findOrientationLeaks, findWorkingNoteLeaks, findNamingActHints, isAgreementWordCode, orientationSafeFallback, rewriteReasons } from "./generation-guard.ts";
 import { createMemoAiExtractor, MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS, AiPublicError, aiHash, emptyAiEvidence } from "../local-grounding/extract-ai.ts";
 import { createJevAiFunctionClassifier, createJevAiSupportChecker, AI_FUNCTION_INSTRUCTIONS, AI_SUPPORT_INSTRUCTIONS,
   AI_RESPONSE_SUPPORT_INSTRUCTIONS, AI_FUNCTION_CRITERIA, AI_SUPPORT_CHOICES, AI_ACT_DESCRIPTIONS } from "../local-grounding/jev-ai-public.ts";
@@ -102,6 +103,8 @@ function observationFailure(error: unknown, phase: ObservationFailure["observati
   } catch { code = "unavailable"; }
   return { observationErrorCode: code, observationPhase: phase };
 }
+export type DraftActRecord = { draft: "initial" | "retry"; draftSha256: string; triggers: string[]; status: "ok" | "error"; choice: DraftAct | null;
+  scores: Record<string, number> | null; model: string | null; responseId: string | null; costUsd: number | null; latencyMs: number; error: string | null };
 export type JevTurnTrace = {
   turnIndex: number; lastEventId: string | null; attemptNumber: number;
   status: "staged" | "committed" | "superseded" | "error" | "aborted";
@@ -121,6 +124,8 @@ export type JevTurnTrace = {
   repairHistory: RepairHistoryEntry[];
   generationGuard: Guard;
   generationRetryVersion?: "jev_generation_retry_v2";
+  /** holistic_v1 only: every draft-naming question asked this attempt, in order (initial draft, then the retry). */
+  draftActs?: DraftActRecord[];
   errorCode?: JevTurnErrorCode;
   observationErrorCode?: ObservationErrorCode;
   observationPhase?: ObservationFailure["observationPhase"];
@@ -134,7 +139,7 @@ export type JevTurnTrace = {
 };
 type CommittedAct = {
   turnIndex: number; lastEventId: string | null; status: "committed"; judgment: Judgment;
-  generationGuard: Guard; jevTurn: { attemptNumber: number; decision: JevDecision; executed?:ExecutedDecision; intervention?:InterventionTrace; humanReferent?: JevHumanReferentTrace; repairProspect?: RepairProspectMaterial; repairGate?: RepairGate; agreeNames?: PublicNameCandidate[]; repairFacts?: RepairFact[] };
+  generationGuard: Guard; jevTurn: { attemptNumber: number; decision: JevDecision; executed?:ExecutedDecision; intervention?:InterventionTrace; humanReferent?: JevHumanReferentTrace; repairProspect?: RepairProspectMaterial; repairGate?: RepairGate; draftActs?: DraftActRecord[]; agreeNames?: PublicNameCandidate[]; repairFacts?: RepairFact[] };
   localGrounding: LocalGroundingTrace;
   aiPublic?: { aiSeq: number; textSha256: string };
 };
@@ -149,6 +154,8 @@ export type JevTurnOptions = {
   intervention?: InterventionConfig; decisionTimeoutMs?:number; technicalTrial?: AdaptiveRepairTrial;
   /** Omitted means two_stage_v1. Must match the decision client's own layout when it declares one. */
   questionLayout?: JevQuestionLayout;
+  /** The policy the trial was created with (profile.dialoguePolicy); only two_stage_v3 reads it. */
+  dialoguePolicy?: DialoguePolicy;
   /** Offline replay can request the original retry wire text for a historical tape. */
   generationRetryVersion?: GenerationRetryVersion;
   client: ChatClient; ownImage: LocalOwnImage; ownAnchors: readonly LocalOwnAnchor[];
@@ -423,7 +430,7 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
   const seen=new Set<string>();
   for(const j of s.judgments){
    if(!stateExact(j,['turnIndex','lastEventId','status','judgment','generationGuard','jevTurn','localGrounding',...(Object.hasOwn(j,'aiPublic')?['aiPublic']:[])])||j.status!=='committed'||!Number.isSafeInteger(j.turnIndex)||j.turnIndex<1||!(j.lastEventId===null||typeof j.lastEventId==='string'&&j.lastEventId.length<=160))throw Error();
-   const z=j.jevTurn;if(!stateExact(z,['attemptNumber','decision','executed','intervention',...(Object.hasOwn(z??{},'humanReferent')?['humanReferent']:[]),...(Object.hasOwn(z??{},'repairProspect')?['repairProspect']:[]),...(Object.hasOwn(z??{},'repairGate')?['repairGate']:[]),...(Object.hasOwn(z??{},'agreeNames')?['agreeNames']:[]),...(Object.hasOwn(z??{},'repairFacts')?['repairFacts']:[])])||!Number.isSafeInteger(z.attemptNumber)||z.attemptNumber<1)throw Error();
+   const z=j.jevTurn;if(!stateExact(z,['attemptNumber','decision','executed','intervention',...(Object.hasOwn(z??{},'humanReferent')?['humanReferent']:[]),...(Object.hasOwn(z??{},'repairProspect')?['repairProspect']:[]),...(Object.hasOwn(z??{},'repairGate')?['repairGate']:[]),...(Object.hasOwn(z??{},'draftActs')?['draftActs']:[]),...(Object.hasOwn(z??{},'agreeNames')?['agreeNames']:[]),...(Object.hasOwn(z??{},'repairFacts')?['repairFacts']:[])])||!Number.isSafeInteger(z.attemptNumber)||z.attemptNumber<1)throw Error();
    const hasAgreeNames=Object.hasOwn(z,'agreeNames');
    // Historical evidence retains the candidate catalog, not the original request's public turns.
    if(questionLayout==='two_stage_v3'&&!hasAgreeNames||hasAgreeNames&&(!Array.isArray(z.agreeNames)||z.agreeNames.length>JEV_DECISION_INPUT_LIMITS.publicNames||z.agreeNames.some((n:any)=>!stateExact(n,['name','figureId','sourceTurn'])||
@@ -583,6 +590,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   const { client, observer, jevDecision, generation } = options;
   // One layout per runtime: validation, acceptance, restore and the client's own requests must agree.
   const questionLayout: JevQuestionLayout = options.questionLayout ?? "two_stage_v1";
+  const holistic = questionLayout === "two_stage_v3" && options.dialoguePolicy === "holistic_v1";
   if (questionLayout !== "two_stage_v1" && questionLayout !== "two_stage_v2" && questionLayout !== "two_stage_v3") throw new Error("Invalid Jev question layout");
   if (questionLayout !== "two_stage_v1" && !integrated) throw new Error(questionLayout + " requires the integrated Jev profile");
   const generationRetryVersion = options.generationRetryVersion ??
@@ -797,7 +805,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         const onFailureEvidence = (evidence: unknown) => { sink.evidence = evidence; };
         let raw: unknown;
         try {
-          raw = deadline?await deadline.run(s=>jevDecision.decide(structuredClone(input),{signal:s,timeoutMs:options.decisionTimeoutMs,onFailureEvidence})):await interruptible(jevDecision.decide(structuredClone(input), { signal, onFailureEvidence }), signal);
+          raw = deadline?await deadline.run(s=>jevDecision.decide(structuredClone(input),{signal:s,timeoutMs:options.decisionTimeoutMs,onFailureEvidence,...(holistic?{dialoguePolicy:'holistic_v1' as const}:{})})):await interruptible(jevDecision.decide(structuredClone(input), { signal, onFailureEvidence }), signal);
         } catch (error) { decideFailure.failed = true; decideFailure.evidence = sink.evidence; throw error; }
         abortIf(signal);
         errorCode = "invalid_decision";
@@ -890,10 +898,8 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         ...observationContextMessages(JSON.stringify({ scope: "private_observations_not_ground_truth", memo })),
         { role: "system", content: "局所問題（非公開）:\n" + summarizeLocalIssues(graph) },
         ...publicTurns.map(t => ({ role: t.speaker === "human" ? "user" as const : "assistant" as const, content: t.text }))];
-      const violations = (text: string, context: Message[]) => [...new Set([...findGuardViolations(text, judgment.action), ...findLocalPublicationViolations(text, context),
+      const violations = (text: string, context: Message[]) => [...new Set([...findGuardViolations(text, judgment.action).filter(code => !(holistic && isAgreementWordCode(code))), ...findLocalPublicationViolations(text, context),
         ...(questionLayout === "two_stage_v3" ? findOrientationLeaks(text) : []),
-        ...(questionLayout === "two_stage_v3" && judgment.action !== "agree" ? findExtendedNamingDecisions(text) : []),
-        ...(questionLayout === "two_stage_v3" && judgment.action === "agree" ? findAgreeNotAdopted(text) : []),
         ...(questionLayout === "two_stage_v3" ? findWorkingNoteLeaks(text, events.filter(e => e.seq <= latest.seq).map(e => e.text)) : []),
         ...(questionLayout === "two_stage_v3" && judgment.action === "agree" && judgment.candidateName !== null
           ? findAgreeNameMismatch(text, judgment.candidateName) : []),
@@ -904,11 +910,44 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         ...(/human[_-]?referent/iu.test(text.normalize("NFKC").replace(/\s/gu, "")) ? ["internal_field"] : []),
         ...(aiEnabled && /\d+:pub\d+/u.test(text.normalize("NFKC").replace(/[\s\u200b-\u200d\ufeff]+/gu, "")) ? ["internal_id"] : []),
         ...(aiEnabled ? findLocalPublicationViolations(text, privateInstructions) : [])])];
+      // holistic_v1: a closed-set question about the draft's naming act. An agree draft is always asked; any other draft only on a typed naming context,
+      // a naming-act wording hit or a quoted string that is not the figure's agreed name. A failed question is "unconfirmed", never a pass.
+      const boundary = state.judgments.filter(j => ["agree", "defer", "move_on"].includes(j.judgment.action)).at(-1)?.turnIndex ?? 0;
+      const openHumanProposal = claims.some(c => c.speaker === "human" && c.act === "name_propose" && c.name !== null && c.sourceTurn > boundary);
+      const agreedNames = new Set(targets(execution).map(id => state.ledger[id]?.name).filter((n): n is string => typeof n === "string").map(normalizeName));
+      const draftTriggers = (text: string) => {
+        if (judgment.action === "agree") return ["agree_action"];
+        const hints = findNamingActHints(text);
+        return [...(openHumanProposal ? ["typed_context"] : []), ...(hints.wording ? ["naming_words"] : []),
+          ...(hints.quoted.some(q => !agreedNames.has(normalizeName(q))) ? ["quoted_other"] : [])];
+      };
+      const confirmDraft = async (text: string, draft: "initial" | "retry", found: string[]): Promise<string[]> => {
+        if (!holistic || found.length) return found;
+        const triggers = draftTriggers(text);
+        if (!triggers.length) return found;
+        let res: Awaited<ReturnType<NonNullable<JevDecisionClient["classifyDraftAct"]>>>;
+        try {
+          if (typeof jevDecision.classifyDraftAct !== "function") throw new Error("unavailable");
+          res = await interruptible(jevDecision.classifyDraftAct({ turn: latest.seq, publicTurns, reasons: triggers,
+            selected: { action: judgment.action, target: execution.target, name: judgment.candidateName ?? null }, draft: text },
+            { signal, timeoutMs: options.decisionTimeoutMs, dialoguePolicy: "holistic_v1" }), signal);
+        } catch (error) {
+          abortIf(signal);
+          res = { status: "error", choice: null, scores: null, model: null, responseId: null, costUsd: null, latencyMs: 0, error: "unavailable" };
+        }
+        abortIf(signal);
+        (record.draftActs ??= []).push({ draft, draftSha256: await aiHash(text), triggers, status: res.status === "ok" && res.choice ? "ok" : "error", choice: res.status === "ok" ? res.choice : null,
+          scores: res.status === "ok" ? res.scores : null, model: res.model ?? null, responseId: res.responseId ?? null, costUsd: res.costUsd ?? null,
+          latencyMs: Number.isFinite(res.latencyMs) ? res.latencyMs : 0, error: res.status === "ok" ? null : res.error ?? "invalid_response" });
+        if (res.status !== "ok" || !res.choice) return ["draft_act_unconfirmed"];
+        const adopts = res.choice === "adopt_chosen" || res.choice === "adopt_other";
+        return judgment.action === "agree" ? (res.choice === "adopt_chosen" ? [] : ["draft_act_mismatch"]) : (adopts ? ["draft_act_mismatch"] : []);
+      };
       errorCode = "generation_failed";
       let result = await interruptible(client.complete(messages, { phase: "generation", timeoutMs: generation.timeoutMs, signal }), signal);
       abortIf(signal);
       if (typeof result?.text !== "string" || !result.text.trim()) throw new JevTurnError("generation_failed", undefined, { generationErrorCode: "invalid_response" });
-      record.generationGuard.violations = violations(result.text, messages);
+      record.generationGuard.violations = await confirmDraft(result.text, "initial", violations(result.text, messages));
       if (record.generationGuard.violations.length) {
         record.generationGuard.regenerated = true;
         if (restateJudgment) record.generationRetryVersion = generationRetryVersion;
@@ -917,7 +956,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
             (restateJudgment ? "\n" + actionMessage.content + "\n" : "") + rewriteReasons(record.generationGuard.violations) }];
         result = await interruptible(client.complete(retry, { phase: "generation", timeoutMs: generation.timeoutMs, signal }), signal);
         abortIf(signal);
-        const codes = typeof result?.text === "string" && result.text.trim() ? violations(result.text, retry) : ["empty_utterance"];
+        const codes = typeof result?.text === "string" && result.text.trim() ? await confirmDraft(result.text, "retry", violations(result.text, retry)) : ["empty_utterance"];
         record.generationGuard.violations = [...new Set([...record.generationGuard.violations, ...codes])];
         if (codes.length) {
           const orientationOnly = questionLayout === "two_stage_v3" &&
@@ -950,7 +989,8 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
           generationGuard: structuredClone(record.generationGuard), jevTurn: { attemptNumber, decision, ...(integrated?{executed:execution,intervention:record.intervention as InterventionTrace}:{}), humanReferent: structuredClone(record.humanReferent), ...(record.repairProspect === undefined ? {} : { repairProspect: structuredClone(record.repairProspect) }),
             ...(adaptive || questionLayout === "two_stage_v3" ? { agreeNames: structuredClone(baseInput.agreeNames!) } : {}),
             ...(factored ? { repairFacts: structuredClone(baseInput.repairFacts!) } : {}),
-            ...(gate ? { repairGate: structuredClone(gate) } : {}) },
+            ...(gate ? { repairGate: structuredClone(gate) } : {}),
+            ...(record.draftActs?.length ? { draftActs: structuredClone(record.draftActs) } : {}) },
           localGrounding: { ...prepared.trace, attemptNumber }, ...(aiEnabled ? { aiPublic: { aiSeq: aiPending!.aiSeq, textSha256: aiPending!.textSha256 } } : {}) }],
         ...(aiEnabled ? { aiPublic: state.aiPublic } : {}) };
       // Keep the naming policy from the original snapshot, including its absence on historical v3 tapes.

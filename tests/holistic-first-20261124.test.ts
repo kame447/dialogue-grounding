@@ -3,7 +3,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { createDialogueV2 } from '../dialogue-model/runtime/v2/dialogue-v2.mjs';
-import { buildJevDecisionPayload, createJevDecisionClient } from '../dialogue-model/runtime/decision/jev-decision.ts';
+import { buildJevDecisionPayload, buildJevDraftActPayload, createJevDecisionClient } from '../dialogue-model/runtime/decision/jev-decision.ts';
+import { findNamingActHints } from '../dialogue-model/runtime/v2/generation-guard.ts';
 import type { JevDecisionInput } from '../dialogue-model/runtime/decision/contract.ts';
 import { BYPASS_ACCEPTANCE_V1_CANONICAL_JSON, BYPASS_ACCEPTANCE_V1_TABLE_SHA256 } from '../dialogue-model/runtime/decision/bypass-acceptance.ts';
 import { LOCAL_FUNCTION_CRITERIA, LOCAL_FUNCTION_CRITERIA_V3 } from '../dialogue-model/runtime/local-grounding/classify.ts';
@@ -16,7 +17,7 @@ const input = (): JevDecisionInput => ({ turn: 2, ownSlots: slots,
     holistic: [{ construal: `見立て${i}`, basis: ['丸みのある部分'], status: 'hypothesis' }],
     analytic: { shapes: [`三角${i}`], composition: `構成${i}`, relations: [`関係${i}`] }, unknowns: [], reobservations: [] })) },
   issueSummary: '', priorClaims: [], publicNames: [], repairHistory: [], previousAction: null } as unknown as JevDecisionInput);
-const criteria = (layout: 'two_stage_v1' | 'two_stage_v2' | 'two_stage_v3') => buildJevDecisionPayload(input(), { questionLayout: layout }).questions.action.criteria;
+const criteria = (layout: 'two_stage_v1' | 'two_stage_v2' | 'two_stage_v3') => buildJevDecisionPayload(input(), { questionLayout: layout, ...(layout === 'two_stage_v3' ? { dialoguePolicy: 'holistic_v1' as const } : {}) }).questions.action.criteria;
 const READINGS = /ペンギン|馬|犬|猫|鳥|風車|魚|拳|家|蝶/u;
 
 test('Jev v3 criteria: whole reading first, parts only when needed, no stalling once shared; v1/v2 are unchanged', () => {
@@ -61,7 +62,7 @@ async function generation(strategy: 'repair-first' | 'bypass-enabled', human: st
       if (options?.phase === 'generation') { lunaPayloads.push(messages); return { text: reply }; }
       return { text: JSON.stringify({ segments: [] }) };
     } },
-    strategy, image: s4Image, anchors: s4Anchors, referenceMemory: true, decisionMode: 'jev', questionLayout: 'two_stage_v3',
+    strategy, image: s4Image, anchors: s4Anchors, referenceMemory: true, decisionMode: 'jev', questionLayout: 'two_stage_v3', dialoguePolicy: 'holistic_v1',
     technicalTrial: { version: 'adaptive_repair_v3' }, interventionPolicy: { version: 'bypass_acceptance_v1', tableSha256: BYPASS_ACCEPTANCE_V1_TABLE_SHA256 },
     decisionTimeoutMs: 5000,
     observer: { async observeAll() { return s4Memo() as never; }, async reobserve() { throw new Error('unused'); } },
@@ -108,19 +109,35 @@ test('a naming decision written as 「X」で呼びましょう / そう呼び�
   for (const text of ['「名前」で呼びましょうか？', '「名前」で呼ぶのはどうでしょう？', '全体は丸い形です。']) assert.deepEqual(findExtendedNamingDecisions(text), [], text);
 });
 
-test('the agree-adoption check: refusals and bare restatements are violations, each natural adoption wording and questions-with-adoption are not', async () => {
-  const { findAgreeNotAdopted } = await import('../dialogue-model/runtime/v2/generation-guard.ts');
-  for (const text of ['今回は「名前」にはしません。', '「名前」は少し違う気がします。', '「名前」という呼び名ですね。']) assert.deepEqual(findAgreeNotAdopted(text), ['agree_not_adopted'], text);
-  for (const text of ['はい、「名前」と呼びましょう。', '「名前」で呼びましょう。', '「名前」にしましょう。', '「名前」で決まりです。', '「名前」でいいですよ。', '「名前」で決めましょう。', '「名前」で決めます。', 'そう呼びます。', '「名前」にしました。']) {
-    assert.deepEqual(findAgreeNotAdopted(text), [], text);
+
+
+const draftInput = (draft: string) => ({ turn: 2, publicTurns: input().publicTurns, reasons: ['naming_words'],
+  selected: { action: 'accept' as const, target: { kind: 'single' as const, figureId: slots[0] }, name: null }, draft });
+test('the draft-naming question is one closed question with six labels, no example sentence and no particular phrase as a condition', () => {
+  const payload = buildJevDraftActPayload(draftInput('この形はそう見えます。'));
+  assert.deepEqual(Object.keys(payload.questions), ['draft_naming']);
+  assert.deepEqual(Object.keys(payload.questions.draft_naming.criteria), ['adopt_chosen', 'adopt_other', 'decline_or_hold', 'propose_question', 'recount_only', 'none']);
+  const text = JSON.stringify(payload.questions);
+  assert.doesNotMatch(text, /[「」『』]/u);
+  assert.doesNotMatch(text, /(?:呼びましょう|決めましょう|でいい|おっけー|オッケー)/u);
+  assert.ok(JSON.parse(payload.state).draft === 'この形はそう見えます。');
+});
+test('the draft-naming question reports a transport or response failure as status error, never as a pass, and an ok label with its evidence', async () => {
+  const body = (choice: string) => ({ model: 'typesafe/jev-1.14', id: 'gen-draft-1', usage: { cost: 0 }, answers: { draft_naming: { type: 'choice', choice,
+    probabilities: Object.fromEntries(['adopt_chosen', 'adopt_other', 'decline_or_hold', 'propose_question', 'recount_only', 'none'].map(k => [k, Number(k === choice)])) } } });
+  const ok = createJevDecisionClient({ enabled: true, questionLayout: 'two_stage_v3', readKey: async () => 'sk-or-SYNTHETIC-draft-key', timeoutMs: 3000,
+    fetchImpl: async () => Response.json(body('recount_only')) })!;
+  const good = await ok.classifyDraftAct!(draftInput('提案は「X」でしたね。'), { dialoguePolicy: 'holistic_v1' });
+  assert.equal(good.status, 'ok'); assert.equal(good.choice, 'recount_only'); assert.equal(good.responseId, 'gen-draft-1');
+  for (const fetchImpl of [async () => { throw new Error('boom'); }, async () => Response.json({ model: 'typesafe/jev-1.14', id: 'x', usage: { cost: 0 }, answers: {} }),
+    async () => new Response('x', { status: 500 })]) {
+    const bad = createJevDecisionClient({ enabled: true, questionLayout: 'two_stage_v3', readKey: async () => 'sk-or-SYNTHETIC-draft-key', timeoutMs: 3000, fetchImpl: fetchImpl as any })!;
+    const r = await bad.classifyDraftAct!(draftInput('提案は「X」でしたね。'), { dialoguePolicy: 'holistic_v1' });
+    assert.equal(r.status, 'error'); assert.equal(r.choice, null); assert.equal(typeof r.error, 'string');
   }
 });
-
-test('a flat statement of the call name is a naming decision under a non-agree act and counts as the adoption in an agree draft; its question form is neither', async () => {
-  const { findExtendedNamingDecisions, findAgreeNotAdopted } = await import('../dialogue-model/runtime/v2/generation-guard.ts');
-  for (const text of ['この形の呼び名は「名前」です。', 'この図形の名前は「名前」だ。', '「名前」で決めましょう。']) {
-    assert.deepEqual(findExtendedNamingDecisions(text), ['naming_decision'], text);
-    assert.deepEqual(findAgreeNotAdopted(text), [], text);
-  }
-  for (const text of ['この形の呼び名は「名前」ですか？', '呼び名は「名前」でしょうか？']) assert.deepEqual(findExtendedNamingDecisions(text), [], text);
+test('naming-act wording is only a hint to ask: pre-holistic words, 「で呼…」「で決め…」, the 「呼び名は『X』です」 type, and quoted strings', () => {
+  for (const text of ['それでいいですね、「X」にしましょう。', 'この形は「X」で呼びましょう。', 'この形は「X」で決めましょう。', 'この形の呼び名は『X』です。']) assert.equal(findNamingActHints(text).wording, true, text);
+  for (const text of ['細い部分が二つつながっています。', '「X」で呼びますか？', 'そう見えるんですね。']) assert.equal(findNamingActHints(text).wording, false, text);
+  assert.deepEqual(findNamingActHints('あなたの案は「風車」でしたね。').quoted, ['風車']);
 });

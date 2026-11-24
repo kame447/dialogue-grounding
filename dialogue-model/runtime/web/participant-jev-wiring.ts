@@ -55,7 +55,8 @@ function checkedTechnicalTrial(value: unknown): AdaptiveRepairTrial {
 function checkedProfile(value: unknown): ResearchTrialProfileV3 {
   const profile = jsonData(value) as ResearchTrialProfileV3;
   if (resolveInterventionPolicy(profile).mode !== 'explicit') return invalid();
-  const expected = researchTrialProfileV3(profile.lunaRequest, profile.timeouts, profile.questionLayout);
+  // The stored value (or its absence) decides the version: a profile without dialoguePolicy is rebuilt without one.
+  const expected = researchTrialProfileV3(profile.lunaRequest, profile.timeouts, profile.questionLayout, profile.dialoguePolicy ?? null);
   if (researchHash(profile) !== researchHash(expected)) return invalid();
   return expected;
 }
@@ -85,7 +86,7 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
       if (marker !== undefined && marker !== true && marker !== false) return invalid();
       if (marker !== true) {
         const state = restore.queueState?.privateState;
-        if (['profileSha256','interventionPolicy','technicalTrial','questionLayout'].some(k => Object.hasOwn(restore.options ?? {},k)) ||
+        if (['profileSha256','interventionPolicy','technicalTrial','questionLayout','dialoguePolicy'].some(k => Object.hasOwn(restore.options ?? {},k)) ||
             ['jevTraces','aiPublicSettlement','initialObservation','jevLedger'].some(k => Object.hasOwn(restore,k)) ||
             state && (['schemaVersion','interventionPolicy','observationMemo','repairHistory','aiPublic'].some(k=>Object.hasOwn(state,k)) ||
               state.judgments?.some((j: any) => j.jevTurn))) return invalid();
@@ -97,7 +98,14 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
     const v = data(raw,['profile','observer','jevDecision','localGrounding','ledger',...(Object.hasOwn(raw,'technicalTrial')?['technicalTrial']:[])]);
     const technicalTrial = Object.hasOwn(v,'technicalTrial') ? checkedTechnicalTrial(v.technicalTrial) : undefined;
     // The frozen order is outer shape, explicit profile, memory, strategy.
-    const profile = checkedProfile(v.profile);
+    let profile = checkedProfile(v.profile);
+    // A restored record keeps the policy it was created with, or none: a record without dialoguePolicy never gains one on restore.
+    if (restore) {
+      const savedPolicy = Object.hasOwn(restore.options ?? {}, 'dialoguePolicy') ? restore.options.dialoguePolicy : undefined;
+      if (savedPolicy !== undefined && savedPolicy !== 'holistic_v1') return invalid();
+      if (savedPolicy === undefined && profile.dialoguePolicy !== undefined) profile = researchTrialProfileV3(profile.lunaRequest, profile.timeouts, profile.questionLayout, null);
+      else if (savedPolicy !== profile.dialoguePolicy) return invalid();
+    }
     if (context.referenceMemory !== true) return invalid();
     if (!STRATEGIES.includes(context.strategy)) return invalid();
     if (context.legacy.some(v => v !== null && v !== undefined) || context.style !== profile.utteranceStyle) return invalid();
@@ -326,6 +334,14 @@ export async function prepareParticipantJev(options:{configFile:string;baseAssig
           const parent=scope(ledger).getStore();
           return scope(ledger).run({turn:parent?.turn??null,phase:'jev_prospect',boundary:'common'},
             ()=>jevOperation(ledger,'jev_prospect',()=>nativeDecision.estimateRepairProspect(...args)));
+        }} : {}),
+        ...(profile.dialoguePolicy==='holistic_v1'&&nativeDecision.classifyDraftAct ? {classifyDraftAct:async(...args:Parameters<NonNullable<typeof nativeDecision.classifyDraftAct>>)=>{
+          ledger.beforeSend();
+          const parent=scope(ledger).getStore();
+          const res=await scope(ledger).run({turn:parent?.turn??null,phase:'jev_draft_act',boundary:'tail'},()=>nativeDecision.classifyDraftAct!(...args));
+          // The native client reports a failed question as status "error"; the shared budget still has to learn of a cap or identity stop.
+          if(res.status==='error'&&res.error){ledger.refuse('jev_draft_act',res.error);if(['cost_cap','cost_unreported','model_mismatch'].includes(res.error))ledger.stop(res.error);}
+          return res;
         }} : {}),
         completeDetail:(...args:Parameters<typeof nativeDecision.completeDetail>)=>{
         const parent=scope(ledger).getStore();

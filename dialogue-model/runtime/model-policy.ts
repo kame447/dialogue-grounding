@@ -40,7 +40,7 @@ export function resolveModelPolicy(profile: unknown): ResolvedModelPolicy {
     if (d.id.value !== 'research_trial_profile_v2' && d.id.value !== 'research_trial_profile_v3') throw Error();
     const integrated = d.id.value === 'research_trial_profile_v3';
     const keys = Reflect.ownKeys(d);
-    if (keys.some(k => typeof k !== 'string' || !rootKeys.includes(k) && !(integrated && k === 'interventionPolicy')) ||
+    if (keys.some(k => typeof k !== 'string' || !rootKeys.includes(k) && !(integrated && (k === 'interventionPolicy' || k === 'dialoguePolicy'))) ||
         rootKeys.filter(k => k !== 'modelContract').some(k => !d[k] || !Object.hasOwn(d[k], 'value'))) throw Error();
     const v = Object.fromEntries(rootKeys.filter(k => k !== 'modelContract').map(k => [k, d[k].value]));
     if (integrated) {

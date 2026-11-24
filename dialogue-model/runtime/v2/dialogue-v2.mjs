@@ -240,15 +240,18 @@ export function createDialogueV2(options) {
   const ownAnchors = anchors.map(({ id, bbox, centroid }) => ({ id, bbox: { ...bbox }, centroid: { ...centroid } }));
   if (decisionMode === "jev") {
     const v3Trial = Boolean(options.technicalTrial) && options.questionLayout === "two_stage_v3";
+    // holistic-first is selected by the policy the trial was created with (its profile), not by the layout alone; none keeps the older v3 trial text.
+    const holisticV1 = v3Trial && options.dialoguePolicy === "holistic_v1";
     if (!referenceMemory || !localGrounding) throw new Error("Jev decision mode requires local reference memory");
     if (activeDecision || decisionShadowClient || groundingShadow) throw new Error("Jev decision mode cannot combine legacy decision paths");
     return createJevTurnRuntime({ client, ownImage, ownAnchors, observer, jevDecision, localGrounding, ...(integrated?{intervention,decisionTimeoutMs}:{}),
       ...(Object.hasOwn(options,'technicalTrial')?{technicalTrial:options.technicalTrial}:{}),
       ...(Object.hasOwn(options,'questionLayout')?{questionLayout:options.questionLayout}:{}),
+      ...(options.dialoguePolicy ? { dialoguePolicy: options.dialoguePolicy } : {}),
       generationRetryVersion: options.generationRetryVersion,
       onJevTurnTrace, onLocalGroundingTrace, maxReobservations,
-      generation: { task: TASK_INSTRUCTIONS_V2, instructions: v3Trial ? HOLISTIC_V3_GENERATOR_INSTRUCTIONS_V2 : options.technicalTrial ? TRIAL_GENERATOR_INSTRUCTIONS_V2 : GENERATOR_INSTRUCTIONS_V2,
-        ...(concise ? { concise: CONCISE_INSTRUCTIONS_V2 } : {}), actionScope: v3Trial ? HOLISTIC_V3_ACTION_SCOPE_V2 : options.technicalTrial ? TRIAL_ACTION_SCOPE_V2 : ACTION_SCOPE_V2,
+      generation: { task: TASK_INSTRUCTIONS_V2, instructions: holisticV1 ? HOLISTIC_V3_GENERATOR_INSTRUCTIONS_V2 : v3Trial ? TRIAL_V3_GENERATOR_INSTRUCTIONS_V2 : options.technicalTrial ? TRIAL_GENERATOR_INSTRUCTIONS_V2 : GENERATOR_INSTRUCTIONS_V2,
+        ...(concise ? { concise: CONCISE_INSTRUCTIONS_V2 } : {}), actionScope: holisticV1 ? HOLISTIC_V3_ACTION_SCOPE_V2 : v3Trial ? TRIAL_V3_ACTION_SCOPE_V2 : options.technicalTrial ? TRIAL_ACTION_SCOPE_V2 : ACTION_SCOPE_V2,
         final: FINAL_INSTRUCTIONS_V2, timeoutMs: GENERATION_TIMEOUT_MS } });
   }
   const dialogueJudge = judge ?? createLunaJudge(client);

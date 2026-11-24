@@ -109,6 +109,12 @@ function session(strategy: Strategy, observation: Memo = memo) {
           let choice: string | undefined;
           if (key === 'action') choice = turn.action;
           if (key === 'target') choice = targetLabel(turn.target);
+          if (key === 'draft_naming') {
+            // A synthetic stand-in for the model that judges the draft's naming act; the program under test only compares its label with the action.
+            const asked = JSON.parse(request.state) as { draft: string; selected: { action: string } };
+            choice = /賛成できません/u.test(asked.draft) ? 'decline_or_hold'
+              : asked.selected.action === 'agree' || /呼びましょう|[「『][^」』]+[」』]です/u.test(asked.draft) ? 'adopt_chosen' : 'none';
+          }
           if (key === 'human_referent') choice = typeof turn.target === 'number' ? targetLabel(turn.target) : turn.target ? 'multiple' : 'none';
           if (key === 'repair_issue' || key === 'basis') choice = 'none';
           if (key === 'prospect') choice = 'no_open_issue';

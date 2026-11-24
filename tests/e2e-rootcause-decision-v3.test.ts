@@ -24,11 +24,13 @@ type Plan = {
   aiSegments?: LocalSegmentProposal[];
   actionScores?: Partial<Record<JevAction, number>>;
   prospect?: 'uncertain' | 'no_open_issue';
+  /** holistic fixture only: the scripted answers of the draft-naming question, in order; 'fail' makes that POST fail. */
+  draftActs?: string[];
 };
 
 function fixture(strategy: 'bypass-enabled' | 'repair-first' = 'bypass-enabled',
-  { aiPublic = false, observations = memo(), historicalNameScope = false }:
-  { aiPublic?: boolean; observations?: ReturnType<typeof memo>; historicalNameScope?: boolean } = {}) {
+  { aiPublic = false, observations = memo(), historicalNameScope = false, holistic = false }:
+  { aiPublic?: boolean; observations?: ReturnType<typeof memo>; historicalNameScope?: boolean; holistic?: boolean } = {}) {
   const intervention = interventionForStrategy(strategy);
   const inputs: JevDecisionInput[] = [];
   const wire: JevDecisionPayload[] = [];
@@ -39,12 +41,14 @@ function fixture(strategy: 'bypass-enabled' | 'repair-first' = 'bypass-enabled',
     fetchImpl: async (_url, init) => {
       const request = JSON.parse(String(init.body)) as JevDecisionPayload;
       wire.push(request);
+      if (Object.hasOwn(request.questions, 'draft_naming') && plan.draftActs?.[0] === 'fail') { plan.draftActs.shift(); throw new Error('scripted question failure'); }
       const answers = Object.fromEntries(Object.entries(request.questions).map(([key, question]) => {
         const labels = Object.keys(question.criteria);
         const choice = key === 'action' ? plan.action
           : key === 'target' ? (plan.target === undefined ? 'none' : `figure_${plan.target}`)
           : key === 'repair_issue' ? (plan.prospect ? 'issue_0' : 'none')
           : key === 'prospect' ? plan.prospect ?? 'uncertain'
+          : key === 'draft_naming' ? plan.draftActs!.shift()
           : key === 'human_referent' ? (plan.target === undefined ? 'none' : `figure_${plan.target}`)
           : key === 'name' && plan.name ? labels.find(label => JSON.parse(question.criteria[label]).value === plan.name)
           : labels[0];
@@ -57,13 +61,14 @@ function fixture(strategy: 'bypass-enabled' | 'repair-first' = 'bypass-enabled',
     },
   })!;
   const runtime = createJevTurnRuntime({
-    ...V3, intervention, decisionTimeoutMs: 3000,
+    ...V3, intervention, decisionTimeoutMs: 3000, ...(holistic ? { dialoguePolicy: 'holistic_v1' as const } : {}),
     ...(strategy === 'repair-first' ? { technicalTrial: { version: 'adaptive_repair_v3' as const } } : {}),
     ownAnchors: anchors, ownImage: { ...image, mimeType: 'image/png' }, maxReobservations: 0,
     observer: { async observeAll() { return validateObservationMemo(observations); }, async reobserve() { throw Error('no reobservation expected'); } },
     jevDecision: {
       async decide(input, options) { inputs.push(structuredClone(input)); return native.decide(input, options); },
       estimateReferent: native.estimateReferent, estimateRepairProspect: native.estimateRepairProspect, completeDetail: native.completeDetail,
+      ...(holistic ? { classifyDraftAct: native.classifyDraftAct } : {}),
     },
     localGrounding: { ...(aiPublic ? { aiPublicClaims: true, aiPublicTransport: {
       readKey: async () => 'sk-or-SYNTHETIC-ai-public-rootcause-key',
@@ -939,37 +944,46 @@ test('an English name the partner used in public is allowed however long ago it 
   assert.equal(r.text, 'Golden Gate Bridge のような形ですね。');
 });
 
-test('a naming decision in the 「X」で呼びましょう form is regenerated under accept in both strategies', async () => {
-  for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
-    const f = fixture(strategy);
-    const r = await f.exchange('丸い形のことです。', { action: 'accept', target: 3, drafts: ['この形は「時計」で呼びましょう。', 'そう見えるんですね。'] });
-    assert.deepEqual(r.trace.generationGuard, { violations: ['naming_decision'], regenerated: true, fallback: false });
-    assert.equal(r.text, 'そう見えるんですね。');
-  }
-});
-
-// An agree draft must state the adoption in the existing wording family (questions not counting). Synthetic wordings, both strategies.
 for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
-  test(`v3 ${strategy}: an agree draft that only refuses the quoted name is regenerated; each natural adoption wording is published on the first draft`, async () => {
-    const quote = `この形は「${NEW_NAME}」でいいですか？`;
-    const refusal = await (await groundedFixture(3, strategy)).exchange(quote, { action: 'agree', target: 3, segments: [naming(quote, NEW_NAME)],
-      drafts: [`今回は「${NEW_NAME}」にはしません。`, agreeSpeech(NEW_NAME)] });
-    assert.deepEqual(refusal.trace.generationGuard, { violations: ['agree_not_adopted'], regenerated: true, fallback: false });
-    assert.equal(refusal.text, agreeSpeech(NEW_NAME));
-    assert.deepEqual(refusal.state.ledger[ids[3]], { status: 'agreed', name: NEW_NAME });
-    for (const wording of [`はい、「${NEW_NAME}」と呼びましょう。`, `じゃあ「${NEW_NAME}」で呼びましょう。`, `うん、「${NEW_NAME}」にしましょう。`, `「${NEW_NAME}」で決まりですね。`,
-      `うん、「${NEW_NAME}」でいいですよ。`, `はい、「${NEW_NAME}」で決めましょう。`, `「${NEW_NAME}」で決めます。`, `ではそう呼びます。「${NEW_NAME}」ですね。`, `「${NEW_NAME}」にしました。`]) {
-      const r = await (await groundedFixture(3, strategy)).exchange(quote, { action: 'agree', target: 3, segments: [naming(quote, NEW_NAME)], drafts: [wording] });
-      assert.deepEqual(r.trace.generationGuard, { violations: [], regenerated: false, fallback: false }, wording);
-      assert.equal(r.text, wording);
-    }
+  test(`holistic_v1 (${strategy}): a naming-act draft under accept is asked; an adopting label regenerates, a non-adopting one publishes`, async () => {
+    const f = fixture(strategy, { holistic: true });
+    const r = await f.exchange('丸い形のことです。', { action: 'accept', target: 3, draftActs: ['adopt_chosen'], drafts: ['この形は「時計」で呼びましょう。', 'そう見えるんですね。'] });
+    assert.deepEqual(r.trace.generationGuard, { violations: ['draft_act_mismatch'], regenerated: true, fallback: false });
+    assert.equal(r.text, 'そう見えるんですね。');
+    assert.deepEqual(r.trace.draftActs!.map(a => [a.draft, a.status, a.choice]), [['initial', 'ok', 'adopt_chosen']]);
+    const g = fixture(strategy, { holistic: true });
+    const published = await g.exchange('丸い形のことです。', { action: 'accept', target: 3, draftActs: ['recount_only'], drafts: ['この形は「時計」で呼びましょう。'] });
+    assert.deepEqual(published.trace.generationGuard, { violations: [], regenerated: false, fallback: false });
+    assert.equal(published.text, 'この形は「時計」で呼びましょう。');
+  });
+  test(`holistic_v1 (${strategy}): a failed or repeatedly unconfirmed question is regenerated, then unsafe_generation; non-target drafts are never asked`, async () => {
+    const f = fixture(strategy, { holistic: true });
+    const r = await f.exchange('丸い形のことです。', { action: 'accept', target: 3, draftActs: ['fail'], drafts: ['この形は「時計」で決めましょう。', 'そう見えるんですね。'] });
+    assert.deepEqual(r.trace.generationGuard, { violations: ['draft_act_unconfirmed'], regenerated: true, fallback: false });
+    assert.equal(r.trace.draftActs![0].status, 'error');
+    const g = fixture(strategy, { holistic: true });
+    await assert.rejects(g.exchange('丸い形のことです。', { action: 'accept', target: 3, draftActs: ['fail', 'fail'], drafts: ['この形は「時計」で決めましょう。', 'この形は「時計」で決めましょう。'] }), { code: 'unsafe_generation' });
+    assert.deepEqual(g.attempt()?.generationGuard.violations, ['draft_act_unconfirmed']);
+    const h = fixture(strategy, { holistic: true });
+    const plain = await h.exchange('丸い形のことです。', { action: 'accept', target: 3, drafts: ['そう見えるんですね。'] });
+    assert.equal(plain.trace.draftActs, undefined);
+    assert.equal(plain.requests.some(q => Object.hasOwn(q.questions, 'draft_naming')), false);
   });
 }
 
-test('a non-agree act may not publish the 「X」で決めましょう form either', async () => {
-  const f = fixture('bypass-enabled');
-  const r = await f.exchange('丸い形のことです。', { action: 'accept', target: 3, drafts: ['この形は「時計」で決めましょう。', 'そう見えるんですね。'] });
-  assert.deepEqual(r.trace.generationGuard, { violations: ['naming_decision'], regenerated: true, fallback: false });
+test('holistic_v1: an agree draft is always asked and publishes only an adopting label; the older version is never asked', async () => {
+  const f = fixture('bypass-enabled', { aiPublic: true, holistic: true });
+  await share(f, 3);
+  const proposal = `こちらの形は「${NEW_NAME}」でどうですか？`;
+  const r = await f.exchange(proposal, { action: 'agree', target: 3, draftActs: ['recount_only', 'adopt_chosen'], segments: [naming(proposal, NEW_NAME)],
+    drafts: [agreeSpeech(NEW_NAME), agreeSpeech(NEW_NAME)] });
+  assert.deepEqual(r.trace.generationGuard, { violations: ['draft_act_mismatch'], regenerated: true, fallback: false });
+  assert.deepEqual(r.trace.draftActs!.map(a => [a.draft, a.choice]), [['initial', 'recount_only'], ['retry', 'adopt_chosen']]);
+  assert.equal(r.state.ledger[ids[3]].name, NEW_NAME);
+  const old = fixture('bypass-enabled');
+  const o = await old.exchange('丸い形のことです。', { action: 'accept', target: 3, drafts: ['この形は「時計」と呼びましょう。', 'そう見えるんですね。'] });
+  assert.deepEqual(o.trace.generationGuard, { violations: ['naming_decision'], regenerated: true, fallback: false });
+  assert.equal(o.trace.draftActs, undefined);
 });
 
 test('S4 rebuilds the propose_name targets without the name the partner proposed (current text version), the same as the request builder', async () => {

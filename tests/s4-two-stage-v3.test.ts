@@ -53,7 +53,8 @@ async function recordedRun(profile: any, tape: any, label: 'repair-first' | 'byp
     observer: { async observeAll() { return structuredClone(tape.state.observationMemo); },
       async reobserve(input: any) { const result = learn ? learn(input) : structuredClone(fixed.shift()); made.push(structuredClone(result));
         await client.complete(buildReobservationMessages(input), { phase: 'observation_targeted' }); return result; } },
-    jevDecision: { decide: (i: any, o: any) => native.decide(i, o), completeDetail: (i: any, s: any, o: any) => native.completeDetail!(i, s, o) },
+    jevDecision: { decide: (i: any, o: any) => native.decide(i, o), completeDetail: (i: any, s: any, o: any) => native.completeDetail!(i, s, o),
+      ...(profile.dialoguePolicy === 'holistic_v1' ? { classifyDraftAct: (i: any, o: any) => native.classifyDraftAct!(i, o) } : {}) },
     localGrounding: { classifier: createJevLocalTestClassifier({ enabled: true, readKey, fetchImpl, timeoutMs: profile.timeouts.localMs, researchLimits: { maxDeadlineMs: 600000 } })!,
       aiPublicTransport: { readKey, fetchImpl, timeoutMs: profile.timeouts.decisionMs } },
     onJevTurnTrace: (t: any) => traces.push(t) } as any);
@@ -63,15 +64,17 @@ async function recordedRun(profile: any, tape: any, label: 'repair-first' | 'byp
 }
 /** NORMAL rebuilt as one canonical trial of the given layout, label and Jev responses (the s4-two-stage-v2 pattern). */
 async function records(layout: 'two_stage_v2' | 'two_stage_v3', jev: any[], { reobservation = false, label = 'bypass-enabled' as 'repair-first' | 'bypass-enabled', generationText = null as string | null, humanText = null as string | null,
-  retry = null as { drafts: [string, string]; current: boolean; fallback?: boolean } | null } = {}) {
+  retry = null as { drafts: [string, string]; current: boolean; fallback?: boolean } | null, policy = null as 'holistic_v1' | null, draftAnswers = [] as string[] } = {}) {
   const n = structuredClone(normal), tr = n.trials[0], m = n.run.manifest;
-  const profile = JSON.parse(JSON.stringify(researchTrialProfileV3(m.lunaRequest, m.timeouts, layout)));
+  const profile = JSON.parse(JSON.stringify(researchTrialProfileV3(m.lunaRequest, m.timeouts, layout, policy)));
   const digest = hash(profile);
   for (const s of [n.run, n.summary, tr]) { s.profile = structuredClone(profile); s.profileSha256 = digest; }
   tr.identity.profile = digest;
   tr.label = label; m.trials[0].label = label; n.summary.runOrder[0].label = label;
   const tape: any = { ...structuredClone(OLD), common: { ...structuredClone(OLD.common), jev }, recorded: { label, expectedRequests: [] } };
   if (humanText !== null) tape.events.at(-1).text = humanText;
+  if (draftAnswers.length) for (const side of Object.values(tape.tails) as any[]) side.jev = [...draftAnswers.map((c, i) => jevResponse('draft-' + i,
+    { draft_naming: answer(c, ['adopt_chosen', 'adopt_other', 'decline_or_hold', 'propose_question', 'recount_only', 'none']) })), ...side.jev];
   if (generationText !== null) {
     for (const side of Object.values(tape.tails ?? {}) as any[]) {
       for (const l of side.luna ?? []) if (l.phase === 'generation') l.response = { ...l.response, text: generationText };
@@ -92,6 +95,7 @@ async function records(layout: 'two_stage_v2' | 'two_stage_v3', jev: any[], { re
     tape.common.reobservations = learned.reobservations;
   }
   const probe: any = await pairedInterventionReplay(tape, OWN as any, MODEL, profile);
+  if (!probe.sides?.length || process.env.DBG) console.log('PROBE', probe.status, probe.error);
   const recorded = probe.sides.find((s: any) => s.label === label);
   tape.recorded.expectedRequests = recorded.requests.map((r: any, i: number) => ({ provider: r.provider, phase: r.phase, requestSha256: r.preProjectionPayloadSha256,
     actualSendMeasured: true, sendIds: [i + 1], ...(r.provider === 'luna' ? { messagesSha256: r.completeMessagesSha256 } : {}) }));
@@ -550,14 +554,48 @@ test('the comparison condition must carry exactly the reasons its own draft show
   }
 });
 
-test('S4 knows the 「X」で呼びましょう naming decision for the holistic text: the reason is required on both conditions and a record without it is refused', async () => {
+const DRAFT_MISMATCH = '前の下書きの命名に関する行為が、選んだ行動と合っていませんでした。選んだ行動の範囲で、命名に関する行為を行動に合わせて書き直してください。';
+test('holistic_v1: a naming-wording draft is asked, a mismatch regenerates, and S4 requires the reason on both conditions', async () => {
   const decisions = [stageOne('retry', 'accept'), stageTwo('retry', 'accept', 'none')];
-  const namingReason = '前の下書きは名称の決定・合意を表していました。決定・合意を表明せず、このactionの範囲で書き直してください。';
-  const record = await records('two_stage_v3', decisions, { retry: { current: true, drafts: ['この形は「name-0」で呼びましょう。', 'そう見えるんですね。'] } });
+  const record = await records('two_stage_v3', decisions, { policy: 'holistic_v1', draftAnswers: ['adopt_chosen'],
+    retry: { current: true, drafts: ['この形は「name-0」で呼びましょう。', 'そう見えるんですね。'] } });
   pass(record);
+  const t = record.trials[0].turns[0].trace[0];
+  assert.deepEqual(t.generationGuard, { violations: ['draft_act_mismatch'], regenerated: true, fallback: false });
+  assert.equal(t.draftActs.length, 1);
+  assert.equal(t.draftActs[0].choice, 'adopt_chosen');
   for (const label of ['bypass-enabled', 'repair-first']) {
     const dropped = structuredClone(record);
-    changeRetry(dropped, label, (text: string) => text.replace(namingReason, ''));
+    changeRetry(dropped, label, (text: string) => text.replace(DRAFT_MISMATCH, ''));
     assert.equal(status(dropped, 'replay'), 'mismatch', label);
   }
+});
+test('holistic_v1: S4 refuses an altered or dropped question record', async () => {
+  const decisions = [stageOne('retry', 'accept'), stageTwo('retry', 'accept', 'none')];
+  const record = await records('two_stage_v3', decisions, { policy: 'holistic_v1', draftAnswers: ['adopt_chosen'],
+    retry: { current: true, drafts: ['この形は「name-0」で呼びましょう。', 'そう見えるんですね。'] } });
+  pass(record);
+  const tr = record.trials[0];
+  const copiesOfTrace = (n: any) => [n.trials[0].attempts[0], n.trials[0].turns[0].trace[0]];
+  const tampered = structuredClone(record);
+  for (const t of copiesOfTrace(tampered)) t.draftActs[0].choice = 'none';
+  assert.ok(checksOf(tampered).some((c: any) => c.status !== 'pass'), 'altered label');
+  const noRecord = structuredClone(record);
+  for (const t of copiesOfTrace(noRecord)) delete t.draftActs;
+  assert.ok(checksOf(noRecord).some((c: any) => c.status !== 'pass'), 'dropped record');
+  assert.ok(tr.turns[0].trace[0].draftActs.every((a: any) => a.status === 'ok'));
+});
+
+test('holistic_v1: an orientation-only fallback record passes with no question, and one that carries a question record is refused', async () => {
+  const decisions = [stageOne('fallback', 'accept'), stageTwo('fallback', 'accept', 'none')];
+  const drafts: [string, string] = ['右側に張り出しがあります。', '上端がとがっています。'];
+  const original = await records('two_stage_v3', decisions, { policy: 'holistic_v1', retry: { current: true, drafts, fallback: true } });
+  assert.deepEqual(original.trials[0].attempts[0].generationGuard, { violations: ['orientation_leak'], regenerated: true, fallback: true });
+  assert.equal(original.trials[0].attempts[0].draftActs, undefined);
+  pass(original);
+  const mixed = structuredClone(original);
+  for (const t of [mixed.trials[0].attempts[0], mixed.trials[0].turns[0].trace[0]]) t.draftActs = [{ draft: 'initial', draftSha256: 'a'.repeat(64), triggers: ['naming_words'], status: 'ok', choice: 'adopt_chosen',
+    scores: Object.fromEntries(['adopt_chosen', 'adopt_other', 'decline_or_hold', 'propose_question', 'recount_only', 'none'].map(k => [k, Number(k === 'adopt_chosen')])),
+    model: 'typesafe/jev-1.14', responseId: 'gen-x', costUsd: 0, latencyMs: 1, error: null }];
+  assert.ok(checksOf(mixed).some((c: any) => c.status !== 'pass'));
 });

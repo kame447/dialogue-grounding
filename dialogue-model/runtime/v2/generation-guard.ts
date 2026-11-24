@@ -48,8 +48,6 @@ export function findAgreementClaims(text: string): string[] {
 const extendedNaming: ReadonlyArray<readonly [string, RegExp]> = [
   ["naming_decision", /(?:で|そう)呼(?:ぼう|びましょう|ぶことに(?:しよう|しましょう|します)|びます)/gu],
   ["naming_decision", /で決め(?:よう|ましょう|ます)/gu],
-  // a flat statement of the call name (a question clause is exempt): 「この形の呼び名は「X」です」
-  ["naming_decision", /(?:呼び名|名前|呼び方|名称)(?:は|を)[^。!?、,]{0,16}?(?:「[^」]+」|『[^』]+』)(?:です|だ|ですね|ですよ)/gu],
 ];
 export function findExtendedNamingDecisions(text: string): string[] {
   const normalized = normalize(text);
@@ -70,17 +68,9 @@ const copulaNaming: ReadonlyArray<RegExp> = [
   /(?:この|その|こちら|そちら)?(?:図形|形)?(?:の)?名前(?:は|を)[^。!?、,]{0,16}?(?:「[^」]+」|『[^』]+』)(?:です|だ|ですね|ですよ)/gu,
   /(?:この|その|こちら|そちら)の?(?:図形|形)は[^。!?、,]{0,16}?(?:「[^」]+」|『[^』]+』)(?:です|だ|ですね|ですよ)/gu,
 ];
+// Trigger only: 「（この形の）呼び名・呼称・名前は『X』です」 (an `agree` draft check keeps the narrower copulaNaming above).
+const calledNameCopula = /(?:呼び名|呼称|名前)(?:は|を)[^。!?、,]{0,16}?(?:「[^」]+」|『[^』]+』)(?:です|だ|ですね|ですよ)/gu;
 const quotedNames = (span: string) => [...span.matchAll(/「([^」]+)」|『([^』]+)』/gu)].map((m) => normalize(m[1] ?? m[2]));
-
-/** two_stage_v3: an `agree` draft must also state the adoption in the same wording family (a question clause not counting), so a refusal or a bare
- * restatement of the name is not published as the agreement the judgment chose. Codes only; it never decides state or edits the draft. */
-export function findAgreeNotAdopted(text: string): string[] {
-  const normalized = normalize(text);
-  const shown = findAgreementClaims(text).length > 0 || findExtendedNamingDecisions(text).length > 0 ||
-    completedAdoption.some(([, pattern]) => { pattern.lastIndex = 0; return [...normalized.matchAll(pattern)].some((match) => !questionTail(normalized.slice(match.index! + match[0].length))); }) ||
-    copulaNaming.some((pattern) => { pattern.lastIndex = 0; return [...normalized.matchAll(pattern)].some((match) => !questionTail(normalized.slice(match.index! + match[0].length))); });
-  return shown ? [] : ["agree_not_adopted"];
-}
 
 /** For an `agree` draft: the adopted name must be shown, and the quoted name nearest before each adoption wording
  * (same clause) must be the judged one. Codes only; never decides state. */
@@ -293,6 +283,16 @@ export function findGuardViolations(text: string, action: Action): string[] {
 }
 
 const AGREEMENT_CODES = new Set(patterns.map(([code]) => code));
+/** True for the naming-decision wording families (pre-holistic set); holistic_v1 uses them only as a question trigger, never as a blocker. */
+export const isAgreementWordCode = (code: string) => AGREEMENT_CODES.has(code);
+/** holistic_v1 question trigger: the naming-act wording families (pre-holistic set, 「で呼…」「で決め…」, and the 「呼び名・名前は『X』です」 type), and
+ * quoted strings. Codes only, never matched text. */
+export function findNamingActHints(text: string): { wording: boolean; quoted: string[] } {
+  const normalized = normalize(text);
+  const wording = findAgreementClaims(text).length > 0 || findExtendedNamingDecisions(text).length > 0 ||
+    [...copulaNaming, calledNameCopula].some((pattern) => { pattern.lastIndex = 0; return pattern.test(normalized); });
+  return { wording, quoted: quotedNames(normalized) };
+}
 /** Retry instruction for the violated rule families; never echoes the draft. */
 export function rewriteReasons(codes: readonly string[]): string {
   return [
@@ -303,7 +303,8 @@ export function rewriteReasons(codes: readonly string[]): string {
     codes.includes("orientation_leak") ? "前の下書きに画面の向きに依存する語（上下左右・側・端・向き・斜め上/下/左/右・縦長・横長等）が含まれていました。非公開メモや判断の方位語をそのまま写さず、尖りの数・大小・くぼみ・四角い部分とのつながりなど回転しても変わらない特徴へ言い換えるか、同じ節で「こちらの画面では〜」と視点を明示して書き直してください。" : "",
     codes.some((code) => code.startsWith("internal_")) ? "前の下書きには内部の参照IDや作業メモの項目が含まれていました。それらを出さずに書き直してください。" : "",
     codes.includes("working_note") ? "前の下書きに、英語の作業メモや複数の返答案が混じっていました。日本語の一つの返答だけにして書き直してください。" : "",
-    codes.includes("agree_not_adopted") ? "前の下書きは、選ばれた名前に決まったことを述べていませんでした。この名前に決まったことを、名前を「」で示して伝えてください。" : "",
+    codes.includes("draft_act_mismatch") ? "前の下書きの命名に関する行為が、選んだ行動と合っていませんでした。選んだ行動の範囲で、命名に関する行為を行動に合わせて書き直してください。" : "",
+    codes.includes("draft_act_unconfirmed") ? "前の下書きの命名に関する行為を確認できませんでした。選んだ行動の範囲で、命名に関する行為が明確になるように書き直してください。" : "",
     codes.includes("name_not_shown") ? "このactionで扱う名前を、「」で囲んで発話の中に示してください。" : "",
   ].join("");
 }

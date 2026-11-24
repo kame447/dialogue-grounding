@@ -51,6 +51,7 @@ async function run(strategy: Strategy, { human, drafts, name }: Turn) {
         const labels = Object.keys(criteria);
         const choice = key === 'action' ? action
           : key === 'target' || key === 'human_referent' ? 'figure_0'
+          : key === 'draft_naming' ? (action === 'agree' ? 'adopt_chosen' : 'none')
           : key === 'name' || key === 'feature' ? labels.find(label => JSON.parse(criteria[label]).value === (key === 'name' ? name : feature))
           : labels[0];
         assert.ok(choice && labels.includes(choice), 'scripted choice must be offered for ' + key);

@@ -123,6 +123,8 @@ export type JevDecision = {
   calibrated: false;
 };
 export type JevDecisionCallOptions = { signal?: AbortSignal; timeoutMs?: number;
+  /** two_stage_v3 only: selects the holistic-first criteria text; absent keeps the older text byte for byte. */
+  dialoguePolicy?: DialoguePolicy;
   /** decide() only: receives a copy of this call's own evidence when the call fails. Untrusted until
    * validated by projectDecisionFailureEvidence; never invoked for referent, prospect or detail calls. */
   onFailureEvidence?: (evidence: unknown) => void };
@@ -134,11 +136,22 @@ export type JevDecisionClient = {
   decide(input: JevDecisionInput, options?: JevDecisionCallOptions): Promise<JevDecision>;
   estimateRepairProspect?(input: JevDecisionInput, options?: JevDecisionCallOptions): Promise<RepairProspectMaterial>;
   estimateReferent?(input: JevDecisionInput, options?: JevDecisionCallOptions): Promise<HumanReferentEstimate>;
+  /** two_stage_v3 + dialoguePolicy holistic_v1 only. Never throws for a transport or response failure: that is status "error" (unconfirmed). */
+  classifyDraftAct?(input: DraftActInput, options?: JevDecisionCallOptions): Promise<DraftActResult>;
   completeDetail?(input: JevDecisionInput, selected: Pick<JevDecision, "action" | "target">,
     options?: JevDecisionCallOptions): Promise<JevDetailResult>;
 };
 /** two_stage_v1 is the default and is unchanged. two_stage_v2 is explicit opt-in only: stage one asks
  * action and target kind, and a multiple target is followed by one closed choice among the 2-6 figure subsets. */
+/** Version of the dialogue policy a trial was created with (recorded in its profile and options). Absent = the text before holistic-first. */
+export type DialoguePolicy = "holistic_v1";
+/** What a draft does about naming (holistic_v1): a closed set judged by Jev for the executed target and name. */
+export const DRAFT_ACTS = ["adopt_chosen", "adopt_other", "decline_or_hold", "propose_question", "recount_only", "none"] as const;
+export type DraftAct = typeof DRAFT_ACTS[number];
+export type DraftActInput = { turn: number; publicTurns: readonly PublicTurn[]; reasons: readonly string[];
+  selected: { action: JevAction; target: JevTarget; name: string | null }; draft: string };
+export type DraftActResult = { status: "ok" | "error"; choice: DraftAct | null; scores: Record<string, number> | null; model: string | null;
+  responseId: string | null; costUsd: number | null; latencyMs: number; error: string | null };
 export type JevQuestionLayout = "two_stage_v1" | "two_stage_v2" | "two_stage_v3";
 /** two_stage_v3 is explicit opt-in only (integrated profile). Stage one is one closed question over the actions that have at
  * least one legal target and detail in the material; stage two is one closed question over the targets that action may take
