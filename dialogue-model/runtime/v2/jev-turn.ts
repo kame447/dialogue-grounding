@@ -229,7 +229,7 @@ const eligibleAgreeClaim = (c: LocalClaimView) => c.aspect === "name" && c.name 
 
 function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns: readonly PublicTurn[], turn: number,
   slots: readonly string[], { ledger, judgments, agreeNameScopeVersion }: Pick<JevPrivateState, "ledger" | "judgments" | "agreeNameScopeVersion">,
-  current: { status: string; scores: Record<string, number> | null } | null = null, referentShared = false): PublicNameCandidate[] {
+  current: { status: string; scores: Record<string, number> | null } | null = null): PublicNameCandidate[] {
   const isHumanProposal = (c: LocalClaimView) => c.speaker === "human" && c.act === "name_propose";
   const publicClaims = claims.filter(c => c.aspect === "name" && c.name !== null &&
     publicTurns.some(t => t.turn === c.sourceTurn));
@@ -250,11 +250,7 @@ function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns: reado
     ["confirm", "repair"].includes(prevJudgment.judgment.action);
   const prevPublicIds = new Set(prevJudgment && prevIds.length ? claims.filter(c => c.speaker === "ai" &&
     c.sourceTurn > prevJudgment.turnIndex && c.sourceTurn < turn).flatMap(c => c.targets) : []);
-  // holistic_v2: the partner pointing at the figure the AI described ("that one": a live human referent agree answering an AI claim about exactly that figure
-  // in this interval) shares the figure in public just as an executed focus does.
-  const referentAgreed = (id: string) => referentShared && claims.some(c => c.speaker === "human" && c.act === "agree" && c.aspect === "referent" && c.sourceTurn > lastBoundary &&
-    c.targets.length === 1 && c.targets[0] === id && claims.some(a => a.id === c.respondsTo && a.speaker === "ai" && a.targets.length === 1 && a.targets[0] === id));
-  const wasFocused = (id: string) => prevIds.includes(id) || focusedTurns.some(j => j.ids.includes(id)) || referentAgreed(id);
+  const wasFocused = (id: string) => prevIds.includes(id) || focusedTurns.some(j => j.ids.includes(id));
   // The partner's own latest word on whether a figure is the one meant: a referent denial (targets taken from the claim it answers when it has none)
   // blocks agreement on that figure until a later referent claim of theirs re-affirms it. This is about the target, not about the proposed name.
   const claimTargets = (c: LocalClaimView) => c.targets.length ? c.targets : claims.find(p => p.id === c.respondsTo)?.targets ?? [];
@@ -698,7 +694,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         (!aiEnabled || events.filter(other => other.seq === e.seq).length === 1)).slice(-REFERENCE_LIMITS.publicTurns).map(e => ({ turn: e.seq, speaker: e.speaker, text: e.text,
         ...(e.nonReferential ? { nonReferential: true } : {}) }));
       const previous = state.judgments.at(-1), previousExecution=previous?(integrated?previous.jevTurn.executed!:previous.jevTurn.decision):null, previousAi = previous && publicTurns.find(t => t.speaker === "ai" && t.turn > previous.turnIndex && t.turn < latest.seq);
-      const local = { ...options.localGrounding, ...(holisticV2 ? { referentAcrossAspects: true } : {}), extractor: createMemoLocalExtractor({ complete(messages, options) {
+      const local = { ...options.localGrounding, extractor: createMemoLocalExtractor({ complete(messages, options) {
         if (messages.some(message => typeof message.content !== "string")) throw new JevTurnError("invalid_state");
         return client.complete(messages as Message[], options);
       } }, { getMemo: () => structuredClone(memo), holistic: holisticV2, ...(options.localGrounding.researchLimits === undefined ? {} : { researchLimits: options.localGrounding.researchLimits, timeoutMs: options.localGrounding.timeoutMs }) }) };
@@ -738,7 +734,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         publicNames: claims.filter(c => c.name !== null && publicTurns.some(t => t.turn === c.sourceTurn && t.text.includes(c.name!)))
           .map(c => ({ name: c.name!, figureId: c.targets.length === 1 ? c.targets[0] : null, sourceTurn: c.sourceTurn })) };
       if (questionLayout === "two_stage_v3") {
-        baseInput.agreeNames = buildAgreeNamesV3(claims, publicTurns, latest.seq, slots, state, null, holisticV2);
+        baseInput.agreeNames = buildAgreeNamesV3(claims, publicTurns, latest.seq, slots, state);
         baseInput.nameLedger = structuredClone(state.ledger);
         // holistic_v1: the memo's readings are explanations, never AI-proposed names (the candidates are then only names that were said in public).
         if (holisticV2) {
@@ -786,7 +782,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       record.humanReferent = { ...estimate, turnIndex: latest.seq, observationMemo };
       baseInput.humanReferent = { status: estimate.status, scores: structuredClone(estimate.scores) };
       // The estimate of this very exchange backs a re-affirmation of a denied figure, so the candidates are completed only now.
-      if (questionLayout === "two_stage_v3") baseInput.agreeNames = buildAgreeNamesV3(claims, publicTurns, latest.seq, slots, state, baseInput.humanReferent, holisticV2);
+      if (questionLayout === "two_stage_v3") baseInput.agreeNames = buildAgreeNamesV3(claims, publicTurns, latest.seq, slots, state, baseInput.humanReferent);
       if (adaptive && baseInput.repairHistory.length && typeof jevDecision.estimateRepairProspect === "function") {
         record.repairHistory = structuredClone(repairHistory);
         let prospect = unknownRepairProspect();

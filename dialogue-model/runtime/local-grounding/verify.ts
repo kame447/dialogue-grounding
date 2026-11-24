@@ -29,8 +29,6 @@ export type LocalVerificationDiagnostic = {
 };
 export type LocalVerifiedUpdate = LocalVerificationResult & { diagnostics?: LocalVerificationDiagnostic[] };
 type VerificationInput = {
-  /** holistic_v2 only: a human referent agree/deny that answers an AI claim about exactly one figure points at that figure whatever the claim's aspect. */
-  referentAcrossAspects?: boolean;
   graph: LocalGraph;
   turn: number;
   publicTurns: readonly PublicTurn[];
@@ -46,7 +44,7 @@ const independentActs = new Set(["assert", "construe", "name_propose", "ask"]);
 const overlap = (a: readonly string[], b: readonly string[]) => a.some(slot => b.includes(slot));
 
 /** Only the CURRENT public human turn may supply a new segment's quote. */
-export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts, referentAcrossAspects = false }: VerificationInput): LocalVerifiedUpdate {
+export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts }: VerificationInput): LocalVerifiedUpdate {
   const result: LocalVerifiedUpdate = { operations: [], rejected: [] };
   // Revalidate JSON-restored graphs before using any model-selected pointer.
   snapshotReferenceGraph(graph);
@@ -113,13 +111,7 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     // Deferring or revisiting an issue inherits its aspect only when extraction
     // supplied generic progress. Explicit semantic disagreements remain invalid.
     if (prior && aspect === "progress" && ["defer", "revisit"].includes(act)) aspect = prior.aspect;
-    // The partner pointing at the figure the AI described ("that one") answers a claim of any aspect; the figure is the AI claim's single target. A claim about
-    // several figures is never narrowed this way.
-    const referentReply = referentAcrossAspects && !!prior && prior.speaker === "ai" && aspect === "referent" && prior.aspect !== "referent" &&
-      (act === "agree" || act === "deny") && prior.sourceTurn < turn && prior.targets.length === 1 && (targets.length === 0 || overlap(prior.targets, targets)) &&
-      (segment.respondsToTurn === null || segment.respondsToTurn === prior.sourceTurn);
-    if (referentReply) targets = [...prior!.targets];
-    if (prior && !referentReply && (prior.sourceTurn >= turn || prior.aspect !== aspect || !overlap(prior.targets, targets) ||
+    if (prior && (prior.sourceTurn >= turn || prior.aspect !== aspect || !overlap(prior.targets, targets) ||
         (segment.respondsToTurn !== null && segment.respondsToTurn !== prior.sourceTurn))) {
       reject("inconsistent_claim_response"); continue;
     }
@@ -163,7 +155,7 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     let local = result.operations.length + 1;
     while (graph.records.some(r => (r as { id?: string }).id === `${turn}:local${local}`) || result.operations.some(r => r.id === `${turn}:local${local}`)) local++;
     const id = `${turn}:local${local}`;
-    const issueId = referentReply ? id : prior?.issueId ?? linkedIssue ?? id;
+    const issueId = prior?.issueId ?? linkedIssue ?? id;
     result.operations.push({ kind: "claim", id, issueId,
       targets, aspect, act, proposition: segment.proposition, name,
       speaker: "human", sourceTurn: turn, quote, respondsTo: prior?.id ?? null, source: "partner_statement" });

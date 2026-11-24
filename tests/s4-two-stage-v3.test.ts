@@ -890,19 +890,3 @@ test('05m: a withdrawn partner proposal is no longer a proposal: the regular hol
     assert.ok(finalChecks(nameless).length >= 4 && finalChecks(nameless).every((c: any) => c.status === 'pass'), label + ' (nameless withdrawal)');
   }
 });
-
-test('05o: "that one" to the figure the AI described is recorded, makes the unbound naming proposal agreeable, and the regular holistic_v2 agree record (both strategies) is accepted', async () => {
-  const [, , , s3] = Object.keys(OLD.state.ledger);
-  const speech = '角ばった塊に細い脚が付いた形のように見えます。';
-  const ai = JSON.stringify([{ segmentId: 'shape', quote: speech, targets: [s3], aspect: 'construal', proposition: '角ばった塊に脚が付く', name: null, linkedIssueId: null, respondsToTurn: null }]);
-  const seg = (quote: string, aspect: string, name: string | null) => JSON.stringify([{ segmentId: 's1', quote, targets: [], aspect, proposition: quote, name, linkedIssueId: null, respondsToTurn: null }]);
-  for (const label of ['repair-first', 'bypass-enabled'] as const) {
-    const record = await buildRecords({ label, turns: [
-      { human: 'どんな図形がありますか？', plan: { action: 'accept', target: 'none', speech, aiExtraction: ai } },
-      { human: 'そうそう、それ', plan: { action: 'accept', target: 'none', act: 'agree', antecedent: 'claim_0', extraction: seg('そうそう、それ', 'referent', null) } },
-      { human: 'これ、かかしとかどう？', plan: { action: 'agree', target: 'figure_3', name: 'かかし', act: 'name_propose', speech: '「かかし」と呼びましょう。', extraction: seg('かかし', 'name', 'かかし') } }] });
-    assert.equal(record.trials[0].attempts[0].executed.action, 'agree', label);
-    assert.ok(finalChecks(record).length >= 4 && finalChecks(record).every((c: any) => c.status === 'pass'), label);
-    assert.ok(!finalChecks(relabel(record, 'holistic_v1')).every((c: any) => c.status === 'pass'), label + ': the same record under holistic_v1 (no referent reply rule)');
-  }
-});

@@ -218,12 +218,8 @@ function validateSupport(record, records, historical = false) {
     if (!record.respondsTo) return;
     const prior = byId.get(record.respondsTo);
     if (prior?.kind !== "claim" || (!historical && dead.has(prior.id))) fail("missing_provenance");
-    // The partner pointing at the figure the AI described ("that one", holistic_v2): a referent agree/deny of the partner's own issue that answers an AI claim
-    // about exactly that one figure, whatever the AI claim's aspect. Nothing else may cross aspects or issues.
-    const referentReply = record.aspect === "referent" && record.speaker === "human" && ["agree", "deny"].includes(record.act) && prior.speaker === "ai" &&
-      prior.aspect !== "referent" && prior.targets.length === 1 && record.targets.length === 1 && record.targets[0] === prior.targets[0];
     if (prior.id === record.id || prior.sourceTurn > record.sourceTurn || prior.turn > record.turn ||
-        !referentReply && (prior.aspect !== record.aspect || prior.issueId !== record.issueId) ||
+        prior.aspect !== record.aspect || prior.issueId !== record.issueId ||
         !prior.targets.some((slot) => record.targets.includes(slot))) fail("inconsistent_claim_response");
     const visited = new Set([record.id]);
     let cursor = prior;

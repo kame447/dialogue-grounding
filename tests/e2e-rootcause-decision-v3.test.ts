@@ -1124,27 +1124,3 @@ test('holistic_v2 (names, 05k-B2): a partner name stays out of the candidates wh
     }
   }
 });
-
-test('holistic_v2 (referent reply): "that one" to an AI claim about one figure is recorded as a referent agree and makes an unbound naming proposal agreeable; v1 and a multi-figure claim are unchanged', async () => {
-  const offered = (r: { requests: Array<{ questions: Record<string, { criteria: Record<string, string> }> }> }) =>
-    Object.keys(r.requests.find(q => q.questions.action)!.questions.action.criteria);
-  const run = async (holistic: boolean | 'holistic_v1', aiTargets: number[], reply: boolean) => {
-    const f = fixture('bypass-enabled', { aiPublic: true, holistic });
-    const speech = '角ばった塊に細い脚が付いた形のように見えます。';
-    const aiSegment: LocalSegmentProposal = { segmentId: 'shape', quote: speech, targets: aiTargets.map(i => ids[i]), aspect: 'construal', proposition: '角ばった塊に脚が付く',
-      name: null, linkedIssueId: null, respondsToTurn: null };
-    await f.exchange('どんな図形がありますか？', { action: 'accept', drafts: [speech], aiSegments: [aiSegment] });
-    const that = 'そうそう、それ';
-    const referent: Segment = { quote: that, name: null, targets: [], act: 'agree', aspect: 'referent', proposition: that };
-    const second = await f.exchange(reply ? that : 'うん、続けて。', { action: 'accept', drafts: ['はい。'], ...(reply ? { segments: [referent] } : {}) });
-    const proposal = 'これ、かかしとかどう？';
-    const third = await f.exchange(proposal, { action: 'accept', draftActs: ['none'], drafts: ['図形の話ですね。'], segments: [naming(proposal, 'かかし')] });
-    return { second, third, offered: offered(third) };
-  };
-  const ok = await run(true, [3], true);
-  assert.ok(ok.third.input.priorClaims.some(c => c.speaker === 'human' && c.act === 'agree' && c.aspect === 'referent' && c.targets.join() === ids[3]), 'the referent agree is recorded with the described figure');
-  assert.ok(ok.offered.includes('agree'), 'the unbound naming proposal can now be agreed');
-  assert.ok(!(await run(true, [3], false)).offered.includes('agree'), 'without the reply nothing is shared');
-  assert.ok(!(await run('holistic_v1', [3], true)).offered.includes('agree'), 'holistic_v1 keeps the earlier rule (the reply is dropped)');
-  assert.ok(!(await run(true, [3, 4], true)).offered.includes('agree'), 'a claim about several figures is not narrowed');
-});
