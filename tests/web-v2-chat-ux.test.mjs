@@ -306,29 +306,29 @@ test("a missing POST acknowledgement times out to a retained retryable bubble wi
   held.release(); await tick();
 });
 
-test("plain Enter and IME do not submit; Shift+Enter sends exact multiline text once", async () => {
+test("Shift+Enter and IME do not submit; plain Enter sends exact multiline text once", async () => {
   const { e, calls, advance } = await ui();
   const text = "  第一行\n第二行\n";
   e.utterance.value = text;
-  for (const fields of [{}, { shiftKey: true, isComposing: true }, { shiftKey: true, keyCode: 229 },
-    { shiftKey: true, ctrlKey: true }, { shiftKey: true, altKey: true }, { shiftKey: true, metaKey: true }]) {
+  for (const fields of [{ shiftKey: true }, { isComposing: true }, { keyCode: 229 },
+    { ctrlKey: true }, { altKey: true }, { metaKey: true }]) {
     assert.equal(e.utterance.fire("keydown", { key: "Enter", ...fields }).prevented, false);
   }
   e.utterance.fire("compositionstart");
-  assert.equal(e.utterance.fire("keydown", { key: "Enter", shiftKey: true }).prevented, false);
+  assert.equal(e.utterance.fire("keydown", { key: "Enter" }).prevented, false);
   e.utterance.fire("compositionend");
-  assert.equal(e.utterance.fire("keydown", { key: "Enter", shiftKey: true }).prevented, false);
+  assert.equal(e.utterance.fire("keydown", { key: "Enter" }).prevented, false);
   await advance(0);
-  assert.equal(e.utterance.fire("keydown", { key: "Enter", shiftKey: true, repeat: true }).prevented, true);
+  assert.equal(e.utterance.fire("keydown", { key: "Enter", repeat: true }).prevented, true);
   assert.equal(messageCalls(calls).length, 0);
-  assert.equal(e.utterance.fire("keydown", { key: "Enter", shiftKey: true }).prevented, true);
+  assert.equal(e.utterance.fire("keydown", { key: "Enter" }).prevented, true);
   assert.equal(e.utterance.value, "");
-  assert.equal(e.utterance.fire("keydown", { key: "Enter", shiftKey: true, repeat: true }).prevented, true);
+  assert.equal(e.utterance.fire("keydown", { key: "Enter", repeat: true }).prevented, true);
   await tick();
   assert.deepEqual(messageCalls(calls).map((call) => call.body.text), [text]);
   assert.equal(messageBodies(e).at(-1), text);
   e.utterance.value = "   ";
-  e.utterance.fire("keydown", { key: "Enter", shiftKey: true });
+  e.utterance.fire("keydown", { key: "Enter" });
   await tick();
   assert.equal(messageCalls(calls).length, 1);
   e.utterance.value = "ボタン送信";
@@ -360,7 +360,7 @@ test("typing motion is disabled by reduced-motion and the shortcut hint matches 
   assert.match(css, /@keyframes typing-bounce/u);
   assert.match(css, /@media\(prefers-reduced-motion:reduce\)\{\.typing-indicator span\{animation:none\}/u);
   assert.doesNotMatch(html + script, /AIが考えています|受理済み・会話を更新中|送信中…/u);
-  assert.match(html, /Enterで改行・Shift＋Enterで送信/u);
+  assert.match(html, /Enterで送信・Shift＋Enterで改行/u);
   assert.match(css, /#chat textarea\{[^}]*overflow-y:auto/u);
 });
 
