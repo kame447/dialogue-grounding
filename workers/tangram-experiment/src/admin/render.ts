@@ -295,12 +295,14 @@ export function renderReceptions(items: ReceptionAdminRow[], next: string | null
     const lastRecord = entry.trials.at(-1)?.recordId;
     const open = entry.status === 'in_progress' && lastRecord && RECORD_ID.test(lastRecord)
       ? `<a href="/admin/record/${escapeHtml(lastRecord)}/experiment" target="_blank" rel="noopener noreferrer">実験画面を開く</a>` : '';
+    const usage = entry.hasUnrecordedProductionAdmission && RECORD_ID.test(entry.receptionId)
+      ? `<a href="/admin/reception/${escapeHtml(entry.receptionId)}/usage.json">開始失敗の使用量 JSON</a>` : '';
     return `<tr data-id="${escapeHtml(entry.receptionId)}" data-status="${escapeHtml(entry.status)}" data-created="${escapeHtml(entry.createdAt)}" data-key="${escapeHtml(entry.revision + ':' + protocolKey)}">${td('受付番号', escapeHtml(entry.number ?? '未割当'))}${td('受付時刻', timeTag(entry.createdAt))}
 ${td('状態', receptionBadge(entry.status))}${td('条件順序', escapeHtml(entry.plan?.order.join(' → ') ?? ''))}
 ${td('図形セット', escapeHtml(figureSetSummary(entry.plan?.figureSets ?? [])))}${td('回転', escapeHtml(entry.plan ? ROTATION_LABELS[entry.plan.rotationMode] ?? '' : ''))}${td('試行の間', escapeHtml(entry.plan ? BETWEEN_LABELS[entry.plan.betweenTrials] ?? '' : ''))}
 ${td('試行記録', entry.trials.filter(trial => trial.recordId && RECORD_ID.test(trial.recordId)).map(trial =>
       `<a href="/admin/record/${escapeHtml(trial.recordId)}">${escapeHtml(trial.recordId)}</a>`).join('<br>'))}
-${td('操作', `${entry.status === 'pending' && unstarted && protocol.configured && protocol.mode !== 'off' ? form(entry, 'approve') : ''}${cancel ? form(entry, 'cancel') : ''}${open}`, ' class="ops"')}</tr>`;
+${td('操作', `${entry.status === 'pending' && unstarted && protocol.configured && protocol.mode !== 'off' ? form(entry, 'approve') : ''}${cancel ? form(entry, 'cancel') : ''}${open}${usage}`, ' class="ops"')}</tr>`;
   }).join('');
   const names = ['受付番号', '受付時刻', '状態', '条件順序', '図形セット', '回転', '試行の間', '試行記録', '操作'];
   const list = `<div id="reception-list"${live ? ` data-version="${escapeHtml(live.version)}" data-since="${escapeHtml(live.since)}"` : ''}>

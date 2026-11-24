@@ -1,3 +1,5 @@
+import { ParticipantUsageLedger } from './participant-usage.ts';
+import { PARTICIPANT_PRODUCTION_PROFILE } from './participant-usage-policy.ts';
 // Node loopback only. Explicit private configuration; never an assignment method.
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { constants } from 'node:fs';
@@ -29,9 +31,9 @@ import { checkModelIdentity, MODEL_CONTRACT_V2 } from '../model-identity-contrac
 import { DEFAULT_COST_CAP_USD } from '../diagnostics/jev-shadow-eval/local-openrouter.ts';
 import { inferenceHistory } from '../v2/agreement-gate.ts';
 
-export type JevResearchLedger = RunBudget;
-export type JevResearchOptions = Readonly<{ profile: ResearchTrialProfileV3; observer: ObservationObserver;
-  jevDecision: JevDecisionClient; localGrounding: JevTurnLocalOptions; ledger: JevResearchLedger; technicalTrial?: AdaptiveRepairTrial }>;
+export type JevResearchLedger = RunBudget | ParticipantUsageLedger;
+export type JevResearchOptions<Ledger extends JevResearchLedger = RunBudget> = Readonly<{ profile: ResearchTrialProfileV3; observer: ObservationObserver;
+  jevDecision: JevDecisionClient; localGrounding: JevTurnLocalOptions; ledger: Ledger; technicalTrial?: AdaptiveRepairTrial }>;
 export class ParticipantJevError extends Error {
   readonly code: string;
   constructor(code: 'invalid_config' | 'wrong_own_material' | 'initialization_failed' | 'model_mismatch') {
@@ -64,7 +66,7 @@ function checkedProfile(value: unknown): ResearchTrialProfileV3 {
 /** R2: classify restore before any queue, initial observer, or model work. */
 export function selectParticipantJev(restore: any, provided: unknown, context: {
   referenceMemory: boolean; strategy: string; style: string; legacy: unknown[];
-}): JevResearchOptions | null {
+}): JevResearchOptions<JevResearchLedger> | null {
   try {
     const marker = restore?.options?.jevResearch;
     if (restore) {
@@ -91,8 +93,11 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
     const local = v.localGrounding as JevTurnLocalOptions;
     if (typeof observer?.observeAll !== 'function' || typeof observer.reobserve !== 'function' || typeof jevDecision?.decide !== 'function' ||
         typeof local?.classifier?.classify !== 'function' || local.timeoutMs !== profile.timeouts.localMs ||
-        local.aiPublicClaims !== profile.localGrounding.aiPublicClaims || !(v.ledger instanceof RunBudget)) return invalid();
+        local.aiPublicClaims !== profile.localGrounding.aiPublicClaims || !(v.ledger instanceof RunBudget || v.ledger instanceof ParticipantUsageLedger)) return invalid();
     if (restore) {
+      const savedProfile = restore.options.participantRuntimeProfile;
+      if (v.ledger instanceof ParticipantUsageLedger ? savedProfile !== PARTICIPANT_PRODUCTION_PROFILE :
+        Object.hasOwn(restore.options,'participantRuntimeProfile') || restore.jevLedger?.schemaVersion === PARTICIPANT_PRODUCTION_PROFILE) return invalid();
       const savedTrial = Object.hasOwn(restore.options,'technicalTrial') ? checkedTechnicalTrial(restore.options.technicalTrial) : undefined;
       if (JSON.stringify(savedTrial) !== JSON.stringify(technicalTrial)) return invalid();
       if (restore.options.profileSha256 !== researchHash(profile) ||
@@ -155,10 +160,14 @@ export function withParticipantJevTurn<T>(ledger:RunBudget,turn:number,operation
   return scope(ledger).run({turn,phase:null,boundary:'common'},operation);
 }
 type ChatClient = {complete(messages:any[],options?:any):Promise<any>};
-export function participantLunaClient(client:ChatClient,ledger:RunBudget,profile:ResearchTrialProfileV3):ChatClient {
+export function participantLunaClient(client:ChatClient,ledger:JevResearchLedger,profile:ResearchTrialProfileV3):ChatClient {
   const timed=researchGenerationClient(client,profile.timeouts.generationMs);
   return {async complete(messages,options={}) {
     if (options.signal?.aborted) throw Object.assign(Error('aborted'),{name:'AbortError'});
+    if (ledger instanceof ParticipantUsageLedger) {
+      const phase = ['generation','final_submission','ai_extraction'].includes(options.phase) ? options.phase : 'dialogue';
+      return ledger.logical('luna', phase, () => timed.complete(messages,options));
+    }
     ledger.beforeSend();ledger.lunaCalls++;
     const parent=scope(ledger).getStore(),phase=options.phase ?? null;
     return scope(ledger).run({turn:parent?.turn??null,phase,boundary:['generation','final_submission','ai_extraction'].includes(phase)?'tail':parent?.boundary??'common'},

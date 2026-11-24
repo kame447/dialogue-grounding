@@ -1,3 +1,4 @@
+import { verifiedParticipantUsage } from './participant-usage-fields.ts';
 import { MODEL_CONTRACT_V2 } from '../../../dialogue-model/runtime/model-identity-contract.ts';
 // Private Service-binding transport. Never exposed through the Worker's fetch handler.
 import { DECISION_MODELS, OPENROUTER_DECISIONS_URL, decisionConfig } from './decisions.mjs';
@@ -58,7 +59,7 @@ function choicePayload(input: unknown) {
   return new TextEncoder().encode(wire).byteLength <= MAX_BODY && !imageField.test(wire) ? { payload, wire } : null;
 }
 
-function choiceReply(input: unknown, questions: Record<string, unknown>) {
+function choiceReply(input: unknown, questions: Record<string, unknown>, usageOnly: boolean) {
   const response = record(input);
   const raw = record(response?.answers);
   if (!raw || !exact(raw, Object.keys(questions))) return null;
@@ -75,13 +76,26 @@ function choiceReply(input: unknown, questions: Record<string, unknown>) {
       ...(answer.confidence !== undefined ? { confidence: answer.confidence } : {}),
     } });
   }
-  const cost = record(response?.usage)?.cost;
-  if (typeof cost !== 'number' || !Number.isFinite(cost) || cost < 0) return null;
+  const usage = record(response?.usage);
+  const cost = usage?.cost ?? null;
+  if (!(usageOnly && cost === null) && (typeof cost !== 'number' || !Number.isFinite(cost) || cost < 0)) return null;
+  const tokens = (n: unknown) => typeof n === 'number' && Number.isSafeInteger(n) && n >= 0 ? n : null;
   const id = typeof response?.id === 'string' && /^gen-[A-Za-z0-9_-]{1,124}$/u.test(response.id) ? response.id : null;
-  return { model: response?.model, id, usage: { cost }, answers };
+  return { model: response?.model, id, usage: { cost, ...(usageOnly ? {
+    prompt_tokens: tokens(usage?.prompt_tokens ?? usage?.input_tokens),
+    completion_tokens: tokens(usage?.completion_tokens ?? usage?.output_tokens),
+  } : {}) }, answers };
 }
 
-export async function participantChoices(env: ParticipantEnvironment, input: unknown, expectedId: string, fetchImpl = globalThis.fetch) {
+export function participantChoices(env: ParticipantEnvironment, input: unknown, expectedId: string, fetchImpl = globalThis.fetch) {
+  return choices(env, input, expectedId, fetchImpl, false);
+}
+
+export function participantUsageChoices(env: ParticipantEnvironment, input: unknown, expectedId: string, fetchImpl = globalThis.fetch) {
+  return choices(env, input, expectedId, fetchImpl, true);
+}
+
+async function choices(env: ParticipantEnvironment, input: unknown, expectedId: string, fetchImpl: typeof fetch, usageOnly: boolean) {
   const pin = configuredParticipantPin(env);
   if (!pin) return failure(503, 'service_unconfigured');
   if (expectedId !== pin.jevModelId) return failure(409, 'model_mismatch');
@@ -98,8 +112,11 @@ export async function participantChoices(env: ParticipantEnvironment, input: unk
     const raw = await response.json();
     try { requireExactParticipantModel(expectedId, record(raw)?.model); }
     catch { return failure(502, 'model_mismatch'); }
-    const data = choiceReply(raw, request.payload.questions);
-    if (!data || JSON.stringify(data).includes(env.OPENROUTER_DECISIONS_API_KEY!)) return failure(502, 'invalid_upstream_response');
+    const data = choiceReply(raw, request.payload.questions, usageOnly);
+    if (!data || JSON.stringify(data).includes(env.OPENROUTER_DECISIONS_API_KEY!)) {
+      const rejected = failure(502, 'invalid_upstream_response');
+      return usageOnly ? { ...rejected, verifiedUsage: verifiedParticipantUsage(expectedId, record(raw)?.usage) } : rejected;
+    }
     return { status: 200, data };
   } catch { return failure(signal.aborted ? 504 : 502, 'upstream_unavailable'); }
 }

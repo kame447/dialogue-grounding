@@ -6,6 +6,7 @@ import { NamingTaskError } from "../../../dialogue-model/runtime/naming-error.mj
 import { sessionCookie, sessionId } from "./session-cookie.ts";
 import { isExcessiveTraffic, type SoftLimitBindings } from "./soft-limits";
 import { AdminIndex } from "./admin/index-do";
+import type { ReceptionFailedStartUsage } from './admin/reception-port.ts';
 import { createReceptionAdminPort, createReceptionSettingsPort } from './admin/reception-adapter.ts';
 import { handleAdmin, isAdminPath, type AdminLimiter } from "./admin/routes.ts";
 import { summarizeRecord, type AdminSummary } from "./admin/summary.ts";
@@ -19,7 +20,7 @@ import { lockResult, participantReview, QUESTIONNAIRE_FORM, recordListEntry, sor
 
 import { createBaseAssignmentSession, BaseSessionError } from "../../../dialogue-model/runtime/v2/base-assignment-session.ts";
 import { validateBaseStart, validateBaseAssignmentConfig, BaseAssignmentError } from "../../../dialogue-model/runtime/v2/base-assignment.ts";
-import { data, readOwner, validateBoundBaseRecord } from "../../../dialogue-model/runtime/v2/base-assignment-data.ts";
+import { assignmentParticipantModelPin, data, readOwner, validateBoundBaseRecord } from "../../../dialogue-model/runtime/v2/base-assignment-data.ts";
 import type { BaseOwnerState, BaseRecord, BaseSession, MakeBaseTask, OwnerRead } from "../../../dialogue-model/runtime/v2/base-assignment.ts";
 import { participantContactHTML } from "../../../dialogue-model/runtime/v2/participant-contact.ts";
 import { PARTICIPANT_STOP_HTML } from "../../../dialogue-model/runtime/v2/participant-stop-page.ts";
@@ -36,6 +37,8 @@ import { BROWSER_SESSIONS_KEY, EMPTY_TAB_SESSION_MAX_AGE_MS, MAX_EMPTY_TAB_SESSI
 import type { BrowserSession, BrowserSessionSummary, ReceptionMode } from './tab-sessions.ts';
 import { createTrialV2, modelView } from "../../../dialogue-model/runtime/stimuli/scatter-v2.mjs";
 import { resolveWorkerParticipantModelPin } from "../../../dialogue-model/runtime/v2/participant-model-pin.ts";
+import { PARTICIPANT_PRODUCTION_PROFILE } from '../../../dialogue-model/runtime/web/participant-usage-policy.ts';
+import { ParticipantUsageLedger, type ParticipantUsageStore } from '../../../dialogue-model/runtime/web/participant-usage.ts';
 import { createWorkerParticipantRuntime, workerParticipantPolicy, type ParticipantService } from "./participant-runtime.ts";
 export { AdminIndex };
 
@@ -46,7 +49,7 @@ type StoredTrial = {
   recordId: string;
   seed: number;
   strategy: Strategy;
-  options: { referenceMemory: boolean; utteranceStyle?: UtteranceStyle };
+  options: { referenceMemory: boolean; utteranceStyle?: UtteranceStyle; participantRuntimeProfile?: unknown };
   queueState: { pendingHumanEventIds: string[]; errorCode: string | null };
   closed?: boolean;
   [field: string]: unknown;
@@ -69,6 +72,7 @@ export interface Env extends SoftLimitBindings {
   PARTICIPANT_CONTACT_TEXT?: string;
   // Add the private proxy's verified pin to new approvals only.
   PARTICIPANT_TERRA_ENABLED?: string;
+  PARTICIPANT_TERRA_PROFILE?: string;
   PARTICIPANT_TERRA_LIMITS_JSON?: string;
   // Deployment-wide AI utterance style for new trials; identical for both strategies.
   V2_UTTERANCE_STYLE?: string;
@@ -138,6 +142,8 @@ function sanitizedError(error: unknown): Response {
     : ["ai_busy", "ai_retry_required", "busy", "questionnaire_submitted", "trial_not_completed", "trial_changed"].includes(code) ? 409 : 400;
   return json(status, { error: code });
 }
+
+const participantUsageKey = (assignmentId: string) => 'participant-usage:' + assignmentId;
 
 export class TangramSession extends DurableObject<Env> {
   private trial: NamingTask | null = null;
@@ -211,6 +217,29 @@ export class TangramSession extends DurableObject<Env> {
   }
   /** Researcher-only RPCs. The management adapter supplies authorization. */
   async adminReception(): Promise<Reception | null> { return this.readReception(); }
+  async adminFailedStartUsage(receptionId: string): Promise<ReceptionFailedStartUsage | null> {
+    return this.ctx.storage.transaction(async tx => {
+      const rawReception = await tx.get('reception:v1');
+      if (rawReception === undefined) return null;
+      const reception = validateReception(rawReception), plan = reception.plan;
+      const ownerId = this.ctx.id.toString();
+      if (reception.receptionId !== receptionId || reception.objectId !== ownerId ||
+          !plan || plan.schemaVersion === 'reception_plan_v1' || plan.participantRuntimeProfile !== PARTICIPANT_PRODUCTION_PROFILE) return null;
+      const owner = readOwner(await tx.get('base:owner:v1'), ownerId);
+      const failedStarts: ReceptionFailedStartUsage['failedStarts'] = [];
+      for (const entry of Object.values(owner.admissions)) {
+        if (entry?.status !== 'failed' || entry.record !== null || entry.errorCode === null || entry.errorCode === 'record_deleted') continue;
+        const { assignmentId, source } = entry.assignment;
+        if (source.kind !== plan.schemaVersion || source.receptionId !== receptionId ||
+            JSON.stringify(source.plan) !== JSON.stringify(plan) || reception.trials[source.trialIndex]?.recordId !== null ||
+            !plan.participantModelPin) throw new ReceptionError('reception_unavailable');
+        const journal = await tx.get(participantUsageKey(assignmentId));
+        failedStarts.push({ assignmentId, trialIndex: source.trialIndex, errorCode: entry.errorCode,
+          usage: journal === undefined ? null : ParticipantUsageLedger.readSnapshot(journal, assignmentId, plan.participantModelPin) });
+      }
+      return { receptionId, failedStarts };
+    });
+  }
   async adminApproveReception(input: { expectedRevision: number; order: number; protocol: unknown }): Promise<Reception> {
     return this.receptionSerial(async () => {
       // One settings read is the fixed point: the same snapshot is compared and copied into the plan.
@@ -218,12 +247,19 @@ export class TangramSession extends DurableObject<Env> {
       if (!receptionOpen(settings.mode)) throw new ReceptionError('reception_closed');
       if (!settings.protocol) throw new ReceptionError('protocol_unconfigured');
       const protocol = settings.protocol.protocol, expected = input?.protocol;
-      let participant: Pick<Parameters<typeof approveReception>[1], 'participantModelPin' | 'participantLimits'> = {};
+      let participant: Pick<Parameters<typeof approveReception>[1], 'participantModelPin' | 'participantRuntimeProfile' | 'participantLimits'> = {};
       if (this.env.PARTICIPANT_TERRA_ENABLED === 'on') {
         try {
-          const participantLimits = validateParticipantLimits(JSON.parse(this.env.PARTICIPANT_TERRA_LIMITS_JSON ?? 'null'));
-          const { pin: participantModelPin } = await workerParticipantPolicy(this.env.PARTICIPANT_AI_PROXY);
-          participant = { participantModelPin, participantLimits };
+          const configuredProfile = this.env.PARTICIPANT_TERRA_PROFILE;
+          if (configuredProfile === PARTICIPANT_PRODUCTION_PROFILE) {
+            const { pin: participantModelPin } = await workerParticipantPolicy(this.env.PARTICIPANT_AI_PROXY, true);
+            participant = { participantModelPin, participantRuntimeProfile: PARTICIPANT_PRODUCTION_PROFILE };
+          } else {
+            if (configuredProfile !== undefined) throw new Error('unknown participant profile');
+            const participantLimits = validateParticipantLimits(JSON.parse(this.env.PARTICIPANT_TERRA_LIMITS_JSON ?? 'null'));
+            const { pin: participantModelPin } = await workerParticipantPolicy(this.env.PARTICIPANT_AI_PROXY);
+            participant = { participantModelPin, participantLimits };
+          }
         } catch {
           throw new ReceptionError('reception_unavailable');
         }
@@ -301,7 +337,16 @@ export class TangramSession extends DurableObject<Env> {
 
   /** Researcher-only read of one archived trial for /admin. It neither restores nor resumes a trial. */
   async adminRecord(recordId: string): Promise<StoredTrial | null> {
-    return await this.withQuestionnaire(await this.readOwnedArchive(recordId));
+    const record = await this.readOwnedArchive(recordId);
+    if (record?.options.participantRuntimeProfile === PARTICIPANT_PRODUCTION_PROFILE) {
+      const saved = record as unknown as BaseRecord;
+      const { assignmentId } = saved.assignment;
+      const pin = assignmentParticipantModelPin(saved.assignment);
+      if (!pin || saved.jevLedger === undefined) throw new BaseAssignmentError('assignment_record_invalid');
+      const usage = await ParticipantUsageLedger.open(this.participantUsageStore(assignmentId), assignmentId, pin, saved.jevLedger);
+      return await this.withQuestionnaire({ ...record, jevLedger: usage.snapshot() } as StoredTrial);
+    }
+    return await this.withQuestionnaire(record);
   }
 
   /** A new assigned archive is authoritative only through its saved owner admission. */
@@ -343,6 +388,9 @@ export class TangramSession extends DurableObject<Env> {
           if (entry?.record?.recordId !== recordId) continue;
           // Keep the admission/after key: retries must never create a replacement
           // for this deleted trial. This marker is part of the strict owner schema.
+          if (entry.record.options.participantRuntimeProfile === PARTICIPANT_PRODUCTION_PROFILE) {
+            await tx.delete(participantUsageKey(entry.assignment.assignmentId));
+          }
           entry.record = null;
           entry.status = 'failed';
           entry.errorCode = 'record_deleted';
@@ -662,10 +710,32 @@ export class TangramSession extends DurableObject<Env> {
     });
   }
 
+  private participantUsageStore(assignmentId: string): ParticipantUsageStore {
+    const key = participantUsageKey(assignmentId);
+    return {
+      read: () => this.ctx.storage.get(key),
+      update: (write, kind) => this.ctx.storage.transaction(async tx => {
+        const owner = await tx.get<BaseOwnerState>('base:owner:v1');
+        const entry = kind === 'settle'
+          ? Object.values(owner?.admissions ?? {}).find(entry => entry?.assignment.assignmentId === assignmentId)
+          : owner?.activeKey && owner.admissions[owner.activeKey];
+        // A reserved RPC can finish after initialization failed. Settle it
+        // without reopening the assignment or recreating a deleted journal.
+        if (!entry || entry.assignment.assignmentId !== assignmentId ||
+            entry.status === 'failed' && (kind !== 'settle' || entry.errorCode === 'record_deleted')) {
+          throw new NamingTaskError('ai_unavailable');
+        }
+        const result = write(await tx.get(key));
+        await tx.put({ [key]: result });
+        return result;
+      }),
+    };
+  }
+
   private async createTrial(binding: Parameters<MakeBaseTask>[0]): Promise<NamingTask> {
-    const {seed,strategy,referenceMemory,restore} = binding;
+    const {seed,strategy,referenceMemory,restore,participantRuntime} = binding;
     const policy = binding.participantModelPin === undefined ? null
-      : await workerParticipantPolicy(this.env.PARTICIPANT_AI_PROXY);
+      : await workerParticipantPolicy(this.env.PARTICIPANT_AI_PROXY, Boolean(participantRuntime));
     let pin;
     try {
       pin = resolveWorkerParticipantModelPin({
@@ -675,15 +745,19 @@ export class TangramSession extends DurableObject<Env> {
       throw new NamingTaskError('invalid_options');
     }
     const onPersist = async (snapshot: StoredTrial) => {
-      const record = pin ? { ...snapshot, options: { ...snapshot.options, participantModelPin: pin } } : snapshot;
+      const record = pin ? { ...snapshot, options: { ...snapshot.options, participantModelPin: pin,
+        ...(participantRuntime ? { participantRuntimeProfile: participantRuntime.profile } : {}) } } : snapshot;
       await binding.onPersist(record as unknown as BaseRecord);
       await this.scheduleExpiry();
       this.ctx.waitUntil(this.registerSummary(record));
     };
     if (pin && policy) {
       // Pin-only plans predate reception-level limits. Their existing trials have a ledger snapshot.
-      const limits = binding.participantLimits ?? validateParticipantLimits(restore
-        ? data(restore.jevLedger).limits : JSON.parse(this.env.PARTICIPANT_TERRA_LIMITS_JSON ?? 'null'));
+      const runtimeMode = participantRuntime ? {
+        usage: await ParticipantUsageLedger.open(this.participantUsageStore(participantRuntime.assignmentId),
+          participantRuntime.assignmentId, pin, restore?.jevLedger),
+      } : { limits: binding.participantLimits ?? validateParticipantLimits(restore
+        ? data(restore.jevLedger).limits : JSON.parse(this.env.PARTICIPANT_TERRA_LIMITS_JSON ?? 'null')) };
       const rotationMode = restore?.options.rotationMode ?? binding.rotationMode ?? 'relative_pm90';
       if (rotationMode !== 'relative_pm90' && rotationMode !== 'relative_0') throw new NamingTaskError('invalid_options');
       // The observer and dialogue must see the same board. A restore uses the validated record's selection.
@@ -692,7 +766,7 @@ export class TangramSession extends DurableObject<Env> {
       const trial = createTrialV2({ seed, rotationMode, ...figures });
       const model = modelView(trial);
       const runtime = createWorkerParticipantRuntime({
-        proxy: policy.proxy, pin, limits, own: { ownImage: { mimeType: model.mimeType, base64: model.png.toString('base64') }, ownAnchors: model.anchors },
+        proxy: policy.proxy, pin, ...runtimeMode, own: { ownImage: { mimeType: model.mimeType, base64: model.png.toString('base64') }, ownAnchors: model.anchors },
         cache: {
           read: key => this.ctx.storage.get(key),
           putIfAbsent: (key, entry) => this.ctx.storage.transaction(async tx => {

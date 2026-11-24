@@ -63,7 +63,7 @@ function providerText(raw: unknown, modelId: string): string {
  * ID. The runtime supplies the validated issue and current memo for reobservation.
  * Only initial observations are shared through the private cache.
  */
-export function createWorkerTerraObserver({ modelPin, own, visual, cache, timeoutMs, now, researchLimits }: {
+export function createWorkerTerraObserver({ modelPin, own, visual, cache, timeoutMs, now, researchLimits, onCacheHit }: {
   modelPin: ParticipantModelPin;
   own: ObservationInput;
   visual: VisualPort;
@@ -71,6 +71,7 @@ export function createWorkerTerraObserver({ modelPin, own, visual, cache, timeou
   timeoutMs?: number;
   now?: () => Date;
   researchLimits?: ResearchLimits;
+  onCacheHit?: () => Promise<void>;
 }): ObservationObserver {
   const { terraModelId } = validateParticipantModelPin(modelPin);
   const bound = ownProjection(own);
@@ -115,7 +116,12 @@ export function createWorkerTerraObserver({ modelPin, own, visual, cache, timeou
         const key = await cacheKey();
         const hit = await cache.read(key);
         checkAbort(options);
-        if (hit !== null && hit !== undefined) return await validateEntry(hit, key);
+        if (hit !== null && hit !== undefined) {
+          const memo = await validateEntry(hit, key);
+          await onCacheHit?.();
+          checkAbort(options);
+          return memo;
+        }
         const memo = await observer.observeAll(bound, options);
         const memoSha256 = await sha256(JSON.stringify(memo));
         checkAbort(options);

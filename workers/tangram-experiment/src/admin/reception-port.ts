@@ -1,3 +1,6 @@
+import type { FailureCode } from '../../../../dialogue-model/runtime/v2/base-assignment.ts';
+import type { ParticipantUsageSnapshot } from '../../../../dialogue-model/runtime/web/participant-usage.ts';
+
 /** Researcher-only projections. These types are not the persisted reception or protocol schema. */
 export type ReceptionStrategy = 'repair-first' | 'bypass-enabled';
 export type ReceptionStatus = 'pending' | 'approved' | 'in_progress' | 'finished' | 'cancelled';
@@ -11,6 +14,13 @@ export type ReceptionAdminRow = {
   plan: { order: ReceptionStrategy[]; rotationMode: 'relative_pm90' | 'relative_0'; betweenTrials: 'none' | 'questionnaire_required';
     /** Frozen figure set id per trial; plans before the figure bank read as the legacy set. */ figureSets?: string[] } | null;
   trials: { index: number; recordId: string | null }[];
+  hasUnrecordedProductionAdmission?: true;
+};
+
+export type ReceptionFailedStartUsage = {
+  receptionId: string;
+  failedStarts: { assignmentId: string; trialIndex: number; errorCode: Exclude<FailureCode, 'record_deleted'>;
+    usage: ParticipantUsageSnapshot | null }[];
 };
 export type ReceptionMode = 'on' | 'off' | 'unset';
 export type FigureSetPolicy = 'shared' | 'per_trial';
@@ -42,6 +52,8 @@ export type ReceptionAdminPort = {
   listPage(after: string | null): Promise<{ items: ReceptionAdminRow[]; next: string | null }>;
   /** Read authoritative participant state, rather than trusting an index snapshot for a mutation. */
   get(receptionId: string): Promise<ReceptionAdminRow | null>;
+  /** Reads metering for failed starts with no archived record, without restoring a participant task. */
+  failedStartUsage?(receptionId: string): Promise<ReceptionFailedStartUsage | null>;
   /** The owning DO must CAS revision and pending status, validate the current protocol/order and freeze the plan. */
   approve(receptionId: string, input: { order: number; expectedRevision: number; protocol: DisplayedProtocol }): Promise<ReceptionAdminResult>;
   /** The owning DO must CAS revision and reject cancellation after any trial exists. Never delete trial records. */
