@@ -180,7 +180,7 @@ test("failed or excessive reobservation never changes the caller's memo", async 
 
 test("private trace redacts image bodies, credentials and memo-extractor prompt echoes", async () => {
   const privateMemo = memo();
-  const actInstruction = "Jevが選んだ行動だけを文章にしてください。行動・対象・名前・特徴を変更しないでください。観察メモは仮説で、局所的な支持を図形全体の理解や名称決定へ拡張しないでください。";
+  const actInstruction = "Jevが選んだ行動だけを文章にしてください。行動と対象は変更せず、選択済みの名前・特徴があればそれに従ってください。選択済みの特徴がないacceptでは、相手の問いに観察メモで確かめられる範囲（ある・ない・確かめられない）で直接答えてよく、新しい名前や特徴の確認質問は足さないでください。観察メモは仮説で、局所的な支持を図形全体の理解や名称決定へ拡張しないでください。";
   privateMemo.figures[0].unknowns = [image.base64, "Bearer synthetic-private-canary-12345", MEMO_LOCAL_EXTRACTION_INSTRUCTIONS.split("\n")[0], actInstruction];
   const h = harness({ observer: { async observeAll() { return privateMemo; }, async reobserve() { throw new Error("unused"); } } });
   await h.run();

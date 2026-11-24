@@ -23,7 +23,7 @@ import { validateJevDecision, validateHumanReferentEstimate, validateRepairProsp
 import type { JevDecisionFailureEvidence } from "../decision/jev-decision.ts";
 import { prepareLocalGroundingTurn, validateLocalGroundingOptions, findLocalPublicationViolations } from "./local-grounding-turn.ts";
 import type { LocalGroundingResearchRecord, LocalGroundingTrace } from "./local-grounding-turn.ts";
-import { findAgreeNameMismatch, findGuardViolations, findOrientationLeaks, orientationSafeFallback, rewriteReasons } from "./generation-guard.ts";
+import { findAgreeNameMismatch, findProposeNameMismatch, findGuardViolations, findOrientationLeaks, orientationSafeFallback, rewriteReasons } from "./generation-guard.ts";
 import { createMemoAiExtractor, MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS, AiPublicError, aiHash, emptyAiEvidence } from "../local-grounding/extract-ai.ts";
 import { createJevAiFunctionClassifier, createJevAiSupportChecker, AI_FUNCTION_INSTRUCTIONS, AI_SUPPORT_INSTRUCTIONS,
   AI_RESPONSE_SUPPORT_INSTRUCTIONS, AI_FUNCTION_CRITERIA, AI_SUPPORT_CHOICES, AI_ACT_DESCRIPTIONS } from "../local-grounding/jev-ai-public.ts";
@@ -40,7 +40,7 @@ type Event = { id: string; seq: number; speaker: "human" | "ai"; text: string; n
 type Message = { role: "system" | "user" | "assistant"; content: string };
 type ChatClient = { complete(messages: Message[], options: { phase: string; timeoutMs: number; signal?: AbortSignal }): Promise<{ text: string }> };
 type Guard = { violations: string[]; regenerated: boolean; fallback: boolean };
-const ACT_INSTRUCTIONS = "Jevが選んだ行動だけを文章にしてください。行動・対象・名前・特徴を変更しないでください。観察メモは仮説で、局所的な支持を図形全体の理解や名称決定へ拡張しないでください。";
+const ACT_INSTRUCTIONS = "Jevが選んだ行動だけを文章にしてください。行動と対象は変更せず、選択済みの名前・特徴があればそれに従ってください。選択済みの特徴がないacceptでは、相手の問いに観察メモで確かめられる範囲（ある・ない・確かめられない）で直接答えてよく、新しい名前や特徴の確認質問は足さないでください。観察メモは仮説で、局所的な支持を図形全体の理解や名称決定へ拡張しないでください。";
 // two_stage_v3 only (new text, not yet reviewed by Argon): a revisit whose target stays a candidate set.
 export const REVISIT_MULTIPLE_INSTRUCTIONS = "対象は複数候補のままです。選ばれた行動は、先ほどの未解決の区別に戻ることだけです。どの候補かを勝手に一つに絞らず、名前に決まったとは言わないでください。候補の数や内部の参照IDは相手に伝えず、相手が知らないことを知っているかのようにも話さないでください。";
 const DETAIL_INSTRUCTIONS = "対象は複数候補のままです。detailFigureIdsは選ばれた特徴の出典図形であり、対象の確定ではありません。その特徴を候補すべての性質にせず、候補を勝手に一つに絞らずに確認・修復を表現してください。";
@@ -835,6 +835,8 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         ...(questionLayout === "two_stage_v3" ? findOrientationLeaks(text) : []),
         ...(questionLayout === "two_stage_v3" && judgment.action === "agree" && judgment.candidateName !== null
           ? findAgreeNameMismatch(text, judgment.candidateName) : []),
+        ...(questionLayout === "two_stage_v3" && judgment.action === "propose_name" && judgment.candidateName !== null
+          ? findProposeNameMismatch(text, judgment.candidateName) : []),
         ...(adaptive && /repair[_-]?prospect|repair_issue|candidate_narrowed|candidate_widened|other_figure_benefit|no_open_issue|issue_\d+/iu.test(text.normalize("NFKC").replace(/\s/gu, "")) ? ["internal_field"] : []),
         ...(factored && /repair_?facts|reply_?vs_?previous|not_comparable|widened_or_shifted|same_?question|local_?gaps/iu.test(text.normalize("NFKC").replace(/\s/gu, "")) ? ["internal_field"] : []),
         ...(/human[_-]?referent/iu.test(text.normalize("NFKC").replace(/\s/gu, "")) ? ["internal_field"] : []),

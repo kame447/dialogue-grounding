@@ -61,7 +61,7 @@ async function recordedRun(profile: any, tape: any, label: 'repair-first' | 'byp
   return { trace: { ...structuredClone(traces.at(-1)), status: 'committed' }, state: structuredClone(result.privateState), reobservations: made };
 }
 /** NORMAL rebuilt as one canonical trial of the given layout, label and Jev responses (the s4-two-stage-v2 pattern). */
-async function records(layout: 'two_stage_v2' | 'two_stage_v3', jev: any[], { reobservation = false, label = 'bypass-enabled' as 'repair-first' | 'bypass-enabled' } = {}) {
+async function records(layout: 'two_stage_v2' | 'two_stage_v3', jev: any[], { reobservation = false, label = 'bypass-enabled' as 'repair-first' | 'bypass-enabled', generationText = null as string | null } = {}) {
   const n = structuredClone(normal), tr = n.trials[0], m = n.run.manifest;
   const profile = JSON.parse(JSON.stringify(researchTrialProfileV3(m.lunaRequest, m.timeouts, layout)));
   const digest = hash(profile);
@@ -69,6 +69,12 @@ async function records(layout: 'two_stage_v2' | 'two_stage_v3', jev: any[], { re
   tr.identity.profile = digest;
   tr.label = label; m.trials[0].label = label; n.summary.runOrder[0].label = label;
   const tape: any = { ...structuredClone(OLD), common: { ...structuredClone(OLD.common), jev }, recorded: { label, expectedRequests: [] } };
+  if (generationText !== null) {
+    for (const side of Object.values(tape.tails ?? {}) as any[]) {
+      for (const l of side.luna ?? []) if (l.phase === 'generation') l.response = { ...l.response, text: generationText };
+    }
+    for (const l of tape.common.luna ?? []) if (l.phase === 'generation') l.response = { ...l.response, text: generationText };
+  }
   if (reobservation) {
     tape.common.luna = [...tape.common.luna, { ...structuredClone(OLD.common.luna[0]), phase: 'observation_targeted' }];
     const learned = await recordedRun(profile, tape, label, (input: any) => ({ observedAt: '2026-01-01T00:00:01.000Z', issue: structuredClone(input.issue),
@@ -122,7 +128,7 @@ test('v3 revisit x multiple: the candidate set is kept, the judgment has no slot
 test('v3 detail actions: confirm / single (feature) and propose_name / single (name) pass; a forged detail candidate fails', async () => {
   const confirm = await records('two_stage_v3', [stageOne('c', 'confirm'), stageTwo('c', 'confirm', 'figure_1'), jevResponse('c-detail', { feature: answer('feature_0', ['feature_0', 'feature_1']) })]); pass(confirm);
   assert.deepEqual(confirm.trials[0].attempts[0].decisions[0].evidence.stages.map((s: any) => s.stage), ['action', 'target', 'detail']);
-  const name = await records('two_stage_v3', [stageOne('p', 'propose_name'), stageTwo('p', 'propose_name', 'figure_2'), jevResponse('p-detail', { name: answer('name_0', ['name_0']) })]); pass(name);
+  const name = await records('two_stage_v3', [stageOne('p', 'propose_name'), stageTwo('p', 'propose_name', 'figure_2'), jevResponse('p-detail', { name: answer('name_0', ['name_0']) })], { generationText: '「name-2」と呼ぶのはどうでしょう？' }); pass(name);
   const forged = structuredClone(name);
   for (const d of copies(forged)) { d.name = 'forged-name'; }
   for (const j of [forged.trials[0].attempts[0], forged.trials[0].turns[0].trace[0]]) { j.executed.name = 'forged-name'; j.intervention.original.name = 'forged-name'; }
@@ -319,4 +325,8 @@ test('S4 orientation fallback rejects mixed name_mismatch on agree alongside sel
   assert.equal(s4Probe.s4HasNonOrientationLeak('右側です。すみません、訂正します。', { action: 'accept', candidateName: null }), true);
   assert.equal(s4Probe.s4HasNonOrientationLeak('右側です。この形は後回しにしましょう。', { action: 'accept', candidateName: null }), true);
   assert.equal(s4Probe.s4HasNonOrientationLeak('右側の「舟」で決まりです。', { action: 'accept', candidateName: null }), true);
+  const propBoat = { action: 'propose_name', candidateName: '舟' };
+  assert.equal(s4Probe.s4HasNonOrientationLeak('右側の「舟」と呼ぶのはどうでしょう？', propBoat), false, 'pure orientation_leak on propose_name passes');
+  assert.equal(s4Probe.s4HasNonOrientationLeak('右側に突起があります。', propBoat), true, 'missing name on propose_name rejected');
+  assert.equal(s4Probe.s4HasNonOrientationLeak('右側です。「舟」に見えますが、「キリン」と呼ぶのはどうでしょう？', propBoat), true, 'substituted name on propose_name rejected');
 });
