@@ -998,7 +998,7 @@ test('05r: S4 recomputes the reconfirmation marker and the inherited-name source
   for (const label of ['repair-first', 'bypass-enabled'] as const) {
     // A reconfirmation of the agreed name: marked, accept stays, no naming-act question.
     const again = await buildRecords({ label, dialoguePolicy: 'holistic_v3', turns: [describe, agreedTurn,
-      { human: 'で、さっきのかかしでいい？', plan: { action: 'accept', target: 'none', act: 'name_propose', referent: 'none', extraction: seg('かかし', 'かかし'), speech: 'うん、いいよ。' } }] });
+      { human: 'で、さっきのかかしでいい？', plan: { action: 'accept', target: 'none', act: 'name_propose', referent: 'figure_3', extraction: seg('かかし', 'かかし'), speech: 'うん、いいよ。' } }] });
     const t = again.trials[0].attempts[0];
     assert.equal(t.namingReconfirm, true, label);
     assert.equal(t.namingRequest, undefined);
@@ -1018,6 +1018,26 @@ test('05r: S4 recomputes the reconfirmation marker and the inherited-name source
   }
 });
 
+test('05t-1: S4 recomputes the turn kind with the bound figure: a proposal whose figure is undetermined or another figure is an open request, a reconfirm marker on it is refused', async () => {
+  const s3 = Object.keys(OLD.state.ledger)[3];
+  const speech = '角ばった塊に細い脚が付いた形のように見えます。';
+  const ai = JSON.stringify([{ segmentId: 'shape', quote: speech, targets: [s3], aspect: 'construal', proposition: 'x', name: null, linkedIssueId: null, respondsToTurn: null }]);
+  const seg = (quote: string, name: string | null) => JSON.stringify([{ segmentId: 's1', quote, targets: [], aspect: 'name', proposition: quote, name, linkedIssueId: null, respondsToTurn: null }]);
+  const describe = { human: 'どんな図形がありますか？', plan: { action: 'confirm', target: 'figure_3', speech, aiExtraction: ai } };
+  const agreedTurn = { human: 'これ、かかしとかどう？', plan: { action: 'agree', target: 'figure_3', name: 'かかし', act: 'name_propose', referent: 'figure_3', extraction: seg('かかし', 'かかし'), speech: '「かかし」と呼びましょう。' } };
+  for (const label of ['repair-first', 'bypass-enabled'] as const) {
+    const other = await buildRecords({ label, dialoguePolicy: 'holistic_v3', turns: [describe, agreedTurn,
+      { human: 'かかしがいい、どう？', plan: { action: 'confirm', target: 'figure_4', act: 'name_propose', referent: 'figure_4', extraction: seg('かかしがいい、どう？', 'かかし'), speech: 'どの形のことですか？' } }] });
+    const t = other.trials[0].attempts[0];
+    assert.equal(t.namingRequest, true, label);
+    assert.equal(t.namingReconfirm, undefined, label);
+    assert.ok(finalChecks(other).length >= 4 && finalChecks(other).every((c: any) => c.status === 'pass'), label + ' ' + JSON.stringify(finalChecks(other).filter((c: any) => c.status !== 'pass').map((c: any) => [c.id, c.reason])));
+    const asReconfirm = structuredClone(other);
+    for (const x of traceCopies(asReconfirm)) { delete x.namingRequest; x.namingReconfirm = true; }
+    assert.ok(!finalChecks(asReconfirm).every((c: any) => c.status === 'pass'), label + ': an undetermined figure passed off as a reconfirmation');
+  }
+});
+
 test('05s: S4 derives the question triggers of a reconfirmation without the wording trigger: the affirming draft carries no question record, a question record on it is refused', async () => {
   const s3 = Object.keys(OLD.state.ledger)[3];
   const speech = '角ばった塊に細い脚が付いた形のように見えます。';
@@ -1026,7 +1046,7 @@ test('05s: S4 derives the question triggers of a reconfirmation without the word
   for (const label of ['repair-first', 'bypass-enabled'] as const) {
     const record = await buildRecords({ label, dialoguePolicy: 'holistic_v3', turns: [{ human: 'どんな図形がありますか？', plan: { action: 'confirm', target: 'figure_3', speech, aiExtraction: ai } },
       { human: 'これ、かかしとかどう？', plan: { action: 'agree', target: 'figure_3', name: 'かかし', act: 'name_propose', referent: 'figure_3', extraction: seg('かかし', 'かかし'), speech: '「かかし」と呼びましょう。' } },
-      { human: 'それで、さっきの「かかし」でいい？', plan: { action: 'accept', target: 'none', act: 'name_propose', referent: 'none', extraction: seg('かかし', 'かかし'), speech: 'はい、その呼び方で大丈夫です。' } }] });
+      { human: 'それで、さっきの「かかし」でいい？', plan: { action: 'accept', target: 'none', act: 'name_propose', referent: 'figure_3', extraction: seg('かかし', 'かかし'), speech: 'はい、その呼び方で大丈夫です。' } }] });
     assert.equal(record.trials[0].attempts[0].namingReconfirm, true, label);
     assert.equal(record.trials[0].attempts[0].draftActs, undefined, label);
     assert.ok(finalChecks(record).length >= 4 && finalChecks(record).every((c: any) => c.status === 'pass'), label);

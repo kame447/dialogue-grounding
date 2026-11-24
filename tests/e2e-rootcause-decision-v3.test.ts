@@ -1344,7 +1344,7 @@ test('05r-1 (holistic_v3): asking again about a name that is already agreed for 
       const { f, proposalTurn } = await agreed(strategy);
       const human = literal ? 'で、さっきのかかしでいい？' : 'その呼び名でいい？';
       const seg = literal ? naming(human, 'かかし') : reapproval(proposalTurn.events.at(-1)!.seq);
-      const r = await f.exchange(human, { action: 'accept', referent: 'none', segments: [seg], drafts: ['うん、いいよ。'] });
+      const r = await f.exchange(human, { action: 'accept', referent: 'figure_3', segments: [seg], drafts: ['うん、いいよ。'] });
       assert.ok(offered(r).includes('accept'), `${strategy} ${literal}: accept is offered`);
       assert.equal(r.text, 'うん、いいよ。', `${strategy} ${literal}: the plain yes is published`);
       assert.equal(r.trace.draftActs, undefined, `${strategy} ${literal}: no naming-act question is opened`);
@@ -1359,6 +1359,41 @@ test('05r-1 (holistic_v3): asking again about a name that is already agreed for 
     assert.ok(!offered(r).includes('accept') && !offered(r).includes('agree'), `${strategy}: ${offered(r).join()}`);
     assert.equal(r.saved.namingRequest, true, `${strategy}: still an open request`);
     assert.equal(r.state.ledger[ids[4]].name, null);
+  }
+});
+
+test('05t-1 (holistic_v3): a reconfirmation needs a determined figure whose agreed name is the proposed one; an undetermined or other figure keeps the open request (both strategies)', async () => {
+  const offered = (r: { requests: Array<{ questions: Record<string, { criteria: Record<string, string> }> }> }) =>
+    Object.keys(r.requests.find(q => q.questions.action)!.questions.action.criteria);
+  const proposal = 'これ、かかしとかどう？';
+  const agreed = async (strategy: 'bypass-enabled' | 'repair-first', targets: string[] = []) => {
+    const f = fixture(strategy, { aiPublic: true, holistic: 'holistic_v3' });
+    await share(f, 3);
+    const first = await f.exchange(proposal, { action: 'agree', target: 3, referent: 'figure_3', segments: [naming(proposal, 'かかし', targets)], draftActs: ['adopt_chosen'], drafts: [agreeSpeech('かかし')] });
+    assert.equal(first.state.ledger[ids[3]].name, 'かかし');
+    return { f, first };
+  };
+  const reapproval = (respondsTo: number): Segment => ({ respondsTo, quote: 'その呼び名でいい？', name: null, targets: [], act: 'name_propose', aspect: 'name', proposition: 'その呼び名でいい？' });
+  for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
+    // Figure 3 has the agreed name; the proposal binds to figure 4 (empty targets, or two figures) or to nothing: an open request, no accept, no adoption.
+    const cases: Array<[string, string[], 'figure_4' | 'none']> = [['unbound, estimate on another figure', [], 'figure_4'], ['two figures, estimate on the other', [ids[3], ids[4]], 'figure_4'], ['unbound, no estimate', [], 'none']];
+    for (const [label, targets, referent] of cases) {
+      const { f } = await agreed(strategy);
+      const text = 'かかしがいい、どう？';
+      const r = await f.exchange(text, { action: 'confirm', target: referent === 'none' ? 3 : 4, referent, segments: [naming(text, 'かかし', targets)], draftActs: ['none'], drafts: ['どの形のことですか？'] });
+      assert.equal(r.saved.namingRequest, true, `${strategy} ${label}: an open request`);
+      assert.equal(r.saved.namingReconfirm, undefined, `${strategy} ${label}`);
+      assert.ok(!offered(r).includes('accept'), `${strategy} ${label}: ${offered(r).join()}`);
+      assert.equal(r.state.ledger[ids[4]].name, null, `${strategy} ${label}: nothing adopted`);
+    }
+    // A short re-approval that inherits the earlier proposal's target: the figure holds only if the partner's newest meaningful estimate does not point elsewhere.
+    for (const [referent, kind] of [['figure_4', 'namingRequest'], ['figure_3', 'namingReconfirm'], ['none', 'namingReconfirm']] as const) {
+      const { f, first } = await agreed(strategy, [ids[3]]);
+      const r = await f.exchange('その呼び名でいい？', { action: referent === 'figure_4' ? 'confirm' : 'accept', target: referent === 'figure_4' ? 4 : undefined, referent,
+        segments: [reapproval(first.events.at(-1)!.seq)], draftActs: ['none'], drafts: [referent === 'figure_4' ? 'どの形のことですか？' : 'うん、いいよ。'] });
+      assert.equal(r.saved[kind], true, `${strategy} inherited, estimate ${referent}`);
+      assert.equal(r.saved[kind === 'namingRequest' ? 'namingReconfirm' : 'namingRequest'], undefined, `${strategy} inherited, estimate ${referent}`);
+    }
   }
 });
 
@@ -1391,13 +1426,13 @@ test('05s (holistic_v3): affirming a reconfirmed agreed name does not open the n
     };
     const again = 'それで、さっきの「かかし」でいい？';
     const f = await make();
-    const yes = await f.exchange(again, { action: 'accept', referent: 'none', segments: [naming(again, 'かかし')], drafts: ['はい、その呼び方で大丈夫です。'] });
+    const yes = await f.exchange(again, { action: 'accept', referent: 'figure_3', segments: [naming(again, 'かかし')], drafts: ['はい、その呼び方で大丈夫です。'] });
     assert.equal(yes.saved.namingReconfirm, true, strategy);
     assert.equal(yes.text, 'はい、その呼び方で大丈夫です。', `${strategy}: the affirmation is published`);
     assert.equal(yes.trace.draftActs, undefined, `${strategy}: no question on wording alone`);
     // Adopting another name in the same turn is still stopped: the quoted other name opens the question and the adoption is refused.
     const g = await make();
-    const other = await g.exchange(again, { action: 'accept', referent: 'none', segments: [naming(again, 'かかし')], draftActs: ['adopt_other', 'none'],
+    const other = await g.exchange(again, { action: 'accept', referent: 'figure_3', segments: [naming(again, 'かかし')], draftActs: ['adopt_other', 'none'],
       drafts: ['はい、では「らいおん」にしましょう。', 'うん、いいよ。'] });
     assert.deepEqual(other.trace.generationGuard, { violations: ['draft_act_mismatch'], regenerated: true, fallback: false }, strategy);
     assert.equal(other.text, 'うん、いいよ。');

@@ -11,7 +11,7 @@ import { normalizeName } from "../judgment/name-evidence.mjs";
 import { stageMemory } from "../judgment/memory.mjs";
 import { createReferenceGraph, applyReferenceUpdate, previewReferenceUpdate, snapshotReferenceGraph, REFERENCE_LIMITS } from "../memory/reference-graph.mjs";
 import { nameBindsFigure } from "../decision/referent-binding.ts";
-import { hasNameProposal, namingTurnKind, inheritsProposalName, turnNameProposals, namingNameKey } from "../decision/naming-request.ts";
+import { hasNameProposal, namingTurnKind, namingIntervalEstimates, inheritsProposalName, turnNameProposals, namingNameKey } from "../decision/naming-request.ts";
 import { priorClaimViews, summarizeLocalIssues } from "../local-grounding/derive.ts";
 import { createMemoLocalExtractor, LOCAL_EXTRACTION_INSTRUCTIONS, MEMO_LOCAL_EXTRACTION_INSTRUCTIONS, MEMO_LOCAL_EXTRACTION_INSTRUCTIONS_HOLISTIC } from "../local-grounding/extract.ts";
 import { LOCAL_CLASSIFICATION_INSTRUCTIONS } from "../local-grounding/classify.ts";
@@ -773,10 +773,6 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         baseInput.agreeNames = buildAgreeNamesV3(claims, publicTurns, latest.seq, slots, state, null, holisticV3);
         baseInput.nameLedger = structuredClone(state.ledger);
         // holistic_v1: the memo's readings are explanations, never AI-proposed names (the candidates are then only names that were said in public).
-        if (holisticV3) {
-          const kind = namingTurnKind(claims, latest.seq, state.ledger);
-          if (kind === "request") { baseInput.namingRequest = true; record.namingRequest = true; } else if (kind === "reconfirm") record.namingReconfirm = true;
-        }
         if (holisticV2) {
           baseInput.nameSource = "public_only";
           // A name the partner proposed is decided from every claim, not from the claims that survive the input's size limit: it never reaches the candidate list.
@@ -821,6 +817,11 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       abortIf(signal);
       record.humanReferent = { ...estimate, turnIndex: latest.seq, observationMemo };
       baseInput.humanReferent = { status: estimate.status, scores: structuredClone(estimate.scores) };
+      // holistic_v3: the turn kind needs this very turn's estimate to bind a name that does not itself name one figure.
+      if (holisticV3 && questionLayout === "two_stage_v3") {
+        const kind = namingTurnKind(claims, latest.seq, state.ledger, namingIntervalEstimates(state.judgments, latest.seq, baseInput.humanReferent));
+        if (kind === "request") { baseInput.namingRequest = true; record.namingRequest = true; } else if (kind === "reconfirm") record.namingReconfirm = true;
+      }
       // The estimate of this very exchange backs a re-affirmation of a denied figure, so the candidates are completed only now.
       if (questionLayout === "two_stage_v3") baseInput.agreeNames = buildAgreeNamesV3(claims, publicTurns, latest.seq, slots, state, baseInput.humanReferent, holisticV3);
       if (adaptive && baseInput.repairHistory.length && typeof jevDecision.estimateRepairProspect === "function") {

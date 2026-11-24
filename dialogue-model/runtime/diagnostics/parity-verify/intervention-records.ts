@@ -4,7 +4,7 @@ import {createHash as nodeSha256} from 'node:crypto';
 // version constants are evidence; successful producer flags are not an oracle.
 import {jevChoiceAnswersValid,jevReportedCost,jevResponseId} from '../../decision/jev-choice-response.ts';
 import {nameBindsFigure} from '../../decision/referent-binding.ts';
-import {hasNameProposal,namingTurnKind,inheritsProposalName} from '../../decision/naming-request.ts';
+import {hasNameProposal,namingTurnKind,namingIntervalEstimates,inheritsProposalName} from '../../decision/naming-request.ts';
 import {generationGuardCodes,draftViolationCodes,deriveGenerationOutcome,orientationSafeFallback} from '../../v2/generation-guard.ts';
 import {checkModelIdentity} from '../../model-identity-contract.ts';
 import {resolveModelPolicy} from '../../model-policy.ts';
@@ -371,7 +371,7 @@ function s4HumanProposedNames(tape:any,trace:any):Set<string>{
 // holistic_v3: the turn kind from the turn's claims (saved graph plus this turn's local claims) and the ledger before the turn, by the shared function.
 function s4NamingKind(tape:any,trace:any):'none'|'request'|'reconfirm'{
  const graph=tape.generationGraph??tape.state?.graph;
- return namingTurnKind([...(graph?.records??[]).filter((c:any)=>c.kind==='claim'),...(trace.local?.claims??[]).filter((c:any)=>c.kind==='claim')],trace.turnIndex,tape.state?.ledger??{});
+ return namingTurnKind([...(graph?.records??[]).filter((c:any)=>c.kind==='claim'),...(trace.local?.claims??[]).filter((c:any)=>c.kind==='claim')],trace.turnIndex,tape.state?.ledger??{},namingIntervalEstimates((tape.state?.judgments??[]).filter((x:any)=>x.turnIndex<trace.turnIndex),trace.turnIndex,trace.humanReferent));
 }
 const s4TypedContext=(tape:any,trace:any)=>H3()?!!CTX.namingRequest:s4OpenHumanProposal(tape,trace,true);
 function s4OpenHumanProposal(tape:any,trace:any,askCounts=true):boolean{
