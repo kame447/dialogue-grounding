@@ -124,8 +124,7 @@ export function renderTurnSheet(record: Data, latency: LatencySummary, {escape, 
       '</td><td>' + (timing + calls || empty) + '</td><td>' + detailPanel + '</td></tr>';
   };
   if (!rows.length && !unmatched.length) return '<p class="muted">なし</p>';
-  return '<p class="muted">発話1件につき1行。内部処理は起点となった人間の発話の行に表示します。— は対応する保存記録なし。判断のスコアは未校正です。</p>' +
-    (rows.length ? '<div class="turn-sheet"><table><thead><tr>' + ["No.", "話者", "時刻（JST）", "公開発話", "参照先・再観察", "判断・方略", "処理結果・検証", "モデル呼び出し・時間", "保存された詳細"].map(h => '<th scope="col">' + escape(h) + '</th>').join("") +
+  return (rows.length ? '<div class="turn-sheet"><table><thead><tr>' + ["No.", "話者", "時刻（JST）", "公開発話", "参照先・再観察", "判断・方略", "処理結果・検証", "モデル呼び出し・時間", "保存された詳細"].map(h => '<th scope="col">' + escape(h) + '</th>').join("") +
     '</tr></thead><tbody>' + rows.map(render).join("") + '</tbody></table></div>' : "") +
     (unmatched.length ? '<details class="turn-detail unlinked"><summary>発話に対応づけられない処理・セッション共通処理（' + unmatched.length + '件）</summary>' + details(unmatched) + '</details>' : "");
 }
