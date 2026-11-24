@@ -414,7 +414,10 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
    persistedEvidence(d.evidence);
    if(d.decisionKind==='jev_local_test'){
     // two_stage_v2 keeps a candidate-set stage between action_target and detail for every multiple target.
-    const detail=['propose_name','agree','confirm','repair'].includes(d.action),setStage=questionLayout==='two_stage_v2'&&d.target?.kind==='multiple';
+    // two_stage_v3: an accept has a third stage exactly when a saved shared construal covers every selected figure (the request builder's own rule).
+    const targetIds=d.target?.kind==='single'?[d.target.figureId]:d.target?.kind==='multiple'&&Array.isArray(d.target.figureIds)?d.target.figureIds:[];
+    const sharedOffered=questionLayout==='two_stage_v3'&&d.action==='accept'&&Array.isArray(z.sharedConstruals)?z.sharedConstruals.filter((f:any)=>targetIds.every((id:string)=>f.figureIds.includes(id))):[];
+    const detail=['propose_name','agree','confirm','repair'].includes(d.action)||sharedOffered.length>0,setStage=questionLayout==='two_stage_v2'&&d.target?.kind==='multiple';
     // two_stage_v3 keeps exactly action, target, [detail]; a target label must decode to the saved decision's own target.
     const v3=questionLayout==='two_stage_v3';
     const es=d.evidence.stages;if(!Array.isArray(es)||es.length!==(v3?2:1+(setStage?1:0))+(detail?1:0))throw Error();
@@ -440,6 +443,13 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
      if(!set||es[0].choices.target!=='multiple'||!stateSame(set.map(i=>ownSlots[i]),d.target.figureIds))throw Error();
     }
     if(detail)persistedEvidence(es.at(-1),'detail');
+    if(sharedOffered.length){
+     // The third stage asked one closed question; its answer is what the executed decision records.
+     const last=es.at(-1),label=last.choices?.shared_construal;
+     if(!stateSame(Object.keys(last.choices),['shared_construal'])||!stateSame(Object.keys(last.scores.shared_construal),['none',...sharedOffered.map((_f:any,i:number)=>'use_'+i)])||typeof label!=='string')throw Error();
+     const chosen=label==='none'?null:sharedOffered[Number(label.slice(4))];
+     if(label!=='none'&&!chosen||!stateSame(Object.hasOwn(d,'sharedClaimIds')?d.sharedClaimIds:null,chosen?chosen.claimIds:null))throw Error();
+    }else if(Object.hasOwn(d,'sharedClaimIds'))throw Error();
     // After the turn's one reobservation the stage-one question omits request_observation (as in isOpenIssueRerankRecord).
     const keys=Object.keys(es[0].scores.action??{}).sort();
     // v3 scores only the actions that had a legal target and detail: any subset of the offerable labels that holds the always-legal ones and the chosen action.

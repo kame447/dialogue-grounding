@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
-import { interventionForStrategy, isOpenIssueRerankRecord } from '../dialogue-model/runtime/decision/bypass-acceptance.ts';
+import { BYPASS_ACCEPTANCE_V1_CANONICAL_JSON, BYPASS_ACCEPTANCE_V1_TABLE_SHA256, interventionForStrategy, isOpenIssueRerankRecord } from '../dialogue-model/runtime/decision/bypass-acceptance.ts';
 import { buildJevDecisionDetailPayload, buildJevDecisionPayload, buildJevTargetPayload, createJevDecisionClient, JEV_ACTION_CRITERIA, JEV_DECISION_MODEL } from '../dialogue-model/runtime/decision/jev-decision.ts';
 import type { JevDecisionPayload } from '../dialogue-model/runtime/decision/jev-decision.ts';
 import type { JevAction, JevDecisionInput, RepairHistoryEntry } from '../dialogue-model/runtime/decision/contract.ts';
@@ -14,7 +15,7 @@ const V3 = { questionLayout: 'two_stage_v3' } as const;
 const UNRELATED_NAME = '灯台';
 const NEW_NAME = '風車';
 const single = (index: number) => ({ kind: 'single' as const, figureId: ids[index] });
-type Segment = Omit<LocalSegmentProposal, 'segmentId' | 'linkedIssueId' | 'respondsToTurn'> & { act: LocalAct; respondsTo?: number };
+type Segment = Omit<LocalSegmentProposal, 'segmentId' | 'linkedIssueId' | 'respondsToTurn'> & { act: LocalAct; respondsTo?: number; linked?: string };
 type Plan = {
   action: JevAction;
   target?: number;
@@ -23,6 +24,8 @@ type Plan = {
   segments?: Segment[];
   aiSegments?: LocalSegmentProposal[];
   actionScores?: Partial<Record<JevAction, number>>;
+  /** The index of the shared construal an accept chooses to use; omitted means none. */
+  shared?: number;
   prospect?: 'uncertain' | 'no_open_issue';
 };
 
@@ -45,6 +48,7 @@ function fixture(strategy: 'bypass-enabled' | 'repair-first' = 'bypass-enabled',
           : key === 'repair_issue' ? (plan.prospect ? 'issue_0' : 'none')
           : key === 'prospect' ? plan.prospect ?? 'uncertain'
           : key === 'human_referent' ? (plan.target === undefined ? 'none' : `figure_${plan.target}`)
+          : key === 'shared_construal' ? (plan.shared === undefined ? 'none' : `use_${plan.shared}`)
           : key === 'name' && plan.name ? labels.find(label => JSON.parse(question.criteria[label]).value === plan.name)
           : labels[0];
         assert.ok(choice && labels.includes(choice), `scripted answer is unavailable for ${key}`);
@@ -81,8 +85,8 @@ function fixture(strategy: 'bypass-enabled' | 'repair-first' = 'bypass-enabled',
           const act = plan.segments![index].act;
           const antecedentAct = act === 'deny' ? 'name_accept' : act === 'name_accept' ? 'name_propose' : null;
           // A referent denial answers the AI's latest public claim about the figure.
-          const referentDenial = act === 'deny' && plan.segments![index].aspect === 'referent';
-          const antecedent = referentDenial ? priorClaims.filter(c => c.speaker === 'ai').at(-1)
+          const referentDenial = act === 'deny' && ['referent', 'construal'].includes(plan.segments![index].aspect);
+          const antecedent = referentDenial ? priorClaims.filter(c => c.speaker === 'ai' && c.aspect === plan.segments![index].aspect).at(-1)
             : antecedentAct && priorClaims.find(c => c.speaker === 'ai' && c.act === antecedentAct);
           return { segmentId, act, respondsToClaimId: antecedent?.id ?? null, rawScore: null };
         });
@@ -91,8 +95,8 @@ function fixture(strategy: 'bypass-enabled' | 'repair-first' = 'bypass-enabled',
     client: {
       async complete(_messages, { phase }) {
         if (phase === 'ai_extraction') return { text: JSON.stringify(plan.aiSegments ?? []) };
-        if (phase === 'local_extraction') return { text: JSON.stringify((plan.segments ?? []).map(({ act, respondsTo, ...segment }, index) => ({
-          ...segment, segmentId: `segment-${index}`, linkedIssueId: null,
+        if (phase === 'local_extraction') return { text: JSON.stringify((plan.segments ?? []).map(({ act, respondsTo, linked, ...segment }, index) => ({
+          ...segment, segmentId: `segment-${index}`, linkedIssueId: linked ?? null,
           respondsToTurn: respondsTo ?? (act === 'deny' || act === 'name_accept' ? events.at(-2)!.seq : null),
         }))) };
         assert.equal(phase, 'generation');
@@ -815,3 +819,169 @@ for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
     assert.equal(verdict([{ name, figureId: ids[0], sourceTurn: 1 }], request), 'invalid', 'an unsupported single candidate matches no rule');
   });
 }
+
+// ---- A rough reading both sides stated in public (sharedConstruals): synthetic paraphrases only ----
+const BIRD = '鳥のように見える図形はあります。';
+const BEAK = '嘴のあたりの見え方はまだ分かりません。';
+type Fx = ReturnType<typeof fixture>;
+/** The AI says in public that a figure (or several) looks like a bird, and that one detail is not clear. */
+async function offerConstrual(f: Fx, targets: number[] = [0]) {
+  const construal: LocalSegmentProposal = { segmentId: 'bird', quote: BIRD, targets: targets.map(t => ids[t]), aspect: 'construal', proposition: '鳥のように見える', name: null, linkedIssueId: null, respondsToTurn: null };
+  const detail: LocalSegmentProposal = { segmentId: 'beak', quote: BEAK, targets: [ids[targets[0]]], aspect: 'part', proposition: '嘴の見え方が合うか分からない', name: null, linkedIssueId: null, respondsToTurn: null };
+  const r = await f.exchange('鳥みたいな形はありますか？', { action: 'confirm', target: targets[0], drafts: [BIRD + BEAK], aiSegments: [construal, detail] });
+  // The AI's public claims are applied with the next human turn and are named after it; the first one opens the issue.
+  return Object.assign(r, { issue: `${r.input.turn + 2}:pub1` });
+}
+const roughAsk = (issue: string, target = 0): Segment => ({ quote: '大体鳥っぽいのは分かる？', name: null, targets: [ids[target]], aspect: 'construal', proposition: '大体鳥っぽい', act: 'ask', linked: issue });
+const ROUGH = 'まあ、大体鳥っぽいのは分かる？';
+
+test('the intervention table and its SHA-256 are unchanged', () => {
+  assert.equal(BYPASS_ACCEPTANCE_V1_TABLE_SHA256, '376d569120ca36a3eceaf5ab95410f7eb83f25fbb681e7566a684b97c35165c8');
+  assert.equal(createHash('sha256').update(BYPASS_ACCEPTANCE_V1_CANONICAL_JSON).digest('hex'), BYPASS_ACCEPTANCE_V1_TABLE_SHA256);
+});
+
+const sharedQuestion = (requests: Awaited<ReturnType<Fx['exchange']>>['requests']) => requests.find(r => r.questions.shared_construal)?.questions.shared_construal;
+const noLabel = (x: unknown) => assert.equal(/P5/u.test(JSON.stringify(x)), false, 'no research label in a record');
+const wires: Record<string, unknown> = {};
+
+for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
+  test(`shared construal (${strategy}): (1) a rough reading both sides use is adopted as a common reference; the ledger and the open detail stay`, async () => {
+    const f = fixture(strategy, { aiPublic: true });
+    const o = await offerConstrual(f);
+    const before = structuredClone(f.state().ledger);
+    const r = await f.exchange(ROUGH, { action: 'accept', target: 0, shared: 0, drafts: ['うん、その鳥っぽいやつね。'], segments: [roughAsk(o.issue)] });
+    const [fact] = r.input.sharedConstruals!;
+    assert.equal(r.input.sharedConstruals!.length, 1);
+    assert.deepEqual(fact.figureIds, [ids[0]]);
+    assert.ok(fact.claimIds.length >= 2, 'a claim of each side');
+    assert.ok(fact.openDetails.some(d => d.aspect === 'part'), 'the unresolved detail rides along');
+    assert.equal(r.saved.executed?.action, 'accept');
+    assert.deepEqual(r.saved.executed?.sharedClaimIds, fact.claimIds);
+    assert.deepEqual(r.saved.sharedConstruals, r.input.sharedConstruals);
+    assert.equal(r.text, 'うん、その鳥っぽいやつね。');
+    assert.deepEqual(r.state.ledger, before, 'no name, no identification, no agreement');
+    assert.deepEqual(Object.keys(sharedQuestion(r.requests)!.criteria), ['none', 'use_0']);
+    assert.deepEqual(validateJevPrivateStateV2(r.state, ids, f.intervention, V3.questionLayout), r.state);
+    noLabel(r.state);
+    wires[strategy] = sharedQuestion(r.requests);
+  });
+
+  test(`shared construal (${strategy}): (2) a bound name the partner proposes is still an agree, independent of the rough reading`, async () => {
+    const f = fixture(strategy, { aiPublic: true });
+    await offerConstrual(f);
+    const proposal = 'じゃあこの形は「鳥」とかどう？';
+    const r = await f.exchange(proposal, { action: 'agree', target: 0, drafts: [agreeSpeech('鳥')], segments: [naming(proposal, '鳥', [ids[0]])] });
+    assert.equal(r.saved.executed?.action, 'agree');
+    assert.equal(r.saved.executed?.sharedClaimIds, undefined);
+    assert.deepEqual(r.state.ledger[ids[0]], { status: 'agreed', name: '鳥' });
+  });
+
+  test(`shared construal (${strategy}): (3) a one-sided reading or a backchannel gives no shared construal and no third stage`, async () => {
+    const f = fixture(strategy, { aiPublic: true });
+    await offerConstrual(f);
+    const r = await f.exchange('うん', { action: 'accept', target: 0, drafts: ['はい。'] });
+    assert.equal(r.input.sharedConstruals, undefined);
+    assert.equal(sharedQuestion(r.requests), undefined);
+    assert.equal(r.saved.executed?.sharedClaimIds, undefined);
+    assert.equal(r.saved.sharedConstruals, undefined);
+  });
+
+  test(`shared construal (${strategy}): (4) several candidates share the reading; adopting it names no single figure and never agrees`, async () => {
+    const f = fixture(strategy, { aiPublic: true });
+    const o = await offerConstrual(f, [0, 1]);
+    const before = structuredClone(f.state().ledger);
+    const r = await f.exchange(ROUGH, { action: 'accept', shared: 0, drafts: ['うん、その鳥っぽいやつね。'], segments: [roughAsk(o.issue)] });
+    assert.deepEqual(r.input.sharedConstruals![0].figureIds, [ids[0], ids[1]]);
+    assert.deepEqual(r.saved.executed?.target, { kind: 'none' });
+    assert.equal(r.saved.executed?.sharedClaimIds?.length, r.input.sharedConstruals![0].claimIds.length);
+    assert.notEqual(r.saved.executed?.action, 'agree');
+    assert.deepEqual(r.state.ledger, before);
+  });
+
+  test(`shared construal (${strategy}): (5) a denied reading is no shared construal`, async () => {
+    const f = fixture(strategy, { aiPublic: true });
+    await offerConstrual(f);
+    const denial = 'いや、鳥には見えないです。';
+    const r = await f.exchange(denial, { action: 'accept', target: 0, drafts: ['なるほど。'],
+      segments: [{ quote: denial, name: null, targets: [ids[0]], aspect: 'construal', proposition: '鳥には見えない', act: 'deny' }] });
+    assert.equal(r.input.sharedConstruals, undefined);
+    assert.equal(sharedQuestion(r.requests), undefined);
+  });
+
+  test(`shared construal (${strategy}): (6) a later denial removes the reading; the earlier adoption stays in the record and the ledger is untouched; (7) the open detail can still be repaired`, async () => {
+    const f = fixture(strategy, { aiPublic: true });
+    const o = await offerConstrual(f);
+    const adopted = await f.exchange(ROUGH, { action: 'accept', target: 0, shared: 0, drafts: ['うん、その鳥っぽいやつね。'], segments: [roughAsk(o.issue)] });
+    const ledger = structuredClone(adopted.state.ledger);
+    // (7) the detail is still open, so a repair-type question remains available and the reading stays offered.
+    const next = await f.exchange('そうなんだ。', { action: 'confirm', target: 0, drafts: ['嘴のあたりは二つの部分がつながっていますか？'] });
+    assert.equal(next.input.sharedConstruals!.length, 1);
+    assert.equal(next.saved.executed?.action, 'confirm');
+    assert.equal(next.saved.executed?.sharedClaimIds, undefined);
+    assert.deepEqual(next.state.ledger, ledger);
+    // (6) the partner now denies it.
+    const denial = 'やっぱり鳥には見えないです。';
+    const gone = await f.exchange(denial, { action: 'accept', target: 0, drafts: ['そうですか。'],
+      segments: [{ quote: denial, name: null, targets: [ids[0]], aspect: 'construal', proposition: '鳥には見えない', act: 'deny', linked: o.issue, respondsTo: 2 }] });
+    assert.equal(gone.input.sharedConstruals, undefined);
+    assert.deepEqual(gone.state.ledger, ledger);
+    assert.ok(gone.state.judgments.some(j => j.jevTurn.executed?.sharedClaimIds), 'the adoption stays as history');
+  });
+}
+
+test('shared construal: the third-stage question is the same text for both strategies', () => {
+  const [a, b] = [wires['bypass-enabled'], wires['repair-first']] as { instructions: string; criteria: unknown }[];
+  assert.ok(a && b);
+  assert.deepEqual(a.criteria, b.criteria);
+  const tail = (q: { instructions: string }) => q.instructions.slice(q.instructions.indexOf('第1段のacceptで、公開された共通の見立て'));
+  assert.equal(tail(a), tail(b));
+});
+
+test('shared construal: repair-first adopts on a re-ranked accept after vetoing defer, and bypass-enabled keeps its defer', async () => {
+  const run = async (strategy: 'bypass-enabled' | 'repair-first') => {
+    const f = fixture(strategy, { aiPublic: true });
+    const o = await offerConstrual(f);
+    return f.exchange(ROUGH, { action: 'defer', target: 0, shared: 0, actionScores: { accept: 0.9 }, drafts: ['うん、その鳥っぽいやつね。'], segments: [roughAsk(o.issue)] });
+  };
+  const repair = await run('repair-first');
+  assert.equal(repair.saved.executed?.action, 'accept');
+  assert.equal(repair.saved.intervention?.disposition, 'rejected');
+  assert.deepEqual(repair.saved.executed?.sharedClaimIds, repair.input.sharedConstruals![0].claimIds);
+  assert.ok(repair.saved.intervention?.detailEvidence, 'the same conditional third stage ran');
+  assert.deepEqual(validateJevPrivateStateV2(repair.state, ids, interventionForStrategy('repair-first'), V3.questionLayout), repair.state);
+  const bypass = await run('bypass-enabled');
+  assert.equal(bypass.saved.executed?.action, 'defer');
+  assert.equal(bypass.saved.executed?.sharedClaimIds, undefined);
+});
+
+for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
+  test(`shared construal (${strategy}): choosing none on the third stage is an ordinary accept and the saved state restores for the next turn`, async () => {
+    const f = fixture(strategy, { aiPublic: true });
+    const o = await offerConstrual(f);
+    const r = await f.exchange(ROUGH, { action: 'accept', target: 0, drafts: ['なるほど。'], segments: [roughAsk(o.issue)] });
+    assert.equal(r.input.sharedConstruals!.length, 1);
+    assert.equal(r.saved.executed?.sharedClaimIds, undefined);
+    assert.equal(r.saved.decision.evidence.stages!.at(-1)!.stage, 'detail');
+    assert.deepEqual(validateJevPrivateStateV2(r.state, ids, f.intervention, V3.questionLayout), r.state);
+    const next = await f.exchange('そうだね。', { action: 'accept', target: 0, drafts: ['はい。'] });
+    assert.equal(next.saved.executed?.sharedClaimIds, undefined);
+  });
+}
+
+test('shared construal: S4 rebuilds the saved facts from the graph and refuses an added or altered one', async () => {
+  const f = fixture('repair-first', { aiPublic: true });
+  const o = await offerConstrual(f);
+  const previous = structuredClone(f.state());
+  const r = await f.exchange(ROUGH, { action: 'accept', target: 0, shared: 0, drafts: ['うん、その鳥っぽいやつね。'], segments: [roughAsk(o.issue)] });
+  const profile = { id: 'research_trial_profile_v3', ...V3, localGrounding: { aiPublicClaims: true } };
+  const key = JSON.stringify([r.trace.turnIndex, r.trace.lastEventId, r.trace.attemptNumber]);
+  const verdict = (edit: (facts: any[]) => void) => {
+    const state = structuredClone(r.state);
+    edit(state.judgments.at(-1)!.jevTurn.sharedConstruals as any[]);
+    return s4Probe.agreeSource({ profile, turns: [{ turn: r.trace.turnIndex, state }] }, r.trace, key, { state: previous, events: r.events, generationGraph: r.state.graph });
+  };
+  assert.deepEqual(verdict(() => {}), { known: true, names: r.input.agreeNames });
+  assert.equal(verdict(facts => { facts[0].figureIds = [ids[0], ids[1]]; }), 'invalid', 'a figure the AI never described');
+  assert.equal(verdict(facts => { facts[0].construal = '別の見立て'; }), 'invalid', 'an altered reading');
+  assert.equal(verdict(facts => { facts.push({ ...facts[0], id: 'sc:forged' }); }), 'invalid', 'an added fact');
+});
