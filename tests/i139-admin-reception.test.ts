@@ -194,7 +194,7 @@ test('an already approved reception is not approved twice and stale visible revi
 test('entry URL and QR use only request origin plus root, never query/admin data or forwarded origin', async () => {
   const request = get('/admin/entry?token=PRIVATE&order=repair-first', { 'X-Forwarded-Host': 'evil.test', 'X-Forwarded-Proto': 'http' });
   const response = await handleAdmin(request, fixture().deps); assert.equal(response.status, 200); const html = await response.text();
-  assert.match(html, /href="https:\/\/example\.test\/"/); assert.match(html, /<svg\b/);
+  assert.match(html, /<p class="entry-url"><a href="https:\/\/example\.test\/" target="_blank" rel="noopener noreferrer">https:\/\/example\.test\/<\/a><\/p>/); assert.match(html, /<svg\b/);
   assert.doesNotMatch(html, /PRIVATE|evil\.test|repair-first|\?token|data:|<script|<style|\sstyle=|\son\w+=|<use|<image/i);
 });
 test('actual entry response QR equals independent root oracle across queries and forwarded headers; changed origin changes QR', async () => {
