@@ -308,3 +308,15 @@ test('F3 open_issue_v1 execution record: shape, source link to the prospect choi
   assert.equal(s4Probe.relation({ ...adopted, executed: { ...adopted.executed, action: 'revisit', target: { kind: 'none' }, name: null, feature: null } }, 'bypass-enabled', slots), false, 'revisit x none is never an executed projection');
   assert.equal(s4Probe.relation({ ...adopted, intervention: { ...adopted.intervention, original: { ...adopted.intervention.original, action: 'revisit', target: target(c) } }, executed: { action: 'revisit', target: target(c), name: null, feature: null, observe: null }, decisions: [{ ...decision, action: 'revisit', target: target(c) }] }, 'bypass-enabled', slots), true, 'revisit x multiple is');
 });
+
+test('S4 orientation fallback rejects mixed name_mismatch on agree alongside self_repair, deferral and agreement', () => {
+  const agreeBoat = { action: 'agree', candidateName: '舟' };
+  assert.equal(s4Probe.s4HasNonOrientationLeak('右側の「舟」にしましょう。', agreeBoat), false, 'pure orientation_leak on agree passes');
+  assert.equal(s4Probe.s4HasNonOrientationLeak('右側に突起があります。', agreeBoat), true, 'missing name on agree is non-orientation violation');
+  assert.equal(s4Probe.s4HasNonOrientationLeak('右側です。「舟」に見えますが、名前は「鳥」です。', agreeBoat), true, 'copula name_mismatch on agree is rejected');
+  assert.equal(s4Probe.s4HasNonOrientationLeak('右側です。「舟」に見えますが、「鳥」にしましょう。', agreeBoat), true, 'adoption name_mismatch on agree is rejected');
+  assert.equal(s4Probe.s4HasNonOrientationLeak('右側です。さっきの「鳥」とは別の形なので、「舟」にしましょう。', agreeBoat), false, 'prior-figure mention is allowed');
+  assert.equal(s4Probe.s4HasNonOrientationLeak('右側です。すみません、訂正します。', { action: 'accept', candidateName: null }), true);
+  assert.equal(s4Probe.s4HasNonOrientationLeak('右側です。この形は後回しにしましょう。', { action: 'accept', candidateName: null }), true);
+  assert.equal(s4Probe.s4HasNonOrientationLeak('右側の「舟」で決まりです。', { action: 'accept', candidateName: null }), true);
+});

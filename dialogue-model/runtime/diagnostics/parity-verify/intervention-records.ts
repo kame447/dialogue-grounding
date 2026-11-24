@@ -61,8 +61,22 @@ function s4HasNonOrientationLeak(text:string,action:any):boolean{
   if(sents.some(s=>dep.some(r=>r.test(s))))return true;
  }
  if(act==='agree'&&typeof action?.candidateName==='string'&&action.candidateName.trim()){
-  const name=action.candidateName.normalize('NFKC').trim();
+  const name=action.candidateName.normalize('NFKC').trim(),target=name.replace(/[\s\u200b-\u200d\ufeff]/gu,'');
   if(!nfkc.includes(`「${name}」`)&&!nfkc.includes(`『${name}』`))return true;
+  const quoted=(span:string)=>[...span.matchAll(/「([^」]+)」|『([^』]+)』/gu)].map(m=>(m[1]??m[2]).replace(/[\s\u200b-\u200d\ufeff]/gu,''));
+  const clauseBefore=(index:number)=>{const b=compact.slice(0,index);return b.slice(Math.max(b.lastIndexOf('。'),b.lastIndexOf('!'),b.lastIndexOf('?'),b.lastIndexOf('、'),b.lastIndexOf(','))+1);};
+  const deferred=(index:number)=>(/(?:後|あと|後日|今度|別の機会|保留|後回し|先送り|先延ばし)$/u).test(compact.slice(0,index));
+  const priorFigure=/(?:前の|さっきの|先ほどの|以前の|別の|他の)(?:図形|形)/u;
+  const differs=(qs:string[])=>qs.length>0&&qs.at(-1)!==target;
+  for(const re of [/と呼(?:ぼう|びましょう|ぶことに(?:しよう|しましょう|します)|びます)/gu,/に(?:しよう|しましょう|します|決めよう|決めましょう|決めます)/gu,/で(?:いこう|行こう|いきましょう|行きましょう|いきます|行きます)/gu,/[でに](?:決まり|決定|確定)/gu,/で(?:いい|良い|よい|大丈夫)/gu,/合意/gu]){
+   for(const m of compact.matchAll(re)){const tail=compact.slice(m.index!+m[0].length);if(qTail(tail))continue;if(m[0]==='合意'&&/^(?:していません|していない|しません|ではありません|ではない|はしていません|はしていない)/u.test(tail))continue;if(re.source.startsWith('に')&&deferred(m.index!))continue;if(differs(quoted(clauseBefore(m.index!))))return true;}
+  }
+  for(const re of [/と呼(?:びました|んだ|ぶことにしました|ぶことにした)/gu,/に(?:決めました|決めた|しました|した)/gu,/で(?:いきました|行きました|決まりました|決まった|決定しました|確定しました)/gu]){
+   for(const m of compact.matchAll(re)){if(qTail(compact.slice(m.index!+m[0].length)))continue;if(re.source.startsWith('に')&&deferred(m.index!))continue;const c=clauseBefore(m.index!);if(priorFigure.test(c))continue;if(differs(quoted(c)))return true;}
+  }
+  for(const re of [/(?:この|その|こちら|そちら)?(?:図形|形)?(?:の)?名前(?:は|を)[^。!?、,]{0,16}?(?:「[^」]+」|『[^』]+』)(?:です|だ|ですね|ですよ)/gu,/(?:この|その|こちら|そちら)の?(?:図形|形)は[^。!?、,]{0,16}?(?:「[^」]+」|『[^』]+』)(?:です|だ|ですね|ですよ)/gu]){
+   for(const m of compact.matchAll(re)){if(qTail(compact.slice(m.index!+m[0].length)))continue;if(priorFigure.test(clauseBefore(m.index!+m[0].length)))continue;if(differs(quoted(m[0])))return true;}
+  }
  }
  return false;
 }
@@ -740,7 +754,7 @@ function prospectMaterial(input:any,answers:any){
   scores:{repair_issue:answers.repair_issue.probabilities,prospect:answers.prospect.probabilities,basis:answers.basis.probabilities}};
 }
 /** Test hook for the independent reconstructions; changes no verdict. */
-export const s4Probe={originalQuestions,targetQuestion,targetProof,rankProof,expectedRerank,agreeSource,legal,decisionShape,traceShape,relation,
+export const s4Probe={originalQuestions,targetQuestion,targetProof,rankProof,expectedRerank,agreeSource,legal,decisionShape,traceShape,relation,s4HasNonOrientationLeak,
  setContext:(c:Partial<typeof CTX>)=>Object.assign(CTX,defaultContext,c),prospectQuestions:(input:any,facts:boolean)=>prospectQuestions(input,facts),prospectMaterial:(input:any,answers:any)=>prospectMaterial(input,answers),trialVersion:(t:any,claim:any)=>trialVersion(t,claim)};
 export function interventionChecks(records:Records):Check[]{
  const broken=(reason='intervention_trace_invalid')=>{
