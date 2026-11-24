@@ -327,6 +327,29 @@ function safeSpan(value: unknown): value is string {
     findRepairClaims(value).length === 0 && findInternalLeaks(value).length === 0;
 }
 
+/** Opt-in publication checks. Only fixed codes leave this function; private
+ * instructions and the matched draft text never enter research records. */
+export function findLocalPublicationViolations(text: string, messages: readonly { role: string; content: unknown }[]): string[] {
+  const normalized = text.normalize("NFKC");
+  // Preserve token boundaries: the legacy guard removes whitespace, which can
+  // join a field and an opaque id into a single unmatched token.
+  const separated = normalized.replace(/[\s\u200b-\u200d\ufeff]+/gu, "、");
+  const codes = findInternalLeaks(separated);
+  if (/(?<![A-Za-z])(?:issueId|nameState|claimIds|sourceTurn|respondsTo|localGrounding|classifierKind)(?![A-Za-z])/u.test(separated)) codes.push("internal_field");
+  if (/(?<![A-Za-z0-9])[1-9]\d*:(?:local|ai)[1-9]\d*(?![A-Za-z0-9])/u.test(separated)) codes.push("internal_id");
+  const compact = (value: string) => value.normalize("NFKC").replace(/[\s\u200b-\u200d\ufeff]+/gu, "");
+  const reply = compact(normalized);
+  if (messages.some(message => message.role === "system" && typeof message.content === "string" &&
+      message.content.split(/\r?\n/u).some(line => line.trim().length >= 24 && reply.includes(compact(line.trim().slice(0, 80)))))) {
+    codes.push("internal_prompt_echo");
+  }
+  if (/data\s*:\s*image\s*\//iu.test(normalized)) codes.push("internal_image");
+  if (/\bBearer[ \t]+[A-Za-z0-9._~+/-]+={0,2}|\bsk-[A-Za-z0-9_-]{8,}\b|\bAIza[A-Za-z0-9_-]{20,}\b|\b(?:api[_-]?key|x-api-key)\s*[:=]\s*["']?[A-Za-z0-9._~+/-]{8,}/iu.test(normalized)) {
+    codes.push("internal_credential");
+  }
+  return [...new Set(codes)];
+}
+
 export type GenerationCodeContext = { action: Action; candidateName: string | null; v3: boolean; holistic: boolean; adaptive: boolean; factored: boolean; ai: boolean;
   publicTexts: readonly string[] };
 /** Every publication rule for one draft that does not need the private prompts (those are added by the runtime): the single source for the run and for S4.
@@ -346,6 +369,13 @@ export function generationGuardCodes(text: string, c: GenerationCodeContext): st
 export type GenerationOutcome = { kind: "publish_first" | "publish_retry" | "fallback" | "stop"; regenerated: boolean; violations: string[] };
 /** What a draft (and its one rewrite) lead to, from their violation codes alone: publish the first, publish the rewrite, the orientation-only fallback, or stop.
  * `fallbackText` is the derived fallback sentence and `fallbackClean` says it has no violation of its own. */
+/** One draft's complete violation set, as the run composes it: the guard codes, the local publication checks against that very generation request's messages,
+ * and (AI public claims on) against the remaining private instructions. S4 calls this with the messages recorded for the send; `extra` is absent there. */
+export function draftViolationCodes(text: string, c: GenerationCodeContext, requestMessages: readonly { role: string; content: unknown }[],
+  extraInstructions: readonly { role: string; content: unknown }[] = []): string[] {
+  return [...new Set([...generationGuardCodes(text, c), ...findLocalPublicationViolations(text, requestMessages),
+    ...(c.ai && extraInstructions.length ? findLocalPublicationViolations(text, extraInstructions) : [])])];
+}
 export function deriveGenerationOutcome(first: readonly string[], retry: readonly string[] | null, fallbackText: string | null, fallbackClean: boolean): GenerationOutcome {
   if (!first.length) return { kind: "publish_first", regenerated: false, violations: [] };
   const union = [...new Set([...first, ...(retry ?? [])])];

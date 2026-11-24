@@ -24,7 +24,7 @@ import { validateJevDecision, validateHumanReferentEstimate, validateRepairProsp
 import type { JevDecisionFailureEvidence } from "../decision/jev-decision.ts";
 import { prepareLocalGroundingTurn, validateLocalGroundingOptions, findLocalPublicationViolations } from "./local-grounding-turn.ts";
 import type { LocalGroundingResearchRecord, LocalGroundingTrace } from "./local-grounding-turn.ts";
-import { findNamingActHints, generationGuardCodes, deriveGenerationOutcome, orientationSafeFallback, rewriteReasons } from "./generation-guard.ts";
+import { findNamingActHints, draftViolationCodes, deriveGenerationOutcome, orientationSafeFallback, rewriteReasons } from "./generation-guard.ts";
 import { createMemoAiExtractor, MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS, AiPublicError, aiHash, emptyAiEvidence } from "../local-grounding/extract-ai.ts";
 import { createJevAiFunctionClassifier, createJevAiSupportChecker, AI_FUNCTION_INSTRUCTIONS, AI_SUPPORT_INSTRUCTIONS,
   AI_RESPONSE_SUPPORT_INSTRUCTIONS, AI_FUNCTION_CRITERIA, AI_SUPPORT_CHOICES, AI_ACT_DESCRIPTIONS } from "../local-grounding/jev-ai-public.ts";
@@ -900,8 +900,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         ...publicTurns.map(t => ({ role: t.speaker === "human" ? "user" as const : "assistant" as const, content: t.text }))];
       const codeContext = { action: judgment.action, candidateName: judgment.candidateName ?? null, v3: questionLayout === "two_stage_v3", holistic, adaptive, factored, ai: aiEnabled,
         publicTexts: events.filter(e => e.seq <= latest.seq).map(e => e.text) };
-      const violations = (text: string, context: Message[]) => [...new Set([...generationGuardCodes(text, codeContext), ...findLocalPublicationViolations(text, context),
-        ...(aiEnabled ? findLocalPublicationViolations(text, privateInstructions) : [])])];
+      const violations = (text: string, context: Message[]) => draftViolationCodes(text, codeContext, context, privateInstructions);
       // holistic_v1: a closed-set question about the draft's naming act. An agree draft is always asked; any other draft only on a typed naming context,
       // a naming-act wording hit or a quoted string that is not the figure's agreed name. A failed question is "unconfirmed", never a pass.
       // Typed context: this turn's human utterance carries a name proposal or a request for approval of a name (both are name_propose claims).

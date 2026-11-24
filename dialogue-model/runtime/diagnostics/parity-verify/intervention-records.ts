@@ -3,7 +3,7 @@ import {createHash as nodeSha256} from 'node:crypto';
 // producer validator or replay executor. Only supplied data and code-owned
 // version constants are evidence; successful producer flags are not an oracle.
 import {jevChoiceAnswersValid,jevReportedCost,jevResponseId} from '../../decision/jev-choice-response.ts';
-import {generationGuardCodes,deriveGenerationOutcome,orientationSafeFallback} from '../../v2/generation-guard.ts';
+import {generationGuardCodes,draftViolationCodes,deriveGenerationOutcome,orientationSafeFallback} from '../../v2/generation-guard.ts';
 import {checkModelIdentity} from '../../model-identity-contract.ts';
 import {resolveModelPolicy} from '../../model-policy.ts';
 import {check,hash,equal,row,rows,list,META_KEYS} from './core.ts';
@@ -326,7 +326,7 @@ function draftActsShape(v:any):boolean{
   Number.isFinite(a.latencyMs)&&a.latencyMs>=0);
 }
 const s4AgreedNames=(tape:any,ex:any):Set<string>=>new Set<string>((ex.target.kind==='single'?[ex.target.figureId]:ex.target.kind==='multiple'?ex.target.figureIds:[]).map((id:string)=>tape.state.ledger?.[id]).filter((e:any)=>e&&e.status==='agreed'&&typeof e.name==='string').map((e:any)=>ledgerName(e.name)));
-const generationCodesClean=(text:string,cc:any)=>generationGuardCodes(text,cc).length===0;
+const generationCodesClean=(text:string,cc:any,messages:any[])=>draftViolationCodes(text,cc,messages).length===0;
 const s4Sha256=(text:string)=>nodeSha256('sha256').update(text,'utf8').digest('hex');
 // The verdict is a pure function of the label and the executed action: agree publishes only adopt_chosen, any other act never adopts a name.
 function draftActVerdict(choice:string,action:string):string|null{
@@ -563,7 +563,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
  for(const [n,label]of ['repair-first','bypass-enabled'].entries()){
   const s=result.sides[n],m=s?.material;if(!exact(s,['label','material','materialSha256','requests','executed','intervention'])||s.label!==label||!exact(m,['state','events','common','tail','own','model','profile','boundary',...(CTX.trial?['technicalTrial']:[]),...(tape.generationRetryVersion?['generationRetryVersion']:[])])||m.generationRetryVersion!==tape.generationRetryVersion||hash(m)!==s.materialSha256||(CTX.trial&&!equal(m.technicalTrial,tape.technicalTrial))||!equal(m.state,tape.state)||!equal(m.events,tape.events)||!equal(m.common,tape.common)||!equal(m.tail,tape.tails[label])||!equal(m.profile,tr.profile)||!Array.isArray(s.requests)||!equal(m.boundary,{luna:'canonical_http_json',jev:'canonical_http_json',hashScheme:'canonical_json_sha256_not_raw_body_bytes'}))return'invalid';
   if(!relation({...t,executed:s.executed,intervention:s.intervention,finalAction:s.executed?{action:s.executed.action,targetSlot:s.executed.target.kind==='single'?s.executed.target.figureId:null,candidateName:s.executed.name,discriminatingFeature:s.executed.feature}:null},label,Object.keys(tape.state.ledger),layout))return'invalid';
-  let originalInput:any=null,pendingSet=false,pendingTarget=false,current:any=null,currentInput:any=null,turnDecision=-1,prospect:any=null,generationCount=0,prevDraft:any=null,lastVerdict:string|null=null;const draftTexts:any[]=[],askedDrafts:number[]=[],askedRows:any[]=[],draftVerdicts:(string|null)[]=[];
+  let originalInput:any=null,pendingSet=false,pendingTarget=false,current:any=null,currentInput:any=null,turnDecision=-1,prospect:any=null,generationCount=0,prevDraft:any=null,lastVerdict:string|null=null;const draftTexts:any[]=[],genMessages:any[]=[],askedDrafts:number[]=[],askedRows:any[]=[],draftVerdicts:(string|null)[]=[];
   const response={luna:[...tape.common.luna,...tape.tails[label].luna],jev:[...tape.common.jev,...tape.tails[label].jev]},indices={luna:0,jev:0};
   for(const r of s.requests){if(!exact(r,['provider','phase','payload','payloadDomain','payloadSha256','preProjectionPayloadSha256','role',...(Object.hasOwn(r,'completeMessagesSha256')?['completeMessagesSha256']:[])])||!['luna','jev'].includes(r.provider)||!['common','alternative_detail','generation','post_generation'].includes(r.role)||r.payloadDomain!=='canonical_http_json'||hash(r.payload)!==r.payloadSha256||typeof r.preProjectionPayloadSha256!=='string'||!/^[a-f0-9]{64}$/.test(r.preProjectionPayloadSha256))return'invalid';
    const p=r.payload,provider=r.provider as 'luna'|'jev',answer=response[provider][indices[provider]++];if(!answer)return'missing';
@@ -577,7 +577,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
      const v3Retry=layout==='two_stage_v3';
      const draft=codes===undefined&&generationCount===1?{orientation:v3Retry&&s4HasOrientationLeak(prevDraft),naming:typeof prevDraft==='string'&&s4NamingDecision(prevDraft.normalize('NFKC').replace(/[\s\u200b-\u200d\ufeff]/gu,''),s.executed?.action),workingNote:v3Retry&&restatedRetry&&s4HasWorkingNote(prevDraft,publicTexts),...(CTX.policy==='holistic_v1'?{draftAct:lastVerdict}:{})}:undefined;
      if(!generationMessages(p.messages,t,s.executed,{...tape,generationGraph:(tr.turns??[]).find((u:any)=>u.turn===t.turnIndex)?.state?.graph},m.profile,generationCount++,codes,draft))return'invalid';
-     prevDraft=answer?.response?.text??answer?.text;draftTexts.push(prevDraft);lastVerdict=null;
+     prevDraft=answer?.response?.text??answer?.text;draftTexts.push(prevDraft);genMessages.push(p.messages);lastVerdict=null;
     }
    }
    else{
@@ -674,14 +674,17 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
    {
     const aiOn=tr.profile?.localGrounding?.aiPublicClaims===true||Object.hasOwn(tr.lastCommittedState??{},'aiPublic'),cc={action:ex.action as any,candidateName:typeof ex.name==='string'?ex.name:null,v3:true,holistic:true,adaptive:!!CTX.trial,factored:!!CTX.facts,ai:aiOn,publicTexts};
     const actCode=(i:number)=>{const row=askedRows.find(y=>y.draft===(i===0?'initial':'retry'));return row&&row.verdict!==null?[row.verdict as string]:[];};
-    const codes=(i:number)=>typeof draftTexts[i]==='string'?[...new Set([...generationGuardCodes(draftTexts[i],cc),...actCode(i)])]:['empty_utterance'];
+    // The same composition as the run (guard codes + the local publication checks against that send's own recorded messages); no private instruction is stored.
+    const codes=(i:number)=>typeof draftTexts[i]==='string'?[...new Set([...draftViolationCodes(draftTexts[i],cc,genMessages[i]??[]),...actCode(i)])]:['empty_utterance'];
     const fb=orientationSafeFallback({action:ex.action,candidateName:cc.candidateName,discriminatingFeature:typeof ex.feature==='string'?ex.feature:null} as any);
-    const out=deriveGenerationOutcome(codes(0),generationCount===2?codes(1):null,fb,fb!==null&&generationCodesClean(fb,cc));
+    const out=deriveGenerationOutcome(codes(0),generationCount===2?codes(1):null,fb,fb!==null&&generationCodesClean(fb,cc,genMessages[generationCount-1]??[]));
     if(out.kind==='stop'||out.regenerated!==(generationCount===2))return'invalid';
     if(label===tr.label){
      const g=t.generationGuard,derived=new Set(out.violations),recorded:string[]=g?.violations??[];
      const extra=recorded.filter(c=>!derived.has(c));
      if(g?.fallback!==(out.kind==='fallback')||g?.regenerated!==out.regenerated||[...derived].some(c=>!recorded.includes(c))||extra.some(c=>!['internal_image','internal_credential','internal_prompt_echo'].includes(c)))return'invalid';
+     // A prompt echo of an instruction that is not in this send's recorded messages (AI public claims on) cannot be re-derived: insufficient evidence, not a contradiction.
+     if(extra.length)missing=true;
      if(out.kind==='fallback'?t.publicSpeech!==fb:t.publicSpeech!==draftTexts.at(-1))return'invalid';
     }
    }

@@ -5,7 +5,6 @@ import type { LocalAct, LocalOwnImage, LocalOwnAnchor, LocalFunctionVerdict, Loc
 import { verifyLocalUpdate, recordAiClaims, type LocalVerificationDiagnostic } from "../local-grounding/verify.ts";
 import { summarizeLocalIssues, priorClaimViews } from "../local-grounding/derive.ts";
 import { validateReferenceUpdate, previewReferenceUpdate, ReferenceGraphError } from "../memory/reference-graph.mjs";
-import { findInternalLeaks } from "./generation-guard.ts";
 import { literalSpan } from "../judgment/public-evidence.mjs";
 import { LOCAL_EXTRACTION_INSTRUCTIONS, LocalExtractionError, type LocalExtractionErrorCode } from "../local-grounding/extract.ts";
 import { LOCAL_CLASSIFICATION_INSTRUCTIONS, LocalClassificationError, type LocalClassificationErrorCode } from "../local-grounding/classify.ts";
@@ -13,28 +12,8 @@ import { LOCAL_CLASSIFICATION_INSTRUCTIONS, LocalClassificationError, type Local
 export const LOCAL_GROUNDING_TIMEOUT_MS = 20_000;
 type Message = { role: string; content: unknown };
 
-/** Opt-in publication checks. Only fixed codes leave this function; private
- * instructions and the matched draft text never enter research records. */
-export function findLocalPublicationViolations(text: string, messages: readonly Message[]): string[] {
-  const normalized = text.normalize("NFKC");
-  // Preserve token boundaries: the legacy guard removes whitespace, which can
-  // join a field and an opaque id into a single unmatched token.
-  const separated = normalized.replace(/[\s\u200b-\u200d\ufeff]+/gu, "、");
-  const codes = findInternalLeaks(separated);
-  if (/(?<![A-Za-z])(?:issueId|nameState|claimIds|sourceTurn|respondsTo|localGrounding|classifierKind)(?![A-Za-z])/u.test(separated)) codes.push("internal_field");
-  if (/(?<![A-Za-z0-9])[1-9]\d*:(?:local|ai)[1-9]\d*(?![A-Za-z0-9])/u.test(separated)) codes.push("internal_id");
-  const compact = (value: string) => value.normalize("NFKC").replace(/[\s\u200b-\u200d\ufeff]+/gu, "");
-  const reply = compact(normalized);
-  if (messages.some(message => message.role === "system" && typeof message.content === "string" &&
-      message.content.split(/\r?\n/u).some(line => line.trim().length >= 24 && reply.includes(compact(line.trim().slice(0, 80)))))) {
-    codes.push("internal_prompt_echo");
-  }
-  if (/data\s*:\s*image\s*\//iu.test(normalized)) codes.push("internal_image");
-  if (/\bBearer[ \t]+[A-Za-z0-9._~+/-]+={0,2}|\bsk-[A-Za-z0-9_-]{8,}\b|\bAIza[A-Za-z0-9_-]{20,}\b|\b(?:api[_-]?key|x-api-key)\s*[:=]\s*["']?[A-Za-z0-9._~+/-]{8,}/iu.test(normalized)) {
-    codes.push("internal_credential");
-  }
-  return [...new Set(codes)];
-}
+export { findLocalPublicationViolations } from "./generation-guard.ts";
+import { findLocalPublicationViolations } from "./generation-guard.ts";
 
 type Graph = { revision: number; lastTurn: number; slots: string[]; records: Array<{ kind: string; id: string }> };
 type Update = { expectedRevision: number; turn: number; operations: Array<{ kind: string; id: string }> };

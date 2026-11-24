@@ -744,3 +744,19 @@ test('05f: the run, its dynamic replay and S4 agree on the deferral and name-not
   assert.notEqual(await dynamic(hidden), 'same_material_intervention_verified');
   assert.ok(checksOf(hidden).some((c: any) => c.status !== 'pass'));
 });
+
+test('05g: internal items (field names, local ids, an echo of the send\'s own instructions) in a first draft rewritten safely are accepted; one such comparison draft alone is refused', async () => {
+  const dynamic = async (record: any) => (await pairedInterventionReplay(structuredClone(record.trials[0].replay[0].tape), OWN as any, MODEL, record.trials[0].profile) as any).status;
+  const echo = '画像はあなた自身に提示された図形だけです。相手の画像・内部認識・正しい対応表は見えません。';
+  for (const first of ['この形のissueIdは違います。', '2:local1 の話です。', echo]) {
+    const record = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v1', retry: { current: true, drafts: [first, 'そう見えるんですね。'] } });
+    pass(record);
+    assert.deepEqual(record.trials[0].attempts[0].generationGuard.regenerated, true);
+    assert.ok(record.trials[0].attempts[0].generationGuard.violations.length >= 1, first);
+    assert.equal(await dynamic(record), 'same_material_intervention_verified', first);
+    const single = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v1', generationText: 'そう見えるんですね。' });
+    const bad = forgeGeneration(single, 'repair-first', 0, first);
+    assert.ok(checksOf(bad).some((c: any) => c.status !== 'pass'), 'comparison: ' + first);
+    assert.notEqual(await dynamic(bad), 'same_material_intervention_verified', 'dynamic: ' + first);
+  }
+});
