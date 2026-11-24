@@ -17,3 +17,22 @@ test('a technical-trial v3 records holistic_v1; a plain v3 and v1/v2 layouts do 
   assert.notEqual(researchHash(trial), researchHash(plain));
   for (const layout of ['two_stage_v1', 'two_stage_v2']) assert.equal(Object.hasOwn(validateParticipantJevConfig({ ...base, questionLayout: layout }).profile, 'dialoguePolicy'), false);
 });
+
+import { jevChoiceAnswersValid, jevReportedCost, jevResponseId } from '../dialogue-model/runtime/decision/jev-choice-response.ts';
+test('the shared response contract: confidence and probabilities in 0..1, exact keys, reported cost, gen- ids', () => {
+  const labels = { q: ['a', 'b'] };
+  const ok = (extra: object = {}, probs = { a: 1, b: 0 }) => ({ q: { type: 'choice', choice: 'a', probabilities: probs, ...extra } });
+  assert.equal(jevChoiceAnswersValid(ok(), labels), true);
+  assert.equal(jevChoiceAnswersValid(ok({ confidence: 0.5 }), labels), true);
+  assert.equal(jevChoiceAnswersValid(ok({ confidence: null }), labels), true);
+  assert.equal(jevChoiceAnswersValid(ok({ confidence: 2 }), labels), false);
+  assert.equal(jevChoiceAnswersValid(ok({ extra: 1 }), labels), false);
+  assert.equal(jevChoiceAnswersValid(ok({}, { a: 1, b: 1.5 }), labels), false);
+  assert.equal(jevChoiceAnswersValid({ ...ok(), z: ok().q }, labels), false);
+  assert.equal(jevChoiceAnswersValid({ q: { ...ok().q, choice: 'c' } }, labels), false);
+  assert.equal(jevReportedCost({ usage: { cost: 0 } }), 0);
+  assert.equal(jevReportedCost({ usage: { cost: -1 } }), null);
+  assert.equal(jevReportedCost({}), null);
+  assert.equal(jevResponseId({ id: 'gen-abc_1' }), 'gen-abc_1');
+  assert.equal(jevResponseId({ id: 'other' }), null);
+});

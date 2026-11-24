@@ -64,7 +64,7 @@ async function recordedRun(profile: any, tape: any, label: 'repair-first' | 'byp
 }
 /** NORMAL rebuilt as one canonical trial of the given layout, label and Jev responses (the s4-two-stage-v2 pattern). */
 async function records(layout: 'two_stage_v2' | 'two_stage_v3', jev: any[], { reobservation = false, label = 'bypass-enabled' as 'repair-first' | 'bypass-enabled', generationText = null as string | null, humanText = null as string | null,
-  retry = null as { drafts: [string, string]; current: boolean; fallback?: boolean } | null, policy = null as 'holistic_v1' | null, draftAnswers = [] as string[] } = {}) {
+  retry = null as { drafts: [string, string]; current: boolean; fallback?: boolean } | null, policy = null as 'holistic_v1' | null, draftAnswers = [] as Array<string | { choice: string; extra: Record<string, unknown> }> } = {}) {
   const n = structuredClone(normal), tr = n.trials[0], m = n.run.manifest;
   const profile = JSON.parse(JSON.stringify(researchTrialProfileV3(m.lunaRequest, m.timeouts, layout, policy)));
   const digest = hash(profile);
@@ -74,7 +74,8 @@ async function records(layout: 'two_stage_v2' | 'two_stage_v3', jev: any[], { re
   const tape: any = { ...structuredClone(OLD), common: { ...structuredClone(OLD.common), jev }, recorded: { label, expectedRequests: [] } };
   if (humanText !== null) tape.events.at(-1).text = humanText;
   if (draftAnswers.length) for (const side of Object.values(tape.tails) as any[]) side.jev = [...draftAnswers.map((c, i) => jevResponse('draft-' + i,
-    { draft_naming: answer(c, ['adopt_chosen', 'adopt_other', 'decline_or_hold', 'propose_question', 'recount_only', 'none']) })), ...side.jev];
+    { draft_naming: typeof c === 'string' ? answer(c, ['adopt_chosen', 'adopt_other', 'decline_or_hold', 'propose_question', 'recount_only', 'none'])
+      : { ...answer(c.choice, ['adopt_chosen', 'adopt_other', 'decline_or_hold', 'propose_question', 'recount_only', 'none']), ...c.extra } })), ...side.jev];
   if (generationText !== null) {
     for (const side of Object.values(tape.tails ?? {}) as any[]) {
       for (const l of side.luna ?? []) if (l.phase === 'generation') l.response = { ...l.response, text: generationText };
@@ -641,4 +642,57 @@ test('05d-6: draftSha256 is recomputed from the draft text', async () => {
   const forged = structuredClone(record);
   for (const c of traceCopies(forged)) c.draftActs[0].draftSha256 = '0'.repeat(64);
   assert.ok(checksOf(forged).some((c: any) => c.status !== 'pass'));
+});
+
+const NAMING_DRAFT = 'この形は「name-0」で呼びましょう。', RECOUNT_DRAFT = 'さっきの「name-0」は相手の案ですね。';
+const forgeBoth = (record: any, label: string, edit: (tail: any) => void) => {
+  const forged = structuredClone(record);
+  edit(forged.trials[0].replay[0].tape.tails[label]);
+  for (const side of sideCopies(forged).filter((x: any) => x.label === label)) { edit(side.material.tail); side.materialSha256 = hash(side.material); }
+  return forged;
+};
+const draftAnswerOf = (tail: any) => tail.jev.find((j: any) => j.answers?.draft_naming).answers.draft_naming;
+
+test('05e-1: a normally published text must be the last checked generation draft', async () => {
+  const record = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v1', generationText: '輪の部分が見えます。' });
+  pass(record);
+  const forged = structuredClone(record);
+  for (const t of traceCopies(forged)) t.publicSpeech = 'この形は「丸形」と呼びましょう。';
+  forged.trials[0].turns[0].publicText = 'この形は「丸形」と呼びましょう。';
+  assert.ok(checksOf(forged).some((c: any) => c.status !== 'pass'));
+});
+
+test('05e-2: an out-of-range optional confidence is an unusable answer in the run and in S4, on both the recorded and the comparison side', async () => {
+  const bad = { choice: 'recount_only', extra: { confidence: 2 } };
+  const record = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v1', draftAnswers: [bad, 'recount_only'], retry: { current: true, drafts: [NAMING_DRAFT, RECOUNT_DRAFT] } });
+  pass(record);
+  assert.deepEqual(record.trials[0].attempts[0].draftActs.map((a: any) => [a.status, a.error]), [['error', 'invalid_response'], ['ok', null]]);
+  const single = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v1', draftAnswers: ['recount_only'], generationText: RECOUNT_DRAFT });
+  pass(single);
+  for (const label of ['bypass-enabled', 'repair-first']) {
+    const forged = forgeBoth(single, label, tail => { draftAnswerOf(tail).confidence = 2; });
+    assert.ok(checksOf(forged).some((c: any) => c.status !== 'pass'), label + ' unconfirmed final draft');
+  }
+});
+
+test('05e-3: a failed question answer is checked against its own send: id, cost, reason, triggers', async () => {
+  const record = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v1', draftAnswers: [{ choice: 'recount_only', extra: { confidence: 2 } }, 'recount_only'],
+    retry: { current: true, drafts: [NAMING_DRAFT, RECOUNT_DRAFT] } });
+  pass(record);
+  const forgeries: Array<[string, (a: any) => void]> = [['cost', a => { a.costUsd = 0.034; }], ['response id', a => { a.responseId = 'gen-other'; }],
+    ['reason', a => { a.error = 'timeout'; }], ['triggers', a => { a.triggers = ['agree_action']; }]];
+  for (const [name, edit] of forgeries) {
+    const forged = structuredClone(record);
+    for (const t of traceCopies(forged)) edit(t.draftActs[0]);
+    assert.ok(checksOf(forged).some((c: any) => c.status !== 'pass'), name);
+  }
+});
+
+test('05e-4: a comparison retry that can neither publish nor fall back (naming fault, then orientation fault) is never a success', async () => {
+  const record = await records('two_stage_v3', decisionsAccept(), { policy: 'holistic_v1', draftAnswers: ['adopt_other'], retry: { current: true, drafts: [NAMING_DRAFT, 'そう見えるんですね。'] } });
+  pass(record);
+  for (const label of ['bypass-enabled', 'repair-first']) {
+    const forged = forgeBoth(record, label, tail => { tail.luna.filter((l: any) => l.phase === 'generation')[1].response.text = '右側が尖っています。'; });
+    assert.ok(checksOf(forged).some((c: any) => c.status !== 'pass'), label);
+  }
 });

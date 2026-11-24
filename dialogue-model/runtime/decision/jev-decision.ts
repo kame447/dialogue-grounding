@@ -8,6 +8,7 @@ import { literalSpan } from "../judgment/public-evidence.mjs";
 import { validateOwnLedger } from "../judgment/schema.mjs";
 import { normalizeName } from "../scoring.mjs";
 import { validateRepairFacts } from "./repair-facts.ts";
+import { jevChoiceAnswersValid } from "./jev-choice-response.ts";
 import { JEV_ACTIONS, DRAFT_ACTS, OBSERVATION_ASPECTS, REPAIR_PROSPECTS, REPAIR_PROSPECT_BASES } from "./contract.ts";
 import type { JevAction, JevDecision, JevDecisionClient, JevDecisionInput, JevDecisionEvidence, JevObservationRequest,
   JevQuestionLayout, JevTarget, RepairHistoryEntry, DecisionInputBudget, JevDecisionStageEvidence, JevDecisionCallOptions, DialoguePolicy,
@@ -1119,14 +1120,11 @@ export function createJevDecisionClient(options: JevDecisionClientOptions = {}):
             record.responseId = evidence.responseId = typeof data.id === "string" && /^gen-[A-Za-z0-9_-]{1,124}$/.test(data.id) ? data.id : null;
             if (!accounted) fail("cost_unreported");
             if (spentUsd > costCapUsd) fail("cost_cap");
-            if (!exact(data.answers, Object.keys(payload.questions))) fail("invalid_response");
+            if (!jevChoiceAnswersValid(data.answers, Object.fromEntries(Object.entries(payload.questions).map(([name, q]) => [name, Object.keys(q.criteria)])))) fail("invalid_response");
             const choices: Record<string, string> = {}, scores: Record<string, Record<string, number>> = {};
-            for (const [name, q] of Object.entries(payload.questions)) {
-              const a = data.answers[name], labels = Object.keys(q.criteria);
-              if (!object(a) || !Object.keys(a).every(k => ["type", "choice", "probabilities", "confidence"].includes(k)) || a.type !== "choice" ||
-                  !includes(labels, a.choice) || !exact(a.probabilities, labels) || !Object.values(a.probabilities).every(probability) ||
-                  !(a.confidence === undefined || a.confidence === null || probability(a.confidence))) fail("invalid_response");
-              choices[name] = a.choice; scores[name] = { ...a.probabilities } as Record<string, number>;
+            for (const name of Object.keys(payload.questions)) {
+              const a = (data.answers as Record<string, { choice: string; probabilities: Record<string, number> }>)[name];
+              choices[name] = a.choice; scores[name] = { ...a.probabilities };
             }
             Object.assign(record, { choices, scores, status: "ok" });
             if (stage === "action_target" || stage === "action") { evidence.choices = { ...choices }; evidence.scores = structuredClone(scores); }

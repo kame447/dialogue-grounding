@@ -2,6 +2,7 @@ import {createHash as nodeSha256} from 'node:crypto';
 // Independent record-only S4 checks. Never imports an online runtime, transport,
 // producer validator or replay executor. Only supplied data and code-owned
 // version constants are evidence; successful producer flags are not an oracle.
+import {jevChoiceAnswersValid,jevReportedCost,jevResponseId} from '../../decision/jev-choice-response.ts';
 import {checkModelIdentity} from '../../model-identity-contract.ts';
 import {resolveModelPolicy} from '../../model-policy.ts';
 import {check,hash,equal,row,rows,list,META_KEYS} from './core.ts';
@@ -589,8 +590,10 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
       const turns=(tape.events??[]).filter((e:any)=>e.seq<=t.turnIndex).slice(-12).map((e:any)=>({turn:e.seq,speaker:e.speaker,text:String(e.text).slice(0,400)}));
       if(!trig.length||p.state!==JSON.stringify({turn:t.turnIndex,publicTurns:turns,reasons:trig,selected:{action:ex.action,target:ex.target,name:ex.name},draft:prevDraft}))return'invalid';
       // A response the client cannot use (a label outside the six) is recorded as an error act: that send is unconfirmed, never a pass.
-      const usable=choiceResponse(p,answer),v=usable?draftActVerdict(answer.answers.draft_naming.choice,ex.action):'draft_act_unconfirmed';draftVerdicts.push(v);lastVerdict=v;askedDrafts.push(gi);
-      askedRows.push({draft:gi===0?'initial':'retry',triggers:trig,invalid:!usable,choice:usable?answer.answers.draft_naming.choice:null,scores:usable?answer.answers.draft_naming.probabilities:null,model:answer.model,responseId:answer.id,costUsd:answer.usage?.cost??null,verdict:v});
+      // Usability is the real client's own contract (shared pure functions): a reported cost and answers of exactly the asked question.
+      const reported=jevReportedCost(answer),usable=reported!==null&&jevChoiceAnswersValid(answer.answers,{draft_naming:Object.keys(DRAFT_NAMING_QUESTIONS_S4.draft_naming.criteria)});
+      const v=usable?draftActVerdict(answer.answers.draft_naming.choice,ex.action):'draft_act_unconfirmed';draftVerdicts.push(v);lastVerdict=v;askedDrafts.push(gi);
+      askedRows.push({draft:gi===0?'initial':'retry',triggers:trig,invalid:!usable,reason:usable?null:reported===null?'cost_unreported':'invalid_response',choice:usable?answer.answers.draft_naming.choice:null,scores:usable?answer.answers.draft_naming.probabilities:null,model:answer.model,responseId:jevResponseId(answer),costUsd:reported,verdict:v});
       continue;
      }
      if(Object.hasOwn(p.questions,'repair_issue')){
@@ -664,6 +667,14 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
     if(!target&&row)return'invalid';
     if(row&&row.verdict!==null&&i===generationCount-1)return'invalid';
    }
+   // The outcome of each side follows from its own drafts and answers: a draft that fits publishes; a draft with an orientation-only fault may fall back
+   // only when both drafts are orientation-only with every asked question successful and fitting; any other combination stops the turn (never a commit).
+   {
+    const bad=(i:number)=>{const x=draftTexts[i],row=askedRows.find(y=>y.draft===(i===0?'initial':'retry'));return typeof x!=='string'||s4HasOrientationLeak(x)||s4HasNonOrientationLeak(x,ex)||s4HasWorkingNote(x,publicTexts)||Boolean(row&&row.verdict!==null);};
+    const orientOnly=(i:number)=>{const x=draftTexts[i],row=askedRows.find(y=>y.draft===(i===0?'initial':'retry'));return typeof x==='string'&&s4HasOrientationLeak(x)&&!s4HasNonOrientationLeak(x,ex)&&!s4HasWorkingNote(x,publicTexts)&&!(row&&row.verdict!==null);};
+    if(generationCount===1&&bad(0))return'invalid';
+    if(generationCount===2&&bad(1)&&!(orientOnly(0)&&orientOnly(1)))return'invalid';
+   }
   }
   if(label===tr.label&&t.status==='committed'){
    const acts:any[]=t.draftActs??[],guardCodes:string[]=(t.generationGuard?.violations??[]).filter((c:string)=>c.startsWith('draft_act_'));
@@ -674,12 +685,16 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
      if(typeof draftTexts[idx]!=='string'||a.draftSha256!==s4Sha256(draftTexts[idx]))return'invalid';
      const row=askedRows.find(x=>x.draft===a.draft);
      if(!row){if(a.status!=='error')return'invalid';missing=true;continue;}
-     if(row.invalid?a.status!=='error'||a.choice!==null:a.status!=='ok'||!equal(a.triggers,row.triggers)||a.choice!==row.choice||!equal(a.scores,row.scores)||a.model!==row.model||a.responseId!==row.responseId||a.costUsd!==row.costUsd)return'invalid';
+     // The send's own evidence decides every field: its trigger list, response id, reported cost and, for a failed send, the failure the client contract derives.
+     if(!equal(a.triggers,row.triggers)||a.model!==row.model||a.responseId!==row.responseId||a.costUsd!==row.costUsd)return'invalid';
+     if(row.invalid?a.status!=='error'||a.choice!==null||a.scores!==null||a.error!==row.reason:a.status!=='ok'||a.error!==null||a.choice!==row.choice||!equal(a.scores,row.scores))return'invalid';
     }
     if(askedRows.some(x=>!acts.some(a=>a.draft===x.draft)))return'invalid';
     if(acts.some(a=>a.status==='error')!==guardCodes.includes('draft_act_unconfirmed')||acts.some(a=>a.status==='ok'&&draftActVerdict(a.choice,s.executed?.action)!==null)!==guardCodes.includes('draft_act_mismatch'))return'invalid';
     // Fallback sentence: both drafts were orientation-only and every question asked of them succeeded and fit the act.
     if(t.generationGuard?.fallback===true&&(draftTexts.length!==2||guardCodes.length>0||acts.some(a=>a.status!=='ok')))return'invalid';
+    // A normal publication is the last checked draft itself; the fallback sentence is derived (see the published-record check).
+    if(t.generationGuard?.fallback!==true&&t.publicSpeech!==draftTexts.at(-1))return'invalid';
    }
   }
   if(indices.luna!==response.luna.length||indices.jev!==response.jev.length||pendingSet||pendingTarget||turnDecision!==t.decisions.length-1)return'invalid';
