@@ -577,6 +577,11 @@ function agreeSource(tr:any,t:any,key:string,tape:any,legacyV3=false):'invalid'|
     });
    };
    const inheritedIds=inheritedTargetClaimIds(t.local?.verification?.diagnostics);
+   // holistic_v5: the oldest windowed turn that says the name along the respondsTo chain of same-name proposals and adoptions (bounded, cycle-safe); the run's chainedNameSource.
+   const chainedSource=(c:any,name:string):any=>{let found:any,cur=c;const seenIds=new Set([c.id]);
+    for(let i=0;i<8;i++){const up=typeof cur.respondsTo==='string'?publicClaims.find((p:any)=>p.id===cur.respondsTo&&p.name===name&&(p.act==='name_propose'||p.act==='name_accept')):undefined;
+     if(!up||seenIds.has(up.id))break;seenIds.add(up.id);const e=win.find((w:any)=>w.seq===up.sourceTurn&&w.text.includes(name));if(e&&(!found||e.seq<found.seq))found=e;cur=up;}
+    return found;};
    const expectedAt=(level:number):string[]=>{const tagged=openClaims.flatMap((c:any)=>{
     const name=c.name as string;
     const perFigure=scoped&&level===2;
@@ -592,7 +597,8 @@ function agreeSource(tr:any,t:any,key:string,tape:any,legacyV3=false):'invalid'|
     const baseSlots=targets.length>=1?targets.filter(id=>slotAllowed(id,name)):currentUnbound?slots.filter(id=>slotAllowed(id,name)&&(level<1||aiSharedIds.has(id)&&wasFocused(id))):[];
     const eligibleSlots=level>=2&&isHolisticV3Plus(tr.profile?.dialoguePolicy)?baseSlots.filter(id=>agreeCandidateAllowed(c,id,t.turnIndex,hasNameProposal(openClaims,t.turnIndex),inheritedIds,intervalEstimates)):baseSlots;
     const antecedent=c.act==='name_accept'||inheritsProposalName(c,publicClaims,isHolisticV4Plus(tr.profile?.dialoguePolicy))?publicClaims.find((p:any)=>p.id===c.respondsTo&&p.name===name):undefined;
-    const s=win.find((e:any)=>e.seq===c.sourceTurn&&e.text.includes(name))??(antecedent&&win.find((e:any)=>e.seq===antecedent.sourceTurn&&e.text.includes(name)))??(c.act==='name_accept'?win.filter((e:any)=>e.text.includes(name)).sort((a:any,b:any)=>a.seq-b.seq)[0]:undefined);
+    const s=win.find((e:any)=>e.seq===c.sourceTurn&&e.text.includes(name))??(antecedent&&win.find((e:any)=>e.seq===antecedent.sourceTurn&&e.text.includes(name)))??(c.act==='name_accept'?win.filter((e:any)=>e.text.includes(name)).sort((a:any,b:any)=>a.seq-b.seq)[0]:undefined)??
+     (tr.profile?.dialoguePolicy==='holistic_v5'?chainedSource(c,name):undefined);
     if(!s)return[];
     return eligibleSlots.filter(id=>{
      if(perFigure&&proposals.some((p:any)=>{

@@ -241,9 +241,24 @@ export function hasTypedNamingRequest(claims: readonly LocalClaimView[], turn: n
   return claims.some(c => c.speaker === "human" && c.sourceTurn === turn && (c.act === "name_propose" && c.name !== null ||
     askCounts && c.act === "ask" && c.aspect === "name" && claims.some(p => p.id === c.respondsTo && p.act === "name_propose" && p.name !== null)));
 }
-function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns: readonly PublicTurn[], turn: number,
+/** The oldest public turn that says `name` along the respondsTo chain of same-name proposals and adoptions above `claim` (bounded and cycle-safe). */
+export function chainedNameSource(claim: LocalClaimView, publicClaims: readonly LocalClaimView[], publicTurns: readonly PublicTurn[], name: string): PublicTurn | undefined {
+  let found: PublicTurn | undefined;
+  const seen = new Set<string>([claim.id]);
+  let current: LocalClaimView = claim;
+  for (let step = 0; step < 8; step++) {
+    const up = current.respondsTo === null ? undefined : publicClaims.find(p => p.id === current.respondsTo && p.name === name && (p.act === "name_propose" || p.act === "name_accept"));
+    if (!up || seen.has(up.id)) break;
+    seen.add(up.id);
+    const turn = publicTurns.find(t => t.turn === up.sourceTurn && t.text.includes(name));
+    if (turn && (!found || turn.turn < found.turn)) found = turn;
+    current = up;
+  }
+  return found;
+}
+export function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns: readonly PublicTurn[], turn: number,
   slots: readonly string[], { ledger, judgments, agreeNameScopeVersion }: Pick<JevPrivateState, "ledger" | "judgments" | "agreeNameScopeVersion">,
-  current: { status: string; scores: Record<string, number> | null } | null = null, referentRule = false, inheritedIds: ReadonlySet<string> = new Set(), fromNamedClaim = false): PublicNameCandidate[] {
+  current: { status: string; scores: Record<string, number> | null } | null = null, referentRule = false, inheritedIds: ReadonlySet<string> = new Set(), fromNamedClaim = false, chainedSource = false): PublicNameCandidate[] {
   const turnHasProposal = hasNameProposal(claims, turn);
   const isHumanProposal = (c: LocalClaimView) => c.speaker === "human" && c.act === "name_propose";
   const publicClaims = claims.filter(c => c.aspect === "name" && c.name !== null &&
@@ -314,7 +329,9 @@ function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns: reado
     const source = publicTurns.find(t => t.turn === c.sourceTurn && t.text.includes(name)) ??
       (antecedent && publicTurns.find(t => t.turn === antecedent.sourceTurn && t.text.includes(name))) ??
       (c.act === "name_accept" ? publicTurns.filter(t => t.text.includes(name)).sort((a, b) => a.turn - b.turn)[0] : undefined);
-    if (!source) return [];
+    // holistic_v5: a name-less approval request answers the previous request, which answers the proposal that said the name; follow that same-name chain to the public turn that says it.
+    const chain = source ?? (chainedSource ? chainedNameSource(c, publicClaims, publicTurns, name) : undefined);
+    if (!chain) return [];
     const occupied = slots.filter(id => ledger[id].name !== null && normalizeName(ledger[id].name) === normalized);
     return (referentRule ? candidates.filter(id => agreeCandidateAllowed(c, id, turn, turnHasProposal, inheritedIds, intervalEstimates)) : candidates).filter(id => {
       // Supersession applies to this candidate, using a verified reply or an explicitly bound target.
@@ -333,7 +350,7 @@ function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns: reado
         occupied.some(other => other !== id)) return false;
       return !openClaims.some(r => r.speaker === "human" && r.sourceTurn > c.sourceTurn &&
         (r.act === "deny" || r.act === "name_reject") && r.name === name && (r.respondsTo === c.id || r.targets.includes(id)));
-    }).map(figureId => ({ entry: { name, figureId, sourceTurn: source.turn }, inherited: inheritsProposalName(c, publicClaims, fromNamedClaim) }));
+    }).map(figureId => ({ entry: { name, figureId, sourceTurn: chain.turn }, inherited: inheritsProposalName(c, publicClaims, fromNamedClaim) }));
   });
   // A proposal that carries an earlier proposal's name must not list a candidate the earlier proposal already lists (or that another such proposal lists).
   const direct = new Set(tagged.filter(x => !x.inherited).map(x => JSON.stringify(x.entry)));
@@ -779,7 +796,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         publicNames: claims.filter(c => c.name !== null && publicTurns.some(t => t.turn === c.sourceTurn && t.text.includes(c.name!)))
           .map(c => ({ name: c.name!, figureId: c.targets.length === 1 ? c.targets[0] : null, sourceTurn: c.sourceTurn })) };
       if (questionLayout === "two_stage_v3") {
-        baseInput.agreeNames = buildAgreeNamesV3(claims, publicTurns, latest.seq, slots, state, null, holisticV3, inheritedTargetClaimIds(prepared.research?.verification?.diagnostics), holisticV4);
+        baseInput.agreeNames = buildAgreeNamesV3(claims, publicTurns, latest.seq, slots, state, null, holisticV3, inheritedTargetClaimIds(prepared.research?.verification?.diagnostics), holisticV4, options.dialoguePolicy === "holistic_v5");
         baseInput.nameLedger = structuredClone(state.ledger);
         // holistic_v1: the memo's readings are explanations, never AI-proposed names (the candidates are then only names that were said in public).
         if (holisticV2) {
@@ -832,7 +849,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         if (kind === "request") { baseInput.namingRequest = true; if (holisticV4) baseInput.namingRequestStrict = true; record.namingRequest = true; } else if (kind === "reconfirm") record.namingReconfirm = true;
       }
       // The estimate of this very exchange backs a re-affirmation of a denied figure, so the candidates are completed only now.
-      if (questionLayout === "two_stage_v3") baseInput.agreeNames = buildAgreeNamesV3(claims, publicTurns, latest.seq, slots, state, baseInput.humanReferent, holisticV3, inheritedTargetClaimIds(prepared.research?.verification?.diagnostics), holisticV4);
+      if (questionLayout === "two_stage_v3") baseInput.agreeNames = buildAgreeNamesV3(claims, publicTurns, latest.seq, slots, state, baseInput.humanReferent, holisticV3, inheritedTargetClaimIds(prepared.research?.verification?.diagnostics), holisticV4, options.dialoguePolicy === "holistic_v5");
       if (adaptive && baseInput.repairHistory.length && typeof jevDecision.estimateRepairProspect === "function") {
         record.repairHistory = structuredClone(repairHistory);
         let prospect = unknownRepairProspect();
