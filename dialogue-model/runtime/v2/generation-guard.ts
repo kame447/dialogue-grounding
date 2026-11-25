@@ -2,24 +2,28 @@
 // validated judgment determines state; detected wording never changes its act.
 import type { DialoguePolicy } from "../decision/contract.ts";
 // v3 was reserved for the experiment that extended fixed responses.
-// v7 contains every behaviour of v6 and widens the unsupported-topic-shift check to the particle-less and "next figure" wordings. v6 contains every behaviour of v5 and adds the unsupported-topic-shift check. v5 contains every behaviour of v4 (viewpoint rules, no fixed-sentence fallback, the whole-history judgment material, the private naming state) and adds the confirm-specific viewpoint note and the topic markers.
-export type GenerationRetryVersion = "jev_generation_retry_v1" | "jev_generation_retry_v2" | "jev_generation_retry_v4" | "jev_generation_retry_v5" | "jev_generation_retry_v6" | "jev_generation_retry_v7";
+// v8 contains every behaviour of v7 and adds the direct pointing-reply match to a targetless or differently-extracted confirm question. v7 contains every behaviour of v6 and widens the unsupported-topic-shift check to the particle-less and "next figure" wordings. v6 contains every behaviour of v5 and adds the unsupported-topic-shift check. v5 contains every behaviour of v4 (viewpoint rules, no fixed-sentence fallback, the whole-history judgment material, the private naming state) and adds the confirm-specific viewpoint note and the topic markers.
+export type GenerationRetryVersion = "jev_generation_retry_v1" | "jev_generation_retry_v2" | "jev_generation_retry_v4" | "jev_generation_retry_v5" | "jev_generation_retry_v6" | "jev_generation_retry_v7" | "jev_generation_retry_v8";
 export type RecordedGenerationRetryVersion = Exclude<GenerationRetryVersion, "jev_generation_retry_v1">;
 
-export function hasVersionedViewpoint(version: unknown): version is "jev_generation_retry_v4" | "jev_generation_retry_v5" | "jev_generation_retry_v6" | "jev_generation_retry_v7" {
-  return version === "jev_generation_retry_v4" || version === "jev_generation_retry_v5" || version === "jev_generation_retry_v6" || version === "jev_generation_retry_v7";
+export function hasVersionedViewpoint(version: unknown): version is "jev_generation_retry_v4" | "jev_generation_retry_v5" | "jev_generation_retry_v6" | "jev_generation_retry_v7" | "jev_generation_retry_v8" {
+  return version === "jev_generation_retry_v4" || version === "jev_generation_retry_v5" || version === "jev_generation_retry_v6" || version === "jev_generation_retry_v7" || version === "jev_generation_retry_v8";
 }
 /** v5 or later: what v4 does, plus the confirm viewpoint note, the topic markers and the answer-resolving judgment material. */
-export function isGenerationV5(version: unknown): version is "jev_generation_retry_v5" | "jev_generation_retry_v6" | "jev_generation_retry_v7" {
-  return version === "jev_generation_retry_v5" || version === "jev_generation_retry_v6" || version === "jev_generation_retry_v7";
+export function isGenerationV5(version: unknown): version is "jev_generation_retry_v5" | "jev_generation_retry_v6" | "jev_generation_retry_v7" | "jev_generation_retry_v8" {
+  return version === "jev_generation_retry_v5" || version === "jev_generation_retry_v6" || version === "jev_generation_retry_v7" || version === "jev_generation_retry_v8";
 }
 /** v6 or later: v5 plus the unsupported-topic-shift check (a draft that moves on while the chosen action is not a move), the scoped_v3 agreement scope and the notation on every question. */
-export function isGenerationV6(version: unknown): version is "jev_generation_retry_v6" | "jev_generation_retry_v7" {
-  return version === "jev_generation_retry_v6" || version === "jev_generation_retry_v7";
+export function isGenerationV6(version: unknown): version is "jev_generation_retry_v6" | "jev_generation_retry_v7" | "jev_generation_retry_v8" {
+  return version === "jev_generation_retry_v6" || version === "jev_generation_retry_v7" || version === "jev_generation_retry_v8";
 }
-/** The newest generation version: v6 plus the widened topic-shift wordings (particle-less "次いこう", "次の図形を見てみよう"). */
-export function isGenerationV7(version: unknown): version is "jev_generation_retry_v7" {
-  return version === "jev_generation_retry_v7";
+/** v7 or later: v6 plus the widened topic-shift wordings (particle-less "次いこう", "次の図形を見てみよう"), the scoped_v4 agreement scope and the reference-question binding. */
+export function isGenerationV7(version: unknown): version is "jev_generation_retry_v7" | "jev_generation_retry_v8" {
+  return version === "jev_generation_retry_v7" || version === "jev_generation_retry_v8";
+}
+/** The newest generation version: v7 plus the direct pointing-reply match (a participant's agree that points at the public confirm question). */
+export function isGenerationV8(version: unknown): version is "jev_generation_retry_v8" {
+  return version === "jev_generation_retry_v8";
 }
 export function validAgreeNameScope(scope: unknown, generation: unknown): boolean {
   if (isGenerationV7(generation)) return scope === "scoped_v4";
@@ -33,7 +37,7 @@ export function validGenerationRetryVersion(version: unknown, layout: string, po
 }
 export function defaultGenerationRetryVersion(layout: string, policy?: string): GenerationRetryVersion {
   if (layout !== "two_stage_v3") return "jev_generation_retry_v1";
-  return policy === "holistic_v5" ? "jev_generation_retry_v7" : "jev_generation_retry_v2";
+  return policy === "holistic_v5" ? "jev_generation_retry_v8" : "jev_generation_retry_v2";
 }
 
 export function allowsOrientationFallback(version: GenerationRetryVersion | undefined): boolean {
