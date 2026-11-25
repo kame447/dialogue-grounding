@@ -14,6 +14,8 @@ export type MaterialV5Context = { actions: readonly LedgerAction[]; nameLedger?:
   answers?: ReadonlyMap<number, readonly string[]>;
   /** The stimulus rotation, written into the state so a verifier reads the same condition the instructions used. */
   rotationMode?: string;
+  /** jev_generation_retry_v6: written into the state so a verifier knows every question carried the legend. */
+  notationV6?: boolean;
   /** The answering claims the ledger points at, by id: one that is not a row of `claims` is written as an `answerClaims` row, so every id is defined in the same request. */
   answerRows?: ReadonlyMap<string, { sourceTurn: number | null; act: string; proposition: string; targets: readonly string[] }> };
 /** Appended to every question's instructions of a holistic_v5 judgment request, and nowhere else. */
@@ -26,7 +28,7 @@ const unalias = (slots: readonly string[], f: string) => slots[Number(String(f).
 const line = (t: { turn: number; speaker: string; text: string }) => `U${t.turn} ${t.speaker === "human" ? "h" : "ai"}: ${t.text}`;
 const LINE = /^U(\d+) (h|ai): ([\s\S]*)$/u;
 
-export function encodeMaterialV5(material: any, { actions, nameLedger, answers: allAnswers, rotationMode, answerRows }: MaterialV5Context): Record<string, unknown> {
+export function encodeMaterialV5(material: any, { actions, nameLedger, answers: allAnswers, rotationMode, answerRows, notationV6 }: MaterialV5Context): Record<string, unknown> {
   const slots: string[] = material.ownSlots;
   const al = (ids: readonly string[]) => ids.map(id => alias(slots, id));
   const answers = allAnswers ?? new Map<number, string[]>(material.repairHistory.map((r: any) => [r.turn, r.partnerClaims.map((c: any) => c.id)]));
@@ -41,7 +43,7 @@ export function encodeMaterialV5(material: any, { actions, nameLedger, answers: 
     for (const id of ids) if (figures[alias(slots, id)]) figures[alias(slots, id)].actions.push(entry);
   }
   return {
-    view: JUDGMENT_VIEW_V5, ...(rotationMode ? { rotationMode } : {}), turn: material.turn, ownSlots: slots,
+    view: JUDGMENT_VIEW_V5, ...(rotationMode ? { rotationMode } : {}), ...(notationV6 ? { notationV6: true } : {}), turn: material.turn, ownSlots: slots,
     publicTurns: material.publicTurns.map(line),
     observations: material.observations, ...compactIssues(material.issueSummary, slots, new Set(material.priorClaims.map((c: any) => c.id))),
     claims: material.priorClaims.map((c: any) => [c.id, c.sourceTurn, c.act, c.aspect, al(c.targets), c.name, c.respondsTo, c.proposition, c.issueId]),

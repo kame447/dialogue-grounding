@@ -2,16 +2,20 @@
 // validated judgment determines state; detected wording never changes its act.
 import type { DialoguePolicy } from "../decision/contract.ts";
 // v3 was reserved for the experiment that extended fixed responses.
-// v5 contains every behaviour of v4 (viewpoint rules, no fixed-sentence fallback, the whole-history judgment material, the private naming state) and adds the confirm-specific viewpoint note and the topic markers.
-export type GenerationRetryVersion = "jev_generation_retry_v1" | "jev_generation_retry_v2" | "jev_generation_retry_v4" | "jev_generation_retry_v5";
+// v6 contains every behaviour of v5 and adds the unsupported-topic-shift check. v5 contains every behaviour of v4 (viewpoint rules, no fixed-sentence fallback, the whole-history judgment material, the private naming state) and adds the confirm-specific viewpoint note and the topic markers.
+export type GenerationRetryVersion = "jev_generation_retry_v1" | "jev_generation_retry_v2" | "jev_generation_retry_v4" | "jev_generation_retry_v5" | "jev_generation_retry_v6";
 export type RecordedGenerationRetryVersion = Exclude<GenerationRetryVersion, "jev_generation_retry_v1">;
 
-export function hasVersionedViewpoint(version: unknown): version is "jev_generation_retry_v4" | "jev_generation_retry_v5" {
-  return version === "jev_generation_retry_v4" || version === "jev_generation_retry_v5";
+export function hasVersionedViewpoint(version: unknown): version is "jev_generation_retry_v4" | "jev_generation_retry_v5" | "jev_generation_retry_v6" {
+  return version === "jev_generation_retry_v4" || version === "jev_generation_retry_v5" || version === "jev_generation_retry_v6";
 }
-/** The newest generation version: what v4 does, plus the confirm viewpoint note, the topic markers and the answer-resolving judgment material. */
-export function isGenerationV5(version: unknown): version is "jev_generation_retry_v5" {
-  return version === "jev_generation_retry_v5";
+/** v5 or later: what v4 does, plus the confirm viewpoint note, the topic markers and the answer-resolving judgment material. */
+export function isGenerationV5(version: unknown): version is "jev_generation_retry_v5" | "jev_generation_retry_v6" {
+  return version === "jev_generation_retry_v5" || version === "jev_generation_retry_v6";
+}
+/** The newest generation version: v5 plus the unsupported-topic-shift check (a draft that moves on while the chosen action is not a move). */
+export function isGenerationV6(version: unknown): version is "jev_generation_retry_v6" {
+  return version === "jev_generation_retry_v6";
 }
 export function validGenerationRetryVersion(version: unknown, layout: string, policy?: string | null): version is GenerationRetryVersion {
   return version === "jev_generation_retry_v1" || layout === "two_stage_v3" &&
@@ -19,7 +23,7 @@ export function validGenerationRetryVersion(version: unknown, layout: string, po
 }
 export function defaultGenerationRetryVersion(layout: string, policy?: string): GenerationRetryVersion {
   if (layout !== "two_stage_v3") return "jev_generation_retry_v1";
-  return policy === "holistic_v5" ? "jev_generation_retry_v5" : "jev_generation_retry_v2";
+  return policy === "holistic_v5" ? "jev_generation_retry_v6" : "jev_generation_retry_v2";
 }
 
 export function allowsOrientationFallback(version: GenerationRetryVersion | undefined): boolean {
@@ -255,6 +259,20 @@ export function findDeferralClaims(text: string): string[] {
   return continuesConfirming ? [] : ["unsolicited_deferral"];
 }
 
+// jev_generation_retry_v6: a draft that says the conversation moves on to the next figure or topic. Only a chosen move_on, defer or close may say it; after a veto, or while the
+// chosen act is a confirm or repair, it contradicts the executed action. Sentence-local, codes only; quoted spans, negations and past mentions never match.
+const topicShiftAct = /(?:行こう|いこう|いきましょう|行きましょう|進もう|進みましょう|進めましょう|移ろう|移りましょう|いきます|行きます|進みます|移ります|いきたい|行きたい|進みたい|移りたい)(?![^。!?]{0,4}(?:ません|ない|ず))/u;
+const topicShiftClaims: ReadonlyArray<RegExp> = [
+  new RegExp(`(?:次|先)(?:に|へ)${topicShiftAct.source}`, "u"),
+  new RegExp(`(?:次の|別の|他の)(?:図形|形|話題|ところ)(?:へ|に)(?:${topicShiftAct.source}|移|進|切り替え|変え)`, "u"),
+  /話題を(?:変え|移し|切り替え)(?:ましょう|よう|ます|たい)/u,
+];
+/** A draft that moves on to the next figure or topic (v6 only; see generationGuardCodes for when it counts). */
+export function findTopicShiftClaims(text: string): string[] {
+  const sentences = normalize(text).replace(/「[^」]*」|『[^』]*』/gu, "「」").split(/(?<=[。!?])/u);
+  return sentences.some((s) => topicShiftClaims.some((pattern) => pattern.test(s))) ? ["unsupported_topic_shift"] : [];
+}
+
 const internalId =/(?<![A-Za-z0-9])s-[0-9a-f]{4}(?![A-Za-z0-9])/iu;
 const internalField = /(?<![A-Za-z])(?:targetSlot|candidateName|discriminatingFeature|ownLedger|ledger|judgment)(?![A-Za-z])|\{"[^"]{1,40}":/u;
 
@@ -393,6 +411,7 @@ export function rewriteReasons(codes: readonly string[], policy?: DialoguePolicy
     codes.includes("self_repair") ? "前の下書きは自分の取り違え・訂正・取り消しを表していました。このactionでは訂正を表明せず、このactionの範囲で書き直してください。" : "",
     codes.includes("name_mismatch") ? "前の下書きは、このactionで扱う名前とは別の名前を提案・決定・合意として述べていました。このactionで扱う名前だけを「」で示して書き直してください。" : "",
     codes.includes("unsolicited_deferral") ? "前の下書きは未解決の図形について保留や先送りを提案していました。保留・先送りを提案せず、このactionの範囲で書き直してください。" : "",
+    codes.includes("unsupported_topic_shift") ? "前の下書きは話題や図形を次へ移すと述べていましたが、選んだ行動は移行ではありません。移行に触れず、選ばれた対象や特徴の確認など、このactionの範囲で書き直してください。" : "",
     specificViewpoint
       ? codes.includes("orientation_leak") ? "前の下書きに、自分側の見え方だと示されていない方位の語（上下左右・端・向き・斜め・縦長・横長など）がありました。公開発話では、回転しても変わらない形や部分同士のつながりに言い換えてください。方位が区別に必要なら、その語と同じ節で自分側の画面での見え方だと明示し、相手には形の対応を尋ねてください。" : ""
       : policy === "holistic_v5"
@@ -450,7 +469,9 @@ export function findLocalPublicationViolations(text: string, messages: readonly 
 }
 
 export type GenerationCodeContext = { action: Action; candidateName: string | null; v3: boolean; holistic: boolean; adaptive: boolean; factored: boolean; ai: boolean;
-  publicTexts: readonly string[]; dialoguePolicy?: DialoguePolicy; generationRetryVersion?: GenerationRetryVersion };
+  publicTexts: readonly string[]; dialoguePolicy?: DialoguePolicy; generationRetryVersion?: GenerationRetryVersion;
+  /** True when the strategy's intervention refused the Jev action (a move) and the chosen action is another one. */
+  vetoed?: boolean };
 /** Every publication rule for one draft that does not need the private prompts (those are added by the runtime): the single source for the run and for S4.
  * In holistic_v1 the naming-act wording never blocks here; it only triggers the draft_naming question. */
 export function generationGuardCodes(text: string, c: GenerationCodeContext): string[] {
@@ -458,6 +479,8 @@ export function generationGuardCodes(text: string, c: GenerationCodeContext): st
   return [...new Set([...findGuardViolations(text, c.action).filter((code) => !(c.holistic && isAgreementWordCode(code))),
     ...(c.v3 ? findOrientationLeaks(text, c.dialoguePolicy, c.generationRetryVersion) : []),
     ...(c.v3 ? findWorkingNoteLeaks(text, c.publicTexts) : []),
+    ...(c.v3 && isGenerationV6(c.generationRetryVersion) && c.action !== "move_on" && c.action !== "defer" && c.action !== "close" &&
+      (c.vetoed === true || c.action === "confirm" || c.action === "repair") ? findTopicShiftClaims(text) : []),
     ...(c.v3 && c.action === "agree" && c.candidateName !== null ? findAgreeNameMismatch(text, c.candidateName) : []),
     ...(c.v3 && c.action === "propose_name" && c.candidateName !== null ? findProposeNameMismatch(text, c.candidateName) : []),
     ...(c.adaptive && /repair[_-]?prospect|repair_issue|candidate_narrowed|candidate_widened|other_figure_benefit|no_open_issue|issue_\d+/iu.test(squeezed) ? ["internal_field"] : []),

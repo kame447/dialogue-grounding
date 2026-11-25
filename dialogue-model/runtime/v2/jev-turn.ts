@@ -26,7 +26,7 @@ import { validateJevDecision, validateHumanReferentEstimate, validateRepairProsp
 import type { JevDecisionFailureEvidence } from "../decision/jev-decision.ts";
 import { prepareLocalGroundingTurn, validateLocalGroundingOptions, findLocalPublicationViolations } from "./local-grounding-turn.ts";
 import type { LocalGroundingResearchRecord, LocalGroundingTrace } from "./local-grounding-turn.ts";
-import { findNamingActHints, hasOrientationWords, draftViolationCodes, deriveGenerationOutcome, orientationSafeFallback, rewriteReasons, isGenerationV5, hasVersionedViewpoint, defaultGenerationRetryVersion, validGenerationRetryVersion, allowsOrientationFallback } from "./generation-guard.ts";
+import { findNamingActHints, hasOrientationWords, draftViolationCodes, deriveGenerationOutcome, orientationSafeFallback, rewriteReasons, isGenerationV5, isGenerationV6, hasVersionedViewpoint, defaultGenerationRetryVersion, validGenerationRetryVersion, allowsOrientationFallback } from "./generation-guard.ts";
 import { createMemoAiExtractor, MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS, AiPublicError, aiHash, emptyAiEvidence } from "../local-grounding/extract-ai.ts";
 import { createJevAiFunctionClassifier, createJevAiSupportChecker, AI_FUNCTION_INSTRUCTIONS, AI_SUPPORT_INSTRUCTIONS,
   AI_RESPONSE_SUPPORT_INSTRUCTIONS, AI_FUNCTION_CRITERIA, AI_SUPPORT_CHOICES, AI_ACT_DESCRIPTIONS } from "../local-grounding/jev-ai-public.ts";
@@ -52,6 +52,9 @@ const ACCEPT_FEATURE_REPLY_V5 = "acceptで相手が図形の有無や特定の�
 const CONFIRM_NAMING_REQUEST_V5 = "判断で選ばれた対象について、その特徴だけを確かめてください。相手が出した呼び名を採用・再提案しないでください。その案に触れる場合は、相手の提案だと分かる引用に留めてください。";
 const NAMING_CONFLICT_V5 = "選ばれた図形にはすでに合意済みの名前（agreedName）があり、今回の相手の案（proposedNames）とは異なります。選ばれた行動で対象を確かめる際は、相手が同じ図形と別の図形のどちらについて話しているかを確かめてください。この案を採用して合意済みの名前を変更しないでください。明示的な改名は、判断が選んだrepairの範囲で扱います。";
 const FEATURE_VIEWPOINT_V5 = "以下のdiscriminatingFeatureにある上下左右・横長などの向きの語は、自分側の画面での見え方です。公開発話では、回転しても変わらない形や部分同士のつながりに言い換えてください。向きが区別に必要なら、その語と同じ節で「こちらの画面では」などと自分側の見え方だと明示し、相手には形の対応を尋ねてください。";
+const isVetoed = (intervention: unknown) => typeof intervention === "object" && intervention !== null && (intervention as { reasonCode?: unknown }).reasonCode === "vetoed_bypass_action";
+// jev_generation_retry_v6: the strategy refused the Jev move and the chosen act is another one; the public turn must not say the conversation moves on.
+const VETOED_MOVE_V6 = "選ばれた行動は、話題や図形を次へ移すことではありません。相手が次へ進むことを提案していても応じず、次へ進むと述べずに、選ばれた対象や特徴の確認を、このactionの範囲で行ってください。";
 const CONFIRM_FEATURE_VIEWPOINT_V5 = "以下のdiscriminatingFeatureは自分側の観察です。選ばれた特徴を確かめるのに必要な形や部分同士のつながりを、回転しても変わらない表現で優先して伝えてください。別の特徴を列挙したり、相手が使った方位を自分側の観察として写したりしないでください。方位が区別に必要な箇所では、その語と同じ節で、その語より前に「こちらの画面では」など自分側の見え方を明示する標識を置き、相手には形の対応を尋ねてください。別の節や文にある標識に頼らないでください。";
 // two_stage_v3 only (new text, not yet reviewed by Argon): a revisit whose target stays a candidate set.
 export const REVISIT_MULTIPLE_INSTRUCTIONS = "対象は複数候補のままです。選ばれた行動は、先ほどの未解決の区別に戻ることだけです。どの候補かを勝手に一つに絞らず、名前に決まったとは言わないでください。候補の数や内部の参照IDは相手に伝えず、相手が知らないことを知っているかのようにも話さないでください。";
@@ -821,6 +824,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
           baseInput.publicTurns = events.filter(e => e.seq <= latest.seq && (!aiEnabled || events.filter(other => other.seq === e.seq).length === 1))
             .map(e => ({ turn: e.seq, speaker: e.speaker, text: e.text }));
           baseInput.rotationMode = options.rotationMode ?? "relative_pm90";
+          if (isGenerationV6(generationRetryVersion)) baseInput.notationV6 = true;
           baseInput.judgmentLedger = state.judgments.map(j => { const d = j.jevTurn.executed ?? j.jevTurn.decision;
             // jev_generation_retry_v5: each action also carries its answers from the whole repair history (the field's presence, even empty, selects the answer-resolving material).
             const answers = isGenerationV5(generationRetryVersion) ? { answers: (repairHistory.find(r => r.turn === j.turnIndex)?.partnerClaims ?? []).map(c => ({ id: c.id, act: c.act, proposition: c.proposition, targets: [...c.targets] })) } : {};
@@ -1009,6 +1013,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       })) : null;
       const actionMessage: Message = { role: "system",
         content: ACT_INSTRUCTIONS + "\n" + generation.actionScope[judgment.action] + "\n" +
+          (isGenerationV6(generationRetryVersion) && (isVetoed(record.intervention) || judgment.action === "confirm" || judgment.action === "repair") ? VETOED_MOVE_V6 + "\n" : "") +
           (versionedGeneration && judgment.action === "accept" ? ACCEPT_FEATURE_REPLY_V5 + "\n" : "") +
           (reconfirmName ? RECONFIRM_NAME_V5 + "\n" : "") +
           (options.dialoguePolicy === "holistic_v5" && judgment.action === "confirm" && record.namingRequest === true ? CONFIRM_NAMING_REQUEST_V5 + "\n" : "") +
@@ -1026,7 +1031,8 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         { role: "system", content: "局所問題（非公開）:\n" + summarizeLocalIssues(graph) },
         ...publicTurns.map(t => ({ role: t.speaker === "human" ? "user" as const : "assistant" as const, content: t.text }))];
       const codeContext = { action: judgment.action, candidateName: judgment.candidateName ?? null, v3: questionLayout === "two_stage_v3", holistic, adaptive, factored, ai: aiEnabled,
-        publicTexts: events.filter(e => e.seq <= latest.seq).map(e => e.text), dialoguePolicy: options.dialoguePolicy, generationRetryVersion };
+        publicTexts: events.filter(e => e.seq <= latest.seq).map(e => e.text), dialoguePolicy: options.dialoguePolicy, generationRetryVersion,
+        vetoed: isVetoed(record.intervention) };
       const violations = (text: string, context: Message[]) => draftViolationCodes(text, codeContext, context, privateInstructions);
       // holistic_v1: a closed-set question about the draft's naming act. An agree draft is always asked; any other draft only on a typed naming context,
       // a naming-act wording hit or a quoted string that is not the figure's agreed name. A failed question is "unconfirmed", never a pass.

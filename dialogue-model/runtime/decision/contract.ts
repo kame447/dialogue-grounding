@@ -96,6 +96,8 @@ export type JevDecisionInput = {
   judgmentLedger?: readonly LedgerAction[];
   /** holistic_v5 only: the stimulus rotation of the trial. The rotation premise is stated only for relative_pm90 (omitted means that original mode). */
   rotationMode?: "relative_pm90" | "relative_0";
+  /** jev_generation_retry_v6 only: every question of the request, the repair-prospect questions included, carries the notation legend and the rotation premise. */
+  notationV6?: true;
 };
 export type DecisionInputBudget = {
   maxChars: 20000;

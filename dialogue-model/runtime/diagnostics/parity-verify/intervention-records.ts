@@ -7,7 +7,7 @@ import {nameBindsFigure} from '../../decision/referent-binding.ts';
 import {hasNameProposal,namingTurnKind,namingIntervalEstimates,inheritedTargetClaimIds,agreeCandidateAllowed,inheritsProposalName,targetNamingConflict,publiclyCheckedNamingTarget} from '../../decision/naming-request.ts';
 import {decodeMaterialV5} from '../../decision/judgment-material-v5.ts';
 import {isHolisticPolicy,isHolisticV2Plus,isHolisticV3Plus,isHolisticV4Plus} from '../../decision/contract.ts';
-import {generationGuardCodes,draftViolationCodes,deriveGenerationOutcome,orientationSafeFallback,findOrientationLeaks,hasOrientationWords,hasVersionedViewpoint,isGenerationV5,validGenerationRetryVersion,allowsOrientationFallback} from '../../v2/generation-guard.ts';
+import {generationGuardCodes,draftViolationCodes,deriveGenerationOutcome,orientationSafeFallback,findOrientationLeaks,hasOrientationWords,hasVersionedViewpoint,isGenerationV5,isGenerationV6,validGenerationRetryVersion,allowsOrientationFallback} from '../../v2/generation-guard.ts';
 import type {RecordedGenerationRetryVersion} from '../../v2/generation-guard.ts';
 import {checkModelIdentity} from '../../model-identity-contract.ts';
 import {resolveModelPolicy} from '../../model-policy.ts';
@@ -33,6 +33,7 @@ const ACCEPT_FEATURE_REPLY_V5_S4='acceptで相手が図形の有無や特定の�
 const CONFIRM_NAMING_REQUEST_V5_S4='判断で選ばれた対象について、その特徴だけを確かめてください。相手が出した呼び名を採用・再提案しないでください。その案に触れる場合は、相手の提案だと分かる引用に留めてください。';
 const NAMING_CONFLICT_V5_S4='選ばれた図形にはすでに合意済みの名前（agreedName）があり、今回の相手の案（proposedNames）とは異なります。選ばれた行動で対象を確かめる際は、相手が同じ図形と別の図形のどちらについて話しているかを確かめてください。この案を採用して合意済みの名前を変更しないでください。明示的な改名は、判断が選んだrepairの範囲で扱います。';
 const FEATURE_VIEWPOINT_V5_S4='以下のdiscriminatingFeatureにある上下左右・横長などの向きの語は、自分側の画面での見え方です。公開発話では、回転しても変わらない形や部分同士のつながりに言い換えてください。向きが区別に必要なら、その語と同じ節で「こちらの画面では」などと自分側の見え方だと明示し、相手には形の対応を尋ねてください。';
+const VETOED_MOVE_V6_S4='選ばれた行動は、話題や図形を次へ移すことではありません。相手が次へ進むことを提案していても応じず、次へ進むと述べずに、選ばれた対象や特徴の確認を、このactionの範囲で行ってください。';
 const CONFIRM_FEATURE_VIEWPOINT_V5_S4='以下のdiscriminatingFeatureは自分側の観察です。選ばれた特徴を確かめるのに必要な形や部分同士のつながりを、回転しても変わらない表現で優先して伝えてください。別の特徴を列挙したり、相手が使った方位を自分側の観察として写したりしないでください。方位が区別に必要な箇所では、その語と同じ節で、その語より前に「こちらの画面では」など自分側の見え方を明示する標識を置き、相手には形の対応を尋ねてください。別の節や文にある標識に頼らないでください。';
 // Closed, ordered reason text for the original and restated-judgment prompts.
 type RetryReason={codes:readonly string[];text:string;legacy?:string};
@@ -46,6 +47,7 @@ const RETRY_REASONS:readonly RetryReason[]=[
  {codes:['name_mismatch'],text:'前の下書きは、このactionで扱う名前とは別の名前を提案・決定・合意として述べていました。このactionで扱う名前だけを「」で示して書き直してください。',
   legacy:'前の下書きは、このactionで扱う名前とは別の名前を決定・合意として述べていました。このactionで扱う名前だけを「」で示して書き直してください。'},
  {codes:['unsolicited_deferral'],text:'前の下書きは未解決の図形について保留や先送りを提案していました。保留・先送りを提案せず、このactionの範囲で書き直してください。'},
+ {codes:['unsupported_topic_shift'],text:'前の下書きは話題や図形を次へ移すと述べていましたが、選んだ行動は移行ではありません。移行に触れず、選ばれた対象や特徴の確認など、このactionの範囲で書き直してください。'},
  {codes:['orientation_leak'],text:'前の下書きに画面の向きに依存する語（上下左右・側・端・向き・斜め上/下/左/右・縦長・横長等）が含まれていました。非公開メモや判断の方位語をそのまま写さず、尖りの数・大小・くぼみ・四角い部分とのつながりなど回転しても変わらない特徴へ言い換えるか、同じ節で「こちらの画面では〜」と視点を明示して書き直してください。',
   legacy:'前の下書きに画面の向きに依存する語（上下左右・上端・下端・右向き等）が含まれていました。相手の画面では図形が回転しているため、上下左右を使わず、尖りの数・大小・くぼみ・四角い部分とのつながりなど回転しても変わらない特徴だけで書き直してください。'},
  {codes:['internal_id','internal_field','internal_image','internal_credential','internal_prompt_echo'],text:'前の下書きには内部の参照IDや作業メモの項目が含まれていました。それらを出さずに書き直してください。'},
@@ -556,7 +558,7 @@ function agreeSource(tr:any,t:any,key:string,tape:any,legacyV3=false):'invalid'|
   // The rule is pinned by the pre-turn state carried in the hashed replay material and by the committed state.
   const version=tape.state?.agreeNameScopeVersion;
   if(version!==state.agreeNameScopeVersion||version!==undefined&&(!v3||version!=='scoped_v1'&&
-    (version!=='scoped_v2'||tr.profile?.dialoguePolicy!=='holistic_v5'||!hasVersionedViewpoint(t.generationRetryVersion))))return'invalid';
+    (version!=='scoped_v2'||tr.profile?.dialoguePolicy!=='holistic_v5'||!isGenerationV5(t.generationRetryVersion))))return'invalid';
   const scoped=version!==undefined;
   // two_stage_v3 always saves its agree evidence (an adaptive-off trial too); a known judgment without it is a forged omission.
   if(!Object.hasOwn(z,'agreeNames'))return v3?'invalid':{known:true,names:undefined};
@@ -720,7 +722,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
      const v3Retry=layout==='two_stage_v3';
      const draft=generationCount===1&&(codes===undefined||hasVersionedViewpoint(version))?{orientation:v3Retry&&s4HasOrientationLeak(prevDraft,version),
        ...(hasVersionedViewpoint(version)&&typeof prevDraft==='string'?{orientationCodes:findOrientationLeaks(prevDraft,'holistic_v5',version)}:{}),naming:typeof prevDraft==='string'&&s4NamingDecision(prevDraft.normalize('NFKC').replace(/[\s\u200b-\u200d\ufeff]/gu,''),s.executed?.action),workingNote:v3Retry&&restatedRetry&&s4HasWorkingNote(prevDraft,publicTexts),...(H()?{draftAct:lastVerdict}:{})}:undefined;
-     if(!generationMessages(p.messages,t,s.executed,{...tape,generationGraph:(tr.turns??[]).find((u:any)=>u.turn===t.turnIndex)?.state?.graph},m.profile,generationCount++,codes,draft))return'invalid';
+     if(!generationMessages(p.messages,t,s.executed,{...tape,vetoed:s.intervention?.reasonCode==='vetoed_bypass_action',generationGraph:(tr.turns??[]).find((u:any)=>u.turn===t.turnIndex)?.state?.graph},m.profile,generationCount++,codes,draft))return'invalid';
      prevDraft=answer?.response?.text??answer?.text;draftTexts.push(prevDraft);genMessages.push(p.messages);lastVerdict=null;
     }
    }
@@ -829,7 +831,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
    // The outcome of each side is derived from its own drafts and question answers by the run's own pure functions (generation-guard): publish the first,
    // publish the rewrite, the derived orientation-only fallback, or stop (a stop is never a committed turn).
    {
-    const aiOn=tr.profile?.localGrounding?.aiPublicClaims===true||Object.hasOwn(tr.lastCommittedState??{},'aiPublic'),cc={action:ex.action as any,candidateName:typeof ex.name==='string'?ex.name:null,v3:true,holistic:true,adaptive:!!CTX.trial,factored:!!CTX.facts,ai:aiOn,publicTexts,dialoguePolicy:H5()?'holistic_v5' as const:undefined,generationRetryVersion:version??'jev_generation_retry_v1'};
+    const aiOn=tr.profile?.localGrounding?.aiPublicClaims===true||Object.hasOwn(tr.lastCommittedState??{},'aiPublic'),cc={action:ex.action as any,candidateName:typeof ex.name==='string'?ex.name:null,v3:true,holistic:true,adaptive:!!CTX.trial,factored:!!CTX.facts,ai:aiOn,publicTexts,dialoguePolicy:H5()?'holistic_v5' as const:undefined,generationRetryVersion:version??'jev_generation_retry_v1',vetoed:s.intervention?.reasonCode==='vetoed_bypass_action'};
     const actCode=(i:number)=>{const row=askedRows.find(y=>y.draft===(i===0?'initial':'retry'));return row&&row.verdict!==null?[row.verdict as string]:[];};
     // The same composition as the run (guard codes + the local publication checks against that send's own recorded messages); no private instruction is stored.
     const codes=(i:number)=>typeof draftTexts[i]==='string'?[...new Set([...draftViolationCodes(draftTexts[i],cc,genMessages[i]??[]),...actCode(i)])]:['empty_utterance'];
@@ -1177,7 +1179,8 @@ function generationMessagesWith(messages:any[],trace:any,execution:any,tape:any,
   const accept=execution.action==='accept';
   const acceptNote=versionedGeneration&&accept?ACCEPT_FEATURE_REPLY_V5_S4+'\n':'';
   const reconfirmNote=versionedGeneration&&accept&&CTX.namingReconfirm?RECONFIRM_NAME_V5_S4+'\n':'';
-  const actionMessage={role:'system',content:FIXED.act+'\n'+scope+'\n'+acceptNote+reconfirmNote+namingNote+conflictNote+featureNote+JSON.stringify({...g,target:execution.target,...(Object.hasOwn(execution,'detailFigureIds')?{detailFigureIds:execution.detailFigureIds}:{})})};
+  const vetoNote=isGenerationV6(tape.generationRetryVersion)&&(tape.vetoed===true||execution.action==='confirm'||execution.action==='repair')?VETOED_MOVE_V6_S4+'\n':'';
+  const actionMessage={role:'system',content:FIXED.act+'\n'+scope+'\n'+vetoNote+acceptNote+reconfirmNote+namingNote+conflictNote+featureNote+JSON.stringify({...g,target:execution.target,...(Object.hasOwn(execution,'detailFigureIds')?{detailFigureIds:execution.detailFigureIds}:{})})};
   const expected:any[]=[{role:'system',content:FIXED.task},{role:'system',content:!H5()&&tape.technicalTrial?FIXED.generator.replace(trial.from,trial.generator):FIXED.generator},...(profile.utteranceStyle==='concise'?[{role:'system',content:FIXED.concise}]:[]),actionMessage,...(['confirm','repair'].includes(execution.action)&&execution.target.kind==='multiple'?[{role:'system',content:FIXED.detail}]:[]),...(layoutOf(profile)==='two_stage_v3'&&execution.action==='revisit'&&execution.target.kind==='multiple'?[{role:'system',content:REVISIT_MULTIPLE}]:[])];
   if(versionedGeneration){
    const namingState=Object.keys(tape.state.ledger).sort().map(figureId=>({figureId,status:tape.state.ledger[figureId].status,name:tape.state.ledger[figureId].name}));
@@ -1227,7 +1230,7 @@ const PROSPECT_TEXT={base:"公開履歴・観察メモ・修復履歴だけを�
 const PROSPECT_CRITERIA={prospect:{progressing:"修復が進む見込みがある。",stalled:"修復が停滞する見込みがある。",uncertain:"見込みは不確か。",no_open_issue:"修復する対象がない。"},
  basis:{new_information:"新しい情報が得られた。",candidate_narrowed:"候補が狭まった。",candidate_widened:"候補が広がった。",repetition:"同じやり取りの反復。",partner_uncertain:"相手の不確かさ。",other_figure_benefit:"別の図形を扱う利点がある。",none:"該当する根拠なし（修復対象がない場合を含む）。"}};
 function prospectQuestions(input:any,facts:boolean,layout='two_stage_v1'){
- const issues=(input.repairHistory??[]).filter((r:any)=>r.turn<input.turn).slice().sort((a:any,b:any)=>a.turn-b.turn).slice(-8),ins=PROSPECT_TEXT.base+(facts?'\n'+ADAPT.facts:'');
+ const issues=(input.repairHistory??[]).filter((r:any)=>r.turn<input.turn).slice().sort((a:any,b:any)=>a.turn-b.turn).slice(-8),ins=PROSPECT_TEXT.base+(facts?'\n'+ADAPT.facts:'')+(input.notationV6===true?'\n'+LEGEND_V5+(input.rotationMode==='relative_pm90'?'\n'+ROTATION_V5:''):'');
  const q=(suffix:string,criteria:any)=>({type:'choice',instructions:ins+suffix,criteria});
  return{issues,questions:{repair_issue:q(PROSPECT_TEXT.issue+(layout==='two_stage_v3'?NATIVE_V3.repairIssueGuidance:''),Object.fromEntries([...issues.map((r:any,i:number)=>['issue_'+i,JSON.stringify({turn:r.turn,action:r.action,question:r.question,candidatesAfter:r.candidatesAfter})]),['none','修復の理由が残る局所問題はない。'],['unknown','判断できない。']])),
   prospect:q(PROSPECT_TEXT.prospect,PROSPECT_CRITERIA.prospect),basis:q(PROSPECT_TEXT.basis,PROSPECT_CRITERIA.basis)}};
