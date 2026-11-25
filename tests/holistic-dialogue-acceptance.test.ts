@@ -227,6 +227,12 @@ function session(strategy: Strategy, observation: Memo = memo, trialProfile = pr
   return {
     async start() { task = await create(); },
     async restore() { task = await create(JSON.parse(JSON.stringify(record())) as SavedTrial); },
+    /** The ordinary restore entrance, from a record whose generation version is the given one (a version pinned by a saved record decides the trial). */
+    async restoreAs(version: string) {
+      const saved = JSON.parse(JSON.stringify(record())) as SavedTrial & { options: { generationRetryVersion?: string } };
+      saved.options.generationRetryVersion = version;
+      task = await create(saved);
+    },
     interrupt() { return task.interruptDialogue(); },
     async resumeWith(turn: Turn) {
       current = turn;
@@ -1226,3 +1232,91 @@ for (const strategy of strategies) {
     }
   }
 }
+
+// Audit v9 (generation guard: the forms accepted as an own-side marker or a quotation of the partner's words).
+// Synthetic sentences only. v9 accepts the forms; v8 keeps its earlier judgment; the guard's standard itself is unchanged in both.
+const v8 = 'jev_generation_retry_v8', v9 = 'jev_generation_retry_v9';
+async function pairedAs(version: string, check: (trial: ReturnType<typeof session>, strategy: Strategy) => Promise<void>) {
+  const runs = await Promise.allSettled(strategies.map(async strategy => {
+    const trial = session(strategy);
+    await trial.start();
+    await trial.restoreAs(version);
+    await check(trial, strategy);
+  }));
+  const failures = runs.flatMap((run, index) => run.status === 'rejected' ? [new Error(strategies[index], { cause: run.reason })] : []);
+  if (failures.length) throw new AggregateError(failures, 'paired synthetic acceptance (' + version + ')');
+}
+const claimOf = (text: string) => [{ text, act: 'assert' as const, aspect: 'part' as const, targets: [first] }];
+async function heldAs(trial: ReturnType<typeof session>, draft: string) {
+  const before = trial.record();
+  const turn = await trial.say({ ...broad, drafts: [draft, draft], publicClaims: claimOf(draft) });
+  assert.equal(turn.generationRequests.length, 2, 'the same draft is regenerated once and rejected again');
+  assert.equal(turn.trace.errorCode, 'unsafe_generation');
+  assert.equal(turn.speech, null);
+  assert.equal(turn.trace.publicSpeech, null);
+  assert.equal(turn.trace.generationGuard.fallback, false);
+  assert.deepEqual(turn.after.queueState.privateState, before.queueState.privateState);
+  assert.equal(turn.after.queueState.pendingHumanEventIds.length, 1);
+  return turn;
+}
+async function publishedAs(trial: ReturnType<typeof session>, draft: string) {
+  const turn = await trial.say({ ...broad, drafts: [draft], publicClaims: claimOf(draft) });
+  published(turn, 'accept', single(first), draft);
+  assert.equal(turn.generationRequests.length, 1);
+  assert.deepEqual(turn.trace.generationGuard, { violations: [], regenerated: false, fallback: false });
+  return turn;
+}
+
+// [label, draft, the code v8 reports]
+const v9Accepted = [
+  ['an own-side possessive before a direction word', 'こちらの上の三角形の突起に、細い切れ目があります。', 'orientation_leak'],
+  ['an own-side 「の画面で」', 'こちらの画面で上端に切れ目があります。', 'orientation_leak'],
+  ['the partner\'s words quoted with 「そちらでいう」', 'そうかもしれないね。こちらの画面では切れ目が見えるので、そちらでいう左向きの先に対応する可能性はありそう。', 'shared_view_assumption'],
+  ['an own-side possessive with a rotation remark', 'うん、90度回して考えると、こちらの上の三角形の突起がそちらの左向きのとがった先にあたりそうだね。', 'orientation_leak'],
+  ['an own-side 「の画面で」 in a longer correspondence question', 'こちらの画面で上部中央にある三角形の突起が、そちらでは左向きの先にあたり、その両側から続く形ですか？', 'orientation_leak'],
+] as const;
+// Still rejected in both versions: a direction word with no marker, and an assertion about the partner's side.
+const bothRejected = [
+  ['a direction word with no marker', '上端に切れ目があります。', 'orientation_leak'],
+  ['an unmarked own-side description beside a partner direction', 'うん、こちらの切れ目がそちらの左向きのとがった先にあたりそうだね。', 'orientation_leak'],
+  ['an assertion about the partner\'s side after an own-side marker', 'こちらの画面では切れ目が上にあるよ。そちらでは右側にあるはずだね。', 'shared_view_assumption'],
+] as const;
+
+for (const [label, draft] of v9Accepted) {
+  test(`Audit v9 publishes ${label} under v9 in both strategies`, async () => {
+    await pairedAs(v9, async trial => {
+      const turn = await publishedAs(trial, draft);
+      assert.equal(turn.trace.generationRetryVersion, v9);
+    });
+  });
+  test(`Audit v9 keeps the v8 judgment for ${label}`, async () => {
+    const code = v9Accepted.find(entry => entry[1] === draft)![2];
+    await pairedAs(v8, async trial => {
+      const turn = await heldAs(trial, draft);
+      assert.equal(turn.trace.generationRetryVersion, v8);
+      assert.deepEqual(turn.trace.generationGuard, { violations: [code], regenerated: true, fallback: false });
+    });
+  });
+}
+for (const [label, draft, code] of bothRejected) {
+  for (const version of [v8, v9]) {
+    test(`Audit v9 still rejects ${label} under ${version.slice(-2)} in both strategies`, async () => {
+      await pairedAs(version, async trial => {
+        const turn = await heldAs(trial, draft);
+        assert.equal(turn.trace.generationRetryVersion, version);
+        assert.deepEqual(turn.trace.generationGuard, { violations: [code], regenerated: true, fallback: false });
+      });
+    });
+  }
+}
+test('Audit v9 is the version a new holistic_v5 trial starts with, and a v8 record keeps v8 across a restore', async () => {
+  await paired(async trial => {
+    const turn = await trial.say({ ...broad, drafts: ['上端に穴があります。', '右端に穴があります。'] });
+    assert.equal(turn.trace.generationRetryVersion, v9);
+  });
+  await pairedAs(v8, async trial => {
+    await trial.restore();
+    const turn = await heldAs(trial, 'こちらの画面で上端に切れ目があります。');
+    assert.equal(turn.trace.generationRetryVersion, v8);
+  });
+});
