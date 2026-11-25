@@ -8,6 +8,7 @@ import { createProfileDialogue } from '../../dialogue-model/runtime/diagnostics/
 import { pairedInterventionReplay } from '../../dialogue-model/runtime/diagnostics/parity-live/intervention-replay.ts';
 import { hash } from '../../dialogue-model/runtime/diagnostics/parity-verify/core.ts';
 import { createJevDecisionClient } from '../../dialogue-model/runtime/decision/jev-decision.ts';
+import type { DialoguePolicy, DraftAct } from '../../dialogue-model/runtime/decision/contract.ts';
 import { createJevLocalTestClassifier } from '../../dialogue-model/runtime/local-grounding/jev-local-test.ts';
 import { createChatClient } from '../../dialogue-model/runtime/client.mjs';
 import { buildReobservationMessages } from '../../dialogue-model/runtime/observation/observe.ts';
@@ -21,6 +22,8 @@ export type Label = 'repair-first' | 'bypass-enabled';
 export type TrialVersion = 'adaptive_repair_v1' | 'adaptive_repair_v2' | 'adaptive_repair_v3';
 /** What one scripted turn answers. `target` is a v3 target label; `issue` answers the repair prospect's issue question. */
 export type Plan = { action: string; target: string; issue?: string; prospect?: string; actionScores?: Record<string, number>; speech?: string; inject?: any;
+  drafts?: readonly string[];
+  draftAct?: DraftAct;
   /** Raw JSON text the local-extraction request returns (public name proposals etc.); `act` answers the classifier's `*_act` questions (default assert). */
   extraction?: string; act?: string;
   /** The turn's first decision is a request_observation of figure_0 (one self-side reobservation); `action`/`target` are the terminal decision after it. */
@@ -39,12 +42,14 @@ const TEXTS: Record<string, string> = { local_extraction: '[]', ai_extraction: '
 
 export async function runTurn(profile: any, label: Label, state: any, events: any[], plan: Plan, technicalTrial: { version: TrialVersion } | undefined) {
   const luna: any[] = [], jev: any[] = [], traces: any[] = [], reobservations: any[] = [], boundary = { luna: -1, jev: -1 };
-  let next: any, count = 0, actionCalls = 0, lastAction = '';
+  let next: any, count = 0, actionCalls = 0, generationCalls = 0, lastAction = '';
   const http = createChatClient({ provider: 'cloudflare', apiKey: 'synthetic-offline-replay-key', purpose: profile.modelPolicy.purpose,
     baseUrl: 'http://offline.invalid/v1', timeoutMs: profile.timeouts.lunaAttemptMs },
   async () => Response.json({ model: next.model, choices: [{ message: { content: next.text } }], usage: { prompt_tokens: 0, completion_tokens: 0 } }));
   const client = { async complete(messages: any[], options: any) {
-    const response = { text: options.phase === 'local_extraction' && plan.extraction !== undefined ? plan.extraction : options.phase === 'ai_extraction' && plan.aiExtraction !== undefined ? plan.aiExtraction : TEXTS[options.phase] ?? plan.speech ?? 'もう一度、確かめてみますね。', model: 'synthetic-luna-model', usage: { inputTokens: 0, outputTokens: 0 } };
+    const draft = options.phase === 'generation' && plan.drafts ? plan.drafts[generationCalls++] : undefined;
+    if (options.phase === 'generation' && plan.drafts) assert.ok(draft);
+    const response = { text: options.phase === 'local_extraction' && plan.extraction !== undefined ? plan.extraction : options.phase === 'ai_extraction' && plan.aiExtraction !== undefined ? plan.aiExtraction : draft ?? TEXTS[options.phase] ?? plan.speech ?? 'もう一度、確かめてみますね。', model: 'synthetic-luna-model', usage: { inputTokens: 0, outputTokens: 0 } };
     luna.push({ phase: options.phase, response }); next = response; return http.complete(messages, options); } };
   const readKey = async () => 'sk-or-SYNTHETIC-offline-replay-key-0000';
   const fetchImpl = async (_url: any, init: any) => {
@@ -55,7 +60,7 @@ export async function runTurn(profile: any, label: Label, state: any, events: an
       const choice = key === 'action' ? lastAction : key === 'target' ? (lastAction === 'request_observation' ? 'figure_0' : plan.target) : key === 'repair_issue' ? plan.issue ?? 'none' : key === 'prospect' ? plan.prospect ?? 'uncertain'
         : key === 'name' && plan.name ? (labels.find(l => JSON.parse(q.criteria[l]).value === plan.name) ?? labels[0])
         : key === 'human_referent' && plan.referent ? plan.referent
-        : key === 'draft_naming' ? (plan.action === 'agree' ? 'adopt_chosen' : 'none') : key === 'basis' ? 'partner_uncertain' : key.endsWith('_antecedent') ? (plan.antecedent ?? 'none') : key.endsWith('_act') ? (plan.act && labels.includes(plan.act) ? plan.act : 'assert') : key === 'observe_aspect' ? 'orientation' : labels[0];
+        : key === 'draft_naming' ? (plan.draftAct ?? (plan.action === 'agree' ? 'adopt_chosen' : 'none')) : key === 'basis' ? 'partner_uncertain' : key.endsWith('_antecedent') ? (plan.antecedent ?? 'none') : key.endsWith('_act') ? (plan.act && labels.includes(plan.act) ? plan.act : 'assert') : key === 'observe_aspect' ? 'orientation' : labels[0];
       if (!labels.includes(choice) && !(key === 'action' && plan.forceAction)) throw new Error(`scripted choice ${choice} is not offered for ${key}: ${labels.slice(0, 8)}`);
       answers[key] = { type: 'choice', choice, probabilities: Object.fromEntries(labels.map(l => [l, key === 'action' ? plan.actionScores?.[l] ?? (l === choice ? 1 : 0) : l === choice ? 1 : 0])) };
     }
@@ -76,7 +81,8 @@ export async function runTurn(profile: any, label: Label, state: any, events: an
       async reobserve(input: any) { const result = { observedAt: '2026-01-01T00:00:01.000Z', issue: structuredClone(input.issue),
         figures: input.figureIds.map((figureId: string) => ({ figureId, supports: ['control-feature'], contradicts: [], unknown: [] })) };
         reobservations.push(structuredClone(result)); await client.complete(buildReobservationMessages(input), { phase: 'observation_targeted' }); return result; } }, jevDecision,
-    localGrounding: { classifier: createJevLocalTestClassifier({ enabled: true, readKey, fetchImpl, timeoutMs: profile.timeouts.localMs, researchLimits: { maxDeadlineMs: 600000 }, questionLayout: profile.questionLayout, ...(profile.dialoguePolicy === 'holistic_v3' ? { dialoguePolicy: 'holistic_v3' } : {}) })!,
+    localGrounding: { classifier: createJevLocalTestClassifier({ enabled: true, readKey, fetchImpl, timeoutMs: profile.timeouts.localMs, researchLimits: { maxDeadlineMs: 600000 }, questionLayout: profile.questionLayout,
+      ...(['holistic_v3', 'holistic_v5'].includes(profile.dialoguePolicy) ? { dialoguePolicy: profile.dialoguePolicy } : {}) })!,
       aiPublicTransport: { readKey, fetchImpl, timeoutMs: profile.timeouts.decisionMs } },
     onJevTurnTrace: (t: any) => traces.push(t), ...(technicalTrial ? { technicalTrial } : {}) } as any);
   let result: any;
@@ -89,7 +95,7 @@ export async function runTurn(profile: any, label: Label, state: any, events: an
 export type Turn = { human: string; plan: Plan };
 /** NORMAL rebuilt as one canonical trial whose final turn follows the earlier scripted turns (all of them under `label`). */
 /** dialoguePolicy: omitted = the creation default (holistic_v1); null = the earlier version (no policy), for controls of the older lineages. */
-export async function buildRecords({ label = 'repair-first' as Label, technicalTrial, turns, ledger, dialoguePolicy }: { label?: Label; technicalTrial?: { version: TrialVersion }; turns: Turn[]; ledger?: Record<string, any>; dialoguePolicy?: 'holistic_v1' | 'holistic_v2' | 'holistic_v3' | 'holistic_v4' | null }) {
+export async function buildRecords({ label = 'repair-first' as Label, technicalTrial, turns, ledger, dialoguePolicy }: { label?: Label; technicalTrial?: { version: TrialVersion }; turns: Turn[]; ledger?: Record<string, any>; dialoguePolicy?: DialoguePolicy | null }) {
   const n = structuredClone(normal), tr = n.trials[0], m = n.run.manifest;
   const profile = JSON.parse(JSON.stringify(researchTrialProfileV3(m.lunaRequest, m.timeouts, 'two_stage_v3', dialoguePolicy)));
   const digest = hash(profile);
@@ -111,7 +117,8 @@ export async function buildRecords({ label = 'repair-first' as Label, technicalT
     const seg = (r: any) => ({ luna: r.luna.slice(r.boundary.luna), jev: r.jev.slice(r.boundary.jev), reobservations: [] });
     const tape: any = { schemaVersion: 'parity_intervention_replay_v1', state: run.state, events: run.events,
       common: { luna: a.luna.slice(0, a.boundary.luna), jev: a.jev.slice(0, a.boundary.jev), reobservations: structuredClone(a.reobservations) },
-      tails: { 'repair-first': seg(a), 'bypass-enabled': seg(b) }, recorded: { label, expectedRequests: [] }, ...(technicalTrial ? { technicalTrial } : {}) };
+      tails: { 'repair-first': seg(a), 'bypass-enabled': seg(b) }, recorded: { label, expectedRequests: [] }, ...(technicalTrial ? { technicalTrial } : {}),
+      ...(runs[label].trace.generationRetryVersion ? { generationRetryVersion: runs[label].trace.generationRetryVersion } : {}) };
     const probe: any = await pairedInterventionReplay(tape, OWN as any, MODEL, profile);
     assert.equal(probe.status === 'not_reached', false, String(probe.error));
     const recorded = probe.sides.find((s: any) => s.label === label);

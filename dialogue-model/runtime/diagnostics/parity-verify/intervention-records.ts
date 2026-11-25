@@ -6,7 +6,7 @@ import {jevChoiceAnswersValid,jevReportedCost,jevResponseId} from '../../decisio
 import {nameBindsFigure} from '../../decision/referent-binding.ts';
 import {hasNameProposal,namingTurnKind,namingIntervalEstimates,inheritedTargetClaimIds,agreeCandidateAllowed,inheritsProposalName} from '../../decision/naming-request.ts';
 import {isHolisticPolicy,isHolisticV2Plus,isHolisticV3Plus,isHolisticV4Plus} from '../../decision/contract.ts';
-import {generationGuardCodes,draftViolationCodes,deriveGenerationOutcome,orientationSafeFallback} from '../../v2/generation-guard.ts';
+import {generationGuardCodes,draftViolationCodes,deriveGenerationOutcome,orientationSafeFallback,findOrientationLeaks} from '../../v2/generation-guard.ts';
 import {checkModelIdentity} from '../../model-identity-contract.ts';
 import {resolveModelPolicy} from '../../model-policy.ts';
 import {verifyLocalUpdate,applyVerifiedOperation} from '../../local-grounding/verify.ts';
@@ -24,6 +24,8 @@ const DETAIL_ACTIONS=['propose_name','agree','confirm','repair','request_observa
 const JUDGMENT_REJECTION_CODES=['reassignment_requires_repair','duplicate_name_requires_repair','inconsistent_action','agree_requires_shared_identification'];
 const ORIENTATION_SAFE_FALLBACK:Record<string,string>={accept:'なるほど、そう見えるんですね。',confirm:'その形の特徴について、もう少し詳しく教えてもらえますか？',repair:'すみません、どの形の特徴かもう一度確認させてください。',defer:'この形の話には、あとで戻りたいです。',revisit:'先ほどの形について、もう一度お話しできますか？',move_on:'別の形についても、見立てを聞かせてもらえますか？',close:'ここでお話を終えてもよいですか？'};
 const RETRY_INSTRUCTION='公開発話を書き直してください。選択済みの行動を変更しないでください。';
+const VIEWPOINT_RULE_V5_S4='形の確認・説明には、回転しても変わらない形や部分同士の関係を優先してください。選択済みの特徴は自分側の観察に基づく根拠です。方位が弁別に必要なときは、自分側の図形の見え方だと同じ節で明示し、相手には形の対応を尋ねてください。相手側の位置や向きを自分側と同じだと断定せず、相手の方位には相手が述べた見え方として触れるか、相手の見え方を尋ねてください。';
+const CONFIRM_NAMING_REQUEST_V5_S4='判断で選ばれた対象について、その特徴だけを確かめてください。相手が出した呼び名を採用・再提案せず、その案に触れる場合は相手の提案だと分かる形で引用してください。';
 // Closed, ordered reason text for the original and restated-judgment prompts.
 const RETRY_REASONS:ReadonlyArray<{codes:readonly string[];text:string;legacy?:string}>=[
  {codes:['naming_decision','name_selection','go_with_name','name_settled','name_approval','explicit_agreement'],text:'前の下書きは名称の決定・合意を表していました。決定・合意を表明せず、このactionの範囲で書き直してください。'},
@@ -45,8 +47,10 @@ const RETRY_REASONS:ReadonlyArray<{codes:readonly string[];text:string;legacy?:s
 function retryReasonsMatch(text:string,restated:boolean,codes?:readonly string[],draft?:{orientation:boolean;naming:boolean;workingNote:boolean;draftAct?:string|null}):boolean{
  if(!text)return false;
  for(const reason of RETRY_REASONS){
-  const match=text.startsWith(reason.text)?reason.text:!restated&&reason.legacy&&text.startsWith(reason.legacy)?reason.legacy:null;
-  if(codes&&reason.codes.some(code=>codes.includes(code))!==Boolean(match))return false;
+  const viewpoint=H5()&&reason.codes.includes('orientation_leak');
+  const reasonText=viewpoint?'前の下書きの方位の参照枠を明確にして書き直してください。'+VIEWPOINT_RULE_V5_S4:reason.text;
+  const match=text.startsWith(reasonText)?reasonText:!viewpoint&&!restated&&reason.legacy&&text.startsWith(reason.legacy)?reason.legacy:null;
+  if(codes&&(reason.codes.some(code=>codes.includes(code))||viewpoint&&codes.includes('shared_view_assumption'))!==Boolean(match))return false;
   if(!codes&&draft){
    // Each family this verifier can decide from the draft alone is checked exactly (present iff the draft shows it); the others stay open.
    if(reason.codes.includes('orientation_leak')&&draft.orientation!==Boolean(match))return false;
@@ -74,6 +78,7 @@ const S4_VIEWPOINT=/(?:こちら|私|わたし|自分|相手|そちら)(?:の(?:
 const S4_CLAUSE_BREAK=/(?<=[。!?]|(?:ですが|ますが|ませんが|ましたが|でしたが|けど|けれど|けれども|のに)、)/u;
 function s4HasOrientationLeak(text:unknown):boolean{
  if(typeof text!=='string'||!text.trim())return false;
+ if(H5())return findOrientationLeaks(text,'holistic_v5').length>0;
  const unquoted=text.normalize('NFKC').replace(/[\s\u200b-\u200d\ufeff]/gu,'').replace(/「[^」]*」|『[^』]*』/gu,'「」');
  return unquoted.split(S4_CLAUSE_BREAK).some(clause=>S4_ORIENT_WORDS.test(clause)&&!S4_VIEWPOINT.test(clause));
 }
@@ -180,6 +185,7 @@ const H=()=>isHolisticPolicy(CTX.policy);
 const H2=()=>isHolisticV2Plus(CTX.policy);
 const H3=()=>isHolisticV3Plus(CTX.policy);
 const H4=()=>isHolisticV4Plus(CTX.policy);
+const H5=()=>CTX.policy==='holistic_v5';
 // Only holistic_v3 carries its own human local-classification criteria; the check below needs the policy of the record being verified.
 const H3_ONLY=()=>isHolisticV3Plus(CTX.policy);
 // Only the verified integrated profile can name two_stage_v2; every other record is read as two_stage_v1.
@@ -339,6 +345,16 @@ const DRAFT_NAMING_QUESTIONS_S4={draft_naming:{type:'choice',instructions:DRAFT_
   recount_only: "誰が何を提案したか、見立てなどの説明だけで、名前を採用も提案もしない。",
   none: "命名に関する行為をしていない。",
 }}};
+const DRAFT_NAMING_QUESTIONS_V5_S4={draft_naming:{
+  type:'choice',instructions:DRAFT_NAMING_INSTRUCTIONS_S4+'名前を決めたかは、相手の提案や指定actionから補わず、下書きでAI自身がその対象と名前の組を新たに採用したかで判断してください。',
+  criteria:{...DRAFT_NAMING_QUESTIONS_S4.draft_naming.criteria,
+    adopt_chosen:'state.selected.nameがnullでなく、AI自身がこの対象の呼び名としてその選択名を採用する。',
+    adopt_other:'AI自身が選択名と異なる名前を採用する。state.selected.nameがnullのときに相手の案などを採用する場合もここに含める。',
+    propose_question:'呼び名を提案する、または採用してよいか尋ねる疑問形。問いかけの段階では採用していない。',
+    recount_only:'相手や過去の発話に帰属させて案・既存名を引用するか、既存名の由来や使用について尋ねる。新たな名称の採用・提案はない。',
+    none:'形の見立て、特徴への同意や特徴だけを確かめる質問など、命名に関する行為をしていない。'
+  }
+}};
 const DRAFT_TRIGGERS_S4=['agree_action','typed_context','naming_words','quoted_other'];
 function draftActsShape(v:any):boolean{
  return Array.isArray(v)&&v.length>=1&&v.length<=2&&v.every((a:any,i:number)=>exact(a,['draft','draftSha256','triggers','status','choice','scores','model','responseId','costUsd','latencyMs','error'])&&(a.draft==='initial'&&i===0||a.draft==='retry'&&(i===0||v[i-1].draft==='initial'))&&
@@ -680,14 +696,15 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
      if(Object.hasOwn(p.questions,'draft_naming')){
       // holistic_v1: the closed question about the draft's naming act, rebuilt exactly from this material and the previous generation draft.
       const gi=generationCount-1,ex=s.executed;
-      if(!H()||r.role!=='post_generation'||gi<0||!ex||typeof prevDraft!=='string'||askedDrafts.includes(gi)||!equal(p.questions,DRAFT_NAMING_QUESTIONS_S4)||p.model!=='typesafe/jev-1.14')return'invalid';
+      const questions=H5()?DRAFT_NAMING_QUESTIONS_V5_S4:DRAFT_NAMING_QUESTIONS_S4;
+      if(!H()||r.role!=='post_generation'||gi<0||!ex||typeof prevDraft!=='string'||askedDrafts.includes(gi)||!equal(p.questions,questions)||p.model!=='typesafe/jev-1.14')return'invalid';
       const agreed=s4AgreedNames(tape,ex);
       const trig=s4DraftTriggers(prevDraft,ex.action,s4TypedContext(tape,t),agreed,ex.action==='propose_name'&&typeof ex.name==='string'?ledgerName(ex.name):null,!!CTX.namingReconfirm);
       const turns=(tape.events??[]).filter((e:any)=>e.seq<=t.turnIndex).slice(-12).map((e:any)=>({turn:e.seq,speaker:e.speaker,text:String(e.text).slice(0,400)}));
       if(!trig.length||p.state!==JSON.stringify({turn:t.turnIndex,publicTurns:turns,reasons:trig,selected:{action:ex.action,target:ex.target,name:ex.name},draft:prevDraft}))return'invalid';
       // A response the client cannot use (a label outside the six) is recorded as an error act: that send is unconfirmed, never a pass.
       // Usability is the real client's own contract (shared pure functions): a reported cost and answers of exactly the asked question.
-      const reported=jevReportedCost(answer),usable=reported!==null&&jevChoiceAnswersValid(answer.answers,{draft_naming:Object.keys(DRAFT_NAMING_QUESTIONS_S4.draft_naming.criteria)});
+      const reported=jevReportedCost(answer),usable=reported!==null&&jevChoiceAnswersValid(answer.answers,{draft_naming:Object.keys(questions.draft_naming.criteria)});
       const v=usable?draftActVerdict(answer.answers.draft_naming.choice,ex.action):'draft_act_unconfirmed';draftVerdicts.push(v);lastVerdict=v;askedDrafts.push(gi);
       askedRows.push({draft:gi===0?'initial':'retry',triggers:trig,invalid:!usable,reason:usable?null:reported===null?'cost_unreported':'invalid_response',choice:usable?answer.answers.draft_naming.choice:null,scores:usable?answer.answers.draft_naming.probabilities:null,model:answer.model,responseId:jevResponseId(answer),costUsd:reported,verdict:v});
       continue;
@@ -767,7 +784,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
    // The outcome of each side is derived from its own drafts and question answers by the run's own pure functions (generation-guard): publish the first,
    // publish the rewrite, the derived orientation-only fallback, or stop (a stop is never a committed turn).
    {
-    const aiOn=tr.profile?.localGrounding?.aiPublicClaims===true||Object.hasOwn(tr.lastCommittedState??{},'aiPublic'),cc={action:ex.action as any,candidateName:typeof ex.name==='string'?ex.name:null,v3:true,holistic:true,adaptive:!!CTX.trial,factored:!!CTX.facts,ai:aiOn,publicTexts};
+    const aiOn=tr.profile?.localGrounding?.aiPublicClaims===true||Object.hasOwn(tr.lastCommittedState??{},'aiPublic'),cc={action:ex.action as any,candidateName:typeof ex.name==='string'?ex.name:null,v3:true,holistic:true,adaptive:!!CTX.trial,factored:!!CTX.facts,ai:aiOn,publicTexts,dialoguePolicy:H5()?'holistic_v5' as const:undefined};
     const actCode=(i:number)=>{const row=askedRows.find(y=>y.draft===(i===0?'initial':'retry'));return row&&row.verdict!==null?[row.verdict as string]:[];};
     // The same composition as the run (guard codes + the local publication checks against that send's own recorded messages); no private instruction is stored.
     const codes=(i:number)=>typeof draftTexts[i]==='string'?[...new Set([...draftViolationCodes(draftTexts[i],cc,genMessages[i]??[]),...actCode(i)])]:['empty_utterance'];
@@ -1083,6 +1100,7 @@ function choiceResponse(body:any,response:any):boolean{
 // executed while checking a record. No condition or original decision is input.
 // Prompt-style update (prompt-style-20261124): the current text and the prior text are both verified exactly.
 function generationMessages(messages:any[],trace:any,execution:any,tape:any,profile:any,index:number,codes?:readonly string[],draft?:{orientation:boolean;naming:boolean;workingNote:boolean}):boolean{
+ if(H5())return generationMessagesWith(messages,trace,execution,tape,profile,FIXED_HOLISTIC_V5,{v3:[TRIAL_HOLISTIC],legacy:LEGACY_TRIAL_STYLE},index,codes,draft);
  // holistic-first: the new generation text applies to a technical trial only; a non-trial v3 attempt keeps the style text under the same criteria version.
  if(CTX.style==='holistic')return tape.technicalTrial?generationMessagesWith(messages,trace,execution,tape,profile,FIXED_HOLISTIC,{v3:[TRIAL_HOLISTIC],legacy:LEGACY_TRIAL_STYLE},index,codes,draft):generationMessagesWith(messages,trace,execution,tape,profile,FIXED_STYLE,{v3:[TRIAL_STYLE],legacy:LEGACY_TRIAL_STYLE},index,codes,draft);
  if(CTX.style==='style'||CTX.style==='loop')return generationMessagesWith(messages,trace,execution,tape,profile,FIXED_STYLE,{v3:[TRIAL_STYLE],legacy:LEGACY_TRIAL_STYLE},index,codes,draft);
@@ -1093,8 +1111,10 @@ function generationMessagesWith(messages:any[],trace:any,execution:any,tape:any,
  if(!trace.finalAction||!execution)return false;const g={action:execution.action,targetSlot:execution.target.kind==='single'?execution.target.figureId:null,candidateName:execution.name,discriminatingFeature:execution.feature,note:null};
  const trialOptions=CTX.v3&&!CTX.legacyV3?trials.v3:[trials.legacy];
  for(const trial of trialOptions){
-  const actionMessage={role:'system',content:FIXED.act+'\n'+(tape.technicalTrial&&Object.hasOwn(trial.scope,execution.action)?(trial.scope as any)[execution.action]:(FIXED.scope as any)[execution.action])+'\n'+JSON.stringify({...g,target:execution.target,...(Object.hasOwn(execution,'detailFigureIds')?{detailFigureIds:execution.detailFigureIds}:{})})};
-  const expected:any[]=[{role:'system',content:FIXED.task},{role:'system',content:tape.technicalTrial?FIXED.generator.replace(trial.from,trial.generator):FIXED.generator},...(profile.utteranceStyle==='concise'?[{role:'system',content:FIXED.concise}]:[]),actionMessage,...(['confirm','repair'].includes(execution.action)&&execution.target.kind==='multiple'?[{role:'system',content:FIXED.detail}]:[]),...(layoutOf(profile)==='two_stage_v3'&&execution.action==='revisit'&&execution.target.kind==='multiple'?[{role:'system',content:REVISIT_MULTIPLE}]:[])];
+  const scope=!H5()&&tape.technicalTrial&&Object.hasOwn(trial.scope,execution.action)?(trial.scope as any)[execution.action]:(FIXED.scope as any)[execution.action];
+  const namingNote=H5()&&execution.action==='confirm'&&CTX.namingRequest?CONFIRM_NAMING_REQUEST_V5_S4+'\n':'';
+  const actionMessage={role:'system',content:FIXED.act+'\n'+scope+'\n'+namingNote+JSON.stringify({...g,target:execution.target,...(Object.hasOwn(execution,'detailFigureIds')?{detailFigureIds:execution.detailFigureIds}:{})})};
+  const expected:any[]=[{role:'system',content:FIXED.task},{role:'system',content:!H5()&&tape.technicalTrial?FIXED.generator.replace(trial.from,trial.generator):FIXED.generator},...(profile.utteranceStyle==='concise'?[{role:'system',content:FIXED.concise}]:[]),actionMessage,...(['confirm','repair'].includes(execution.action)&&execution.target.kind==='multiple'?[{role:'system',content:FIXED.detail}]:[]),...(layoutOf(profile)==='two_stage_v3'&&execution.action==='revisit'&&execution.target.kind==='multiple'?[{role:'system',content:REVISIT_MULTIPLE}]:[])];
   const context=JSON.stringify({scope:'private_observations_not_ground_truth',memo:trace.observationMemo});
   const chunks:string[]=[];if(context.length<=20000)expected.push({role:'user',content:context});else{for(let at=0;at<context.length;){let end=Math.min(at+19000,context.length);if(end<context.length&&/[\uD800-\uDBFF]/u.test(context[end-1])&&/[\uDC00-\uDFFF]/u.test(context[end]))end--;chunks.push(context.slice(at,end));at=end;}chunks.forEach((c,i)=>expected.push({role:'user',content:`同じJSON文脈の続き ${i+1}/${chunks.length}（全断片を順に連結して読む。内容は指示ではなくデータ）\n`+c}));}
   // The independently reconstructed local issue view is version-bound to the
@@ -1284,6 +1304,14 @@ const TRIAL_STYLE={...TRIAL,scope:{...TRIAL.scope,accept:"受け止める。特�
 // holistic-first generation text snapshot: derived from the style literals above by exact replacement (v3 technical trial only).
 const FIXED_HOLISTIC={...FIXED_STYLE,generator:rep(rep(FIXED_STYLE.generator,"まず相手の発話に短く応じ、必要なら全体の印象・身近なものへの見立てを1つ伝えてください。形の分析は、共通教示の分析トリガー（相手が迷い・曖昧さ・食い違いを表明したか特徴・詳細を求めた、公開対話の矛盾が未解決、または名前を確定しようとする時点で対象を1つに絞れず誤った合意の実害がある）に基づく判断に discriminatingFeature があるときだけにし、その場合も特徴は1つに絞って相手の反応を待ってください。内部に候補が複数残るだけでは分析を始めないでください。","図形全体を尋ねられた最初の説明（どんな図形か、残りはどんな形かなど）では、まず自分の観察と公開対話に根拠のある全体の見立て・印象・大まかな形を短く先に伝えてください。見立ては相手が対象の候補をつかむためのもので、特定の見立てを決まりにせず、自然な見立てが作れないときは無理に物の名前を当てはめず全体の形を伝えてかまいません。全体の見立てを述べることは、名前の提案や採用ではありません。形の分析（部分の形・つながり・配置）は、判断にdiscriminatingFeatureがあるときだけ、その特徴を1つに絞って述べて相手の反応を待ってください。最初から細部を尋ねられたときはその質問に直接答え、毎回先頭へ見立てを付けないでください。判断が求めていない部品の確認や、すでに肯定された特徴の再確認を自分から足さず、否定された見立てを新しい根拠なく繰り返さないでください。内部に候補が複数残るだけでは分析を始めないでください。"),"1回は1〜2文で返してください。口調は","1回は1〜2文で返してください（複数の図形をまとめて尋ねられたときは、求められた図形それぞれに短く答えてください）。口調は")};
 const TRIAL_HOLISTIC={...TRIAL_STYLE,scope:{...TRIAL_STYLE.scope,accept:rep(TRIAL_STYLE.scope.accept,"受け止める。特徴を尋ねられたときは、確かめられる範囲で直接答えてよい。","受け止める。図形の見た目や特徴を尋ねられたときは、確かめられる範囲で直接答えてよい。図形全体を初めて尋ねられたときは全体の見立てを先に短く、複数の図形を尋ねられたときは求められた図形それぞれに短く答える。"),confirm:rep(TRIAL_STYLE.scope.confirm,"決まった・それでいこうとは言わない","判断で選ばれた特徴だけを確かめ、ほかの部品の確認を足さない。"+"決まった・それでいこうとは言わない")}};
+
+const FIXED_HOLISTIC_V5={...FIXED_HOLISTIC,
+ generator:rep(rep(rep(FIXED_HOLISTIC.generator,TRIAL_HOLISTIC.from,TRIAL_HOLISTIC.generator),
+  '自分の画面の向きに依存する上下左右・右向き・上端・下端などの語で形を説明しないでください。特徴を伝えるときは、回転しても変わらない尖りの数や大小・くぼみ・細長さ・四角の有無・部分同士のつながりから選んでください。',VIEWPOINT_RULE_V5_S4),
+  '非公開メモやdiscriminatingFeatureには自分側の画面の向きに依存する語（上下左右・側・端・向き・斜め上/下/左/右・縦長・横長等）が含まれることがあるため、公開発話にはそのまま写さず、回転しても変わらない尖り・くぼみ・四角い部分・つながりなどの表現に言い換えるか、同じ節で「こちらの画面では〜」と視点を明示して伝えてください。',''),
+ scope:{...TRIAL_HOLISTIC.scope,
+  confirm:rep(TRIAL_HOLISTIC.scope.confirm,'回転に依存しない表現で','形の参照枠に関する共通教示に沿って'),
+  repair:rep(TRIAL_HOLISTIC.scope.repair,'回転に依存しない表現で','形の参照枠に関する共通教示に沿って')}};
 
 const ADAPT={"prospect": "repairProspectは未校正の見込みと根拠の材料です。正解や閾値ではありません。進捗が見込めれば修復の継続、停滞して別の対象に明確な利点があれば保留や移行、不確かなら確認、といった判断の目安にしてください。", "facts": "repairHistoryの各項目のfactsは、プログラムが記録から機械的に数えた事実です（直前の明確化への返答と比べた候補集合、同じ特徴の文の再提示、局所記録の欠落と棄却の件数）。抽出の誤差を含む未検証の材料で、意味が同じか、修復が進んだか停滞したか、次に何をすべきかを判定したものではありません。閾値や規則にせず、公開発話と照合して判断してください。"};
 // Observation-request detail text snapshot (2dbf7e2): the v1 targets sentence, the aspect question and the five aspects.

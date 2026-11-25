@@ -144,7 +144,15 @@ const DRAFT_NAMING_CRITERIA: Readonly<Record<typeof DRAFT_ACTS[number], string>>
   recount_only: "誰が何を提案したか、見立てなどの説明だけで、名前を採用も提案もしない。",
   none: "命名に関する行為をしていない。",
 });
-function prepareDraftAct(input: DraftActInput) {
+const DRAFT_NAMING_INSTRUCTIONS_V5 = DRAFT_NAMING_INSTRUCTIONS + "名前を決めたかは、相手の提案や指定actionから補わず、下書きでAI自身がその対象と名前の組を新たに採用したかで判断してください。";
+const DRAFT_NAMING_CRITERIA_V5 = Object.freeze({ ...DRAFT_NAMING_CRITERIA,
+  adopt_chosen: "state.selected.nameがnullでなく、AI自身がこの対象の呼び名としてその選択名を採用する。",
+  adopt_other: "AI自身が選択名と異なる名前を採用する。state.selected.nameがnullのときに相手の案などを採用する場合もここに含める。",
+  propose_question: "呼び名を提案する、または採用してよいか尋ねる疑問形。問いかけの段階では採用していない。",
+  recount_only: "相手や過去の発話に帰属させて案・既存名を引用するか、既存名の由来や使用について尋ねる。新たな名称の採用・提案はない。",
+  none: "形の見立て、特徴への同意や特徴だけを確かめる質問など、命名に関する行為をしていない。",
+});
+function prepareDraftAct(input: DraftActInput, policy?: DialoguePolicy) {
   if (!object(input) || !Array.isArray(input.publicTurns) || !Array.isArray(input.reasons) || input.reasons.length > 8 || !input.reasons.every(r => text(r, 40)) ||
       !object(input.selected) || !includes(JEV_ACTIONS, input.selected.action) || !(input.selected.name === null || text(input.selected.name, 80)) ||
       !text(input.draft, 8000) || !positive(input.turn)) fail("invalid_input");
@@ -160,10 +168,12 @@ function prepareDraftAct(input: DraftActInput) {
   const budget: DecisionInputBudget = { maxChars: 20000, stateChars: state.length, omitted: { publicTurns: 0, claims: 0, publicNames: 0, repairHistory: 0,
     reobservations: 0, observationDetails: 0, observationChars: 0, issueSummaryChars: 0 } };
   if (state.length > 20000) fail("invalid_input");
-  const questions: Record<string, Question> = { draft_naming: { type: "choice", instructions: DRAFT_NAMING_INSTRUCTIONS, criteria: { ...DRAFT_NAMING_CRITERIA } } };
+  const v5 = policy === "holistic_v5";
+  const questions: Record<string, Question> = { draft_naming: { type: "choice", instructions: v5 ? DRAFT_NAMING_INSTRUCTIONS_V5 : DRAFT_NAMING_INSTRUCTIONS,
+    criteria: { ...(v5 ? DRAFT_NAMING_CRITERIA_V5 : DRAFT_NAMING_CRITERIA) } } };
   return { payload: { model: JEV_DECISION_MODEL, state, questions } as JevDecisionPayload, slots: [] as string[], budget };
 }
-export function buildJevDraftActPayload(input: DraftActInput): JevDecisionPayload { return prepareDraftAct(input).payload; }
+export function buildJevDraftActPayload(input: DraftActInput, policy?: DialoguePolicy): JevDecisionPayload { return prepareDraftAct(input, policy).payload; }
 
 /** two_stage_v3 legality: the single source of the (action, target) table. A pair is legal when the target kind is allowed for the action
  * and the material actually holds the name/feature candidates or the observation allowance that action needs for that target. */
@@ -1074,7 +1084,7 @@ export function createJevDecisionClient(options: JevDecisionClientOptions = {}):
         const raw = researchLimits === undefined ? callOptions.timeoutMs ?? timeoutMs : callOptions.timeoutMs === undefined ? timeoutMs : callOptions.timeoutMs;
         if (!deadlineValue(raw, limit)) fail("invalid_options");
         const deadline = Math.min(timeoutMs, raw);
-        const p = referent === "draftAct" ? prepareDraftAct(input as unknown as DraftActInput) as unknown as ReturnType<typeof prepare> : referent === "prospect" ? prepareRepairProspect(input, questionLayout) : referent ? prepareReferent(input) : prepare(input, questionLayout, undefined, false, undefined, undefined, callOptions.dialoguePolicy);
+        const p = referent === "draftAct" ? prepareDraftAct(input as unknown as DraftActInput, callOptions.dialoguePolicy) as unknown as ReturnType<typeof prepare> : referent === "prospect" ? prepareRepairProspect(input, questionLayout) : referent ? prepareReferent(input) : prepare(input, questionLayout, undefined, false, undefined, undefined, callOptions.dialoguePolicy);
         referentSlots = p.slots;
         const snapshot = structuredClone(input);
         evidence.inputBudget = structuredClone(p.budget);
