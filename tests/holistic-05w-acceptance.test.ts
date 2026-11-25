@@ -41,7 +41,8 @@ const v3CriteriaSha256 = '08ba5880bf6bfcd09609bb651a22542e39c4c378d0bc3b884ac5c8
 const feature = '小さな輪が台に接している';
 const alias = '輪どまり';
 const neutral = '見取り図では輪のある形を「' + alias + '」と記しています。';
-const proposedSpeech = '「' + alias + '」と呼ぶのはどうでしょう？';
+const figureDescription = feature + '形があります。';
+const proposedSpeech = figureDescription + '「' + alias + '」と呼ぶのはどうでしょう？';
 const humanProposal = '輪のあるこの形を「' + alias + '」と呼びませんか？';
 const adoption = 'はい、この形を「' + alias + '」と呼びましょう。';
 const approval = 'その呼び名でいい？';
@@ -60,6 +61,7 @@ type WireClaim = Pick<LocalClaimView, 'speaker' | 'act' | 'name' | 'sourceTurn'>
 type Script = {
   human: string;
   segment?: Segment;
+  aiClaim?: { segment: Segment; act: 'ask' | 'assert' };
   act?: LocalAct;
   antecedent?: Pick<WireClaim, 'speaker' | 'act' | 'name'>;
   referent?: 'figure_0' | 'none';
@@ -141,6 +143,11 @@ async function participant(t: TestContext, strategy: Label) {
           else if (action === 'propose_name') choice = 'propose_question';
           else choice = action === 'accept' && script.replies.accept === affirmation ? 'adopt_other' : 'none';
         }
+        if (state.aiSeq !== undefined && script.aiClaim) {
+          if (key === 'segment_0_act') choice = script.aiClaim.act;
+          if (key === 'segment_0_antecedent') choice = 'none';
+          if (key === 'segment_0_support') choice = 'expressed';
+        }
         if (isHumanLocal && key === 'segment_0_act') choice = script.act;
         if (isHumanLocal && key === 'segment_0_antecedent') {
           choice = 'none';
@@ -165,6 +172,7 @@ async function participant(t: TestContext, strategy: Label) {
     const state = typeof content === 'string' && content.startsWith('{')
       ? JSON.parse(content) as { candidateText?: string; publicTurns?: unknown[] } : {};
     let text = '[]';
+    if (state.candidateText && script.aiClaim) text = JSON.stringify([extract(script.aiClaim.segment)]);
     if (state.publicTurns && !state.candidateText && script.segment) {
       const segment = extract(script.segment);
       extractionSends.push(segment);
@@ -265,10 +273,15 @@ for (const strategy of strategies) {
     const proposed = await session.say({
       human: neutral, segment: { quote: neutral, aspect: 'name', name: alias, targets: [first] },
       act: 'assert', referent: 'figure_0', actions: ['propose_name'], replies: { propose_name: proposedSpeech },
+      aiClaim: { act: 'assert', segment: { quote: figureDescription, aspect: 'part', targets: [first] } },
     });
     assert.equal(proposed.localReplies[0]?.act, 'assert');
     assert.equal(proposed.trace.executed?.action, 'propose_name');
     assert.equal(proposed.ai.text, proposedSpeech);
+    const publicDescription = proposed.trace.aiPublic?.pending?.candidates.find(claim =>
+      claim.act === 'assert' && claim.quote === figureDescription);
+    assert.ok(publicDescription, 'the AI name proposal includes a public description of the same figure');
+    assert.deepEqual(publicDescription.targets, [first]);
     assert.deepEqual(proposed.after.ownLedger[first], { status: 'tentative', name: alias });
 
     const result = await session.say({
@@ -289,6 +302,18 @@ for (const strategy of strategies) {
 
   test('B1 ' + strategy + ' can acknowledge reconfirmation of an agreed name', async t => {
     const session = await (await participant(t, strategy))();
+    const checked = await session.say({
+      human: '輪と台の形を確かめたいです。', actions: ['confirm'], replies: { confirm: clarification },
+      referent: 'figure_0', aiClaim: { act: 'ask', segment: { quote: clarification, aspect: 'part', targets: [first] } },
+    });
+    assert.deepEqual(checked.trace.executed?.target, { kind: 'single', figureId: first });
+    const description = 'ええ、小さな輪が台に接している形のことです。';
+    const answered = await session.say({
+      human: description, segment: { quote: description, aspect: 'part', targets: [first] },
+      act: 'assert', referent: 'figure_0', actions: ['accept'], replies: { accept: 'その形ですね。' },
+    });
+    assert.equal(answered.trace.aiPublic?.application?.status, 'applied');
+
     const agreed = await session.say({
       human: humanProposal, segment: { quote: humanProposal, aspect: 'name', name: alias, targets: [first] },
       act: 'name_propose', referent: 'figure_0', actions: ['agree'], replies: { agree: adoption },
