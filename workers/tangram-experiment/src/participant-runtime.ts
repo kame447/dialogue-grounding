@@ -25,6 +25,9 @@ export interface ParticipantService {
 
 const profile = researchTrialProfileV3({ timeoutMs: null, maxCompletionTokens: null }, {
   ...RESEARCH_TRIAL_PROFILE_V1.timeouts,
+  // The first 6-figure observation by the vision model takes longer than the research harness default of 20 s. The deadline must
+  // not undercut the proxy's own 85 s upstream deadline: a shorter one fails the start while the Terra call is still running and later settles.
+  observationMs: RESEARCH_MAX_LUNA_ATTEMPT_MS,
   lunaAttemptMs: RESEARCH_MAX_LUNA_ATTEMPT_MS,
   trialMs: ENGINEERING_LIMITS.trialMs,
 });
