@@ -174,7 +174,9 @@ test("admin shows the questionnaire escaped in the detail and only its state in 
   // Older index entries have no questionnaire state: shown as none, never an error.
   const legacy = { ...summary } as Record<string, unknown>;
   delete legacy.questionnaire;
-  assert.match(renderList([legacy as typeof summary], parseFilter(new URLSearchParams()), null, [], 30), /<td>なし<\/td><\/tr>/);
+  const legacyList = renderList([legacy as typeof summary], parseFilter(new URLSearchParams()), null, [], 30);
+  assert.match(legacyList, /仮アンケートなし/);
+  assert.doesNotMatch(legacyList, /undefined/);
   assert.equal(summarizeRecord(completed(), "a".repeat(64), summarizeLatency(completed())).questionnaire, "none");
   assert.match(renderDetail(completed(), summary, summarizeLatency(completed()), 30), /回答なし/);
 });

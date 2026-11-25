@@ -54,6 +54,11 @@
       "binding": "AI_PROXY",
       "service": "dialogue-grounding-ai-proxy",
       "entrypoint": "InternalResearchProxy"
+    },
+    {
+      "binding": "PARTICIPANT_AI_PROXY",
+      "service": "dialogue-grounding-ai-proxy",
+      "entrypoint": "InternalParticipantProxy"
     }
   ],
   "ratelimits": [

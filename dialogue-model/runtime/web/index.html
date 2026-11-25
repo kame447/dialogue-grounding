@@ -6,6 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content">
   <title>6図形の共同命名</title>
   <link rel="stylesheet" href="/style.css">
+  <script src="/tab-session.js" defer></script>
   <script src="/app.js" defer></script>
 </head>
 <body>
@@ -20,6 +21,15 @@
       </ol></nav>
     </header>
     <p id="notice" role="status" aria-live="polite"></p>
+    <button id="leave-session" type="button" class="secondary" hidden>受付に戻る</button>
+    <section id="entry-stage" class="panel entry" aria-labelledby="entry-title" hidden>
+      <h2 id="entry-title">課題を始める</h2>
+      <button id="new-session" type="button">新しく始める</button>
+      <details id="session-history" class="session-history" hidden>
+        <summary id="session-summary">このブラウザの以前の試行・受付</summary>
+        <ul id="session-list" class="record-list"></ul>
+      </details>
+    </section>
     <section id="start-stage" class="panel" aria-labelledby="start-title" hidden>
       <h2 id="start-title">課題を始める</h2>
       <p id="reception-number" hidden></p>
@@ -60,10 +70,9 @@
               <ol id="history" role="log" tabindex="0" aria-live="polite" aria-label="AIとの会話履歴"></ol>
               <button id="new-messages" type="button" class="new-messages" hidden><span aria-hidden="true">↓</span> 新しいメッセージ</button>
             </div>
-            <form id="chat"><div class="composer-status"><div id="typing-indicator" class="typing-indicator" aria-hidden="true" hidden><span></span><span></span><span></span></div>
-              <div id="chat-recovery" class="chat-recovery" hidden><p id="chat-recovery-message"></p><button id="retry-chat" type="button" class="quiet">状態を確認</button></div></div>
-              <label for="utterance" class="sr-only">メッセージ</label><textarea id="utterance" name="utterance" rows="2" maxlength="12000" required placeholder="メッセージを入力…" aria-describedby="send-hint"></textarea>
-              <div class="chat-actions"><span id="send-hint" class="muted">改行して入力できます</span><button id="send-message">送信 <span aria-hidden="true">↑</span></button></div>
+            <form id="chat"><div id="chat-recovery" class="chat-recovery" hidden><p id="chat-recovery-message"></p><button id="retry-chat" type="button" class="quiet">状態を確認</button></div>
+              <label for="utterance" class="sr-only">メッセージ</label><textarea id="utterance" name="utterance" rows="2" maxlength="2000" required placeholder="メッセージを入力…" aria-describedby="send-hint"></textarea>
+              <div class="chat-actions"><span id="send-hint" class="muted">Enterで送信・Shift＋Enterで改行</span><button id="send-message">送信 <span aria-hidden="true">↑</span></button></div>
             </form>
           </section>
           <section id="name-stage" class="stage submission-panel" aria-labelledby="names-title" hidden>

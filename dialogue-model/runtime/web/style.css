@@ -57,14 +57,14 @@ button:disabled{opacity:.45;cursor:default}
 .transcript{position:relative;display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden}
 /* Shown only while the reader is scrolled up and something new has arrived. */
 .new-messages{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);padding:5px 14px;border-radius:999px;font-size:.75rem;white-space:nowrap;box-shadow:0 4px 14px #24252233}
-/* The composer's speaking space: a reserved row, so the dots never move the log or the input. */
-.composer-status{display:flex;align-items:center;min-height:20px;margin:-8px 0 6px}
-.typing-indicator{display:flex;align-items:center;gap:5px;padding:0 4px}
+/* The AI's reply in progress: a transient bubble at the end of the log, as tall as a one-line reply. */
+#history li.typing-message{width:fit-content}
+.typing-indicator{display:flex;align-items:center;gap:5px;height:1.6em;margin-top:4px}
 .typing-indicator span{width:6px;height:6px;background:#92978a;border-radius:50%;animation:typing-bounce 1.3s ease-in-out infinite}
 .typing-indicator span:nth-child(2){animation-delay:.16s}
 .typing-indicator span:nth-child(3){animation-delay:.32s}
 @keyframes typing-bounce{0%,60%,100%{transform:translateY(0);opacity:.55}30%{transform:translateY(-4px);opacity:1}}
-.chat-recovery{display:flex;flex:1;align-items:center;justify-content:space-between;gap:8px;font-size:.75rem;color:var(--muted)}
+.chat-recovery{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:-8px 0 6px;font-size:.75rem;color:var(--muted)}
 .chat-recovery p{margin:0}
 .chat-recovery button{flex-shrink:0}
 #history .message-failure{display:flex;align-items:center;gap:6px}
@@ -128,7 +128,7 @@ main:has(#trial:not([hidden]) #conversation-stage:not([hidden])) .conversation-h
 main:has(#trial:not([hidden]) #conversation-stage:not([hidden])) #finish-conversation{width:auto;margin-top:0;font-size:.72rem;padding:6px 10px}
 main:has(#trial:not([hidden]) #conversation-stage:not([hidden])) #history{padding:12px}
 main:has(#trial:not([hidden]) #conversation-stage:not([hidden])) #chat{display:flex;flex-wrap:wrap;align-items:flex-end;gap:4px 8px;padding:8px 12px 10px}
-main:has(#trial:not([hidden]) #conversation-stage:not([hidden])) .composer-status{flex:0 0 100%;margin:0}
+main:has(#trial:not([hidden]) #conversation-stage:not([hidden])) .chat-recovery{flex:0 0 100%;margin:0}
 main:has(#trial:not([hidden]) #conversation-stage:not([hidden])) #chat textarea{flex:1;min-height:56px;max-height:96px}
 main:has(#trial:not([hidden]) #conversation-stage:not([hidden])) .chat-actions{margin:0}
 main:has(#trial:not([hidden]) #conversation-stage:not([hidden])) .chat-actions .muted{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
@@ -204,3 +204,16 @@ main:has(#trial:not([hidden]) #conversation-stage:not([hidden])):has(#review-bar
 main:has(#trial:not([hidden]) #conversation-stage:not([hidden])):has(#review-bar:not([hidden])) .dialogue{height:auto;max-height:none}
 main:has(#trial:not([hidden]) #conversation-stage:not([hidden])):has(#review-bar:not([hidden])) #history{min-height:240px;max-height:60dvh}
 }
+
+/* Entry screen: a new tab starts here; earlier sessions are listed by state only. */
+.entry{max-width:560px;margin:24px auto;display:grid;gap:18px}
+#new-session{width:100%;padding:14px 16px;font-size:1rem}
+#leave-session{margin:0 0 14px;font-size:.8rem}
+.session-history{border-top:1px solid var(--line);padding-top:12px;font-size:.82rem}
+.session-history summary{cursor:pointer;font-weight:600;min-height:32px;display:flex;align-items:center}
+.session-history .record-list{margin-top:8px}
+.session-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}
+.status-badge{font-size:.72rem;border:1px solid var(--line);border-radius:999px;padding:1px 9px;background:#f3f4ef;color:#51564c;white-space:nowrap}
+.record-list li[data-status=in_progress] .status-badge,.record-list li[data-status=submitting] .status-badge,.record-list li[data-status=questionnaire_waiting] .status-badge{background:#fdf1d8;border-color:#e6c88a;color:#7a4f12}
+.record-list li[data-status=cancelled] .status-badge,.record-list li[data-status=unavailable] .status-badge{color:var(--muted)}
+@media(max-width:760px){.entry{margin:12px auto}}

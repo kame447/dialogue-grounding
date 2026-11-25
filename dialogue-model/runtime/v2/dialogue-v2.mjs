@@ -159,6 +159,7 @@ function abortIf(signal) {
  *   localGrounding?: import('../local-grounding/contract.ts').LocalGroundingOptions | import('./jev-turn.ts').JevTurnLocalOptions | null,
  *   onLocalGroundingTrace?: ((record: import('./local-grounding-turn.ts').LocalGroundingResearchRecord) => unknown) | null,
  *   decisionMode?: 'jev' | null, observer?: import('../observation/contract.ts').ObservationObserver | null,
+ *   usagePolicy?: import('../web/participant-usage-policy.ts').ParticipantUsageOnly,
  *   jevDecision?: import('../decision/contract.ts').JevDecisionClient | null, maxReobservations?: number, interventionPolicy?: import('./research-profile.ts').InterventionPolicyReference, decisionTimeoutMs?:number,
  *   technicalTrial?: import('../decision/contract.ts').AdaptiveRepairTrial,
  *   onJevTurnTrace?: ((record: import('./jev-turn.ts').JevTurnTrace) => unknown) | null }} options
@@ -175,7 +176,7 @@ export function createDialogueV2(options) {
  const { client, strategy, image, anchors, judge = null, referenceMemory = true,
   decisionShadowClient = null, onResearchUpdate = null, activeDecision = null, utteranceStyle = "default",
   groundingShadow = null, onGroundingShadow = null, localGrounding = null, onLocalGroundingTrace = null,
-  decisionMode = null, observer = null, jevDecision = null, onJevTurnTrace = null, maxReobservations = 1 }=options;
+  decisionMode = null, observer = null, jevDecision = null, usagePolicy, onJevTurnTrace = null, maxReobservations = 1 }=options;
   let interventionPolicy, decisionTimeoutMs;
   const integrated=Object.hasOwn(options,'interventionPolicy')||Object.hasOwn(options,'decisionTimeoutMs');
   let intervention;
@@ -213,7 +214,7 @@ export function createDialogueV2(options) {
   if (decisionMode === "jev") {
     if (!referenceMemory || !localGrounding) throw new Error("Jev decision mode requires local reference memory");
     if (activeDecision || decisionShadowClient || groundingShadow) throw new Error("Jev decision mode cannot combine legacy decision paths");
-    return createJevTurnRuntime({ client, ownImage, ownAnchors, observer, jevDecision, localGrounding, ...(integrated?{intervention,decisionTimeoutMs}:{}),
+    return createJevTurnRuntime({ client, ownImage, ownAnchors, observer, jevDecision, localGrounding, usagePolicy, ...(integrated?{intervention,decisionTimeoutMs}:{}),
       ...(Object.hasOwn(options,'technicalTrial')?{technicalTrial:options.technicalTrial}:{}),
       onJevTurnTrace, onLocalGroundingTrace, maxReobservations,
       generation: { task: TASK_INSTRUCTIONS_V2, instructions: options.technicalTrial ? TRIAL_GENERATOR_INSTRUCTIONS_V2 : GENERATOR_INSTRUCTIONS_V2,

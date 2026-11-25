@@ -16,8 +16,9 @@ class Element {
   }
   set textContent(value) { this._text = String(value); this.children = []; }
   get textContent() { return this._text + this.children.map((child) => child.textContent).join(""); }
-  append(...children) { this.children.push(...children); }
+  append(...children) { for (const child of children) child.parentNode = this; this.children.push(...children); }
   replaceChildren(...children) { this._text = ""; this.children = [...children]; }
+  remove() { if (this.parentNode) this.parentNode.children = this.parentNode.children.filter((child) => child !== this); this.parentNode = null; }
   setAttribute(name, value) {
     this.attributes[name] = String(value);
     if (name === "hidden" || name === "disabled") this[name] = true;
