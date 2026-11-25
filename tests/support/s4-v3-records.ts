@@ -12,6 +12,7 @@ import type { DialoguePolicy, DraftAct } from '../../dialogue-model/runtime/deci
 import { createJevLocalTestClassifier } from '../../dialogue-model/runtime/local-grounding/jev-local-test.ts';
 import { createChatClient } from '../../dialogue-model/runtime/client.mjs';
 import { buildReobservationMessages } from '../../dialogue-model/runtime/observation/observe.ts';
+import type { ObservationMemo } from '../../dialogue-model/runtime/observation/contract.ts';
 import { image } from './s4-integration/harness.ts';
 
 export const normal = JSON.parse(await readFile(new URL('./s4-integration/NORMAL-RECORDS.json', import.meta.url), 'utf8'));
@@ -95,13 +96,16 @@ export async function runTurn(profile: any, label: Label, state: any, events: an
 export type Turn = { human: string; plan: Plan };
 /** NORMAL rebuilt as one canonical trial whose final turn follows the earlier scripted turns (all of them under `label`). */
 /** dialoguePolicy: omitted = the creation default (holistic_v1); null = the earlier version (no policy), for controls of the older lineages. */
-export async function buildRecords({ label = 'repair-first' as Label, technicalTrial, turns, ledger, dialoguePolicy }: { label?: Label; technicalTrial?: { version: TrialVersion }; turns: Turn[]; ledger?: Record<string, any>; dialoguePolicy?: DialoguePolicy | null }) {
+export async function buildRecords({ label = 'repair-first' as Label, technicalTrial, turns, ledger, dialoguePolicy, memo }: {
+  label?: Label; technicalTrial?: { version: TrialVersion }; turns: Turn[]; ledger?: Record<string, any>; dialoguePolicy?: DialoguePolicy | null; memo?: ObservationMemo;
+}) {
   const n = structuredClone(normal), tr = n.trials[0], m = n.run.manifest;
   const profile = JSON.parse(JSON.stringify(researchTrialProfileV3(m.lunaRequest, m.timeouts, 'two_stage_v3', dialoguePolicy)));
   const digest = hash(profile);
   for (const s of [n.run, n.summary, tr]) { s.profile = structuredClone(profile); s.profileSha256 = digest; }
   tr.identity.profile = digest; tr.label = label; m.trials[0].label = label; n.summary.runOrder[0].label = label;
   let state: any = structuredClone(OLD.state); if (ledger) state.ledger = structuredClone(ledger);
+  if (memo) state.observationMemo = structuredClone(memo);
   let events: any[] = [], seq = 0;
   for (let i = 0; i < turns.length; i++) {
     events = [...events, { id: `human-${++seq}`, seq, speaker: 'human', text: turns[i].human }];

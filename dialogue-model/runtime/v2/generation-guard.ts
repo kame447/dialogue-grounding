@@ -243,6 +243,11 @@ export function findInternalLeaks(text: string): string[] {
 // are exempt; idioms (その上・以上・左右対称・両側・片側・反対側…) and rotation-invariant geometry never match.
 const orientationWords = /上部|下部|上端|下端|左端|右端|左側|右側|上側|下側|右上|左上|右下|左下|右向き|左向き|上向き|下向き|斜め[上下左右]|[上下左右]の辺|横長|縦長|[上下左右]方向|[上下左右]寄り|[上下左右]の(?:突起|角|隅|端|部分|張り出し|くぼみ|切り欠き|三角|四角|脚|棒|腕|頭|耳|側)|(?<!以)[上下左右][へに](?:伸び|突き出|出っ張|張|向か|傾|広が|すぼま)/u;
 
+/** The selected feature contains viewpoint-dependent wording, even if the feature itself marks the viewpoint. */
+export function hasOrientationWords(text: string): boolean {
+  return orientationWords.test(normalize(text));
+}
+
 // A clause that says whose screen/viewpoint it describes (こちらの画面では…／私から見ると…) is not a flat claim.
 // A bare mention of rotation or a different orientation does not say whose view the direction word belongs to.
 const viewpointStated = /(?:こちら|私|わたし|自分|相手|そちら)(?:の(?:画面|側|向き|見方|図形|方)|側)?(?:では(?!なく|ない|なかっ|なけれ|じゃな)|で見ると|から見ると|から見れば|から見たら|から見て)/u;

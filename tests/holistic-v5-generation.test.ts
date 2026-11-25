@@ -29,6 +29,47 @@ test('holistic_v5 distinguishes local observations, attributed reports and quest
 });
 
 for (const label of ['bypass-enabled', 'repair-first'] as const) {
+  test(`holistic_v5 ${label}: only a selected feature with orientation wording gets the adjacent viewpoint note`, async () => {
+    const note = '以下のdiscriminatingFeatureにある上下左右・横長などの向きの語は、自分側の画面での見え方です。公開発話では、回転しても変わらない形や部分同士のつながりに言い換えてください。向きが区別に必要なら、その語と同じ節で「こちらの画面では」などと自分側の見え方だと明示し、相手には形の対応を尋ねてください。';
+    const statuses = (records: any) => verifyRecords(records).checks.filter(c => /^intervention\.trial\.0\.attempt\.0\./u.test(c.id)).map(c => c.status);
+    for (const [feature, annotated] of [
+      ['左端に横長の部分がつながる', true],
+      ['こちらの画面では右端に切れ目があります', true],
+      ['切れ目と細い棒がつながる', false],
+    ] as const) {
+      const memo = structuredClone(OLD.state.observationMemo);
+      memo.figures.find((figure: {id: string}) => figure.id === OWN.ownAnchors[0].id).analytic.shapes[0] = feature;
+      memo.figures.find((figure: {id: string}) => figure.id === OWN.ownAnchors[1].id).analytic.shapes[0] = '右上に突起がある';
+      const records = await buildRecords({ label, dialoguePolicy: 'holistic_v5', memo,
+        technicalTrial: { version: 'adaptive_repair_v3' }, turns: [{ human: 'この形の特徴を教えてください。',
+          plan: { action: 'confirm', target: 'figure_0', drafts: ['右端に切れ目がある形ですか？', '切れ目がある形ですか？'] } }] });
+      const trial = records.trials[0];
+      assert.deepEqual(statuses(records), ['pass', 'pass', 'pass', 'pass']);
+      assert.equal(trial.attempts[0].executed.feature, feature);
+      const sides = trial.replay[0].result.sides;
+      for (const side of sides) {
+        const [initial, retry] = side.requests.filter((request: any) => request.phase === 'generation');
+        const act = initial.payload.messages[2].content;
+        const lines = act.split('\n');
+        assert.equal(JSON.parse(lines.at(-1)).discriminatingFeature, feature);
+        assert.equal(lines.at(-2) === note, annotated);
+        assert.equal(lines.includes(note), annotated);
+        assert.ok(retry.payload.messages.at(-1).content.includes(act));
+      }
+      if (annotated) {
+        const tampered = structuredClone(records);
+        const otherIndex = sides.findIndex((side: any) => side.label !== label);
+        const other = tampered.trials[0].replay[0].result.sides[otherIndex];
+        const initial = other.requests.find((request: any) => request.phase === 'generation');
+        initial.payload.messages[2].content = initial.payload.messages[2].content.replace(note + '\n', '');
+        initial.completeMessagesSha256 = hash(initial.payload.messages);
+        initial.payloadSha256 = initial.preProjectionPayloadSha256 = hash(initial.payload);
+        tampered.evidence.pairedReplay[0][otherIndex === 0 ? 'left' : 'right'] = structuredClone(other);
+        assert.ok(statuses(tampered).includes('mismatch'));
+      }
+    }
+  });
+
   test(`holistic_v5 ${label}: the retry restates confirmation and S4 binds the exact framing and naming criteria`, async () => {
     const slot = OWN.ownAnchors[0].id, ledger = structuredClone(OLD.state.ledger);
     ledger[slot] = { status: 'agreed', name: '小舟' };

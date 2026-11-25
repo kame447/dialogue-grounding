@@ -26,7 +26,7 @@ import { validateJevDecision, validateHumanReferentEstimate, validateRepairProsp
 import type { JevDecisionFailureEvidence } from "../decision/jev-decision.ts";
 import { prepareLocalGroundingTurn, validateLocalGroundingOptions, findLocalPublicationViolations } from "./local-grounding-turn.ts";
 import type { LocalGroundingResearchRecord, LocalGroundingTrace } from "./local-grounding-turn.ts";
-import { findNamingActHints, draftViolationCodes, deriveGenerationOutcome, orientationSafeFallback, rewriteReasons } from "./generation-guard.ts";
+import { findNamingActHints, hasOrientationWords, draftViolationCodes, deriveGenerationOutcome, orientationSafeFallback, rewriteReasons } from "./generation-guard.ts";
 import { createMemoAiExtractor, MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS, AiPublicError, aiHash, emptyAiEvidence } from "../local-grounding/extract-ai.ts";
 import { createJevAiFunctionClassifier, createJevAiSupportChecker, AI_FUNCTION_INSTRUCTIONS, AI_SUPPORT_INSTRUCTIONS,
   AI_RESPONSE_SUPPORT_INSTRUCTIONS, AI_FUNCTION_CRITERIA, AI_SUPPORT_CHOICES, AI_ACT_DESCRIPTIONS } from "../local-grounding/jev-ai-public.ts";
@@ -47,6 +47,7 @@ export type GenerationRetryVersion = "jev_generation_retry_v1" | "jev_generation
 const ACT_INSTRUCTIONS = "Jevが選んだ行動だけを文章にしてください。行動と対象は変更せず、選択済みの名前・特徴があればそれに従ってください。選択済みの特徴がないacceptでは、相手の問いに観察メモで確かめられる範囲（ある・ない・確かめられない）で直接答えてよく、新しい名前や特徴の確認質問は足さないでください。観察メモは仮説で、局所的な支持を図形全体の理解や名称決定へ拡張しないでください。";
 const CONFIRM_NAMING_REQUEST_V5 = "判断で選ばれた対象について、その特徴だけを確かめてください。相手が出した呼び名を採用・再提案しないでください。その案に触れる場合は、相手の提案だと分かる引用に留めてください。";
 const NAMING_CONFLICT_V5 = "選ばれた図形にはすでに合意済みの名前（agreedName）があり、今回の相手の案（proposedNames）とは異なります。選ばれた行動で対象を確かめる際は、相手が同じ図形と別の図形のどちらについて話しているかを確かめてください。この案を採用して合意済みの名前を変更しないでください。明示的な改名は、判断が選んだrepairの範囲で扱います。";
+const FEATURE_VIEWPOINT_V5 = "以下のdiscriminatingFeatureにある上下左右・横長などの向きの語は、自分側の画面での見え方です。公開発話では、回転しても変わらない形や部分同士のつながりに言い換えてください。向きが区別に必要なら、その語と同じ節で「こちらの画面では」などと自分側の見え方だと明示し、相手には形の対応を尋ねてください。";
 // two_stage_v3 only (new text, not yet reviewed by Argon): a revisit whose target stays a candidate set.
 export const REVISIT_MULTIPLE_INSTRUCTIONS = "対象は複数候補のままです。選ばれた行動は、先ほどの未解決の区別に戻ることだけです。どの候補かを勝手に一つに絞らず、名前に決まったとは言わないでください。候補の数や内部の参照IDは相手に伝えず、相手が知らないことを知っているかのようにも話さないでください。";
 const DETAIL_INSTRUCTIONS = "対象は複数候補のままです。detailFigureIdsは選ばれた特徴の出典図形であり、対象の確定ではありません。その特徴を候補すべての性質にせず、候補を勝手に一つに絞らずに確認・修復を表現してください。";
@@ -950,10 +951,13 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
           namingIntervalEstimates(state.judgments, latest.seq, baseInput.humanReferent),
           inheritedTargetClaimIds(prepared.research?.verification?.diagnostics))
         : null;
+      const featureViewpoint = options.dialoguePolicy === "holistic_v5" && judgment.discriminatingFeature !== null &&
+        hasOrientationWords(judgment.discriminatingFeature) ? FEATURE_VIEWPOINT_V5 + "\n" : "";
       const actionMessage: Message = { role: "system",
         content: ACT_INSTRUCTIONS + "\n" + generation.actionScope[judgment.action] + "\n" +
           (options.dialoguePolicy === "holistic_v5" && judgment.action === "confirm" && record.namingRequest === true ? CONFIRM_NAMING_REQUEST_V5 + "\n" : "") +
           (namingConflict ? NAMING_CONFLICT_V5 + "\n" + JSON.stringify(namingConflict) + "\n" : "") +
+          featureViewpoint +
           JSON.stringify({ ...judgment, target: execution.target,
           ...(execution.detailFigureIds ? { detailFigureIds: execution.detailFigureIds } : {}) }) };
       const messages: Message[] = [{ role: "system", content: generation.task }, { role: "system", content: generation.instructions },
