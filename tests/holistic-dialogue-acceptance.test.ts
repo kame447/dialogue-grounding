@@ -974,8 +974,8 @@ test('Final submission reports the existing error after two mismatches, with no 
 });
 
 async function audit16Check(dialogue: ReturnType<typeof session>, target: number | readonly number[],
-  { questionTargets = [], feature = ringGap, opening }: {
-    questionTargets?: string[]; feature?: string; opening?: Pick<Turn, 'human' | 'local'>;
+  { questionTargets = [], feature = ringGap, opening, questionAspect = 'question' }: {
+    questionTargets?: string[]; feature?: string; opening?: Pick<Turn, 'human' | 'local'>; questionAspect?: 'question' | 'part';
   } = {}) {
   const description = '台は輪より細く見えます。';
   const outline = '環の縁が途中で切れています。';
@@ -987,7 +987,7 @@ async function audit16Check(dialogue: ReturnType<typeof session>, target: number
     publicClaims: [
       { text: description, act: 'assert', aspect: 'part', targets: [first] },
       { text: outline, act: 'assert', aspect: 'contour', targets: [first] },
-      { text: question, act: 'ask', aspect: 'question', targets: questionTargets },
+      { text: question, act: 'ask', aspect: questionAspect, targets: questionTargets },
     ],
   });
   assert.equal(check.speech, description + outline + question);
@@ -998,7 +998,7 @@ async function audit16Check(dialogue: ReturnType<typeof session>, target: number
   assert.deepEqual(claims?.map(({ act, aspect, targets }) => ({ act, aspect, targets })), [
     { act: 'assert', aspect: 'part', targets: [first] },
     { act: 'assert', aspect: 'contour', targets: [first] },
-    { act: 'ask', aspect: 'question', targets: questionTargets },
+    { act: 'ask', aspect: questionAspect, targets: questionTargets },
   ]);
   return { quote: question, sourceTurn: claims![2].sourceTurn };
 }
@@ -1006,7 +1006,7 @@ async function audit16Check(dialogue: ReturnType<typeof session>, target: number
 async function audit16Answer(dialogue: ReturnType<typeof session>, question: { quote: string; sourceTurn: number },
   act: 'agree' | 'acknowledge', target: number | readonly number[],
   { aspect = 'referent', targets = [], human = act === 'agree' ? 'はい、まさにそれです。' : 'ええ、質問は分かりました。' }: {
-    aspect?: 'referent' | 'part'; targets?: string[]; human?: string;
+    aspect?: 'referent' | 'part' | 'question'; targets?: string[]; human?: string;
   } = {}) {
   const answered = await dialogue.say({
     human, action: 'accept', target, drafts: ['形の照らし合わせを続けましょう。'],
@@ -1023,11 +1023,12 @@ async function audit16Answer(dialogue: ReturnType<typeof session>, question: { q
   return { asked, reply, ledger: answered.after.ownLedger };
 }
 
-async function audit16Name(dialogue: ReturnType<typeof session>, feature = baseWidth) {
-  const human = 'この形は「' + originalName + '」と呼びませんか？';
+async function audit16Name(dialogue: ReturnType<typeof session>, feature = baseWidth, nameTargets: string[] = [first],
+  proposal = 'この形は「' + originalName + '」と呼びませんか？') {
+  const human = proposal;
   const named = await dialogue.say({
     human, action: 'confirm', target: 0, feature, name: originalName,
-    local: [{ text: human, act: 'name_propose', aspect: 'name', targets: [first], name: originalName }],
+    local: [{ text: human, act: 'name_propose', aspect: 'name', targets: nameTargets, name: originalName }],
     agreeSpeech, drafts: [feature + '形ですか？'], draftActs: { [agreeSpeech]: 'adopt_chosen' },
   });
   assert.equal(named.trace.status, 'committed');
@@ -1178,4 +1179,50 @@ for (const strategy of strategies) {
     assert.ok(named.trace.namingRequest, 'the earlier name is being approved, so the naming request must reach the decision');
     checkAudit17Pending({ named, offered: Object.hasOwn(action.questions.action.criteria, 'agree') });
   });
+}
+
+// Audit 19: an acknowledgement of the question's meaning must not become confirmation of the figure.
+for (const strategy of strategies) {
+  const proposal = '「' + originalName + '」とかどう？';
+  const afterReply = async (questionAspect: 'question' | 'part', act: 'agree' | 'acknowledge', aspect: 'part' | 'question', human: string) => {
+    const dialogue = session(strategy);
+    await dialogue.start();
+    const question = await audit16Check(dialogue, 0, { questionTargets: [], questionAspect });
+    await audit16Answer(dialogue, question, act, 0, { aspect, targets: [], human });
+    return { dialogue, named: await audit16Name(dialogue, baseWidth, [], proposal) };
+  };
+  for (const [label, act] of [['agree/part', 'agree'], ['acknowledge', 'acknowledge']] as const) {
+    test(`Audit 19 ${strategy} keeps names pending after 「質問の意味は分かりました。」 (${label}) to a targetless ask/part, then an untargeted proposal`, async () => {
+      const { dialogue, named } = await afterReply('part', act, 'part', '質問の意味は分かりました。');
+      checkAudit17Pending(named);
+      await dialogue.restore();
+      await dialogue.submit([Object.fromEntries(figureIds.map(figureId => [figureId, null]))]);
+      const saved = dialogue.record();
+      assert.ok(Object.values(saved.ownLedger).every(entry => entry.name === null));
+      assert.ok(Object.values(saved.aiSubmission ?? {}).every(value => value === null));
+    });
+  }
+  for (const [questionAspect, aspect] of [['part', 'part'], ['question', 'question']] as const) {
+    test(`Audit 19 ${strategy} leaves 「ええ、分かりました。」 to an ask/${questionAspect} without a name candidate`, async () => {
+      const { named } = await afterReply(questionAspect, 'agree', aspect, 'ええ、分かりました。');
+      checkAudit17Pending(named);
+    });
+  }
+  for (const [questionAspect, aspect] of [['part', 'part'], ['question', 'question'], ['part', 'referent']] as const) {
+    for (const human of ['それそれ', 'そうそう！それ']) {
+      test(`Audit 19 ${strategy} still confirms ${human} to an ask/${questionAspect} (${aspect}) and submits a later agreed name`, async () => {
+        const dialogue = session(strategy);
+        await dialogue.start();
+        const question = await audit16Check(dialogue, 0, { questionTargets: [], questionAspect });
+        const { asked, reply } = await audit16Answer(dialogue, question, 'agree', 0, { aspect, targets: [], human });
+        assert.deepEqual({ act: reply?.act, targets: reply?.targets, respondsTo: reply?.respondsTo }, { act: 'agree', targets: [first], respondsTo: asked.id });
+        const { named, offered } = await audit16Name(dialogue);
+        assert.equal(offered, true);
+        assert.equal(named.speech, agreeSpeech);
+        await dialogue.restore();
+        await dialogue.submit([Object.fromEntries(figureIds.map(figureId => [figureId, figureId === first ? originalName : null]))]);
+        assert.deepEqual(dialogue.record().ownLedger[first], { status: 'agreed', name: originalName });
+      });
+    }
+  }
 }
