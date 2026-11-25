@@ -790,7 +790,7 @@ test('05h: not_reached only where material outside the record is needed; provabl
 });
 
 // 05j-B1: each policy version reproduces its own requests; a record relabelled with the other version (profile, digests, materials) is refused.
-function relabel(record: any, policy: 'holistic_v1' | 'holistic_v2' | 'holistic_v3') {
+function relabel(record: any, policy: 'holistic_v1' | 'holistic_v2' | 'holistic_v3' | 'holistic_v4') {
   const forged = structuredClone(record), oldProfile = forged.trials[0].profile, oldDigest = forged.trials[0].profileSha256;
   const profile = { ...oldProfile, dialoguePolicy: policy }, digest = hash(profile);
   const walk = (x: any): any => {
@@ -1155,6 +1155,26 @@ test('05w: S4 recomputes an approval request that answers a public AI adoption (
       const t = record.trials[0].attempts[0];
       assert.equal(t.namingReconfirm, true, `${label} ${antecedent}`);
       assert.ok(finalChecks(record).length >= 4 && finalChecks(record).every((c: any) => c.status === 'pass'), `${label} ${antecedent} ` + JSON.stringify(finalChecks(record).filter((c: any) => c.status !== 'pass').map((c: any) => [c.id, c.reason])));
+    }
+  }
+});
+
+test('05z-1: S4 redoes the human-side local verification with the saved version\'s options: an approval request handled under the other version\'s rule is a replay mismatch', async () => {
+  const s3 = Object.keys(OLD.state.ledger)[3];
+  const speech = '角ばった塊に細い脚が付いた形のように見えます。';
+  const ai = JSON.stringify([{ segmentId: 'shape', quote: speech, targets: [s3], aspect: 'construal', proposition: 'x', name: null, linkedIssueId: null, respondsToTurn: null }]);
+  const seg = (quote: string, name: string | null, targets: string[] = [], respondsToTurn: number | null = null) => JSON.stringify([{ segmentId: 's1', quote, targets, aspect: 'name', proposition: quote, name, linkedIssueId: null, respondsToTurn }]);
+  const turnsFor = (antecedent: string) => [
+    { human: 'どんな図形がありますか？', plan: { action: 'confirm', target: 'figure_3', speech, aiExtraction: ai } },
+    { human: 'これ、かかしとかどう？', plan: { action: 'agree', target: 'figure_3', name: 'かかし', act: 'name_propose', referent: 'figure_3', extraction: seg('かかし', 'かかし', [s3]), speech: '「かかし」と呼びましょう。' } },
+    { human: 'その呼び名でいい？', plan: { action: 'accept', target: 'none', act: 'name_propose', antecedent, referent: 'figure_3', extraction: seg('その呼び名でいい？', null, [], 4), speech: 'うん、いいよ。' } }];
+  for (const label of ['repair-first', 'bypass-enabled'] as const) {
+    for (const antecedent of ['claim_1', 'claim_2']) {
+      for (const [made, other] of [['holistic_v4', 'holistic_v3'], ['holistic_v3', 'holistic_v4']] as const) {
+        const record = await buildRecords({ label, dialoguePolicy: made, turns: turnsFor(antecedent) as any });
+        assert.ok(finalChecks(record).length >= 4 && finalChecks(record).every((c: any) => c.status === 'pass'), `${label} ${antecedent} ${made} regular`);
+        assert.ok(!finalChecks(relabel(record, other)).every((c: any) => c.status === 'pass'), `${label} ${antecedent}: a ${made} record under ${other}`);
+      }
     }
   }
 });

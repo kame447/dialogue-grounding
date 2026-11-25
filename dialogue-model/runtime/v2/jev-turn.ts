@@ -466,6 +466,8 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
    if(isRequest&&z.namingRequest!==true||isReconfirm&&z.namingReconfirm!==true||isRequest&&isReconfirm||(isRequest||isReconfirm)!==proposed)throw Error();
    if(isReconfirm&&!turnNameProposals(turnClaims,j.turnIndex).some((p:any)=>Object.values(s.ledger??{}).some((e:any)=>e?.status==='agreed'&&typeof e.name==='string'&&namingNameKey(e.name)===namingNameKey(p.name))))throw Error();
    const acceptOptional=z.namingRequest===true;
+   // holistic_v4: an unadopted name's request never offered accept, so no saved score of it and no executed accept can stand for such a turn.
+   const noAcceptTurn=policy==='holistic_v4'&&questionLayout==='two_stage_v3'&&z.namingRequest===true;
    const hasAgreeNames=Object.hasOwn(z,'agreeNames');
    // Historical evidence retains the candidate catalog, not the original request's public turns.
    if(questionLayout==='two_stage_v3'&&!hasAgreeNames||hasAgreeNames&&(!Array.isArray(z.agreeNames)||z.agreeNames.length>JEV_DECISION_INPUT_LIMITS.publicNames||z.agreeNames.some((n:any)=>!stateExact(n,['name','figureId','sourceTurn'])||
@@ -510,11 +512,12 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
     // After the turn's one reobservation the stage-one question omits request_observation (as in isOpenIssueRerankRecord).
     const keys=Object.keys(es[0].scores.action??{}).sort();
     // v3 scores only the actions that had a legal target and detail: any subset of the offerable labels that holds the always-legal ones and the chosen action.
-    const actionKeysOk=v3?keys.every(k=>actionLabels.includes(k as any))&&[...v3AlwaysOffered(acceptOptional),d.action].every(k=>keys.includes(k))
+    const actionKeysOk=v3?keys.every(k=>actionLabels.includes(k as any))&&[...v3AlwaysOffered(acceptOptional),d.action].every(k=>keys.includes(k))&&!(noAcceptTurn&&keys.includes('accept'))
       :stateSame(keys,[...actionLabels].sort())||stateSame(keys,actionLabels.filter(a=>a!=='request_observation').sort());
     if(!actionKeysOk||!stateSame(d.evidence.choices,es[0].choices)||!stateSame(d.evidence.scores,es[0].scores)||es[0].choices.action!==d.action||d.evidence.model!==es.at(-1).model||d.evidence.responseId!==es.at(-1).responseId||d.evidence.costUsd!==es.reduce((n:number,e:any)=>n+e.costUsd,0))throw Error();
    }else if(d.evidence.model!==null||Object.keys(d.evidence.choices).length||Object.keys(d.evidence.scores).length||d.evidence.stages?.length)throw Error();
    const original=executionProjection(d);persistedExecution(original,ownSlots);persistedExecution(z.executed,ownSlots);
+   if(noAcceptTurn&&(original.action==='accept'||z.executed.action==='accept'))throw Error();
    if(questionLayout==='two_stage_v3'&&[original,z.executed].some(e=>e.action==='agree'&&
     (e.target.kind!=='single'||!hasAgreeNameV3(z.agreeNames,e.name,e.target.figureId))))throw Error();
    const t=z.intervention;if(!stateExact(t,['schemaVersion','policy','disposition','reasonCode','original','rerank','alternative','detailEvidence','failure'])||t.schemaVersion!=='jev_intervention_v1'||t.failure!==null||!stateSame(t.original,original))throw Error();

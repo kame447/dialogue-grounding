@@ -50,3 +50,26 @@ for (const label of ['repair-first', 'bypass-enabled'] as const) {
     });
   }
 }
+
+// A record made by the runtime of eca0e6a is holistic_v3 by name but handled the approval request by what is now holistic_v4's rule: S4 must not accept it as v3.
+for (const label of ['repair-first', 'bypass-enabled'] as const) {
+  for (const antecedent of ['claim_1', 'claim_2']) {
+    test(`S4 ${label} ${antecedent}: a record of eca0e6a labelled holistic_v3 is a replay mismatch`, async t => {
+      const middle = 'eca0e6a';
+      try { await gitExec('git', ['cat-file', '-e', middle + '^{commit}'], { cwd: gitRoot }); }
+      catch (error) {
+        if (error instanceof Error && 'code' in error && (error.code === 1 || error.code === 128)) { t.skip('historical Git objects are unavailable in this checkout'); return; }
+        throw error;
+      }
+      const directory = await mkdtemp(join(tmpdir(), 'v3-middle-runtime-'));
+      t.after(() => rm(directory, { recursive: true, force: true }));
+      await gitExec('git', ['archive', '--output=' + join(directory, 'source.tar'), middle], { cwd: gitRoot });
+      await gitExec('tar', ['-xf', join(directory, 'source.tar'), '-C', directory]);
+      const archived = await import(pathToFileURL(join(directory, 'tests/support/s4-v3-records.ts')).href) as { buildRecords: typeof buildRecords; OWN: typeof OWN };
+      const records = await archived.buildRecords({ label, dialoguePolicy: 'holistic_v3', turns: turnsFor(antecedent, archived.OWN.ownAnchors[3].id) as never });
+      const checks = interventionChecks(records);
+      const statuses = ['shape', 'binding', 'execution', 'replay'].map(kind => checks.find(c => c.id === 'intervention.trial.0.attempt.0.' + kind)?.status);
+      assert.notDeepEqual(statuses, ['pass', 'pass', 'pass', 'pass']);
+    });
+  }
+}

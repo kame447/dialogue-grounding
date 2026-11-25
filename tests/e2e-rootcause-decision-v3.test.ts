@@ -1549,6 +1549,37 @@ test('05x-2 (holistic_v4 and holistic_v3): an approval request for a name the AI
   }
 });
 
+test('05z-2 (holistic_v4): a saved state whose naming request holds accept (a score or the executed action) is refused as holistic_v4 and accepted as holistic_v3; a reconfirmation keeps accept under both (both strategies)', async () => {
+  const proposal = 'これ、かかしとかどう？';
+  for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
+    const check = (f: ReturnType<typeof fixture>, policy: string) => validateJevPrivateStateV2(JSON.parse(JSON.stringify(f.state())) as never, ids, f.intervention, 'two_stage_v3', policy);
+    // An open request answered with accept, made under holistic_v3 (an agree was legal).
+    const v3 = fixture(strategy, { aiPublic: true, holistic: 'holistic_v3' });
+    await share(v3, 3);
+    const answered = await v3.exchange(proposal, { action: 'accept', referent: 'figure_3', segments: [naming(proposal, 'かかし')], draftActs: ['none'], drafts: ['名前の案ですね。'] });
+    assert.equal(answered.saved.namingRequest, true);
+    assert.equal(answered.saved.executed?.action ?? answered.trace.executed?.action, 'accept');
+    check(v3, 'holistic_v3');
+    assert.throws(() => check(v3, 'holistic_v4'), { code: 'invalid_state' }, `${strategy}: the accept of a naming request under v4`);
+    // The same turn made under holistic_v4 answers with agree and is valid.
+    const v4 = fixture(strategy, { aiPublic: true, holistic: 'holistic_v4' });
+    await share(v4, 3);
+    await v4.exchange(proposal, { action: 'agree', target: 3, referent: 'figure_3', segments: [naming(proposal, 'かかし', [ids[3]])], draftActs: ['adopt_chosen'], drafts: [agreeSpeech('かかし')] });
+    check(v4, 'holistic_v4');
+    // A reconfirmation of an agreed name keeps accept under both versions.
+    for (const version of ['holistic_v3', 'holistic_v4'] as const) {
+      const f = fixture(strategy, { aiPublic: true, holistic: version });
+      await share(f, 3);
+      const first = await f.exchange(proposal, { action: 'agree', target: 3, referent: 'figure_3', segments: [naming(proposal, 'かかし', [ids[3]])], draftActs: ['adopt_chosen'], drafts: [agreeSpeech('かかし')] });
+      const text = 'さっきの「かかし」でいい？';
+      const r = await f.exchange(text, { action: 'accept', referent: 'figure_3', segments: [{ ...naming(text, 'かかし', [ids[3]]) }], drafts: ['うん、いいよ。'] });
+      assert.equal(r.saved.namingReconfirm, true, `${strategy} ${version}`);
+      check(f, version);
+      void first;
+    }
+  }
+});
+
 test('05r-2 (holistic_v3): a short re-approval that carries an earlier unbound name takes that proposal\'s turn as the name\'s public source, so agree is offered once the partner\'s estimate singles the figure out (both strategies)', async () => {
   const offered = (r: { requests: Array<{ questions: Record<string, { criteria: Record<string, string> }> }> }) =>
     Object.keys(r.requests.find(q => q.questions.action)!.questions.action.criteria);
