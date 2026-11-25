@@ -29,6 +29,7 @@ type Segment = Omit<LocalSegmentProposal, 'segmentId' | 'quote' | 'linkedIssueId
   name?: string;
   respondsToTurn?: number;
   antecedent?: string;
+  quote?: string;
 };
 type Turn = {
   human: string;
@@ -36,7 +37,7 @@ type Turn = {
   action: JevAction;
   target: number;
   feature?: string;
-  local?: Segment;
+  local?: Segment | Segment[];
 };
 
 const slots = OWN.ownAnchors.map((anchor: { id: string }) => anchor.id) as string[];
@@ -62,6 +63,7 @@ function syntheticCheckpoint(): Checkpoint {
 
 function session(profile: Profile, strategy: Label, start: Checkpoint) {
   let current: Turn;
+  let segments: Segment[];
   let sends: Request[] = [];
   let mockError: unknown;
   let trace: JevTurnTrace | undefined;
@@ -95,11 +97,18 @@ function session(profile: Profile, strategy: Label, start: Checkpoint) {
             case 'basis': choice = 'none'; break;
             case 'prospect': choice = 'no_open_issue'; break;
             case 'feature': choice = labels.find(label => JSON.parse(criteria[label]).value === current.feature); break;
-            case 'name': choice = labels.find(label => JSON.parse(criteria[label]).value === current.local?.name); break;
+            case 'name': {
+              const name = segments.find(segment => segment.name !== undefined)?.name;
+              choice = labels.find(label => JSON.parse(criteria[label]).value === name);
+              break;
+            }
             case 'draft_naming': choice = current.action === 'agree' ? 'adopt_chosen' : 'none'; break;
-            case 'segment_0_act': choice = current.local?.act; break;
-            case 'segment_0_antecedent': {
-              const antecedent = current.local?.antecedent;
+            default: {
+              const match = /^segment_(\d+)_(act|antecedent)$/u.exec(key);
+              const segment = match && segments[Number(match[1])];
+              assert.ok(segment && match, 'each question must refer to an extracted clause');
+              if (match[2] === 'act') { choice = segment.act; break; }
+              const antecedent = segment.antecedent;
               if (!antecedent) {
                 choice = 'none';
                 break;
@@ -130,14 +139,13 @@ function session(profile: Profile, strategy: Label, start: Checkpoint) {
     },
     client: {
       async complete(_messages: unknown, { phase }: { phase: string }) {
-        const { local } = current;
         let text: string;
         if (phase === 'local_extraction') {
-          text = JSON.stringify(local ? [{
-            segmentId: '1', quote: current.human, proposition: local.proposition,
-            targets: local.targets, aspect: local.aspect, name: local.name ?? null,
-            linkedIssueId: null, respondsToTurn: local.respondsToTurn ?? null,
-          } satisfies LocalSegmentProposal] : []);
+          text = JSON.stringify(segments.map((segment, index): LocalSegmentProposal => ({
+            segmentId: String(index + 1), quote: segment.quote ?? current.human, proposition: segment.proposition,
+            targets: segment.targets, aspect: segment.aspect, name: segment.name ?? null,
+            linkedIssueId: null, respondsToTurn: segment.respondsToTurn ?? null,
+          })));
         } else if (phase === 'ai_extraction') text = '[]';
         else {
           assert.equal(phase, 'generation');
@@ -153,10 +161,14 @@ function session(profile: Profile, strategy: Label, start: Checkpoint) {
     },
     onJevTurnTrace(record: JevTurnTrace) { trace = record; },
   });
+  if (profile.dialoguePolicy === 'holistic_v5' && events.length === 0) {
+    state = { ...runtime.initialPrivateState(), observationMemo: memo };
+  }
   return {
     checkpoint: () => structuredClone({ state, events }),
     async say(turn: Turn) {
       current = turn;
+      segments = Array.isArray(turn.local) ? turn.local : turn.local ? [turn.local] : [];
       sends = [];
       mockError = undefined;
       trace = undefined;
@@ -225,8 +237,15 @@ async function makeHistory(profile: Profile) {
   // The shared checkpoint holds an actual executed defer. Repairs and bypass use
   // the same saved history for the comparison; the repair strategy still vetoes new defers.
   const trial = session(profile, 'bypass-enabled', syntheticCheckpoint());
+  const identification = '私が指しているのは、丸みのある縁が二つつながった方です。';
+  const agreement: Turn = profile.dialoguePolicy === 'holistic_v5'
+    ? { ...initialAgreement, human: identification + nameProposal, local: [
+      { act: 'assert', aspect: 'referent', targets: [first], quote: identification, proposition: identification },
+      { ...localName(agreedName), quote: nameProposal },
+    ] }
+    : initialAgreement;
   const earlier = [
-    initialAgreement, defer,
+    agreement, defer,
     accept('見分けやすい輪の方を見てみます。', '輪のある形ですね。', 2),
     revisit, firstQuestion, firstAnswer,
     accept('輪の方は輪郭がなめらかです。', 'なめらかな輪郭なんですね。', 2),

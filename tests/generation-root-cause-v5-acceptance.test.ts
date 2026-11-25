@@ -49,6 +49,7 @@ type Turn = {
   human: string;
   action: 'agree' | 'confirm';
   name?: string;
+  publicReferent?: string;
   drafts: readonly Draft[];
 };
 type Event = InterventionReplayTape['events'][number];
@@ -58,10 +59,19 @@ function namingProposal(name: string, action: 'agree' | 'confirm', drafts: reado
   return { human: 'こちらでは「' + feature + '」形を「' + name + '」と呼びませんか？', action, name, drafts };
 }
 function extraction(turn: Turn) {
-  return JSON.stringify(turn.name === undefined ? [] : [{
-    segmentId: '1', quote: turn.human, proposition: turn.human, aspect: 'name',
-    targets: [figure], name: turn.name, linkedIssueId: null, respondsToTurn: null,
-  } satisfies LocalSegmentProposal]);
+  const segments: LocalSegmentProposal[] = [];
+  if (turn.publicReferent) segments.push({
+    segmentId: '1', quote: turn.publicReferent, proposition: turn.publicReferent, aspect: 'referent',
+    targets: [figure], name: null, linkedIssueId: null, respondsToTurn: null,
+  });
+  if (turn.name !== undefined) {
+    const quote = turn.human.slice(turn.publicReferent?.length ?? 0);
+    segments.push({
+      segmentId: String(segments.length + 1), quote, proposition: quote, aspect: 'name',
+      targets: [figure], name: turn.name, linkedIssueId: null, respondsToTurn: null,
+    });
+  }
+  return JSON.stringify(segments);
 }
 
 function session(label: Label, profile: ResearchTrialProfileV3) {
@@ -77,7 +87,8 @@ function session(label: Label, profile: ResearchTrialProfileV3) {
   let cut: { luna: number; jev: number };
   let responseNo = 0;
   let state: InterventionReplayTape['state'] = structuredClone(OLD.state);
-  const observed = state.observationMemo!.figures.find(figureMemo => figureMemo.id === figure)!;
+  const memo = state.observationMemo!;
+  const observed = memo.figures.find(figureMemo => figureMemo.id === figure)!;
   observed.analytic.shapes = [feature];
   const events: Event[] = [];
   function append(speaker: 'human' | 'ai', text: string) {
@@ -118,9 +129,11 @@ function session(label: Label, profile: ResearchTrialProfileV3) {
         if (key === 'action') choice = current.action;
         if (key === 'target') choice = 'figure_0';
         if (key === 'human_referent') choice = 'figure_0';
-        if (key === 'repair_issue' || key === 'basis' || key === 'segment_0_antecedent') choice = 'none';
+        if (key === 'repair_issue' || key === 'basis' || /^segment_\d+_antecedent$/u.test(key)) choice = 'none';
         if (key === 'prospect') choice = 'no_open_issue';
-        if (key === 'segment_0_act') choice = 'name_propose';
+        if (/^segment_\d+_act$/u.test(key)) {
+          choice = current.publicReferent && key === 'segment_0_act' ? 'assert' : 'name_propose';
+        }
         if (key === 'feature') choice = labels.find(label => JSON.parse(criteria[label]).value === feature);
         if (key === 'name') choice = labels.find(label => JSON.parse(criteria[label]).value === current.name);
         if (key === 'draft_naming') {
@@ -181,6 +194,9 @@ function session(label: Label, profile: ResearchTrialProfileV3) {
     },
     onJevTurnTrace(record: JevTurnTrace) { trace = structuredClone(record); },
   });
+  if (profile.dialoguePolicy === 'holistic_v5') {
+    state = { ...runtime.initialPrivateState(), observationMemo: memo };
+  }
   return {
     async say(turn: Turn) {
       current = turn;
@@ -231,7 +247,10 @@ const quoteName: Draft = { text: quotedName, choice: 'recount_only' };
 
 async function agreedSession(label: Label, profile: ResearchTrialProfileV3) {
   const trial = session(label, profile);
-  const agreed = await trial.say(namingProposal(original, 'agree', [{ text: agreedSpeech, choice: 'adopt_chosen' }]));
+  const proposal = namingProposal(original, 'agree', [{ text: agreedSpeech, choice: 'adopt_chosen' }]);
+  const publicReferent = '指しているのは、丸い穴が一つある方の形です。';
+  const agreed = await trial.say(profile.dialoguePolicy === 'holistic_v5'
+    ? { ...proposal, human: publicReferent + proposal.human, publicReferent } : proposal);
   assert.ifError(agreed.error);
   assert.equal(agreed.trace.executed?.action, 'agree');
   assert.equal(agreed.events.at(-1)?.text, agreedSpeech);

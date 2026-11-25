@@ -218,6 +218,8 @@ for (const strategy of strategies) {
 
     // Exercise the same first draft in the paired replay harness and check the persisted turn.
     const records = await buildRecords({ label: strategy, technicalTrial: { version: 'adaptive_repair_v3' },
+      generationRetryVersion: result.trace.generationRetryVersion,
+      agreeNameScopeVersion: result.before.agreeNameScopeVersion,
       turns: [{ human, plan: { action: 'confirm', target: 'figure_0', speech } }],
     });
     const trial = records.trials[0];

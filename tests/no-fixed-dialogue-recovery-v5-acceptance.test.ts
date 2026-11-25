@@ -17,6 +17,7 @@ import { hash } from '../dialogue-model/runtime/diagnostics/parity-verify/core.t
 import { interventionChecks } from '../dialogue-model/runtime/diagnostics/parity-verify/intervention-records.ts';
 import { createObservationCache } from '../dialogue-model/runtime/observation/cache.ts';
 import { createTrialV2, modelView } from '../dialogue-model/runtime/stimuli/scatter-v2.mjs';
+import type { RecordedGenerationRetryVersion } from '../dialogue-model/runtime/v2/generation-guard.ts';
 import { createNamingTaskV2 } from '../dialogue-model/runtime/v2/naming-task-v2.mjs';
 import { researchHash } from '../dialogue-model/runtime/v2/research-profile.ts';
 import type { JevPrivateState, JevTurnTrace } from '../dialogue-model/runtime/v2/jev-turn.ts';
@@ -54,7 +55,7 @@ type TrialView = {
   closed: boolean; submitted: boolean; aiSubmitted: boolean; scene: { shapes: Array<{ id: string }> };
 };
 type PrivateRecord = {
-  options: { dialoguePolicy?: string };
+  options: { dialoguePolicy?: string; generationRetryVersion?: RecordedGenerationRetryVersion };
   queueState: {
     events: PublicEvent[]; pendingHumanEventIds: string[]; privateState: JevPrivateState;
     requestSeq: number; closed: boolean; errorCode: string | null;
@@ -484,8 +485,8 @@ for (const strategy of strategies) {
 
 const stages = ['shape', 'binding', 'execution', 'replay'];
 const recordsFor = (label: Label, dialoguePolicy: 'holistic_v1' | 'holistic_v2' | 'holistic_v3' | 'holistic_v4' | 'holistic_v5',
-  drafts: readonly string[]) => buildRecords({
-  label, dialoguePolicy, technicalTrial,
+  drafts: readonly string[], versions?: Pick<Parameters<typeof buildRecords>[0], 'generationRetryVersion' | 'agreeNameScopeVersion'>) => buildRecords({
+  label, dialoguePolicy, technicalTrial, ...versions,
   turns: [{ human, plan: { action: 'confirm', target: 'figure_0', referent: 'figure_0', drafts: [...drafts] } }],
 });
 type S4Records = Awaited<ReturnType<typeof recordsFor>>;
@@ -541,8 +542,13 @@ function substituteFixedReply(genuine: S4Records, legacy: S4Records): S4Records 
 }
 
 for (const strategy of strategies) {
-  test(strategy + ' S4 accepts a model rewrite and rejects the equivalent v5 record with a fixed reply', async () => {
-    const good = await recordsFor(strategy, 'holistic_v5', [bad[0], generated]);
+  test(strategy + ' S4 accepts a model rewrite and rejects the equivalent v5 record with a fixed reply', async t => {
+    const fresh = (await participant(t, strategy)).record();
+    const { generationRetryVersion } = fresh.options;
+    const { agreeNameScopeVersion } = fresh.queueState.privateState;
+    assert.ok(generationRetryVersion);
+    assert.ok(agreeNameScopeVersion);
+    const good = await recordsFor(strategy, 'holistic_v5', [bad[0], generated], { generationRetryVersion, agreeNameScopeVersion });
     const old = await recordsFor(strategy, 'holistic_v4', bad);
     assert.equal(good.trials[0].attempts[0].publicSpeech, generated);
     assert.deepEqual(verdicts(good), ['pass', 'pass', 'pass', 'pass']);

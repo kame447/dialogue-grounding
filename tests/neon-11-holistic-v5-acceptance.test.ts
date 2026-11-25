@@ -160,6 +160,9 @@ function dialogue(profile: Profile, strategy: Label, checkpoint = start()) {
     },
     onJevTurnTrace(record: JevTurnTrace) { trace = record; },
   });
+  if (profile.dialoguePolicy === 'holistic_v5' && events.length === 0) {
+    state = { ...runtime.initialPrivateState(), observationMemo: memo };
+  }
   return {
     checkpoint: () => structuredClone({ events, state }),
     async say(plan: Turn) {
@@ -198,6 +201,13 @@ async function longHistory(profile: Profile) {
   // An executed defer is valid evidence from the bypass condition. Feed that
   // one saved history to both conditions to compare the subsequent input.
   const trial = dialogue(profile, 'bypass-enabled');
+  if (profile.dialoguePolicy === 'holistic_v5') {
+    const human = '指しているのは、楕円の穴が一つある方の形です。';
+    await trial.say({
+      ...accept(human, '楕円の穴が一つある方ですね。', 'figure_0'),
+      local: { aspect: 'referent', act: 'assert', targets: [slots[0]], name: null, proposition: human },
+    });
+  }
   await trial.say(nameSlot(0, agreed, 'agree'));
   await trial.say(nameSlot(1, tentative, 'propose_name'));
   await trial.say(nameSlot(2, deferred, 'propose_name'));
