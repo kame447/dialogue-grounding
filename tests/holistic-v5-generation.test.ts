@@ -102,3 +102,11 @@ test('v5 stops a repeated name adoption under confirm in both conditions', async
     assert.deepEqual(state.ledger, before);
   }
 });
+
+test('new two_stage_v3 research profiles default to holistic_v5 and explicit policies remain pinned', () => {
+  const { lunaRequest, timeouts } = normal.run.manifest;
+  assert.equal(researchTrialProfileV3(lunaRequest, timeouts, 'two_stage_v3').dialoguePolicy, 'holistic_v5');
+  assert.equal(researchTrialProfileV3(lunaRequest, timeouts, 'two_stage_v3', 'holistic_v4').dialoguePolicy, 'holistic_v4');
+  assert.equal(researchTrialProfileV3(lunaRequest, timeouts, 'two_stage_v3', null).dialoguePolicy, undefined);
+  assert.equal(researchTrialProfileV3(lunaRequest, timeouts, 'two_stage_v2').dialoguePolicy, undefined);
+});
