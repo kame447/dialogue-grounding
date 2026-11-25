@@ -48,7 +48,7 @@ const described = (quote: string, targets: string[], aspect: Clause['aspect'] = 
   ({ quote, act: 'assert', aspect, targets });
 const ask = (quote: string, targets: string[]): Clause => ({ quote, act: 'ask', aspect: 'question', targets });
 
-function trial(strategy: Label, savedVersion?: 'jev_generation_retry_v5') {
+function trial(strategy: Label, savedVersion?: 'jev_generation_retry_v5' | 'jev_generation_retry_v6') {
   const events: ReplayTape['events'] = [];
   const memo = structuredClone((OLD.state as ReplayTape['state']).observationMemo)!;
   for (const figure of memo.figures.slice(0, 2)) figure.analytic.shapes = [hole, seam, stem];
@@ -398,4 +398,85 @@ test('B2 preserves the recorded v5 handling of a post-veto draft', async () => {
   assert.equal(result.trace.executed?.action, 'confirm');
   assert.deepEqual(result.drafts, [moving]);
   assert.equal(result.text, moving);
+});
+
+const moves = ['うん、次いこう。', 'じゃあ、次の図形を見てみよう。'] as const;
+for (const [index, draft] of moves.entries()) {
+  for (const strategy of strategies) {
+    test(`Audit 16 B2 ${strategy} handles short move wording ${index + 1} according to the executed action`, async () => {
+      const say = trial(strategy);
+      await ambiguousPair(say);
+      const result = await say(moveOn([draft, continuing]));
+      assert.ifError(result.error);
+      assert.equal(intervention(result.trace).original.action, 'move_on');
+      if (strategy === 'repair-first') {
+        assert.equal(intervention(result.trace).reasonCode, 'vetoed_bypass_action');
+        assert.equal(result.trace.executed?.action, 'confirm');
+        assert.deepEqual(result.trace.executed?.target, pair);
+        assert.equal(result.trace.executed?.feature, stem);
+        assert.deepEqual(result.drafts, [draft, continuing]);
+        assert.equal(result.text, continuing);
+        assert.equal(result.trace.generationGuard.regenerated, true);
+        assert.equal(result.trace.generationGuard.fallback, false);
+      } else {
+        assert.equal(intervention(result.trace).disposition, 'adopted');
+        assert.equal(result.trace.executed?.action, 'move_on');
+        assert.deepEqual(result.drafts, [draft]);
+        assert.equal(result.text, draft);
+        assert.deepEqual(result.trace.generationGuard, { violations: [], regenerated: false, fallback: false });
+      }
+    });
+  }
+
+  test(`Audit 16 B2 retains v6 handling of short move wording ${index + 1} on a recorded trial`, async () => {
+    const say = trial('repair-first', 'jev_generation_retry_v6');
+    await ambiguousPair(say);
+    const result = await say(moveOn([draft, continuing]));
+    assert.ifError(result.error);
+    assert.equal(result.trace.generationRetryVersion, 'jev_generation_retry_v6');
+    assert.equal(intervention(result.trace).reasonCode, 'vetoed_bypass_action');
+    assert.equal(result.trace.executed?.action, 'confirm');
+    assert.deepEqual(result.drafts, [draft]);
+    assert.equal(result.text, draft);
+  });
+}
+
+for (const strategy of strategies) {
+  for (const [label, draft] of [
+    ['a negated move', '次には進まず、先ほどの二つで' + stem + 'のはどちらか教えてください。'],
+    ['a preface to a check', '次に、先ほどの二つで' + stem + 'のはどちらか確認させてください。'],
+  ] as const) {
+    test(`Audit 16 B2 ${strategy} publishes ${label} when the draft continues the current check`, async () => {
+      const say = trial(strategy);
+      await ambiguousPair(say);
+      const result = await say({
+        ...moveOn([draft]), action: strategy === 'repair-first' ? 'move_on' : 'confirm',
+        target: strategy === 'repair-first' ? 'figure_2' : 'figures_0_1',
+        openIssue: strategy === 'repair-first',
+      });
+      assert.ifError(result.error);
+      assert.equal(intervention(result.trace).reasonCode, strategy === 'repair-first' ? 'vetoed_bypass_action' : 'no_intervention');
+      assert.equal(result.trace.executed?.action, 'confirm');
+      assert.deepEqual(result.trace.executed?.target, pair);
+      assert.equal(result.trace.executed?.feature, stem);
+      assert.deepEqual(result.drafts, [draft]);
+      assert.equal(result.text, draft);
+      assert.deepEqual(result.trace.generationGuard, { violations: [], regenerated: false, fallback: false });
+    });
+  }
+}
+
+test('Audit 16 B2 repair-first leaves the prior state intact when both short move drafts are rejected', async () => {
+  const say = trial('repair-first');
+  await ambiguousPair(say);
+  const result = await say(moveOn([...moves]));
+  assert.equal(intervention(result.trace).reasonCode, 'vetoed_bypass_action');
+  assert.equal(result.trace.executed?.action, 'confirm');
+  assert.deepEqual(result.drafts, [...moves]);
+  assert.equal(result.text, null);
+  assert.equal(result.trace.publicSpeech, null);
+  assert.equal(result.trace.status, 'error');
+  assert.equal(result.trace.errorCode, 'unsafe_generation');
+  assert.equal(result.trace.generationGuard.fallback, false);
+  assert.deepEqual(result.state, result.before);
 });

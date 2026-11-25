@@ -12,6 +12,7 @@ import type { JevDecisionPayload } from '../dialogue-model/runtime/decision/jev-
 import { RunBudget } from '../dialogue-model/runtime/diagnostics/parity-live/audit.ts';
 import { interventionChecks, s4Probe } from '../dialogue-model/runtime/diagnostics/parity-verify/intervention-records.ts';
 import type { LocalAct, LocalClaimView, LocalSegmentProposal } from '../dialogue-model/runtime/local-grounding/contract.ts';
+import { priorClaimViews } from '../dialogue-model/runtime/local-grounding/derive.ts';
 import { createJevLocalTestClassifier } from '../dialogue-model/runtime/local-grounding/jev-local-test.ts';
 import type { ObservationInput } from '../dialogue-model/runtime/observation/contract.ts';
 import { createTrialV2, modelView } from '../dialogue-model/runtime/stimuli/scatter-v2.mjs';
@@ -59,6 +60,7 @@ type Segment = {
   targets?: string[];
   name?: string;
   antecedent?: Pick<LocalClaimView, 'speaker' | 'proposition'>;
+  respondsToTurn?: number;
 };
 type Turn = {
   human: string;
@@ -71,6 +73,7 @@ type Turn = {
   name?: string;
   drafts: string[];
   draftActs?: Readonly<Record<string, DraftAct>>;
+  agreeSpeech?: string;
 };
 type Names = Record<string, string | null>;
 type SavedTrial = {
@@ -88,7 +91,7 @@ type Message = { role: string; content: unknown };
 type DraftRequest = { draft: string; reasons: string[] };
 const descriptions = (segments: Segment[]) => JSON.stringify(segments.map((segment, index): LocalSegmentProposal => ({
   segmentId: String(index + 1), quote: segment.text, proposition: segment.text, aspect: segment.aspect,
-  targets: segment.targets ?? [], name: segment.name ?? null, linkedIssueId: null, respondsToTurn: null,
+  targets: segment.targets ?? [], name: segment.name ?? null, linkedIssueId: null, respondsToTurn: segment.respondsToTurn ?? null,
 })));
 
 function targetLabel(target: Turn['target']) {
@@ -99,6 +102,8 @@ function targetLabel(target: Turn['target']) {
 
 function session(strategy: Strategy, observation: Memo = memo, trialProfile = profile, lunaCalls = 90, transientStatus?: number) {
   let current: Turn | undefined;
+  let choseAgreement = false;
+  const draftAt = (turn: Turn, index: number) => choseAgreement && index === 0 ? turn.agreeSpeech : turn.drafts[index];
   let actionRequests: JevDecisionPayload[] = [];
   let draftRequests: DraftRequest[] = [];
   let generationRequests: Message[][] = [];
@@ -130,12 +135,15 @@ function session(strategy: Strategy, observation: Memo = memo, trialProfile = pr
         }
         const answers = Object.fromEntries(Object.entries(request.questions).map(([key, { criteria }]) => {
           let choice: string | undefined;
-          if (key === 'action') choice = turn.action;
+          if (key === 'action') {
+            choseAgreement = Boolean(turn.agreeSpeech) && Object.hasOwn(criteria, 'agree');
+            choice = choseAgreement ? 'agree' : turn.action;
+          }
           if (key === 'target') choice = targetLabel(turn.target);
           if (key === 'draft_naming') {
             const { draft, reasons } = JSON.parse(request.state) as DraftRequest;
             draftRequests.push({ draft, reasons });
-            assert.equal(draft, turn.drafts[generationRequests.length - 1], 'judge the draft just generated');
+            assert.equal(draft, draftAt(turn, generationRequests.length - 1), 'judge the draft just generated');
             choice = turn.draftActs?.[draft] ?? 'none';
           }
           if (key === 'human_referent') {
@@ -185,7 +193,7 @@ function session(strategy: Strategy, observation: Memo = memo, trialProfile = pr
         if (phase === 'local_extraction') return { text: descriptions(current.local ?? []) };
         if (phase === 'ai_extraction') return { text: descriptions(current.publicClaims ?? []) };
         assert.equal(phase, 'generation');
-        const draft = current.drafts[generationRequests.length];
+        const draft = draftAt(current, generationRequests.length);
         generationRequests.push(structuredClone(messages));
         assert.ok(draft, 'unexpected generation');
         if (transientStatus !== undefined) {
@@ -964,3 +972,104 @@ test('Final submission reports the existing error after two mismatches, with no 
     assert.deepEqual(trial.record().ownLedger, ledger);
   });
 });
+
+async function audit16Check(dialogue: ReturnType<typeof session>, target: number | readonly number[]) {
+  const description = '台は輪より細く見えます。';
+  const outline = '環の縁が途中で切れています。';
+  const question = typeof target === 'number' ? 'そちらが見ているのもこの形ですか？' : 'いまの二つのうち、どちらの形ですか？';
+  const check = await dialogue.say({
+    human: typeof target === 'number' ? '輪のついた形を照らし合わせたいです。' : '輪に似た形が二つあり、まだ区別できません。',
+    action: 'confirm', target, feature: ringGap, drafts: [description + outline + question],
+    publicClaims: [
+      { text: description, act: 'assert', aspect: 'part', targets: [first] },
+      { text: outline, act: 'assert', aspect: 'contour', targets: [first] },
+      { text: question, act: 'ask', aspect: 'question', targets: [] },
+    ],
+  });
+  assert.equal(check.speech, description + outline + question);
+  assert.equal(check.trace.executed?.action, 'confirm');
+  assert.deepEqual(check.trace.executed?.target,
+    typeof target === 'number' ? single(first) : { kind: 'multiple', figureIds: [first, second] });
+  const claims = check.trace.aiPublic?.pending?.candidates;
+  assert.deepEqual(claims?.map(({ act, aspect, targets }) => ({ act, aspect, targets })), [
+    { act: 'assert', aspect: 'part', targets: [first] },
+    { act: 'assert', aspect: 'contour', targets: [first] },
+    { act: 'ask', aspect: 'question', targets: [] },
+  ]);
+  return { quote: question, sourceTurn: claims![2].sourceTurn };
+}
+
+async function audit16Answer(dialogue: ReturnType<typeof session>, question: { quote: string; sourceTurn: number },
+  act: 'agree' | 'acknowledge', target: number | readonly number[]) {
+  const human = act === 'agree' ? 'はい、まさにそれです。' : 'ええ、質問は分かりました。';
+  const answered = await dialogue.say({
+    human, action: 'accept', target, drafts: ['形の照らし合わせを続けましょう。'],
+    local: [{ text: human, act, aspect: 'referent', targets: [], respondsToTurn: question.sourceTurn,
+      antecedent: { speaker: 'ai', proposition: question.quote } }],
+  });
+  assert.equal(answered.trace.status, 'committed');
+  assert.equal(answered.trace.executed?.action, 'accept');
+  assert.equal(answered.after.ownLedger[first].name, null, 'a confirmation of the figure does not name it');
+  const claims = priorClaimViews(answered.after.queueState.privateState.graph);
+  const asked = claims.find(claim => claim.speaker === 'ai' && claim.sourceTurn === question.sourceTurn && claim.quote === question.quote);
+  assert.ok(asked, 'the actual published question is the antecedent');
+  const reply = claims.find(claim => claim.speaker === 'human' && claim.quote === human);
+  return { asked, reply };
+}
+
+async function audit16Name(dialogue: ReturnType<typeof session>) {
+  const human = 'この形は「' + originalName + '」と呼びませんか？';
+  const named = await dialogue.say({
+    human, action: 'confirm', target: 0, feature: baseWidth, name: originalName,
+    local: [{ text: human, act: 'name_propose', aspect: 'name', targets: [first], name: originalName }],
+    agreeSpeech, drafts: [baseWidth + '形ですか？'], draftActs: { [agreeSpeech]: 'adopt_chosen' },
+  });
+  assert.equal(named.trace.status, 'committed');
+  assert.ok(named.trace.namingRequest);
+  const action = named.actionRequests.find(request => request.questions.action);
+  assert.ok(action);
+  return { named, offered: Object.hasOwn(action.questions.action.criteria, 'agree') };
+}
+
+for (const strategy of strategies) {
+  test(`Audit 16 B1 ${strategy} keeps a short answer to a targetless question and submits the later agreed name`, async () => {
+    const dialogue = session(strategy);
+    await dialogue.start();
+    const question = await audit16Check(dialogue, 0);
+    const { asked, reply } = await audit16Answer(dialogue, question, 'agree', 0);
+    const { named, offered } = await audit16Name(dialogue);
+    await dialogue.restore();
+    const submitted = Object.fromEntries(figureIds.map(figureId => [
+      figureId, figureId === first && named.speech === agreeSpeech ? originalName : null,
+    ]));
+    await dialogue.submit([submitted]);
+    const saved = dialogue.record();
+    assert.deepEqual({
+      linkedAnswer: reply?.act === 'agree' && reply.respondsTo === asked.id,
+      offered, action: named.trace.executed?.action, target: named.trace.executed?.target,
+      speech: named.speech, entry: saved.ownLedger[first], submitted: saved.aiSubmission?.[first],
+    }, { linkedAnswer: true, offered: true, action: 'agree', target: single(first),
+      speech: agreeSpeech, entry: { status: 'agreed', name: originalName }, submitted: originalName });
+    assert.equal(dialogue.publicState().aiSubmitted, true);
+    assert.equal(dialogue.finalCalls(), 1);
+    assert.deepEqual(saved.ownLedger, named.after.ownLedger);
+    assert.deepEqual(saved.aiSubmission, submitted);
+  });
+
+  for (const [control, target, act] of [
+    ['a backchannel', 0, 'acknowledge'],
+    ['an elliptical reply to a two-figure question', [0, 1], 'agree'],
+  ] as const) {
+    test(`Audit 16 B1 ${strategy} keeps names pending after ${control}`, async () => {
+      const dialogue = session(strategy);
+      await dialogue.start();
+      const question = await audit16Check(dialogue, target);
+      await audit16Answer(dialogue, question, act, target);
+      const { named, offered } = await audit16Name(dialogue);
+      assert.equal(offered, false);
+      assert.equal(named.trace.executed?.action, 'confirm');
+      assert.equal(named.speech, baseWidth + '形ですか？');
+      assert.deepEqual(named.after.ownLedger, named.before.ownLedger);
+    });
+  }
+}
