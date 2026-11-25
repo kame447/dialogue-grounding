@@ -1,5 +1,5 @@
 import { ParticipantUsageLedger } from './participant-usage.ts';
-import { PARTICIPANT_PRODUCTION_PROFILE } from './participant-usage-policy.ts';
+import { PARTICIPANT_PRODUCTION_PROFILE, PARTICIPANT_USAGE_ONLY, type ParticipantUsageOnly } from './participant-usage-policy.ts';
 // Node loopback only. Explicit private configuration; never an assignment method.
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { constants } from 'node:fs';
@@ -63,14 +63,14 @@ function checkedProfile(value: unknown): ResearchTrialProfileV3 {
   return expected;
 }
 /** Plan O records exist only on failed decide() attempts and must re-validate to the identical closed record. */
-function checkedDecisionFailure(trace: any, layout: JevQuestionLayout): boolean {
+function checkedDecisionFailure(trace: any, layout: JevQuestionLayout, usagePolicy?: ParticipantUsageOnly): boolean {
   // The local v3 rule is recorded together with its evidence; a bare rule name on a trace is a damaged record.
   if (!Object.hasOwn(trace, 'decisionFailure')) return trace.decisionRejectionCode !== 'action_target_not_allowed';
   const f = trace.decisionFailure;
   if (trace.status !== 'error' || !['decision_failed', 'invalid_decision'].includes(trace.errorCode) || !f || typeof f !== 'object' ||
       Object.getPrototypeOf(f) !== Object.prototype || Reflect.ownKeys(f).length !== 1 || !Object.hasOwn(f, 'evidence')) return false;
   if (f.evidence === null) return trace.decisionRejectionCode !== 'action_target_not_allowed';
-  const checked = checkDecisionFailureEvidence(f.evidence);
+  const checked = checkDecisionFailureEvidence(f.evidence, usagePolicy);
   if (checked === null || checked.questionLayout !== layout || researchHash(checked) !== researchHash(jsonData(f.evidence))) return false;
   // A decision the local v3 table refused names its rule twice, in the turn and in the evidence, and in no other way; no native failure may carry it.
   const local = checked.rejectionCode === 'action_target_not_allowed' && checked.stages.length === 0;
@@ -118,7 +118,7 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
       // A v2 record names its layout; a v1 record never does. profileSha256 below also differs between layouts.
       const savedLayout = Object.hasOwn(restore.options,'questionLayout') ? restore.options.questionLayout : 'two_stage_v1';
       if (savedLayout !== profile.questionLayout || Object.hasOwn(restore.options,'questionLayout') && savedLayout !== 'two_stage_v2' && savedLayout !== 'two_stage_v3') return invalid();
-      if (restore.jevTraces?.some?.((trace:any)=>!checkedDecisionFailure(trace,profile.questionLayout))) return invalid();
+      if (restore.jevTraces?.some?.((trace:any)=>!checkedDecisionFailure(trace,profile.questionLayout,v.ledger instanceof ParticipantUsageLedger?PARTICIPANT_USAGE_ONLY:undefined))) return invalid();
       if (restore.options.profileSha256 !== researchHash(profile) ||
           researchHash(jsonData(restore.options.interventionPolicy)) !== researchHash(profile.interventionPolicy) ||
           restore.queueState?.privateState?.schemaVersion !== 'jev_private_state_v2' ||

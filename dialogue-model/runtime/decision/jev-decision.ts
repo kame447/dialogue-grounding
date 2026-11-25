@@ -814,7 +814,7 @@ function failureLabelsValid(question: string, labels: readonly string[], layout:
   if (question === "observe_aspect") return sameLabels(labels, [...OBSERVATION_ASPECTS]);
   return false;
 }
-function failureStage(s: unknown, layout: JevQuestionLayout, last: boolean): JevDecisionFailureStage | null {
+function failureStage(s: unknown, layout: JevQuestionLayout, last: boolean, usagePolicy?: ParticipantUsageOnly): JevDecisionFailureStage | null {
   if (!exact(s, FAILURE_STAGE_KEYS) || !includes(["ok", "error"], s.status) || !(s.error === null || includes(CODES, s.error)) ||
       !(s.rejectionCode === null || includes(JEV_DECISION_REJECTION_CODES, s.rejectionCode)) ||
       !(s.model === null || isGroundingModel(s.model, JEV_DECISION_MODEL)) || !responseIdValue(s.responseId) ||
@@ -826,7 +826,7 @@ function failureStage(s: unknown, layout: JevQuestionLayout, last: boolean): Jev
   if (!exact(scores, questions)) return null;
   if (!questions.length) { if (s.status === "ok") return null; }
   else {
-    if (s.model === null || s.costUsd === null || !failureQuestionSets(s.stage, layout).some(set => sameLabels(questions, set))) return null;
+    if (s.model === null || s.costUsd === null && usagePolicy !== PARTICIPANT_USAGE_ONLY || !failureQuestionSets(s.stage, layout).some(set => sameLabels(questions, set))) return null;
     for (const q of questions) {
       const labels = scores[q];
       if (!object(labels) || !failureLabelsValid(q, Object.keys(labels), layout) || !includes(Object.keys(labels), choices[q]) ||
@@ -908,7 +908,7 @@ function failureConsistent(e: JevDecisionFailureEvidence): boolean {
   return outcome === "done" ? e.rejectionCode === null : e.rejectionCode === outcome;
 }
 /** Restore-time check of a saved failure record. Returns a rebuilt copy, or null for any key, label or value outside the closed shape. */
-export function checkDecisionFailureEvidence(value: unknown): JevDecisionFailureEvidence | null {
+export function checkDecisionFailureEvidence(value: unknown, usagePolicy?: ParticipantUsageOnly): JevDecisionFailureEvidence | null {
   try {
     if (!exact(value, FAILURE_KEYS) || value.schemaVersion !== "jev_decision_failure_v1" || !includes(LAYOUTS, value.questionLayout) ||
         !positive(value.callIndex) || !includes(CODES, value.error) || !(value.rejectionCode === null || includes(JEV_DECISION_REJECTION_CODES, value.rejectionCode)) ||
@@ -921,7 +921,7 @@ export function checkDecisionFailureEvidence(value: unknown): JevDecisionFailure
       : ["", "action_target", "action_target,multiple_candidates", "action_target,detail", "action_target,multiple_candidates,detail"];
     const inputBudget = value.inputBudget === null ? null : closedBudget(value.inputBudget);
     if (!orders.includes(order) || value.inputBudget !== null && !inputBudget) return null;
-    const stages = raw.map((s, i) => failureStage(s, layout, i === raw.length - 1));
+    const stages = raw.map((s, i) => failureStage(s, layout, i === raw.length - 1, usagePolicy));
     if (stages.some(s => s === null)) return null;
     const checked: JevDecisionFailureEvidence = { schemaVersion: "jev_decision_failure_v1", questionLayout: layout, callIndex: value.callIndex as number,
       error: value.error as JevDecisionErrorCode, rejectionCode: value.rejectionCode as JevDecisionRejectionCode | null, model: value.model as string | null,
@@ -932,7 +932,7 @@ export function checkDecisionFailureEvidence(value: unknown): JevDecisionFailure
 }
 /** Projects the evidence a decide() call handed to onFailureEvidence. Untrusted input: anything outside the closed
  * client evidence shape yields null, which the caller records as an unknown breakdown. */
-export function projectDecisionFailureEvidence(raw: unknown, questionLayout: JevQuestionLayout): JevDecisionFailureEvidence | null {
+export function projectDecisionFailureEvidence(raw: unknown, questionLayout: JevQuestionLayout, usagePolicy?: ParticipantUsageOnly): JevDecisionFailureEvidence | null {
   try {
     if (!object(raw) || !includes(LAYOUTS, questionLayout)) return null;
     const keys = ["model", "responseId", "choices", "scores", "latencyMs", "costUsd", "callIndex", "status", "error", "rejectionCode", "stages",
@@ -940,7 +940,7 @@ export function projectDecisionFailureEvidence(raw: unknown, questionLayout: Jev
     if (!exact(raw, keys) || raw.status !== "error" || !Array.isArray(raw.stages)) return null;
     return checkDecisionFailureEvidence({ schemaVersion: "jev_decision_failure_v1", questionLayout, callIndex: raw.callIndex, error: raw.error,
       rejectionCode: raw.rejectionCode, model: raw.model, responseId: raw.responseId, costUsd: raw.costUsd, latencyMs: raw.latencyMs,
-      inputBudget: raw.inputBudget ?? null, stages: raw.stages });
+      inputBudget: raw.inputBudget ?? null, stages: raw.stages }, usagePolicy);
   } catch { return null; }
 }
 export type JevDecisionClientOptions = { enabled?: boolean; readKey?: () => Promise<string>; fetchImpl?: (url: string, init: RequestInit) => Promise<Response>;
