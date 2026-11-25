@@ -65,6 +65,7 @@ const timeouts = { ...deadlines(), localMs: 3000, decisionMs: 3000, generationMs
 const profile = researchTrialProfileV3(lunaSettings, timeouts, 'two_stage_v3');
 const holisticV2Profile = researchTrialProfileV3(lunaSettings, timeouts, 'two_stage_v3', 'holistic_v2');
 const holisticV3Profile = researchTrialProfileV3(lunaSettings, timeouts, 'two_stage_v3', 'holistic_v3');
+const holisticV4Profile = researchTrialProfileV3(lunaSettings, timeouts, 'two_stage_v3', 'holistic_v4');
 const versionlessProfile = researchTrialProfileV3(lunaSettings, timeouts, 'two_stage_v3', null);
 const technicalTrial = { version: 'adaptive_repair_v3' } as const;
 const own = { ownImage: { ...image, mimeType: 'image/png' as const }, ownAnchors: anchors };
@@ -233,7 +234,7 @@ async function replay(strategy: Strategy, scenario: Turn[], onFailure?: (attempt
     assert.deepEqual(saved.judgment, trace.finalAction);
     const common = { luna: material.luna.slice(0, cut!.luna), jev: material.jev.slice(0, cut!.jev), reobservations: [] };
     const tail = { luna: material.luna.slice(cut!.luna), jev: material.jev.slice(cut!.jev), reobservations: [] };
-    snapshots.push({ state, saved, input, trace, wire, generation, speech: result.text as string,
+    snapshots.push({ profile: trialProfile, state, saved, input, trace, wire, generation, speech: result.text as string,
       before, events: structuredClone(events), common, tail, sends });
     append('ai', result.text);
   }
@@ -255,11 +256,15 @@ async function sameScenario(scenario: Turn[], trialProfile = profile): Promise<S
 
 async function checkS4(repair: Snapshot, bypass: Snapshot): Promise<void> {
   assert.deepEqual(repair.common, bypass.common);
+  assert.deepEqual(repair.profile, bypass.profile);
+  assert.equal(repair.trace.generationRetryVersion, bypass.trace.generationRetryVersion);
   for (const [label, item] of [['repair-first', repair], ['bypass-enabled', bypass]] as const) {
+    const { profile, trace: { generationRetryVersion } } = item;
     const tape: InterventionReplayTape = {
       schemaVersion: 'parity_intervention_replay_v1', state: item.before, events: item.events, technicalTrial,
       common: item.common, tails: { 'repair-first': repair.tail, 'bypass-enabled': bypass.tail },
       recorded: { label, expectedRequests: item.sends },
+      ...(generationRetryVersion ? { generationRetryVersion } : {}),
     };
     const result = await pairedInterventionReplay(tape, own, MODEL, JSON.parse(JSON.stringify(profile)));
     const side = result.sides.find(side => side.label === label);
@@ -492,7 +497,9 @@ test('holistic_v4 requires clarification for a linked approval request after the
     human: denial + approval, local: [referentResponse(denial, 'deny'), approvalQuestion(approval)],
     ...clarifyUnboundName,
   };
-  const [[, eligible, asked], [, , bypass]] = await Promise.all(strategies.map(strategy => replay(strategy, [question, proposal, request])));
+  const [[, eligible, asked], [, , bypass]] = await Promise.all(
+    strategies.map(strategy => replay(strategy, [question, proposal, request], undefined, holisticV4Profile)),
+  );
   assert.deepEqual(asked.wire, bypass.wire);
   assert.deepEqual(asked.state.ledger, bypass.state.ledger);
   assert.equal(asked.speech, bypass.speech);
@@ -859,11 +866,12 @@ for (const multiple of [true, false]) {
       ai: [{ text: question, aspect: 'referent', act: 'ask', targets }],
     };
     const text = 'はい、輪に切れ目のある形で合っています。';
+    const followUp = proposalFeature + '形ですか？';
     const reply: Turn = {
       human: text + repeatApproval,
       local: [{ text, act: 'agree', aspect: 'referent', targets: [slot],
         antecedent: claim => answerToPublicReferent(claim) && claim.proposition === question }, approvalQuestion(repeatApproval)],
-      action: 'confirm', target: 0, referent: 0, feature, speech: locate.speech,
+      action: 'confirm', target: 0, referent: 0, feature: proposalFeature, speech: followUp,
       agreeIfOffered: { ...proposedAgreement, figureIndex: 0 },
     };
     const runs = await Promise.all(strategies.map(strategy => replay(strategy, [...afterReferentDenial, ask, reply])));
@@ -884,13 +892,14 @@ for (const multiple of [true, false]) {
       assert.equal(answer?.respondsTo, publicQuestion.id);
       assert.deepEqual(answer?.targets, [slot]);
       assert.equal(last.input.humanReferent?.scores?.[slot], 1);
+      assert.equal(last.saved.jevTurn.executed?.feature, multiple ? proposalFeature : null);
       return {
         nameOffered: last.input.agreeNames?.some(item => item.figureId === slot && item.name === name),
         action: last.saved.judgment.action, speech: last.speech, entry: last.state.ledger[slot],
       };
     });
     const expected = multiple
-      ? { nameOffered: false, action: 'confirm', speech: locate.speech, entry: repair.before.ledger[slot] }
+      ? { nameOffered: false, action: 'confirm', speech: followUp, entry: repair.before.ledger[slot] }
       : { nameOffered: true, action: 'agree', speech: proposedAgreement.speech, entry: { status: 'agreed', name } };
     assert.deepEqual(outcomes, [expected, expected]);
   });
@@ -926,13 +935,18 @@ test('B change: shared native criteria direct an unresolved backchannel toward g
 });
 
 test('B control: “うん” can support actual naming, but a feature question and a backchannel supply no name evidence', async () => {
+  const description = feature + '形があります。';
   const first: Turn = { ...locate, human: locate.human + priorPublicAlias.text, local: [priorPublicAlias],
-    ai: [], action: 'propose_name', name: publicAlias, speech: `「${publicAlias}」と呼ぶのはどうでしょう？` };
+    ai: [{ text: description, act: 'assert', aspect: 'part', targets: [slot] }],
+    action: 'propose_name', name: publicAlias, speech: description + `「${publicAlias}」と呼ぶのはどうでしょう？` };
   const response: Turn = { human: 'うん', local: [{ text: 'うん', aspect: 'name', act: 'name_accept', antecedent: fromAi('name_propose') }],
     action: 'agree', ...ownFigure, name: publicAlias, speech: `「${publicAlias}」にしましょう。` };
   const [proposed, named] = await sameScenario([first, response]);
   assert.deepEqual(proposed.input.agreeNames, []);
   assert.deepEqual(proposed.state.ledger[slot], { status: 'tentative', name: publicAlias });
+  const publicDescription = named.input.priorClaims.find(c => c.speaker === 'ai' && c.quote === description);
+  assert.equal(publicDescription?.act, 'assert');
+  assert.deepEqual(publicDescription?.targets, [slot]);
   const claim = named.input.priorClaims.find(c => c.act === 'name_accept');
   assert.match(claim?.respondsTo ?? '', /:ai1$/u);
   assert.equal(named.state.ledger[slot].name, publicAlias);

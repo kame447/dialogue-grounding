@@ -24,6 +24,7 @@ observation.figures[0].analytic.shapes = [feature];
 const ownMemo = validateObservationMemo(observation, { ownAnchors: anchors });
 const readKey = async () => 'sk-or-SYNTHETIC-offline-public-draft-key';
 const clean = '輪に切れ目がある形ですか？';
+const identifiedFigure = '二つの輪のうち、私が指しているのは切れ目のある方です。';
 const firstNote = 'Check whether the question can be shorter.';
 const secondNote = 'Keep the description concise and neutral.';
 const alternatives = ['案1：輪に切れ目がある形ですか？', '案2：切れ目のある輪がついていますか？'].join('\n');
@@ -36,7 +37,10 @@ type Message = { role: string; content: unknown };
 async function run(strategy: Strategy, { human, drafts, name }: Turn) {
   const action = name === undefined ? 'confirm' : 'agree';
   const local: LocalSegmentProposal[] = name === undefined ? [] : [{
-    segmentId: '1', quote: human, proposition: human, aspect: 'name', name, targets: [slot],
+    segmentId: '1', quote: identifiedFigure, proposition: identifiedFigure, aspect: 'referent', name: null, targets: [slot],
+    linkedIssueId: null, respondsToTurn: null,
+  }, {
+    segmentId: '2', quote: human, proposition: human, aspect: 'name', name, targets: [slot],
     linkedIssueId: null, respondsToTurn: null,
   }];
   const requests: Message[][] = [];
@@ -81,7 +85,9 @@ async function run(strategy: Strategy, { human, drafts, name }: Turn) {
     jevDecision: createJevDecisionClient(transport)!,
     localGrounding: {
       classifier: { async classify({ segments }) {
-        return segments.map(({ segmentId }) => ({ segmentId, act: 'name_propose', respondsToClaimId: null, rawScore: null }));
+        return segments.map(({ segmentId, aspect }) => ({
+          segmentId, act: aspect === 'referent' ? 'assert' : 'name_propose', respondsToClaimId: null, rawScore: null,
+        }));
       } },
       aiPublicTransport: transport,
     },
@@ -89,7 +95,8 @@ async function run(strategy: Strategy, { human, drafts, name }: Turn) {
   });
   const privateState: JevPrivateState = runtime.initialPrivateState();
   const before = structuredClone(privateState);
-  const events = [{ id: 'human-1', seq: 1, speaker: 'human', text: human }];
+  const text = name === undefined ? human : identifiedFigure + human;
+  const events = [{ id: 'human-1', seq: 1, speaker: 'human', text }];
   const outcome = await runtime.runAiTurn({ events, privateState, lastEventId: 'human-1', requestSeq: 1 }).then(
     result => ({ result, error: null }), (error: unknown) => ({ result: null, error }),
   );
