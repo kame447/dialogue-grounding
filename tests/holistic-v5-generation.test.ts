@@ -261,3 +261,73 @@ for (const label of ['bypass-enabled', 'repair-first'] as const) {
     }
   });
 }
+
+for (const label of ['bypass-enabled', 'repair-first'] as const) {
+  test(`${label}: accept sees the same private naming state in the first request and rewrite`, async () => {
+    const ledger = structuredClone(OLD.state.ledger);
+    const [agreed, tentative, deferred] = OWN.ownAnchors.map((anchor: { id: string }) => anchor.id);
+    ledger[agreed] = { status: 'agreed', name: '扇' };
+    ledger[tentative] = { status: 'tentative', name: '丸窓' };
+    ledger[deferred] = { status: 'deferred', name: '灯台' };
+    const statuses = (record: any) => verifyRecords(record).checks.filter(c => /^intervention\.trial\.0\.attempt\.0\./u.test(c.id)).map(c => c.status);
+    const privateMessage = (messages: any[]) =>
+      messages.find(m => m.role === 'system' && m.content.startsWith('自分側の命名の記録です。'));
+    for (const version of ['jev_generation_retry_v2', 'jev_generation_retry_v4'] as const) {
+      const response = '決まったのは一つなので、あと五つです。';
+      const leakingDraft = '未合意の図形は ' + deferred + ' です。';
+      const records = await buildRecords({ label, dialoguePolicy: 'holistic_v5', generationRetryVersion: version, ledger,
+        technicalTrial: { version: 'adaptive_repair_v3' }, turns: [{ human: 'あといくつ残っていますか？',
+          plan: { action: 'accept', target: 'none', drafts: [leakingDraft, response] } }] });
+      assert.deepEqual(statuses(records), ['pass', 'pass', 'pass', 'pass']);
+      const trial = records.trials[0];
+      assert.equal(trial.attempts[0].publicSpeech, response);
+      assert.deepEqual(trial.attempts[0].generationGuard.violations, ['internal_id']);
+      assert.deepEqual(trial.lastCommittedState.ledger, ledger);
+      for (const side of trial.replay[0].result.sides) {
+        const [initial, retry] = side.requests.filter((r: any) => r.phase === 'generation');
+        const message = privateMessage(initial.payload.messages);
+        assert.deepEqual(privateMessage(retry.payload.messages), message);
+        if (version === 'jev_generation_retry_v2') { assert.equal(message, undefined); continue; }
+        assert.ok(message);
+        const figures = JSON.parse(message.content.split('\n')[1]);
+        assert.deepEqual(figures, Object.keys(ledger).sort().map(figureId => ({ figureId, ...ledger[figureId] })));
+      }
+      if (version === 'jev_generation_retry_v2') continue;
+      const tampered = structuredClone(records);
+      const sides = tampered.trials[0].replay[0].result.sides;
+      const otherIndex = sides.findIndex((side: any) => side.label !== label);
+      const other = sides[otherIndex];
+      const initial = other.requests.find((r: any) => r.phase === 'generation');
+      const message = privateMessage(initial.payload.messages);
+      message.content = message.content.replace('丸窓', '橋脚');
+      initial.completeMessagesSha256 = hash(initial.payload.messages);
+      initial.payloadSha256 = initial.preProjectionPayloadSha256 = hash(initial.payload);
+      tampered.evidence.pairedReplay[0][otherIndex === 0 ? 'left' : 'right'] = structuredClone(other);
+      assert.ok(statuses(tampered).includes('mismatch'));
+    }
+  });
+
+  test(`${label}: an accept for the agreed name gets a reconfirmation instruction`, async () => {
+    const ledger = structuredClone(OLD.state.ledger);
+    const figureId = OWN.ownAnchors[0].id, name = '小舟';
+    ledger[figureId] = { status: 'agreed', name };
+    const human = 'この図形は、小舟でいい？';
+    const text = 'うん、その図形はもう小舟で決まっています。';
+    const records = await buildRecords({ label, dialoguePolicy: 'holistic_v5', ledger,
+      technicalTrial: { version: 'adaptive_repair_v3' }, turns: [{ human,
+        plan: { action: 'accept', target: 'figure_0', referent: 'figure_0', act: 'name_propose', drafts: [text],
+          extraction: JSON.stringify([{ segmentId: 's1', quote: name, proposition: name, name, targets: [figureId], aspect: 'name',
+            linkedIssueId: null, respondsToTurn: null }]) } }] });
+    const trial = records.trials[0];
+    assert.equal(trial.attempts[0].namingReconfirm, true);
+    assert.equal(trial.attempts[0].executed.action, 'accept');
+    assert.equal(trial.attempts[0].publicSpeech, text);
+    assert.deepEqual(trial.lastCommittedState.ledger, ledger);
+    assert.deepEqual(verifyRecords(records).checks.filter(c => /^intervention\.trial\.0\.attempt\.0\./u.test(c.id)).map(c => c.status),
+      ['pass', 'pass', 'pass', 'pass']);
+    for (const side of trial.replay[0].result.sides) {
+      const request = side.requests.find((r: any) => r.phase === 'generation');
+      assert.match(request.payload.messages[2].content, /今回は既に合意した呼び名の再確認です。/u);
+    }
+  });
+}
