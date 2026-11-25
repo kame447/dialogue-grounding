@@ -28,6 +28,9 @@ const profile = researchTrialProfileV3({ timeoutMs: null, maxCompletionTokens: n
   // The first 6-figure observation by the vision model takes longer than the research harness default of 20 s. The deadline must
   // not undercut the proxy's own 85 s upstream deadline: a shorter one fails the start while the Terra call is still running and later settles.
   observationMs: RESEARCH_MAX_LUNA_ATTEMPT_MS,
+  // Local grounding and the AI-public extraction share one deadline per turn (extraction + function + support). The E2E-validated value is 45 s;
+  // measured worst cases were 16.6 s and 17.0 s of Luna extraction alone, too close to the 20 s default for long dialogues.
+  localMs: 45000,
   lunaAttemptMs: RESEARCH_MAX_LUNA_ATTEMPT_MS,
   trialMs: ENGINEERING_LIMITS.trialMs,
 });
