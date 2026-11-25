@@ -362,8 +362,10 @@ const v5TopicViewpoint = new RegExp(
 // The partner's own words: "そちらでいう…" is a quotation of the partner, not an assertion about the partner's view.
 const v9OwnPossessiveView = "(?:こちら|私|わたし|自分)の(?=" + orientationWords.source + ")|(?:こちら|私|わたし|自分)の(?:画面|図形|側)で(?!は|なく|ない|なかっ|なけれ|じゃな)";
 const v9PartnerQuotedView = "(?:そちら|相手)(?:で|の)いう";
-// "そちらでいうと／いえば／いうなら" is a topic or condition, not the partner's own wording.
-const v9PartnerQuotedStart = /^(?:そちら|相手)(?:で|の)いう(?!と|えば|なら)/u;
+// "そちらでいうと／いえば／いうなら／いうこと" is a topic, a condition or a statement about what was said, not the partner's own wording.
+const v9PartnerQuotedStart = /^(?:そちら|相手)(?:で|の)いう(?!と|えば|なら|こと)/u;
+// What "そちらでいう" quotes is only the noun phrase right after it, up to the first particle or punctuation ("左向きの先は", "左向きの先端を含む形も", "左向きの先に対応する").
+const v9QuotedPhrase = /^[^はがをもにへでと、,。.!?！？「」]{1,16}/u;
 const v9TopicViewpoint = new RegExp(
   "(?<own>" + v5OwnView.source + "|" + explicitOwnView.source + "|" + ownTopicView.source + "|" + v9OwnPossessiveView + ")|" +
   v5PartnerView.source + "|" + explicitPartnerView.source + "|" + partnerTopicView.source + "|" + v9PartnerQuotedView, "gu");
@@ -391,7 +393,14 @@ function v5OrientationLeaks(text: string, expanded: boolean, topic = false, v9 =
         continue;
       }
       if (preceding?.groups?.own && !comparesScreens) continue;
-      if (v9 && preceding && !comparesScreens && v9PartnerQuotedStart.test(clause.slice(preceding.index))) continue; // v9: "そちらでいう…" quotes the partner's wording
+      if (v9 && preceding && !sameFrame) {
+        // v9: a direction word inside the phrase quoted after "そちらでいう" is the partner's own wording. Everything after the phrase is checked as usual.
+        const quoteAt = clause.slice(preceding.index), start = v9PartnerQuotedStart.exec(quoteAt);
+        if (start) {
+          const phrase = v9QuotedPhrase.exec(quoteAt.slice(start[0].length))?.[0] ?? "", from = preceding.index + start[0].length;
+          if (term.index >= from && term.index < from + phrase.length) continue;
+        }
+      }
       // A later viewpoint starts a new description even when there is no clause punctuation.
       const description = clause.slice(term.index + term[0].length, viewpoints[nextViewpoint]?.index).split(descriptionBreak, 1)[0];
       const qualifier = descriptionQualifier.exec(description);

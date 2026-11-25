@@ -16,6 +16,7 @@ const acceptedInV9: [string, string[]][] = [
   ['こちらの上の三角の突起が、そちらでは右向きの先に当たる形ですか？', ['orientation_leak']],
   ['こちらの図形で右端に丸い穴があって、つながり方は同じですか？', ['orientation_leak']],
   ['こちらの画面では輪が見えるので、そちらでいう右端の部分に対応する可能性はありそう。', ['shared_view_assumption']],
+  ['こちらの画面では三角形状の突起が見えるので、そちらでいう左向きの先に対応する可能性はありそう。', ['shared_view_assumption']],
 ];
 // The same violation in both versions: no viewpoint, an unmarked partner side, an assertion about the partner's view, and the forms v9 leaves alone.
 const stillRejected: [string, string[]][] = [
@@ -37,7 +38,7 @@ const stillRejected: [string, string[]][] = [
   ['こちらの画面でないところの上端に穴があります。', ['orientation_leak']],
 ];
 // Clean in both versions.
-const cleanInBoth = ['そちらでいう左向きの先は、こちらの三角の突起に対応しますか？', 'そちらでいう下向きの先は、この突起に対応していますか？', '二つの部分がつながった形ですか？', 'こちらの画面では上部に丸い穴があります。'];
+const cleanInBoth = ['そちらでいう左向きの先端を含む形も、この輪郭のつながり方に対応していますか？', 'そちらでいう左向きの先は、こちらの三角の突起に対応しますか？', 'そちらでいう下向きの先は、この突起に対応していますか？', '二つの部分がつながった形ですか？', 'こちらの画面では上部に丸い穴があります。'];
 
 test('v9 accepts the wider stated-viewpoint and quoted wordings; v8 rejects them as before', () => {
   for (const [text, before] of acceptedInV9) { assert.deepEqual(leaks(text, v8), before, 'v8: ' + text); assert.deepEqual(leaks(text, v9), [], 'v9: ' + text); }
@@ -45,6 +46,18 @@ test('v9 accepts the wider stated-viewpoint and quoted wordings; v8 rejects them
 test('v9 still rejects an unmarked direction, the partner side without a stated view and an assertion about the partner view, exactly as v8 does', () => {
   for (const [text, codes] of stillRejected) { assert.deepEqual(leaks(text, v8), codes, 'v8: ' + text); assert.deepEqual(leaks(text, v9), codes, 'v9: ' + text); }
   for (const text of cleanInBoth) { assert.deepEqual(leaks(text, v8), [], 'v8: ' + text); assert.deepEqual(leaks(text, v9), [], 'v9: ' + text); }
+});
+// Audit 22n (NB-22N-2): the quotation excuses only the phrase quoted right after "そちらでいう"; what follows it is checked as usual.
+const afterTheQuotedPhrase = [
+  'そちらでいう『3』は、左上にV字状のくぼみがありますね。',
+  'そちらでいう『星』は、そちらの上端に切れ目がありますよ。',
+  '相手のいうことは分かりました、上の突起がとがっていますね。',
+  'そちらでいう左向きの先は、こちらと同じ向きですね。',
+  'そちらでいう左向きの先は、右上に丸い穴がありますね。',
+  'そちらでいう左向きの先は、そちらの上の突起とつながっていますね。',
+];
+test('v9 rejects an unmarked direction or an assertion about the partner view that follows a quoted phrase, as v8 does', () => {
+  for (const text of afterTheQuotedPhrase) { assert.notDeepEqual(leaks(text, v8), [], 'v8: ' + text); assert.notDeepEqual(leaks(text, v9), [], 'v9: ' + text); }
 });
 test('the v9 agreement scope is the v8 scope', () => {
   assert.equal(validAgreeNameScope('scoped_v5', v9), true);
