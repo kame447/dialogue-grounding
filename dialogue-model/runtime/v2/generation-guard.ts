@@ -2,11 +2,16 @@
 // validated judgment determines state; detected wording never changes its act.
 import type { DialoguePolicy } from "../decision/contract.ts";
 // v3 was reserved for the experiment that extended fixed responses.
-export type GenerationRetryVersion = "jev_generation_retry_v1" | "jev_generation_retry_v2" | "jev_generation_retry_v4";
+// v5 contains every behaviour of v4 (viewpoint rules, no fixed-sentence fallback, the whole-history judgment material, the private naming state) and adds the confirm-specific viewpoint note and the topic markers.
+export type GenerationRetryVersion = "jev_generation_retry_v1" | "jev_generation_retry_v2" | "jev_generation_retry_v4" | "jev_generation_retry_v5";
 export type RecordedGenerationRetryVersion = Exclude<GenerationRetryVersion, "jev_generation_retry_v1">;
 
-export function hasVersionedViewpoint(version: unknown): version is "jev_generation_retry_v4" {
-  return version === "jev_generation_retry_v4";
+export function hasVersionedViewpoint(version: unknown): version is "jev_generation_retry_v4" | "jev_generation_retry_v5" {
+  return version === "jev_generation_retry_v4" || version === "jev_generation_retry_v5";
+}
+/** The newest generation version: what v4 does, plus the confirm viewpoint note, the topic markers and the answer-resolving judgment material. */
+export function isGenerationV5(version: unknown): version is "jev_generation_retry_v5" {
+  return version === "jev_generation_retry_v5";
 }
 export function validGenerationRetryVersion(version: unknown, layout: string, policy?: string | null): version is GenerationRetryVersion {
   return version === "jev_generation_retry_v1" || layout === "two_stage_v3" &&
@@ -14,7 +19,7 @@ export function validGenerationRetryVersion(version: unknown, layout: string, po
 }
 export function defaultGenerationRetryVersion(layout: string, policy?: string): GenerationRetryVersion {
   if (layout !== "two_stage_v3") return "jev_generation_retry_v1";
-  return policy === "holistic_v5" ? "jev_generation_retry_v4" : "jev_generation_retry_v2";
+  return policy === "holistic_v5" ? "jev_generation_retry_v5" : "jev_generation_retry_v2";
 }
 
 export function allowsOrientationFallback(version: GenerationRetryVersion | undefined): boolean {

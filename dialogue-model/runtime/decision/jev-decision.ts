@@ -395,9 +395,11 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
   for (const a of ledgerActions ?? []) if (a.answers?.length) answerSource.set(a.turn, a.answers);
   const claimSource = new Map(priorClaims.map(c => [c.id, c.sourceTurn]));
   const answers = new Map<number, string[]>([...answerSource].map(([turn, list]) => [turn, list.map(c => c.id).filter(id => !withdrawn.has(id))]));
+  // Only a request whose ledger carries `answers` (jev_generation_retry_v5) defines the answer ids it points at; earlier versions keep their bytes.
+  const resolveAnswers = (ledgerActions ?? []).some(a => a.answers !== undefined);
   const answerRows = new Map<string, { sourceTurn: number | null; act: string; proposition: string; targets: readonly string[] }>(
     [...answerSource.values()].flat().filter(c => !withdrawn.has(c.id)).map(c => [c.id, { sourceTurn: claimSource.get(c.id) ?? null, act: c.act, proposition: c.proposition, targets: c.targets }]));
-  const render = (m: unknown) => JSON.stringify(v5 ? encodeMaterialV5(m, { actions: ledgerActions!, answers, answerRows, rotationMode: input.rotationMode ?? "relative_pm90", ...(nameLedger ? { nameLedger } : {}) }) : m);
+  const render = (m: unknown) => JSON.stringify(v5 ? encodeMaterialV5(m, { actions: ledgerActions!, answers, ...(resolveAnswers ? { answerRows } : {}), rotationMode: input.rotationMode ?? "relative_pm90", ...(nameLedger ? { nameLedger } : {}) }) : m);
   const over = () => {
     state = render(material);
     return (v3 && selection ? render({ ...material, selected: undefined }).length : state.length) + reserve > 20000;

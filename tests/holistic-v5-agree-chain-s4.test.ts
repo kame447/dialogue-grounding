@@ -70,3 +70,14 @@ for (const label of ['bypass-enabled', 'repair-first'] as const) {
     assert.deepEqual(verifyRecords(records).checks.filter(c => /^intervention\.trial\.0\.attempt\.0\./u.test(c.id)).map(c => c.status), ['pass', 'pass', 'pass', 'pass']);
   });
 }
+
+// A record of jev_generation_retry_v4 (saved before the answer-resolving material) still verifies in S4 and the dynamic replay.
+for (const label of ['bypass-enabled', 'repair-first'] as const) {
+  test(`holistic_v5 ${label}: a jev_generation_retry_v4 record keeps verifying and replays with the v4 requests`, async () => {
+    const records = await buildRecords({ label, dialoguePolicy: 'holistic_v5', generationRetryVersion: 'jev_generation_retry_v4', technicalTrial: { version: 'adaptive_repair_v3' }, turns: turns(['claim_0', 'claim_1']) });
+    const trial = records.trials[0];
+    assert.equal(trial.attempts[0].generationRetryVersion, 'jev_generation_retry_v4');
+    assert.equal(trial.replay[0].result.status, 'same_material_intervention_verified');
+    assert.deepEqual(verifyRecords(records).checks.filter(c => /^intervention\.trial\.0\.attempt\.0\./u.test(c.id)).map(c => c.status), ['pass', 'pass', 'pass', 'pass']);
+  });
+}

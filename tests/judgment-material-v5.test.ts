@@ -128,3 +128,12 @@ test('a withdrawn answer is not defined and does not exclude its feature', () =>
   assert.deepEqual(s.figures.f1.actions, [['confirm', 3, feature]]);
   assert.equal(s.answerClaims, undefined);
 });
+
+test('without answers on the ledger (a record of jev_generation_retry_v4) the request defines no extra rows and keeps the earlier bytes', () => {
+  const filler = Array.from({ length: 150 }, (_, k) => claim('f' + k, 1 + (k % 6), lines[k % 6].speaker, lines[k % 6].text.slice(0, 6), { proposition: '細部-' + k + 'あ'.repeat(120) }));
+  const base = (ledgerActions: any[]) => sentWith(ledgerActions, { priorClaims: filler, repairHistory: [], issueSummary: '論点'.repeat(1500) });
+  const v4 = base([{ turn: 3, action: 'confirm', target: { kind: 'single', figureId: slots[1] }, name: null, feature }]);
+  assert.equal(v4.answerClaims, undefined);
+  const v5 = base(answered([reply]));
+  assert.ok(v5.answerClaims);
+});
