@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { interventionChecks, s4Probe } from '../dialogue-model/runtime/diagnostics/parity-verify/intervention-records.ts';
 import { researchTrialProfileV3 } from '../dialogue-model/runtime/v2/research-profile.ts';
-import { buildRecords, normal, runTurn, OLD } from './support/s4-v3-records.ts';
+import { buildRecords, initialState, normal, runTurn, OLD } from './support/s4-v3-records.ts';
 import type { Plan } from './support/s4-v3-records.ts';
 
 const checksOf = (records: any) => interventionChecks(records);
@@ -197,7 +197,7 @@ test('F6: every injected forbidden pair leaves action_target_not_allowed in the 
   for (const [action, target] of INJECTED_CELLS) {
     const inject = { action, target, name: null, feature: null, observe: null, decisionKind: 'mock', calibrated: false, evidence: { model: null, responseId: null, choices: {}, scores: {}, latencyMs: 0, costUsd: null } };
     let failure: any;
-    try { await runTurn(profile, 'bypass-enabled', structuredClone(OLD.state), structuredClone(OLD.events), { action, target: 'none', inject }, undefined); } catch (e) { failure = e; }
+    try { await runTurn(profile, 'bypass-enabled', initialState({ profile }), structuredClone(OLD.events), { action, target: 'none', inject }, undefined); } catch (e) { failure = e; }
     assert.ok(failure && failure.code === 'invalid_decision', action + ' ' + failure?.code);
     assert.equal(failure.decisionRejectionCode, 'action_target_not_allowed');
     const t = failure.traces.at(-1);

@@ -13,7 +13,7 @@ import { createJevLocalTestClassifier } from '../../dialogue-model/runtime/local
 import { createChatClient } from '../../dialogue-model/runtime/client.mjs';
 import { buildReobservationMessages } from '../../dialogue-model/runtime/observation/observe.ts';
 import type { AgreeNameScopeVersion } from '../../dialogue-model/runtime/decision/naming-request.ts';
-import { isGenerationV6 } from '../../dialogue-model/runtime/v2/generation-guard.ts';
+import { defaultGenerationRetryVersion, isGenerationV6 } from '../../dialogue-model/runtime/v2/generation-guard.ts';
 import type { RecordedGenerationRetryVersion } from '../../dialogue-model/runtime/v2/generation-guard.ts';
 import type { ObservationMemo } from '../../dialogue-model/runtime/observation/contract.ts';
 import { image } from './s4-integration/harness.ts';
@@ -103,6 +103,23 @@ export async function runTurn(profile: any, label: Label, state: any, events: an
 export type Turn = { human: string; plan: Plan };
 /** NORMAL rebuilt as one canonical trial whose final turn follows the earlier scripted turns (all of them under `label`). */
 /** dialoguePolicy: omitted = the creation default (holistic_v1); null = the earlier version (no policy), for controls of the older lineages. */
+/** The private state a NEW trial of this profile starts from: the cached observation, an optional ledger, and the agreement scope the runtime gives a new trial of its generation version
+ * (a new holistic_v5 trial defaults to jev_generation_retry_v6, whose scope is scoped_v3). A test that pins an older version passes it. */
+export function initialState({ profile, ledger, memo, generationRetryVersion, agreeNameScopeVersion }: { profile: any; ledger?: Record<string, any>; memo?: ObservationMemo;
+  generationRetryVersion?: RecordedGenerationRetryVersion; agreeNameScopeVersion?: AgreeNameScopeVersion }) {
+  const state: any = structuredClone(OLD.state); if (ledger) state.ledger = structuredClone(ledger);
+  const created = generationRetryVersion ?? (profile.dialoguePolicy === 'holistic_v5' ? defaultGenerationRetryVersion('two_stage_v3', 'holistic_v5') : undefined);
+  const scope = agreeNameScopeVersion ?? (isGenerationV6(created) ? 'scoped_v3' : undefined);
+  if (scope) state.agreeNameScopeVersion = scope;
+  if (memo) state.observationMemo = structuredClone(memo);
+  return state;
+}
+/** A turn in which the AI publicly describes one figure it also acts on (an accept with a public claim about it): the public basis a later naming turn needs under the v6 agreement scope. */
+export function publicFocusTurn(figureIndex = 0): Turn {
+  const text = '輪が台に接している形です。';
+  return { human: 'この形の特徴を教えてください。', plan: { action: 'accept', target: 'figure_' + figureIndex, referent: 'figure_' + figureIndex, speech: text,
+    aiExtraction: JSON.stringify([{ segmentId: 's1', quote: text, proposition: text, name: null, targets: [OWN.ownAnchors[figureIndex].id], aspect: 'part', linkedIssueId: null, respondsToTurn: null }]) } };
+}
 export async function buildRecords({ label = 'repair-first' as Label, technicalTrial, turns, ledger, dialoguePolicy, memo, generationRetryVersion, agreeNameScopeVersion }: {
   label?: Label; technicalTrial?: { version: TrialVersion }; turns: Turn[]; ledger?: Record<string, any>; dialoguePolicy?: DialoguePolicy | null; memo?: ObservationMemo; generationRetryVersion?: RecordedGenerationRetryVersion;
   agreeNameScopeVersion?: AgreeNameScopeVersion;
@@ -112,10 +129,7 @@ export async function buildRecords({ label = 'repair-first' as Label, technicalT
   const digest = hash(profile);
   for (const s of [n.run, n.summary, tr]) { s.profile = structuredClone(profile); s.profileSha256 = digest; }
   tr.identity.profile = digest; tr.label = label; m.trials[0].label = label; n.summary.runOrder[0].label = label;
-  let state: any = structuredClone(OLD.state); if (ledger) state.ledger = structuredClone(ledger);
-  const scope = agreeNameScopeVersion ?? (isGenerationV6(generationRetryVersion) ? 'scoped_v3' : undefined);
-  if (scope) state.agreeNameScopeVersion = scope;
-  if (memo) state.observationMemo = structuredClone(memo);
+  let state: any = initialState({ profile, ledger, memo, generationRetryVersion, agreeNameScopeVersion });
   let events: any[] = [], seq = 0;
   for (let i = 0; i < turns.length; i++) {
     events = [...events, { id: `human-${++seq}`, seq, speaker: 'human', text: turns[i].human }];

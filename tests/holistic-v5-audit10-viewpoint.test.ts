@@ -3,7 +3,7 @@ import test from 'node:test';
 import { findOrientationLeaks } from '../dialogue-model/runtime/v2/generation-guard.ts';
 import { researchTrialProfileV3 } from '../dialogue-model/runtime/v2/research-profile.ts';
 import { verifyRecords } from '../dialogue-model/runtime/diagnostics/parity-verify/index.ts';
-import { buildRecords, normal, OLD, runTurn } from './support/s4-v3-records.ts';
+import { buildRecords, initialState, normal, OLD, runTurn } from './support/s4-v3-records.ts';
 
 const trialVersion = { version: 'adaptive_repair_v3' } as const;
 const human = '私の画面では右端に切れ目があります。そちらの図形にも切れ目はありますか？';
@@ -149,7 +149,7 @@ for (const label of ['bypass-enabled', 'repair-first'] as const) {
   test(`${label}: two partner-view assertions stop without a fallback`, async () => {
     const { lunaRequest, timeouts } = normal.run.manifest;
     const profile = researchTrialProfileV3(lunaRequest, timeouts, 'two_stage_v3', 'holistic_v5');
-    const state = structuredClone(OLD.state);
+    const state = initialState({ profile }); // a new trial: the agreement scope of the runtime's default generation version
     await assert.rejects(runTurn(profile, label, state, [{ id: 'human-1', seq: 1, speaker: 'human', text: human }],
       { action: 'confirm', target: 'figure_0', drafts: [unsafe[0], unsafe[0]] }, trialVersion), (error: any) => {
       assert.equal(error.code, 'unsafe_generation');

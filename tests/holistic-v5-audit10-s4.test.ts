@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { verifyRecords } from '../dialogue-model/runtime/diagnostics/parity-verify/index.ts';
-import { buildRecords, OWN, type Turn } from './support/s4-v3-records.ts';
+import { buildRecords, OWN, publicFocusTurn, type Turn } from './support/s4-v3-records.ts';
 
 const name = '小舟';
 const human = 'この図形を「小舟」と呼びませんか？';
@@ -15,7 +15,8 @@ const scenarios: Turn[] = [
 for (const dialoguePolicy of ['holistic_v4', 'holistic_v5'] as const) {
   for (const label of ['bypass-enabled', 'repair-first'] as const) {
     for (const turn of scenarios) test(`${dialoguePolicy} ${label}: S4 verifies ${turn.plan.action} generation`, async () => {
-      const records = await buildRecords({ label, dialoguePolicy, technicalTrial: { version: 'adaptive_repair_v3' }, turns: [turn] });
+      const records = await buildRecords({ label, dialoguePolicy, technicalTrial: { version: 'adaptive_repair_v3' },
+        turns: turn.plan.action === 'agree' ? [publicFocusTurn(0), turn] : [turn] }); // an agreement needs the public basis of the v6 agreement scope
       const trial = records.trials[0];
       assert.equal(trial.attempts[0].executed.action, turn.plan.action);
       const replay = trial.replay[0].result;

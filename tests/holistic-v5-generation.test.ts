@@ -3,7 +3,7 @@ import test from 'node:test';
 import { deriveGenerationOutcome, findOrientationLeaks } from '../dialogue-model/runtime/v2/generation-guard.ts';
 import { buildJevDraftActPayload } from '../dialogue-model/runtime/decision/jev-decision.ts';
 import { hash, verifyRecords } from '../dialogue-model/runtime/diagnostics/parity-verify/index.ts';
-import { buildRecords, normal, OLD, OWN, runTurn } from './support/s4-v3-records.ts';
+import { buildRecords, initialState, normal, OLD, OWN, publicFocusTurn, runTurn } from './support/s4-v3-records.ts';
 import { researchTrialProfileV3 } from '../dialogue-model/runtime/v2/research-profile.ts';
 
 const orientationReason = '前の下書きに、自分側の見え方だと示されていない方位の語（上下左右・端・向き・斜め・縦長・横長など）がありました。公開発話では、回転しても変わらない形や部分同士のつながりに言い換えてください。方位が区別に必要なら、その語と同じ節で自分側の画面での見え方だと明示し、相手には形の対応を尋ねてください。';
@@ -182,14 +182,14 @@ for (const label of ['bypass-enabled', 'repair-first'] as const) {
       { status: 'agreed', name: '帆', targets: [], referent: 'figure_0', request: true, conflict: true },
       { status: 'agreed', name: '帆', targets: [other], referent: 'figure_1', request: true, conflict: false },
       { status: 'agreed', name: '帆', targets: [], referent: 'none', request: true, conflict: false },
-      { status: 'agreed', name: 'コブネ', targets: [slot], referent: 'figure_0', request: false, conflict: false },
+      { status: 'agreed', name: 'コブネ', targets: [slot], referent: 'figure_0', request: false, conflict: false, focus: true }, // a reconfirmation needs the figure to be the publicly checked one
       { status: 'tentative', name: '帆', targets: [slot], referent: 'figure_0', request: true, conflict: false },
     ];
-    for (const { status, name, targets, referent, request, conflict } of cases) {
+    for (const { status, name, targets, referent, request, conflict, focus } of cases as any[]) {
       const ledger = structuredClone(OLD.state.ledger);
       ledger[slot] = { status, name: 'こぶね' };
       const records = await buildRecords({ label, dialoguePolicy: 'holistic_v5', ledger,
-        technicalTrial: { version: 'adaptive_repair_v3' }, turns: [{ human: `この形を「${name}」と呼びませんか？`,
+        technicalTrial: { version: 'adaptive_repair_v3' }, turns: [...(focus ? [publicFocusTurn(0)] : []), { human: `この形を「${name}」と呼びませんか？`,
           plan: { action: 'confirm', target: 'figure_0', referent, act: 'name_propose', speech: '切れ目が一つある形ですか？',
             extraction: JSON.stringify([{ segmentId: 's1', quote: name, proposition: name, name, targets, aspect: 'name',
               linkedIssueId: null, respondsToTurn: null }]) } }] });
@@ -221,7 +221,7 @@ test('v5 stops a repeated name adoption under confirm in both conditions', async
   const { lunaRequest, timeouts } = normal.run.manifest;
   const profile = researchTrialProfileV3(lunaRequest, timeouts, 'two_stage_v3', 'holistic_v5');
   for (const label of ['bypass-enabled', 'repair-first'] as const) {
-    const state = structuredClone(OLD.state), before = structuredClone(state.ledger);
+    const state = initialState({ profile }), before = structuredClone(state.ledger);
     const adoption = 'この形は「帆」にしましょう。';
     await assert.rejects(runTurn(profile, label, state, [{ id: 'human-1', seq: 1, speaker: 'human', text: '切れ目がありますか？' }],
       { action: 'confirm', target: 'figure_0', drafts: [adoption, adoption], draftAct: 'adopt_other' }, { version: 'adaptive_repair_v3' }),
@@ -319,7 +319,7 @@ for (const label of ['bypass-enabled', 'repair-first'] as const) {
     const human = 'この図形は、小舟でいい？';
     const text = 'うん、その図形はもう小舟で決まっています。';
     const records = await buildRecords({ label, dialoguePolicy: 'holistic_v5', ledger,
-      technicalTrial: { version: 'adaptive_repair_v3' }, turns: [{ human,
+      technicalTrial: { version: 'adaptive_repair_v3' }, turns: [publicFocusTurn(0), { human,
         plan: { action: 'accept', target: 'figure_0', referent: 'figure_0', act: 'name_propose', drafts: [text],
           extraction: JSON.stringify([{ segmentId: 's1', quote: name, proposition: name, name, targets: [figureId], aspect: 'name',
             linkedIssueId: null, respondsToTurn: null }]) } }] });
