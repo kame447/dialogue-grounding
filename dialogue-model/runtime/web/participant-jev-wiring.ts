@@ -29,10 +29,13 @@ import type { BudgetLimits, SendReceipt } from '../diagnostics/parity-live/audit
 import { checkModelIdentity, MODEL_CONTRACT_V2 } from '../model-identity-contract.ts';
 import { RESEARCH_MAX_JEV_USD } from '../diagnostics/jev-shadow-eval/local-openrouter.ts';
 import { inferenceHistory } from '../v2/agreement-gate.ts';
+import { defaultGenerationRetryVersion, hasVersionedViewpoint, validGenerationRetryVersion } from '../v2/generation-guard.ts';
+import type { GenerationRetryVersion } from '../v2/generation-guard.ts';
 
 export type JevResearchLedger = RunBudget;
 export type JevResearchOptions = Readonly<{ profile: ResearchTrialProfileV3; observer: ObservationObserver;
   jevDecision: JevDecisionClient; localGrounding: JevTurnLocalOptions; ledger: JevResearchLedger; technicalTrial?: AdaptiveRepairTrial }>;
+type SelectedJevResearchOptions = JevResearchOptions & { generationRetryVersion?: GenerationRetryVersion };
 export class ParticipantJevError extends Error {
   readonly code: string;
   constructor(code: 'invalid_config' | 'wrong_own_material' | 'initialization_failed' | 'model_mismatch') {
@@ -82,14 +85,14 @@ function checkedDecisionFailure(trace: any, layout: JevQuestionLayout): boolean 
 /** R2: classify restore before any queue, initial observer, or model work. */
 export function selectParticipantJev(restore: any, provided: unknown, context: {
   referenceMemory: boolean; strategy: string; style: string; legacy: unknown[];
-}): JevResearchOptions | null {
+}): SelectedJevResearchOptions | null {
   try {
     const marker = restore?.options?.jevResearch;
     if (restore) {
       if (marker !== undefined && marker !== true && marker !== false) return invalid();
       if (marker !== true) {
         const state = restore.queueState?.privateState;
-        if (['profileSha256','interventionPolicy','technicalTrial','questionLayout','dialoguePolicy'].some(k => Object.hasOwn(restore.options ?? {},k)) ||
+        if (['profileSha256','interventionPolicy','technicalTrial','questionLayout','dialoguePolicy','generationRetryVersion'].some(k => Object.hasOwn(restore.options ?? {},k)) ||
             ['jevTraces','aiPublicSettlement','initialObservation','jevLedger'].some(k => Object.hasOwn(restore,k)) ||
             state && (['schemaVersion','interventionPolicy','observationMemo','repairHistory','aiPublic'].some(k=>Object.hasOwn(state,k)) ||
               state.judgments?.some((j: any) => j.jevTurn))) return invalid();
@@ -109,6 +112,12 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
       // The stored value (or its absence) decides the version, whatever the creation default is now.
       if (savedPolicy !== profile.dialoguePolicy) profile = researchTrialProfileV3(profile.lunaRequest, profile.timeouts, profile.questionLayout, savedPolicy ?? null);
     }
+    const savedGenerationVersion = restore?.options?.generationRetryVersion;
+    if (restore && Object.hasOwn(restore.options ?? {}, 'generationRetryVersion') &&
+        (!hasVersionedViewpoint(savedGenerationVersion) || !validGenerationRetryVersion(savedGenerationVersion, profile.questionLayout, profile.dialoguePolicy))) return invalid();
+    const generationRetryVersion = profile.dialoguePolicy === 'holistic_v5' && profile.questionLayout === 'two_stage_v3'
+      ? restore ? savedGenerationVersion ?? 'jev_generation_retry_v2' : defaultGenerationRetryVersion(profile.questionLayout, profile.dialoguePolicy)
+      : undefined;
     if (context.referenceMemory !== true) return invalid();
     if (!STRATEGIES.includes(context.strategy)) return invalid();
     if (context.legacy.some(v => v !== null && v !== undefined) || context.style !== profile.utteranceStyle) return invalid();
@@ -136,6 +145,10 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
       // must be equal in every field they share.
       const savedJudgments: any[] = Array.isArray(restore.queueState?.privateState?.judgments) ? restore.queueState.privateState.judgments : [];
       for (const trace of restore.jevTraces) {
+        if (hasVersionedViewpoint(trace.generationRetryVersion) && trace.generationRetryVersion !== generationRetryVersion ||
+            hasVersionedViewpoint(generationRetryVersion) && trace.finalAction && trace.generationRetryVersion !== generationRetryVersion ||
+            Object.hasOwn(trace,'generationRetryVersion') && trace.generationRetryVersion !== 'jev_generation_retry_v2' &&
+              !hasVersionedViewpoint(trace.generationRetryVersion)) return invalid();
         const requested = Object.hasOwn(trace,'namingRequest'), reconfirmed = Object.hasOwn(trace,'namingReconfirm'), marked = requested || reconfirmed;
         if (marked && (requested && trace.namingRequest !== true || reconfirmed && trace.namingReconfirm !== true || requested && reconfirmed || !isHolisticV3Plus(profile.dialoguePolicy) ||
             profile.questionLayout !== 'two_stage_v3' || !Array.isArray(trace.local?.claims) || !hasNameProposal(trace.local.claims, trace.turnIndex))) return invalid();
@@ -160,7 +173,7 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
     // A classifier built for another version than the selected one is replaced by one for the selected version (a restored record keeps its stored criteria).
     const rebuilt = typeof (local.classifier as any)?.forPolicy === 'function' ? (local.classifier as any).forPolicy(profile.dialoguePolicy) : undefined;
     if (rebuilt) local = {...local,classifier:rebuilt};
-    return {profile,observer,jevDecision,localGrounding:local,ledger:v.ledger,...(technicalTrial?{technicalTrial}:{})};
+    return {profile,observer,jevDecision,localGrounding:local,ledger:v.ledger,...(technicalTrial?{technicalTrial}:{}),...(generationRetryVersion?{generationRetryVersion}:{})};
   } catch { return invalid(); }
 }
 

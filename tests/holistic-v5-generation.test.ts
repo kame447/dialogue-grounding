@@ -25,7 +25,9 @@ test('holistic_v5 distinguishes local observations, attributed reports and quest
     assert.equal(deriveGenerationOutcome(codes, codes, '切れ目のある形ですか？', true).kind, 'stop');
   }
   assert.deepEqual(findOrientationLeaks('右端に切れ目がある形ですか？', 'holistic_v5'), ['orientation_leak']);
-  assert.deepEqual(findOrientationLeaks('こちらでは右端に切れ目が見えますが、左側に突起があります。', 'holistic_v5'), ['orientation_leak']);
+  const continuation = 'こちらでは右端に切れ目が見えますが、左側に突起があります。';
+  assert.deepEqual(findOrientationLeaks(continuation, 'holistic_v5', 'jev_generation_retry_v2'), ['orientation_leak']);
+  assert.deepEqual(findOrientationLeaks(continuation, 'holistic_v5'), []);
 });
 
 for (const label of ['bypass-enabled', 'repair-first'] as const) {

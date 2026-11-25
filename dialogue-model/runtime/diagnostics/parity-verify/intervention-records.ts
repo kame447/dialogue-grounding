@@ -6,7 +6,8 @@ import {jevChoiceAnswersValid,jevReportedCost,jevResponseId} from '../../decisio
 import {nameBindsFigure} from '../../decision/referent-binding.ts';
 import {hasNameProposal,namingTurnKind,namingIntervalEstimates,inheritedTargetClaimIds,agreeCandidateAllowed,inheritsProposalName,targetNamingConflict} from '../../decision/naming-request.ts';
 import {isHolisticPolicy,isHolisticV2Plus,isHolisticV3Plus,isHolisticV4Plus} from '../../decision/contract.ts';
-import {generationGuardCodes,draftViolationCodes,deriveGenerationOutcome,orientationSafeFallback,findOrientationLeaks,hasOrientationWords} from '../../v2/generation-guard.ts';
+import {generationGuardCodes,draftViolationCodes,deriveGenerationOutcome,orientationSafeFallback,findOrientationLeaks,hasOrientationWords,hasVersionedViewpoint,validGenerationRetryVersion} from '../../v2/generation-guard.ts';
+import type {RecordedGenerationRetryVersion} from '../../v2/generation-guard.ts';
 import {checkModelIdentity} from '../../model-identity-contract.ts';
 import {resolveModelPolicy} from '../../model-policy.ts';
 import {verifyLocalUpdate,applyVerifiedOperation} from '../../local-grounding/verify.ts';
@@ -78,9 +79,9 @@ function safeFallbackName(value:unknown):string|null{
 const S4_ORIENT_WORDS=/上部|下部|上端|下端|左端|右端|左側|右側|上側|下側|右上|左上|右下|左下|右向き|左向き|上向き|下向き|斜め[上下左右]|[上下左右]の辺|横長|縦長|[上下左右]方向|[上下左右]寄り|[上下左右]の(?:突起|角|隅|端|部分|張り出し|くぼみ|切り欠き|三角|四角|脚|棒|腕|頭|耳|側)|(?<!以)[上下左右][へに](?:伸び|突き出|出っ張|張|向か|傾|広が|すぼま)/u;
 const S4_VIEWPOINT=/(?:こちら|私|わたし|自分|相手|そちら)(?:の(?:画面|側|向き|見方|図形|方)|側)?(?:では(?!なく|ない|なかっ|なけれ|じゃな)|で見ると|から見ると|から見れば|から見たら|から見て)/u;
 const S4_CLAUSE_BREAK=/(?<=[。!?]|(?:ですが|ますが|ませんが|ましたが|でしたが|けど|けれど|けれども|のに)、)/u;
-function s4HasOrientationLeak(text:unknown):boolean{
+function s4HasOrientationLeak(text:unknown,version:RecordedGenerationRetryVersion|undefined):boolean{
  if(typeof text!=='string'||!text.trim())return false;
- if(H5())return findOrientationLeaks(text,'holistic_v5').length>0;
+ if(H5())return findOrientationLeaks(text,'holistic_v5',version??'jev_generation_retry_v1').length>0;
  const unquoted=text.normalize('NFKC').replace(/[\s\u200b-\u200d\ufeff]/gu,'').replace(/「[^」]*」|『[^』]*』/gu,'「」');
  return unquoted.split(S4_CLAUSE_BREAK).some(clause=>S4_ORIENT_WORDS.test(clause)&&!S4_VIEWPOINT.test(clause));
 }
@@ -433,14 +434,15 @@ function s4OpenHumanProposal(tape:any,trace:any,askCounts=true):boolean{
  const claims=liveClaims({records:[...(graph?.records??[]),...(trace.local?.claims??[]).filter((c:any)=>c.kind==='claim')]});
  return claims.some((c:any)=>c.speaker==='human'&&c.sourceTurn===trace.turnIndex&&(c.act==='name_propose'&&typeof c.name==='string'||askCounts&&c.act==='ask'&&c.aspect==='name'&&claims.some((q:any)=>q.id===c.respondsTo&&q.act==='name_propose'&&typeof q.name==='string')));
 }
-function traceShape(t:any,layout='two_stage_v1'):boolean{
+function traceShape(t:any,layout='two_stage_v1',policy?:string):boolean{
  const req=['schemaVersion','turnIndex','lastEventId','attemptNumber','status','initialObservation','reobservations','local','humanReferent','decisions','intervention','executed','finalAction','publicSpeech','observationMemo','repairHistory','generationGuard'];
  const opt=['errorCode','observationErrorCode','observationPhase','decisionRejectionCode','generationErrorCode','redacted','aiPublic','decisionFailure','repairProspect','repairGate','repairFacts','generationRetryVersion','draftActs','namingRequest','namingReconfirm'];
  if(!exact(t,[...req,...opt.filter(k=>Object.hasOwn(t??{},k))])||t.schemaVersion!=='jev_turn_trace_v2'||!ident(t)||!['committed','staged','superseded','error','aborted'].includes(t.status)||!Array.isArray(t.decisions)||!Array.isArray(t.reobservations)||!Array.isArray(t.repairHistory)||!primitiveText(t.publicSpeech,10000))return false;
  if(Object.hasOwn(t,'namingRequest')&&(layout!=='two_stage_v3'||t.namingRequest!==true||Object.hasOwn(t,'namingReconfirm')||!hasNameProposal(t.local?.claims??[],t.turnIndex)))return false;
  if(Object.hasOwn(t,'namingReconfirm')&&(layout!=='two_stage_v3'||t.namingReconfirm!==true||!hasNameProposal(t.local?.claims??[],t.turnIndex)))return false;
  CTX.acceptOptional=t?.namingRequest===true;
- if(Object.hasOwn(t,'generationRetryVersion')&&(layout!=='two_stage_v3'||t.generationRetryVersion!=='jev_generation_retry_v2'||t.generationGuard?.regenerated!==true))return false;
+ if(Object.hasOwn(t,'generationRetryVersion')&&(t.generationRetryVersion==='jev_generation_retry_v1'||!validGenerationRetryVersion(t.generationRetryVersion,layout,policy)||
+   (hasVersionedViewpoint(t.generationRetryVersion)?!t.executed||!t.finalAction:t.generationGuard?.regenerated!==true)))return false;
  if(Object.hasOwn(t,'draftActs')&&(layout!=='two_stage_v3'||!draftActsShape(t.draftActs)))return false;
  if(t.intervention!==null){const i=t.intervention;if(!exact(i,['schemaVersion','policy','disposition','reasonCode','original','rerank','alternative','detailEvidence','failure'])||i.schemaVersion!=='jev_intervention_v1'||!['bypass_acceptance_v1:accept','bypass_acceptance_v1:veto'].includes(i.policy)||!['adopted','rejected'].includes(i.disposition)||!['no_intervention','not_in_veto_set','vetoed_bypass_action','alternative_failed'].includes(i.reasonCode))return false;}
  // Plan O: only a failed decide() attempt carries its closed failure record; older records simply lack it.
@@ -656,9 +658,10 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
    if(H3()?(t.namingRequest===true)!==!!CTX.namingRequest||(t.namingReconfirm===true)!==!!CTX.namingReconfirm:Object.hasOwn(t,'namingRequest')||Object.hasOwn(t,'namingReconfirm'))return'invalid';
  if(!exact(tape,['schemaVersion','state','events','common','tails','recorded',...(Object.hasOwn(tape??{},'technicalTrial')?['technicalTrial']:[]),...(Object.hasOwn(tape??{},'generationRetryVersion')?['generationRetryVersion']:[])])||tape.schemaVersion!=='parity_intervention_replay_v1'||!exact(result,['schemaVersion','status','error','commonEqual','policyConformant','recordedPayloadsReproduced','actualLunaHttpMeasured','hashScheme','excludedEnvelopeFields','sides'])||result.schemaVersion!=='parity_intervention_replay_result_v1'||result.status!=='same_material_intervention_verified'||result.error!==null||result.commonEqual!==true||result.policyConformant!==true||result.recordedPayloadsReproduced!==true||typeof result.actualLunaHttpMeasured!=='boolean'||result.hashScheme!=='canonical_json_sha256_not_raw_body_bytes'||!equal(result.excludedEnvelopeFields,META_KEYS)||!Array.isArray(result.sides)||result.sides.length!==2)return'invalid';
  // The replay plan declares a shared version. An attempt without a retry has no retry wire text to bind.
- if(Object.hasOwn(tape,'generationRetryVersion')&&(layout!=='two_stage_v3'||tape.generationRetryVersion!=='jev_generation_retry_v2')||
-    t.generationGuard.regenerated&&tape.generationRetryVersion!==t.generationRetryVersion)return'invalid';
- const restatedRetry=tape.generationRetryVersion==='jev_generation_retry_v2';
+ const version=tape.generationRetryVersion;
+ if(Object.hasOwn(tape,'generationRetryVersion')&&(version==='jev_generation_retry_v1'||!validGenerationRetryVersion(version,layout,tr.profile?.dialoguePolicy))||
+    (t.generationGuard.regenerated||hasVersionedViewpoint(version)||hasVersionedViewpoint(t.generationRetryVersion))&&version!==t.generationRetryVersion)return'invalid';
+ const restatedRetry=version!==undefined;
  const publicTexts=(tape.events??[]).filter((e:any)=>e.seq<=t.turnIndex).map((e:any)=>e.text);
  if(pairs.length===0)return'missing';
  if(!equal(result.sides,[pair.left,pair.right]))return'invalid';
@@ -682,7 +685,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
      const codes=label===tr.label&&t.status==='committed'?t.generationGuard.violations:undefined;
      // The comparison condition's retry reason is checked against that condition's own first draft, which this verifier classifies itself.
      const v3Retry=layout==='two_stage_v3';
-     const draft=codes===undefined&&generationCount===1?{orientation:v3Retry&&s4HasOrientationLeak(prevDraft),naming:typeof prevDraft==='string'&&s4NamingDecision(prevDraft.normalize('NFKC').replace(/[\s\u200b-\u200d\ufeff]/gu,''),s.executed?.action),workingNote:v3Retry&&restatedRetry&&s4HasWorkingNote(prevDraft,publicTexts),...(H()?{draftAct:lastVerdict}:{})}:undefined;
+     const draft=codes===undefined&&generationCount===1?{orientation:v3Retry&&s4HasOrientationLeak(prevDraft,version),naming:typeof prevDraft==='string'&&s4NamingDecision(prevDraft.normalize('NFKC').replace(/[\s\u200b-\u200d\ufeff]/gu,''),s.executed?.action),workingNote:v3Retry&&restatedRetry&&s4HasWorkingNote(prevDraft,publicTexts),...(H()?{draftAct:lastVerdict}:{})}:undefined;
      if(!generationMessages(p.messages,t,s.executed,{...tape,generationGraph:(tr.turns??[]).find((u:any)=>u.turn===t.turnIndex)?.state?.graph},m.profile,generationCount++,codes,draft))return'invalid';
      prevDraft=answer?.response?.text??answer?.text;draftTexts.push(prevDraft);genMessages.push(p.messages);lastVerdict=null;
     }
@@ -792,7 +795,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
    // The outcome of each side is derived from its own drafts and question answers by the run's own pure functions (generation-guard): publish the first,
    // publish the rewrite, the derived orientation-only fallback, or stop (a stop is never a committed turn).
    {
-    const aiOn=tr.profile?.localGrounding?.aiPublicClaims===true||Object.hasOwn(tr.lastCommittedState??{},'aiPublic'),cc={action:ex.action as any,candidateName:typeof ex.name==='string'?ex.name:null,v3:true,holistic:true,adaptive:!!CTX.trial,factored:!!CTX.facts,ai:aiOn,publicTexts,dialoguePolicy:H5()?'holistic_v5' as const:undefined};
+    const aiOn=tr.profile?.localGrounding?.aiPublicClaims===true||Object.hasOwn(tr.lastCommittedState??{},'aiPublic'),cc={action:ex.action as any,candidateName:typeof ex.name==='string'?ex.name:null,v3:true,holistic:true,adaptive:!!CTX.trial,factored:!!CTX.facts,ai:aiOn,publicTexts,dialoguePolicy:H5()?'holistic_v5' as const:undefined,generationRetryVersion:version??'jev_generation_retry_v1'};
     const actCode=(i:number)=>{const row=askedRows.find(y=>y.draft===(i===0?'initial':'retry'));return row&&row.verdict!==null?[row.verdict as string]:[];};
     // The same composition as the run (guard codes + the local publication checks against that send's own recorded messages); no private instruction is stored.
     const codes=(i:number)=>typeof draftTexts[i]==='string'?[...new Set([...draftViolationCodes(draftTexts[i],cc,genMessages[i]??[]),...actCode(i)])]:['empty_utterance'];
@@ -852,7 +855,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
   const gens=actual.requests.filter((r:any)=>r.provider==='luna'&&r.role==='generation');
   const genTexts=[...(tape.common?.luna??[]),...(tape.tails?.[tr.label]?.luna??[])].filter((x:any)=>x?.phase==='generation').map((x:any)=>x?.response?.text??x?.text);
   if(gens.length!==2||genTexts.length!==2||
-   !genTexts.every((tx:unknown)=>typeof tx==='string'&&s4HasOrientationLeak(tx)&&!s4HasNonOrientationLeak(tx,t.finalAction)&&
+   !genTexts.every((tx:unknown)=>typeof tx==='string'&&s4HasOrientationLeak(tx,version)&&!s4HasNonOrientationLeak(tx,t.finalAction)&&
     (!restatedRetry||!s4HasWorkingNote(tx,publicTexts))))return'invalid';
  }
  // M is recomputed: at least one recorded Luna request, all of them with measured sends. A label is either wholly measured or wholly synthetic.
@@ -1124,7 +1127,7 @@ function generationMessagesWith(messages:any[],trace:any,execution:any,tape:any,
    namingIntervalEstimates(tape.state.judgments??[],trace.turnIndex,trace.humanReferent),
    inheritedTargetClaimIds(trace.local?.verification?.diagnostics)):null;
  const conflictNote=namingConflict?NAMING_CONFLICT_V5_S4+'\n'+JSON.stringify(namingConflict)+'\n':'';
- const featureNote=H5()&&typeof g.discriminatingFeature==='string'&&hasOrientationWords(g.discriminatingFeature)?FEATURE_VIEWPOINT_V5_S4+'\n':'';
+ const featureNote=H5()&&typeof g.discriminatingFeature==='string'&&hasOrientationWords(g.discriminatingFeature,tape.generationRetryVersion)?FEATURE_VIEWPOINT_V5_S4+'\n':'';
  const trialOptions=CTX.v3&&!CTX.legacyV3?trials.v3:[trials.legacy];
  for(const trial of trialOptions){
   const scope=!H5()&&tape.technicalTrial&&Object.hasOwn(trial.scope,execution.action)?(trial.scope as any)[execution.action]:(FIXED.scope as any)[execution.action];
@@ -1141,7 +1144,7 @@ function generationMessagesWith(messages:any[],trace:any,execution:any,tape:any,
   const retry=messages.at(-1);
   if(index!==1||messages.length!==expected.length+1||!equal(messages.slice(0,-1),expected)||
      !exact(retry,['role','content'])||retry.role!=='system'||typeof retry.content!=='string')continue;
-  const restated=tape.generationRetryVersion==='jev_generation_retry_v2';
+  const restated=tape.generationRetryVersion!==undefined;
   const prefix=RETRY_INSTRUCTION+(restated?'\n'+actionMessage.content+'\n':'');
   if(retry.content.startsWith(prefix)&&retryReasonsMatch(retry.content.slice(prefix.length),restated,codes,draft))return true;
  }
@@ -1223,7 +1226,7 @@ export function interventionChecks(records:Records):Check[]{
     const add=(component:string,status:'pass'|'mismatch'|'not_reached',reason:string,detail?:Record<string,unknown>)=>out.push(check(prefix+component,status,reason,detail));
     if(!has){for(const k of ['shape','binding','execution','replay'])add(k,key||t===null?'not_reached':'mismatch',key||t===null?'intervention_trace_missing':'intervention_trace_invalid');continue;}
     const related=copies.filter((c:any)=>key&&ident(c)===key),js=judgments.filter((j:any)=>key&&judgmentKey(j)===key),ownTurns=turns.filter((v:any)=>(v.trace??[]).some((c:any)=>key&&ident(c)===key));
-    const layout=layoutOf(tr.profile),shape=traceShape(t,layout)&&related.every((c:any)=>traceShape(c,layout));if(!shape){for(const k of ['shape','binding','execution','replay'])add(k,'mismatch','intervention_trace_invalid');continue;}
+    const layout=layoutOf(tr.profile),shape=traceShape(t,layout,tr.profile?.dialoguePolicy)&&related.every((c:any)=>traceShape(c,layout,tr.profile?.dialoguePolicy));if(!shape){for(const k of ['shape','binding','execution','replay'])add(k,'mismatch','intervention_trace_invalid');continue;}
     add('shape','pass','closed_intervention_trace');
     const foreign=r.trials.filter((q:any)=>q!==tr),callIds=new Set((tr.calls??[]).map((c:any)=>c.id)),sendIds=new Set((tr.calls??[]).flatMap((c:any)=>c.sendIds??[]));
     const cross=foreign.some((q:any)=>(q.calls??[]).some((c:any)=>callIds.has(c.id)||(c.sendIds??[]).some((id:any)=>sendIds.has(id))));

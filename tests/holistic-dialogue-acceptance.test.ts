@@ -71,6 +71,7 @@ type Turn = {
 };
 type Names = Record<string, string | null>;
 type SavedTrial = {
+  options: { dialoguePolicy?: string };
   ownLedger: JevPrivateState['ledger'];
   queueState: { privateState: JevPrivateState };
   jevTraces: JevTurnTrace[];
@@ -234,7 +235,7 @@ function published(turn: Outcome, action: JevAction, target: JevTarget, speech: 
   assert.equal(turn.trace.executed?.action, action);
   assert.deepEqual(turn.trace.executed?.target, target);
   assert.deepEqual(turn.after.queueState.privateState.judgments.at(-1)?.jevTurn.executed, turn.trace.executed);
-  assert.equal(s4Probe.traceShape(turn.trace, profile.questionLayout), true);
+  assert.equal(s4Probe.traceShape(turn.trace, profile.questionLayout, turn.after.options.dialoguePolicy), true);
 }
 function unchanged(turn: Outcome) {
   assert.deepEqual(turn.after.ownLedger, turn.before.ownLedger);

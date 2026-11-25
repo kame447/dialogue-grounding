@@ -113,7 +113,7 @@ function checkRetry(outcome: Outcome, rejected: string) {
   assert.equal(trace.generationGuard.regenerated, true);
   assert.equal(trace.generationGuard.fallback, false);
   assert.ok(trace.generationGuard.violations.length > 0);
-  assert.equal(s4Probe.traceShape(trace, profile.questionLayout), true);
+  assert.equal(s4Probe.traceShape(trace, profile.questionLayout, profile.dialoguePolicy), true);
 }
 
 function checkPublished(outcome: Outcome, text: string) {

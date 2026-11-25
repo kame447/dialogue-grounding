@@ -8,6 +8,8 @@ import {buildReobservationMessages} from '../../observation/observe.ts';
 import {researchHash} from '../../v2/research-profile.ts';
 import {resolveInterventionPolicy} from '../../intervention-policy.ts';
 import {createProfileDialogue} from './replay.ts';
+import {hasVersionedViewpoint,validGenerationRetryVersion} from '../../v2/generation-guard.ts';
+import type {RecordedGenerationRetryVersion} from '../../v2/generation-guard.ts';
 import {EVIDENCE_NORMALIZED_ENVELOPE_FIELDS,imageProjection,projectReplayValue} from './evidence.ts';
 import type {ReplaySide} from './evidence.ts';
 import type {ReplayTape} from './replay.ts';
@@ -18,7 +20,7 @@ import type {ExecutedDecision,InterventionTrace} from '../../decision/bypass-acc
 export type ReplaySegment=Pick<ReplayTape,'luna'|'jev'|'reobservations'>;
 /** Record-derived adaptive trial of the replayed attempt (the S4 verifier derives it from the record's own trace and refuses any other claim); absent for a non-adaptive trial. */
 export type ReplayTechnicalTrial={version:'adaptive_repair_v1'|'adaptive_repair_v2'|'adaptive_repair_v3'};
-export type InterventionReplayTape={schemaVersion:'parity_intervention_replay_v1';state:JevPrivateStateV2;events:ReplayTape['events'];common:ReplaySegment;tails:Record<'repair-first'|'bypass-enabled',ReplaySegment|null>;recorded:{label:'repair-first'|'bypass-enabled';expectedRequests:ReplayTape['expectedRequests']};technicalTrial?:ReplayTechnicalTrial;generationRetryVersion?:'jev_generation_retry_v2'};
+export type InterventionReplayTape={schemaVersion:'parity_intervention_replay_v1';state:JevPrivateStateV2;events:ReplayTape['events'];common:ReplaySegment;tails:Record<'repair-first'|'bypass-enabled',ReplaySegment|null>;recorded:{label:'repair-first'|'bypass-enabled';expectedRequests:ReplayTape['expectedRequests']};technicalTrial?:ReplayTechnicalTrial;generationRetryVersion?:RecordedGenerationRetryVersion};
 type Role='common'|'alternative_detail'|'generation'|'post_generation';
 export type InterventionReplaySide=Omit<ReplaySide,'requests'>&{requests:Array<ReplaySide['requests'][number]&{role:Role}>;executed:ExecutedDecision|null;intervention:InterventionTrace|null};
 type ReplayError='replay_material_invalid'|'replay_material_missing'|'replay_unused_material'|'replay_pipeline_failed';
@@ -39,7 +41,7 @@ export async function pairedInterventionReplay(tape:InterventionReplayTape,own:O
  const stop=(s:ReplayError):never=>{materialFailure??=s;throw Error(s);};
  try{
   data(tape);if(!exact(tape,['schemaVersion','state','events','common','tails','recorded',...(Object.hasOwn(tape,'technicalTrial')?['technicalTrial']:[]),...(Object.hasOwn(tape,'generationRetryVersion')?['generationRetryVersion']:[])])||(Object.hasOwn(tape,'technicalTrial')&&(!exact(tape.technicalTrial,['version'])||!['adaptive_repair_v1','adaptive_repair_v2','adaptive_repair_v3'].includes(tape.technicalTrial!.version)))||tape.schemaVersion!=='parity_intervention_replay_v1'||!exact(tape.tails,['repair-first','bypass-enabled'])||!exact(tape.recorded,['label','expectedRequests'])||!['repair-first','bypass-enabled'].includes(tape.recorded.label)||!Array.isArray(tape.recorded.expectedRequests)||!Array.isArray(tape.events)||!tape.events.length)stop('replay_material_invalid');
-  if(Object.hasOwn(tape,'generationRetryVersion')&&(tape.generationRetryVersion!=='jev_generation_retry_v2'||profile.questionLayout!=='two_stage_v3'))stop('replay_material_invalid');
+  if(Object.hasOwn(tape,'generationRetryVersion')&&((tape.generationRetryVersion!=='jev_generation_retry_v2'&&!hasVersionedViewpoint(tape.generationRetryVersion))||!validGenerationRetryVersion(tape.generationRetryVersion,profile.questionLayout,profile.dialoguePolicy)))stop('replay_material_invalid');
   if(!tape.common||!tape.tails['repair-first']||!tape.tails['bypass-enabled'])stop('replay_material_missing');
   for(const s of [tape.common,...Object.values(tape.tails)])if(!exact(s,['luna','jev','reobservations'])||!Array.isArray(s!.luna)||!Array.isArray(s!.jev)||!Array.isArray(s!.reobservations))stop('replay_material_invalid');
   data(own);data(profile);if(resolveInterventionPolicy(profile).profileId!=='research_trial_profile_v3'||typeof expectedModel!=='string'||!expectedModel)stop('replay_material_invalid');

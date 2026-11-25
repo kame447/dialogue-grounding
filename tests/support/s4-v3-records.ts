@@ -12,6 +12,7 @@ import type { DialoguePolicy, DraftAct } from '../../dialogue-model/runtime/deci
 import { createJevLocalTestClassifier } from '../../dialogue-model/runtime/local-grounding/jev-local-test.ts';
 import { createChatClient } from '../../dialogue-model/runtime/client.mjs';
 import { buildReobservationMessages } from '../../dialogue-model/runtime/observation/observe.ts';
+import type { RecordedGenerationRetryVersion } from '../../dialogue-model/runtime/v2/generation-guard.ts';
 import type { ObservationMemo } from '../../dialogue-model/runtime/observation/contract.ts';
 import { image } from './s4-integration/harness.ts';
 
@@ -41,7 +42,7 @@ export type Plan = { action: string; target: string; issue?: string; prospect?: 
   referent?: string };
 const TEXTS: Record<string, string> = { local_extraction: '[]', ai_extraction: '[]' };
 
-export async function runTurn(profile: any, label: Label, state: any, events: any[], plan: Plan, technicalTrial: { version: TrialVersion } | undefined) {
+export async function runTurn(profile: any, label: Label, state: any, events: any[], plan: Plan, technicalTrial: { version: TrialVersion } | undefined, generationRetryVersion?: RecordedGenerationRetryVersion) {
   const luna: any[] = [], jev: any[] = [], traces: any[] = [], reobservations: any[] = [], boundary = { luna: -1, jev: -1 };
   let next: any, count = 0, actionCalls = 0, generationCalls = 0, lastAction = '';
   const http = createChatClient({ provider: 'cloudflare', apiKey: 'synthetic-offline-replay-key', purpose: profile.modelPolicy.purpose,
@@ -85,7 +86,7 @@ export async function runTurn(profile: any, label: Label, state: any, events: an
     localGrounding: { classifier: createJevLocalTestClassifier({ enabled: true, readKey, fetchImpl, timeoutMs: profile.timeouts.localMs, researchLimits: { maxDeadlineMs: 600000 }, questionLayout: profile.questionLayout,
       ...(['holistic_v3', 'holistic_v5'].includes(profile.dialoguePolicy) ? { dialoguePolicy: profile.dialoguePolicy } : {}) })!,
       aiPublicTransport: { readKey, fetchImpl, timeoutMs: profile.timeouts.decisionMs } },
-    onJevTurnTrace: (t: any) => traces.push(t), ...(technicalTrial ? { technicalTrial } : {}) } as any);
+    onJevTurnTrace: (t: any) => traces.push(t), generationRetryVersion, ...(technicalTrial ? { technicalTrial } : {}) } as any);
   let result: any;
   try { result = await runtime.runAiTurn({ events, privateState: state, lastEventId: events.at(-1).id, requestSeq: events.at(-1).seq }); }
   catch (error) { (error as any).traces = traces; throw error; }
@@ -96,8 +97,8 @@ export async function runTurn(profile: any, label: Label, state: any, events: an
 export type Turn = { human: string; plan: Plan };
 /** NORMAL rebuilt as one canonical trial whose final turn follows the earlier scripted turns (all of them under `label`). */
 /** dialoguePolicy: omitted = the creation default (holistic_v1); null = the earlier version (no policy), for controls of the older lineages. */
-export async function buildRecords({ label = 'repair-first' as Label, technicalTrial, turns, ledger, dialoguePolicy, memo }: {
-  label?: Label; technicalTrial?: { version: TrialVersion }; turns: Turn[]; ledger?: Record<string, any>; dialoguePolicy?: DialoguePolicy | null; memo?: ObservationMemo;
+export async function buildRecords({ label = 'repair-first' as Label, technicalTrial, turns, ledger, dialoguePolicy, memo, generationRetryVersion }: {
+  label?: Label; technicalTrial?: { version: TrialVersion }; turns: Turn[]; ledger?: Record<string, any>; dialoguePolicy?: DialoguePolicy | null; memo?: ObservationMemo; generationRetryVersion?: RecordedGenerationRetryVersion;
 }) {
   const n = structuredClone(normal), tr = n.trials[0], m = n.run.manifest;
   const profile = JSON.parse(JSON.stringify(researchTrialProfileV3(m.lunaRequest, m.timeouts, 'two_stage_v3', dialoguePolicy)));
@@ -111,18 +112,19 @@ export async function buildRecords({ label = 'repair-first' as Label, technicalT
     events = [...events, { id: `human-${++seq}`, seq, speaker: 'human', text: turns[i].human }];
     const run = { state, events: structuredClone(events) };
     const last = i === turns.length - 1;
-    if (!last) { const r = await runTurn(profile, label, state, events, turns[i].plan, technicalTrial); state = r.state; events = [...events, { id: `ai-${++seq}`, seq, speaker: 'ai', text: r.speech }]; continue; }
+    if (!last) { const r = await runTurn(profile, label, state, events, turns[i].plan, technicalTrial, generationRetryVersion); state = r.state; events = [...events, { id: `ai-${++seq}`, seq, speaker: 'ai', text: r.speech }]; continue; }
     // The final turn is run once per label: the common segment (before the original decision) is shared, each tail is that label's own.
-    const runs = { 'repair-first': await runTurn(profile, 'repair-first', run.state, run.events, turns[i].plan, technicalTrial),
-      'bypass-enabled': await runTurn(profile, 'bypass-enabled', run.state, run.events, turns[i].plan, technicalTrial) };
+    const runs = { 'repair-first': await runTurn(profile, 'repair-first', run.state, run.events, turns[i].plan, technicalTrial, generationRetryVersion),
+      'bypass-enabled': await runTurn(profile, 'bypass-enabled', run.state, run.events, turns[i].plan, technicalTrial, generationRetryVersion) };
     const a = runs['repair-first'], b = runs['bypass-enabled'];
     assert.deepEqual([a.luna.slice(0, a.boundary.luna), a.jev.slice(0, a.boundary.jev)], [b.luna.slice(0, b.boundary.luna), b.jev.slice(0, b.boundary.jev)]);
     assert.deepEqual(a.reobservations, b.reobservations);
     const seg = (r: any) => ({ luna: r.luna.slice(r.boundary.luna), jev: r.jev.slice(r.boundary.jev), reobservations: [] });
+    const version = runs[label].trace.generationRetryVersion ?? generationRetryVersion;
     const tape: any = { schemaVersion: 'parity_intervention_replay_v1', state: run.state, events: run.events,
       common: { luna: a.luna.slice(0, a.boundary.luna), jev: a.jev.slice(0, a.boundary.jev), reobservations: structuredClone(a.reobservations) },
       tails: { 'repair-first': seg(a), 'bypass-enabled': seg(b) }, recorded: { label, expectedRequests: [] }, ...(technicalTrial ? { technicalTrial } : {}),
-      ...(runs[label].trace.generationRetryVersion ? { generationRetryVersion: runs[label].trace.generationRetryVersion } : {}) };
+      ...(version ? { generationRetryVersion: version } : {}) };
     const probe: any = await pairedInterventionReplay(tape, OWN as any, MODEL, profile);
     assert.equal(probe.status === 'not_reached', false, String(probe.error));
     const recorded = probe.sides.find((s: any) => s.label === label);

@@ -15,6 +15,7 @@ import { STATUSES } from "../judgment/schema.mjs";
 import { normalizeName as normalizeAgreedName } from "../judgment/name-evidence.mjs";
 import { selectParticipantJev, participantLunaClient, withParticipantJevTurn, restoreParticipantJevLedger,
   participantInitialObservation } from "../web/participant-jev-wiring.ts";
+import { hasVersionedViewpoint } from "./generation-guard.ts";
 import { researchHash } from "./research-profile.ts";
 import { agreedNamesFromLedger, settleJevTurnTraces, settleAiPublicClaims } from "./jev-turn.ts";
 
@@ -170,6 +171,7 @@ export async function createNamingTaskV2({
       interventionPolicy: jev.profile.interventionPolicy, decisionTimeoutMs: jev.profile.timeouts.decisionMs,
       ...(jev.profile.questionLayout !== "two_stage_v1" ? { questionLayout: jev.profile.questionLayout } : {}),
       ...(jev.profile.dialoguePolicy ? { dialoguePolicy: jev.profile.dialoguePolicy } : {}),
+      generationRetryVersion: jev.generationRetryVersion,
       onJevTurnTrace: (record) => {
         jevTraces.push(clone(record));
         if (Object.values(record.aiPublic?.stages ?? {}).some(stage => stage.error === "cost_cap")) jev.ledger.stop("cost_cap");
@@ -253,7 +255,8 @@ export async function createNamingTaskV2({
           // two_stage_v2 records name their layout; two_stage_v1 records keep their previous shape.
           ...(jev.profile.questionLayout !== "two_stage_v1" ? { questionLayout: jev.profile.questionLayout } : {}),
           // The policy a new two_stage_v3 trial was created with; a record without one never gains it.
-          ...(jev.profile.dialoguePolicy ? { dialoguePolicy: jev.profile.dialoguePolicy } : {}) } : {}) },
+          ...(jev.profile.dialoguePolicy ? { dialoguePolicy: jev.profile.dialoguePolicy } : {}),
+          ...(hasVersionedViewpoint(jev.generationRetryVersion) ? { generationRetryVersion: jev.generationRetryVersion } : {}) } : {}) },
       ...(rotation.legacy ? {} : { stimulus: clone(stimulus) }),
       status: result ? "completed" : closed ? "submitting" : "dialogue",
       // Origin is research metadata only; queue/model/participant events stay ordinary public speech.
