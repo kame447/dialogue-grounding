@@ -17,6 +17,7 @@ import { applyBypassAcceptance, interventionForStrategy, BYPASS_ACCEPTANCE_V1_CA
   BYPASS_ACCEPTANCE_V1 } from "../dialogue-model/runtime/decision/bypass-acceptance.ts";
 import { createJevLocalTestClassifier } from "../dialogue-model/runtime/local-grounding/jev-local-test.ts";
 import { createJevAiFunctionClassifier, createJevAiSupportChecker } from "../dialogue-model/runtime/local-grounding/jev-ai-public.ts";
+import { PARTICIPANT_USAGE_ONLY } from "../dialogue-model/runtime/web/participant-usage-policy.ts";
 import { DEFAULT_COST_CAP_USD, RESEARCH_MAX_JEV_USD } from "../dialogue-model/runtime/diagnostics/jev-shadow-eval/local-openrouter.ts";
 import { researchHash, researchTrialProfileV3 } from "../dialogue-model/runtime/v2/research-profile.ts";
 import { RESEARCH_MAX_DEADLINE_MS } from "../dialogue-model/runtime/v2/research-timeouts.ts";
@@ -353,5 +354,23 @@ test("budget ceiling: research callers may set up to 0.15 USD; the default path 
     for (const costCapUsd of [0.150001, 0, -0.01, Number.NaN, Number.POSITIVE_INFINITY, "0.1", null])
       assert.throws(() => make({ costCapUsd, researchLimits }), (e: unknown) => (e as { code?: string })?.code === "invalid_options", `${name} ${costCapUsd}`);
     assert.throws(() => make({ costCapUsd: 0.06 }), (e: unknown) => (e as { code?: string })?.code === "invalid_options", `${name} without research limits`);
+  }
+});
+
+// Usage-only participant (#194): the provider reports no cost. The failure evidence of a parsed stage then carries
+// costUsd null and must be stored and restored; without the usage-only capability it stays refused, as before.
+test("B1b: a usage-only decision failure keeps a null cost and checks; without the capability the same record is refused", async t => {
+  for (const layout of ["two_stage_v1", "two_stage_v2"] as const) {
+    const http = await httpMock(t, staged({ stage1: { action: "agree", target: "figure_1" } }, () => null));
+    const c = client(http.fetchImpl, layout, { usagePolicy: PARTICIPANT_USAGE_ONLY }), seen: unknown[] = [];
+    await assert.rejects(c.decide(rich(), { onFailureEvidence: e => seen.push(e) }), code("inconsistent_decision"));
+    assert.equal(seen.length, 1);
+    const projected = projectDecisionFailureEvidence(seen[0], layout, PARTICIPANT_USAGE_ONLY)!;
+    assert.ok(projected, "usage-only evidence is projected");
+    assert.equal(projected.costUsd, null); assert.equal(projected.stages[0].costUsd, null); assert.ok(projected.stages[0].model !== null);
+    assert.deepEqual(checkDecisionFailureEvidence(structuredClone(projected), PARTICIPANT_USAGE_ONLY), projected);
+    // Control: no capability, no null cost on a parsed stage.
+    assert.equal(projectDecisionFailureEvidence(seen[0], layout), null);
+    assert.equal(checkDecisionFailureEvidence(structuredClone(projected)), null);
   }
 });

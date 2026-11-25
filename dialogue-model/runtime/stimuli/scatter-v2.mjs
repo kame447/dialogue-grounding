@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { FIGURES } from './figures.mjs';
+import { FIGURE_BANK, isLegacyFigureSelection, resolveFigureSelection } from './figure-bank.ts';
 import { boundarySegments, polygonArea, transformPolygon } from './geometry.mjs';
 import { renderPolygons } from './render.mjs';
 
@@ -86,7 +86,7 @@ function areaCentroid(polygons) {
   return { x: x / area, y: y / area };
 }
 
-const silhouettes = new Map(FIGURES.map(figure => [figure.id,
+const silhouettes = new Map(FIGURE_BANK.map(figure => [figure.id,
   Array.from({ length: 4 }, (_, turn) => {
     const rotated = figure.pieces.map(p => transformPolygon(p.points, { rotation: turn * 90 }));
     const box = bbox(rotated);
@@ -165,9 +165,11 @@ function rotationModeOf(rotationMode) {
 }
 
 /** Researcher-only geometry and correspondence. Never send this to a participant/model. */
-export function createLayoutsV2({ seed, rotationMode = 'relative_pm90' }) {
+export function createLayoutsV2({ seed, rotationMode = 'relative_pm90', figureSelection = /** @type {unknown} */ (undefined) }) {
   digest(seed, 'validate');
   const mode = rotationModeOf(rotationMode);
+  const selection = resolveFigureSelection(figureSelection);
+  const FIGURES = selection.figureIds.map(id => FIGURE_BANK.find(f => f.id === id));
   const used = new Set();
   const rotations = randomSource(seed, 'orientations');
   const humanRotations = new Map(FIGURES.map(f => [f.id, Math.floor(rotations() * 4) * 90]));
@@ -200,14 +202,16 @@ const sceneOf = layout => ({
 const stimuli = new WeakMap();
 
 /** Researcher-owned trial. Project it with participantView/modelView before sending it. */
-export function createTrialV2({ seed, rotationMode = 'relative_pm90' }) {
+export function createTrialV2({ seed, rotationMode = 'relative_pm90', figureSelection = /** @type {unknown} */ (undefined) }) {
   const mode = rotationModeOf(rotationMode);
-  const layouts = createLayoutsV2({ seed, rotationMode: mode });
+  const selection = resolveFigureSelection(figureSelection);
+  const legacy = isLegacyFigureSelection(selection);
+  const layouts = createLayoutsV2({ seed, rotationMode: mode, figureSelection: selection });
   const render = layout => renderPolygons(layout.flatMap(p => p.polygons), { width: BOARD_WIDTH, height: BOARD_HEIGHT });
   const trial = {
     version: 2,
     // relative_pm90 keeps its original id; other modes get an equally opaque id of their own.
-    trialId: `${VERSION}-${digest(seed, mode === 'relative_pm90' ? 'trial' : `trial:${mode}`).toString('hex').slice(0, 16)}`,
+    trialId: `${VERSION}-${digest(seed, (mode === 'relative_pm90' ? 'trial' : `trial:${mode}`) + (legacy ? '' : `:figures:${selection.bankVersion}:${selection.figureIds.join(',')}`)).toString('hex').slice(0, 16)}`,
     seed,
     human: { png: render(layouts.human), mimeType: 'image/png', scene: sceneOf(layouts.human) },
     ai: {
@@ -218,9 +222,15 @@ export function createTrialV2({ seed, rotationMode = 'relative_pm90' }) {
       Object.fromEntries(layouts[side].map(p => [p.id, p.figureId])),
     ])),
   };
-  stimuli.set(trial, { version: VERSION, rotationMode: mode, angles: Object.fromEntries(['human', 'ai'].map(side => [side,
+  const record = { version: VERSION, rotationMode: mode, angles: Object.fromEntries(['human', 'ai'].map(side => [side,
     Object.fromEntries(layouts[side].map(p => [p.id, p.rotation])),
-  ])) });
+  ])) };
+  // Legacy sets keep the original record shape; the bank fields exist only for non-legacy selections.
+  if (!legacy) Object.assign(record, {
+    bankVersion: selection.bankVersion, figureSetId: selection.setId, figureIds: [...selection.figureIds],
+    selectionSeed: selection.selectionSeed, selectionMode: selection.mode,
+  });
+  stimuli.set(trial, record);
   return trial;
 }
 

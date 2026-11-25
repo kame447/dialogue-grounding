@@ -38,7 +38,7 @@ function memory() {
   };
 }
 const fields = (patch: Record<string, unknown> = {}) => ({ allowedOrders: [['repair-first', 'bypass-enabled'], ['bypass-enabled']], seedPolicy: 'shared',
-  referenceMemory: true, betweenTrials: 'none', receptionNumberFormat: 'daily_seq3', rotationMode: 'relative_0', ...patch });
+  referenceMemory: true, betweenTrials: 'none', receptionNumberFormat: 'daily_seq3', rotationMode: 'relative_0', figureSelection: { mode: 'preset', setId: 'legacy-v1' }, figureSetPolicy: 'shared', ...patch });
 const fresh = () => { const storage = memory(); return { storage, index: new AdminIndex({ storage }, {}) }; };
 const sha = (text: string) => createHash('sha256').update(text).digest('hex');
 const broken = (error: any) => { assert.equal(error.code, 'reception_unavailable'); return true; };
@@ -56,7 +56,7 @@ test('protocol saves are compare-and-swap, keep one protocol id, and append a co
   assert.deepEqual(first, { ok: true, revision: 1 });
   const s1 = settings.validateReceptionSettings(clone(await index.readReceptionSettings()));
   assert.equal(s1.protocol.revision, 1); assert.equal(s1.protocol.protocol.revision, 1);
-  assert.equal(s1.protocol.protocol.schemaVersion, 'reception_protocol_v2'); assert.equal(s1.protocol.protocol.rotationMode, 'relative_0');
+  assert.equal(s1.protocol.protocol.schemaVersion, 'reception_protocol_v3'); assert.equal(s1.protocol.protocol.rotationMode, 'relative_0');
   assert.match(s1.protocol.protocol.protocolId, /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u);
   assert.equal(s1.protocol.sha256, sha(JSON.stringify(s1.protocol.protocol)));
   const before = storage.snapshot();

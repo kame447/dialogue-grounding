@@ -171,6 +171,7 @@ function abortIf(signal) {
  *   localGrounding?: import('../local-grounding/contract.ts').LocalGroundingOptions | import('./jev-turn.ts').JevTurnLocalOptions | null,
  *   onLocalGroundingTrace?: ((record: import('./local-grounding-turn.ts').LocalGroundingResearchRecord) => unknown) | null,
  *   decisionMode?: 'jev' | null, observer?: import('../observation/contract.ts').ObservationObserver | null,
+ *   usagePolicy?: import('../web/participant-usage-policy.ts').ParticipantUsageOnly,
  *   jevDecision?: import('../decision/contract.ts').JevDecisionClient | null, maxReobservations?: number, interventionPolicy?: import('./research-profile.ts').InterventionPolicyReference, decisionTimeoutMs?:number,
  *   technicalTrial?: import('../decision/contract.ts').AdaptiveRepairTrial,
  *   generationRetryVersion?: import('./jev-turn.ts').GenerationRetryVersion,
@@ -188,7 +189,7 @@ export function createDialogueV2(options) {
  const { client, strategy, image, anchors, judge = null, referenceMemory = true,
   decisionShadowClient = null, onResearchUpdate = null, activeDecision = null, utteranceStyle = "default",
   groundingShadow = null, onGroundingShadow = null, localGrounding = null, onLocalGroundingTrace = null,
-  decisionMode = null, observer = null, jevDecision = null, onJevTurnTrace = null, maxReobservations = 1 }=options;
+  decisionMode = null, observer = null, jevDecision = null, usagePolicy, onJevTurnTrace = null, maxReobservations = 1 }=options;
   let interventionPolicy, decisionTimeoutMs;
   const integrated=Object.hasOwn(options,'interventionPolicy')||Object.hasOwn(options,'decisionTimeoutMs');
   let intervention;
@@ -229,7 +230,7 @@ export function createDialogueV2(options) {
     const v3Trial = Boolean(options.technicalTrial) && options.questionLayout === "two_stage_v3";
     if (!referenceMemory || !localGrounding) throw new Error("Jev decision mode requires local reference memory");
     if (activeDecision || decisionShadowClient || groundingShadow) throw new Error("Jev decision mode cannot combine legacy decision paths");
-    return createJevTurnRuntime({ client, ownImage, ownAnchors, observer, jevDecision, localGrounding, ...(integrated?{intervention,decisionTimeoutMs}:{}),
+    return createJevTurnRuntime({ client, ownImage, ownAnchors, observer, jevDecision, localGrounding, usagePolicy, ...(integrated?{intervention,decisionTimeoutMs}:{}),
       ...(Object.hasOwn(options,'technicalTrial')?{technicalTrial:options.technicalTrial}:{}),
       ...(Object.hasOwn(options,'questionLayout')?{questionLayout:options.questionLayout}:{}),
       generationRetryVersion: options.generationRetryVersion,

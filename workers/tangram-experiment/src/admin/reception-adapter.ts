@@ -1,11 +1,13 @@
-import { ReceptionError, validateReception, effectiveRotationMode, effectiveBetweenTrials } from '../../../../dialogue-model/runtime/v2/reception.ts';
+import { PARTICIPANT_PRODUCTION_PROFILE } from '../../../../dialogue-model/runtime/web/participant-usage-policy.ts';
+import { ReceptionError, validateReception, effectiveRotationMode, effectiveBetweenTrials, effectiveFigureSelection } from '../../../../dialogue-model/runtime/v2/reception.ts';
 import { validateReceptionSettings } from './reception-settings.ts';
 import type { Reception, ReceptionSummary } from '../../../../dialogue-model/runtime/v2/reception.ts';
-import type { DisplayedProtocol, ReceptionAdminPort, ReceptionAdminRow, ReceptionAdminResult, ReceptionSettingsPort } from './reception-port.ts';
+import type { DisplayedProtocol, ReceptionAdminPort, ReceptionAdminRow, ReceptionAdminResult, ReceptionFailedStartUsage, ReceptionSettingsPort } from './reception-port.ts';
 import { OBJECT_ID, RECORD_ID } from './summary.ts';
 
 type Owner = {
   adminReception(): Promise<Reception | null>;
+  adminFailedStartUsage?(receptionId: string): Promise<ReceptionFailedStartUsage | null>;
   adminApproveReception(input: { expectedRevision: number; order: number; protocol: DisplayedProtocol }): Promise<Reception>;
   adminCancelReception(input: { expectedRevision: number }): Promise<Reception>;
 };
@@ -19,8 +21,11 @@ const PAGE_SIZE = 100;
 /** Management values always come from the owning DO, never from index extras. */
 function project(r: Reception): ReceptionAdminRow {
   return { receptionId:r.receptionId, number:r.number, createdAt:r.createdAt, status:r.status, revision:r.revision,
-    plan:r.plan ? { order:[...r.plan.order], rotationMode:effectiveRotationMode(r.plan, 0), betweenTrials:effectiveBetweenTrials(r.plan) } : null,
-    trials:r.trials.map(t => ({...t})) };
+    plan:r.plan ? { order:[...r.plan.order], rotationMode:effectiveRotationMode(r.plan, 0), betweenTrials:effectiveBetweenTrials(r.plan),
+      figureSets:r.plan.trials.map((_, index) => effectiveFigureSelection(r.plan!, index).setId ?? '') } : null,
+    trials:r.trials.map(t => ({...t})),
+    ...(r.plan && r.plan.schemaVersion !== 'reception_plan_v1' && r.plan.participantRuntimeProfile === PARTICIPANT_PRODUCTION_PROFILE &&
+      r.trials.some(t => t.recordId === null) ? { hasUnrecordedProductionAdmission: true } : {}) };
 }
 function failure(error: unknown): ReceptionAdminResult {
   // RPC Error objects need not preserve custom .code properties. Accept only
@@ -66,7 +71,8 @@ export function createReceptionAdminPort(options: Options): ReceptionAdminPort {
       if (!s.protocol) return { configured:false, mode:s.mode.value };
       const p = s.protocol.protocol;
       return { configured:true, mode:s.mode.value, protocolId:p.protocolId, revision:s.protocol.revision, sha256:s.protocol.sha256,
-        allowedOrders:p.allowedOrders, rotationMode:p.rotationMode, betweenTrials:p.betweenTrials };
+        allowedOrders:p.allowedOrders, rotationMode:p.rotationMode, betweenTrials:p.betweenTrials,
+        ...(p.schemaVersion === 'reception_protocol_v3' ? { figureSelection:p.figureSelection, figureSetPolicy:p.figureSetPolicy } : {}) };
     },
     async listPage(after) {
       const summaries = await options.index.listReceptions();
@@ -103,6 +109,12 @@ export function createReceptionAdminPort(options: Options): ReceptionAdminPort {
       return { version: [...digest].map(b => b.toString(16).padStart(2, '0')).join(''), newPending };
     },
     async get(id) { const result = await lookup(id); return result ? project(result.reception) : null; },
+    async failedStartUsage(id) {
+      const resolved = await lookup(id);
+      if (!resolved?.owner.adminFailedStartUsage) return null;
+      const snapshot = structuredClone(await resolved.owner.adminFailedStartUsage(id));
+      return snapshot?.receptionId === id ? snapshot : null;
+    },
     approve:(id,input) => mutate(id,owner => owner.adminApproveReception(input)),
     cancel:(id,input) => mutate(id,owner => owner.adminCancelReception(input)),
   };

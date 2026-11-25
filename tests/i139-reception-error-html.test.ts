@@ -163,7 +163,7 @@ test('real edge: a stale approval form posted by a browser gets the 409 page and
       async setAlarm() {}, async deleteAlarm() {} };
   };
   const index = new AdminIndex({ storage: memory() }, {}), stores = new Map<string, ReturnType<typeof memory>>(), objects = new Map<string, any>(), pending: Promise<unknown>[] = [];
-  const fields = { allowedOrders: [['repair-first']], seedPolicy: 'shared', referenceMemory: false, betweenTrials: 'none', receptionNumberFormat: 'daily_seq3', rotationMode: 'relative_pm90' };
+  const fields = { allowedOrders: [['repair-first']], seedPolicy: 'shared', referenceMemory: false, betweenTrials: 'none', receptionNumberFormat: 'daily_seq3', rotationMode: 'relative_pm90', figureSelection: { mode: 'preset', setId: 'legacy-v1' }, figureSetPolicy: 'shared' };
   assert.equal((await index.saveReceptionProtocol({ expectedRevision: 0, fields })).ok, true);
   assert.equal((await index.saveReceptionMode({ expectedRevision: 0, value: 'on' })).ok, true);
   const env: any = { ADMIN_TOKEN: TOKEN, ADMIN_INDEX: { idFromName: (n: string) => n, get: () => index },

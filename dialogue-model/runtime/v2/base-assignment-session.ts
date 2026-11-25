@@ -1,5 +1,6 @@
 import { validateBaseStart, validateBaseAssignmentConfig, canonicalBaseAssignmentConfig, validateBoundBaseRecord } from './base-assignment.ts';
-import { BaseAssignmentError, data, readAssignment, readOwner, UUID, OWNER, safeInt, assignmentRotationMode } from './base-assignment-data.ts';
+import { BaseAssignmentError, data, readAssignment, readOwner, UUID, OWNER, safeInt,
+  assignmentRotationMode, assignmentParticipantModelPin, assignmentFigureSelection } from './base-assignment-data.ts';
 import type { BaseSessionOptions, BaseSession, BaseSessionErrorCode, BaseOwnerState, BaseAssignment,
   AdmissionKey, BaseRecord, RawBaseRecord, BaseTask, BaseArchiveWrite, FailureCode, RestoreResult } from './base-assignment.ts';
 export class BaseSessionError extends Error {
@@ -113,9 +114,17 @@ export function createBaseAssignmentSession(options: BaseSessionOptions): BaseSe
     };
     try {
       let task: BaseTask;
+      const pin = assignmentParticipantModelPin(a);
+      const plan = a.source.kind === 'reception_plan_v2' || a.source.kind === 'reception_plan_v3' ? a.source.plan : null;
+      const limits = plan?.participantLimits;
+      const profile = plan?.participantRuntimeProfile;
       try { task = await options.makeTask({ strategy: a.strategy, seed: a.seed, referenceMemory: a.referenceMemory,
         runDir: null, restore: restore ? copy(restore) : null, now: options.now, onPersist,
-        ...(restore ? {} : { rotationMode: assignmentRotationMode(a) }) }); }
+        ...(pin ? { participantModelPin: pin } : {}),
+        ...(limits ? { participantLimits: limits } : {}),
+        ...(profile ? { participantRuntime: { profile, assignmentId: a.assignmentId } } : {}),
+        ...(restore ? {} : { rotationMode: assignmentRotationMode(a),
+          ...(a.source.kind === 'reception_plan_v3' ? { figureSelection: assignmentFigureSelection(a) } : {}) }) }); }
       catch (error) { if (error === token.internal && error instanceof BaseSessionError) throw error; return fail(); }
       if (!task || ['getState', 'persistNow', 'whenIdle', 'message', 'retry', 'submitHuman', 'submitAI'].some(k => typeof (task as unknown as Record<string, unknown>)[k] !== 'function')) return fail();
       const view = await port(() => task.getState());

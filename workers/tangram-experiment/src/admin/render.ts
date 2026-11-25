@@ -7,7 +7,11 @@ import type { LatencySummary } from "./latency";
 import type { AuditEntry } from "./index-store";
 import type { ReceptionAdminRow, ReceptionProtocolStatus, SettingsView } from './reception-port.ts';
 import { RECORD_ID } from './summary.ts';
+import { renderTurnSheet } from "./turn-sheet.ts";
 import { renderQrSvg } from './qr.ts';
+import { createTrialV2, participantView, ROTATION_MODES } from '../../../../dialogue-model/runtime/stimuli/scatter-v2.mjs';
+import { FIGURE_BANK, FIGURE_BANK_VERSION, FIGURE_SETS, validateResolvedFigureSelection } from '../../../../dialogue-model/runtime/stimuli/figure-bank.ts';
+import type { BankFigure } from '../../../../dialogue-model/runtime/stimuli/figure-bank.ts';
 
 export const ADMIN_CSS = `:root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans JP",sans-serif;font-size:14px;line-height:1.5;color:#222;background:#f7f7f4;--line:#d8d8d2;--accent:#2a5d8f;--tint:#eaf1f8}
 *,*::before,*::after{box-sizing:border-box}
@@ -32,6 +36,7 @@ input[type="radio"],input[type="checkbox"]{width:18px;height:18px;margin:2px 0 0
 .ops form+form{padding-top:10px;border-top:1px solid #eee}
 #reception-new{margin:12px 0;padding:8px 12px;border-left:3px solid var(--accent);background:var(--tint);font-weight:600}
 #reception-new:empty,#reception-sync:empty{display:none}tr.new>td{background:var(--tint)}
+.experiment-preview{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:start}.experiment-preview section{min-width:0;background:#fff;border:1px solid var(--line);border-radius:6px;padding:12px}.experiment-preview h2{margin:0 0 12px}.experiment-preview svg{display:block;width:100%;height:auto;background:#fafafa}.experiment-preview svg path{fill:#333}.experiment-preview .chat{max-height:70vh;overflow:auto}@media(max-width:699px){.experiment-preview{grid-template-columns:1fr}}
 .history table{min-width:720px}.history td{overflow-wrap:anywhere}.entry-url{overflow-wrap:anywhere}.qr svg{display:block;width:100%;max-width:264px;height:auto}
 @media (max-width:699px){input:not([type="radio"]):not([type="checkbox"]),select{font-size:16px;min-height:44px}button{min-height:44px}
 .cards table,.cards tbody,.cards tr,.cards td{display:block;width:100%}.cards table{background:none}.cards thead{display:none}
@@ -52,6 +57,10 @@ ol.chat .meta{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center;color:#
 details.diag{margin:12px 0;background:#fff;border:1px solid var(--line);border-radius:6px}details.diag>summary{cursor:pointer;padding:10px 12px;font-weight:600;min-height:40px}
 details.diag[open]>summary{border-bottom:1px solid var(--line)}details.diag>.body{padding:4px 12px 12px;overflow-x:auto}details.diag h3:first-child{margin-top:10px}
 details.danger>summary{color:#9b2c1f}
+.turn-sheet{max-height:72vh;overflow:auto;border:1px solid var(--line);background:#fff}.turn-sheet table{border-collapse:separate;border-spacing:0;min-width:1300px;table-layout:fixed;font-size:.85rem}.turn-sheet th,.turn-sheet td{border:0;border-right:1px solid #ddd;border-bottom:1px solid #ddd;padding:8px;overflow-wrap:anywhere;white-space:pre-wrap}.turn-sheet th{position:sticky;top:0;z-index:2;white-space:normal;background:#eee}.turn-sheet tr:nth-child(even) td{background:#fafafa}.turn-sheet th:nth-child(1){width:44px}.turn-sheet th:nth-child(2){width:54px}.turn-sheet th:nth-child(3){width:105px}.turn-sheet th:nth-child(4){width:300px}.turn-sheet th:nth-child(5){width:170px}.turn-sheet th:nth-child(6){width:195px}.turn-sheet th:nth-child(7){width:180px}.turn-sheet th:nth-child(8){width:195px}.turn-sheet th:nth-child(9){width:100px}.turn-sheet .seq,.turn-sheet .speaker{font-weight:600}.turn-sheet .utterance{font-size:.95rem}.turn-sheet td:first-child,.turn-sheet th:first-child{position:sticky;left:0;background:#eee;z-index:1}.turn-sheet th:first-child{z-index:3}.turn-sheet time{font-variant-numeric:tabular-nums}.turn-sheet .turn-open{min-height:30px;padding:3px 7px;font-size:.8rem;white-space:nowrap}.turn-popover{width:min(840px,92vw);max-height:85vh;overflow:auto;border:1px solid var(--line);border-radius:6px;padding:16px 20px;color:#222;background:#fff;box-shadow:0 8px 32px #0002;white-space:normal}.turn-popover::backdrop{background:#0003}.turn-popover-head{display:flex;justify-content:space-between;align-items:center;gap:12px}.turn-popover-head h3{margin:0}.turn-popover .utterance{white-space:pre-wrap;overflow-wrap:anywhere}.turn-popover .turn-entry pre{font-size:.85rem;max-height:48vh}.turn-sheet .turn-block+.turn-block{border-top:1px solid #ddd;margin-top:5px;padding-top:5px}.turn-sheet tr:target td{background:var(--tint)}.turn-detail summary,.turn-entry summary{cursor:pointer;overflow-wrap:anywhere;color:var(--accent)}.turn-entry{padding:5px 0;border-top:1px solid var(--line)}.turn-entry pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:32vh;overflow:auto;background:#f5f5f5;padding:6px}.unlinked{margin:10px 0}.record-detail{max-width:none}
+.figure-grid{display:flex;flex-wrap:wrap;gap:12px}.figure-grid figure{margin:0;text-align:center}.figure-art{display:flex;align-items:center;justify-content:center;min-width:112px;min-height:112px;padding:4px;background:#fff;border:1px solid var(--line);border-radius:4px}
+.figure-art svg{max-width:96px;height:auto;fill:#24476b;stroke:#24476b;stroke-width:1;stroke-linejoin:round}.figure-grid figcaption{font-weight:600}
+fieldset.figure-source{display:grid;gap:8px}.figure-source>div>label{display:block}.figure-source .sub{margin:4px 0 0 20px;display:flex;flex-wrap:wrap;gap:4px 12px}.figure-source input[type=text]{width:12em}
 @media (max-width:699px){ol.chat li,ol.chat li.human{max-width:none;margin-left:0}dl.summary{grid-template-columns:1fr 1fr}}`;
 
 const ENTITIES: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" };
@@ -68,10 +77,10 @@ const table = (names: string[], rows: unknown[][]) => rows.length
 const isPlain = (value: unknown): value is Record<string, any> => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 const list = (value: unknown): any[] => Array.isArray(value) ? value : [];
 
-function page(title: string, body: string): string {
+function page(title: string, body: string, wide = false): string {
   return `<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow"><title>${escapeHtml(title)}</title><link rel="stylesheet" href="/admin/style.css"></head>
-<body>${body}</body></html>`;
+<body${wide ? ' class="record-detail"' : ""}>${body}</body></html>`;
 }
 
 export type ListFilter = { status: string; error: "any" | "with" | "without"; memory: "any" | "on" | "off" };
@@ -178,9 +187,23 @@ function outcomeSection(r: Record<string, any>): string {
 }
 
 /** Full researcher view of one stored record: identity and outcome first, every diagnostic one click away. */
+/** Researcher metadata of the recorded figure set; a record without one shows the legacy six figures. */
+function recordedFigures(r: Record<string, any>): unknown {
+  const stimulus = isPlain(r.stimulus) ? r.stimulus : {};
+  if (Object.hasOwn(stimulus, 'figureIds')) {
+    return { figureSetId: stimulus.figureSetId ?? null, figureIds: stimulus.figureIds ?? null, bankVersion: stimulus.bankVersion ?? null,
+      selectionSeed: stimulus.selectionSeed ?? null, selectionMode: stimulus.selectionMode ?? null };
+  }
+  const opt = isPlain(r.options) && isPlain(r.options.figureSelection) ? r.options.figureSelection : null;
+  if (opt && Object.hasOwn(opt, 'figureIds')) {
+    return { figureSetId: opt.setId ?? null, figureIds: opt.figureIds ?? null, bankVersion: opt.bankVersion ?? null,
+      selectionSeed: opt.selectionSeed ?? null, selectionMode: opt.mode ?? null };
+  }
+  return '未記録（従来の6図形 F1–F6）';
+}
+
 export function renderDetail(record: unknown, summary: AdminSummary, latency: LatencySummary, _retentionDays?: number): string {
   const r = isPlain(record) ? record : {};
-  const rawEvents = list(r.events).filter(isPlain);
   const judgments = list(r.judgments).filter(isPlain).map((j) => [j.turnIndex, j.judgment?.action, j.judgment?.targetSlot,
     j.judgment?.candidateName, j.judgment?.discriminatingFeature, j.judgment?.followUp ?? null, j.activeJudge ?? null]);
   // errorCode/errorPhase/errorStatus/errorElapsedMs and generationRetried are written by the v2 turn on failure.
@@ -202,7 +225,7 @@ export function renderDetail(record: unknown, summary: AdminSummary, latency: La
     ms(q.latencyMs), q.retryCount ?? "", q.model ?? ""]);
   const attemptErrors = attemptList.filter((a) => a.errorCode).length;
   const requestErrors = requestList.filter((q) => q.errorCode || (typeof q.httpStatus === "number" && q.httpStatus >= 400)).length;
-  const conversation = rawEvents.length ? `<ol class="chat">${rawEvents.map((e) => `<li class="${e.speaker === "ai" ? "ai" : "human"}"><div class="meta">${badge(chatSpeaker(e.speaker))}<span>seq ${escapeHtml(e.seq)}</span>${timeTag(e.at)}${e.origin ? `<span>${escapeHtml(e.origin)}</span>` : ""}</div><p>${escapeHtml(e.text)}</p></li>`).join("")}</ol>` : `<p class="muted">なし</p>`;
+  const conversation = renderTurnSheet(r, latency, { escape: escapeHtml, time: timeTag });
   const dl = (items: [string, string][]) => `<dl class="summary">${items.map(([k, v]) => `<div><dt>${escapeHtml(k)}</dt><dd>${v}</dd></div>`).join("")}</dl>`;
   const id = escapeHtml(summary.recordId);
   const surveyState = isPlain(r.questionnaire) && typeof r.questionnaire.status === "string" ? r.questionnaire.status : summary.questionnaire;
@@ -226,10 +249,10 @@ ${fold(`外部要求（${requests.length}回・エラー ${requestErrors}件）`
 ${fold("詳細メタデータ・キュー・提出と採点の生データ", table(["項目", "値"], [["Durable Object", summary.objectId], ["開始", summary.startedAt], ["更新", summary.updatedAt],
   ["キュー", r.queueState ? { errorCode: r.queueState.errorCode ?? null, pending: list(r.queueState.pendingHumanEventIds).length, closed: r.queueState.closed ?? false } : null],
   ["最終エラー", r.finalError ?? null], ["件数", summary.counts], ["人間の提出", r.humanSubmission ?? null], ["AIの提出", r.aiSubmission ?? null],
-  ["診断", r.diagnostics ?? null], ["採点", r.scoring ?? null]]))}
+  ["診断", r.diagnostics ?? null], ["採点", r.scoring ?? null], ["初回観察", r.initialObservation ?? null], ["最終参照グラフ", r.referenceGraph ?? null], ["最終参照台帳", r.ownLedger ?? null], ["図形セット", recordedFigures(r)]]))}
 ${fold("削除", `<p class="muted">この記録は自動では削除されません。削除する場合は、記録IDを確認欄に入力してください（仮アンケートの回答も削除されます）。削除は取り消せません。</p>
 <form method="post" action="/admin/record/${id}/delete"><label>確認（記録ID） <input name="confirm" autocomplete="off" required></label>
-<button>この記録を削除</button></form>`, "danger")}`);
+<button>この記録を削除</button></form>`, "danger")}`, true);
 }
 
 export function renderMessage(title: string, message: string, back: { href: string; label: string } = { href: '/admin', label: '一覧へ' }): string {
@@ -239,10 +262,12 @@ export function renderMessage(title: string, message: string, back: { href: stri
 const RECEPTION_LABELS = { pending: '許可待ち', approved: '許可済み', in_progress: '実施中', finished: '終了', cancelled: '取消済み' };
 const receptionBadge = (status: string) => badge(RECEPTION_LABELS[status as keyof typeof RECEPTION_LABELS] ?? status,
   status === 'finished' ? 'done' : status === 'in_progress' || status === 'approved' ? 'live' : status === 'pending' ? 'warn' : '');
-const NAV: [string, string][] = [['/admin/receptions', '受付一覧'], ['/admin/entry', '参加用URL・QRコード'], ['/admin/reception-settings', '受付の設定'], ['/admin', '実験ログ']];
+const NAV: [string, string][] = [['/admin/receptions', '受付一覧'], ['/admin/entry', '参加用URL・QRコード'], ['/admin/reception-settings', '受付の設定'], ['/admin/figures', '図形一覧'], ['/admin', '実験ログ']];
 function adminNav(current: string): string {
   return `<nav>${NAV.map(([href, label]) => `<a href="${href}"${href === current ? ' aria-current="page"' : ''}>${escapeHtml(label)}</a>`).join('')}</nav>`;
 }
+/** One frozen set id, or `A → B` when the trials use different sets. */
+const figureSetSummary = (ids: readonly string[]) => ids.length && ids.every(id => id === ids[0]) ? ids[0] : ids.join(' → ');
 const ROTATION_LABELS: Record<string, string> = { relative_pm90: '±90°', relative_0: '0°' };
 const BETWEEN_LABELS: Record<string, string> = { none: '指定なし', questionnaire_required: 'アンケート必須' };
 
@@ -267,14 +292,19 @@ export function renderReceptions(items: ReceptionAdminRow[], next: string | null
   const rows = [...items].sort((a, b) => Number(b.status === 'pending') - Number(a.status === 'pending')).map(entry => {
     const unstarted = !entry.trials.some(trial => trial.recordId !== null);
     const cancel = unstarted && (entry.status === 'pending' || entry.status === 'approved');
+    const lastRecord = entry.trials.at(-1)?.recordId;
+    const open = entry.status === 'in_progress' && lastRecord && RECORD_ID.test(lastRecord)
+      ? `<a href="/admin/record/${escapeHtml(lastRecord)}/experiment" target="_blank" rel="noopener noreferrer">実験画面を開く</a>` : '';
+    const usage = entry.hasUnrecordedProductionAdmission && RECORD_ID.test(entry.receptionId)
+      ? `<a href="/admin/reception/${escapeHtml(entry.receptionId)}/usage.json">開始失敗の使用量 JSON</a>` : '';
     return `<tr data-id="${escapeHtml(entry.receptionId)}" data-status="${escapeHtml(entry.status)}" data-created="${escapeHtml(entry.createdAt)}" data-key="${escapeHtml(entry.revision + ':' + protocolKey)}">${td('受付番号', escapeHtml(entry.number ?? '未割当'))}${td('受付時刻', timeTag(entry.createdAt))}
 ${td('状態', receptionBadge(entry.status))}${td('条件順序', escapeHtml(entry.plan?.order.join(' → ') ?? ''))}
-${td('回転', escapeHtml(entry.plan ? ROTATION_LABELS[entry.plan.rotationMode] ?? '' : ''))}${td('試行の間', escapeHtml(entry.plan ? BETWEEN_LABELS[entry.plan.betweenTrials] ?? '' : ''))}
+${td('図形セット', escapeHtml(figureSetSummary(entry.plan?.figureSets ?? [])))}${td('回転', escapeHtml(entry.plan ? ROTATION_LABELS[entry.plan.rotationMode] ?? '' : ''))}${td('試行の間', escapeHtml(entry.plan ? BETWEEN_LABELS[entry.plan.betweenTrials] ?? '' : ''))}
 ${td('試行記録', entry.trials.filter(trial => trial.recordId && RECORD_ID.test(trial.recordId)).map(trial =>
       `<a href="/admin/record/${escapeHtml(trial.recordId)}">${escapeHtml(trial.recordId)}</a>`).join('<br>'))}
-${td('操作', `${entry.status === 'pending' && unstarted && protocol.configured && protocol.mode !== 'off' ? form(entry, 'approve') : ''}${cancel ? form(entry, 'cancel') : ''}`, ' class="ops"')}</tr>`;
+${td('操作', `${entry.status === 'pending' && unstarted && protocol.configured && protocol.mode !== 'off' ? form(entry, 'approve') : ''}${cancel ? form(entry, 'cancel') : ''}${open}${usage}`, ' class="ops"')}</tr>`;
   }).join('');
-  const names = ['受付番号', '受付時刻', '状態', '条件順序', '回転', '試行の間', '試行記録', '操作'];
+  const names = ['受付番号', '受付時刻', '状態', '条件順序', '図形セット', '回転', '試行の間', '試行記録', '操作'];
   const list = `<div id="reception-list"${live ? ` data-version="${escapeHtml(live.version)}" data-since="${escapeHtml(live.since)}"` : ''}>
 <div data-part="status">${protocol.configured ? `<p>プロトコル設定済み: ${escapeHtml(protocol.protocolId)} / revision ${escapeHtml(protocol.revision)}</p>`
     : '<p class="bad">プロトコルが未設定のため、許可できません（<a href="/admin/reception-settings">受付の設定</a>）</p>'}
@@ -286,9 +316,30 @@ ${live ? '<p id="reception-new" role="status" aria-live="polite"></p><p id="rece
 ${list}${live ? '<script src="/admin/receptions.js" defer></script>' : ''}`);
 }
 
+/** Researcher-only snapshot of the participant's own scene and public conversation. */
+export function renderExperimentPreview(record: unknown, summary: AdminSummary): string {
+  const r = isPlain(record) ? record : {};
+  let board = '<p class="muted">図形を表示できません。</p>';
+  const options = isPlain(r.options) ? r.options : {};
+  const rotationMode = options.rotationMode ?? 'relative_pm90';
+  if (Number.isSafeInteger(r.seed) && ROTATION_MODES.includes(rotationMode)) {
+    try {
+      const figureSelection = Object.hasOwn(options, 'figureSelection') ? validateResolvedFigureSelection(options.figureSelection) : undefined;
+      const scene = participantView(createTrialV2({ seed: r.seed, rotationMode, ...(figureSelection ? { figureSelection } : {}) }));
+      board = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${scene.width} ${scene.height}" aria-label="参加者の図形">${scene.shapes.map((shape: { path: string }) => `<path d="${escapeHtml(shape.path)}"/>`).join('')}</svg>`;
+    } catch { /* An older or unreadable stimulus must not prevent reading the conversation. */ }
+  }
+  const conversation = list(r.events).filter(e => isPlain(e) && ['ai', 'human'].includes(e.speaker)).map(e =>
+    `<li class="${e.speaker}"><div class="meta">${badge(chatSpeaker(e.speaker))}${timeTag(e.at)}</div><p>${escapeHtml(e.text)}</p></li>`).join('');
+  const id = escapeHtml(summary.recordId);
+  return page('実験画面（閲覧専用）', `<p><a href="/admin/receptions">受付一覧</a> · <a href="/admin/record/${id}">試行記録</a> · <a href="/admin/record/${id}/experiment">更新</a></p>
+<h1>実験画面（閲覧専用）</h1><p>${statusBadge(summary.status)} 保存時刻 ${timeTag(r.updatedAt ?? summary.updatedAt)}</p>
+<div class="experiment-preview"><section><h2>参加者の図形</h2>${board}</section><section><h2>会話</h2><ol class="chat">${conversation}</ol></section></div>`);
+}
+
 export function renderEntry(entryUrl: string): string {
   return page('参加用URL・QRコード', `${adminNav('/admin/entry')}<h1>参加用URL・QRコード</h1>
-<p class="entry-url"><a href="${escapeHtml(entryUrl)}">${escapeHtml(entryUrl)}</a></p><div class="qr">${renderQrSvg(entryUrl)}</div>`);
+<p class="entry-url"><a href="${escapeHtml(entryUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(entryUrl)}</a></p><div class="qr">${renderQrSvg(entryUrl)}</div>`);
 }
 
 const ORDER_CHOICES: [string, string, string][] = [['rf-be', 'repair-first,bypass-enabled', 'repair-first → bypass-enabled'],
@@ -300,14 +351,26 @@ const SETTING_CHOICES: [string, string, [string, string][]][] = [
   ['rotationMode', '回転', [['relative_pm90', '相対 ±90°（従来）'], ['relative_0', '相対 0°（向きを一致）']]],
   ['receptionNumberFormat', '受付番号', [['daily_seq3', '日ごとの3桁の連番']]],
 ];
+const FIGURE_SET_LABELS: Record<string, string> = { 'legacy-v1': 'legacy-v1（従来 F1–F6）', 'bank-set-a': 'bank-set-a（F7–F12）', 'bank-set-b': 'bank-set-b（F13–F18）',
+  'bank-set-c': 'bank-set-c（F19–F24）', 'bank-set-d': 'bank-set-d（F25–F30）' };
 const MODE_LABELS: Record<string, string> = { on: '現在：使う', off: '現在：使わない', unset: '既定（使う）' };
 
 /** Researcher settings form. Unsaved settings preselect nothing; saved settings preselect the current values. */
 export function renderSettings(view: SettingsView): string {
   const p = view.protocol?.protocol;
-  const current: Record<string, string> = p ? { seedPolicy: p.seedPolicy, referenceMemory: p.referenceMemory ? 'on' : 'off', betweenTrials: p.betweenTrials,
+  const current: Record<string, string> = p ? { figureSetPolicy: p.figureSetPolicy ?? '', seedPolicy: p.seedPolicy, referenceMemory: p.referenceMemory ? 'on' : 'off', betweenTrials: p.betweenTrials,
     rotationMode: p.rotationMode, receptionNumberFormat: p.receptionNumberFormat } : {};
   const orders = new Set(p ? p.allowedOrders.map(o => o.join(',')) : []);
+  // A protocol saved before the figure bank has no figure fields: they stay unselected so the researcher chooses them.
+  const selection = p?.figureSelection, policy = p?.figureSetPolicy;
+  const customIds = new Set(selection?.mode === 'custom' ? selection.figureIds : []);
+  const figureSource = `<fieldset class="figure-source"><legend>図形セット</legend>
+<div><label><input type="radio" name="figureMode" value="preset" required${selection?.mode === 'preset' ? ' checked' : ''}> プリセット</label>
+<div class="sub">${Object.keys(FIGURE_SETS).map(id => `<label><input type="radio" name="figureSetId" value="${escapeHtml(id)}"${selection?.mode === 'preset' && selection.setId === id ? ' checked' : ''}> ${escapeHtml(FIGURE_SET_LABELS[id] ?? id)}</label>`).join('')}</div></div>
+<div><label><input type="radio" name="figureMode" value="seeded_random" required${selection?.mode === 'seeded_random' ? ' checked' : ''}> シード乱数</label>
+<div class="sub"><label>シード <input type="text" name="selectionSeed" inputmode="numeric" autocomplete="off" placeholder="空欄で自動"${selection?.mode === 'seeded_random' && selection.selectionSeed !== null ? ` value="${escapeHtml(selection.selectionSeed)}"` : ''}></label></div></div>
+<div><label><input type="radio" name="figureMode" value="custom" required${selection?.mode === 'custom' ? ' checked' : ''}> 6図形を選ぶ</label>
+<div class="sub">${FIGURE_BANK.map(f => `<label><input type="checkbox" name="figureIds" value="${escapeHtml(f.id)}"${customIds.has(f.id) ? ' checked' : ''}> ${escapeHtml(f.id)}</label>`).join('')}</div></div></fieldset>`;
   const mark = (on: boolean) => on ? ' checked' : '';
   const fieldset = (name: string, legend: string, choices: [string, string][]) => `<fieldset><legend>${escapeHtml(legend)}</legend>${choices.map(([value, label]) =>
     `<label><input type="radio" name="${name}" value="${escapeHtml(value)}" required${mark(current[name] === value)}> ${escapeHtml(label)}</label>`).join('')}</fieldset>`;
@@ -321,8 +384,28 @@ export function renderSettings(view: SettingsView): string {
 <form method="post" action="/admin/reception-settings/protocol"><input type="hidden" name="expectedRevision" value="${escapeHtml(view.protocol?.revision ?? 0)}">
 <div class="fields"><fieldset><legend>条件順序</legend>${ORDER_CHOICES.map(([token, key, label]) =>
     `<label><input type="checkbox" name="orders" value="${token}"${mark(orders.has(key))}> ${escapeHtml(label)}</label>`).join('')}</fieldset>
-${SETTING_CHOICES.map(([name, legend, choices]) => fieldset(name, legend, choices)).join('\n')}</div>
+${SETTING_CHOICES.map(([name, legend, choices]) => fieldset(name, legend, choices)).join('\n')}
+${figureSource}
+${fieldset('figureSetPolicy', '図形セットの割付', [['shared', '全試行で同じ'], ['per_trial', '試行ごとに別（シード乱数のみ）']])}</div>
 <p>保存しても、許可済みの受付の計画は変わりません。</p><button class="primary">保存</button></form>
 <h2>履歴</h2><div class="history"><h3>プロトコル</h3>${table(['revision', '保存日時', '内容', 'SHA-256'], view.protocolHistory.map(h => [h.revision, h.savedAt, h.protocol, h.sha256]))}
 <h3>受付モード</h3>${table(['revision', '保存日時', '受付モード', 'プロトコル revision'], view.modeHistory.map(h => [h.revision, h.savedAt, h.value, h.protocolRevision]))}</div>`);
+}
+
+/** Researcher-only catalogue of the candidate figure bank and sets. Never offered to a participant or model. */
+function figureSvg(figure: BankFigure): string {
+  const SCALE = 24, PAD = 12, points = figure.pieces.flatMap(piece => piece.points);
+  const minX = Math.min(...points.map(q => q[0])), minY = Math.min(...points.map(q => q[1]));
+  const w = Math.max(...points.map(q => q[0])) - minX, h = Math.max(...points.map(q => q[1])) - minY;
+  const polygons = figure.pieces.map(piece => `<polygon points="${piece.points.map(([x, y]) => `${(x - minX) * SCALE + PAD},${(y - minY) * SCALE + PAD}`).join(' ')}"/>`).join('');
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w * SCALE + 2 * PAD}" height="${h * SCALE + 2 * PAD}" viewBox="0 0 ${w * SCALE + 2 * PAD} ${h * SCALE + 2 * PAD}" role="img" aria-label="${escapeHtml(figure.id)}">${polygons}</svg>`;
+}
+export function renderFigures(): string {
+  const cell = (figure: BankFigure) => `<figure><div class="figure-art">${figureSvg(figure)}</div><figcaption>${escapeHtml(figure.id)}</figcaption></figure>`;
+  const byId = new Map(FIGURE_BANK.map(f => [f.id, f]));
+  const sets = Object.entries(FIGURE_SETS).map(([id, ids]) => `<h3>${escapeHtml(id)}</h3><div class="figure-grid">${ids.map(fid => byId.get(fid)).filter((f): f is BankFigure => Boolean(f)).map(cell).join('')}</div>`).join('');
+  return page('図形一覧', `${adminNav('/admin/figures')}<h1>図形一覧</h1>
+<p class="muted">候補バンク（${escapeHtml(FIGURE_BANK_VERSION)}）と候補セットは予備検討用です。実験条件への採用は研究者が判断します。</p>
+<h2>全${FIGURE_BANK.length}図形</h2><div class="figure-grid">${FIGURE_BANK.map(cell).join('')}</div>
+<h2>候補セット</h2>${sets}`);
 }
