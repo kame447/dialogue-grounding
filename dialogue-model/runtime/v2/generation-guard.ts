@@ -257,25 +257,29 @@ const clauseBreak = /(?<=[。!?]|(?:ですが|ますが|ませんが|ました�
 export const HOLISTIC_V5_VIEWPOINT_RULE = "形の確認・説明には、回転しても変わらない形や部分同士の関係を優先してください。選択済みの特徴は自分側の観察に基づく根拠です。方位が弁別に必要なときは、自分側の図形の見え方だと同じ節で明示し、相手には形の対応を尋ねてください。相手側の位置や向きを自分側と同じだと断定せず、相手の方位には相手が述べた見え方として触れるか、相手の見え方を尋ねてください。";
 const partnerView = /(?:そちら|相手)(?:の(?:画面|図形|側))?(?:で(?:は|も)|も)(?!なく|ない)/u;
 const ownView = /(?:こちら|私|わたし|自分)(?:の(?:画面|図形|側))?(?:で(?:は|も)|から見ると)/u;
+const ownColloquialView = /(?:こちら|私|わたし|自分)(?:の(?:画面|側|向き|見方|図形|方)|側)?だと/u;
 const sameFrame = /同じ(?:位置|向き|方向)/u;
-const assertionEnd = /(?:あります|見えます|付いています|ついています|出ています|向いています|です|だ)(?:ね|よ)?[。.!]?$/u;
-const negativeEnd = /(?:ではない|じゃない|ません)です(?:ね|よ)?[。.!]?$/u;
+const questionEnd = /[か?][。.]?$/u;
+const attributedView = /と(?:いう|言っ|おっしゃ|聞い|説明|伺|述べ|話し)/u;
+const deniesSameFrame = /同じ(?:位置|向き|方向)(?:では|じゃ)(?:ない|ありません)(?:です)?(?:ね|よ)?[。.!]?$/u;
 
 function assertsPartnerOrientation(clause: string): boolean {
   const match = partnerView.exec(clause);
   if (!match) return false;
-  const statement = clause.slice(match.index + match[0].length).split(ownView, 1)[0];
-  return (orientationWords.test(statement) || sameFrame.test(statement)) && assertionEnd.test(statement) && !negativeEnd.test(statement)
-    && !/と(?:いう|言っ|おっしゃ|聞い|説明)/u.test(statement);
+  const statement = clause.slice(match.index + match[0].length).split(ownView, 1)[0].split(ownColloquialView, 1)[0];
+  return (orientationWords.test(statement) || sameFrame.test(statement)) &&
+    !questionEnd.test(statement) && !attributedView.test(statement) && !deniesSameFrame.test(statement);
 }
 
 /** Check unmarked directions and, in holistic_v5, explicit assertions about the partner's orientation. */
 export function findOrientationLeaks(text: string, policy?: DialoguePolicy): string[] {
   const unquoted = normalize(text).replace(/「[^」]*」|『[^』]*』/gu, "「」");
   const clauses = unquoted.split(clauseBreak);
+  const v5 = policy === "holistic_v5";
   return [
-    ...(clauses.some(clause => orientationWords.test(clause) && !viewpointStated.test(clause)) ? ["orientation_leak"] : []),
-    ...(policy === "holistic_v5" && clauses.some(assertsPartnerOrientation) ? ["shared_view_assumption"] : []),
+    ...(clauses.some(clause => orientationWords.test(clause) && !viewpointStated.test(clause) &&
+      !(v5 && (ownColloquialView.test(clause) || partnerView.test(clause)))) ? ["orientation_leak"] : []),
+    ...(v5 && clauses.some(assertsPartnerOrientation) ? ["shared_view_assumption"] : []),
   ];
 }
 
