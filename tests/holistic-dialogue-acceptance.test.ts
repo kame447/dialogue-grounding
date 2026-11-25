@@ -833,7 +833,7 @@ test('New v5 keeps the input pending after two orientation violations and publis
     const before = trial.record();
     const turn = await trial.say({ ...broad, drafts: ['上端に穴があります。', '右端に穴があります。'] });
     assert.equal(turn.generationRequests.length, 2);
-    assert.equal(turn.trace.generationRetryVersion, 'jev_generation_retry_v10'); // the default of a new v5 trial
+    assert.equal(turn.trace.generationRetryVersion, 'jev_generation_retry_v11'); // the default of a new v5 trial
     assert.equal(turn.trace.errorCode, 'unsafe_generation');
     assert.equal(turn.trace.publicSpeech, null);
     assert.equal(turn.speech, null);
@@ -1236,7 +1236,7 @@ for (const strategy of strategies) {
 
 // Audit v9 (generation guard: the forms accepted as an own-side marker or a quotation of the partner's words).
 // Synthetic sentences only. v9 accepts the forms; v8 keeps its earlier judgment; the guard's standard itself is unchanged in both.
-const v8 = 'jev_generation_retry_v8', v9 = 'jev_generation_retry_v9', v10 = 'jev_generation_retry_v10';
+const v8 = 'jev_generation_retry_v8', v9 = 'jev_generation_retry_v9', v10 = 'jev_generation_retry_v10', v11 = 'jev_generation_retry_v11';
 async function pairedAs(version: string, check: (trial: ReturnType<typeof session>, strategy: Strategy) => Promise<void>) {
   const runs = await Promise.allSettled(strategies.map(async strategy => {
     const trial = session(strategy);
@@ -1313,7 +1313,7 @@ for (const [label, draft, code] of bothRejected) {
 test('Audit v9 v10 is the version a new holistic_v5 trial starts with, and a v8 record keeps v8 across a restore', async () => {
   await paired(async trial => {
     const turn = await trial.say({ ...broad, drafts: ['上端に穴があります。', '右端に穴があります。'] });
-    assert.equal(turn.trace.generationRetryVersion, v10);
+    assert.equal(turn.trace.generationRetryVersion, v11);
   });
   await pairedAs(v8, async trial => {
     await trial.restore();

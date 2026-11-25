@@ -13,8 +13,8 @@ const v8 = 'jev_generation_retry_v8', v9 = 'jev_generation_retry_v9', v10 = 'jev
 const said = ['こちらの図では、輪の切れ目から左下へ向かって、とがった左向きの先が見えます。'];
 const leaks = (text: string, version: string, human: readonly string[] = said) => findOrientationLeaks(text, 'holistic_v5', version as any, human);
 
-test('v10 is the default of a new v5 trial and contains v9', () => {
-  assert.equal(defaultGenerationRetryVersion('two_stage_v3', 'holistic_v5'), v10);
+test('v10 contains v9 (v11 is now the default of a new v5 trial)', () => {
+  assert.equal(defaultGenerationRetryVersion('two_stage_v3', 'holistic_v5'), 'jev_generation_retry_v11');
   assert.deepEqual([v8, v9, v10].map(isGenerationV9), [false, true, true]);
   assert.deepEqual([v8, v9, v10].map(isGenerationV10), [false, false, true]);
 });
@@ -59,13 +59,13 @@ for (const label of ['bypass-enabled', 'repair-first'] as const) {
     buildRecords({ label, dialoguePolicy: 'holistic_v5', ...(version ? { generationRetryVersion: version as any } : {}), technicalTrial: { version: 'adaptive_repair_v3' }, turns: turns(human, drafts) });
   const human = said[0];
   test(`${label}: a v10 trial publishes the quotation of a word the participant said on the first draft, and rewrites one they never said; S4 and replay agree`, async () => {
-    const ok = await build(undefined, human, [quotesWhatWasSaid[2], confirming]);
+    const ok = await build(v10, human, [quotesWhatWasSaid[2], confirming]);
     const a = ok.trials[0].attempts[0];
     assert.equal(a.generationRetryVersion, v10);
     assert.deepEqual(a.generationGuard, { violations: [], regenerated: false, fallback: false });
     assert.equal(a.publicSpeech, quotesWhatWasSaid[2]);
     assert.deepEqual(statuses(ok), ['pass', 'pass', 'pass', 'pass']);
-    const held = await build(undefined, human, [notSaid[0], confirming]);
+    const held = await build(v10, human, [notSaid[0], confirming]);
     const b = held.trials[0].attempts[0];
     assert.equal(b.generationGuard.regenerated, true);
     assert.equal(b.publicSpeech, confirming);
