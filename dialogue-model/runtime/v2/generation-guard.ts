@@ -300,13 +300,19 @@ const explicitOwnView = /(?:(?:こちら|私|わたし|自分|僕|ぼく)の(?:�
 const explicitPartnerView = /(?:そちら|相手)の(?:画像|見え方)(?:では(?!なく|ない|なかっ|なけれ|じゃな)|だと)/u;
 const v5ExpandedViewpoint = new RegExp("(?<own>" + v5OwnView.source + "|" + explicitOwnView.source + ")|" +
   v5PartnerView.source + "|" + explicitPartnerView.source, "gu");
+// jev_generation_retry_v5: a clause that opens with "こちらは / こちらにも" is about this side, "そちらは" about the partner's side.
+const ownTopicView = /こちら(?:は|にも|の図形は)/u;
+const partnerTopicView = /そちら(?:は|の図形は)/u; // そちらにも already matches v5PartnerView.
+const v5TopicViewpoint = new RegExp(
+  "(?<own>" + v5OwnView.source + "|" + explicitOwnView.source + "|" + ownTopicView.source + ")|" +
+  v5PartnerView.source + "|" + explicitPartnerView.source + "|" + partnerTopicView.source, "gu");
 const screenComparison = /(?:こちら|私|わたし|自分|そちら|相手)(?:の(?:画面|図形|側|位置|向き|方向)|側)?と[、,]?$/u;
 const questionEnd = /(?:\?|か(?:ね)?[。、,.]?)$/u;
 // The first qualifier after a term belongs to that description. A later question cannot undo a causal premise.
 const descriptionQualifier = /と(?:のこと|教えて|いう(?!前提|仮定|想定)|言っ|おっしゃ|聞い|説明|伺|述べ|話し)|なら|(?:の)?であれば|とすると|とすれば|とは限(?:らな|りませ)|(?:では|じゃ)(?:な(?:い|く)|ありませ)|(?<cause>ので|(?:だ|です|ます|ある|いる|見える)から|から(?=[、,]|$)|ため)/u;
 
-function v5OrientationLeaks(text: string, expanded: boolean): string[] {
-  const markers = expanded ? v5ExpandedViewpoint : v5Viewpoint;
+function v5OrientationLeaks(text: string, expanded: boolean, topic = false): string[] {
+  const markers = topic ? v5TopicViewpoint : expanded ? v5ExpandedViewpoint : v5Viewpoint;
   const terms = expanded ? v5ExpandedOrientationTerms : v5OrientationTerms;
   const descriptionBreak = expanded ? v5DescriptionBreak : v5ContinuationBreak;
   let unmarked = false, partnerAssertion = false;
@@ -336,7 +342,7 @@ function v5OrientationLeaks(text: string, expanded: boolean): string[] {
 /** Check unmarked directions and, in holistic_v5, explicit assertions about the partner's orientation. */
 export function findOrientationLeaks(text: string, policy?: DialoguePolicy, version = defaultGenerationRetryVersion("two_stage_v3", policy)): string[] {
   const unquoted = normalize(text).replace(/「[^」]*」|『[^』]*』/gu, "「」");
-  if (policy === "holistic_v5") return v5OrientationLeaks(unquoted, hasVersionedViewpoint(version));
+  if (policy === "holistic_v5") return v5OrientationLeaks(unquoted, hasVersionedViewpoint(version), isGenerationV5(version));
   return unquoted.split(clauseBreak).some(clause => orientationWords.test(clause) && !viewpointStated.test(clause))
     ? ["orientation_leak"] : [];
 }

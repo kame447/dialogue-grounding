@@ -21,6 +21,10 @@ const needsRewrite = [
   { draft: 'そちらの画像では右端に小さな穴が見えます。', codes: ['shared_view_assumption'] },
   { draft: 'そちらの画面では右端に切れ目が見えますが、左側に小さな穴もあります。', codes: ['shared_view_assumption'] },
   { draft: '上の中央に丸い穴がありますか？', codes: ['orientation_leak'] },
+  { draft: 'そちらは左側に浅いくぼみが見えます。', codes: ['shared_view_assumption'] },
+  { draft: 'そちらにも上端に長い棒が見えます。', codes: ['shared_view_assumption'] },
+  { draft: 'こちらは細い棒が見えます。左側に浅いくぼみがあります。', codes: ['orientation_leak'] },
+  { draft: 'こちらは左端に穴があり、そちらの図形は右端に穴があります。', codes: ['shared_view_assumption'] },
 ];
 const safe = [
   selfView,
@@ -50,6 +54,10 @@ const safe = [
   'そちらの画面で右端に切れ目があるのであれば、その切れ目の形を教えてください。',
   'そちらで右端に切れ目があるとすると、細い棒もつながっていますか？',
   '二つの突起が同じ方向に傾いて並ぶかは判断しきれません。根元はつながっていますか？',
+  'こちらは左側に浅いくぼみが見えます。',
+  'こちらにも上端に長い棒が見えます。',
+  'こちらの図形は右端に丸い穴が見えます。',
+  'こちらは左端に穴があり、そちらは右端に穴がありますか？',
 ];
 const scopeChecks = (records: any) =>
   verifyRecords(records).checks.filter(check => /^intervention\.trial\.0\.attempt\.0\./u.test(check.id)).map(check => check.status);
@@ -63,6 +71,17 @@ test('v4 keeps its saved orientation rules', () => {
 
 test('v5 attaches viewpoint and clause qualifiers to the directional terms they cover', () => {
   const legacy = 'jev_generation_retry_v2';
+  // the topic markers belong to jev_generation_retry_v5 only: v4 reads these clauses as before
+  const v4 = 'jev_generation_retry_v4';
+  for (const cue of ['こちらは', 'こちらにも', 'こちらの図形は']) {
+    assert.deepEqual(findOrientationLeaks(cue + '右端に小さな穴があります。', 'holistic_v5', v4), ['orientation_leak']);
+    assert.deepEqual(findOrientationLeaks(cue + '右端に小さな穴があります。', 'holistic_v5', 'jev_generation_retry_v5'), []);
+  }
+  assert.deepEqual(findOrientationLeaks('そちらは右端に小さな穴があります。', 'holistic_v5', v4), ['orientation_leak']);
+  assert.deepEqual(findOrientationLeaks('そちらは右端に小さな穴があります。', 'holistic_v5', 'jev_generation_retry_v5'), ['shared_view_assumption']);
+  for (const cue of ['こちらは', 'こちらにも', 'こちらの図形は', 'そちらは']) {
+    assert.deepEqual(findOrientationLeaks(cue + '右端に小さな穴があります。', 'holistic_v5', legacy), ['orientation_leak']);
+  }
   assert.deepEqual(findOrientationLeaks('こっちでは右端に丸い穴が見えるよ。', 'holistic_v5', legacy), ['orientation_leak']);
   assert.deepEqual(findOrientationLeaks('上の中央に丸い穴がありますか？', 'holistic_v5', legacy), []);
   assert.deepEqual(findOrientationLeaks('そちらでは右端に切れ目がありますが、その切れ目は見えますか？', 'holistic_v5'),

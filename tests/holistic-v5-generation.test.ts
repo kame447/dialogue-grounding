@@ -75,19 +75,23 @@ for (const label of ['bypass-enabled', 'repair-first'] as const) {
   });
 
   test(`holistic_v5 ${label}: only a selected feature with orientation wording gets the adjacent viewpoint note`, async () => {
-    const note = '以下のdiscriminatingFeatureにある上下左右・横長などの向きの語は、自分側の画面での見え方です。公開発話では、回転しても変わらない形や部分同士のつながりに言い換えてください。向きが区別に必要なら、その語と同じ節で「こちらの画面では」などと自分側の見え方だと明示し、相手には形の対応を尋ねてください。';
+    const previousNote = '以下のdiscriminatingFeatureにある上下左右・横長などの向きの語は、自分側の画面での見え方です。公開発話では、回転しても変わらない形や部分同士のつながりに言い換えてください。向きが区別に必要なら、その語と同じ節で「こちらの画面では」などと自分側の見え方だと明示し、相手には形の対応を尋ねてください。';
+    const confirmNote = '以下のdiscriminatingFeatureは自分側の観察です。選ばれた特徴を確かめるのに必要な形や部分同士のつながりを、回転しても変わらない表現で優先して伝えてください。別の特徴を列挙したり、相手が使った方位を自分側の観察として写したりしないでください。方位が区別に必要な箇所では、その語と同じ節で、その語より前に「こちらの画面では」など自分側の見え方を明示する標識を置き、相手には形の対応を尋ねてください。別の節や文にある標識に頼らないでください。';
     const statuses = (records: any) => verifyRecords(records).checks.filter(c => /^intervention\.trial\.0\.attempt\.0\./u.test(c.id)).map(c => c.status);
-    for (const [feature, annotated] of [
-      ['左端に横長の部分がつながる', true],
-      ['こちらの画面では右端に切れ目があります', true],
-      ['切れ目と細い棒がつながる', false],
+    for (const [feature, action, generationRetryVersion, note] of [
+      ['左端に横長の部分がつながる', 'confirm', 'jev_generation_retry_v5', confirmNote],
+      ['こちらの画面では右端に切れ目があります', 'confirm', 'jev_generation_retry_v5', confirmNote],
+      ['切れ目と細い棒がつながる', 'confirm', 'jev_generation_retry_v5', null],
+      ['左端に横長の部分がつながる', 'confirm', 'jev_generation_retry_v4', previousNote], // v4 keeps its note
+      ['左端に横長の部分がつながる', 'confirm', 'jev_generation_retry_v2', previousNote],
+      ['左端に横長の部分がつながる', 'repair', 'jev_generation_retry_v5', previousNote],
     ] as const) {
       const memo = structuredClone(OLD.state.observationMemo);
       memo.figures.find((figure: {id: string}) => figure.id === OWN.ownAnchors[0].id).analytic.shapes[0] = feature;
       memo.figures.find((figure: {id: string}) => figure.id === OWN.ownAnchors[1].id).analytic.shapes[0] = '右上に突起がある';
-      const records = await buildRecords({ label, dialoguePolicy: 'holistic_v5', memo,
+      const records = await buildRecords({ label, dialoguePolicy: 'holistic_v5', generationRetryVersion, memo,
         technicalTrial: { version: 'adaptive_repair_v3' }, turns: [{ human: 'この形の特徴を教えてください。',
-          plan: { action: 'confirm', target: 'figure_0', drafts: ['右端に切れ目がある形ですか？', '切れ目がある形ですか？'] } }] });
+          plan: { action, target: 'figure_0', drafts: ['右端に切れ目がある形ですか？', '切れ目がある形ですか？'] } }] });
       const trial = records.trials[0];
       assert.deepEqual(statuses(records), ['pass', 'pass', 'pass', 'pass']);
       assert.equal(trial.attempts[0].executed.feature, feature);
@@ -97,11 +101,12 @@ for (const label of ['bypass-enabled', 'repair-first'] as const) {
         const act = initial.payload.messages[2].content;
         const lines = act.split('\n');
         assert.equal(JSON.parse(lines.at(-1)).discriminatingFeature, feature);
-        assert.equal(lines.at(-2) === note, annotated);
-        assert.equal(lines.includes(note), annotated);
+        assert.equal(lines.includes(previousNote), note === previousNote);
+        assert.equal(lines.includes(confirmNote), note === confirmNote);
+        if (note) assert.equal(lines.at(-2), note);
         assert.ok(retry.payload.messages.at(-1).content.includes(act));
       }
-      if (annotated) {
+      if (note) {
         const tampered = structuredClone(records);
         const otherIndex = sides.findIndex((side: any) => side.label !== label);
         const other = tampered.trials[0].replay[0].result.sides[otherIndex];

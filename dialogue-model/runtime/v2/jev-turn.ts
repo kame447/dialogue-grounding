@@ -52,6 +52,7 @@ const ACCEPT_FEATURE_REPLY_V5 = "acceptで相手が図形の有無や特定の�
 const CONFIRM_NAMING_REQUEST_V5 = "判断で選ばれた対象について、その特徴だけを確かめてください。相手が出した呼び名を採用・再提案しないでください。その案に触れる場合は、相手の提案だと分かる引用に留めてください。";
 const NAMING_CONFLICT_V5 = "選ばれた図形にはすでに合意済みの名前（agreedName）があり、今回の相手の案（proposedNames）とは異なります。選ばれた行動で対象を確かめる際は、相手が同じ図形と別の図形のどちらについて話しているかを確かめてください。この案を採用して合意済みの名前を変更しないでください。明示的な改名は、判断が選んだrepairの範囲で扱います。";
 const FEATURE_VIEWPOINT_V5 = "以下のdiscriminatingFeatureにある上下左右・横長などの向きの語は、自分側の画面での見え方です。公開発話では、回転しても変わらない形や部分同士のつながりに言い換えてください。向きが区別に必要なら、その語と同じ節で「こちらの画面では」などと自分側の見え方だと明示し、相手には形の対応を尋ねてください。";
+const CONFIRM_FEATURE_VIEWPOINT_V5 = "以下のdiscriminatingFeatureは自分側の観察です。選ばれた特徴を確かめるのに必要な形や部分同士のつながりを、回転しても変わらない表現で優先して伝えてください。別の特徴を列挙したり、相手が使った方位を自分側の観察として写したりしないでください。方位が区別に必要な箇所では、その語と同じ節で、その語より前に「こちらの画面では」など自分側の見え方を明示する標識を置き、相手には形の対応を尋ねてください。別の節や文にある標識に頼らないでください。";
 // two_stage_v3 only (new text, not yet reviewed by Argon): a revisit whose target stays a candidate set.
 export const REVISIT_MULTIPLE_INSTRUCTIONS = "対象は複数候補のままです。選ばれた行動は、先ほどの未解決の区別に戻ることだけです。どの候補かを勝手に一つに絞らず、名前に決まったとは言わないでください。候補の数や内部の参照IDは相手に伝えず、相手が知らないことを知っているかのようにも話さないでください。";
 const DETAIL_INSTRUCTIONS = "対象は複数候補のままです。detailFigureIdsは選ばれた特徴の出典図形であり、対象の確定ではありません。その特徴を候補すべての性質にせず、候補を勝手に一つに絞らずに確認・修復を表現してください。";
@@ -991,9 +992,10 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
           namingIntervalEstimates(state.judgments, latest.seq, baseInput.humanReferent),
           inheritedTargetClaimIds(prepared.research?.verification?.diagnostics))
         : null;
-      const featureViewpoint = options.dialoguePolicy === "holistic_v5" && judgment.discriminatingFeature !== null &&
-        hasOrientationWords(judgment.discriminatingFeature, generationRetryVersion) ? FEATURE_VIEWPOINT_V5 + "\n" : "";
       const versionedGeneration = hasVersionedViewpoint(generationRetryVersion);
+      const featureViewpoint = options.dialoguePolicy === "holistic_v5" && judgment.discriminatingFeature !== null &&
+        hasOrientationWords(judgment.discriminatingFeature, generationRetryVersion)
+        ? (isGenerationV5(generationRetryVersion) && judgment.action === "confirm" ? CONFIRM_FEATURE_VIEWPOINT_V5 : FEATURE_VIEWPOINT_V5) + "\n" : "";
       const reconfirmName = versionedGeneration && judgment.action === "accept" && record.namingReconfirm === true;
       const namingState = versionedGeneration ? Object.keys(state.ledger).sort().map(figureId => ({
         figureId, status: state.ledger[figureId].status, name: state.ledger[figureId].name,
