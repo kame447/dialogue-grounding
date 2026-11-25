@@ -1,6 +1,13 @@
 import { createHash } from 'node:crypto';
+import { PARTICIPANT_PRODUCTION_PROFILE, type ParticipantProductionProfile } from '../web/participant-usage-policy.ts';
 import type { Strategy } from './base-assignment.ts';
+import type { BudgetLimits } from '../diagnostics/parity-live/audit.ts';
+import { DEFAULT_COST_CAP_USD } from '../diagnostics/jev-shadow-eval/local-openrouter.ts';
+import { validateParticipantModelPin } from './participant-model-pin.ts';
+import type { ParticipantModelPin } from './participant-model-pin.ts';
 import { ROTATION_MODES as STIMULUS_ROTATION_MODES } from '../stimuli/scatter-v2.mjs';
+import { FIGURE_SETS, resolveFigureSelection, validateResolvedFigureSelection } from '../stimuli/figure-bank.ts';
+import type { ResolvedFigureSelection } from '../stimuli/figure-bank.ts';
 
 export type ReceptionProtocol = { schemaVersion: 'reception_protocol_v1'; protocolId: string; revision: number;
   allowedOrders: Strategy[][]; seedPolicy: 'shared' | 'per_trial'; referenceMemory: boolean;
@@ -15,10 +22,28 @@ export type ReceptionProtocolV2 = { schemaVersion: 'reception_protocol_v2'; prot
   betweenTrials: BetweenTrials; receptionNumberFormat: 'daily_seq3'; rotationMode: RotationMode };
 export type ReceptionPlanV1 = { schemaVersion: 'reception_plan_v1'; protocolId: string; protocolRevision: number;
   protocolSha256: string; order: Strategy[]; trials: { index: number; strategy: Strategy; seed: number; referenceMemory: boolean }[]; approvedAt: string };
-export type ReceptionPlanV2 = { schemaVersion: 'reception_plan_v2'; protocolId: string; protocolRevision: number;
+type ParticipantPlanSettings = {
+  participantModelPin?: ParticipantModelPin;
+  participantLimits?: Readonly<BudgetLimits>;
+  participantRuntimeProfile?: ParticipantProductionProfile;
+};
+export type ReceptionPlanV2 = ParticipantPlanSettings & { schemaVersion: 'reception_plan_v2'; protocolId: string; protocolRevision: number;
   protocolSha256: string; order: Strategy[]; betweenTrials: BetweenTrials; approvedAt: string;
   trials: { index: number; strategy: Strategy; seed: number; referenceMemory: boolean; rotationMode: RotationMode }[] };
-export type ReceptionPlan = ReceptionPlanV1 | ReceptionPlanV2;
+export type FigureSetPolicy = 'shared' | 'per_trial';
+/** Researcher-chosen figure source. `selectionSeed: null` asks the approval step to draw one seed. */
+export type ProtocolFigureSelection =
+  | { mode: 'preset'; setId: string }
+  | { mode: 'seeded_random'; selectionSeed: number | null }
+  | { mode: 'custom'; figureIds: readonly string[] };
+export type ReceptionProtocolV3 = { schemaVersion: 'reception_protocol_v3'; protocolId: string; revision: number;
+  allowedOrders: Strategy[][]; seedPolicy: 'shared' | 'per_trial'; referenceMemory: boolean;
+  betweenTrials: BetweenTrials; receptionNumberFormat: 'daily_seq3'; rotationMode: RotationMode;
+  figureSelection: ProtocolFigureSelection; figureSetPolicy: FigureSetPolicy };
+export type ReceptionPlanV3 = ParticipantPlanSettings & { schemaVersion: 'reception_plan_v3'; protocolId: string; protocolRevision: number;
+  protocolSha256: string; order: Strategy[]; betweenTrials: BetweenTrials; approvedAt: string;
+  trials: { index: number; strategy: Strategy; seed: number; referenceMemory: boolean; rotationMode: RotationMode; figureSelection: ResolvedFigureSelection }[] };
+export type ReceptionPlan = ReceptionPlanV1 | ReceptionPlanV2 | ReceptionPlanV3;
 /** The protocol version a researcher saw when choosing an order. */
 export type DisplayedProtocol = { protocolId: string; revision: number; sha256: string };
 export type ReceptionStatus = 'pending' | 'approved' | 'in_progress' | 'finished' | 'cancelled';
@@ -45,6 +70,12 @@ function object(value: unknown, keys: string[]): Record<string, any> {
   if (names.length !== keys.length || names.some(k => typeof k !== 'string' || !keys.includes(k))) return fail();
   for (const key of keys) { const d = Object.getOwnPropertyDescriptor(value, key); if (!d || !Object.hasOwn(d, 'value') || !d.enumerable) return fail(); }
   return value as Record<string, any>;
+}
+export function validateParticipantLimits(value: unknown): Readonly<BudgetLimits> {
+  const { lunaCalls, lunaTokens, lunaPosts, jevPosts, jevUsd } = object(value, ['lunaCalls','lunaTokens','lunaPosts','jevPosts','jevUsd']);
+  if ([lunaCalls, lunaTokens, lunaPosts, jevPosts].some(v => !int(v) || v < 1) ||
+      typeof jevUsd !== 'number' || !Number.isFinite(jevUsd) || jevUsd <= 0 || jevUsd > DEFAULT_COST_CAP_USD) return fail();
+  return Object.freeze({ lunaCalls, lunaTokens, lunaPosts, jevPosts, jevUsd });
 }
 function order(value: unknown): Strategy[] {
   if (!Array.isArray(value) || value.length < 1 || value.length > 2 || value.some(v => !strategy(v)) || new Set(value).size !== value.length) return fail();
@@ -80,25 +111,101 @@ export function validateReceptionProtocolV2(value: unknown): ReceptionProtocolV2
   } catch { return fail('protocol_unconfigured'); }
 }
 export function canonicalReceptionProtocolV2(value: unknown): string { return JSON.stringify(validateReceptionProtocolV2(value)); }
+function protocolFigureSelection(value: unknown): ProtocolFigureSelection {
+  const head = object(value, Array.isArray((value as { figureIds?: unknown } | null)?.figureIds) ? ['mode','figureIds']
+    : value && typeof value === 'object' && 'setId' in value ? ['mode','setId'] : ['mode','selectionSeed']);
+  if (head.mode === 'preset') {
+    if (typeof head.setId !== 'string' || !Object.hasOwn(FIGURE_SETS, head.setId)) return fail();
+    return { mode: 'preset', setId: head.setId };
+  }
+  if (head.mode === 'seeded_random') {
+    if (head.selectionSeed !== null && !int(head.selectionSeed)) return fail();
+    return { mode: 'seeded_random', selectionSeed: head.selectionSeed };
+  }
+  if (head.mode === 'custom') {
+    try { return { mode: 'custom', figureIds: [...resolveFigureSelection({ mode: 'custom', figureIds: head.figureIds }).figureIds] }; } catch { return fail(); }
+  }
+  return fail();
+}
+/** v3 adds the figure source and its policy; neither is ever defaulted. */
+export function validateReceptionProtocolV3(value: unknown): ReceptionProtocolV3 {
+  try {
+    const p = object(value, ['schemaVersion','protocolId','revision','allowedOrders','seedPolicy','referenceMemory','betweenTrials','receptionNumberFormat','rotationMode','figureSelection','figureSetPolicy']);
+    if (p.schemaVersion !== 'reception_protocol_v3' || !uuid.test(p.protocolId) || !int(p.revision) || p.revision < 1 ||
+      !Array.isArray(p.allowedOrders) || !p.allowedOrders.length || !['shared','per_trial'].includes(p.seedPolicy) ||
+      typeof p.referenceMemory !== 'boolean' || !between(p.betweenTrials) || p.receptionNumberFormat !== 'daily_seq3' || !rotation(p.rotationMode) ||
+      !['shared','per_trial'].includes(p.figureSetPolicy)) return fail();
+    const allowedOrders = p.allowedOrders.map(order);
+    if (new Set(allowedOrders.map(o => o.join(','))).size !== allowedOrders.length) return fail();
+    const figureSelection = protocolFigureSelection(p.figureSelection);
+    // A preset or custom set is one fixed set, so it cannot be redrawn per trial.
+    if (figureSelection.mode !== 'seeded_random' && p.figureSetPolicy !== 'shared') return fail();
+    return { schemaVersion: 'reception_protocol_v3', protocolId: p.protocolId, revision: p.revision, allowedOrders,
+      seedPolicy: p.seedPolicy, referenceMemory: p.referenceMemory, betweenTrials: p.betweenTrials,
+      receptionNumberFormat: p.receptionNumberFormat, rotationMode: p.rotationMode, figureSelection, figureSetPolicy: p.figureSetPolicy };
+  } catch { return fail('protocol_unconfigured'); }
+}
+export function canonicalReceptionProtocolV3(value: unknown): string { return JSON.stringify(validateReceptionProtocolV3(value)); }
 export const receptionProtocolSha256 = (canonical: string): string => createHash('sha256').update(canonical).digest('hex');
+const PLAN_KEYS = ['schemaVersion','protocolId','protocolRevision','protocolSha256','order','betweenTrials','trials','approvedAt'];
+function participantPlan(value: unknown) {
+  const fields = value && typeof value === 'object' ? value : {};
+  const hasPin = Object.hasOwn(fields, 'participantModelPin');
+  const hasLimits = Object.hasOwn(fields, 'participantLimits');
+  const hasProfile = Object.hasOwn(fields, 'participantRuntimeProfile');
+  if ((hasLimits || hasProfile) && !hasPin || hasLimits && hasProfile) return fail();
+  const p = object(value, [...PLAN_KEYS,
+    ...(hasPin ? ['participantModelPin'] : []), ...(hasLimits ? ['participantLimits'] : []),
+    ...(hasProfile ? ['participantRuntimeProfile'] : [])]);
+  if (hasProfile && p.participantRuntimeProfile !== PARTICIPANT_PRODUCTION_PROFILE) return fail();
+  const pin = hasPin ? validateParticipantModelPin(p.participantModelPin) : undefined;
+  const limits = hasLimits ? validateParticipantLimits(p.participantLimits) : undefined;
+  const participant: ParticipantPlanSettings = {
+    ...(pin ? { participantModelPin: pin } : {}),
+    ...(limits ? { participantLimits: limits } : {}),
+    ...(hasProfile ? { participantRuntimeProfile: PARTICIPANT_PRODUCTION_PROFILE } : {}),
+  };
+  return { p, participant };
+}
 function validatePlanV2(value: unknown): ReceptionPlanV2 {
-  const p = object(value, ['schemaVersion','protocolId','protocolRevision','protocolSha256','order','betweenTrials','trials','approvedAt']);
+  const { p, participant } = participantPlan(value);
   const strategies = order(p.order);
   if (p.schemaVersion !== 'reception_plan_v2' || !uuid.test(p.protocolId) || !int(p.protocolRevision) || p.protocolRevision < 1 ||
     typeof p.protocolSha256 !== 'string' || !owner.test(p.protocolSha256) || !iso(p.approvedAt) || !between(p.betweenTrials) ||
     !Array.isArray(p.trials) || p.trials.length !== strategies.length) return fail();
   const trials = p.trials.map((raw: unknown, index: number) => {
     const t = object(raw, ['index','strategy','seed','referenceMemory','rotationMode']);
-    if (t.index !== index || t.strategy !== strategies[index] || !int(t.seed) || typeof t.referenceMemory !== 'boolean' || !rotation(t.rotationMode)) return fail();
+    if (t.index !== index || t.strategy !== strategies[index] || !int(t.seed) || typeof t.referenceMemory !== 'boolean' || participant.participantModelPin && !t.referenceMemory || !rotation(t.rotationMode)) return fail();
     return { index, strategy: strategies[index], seed: t.seed, referenceMemory: t.referenceMemory, rotationMode: t.rotationMode as RotationMode };
   });
   return { schemaVersion: 'reception_plan_v2', protocolId: p.protocolId, protocolRevision: p.protocolRevision,
-    protocolSha256: p.protocolSha256, order: strategies, betweenTrials: p.betweenTrials, approvedAt: p.approvedAt, trials };
+    protocolSha256: p.protocolSha256, order: strategies, betweenTrials: p.betweenTrials, approvedAt: p.approvedAt, trials,
+    ...participant };
+}
+function resolvedSelection(value: unknown): ResolvedFigureSelection {
+  object(value, ['bankVersion','mode','setId','selectionSeed','figureIds']);
+  try { return validateResolvedFigureSelection(value); } catch { return fail(); }
+}
+function validatePlanV3(value: unknown): ReceptionPlanV3 {
+  const { p, participant } = participantPlan(value);
+  const strategies = order(p.order);
+  if (p.schemaVersion !== 'reception_plan_v3' || !uuid.test(p.protocolId) || !int(p.protocolRevision) || p.protocolRevision < 1 ||
+    typeof p.protocolSha256 !== 'string' || !owner.test(p.protocolSha256) || !iso(p.approvedAt) || !between(p.betweenTrials) ||
+    !Array.isArray(p.trials) || p.trials.length !== strategies.length) return fail();
+  const trials = p.trials.map((raw: unknown, index: number) => {
+    const t = object(raw, ['index','strategy','seed','referenceMemory','rotationMode','figureSelection']);
+    if (t.index !== index || t.strategy !== strategies[index] || !int(t.seed) || typeof t.referenceMemory !== 'boolean' || participant.participantModelPin && !t.referenceMemory || !rotation(t.rotationMode)) return fail();
+    return { index, strategy: strategies[index], seed: t.seed, referenceMemory: t.referenceMemory, rotationMode: t.rotationMode as RotationMode,
+      figureSelection: resolvedSelection(t.figureSelection) };
+  });
+  return { schemaVersion: 'reception_plan_v3', protocolId: p.protocolId, protocolRevision: p.protocolRevision,
+    protocolSha256: p.protocolSha256, order: strategies, betweenTrials: p.betweenTrials, approvedAt: p.approvedAt, trials, ...participant };
 }
 /** Each saved plan version is validated strictly by its own schema; v1 keeps its exact shape. */
 export function validateReceptionPlan(value: unknown): ReceptionPlan {
   try {
     if (value && typeof value === 'object' && (value as { schemaVersion?: unknown }).schemaVersion === 'reception_plan_v2') return validatePlanV2(value);
+    if (value && typeof value === 'object' && (value as { schemaVersion?: unknown }).schemaVersion === 'reception_plan_v3') return validatePlanV3(value);
     const p = object(value, ['schemaVersion','protocolId','protocolRevision','protocolSha256','order','trials','approvedAt']);
     const strategies = order(p.order);
     if (p.schemaVersion !== 'reception_plan_v1' || !uuid.test(p.protocolId) || !int(p.protocolRevision) || p.protocolRevision < 1 ||
@@ -116,10 +223,18 @@ export function validateReceptionPlan(value: unknown): ReceptionPlan {
 /** Effective values: a v1 plan predates these settings and means the old mechanism. */
 export function effectiveRotationMode(plan: ReceptionPlan, index: number): RotationMode {
   if (!int(index) || index < 0 || index >= plan.trials.length) return fail();
-  return plan.schemaVersion === 'reception_plan_v2' ? plan.trials[index].rotationMode : 'relative_pm90';
+  return plan.schemaVersion === 'reception_plan_v2' || plan.schemaVersion === 'reception_plan_v3' ? plan.trials[index].rotationMode : 'relative_pm90';
 }
 export function effectiveBetweenTrials(plan: ReceptionPlan): BetweenTrials {
-  return plan.schemaVersion === 'reception_plan_v2' ? plan.betweenTrials : 'none';
+  return plan.schemaVersion === 'reception_plan_v2' || plan.schemaVersion === 'reception_plan_v3' ? plan.betweenTrials : 'none';
+}
+/** v1 and v2 plans predate the figure bank and mean the legacy F1-F6 set. */
+export function effectiveFigureSelection(plan: ReceptionPlan, index: number): ResolvedFigureSelection {
+  if (!int(index) || index < 0 || index >= plan.trials.length) return fail();
+  return plan.schemaVersion === 'reception_plan_v3' ? plan.trials[index].figureSelection : resolveFigureSelection(undefined);
+}
+export function effectiveParticipantModelPin(plan: ReceptionPlan): ParticipantModelPin | undefined {
+  return plan.schemaVersion === 'reception_plan_v1' ? undefined : plan.participantModelPin;
 }
 export function validateReception(value: unknown): Reception {
   try {
@@ -154,8 +269,55 @@ function displayed(value: unknown): DisplayedProtocol {
  * v1 (pure, legacy) freezes a v1 plan exactly as before. v2 requires the displayed
  * version and compares it with the same protocol snapshot the plan is copied from.
  */
-export async function approveReception(value: unknown, options: { expectedRevision: number; order: number; protocol: unknown; expected?: unknown; approvedAt: string; randomSeed: () => number }): Promise<Reception> {
+export async function approveReception(value: unknown, options: ParticipantPlanSettings & {
+  expectedRevision: number; order: number; protocol: unknown; expected?: unknown; approvedAt: string; randomSeed: () => number;
+}): Promise<Reception> {
   const r = validateReception(value);
+  const participant = {
+    ...(options.participantModelPin !== undefined ? { participantModelPin: options.participantModelPin } : {}),
+    ...(options.participantLimits !== undefined ? { participantLimits: options.participantLimits } : {}),
+    ...(options.participantRuntimeProfile !== undefined ? { participantRuntimeProfile: options.participantRuntimeProfile } : {}),
+  };
+  if (options.protocol && typeof options.protocol === 'object' && (options.protocol as { schemaVersion?: unknown }).schemaVersion === 'reception_protocol_v3') {
+    const p = validateReceptionProtocolV3(options.protocol), canonical = JSON.stringify(p), sha256 = receptionProtocolSha256(canonical);
+    if (r.status !== 'pending' || r.revision !== options.expectedRevision) return fail('reception_conflict');
+    const shown = displayed(options.expected);
+    if (shown.protocolId !== p.protocolId || shown.revision !== p.revision || shown.sha256 !== sha256) return fail('protocol_changed');
+    if (!int(options.order) || !p.allowedOrders[options.order]) return fail('invalid_order');
+    const selected = p.allowedOrders[options.order], seeds = selected.map((_, i) => i === 0 || p.seedPolicy === 'per_trial' ? options.randomSeed() : null);
+    // Figure seeds are drawn after the trial seeds, so the trial seed sequence equals v2's.
+    const figures: ResolvedFigureSelection[] = [];
+    try {
+      if (p.figureSetPolicy === 'shared') {
+        const one = p.figureSelection.mode === 'seeded_random'
+          ? resolveFigureSelection({ mode: 'seeded_random', selectionSeed: p.figureSelection.selectionSeed ?? options.randomSeed() })
+          : resolveFigureSelection(p.figureSelection);
+        selected.forEach(() => figures.push(one));
+      } else {
+        if (p.figureSelection.mode !== 'seeded_random') return fail();
+        const base = p.figureSelection.selectionSeed;
+        selected.forEach((_, i) => {
+          let seed = base === null ? options.randomSeed() : base + i;
+          // Distinct seeds can still draw the same six figures in a different order.
+          for (let attempt = 0; attempt < 32; attempt++) {
+            if (!int(seed)) throw new Error('seed');
+            const candidate = resolveFigureSelection({ mode: 'seeded_random', selectionSeed: seed });
+            if (!figures.some(prior => candidate.figureIds.every(id => prior.figureIds.includes(id)))) {
+              figures.push(candidate);
+              return;
+            }
+            seed = base === null && attempt < 16 ? options.randomSeed() : seed + 1;
+          }
+          throw new Error('figure_set_collision');
+        });
+      }
+    } catch { return fail(); }
+    const plan = validateReceptionPlan({ schemaVersion:'reception_plan_v3', protocolId:p.protocolId, protocolRevision:p.revision,
+      protocolSha256:sha256, order:selected, betweenTrials:p.betweenTrials, approvedAt:options.approvedAt,
+      ...participant, trials:selected.map((strategy, index) => ({ index, strategy, seed:seeds[index] ?? seeds[0], referenceMemory:p.referenceMemory,
+        rotationMode:p.rotationMode, figureSelection:figures[index] })) });
+    return validateReception({ ...r, status:'approved', plan, revision:r.revision+1 });
+  }
   if (options.protocol && typeof options.protocol === 'object' && (options.protocol as { schemaVersion?: unknown }).schemaVersion === 'reception_protocol_v2') {
     const p = validateReceptionProtocolV2(options.protocol), canonical = JSON.stringify(p), sha256 = receptionProtocolSha256(canonical);
     if (r.status !== 'pending' || r.revision !== options.expectedRevision) return fail('reception_conflict');
@@ -165,9 +327,10 @@ export async function approveReception(value: unknown, options: { expectedRevisi
     const selected = p.allowedOrders[options.order], seeds = selected.map((_, i) => i === 0 || p.seedPolicy === 'per_trial' ? options.randomSeed() : null);
     const plan = validateReceptionPlan({ schemaVersion:'reception_plan_v2', protocolId:p.protocolId, protocolRevision:p.revision,
       protocolSha256:sha256, order:selected, betweenTrials:p.betweenTrials, approvedAt:options.approvedAt,
-      trials:selected.map((strategy, index) => ({ index, strategy, seed:seeds[index] ?? seeds[0], referenceMemory:p.referenceMemory, rotationMode:p.rotationMode })) });
+      ...participant, trials:selected.map((strategy, index) => ({ index, strategy, seed:seeds[index] ?? seeds[0], referenceMemory:p.referenceMemory, rotationMode:p.rotationMode })) });
     return validateReception({ ...r, status:'approved', plan, revision:r.revision+1 });
   }
+  if (options.participantModelPin !== undefined || options.participantLimits !== undefined || options.participantRuntimeProfile !== undefined) return fail('protocol_unconfigured');
   const p = validateReceptionProtocol(options.protocol);
   if (r.status !== 'pending' || r.revision !== options.expectedRevision) return fail('reception_conflict');
   if (!int(options.order) || !p.allowedOrders[options.order]) return fail('invalid_order');

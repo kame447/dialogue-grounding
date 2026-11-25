@@ -1,3 +1,5 @@
+import { ParticipantUsageLedger } from './participant-usage.ts';
+import { PARTICIPANT_PRODUCTION_PROFILE, PARTICIPANT_USAGE_ONLY, type ParticipantUsageOnly } from './participant-usage-policy.ts';
 // Node loopback only. Explicit private configuration; never an assignment method.
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { constants } from 'node:fs';
@@ -7,6 +9,7 @@ import { createChatClient } from '../client.mjs';
 import { NamingTaskError } from '../naming-error.mjs';
 import { createTrialV2, modelView } from '../stimuli/scatter-v2.mjs';
 import { STRATEGIES } from '../judgment/instructions.mjs';
+import { isLegacyFigureSelection, resolveFigureSelection, validateResolvedFigureSelection } from '../stimuli/figure-bank.ts';
 import { data } from '../v2/base-assignment-data.ts';
 import { privateDirectory, readPrivateAssignment } from './base-assignment-store.ts';
 import { researchHash, researchTrialProfileV3 } from '../v2/research-profile.ts';
@@ -30,9 +33,9 @@ import { checkModelIdentity, MODEL_CONTRACT_V2 } from '../model-identity-contrac
 import { RESEARCH_MAX_JEV_USD } from '../diagnostics/jev-shadow-eval/local-openrouter.ts';
 import { inferenceHistory } from '../v2/agreement-gate.ts';
 
-export type JevResearchLedger = RunBudget;
-export type JevResearchOptions = Readonly<{ profile: ResearchTrialProfileV3; observer: ObservationObserver;
-  jevDecision: JevDecisionClient; localGrounding: JevTurnLocalOptions; ledger: JevResearchLedger; technicalTrial?: AdaptiveRepairTrial }>;
+export type JevResearchLedger = RunBudget | ParticipantUsageLedger;
+export type JevResearchOptions<Ledger extends JevResearchLedger = RunBudget> = Readonly<{ profile: ResearchTrialProfileV3; observer: ObservationObserver;
+  jevDecision: JevDecisionClient; localGrounding: JevTurnLocalOptions; ledger: Ledger; technicalTrial?: AdaptiveRepairTrial }>;
 export class ParticipantJevError extends Error {
   readonly code: string;
   constructor(code: 'invalid_config' | 'wrong_own_material' | 'initialization_failed' | 'model_mismatch') {
@@ -63,7 +66,7 @@ function checkedProfile(value: unknown): ResearchTrialProfileV3 {
   return expected;
 }
 /** Plan O records exist only on failed decide() attempts and must re-validate to the identical closed record. */
-function checkedDecisionFailure(trace: any, layout: JevQuestionLayout): boolean {
+function checkedDecisionFailure(trace: any, layout: JevQuestionLayout, usagePolicy?: ParticipantUsageOnly): boolean {
   // The local v3 rule is recorded together with its evidence; a bare rule name on a trace is a damaged record.
   if (!Object.hasOwn(trace, 'decisionFailure')) return trace.decisionRejectionCode !== 'action_target_not_allowed';
   const f = trace.decisionFailure;
@@ -71,7 +74,7 @@ function checkedDecisionFailure(trace: any, layout: JevQuestionLayout): boolean 
       Object.getPrototypeOf(f) !== Object.prototype || Reflect.ownKeys(f).length !== 1 || !Object.hasOwn(f, 'evidence')) return false;
   if (f.evidence === null) return trace.decisionRejectionCode !== 'action_target_not_allowed';
   // The trace names its own condition (a typed naming request of a holistic_v3 turn): only then may accept be missing from the first stage.
-  const checked = checkDecisionFailureEvidence(f.evidence, { acceptOptional: trace.namingRequest === true && Array.isArray(trace.local?.claims) && hasNameProposal(trace.local.claims, trace.turnIndex) });
+  const checked = checkDecisionFailureEvidence(f.evidence, { acceptOptional: trace.namingRequest === true && Array.isArray(trace.local?.claims) && hasNameProposal(trace.local.claims, trace.turnIndex), usagePolicy });
   if (checked === null || checked.questionLayout !== layout || researchHash(checked) !== researchHash(jsonData(f.evidence))) return false;
   // A decision the local v3 table refused names its rule twice, in the turn and in the evidence, and in no other way; no native failure may carry it.
   const local = checked.rejectionCode === 'action_target_not_allowed' && checked.stages.length === 0;
@@ -82,7 +85,7 @@ function checkedDecisionFailure(trace: any, layout: JevQuestionLayout): boolean 
 /** R2: classify restore before any queue, initial observer, or model work. */
 export function selectParticipantJev(restore: any, provided: unknown, context: {
   referenceMemory: boolean; strategy: string; style: string; legacy: unknown[];
-}): JevResearchOptions | null {
+}): JevResearchOptions<JevResearchLedger> | null {
   try {
     const marker = restore?.options?.jevResearch;
     if (restore) {
@@ -116,14 +119,17 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
     let local = v.localGrounding as JevTurnLocalOptions;
     if (typeof observer?.observeAll !== 'function' || typeof observer.reobserve !== 'function' || typeof jevDecision?.decide !== 'function' ||
         typeof local?.classifier?.classify !== 'function' || local.timeoutMs !== profile.timeouts.localMs ||
-        local.aiPublicClaims !== profile.localGrounding.aiPublicClaims || !(v.ledger instanceof RunBudget)) return invalid();
+        local.aiPublicClaims !== profile.localGrounding.aiPublicClaims || !(v.ledger instanceof RunBudget || v.ledger instanceof ParticipantUsageLedger)) return invalid();
     if (restore) {
+      const savedProfile = restore.options.participantRuntimeProfile;
+      if (v.ledger instanceof ParticipantUsageLedger ? savedProfile !== PARTICIPANT_PRODUCTION_PROFILE :
+        Object.hasOwn(restore.options,'participantRuntimeProfile') || restore.jevLedger?.schemaVersion === PARTICIPANT_PRODUCTION_PROFILE) return invalid();
       const savedTrial = Object.hasOwn(restore.options,'technicalTrial') ? checkedTechnicalTrial(restore.options.technicalTrial) : undefined;
       if (JSON.stringify(savedTrial) !== JSON.stringify(technicalTrial)) return invalid();
       // A v2 record names its layout; a v1 record never does. profileSha256 below also differs between layouts.
       const savedLayout = Object.hasOwn(restore.options,'questionLayout') ? restore.options.questionLayout : 'two_stage_v1';
       if (savedLayout !== profile.questionLayout || Object.hasOwn(restore.options,'questionLayout') && savedLayout !== 'two_stage_v2' && savedLayout !== 'two_stage_v3') return invalid();
-      if (restore.jevTraces?.some?.((trace:any)=>!checkedDecisionFailure(trace,profile.questionLayout))) return invalid();
+      if (restore.jevTraces?.some?.((trace:any)=>!checkedDecisionFailure(trace,profile.questionLayout,v.ledger instanceof ParticipantUsageLedger?PARTICIPANT_USAGE_ONLY:undefined))) return invalid();
       if (restore.options.profileSha256 !== researchHash(profile) ||
           researchHash(jsonData(restore.options.interventionPolicy)) !== researchHash(profile.interventionPolicy) ||
           restore.queueState?.privateState?.schemaVersion !== 'jev_private_state_v2' ||
@@ -202,10 +208,14 @@ export function withParticipantJevTurn<T>(ledger:RunBudget,turn:number,operation
   return scope(ledger).run({turn,phase:null,boundary:'common'},operation);
 }
 type ChatClient = {complete(messages:any[],options?:any):Promise<any>};
-export function participantLunaClient(client:ChatClient,ledger:RunBudget,profile:ResearchTrialProfileV3):ChatClient {
+export function participantLunaClient(client:ChatClient,ledger:JevResearchLedger,profile:ResearchTrialProfileV3):ChatClient {
   const timed=researchGenerationClient(client,profile.timeouts.generationMs);
   return {async complete(messages,options={}) {
     if (options.signal?.aborted) throw Object.assign(Error('aborted'),{name:'AbortError'});
+    if (ledger instanceof ParticipantUsageLedger) {
+      const phase = ['generation','final_submission','ai_extraction'].includes(options.phase) ? options.phase : 'dialogue';
+      return ledger.logical('luna', phase, () => timed.complete(messages,options));
+    }
     ledger.beforeSend();ledger.lunaCalls++;
     const parent=scope(ledger).getStore(),phase=options.phase ?? null;
     return scope(ledger).run({turn:parent?.turn??null,phase,boundary:['generation','final_submission','ai_extraction'].includes(phase)?'tail':parent?.boundary??'common'},
@@ -324,10 +334,18 @@ export async function prepareParticipantJev(options:{configFile:string;baseAssig
     if(!response.ok)throw Error();
     const policy=data(await response.json());
     if(policy.ready!==true||policy.purpose!=='dialogue_turn'||typeof policy.provider!=='string'||!['openai','gemini'].includes(policy.provider)||policy.model!==config.modelId)throw Error();
-    return {config,profile,async taskOptions(value:{seed:number;referenceMemory:boolean;strategy:string;rotationMode?:string;restore?:any}) {
+    return {config,profile,async taskOptions(value:{seed:number;referenceMemory:boolean;strategy:string;rotationMode?:string;figureSelection?:unknown;restore?:any}) {
       // An old assigned record stays on the original caller's client and options.
       if(value.restore&&value.restore.options?.jevResearch!==true)return {};
       const saved=value.restore?.options;
+      // The P1 fixed cache was observed on the legacy figure set: any other selection fails closed.
+      for(const candidate of [value.figureSelection,saved&&typeof saved==='object'&&Object.hasOwn(saved,'figureSelection')?saved.figureSelection:undefined]){
+        if(candidate===undefined)continue;
+        try{
+          const selection=candidate&&typeof candidate==='object'&&Object.hasOwn(candidate,'bankVersion')?validateResolvedFigureSelection(candidate):resolveFigureSelection(candidate);
+          if(!isLegacyFigureSelection(selection))throw Error();
+        }catch{throw new ParticipantJevError('invalid_config');}
+      }
       const rotationMode=value.restore?(saved&&typeof saved==='object'&&Object.hasOwn(saved,'rotationMode')?saved.rotationMode:'relative_pm90'):value.rotationMode??'relative_pm90';
       if(rotationMode!=='relative_pm90')throw new ParticipantJevError('invalid_config');
       if(value.seed!==config.seed||value.referenceMemory!==true||!STRATEGIES.includes(value.strategy))throw new ParticipantJevError('invalid_config');

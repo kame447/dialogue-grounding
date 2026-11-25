@@ -34,7 +34,7 @@ test("security: deployed config enables Decisions by a plain flag and holds no s
   assert.equal(config.vars.RESEARCH_DECISIONS_ENABLED, "true");
   // The grounding-evidence shadow route ships disabled; enabling it needs a separate researcher decision.
   assert.equal(config.vars.RESEARCH_GROUNDING_ENABLED, "false");
-  assert.deepEqual(Object.keys(config.vars).sort(), ["DIALOGUE_MODEL", "MAX_COMPLETION_TOKENS", "RESEARCH_DECISIONS_ENABLED", "RESEARCH_GROUNDING_ENABLED", "UPSTREAM_PROVIDER"]);
+  assert.deepEqual(Object.keys(config.vars).sort(), ["DIALOGUE_MODEL", "MAX_COMPLETION_TOKENS", "RESEARCH_DECISIONS_ENABLED", "RESEARCH_GROUNDING_ENABLED", "UPSTREAM_PROVIDER", "VISION_MODEL"]);
   assert.equal(config.main, "src/worker.ts");
   assert.equal(config.observability.enabled, false);
   assert.doesNotMatch(source, /sk-or-|OPENROUTER_DECISIONS_API_KEY|UPSTREAM_API_KEY|RESEARCH_PROXY_TOKEN/);

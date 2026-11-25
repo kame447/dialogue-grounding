@@ -23,7 +23,7 @@ globalThis.Request = class extends NativeRequest {
 };
 const RF = 'repair-first', BE = 'bypass-enabled';
 const fields = (patch: Record<string, unknown> = {}) => ({ allowedOrders: [[BE, RF], [RF]], seedPolicy: 'per_trial', referenceMemory: false,
-  betweenTrials: 'none', receptionNumberFormat: 'daily_seq3', rotationMode: 'relative_0', ...patch });
+  betweenTrials: 'none', receptionNumberFormat: 'daily_seq3', rotationMode: 'relative_0', figureSelection: { mode: 'preset', setId: 'legacy-v1' }, figureSetPolicy: 'shared', ...patch });
 const answers = { mental_effort: 4, task_difficulty: 4, smoothness: 4, bothersome: 4 };
 const req = (path: string, body?: unknown, cookie?: string) => new Request('https://i139.invalid' + path, {
   method: body === undefined ? 'GET' : 'POST', headers: { ...(cookie ? { Cookie: cookie } : {}),
@@ -77,6 +77,7 @@ function harness() {
           record.recordId = crypto.randomUUID(); record.seed = input.seed; record.strategy = input.strategy; record.options.referenceMemory = input.referenceMemory;
           // Stands in for implementer A's task: new records carry the mode and generated stimulus.
           record.options.rotationMode = input.rotationMode;
+          if (input.figureSelection) record.options.figureSelection = input.figureSelection; // frozen by a v3 plan; legacy-v1 needs no stimulus metadata
           record.stimulus = { version: 'synthetic-stimulus-v1', rotationMode: input.rotationMode, angles: { human: { h1: 0 }, ai: { a1: 0 } } };
         }
         const task = { getState: () => ({ version: 2, sessionId: record.recordId, status: record.status, events: [], submitted: record.status === 'completed', aiSubmitted: record.status === 'completed' }),
@@ -229,7 +230,7 @@ test('D1: approval uses one snapshot; a stale protocol version or stale receptio
   const fresh = await h.displayed();
   await o.adminApproveReception({ expectedRevision: 0, order: 0, protocol: fresh });
   const plan = reception(h, cookie).plan;
-  assert.equal(plan.schemaVersion, 'reception_plan_v2'); assert.equal(plan.protocolRevision, fresh.revision); assert.equal(plan.protocolSha256, fresh.sha256);
+  assert.equal(plan.schemaVersion, 'reception_plan_v3'); assert.equal(plan.protocolRevision, fresh.revision); assert.equal(plan.protocolSha256, fresh.sha256);
   assert.deepEqual(plan.trials.map((t: any) => t.rotationMode), ['relative_pm90', 'relative_pm90']);
   // Concurrent save and approval: whichever order wins, the frozen plan matches the displayed version or nothing is approved.
   for (let i = 0; i < 4; i++) {

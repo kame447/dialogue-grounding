@@ -1,3 +1,4 @@
+import { PARTICIPANT_USAGE_ONLY, type ParticipantUsageOnly } from '../web/participant-usage-policy.ts';
 import {applyBypassAcceptance,interventionForStrategy,BypassAcceptanceError,BYPASS_ACCEPTANCE_V1_TABLE_SHA256,isOpenIssueRerankRecord} from '../decision/bypass-acceptance.ts';
 import type {ExecutedDecision,InterventionConfig,InterventionTrace} from '../decision/bypass-acceptance.ts';
 import {JEV_ACTIONS,isHolisticPolicy,isHolisticV2Plus,isHolisticV3Plus} from '../decision/contract.ts';
@@ -158,6 +159,7 @@ export type JevPrivateState = {
 };
 export type JevTurnOptions = {
   intervention?: InterventionConfig; decisionTimeoutMs?:number; technicalTrial?: AdaptiveRepairTrial;
+  usagePolicy?: ParticipantUsageOnly;
   /** Omitted means two_stage_v1. Must match the decision client's own layout when it declares one. */
   questionLayout?: JevQuestionLayout;
   /** The policy the trial was created with (profile.dialoguePolicy); only two_stage_v3 reads it. */
@@ -432,15 +434,15 @@ function persistedExecution(x:any,slots:readonly string[]):void {
 }
 // Historical state has no original request catalog; validate all retained
 // native evidence fields without inventing omitted catalog material.
-function persistedEvidence(value:any,stage?:'action_target'|'multiple_candidates'|'detail'|'action'|'target'):void {
+function persistedEvidence(value:any,stage?:'action_target'|'multiple_candidates'|'detail'|'action'|'target',usagePolicy?:ParticipantUsageOnly):void {
  const keys=['model','responseId','choices','scores','latencyMs','costUsd',...(stage||Object.hasOwn(value??{},'inputBudget')?['inputBudget']:[]),...(stage?['stage']:Object.hasOwn(value??{},'stages')?['stages']:[])];
- if(!stateExact(value,keys)||stage&&(value.stage!==stage||value.model===null||value.costUsd===null)||!(value.model===null||typeof value.model==='string'&&value.model.length<=128)||!(value.responseId===null||typeof value.responseId==='string'&&/^gen-[A-Za-z0-9_-]{1,124}$/.test(value.responseId))||typeof value.latencyMs!=='number'||!Number.isFinite(value.latencyMs)||value.latencyMs<0||!(value.costUsd===null||typeof value.costUsd==='number'&&Number.isFinite(value.costUsd)&&value.costUsd>=0)||!value.choices||!value.scores||!stateSame(Object.keys(value.choices).sort(),Object.keys(value.scores).sort()))throw Error();
+ if(!stateExact(value,keys)||stage&&(value.stage!==stage||value.model===null||(value.costUsd===null&&usagePolicy!==PARTICIPANT_USAGE_ONLY))||!(value.model===null||typeof value.model==='string'&&value.model.length<=128)||!(value.responseId===null||typeof value.responseId==='string'&&/^gen-[A-Za-z0-9_-]{1,124}$/.test(value.responseId))||typeof value.latencyMs!=='number'||!Number.isFinite(value.latencyMs)||value.latencyMs<0||!(value.costUsd===null||typeof value.costUsd==='number'&&Number.isFinite(value.costUsd)&&value.costUsd>=0)||!value.choices||!value.scores||!stateSame(Object.keys(value.choices).sort(),Object.keys(value.scores).sort()))throw Error();
  for(const [key,choice]of Object.entries(value.choices)){const scores=value.scores[key];if(typeof choice!=='string'||!scores||!Object.hasOwn(scores,choice)||Object.values(scores).some(n=>typeof n!=='number'||!Number.isFinite(n)||n<0||n>1))throw Error();}
  if(value.inputBudget!==undefined){const b=value.inputBudget,ks=['publicTurns','claims','publicNames','repairHistory','reobservations','observationDetails','observationChars','issueSummaryChars'];if(!stateExact(b,['maxChars','stateChars','omitted'])||b.maxChars!==20000||!Number.isSafeInteger(b.stateChars)||b.stateChars<0||b.stateChars>20000||!stateExact(b.omitted,ks)||ks.some(k=>!Number.isSafeInteger(b.omitted[k])||b.omitted[k]<0))throw Error();}
 }
 export type JevPrivateStateV2=JevPrivateState & {schemaVersion:'jev_private_state_v2';interventionPolicy:{version:'bypass_acceptance_v1';tableSha256:string}};
 export type JevTurnTraceV2=Omit<JevTurnTrace,'schemaVersion'|'executed'|'intervention'>&{schemaVersion:'jev_turn_trace_v2';executed:ExecutedDecision|null;intervention:InterventionTrace|null};
-export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string[],intervention:InterventionConfig,questionLayout:JevQuestionLayout='two_stage_v1',policy?:string):JevPrivateStateV2 {
+export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string[],intervention:InterventionConfig,questionLayout:JevQuestionLayout='two_stage_v1',policy?:string,usagePolicy?:ParticipantUsageOnly):JevPrivateStateV2 {
  checkedIntervention(intervention);
  if(questionLayout!=='two_stage_v1'&&questionLayout!=='two_stage_v2'&&questionLayout!=='two_stage_v3')throw new JevTurnError('invalid_state');
  try{
@@ -487,9 +489,9 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
     // two_stage_v3 keeps exactly action, target, [detail]; a target label must decode to the saved decision's own target.
     const v3=questionLayout==='two_stage_v3';
     const es=d.evidence.stages;if(!Array.isArray(es)||es.length!==(v3?2:1+(setStage?1:0))+(detail?1:0))throw Error();
-    persistedEvidence(es[0],v3?'action':'action_target');
+    persistedEvidence(es[0],v3?'action':'action_target',usagePolicy);
     if(v3){
-     persistedEvidence(es[1],'target');
+     persistedEvidence(es[1],'target',usagePolicy);
      if(!stateSame(Object.keys(es[0].choices),['action'])||!stateSame(Object.keys(es[1].choices),['target']))throw Error();
      const t=d.target,idx=(ids:string[])=>ids.map(id=>ownSlots.indexOf(id));
      const expected=t?.kind==='none'?'none':t?.kind==='single'?'figure_'+ownSlots.indexOf(t.figureId):t?.kind==='multiple'?candidateSetLabel(idx(t.figureIds)):null;
@@ -502,19 +504,19 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
      if(t.kind==='multiple'&&!TWO_STAGE_V2_CANDIDATE_SETS.some(s=>candidateSetLabel(s)===expected))throw Error();
     }
     if(setStage){
-     persistedEvidence(es[1],'multiple_candidates');
+     persistedEvidence(es[1],'multiple_candidates',usagePolicy);
      // The set stage asked exactly one closed question over all 57 subsets; anything else was never a Jev answer.
      if(!sameSet(Object.keys(es[1].choices),['candidate_set'])||!sameSet(Object.keys(es[1].scores),['candidate_set'])||!sameSet(Object.keys(es[1].scores.candidate_set),CANDIDATE_SET_LABELS))throw Error();
      const set=TWO_STAGE_V2_CANDIDATE_SETS.find(s=>candidateSetLabel(s)===es[1].choices.candidate_set);
      if(!set||es[0].choices.target!=='multiple'||!stateSame(set.map(i=>ownSlots[i]),d.target.figureIds))throw Error();
     }
-    if(detail)persistedEvidence(es.at(-1),'detail');
+    if(detail)persistedEvidence(es.at(-1),'detail',usagePolicy);
     // After the turn's one reobservation the stage-one question omits request_observation (as in isOpenIssueRerankRecord).
     const keys=Object.keys(es[0].scores.action??{}).sort();
     // v3 scores only the actions that had a legal target and detail: any subset of the offerable labels that holds the always-legal ones and the chosen action.
     const actionKeysOk=v3?keys.every(k=>actionLabels.includes(k as any))&&[...v3AlwaysOffered(acceptOptional),d.action].every(k=>keys.includes(k))&&!(noAcceptTurn&&keys.includes('accept'))
       :stateSame(keys,[...actionLabels].sort())||stateSame(keys,actionLabels.filter(a=>a!=='request_observation').sort());
-    if(!actionKeysOk||!stateSame(d.evidence.choices,es[0].choices)||!stateSame(d.evidence.scores,es[0].scores)||es[0].choices.action!==d.action||d.evidence.model!==es.at(-1).model||d.evidence.responseId!==es.at(-1).responseId||d.evidence.costUsd!==es.reduce((n:number,e:any)=>n+e.costUsd,0))throw Error();
+    if(!actionKeysOk||!stateSame(d.evidence.choices,es[0].choices)||!stateSame(d.evidence.scores,es[0].scores)||es[0].choices.action!==d.action||d.evidence.model!==es.at(-1).model||d.evidence.responseId!==es.at(-1).responseId||d.evidence.costUsd!==(es.some((e:any)=>e.costUsd===null)?null:es.reduce((n:number,e:any)=>n+e.costUsd,0)))throw Error();
    }else if(d.evidence.model!==null||Object.keys(d.evidence.choices).length||Object.keys(d.evidence.scores).length||d.evidence.stages?.length)throw Error();
    const original=executionProjection(d);persistedExecution(original,ownSlots);persistedExecution(z.executed,ownSlots);
    if(noAcceptTurn&&(original.action==='accept'||z.executed.action==='accept'))throw Error();
@@ -530,7 +532,7 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
     if(!veto||m?.status!=='ok'||m.issue.choice!=='issue'||m.issue.turn!==src?.issueTurn||m.issue.issueId!==src?.issueId||
        !s.repairHistory.some((r:RepairHistoryEntry)=>r.turn===src.issueTurn&&r.issueId===src.issueId&&r.turn<j.turnIndex)||
        !isOpenIssueRerankRecord(t,d,z.executed,ownSlots,p&&{action:p.action,target:p.target},hasAgreeNames?z.agreeNames:undefined,questionLayout,m,acceptOptional))throw Error();
-    if(['confirm','repair'].includes(z.executed.action))persistedEvidence(t.detailEvidence,'detail');else if(t.detailEvidence!==null)throw Error();
+    if(['confirm','repair'].includes(z.executed.action))persistedEvidence(t.detailEvidence,'detail',usagePolicy);else if(t.detailEvidence!==null)throw Error();
    }
    else if(t.disposition==='rejected'){
     if(!veto||!['defer','move_on'].includes(d.action)||t.reasonCode!=='vetoed_bypass_action'||!stateSame(t.alternative,z.executed)||!stateSame(z.executed.target,original.target)||['defer','move_on'].includes(z.executed.action))throw Error();
@@ -542,7 +544,7 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
       restrictedAgree?actions.has('agree'):actions.has('propose_name')!==actions.has('agree');
     if(!(acceptOptional||actions.has('accept'))||!actions.has('close')||r.ranking[0].action!==z.executed.action||actions.has('confirm')!==actions.has('repair')||
       invalidNames||actions.has('revisit')!==(original.target.kind!=='none')||original.target.kind!=='single'&&(actions.has('agree')||actions.has('propose_name')))throw Error();
-    const detail=['propose_name','agree','confirm','repair'].includes(z.executed.action);if(detail){persistedEvidence(t.detailEvidence,'detail');}else if(t.detailEvidence!==null)throw Error();
+    const detail=['propose_name','agree','confirm','repair'].includes(z.executed.action);if(detail){persistedEvidence(t.detailEvidence,'detail',usagePolicy);}else if(t.detailEvidence!==null)throw Error();
    }else throw Error();
    if(questionLayout==='two_stage_v3'&&['repair','confirm','revisit'].includes(j.judgment?.action)){
     // The repair-history entry created for this judgment keeps the executed candidate set; only a later human reply may update it (progress leaves unknown).
@@ -625,7 +627,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
    if(!c?.enumerable||!Object.hasOwn(c,'value')||!t?.enumerable||!Object.hasOwn(t,'value')||!Number.isSafeInteger(t.value)||t.value<1||t.value>600000)throw Error();
    intervention=checkedIntervention(c.value);decisionTimeoutMs=t.value;
   }catch{throw new JevTurnError('invalid_intervention');}}
-  const { client, observer, jevDecision, generation } = options;
+  const { client, observer, jevDecision, generation, usagePolicy } = options;
   // One layout per runtime: validation, acceptance, restore and the client's own requests must agree.
   const questionLayout: JevQuestionLayout = options.questionLayout ?? "two_stage_v1";
   const holistic = questionLayout === "two_stage_v3" && isHolisticPolicy(options.dialoguePolicy);
@@ -718,7 +720,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
     let observationPhase: ObservationFailure["observationPhase"] | null = null;
     try {
       abortIf(signal);
-      const state = integrated?validateJevPrivateStateV2(privateState,slots,intervention!,questionLayout,options.dialoguePolicy):structuredClone(privateState);
+      const state = integrated?validateJevPrivateStateV2(privateState,slots,intervention!,questionLayout,options.dialoguePolicy,usagePolicy):structuredClone(privateState);
       if(!integrated&&(Object.hasOwn(state,'schemaVersion')||Object.hasOwn(state,'interventionPolicy')||state.judgments?.some(j=>Object.hasOwn(j.jevTurn??{},'executed')||Object.hasOwn(j.jevTurn??{},'intervention'))))throw new JevTurnError('invalid_state');
       checkProspectMode(state);
       snapshotReferenceGraph(state.graph);
@@ -810,7 +812,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         if (typeof jevDecision.estimateReferent === "function") {
           const raw = await interruptible(jevDecision.estimateReferent(structuredClone(referentInput), { signal }), signal);
           abortIf(signal);
-          estimate = validateHumanReferentEstimate(raw, referentInput);
+          estimate = validateHumanReferentEstimate(raw, referentInput, usagePolicy);
         }
       } catch (error) {
         abortIf(signal);
@@ -865,7 +867,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         } catch (error) { decideFailure.failed = true; decideFailure.evidence = sink.evidence; throw error; }
         abortIf(signal);
         errorCode = "invalid_decision";
-        try { decision = validateJevDecision(raw, input, { questionLayout }); }
+        try { decision = validateJevDecision(raw, input, { questionLayout, usagePolicy }); }
         catch (error) {
           // two_stage_v3 only: a decision the local table refuses names its rule; no provider response or cost record is invented for it.
           if (questionLayout === "two_stage_v3" && error instanceof JevDecisionError && error.rule === "action_target_not_allowed") localRule = error.rule;
@@ -896,7 +898,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
           const acceptanceOptions={...(adaptive?{rerank:"open_issue_v1" as const}:{}),...(questionLayout!=="two_stage_v1"?{questionLayout}:{})};
           const result=await applyBypassAcceptance(finalInput!,decision!,intervention!,typeof jevDecision.completeDetail==='function'?
             (input,selected)=>deadline!.run(s=>jevDecision.completeDetail!(input,selected,{signal:s,timeoutMs:deadline!.remaining()}),true):undefined,
-            Object.keys(acceptanceOptions).length?acceptanceOptions:undefined);
+            Object.keys(acceptanceOptions).length?acceptanceOptions:undefined,usagePolicy);
           deadline!.check();execution=result.executed;record.intervention=result.intervention;record.executed=execution;
         }catch(e){
           if(e instanceof BypassAcceptanceError){if(e.intervention)record.intervention=structuredClone(e.intervention);throw new JevTurnError(e.code==='alternative_failed'?'alternative_failed':'invalid_decision');}throw e;
@@ -1066,7 +1068,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         catch { code = errorCode; }
       }
       record.status = code === "aborted" ? "aborted" : "error"; record.errorCode = code;
-      if (decideFailure.failed && record.status === "error") record.decisionFailure = { evidence: projectDecisionFailureEvidence(decideFailure.evidence, questionLayout, { acceptOptional: record.namingRequest === true }) };
+      if (decideFailure.failed && record.status === "error") record.decisionFailure = { evidence: projectDecisionFailureEvidence(decideFailure.evidence, questionLayout, { acceptOptional: record.namingRequest === true, usagePolicy }) };
       else if (localRule !== null && record.status === "error") {
         record.decisionRejectionCode = localRule;
         record.decisionFailure = { evidence: checkDecisionFailureEvidence({ schemaVersion: "jev_decision_failure_v1", questionLayout, callIndex: attemptNumber, error: "invalid_decision",
@@ -1194,7 +1196,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   }
   async function finalRequest({ events, privateState }: { events: Event[]; privateState: JevPrivateState }, retry = false) {
     checkProspectMode(privateState);
-    if(integrated)privateState=validateJevPrivateStateV2(privateState,slots,intervention!,questionLayout,options.dialoguePolicy);else rejectNewLegacyState(privateState);
+    if(integrated)privateState=validateJevPrivateStateV2(privateState,slots,intervention!,questionLayout,options.dialoguePolicy,usagePolicy);else rejectNewLegacyState(privateState);
     if (!privateState.observationMemo) throw new JevTurnError("invalid_state");
     const memo = validateObservationMemo(privateState.observationMemo, { ownAnchors });
     const agreed = retry && questionLayout === "two_stage_v3" ? agreedNamesFromLedger(privateState.ledger) : {};
@@ -1205,5 +1207,5 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       { role: "user", content: generation.final + (retry ? "\n指定JSON形式で再提出してください。" + confirmed : "") }], { phase: "final_submission", timeoutMs: generation.timeoutMs });
   }
   return Object.freeze({ slots: Object.freeze([...slots]), initialPrivateState, initializePrivateState, runAiTurn, finalRequest,
-    getAttempts: () => structuredClone(attempts), snapshotGraph: (state: JevPrivateState) => {checkProspectMode(state);if(!integrated)rejectNewLegacyState(state);return snapshotReferenceGraph((integrated?validateJevPrivateStateV2(state,slots,intervention!,questionLayout,options.dialoguePolicy):state).graph);} });
+    getAttempts: () => structuredClone(attempts), snapshotGraph: (state: JevPrivateState) => {checkProspectMode(state);if(!integrated)rejectNewLegacyState(state);return snapshotReferenceGraph((integrated?validateJevPrivateStateV2(state,slots,intervention!,questionLayout,options.dialoguePolicy,usagePolicy):state).graph);} });
 }
