@@ -30,7 +30,7 @@ import type { JevTurnLocalOptions } from '../v2/jev-turn.ts';
 import { RunBudget } from '../diagnostics/parity-live/audit.ts';
 import type { BudgetLimits, SendReceipt } from '../diagnostics/parity-live/audit.ts';
 import { checkModelIdentity, MODEL_CONTRACT_V2 } from '../model-identity-contract.ts';
-import { RESEARCH_MAX_JEV_USD } from '../diagnostics/jev-shadow-eval/local-openrouter.ts';
+import { DEFAULT_COST_CAP_USD, RESEARCH_MAX_JEV_USD } from '../diagnostics/jev-shadow-eval/local-openrouter.ts';
 import { inferenceHistory } from '../v2/agreement-gate.ts';
 
 export type JevResearchLedger = RunBudget | ParticipantUsageLedger;
@@ -288,19 +288,22 @@ export function restoreParticipantJevLedger(ledger:RunBudget,saved:any):void {
 export type ParticipantJevConfig = {schemaVersion:'participant_jev_config_v1';lunaRequest:ResearchTrialProfileV3['lunaRequest'];
   timeouts:ResearchTrialProfileV3['timeouts'];cacheDirectory:string;modelId:string;memoSha256:string;seed:number;limits:BudgetLimits;technicalTrial?:AdaptiveRepairTrial;
   /** Optional; omitted means two_stage_v1. two_stage_v2 must be chosen explicitly per trial. */
-  questionLayout?:JevQuestionLayout};
+  questionLayout?:JevQuestionLayout;
+  /** Explicit research opt-in: only then may limits.jevUsd exceed the approved 0.05 default (never RESEARCH_MAX_JEV_USD). */
+  researchBudget?:true};
 export function validateParticipantJevConfig(value:unknown):{config:ParticipantJevConfig;profile:ResearchTrialProfileV3} {
   try {
     const raw=data(value);
     const c=jsonData(data(raw,['schemaVersion','lunaRequest','timeouts','cacheDirectory','modelId','memoSha256','seed','limits',...(Object.hasOwn(raw,'technicalTrial')?['technicalTrial']:[]),
-      ...(Object.hasOwn(raw,'questionLayout')?['questionLayout']:[])])) as ParticipantJevConfig;
+      ...(Object.hasOwn(raw,'questionLayout')?['questionLayout']:[]),...(Object.hasOwn(raw,'researchBudget')?['researchBudget']:[])])) as ParticipantJevConfig;
     if(Object.hasOwn(c,'technicalTrial'))c.technicalTrial=checkedTechnicalTrial(c.technicalTrial);
+    if(Object.hasOwn(c,'researchBudget')&&c.researchBudget!==true)throw Error();
     if(Object.hasOwn(c,'questionLayout')&&c.questionLayout!=='two_stage_v1'&&c.questionLayout!=='two_stage_v2'&&c.questionLayout!=='two_stage_v3')throw Error();
     if(c.schemaVersion!=='participant_jev_config_v1'||typeof c.cacheDirectory!=='string'||!safeModel(c.modelId)||!digest(c.memoSha256)||!Number.isSafeInteger(c.seed))throw Error();
     const limits=data(c.limits,['lunaCalls','lunaTokens','lunaPosts','jevPosts','jevUsd']);
-    // The explicit per-trial research Jev budget may exceed the 0.05 default, never RESEARCH_MAX_JEV_USD; the same
+    // The approved 0.05 default holds unless the config opts into the research budget (researchBudget:true, never above RESEARCH_MAX_JEV_USD); the same
     // value reaches RunBudget and every Jev adapter (they receive researchLimits, see maxJevCostCapUsd).
-    if(!['lunaCalls','lunaTokens','lunaPosts','jevPosts'].every(k=>positive(limits[k]))||typeof limits.jevUsd!=='number'||!Number.isFinite(limits.jevUsd)||limits.jevUsd<=0||limits.jevUsd>RESEARCH_MAX_JEV_USD)throw Error();
+    if(!['lunaCalls','lunaTokens','lunaPosts','jevPosts'].every(k=>positive(limits[k]))||typeof limits.jevUsd!=='number'||!Number.isFinite(limits.jevUsd)||limits.jevUsd<=0||limits.jevUsd>(c.researchBudget===true?RESEARCH_MAX_JEV_USD:DEFAULT_COST_CAP_USD))throw Error();
     data(c.lunaRequest,['timeoutMs','maxCompletionTokens']);
     // holistic_v3 (the creation default) is recorded for a technical-trial v3 only; a plain v3 keeps its original decision, generation, guards and requests.
     return {config:c,profile:researchTrialProfileV3(c.lunaRequest,c.timeouts,c.questionLayout??'two_stage_v1',c.technicalTrial?undefined:null)};
