@@ -255,32 +255,47 @@ const viewpointStated = /(?:こちら|私|わたし|自分|相手|そちら)(?:�
 const clauseBreak = /(?<=[。!?]|(?:ですが|ますが|ませんが|ましたが|でしたが|けど|けれど|けれども|のに)、)/u;
 
 export const HOLISTIC_V5_VIEWPOINT_RULE = "形の確認・説明には、回転しても変わらない形や部分同士の関係を優先してください。選択済みの特徴は自分側の観察に基づく根拠です。方位が弁別に必要なときは、自分側の図形の見え方だと同じ節で明示し、相手には形の対応を尋ねてください。相手側の位置や向きを自分側と同じだと断定せず、相手の方位には相手が述べた見え方として触れるか、相手の見え方を尋ねてください。";
-const partnerView = /(?:そちら|相手)(?:の(?:画面|図形|側))?(?:で(?:は|も)|も)(?!なく|ない)/u;
-const ownView = /(?:こちら|私|わたし|自分)(?:の(?:画面|図形|側))?(?:で(?:は|も)|から見ると)/u;
-const ownColloquialView = /(?:こちら|私|わたし|自分)(?:の(?:画面|側|向き|見方|図形|方)|側)?だと/u;
-const sameFrame = /同じ(?:位置|向き|方向)/u;
-const questionEnd = /[か?][。.]?$/u;
-const attributedView = /と(?:いう|言っ|おっしゃ|聞い|説明|伺|述べ|話し)/u;
-const deniesSameFrame = /同じ(?:位置|向き|方向)(?:では|じゃ)(?:ない|ありません)(?:です)?(?:ね|よ)?[。.!]?$/u;
+const v5OrientationTerms = new RegExp(orientationWords.source + "|(?<sameFrame>同じ(?:位置|向き|方向))", "gu");
+const v5ClauseBreak = /(?<=[。!?]|(?:(?:です|ます|ません|ました|でした)が?|けど|けれど(?:も)?|のに|ので|から|ため(?:に)?|(?<!から見)て|なら|であれば|とすると)[、,])/u;
+const v5OwnView = /(?:こちら|私|わたし|自分)(?:(?:の(?:画面|図形|側|向き|見方|方)|側)?(?:では(?!なく|ない|なかっ|なけれ|じゃな)|でも|も|だと|で見ると|から見ると|から見れば|から見たら|から見て)|の(?:画面|図形)の)/u;
+const v5PartnerView = /(?:そちら|相手)(?:の(?:画面|図形|側)|側|でも|にも|も|だと|から見ると|から見れば|から見たら|から見て|で(?:は)?(?!は|なく|ない))|両(?:方の)?画面/u;
+const v5Viewpoint = new RegExp("(?<own>" + v5OwnView.source + ")|" + v5PartnerView.source, "gu");
+const screenComparison = /(?:こちら|私|わたし|自分|そちら|相手)(?:の(?:画面|図形|側|位置|向き|方向)|側)?と[、,]?$/u;
+const questionEnd = /(?:\?|か(?:ね)?[。、,.]?)$/u;
+// The first qualifier after a term belongs to that description. A later question cannot undo a causal premise.
+const descriptionQualifier = /と(?:のこと|教えて|いう(?!前提|仮定|想定)|言っ|おっしゃ|聞い|説明|伺|述べ|話し)|なら|(?:の)?であれば|とすると|とすれば|とは限(?:らな|りませ)|(?:では|じゃ)(?:な(?:い|く)|ありませ)|(?<cause>ので|(?:だ|です|ます|ある|いる|見える)から|から(?=[、,]|$)|ため)/u;
 
-function assertsPartnerOrientation(clause: string): boolean {
-  const match = partnerView.exec(clause);
-  if (!match) return false;
-  const statement = clause.slice(match.index + match[0].length).split(ownView, 1)[0].split(ownColloquialView, 1)[0];
-  return (orientationWords.test(statement) || sameFrame.test(statement)) &&
-    !questionEnd.test(statement) && !attributedView.test(statement) && !deniesSameFrame.test(statement);
+function v5OrientationLeaks(text: string): string[] {
+  let unmarked = false, partnerAssertion = false;
+  for (const clause of text.split(v5ClauseBreak)) {
+    const viewpoints = [...clause.matchAll(v5Viewpoint)];
+    let nextViewpoint = 0;
+    for (const term of clause.matchAll(v5OrientationTerms)) {
+      while (nextViewpoint < viewpoints.length && viewpoints[nextViewpoint].index < term.index) nextViewpoint++;
+      const preceding = viewpoints[nextViewpoint - 1];
+      const sameFrame = term.groups?.sameFrame !== undefined;
+      const comparesScreens = sameFrame && screenComparison.test(clause.slice(0, term.index));
+      // Relative geometry within one figure does not need a viewpoint. A comparison to a screen does.
+      if (!preceding && !comparesScreens) {
+        unmarked ||= !sameFrame;
+        continue;
+      }
+      if (preceding?.groups?.own && !comparesScreens) continue;
+      // A later viewpoint starts a new description even when there is no clause punctuation.
+      const description = clause.slice(term.index + term[0].length, viewpoints[nextViewpoint]?.index);
+      const qualifier = descriptionQualifier.exec(description);
+      if (qualifier ? qualifier.groups?.cause !== undefined : !questionEnd.test(description)) partnerAssertion = true;
+    }
+  }
+  return [...(unmarked ? ["orientation_leak"] : []), ...(partnerAssertion ? ["shared_view_assumption"] : [])];
 }
 
 /** Check unmarked directions and, in holistic_v5, explicit assertions about the partner's orientation. */
 export function findOrientationLeaks(text: string, policy?: DialoguePolicy): string[] {
   const unquoted = normalize(text).replace(/「[^」]*」|『[^』]*』/gu, "「」");
-  const clauses = unquoted.split(clauseBreak);
-  const v5 = policy === "holistic_v5";
-  return [
-    ...(clauses.some(clause => orientationWords.test(clause) && !viewpointStated.test(clause) &&
-      !(v5 && (ownColloquialView.test(clause) || partnerView.test(clause)))) ? ["orientation_leak"] : []),
-    ...(v5 && clauses.some(assertsPartnerOrientation) ? ["shared_view_assumption"] : []),
-  ];
+  if (policy === "holistic_v5") return v5OrientationLeaks(unquoted);
+  return unquoted.split(clauseBreak).some(clause => orientationWords.test(clause) && !viewpointStated.test(clause))
+    ? ["orientation_leak"] : [];
 }
 
 /** two_stage_v3 only. Generation working text that leaked into the public utterance: a run of three or more English words outside quotes
