@@ -538,7 +538,7 @@ for (const label of strategies) {
 
   test('2 ' + label + ' v4 keeps accept valid for a naming reconfirmation', async t => {
     const open = await participant(t, label);
-    const session = await open();
+    const session = await open({ policy: 'holistic_v4' });
     const agreed = await session.say(propose('agree'));
     const human = 'この形は「' + alias + '」で大丈夫ですか？';
     const source = await session.say({ human, plan: {

@@ -35,6 +35,7 @@ const timeouts = {
   observationMs: 20000, localMs: 20000, decisionMs: 20000, lunaAttemptMs: 80000, generationMs: 40000, trialMs: 600000,
 };
 const v3Profile = researchTrialProfileV3(lunaRequest, timeouts, 'two_stage_v3', 'holistic_v3');
+const v4Profile = researchTrialProfileV3(lunaRequest, timeouts, 'two_stage_v3', 'holistic_v4');
 // Hash of the closed-set criteria as sent by 80d0cfd, in its original key order.
 const v3CriteriaSha256 = '08ba5880bf6bfcd09609bb651a22542e39c4c378d0bc3b884ac5c8a83da0bdb8';
 const feature = '小さな輪が台に接している';
@@ -183,18 +184,18 @@ async function participant(t: TestContext, strategy: Label) {
     readKey, fetchImpl,
   });
 
-  return async function makeTask(restore?: Saved, createV3 = false) {
+  return async function makeTask(restore?: Saved, creationProfile?: typeof v3Profile) {
     const options = { strategy, seed, referenceMemory: true, restore };
     const wiring = await prepared.taskOptions(options);
     assert.ok(wiring.jevResearch);
-    // Create a v3 record even in a shallow checkout, then restore it through ordinary participant wiring.
-    const jevResearch = createV3 ? {
-      ...wiring.jevResearch, profile: v3Profile,
+    // Create an explicit version even in a shallow checkout; restore uses the ordinary participant wiring.
+    const jevResearch = creationProfile ? {
+      ...wiring.jevResearch, profile: creationProfile,
       localGrounding: {
         ...wiring.jevResearch.localGrounding,
         classifier: createJevLocalTestClassifier({
-          enabled: true, readKey, fetchImpl, timeoutMs: v3Profile.timeouts.localMs,
-          questionLayout: v3Profile.questionLayout, dialoguePolicy: v3Profile.dialoguePolicy,
+          enabled: true, readKey, fetchImpl, timeoutMs: creationProfile.timeouts.localMs,
+          questionLayout: creationProfile.questionLayout, dialoguePolicy: creationProfile.dialoguePolicy,
         })!,
       },
     } : wiring.jevResearch;
@@ -309,8 +310,9 @@ for (const strategy of strategies) {
     assert.deepEqual(result.after.ownLedger, agreed.after.ownLedger);
   });
 
-  test('B2 ' + strategy + ' persists holistic_v4 for a new technical trial', async t => {
-    const fresh = await (await participant(t, strategy))();
+  test('B2 ' + strategy + ' persists explicit holistic_v4 for a new technical trial', async t => {
+    const makeTask = await participant(t, strategy);
+    const fresh = await makeTask(undefined, v4Profile);
     await fresh.say({ human: 'では始めましょう。', actions: ['accept'], replies: { accept: 'はい、始めましょう。' } });
     assert.equal(fresh.saved().options.profileSha256, researchHash(fresh.profile));
     assert.equal(fresh.saved().options.dialoguePolicy, 'holistic_v4');
@@ -318,7 +320,7 @@ for (const strategy of strategies) {
 
   test('B2 ' + strategy + ' sends the v3 classification text after restoring a v3 trial', async t => {
     const makeTask = await participant(t, strategy);
-    const old = await makeTask(undefined, true);
+    const old = await makeTask(undefined, v3Profile);
     const warmup = 'この輪は台に接していますか？';
     const original = await old.say({
       human: warmup, segment: { quote: warmup, aspect: 'part', targets: [first] }, act: 'ask',

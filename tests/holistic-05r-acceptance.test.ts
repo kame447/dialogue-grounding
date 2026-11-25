@@ -438,16 +438,15 @@ async function participantSetup(t: TestContext, strategy: Strategy) {
     },
   });
   type ParticipantRecord = Saved & { options: { profileSha256: string; dialoguePolicy?: string } };
-  async function makeTask(restore?: ParticipantRecord, earlier = false) {
+  async function makeTask(restore?: ParticipantRecord, creationProfile?: typeof participantProfile) {
     const value = { strategy, seed, referenceMemory: true, restore };
     const wiring = await prepared.taskOptions(value);
     assert.ok(wiring.jevResearch);
     let saved: ParticipantRecord | undefined;
-    // Produce a genuine v2 record with that profile. The subsequent restore
-    // uses the current prepared factory and keeps its default configuration.
+    // Pin the profile for new fixtures. Restore selects its saved profile through the ordinary wiring.
     const task = await createNamingTaskV2({
       ...value, ...wiring, runDir: null, createTrial: () => scene,
-      ...(earlier ? { jevResearch: { ...wiring.jevResearch, profile: legacyProfile } } : {}),
+      ...(creationProfile ? { jevResearch: { ...wiring.jevResearch, profile: creationProfile } } : {}),
       onPersist(record: unknown) { saved = structuredClone(record) as ParticipantRecord; },
     });
     return {
@@ -461,7 +460,7 @@ async function participantSetup(t: TestContext, strategy: Strategy) {
 for (const strategy of strategies) {
   test('6 ' + strategy + ' keeps the classification version on ordinary participant restore', async t => {
     const { makeTask, localRequests } = await participantSetup(t, strategy);
-    const old = await makeTask(undefined, true);
+    const old = await makeTask(undefined, legacyProfile);
     old.task.message('では始めましょう。', 'offline-05r-warmup');
     await old.task.whenIdle();
     assert.equal(old.task.getState().aiStatus, 'idle');
@@ -470,7 +469,7 @@ for (const strategy of strategies) {
 
     const restarted = await makeTask(source);
     assert.equal(restarted.record().options.profileSha256, source.options.profileSha256);
-    const fresh = await makeTask();
+    const fresh = await makeTask(undefined, participantProfile);
     assert.equal(fresh.record().options.profileSha256, researchHash(participantProfile));
     assert.equal(restarted.record().options.dialoguePolicy, 'holistic_v2');
     assert.equal(fresh.record().options.dialoguePolicy, 'holistic_v4');
