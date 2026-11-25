@@ -214,17 +214,21 @@ test('A9/D3: both strategies fail identically before acceptance and send identic
 
 test('budget: an explicit 0.15 USD research cap reaches RunBudget and every Jev adapter; another cap cannot restore the record',async t=>{
   const base=(await fixture(t)).config;
-  for(const jevUsd of [0.150001,0,-0.01,null,Number.NaN,Infinity,'0.1'])assert.throws(()=>validateParticipantJevConfig({...base,limits:{...limits,jevUsd}}),{code:'invalid_config'},String(jevUsd));
+  const research={...base,researchBudget:true};
+  for(const jevUsd of [0.150001,0,-0.01,null,Number.NaN,Infinity,'0.1'])assert.throws(()=>validateParticipantJevConfig({...research,limits:{...limits,jevUsd}}),{code:'invalid_config'},String(jevUsd));
+  // Without the explicit research opt-in the approved 0.05 holds (#194); the flag itself is closed.
+  for(const changes of [{limits:{...limits,jevUsd:0.051}},{limits:{...limits,jevUsd:0.15}},{researchBudget:false,limits:{...limits,jevUsd:0.15}},{researchBudget:'true'}])assert.throws(()=>validateParticipantJevConfig({...base,...changes}),{code:'invalid_config'},JSON.stringify(changes));
+  assert.equal(validateParticipantJevConfig({...base,limits:{...limits,jevUsd:0.05}}).config.limits.jevUsd,0.05);
   // Unspecified: the research config has no implicit Jev budget; a missing jevUsd refuses startup.
   const {jevUsd:_unspecified,...withoutJevUsd}=limits;
-  assert.throws(()=>validateParticipantJevConfig({...base,limits:withoutJevUsd}),{code:'invalid_config'});
-  assert.equal(validateParticipantJevConfig({...base,limits:{...limits,jevUsd:0.15}}).config.limits.jevUsd,0.15);
+  assert.throws(()=>validateParticipantJevConfig({...research,limits:withoutJevUsd}),{code:'invalid_config'});
+  assert.equal(validateParticipantJevConfig({...research,limits:{...limits,jevUsd:0.15}}).config.limits.jevUsd,0.15);
   // Two 0.04 USD Jev calls in one turn exceed 0.05 but fit 0.15, in the decision client and in the ledger alike.
   const low=await fixture(t,{},{stage1:{action:'accept',target:'none'},cost:0.04});
   const lowMade=await makeTask(await prepareParticipantJev(low.options),{strategy:'bypass-enabled'});
   lowMade.task.message('この形について話しましょう','low');await lowMade.task.whenIdle();
   assert.equal(lowMade.task.getState().aiStatus,'error');
-  const high=await fixture(t,{limits:{...limits,jevUsd:0.15}},{stage1:{action:'accept',target:'none'},cost:0.04});
+  const high=await fixture(t,{researchBudget:true,limits:{...limits,jevUsd:0.15}},{stage1:{action:'accept',target:'none'},cost:0.04});
   const highPrepared=await prepareParticipantJev(high.options),highMade=await makeTask(highPrepared,{strategy:'bypass-enabled'});
   highMade.task.message('この形について話しましょう','high');await highMade.task.whenIdle();
   const record=highMade.record();
