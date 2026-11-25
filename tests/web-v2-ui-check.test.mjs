@@ -130,6 +130,7 @@ const STOPPED = "進行を確認できません。実験担当者にお知らせ
 test("v5 offers non-dialogue pause and resume and never posts a retry after the server reports the limit", async () => {
   const initial = { ...trial(), aiStatus: "error", dialogueRecovery: "retry" };
   initial.events.push({ id: "event-2", speaker: "human", text: "切れ目はありますか？" });
+  const exhausted = { ...structuredClone(initial), dialogueRecovery: "unavailable" };
   const h = await ui(initial, ({ path, state }) => {
     if (path === "/api/interrupt") {
       state.trial.dialogueRecovery = "paused";
@@ -141,6 +142,7 @@ test("v5 offers non-dialogue pause and resume and never posts a retry after the 
   assert.equal(e["chat-recovery-message"].textContent, "");
   assert.equal(e["retry-chat"].textContent, "再開");
   assert.equal(e["interrupt-chat"].hidden, false);
+  assert.equal(e["leave-incomplete-trial"].hidden, true);
   assert.equal(e["finish-conversation"].disabled, true);
   e["interrupt-chat"].fire("click"); await tick();
   assert.deepEqual(calls.find(call => call.path === "/api/interrupt").body, { expectedRecordId: "trial-private" });
@@ -150,11 +152,25 @@ test("v5 offers non-dialogue pause and resume and never posts a retry after the 
   e["retry-chat"].fire("click"); await tick();
   assert.equal(calls.filter(call => call.path === "/api/retry").length, 1);
 
-  const gone = await ui({ ...trial(), aiStatus: "error", dialogueRecovery: "unavailable" });
+  const gone = await ui(exhausted);
   assert.equal(gone.e["retry-chat"].hidden, true);
   assert.equal(gone.e["interrupt-chat"].hidden, true);
   gone.e["retry-chat"].fire("click"); await tick();
   assert.equal(gone.calls.filter(call => call.path === "/api/retry").length, 0);
+
+  assert.equal(gone.e["leave-incomplete-trial"].hidden, false);
+  assert.equal(gone.e["leave-incomplete-trial"].disabled, false);
+  assert.equal(gone.e["leave-incomplete-trial"].textContent, "試行を中断");
+  const callsBeforeLeaving = gone.calls.length;
+  const snapshot = structuredClone(gone.getState());
+  gone.e["leave-incomplete-trial"].fire("click");
+  await gone.advance(60000);
+  assert.equal(gone.calls.length, callsBeforeLeaving);
+  assert.deepEqual(gone.getState(), snapshot);
+  assert.equal(gone.e.trial.hidden, true);
+  assert.equal(gone.e["incomplete-stage"].hidden, false);
+  assert.equal(gone.e["incomplete-title"].focused, true);
+  assert.match(html, /id="incomplete-title"[^>]*>試行は未完了です<\/h2>/u);
 });
 test("v5 recovers the controls after a retry acknowledgement gets stuck", async () => {
   const initial = { ...trial(), aiStatus: "error", dialogueRecovery: "retry" };

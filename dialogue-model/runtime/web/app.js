@@ -31,6 +31,7 @@ let activitySince = 0;
 let chatStalled = false;
 let chatDisconnected = false;
 let checking = false;
+let showingIncompleteTrial = false;
 // An explicit resume of stopped server work is in flight (shown as activity).
 let resuming = false;
 // Progress at the moment a failed operation put STOPPED in the top notice; the
@@ -434,6 +435,9 @@ function renderProgress() {
   $("retry-chat").disabled = working || checking || sending || !chatOpen();
   $("interrupt-chat").hidden = recovery !== "retry" || !dialogueFailed();
   $("interrupt-chat").disabled = working || checking || sending || !chatOpen();
+  $("leave-incomplete-trial").textContent = "試行を中断";
+  $("leave-incomplete-trial").hidden = recovery !== "unavailable" || !dialogueFailed();
+  $("leave-incomplete-trial").disabled = working || checking || sending || !chatOpen();
   $("chat-status").textContent = failed ? "送信を確認できませんでした。送り直すには、そのメッセージの「再送」を押してください。" :
     stopped ? stoppedMessage : showDots ? "AIが返答を作成しています" : "";
   if (current) {
@@ -535,6 +539,7 @@ function canStart() {
   return startReady && (!current || trialCompleted() && reception?.status === "in_progress") && !working && !serverBusy && !reviewing;
 }
 function render(state) {
+  if (showingIncompleteTrial) return;
   const trial = state.trial;
   if (trialIdentity(trial) !== trialIdentity(current)) {
     // A poll can observe the switch before the in-flight POST returns 409.
@@ -609,11 +614,12 @@ function setControls() {
 }
 function scheduleRefresh() {
   clearTimeout(refreshTimer);
-  if (document.visibilityState === "hidden") return;
+  if (showingIncompleteTrial || document.visibilityState === "hidden") return;
   if (!current && reception && !reviewing) { refreshTimer = setTimeout(() => refreshState(), 5000); return; }
   if (current && !preparing && !reviewing) refreshTimer = setTimeout(() => refreshState(), aiThinking() || pending.length ? 700 : 2000);
 }
 async function refreshState() {
+  if (showingIncompleteTrial) return false;
   if (refreshRequest) return refreshRequest;
   if (entryMode()) return false;
   const epoch = generation;
@@ -1091,7 +1097,7 @@ function earlierRecords() {
   return reviewing ? [] : records.items.filter((item) => !item.active && item.recordId !== trialIdentity(current) && item.status === "completed");
 }
 function renderRecords() {
-  const others = earlierRecords();
+  const others = showingIncompleteTrial ? [] : earlierRecords();
   const history = $("record-history");
   history.hidden = !others.length;
   const unanswered = others.filter((item) => item.questionnaire !== "submitted").length;
@@ -1211,6 +1217,18 @@ $("interrupt-chat").addEventListener("click", () => {
   if (chatOpen() && dialogueFailed() && current?.dialogueRecovery === "retry" && !checking && !sending) {
     operate(() => boundedRequest("/api/interrupt", {}), { recovery: true });
   }
+});
+$("leave-incomplete-trial").addEventListener("click", () => {
+  if (working || checking || sending || !chatOpen() || !dialogueFailed() || current?.dialogueRecovery !== "unavailable") return;
+  // The server already recorded the pending turn. Leaving only changes this screen.
+  showingIncompleteTrial = true;
+  generation++;
+  clearTimeout(refreshTimer);
+  clearTimeout(typingTimer);
+  for (const id of ["trial", "trial-progress", "record-history"]) $(id).hidden = true;
+  $("notice").textContent = "";
+  $("incomplete-stage").hidden = false;
+  $("incomplete-title").focus();
 });
 $("finish-conversation").addEventListener("click", () => changeStage("names"));
 $("back-to-chat").addEventListener("click", () => changeStage("chat"));
