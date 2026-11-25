@@ -355,7 +355,7 @@ export async function runJevEvaluation(options: EvaluationOptions, deps: Evaluat
           record = { turn: currentTurn, committed: !!committed, traceMatches, decisions: structuredClone(decisionCalls), decisionOrder: [...decisionOrder],
             humanReferent: structuredClone(committed?.humanReferent ?? null), decisionReferents: structuredClone(decisionReferents), decisionInputHashes: structuredClone(decisionInputHashes),
             finalAct: judgment ? { action: judgment.action, targetSlot: judgment.targetSlot, candidateName: judgment.candidateName, discriminatingFeature: judgment.discriminatingFeature } : null,
-            intervention: committed?.intervention ?? null, publicText: result.text, local: localAudit, issues: deriveLocalIssues(state!.graph),
+            intervention: (committed?.intervention ?? null) as TurnReceipt["intervention"], publicText: result.text, local: localAudit, issues: deriveLocalIssues(state!.graph),
             ledger: structuredClone(state!.ledger), repairHistory: structuredClone(state!.repairHistory), step: structuredClone(step) };
           trial.turns.push(record);
           events.push({ seq: currentTurn + 1, id: "synthetic-" + (currentTurn + 1), speaker: "ai", text: result.text });
@@ -377,7 +377,8 @@ export async function runJevEvaluation(options: EvaluationOptions, deps: Evaluat
       }
       trial.completed = true;
     } catch (error) {
-      const code = clientFailure ?? (error instanceof JevTurnError ? new JevTurnError(error.code).code : evaluationErrorCode(error));
+      const turnCode = error instanceof JevTurnError ? new JevTurnError(error.code).code : null;
+      const code = clientFailure ?? (turnCode !== null && CODES.some(c => c === turnCode) ? turnCode as EvaluationErrorCode : evaluationErrorCode(error));
       trial.failureCode = code;
       const observation: ObservationFailure = {};
       if (error instanceof JevTurnError) {

@@ -1,3 +1,5 @@
+import { deadlineLimit, deadlineValue } from '../v2/research-deadline-options.ts';
+import type { ResearchLimits } from '../v2/research-timeouts.ts';
 // Private visual descriptions only. Action selection remains with Jev (0002).
 import { LOCAL_ASPECTS } from "../local-grounding/contract.ts";
 import type { LocalOwnAnchor } from "../local-grounding/contract.ts";
@@ -200,13 +202,16 @@ export function mergeReobservation(memo: ObservationMemo, result: ReobservationR
   return validateObservationMemo(next);
 }
 
-export function createLunaObserver(client: ObservationClient, { timeoutMs = 20000, now = () => new Date() }:
-  { timeoutMs?: number; now?: () => Date } = {}): ObservationObserver {
-  if (!client || typeof client.complete !== "function" || !positive(timeoutMs) || timeoutMs > 60000 || typeof now !== "function") fail("invalid_input");
+export function createLunaObserver(client: ObservationClient, { timeoutMs = 20000, now = () => new Date(), researchLimits }:
+  { timeoutMs?: number; now?: () => Date; researchLimits?: ResearchLimits } = {}): ObservationObserver {
+  const limit = deadlineLimit(researchLimits);
+  if (!client || typeof client.complete !== "function" || !positive(timeoutMs) || timeoutMs > limit || typeof now !== "function") fail("invalid_input");
   async function run<T>(messages: ObservationMessage[], phase: string, parse: (raw: unknown, observedAt: string) => T, options: ObservationOptions): Promise<T> {
     if (options.signal?.aborted) fail("aborted");
-    const deadline = options.timeoutMs ?? timeoutMs;
-    if (!positive(deadline) || deadline > 60000) fail("invalid_input");
+    const raw = researchLimits === undefined ? options.timeoutMs ?? timeoutMs : options.timeoutMs === undefined ? timeoutMs : options.timeoutMs;
+    if (!deadlineValue(raw, limit)) fail("invalid_input");
+    const deadline = researchLimits === undefined ? raw : Math.min(timeoutMs, raw);
+    if (!positive(deadline) || deadline > limit) fail("invalid_input");
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     let abort = () => {};

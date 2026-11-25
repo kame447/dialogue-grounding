@@ -1,3 +1,4 @@
+import type { ResearchLimits } from '../v2/research-timeouts.ts';
 // Shared contract for proposition-scoped (partial) grounding memory. Decision 0001.
 // Opt-in research path only: no default strategy, prompt, scoring, UI or model policy
 // depends on this file. Every record is the AI's interpretation of PUBLIC utterances
@@ -158,6 +159,7 @@ export type LocalIssueView = {
 
 /** v2 option shape. Default null (off). Requires referenceMemory: true. */
 export type LocalGroundingOptions = {
+  researchLimits?: ResearchLimits;
   extractor: LocalSegmentExtractor;
   classifier: LocalFunctionClassifier;
   timeoutMs?: number;

@@ -5,7 +5,7 @@ export type Status = "pass" | "mismatch" | "not_comparable" | "not_reached";
 export type Check = { id: string; status: Status; reason: string; detail?: Row };
 export type Storage = { name: string; mode: number; external: boolean; regular: boolean };
 export type Records = { run?: Row; summary?: Row; warmup?: Row; failure?: Row; trials: Row[];
-  billing?: Row[]; packets?: Array<{ name: string; value: Row }>; storage?: Storage[]; evidence?: Row };
+  billing?: Row[]; deadlineRevisions?: Row[]; packets?: Array<{ name: string; value: Row }>; storage?: Storage[]; evidence?: Row };
 export const row = (value: unknown): Row => value !== null && typeof value === "object" && !Array.isArray(value) ? value as Row : {};
 export const list = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
 export const rows = (value: unknown): Row[] => list(value).map(row);

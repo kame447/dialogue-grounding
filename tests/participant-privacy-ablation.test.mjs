@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { deflateSync, inflateSync } from 'node:zlib';
 import { createNamingTask, SLOTS } from '../dialogue-model/runtime/naming-task.mjs';
 import { createDialogueSession } from '../dialogue-model/runtime/session.mjs';
-import { startNamingServer } from '../dialogue-model/runtime/web/server.mjs';
+import { startNamingServer } from './support/legacy-web-v1-fa84980/server.mjs';
 import { createOwnImageRotationSheet } from '../dialogue-model/runtime/visual/own-image-rotation.mjs';
 import { createReferenceGraph, validateReferenceUpdate } from '../dialogue-model/runtime/memory/reference-graph.mjs';
 import { JUDGE_POLICIES } from '../dialogue-model/runtime/judgment/instructions.mjs';

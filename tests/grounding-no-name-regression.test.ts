@@ -89,12 +89,15 @@ async function run(steps: Step[], { referenceMemory = true, strategy = "repair-f
 }
 // Per turn of SCRIPT under the stand-in (pre-utterance state, researcher boundary):
 // 0 鳥みたい = impression only; 1 「鳥と呼びましょう」 = explicit proposal, not yet adopted on record;
-// 2-4, 6-7 impressions/defer/revisit, never an explicit proposal for that figure; 5 no target;
-// 8 「波でいいです」 after only 「波みたい」 is a borderline 仮称-by-context case (labelQuality weak):
-// it may offer 波 as this figure's name (unclear) or merely OK an impression (no_name). No level
-// is asserted for it (null below); 9 a feature description only.
+// 2 and 4, 6-7 impressions/defer/revisit with no proposal on record yet for that figure; 5 no target;
+// 3 the current human denial, judged before the AI repair is published: 棒 was publicly proposed in the AI's
+//   turn-2 reply (a propose_name now shows its name), so a proposal is on record (unclear);
+// 8 「波でいいです」 follows the AI's 「波」でどうでしょう？: a public name offer in a form the stand-in PROPOSAL
+//   regex does not handle (a stand-in coverage gap, not a semantic borderline). Its label and oracle are
+//   unchanged here: unclear or no_name, never agreed / not_agreed (no single level asserted);
+// 9 a feature description only.
 const BORDERLINE = "borderline";
-const EXPECTED_SCRIPT_LEVELS = ["no_name", "unclear", "no_name", "no_name", "no_name", "unknown", "no_name", "no_name", BORDERLINE, "no_name"];
+const EXPECTED_SCRIPT_LEVELS = ["no_name", "unclear", "no_name", "unclear", "no_name", "unknown", "no_name", "no_name", BORDERLINE, "no_name"];
 // Detached shadow calls may finish out of order; compare their public turn order.
 const levels = (record: Rec) => [...record.groundingShadow].sort((a: Rec, b: Rec) => a.turnIndex - b.turnIndex)
   .map((r: Rec) => r.status === "ok" ? r.nameAgreement.level : r.status + ":" + r.error);
@@ -221,8 +224,8 @@ test("agree, negation/repair, defer/revisit: verdicts follow the pre-turn eviden
   }
   // Turn 2 judges A's agreement before it is committed: a proposal on record, not yet agreed.
   assert.equal(got[1], "unclear");
-  // B after the denial and the AI's repair: 棒 was only ever an impression, so no_name, never not_agreed.
-  assert.equal(got[3], "no_name");
+  // B on the current human denial, before the AI repair is published: 棒 was publicly proposed at turn 2.
+  assert.equal(got[3], "unclear");
   assert.deepEqual(got.map((level: string, i: number) => EXPECTED_SCRIPT_LEVELS[i] === BORDERLINE ? BORDERLINE : level), EXPECTED_SCRIPT_LEVELS);
   assert.ok(["no_name", "unclear"].includes(got[8]), "the borderline turn is never agreed / not_agreed");
 });

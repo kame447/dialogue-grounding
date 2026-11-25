@@ -1,3 +1,5 @@
+import { deadlineLimit, deadlineValue } from '../v2/research-deadline-options.ts';
+import type { ResearchLimits } from '../v2/research-timeouts.ts';
 // Opt-in semantic extraction from the AI's own image and public dialogue only.
 // No partner image, answer key, strategy, model policy or graph writes.
 import { LOCAL_ASPECTS } from "./contract.ts";
@@ -126,17 +128,20 @@ export function parseLocalExtraction(raw: unknown, input: LocalExtractionInput,
   return segments;
 }
 
-function createLocalExtractor(client: Client, { timeoutMs = 20000 }: { timeoutMs?: number },
+function createLocalExtractor(client: Client, { timeoutMs = 20000, researchLimits }: { timeoutMs?: number; researchLimits?: ResearchLimits },
   buildMessages: (input: LocalExtractionInput) => Message[]): DiagnosedLocalExtractor {
-  if (!client || typeof client.complete !== "function" || !positive(timeoutMs) || timeoutMs > 60000) fail("invalid_input");
+  const limit = deadlineLimit(researchLimits);
+  if (!client || typeof client.complete !== "function" || !positive(timeoutMs) || timeoutMs > limit) fail("invalid_input");
   let diagnostics: LocalExtractionDiagnostics = { rejectedSegments: 0, reasons: [] };
   return {
     get lastDiagnostics() { return structuredClone(diagnostics); },
     async extract(input, options = {}) {
       diagnostics = { rejectedSegments: 0, reasons: [] };
       if (options.signal?.aborted) fail("aborted");
-      const deadline = options.timeoutMs ?? timeoutMs;
-      if (!positive(deadline) || deadline > 60000) fail("invalid_input");
+      const raw = researchLimits === undefined ? options.timeoutMs ?? timeoutMs : options.timeoutMs === undefined ? timeoutMs : options.timeoutMs;
+      if (!deadlineValue(raw, limit)) fail("invalid_input");
+      const deadline = researchLimits === undefined ? raw : Math.min(timeoutMs, raw);
+      if (!positive(deadline) || deadline > limit) fail("invalid_input");
       // A detached snapshot prevents a caller mutating provenance while the model runs.
       const snapshot = extractionSnapshot(input);
       const messages = buildMessages(snapshot);
@@ -168,7 +173,7 @@ function createLocalExtractor(client: Client, { timeoutMs = 20000 }: { timeoutMs
   };
 }
 
-export function createLunaLocalExtractor(client: Client, options: { timeoutMs?: number } = {}): DiagnosedLocalExtractor {
+export function createLunaLocalExtractor(client: Client, options: { timeoutMs?: number; researchLimits?: ResearchLimits } = {}): DiagnosedLocalExtractor {
   return createLocalExtractor(client, options, buildLocalExtractionMessages);
 }
 
@@ -193,11 +198,11 @@ export function buildMemoExtractionMessages(input: LocalExtractionInput, memo: O
 }
 
 /** Opt-in memo interpretation. No image content is sent; the legacy input stays compatible. */
-export function createMemoLocalExtractor(client: Client, { getMemo, timeoutMs }: {
-  getMemo: () => ObservationMemo; timeoutMs?: number;
+export function createMemoLocalExtractor(client: Client, { getMemo, timeoutMs, researchLimits }: {
+  getMemo: () => ObservationMemo; timeoutMs?: number; researchLimits?: ResearchLimits;
 }): DiagnosedLocalExtractor {
   if (typeof getMemo !== "function") fail("invalid_input");
-  return createLocalExtractor(client, { timeoutMs }, input => {
+  return createLocalExtractor(client, { timeoutMs, researchLimits }, input => {
     let memo: ObservationMemo;
     try { memo = getMemo(); } catch { return fail("invalid_input"); }
     return buildMemoExtractionMessages(input, memo);

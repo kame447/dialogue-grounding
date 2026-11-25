@@ -1,3 +1,4 @@
+import type { ResearchDeadlineScope } from './research-deadlines.ts';
 // Client-level complete calls and actual HTTP attempts are different counters.
 import { researchHash } from "../../v2/research-profile.ts";
 import type { LunaRequestSettings } from "../../v2/research-profile.ts";
@@ -13,7 +14,7 @@ export function canonicalLunaPayload(messages: unknown[], settings: LunaRequestS
 }
 export class LunaWireError extends Error { readonly code = "invalid_luna_wire"; constructor() { super("invalid_luna_wire"); } }
 export function lunaWire(settings: LunaRequestSettings, budget: RunBudget, onSecret: (key: string) => void = () => {},
-  onPolicyGet: () => void = () => {}) {
+  onPolicyGet: () => void = () => {}, deadlines?: ResearchDeadlineScope) {
   const records: HttpReceipt[] = [];
   const owned: ReturnType<RunBudget["reserve"]>[] = [];
   const context = new AsyncLocalStorage<{ record: CallReceipt; signal?: AbortSignal }>();
@@ -48,6 +49,32 @@ export function lunaWire(settings: LunaRequestSettings, budget: RunBudget, onSec
         const record: HttpReceipt = { method, kind: method === "POST" ? "completion_post" : "policy_get", phase: current?.phase ?? null,
           callId: current?.id ?? null, sendId: null, hashScheme: "canonical_json_sha256",
           requestSha256: body ? researchHash(body) : null, status: null, outcome: "started" };
+        if (deadlines && method === 'POST') {
+          let send: ReturnType<RunBudget['reserve']> | null = null, response: Response | undefined;
+          try {
+            const result = await deadlines.fetch(current!.id, (attempts.get(current!) ?? 1) - 1, {
+              signal: init?.signal ?? undefined,
+              reserve: () => {
+                send = budget.reserve('luna', current!.phase, current!.turn, current!.id);
+                current!.sendIds.push(send.id); record.sendId = send.id;
+                owned.push(send); records.push(record); return send.id;
+              },
+              fetchImpl: async scoped => {
+                budget.sent(send!); current!.httpRequestSha256 = record.requestSha256!;
+                const signals = [scoped, signal, call?.signal, init?.signal].filter((s): s is AbortSignal => s != null);
+                response = await fetchImpl(url, { ...init, signal: AbortSignal.any(signals) }); return response;
+              },
+              onUsage: (_id, usage) => budget.observe(send!, usage),
+              onUnknown: () => budget.unknown(send!),
+            });
+            if (!closed) { record.status = result.status; record.outcome = 'returned'; }
+            return result;
+          } catch (error) {
+            if (!send) budget.refuse('luna_http', 'phase_aborted', current!.id);
+            if (!closed) { record.status = response?.status ?? null; record.outcome = 'unknown'; }
+            throw error;
+          }
+        }
         const send = method === "POST" ? budget.reserve("luna", current?.phase ?? null, current?.turn ?? null, current?.id ?? null) : null;
         if (send && current?.sendIds) current.sendIds.push(send.id);
         record.sendId = send?.id ?? null;
@@ -55,7 +82,8 @@ export function lunaWire(settings: LunaRequestSettings, budget: RunBudget, onSec
         records.push(record);
         try {
           if (send) { budget.sent(send); current!.httpRequestSha256 = record.requestSha256!; } else onPolicyGet();
-          const response = await fetchImpl(url, { ...init, ...(signal ? { signal: init?.signal ? AbortSignal.any([signal, init.signal]) : signal } : {}) });
+          const signals = [signal, call?.signal, init?.signal].filter((v): v is AbortSignal => v != null);
+          const response = await fetchImpl(url, { ...init, ...(signals.length ? { signal: AbortSignal.any(signals) } : {}) });
           // Account each send once, even when complete() later rejects an empty
           // body, or the trial has already ended. Failed HTTP bodies stay unread.
           if (send) {

@@ -12,7 +12,9 @@ import { createOwnImageRotationSheet } from "./visual/own-image-rotation.mjs";
 
 // Fixed participant-facing coordinates, never figure identities.
 export { SLOTS, STRATEGIES };
-const REPOSITORY = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+// Resolve the repository path only for Node-side output checks. Cloudflare Workers
+// imports this module without a usable import.meta.url and never writes runDir.
+const repositoryRoot = () => resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const FINAL_INSTRUCTIONS = [
   "【実験環境からの非公開最終提出要求。対話相手の発話ではありません】",
   "対話は終了しました。自分自身の画像と公開対話履歴だけから、あなた自身の画面上の6位置に付ける最終名称を提出してください。",
@@ -48,7 +50,7 @@ async function canonicalDestination(path) {
 export async function outsideRepositoryDirectory(path) {
   if (typeof path !== "string" || !path.trim()) throw new NamingTaskError("invalid_output_directory");
   const destination = await canonicalDestination(path);
-  const repository = await realpath(REPOSITORY);
+  const repository = await realpath(repositoryRoot());
   const rel = relative(repository, destination);
   if (!rel || (!rel.startsWith("../") && rel !== ".." && !isAbsolute(rel))) {
     throw new NamingTaskError("repository_output_forbidden");

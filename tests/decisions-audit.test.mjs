@@ -23,7 +23,7 @@ function makeDialogue(decisionShadowClient = null, { generationGate = null } = {
   const client = { async complete(messages, options = {}) {
     calls.push({ messages: structuredClone(messages), phase: options.phase });
     if (options.phase === 'generation' && generationGate) await generationGate;
-    return { text: options.phase === 'final_submission' ? JSON.stringify(Object.fromEntries(model.anchors.map((a, i) => [a.id, '名' + i]))) : 'FUTURE-REPLY-CANARY' };
+    return { text: options.phase === 'final_submission' ? JSON.stringify(Object.fromEntries(model.anchors.map((a, i) => [a.id, '名' + i]))) : 'FUTURE-REPLY-CANARY「話題名」' };
   } };
   const dialogue = createDialogueV2({ client, strategy: 'repair-first', image: { mimeType: model.mimeType, base64: model.png.toString('base64') },
     anchors: model.anchors, judge: { async judge() { return { ...SAFE_JUDGMENT, action: 'propose_name', targetSlot: model.anchors[0].id, candidateName: '話題名' }; } },

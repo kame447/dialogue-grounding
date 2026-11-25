@@ -44,6 +44,9 @@ export function replayChecks(records: Records): Check[] {
     const outputMissing = !trial && missingTrialOrders(records).includes(Number(pair.trialOrder));
     const native = rows(trial?.replay).find(r => row(list(row(r.tape).events).at(-1)).seq === pair.turn), tape = row(native?.tape);
     out.push(outputMissing && !seen.has(key) ? missing(`${id}.binding`, "output_missing") : assertion(`${id}.binding`, expected.some(e => e.order === pair.trialOrder && e.turn === pair.turn) && !seen.has(key), "recorded_trial_turn_binding")); seen.add(key);
+    if(tape.schemaVersion==='parity_intervention_replay_v1'){
+      out.push(...interventionReplayWire(records,trial,pair,tape,id,outputMissing));continue;
+    }
     out.push(assertion(`${id}.labels`, a.label === "repair-first" && b.label === "bypass-enabled", "both_labels_captured"));
     if (!Object.hasOwn(a, "material") || !Object.hasOwn(b, "material")) { out.push(missing(`${id}.materials`)); continue; }
     out.push(assertion(`${id}.materials.sha256`, hash(a.material) === a.materialSha256 && hash(b.material) === b.materialSha256, "projected_material_sha256"));
@@ -112,9 +115,48 @@ export function replayChecks(records: Records): Check[] {
   }
   expected.forEach((e, i) => { if (!seen.has(`${e.order}:${e.turn}`)) out.push(missing(`replay.required.${i}`, "paired_raw_requests_missing")); });
   records.trials.forEach((trial, i) => rows(trial.replay).forEach((r, j) => {
+    if(row(r.tape).schemaVersion==='parity_intervention_replay_v1')return;
     const projected = (v: unknown) => rows(v).map(({ provider, phase, requestSha256 }) => ({ provider, phase, requestSha256 }));
     out.push(Array.isArray(row(r.tape).expectedRequests) && Array.isArray(row(r.result).requests) ? assertion(`replay.recorded.${i}.${j}`,
       equal(projected(row(r.tape).expectedRequests), projected(row(r.result).requests)), "recorded_http_hash_list_consistency_only") : missing(`replay.recorded.${i}.${j}`));
   }));
   return out;
+}
+
+/** V3 common parity and recorded-label physical receipts are distinct claims. */
+function interventionReplayWire(records:Records,trial:Row|undefined,pair:Row,tape:Row,id:string,outputMissing:boolean):Check[]{
+ const out:Check[]=[],sides=[row(pair.left),row(pair.right)],recorded=row(tape.recorded),expected=rows(recorded.expectedRequests);
+ out.push(assertion(`${id}.labels`,sides[0].label==='repair-first'&&sides[1].label==='bypass-enabled','both_labels_captured'));
+ const common=(s:Row)=>{const m=row(s.material);return{state:m.state,events:m.events,common:m.common,own:m.own,model:m.model,profile:m.profile,boundary:m.boundary,requests:rows(s.requests).filter(r=>r.role==='common')};};
+ out.push(assertion(`${id}.parity`,equal(common(sides[0]),common(sides[1])),'complete_common_materials_and_payloads'));
+ for(const [si,side]of sides.entries()){
+  const name=si===0?'left':'right',m=row(side.material),requests=rows(side.requests),actual=side.label===recorded.label,tail=row(row(tape.tails)[String(side.label)]),boundary=row(m.boundary);
+  out.push(assertion(`${id}.${name}.materials.sha256`,hash(m)===side.materialSha256,'projected_material_sha256'));
+  out.push(assertion(`${id}.${name}.material_binding`,equal(m.state,tape.state)&&equal(m.events,tape.events)&&equal(m.common,tape.common)&&equal(m.tail,tail)&&equal(m.profile,trial?.profile),'raw_frozen_versioned_material_binding'));
+  const domain=boundary.luna==='canonical_http_json'&&boundary.jev==='canonical_http_json'&&boundary.hashScheme==='canonical_json_sha256_not_raw_body_bytes';
+  out.push(domain?check(`${id}.${name}.domain`,'pass','canonical_http_json_boundary'):missing(`${id}.${name}.domain`,'full_http_hash_domains_not_recorded'));
+  out.push(assertion(`${id}.${name}.count`,requests.length>0&&(!actual||requests.length===expected.length),'request_count_order'));
+  const used=new Set<unknown>();
+  requests.forEach((r,j)=>{
+   const rid=`${id}.${name}.${j}`,body=row(r.payload),provider=r.provider;
+   out.push(assertion(`${rid}.projected_sha256`,hash(r.payload)===r.payloadSha256,'post_projection_canonical_payload_sha256'));
+   const projection=projectionAudit(r.payload,row(row(m.own).ownImage));out.push(assertion(`${rid}.projection`,projection.valid&&(provider==='luna'||projection.count===0),'only_enumerated_own_image_url_projection'));
+   out.push(!projection.count?assertion(`${rid}.original_recomputation`,hash(r.payload)===r.preProjectionPayloadSha256,'independent_pre_projection_http_hash'):missing(`${rid}.original_recomputation`,'original_image_bytes_not_present_self_reported_hash_is_not_full_proof'));
+   if(provider==='luna'){
+    const limit=row(row(trial?.profile).lunaRequest).maxCompletionTokens;
+    out.push(assertion(`${rid}.http_fields`,equal(Object.keys(body).sort(),['messages','purpose',...(limit===null?[]:['max_completion_tokens'])].sort())&&body.purpose==='dialogue_turn'&&Array.isArray(body.messages)&&(limit===null||body.max_completion_tokens===limit),'exact_luna_body_keys_purpose_explicit_limit'));
+    if(!projection.count)out.push(assertion(`${rid}.messages_recomputation`,hash(body.messages)===r.completeMessagesSha256,'independent_complete_messages_hash'));
+   }else out.push(assertion(`${rid}.provider`,provider==='jev','known_provider_required'));
+   if(!actual){out.push(check(`${rid}.actual_http`,'pass','counterfactual_not_actual_billing_evidence',{applicable:false}));return;}
+   const e=expected[j]??{},call=rows(trial?.calls).filter(c=>c.provider===provider&&c.turn===pair.turn)[requests.slice(0,j).filter(p=>p.provider===provider).length];
+   out.push(outputMissing?missing(`${rid}.recorded_hash_binding`,'output_missing'):assertion(`${rid}.recorded_hash_binding`,provider===e.provider&&r.phase===e.phase&&r.preProjectionPayloadSha256===e.requestSha256&&shaLike(r.preProjectionPayloadSha256),'pre_projection_hash_association_to_recorded_http'));
+   const ids=list(e.sendIds),unique=ids.length>0&&ids.every(n=>count(n)&&Number(n)>0&&!used.has(n))&&new Set(ids).size===ids.length;ids.forEach(n=>used.add(n));
+   if(provider==='luna'){
+    out.push(assertion(`${rid}.messages_binding`,r.completeMessagesSha256===e.messagesSha256&&r.completeMessagesSha256===call?.requestSha256,'complete_messages_diagnostic_association_only'));
+    const receipts=rows(trial?.http).filter(h=>h.kind==='completion_post'&&(h.callId===call?.id||ids.includes(h.sendId)));
+    out.push(e.actualSendMeasured!==true?missing(`${rid}.actual_http`,'actual_luna_send_not_measured'):assertion(`${rid}.actual_http`,!!call&&unique&&equal(ids,call.sendIds)&&receipts.length===ids.length&&receipts.every(h=>ids.includes(h.sendId)&&h.callId===call.id&&h.phase===r.phase&&h.requestSha256===e.requestSha256&&h.hashScheme==='canonical_json_sha256')&&call.expectedHttpRequestSha256===e.requestSha256&&call.httpRequestSha256===e.requestSha256,'each_actual_post_and_retry_bound_to_full_http_hash'));
+   }else out.push(assertion(`${rid}.actual_http`,!!call&&unique&&equal(ids,call.sendIds)&&call.requestSha256===e.requestSha256,'jev_call_full_http_hash_binding'));
+  });
+ }
+ return out;
 }

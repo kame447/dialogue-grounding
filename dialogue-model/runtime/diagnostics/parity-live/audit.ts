@@ -121,7 +121,7 @@ export function compareParity(a: ComparableTrial, b: ComparableTrial) {
   }
   if (!comparedTurns.length) unmet.push("no_identical_prefix_measured");
   return { status: "independent_run_material_report", unmet: [...new Set(unmet)], comparedTurns, publicDivergenceTurn, internalDivergenceTurn, cells,
-    postDivergence: "compare_only_demonstrably_identical_materials", divergenceCause: "upstream_sampling_not_intervention",
+    postDivergence: "compare_only_demonstrably_identical_materials", divergenceCause: [a,b].some(t=>(t as ComparableTrial&{profile?:{id?:string}}).profile?.id==='research_trial_profile_v3')?'explicit_policy_execution_divergence_requires_material_comparison':"upstream_sampling_not_intervention",
     comparison: "not_implemented_pending_researcher_decision" };
 }
 export async function promptSourceManifest() {

@@ -1,5 +1,6 @@
 const MODEL_KEYS = Object.freeze({
   dialogue_turn: "DIALOGUE_MODEL",
+  visual_observation: "VISION_MODEL",
 });
 
 export const RESEARCH_AI_PURPOSES = Object.freeze(Object.keys(MODEL_KEYS));

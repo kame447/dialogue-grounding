@@ -28,6 +28,10 @@ const PUBLIC = ['synthetic public message alpha', 'synthetic public message beta
 const REPLY = ['synthetic stale reply', 'synthetic current reply'];
 const NAME = ['synthetic obsolete name', 'synthetic current name'];
 const PRIVATE = 'SYNTHETIC_RESEARCHER_ONLY_CANARY';
+// Luna-path replies for a propose_name act show the name (Luna publication rule).
+const SHOWN_REPLY = REPLY.map((text, index) => text + '「' + NAME[index] + '」');
+// The judge's own memo is a separate canary: it may reach only the private Luna memo message.
+const MEMO = 'SYNTHETIC_JUDGE_MEMO_CANARY';
 const act = (candidateName) => ({ action: 'propose_name', targetSlot: SLOTS[0], candidateName,
   discriminatingFeature: null, note: PRIVATE });
 const gate = () => {
@@ -368,7 +372,7 @@ requirement('v2 actual dialogue adapter: shared holistic generator, own image on
     const adapter = dialogueV2.createDialogueV2({ strategy, image: { mimeType: own.mimeType, base64: own.png.toString('base64') },
       anchors: own.anchors, client: { async complete(messages, options) {
         calls.push({ phase: options.phase, messages: structuredClone(messages) });
-        return { text: options.phase === 'judgment' ? JSON.stringify({ ...act(NAME[1]), targetSlot: own.anchors[0].id }) : REPLY[1] };
+        return { text: options.phase === 'judgment' ? JSON.stringify({ ...act(NAME[1]), note: MEMO, targetSlot: own.anchors[0].id }) : SHOWN_REPLY[1] };
       } },
     });
     const initial = adapter.initialPrivateState();
@@ -378,7 +382,11 @@ requirement('v2 actual dialogue adapter: shared holistic generator, own image on
     assert.deepEqual(calls.map((call) => call.phase), ['judgment', 'generation']);
     for (const call of calls) {
       assertHolisticContract(call.messages, call.phase);
-      assert.ok(!JSON.stringify(call.messages).includes(PRIVATE), 'private event metadata and judgment notes must be stripped');
+      assert.ok(!JSON.stringify(call.messages).includes(PRIVATE), 'private event metadata must be stripped');
+      const memo = call.messages.filter((message) => JSON.stringify(message).includes(MEMO));
+      if (call.phase === 'judgment') assert.equal(memo.length, 0, 'the judge never receives its own memo');
+      else assert.deepEqual(memo.map((message) => [message.role, message.content.startsWith(dialogueV2.LUNA_NOTE_PREFIX)]), [['system', true]],
+        'the memo reaches generation only as the private Luna memo message');
       const visible = call.messages.filter((message) => message.role === 'user' && typeof message.content === 'string');
       assert.deepEqual(visible, PUBLIC.map((content) => ({ role: 'user', content })), 'all consecutive human messages reach both stages');
       const images = call.messages.flatMap((message) => Array.isArray(message.content) ? message.content.filter((part) => part.type === 'image_url') : []);
@@ -404,8 +412,8 @@ requirement('v2 real adapter plus queue: superseded generation cannot commit act
     image: { mimeType: own.mimeType, base64: own.png.toString('base64') }, anchors: own.anchors,
     client: { async complete(_messages, options) {
       if (options.phase === 'judgment') return { text: JSON.stringify({ ...act(generations ? NAME[1] : NAME[0]), targetSlot: own.anchors[0].id }) };
-      if (generations++ === 0) { held.signal(); await held.wait; return { text: REPLY[0] }; }
-      return { text: REPLY[1] };
+      if (generations++ === 0) { held.signal(); await held.wait; return { text: SHOWN_REPLY[0] }; }
+      return { text: SHOWN_REPLY[1] };
     } },
   });
   const initial = adapter.initialPrivateState();
@@ -417,13 +425,16 @@ requirement('v2 real adapter plus queue: superseded generation cannot commit act
     assert.deepEqual(queue.getSnapshot().events.map((event) => event.text), PUBLIC);
   } finally { held.release(); }
   await queue.whenIdle();
-  assert.deepEqual(queue.getSnapshot().events.map((event) => event.text), [...PUBLIC, REPLY[1]]);
+  assert.deepEqual(queue.getSnapshot().events.map((event) => event.text), [...PUBLIC, SHOWN_REPLY[1]]);
   const committed = queue.getPrivateState();
   assert.equal(committed.ledger[own.anchors[0].id].name, NAME[1]);
   assert.equal(committed.judgments.length, 1);
   assert.equal(committed.judgments[0].turnIndex, 2);
   assert.ok(!JSON.stringify(committed).includes(NAME[0]), 'superseded real judgment cannot pollute ledger, graph, or committed diagnostics');
-  assert.ok(!JSON.stringify(queue.getSnapshot()).includes(NAME[1]), 'private agreement memory cannot leak into participant polling');
+  // NAME[1] is now public in the AI's own reply; private state must still stay out of participant polling.
+  const snapshot = queue.getSnapshot(), raw = JSON.stringify(snapshot);
+  for (const key of ['ledger', 'judgments', 'publication', 'humanNaming', 'graph', 'privateState']) assert.ok(!raw.includes('"' + key + '"'), key + ' never reaches participant polling');
+  assert.ok(!raw.includes(PRIVATE) && !raw.includes(NAME[0]), 'judge notes and superseded names never reach participant polling');
 });
 
 // Optional read-only override lets the UI owner run these same acceptance cases

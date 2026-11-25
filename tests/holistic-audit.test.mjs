@@ -15,7 +15,7 @@ test('holistic audit: actual generator requests do not restore the old internal-
         targetSlot: anchors[0].id, candidateName: '鳥' }; } },
       client: { async complete(messages, options) {
         assert.equal(options.phase, 'generation'); requests.push(structuredClone(messages));
-        return { text: '私にも鳥のように見えます。' };
+        return { text: '私にも鳥のように見えます。「鳥」と呼ぶのはどうでしょう？' };
       } } });
     const result = await dialogue.runAiTurn({ events: [{ id: 'event-1', seq: 1, speaker: 'human', text: '鳥っぽい形があるよ。' }],
       lastEventId: 'event-1', privateState: dialogue.initialPrivateState(), signal: new AbortController().signal });

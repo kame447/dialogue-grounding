@@ -1,0 +1,27 @@
+[
+  {
+    "id": "identity.intervention_policy",
+    "status": "pass",
+    "reason": "canonical_intervention_policy"
+  },
+  {
+    "id": "intervention.trial.0.attempt.0.shape",
+    "status": "not_reached",
+    "reason": "intervention_trace_missing"
+  },
+  {
+    "id": "intervention.trial.0.attempt.0.binding",
+    "status": "not_reached",
+    "reason": "intervention_trace_missing"
+  },
+  {
+    "id": "intervention.trial.0.attempt.0.execution",
+    "status": "not_reached",
+    "reason": "intervention_trace_missing"
+  },
+  {
+    "id": "intervention.trial.0.attempt.0.replay",
+    "status": "not_reached",
+    "reason": "intervention_trace_missing"
+  }
+]

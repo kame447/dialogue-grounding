@@ -1,3 +1,4 @@
+import { validateResearchFailureV2 } from './research-records.ts';
 import { amount, assertion, count, equal, list, missing, missingTrialOrders, row, rows, shaLike } from "./core.ts";
 import type { Check, Records, Row } from "./core.ts";
 
@@ -44,6 +45,10 @@ function cacheSchema(v: unknown): boolean {
 }
 export function failureKind(f: Row): "legacy_v0" | "warmup" | "after_warmup" | "invalid" {
   if (!object(f)) return "invalid";
+  if (f.schemaVersion === 'parity_live_failure_v2') {
+    try { validateResearchFailureV2(f); return f.scope === 'warmup' ? 'warmup' : 'after_warmup'; }
+    catch { return 'invalid'; }
+  }
   if (!Object.hasOwn(f, "schemaVersion")) return keys(f, ["code", "calls", "cache"]) && safeCode(f.code) &&
     Array.isArray(f.calls) && f.calls.every(callSchema) && cacheSchema(f.cache) ? "legacy_v0" : "invalid";
   if (f.schemaVersion !== "parity_live_failure_v1" || !safeCode(f.code)) return "invalid";
@@ -91,7 +96,7 @@ export function failureChecks(records: Records): Check[] {
         missing("failure.policy", "policy_not_obtained"));
       const d = row(f.deadlines), configured = row(d.configured), applied = row(d.applied);
       const observation = row(row(records.run?.profile).timeouts).observationMs, client = row(row(records.run?.manifest).lunaRequest).timeoutMs;
-      out.push(observation === undefined || client === undefined ? missing("failure.deadlines", "output_missing") :
+      if (f.schemaVersion !== 'parity_live_failure_v2') out.push(observation === undefined || client === undefined ? missing("failure.deadlines", "output_missing") :
         assertion("failure.deadlines", configured.observationMs === observation && configured.lunaClientTimeoutMs === client &&
           (applied.observationOuterMs === null || applied.observationOuterMs === configured.observationMs), "configured_and_applied_deadlines"));
       if (row(f.http).measured === false) out.push(missing("failure.http", "output_missing"));

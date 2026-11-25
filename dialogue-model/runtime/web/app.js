@@ -1,6 +1,8 @@
 const $ = (id) => document.getElementById(id);
 const SVG = "http://www.w3.org/2000/svg";
 let current = null;
+let startReady = false;
+let reception = null;
 let working = false;
 let serverBusy = false;
 let refreshTimer;
@@ -28,9 +30,29 @@ let activitySignature = "";
 let activitySince = 0;
 let chatStalled = false;
 let chatDisconnected = false;
-let checkingChat = false;
-let retryingAI = false;
+let checking = false;
+// An explicit resume of stopped server work is in flight (shown as activity).
+let resuming = false;
+// Progress at the moment a failed operation put STOPPED in the top notice; the
+// notice stays until the server confirms that progress has changed.
+let operationStop = null;
 let submissionWarning = "";
+let restoreComposerOnChange = false;
+// Tab-isolated sessions (tab-session.js + /api/sessions). null without that
+// script or before a session is chosen; then the single cookie session is used.
+let activeTabSessionId = null;
+let pendingEmptySessionId = null;
+let sessionsReceptionMode = null;
+let confirmSnapshot = null;
+const tabSession = () => globalThis.TangramTabSession ?? null;
+// Without tab-session.js (or on a server without /api/sessions) the single
+// cookie session is used and nothing below changes its behavior.
+let cookieMode = !globalThis.TangramTabSession;
+// The entry screen has no session: it must never read the cookie session's state.
+const entryMode = () => !cookieMode && !activeTabSessionId && !reviewing;
+// An earlier trial opened from the entry screen belongs to its own session.
+const requestSession = () => reviewing?.sessionId ?? activeTabSessionId;
+const sessionHeaders = (sessionId) => sessionId ? { "X-Tab-Session": sessionId } : {};
 // Presentation/network safeguards only; these never close a research trial or
 // cancel backend generation. A stalled state is refreshed, never auto-retried.
 const CHAT_STALL_MS = 60000;
@@ -50,7 +72,7 @@ function clearDraft() {
   if (reviewing) return;
   try { sessionStorage.removeItem(draftKey); } catch { /* Storage may be disabled. */ }
 }
-function restoreDraft(trial) {
+function restoreDraft(trial, composer = "") {
   if (reviewing) return;
   try {
     const draft = JSON.parse(sessionStorage.getItem(draftKey));
@@ -61,30 +83,50 @@ function restoreDraft(trial) {
     localStage = draft.stage === "names" ? "names" : "chat";
     reviewStage = STAGES.includes(draft.review) ? draft.review : null;
   } catch { /* Ignore unavailable or invalid browser drafts. */ }
+  finally { if (composer) $("utterance").value = composer; }
 }
+const defaultContact = "実験の案内に記載された連絡先へお問い合わせください。";
+const contact = document.querySelector?.('meta[name="participant-contact"]')?.content || defaultContact;
+// Participant copy for neutral or participant-actionable outcomes only. Any
+// other failure (AI, scoring, records, transport, an unreadable response or an
+// unknown code) is shown as STOPPED; its cause stays in error.code and the
+// server's private records, never on the page.
+const STOPPED = "進行を確認できません。実験担当者にお知らせください。";
 const errors = {
-  ai_unavailable: "AIに接続できませんでした。公開された会話を確認してください。メッセージは自動で再送しません。",
-  scoring_error: "採点でエラーが発生しました。提出内容を保持しています。採点を再試行できます。",
-  invalid_ai_submission: "AIの最終提出を検証できませんでした。研究者がこの試行を確認してください。",
-  repository_output_forbidden: "記録先はリポジトリ外に設定してください。",
-  record_write_failed: "研究記録を保存できませんでした。研究者が保存先を確認してください。",
-  invalid_seed: "Seedを安全な整数で入力してください。",
-  busy: "処理中です。完了を待ってください。",
+  trial_unavailable: "試行を開始できませんでした。" + contact,
+  reception_not_approved: "この画面を開いたまま、開始の案内があるまでお待ちください。",
+  protocol_unconfigured: "この画面を開いたまま、開始の案内があるまでお待ちください。",
+  reception_conflict: "画面が更新されたため、直前の操作を完了できませんでした。現在の表示を確認し、必要ならもう一度操作してください。",
+  reception_unavailable: "受付を確認できませんでした。" + contact,
+  reception_finished: "すべての課題が完了しました。ご協力ありがとうございました。",
+  reception_required: "受付を確認できませんでした。" + contact,
+  questionnaire_required: "アンケートを提出すると、次の課題を開始できます。",
+  busy: "処理中です。完了までお待ちください。",
   rate_limited: "短時間に送信が集中しています。1分ほど待ってからもう一度送信してください。",
   invalid_questionnaire: "アンケートの回答を確認してください。すべての質問に回答が必要です。",
   questionnaire_submitted: "このアンケートは提出済みです。",
   trial_not_completed: "試行が完了してからアンケートに回答できます。",
+  trial_changed: "画面を現在の試行に更新したため、直前の操作は送信されませんでした。画面と入力欄を確認し、必要ならもう一度操作してください。",
   not_found: "この試行は表示できません。保存期間が過ぎたか、このブラウザの試行ではありません。",
 };
-async function api(path, body, signal) {
-  const response = await fetch(path, body === undefined ? (signal ? { signal } : {}) : {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), ...(signal ? { signal } : {}),
+const knownOutcome = (code) => typeof errors[code] === "string";
+const participantMessage = (code) => knownOutcome(code) ? errors[code] : STOPPED;
+async function api(path, body, signal, sessionId) {
+  if (body !== undefined && ["/api/message", "/api/retry", "/api/names", "/api/ai-submit"].includes(path)) {
+    body = { ...body, expectedRecordId: Object.hasOwn(body, "expectedRecordId") ? body.expectedRecordId : current?.sessionId };
+    if (path === "/api/names" && requestSession() && !Object.hasOwn(body, "expectedEventCount")) body.expectedEventCount = events().length;
+  }
+  const headers = sessionHeaders(sessionId === undefined ? requestSession() : sessionId);
+  const response = await fetch(path, body === undefined ? (signal || headers["X-Tab-Session"] ? { ...(headers["X-Tab-Session"] ? { headers } : {}), ...(signal ? { signal } : {}) } : {}) : {
+    method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(body), ...(signal ? { signal } : {}),
   });
-  const value = await response.json();
-  if (!response.ok) {
-    const error = new Error(errors[value.error] || "操作を完了できませんでした。研究者が試行状態を確認してください。");
+  // A proxy error page is not JSON; it is an unreadable response, not a message.
+  const value = await response.json().catch(() => null);
+  if (!response.ok || !value) {
+    if (response.status === 409 && value?.error === "trial_changed" && body?.expectedRecordId === current?.sessionId) restoreComposerOnChange = true;
+    const error = new Error(participantMessage(value?.error));
     error.status = response.status;
-    error.code = value?.error;
+    error.code = typeof value?.error === "string" ? value.error : undefined;
     throw error;
   }
   return value;
@@ -114,6 +156,7 @@ function svgNode(tag, attributes = {}) {
 }
 function closeDialog(id, restore = true) {
   const dialog = $(id);
+  if (id === "confirm-dialog") confirmSnapshot = null;
   if (dialog.open) dialog.close();
   if (restore) (id === "name-dialog" ? selectedTarget : $("review-names"))?.focus({ preventScroll: true });
 }
@@ -124,7 +167,7 @@ function resetLocal() {
   answers = new Map(); selected = null; selectedTarget = null;
   pending = []; sceneSignature = ""; followHistory = true; seenMessages = 0;
   clearTimeout(typingTimer); activitySignature = ""; activitySince = 0;
-  chatStalled = false; chatDisconnected = false; checkingChat = false; submissionWarning = "";
+  chatStalled = false; chatDisconnected = false; checking = false; submissionWarning = "";
   $("utterance").value = "";
   $("history").replaceChildren();
   $("history").historySignature = undefined;
@@ -192,12 +235,12 @@ function updateSceneLabels(target) {
     // AI names and matches appear only on the results stage, so the
     // questionnaire and the read-only review are answered before seeing them.
     const result = renderedStage === "results" && resultsUnlocked() ? rowFor(shape.id) : null;
-    path.setAttribute("aria-label", result ? `図形。あなた：${result.human.rawName || "未合意"}。AI：${result.ai?.rawName || "未合意"}。${result.matched ? "一致" : "不一致"}` :
+    path.setAttribute("aria-label", result ? `図形。あなた：${result.human.rawName || "未合意・わからない"}。AI：${result.ai?.rawName || "未合意・わからない"}。${result.matched ? "一致" : "不一致"}` :
       name ? `図形。メモ：${name}。選択して拡大・修正` : "図形を選択して拡大・名前を入力");
     const label = path.shapeName;
     label.replaceChildren();
     if (result) {
-      ["あなた：" + displayName(result.human.rawName || "未合意"), "AI：" + displayName(result.ai?.rawName || "未合意") + (result.matched ? " · 一致" : " · 不一致")].forEach((text, i) => {
+      ["あなた：" + displayName(result.human.rawName || "未合意・わからない"), "AI：" + displayName(result.ai?.rawName || "未合意・わからない") + (result.matched ? " · 一致" : " · 不一致")].forEach((text, i) => {
         const line = svgNode("tspan", { x: label.getAttribute("x"), dy: i ? "1.3em" : "0" });
         line.textContent = text; label.append(line);
       });
@@ -216,7 +259,7 @@ function openFigure(shape, target) {
   preview.setAttribute("viewBox", box?.width > 0 ? `${box.x - 24} ${box.y - 24} ${box.width + 48} ${box.height + 48}` : `0 0 ${data.width} ${data.height}`);
   $("figure-name").disabled = !dialogueOpen();
   $("name-unknown").disabled = !dialogueOpen();
-  $("name-form").querySelectorAll('button[type="submit"]').forEach((button) => { button.disabled = !dialogueOpen(); });
+  $("name-form").querySelectorAll('button[type="submit"]').forEach((button) => { button.disabled = !dialogueOpen(); button.textContent = participantStage() === "names" ? "名前を保存" : "メモを保存"; });
   $("name-dialog").showModal();
   $("figure-name").focus({ preventScroll: true });
 }
@@ -229,7 +272,7 @@ function saveAnswer(value) {
 }
 function updateNameCount() {
   const count = scene()?.shapes?.filter((shape) => answers.has(shape.id)).length ?? 0;
-  $("name-count").textContent = scene()?.shapes?.length ? `回答 ${count} / ${scene().shapes.length}` : "";
+  $("name-count").textContent = scene()?.shapes?.length ? `入力済み ${count} / ${scene().shapes.length}` : "";
 }
 function renderNameList() {
   const signature = JSON.stringify([scene(), [...answers], submitted()]);
@@ -273,7 +316,7 @@ function renderSummary(target, text) {
 }
 const resultSummary = (shape) => {
   const row = rowFor(shape.id);
-  return row ? `あなた：${row.human.rawName || "未合意"}\nAI：${row.ai?.rawName || "未合意"} · ${row.matched ? "一致" : "不一致"}` : "";
+  return row ? `あなた：${row.human.rawName || "未合意・わからない"}\nAI：${row.ai?.rawName || "未合意・わからない"} · ${row.matched ? "一致" : "不一致"}` : "";
 };
 function renderStage(focus = false) {
   const stage = participantStage();
@@ -292,7 +335,7 @@ function renderStage(focus = false) {
   }
   // An older deployment without the questionnaire API keeps the planned label.
   if (surveyState === "unavailable" && stage !== "questionnaire") $("step-questionnaire").setAttribute("data-state", "planned");
-  $("step-questionnaire-note").textContent = surveyState === "unavailable" ? "予定" : "試行用";
+  $("step-questionnaire-note").textContent = surveyState === "unavailable" ? "利用できません" : "試行用";
   renderReviewBar(stage);
   updateSceneLabels($("board"));
   // A display:none log loses its offset; returning to the chat shows the newest.
@@ -346,30 +389,92 @@ function keepPosition(scrollTop) {
 function followToBottom() {
   followHistory = true; keepPosition();
 }
-function renderChatActivity() {
+// The AI's reply in progress: a transient AI bubble at the end of the log. It
+// is display only, never an event, a pending message or a counted message.
+// #chat-status announces the wait, so the bubble is hidden from screen readers.
+// A history rebuild detaches it; renderProgress puts it back at the end.
+const typingBubble = (() => {
+  const li = document.createElement("li"); li.className = "ai typing-message"; li.setAttribute("aria-hidden", "true");
+  const who = document.createElement("strong"); who.textContent = "AI";
+  const dots = document.createElement("div"); dots.className = "typing-indicator";
+  dots.append(...[0, 1, 2].map(() => document.createElement("span")));
+  li.append(who, dots); return li;
+})();
+function renderTyping(show) {
+  const log = $("history");
+  if (show === (log.children[log.children.length - 1] === typingBubble)) return;
+  if (show) log.append(typingBubble); else typingBubble.remove();
+  // A following reader sees the bubble come and go; a reader who scrolled up stays put.
+  keepPosition();
+}
+// ---- Participant-facing progress (display layer) ----------------------------
+// Failures are shown by state, never by cause. The trial has stopped when the
+// server reports a failure, or when something is awaited (an AI reply, a send
+// acknowledgement, the final submission or a failed state read) without
+// confirmed progress for CHAT_STALL_MS; without a trial (waiting for the
+// reception) only a lasting failed state read counts. A shorter interruption
+// stays invisible while polling recovers it. The participant sees STOPPED where
+// the current screen shows it, with one recovery action in the trial view;
+// nothing is retried automatically.
+const dialogueFailed = () => Boolean(dialogueOpen() && current?.aiStatus === "error" && !resuming);
+const submissionFailed = () => Boolean(submitted() && !trialCompleted() && !resuming &&
+  (current?.finalError || ["scoring_error", "submission_error"].includes(current?.status)));
+const chatWaiting = () => Boolean(current && !submitted() && (aiThinking() || resuming || pending.some((item) => item.status !== "failed")));
+const progressStopped = () => Boolean(!reviewing && (chatStalled || (current && (dialogueFailed() || submissionFailed()))));
+// Where the trial view itself shows the stop (beside the composer or the
+// submission); anywhere else the top notice shows it.
+const stopShownInView = () => progressStopped() && Boolean(current) && participantStage() === (submitted() ? "names" : "chat");
+const progressSignature = () => JSON.stringify([trialIdentity(current), events().at(-1)?.id, current?.aiStatus,
+  submitted(), current?.status, current?.aiSubmitted, current?.finalError]);
+function renderProgress() {
   const failed = pending.some((item) => item.status === "failed");
-  // A retry in flight is shown as AI activity, not as the error it replaces.
-  const aiError = current?.aiStatus === "error" && !retryingAI;
-  const waiting = Boolean(current && !submitted() && (aiThinking() || retryingAI || pending.some((item) => item.status !== "failed")));
-  const signature = JSON.stringify([trialIdentity(current), events().at(-1)?.id, current?.aiStatus, retryingAI]);
+  const awaited = Boolean(!reviewing && (current ? !trialCompleted() && (submitted() || chatWaiting() || chatDisconnected) : chatDisconnected));
+  const signature = progressSignature() + resuming;
   clearTimeout(typingTimer);
-  if (!waiting) { activitySignature = ""; chatStalled = false; }
+  if (!awaited) { activitySignature = ""; chatStalled = false; }
   else {
     if (signature !== activitySignature) { activitySignature = signature; activitySince = Date.now(); chatStalled = false; }
     const remaining = CHAT_STALL_MS - (Date.now() - activitySince);
     if (remaining <= 0) chatStalled = true;
-    else if (!failed && !aiError && !chatDisconnected) typingTimer = setTimeout(renderChatActivity, remaining);
+    else if (!dialogueFailed() && !submissionFailed()) typingTimer = setTimeout(renderProgress, remaining);
   }
-  const showDots = waiting && !failed && !aiError && !chatStalled && !chatDisconnected;
-  $("typing-indicator").hidden = !showDots;
-  $("chat-recovery").hidden = !(aiError || chatStalled || chatDisconnected);
-  $("chat-recovery-message").textContent = aiError ? "返答を取得できませんでした。" : "会話の更新を確認できません。";
-  $("retry-chat").textContent = aiError ? "AIの返答を再試行" : "状態を確認";
-  $("retry-chat").disabled = working || checkingChat || sending || !chatOpen();
-  $("chat-status").textContent = failed ? "送信を確認できません。メッセージの再送ボタンで再試行できます。" :
-    aiError ? "AIの返答を取得できませんでした。再試行できます。" :
-      chatStalled || chatDisconnected ? "会話の更新を確認できません。状態を確認してください。" :
-        showDots ? "AIが返答を作成しています" : "";
+  const stopped = progressStopped();
+  const showDots = chatWaiting() && !failed && !stopped;
+  renderTyping(showDots);
+  $("chat-recovery").hidden = !stopped;
+  $("chat-recovery-message").textContent = STOPPED;
+  $("retry-chat").disabled = working || checking || sending || !chatOpen();
+  $("chat-status").textContent = failed ? "送信を確認できませんでした。送り直すには、そのメッセージの「再送」を押してください。" :
+    stopped ? STOPPED : showDots ? "AIが返答を作成しています" : "";
+  if (current) {
+    $("submission-status").textContent = submissionWarning || (!submitted() ? "" : stopped ? STOPPED :
+      trialCompleted() ? "双方の提出が完了しました。" : "名前を提出しました。AIの提出を待っています。");
+  }
+  retrySubmission.hidden = !(submitted() && stopped);
+  retrySubmission.disabled = working || checking;
+  if (!reviewing) {
+    if (stopped && !stopShownInView()) $("notice").textContent = STOPPED;
+    else if ($("notice").textContent === STOPPED && (stopped || operationStop !== progressSignature())) {
+      $("notice").textContent = ""; operationStop = null;
+    }
+  }
+}
+// The one recovery action. It first re-reads the state, which is idempotent.
+// Only a stop that the refreshed server state itself reports resumes the same
+// retained work: /api/retry re-runs the pending turn without re-enqueuing any
+// message, and /api/ai-submit is single-flight with one stored AI submission.
+// A stall while the server still reports work in progress is only re-read.
+async function checkProgress() {
+  if (working || checking || sending) return;
+  checking = true; renderProgress();
+  const trial = trialIdentity(current);
+  try {
+    // Only a fresh state of the same trial decides; a failed read resumes nothing.
+    if (!await refreshState() || trialIdentity(current) !== trial) return;
+    const path = dialogueOpen() ? (current?.aiStatus === "error" && !serverBusy ? "/api/retry" : null)
+      : submitted() && !trialCompleted() && (submissionFailed() || !current?.aiSubmitted) ? "/api/ai-submit" : null;
+    if (path && !reviewing) { resuming = true; renderProgress(); await operate(() => api(path, {})); }
+  } finally { checking = false; resuming = false; renderProgress(); }
 }
 function retryMessage(item) {
   if (working || sending || !chatOpen() || item.status !== "failed" || !pending.includes(item)) return;
@@ -400,7 +505,7 @@ function renderHistory() {
           const status = document.createElement("small"); status.className = "message-failure";
           const mark = document.createElement("span"); mark.textContent = "!"; mark.setAttribute("aria-hidden", "true");
           const explanation = document.createElement("span"); explanation.className = "sr-only";
-          explanation.textContent = "送信を確認できません。自動では再送しません。";
+          explanation.textContent = "送信を確認できませんでした。自動では再送されないため、「再送」を押してください。";
           const retry = document.createElement("button"); retry.type = "button"; retry.className = "retry-message";
           retry.textContent = "再送"; retry.setAttribute("aria-label", "このメッセージを再送");
           retry.disabled = working || sending || !chatOpen();
@@ -411,18 +516,55 @@ function renderHistory() {
       log.append(li);
     }
   }
-  renderChatActivity();
+  renderProgress();
   keepPosition(scrollTop);
+}
+function renderStartStage(state) {
+  reception = state.reception ?? null;
+  const next = Boolean(state.trial && trialCompleted() && reception?.status === "in_progress");
+  // The plan waits for this trial's questionnaire: show the next step, but it cannot start yet.
+  const awaitingSurvey = Boolean(state.trial && trialCompleted() && reception?.status === "questionnaire");
+  startReady = reception ? (!state.trial && reception.status === "ready") || next : !state.trial;
+  $("start-stage").hidden = Boolean(state.trial) && !next && !awaitingSurvey;
+  $("trial-progress").hidden = !state.trial;
+  $("start-trial").textContent = next || awaitingSurvey ? "次の課題を開始" : "スタート";
+  $("reception-number").hidden = !reception?.number;
+  $("reception-number").textContent = reception?.number ? `受付番号 ${reception.number}` : "";
+  $("start-message").textContent = !reception ? "案内を確認してから、スタートを押してください。"
+    : awaitingSurvey ? errors.questionnaire_required : next ? "前の課題が終わったら、「次の課題を開始」を押してください。" : reception.status === "ready" ? "準備ができました。スタートを押してください。"
+      : reception.status === "finished" ? "すべての課題が完了しました。ご協力ありがとうございました。" : "この画面を開いたまま、開始の案内があるまでお待ちください。";
+}
+function canStart() {
+  return startReady && (!current || trialCompleted() && reception?.status === "in_progress") && !working && !serverBusy && !reviewing;
 }
 function render(state) {
   const trial = state.trial;
-  if (trialIdentity(trial) !== trialIdentity(current)) { generation++; resetLocal(); if (trial) restoreDraft(trial); }
-  // Events are append-only; a state response started earlier must not remove newer events.
-  if (trial && trialIdentity(current) === trialIdentity(trial) && (trial.events?.length ?? 0) < (current?.events?.length ?? 0)) return;
+  if (trialIdentity(trial) !== trialIdentity(current)) {
+    // A poll can observe the switch before the in-flight POST returns 409.
+    // Keep unconfirmed text editable; names restore only for their own trial.
+    const composer = (restoreComposerOnChange || sending || working) && !reviewing ? [...pending.filter((item) => item.status !== "accepted").map((item) => item.text), $("utterance").value].filter(Boolean).join("\n") : "";
+    restoreComposerOnChange = false;
+    generation++; resetLocal();
+    if (trial) restoreDraft(trial, composer);
+    else $("utterance").value = composer;
+  }
+  // Events and trial lifecycle are monotonic: a stale poll response started earlier
+  // must never drop newer events or regress a submitted/completed trial back to dialogue.
+  if (trial && trialIdentity(current) === trialIdentity(trial)) {
+    if ((trial.events?.length ?? 0) < (current?.events?.length ?? 0)) return;
+    const incomingSubmitted = Boolean(trial.submitted ?? trial.humanSubmitted);
+    const incomingCompleted = Boolean(incomingSubmitted && (trial.status === "completed" || trial.resultLocked === true || (trial.result && trial.aiSubmitted !== false)));
+    if (submitted() && !incomingSubmitted) return;
+    if (trialCompleted() && !incomingCompleted) return;
+  }
+  if (confirmSnapshot && $("confirm-dialog").open && (!trial || trialIdentity(trial) !== confirmSnapshot.identity || eventsFor(trial).length !== confirmSnapshot.eventCount)) {
+    closeDialog("confirm-dialog", false);
+    $("notice").textContent = participantMessage("trial_changed");
+  }
   current = trial; serverBusy = Boolean(state.busy);
-  $("setup").hidden = Boolean(trial) && !preparing;
+  renderStartStage(state);
   $("trial").hidden = !trial || preparing;
-  if (!trial) { loadRecords(); renderRecords(); setControls(); return; }
+  if (!trial) { loadRecords(); renderRecords(); setControls(); scheduleRefresh(); return; }
   const data = scene();
   const nextSignature = JSON.stringify(data);
   if (nextSignature !== sceneSignature) { sceneSignature = nextSignature; addScene($("board"), true); }
@@ -431,9 +573,6 @@ function render(state) {
   updateSceneLabels($("board")); updateNameCount(); renderNameList(); renderHistory();
   // Polling must not erase the unanswered-figure warning before it is resolved.
   if (submitted() || data?.shapes?.every((shape) => answers.has(shape.id))) submissionWarning = "";
-  $("submission-status").textContent = submissionWarning || (trial.status === "submission_error" || trial.finalError === "invalid_ai_submission" ? errors.invalid_ai_submission :
-    trial.status === "scoring_error" ? errors.scoring_error : trial.result ? "双方の提出が完了しました。" :
-      submitted() ? "あなたの回答を確定しました。AIの提出を待っています。" : "メモはこのブラウザのタブに保存されます。相手には届きません。");
   if (trialCompleted()) loadSurvey();
   loadRecords();
   const previousStage = renderedStage;
@@ -442,10 +581,6 @@ function render(state) {
   if (trialCompleted() && previousStage !== participantStage() && ["questionnaire", "results"].includes(participantStage())) stageFocusTarget(participantStage()).focus({ preventScroll: true });
   renderSurvey(); renderRecords();
   renderResults();
-  $("new-trial").hidden = Boolean(reviewing) || (!trial.result && !["completed", "submission_error"].includes(trial.status));
-  if ($("new-trial").hidden) disarmNewTrial();
-  retrySubmission.hidden = !canRetrySubmission();
-  retrySubmission.textContent = trial.status === "scoring_error" ? "採点を再試行" : "AIの提出を再試行";
   setControls(); scheduleRefresh();
 }
 // Nothing of the result is put into the page while it is locked.
@@ -458,10 +593,11 @@ function renderResults() {
   }
 }
 function setControls() {
-  renderChatActivity();
+  renderLeave();
+  $("start-trial").disabled = !canStart();
+  renderProgress();
   $("history").querySelectorAll("button").forEach((node) => { node.disabled = working || sending || !chatOpen(); });
   for (const id of ["utterance", "send-message"]) $(id).disabled = working || !chatOpen();
-  $("setup").querySelectorAll("input,select,button").forEach((node) => { node.disabled = working; });
   $("finish-conversation").disabled = working || sending || pending.some((item) => item.status === "queued") || !dialogueOpen() || !scene()?.shapes?.length;
   $("back-to-chat").disabled = working;
   $("finish-conversation").hidden = submitted();
@@ -472,20 +608,24 @@ function setControls() {
   $("names-help").textContent = submitted() ? "提出済みの名前です。変更はできません。図形を選ぶと拡大して確認できます。" : "会話で共有した名前を確認してください。図形を選ぶと修正できます。";
   $("review-names").disabled = working || aiThinking() || sending || pending.some((item) => item.status === "queued") || !dialogueOpen() || !scene()?.shapes?.length;
   $("confirm-submit").disabled = working || aiThinking() || sending || !dialogueOpen();
-  $("new-trial").disabled = working || serverBusy;
-  retrySubmission.disabled = working || serverBusy || !canRetrySubmission();
 }
 function scheduleRefresh() {
   clearTimeout(refreshTimer);
+  if (document.visibilityState === "hidden") return;
+  if (!current && reception && !reviewing) { refreshTimer = setTimeout(() => refreshState(), 5000); return; }
   if (current && !preparing && !reviewing) refreshTimer = setTimeout(() => refreshState(), aiThinking() || pending.length ? 700 : 2000);
 }
 async function refreshState() {
   if (refreshRequest) return refreshRequest;
+  if (entryMode()) return false;
   const epoch = generation;
   const requestEpoch = stateEpoch;
   refreshRequest = (async () => {
-    try { const state = await boundedRequest("/api/state", undefined, STATE_REFRESH_MS); if (epoch === generation && requestEpoch === stateEpoch && !reviewing) { chatDisconnected = false; render(state); } }
-    catch { if (epoch === generation) { chatDisconnected = true; renderChatActivity(); } }
+    try {
+      const state = await boundedRequest("/api/state", undefined, STATE_REFRESH_MS);
+      if (epoch !== generation || requestEpoch !== stateEpoch || reviewing) return false;
+      chatDisconnected = false; render(state); return true;
+    } catch { if (epoch === generation) { chatDisconnected = true; renderProgress(); } return false; }
     finally { refreshRequest = null; scheduleRefresh(); }
   })();
   return refreshRequest;
@@ -494,8 +634,20 @@ async function operate(action) {
   if (working) return;
   stateEpoch++;
   working = true; setControls();
-  try { const state = await action(); if (state?.trial !== undefined) render(state); $("notice").textContent = ""; }
-  catch (error) { $("notice").textContent = error.message; await refreshState(); }
+  try {
+    const state = await action();
+    stateEpoch++;
+    if (state?.trial !== undefined) render(state);
+    $("notice").textContent = "";
+  }
+  catch (error) {
+    // A failed resume shows the stop it was resuming, not activity.
+    resuming = false;
+    await refreshState();
+    // A stop the trial view already shows is not repeated at the top.
+    $("notice").textContent = !knownOutcome(error?.code) && stopShownInView() ? "" : participantMessage(error?.code);
+    operationStop = $("notice").textContent === STOPPED ? progressSignature() : null;
+  }
   finally { working = false; setControls(); }
 }
 async function boundedRequest(path, body, timeoutMs = MESSAGE_ACK_MS) {
@@ -504,7 +656,7 @@ async function boundedRequest(path, body, timeoutMs = MESSAGE_ACK_MS) {
   try {
     return await Promise.race([api(path, body, controller?.signal), new Promise((_, reject) => {
       timer = setTimeout(() => {
-        controller?.abort(); reject(new Error("通信を確認できませんでした。"));
+        controller?.abort(); reject(Object.assign(new Error(STOPPED), { code: "timeout" }));
       }, timeoutMs);
     })]);
   } finally { clearTimeout(timer); }
@@ -539,8 +691,9 @@ async function drainMessages() {
         item.status = "accepted";
         if (state?.trial !== undefined) render(state);
         else await refreshState();
-      } catch {
+      } catch (error) {
         if (epoch !== generation) break;
+        if (error.code === "trial_changed") $("notice").textContent = participantMessage(error.code);
         if (pending.includes(item)) item.status = "failed";
         renderHistory(); setControls();
         // The server may already have accepted it. Refresh without resending.
@@ -560,7 +713,6 @@ async function drainMessages() {
 const STAGES = ["chat", "names", "questionnaire", "results"];
 let renderedStage = null;
 let reviewing = null;
-let newTrialArmed = false;
 let survey = { recordId: null, status: "idle", form: null, questionnaire: null };
 let surveyAnswers = {};
 let surveyComment = "";
@@ -624,6 +776,16 @@ function sanitizeSurveyAnswers(form, values) {
   }
   return clean;
 }
+// A save or submit carries the draft version it was based on, so another tab's
+// newer answers are never overwritten (409 trial_changed re-reads the server copy).
+let surveyBaseUpdatedAt = null;
+const surveyBody = (submit) => ({ answers: fullSurveyAnswers(), comment: surveyComment, submit,
+  ...(requestSession() ? { expectedUpdatedAt: surveyBaseUpdatedAt } : {}) });
+function surveyConflict(recordId) {
+  removeLocalSurvey(recordId);
+  surveyMessage = "別の画面で回答が更新されたため、最新の回答を表示しました。";
+  loadSurvey(true);
+}
 const recordPath = (recordId, leaf) => `/api/records/${encodeURIComponent(recordId)}/${leaf}`;
 const surveyKey = (recordId) => `joint-naming-survey:${recordId}`;
 // Browser fallback only: the server draft is the primary copy. Removed on submit.
@@ -635,7 +797,7 @@ function readLocalSurvey(recordId) {
 }
 function writeLocalSurvey(recordId, synced) {
   if (!recordId) return;
-  try { localStorage.setItem(surveyKey(recordId), JSON.stringify({ answers: surveyAnswers, comment: surveyComment, synced })); } catch { /* Storage may be disabled. */ }
+  try { localStorage.setItem(surveyKey(recordId), JSON.stringify({ answers: surveyAnswers, comment: surveyComment, synced, baseUpdatedAt: surveyBaseUpdatedAt })); } catch { /* Storage may be disabled. */ }
 }
 function removeLocalSurvey(recordId) {
   try { localStorage.removeItem(surveyKey(recordId)); } catch { /* Storage may be disabled. */ }
@@ -656,10 +818,9 @@ function pruneLocalSurveys(recordIds) {
 function resetSurvey() {
   clearTimeout(surveyTimer); surveyToken++;
   survey = { recordId: null, status: "idle", form: null, questionnaire: null };
-  surveyAnswers = {}; surveyComment = ""; surveyRevision = 0; surveySyncedRevision = 0;
+  surveyAnswers = {}; surveyComment = ""; surveyBaseUpdatedAt = null; surveyRevision = 0; surveySyncedRevision = 0;
   surveySave = null; surveySaveError = false; surveySubmitting = false; surveyMessage = ""; surveySignature = "";
   records = { loadedFor: null, items: [], token: records.token + 1 };
-  newTrialArmed = false;
 }
 // "pending" before a result, "loading" until the form arrives, then
 // "open", "submitted" or "unavailable" (an older server without the API).
@@ -699,12 +860,18 @@ function applySurvey(recordId, form, questionnaire) {
   survey = { recordId, status: "ready", form, questionnaire: questionnaire && typeof questionnaire === "object" ? questionnaire : null };
   surveySignature = "";
   if (survey.questionnaire?.status === "submitted") {
+    surveyBaseUpdatedAt = survey.questionnaire.updatedAt ?? null;
     surveyAnswers = sanitizeSurveyAnswers(form, survey.questionnaire.answers);
     surveyComment = String(survey.questionnaire.comment ?? "");
     removeLocalSurvey(recordId); return;
   }
   const local = readLocalSurvey(recordId);
   const chosen = pickSurveyDraft(local, survey.questionnaire);
+  // Keep the base revision the unsynced local draft actually edited from so
+  // reloading cannot borrow another tab's newer updatedAt and overwrite it.
+  surveyBaseUpdatedAt = chosen && chosen === local
+    ? (Object.hasOwn(local, "baseUpdatedAt") ? local.baseUpdatedAt : null)
+    : (survey.questionnaire?.updatedAt ?? null);
   surveyAnswers = sanitizeSurveyAnswers(form, chosen?.answers);
   surveyComment = String(chosen?.comment ?? "").slice(0, form.commentMaxLength);
   surveySyncedRevision = surveyRevision;
@@ -729,7 +896,7 @@ async function saveSurveyDraft() {
   if (surveySave) { await surveySave; }
   if (!surveyEditable() || surveyRevision === surveySyncedRevision) return;
   const recordId = survey.recordId, revision = surveyRevision, token = surveyToken;
-  const body = { answers: fullSurveyAnswers(), comment: surveyComment, submit: false };
+  const body = surveyBody(false);
   renderSurveyStatus();
   surveySave = (async () => {
     try {
@@ -737,13 +904,18 @@ async function saveSurveyDraft() {
       if (token !== surveyToken) return;
       surveySaveError = false;
       surveySyncedRevision = Math.max(surveySyncedRevision, revision);
-      if (value?.questionnaire && typeof value.questionnaire === "object") survey.questionnaire = value.questionnaire;
+      if (value?.questionnaire && typeof value.questionnaire === "object") {
+        survey.questionnaire = value.questionnaire;
+        surveyBaseUpdatedAt = value.questionnaire.updatedAt ?? surveyBaseUpdatedAt;
+      }
       // The browser copy exists only while unsynced: the server copy follows
       // the record's retention and deletion, a browser copy would not.
       if (surveyRevision === revision) removeLocalSurvey(recordId);
+      else writeLocalSurvey(recordId, false);
     } catch (error) {
       if (token !== surveyToken) return;
       if (error.code === "questionnaire_submitted") { loadSurvey(true); return; }
+      if (error.status === 409 && error.code === "trial_changed") { surveyConflict(recordId); return; }
       // The browser copy stays; the next edit or the timer retries.
       surveySaveError = true; scheduleSurveySave(SURVEY_RETRY_MS);
     }
@@ -766,10 +938,12 @@ async function submitSurvey() {
   surveySubmitting = true; clearTimeout(surveyTimer); surveyMessage = ""; renderSurvey();
   if (surveySave) await surveySave;
   try {
-    const value = await boundedRequest(recordPath(recordId, "questionnaire"), { answers: fullSurveyAnswers(), comment: surveyComment, submit: true });
+    const value = await boundedRequest(recordPath(recordId, "questionnaire"), surveyBody(true));
     if (token !== surveyToken) return;
-    if (value?.questionnaire?.status !== "submitted") throw new Error(errors.invalid_questionnaire);
-    survey.questionnaire = value.questionnaire; surveySyncedRevision = surveyRevision;
+    if (value?.questionnaire?.status !== "submitted") throw new Error("questionnaire_not_submitted");
+    survey.questionnaire = value.questionnaire;
+    surveyBaseUpdatedAt = value.questionnaire.updatedAt ?? surveyBaseUpdatedAt;
+    surveySyncedRevision = surveyRevision;
     removeLocalSurvey(recordId);
     surveySubmitting = false;
     reviewStage = "results"; storeDraft();
@@ -783,8 +957,9 @@ async function submitSurvey() {
     if (token !== surveyToken) return;
     surveySubmitting = false;
     if (error.code === "questionnaire_submitted") loadSurvey(true);
+    else if (error.status === 409 && error.code === "trial_changed") { surveyConflict(recordId); renderSurvey(); return; }
     // Answers stay on screen and in this browser; nothing is cleared on failure.
-    surveyMessage = `${error.message} 回答内容は保持しています。`;
+    surveyMessage = `${participantMessage(error.code)} 入力した回答はこの画面に残っています。`;
     renderSurvey();
   }
 }
@@ -792,7 +967,7 @@ function renderSurveyStatus() {
   const submittedSurvey = survey.questionnaire?.status === "submitted";
   $("questionnaire-status").textContent = surveyMessage || (submittedSurvey ? "アンケートは提出済みです。ご協力ありがとうございました。" :
     surveySubmitting ? "提出しています…" :
-      surveySaveError ? "このブラウザには保存しました。サーバーへの保存は自動で再試行します。" :
+      surveySaveError ? "入力した回答はこの画面に残っています。" :
         surveyRevision !== surveySyncedRevision ? "途中の回答を保存しています…" :
           "途中の回答は自動で保存されます。提出するまで何度でも変更できます。");
 }
@@ -802,7 +977,7 @@ function renderSurvey() {
   const submittedSurvey = survey.questionnaire?.status === "submitted";
   $("questionnaire-notice").textContent = form?.notice ?? "";
   $("questionnaire-loading").textContent = !trialCompleted() ? "AIの提出が終わり、試行が完了するとアンケートに回答できます。" :
-    status === "error" ? "アンケートを読み込めませんでした。通信を確認して、上の「アンケート」をもう一度選んでください。" :
+    status === "error" ? "アンケートを表示できませんでした。上の「アンケート」をもう一度選んでください。" :
       status === "unavailable" ? "この試行ではアンケートを表示できません。" : status === "ready" ? "" : "アンケートを読み込んでいます…";
   $("questionnaire-form").hidden = !form;
   $("questionnaire-to-results").hidden = !resultsUnlocked();
@@ -860,13 +1035,14 @@ function renderSurveyPrompt() {
   const started = Object.keys(surveyAnswers).length > 0 || Boolean(surveyComment);
   $("open-survey").textContent = started ? "アンケートの回答を再開する" : "アンケートに回答する";
   $("survey-prompt-detail").textContent = reviewing ? "以前の試行のアンケートです。提出するまで回答・変更できます。" :
-    started ? "途中の回答は保存されています。提出するまで変更できます。" : "この試行について、数問の質問に回答してください。";
+    started ? "途中の回答は保存されています。提出するまで変更できます。" : "この試行について、いくつかの質問に回答してください。";
 }
 function renderReviewBar(stage) {
   renderedStage = stage;
   const show = submitted();
   $("review-bar").hidden = !show;
   $("exit-review").hidden = !reviewing;
+  $("exit-review").textContent = reviewing?.fromEntry ? "受付に戻る" : "現在の試行に戻る";
   if (!show) { $("survey-prompt").hidden = true; return; }
   const surveyState = surveyAvailability();
   const surveyText = surveyState === "submitted" ? "アンケートも提出済みです。" : surveyState === "pending" ? "試行が完了するとアンケートと結果を表示します。" :
@@ -893,20 +1069,24 @@ function loadRecords(force = false) {
   records.loadedFor = key;
   (async () => {
     let items = [];
+    let loaded = false;
     try {
       const value = await boundedRequest("/api/records", undefined, STATE_REFRESH_MS);
       if (Array.isArray(value?.records)) {
         items = value.records.filter((item) => item && typeof item.recordId === "string");
-        pruneLocalSurveys(items.map((item) => item.recordId));
+        loaded = true;
       }
     } catch { /* An older server has no record list; only the active trial is shown. */ }
     if (token !== records.token) return;
+    // Only cookie-wide lists may prune shared localStorage; tab-scoped lists
+    // only know one session and would otherwise erase another tab's draft.
+    if (loaded && cookieMode) pruneLocalSurveys(items.map((item) => item.recordId));
     records.items = items; renderRecords();
   })();
 }
 function formatRecordTime(value) {
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "以前";
+  if (Number.isNaN(date.getTime())) return "以前の試行";
   return `${date.getMonth() + 1}月${date.getDate()}日 ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 function earlierRecords() {
@@ -949,16 +1129,17 @@ function renderRecords() {
 // pauses so the active trial's state never replaces it; the active trial's
 // name memo (tab storage) and unsent composer text are kept for the return.
 let stashedComposer = null;
-async function openRecord(recordId, stage) {
+async function openRecord(recordId, stage, origin = {}) {
   if (working || reviewing) return;
   if (sending || pending.length) { $("notice").textContent = "送信中または未送信のメッセージがあります。送信を確認してから以前の試行を開いてください。"; return; }
   flushSurveyDraft();
   const composer = { trial: trialIdentity(current), text: $("utterance").value };
   await operate(async () => {
-    const review = await api(recordPath(recordId, "review"));
-    if (!review || review.recordId !== recordId || !review.scene?.shapes?.length) throw new Error(errors.not_found);
+    const sessionId = origin.sessionId ?? activeTabSessionId;
+    const review = await api(recordPath(recordId, "review"), undefined, undefined, sessionId);
+    if (!review || review.recordId !== recordId || !review.scene?.shapes?.length) throw Object.assign(new Error("not_found"), { code: "not_found" });
     clearTimeout(refreshTimer); stateEpoch++;
-    reviewing = { recordId }; stashedComposer = composer.text ? composer : null;
+    reviewing = { recordId, sessionId, fromEntry: Boolean(origin.fromEntry) }; $("entry-stage").hidden = true; stashedComposer = composer.text ? composer : null;
     preparing = false;
     return { busy: false, trial: reviewTrial(recordId, review) };
   });
@@ -981,6 +1162,7 @@ async function reloadReview(recordId) {
 function exitReview() {
   if (!reviewing || working) return;
   flushSurveyDraft();
+  if (reviewing.fromEntry) { reviewing = null; showEntry(); return; }
   reviewing = null;
   operate(async () => {
     const state = await api("/api/state");
@@ -991,15 +1173,9 @@ function exitReview() {
     return state;
   });
 }
-function disarmNewTrial() {
-  newTrialArmed = false; $("new-trial-warning").hidden = true;
-}
-function canRetrySubmission() {
-  return Boolean(submitted() && (current?.status === "scoring_error" || (current?.status === "submitting" && !current?.aiSubmitted)));
-}
 const retrySubmission = document.createElement("button");
-retrySubmission.type = "button"; retrySubmission.hidden = true;
-retrySubmission.addEventListener("click", () => { if (!working && !serverBusy && canRetrySubmission()) operate(() => api("/api/ai-submit", {})); });
+retrySubmission.type = "button"; retrySubmission.hidden = true; retrySubmission.textContent = "状態を確認";
+retrySubmission.addEventListener("click", checkProgress);
 $("submission").append(retrySubmission);
 $("history").addEventListener("scroll", () => {
   const log = $("history"); followHistory = log.scrollHeight - log.scrollTop - log.clientHeight < AT_BOTTOM_PX;
@@ -1021,15 +1197,6 @@ if (viewport) {
   };
   viewport.addEventListener("resize", fitViewport); fitViewport();
 }
-$("setup").addEventListener("submit", (event) => {
-  event.preventDefault();
-  const data = new FormData(event.target);
-  operate(async () => {
-    const state = await api("/api/start", { strategy: data.get("strategy"), seed: Number(data.get("seed")),
-      referenceMemory: data.get("referenceMemory") === "on", version: 2 });
-    generation++; clearDraft(); resetLocal(); preparing = false; return state;
-  });
-});
 $("chat").addEventListener("submit", (event) => {
   event.preventDefault();
   if (working || !chatOpen()) return;
@@ -1039,18 +1206,30 @@ $("chat").addEventListener("submit", (event) => {
   $("utterance").value = ""; followHistory = true; renderHistory();
   $("utterance").focus({ preventScroll: true }); drainMessages();
 });
-// Textarea Enter (including IME) is left to native multiline editing. Sending
-// is an explicit form action; no keydown handler turns Enter into a request.
-$("retry-chat").addEventListener("click", async () => {
-  if (working || checkingChat || sending || !chatOpen()) return;
-  if (current?.aiStatus === "error" && !serverBusy) {
-    retryingAI = true; renderChatActivity();
-    try { await operate(() => api("/api/retry", {})); } finally { retryingAI = false; renderChatActivity(); }
-  } else {
-    checkingChat = true; renderChatActivity();
-    try { await refreshState(); } finally { checkingChat = false; renderChatActivity(); }
-  }
+// Shift+Enter remains native multiline input. Plain Enter uses the same
+// form action as the send button, except during IME confirmation.
+let composingUtterance = false;
+let settlingComposition = false;
+let compositionTimer;
+$("utterance").addEventListener("compositionstart", () => {
+  clearTimeout(compositionTimer);
+  composingUtterance = true;
+  settlingComposition = false;
 });
+$("utterance").addEventListener("compositionend", () => {
+  composingUtterance = false;
+  settlingComposition = true;
+  clearTimeout(compositionTimer);
+  compositionTimer = setTimeout(() => { settlingComposition = false; }, 0);
+});
+$("utterance").addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" || event.shiftKey || event.ctrlKey || event.altKey || event.metaKey ||
+      event.defaultPrevented || event.isComposing || event.keyCode === 229 ||
+      composingUtterance || settlingComposition) return;
+  event.preventDefault();
+  if (!event.repeat) $("chat").requestSubmit();
+});
+$("retry-chat").addEventListener("click", () => { if (chatOpen()) checkProgress(); });
 $("finish-conversation").addEventListener("click", () => changeStage("names"));
 $("back-to-chat").addEventListener("click", () => changeStage("chat"));
 $("name-form").addEventListener("submit", (event) => {
@@ -1066,20 +1245,23 @@ $("submission").addEventListener("submit", (event) => {
   event.preventDefault();
   if (working || sending || aiThinking() || !dialogueOpen()) return;
   if (!scene()?.shapes?.length || scene().shapes.some((shape) => !answers.has(shape.id))) {
-    submissionWarning = "未回答の図形があります。図形を選んで名前か「未合意・わからない」を入力してください。";
+    submissionWarning = "名前が未入力の図形があります。図形を選択し、名前を入力するか「未合意・わからない」を選んでください。";
     $("submission-status").textContent = submissionWarning; return;
   }
   addScene($("confirm-scene"), false);
   renderSummary($("confirm-list"), (shape) => answers.get(shape.id) ?? "未合意・わからない");
+  confirmSnapshot = { recordId: current?.sessionId, identity: trialIdentity(current), eventCount: events().length };
   $("confirm-dialog").showModal(); $("confirm-cancel").focus({ preventScroll: true });
 });
 $("confirm-cancel").addEventListener("click", () => closeDialog("confirm-dialog"));
 $("confirm-submit").addEventListener("click", () => {
   if (working || sending || aiThinking() || !dialogueOpen()) return;
+  const snapshot = confirmSnapshot;
   const names = Object.fromEntries(scene().shapes.map((shape) => [shape.id, answers.get(shape.id)]));
   closeDialog("confirm-dialog");
   reviewStage = null;
-  operate(() => api("/api/names", { names, confirm: true }));
+  const expectation = snapshot ? { ...(snapshot.recordId !== undefined ? { expectedRecordId: snapshot.recordId } : {}), ...(requestSession() ? { expectedEventCount: snapshot.eventCount } : {}) } : {};
+  operate(() => api("/api/names", { names, confirm: true, ...expectation }));
 });
 for (const button of $("stage-nav").querySelectorAll("button")) {
   button.addEventListener("click", () => {
@@ -1105,19 +1287,252 @@ $("questionnaire-comment").addEventListener("input", () => {
 const sendSurveyOnHide = () => {
   if (!surveyEditable() || surveyRevision === surveySyncedRevision) return;
   try {
-    fetch(recordPath(survey.recordId, "questionnaire"), { method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ answers: fullSurveyAnswers(), comment: surveyComment, submit: false }) }).catch(() => {});
+    fetch(recordPath(survey.recordId, "questionnaire"), { method: "POST", keepalive: true, headers: { "Content-Type": "application/json", ...sessionHeaders(requestSession()) },
+      body: JSON.stringify(surveyBody(false)) }).catch(() => {});
   } catch { /* The browser copy is resent after reload. */ }
 };
 globalThis.addEventListener?.("pagehide", sendSurveyOnHide);
-document.addEventListener?.("visibilitychange", () => { if (document.visibilityState === "hidden") sendSurveyOnHide(); });
-$("new-trial").addEventListener("click", () => {
-  // Confirm-free safeguard: an unsubmitted questionnaire needs a second press.
-  if (!newTrialArmed && trialCompleted() && surveyAvailability() === "open") {
-    newTrialArmed = true; $("new-trial-warning").hidden = false; return;
-  }
-  flushSurveyDraft(); disarmNewTrial();
-  preparing = true; clearTimeout(refreshTimer);
-  $("setup").hidden = false; $("trial").hidden = true; $("setup").elements.seed.focus();
+document.addEventListener?.("visibilitychange", () => {
+  if (document.visibilityState === "hidden") { sendSurveyOnHide(); clearTimeout(refreshTimer); }
+  else { if (reception) refreshState(); else scheduleRefresh(); }
 });
-operate(() => api("/api/state"));
+$("start-trial").addEventListener("click", () => {
+  if (!canStart()) return;
+  const expectation = reception ? { expectedReceptionRevision: reception.revision, ...(current ? { expectedRecordId: current.sessionId } : {}) } : {};
+  operate(() => api("/api/start", { version: 2, ...expectation }));
+});
+// ---- Entry screen and tab-isolated sessions -------------------------------
+// A new tab starts here, never inside another participant's conversation. The
+// list shows only the server state of each session (reception number, time,
+// state, questionnaire): no conversation, names, answers or internal IDs.
+const SESSION_STATES = {
+  waiting: ["受付待ち", [["開く", "resume"]]],
+  ready: ["開始可能", [["開く", "resume"]]],
+  in_progress: ["実施中", [["再開", "resume"]]],
+  submitting: ["提出中", [["再開", "resume"]]],
+  questionnaire_waiting: ["アンケート待ち", [["アンケートへ", "resume"]]],
+  ready_next: ["次の課題待ち", [["再開", "resume"]]],
+  finished: ["終了", [["閲覧", "view"]]],
+  cancelled: ["取消済み", []],
+  unavailable: ["確認不可", []],
+};
+const sessionTime = (session) => session.updatedAt || session.createdAt ? formatRecordTime(session.updatedAt || session.createdAt) : "";
+const completedRecords = (session) => (Array.isArray(session.records) ? session.records : [])
+  .filter((item) => item?.status === "completed" && typeof item.recordId === "string")
+  .sort((a, b) => String(a.startedAt ?? a.updatedAt ?? "").localeCompare(String(b.startedAt ?? b.updatedAt ?? "")) || a.recordId.localeCompare(b.recordId));
+function sessionRow(session) {
+  const [baseLabel, baseActions] = SESSION_STATES[session.status] ?? SESSION_STATES.unavailable;
+  const unanswered = session.status === "finished" && session.hasUnansweredQuestionnaire === true;
+  const row = document.createElement("li"); row.setAttribute("data-status", SESSION_STATES[session.status] ? session.status : "unavailable");
+  const meta = document.createElement("span"); meta.className = "session-meta";
+  const number = document.createElement("span"); number.textContent = [session.reception?.number ? `受付番号 ${session.reception.number}` : "", sessionTime(session)].filter(Boolean).join(" · ") || "受付";
+  const state = document.createElement("span"); state.className = "status-badge"; state.textContent = unanswered ? "終了・アンケート未回答" : baseLabel;
+  meta.append(number, state);
+  const actions = document.createElement("span"); actions.className = "record-actions";
+  const add = (label, handler, primary) => {
+    const button = document.createElement("button"); button.type = "button"; button.textContent = label;
+    if (!primary) button.className = "secondary";
+    button.addEventListener("click", handler); actions.append(button);
+  };
+  for (const [label, kind] of baseActions) {
+    if (kind === "resume" && session.resumable !== false) add(label, () => resumeSession(session.sessionId), true);
+    // A finished session is only viewed; it is never bound to this tab or resumed.
+    if (kind === "view") {
+      const done = completedRecords(session);
+      if (done.length === 1) {
+        add(label, () => openRecord(done[0].recordId, "chat", { sessionId: session.sessionId, fromEntry: true }), false);
+        if (done[0].questionnaire !== "submitted") add("アンケート", () => openRecord(done[0].recordId, "questionnaire", { sessionId: session.sessionId, fromEntry: true }), true);
+      } else {
+        done.forEach((item, index) => {
+          const prefix = `${index + 1}回目`;
+          add(`${prefix}を見る`, () => openRecord(item.recordId, "chat", { sessionId: session.sessionId, fromEntry: true }), false);
+          if (item.questionnaire !== "submitted") add(`${prefix}アンケート`, () => openRecord(item.recordId, "questionnaire", { sessionId: session.sessionId, fromEntry: true }), true);
+        });
+      }
+    }
+  }
+  row.append(meta, actions);
+  return row;
+}
+function renderEntry(sessions) {
+  const sorted = [...sessions].sort((a, b) => String(b.updatedAt ?? b.createdAt ?? "").localeCompare(String(a.updatedAt ?? a.createdAt ?? "")));
+  $("session-history").hidden = !sorted.length;
+  $("session-list").replaceChildren(...sorted.map(sessionRow));
+  $("new-session").disabled = sessionsReceptionMode === "unavailable";
+  if (sessionsReceptionMode === "unavailable") $("notice").textContent = errors.reception_unavailable;
+  $("entry-stage").hidden = false;
+}
+// Forget the bound session and the screen of the previous participant.
+function leaveSession() {
+  try { tabSession()?.clear(); } catch { /* The tab keeps no binding. */ }
+  activeTabSessionId = null; reviewing = null; current = null; reception = null; startReady = false; preparing = false;
+  generation++; stateEpoch++; clearTimeout(refreshTimer); clearTimeout(typingTimer);
+  resetLocal(); clearDraft();
+  $("notice").textContent = "";
+  $("session-history").open = false;
+  for (const id of ["start-stage", "trial", "trial-progress", "record-history", "entry-stage", "survey-prompt", "review-bar"]) $(id).hidden = true;
+  setControls();
+}
+async function loadSessions() {
+  const value = await api("/api/sessions", undefined, undefined, null);
+  sessionsReceptionMode = ["on", "off", "unavailable"].includes(value?.receptionMode) ? value.receptionMode : "off";
+  const list = Array.isArray(value?.sessions) ? value.sessions.filter((item) => item && typeof item.sessionId === "string") : [];
+  const browserRecordIds = list.flatMap((item) => [
+    ...(typeof item.activeRecordId === "string" ? [item.activeRecordId] : []),
+    ...(Array.isArray(item.records) ? item.records.map((r) => r?.recordId).filter((id) => typeof id === "string") : []),
+  ]);
+  if (trialIdentity(current)) browserRecordIds.push(trialIdentity(current));
+  pruneLocalSurveys(browserRecordIds);
+  return list;
+}
+async function showEntry() {
+  leaveSession();
+  try { renderEntry(await loadSessions()); }
+  catch (error) { $("notice").textContent = participantMessage(error.code); }
+}
+function bindSession(sessionId) {
+  try { tabSession()?.bind(sessionId); } catch { /* The binding is only a reload convenience. */ }
+  activeTabSessionId = sessionId;
+}
+// An explicit choice: a new session and, when receptions are on, a new reception.
+async function newSession() {
+  if (working) return;
+  stateEpoch++; working = true; $("new-session").disabled = true; setControls();
+  let reusedId = pendingEmptySessionId;
+  const createdNow = !reusedId;
+  let state = { trial: null };
+  try {
+    if (createdNow) {
+      const created = await api("/api/sessions", {}, undefined, null);
+      if (typeof created?.sessionId !== "string") throw new Error("session_unavailable");
+      reusedId = created.sessionId;
+      pendingEmptySessionId = reusedId;
+      state = created.state ?? { trial: null };
+    }
+    bindSession(reusedId);
+    $("entry-stage").hidden = true; $("notice").textContent = "";
+    if (sessionsReceptionMode === "on" || (sessionsReceptionMode === null && state.reception)) {
+      try { state = await api("/api/reception", {}); }
+      catch (error) { if (error.status !== 404) throw error; }
+    } else if (!createdNow) {
+      state = await api("/api/state");
+    }
+    pendingEmptySessionId = null;
+    render(state);
+  } catch (error) {
+    // Keep the already-created empty child for retry without stranding the user on a blank page.
+    try { tabSession()?.clear(); } catch { /* No binding to forget. */ }
+    activeTabSessionId = null;
+    $("entry-stage").hidden = false;
+    $("new-session").disabled = false;
+    $("notice").textContent = participantMessage(error?.code);
+  } finally { working = false; setControls(); }
+}
+// An explicit resume binds this tab to that session and shows its server state.
+async function resumeSession(sessionId) {
+  if (working) return;
+  stateEpoch++; working = true; setControls();
+  try {
+    const state = await api("/api/state", undefined, undefined, sessionId);
+    pendingEmptySessionId = null;
+    bindSession(sessionId);
+    $("entry-stage").hidden = true; $("notice").textContent = "";
+    render(state);
+  } catch (error) {
+    $("notice").textContent = participantMessage(error?.code);
+    try { renderEntry(await loadSessions()); } catch { /* The list stays as shown. */ }
+  } finally { working = false; setControls(); }
+}
+// "受付に戻る" before the end, "新しく始める" once the participant is done.
+let leaveAction = null;
+function renderLeave() {
+  const done = Boolean(activeTabSessionId && !reviewing && !working && (reception?.status === "finished" ||
+    (current && trialCompleted() && !reception && ["submitted", "unavailable"].includes(surveyAvailability()))));
+  const back = Boolean(activeTabSessionId && !reviewing && !current && (!reception || reception.status !== "finished"));
+  leaveAction = done ? "new" : back ? "back" : null;
+  $("leave-session").hidden = !leaveAction;
+  $("leave-session").textContent = leaveAction === "new" ? "新しく始める" : "受付に戻る";
+  $("leave-session").disabled = working;
+}
+async function startupAdmission() {
+  const state = await api("/api/state");
+  if (!state.reception) return state;
+  try { return await api("/api/reception", {}); }
+  catch (error) { if (error.status === 404) return state; throw error; }
+}
+// An explicit record link never starts an unrelated trial, even on a clean browser.
+async function resumeLinkedRecord(recordId, TS) {
+  try { TS?.clear(); } catch { /* No binding to retain. */ }
+  clearDraft();
+  try {
+    if (!TS || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/u.test(recordId)) throw new Error('not_found');
+    const sessions = await loadSessions();
+    const matches = sessions.filter(session => session.resumable === true && session.activeRecordId === recordId);
+    if (matches.length !== 1) throw new Error('not_found');
+    const sessionId = matches[0].sessionId;
+    const state = await api('/api/state', undefined, undefined, sessionId);
+    if (state?.trial?.sessionId !== recordId) throw new Error('trial_changed');
+    bindSession(sessionId);
+    $("entry-stage").hidden = true;
+    $("notice").textContent = "";
+    render(state); setControls();
+    // Following ordinary reloads and transitions uses the tab binding, not a stale record link.
+    try { globalThis.history?.replaceState(globalThis.history.state, '', globalThis.location.pathname + globalThis.location.search); } catch { /* The binding still works. */ }
+  } catch {
+    $("notice").textContent = "この試行を開けませんでした。受付一覧から開き直してください。";
+  }
+}
+async function startup() {
+  const TS = tabSession();
+  const linked = globalThis.location?.hash?.startsWith('#resume=') ? globalThis.location.hash.slice(8) : null;
+  if (linked !== null) {
+    try { await TS?.resolve(); } catch { /* Fail closed rather than creating a trial. */ }
+    await resumeLinkedRecord(linked, TS);
+    return;
+  }
+  // Without tab-session.js the single cookie session is used as before.
+  if (!TS) { cookieMode = true; operate(startupAdmission); return; }
+  let resolved = null;
+  try { resolved = await TS.resolve(); } catch { /* A tab that cannot be resolved starts fresh. */ }
+  if (resolved?.kind === "restored" && typeof resolved.sessionId === "string") {
+    // Same tab, reload: keep this tab's session where it was.
+    try {
+      const state = await api("/api/state", undefined, undefined, resolved.sessionId);
+      activeTabSessionId = resolved.sessionId;
+      let next = state;
+      if (!state.trial && state.reception && !state.reception.number) {
+        try { next = await api("/api/reception", {}); } catch (error) { if (error.status !== 404) throw error; }
+      }
+      render(next); setControls();
+      return;
+    } catch (error) {
+      if (![401, 403, 404, 410].includes(error.status)) {
+        // A passing failure keeps the binding and tries again.
+        $("notice").textContent = participantMessage(error.code);
+        setTimeout(startup, 5000); return;
+      }
+      try { TS.clear(); } catch { /* No binding to forget. */ }
+    }
+  }
+  clearDraft();
+  let sessions;
+  try { sessions = await loadSessions(); }
+  catch (error) {
+    // An older server has no session list: the single cookie session as before.
+    if ([404, 405].includes(error.status)) { cookieMode = true; operate(startupAdmission); return; }
+    $("notice").textContent = participantMessage(error.code); return;
+  }
+  // The first visit of a browser keeps the QR experience: a number right away.
+  if (!sessions.length && sessionsReceptionMode !== "unavailable") { await newSession(); return; }
+  renderEntry(sessions);
+}
+$("new-session").addEventListener("click", newSession);
+$("leave-session").addEventListener("click", async () => {
+  if (working || !leaveAction) return;
+  const action = leaveAction;
+  if (action === "back") { showEntry(); return; }
+  leaveSession(); sessionsReceptionMode = null;
+  try { await loadSessions(); } catch { /* Falls back to the new state's reception. */ }
+  await newSession();
+});
+startup();

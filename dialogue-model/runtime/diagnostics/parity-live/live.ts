@@ -1,8 +1,17 @@
+import { createResearchDeadlineScope } from './research-deadlines.ts';
+import type { ResearchDeadlineScope, ResearchDeadlines } from './research-deadlines.ts';
+import { AIConnectionError } from '../../client.mjs';
+import { RESEARCH_MAX_DEADLINE_MS } from '../../v2/research-timeouts.ts';
+import {resolveInterventionPolicy} from '../../intervention-policy.ts';
+import {pairedInterventionReplay} from './intervention-replay.ts';
+import type {InterventionReplayTape,InterventionReplayResult} from './intervention-replay.ts';
+import { resolveModelPolicy } from '../../model-policy.ts';
+import { checkModelIdentity } from '../../model-identity-contract.ts';
 // Import-safe Node harness. Only the parent supplies/executes real clients.
 import { createHash, randomUUID } from "node:crypto";
 import { readFile, appendFile, writeFile, rename, lstat, unlink } from "node:fs/promises";
 import { join } from "node:path";
-import { researchTrialProfile, researchHash } from "../../v2/research-profile.ts";
+import { researchTrialProfile, researchTrialProfileV2, researchTrialProfileV3, researchHash } from "../../v2/research-profile.ts";
 import type { LunaRequestSettings } from "../../v2/research-profile.ts";
 import { createTrialV2, modelView } from "../../stimuli/scatter-v2.mjs";
 import { createObservationCache, createObservationCacheKey, observationCacheFileName } from "../../observation/cache.ts";
@@ -16,12 +25,13 @@ import type { ObservationCacheAudit } from "../../observation/cache.ts";
 import { isGroundingModel } from "../../../../workers/research-ai-proxy/src/grounding.ts";
 import { RunBudget, ENGINEERING_LIMITS, CALL_CAPS, compareParity, privateDirectory, privateWrite, publicText, promptSourceManifest } from "./audit.ts";
 import type { Label, Phase, CallReceipt, ComparableTrial, IdentityTurn } from "./audit.ts";
-import { validateRunManifest, loadRunManifest } from "./manifest.ts";
-import type { RunManifest } from "./manifest.ts";
+import { validateAnyRunManifest, loadAnyRunManifest } from "./manifest.ts";
+import type {RunManifest,RunManifestV2} from "./manifest.ts";
+import type { AnyRunManifest } from "./manifest.ts";
 import { canonicalLunaPayload, LunaWireError, lunaWire } from "./luna-wire.ts";
 import type { HttpReceipt } from "./luna-wire.ts";
 import { createProfileDialogue, pairedReplay } from "./replay.ts";
-import type { ReplayTape } from "./replay.ts";
+import type { ReplayTape, Profile } from "./replay.ts";
 import { wiringCoverage, stageGates } from "./coverage.ts";
 import { DEFAULT_COST_CAP_USD } from "../jev-shadow-eval/local-openrouter.ts";
 import { SYNTHETIC_PROBES } from "./cases.ts";
@@ -41,14 +51,14 @@ export type Dependencies = { execution: "mock" | "live";
   createJevTransport(label: Label): { readKey(): Promise<string>; fetchImpl(url: string, options: RequestInit): Promise<Response> };
   secrets?: readonly string[];
 };
-export type Options = { outputDir: string; cacheDir: string; manifest: RunManifest; scripts: readonly Script[] };
+export type Options = { outputDir: string; cacheDir: string; manifest: AnyRunManifest; scripts: readonly Script[] };
 type Event = { id: string; seq: number; speaker: "human" | "ai"; text: string };
-export type Trial = Omit<ComparableTrial, "turns"> & { order: number; plannedIndex: number; stage: string; profile: ReturnType<typeof researchTrialProfile>; profileSha256: string;
+export type Trial = Omit<ComparableTrial, "turns"> & { order: number; plannedIndex: number; stage: string; profile: Profile; profileSha256: string;
   failure: string | null; cache: ObservationCacheAudit | null; calls: CallReceipt[];
   turns: Array<IdentityTurn & { trace: JevTurnTrace[]; state: JevPrivateState; wiring: unknown }>;
   notReached: number[]; aiPublicSettlement: unknown; durationMs: number; budget: unknown; http: HttpReceipt[]; attempts: JevTurnTrace[];
-  replay: Array<{ tape: ReplayTape; result: Omit<Awaited<ReturnType<typeof pairedReplay>>, "sides"> }>; gates?: ReturnType<typeof stageGates>;
-  lastCommittedState: JevPrivateState | null; failureAtTurn: number | null };
+  replay: Array<{ tape: ReplayTape | InterventionReplayTape; result: Omit<Awaited<ReturnType<typeof pairedReplay>>, "sides"> | InterventionReplayResult }>; gates?: ReturnType<typeof stageGates>;
+  deadlines?: ResearchDeadlines; lastCommittedState: JevPrivateState | null; failureAtTurn: number | null };
 class HarnessError extends Error { constructor(readonlyCode: string) { super(readonlyCode); this.code = readonlyCode; } code: string; }
 const fail = (code: string): never => { throw new HarnessError(code); };
 const digestBytes = (v: Uint8Array) => createHash("sha256").update(v).digest("hex");
@@ -62,8 +72,19 @@ export type SaveAudit = { status: "auditable" | "save_failed"; firstSaveFailure:
   evidenceRevision: number; savedEvidenceRevision: number; billingRevision: number; savedBillingRevision: number };
 
 /** Labels are metadata only. No semantic oracle or approved script catalog here. */
-export async function runParityLive(options: Options, deps: Dependencies) {
-  const manifest = validateRunManifest(options.manifest), PROFILE = researchTrialProfile(manifest.lunaRequest, manifest.phaseTimeouts), RESEARCH_TRIAL_PROFILE_SHA256 = researchHash(PROFILE);
+type ParityResult=Awaited<ReturnType<typeof runParityLiveImpl>>;
+type LegacyParityResult=Omit<ParityResult,'trials'>&{trials:Array<Omit<Trial,'replay'>&{replay:Array<{tape:ReplayTape;result:Omit<Awaited<ReturnType<typeof pairedReplay>>,'sides'>}>}>};
+export function runParityLive(options:Omit<Options,'manifest'>&{manifest:RunManifest|RunManifestV2},deps:Dependencies):Promise<LegacyParityResult>;
+export function runParityLive(options:Options,deps:Dependencies):Promise<ParityResult>;
+export function runParityLive(options:Options,deps:Dependencies):Promise<ParityResult>{return runParityLiveImpl(options,deps);}
+async function runParityLiveImpl(options: Options, deps: Dependencies) {
+  const manifest = validateAnyRunManifest(options.manifest), PROFILE = "schemaVersion" in manifest ? manifest.schemaVersion===3?researchTrialProfileV3(manifest.lunaRequest,manifest.timeouts):researchTrialProfileV2(manifest.lunaRequest, manifest.timeouts) : researchTrialProfile(manifest.lunaRequest, manifest.phaseTimeouts), RESEARCH_TRIAL_PROFILE_SHA256 = researchHash(PROFILE);
+  const modelPolicy = resolveModelPolicy(PROFILE);
+  const interventionPolicy=resolveInterventionPolicy(PROFILE),integrated=interventionPolicy.mode==='explicit';
+  const research = PROFILE.id !== "research_trial_profile_v1";
+  const limits = research ? { researchLimits: { maxDeadlineMs: RESEARCH_MAX_DEADLINE_MS } } : {};
+  const effectiveRequest = research ? { ...manifest.lunaRequest, timeoutMs: PROFILE.timeouts.lunaAttemptMs } : manifest.lunaRequest;
+  const trialMs = research ? PROFILE.timeouts.trialMs : ENGINEERING_LIMITS.trialMs;
   const labels = [...new Set(manifest.trials.map(t => t.label))];
   const secrets = [...(deps.secrets ?? [])];
   if (!["mock", "live"].includes(deps.execution) || deps.execution === "live" && manifest.approval !== "approved" ||
@@ -119,6 +140,10 @@ export async function runParityLive(options: Options, deps: Dependencies) {
     })();
     recordWrites.add(work); void work.finally(() => recordWrites.delete(work)); return work;
   };
+  let deadlineWrites = Promise.resolve(), deadlineWriteFailed = false, deadlineRevision = 0, savedDeadlineRevision = 0;
+  type DeadlineRevision = { schemaVersion: 'parity_live_deadline_revision_v2'; revision: number; trialOrder: number | null; deadlines: ResearchDeadlines; closedCallIds: readonly number[]; scopeClosed: boolean };
+  const deadlineScopes = new Map<number | null, ResearchDeadlineScope>(), deadlineLatest = new Map<number | null, DeadlineRevision>();
+  let activeTrialDeadline: { order: number; scope: ResearchDeadlineScope } | null = null;
   let billingWrites = Promise.resolve(), billingWriteFailed = false;
   let billingRevision = 0, savedBillingRevision = 0;
   let evidenceWrites = Promise.resolve(), evidenceWriteFailed = false, evidencePublished = false;
@@ -144,10 +169,10 @@ export async function runParityLive(options: Options, deps: Dependencies) {
   const auditability = async (): Promise<SaveAudit> => {
     for (;;) {
       await Promise.all([...recordWrites]);
-      const bills = billingWrites, records = evidenceWrites;
-      await bills; await records;
-      if (recordWrites.size || bills !== billingWrites || records !== evidenceWrites) continue;
-      const revision = evidenceRevision;
+      const bills = billingWrites, records = evidenceWrites, timed = deadlineWrites;
+      await bills; await records; await timed;
+      if (recordWrites.size || bills !== billingWrites || records !== evidenceWrites || timed !== deadlineWrites) continue;
+      const revision = evidenceRevision, timedRevision = deadlineRevision, billedRevision = billingRevision, receiptCount = requiredRecords.length;
       let evidencePresent = false;
       try { const info = await lstat(join(directory, "verifier-evidence.private.json"));
         evidencePresent = info.isFile() && !info.isSymbolicLink() && (info.mode & 0o777) === 0o600 &&
@@ -163,7 +188,8 @@ export async function runParityLive(options: Options, deps: Dependencies) {
           if (!info.isFile() || info.isSymbolicLink() || (info.mode & 0o777) !== 0o600) throw new Error("invalid_record");
         } catch { receipt.status = "failed"; saveFailed(receipt.file); }
       }));
-      if (revision !== evidenceRevision) continue;
+      if (revision !== evidenceRevision || research && (recordWrites.size || bills !== billingWrites || records !== evidenceWrites || timed !== deadlineWrites ||
+        timedRevision !== deadlineRevision || billedRevision !== billingRevision || receiptCount !== requiredRecords.length)) continue;
       if (!evidencePresent) saveFailed("verifier-evidence.private.json");
       const recordReceipts = structuredClone(requiredRecords);
       const fields = { profile: false, manifest: false, cost: evidencePresent, usage: evidencePresent, model_ids: evidencePresent };
@@ -213,6 +239,24 @@ export async function runParityLive(options: Options, deps: Dependencies) {
       savedBillingRevision = revision;
     }).catch(() => { billingWriteFailed = true; saveFailed("billing.private.jsonl"); });
   };
+  const recordDeadline = (trialOrder: number | null, scope: ResearchDeadlineScope, snapshot = scope.snapshot()) => {
+    const revision = ++deadlineRevision, closure = scope.closure();
+    const value: DeadlineRevision = { schemaVersion: 'parity_live_deadline_revision_v2', revision, trialOrder,
+      deadlines: snapshot, closedCallIds: closure.closedCallIds, scopeClosed: closure.scopeClosed };
+    deadlineLatest.set(trialOrder, structuredClone(value));
+    deadlineWrites = deadlineWrites.then(async () => {
+      await privateDirectory(directory);
+      await appendFile(join(directory, 'deadlines.private.jsonl'), JSON.stringify(value) + '\n', { mode: 0o600 });
+      if (!deadlineWriteFailed && savedDeadlineRevision === revision - 1) savedDeadlineRevision = revision;
+    }).catch(() => { deadlineWriteFailed = true; saveFailed('deadlines.private.jsonl'); });
+  };
+  const newDeadlineScope = (trialOrder: number | null, originAtMs?: number) => {
+    if (PROFILE.id === 'research_trial_profile_v1') return undefined;
+    let scope!: ResearchDeadlineScope;
+    scope = createResearchDeadlineScope({ timeouts: PROFILE.timeouts, origin: trialOrder === null ? 'warmup_start' : 'trial_start',
+      ...(originAtMs === undefined ? {} : { originAtMs }), onChange: snapshot => recordDeadline(trialOrder, scope, snapshot) });
+    deadlineScopes.set(trialOrder, scope); recordDeadline(trialOrder, scope); return scope;
+  };
   const warmConnection: { current: ReturnType<typeof lunaWire> | null } = { current: null };
   let warmupSaved = false, warmClosed = false, trialLoopStarted = false;
   let warmStage: "client_setup" | "policy_get" | "cache_get" | "post_cache" | "unknown" = "unknown";
@@ -223,11 +267,11 @@ export async function runParityLive(options: Options, deps: Dependencies) {
   const freshClient = async (label: Label | "warmup", signal?: AbortSignal, trialOrder: number | null = null) => {
     if (label === "warmup") warmStage = "client_setup";
     const identity = { provider: "luna" as const, instanceId: `luna-${++instanceSequence}`, trialOrder, label, requestedModel: expectedModel };
-    const connection = lunaWire(manifest.lunaRequest, budget, key => secrets.push(key), () => evidence.event({ ...identity,
-      type: "policy_get", callId: 0, phase: "model_policy" }));
+    const connection = lunaWire(effectiveRequest, budget, key => secrets.push(key), () => evidence.event({ ...identity,
+      type: "policy_get", callId: 0, phase: "model_policy" }), deadlineScopes.get(trialOrder));
     if (label === "warmup") warmConnection.current = connection;
     if (signal) connection.bind(signal);
-    const client = await deps.createLunaClient(label, { request: manifest.lunaRequest, instrumentFetch: connection.instrumentFetch });
+    const client = await deps.createLunaClient(label, { request: effectiveRequest, instrumentFetch: connection.instrumentFetch });
     if (!client || typeof client.complete !== "function" || typeof client.getModelPolicy !== "function") fail("missing_luna_dependency");
     if (clients.has(client)) fail("shared_luna_client"); clients.add(client);
     connections.set(client, connection);
@@ -290,8 +334,10 @@ export async function runParityLive(options: Options, deps: Dependencies) {
         scope: "instance", scopeDetail: "logical_call", inFlight: budget.sends.filter(s => s.logicalCallId === record.id && s.status !== "observed_response").map(s => s.id) });
       callSignal.addEventListener("abort", recordAbort, { once: true });
       try {
-        const reply = await connections.get(raw)!.withCall(record, () => raw.complete(messages, { ...callOptions, signal: callSignal }), callSignal);
-        if (isClosed() || callSignal.aborted) fail("aborted");
+        const deadline = deadlineScopes.get(lunaIdentity.trialOrder ?? null);
+        const execute = async (scopedSignal: AbortSignal) => {
+        const reply = await connections.get(raw)!.withCall(record, () => raw.complete(messages, { ...callOptions, signal: scopedSignal }), scopedSignal);
+        if (isClosed() || scopedSignal.aborted) fail("aborted");
         if (reply.model !== expectedModel) { stop("model_changed"); fail("model_changed"); }
         record.model = reply.model ?? null; record.inputTokens = tokens(reply.usage?.inputTokens); record.outputTokens = tokens(reply.usage?.outputTokens);
         if (!connections.get(raw)!.measured) {
@@ -299,17 +345,22 @@ export async function runParityLive(options: Options, deps: Dependencies) {
           if (record.outputTokens === null) budget.syntheticOutputUnknown++; else budget.syntheticOutputTokens += record.outputTokens;
           budget.checkObservedLimits();
         }
+        return reply;
+        };
+        const reply = deadline ? await deadline.withCall(record.id, { phase: phase as Parameters<ResearchDeadlineScope['withCall']>[1]['phase'], callOptionTimeoutMs: callOptions.timeoutMs ?? null, signal: callSignal }, execute) : await execute(callSignal);
         record.status = "ok";
         getTape()?.luna.push({ phase, response: { text: reply.text, model: reply.model, usage: { inputTokens: record.inputTokens, outputTokens: record.outputTokens } } });
         return reply;
       } catch (error) {
         if (error instanceof LunaWireError) stop(error.code);
         for (const id of record.sendIds) { const send = budget.sends.find(s => s.id === id); if (send?.status === "observed_response") evidence.response(send, "error"); }
-        if (!isClosed()) { record.status = "error"; record.error = error instanceof HarnessError ? error.code : "luna_error"; } throw new HarnessError(record.error ?? "aborted"); }
+        if (!isClosed()) { record.status = "error"; record.error = error instanceof HarnessError ? error.code : research && error instanceof AIConnectionError ? error.code :
+          research && ['attempt_timeout', 'phase_deadline', 'trial_deadline', 'caller_abort'].includes((error as {abortCause?:string})?.abortCause ?? '') ? ((error as {code:string}).code) : "luna_error"; } throw new HarnessError(record.error ?? "aborted"); }
       finally { callSignal.removeEventListener("abort", recordAbort); if (!isClosed()) record.latencyMs = Math.max(0, performance.now() - started); }
     } };
     const fetchImpl = async (url: string, init: RequestInit) => {
       const payload = JSON.parse(String(init.body)), questions = Object.keys(payload.questions ?? {});
+      if (modelPolicy.mode === 'explicit' && payload.model !== PROFILE.modelPolicy.jevModel) fail('model_requested_mismatch');
       const state = JSON.parse(payload.state);
       const phase: Phase = questions.includes("human_referent") ? "human_referent" : questions.some(k => k.endsWith("_support")) ? "ai_support"
         : questions.some(k => k.endsWith("_act")) ? (Object.hasOwn(state, "aiSeq") ? "ai_function" : "local_function") : "decision";
@@ -334,12 +385,19 @@ export async function runParityLive(options: Options, deps: Dependencies) {
         const data = await response.clone().json() as { model?: unknown; id?: unknown; answers?: unknown; usage?: { cost?: unknown } };
         const cost = data.usage?.cost;
         const costUsd = typeof cost === "number" && Number.isFinite(cost) && cost >= 0 ? cost : null;
-        const modelMatches = isGroundingModel(data.model, PROFILE.modelPolicy.jevModel);
+        const identity = modelPolicy.mode === 'explicit' ? checkModelIdentity(payload.model, data.model) : null;
+        const modelMatches = identity ? identity.status === 'accepted' : isGroundingModel(data.model, PROFILE.modelPolicy.jevModel);
         budget.observe(send, { costUsd, model: modelMatches ? data.model as string : null, modelMatches });
-        if (isClosed() || signal.aborted) fail("aborted");
+        if (isClosed() || (modelPolicy.mode === 'explicit' ? callSignal.aborted : signal.aborted)) fail("aborted");
         if (typeof cost !== "number" || !Number.isFinite(cost) || cost < 0) { budget.jevUnknown = true; stop("jev_cost_unknown"); fail("jev_cost_unknown"); }
         record.costUsd = cost as number;
-        if (!isGroundingModel(data.model, PROFILE.modelPolicy.jevModel)) { stop("model_changed"); fail("model_changed"); }
+        if (!modelMatches) {
+          const code = identity ? identity.status === 'invalid' ? 'model_invalid' : identity.status === 'unknown_version' ? 'model_unknown_version' : 'model_not_allowed' : 'model_changed';
+          // Stop closes and freezes the trial. Record the fixed rejection first;
+          // budget.observe above may already have established an earlier cause.
+          if (modelPolicy.mode === 'explicit') { record.status = 'error'; record.error = code; }
+          stop(code); fail(code);
+        }
         record.model = data.model as string; record.status = "ok";
         getTape()?.jev.push({ model: data.model, id: typeof data.id === "string" ? data.id : null, answers: data.answers, usage: { cost } });
         return response;
@@ -368,17 +426,18 @@ export async function runParityLive(options: Options, deps: Dependencies) {
     semantic: "not_installed_pending_auditor_approval", coverage: "not_measured_by_wiring_harness" }, ["profile", "manifest"]);
   evidencePublished = true; writeEvidence(); await evidenceWrites;
   let warmupSaving: Awaited<ReturnType<typeof auditability>> | null = null, plannedIndex = 0;
+  const warmDeadline = newDeadlineScope(null);
   try {
     if (firstSaveFailure) fail("save_failed");
     const warm = await freshClient("warmup"); expectedModel = warm.policy.model;
     const controller = new AbortController();
     activeRunStop = reason => { fatal ??= reason; controller.abort(); };
     const wire = wireScope(warm.client, null, warmCalls, controller.signal, () => null, () => warmClosed, code => { fatal = code; controller.abort(); });
-    const cache = await createObservationCache({ directory: cacheDir, modelId: expectedModel, client: wire.client, onMiss: "observe", timeoutMs: PROFILE.timeouts.observationMs });
+    const cache = await createObservationCache({ directory: cacheDir, modelId: expectedModel, client: wire.client, onMiss: "observe", timeoutMs: PROFILE.timeouts.observationMs, ...limits });
     const cacheFile = join(cacheDir, observationCacheFileName(createObservationCacheKey(own, { modelId: expectedModel })));
     let warmBefore: string | null = null;
     try { warmBefore = digestBytes(await readFile(cacheFile)); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-    warmStage = "cache_get"; observationOuterMs = PROFILE.timeouts.observationMs;
+    warmStage = "cache_get"; observationOuterMs = PROFILE.timeouts.observationMs; warmDeadline?.observationStarted();
     const initial = await cache.get(own, { signal: controller.signal, timeoutMs: observationOuterMs }); warmAudit = initial.audit;
     warmStage = "post_cache";
     if (warmCalls.length !== (warmAudit.status === "MISS" ? 1 : 0)) fail("cache_warmup_wiring");
@@ -386,12 +445,12 @@ export async function runParityLive(options: Options, deps: Dependencies) {
     warmHttpRecords = warmHttp.records; warmMeasured = warmHttp.measured;
     const posts = warmHttp.records.filter(r => r.kind === "completion_post").length;
     if (warmHttp.measured && (warmAudit.status === "MISS" ? posts < 1 || posts > 3 : posts !== 0)) fail("cache_warmup_http_wiring");
-    warmClosed = true; warmHttp.close();
+    warmClosed = true; warmDeadline?.close(); warmHttp.close();
     activeRunStop = null;
     cacheHash = digestBytes(await readFile(cacheFile));
     evidence.cache({ trialOrder: null, status: warmAudit.status, beforeSha256: warmBefore, afterSha256: cacheHash,
       memo: initial.memo, memoSha256: researchHash(initial.memo), validated: true, requestedModel: expectedModel, returnedModel: warm.policy.model });
-    warmupSaved = (await persist("warmup.private.json", { audit: warmAudit, memoSha256: researchHash(initial.memo), fileSha256: cacheHash, calls: warmCalls, http: warmHttp.records, policy: warm.policy }, ["usage", "model_ids"])).saved;
+    warmupSaved = (await persist("warmup.private.json", { audit: warmAudit, memoSha256: researchHash(initial.memo), fileSha256: cacheHash, calls: warmCalls, http: warmHttp.records, policy: warm.policy, ...(warmDeadline ? { deadlines: warmDeadline.snapshot() } : {}) }, ["usage", "model_ids"])).saved;
     if (!warmupSaved) fail("save_failed");
     warmupSaving = await auditability();
     trialLoopStarted = true;
@@ -410,6 +469,8 @@ export async function runParityLive(options: Options, deps: Dependencies) {
         if (stopReason) { budget.stop(stopReason);
           skipped.push({ plannedIndex: index, scriptId: script.id, label, reason: stopReason, status: "not_reached" }); continue; }
         const controller = new AbortController(), started = performance.now(); let closed = false, turn: number | null = null;
+        const trialDeadline = newDeadlineScope(trials.length, Math.floor(started));
+        activeTrialDeadline = trialDeadline ? { order: trials.length, scope: trialDeadline } : null;
         let state: JevPrivateState | null = null;
         const events: Event[] = [], traces: JevTurnTrace[] = [];
         const trial: Trial = { scriptId: script.id, label, stage: planned.stage, completed: false, order: trials.length, plannedIndex: index, profile: PROFILE, profileSha256: RESEARCH_TRIAL_PROFILE_SHA256,
@@ -429,7 +490,7 @@ export async function runParityLive(options: Options, deps: Dependencies) {
         let timer: ReturnType<typeof setTimeout> | undefined;
         const canceled = new Promise<never>((_resolve, reject) => {
           controller.signal.addEventListener("abort", () => reject(new HarnessError(trial.failure ?? "aborted")), { once: true });
-          timer = setTimeout(() => stop("trial_timeout"), ENGINEERING_LIMITS.trialMs);
+          timer = setTimeout(() => stop("trial_timeout"), trialMs);
         });
         const work = async () => {
           try { trialBefore = digestBytes(await readFile(cacheFile)); } catch { fail("cache_read_failed"); }
@@ -439,12 +500,13 @@ export async function runParityLive(options: Options, deps: Dependencies) {
           const rawJev = deps.createJevTransport(label);
           if (!rawJev || typeof rawJev.readKey !== "function" || typeof rawJev.fetchImpl !== "function") fail("missing_jev_dependency");
           let tape: ReplayTape | null = null;
+          let commonBoundary:{luna:number;jev:number;reobservations:number}|null=null;
           setupStage = "native_runtime";
           const wire = wireScope(fresh.client, rawJev, trial.calls, controller.signal, () => turn, () => closed, stop, () => tape);
-          const cached = await createObservationCache({ directory: cacheDir, modelId: expectedModel, onMiss: "error" });
-          const observer = createLunaObserver(wire.client, { timeoutMs: PROFILE.timeouts.observationMs });
+          const cached = await createObservationCache({ directory: cacheDir, modelId: expectedModel, onMiss: "error", ...limits });
+          const observer = createLunaObserver(wire.client, { timeoutMs: PROFILE.timeouts.observationMs, ...limits });
           const core = createJevDecisionClient({ enabled: true, readKey: wire.readKey, fetchImpl: wire.fetchImpl,
-            timeoutMs: PROFILE.timeouts.decisionMs, questionLayout: PROFILE.questionLayout })!;
+            timeoutMs: PROFILE.timeouts.decisionMs, questionLayout: PROFILE.questionLayout, ...limits })!;
           let inputs = { humanReferent: [] as string[], actionInputs: [] as string[], humanMaterial: [] as string[], actionMaterial: [] as string[] };
           const jevDecision: JevDecisionClient = {
             async estimateReferent(input, opts) {
@@ -455,12 +517,16 @@ export async function runParityLive(options: Options, deps: Dependencies) {
             },
             async decide(input, opts) {
               inputs.actionMaterial.push(researchHash(input)); inputs.actionInputs.push(researchHash(buildJevDecisionPayload(input)));
-              try { return await core.decide(input, opts); }
+              try { const decision=await core.decide(input, opts);if(integrated&&decision.action!=='request_observation'&&tape)commonBoundary={luna:tape.luna.length,jev:tape.jev.length,reobservations:tape.reobservations.length};return decision; }
               catch (error) { wire.adapterResult("decision", error instanceof JevDecisionError ? error.code : "decision_error");
                 if (error instanceof JevDecisionError && error.code === "cost_cap") stop("cost_cap"); throw error; }
             },
+            ...(integrated?{async completeDetail(input,selected,opts){
+              try{return await core.completeDetail!(input,selected,opts);}
+              catch(error){wire.adapterResult('decision',error instanceof JevDecisionError?error.code:'decision_error');if(error instanceof JevDecisionError&&error.code==='cost_cap')stop('cost_cap');throw error;}
+            }}:{}),
           };
-          const classifier = createJevLocalTestClassifier({ enabled: true, readKey: wire.readKey, fetchImpl: wire.fetchImpl, timeoutMs: PROFILE.timeouts.decisionMs })!;
+          const classifier = createJevLocalTestClassifier({ enabled: true, readKey: wire.readKey, fetchImpl: wire.fetchImpl, timeoutMs: PROFILE.timeouts.decisionMs, ...limits })!;
           const runtime = createProfileDialogue(PROFILE, { client: wire.client, strategy: label, image, anchors, referenceMemory: PROFILE.referenceMemory,
             decisionMode: PROFILE.decisionMode, utteranceStyle: PROFILE.utteranceStyle, maxReobservations: PROFILE.maxReobservations,
             observer: { async reobserve(input, opts) { const result = await observer.reobserve(input, opts); tape?.reobservations.push(structuredClone(result)); return result; }, async observeAll(input, opts) {
@@ -471,8 +537,8 @@ export async function runParityLive(options: Options, deps: Dependencies) {
               if (hit.audit.status !== "HIT" || researchHash(hit.memo) !== researchHash(initial.memo)) fail("cache_mismatch");
               trial.identity.memo = researchHash(hit.memo); return hit.memo;
             } }, jevDecision,
-            localGrounding: { classifier, timeoutMs: PROFILE.timeouts.localMs, aiPublicClaims: PROFILE.localGrounding.aiPublicClaims,
-              aiPublicTransport: { readKey: wire.readKey, fetchImpl: wire.fetchImpl, timeoutMs: PROFILE.timeouts.decisionMs } },
+            localGrounding: { classifier, ...limits, timeoutMs: PROFILE.timeouts.localMs, aiPublicClaims: PROFILE.localGrounding.aiPublicClaims,
+              aiPublicTransport: { readKey: wire.readKey, fetchImpl: wire.fetchImpl, timeoutMs: PROFILE.timeouts.decisionMs, ...limits } },
             onJevTurnTrace: trace => { if (!closed) {
               const localError = trace.local?.classifier.errorCode;
               if (localError) wire.adapterResult("local_function", localError);
@@ -490,6 +556,7 @@ export async function runParityLive(options: Options, deps: Dependencies) {
             const publicPrefix = events.map(e => ({ turn: e.seq, speaker: e.speaker, text: e.text }));
             await persist(`public-${trial.order}-${turn}.packet.json`, { prefix: publicPrefix, sha256: researchHash(publicPrefix) });
             const prefixSha256 = researchHash(events), callStart = trial.calls.length, traceStart = traces.length;
+            commonBoundary=null;
             tape = { state: structuredClone(state!), events: structuredClone(events), luna: [], jev: [], reobservations: [], expectedRequests: [] };
             const result = await runtime.runAiTurn({ events: structuredClone(events), privateState: state, lastEventId: events.at(-1)!.id,
               requestSeq: turn, signal: controller.signal });
@@ -497,20 +564,32 @@ export async function runParityLive(options: Options, deps: Dependencies) {
             publicText(result.text, secrets); if (unsafe(result.text)) fail("privacy_rejected");
             const settled = settleJevTurnTraces(traces.slice(traceStart), result.privateState);
             const trace = settled.find(t => t.status === "committed");
-            if (!trace || trace.redacted || trace.publicSpeech !== result.text || trace.intervention !== "none_pending_researcher_decision") fail("trace_mismatch");
+            if (!trace || trace.redacted || trace.publicSpeech !== result.text || (integrated?trace.schemaVersion!=='jev_turn_trace_v2'||trace.executed===null||!trace.intervention:trace.intervention !== "none_pending_researcher_decision")) fail("trace_mismatch");
             const calls = trial.calls.slice(callStart), counts = Object.fromEntries(Object.keys(CALL_CAPS).map(phase => [phase, calls.filter(c => c.phase === phase).length]));
             if (trace!.aiPublic?.pending?.reasons.some(r => r.endsWith("_cost_cap"))) fail("cost_cap");
             if (calls.some(c => c.status !== "ok") || trace!.local?.localStatus !== "ok" || trace!.humanReferent?.status !== "ok" ||
                 trace!.aiPublic?.pending?.status === "failed") fail("stage_wiring_failed");
             tape.expectedRequests = calls.map(c => ({ provider: c.provider, phase: c.phase,
               requestSha256: c.provider === "luna" ? c.httpRequestSha256 ?? c.expectedHttpRequestSha256! : c.requestSha256,
+              ...(integrated&&c.provider==='jev'?{actualSendMeasured:c.sendIds.length>0,sendIds:[...c.sendIds]}:{}),
               ...(c.provider === "luna" ? { actualSendMeasured: !!c.httpRequestSha256, messagesSha256: c.requestSha256,
                 sendIds: [...c.sendIds] } : {}) }));
-            const { sides, ...replayResult } = await pairedReplay(tape, own, expectedModel, PROFILE);
+            if(integrated){
+              const cut=commonBoundary as {luna:number;jev:number;reobservations:number}|null;
+              const common={luna:tape.luna.slice(0,cut?.luna??tape.luna.length),jev:tape.jev.slice(0,cut?.jev??tape.jev.length),reobservations:tape.reobservations.slice(0,cut?.reobservations??tape.reobservations.length)};
+              const tail={luna:tape.luna.slice(cut?.luna??tape.luna.length),jev:tape.jev.slice(cut?.jev??tape.jev.length),reobservations:tape.reobservations.slice(cut?.reobservations??tape.reobservations.length)};
+              const versioned:InterventionReplayTape={schemaVersion:'parity_intervention_replay_v1',state:structuredClone(tape.state) as InterventionReplayTape['state'],events:structuredClone(tape.events),common,tails:{'repair-first':label==='repair-first'?tail:null,'bypass-enabled':label==='bypass-enabled'?tail:null},recorded:{label,expectedRequests:structuredClone(tape.expectedRequests)}};
+              const replayResult=await pairedInterventionReplay(versioned,own,expectedModel,PROFILE as import('../../v2/research-profile.ts').ResearchTrialProfileV3);
+              trial.replay.push({tape:versioned,result:replayResult});
+              if(replayResult.sides.length===2)evidence.pair(trial.order,turn,replayResult.sides[0],replayResult.sides[1]);
+              if(replayResult.status!=='same_material_intervention_verified')fail('replay_not_verified');
+            }else{
+              const {sides,...replayResult}=await pairedReplay(tape,own,expectedModel,PROFILE);
+              trial.replay.push({tape:structuredClone(tape),result:replayResult});
+              if(sides.length===2)evidence.pair(trial.order,turn,sides[0],sides[1]);
+              if(replayResult.status!=='same_material_same_payload')fail('replay_not_verified');
+            }
             if (closed || controller.signal.aborted || budget.halted || fatal) fail(trial.failure ?? budget.haltReason ?? fatal ?? "aborted");
-            trial.replay.push({ tape: structuredClone(tape), result: replayResult });
-            if (sides.length === 2) evidence.pair(trial.order, turn, sides[0], sides[1]);
-            if (trial.replay.at(-1)!.result.status !== "same_material_same_payload") fail("replay_not_verified");
             if (closed || controller.signal.aborted || budget.halted || fatal) fail(trial.failure ?? budget.haltReason ?? fatal ?? "aborted");
             state = result.privateState;
             evidence.event({ type: "commit", trialOrder: trial.order, label, turn });
@@ -569,6 +648,8 @@ export async function runParityLive(options: Options, deps: Dependencies) {
         // fails. Saving failure remains explicit; it never moves a trial to skipped.
         const failureCategory = !trial.failure ? null : budget.jevUnknown ? "sent_result_unknown_run_halted" :
           /budget|cost_cap|trial_timeout/u.test(trial.failure) ? "budget_or_time_stop" : "validation_or_pipeline_failure_known_billing";
+        trialDeadline?.close();
+        if (trialDeadline) trial.deadlines = trialDeadline.snapshot();
         const trialSave = await persist(`trial-${trial.order}.private.json`, { ...trial, failureCategory, coverage, publicTurns: events }, ["profile", "cost", "usage", "model_ids"]);
         if (!trialSave.saved) {
           // No published gate file exists: the atomic trial-record save failed.
@@ -579,22 +660,24 @@ export async function runParityLive(options: Options, deps: Dependencies) {
         // A primary wiring failure is retained; do not repeat the same script/input.
         if (trial.failure) { fatal ??= trial.failure; budget.stop(trial.failure); }
         if (finalizeFailed) fail(trial.failure!);
+        activeTrialDeadline = null;
     }
   } catch (error) {
     if (!(error instanceof HarnessError && error.code === "save_failed" && firstSaveFailure)) {
       fatal ??= budget.haltReason ?? (error instanceof HarnessError ? error.code : "warmup_failed"); budget.stop(fatal);
     }
     if (warmupSaved) {
-      await persist("failure.private.json", { schemaVersion: "parity_live_failure_v1", scope: "after_warmup", code: fatal ?? "save_failed",
-        stage: trialLoopStarted ? "trial_loop" : "unknown" });
+      activeTrialDeadline?.scope.close();
+      await persist("failure.private.json", { schemaVersion: research ? "parity_live_failure_v2" : "parity_live_failure_v1", scope: "after_warmup", code: fatal ?? "save_failed",
+        stage: trialLoopStarted ? "trial_loop" : "unknown", ...(research ? { trialOrder: activeTrialDeadline?.order ?? null, deadlines: activeTrialDeadline?.scope.snapshot() ?? null } : {}) });
     } else {
       warmClosed = true;
-      warmConnection.current?.close();
+      warmDeadline?.close(); warmConnection.current?.close();
       warmCalls.filter(c => c.status === "started").forEach(c => { c.status = "error"; c.error = "in_flight_outcome_unknown"; });
-      await persist("failure.private.json", { schemaVersion: "parity_live_failure_v1", scope: "warmup", code: fatal ?? "save_failed", stage: warmStage,
+      await persist("failure.private.json", { schemaVersion: research ? "parity_live_failure_v2" : "parity_live_failure_v1", scope: "warmup", code: fatal ?? "save_failed", stage: warmStage,
         calls: warmCalls, cache: warmAudit, observationCallStarted: warmCalls.length > 0, policy: warmPolicy,
         http: { measured: warmConnection.current?.measured ?? false, records: warmConnection.current?.measured ? warmConnection.current.records : [] },
-        deadlines: { configured: { observationMs: PROFILE.timeouts.observationMs, lunaClientTimeoutMs: manifest.lunaRequest.timeoutMs },
+        deadlines: warmDeadline ? warmDeadline.snapshot() : { configured: { observationMs: PROFILE.timeouts.observationMs, lunaClientTimeoutMs: manifest.lunaRequest.timeoutMs },
           applied: { observationOuterMs, completeCalls: warmCompleteCalls } } });
     }
   }
@@ -630,15 +713,26 @@ export async function runParityLive(options: Options, deps: Dependencies) {
   }
   await billingWrites;
   return { directory, summary, trials: structuredClone(trials), async flushBilling() {
-    const current = await auditability(), latest = budget.snapshot();
-    const diff = Object.fromEntries(Object.keys(current).filter(k => researchHash(current[k as keyof typeof current]) !== researchHash(savedAtSummary[k as keyof typeof current]))
-      .map(k => [k, { snapshot: savedAtSummary[k as keyof typeof current], current: current[k as keyof typeof current] }]));
-    return { ...latest, billingWriteFailed, evidenceWriteFailed,
-      auditability: { ...current, snapshotStatus: savedAtSummary.status, changedSinceSnapshot: Object.keys(diff).length > 0,
-        diff, consumptionDiff: { observedJevUsd: latest.observedJevUsd - budgetAtSummary.observedJevUsd,
-          observedLunaTokens: latest.observedLunaTokens - budgetAtSummary.observedLunaTokens } } }; } };
+    for (;;) {
+      const bills = billingWrites, records = evidenceWrites, timed = deadlineWrites, revision = deadlineRevision, receiptCount = requiredRecords.length;
+      const current = await auditability();
+      // Recheck after the final await too: resolving auditability schedules this
+      // continuation separately from any newly observed remote response.
+      if (research && (recordWrites.size || bills !== billingWrites || records !== evidenceWrites || timed !== deadlineWrites ||
+        revision !== deadlineRevision || receiptCount !== requiredRecords.length)) continue;
+      const latest = budget.snapshot();
+      const diff = Object.fromEntries(Object.keys(current).filter(k => researchHash(current[k as keyof typeof current]) !== researchHash(savedAtSummary[k as keyof typeof current]))
+        .map(k => [k, { snapshot: savedAtSummary[k as keyof typeof current], current: current[k as keyof typeof current] }]));
+      const latestDeadlines = [...deadlineLatest.values()].sort((a, b) => (a.trialOrder ?? -1) - (b.trialOrder ?? -1)).map(({ schemaVersion: _schema, ...value }) => structuredClone(value));
+      return { ...latest, billingWriteFailed, evidenceWriteFailed,
+        ...(research ? { deadlineRevisions: { cutoffRevision: deadlineRevision, savedRevision: savedDeadlineRevision, writeFailed: deadlineWriteFailed, latest: latestDeadlines } } : {}),
+        auditability: { ...current, snapshotStatus: savedAtSummary.status, changedSinceSnapshot: Object.keys(diff).length > 0,
+          diff, consumptionDiff: { observedJevUsd: latest.observedJevUsd - budgetAtSummary.observedJevUsd,
+            observedLunaTokens: latest.observedLunaTokens - budgetAtSummary.observedLunaTokens } } };
+    }
+  } };
 }
 export async function runParityLiveFromManifest(options: { outputDir: string; cacheDir: string; manifestFile: string; scripts?: readonly Script[] }, deps: Dependencies) {
-  return runParityLive({ outputDir: options.outputDir, cacheDir: options.cacheDir, manifest: await loadRunManifest(options.manifestFile),
+  return runParityLive({ outputDir: options.outputDir, cacheDir: options.cacheDir, manifest: await loadAnyRunManifest(options.manifestFile),
     scripts: options.scripts ?? SYNTHETIC_PROBES }, deps);
 }

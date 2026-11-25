@@ -287,6 +287,35 @@ function progressFixture(candidates = ids.slice(0, 2)) {
   return { claim, history };
 }
 
+test("known lexical limit: a paraphrase re-extracted from the same quote counts as new without semantic judgment", () => {
+  // Synthetic characterization only: the program compares extracted strings;
+  // it does not judge semantic identity. Whether this progress rule should change
+  // is a researcher decision, not a semantic rule introduced by this test.
+  const { claim, history } = progressFixture();
+  const quote = "四角いところは一つです";
+  const prior = { ...claim, id: "2:local1", turn: 2, sourceTurn: 2,
+    proposition: "四角い部分は一つある", quote };
+  const reply = { ...claim, proposition: prior.proposition, quote, targets: [...prior.targets].reverse() };
+  const context = { answeredRepairTurn: 3, aiPublic: { humanOk: true, rejected: [], aiComplete: true } };
+  const before = JSON.stringify({ history, prior, reply });
+  for (const scenario of [
+    { label: "same extraction", proposition: prior.proposition, quote, progress: "unchanged", added: [] },
+    { label: "same quote, paraphrased extraction", proposition: "四角い部分が一つある", quote, progress: "changed", added: [reply.id] },
+    { label: "different quote, same extraction", proposition: prior.proposition, quote: "四角い部分が一つあります", progress: "unchanged", added: [] },
+  ]) {
+    const current = { ...reply, proposition: scenario.proposition, quote: scenario.quote };
+    const result = updateRepairHistory(history, [prior], [prior, current], 5, context)[0];
+    assert.equal(result.issueId, history[0].issueId, scenario.label);
+    assert.deepEqual([...result.candidatesAfter].sort(), [...result.candidatesBefore].sort(), scenario.label);
+    assert.equal(result.progress, scenario.progress, scenario.label);
+    assert.deepEqual(result.addedClaimIds, scenario.added, scenario.label);
+    assert.deepEqual(Reflect.get(result, "missingReasons"), [], scenario.label);
+    assert.deepEqual(result.partnerClaims, [{ id: current.id, act: current.act,
+      proposition: current.proposition, targets: current.targets }], scenario.label);
+  }
+  assert.equal(JSON.stringify({ history, prior, reply }), before);
+});
+
 test("difficulty and backchannels add no figure information or candidate narrowing", () => {
   for (const act of ["defer", "ask", "acknowledge", "withdraw", "revisit"] as const) {
     const { claim, history } = progressFixture();

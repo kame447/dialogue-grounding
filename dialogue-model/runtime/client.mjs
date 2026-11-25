@@ -23,7 +23,7 @@ export class AIConnectionError extends Error {
   }
 }
 
-function responseText(content) {
+export function responseText(content) {
   if (typeof content === "string") return content;
   if (Array.isArray(content)) {
     return content.filter((part) => part?.type === "text" && typeof part.text === "string")

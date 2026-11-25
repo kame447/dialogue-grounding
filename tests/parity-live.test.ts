@@ -25,7 +25,7 @@ const pause = () => { let release!: () => void; const promise = new Promise<void
 const manifest = () => ({ id: "synthetic-wiring", seed: 1701, figureSets: 1 as const, approval: "pending" as const,
   lunaRequest: { timeoutMs: null, maxCompletionTokens: null }, caps: { ...caps }, trials: alternatingTrials(["probe"]) });
 async function fixture(t: { after(fn: () => Promise<void>): void }) {
-  const root = await mkdtemp(join(tmpdir(), "parity-wiring-")); t.after(() => rm(root, { recursive: true, force: true }));
+  const root = await mkdtemp(join(tmpdir(), "parity-wiring-")); t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   return { outputDir: join(root, "runs"), cacheDir: join(root, "cache"), scripts: [{ id: "probe", humanTurns: ["形を教えてください。", "続きを教えてください。"] }], manifest: manifest() };
 }
 function dependencies(config: any = {}) {
