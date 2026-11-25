@@ -1,7 +1,7 @@
 // The models propose interpretations; only this boundary assigns public evidence,
 // graph IDs and issue IDs. No score is used to promote an interpretation.
 import { LOCAL_ASPECTS, LOCAL_ACTS } from "./contract.ts";
-import type { LocalSegmentProposal, LocalFunctionVerdict, LocalVerificationResult, LocalClaimView, PublicTurn } from "./contract.ts";
+import type { AiPublicPending, LocalSegmentProposal, LocalFunctionVerdict, LocalVerificationResult, LocalClaimView, PublicTurn } from "./contract.ts";
 import { isBareDeictic, literalSpan, quoteAround } from "../judgment/public-evidence.mjs";
 import { SLOTS } from "../stimuli/board.mjs";
 import { REFERENCE_LIMITS, snapshotReferenceGraph, validateReferenceUpdate, ReferenceGraphError } from "../memory/reference-graph.mjs";
@@ -39,6 +39,8 @@ type VerificationInput = {
   keepUnboundApproval?: boolean;
   /** holistic_v4 only: see LocalGroundingOptions.approvalFromNamedClaim. */
   approvalFromNamedClaim?: boolean;
+  /** v7: questions bound through the committed single-figure check and its public description. */
+  referenceQuestionBindings?: ReadonlyMap<string, string>;
   graph: LocalGraph;
   turn: number;
   publicTurns: readonly PublicTurn[];
@@ -51,10 +53,13 @@ const text = (value: unknown): value is string => typeof value === "string" && v
 const ref = (value: unknown) => typeof value === "string" && /^[1-9]\d*:[a-zA-Z0-9_-]{1,32}$/u.test(value);
 const responses = new Set(["agree", "deny", "name_accept", "name_reject", "withdraw"]);
 const independentActs = new Set(["assert", "construe", "name_propose", "ask"]);
+// A typed agree still needs words that point to the checked figure for this
+// cross-aspect reply. A standalone acknowledgment or a name question is not enough.
+export const directsToFigure = (quote: string) => /(?:(?:^|[\s、,]|まさに|確かに)(?:これ|それ)|(?:この|その|同じ)(?:図形|形))(?:のこと)?(?:です[よね]?|だ[よね]?)?[。!\s]*$/u.test(quote.normalize("NFKC"));
 const overlap = (a: readonly string[], b: readonly string[]) => a.some(slot => b.includes(slot));
 
 /** Only the CURRENT public human turn may supply a new segment's quote. */
-export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts, keepUnboundApproval = false, approvalFromNamedClaim = false }: VerificationInput): LocalVerifiedUpdate {
+export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts, keepUnboundApproval = false, approvalFromNamedClaim = false, referenceQuestionBindings }: VerificationInput): LocalVerifiedUpdate {
   const result: LocalVerifiedUpdate = { operations: [], rejected: [] };
   // Revalidate JSON-restored graphs before using any model-selected pointer.
   snapshotReferenceGraph(graph);
@@ -102,7 +107,13 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     // The name is public either way. The extraction's respondsToTurn names the AI turn that was just answered, so for this act it does not have to be the claim's turn.
     const approvalRequest = keepUnboundApproval && !!prior && act === "name_propose" && name === null && aspect === "name" && prior.aspect === "name" &&
       (approvalFromNamedClaim ? ["name_propose", "name_accept"].includes(prior.act) : prior.act === "name_propose" && prior.speaker === "human") && prior.name !== null;
-    if (isBareDeictic(quote) || /^(?:それ|これ|あれ)で(?:いい|良い|よい)(?:です)?[。！!？?\s]*$/u.test(quote.normalize("NFKC").trim())) {
+    const checkedFigure = prior && referenceQuestionBindings?.get(prior.id);
+    const agreesWithCheckedFigure = !!checkedFigure && act === "agree" && aspect === "referent" && name === null &&
+      prior?.act === "ask" && prior.aspect === "question" && previousClaims.includes(prior) &&
+      prior.targets.length === 1 && prior.targets[0] === checkedFigure &&
+      (targets.length === 0 || targets.length === 1 && targets[0] === checkedFigure) && directsToFigure(quote);
+    if (agreesWithCheckedFigure) aspect = "question";
+    if (!agreesWithCheckedFigure && (isBareDeictic(quote) || /^(?:それ|これ|あれ)で(?:いい|良い|よい)(?:です)?[。！!？?\s]*$/u.test(quote.normalize("NFKC").trim()))) {
       // ai1 is the program-owned primary act. A secondary feature (ai2) cannot
       // receive a bare acknowledgment, even if the classifier selected its ID.
       const primary = previousClaims.filter(c => c.id === `${c.turn}:ai1`);
@@ -220,6 +231,28 @@ export type LocalPriorAct = {
   publishedFallback?: boolean;
   followUp?: Omit<LocalPriorAct, "turn" | "followUp" | "publishedFallback"> | null;
 };
+
+/** Bind one targetless question to the executed figure only when the already
+ * published description supports that single figure. Pending extraction stays raw. */
+export function bindPublishedReferenceQuestion(pending: AiPublicPending | null | undefined,
+  prior: Pick<LocalPriorAct, "turn" | "action" | "targetSlot" | "publishedFallback"> | undefined,
+  source: (PublicTurn & { nonReferential?: boolean }) | undefined, turn: number): Map<string, string> {
+  const bound = new Map<string, string>();
+  if (!pending || !prior || prior.publishedFallback || !prior.targetSlot ||
+      (prior.action !== "confirm" && prior.action !== "repair") ||
+      source?.speaker !== "ai" || source.nonReferential || source.turn !== pending.aiSeq || source.turn !== prior.turn ||
+      (pending.status !== "ready" && pending.status !== "partial")) return bound;
+  const cited = pending.candidates.filter(c => c.sourceTurn === source.turn && source.text.includes(c.quote));
+  const questions = cited.filter(c => c.act === "ask");
+  const descriptions = cited.filter(c => ["assert", "agree", "construe"].includes(c.act) &&
+    ["referent", "part", "contour", "construal"].includes(c.aspect) && c.targets.length > 0);
+  const question = questions[0];
+  const figure = prior.targetSlot;
+  if (questions.length === 1 && question.aspect === "question" && question.targets.length === 0 &&
+      descriptions.some(c => c.targets.length === 1 && c.targets[0] === figure) &&
+      descriptions.every(c => c.targets.includes(figure))) bound.set(`${turn}:pub${question.ordinal}`, figure);
+  return bound;
+}
 
 /** Recover literal names from a committed act whose AI turn is public.
  * Private plan features are disabled by default. legacy_private_plan exists only

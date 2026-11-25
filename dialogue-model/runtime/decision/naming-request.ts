@@ -1,5 +1,6 @@
 import { nameBindsFigure, meaningfulEstimate } from "./referent-binding.ts";
 import type { ReferentEstimateValue } from "./referent-binding.ts";
+import { directsToFigure } from "../local-grounding/verify.ts";
 import type { LocalClaimView, PublicTurn } from "../local-grounding/contract.ts";
 // holistic_v3 turn kinds from the turn's verified claims and the ledger before the turn. Pure and import-free: the run, the state validation, the participant restore
 // and S4 recompute the markers `namingRequest` and `namingReconfirm` with these functions.
@@ -18,9 +19,9 @@ export function turnNameProposals(claims: readonly NamingClaimLike[], turn: numb
 }
 export const hasNameProposal = (claims: readonly NamingClaimLike[], turn: number): boolean => turnNameProposals(claims, turn).length > 0;
 
-export type AgreeNameScopeVersion = "scoped_v1" | "scoped_v2" | "scoped_v3";
-export function usesPublicNamingTarget(scope: unknown): scope is "scoped_v2" | "scoped_v3" {
-  return scope === "scoped_v2" || scope === "scoped_v3";
+export type AgreeNameScopeVersion = "scoped_v1" | "scoped_v2" | "scoped_v3" | "scoped_v4";
+export function usesPublicNamingTarget(scope: unknown): scope is "scoped_v2" | "scoped_v3" | "scoped_v4" {
+  return scope === "scoped_v2" || scope === "scoped_v3" || scope === "scoped_v4";
 }
 
 export type NamingJudgmentLike = {
@@ -44,7 +45,8 @@ export function publiclyCheckedNamingTarget(claims: readonly LocalClaimView[], p
   const live = claims.filter(c => {
     const event = publicByTurn.get(c.sourceTurn);
     return c.sourceTurn > boundary && c.sourceTurn <= turn &&
-      (isFigureEvidence(c) || c.speaker === "ai" && c.act === "ask" && c.aspect === "question") &&
+      (isFigureEvidence(c) || c.aspect === "question" &&
+        (c.speaker === "ai" && c.act === "ask" || scope === "scoped_v4" && c.speaker === "human" && c.act === "agree")) &&
       event?.speaker === c.speaker && !!c.quote && event.text.includes(c.quote);
   });
   const publications = new Map<number, typeof before[number]>();
@@ -64,7 +66,7 @@ export function publiclyCheckedNamingTarget(claims: readonly LocalClaimView[], p
       ai.set(c.id, { claim: c, singleton: target?.kind === "single" });
       // Public descriptions corroborate the executed check even when its
       // question has no extracted target or was missed by extraction entirely.
-      if (scope === "scoped_v3" && c.act !== "ask" && ids.length <= 2 &&
+      if ((scope === "scoped_v3" || scope === "scoped_v4") && c.act !== "ask" && ids.length <= 2 &&
           (published?.judgment?.action === "confirm" || published?.judgment?.action === "repair")) {
         describedChecks.add(c.sourceTurn);
       }
@@ -80,7 +82,8 @@ export function publiclyCheckedNamingTarget(claims: readonly LocalClaimView[], p
     const antecedent = reply.respondsTo === null ? undefined : ai.get(reply.respondsTo);
     if (reply.act === "agree" && antecedent && (antecedent.singleton || describedChecks.has(antecedent.claim.sourceTurn)) &&
         antecedent.claim.sourceTurn < reply.sourceTurn && antecedent.claim.aspect === reply.aspect &&
-        antecedent.claim.targets.length === 1 && antecedent.claim.targets[0] === reply.targets[0]) {
+        antecedent.claim.targets.length === 1 && antecedent.claim.targets[0] === reply.targets[0] &&
+        (reply.aspect !== "question" || antecedent.claim.act === "ask" && antecedent.singleton && describedChecks.has(antecedent.claim.sourceTurn) && directsToFigure(reply.quote))) {
       answers.push(reply); continue;
     }
     if (reply.act !== "assert" && reply.act !== "construe") continue;

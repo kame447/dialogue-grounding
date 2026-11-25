@@ -109,6 +109,7 @@ export async function prepareLocalGroundingTurn(options: LocalGroundingOptions, 
   graph: Graph; update: Update; publicTurns: readonly PublicTurn[]; signal?: AbortSignal;
   ownImage: LocalOwnImage; ownAnchors: readonly LocalOwnAnchor[];
   captureResearch?: boolean;
+  referenceQuestionBindings?: ReadonlyMap<string, string>;
   priorAct?: Parameters<typeof recordAiClaims>[0]["priorAct"];
 }): Promise<{ update: Update; trace: LocalGroundingTrace; research?: LocalGroundingResearchData }> {
   const started = performance.now();
@@ -259,7 +260,7 @@ export async function prepareLocalGroundingTurn(options: LocalGroundingOptions, 
       });
     }
     phase = "verification_failed";
-    const verified = verifyLocalUpdate({ graph, turn: input.update.turn, publicTurns, segments, verdicts, keepUnboundApproval: options.keepUnboundApproval === true, approvalFromNamedClaim: options.approvalFromNamedClaim === true });
+    const verified = verifyLocalUpdate({ graph, turn: input.update.turn, publicTurns, segments, verdicts, keepUnboundApproval: options.keepUnboundApproval === true, approvalFromNamedClaim: options.approvalFromNamedClaim === true, referenceQuestionBindings: input.referenceQuestionBindings });
     if (research && verified.diagnostics?.length) research.verification.diagnostics = verified.diagnostics
       .flatMap((diagnostic, index): LocalVerificationDiagnostic[] => {
         const segmentId = segmentCode(diagnostic.segmentId, index);

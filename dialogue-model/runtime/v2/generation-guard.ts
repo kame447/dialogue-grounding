@@ -22,6 +22,7 @@ export function isGenerationV7(version: unknown): version is "jev_generation_ret
   return version === "jev_generation_retry_v7";
 }
 export function validAgreeNameScope(scope: unknown, generation: unknown): boolean {
+  if (isGenerationV7(generation)) return scope === "scoped_v4";
   if (isGenerationV6(generation)) return scope === "scoped_v3";
   return scope === undefined || scope === "scoped_v1" || scope === "scoped_v2" && isGenerationV5(generation);
 }

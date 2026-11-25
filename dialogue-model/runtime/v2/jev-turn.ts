@@ -26,7 +26,7 @@ import { validateJevDecision, validateHumanReferentEstimate, validateRepairProsp
 import type { JevDecisionFailureEvidence } from "../decision/jev-decision.ts";
 import { prepareLocalGroundingTurn, validateLocalGroundingOptions, findLocalPublicationViolations } from "./local-grounding-turn.ts";
 import type { LocalGroundingResearchRecord, LocalGroundingTrace } from "./local-grounding-turn.ts";
-import { findNamingActHints, hasOrientationWords, draftViolationCodes, deriveGenerationOutcome, orientationSafeFallback, rewriteReasons, isGenerationV5, isGenerationV6, hasVersionedViewpoint, defaultGenerationRetryVersion, validGenerationRetryVersion, validAgreeNameScope, allowsOrientationFallback } from "./generation-guard.ts";
+import { findNamingActHints, hasOrientationWords, draftViolationCodes, deriveGenerationOutcome, orientationSafeFallback, rewriteReasons, isGenerationV5, isGenerationV6, isGenerationV7, hasVersionedViewpoint, defaultGenerationRetryVersion, validGenerationRetryVersion, validAgreeNameScope, allowsOrientationFallback } from "./generation-guard.ts";
 import { createMemoAiExtractor, MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS, AiPublicError, aiHash, emptyAiEvidence } from "../local-grounding/extract-ai.ts";
 import { createJevAiFunctionClassifier, createJevAiSupportChecker, AI_FUNCTION_INSTRUCTIONS, AI_SUPPORT_INSTRUCTIONS,
   AI_RESPONSE_SUPPORT_INSTRUCTIONS, AI_FUNCTION_CRITERIA, AI_SUPPORT_CHOICES, AI_ACT_DESCRIPTIONS } from "../local-grounding/jev-ai-public.ts";
@@ -722,7 +722,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
     return result;
   }
   function initialPrivateState(): JevPrivateState {
-    const scope = isGenerationV6(generationRetryVersion) ? "scoped_v3" : isGenerationV5(generationRetryVersion) ? "scoped_v2" : "scoped_v1";
+    const scope = isGenerationV7(generationRetryVersion) ? "scoped_v4" : isGenerationV6(generationRetryVersion) ? "scoped_v3" : isGenerationV5(generationRetryVersion) ? "scoped_v2" : "scoped_v1";
     return { ...(integrated?{schemaVersion:'jev_private_state_v2' as const,interventionPolicy:{version:'bypass_acceptance_v1' as const,tableSha256:BYPASS_ACCEPTANCE_V1_TABLE_SHA256}}:{}), ledger: createOwnLedger(slots), judgments: [], graph: createReferenceGraph({ slots }) as Graph, observationMemo: null, repairHistory: [],
       ...(questionLayout === "two_stage_v3" ? { agreeNameScopeVersion: scope } : {}),
       ...(aiEnabled ? { aiPublic: initialAiPublicState() } : {}) };
@@ -781,9 +781,12 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       const priorAct = previousAi ? { ...previous.judgment, turn: previousAi.turn, publishedFallback: previous.generationGuard.fallback,
         ...(previousExecution!.target.kind === "multiple" ? { targetCandidates: [...previousExecution!.target.figureIds] } : {}) } : undefined;
       let initialUpdate = stageMemory(state.graph, latest.seq, null, publicTurns);
+      let referenceQuestionBindings: ReadonlyMap<string, string> | undefined;
       if (aiEnabled) {
         errorCode = "invalid_state";
-        const pre = await prependAiPublic({ graph: state.graph, update: initialUpdate, state: state.aiPublic!, events, publicTurns, priorAct });
+        const pre = await prependAiPublic({ graph: state.graph, update: initialUpdate, state: state.aiPublic!, events, publicTurns, priorAct,
+          bindReferenceQuestions: isGenerationV7(generationRetryVersion) });
+        referenceQuestionBindings = pre.referenceQuestionBindings;
         state.aiPublic = pre.state; initialUpdate = pre.update;
         record.aiPublic = { phase: "ai_public_claims", application: pre.application, pending: null, observationMemo: null,
           stages: { ai_extraction: emptyAiEvidence(), ai_function: emptyAiEvidence(), ai_support: emptyAiEvidence() },
@@ -791,7 +794,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
             support: { version: 1, sha256: await aiHash(aiPromptBodies[2]) } } };
       }
       const prepared = await prepareLocalGroundingTurn(local, { graph: state.graph,
-        update: initialUpdate, publicTurns, signal, ownImage, ownAnchors, captureResearch: true,
+        update: initialUpdate, publicTurns, signal, ownImage, ownAnchors, captureResearch: true, referenceQuestionBindings,
         ...(!aiEnabled && previousAi ? { priorAct: { ...previous.judgment, turn: previousAi.turn, publishedFallback: previous.generationGuard.fallback,
           ...(previousExecution!.target.kind === "multiple" ? { targetCandidates: [...previousExecution!.target.figureIds] } : {}) } } : {}) });
       record.local = { ...prepared.research!, turnIndex: latest.seq, lastEventId, attemptNumber, status: "error", localStatus: prepared.trace.status };
