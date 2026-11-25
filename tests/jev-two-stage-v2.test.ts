@@ -365,10 +365,10 @@ test("B1b: a usage-only decision failure keeps a null cost and checks; without t
     const c = client(http.fetchImpl, layout, { usagePolicy: PARTICIPANT_USAGE_ONLY }), seen: unknown[] = [];
     await assert.rejects(c.decide(rich(), { onFailureEvidence: e => seen.push(e) }), code("inconsistent_decision"));
     assert.equal(seen.length, 1);
-    const projected = projectDecisionFailureEvidence(seen[0], layout, PARTICIPANT_USAGE_ONLY)!;
+    const projected = projectDecisionFailureEvidence(seen[0], layout, { usagePolicy: PARTICIPANT_USAGE_ONLY })!;
     assert.ok(projected, "usage-only evidence is projected");
     assert.equal(projected.costUsd, null); assert.equal(projected.stages[0].costUsd, null); assert.ok(projected.stages[0].model !== null);
-    assert.deepEqual(checkDecisionFailureEvidence(structuredClone(projected), PARTICIPANT_USAGE_ONLY), projected);
+    assert.deepEqual(checkDecisionFailureEvidence(structuredClone(projected), { usagePolicy: PARTICIPANT_USAGE_ONLY }), projected);
     // Control: no capability, no null cost on a parsed stage.
     assert.equal(projectDecisionFailureEvidence(seen[0], layout), null);
     assert.equal(checkDecisionFailureEvidence(structuredClone(projected)), null);
