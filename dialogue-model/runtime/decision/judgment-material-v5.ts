@@ -6,12 +6,16 @@ import type { JevAction, JevTarget } from "./contract.ts";
 
 export const JUDGMENT_VIEW_V5 = "judgment_v5";
 /** An action executed on figures in an earlier turn (the ledger's typed history). */
-export type LedgerAction = { turn: number; action: JevAction; target: JevTarget; name: string | null; feature: string | null };
+export type LedgerAction = { turn: number; action: JevAction; target: JevTarget; name: string | null; feature: string | null;
+  /** The partner claims that answered this action's check, read from the whole (ungated) repair history: they stay defined even after the issue closed. */
+  answers?: readonly { id: string; act: string; proposition: string; targets: readonly string[] }[] };
 export type MaterialV5Context = { actions: readonly LedgerAction[]; nameLedger?: Record<string, { status: string; name: string | null }>;
   /** Partner claims that answered each repair turn, taken before any repair history was trimmed for the budget. */
   answers?: ReadonlyMap<number, readonly string[]>;
   /** The stimulus rotation, written into the state so a verifier reads the same condition the instructions used. */
-  rotationMode?: string };
+  rotationMode?: string;
+  /** The answering claims the ledger points at, by id: one that is not a row of `claims` is written as an `answerClaims` row, so every id is defined in the same request. */
+  answerRows?: ReadonlyMap<string, { sourceTurn: number | null; act: string; proposition: string; targets: readonly string[] }> };
 /** Appended to every question's instructions of a holistic_v5 judgment request, and nowhere else. */
 export const JUDGMENT_V5_LEGEND = "stateの記法: publicTurnsは全公開発話を番号順に一度ずつ並べた行（U番号 h=人間 / ai: 発話）です。claimsの各行は" +
   " [claim id, 出典の発話番号, act, aspect, 対象, 名前, 返答先のclaim id, 命題, issueId] で、発言そのものは出典の発話番号の行を参照してください。" +
@@ -22,7 +26,7 @@ const unalias = (slots: readonly string[], f: string) => slots[Number(String(f).
 const line = (t: { turn: number; speaker: string; text: string }) => `U${t.turn} ${t.speaker === "human" ? "h" : "ai"}: ${t.text}`;
 const LINE = /^U(\d+) (h|ai): ([\s\S]*)$/u;
 
-export function encodeMaterialV5(material: any, { actions, nameLedger, answers: allAnswers, rotationMode }: MaterialV5Context): Record<string, unknown> {
+export function encodeMaterialV5(material: any, { actions, nameLedger, answers: allAnswers, rotationMode, answerRows }: MaterialV5Context): Record<string, unknown> {
   const slots: string[] = material.ownSlots;
   const al = (ids: readonly string[]) => ids.map(id => alias(slots, id));
   const answers = allAnswers ?? new Map<number, string[]>(material.repairHistory.map((r: any) => [r.turn, r.partnerClaims.map((c: any) => c.id)]));
@@ -44,6 +48,7 @@ export function encodeMaterialV5(material: any, { actions, nameLedger, answers: 
     repairHistory: material.repairHistory.map((r: any) => [r.turn, r.issueId, r.action, r.question,
       r.partnerClaims.map((c: any) => [c.id, c.act, al(c.targets), c.proposition]), al(r.candidatesBefore), al(r.candidatesAfter),
       r.addedClaimIds, r.removedClaimIds, r.progress, ...(r.facts ? [r.facts] : [])]),
+    ...answerClaimRows(figures, material, slots, answerRows),
     previousAction: material.previousAction, publicNames: material.publicNames, figures,
     reobservationAllowed: material.reobservationAllowed,
     ...(material.selected ? { selected: material.selected } : {}),
@@ -53,6 +58,14 @@ export function encodeMaterialV5(material: any, { actions, nameLedger, answers: 
   };
 }
 
+// An answer id the ledger points at but the request's claims do not carry gets its own row [id, source turn, act, targets, proposition]; nothing is written when every id is a claim row.
+function answerClaimRows(figures: Record<string, { actions: unknown[][] }>, material: any, slots: readonly string[],
+  rows: MaterialV5Context["answerRows"]): Record<string, unknown> {
+  if (!rows) return {};
+  const carried = new Set<string>(material.priorClaims.map((c: any) => c.id));
+  const ids = [...new Set(Object.values(figures).flatMap(f => f.actions.flatMap(a => Array.isArray(a[3]) ? (a[3] as string[]) : [])))].filter(id => !carried.has(id) && rows.has(id));
+  return ids.length ? { answerClaims: ids.map(id => { const r = rows.get(id)!; return [id, r.sourceTurn, r.act, r.targets.map(t => alias(slots, t)), r.proposition]; }) } : {};
+}
 // The local issue summary repeats its claims' propositions; the written form keeps each issue's identity and state and points at the claims by id (only ones that are in `claims`).
 function compactIssues(summary: string, slots: readonly string[], kept: ReadonlySet<string>): Record<string, unknown> {
   let parsed: any;

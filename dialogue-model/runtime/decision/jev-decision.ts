@@ -271,7 +271,15 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
     if (!Array.isArray(input.judgmentLedger) || input.judgmentLedger.length > JEV_DECISION_INPUT_LIMITS.repairHistory) fail("invalid_input");
     ledgerActions = input.judgmentLedger.filter(a => a?.turn < input.turn).map(a => {
       if (!positive(a.turn) || !includes(JEV_ACTIONS, a.action) || !(a.name === null || text(a.name, 80)) || !(a.feature === null || text(a.feature, 400))) fail("invalid_input");
-      return { turn: a.turn, action: a.action, target: cleanTarget(a.target, slots), name: a.name, feature: a.feature };
+      let answers: LedgerAction["answers"];
+      if (a.answers !== undefined) {
+        if (!Array.isArray(a.answers) || a.answers.length > 64) fail("invalid_input");
+        answers = a.answers.map((r: any) => {
+          if (!ref(r?.id) || !includes(LOCAL_ACTS, r.act) || !text(r.proposition, 160) || !strings(r.targets, 6, 160) || !r.targets.every((id: string) => slots.includes(id))) fail("invalid_input");
+          return { id: r.id, act: r.act, proposition: r.proposition, targets: [...r.targets] };
+        });
+      }
+      return { turn: a.turn, action: a.action, target: cleanTarget(a.target, slots), name: a.name, feature: a.feature, ...(answers ? { answers } : {}) };
     });
   }
   const ownIds = (v: unknown): v is string[] => strings(v, 6, 160) && unique(v).length === v.length && v.every(s => slots.includes(s));
@@ -382,8 +390,14 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
   const v5 = ledgerActions !== undefined;
   // An answer that was withdrawn or corrected no longer answers: the partner's later withdraw claim points at it.
   const withdrawn = new Set(priorClaims.filter(c => c.act === "withdraw" && c.respondsTo !== null).map(c => c.respondsTo!));
-  const answers = new Map<number, string[]>(repairHistory.map(r => [r.turn, r.partnerClaims.map(c => c.id).filter(id => !withdrawn.has(id))]));
-  const render = (m: unknown) => JSON.stringify(v5 ? encodeMaterialV5(m, { actions: ledgerActions!, answers, rotationMode: input.rotationMode ?? "relative_pm90", ...(nameLedger ? { nameLedger } : {}) }) : m);
+  // The answers of an earlier check come from the whole repair history the run kept (a closed issue is left out of `repairHistory`), else from `repairHistory`.
+  const answerSource = new Map<number, readonly { id: string; act: string; proposition: string; targets: readonly string[] }[]>(repairHistory.map(r => [r.turn, r.partnerClaims]));
+  for (const a of ledgerActions ?? []) if (a.answers?.length) answerSource.set(a.turn, a.answers);
+  const claimSource = new Map(priorClaims.map(c => [c.id, c.sourceTurn]));
+  const answers = new Map<number, string[]>([...answerSource].map(([turn, list]) => [turn, list.map(c => c.id).filter(id => !withdrawn.has(id))]));
+  const answerRows = new Map<string, { sourceTurn: number | null; act: string; proposition: string; targets: readonly string[] }>(
+    [...answerSource.values()].flat().filter(c => !withdrawn.has(c.id)).map(c => [c.id, { sourceTurn: claimSource.get(c.id) ?? null, act: c.act, proposition: c.proposition, targets: c.targets }]));
+  const render = (m: unknown) => JSON.stringify(v5 ? encodeMaterialV5(m, { actions: ledgerActions!, answers, answerRows, rotationMode: input.rotationMode ?? "relative_pm90", ...(nameLedger ? { nameLedger } : {}) }) : m);
   const over = () => {
     state = render(material);
     return (v3 && selection ? render({ ...material, selected: undefined }).length : state.length) + reserve > 20000;

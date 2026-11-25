@@ -94,3 +94,37 @@ test('the rotation premise is part of the v5 instructions only, and only for rel
   for (const t of texts(sent({}))) assert.doesNotMatch(t, /relative_pm90/u);
   assert.throws(() => sent({ judgmentLedger: ledger, rotationMode: 'relative_x' }), /invalid_input/u);
 });
+
+// audit 13, item 2: an answer id the ledger points at is defined in the same request, however the history was shortened or the issue was closed.
+const answered = (answers: any[]) => [{ turn: 3, action: 'confirm', target: { kind: 'single', figureId: slots[1] }, name: null, feature, answers }];
+const reply = { id: 'c5', act: 'assert', proposition: '命題-c5', targets: [slots[1]] };
+const definedIds = (s: any) => new Set<string>([...s.claims.map((c: any[]) => c[0]), ...s.repairHistory.flatMap((r: any[]) => r[4].map((p: any[]) => p[0])), ...(s.answerClaims ?? []).map((r: any[]) => r[0])]);
+const sentWith = (ledgerActions: any[], extra: Record<string, unknown> = {}) => JSON.parse(buildJevDecisionPayload({ ...input(extra), nameLedger, judgmentLedger: ledgerActions }, { questionLayout: 'two_stage_v3', dialoguePolicy: 'holistic_v5' }).state);
+
+test('an answer to a check stays defined and excludes its feature after the issue closed (the gated repair history no longer lists the check)', () => {
+  const s = sentWith(answered([reply]), { repairHistory: [], priorClaims: [claim('c1', 1, 'human', NAME, { aspect: 'name', act: 'name_propose', name: NAME })] });
+  assert.deepEqual(s.figures.f1.actions, [['confirm', 3, feature, ['c5']]]);
+  assert.deepEqual(s.answerClaims, [['c5', null, 'assert', ['f1'], '命題-c5']]);
+  assert.ok([...Object.values<any>(s.figures)].flatMap((f: any) => f.actions).flatMap((a: any) => a[3] ?? []).every((id: string) => definedIds(s).has(id)));
+  const values = Object.values<string>(buildJevDecisionDetailPayload({ ...input({ repairHistory: [], previousAction: afterAccept }), nameLedger, judgmentLedger: answered([reply]) },
+    { action: 'confirm', target: { kind: 'single', figureId: slots[1] } }, { questionLayout: 'two_stage_v3' })!.questions.feature.criteria).map(v => JSON.parse(v).value);
+  assert.ok(!values.includes(feature));
+});
+
+test('under the character budget the answering claim may leave the claims but its id never dangles; nothing extra is written when every id is a claim row', () => {
+  const plain = sentWith(answered([reply]));
+  assert.equal(plain.answerClaims, undefined, 'c5 is a claims row, so no extra row');
+  assert.equal(JSON.stringify(plain), JSON.stringify(sentWith(answered([]))), 'the same request whether the answers come with the ledger or from the repair history');
+  const filler = Array.from({ length: 150 }, (_, k) => claim('f' + k, 1 + (k % 6), lines[k % 6].speaker, lines[k % 6].text.slice(0, 6), { proposition: '細部-' + k + 'あ'.repeat(120) }));
+  const squeezed = sentWith(answered([reply]), { priorClaims: filler, repairHistory: [], issueSummary: '論点'.repeat(1500) });
+  assert.ok(squeezed.inputBudget.omitted.claims > 0);
+  assert.ok(definedIds(squeezed).has('c5'));
+  assert.equal(squeezed.publicTurns.length, lines.length);
+});
+
+test('a withdrawn answer is not defined and does not exclude its feature', () => {
+  const withdraw = [claim('c5', 5, 'human', 'はい、二本です。', { targets: [slots[1]], respondsTo: 'c4' }), claim('w7', 7, 'human', 'もう一度確かめたい。', { targets: [slots[1]], act: 'withdraw', respondsTo: 'c5' })];
+  const s = sentWith(answered([reply]), { priorClaims: withdraw, repairHistory: [] });
+  assert.deepEqual(s.figures.f1.actions, [['confirm', 3, feature]]);
+  assert.equal(s.answerClaims, undefined);
+});

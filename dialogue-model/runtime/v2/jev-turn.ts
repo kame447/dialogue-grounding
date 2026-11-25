@@ -816,7 +816,8 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
             .map(e => ({ turn: e.seq, speaker: e.speaker, text: e.text }));
           baseInput.rotationMode = options.rotationMode ?? "relative_pm90";
           baseInput.judgmentLedger = state.judgments.map(j => { const d = j.jevTurn.executed ?? j.jevTurn.decision;
-            return { turn: j.turnIndex, action: d.action, target: d.target, name: d.name, feature: d.feature }; });
+            const answers = repairHistory.find(r => r.turn === j.turnIndex)?.partnerClaims;
+            return { turn: j.turnIndex, action: d.action, target: d.target, name: d.name, feature: d.feature, ...(answers?.length ? { answers: answers.map(c => ({ id: c.id, act: c.act, proposition: c.proposition, targets: [...c.targets] })) } : {}) }; });
         }
         // holistic_v1: the memo's readings are explanations, never AI-proposed names (the candidates are then only names that were said in public).
         if (holisticV2) {

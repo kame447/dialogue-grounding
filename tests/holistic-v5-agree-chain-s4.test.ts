@@ -49,3 +49,24 @@ for (const label of ['bypass-enabled', 'repair-first'] as const) {
     assert.deepEqual(verifyRecords(records).checks.filter(c => /^intervention\.trial\.0\.attempt\.0\./u.test(c.id)).map(c => c.status), ['pass', 'pass', 'pass', 'pass']);
   });
 }
+
+// audit 13, item 2: the agreement closes the repair issue, yet the answered feature stays answered.
+for (const label of ['bypass-enabled', 'repair-first'] as const) {
+  test(`holistic_v5 ${label}: an answered feature stays excluded after the naming agreement closed its issue, S4 and the dynamic replay verify it`, async () => {
+    const records = await buildRecords({ label, dialoguePolicy: 'holistic_v5', technicalTrial: { version: 'adaptive_repair_v3' }, turns: [
+      { human: 'この図形の特徴を教えてください。', plan: { action: 'confirm', target: 'figure_0', referent: 'figure_0', speech: '特徴を一つ確かめさせてください。' } },
+      { human: 'はい、その特徴があります。', plan: { action: 'accept', target: 'figure_0', referent: 'figure_0', speech: '特徴が分かりました。', act: 'assert',
+        extraction: JSON.stringify([{ segmentId: 's1', quote: 'はい、その特徴があります。', proposition: 'その特徴がある', name: null, targets: [slot], aspect: 'part', linkedIssueId: null, respondsToTurn: 2 }]) } },
+      { human: proposal, plan: { action: 'agree', target: 'figure_0', referent: 'figure_0', name, act: 'name_propose', speech: 'では「小舟」と呼びましょう。',
+        extraction: JSON.stringify([{ segmentId: 's1', quote: proposal, proposition: name, name, targets: [slot], aspect: 'name', linkedIssueId: null, respondsToTurn: null }]) } },
+      { human: '少し休憩します。', plan: { action: 'accept', target: 'figure_0', referent: 'figure_0', speech: 'はい、どうぞ。' } },
+      { human: 'では、さらに特徴を一つ教えてください。', plan: { action: 'confirm', target: 'figure_0', referent: 'figure_0', speech: 'もう一つ確かめさせてください。' } },
+    ] });
+    const trial = records.trials[0], j = trial.lastCommittedState.judgments;
+    const features = j.filter((x: any) => x.jevTurn.executed.action === 'confirm').map((x: any) => x.jevTurn.executed.feature);
+    assert.equal(features.length, 2);
+    assert.notEqual(features[0], features[1], 'the answered feature is not asked again after the agreement');
+    assert.equal(trial.replay[0].result.status, 'same_material_intervention_verified');
+    assert.deepEqual(verifyRecords(records).checks.filter(c => /^intervention\.trial\.0\.attempt\.0\./u.test(c.id)).map(c => c.status), ['pass', 'pass', 'pass', 'pass']);
+  });
+}
