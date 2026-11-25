@@ -25,7 +25,7 @@ const JUDGMENT_REJECTION_CODES=['reassignment_requires_repair','duplicate_name_r
 const ORIENTATION_SAFE_FALLBACK:Record<string,string>={accept:'なるほど、そう見えるんですね。',confirm:'その形の特徴について、もう少し詳しく教えてもらえますか？',repair:'すみません、どの形の特徴かもう一度確認させてください。',defer:'この形の話には、あとで戻りたいです。',revisit:'先ほどの形について、もう一度お話しできますか？',move_on:'別の形についても、見立てを聞かせてもらえますか？',close:'ここでお話を終えてもよいですか？'};
 const RETRY_INSTRUCTION='公開発話を書き直してください。選択済みの行動を変更しないでください。';
 const VIEWPOINT_RULE_V5_S4='形の確認・説明には、回転しても変わらない形や部分同士の関係を優先してください。選択済みの特徴は自分側の観察に基づく根拠です。方位が弁別に必要なときは、自分側の図形の見え方だと同じ節で明示し、相手には形の対応を尋ねてください。相手側の位置や向きを自分側と同じだと断定せず、相手の方位には相手が述べた見え方として触れるか、相手の見え方を尋ねてください。';
-const CONFIRM_NAMING_REQUEST_V5_S4='判断で選ばれた対象について、その特徴だけを確かめてください。相手が出した呼び名を採用・再提案せず、その案に触れる場合は相手の提案だと分かる形で引用してください。';
+const CONFIRM_NAMING_REQUEST_V5_S4='判断で選ばれた対象について、その特徴だけを確かめてください。相手が出した呼び名を採用・再提案しないでください。その案に触れる場合は、相手の提案だと分かる引用に留めてください。';
 // Closed, ordered reason text for the original and restated-judgment prompts.
 const RETRY_REASONS:ReadonlyArray<{codes:readonly string[];text:string;legacy?:string}>=[
  {codes:['naming_decision','name_selection','go_with_name','name_settled','name_approval','explicit_agreement'],text:'前の下書きは名称の決定・合意を表していました。決定・合意を表明せず、このactionの範囲で書き直してください。'},

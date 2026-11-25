@@ -53,7 +53,7 @@ for (const label of ['bypass-enabled', 'repair-first'] as const) {
     const gens = side.requests.filter((r: any) => r.phase === 'generation');
     assert.equal(gens.length, 2);
     const act = gens[0].payload.messages[2].content;
-    assert.match(act, /その特徴だけを確かめてください.*採用・再提案せず.*相手の提案だと分かる形で引用/u);
+    assert.match(act, /その特徴だけを確かめてください。.*採用・再提案しないでください。その案に触れる場合は、相手の提案だと分かる引用に留めてください。/u);
     assert.ok(gens[1].payload.messages.at(-1).content.includes(act));
     assert.match(gens[1].payload.messages.at(-1).content, /参照枠を明確/u);
     const classify = side.requests.find((r: any) => r.phase === 'draft_naming');
