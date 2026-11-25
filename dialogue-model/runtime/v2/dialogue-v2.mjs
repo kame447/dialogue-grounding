@@ -17,6 +17,7 @@ import { startGroundingShadow, validateGroundingShadowOptions } from "./groundin
 import { prepareLocalGroundingTurn, validateLocalGroundingOptions, localGroundingMemo, findLocalPublicationViolations } from "./local-grounding-turn.ts";
 import { createJevTurnRuntime } from "./jev-turn.ts";
 import { NAME_ACTS, nameShown, effectiveName, humanNamingRecord } from "../judgment/name-evidence.mjs";
+import { isHolisticPolicy } from "../decision/contract.ts";
 
 // Identical across strategies. Holistic first; analysis only when the judge asks for it.
 export const GENERATOR_INSTRUCTIONS_V2 = [
@@ -241,7 +242,7 @@ export function createDialogueV2(options) {
   if (decisionMode === "jev") {
     const v3Trial = Boolean(options.technicalTrial) && options.questionLayout === "two_stage_v3";
     // holistic-first is selected by the policy the trial was created with (its profile), not by the layout alone; none keeps the older v3 trial text.
-    const holisticV1 = v3Trial && (options.dialoguePolicy === "holistic_v1" || options.dialoguePolicy === "holistic_v2" || options.dialoguePolicy === "holistic_v3" || options.dialoguePolicy === "holistic_v4");
+    const holisticV1 = v3Trial && isHolisticPolicy(options.dialoguePolicy);
     if (!referenceMemory || !localGrounding) throw new Error("Jev decision mode requires local reference memory");
     if (activeDecision || decisionShadowClient || groundingShadow) throw new Error("Jev decision mode cannot combine legacy decision paths");
     return createJevTurnRuntime({ client, ownImage, ownAnchors, observer, jevDecision, localGrounding, ...(integrated?{intervention,decisionTimeoutMs}:{}),

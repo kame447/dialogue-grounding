@@ -5,6 +5,7 @@ import {createHash as nodeSha256} from 'node:crypto';
 import {jevChoiceAnswersValid,jevReportedCost,jevResponseId} from '../../decision/jev-choice-response.ts';
 import {nameBindsFigure} from '../../decision/referent-binding.ts';
 import {hasNameProposal,namingTurnKind,namingIntervalEstimates,inheritedTargetClaimIds,agreeCandidateAllowed,inheritsProposalName} from '../../decision/naming-request.ts';
+import {isHolisticPolicy,isHolisticV2Plus,isHolisticV3Plus,isHolisticV4Plus} from '../../decision/contract.ts';
 import {generationGuardCodes,draftViolationCodes,deriveGenerationOutcome,orientationSafeFallback} from '../../v2/generation-guard.ts';
 import {checkModelIdentity} from '../../model-identity-contract.ts';
 import {resolveModelPolicy} from '../../model-policy.ts';
@@ -175,12 +176,12 @@ const ANY_TARGET=['accept','defer','move_on','close'];
 type ReplayContext={policy:string|null;agreeMatch:{l0:boolean;l2:boolean}|null;facts:boolean;agree:any[]|undefined;known:boolean;v3:boolean;trial:boolean;ledger:Record<string,{status:string;name:string|null}>|undefined;legacyV3:boolean;style:null|'legacy'|'style'|'loop'|'holistic';humanNames?:Set<string>|null;namingRequest?:boolean;namingReconfirm?:boolean;acceptOptional?:boolean;critKind?:'V1'|'V3'|'H3'|null};
 const defaultContext:ReplayContext={policy:null,agreeMatch:null,facts:false,agree:undefined,known:true,v3:false,trial:false,ledger:undefined,legacyV3:false,style:null,humanNames:null,critKind:null};
 const CTX={...defaultContext};
-const H=()=>CTX.policy==='holistic_v1'||CTX.policy==='holistic_v2'||CTX.policy==='holistic_v3'||CTX.policy==='holistic_v4';
-const H2=()=>CTX.policy==='holistic_v2'||CTX.policy==='holistic_v3'||CTX.policy==='holistic_v4';
-const H3=()=>CTX.policy==='holistic_v3'||CTX.policy==='holistic_v4';
-const H4=()=>CTX.policy==='holistic_v4';
+const H=()=>isHolisticPolicy(CTX.policy);
+const H2=()=>isHolisticV2Plus(CTX.policy);
+const H3=()=>isHolisticV3Plus(CTX.policy);
+const H4=()=>isHolisticV4Plus(CTX.policy);
 // Only holistic_v3 carries its own human local-classification criteria; the check below needs the policy of the record being verified.
-const H3_ONLY=()=>CTX.policy==='holistic_v3'||CTX.policy==='holistic_v4';
+const H3_ONLY=()=>isHolisticV3Plus(CTX.policy);
 // Only the verified integrated profile can name two_stage_v2; every other record is read as two_stage_v1.
 const layoutOf=(profile:any)=>profile?.id==='research_trial_profile_v3'&&['two_stage_v2','two_stage_v3'].includes(profile?.questionLayout)?profile.questionLayout as string:'two_stage_v1';
 const probability=(n:any)=>typeof n==='number'&&Number.isFinite(n)&&n>=0&&n<=1;
@@ -201,7 +202,7 @@ function fullProfile(p:any):string|null{
   if(!id?.enumerable||!Object.hasOwn(id,'value')||typeof id.value!=='string'||!profiles.includes(id.value))return'intervention_profile_invalid';
   const v3=id.value==='research_trial_profile_v3',allowed=['id','referenceMemory','decisionMode','humanReferent','localGrounding','initialObservation','questionLayout','utteranceStyle','maxReobservations','modelPolicy','timeouts','lunaRequest','outputLimit','modelContract','interventionPolicy','dialoguePolicy'];
   // dialoguePolicy (holistic_v1) exists only on a two_stage_v3 profile; its absence is the older text.
-  if(v3&&Object.hasOwn(p,'dialoguePolicy')&&(!['holistic_v1','holistic_v2','holistic_v3','holistic_v4'].includes(p.dialoguePolicy)||p.questionLayout!=='two_stage_v3'))return'intervention_profile_invalid';
+  if(v3&&Object.hasOwn(p,'dialoguePolicy')&&(!isHolisticPolicy(p.dialoguePolicy)||p.questionLayout!=='two_stage_v3'))return'intervention_profile_invalid';
   if(v3&&Reflect.ownKeys(p).some(k=>typeof k!=='string'||!allowed.includes(k))||!v3&&Object.hasOwn(p,'interventionPolicy'))return'intervention_profile_invalid';
   resolveModelPolicy(p);if(!v3)return null;
   const d=ds.interventionPolicy;if(!d)return'intervention_contract_missing';
@@ -390,7 +391,7 @@ function s4LocalReverify(tape:any,t:any,policy:string,after:any):'ok'|'mismatch'
  const verdicts=local.classifier.verdicts.map((v:any)=>({segmentId:v.segmentId,act:v.act,respondsToClaimId:v.respondsToClaimId,rawScore:null}));
  let applied:any[]=[],rejected:string[]=[];
  try{
-  const verified:any=verifyLocalUpdate({graph:base,turn,publicTurns,segments,verdicts,keepUnboundApproval:true,approvalFromNamedClaim:policy==='holistic_v4'} as any);
+  const verified:any=verifyLocalUpdate({graph:base,turn,publicTurns,segments,verdicts,keepUnboundApproval:true,approvalFromNamedClaim:isHolisticV4Plus(policy)} as any);
   rejected=verified.rejected.map((r:any)=>String(r.reason));
   const before=tape.state.graph;
   let update:any={expectedRevision:before.revision,turn,operations:[]};
@@ -571,8 +572,8 @@ function agreeSource(tr:any,t:any,key:string,tape:any,legacyV3=false):'invalid'|
     }
     const currentUnbound=c.sourceTurn===t.turnIndex||isHumanProposal(c)&&c.sourceTurn===(perFigure?latestUnboundProposal:latestProposal);
     const baseSlots=targets.length>=1?targets.filter(id=>slotAllowed(id,name)):currentUnbound?slots.filter(id=>slotAllowed(id,name)&&(level<1||aiSharedIds.has(id)&&wasFocused(id))):[];
-    const eligibleSlots=level>=2&&['holistic_v3','holistic_v4'].includes(tr.profile?.dialoguePolicy)?baseSlots.filter(id=>agreeCandidateAllowed(c,id,t.turnIndex,hasNameProposal(openClaims,t.turnIndex),inheritedIds,intervalEstimates)):baseSlots;
-    const antecedent=c.act==='name_accept'||inheritsProposalName(c,publicClaims,tr.profile?.dialoguePolicy==='holistic_v4')?publicClaims.find((p:any)=>p.id===c.respondsTo&&p.name===name):undefined;
+    const eligibleSlots=level>=2&&isHolisticV3Plus(tr.profile?.dialoguePolicy)?baseSlots.filter(id=>agreeCandidateAllowed(c,id,t.turnIndex,hasNameProposal(openClaims,t.turnIndex),inheritedIds,intervalEstimates)):baseSlots;
+    const antecedent=c.act==='name_accept'||inheritsProposalName(c,publicClaims,isHolisticV4Plus(tr.profile?.dialoguePolicy))?publicClaims.find((p:any)=>p.id===c.respondsTo&&p.name===name):undefined;
     const s=win.find((e:any)=>e.seq===c.sourceTurn&&e.text.includes(name))??(antecedent&&win.find((e:any)=>e.seq===antecedent.sourceTurn&&e.text.includes(name)))??(c.act==='name_accept'?win.filter((e:any)=>e.text.includes(name)).sort((a:any,b:any)=>a.seq-b.seq)[0]:undefined);
     if(!s)return[];
     return eligibleSlots.filter(id=>{
@@ -587,7 +588,7 @@ function agreeSource(tr:any,t:any,key:string,tape:any,legacyV3=false):'invalid'|
      if(requiresFocus&&!wasFocused(id))return false;
      if(prevPublicIds.size&&!prevPublicIds.has(id))return false;
      return !openClaims.some((r:any)=>r.speaker==='human'&&r.sourceTurn>c.sourceTurn&&(r.act==='deny'||r.act==='name_reject')&&r.name===name&&(r.respondsTo===c.id||(Array.isArray(r.targets)&&r.targets.includes(id))));
-    }).map(figureId=>({key:JSON.stringify([name,figureId,s.seq]),inherited:inheritsProposalName(c,publicClaims,tr.profile?.dialoguePolicy==='holistic_v4')}));
+    }).map(figureId=>({key:JSON.stringify([name,figureId,s.seq]),inherited:inheritsProposalName(c,publicClaims,isHolisticV4Plus(tr.profile?.dialoguePolicy))}));
    });
    // The same de-duplication as the run's: a name-carrying proposal never repeats a candidate an earlier proposal (or another such proposal) already lists.
    const direct=new Set(tagged.filter((x:any)=>!x.inherited).map((x:any)=>x.key)),seen=new Set<string>();
@@ -621,8 +622,8 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
     typeof instructions==='string'&&instructions.endsWith('\n'+LEGACY_V3_TARGET));
   const src=agreeSource(tr,t,key,tape,legacyV3);if(src==='invalid')return'invalid';
    const trial=trialVersion(t,tape.technicalTrial);if(trial==='invalid')return'invalid';
-   Object.assign(CTX,{critKind:null,facts:Array.isArray(t.repairFacts),agree:src.names,known:src.known,v3:layout==='two_stage_v3',trial:trial!==null,ledger:tape.state?.ledger,legacyV3,style:null,policy:tr.profile?.dialoguePolicy??null,humanNames:['holistic_v2','holistic_v3','holistic_v4'].includes(tr.profile?.dialoguePolicy)?s4HumanProposedNames(tape,t):null,namingRequest:['holistic_v3','holistic_v4'].includes(tr.profile?.dialoguePolicy)&&s4NamingKind(tape,t)==='request',namingReconfirm:['holistic_v3','holistic_v4'].includes(tr.profile?.dialoguePolicy)&&s4NamingKind(tape,t)==='reconfirm',acceptOptional:t.namingRequest===true});
-   if(['holistic_v3','holistic_v4'].includes(tr.profile?.dialoguePolicy)&&layout==='two_stage_v3'){
+   Object.assign(CTX,{critKind:null,facts:Array.isArray(t.repairFacts),agree:src.names,known:src.known,v3:layout==='two_stage_v3',trial:trial!==null,ledger:tape.state?.ledger,legacyV3,style:null,policy:tr.profile?.dialoguePolicy??null,humanNames:isHolisticV2Plus(tr.profile?.dialoguePolicy)?s4HumanProposedNames(tape,t):null,namingRequest:isHolisticV3Plus(tr.profile?.dialoguePolicy)&&s4NamingKind(tape,t)==='request',namingReconfirm:isHolisticV3Plus(tr.profile?.dialoguePolicy)&&s4NamingKind(tape,t)==='reconfirm',acceptOptional:t.namingRequest===true});
+   if(isHolisticV3Plus(tr.profile?.dialoguePolicy)&&layout==='two_stage_v3'){
     const redone=s4LocalReverify(tape,t,tr.profile.dialoguePolicy,(tr.turns??[]).find((u:any)=>u.turn===t.turnIndex)?.state?.graph);
     if(redone==='mismatch')return'invalid';
     if(redone==='unknown')return'missing';

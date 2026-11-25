@@ -1,6 +1,6 @@
 import {applyBypassAcceptance,interventionForStrategy,BypassAcceptanceError,BYPASS_ACCEPTANCE_V1_TABLE_SHA256,isOpenIssueRerankRecord} from '../decision/bypass-acceptance.ts';
 import type {ExecutedDecision,InterventionConfig,InterventionTrace} from '../decision/bypass-acceptance.ts';
-import {JEV_ACTIONS,isHolisticPolicy,isHolisticV2Plus,isHolisticV3Plus} from '../decision/contract.ts';
+import {JEV_ACTIONS,isHolisticPolicy,isHolisticV2Plus,isHolisticV3Plus,isHolisticV4Plus} from '../decision/contract.ts';
 import type {DraftAct} from '../decision/contract.ts';
 import {validateOwnLedger} from '../judgment/schema.mjs';
 // Decision 0002, opt-in only. The queue owns publication; this module returns a
@@ -467,7 +467,7 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
    if(isReconfirm&&!turnNameProposals(turnClaims,j.turnIndex).some((p:any)=>Object.values(s.ledger??{}).some((e:any)=>e?.status==='agreed'&&typeof e.name==='string'&&namingNameKey(e.name)===namingNameKey(p.name))))throw Error();
    const acceptOptional=z.namingRequest===true;
    // holistic_v4: an unadopted name's request never offered accept, so no saved score of it and no executed accept can stand for such a turn.
-   const noAcceptTurn=policy==='holistic_v4'&&questionLayout==='two_stage_v3'&&z.namingRequest===true;
+   const noAcceptTurn=isHolisticV4Plus(policy)&&questionLayout==='two_stage_v3'&&z.namingRequest===true;
    const hasAgreeNames=Object.hasOwn(z,'agreeNames');
    // Historical evidence retains the candidate catalog, not the original request's public turns.
    if(questionLayout==='two_stage_v3'&&!hasAgreeNames||hasAgreeNames&&(!Array.isArray(z.agreeNames)||z.agreeNames.length>JEV_DECISION_INPUT_LIMITS.publicNames||z.agreeNames.some((n:any)=>!stateExact(n,['name','figureId','sourceTurn'])||
@@ -634,7 +634,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   // holistic_v3 (new trials): a typed naming request with no agree candidate leaves accept out of the legal actions.
   const holisticV3 = questionLayout === "two_stage_v3" && isHolisticV3Plus(options.dialoguePolicy);
   // holistic_v4 (new trials): the approval request also answers a public AI claim that carries a name, whatever turn the extraction names; accept is never offered for an unadopted name.
-  const holisticV4 = questionLayout === "two_stage_v3" && options.dialoguePolicy === "holistic_v4";
+  const holisticV4 = questionLayout === "two_stage_v3" && isHolisticV4Plus(options.dialoguePolicy);
   if (questionLayout !== "two_stage_v1" && questionLayout !== "two_stage_v2" && questionLayout !== "two_stage_v3") throw new Error("Invalid Jev question layout");
   if (questionLayout !== "two_stage_v1" && !integrated) throw new Error(questionLayout + " requires the integrated Jev profile");
   const generationRetryVersion = options.generationRetryVersion ??

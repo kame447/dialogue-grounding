@@ -2,6 +2,7 @@ import { BYPASS_ACCEPTANCE_V1_TABLE_SHA256 } from '../decision/bypass-acceptance
 import { MODEL_CONTRACT_V2, MODEL_CONTRACT_V2_TABLE_SHA256 } from '../model-identity-contract.ts';
 import { validateResearchTimeouts } from './research-timeouts.ts';
 import type { ResearchTimeoutsV2 } from './research-timeouts.ts';
+import { isHolisticPolicy } from '../decision/contract.ts';
 import type { JevQuestionLayout, DialoguePolicy } from '../decision/contract.ts';
 // Node-only research harness profile. Historical runtime defaults are untouched.
 import { createHash } from "node:crypto";
@@ -66,5 +67,5 @@ export function researchTrialProfileV3(lunaRequest:LunaRequestSettings,timeouts:
  return frozen({...researchTrialProfileV2(lunaRequest,timeouts),id:'research_trial_profile_v3' as const,
   interventionPolicy:{version:'bypass_acceptance_v1' as const,tableSha256:BYPASS_ACCEPTANCE_V1_TABLE_SHA256},
   ...(questionLayout!=='two_stage_v1'?{questionLayout}:{}),
-  ...(questionLayout==='two_stage_v3'&&dialoguePolicy!==null&&(dialoguePolicy===undefined||dialoguePolicy==='holistic_v1'||dialoguePolicy==='holistic_v2'||dialoguePolicy==='holistic_v3'||dialoguePolicy==='holistic_v4')?{dialoguePolicy:(dialoguePolicy??'holistic_v4') as DialoguePolicy}:{})});
+  ...(questionLayout==='two_stage_v3'&&(dialoguePolicy===undefined||isHolisticPolicy(dialoguePolicy))?{dialoguePolicy:dialoguePolicy??'holistic_v4'}:{})});
 }
