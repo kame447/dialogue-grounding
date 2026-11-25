@@ -1,6 +1,6 @@
 // The models propose interpretations; only this boundary assigns public evidence,
 // graph IDs and issue IDs. No score is used to promote an interpretation.
-import { LOCAL_ASPECTS, LOCAL_ACTS } from "./contract.ts";
+import { AI_BOUND_SOURCE, LOCAL_ASPECTS, LOCAL_ACTS } from "./contract.ts";
 import type { AiPublicPending, LocalSegmentProposal, LocalFunctionVerdict, LocalVerificationResult, LocalClaimView, PublicTurn } from "./contract.ts";
 import { isBareDeictic, literalSpan, quoteAround } from "../judgment/public-evidence.mjs";
 import { SLOTS } from "../stimuli/board.mjs";
@@ -131,7 +131,8 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     // The name is public either way. The extraction's respondsToTurn names the AI turn that was just answered, so for this act it does not have to be the claim's turn.
     const approvalRequest = keepUnboundApproval && !!prior && act === "name_propose" && name === null && aspect === "name" && prior.aspect === "name" &&
       (approvalFromNamedClaim ? ["name_propose", "name_accept"].includes(prior.act) : prior.act === "name_propose" && prior.speaker === "human") && prior.name !== null;
-    const checkedFigure = prior && referenceQuestionBindings?.get(prior.id);
+    // jev_generation_retry_v9: a question whose target the binding supplied keeps that provenance in its claim, so the rule below also holds on later turns.
+    const checkedFigure = prior && (referenceQuestionBindings?.get(prior.id) ?? (prior.source === AI_BOUND_SOURCE ? prior.targets[0] : undefined));
     const boundQuestion = checkedFigure && prior?.act === "ask" && previousClaims.includes(prior) &&
       prior.targets.length === 1 && prior.targets[0] === checkedFigure ? prior : null;
     const pointsToFigure = !!boundQuestion && directsToFigure(quote, directReferenceReplies);
@@ -143,10 +144,13 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     // A same-aspect extraction of a pointing reply must pass the direct check too.
     // A supplied target is used only by a reply that passed the direct check; any other agree is the v7 case (a response to a question that has no target).
     if (directReferenceReplies && boundQuestion && act === "agree" && !agreesWithCheckedFigure &&
-        (boundQuestion.aspect === "question" || pointsToFigure || isSuppliedBinding(referenceQuestionBindings, boundQuestion.id))) {
+        (boundQuestion.aspect === "question" || pointsToFigure || boundQuestion.source === AI_BOUND_SOURCE || isSuppliedBinding(referenceQuestionBindings, boundQuestion.id))) {
       reject("inconsistent_claim_response"); continue;
     }
     if (agreesWithCheckedFigure && boundQuestion) aspect = boundQuestion.aspect;
+    // v9: a supplied target is the question's only for a reply that passed the direct check. Any other reply that adds information
+    // (agree was rejected above; assert and construe here) is judged against the question as extracted, which named no figure.
+    if (prior && prior.source === AI_BOUND_SOURCE && !agreesWithCheckedFigure && ["agree", "assert", "construe"].includes(act)) prior = { ...prior, targets: [] };
     if (directReferenceReplies && prior && name === null && figureReplyAspects.has(aspect) &&
         figureReplyAspects.has(prior.aspect) && prior.targets.length === 1 &&
         (targets.length === 0 || targets.length === 1 && targets[0] === prior.targets[0])) {

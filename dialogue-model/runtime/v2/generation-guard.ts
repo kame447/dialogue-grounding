@@ -358,9 +358,9 @@ const v5TopicViewpoint = new RegExp(
   "(?<own>" + v5OwnView.source + "|" + explicitOwnView.source + "|" + ownTopicView.source + ")|" +
   v5PartnerView.source + "|" + explicitPartnerView.source + "|" + partnerTopicView.source, "gu");
 // jev_generation_retry_v9: wordings that state whose view a direction word belongs to, which the earlier versions did not accept.
-// Own side: "こちらの上の…" (a side's possessive directly before the direction word) and "こちらの画面で" (without は).
+// Own side: "こちらの上の…" (a side's possessive directly before the direction word) and "こちらの画面で" (without は, and not a negation such as でなく).
 // The partner's own words: "そちらでいう…" is a quotation of the partner, not an assertion about the partner's view.
-const v9OwnPossessiveView = "(?:こちら|私|わたし|自分)の(?=" + orientationWords.source + ")|(?:こちら|私|わたし|自分)の(?:画面|図形|側)で(?!は)";
+const v9OwnPossessiveView = "(?:こちら|私|わたし|自分)の(?=" + orientationWords.source + ")|(?:こちら|私|わたし|自分)の(?:画面|図形|側)で(?!は|なく|ない|なかっ|なけれ|じゃな)";
 const v9PartnerQuotedView = "(?:そちら|相手)(?:で|の)いう";
 const v9PartnerQuotedStart = /^(?:そちら|相手)(?:で|の)いう/u;
 const v9TopicViewpoint = new RegExp(
@@ -390,7 +390,7 @@ function v5OrientationLeaks(text: string, expanded: boolean, topic = false, v9 =
         continue;
       }
       if (preceding?.groups?.own && !comparesScreens) continue;
-      if (v9 && preceding && v9PartnerQuotedStart.test(clause.slice(preceding.index))) continue; // v9: "そちらでいう…" quotes the partner's wording
+      if (v9 && preceding && !comparesScreens && v9PartnerQuotedStart.test(clause.slice(preceding.index))) continue; // v9: "そちらでいう…" quotes the partner's wording
       // A later viewpoint starts a new description even when there is no clause punctuation.
       const description = clause.slice(term.index + term[0].length, viewpoints[nextViewpoint]?.index).split(descriptionBreak, 1)[0];
       const qualifier = descriptionQualifier.exec(description);

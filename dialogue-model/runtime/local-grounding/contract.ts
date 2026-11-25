@@ -54,7 +54,9 @@ export const LOCAL_NAME_STATES = Object.freeze(["no_name", "unclear", "not_agree
 export type LocalNameState = typeof LOCAL_NAME_STATES[number];
 
 /** Whose epistemic position a claim records. AI hypotheses are never facts. */
-export const LOCAL_SOURCES = Object.freeze(["own_observation", "partner_statement", "ai_hypothesis"] as const);
+/** `ai_bound_target` (jev_generation_retry_v9): an AI question whose extraction named no figure and whose single target the program bound from the published description. Only a reply that passes the direct pointing check may use that target. */
+export const AI_BOUND_SOURCE = "ai_bound_target" as const;
+export const LOCAL_SOURCES = Object.freeze(["own_observation", "partner_statement", "ai_hypothesis", AI_BOUND_SOURCE] as const);
 export type LocalSource = typeof LOCAL_SOURCES[number];
 
 export type PublicTurn = { turn: number; speaker: "human" | "ai"; text: string };

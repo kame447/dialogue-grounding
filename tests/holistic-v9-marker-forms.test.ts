@@ -26,6 +26,10 @@ const stillRejected: [string, string[]][] = [
   ['そちらの右向きの先端が、この突起に対応しますか？', ['orientation_leak']],
   ['こちらの三角の突起がそちらの左向きの先にあたりそうだね。', ['orientation_leak']],
   ['こちらの画面で上に見える三角の突起が、そちらでは左向きのとがった先にあたりそうなんですね。', ['shared_view_assumption']],
+  // Audit 21n: the partner's own words do not excuse a comparison of the two screens, and a negated "こちらの画面で" states no viewpoint.
+  ['そちらでいう左向きの先は、こちらと同じ向きですね。', ['shared_view_assumption']],
+  ['こちらの画面でなく、上端に穴があります。', ['orientation_leak']],
+  ['こちらの画面でないところの上端に穴があります。', ['orientation_leak']],
 ];
 // Clean in both versions.
 const cleanInBoth = ['そちらでいう下向きの先は、この突起に対応していますか？', '二つの部分がつながった形ですか？', 'こちらの画面では上部に丸い穴があります。'];
