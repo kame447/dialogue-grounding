@@ -602,6 +602,19 @@ test('R3 pruning: once the claim and its withdrawal are gone from the graph, the
 
 import { researchTrialProfileV3 } from '../dialogue-model/runtime/v2/research-profile.ts';
 import { LOCAL_FUNCTION_CRITERIA_V3, LOCAL_FUNCTION_CRITERIA_HOLISTIC_V3 } from '../dialogue-model/runtime/local-grounding/classify.ts';
+// A record stored under an older policy never had the markers of a holistic_v5 trial (the generation version, the scoped_v2 naming scope); the clone drops them as a real older record would not carry them.
+function asOlderRecord(saved: any, policy: string) {
+  const older = structuredClone(saved);
+  older.options.dialoguePolicy = policy;
+  const strip = (value: any) => {
+    if (!value || typeof value !== 'object') return;
+    delete value.generationRetryVersion; delete value.agreeNameScopeVersion;
+    for (const child of Object.values(value)) strip(child);
+  };
+  strip(older);
+  return older;
+}
+
 test('05t-6: a restored record keeps the classification criteria of its stored version; a new record uses the current one', async t => {
   const proposal = 'これ、かかしとかどう？';
   const segment = { segmentId: 'name', quote: 'かかし', targets: [], aspect: 'name', proposition: 'かかしと呼ぶ提案', name: 'かかし', linkedIssueId: null, respondsToTurn: null };
@@ -612,15 +625,14 @@ test('05t-6: a restored record keeps the classification criteria of its stored v
   const fresh = await makeTask(prepared, { strategy: 'bypass-enabled' });
   fresh.task.message('どんな図形がありますか？', 'turn-1'); await fresh.task.whenIdle();
   const saved = fresh.record();
-  assert.equal(saved.options.dialoguePolicy, 'holistic_v4');
+  assert.equal(saved.options.dialoguePolicy, 'holistic_v5'); // the default of a new trial (998ebf6)
   fresh.task.message(proposal, 'turn-2'); await fresh.task.whenIdle();
   const created = criteriaOf(first);
   assert.ok(created.length > 0 && created.every((c: any) => JSON.stringify(c) === JSON.stringify({ ...LOCAL_FUNCTION_CRITERIA_HOLISTIC_V3 })), 'a new record sends the holistic_v3 criteria');
   // The same record stored under holistic_v2 (as cqab2 was): its next classification request carries the criteria of that version.
   const second = await fixture(t, config, { answers: { action: 'accept', target: 'none' }, segmentText: proposal, segments: [segment] });
   const preparedAgain = await prepareParticipantJev(second.options);
-  const older = structuredClone(saved);
-  older.options.dialoguePolicy = 'holistic_v2';
+  const older = asOlderRecord(saved, 'holistic_v2');
   older.options.profileSha256 = researchHash(researchTrialProfileV3({ timeoutMs: null, maxCompletionTokens: 1000 }, timeouts, 'two_stage_v3', 'holistic_v2'));
   const restored = await makeTask(preparedAgain, { strategy: 'bypass-enabled', restore: older });
   restored.task.message(proposal, 'turn-r'); await restored.task.whenIdle();
@@ -628,7 +640,7 @@ test('05t-6: a restored record keeps the classification criteria of its stored v
   assert.ok(kept.length > 0 && kept.every((c: any) => JSON.stringify(c) === JSON.stringify({ ...LOCAL_FUNCTION_CRITERIA_V3 })), 'a restored holistic_v2 record keeps its criteria');
 });
 
-test('05y-1: a record stored as holistic_v3 (cqab3) is restored as holistic_v3 with the holistic_v3 classification text, and a new one is created as holistic_v4', async t => {
+test('05y-1: a record stored as holistic_v3 (cqab3) is restored as holistic_v3 with the holistic_v3 classification text, and a new one is created as holistic_v5', async t => {
   const proposal = 'これ、かかしとかどう？';
   const segment = { segmentId: 'name', quote: 'かかし', targets: [], aspect: 'name', proposition: 'かかしと呼ぶ提案', name: 'かかし', linkedIssueId: null, respondsToTurn: null };
   const config = { questionLayout: 'two_stage_v3', technicalTrial: { version: 'adaptive_repair_v3' } };
@@ -638,9 +650,8 @@ test('05y-1: a record stored as holistic_v3 (cqab3) is restored as holistic_v3 w
   const fresh = await makeTask(prepared, { strategy: 'bypass-enabled' });
   fresh.task.message('どんな図形がありますか？', 'turn-1'); await fresh.task.whenIdle();
   const saved = fresh.record();
-  assert.equal(saved.options.dialoguePolicy, 'holistic_v4');
-  const stored = structuredClone(saved);
-  stored.options.dialoguePolicy = 'holistic_v3';
+  assert.equal(saved.options.dialoguePolicy, 'holistic_v5'); // the default of a new trial (998ebf6)
+  const stored = asOlderRecord(saved, 'holistic_v3');
   stored.options.profileSha256 = researchHash(researchTrialProfileV3({ timeoutMs: null, maxCompletionTokens: 1000 }, timeouts, 'two_stage_v3', 'holistic_v3'));
   const second = await fixture(t, config, { answers: { action: 'accept', target: 'none' }, segmentText: proposal, segments: [segment] });
   const preparedAgain = await prepareParticipantJev(second.options);
