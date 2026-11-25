@@ -178,6 +178,7 @@ export async function createNamingTaskV2({
     ...(jev ? { decisionMode: "jev", observer: jev.observer, jevDecision: jev.jevDecision,
       ...(jev.technicalTrial ? { technicalTrial: clone(jev.technicalTrial) } : {}),
       localGrounding: jev.localGrounding, maxReobservations: jev.profile.maxReobservations,
+      rotationMode: rotation.mode,
       interventionPolicy: jev.profile.interventionPolicy, decisionTimeoutMs: jev.profile.timeouts.decisionMs,
       ...(jev.profile.questionLayout !== "two_stage_v1" ? { questionLayout: jev.profile.questionLayout } : {}),
       ...(jev.profile.dialoguePolicy ? { dialoguePolicy: jev.profile.dialoguePolicy } : {}),
