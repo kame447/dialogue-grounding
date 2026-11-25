@@ -256,7 +256,9 @@ const clauseBreak = /(?<=[。!?]|(?:ですが|ますが|ませんが|ました�
 
 export const HOLISTIC_V5_VIEWPOINT_RULE = "形の確認・説明には、回転しても変わらない形や部分同士の関係を優先してください。選択済みの特徴は自分側の観察に基づく根拠です。方位が弁別に必要なときは、自分側の図形の見え方だと同じ節で明示し、相手には形の対応を尋ねてください。相手側の位置や向きを自分側と同じだと断定せず、相手の方位には相手が述べた見え方として触れるか、相手の見え方を尋ねてください。";
 const v5OrientationTerms = new RegExp(orientationWords.source + "|(?<sameFrame>同じ(?:位置|向き|方向))", "gu");
-const v5ClauseBreak = /(?<=[。!?]|(?:(?:です|ます|ません|ました|でした)が?|けど|けれど(?:も)?|のに|ので|から|ため(?:に)?|(?<!から見)て|なら|であれば|とすると)[、,])/u;
+const v5ClauseBreak = /(?<=[。!?]|(?:(?:です|ます|ません|ました|でした)が?|けど|けれど(?:も)?|のに|ので|から|ため(?:に)?|なら|であれば|とすると)[、,])/u;
+// A continuative clause keeps its viewpoint, but a question about the next description does not qualify the previous one.
+const v5ContinuationBreak = /(?<=(?<!から見)て[、,])/u;
 const v5OwnView = /(?:こちら|私|わたし|自分)(?:(?:の(?:画面|図形|側|向き|見方|方)|側)?(?:では(?!なく|ない|なかっ|なけれ|じゃな)|でも|も|だと|で見ると|から見ると|から見れば|から見たら|から見て)|の(?:画面|図形)の)/u;
 const v5PartnerView = /(?:そちら|相手)(?:の(?:画面|図形|側)|側|でも|にも|も|だと|から見ると|から見れば|から見たら|から見て|で(?:は)?(?!は|なく|ない))|両(?:方の)?画面/u;
 const v5Viewpoint = new RegExp("(?<own>" + v5OwnView.source + ")|" + v5PartnerView.source, "gu");
@@ -282,7 +284,7 @@ function v5OrientationLeaks(text: string): string[] {
       }
       if (preceding?.groups?.own && !comparesScreens) continue;
       // A later viewpoint starts a new description even when there is no clause punctuation.
-      const description = clause.slice(term.index + term[0].length, viewpoints[nextViewpoint]?.index);
+      const description = clause.slice(term.index + term[0].length, viewpoints[nextViewpoint]?.index).split(v5ContinuationBreak, 1)[0];
       const qualifier = descriptionQualifier.exec(description);
       if (qualifier ? qualifier.groups?.cause !== undefined : !questionEnd.test(description)) partnerAssertion = true;
     }
