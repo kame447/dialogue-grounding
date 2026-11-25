@@ -7,11 +7,12 @@ import {nameBindsFigure} from '../../decision/referent-binding.ts';
 import {hasNameProposal,namingTurnKind,namingIntervalEstimates,inheritedTargetClaimIds,agreeCandidateAllowed,inheritsProposalName,targetNamingConflict,publiclyCheckedNamingTarget,usesPublicNamingTarget} from '../../decision/naming-request.ts';
 import {decodeMaterialV5} from '../../decision/judgment-material-v5.ts';
 import {isHolisticPolicy,isHolisticV2Plus,isHolisticV3Plus,isHolisticV4Plus} from '../../decision/contract.ts';
-import {generationGuardCodes,draftViolationCodes,deriveGenerationOutcome,orientationSafeFallback,findOrientationLeaks,hasOrientationWords,hasVersionedViewpoint,isGenerationV5,isGenerationV6,isGenerationV7,isGenerationV8,validGenerationRetryVersion,validAgreeNameScope,allowsOrientationFallback} from '../../v2/generation-guard.ts';
+import {generationGuardCodes,draftViolationCodes,deriveGenerationOutcome,orientationSafeFallback,findOrientationLeaks,hasOrientationWords,hasVersionedViewpoint,isGenerationV5,isGenerationV6,isGenerationV7,isGenerationV8,isGenerationV9,validGenerationRetryVersion,validAgreeNameScope,allowsOrientationFallback} from '../../v2/generation-guard.ts';
 import type {RecordedGenerationRetryVersion} from '../../v2/generation-guard.ts';
 import {checkModelIdentity} from '../../model-identity-contract.ts';
 import {resolveModelPolicy} from '../../model-policy.ts';
 import {verifyLocalUpdate,applyVerifiedOperation,bindPublishedReferenceQuestion} from '../../local-grounding/verify.ts';
+import {AI_BOUND_SOURCE} from '../../local-grounding/contract.ts';
 import {check,hash,equal,row,rows,list,META_KEYS} from './core.ts';
 import type {Check,Records} from './core.ts';
 const POLICY='376d569120ca36a3eceaf5ab95410f7eb83f25fbb681e7566a684b97c35165c8';
@@ -98,9 +99,9 @@ function safeFallbackName(value:unknown):string|null{
 const S4_ORIENT_WORDS=/上部|下部|上端|下端|左端|右端|左側|右側|上側|下側|右上|左上|右下|左下|右向き|左向き|上向き|下向き|斜め[上下左右]|[上下左右]の辺|横長|縦長|[上下左右]方向|[上下左右]寄り|[上下左右]の(?:突起|角|隅|端|部分|張り出し|くぼみ|切り欠き|三角|四角|脚|棒|腕|頭|耳|側)|(?<!以)[上下左右][へに](?:伸び|突き出|出っ張|張|向か|傾|広が|すぼま)/u;
 const S4_VIEWPOINT=/(?:こちら|私|わたし|自分|相手|そちら)(?:の(?:画面|側|向き|見方|図形|方)|側)?(?:では(?!なく|ない|なかっ|なけれ|じゃな)|で見ると|から見ると|から見れば|から見たら|から見て)/u;
 const S4_CLAUSE_BREAK=/(?<=[。!?]|(?:ですが|ますが|ませんが|ましたが|でしたが|けど|けれど|けれども|のに)、)/u;
-function s4HasOrientationLeak(text:unknown,version:RecordedGenerationRetryVersion|undefined):boolean{
+function s4HasOrientationLeak(text:unknown,version:RecordedGenerationRetryVersion|undefined,humanTexts:readonly string[]=[]):boolean{
  if(typeof text!=='string'||!text.trim())return false;
- if(H5())return findOrientationLeaks(text,'holistic_v5',version??'jev_generation_retry_v1').length>0;
+ if(H5())return findOrientationLeaks(text,'holistic_v5',version??'jev_generation_retry_v1',humanTexts).length>0;
  const unquoted=text.normalize('NFKC').replace(/[\s\u200b-\u200d\ufeff]/gu,'').replace(/「[^」]*」|『[^』]*』/gu,'「」');
  return unquoted.split(S4_CLAUSE_BREAK).some(clause=>S4_ORIENT_WORDS.test(clause)&&!S4_VIEWPOINT.test(clause));
 }
@@ -417,6 +418,8 @@ function s4HumanProposedNames(tape:any,trace:any):Set<string>{
 // is refused here too. What it adopts and rejects must be what the trace holds: a record whose approval request was handled under another version's rule cannot pass.
 // A redacted value is an unknown value: a redacted proposition is carried as recorded (no decision reads it). A turn whose decision needs a redacted quote or name cannot be redone: 'unknown'.
 function s4LocalReverify(tape:any,t:any,policy:string,after:any):'ok'|'mismatch'|'unknown'{
+ // The ai_bound_target provenance exists only in v9 and later records (the same boundary the stored state is checked for).
+ if(!isGenerationV9(tape?.generationRetryVersion)){const bound=(g:any)=>Array.isArray(g?.records)&&g.records.some((c:any)=>c?.kind==='claim'&&c.source===AI_BOUND_SOURCE);if(bound(after)||bound(tape?.state?.graph))return'mismatch';}
  const local=t?.local;
  if(!local||!Array.isArray(local.extractor?.segments)||!Array.isArray(local.classifier?.verdicts)||!Array.isArray(local.claims)||local.status!=='committed'&&local.status!=='staged'&&local.status!=='error')return'ok';
  if(local.localStatus!==undefined&&local.localStatus!=='ok')return'ok';
@@ -711,6 +714,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
     (t.generationGuard.regenerated||hasVersionedViewpoint(version)||hasVersionedViewpoint(t.generationRetryVersion))&&version!==t.generationRetryVersion)return'invalid';
  const restatedRetry=version!==undefined;
  const publicTexts=(tape.events??[]).filter((e:any)=>e.seq<=t.turnIndex).map((e:any)=>e.text);
+ const humanTexts=(tape.events??[]).filter((e:any)=>e.seq<=t.turnIndex&&e.speaker==='human').map((e:any)=>e.text);
  if(pairs.length===0)return'missing';
  if(!equal(result.sides,[pair.left,pair.right]))return'invalid';
  if(!tape.tails?.['repair-first']||!tape.tails?.['bypass-enabled'])return'missing';
@@ -733,8 +737,8 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
      const codes=label===tr.label&&t.status==='committed'?t.generationGuard.violations:undefined;
      // The comparison condition's retry reason is checked against that condition's own first draft, which this verifier classifies itself.
      const v3Retry=layout==='two_stage_v3';
-     const draft=generationCount===1&&(codes===undefined||hasVersionedViewpoint(version))?{orientation:v3Retry&&s4HasOrientationLeak(prevDraft,version),
-       ...(hasVersionedViewpoint(version)&&typeof prevDraft==='string'?{orientationCodes:findOrientationLeaks(prevDraft,'holistic_v5',version)}:{}),naming:typeof prevDraft==='string'&&s4NamingDecision(prevDraft.normalize('NFKC').replace(/[\s\u200b-\u200d\ufeff]/gu,''),s.executed?.action),workingNote:v3Retry&&restatedRetry&&s4HasWorkingNote(prevDraft,publicTexts),...(H()?{draftAct:lastVerdict}:{})}:undefined;
+     const draft=generationCount===1&&(codes===undefined||hasVersionedViewpoint(version))?{orientation:v3Retry&&s4HasOrientationLeak(prevDraft,version,humanTexts),
+       ...(hasVersionedViewpoint(version)&&typeof prevDraft==='string'?{orientationCodes:findOrientationLeaks(prevDraft,'holistic_v5',version,humanTexts)}:{}),naming:typeof prevDraft==='string'&&s4NamingDecision(prevDraft.normalize('NFKC').replace(/[\s\u200b-\u200d\ufeff]/gu,''),s.executed?.action),workingNote:v3Retry&&restatedRetry&&s4HasWorkingNote(prevDraft,publicTexts),...(H()?{draftAct:lastVerdict}:{})}:undefined;
      if(!generationMessages(p.messages,t,s.executed,{...tape,vetoed:s.intervention?.reasonCode==='vetoed_bypass_action',generationGraph:(tr.turns??[]).find((u:any)=>u.turn===t.turnIndex)?.state?.graph},m.profile,generationCount++,codes,draft))return'invalid';
      prevDraft=answer?.response?.text??answer?.text;draftTexts.push(prevDraft);genMessages.push(p.messages);lastVerdict=null;
     }
@@ -844,7 +848,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
    // The outcome of each side is derived from its own drafts and question answers by the run's own pure functions (generation-guard): publish the first,
    // publish the rewrite, the derived orientation-only fallback, or stop (a stop is never a committed turn).
    {
-    const aiOn=tr.profile?.localGrounding?.aiPublicClaims===true||Object.hasOwn(tr.lastCommittedState??{},'aiPublic'),cc={action:ex.action as any,candidateName:typeof ex.name==='string'?ex.name:null,v3:true,holistic:true,adaptive:!!CTX.trial,factored:!!CTX.facts,ai:aiOn,publicTexts,dialoguePolicy:H5()?'holistic_v5' as const:undefined,generationRetryVersion:version??'jev_generation_retry_v1',vetoed:s.intervention?.reasonCode==='vetoed_bypass_action'};
+    const aiOn=tr.profile?.localGrounding?.aiPublicClaims===true||Object.hasOwn(tr.lastCommittedState??{},'aiPublic'),cc={action:ex.action as any,candidateName:typeof ex.name==='string'?ex.name:null,v3:true,holistic:true,adaptive:!!CTX.trial,factored:!!CTX.facts,ai:aiOn,publicTexts,humanTexts,dialoguePolicy:H5()?'holistic_v5' as const:undefined,generationRetryVersion:version??'jev_generation_retry_v1',vetoed:s.intervention?.reasonCode==='vetoed_bypass_action'};
     const actCode=(i:number)=>{const row=askedRows.find(y=>y.draft===(i===0?'initial':'retry'));return row&&row.verdict!==null?[row.verdict as string]:[];};
     // The same composition as the run (guard codes + the local publication checks against that send's own recorded messages); no private instruction is stored.
     const codes=(i:number)=>typeof draftTexts[i]==='string'?[...new Set([...draftViolationCodes(draftTexts[i],cc,genMessages[i]??[]),...actCode(i)])]:['empty_utterance'];
@@ -904,7 +908,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
   const gens=actual.requests.filter((r:any)=>r.provider==='luna'&&r.role==='generation');
   const genTexts=[...(tape.common?.luna??[]),...(tape.tails?.[tr.label]?.luna??[])].filter((x:any)=>x?.phase==='generation').map((x:any)=>x?.response?.text??x?.text);
   if(gens.length!==2||genTexts.length!==2||
-   !genTexts.every((tx:unknown)=>typeof tx==='string'&&s4HasOrientationLeak(tx,version)&&!s4HasNonOrientationLeak(tx,t.finalAction)&&
+   !genTexts.every((tx:unknown)=>typeof tx==='string'&&s4HasOrientationLeak(tx,version,humanTexts)&&!s4HasNonOrientationLeak(tx,t.finalAction)&&
     (!restatedRetry||!s4HasWorkingNote(tx,publicTexts))))return'invalid';
  }
  // M is recomputed: at least one recorded Luna request, all of them with measured sends. A label is either wholly measured or wholly synthetic.

@@ -16,6 +16,7 @@ import { priorClaimViews, summarizeLocalIssues } from "../local-grounding/derive
 import { createMemoLocalExtractor, LOCAL_EXTRACTION_INSTRUCTIONS, MEMO_LOCAL_EXTRACTION_INSTRUCTIONS, MEMO_LOCAL_EXTRACTION_INSTRUCTIONS_HOLISTIC } from "../local-grounding/extract.ts";
 import { LOCAL_CLASSIFICATION_INSTRUCTIONS } from "../local-grounding/classify.ts";
 import type { LocalGroundingOptions, LocalOwnImage, LocalOwnAnchor, PublicTurn, LocalClaimView } from "../local-grounding/contract.ts";
+import { AI_BOUND_SOURCE } from "../local-grounding/contract.ts";
 import type { ObservationMemo, ObservationObserver, ReobservationResult } from "../observation/contract.ts";
 import { validateObservationMemo, mergeReobservation, observationContextMessages, ObservationError, type ObservationErrorCode,
   OBSERVATION_INITIAL_INSTRUCTIONS, OBSERVATION_TARGETED_INSTRUCTIONS, OBSERVATION_MEMO_VERSION } from "../observation/observe.ts";
@@ -482,7 +483,10 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
   if(!stateExact(s,['schemaVersion','interventionPolicy','ledger','graph','judgments','observationMemo','repairHistory',...(Object.hasOwn(s??{},'aiPublic')?['aiPublic']:[]),...(hasAgreeNameScope?['agreeNameScopeVersion']:[])])||s.schemaVersion!=='jev_private_state_v2'||!stateSame(s.interventionPolicy,{version:'bypass_acceptance_v1',tableSha256:BYPASS_ACCEPTANCE_V1_TABLE_SHA256}))throw Error();
   if(!validAgreeNameScope(s.agreeNameScopeVersion,generation)||hasAgreeNameScope&&
     (s.agreeNameScopeVersion===undefined||questionLayout!=='two_stage_v3'||s.agreeNameScopeVersion!=='scoped_v1'&&policy!=='holistic_v5'))throw Error();
-  validateOwnLedger(s.ledger);if(!sameSet(Object.keys(s.ledger),ownSlots))throw Error();const graph=snapshotReferenceGraph(s.graph);if(!sameSet(Object.keys(graph.ownSlots),ownSlots)||!Array.isArray(s.judgments)||!Array.isArray(s.repairHistory))throw Error();
+  validateOwnLedger(s.ledger);if(!sameSet(Object.keys(s.ledger),ownSlots))throw Error();const graph=snapshotReferenceGraph(s.graph);
+  // The ai_bound_target provenance exists only in v9 and later records; an earlier version carrying it is refused.
+  if(!isGenerationV9(generation)&&Array.isArray(s.graph?.records)&&s.graph.records.some((r:any)=>r?.kind==='claim'&&r.source===AI_BOUND_SOURCE))throw Error();
+  if(!sameSet(Object.keys(graph.ownSlots),ownSlots)||!Array.isArray(s.judgments)||!Array.isArray(s.repairHistory))throw Error();
   if(s.observationMemo!==null){const m=validateObservationMemo(s.observationMemo);if(!sameSet(m.figures.map(f=>f.id),ownSlots))throw Error();}
   if(Object.hasOwn(s,'aiPublic'))validateAiPublicState(s.aiPublic,ownSlots,Number.MAX_SAFE_INTEGER,s.graph);
   // Every claim record still held by the graph, withdrawn or not (the live view alone drops a claim as soon as it is withdrawn).
@@ -1037,7 +1041,8 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         { role: "system", content: "局所問題（非公開）:\n" + summarizeLocalIssues(graph) },
         ...publicTurns.map(t => ({ role: t.speaker === "human" ? "user" as const : "assistant" as const, content: t.text }))];
       const codeContext = { action: judgment.action, candidateName: judgment.candidateName ?? null, v3: questionLayout === "two_stage_v3", holistic, adaptive, factored, ai: aiEnabled,
-        publicTexts: events.filter(e => e.seq <= latest.seq).map(e => e.text), dialoguePolicy: options.dialoguePolicy, generationRetryVersion,
+        publicTexts: events.filter(e => e.seq <= latest.seq).map(e => e.text), humanTexts: events.filter(e => e.seq <= latest.seq && e.speaker === "human").map(e => e.text),
+        dialoguePolicy: options.dialoguePolicy, generationRetryVersion,
         vetoed: isVetoed(record.intervention) };
       const violations = (text: string, context: Message[]) => draftViolationCodes(text, codeContext, context, privateInstructions);
       // holistic_v1: a closed-set question about the draft's naming act. An agree draft is always asked; any other draft only on a typed naming context,

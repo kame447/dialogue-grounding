@@ -3,31 +3,35 @@
 import type { DialoguePolicy } from "../decision/contract.ts";
 // v3 was reserved for the experiment that extended fixed responses.
 // v9 contains every behaviour of v8 and widens only which wordings the orientation check accepts as a stated viewpoint or as the partner's own words. v8 contains every behaviour of v7 and adds the direct pointing-reply match to a targetless or differently-extracted confirm question. v7 contains every behaviour of v6 and widens the unsupported-topic-shift check to the particle-less and "next figure" wordings. v6 contains every behaviour of v5 and adds the unsupported-topic-shift check. v5 contains every behaviour of v4 (viewpoint rules, no fixed-sentence fallback, the whole-history judgment material, the private naming state) and adds the confirm-specific viewpoint note and the topic markers.
-export type GenerationRetryVersion = "jev_generation_retry_v1" | "jev_generation_retry_v2" | "jev_generation_retry_v4" | "jev_generation_retry_v5" | "jev_generation_retry_v6" | "jev_generation_retry_v7" | "jev_generation_retry_v8" | "jev_generation_retry_v9";
+export type GenerationRetryVersion = "jev_generation_retry_v1" | "jev_generation_retry_v2" | "jev_generation_retry_v4" | "jev_generation_retry_v5" | "jev_generation_retry_v6" | "jev_generation_retry_v7" | "jev_generation_retry_v8" | "jev_generation_retry_v9" | "jev_generation_retry_v10";
 export type RecordedGenerationRetryVersion = Exclude<GenerationRetryVersion, "jev_generation_retry_v1">;
 
-export function hasVersionedViewpoint(version: unknown): version is "jev_generation_retry_v4" | "jev_generation_retry_v5" | "jev_generation_retry_v6" | "jev_generation_retry_v7" | "jev_generation_retry_v8" | "jev_generation_retry_v9" {
-  return version === "jev_generation_retry_v4" || version === "jev_generation_retry_v5" || version === "jev_generation_retry_v6" || version === "jev_generation_retry_v7" || version === "jev_generation_retry_v8" || version === "jev_generation_retry_v9";
+export function hasVersionedViewpoint(version: unknown): version is "jev_generation_retry_v4" | "jev_generation_retry_v5" | "jev_generation_retry_v6" | "jev_generation_retry_v7" | "jev_generation_retry_v8" | "jev_generation_retry_v9" | "jev_generation_retry_v10" {
+  return version === "jev_generation_retry_v4" || version === "jev_generation_retry_v5" || version === "jev_generation_retry_v6" || version === "jev_generation_retry_v7" || version === "jev_generation_retry_v8" || version === "jev_generation_retry_v9" || version === "jev_generation_retry_v10";
 }
 /** v5 or later: what v4 does, plus the confirm viewpoint note, the topic markers and the answer-resolving judgment material. */
-export function isGenerationV5(version: unknown): version is "jev_generation_retry_v5" | "jev_generation_retry_v6" | "jev_generation_retry_v7" | "jev_generation_retry_v8" | "jev_generation_retry_v9" {
-  return version === "jev_generation_retry_v5" || version === "jev_generation_retry_v6" || version === "jev_generation_retry_v7" || version === "jev_generation_retry_v8" || version === "jev_generation_retry_v9";
+export function isGenerationV5(version: unknown): version is "jev_generation_retry_v5" | "jev_generation_retry_v6" | "jev_generation_retry_v7" | "jev_generation_retry_v8" | "jev_generation_retry_v9" | "jev_generation_retry_v10" {
+  return version === "jev_generation_retry_v5" || version === "jev_generation_retry_v6" || version === "jev_generation_retry_v7" || version === "jev_generation_retry_v8" || version === "jev_generation_retry_v9" || version === "jev_generation_retry_v10";
 }
 /** v6 or later: v5 plus the unsupported-topic-shift check (a draft that moves on while the chosen action is not a move), the scoped_v3 agreement scope and the notation on every question. */
-export function isGenerationV6(version: unknown): version is "jev_generation_retry_v6" | "jev_generation_retry_v7" | "jev_generation_retry_v8" | "jev_generation_retry_v9" {
-  return version === "jev_generation_retry_v6" || version === "jev_generation_retry_v7" || version === "jev_generation_retry_v8" || version === "jev_generation_retry_v9";
+export function isGenerationV6(version: unknown): version is "jev_generation_retry_v6" | "jev_generation_retry_v7" | "jev_generation_retry_v8" | "jev_generation_retry_v9" | "jev_generation_retry_v10" {
+  return version === "jev_generation_retry_v6" || version === "jev_generation_retry_v7" || version === "jev_generation_retry_v8" || version === "jev_generation_retry_v9" || version === "jev_generation_retry_v10";
 }
 /** v7 or later: v6 plus the widened topic-shift wordings (particle-less "次いこう", "次の図形を見てみよう"), the scoped_v4 agreement scope and the reference-question binding. */
-export function isGenerationV7(version: unknown): version is "jev_generation_retry_v7" | "jev_generation_retry_v8" | "jev_generation_retry_v9" {
-  return version === "jev_generation_retry_v7" || version === "jev_generation_retry_v8" || version === "jev_generation_retry_v9";
+export function isGenerationV7(version: unknown): version is "jev_generation_retry_v7" | "jev_generation_retry_v8" | "jev_generation_retry_v9" | "jev_generation_retry_v10" {
+  return version === "jev_generation_retry_v7" || version === "jev_generation_retry_v8" || version === "jev_generation_retry_v9" || version === "jev_generation_retry_v10";
 }
 /** v8 or later: v7 plus the direct pointing-reply match (a participant's agree that points at the public confirm question) and the scoped_v5 agreement scope. */
-export function isGenerationV8(version: unknown): version is "jev_generation_retry_v8" | "jev_generation_retry_v9" {
-  return version === "jev_generation_retry_v8" || version === "jev_generation_retry_v9";
+export function isGenerationV8(version: unknown): version is "jev_generation_retry_v8" | "jev_generation_retry_v9" | "jev_generation_retry_v10" {
+  return version === "jev_generation_retry_v8" || version === "jev_generation_retry_v9" || version === "jev_generation_retry_v10";
 }
-/** The newest generation version: v8 plus the wider wordings the orientation check accepts as a stated viewpoint ("こちらの画面で", "こちらの上の…") and as the partner's own words ("そちらでいう…"). */
-export function isGenerationV9(version: unknown): version is "jev_generation_retry_v9" {
-  return version === "jev_generation_retry_v9";
+/** v9 or later: v8 plus the wider wordings the orientation check accepts as a stated viewpoint ("こちらの画面で", "こちらの上の…") and as the partner's own words ("そちらでいう…"), and the ai_bound_target provenance of a bound question target. */
+export function isGenerationV9(version: unknown): version is "jev_generation_retry_v9" | "jev_generation_retry_v10" {
+  return version === "jev_generation_retry_v9" || version === "jev_generation_retry_v10";
+}
+/** The newest generation version: v9 plus the narrower quotation exemption: a direction word inside the phrase quoted after "そちらでいう" is excused only when the participant used that very word in public. */
+export function isGenerationV10(version: unknown): version is "jev_generation_retry_v10" {
+  return version === "jev_generation_retry_v10";
 }
 export function validAgreeNameScope(scope: unknown, generation: unknown): boolean {
   if (isGenerationV8(generation)) return scope === "scoped_v5";
@@ -42,7 +46,7 @@ export function validGenerationRetryVersion(version: unknown, layout: string, po
 }
 export function defaultGenerationRetryVersion(layout: string, policy?: string): GenerationRetryVersion {
   if (layout !== "two_stage_v3") return "jev_generation_retry_v1";
-  return policy === "holistic_v5" ? "jev_generation_retry_v9" : "jev_generation_retry_v2";
+  return policy === "holistic_v5" ? "jev_generation_retry_v10" : "jev_generation_retry_v2";
 }
 
 export function allowsOrientationFallback(version: GenerationRetryVersion | undefined): boolean {
@@ -364,8 +368,11 @@ const v9OwnPossessiveView = "(?:こちら|私|わたし|自分)の(?=" + orienta
 const v9PartnerQuotedView = "(?:そちら|相手)(?:で|の)いう";
 // "そちらでいうと／いえば／いうなら／いうこと" is a topic, a condition or a statement about what was said, not the partner's own wording.
 const v9PartnerQuotedStart = /^(?:そちら|相手)(?:で|の)いう(?!と|えば|なら|こと)/u;
+// v10: "いうとがった…" is "いう" + "とがった" (pointed), not the conditional "いうと".
+const v10PartnerQuotedStart = /^(?:そちら|相手)(?:で|の)いう(?!と(?!がっ|がる)|えば|なら|こと)/u;
 // What "そちらでいう" quotes is only the noun phrase right after it, up to the first particle or punctuation ("左向きの先は", "左向きの先端を含む形も", "左向きの先に対応する").
 const v9QuotedPhrase = /^[^はがをもにへでと、,。.!?！？「」]{1,16}/u;
+const v10QuotedPhrase = /^(?:とがった)?[^はがをもにへでと、,。.!?！？「」]{1,16}/u;
 const v9TopicViewpoint = new RegExp(
   "(?<own>" + v5OwnView.source + "|" + explicitOwnView.source + "|" + ownTopicView.source + "|" + v9OwnPossessiveView + ")|" +
   v5PartnerView.source + "|" + explicitPartnerView.source + "|" + partnerTopicView.source + "|" + v9PartnerQuotedView, "gu");
@@ -374,7 +381,7 @@ const questionEnd = /(?:\?|か(?:ね)?[。、,.]?)$/u;
 // The first qualifier after a term belongs to that description. A later question cannot undo a causal premise.
 const descriptionQualifier = /と(?:のこと|教えて|いう(?!前提|仮定|想定)|言っ|おっしゃ|聞い|説明|伺|述べ|話し)|なら|(?:の)?であれば|とすると|とすれば|とは限(?:らな|りませ)|(?:では|じゃ)(?:な(?:い|く)|ありませ)|(?<cause>ので|(?:だ|です|ます|ある|いる|見える)から|から(?=[、,]|$)|ため)/u;
 
-function v5OrientationLeaks(text: string, expanded: boolean, topic = false, v9 = false): string[] {
+function v5OrientationLeaks(text: string, expanded: boolean, topic = false, v9 = false, v10 = false, humanText = ""): string[] {
   const markers = v9 && topic ? v9TopicViewpoint : topic ? v5TopicViewpoint : expanded ? v5ExpandedViewpoint : v5Viewpoint;
   const terms = expanded ? v5ExpandedOrientationTerms : v5OrientationTerms;
   const descriptionBreak = expanded ? v5DescriptionBreak : v5ContinuationBreak;
@@ -395,10 +402,11 @@ function v5OrientationLeaks(text: string, expanded: boolean, topic = false, v9 =
       if (preceding?.groups?.own && !comparesScreens) continue;
       if (v9 && preceding && !sameFrame) {
         // v9: a direction word inside the phrase quoted after "そちらでいう" is the partner's own wording. Everything after the phrase is checked as usual.
-        const quoteAt = clause.slice(preceding.index), start = v9PartnerQuotedStart.exec(quoteAt);
+        const quoteAt = clause.slice(preceding.index), start = (v10 ? v10PartnerQuotedStart : v9PartnerQuotedStart).exec(quoteAt);
         if (start) {
-          const phrase = v9QuotedPhrase.exec(quoteAt.slice(start[0].length))?.[0] ?? "", from = preceding.index + start[0].length;
-          if (term.index >= from && term.index < from + phrase.length) continue;
+          const phrase = (v10 ? v10QuotedPhrase : v9QuotedPhrase).exec(quoteAt.slice(start[0].length))?.[0] ?? "", from = preceding.index + start[0].length;
+          // v10: the quotation excuses only a direction word the participant actually used in public (a "左向き" they said, not a "右上" they never said).
+          if (term.index >= from && term.index < from + phrase.length && (!v10 || humanText.includes(term[0]))) continue;
         }
       }
       // A later viewpoint starts a new description even when there is no clause punctuation.
@@ -411,9 +419,9 @@ function v5OrientationLeaks(text: string, expanded: boolean, topic = false, v9 =
 }
 
 /** Check unmarked directions and, in holistic_v5, explicit assertions about the partner's orientation. */
-export function findOrientationLeaks(text: string, policy?: DialoguePolicy, version = defaultGenerationRetryVersion("two_stage_v3", policy)): string[] {
+export function findOrientationLeaks(text: string, policy?: DialoguePolicy, version = defaultGenerationRetryVersion("two_stage_v3", policy), humanTexts: readonly string[] = []): string[] {
   const unquoted = normalize(text).replace(/「[^」]*」|『[^』]*』/gu, "「」");
-  if (policy === "holistic_v5") return v5OrientationLeaks(unquoted, hasVersionedViewpoint(version), isGenerationV5(version), isGenerationV9(version));
+  if (policy === "holistic_v5") return v5OrientationLeaks(unquoted, hasVersionedViewpoint(version), isGenerationV5(version), isGenerationV9(version), isGenerationV10(version), isGenerationV10(version) ? humanTexts.map(normalize).join("\n") : "");
   return unquoted.split(clauseBreak).some(clause => orientationWords.test(clause) && !viewpointStated.test(clause))
     ? ["orientation_leak"] : [];
 }
@@ -523,6 +531,8 @@ export function findLocalPublicationViolations(text: string, messages: readonly 
 
 export type GenerationCodeContext = { action: Action; candidateName: string | null; v3: boolean; holistic: boolean; adaptive: boolean; factored: boolean; ai: boolean;
   publicTexts: readonly string[]; dialoguePolicy?: DialoguePolicy; generationRetryVersion?: GenerationRetryVersion;
+  /** The participant's public utterances so far (v10: the only source of direction words a quotation after "そちらでいう" may excuse). */
+  humanTexts?: readonly string[];
   /** True when the strategy's intervention refused the Jev action (a move) and the chosen action is another one. */
   vetoed?: boolean };
 /** Every publication rule for one draft that does not need the private prompts (those are added by the runtime): the single source for the run and for S4.
@@ -530,7 +540,7 @@ export type GenerationCodeContext = { action: Action; candidateName: string | nu
 export function generationGuardCodes(text: string, c: GenerationCodeContext): string[] {
   const squeezed = text.normalize("NFKC").replace(/\s/gu, "");
   return [...new Set([...findGuardViolations(text, c.action).filter((code) => !(c.holistic && isAgreementWordCode(code))),
-    ...(c.v3 ? findOrientationLeaks(text, c.dialoguePolicy, c.generationRetryVersion) : []),
+    ...(c.v3 ? findOrientationLeaks(text, c.dialoguePolicy, c.generationRetryVersion, c.humanTexts) : []),
     ...(c.v3 ? findWorkingNoteLeaks(text, c.publicTexts) : []),
     ...(c.v3 && isGenerationV6(c.generationRetryVersion) && c.action !== "move_on" && c.action !== "defer" && c.action !== "close" &&
       (c.vetoed === true || c.action === "confirm" || c.action === "repair") ? (isGenerationV7(c.generationRetryVersion) ? findTopicShiftClaimsV7(text) : findTopicShiftClaims(text)) : []),

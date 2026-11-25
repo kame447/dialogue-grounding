@@ -76,10 +76,10 @@ const build = (label: 'bypass-enabled' | 'repair-first', version: string | undef
 
 for (const label of ['bypass-enabled', 'repair-first'] as const) {
   for (const [form] of acceptedInV9) {
-    test(`${label}: a new v9 trial publishes "${form.slice(0, 16)}…" on the first draft, S4 and replay agree; the same input as a v8 record rewrites it`, async () => {
-      const fresh = await build(label, undefined, [form, confirming]);
+    test(`${label}: a v9 trial publishes "${form.slice(0, 16)}…" on the first draft, S4 and replay agree; the same input as a v8 record rewrites it`, async () => {
+      const fresh = await build(label, v9, [form, confirming]);
       const a = fresh.trials[0].attempts[0];
-      assert.equal(a.generationRetryVersion, v9, 'the default of a new trial');
+      assert.equal(a.generationRetryVersion, v9);
       assert.equal(a.publicSpeech, form);
       assert.deepEqual(a.generationGuard, { violations: [], regenerated: false, fallback: false });
       assert.deepEqual(statuses(fresh), ['pass', 'pass', 'pass', 'pass']);
@@ -94,7 +94,7 @@ for (const label of ['bypass-enabled', 'repair-first'] as const) {
   }
   test(`${label}: an unmarked direction and an assertion about the partner's view are still held back under v9`, async () => {
     for (const bad of ['上の突起がとがっていますね。', 'そちらでは上の突起がとがっていますね。']) {
-      const held = await build(label, undefined, [bad, confirming]);
+      const held = await build(label, v9, [bad, confirming]);
       const a = held.trials[0].attempts[0];
       assert.equal(a.generationGuard.regenerated, true, bad);
       assert.equal(a.publicSpeech, confirming);
