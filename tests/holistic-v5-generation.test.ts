@@ -238,3 +238,26 @@ test('new two_stage_v3 research profiles default to holistic_v5 and explicit pol
   assert.equal(researchTrialProfileV3(lunaRequest, timeouts, 'two_stage_v3', null).dialoguePolicy, undefined);
   assert.equal(researchTrialProfileV3(lunaRequest, timeouts, 'two_stage_v2').dialoguePolicy, undefined);
 });
+
+for (const label of ['bypass-enabled', 'repair-first'] as const) {
+  test(`${label}: accept gets a direct feature-answer instruction tied to the saved generation version`, async () => {
+    const note = 'acceptで相手が図形の有無や特定の特徴を直接尋ねたら、相槌だけで済ませず、まずその問いに答えてください。';
+    for (const generationRetryVersion of ['jev_generation_retry_v2', 'jev_generation_retry_v4'] as const) {
+      const text = '細い棒とつながった形は見えます。';
+      const records = await buildRecords({ label, dialoguePolicy: 'holistic_v5', generationRetryVersion,
+        technicalTrial: { version: 'adaptive_repair_v3' }, turns: [{ human: '細い棒とつながっていますか？',
+          plan: { action: 'accept', target: 'figure_0', drafts: ['上端に細い棒があります。', text] } }] });
+      const trial = records.trials[0];
+      assert.equal(trial.attempts[0].executed.action, 'accept');
+      assert.equal(trial.attempts[0].publicSpeech, text);
+      assert.deepEqual(verifyRecords(records).checks.filter(c => /^intervention\.trial\.0\.attempt\.0\./u.test(c.id)).map(c => c.status),
+        ['pass', 'pass', 'pass', 'pass']);
+      for (const side of trial.replay[0].result.sides) {
+        const messages = side.requests.filter((r: any) => r.phase === 'generation').map((r: any) => r.payload.messages);
+        for (const content of [messages[0][2].content, messages[1].at(-1).content]) {
+          assert.equal(content.includes(note), generationRetryVersion === 'jev_generation_retry_v4');
+        }
+      }
+    }
+  });
+}
