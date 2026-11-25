@@ -1555,3 +1555,114 @@ for (const strategy of strategies) {
     await assert.rejects(dialogue.restoreFrom(tampered));
   });
 }
+
+// Audit v11 (candidate, issues #202, #204, #198). Each fixed form is checked in both strategies through the ordinary entrance; the same input under v10 keeps its judgment.
+const saidFacingLeftTwo = 'こちらの図では輪の先が左を向いています。';
+const guardCases = [
+  // [label, participant text, draft, v10 outcome, v11 outcome]
+  ['an own-side 「の上の…」 clause swallowing an unsaid partner-side direction (NB-21N-2)', saidFacingLeft, 'こちらの上の突起は、そちらの上側にあるはずだね。', 'published', 'held'],
+  ['an own-side 「の上の中央」 (NB-21N-4)', saidFacingLeft, 'こちらの上の中央に、細い切れ目があります。', 'held', 'published'],
+  ['a bracketed direction word nobody said (audit 24)', saidFacingLeft, 'そちらでいう「右上の突起」の先は、切れ目になっていますね。', 'published', 'held'],
+  ['a paraphrase of what the participant said (audit 24 c)', saidFacingLeftTwo, 'そちらでいう左向きの先に対応する可能性はありそう。', 'held', 'published'],
+  ['「そちらでいうとがっている…」 (NB-24N-3)', saidFacingLeft, 'そちらでいうとがっている左向きの先に対応する可能性はありそう。', 'held', 'published'],
+  ['a question about 「そちらの」 plus a direction word', saidFacingLeft, 'そちらの左向きの先端が、この突起に対応しますか？', 'held', 'published'],
+] as const;
+const guardStillRejected = [
+  ['an unmarked direction word', saidFacingLeft, '上端に切れ目があります。'],
+  ['an assertion about the partner view the participant did not make', saidFacingLeft, 'そちらの画像では右端に小さな穴が見えます。'],
+  ['a quoted phrase whose direction word was never said', saidLowerLeft, 'そちらでいう輪の切れ目から右上に、小さな突起がありますね。'],
+] as const;
+for (const [label, said, draft, outcome10, outcome11] of guardCases) {
+  for (const [version, outcome] of [[v10, outcome10], [v11, outcome11]] as const) {
+    test(`Audit v11 ${version.slice(-2)} ${outcome === 'held' ? 'rejects' : 'publishes'} ${label}, in both strategies`, async () => {
+      await pairedAs(version, trial => outcome === 'held' ? v10Held(trial, said, draft, version) : v10Published(trial, said, draft, version));
+    });
+  }
+}
+for (const [label, said, draft] of guardStillRejected) {
+  for (const version of [v10, v11]) {
+    test(`Audit v11 ${version.slice(-2)} still rejects ${label}, in both strategies`, async () => {
+      await pairedAs(version, trial => v10Held(trial, said, draft, version));
+    });
+  }
+}
+// A word the participant corrected away is not excused by a later quotation (audit 24 b).
+test('Audit v11 rejects a quotation of a direction word the participant corrected, v10 publishes it, in both strategies', async () => {
+  const first = '輪の切れ目から右上に突起があります。';
+  const correction = '右上ではなく、左下でした。';
+  const draft = 'そちらでいう輪の切れ目から右上に、小さな突起がありますね。';
+  for (const [version, held] of [[v10, false], [v11, true]] as const) {
+    await pairedAs(version, async trial => {
+      await trial.say({ ...broad, ...sayingTurn('こちらの図では' + first), drafts: ['ええ、見えています。'], publicClaims: claimOf('ええ、見えています。') });
+      const turn = await trial.say({ ...broad, ...sayingTurn(correction), drafts: held ? [draft, draft] : [draft], publicClaims: claimOf(draft) });
+      if (held) { assert.equal(turn.trace.errorCode, 'unsafe_generation'); assert.equal(turn.speech, null); }
+      else assert.equal(turn.speech, draft);
+    });
+  }
+});
+
+// Reply rules (through the real run: decision, publication, restore).
+for (const strategy of strategies) {
+  const build = async (version: string) => {
+    const dialogue = session(strategy);
+    await dialogue.start();
+    await dialogue.restoreAs(version);
+    return dialogue;
+  };
+  const gap = async (dialogue: ReturnType<typeof session>) => {
+    const turn = await dialogue.say({ human: 'はい、続けてください。', action: 'accept', target: 0, drafts: ['では続けます。'] });
+    assert.equal(turn.trace.status, 'committed');
+  };
+  for (const [version, offeredAfterRecheck] of [[v10, true], [v11, false]] as const) {
+    test(`Audit v11 ${strategy} ${version.slice(-2)}: a re-check question that answers an older one ${offeredAfterRecheck ? 'leaves' : 'withdraws'} the earlier confirmation (NB-19N-1)`, async () => {
+      const dialogue = await build(version);
+      const question = await audit16Check(dialogue, 0, { questionTargets: [first] });
+      await audit16Answer(dialogue, question, 'agree', 0, { aspect: 'referent', targets: [first], human: 'はい、まさにそれです。' });
+      await gap(dialogue);
+      const human = '本当に同じ図形ですか？';
+      const turn = await dialogue.say({ human, action: 'accept', target: 0, drafts: ['そうです。'],
+        local: [{ text: human, act: 'ask', aspect: 'referent', targets: [], respondsToTurn: question.sourceTurn + 4, antecedent: { speaker: 'ai', proposition: question.quote } }] });
+      assert.equal(turn.trace.status, 'committed');
+      const { offered } = await audit16Name(dialogue, baseWidth, [], audit20Proposal);
+      assert.equal(offered, offeredAfterRecheck);
+    });
+  }
+  for (const [version, offeredAfterDenial] of [[v10, true], [v11, false]] as const) {
+    test(`Audit v11 ${strategy} ${version.slice(-2)}: a denied figure ${offeredAfterDenial ? 'can still be offered' : 'is not offered'} to a later nameless proposal (NB-19N-3)`, async () => {
+      const dialogue = await build(version);
+      const question = await audit16Check(dialogue, 0, { questionTargets: [first] });
+      const human = 'いえ、その図形ではありません。';
+      const denied = await dialogue.say({ human, action: 'accept', target: 0, drafts: ['台と環が一続きの形のことです。'],
+        publicClaims: [{ text: '台と環が一続きの形のことです。', act: 'assert', aspect: 'part', targets: [first] }],
+        local: [{ text: human, act: 'deny', aspect: 'referent', targets: [first], respondsToTurn: question.sourceTurn, antecedent: { speaker: 'ai', proposition: question.quote } }] });
+      assert.equal(denied.trace.status, 'committed');
+      const { offered } = await audit16Name(dialogue, baseWidth, [], audit20Proposal);
+      assert.equal(offered, offeredAfterDenial);
+    });
+  }
+  // #198: the approval request answers the AI's question about the name; v10 keeps losing the request mark, v11 marks it.
+  for (const [version, marked] of [[v10, false], [v11, true]] as const) {
+    test(`Audit v11 ${strategy} ${version.slice(-2)}: an approval request after the AI's question ${marked ? 'marks' : 'does not mark'} a naming request (#198)`, async () => {
+      const dialogue = await build(version);
+      const previous = 'この形の呼び名には「' + originalName + '」を提案します。';
+      const question = await audit16Check(dialogue, 0, { questionTargets: [first],
+        opening: { human: previous, local: [{ text: previous, act: 'name_propose', aspect: 'name', targets: [], name: originalName }] } });
+      const human = 'それなら、いい？';
+      const named = await dialogue.say({ human, action: 'confirm', target: 0, feature: baseWidth, name: originalName,
+        local: [{ text: human, act: 'name_propose', aspect: 'name', targets: [], respondsToTurn: question.sourceTurn, antecedent: { speaker: 'ai', proposition: question.quote } }],
+        agreeSpeech, drafts: [baseWidth + '形ですか？'], draftActs: { [agreeSpeech]: 'adopt_chosen' } });
+      assert.equal(named.trace.status, 'committed');
+      assert.equal(Boolean(named.trace.namingRequest), marked);
+    });
+  }
+  // Not fixed (research judgment): a bare acknowledgement of an ask/part whose target was extracted keeps its judgment in v10 and v11.
+  for (const version of [v10, v11]) {
+    test(`Audit v11 ${strategy} ${version.slice(-2)}: an acknowledgement of an ask/part with an extracted target keeps offering the name (unchanged, #202 item 3)`, async () => {
+      const dialogue = await build(version);
+      const question = await audit16Check(dialogue, 0, { questionTargets: [first], questionAspect: 'part' });
+      await audit16Answer(dialogue, question, 'agree', 0, { aspect: 'part', targets: [first], human: '質問の意味は分かりました。' });
+      const { offered } = await audit16Name(dialogue, baseWidth, [], audit20Proposal);
+      assert.equal(offered, true);
+    });
+  }
+}
