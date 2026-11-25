@@ -30,3 +30,21 @@ for (const label of ['bypass-enabled', 'repair-first'] as const) {
     assert.deepEqual(verifyRecords(records).checks.filter(c => /^intervention\.trial\.0\.attempt\.0\./u.test(c.id)).map(c => c.status), ['pass', 'pass', 'pass', 'pass']);
   });
 }
+
+
+// A feature asked once is not asked again after an accept and a change of figure; S4 re-derives the same feature candidates from the written ledger.
+for (const label of ['bypass-enabled', 'repair-first'] as const) {
+  test(`holistic_v5 ${label}: a confirmed feature does not come back after an accept in between, and S4 derives the same candidates`, async () => {
+    const records = await buildRecords({ label, dialoguePolicy: 'holistic_v5', technicalTrial: { version: 'adaptive_repair_v3' }, turns: [
+      { human: 'この図形の特徴を教えてください。', plan: { action: 'confirm', target: 'figure_0', referent: 'figure_0', speech: '特徴を一つ確かめさせてください。' } },
+      { human: '別の図形の話に移ります。', plan: { action: 'accept', target: 'figure_1', referent: 'figure_1', speech: '別の図形の話ですね。' } },
+      { human: 'もう一度さっきの図形に戻って特徴を教えてください。', plan: { action: 'confirm', target: 'figure_0', referent: 'figure_0', speech: 'もう一つ特徴を確かめさせてください。' } },
+    ] });
+    const trial = records.trials[0], judgments = trial.lastCommittedState.judgments;
+    const features = judgments.filter((j: any) => j.jevTurn.executed.action === 'confirm').map((j: any) => j.jevTurn.executed.feature);
+    assert.equal(features.length, 2);
+    assert.notEqual(features[0], features[1]);
+    assert.equal(trial.replay[0].result.status, 'same_material_intervention_verified');
+    assert.deepEqual(verifyRecords(records).checks.filter(c => /^intervention\.trial\.0\.attempt\.0\./u.test(c.id)).map(c => c.status), ['pass', 'pass', 'pass', 'pass']);
+  });
+}

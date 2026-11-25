@@ -537,7 +537,7 @@ function agreeSource(tr:any,t:any,key:string,tape:any,legacyV3=false):'invalid'|
   // claims of the graph after this turn ordered by (sourceTurn, turn), the last 160. The source is the claim's own turn when it holds the name,
   // otherwise the earliest windowed turn that does (an inherited name).
   const aiPublic=tr.profile?.localGrounding?.aiPublicClaims===true;
-  const upTo:any[]=(tape.events??[]).filter((e:any)=>e.seq<=t.turnIndex),win=(aiPublic?upTo.filter((e:any)=>upTo.filter((o:any)=>o.seq===e.seq).length===1):upTo).slice(-32);
+  const upTo:any[]=(tape.events??[]).filter((e:any)=>e.seq<=t.turnIndex),win=(aiPublic?upTo.filter((e:any)=>upTo.filter((o:any)=>o.seq===e.seq).length===1):upTo).slice(tr.profile?.dialoguePolicy==='holistic_v5'?0:-32);
   const live=liveClaims(state.graph).sort((a:any,b:any)=>a.sourceTurn-b.sourceTurn||a.turn-b.turn).slice(-160);
   let expected:string[],levels:string[][]|null=null;
   if(v3){
@@ -962,8 +962,9 @@ function rankProof(i:any,d:any,input:any):boolean{
 }
 // holistic_v5 writes the same material in a compact form (decision/judgment-material-v5.ts); S4 reads it back to the older shape before it re-derives anything.
 const LEGEND_V5='stateの記法: publicTurnsは全公開発話を番号順に一度ずつ並べた行（U番号 h=人間 / ai: 発話）です。claimsの各行は [claim id, 出典の発話番号, act, aspect, 対象, 名前, 返答先のclaim id, 命題, issueId] で、発言そのものは出典の発話番号の行を参照してください。f0〜f5はownSlotsの順の自分の図形です。issuesは局所の論点で、各行は [issue id, aspect, 対象, state, nameState, 名前, 最後の発話番号, claim id] です。figuresは図形ごとに、名称の状態（statusとname）と、これまでに実行した行動 [行動, 発話番号, 名前または特徴, 返答のclaim id] を並べた履歴です。';
+const ROTATION_V5='課題の条件として、相手の盤面は自分の盤面と同じ図形を±90度ほど回転して提示しています（relative_pm90）。向きや方位を表す語（上・下・左・右・縦・横など）は、相手と自分で一致しない前提で扱い、向きに依存しない特徴で照合してください。';
 const parseMaterial=(text:string):any=>{const x=JSON.parse(text);return x?.view==='judgment_v5'?decodeMaterialV5(x):x;};
-const nativeInstructions=(s:any,layout='two_stage_v1',prospect=false)=>(layout==='two_stage_v3'?NATIVE.common.replace(NATIVE_V2.v1Stages,NATIVE_V3.stages):layout==='two_stage_v2'?NATIVE.common.replace(NATIVE_V2.v1Stages,NATIVE_V2.stages):NATIVE.common)+(Object.hasOwn(s,'humanReferent')?'\n'+NATIVE.referent:'')+(prospect&&Object.hasOwn(s,'repairProspect')?'\n'+ADAPT.prospect:'')+(CTX.facts?'\n'+ADAPT.facts:'')+(s?.view==='judgment_v5'?'\n'+LEGEND_V5:'');
+const nativeInstructions=(s:any,layout='two_stage_v1',prospect=false)=>(layout==='two_stage_v3'?NATIVE.common.replace(NATIVE_V2.v1Stages,NATIVE_V3.stages):layout==='two_stage_v2'?NATIVE.common.replace(NATIVE_V2.v1Stages,NATIVE_V2.stages):NATIVE.common)+(Object.hasOwn(s,'humanReferent')?'\n'+NATIVE.referent:'')+(prospect&&Object.hasOwn(s,'repairProspect')?'\n'+ADAPT.prospect:'')+(CTX.facts?'\n'+ADAPT.facts:'')+(s?.view==='judgment_v5'?'\n'+LEGEND_V5+'\n'+ROTATION_V5:'');
 function originalQuestions(body:any,input:any,layout='two_stage_v1'):boolean|null{
   if(body.model!=='typesafe/jev-1.14'||!Array.isArray(input.ownSlots)||input.ownSlots.length!==6||!Array.isArray(input.observations)||!Array.isArray(input.publicNames)||Object.hasOwn(input,'nameLedger'))return false;
   // holistic_v2 never sends a name the partner proposed among the public names (decided from the turn's full claims, not from the shortened ones).
@@ -1076,12 +1077,14 @@ function observationRequestProof(messages:any[],d:any,m:any):boolean{
   ownAnchors:(m.own?.ownAnchors??[]).filter((a:any)=>ids.has(a.id)),figures:(m.state?.observationMemo?.figures??[]).filter((f:any)=>ids.has(f.id))});
 }
 function unaskedConfirmFeatures(input:any,target:any,candidates:{value:string;figureIds:string[]}[]):{value:string;figureIds:string[]}[]{
- const prev=input.previousAction;if(!prev)return candidates;
+ const prev=input.previousAction;
  const idsOf=(t:any)=>t?.kind==='single'?[t.figureId]:t?.kind==='multiple'?t.figureIds:[];
  const scope:string[]=idsOf(target);
  const sameScope=(ids:string[])=>ids.length===scope.length&&ids.every(id=>scope.includes(id));
- if(!sameScope(idsOf(prev.target)))return candidates;
+ // holistic_v5: a feature already asked of a figure in this scope (the ledger's confirm/repair rows) is not asked again; a revisit just before lifts it.
  const asked=new Set<string>();
+ if(input?.view==='judgment_v5'&&prev?.action!=='revisit')for(const [i,id] of (input.ownSlots??[]).entries())if(scope.includes(id))for(const a of input.figures?.['f'+i]?.actions??[])if((a[0]==='confirm'||a[0]==='repair')&&typeof a[2]==='string')asked.add(a[2]);
+ if(!prev||!sameScope(idsOf(prev.target))){const left=candidates.filter(c=>!asked.has(c.value));return asked.size&&left.length?left:candidates;}
  if((prev.action==='confirm'||!CTX.legacyV3&&prev.action==='repair')&&prev.feature)asked.add(prev.feature);
  if(['confirm','repair','revisit'].includes(prev.action)){
   const byTurn=new Map((input.repairHistory??[]).map((r:any)=>[r.turn,r]));

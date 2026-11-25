@@ -1,7 +1,7 @@
 // Synthetic material only. holistic_v5 writes the same validated material compactly; these checks pin the written form and its budget behaviour.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildJevDecisionPayload } from '../dialogue-model/runtime/decision/jev-decision.ts';
+import { buildJevDecisionDetailPayload, buildJevDecisionPayload } from '../dialogue-model/runtime/decision/jev-decision.ts';
 import { claimKeepOrder, decodeMaterialV5, JUDGMENT_V5_LEGEND } from '../dialogue-model/runtime/decision/judgment-material-v5.ts';
 import { OLD, OWN } from './support/s4-v3-records.ts';
 
@@ -59,4 +59,24 @@ test('over the character budget the least relevant claims go first; names, repli
   assert.equal(v5.inputBudget.omitted.publicTurns, 0);
   assert.ok(JSON.stringify(v5).length <= 20000);
   assert.deepEqual(claimKeepOrder(claims, input().repairHistory).slice(-3).sort(), ['c1', 'c4', 'c5']);
+});
+
+const feature = (OLD.state.observationMemo as any)!.figures.find((f: any) => f.id === slots[1]).analytic.shapes[0] as string;
+const detailValues = (extra: Record<string, unknown>, previous: any) => Object.values<string>(buildJevDecisionDetailPayload(
+  { ...input({ previousAction: previous }), nameLedger, ...extra }, { action: 'confirm', target: { kind: 'single', figureId: slots[1] } }, { questionLayout: 'two_stage_v3' })!.questions.feature.criteria).map(v => JSON.parse(v).value);
+const asked = [{ turn: 2, action: 'confirm', target: { kind: 'multiple', figureIds: [slots[1], slots[2]] }, name: null, feature }];
+const afterAccept = { turn: 6, action: 'accept', target: { kind: 'single', figureId: slots[1] }, name: null, feature: null };
+
+test('holistic_v5 never asks again a feature already asked of the figure, even after the scope narrowed or an accept in between; before v5 the unbroken same-scope run decides', () => {
+  assert.ok(detailValues({}, afterAccept).includes(feature), 'before holistic_v5 the feature comes back');
+  const v5 = detailValues({ judgmentLedger: asked }, afterAccept);
+  assert.ok(!v5.includes(feature) && v5.length > 0);
+  // a revisit just before lifts the exclusion (the figure is looked at again)
+  assert.ok(detailValues({ judgmentLedger: asked }, { ...afterAccept, action: 'revisit' }).includes(feature));
+});
+
+test('the rotation premise is part of the v5 instructions only', () => {
+  const sent = (extra: Record<string, unknown>) => Object.values<any>(buildJevDecisionPayload({ ...input(), nameLedger, ...extra }, { questionLayout: 'two_stage_v3', dialoguePolicy: 'holistic_v5' }).questions);
+  for (const q of sent({ judgmentLedger: ledger })) assert.match(q.instructions, /relative_pm90/u);
+  for (const q of sent({})) assert.doesNotMatch(q.instructions, /relative_pm90/u);
 });

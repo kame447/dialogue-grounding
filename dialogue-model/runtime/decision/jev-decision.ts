@@ -105,6 +105,8 @@ const COMMON = [
 ].join("\n");
 const HUMAN_REFERENT_GUIDANCE = "humanReferentは今回の人間発話が指す図形の候補分布で、次の行動の対象targetとは別です。未校正の判断材料であり、最大値を正解としたり、行動の対象で分布を書き換えたりしないでください。unknownは不明のまま扱ってください。";
 const REPAIR_PROSPECT_GUIDANCE = "repairProspectは未校正の見込みと根拠の材料です。正解や閾値ではありません。進捗が見込めれば修復の継続、停滞して別の対象に明確な利点があれば保留や移行、不確かなら確認、といった判断の目安にしてください。";
+/** holistic_v5: a condition of the task (not an answer): the partner's board shows the same figures turned by about 90 degrees. */
+export const ROTATION_V5 = "課題の条件として、相手の盤面は自分の盤面と同じ図形を±90度ほど回転して提示しています（relative_pm90）。向きや方位を表す語（上・下・左・右・縦・横など）は、相手と自分で一致しない前提で扱い、向きに依存しない特徴で照合してください。";
 export const REPAIR_FACTS_GUIDANCE = "repairHistoryの各項目のfactsは、プログラムが記録から機械的に数えた事実です（直前の明確化への返答と比べた候補集合、同じ特徴の文の再提示、局所記録の欠落と棄却の件数）。抽出の誤差を含む未検証の材料で、意味が同じか、修復が進んだか停滞したか、次に何をすべきかを判定したものではありません。閾値や規則にせず、公開発話と照合して判断してください。";
 const factsGuidance = (input: JevDecisionInput) => input.repairFacts === undefined ? "" : "\n" + REPAIR_FACTS_GUIDANCE;
 // two_stage_v2 changes only the sentence that describes the stages; every other v1 sentence is shared.
@@ -120,7 +122,7 @@ export const TWO_STAGE_V3_TARGET_INSTRUCTIONS = "stateのselected.actionが第1�
 export const TWO_STAGE_V2_CANDIDATE_SET_INSTRUCTIONS = "第1段で対象をmultiple（一つに絞れない）としました。この行動で対象候補として扱う自分の図形の集合を、2図形以上の組合せから一つ選んでください。公開発話と観察メモに根拠がある図形を含め、根拠のない図形は含めないでください。";
 export const TWO_STAGE_V2_CANDIDATE_SET_CRITERION = (figureIds: readonly string[]) => `自分の候補図形の集合 ${JSON.stringify(figureIds)}。観察メモを参照。`;
 const decisionInstructions = (input: JevDecisionInput, prospect = false, layout: JevQuestionLayout = "two_stage_v1") =>
-  (layout === "two_stage_v3" ? COMMON_V3 : layout === "two_stage_v2" ? COMMON_V2 : COMMON) + (input.humanReferent === undefined ? "" : "\n" + HUMAN_REFERENT_GUIDANCE) + (!prospect || input.repairProspect === undefined ? "" : "\n" + REPAIR_PROSPECT_GUIDANCE) + factsGuidance(input) + (input.judgmentLedger === undefined ? "" : "\n" + JUDGMENT_V5_LEGEND);
+  (layout === "two_stage_v3" ? COMMON_V3 : layout === "two_stage_v2" ? COMMON_V2 : COMMON) + (input.humanReferent === undefined ? "" : "\n" + HUMAN_REFERENT_GUIDANCE) + (!prospect || input.repairProspect === undefined ? "" : "\n" + REPAIR_PROSPECT_GUIDANCE) + factsGuidance(input) + (input.judgmentLedger === undefined ? "" : "\n" + JUDGMENT_V5_LEGEND + "\n" + ROTATION_V5);
 const LAYOUTS: readonly JevQuestionLayout[] = Object.freeze(["two_stage_v1", "two_stage_v2", "two_stage_v3"]);
 /** Closed two_stage_v2 candidate sets: every subset of the six own slots with 2-6 members (15+20+15+6+1 = 57),
  * ordered by size, then lexicographically by slot index. Labels name the slot indices, so they are reconstructable. */
@@ -488,7 +490,7 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
       { include: "公開発話の対象候補に含む。", exclude: "対象候補に含まない。" });
   });
   return { payload: { model: JEV_DECISION_MODEL, state, questions } as JevDecisionPayload, slots, catalog, human: humans[0].text, reobservationAllowed, noAccept,
-    budget, layout, previousAction, publicTurns, repairHistory };
+    budget, layout, previousAction, publicTurns, repairHistory, ledgerActions };
 }
 
 export function buildJevDecisionPayload(input: JevDecisionInput, { questionLayout = "two_stage_v1", dialoguePolicy }: { questionLayout?: JevQuestionLayout; dialoguePolicy?: DialoguePolicy } = {}): JevDecisionPayload {
@@ -647,13 +649,18 @@ export function buildJevTargetPayload(input: JevDecisionInput, action: JevAction
 }
 
 type DetailCandidate = { value: string; figureIds: string[] };
-function unaskedConfirmFeatures({ previousAction, publicTurns, repairHistory }: ReturnType<typeof prepare>,
+function unaskedConfirmFeatures({ previousAction, publicTurns, repairHistory, ledgerActions }: ReturnType<typeof prepare>,
   scope: readonly string[], candidates: DetailCandidate[]): DetailCandidate[] {
-  if (!previousAction) return candidates;
   const sameScope = (ids: readonly string[]) => ids.length === scope.length && ids.every(id => scope.includes(id));
-  if (!sameScope(targetIds(previousAction.target))) return candidates;
+  // holistic_v5: a feature already asked of a figure in this scope is not asked again, however long ago and whatever the scopes in between were
+  // (a request to look at the figure again, a revisit, lifts it). Before holistic_v5 only the unbroken same-scope run counts (below).
+  const asked = new Set<string>(ledgerActions === undefined || previousAction?.action === "revisit" ? [] :
+    ledgerActions.filter(a => ["confirm", "repair"].includes(a.action) && a.feature !== null && targetIds(a.target).some(id => scope.includes(id))).map(a => a.feature!));
+  if (!previousAction || !sameScope(targetIds(previousAction.target))) {
+    const left = candidates.filter(c => !asked.has(c.value));
+    return asked.size && left.length ? left : candidates;
+  }
 
-  const asked = new Set<string>();
   if (["confirm", "repair"].includes(previousAction.action) && previousAction.feature) asked.add(previousAction.feature);
   if (["confirm", "repair", "revisit"].includes(previousAction.action)) {
     const byTurn = new Map(repairHistory.map(r => [r.turn, r]));
