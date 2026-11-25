@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildRecords, OWN } from "./support/s4-v3-records.ts";
+import { pairedInterventionReplay } from "../dialogue-model/runtime/diagnostics/parity-live/intervention-replay.ts";
+import { buildRecords, MODEL, OWN } from "./support/s4-v3-records.ts";
 import type { Turn } from "./support/s4-v3-records.ts";
 import { verifyRecords } from "../dialogue-model/runtime/diagnostics/parity-verify/index.ts";
 
@@ -92,5 +93,55 @@ for (const label of ["bypass-enabled", "repair-first"] as const) {
     assert.deepEqual(trial.lastCommittedState.ledger[first], { name, status: "agreed" });
     assert.equal(trial.replay[0].result.recordedPayloadsReproduced, true);
     assert.deepEqual(checks(records), ["pass", "pass", "pass", "pass"]);
+  });
+}
+
+
+const sameShape = "同じ形を指していますか？";
+const explicitCheck: Turn = { ...singleDescription, plan: {
+  ...singleDescription.plan, speech: checkedDescription + sameShape, aiActs: ["assert", "ask"],
+  aiExtraction: JSON.stringify([
+    ...JSON.parse(singleDescription.plan.aiExtraction!),
+    { segmentId: "s2", quote: sameShape, proposition: sameShape, name: null, targets: [], aspect: "question", linkedIssueId: null, respondsToTurn: null },
+  ]),
+} };
+
+for (const label of ["bypass-enabled", "repair-first"] as const) {
+  const fixed = { label, dialoguePolicy: "holistic_v5", generationRetryVersion: "jev_generation_retry_v6",
+    technicalTrial: { version: "adaptive_repair_v3" } } as const;
+
+  for (const [scenario, check] of [["an empty question target", explicitCheck], ["an omitted question claim", singleDescription]] as const) {
+    test(label + ": a description cannot answer its own check with " + scenario, async () => {
+      const records = await buildRecords({ ...fixed, turns: [check, lastTurn(first, "confirm", "figure_0", "figure_0")] });
+      const trial = records.trials[0];
+      assert.deepEqual(checks(records), ["pass", "pass", "pass", "pass"]);
+      assert.deepEqual(trial.lastCommittedState.judgments.at(-1).jevTurn.agreeNames, []);
+      assert.deepEqual(trial.lastCommittedState.ledger[first], { name: null, status: "unassigned" });
+      assert.equal(trial.replay[0].result.recordedPayloadsReproduced, true);
+      const forged = structuredClone(records);
+      forged.trials[0].replay[0].tape.state.agreeNameScopeVersion = "scoped_v2";
+      forged.trials[0].lastCommittedState.agreeNameScopeVersion = "scoped_v2";
+      forged.trials[0].turns[0].state.agreeNameScopeVersion = "scoped_v2";
+      assert.equal(checks(forged).at(-1), "mismatch");
+      const replay = await pairedInterventionReplay(forged.trials[0].replay[0].tape, OWN as Parameters<typeof pairedInterventionReplay>[1], MODEL, trial.profile);
+      assert.equal(replay.status, "not_reached");
+      assert.ok(replay.sides.every(side => side.requests.length === 0));
+    });
+  }
+
+  test(label + ": an answer to the selected feature still permits agreement under scoped_v3", async () => {
+    const records = await buildRecords({ ...fixed, turns: [explicitCheck, distinctAnswer, lastTurn(first, "agree", "figure_0", "figure_0")] });
+    assert.deepEqual(checks(records), ["pass", "pass", "pass", "pass"]);
+    const trial = records.trials[0];
+    assert.deepEqual(trial.lastCommittedState.ledger[first], { name, status: "agreed" });
+    assert.equal(trial.replay[0].result.recordedPayloadsReproduced, true);
+  });
+
+  test(label + ": an answer to a question outside a selected check is optional for naming", async () => {
+    const explanation = structuredClone(explicitCheck);
+    explanation.plan.action = "accept";
+    const records = await buildRecords({ ...fixed, turns: [explanation, lastTurn(first, "agree", "figure_0", "figure_0")] });
+    assert.deepEqual(checks(records), ["pass", "pass", "pass", "pass"]);
+    assert.deepEqual(records.trials[0].lastCommittedState.ledger[first], { name, status: "agreed" });
   });
 }

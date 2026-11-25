@@ -12,6 +12,8 @@ import type { DialoguePolicy, DraftAct } from '../../dialogue-model/runtime/deci
 import { createJevLocalTestClassifier } from '../../dialogue-model/runtime/local-grounding/jev-local-test.ts';
 import { createChatClient } from '../../dialogue-model/runtime/client.mjs';
 import { buildReobservationMessages } from '../../dialogue-model/runtime/observation/observe.ts';
+import type { AgreeNameScopeVersion } from '../../dialogue-model/runtime/decision/naming-request.ts';
+import { isGenerationV6 } from '../../dialogue-model/runtime/v2/generation-guard.ts';
 import type { RecordedGenerationRetryVersion } from '../../dialogue-model/runtime/v2/generation-guard.ts';
 import type { ObservationMemo } from '../../dialogue-model/runtime/observation/contract.ts';
 import { image } from './s4-integration/harness.ts';
@@ -38,6 +40,8 @@ export type Plan = { action: string; target: string; issue?: string; prospect?: 
   antecedent?: string;
   /** Raw JSON text the AI-public extraction request returns (the AI's own claims about its public reply); default none. */
   aiExtraction?: string;
+  /** Function labels by segment for the AI's public extraction. */
+  aiActs?: readonly string[];
   /** The partner-referent estimate's top label (e.g. `multiple`, `figure_3`); default the first offered. */
   referent?: string };
 const TEXTS: Record<string, string> = { local_extraction: '[]', ai_extraction: '[]' };
@@ -58,11 +62,13 @@ export async function runTurn(profile: any, label: Label, state: any, events: an
     const body = JSON.parse(init.body), answers: any = {};
     for (const [key, q] of Object.entries(body.questions) as any) {
       const labels = Object.keys(q.criteria);
+      const aiSegment = plan.aiActs && Object.hasOwn(JSON.parse(body.state), 'aiSeq') ? /^segment_(\d+)_act$/u.exec(key) : null;
+      const publicAct = aiSegment ? plan.aiActs?.[Number(aiSegment[1])] : undefined;
       if (key === 'action') lastAction = plan.forceAction ?? (plan.reobserve && ++actionCalls === 1 ? 'request_observation' : plan.action);
       const choice = key === 'action' ? lastAction : key === 'target' ? (lastAction === 'request_observation' ? 'figure_0' : plan.target) : key === 'repair_issue' ? plan.issue ?? 'none' : key === 'prospect' ? plan.prospect ?? 'uncertain'
         : key === 'name' && plan.name ? (labels.find(l => JSON.parse(q.criteria[l]).value === plan.name) ?? labels[0])
         : key === 'human_referent' && plan.referent ? plan.referent
-        : key === 'draft_naming' ? (plan.draftAct ?? (plan.action === 'agree' ? 'adopt_chosen' : 'none')) : key === 'basis' ? 'partner_uncertain' : key.endsWith('_antecedent') ? (plan.antecedent ?? 'none') : key.endsWith('_act') ? (plan.act && labels.includes(plan.act) ? plan.act : 'assert') : key === 'observe_aspect' ? 'orientation' : labels[0];
+        : key === 'draft_naming' ? (plan.draftAct ?? (plan.action === 'agree' ? 'adopt_chosen' : 'none')) : key === 'basis' ? 'partner_uncertain' : key.endsWith('_antecedent') ? (plan.antecedent ?? 'none') : key.endsWith('_act') ? (publicAct ?? (plan.act && labels.includes(plan.act) ? plan.act : 'assert')) : key === 'observe_aspect' ? 'orientation' : labels[0];
       if (!labels.includes(choice) && !(key === 'action' && plan.forceAction)) throw new Error(`scripted choice ${choice} is not offered for ${key}: ${labels.slice(0, 8)}`);
       answers[key] = { type: 'choice', choice, probabilities: Object.fromEntries(labels.map(l => [l, key === 'action' ? plan.actionScores?.[l] ?? (l === choice ? 1 : 0) : l === choice ? 1 : 0])) };
     }
@@ -99,7 +105,7 @@ export type Turn = { human: string; plan: Plan };
 /** dialoguePolicy: omitted = the creation default (holistic_v1); null = the earlier version (no policy), for controls of the older lineages. */
 export async function buildRecords({ label = 'repair-first' as Label, technicalTrial, turns, ledger, dialoguePolicy, memo, generationRetryVersion, agreeNameScopeVersion }: {
   label?: Label; technicalTrial?: { version: TrialVersion }; turns: Turn[]; ledger?: Record<string, any>; dialoguePolicy?: DialoguePolicy | null; memo?: ObservationMemo; generationRetryVersion?: RecordedGenerationRetryVersion;
-  agreeNameScopeVersion?: 'scoped_v1' | 'scoped_v2';
+  agreeNameScopeVersion?: AgreeNameScopeVersion;
 }) {
   const n = structuredClone(normal), tr = n.trials[0], m = n.run.manifest;
   const profile = JSON.parse(JSON.stringify(researchTrialProfileV3(m.lunaRequest, m.timeouts, 'two_stage_v3', dialoguePolicy)));
@@ -107,7 +113,8 @@ export async function buildRecords({ label = 'repair-first' as Label, technicalT
   for (const s of [n.run, n.summary, tr]) { s.profile = structuredClone(profile); s.profileSha256 = digest; }
   tr.identity.profile = digest; tr.label = label; m.trials[0].label = label; n.summary.runOrder[0].label = label;
   let state: any = structuredClone(OLD.state); if (ledger) state.ledger = structuredClone(ledger);
-  if (agreeNameScopeVersion) state.agreeNameScopeVersion = agreeNameScopeVersion;
+  const scope = agreeNameScopeVersion ?? (isGenerationV6(generationRetryVersion) ? 'scoped_v3' : undefined);
+  if (scope) state.agreeNameScopeVersion = scope;
   if (memo) state.observationMemo = structuredClone(memo);
   let events: any[] = [], seq = 0;
   for (let i = 0; i < turns.length; i++) {

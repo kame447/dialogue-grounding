@@ -18,6 +18,11 @@ export function turnNameProposals(claims: readonly NamingClaimLike[], turn: numb
 }
 export const hasNameProposal = (claims: readonly NamingClaimLike[], turn: number): boolean => turnNameProposals(claims, turn).length > 0;
 
+export type AgreeNameScopeVersion = "scoped_v1" | "scoped_v2" | "scoped_v3";
+export function usesPublicNamingTarget(scope: unknown): scope is "scoped_v2" | "scoped_v3" {
+  return scope === "scoped_v2" || scope === "scoped_v3";
+}
+
 export type NamingJudgmentLike = {
   turnIndex?: unknown; judgment?: { action?: unknown } | null; generationGuard?: { fallback?: boolean } | null;
   jevTurn?: { humanReferent?: unknown; executed?: { target: { kind: string; figureId?: string; figureIds?: readonly string[] } } } | null;
@@ -31,7 +36,7 @@ const isFigureEvidence = (c: LocalClaimView) => c.name === null &&
  * referent scores can suggest candidates; neither supplies figure evidence.
  * The caller supplies live claims and their public source turns. */
 export function publiclyCheckedNamingTarget(claims: readonly LocalClaimView[], publicTurns: readonly PublicTurn[],
-  judgments: readonly NamingJudgmentLike[], turn: number, includeAgreed = false): string | null {
+  judgments: readonly NamingJudgmentLike[], turn: number, includeAgreed = false, scope: AgreeNameScopeVersion = "scoped_v2"): string | null {
   const before = judgments.filter((j): j is NamingJudgmentLike & { turnIndex: number } => typeof j.turnIndex === "number" && j.turnIndex < turn);
   const lastBoundary = before.filter(j => ["agree", "defer", "move_on"].includes(j.judgment?.action as string)).at(-1);
   const boundary = lastBoundary?.turnIndex ?? 0;
@@ -49,6 +54,7 @@ export function publiclyCheckedNamingTarget(claims: readonly LocalClaimView[], p
         publicByTurn.get(seq)?.speaker === "ai") publications.set(seq, judgment);
   }
   const ai = new Map<string, { claim: LocalClaimView; singleton: boolean }>();
+  const describedChecks = new Set<number>();
   for (const c of live) {
     if (c.speaker !== "ai" || !["ask", "assert", "construe", "agree"].includes(c.act)) continue;
     const published = publications.get(c.sourceTurn);
@@ -56,6 +62,12 @@ export function publiclyCheckedNamingTarget(claims: readonly LocalClaimView[], p
     const ids = target?.kind === "single" ? [target.figureId] : target?.kind === "multiple" ? target.figureIds : undefined;
     if (ids && c.targets.length > 0 && c.targets.every(id => ids.includes(id))) {
       ai.set(c.id, { claim: c, singleton: target?.kind === "single" });
+      // Public descriptions corroborate the executed check even when its
+      // question has no extracted target or was missed by extraction entirely.
+      if (scope === "scoped_v3" && c.act !== "ask" && ids.length <= 2 &&
+          (published?.judgment?.action === "confirm" || published?.judgment?.action === "repair")) {
+        describedChecks.add(c.sourceTurn);
+      }
     }
   }
 
@@ -66,7 +78,7 @@ export function publiclyCheckedNamingTarget(claims: readonly LocalClaimView[], p
     if (reply.speaker !== "human" || reply.targets.length !== 1) continue;
     if (reply.act === "assert" && reply.aspect === "referent") { answers.push(reply); continue; }
     const antecedent = reply.respondsTo === null ? undefined : ai.get(reply.respondsTo);
-    if (reply.act === "agree" && antecedent?.singleton &&
+    if (reply.act === "agree" && antecedent && (antecedent.singleton || describedChecks.has(antecedent.claim.sourceTurn)) &&
         antecedent.claim.sourceTurn < reply.sourceTurn && antecedent.claim.aspect === reply.aspect &&
         antecedent.claim.targets.length === 1 && antecedent.claim.targets[0] === reply.targets[0]) {
       answers.push(reply); continue;
@@ -84,12 +96,18 @@ export function publiclyCheckedNamingTarget(claims: readonly LocalClaimView[], p
     (c.act === "ask" || c.act === "assert" && c.targets.length > 1)).map(c => c.sourceTurn));
   if (ambiguityAt > 0 && ambiguityAt >= answerAt) return null;
 
-  const focus = [...ai.values()].filter(({ claim, singleton }) => singleton && claim.act !== "ask" && claim.targets.length === 1);
+  // A check's preamble establishes what was asked, but cannot answer the
+  // check. A later public focus or a human answer can supply the evidence.
+  const focus = [...ai.values()].filter(({ claim, singleton }) =>
+    singleton && claim.act !== "ask" && claim.targets.length === 1 && !describedChecks.has(claim.sourceTurn));
   const focusAt = Math.max(0, ...focus.map(({ claim }) => claim.sourceTurn));
   // An AI question in the active exchange remains open when the human reply
   // just asks about a name. A public description on a later turn can establish
   // a new public focus, while explicit human ambiguity needs a human answer.
   if ([...ai.values()].some(({ claim }) => claim.act === "ask" && claim.sourceTurn >= focusAt && claim.sourceTurn >= answerAt)) return null;
+  if ([...describedChecks].some(sourceTurn => sourceTurn >= focusAt && !answers.some(reply =>
+    reply.sourceTurn > sourceTurn && (reply.act !== "agree" ||
+      (ai.get(reply.respondsTo!)?.claim.sourceTurn ?? 0) >= sourceTurn)))) return null;
 
   const supported = new Set<string>();
   const evidenceAt = Math.max(focusAt, answerAt);

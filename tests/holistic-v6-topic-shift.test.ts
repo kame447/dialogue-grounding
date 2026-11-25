@@ -75,8 +75,11 @@ test('v6: a vetoed defer is treated the same way, and a move to the next figure 
   assert.deepEqual(trace.generationGuard.violations, ['unsupported_topic_shift']);
   assert.deepEqual(statuses(deferred), ['pass', 'pass', 'pass', 'pass']);
   const proposal = 'この図形を「小舟」と呼びませんか？';
+  const description = '短い辺が二つつながっていますね。';
   for (const label of ['bypass-enabled', 'repair-first'] as const) {
     const records = await buildRecords({ label, dialoguePolicy: 'holistic_v5', generationRetryVersion: 'jev_generation_retry_v6', technicalTrial: { version: 'adaptive_repair_v3' }, turns: [
+      { human: '短い辺がつながった形の話です。', plan: { action: 'accept', target: 'figure_0', referent: 'figure_0', speech: description,
+        aiExtraction: JSON.stringify([{ segmentId: 's1', quote: description, proposition: description, name: null, targets: [slot], aspect: 'contour', linkedIssueId: null, respondsToTurn: null }]) } },
       { human: proposal, plan: { action: 'agree', target: 'figure_0', referent: 'figure_0', name: '小舟', act: 'name_propose', speech: 'では「小舟」と呼びましょう。',
         extraction: JSON.stringify([{ segmentId: 's1', quote: proposal, proposition: '小舟', name: '小舟', targets: [slot], aspect: 'name', linkedIssueId: null, respondsToTurn: null }]) } },
       { human: 'では、次の形を見ましょう。', plan: { action: 'accept', target: 'figure_1', referent: 'figure_1', drafts: ['はい、次の形にいきましょう。'] } },

@@ -29,7 +29,7 @@ import type { BudgetLimits, SendReceipt } from '../diagnostics/parity-live/audit
 import { checkModelIdentity, MODEL_CONTRACT_V2 } from '../model-identity-contract.ts';
 import { RESEARCH_MAX_JEV_USD } from '../diagnostics/jev-shadow-eval/local-openrouter.ts';
 import { inferenceHistory } from '../v2/agreement-gate.ts';
-import { defaultGenerationRetryVersion, hasVersionedViewpoint, isGenerationV5, validGenerationRetryVersion } from '../v2/generation-guard.ts';
+import { defaultGenerationRetryVersion, hasVersionedViewpoint, validGenerationRetryVersion, validAgreeNameScope } from '../v2/generation-guard.ts';
 import type { GenerationRetryVersion } from '../v2/generation-guard.ts';
 
 export type JevResearchLedger = RunBudget;
@@ -118,7 +118,7 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
     const generationRetryVersion = profile.dialoguePolicy === 'holistic_v5' && profile.questionLayout === 'two_stage_v3'
       ? restore ? savedGenerationVersion ?? 'jev_generation_retry_v2' : defaultGenerationRetryVersion(profile.questionLayout, profile.dialoguePolicy)
       : undefined;
-    if (restore?.queueState?.privateState?.agreeNameScopeVersion === 'scoped_v2' && !isGenerationV5(generationRetryVersion)) return invalid();
+    if (restore && !validAgreeNameScope(restore.queueState?.privateState?.agreeNameScopeVersion, generationRetryVersion)) return invalid();
     if (context.referenceMemory !== true) return invalid();
     if (!STRATEGIES.includes(context.strategy)) return invalid();
     if (context.legacy.some(v => v !== null && v !== undefined) || context.style !== profile.utteranceStyle) return invalid();

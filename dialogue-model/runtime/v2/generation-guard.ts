@@ -17,6 +17,11 @@ export function isGenerationV5(version: unknown): version is "jev_generation_ret
 export function isGenerationV6(version: unknown): version is "jev_generation_retry_v6" {
   return version === "jev_generation_retry_v6";
 }
+export function validAgreeNameScope(scope: unknown, generation: unknown): boolean {
+  if (isGenerationV6(generation)) return scope === "scoped_v3";
+  return scope === undefined || scope === "scoped_v1" || scope === "scoped_v2" && isGenerationV5(generation);
+}
+
 export function validGenerationRetryVersion(version: unknown, layout: string, policy?: string | null): version is GenerationRetryVersion {
   return version === "jev_generation_retry_v1" || layout === "two_stage_v3" &&
     (version === "jev_generation_retry_v2" || policy === "holistic_v5" && hasVersionedViewpoint(version));
