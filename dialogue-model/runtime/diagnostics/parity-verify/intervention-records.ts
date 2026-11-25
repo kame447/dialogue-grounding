@@ -6,7 +6,7 @@ import {jevChoiceAnswersValid,jevReportedCost,jevResponseId} from '../../decisio
 import {nameBindsFigure} from '../../decision/referent-binding.ts';
 import {hasNameProposal,namingTurnKind,namingIntervalEstimates,inheritedTargetClaimIds,agreeCandidateAllowed,inheritsProposalName,targetNamingConflict} from '../../decision/naming-request.ts';
 import {isHolisticPolicy,isHolisticV2Plus,isHolisticV3Plus,isHolisticV4Plus} from '../../decision/contract.ts';
-import {generationGuardCodes,draftViolationCodes,deriveGenerationOutcome,orientationSafeFallback,findOrientationLeaks,hasOrientationWords,hasVersionedViewpoint,validGenerationRetryVersion} from '../../v2/generation-guard.ts';
+import {generationGuardCodes,draftViolationCodes,deriveGenerationOutcome,orientationSafeFallback,findOrientationLeaks,hasOrientationWords,hasVersionedViewpoint,validGenerationRetryVersion,allowsOrientationFallback} from '../../v2/generation-guard.ts';
 import type {RecordedGenerationRetryVersion} from '../../v2/generation-guard.ts';
 import {checkModelIdentity} from '../../model-identity-contract.ts';
 import {resolveModelPolicy} from '../../model-policy.ts';
@@ -57,7 +57,7 @@ const RETRY_REASONS_SPECIFIC=RETRY_REASONS.flatMap(reason=>reason.codes.includes
 type RetryDraftEvidence={orientation:boolean;orientationCodes?:readonly string[];naming:boolean;workingNote:boolean;draftAct?:string|null};
 function retryReasonsMatch(text:string,version:RecordedGenerationRetryVersion|undefined,codes?:readonly string[],draft?:RetryDraftEvidence):boolean{
  if(!text)return false;
- const specific=version==='jev_generation_retry_v5',restated=version!==undefined;
+ const specific=hasVersionedViewpoint(version),restated=version!==undefined;
  const reasons=specific?RETRY_REASONS_SPECIFIC:RETRY_REASONS;
  for(const reason of reasons){
   const viewpoint=!specific&&H5()&&reason.codes.includes('orientation_leak');
@@ -469,7 +469,7 @@ function traceShape(t:any,layout='two_stage_v1',policy?:string):boolean{
  if(Object.hasOwn(t,'repairProspect')&&!prospectShape(t.repairProspect))return false;
   if(Object.hasOwn(t,'repairFacts')&&!Array.isArray(t.repairFacts)||Object.hasOwn(t,'repairGate')&&(!t.repairGate||typeof t.repairGate!=='object'))return false;
   if(!t.decisions.every((d:any)=>decisionShape(d,layout)))return false;
-  const guardFallbackOk = t.generationGuard?.fallback === false ||
+  const guardFallbackOk = t.generationGuard?.fallback === false || allowsOrientationFallback(t.generationRetryVersion) &&
     layout === 'two_stage_v3' && t.generationGuard?.fallback === true && t.generationGuard?.regenerated === true &&
     Array.isArray(t.generationGuard?.violations) && t.generationGuard.violations.length === 1 && t.generationGuard.violations[0] === 'orientation_leak';
   return exact(t.generationGuard,['violations','regenerated','fallback'])&&Array.isArray(t.generationGuard.violations)&&typeof t.generationGuard.regenerated==='boolean'&&guardFallbackOk;
@@ -698,8 +698,8 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
      const codes=label===tr.label&&t.status==='committed'?t.generationGuard.violations:undefined;
      // The comparison condition's retry reason is checked against that condition's own first draft, which this verifier classifies itself.
      const v3Retry=layout==='two_stage_v3';
-     const draft=generationCount===1&&(codes===undefined||version==='jev_generation_retry_v5')?{orientation:v3Retry&&s4HasOrientationLeak(prevDraft,version),
-       ...(version==='jev_generation_retry_v5'&&typeof prevDraft==='string'?{orientationCodes:findOrientationLeaks(prevDraft,'holistic_v5',version)}:{}),naming:typeof prevDraft==='string'&&s4NamingDecision(prevDraft.normalize('NFKC').replace(/[\s\u200b-\u200d\ufeff]/gu,''),s.executed?.action),workingNote:v3Retry&&restatedRetry&&s4HasWorkingNote(prevDraft,publicTexts),...(H()?{draftAct:lastVerdict}:{})}:undefined;
+     const draft=generationCount===1&&(codes===undefined||hasVersionedViewpoint(version))?{orientation:v3Retry&&s4HasOrientationLeak(prevDraft,version),
+       ...(hasVersionedViewpoint(version)&&typeof prevDraft==='string'?{orientationCodes:findOrientationLeaks(prevDraft,'holistic_v5',version)}:{}),naming:typeof prevDraft==='string'&&s4NamingDecision(prevDraft.normalize('NFKC').replace(/[\s\u200b-\u200d\ufeff]/gu,''),s.executed?.action),workingNote:v3Retry&&restatedRetry&&s4HasWorkingNote(prevDraft,publicTexts),...(H()?{draftAct:lastVerdict}:{})}:undefined;
      if(!generationMessages(p.messages,t,s.executed,{...tape,generationGraph:(tr.turns??[]).find((u:any)=>u.turn===t.turnIndex)?.state?.graph},m.profile,generationCount++,codes,draft))return'invalid';
      prevDraft=answer?.response?.text??answer?.text;draftTexts.push(prevDraft);genMessages.push(p.messages);lastVerdict=null;
     }
@@ -813,7 +813,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
     const actCode=(i:number)=>{const row=askedRows.find(y=>y.draft===(i===0?'initial':'retry'));return row&&row.verdict!==null?[row.verdict as string]:[];};
     // The same composition as the run (guard codes + the local publication checks against that send's own recorded messages); no private instruction is stored.
     const codes=(i:number)=>typeof draftTexts[i]==='string'?[...new Set([...draftViolationCodes(draftTexts[i],cc,genMessages[i]??[]),...actCode(i)])]:['empty_utterance'];
-    const fb=orientationSafeFallback({action:ex.action,candidateName:cc.candidateName,discriminatingFeature:typeof ex.feature==='string'?ex.feature:null} as any);
+    const fb=allowsOrientationFallback(version)?orientationSafeFallback({action:ex.action,candidateName:cc.candidateName,discriminatingFeature:typeof ex.feature==='string'?ex.feature:null} as any):null;
     const clean=fb!==null&&generationCodesClean(fb,cc,genMessages[generationCount-1]??[]);
     let out=deriveGenerationOutcome(codes(0),generationCount===2?codes(1):null,fb,clean);
     // A regeneration that the known drafts cannot explain is a contradiction, except where a hidden instruction (AI public claims on: the remaining private

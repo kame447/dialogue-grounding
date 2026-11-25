@@ -6,7 +6,7 @@ export type GenerationRetryVersion = "jev_generation_retry_v1" | "jev_generation
 export type RecordedGenerationRetryVersion = Exclude<GenerationRetryVersion, "jev_generation_retry_v1">;
 
 export function hasVersionedViewpoint(version: unknown): version is "jev_generation_retry_v4" {
-  return version === "jev_generation_retry_v4" || hasVersionedViewpoint(version);
+  return version === "jev_generation_retry_v4";
 }
 export function validGenerationRetryVersion(version: unknown, layout: string, policy?: string | null): version is GenerationRetryVersion {
   return version === "jev_generation_retry_v1" || layout === "two_stage_v3" &&
@@ -15,6 +15,10 @@ export function validGenerationRetryVersion(version: unknown, layout: string, po
 export function defaultGenerationRetryVersion(layout: string, policy?: string): GenerationRetryVersion {
   if (layout !== "two_stage_v3") return "jev_generation_retry_v1";
   return policy === "holistic_v5" ? "jev_generation_retry_v4" : "jev_generation_retry_v2";
+}
+
+export function allowsOrientationFallback(version: GenerationRetryVersion | undefined): boolean {
+  return !hasVersionedViewpoint(version);
 }
 
 type Action = "accept" | "propose_name" | "confirm" | "agree" | "repair" | "defer" | "revisit" | "move_on" | "close";

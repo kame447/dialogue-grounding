@@ -30,6 +30,7 @@ const [first, second, ribbon, fan, cup] = figureIds;
 const lunaRequest = { timeoutMs: null, maxCompletionTokens: null };
 const timeouts = { ...deadlines(), observationMs: 5000, localMs: 5000, decisionMs: 5000, generationMs: 5000 };
 const profile = researchTrialProfileV3(lunaRequest, timeouts, 'two_stage_v3');
+const legacyFallbackProfile = researchTrialProfileV3(lunaRequest, timeouts, 'two_stage_v3', 'holistic_v4');
 const holisticV3Profile = researchTrialProfileV3(lunaRequest, timeouts, 'two_stage_v3', 'holistic_v3');
 const ringGap = '環に切れ目がある';
 const baseWidth = '台が環より細い';
@@ -73,7 +74,7 @@ type Names = Record<string, string | null>;
 type SavedTrial = {
   options: { dialoguePolicy?: string };
   ownLedger: JevPrivateState['ledger'];
-  queueState: { privateState: JevPrivateState };
+  queueState: { privateState: JevPrivateState; pendingHumanEventIds: string[]; closed: boolean };
   jevTraces: JevTurnTrace[];
   aiSubmission: Names | null;
   finalError: string | null;
@@ -776,6 +777,25 @@ test('Two orientation violations allow the existing fallback when both drafts ad
     assert.equal(turn.generationRequests.length, 2);
     assert.deepEqual(turn.trace.generationGuard, { violations: ['orientation_leak'], regenerated: true, fallback: true });
     assert.deepEqual(turn.after.ownLedger[first], { status: 'agreed', name: originalName });
+  }, memo, legacyFallbackProfile);
+});
+
+test('New v5 keeps the input pending after two orientation violations and publishes no fixed dialogue', async () => {
+  await paired(async trial => {
+    const before = trial.record();
+    const turn = await trial.say({ ...broad, drafts: ['上端に穴があります。', '右端に穴があります。'] });
+    assert.equal(turn.generationRequests.length, 2);
+    assert.equal(turn.trace.generationRetryVersion, 'jev_generation_retry_v4');
+    assert.equal(turn.trace.errorCode, 'unsafe_generation');
+    assert.equal(turn.trace.publicSpeech, null);
+    assert.equal(turn.speech, null);
+    assert.deepEqual(turn.trace.generationGuard, { violations: ['orientation_leak'], regenerated: true, fallback: false });
+    assert.deepEqual(turn.after.queueState.privateState, before.queueState.privateState);
+    assert.equal(turn.after.queueState.pendingHumanEventIds.length, 1);
+    assert.equal(turn.after.queueState.closed, false);
+    assert.equal(s4Probe.traceShape(turn.trace, profile.questionLayout, profile.dialoguePolicy), true);
+    assert.equal(s4Probe.traceShape({ ...turn.trace, generationGuard: { ...turn.trace.generationGuard, fallback: true } },
+      profile.questionLayout, profile.dialoguePolicy), false);
   });
 });
 
