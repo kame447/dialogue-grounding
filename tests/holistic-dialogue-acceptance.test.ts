@@ -293,9 +293,15 @@ const broad: Turn = {
   human: '見えている図形を一つ選んで、全体としてどんな形か教えてください。', action: 'accept', target: 0, drafts: [fullShape],
   publicClaims: [{ text: fullShape, aspect: 'referent', act: 'assert', targets: [first] }],
 };
+const sharedReferent: Segment = {
+  text: 'はい、その環飾りの形を指しています。',
+  aspect: 'referent', act: 'agree', targets: [first],
+  antecedent: { speaker: 'ai', proposition: fullShape },
+};
 const proposalQuestion = '呼び名を決める前に、環に切れ目がある形か確認してもいいですか？';
 const holdProposal: Turn = {
-  human: firstProposal, local: [proposal(firstProposal)], action: 'confirm', target: 0, feature: ringGap,
+  human: sharedReferent.text + firstProposal, local: [sharedReferent, proposal(firstProposal)],
+  action: 'confirm', target: 0, feature: ringGap,
   drafts: [proposalQuestion],
 };
 async function keepNamePending(trial: ReturnType<typeof session>) {
@@ -755,8 +761,8 @@ test('05d-2: the same name quote is checked while tentative and exempt after agr
     const name = '輪縁';
     const remembered = `以前この形を「${name}」と呼んだ人がいました。`;
     const suggestion = `「${name}」という呼び名はどうでしょう？`;
-    const proposed = await trial.say({ human: 'この輪郭はどんな印象ですか？' + remembered,
-      local: [{ text: remembered, aspect: 'name', act: 'assert', name, targets: [first] }],
+    const proposed = await trial.say({ human: sharedReferent.text + 'この輪郭はどんな印象ですか？' + remembered,
+      local: [sharedReferent, { text: remembered, aspect: 'name', act: 'assert', name, targets: [first] }],
       action: 'propose_name', target: 0, name, drafts: [suggestion] });
     published(proposed, 'propose_name', single(first), suggestion);
     assert.deepEqual(proposed.after.ownLedger[first], { status: 'tentative', name });

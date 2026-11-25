@@ -1,5 +1,6 @@
 import { nameBindsFigure, meaningfulEstimate } from "./referent-binding.ts";
 import type { ReferentEstimateValue } from "./referent-binding.ts";
+import type { LocalClaimView, PublicTurn } from "../local-grounding/contract.ts";
 // holistic_v3 turn kinds from the turn's verified claims and the ledger before the turn. Pure and import-free: the run, the state validation, the participant restore
 // and S4 recompute the markers `namingRequest` and `namingReconfirm` with these functions.
 //  - a name proposal of the partner this turn that is not already agreed is a naming request (an approval request is itself a name proposal that carries the earlier
@@ -17,7 +18,92 @@ export function turnNameProposals(claims: readonly NamingClaimLike[], turn: numb
 }
 export const hasNameProposal = (claims: readonly NamingClaimLike[], turn: number): boolean => turnNameProposals(claims, turn).length > 0;
 
-export type NamingJudgmentLike = { turnIndex?: unknown; judgment?: { action?: unknown } | null; jevTurn?: { humanReferent?: unknown } | null };
+export type NamingJudgmentLike = {
+  turnIndex?: unknown; judgment?: { action?: unknown } | null; generationGuard?: { fallback?: boolean } | null;
+  jevTurn?: { humanReferent?: unknown; executed?: { target: { kind: string; figureId?: string; figureIds?: readonly string[] } } } | null;
+  aiPublic?: { aiSeq?: number };
+};
+
+const isFigureEvidence = (c: LocalClaimView) => c.name === null &&
+  ["referent", "part", "contour", "construal"].includes(c.aspect);
+
+/** Find the figure supported by the open public exchange. Naming claims and
+ * referent scores can suggest candidates; neither supplies figure evidence.
+ * The caller supplies live claims and their public source turns. */
+export function publiclyCheckedNamingTarget(claims: readonly LocalClaimView[], publicTurns: readonly PublicTurn[],
+  judgments: readonly NamingJudgmentLike[], turn: number, includeAgreed = false): string | null {
+  const before = judgments.filter((j): j is NamingJudgmentLike & { turnIndex: number } => typeof j.turnIndex === "number" && j.turnIndex < turn);
+  const lastBoundary = before.filter(j => ["agree", "defer", "move_on"].includes(j.judgment?.action as string)).at(-1);
+  const boundary = lastBoundary?.turnIndex ?? 0;
+  const publicByTurn = new Map(publicTurns.map(t => [t.turn, t]));
+  const live = claims.filter(c => {
+    const event = publicByTurn.get(c.sourceTurn);
+    return c.sourceTurn > boundary && c.sourceTurn <= turn &&
+      (isFigureEvidence(c) || c.speaker === "ai" && c.act === "ask" && c.aspect === "question") &&
+      event?.speaker === c.speaker && !!c.quote && event.text.includes(c.quote);
+  });
+  const publications = new Map<number, typeof before[number]>();
+  for (const judgment of before) {
+    const seq = judgment.aiPublic?.aiSeq;
+    if (seq !== undefined && judgment.turnIndex > boundary && judgment.generationGuard?.fallback !== true &&
+        publicByTurn.get(seq)?.speaker === "ai") publications.set(seq, judgment);
+  }
+  const ai = new Map<string, { claim: LocalClaimView; singleton: boolean }>();
+  for (const c of live) {
+    if (c.speaker !== "ai" || !["ask", "assert", "construe", "agree"].includes(c.act)) continue;
+    const published = publications.get(c.sourceTurn);
+    const target = published?.jevTurn?.executed?.target;
+    const ids = target?.kind === "single" ? [target.figureId] : target?.kind === "multiple" ? target.figureIds : undefined;
+    if (ids && c.targets.length > 0 && c.targets.every(id => ids.includes(id))) {
+      ai.set(c.id, { claim: c, singleton: target?.kind === "single" });
+    }
+  }
+
+  // Distinguishing the figure, or answering a documented single-figure check,
+  // is evidence even when the function classifier emits assert instead of agree.
+  const answers: LocalClaimView[] = [];
+  for (const reply of live) {
+    if (reply.speaker !== "human" || reply.targets.length !== 1) continue;
+    if (reply.act === "assert" && reply.aspect === "referent") { answers.push(reply); continue; }
+    const antecedent = reply.respondsTo === null ? undefined : ai.get(reply.respondsTo);
+    if (reply.act === "agree" && antecedent?.singleton &&
+        antecedent.claim.sourceTurn < reply.sourceTurn && antecedent.claim.aspect === reply.aspect &&
+        antecedent.claim.targets.length === 1 && antecedent.claim.targets[0] === reply.targets[0]) {
+      answers.push(reply); continue;
+    }
+    if (reply.act !== "assert" && reply.act !== "construe") continue;
+    const previousAi = publicTurns.filter(event => event.speaker === "ai" && event.turn < reply.sourceTurn).at(-1);
+    if (!previousAi || publicTurns.some(event => event.speaker === "human" && event.turn > previousAi.turn && event.turn < reply.sourceTurn)) continue;
+    const check = publications.get(previousAi.turn);
+    const target = check?.jevTurn?.executed?.target;
+    if (target?.kind === "single" && target.figureId === reply.targets[0] &&
+        ["confirm", "repair"].includes(check?.judgment?.action as string)) answers.push(reply);
+  }
+  const answerAt = Math.max(0, ...answers.map(c => c.sourceTurn));
+  const ambiguityAt = Math.max(0, ...live.filter(c => c.speaker === "human" && c.aspect === "referent" &&
+    (c.act === "ask" || c.act === "assert" && c.targets.length > 1)).map(c => c.sourceTurn));
+  if (ambiguityAt > 0 && ambiguityAt >= answerAt) return null;
+
+  const focus = [...ai.values()].filter(({ claim, singleton }) => singleton && claim.act !== "ask" && claim.targets.length === 1);
+  const focusAt = Math.max(0, ...focus.map(({ claim }) => claim.sourceTurn));
+  // An AI question in the active exchange remains open when the human reply
+  // just asks about a name. A public description on a later turn can establish
+  // a new public focus, while explicit human ambiguity needs a human answer.
+  if ([...ai.values()].some(({ claim }) => claim.act === "ask" && claim.sourceTurn >= focusAt && claim.sourceTurn >= answerAt)) return null;
+
+  const supported = new Set<string>();
+  const evidenceAt = Math.max(focusAt, answerAt);
+  if (focusAt === evidenceAt) for (const { claim } of focus) if (claim.sourceTurn === focusAt) supported.add(claim.targets[0]);
+  if (answerAt === evidenceAt) for (const reply of answers) if (reply.sourceTurn === answerAt) supported.add(reply.targets[0]);
+  const agreed = lastBoundary?.jevTurn?.executed?.target;
+  if (!evidenceAt && includeAgreed && lastBoundary?.judgment?.action === "agree" && agreed?.kind === "single" && agreed.figureId) {
+    supported.add(agreed.figureId);
+  }
+  if (supported.size !== 1) return null;
+  const [figure] = supported;
+  if (live.some(c => c.speaker === "human" && c.sourceTurn >= evidenceAt && c.act === "deny" && c.targets.includes(figure))) return null;
+  return figure;
+}
 /** The partner's referent estimates of the current naming interval (after the last agree, defer or move_on, before this turn), oldest first, then this turn's. */
 export function namingIntervalEstimates(judgments: readonly NamingJudgmentLike[], turn: number, current: ReferentEstimateValue): ReferentEstimateValue[] {
   const lastBoundary = judgments.filter(j => typeof j?.turnIndex === "number" && ["agree", "defer", "move_on"].includes(j.judgment?.action as string)).at(-1)?.turnIndex as number | undefined ?? 0;
@@ -32,10 +118,12 @@ export function inheritedTargetClaimIds(diagnostics: unknown): Set<string> {
 /** The proposal's name is agreed already for the figure it binds to. The partner's own words of this turn decide first: a single target the segment itself named
  * is that figure; a target carried over from the proposal it answers stands unless a meaningful estimate of the interval selects another. Otherwise (no target, several figures) the figure is the one the partner's estimate binds
  * (nameBindsFigure, newest meaningful estimate of the naming interval) among the targets, or among all figures when there are none. No bound figure: not a reconfirmation. */
-function reconfirmsAgreedName(p: NamingClaimLike, ledger: NamingLedgerLike, estimates: readonly ReferentEstimateValue[], inherited: ReadonlySet<string>): boolean {
+function reconfirmsAgreedName(p: NamingClaimLike, ledger: NamingLedgerLike, estimates: readonly ReferentEstimateValue[], inherited: ReadonlySet<string>,
+  publiclyChecked: string | null | undefined): boolean {
   const targets = Array.isArray(p.targets) ? p.targets.filter((t): t is string => typeof t === "string") : [];
   const key = namingNameKey(p.name as string);
-  const agreed = (id: string) => ledger[id]?.status === "agreed" && typeof ledger[id]?.name === "string" && namingNameKey(ledger[id]!.name as string) === key;
+  const agreed = (id: string) => (publiclyChecked === undefined || publiclyChecked === id) &&
+    ledger[id]?.status === "agreed" && typeof ledger[id]?.name === "string" && namingNameKey(ledger[id]!.name as string) === key;
   if (targets.length === 1) {
     // The partner's own single target of this turn decides. A target carried over from the proposal answered stands until the partner's estimate says otherwise.
     if (!inherited.has(p.id as string) || !estimates.some(meaningfulEstimate)) return agreed(targets[0]);
@@ -45,10 +133,10 @@ function reconfirmsAgreedName(p: NamingClaimLike, ledger: NamingLedgerLike, esti
   return figure !== undefined && agreed(figure);
 }
 export function namingTurnKind(claims: readonly NamingClaimLike[], turn: number, ledger: NamingLedgerLike, estimates: readonly ReferentEstimateValue[],
-  inherited: ReadonlySet<string> = new Set()): "none" | "request" | "reconfirm" {
+  inherited: ReadonlySet<string> = new Set(), publiclyChecked?: string | null): "none" | "request" | "reconfirm" {
   const proposals = turnNameProposals(claims, turn);
   if (!proposals.length) return "none";
-  return proposals.every(p => reconfirmsAgreedName(p, ledger, estimates, inherited)) ? "reconfirm" : "request";
+  return proposals.every(p => reconfirmsAgreedName(p, ledger, estimates, inherited, publiclyChecked)) ? "reconfirm" : "request";
 }
 /** Whether figure `id` may be an agree candidate of claim `c` (holistic_v3). `estimates` is the naming interval's estimates, oldest first, this turn's last.
  * A claim that does not name exactly one figure needs the interval's binding (nameBindsFigure). A single-target claim is free outside a naming request, and in one

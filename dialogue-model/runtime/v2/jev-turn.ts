@@ -11,7 +11,7 @@ import { normalizeName } from "../judgment/name-evidence.mjs";
 import { stageMemory } from "../judgment/memory.mjs";
 import { createReferenceGraph, applyReferenceUpdate, previewReferenceUpdate, snapshotReferenceGraph, REFERENCE_LIMITS } from "../memory/reference-graph.mjs";
 import { nameBindsFigure } from "../decision/referent-binding.ts";
-import { hasNameProposal, namingTurnKind, namingIntervalEstimates, inheritedTargetClaimIds, agreeCandidateAllowed, inheritsProposalName, turnNameProposals, namingNameKey, targetNamingConflict } from "../decision/naming-request.ts";
+import { hasNameProposal, namingTurnKind, namingIntervalEstimates, inheritedTargetClaimIds, agreeCandidateAllowed, inheritsProposalName, turnNameProposals, namingNameKey, targetNamingConflict, publiclyCheckedNamingTarget } from "../decision/naming-request.ts";
 import { priorClaimViews, summarizeLocalIssues } from "../local-grounding/derive.ts";
 import { createMemoLocalExtractor, LOCAL_EXTRACTION_INSTRUCTIONS, MEMO_LOCAL_EXTRACTION_INSTRUCTIONS, MEMO_LOCAL_EXTRACTION_INSTRUCTIONS_HOLISTIC } from "../local-grounding/extract.ts";
 import { LOCAL_CLASSIFICATION_INSTRUCTIONS } from "../local-grounding/classify.ts";
@@ -159,7 +159,7 @@ type CommittedAct = {
 };
 export type JevPrivateState = {
   schemaVersion?: "jev_private_state_v2"; interventionPolicy?: {version:"bypass_acceptance_v1";tableSha256:string};
-  agreeNameScopeVersion?: "scoped_v1";
+  agreeNameScopeVersion?: "scoped_v1" | "scoped_v2";
   ledger: OwnLedger; graph: Graph; judgments: CommittedAct[];
   observationMemo: ObservationMemo | null; repairHistory: RepairHistoryEntry[];
   aiPublic?: AiPublicState;
@@ -274,7 +274,9 @@ export function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns
   const lastBoundary = judgments.filter(j => ["agree", "defer", "move_on"].includes(j.judgment.action)).at(-1)?.turnIndex ?? 0;
   const openClaims = publicClaims.filter(c => c.sourceTurn > lastBoundary);
   const proposals = openClaims.filter(isHumanProposal);
-  const scoped = agreeNameScopeVersion === "scoped_v1";
+  const scoped = agreeNameScopeVersion !== undefined;
+  const checkedTarget = agreeNameScopeVersion === "scoped_v2" ? publiclyCheckedNamingTarget(claims, publicTurns, judgments, turn) : undefined;
+  if (checkedTarget === null) return [];
   const latestProposal = (scoped ? proposals.filter(p => p.targets.length === 0) : proposals).at(-1)?.sourceTurn;
   const focusedTurns = judgments.flatMap(({ turnIndex, jevTurn }) => {
     const ids = jevTurn.executed ? targets(jevTurn.executed) : [];
@@ -341,6 +343,7 @@ export function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns
     if (!chain) return [];
     const occupied = slots.filter(id => ledger[id].name !== null && normalizeName(ledger[id].name) === normalized);
     return (referentRule ? candidates.filter(id => agreeCandidateAllowed(c, id, turn, turnHasProposal, inheritedIds, intervalEstimates)) : candidates).filter(id => {
+      if (checkedTarget !== undefined && id !== checkedTarget) return false;
       // Supersession applies to this candidate, using a verified reply or an explicitly bound target.
       if (scoped && proposals.some(p => {
         if (p.sourceTurn <= c.sourceTurn) return false;
@@ -474,7 +477,8 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
   stateJson(value);const s=value as any;validateOwnLedger(Object.fromEntries(ownSlots.map(k=>[k,{status:'unassigned',name:null}])));
   const hasAgreeNameScope=Object.hasOwn(s??{},'agreeNameScopeVersion');
   if(!stateExact(s,['schemaVersion','interventionPolicy','ledger','graph','judgments','observationMemo','repairHistory',...(Object.hasOwn(s??{},'aiPublic')?['aiPublic']:[]),...(hasAgreeNameScope?['agreeNameScopeVersion']:[])])||s.schemaVersion!=='jev_private_state_v2'||!stateSame(s.interventionPolicy,{version:'bypass_acceptance_v1',tableSha256:BYPASS_ACCEPTANCE_V1_TABLE_SHA256}))throw Error();
-  if(hasAgreeNameScope&&(questionLayout!=='two_stage_v3'||s.agreeNameScopeVersion!=='scoped_v1'))throw Error();
+  if(hasAgreeNameScope&&(questionLayout!=='two_stage_v3'||s.agreeNameScopeVersion!=='scoped_v1'&&
+    (s.agreeNameScopeVersion!=='scoped_v2'||policy!=='holistic_v5')))throw Error();
   validateOwnLedger(s.ledger);if(!sameSet(Object.keys(s.ledger),ownSlots))throw Error();const graph=snapshotReferenceGraph(s.graph);if(!sameSet(Object.keys(graph.ownSlots),ownSlots)||!Array.isArray(s.judgments)||!Array.isArray(s.repairHistory))throw Error();
   if(s.observationMemo!==null){const m=validateObservationMemo(s.observationMemo);if(!sameSet(m.figures.map(f=>f.id),ownSlots))throw Error();}
   if(Object.hasOwn(s,'aiPublic'))validateAiPublicState(s.aiPublic,ownSlots,Number.MAX_SAFE_INTEGER,s.graph);
@@ -716,7 +720,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   }
   function initialPrivateState(): JevPrivateState {
     return { ...(integrated?{schemaVersion:'jev_private_state_v2' as const,interventionPolicy:{version:'bypass_acceptance_v1' as const,tableSha256:BYPASS_ACCEPTANCE_V1_TABLE_SHA256}}:{}), ledger: createOwnLedger(slots), judgments: [], graph: createReferenceGraph({ slots }) as Graph, observationMemo: null, repairHistory: [],
-      ...(questionLayout === "two_stage_v3" ? { agreeNameScopeVersion: "scoped_v1" as const } : {}),
+      ...(questionLayout === "two_stage_v3" ? { agreeNameScopeVersion: judgmentV5 && isGenerationV5(generationRetryVersion) ? "scoped_v2" as const : "scoped_v1" as const } : {}),
       ...(aiEnabled ? { aiPublic: initialAiPublicState() } : {}) };
   }
   async function memoOnce(signal?: AbortSignal) {
@@ -748,6 +752,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
     try {
       abortIf(signal);
       const state = integrated?validateJevPrivateStateV2(privateState,slots,intervention!,questionLayout,options.dialoguePolicy):structuredClone(privateState);
+      if (state.agreeNameScopeVersion === "scoped_v2" && !(judgmentV5 && isGenerationV5(generationRetryVersion))) throw new JevTurnError("invalid_state");
       if(!integrated&&(Object.hasOwn(state,'schemaVersion')||Object.hasOwn(state,'interventionPolicy')||state.judgments?.some(j=>Object.hasOwn(j.jevTurn??{},'executed')||Object.hasOwn(j.jevTurn??{},'intervention'))))throw new JevTurnError('invalid_state');
       checkProspectMode(state);
       snapshotReferenceGraph(state.graph);
@@ -868,7 +873,9 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       baseInput.humanReferent = { status: estimate.status, scores: structuredClone(estimate.scores) };
       // holistic_v3: the turn kind needs this very turn's estimate to bind a name that does not itself name one figure.
       if (holisticV3 && questionLayout === "two_stage_v3") {
-        const kind = namingTurnKind(claims, latest.seq, state.ledger, namingIntervalEstimates(state.judgments, latest.seq, baseInput.humanReferent), inheritedTargetClaimIds(prepared.research?.verification?.diagnostics));
+        const checkedTarget = state.agreeNameScopeVersion === "scoped_v2" ? publiclyCheckedNamingTarget(claims, agreeTurns, state.judgments, latest.seq, true) : undefined;
+        const kind = namingTurnKind(claims, latest.seq, state.ledger, namingIntervalEstimates(state.judgments, latest.seq, baseInput.humanReferent),
+          inheritedTargetClaimIds(prepared.research?.verification?.diagnostics), checkedTarget);
         if (kind === "request") { baseInput.namingRequest = true; if (holisticV4) baseInput.namingRequestStrict = true; record.namingRequest = true; } else if (kind === "reconfirm") record.namingReconfirm = true;
       }
       // The estimate of this very exchange backs a re-affirmation of a denied figure, so the candidates are completed only now.

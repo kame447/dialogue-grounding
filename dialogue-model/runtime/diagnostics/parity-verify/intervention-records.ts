@@ -4,7 +4,7 @@ import {createHash as nodeSha256} from 'node:crypto';
 // version constants are evidence; successful producer flags are not an oracle.
 import {jevChoiceAnswersValid,jevReportedCost,jevResponseId} from '../../decision/jev-choice-response.ts';
 import {nameBindsFigure} from '../../decision/referent-binding.ts';
-import {hasNameProposal,namingTurnKind,namingIntervalEstimates,inheritedTargetClaimIds,agreeCandidateAllowed,inheritsProposalName,targetNamingConflict} from '../../decision/naming-request.ts';
+import {hasNameProposal,namingTurnKind,namingIntervalEstimates,inheritedTargetClaimIds,agreeCandidateAllowed,inheritsProposalName,targetNamingConflict,publiclyCheckedNamingTarget} from '../../decision/naming-request.ts';
 import {decodeMaterialV5} from '../../decision/judgment-material-v5.ts';
 import {isHolisticPolicy,isHolisticV2Plus,isHolisticV3Plus,isHolisticV4Plus} from '../../decision/contract.ts';
 import {generationGuardCodes,draftViolationCodes,deriveGenerationOutcome,orientationSafeFallback,findOrientationLeaks,hasOrientationWords,hasVersionedViewpoint,isGenerationV5,validGenerationRetryVersion,allowsOrientationFallback} from '../../v2/generation-guard.ts';
@@ -443,7 +443,17 @@ function s4LocalReverify(tape:any,t:any,policy:string,after:any):'ok'|'mismatch'
 // holistic_v3: the turn kind from the turn's claims (saved graph plus this turn's local claims) and the ledger before the turn, by the shared function.
 function s4NamingKind(tape:any,trace:any):'none'|'request'|'reconfirm'{
  const graph=tape.generationGraph??tape.state?.graph;
- return namingTurnKind([...(graph?.records??[]).filter((c:any)=>c.kind==='claim'),...(trace.local?.claims??[]).filter((c:any)=>c.kind==='claim')],trace.turnIndex,tape.state?.ledger??{},namingIntervalEstimates((tape.state?.judgments??[]).filter((x:any)=>x.turnIndex<trace.turnIndex),trace.turnIndex,trace.humanReferent),inheritedTargetClaimIds(trace.local?.verification?.diagnostics));
+ const scoped=tape.state?.agreeNameScopeVersion==='scoped_v2';
+ const claims=scoped?liveClaims(graph).sort((a:any,b:any)=>a.sourceTurn-b.sourceTurn||a.turn-b.turn).slice(-160):
+  [...(graph?.records??[]).filter((c:any)=>c.kind==='claim'),...(trace.local?.claims??[]).filter((c:any)=>c.kind==='claim')];
+ const judgments=(tape.state?.judgments??[]).filter((x:any)=>x.turnIndex<trace.turnIndex);
+ const checked=scoped?publiclyCheckedNamingTarget(claims,s4NamingPublicTurns(tape,trace),judgments,trace.turnIndex,true):undefined;
+ return namingTurnKind(claims,trace.turnIndex,tape.state?.ledger??{},namingIntervalEstimates(judgments,trace.turnIndex,trace.humanReferent),inheritedTargetClaimIds(trace.local?.verification?.diagnostics),checked);
+}
+function s4NamingPublicTurns(tape:any,trace:any){
+ const events:any[]=tape.events??[];
+ return events.filter(e=>e.seq<=trace.turnIndex&&events.filter(o=>o.seq===e.seq).length===1)
+  .map(e=>({turn:e.seq,speaker:e.speaker,text:e.text}));
 }
 const s4TypedContext=(tape:any,trace:any)=>H3()?!!CTX.namingRequest:s4OpenHumanProposal(tape,trace,true);
 function s4OpenHumanProposal(tape:any,trace:any,askCounts=true):boolean{
@@ -545,8 +555,9 @@ function agreeSource(tr:any,t:any,key:string,tape:any,legacyV3=false):'invalid'|
   const z=j.jevTurn,v3=layoutOf(tr.profile)==='two_stage_v3';
   // The rule is pinned by the pre-turn state carried in the hashed replay material and by the committed state.
   const version=tape.state?.agreeNameScopeVersion;
-  if(version!==state.agreeNameScopeVersion||version!==undefined&&(!v3||version!=='scoped_v1'))return'invalid';
-  const scoped=version==='scoped_v1';
+  if(version!==state.agreeNameScopeVersion||version!==undefined&&(!v3||version!=='scoped_v1'&&
+    (version!=='scoped_v2'||tr.profile?.dialoguePolicy!=='holistic_v5'||!hasVersionedViewpoint(t.generationRetryVersion))))return'invalid';
+  const scoped=version!==undefined;
   // two_stage_v3 always saves its agree evidence (an adaptive-off trial too); a known judgment without it is a forged omission.
   if(!Object.hasOwn(z,'agreeNames'))return v3?'invalid':{known:true,names:undefined};
   const names=z.agreeNames,slots=Object.keys(state.ledger??{});
@@ -564,6 +575,7 @@ function agreeSource(tr:any,t:any,key:string,tape:any,legacyV3=false):'invalid'|
    const publicClaims=live.filter((c:any)=>c.aspect==='name'&&typeof c.name==='string'&&c.name!==null&&win.some((e:any)=>e.seq===c.sourceTurn));
    const preLedger=tape?.state?.ledger??state.ledger??{};
    const preJudgments=tape?.state?.judgments??(state.judgments??[]).filter((x:any)=>x.turnIndex<t.turnIndex);
+   const checkedTarget=version==='scoped_v2'?publiclyCheckedNamingTarget(live,s4NamingPublicTurns(tape,t),preJudgments,t.turnIndex):undefined;
    const lastBoundary=preJudgments.filter((x:any)=>['agree','defer','move_on'].includes(x.judgment?.action)).at(-1)?.turnIndex??0;
    const openClaims=publicClaims.filter((c:any)=>c.sourceTurn>lastBoundary),proposals=openClaims.filter(isHumanProposal);
    const latestProposal=proposals.at(-1)?.sourceTurn;
@@ -620,6 +632,7 @@ function agreeSource(tr:any,t:any,key:string,tape:any,legacyV3=false):'invalid'|
      (tr.profile?.dialoguePolicy==='holistic_v5'&&hasVersionedViewpoint(t.generationRetryVersion)?chainedSource(c,name):undefined);
     if(!s)return[];
     return eligibleSlots.filter(id=>{
+     if(checkedTarget!==undefined&&id!==checkedTarget)return false;
      if(perFigure&&proposals.some((p:any)=>{
       if(p.sourceTurn<=c.sourceTurn)return false;
       const linked=p.respondsTo===c.id||antecedent!==undefined&&p.respondsTo===antecedent.id;
@@ -665,7 +678,10 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
     typeof instructions==='string'&&instructions.endsWith('\n'+LEGACY_V3_TARGET));
   const src=agreeSource(tr,t,key,tape,legacyV3);if(src==='invalid')return'invalid';
    const trial=trialVersion(t,tape.technicalTrial);if(trial==='invalid')return'invalid';
-   Object.assign(CTX,{critKind:null,facts:Array.isArray(t.repairFacts),agree:src.names,known:src.known,v3:layout==='two_stage_v3',trial:trial!==null,ledger:tape.state?.ledger,legacyV3,style:null,policy:tr.profile?.dialoguePolicy??null,humanNames:isHolisticV2Plus(tr.profile?.dialoguePolicy)?s4HumanProposedNames(tape,t):null,namingRequest:isHolisticV3Plus(tr.profile?.dialoguePolicy)&&s4NamingKind(tape,t)==='request',namingReconfirm:isHolisticV3Plus(tr.profile?.dialoguePolicy)&&s4NamingKind(tape,t)==='reconfirm',acceptOptional:t.namingRequest===true});
+   const namingTape=tape.state?.agreeNameScopeVersion==='scoped_v2'?
+    {...tape,generationGraph:(tr.turns??[]).find((v:any)=>v.turn===t.turnIndex)?.state?.graph??tr.lastCommittedState?.graph}:tape;
+   const namingKind=isHolisticV3Plus(tr.profile?.dialoguePolicy)?s4NamingKind(namingTape,t):'none';
+   Object.assign(CTX,{critKind:null,facts:Array.isArray(t.repairFacts),agree:src.names,known:src.known,v3:layout==='two_stage_v3',trial:trial!==null,ledger:tape.state?.ledger,legacyV3,style:null,policy:tr.profile?.dialoguePolicy??null,humanNames:isHolisticV2Plus(tr.profile?.dialoguePolicy)?s4HumanProposedNames(tape,t):null,namingRequest:namingKind==='request',namingReconfirm:namingKind==='reconfirm',acceptOptional:t.namingRequest===true});
    if(isHolisticV3Plus(tr.profile?.dialoguePolicy)&&layout==='two_stage_v3'){
     const redone=s4LocalReverify(tape,t,tr.profile.dialoguePolicy,(tr.turns??[]).find((u:any)=>u.turn===t.turnIndex)?.state?.graph);
     if(redone==='mismatch')return'invalid';
