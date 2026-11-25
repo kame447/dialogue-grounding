@@ -157,7 +157,7 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
         if (trace.status === 'committed') {
           const judgment = savedJudgments.find((j: any) => j?.turnIndex === trace.turnIndex && j?.jevTurn?.attemptNumber === trace.attemptNumber);
           if (!judgment) return invalid();
-          for (const key of ['humanReferent','repairProspect','repairGate','repairFacts','draftActs','namingRequest','namingReconfirm'])
+          for (const key of ['executed','humanReferent','repairProspect','repairGate','repairFacts','draftActs','namingRequest','namingReconfirm'])
             if (Object.hasOwn(trace, key) !== Object.hasOwn(judgment.jevTurn, key) || Object.hasOwn(trace, key) && researchHash(jsonData(trace[key])) !== researchHash(jsonData(judgment.jevTurn[key]))) return invalid();
         }
       }

@@ -1539,3 +1539,19 @@ for (const strategy of strategies) {
     await assert.rejects(dialogue.restoreFrom(tampered));
   });
 }
+
+// #197: an ordinary participant restore compares the executed action of a saved trace with the saved state's own copy.
+for (const strategy of strategies) {
+  test(`#197 ${strategy} refuses a restore whose trace executed action differs from the saved state`, async () => {
+    const dialogue = session(strategy);
+    await dialogue.start();
+    await dialogue.say(broad);
+    const untouched = dialogue.record();
+    await dialogue.restoreFrom(untouched);
+    const tampered = JSON.parse(JSON.stringify(untouched));
+    const trace = tampered.jevTraces.find((entry: { status: string }) => entry.status === 'committed');
+    assert.ok(trace?.executed, 'a committed trace carries its executed decision');
+    trace.executed.action = trace.executed.action === 'confirm' ? 'accept' : 'confirm';
+    await assert.rejects(dialogue.restoreFrom(tampered));
+  });
+}

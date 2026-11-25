@@ -503,6 +503,9 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
    // A turn with a name proposal carries exactly one of the two markers; one without carries none. A reconfirmation also needs an agreed ledger name equal to a proposal's name.
    if(isRequest&&z.namingRequest!==true||isReconfirm&&z.namingReconfirm!==true||isRequest&&isReconfirm||(isRequest||isReconfirm)!==proposed)throw Error();
    if(isReconfirm&&!turnNameProposals(turnClaims,j.turnIndex).some((p:any)=>Object.values(s.ledger??{}).some((e:any)=>e?.status==='agreed'&&typeof e.name==='string'&&namingNameKey(e.name)===namingNameKey(p.name))))throw Error();
+   // The name a reconfirmation reconfirms was agreed by an earlier turn's executed agree, not by this turn: the final ledger alone cannot tell the turn that first agreed it from a later one.
+   if(isReconfirm){const proposed=turnNameProposals(turnClaims,j.turnIndex).map((p:any)=>namingNameKey(p.name));
+    if(!s.judgments.some((x:any)=>x!==j&&x?.turnIndex<j.turnIndex&&x.jevTurn?.executed?.action==='agree'&&typeof x.jevTurn.executed.name==='string'&&proposed.includes(namingNameKey(x.jevTurn.executed.name))))throw Error();}
    const acceptOptional=z.namingRequest===true;
    // holistic_v4: an unadopted name's request never offered accept, so no saved score of it and no executed accept can stand for such a turn.
    const noAcceptTurn=isHolisticV4Plus(policy)&&questionLayout==='two_stage_v3'&&z.namingRequest===true;
