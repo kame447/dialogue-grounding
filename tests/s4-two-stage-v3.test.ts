@@ -1179,6 +1179,55 @@ test('05z-1: S4 redoes the human-side local verification with the saved version\
   }
 });
 
+import { LOCAL_EXTRACTION_INSTRUCTIONS } from '../dialogue-model/runtime/local-grounding/extract.ts';
+test('05aa-1: S4 applies the redone operations as the run does: the memory\'s 16-operation limit refuses the last segment and the record is regular (v3, v4, both strategies)', async () => {
+  const s3 = Object.keys(OLD.state.ledger)[3];
+  const speech = '角ばった塊に細い脚が付いた形のように見えます。';
+  const ai = JSON.stringify([{ segmentId: 'shape', quote: speech, targets: [s3], aspect: 'construal', proposition: 'x', name: null, linkedIssueId: null, respondsToTurn: null }]);
+  const seg1 = (quote: string, name: string | null, targets: string[] = []) => JSON.stringify([{ segmentId: 's1', quote, targets, aspect: 'name', proposition: quote, name, linkedIssueId: null, respondsToTurn: null }]);
+  const sentences = (n: number) => Array.from({ length: n }, (_, k) => `特徴${k + 1}があります。`);
+  const many = (n: number) => JSON.stringify(sentences(n).map((quote, k) => ({ segmentId: 's' + (k + 1), quote, targets: [s3], aspect: 'part', proposition: quote, name: null, linkedIssueId: null, respondsToTurn: null })));
+  for (const label of ['repair-first', 'bypass-enabled'] as const) {
+    for (const policy of ['holistic_v3', 'holistic_v4'] as const) {
+      for (const n of [15, 16]) {
+        const record = await buildRecords({ label, dialoguePolicy: policy, turns: [
+          { human: 'どんな図形がありますか？', plan: { action: 'confirm', target: 'figure_3', speech, aiExtraction: ai } },
+          { human: 'これ、かかしとかどう？', plan: { action: 'agree', target: 'figure_3', name: 'かかし', act: 'name_propose', referent: 'figure_3', extraction: seg1('かかし', 'かかし', [s3]), speech: '「かかし」と呼びましょう。' } },
+          { human: sentences(n).join(''), plan: { action: 'accept', target: 'none', act: 'assert', referent: 'none', extraction: many(n), speech: 'はい。' } }] });
+        const t = record.trials[0].attempts[0];
+        const rejected = (t.local.verification?.rejected ?? []).map((r: any) => r.reason);
+        assert.equal(t.local.claims.length, 15, `${label} ${policy} ${n}`);
+        assert.deepEqual(rejected, n === 16 ? ['memory_invalid_update'] : [], `${label} ${policy} ${n}: the memory refuses only what is beyond its limit`);
+        assert.ok(finalChecks(record).length >= 4 && finalChecks(record).every((c: any) => c.status === 'pass'), `${label} ${policy} ${n} ` + JSON.stringify(finalChecks(record).filter((c: any) => c.status !== 'pass').map((c: any) => [c.id, c.reason])));
+      }
+    }
+  }
+});
+
+test('05aa-2: a redacted value is an unknown value: another segment\'s redacted proposition does not hide a version mismatch, a redacted quote or name is not_reached, never pass', async () => {
+  const s3 = Object.keys(OLD.state.ledger)[3];
+  const speech = '角ばった塊に細い脚が付いた形のように見えます。';
+  const ai = JSON.stringify([{ segmentId: 'shape', quote: speech, targets: [s3], aspect: 'construal', proposition: 'x', name: null, linkedIssueId: null, respondsToTurn: null }]);
+  const seg = (quote: string, name: string | null, targets: string[] = [], respondsToTurn: number | null = null) => JSON.stringify([{ segmentId: 's1', quote, targets, aspect: 'name', proposition: quote, name, linkedIssueId: null, respondsToTurn }]);
+  const approval = 'その呼び名でいい？', feature = '丸い穴があります。';
+  const two = JSON.stringify([{ segmentId: 's1', quote: approval, targets: [], aspect: 'name', proposition: approval, name: null, linkedIssueId: null, respondsToTurn: 4 },
+    { segmentId: 's2', quote: feature, targets: [s3], aspect: 'part', proposition: LOCAL_EXTRACTION_INSTRUCTIONS.slice(0, 120), name: null, linkedIssueId: null, respondsToTurn: null }]);
+  for (const label of ['repair-first', 'bypass-enabled'] as const) {
+    const record = await buildRecords({ label, dialoguePolicy: 'holistic_v4', turns: [
+      { human: 'どんな図形がありますか？', plan: { action: 'confirm', target: 'figure_3', speech, aiExtraction: ai } },
+      { human: 'これ、かかしとかどう？', plan: { action: 'agree', target: 'figure_3', name: 'かかし', act: 'name_propose', referent: 'figure_3', extraction: seg('かかし', 'かかし', [s3]), speech: '「かかし」と呼びましょう。' } },
+      { human: approval + feature, plan: { action: 'accept', target: 'none', act: 'name_propose', antecedent: 'claim_2', referent: 'figure_3', extraction: two, speech: 'うん、いいよ。' } }] });
+    const trace = record.trials[0].attempts[0];
+    assert.ok(trace.local.extractor.segments.some((x: any) => x.redacted === true), `${label}: a segment of the turn is redacted`);
+    assert.ok(finalChecks(record).length >= 4 && finalChecks(record).every((c: any) => c.status === 'pass'), `${label}: the regular v4 record with a redacted proposition`);
+    assert.ok(!finalChecks(relabel(record, 'holistic_v3')).every((c: any) => c.status === 'pass'), `${label}: a v4 record under v3 stays refused although another segment is redacted`);
+    const hidden = structuredClone(record);
+    for (const x of traceCopies(hidden)) x.local.extractor.segments[0].quote = '[redacted]';
+    const status = finalChecks(hidden).find((c: any) => c.id.endsWith('.replay'))?.status;
+    assert.notEqual(status, 'pass', `${label}: a redacted quote that the decision needs`);
+  }
+});
+
 test('05s: S4 derives the question triggers of a reconfirmation without the wording trigger: the affirming draft carries no question record, a question record on it is refused', async () => {
   const s3 = Object.keys(OLD.state.ledger)[3];
   const speech = '角ばった塊に細い脚が付いた形のように見えます。';

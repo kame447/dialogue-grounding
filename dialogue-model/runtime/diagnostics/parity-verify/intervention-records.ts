@@ -8,7 +8,7 @@ import {hasNameProposal,namingTurnKind,namingIntervalEstimates,inheritedTargetCl
 import {generationGuardCodes,draftViolationCodes,deriveGenerationOutcome,orientationSafeFallback} from '../../v2/generation-guard.ts';
 import {checkModelIdentity} from '../../model-identity-contract.ts';
 import {resolveModelPolicy} from '../../model-policy.ts';
-import {verifyLocalUpdate} from '../../local-grounding/verify.ts';
+import {verifyLocalUpdate,applyVerifiedOperation} from '../../local-grounding/verify.ts';
 import {check,hash,equal,row,rows,list,META_KEYS} from './core.ts';
 import type {Check,Records} from './core.ts';
 const POLICY='376d569120ca36a3eceaf5ab95410f7eb83f25fbb681e7566a684b97c35165c8';
@@ -372,31 +372,36 @@ function s4HumanProposedNames(tape:any,trace:any):Set<string>{
  const claims=liveClaims({records:[...(graph?.records??[]),...(trace.local?.claims??[]).filter((c:any)=>c.kind==='claim')]});
  return new Set(claims.filter((c:any)=>c.speaker==='human'&&c.act==='name_propose'&&typeof c.name==='string'&&c.name!==''&&c.sourceTurn<=trace.turnIndex).map((c:any)=>ledgerName(c.name)));
 }
-// holistic_v3/v4: the turn's human-side local verification is done again from the saved extraction, the saved classifier verdicts, the graph before the turn (plus the AI claims
-// this turn committed) and the public turns, by the shared verifier with the saved version's options. What it adopts and rejects must be what the trace holds: a record
-// whose approval request was handled under another version's rule (an inherited name, the turn pointer) cannot pass. A redacted trace cannot be redone and is left to the other checks.
-function s4LocalReverify(tape:any,t:any,policy:string,after:any):boolean{
+// holistic_v3/v4: the turn's human-side local verification is done again from the saved extraction, the saved classifier verdicts, the graph before the turn's human claims (the saved
+// graph after the turn without them: it holds the AI claims this turn committed) and the public turns, by the shared verifier with the saved version's options; the verified
+// operations are then applied to the graph before the turn in the run's own order (the AI claims first) and through its own step, so an operation the memory refused at its limit
+// is refused here too. What it adopts and rejects must be what the trace holds: a record whose approval request was handled under another version's rule cannot pass.
+// A redacted value is an unknown value: a redacted proposition is carried as recorded (no decision reads it). A turn whose decision needs a redacted quote or name cannot be redone: 'unknown'.
+function s4LocalReverify(tape:any,t:any,policy:string,after:any):'ok'|'mismatch'|'unknown'{
  const local=t?.local;
- if(!local||!Array.isArray(local.extractor?.segments)||!Array.isArray(local.classifier?.verdicts)||!Array.isArray(local.claims)||!Array.isArray(local.aiClaims)||local.status!=='committed'&&local.status!=='staged'&&local.status!=='error')return true;
- if(local.localStatus!==undefined&&local.localStatus!=='ok')return true;
- if([...local.extractor.segments,...local.claims,...local.aiClaims].some((x:any)=>x?.redacted===true))return true;
- if(!after||!Array.isArray(after.records))return true;
- // The graph the verifier saw: the saved graph after the turn, without the human claims this turn added (the AI claims committed in the same update stay).
+ if(!local||!Array.isArray(local.extractor?.segments)||!Array.isArray(local.classifier?.verdicts)||!Array.isArray(local.claims)||local.status!=='committed'&&local.status!=='staged'&&local.status!=='error')return'ok';
+ if(local.localStatus!==undefined&&local.localStatus!=='ok')return'ok';
+ if(!after||!Array.isArray(after.records)||!tape?.state?.graph||!Array.isArray(tape.state.graph.records))return'ok';
+ if(local.extractor.segments.some((x:any)=>x?.quote==='[redacted]'||x?.name==='[redacted]')||local.claims.some((c:any)=>c?.name==='[redacted]'))return'unknown';
  const savedIds=new Set(local.claims.map((c:any)=>c.id));
  const base={...after,records:after.records.filter((r:any)=>!(r?.kind==='claim'&&savedIds.has(r.id)))};
  const turn=t.turnIndex,publicTurns=(tape.events??[]).filter((e:any)=>e.seq<=turn).map((e:any)=>({turn:e.seq,speaker:e.speaker,text:String(e.text)}));
  const segments=local.extractor.segments.map(({act:_a,redacted:_r,...s}:any)=>s);
  const verdicts=local.classifier.verdicts.map((v:any)=>({segmentId:v.segmentId,act:v.act,respondsToClaimId:v.respondsToClaimId,rawScore:null}));
- let result:any;
+ let applied:any[]=[],rejected:string[]=[];
  try{
-  result=verifyLocalUpdate({graph:base,turn,publicTurns,segments,verdicts,keepUnboundApproval:true,approvalFromNamedClaim:policy==='holistic_v4'} as any);
- }catch{return false;}
+  const verified:any=verifyLocalUpdate({graph:base,turn,publicTurns,segments,verdicts,keepUnboundApproval:true,approvalFromNamedClaim:policy==='holistic_v4'} as any);
+  rejected=verified.rejected.map((r:any)=>String(r.reason));
+  const before=tape.state.graph;
+  let update:any={expectedRevision:before.revision,turn,operations:[]};
+  const aiOps=after.records.filter((r:any)=>r?.kind==='claim'&&r.speaker==='ai'&&r.turn===turn).map(({turn:_t,...op}:any)=>op);
+  for(const op of aiOps){const step=applyVerifiedOperation(before,update,op,publicTurns);if(step.applied)update=step.update;}
+  for(const op of verified.operations){const step=applyVerifiedOperation(before,update,op,publicTurns);if(step.applied){update=step.update;applied.push(op);}else rejected.push(step.reason);}
+ }catch{return'mismatch';}
  const shape=(c:any)=>JSON.stringify([c.id,c.act,c.aspect,c.targets,c.name,c.respondsTo]);
- const redone=result.operations.map(shape),saved=local.claims.map(shape);
- if(redone.length!==saved.length||redone.some((x:string,i:number)=>x!==saved[i]))return false;
- const reasons=(list:any[])=>list.map((r:any)=>String(r.reason)).sort().join();
- const savedRejected=(local.verification?.rejected??[]).filter((r:any)=>!String(r.reason).startsWith('memory_'));
- return reasons(result.rejected)===reasons(savedRejected);
+ if(applied.length!==local.claims.length||applied.some((c:any,i:number)=>shape(c)!==shape(local.claims[i])))return'mismatch';
+ const reasons=(list:string[])=>[...list].sort().join();
+ return reasons(rejected)===reasons((local.verification?.rejected??[]).map((r:any)=>String(r.reason)))?'ok':'mismatch';
 }
 // holistic_v3: the turn kind from the turn's claims (saved graph plus this turn's local claims) and the ledger before the turn, by the shared function.
 function s4NamingKind(tape:any,trace:any):'none'|'request'|'reconfirm'{
@@ -617,7 +622,11 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
   const src=agreeSource(tr,t,key,tape,legacyV3);if(src==='invalid')return'invalid';
    const trial=trialVersion(t,tape.technicalTrial);if(trial==='invalid')return'invalid';
    Object.assign(CTX,{critKind:null,facts:Array.isArray(t.repairFacts),agree:src.names,known:src.known,v3:layout==='two_stage_v3',trial:trial!==null,ledger:tape.state?.ledger,legacyV3,style:null,policy:tr.profile?.dialoguePolicy??null,humanNames:['holistic_v2','holistic_v3','holistic_v4'].includes(tr.profile?.dialoguePolicy)?s4HumanProposedNames(tape,t):null,namingRequest:['holistic_v3','holistic_v4'].includes(tr.profile?.dialoguePolicy)&&s4NamingKind(tape,t)==='request',namingReconfirm:['holistic_v3','holistic_v4'].includes(tr.profile?.dialoguePolicy)&&s4NamingKind(tape,t)==='reconfirm',acceptOptional:t.namingRequest===true});
-   if(['holistic_v3','holistic_v4'].includes(tr.profile?.dialoguePolicy)&&layout==='two_stage_v3'&&!s4LocalReverify(tape,t,tr.profile.dialoguePolicy,(tr.turns??[]).find((u:any)=>u.turn===t.turnIndex)?.state?.graph))return'invalid';
+   if(['holistic_v3','holistic_v4'].includes(tr.profile?.dialoguePolicy)&&layout==='two_stage_v3'){
+    const redone=s4LocalReverify(tape,t,tr.profile.dialoguePolicy,(tr.turns??[]).find((u:any)=>u.turn===t.turnIndex)?.state?.graph);
+    if(redone==='mismatch')return'invalid';
+    if(redone==='unknown')return'missing';
+   }
    // The trace's own marker of a typed naming request is checked against the request recomputed from the turn's claims: only a holistic_v3 trial carries it, and exactly then.
    if(H3()?(t.namingRequest===true)!==!!CTX.namingRequest||(t.namingReconfirm===true)!==!!CTX.namingReconfirm:Object.hasOwn(t,'namingRequest')||Object.hasOwn(t,'namingReconfirm'))return'invalid';
  if(!exact(tape,['schemaVersion','state','events','common','tails','recorded',...(Object.hasOwn(tape??{},'technicalTrial')?['technicalTrial']:[]),...(Object.hasOwn(tape??{},'generationRetryVersion')?['generationRetryVersion']:[])])||tape.schemaVersion!=='parity_intervention_replay_v1'||!exact(result,['schemaVersion','status','error','commonEqual','policyConformant','recordedPayloadsReproduced','actualLunaHttpMeasured','hashScheme','excludedEnvelopeFields','sides'])||result.schemaVersion!=='parity_intervention_replay_result_v1'||result.status!=='same_material_intervention_verified'||result.error!==null||result.commonEqual!==true||result.policyConformant!==true||result.recordedPayloadsReproduced!==true||typeof result.actualLunaHttpMeasured!=='boolean'||result.hashScheme!=='canonical_json_sha256_not_raw_body_bytes'||!equal(result.excludedEnvelopeFields,META_KEYS)||!Array.isArray(result.sides)||result.sides.length!==2)return'invalid';

@@ -2,9 +2,9 @@
 // operations; the dialogue queue still owns publication and state installation.
 import { LOCAL_ACTS, LOCAL_ASPECTS } from "../local-grounding/contract.ts";
 import type { LocalAct, LocalOwnImage, LocalOwnAnchor, LocalFunctionVerdict, LocalSegmentProposal, LocalGroundingOptions, PublicTurn, LocalRejection, LocalVerificationResult } from "../local-grounding/contract.ts";
-import { verifyLocalUpdate, recordAiClaims, type LocalVerificationDiagnostic } from "../local-grounding/verify.ts";
+import { verifyLocalUpdate, recordAiClaims, applyVerifiedOperation, type LocalVerificationDiagnostic } from "../local-grounding/verify.ts";
 import { summarizeLocalIssues, priorClaimViews } from "../local-grounding/derive.ts";
-import { validateReferenceUpdate, previewReferenceUpdate, ReferenceGraphError } from "../memory/reference-graph.mjs";
+import { previewReferenceUpdate } from "../memory/reference-graph.mjs";
 import { literalSpan } from "../judgment/public-evidence.mjs";
 import { LOCAL_EXTRACTION_INSTRUCTIONS, LocalExtractionError, type LocalExtractionErrorCode } from "../local-grounding/extract.ts";
 import { LOCAL_CLASSIFICATION_INSTRUCTIONS, LocalClassificationError, type LocalClassificationErrorCode } from "../local-grounding/classify.ts";
@@ -183,18 +183,14 @@ export async function prepareLocalGroundingTurn(options: LocalGroundingOptions, 
     const merge = (verified: LocalVerificationResult) => {
       rejected.push(...verified.rejected.map((r, i) => ({ segmentId: segmentCode(r.segmentId, i), reason: reasonCode(r.reason) })));
       for (const operation of verified.operations) {
-        const candidate = { ...update, operations: [...update.operations, operation] };
-        try {
-          update = validateReferenceUpdate(input.graph, candidate, { publicTurns }); accepted++;
+        const step = applyVerifiedOperation(input.graph, update, operation, publicTurns);
+        if (step.applied) {
+          update = step.update; accepted++;
           if (research) {
             const claim = researchClaim(operation);
             (claim.speaker === "ai" ? research.aiClaims : research.claims).push(claim);
           }
-        }
-        catch (error) {
-          if (!(error instanceof ReferenceGraphError)) throw error;
-          rejected.push({ segmentId: `operation_${accepted + rejected.length + 1}`, reason: "memory_" + reasonCode(error.code) });
-        }
+        } else rejected.push({ segmentId: `operation_${accepted + rejected.length + 1}`, reason: step.reason });
       }
     };
     // Both current opt-in callers use this boundary. Never select legacy mode

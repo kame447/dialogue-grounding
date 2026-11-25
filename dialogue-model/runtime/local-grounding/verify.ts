@@ -4,7 +4,7 @@ import { LOCAL_ASPECTS, LOCAL_ACTS } from "./contract.ts";
 import type { LocalSegmentProposal, LocalFunctionVerdict, LocalVerificationResult, LocalClaimView, PublicTurn } from "./contract.ts";
 import { isBareDeictic, literalSpan, quoteAround } from "../judgment/public-evidence.mjs";
 import { SLOTS } from "../stimuli/board.mjs";
-import { REFERENCE_LIMITS, snapshotReferenceGraph } from "../memory/reference-graph.mjs";
+import { REFERENCE_LIMITS, snapshotReferenceGraph, validateReferenceUpdate, ReferenceGraphError } from "../memory/reference-graph.mjs";
 import { priorClaimViews } from "./derive.ts";
 
 export type LocalGraph = { records: readonly unknown[]; slots?: readonly string[] };
@@ -191,6 +191,20 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
       respondsToClaimId: ref(verdict.respondsToClaimId) ? verdict.respondsToClaimId : null, resolvedIssueId: issueId });
   }
   return result;
+}
+
+/** The reason a verified operation the memory then refused is recorded under (the run and S4 share it). */
+export const memoryRejectionReason = (code: unknown): string => "memory_" + (typeof code === "string" && /^[a-z][a-z0-9_]{0,59}$/.test(code) ? code : "invalid_update");
+/** The run's own step for one verified operation: append it to the update and let the memory validate the whole update, so an operation beyond the memory's limits is refused
+ * while the earlier ones stand. S4 applies the redone operations through this same function, in the same order, on the graph before the turn. */
+export function applyVerifiedOperation<U extends { operations: unknown[] }>(graph: LocalGraph, update: U, operation: unknown, publicTurns: readonly PublicTurn[]):
+  { applied: true; update: U } | { applied: false; reason: string } {
+  const candidate = { ...update, operations: [...update.operations, operation] };
+  try { return { applied: true, update: validateReferenceUpdate(graph, candidate, { publicTurns }) as unknown as U }; }
+  catch (error) {
+    if (!(error instanceof ReferenceGraphError)) throw error;
+    return { applied: false, reason: memoryRejectionReason((error as { code?: unknown }).code) };
+  }
 }
 
 export type LocalPriorAct = {
