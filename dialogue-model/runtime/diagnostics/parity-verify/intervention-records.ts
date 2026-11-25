@@ -1319,7 +1319,7 @@ const FIXED_HOLISTIC_V5={...FIXED_HOLISTIC,
  generator:rep(rep(rep(FIXED_HOLISTIC.generator,TRIAL_HOLISTIC.from,TRIAL_HOLISTIC.generator),
   '自分の画面の向きに依存する上下左右・右向き・上端・下端などの語で形を説明しないでください。特徴を伝えるときは、回転しても変わらない尖りの数や大小・くぼみ・細長さ・四角の有無・部分同士のつながりから選んでください。',VIEWPOINT_RULE_V5_S4),
   '非公開メモやdiscriminatingFeatureには自分側の画面の向きに依存する語（上下左右・側・端・向き・斜め上/下/左/右・縦長・横長等）が含まれることがあるため、公開発話にはそのまま写さず、回転しても変わらない尖り・くぼみ・四角い部分・つながりなどの表現に言い換えるか、同じ節で「こちらの画面では〜」と視点を明示して伝えてください。',''),
- scope:{...TRIAL_HOLISTIC.scope,
+ scope:{...FIXED_HOLISTIC.scope,...TRIAL_HOLISTIC.scope,
   confirm:rep(TRIAL_HOLISTIC.scope.confirm,'回転に依存しない表現で','形の参照枠に関する共通教示に沿って'),
   repair:rep(TRIAL_HOLISTIC.scope.repair,'回転に依存しない表現で','形の参照枠に関する共通教示に沿って')}};
 
