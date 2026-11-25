@@ -249,7 +249,7 @@ export function createBaseParticipantServer(options: Record<string, any> = {}) {
         const bytes=await readFile(join(PUBLIC,file));res.end(type==='text/html'?participantContactHTML(bytes.toString('utf8'),options.participantContactText):bytes);return;
       }
       const recordPath=path.match(/^\/api\/records\/([^/]+)\/(review|questionnaire)$/u);
-      const action=req.method==='POST'&&['/api/start','/api/message','/api/names','/api/retry','/api/ai-submit'].includes(path);
+      const action=req.method==='POST'&&['/api/start','/api/message','/api/names','/api/retry','/api/interrupt','/api/ai-submit'].includes(path);
       const sessions=path==='/api/sessions'&&['GET','POST'].includes(req.method!);
       if(!sessions&&!action&&!(req.method==='GET'&&['/api/state','/api/records'].includes(path))&&!(recordPath&&['GET','POST'].includes(req.method!)))return json(404,{error:'not_found'});
       if(!cookie)return json(401,{error:'session_required'});
@@ -317,6 +317,10 @@ export function createBaseParticipantServer(options: Record<string, any> = {}) {
         return json(202,{eventId:receipt.eventId,...await state()});
       }
       if(path==='/api/retry')await task.retry();
+      if(path==='/api/interrupt'){
+        if(typeof task.interruptDialogue!=='function'||live.dialogueRecovery!=='retry'&&live.dialogueRecovery!=='paused')return json(409,{error:'ai_busy'});
+        await task.interruptDialogue();
+      }
       if(path==='/api/names'){
         if(input.confirm!==true)throw new NamingTaskError('invalid_submission');
         validateEventCount(input,live.events);

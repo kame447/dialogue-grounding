@@ -127,6 +127,50 @@ const nameAll = async (e, skip = -1) => {
 };
 const itemTexts = (list) => list.children.map((item) => item.querySelectorAll("span")[0]?.textContent);
 const STOPPED = "進行を確認できません。実験担当者にお知らせください。";
+test("v5 offers non-dialogue pause and resume and never posts a retry after the server reports the limit", async () => {
+  const initial = { ...trial(), aiStatus: "error", dialogueRecovery: "retry" };
+  initial.events.push({ id: "event-2", speaker: "human", text: "切れ目はありますか？" });
+  const h = await ui(initial, ({ path, state }) => {
+    if (path === "/api/interrupt") {
+      state.trial.dialogueRecovery = "paused";
+      return { status: 200, body: state };
+    }
+    if (path === "/api/retry") state.trial.dialogueRecovery = "active";
+  });
+  const { e, calls } = h;
+  assert.equal(e["chat-recovery-message"].textContent, "");
+  assert.equal(e["retry-chat"].textContent, "再開");
+  assert.equal(e["interrupt-chat"].hidden, false);
+  assert.equal(e["finish-conversation"].disabled, true);
+  e["interrupt-chat"].fire("click"); await tick();
+  assert.deepEqual(calls.find(call => call.path === "/api/interrupt").body, { expectedRecordId: "trial-private" });
+  assert.equal(e["chat-recovery-message"].textContent, "会話を中断しました。");
+  assert.equal(e["interrupt-chat"].hidden, true);
+  assert.equal(h.getState().trial.events.length, 2);
+  e["retry-chat"].fire("click"); await tick();
+  assert.equal(calls.filter(call => call.path === "/api/retry").length, 1);
+
+  const gone = await ui({ ...trial(), aiStatus: "error", dialogueRecovery: "unavailable" });
+  assert.equal(gone.e["retry-chat"].hidden, true);
+  assert.equal(gone.e["interrupt-chat"].hidden, true);
+  gone.e["retry-chat"].fire("click"); await tick();
+  assert.equal(gone.calls.filter(call => call.path === "/api/retry").length, 0);
+});
+test("v5 recovers the controls after a retry acknowledgement gets stuck", async () => {
+  const initial = { ...trial(), aiStatus: "error", dialogueRecovery: "retry" };
+  initial.events.push({ id: "event-2", speaker: "human", text: "輪の形ですか？" });
+  const { e, calls, advance } = await ui(initial, ({ path }) => {
+    if (path === "/api/retry") return new Promise(() => {});
+  });
+  e["retry-chat"].fire("click"); await tick();
+  assert.equal(e["retry-chat"].disabled, true);
+  await advance(60000);
+  assert.equal(e["retry-chat"].disabled, false);
+  assert.equal(e["interrupt-chat"].hidden, false);
+  assert.equal(e.notice.textContent, "");
+  assert.deepEqual(messageBodies(e), initial.events.map(event => event.text));
+  assert.equal(calls.filter(call => call.path === "/api/retry").length, 1);
+});
 // Issue #161: no internal cause reaches the participant (AI failure wording,
 // retries of AI work, scoring, HTTP/JSON/transport text or error codes).
 const INTERNAL = /AIの返答|AIに接続|AIの提出を再試行|再試行|採点|エラー|通信|サーバー|[0-9]{3}|JSON|Unexpected|Failed|fetch|Bad Gateway|ai_|_error|scoring|record_write|PRIVATE/u;
