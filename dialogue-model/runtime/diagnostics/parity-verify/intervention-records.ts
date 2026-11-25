@@ -554,7 +554,7 @@ function agreeSource(tr:any,t:any,key:string,tape:any,legacyV3=false):'invalid'|
   // claims of the graph after this turn ordered by (sourceTurn, turn), the last 160. The source is the claim's own turn when it holds the name,
   // otherwise the earliest windowed turn that does (an inherited name).
   const aiPublic=tr.profile?.localGrounding?.aiPublicClaims===true;
-  const upTo:any[]=(tape.events??[]).filter((e:any)=>e.seq<=t.turnIndex),win=(aiPublic?upTo.filter((e:any)=>upTo.filter((o:any)=>o.seq===e.seq).length===1):upTo).slice(tr.profile?.dialoguePolicy==='holistic_v5'?0:-32);
+  const upTo:any[]=(tape.events??[]).filter((e:any)=>e.seq<=t.turnIndex),win=(aiPublic?upTo.filter((e:any)=>upTo.filter((o:any)=>o.seq===e.seq).length===1):upTo).slice(tr.profile?.dialoguePolicy==='holistic_v5'&&hasVersionedViewpoint(t.generationRetryVersion)?0:-32);
   const live=liveClaims(state.graph).sort((a:any,b:any)=>a.sourceTurn-b.sourceTurn||a.turn-b.turn).slice(-160);
   let expected:string[],levels:string[][]|null=null;
   if(v3){
@@ -616,7 +616,7 @@ function agreeSource(tr:any,t:any,key:string,tape:any,legacyV3=false):'invalid'|
     const eligibleSlots=level>=2&&isHolisticV3Plus(tr.profile?.dialoguePolicy)?baseSlots.filter(id=>agreeCandidateAllowed(c,id,t.turnIndex,hasNameProposal(openClaims,t.turnIndex),inheritedIds,intervalEstimates)):baseSlots;
     const antecedent=c.act==='name_accept'||inheritsProposalName(c,publicClaims,isHolisticV4Plus(tr.profile?.dialoguePolicy))?publicClaims.find((p:any)=>p.id===c.respondsTo&&p.name===name):undefined;
     const s=win.find((e:any)=>e.seq===c.sourceTurn&&e.text.includes(name))??(antecedent&&win.find((e:any)=>e.seq===antecedent.sourceTurn&&e.text.includes(name)))??(c.act==='name_accept'?win.filter((e:any)=>e.text.includes(name)).sort((a:any,b:any)=>a.seq-b.seq)[0]:undefined)??
-     (tr.profile?.dialoguePolicy==='holistic_v5'?chainedSource(c,name):undefined);
+     (tr.profile?.dialoguePolicy==='holistic_v5'&&hasVersionedViewpoint(t.generationRetryVersion)?chainedSource(c,name):undefined);
     if(!s)return[];
     return eligibleSlots.filter(id=>{
      if(perFigure&&proposals.some((p:any)=>{
