@@ -29,10 +29,15 @@ const stillRejected: [string, string[]][] = [
   // Audit 21n: the partner's own words do not excuse a comparison of the two screens, and a negated "こちらの画面で" states no viewpoint.
   ['そちらでいう左向きの先は、こちらと同じ向きですね。', ['shared_view_assumption']],
   ['こちらの画面でなく、上端に穴があります。', ['orientation_leak']],
+  // Audit 22: "そちらでいうと…" opens a topic or condition; it does not quote the partner, so a direction asserted after it is an assertion about the partner's view.
+  ['そちらでは、輪の先は右向きですね。', ['shared_view_assumption']],
+  ['そちらでいうと、輪の先は右向きですね。', ['shared_view_assumption']],
+  ['そちらでいえば、輪の先は右向きですね。', ['shared_view_assumption']],
+  ['そちらでいうなら、輪の先は右向きですね。', ['orientation_leak']],
   ['こちらの画面でないところの上端に穴があります。', ['orientation_leak']],
 ];
 // Clean in both versions.
-const cleanInBoth = ['そちらでいう下向きの先は、この突起に対応していますか？', '二つの部分がつながった形ですか？', 'こちらの画面では上部に丸い穴があります。'];
+const cleanInBoth = ['そちらでいう左向きの先は、こちらの三角の突起に対応しますか？', 'そちらでいう下向きの先は、この突起に対応していますか？', '二つの部分がつながった形ですか？', 'こちらの画面では上部に丸い穴があります。'];
 
 test('v9 accepts the wider stated-viewpoint and quoted wordings; v8 rejects them as before', () => {
   for (const [text, before] of acceptedInV9) { assert.deepEqual(leaks(text, v8), before, 'v8: ' + text); assert.deepEqual(leaks(text, v9), [], 'v9: ' + text); }

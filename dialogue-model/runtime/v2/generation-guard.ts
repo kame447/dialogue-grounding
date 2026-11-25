@@ -362,7 +362,8 @@ const v5TopicViewpoint = new RegExp(
 // The partner's own words: "そちらでいう…" is a quotation of the partner, not an assertion about the partner's view.
 const v9OwnPossessiveView = "(?:こちら|私|わたし|自分)の(?=" + orientationWords.source + ")|(?:こちら|私|わたし|自分)の(?:画面|図形|側)で(?!は|なく|ない|なかっ|なけれ|じゃな)";
 const v9PartnerQuotedView = "(?:そちら|相手)(?:で|の)いう";
-const v9PartnerQuotedStart = /^(?:そちら|相手)(?:で|の)いう/u;
+// "そちらでいうと／いえば／いうなら" is a topic or condition, not the partner's own wording.
+const v9PartnerQuotedStart = /^(?:そちら|相手)(?:で|の)いう(?!と|えば|なら)/u;
 const v9TopicViewpoint = new RegExp(
   "(?<own>" + v5OwnView.source + "|" + explicitOwnView.source + "|" + ownTopicView.source + "|" + v9OwnPossessiveView + ")|" +
   v5PartnerView.source + "|" + explicitPartnerView.source + "|" + partnerTopicView.source + "|" + v9PartnerQuotedView, "gu");
