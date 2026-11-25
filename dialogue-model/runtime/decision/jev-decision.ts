@@ -8,6 +8,8 @@ import { literalSpan } from "../judgment/public-evidence.mjs";
 import { validateOwnLedger } from "../judgment/schema.mjs";
 import { normalizeName } from "../scoring.mjs";
 import { validateRepairFacts } from "./repair-facts.ts";
+import { encodeMaterialV5, claimKeepOrder, JUDGMENT_V5_LEGEND } from "./judgment-material-v5.ts";
+import type { LedgerAction } from "./judgment-material-v5.ts";
 import { jevChoiceAnswersValid } from "./jev-choice-response.ts";
 import { JEV_ACTIONS, DRAFT_ACTS, OBSERVATION_ASPECTS, REPAIR_PROSPECTS, REPAIR_PROSPECT_BASES, isHolisticPolicy } from "./contract.ts";
 import type { JevAction, JevDecision, JevDecisionClient, JevDecisionInput, JevDecisionEvidence, JevObservationRequest,
@@ -118,7 +120,7 @@ export const TWO_STAGE_V3_TARGET_INSTRUCTIONS = "stateのselected.actionが第1�
 export const TWO_STAGE_V2_CANDIDATE_SET_INSTRUCTIONS = "第1段で対象をmultiple（一つに絞れない）としました。この行動で対象候補として扱う自分の図形の集合を、2図形以上の組合せから一つ選んでください。公開発話と観察メモに根拠がある図形を含め、根拠のない図形は含めないでください。";
 export const TWO_STAGE_V2_CANDIDATE_SET_CRITERION = (figureIds: readonly string[]) => `自分の候補図形の集合 ${JSON.stringify(figureIds)}。観察メモを参照。`;
 const decisionInstructions = (input: JevDecisionInput, prospect = false, layout: JevQuestionLayout = "two_stage_v1") =>
-  (layout === "two_stage_v3" ? COMMON_V3 : layout === "two_stage_v2" ? COMMON_V2 : COMMON) + (input.humanReferent === undefined ? "" : "\n" + HUMAN_REFERENT_GUIDANCE) + (!prospect || input.repairProspect === undefined ? "" : "\n" + REPAIR_PROSPECT_GUIDANCE) + factsGuidance(input);
+  (layout === "two_stage_v3" ? COMMON_V3 : layout === "two_stage_v2" ? COMMON_V2 : COMMON) + (input.humanReferent === undefined ? "" : "\n" + HUMAN_REFERENT_GUIDANCE) + (!prospect || input.repairProspect === undefined ? "" : "\n" + REPAIR_PROSPECT_GUIDANCE) + factsGuidance(input) + (input.judgmentLedger === undefined ? "" : "\n" + JUDGMENT_V5_LEGEND);
 const LAYOUTS: readonly JevQuestionLayout[] = Object.freeze(["two_stage_v1", "two_stage_v2", "two_stage_v3"]);
 /** Closed two_stage_v2 candidate sets: every subset of the six own slots with 2-6 members (15+20+15+6+1 = 57),
  * ordered by size, then lexicographically by slot index. Labels name the slot indices, so they are reconstructable. */
@@ -259,6 +261,14 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
     const keys = Object.keys(nameLedger);
     if (keys.length !== slots.length || !keys.every(id => slots.includes(id))) fail("invalid_input");
   }
+  let ledgerActions: LedgerAction[] | undefined;
+  if (input.judgmentLedger !== undefined) {
+    if (!Array.isArray(input.judgmentLedger) || input.judgmentLedger.length > JEV_DECISION_INPUT_LIMITS.repairHistory) fail("invalid_input");
+    ledgerActions = input.judgmentLedger.filter(a => a?.turn < input.turn).map(a => {
+      if (!positive(a.turn) || !includes(JEV_ACTIONS, a.action) || !(a.name === null || text(a.name, 80)) || !(a.feature === null || text(a.feature, 400))) fail("invalid_input");
+      return { turn: a.turn, action: a.action, target: cleanTarget(a.target, slots), name: a.name, feature: a.feature };
+    });
+  }
   const ownIds = (v: unknown): v is string[] => strings(v, 6, 160) && unique(v).length === v.length && v.every(s => slots.includes(s));
   const publicTurns = input.publicTurns.filter(t => t?.turn <= input.turn && (t.turn < input.turn || t.speaker === "human")).map(t => {
     if (!positive(t.turn) || !includes(["human", "ai"], t.speaker) || !text(t.text, 12000)) fail("invalid_input");
@@ -363,9 +373,18 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
   // `selected` any later stage can add, so the action, target and detail requests all derive candidates from the same retained material.
   const v3 = layout === "two_stage_v3";
   const reserve = v3 ? JSON.stringify({ selected: { action: "request_observation", target: { kind: "multiple", figureIds: slots } } }).length : 0;
+  // holistic_v5 (judgmentLedger present): the request is the compact written form of the same material; the budget is measured on what is sent.
+  const v5 = ledgerActions !== undefined;
+  const render = (m: unknown) => JSON.stringify(v5 ? encodeMaterialV5(m, { actions: ledgerActions!, ...(nameLedger ? { nameLedger } : {}) }) : m);
   const over = () => {
-    state = JSON.stringify(material);
-    return (v3 && selection ? JSON.stringify({ ...material, selected: undefined }).length : state.length) + reserve > 20000;
+    state = render(material);
+    return (v3 && selection ? render({ ...material, selected: undefined }).length : state.length) + reserve > 20000;
+  };
+  const dropClaim = () => {
+    if (!priorClaims.length) return false;
+    const id = v5 ? claimKeepOrder(priorClaims, repairHistory)[0] : priorClaims[0].id;
+    priorClaims.splice(priorClaims.findIndex(c => c.id === id), 1); omitted.claims++;
+    return true;
   };
   const latestAi = [...publicTurns].reverse().find(t => t.speaker === "ai")?.turn;
   const dropPublic = (count = 1) => {
@@ -394,8 +413,9 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
   // older material is exhausted. Batched drops avoid repeated large serializations.
   while (over() && repairHistory.length > 4) { const n = Math.ceil((repairHistory.length - 4) / 2); repairHistory.splice(0, n); omitted.repairHistory += n; }
   for (const o of observations) while (over() && o.reobservations.length > 1) { const n = Math.ceil((o.reobservations.length - 1) / 2); o.reobservations.splice(0, n); omitted.reobservations += n; }
+  while (v5 && over() && priorClaims.length > 16 && dropClaim()) { /* the least relevant claim first; public history stays whole */ }
   while (over() && publicTurns.length > 16 && dropPublic(Math.ceil((publicTurns.length - 16) / 2))) { /* oldest first */ }
-  while (over() && priorClaims.length > 16) { priorClaims.shift(); omitted.claims++; }
+  while (over() && priorClaims.length > 16 && dropClaim()) { /* oldest first before holistic_v5 */ }
   for (const o of observations) {
     for (const h of o.holistic) while (over() && h.basis.length > 1) { h.basis.pop(); omitted.observationDetails++; }
     for (const a of [o.analytic.relations, o.unknowns, o.analytic.shapes]) while (over() && a.length > 1) { a.pop(); omitted.observationDetails++; }
@@ -410,7 +430,7 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
     for (const h of o.holistic) while (over() && h.basis.length) { h.basis.pop(); omitted.observationDetails++; }
   }
   if (over() && material.issueSummary.length > 2000) { omitted.issueSummaryChars = material.issueSummary.length - 2000; material.issueSummary = material.issueSummary.slice(0, 2000); }
-  while (over() && priorClaims.length) { priorClaims.shift(); omitted.claims++; }
+  while (over() && dropClaim()) { /* all that is left */ }
   if (over()) fail("invalid_input"); // Never truncate the indispensable public source utterances.
   const budget: DecisionInputBudget = { maxChars: 20000, stateChars: state.length, omitted: structuredClone(omitted) };
   // Public agree evidence whose source turn did not survive compaction can no longer be shown as evidence (two_stage_v3).
@@ -747,7 +767,7 @@ function detailJsonData(value: unknown, seen = new Set<object>()): void {
 function prepareExecutedDetail(input: JevDecisionInput, selected: JevActionTarget, layout: JevQuestionLayout = "two_stage_v1") {
   try {
     detailJsonData(input); detailJsonData(selected);
-    const optional = ["reobservationAllowed", "humanReferent", "repairProspect", "agreeNames", "repairFacts", "nameLedger", "nameSource", "namingRequest", "namingRequestStrict"].filter(key => Object.hasOwn(input, key));
+    const optional = ["reobservationAllowed", "humanReferent", "repairProspect", "agreeNames", "repairFacts", "nameLedger", "nameSource", "namingRequest", "namingRequestStrict", "judgmentLedger"].filter(key => Object.hasOwn(input, key));
     if (!exact(input, ["turn", "publicTurns", "ownSlots", "observations", "issueSummary", "priorClaims", "repairHistory", "previousAction", "publicNames", ...optional])) fail("invalid_input");
     if (!exact(selected, ["action", "target"]) || !includes(["propose_name", "agree", "confirm", "repair"], selected.action)) fail("invalid_input");
     const snapshot = structuredClone(input), selection = structuredClone(selected);

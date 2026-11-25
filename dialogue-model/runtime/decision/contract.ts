@@ -1,3 +1,4 @@
+import type { LedgerAction } from "./judgment-material-v5.ts";
 // Decision 0002, opt-in research contract. Jev alone selects the next action;
 // observations and repair progress are materials, never an answer key or policy.
 import type { ObservationMemo } from "../observation/contract.ts";
@@ -91,6 +92,8 @@ export type JevDecisionInput = {
   humanReferent?: HumanReferentMaterial;
   repairProspect?: RepairProspectMaterial;
   repairFacts?: RepairFact[];
+  /** holistic_v5 only: every action executed in earlier turns. Its presence (even empty) selects the compact judgment material (decision/judgment-material-v5.ts). */
+  judgmentLedger?: readonly LedgerAction[];
 };
 export type DecisionInputBudget = {
   maxChars: 20000;

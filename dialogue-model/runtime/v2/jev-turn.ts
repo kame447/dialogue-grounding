@@ -798,6 +798,13 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       if (questionLayout === "two_stage_v3") {
         baseInput.agreeNames = buildAgreeNamesV3(claims, publicTurns, latest.seq, slots, state, null, holisticV3, inheritedTargetClaimIds(prepared.research?.verification?.diagnostics), holisticV4, options.dialoguePolicy === "holistic_v5");
         baseInput.nameLedger = structuredClone(state.ledger);
+        // holistic_v5: the decision material carries the whole public history and the typed ledger of every executed action (decision/judgment-material-v5.ts).
+        if (options.dialoguePolicy === "holistic_v5") {
+          baseInput.publicTurns = events.filter(e => e.seq <= latest.seq && (!aiEnabled || events.filter(other => other.seq === e.seq).length === 1))
+            .map(e => ({ turn: e.seq, speaker: e.speaker, text: e.text }));
+          baseInput.judgmentLedger = state.judgments.map(j => { const d = j.jevTurn.executed ?? j.jevTurn.decision;
+            return { turn: j.turnIndex, action: d.action, target: d.target, name: d.name, feature: d.feature }; });
+        }
         // holistic_v1: the memo's readings are explanations, never AI-proposed names (the candidates are then only names that were said in public).
         if (holisticV2) {
           baseInput.nameSource = "public_only";

@@ -5,6 +5,7 @@ import {createHash as nodeSha256} from 'node:crypto';
 import {jevChoiceAnswersValid,jevReportedCost,jevResponseId} from '../../decision/jev-choice-response.ts';
 import {nameBindsFigure} from '../../decision/referent-binding.ts';
 import {hasNameProposal,namingTurnKind,namingIntervalEstimates,inheritedTargetClaimIds,agreeCandidateAllowed,inheritsProposalName,targetNamingConflict} from '../../decision/naming-request.ts';
+import {decodeMaterialV5} from '../../decision/judgment-material-v5.ts';
 import {isHolisticPolicy,isHolisticV2Plus,isHolisticV3Plus,isHolisticV4Plus} from '../../decision/contract.ts';
 import {generationGuardCodes,draftViolationCodes,deriveGenerationOutcome,orientationSafeFallback,findOrientationLeaks,hasOrientationWords} from '../../v2/generation-guard.ts';
 import {checkModelIdentity} from '../../model-identity-contract.ts';
@@ -689,7 +690,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
    }
    else{
     if(hash(p)!==r.preProjectionPayloadSha256||!(Object.hasOwn(p.questions,'draft_naming')||choiceResponse(p,answer))||checkModelIdentity(p.model,answer.model).status!=='accepted')return'invalid';
-    const st=JSON.parse(p.state);
+    const st=parseMaterial(p.state);
      for(const [k,q] of Object.entries(p.questions) as any){
       if(/^segment_\d+_act$/.test(k)&&!Object.hasOwn(st,'aiSeq')){
        // The saved version decides the whole set: holistic_v3 its own, holistic_v1/v2 the V3 set, a version-less two_stage_v3 either the set of the legacy/style commits
@@ -959,7 +960,10 @@ function rankProof(i:any,d:any,input:any):boolean{
  const expected=expectedRerank(d,input,scores);
  return !!expected&&expected.ranking.every((x:any)=>Number.isFinite(x.score))&&equal(expected,i.rerank);
 }
-const nativeInstructions=(s:any,layout='two_stage_v1',prospect=false)=>(layout==='two_stage_v3'?NATIVE.common.replace(NATIVE_V2.v1Stages,NATIVE_V3.stages):layout==='two_stage_v2'?NATIVE.common.replace(NATIVE_V2.v1Stages,NATIVE_V2.stages):NATIVE.common)+(Object.hasOwn(s,'humanReferent')?'\n'+NATIVE.referent:'')+(prospect&&Object.hasOwn(s,'repairProspect')?'\n'+ADAPT.prospect:'')+(CTX.facts?'\n'+ADAPT.facts:'');
+// holistic_v5 writes the same material in a compact form (decision/judgment-material-v5.ts); S4 reads it back to the older shape before it re-derives anything.
+const LEGEND_V5='stateの記法: publicTurnsは全公開発話を番号順に一度ずつ並べた行（U番号 h=人間 / ai: 発話）です。claimsの各行は [claim id, 出典の発話番号, act, aspect, 対象, 名前, 返答先のclaim id, 命題, issueId] で、発言そのものは出典の発話番号の行を参照してください。f0〜f5はownSlotsの順の自分の図形です。figuresは図形ごとに、名称の状態（statusとname）と、これまでに実行した行動 [行動, 発話番号, 名前または特徴, 返答のclaim id] を並べた履歴です。';
+const parseMaterial=(text:string):any=>{const x=JSON.parse(text);return x?.view==='judgment_v5'?decodeMaterialV5(x):x;};
+const nativeInstructions=(s:any,layout='two_stage_v1',prospect=false)=>(layout==='two_stage_v3'?NATIVE.common.replace(NATIVE_V2.v1Stages,NATIVE_V3.stages):layout==='two_stage_v2'?NATIVE.common.replace(NATIVE_V2.v1Stages,NATIVE_V2.stages):NATIVE.common)+(Object.hasOwn(s,'humanReferent')?'\n'+NATIVE.referent:'')+(prospect&&Object.hasOwn(s,'repairProspect')?'\n'+ADAPT.prospect:'')+(CTX.facts?'\n'+ADAPT.facts:'')+(s?.view==='judgment_v5'?'\n'+LEGEND_V5:'');
 function originalQuestions(body:any,input:any,layout='two_stage_v1'):boolean|null{
   if(body.model!=='typesafe/jev-1.14'||!Array.isArray(input.ownSlots)||input.ownSlots.length!==6||!Array.isArray(input.observations)||!Array.isArray(input.publicNames)||Object.hasOwn(input,'nameLedger'))return false;
   // holistic_v2 never sends a name the partner proposed among the public names (decided from the turn's full claims, not from the shortened ones).
@@ -1011,7 +1015,7 @@ function targetQuestion(input:any,action:string):{options:{label:string;target:a
  return{options,questions:{target:{type:'choice',instructions:nativeInstructions(input,'two_stage_v3',false)+'\n'+(CTX.legacyV3?LEGACY_V3_TARGET:NATIVE_V3.target),criteria:Object.fromEntries(options.map(o=>[o.label,criterion(o.target)]))}}};
 }
 function targetProof(body:any,response:any,d:any,original:any,layout:string):boolean|null{
- const input=JSON.parse(body.state);if(layout!=='two_stage_v3'||!original||!d||!equal(input.selected,{action:d.action}))return false;
+ const input=parseMaterial(body.state);if(layout!=='two_stage_v3'||!original||!d||!equal(input.selected,{action:d.action}))return false;
  const same=sameMaterial(input,original);if(same!==true)return same;
  const {options,questions}=targetQuestion(input,d.action);if(!options.length||!equal(body.questions,questions))return false;
  const e=d.evidence?.stages?.find((x:any)=>x.stage==='target'),a=response.answers.target,o=options.find(x=>x.label===a.choice);
@@ -1027,7 +1031,7 @@ function sameMaterial(input:any,original:any):boolean|null{
 }
 // two_stage_v2 candidate-set request: the same material plus the stage-one selection, the fixed 57 subsets, and the evidence and target it produced.
 function setProof(body:any,response:any,d:any,original:any,layout:string):boolean|null{
- const input=JSON.parse(body.state);if(layout!=='two_stage_v2'||!original||!d||!equal(input.selected,{action:d.action,target:{kind:'multiple'}}))return false;
+ const input=parseMaterial(body.state);if(layout!=='two_stage_v2'||!original||!d||!equal(input.selected,{action:d.action,target:{kind:'multiple'}}))return false;
  const same=sameMaterial(input,original);if(same!==true)return same;
  const criteria=Object.fromEntries(SETS.map((set,i)=>[SET_LABELS[i],`自分の候補図形の集合 ${JSON.stringify(set.map(k=>input.ownSlots[k]))}。観察メモを参照。`]));
  if(!equal(body.questions,{candidate_set:{type:'choice',instructions:nativeInstructions(input,layout)+'\n'+NATIVE_V2.candidateSet,criteria}}))return false;
@@ -1038,7 +1042,7 @@ function setProof(body:any,response:any,d:any,original:any,layout:string):boolea
 // A request_observation decision's own detail request: subsets of that decision's target, one visual aspect, and the
 // observation request it produced. Question texts are code-owned snapshots; the quoted utterance is the request's own turn.
 function observeProof(body:any,response:any,d:any,original:any,layout:string):boolean|null{
- const input=JSON.parse(body.state);if(!original||!equal(input.selected,{action:'request_observation',target:d.target}))return false;
+ const input=parseMaterial(body.state);if(!original||!equal(input.selected,{action:'request_observation',target:d.target}))return false;
  const same=sameMaterial(input,original);if(same!==true)return same;
  const scope=d.target?.kind==='single'?[d.target.figureId]:d.target?.kind==='multiple'?d.target.figureIds:[],subsets:string[][]=[];
  for(let mask=1;mask<2**scope.length;mask++)subsets.push(scope.filter((_:any,i:number)=>mask&(1<<i)));
@@ -1092,7 +1096,7 @@ function unaskedConfirmFeatures(input:any,target:any,candidates:{value:string;fi
  return remaining.length?remaining:candidates;
 }
 function detailProof(body:any,response:any,selection:any,original:any,evidence:any,layout='two_stage_v1'):boolean|null{
- const input=JSON.parse(body.state);if(!original||!equal(input.selected,{action:selection.action,target:selection.target}))return false;
+ const input=parseMaterial(body.state);if(!original||!equal(input.selected,{action:selection.action,target:selection.target}))return false;
  const same=sameMaterial(input,original);if(same!==true)return same;
  // agree under a v3 attempt without a known saved evidence source cannot be told from forgery.
  if(selection.action==='agree'&&CTX.v3&&!CTX.known)return null;
