@@ -23,7 +23,9 @@ export const UPSTREAM_TIMEOUT_MS = 15_000;
 export const DEFAULT_COST_CAP_USD = 0.05;
 /** Ceiling for an explicit per-trial research Jev budget (participant_jev_config_v1 limits.jevUsd). Not a default:
  * callers without research limits keep DEFAULT_COST_CAP_USD, and every research value is chosen before a trial. */
-export const RESEARCH_MAX_JEV_USD = 0.15;
+/** Raised from 0.15 to 0.45: a natural full dialogue costs about 0.0036 USD per attempt in Jev calls (rising with the history), which stopped the 40-turn pair-04 repair run at 0.15.
+ * Only research harnesses reach it (they pass researchLimits); the 0.05 default and the production participant path are unchanged. */
+export const RESEARCH_MAX_JEV_USD = 0.45;
 /** Largest costCapUsd a Jev adapter accepts. Only research-harness callers (which always pass researchLimits) may
  * exceed the default, and never beyond RESEARCH_MAX_JEV_USD. */
 export function maxJevCostCapUsd(researchLimits: unknown): number {

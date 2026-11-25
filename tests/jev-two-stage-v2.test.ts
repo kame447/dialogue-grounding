@@ -339,18 +339,19 @@ test("E: ten Jev actions; request_observation is offered only while reobservatio
   assert.throws(() => createJevDecisionClient({ enabled: true, readKey, questionLayout: "two_stage_v9" as never }), code("invalid_options"));
 });
 
-test("budget ceiling: research callers may set up to 0.15 USD; the default path keeps 0.05", () => {
-  assert.equal(DEFAULT_COST_CAP_USD, 0.05); assert.equal(RESEARCH_MAX_JEV_USD, 0.15);
+test("budget ceiling: research callers may set up to 0.45 USD; the default path keeps 0.05", () => {
+  assert.equal(DEFAULT_COST_CAP_USD, 0.05); assert.equal(RESEARCH_MAX_JEV_USD, 0.45);
   const researchLimits = { maxDeadlineMs: RESEARCH_MAX_DEADLINE_MS };
   const adapters: Array<[string, (o: Record<string, unknown>) => unknown]> = [
     ["decision", o => createJevDecisionClient({ enabled: true, readKey, ...o })], ["local", o => createJevLocalTestClassifier({ enabled: true, readKey, ...o })],
     ["ai function", o => createJevAiFunctionClassifier({ readKey, ...o })], ["ai support", o => createJevAiSupportChecker({ readKey, ...o })],
   ];
   for (const [name, make] of adapters) {
+    assert.ok(make({ costCapUsd: 0.45, researchLimits }), name);
     assert.ok(make({ costCapUsd: 0.15, researchLimits }), name);
     assert.ok(make({ costCapUsd: 0.05 }), name);
     assert.ok(make({}), `${name} unspecified uses the 0.05 default`);
-    for (const costCapUsd of [0.150001, 0, -0.01, Number.NaN, Number.POSITIVE_INFINITY, "0.1", null])
+    for (const costCapUsd of [0.450001, 0, -0.01, Number.NaN, Number.POSITIVE_INFINITY, "0.1", null])
       assert.throws(() => make({ costCapUsd, researchLimits }), (e: unknown) => (e as { code?: string })?.code === "invalid_options", `${name} ${costCapUsd}`);
     assert.throws(() => make({ costCapUsd: 0.06 }), (e: unknown) => (e as { code?: string })?.code === "invalid_options", `${name} without research limits`);
   }
