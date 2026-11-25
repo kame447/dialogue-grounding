@@ -2,20 +2,24 @@
 // validated judgment determines state; detected wording never changes its act.
 import type { DialoguePolicy } from "../decision/contract.ts";
 // v3 was reserved for the experiment that extended fixed responses.
-// v6 contains every behaviour of v5 and adds the unsupported-topic-shift check. v5 contains every behaviour of v4 (viewpoint rules, no fixed-sentence fallback, the whole-history judgment material, the private naming state) and adds the confirm-specific viewpoint note and the topic markers.
-export type GenerationRetryVersion = "jev_generation_retry_v1" | "jev_generation_retry_v2" | "jev_generation_retry_v4" | "jev_generation_retry_v5" | "jev_generation_retry_v6";
+// v7 contains every behaviour of v6 and widens the unsupported-topic-shift check to the particle-less and "next figure" wordings. v6 contains every behaviour of v5 and adds the unsupported-topic-shift check. v5 contains every behaviour of v4 (viewpoint rules, no fixed-sentence fallback, the whole-history judgment material, the private naming state) and adds the confirm-specific viewpoint note and the topic markers.
+export type GenerationRetryVersion = "jev_generation_retry_v1" | "jev_generation_retry_v2" | "jev_generation_retry_v4" | "jev_generation_retry_v5" | "jev_generation_retry_v6" | "jev_generation_retry_v7";
 export type RecordedGenerationRetryVersion = Exclude<GenerationRetryVersion, "jev_generation_retry_v1">;
 
-export function hasVersionedViewpoint(version: unknown): version is "jev_generation_retry_v4" | "jev_generation_retry_v5" | "jev_generation_retry_v6" {
-  return version === "jev_generation_retry_v4" || version === "jev_generation_retry_v5" || version === "jev_generation_retry_v6";
+export function hasVersionedViewpoint(version: unknown): version is "jev_generation_retry_v4" | "jev_generation_retry_v5" | "jev_generation_retry_v6" | "jev_generation_retry_v7" {
+  return version === "jev_generation_retry_v4" || version === "jev_generation_retry_v5" || version === "jev_generation_retry_v6" || version === "jev_generation_retry_v7";
 }
 /** v5 or later: what v4 does, plus the confirm viewpoint note, the topic markers and the answer-resolving judgment material. */
-export function isGenerationV5(version: unknown): version is "jev_generation_retry_v5" | "jev_generation_retry_v6" {
-  return version === "jev_generation_retry_v5" || version === "jev_generation_retry_v6";
+export function isGenerationV5(version: unknown): version is "jev_generation_retry_v5" | "jev_generation_retry_v6" | "jev_generation_retry_v7" {
+  return version === "jev_generation_retry_v5" || version === "jev_generation_retry_v6" || version === "jev_generation_retry_v7";
 }
-/** The newest generation version: v5 plus the unsupported-topic-shift check (a draft that moves on while the chosen action is not a move). */
-export function isGenerationV6(version: unknown): version is "jev_generation_retry_v6" {
-  return version === "jev_generation_retry_v6";
+/** v6 or later: v5 plus the unsupported-topic-shift check (a draft that moves on while the chosen action is not a move), the scoped_v3 agreement scope and the notation on every question. */
+export function isGenerationV6(version: unknown): version is "jev_generation_retry_v6" | "jev_generation_retry_v7" {
+  return version === "jev_generation_retry_v6" || version === "jev_generation_retry_v7";
+}
+/** The newest generation version: v6 plus the widened topic-shift wordings (particle-less "次いこう", "次の図形を見てみよう"). */
+export function isGenerationV7(version: unknown): version is "jev_generation_retry_v7" {
+  return version === "jev_generation_retry_v7";
 }
 export function validAgreeNameScope(scope: unknown, generation: unknown): boolean {
   if (isGenerationV6(generation)) return scope === "scoped_v3";
@@ -28,7 +32,7 @@ export function validGenerationRetryVersion(version: unknown, layout: string, po
 }
 export function defaultGenerationRetryVersion(layout: string, policy?: string): GenerationRetryVersion {
   if (layout !== "two_stage_v3") return "jev_generation_retry_v1";
-  return policy === "holistic_v5" ? "jev_generation_retry_v6" : "jev_generation_retry_v2";
+  return policy === "holistic_v5" ? "jev_generation_retry_v7" : "jev_generation_retry_v2";
 }
 
 export function allowsOrientationFallback(version: GenerationRetryVersion | undefined): boolean {
@@ -278,6 +282,20 @@ export function findTopicShiftClaims(text: string): string[] {
   return sentences.some((s) => topicShiftClaims.some((pattern) => pattern.test(s))) ? ["unsupported_topic_shift"] : [];
 }
 
+// jev_generation_retry_v7: the wordings v6 missed. The particle after 次 may be left out ("次いこう"), and the "next figure" can be the object of a looking or confirming verb
+// ("次の図形を見てみよう"). A sentence that only introduces what is checked next ("次に、〜を確認させてください"), a negated move ("次へは進まずに") and quoted words never match.
+const topicShiftActV7 = /(?:行こう|いこう|行こっか|いこっか|いきましょう|行きましょう|いきます|行きます|いくね|行くね|いくよ|行くよ|いくか|行くか|進もう|進みましょう|進めましょう|進めよう|進むね|進むよ|移ろう|移りましょう|移ります|いきたい|行きたい|進みたい|移りたい)(?![^。!?]{0,4}(?:ません|ない|ず))/u;
+const topicShiftClaimsV7: ReadonlyArray<RegExp> = [
+  ...topicShiftClaims,
+  new RegExp(`(?:次|先|つぎ)(?:に|へ)?${topicShiftActV7.source}`, "u"),
+  new RegExp(`(?:次|別|他)の(?:図形|形|もの|ところ)(?:を|に|へ)?(?:${topicShiftActV7.source}|見(?:てみ)?(?:よう|ましょう|たい)|見てい(?:こう|きましょう)|見てみましょう|確認(?:しよう|しましょう|してみよう|していこう|していきましょう)|扱(?:おう|いましょう)|やろう|やりましょう|話(?:そう|しましょう))`, "u"),
+];
+/** The jev_generation_retry_v7 form of findTopicShiftClaims: every v6 wording plus the ones above. */
+export function findTopicShiftClaimsV7(text: string): string[] {
+  const sentences = normalize(text).replace(/「[^」]*」|『[^』]*』/gu, "「」").split(/(?<=[。!?])/u);
+  return sentences.some((s) => topicShiftClaimsV7.some((pattern) => pattern.test(s))) ? ["unsupported_topic_shift"] : [];
+}
+
 const internalId =/(?<![A-Za-z0-9])s-[0-9a-f]{4}(?![A-Za-z0-9])/iu;
 const internalField = /(?<![A-Za-z])(?:targetSlot|candidateName|discriminatingFeature|ownLedger|ledger|judgment)(?![A-Za-z])|\{"[^"]{1,40}":/u;
 
@@ -485,7 +503,7 @@ export function generationGuardCodes(text: string, c: GenerationCodeContext): st
     ...(c.v3 ? findOrientationLeaks(text, c.dialoguePolicy, c.generationRetryVersion) : []),
     ...(c.v3 ? findWorkingNoteLeaks(text, c.publicTexts) : []),
     ...(c.v3 && isGenerationV6(c.generationRetryVersion) && c.action !== "move_on" && c.action !== "defer" && c.action !== "close" &&
-      (c.vetoed === true || c.action === "confirm" || c.action === "repair") ? findTopicShiftClaims(text) : []),
+      (c.vetoed === true || c.action === "confirm" || c.action === "repair") ? (isGenerationV7(c.generationRetryVersion) ? findTopicShiftClaimsV7(text) : findTopicShiftClaims(text)) : []),
     ...(c.v3 && c.action === "agree" && c.candidateName !== null ? findAgreeNameMismatch(text, c.candidateName) : []),
     ...(c.v3 && c.action === "propose_name" && c.candidateName !== null ? findProposeNameMismatch(text, c.candidateName) : []),
     ...(c.adaptive && /repair[_-]?prospect|repair_issue|candidate_narrowed|candidate_widened|other_figure_benefit|no_open_issue|issue_\d+/iu.test(squeezed) ? ["internal_field"] : []),

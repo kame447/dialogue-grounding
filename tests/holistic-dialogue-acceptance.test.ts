@@ -818,7 +818,7 @@ test('New v5 keeps the input pending after two orientation violations and publis
     const before = trial.record();
     const turn = await trial.say({ ...broad, drafts: ['上端に穴があります。', '右端に穴があります。'] });
     assert.equal(turn.generationRequests.length, 2);
-    assert.equal(turn.trace.generationRetryVersion, 'jev_generation_retry_v6'); // the default of a new v5 trial
+    assert.equal(turn.trace.generationRetryVersion, 'jev_generation_retry_v7'); // the default of a new v5 trial
     assert.equal(turn.trace.errorCode, 'unsafe_generation');
     assert.equal(turn.trace.publicSpeech, null);
     assert.equal(turn.speech, null);
