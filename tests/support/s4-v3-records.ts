@@ -13,7 +13,7 @@ import { createJevLocalTestClassifier } from '../../dialogue-model/runtime/local
 import { createChatClient } from '../../dialogue-model/runtime/client.mjs';
 import { buildReobservationMessages } from '../../dialogue-model/runtime/observation/observe.ts';
 import type { AgreeNameScopeVersion } from '../../dialogue-model/runtime/decision/naming-request.ts';
-import { defaultGenerationRetryVersion, isGenerationV6, isGenerationV7 } from '../../dialogue-model/runtime/v2/generation-guard.ts';
+import { defaultGenerationRetryVersion, isGenerationV6, isGenerationV7, isGenerationV8 } from '../../dialogue-model/runtime/v2/generation-guard.ts';
 import type { RecordedGenerationRetryVersion } from '../../dialogue-model/runtime/v2/generation-guard.ts';
 import type { ObservationMemo } from '../../dialogue-model/runtime/observation/contract.ts';
 import { image } from './s4-integration/harness.ts';
@@ -104,12 +104,12 @@ export type Turn = { human: string; plan: Plan };
 /** NORMAL rebuilt as one canonical trial whose final turn follows the earlier scripted turns (all of them under `label`). */
 /** dialoguePolicy: omitted = the creation default (holistic_v1); null = the earlier version (no policy), for controls of the older lineages. */
 /** The private state a NEW trial of this profile starts from: the cached observation, an optional ledger, and the agreement scope the runtime gives a new trial of its generation version
- * (a new holistic_v5 trial defaults to jev_generation_retry_v7, whose scope is scoped_v4). A test that pins an older version passes it. */
+ * (a new holistic_v5 trial defaults to jev_generation_retry_v8, whose scope is scoped_v5). A test that pins an older version passes it. */
 export function initialState({ profile, ledger, memo, generationRetryVersion, agreeNameScopeVersion }: { profile: any; ledger?: Record<string, any>; memo?: ObservationMemo;
   generationRetryVersion?: RecordedGenerationRetryVersion; agreeNameScopeVersion?: AgreeNameScopeVersion }) {
   const state: any = structuredClone(OLD.state); if (ledger) state.ledger = structuredClone(ledger);
   const created = generationRetryVersion ?? (profile.dialoguePolicy === 'holistic_v5' ? defaultGenerationRetryVersion('two_stage_v3', 'holistic_v5') : undefined);
-  const scope = agreeNameScopeVersion ?? (isGenerationV7(created) ? 'scoped_v4' : isGenerationV6(created) ? 'scoped_v3' : undefined);
+  const scope = agreeNameScopeVersion ?? (isGenerationV8(created) ? 'scoped_v5' : isGenerationV7(created) ? 'scoped_v4' : isGenerationV6(created) ? 'scoped_v3' : undefined);
   if (scope) state.agreeNameScopeVersion = scope;
   if (memo) state.observationMemo = structuredClone(memo);
   return state;

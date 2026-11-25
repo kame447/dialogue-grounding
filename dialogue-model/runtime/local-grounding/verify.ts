@@ -41,6 +41,7 @@ type VerificationInput = {
   approvalFromNamedClaim?: boolean;
   /** v7: questions bound through the committed single-figure check and its public description. */
   referenceQuestionBindings?: ReadonlyMap<string, string>;
+  directReferenceReplies?: boolean;
   graph: LocalGraph;
   turn: number;
   publicTurns: readonly PublicTurn[];
@@ -55,11 +56,34 @@ const responses = new Set(["agree", "deny", "name_accept", "name_reject", "withd
 const independentActs = new Set(["assert", "construe", "name_propose", "ask"]);
 // A typed agree still needs words that point to the checked figure for this
 // cross-aspect reply. A standalone acknowledgment or a name question is not enough.
-export const directsToFigure = (quote: string) => /(?:(?:^|[\s、,]|まさに|確かに)(?:これ|それ)|(?:この|その|同じ)(?:図形|形))(?:のこと)?(?:です[よね]?|だ[よね]?)?[。!\s]*$/u.test(quote.normalize("NFKC"));
+export function directsToFigure(quote: string, directReferenceReplies = false): boolean {
+  const normalized = quote.normalize("NFKC");
+  if (!directReferenceReplies) return /(?:(?:^|[\s、,]|まさに|確かに)(?:これ|それ)|(?:この|その|同じ)(?:図形|形))(?:のこと)?(?:です[よね]?|だ[よね]?)?[。!\s]*$/u.test(normalized);
+  // Speech-like spelling can separate a pointing word with punctuation or repeat it.
+  return /(?:(?:^|[\s、,!。.]|まさに|確かに|そうそう)(?:これ(?:これ)?|それ(?:それ)?)|(?:この|その|同じ)(?:図形|形))(?:のこと)?(?:です[よね]?|だ[よね]?)?[\s、,!。.]*$/u.test(normalized);
+}
+const figureReplyAspects = new Set(["referent", "part", "contour", "construal", "orientation", "position", "question"]);
+export const isFigureReplyAspect = (aspect: string): boolean => figureReplyAspects.has(aspect);
+
+function opposesPointingReply(segment: LocalSegmentProposal, question: LocalClaimView, figure: string, humanText: string,
+  segments: readonly LocalSegmentProposal[], verdicts: readonly LocalFunctionVerdict[], ownSlots: readonly string[]): boolean {
+  if (/[?？]|じゃない|ではない|違う|違います|別の(?:図形|形)/u.test(segment.quote.normalize("NFKC"))) return true;
+  return segments.some(other => {
+    if (!other || other.segmentId === segment.segmentId || !figureReplyAspects.has(other.aspect) ||
+        !text(other.quote) || !literalSpan(humanText, other.quote) || !Array.isArray(other.targets) ||
+        !other.targets.every(id => ownSlots.includes(id))) return false;
+    if (other.targets.some(id => id !== figure)) return true;
+    const matching = verdicts.filter(v => v?.segmentId === other.segmentId);
+    if (matching.length !== 1) return false;
+    const verdict = matching[0];
+    return (verdict.act === "deny" || verdict.act === "ask") &&
+      (verdict.respondsToClaimId === question.id || other.respondsToTurn === question.sourceTurn);
+  });
+}
 const overlap = (a: readonly string[], b: readonly string[]) => a.some(slot => b.includes(slot));
 
 /** Only the CURRENT public human turn may supply a new segment's quote. */
-export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts, keepUnboundApproval = false, approvalFromNamedClaim = false, referenceQuestionBindings }: VerificationInput): LocalVerifiedUpdate {
+export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts, keepUnboundApproval = false, approvalFromNamedClaim = false, referenceQuestionBindings, directReferenceReplies = false }: VerificationInput): LocalVerifiedUpdate {
   const result: LocalVerifiedUpdate = { operations: [], rejected: [] };
   // Revalidate JSON-restored graphs before using any model-selected pointer.
   snapshotReferenceGraph(graph);
@@ -108,11 +132,27 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     const approvalRequest = keepUnboundApproval && !!prior && act === "name_propose" && name === null && aspect === "name" && prior.aspect === "name" &&
       (approvalFromNamedClaim ? ["name_propose", "name_accept"].includes(prior.act) : prior.act === "name_propose" && prior.speaker === "human") && prior.name !== null;
     const checkedFigure = prior && referenceQuestionBindings?.get(prior.id);
-    const agreesWithCheckedFigure = !!checkedFigure && act === "agree" && aspect === "referent" && name === null &&
-      prior?.act === "ask" && prior.aspect === "question" && previousClaims.includes(prior) &&
-      prior.targets.length === 1 && prior.targets[0] === checkedFigure &&
-      (targets.length === 0 || targets.length === 1 && targets[0] === checkedFigure) && directsToFigure(quote);
-    if (agreesWithCheckedFigure) aspect = "question";
+    const boundQuestion = checkedFigure && prior?.act === "ask" && previousClaims.includes(prior) &&
+      prior.targets.length === 1 && prior.targets[0] === checkedFigure ? prior : null;
+    const pointsToFigure = !!boundQuestion && directsToFigure(quote, directReferenceReplies);
+    const agreesWithCheckedFigure = !!boundQuestion && pointsToFigure && act === "agree" && name === null &&
+      (directReferenceReplies ? figureReplyAspects.has(aspect) && figureReplyAspects.has(boundQuestion.aspect) :
+        aspect === "referent" && boundQuestion.aspect === "question") &&
+      (targets.length === 0 || targets.length === 1 && targets[0] === boundQuestion.targets[0]) &&
+      (!directReferenceReplies || !opposesPointingReply(segment, boundQuestion, boundQuestion.targets[0], human.text, segments, verdicts, ownSlots));
+    // A same-aspect extraction of a pointing reply must pass the direct check too.
+    if (directReferenceReplies && boundQuestion && act === "agree" && !agreesWithCheckedFigure &&
+        (boundQuestion.aspect === "question" || pointsToFigure)) {
+      reject("inconsistent_claim_response"); continue;
+    }
+    if (agreesWithCheckedFigure && boundQuestion) aspect = boundQuestion.aspect;
+    if (directReferenceReplies && prior && name === null && figureReplyAspects.has(aspect) &&
+        figureReplyAspects.has(prior.aspect) && prior.targets.length === 1 &&
+        (targets.length === 0 || targets.length === 1 && targets[0] === prior.targets[0])) {
+      const withdrawnQuestion = act === "withdraw" && prior.speaker === "human" && prior.act === "agree" &&
+        active.some(c => c.id === prior?.respondsTo && c.speaker === "ai" && c.act === "ask");
+      if (withdrawnQuestion || (act === "deny" || act === "ask") && prior.speaker === "ai" && prior.act === "ask") aspect = prior.aspect;
+    }
     if (!agreesWithCheckedFigure && (isBareDeictic(quote) || /^(?:それ|これ|あれ)で(?:いい|良い|よい)(?:です)?[。！!？?\s]*$/u.test(quote.normalize("NFKC").trim()))) {
       // ai1 is the program-owned primary act. A secondary feature (ai2) cannot
       // receive a bare acknowledgment, even if the classifier selected its ID.
@@ -236,7 +276,7 @@ export type LocalPriorAct = {
  * published description supports that single figure. Pending extraction stays raw. */
 export function bindPublishedReferenceQuestion(pending: AiPublicPending | null | undefined,
   prior: Pick<LocalPriorAct, "turn" | "action" | "targetSlot" | "publishedFallback"> | undefined,
-  source: (PublicTurn & { nonReferential?: boolean }) | undefined, turn: number): Map<string, string> {
+  source: (PublicTurn & { nonReferential?: boolean }) | undefined, turn: number, directReferenceReplies = false): Map<string, string> {
   const bound = new Map<string, string>();
   if (!pending || !prior || prior.publishedFallback || !prior.targetSlot ||
       (prior.action !== "confirm" && prior.action !== "repair") ||
@@ -248,7 +288,9 @@ export function bindPublishedReferenceQuestion(pending: AiPublicPending | null |
     ["referent", "part", "contour", "construal"].includes(c.aspect) && c.targets.length > 0);
   const question = questions[0];
   const figure = prior.targetSlot;
-  if (questions.length === 1 && question.aspect === "question" && question.targets.length === 0 &&
+  if (questions.length === 1 &&
+      (directReferenceReplies ? figureReplyAspects.has(question.aspect) : question.aspect === "question") &&
+      (question.targets.length === 0 || directReferenceReplies && question.targets.length === 1 && question.targets[0] === figure) &&
       descriptions.some(c => c.targets.length === 1 && c.targets[0] === figure) &&
       descriptions.every(c => c.targets.includes(figure))) bound.set(`${turn}:pub${question.ordinal}`, figure);
   return bound;

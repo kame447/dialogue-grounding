@@ -125,9 +125,10 @@ export function validateAiPublicState(value: unknown, slots: readonly string[], 
 }
 type Update = { expectedRevision: number; turn: number; operations: Array<{ kind: string; id: string }> };
 type Event = { seq: number; speaker: string; text: string; nonReferential?: boolean };
-export async function prependAiPublic({ graph, update, state, events, publicTurns, priorAct, bindReferenceQuestions = false }: {
+export async function prependAiPublic({ graph, update, state, events, publicTurns, priorAct, bindReferenceQuestions = false, directReferenceReplies = false }: {
   graph: LocalGraph; update: Update; state: AiPublicState; events: readonly Event[]; publicTurns: readonly PublicTurn[]; priorAct?: LocalPriorAct;
   bindReferenceQuestions?: boolean;
+  directReferenceReplies?: boolean;
 }): Promise<{ update: Update; state: AiPublicState; application: AiPublicApplication; referenceQuestionBindings?: ReadonlyMap<string, string> }> {
   const next = structuredClone(state), pending = next.pending;
   const application: AiPublicApplication = { aiSeq: pending?.aiSeq ?? null, status: "none", reasons: [], claims: [], nameIds: [], nameRejections: [] };
@@ -149,7 +150,7 @@ export async function prependAiPublic({ graph, update, state, events, publicTurn
     else {
       const active = priorClaimViews(graph, { limit: REFERENCE_LIMITS.records });
       const bindings = bindReferenceQuestions ?
-        bindPublishedReferenceQuestion(pending, priorAct, publicTurns.find(t => t.turn === pending.aiSeq), update.turn) : undefined;
+        bindPublishedReferenceQuestion(pending, priorAct, publicTurns.find(t => t.turn === pending.aiSeq), update.turn, directReferenceReplies) : undefined;
       const operations = pending.candidates.map(c => {
         const { candidateKey: _key, ordinal, segmentId: _segment, ...fields } = c, id = `${update.turn}:pub${ordinal}`;
         const figure = bindings?.get(id);
