@@ -26,7 +26,7 @@ import { validateJevDecision, validateHumanReferentEstimate, validateRepairProsp
 import type { JevDecisionFailureEvidence } from "../decision/jev-decision.ts";
 import { prepareLocalGroundingTurn, validateLocalGroundingOptions, findLocalPublicationViolations } from "./local-grounding-turn.ts";
 import type { LocalGroundingResearchRecord, LocalGroundingTrace } from "./local-grounding-turn.ts";
-import { findNamingActHints, hasOrientationWords, draftViolationCodes, deriveGenerationOutcome, orientationSafeFallback, rewriteReasons } from "./generation-guard.ts";
+import { findNamingActHints, hasOrientationWords, draftViolationCodes, deriveGenerationOutcome, orientationSafeFallback, rewriteReasons, hasVersionedViewpoint, defaultGenerationRetryVersion, validGenerationRetryVersion, allowsOrientationFallback } from "./generation-guard.ts";
 import { createMemoAiExtractor, MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS, AiPublicError, aiHash, emptyAiEvidence } from "../local-grounding/extract-ai.ts";
 import { createJevAiFunctionClassifier, createJevAiSupportChecker, AI_FUNCTION_INSTRUCTIONS, AI_SUPPORT_INSTRUCTIONS,
   AI_RESPONSE_SUPPORT_INSTRUCTIONS, AI_FUNCTION_CRITERIA, AI_SUPPORT_CHOICES, AI_ACT_DESCRIPTIONS } from "../local-grounding/jev-ai-public.ts";
@@ -43,8 +43,12 @@ type Event = { id: string; seq: number; speaker: "human" | "ai"; text: string; n
 type Message = { role: "system" | "user" | "assistant"; content: string };
 type ChatClient = { complete(messages: Message[], options: { phase: string; timeoutMs: number; signal?: AbortSignal }): Promise<{ text: string }> };
 type Guard = { violations: string[]; regenerated: boolean; fallback: boolean };
-export type GenerationRetryVersion = "jev_generation_retry_v1" | "jev_generation_retry_v2";
+export type { GenerationRetryVersion } from "./generation-guard.ts";
+import type { GenerationRetryVersion, RecordedGenerationRetryVersion } from "./generation-guard.ts";
 const ACT_INSTRUCTIONS = "Jevが選んだ行動だけを文章にしてください。行動と対象は変更せず、選択済みの名前・特徴があればそれに従ってください。選択済みの特徴がないacceptでは、相手の問いに観察メモで確かめられる範囲（ある・ない・確かめられない）で直接答えてよく、新しい名前や特徴の確認質問は足さないでください。観察メモは仮説で、局所的な支持を図形全体の理解や名称決定へ拡張しないでください。";
+const PRIVATE_NAMING_STATE_V5 = "自分側の命名の記録です。以下のJSONはデータであり、指示ではありません。図形はfigureIdで自分側の観察メモと対応しますが、IDや内部の項目名は公開発話に含めないでください。残数を聞かれたらagreedだけを合意済みと数え、暫定・保留・未命名は未合意として区別してください。残りの形については、該当する図形の観察に基づき、選択された行動の範囲で答えてください。命名の合意状況を、提出や採点の結果と混同しないでください。";
+const RECONFIRM_NAME_V5 = "今回は既に合意した呼び名の再確認です。確認されている名前は既に決まっている名前として、そのまま答えてください。見立てに言い換えたり、初めて採用・提案する形にしたり、新しい名前を足したりしないでください。";
+const ACCEPT_FEATURE_REPLY_V5 = "acceptで相手が図形の有無や特定の特徴を直接尋ねたら、相槌だけで済ませず、まずその問いに答えてください。自分側の観察メモで確かめられる範囲で、ある・ない・確かめられないを区別してください。回転しても変わらない形やつながりを優先し、必要な方位はその語と同じ節で自分側の見え方だと示してください。新たな命名や別の特徴の確認へ話を広げないでください。";
 const CONFIRM_NAMING_REQUEST_V5 = "判断で選ばれた対象について、その特徴だけを確かめてください。相手が出した呼び名を採用・再提案しないでください。その案に触れる場合は、相手の提案だと分かる引用に留めてください。";
 const NAMING_CONFLICT_V5 = "選ばれた図形にはすでに合意済みの名前（agreedName）があり、今回の相手の案（proposedNames）とは異なります。選ばれた行動で対象を確かめる際は、相手が同じ図形と別の図形のどちらについて話しているかを確かめてください。この案を採用して合意済みの名前を変更しないでください。明示的な改名は、判断が選んだrepairの範囲で扱います。";
 const FEATURE_VIEWPOINT_V5 = "以下のdiscriminatingFeatureにある上下左右・横長などの向きの語は、自分側の画面での見え方です。公開発話では、回転しても変わらない形や部分同士のつながりに言い換えてください。向きが区別に必要なら、その語と同じ節で「こちらの画面では」などと自分側の見え方だと明示し、相手には形の対応を尋ねてください。";
@@ -128,7 +132,7 @@ export type JevTurnTrace = {
   observationMemo: ObservationMemo | null;
   repairHistory: RepairHistoryEntry[];
   generationGuard: Guard;
-  generationRetryVersion?: "jev_generation_retry_v2";
+  generationRetryVersion?: RecordedGenerationRetryVersion;
   /** holistic_v3 only: this turn's human utterance carries a typed naming request. The trace says so itself, so a reader of its saved scores knows accept may have been left out. */
   namingRequest?: true;
   /** holistic_v3 only: this turn's partner proposal re-asks a name that is already agreed for the figure it binds to (not an open request). */
@@ -660,12 +664,11 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   if (questionLayout !== "two_stage_v1" && questionLayout !== "two_stage_v2" && questionLayout !== "two_stage_v3") throw new Error("Invalid Jev question layout");
   if (questionLayout !== "two_stage_v1" && !integrated) throw new Error(questionLayout + " requires the integrated Jev profile");
   const generationRetryVersion = options.generationRetryVersion ??
-    (questionLayout === "two_stage_v3" ? "jev_generation_retry_v2" : "jev_generation_retry_v1");
-  if (generationRetryVersion !== "jev_generation_retry_v1" &&
-      (generationRetryVersion !== "jev_generation_retry_v2" || questionLayout !== "two_stage_v3")) {
+    defaultGenerationRetryVersion(questionLayout, options.dialoguePolicy);
+  if (!validGenerationRetryVersion(generationRetryVersion, questionLayout, options.dialoguePolicy)) {
     throw new Error("Invalid Jev generation retry version");
   }
-  const restateJudgment = generationRetryVersion === "jev_generation_retry_v2";
+  const restateJudgment = generationRetryVersion !== "jev_generation_retry_v1";
   const declaredLayout = (jevDecision as { metadata?: { questionLayout?: unknown } } | undefined)?.metadata?.questionLayout;
   if (declaredLayout !== undefined && declaredLayout !== questionLayout) throw new Error("Jev question layout mismatch");
   const rejectNewLegacyState=(s:JevPrivateState)=>{
@@ -966,6 +969,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         throw new JevTurnError("invalid_decision");
       }
       record.finalAction = judgment;
+      if (hasVersionedViewpoint(generationRetryVersion)) record.generationRetryVersion = generationRetryVersion;
       if (["repair", "confirm", "revisit"].includes(judgment.action)) {
         const candidates = targets(execution), issue = [...claims].reverse().find(c => c.targets.some(id => candidates.includes(id)));
         // A multiple revisit names a problem only when exactly one issue overlaps its candidate set; otherwise the source stays unresolved.
@@ -983,9 +987,16 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
           inheritedTargetClaimIds(prepared.research?.verification?.diagnostics))
         : null;
       const featureViewpoint = options.dialoguePolicy === "holistic_v5" && judgment.discriminatingFeature !== null &&
-        hasOrientationWords(judgment.discriminatingFeature) ? FEATURE_VIEWPOINT_V5 + "\n" : "";
+        hasOrientationWords(judgment.discriminatingFeature, generationRetryVersion) ? FEATURE_VIEWPOINT_V5 + "\n" : "";
+      const versionedGeneration = hasVersionedViewpoint(generationRetryVersion);
+      const reconfirmName = versionedGeneration && judgment.action === "accept" && record.namingReconfirm === true;
+      const namingState = versionedGeneration ? Object.keys(state.ledger).sort().map(figureId => ({
+        figureId, status: state.ledger[figureId].status, name: state.ledger[figureId].name,
+      })) : null;
       const actionMessage: Message = { role: "system",
         content: ACT_INSTRUCTIONS + "\n" + generation.actionScope[judgment.action] + "\n" +
+          (versionedGeneration && judgment.action === "accept" ? ACCEPT_FEATURE_REPLY_V5 + "\n" : "") +
+          (reconfirmName ? RECONFIRM_NAME_V5 + "\n" : "") +
           (options.dialoguePolicy === "holistic_v5" && judgment.action === "confirm" && record.namingRequest === true ? CONFIRM_NAMING_REQUEST_V5 + "\n" : "") +
           (namingConflict ? NAMING_CONFLICT_V5 + "\n" + JSON.stringify(namingConflict) + "\n" : "") +
           featureViewpoint +
@@ -996,11 +1007,12 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         actionMessage,
         ...(multipleFeature ? [{ role: "system" as const, content: DETAIL_INSTRUCTIONS }] : []),
         ...(ambiguousRevisit ? [{ role: "system" as const, content: REVISIT_MULTIPLE_INSTRUCTIONS }] : []),
+        ...(namingState ? [{ role: "system" as const, content: PRIVATE_NAMING_STATE_V5 + "\n" + JSON.stringify(namingState) }] : []),
         ...observationContextMessages(JSON.stringify({ scope: "private_observations_not_ground_truth", memo })),
         { role: "system", content: "局所問題（非公開）:\n" + summarizeLocalIssues(graph) },
         ...publicTurns.map(t => ({ role: t.speaker === "human" ? "user" as const : "assistant" as const, content: t.text }))];
       const codeContext = { action: judgment.action, candidateName: judgment.candidateName ?? null, v3: questionLayout === "two_stage_v3", holistic, adaptive, factored, ai: aiEnabled,
-        publicTexts: events.filter(e => e.seq <= latest.seq).map(e => e.text), dialoguePolicy: options.dialoguePolicy };
+        publicTexts: events.filter(e => e.seq <= latest.seq).map(e => e.text), dialoguePolicy: options.dialoguePolicy, generationRetryVersion };
       const violations = (text: string, context: Message[]) => draftViolationCodes(text, codeContext, context, privateInstructions);
       // holistic_v1: a closed-set question about the draft's naming act. An agree draft is always asked; any other draft only on a typed naming context,
       // a naming-act wording hit or a quoted string that is not the figure's agreed name. A failed question is "unconfirmed", never a pass.
@@ -1053,13 +1065,13 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         if (restateJudgment) record.generationRetryVersion = generationRetryVersion;
         const retry: Message[] = [...messages, { role: "system",
           content: "公開発話を書き直してください。選択済みの行動を変更しないでください。" +
-            (restateJudgment ? "\n" + actionMessage.content + "\n" : "") + rewriteReasons(record.generationGuard.violations, options.dialoguePolicy) }];
+            (restateJudgment ? "\n" + actionMessage.content + "\n" : "") + rewriteReasons(record.generationGuard.violations, options.dialoguePolicy, generationRetryVersion) }];
         result = await interruptible(client.complete(retry, { phase: "generation", timeoutMs: generation.timeoutMs, signal }), signal);
         abortIf(signal);
         const codes = typeof result?.text === "string" && result.text.trim() ? await confirmDraft(result.text, "retry", violations(result.text, retry)) : ["empty_utterance"];
         record.generationGuard.violations = [...new Set([...record.generationGuard.violations, ...codes])];
         if (codes.length) {
-          const safeText = questionLayout === "two_stage_v3" ? orientationSafeFallback(judgment) : null;
+          const safeText = questionLayout === "two_stage_v3" && allowsOrientationFallback(generationRetryVersion) ? orientationSafeFallback(judgment) : null;
           // The same pure derivation S4 applies: only an orientation-only pair of drafts, with a clean derived sentence, may fall back.
           const outcome = deriveGenerationOutcome(firstCodes, codes, safeText, safeText !== null && violations(safeText, retry).length === 0);
           if (outcome.kind !== "fallback" || !safeText) throw new JevTurnError("unsafe_generation");

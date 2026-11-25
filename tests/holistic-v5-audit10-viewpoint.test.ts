@@ -18,12 +18,24 @@ const needsRewrite = [
   { draft: 'こちらと同じ向きに見えています。切れ目の形は分かりますか？', codes: ['shared_view_assumption'] },
   { draft: '右端に切れ目がある図形、そちらも見つかりましたか？', codes: ['orientation_leak'] },
   { draft: 'そちらの画面では上端に切れ目があって、下端に丸い穴があります。', codes: ['shared_view_assumption'] },
+  { draft: 'そちらの画像では右端に小さな穴が見えます。', codes: ['shared_view_assumption'] },
+  { draft: 'そちらの画面では右端に切れ目が見えますが、左側に小さな穴もあります。', codes: ['shared_view_assumption'] },
+  { draft: '上の中央に丸い穴がありますか？', codes: ['orientation_leak'] },
 ];
 const safe = [
   selfView,
   'こちらの画面だと右端に切れ目があります。',
   '私の画面だと右端に切れ目があります。',
   'こちらの画面では上端に切れ目があって、下端に丸い穴があります。',
+  '私の画像では右端に小さな穴が見えます。',
+  'こちらの見え方では下端に細い棒があります。',
+  '僕の見え方だと上端に丸い穴があります。',
+  'こっちでは右端に丸い穴が見えるよ。',
+  'こちらの画面だと上端は丸いけど、下端には切れ目があります。',
+  'こちらの画面では右端に切れ目が見えますが、左側に穴もあります。',
+  'こちらの画面では上端が丸いです、左側には切れ目があります。',
+  'こちらの画面では上の中央に丸い穴があります。',
+  'そちらの画像では右端に小さな穴がありますか？',
   'こちらから見て、右端に切れ目があります。',
   'そちらの画面では右端に切れ目が見えるとおっしゃっていましたね。',
   '「そちらの画面では右端に見える」と言っていましたね。',
@@ -50,6 +62,11 @@ test('v4 keeps its saved orientation rules', () => {
 });
 
 test('v5 attaches viewpoint and clause qualifiers to the directional terms they cover', () => {
+  const legacy = 'jev_generation_retry_v2';
+  assert.deepEqual(findOrientationLeaks('こっちでは右端に丸い穴が見えるよ。', 'holistic_v5', legacy), ['orientation_leak']);
+  assert.deepEqual(findOrientationLeaks('上の中央に丸い穴がありますか？', 'holistic_v5', legacy), []);
+  assert.deepEqual(findOrientationLeaks('そちらでは右端に切れ目がありますが、その切れ目は見えますか？', 'holistic_v5'),
+    ['shared_view_assumption']);
   for (const cause of ['なので、', 'なので', 'だという前提があるため、', 'ですから、']) {
     assert.deepEqual(findOrientationLeaks('そちらでも同じ向き' + cause + '切れ目が見えますか？', 'holistic_v5'),
       ['shared_view_assumption']);
@@ -69,6 +86,25 @@ test('v5 attaches viewpoint and clause qualifiers to the directional terms they 
 });
 
 for (const label of ['bypass-enabled', 'repair-first'] as const) {
+  test(`${label}: old v5 preserves a saved orientation fallback and new v5 publishes the explicit viewpoint`, async () => {
+    const draft = '私の画像では右端に小さな穴があります。';
+    const options = { label, dialoguePolicy: 'holistic_v5' as const, technicalTrial: trialVersion };
+    const plan = { action: 'confirm', target: 'figure_0' };
+    const old = await buildRecords({ ...options, generationRetryVersion: 'jev_generation_retry_v2',
+      turns: [{ human, plan: { ...plan, drafts: [draft, draft] } }] });
+    const modern = await buildRecords({ ...options, turns: [{ human, plan: { ...plan, drafts: [draft] } }] });
+    assert.deepEqual(old.trials[0].attempts[0].generationGuard, { violations: ['orientation_leak'], regenerated: true, fallback: true });
+    assert.equal(modern.trials[0].attempts[0].publicSpeech, draft);
+    assert.equal(modern.trials[0].attempts[0].generationGuard.regenerated, false);
+    assert.equal(modern.trials[0].attempts[0].generationRetryVersion, modern.trials[0].replay[0].tape.generationRetryVersion);
+    assert.deepEqual(scopeChecks(old), ['pass', 'pass', 'pass', 'pass']);
+    assert.deepEqual(scopeChecks(modern), ['pass', 'pass', 'pass', 'pass']);
+    const wrongVersion = structuredClone(modern);
+    delete wrongVersion.trials[0].attempts[0].generationRetryVersion;
+    delete wrongVersion.trials[0].turns[0].trace[0].generationRetryVersion;
+    assert.ok(scopeChecks(wrongVersion).includes('mismatch'));
+  });
+
   test(`${label}: an assertion about the partner's view is rewritten`, async () => {
     for (const { draft, codes } of needsRewrite) {
       const records = await buildRecords({ label, dialoguePolicy: 'holistic_v5', technicalTrial: trialVersion,

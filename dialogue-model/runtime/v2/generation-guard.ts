@@ -1,6 +1,26 @@
 // A lexical publication guard, not evidence of shared identification. Only the
 // validated judgment determines state; detected wording never changes its act.
 import type { DialoguePolicy } from "../decision/contract.ts";
+// v3 was reserved for the experiment that extended fixed responses.
+export type GenerationRetryVersion = "jev_generation_retry_v1" | "jev_generation_retry_v2" | "jev_generation_retry_v4";
+export type RecordedGenerationRetryVersion = Exclude<GenerationRetryVersion, "jev_generation_retry_v1">;
+
+export function hasVersionedViewpoint(version: unknown): version is "jev_generation_retry_v4" {
+  return version === "jev_generation_retry_v4";
+}
+export function validGenerationRetryVersion(version: unknown, layout: string, policy?: string | null): version is GenerationRetryVersion {
+  return version === "jev_generation_retry_v1" || layout === "two_stage_v3" &&
+    (version === "jev_generation_retry_v2" || policy === "holistic_v5" && hasVersionedViewpoint(version));
+}
+export function defaultGenerationRetryVersion(layout: string, policy?: string): GenerationRetryVersion {
+  if (layout !== "two_stage_v3") return "jev_generation_retry_v1";
+  return policy === "holistic_v5" ? "jev_generation_retry_v4" : "jev_generation_retry_v2";
+}
+
+export function allowsOrientationFallback(version: GenerationRetryVersion | undefined): boolean {
+  return !hasVersionedViewpoint(version);
+}
+
 type Action = "accept" | "propose_name" | "confirm" | "agree" | "repair" | "defer" | "revisit" | "move_on" | "close";
 type Judgment = { action: Action; candidateName?: string | null; discriminatingFeature?: string | null };
 
@@ -243,9 +263,11 @@ export function findInternalLeaks(text: string): string[] {
 // are exempt; idioms (その上・以上・左右対称・両側・片側・反対側…) and rotation-invariant geometry never match.
 const orientationWords = /上部|下部|上端|下端|左端|右端|左側|右側|上側|下側|右上|左上|右下|左下|右向き|左向き|上向き|下向き|斜め[上下左右]|[上下左右]の辺|横長|縦長|[上下左右]方向|[上下左右]寄り|[上下左右]の(?:突起|角|隅|端|部分|張り出し|くぼみ|切り欠き|三角|四角|脚|棒|腕|頭|耳|側)|(?<!以)[上下左右][へに](?:伸び|突き出|出っ張|張|向か|傾|広が|すぼま)/u;
 
+const directionalCenter = /[上下左右]の中央/u;
 /** The selected feature contains viewpoint-dependent wording, even if the feature itself marks the viewpoint. */
-export function hasOrientationWords(text: string): boolean {
-  return orientationWords.test(normalize(text));
+export function hasOrientationWords(text: string, version?: GenerationRetryVersion): boolean {
+  const normalized = normalize(text);
+  return orientationWords.test(normalized) || hasVersionedViewpoint(version) && directionalCenter.test(normalized);
 }
 
 // A clause that says whose screen/viewpoint it describes (こちらの画面では…／私から見ると…) is not a flat claim.
@@ -255,24 +277,38 @@ const viewpointStated = /(?:こちら|私|わたし|自分|相手|そちら)(?:�
 const clauseBreak = /(?<=[。!?]|(?:ですが|ますが|ませんが|ましたが|でしたが|けど|けれど|けれども|のに)、)/u;
 
 export const HOLISTIC_V5_VIEWPOINT_RULE = "形の確認・説明には、回転しても変わらない形や部分同士の関係を優先してください。選択済みの特徴は自分側の観察に基づく根拠です。方位が弁別に必要なときは、自分側の図形の見え方だと同じ節で明示し、相手には形の対応を尋ねてください。相手側の位置や向きを自分側と同じだと断定せず、相手の方位には相手が述べた見え方として触れるか、相手の見え方を尋ねてください。";
-const v5OrientationTerms = new RegExp(orientationWords.source + "|(?<sameFrame>同じ(?:位置|向き|方向))", "gu");
+const sameFrameTerm = "(?<sameFrame>同じ(?:位置|向き|方向))";
+const v5OrientationTerms = new RegExp(orientationWords.source + "|" + sameFrameTerm, "gu");
+const v5ExpandedOrientationTerms = new RegExp(orientationWords.source + "|" + directionalCenter.source + "|" + sameFrameTerm, "gu");
 const v5ClauseBreak = /(?<=[。!?]|(?:(?:です|ます|ません|ました|でした)が?|けど|けれど(?:も)?|のに|ので|から|ため(?:に)?|なら|であれば|とすると)[、,])/u;
 // A continuative clause keeps its viewpoint, but a question about the next description does not qualify the previous one.
 const v5ContinuationBreak = /(?<=(?<!から見)て[、,])/u;
+// Keep the speaker's viewpoint across descriptions in one sentence. A causal
+// or conditional premise still has its own scope, and a later question does
+// not turn an earlier assertion about the partner's view into a question.
+const v5ViewpointBreak = /(?<=[。!?]|(?:ので|から|ため(?:に)?|なら|であれば|とすると)[、,])/u;
+const v5DescriptionBreak = new RegExp(v5ClauseBreak.source + "|" + v5ContinuationBreak.source, "u");
 const v5OwnView = /(?:こちら|私|わたし|自分)(?:(?:の(?:画面|図形|側|向き|見方|方)|側)?(?:では(?!なく|ない|なかっ|なけれ|じゃな)|でも|も|だと|で見ると|から見ると|から見れば|から見たら|から見て)|の(?:画面|図形)の)/u;
 const v5PartnerView = /(?:そちら|相手)(?:の(?:画面|図形|側)|側|でも|にも|も|だと|から見ると|から見れば|から見たら|から見て|で(?:は)?(?!は|なく|ない))|両(?:方の)?画面/u;
 const v5Viewpoint = new RegExp("(?<own>" + v5OwnView.source + ")|" + v5PartnerView.source, "gu");
+const explicitOwnView = /(?:(?:こちら|私|わたし|自分|僕|ぼく)の(?:画像|見え方)|こっち)(?:では(?!なく|ない|なかっ|なけれ|じゃな)|だと)/u;
+const explicitPartnerView = /(?:そちら|相手)の(?:画像|見え方)(?:では(?!なく|ない|なかっ|なけれ|じゃな)|だと)/u;
+const v5ExpandedViewpoint = new RegExp("(?<own>" + v5OwnView.source + "|" + explicitOwnView.source + ")|" +
+  v5PartnerView.source + "|" + explicitPartnerView.source, "gu");
 const screenComparison = /(?:こちら|私|わたし|自分|そちら|相手)(?:の(?:画面|図形|側|位置|向き|方向)|側)?と[、,]?$/u;
 const questionEnd = /(?:\?|か(?:ね)?[。、,.]?)$/u;
 // The first qualifier after a term belongs to that description. A later question cannot undo a causal premise.
 const descriptionQualifier = /と(?:のこと|教えて|いう(?!前提|仮定|想定)|言っ|おっしゃ|聞い|説明|伺|述べ|話し)|なら|(?:の)?であれば|とすると|とすれば|とは限(?:らな|りませ)|(?:では|じゃ)(?:な(?:い|く)|ありませ)|(?<cause>ので|(?:だ|です|ます|ある|いる|見える)から|から(?=[、,]|$)|ため)/u;
 
-function v5OrientationLeaks(text: string): string[] {
+function v5OrientationLeaks(text: string, expanded: boolean): string[] {
+  const markers = expanded ? v5ExpandedViewpoint : v5Viewpoint;
+  const terms = expanded ? v5ExpandedOrientationTerms : v5OrientationTerms;
+  const descriptionBreak = expanded ? v5DescriptionBreak : v5ContinuationBreak;
   let unmarked = false, partnerAssertion = false;
-  for (const clause of text.split(v5ClauseBreak)) {
-    const viewpoints = [...clause.matchAll(v5Viewpoint)];
+  for (const clause of text.split(expanded ? v5ViewpointBreak : v5ClauseBreak)) {
+    const viewpoints = [...clause.matchAll(markers)];
     let nextViewpoint = 0;
-    for (const term of clause.matchAll(v5OrientationTerms)) {
+    for (const term of clause.matchAll(terms)) {
       while (nextViewpoint < viewpoints.length && viewpoints[nextViewpoint].index < term.index) nextViewpoint++;
       const preceding = viewpoints[nextViewpoint - 1];
       const sameFrame = term.groups?.sameFrame !== undefined;
@@ -284,7 +320,7 @@ function v5OrientationLeaks(text: string): string[] {
       }
       if (preceding?.groups?.own && !comparesScreens) continue;
       // A later viewpoint starts a new description even when there is no clause punctuation.
-      const description = clause.slice(term.index + term[0].length, viewpoints[nextViewpoint]?.index).split(v5ContinuationBreak, 1)[0];
+      const description = clause.slice(term.index + term[0].length, viewpoints[nextViewpoint]?.index).split(descriptionBreak, 1)[0];
       const qualifier = descriptionQualifier.exec(description);
       if (qualifier ? qualifier.groups?.cause !== undefined : !questionEnd.test(description)) partnerAssertion = true;
     }
@@ -293,9 +329,9 @@ function v5OrientationLeaks(text: string): string[] {
 }
 
 /** Check unmarked directions and, in holistic_v5, explicit assertions about the partner's orientation. */
-export function findOrientationLeaks(text: string, policy?: DialoguePolicy): string[] {
+export function findOrientationLeaks(text: string, policy?: DialoguePolicy, version = defaultGenerationRetryVersion("two_stage_v3", policy)): string[] {
   const unquoted = normalize(text).replace(/「[^」]*」|『[^』]*』/gu, "「」");
-  if (policy === "holistic_v5") return v5OrientationLeaks(unquoted);
+  if (policy === "holistic_v5") return v5OrientationLeaks(unquoted, hasVersionedViewpoint(version));
   return unquoted.split(clauseBreak).some(clause => orientationWords.test(clause) && !viewpointStated.test(clause))
     ? ["orientation_leak"] : [];
 }
@@ -338,16 +374,21 @@ export function findNamingActHints(text: string): { wording: boolean; quoted: st
   return { wording, quoted: quotedNames(normalized) };
 }
 /** Retry instruction for the violated rule families; never echoes the draft. */
-export function rewriteReasons(codes: readonly string[], policy?: DialoguePolicy): string {
+export function rewriteReasons(codes: readonly string[], policy?: DialoguePolicy,
+  version = defaultGenerationRetryVersion("two_stage_v3", policy)): string {
+  const specificViewpoint = policy === "holistic_v5" && hasVersionedViewpoint(version);
   return [
     codes.some((code) => AGREEMENT_CODES.has(code)) ? "前の下書きは名称の決定・合意を表していました。決定・合意を表明せず、このactionの範囲で書き直してください。" : "",
     codes.includes("self_repair") ? "前の下書きは自分の取り違え・訂正・取り消しを表していました。このactionでは訂正を表明せず、このactionの範囲で書き直してください。" : "",
     codes.includes("name_mismatch") ? "前の下書きは、このactionで扱う名前とは別の名前を提案・決定・合意として述べていました。このactionで扱う名前だけを「」で示して書き直してください。" : "",
     codes.includes("unsolicited_deferral") ? "前の下書きは未解決の図形について保留や先送りを提案していました。保留・先送りを提案せず、このactionの範囲で書き直してください。" : "",
-    policy === "holistic_v5"
+    specificViewpoint
+      ? codes.includes("orientation_leak") ? "前の下書きに、自分側の見え方だと示されていない方位の語（上下左右・端・向き・斜め・縦長・横長など）がありました。公開発話では、回転しても変わらない形や部分同士のつながりに言い換えてください。方位が区別に必要なら、その語と同じ節で自分側の画面での見え方だと明示し、相手には形の対応を尋ねてください。" : ""
+      : policy === "holistic_v5"
       ? codes.includes("orientation_leak") || codes.includes("shared_view_assumption")
         ? "前の下書きの方位の参照枠を明確にして書き直してください。" + HOLISTIC_V5_VIEWPOINT_RULE : ""
       : codes.includes("orientation_leak") ? "前の下書きに画面の向きに依存する語（上下左右・側・端・向き・斜め上/下/左/右・縦長・横長等）が含まれていました。非公開メモや判断の方位語をそのまま写さず、尖りの数・大小・くぼみ・四角い部分とのつながりなど回転しても変わらない特徴へ言い換えるか、同じ節で「こちらの画面では〜」と視点を明示して書き直してください。" : "",
+    specificViewpoint && codes.includes("shared_view_assumption") ? "前の下書きは、相手側の位置や向きを自分側と同じだと断定していました。相手側の位置や向きは、相手自身の説明として引用するか、相手の見え方を尋ねてください。" : "",
     codes.some((code) => code.startsWith("internal_")) ? "前の下書きには内部の参照IDや作業メモの項目が含まれていました。それらを出さずに書き直してください。" : "",
     codes.includes("working_note") ? "前の下書きに、英語の作業メモや複数の返答案が混じっていました。日本語の一つの返答だけにして書き直してください。" : "",
     codes.includes("draft_act_mismatch") ? "前の下書きの命名に関する行為が、選んだ行動と合っていませんでした。選んだ行動の範囲で、命名に関する行為を行動に合わせて書き直してください。" : "",
@@ -398,13 +439,13 @@ export function findLocalPublicationViolations(text: string, messages: readonly 
 }
 
 export type GenerationCodeContext = { action: Action; candidateName: string | null; v3: boolean; holistic: boolean; adaptive: boolean; factored: boolean; ai: boolean;
-  publicTexts: readonly string[]; dialoguePolicy?: DialoguePolicy };
+  publicTexts: readonly string[]; dialoguePolicy?: DialoguePolicy; generationRetryVersion?: GenerationRetryVersion };
 /** Every publication rule for one draft that does not need the private prompts (those are added by the runtime): the single source for the run and for S4.
  * In holistic_v1 the naming-act wording never blocks here; it only triggers the draft_naming question. */
 export function generationGuardCodes(text: string, c: GenerationCodeContext): string[] {
   const squeezed = text.normalize("NFKC").replace(/\s/gu, "");
   return [...new Set([...findGuardViolations(text, c.action).filter((code) => !(c.holistic && isAgreementWordCode(code))),
-    ...(c.v3 ? findOrientationLeaks(text, c.dialoguePolicy) : []),
+    ...(c.v3 ? findOrientationLeaks(text, c.dialoguePolicy, c.generationRetryVersion) : []),
     ...(c.v3 ? findWorkingNoteLeaks(text, c.publicTexts) : []),
     ...(c.v3 && c.action === "agree" && c.candidateName !== null ? findAgreeNameMismatch(text, c.candidateName) : []),
     ...(c.v3 && c.action === "propose_name" && c.candidateName !== null ? findProposeNameMismatch(text, c.candidateName) : []),

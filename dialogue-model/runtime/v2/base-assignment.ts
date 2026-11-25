@@ -32,6 +32,7 @@ export type BaseStore = { read(): Promise<OwnerRead>;
   readRecord(recordId: string): Promise<BaseRecord | null> };
 export type BaseTask = { getState(): Record<string, unknown>; persistNow(): Promise<void>; whenIdle(): Promise<void>;
   message(text: string, clientId?: string): { eventId: string; duplicate: boolean }; retry(): Promise<void>;
+  interruptDialogue?(): Promise<void>;
   submitHuman(options: { names: unknown }): Promise<unknown>; submitAI(): Promise<unknown> };
 /** rotationMode is present for new tasks only; a restored task takes its mode from the record. */
 export type MakeBaseTask = (options: { strategy: Strategy; seed: number; referenceMemory: boolean; runDir: null;

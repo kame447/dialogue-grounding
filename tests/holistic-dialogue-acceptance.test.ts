@@ -4,6 +4,8 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
+import { createChatClient } from '../dialogue-model/runtime/client.mjs';
+import { participantLedgerFetch } from '../dialogue-model/runtime/web/participant-jev-wiring.ts';
 import { createJevDecisionClient } from '../dialogue-model/runtime/decision/jev-decision.ts';
 import type { DraftAct, JevAction, JevTarget } from '../dialogue-model/runtime/decision/contract.ts';
 import type { JevDecisionPayload } from '../dialogue-model/runtime/decision/jev-decision.ts';
@@ -30,6 +32,7 @@ const [first, second, ribbon, fan, cup] = figureIds;
 const lunaRequest = { timeoutMs: null, maxCompletionTokens: null };
 const timeouts = { ...deadlines(), observationMs: 5000, localMs: 5000, decisionMs: 5000, generationMs: 5000 };
 const profile = researchTrialProfileV3(lunaRequest, timeouts, 'two_stage_v3');
+const legacyFallbackProfile = researchTrialProfileV3(lunaRequest, timeouts, 'two_stage_v3', 'holistic_v4');
 const holisticV3Profile = researchTrialProfileV3(lunaRequest, timeouts, 'two_stage_v3', 'holistic_v3');
 const ringGap = '環に切れ目がある';
 const baseWidth = '台が環より細い';
@@ -71,11 +74,15 @@ type Turn = {
 };
 type Names = Record<string, string | null>;
 type SavedTrial = {
+  options: { dialoguePolicy?: string };
   ownLedger: JevPrivateState['ledger'];
-  queueState: { privateState: JevPrivateState };
+  queueState: { privateState: JevPrivateState; pendingHumanEventIds: string[]; closed: boolean };
   jevTraces: JevTurnTrace[];
+  turnTimings: { requestSeq: number; lastEventId: string }[];
+  requests: { kind: string; requestSeq: number | null; retryCount: number }[];
   aiSubmission: Names | null;
   finalError: string | null;
+  dialogueInterruption?: 'participant_paused' | 'budget_exhausted';
 };
 type Message = { role: string; content: unknown };
 type DraftRequest = { draft: string; reasons: string[] };
@@ -90,7 +97,7 @@ function targetLabel(target: Turn['target']) {
   return 'figures_' + target.join('_');
 }
 
-function session(strategy: Strategy, observation: Memo = memo, trialProfile = profile) {
+function session(strategy: Strategy, observation: Memo = memo, trialProfile = profile, lunaCalls = 90, transientStatus?: number) {
   let current: Turn | undefined;
   let actionRequests: JevDecisionPayload[] = [];
   let draftRequests: DraftRequest[] = [];
@@ -99,7 +106,17 @@ function session(strategy: Strategy, observation: Memo = memo, trialProfile = pr
   let finalCalls = 0;
   let responseId = 0;
   let saved: SavedTrial | undefined;
+  let draftForTransport = '';
+  let generationPosts = 0;
+  let ledger: RunBudget;
   const create = async (restore?: SavedTrial) => {
+    ledger = new RunBudget({ lunaCalls, lunaPosts: 90, lunaTokens: 100000, jevPosts: 90, jevUsd: 1 });
+    const generationClient = createChatClient({ apiKey: 'synthetic-only', baseUrl: 'https://offline.example/v1', model: 'synthetic-luna' },
+      participantLedgerFetch(ledger, 'luna', 'synthetic-luna', async () => {
+        if (++generationPosts === 1) return new Response(null, { status: transientStatus });
+        return Response.json({ model: 'synthetic-luna', choices: [{ message: { content: draftForTransport } }],
+          usage: { prompt_tokens: 8, completion_tokens: 3 } });
+      }), { sleep: async () => {} });
     const transport = {
       enabled: true, timeoutMs: trialProfile.timeouts.decisionMs, questionLayout: trialProfile.questionLayout,
       readKey: async () => 'sk-or-SYNTHETIC-holistic-acceptance-key',
@@ -158,7 +175,7 @@ function session(strategy: Strategy, observation: Memo = memo, trialProfile = pr
     return createNamingTaskV2({
       strategy, seed, runDir: null, createTrial: () => trial, restore: restore ?? null,
       utteranceStyle: trialProfile.utteranceStyle,
-      client: { async complete(messages: Message[], { phase }: { phase: string }) {
+      client: { async complete(messages: Message[], { phase, timeoutMs }: { phase: string; timeoutMs?: number }) {
         if (phase === 'final_submission') {
           const draft = finalDrafts[finalCalls++];
           assert.ok(draft, 'unexpected final submission');
@@ -171,11 +188,15 @@ function session(strategy: Strategy, observation: Memo = memo, trialProfile = pr
         const draft = current.drafts[generationRequests.length];
         generationRequests.push(structuredClone(messages));
         assert.ok(draft, 'unexpected generation');
+        if (transientStatus !== undefined) {
+          draftForTransport = draft;
+          return generationClient.complete(messages, { timeoutMs });
+        }
         return { text: draft, model: 'synthetic-luna' };
       } },
       jevResearch: {
         profile: trialProfile, technicalTrial,
-        ledger: new RunBudget({ lunaCalls: 90, lunaPosts: 90, lunaTokens: 100000, jevPosts: 90, jevUsd: 1 }),
+        ledger,
         jevDecision: createJevDecisionClient(transport)!,
         observer: {
           async observeAll() { return structuredClone(observation); },
@@ -198,6 +219,13 @@ function session(strategy: Strategy, observation: Memo = memo, trialProfile = pr
   return {
     async start() { task = await create(); },
     async restore() { task = await create(JSON.parse(JSON.stringify(record())) as SavedTrial); },
+    interrupt() { return task.interruptDialogue(); },
+    async resumeWith(turn: Turn) {
+      current = turn;
+      generationRequests = [];
+      await Promise.all([task.retry(), task.retry()]);
+      return generationRequests.length;
+    },
     async say(turn: Turn) {
       current = turn;
       actionRequests = [];
@@ -220,6 +248,7 @@ function session(strategy: Strategy, observation: Memo = memo, trialProfile = pr
       return task.submitAI();
     },
     record, finalCalls: () => finalCalls,
+    usage: () => ledger.snapshot(),
     publicState: () => task.getState(),
   };
 }
@@ -234,7 +263,7 @@ function published(turn: Outcome, action: JevAction, target: JevTarget, speech: 
   assert.equal(turn.trace.executed?.action, action);
   assert.deepEqual(turn.trace.executed?.target, target);
   assert.deepEqual(turn.after.queueState.privateState.judgments.at(-1)?.jevTurn.executed, turn.trace.executed);
-  assert.equal(s4Probe.traceShape(turn.trace, profile.questionLayout), true);
+  assert.equal(s4Probe.traceShape(turn.trace, profile.questionLayout, turn.after.options.dialoguePolicy), true);
 }
 function unchanged(turn: Outcome) {
   assert.deepEqual(turn.after.ownLedger, turn.before.ownLedger);
@@ -775,7 +804,82 @@ test('Two orientation violations allow the existing fallback when both drafts ad
     assert.equal(turn.generationRequests.length, 2);
     assert.deepEqual(turn.trace.generationGuard, { violations: ['orientation_leak'], regenerated: true, fallback: true });
     assert.deepEqual(turn.after.ownLedger[first], { status: 'agreed', name: originalName });
+  }, memo, legacyFallbackProfile);
+});
+
+test('New v5 keeps the input pending after two orientation violations and publishes no fixed dialogue', async () => {
+  await paired(async trial => {
+    const before = trial.record();
+    const turn = await trial.say({ ...broad, drafts: ['上端に穴があります。', '右端に穴があります。'] });
+    assert.equal(turn.generationRequests.length, 2);
+    assert.equal(turn.trace.generationRetryVersion, 'jev_generation_retry_v4');
+    assert.equal(turn.trace.errorCode, 'unsafe_generation');
+    assert.equal(turn.trace.publicSpeech, null);
+    assert.equal(turn.speech, null);
+    assert.deepEqual(turn.trace.generationGuard, { violations: ['orientation_leak'], regenerated: true, fallback: false });
+    assert.deepEqual(turn.after.queueState.privateState, before.queueState.privateState);
+    assert.equal(turn.after.queueState.pendingHumanEventIds.length, 1);
+    assert.equal(turn.after.queueState.closed, false);
+    assert.equal(s4Probe.traceShape(turn.trace, profile.questionLayout, profile.dialoguePolicy), true);
+    assert.equal(s4Probe.traceShape({ ...turn.trace, generationGuard: { ...turn.trace.generationGuard, fallback: true } },
+      profile.questionLayout, profile.dialoguePolicy), false);
   });
+});
+
+test('New v5 recovers a transient 503 within the same generation and the existing POST accounting', async () => {
+  for (const strategy of strategies) {
+    const ready = session(strategy, memo, profile, 90, 503);
+    await ready.start();
+    const turn = await ready.say(broad);
+    published(turn, 'accept', single(first), broad.drafts[0]);
+    assert.equal(turn.generationRequests.length, 1);
+    assert.deepEqual(turn.trace.generationGuard, { violations: [], regenerated: false, fallback: false });
+    assert.equal(ready.publicState().dialogueRecovery, 'active');
+    assert.deepEqual(ready.record().queueState.pendingHumanEventIds, []);
+    const sends = ready.usage().sends.filter(send => send.provider === 'luna' && send.phase === 'generation');
+    const timing = turn.after.turnTimings.at(-1)!;
+    assert.equal(timing.lastEventId, turn.trace.lastEventId);
+    assert.deepEqual(sends.map(send => send.turn), [timing.requestSeq, timing.requestSeq]);
+    assert.deepEqual(sends.map(send => send.outputTokens), [null, 3]);
+    const requests = turn.after.requests.filter(request => request.kind === 'generation');
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].retryCount, 1);
+    assert.equal(requests[0].requestSeq, timing.requestSeq);
+  }
+});
+
+test('New v5 can pause and resume a saved pending turn, or remain incomplete at the existing limit', async () => {
+  const rejected = { ...broad, drafts: ['上端に穴があります。', '右端に穴があります。'] };
+  for (const strategy of strategies) {
+    const ready = session(strategy);
+    await ready.start();
+    const failed = await ready.say(rejected);
+    const pending = failed.after.queueState.pendingHumanEventIds;
+    assert.equal(ready.publicState().dialogueRecovery, 'retry');
+    await ready.interrupt();
+    assert.equal(ready.record().dialogueInterruption, 'participant_paused');
+    assert.deepEqual(ready.record().queueState.pendingHumanEventIds, pending);
+    assert.deepEqual(ready.record().ownLedger, failed.before.ownLedger);
+    await ready.restore();
+    assert.equal(ready.publicState().dialogueRecovery, 'paused');
+    assert.equal(await ready.resumeWith(broad), 1);
+    assert.equal(ready.publicState().dialogueRecovery, 'active');
+    assert.deepEqual(ready.record().queueState.pendingHumanEventIds, []);
+    assert.equal(ready.record().jevTraces.at(-1)?.lastEventId, pending[0]);
+    assert.equal(ready.record().dialogueInterruption, undefined);
+
+    const exhausted = session(strategy, memo, profile, 3);
+    await exhausted.start();
+    const stopped = await exhausted.say(rejected);
+    assert.equal(stopped.generationRequests.length, 2);
+    assert.equal(exhausted.publicState().dialogueRecovery, 'unavailable');
+    assert.equal(exhausted.record().dialogueInterruption, 'budget_exhausted');
+    await exhausted.restore();
+    assert.equal(await exhausted.resumeWith(broad), 0);
+    assert.equal(exhausted.record().aiSubmission, null);
+    assert.deepEqual(exhausted.record().queueState.pendingHumanEventIds, stopped.after.queueState.pendingHumanEventIds);
+    assert.equal(exhausted.publicState().status, 'dialogue');
+  }
 });
 
 test('An orientation retry refusing the chosen name cannot be published as an agreement fallback', async () => {

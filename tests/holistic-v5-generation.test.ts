@@ -6,6 +6,9 @@ import { hash, verifyRecords } from '../dialogue-model/runtime/diagnostics/parit
 import { buildRecords, normal, OLD, OWN, runTurn } from './support/s4-v3-records.ts';
 import { researchTrialProfileV3 } from '../dialogue-model/runtime/v2/research-profile.ts';
 
+const orientationReason = '前の下書きに、自分側の見え方だと示されていない方位の語（上下左右・端・向き・斜め・縦長・横長など）がありました。公開発話では、回転しても変わらない形や部分同士のつながりに言い換えてください。方位が区別に必要なら、その語と同じ節で自分側の画面での見え方だと明示し、相手には形の対応を尋ねてください。';
+const sharedReason = '前の下書きは、相手側の位置や向きを自分側と同じだと断定していました。相手側の位置や向きは、相手自身の説明として引用するか、相手の見え方を尋ねてください。';
+
 test('holistic_v5 distinguishes local observations, attributed reports and questions from asserted shared orientation', () => {
   for (const text of [
     'こちらの画面では右端に切れ目があります。そちらにも切れ目がある形ですか？',
@@ -25,10 +28,52 @@ test('holistic_v5 distinguishes local observations, attributed reports and quest
     assert.equal(deriveGenerationOutcome(codes, codes, '切れ目のある形ですか？', true).kind, 'stop');
   }
   assert.deepEqual(findOrientationLeaks('右端に切れ目がある形ですか？', 'holistic_v5'), ['orientation_leak']);
-  assert.deepEqual(findOrientationLeaks('こちらでは右端に切れ目が見えますが、左側に突起があります。', 'holistic_v5'), ['orientation_leak']);
+  const continuation = 'こちらでは右端に切れ目が見えますが、左側に突起があります。';
+  assert.deepEqual(findOrientationLeaks(continuation, 'holistic_v5', 'jev_generation_retry_v2'), ['orientation_leak']);
+  assert.deepEqual(findOrientationLeaks(continuation, 'holistic_v5'), []);
 });
 
 for (const label of ['bypass-enabled', 'repair-first'] as const) {
+  test(`${label}: retry reason bytes follow the saved version and the two orientation codes`, async () => {
+    const unmarked = '右上に丸い突起がありますか？';
+    const partner = 'そちらの画面では左端に細い棒が見えます。';
+    const human = 'どんな形か教えてください。';
+    const next = '細い棒と丸い突起がつながっていますか？';
+    const versions = ['jev_generation_retry_v2', 'jev_generation_retry_v4'] as const;
+    const exercise = (draft: string, generationRetryVersion: (typeof versions)[number]) =>
+      buildRecords({ label, dialoguePolicy: 'holistic_v5', generationRetryVersion, technicalTrial: { version: 'adaptive_repair_v3' },
+        turns: [{ human, plan: { action: 'confirm', target: 'figure_0', drafts: [draft, next] } }] });
+    const statuses = (records: any) => verifyRecords(records).checks.filter(c => /^intervention\.trial\.0\.attempt\.0\./u.test(c.id)).map(c => c.status);
+    for (const version of versions) {
+      const scenarios = version === 'jev_generation_retry_v4'
+        ? [[unmarked, orientationReason], [partner, sharedReason], [unmarked + partner, orientationReason + sharedReason]]
+        : [[unmarked + partner, null]];
+      for (const [draft, reason] of scenarios) {
+        const records = await exercise(draft!, version);
+        assert.deepEqual(statuses(records), ['pass', 'pass', 'pass', 'pass']);
+        const replay = records.trials[0].replay[0];
+        assert.equal(replay.tape.generationRetryVersion, version);
+        for (const side of replay.result.sides) {
+          const retry = side.requests.filter((request: any) => request.phase === 'generation')[1];
+          const actual = retry.payload.messages.at(-1).content.split('\n').at(-1);
+          if (reason === null) assert.match(actual, /^前の下書きの方位の参照枠を明確にして書き直してください。/u);
+          else assert.equal(actual, reason);
+        }
+        if (reason === null) continue;
+        const altered = structuredClone(records);
+        const sides = altered.trials[0].replay[0].result.sides;
+        const otherIndex = sides.findIndex((side: any) => side.label !== label);
+        const other = sides[otherIndex];
+        const retry = other.requests.filter((request: any) => request.phase === 'generation')[1];
+        retry.payload.messages.at(-1).content = retry.payload.messages.at(-1).content.replace(reason, reason === sharedReason ? orientationReason : sharedReason);
+        retry.completeMessagesSha256 = hash(retry.payload.messages);
+        retry.payloadSha256 = retry.preProjectionPayloadSha256 = hash(retry.payload);
+        altered.evidence.pairedReplay[0][otherIndex === 0 ? 'left' : 'right'] = structuredClone(other);
+        assert.ok(statuses(altered).includes('mismatch'));
+      }
+    }
+  });
+
   test(`holistic_v5 ${label}: only a selected feature with orientation wording gets the adjacent viewpoint note`, async () => {
     const note = '以下のdiscriminatingFeatureにある上下左右・横長などの向きの語は、自分側の画面での見え方です。公開発話では、回転しても変わらない形や部分同士のつながりに言い換えてください。向きが区別に必要なら、その語と同じ節で「こちらの画面では」などと自分側の見え方だと明示し、相手には形の対応を尋ねてください。';
     const statuses = (records: any) => verifyRecords(records).checks.filter(c => /^intervention\.trial\.0\.attempt\.0\./u.test(c.id)).map(c => c.status);
@@ -100,7 +145,7 @@ for (const label of ['bypass-enabled', 'repair-first'] as const) {
     assert.deepEqual(JSON.parse(act.split('\n').at(-2)), { agreedName: '小舟', proposedNames: [name] });
     assert.doesNotMatch(act, /別枠の名前/u);
     assert.ok(gens[1].payload.messages.at(-1).content.includes(act));
-    assert.match(gens[1].payload.messages.at(-1).content, /参照枠を明確/u);
+    assert.ok(gens[1].payload.messages.at(-1).content.endsWith(sharedReason));
     const classify = side.requests.find((r: any) => r.phase === 'draft_naming');
     assert.match(classify.payload.questions.draft_naming.criteria.adopt_chosen, /nullでなく/u);
     assert.match(classify.payload.questions.draft_naming.criteria.adopt_other, /nullのとき/u);
@@ -193,3 +238,96 @@ test('new two_stage_v3 research profiles default to holistic_v5 and explicit pol
   assert.equal(researchTrialProfileV3(lunaRequest, timeouts, 'two_stage_v3', null).dialoguePolicy, undefined);
   assert.equal(researchTrialProfileV3(lunaRequest, timeouts, 'two_stage_v2').dialoguePolicy, undefined);
 });
+
+for (const label of ['bypass-enabled', 'repair-first'] as const) {
+  test(`${label}: accept gets a direct feature-answer instruction tied to the saved generation version`, async () => {
+    const note = 'acceptで相手が図形の有無や特定の特徴を直接尋ねたら、相槌だけで済ませず、まずその問いに答えてください。';
+    for (const generationRetryVersion of ['jev_generation_retry_v2', 'jev_generation_retry_v4'] as const) {
+      const text = '細い棒とつながった形は見えます。';
+      const records = await buildRecords({ label, dialoguePolicy: 'holistic_v5', generationRetryVersion,
+        technicalTrial: { version: 'adaptive_repair_v3' }, turns: [{ human: '細い棒とつながっていますか？',
+          plan: { action: 'accept', target: 'figure_0', drafts: ['上端に細い棒があります。', text] } }] });
+      const trial = records.trials[0];
+      assert.equal(trial.attempts[0].executed.action, 'accept');
+      assert.equal(trial.attempts[0].publicSpeech, text);
+      assert.deepEqual(verifyRecords(records).checks.filter(c => /^intervention\.trial\.0\.attempt\.0\./u.test(c.id)).map(c => c.status),
+        ['pass', 'pass', 'pass', 'pass']);
+      for (const side of trial.replay[0].result.sides) {
+        const messages = side.requests.filter((r: any) => r.phase === 'generation').map((r: any) => r.payload.messages);
+        for (const content of [messages[0][2].content, messages[1].at(-1).content]) {
+          assert.equal(content.includes(note), generationRetryVersion === 'jev_generation_retry_v4');
+        }
+      }
+    }
+  });
+}
+
+for (const label of ['bypass-enabled', 'repair-first'] as const) {
+  test(`${label}: accept sees the same private naming state in the first request and rewrite`, async () => {
+    const ledger = structuredClone(OLD.state.ledger);
+    const [agreed, tentative, deferred] = OWN.ownAnchors.map((anchor: { id: string }) => anchor.id);
+    ledger[agreed] = { status: 'agreed', name: '扇' };
+    ledger[tentative] = { status: 'tentative', name: '丸窓' };
+    ledger[deferred] = { status: 'deferred', name: '灯台' };
+    const statuses = (record: any) => verifyRecords(record).checks.filter(c => /^intervention\.trial\.0\.attempt\.0\./u.test(c.id)).map(c => c.status);
+    const privateMessage = (messages: any[]) =>
+      messages.find(m => m.role === 'system' && m.content.startsWith('自分側の命名の記録です。'));
+    for (const version of ['jev_generation_retry_v2', 'jev_generation_retry_v4'] as const) {
+      const response = '決まったのは一つなので、あと五つです。';
+      const leakingDraft = '未合意の図形は ' + deferred + ' です。';
+      const records = await buildRecords({ label, dialoguePolicy: 'holistic_v5', generationRetryVersion: version, ledger,
+        technicalTrial: { version: 'adaptive_repair_v3' }, turns: [{ human: 'あといくつ残っていますか？',
+          plan: { action: 'accept', target: 'none', drafts: [leakingDraft, response] } }] });
+      assert.deepEqual(statuses(records), ['pass', 'pass', 'pass', 'pass']);
+      const trial = records.trials[0];
+      assert.equal(trial.attempts[0].publicSpeech, response);
+      assert.deepEqual(trial.attempts[0].generationGuard.violations, ['internal_id']);
+      assert.deepEqual(trial.lastCommittedState.ledger, ledger);
+      for (const side of trial.replay[0].result.sides) {
+        const [initial, retry] = side.requests.filter((r: any) => r.phase === 'generation');
+        const message = privateMessage(initial.payload.messages);
+        assert.deepEqual(privateMessage(retry.payload.messages), message);
+        if (version === 'jev_generation_retry_v2') { assert.equal(message, undefined); continue; }
+        assert.ok(message);
+        const figures = JSON.parse(message.content.split('\n')[1]);
+        assert.deepEqual(figures, Object.keys(ledger).sort().map(figureId => ({ figureId, ...ledger[figureId] })));
+      }
+      if (version === 'jev_generation_retry_v2') continue;
+      const tampered = structuredClone(records);
+      const sides = tampered.trials[0].replay[0].result.sides;
+      const otherIndex = sides.findIndex((side: any) => side.label !== label);
+      const other = sides[otherIndex];
+      const initial = other.requests.find((r: any) => r.phase === 'generation');
+      const message = privateMessage(initial.payload.messages);
+      message.content = message.content.replace('丸窓', '橋脚');
+      initial.completeMessagesSha256 = hash(initial.payload.messages);
+      initial.payloadSha256 = initial.preProjectionPayloadSha256 = hash(initial.payload);
+      tampered.evidence.pairedReplay[0][otherIndex === 0 ? 'left' : 'right'] = structuredClone(other);
+      assert.ok(statuses(tampered).includes('mismatch'));
+    }
+  });
+
+  test(`${label}: an accept for the agreed name gets a reconfirmation instruction`, async () => {
+    const ledger = structuredClone(OLD.state.ledger);
+    const figureId = OWN.ownAnchors[0].id, name = '小舟';
+    ledger[figureId] = { status: 'agreed', name };
+    const human = 'この図形は、小舟でいい？';
+    const text = 'うん、その図形はもう小舟で決まっています。';
+    const records = await buildRecords({ label, dialoguePolicy: 'holistic_v5', ledger,
+      technicalTrial: { version: 'adaptive_repair_v3' }, turns: [{ human,
+        plan: { action: 'accept', target: 'figure_0', referent: 'figure_0', act: 'name_propose', drafts: [text],
+          extraction: JSON.stringify([{ segmentId: 's1', quote: name, proposition: name, name, targets: [figureId], aspect: 'name',
+            linkedIssueId: null, respondsToTurn: null }]) } }] });
+    const trial = records.trials[0];
+    assert.equal(trial.attempts[0].namingReconfirm, true);
+    assert.equal(trial.attempts[0].executed.action, 'accept');
+    assert.equal(trial.attempts[0].publicSpeech, text);
+    assert.deepEqual(trial.lastCommittedState.ledger, ledger);
+    assert.deepEqual(verifyRecords(records).checks.filter(c => /^intervention\.trial\.0\.attempt\.0\./u.test(c.id)).map(c => c.status),
+      ['pass', 'pass', 'pass', 'pass']);
+    for (const side of trial.replay[0].result.sides) {
+      const request = side.requests.find((r: any) => r.phase === 'generation');
+      assert.match(request.payload.messages[2].content, /今回は既に合意した呼び名の再確認です。/u);
+    }
+  });
+}

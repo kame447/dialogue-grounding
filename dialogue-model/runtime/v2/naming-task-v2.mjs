@@ -15,6 +15,7 @@ import { STATUSES } from "../judgment/schema.mjs";
 import { normalizeName as normalizeAgreedName } from "../judgment/name-evidence.mjs";
 import { selectParticipantJev, participantLunaClient, withParticipantJevTurn, restoreParticipantJevLedger,
   participantInitialObservation } from "../web/participant-jev-wiring.ts";
+import { allowsOrientationFallback, hasVersionedViewpoint } from "./generation-guard.ts";
 import { researchHash } from "./research-profile.ts";
 import { agreedNamesFromLedger, settleJevTurnTraces, settleAiPublicClaims } from "./jev-turn.ts";
 
@@ -94,6 +95,15 @@ export async function createNamingTaskV2({
   const style = restore?.options?.utteranceStyle ?? utteranceStyle;
   const jev = selectParticipantJev(restore, jevResearch, { referenceMemory, strategy, style,
     legacy: [localGrounding, activeDecision, decisionShadowClient, groundingShadow] });
+  const dialogueRecoveryEnabled = !!jev && !allowsOrientationFallback(jev.generationRetryVersion);
+  let dialogueInterruption = restore?.dialogueInterruption;
+  if (restore && Object.hasOwn(restore, "dialogueInterruption") &&
+      (!dialogueRecoveryEnabled || !["participant_paused", "budget_exhausted"].includes(dialogueInterruption) ||
+        restore.status !== "dialogue" || restore.queueState?.closed !== false ||
+        restore.queueState?.errorCode !== "ai_unavailable" ||
+        !Array.isArray(restore.queueState.pendingHumanEventIds) || !restore.queueState.pendingHumanEventIds.length)) {
+    throw new NamingTaskError("invalid_options");
+  }
   if (!STRATEGIES.includes(strategy)) throw new NamingTaskError("invalid_strategy");
   // Luna records keep their attempts across restores; a malformed list is refused, never replaced.
   if (restore && !jev && Object.hasOwn(restore, "attempts") && !Array.isArray(restore.attempts)) throw new NamingTaskError("invalid_options");
@@ -126,6 +136,7 @@ export async function createNamingTaskV2({
   let aiPublicSettlement = jev && restore ? clone(restore.aiPublicSettlement) : null;
   let initialObservation = jev && restore ? clone(restore.initialObservation) : null;
   if (jev && restore) restoreParticipantJevLedger(jev.ledger, restore.jevLedger);
+  if (dialogueInterruption === "budget_exhausted" && !jev?.ledger.stopReason()) throw new NamingTaskError("invalid_options");
   const effectiveClient = jev ? participantLunaClient(client, jev.ledger, jev.profile) : client;
   // The queue runs one AI turn at a time, so every upstream call starts inside the
   // current attempt (requestSeq) or outside any turn (final submission: null).
@@ -170,6 +181,7 @@ export async function createNamingTaskV2({
       interventionPolicy: jev.profile.interventionPolicy, decisionTimeoutMs: jev.profile.timeouts.decisionMs,
       ...(jev.profile.questionLayout !== "two_stage_v1" ? { questionLayout: jev.profile.questionLayout } : {}),
       ...(jev.profile.dialoguePolicy ? { dialoguePolicy: jev.profile.dialoguePolicy } : {}),
+      generationRetryVersion: jev.generationRetryVersion,
       onJevTurnTrace: (record) => {
         jevTraces.push(clone(record));
         if (Object.values(record.aiPublic?.stages ?? {}).some(stage => stage.error === "cost_cap")) jev.ledger.stop("cost_cap");
@@ -230,6 +242,15 @@ export async function createNamingTaskV2({
       ...(speaker === "human" && clientId !== undefined ? { clientId } : {}) }));
   }
 
+  // A stopped generation retains the queue, including on a process restore.
+  function markBudgetInterruption(snapshot) {
+    if (!dialogueRecoveryEnabled || snapshot.status !== "error") return;
+    const reason = jev.ledger.stopReason();
+    if (!reason) return;
+    dialogueInterruption = "budget_exhausted";
+    if (!jev.ledger.halted) jev.ledger.stop(reason);
+  }
+
   // Writes are serialized; each writes the latest state.
   let writing = Promise.resolve();
   function persist() {
@@ -240,6 +261,7 @@ export async function createNamingTaskV2({
   async function writeRecord() {
     if (!directory && !onPersist) return;
     const snapshot = queue.getSnapshot();
+    markBudgetInterruption(snapshot);
     const privateState = queue.getPrivateState();
     const record = {
       recordId, version: VERSION, trialId: trial.trialId, seed, strategy, startedAt, updatedAt: new Date(now()).toISOString(),
@@ -253,7 +275,8 @@ export async function createNamingTaskV2({
           // two_stage_v2 records name their layout; two_stage_v1 records keep their previous shape.
           ...(jev.profile.questionLayout !== "two_stage_v1" ? { questionLayout: jev.profile.questionLayout } : {}),
           // The policy a new two_stage_v3 trial was created with; a record without one never gains it.
-          ...(jev.profile.dialoguePolicy ? { dialoguePolicy: jev.profile.dialoguePolicy } : {}) } : {}) },
+          ...(jev.profile.dialoguePolicy ? { dialoguePolicy: jev.profile.dialoguePolicy } : {}),
+          ...(hasVersionedViewpoint(jev.generationRetryVersion) ? { generationRetryVersion: jev.generationRetryVersion } : {}) } : {}) },
       ...(rotation.legacy ? {} : { stimulus: clone(stimulus) }),
       status: result ? "completed" : closed ? "submitting" : "dialogue",
       // Origin is research metadata only; queue/model/participant events stay ordinary public speech.
@@ -267,6 +290,7 @@ export async function createNamingTaskV2({
       ...(jev ? { jevTraces: settleJevTurnTraces(jevTraces, privateState), aiPublicSettlement: clone(aiPublicSettlement),
         initialObservation: clone(initialObservation), jevLedger: jev.ledger.snapshot() } : {}),
       humanSubmission, aiSubmission, closed, finalError,
+      ...(dialogueInterruption ? { dialogueInterruption } : {}),
       queueState: queue.getDurableState(), scoring: result ? { key: trial.key, result } : null, requests, turnTimings,
       diagnostics: aiSubmission ? {
         ledgerFinalMismatch: (() => { const slots = dialogue.slots.filter((s) => (privateState.ledger[s].name ?? null) !== (aiSubmission[s] ?? null)); return { count: slots.length, slots }; })(),
@@ -310,6 +334,18 @@ export async function createNamingTaskV2({
     return settlementPromise;
   }
 
+  let recoveryInFlight = null;
+  async function resumePendingDialogue() {
+    const snapshot = queue.getSnapshot();
+    if (snapshot.status !== "error") return;
+    markBudgetInterruption(snapshot);
+    if (dialogueInterruption !== "budget_exhausted") {
+      dialogueInterruption = undefined;
+      await queue.retry();
+    }
+    await persist();
+  }
+
   await persist();
   return {
     version: VERSION,
@@ -317,21 +353,40 @@ export async function createNamingTaskV2({
     message(text, clientId) {
       if (closed) throw new NamingTaskError("dialogue_closed");
       if (typeof text !== "string" || !text.trim() || text.length > 2000) throw new NamingTaskError("invalid_message");
+      if (dialogueRecoveryEnabled) {
+        const snapshot = queue.getSnapshot();
+        const duplicate = clientId !== undefined && snapshot.events.some(event => event.clientId === clientId);
+        if (snapshot.status === "error" && !duplicate) throw new NamingTaskError("ai_retry_required");
+      }
       const receipt = queue.enqueue({ clientId, text: text.trim() });
       queue.whenIdle().then(() => persist()).catch(() => {});
       return { eventId: receipt.event.id, duplicate: receipt.duplicate };
     },
     async whenIdle() { await queue.whenIdle(); await persist(); },
     async persistNow() { await persist(); },
-    async retry() { await queue.retry(); await persist(); },
+    async retry() {
+      if (!dialogueRecoveryEnabled) { await queue.retry(); await persist(); return; }
+      recoveryInFlight ??= resumePendingDialogue().finally(() => { recoveryInFlight = null; });
+      await recoveryInFlight;
+    },
+    async interruptDialogue() {
+      const snapshot = queue.getSnapshot();
+      if (!dialogueRecoveryEnabled || snapshot.status !== "error" || recoveryInFlight) throw new NamingTaskError("ai_busy");
+      markBudgetInterruption(snapshot);
+      dialogueInterruption ??= "participant_paused";
+      await persist();
+    },
     getState() {
       const snapshot = queue.getSnapshot();
+      const recovery = snapshot.status !== "error" ? "active" : jev?.ledger.stopReason() ? "unavailable" :
+        dialogueInterruption === "participant_paused" ? "paused" : "retry";
       return clone({
         // No seed or seed-derived trial id: either would let a client regenerate the boards and key.
         version: VERSION, sessionId: recordId, scene,
         events: publicEvents(),
         aiStatus: snapshot.status === "pending" || snapshot.status === "processing" ? "thinking" : snapshot.status === "error" ? "error" : "idle",
         submitted: humanSubmission !== null, aiSubmitted: aiSubmission !== null, closed,
+        ...(dialogueRecoveryEnabled ? { dialogueRecovery: recovery } : {}),
         status: result ? "completed" : closed ? "submitting" : "dialogue",
         busy: snapshot.status === "pending" || snapshot.status === "processing",
         // Participant-facing result: own slots and names only, never figure ids.
