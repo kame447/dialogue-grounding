@@ -227,6 +227,7 @@ function session(strategy: Strategy, observation: Memo = memo, trialProfile = pr
   return {
     async start() { task = await create(); },
     async restore() { task = await create(JSON.parse(JSON.stringify(record())) as SavedTrial); },
+    async restoreFrom(saved: unknown) { task = await create(JSON.parse(JSON.stringify(saved)) as SavedTrial); },
     /** The ordinary restore entrance, from a record whose generation version is the given one (a version pinned by a saved record decides the trial). */
     async restoreAs(version: string) {
       const saved = JSON.parse(JSON.stringify(record())) as SavedTrial & { options: { generationRetryVersion?: string } };
@@ -1451,3 +1452,90 @@ test('Audit 22n v9 still publishes a draft whose quoted term is followed by a co
     assert.equal(turn.trace.generationRetryVersion, v9);
   });
 });
+
+// Audit v10 (candidate): a quotation of the partner's wording excuses a direction word only when the participant said that word in public.
+const saidLowerLeft = 'こちらの図では輪の切れ目から左下に突起があります。';
+const saidFacingLeft = 'こちらの図では輪の先が左向きになっています。';
+const sayingTurn = (text: string) => ({ human: text, local: [{ text, act: 'assert' as const, aspect: 'orientation' as const, targets: [first] }] });
+async function v10Held(trial: ReturnType<typeof session>, said: string, draft: string, version: string) {
+  const before = trial.record();
+  const turn = await trial.say({ ...broad, ...sayingTurn(said), drafts: [draft, draft], publicClaims: claimOf(draft) });
+  assert.equal(turn.trace.generationRetryVersion, version);
+  assert.equal(turn.generationRequests.length, 2, 'the same draft is regenerated once and rejected again');
+  assert.equal(turn.trace.errorCode, 'unsafe_generation');
+  assert.equal(turn.speech, null);
+  assert.equal(turn.trace.publicSpeech, null);
+  assert.equal(turn.trace.generationGuard.fallback, false);
+  assert.ok(turn.trace.generationGuard.violations.length > 0);
+  assert.deepEqual(turn.after.queueState.privateState, before.queueState.privateState);
+  assert.ok(!trial.publicState().events.some((event: { text: string }) => event.text === draft));
+}
+async function v10Published(trial: ReturnType<typeof session>, said: string, draft: string, version: string) {
+  const turn = await trial.say({ ...broad, ...sayingTurn(said), drafts: [draft], publicClaims: claimOf(draft) });
+  published(turn, 'accept', single(first), draft);
+  assert.deepEqual(turn.trace.generationGuard, { violations: [], regenerated: false, fallback: false });
+  assert.equal(turn.trace.generationRetryVersion, version);
+}
+const unsaidDirection = 'そちらでいう輪の切れ目から右上に、小さな突起がありますね。';
+test('Audit v10 rejects a quoted phrase whose direction word the participant never said, in both strategies', async () => {
+  await pairedAs(v10, trial => v10Held(trial, saidLowerLeft, unsaidDirection, v10));
+});
+test('Audit v10 keeps the v9 judgment for the same draft (v9 publishes it) in both strategies', async () => {
+  await pairedAs(v9, trial => v10Published(trial, saidLowerLeft, unsaidDirection, v9));
+});
+test('Audit v10 publishes the quotation when the participant did say that direction word, in both strategies', async () => {
+  await pairedAs(v10, trial => v10Published(trial, saidLowerLeft, 'そちらでいう輪の切れ目から左下に、小さな突起がありますね。', v10));
+});
+for (const draft of [...afterQuotation, 'そちらでは、輪の先は右向きですね。', 'そちらでいうと、輪の先は右向きですね。']) {
+  test(`Audit v10 rejects 「${draft}」 after the participant's statement, in both strategies`, async () => {
+    await pairedAs(v10, trial => v10Held(trial, stated, draft, v10));
+  });
+}
+for (const draft of [
+  'そちらでいう左向きの先は、こちらの輪の切れ目に対応していますか？',
+  'こちらの画面では輪の先が切れているので、そちらでいう左向きの先に対応する可能性はありそう。',
+  'そちらでいうとがった左向きの先は、こちらの輪の切れ目に対応していますか？',
+]) {
+  for (const version of [v9, v10]) {
+    test(`Audit v10 ${version.slice(-2)} publishes 「${draft}」 when the participant said 左向き, in both strategies`, async () => {
+      await pairedAs(version, trial => v10Published(trial, saidFacingLeft, draft, version));
+    });
+  }
+}
+// 「そちらでいうとがった…」 is not the conditional 「いうと」: v10 publishes it, v9 keeps rejecting it.
+for (const draft of ['そちらでいうとがった左向きの先に対応する可能性はありそう。']) {
+  test(`Audit v10 publishes 「${draft}」 and v9 still rejects it, in both strategies`, async () => {
+    await pairedAs(v10, trial => v10Published(trial, saidFacingLeft, draft, v10));
+    await pairedAs(v9, trial => v10Held(trial, saidFacingLeft, draft, v9));
+  });
+}
+// ai_bound_target belongs to v9 and later: v9 and v10 records keep it across a restore; a v8 record that carries one is refused.
+for (const strategy of strategies) {
+  const build = async (version: string) => {
+    const dialogue = session(strategy);
+    await dialogue.start();
+    await dialogue.restoreAs(version);
+    const question = await audit16Check(dialogue, 0, { questionTargets: [], questionAspect: 'part' });
+    await audit16Answer(dialogue, question, 'acknowledge', 0, { aspect: 'part', targets: [] });
+    return dialogue;
+  };
+  const bound = (record: any) => (record.referenceGraph.claims as Array<{ source: string }>).filter(claim => claim.source === 'ai_bound_target');
+  for (const version of [v9, v10]) {
+    test(`Audit v10 ${strategy} keeps an ai_bound_target claim across a restore as ${version.slice(-2)}`, async () => {
+      const dialogue = await build(version);
+      assert.equal(bound(dialogue.record()).length, 1, 'the supplied target of the targetless question is recorded as ai_bound_target');
+      await dialogue.restore();
+    });
+  }
+  test(`Audit v10 ${strategy} refuses a v8 record that carries an ai_bound_target claim`, async () => {
+    const dialogue = await build(v8);
+    const untouched = dialogue.record();
+    assert.equal(bound(untouched).length, 0, 'v8 records the supplied target without the provenance');
+    await dialogue.restoreFrom(untouched);
+    const tampered = JSON.parse(JSON.stringify(untouched));
+    const claim = tampered.queueState.privateState.graph.records.find((entry: { kind: string; source: string }) => entry.kind === 'claim' && entry.source === 'ai_hypothesis');
+    assert.ok(claim, 'an AI question claim exists to rewrite');
+    claim.source = 'ai_bound_target';
+    await assert.rejects(dialogue.restoreFrom(tampered));
+  });
+}
