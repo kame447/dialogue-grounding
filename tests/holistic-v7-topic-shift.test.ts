@@ -32,7 +32,7 @@ for (const moved of ['うん、次いこう。', 'じゃあ、次の図形を見
   test(`after a vetoed move_on a new trial (v7) does not publish "${moved}" and rewrites it into the chosen confirmation; v6 publishes it as before`, async () => {
     const v7 = await build('repair-first', undefined, [moved, confirming]);
     const t7 = v7.trials[0].attempts[0];
-    assert.equal(t7.generationRetryVersion, 'jev_generation_retry_v8'); // the default of a new trial; v8 contains the v7 topic-shift check
+    assert.equal(t7.generationRetryVersion, 'jev_generation_retry_v9'); // the default of a new trial; v9 contains the v7 topic-shift check
     assert.equal(t7.intervention.reasonCode, 'vetoed_bypass_action');
     assert.equal(t7.executed.action, 'confirm');
     assert.deepEqual(t7.generationGuard, { violations: ['unsupported_topic_shift'], regenerated: true, fallback: false });
