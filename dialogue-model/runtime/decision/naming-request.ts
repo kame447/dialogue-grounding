@@ -64,6 +64,22 @@ export function agreeCandidateAllowed(c: NamingClaimLike, id: string, turn: numb
   if (own && !inherited.has(c.id as string)) return true;
   return estimates.some(meaningfulEstimate) ? nameBindsFigure(id, estimates) : !own;
 }
+
+/** Generation context for one selected figure, using only live proposals of this turn and its pre-turn ledger entry. */
+export function targetNamingConflict(claims: readonly NamingClaimLike[], turn: number, entry: NamingLedgerLike[string], figureId: string,
+  estimates: readonly ReferentEstimateValue[], inherited: ReadonlySet<string>): { agreedName: string; proposedNames: string[] } | null {
+  if (entry?.status !== "agreed" || typeof entry.name !== "string") return null;
+  const agreedKey = namingNameKey(entry.name);
+  const proposals = new Map<string, string>();
+  for (const proposal of turnNameProposals(claims, turn)) {
+    if (!Array.isArray(proposal.targets) || (proposal.targets.length > 0 && !proposal.targets.includes(figureId)) ||
+        !agreeCandidateAllowed(proposal, figureId, turn, true, inherited, estimates)) continue;
+    const name = proposal.name as string;
+    const key = namingNameKey(name);
+    if (key && key !== agreedKey && !proposals.has(key)) proposals.set(key, name);
+  }
+  return proposals.size ? { agreedName: entry.name, proposedNames: [...proposals.values()] } : null;
+}
 /** A name proposal that answers an earlier name proposal and carries its name (the approval request of local-grounding/verify.ts); from holistic_v4 the answered claim may also be a public adoption (name_accept) that carries the name. */
 export function inheritsProposalName(c: NamingClaimLike, claims: readonly NamingClaimLike[], fromNamedClaim = false): boolean {
   return c.act === "name_propose" && typeof c.respondsTo === "string" && claims.some(p => p.id === c.respondsTo && (p.act === "name_propose" || fromNamedClaim && p.act === "name_accept") && p.name === c.name);

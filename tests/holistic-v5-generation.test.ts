@@ -32,6 +32,7 @@ for (const label of ['bypass-enabled', 'repair-first'] as const) {
   test(`holistic_v5 ${label}: the retry restates confirmation and S4 binds the exact framing and naming criteria`, async () => {
     const slot = OWN.ownAnchors[0].id, ledger = structuredClone(OLD.state.ledger);
     ledger[slot] = { status: 'agreed', name: '小舟' };
+    ledger[OWN.ownAnchors[1].id] = { status: 'agreed', name: '別枠の名前' };
     const name = '帆', human = `この形を「${name}」と呼びませんか？`;
     const drafts = ['そちらの画面では右端に切れ目があります。', '切れ目が一つある形ですか？'];
     const records = await buildRecords({ label, dialoguePolicy: 'holistic_v5', technicalTrial: { version: 'adaptive_repair_v3' }, ledger,
@@ -54,6 +55,9 @@ for (const label of ['bypass-enabled', 'repair-first'] as const) {
     assert.equal(gens.length, 2);
     const act = gens[0].payload.messages[2].content;
     assert.match(act, /その特徴だけを確かめてください。.*採用・再提案しないでください。その案に触れる場合は、相手の提案だと分かる引用に留めてください。/u);
+    assert.match(act, /同じ図形と別の図形のどちらについて話しているかを確かめてください。この案を採用して合意済みの名前を変更しないでください。/u);
+    assert.deepEqual(JSON.parse(act.split('\n').at(-2)), { agreedName: '小舟', proposedNames: [name] });
+    assert.doesNotMatch(act, /別枠の名前/u);
     assert.ok(gens[1].payload.messages.at(-1).content.includes(act));
     assert.match(gens[1].payload.messages.at(-1).content, /参照枠を明確/u);
     const classify = side.requests.find((r: any) => r.phase === 'draft_naming');
@@ -70,6 +74,44 @@ for (const label of ['bypass-enabled', 'repair-first'] as const) {
     retry.payloadSha256 = retry.preProjectionPayloadSha256 = hash(retry.payload);
     corrupted.evidence.pairedReplay[0][opposite === 0 ? 'left' : 'right'] = structuredClone(comparison);
     assert.ok(statuses(corrupted).includes('mismatch'));
+
+    const changedName = structuredClone(records);
+    const other = changedName.trials[0].replay[0].result.sides[opposite];
+    const initial = other.requests.find((r: any) => r.phase === 'generation');
+    initial.payload.messages[2].content = initial.payload.messages[2].content.replace('"agreedName":"小舟"', '"agreedName":"小島"');
+    initial.completeMessagesSha256 = hash(initial.payload.messages);
+    initial.payloadSha256 = initial.preProjectionPayloadSha256 = hash(initial.payload);
+    changedName.evidence.pairedReplay[0][opposite === 0 ? 'left' : 'right'] = structuredClone(other);
+    assert.ok(statuses(changedName).includes('mismatch'));
+  });
+
+  test(`holistic_v5 ${label}: naming conflict context requires an agreed name and a new name bound to the selected figure`, async () => {
+    const slot = OWN.ownAnchors[0].id, other = OWN.ownAnchors[1].id;
+    const cases = [
+      { status: 'agreed', name: '帆', targets: [], referent: 'figure_0', request: true, conflict: true },
+      { status: 'agreed', name: '帆', targets: [other], referent: 'figure_1', request: true, conflict: false },
+      { status: 'agreed', name: '帆', targets: [], referent: 'none', request: true, conflict: false },
+      { status: 'agreed', name: 'コブネ', targets: [slot], referent: 'figure_0', request: false, conflict: false },
+      { status: 'tentative', name: '帆', targets: [slot], referent: 'figure_0', request: true, conflict: false },
+    ];
+    for (const { status, name, targets, referent, request, conflict } of cases) {
+      const ledger = structuredClone(OLD.state.ledger);
+      ledger[slot] = { status, name: 'こぶね' };
+      const records = await buildRecords({ label, dialoguePolicy: 'holistic_v5', ledger,
+        technicalTrial: { version: 'adaptive_repair_v3' }, turns: [{ human: `この形を「${name}」と呼びませんか？`,
+          plan: { action: 'confirm', target: 'figure_0', referent, act: 'name_propose', speech: '切れ目が一つある形ですか？',
+            extraction: JSON.stringify([{ segmentId: 's1', quote: name, proposition: name, name, targets, aspect: 'name',
+              linkedIssueId: null, respondsToTurn: null }]) } }] });
+      const trial = records.trials[0];
+      assert.equal(trial.attempts[0].namingRequest === true, request);
+      assert.deepEqual(trial.lastCommittedState.ledger, ledger);
+      for (const side of trial.replay[0].result.sides) {
+        const act = side.requests.find((r: any) => r.phase === 'generation').payload.messages[2].content;
+        assert.equal(act.includes('"agreedName"'), conflict);
+      }
+      assert.deepEqual(verifyRecords(records).checks.filter(c => /^intervention\.trial\.0\.attempt\.0\./.test(c.id)).map(c => c.status),
+        ['pass', 'pass', 'pass', 'pass']);
+    }
   });
 }
 
