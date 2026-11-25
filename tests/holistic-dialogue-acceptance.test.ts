@@ -1010,7 +1010,7 @@ async function audit16Check(dialogue: ReturnType<typeof session>, target: number
 }
 
 async function audit16Answer(dialogue: ReturnType<typeof session>, question: { quote: string; sourceTurn: number },
-  act: 'agree' | 'acknowledge', target: number | readonly number[],
+  act: 'agree' | 'acknowledge' | 'assert', target: number | readonly number[],
   { aspect = 'referent', targets = [], human = act === 'agree' ? 'はい、まさにそれです。' : 'ええ、質問は分かりました。' }: {
     aspect?: 'referent' | 'part' | 'question'; targets?: string[]; human?: string;
   } = {}) {
@@ -1320,3 +1320,66 @@ test('Audit v9 is the version a new holistic_v5 trial starts with, and a v8 reco
     assert.equal(turn.trace.generationRetryVersion, v8);
   });
 });
+
+// Audit 20: the target supplied to an empty-target question is used only by a reply that passed the direct affirmation check,
+// whenever the reply arrives. A reply one exchange later, or one that is not an affirmation, names nothing.
+const audit20Proposal = '「' + originalName + '」とかどう？';
+async function audit20Gap(dialogue: ReturnType<typeof session>, act: 'assert' | 'acknowledge') {
+  const human = '少し考えさせてください。';
+  const turn = await dialogue.say({ human, action: 'accept', target: 0, drafts: ['ええ、ゆっくりどうぞ。'],
+    local: [{ text: human, act, aspect: 'progress', targets: [] }] });
+  assert.equal(turn.trace.status, 'committed');
+  assert.equal(turn.trace.executed?.action, 'accept');
+}
+for (const strategy of strategies) {
+  const late = async (gap: 'assert' | 'acknowledge', act: 'agree' | 'acknowledge' | 'assert', human: string) => {
+    const dialogue = session(strategy);
+    await dialogue.start();
+    const question = await audit16Check(dialogue, 0, { questionTargets: [], questionAspect: 'part' });
+    await audit20Gap(dialogue, gap);
+    await audit16Answer(dialogue, question, act, 0, { aspect: 'part', targets: [], human });
+    return { dialogue, named: await audit16Name(dialogue, baseWidth, [], audit20Proposal) };
+  };
+  for (const [label, act] of [['assert/part with no target right after the question (NB-20N-2)', 'assert'], ['agree/part with no target right after the question', 'agree']] as const) {
+    test(`Audit 20 ${strategy} keeps names pending and submits unnamed after ${label}`, async () => {
+      const dialogue = session(strategy);
+      await dialogue.start();
+      const question = await audit16Check(dialogue, 0, { questionTargets: [], questionAspect: 'part' });
+      await audit16Answer(dialogue, question, act, 0, { aspect: 'part', targets: [], human: '質問の意味は分かりました。' });
+      checkAudit17Pending(await audit16Name(dialogue, baseWidth, [], audit20Proposal));
+      await dialogue.restore();
+      await dialogue.submit([Object.fromEntries(figureIds.map(figureId => [figureId, null]))]);
+      assert.ok(Object.values(dialogue.record().ownLedger).every(entry => entry.name === null));
+    });
+  }
+  for (const [label, gap, act, human] of [
+    ['agree/part after an assert/progress exchange', 'assert', 'agree', '質問の意味は分かりました。'],
+    ['agree/part after an acknowledge exchange', 'acknowledge', 'agree', '質問の意味は分かりました。'],
+    ['acknowledge after an exchange', 'acknowledge', 'acknowledge', '質問の意味は分かりました。'],
+    ['assert/part with no target (NB-20N-2)', 'assert', 'assert', '質問の意味は分かりました。'],
+    ['assert/part with no target after an acknowledge exchange', 'acknowledge', 'assert', '質問の意味は分かりました。'],
+    ['「ええ、分かりました。」 as agree/part', 'assert', 'agree', 'ええ、分かりました。'],
+  ] as const) {
+    test(`Audit 20 ${strategy} keeps names pending, publishes none and submits unnamed after a late ${label}`, async () => {
+      const { dialogue, named } = await late(gap, act, human);
+      checkAudit17Pending(named);
+      await dialogue.restore();
+      await dialogue.submit([Object.fromEntries(figureIds.map(figureId => [figureId, null]))]);
+      const saved = dialogue.record();
+      assert.ok(Object.values(saved.ownLedger).every(entry => entry.name === null));
+      assert.ok(Object.values(saved.aiSubmission ?? {}).every(value => value === null));
+    });
+  }
+}
+for (const [label, draft] of [
+  ['a quotation of the partner\'s words that compares the two screens (NB-21N-1)', 'そちらでいう左向きの先は、こちらと同じ向きですね。'],
+  ['a negated own-side 「の画面で」 (NB-21N-3)', 'こちらの画面でなく、上端に穴があります。'],
+] as const) {
+  test(`Audit 20 v9 rejects ${label} in both strategies`, async () => {
+    await pairedAs(v9, async trial => {
+      const turn = await heldAs(trial, draft);
+      assert.equal(turn.trace.generationRetryVersion, v9);
+      assert.ok(turn.trace.generationGuard.violations.length > 0);
+    });
+  });
+}
