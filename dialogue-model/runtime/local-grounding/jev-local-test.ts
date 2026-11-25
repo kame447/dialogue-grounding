@@ -1,3 +1,6 @@
+import { PARTICIPANT_USAGE_ONLY, type ParticipantUsageOnly } from '../web/participant-usage-policy.ts';
+import { deadlineLimit, deadlineValue } from '../v2/research-deadline-options.ts';
+import type { ResearchLimits } from '../v2/research-timeouts.ts';
 // Researcher-authorized local experiment (2026-10-20), explicitly enabled only.
 // No .env credentials, Worker changes, automatic retries or calibration claims.
 import { keychainKeyReader, DEFAULT_COST_CAP_USD, UPSTREAM_TIMEOUT_MS } from "../diagnostics/jev-shadow-eval/local-openrouter.ts";
@@ -29,8 +32,34 @@ const probability = (v: unknown): v is number => finite(v) && v >= 0 && v <= 1;
 const timeout = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) > 0 && (v as number) <= 60000;
 
 type State = Pick<LocalClassificationInput, "segments"> & { priorClaims: Array<{ id: string }> };
-type ChoiceQuestion = { type: "choice"; instructions: string; criteria: Readonly<Record<string, string>> };
+export type ChoiceQuestion = { type: "choice"; instructions: string; criteria: Readonly<Record<string, string>> };
 export type JevLocalTestPayload = { model: typeof JEV_LOCAL_TEST_MODEL; state: string; questions: Record<string, ChoiceQuestion> };
+export type JevChoiceInput = Pick<JevLocalTestPayload, "state" | "questions">;
+export type JevChoiceEvidence = {
+  callIndex: number;
+  /** Transport and the optional synchronous adapter parser both completed. */
+  status: "ok" | "error" | "skipped";
+  model: string | null;
+  responseId: string | null;
+  latencyMs: number;
+  costUsd: number | null;
+  error: JevLocalTestErrorCode | null;
+};
+type ChoiceCallOptions = { signal?: AbortSignal; timeoutMs?: number };
+export type JevChoiceTransport = {
+  readonly lastEvidence: JevChoiceEvidence | null;
+  readonly spentUsd: number;
+  readonly callCount: number;
+  leaks(value: string): boolean;
+  /** Raw answers retain probabilities/confidence; callers must parse them before use.
+   * A lazy builder preserves the legacy adapter's validation/error ordering.
+   * Parser failures retain billed cost and never produce successful evidence.
+   * null with skipped evidence means that there were no questions. */
+  request<T = unknown>(input: JevChoiceInput | (() => JevChoiceInput), options?: ChoiceCallOptions,
+    parse?: (answers: unknown, payload: JevLocalTestPayload) => T): Promise<T | null>;
+};
+export type JevChoiceTransportOptions = Omit<JevLocalTestOptions, "enabled">;
+
 export type JevLocalTestEvidence = {
   callIndex: number;
   classifierKind: "jev_local_test";
@@ -57,7 +86,9 @@ export type JevLocalTestOptions = {
   readKey?: () => Promise<string>;
   fetchImpl?: (url: string, init: RequestInit) => Promise<Response>;
   costCapUsd?: number;
+  usagePolicy?: ParticipantUsageOnly;
   timeoutMs?: number;
+  researchLimits?: ResearchLimits;
 };
 
 const INSTRUCTIONS = [
@@ -109,32 +140,33 @@ function parseChoices(raw: unknown, payload: JevLocalTestPayload): LocalFunction
   try { return parseLocalFunctionVerdicts(verdicts, input); } catch { fail("invalid_response"); }
 }
 
-/** Explicit researcher-local opt-in only. Constructing/importing it reads no key.
+/** Shared fixed-model transport. Constructing/importing it reads no key.
  * The observed-cost guard follows the existing diagnostic: an unknown billable
  * outcome halts this instance, and the largest known cost estimates the next call.
  * This is a stop rule, not a guaranteed provider-side prepaid spending limit. */
-export function createJevLocalTestClassifier(options: JevLocalTestOptions = {}): JevLocalTestClassifier | null {
-  if (options.enabled !== true) return null;
+export function createJevChoiceTransport(options: JevChoiceTransportOptions = {}): JevChoiceTransport {
   const { readKey = keychainKeyReader(), fetchImpl = globalThis.fetch, costCapUsd = DEFAULT_COST_CAP_USD,
-    timeoutMs = UPSTREAM_TIMEOUT_MS } = options;
+    timeoutMs = UPSTREAM_TIMEOUT_MS, researchLimits } = options;
+  const limit = deadlineLimit(researchLimits);
+  const usageOnly = options.usagePolicy === PARTICIPANT_USAGE_ONLY;
   if (typeof readKey !== "function" || typeof fetchImpl !== "function" || !finite(costCapUsd) || costCapUsd <= 0 ||
-      costCapUsd > DEFAULT_COST_CAP_USD || !timeout(timeoutMs)) fail("invalid_options");
+      costCapUsd > DEFAULT_COST_CAP_USD || !deadlineValue(timeoutMs, limit)) fail("invalid_options");
   let key: string | null = null;
   let spentUsd = 0, maxCost = 0, callCount = 0;
   let halted = false, busy = false;
-  let lastEvidence: JevLocalTestEvidence | null = null;
+  let lastEvidence: JevChoiceEvidence | null = null;
   const leaks = (value: string) => key !== null && value.includes(key);
 
   return Object.freeze({
-    metadata: Object.freeze({ classifierKind: "jev_local_test" as const, calibrated: false as const, model: JEV_LOCAL_TEST_MODEL }),
     get lastEvidence() { return structuredClone(lastEvidence); },
     get spentUsd() { return spentUsd; },
     get callCount() { return callCount; },
     leaks,
-    async classify(input, callOptions = {}) {
+    async request<T = unknown>(input: JevChoiceInput | (() => JevChoiceInput), callOptions: ChoiceCallOptions = {},
+      parse?: (answers: unknown, payload: JevLocalTestPayload) => T): Promise<T | null> {
       const callIndex = ++callCount, started = performance.now();
-      const evidence: JevLocalTestEvidence = { callIndex, classifierKind: "jev_local_test", status: "error", model: null,
-        responseId: null, choices: [], latencyMs: 0, costUsd: null, error: null };
+      const evidence: JevChoiceEvidence = { callIndex, status: "error", model: null,
+        responseId: null, latencyMs: 0, costUsd: null, error: null };
       let ownsSlot = false, delivered = false, accounted = false;
       let timer: ReturnType<typeof setTimeout> | undefined;
       let abort = () => {};
@@ -143,11 +175,17 @@ export function createJevLocalTestClassifier(options: JevLocalTestOptions = {}):
       try {
         if (callOptions.signal?.aborted) fail("aborted");
         if (busy) fail("busy");
-        const deadline = callOptions.timeoutMs === undefined ? timeoutMs : Math.min(timeoutMs, callOptions.timeoutMs);
-        if (!timeout(callOptions.timeoutMs ?? timeoutMs) || !timeout(deadline)) fail("invalid_options");
-        const payload = buildJevLocalTestPayload(input);
-        if (!Object.keys(payload.questions).length) { evidence.status = "skipped"; return []; }
-        if (halted || spentUsd >= costCapUsd || spentUsd + maxCost > costCapUsd) fail("cost_cap");
+        const raw = researchLimits === undefined ? callOptions.timeoutMs ?? timeoutMs : callOptions.timeoutMs === undefined ? timeoutMs : callOptions.timeoutMs;
+        if (!deadlineValue(raw, limit)) fail("invalid_options");
+        const deadline = callOptions.timeoutMs === undefined ? timeoutMs : Math.min(timeoutMs, researchLimits === undefined ? callOptions.timeoutMs : raw);
+        if (!deadlineValue(deadline, limit)) fail("invalid_options");
+        const built = typeof input === "function" ? input() : input;
+        if (!object(built) || typeof built.state !== "string" || !object(built.questions)) fail("invalid_request");
+        // Whitelist the body and fix the model here, even for untyped callers.
+        const payload: JevLocalTestPayload = { model: JEV_LOCAL_TEST_MODEL, state: built.state,
+          questions: built.questions as Record<string, ChoiceQuestion> };
+        if (!Object.keys(payload.questions).length) { evidence.status = "skipped"; return null; }
+        if (!usageOnly && (halted || spentUsd >= costCapUsd || spentUsd + maxCost > costCapUsd)) fail("cost_cap");
         busy = true;
         ownsSlot = true;
         const cancelled = new Promise<never>((_resolve, reject) => {
@@ -197,12 +235,11 @@ export function createJevLocalTestClassifier(options: JevLocalTestOptions = {}):
           if (!isGroundingModel(data.model, JEV_LOCAL_TEST_MODEL)) fail("model_mismatch");
           evidence.model = data.model;
           evidence.responseId = typeof data.id === "string" && /^gen-[A-Za-z0-9_-]{1,124}$/.test(data.id) ? data.id : null;
-          if (!accounted) fail("cost_unreported");
-          if (spentUsd > costCapUsd) fail("cost_cap");
-          const verdicts = parseChoices(data.answers, payload);
+          if (!usageOnly && !accounted) fail("cost_unreported");
+          if (!usageOnly && spentUsd > costCapUsd) fail("cost_cap");
+          const result = parse ? parse(data.answers, payload) : data.answers as T;
           evidence.status = "ok";
-          evidence.choices = structuredClone(verdicts);
-          return verdicts;
+          return result;
         };
         return await Promise.race([run(), cancelled]);
       } catch (error) {
@@ -212,12 +249,46 @@ export function createJevLocalTestClassifier(options: JevLocalTestOptions = {}):
       } finally {
         clearTimeout(timer);
         callOptions.signal?.removeEventListener("abort", abort);
-        if (delivered && !accounted) halted = true;
+        if (!usageOnly && delivered && !accounted) halted = true;
         if (ownsSlot) busy = false;
         evidence.latencyMs = Math.max(0, Math.round(performance.now() - started));
         // Concurrent calls are rejected; an older completion cannot overwrite their failure proof.
         if (callIndex === callCount) lastEvidence = structuredClone(evidence);
       }
+    },
+  });
+}
+
+/** Explicit researcher-local opt-in only. The legacy human adapter keeps its
+ * builder, parser, API and evidence shape. */
+export function createJevLocalTestClassifier(options: JevLocalTestOptions = {}): JevLocalTestClassifier | null {
+  if (options.enabled !== true) return null;
+  const transport = createJevChoiceTransport(options);
+  const parsed = new Map<number, LocalFunctionVerdict[]>();
+  return Object.freeze({
+    metadata: Object.freeze({ classifierKind: "jev_local_test" as const, calibrated: false as const, model: JEV_LOCAL_TEST_MODEL }),
+    get lastEvidence(): JevLocalTestEvidence | null {
+      const evidence = transport.lastEvidence;
+      if (!evidence) return null;
+      return { callIndex: evidence.callIndex, classifierKind: "jev_local_test", status: evidence.status,
+        model: evidence.model, responseId: evidence.responseId,
+        choices: evidence.status === "ok" ? structuredClone(parsed.get(evidence.callIndex) ?? []) : [],
+        latencyMs: evidence.latencyMs, costUsd: evidence.costUsd, error: evidence.error };
+    },
+    get spentUsd() { return transport.spentUsd; },
+    get callCount() { return transport.callCount; },
+    leaks: transport.leaks,
+    async classify(input, callOptions = {}) {
+      const callIndex = transport.callCount + 1;
+      return await transport.request(() => buildJevLocalTestPayload(input), callOptions, (raw, payload) => {
+        const choices = parseChoices(raw, payload);
+        // Keep the published result until transport finally publishes its successor.
+        // At most the completed snapshot and this in-flight parse are retained.
+        const published = transport.lastEvidence?.callIndex;
+        for (const index of parsed.keys()) if (index !== published) parsed.delete(index);
+        parsed.set(callIndex, structuredClone(choices));
+        return choices;
+      }) ?? [];
     },
   });
 }

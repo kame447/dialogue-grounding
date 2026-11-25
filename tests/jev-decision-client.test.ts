@@ -52,6 +52,24 @@ async function httpMock(t: TestContext, respond: (p: JevDecisionPayload) => Repl
 }
 const code = (wanted: string) => (e: unknown) => e instanceof JevDecisionError && e.code === wanted;
 
+test("S1-c: none repair/confirm with included candidates records rejection before detail", async t => {
+  for (const action of ["repair", "confirm"]) {
+    const http = await httpMock(t, p => ({ body: answer(p, { action, target: "none", candidate_0: "include", candidate_1: "include" }) }));
+    const client = createJevDecisionClient({ enabled: true, readKey, fetchImpl: http.fetchImpl })!;
+    const input = fixture(), before = structuredClone(input);
+    await assert.rejects(client.decide(input), code("invalid_decision"));
+    assert.deepEqual(input, before);
+    assert.equal(http.requests.length, 1);
+    const failed = client.lastEvidence!;
+    assert.equal(failed.status, "error"); assert.equal(failed.error, "invalid_decision");
+    assert.equal(failed.rejectionCode, "detail_target_required");
+    assert.equal(failed.choices.action, action); assert.equal(failed.choices.target, "none");
+    assert.equal(failed.choices.candidate_0, "include"); assert.equal(failed.choices.candidate_1, "include");
+    assert.equal(failed.stages.length, 1); assert.equal(failed.stages[0].stage, "action_target");
+    assert.equal(failed.stages[0].status, "error"); assert.equal(failed.stages[0].rejectionCode, "detail_target_required");
+  }
+});
+
 test("off mode and construction do no I/O; Keychain uses existing service/account at decide time only", async t => {
   let reads = 0;
   const reader = keychainKeyReader((file, args, options, callback) => {

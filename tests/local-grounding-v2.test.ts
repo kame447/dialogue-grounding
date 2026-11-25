@@ -45,10 +45,12 @@ test("local grounding omitted and null keep requests, private state and traces b
   assert.equal(JSON.stringify(a), JSON.stringify(b));
   assert.equal(JSON.stringify(implicit.calls), JSON.stringify(explicit.calls));
   assert.equal(JSON.stringify(implicit.dialogue.getAttempts()), JSON.stringify(explicit.dialogue.getAttempts()));
-  // Captured from the pre-integration e06b04e implementation with this synthetic
-  // fixture: guards the request, output state and trace bytes, not just null's alias.
+  // Originally captured from e06b04e; re-captured for the Luna public-act change after checking the only
+  // differences are humanNaming/publication on traces, the Luna generator text and the Luna accept scope;
+  // re-captured again for Argon's Japanese review, which changes only one particle here (見立てには → 見立ては).
+  // Guards the request, output state and trace bytes, not just null's alias.
   const bytes = JSON.stringify({ result: a, calls: implicit.calls, attempts: implicit.dialogue.getAttempts() });
-  assert.equal(createHash("sha256").update(bytes).digest("hex"), "9e7bdb6acab26c266a2bcf8a33f838acff172815f15b6c2964a7be524b88a442");
+  assert.equal(createHash("sha256").update(bytes).digest("hex"), "c4b7aeafdc0636ccd82cabc06476d49c63f879688142603d213764176be885cc");
   assert.ok(!JSON.stringify(implicit.dialogue.getAttempts()).includes("localGrounding"));
   assert.ok(!JSON.stringify(implicit.calls).includes("局所問題の作業メモ"));
 });
@@ -180,12 +182,20 @@ test("supersede after local verification cannot install a stale generation snaps
 });
 
 for (const phase of ["extractor", "classifier"] as const) {
-  test(`${phase} timeout keeps the turn and legacy memory, and ignores late operations`, async () => {
-    const local = options(), late = gate(), records: LocalGroundingResearchRecord[] = [];
+  test(`${phase} timeout keeps the turn and legacy memory, and ignores late operations`, async t => {
+    let clock = 0;
+    t.mock.method(performance, "now", () => clock);
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const local = options(), entered = gate(), late = gate(), records: LocalGroundingResearchRecord[] = [];
     local.timeoutMs = 5;
-    if (phase === "extractor") local.extractor.extract = async () => { await late.promise; return [segment(ids[0])]; };
-    else local.classifier.classify = async () => { await late.promise; return [{ segmentId: "s1", act: "assert", respondsToClaimId: null, rawScore: 1 }]; };
-    const h = harness({ localGrounding: local, onLocalGroundingTrace: (record: LocalGroundingResearchRecord) => records.push(record) }); const result = await h.run();
+    if (phase === "extractor") local.extractor.extract = async () => { entered.release(); await late.promise; return [segment(ids[0])]; };
+    else local.classifier.classify = async () => { entered.release(); await late.promise; return [{ segmentId: "s1", act: "assert", respondsToClaimId: null, rawScore: 1 }]; };
+    const h = harness({ localGrounding: local, onLocalGroundingTrace: (record: LocalGroundingResearchRecord) => records.push(record) }); const work = h.run();
+    // Expire the shared deadline only after the selected phase has started.
+    await entered.promise;
+    clock = local.timeoutMs;
+    t.mock.timers.tick(local.timeoutMs);
+    const result = await work;
     assert.deepEqual(result.privateState.graph.records.map((r: any) => r.kind), ["mention", "feature"]);
     assert.equal(h.dialogue.getAttempts()[0].localGrounding.status, "timeout");
     assert.equal(records[0][phase].errorCode, "timeout");
@@ -550,7 +560,7 @@ test("committed fallback turns produce no AI claims, while ordinary and rewritte
   for (const publication of ["ordinary", "rewritten", "fallback"]) {
     const records: LocalGroundingResearchRecord[] = [], local = options(); let generations = 0, judgments = 0;
     local.extractor.extract = async () => [];
-    const publicText = "船と呼ぶのはどうでしょう？四角い部分があります。";
+    const publicText = "「船」と呼ぶのはどうでしょう？四角い部分があります。";
     const h = harness({ localGrounding: local, onLocalGroundingTrace: (record: LocalGroundingResearchRecord) => records.push(record),
       judge: { async judge() { return ++judgments === 1 ? { ...core, action: "propose_name", targetSlot: ids[0], candidateName: "船", discriminatingFeature: "四角い部分" } : core; } },
       client: { async complete() {
@@ -564,8 +574,18 @@ test("committed fallback turns produce no AI claims, while ordinary and rewritte
     const second = await h.run({ privateState: first.privateState, events: [events[0],
       { id: "event-2", seq: 2, speaker: "ai", text: first.text },
       { id: "event-3", seq: 3, speaker: "human", text: "うん" }], lastEventId: "event-3" });
-    assert.equal(records[1].aiClaims.length, publication === "fallback" ? 0 : 2);
-    assert.equal(second.privateState.graph.records.filter((r: any) => r.kind === "claim" && r.speaker === "ai").length, publication === "fallback" ? 0 : 2);
+    assert.equal(records[1].aiClaims.length, publication === "fallback" ? 0 : 1);
+    assert.equal(second.privateState.graph.records.filter((r: any) => r.kind === "claim" && r.speaker === "ai").length, publication === "fallback" ? 0 : 1);
+    // Public text expresses the feature, but this slice has no public-text feature extraction; coverage is not demonstrated.
+    assert.equal(records[1].aiClaims.filter(c => c.aspect === "part").length, 0);
+    const installed = second.privateState.graph.records.filter((r: any) => r.kind === "claim" && r.speaker === "ai");
+    assert.equal(installed.filter((r: any) => r.aspect === "part").length, 0);
+    if (publication !== "fallback") {
+      for (const claim of [records[1].aiClaims[0], installed[0]]) {
+        assert.equal(claim.aspect, "name"); assert.equal(claim.act, "name_propose"); assert.equal(claim.name, "船");
+        assert.equal(claim.sourceTurn, 2); assert.equal(claim.id, "3:ai1");
+      }
+    }
     assert.equal(records[1].verification.rejected.some(r => r.reason === "ai_fallback_utterance"), publication === "fallback");
   }
 });

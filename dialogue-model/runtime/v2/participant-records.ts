@@ -7,7 +7,8 @@
 // The questionnaire items are trial items written for operation checks only
 // (研究者未承認の仮項目). They are not NASA-TLX, Paas or any validated scale, and
 // no total score is computed. See dialogue-model/README.md: the scales are undecided.
-import { createTrialV2, participantView } from "../stimuli/scatter-v2.mjs";
+import { createTrialV2, participantView, ROTATION_MODES } from "../stimuli/scatter-v2.mjs";
+import { validateResolvedFigureSelection } from "../stimuli/figure-bank.ts";
 import { NamingTaskError } from "../naming-error.mjs";
 
 export const QUESTIONNAIRE_VERSION = "provisional-v0";
@@ -33,7 +34,7 @@ const item = (id: string, text: string, minLabel: string, maxLabel: string): Que
 export const QUESTIONNAIRE_FORM: QuestionnaireForm = Object.freeze({
   version: QUESTIONNAIRE_VERSION,
   provisional: true,
-  notice: "試行用の仮の質問です（研究者未承認）。正式な尺度ではありません。回答は実験記録と同じ期間保存され、その後自動的に削除されます。",
+  notice: "試行用の仮の質問です（研究者未承認）。正式な尺度ではありません。回答は実験記録とともに保存され、研究者が削除するまで残ります（自動では削除されません）。",
   items: [
     item("mental_effort", "この課題に取り組むあいだ、どの程度頭を使いましたか。", "ほとんど使わなかった", "非常に多く使った"),
     item("task_difficulty", "この課題はどの程度難しかったですか。", "とても易しかった", "とても難しかった"),
@@ -135,12 +136,22 @@ export function participantResult(result: any) {
 export function participantReview(record: Record<string, any>) {
   if (record.status !== "completed" || !isPlain(record.scoring) || !isPlain(record.scoring.result)) throw new NamingTaskError("trial_not_completed");
   if (!Number.isSafeInteger(record.seed)) throw new NamingTaskError("operation_failed");
+  // The recorded rotation; records from before the field existed are relative_pm90.
+  if (Object.hasOwn(record, "options") && !isPlain(record.options)) throw new NamingTaskError("operation_failed");
+  const options = isPlain(record.options) ? record.options : {};
+  const rotationMode = Object.hasOwn(options, "rotationMode") ? options.rotationMode : "relative_pm90";
+  if (typeof rotationMode !== "string" || !ROTATION_MODES.includes(rotationMode)) throw new NamingTaskError("operation_failed");
+  // A recorded figure selection is replayed so the review shows the same six figures; older records mean the legacy set.
+  let figureSelection: ReturnType<typeof validateResolvedFigureSelection> | undefined;
+  if (Object.hasOwn(options, "figureSelection")) {
+    try { figureSelection = validateResolvedFigureSelection(options.figureSelection); } catch { throw new NamingTaskError("operation_failed"); }
+  }
   const events = (Array.isArray(record.events) ? record.events : []).filter(isPlain)
     .map(({ id, speaker, text, at }) => ({ id, speaker, text, at }));
   const human = isPlain(record.humanSubmission) ? record.humanSubmission : {};
   return {
     recordId: String(record.recordId), status: "completed" as const, startedAt: iso(record.startedAt), updatedAt: iso(record.updatedAt),
-    scene: participantView(createTrialV2({ seed: record.seed })), events,
+    scene: participantView(createTrialV2({ seed: record.seed, rotationMode, ...(figureSelection ? { figureSelection } : {}) })), events,
     humanSubmission: Object.fromEntries(Object.entries(human).map(([slot, name]) => [slot, typeof name === "string" ? name : null])),
     result: participantResult(record.scoring.result),
   };

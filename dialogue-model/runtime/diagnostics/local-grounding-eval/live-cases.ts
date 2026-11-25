@@ -1,3 +1,7 @@
+// Frozen/retired old Luna-action dialogue-v2 evaluation, researcher decision 2026-10-21.
+// Historical scripts/expectations only: no changes to green current runtime runs.
+// Reproduction needs the matching historical runtime/commit; no CLI ban is added.
+// This retirement does not judge the semantic validity of these old expectations.
 // Newly authored anonymous human-only scripts. Expectations are gate inputs,
 // never instructions to the dialogue models or replacements for their replies.
 export const EXPECTED_ACTS = ["agree", "deny", "name_accept", "name_propose", "name_reject", "defer", "revisit"] as const;

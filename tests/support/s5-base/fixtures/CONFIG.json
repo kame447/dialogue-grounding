@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "base_assignment_config_v1",
+  "configId": "11111111-1111-4111-8111-111111111111",
+  "revision": 1,
+  "strategy": "repair-first",
+  "seed": 17,
+  "referenceMemory": false
+}

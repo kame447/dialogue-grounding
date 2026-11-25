@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { ACTIONS } from "../dialogue-model/runtime/judgment/schema.mjs";
 import { JEV_ACTIONS } from "../dialogue-model/runtime/decision/contract.ts";
 import type { JevDecision, JevDecisionInput } from "../dialogue-model/runtime/decision/contract.ts";
-import { buildJevDecisionPayload, buildJevDecisionDetailPayload, buildHumanReferentPayload, validateJevDecision, JevDecisionError, JEV_ACTION_CRITERIA, JEV_DECISION_INPUT_LIMITS } from "../dialogue-model/runtime/decision/jev-decision.ts";
+import { buildJevDecisionPayload, buildJevDecisionDetailPayload, buildHumanReferentPayload, parseJevActionTargetChoices, validateJevDecision, JevDecisionError, JEV_ACTION_CRITERIA, JEV_DECISION_INPUT_LIMITS } from "../dialogue-model/runtime/decision/jev-decision.ts";
 import { createMockJevDecisionClient } from "../dialogue-model/runtime/decision/mocks.ts";
 
 function fixture(): JevDecisionInput {
@@ -21,6 +21,16 @@ function mockValue(patch: Partial<JevDecision> = {}): JevDecision {
   return { action: "accept", target: { kind: "none" }, name: null, feature: null, observe: null, decisionKind: "mock", calibrated: false,
     evidence: { model: null, responseId: null, choices: {}, scores: {}, latencyMs: 0, costUsd: 0 }, ...patch };
 }
+
+test("S1-c: repair/confirm with none and no issue reference cannot borrow included candidates", () => {
+  const input = fixture(), before = structuredClone(input);
+  for (const action of ["repair", "confirm"] as const) {
+    const choices = { action, target: "none", ...Object.fromEntries(input.ownSlots.map((_id, i) => [`candidate_${i}`, "include"])) };
+    assert.deepEqual(parseJevActionTargetChoices(input, choices), { action, target: { kind: "none" } });
+    assert.throws(() => buildJevDecisionDetailPayload(input, { action, target: { kind: "none" } }), code("invalid_decision"));
+    assert.deepEqual(input, before);
+  }
+});
 
 test("closed action vocabulary includes existing acts plus an observation request", () => {
   assert.deepEqual([...JEV_ACTIONS], [...ACTIONS, "request_observation"]);

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createDialogueV2, ACTION_SCOPE_V2 } from "../dialogue-model/runtime/v2/dialogue-v2.mjs";
+import { createDialogueV2, ACTION_SCOPE_V2, LUNA_ACTION_SCOPE_V2 } from "../dialogue-model/runtime/v2/dialogue-v2.mjs";
 import { ACTIONS } from "../dialogue-model/runtime/judgment/schema.mjs";
 
 const anchors = ["s-0a01", "s-0a02", "s-0a03", "s-0a04", "s-0a05", "s-0a06"].map((id, i) => ({ id, bbox: { x: i * 100, y: 0, w: 90, h: 90 }, centroid: { x: i * 100 + 45, y: 45 } }));
@@ -20,6 +20,6 @@ for (const strategy of ["repair-first", "bypass-enabled"]) test(`generator is to
   const dialogue = createDialogueV2({ client, strategy, image, anchors, judge });
   await dialogue.runAiTurn({ events: [{ id: "e1", seq: 1, speaker: "human", text: "それを階段で" }], privateState: dialogue.initialPrivateState(), lastEventId: "e1" });
   const decision = generation.find((m) => typeof m.content === "string" && m.content.startsWith("この発話の判断"));
-  assert.ok(decision.content.includes("主actionで言えること: " + ACTION_SCOPE_V2.confirm));
-  assert.ok(decision.content.includes("followUpで言えること: " + ACTION_SCOPE_V2.propose_name));
+  assert.ok(decision.content.includes("主actionで言えること: " + LUNA_ACTION_SCOPE_V2.confirm));
+  assert.ok(decision.content.includes("followUpで言えること: " + LUNA_ACTION_SCOPE_V2.propose_name));
 });

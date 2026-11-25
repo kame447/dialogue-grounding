@@ -1,3 +1,5 @@
+// Frozen 21e9fde catalog after AUDIT-01: historical reproduction only.
+// Text, order, metadata and expect/check must not be changed to green old runs.
 // Newly written anonymous human speech. Expectations stay outside model inputs.
 import type { LocalAct, LocalAspect } from "../../local-grounding/contract.ts";
 

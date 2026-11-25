@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 2,
+  "id": "s0_r3_preflight_f88abb3_v2_mock",
+  "seed": 1701,
+  "figureSets": 1,
+  "approval": "pending",
+  "lunaRequest": {
+    "timeoutMs": null,
+    "maxCompletionTokens": null
+  },
+  "timeouts": {
+    "observationMs": 300000,
+    "localMs": 300000,
+    "decisionMs": 60000,
+    "lunaAttemptMs": 80000,
+    "generationMs": 80000,
+    "trialMs": 3600000
+  },
+  "caps": {
+    "jevUsd": 2,
+    "jevPosts": 208,
+    "lunaCalls": 131,
+    "lunaPosts": 393,
+    "lunaTokens": 1500000
+  },
+  "trials": [
+    {
+      "stage": "smoke",
+      "scriptId": "S0",
+      "label": "repair-first"
+    },
+    {
+      "stage": "main",
+      "scriptId": "S0",
+      "label": "bypass-enabled"
+    },
+    {
+      "stage": "main",
+      "scriptId": "S0",
+      "label": "repair-first"
+    },
+    {
+      "stage": "main",
+      "scriptId": "S1",
+      "label": "repair-first"
+    },
+    {
+      "stage": "main",
+      "scriptId": "S1",
+      "label": "bypass-enabled"
+    },
+    {
+      "stage": "main",
+      "scriptId": "S2",
+      "label": "bypass-enabled"
+    },
+    {
+      "stage": "main",
+      "scriptId": "S2",
+      "label": "repair-first"
+    },
+    {
+      "stage": "main",
+      "scriptId": "S3",
+      "label": "repair-first"
+    },
+    {
+      "stage": "main",
+      "scriptId": "S3",
+      "label": "bypass-enabled"
+    }
+  ]
+}

@@ -1,0 +1,742 @@
+{
+  "scope": "main-f88abb3-v2-dry-only",
+  "baselineHead": "f88abb32736141ac7ad6dd2fee4740df3a019490",
+  "files": [
+    {
+      "path": "dialogue-model/runtime/DECISIONS-SMOKE-2026-10-18.md",
+      "sha256": "f3a3c47e58190b5b3a23002655181b0369da64d2b930f2ec3b6ff3c95fce1821"
+    },
+    {
+      "path": "dialogue-model/runtime/E2E-2026-10-18.md",
+      "sha256": "a150bbd7bbc3096d6fc16dbbe8fbf15de37c3363f5f517fc237841a712692759"
+    },
+    {
+      "path": "dialogue-model/runtime/README.md",
+      "sha256": "53e4ee5b426bff179156f5064c7d0dbce3a1aa9d512e1ac1576c5b431ae20d45"
+    },
+    {
+      "path": "dialogue-model/runtime/VISUAL-MEMORY-2026-10-18.md",
+      "sha256": "174c056d4ff54d5b8e2bd14308955a7ca0a3089c128ed16295d17fca024d0cdb"
+    },
+    {
+      "path": "dialogue-model/runtime/cli.mjs",
+      "sha256": "a689893a1e10a67a71b99956869d969a42854db1630bf4a8d88cc9d3fe1c38ab"
+    },
+    {
+      "path": "dialogue-model/runtime/client.mjs",
+      "sha256": "8392f8843365b22bbf802a66365823d8b9598df6288e108b53810b21544a17ed"
+    },
+    {
+      "path": "dialogue-model/runtime/config.mjs",
+      "sha256": "2b6a4ea7a18c088e6ca6bf519537ef51039d71e81872ef26b93eba3739aa98ca"
+    },
+    {
+      "path": "dialogue-model/runtime/decision/bypass-acceptance.ts",
+      "sha256": "d065f1449f5da6e1ec6d2b19a87d2ecdf3f2e64bd1a573fc0798e8012bbc64db"
+    },
+    {
+      "path": "dialogue-model/runtime/decision/contract.ts",
+      "sha256": "9c4f8bd3077055f603d7814f22f9674fa6454068cc2ffe1078183342cc9cb9b5"
+    },
+    {
+      "path": "dialogue-model/runtime/decision/jev-decision.ts",
+      "sha256": "b5e694b5a3f4a57508f0f58c555c799f5a4ec0943961af2d76b760b7d143caa4"
+    },
+    {
+      "path": "dialogue-model/runtime/decision/mocks.ts",
+      "sha256": "7e002a29fab97f721c540b3916612dfcaa9726ddddd6029c6af9f4df20496301"
+    },
+    {
+      "path": "dialogue-model/runtime/decisions-client.mjs",
+      "sha256": "c114473510895ecac44e5fa916eb8910a25cf3a066506de10cd82b5636408a09"
+    },
+    {
+      "path": "dialogue-model/runtime/decisions-eval/ACTIVE-JUDGE-AUDIT.md",
+      "sha256": "306f7bd635356c6b8a0330a203e80d3b78b97b3b73747a9b411479a31596509a"
+    },
+    {
+      "path": "dialogue-model/runtime/decisions-eval/CONFLICT-REPORT-2026-10-19.md",
+      "sha256": "0a7b37ce28ec6e9043b86830033b1f7f8033ad034399fcc72aa69353ca357f96"
+    },
+    {
+      "path": "dialogue-model/runtime/decisions-eval/E2E-ACTIVE-JUDGE-PLAN.md",
+      "sha256": "bd0cf29609a52ec6a84b54895ded2f98f7ac11b3668d87aec2be9178ce88698e"
+    },
+    {
+      "path": "dialogue-model/runtime/decisions-eval/E2E-ACTIVE-RESULTS-2026-10-18.md",
+      "sha256": "6c9158132fbcf45c8a7e478a814a31757b54d03574614527d99f5596bcac5cdd"
+    },
+    {
+      "path": "dialogue-model/runtime/decisions-eval/GENERATION-GUARD-AUDIT.md",
+      "sha256": "6093fb75d60cc46686736dccb280dfe8b718b5e94b865722c562aea20133381e"
+    },
+    {
+      "path": "dialogue-model/runtime/decisions-eval/HOLISTIC-AUDIT.md",
+      "sha256": "a38f417f6c1bae5771a1a1686999d642201bf5af413233dee6ebc3c4d744e4ec"
+    },
+    {
+      "path": "dialogue-model/runtime/decisions-eval/PLAN.md",
+      "sha256": "9a94142514eb85dda6d4c17fdb5c053d7a69241a79e725160a3f7e5e6be5c054"
+    },
+    {
+      "path": "dialogue-model/runtime/decisions-eval/RESULTS-2026-10-18.md",
+      "sha256": "1ad1734baecdb18cca0a004d8d3b43cf30cb84ddb5b18060cebb759cdfd3d6dd"
+    },
+    {
+      "path": "dialogue-model/runtime/decisions-eval/RUBRIC-AUDIT.md",
+      "sha256": "dc1aaf0ca6edffe8427abac4633ccf6d8d1c9ef4844e5af803c1b7dd34181acc"
+    },
+    {
+      "path": "dialogue-model/runtime/decisions-eval/STRATEGY-DIFFERENCE-2026-10-19.md",
+      "sha256": "b599f2260af0927d08584a81348112bc47f51962b72b10a001c0b391a5d86350"
+    },
+    {
+      "path": "dialogue-model/runtime/decisions-eval/UTTERANCE-REPORT-2026-10-19.md",
+      "sha256": "165af84325b6808959e77c5b955a087936978f4d05c5262405d06c6fc953a67d"
+    },
+    {
+      "path": "dialogue-model/runtime/decisions-eval/cases.mjs",
+      "sha256": "67063581ff2f9cadb1769e4f0017d9e66d83b687f1d82795cc2fd8403a4d02dd"
+    },
+    {
+      "path": "dialogue-model/runtime/decisions-eval/score.mjs",
+      "sha256": "ba8c45f071e783a4bb998f5d7d7ebfcfd9a21430e48278ee0dafb900f3f896d6"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/ablation-design.mjs",
+      "sha256": "c0f48c8c93b530840343bb788ef63a4ca17cc10312171bb93c06507d95729a77"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/candidate-conflict-score.ts",
+      "sha256": "7319a0c6748c42bf3b5db96336079a18a9e66a342cac9bcb6deec2f282801734"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/candidate-conflict/analyze.ts",
+      "sha256": "3390a360d7df2edc6c7fa26386f74e48dcb06933adae5d394a95696362b8e813"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/candidate-conflict/common.ts",
+      "sha256": "1b267b33da0f4d2e7ed95b86fbefc929c5e29fdba9ca1dbd8c23774d589eb17e"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/candidate-conflict/live-compare.ts",
+      "sha256": "d1978251a71098c2034f4a24928d0ac6fcca334aac31574aad7dcf1fd24bdc0a"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/candidate-conflict/planned-decisions.ts",
+      "sha256": "b6868881d6378c820c5e18cf043f612c0005f0635611b2de66aa82b64358384d"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/candidate-conflict/replay.ts",
+      "sha256": "8dff0c56db3a3262ec2b0c711e862b3b55df6a140415d40bb266ee8bd33c691c"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/candidate-conflict/scorer.ts",
+      "sha256": "1fb104948a03afb15d7c3631b9a484219add8c2e2e66006813f1772b015aa1aa"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/compare-decisions.mjs",
+      "sha256": "a5522c6f501947a7bb67b47620cd780bff9414500bf5e6259906aae6cdd55b64"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/decisions-eval.mjs",
+      "sha256": "a603bbd409a275db5ae0a88e0bbdf4ec4b33d9ba31707c409fca9e1ca5ea5e6b"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/e2e-active-report.mjs",
+      "sha256": "9efafacb03487a89ca8ef763cae49e042888b6dd16074d420865489d7147f61e"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/grounding-metrics.mjs",
+      "sha256": "5681bbb8601231836f6564c144aa1f05600799701f10403e73941b3b8bf7707d"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/jev-decision-eval/README.md",
+      "sha256": "f5c48ba217c6db3eb6aaf3d4ad996ee4c094962c1d32232c153161cfc24f40d4"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/jev-decision-eval/cases.ts",
+      "sha256": "5d16ab3bc67838095dcee6546719d6da20253a2fe1e098d6b8b9fbca6abc32ac"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/jev-decision-eval/gate.ts",
+      "sha256": "3096285a932be399c9d91a857d2b5bfe018c5a3b4fc1b9f4f154e1d5e7ceff4a"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/jev-decision-eval/live.ts",
+      "sha256": "2837c6fc1eb70bd7781ccf14b0c743992b244996aee9949777f04c0427a6acd1"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/jev-shadow-eval/README.md",
+      "sha256": "2cc33107223cc52a5da912218f527883920d402f5220772a291dd53032360b99"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/jev-shadow-eval/SHADOW-DRYRUN-2026-10-19.md",
+      "sha256": "5255fd4b61291418f9c3341284de25f01d1f41d9996a32421790306856c6510d"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/jev-shadow-eval/SHADOW-NONAME-V2-2026-10-19.md",
+      "sha256": "d9e9b1b02aaa9d28643d036e6f2e9f8c87f6ffaf74039aa4e61f4d3af3c9e207"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/jev-shadow-eval/audit.ts",
+      "sha256": "57e0da26550fd78b4e3fee07910e8fda5093a0530235032471efb421bf9660ef"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/jev-shadow-eval/compare.ts",
+      "sha256": "f4e42e41ad947392e1b63756595c1fe33cd89f60597a8e448c5f991044088445"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/jev-shadow-eval/local-openrouter.ts",
+      "sha256": "fd53aa0a09c2a865ce0bf5ffecaf7ba1028a45a3112db150615af15186c40610"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/jev-shadow-eval/metrics.ts",
+      "sha256": "120e9009c0f520d0b2433c180c8c80447d44652deb1fc1e9431212ca65f8ea5a"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/jev-shadow-eval/mock-client.ts",
+      "sha256": "ec86b4dc628b114edfd58085ee160f7c0f24cb49b981d6432930cfa484de59fe"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/jev-shadow-eval/replay.ts",
+      "sha256": "2f367a119e890329aa65459cc2044d72a61acb3c44c7ff6ca8d7f97756499165"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/jev-shadow-eval/report.ts",
+      "sha256": "bd63315281723a3fcb114326c8334b91d41761117cefbc76cb5b1adaa1bc6a09"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/jev-shadow-eval/run.ts",
+      "sha256": "c4732ea1ce20be942a5913ace0ca884c23fa212ee2a4c7584df222c7d97f485a"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/jev-shadow-eval/types.ts",
+      "sha256": "e9f6c5fc6227d1a3173fd72627fa65f40183b69e8bdc2878c41d42582ecc2df1"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/local-grounding-eval/README.md",
+      "sha256": "512bed88e7f4ef98cf46210b238dd2bafac223f293a4fb5598a249f70331f024"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/local-grounding-eval/argon-prompt.md",
+      "sha256": "9146e4e47ba70e2f9261b55555867c0b8e3dfc5cd5d384b2f930fea226d0faf5"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/local-grounding-eval/cases.ts",
+      "sha256": "cbb0520c6e07801b3c4ddc8985297ff77965308c715466cf4dba27647f2563c1"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/local-grounding-eval/gate.ts",
+      "sha256": "a2bd97a75850fa6fb8d671dd7e51b9731f2095982cb9ab399ec15c78a346589d"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/local-grounding-eval/live-cases.ts",
+      "sha256": "8b5e417124216ae3f4d5e55007a366900b51b87e92878550d4505063f61ee290"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/local-grounding-eval/live.ts",
+      "sha256": "6ec13fe94b9c7fe427955d5661fbcb05d43bcd06f9f4e19bae2ac76ec4aa5c75"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/local-grounding-eval/run.ts",
+      "sha256": "d276e99bd5d226433f1197fcbed0e9a2f6d8acbcf0bb12c4338f5d98155e880f"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/parity-live/README.md",
+      "sha256": "c3fd0a2acf5d475a8010cb57eda5a93665730eeb3d68857321b7b2ff8f9fb113"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/parity-live/audit.ts",
+      "sha256": "146db2b03da1c27039b536d1891cdfa658d44ef15491036d760599f8f82236c3"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/parity-live/cases.ts",
+      "sha256": "04e9b9fa50d111b7dd0bd036c8b47442a81af5c176b1ff8be518c30d76aa5955"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/parity-live/coverage.ts",
+      "sha256": "ba61746a4ca9fb21c95b1819471cbe9341581691e653198281f722e2648d296f"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/parity-live/evidence.ts",
+      "sha256": "b93f3903fc7f84793c6ab2bd46e38ff193e4b8213c5462d3e0d060e90c64cb79"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/parity-live/live.ts",
+      "sha256": "accf2823006c3e8b71a16db2485db1ff1d4c96951c9c3659fb3369ec75cabcc4"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/parity-live/luna-wire.ts",
+      "sha256": "608809e78e539fde8585058ea060ad0e2779a1e58747ccbfd0791873f2277b24"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/parity-live/manifest.ts",
+      "sha256": "5583edcdc8b0dbb08e6fee2c0b87789a9cb9db7b66105b94e6992dc0139c98d2"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/parity-live/replay.ts",
+      "sha256": "ceee1f12052d93dd4f5ccb33c70e19696525097a00aeb52655ea11443f64996c"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/parity-live/research-deadline-schema.ts",
+      "sha256": "43d2ee7686a261e2f846a461ffdc6887703dab11c3d0d3c264557e186c7e9362"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/parity-live/research-deadlines.ts",
+      "sha256": "ecad0b5ff953de51343d2ef072869b9ffb34c7abb8909e1c2279b189c643583b"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/parity-verify/README.md",
+      "sha256": "46c47b540d4820117508eaa1fe864f30e485c80f95f61d1b547fa573634e1ade"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/parity-verify/core.ts",
+      "sha256": "e0c9183071caa878f2599f19b139f81bab7973b97eecf04c3960a5021eb3f753"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/parity-verify/coverage.ts",
+      "sha256": "fa90db039d7771ef37e3bf564ef816618c82845404bb287067eeda85c0c20890"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/parity-verify/evidence-schema.md",
+      "sha256": "326ee8d8f1009557eb97475bdcc7846424d3921f5f63dceb73e1dc1f9d68bfca"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/parity-verify/failure-audit-map.md",
+      "sha256": "953e11971495a65590d836c27c14e9ddacb51d8f5641eba8d746c4868a617bf1"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/parity-verify/failure-records.ts",
+      "sha256": "12e1fc1cfe2765909e50f2b2be5c4448dbfdb26eb59e6e1a170690a29e4f619e"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/parity-verify/fairness.ts",
+      "sha256": "e8d02c171408bd19e40b846e994ef6c9e9767248622f792b9f01ec2efcf8317e"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/parity-verify/index.ts",
+      "sha256": "99bf31bbafe0f41ee56c7503a2936656e6c40cc882e508053c07bfb836d3a0d6"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/parity-verify/ledger.ts",
+      "sha256": "c1cb244b36c9aa0f299a872fc7524c8cd68c6cf54a1369bea3ec0c1f75ef6a5f"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/parity-verify/model-checks.ts",
+      "sha256": "d0b66fdca4808a24b667d7cf38316d357c295497c0fea641c5642e4749dcfd15"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/parity-verify/model-observations.ts",
+      "sha256": "90d9de627e70e0449be9476123765ea865cf757535b5011bd44ccc3e661a6ee1"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/parity-verify/packets.ts",
+      "sha256": "f3ba58f63618f2478cee4eb2fbe7d4e95d4887f2113178420466651415fc6c88"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/parity-verify/replay-records.ts",
+      "sha256": "2c0ecf204ff8ef2064ee1c9e82e7a8b5217e9855f86119dad1d0466eee4a9729"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/parity-verify/research-records.ts",
+      "sha256": "15269956a6eb51fd7e9d766a665bde648b2024744a5dccddc117d67c37689188"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/pixel-invariant-features.mjs",
+      "sha256": "1895000c3ec08feb3c9aea6c125a45be36b79660dbdc28941aadf0a480743793"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/rotation-benchmark.mjs",
+      "sha256": "66592768f02c70cec75d4a488054061eaeb6a6bb7a72e67fc881c0f83ace45f9"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/rotation/REPORT-2026-10-19.md",
+      "sha256": "7c22500a1b045767feda30d091efa4d37ac5e04290580716e4d31a7310a938d9"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/rotation/bench-common.ts",
+      "sha256": "f7be22cc8ea15b03968d0c5989be96a6342aa5b7ca02f8ca9b8abe4e226778f4"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/rotation/run.ts",
+      "sha256": "b9fbcee6d298b53975e533d930212cae640d73cf2a7066e1d3f7e7a58ebe6fd2"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/rotation/shape-similarity.ts",
+      "sha256": "2772358e0e4b66bdcd82893455861cf68944d736a76efb2547771bdff0bc0b25"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/rotation/verbal-bench.ts",
+      "sha256": "4131773b5d39754353f715fbde4e8734fadf29d85df0f1192613128e7075ebd9"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/rotation/vision-bench.ts",
+      "sha256": "752195af6a2e9f457101a1b22a1d008881f1719f69f224f1381ff01cf7bfeb17"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/strategy-difference/tabulate.ts",
+      "sha256": "cac11f426e5aa68212fe986beb8afe5a2adde5097c8178af39d1797ddcf68bb4"
+    },
+    {
+      "path": "dialogue-model/runtime/diagnostics/strategy-difference/turn-type.ts",
+      "sha256": "10f7f2a13fe41d0e1351aecfb5e73c4d79daafd42fadc173d3b3f2a68cfe77e4"
+    },
+    {
+      "path": "dialogue-model/runtime/grounding/README.md",
+      "sha256": "e770e51b690c2cb59984fdbd415656170147b1e769386683a43f53137a269a11"
+    },
+    {
+      "path": "dialogue-model/runtime/grounding/client.ts",
+      "sha256": "6deabe4f38f5dc0a57c3c5650d217272bd2bd78898271b56b7f1e07b3deb95da"
+    },
+    {
+      "path": "dialogue-model/runtime/grounding/evidence.ts",
+      "sha256": "bb00b8cccfeac39a714623530fe06d0edf41778e853cebe283bfd6cf727e0a57"
+    },
+    {
+      "path": "dialogue-model/runtime/grounding/memory-evidence.ts",
+      "sha256": "90f366e1ff106160636971d9f9cf17cb12f21c6f39df0c7e9d904daa6274d20a"
+    },
+    {
+      "path": "dialogue-model/runtime/image.mjs",
+      "sha256": "fe1ccaab69cecf8790eb1fa44a1997403a93b3b67d29eb399cefd65726f13ba6"
+    },
+    {
+      "path": "dialogue-model/runtime/jev-grounding/README.md",
+      "sha256": "d7f47f9d4aa4668ddc8711691430927ace058c89c54b11acdf10db7b1169158c"
+    },
+    {
+      "path": "dialogue-model/runtime/jev-grounding/ai-session.ts",
+      "sha256": "be98d65be5eccb101597f013d607b81a1f5d827203cfcb1520da203e83043644"
+    },
+    {
+      "path": "dialogue-model/runtime/jev-grounding/build-evalset.ts",
+      "sha256": "c36f074c890ce525e07f2c7b6edc0917d5c96966ccbdc9c747bcf1a6759860d5"
+    },
+    {
+      "path": "dialogue-model/runtime/jev-grounding/compare-name-scenes.ts",
+      "sha256": "0e64928917beea059abfcb7ed4bbb382e72b01390fd8c5e9bfd3e2ca0bd8f49c"
+    },
+    {
+      "path": "dialogue-model/runtime/jev-grounding/derive.ts",
+      "sha256": "dbd8264399169b5840828f0f9b65809e332c5b673f7ff3fdd25f60d41a07326d"
+    },
+    {
+      "path": "dialogue-model/runtime/jev-grounding/evalcase.ts",
+      "sha256": "14f41b7b37c704c4a2eba262c52f51d399e83b0fb3c8d886bd379c48d56cfce2"
+    },
+    {
+      "path": "dialogue-model/runtime/jev-grounding/labels.ts",
+      "sha256": "76dc54848ed3848c41f4c5f47a758020cd504664877f4d74746c1551a6e8c66f"
+    },
+    {
+      "path": "dialogue-model/runtime/jev-grounding/metrics.ts",
+      "sha256": "eb1fb66f49e426b9783a0f3e97f7e3f53b6e61e65ed8b8c05aaee5dc05a09a15"
+    },
+    {
+      "path": "dialogue-model/runtime/jev-grounding/name-scenes.ts",
+      "sha256": "48085ed9aa27b85de2b26ad27fb9dc57a32d02e8bee6ad1a1c46794d50a4d20e"
+    },
+    {
+      "path": "dialogue-model/runtime/jev-grounding/skeleton.ts",
+      "sha256": "5181461ab006ab9c194de051bd7dad26e8e27bfec606b2220b072e63ccd6be43"
+    },
+    {
+      "path": "dialogue-model/runtime/jev-grounding/split.ts",
+      "sha256": "65ae7ac83c4478f579bb6cfd27682127362637b9bcfba7d72dd188f063e9b5e3"
+    },
+    {
+      "path": "dialogue-model/runtime/judgment/index.mjs",
+      "sha256": "89a244d70b814f5de6dff4d6e3dc3ae835ddc264e8acfe9e6a8392e7949cc202"
+    },
+    {
+      "path": "dialogue-model/runtime/judgment/instructions.mjs",
+      "sha256": "aa8b84ba60f10780328521457fc3abf4bfaa6db6efd32a725924075a9584f884"
+    },
+    {
+      "path": "dialogue-model/runtime/judgment/luna.mjs",
+      "sha256": "aeccad1f4afc16584ed91c964e1b03f12dd501ef323301745066186eceffee04"
+    },
+    {
+      "path": "dialogue-model/runtime/judgment/memory.mjs",
+      "sha256": "ed36ef416669b1172c3ca97d616b197e1dd0489e03f82b770f02f82c14115c60"
+    },
+    {
+      "path": "dialogue-model/runtime/judgment/public-evidence.mjs",
+      "sha256": "a09287a5ac7ef55df739d9731a76d6d465d6859b9673a984593e3091950e413d"
+    },
+    {
+      "path": "dialogue-model/runtime/judgment/schema.mjs",
+      "sha256": "d3ddc437174f697451da4cd181869010572207889f3b9a0b58dca2caaefe602c"
+    },
+    {
+      "path": "dialogue-model/runtime/local-grounding/README.md",
+      "sha256": "06af60b4abc9efa6fc9b8541a3785cec40038865fb3768ab7210346ab476616d"
+    },
+    {
+      "path": "dialogue-model/runtime/local-grounding/classify.ts",
+      "sha256": "ef6c9aeea3c1920ba11cfdf07d9a8d4a57c84ab495627960dac95ef06889a0f6"
+    },
+    {
+      "path": "dialogue-model/runtime/local-grounding/contract.ts",
+      "sha256": "b9cd4e0bb14722aa7a0731ce2b89f7db04a3d87fb2b53f291ce3b241b3921764"
+    },
+    {
+      "path": "dialogue-model/runtime/local-grounding/derive.ts",
+      "sha256": "699d0d49a09120dd1ce53ea0795631754388557ea00f7e0efcaae65afc90e454"
+    },
+    {
+      "path": "dialogue-model/runtime/local-grounding/extract-ai.ts",
+      "sha256": "61c88803ddd0dd8690dadbd707afdb1111e894fb8dcc396562cd6eb85217ebd5"
+    },
+    {
+      "path": "dialogue-model/runtime/local-grounding/extract.ts",
+      "sha256": "1f3af472bca173e83bcb0bf07e4b98c15fb98bc1b960aedc28e0a4970563764e"
+    },
+    {
+      "path": "dialogue-model/runtime/local-grounding/jev-ai-public.ts",
+      "sha256": "6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7"
+    },
+    {
+      "path": "dialogue-model/runtime/local-grounding/jev-local-test.ts",
+      "sha256": "3546705fffd22faf4133ddc9807129abfb50d7d5a004610f4172a51e94dc1b1b"
+    },
+    {
+      "path": "dialogue-model/runtime/local-grounding/mocks.ts",
+      "sha256": "ce353ba9cb07cb5c1f98e884ecc5dca1f83f9714fd935e427875cceb8b93b68c"
+    },
+    {
+      "path": "dialogue-model/runtime/local-grounding/verify-ai.ts",
+      "sha256": "e594e960634b8fa6597049edf41e31c0dc674a361619e921a37429380ea0dc9a"
+    },
+    {
+      "path": "dialogue-model/runtime/local-grounding/verify.ts",
+      "sha256": "7598d847ffe0863bd9910bcf39bd1ab3ab693320de9e22e4e34e0b89fe7d1417"
+    },
+    {
+      "path": "dialogue-model/runtime/memory/reference-graph.mjs",
+      "sha256": "aaf139ca7d36ade3d3d71b231bf123ddb76b4cdee77e5092cd80055b91fa1172"
+    },
+    {
+      "path": "dialogue-model/runtime/model-identity-contract.ts",
+      "sha256": "6709323470d7f578d60573e6c87de3a5f47cb1473ad7b42a5adf8152a75398ff"
+    },
+    {
+      "path": "dialogue-model/runtime/model-observations.ts",
+      "sha256": "d273dc60b9468f3ae9bf58823552e708dccf2c14eb3f4297b73572a134e085b1"
+    },
+    {
+      "path": "dialogue-model/runtime/model-policy.ts",
+      "sha256": "ca27d15fa3a102d365f87e5cb8d74add6506da64e63525f2dd3a92678e34d547"
+    },
+    {
+      "path": "dialogue-model/runtime/naming-cli.mjs",
+      "sha256": "deaceba61c2d29a5d9851e9735d85001d6555fb9192a4b8a6b110f812aca9905"
+    },
+    {
+      "path": "dialogue-model/runtime/naming-error.mjs",
+      "sha256": "ce43da93189bd097b53840b9e161ac0bee39a307d30ab27d9ab09e6877f3be08"
+    },
+    {
+      "path": "dialogue-model/runtime/naming-task.mjs",
+      "sha256": "21de4eb7fd145f677756ccf6d21fa93844220c11909c468f0bf7f60d06ebe6ad"
+    },
+    {
+      "path": "dialogue-model/runtime/observation/README.md",
+      "sha256": "e68042c6cde3b93857969f332de13bcd441ef2b1956a0d0821f60e494a8f008d"
+    },
+    {
+      "path": "dialogue-model/runtime/observation/cache.ts",
+      "sha256": "8d3a7dadec9a5973984b57818c25a5c18c0eb4a4f342752dd422e83728960a97"
+    },
+    {
+      "path": "dialogue-model/runtime/observation/contract.ts",
+      "sha256": "92398a7dcf5d38684b555f5f14adc021a8576a29c996f2fafa079674f9a7a2a5"
+    },
+    {
+      "path": "dialogue-model/runtime/observation/mocks.ts",
+      "sha256": "97b0890f1137f6a9583ce2df076fb6ee0528052d6465fd2eb30c4300f13e4395"
+    },
+    {
+      "path": "dialogue-model/runtime/observation/observe.ts",
+      "sha256": "469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad"
+    },
+    {
+      "path": "dialogue-model/runtime/scoring.mjs",
+      "sha256": "01115023003d7c24d2f2e9c20cd444580e280365b81980b419cda4ecb702b9dc"
+    },
+    {
+      "path": "dialogue-model/runtime/session.mjs",
+      "sha256": "c60d47c28e1cad541a4c64084e3b23f5b7548fda45b3bbd3e071813f51d8436e"
+    },
+    {
+      "path": "dialogue-model/runtime/stimuli/README.md",
+      "sha256": "21fa4e4dff11069642029215d191fb80af73e23407ea02ccc9bfe29792a87a94"
+    },
+    {
+      "path": "dialogue-model/runtime/stimuli/board.mjs",
+      "sha256": "4c7fca997b71bdf44fdebf66c6432d6b4f5d55c3779c846de067f1f54dc4627b"
+    },
+    {
+      "path": "dialogue-model/runtime/stimuli/figures.mjs",
+      "sha256": "401a206122d7466db35c2eb71d52cb34f52526f01e72a66e04fa0c968d0b4a09"
+    },
+    {
+      "path": "dialogue-model/runtime/stimuli/geometry.mjs",
+      "sha256": "66625207fdfe3b238b649c225ee87b28a63ab1d52197bc78bfc0f25bf375f143"
+    },
+    {
+      "path": "dialogue-model/runtime/stimuli/pieces.mjs",
+      "sha256": "62bd714c2c74d98971bb4c4e894c1d23cc510e1bbb94a10f7ec248e64bda92e0"
+    },
+    {
+      "path": "dialogue-model/runtime/stimuli/preview.mjs",
+      "sha256": "9f5e705351d9d6af13c15e3da02e978b7c2d09a7720a49925368311daf3653dc"
+    },
+    {
+      "path": "dialogue-model/runtime/stimuli/render.mjs",
+      "sha256": "6ba4e78e8f4a73c6d25ec163953c47a683d14c7c76adba48d1ab8aafd5352eaf"
+    },
+    {
+      "path": "dialogue-model/runtime/stimuli/scatter-v2.mjs",
+      "sha256": "edd386e6a43386e5d86f22db4e4c6c60604355aa2501ad4d8699c69a34008a18"
+    },
+    {
+      "path": "dialogue-model/runtime/v2/active-judge.mjs",
+      "sha256": "98eb42d6365b4bdb6179667f009d6d32bf49f60a90fe31f7368bbd4cda0a0068"
+    },
+    {
+      "path": "dialogue-model/runtime/v2/base-assignment-data.ts",
+      "sha256": "a338bf26422e4c65097a826b1e08be3fa13dc92a2a60d4da88eabaa1e30c57b9"
+    },
+    {
+      "path": "dialogue-model/runtime/v2/base-assignment-session.ts",
+      "sha256": "c38629772ba0c157ae05494458a92f61e10ca771665ccdad94061a836fa1f6c1"
+    },
+    {
+      "path": "dialogue-model/runtime/v2/base-assignment.ts",
+      "sha256": "cab75d6a3ce61c779b8fdd9055817d8ba3f876d96791461cae35b18ed79a1940"
+    },
+    {
+      "path": "dialogue-model/runtime/v2/candidate-conflict.ts",
+      "sha256": "6c7bd78f3a12205cfb1e8332514b8a027844da378487699a494fc3c6bbabd92d"
+    },
+    {
+      "path": "dialogue-model/runtime/v2/decision-evidence.mjs",
+      "sha256": "7b0f7497d142d2e72f1b4952667082888f5ddb2fc3982e84bfb6efc53df86bdc"
+    },
+    {
+      "path": "dialogue-model/runtime/v2/dialogue-v2.mjs",
+      "sha256": "14734faf9442d0833c802463ff0875556c11f22d11179e38ee448f4fbdd9b505"
+    },
+    {
+      "path": "dialogue-model/runtime/v2/generation-guard.ts",
+      "sha256": "57c4034aff8d9a7a9c3d35920dc76050fb2cff3dd6a8ab86fc91657ca91e392e"
+    },
+    {
+      "path": "dialogue-model/runtime/v2/grounding-shadow.ts",
+      "sha256": "0ea88381322e7d8af01131dfe27788848057854386c7e364f782fc0bcc5a6921"
+    },
+    {
+      "path": "dialogue-model/runtime/v2/jev-turn.ts",
+      "sha256": "bf4d193d1da0c72550b8545731b34f81fc59e9888b74d2a2a007234cf047c488"
+    },
+    {
+      "path": "dialogue-model/runtime/v2/latency.ts",
+      "sha256": "0b7c9747fb132072e67612c4e994739609f5715c975003de220448e688e782a5"
+    },
+    {
+      "path": "dialogue-model/runtime/v2/local-grounding-turn.ts",
+      "sha256": "04f064b8549e1bb0694195764f7b69b12f356392180814ed9620c8ce8508d0f5"
+    },
+    {
+      "path": "dialogue-model/runtime/v2/naming-task-v2.mjs",
+      "sha256": "22cb04c3478d96ff6cad1a1e35b115d3a6c8654d2e4be35674f5380503eb2211"
+    },
+    {
+      "path": "dialogue-model/runtime/v2/participant-contact.ts",
+      "sha256": "cb147f36fb5294e462af167c73ce9d04a822be162baa54d4f38f6ac4f3a4a9d1"
+    },
+    {
+      "path": "dialogue-model/runtime/v2/participant-records.ts",
+      "sha256": "42457f1adc0669e9ff9e7dd75706d8322760f56ffe33bf44e437c55057696630"
+    },
+    {
+      "path": "dialogue-model/runtime/v2/research-deadline-options.ts",
+      "sha256": "cd1bf3b49547c8d566d2d5f133aec9f8a2aeb146fc6fa5f509d5ca472182eaf6"
+    },
+    {
+      "path": "dialogue-model/runtime/v2/research-generation-client.ts",
+      "sha256": "9e3511793a2801ec6dc06c9e75daa0654bf47b623db93907547c7e4f8c12ce0f"
+    },
+    {
+      "path": "dialogue-model/runtime/v2/research-profile.ts",
+      "sha256": "70c9d89fd0a8bea428b538f9965ee2eaf43395b28d79e2cb70f5c37f72140814"
+    },
+    {
+      "path": "dialogue-model/runtime/v2/research-timeouts.ts",
+      "sha256": "3f2ad0a33a7c5d66ca8024662d8443b56c8570c834e29812ca07f6df9e415326"
+    },
+    {
+      "path": "dialogue-model/runtime/v2/utterance-metrics.ts",
+      "sha256": "fa3cd179b4059eb8310903018376615c7efaea12c2c311ea1980b45acb3756df"
+    },
+    {
+      "path": "dialogue-model/runtime/visual/own-image-rotation.mjs",
+      "sha256": "aba7c7e4634e71a0e0171737d3260e969b408e33b7abec7b706f446b488a1fe4"
+    },
+    {
+      "path": "dialogue-model/runtime/web/CHAT-UI-2026-10-19.md",
+      "sha256": "98aa9e561ba4bdd5bbc3d688a57a41521a70a081c88446e68e27e9950a2d9c49"
+    },
+    {
+      "path": "dialogue-model/runtime/web/SURVEY-UI-2026-10-19.md",
+      "sha256": "c38e3c3bb6dcbeac311dd9968dfb2fb89e2d5009ff298e17c4b1488b9bf35ca6"
+    },
+    {
+      "path": "dialogue-model/runtime/web/UI-CHECK-2026-10-19.md",
+      "sha256": "c78fd9b56cea5ef95ee1bfe1b60a82976f83d23c9cf06b644c8ebe8492e5793e"
+    },
+    {
+      "path": "dialogue-model/runtime/web/app.js",
+      "sha256": "473798bc29c84a53aa178ee023041273d8e45cb65fd171c50bf4e2a34c07227d"
+    },
+    {
+      "path": "dialogue-model/runtime/web/base-assignment-store.ts",
+      "sha256": "3eca4943c872a73d3094afd3096c40439325428290038a21340d2f11519b0fc6"
+    },
+    {
+      "path": "dialogue-model/runtime/web/base-participant-server.ts",
+      "sha256": "74443a1b7717ae0a5d0b70ae81f36aba3f9bbc244390bbd861b04f544818138d"
+    },
+    {
+      "path": "dialogue-model/runtime/web/human-message-queue.mjs",
+      "sha256": "72652eb12206d3f99ca004489c92c60238a7493031dd0c236aa670498ee795cf"
+    },
+    {
+      "path": "dialogue-model/runtime/web/index.html",
+      "sha256": "4c252a3edd3ca457c2cadeb41c4f8e2d59358088feafe287d1fedaa1bb7a0df9"
+    },
+    {
+      "path": "dialogue-model/runtime/web/server.mjs",
+      "sha256": "16dec0329882dad08311afb519f601ad83122069092d239b6ea3cf065544c99b"
+    },
+    {
+      "path": "dialogue-model/runtime/web/style.css",
+      "sha256": "5e56ae32de8edd24fa9d6a9a9201bece4517829705172988ea60f0cef6b1f862"
+    },
+    {
+      "path": "dialogue-model/runtime/web/v1/app.js",
+      "sha256": "58a1528b7ea30c20bb92b2525705d68e58666efc668a134878b172c90e3ca8b7"
+    },
+    {
+      "path": "dialogue-model/runtime/web/v1/index.html",
+      "sha256": "d84665e8d926a03175af43b214ceaae232c0c0f80b9a6d1d7d9615f497550c68"
+    },
+    {
+      "path": "dialogue-model/runtime/web/v1/style.css",
+      "sha256": "c0ef644d490378d908f637a6969ec5e3e8fff67234021f9c7eb4b119e43cecf8"
+    }
+  ]
+}

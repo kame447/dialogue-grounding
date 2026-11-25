@@ -1,0 +1,162 @@
+import { allCalls, allHttp, assertion, callsComplete, check, combine, count, equal, hash, httpComplete, httpMissingReason, list, META_KEYS, missing, missingTrialOrders, omit, row, rows, shaLike } from "./core.ts";
+import type { Check, Records, Row } from "./core.ts";
+
+/** The sole permitted projection is an image URL value, never a whole message/body. */
+function projectionAudit(value: unknown, ownImage: Row, path: string[] = []): { count: number; valid: boolean } {
+  if (typeof value === "string" && /^data\s*:\s*image\s*\//iu.test(value)) return { count: 0, valid: false };
+  if (Array.isArray(value)) return value.reduce<{ count: number; valid: boolean }>((a, v, i) => {
+    const b = projectionAudit(v, ownImage, [...path, String(i)]); return { count: a.count + b.count, valid: a.valid && b.valid };
+  }, { count: 0, valid: true });
+  const object = row(value);
+  if (object.projection === "own_image_bytes_sha256") {
+    const location = path.join(".");
+    return { count: 1, valid: /^messages\.\d+\.content\.\d+\.image_url\.url$/u.test(location) &&
+      equal(Object.keys(object).sort(), ["byteSha256", "mimeType", "projection"]) &&
+      ["image/png", "image/jpeg", "image/webp"].includes(String(object.mimeType)) && shaLike(object.byteSha256) && equal(object, ownImage) };
+  }
+  return Object.entries(object).reduce<{ count: number; valid: boolean }>((a, [key, v]) => {
+    const b = projectionAudit(v, ownImage, [...path, key]); return { count: a.count + b.count, valid: a.valid && b.valid };
+  }, { count: 0, valid: true });
+}
+
+export function replayChecks(records: Records): Check[] {
+  const out: Check[] = [], pairs = rows(records.evidence?.pairedReplay), seen = new Set<string>();
+  const uniqueIds = (ids: unknown[]) => ids.every(id => count(id) && id > 0) && new Set(ids).size === ids.length;
+  const sameIds = (a: unknown[], b: unknown[]) => uniqueIds(a) && uniqueIds(b) && a.length === b.length && a.every(id => b.includes(id));
+  // Account for EVERY POST receipt, including one whose IDs match no replay request.
+  // Per-request selection alone must never make an unmatched receipt disappear.
+  const allPosts = allHttp(records).filter(h => h.kind === "completion_post" || h.method === "POST");
+  const lunaCalls = allCalls(records).filter(c => c.provider === "luna");
+  const receiptContradiction = !uniqueIds(allPosts.map(h => h.sendId)) || allPosts.some(h => {
+    const c = lunaCalls.find(c => c.id === h.callId);
+    return h.kind !== "completion_post" || h.method !== "POST" || (!c ? callsComplete(records) : !list(c.sendIds).includes(h.sendId) || c.phase !== h.phase);
+  });
+  out.push(receiptContradiction ? assertion("replay.http_receipts", false, "one_to_one_all_http_receipts_and_native_send_ids") :
+    !httpComplete(records) ? missing("replay.http_receipts", httpMissingReason(records)) :
+      assertion("replay.http_receipts", lunaCalls.every(c => sameIds(list(c.sendIds), allPosts.filter(h => h.callId === c.id).map(h => h.sendId))),
+        "one_to_one_all_http_receipts_and_native_send_ids"));
+  const expected = records.trials.flatMap(t => rows(t.replay).map(r => ({ order: t.order, turn: row(list(row(r.tape).events).at(-1)).seq })));
+  if (!pairs.length) out.push(missing("replay.prewire", "both_label_raw_requests_missing"));
+  if (records.evidence?.normalizedEnvelopeFields) out.push(assertion("replay.normalization", equal(records.evidence.normalizedEnvelopeFields, META_KEYS), "fixed_envelope_key_list"));
+  for (const [i, pair] of pairs.entries()) {
+    const id = `replay.${i}`, key = `${pair.trialOrder}:${pair.turn}`, a = row(pair.left), b = row(pair.right);
+    const trial = records.trials.find(t => t.order === pair.trialOrder);
+    const outputMissing = !trial && missingTrialOrders(records).includes(Number(pair.trialOrder));
+    const native = rows(trial?.replay).find(r => row(list(row(r.tape).events).at(-1)).seq === pair.turn), tape = row(native?.tape);
+    out.push(outputMissing && !seen.has(key) ? missing(`${id}.binding`, "output_missing") : assertion(`${id}.binding`, expected.some(e => e.order === pair.trialOrder && e.turn === pair.turn) && !seen.has(key), "recorded_trial_turn_binding")); seen.add(key);
+    if(tape.schemaVersion==='parity_intervention_replay_v1'){
+      out.push(...interventionReplayWire(records,trial,pair,tape,id,outputMissing));continue;
+    }
+    out.push(assertion(`${id}.labels`, a.label === "repair-first" && b.label === "bypass-enabled", "both_labels_captured"));
+    if (!Object.hasOwn(a, "material") || !Object.hasOwn(b, "material")) { out.push(missing(`${id}.materials`)); continue; }
+    out.push(assertion(`${id}.materials.sha256`, hash(a.material) === a.materialSha256 && hash(b.material) === b.materialSha256, "projected_material_sha256"));
+    const different = !equal(a.material, b.material), left = rows(a.requests), right = rows(b.requests);
+    const incomparable = (name: string) => check(name, "not_comparable", "upstream_material_difference");
+    out.push(different ? incomparable(`${id}.parity`) : !left.length || !right.length ? missing(`${id}.parity`) :
+      assertion(`${id}.parity`, equal(left.map(r => omit(r, META_KEYS)), right.map(r => omit(r, META_KEYS))), "complete_projected_payloads_and_all_nonmetadata_fields"));
+    for (const [sideName, side] of [["left", a], ["right", b]] as const) {
+      const material = row(side.material), requests = rows(side.requests), originalRequests = rows(tape.expectedRequests);
+      out.push(outputMissing ? missing(`${id}.${sideName}.material_binding`, "output_missing") : different ? incomparable(`${id}.${sideName}.material_binding`) : assertion(`${id}.${sideName}.material_binding`,
+        ["state", "events"].every(k => equal(material[k], tape[k])) && equal(material.profile, trial?.profile) &&
+        ["luna", "jev", "reobservations"].every(k => !Object.hasOwn(material, k) || equal(material[k], tape[k])), "raw_frozen_material_binding"));
+      const boundary = row(material.boundary), domainKnown = boundary.luna === "canonical_http_json" && boundary.jev === "canonical_http_json" && boundary.hashScheme === "canonical_json_sha256_not_raw_body_bytes";
+      out.push(domainKnown ? check(`${id}.${sideName}.domain`, "pass", "canonical_http_json_boundary") : missing(`${id}.${sideName}.domain`, "full_http_hash_domains_not_recorded"));
+      const bindings: Check[] = [outputMissing ? missing(`${id}.${sideName}.count`, "output_missing") : different ? incomparable(`${id}.${sideName}.count`) : assertion(`${id}.${sideName}.count`, requests.length > 0 && requests.length === originalRequests.length, "request_count_order")];
+      out.push(...bindings);
+      requests.forEach((request, j) => {
+        const rid = `${id}.${sideName}.${j}`, original = originalRequests[j] ?? {}, body = row(request.payload);
+        const provider = request.provider;
+        const integrity = Object.hasOwn(request, "payload") ? assertion(`${rid}.projected_sha256`, hash(request.payload) === request.payloadSha256, "post_projection_canonical_payload_sha256") : missing(`${rid}.projected_sha256`);
+        out.push(integrity); bindings.push(integrity);
+        if (!domainKnown || request.payloadDomain !== "canonical_http_json") { const absent = missing(`${rid}.wire_domain`, "full_http_hash_domain_missing"); out.push(absent); bindings.push(absent); return; }
+        const projection = projectionAudit(request.payload, row(row(material.own).ownImage));
+        const projectionCheck = assertion(`${rid}.projection`, projection.valid && (provider === "luna" || projection.count === 0), "only_enumerated_own_image_url_projection");
+        out.push(projectionCheck); bindings.push(projectionCheck);
+        const associated = outputMissing ? missing(`${rid}.recorded_hash_binding`, "output_missing") : different ? incomparable(`${rid}.recorded_hash_binding`) : assertion(`${rid}.recorded_hash_binding`, request.provider === original.provider && request.phase === original.phase &&
+          shaLike(request.preProjectionPayloadSha256) && request.preProjectionPayloadSha256 === original.requestSha256, "pre_projection_hash_association_to_recorded_http");
+        out.push(associated); bindings.push(associated);
+        const preimage = projection.count ? missing(`${rid}.original_recomputation`, "original_image_bytes_not_present_self_reported_hash_is_not_full_proof") :
+          assertion(`${rid}.original_recomputation`, hash(request.payload) === request.preProjectionPayloadSha256, "independent_pre_projection_http_hash");
+        out.push(preimage); bindings.push(preimage);
+        if (outputMissing) {
+          const absent = missing(`${rid}.actual_http`, "output_missing"); out.push(absent); bindings.push(absent);
+          if (!["luna", "jev"].includes(String(provider))) out.push(assertion(`${rid}.provider`, false, "known_provider_required"));
+          return;
+        }
+        const calls = rows(trial?.calls).filter(c => c.provider === provider && c.turn === pair.turn);
+        const prior = requests.slice(0, j).filter(r => r.provider === provider).length, call = calls[prior];
+        if (provider === "luna") {
+          const explicit = row(row(trial?.profile).lunaRequest).maxCompletionTokens;
+          const fields = assertion(`${rid}.http_fields`, equal(Object.keys(body).sort(), [...(explicit === null ? [] : ["max_completion_tokens"]), "messages", "purpose"].sort()) &&
+            body.purpose === "dialogue_turn" && Array.isArray(body.messages) && (explicit === null || body.max_completion_tokens === explicit), "exact_luna_body_keys_purpose_explicit_limit");
+          out.push(fields); bindings.push(fields);
+          const diagnostic = different ? incomparable(`${rid}.messages_binding`) : assertion(`${rid}.messages_binding`, shaLike(request.completeMessagesSha256) && request.completeMessagesSha256 === original.messagesSha256 &&
+            request.completeMessagesSha256 === call?.requestSha256, "complete_messages_diagnostic_association_only");
+          out.push(diagnostic); bindings.push(diagnostic);
+          if (!projection.count) out.push(assertion(`${rid}.messages_recomputation`, Array.isArray(body.messages) && hash(body.messages) === request.completeMessagesSha256, "independent_complete_messages_hash"));
+          else out.push(missing(`${rid}.messages_recomputation`, "original_image_bytes_not_present"));
+          if (original.actualSendMeasured !== true) { const absent = missing(`${rid}.actual_http`, "actual_luna_send_not_measured"); out.push(absent); bindings.push(absent); }
+          else {
+            const sends = list(original.sendIds), receipts = rows(trial?.http).filter(h =>
+              (h.kind === "completion_post" || h.method === "POST") && (h.callId === call?.id || sends.includes(h.sendId)));
+            const actual = different ? incomparable(`${rid}.actual_http`) : assertion(`${rid}.actual_http`, !!call && sends.length > 0 && receipts.length === sends.length &&
+              sameIds(sends, receipts.map(h => h.sendId)) && equal(sends, call.sendIds) && receipts.every(h => h.kind === "completion_post" && h.method === "POST" &&
+                h.callId === call.id && h.phase === request.phase && h.hashScheme === "canonical_json_sha256" && h.requestSha256 === original.requestSha256) &&
+              call.expectedHttpRequestSha256 === original.requestSha256 && call.httpRequestSha256 === original.requestSha256, "each_actual_post_and_retry_bound_to_full_http_hash");
+            out.push(actual); bindings.push(actual);
+          }
+        } else if (provider === "jev") {
+          const actual = different ? incomparable(`${rid}.actual_http`) : assertion(`${rid}.actual_http`, !!call && call.requestSha256 === original.requestSha256 && list(call.sendIds).length > 0,
+            "jev_call_full_http_hash_binding"); out.push(actual); bindings.push(actual);
+        } else { const invalid = assertion(`${rid}.provider`, false, "known_provider_required"); out.push(invalid); bindings.push(invalid); }
+      });
+      out.push(different ? incomparable(`${id}.${sideName}.wire_binding`) : combine(`${id}.${sideName}.wire_binding`, bindings, "independent_http_binding_separate_from_projected_payload_parity"));
+    }
+  }
+  expected.forEach((e, i) => { if (!seen.has(`${e.order}:${e.turn}`)) out.push(missing(`replay.required.${i}`, "paired_raw_requests_missing")); });
+  records.trials.forEach((trial, i) => rows(trial.replay).forEach((r, j) => {
+    if(row(r.tape).schemaVersion==='parity_intervention_replay_v1')return;
+    const projected = (v: unknown) => rows(v).map(({ provider, phase, requestSha256 }) => ({ provider, phase, requestSha256 }));
+    out.push(Array.isArray(row(r.tape).expectedRequests) && Array.isArray(row(r.result).requests) ? assertion(`replay.recorded.${i}.${j}`,
+      equal(projected(row(r.tape).expectedRequests), projected(row(r.result).requests)), "recorded_http_hash_list_consistency_only") : missing(`replay.recorded.${i}.${j}`));
+  }));
+  return out;
+}
+
+/** V3 common parity and recorded-label physical receipts are distinct claims. */
+function interventionReplayWire(records:Records,trial:Row|undefined,pair:Row,tape:Row,id:string,outputMissing:boolean):Check[]{
+ const out:Check[]=[],sides=[row(pair.left),row(pair.right)],recorded=row(tape.recorded),expected=rows(recorded.expectedRequests);
+ out.push(assertion(`${id}.labels`,sides[0].label==='repair-first'&&sides[1].label==='bypass-enabled','both_labels_captured'));
+ const common=(s:Row)=>{const m=row(s.material);return{state:m.state,events:m.events,common:m.common,own:m.own,model:m.model,profile:m.profile,boundary:m.boundary,requests:rows(s.requests).filter(r=>r.role==='common')};};
+ out.push(assertion(`${id}.parity`,equal(common(sides[0]),common(sides[1])),'complete_common_materials_and_payloads'));
+ for(const [si,side]of sides.entries()){
+  const name=si===0?'left':'right',m=row(side.material),requests=rows(side.requests),actual=side.label===recorded.label,tail=row(row(tape.tails)[String(side.label)]),boundary=row(m.boundary);
+  out.push(assertion(`${id}.${name}.materials.sha256`,hash(m)===side.materialSha256,'projected_material_sha256'));
+  out.push(assertion(`${id}.${name}.material_binding`,equal(m.state,tape.state)&&equal(m.events,tape.events)&&equal(m.common,tape.common)&&equal(m.tail,tail)&&equal(m.profile,trial?.profile),'raw_frozen_versioned_material_binding'));
+  const domain=boundary.luna==='canonical_http_json'&&boundary.jev==='canonical_http_json'&&boundary.hashScheme==='canonical_json_sha256_not_raw_body_bytes';
+  out.push(domain?check(`${id}.${name}.domain`,'pass','canonical_http_json_boundary'):missing(`${id}.${name}.domain`,'full_http_hash_domains_not_recorded'));
+  out.push(assertion(`${id}.${name}.count`,requests.length>0&&(!actual||requests.length===expected.length),'request_count_order'));
+  const used=new Set<unknown>();
+  requests.forEach((r,j)=>{
+   const rid=`${id}.${name}.${j}`,body=row(r.payload),provider=r.provider;
+   out.push(assertion(`${rid}.projected_sha256`,hash(r.payload)===r.payloadSha256,'post_projection_canonical_payload_sha256'));
+   const projection=projectionAudit(r.payload,row(row(m.own).ownImage));out.push(assertion(`${rid}.projection`,projection.valid&&(provider==='luna'||projection.count===0),'only_enumerated_own_image_url_projection'));
+   out.push(!projection.count?assertion(`${rid}.original_recomputation`,hash(r.payload)===r.preProjectionPayloadSha256,'independent_pre_projection_http_hash'):missing(`${rid}.original_recomputation`,'original_image_bytes_not_present_self_reported_hash_is_not_full_proof'));
+   if(provider==='luna'){
+    const limit=row(row(trial?.profile).lunaRequest).maxCompletionTokens;
+    out.push(assertion(`${rid}.http_fields`,equal(Object.keys(body).sort(),['messages','purpose',...(limit===null?[]:['max_completion_tokens'])].sort())&&body.purpose==='dialogue_turn'&&Array.isArray(body.messages)&&(limit===null||body.max_completion_tokens===limit),'exact_luna_body_keys_purpose_explicit_limit'));
+    if(!projection.count)out.push(assertion(`${rid}.messages_recomputation`,hash(body.messages)===r.completeMessagesSha256,'independent_complete_messages_hash'));
+   }else out.push(assertion(`${rid}.provider`,provider==='jev','known_provider_required'));
+   if(!actual){out.push(check(`${rid}.actual_http`,'pass','counterfactual_not_actual_billing_evidence',{applicable:false}));return;}
+   const e=expected[j]??{},call=rows(trial?.calls).filter(c=>c.provider===provider&&c.turn===pair.turn)[requests.slice(0,j).filter(p=>p.provider===provider).length];
+   out.push(outputMissing?missing(`${rid}.recorded_hash_binding`,'output_missing'):assertion(`${rid}.recorded_hash_binding`,provider===e.provider&&r.phase===e.phase&&r.preProjectionPayloadSha256===e.requestSha256&&shaLike(r.preProjectionPayloadSha256),'pre_projection_hash_association_to_recorded_http'));
+   const ids=list(e.sendIds),unique=ids.length>0&&ids.every(n=>count(n)&&Number(n)>0&&!used.has(n))&&new Set(ids).size===ids.length;ids.forEach(n=>used.add(n));
+   if(provider==='luna'){
+    out.push(assertion(`${rid}.messages_binding`,r.completeMessagesSha256===e.messagesSha256&&r.completeMessagesSha256===call?.requestSha256,'complete_messages_diagnostic_association_only'));
+    const receipts=rows(trial?.http).filter(h=>h.kind==='completion_post'&&(h.callId===call?.id||ids.includes(h.sendId)));
+    out.push(e.actualSendMeasured!==true?missing(`${rid}.actual_http`,'actual_luna_send_not_measured'):assertion(`${rid}.actual_http`,!!call&&unique&&equal(ids,call.sendIds)&&receipts.length===ids.length&&receipts.every(h=>ids.includes(h.sendId)&&h.callId===call.id&&h.phase===r.phase&&h.requestSha256===e.requestSha256&&h.hashScheme==='canonical_json_sha256')&&call.expectedHttpRequestSha256===e.requestSha256&&call.httpRequestSha256===e.requestSha256,'each_actual_post_and_retry_bound_to_full_http_hash'));
+   }else out.push(assertion(`${rid}.actual_http`,!!call&&unique&&equal(ids,call.sendIds)&&call.requestSha256===e.requestSha256,'jev_call_full_http_hash_binding'));
+  });
+ }
+ return out;
+}

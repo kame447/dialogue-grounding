@@ -1,0 +1,63 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {resolve} from 'node:path';
+import {pathToFileURL} from 'node:url';
+const fixtureRoot=new URL('./',import.meta.url);
+const base=()=>JSON.parse(readFileSync(new URL('RECORDS-ACCEPTED-SETUP.json',fixtureRoot),'utf8'));
+const root=process.env.S2_SOURCE_ROOT??'/Users/Shogo/.agentstack/worktrees/SandyNoether';
+const target=resolve(root,'dialogue-model/runtime/diagnostics/parity-verify/model-observations.ts');
+let module:any=null,missing=false;
+try {module=await import(pathToFileURL(target).href)} catch(error:any){
+ if(error?.code==='ERR_MODULE_NOT_FOUND'&&error?.url===pathToFileURL(target).href)missing=true;
+ else throw error;
+}
+const collect=(input:any)=>{assert.equal(missing,false,'R-a: frozen collector entry is absent');assert.equal(typeof module?.collectModelObservations,'function');return module.collectModelObservations(input)};
+const alias='typesafe/jev-1.14',snapshot=alias+'-20261014';
+const seq=(r:any)=>r.evidence.events.forEach((e:any,i:number)=>{e.seq=i+1;e.at='2000-01-01T00:00:00.000Z'});
+const issues=(r:any,name:string,reason:string)=>r[name].filter((x:any)=>x.reason===reason);
+const source=(xs:any[],file:string,pointer:string)=>xs.some(x=>x.file===file&&(x.pointer===pointer||x.pointer.startsWith(pointer+'/')));
+const clean=(r:any)=>{assert.equal(r.missing.length,0);assert.equal(r.inconsistent.length,0);assert.equal(r.rejected.length,0)};
+const unknownReceipt=(r:any)=>{const e=r.evidence.events.find((e:any)=>e.type==='response');e.model=null;e.status='unknown';e.costUsd=null;r.trials[0].calls[0].model=null;r.trials[0].calls[0].status='error';r.trials[0].calls[0].error='in_flight_outcome_unknown';r.trials[0].calls[0].costUsd=null};
+
+test('control: fixture owns one positive send and accounts for started/skipped without a future module',()=>{
+ const r=base();assert.equal(r.run.profile.id,'research_trial_profile_v2');assert.equal(Object.keys(r.run.profile).length,14);
+ assert.deepEqual(r.evidence.events.map((e:any)=>e.seq),[1,2,3,4,5]);
+ assert.equal(r.summary.runOrder.length,1);assert.equal(r.summary.skipped[0].plannedIndex,1);
+ assert.equal(r.trials[0].calls[0].model,snapshot);
+});
+test('normal accepted owner before scoped closes; primary timeout not rewritten',()=>{
+ const r=base(),saved=JSON.stringify(r);const o=collect(r);clean(o);
+ assert.equal(o.schemaVersion,'model_observation_set_v1');assert.equal(o.observations.length,1);assert.equal(o.lateObservations.length,0);
+ const x=o.observations[0];assert.equal(x.callId,1);assert.equal(x.sendId,1);assert.equal(x.responseSeq,3);assert.equal(x.returnedId,snapshot);assert.equal(x.version,'20261014');
+ assert.ok(source(x.sources,'trial-0.private.json','/calls/0'));assert.ok(source(x.sources,'verifier-evidence.private.json','/events/2'));
+ assert.equal(JSON.stringify(r),saved);
+});
+test('accepted alias remains accepted version-null, not inferred snapshot',()=>{const r=base();r.trials[0].calls[0].model=alias;r.evidence.events[2].model=alias;const o=collect(r);clean(o);assert.equal(o.observations[0].version,null);assert.equal(o.observations[0].returnedId,alias)});
+test('error plus saved accepted call before close still supplies identity',()=>{const r=base();r.trials[0].calls[0].status='error';r.trials[0].calls[0].error='aborted';const o=collect(r);clean(o);assert.equal(o.observations.length,1)});
+test('valid skipped unstarted plan adds no missing observation or notSent pointer',()=>{const o=collect(base());clean(o);assert.equal(o.observations.length,1);assert.deepEqual(o.notSent,[])});
+test('started but unsaved second trial keeps accepted first and a source gap',()=>{const r=base();r.summary.runOrder.push({scriptId:'SYNTH1',label:'bypass-enabled'});r.summary.skipped=[];const o=collect(r);assert.equal(o.observations.length,1);assert.equal(o.inconsistent.length,0);const gaps=issues(o,'missing','source_missing');assert.ok(gaps.length>0);assert.ok(gaps.some((x:any)=>source(x.sources,'summary.private.json','/runOrder/1')));assert.ok(gaps.every((x:any)=>x.sources.every((s:any)=>s.file!=='trial-1.private.json')))});
+test('absent claimed owner is missing, not inconsistent orphan',()=>{const r=base();r.trials=[];const o=collect(r);assert.equal(o.inconsistent.length,0);assert.ok(issues(o,'missing','source_missing').length>0);assert.ok(o.missing.every((x:any)=>x.sources.every((s:any)=>s.file!=='trial-0.private.json')))});
+test('present complete owner with no claimed call is inconsistent',()=>{const r=base();r.trials[0].calls=[];const o=collect(r);assert.ok(issues(o,'inconsistent','owner_conflict').length>0);assert.ok(o.inconsistent.some((x:any)=>source(x.sources,'trial-0.private.json','/calls')))});
+test('present claimed call lacking sendIds ownership is inconsistent',()=>{const r=base();r.trials[0].calls[0].sendIds=[];const o=collect(r);assert.ok(issues(o,'inconsistent','owner_conflict').length>0)});
+for(const key of ['run','summary','evidence'])test('absent completeness source '+key+' cannot accept subset',()=>{const r=base();delete r[key];const o=collect(r);assert.ok(issues(o,'missing','source_missing').length>0)});
+test('all permitted sources absent uses only source_missing with empty anchor exception',()=>{const o=collect({trials:[]});assert.ok(o.missing.some((x:any)=>x.reason==='source_missing'&&x.sources.length===0));assert.equal(o.observations.length,0)});
+test('malformed optional summary has its actual root anchor',()=>{const r=base();r.summary={};const o=collect(r);assert.ok(issues(o,'missing','source_missing').some((x:any)=>source(x.sources,'summary.private.json','')))});
+test('missing sequence entry cannot establish complete response coverage',()=>{const r=base();r.evidence.events.splice(1,1);const o=collect(r);assert.ok(issues(o,'missing','source_missing').length>0)});
+test('contradictory run IDs are inconsistent ownership',()=>{const r=base();r.summary.runId='different-synthetic-run';const o=collect(r);assert.ok(issues(o,'inconsistent','owner_conflict').length>0)});
+test('reservation without send is not an actual observation',()=>{const r=base();r.trials[0].calls[0].sendIds=[];r.trials[0].calls[0].model=null;r.trials[0].calls[0].status='error';r.trials[0].calls[0].error='budget_stop';r.evidence.events=[r.evidence.events[0],...r.evidence.events.slice(3)];seq(r);const o=collect(r);assert.equal(o.observations.length,0);assert.ok(source(o.notSent,'trial-0.private.json','/calls/0'))});
+test('sent call with no response remains missing',()=>{const r=base();r.trials[0].calls[0].model=null;r.evidence.events.splice(2,1);seq(r);const o=collect(r);assert.ok(issues(o,'missing','response_missing').length>0);assert.equal(o.observations.length,0)});
+test('null model is not an inferred unknown_version rejection',()=>{const r=base();unknownReceipt(r);const o=collect(r);assert.ok(issues(o,'missing','model_missing').length>0);assert.equal(o.rejected.length,0)});
+test('null adopted call with known response before budget stop stays missing',()=>{const r=base();r.trials[0].calls[0].model=null;r.trials[0].calls[0].status='error';r.trials[0].calls[0].error='budget_stop';r.evidence.events[3].reason='budget_stop';r.evidence.events[4].reason='budget_stop';const o=collect(r);assert.equal(o.observations.length,0);assert.equal(o.lateObservations.length,0);assert.ok(issues(o,'missing','model_missing').length>0)});
+test('unknown receipt then known after close is late-only with main missing',()=>{const r=base();const known=structuredClone(r.evidence.events[2]);unknownReceipt(r);r.evidence.events.push(known);seq(r);const o=collect(r);assert.equal(o.observations.length,0);assert.equal(o.lateObservations.length,1);assert.equal(o.lateObservations[0].responseSeq,6);assert.ok(issues(o,'missing','model_missing').length>0)});
+test('accepted call but only known response after close has missing ordering',()=>{const r=base();const known=r.evidence.events.splice(2,1)[0];r.evidence.events.push(known);seq(r);const o=collect(r);assert.equal(o.observations.length,0);assert.equal(o.lateObservations.length,1);assert.ok(issues(o,'missing','ordering_missing').length>0)});
+test('identical known repeats across close merge into one main, not overlap',()=>{const r=base();r.evidence.events.push(structuredClone(r.evidence.events[2]));seq(r);const o=collect(r);clean(o);assert.equal(o.observations.length,1);assert.equal(o.observations[0].responseSeq,3);assert.equal(o.lateObservations.length,0);assert.ok(source(o.observations[0].sources,'verifier-evidence.private.json','/events/5'))});
+test('identical repeated late known response stays one late and keeps missing',()=>{const r=base();const known=structuredClone(r.evidence.events[2]);unknownReceipt(r);r.evidence.events.push(known,structuredClone(known));seq(r);const o=collect(r);assert.equal(o.observations.length,0);assert.equal(o.lateObservations.length,1);assert.ok(o.missing.length>0);assert.ok(source(o.lateObservations[0].sources,'verifier-evidence.private.json','/events/6'))});
+test('different individually accepted name for same send is a conflict',()=>{const r=base();const update=structuredClone(r.evidence.events[2]);update.model=alias;r.evidence.events.push(update);seq(r);const o=collect(r);assert.ok(o.inconsistent.some((x:any)=>['duplicate_conflict','call_response_conflict'].includes(x.reason)))});
+test('accepted call and response names must agree exactly',()=>{const r=base();r.trials[0].calls[0].model=alias;const o=collect(r);assert.ok(issues(o,'inconsistent','call_response_conflict').length>0)});
+test('unrelated instance stop before response is not a close of this owner',()=>{const r=base();r.evidence.events.splice(2,0,{type:'stop',provider:'jev',instanceId:'other-synthetic-instance',scope:'instance',reason:'cost_cap',inFlight:[]});seq(r);const o=collect(r);clean(o);assert.equal(o.observations.length,1)});
+test('same-owner logical-call scoped stop before response produces late evidence',()=>{const r=base();const stop={...r.evidence.events[0],type:'stop',scope:'instance',scopeDetail:'logical_call',reason:'phase_aborted',inFlight:[1]};delete stop.sendId;delete stop.priorObservedSpentUsd;delete stop.priorObservedMaximumUsd;r.evidence.events.splice(2,0,stop);seq(r);const o=collect(r);assert.equal(o.observations.length,0);assert.equal(o.lateObservations.length,1);assert.ok(issues(o,'missing','ordering_missing').length>0)});
+test('identical wall timestamps do not erase seq temporal proof',()=>{const r=base();seq(r);const o=collect(r);clean(o);assert.equal(o.observations.length,1)});
+test('fixed call error plus matching applicable model-stop records rejection',()=>{const r=base();unknownReceipt(r);r.trials[0].calls[0].error='model_unknown_version';r.evidence.events[3].reason='model_unknown_version';r.evidence.events[4].reason='model_unknown_version';const o=collect(r);assert.equal(o.observations.length,0);assert.ok(o.rejected.some((x:any)=>x.reason==='recorded_model_rejection'&&x.rejectionCode==='model_unknown_version'))});
+test('trial model stop alone does not label unrelated null call as rejection',()=>{const r=base();unknownReceipt(r);r.evidence.events[3].reason='model_unknown_version';r.evidence.events[4].reason='model_unknown_version';const o=collect(r);assert.equal(o.rejected.length,0);assert.ok(o.missing.length>0)});
+test('saved unknown name classified by fixed registry without exposing raw value',()=>{const r=base();const unknown=alias+'-20310529';r.trials[0].calls[0].model=unknown;r.evidence.events[2].model=unknown;const o=collect(r);assert.ok(o.rejected.some((x:any)=>x.rejectionCode==='model_unknown_version'));assert.ok(!JSON.stringify(o).includes(unknown))});

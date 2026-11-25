@@ -1,3 +1,4 @@
+import type { ResearchLimits } from '../v2/research-timeouts.ts';
 // Shared contract for proposition-scoped (partial) grounding memory. Decision 0001.
 // Opt-in research path only: no default strategy, prompt, scoring, UI or model policy
 // depends on this file. Every record is the AI's interpretation of PUBLIC utterances
@@ -158,7 +159,56 @@ export type LocalIssueView = {
 
 /** v2 option shape. Default null (off). Requires referenceMemory: true. */
 export type LocalGroundingOptions = {
+  researchLimits?: ResearchLimits;
   extractor: LocalSegmentExtractor;
   classifier: LocalFunctionClassifier;
   timeoutMs?: number;
+};
+
+// Slice A: opt-in AI public claims. Candidate identity is public-source identity;
+// graph insertion IDs are allocated only in the next human update.
+export type AiPublicAct = Exclude<LocalAct, "name_propose" | "name_accept" | "name_reject">;
+export type AiSupport = "expressed" | "expressed_responds" | "expressed_not_response" | "not_expressed" | "unclear";
+export type AiPublicInput = {
+  turn: number; aiSeq: number; candidateText: string; publicTurns: readonly PublicTurn[];
+  ownSlots: readonly string[]; ownAnchors: readonly LocalOwnAnchor[]; issueSummary: string;
+  observations: import("../observation/contract.ts").ObservationMemo;
+};
+export type AiPublicCandidate = {
+  candidateKey: string; ordinal: number; segmentId: string;
+  targets: string[]; aspect: Exclude<LocalAspect, "name">;
+  act: Exclude<AiPublicAct, "unknown" | "acknowledge">;
+  proposition: string; name: null; quote: string;
+  speaker: "ai"; source: "ai_hypothesis"; sourceTurn: number;
+  /** null for independent claims; their own issue ID is assigned at insertion. */
+  issueId: string | null; respondsTo: string | null;
+};
+export type AiPendingStatus = "ready" | "partial" | "empty" | "failed" | "skipped_fallback";
+export type AiPublicPending = {
+  aiSeq: number; textSha256: string; candidates: AiPublicCandidate[];
+  status: AiPendingStatus; reasons: string[];
+};
+export type AiPublicLog = {
+  aiSeq: number; status: "applied" | "partial" | "not_applied" | "failed" | "empty" | "skipped_fallback";
+  reasons: string[]; appliedAtTurn: number; ids: string[];
+};
+export type AiPublicState = { schema: 1; pending: AiPublicPending | null; log: AiPublicLog[]; omitted: number };
+export type AiPublicApplication = {
+  aiSeq: number | null; status: AiPublicLog["status"] | "none"; reasons: string[];
+  claims: Array<{ id: string; candidateKey: string; sourceTurn: number }>;
+  nameIds: string[]; nameRejections: LocalRejection[];
+};
+export type AiStageEvidence = {
+  status: "not_called" | "skipped" | "ok" | "error"; calls: number;
+  model: string | null; responseId: string | null; callIndex: number | null;
+  costUsd: number | null; error: string | null;
+  /** Closed, parsed choices only; empty on any stage failure. Scores are uncalibrated. */
+  choices: Array<{ segmentId: string; act?: AiPublicAct; respondsToClaimId?: string | null; support?: AiSupport; rawScore: number | null }>;
+};
+export type AiPublicResearch = {
+  phase: "ai_public_claims";
+  application: AiPublicApplication | null; pending: AiPublicPending | null;
+  stages: { ai_extraction: AiStageEvidence; ai_function: AiStageEvidence; ai_support: AiStageEvidence };
+  observationMemo: { version: number; sha256: string } | null;
+  prompts: Record<"extraction" | "function" | "support", { version: 1; sha256: string }>;
 };

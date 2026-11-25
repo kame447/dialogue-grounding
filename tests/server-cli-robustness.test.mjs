@@ -4,7 +4,7 @@ import { Readable, Writable } from "node:stream";
 import { mkdtemp, writeFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { startNamingServer } from "../dialogue-model/runtime/web/server.mjs";
+import { startNamingServer } from "./support/legacy-web-v1-fa84980/server.mjs";
 import { main as cli } from "../dialogue-model/runtime/naming-cli.mjs";
 import { SLOTS } from "../dialogue-model/runtime/naming-task.mjs";
 import { SAFE_JUDGMENT } from "../dialogue-model/runtime/judgment/schema.mjs";

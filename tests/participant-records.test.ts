@@ -1,14 +1,15 @@
+import { privateBaseOptions } from './support/s5-private-options.mjs';
 // Participant-side records: read-only review, the PROVISIONAL questionnaire
 // (研究者未承認の仮項目), per-record archive storage and the admin view of answers.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { once } from "node:events";
-import { readFile } from "node:fs/promises";
+import { writeFile, readFile } from "node:fs/promises";
 import { startNamingServer } from "../dialogue-model/runtime/web/server.mjs";
 import { createChatClient } from "../dialogue-model/runtime/client.mjs";
 import { applyQuestionnaire, lockResult, participantReview, QUESTIONNAIRE_FORM, questionnaireStatus } from "../dialogue-model/runtime/v2/participant-records.ts";
-import { archiveSnapshot, backfillActive, deleteArchived, expiredIds, expireRecords, readArchived, readQuestionnaire,
+import { archiveSnapshot, backfillActive, deleteArchived, readArchived, readQuestionnaire,
   writeQuestionnaire } from "../workers/tangram-experiment/src/admin/archive.ts";
 import { summarizeRecord } from "../workers/tangram-experiment/src/admin/summary.ts";
 import { renderDetail, renderList, parseFilter } from "../workers/tangram-experiment/src/admin/render.ts";
@@ -93,26 +94,22 @@ function completed(overrides: Record<string, unknown> = {}) {
     queueState: { pendingHumanEventIds: [], errorCode: null }, ...overrides };
 }
 
-test("a questionnaire can be added later to a trial completed before this change, and refreshes its retention", async () => {
+test("a legacy completed trial accepts a questionnaire and updates its ledger only on submission", async () => {
   const storage = memoryStorage();
   // A pre-archive session: only "active" exists (as written by the first deployed Worker).
   await storage.put({ active: completed() });
   await backfillActive(storage, T0 + DAY);
   const answers = applyQuestionnaire(null, { answers: full(3), submit: true }, NOW).questionnaire;
-  // A draft never extends retention; the submission does (once).
+  // Preserve the original update time on draft saves; a submission updates the ledger.
+  const originalLedger = await storage.get('ledger');
   const draft = applyQuestionnaire(null, { answers: {}, submit: false }, NOW).questionnaire;
   assert.equal(await writeQuestionnaire(storage, RECORD, draft, T0 + 25 * DAY, false), true);
-  assert.deepEqual(await expiredIds(storage, T0 + 30 * DAY + 10 * 60 * 1000, 30), [RECORD], "a draft save does not extend retention");
+  assert.deepEqual(await storage.get('ledger'), originalLedger);
   assert.equal(await writeQuestionnaire(storage, RECORD, answers, T0 + 20 * DAY, true), true);
   assert.deepEqual(await readQuestionnaire(storage, RECORD), answers);
   // The record itself is untouched: names, key and scoring are byte-identical.
   assert.deepEqual(await readArchived(storage, RECORD), completed());
-  const removed = await expireRecords(storage, T0 + 31 * DAY, 30, async () => {});
-  assert.deepEqual(removed, [], "the questionnaire save counts as an update for retention");
-  assert.deepEqual(await expireRecords(storage, T0 + 51 * DAY, 30, async () => {}), [RECORD]);
-  assert.equal(await readQuestionnaire(storage, RECORD), null, "expiry removes the answers with the record");
-  assert.equal(await writeQuestionnaire(storage, RECORD, answers, T0 + 52 * DAY, true), false, "never recreated after expiry");
-  assert.equal([...storage.map.keys()].some((key) => key.includes(RECORD)), false);
+  assert.deepEqual(await storage.get('ledger'), { [RECORD]: T0 + 20 * DAY });
 });
 
 test("questionnaire writes are refused for unknown, malformed or deleted records; deletion removes the answers", async () => {
@@ -177,24 +174,29 @@ test("admin shows the questionnaire escaped in the detail and only its state in 
   // Older index entries have no questionnaire state: shown as none, never an error.
   const legacy = { ...summary } as Record<string, unknown>;
   delete legacy.questionnaire;
-  assert.match(renderList([legacy as typeof summary], parseFilter(new URLSearchParams()), null, [], 30), /<td>なし<\/td><\/tr>/);
+  const legacyList = renderList([legacy as typeof summary], parseFilter(new URLSearchParams()), null, [], 30);
+  assert.match(legacyList, /仮アンケートなし/);
+  assert.doesNotMatch(legacyList, /undefined/);
   assert.equal(summarizeRecord(completed(), "a".repeat(64), summarizeLatency(completed())).questionnaire, "none");
   assert.match(renderDetail(completed(), summary, summarizeLatency(completed()), 30), /回答なし/);
 });
 
 // --- Session cookie ---------------------------------------------------------------
 
-test("the participant cookie is persistent for the retention period and keeps HttpOnly, Secure and SameSite=Strict", async () => {
+test("the participant cookie has its own lifetime and keeps HttpOnly, Secure and SameSite=Lax (Issue #136)", async () => {
   const id = "c".repeat(64);
-  assert.equal(sessionCookie(id, 30), `tangram_session=${id}; Max-Age=2592000; Path=/; Secure; HttpOnly; SameSite=Strict`);
+  assert.equal(sessionCookie(id, 30), `tangram_session=${id}; Max-Age=2592000; Path=/; Secure; HttpOnly; SameSite=Lax`);
   assert.match(sessionCookie(id, 7), /Max-Age=604800;/);
   assert.throws(() => sessionCookie("x;Domain=evil", 30));
   assert.equal(sessionId(`a=b; tangram_session=${id}`), id);
   assert.equal(sessionId("tangram_session=short"), null);
   const source = await readFile(new URL("../workers/tangram-experiment/src/index.ts", import.meta.url), "utf8");
   assert.doesNotMatch(source, /tangram_session=\$\{/, "every Set-Cookie goes through sessionCookie()");
-  // A page load re-sends the existing id (never a new one) with a fresh Max-Age.
-  assert.match(source, /sessionCookie\(sessionId\(request\.headers\.get\("Cookie"\)\) \?\? newSessionId\(\), retentionDays\(env\.RECORD_RETENTION_DAYS\)\)/);
+  // Known owners keep their id after durable lookup; absent/expired pages register before Cookie.
+  // Actual Worker order/error behavior is covered by the separate S5 Worker tests.
+  assert.match(source, /baseOwnerStatus\(\)/);
+  assert.match(source, /registerBaseOwner\(\)/);
+  assert.match(source, /sessionCookie\(cookie!,retentionDays\(env\.RECORD_RETENTION_DAYS\)\)/);
 });
 
 test("questionnaire saves have their own 30/60s per-session rate limit namespace in wrangler", async () => {
@@ -208,9 +210,9 @@ test("questionnaire saves have their own 30/60s per-session rate limit namespace
 test("Worker routes: one indistinguishable not_found, own records only, and names/scoring never written", async () => {
   const source = await readFile(new URL("../workers/tangram-experiment/src/index.ts", import.meta.url), "utf8");
   const route = source.slice(source.indexOf("private async recordRoute("), source.indexOf("private state()"));
-  assert.match(route, /RECORD_ID\.test\(recordId\) \? await readArchived\(this\.ctx\.storage, recordId\)/);
+  assert.match(route, /RECORD_ID\.test\(recordId\) \? await this\.readOwnedArchive\(recordId\)/);
   assert.match(route, /this\.serialized\(async \(\) => \{[\s\S]*writeQuestionnaire\(/);
-  // Only a submission refreshes retention (draft saves never extend a record's life).
+  // Only a submission updates the ledger timestamp; this never sets an expiry.
   assert.match(route, /writeQuestionnaire\(this\.ctx\.storage, recordId, next\.questionnaire, Date\.now\(\),\s+next\.questionnaire\.status === "submitted"\)/);
   assert.doesNotMatch(route, /archiveSnapshot|storage\.put|humanSubmission|scoring/);
   // The review's result is withheld until that record's questionnaire is submitted.
@@ -242,26 +244,38 @@ async function setup(t: any) {
   upstream.listen(0, "127.0.0.1"); await once(upstream, "listening");
   const client = createChatClient({ provider: "cloudflare", purpose: "dialogue_turn", apiKey: "PRIVATE-TEST-KEY",
     baseUrl: "http://127.0.0.1:" + (upstream.address() as any).port + "/v1" });
-  const server = await (startNamingServer as any)({ port: 0, client, runDir: "", hideStrategy: true });
+  const privateOptions = await privateBaseOptions(t,{seed:31});
+  const server = await (startNamingServer as any)({ port: 0, client, ...privateOptions, hideStrategy: true });
   t.after(async () => { await Promise.all([new Promise((r) => server.close(r)), new Promise((r) => upstream.close(r))]); });
   const base = "http://127.0.0.1:" + (server.address() as any).port;
   const browser = async () => {
     const cookie = (await fetch(base)).headers.get("set-cookie")!.split(";")[0];
-    return (path: string, body?: unknown) => fetch(base + path, { headers: { cookie, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
+    const request = (path: string, body?: unknown) => fetch(base + path, { headers: { cookie, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
       ...(body === undefined ? {} : { method: "POST", body: JSON.stringify(body) }) });
+    return Object.assign(request,{async operatorPrepare(seed:number){
+      const saved=JSON.parse(await readFile(privateOptions.baseAssignmentFile,"utf8"));
+      await writeFile(privateOptions.baseAssignmentFile,JSON.stringify({...saved,seed,revision:saved.revision+1}),{mode:0o600});
+      const current=await (await request("/api/state")).json();
+      if(current.trial?.status==="completed"){
+        const next=await fetch(base+"/admin/record/"+current.trial.sessionId+"/prepare-next",{method:"POST",headers:{Authorization:"Bearer "+privateOptions.adminToken,Origin:base,"Content-Type":"application/json"},body:"{}"});
+        assert.equal(next.status,201);
+      }
+    }});
   };
   return { browser };
 }
 
 async function completeTrial(request: (path: string, body?: unknown) => Promise<Response>, seed: number) {
-  let state = await (await request("/api/start", { version: 2, strategy: "repair-first", seed })).json();
-  assert.equal((await request("/api/message", { text: "細長いのから" })).status, 202);
+  await (request as typeof request & {operatorPrepare(seed:number):Promise<void>}).operatorPrepare(seed);
+  let state = await (await request("/api/state")).json();
+  if(!state.trial)state=await (await request("/api/start",{version:2})).json();
+  assert.equal((await request("/api/message", { text: "細長いのから", expectedRecordId:state.trial.sessionId })).status, 202);
   for (let i = 0; i < 200 && (state.trial.aiStatus !== "idle" || state.trial.events.length < 3); i++) {
     await new Promise((r) => setTimeout(r, 10));
     state = await (await request("/api/state")).json();
   }
   const names = Object.fromEntries(state.trial.scene.shapes.map((s: any, i: number) => [s.id, i ? "名前" + i : null]));
-  const response = await request("/api/names", { names, confirm: true });
+  const response = await request("/api/names", { names, confirm: true, expectedRecordId:state.trial.sessionId });
   assert.equal(response.status, 200);
   return { state: (await response.json()).trial, names };
 }
@@ -271,7 +285,7 @@ test("local server: own completed trials are listed and reviewable; other browse
   const alice = await browser(), bob = await browser();
   const before = await (await alice("/api/records")).json();
   assert.deepEqual(before, { records: [] });
-  let state = await (await alice("/api/start", { version: 2, strategy: "repair-first", seed: 31 })).json();
+  let state = await (await alice("/api/start", { version: 2 })).json();
   const id = state.trial.sessionId;
   assert.equal((await alice(`/api/records/${id}/review`)).status, 409);
   assert.deepEqual(await (await alice(`/api/records/${id}/questionnaire`, { answers: {}, submit: false })).json(), { error: "trial_not_completed" });

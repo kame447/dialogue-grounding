@@ -60,9 +60,10 @@ test("name responses require the partner proposal on the SAME candidate slots an
   const accepted = run([A]); assert.equal(accepted.operations.length, 1); assert.equal(accepted.operations[0].issueId, "1:ai1");
 });
 
-test("bare acknowledgments bind ONLY an explicit previous primary, never a secondary or missing pointer", () => {
+test("historical ai1 rule: bare acknowledgments bind ONLY an explicit previous primary, never a secondary or missing pointer", () => {
   const ai: PublicTurn = { turn: 1, speaker: "ai", text: "この図形を船と呼ぼう、四角がある" };
-  const ops = recordAiClaims({ graph: createReferenceGraph(), turn: 2, publicTurns: [ai], priorAct: { turn: 1, action: "propose_name", targetSlot: A, candidateName: "船", discriminatingFeature: "四角がある" } }).operations;
+  // Historical secondary-feature fixture only; this does not certify runtime feature coverage or an R3 rule.
+  const ops = recordAiClaims({ graph: createReferenceGraph(), turn: 2, publicTurns: [ai], featureSource: "legacy_private_plan", priorAct: { turn: 1, action: "propose_name", targetSlot: A, candidateName: "船", discriminatingFeature: "四角がある" } }).operations;
   const graph = commit(createReferenceGraph(), 2, ops, [ai]);
   const run = (id: string | null, aspect: "name" | "part" = "name", name: string | null = null) => verifyLocalUpdate({ graph, turn: 3,
     publicTurns: [ai, { turn: 3, speaker: "human", text: "うん" }], segments: [segment({ quote: "うん", aspect, name })],
@@ -115,18 +116,76 @@ test("recordAiClaims uses a public committed act, preserves fixed part aspect an
   assert.equal(recordAiClaims({ graph: initial, turn: 2, publicTurns: [], priorAct }).operations.length, 0);
   const result = recordAiClaims({ graph: initial, turn: 2, publicTurns, priorAct });
   assert.deepEqual(result.operations.map(c => [c.id, c.aspect, c.act, c.sourceTurn, c.source]), [
+    ["2:ai1", "name", "name_propose", 1, "ai_hypothesis"],
+  ]);
+  const legacy = recordAiClaims({ graph: initial, turn: 2, publicTurns, priorAct, featureSource: "legacy_private_plan" });
+  assert.deepEqual(legacy.operations.map(c => [c.id, c.aspect, c.act, c.sourceTurn, c.source]), [
     ["2:ai1", "name", "name_propose", 1, "ai_hypothesis"], ["2:ai2", "part", "assert", 1, "ai_hypothesis"],
   ]);
+  assert.equal(recordAiClaims({ graph: commit(initial, 2, legacy.operations, publicTurns), turn: 3, publicTurns, priorAct,
+    featureSource: "legacy_private_plan" }).operations.length, 0);
   const graph = commit(initial, 2, result.operations, publicTurns);
   assert.equal(recordAiClaims({ graph, turn: 3, publicTurns, priorAct }).operations.length, 0);
   const absent = recordAiClaims({ graph: initial, turn: 2, publicTurns: [{ turn: 1, speaker: "ai", text: "四角がある" }], priorAct });
-  assert.deepEqual(absent.operations.map(c => c.id), ["2:ai2"]);
+  assert.deepEqual(absent.operations, []);
+  assert.deepEqual(recordAiClaims({ graph: initial, turn: 2, publicTurns: [{ turn: 1, speaker: "ai", text: "四角がある" }],
+    priorAct, featureSource: "legacy_private_plan" }).operations.map(c => c.id), ["2:ai2"]);
   assert.equal(deriveLocalIssues(graph).find(i => i.aspect === "name")!.nameState, "unclear");
   const followUp = recordAiClaims({ graph: initial, turn: 2, publicTurns, priorAct: {
     turn: 1, action: "accept", targetSlot: null, candidateName: null, discriminatingFeature: null,
     followUp: { action: "propose_name", targetSlot: A, candidateName: "船", discriminatingFeature: null },
   } });
   assert.deepEqual(followUp.operations.map(c => c.id), ["2:ai2"]);
+});
+
+test("S1A-1..4: only explicit legacy mode can reproduce private plan features", () => {
+  const graph = createReferenceGraph();
+  const cases = [
+    ["黒い一続きの輪郭", "鳥のように見えますね。"],
+    ["四角がある", "四角はないように見えます。"],
+    ["四角がある", "四角がある形ですか？"],
+    ["小さい三角が二つつながっている", "小さな三角が2個くっついて見えますか？"],
+  ];
+  for (const [feature, text] of cases) {
+    const publicTurns: PublicTurn[] = [{ turn: 1, speaker: "ai", text }];
+    const priorAct = { turn: 1, action: "confirm", targetSlot: A, candidateName: null, discriminatingFeature: feature,
+      featureSource: "legacy_private_plan" };
+    for (const featureSource of [undefined, "none", "unknown", null, true, {}, ["legacy_private_plan"]]) {
+      // Exercise untyped external values, not just the declared union.
+      const result = recordAiClaims({ graph, turn: 2, publicTurns, priorAct,
+        featureSource: featureSource as "none" | undefined });
+      assert.deepEqual(result.operations, []); assert.deepEqual(result.rejected, []);
+    }
+    assert.deepEqual(recordAiClaims({ graph, turn: 2, publicTurns, priorAct, featureSource: "legacy_private_plan" }).operations, [{
+      kind: "claim", id: "2:ai1", issueId: "2:ai1", targets: [A], aspect: "part", act: "ask", proposition: feature,
+      name: null, speaker: "ai", sourceTurn: 1, quote: text, respondsTo: null, source: "ai_hypothesis",
+    }]);
+  }
+});
+
+test("S1A-5: disabling plan features reserves name ordinals and primary/secondary roles", () => {
+  const graph = createReferenceGraph();
+  const publicTurns: PublicTurn[] = [{ turn: 1, speaker: "ai", text: "船と呼ぼう。別の形は鳥と呼ぼう。四角がある。" }];
+  for (const action of ["propose_name", "confirm", "repair"]) {
+    for (const discriminatingFeature of [null, "四角がある"]) {
+      const priorAct = { turn: 1, action, targetSlot: A, candidateName: action === "repair" ? null : "船", discriminatingFeature,
+        followUp: { action: "propose_name", targetSlot: B, candidateName: "鳥", discriminatingFeature: null } };
+      const current = recordAiClaims({ graph, turn: 2, publicTurns, priorAct });
+      const legacy = recordAiClaims({ graph, turn: 2, publicTurns, priorAct, featureSource: "legacy_private_plan" });
+      assert.deepEqual(current.operations, legacy.operations.filter(c => c.aspect === "name"));
+      assert.deepEqual(current.rejected, legacy.rejected);
+      assert.equal(current.operations.at(-1)!.id, action !== "repair" && discriminatingFeature !== null ? "2:ai3" : "2:ai2");
+      const installed = commit(graph, 2, current.operations, publicTurns);
+      assert.deepEqual(recordAiClaims({ graph: installed, turn: 3, publicTurns, priorAct }).operations, []);
+      for (const nameClaim of current.operations) {
+        const reply = verifyLocalUpdate({ graph: installed, turn: 3,
+          publicTurns: [...publicTurns, { turn: 3, speaker: "human", text: "うん" }],
+          segments: [segment({ quote: "うん", aspect: "name", name: null, targets: [...nameClaim.targets] })],
+          verdicts: [verdict({ act: "name_accept", respondsToClaimId: nameClaim.id })] });
+        assert.equal(reply.operations[0].act, nameClaim.id === "2:ai1" ? "name_accept" : "acknowledge");
+      }
+    }
+  }
 });
 
 test("name rejection and self withdrawal are verified without inventing partner agreement", () => {
@@ -201,7 +260,8 @@ test("a paraphrased public AI feature retains its committed proposition and supp
   const priorAct = { turn: 1, action: "confirm", targetSlot: A, candidateName: null, discriminatingFeature: "小さい三角が二つつながっている" };
   const publicTurns: PublicTurn[] = [{ turn: 1, speaker: "ai", text: "小さな三角が2個くっついて見えますか？" },
     { turn: 2, speaker: "human", text: "三角は一つです" }];
-  const result = recordAiClaims({ graph: initial, turn: 2, publicTurns, priorAct });
+  assert.deepEqual(recordAiClaims({ graph: initial, turn: 2, publicTurns, priorAct }).operations, []);
+  const result = recordAiClaims({ graph: initial, turn: 2, publicTurns, priorAct, featureSource: "legacy_private_plan" });
   assert.equal(result.operations.length, 1); assert.deepEqual(result.rejected, []);
   const feature = result.operations[0];
   assert.equal(feature.proposition, priorAct.discriminatingFeature); assert.equal(feature.quote, publicTurns[0].text);
@@ -214,7 +274,7 @@ test("a paraphrased public AI feature retains its committed proposition and supp
   assert.equal(response.operations[0].act, "deny"); assert.equal(response.operations[0].issueId, feature.issueId);
   const combined = commit(initial, 2, [...result.operations, ...response.operations], publicTurns);
   assert.equal(deriveLocalIssues(combined)[0].state, "denied");
-  assert.equal(recordAiClaims({ graph, turn: 3, publicTurns, priorAct }).operations.length, 0);
+  assert.equal(recordAiClaims({ graph, turn: 3, publicTurns, priorAct, featureSource: "legacy_private_plan" }).operations.length, 0);
 });
 
 test("feature claims require a public AI source and bounded literal quote; names still require literal wording", () => {
@@ -222,7 +282,10 @@ test("feature claims require a public AI source and bounded literal quote; names
   const priorAct = { turn: 1, action: "propose_name", targetSlot: A, candidateName: "灯台", discriminatingFeature: "小さい三角が二つつながっている" };
   const text = " ".repeat(170) + "小さな三角が2個くっついて見えます。" + "形を見ています。".repeat(30);
   const source: PublicTurn = { turn: 1, speaker: "ai", text };
-  const run = (publicTurns: PublicTurn[]) => recordAiClaims({ graph, turn: 2, publicTurns, priorAct });
+  const current = recordAiClaims({ graph, turn: 2, publicTurns: [source], priorAct });
+  assert.deepEqual(current.operations, []);
+  assert.deepEqual(current.rejected, [{ segmentId: "ai1", reason: "nonpublic_ai_element" }]);
+  const run = (publicTurns: PublicTurn[]) => recordAiClaims({ graph, turn: 2, publicTurns, priorAct, featureSource: "legacy_private_plan" });
   const result = run([source]);
   assert.deepEqual(result.operations.map(c => [c.id, c.aspect]), [["2:ai2", "part"]]);
   assert.deepEqual(result.rejected, [{ segmentId: "ai1", reason: "nonpublic_ai_element" }]);
@@ -273,16 +336,23 @@ test("a committed guard fallback cannot supply AI features or names, while an ad
     followUp: { action: "propose_name", targetSlot: B, candidateName: "鳥", discriminatingFeature: null } };
   for (const text of ["なるほど、そう見えるんですね。", "灯台と呼びましょう。別のものは鳥でしょうか。小さな三角が2個くっついて見えます。", "data:image/png;base64,QUJD"]) {
     const publicTurns: PublicTurn[] = [{ turn: 1, speaker: "ai", text }];
-    const result = recordAiClaims({ graph: initial, turn: 2, publicTurns, priorAct: { ...priorAct, publishedFallback: true } });
-    assert.deepEqual(result.operations, []);
-    assert.deepEqual(result.rejected, [{ segmentId: "ai", reason: "ai_fallback_utterance" }]);
-    assert.equal(JSON.stringify(result).includes(text), false);
+    for (const featureSource of ["none", "legacy_private_plan"] as const) {
+      const result = recordAiClaims({ graph: initial, turn: 2, publicTurns, priorAct: { ...priorAct, publishedFallback: true }, featureSource });
+      assert.deepEqual(result.operations, []);
+      assert.deepEqual(result.rejected, [{ segmentId: "ai", reason: "ai_fallback_utterance" }]);
+      assert.equal(JSON.stringify(result).includes(text), false);
+    }
   }
   const adopted = recordAiClaims({ graph: initial, turn: 2,
     publicTurns: [{ turn: 1, speaker: "ai", text: "灯台と呼びましょう。小さな三角が2個くっついて見えます。" }],
     priorAct: { ...priorAct, followUp: null, publishedFallback: false } });
-  assert.deepEqual(adopted.operations.map(c => c.aspect), ["name", "part"]);
-  assert.equal(adopted.operations[1].proposition, priorAct.discriminatingFeature);
+  assert.deepEqual(adopted.operations.map(c => c.aspect), ["name"]);
+  const legacy = recordAiClaims({ graph: initial, turn: 2, featureSource: "legacy_private_plan",
+    publicTurns: [{ turn: 1, speaker: "ai", text: "灯台と呼びましょう。小さな三角が2個くっついて見えます。" }],
+    priorAct: { ...priorAct, followUp: null, publishedFallback: false } });
+  assert.deepEqual(legacy.operations.map(c => c.aspect), ["name", "part"]);
+  assert.equal(legacy.operations[1].proposition, priorAct.discriminatingFeature);
+  assert.deepEqual(legacy.rejected, []);
   assert.deepEqual(adopted.rejected, []);
 });
 

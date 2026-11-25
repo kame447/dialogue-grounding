@@ -1,3 +1,8 @@
+// Frozen/retired by researcher decision on 2026-10-21: historical evaluation of
+// the pre-decision-0002 Luna-action dialogue-v2 configuration, not new evaluation.
+// Current old fixtures can fail the prefix gate under none; this is not a
+// universal none stop rule or a CLI execution ban. Historical reproduction needs
+// its matching runtime/commit. Do not change old gates/expectations to pass.
 // Manual-only live synthetic evaluation. Importing never reads credentials or calls a model.
 import { mkdir, writeFile } from "node:fs/promises";
 import { randomBytes, randomInt, createHash } from "node:crypto";

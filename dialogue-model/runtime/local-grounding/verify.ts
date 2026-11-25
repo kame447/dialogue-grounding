@@ -183,14 +183,13 @@ export type LocalPriorAct = {
   followUp?: Omit<LocalPriorAct, "turn" | "followUp" | "publishedFallback"> | null;
 };
 
-/** Recover a committed act only when its AI turn is already public. Feature
- * propositions retain the act's intended feature, even if the published wording
- * paraphrases it; their quote remains a literal public span. Names stay literal.
- * Feature aspect is conservatively fixed to part: an act has no aspect field,
- * and the program must not infer semantic aspects from generated language.
+/** Recover literal names from a committed act whose AI turn is public.
+ * Private plan features are disabled by default. legacy_private_plan exists only
+ * for historical gate/test reproduction, with the original fixed part aspect.
  */
-export function recordAiClaims({ graph, turn, publicTurns, priorAct }: {
+export function recordAiClaims({ graph, turn, publicTurns, priorAct, featureSource = "none" }: {
   graph: LocalGraph; turn: number; publicTurns: readonly PublicTurn[]; priorAct: LocalPriorAct;
+  featureSource?: "none" | "legacy_private_plan";
 }): LocalVerificationResult {
   snapshotReferenceGraph(graph);
   const result: LocalVerificationResult = { operations: [], rejected: [] };
@@ -244,7 +243,12 @@ export function recordAiClaims({ graph, turn, publicTurns, priorAct }: {
     };
     const naming = act.action === "propose_name" || (["confirm", "agree"].includes(act.action) && act.candidateName !== null);
     if (naming && targets.length === 1) add("name", act.candidateName, act.action === "agree" ? "name_accept" : "name_propose");
-    if (act.discriminatingFeature !== null) add("part", act.discriminatingFeature, act.action === "confirm" ? "ask" : "assert");
+    if (act.discriminatingFeature !== null) {
+      // Reserve the historical ordinal even when no feature claim is created:
+      // later follow-up names must retain their IDs and secondary role.
+      if (featureSource === "legacy_private_plan") add("part", act.discriminatingFeature, act.action === "confirm" ? "ask" : "assert");
+      else ordinal++;
+    }
     // A follow-up never becomes primary if the main act had no literal element.
     if (ordinal === 0) ordinal = 1;
   }

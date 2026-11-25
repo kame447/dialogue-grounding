@@ -130,33 +130,7 @@ test("live CLI accepts only human-script modes and requires an external output p
   assert.equal(deps.calls.length, 0);
 });
 
-test("real dialogue runtime generates/publishes prefixes, branches identical state and runs independent E2E arms", async () => temporary(async outputDir => {
-  const deps = dependencies();
-  const result = await runLiveEvaluation({ ...config, outputDir }, deps);
-  assert.equal(result.status, "completed", JSON.stringify(result));
-  const rows = (await readFile(join(result.directory, "blinded.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line));
-  assert.deepEqual(rows.map(r => r.mode), ["branch", "multiturn"]);
-  assert.deepEqual(rows[1].dialogues.A.filter((t: any) => t.speaker === "human").map((t: any) => t.text), script.steps.map(s => s.text));
-  const branch = deps.judgments.filter(i => i.publicHistory.filter((m: any) => m.role === "user").length === 5).slice(0, 2);
-  assert.deepEqual(branch[0], branch[1]);
-  const prefix = JSON.parse(await readFile(join(result.directory, script.id + ".prefix.private.json"), "utf8"));
-  assert.equal(prefix.provenance.length, 4);
-  assert.ok(prefix.gate.passed);
-  assert.ok(prefix.records.every((r: any) => !Object.hasOwn(r.extractor, "errorCode") && !Object.hasOwn(r.classifier, "errorCode")));
-  assert.deepEqual(prefix.gate.returnedModels, ["typesafe/jev-1.14-20261014"]);
-  for (const provenance of prefix.provenance) {
-    assert.equal(prefix.publicTurns.find((t: any) => t.turn === provenance.aiTurn).text, provenance.text);
-  }
-  assert.equal((await stat(join(result.directory, "blinded.jsonl"))).mode & 0o777, 0o600);
-  assert.equal((await stat(result.directory)).mode & 0o777, 0o700);
-  const blind = JSON.stringify(rows);
-  assert.ok(!blind.includes("classifierKind") && !blind.includes("targetSlot") && !blind.includes("expected"));
-  // Actual generation goes through the supplied client, with own image only.
-  assert.ok(deps.calls.every(c => ["generation", "regeneration", "guard_rewrite"].includes(c.options.phase)));
-  const firstMessages = JSON.stringify(deps.calls[0].messages);
-  for (const step of script.steps.slice(1)) assert.ok(!firstMessages.includes(step.text), "future human speech stays outside inputs");
-  assert.ok(!firstMessages.includes('"expect"'));
-}));
+
 
 test("empty extraction or mismatched live prefix blocks comparisons and every blind artifact", async () => temporary(async outputDir => {
   const deps = dependencies({ createLocalGrounding: () => ({ extractor: createMockLocalExtractor(() => []), classifier: createMockLocalClassifier(() => []) }) });
@@ -168,20 +142,7 @@ test("empty extraction or mismatched live prefix blocks comparisons and every bl
   assert.equal(deps.judgments.length, script.steps.length - 1, "no comparison generation before gate");
 }));
 
-test("an invalid script is excluded with reasons while eligible scripts continue to comparison", async () => temporary(async outputDir => {
-  const altered = structuredClone(script); altered.id = "mismatched"; altered.steps[1].text = "よく分からないから説明を続けて。";
-  const deps = dependencies({ cases: [script, altered] });
-  const result = await runLiveEvaluation({ ...config, outputDir }, deps);
-  assert.equal(result.status, "completed");
-  assert.equal(result.excludedCases, 1);
-  const excluded = JSON.parse(await readFile(join(result.directory, "exclusions.private.json"), "utf8"));
-  assert.ok(excluded.some((e: any) => e.caseId === altered.id && e.unmet.includes("script_mismatch")));
-  assert.equal(deps.judgments.length, 20);
-  const rows = (await readFile(join(result.directory, "blinded.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line));
-  assert.deepEqual(rows.map(r => r.caseId), [script.id, script.id]);
-  const map = JSON.parse(await readFile(join(result.directory, "mapping.private.json"), "utf8"));
-  assert.ok(map.mapping.every((m: any) => m.caseId === script.id));
-}));
+
 
 test("public and private outputs refuse prompt/image/credential echoes and model drift with fixed diagnostics", async () => {
   for (const text of ["data:image/png;base64,QUJD", "Bearer synthetic_token_1234", "sk-or-SYNTHETICSECRET0123"]) await temporary(async outputDir => {
@@ -207,89 +168,12 @@ test("public and private outputs refuse prompt/image/credential echoes and model
 });
 
 
-test("actual Jev adapter with mock HTTP supplies model-checked evidence to the live gate", async () => {
-  const { createJevLocalTestClassifier } = await import("../dialogue-model/runtime/local-grounding/jev-local-test.ts");
-  for (const returnedModel of ["typesafe/jev-1.14", "typesafe/jev-1.14-20261014", "typesafe/jev-1.14-unapproved", "cost_cap"]) await temporary(async outputDir => {
-    const deps = dependencies(), original = deps.createLocalGrounding;
-    let httpCalls = 0;
-    deps.createLocalGrounding = client => ({ extractor: original(client).extractor,
-      classifier: createJevLocalTestClassifier({ enabled: true, readKey: async () => "sk-or-SYNTHETIC-MOCK-ONLY-1234567890",
-        fetchImpl: async (_url, request) => {
-          httpCalls++;
-          const payload = JSON.parse(request.body as string), state = JSON.parse(payload.state);
-          const text = state.publicTurns.at(-1).text;
-          const act = text.includes("合って") ? "agree" : text.includes("反対") ? "deny" : text.includes("名前") ? "name_accept" : "assert";
-          const prior = state.priorClaims.findLastIndex((c: any) => c.speaker === "ai" && c.aspect === (act === "name_accept" ? "name" : "part"));
-          const answers = Object.fromEntries(Object.entries(payload.questions).map(([key, value]: [string, any]) => {
-            const choice = key.endsWith("_act") ? act : ["agree", "deny", "name_accept"].includes(act) && prior >= 0 ? "claim_" + prior : "none";
-            return [key, { type: "choice", choice, confidence: 1,
-              probabilities: Object.fromEntries(Object.keys(value.criteria).map(label => [label, label === choice ? 1 : 0])) }];
-          }));
-          return Response.json({ model: returnedModel === "cost_cap" ? "typesafe/jev-1.14" : returnedModel, id: "synthetic-response-" + httpCalls, answers,
-            usage: { input_tokens: 10, output_tokens: 0, cost: returnedModel === "cost_cap" ? 1 : 0.00001 } });
-        } })! });
-    const result = await runLiveEvaluation({ ...config, mode: "branch", outputDir }, deps);
-    assert.ok(httpCalls > 0);
-    assert.equal(result.status, (returnedModel.endsWith("unapproved") || returnedModel === "cost_cap") ? "gate_failed" : "completed");
-    if (result.status === "completed") {
-      const gate = JSON.parse(await readFile(join(result.directory, "gate.private.json"), "utf8"));
-      assert.deepEqual(gate.returnedModels, [returnedModel]);
-    } else assert.ok(!(await readdir(result.directory)).includes("blinded.jsonl"));
-    if (returnedModel === "cost_cap") {
-      const prefix = JSON.parse(await readFile(join(result.directory, script.id + ".prefix.private.json"), "utf8"));
-      assert.ok(prefix.classifierEvidence.some((e: any) => e.reason === "cost_cap"));
-    }
-    for (const file of await readdir(result.directory)) assert.ok(!(await readFile(join(result.directory, file), "utf8")).includes("sk-or-"));
-  });
-});
-
-test("new E2E arm is gated again after a valid prefix and keeps blind files absent on later classifier failure", async () => temporary(async outputDir => {
-  const deps = dependencies(), original = deps.createLocalGrounding;
-  let factories = 0, classifications = 0;
-  deps.createLocalGrounding = client => {
-    factories++;
-    const local = original(client), base = local.classifier as any;
-    return { extractor: local.extractor, classifier: {
-      get metadata() { return base.metadata; },
-      get lastEvidence() { const e = base.lastEvidence; return e && { ...e, status: classifications > 4 ? "error" : e.status }; },
-      async classify(input: any, options: any) { classifications++; return base.classify(input, options); },
-    } as any };
-  };
-  const result = await runLiveEvaluation({ ...config, mode: "multiturn", outputDir }, deps);
-  assert.equal(factories, 1, "one case shares the same cost-capped classifier across stages");
-  assert.equal(result.status, "gate_failed");
-  assert.ok(result.unmet?.includes("classifier_evidence_invalid"));
-  const preflight = JSON.parse(await readFile(join(result.directory, "gate.private.json"), "utf8"));
-  assert.ok(preflight.passed);
-  assert.ok(!(await readdir(result.directory)).includes("blinded.jsonl"));
-  assert.ok(!(await readdir(result.directory)).includes("mapping.private.json"));
-}));
 
 
-test("generation failure leaves staged claims uncommitted and preserves completed prefix diagnostics", async () => {
-  for (const failureAt of [2, 5]) await temporary(async outputDir => {
-    const deps = dependencies(), original = deps.client;
-    let generations = 0;
-    deps.client = { async complete(messages, options) {
-      if (++generations === failureAt) throw new Error("RAW_PRIVATE_PROVIDER_FAILURE");
-      return original.complete(messages, options);
-    } };
-    const result = await runLiveEvaluation({ ...config, mode: "branch", outputDir }, deps);
-    assert.equal(result.status, "gate_failed");
-    assert.ok(result.unmet?.includes("no_eligible_cases"));
-    const excluded = JSON.parse(await readFile(join(result.directory, "exclusions.private.json"), "utf8"));
-    assert.ok(excluded.some((e: any) => e.caseId === script.id && e.code === "evaluation_unavailable"));
-    const prefixPath = join(result.directory, script.id + (failureAt === 2 ? ".prefix-failed.private.json" : ".prefix.private.json"));
-    const prefix = JSON.parse(await readFile(prefixPath, "utf8"));
-    if (failureAt === 2) {
-      assert.equal(prefix.snapshot.judgments.length, 1);
-      assert.ok(prefix.records.some((r: any) => r.turnIndex === 3 && r.status !== "committed"));
-      assert.ok(prefix.snapshot.graph.records.every((r: any) => r.turn === 1));
-    } else assert.ok(prefix.gate.passed);
-    for (const file of await readdir(result.directory)) assert.ok(!(await readFile(join(result.directory, file), "utf8")).includes("RAW_PRIVATE_PROVIDER_FAILURE"));
-    assert.ok(!(await readdir(result.directory)).includes("blinded.jsonl"));
-  });
-});
+
+
+
+
 
 test("local timeout CLI validates the extractor's millisecond bounds without changing the omitted default", async () => {
   const defaults = parseLiveArguments(["--out", "/tmp/synthetic-evaluation"]);
@@ -313,31 +197,7 @@ test("local timeout CLI validates the extractor's millisecond bounds without cha
   });
 });
 
-test("local timeout reaches extraction and the remaining classification budget in every live stage", async () => temporary(async outputDir => {
-  for (const scenario of [
-    { localTimeoutMs: undefined, factoryTimeoutMs: undefined, expected: 20000 },
-    { localTimeoutMs: undefined, factoryTimeoutMs: 12000, expected: 12000 },
-    { localTimeoutMs: 45000, factoryTimeoutMs: 12000, expected: 45000 },
-  ]) {
-    const deps = dependencies(), original = deps.createLocalGrounding;
-    const extraction: number[] = [], classification: number[] = [];
-    deps.createLocalGrounding = client => {
-      const local = original(client), extract = local.extractor.extract, classify = local.classifier.classify;
-      local.timeoutMs = scenario.factoryTimeoutMs;
-      local.extractor.extract = async (input, options) => { extraction.push(options!.timeoutMs!); return extract(input, options); };
-      local.classifier.classify = async (input, options) => { classification.push(options!.timeoutMs!); return classify(input, options); };
-      return local;
-    };
-    const result = await runLiveEvaluation({ ...config, outputDir, ...(scenario.localTimeoutMs === undefined ? {} : { localTimeoutMs: scenario.localTimeoutMs }) }, deps);
-    assert.equal(result.status, "completed");
-    assert.equal(extraction.length, script.steps.length * 2, "ON prefix, ON branch and ON E2E all use the configured budget");
-    assert.ok(extraction.every(value => value === scenario.expected));
-    assert.equal(classification.length, extraction.length);
-    assert.ok(classification.every(value => value > 0 && value <= scenario.expected));
-    const manifest = JSON.parse(await readFile(join(result.directory, "run.private.json"), "utf8"));
-    assert.equal(manifest.localTimeoutMs, scenario.localTimeoutMs);
-  }
-}));
+
 
 
 test("prefix preserves fixed per-stage error codes while provider errors and modified codes stay private", async () => {
@@ -381,7 +241,8 @@ test("independent audit refuses even a literal AI feature claim from a published
   const judgment = { action: "accept", targetSlot: "s-0001", candidateName: null, discriminatingFeature: "四角", note: null };
   // A plausible, graph-valid claim with literal public provenance still cannot
   // stand in for a program-owned fallback that did not publish the chosen act.
-  const operation = recordAiClaims({ graph, turn: 3, publicTurns, priorAct: { ...judgment, turn: 2 } }).operations[0];
+  // Historical forged-feature fixture for the frozen fallback audit only.
+  const operation = recordAiClaims({ graph, turn: 3, publicTurns, featureSource: "legacy_private_plan", priorAct: { ...judgment, turn: 2 } }).operations[0];
   assert.ok(operation);
   const after = applyReferenceUpdate(graph, { expectedRevision: graph.revision, turn: 3, operations: [operation] },
     { publicTurns, generationSucceeded: true });
@@ -452,79 +313,12 @@ test("compound expectations require every function in that same human turn", () 
   assert.equal(evaluateRunGate([{ caseId: "compound", receipts: [compound] }]).passed, false, "name acceptance remains mandatory globally");
 });
 
-test("live branch and E2E cohorts can supply agreement, denial and naming in different scripts", async () => temporary(async outputDir => {
-  const { acts, deps } = distributedCases();
-  const result = await runLiveEvaluation({ ...config, outputDir }, deps);
-  assert.equal(result.status, "completed");
-  assert.equal(result.excludedCases, 0);
-  const preflight = JSON.parse(await readFile(join(result.directory, "gate.private.json"), "utf8"));
-  for (const c of preflight.cases) for (const act of acts) assert.equal(c.counts[act], act === c.caseId ? 1 : 0);
-  const final = JSON.parse(await readFile(join(result.directory, "final-gates.private.json"), "utf8"));
-  assert.ok(final.branch.passed && final.multiturn.passed);
-  assert.equal((await readFile(join(result.directory, "blinded.jsonl"), "utf8")).trim().split("\n").length, 6);
-}));
 
 
-test("a later invalid E2E case is removed from both modes without stopping the remaining cases", async () => temporary(async outputDir => {
-  const bad = structuredClone(script); bad.id = "later-classifier-error"; bad.steps[0].text += "もう一つの話。";
-  const deps = dependencies({ cases: [bad, script] }), original = deps.createLocalGrounding;
-  deps.createLocalGrounding = client => {
-    const local = original(client), base = local.classifier as any;
-    let count = 0, selected = false;
-    return { extractor: local.extractor, classifier: {
-      get metadata() { return base.metadata; },
-      get lastEvidence() { const e = base.lastEvidence; return e && { ...e, status: selected && count > 5 ? "error" : e.status }; },
-      async classify(input: any, options: any) {
-        count++; selected = input.publicTurns[0].text === bad.steps[0].text;
-        return base.classify(input, options);
-      },
-    } as any };
-  };
-  const result = await runLiveEvaluation({ ...config, outputDir }, deps);
-  assert.equal(result.status, "completed"); assert.equal(result.excludedCases, 1);
-  const rows = (await readFile(join(result.directory, "blinded.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line));
-  assert.deepEqual(rows.map(r => [r.caseId, r.mode]), [[script.id, "branch"], [script.id, "multiturn"]]);
-  const excluded = JSON.parse(await readFile(join(result.directory, "exclusions.private.json"), "utf8"));
-  assert.ok(excluded.some((e: any) => e.caseId === bad.id && e.stage === "multiturn-new" && e.unmet.includes("classifier_evidence_invalid")));
-  assert.ok((await readdir(result.directory)).includes(bad.id + ".branch.completed.private.json"), "earlier private checkpoint survives but is excluded from blind output");
-  const final = JSON.parse(await readFile(join(result.directory, "final-gates.private.json"), "utf8"));
-  for (const mode of ["branch", "multiturn"]) assert.deepEqual(final[mode].includedCaseIds, [script.id]);
-}));
 
-test("global function coverage is required before comparison and recomputed after case exclusion", async () => {
-  await temporary(async outputDir => {
-    const { deps, cases } = distributedCases(); deps.cases = cases.slice(0, 2);
-    const result = await runLiveEvaluation({ ...config, outputDir }, deps);
-    assert.equal(result.status, "gate_failed"); assert.deepEqual(result.unmet, ["name_accept_missing"]);
-    assert.equal(deps.judgments.length, 8, "only prefixes are generated when global coverage is missing");
-    assert.ok(!(await readdir(result.directory)).includes("blinded.jsonl"));
-  });
-  await temporary(async outputDir => {
-    const { deps } = distributedCases(), original = deps.createLocalGrounding;
-    deps.createLocalGrounding = client => {
-      const local = original(client), base = local.classifier as any;
-      let count = 0, selected = false;
-      return { extractor: local.extractor, classifier: {
-        get metadata() { return base.metadata; },
-        get lastEvidence() { const e = base.lastEvidence; return e && { ...e, status: selected && count > 4 ? "error" : e.status }; },
-        async classify(input: any, options: any) {
-          count++; selected = input.publicTurns[0].text.includes("（name_accept）");
-          return base.classify(input, options);
-        },
-      } as any };
-    };
-    const result = await runLiveEvaluation({ ...config, outputDir }, deps);
-    assert.equal(result.status, "gate_failed"); assert.deepEqual(result.unmet, ["name_accept_missing"]);
-    const preflight = JSON.parse(await readFile(join(result.directory, "gate.private.json"), "utf8"));
-    assert.ok(preflight.passed);
-    const final = JSON.parse(await readFile(join(result.directory, "final-gates.private.json"), "utf8"));
-    for (const mode of ["branch", "multiturn"]) {
-      assert.deepEqual(final[mode].includedCaseIds, ["agree", "deny"]);
-      assert.equal(final[mode].counts.name_accept, 0);
-    }
-    for (const file of ["blinded.jsonl", "mapping.private.json"]) assert.ok(!(await readdir(result.directory)).includes(file));
-  });
-});
+
+
+
 
 test("expect arrays reject empty, duplicate or non-function labels before any model call", async () => temporary(async outputDir => {
   for (const expect of [[], ["agree", "agree"], ["ER1"], ["agree", "invalid"], null, { act: "agree" }]) {
@@ -536,50 +330,110 @@ test("expect arrays reject empty, duplicate or non-function labels before any mo
   assert.deepEqual(await readdir(outputDir), []);
 }));
 
-test("a prefix provider failure or model mismatch excludes that script without poisoning later scripts", async () => {
-  for (const fault of ["model", "provider"] as const) await temporary(async outputDir => {
-    const bad = structuredClone(script); bad.id = "failed-prefix";
-    const deps = dependencies({ cases: [bad, script] }), original = deps.client;
-    let first = true;
-    deps.client = { async complete(messages, options) {
-      if (first) {
-        first = false;
-        if (fault === "provider") throw new Error("PRIVATE_PROVIDER_CANARY");
-        return { text: "四角がある図形ですね。", model: "wrong-model" };
-      }
-      return original.complete(messages, options);
-    } };
-    const result = await runLiveEvaluation({ ...config, outputDir }, deps);
-    assert.equal(result.status, "completed"); assert.equal(result.excludedCases, 1);
-    const excluded = JSON.parse(await readFile(join(result.directory, "exclusions.private.json"), "utf8"));
-    assert.ok(excluded.some((e: any) => e.caseId === bad.id && e.code === (fault === "model" ? "model_changed" : "evaluation_unavailable")));
-    const rows = (await readFile(join(result.directory, "blinded.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line));
-    assert.ok(rows.every(r => r.caseId === script.id));
-    for (const file of await readdir(result.directory)) assert.ok(!(await readFile(join(result.directory, file), "utf8")).includes("PRIVATE_PROVIDER_CANARY"));
-  });
-});
-
-test("an abandoned model call belongs to its excluded script and cannot invalidate the next script", async () => temporary(async outputDir => {
-  const bad = structuredClone(script); bad.id = "timed-out-prefix"; bad.steps[0].text += "これは別の図形の話。";
-  let release!: (reply: { text: string; model: string }) => void;
-  const lateReply = new Promise<{ text: string; model: string }>(resolve => { release = resolve; });
-  const deps = dependencies({ cases: [bad, script], onProgress: progress => {
-    if (progress.caseId === script.id && progress.stage === "prefix" && progress.turn === 1) release({ text: "破棄された応答", model: "wrong-model" });
-  } });
-  const originalClient = deps.client, originalLocal = deps.createLocalGrounding;
-  deps.client = { async complete(messages, options) {
-    return options?.phase === "local_extraction" ? lateReply : originalClient.complete(messages, options);
-  } };
+test("R5-c: the fixed synthetic-cycle prefix is ineligible and starts no comparison", async () => temporary(async outputDir => {
+  // This fixed mock fixture checks a completed prefix boundary; it neither
+  // certifies downstream comparison nor replaces the 11 retired tests.
+  const progress: Array<{ caseId: string; stage: string; turn?: number }> = [];
+  const extractionTurns: number[] = [], classificationTurns: number[] = [];
+  const deps = dependencies({ onProgress: value => progress.push(structuredClone(value)) });
+  const factory = deps.createLocalGrounding;
+  let factories = 0;
   deps.createLocalGrounding = client => {
-    const local = originalLocal(client), extract = local.extractor.extract;
-    local.extractor.extract = async (input, options) => {
-      if (input.publicTurns[0].text === bad.steps[0].text && input.turn === 1) await client.complete([], { phase: "local_extraction" });
-      return extract(input, options);
-    };
+    factories++;
+    const local = factory(client), extract = local.extractor.extract, classify = local.classifier.classify;
+    // Observe calls without altering the existing mock's responses or errors.
+    local.extractor.extract = async (input, options) => { extractionTurns.push(input.turn); return extract(input, options); };
+    local.classifier.classify = async (input, options) => { classificationTurns.push(input.turn); return classify(input, options); };
     return local;
   };
-  const result = await runLiveEvaluation({ ...config, outputDir, localTimeoutMs: 1000 }, deps);
-  assert.equal(result.status, "completed"); assert.equal(result.excludedCases, 1);
-  const final = JSON.parse(await readFile(join(result.directory, "result.private.json"), "utf8"));
-  assert.deepEqual(final.includedCaseIds, [script.id]); assert.deepEqual(final.excludedCaseIds, [bad.id]);
+  assert.deepEqual(deps.cases!.map(c => c.id), ["synthetic-cycle"]);
+  const result = await runLiveEvaluation({ outputDir, seed: 1701, strategy: "bypass-enabled", mode: "both" }, deps);
+  assert.equal(result.status, "gate_failed"); assert.equal(result.excludedCases, 1);
+  const load = async (file: string) => JSON.parse(await readFile(join(result.directory, file), "utf8"));
+  const [savedResult, gate, exclusions, failures, prefix] = await Promise.all([
+    load("result.private.json"), load("gate.private.json"), load("exclusions.private.json"), load("failures.private.json"),
+    load("synthetic-cycle.prefix.private.json"),
+  ]);
+  const runUnmet = ["ai_claims_missing", "targeted_claims_missing", "agree_missing", "deny_missing", "name_accept_missing",
+    "classifier_evidence_invalid", "local_pipeline_incomplete", "no_eligible_cases"];
+  assert.deepEqual([...result.unmet!].sort(), [...runUnmet].sort());
+  assert.deepEqual({ ...savedResult, unmet: [...savedResult.unmet].sort() },
+    { status: "gate_failed", stage: "prefix", unmet: [...runUnmet].sort() });
+  assert.equal(gate.scope, "run"); assert.equal(gate.passed, false);
+  assert.deepEqual([...gate.unmet].sort(), [...runUnmet].sort());
+  assert.deepEqual(gate.includedCaseIds, []); assert.deepEqual(gate.excludedCaseIds, ["synthetic-cycle"]);
+  assert.deepEqual(gate.counts, { aiClaims: 0, targetedClaims: 0, agree: 0, deny: 0, name_accept: 0, unverified: 0 });
+  assert.deepEqual(gate.returnedModels, []);
+  const caseGate = { scope: "case", passed: false, unmet: ["script_mismatch"],
+    counts: { aiClaims: 1, targetedClaims: 3, agree: 0, deny: 0, name_accept: 1, unverified: 0 },
+    returnedModels: ["typesafe/jev-1.14-20261014"] };
+  assert.deepEqual(gate.cases, [{ caseId: "synthetic-cycle", ...caseGate }]);
+  assert.deepEqual(prefix.gate, caseGate);
+  assert.deepEqual(exclusions, [{ caseId: "synthetic-cycle", stage: "prefix", unmet: ["script_mismatch"] }]);
+  // The case's missing verified agree/deny responses cause script_mismatch.
+  // evaluateRunGate excludes it, then evaluates EMPTY eligible receipts. Its
+  // classifier_evidence_invalid/local_pipeline_incomplete are secondary run
+  // diagnostics, not classifier transport errors or an unfinished prefix.
+
+  assert.deepEqual(progress, [
+    { caseId: "synthetic-cycle", stage: "prefix", turn: 1 }, { caseId: "synthetic-cycle", stage: "prefix", turn: 3 },
+    { caseId: "synthetic-cycle", stage: "prefix", turn: 5 }, { caseId: "synthetic-cycle", stage: "prefix", turn: 7 },
+  ]);
+  assert.equal(factories, 1);
+  assert.deepEqual(extractionTurns, [1, 3, 5, 7]); assert.deepEqual(classificationTurns, [1, 3, 5, 7]);
+  assert.equal(deps.judgments.length, 4);
+  assert.deepEqual(deps.calls.map(c => c.options.phase), ["generation", "generation", "generation", "generation"]);
+  assert.equal(prefix.caseId, "synthetic-cycle"); assert.equal(prefix.stage, "prefix");
+  assert.deepEqual(prefix.publicTurns.map((t: any) => [t.turn, t.speaker]), [
+    [1, "human"], [2, "ai"], [3, "human"], [4, "ai"], [5, "human"], [6, "ai"], [7, "human"], [8, "ai"],
+  ]);
+  assert.deepEqual(prefix.provenance.map((p: any) => [p.humanTurn, p.aiTurn]), [[1, 2], [3, 4], [5, 6], [7, 8]]);
+  for (const provenance of prefix.provenance) {
+    assert.equal(prefix.publicTurns.find((t: any) => t.turn === provenance.aiTurn).text, provenance.text);
+  }
+  assert.deepEqual(prefix.records.map((r: any) => r.turnIndex), [1, 3, 5, 7]);
+  assert.deepEqual(prefix.records.map((r: any) => r.classifier.callIndex), [1, 2, 3, 4]);
+  assert.equal(prefix.snapshot.judgments.length, 4);
+  for (const [index, record] of prefix.records.entries()) {
+    assert.equal(record.status, "committed"); assert.equal(record.localStatus, "ok");
+    assert.equal(record.classifier.kind, "jev_local_test"); assert.equal(record.classifier.status, "ok");
+    assert.equal(Object.hasOwn(record.extractor, "errorCode"), false);
+    assert.equal(Object.hasOwn(record.classifier, "errorCode"), false);
+    const installed = prefix.snapshot.judgments[index];
+    assert.equal(installed.status, "committed"); assert.equal(installed.turnIndex, record.turnIndex);
+    assert.equal(installed.lastEventId, record.lastEventId);
+    assert.equal(installed.localGrounding.attemptNumber, record.attemptNumber);
+  }
+  assert.deepEqual(prefix.classifierEvidence.map((e: any) => [e.callIndex, e.status, e.reason]),
+    [[1, "ok", null], [2, "ok", null], [3, "ok", null], [4, "ok", null]]);
+  assert.deepEqual(prefix.receipts.map((r: any) => r.turn), [1, 3, 5, 7]);
+  for (const receipt of prefix.receipts) {
+    assert.equal(receipt.pipelineOk, true); assert.equal(receipt.classifierOk, true); assert.equal(receipt.unverified, 0);
+  }
+  assert.deepEqual(failures, []);
+
+  assert.deepEqual(prefix.records.map((r: any) => r.classifier.verdicts), [
+    [{ segmentId: "s1", act: "assert", respondsToClaimId: null }],
+    [{ segmentId: "s1", act: "agree", respondsToClaimId: null }],
+    [{ segmentId: "s1", act: "deny", respondsToClaimId: null }],
+    [{ segmentId: "s1", act: "name_accept", respondsToClaimId: "7:ai1" }],
+  ]);
+  const [first, agreement, denial, naming] = prefix.records;
+  assert.deepEqual(first.verification, { accepted: ["1:local1"], rejected: [] });
+  assert.deepEqual(first.claims.map((c: any) => [c.id, c.speaker, c.act]), [["1:local1", "human", "assert"]]);
+  for (const record of [agreement, denial]) {
+    assert.deepEqual(record.verification, { accepted: [], rejected: [{ segmentId: "s1", reason: "missing_claim_response" }] });
+    assert.deepEqual(record.aiClaims, []); assert.deepEqual(record.claims, []);
+  }
+  assert.deepEqual(naming.verification, { accepted: ["7:ai1", "7:local1"], rejected: [] });
+  assert.deepEqual(naming.aiClaims.map((c: any) => [c.id, c.aspect, c.act, c.sourceTurn]), [["7:ai1", "name", "name_propose", 6]]);
+  assert.deepEqual(naming.claims.map((c: any) => [c.id, c.aspect, c.act, c.respondsTo]), [["7:local1", "name", "name_accept", "7:ai1"]]);
+  const aiClaims = prefix.snapshot.graph.records.filter((r: any) => r.kind === "claim" && r.speaker === "ai");
+  assert.deepEqual(aiClaims.map((c: any) => [c.id, c.aspect, c.act, c.sourceTurn]), [["7:ai1", "name", "name_propose", 6]]);
+  assert.equal(aiClaims.filter((c: any) => c.aspect === "part").length, 0);
+
+  // Exact prefix progress/call counts and this file set jointly exclude later
+  // branch/multiturn work; unexecuted plans do not count as downstream success.
+  assert.deepEqual((await readdir(result.directory)).sort(), ["exclusions.private.json", "failures.private.json", "gate.private.json",
+    "result.private.json", "run.private.json", "synthetic-cycle.prefix.private.json"]);
 }));

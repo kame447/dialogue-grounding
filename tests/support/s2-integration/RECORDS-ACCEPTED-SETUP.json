@@ -1,0 +1,304 @@
+{
+  "run": {
+    "runId": "synthetic-s2-only",
+    "manifest": {
+      "schemaVersion": 2,
+      "id": "synthetic_s2_identity_setup",
+      "seed": 17,
+      "figureSets": 1,
+      "approval": "pending",
+      "lunaRequest": {
+        "timeoutMs": null,
+        "maxCompletionTokens": null
+      },
+      "timeouts": {
+        "observationMs": 20000,
+        "localMs": 20000,
+        "decisionMs": 15000,
+        "lunaAttemptMs": 45000,
+        "generationMs": 40000,
+        "trialMs": 900000
+      },
+      "caps": {
+        "lunaCalls": 10,
+        "lunaTokens": 10000,
+        "lunaPosts": 30,
+        "jevPosts": 10,
+        "jevUsd": 1
+      },
+      "trials": [
+        {
+          "stage": "smoke",
+          "scriptId": "SYNTH0",
+          "label": "repair-first"
+        },
+        {
+          "stage": "main",
+          "scriptId": "SYNTH1",
+          "label": "bypass-enabled"
+        }
+      ]
+    },
+    "manifestSha256": "3578f934f611d80218b0e5a84fa33bb89a987883f9fa65015ba473654c627e9d",
+    "profile": {
+      "id": "research_trial_profile_v2",
+      "referenceMemory": true,
+      "decisionMode": "jev",
+      "humanReferent": true,
+      "localGrounding": {
+        "enabled": true,
+        "aiPublicClaims": true
+      },
+      "initialObservation": "cache_required",
+      "questionLayout": "two_stage_v1",
+      "utteranceStyle": "default",
+      "maxReobservations": 1,
+      "modelPolicy": {
+        "purpose": "dialogue_turn",
+        "resolver": "research_worker",
+        "jevModel": "typesafe/jev-1.14"
+      },
+      "timeouts": {
+        "observationMs": 20000,
+        "localMs": 20000,
+        "decisionMs": 15000,
+        "lunaAttemptMs": 45000,
+        "generationMs": 40000,
+        "trialMs": 900000
+      },
+      "lunaRequest": {
+        "timeoutMs": null,
+        "maxCompletionTokens": null
+      },
+      "outputLimit": "worker_dependent_effective_value_unverified",
+      "modelContract": {
+        "version": "model-contract-v2",
+        "tableSha256": "8863dac6f67424d1bbf76a3e6c1dafc4d8eb48ca36628dd7584454e2876af9b0"
+      }
+    },
+    "profileSha256": "40460ae4c5f2ed7cf6db6ddbd0d27fd0845dc1c907c5d837b7f842c288b074e2",
+    "execution": "mock"
+  },
+  "summary": {
+    "runId": "synthetic-s2-only",
+    "manifestSha256": "3578f934f611d80218b0e5a84fa33bb89a987883f9fa65015ba473654c627e9d",
+    "profile": {
+      "id": "research_trial_profile_v2",
+      "referenceMemory": true,
+      "decisionMode": "jev",
+      "humanReferent": true,
+      "localGrounding": {
+        "enabled": true,
+        "aiPublicClaims": true
+      },
+      "initialObservation": "cache_required",
+      "questionLayout": "two_stage_v1",
+      "utteranceStyle": "default",
+      "maxReobservations": 1,
+      "modelPolicy": {
+        "purpose": "dialogue_turn",
+        "resolver": "research_worker",
+        "jevModel": "typesafe/jev-1.14"
+      },
+      "timeouts": {
+        "observationMs": 20000,
+        "localMs": 20000,
+        "decisionMs": 15000,
+        "lunaAttemptMs": 45000,
+        "generationMs": 40000,
+        "trialMs": 900000
+      },
+      "lunaRequest": {
+        "timeoutMs": null,
+        "maxCompletionTokens": null
+      },
+      "outputLimit": "worker_dependent_effective_value_unverified",
+      "modelContract": {
+        "version": "model-contract-v2",
+        "tableSha256": "8863dac6f67424d1bbf76a3e6c1dafc4d8eb48ca36628dd7584454e2876af9b0"
+      }
+    },
+    "profileSha256": "40460ae4c5f2ed7cf6db6ddbd0d27fd0845dc1c907c5d837b7f842c288b074e2",
+    "execution": "mock",
+    "status": "wiring_failed",
+    "failure": "trial_timeout",
+    "executionFailure": "trial_timeout",
+    "runOrder": [
+      {
+        "scriptId": "SYNTH0",
+        "label": "repair-first"
+      }
+    ],
+    "skipped": [
+      {
+        "plannedIndex": 1,
+        "scriptId": "SYNTH1",
+        "label": "bypass-enabled",
+        "reason": "smoke_stage_not_ready",
+        "status": "not_reached"
+      }
+    ]
+  },
+  "warmup": {
+    "calls": [],
+    "http": []
+  },
+  "trials": [
+    {
+      "order": 0,
+      "plannedIndex": 0,
+      "scriptId": "SYNTH0",
+      "label": "repair-first",
+      "stage": "smoke",
+      "completed": false,
+      "failure": "trial_timeout",
+      "profile": {
+        "id": "research_trial_profile_v2",
+        "referenceMemory": true,
+        "decisionMode": "jev",
+        "humanReferent": true,
+        "localGrounding": {
+          "enabled": true,
+          "aiPublicClaims": true
+        },
+        "initialObservation": "cache_required",
+        "questionLayout": "two_stage_v1",
+        "utteranceStyle": "default",
+        "maxReobservations": 1,
+        "modelPolicy": {
+          "purpose": "dialogue_turn",
+          "resolver": "research_worker",
+          "jevModel": "typesafe/jev-1.14"
+        },
+        "timeouts": {
+          "observationMs": 20000,
+          "localMs": 20000,
+          "decisionMs": 15000,
+          "lunaAttemptMs": 45000,
+          "generationMs": 40000,
+          "trialMs": 900000
+        },
+        "lunaRequest": {
+          "timeoutMs": null,
+          "maxCompletionTokens": null
+        },
+        "outputLimit": "worker_dependent_effective_value_unverified",
+        "modelContract": {
+          "version": "model-contract-v2",
+          "tableSha256": "8863dac6f67424d1bbf76a3e6c1dafc4d8eb48ca36628dd7584454e2876af9b0"
+        }
+      },
+      "profileSha256": "40460ae4c5f2ed7cf6db6ddbd0d27fd0845dc1c907c5d837b7f842c288b074e2",
+      "calls": [
+        {
+          "id": 1,
+          "sendIds": [
+            1
+          ],
+          "phase": "decision",
+          "turn": 1,
+          "provider": "jev",
+          "requestSha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "instructionSha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "requestedModel": "typesafe/jev-1.14",
+          "model": "typesafe/jev-1.14-20261014",
+          "status": "ok",
+          "error": null,
+          "costUsd": 0,
+          "inputTokens": null,
+          "outputTokens": null,
+          "imageCount": 0,
+          "latencyMs": 0
+        }
+      ],
+      "http": [],
+      "turns": [],
+      "replay": []
+    }
+  ],
+  "evidence": {
+    "version": 1,
+    "runId": "synthetic-s2-only",
+    "normalizedEnvelopeFields": [
+      "label",
+      "runId",
+      "timestamp",
+      "timestamps",
+      "startedAt",
+      "finishedAt",
+      "createdAt"
+    ],
+    "imageProjection": "exact_synthetic_own_image_data_url_to_mime_and_byte_sha256; canonical_http_json_not_raw_body_byte_parity",
+    "pairedReplay": [],
+    "events": [
+      {
+        "provider": "jev",
+        "instanceId": "jev-decision-synthetic-1",
+        "trialOrder": 0,
+        "label": "repair-first",
+        "callId": 1,
+        "phase": "decision",
+        "requestedModel": "typesafe/jev-1.14",
+        "seq": 1,
+        "at": "2000-01-01T00:00:00.001Z",
+        "type": "reserve",
+        "sendId": 1,
+        "priorObservedSpentUsd": 0,
+        "priorObservedMaximumUsd": 0
+      },
+      {
+        "provider": "jev",
+        "instanceId": "jev-decision-synthetic-1",
+        "trialOrder": 0,
+        "label": "repair-first",
+        "callId": 1,
+        "phase": "decision",
+        "requestedModel": "typesafe/jev-1.14",
+        "seq": 2,
+        "at": "2000-01-01T00:00:00.002Z",
+        "type": "send",
+        "sendId": 1,
+        "priorObservedSpentUsd": 0,
+        "priorObservedMaximumUsd": 0
+      },
+      {
+        "provider": "jev",
+        "instanceId": "jev-decision-synthetic-1",
+        "trialOrder": 0,
+        "label": "repair-first",
+        "callId": 1,
+        "phase": "decision",
+        "requestedModel": "typesafe/jev-1.14",
+        "seq": 3,
+        "at": "2000-01-01T00:00:00.003Z",
+        "type": "response",
+        "sendId": 1,
+        "status": "ok",
+        "model": "typesafe/jev-1.14-20261014",
+        "costUsd": 0
+      },
+      {
+        "seq": 4,
+        "at": "2000-01-01T00:00:00.004Z",
+        "type": "stop",
+        "trialOrder": 0,
+        "label": "repair-first",
+        "reason": "trial_timeout",
+        "scope": "trial",
+        "inFlight": []
+      },
+      {
+        "seq": 5,
+        "at": "2000-01-01T00:00:00.005Z",
+        "type": "stop",
+        "reason": "trial_timeout",
+        "scope": "run",
+        "inFlight": []
+      }
+    ],
+    "cache": []
+  },
+  "billing": [],
+  "packets": [],
+  "storage": []
+}

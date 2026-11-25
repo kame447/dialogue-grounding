@@ -1,14 +1,13 @@
-// Per-trial archive and retention inside each session Durable Object.
+// Per-trial archive inside each session Durable Object; no automatic expiry.
 //   "active"            the trial this browser resumes
 //   "record:<recordId>" every trial's latest record, so a new trial never erases an earlier log
-//   "ledger"            recordId -> last update (ms), which drives retention
+//   "ledger"            recordId -> last update (ms), also used for record existence
 //   "questionnaire:<recordId>"  the participant's provisional questionnaire for that trial;
-//                       deleted together with its record (expiry or researcher deletion)
+//                       deleted together with its record by a researcher
 //   "tombstones"        recordIds deleted by a researcher (ids only), so a still-running
 //                       trial cannot write its record back after deletion
-// Records expire RECORD_RETENTION_DAYS after their last update; nothing is deleted
-// earlier. Pure over a minimal storage interface with an injected clock, so the
-// Durable Object only wires it up (alarm, index notification).
+// Legacy expiry helpers remain below for compatibility, but the Worker never
+// calls them. RECORD_RETENTION_DAYS configures only the participant Cookie.
 
 export type ArchiveStorage = {
   get<T = unknown>(key: string): Promise<T | undefined>;
@@ -34,7 +33,7 @@ const questionnaireKey = (recordId: string) => {
   return "questionnaire:" + recordId;
 };
 
-/** RECORD_RETENTION_DAYS: an integer 1-365; anything else falls back to 30. */
+/** Participant Cookie lifetime: an integer 1-365; anything else falls back to 30. */
 export function retentionDays(raw: unknown): number {
   const value = typeof raw === "number" ? raw : typeof raw === "string" && /^\d{1,3}$/.test(raw.trim()) ? Number(raw.trim()) : Number.NaN;
   return Number.isInteger(value) && value >= 1 && value <= 365 ? value : DEFAULT_RETENTION_DAYS;
@@ -92,10 +91,9 @@ export async function readQuestionnaire<T = unknown>(storage: ArchiveStorage, re
 }
 
 /**
- * Stores the questionnaire beside its record. Only a submission (refreshRetention)
- * counts as an update for retention; draft saves never extend the record's life,
- * and a submission happens once. Refused (false) when the record is missing,
- * expired or deleted, so answers never outlive it.
+ * Stores the questionnaire beside its record. Only a submission (the legacy
+ * refreshRetention flag) updates the ledger timestamp. This does not set an
+ * expiry. Refused (false) when the record is missing or deleted.
  */
 export async function writeQuestionnaire(storage: ArchiveStorage, recordId: string, questionnaire: unknown, now: number,
   refreshRetention: boolean): Promise<boolean> {
@@ -112,7 +110,7 @@ export async function ledgerIds(storage: ArchiveStorage): Promise<string[]> {
   return Object.keys(await ledgerOf(storage)).sort();
 }
 
-/** When the session's alarm should fire: the earliest expiry, or null with no records. */
+/** Legacy helper only; not used to schedule Worker alarms. */
 export async function nextExpiry(storage: ArchiveStorage, days: number): Promise<number | null> {
   const times = Object.values(await ledgerOf(storage));
   return times.length ? expiryOf(Math.min(...times), days) : null;
@@ -136,7 +134,8 @@ async function removeRecords(storage: ArchiveStorage, ids: readonly string[], to
 }
 
 /**
- * Retention: deletes only records past expiry at `now`. `beforeDelete` runs first
+ * Legacy helper only; never called by the Worker. Deletes records past expiry.
+ * `beforeDelete` runs first
  * (the index removal); if it throws, nothing is deleted and the alarm can retry.
  */
 export async function expireRecords(storage: ArchiveStorage, now: number, days: number,
