@@ -2,7 +2,11 @@
 // under its existing nodejs_compat flag (also used by the stimulus generator).
 import { createHash } from 'node:crypto';
 import type { BaseAssignmentConfig, BaseAssignment, BaseRecord, BaseOwnerState } from './base-assignment.ts';
-import { validateReceptionPlan, effectiveRotationMode, ROTATION_MODES } from './reception.ts';
+import { validateReceptionPlan, effectiveRotationMode, effectiveFigureSelection, effectiveParticipantModelPin, ROTATION_MODES } from './reception.ts';
+import { PARTICIPANT_PRODUCTION_PROFILE } from '../web/participant-usage-policy.ts';
+import { validateParticipantModelPin } from './participant-model-pin.ts';
+import { resolveFigureSelection, validateResolvedFigureSelection, isLegacyFigureSelection } from '../stimuli/figure-bank.ts';
+import type { ResolvedFigureSelection } from '../stimuli/figure-bank.ts';
 import type { RotationMode } from './reception.ts';
 export type BaseAssignmentErrorCode = 'invalid_request' | 'assignment_unconfigured' | 'assignment_invalid' |
   'assignment_conflict' | 'assignment_record_invalid';
@@ -54,7 +58,7 @@ export function readAssignment(value: unknown): BaseAssignment {
   return guard('assignment_record_invalid', () => {
     const a = data(value, ['schemaVersion', 'assignmentId', 'strategy', 'seed', 'referenceMemory', 'source', 'createdAt']);
     const rawSource = data(a.source);
-    if (rawSource.kind === 'reception_plan_v1' || rawSource.kind === 'reception_plan_v2') {
+    if (rawSource.kind === 'reception_plan_v1' || rawSource.kind === 'reception_plan_v2' || rawSource.kind === 'reception_plan_v3') {
       const s = data(rawSource, ['kind','adapter','receptionId','protocolId','protocolRevision','protocolSha256','trialIndex','plan']);
       const plan = validateReceptionPlan(s.plan);
       // The provenance kind names the embedded plan version; mixing them is never accepted.
@@ -88,6 +92,13 @@ export function readAssignment(value: unknown): BaseAssignment {
 export function assignmentRotationMode(a: BaseAssignment): RotationMode {
   return a.source.kind === 'server_config_v1' ? 'relative_pm90' : effectiveRotationMode(a.source.plan, a.source.trialIndex);
 }
+export function assignmentParticipantModelPin(a: BaseAssignment) {
+  return a.source.kind === 'server_config_v1' ? undefined : effectiveParticipantModelPin(a.source.plan);
+}
+/** The figure selection an assignment requires; only reception_plan_v3 carries one, everything older is the legacy set. */
+export function assignmentFigureSelection(a: BaseAssignment): ResolvedFigureSelection {
+  return a.source.kind === 'reception_plan_v3' ? effectiveFigureSelection(a.source.plan, a.source.trialIndex) : resolveFigureSelection(undefined);
+}
 const angles = (value: unknown) => { const o = data(value); if (Object.values(o).some(v => typeof v !== 'number' || !Number.isFinite(v))) throw new Error('angle'); };
 /**
  * New records carry both options.rotationMode and the generated stimulus; only
@@ -95,16 +106,53 @@ const angles = (value: unknown) => { const o = data(value); if (Object.values(o)
  */
 function checkRotation(r: Record<string, unknown>, options: Record<string, unknown>, a: BaseAssignment): void {
   const hasMode = Object.hasOwn(options, 'rotationMode'), hasStimulus = Object.hasOwn(r, 'stimulus');
-  if (!hasMode && !hasStimulus && a.source.kind !== 'reception_plan_v2') return;
+  if (!hasMode && !hasStimulus && a.source.kind !== 'reception_plan_v2' && a.source.kind !== 'reception_plan_v3') {
+    if (Object.hasOwn(options, 'figureSelection')) throw new Error('figureSelection');
+    return;
+  }
   if (!hasMode || !hasStimulus || !ROTATION_MODES.some(m => m === options.rotationMode) || options.rotationMode !== assignmentRotationMode(a)) throw new Error('mode');
   const stimulus = data(r.stimulus), recorded = data(stimulus.angles, ['human', 'ai']);
   if (typeof stimulus.version !== 'string' || !stimulus.version || stimulus.rotationMode !== options.rotationMode) throw new Error('stimulus');
   angles(recorded.human); angles(recorded.ai);
+  checkFigureSelection(r, options, stimulus, a);
+}
+const STIMULUS_FIGURE_KEYS = ['bankVersion', 'figureSetId', 'figureIds', 'selectionSeed', 'selectionMode'] as const;
+/**
+ * reception_plan_v3 records must carry options.figureSelection equal to the plan's. Older sources may omit it
+ * (and then the stimulus must not carry figure metadata); a present selection is always strictly validated.
+ */
+function checkFigureSelection(_r: Record<string, unknown>, options: Record<string, unknown>, stimulus: Record<string, unknown>, a: BaseAssignment): void {
+  const has = Object.hasOwn(options, 'figureSelection');
+  if (!has) {
+    if (a.source.kind === 'reception_plan_v3') throw new Error('figureSelection');
+    if (STIMULUS_FIGURE_KEYS.some(k => Object.hasOwn(stimulus, k))) throw new Error('figureSelection');
+    return;
+  }
+  const recorded = validateResolvedFigureSelection(options.figureSelection);
+  const expected = assignmentFigureSelection(a);
+  if (JSON.stringify(recorded) !== JSON.stringify(expected)) throw new Error('figureSelection');
+  if (isLegacyFigureSelection(recorded)) {
+    if (STIMULUS_FIGURE_KEYS.some(k => Object.hasOwn(stimulus, k))) throw new Error('stimulus');
+    return;
+  }
+  if (stimulus.bankVersion !== recorded.bankVersion || stimulus.figureSetId !== recorded.setId || stimulus.selectionSeed !== recorded.selectionSeed ||
+      stimulus.selectionMode !== recorded.mode || !Array.isArray(stimulus.figureIds) || stimulus.figureIds.length !== recorded.figureIds.length ||
+      stimulus.figureIds.some((id, i) => id !== recorded.figureIds[i])) throw new Error('stimulus');
 }
 export function validateBoundBaseRecord(record: unknown, assignment: unknown): void {
   guard('assignment_record_invalid', () => {
     const a = readAssignment(assignment), r = data(record), own = readAssignment(r.assignment), options = data(r.options), queue = data(r.queueState);
     checkRotation(r, options, a);
+    const pin = assignmentParticipantModelPin(a);
+    const recordedPin = Object.hasOwn(options, 'participantModelPin')
+      ? validateParticipantModelPin(options.participantModelPin) : undefined;
+    if (JSON.stringify(pin) !== JSON.stringify(recordedPin) || pin && options.jevResearch !== true) throw new Error('model_pin');
+    const profile = a.source.kind === 'reception_plan_v2' || a.source.kind === 'reception_plan_v3'
+      ? a.source.plan.participantRuntimeProfile : undefined;
+    const ledger = r.jevLedger && typeof r.jevLedger === 'object' ? data(r.jevLedger) : null;
+    if (profile ? options.participantRuntimeProfile !== profile || ledger?.schemaVersion !== PARTICIPANT_PRODUCTION_PROFILE ||
+        ledger.assignmentId !== a.assignmentId || Object.hasOwn(ledger, 'limits')
+      : Object.hasOwn(options, 'participantRuntimeProfile') || ledger?.schemaVersion === PARTICIPANT_PRODUCTION_PROFILE) throw new Error('runtime_profile');
     if (typeof r.recordId !== 'string' || !UUID.test(r.recordId) || r.version !== 2 || r.seed !== a.seed || r.strategy !== a.strategy ||
         options.referenceMemory !== a.referenceMemory || !['dialogue', 'submitting', 'completed'].some(v => v === r.status) ||
         !Array.isArray(queue.pendingHumanEventIds) || queue.pendingHumanEventIds.some(v => typeof v !== 'string') ||

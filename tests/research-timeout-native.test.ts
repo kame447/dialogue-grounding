@@ -9,5 +9,54 @@ function connection(fetchImpl:typeof fetch, sleep?:()=>Promise<void>){const wire
 test('V2 native factory receives explicit80s while original profile request staysnull',async t=>{const root=await mkdtemp(join(tmpdir(),'sol1-native-selection-'));t.after(()=>rm(root,{recursive:true,force:true}));const seen:any[]=[];const result=await runParityLive({outputDir:join(root,'output'),cacheDir:join(root,'cache'),scripts:[{id:'single',humanTurns:['A synthetic turn.']}],manifest:{...structuredClone(APPROVED_RUN_MANIFEST),schemaVersion:2,timeouts:{...deadlines},trials:[{stage:'smoke',scriptId:'single',label:'repair-first'}]} as any},{execution:'mock',createLunaClient(label,opts){seen.push({label,request:opts.request});throw Error('SYNTHETIC-stop-before-policy');},createJevTransport(){throw Error('unexpected Jev');}});assert.deepEqual(seen,[{label:'warmup',request:{timeoutMs:80000,maxCompletionTokens:null}}]);assert.equal(result.summary.profile.lunaRequest.timeoutMs,null);assert.equal(result.summary.profile.id,'research_trial_profile_v2');assert.notEqual(result.summary.status,'wiring_passed');});
 for(const elapsed of [50000,79999,80001])test('native wire attempt response at '+elapsed,async t=>{let now=0;t.mock.method(performance,'now',()=>now);t.mock.timers.enable({apis:['setTimeout']});let entered=false;const {wire,native}=connection(async()=>{entered=true;await new Promise<void>(r=>setTimeout(r,elapsed));return Response.json({model:'SYNTHETIC-native',choices:[{message:{content:'SYNTHETIC response'}}]});});const messages=[{role:'user',content:'SYNTHETIC'}];let result:any,error:any;const work=wire.withCall(record(messages),()=>native.complete(messages,{timeoutMs:80000})).then(r=>{result=r;},e=>{error=e;});await until(()=>entered);now=elapsed;t.mock.timers.tick(elapsed);await work;if(elapsed<80000){assert.equal(error,undefined);assert.equal(result.timeoutMs,80000);}else assert.equal(error?.code,'timeout');assert.equal(wire.records.length,1);});
 test('wire combines in-flight logical signal with native attempt signal',async t=>{let now=0;t.mock.method(performance,'now',()=>now);t.mock.timers.enable({apis:['setTimeout']});let captured:AbortSignal|undefined;const {wire,native}=connection(async(_url,init)=>{captured=init?.signal??undefined;return await new Promise<Response>(()=>{});});const messages=[{role:'user',content:'SYNTHETIC'}],controller=new AbortController();const work=wire.withCall(record(messages),()=>native.complete(messages,{timeoutMs:80000}),controller.signal).catch(()=>{});await until(()=>!!captured);now=50000;t.mock.timers.tick(50000);controller.abort();const stopped=captured!.aborted;now=80000;t.mock.timers.tick(30000);await work;assert.equal(stopped,true,'logical abort must reach active HTTP before the80s native timer');});
-test('generation deadline includes retry backoff; release after D sends no newPOST',async t=>{let now=0;t.mock.method(performance,'now',()=>now);t.mock.timers.enable({apis:['setTimeout']});let posts=0,sleeps=0,release!:()=>void;const held=new Promise<void>(r=>{release=r;});const {wire,native}=connection(async()=>{posts++;return new Response('',{status:429});},async()=>{sleeps++;await held;});const p=profile(),h=harness({},300000,o=>{const original=o.client;return createProfileDialogue(p,{...o,image:o.ownImage,anchors:o.ownAnchors,strategy:'repair-first',referenceMemory:true,decisionMode:'jev',client:{async complete(messages:any[],opts:any){if(opts.phase!=='generation')return original.complete(messages,opts);return wire.withCall(record(messages),()=>native.complete(messages,opts),opts.signal);}}});});let error:any;const work=h.run().catch((e:any)=>{error=e;});await until(()=>sleeps===1);now=79999;t.mock.timers.tick(79999);await flush();assert.equal(error,undefined);now=80000;t.mock.timers.tick(1);await work;assert.equal((error as any)?.generationErrorCode,'timeout');release();await flush();assert.equal(posts,1);});
+test('generation deadline includes retry backoff; release after D sends no newPOST', { timeout: 10000 }, async t => {
+  let now = 0;
+  t.mock.method(performance, 'now', () => now);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+
+  let posts = 0;
+  let enterBackoff!: () => void;
+  let releaseBackoff!: () => void;
+  const backoffStarted = new Promise<void>(resolve => { enterBackoff = resolve; });
+  const held = new Promise<void>(resolve => { releaseBackoff = resolve; });
+  t.after(releaseBackoff);
+  const { wire, native } = connection(async () => {
+    posts++;
+    return new Response('', { status: 429 });
+  }, async () => {
+    enterBackoff();
+    await held;
+  });
+
+  const p = profile();
+  const h = harness({}, 300000, o => {
+    const original = o.client;
+    return createProfileDialogue(p, {
+      ...o, image: o.ownImage, anchors: o.ownAnchors, strategy: 'repair-first', referenceMemory: true, decisionMode: 'jev',
+      client: {
+        async complete(messages: any[], opts: any) {
+          if (opts.phase !== 'generation') return original.complete(messages, opts);
+          return wire.withCall(record(messages), () => native.complete(messages, opts), opts.signal);
+        },
+      },
+    });
+  });
+  let error: any;
+  const work = h.run().catch((caught: any) => { error = caught; });
+  // The turn completes asynchronous observation hashing before generation can enter backoff.
+  const reachedBackoff = await Promise.race([backoffStarted.then(() => true), work.then(() => false)]);
+  assert.equal(reachedBackoff, true, 'generation must enter retry backoff before the turn settles');
+
+  now = 79999;
+  t.mock.timers.tick(79999);
+  await flush();
+  assert.equal(error, undefined);
+  now = 80000;
+  t.mock.timers.tick(1);
+  await work;
+  assert.equal((error as any)?.generationErrorCode, 'timeout');
+  releaseBackoff();
+  await flush();
+  assert.equal(posts, 1);
+});
 test('finalRequest is a separate logical call with its own generation deadline',async t=>{let now=0;t.mock.method(performance,'now',()=>now);t.mock.timers.enable({apis:['setTimeout']});const p=profile(),h=harness({final_submission:1000000},300000,o=>createProfileDialogue(p,{...o,image:o.ownImage,anchors:o.ownAnchors,strategy:'repair-first',referenceMemory:true,decisionMode:'jev'}));const first=await h.run();now=79000;t.mock.timers.tick(79000);let error:any;const work=(h as any).options;assert.ok(work);const runtime=createProfileDialogue(p,{...h.options,image:h.image,anchors:h.anchors,strategy:'repair-first',referenceMemory:true,decisionMode:'jev'} as any);const pending=runtime.finalRequest({events:[{id:'h',seq:1,speaker:'human',text:'A turn.'}],privateState:first.privateState}).catch((e:any)=>{error=e;});await until(()=>h.sent.some(x=>x.phase==='final_submission'));now=158999;t.mock.timers.tick(79999);await flush();assert.equal(error,undefined);now=159000;t.mock.timers.tick(1);await pending;assert.equal((error as any)?.code,'timeout');assert.equal(h.sent.find(x=>x.phase==='final_submission')?.timeoutMs,80000);});

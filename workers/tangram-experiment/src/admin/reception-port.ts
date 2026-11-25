@@ -1,3 +1,6 @@
+import type { FailureCode } from '../../../../dialogue-model/runtime/v2/base-assignment.ts';
+import type { ParticipantUsageSnapshot } from '../../../../dialogue-model/runtime/web/participant-usage.ts';
+
 /** Researcher-only projections. These types are not the persisted reception or protocol schema. */
 export type ReceptionStrategy = 'repair-first' | 'bypass-enabled';
 export type ReceptionStatus = 'pending' | 'approved' | 'in_progress' | 'finished' | 'cancelled';
@@ -8,10 +11,23 @@ export type ReceptionAdminRow = {
   status: ReceptionStatus;
   revision: number;
   /** Frozen plan values; a v1 plan reads as relative_pm90 / none. */
-  plan: { order: ReceptionStrategy[]; rotationMode: 'relative_pm90' | 'relative_0'; betweenTrials: 'none' | 'questionnaire_required' } | null;
+  plan: { order: ReceptionStrategy[]; rotationMode: 'relative_pm90' | 'relative_0'; betweenTrials: 'none' | 'questionnaire_required';
+    /** Frozen figure set id per trial; plans before the figure bank read as the legacy set. */ figureSets?: string[] } | null;
   trials: { index: number; recordId: string | null }[];
+  hasUnrecordedProductionAdmission?: true;
+};
+
+export type ReceptionFailedStartUsage = {
+  receptionId: string;
+  failedStarts: { assignmentId: string; trialIndex: number; errorCode: Exclude<FailureCode, 'record_deleted'>;
+    usage: ParticipantUsageSnapshot | null }[];
 };
 export type ReceptionMode = 'on' | 'off' | 'unset';
+export type FigureSetPolicy = 'shared' | 'per_trial';
+export type ProtocolFigureSelection =
+  | { mode: 'preset'; setId: string }
+  | { mode: 'seeded_random'; selectionSeed: number | null }
+  | { mode: 'custom'; figureIds: readonly string[] };
 export type ReceptionProtocolStatus = { configured: false; mode: ReceptionMode } | {
   configured: true;
   mode: ReceptionMode;
@@ -21,6 +37,9 @@ export type ReceptionProtocolStatus = { configured: false; mode: ReceptionMode }
   allowedOrders: ReceptionStrategy[][];
   rotationMode: 'relative_pm90' | 'relative_0';
   betweenTrials: 'none' | 'questionnaire_required';
+  /** Absent for a protocol saved before the figure bank (v2). */
+  figureSelection?: ProtocolFigureSelection;
+  figureSetPolicy?: FigureSetPolicy;
 };
 export type ReceptionAdminError = 'not_found' | 'conflict' | 'invalid_order' | 'protocol_unconfigured' | 'protocol_changed' | 'reception_closed' | 'reception_unavailable';
 /** The protocol version shown in the approval form. */
@@ -33,6 +52,8 @@ export type ReceptionAdminPort = {
   listPage(after: string | null): Promise<{ items: ReceptionAdminRow[]; next: string | null }>;
   /** Read authoritative participant state, rather than trusting an index snapshot for a mutation. */
   get(receptionId: string): Promise<ReceptionAdminRow | null>;
+  /** Reads metering for failed starts with no archived record, without restoring a participant task. */
+  failedStartUsage?(receptionId: string): Promise<ReceptionFailedStartUsage | null>;
   /** The owning DO must CAS revision and pending status, validate the current protocol/order and freeze the plan. */
   approve(receptionId: string, input: { order: number; expectedRevision: number; protocol: DisplayedProtocol }): Promise<ReceptionAdminResult>;
   /** The owning DO must CAS revision and reject cancellation after any trial exists. Never delete trial records. */
@@ -47,8 +68,11 @@ export type ReceptionAdminPort = {
 };
 
 export type ProtocolFields = { allowedOrders: ReceptionStrategy[][]; seedPolicy: 'shared' | 'per_trial'; referenceMemory: boolean;
-  betweenTrials: 'none' | 'questionnaire_required'; receptionNumberFormat: 'daily_seq3'; rotationMode: 'relative_pm90' | 'relative_0' };
-export type SavedProtocol = { revision: number; savedAt: string; sha256: string; protocol: ProtocolFields & { protocolId: string } };
+  betweenTrials: 'none' | 'questionnaire_required'; receptionNumberFormat: 'daily_seq3'; rotationMode: 'relative_pm90' | 'relative_0';
+  figureSelection: ProtocolFigureSelection; figureSetPolicy: FigureSetPolicy };
+/** A saved v2 protocol has no figure fields; they are shown as unselected, never filled in. */
+export type SavedProtocol = { revision: number; savedAt: string; sha256: string;
+  protocol: Omit<ProtocolFields, 'figureSelection' | 'figureSetPolicy'> & Partial<Pick<ProtocolFields, 'figureSelection' | 'figureSetPolicy'>> & { protocolId: string } };
 export type SettingsView = {
   protocol: SavedProtocol | null;
   mode: { value: 'unset'; revision: 0 } | { value: 'on' | 'off'; revision: number; savedAt: string };

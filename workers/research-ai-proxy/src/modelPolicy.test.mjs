@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { resolvePurposeModel, RESEARCH_AI_PURPOSES } from "./modelPolicy.mjs";
 
 test("research model selection is centralized by purpose", () => {
-  assert.deepEqual(RESEARCH_AI_PURPOSES, ["dialogue_turn"]);
+  assert.deepEqual(RESEARCH_AI_PURPOSES, ["dialogue_turn", "visual_observation"]);
   assert.deepEqual(
     resolvePurposeModel({ purpose: "dialogue_turn", model: "malicious-client-model" },
       { DIALOGUE_MODEL: "gpt-4o-mini" }),

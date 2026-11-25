@@ -1,3 +1,4 @@
+import { PARTICIPANT_USAGE_ONLY, type ParticipantUsageOnly } from '../web/participant-usage-policy.ts';
 import { deadlineLimit, deadlineValue } from '../v2/research-deadline-options.ts';
 import type { ResearchLimits } from '../v2/research-timeouts.ts';
 // Decision 0002 opt-in prototype. No Luna action, strategy intervention or fallback.
@@ -462,7 +463,7 @@ export function validateRepairProspectEstimate(value: unknown, input: JevDecisio
 }
 
 /** Strict boundary for C's injected estimator. Unknown never contains a repaired score map. */
-export function validateHumanReferentEstimate(value: unknown, input: JevDecisionInput): HumanReferentEstimate {
+export function validateHumanReferentEstimate(value: unknown, input: JevDecisionInput, usagePolicy?: ParticipantUsageOnly): HumanReferentEstimate {
   const p = prepareReferent(input);
   if (!exact(value, ["status", "scores", "model", "responseId", "costUsd", "latencyMs", "inputBudget", "calibrated"]) ||
       !includes(["ok", "unknown"], value.status) || value.calibrated !== false || !finite(value.latencyMs) || value.latencyMs < 0 ||
@@ -472,7 +473,7 @@ export function validateHumanReferentEstimate(value: unknown, input: JevDecision
   if (value.model !== null && !isGroundingModel(value.model, JEV_DECISION_MODEL)) fail("model_mismatch");
   if (value.responseId !== null && value.model === null) fail("invalid_response");
   if (value.status === "ok") {
-    if (!isGroundingModel(value.model, JEV_DECISION_MODEL) || value.costUsd === null || value.inputBudget === null ||
+    if (!isGroundingModel(value.model, JEV_DECISION_MODEL) || (value.costUsd === null && usagePolicy !== PARTICIPANT_USAGE_ONLY) || value.inputBudget === null ||
         cleanHumanReferentMaterial(value, p.slots).status !== "ok") fail("invalid_response");
   } else if (value.scores !== null) fail("invalid_response");
   return structuredClone(value) as HumanReferentEstimate;
@@ -636,10 +637,10 @@ function decodeDetail(selected: JevActionTarget, p: ReturnType<typeof prepareDet
   }
   return { ...selected, name, feature, observe, detailFigureIds };
 }
-function closedEvidence(value: unknown, p: { payload: JevDecisionPayload; budget: DecisionInputBudget }, stage: JevDecisionStageEvidence["stage"]): JevDecisionStageEvidence {
+function closedEvidence(value: unknown, p: { payload: JevDecisionPayload; budget: DecisionInputBudget }, stage: JevDecisionStageEvidence["stage"], usagePolicy?: ParticipantUsageOnly): JevDecisionStageEvidence {
   if (!exact(value, ["stage", "model", "responseId", "choices", "scores", "latencyMs", "costUsd", "inputBudget"]) || value.stage !== stage ||
       !(value.responseId === null || typeof value.responseId === "string" && /^gen-[A-Za-z0-9_-]{1,124}$/.test(value.responseId)) ||
-      !finite(value.latencyMs) || value.latencyMs < 0 || !finite(value.costUsd) || value.costUsd < 0 ||
+      !finite(value.latencyMs) || value.latencyMs < 0 || !(value.costUsd === null && usagePolicy === PARTICIPANT_USAGE_ONLY || finite(value.costUsd) && value.costUsd >= 0) ||
       JSON.stringify(value.inputBudget) !== JSON.stringify(p.budget)) fail("invalid_response");
   if (!isGroundingModel(value.model, JEV_DECISION_MODEL)) fail("model_mismatch");
   if (!exact(value.choices, Object.keys(p.payload.questions)) || !exact(value.scores, Object.keys(p.payload.questions))) fail("invalid_response");
@@ -690,11 +691,11 @@ function freezeDetail<T>(value: T): T {
 }
 /** A separate detail proof, never a forged original action_target decision. */
 export function parseJevExecutedDetail(input: JevDecisionInput, selected: JevActionTarget, value: unknown,
-  { questionLayout = "two_stage_v1" }: { questionLayout?: JevQuestionLayout } = {}): JevExecutedDecision {
+  { questionLayout = "two_stage_v1", usagePolicy }: { questionLayout?: JevQuestionLayout; usagePolicy?: ParticipantUsageOnly } = {}): JevExecutedDecision {
   const detail = prepareExecutedDetail(input, selected, includes(LAYOUTS, questionLayout) ? questionLayout : fail("invalid_input"));
   try {
     detailJsonData(value);
-    const evidence = closedEvidence(value, detail.prepared, "detail");
+    const evidence = closedEvidence(value, detail.prepared, "detail", usagePolicy);
     return freezeDetail(decodeDetail(detail.selected, detail.prepared, evidence.choices) as JevExecutedDecision);
   } catch (error) {
     const code = detailErrorCode(error, "invalid_response");
@@ -704,7 +705,7 @@ export function parseJevExecutedDetail(input: JevDecisionInput, selected: JevAct
 
 /** Also validates injected clients at C's publication boundary; never repairs a malformed decision. */
 export function validateJevDecision(value: unknown, input: JevDecisionInput,
-  { questionLayout = "two_stage_v1" }: { questionLayout?: JevQuestionLayout } = {}): JevDecision {
+  { questionLayout = "two_stage_v1", usagePolicy }: { questionLayout?: JevQuestionLayout; usagePolicy?: ParticipantUsageOnly } = {}): JevDecision {
   if (!includes(LAYOUTS, questionLayout)) fail("invalid_input");
   const p = prepare(input, questionLayout);
   const optional = object(value) && Object.hasOwn(value, "detailFigureIds") ? ["detailFigureIds"] : [];
@@ -740,24 +741,24 @@ export function validateJevDecision(value: unknown, input: JevDecisionInput,
     const v3 = questionLayout === "two_stage_v3";
     const setStage = questionLayout === "two_stage_v2" && selected.target.kind === "multiple";
     if (!Array.isArray(e.stages) || e.stages.length !== (v3 ? 2 : 1 + (setStage ? 1 : 0)) + (d ? 1 : 0)) fail("invalid_response");
-    const first = closedEvidence(e.stages[0], p, v3 ? "action" : "action_target");
+    const first = closedEvidence(e.stages[0], p, v3 ? "action" : "action_target", usagePolicy);
     let actual: JevActionTarget, set: JevDecisionStageEvidence | null = null;
     if (v3) {
       if (first.choices.action !== selected.action) fail("inconsistent_decision");
       const t = prepareTarget(input, selected.action);
-      set = closedEvidence(e.stages[1], t, "target");
+      set = closedEvidence(e.stages[1], t, "target", usagePolicy);
       actual = { action: selected.action, target: decodeTargetV3(set.choices.target, t.targets) };
     } else if (setStage) {
       if (first.choices.action !== selected.action || first.choices.target !== "multiple") fail("inconsistent_decision");
       const s = prepareCandidateSet(input, selected.action);
-      set = closedEvidence(e.stages[1], s, "multiple_candidates");
+      set = closedEvidence(e.stages[1], s, "multiple_candidates", usagePolicy);
       actual = { action: selected.action, target: { kind: "multiple", figureIds: decodeCandidateSet(set.choices.candidate_set, s.slots) } };
     } else actual = decodeSelection(first.choices, p);
     if (JSON.stringify(actual) !== JSON.stringify(selected)) fail("inconsistent_decision");
-    const last = d ? closedEvidence(e.stages.at(-1), d, "detail") : set ?? first;
+    const last = d ? closedEvidence(e.stages.at(-1), d, "detail", usagePolicy) : set ?? first;
     const expected = decodeDetail(actual, d, d ? last.choices : {});
     if (JSON.stringify({ ...selected, name: value.name, feature: value.feature, observe: value.observe, detailFigureIds: value.detailFigureIds }) !== JSON.stringify(expected)) fail("inconsistent_decision");
-    if (e.model !== last.model || e.responseId !== last.responseId || e.costUsd !== first.costUsd! + (set ? set.costUsd! : 0) + (d ? last.costUsd! : 0) ||
+    if (e.model !== last.model || e.responseId !== last.responseId || e.costUsd !== (first.costUsd === null || set?.costUsd === null || d && last.costUsd === null ? null : first.costUsd + (set ? set.costUsd! : 0) + (d ? last.costUsd! : 0)) ||
         JSON.stringify(e.choices) !== JSON.stringify(first.choices) || JSON.stringify(e.scores) !== JSON.stringify(first.scores) ||
         JSON.stringify(e.inputBudget) !== JSON.stringify(p.budget)) fail("invalid_response");
   }
@@ -943,7 +944,7 @@ export function projectDecisionFailureEvidence(raw: unknown, questionLayout: Jev
   } catch { return null; }
 }
 export type JevDecisionClientOptions = { enabled?: boolean; readKey?: () => Promise<string>; fetchImpl?: (url: string, init: RequestInit) => Promise<Response>;
-  costCapUsd?: number; timeoutMs?: number; researchLimits?: ResearchLimits; questionLayout?: JevQuestionLayout };
+  costCapUsd?: number; usagePolicy?: ParticipantUsageOnly; timeoutMs?: number; researchLimits?: ResearchLimits; questionLayout?: JevQuestionLayout };
 
 /** Approved Keychain/transport/observed-cost stop rule, shared across both stages.
  * One deadline per decision, no retry or fallback; unknown billable outcomes stop the instance. */
@@ -960,6 +961,7 @@ export function createJevDecisionClient(options: JevDecisionClientOptions = {}):
   const { readKey = keychainKeyReader(), fetchImpl = globalThis.fetch, costCapUsd = DEFAULT_COST_CAP_USD, timeoutMs = UPSTREAM_TIMEOUT_MS,
     questionLayout = "two_stage_v1", researchLimits } = options;
   const limit = deadlineLimit(researchLimits);
+  const usageOnly = options.usagePolicy === PARTICIPANT_USAGE_ONLY;
   if (typeof readKey !== "function" || typeof fetchImpl !== "function" || !finite(costCapUsd) || costCapUsd <= 0 ||
       costCapUsd > maxJevCostCapUsd(researchLimits) || !deadlineValue(timeoutMs, limit) || !includes(LAYOUTS, questionLayout)) fail("invalid_options");
   let key: string | null = null, lastEvidence: JevDecisionCallEvidence | null = null;
@@ -1007,7 +1009,7 @@ export function createJevDecisionClient(options: JevDecisionClientOptions = {}):
         referentSlots = p.slots;
         const snapshot = structuredClone(input);
         evidence.inputBudget = structuredClone(p.budget);
-        if (halted || spentUsd >= costCapUsd || spentUsd + maxCost > costCapUsd) fail("cost_cap");
+        if (!usageOnly && (halted || spentUsd >= costCapUsd || spentUsd + maxCost > costCapUsd)) fail("cost_cap");
         busy = ownsSlot = true;
         deadlineAt = performance.now() + deadline;
         const cancelled = new Promise<never>((_resolve, reject) => {
@@ -1022,7 +1024,7 @@ export function createJevDecisionClient(options: JevDecisionClientOptions = {}):
             inputBudget: structuredClone(prepared.budget), status: "error", error: null, rejectionCode: null };
           evidence.stages.push(record);
           try {
-            if (halted || spentUsd >= costCapUsd || spentUsd + maxCost > costCapUsd) fail("cost_cap");
+            if (!usageOnly && (halted || spentUsd >= costCapUsd || spentUsd + maxCost > costCapUsd)) fail("cost_cap");
             if (key === null) {
               let rawKey: unknown;
               try { rawKey = await readKey(); } catch { check(); fail("key_unavailable"); }
@@ -1060,8 +1062,8 @@ export function createJevDecisionClient(options: JevDecisionClientOptions = {}):
             if (!isGroundingModel(data.model, JEV_DECISION_MODEL)) fail("model_mismatch");
             record.model = evidence.model = data.model;
             record.responseId = evidence.responseId = typeof data.id === "string" && /^gen-[A-Za-z0-9_-]{1,124}$/.test(data.id) ? data.id : null;
-            if (!accounted) fail("cost_unreported");
-            if (spentUsd > costCapUsd) fail("cost_cap");
+            if (!usageOnly && !accounted) fail("cost_unreported");
+            if (!usageOnly && spentUsd > costCapUsd) fail("cost_cap");
             if (!exact(data.answers, Object.keys(payload.questions))) fail("invalid_response");
             const choices: Record<string, string> = {}, scores: Record<string, Record<string, number>> = {};
             for (const [name, q] of Object.entries(payload.questions)) {
@@ -1132,7 +1134,7 @@ export function createJevDecisionClient(options: JevDecisionClientOptions = {}):
           check();
           const core = decodeDetail(selected, d, d ? stages.at(-1)!.choices : {});
           const measured: JevDecisionEvidence = { model: evidence.model, responseId: evidence.responseId, choices: first.choices, scores: first.scores,
-            latencyMs: Math.max(0, Math.round(performance.now() - started)), costUsd: evidence.costUsd, inputBudget: p.budget, stages };
+            latencyMs: Math.max(0, Math.round(performance.now() - started)), costUsd: stages.some(stage => stage.costUsd === null) ? null : evidence.costUsd, inputBudget: p.budget, stages };
           evidence.status = "ok";
           return { ...core, evidence: measured, decisionKind: "jev_local_test" as const, calibrated: false as const };
         };
@@ -1150,7 +1152,7 @@ export function createJevDecisionClient(options: JevDecisionClientOptions = {}):
         throw safe;
       } finally {
         clearTimeout(timer); callOptions.signal?.removeEventListener("abort", abort);
-        if (delivered && !accounted) halted = true;
+        if (!usageOnly && delivered && !accounted) halted = true;
         if (ownsSlot) busy = false;
         evidence.latencyMs = Math.max(0, Math.round(performance.now() - started));
         if (referent === true) {
