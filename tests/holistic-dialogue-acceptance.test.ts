@@ -1383,3 +1383,45 @@ for (const [label, draft] of [
     });
   });
 }
+
+// Audit 22: after the participant states a direction on their side, a draft that states a different direction for the partner's side is rejected
+// even when it opens with 「そちらでいうと」; a draft that really quotes the partner's wording is still accepted in v9.
+const stated = 'こちらの図では輪の先が左を向いています。';
+const statedTurn = {
+  human: stated + 'そちらからはどう見えますか？',
+  local: [{ text: stated, act: 'assert' as const, aspect: 'orientation' as const, targets: [first] }],
+};
+async function audit22Held(trial: ReturnType<typeof session>, draft: string, version: string) {
+  const before = trial.record();
+  const turn = await trial.say({ ...broad, ...statedTurn, drafts: [draft, draft], publicClaims: claimOf(draft) });
+  assert.equal(turn.trace.generationRetryVersion, version);
+  assert.equal(turn.generationRequests.length, 2, 'the same draft is regenerated once and rejected again');
+  assert.equal(turn.trace.errorCode, 'unsafe_generation');
+  assert.equal(turn.speech, null);
+  assert.equal(turn.trace.publicSpeech, null);
+  assert.equal(turn.trace.generationGuard.fallback, false);
+  assert.ok(turn.trace.generationGuard.violations.length > 0);
+  assert.deepEqual(turn.after.queueState.privateState, before.queueState.privateState);
+  assert.equal(turn.after.queueState.pendingHumanEventIds.length, 1);
+  assert.ok(!trial.publicState().events.some((event: { text: string }) => event.text === draft));
+}
+for (const draft of ['そちらでは、輪の先は右向きですね。', 'そちらでいうと、輪の先は右向きですね。']) {
+  for (const version of [v8, v9]) {
+    test(`Audit 22 ${version.slice(-2)} rejects both drafts of 「${draft}」 and publishes nothing, in both strategies`, async () => {
+      await pairedAs(version, trial => audit22Held(trial, draft, version));
+    });
+  }
+}
+for (const draft of [
+  'そちらでいう左向きの先は、こちらの輪の切れ目に対応していますか？',
+  'こちらの画面では輪の先が切れているので、そちらでいう左向きの先に対応する可能性はありそう。',
+]) {
+  test(`Audit 22 v9 still publishes a draft that quotes the partner's wording: 「${draft}」`, async () => {
+    await pairedAs(v9, async trial => {
+      const turn = await trial.say({ ...broad, ...statedTurn, drafts: [draft], publicClaims: claimOf(draft) });
+      published(turn, 'accept', single(first), draft);
+      assert.deepEqual(turn.trace.generationGuard, { violations: [], regenerated: false, fallback: false });
+      assert.equal(turn.trace.generationRetryVersion, v9);
+    });
+  });
+}
