@@ -1,0 +1,170 @@
+{
+  "action": "defer",
+  "target": {
+    "kind": "single",
+    "figureId": "own-0"
+  },
+  "name": null,
+  "feature": null,
+  "observe": null,
+  "detailFigureIds": [],
+  "evidence": {
+    "model": "typesafe/jev-1.14",
+    "responseId": "gen-contract-synthetic",
+    "choices": {
+      "action": "defer",
+      "target": "figure_0",
+      "candidate_0": "exclude",
+      "candidate_1": "exclude",
+      "candidate_2": "exclude",
+      "candidate_3": "exclude",
+      "candidate_4": "exclude",
+      "candidate_5": "exclude"
+    },
+    "scores": {
+      "action": {
+        "accept": 0.1,
+        "propose_name": 0,
+        "confirm": 0.7,
+        "repair": 0,
+        "defer": 1,
+        "revisit": 0,
+        "agree": 0,
+        "move_on": 0,
+        "close": 0
+      },
+      "target": {
+        "none": 0,
+        "multiple": 0,
+        "figure_0": 1,
+        "figure_1": 0,
+        "figure_2": 0,
+        "figure_3": 0,
+        "figure_4": 0,
+        "figure_5": 0
+      },
+      "candidate_0": {
+        "include": 0,
+        "exclude": 1
+      },
+      "candidate_1": {
+        "include": 0,
+        "exclude": 1
+      },
+      "candidate_2": {
+        "include": 0,
+        "exclude": 1
+      },
+      "candidate_3": {
+        "include": 0,
+        "exclude": 1
+      },
+      "candidate_4": {
+        "include": 0,
+        "exclude": 1
+      },
+      "candidate_5": {
+        "include": 0,
+        "exclude": 1
+      }
+    },
+    "latencyMs": 69,
+    "costUsd": 0,
+    "inputBudget": {
+      "maxChars": 20000,
+      "stateChars": 1723,
+      "omitted": {
+        "publicTurns": 0,
+        "claims": 0,
+        "publicNames": 0,
+        "repairHistory": 0,
+        "reobservations": 0,
+        "observationDetails": 0,
+        "observationChars": 0,
+        "issueSummaryChars": 0
+      }
+    },
+    "stages": [
+      {
+        "stage": "action_target",
+        "model": "typesafe/jev-1.14",
+        "responseId": "gen-contract-synthetic",
+        "choices": {
+          "action": "defer",
+          "target": "figure_0",
+          "candidate_0": "exclude",
+          "candidate_1": "exclude",
+          "candidate_2": "exclude",
+          "candidate_3": "exclude",
+          "candidate_4": "exclude",
+          "candidate_5": "exclude"
+        },
+        "scores": {
+          "action": {
+            "accept": 0.1,
+            "propose_name": 0,
+            "confirm": 0.7,
+            "repair": 0,
+            "defer": 1,
+            "revisit": 0,
+            "agree": 0,
+            "move_on": 0,
+            "close": 0
+          },
+          "target": {
+            "none": 0,
+            "multiple": 0,
+            "figure_0": 1,
+            "figure_1": 0,
+            "figure_2": 0,
+            "figure_3": 0,
+            "figure_4": 0,
+            "figure_5": 0
+          },
+          "candidate_0": {
+            "include": 0,
+            "exclude": 1
+          },
+          "candidate_1": {
+            "include": 0,
+            "exclude": 1
+          },
+          "candidate_2": {
+            "include": 0,
+            "exclude": 1
+          },
+          "candidate_3": {
+            "include": 0,
+            "exclude": 1
+          },
+          "candidate_4": {
+            "include": 0,
+            "exclude": 1
+          },
+          "candidate_5": {
+            "include": 0,
+            "exclude": 1
+          }
+        },
+        "latencyMs": 61,
+        "costUsd": 0,
+        "inputBudget": {
+          "maxChars": 20000,
+          "stateChars": 1723,
+          "omitted": {
+            "publicTurns": 0,
+            "claims": 0,
+            "publicNames": 0,
+            "repairHistory": 0,
+            "reobservations": 0,
+            "observationDetails": 0,
+            "observationChars": 0,
+            "issueSummaryChars": 0
+          }
+        }
+      }
+    ]
+  },
+  "decisionKind": "jev_local_test",
+  "calibrated": false
+}

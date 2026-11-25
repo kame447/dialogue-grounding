@@ -1,3 +1,4 @@
+import { privateBaseOptions } from './support/s5-private-options.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
@@ -280,20 +281,21 @@ test('v1 naming sessions still start without public events or a model call', asy
 test('HTTP reload/polling keeps one opening and duplicate clientId POST returns one human eventId', async (t) => {
   const hold = gate(); t.after(() => hold.release());
   const client = clientFixture({ generation: async () => { hold.signal(); await hold.wait; return 'synthetic reply'; } });
-  const server = await startNamingServer({ port: 0, client, runDir: '', createTaskV2: (options) => makeTask(options.client, options) });
+  const server = await startNamingServer({ port: 0, client, ...(await privateBaseOptions(t,{seed:707})), createTaskV2: (options) => makeTask(options.client, options) });
   t.after(async () => { hold.release(); server.closeAllConnections(); await new Promise((done) => server.close(done)); });
   const base = 'http://127.0.0.1:' + server.address().port;
   const page = await fetch(base); const cookie = page.headers.get('set-cookie').split(';')[0]; await page.text();
   const request = (path, body) => fetch(base + path, { headers: { cookie, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
     ...(body === undefined ? {} : { method: 'POST', body: JSON.stringify(body) }) });
-  const start = await request('/api/start', { version: 2, strategy: 'repair-first', seed: 707 });
+  const start = await request('/api/start', { version: 2 });
   assert.equal(start.status, 200);
-  const first = (await start.json()).trial.events;
+  const startedTrial = (await start.json()).trial;
+  const first = startedTrial.events;
   assert.equal(first.length, 1); assert.equal(first[0].text, OPENING);
   await (await request('/')).text();
   for (let i = 0; i < 3; i++) assert.deepEqual((await (await request('/api/state')).json()).trial.events, first);
   assert.equal(client.calls.length, 0);
-  const post = async (body) => { const response = await request('/api/message', body); assert.equal(response.status, 202); return response.json(); };
+  const post = async (body) => { const response = await request('/api/message', {...body,expectedRecordId:startedTrial.sessionId}); assert.equal(response.status, 202); return response.json(); };
   const accepted = await post({ text: 'synthetic HTTP human', clientId: 'browser-http-1' });
   await hold.entered;
   const repeated = await post({ text: 'synthetic HTTP human', clientId: 'browser-http-1' });

@@ -4,8 +4,8 @@ import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createNamingTaskV2, validateNamesV2, parseAiNamesV2 } from "../dialogue-model/runtime/v2/naming-task-v2.mjs";
-import { GENERATOR_INSTRUCTIONS_V2 } from "../dialogue-model/runtime/v2/dialogue-v2.mjs";
-import { createTrialV2 } from "../dialogue-model/runtime/stimuli/scatter-v2.mjs";
+import { createDialogueV2, GENERATOR_INSTRUCTIONS_V2 } from "../dialogue-model/runtime/v2/dialogue-v2.mjs";
+import { createTrialV2, modelView } from "../dialogue-model/runtime/stimuli/scatter-v2.mjs";
 
 const POSITION_WORDS = /上段|下段|左上|右上|左下|右下|R1C1|R2C3/;
 const textOf = (messages) => messages.flatMap((m) => typeof m.content === "string" ? [m.content] : m.content.filter((p) => p.type === "text").map((p) => p.text)).join("\n");
@@ -120,17 +120,18 @@ test("names validation and AI parsing reject foreign or missing ids", () => {
   assert.equal(parseAiNamesV2("```json\n" + JSON.stringify(Object.fromEntries(ids.map((id) => [id, "a"]))) + "\n```", ids)["s-0006"], "a");
 });
 
-test("reference memory grounds a human mention on an own opaque id and persists privately", async () => {
+for (const strategy of ["repair-first", "bypass-enabled"]) test(`reference memory defaults on and grounds public mentions privately: ${strategy}`, async () => {
   const dir = await mkdtemp(join(tmpdir(), "v2-core-"));
   try {
     const client = fakeClient({ reference: (ids) => ({ slots: [ids[0]], epistemic: "grounded", intent: "feature_assertion",
       feature: { slot: ids[0], feature: "細長い", polarity: "confirmed" }, nameAcceptance: null, deferSlot: null, revisitSlot: null }) });
-    const task = await createNamingTaskV2({ client, strategy: "bypass-enabled", seed: 25, referenceMemory: true, runDir: dir });
+    const task = await createNamingTaskV2({ client, strategy, seed: 25, runDir: dir });
     task.message("細長いのがあります");
     await task.whenIdle();
     const [file] = (await readdir(dir)).filter((f) => f.endsWith(".json"));
     const record = JSON.parse(await readFile(join(dir, file), "utf8"));
     assert.equal(record.version, 2);
+    assert.equal(record.options.referenceMemory, true);
     assert.equal(record.judgments[0].memory.opsApplied, 2);
     const aiId = Object.keys(createTrialV2({ seed: 25 }).key.ai)[0];
     assert.deepEqual(record.referenceGraph.mentions[0].slots, [aiId]);
@@ -139,6 +140,14 @@ test("reference memory grounds a human mention on an own opaque id and persists 
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+for (const strategy of ["repair-first", "bypass-enabled"]) test(`direct v2 runtime defaults on and allows explicit opt-out: ${strategy}`, () => {
+  const model = modelView(createTrialV2({ seed: 25 }));
+  const options = { client: fakeClient(), strategy, anchors: model.anchors,
+    image: { mimeType: model.mimeType, base64: model.png.toString("base64") } };
+  assert.ok(createDialogueV2(options).initialPrivateState().graph);
+  assert.equal(createDialogueV2({ ...options, referenceMemory: false }).initialPrivateState().graph, null);
 });
 
 test("the AI may submit first; the human submission then completes scoring", async () => {

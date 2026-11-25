@@ -1,0 +1,132 @@
+// Decision 0002, opt-in research contract. Jev alone selects the next action;
+// observations and repair progress are materials, never an answer key or policy.
+import type { ObservationMemo } from "../observation/contract.ts";
+import type { LocalAct, LocalClaimView, PublicTurn } from "../local-grounding/contract.ts";
+
+export const JEV_ACTIONS = Object.freeze(["accept", "propose_name", "confirm", "repair", "defer", "revisit", "agree", "move_on", "close", "request_observation"] as const);
+export type JevAction = typeof JEV_ACTIONS[number];
+export const OBSERVATION_ASPECTS = Object.freeze(["orientation", "part", "contour", "construal", "referent"] as const);
+export type DecisionObservationAspect = typeof OBSERVATION_ASPECTS[number];
+export type JevTarget = { kind: "single"; figureId: string } | { kind: "multiple"; figureIds: string[] } | { kind: "none" };
+export type JevObservationRequest = {
+  figureIds: string[];
+  aspect: DecisionObservationAspect;
+  question: string;
+  partnerConstrual: string | null;
+};
+export type RepairHistoryEntry = {
+  turn: number;
+  issueId: string | null;
+  action: "repair" | "confirm" | "revisit";
+  question: string;
+  partnerClaims: readonly { id: string; act: LocalAct; proposition: string; targets: readonly string[] }[];
+  candidatesBefore: readonly string[];
+  candidatesAfter: readonly string[];
+  addedClaimIds: readonly string[];
+  removedClaimIds: readonly string[];
+  /** Descriptive change only; not a stagnation threshold or command to move on. */
+  progress: "changed" | "unchanged" | "unknown";
+  missingReasons?: string[];
+  humanRejections?: { segmentId: string; reason: string }[];
+};
+export const REPAIR_REPLY_COMPARISONS = ["same", "narrowed", "widened_or_shifted", "not_comparable"] as const;
+export const REPAIR_LOCAL_GAPS = ["human_local_missing", "human_capacity_dropped", "ai_source_incomplete"] as const;
+/** adaptive_repair_v3 only. Mechanical record facts, never semantic identity,
+ * a progress verdict, a threshold or a command to select an action. */
+export type RepairFact = {
+  turn: number;
+  previousTurn: number | null;
+  replyVsPrevious: typeof REPAIR_REPLY_COMPARISONS[number];
+  sameQuestionAsPrevious: boolean;
+  localGaps: (typeof REPAIR_LOCAL_GAPS[number])[];
+  localRejections: number;
+};
+export type PublicNameCandidate = { name: string; figureId: string | null; sourceTurn: number };
+export type JevPriorAction = { turn: number; action: JevAction; target: JevTarget; name: string | null; feature: string | null };
+/** Human utterance referent, independent of the next action's target. No winner or calibration. */
+export type HumanReferentMaterial = { status: "ok" | "unknown"; scores: Record<string, number> | null };
+export type HumanReferentEstimate = HumanReferentMaterial & {
+  model: string | null;
+  responseId: string | null;
+  costUsd: number | null;
+  latencyMs: number;
+  inputBudget: DecisionInputBudget | null;
+  calibrated: false;
+};
+export const REPAIR_PROSPECTS = ["progressing", "stalled", "uncertain", "no_open_issue"] as const;
+export const REPAIR_PROSPECT_BASES = ["new_information", "candidate_narrowed", "candidate_widened", "repetition", "partner_uncertain", "other_figure_benefit", "none"] as const;
+/** Uncalibrated Jev material. Never a threshold, a score or a forced branch. */
+export type RepairProspectMaterial =
+  | { status: "ok"; issue: { choice: "issue"; turn: number; issueId: string | null } | { choice: "none" } | { choice: "unknown" };
+      prospect: typeof REPAIR_PROSPECTS[number]; basis: typeof REPAIR_PROSPECT_BASES[number];
+      scores: { repair_issue: Record<string, number>; prospect: Record<string, number>; basis: Record<string, number> } }
+  | { status: "unknown"; issue: null; prospect: null; basis: null; scores: null };
+/** v2 adds the agreement gate: repair issues closed by a later agree are left out of Jev's inference. */
+export type AdaptiveRepairTrial = { version: "adaptive_repair_v1" | "adaptive_repair_v2" | "adaptive_repair_v3" };
+export type JevDecisionInput = {
+  turn: number;
+  publicTurns: readonly PublicTurn[];
+  ownSlots: readonly string[];
+  /** A's memo; the request builder forwards only its textual observation fields. */
+  observations: ObservationMemo;
+  issueSummary: string;
+  priorClaims: readonly LocalClaimView[];
+  repairHistory: readonly RepairHistoryEntry[];
+  previousAction: JevPriorAction | null;
+  /** Literal public spans only, validated against their public source turn. */
+  publicNames: readonly PublicNameCandidate[];
+  /** Opt-in agreement candidates backed by eligible public naming claims. */
+  agreeNames?: PublicNameCandidate[];
+  /** C sets false after its engineering limit for targeted reobservation is reached. */
+  reobservationAllowed?: boolean;
+  humanReferent?: HumanReferentMaterial;
+  repairProspect?: RepairProspectMaterial;
+  repairFacts?: RepairFact[];
+};
+export type DecisionInputBudget = {
+  maxChars: 20000;
+  stateChars: number;
+  omitted: { publicTurns: number; claims: number; publicNames: number; repairHistory: number;
+    reobservations: number; observationDetails: number; observationChars: number; issueSummaryChars: number };
+};
+export type JevDecisionStageEvidence = {
+  stage: "action_target" | "detail";
+  model: string | null;
+  responseId: string | null;
+  /** Wire choice labels, with complete uncalibrated score maps for research only. */
+  choices: Record<string, string>;
+  scores: Record<string, Record<string, number>>;
+  latencyMs: number;
+  costUsd: number | null;
+  /** Present on the real adapter, including when no material was omitted. */
+  inputBudget?: DecisionInputBudget;
+};
+export type JevDecisionEvidence = Omit<JevDecisionStageEvidence, "stage"> & {
+  /** Real calls retain every executed stage; mocks omit this or supply an empty array. */
+  stages?: JevDecisionStageEvidence[];
+};
+export type JevDecision = {
+  action: JevAction;
+  target: JevTarget;
+  name: string | null;
+  feature: string | null;
+  /** Sources of the selected name/feature, within target; never a narrowed target. */
+  detailFigureIds?: string[];
+  observe: JevObservationRequest | null;
+  evidence: JevDecisionEvidence;
+  decisionKind: "jev_local_test" | "mock";
+  calibrated: false;
+};
+export type JevDecisionCallOptions = { signal?: AbortSignal; timeoutMs?: number };
+/** Execution projection, independently evidenced after an opt-in acceptance step. */
+export type JevExecutedDecision = Omit<Pick<JevDecision, "action" | "target" | "name" | "feature" | "observe" | "detailFigureIds">,
+  "action" | "observe"> & { action: Exclude<JevAction, "request_observation">; observe: null };
+export type JevDetailResult = { executed: JevExecutedDecision; evidence: JevDecisionStageEvidence };
+export type JevDecisionClient = {
+  decide(input: JevDecisionInput, options?: JevDecisionCallOptions): Promise<JevDecision>;
+  estimateRepairProspect?(input: JevDecisionInput, options?: JevDecisionCallOptions): Promise<RepairProspectMaterial>;
+  estimateReferent?(input: JevDecisionInput, options?: JevDecisionCallOptions): Promise<HumanReferentEstimate>;
+  completeDetail?(input: JevDecisionInput, selected: Pick<JevDecision, "action" | "target">,
+    options?: JevDecisionCallOptions): Promise<JevDetailResult>;
+};
+export type JevQuestionLayout = "two_stage_v1";

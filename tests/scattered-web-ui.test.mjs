@@ -66,8 +66,6 @@ async function ui(initial = trial(), handler) {
   const { root, ids: e } = makeDOM();
   let state = { trial: initial }, timerId = 0;
   const timers = new Map(), calls = [];
-  e.setup.elements.strategy.value = "repair-first";
-  e.setup.elements.seed.value = "1";
   runInNewContext(script, {
     document: { getElementById: (id) => e[id], createElement: (tag) => new Element(tag), createElementNS: (_, tag) => new Element(tag) },
     FormData: class {
@@ -120,22 +118,22 @@ test("six exact silhouette buttons have no spatial/ordinal labels and open keybo
   assert.equal(e["name-dialog"].open, true);
   e["name-cancel"].fire("click");
   assert.equal(path.fire("keydown", { key: "Enter" }).prevented, true);
-  assert.equal(calls.length, 1, "selection and zoom stay local");
+  assert.equal(calls.filter((call) => call.path !== "/api/records").length, 1, "selection and zoom stay local");
 });
 
 test("name editing/cancel and unknown stay local; all answers require explicit final confirmation", async () => {
   const { e, calls } = await ui();
   e.submission.fire("submit"); assert.equal(e["confirm-dialog"].open, false);
-  assert.match(e["submission-status"].textContent, /未回答/u);
+  assert.match(e["submission-status"].textContent, /未入力/u);
   save(e, paths(e)[0], "会話の名前");
   assert.match(e.board.textContent, /会話の名前/u);
   paths(e)[0].fire("click"); e["figure-name"].value = "捨てる編集"; e["name-cancel"].fire("click");
   assert.doesNotMatch(e.board.textContent, /捨てる編集/u);
   for (const path of paths(e).slice(1)) { path.fire("click"); e["name-unknown"].fire("click"); }
-  assert.equal(calls.length, 1);
+  assert.equal(calls.filter((call) => call.path !== "/api/records").length, 1);
   e.submission.fire("submit"); assert.equal(e["confirm-dialog"].open, true);
   assert.match(e["confirm-scene"].textContent, /会話の名前/u);
-  e["confirm-cancel"].fire("click"); assert.equal(calls.length, 1);
+  e["confirm-cancel"].fire("click"); assert.equal(calls.filter((call) => call.path !== "/api/records").length, 1);
   e.submission.fire("submit"); e["confirm-submit"].fire("click"); await tick();
   const request = calls.find((call) => call.path === "/api/names");
   assert.deepEqual(request.body, { names: { "s-a81c": "会話の名前", "s-f120": null, "s-119e": null, "s-cc02": null, "s-a620": null, "s-67b4": null }, confirm: true });
@@ -162,7 +160,8 @@ test("AI thinking keeps composer active; consecutive sends are optimistic and po
   assert.deepEqual(messages.map((call) => call.body.text), ["最初の発話", "補足の発話"]);
   assert.ok(messages.every((call) => typeof call.body.clientId === "string" && call.body.clientId.length > 0));
   assert.notEqual(messages[0].body.clientId, messages[1].body.clientId);
-  assert.equal(e.history.children.length, 2, "accepted messages are not duplicated by poll reconciliation");
+  assert.equal(e.history.children.at(-1).className, "ai typing-message", "the AI is still answering");
+  assert.equal(e.history.children.length - 1, 2, "accepted messages are not duplicated by poll reconciliation");
   assert.doesNotMatch(JSON.stringify(calls), /秘密のローカルメモ/u);
 });
 
@@ -171,7 +170,7 @@ test("uncertain send failure is never retried or sent through legacy fallback", 
   e.utterance.value = "送信の確認が必要"; e.chat.fire("submit"); await tick(); await poll();
   assert.equal(calls.filter((call) => call.path === "/api/message").length, 1);
   assert.equal(calls.some((call) => call.path === "/api/turn"), false);
-  assert.match(e.history.textContent, /自動では再送しません/u);
+  assert.match(e.history.textContent, /自動では再送されないため、「再送」を押してください/u);
   assert.equal(e.utterance.disabled, false);
 });
 
@@ -182,25 +181,28 @@ test("IME, Shift+Enter and repeated Enter do not accidentally send", async () =>
   }
   e.utterance.fire("compositionstart"); e.utterance.fire("keydown", { key: "Enter" }); e.utterance.fire("compositionend");
   e.utterance.fire("keydown", { key: "Enter", repeat: true });
-  assert.equal(calls.length, 1);
+  assert.equal(calls.filter((call) => call.path !== "/api/records").length, 1);
 });
 
 test("new trial clears old labels, dialogs, message drafts and result content, even for repeated seed", async () => {
-  const { e, getState } = await ui(trial(), ({ path, state }) => {
-    if (path === "/api/start") { state.trial = trial(); return { status: 200, body: state }; }
-  });
+  const first = trial(); delete first.trialId;
+  first.sessionId = "953449d1-ce8f-49bf-9331-d8e79222cde2";
+  const { e, getState, setState, poll } = await ui(first);
   save(e, paths(e)[0], "前の試行の名前");
   e.utterance.value = "前の下書き";
   paths(e)[1].fire("click");
-  e.setup.fire("submit"); await tick();
-  assert.equal(getState().trial.trialId, "trial-private");
+  // Simulate the public state after an authenticated operator prepared the next trial.
+  const next = trial(); delete next.trialId;
+  next.sessionId = "21917ac7-1dc0-4cba-8bfd-248995b63523";
+  setState({ trial: next }); await poll();
+  assert.equal(getState().trial.sessionId, "21917ac7-1dc0-4cba-8bfd-248995b63523");
   assert.doesNotMatch(e.board.textContent, /前の試行/u);
   assert.equal(e.utterance.value, ""); assert.equal(e["name-dialog"].open, false);
-  assert.equal(e["name-count"].textContent, "回答 0 / 6");
+  assert.equal(e["name-count"].textContent, "入力済み 0 / 6");
 });
 
 test("absent scene and initial empty session load safely", async () => {
-  const empty = await ui(null); assert.equal(empty.e.trial.hidden, true); assert.equal(empty.e.setup.hidden, false);
+  const empty = await ui(null); assert.equal(empty.e.trial.hidden, true); assert.equal(empty.e.setup, undefined);
   const state = trial(); delete state.scene;
   const { e } = await ui(state);
   assert.equal(paths(e).length, 0); assert.equal(e["review-names"].disabled, true);

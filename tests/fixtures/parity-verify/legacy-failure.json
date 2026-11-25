@@ -1,0 +1,24 @@
+{
+  "code": "observation_failed",
+  "calls": [
+    {
+      "id": 1,
+      "sendIds": [1],
+      "phase": "observation_initial",
+      "turn": null,
+      "provider": "luna",
+      "requestSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "instructionSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "requestedModel": "synthetic-luna",
+      "model": null,
+      "status": "error",
+      "error": "timeout",
+      "costUsd": null,
+      "inputTokens": 10,
+      "outputTokens": 2,
+      "imageCount": 1,
+      "latencyMs": 100
+    }
+  ],
+  "cache": null
+}

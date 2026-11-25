@@ -1,3 +1,5 @@
+import { ParticipantUsageLedger } from '../web/participant-usage.ts';
+import { PARTICIPANT_USAGE_ONLY } from '../web/participant-usage-policy.ts';
 // v2 naming task: scattered unlabeled boards with opaque per-side ids, immediate
 // asynchronous human messages, and private submissions scored only after both
 // sides submit. The participant sees only their own scene and public events;
@@ -5,13 +7,18 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { createTrialV2, participantView, modelView } from "../stimuli/scatter-v2.mjs";
+import { createTrialV2, participantView, modelView, ROTATION_MODES, trialStimulusV2 } from "../stimuli/scatter-v2.mjs";
+import { resolveFigureSelection, validateResolvedFigureSelection } from "../stimuli/figure-bank.ts";
 import { scoreTrial as defaultScoreTrial, normalizeName } from "../scoring.mjs";
 import { createHumanMessageQueue } from "../web/human-message-queue.mjs";
 import { createDialogueV2 } from "./dialogue-v2.mjs";
 import { NamingTaskError } from "../naming-error.mjs";
 import { STRATEGIES } from "../judgment/instructions.mjs";
 import { STATUSES } from "../judgment/schema.mjs";
+import { selectParticipantJev, participantLunaClient, withParticipantJevTurn, restoreParticipantJevLedger,
+  participantInitialObservation } from "../web/participant-jev-wiring.ts";
+import { researchHash } from "./research-profile.ts";
+import { settleJevTurnTraces, settleAiPublicClaims } from "./jev-turn.ts";
 
 export const VERSION = 2;
 const SCRIPTED_OPENING = "まず、どの図形から話しましょうか？";
@@ -34,6 +41,49 @@ export function validateNamesV2(value, slots) {
   }));
 }
 
+const plain = (value) => value !== null && typeof value === "object" && !Array.isArray(value)
+  && [Object.prototype, null].includes(Object.getPrototypeOf(value));
+
+/**
+ * The rotation a trial uses. A restore keeps the mode its record was generated with; only a record
+ * written before the field existed (no own options.rotationMode) is relative_pm90. A restore never
+ * takes the caller's mode.
+ */
+function trialRotation(restore, rotationMode) {
+  if (!restore) {
+    if (!ROTATION_MODES.includes(rotationMode)) throw new NamingTaskError("invalid_options");
+    return { mode: rotationMode, legacy: false };
+  }
+  if (!plain(restore.options)) throw new NamingTaskError("invalid_options");
+  if (!Object.hasOwn(restore.options, "rotationMode")) {
+    if (Object.hasOwn(restore, "stimulus")) throw new NamingTaskError("invalid_options");
+    return { mode: "relative_pm90", legacy: true };
+  }
+  if (!ROTATION_MODES.includes(restore.options.rotationMode)) throw new NamingTaskError("invalid_options");
+  return { mode: restore.options.rotationMode, legacy: false };
+}
+
+const FIGURE_STIMULUS_KEYS = ["bankVersion", "figureSetId", "figureIds", "selectionSeed", "selectionMode"];
+/**
+ * The figure selection a trial uses. undefined (a new trial without one, or an older record) keeps the exact
+ * previous behavior and record shape. A restore takes only its own recorded selection, never the caller's.
+ */
+function trialFigures(restore, figureSelection, rotation) {
+  try {
+    if (!restore) {
+      if (figureSelection === undefined) return null;
+      return plain(figureSelection) && Object.hasOwn(figureSelection, "bankVersion")
+        ? validateResolvedFigureSelection(figureSelection) : resolveFigureSelection(figureSelection);
+    }
+    if (!Object.hasOwn(restore.options, "figureSelection")) {
+      if (plain(restore.stimulus) && FIGURE_STIMULUS_KEYS.some((key) => Object.hasOwn(restore.stimulus, key))) throw new Error("figures without selection");
+      return null;
+    }
+    if (rotation.legacy) throw new Error("selection without rotation");
+    return validateResolvedFigureSelection(restore.options.figureSelection);
+  } catch { throw new NamingTaskError("invalid_options"); }
+}
+
 export function parseAiNamesV2(text, slots) {
   let value;
   try { value = JSON.parse(String(text).replace(/^\s*```(?:json)?|```\s*$/g, "").trim()); } catch { return null; }
@@ -48,27 +98,60 @@ export function parseAiNamesV2(text, slots) {
  *   judge?: import('../judgment/schema.mjs').DialogueJudge | null, now?: () => number, restore?: object | null, onPersist?: Function | null,
  *   decisionShadowClient?: {chooseAction(request: object): Promise<any>} | null,
  *   activeDecision?: {purpose: string, client: {chooseAction(request: object): Promise<any>}} | null,
- *   utteranceStyle?: string }} options
+ *   utteranceStyle?: string, rotationMode?: string, groundingShadow?: import('./grounding-shadow.ts').GroundingShadowOptions | null,
+ *   localGrounding?: import('../local-grounding/contract.ts').LocalGroundingOptions | null,
+ *   jevResearch?: import('../web/participant-jev-wiring.ts').JevResearchOptions<import('../web/participant-jev-wiring.ts').JevResearchLedger> | null,
+ *   onLocalGroundingTrace?: ((record: import('./local-grounding-turn.ts').LocalGroundingResearchRecord) => unknown) | null }} options
+ *   groundingShadow is a researcher-only, default-off shadow; a restored trial keeps it only if it started with it.
  */
 export async function createNamingTaskV2({
-  client, strategy, seed, referenceMemory = false, runDir = process.env.RESEARCH_RUN_DIR,
+  client, strategy, seed, referenceMemory = true, runDir = process.env.RESEARCH_RUN_DIR,
   createTrial = createTrialV2, scoreTrial = defaultScoreTrial, judge = null, now = () => Date.now(),
   restore = null, onPersist = null, decisionShadowClient = null, activeDecision = null, utteranceStyle = "default",
+  groundingShadow = null, localGrounding = null, onLocalGroundingTrace = null, jevResearch = null, rotationMode = "relative_pm90", figureSelection = undefined,
 }) {
+  // Checked before any generation, observation or persist.
+  const rotation = trialRotation(restore, rotationMode);
+  const figures = trialFigures(restore, figureSelection, rotation);
+  // Restored trials retain their recorded condition, including legacy memory-off trials.
+  if (restore) referenceMemory = restore.options?.referenceMemory === undefined ? false : restore.options.referenceMemory;
+  const style = restore?.options?.utteranceStyle ?? utteranceStyle;
+  const jev = selectParticipantJev(restore, jevResearch, { referenceMemory, strategy, style,
+    legacy: [localGrounding, activeDecision, decisionShadowClient, groundingShadow] });
   if (!STRATEGIES.includes(strategy)) throw new NamingTaskError("invalid_strategy");
+  // Luna records keep their attempts across restores; a malformed list is refused, never replaced.
+  if (restore && !jev && Object.hasOwn(restore, "attempts") && !Array.isArray(restore.attempts)) throw new NamingTaskError("invalid_options");
   if (!Number.isSafeInteger(seed)) throw new NamingTaskError("invalid_seed");
   if (typeof referenceMemory !== "boolean") throw new NamingTaskError("invalid_options");
   // A restored trial keeps the style it started with, whatever the deployment now says.
-  const style = restore?.options?.utteranceStyle ?? utteranceStyle;
   if (!["default", "concise"].includes(style)) throw new NamingTaskError("invalid_options");
+  // Shadow records are private research data; they survive restore with the record.
+  const grounding = restore && restore.options?.groundingShadow !== true ? null : groundingShadow;
+  const local = restore && restore.options?.localGrounding !== true ? null : localGrounding;
+  const groundingRecords = Array.isArray(restore?.groundingShadow) ? clone(restore.groundingShadow) : [];
   const directory = runDir ? await (await import("../naming-task.mjs")).outsideRepositoryDirectory(runDir) : null;
-  const trial = createTrial({ seed });
+  const trial = createTrial({ seed, rotationMode: rotation.mode, ...(figures ? { figureSelection: figures } : {}) });
+  // Generation-time angles; a restored record must match what is shown again.
+  const stimulus = trialStimulusV2(trial);
+  if (!stimulus || stimulus.rotationMode !== rotation.mode) throw new NamingTaskError("invalid_options");
+  if (restore && !rotation.legacy && (JSON.stringify(restore.stimulus) !== JSON.stringify(stimulus) || restore.trialId !== trial.trialId)) {
+    throw new NamingTaskError("invalid_options");
+  }
   const scene = participantView(trial);
   const model = modelView(trial);
   const humanSlots = scene.shapes.map((shape) => shape.id);
   const requests = restore?.requests ? clone(restore.requests) : [];
   // Private per-attempt timings; they survive restore with the record.
   const turnTimings = Array.isArray(restore?.turnTimings) ? clone(restore.turnTimings) : [];
+  const jevTraces = jev && restore ? clone(restore.jevTraces) : [];
+  // Attempts recorded before a restore; this construction's dialogue starts its own list from empty.
+  const priorAttempts = Array.isArray(restore?.attempts) ? clone(restore.attempts) : [];
+  const allAttempts = () => [...clone(priorAttempts), ...dialogue.getAttempts()];
+  let aiPublicSettlement = jev && restore ? clone(restore.aiPublicSettlement) : null;
+  let initialObservation = jev && restore ? clone(restore.initialObservation) : null;
+  const usage = jev?.ledger instanceof ParticipantUsageLedger ? jev.ledger : null;
+  if (jev && restore && !usage) restoreParticipantJevLedger(jev.ledger, restore.jevLedger);
+  const effectiveClient = jev ? participantLunaClient(client, jev.ledger, jev.profile) : client;
   // The queue runs one AI turn at a time, so every upstream call starts inside the
   // current attempt (requestSeq) or outside any turn (final submission: null).
   let currentRequestSeq = null;
@@ -76,7 +159,7 @@ export async function createNamingTaskV2({
     async complete(messages, options = {}) {
       const started = now(), requestSeq = currentRequestSeq;
       try {
-        const response = await client.complete(messages, options);
+        const response = await effectiveClient.complete(messages, options);
         requests.push({ kind: options.phase ?? "dialogue", status: "ok", model: response?.model ?? null,
           usage: response?.usage ?? null, latencyMs: now() - started, retryCount: response?.retryCount ?? 0, requestSeq });
         return response;
@@ -104,7 +187,28 @@ export async function createNamingTaskV2({
   const dialogue = createDialogueV2({ client: trackingClient, strategy, image: { mimeType: model.mimeType, base64: model.png.toString("base64") },
     anchors: model.anchors, judge, referenceMemory, decisionShadowClient: trackDecisions(decisionShadowClient, "decision_shadow"),
     activeDecision: activeDecision && { ...activeDecision, client: trackDecisions(activeDecision.client, "decision_active") }, utteranceStyle: style,
+    groundingShadow: grounding, onGroundingShadow: grounding ? (record) => { groundingRecords.push(record); } : null,
+    localGrounding: local, onLocalGroundingTrace,
+    ...(jev ? { decisionMode: "jev", observer: jev.observer, jevDecision: jev.jevDecision,
+      ...(jev.technicalTrial ? { technicalTrial: clone(jev.technicalTrial) } : {}),
+      localGrounding: jev.localGrounding, ...(usage ? { usagePolicy: PARTICIPANT_USAGE_ONLY } : {}), maxReobservations: jev.profile.maxReobservations,
+      interventionPolicy: jev.profile.interventionPolicy, decisionTimeoutMs: jev.profile.timeouts.decisionMs,
+      onJevTurnTrace: (record) => {
+        jevTraces.push(clone(record));
+        if (!usage && Object.values(record.aiPublic?.stages ?? {}).some(stage => stage.error === "cost_cap")) jev.ledger.stop("cost_cap");
+      } } : {}),
     onResearchUpdate: () => persist().catch(() => {}) });
+  // The queue must never see an uninitialized Jev state, even on a zero-turn submission.
+  let initialPrivateState;
+  if (jev && restore) {
+    try { dialogue.snapshotGraph(restore.queueState.privateState); }
+    catch { throw new NamingTaskError("invalid_options"); }
+    initialPrivateState = restore.queueState.privateState;
+  } else if (jev) {
+    initialPrivateState = await dialogue.initializePrivateState();
+    initialObservation = participantInitialObservation(jev.observer) ?? {
+      audit: null, memoSha256: researchHash(initialPrivateState.observationMemo) };
+  } else initialPrivateState = dialogue.initialPrivateState();
   async function timedAiTurn(input) {
     const attemptIndex = dialogue.getAttempts().length;
     const timing = { requestSeq: input.requestSeq, lastEventId: input.lastEventId, pendingEventIds: input.pendingHumanEvents.map((event) => event.id),
@@ -113,7 +217,9 @@ export async function createNamingTaskV2({
     turnTimings.push(timing);
     currentRequestSeq = input.requestSeq;
     try {
-      const result = await dialogue.runAiTurn(input);
+      if (usage) await persist(); // Ensure the accepted input and clientId are durable before any RPC.
+      const result = await (usage ? usage.runTurn(input.lastEventId, input.signal, () => dialogue.runAiTurn(input)) : jev ? withParticipantJevTurn(jev.ledger, input.requestSeq, () => dialogue.runAiTurn(input)) : dialogue.runAiTurn(input));
+      if (jev?.ledger.halted) throw new NamingTaskError("ai_unavailable");
       timing.outcome = "returned";
       return result;
     } catch (error) {
@@ -133,10 +239,15 @@ export async function createNamingTaskV2({
       }
     }
   }
+  let initialQueue = restore?.queueState;
+  if (initialQueue && usage?.needsExplicitRetry(initialQueue.pendingHumanEventIds.at(-1))) {
+    // A restored POST may already have reached the provider. Reuse the existing queue error/retry path.
+    initialQueue = { ...initialQueue, errorCode: 'ai_unavailable' };
+  }
   const queue = createHumanMessageQueue({ runAiTurn: timedAiTurn,
-    initialPrivateState: dialogue.initialPrivateState(), now,
+    initialPrivateState, now,
     initialEvents: [{ speaker: "ai", text: SCRIPTED_OPENING, nonReferential: true }],
-    ...(restore?.queueState ? { initialState: restore.queueState } : {}) });
+    ...(initialQueue ? { initialState: initialQueue } : {}) });
   const recordId = restore?.recordId ?? randomUUID();
   const startedAt = restore?.startedAt ?? new Date(now()).toISOString();
   let humanSubmission = restore?.humanSubmission ?? null, aiSubmission = restore?.aiSubmission ?? null,
@@ -161,15 +272,27 @@ export async function createNamingTaskV2({
     const privateState = queue.getPrivateState();
     const record = {
       recordId, version: VERSION, trialId: trial.trialId, seed, strategy, startedAt, updatedAt: new Date(now()).toISOString(),
-      options: { visualAid: false, referenceMemory, decisionShadow: Boolean(decisionShadowClient), activeDecision: activeDecision?.purpose ?? null, utteranceStyle: style },
+      options: { visualAid: false, referenceMemory, decisionShadow: Boolean(decisionShadowClient), activeDecision: activeDecision?.purpose ?? null, utteranceStyle: style,
+        // Legacy records keep their original shape; they never gain rotation fields on restore.
+        ...(rotation.legacy ? {} : { rotationMode: rotation.mode }),
+        // Present only for a trial that selected figures, so earlier records keep their shape.
+        ...(figures ? { figureSelection: clone(figures) } : {}),
+        // Present only when on, so default-off records keep their previous shape.
+        ...(grounding ? { groundingShadow: true } : {}), ...(local ? { localGrounding: true } : {}),
+        ...(!jev && restore?.options?.jevResearch === false ? { jevResearch: false } : {}),
+        ...(jev ? { jevResearch: true, profileSha256: researchHash(jev.profile), interventionPolicy: clone(jev.profile.interventionPolicy), ...(jev.technicalTrial ? { technicalTrial: clone(jev.technicalTrial) } : {}) } : {}) },
+      ...(rotation.legacy ? {} : { stimulus: clone(stimulus) }),
       status: result ? "completed" : closed ? "submitting" : "dialogue",
       // Origin is research metadata only; queue/model/participant events stay ordinary public speech.
       events: snapshot.events.map((event) => event.seq === 1 && event.speaker === "ai" && event.text === SCRIPTED_OPENING
         ? { ...event, origin: "scripted_opening" } : event),
       // Same role/content shape as v1 so offline metrics apply unchanged.
       publicHistory: snapshot.events.map((e) => ({ role: e.speaker === "human" ? "user" : "assistant", content: e.text })),
-      judgments: privateState.judgments, attempts: dialogue.getAttempts(), ownLedger: privateState.ledger,
+      judgments: privateState.judgments, attempts: allAttempts(), ownLedger: privateState.ledger,
+      ...(grounding || groundingRecords.length ? { groundingShadow: clone(groundingRecords) } : {}),
       ...(referenceMemory ? { referenceGraph: dialogue.snapshotGraph(privateState) } : {}),
+      ...(jev ? { jevTraces: settleJevTurnTraces(jevTraces, privateState), aiPublicSettlement: clone(aiPublicSettlement),
+        initialObservation: clone(initialObservation), jevLedger: jev.ledger.snapshot() } : {}),
       humanSubmission, aiSubmission, closed, finalError,
       queueState: queue.getDurableState(), scoring: result ? { key: trial.key, result } : null, requests, turnTimings,
       diagnostics: aiSubmission ? {
@@ -205,6 +328,14 @@ export async function createNamingTaskV2({
     if (snapshot.status !== "idle" || snapshot.pendingHumanEventIds.length) throw new NamingTaskError("ai_busy");
   }
   let aiSubmitting = null;
+  let settlementPromise = null;
+  function settlePublicOnce() {
+    if (!jev || aiPublicSettlement !== null) return Promise.resolve();
+    settlementPromise ??= Promise.resolve().then(() => settleAiPublicClaims(jevTraces, queue.getPrivateState()))
+      .then(records => { aiPublicSettlement = { status: "ok", records }; },
+        () => { aiPublicSettlement = { status: "error", code: "settlement_failed" }; });
+    return settlementPromise;
+  }
 
   await persist();
   return {
@@ -244,6 +375,7 @@ export async function createNamingTaskV2({
       closed = true;
       queue.close();
       humanSubmission = valid;
+      await settlePublicOnce();
       try { await scoreIfReady(); } catch { finalError = "scoring_error"; await persist(); throw new NamingTaskError("scoring_error"); }
       await persist();
       return { submitted: true };
@@ -254,7 +386,8 @@ export async function createNamingTaskV2({
       return aiSubmitting;
     },
     // Researcher-only; never returned over the participant API.
-    researcherView() { return { key: clone(trial.key), privateState: queue.getPrivateState(), attempts: dialogue.getAttempts() }; },
+    researcherView() { return { key: clone(trial.key), privateState: queue.getPrivateState(), attempts: allAttempts(),
+      groundingShadow: clone(groundingRecords) }; },
   };
 
   async function submitAIOnce() {

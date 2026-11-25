@@ -6,7 +6,7 @@ import { createServer } from "node:http";
 import { once } from "node:events";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { startNamingServer } from "../dialogue-model/runtime/web/server.mjs";
+import { startNamingServer } from "./support/legacy-web-v1-fa84980/server.mjs";
 import { main as cli } from "../dialogue-model/runtime/naming-cli.mjs";
 import { SLOTS } from "../dialogue-model/runtime/naming-task.mjs";
 import { createChatClient } from "../dialogue-model/runtime/client.mjs";

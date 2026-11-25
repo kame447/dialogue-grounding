@@ -1,4 +1,5 @@
 import { SLOTS } from "../stimuli/board.mjs";
+import { LOCAL_ASPECTS, LOCAL_ACTS, LOCAL_SOURCES } from "../local-grounding/contract.ts";
 
 /**
  * Private, model-agnostic working memory. Never add this graph/summary to public
@@ -23,7 +24,9 @@ import { SLOTS } from "../stimuli/board.mjs";
  * referent; sourceTurn records their original turn, not the insertion turn.
  * Operation IDs are '<update.turn>:<local-id>'. References may point to retained
  * records or earlier operations in the same transaction. All operations are
- * explicit judge decisions; no utterance is parsed into an operation here.
+ * explicit judge decisions; claim-to-claim pointers may also point forward
+ * within the transaction (cycles and future source turns are rejected).
+ * No utterance is parsed into an operation here.
  *
  * Types (all keys required, no extras):
  * mention: id, sourceTurn, speaker, quote, slots[], confidence [0,1],
@@ -37,6 +40,7 @@ import { SLOTS } from "../stimuli/board.mjs";
  *   replaces: previous question ID|null.
  * focus: id, slot, mode: defer|revisit, mentionId.
  * retract: id, targetId, mentionId, reason (correction/denial provenance).
+ * claim: id and exactly LocalClaimFields from local-grounding/contract.ts.
  *
  * 'grounded' human mentions remain interpretations of a public human reference
  * onto OWN slots; they never establish a known human-board correspondence.
@@ -61,6 +65,7 @@ const FIELDS = {
   question: ["slots", "text", "status", "mentionIds", "replaces"],
   focus: ["slot", "mode", "mentionId"],
   retract: ["targetId", "mentionId", "reason"],
+  claim: ["issueId", "targets", "aspect", "act", "proposition", "name", "speaker", "sourceTurn", "quote", "respondsTo", "source"],
 };
 const fail = (code) => { throw new ReferenceGraphError(code); };
 export class ReferenceGraphError extends Error {
@@ -86,6 +91,7 @@ function freeze(value) {
   return value;
 }
 function dependencies(record) {
+  if (record.kind === "claim") return record.respondsTo ? [record.respondsTo] : [];
   if (record.kind === "mention") return record.antecedent ? [record.antecedent] : [];
   if (["name", "question"].includes(record.kind)) return record.mentionIds;
   return [record.mentionId]; // retract target is an audit pointer, not support.
@@ -105,6 +111,17 @@ function checkRecord(record, ownSlots = SLOTS) {
         (record.epistemic === "unresolved" && (record.slots.length !== 0 || record.confidence !== 0)) ||
         (record.epistemic === "hypothesis" && record.slots.length === 0) ||
         (record.epistemic === "grounded" && record.slots.length !== 1)) fail("invalid_mention");
+  } else if (record.kind === "claim") {
+    if (!ref(record.issueId) || !Array.isArray(record.targets) || !slots([...record.targets], true, ownSlots) || !LOCAL_ASPECTS.includes(record.aspect) ||
+        !LOCAL_ACTS.includes(record.act) || record.act === "unknown" || !LOCAL_SOURCES.includes(record.source) ||
+        !text(record.quote, 160) || !text(record.proposition, 160) || !["human", "ai"].includes(record.speaker) ||
+        !index(record.sourceTurn) || record.sourceTurn === 0 || record.sourceTurn > record.turn ||
+        !(record.respondsTo === null || ref(record.respondsTo)) ||
+        !(record.name === null || (record.aspect === "name" && text(record.name, 160))) ||
+        (record.speaker === "human" && record.source !== "partner_statement") ||
+        (record.speaker === "ai" && record.source === "partner_statement") ||
+        (record.act === "construe" && record.aspect !== "construal") ||
+        (record.act.startsWith("name_") && record.aspect !== "name")) fail("invalid_claim");
   } else if (record.kind === "feature") {
     if (!text(record.feature, 160) || !["confirmed", "denied"].includes(record.polarity) || !ref(record.mentionId)) fail("invalid_feature");
   } else if (record.kind === "name") {
@@ -139,15 +156,16 @@ function checkGraph(graph) {
   if (Object.hasOwn(graph, "slots")) validateSlots(ownSlots);
   observations(graph.ownObservations, ownSlots);
   const seen = new Map();
+  const claims = graph.records.filter((r) => r?.kind === "claim");
   let last = 0;
   for (const record of graph.records) {
     checkRecord(record, ownSlots);
     if (seen.has(record.id) || record.turn < last || record.turn > graph.lastTurn) fail("invalid_graph");
     for (const id of dependencies(record)) {
-      if (seen.get(id)?.kind !== "mention") fail("missing_provenance");
+      if (record.kind === "claim" ? !claims.some((r) => r.id === id) : seen.get(id)?.kind !== "mention") fail("missing_provenance");
     }
     if (record.kind === "mention" && record.antecedent && seen.get(record.antecedent).sourceTurn > record.sourceTurn) fail("future_antecedent");
-    validateSupport(record, [...seen.values()], true);
+    validateSupport(record, record.kind === "claim" ? graph.records : [...seen.values()], true);
     seen.set(record.id, record); last = record.turn;
   }
   if (JSON.stringify(graph).length > REFERENCE_LIMITS.graphChars) fail("capacity_exceeded");
@@ -155,9 +173,15 @@ function checkGraph(graph) {
 }
 function inactiveIds(records) {
   const dead = new Set(records.filter((r) => r.kind === "retract").map((r) => r.targetId));
-  // Support references always point backwards, so a forward pass suffices.
-  for (const record of records) {
-    if (record.kind !== "retract" && dependencies(record).some((id) => dead.has(id))) dead.add(record.id);
+  // Claim references may point forward within a transaction; reach a fixed point.
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const record of records) {
+      if (!dead.has(record.id) && record.kind !== "retract" && dependencies(record).some((id) => dead.has(id))) {
+        dead.add(record.id); changed = true;
+      }
+    }
   }
   return dead;
 }
@@ -186,7 +210,30 @@ function validateSupport(record, records, historical = false) {
   };
   const targets = (m, slot) => m.slots.includes(slot);
   const single = (m, slot) => m.epistemic === "grounded" && m.slots.length === 1 && targets(m, slot);
-  if (record.kind === "mention") {
+  if (record.kind === "claim") {
+    const responseActs = ["agree", "deny", "name_accept", "name_reject", "withdraw"];
+    if (records.some((r) => r.kind === "claim" && r.issueId === record.issueId && r.aspect !== record.aspect)) fail("inconsistent_claim_issue");
+    if (responseActs.includes(record.act) && !record.respondsTo) fail("missing_claim_response");
+    if (record.act === "name_propose" && (!record.name || !record.quote.includes(record.name))) fail("unsupported_claim_name");
+    if (!record.respondsTo) return;
+    const prior = byId.get(record.respondsTo);
+    if (prior?.kind !== "claim" || (!historical && dead.has(prior.id))) fail("missing_provenance");
+    if (prior.id === record.id || prior.sourceTurn > record.sourceTurn || prior.turn > record.turn ||
+        prior.aspect !== record.aspect || prior.issueId !== record.issueId ||
+        !prior.targets.some((slot) => record.targets.includes(slot))) fail("inconsistent_claim_response");
+    const visited = new Set([record.id]);
+    let cursor = prior;
+    while (cursor) {
+      if (visited.has(cursor.id)) fail("inconsistent_claim_response");
+      visited.add(cursor.id); cursor = cursor.respondsTo ? byId.get(cursor.respondsTo) : null;
+    }
+    if (record.act === "withdraw" ? prior.speaker !== record.speaker :
+        responseActs.includes(record.act) && prior.speaker === record.speaker) fail("inconsistent_claim_speaker");
+    if (["name_accept", "name_reject"].includes(record.act) &&
+        (prior.act !== "name_propose" || !prior.name || prior.targets.length !== record.targets.length ||
+          !prior.targets.every((slot) => record.targets.includes(slot)) ||
+          (record.name !== null && record.name !== prior.name))) fail("unsupported_claim_name");
+  } else if (record.kind === "mention") {
     if (record.antecedent) {
       const previous = mention(record.antecedent);
       if (previous.sourceTurn > record.sourceTurn || record.slots.some((slot) => !previous.slots.includes(slot))) fail("inconsistent_antecedent");
@@ -242,6 +289,34 @@ function prune(graph) {
   const unresolved = currentQuestions(records).filter((r) => r.status !== "resolved" && !dead.has(r.id));
   if (unresolved.length > REFERENCE_LIMITS.unresolvedQuestions) fail("capacity_exceeded");
   const mandatory = new Set(unresolved.map((r) => r.id));
+  const claims = records.filter((r) => r.kind === "claim").sort((a, b) => a.sourceTurn - b.sourceTurn || a.turn - b.turn);
+  const claimDead = new Set(dead);
+  for (const claim of claims) if (claim.act === "withdraw" && !dead.has(claim.id)) claimDead.add(claim.respondsTo);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const claim of claims) {
+      if (claim.act !== "withdraw" && claim.respondsTo && claimDead.has(claim.respondsTo) && !claimDead.has(claim.id)) {
+        claimDead.add(claim.id); changed = true;
+      }
+    }
+  }
+  const issues = Map.groupBy(claims, (r) => r.issueId);
+  for (const issue of issues.values()) {
+    const active = issue.filter((r) => !claimDead.has(r.id) && r.act !== "withdraw");
+    const support = active.some((r) => ["agree", "name_accept"].includes(r.act));
+    const denial = active.some((r) => ["deny", "name_reject"].includes(r.act));
+    const substantive = active.some((r) => !["acknowledge", "withdraw", "defer", "revisit"].includes(r.act));
+    const focus = active.filter((r) => ["defer", "revisit"].includes(r.act)).at(-1);
+    if (active.length && ((substantive && ((!support && !denial) || active.at(-1).targets.length !== 1)) ||
+        (support && denial) || focus?.act === "defer")) {
+      issue.forEach((r) => mandatory.add(r.id));
+    }
+  }
+  for (const slot of graphSlots(graph)) {
+    const named = claims.findLast((r) => r.aspect === "name" && r.targets.includes(slot));
+    if (named) mandatory.add(named.id);
+  }
   for (const slot of graphSlots(graph)) {
     for (const kind of ["name", "focus"]) {
       const record = latest(records, kind, slot);
@@ -256,6 +331,8 @@ function prune(graph) {
       // Keeping an older question must also keep its successor; otherwise
       // dropping a resolved successor could reopen the old question.
       const successors = records.filter((r) => (r.kind === "retract" && r.targetId === id) ||
+        (record.kind === "claim" && r.kind === "claim" && (r.issueId === record.issueId || r.respondsTo === id ||
+          (record.aspect === "name" && r.aspect === "name" && records.indexOf(r) > records.indexOf(record) && r.targets.some((s) => record.targets.includes(s))))) ||
         (record.kind === "question" && r.kind === "question" && r.replaces === id));
       for (const dep of [...dependencies(record), ...successors.map((r) => r.id)]) {
         if (!keep.has(dep)) { keep.add(dep); pending.push(dep); }
@@ -268,7 +345,7 @@ function prune(graph) {
   if (!fits(kept)) fail("capacity_exceeded");
   const repairs = records.filter((r) => r.kind === "retract" || r.replaces).slice(-REFERENCE_LIMITS.recentRepairs);
   const optional = records.filter((r) => r.kind === "mention").slice(-REFERENCE_LIMITS.recentMentions)
-    .concat(repairs.flatMap((r) => [byId.get(r.targetId ?? r.replaces), r].filter(Boolean))).reverse();
+    .concat(claims.slice(-REFERENCE_LIMITS.recentMentions), repairs.flatMap((r) => [byId.get(r.targetId ?? r.replaces), r].filter(Boolean))).reverse();
   for (const record of optional) {
     const proposed = closure(new Set([...mandatory, record.id]));
     if (fits(proposed)) { mandatory.add(record.id); kept = proposed; }
@@ -292,25 +369,49 @@ function stage(graph, update, publicTurns) {
     // scripted text as a mention, antecedent or downstream name source.
     turnMap.set(item.turn + ":" + item.speaker, scripted ? null : item.text);
   }
+  // Validate all same-transaction claim shapes before following any forward
+  // claim pointer. Legacy operations retain their sequential support checks.
+  for (const op of update.operations.filter((r) => r?.kind === "claim")) {
+    if (!exact(op, ["kind", "id", ...FIELDS.claim])) fail("invalid_record");
+    checkRecord({ ...op, turn: update.turn }, graphSlots(graph));
+  }
   const next = clone(graph);
   for (const op of update.operations) {
     if (!Object.hasOwn(FIELDS, op?.kind) || !exact(op, ["kind", "id", ...FIELDS[op.kind]])) fail("invalid_record");
     const record = { ...op, turn: update.turn };
     checkRecord(record, graphSlots(graph));
     if (next.records.some((r) => r.id === record.id)) fail("duplicate_id");
-    if (record.kind === "mention" && !turnMap.get(record.sourceTurn + ":" + record.speaker)?.includes(record.quote)) fail("nonpublic_evidence");
-    validateSupport(record, next.records);
+    if (["mention", "claim"].includes(record.kind) && !turnMap.get(record.sourceTurn + ":" + record.speaker)?.includes(record.quote)) fail("nonpublic_evidence");
+    const support = record.kind === "claim" ? next.records.concat(update.operations.filter((r) => r.kind === "claim" && r.id !== record.id && !next.records.some((s) => s.id === r.id)).map((r) => ({ ...r, turn: update.turn }))) : next.records;
+    validateSupport(record, support);
     next.records.push(clone(record));
   }
   next.revision++; next.lastTurn = update.turn;
   return freeze(checkGraph(prune(next)));
 }
 
-/** Returns a frozen validated UPDATE, not a commit token. Apply revalidates it. */
+/** Returns a frozen validated UPDATE, not a commit token. Apply revalidates it.
+ * @param {any} graph
+ * @param {any} update
+ * @param {{publicTurns?: readonly {turn: number, speaker: string, text: string, nonReferential?: boolean}[]}} options
+ */
 export function validateReferenceUpdate(graph, update, { publicTurns = [] } = {}) {
   stage(graph, update, publicTurns);
   return freeze(clone(update));
 }
+/** Pure private preview: same validation/pruning as apply, with no commit or
+ * mutation of the input. Publication success is still required for actual apply.
+ * @param {any} graph
+ * @param {any} update
+ * @param {{publicTurns?: readonly {turn: number, speaker: string, text: string, nonReferential?: boolean}[]}} options
+ */
+export function previewReferenceUpdate(graph, update, { publicTurns = [] } = {}) {
+  return stage(graph, update, publicTurns);
+}
+/** @param {any} graph
+ * @param {any} update
+ * @param {{publicTurns?: readonly {turn: number, speaker: string, text: string, nonReferential?: boolean}[], generationSucceeded?: boolean}} options
+ */
 export function applyReferenceUpdate(graph, update, { publicTurns = [], generationSucceeded = false } = {}) {
   if (generationSucceeded !== true) fail("generation_not_succeeded");
   return stage(graph, update, publicTurns);
@@ -354,6 +455,7 @@ export function snapshotReferenceGraph(graph) {
       scope: r.speaker === "human" ? "human_reference_interpretation" : "own_reference" })),
     questions: currentQuestions(graph.records).filter(active).map((r) => ({ ...r, sourceTurns: sourceTurns(r) })),
     repairs: graph.records.filter((r) => r.kind === "retract" || r.replaces),
+    ...(graph.records.some((r) => r.kind === "claim") ? { claims: graph.records.filter((r) => r.kind === "claim" && active(r)) } : {}),
   });
 }
 

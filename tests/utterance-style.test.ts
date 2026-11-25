@@ -2,7 +2,7 @@
 // judged act itself, before ledger, memory and generation. Local mocks only.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createDialogueV2, CONCISE_INSTRUCTIONS_V2, UTTERANCE_STYLES } from "../dialogue-model/runtime/v2/dialogue-v2.mjs";
+import { createDialogueV2, LUNA_CONCISE_INSTRUCTIONS_V2, UTTERANCE_STYLES } from "../dialogue-model/runtime/v2/dialogue-v2.mjs";
 import { createHumanMessageQueue } from "../dialogue-model/runtime/web/human-message-queue.mjs";
 import { SAFE_JUDGMENT, applyJudgment } from "../dialogue-model/runtime/judgment/schema.mjs";
 import { DECISION_ACTIONS } from "../workers/research-ai-proxy/src/decisions.mjs";
@@ -21,7 +21,10 @@ function setup({ utteranceStyle, strategy = "repair-first", raw = agreeWithFollo
   const calls: Message[][] = [];
   const dialogue = createDialogueV2({ strategy, image, anchors, referenceMemory, ...(utteranceStyle === undefined ? {} : { utteranceStyle }),
     judge: { async judge(): Promise<any> { return structuredClone(raw); } }, // raw, validated by the session
-    client: { async complete(messages: Message[]) { calls.push(structuredClone(messages)); return { text: "では「鳥」で決まりですね。" }; } },
+    client: { async complete(messages: Message[]) { calls.push(structuredClone(messages));
+      // Publish the followUp proposal only when the generator was actually given one (default style keeps it, concise drops it).
+      const planned = messages.some((m) => typeof m.content === "string" && m.content.startsWith("この発話の判断（非公開）") && /"followUp":\{/.test(m.content));
+      return { text: "では「鳥」で決まりですね。" + (planned ? "次は「猫」はどうでしょう？" : "") }; } },
     activeDecision: active ? { purpose: "decision_luna", client: { async chooseAction() {
       return { action: "agree", probabilities: Object.fromEntries(DECISION_ACTIONS.map((a: string) => [a, Number(a === "agree")])) }; } } } : null,
   });
@@ -36,7 +39,7 @@ test("style option is validated; default is unchanged whether omitted or explici
   const omitted = setup(), explicit = setup({ utteranceStyle: "default" });
   const a = await omitted.run(), b = await explicit.run();
   assert.deepEqual(a, b); assert.deepEqual(omitted.calls, explicit.calls);
-  assert.ok(!JSON.stringify(omitted.calls).includes(CONCISE_INSTRUCTIONS_V2.slice(0, 12)));
+  assert.ok(!JSON.stringify(omitted.calls).includes(LUNA_CONCISE_INSTRUCTIONS_V2.slice(0, 12)));
   assert.equal(a.privateState.ledger[ids[1]].name, "猫", "default keeps compound acts");
   assert.ok(!Object.hasOwn(a.privateState.judgments[0], "utteranceStyle"));
 });
@@ -50,7 +53,7 @@ test("concise removes followUp before the ledger and generation, and records it 
   assert.deepEqual(r.privateState.ledger[ids[1]], { status: "unassigned", name: null });
   assert.equal(r.privateState.ledger[ids[0]].status, "agreed");
   const generation = JSON.stringify(s.calls[0]);
-  assert.ok(generation.includes(CONCISE_INSTRUCTIONS_V2.slice(0, 12)));
+  assert.ok(generation.includes(LUNA_CONCISE_INSTRUCTIONS_V2.slice(0, 12)));
   assert.doesNotMatch(generation, /猫|followUpで言えること/u);
   assert.deepEqual(s.state, before, "input state stays detached");
 });
@@ -62,7 +65,7 @@ test("concise without followUp changes only the generation instruction", async (
   assert.deepEqual(cr.privateState.ledger, dr.privateState.ledger);
   assert.deepEqual(cr.privateState.judgments[0].utteranceStyle, { style: "concise", droppedFollowUp: null });
   assert.equal(c.calls[0].length, d.calls[0].length + 1);
-  assert.deepEqual(c.calls[0].filter((m) => m.content !== CONCISE_INSTRUCTIONS_V2), d.calls[0]);
+  assert.deepEqual(c.calls[0].filter((m) => m.content !== LUNA_CONCISE_INSTRUCTIONS_V2), d.calls[0]);
 });
 
 test("concise keeps agreeEvidence and the conservative active gate", async () => {

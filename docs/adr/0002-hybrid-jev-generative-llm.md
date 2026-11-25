@@ -1,6 +1,8 @@
 # ADR 0002: Hybrid Jev and generative model pipeline
 
-Status: proposed
+Status: proposed（判断権限の部分は 2026-10-20 に[決定0002](../../dialogue-model/decisions/0002-jev-decision-and-visual-observation.md)で具体化）
+
+> 2026-10-20：閉集合判断をJevに寄せる方針は、対話行動の決定にも及ぶ形で採用された。次の対話行動はJevが単独で選び、生成モデル（Luna）は観察・自由記述と、選ばれた行動の文章化を担う。現行の方針は[SSOT](../../dialogue-model/README.md)と決定0002を参照。
 
 ## Context
 
