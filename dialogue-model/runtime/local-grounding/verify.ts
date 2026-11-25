@@ -141,8 +141,9 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
       (targets.length === 0 || targets.length === 1 && targets[0] === boundQuestion.targets[0]) &&
       (!directReferenceReplies || !opposesPointingReply(segment, boundQuestion, boundQuestion.targets[0], human.text, segments, verdicts, ownSlots));
     // A same-aspect extraction of a pointing reply must pass the direct check too.
+    // A supplied target is used only by a reply that passed the direct check; any other agree is the v7 case (a response to a question that has no target).
     if (directReferenceReplies && boundQuestion && act === "agree" && !agreesWithCheckedFigure &&
-        (boundQuestion.aspect === "question" || pointsToFigure)) {
+        (boundQuestion.aspect === "question" || pointsToFigure || isSuppliedBinding(referenceQuestionBindings, boundQuestion.id))) {
       reject("inconsistent_claim_response"); continue;
     }
     if (agreesWithCheckedFigure && boundQuestion) aspect = boundQuestion.aspect;
@@ -274,6 +275,9 @@ export type LocalPriorAct = {
 
 /** Bind one targetless question to the executed figure only when the already
  * published description supports that single figure. Pending extraction stays raw. */
+const SUPPLIED_SUFFIX = "#supplied";
+/** True when the binding gave the question its figure (its extraction had none), as opposed to confirming a target the extraction already carried. */
+export const isSuppliedBinding = (bindings: ReadonlyMap<string, string> | undefined, questionId: string): boolean => bindings?.has(questionId + SUPPLIED_SUFFIX) === true;
 export function bindPublishedReferenceQuestion(pending: AiPublicPending | null | undefined,
   prior: Pick<LocalPriorAct, "turn" | "action" | "targetSlot" | "publishedFallback"> | undefined,
   source: (PublicTurn & { nonReferential?: boolean }) | undefined, turn: number, directReferenceReplies = false): Map<string, string> {
@@ -292,7 +296,12 @@ export function bindPublishedReferenceQuestion(pending: AiPublicPending | null |
       (directReferenceReplies ? figureReplyAspects.has(question.aspect) : question.aspect === "question") &&
       (question.targets.length === 0 || directReferenceReplies && question.targets.length === 1 && question.targets[0] === figure) &&
       descriptions.some(c => c.targets.length === 1 && c.targets[0] === figure) &&
-      descriptions.every(c => c.targets.includes(figure))) bound.set(`${turn}:pub${question.ordinal}`, figure);
+      descriptions.every(c => c.targets.includes(figure))) {
+    bound.set(`${turn}:pub${question.ordinal}`, figure);
+    // Only a question whose extraction left the target empty gets the executed figure from this binding. That supplied
+    // target is evidence only for a reply that passes the direct check (see isSuppliedBinding).
+    if (question.targets.length === 0) bound.set(`${turn}:pub${question.ordinal}${SUPPLIED_SUFFIX}`, figure);
+  }
   return bound;
 }
 
