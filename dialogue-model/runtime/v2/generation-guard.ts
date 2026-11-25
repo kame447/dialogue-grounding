@@ -6,7 +6,7 @@ export type GenerationRetryVersion = "jev_generation_retry_v1" | "jev_generation
 export type RecordedGenerationRetryVersion = Exclude<GenerationRetryVersion, "jev_generation_retry_v1">;
 
 export function hasVersionedViewpoint(version: unknown): version is "jev_generation_retry_v4" {
-  return version === "jev_generation_retry_v4";
+  return version === "jev_generation_retry_v4" || hasVersionedViewpoint(version);
 }
 export function validGenerationRetryVersion(version: unknown, layout: string, policy?: string | null): version is GenerationRetryVersion {
   return version === "jev_generation_retry_v1" || layout === "two_stage_v3" &&
@@ -370,16 +370,21 @@ export function findNamingActHints(text: string): { wording: boolean; quoted: st
   return { wording, quoted: quotedNames(normalized) };
 }
 /** Retry instruction for the violated rule families; never echoes the draft. */
-export function rewriteReasons(codes: readonly string[], policy?: DialoguePolicy): string {
+export function rewriteReasons(codes: readonly string[], policy?: DialoguePolicy,
+  version = defaultGenerationRetryVersion("two_stage_v3", policy)): string {
+  const specificViewpoint = policy === "holistic_v5" && hasVersionedViewpoint(version);
   return [
     codes.some((code) => AGREEMENT_CODES.has(code)) ? "前の下書きは名称の決定・合意を表していました。決定・合意を表明せず、このactionの範囲で書き直してください。" : "",
     codes.includes("self_repair") ? "前の下書きは自分の取り違え・訂正・取り消しを表していました。このactionでは訂正を表明せず、このactionの範囲で書き直してください。" : "",
     codes.includes("name_mismatch") ? "前の下書きは、このactionで扱う名前とは別の名前を提案・決定・合意として述べていました。このactionで扱う名前だけを「」で示して書き直してください。" : "",
     codes.includes("unsolicited_deferral") ? "前の下書きは未解決の図形について保留や先送りを提案していました。保留・先送りを提案せず、このactionの範囲で書き直してください。" : "",
-    policy === "holistic_v5"
+    specificViewpoint
+      ? codes.includes("orientation_leak") ? "前の下書きに、自分側の見え方だと示されていない方位の語（上下左右・端・向き・斜め・縦長・横長など）がありました。公開発話では、回転しても変わらない形や部分同士のつながりに言い換えてください。方位が区別に必要なら、その語と同じ節で自分側の画面での見え方だと明示し、相手には形の対応を尋ねてください。" : ""
+      : policy === "holistic_v5"
       ? codes.includes("orientation_leak") || codes.includes("shared_view_assumption")
         ? "前の下書きの方位の参照枠を明確にして書き直してください。" + HOLISTIC_V5_VIEWPOINT_RULE : ""
       : codes.includes("orientation_leak") ? "前の下書きに画面の向きに依存する語（上下左右・側・端・向き・斜め上/下/左/右・縦長・横長等）が含まれていました。非公開メモや判断の方位語をそのまま写さず、尖りの数・大小・くぼみ・四角い部分とのつながりなど回転しても変わらない特徴へ言い換えるか、同じ節で「こちらの画面では〜」と視点を明示して書き直してください。" : "",
+    specificViewpoint && codes.includes("shared_view_assumption") ? "前の下書きは、相手側の位置や向きを自分側と同じだと断定していました。相手側の位置や向きは、相手自身の説明として引用するか、相手の見え方を尋ねてください。" : "",
     codes.some((code) => code.startsWith("internal_")) ? "前の下書きには内部の参照IDや作業メモの項目が含まれていました。それらを出さずに書き直してください。" : "",
     codes.includes("working_note") ? "前の下書きに、英語の作業メモや複数の返答案が混じっていました。日本語の一つの返答だけにして書き直してください。" : "",
     codes.includes("draft_act_mismatch") ? "前の下書きの命名に関する行為が、選んだ行動と合っていませんでした。選んだ行動の範囲で、命名に関する行為を行動に合わせて書き直してください。" : "",

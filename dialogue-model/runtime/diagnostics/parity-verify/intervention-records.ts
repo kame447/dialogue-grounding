@@ -30,7 +30,12 @@ const CONFIRM_NAMING_REQUEST_V5_S4='判断で選ばれた対象について、�
 const NAMING_CONFLICT_V5_S4='選ばれた図形にはすでに合意済みの名前（agreedName）があり、今回の相手の案（proposedNames）とは異なります。選ばれた行動で対象を確かめる際は、相手が同じ図形と別の図形のどちらについて話しているかを確かめてください。この案を採用して合意済みの名前を変更しないでください。明示的な改名は、判断が選んだrepairの範囲で扱います。';
 const FEATURE_VIEWPOINT_V5_S4='以下のdiscriminatingFeatureにある上下左右・横長などの向きの語は、自分側の画面での見え方です。公開発話では、回転しても変わらない形や部分同士のつながりに言い換えてください。向きが区別に必要なら、その語と同じ節で「こちらの画面では」などと自分側の見え方だと明示し、相手には形の対応を尋ねてください。';
 // Closed, ordered reason text for the original and restated-judgment prompts.
-const RETRY_REASONS:ReadonlyArray<{codes:readonly string[];text:string;legacy?:string}>=[
+type RetryReason={codes:readonly string[];text:string;legacy?:string};
+const SPECIFIC_VIEWPOINT_REASONS:readonly RetryReason[]=[
+ {codes:['orientation_leak'],text:"前の下書きに、自分側の見え方だと示されていない方位の語（上下左右・端・向き・斜め・縦長・横長など）がありました。公開発話では、回転しても変わらない形や部分同士のつながりに言い換えてください。方位が区別に必要なら、その語と同じ節で自分側の画面での見え方だと明示し、相手には形の対応を尋ねてください。"},
+ {codes:['shared_view_assumption'],text:"前の下書きは、相手側の位置や向きを自分側と同じだと断定していました。相手側の位置や向きは、相手自身の説明として引用するか、相手の見え方を尋ねてください。"},
+];
+const RETRY_REASONS:readonly RetryReason[]=[
  {codes:['naming_decision','name_selection','go_with_name','name_settled','name_approval','explicit_agreement'],text:'前の下書きは名称の決定・合意を表していました。決定・合意を表明せず、このactionの範囲で書き直してください。'},
  {codes:['self_repair'],text:'前の下書きは自分の取り違え・訂正・取り消しを表していました。このactionでは訂正を表明せず、このactionの範囲で書き直してください。'},
  {codes:['name_mismatch'],text:'前の下書きは、このactionで扱う名前とは別の名前を提案・決定・合意として述べていました。このactionで扱う名前だけを「」で示して書き直してください。',
@@ -44,19 +49,26 @@ const RETRY_REASONS:ReadonlyArray<{codes:readonly string[];text:string;legacy?:s
  {codes:['draft_act_unconfirmed'],text:'前の下書きの命名に関する行為を確認できませんでした。選んだ行動の範囲で、命名に関する行為が明確になるように書き直してください。'},
  {codes:['name_not_shown'],text:'このactionで扱う名前を、「」で囲んで発話の中に示してください。'},
 ];
+const RETRY_REASONS_SPECIFIC=RETRY_REASONS.flatMap(reason=>reason.codes.includes('orientation_leak')?SPECIFIC_VIEWPOINT_REASONS:[reason]);
 // codes: the recorded condition's own guard violations (exact). draft: for the comparison condition, what its OWN first draft shows to this verifier
 // (an orientation leak; any other leak, which is where a name/agreement decision, an id or a field would show): the orientation reason must be present exactly
 // when the draft has an orientation leak, and the name/agreement-decision reason can appear only if the draft has some other leak. Other families stay open.
-function retryReasonsMatch(text:string,restated:boolean,codes?:readonly string[],draft?:{orientation:boolean;naming:boolean;workingNote:boolean;draftAct?:string|null}):boolean{
+type RetryDraftEvidence={orientation:boolean;orientationCodes?:readonly string[];naming:boolean;workingNote:boolean;draftAct?:string|null};
+function retryReasonsMatch(text:string,version:RecordedGenerationRetryVersion|undefined,codes?:readonly string[],draft?:RetryDraftEvidence):boolean{
  if(!text)return false;
- for(const reason of RETRY_REASONS){
-  const viewpoint=H5()&&reason.codes.includes('orientation_leak');
+ const specific=version==='jev_generation_retry_v5',restated=version!==undefined;
+ const reasons=specific?RETRY_REASONS_SPECIFIC:RETRY_REASONS;
+ for(const reason of reasons){
+  const viewpoint=!specific&&H5()&&reason.codes.includes('orientation_leak');
   const reasonText=viewpoint?'前の下書きの方位の参照枠を明確にして書き直してください。'+VIEWPOINT_RULE_V5_S4:reason.text;
   const match=text.startsWith(reasonText)?reasonText:!viewpoint&&!restated&&reason.legacy&&text.startsWith(reason.legacy)?reason.legacy:null;
   if(codes&&(reason.codes.some(code=>codes.includes(code))||viewpoint&&codes.includes('shared_view_assumption'))!==Boolean(match))return false;
+  const orientationReason=reason.codes.includes('orientation_leak')||reason.codes.includes('shared_view_assumption');
+  if(specific&&orientationReason&&draft?.orientationCodes!==undefined&&
+     reason.codes.some(code=>draft.orientationCodes!.includes(code))!==Boolean(match))return false;
   if(!codes&&draft){
    // Each family this verifier can decide from the draft alone is checked exactly (present iff the draft shows it); the others stay open.
-   if(reason.codes.includes('orientation_leak')&&draft.orientation!==Boolean(match))return false;
+   if(!specific&&reason.codes.includes('orientation_leak')&&draft.orientation!==Boolean(match))return false;
    if(reason.codes.includes('naming_decision')&&draft.naming!==Boolean(match))return false;
    if(reason.codes.includes('working_note')&&draft.workingNote!==Boolean(match))return false;
    if(draft.draftAct!==undefined&&reason.codes.some(c=>c.startsWith('draft_act_'))&&Boolean(draft.draftAct&&reason.codes.includes(draft.draftAct))!==Boolean(match))return false;
@@ -685,7 +697,8 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
      const codes=label===tr.label&&t.status==='committed'?t.generationGuard.violations:undefined;
      // The comparison condition's retry reason is checked against that condition's own first draft, which this verifier classifies itself.
      const v3Retry=layout==='two_stage_v3';
-     const draft=codes===undefined&&generationCount===1?{orientation:v3Retry&&s4HasOrientationLeak(prevDraft,version),naming:typeof prevDraft==='string'&&s4NamingDecision(prevDraft.normalize('NFKC').replace(/[\s\u200b-\u200d\ufeff]/gu,''),s.executed?.action),workingNote:v3Retry&&restatedRetry&&s4HasWorkingNote(prevDraft,publicTexts),...(H()?{draftAct:lastVerdict}:{})}:undefined;
+     const draft=generationCount===1&&(codes===undefined||version==='jev_generation_retry_v5')?{orientation:v3Retry&&s4HasOrientationLeak(prevDraft,version),
+       ...(version==='jev_generation_retry_v5'&&typeof prevDraft==='string'?{orientationCodes:findOrientationLeaks(prevDraft,'holistic_v5',version)}:{}),naming:typeof prevDraft==='string'&&s4NamingDecision(prevDraft.normalize('NFKC').replace(/[\s\u200b-\u200d\ufeff]/gu,''),s.executed?.action),workingNote:v3Retry&&restatedRetry&&s4HasWorkingNote(prevDraft,publicTexts),...(H()?{draftAct:lastVerdict}:{})}:undefined;
      if(!generationMessages(p.messages,t,s.executed,{...tape,generationGraph:(tr.turns??[]).find((u:any)=>u.turn===t.turnIndex)?.state?.graph},m.profile,generationCount++,codes,draft))return'invalid';
      prevDraft=answer?.response?.text??answer?.text;draftTexts.push(prevDraft);genMessages.push(p.messages);lastVerdict=null;
     }
@@ -1110,7 +1123,7 @@ function choiceResponse(body:any,response:any):boolean{
 // Fixed baseline instruction bytes are installed below; no producer builder is
 // executed while checking a record. No condition or original decision is input.
 // Prompt-style update (prompt-style-20261124): the current text and the prior text are both verified exactly.
-function generationMessages(messages:any[],trace:any,execution:any,tape:any,profile:any,index:number,codes?:readonly string[],draft?:{orientation:boolean;naming:boolean;workingNote:boolean}):boolean{
+function generationMessages(messages:any[],trace:any,execution:any,tape:any,profile:any,index:number,codes?:readonly string[],draft?:RetryDraftEvidence):boolean{
  if(H5())return generationMessagesWith(messages,trace,execution,tape,profile,FIXED_HOLISTIC_V5,{v3:[TRIAL_HOLISTIC],legacy:LEGACY_TRIAL_STYLE},index,codes,draft);
  // holistic-first: the new generation text applies to a technical trial only; a non-trial v3 attempt keeps the style text under the same criteria version.
  if(CTX.style==='holistic')return tape.technicalTrial?generationMessagesWith(messages,trace,execution,tape,profile,FIXED_HOLISTIC,{v3:[TRIAL_HOLISTIC],legacy:LEGACY_TRIAL_STYLE},index,codes,draft):generationMessagesWith(messages,trace,execution,tape,profile,FIXED_STYLE,{v3:[TRIAL_STYLE],legacy:LEGACY_TRIAL_STYLE},index,codes,draft);
@@ -1118,7 +1131,7 @@ function generationMessages(messages:any[],trace:any,execution:any,tape:any,prof
  if(CTX.style==='legacy')return generationMessagesWith(messages,trace,execution,tape,profile,FIXED,{v3:[TRIAL,TRIAL_V3_PREV],legacy:LEGACY_TRIAL},index,codes,draft);
  return generationMessagesWith(messages,trace,execution,tape,profile,FIXED,{v3:[TRIAL,TRIAL_V3_PREV],legacy:LEGACY_TRIAL},index,codes,draft)||generationMessagesWith(messages,trace,execution,tape,profile,FIXED_STYLE,{v3:[TRIAL_STYLE],legacy:LEGACY_TRIAL_STYLE},index,codes,draft);
 }
-function generationMessagesWith(messages:any[],trace:any,execution:any,tape:any,profile:any,FIXED:any,trials:{v3:any[];legacy:any},index:number,codes?:readonly string[],draft?:{orientation:boolean;naming:boolean;workingNote:boolean}):boolean{
+function generationMessagesWith(messages:any[],trace:any,execution:any,tape:any,profile:any,FIXED:any,trials:{v3:any[];legacy:any},index:number,codes?:readonly string[],draft?:RetryDraftEvidence):boolean{
  if(!trace.finalAction||!execution)return false;const g={action:execution.action,targetSlot:execution.target.kind==='single'?execution.target.figureId:null,candidateName:execution.name,discriminatingFeature:execution.feature,note:null};
  const graph=tape.generationGraph??tape.state.graph;
  const namingConflict=H5()&&CTX.namingRequest&&execution.target.kind==='single'?
@@ -1146,7 +1159,7 @@ function generationMessagesWith(messages:any[],trace:any,execution:any,tape:any,
      !exact(retry,['role','content'])||retry.role!=='system'||typeof retry.content!=='string')continue;
   const restated=tape.generationRetryVersion!==undefined;
   const prefix=RETRY_INSTRUCTION+(restated?'\n'+actionMessage.content+'\n':'');
-  if(retry.content.startsWith(prefix)&&retryReasonsMatch(retry.content.slice(prefix.length),restated,codes,draft))return true;
+  if(retry.content.startsWith(prefix)&&retryReasonsMatch(retry.content.slice(prefix.length),tape.generationRetryVersion,codes,draft))return true;
  }
  return false;
 }

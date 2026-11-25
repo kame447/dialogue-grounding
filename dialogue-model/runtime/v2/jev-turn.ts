@@ -1040,7 +1040,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         if (restateJudgment) record.generationRetryVersion = generationRetryVersion;
         const retry: Message[] = [...messages, { role: "system",
           content: "公開発話を書き直してください。選択済みの行動を変更しないでください。" +
-            (restateJudgment ? "\n" + actionMessage.content + "\n" : "") + rewriteReasons(record.generationGuard.violations, options.dialoguePolicy) }];
+            (restateJudgment ? "\n" + actionMessage.content + "\n" : "") + rewriteReasons(record.generationGuard.violations, options.dialoguePolicy, generationRetryVersion) }];
         result = await interruptible(client.complete(retry, { phase: "generation", timeoutMs: generation.timeoutMs, signal }), signal);
         abortIf(signal);
         const codes = typeof result?.text === "string" && result.text.trim() ? await confirmDraft(result.text, "retry", violations(result.text, retry)) : ["empty_utterance"];

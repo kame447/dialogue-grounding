@@ -6,6 +6,9 @@ import { hash, verifyRecords } from '../dialogue-model/runtime/diagnostics/parit
 import { buildRecords, normal, OLD, OWN, runTurn } from './support/s4-v3-records.ts';
 import { researchTrialProfileV3 } from '../dialogue-model/runtime/v2/research-profile.ts';
 
+const orientationReason = '前の下書きに、自分側の見え方だと示されていない方位の語（上下左右・端・向き・斜め・縦長・横長など）がありました。公開発話では、回転しても変わらない形や部分同士のつながりに言い換えてください。方位が区別に必要なら、その語と同じ節で自分側の画面での見え方だと明示し、相手には形の対応を尋ねてください。';
+const sharedReason = '前の下書きは、相手側の位置や向きを自分側と同じだと断定していました。相手側の位置や向きは、相手自身の説明として引用するか、相手の見え方を尋ねてください。';
+
 test('holistic_v5 distinguishes local observations, attributed reports and questions from asserted shared orientation', () => {
   for (const text of [
     'こちらの画面では右端に切れ目があります。そちらにも切れ目がある形ですか？',
@@ -31,6 +34,46 @@ test('holistic_v5 distinguishes local observations, attributed reports and quest
 });
 
 for (const label of ['bypass-enabled', 'repair-first'] as const) {
+  test(`${label}: retry reason bytes follow the saved version and the two orientation codes`, async () => {
+    const unmarked = '右上に丸い突起がありますか？';
+    const partner = 'そちらの画面では左端に細い棒が見えます。';
+    const human = 'どんな形か教えてください。';
+    const next = '細い棒と丸い突起がつながっていますか？';
+    const versions = ['jev_generation_retry_v2', 'jev_generation_retry_v4'] as const;
+    const exercise = (draft: string, generationRetryVersion: (typeof versions)[number]) =>
+      buildRecords({ label, dialoguePolicy: 'holistic_v5', generationRetryVersion, technicalTrial: { version: 'adaptive_repair_v3' },
+        turns: [{ human, plan: { action: 'confirm', target: 'figure_0', drafts: [draft, next] } }] });
+    const statuses = (records: any) => verifyRecords(records).checks.filter(c => /^intervention\.trial\.0\.attempt\.0\./u.test(c.id)).map(c => c.status);
+    for (const version of versions) {
+      const scenarios = version === 'jev_generation_retry_v4'
+        ? [[unmarked, orientationReason], [partner, sharedReason], [unmarked + partner, orientationReason + sharedReason]]
+        : [[unmarked + partner, null]];
+      for (const [draft, reason] of scenarios) {
+        const records = await exercise(draft!, version);
+        assert.deepEqual(statuses(records), ['pass', 'pass', 'pass', 'pass']);
+        const replay = records.trials[0].replay[0];
+        assert.equal(replay.tape.generationRetryVersion, version);
+        for (const side of replay.result.sides) {
+          const retry = side.requests.filter((request: any) => request.phase === 'generation')[1];
+          const actual = retry.payload.messages.at(-1).content.split('\n').at(-1);
+          if (reason === null) assert.match(actual, /^前の下書きの方位の参照枠を明確にして書き直してください。/u);
+          else assert.equal(actual, reason);
+        }
+        if (reason === null) continue;
+        const altered = structuredClone(records);
+        const sides = altered.trials[0].replay[0].result.sides;
+        const otherIndex = sides.findIndex((side: any) => side.label !== label);
+        const other = sides[otherIndex];
+        const retry = other.requests.filter((request: any) => request.phase === 'generation')[1];
+        retry.payload.messages.at(-1).content = retry.payload.messages.at(-1).content.replace(reason, reason === sharedReason ? orientationReason : sharedReason);
+        retry.completeMessagesSha256 = hash(retry.payload.messages);
+        retry.payloadSha256 = retry.preProjectionPayloadSha256 = hash(retry.payload);
+        altered.evidence.pairedReplay[0][otherIndex === 0 ? 'left' : 'right'] = structuredClone(other);
+        assert.ok(statuses(altered).includes('mismatch'));
+      }
+    }
+  });
+
   test(`holistic_v5 ${label}: only a selected feature with orientation wording gets the adjacent viewpoint note`, async () => {
     const note = '以下のdiscriminatingFeatureにある上下左右・横長などの向きの語は、自分側の画面での見え方です。公開発話では、回転しても変わらない形や部分同士のつながりに言い換えてください。向きが区別に必要なら、その語と同じ節で「こちらの画面では」などと自分側の見え方だと明示し、相手には形の対応を尋ねてください。';
     const statuses = (records: any) => verifyRecords(records).checks.filter(c => /^intervention\.trial\.0\.attempt\.0\./u.test(c.id)).map(c => c.status);
@@ -102,7 +145,7 @@ for (const label of ['bypass-enabled', 'repair-first'] as const) {
     assert.deepEqual(JSON.parse(act.split('\n').at(-2)), { agreedName: '小舟', proposedNames: [name] });
     assert.doesNotMatch(act, /別枠の名前/u);
     assert.ok(gens[1].payload.messages.at(-1).content.includes(act));
-    assert.match(gens[1].payload.messages.at(-1).content, /参照枠を明確/u);
+    assert.ok(gens[1].payload.messages.at(-1).content.endsWith(sharedReason));
     const classify = side.requests.find((r: any) => r.phase === 'draft_naming');
     assert.match(classify.payload.questions.draft_naming.criteria.adopt_chosen, /nullでなく/u);
     assert.match(classify.payload.questions.draft_naming.criteria.adopt_other, /nullのとき/u);
