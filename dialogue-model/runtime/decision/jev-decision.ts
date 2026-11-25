@@ -375,7 +375,8 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
   const reserve = v3 ? JSON.stringify({ selected: { action: "request_observation", target: { kind: "multiple", figureIds: slots } } }).length : 0;
   // holistic_v5 (judgmentLedger present): the request is the compact written form of the same material; the budget is measured on what is sent.
   const v5 = ledgerActions !== undefined;
-  const render = (m: unknown) => JSON.stringify(v5 ? encodeMaterialV5(m, { actions: ledgerActions!, ...(nameLedger ? { nameLedger } : {}) }) : m);
+  const answers = new Map<number, string[]>(repairHistory.map(r => [r.turn, r.partnerClaims.map(c => c.id)]));
+  const render = (m: unknown) => JSON.stringify(v5 ? encodeMaterialV5(m, { actions: ledgerActions!, answers, ...(nameLedger ? { nameLedger } : {}) }) : m);
   const over = () => {
     state = render(material);
     return (v3 && selection ? render({ ...material, selected: undefined }).length : state.length) + reserve > 20000;

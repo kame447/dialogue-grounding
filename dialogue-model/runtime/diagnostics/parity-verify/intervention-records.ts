@@ -961,7 +961,7 @@ function rankProof(i:any,d:any,input:any):boolean{
  return !!expected&&expected.ranking.every((x:any)=>Number.isFinite(x.score))&&equal(expected,i.rerank);
 }
 // holistic_v5 writes the same material in a compact form (decision/judgment-material-v5.ts); S4 reads it back to the older shape before it re-derives anything.
-const LEGEND_V5='stateの記法: publicTurnsは全公開発話を番号順に一度ずつ並べた行（U番号 h=人間 / ai: 発話）です。claimsの各行は [claim id, 出典の発話番号, act, aspect, 対象, 名前, 返答先のclaim id, 命題, issueId] で、発言そのものは出典の発話番号の行を参照してください。f0〜f5はownSlotsの順の自分の図形です。figuresは図形ごとに、名称の状態（statusとname）と、これまでに実行した行動 [行動, 発話番号, 名前または特徴, 返答のclaim id] を並べた履歴です。';
+const LEGEND_V5='stateの記法: publicTurnsは全公開発話を番号順に一度ずつ並べた行（U番号 h=人間 / ai: 発話）です。claimsの各行は [claim id, 出典の発話番号, act, aspect, 対象, 名前, 返答先のclaim id, 命題, issueId] で、発言そのものは出典の発話番号の行を参照してください。f0〜f5はownSlotsの順の自分の図形です。issuesは局所の論点で、各行は [issue id, aspect, 対象, state, nameState, 名前, 最後の発話番号, claim id] です。figuresは図形ごとに、名称の状態（statusとname）と、これまでに実行した行動 [行動, 発話番号, 名前または特徴, 返答のclaim id] を並べた履歴です。';
 const parseMaterial=(text:string):any=>{const x=JSON.parse(text);return x?.view==='judgment_v5'?decodeMaterialV5(x):x;};
 const nativeInstructions=(s:any,layout='two_stage_v1',prospect=false)=>(layout==='two_stage_v3'?NATIVE.common.replace(NATIVE_V2.v1Stages,NATIVE_V3.stages):layout==='two_stage_v2'?NATIVE.common.replace(NATIVE_V2.v1Stages,NATIVE_V2.stages):NATIVE.common)+(Object.hasOwn(s,'humanReferent')?'\n'+NATIVE.referent:'')+(prospect&&Object.hasOwn(s,'repairProspect')?'\n'+ADAPT.prospect:'')+(CTX.facts?'\n'+ADAPT.facts:'')+(s?.view==='judgment_v5'?'\n'+LEGEND_V5:'');
 function originalQuestions(body:any,input:any,layout='two_stage_v1'):boolean|null{
