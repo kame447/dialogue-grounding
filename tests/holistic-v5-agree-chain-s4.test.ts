@@ -32,12 +32,13 @@ for (const label of ['bypass-enabled', 'repair-first'] as const) {
 }
 
 
-// A feature asked once is not asked again after an accept and a change of figure; S4 re-derives the same feature candidates from the written ledger.
+// A feature the partner answered is not asked again after an accept and a change of figure; S4 re-derives the same feature candidates from the written ledger.
 for (const label of ['bypass-enabled', 'repair-first'] as const) {
-  test(`holistic_v5 ${label}: a confirmed feature does not come back after an accept in between, and S4 derives the same candidates`, async () => {
+  test(`holistic_v5 ${label}: an answered feature does not come back after an accept in between, and S4 derives the same candidates`, async () => {
     const records = await buildRecords({ label, dialoguePolicy: 'holistic_v5', technicalTrial: { version: 'adaptive_repair_v3' }, turns: [
       { human: 'この図形の特徴を教えてください。', plan: { action: 'confirm', target: 'figure_0', referent: 'figure_0', speech: '特徴を一つ確かめさせてください。' } },
-      { human: '別の図形の話に移ります。', plan: { action: 'accept', target: 'figure_1', referent: 'figure_1', speech: '別の図形の話ですね。' } },
+      { human: 'はい、その特徴があります。別の図形の話に移ります。', plan: { action: 'accept', target: 'figure_1', referent: 'figure_1', speech: '別の図形の話ですね。', act: 'assert',
+        extraction: JSON.stringify([{ segmentId: 's1', quote: 'はい、その特徴があります。', proposition: 'その特徴がある', name: null, targets: [slot], aspect: 'part', linkedIssueId: null, respondsToTurn: 2 }]) } },
       { human: 'もう一度さっきの図形に戻って特徴を教えてください。', plan: { action: 'confirm', target: 'figure_0', referent: 'figure_0', speech: 'もう一つ特徴を確かめさせてください。' } },
     ] });
     const trial = records.trials[0], judgments = trial.lastCommittedState.judgments;

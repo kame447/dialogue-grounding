@@ -64,19 +64,33 @@ test('over the character budget the least relevant claims go first; names, repli
 const feature = (OLD.state.observationMemo as any)!.figures.find((f: any) => f.id === slots[1]).analytic.shapes[0] as string;
 const detailValues = (extra: Record<string, unknown>, previous: any) => Object.values<string>(buildJevDecisionDetailPayload(
   { ...input({ previousAction: previous }), nameLedger, ...extra }, { action: 'confirm', target: { kind: 'single', figureId: slots[1] } }, { questionLayout: 'two_stage_v3' })!.questions.feature.criteria).map(v => JSON.parse(v).value);
-const asked = [{ turn: 2, action: 'confirm', target: { kind: 'multiple', figureIds: [slots[1], slots[2]] }, name: null, feature }];
+const asked = [{ turn: 3, action: 'confirm', target: { kind: 'multiple', figureIds: [slots[1], slots[2]] }, name: null, feature }]; // turn 3 has the partner's answer c5 in the repair history
+const unanswered = [{ ...asked[0], turn: 2 }];
 const afterAccept = { turn: 6, action: 'accept', target: { kind: 'single', figureId: slots[1] }, name: null, feature: null };
 
 test('holistic_v5 never asks again a feature already asked of the figure, even after the scope narrowed or an accept in between; before v5 the unbroken same-scope run decides', () => {
   assert.ok(detailValues({}, afterAccept).includes(feature), 'before holistic_v5 the feature comes back');
   const v5 = detailValues({ judgmentLedger: asked }, afterAccept);
   assert.ok(!v5.includes(feature) && v5.length > 0);
+  // only an answered feature is excluded: one still without an answer, or whose answer was withdrawn, may be asked again
+  assert.ok(detailValues({ judgmentLedger: unanswered }, afterAccept).includes(feature));
+  const withdrawn = [claim('c1', 1, 'human', NAME, { aspect: 'name', act: 'name_propose', name: NAME }), claim('c5', 5, 'human', 'はい、二本です。', { targets: [slots[1]], respondsTo: 'c4' }),
+    claim('w7', 7, 'human', 'もう一度確かめたい。', { targets: [slots[1]], act: 'withdraw', respondsTo: 'c5' })];
+  assert.ok(detailValues({ judgmentLedger: asked, priorClaims: withdrawn }, afterAccept).includes(feature));
   // a revisit just before lifts the exclusion (the figure is looked at again)
   assert.ok(detailValues({ judgmentLedger: asked }, { ...afterAccept, action: 'revisit' }).includes(feature));
 });
 
-test('the rotation premise is part of the v5 instructions only', () => {
-  const sent = (extra: Record<string, unknown>) => Object.values<any>(buildJevDecisionPayload({ ...input(), nameLedger, ...extra }, { questionLayout: 'two_stage_v3', dialoguePolicy: 'holistic_v5' }).questions);
-  for (const q of sent({ judgmentLedger: ledger })) assert.match(q.instructions, /relative_pm90/u);
-  for (const q of sent({})) assert.doesNotMatch(q.instructions, /relative_pm90/u);
+test('the rotation premise is part of the v5 instructions only, and only for relative_pm90 (omitted means that original mode)', () => {
+  const sent = (extra: Record<string, unknown>) => buildJevDecisionPayload({ ...input(), nameLedger, ...extra }, { questionLayout: 'two_stage_v3', dialoguePolicy: 'holistic_v5' });
+  const texts = (p: any) => Object.values<any>(p.questions).map(q => q.instructions);
+  for (const extra of [{ judgmentLedger: ledger }, { judgmentLedger: ledger, rotationMode: 'relative_pm90' }]) {
+    for (const t of texts(sent(extra))) assert.match(t, /relative_pm90/u);
+  }
+  assert.equal(JSON.parse(sent({ judgmentLedger: ledger }).state).rotationMode, 'relative_pm90');
+  const zero = sent({ judgmentLedger: ledger, rotationMode: 'relative_0' });
+  for (const t of texts(zero)) { assert.doesNotMatch(t, /relative_pm90|90度/u); assert.ok(t.includes(JUDGMENT_V5_LEGEND)); }
+  assert.equal(JSON.parse(zero.state).rotationMode, 'relative_0');
+  for (const t of texts(sent({}))) assert.doesNotMatch(t, /relative_pm90/u);
+  assert.throws(() => sent({ judgmentLedger: ledger, rotationMode: 'relative_x' }), /invalid_input/u);
 });

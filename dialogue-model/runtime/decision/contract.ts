@@ -94,6 +94,8 @@ export type JevDecisionInput = {
   repairFacts?: RepairFact[];
   /** holistic_v5 only: every action executed in earlier turns. Its presence (even empty) selects the compact judgment material (decision/judgment-material-v5.ts). */
   judgmentLedger?: readonly LedgerAction[];
+  /** holistic_v5 only: the stimulus rotation of the trial. The rotation premise is stated only for relative_pm90 (omitted means that original mode). */
+  rotationMode?: "relative_pm90" | "relative_0";
 };
 export type DecisionInputBudget = {
   maxChars: 20000;

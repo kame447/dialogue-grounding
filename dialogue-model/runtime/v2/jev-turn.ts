@@ -165,6 +165,8 @@ export type JevTurnOptions = {
   questionLayout?: JevQuestionLayout;
   /** The policy the trial was created with (profile.dialoguePolicy); only two_stage_v3 reads it. */
   dialoguePolicy?: DialoguePolicy;
+  /** The stimulus rotation of the trial (holistic_v5 reads it); omitted means relative_pm90, the original mode. */
+  rotationMode?: "relative_pm90" | "relative_0";
   /** Offline replay can request the original retry wire text for a historical tape. */
   generationRetryVersion?: GenerationRetryVersion;
   client: ChatClient; ownImage: LocalOwnImage; ownAnchors: readonly LocalOwnAnchor[];
@@ -806,6 +808,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         if (options.dialoguePolicy === "holistic_v5") {
           baseInput.publicTurns = events.filter(e => e.seq <= latest.seq && (!aiEnabled || events.filter(other => other.seq === e.seq).length === 1))
             .map(e => ({ turn: e.seq, speaker: e.speaker, text: e.text }));
+          baseInput.rotationMode = options.rotationMode ?? "relative_pm90";
           baseInput.judgmentLedger = state.judgments.map(j => { const d = j.jevTurn.executed ?? j.jevTurn.decision;
             return { turn: j.turnIndex, action: d.action, target: d.target, name: d.name, feature: d.feature }; });
         }

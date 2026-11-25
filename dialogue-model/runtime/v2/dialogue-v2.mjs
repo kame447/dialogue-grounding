@@ -259,6 +259,7 @@ export function createDialogueV2(options) {
       ...(Object.hasOwn(options,'technicalTrial')?{technicalTrial:options.technicalTrial}:{}),
       ...(Object.hasOwn(options,'questionLayout')?{questionLayout:options.questionLayout}:{}),
       ...(options.dialoguePolicy ? { dialoguePolicy: options.dialoguePolicy } : {}),
+      ...(options.rotationMode ? { rotationMode: options.rotationMode } : {}),
       generationRetryVersion: options.generationRetryVersion,
       onJevTurnTrace, onLocalGroundingTrace, maxReobservations,
       generation: { task: TASK_INSTRUCTIONS_V2, instructions: holisticV5 ? HOLISTIC_V5_GENERATOR_INSTRUCTIONS_V2 : holisticV1 ? HOLISTIC_V3_GENERATOR_INSTRUCTIONS_V2 : v3Trial ? TRIAL_V3_GENERATOR_INSTRUCTIONS_V2 : options.technicalTrial ? TRIAL_GENERATOR_INSTRUCTIONS_V2 : GENERATOR_INSTRUCTIONS_V2,

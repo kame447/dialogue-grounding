@@ -9,7 +9,9 @@ export const JUDGMENT_VIEW_V5 = "judgment_v5";
 export type LedgerAction = { turn: number; action: JevAction; target: JevTarget; name: string | null; feature: string | null };
 export type MaterialV5Context = { actions: readonly LedgerAction[]; nameLedger?: Record<string, { status: string; name: string | null }>;
   /** Partner claims that answered each repair turn, taken before any repair history was trimmed for the budget. */
-  answers?: ReadonlyMap<number, readonly string[]> };
+  answers?: ReadonlyMap<number, readonly string[]>;
+  /** The stimulus rotation, written into the state so a verifier reads the same condition the instructions used. */
+  rotationMode?: string };
 /** Appended to every question's instructions of a holistic_v5 judgment request, and nowhere else. */
 export const JUDGMENT_V5_LEGEND = "stateの記法: publicTurnsは全公開発話を番号順に一度ずつ並べた行（U番号 h=人間 / ai: 発話）です。claimsの各行は" +
   " [claim id, 出典の発話番号, act, aspect, 対象, 名前, 返答先のclaim id, 命題, issueId] で、発言そのものは出典の発話番号の行を参照してください。" +
@@ -20,7 +22,7 @@ const unalias = (slots: readonly string[], f: string) => slots[Number(String(f).
 const line = (t: { turn: number; speaker: string; text: string }) => `U${t.turn} ${t.speaker === "human" ? "h" : "ai"}: ${t.text}`;
 const LINE = /^U(\d+) (h|ai): ([\s\S]*)$/u;
 
-export function encodeMaterialV5(material: any, { actions, nameLedger, answers: allAnswers }: MaterialV5Context): Record<string, unknown> {
+export function encodeMaterialV5(material: any, { actions, nameLedger, answers: allAnswers, rotationMode }: MaterialV5Context): Record<string, unknown> {
   const slots: string[] = material.ownSlots;
   const al = (ids: readonly string[]) => ids.map(id => alias(slots, id));
   const answers = allAnswers ?? new Map<number, string[]>(material.repairHistory.map((r: any) => [r.turn, r.partnerClaims.map((c: any) => c.id)]));
@@ -35,7 +37,7 @@ export function encodeMaterialV5(material: any, { actions, nameLedger, answers: 
     for (const id of ids) if (figures[alias(slots, id)]) figures[alias(slots, id)].actions.push(entry);
   }
   return {
-    view: JUDGMENT_VIEW_V5, turn: material.turn, ownSlots: slots,
+    view: JUDGMENT_VIEW_V5, ...(rotationMode ? { rotationMode } : {}), turn: material.turn, ownSlots: slots,
     publicTurns: material.publicTurns.map(line),
     observations: material.observations, ...compactIssues(material.issueSummary, slots, new Set(material.priorClaims.map((c: any) => c.id))),
     claims: material.priorClaims.map((c: any) => [c.id, c.sourceTurn, c.act, c.aspect, al(c.targets), c.name, c.respondsTo, c.proposition, c.issueId]),
