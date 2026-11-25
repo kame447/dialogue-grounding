@@ -1425,3 +1425,29 @@ for (const draft of [
     });
   });
 }
+
+// Audit 22n (NB-22N-2): the exemption for 「そちらでいう」 covers only the quoted phrase right after it. A direction word or a statement about
+// the partner's side later in the same clause is judged as before.
+const afterQuotation = [
+  'そちらでいう『3』は、左上にV字状のくぼみがありますね。',
+  'そちらでいう『星』は、そちらの上端に切れ目がありますよ。',
+  'そちらでいう『星』ですが、右上に穴があります。',
+  'そちらでいう『3』は、そちらの上端に切れ目がありますよ。',
+  '相手のいうことは分かりました、上の突起がとがっていますね。',
+];
+for (const draft of afterQuotation) {
+  for (const version of [v8, v9]) {
+    test(`Audit 22n ${version.slice(-2)} rejects both drafts of 「${draft}」 and publishes nothing, in both strategies`, async () => {
+      await pairedAs(version, trial => audit22Held(trial, draft, version));
+    });
+  }
+}
+test('Audit 22n v9 still publishes a draft whose quoted term is followed by a correspondence question', async () => {
+  const draft = 'そちらでいう『3』は、こちらの輪の切れ目に対応していますか？';
+  await pairedAs(v9, async trial => {
+    const turn = await trial.say({ ...broad, ...statedTurn, drafts: [draft], publicClaims: claimOf(draft) });
+    published(turn, 'accept', single(first), draft);
+    assert.deepEqual(turn.trace.generationGuard, { violations: [], regenerated: false, fallback: false });
+    assert.equal(turn.trace.generationRetryVersion, v9);
+  });
+});
