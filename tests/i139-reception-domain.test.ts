@@ -111,7 +111,7 @@ test('daily_seq3 formatting and internal day key follow explicitly specified JST
   assert.throws(() => format('unknown', 1));
 });
 
-test('dormant dialogue profiles can be read only with the fixed participant pin and usage profile', async () => {
+test('approval preserves the keyless default and round-trips explicit v12 with the required participant pin', async () => {
   const approve = need(mod, 'approveReception'), validate = need(mod, 'validateReceptionPlan');
   const terra = { schemaVersion: 'participant_model_pin_v3', terraModelId: 'gpt-6.1-terra',
     jevModelId: 'typesafe/jev-1.14-20261014' };
@@ -121,14 +121,18 @@ test('dormant dialogue profiles can be read only with the fixed participant pin 
     const input = protocol({ schemaVersion, referenceMemory: true, rotationMode: 'relative_pm90',
       ...(isV3 ? { figureSelection: { mode: 'preset', setId: 'legacy-v1' }, figureSetPolicy: 'shared' } : {}) });
     const canonical = need(mod, isV3 ? 'canonicalReceptionProtocolV3' : 'canonicalReceptionProtocolV2')(input);
-    const { plan } = await approve(pending(), { expectedRevision: 0, order: 0, protocol: input, approvedAt: now,
+    const options = { expectedRevision: 0, order: 0, protocol: input, approvedAt: now,
       expected: { protocolId, revision: 3, sha256: createHash('sha256').update(canonical).digest('hex') },
-      randomSeed: () => 7, ...participant, participantDialogueProfile: 'participant_dialogue_v12' });
+      randomSeed: () => 7, ...participant };
+    const { plan } = await approve(pending(), options);
     assert.equal(Object.hasOwn(plan, 'participantDialogueProfile'), false);
-    assert.deepEqual(validate(plan), plan);
-    for (const profile of ['participant_dialogue_v12', 'participant_dialogue_v13_p5']) {
-      const saved = { ...plan, participantDialogueProfile: profile };
-      assert.deepEqual(validate(saved), saved);
+    assert.deepEqual(validate(JSON.parse(JSON.stringify(plan))), plan);
+
+    const { plan: v12 } = await approve(pending(), { ...options, participantDialogueProfile: 'participant_dialogue_v12' });
+    assert.deepEqual(v12, { ...plan, participantDialogueProfile: 'participant_dialogue_v12' });
+    const v13 = { ...plan, participantDialogueProfile: 'participant_dialogue_v13_p5' };
+    for (const saved of [v12, v13]) {
+      assert.deepEqual(validate(JSON.parse(JSON.stringify(saved))), saved);
       assert.throws(() => validate({ ...saved, participantRuntimeProfile: undefined }), rejects('reception_unavailable'));
       assert.throws(() => validate({ ...saved, participantModelPin: { ...terra,
         schemaVersion: 'participant_model_pin_v1', lunaModelId: 'gpt-6-luna' } }), rejects('reception_unavailable'));
