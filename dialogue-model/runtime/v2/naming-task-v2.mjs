@@ -259,7 +259,19 @@ export async function createNamingTaskV2({
   const PERSIST_FAILURE_LIMIT = 20;
   const PERSIST_CODES = new Set(["record_build_failed", "record_store_rejected", "record_invalid", "owner_expired", "record_write_failed"]);
   // Sub-reasons of record_store_rejected (a store rejection folds several causes into one error code).
-  const PERSIST_REASONS = new Set(["cas_conflict", "owner_expired", "record_deleted", "owner_state_invalid", "store_invalid", "store_io", "size_limit", "store_unknown"]);
+  const PERSIST_REASONS = new Set(["cas_conflict", "owner_expired", "record_deleted", "owner_state_invalid", "store_invalid", "store_io", "size_limit", "store_unknown",
+    // Sub-reasons of record_build_failed: the record's own assembly threw before any write.
+    "build_state_invalid", "build_graph_invalid", "build_clone_failed", "build_unknown"]);
+  // Closed classification of a build exception; never its message, stack or text.
+  function buildReason(error) {
+    try {
+      if (error?.name === "DataCloneError") return "build_clone_failed";
+      const code = error?.code;
+      if (code === "invalid_state") return "build_state_invalid";
+      if (["invalid_graph", "missing_provenance", "future_antecedent", "invalid_retraction", "capacity_exceeded", "invalid_record", "duplicate_id"].includes(code)) return "build_graph_invalid";
+    } catch { /* A hostile getter is unknown. */ }
+    return "build_unknown";
+  }
   const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
   // A restored history is accepted only in the closed form this code writes.
   const persistFailures = Array.isArray(restore?.persistFailures) ? restore.persistFailures.filter((entry) =>
@@ -267,7 +279,7 @@ export async function createNamingTaskV2({
     .slice(-PERSIST_FAILURE_LIMIT).map(({ code, at, reason }) => ({ code, at, ...(PERSIST_REASONS.has(reason) ? { reason } : {}) })) : [];
   let persistStage = "build";
   function persistFailureFields(error) {
-    if (persistStage === "build") return { code: "record_build_failed" };
+    if (persistStage === "build") return { code: "record_build_failed", reason: buildReason(error) };
     switch (error?.code) {
       case "trial_unavailable": return { code: "record_store_rejected", reason: PERSIST_REASONS.has(error?.reason) ? error.reason : "store_unknown" };
       case "assignment_record_invalid": return { code: "record_invalid" };
