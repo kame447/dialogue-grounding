@@ -17,10 +17,11 @@ const outline = '折れた棒に小さな輪がついています。', alias = '
 const untargeted: Turn = { human: proposal, plan: { action: 'confirm', target: 'figure_0', referent: 'figure_0', name: alias, act: 'name_propose',
   extraction: JSON.stringify([seg('s1', proposal, 'name', [], alias)]), speech: '輪が細い棒につながる形ですか？' } };
 
-test('v11 is the default of a new v5 trial and contains v10', () => {
-  assert.equal(defaultGenerationRetryVersion('two_stage_v3', 'holistic_v5'), v11);
-  assert.deepEqual([v10, v11].map(isGenerationV10), [true, true]);
-  assert.deepEqual([v10, v11].map(isGenerationV11), [false, true]);
+const v12 = 'jev_generation_retry_v12';
+test('v12 is the default of a new v5 trial and contains v11 and v10', () => {
+  assert.equal(defaultGenerationRetryVersion('two_stage_v3', 'holistic_v5'), v12);
+  assert.deepEqual([v10, v11, v12].map(isGenerationV10), [true, true, true]);
+  assert.deepEqual([v10, v11, v12].map(isGenerationV11), [false, true, true]);
 });
 
 for (const label of ['bypass-enabled', 'repair-first'] as const) {
@@ -129,13 +130,13 @@ for (const label of ['bypass-enabled', 'repair-first'] as const) {
     buildRecords({ label, dialoguePolicy: 'holistic_v5', ...(version ? { generationRetryVersion: version as any } : {}), technicalTrial: { version: 'adaptive_repair_v3' }, turns: turns(human, drafts) });
   test(`${label}: a v11 trial publishes a paraphrased quotation of what the participant said on the first draft and rewrites a bracketed word they never said; S4 and replay agree`, async () => {
     const human = '輪の先が左を向いています。';
-    const ok = await build(undefined, human, [nowAccepted[0][0], confirming]);
+    const ok = await build(v11, human, [nowAccepted[0][0], confirming]);
     const a = ok.trials[0].attempts[0];
     assert.equal(a.generationRetryVersion, v11);
     assert.deepEqual(a.generationGuard, { violations: [], regenerated: false, fallback: false });
     assert.equal(a.publicSpeech, nowAccepted[0][0]);
     assert.deepEqual(statuses(ok), passed);
-    const held = await build(undefined, human, [nowRejected[0][0], confirming]);
+    const held = await build(v11, human, [nowRejected[0][0], confirming]);
     const b = held.trials[0].attempts[0];
     assert.equal(b.generationGuard.regenerated, true);
     assert.equal(b.publicSpeech, confirming);

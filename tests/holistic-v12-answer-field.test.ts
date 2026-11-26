@@ -181,13 +181,13 @@ for (const label of ['bypass-enabled', 'repair-first'] as const) {
   test(label + ': v11 neither asks for nor reads the label: the same labelled reply is not counted', async () => {
     const trial = verifiedTrial(await buildRecords(options(label, [genericCheck, affirmedV12, naming('confirm')])));
     assert.equal(counted(trial), false);
-    for (const side of trial.replay[0].result.sides) assert.ok(side.requests.every(request => !Object.keys((request.payload as MenuPayload | undefined)?.questions ?? {}).some(key => /_answer$/u.test(key))));
+    for (const side of trial.replay[0].result.sides) assert.ok(side.requests.every((request: { payload?: unknown }) => !Object.keys((request.payload as MenuPayload | undefined)?.questions ?? {}).some((key: string) => /_answer$/u.test(key))));
     stillClarifying(trial);
   });
 
   test(label + ': v12 asks the label question only on local classification', async () => {
     const trial = verifiedTrial(await buildRecords(options(label, [genericCheck, affirmedV12], v12)));
-    const keys = trial.replay[0].result.sides[0].requests.flatMap(request => Object.keys((request.payload as MenuPayload | undefined)?.questions ?? {})).filter(key => /_answer$/u.test(key));
+    const keys = trial.replay[0].result.sides[0].requests.flatMap((request: { payload?: unknown }) => Object.keys((request.payload as MenuPayload | undefined)?.questions ?? {})).filter((key: string) => /_answer$/u.test(key));
     assert.ok(keys.length >= 1);
   });
 }

@@ -110,7 +110,8 @@ test('NB-25N-7: a recorded partner-referent response is accepted only when the r
 // The mixed turn cannot be built through the harness (the verifier drops a second proposal that repeats an agreed one), so the shared functions are pinned directly.
 import { reconfirmationPossible } from '../dialogue-model/runtime/decision/naming-request.ts';
 test('NB-25N-8: reconfirmationPossible needs every proposal of the turn to name something already agreed', () => {
-  const agreedEarlier = [{ turnIndex: 3, jevTurn: { executed: { action: 'agree', name: '小さな鍵' } } }];
+  // What a saved judgment holds: the executed agree, and the judgment whose acts the check replays over an empty ledger (a defer would take the name out again).
+  const agreedEarlier = [{ turnIndex: 3, judgment: { action: 'agree', targetSlot: 'a', candidateName: '小さな鍵' }, jevTurn: { executed: { action: 'agree', name: '小さな鍵' } } }];
   const proposal = (name: string) => ({ speaker: 'human', act: 'name_propose', name, sourceTurn: 9 });
   const ledger = { a: { status: 'agreed', name: '小さな鍵' } };
   assert.equal(reconfirmationPossible([proposal('小さな鍵')], 9, agreedEarlier, ledger), true);
@@ -118,4 +119,6 @@ test('NB-25N-8: reconfirmationPossible needs every proposal of the turn to name 
   assert.equal(reconfirmationPossible([proposal('折れ棒'), proposal('小さな鍵')], 9, agreedEarlier, ledger), false, 'in either order');
   assert.equal(reconfirmationPossible([proposal('小さな鍵'), proposal('小さな鍵')], 9, agreedEarlier, ledger), true);
   assert.equal(reconfirmationPossible([], 9, agreedEarlier, ledger), false);
+  const deferred = [...agreedEarlier, { turnIndex: 5, judgment: { action: 'defer', targetSlot: 'a', candidateName: null }, jevTurn: { executed: { action: 'defer', name: null } } }];
+  assert.equal(reconfirmationPossible([proposal('小さな鍵')], 9, deferred, { a: { status: 'deferred', name: '小さな鍵' } }), false, 'a name agreed and then deferred is not a reconfirmation (audit 31)');
 });
