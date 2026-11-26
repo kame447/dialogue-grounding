@@ -1,5 +1,5 @@
 import { SLOTS } from "../stimuli/board.mjs";
-import { LOCAL_ASPECTS, LOCAL_ACTS, LOCAL_SOURCES } from "../local-grounding/contract.ts";
+import { LOCAL_ASPECTS, LOCAL_ACTS, LOCAL_SOURCES, LABELLED_ANSWER_SOURCE, LOCAL_QUESTION_ANSWER_SOURCE } from "../local-grounding/contract.ts";
 
 /**
  * Private, model-agnostic working memory. Never add this graph/summary to public
@@ -114,14 +114,16 @@ function checkRecord(record, ownSlots = SLOTS) {
         (record.epistemic === "hypothesis" && record.slots.length === 0) ||
         (record.epistemic === "grounded" && record.slots.length !== 1)) fail("invalid_mention");
   } else if (record.kind === "claim") {
+    const localQuestionAnswer = record.source === LOCAL_QUESTION_ANSWER_SOURCE;
+    const partnerSource = record.source === "partner_statement" || record.source === LABELLED_ANSWER_SOURCE || localQuestionAnswer;
     if (!ref(record.issueId) || !Array.isArray(record.targets) || !slots([...record.targets], true, ownSlots) || !LOCAL_ASPECTS.includes(record.aspect) ||
         !LOCAL_ACTS.includes(record.act) || record.act === "unknown" || !LOCAL_SOURCES.includes(record.source) ||
         !text(record.quote, 160) || !text(record.proposition, 160) || !["human", "ai"].includes(record.speaker) ||
         !index(record.sourceTurn) || record.sourceTurn === 0 || record.sourceTurn > record.turn ||
         !(record.respondsTo === null || ref(record.respondsTo)) ||
         !(record.name === null || (record.aspect === "name" && text(record.name, 160))) ||
-        (record.speaker === "human" && record.source !== "partner_statement" && record.source !== "partner_labelled_answer") ||
-        (record.speaker === "ai" && (record.source === "partner_statement" || record.source === "partner_labelled_answer")) ||
+        (record.speaker === "human") !== partnerSource ||
+        (localQuestionAnswer && (record.act !== "agree" || record.aspect !== "question" || record.targets.length !== 1)) ||
         (record.act === "construe" && record.aspect !== "construal") ||
         (record.act.startsWith("name_") && record.aspect !== "name")) fail("invalid_claim");
   } else if (record.kind === "feature") {

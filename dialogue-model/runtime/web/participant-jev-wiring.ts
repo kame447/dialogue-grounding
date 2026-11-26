@@ -11,6 +11,7 @@ import { createTrialV2, modelView } from '../stimuli/scatter-v2.mjs';
 import { STRATEGIES } from '../judgment/instructions.mjs';
 import { isLegacyFigureSelection, resolveFigureSelection, validateResolvedFigureSelection } from '../stimuli/figure-bank.ts';
 import { data } from '../v2/base-assignment-data.ts';
+import { usesDirectNamingReplies } from '../decision/naming-request.ts';
 import { privateDirectory, readPrivateAssignment } from './base-assignment-store.ts';
 import { researchHash, researchTrialProfileV3 } from '../v2/research-profile.ts';
 import type { ResearchTrialProfileV3 } from '../v2/research-profile.ts';
@@ -181,7 +182,7 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
     const requestedScope = v.newTrialAgreeNameScopeVersion;
     const newTrialAgreeNameScopeVersion = requestedScope === 'scoped_v7' ||
       requestedScope === 'scoped_v8' && v.ledger instanceof RunBudget ||
-      requestedScope === 'scoped_v9' && v.ledger instanceof ParticipantUsageLedger &&
+      usesDirectNamingReplies(requestedScope) && v.ledger instanceof ParticipantUsageLedger &&
         pinned?.generationRetryVersion === 'jev_generation_retry_v12' ? requestedScope : undefined;
     if (Object.hasOwn(v, 'newTrialAgreeNameScopeVersion') &&
         (newTrialAgreeNameScopeVersion === undefined ||
@@ -194,7 +195,7 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
     const savedScope = restore?.queueState?.privateState?.agreeNameScopeVersion;
     if (restore && (!validAgreeNameScope(savedScope, generationRetryVersion) ||
         savedScope === 'scoped_v8' && !(v.ledger instanceof RunBudget) ||
-        (savedScope === 'scoped_v9' || newTrialAgreeNameScopeVersion === 'scoped_v9') && savedScope !== newTrialAgreeNameScopeVersion)) return invalid();
+        (usesDirectNamingReplies(savedScope) || usesDirectNamingReplies(newTrialAgreeNameScopeVersion)) && savedScope !== newTrialAgreeNameScopeVersion)) return invalid();
     if (context.referenceMemory !== true) return invalid();
     if (!STRATEGIES.includes(context.strategy)) return invalid();
     if (context.legacy.some(v => v !== null && v !== undefined) || context.style !== profile.utteranceStyle) return invalid();
