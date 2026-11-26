@@ -1,6 +1,7 @@
 import { nameBindsFigure, meaningfulEstimate } from "./referent-binding.ts";
 import type { ReferentEstimateValue } from "./referent-binding.ts";
 import { directsToFigure, isFigureReplyAspect } from "../local-grounding/verify.ts";
+import { LABELLED_ANSWER_SOURCE } from "../local-grounding/contract.ts";
 import type { LocalClaimView, PublicTurn } from "../local-grounding/contract.ts";
 // holistic_v3 turn kinds from the turn's verified claims and the ledger before the turn. Pure and import-free: the run, the state validation, the participant restore
 // and S4 recompute the markers `namingRequest` and `namingReconfirm` with these functions.
@@ -90,6 +91,8 @@ const isFigureEvidence = (c: LocalClaimView) => c.name === null &&
 /** Find the figure supported by the open public exchange. Naming claims and
  * referent scores can suggest candidates; neither supplies figure evidence.
  * The caller supplies live claims and their public source turns. */
+/** The reply points to the figure by its own words, or (v12) was counted as the answer because the classifier's label said so. */
+const pointed = (reply: LocalClaimView, direct: boolean) => reply.source === LABELLED_ANSWER_SOURCE || directsToFigure(reply.quote, direct);
 export function publiclyCheckedNamingTarget(claims: readonly LocalClaimView[], publicTurns: readonly PublicTurn[],
   judgments: readonly NamingJudgmentLike[], turn: number, includeAgreed = false, scope: AgreeNameScopeVersion = "scoped_v2"): string | null {
   const directReferenceReplies = scope === "scoped_v5" || scope === "scoped_v6";
@@ -139,12 +142,12 @@ export function publiclyCheckedNamingTarget(claims: readonly LocalClaimView[], p
     if (reply.act === "assert" && reply.aspect === "referent") { answers.push(reply); continue; }
     const antecedent = reply.respondsTo === null ? undefined : ai.get(reply.respondsTo);
     if (directReferenceReplies && antecedent?.claim.act === "ask" && reply.act === "agree" &&
-        (reply.aspect === "question" || directsToFigure(reply.quote, true))) {
+        (reply.aspect === "question" || pointed(reply, true))) {
       // The original question must still be the direct antecedent, and a
       // newer live denial or reopening of that check voids this positive proof.
       const question = antecedent.claim;
       const previousTurn = publicTurns.filter(event => event.turn < reply.sourceTurn).at(-1);
-      if (previousTurn?.turn !== question.sourceTurn || !directsToFigure(reply.quote, true) ||
+      if (previousTurn?.turn !== question.sourceTurn || !pointed(reply, true) ||
           live.some(c => c.speaker === "human" && c.sourceTurn > reply.sourceTurn &&
             (c.respondsTo === question.id || c.respondsTo === reply.id || c.issueId === question.issueId ||
               c.aspect === "referent" && c.targets.includes(reply.targets[0])) &&
@@ -153,7 +156,7 @@ export function publiclyCheckedNamingTarget(claims: readonly LocalClaimView[], p
     if (reply.act === "agree" && antecedent && (antecedent.singleton || describedChecks.has(antecedent.claim.sourceTurn)) &&
         antecedent.claim.sourceTurn < reply.sourceTurn && antecedent.claim.aspect === reply.aspect &&
         antecedent.claim.targets.length === 1 && antecedent.claim.targets[0] === reply.targets[0] &&
-        (reply.aspect !== "question" || antecedent.claim.act === "ask" && antecedent.singleton && describedChecks.has(antecedent.claim.sourceTurn) && directsToFigure(reply.quote, directReferenceReplies))) {
+        (reply.aspect !== "question" || antecedent.claim.act === "ask" && antecedent.singleton && describedChecks.has(antecedent.claim.sourceTurn) && pointed(reply, directReferenceReplies))) {
       answers.push(reply); continue;
     }
     if (reply.act !== "assert" && reply.act !== "construe") continue;

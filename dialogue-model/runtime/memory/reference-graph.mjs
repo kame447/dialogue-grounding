@@ -118,8 +118,8 @@ function checkRecord(record, ownSlots = SLOTS) {
         !index(record.sourceTurn) || record.sourceTurn === 0 || record.sourceTurn > record.turn ||
         !(record.respondsTo === null || ref(record.respondsTo)) ||
         !(record.name === null || (record.aspect === "name" && text(record.name, 160))) ||
-        (record.speaker === "human" && record.source !== "partner_statement") ||
-        (record.speaker === "ai" && record.source === "partner_statement") ||
+        (record.speaker === "human" && record.source !== "partner_statement" && record.source !== "partner_labelled_answer") ||
+        (record.speaker === "ai" && (record.source === "partner_statement" || record.source === "partner_labelled_answer")) ||
         (record.act === "construe" && record.aspect !== "construal") ||
         (record.act.startsWith("name_") && record.aspect !== "name")) fail("invalid_claim");
   } else if (record.kind === "feature") {

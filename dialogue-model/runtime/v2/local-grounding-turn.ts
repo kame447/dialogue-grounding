@@ -1,6 +1,6 @@
 // One opt-in local interpretation transaction. Model work can only propose
 // operations; the dialogue queue still owns publication and state installation.
-import { LOCAL_ACTS, LOCAL_ASPECTS } from "../local-grounding/contract.ts";
+import { LOCAL_ACTS, LOCAL_ASPECTS, LOCAL_ANSWERS_CHECKED } from "../local-grounding/contract.ts";
 import type { LocalAct, LocalOwnImage, LocalOwnAnchor, LocalFunctionVerdict, LocalSegmentProposal, LocalGroundingOptions, PublicTurn, LocalRejection, LocalVerificationResult } from "../local-grounding/contract.ts";
 import { verifyLocalUpdate, recordAiClaims, applyVerifiedOperation, type LocalVerificationDiagnostic } from "../local-grounding/verify.ts";
 import { summarizeLocalIssues, priorClaimViews } from "../local-grounding/derive.ts";
@@ -31,7 +31,7 @@ type ResearchClaim = LocalVerificationResult["operations"][number] & { redacted?
 export type LocalGroundingResearchData = {
   extractor: { segments: Array<LocalSegmentProposal & { act?: LocalAct; redacted?: true }>; errorCode?: LocalExtractionErrorCode };
   classifier: { kind: LocalGroundingTrace["classifierKind"]; model: string | null; status: "not_called" | "ok" | "error" | "skipped";
-    callIndex: number | null; verdicts: Array<Pick<LocalFunctionVerdict, "segmentId" | "act" | "respondsToClaimId">>; errorCode?: LocalClassificationErrorCode };
+    callIndex: number | null; verdicts: Array<Pick<LocalFunctionVerdict, "segmentId" | "act" | "respondsToClaimId" | "answersChecked">>; errorCode?: LocalClassificationErrorCode };
   verification: { accepted: string[]; rejected: LocalRejection[]; diagnostics?: LocalVerificationDiagnostic[] };
   aiClaims: ResearchClaim[];
   claims: ResearchClaim[];
@@ -112,6 +112,8 @@ export async function prepareLocalGroundingTurn(options: LocalGroundingOptions, 
   referenceQuestionBindings?: ReadonlyMap<string, string>;
   directReferenceReplies?: boolean;
   refinedReplyRules?: boolean;
+  /** jev_generation_retry_v12: the classifier also labels whether an agree answers the checked point, and verification reads the label. */
+  answerFieldRules?: boolean;
   namingIntervalStart?: number;
   priorAct?: Parameters<typeof recordAiClaims>[0]["priorAct"];
 }): Promise<{ update: Update; trace: LocalGroundingTrace; research?: LocalGroundingResearchData }> {
@@ -239,7 +241,8 @@ export async function prepareLocalGroundingTurn(options: LocalGroundingOptions, 
     if (research) research.classifier.status = "error";
     try {
       verdicts = await options.classifier.classify({ turn: input.update.turn, publicTurns: structuredClone(publicTurns),
-        segments: structuredClone(segments), priorClaims }, { signal: controller.signal, timeoutMs: Math.max(1, Math.ceil(deadline - performance.now())) });
+        segments: structuredClone(segments), priorClaims }, { signal: controller.signal, timeoutMs: Math.max(1, Math.ceil(deadline - performance.now())),
+        ...(input.answerFieldRules === true ? { answerField: true } : {}) });
       if (research) research.classifier.status = classifierKind === "jev_local_test" ? "error" : "ok";
     } catch (error) {
       if (research) research.classifier.errorCode = classificationErrorCode(error);
@@ -259,11 +262,12 @@ export async function prepareLocalGroundingTurn(options: LocalGroundingOptions, 
         const recorded = research.extractor.segments.find(segment => segment.segmentId === segmentId);
         if (recorded) recorded.act = verdict.act;
         return [{ segmentId, act: verdict.act,
-          respondsToClaimId: priorClaims.some(claim => claim.id === verdict.respondsToClaimId) ? verdict.respondsToClaimId : null }];
+          respondsToClaimId: priorClaims.some(claim => claim.id === verdict.respondsToClaimId) ? verdict.respondsToClaimId : null,
+          ...(input.answerFieldRules === true && verdict.answersChecked !== undefined && LOCAL_ANSWERS_CHECKED.includes(verdict.answersChecked) ? { answersChecked: verdict.answersChecked } : {}) }];
       });
     }
     phase = "verification_failed";
-    const verified = verifyLocalUpdate({ graph, turn: input.update.turn, publicTurns, segments, verdicts, keepUnboundApproval: options.keepUnboundApproval === true, approvalFromNamedClaim: options.approvalFromNamedClaim === true, referenceQuestionBindings: input.referenceQuestionBindings, directReferenceReplies: input.directReferenceReplies, refinedReplyRules: input.refinedReplyRules, namingIntervalStart: input.namingIntervalStart });
+    const verified = verifyLocalUpdate({ graph, turn: input.update.turn, publicTurns, segments, verdicts, keepUnboundApproval: options.keepUnboundApproval === true, approvalFromNamedClaim: options.approvalFromNamedClaim === true, referenceQuestionBindings: input.referenceQuestionBindings, directReferenceReplies: input.directReferenceReplies, refinedReplyRules: input.refinedReplyRules, answerFieldRules: input.answerFieldRules, namingIntervalStart: input.namingIntervalStart });
     if (research && verified.diagnostics?.length) research.verification.diagnostics = verified.diagnostics
       .flatMap((diagnostic, index): LocalVerificationDiagnostic[] => {
         const segmentId = segmentCode(diagnostic.segmentId, index);

@@ -155,11 +155,12 @@ function session(strategy: Strategy, observation: Memo = memo, trialProfile = pr
           if (key === 'name' || key === 'feature') {
             choice = Object.keys(criteria).find(label => JSON.parse(criteria[label]).value === turn[key]);
           }
-          const segmentQuestion = /^segment_(\d+)_(act|antecedent|support)$/u.exec(key);
+          const segmentQuestion = /^segment_(\d+)_(act|antecedent|support|answer)$/u.exec(key);
           if (segmentQuestion) {
             const segment = (state.aiSeq !== undefined || segmentQuestion[2] === 'support' ? turn.publicClaims : turn.local)?.[Number(segmentQuestion[1])];
             assert.ok(segment, 'script missing a local claim');
             if (segmentQuestion[2] === 'act') choice = segment.act;
+            if (segmentQuestion[2] === 'answer') choice = 'unknown';
             if (segmentQuestion[2] === 'support') choice = 'expressed';
             if (segmentQuestion[2] === 'antecedent') {
               const antecedent = segment.antecedent;
@@ -838,7 +839,7 @@ test('New v5 keeps the input pending after two orientation violations and publis
     const before = trial.record();
     const turn = await trial.say({ ...broad, drafts: ['上端に穴があります。', '右端に穴があります。'] });
     assert.equal(turn.generationRequests.length, 2);
-    assert.equal(turn.trace.generationRetryVersion, 'jev_generation_retry_v11'); // the default of a new v5 trial
+    assert.equal(turn.trace.generationRetryVersion, 'jev_generation_retry_v12'); // the default of a new v5 trial
     assert.equal(turn.trace.errorCode, 'unsafe_generation');
     assert.equal(turn.trace.publicSpeech, null);
     assert.equal(turn.speech, null);
@@ -1241,7 +1242,7 @@ for (const strategy of strategies) {
 
 // Audit v9 (generation guard: the forms accepted as an own-side marker or a quotation of the partner's words).
 // Synthetic sentences only. v9 accepts the forms; v8 keeps its earlier judgment; the guard's standard itself is unchanged in both.
-const v8 = 'jev_generation_retry_v8', v9 = 'jev_generation_retry_v9', v10 = 'jev_generation_retry_v10', v11 = 'jev_generation_retry_v11';
+const v8 = 'jev_generation_retry_v8', v9 = 'jev_generation_retry_v9', v10 = 'jev_generation_retry_v10', v11 = 'jev_generation_retry_v11', v12 = 'jev_generation_retry_v12';
 async function pairedAs(version: string, check: (trial: ReturnType<typeof session>, strategy: Strategy) => Promise<void>) {
   const runs = await Promise.allSettled(strategies.map(async strategy => {
     const trial = session(strategy);
@@ -1318,7 +1319,7 @@ for (const [label, draft, code] of bothRejected) {
 test('Audit v9 v10 is the version a new holistic_v5 trial starts with, and a v8 record keeps v8 across a restore', async () => {
   await paired(async trial => {
     const turn = await trial.say({ ...broad, drafts: ['上端に穴があります。', '右端に穴があります。'] });
-    assert.equal(turn.trace.generationRetryVersion, v11);
+    assert.equal(turn.trace.generationRetryVersion, v12);
   });
   await pairedAs(v8, async trial => {
     await trial.restore();

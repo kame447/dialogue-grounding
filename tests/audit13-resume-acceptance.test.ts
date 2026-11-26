@@ -125,12 +125,13 @@ function session(profile: Profile, strategy: Label) {
             }
             case 'draft_naming': choice = action === 'agree' ? 'adopt_chosen' : 'none'; break;
             default: {
-              const match = /^segment_(\d+)_(act|antecedent|support)$/u.exec(key);
+              const match = /^segment_(\d+)_(act|antecedent|support|answer)$/u.exec(key);
               assert.ok(match, 'unexpected native question ' + key);
               const segments = Array.isArray(current.local) ? current.local : current.local ? [current.local] : [];
               const segment = aiPublic || match[2] === 'support' ? current.ai : segments[Number(match[1])];
               assert.ok(segment, key + ' must refer to a scripted public clause');
               if (match[2] === 'support') { choice = 'expressed'; break; }
+              if (match[2] === 'answer') { choice = 'unknown'; break; }
               if (match[2] === 'act') { choice = segment.act; break; }
               const antecedent = segment?.antecedent;
               if (!antecedent) {

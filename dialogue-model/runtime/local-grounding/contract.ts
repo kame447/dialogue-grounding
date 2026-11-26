@@ -56,7 +56,9 @@ export type LocalNameState = typeof LOCAL_NAME_STATES[number];
 /** Whose epistemic position a claim records. AI hypotheses are never facts. */
 /** `ai_bound_target` (jev_generation_retry_v9): an AI question whose extraction named no figure and whose single target the program bound from the published description. Only a reply that passes the direct pointing check may use that target. */
 export const AI_BOUND_SOURCE = "ai_bound_target" as const;
-export const LOCAL_SOURCES = Object.freeze(["own_observation", "partner_statement", "ai_hypothesis", AI_BOUND_SOURCE] as const);
+/** `partner_labelled_answer` (jev_generation_retry_v12): a partner agree that answers the AI's checked point because the classifier's closed label said so, not because the quote carries pointing words. Human claims only. */
+export const LABELLED_ANSWER_SOURCE = "partner_labelled_answer" as const;
+export const LOCAL_SOURCES = Object.freeze(["own_observation", "partner_statement", "ai_hypothesis", AI_BOUND_SOURCE, LABELLED_ANSWER_SOURCE] as const);
 export type LocalSource = typeof LOCAL_SOURCES[number];
 
 export type PublicTurn = { turn: number; speaker: "human" | "ai"; text: string };
@@ -110,7 +112,11 @@ export type LocalFunctionVerdict = {
   respondsToClaimId: string | null;
   /** Raw model score for research logs only. Uncalibrated; never a promotion threshold. */
   rawScore: number | null;
+  /** jev_generation_retry_v12 only: whether an agree answers the point the AI just checked (closed set). Absent in every earlier version, and read as "unknown" when absent. */
+  answersChecked?: LocalAnswersChecked;
 };
+export const LOCAL_ANSWERS_CHECKED = Object.freeze(["yes", "no", "unknown"] as const);
+export type LocalAnswersChecked = typeof LOCAL_ANSWERS_CHECKED[number];
 export type LocalClassificationInput = {
   turn: number;
   publicTurns: readonly PublicTurn[];
@@ -119,7 +125,7 @@ export type LocalClassificationInput = {
   priorClaims: readonly LocalClaimView[];
 };
 export type LocalFunctionClassifier = {
-  classify(input: LocalClassificationInput, options?: { signal?: AbortSignal; timeoutMs?: number }): Promise<LocalFunctionVerdict[]>;
+  classify(input: LocalClassificationInput, options?: { signal?: AbortSignal; timeoutMs?: number; /** jev_generation_retry_v12: also ask the answersChecked label. */ answerField?: boolean }): Promise<LocalFunctionVerdict[]>;
 };
 
 // ---- Step 3: program-owned records in the reference graph (kind "claim") ----

@@ -118,7 +118,7 @@ async function fixture(strategy: Label) {
           assert.equal(state.draft, draft.text);
           choice = draft.naming ?? 'none';
         }
-        const segmentQuestion = /^segment_(\d+)_(act|antecedent|support)$/u.exec(key);
+        const segmentQuestion = /^segment_(\d+)_(act|antecedent|support|answer)$/u.exec(key);
         if (segmentQuestion) {
           const [, index, field] = segmentQuestion;
           const claims = state.aiSeq !== undefined || field === 'support' ? turn.publicClaims : turn.local;
@@ -126,6 +126,7 @@ async function fixture(strategy: Label) {
           assert.ok(segment, key);
           if (field === 'act') choice = segment.act;
           if (field === 'support') choice = 'expressed';
+          if (field === 'answer') choice = 'unknown';
           if (field === 'antecedent') {
             choice = 'none';
             if (segment.antecedent) {

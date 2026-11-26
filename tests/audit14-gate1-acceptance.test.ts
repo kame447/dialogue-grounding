@@ -82,12 +82,13 @@ function trial(strategy: Label, savedVersion?: 'jev_generation_retry_v5' | 'jev_
           if (key === 'feature') choice = labels.find(label => JSON.parse(criteria[label]).value === turn.feature);
           if (key === 'name') choice = labels.find(label => JSON.parse(criteria[label]).value === alias);
           if (key === 'draft_naming') choice = action === 'agree' ? 'adopt_chosen' : 'none';
-          const match = /^segment_(\d+)_(act|antecedent|support)$/u.exec(key);
+          const match = /^segment_(\d+)_(act|antecedent|support|answer)$/u.exec(key);
           if (match) {
             const ai = state.aiSeq !== undefined || match[2] === 'support';
             const clause = (ai ? turn.ai : turn.local)?.[Number(match[1])];
             assert.ok(clause, key + ' has an extracted public clause');
             if (match[2] === 'act') choice = clause.act;
+            if (match[2] === 'answer') choice = 'unknown';
             if (match[2] === 'support') choice = 'expressed';
             if (match[2] === 'antecedent') {
               const index = clause.antecedent ? state.priorClaims?.findIndex(clause.antecedent) ?? -1 : -1;

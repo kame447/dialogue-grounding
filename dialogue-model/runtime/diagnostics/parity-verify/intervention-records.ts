@@ -9,12 +9,12 @@ import {nameBindsFigure} from '../../decision/referent-binding.ts';
 import {hasNameProposal,namingTurnKind,namingIntervalEstimates,inheritedTargetClaimIds,agreeCandidateAllowed,inheritsProposalName,targetNamingConflict,publiclyCheckedNamingTarget,usesPublicNamingTarget} from '../../decision/naming-request.ts';
 import {decodeMaterialV5} from '../../decision/judgment-material-v5.ts';
 import {isHolisticPolicy,isHolisticV2Plus,isHolisticV3Plus,isHolisticV4Plus} from '../../decision/contract.ts';
-import {generationGuardCodes,draftViolationCodes,deriveGenerationOutcome,orientationSafeFallback,findOrientationLeaks,v11RecentHumanTexts,hasOrientationWords,hasVersionedViewpoint,isGenerationV5,isGenerationV6,isGenerationV7,isGenerationV8,isGenerationV9,isGenerationV11,validGenerationRetryVersion,validAgreeNameScope,allowsOrientationFallback} from '../../v2/generation-guard.ts';
+import {generationGuardCodes,draftViolationCodes,deriveGenerationOutcome,orientationSafeFallback,findOrientationLeaks,v11RecentHumanTexts,hasOrientationWords,hasVersionedViewpoint,isGenerationV5,isGenerationV6,isGenerationV7,isGenerationV8,isGenerationV9,isGenerationV11,isGenerationV12,validGenerationRetryVersion,validAgreeNameScope,allowsOrientationFallback} from '../../v2/generation-guard.ts';
 import type {RecordedGenerationRetryVersion} from '../../v2/generation-guard.ts';
 import {checkModelIdentity} from '../../model-identity-contract.ts';
 import {resolveModelPolicy} from '../../model-policy.ts';
 import {verifyLocalUpdate,applyVerifiedOperation,bindPublishedReferenceQuestion,isFigureReplyAspect} from '../../local-grounding/verify.ts';
-import {AI_BOUND_SOURCE} from '../../local-grounding/contract.ts';
+import {AI_BOUND_SOURCE,LABELLED_ANSWER_SOURCE} from '../../local-grounding/contract.ts';
 import {check,hash,equal,row,rows,list,META_KEYS} from './core.ts';
 import type {Check,Records} from './core.ts';
 const POLICY='376d569120ca36a3eceaf5ab95410f7eb83f25fbb681e7566a684b97c35165c8';
@@ -426,6 +426,8 @@ function s4HumanProposedNames(tape:any,trace:any):Set<string>{
 function s4LocalReverify(tape:any,t:any,policy:string,after:any):'ok'|'mismatch'|'unknown'{
  // The ai_bound_target provenance exists only in v9 and later records (the same boundary the stored state is checked for).
  if(!isGenerationV9(tape?.generationRetryVersion)){const bound=(g:any)=>Array.isArray(g?.records)&&g.records.some((c:any)=>c?.kind==='claim'&&c.source===AI_BOUND_SOURCE);if(bound(after)||bound(tape?.state?.graph))return'mismatch';}
+ // The partner_labelled_answer provenance exists only in v12 records.
+ if(!isGenerationV12(tape?.generationRetryVersion)){const lab=(g:any)=>Array.isArray(g?.records)&&g.records.some((c:any)=>c?.kind==='claim'&&c.source===LABELLED_ANSWER_SOURCE);if(lab(after)||lab(tape?.state?.graph))return'mismatch';}
  const local=t?.local;
  if(!local||!Array.isArray(local.extractor?.segments)||!Array.isArray(local.classifier?.verdicts)||!Array.isArray(local.claims)||local.status!=='committed'&&local.status!=='staged'&&local.status!=='error')return'ok';
  if(local.localStatus!==undefined&&local.localStatus!=='ok')return'ok';
@@ -435,7 +437,7 @@ function s4LocalReverify(tape:any,t:any,policy:string,after:any):'ok'|'mismatch'
  const base={...after,records:after.records.filter((r:any)=>!(r?.kind==='claim'&&savedIds.has(r.id)))};
  const turn=t.turnIndex,publicTurns=(tape.events??[]).filter((e:any)=>e.seq<=turn).map((e:any)=>({turn:e.seq,speaker:e.speaker,text:String(e.text)}));
  const segments=local.extractor.segments.map(({act:_a,redacted:_r,...s}:any)=>s);
- const verdicts=local.classifier.verdicts.map((v:any)=>({segmentId:v.segmentId,act:v.act,respondsToClaimId:v.respondsToClaimId,rawScore:null}));
+ const verdicts=local.classifier.verdicts.map((v:any)=>({segmentId:v.segmentId,act:v.act,respondsToClaimId:v.respondsToClaimId,rawScore:null,...(isGenerationV12(tape.generationRetryVersion)&&v.answersChecked!==undefined?{answersChecked:v.answersChecked}:{})}));
  let applied:any[]=[],rejected:string[]=[];
  try{
   let referenceQuestionBindings:ReadonlyMap<string,string>|undefined;
@@ -451,7 +453,7 @@ function s4LocalReverify(tape:any,t:any,policy:string,after:any):'ok'|'mismatch'
     referenceQuestionBindings=bindPublishedReferenceQuestion(pending,prior,{turn:e.seq,speaker:e.speaker,text:e.text,nonReferential:e.nonReferential},turn,directReferenceReplies);
    }
   }
-  const verified:any=verifyLocalUpdate({graph:base,turn,publicTurns,segments,verdicts,keepUnboundApproval:true,approvalFromNamedClaim:isHolisticV4Plus(policy),referenceQuestionBindings,directReferenceReplies,refinedReplyRules:isGenerationV11(tape.generationRetryVersion),namingIntervalStart:(tape.state?.judgments??[]).filter((x:any)=>['agree','defer','move_on'].includes(x.judgment?.action)).at(-1)?.turnIndex??0} as any);
+  const verified:any=verifyLocalUpdate({graph:base,turn,publicTurns,segments,verdicts,keepUnboundApproval:true,approvalFromNamedClaim:isHolisticV4Plus(policy),referenceQuestionBindings,directReferenceReplies,refinedReplyRules:isGenerationV11(tape.generationRetryVersion),answerFieldRules:isGenerationV12(tape.generationRetryVersion),namingIntervalStart:(tape.state?.judgments??[]).filter((x:any)=>['agree','defer','move_on'].includes(x.judgment?.action)).at(-1)?.turnIndex??0} as any);
   rejected=verified.rejected.map((r:any)=>String(r.reason));
   const before=tape.state.graph;
   let update:any={expectedRevision:before.revision,turn,operations:[]};

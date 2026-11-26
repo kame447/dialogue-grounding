@@ -131,6 +131,7 @@ function session(label: Label, profile: ResearchTrialProfileV3) {
         if (key === 'human_referent') choice = 'figure_0';
         if (key === 'repair_issue' || key === 'basis' || /^segment_\d+_antecedent$/u.test(key)) choice = 'none';
         if (key === 'prospect') choice = 'no_open_issue';
+        if (/^segment_\d+_answer$/u.test(key)) choice = 'unknown';
         if (/^segment_\d+_act$/u.test(key)) {
           choice = current.publicReferent && key === 'segment_0_act' ? 'assert' : 'name_propose';
         }

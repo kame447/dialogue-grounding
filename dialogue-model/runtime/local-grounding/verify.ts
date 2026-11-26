@@ -1,6 +1,6 @@
 // The models propose interpretations; only this boundary assigns public evidence,
 // graph IDs and issue IDs. No score is used to promote an interpretation.
-import { AI_BOUND_SOURCE, LOCAL_ASPECTS, LOCAL_ACTS } from "./contract.ts";
+import { AI_BOUND_SOURCE, LABELLED_ANSWER_SOURCE, LOCAL_ASPECTS, LOCAL_ACTS, LOCAL_ANSWERS_CHECKED } from "./contract.ts";
 import type { AiPublicPending, LocalSegmentProposal, LocalFunctionVerdict, LocalVerificationResult, LocalClaimView, PublicTurn } from "./contract.ts";
 import { isBareDeictic, literalSpan, quoteAround } from "../judgment/public-evidence.mjs";
 import { SLOTS } from "../stimuli/board.mjs";
@@ -44,6 +44,8 @@ type VerificationInput = {
   directReferenceReplies?: boolean;
   /** jev_generation_retry_v11: an ask rewrites its aspect to the question's only when it answers that question or names no turn. */
   refinedReplyRules?: boolean;
+  /** jev_generation_retry_v12: an agree the classifier labelled as answering the checked point (answersChecked "yes") counts as the pointing reply the quote's own words would otherwise have to carry. */
+  answerFieldRules?: boolean;
   /** v11: the turn after which the current naming interval starts (the last agree, defer or move_on); a name proposal before it is never carried by an approval request. */
   namingIntervalStart?: number;
   graph: LocalGraph;
@@ -87,7 +89,7 @@ function opposesPointingReply(segment: LocalSegmentProposal, question: LocalClai
 const overlap = (a: readonly string[], b: readonly string[]) => a.some(slot => b.includes(slot));
 
 /** Only the CURRENT public human turn may supply a new segment's quote. */
-export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts, keepUnboundApproval = false, approvalFromNamedClaim = false, referenceQuestionBindings, directReferenceReplies = false, refinedReplyRules = false, namingIntervalStart = 0 }: VerificationInput): LocalVerifiedUpdate {
+export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts, keepUnboundApproval = false, approvalFromNamedClaim = false, referenceQuestionBindings, directReferenceReplies = false, refinedReplyRules = false, answerFieldRules = false, namingIntervalStart = 0 }: VerificationInput): LocalVerifiedUpdate {
   const result: LocalVerifiedUpdate = { operations: [], rejected: [] };
   // Revalidate JSON-restored graphs before using any model-selected pointer.
   snapshotReferenceGraph(graph);
@@ -114,7 +116,8 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     }
     const matches = verdicts.filter(v => v?.segmentId === segment.segmentId);
     const verdict = matches[0];
-    if (matches.length !== 1 || !exact(verdict, ["segmentId", "act", "respondsToClaimId", "rawScore"]) ||
+    if (matches.length !== 1 || !exact(verdict, answerFieldRules && matches.length === 1 && Object.hasOwn(verdict ?? {}, "answersChecked") ? ["segmentId", "act", "respondsToClaimId", "rawScore", "answersChecked"] : ["segmentId", "act", "respondsToClaimId", "rawScore"]) ||
+        verdict.answersChecked !== undefined && !LOCAL_ANSWERS_CHECKED.includes(verdict.answersChecked) ||
         !LOCAL_ACTS.includes(verdict.act) || !(verdict.respondsToClaimId === null || ref(verdict.respondsToClaimId) || independentActs.has(verdict.act)) ||
         !(verdict.rawScore === null || (typeof verdict.rawScore === "number" && Number.isFinite(verdict.rawScore)))) {
       reject("invalid_verdict"); continue;
@@ -149,7 +152,9 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     const checkedFigure = prior && (referenceQuestionBindings?.get(prior.id) ?? (prior.source === AI_BOUND_SOURCE ? prior.targets[0] : undefined));
     const boundQuestion = checkedFigure && prior?.act === "ask" && previousClaims.includes(prior) &&
       prior.targets.length === 1 && prior.targets[0] === checkedFigure ? prior : null;
-    const pointsToFigure = !!boundQuestion && directsToFigure(quote, directReferenceReplies);
+    // v12: the classifier's closed label stands in for the quote's pointing words; every other condition below (agree, no name, the question's only figure, nothing opposing) is unchanged.
+    const labelled = !!boundQuestion && !directsToFigure(quote, directReferenceReplies) && answerFieldRules && verdict.answersChecked === "yes";
+    const pointsToFigure = !!boundQuestion && (directsToFigure(quote, directReferenceReplies) || labelled);
     const agreesWithCheckedFigure = !!boundQuestion && pointsToFigure && act === "agree" && name === null &&
       (directReferenceReplies ? figureReplyAspects.has(aspect) && figureReplyAspects.has(boundQuestion.aspect) :
         aspect === "referent" && boundQuestion.aspect === "question") &&
@@ -162,6 +167,8 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
       reject("inconsistent_claim_response"); continue;
     }
     if (agreesWithCheckedFigure && boundQuestion) aspect = boundQuestion.aspect;
+    // v12: a reply counted because of the label (not the quote's own words) keeps that provenance in its claim, so the naming scope reads it the same way on later turns.
+    const labelledAnswer = agreesWithCheckedFigure && labelled;
     // v9: a supplied target is the question's only for a reply that passed the direct check. Any other reply that adds information
     // (agree was rejected above; assert and construe here) is judged against the question as extracted, which named no figure.
     if (prior && prior.source === AI_BOUND_SOURCE && !agreesWithCheckedFigure && ["agree", "assert", "construe"].includes(act)) prior = { ...prior, targets: [] };
@@ -256,7 +263,7 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     const issueId = prior?.issueId ?? linkedIssue ?? id;
     result.operations.push({ kind: "claim", id, issueId,
       targets, aspect, act, proposition: segment.proposition, name,
-      speaker: "human", sourceTurn: turn, quote, respondsTo: prior?.id ?? null, source: "partner_statement" });
+      speaker: "human", sourceTurn: turn, quote, respondsTo: prior?.id ?? null, source: labelledAnswer ? LABELLED_ANSWER_SOURCE : "partner_statement" });
     if (keepUnboundApproval && inheritedTargets) (result.diagnostics ??= []).push({ segmentId: segment.segmentId, reason: "targets_inherited", claimId: id, respondsToClaimId: prior!.id });
     if (overriddenIssue || droppedIssue) (result.diagnostics ??= []).push({ segmentId: segment.segmentId, reason: "issue_link_overridden",
       linkedIssueId: ref(proposedIssue) ? proposedIssue : null, resolvedIssueId: issueId });

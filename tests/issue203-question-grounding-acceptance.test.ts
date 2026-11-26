@@ -56,6 +56,10 @@ function answerTurn(human: string, act: string, aspect: LocalAspect, targets: st
 
 // A substantive answer to the question, without a bare pointing expression.
 const affirmed = answerTurn(answer, 'agree', 'contour', [first]);
+// v12: the classifier also labels the part as the answer to the point the AI checked.
+const v12 = 'jev_generation_retry_v12' as const;
+const labelled = (turn: Turn, answers: 'answers_checked_point' | 'not_an_answer' | 'unknown'): Turn => ({ ...turn, plan: { ...turn.plan, answers } });
+const affirmedV12 = labelled(affirmed, 'answers_checked_point');
 
 const publicFocus: Turn = {
   human: '切り込みのある形を見比べたいです。',
@@ -82,8 +86,8 @@ const anotherClue: Turn = {
   plan: { action: 'confirm', target: 'figure_0', referent: 'figure_0', speech: '形の特徴をもう少し確かめてもいいですか？' },
 };
 
-function options(label: Label, turns: Turn[]) {
-  return { label, dialoguePolicy: 'holistic_v5', generationRetryVersion: 'jev_generation_retry_v11',
+function options(label: Label, turns: Turn[], generationRetryVersion: 'jev_generation_retry_v11' | 'jev_generation_retry_v12' = 'jev_generation_retry_v11') {
+  return { label, dialoguePolicy: 'holistic_v5', generationRetryVersion,
     technicalTrial: { version: 'adaptive_repair_v3' }, turns, memo } as const;
 }
 
@@ -148,16 +152,16 @@ function stillClarifying(trial: Trial) {
 }
 
 for (const label of ['bypass-enabled', 'repair-first'] as const) {
-  test(label + ': #203 retains the typed feature answer to a generic AI question and permits adoption', { todo: 'D1 (G.1): counting a feature answer to a generic question needs the researcher decision' }, async () => {
-    checkAnswer(verifiedTrial(await buildRecords(options(label, [genericCheck, affirmed]))));
+  test(label + ': #203 retains the typed feature answer to a generic AI question and permits adoption', async () => {
+    checkAnswer(verifiedTrial(await buildRecords(options(label, [genericCheck, affirmedV12], v12))));
 
     // Probe the native menu before scripting an agree. On the old path this
     // identifies the unavailable agreement without injecting an illegal choice.
-    const probe = verifiedTrial(await buildRecords(options(label, [genericCheck, affirmed, naming('confirm')])));
+    const probe = verifiedTrial(await buildRecords(options(label, [genericCheck, affirmedV12, naming('confirm')], v12)));
     for (const side of probe.replay[0].result.sides) assert.ok(Object.hasOwn(menu(side, 'action'), 'agree'));
     assert.deepEqual(candidates(probe), [{ name, figureId: first, sourceTurn: 5 }]);
 
-    agreed(verifiedTrial(await buildRecords(options(label, [genericCheck, affirmed, naming('agree')]))), 5);
+    agreed(verifiedTrial(await buildRecords(options(label, [genericCheck, affirmedV12, naming('agree')], v12))), 5);
   });
 
   const backchannel = answerTurn('ええ。', 'acknowledge', 'question', [], 'none');
@@ -177,14 +181,14 @@ for (const label of ['bypass-enabled', 'repair-first'] as const) {
   }
 
   for (const [scenario, reply, remainsOffered] of [
-    ['an explicit feature answer', affirmed, false],
+    ['an explicit feature answer', affirmedV12, false],
     ['only a backchannel', backchannel, true],
     ['only a follow-up question', followUp, true],
   ] as const) {
-    test(label + ': #203 feature menu after accepting ' + scenario, reply === affirmed ? { todo: 'D1 (G.1): the explicit feature answer is accepted only after the researcher decision' } : { todo: 'the #203 bundle (same mechanism as G.3): a feature asked stays answered after only an acknowledgement or a question; fixed by T1b (decision/jev-decision.ts and S4 copy), not integrated yet' }, async () => {
+    test(label + ': #203 feature menu after accepting ' + scenario, reply === affirmedV12 ? {} : { todo: 'the #203 bundle (same mechanism as G.3): a feature asked stays answered after only an acknowledgement or a question; fixed by T1b (decision/jev-decision.ts and S4 copy), not integrated yet' }, async () => {
       // The interim accept makes this exercise history, independently of
       // de-duplication for adjacent confirms.
-      const trial = verifiedTrial(await buildRecords(options(label, [genericCheck, reply, anotherClue])));
+      const trial = verifiedTrial(await buildRecords(options(label, [genericCheck, reply, anotherClue], reply === affirmedV12 ? v12 : undefined)));
       assert.equal(before(trial).judgments[0].jevTurn.executed.feature, notch);
       if (reply === followUp) {
         assert.ok(priorClaimViews(before(trial).graph).some(claim =>

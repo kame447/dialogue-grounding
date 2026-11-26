@@ -38,6 +38,8 @@ export type Plan = { action: string; target: string; issue?: string; prospect?: 
   name?: string;
   /** The classifier's antecedent answer (`claim_0` etc.; default none), for a reply that must be linked to an earlier claim. */
   antecedent?: string;
+  /** jev_generation_retry_v12: the classifier's `*_answer` label (default unknown, which reads as no label). */
+  answers?: 'answers_checked_point' | 'not_an_answer' | 'unknown';
   /** Raw JSON text the AI-public extraction request returns (the AI's own claims about its public reply); default none. */
   aiExtraction?: string;
   /** Function labels by segment for the AI's public extraction. */
@@ -68,7 +70,7 @@ export async function runTurn(profile: any, label: Label, state: any, events: an
       const choice = key === 'action' ? lastAction : key === 'target' ? (lastAction === 'request_observation' ? 'figure_0' : plan.target) : key === 'repair_issue' ? plan.issue ?? 'none' : key === 'prospect' ? plan.prospect ?? 'uncertain'
         : key === 'name' && plan.name ? (labels.find(l => JSON.parse(q.criteria[l]).value === plan.name) ?? labels[0])
         : key === 'human_referent' && plan.referent ? plan.referent
-        : key === 'draft_naming' ? (plan.draftAct ?? (plan.action === 'agree' ? 'adopt_chosen' : 'none')) : key === 'basis' ? 'partner_uncertain' : key.endsWith('_antecedent') ? (plan.antecedent ?? 'none') : key.endsWith('_act') ? (publicAct ?? (plan.act && labels.includes(plan.act) ? plan.act : 'assert')) : key === 'observe_aspect' ? 'orientation' : labels[0];
+        : key === 'draft_naming' ? (plan.draftAct ?? (plan.action === 'agree' ? 'adopt_chosen' : 'none')) : key === 'basis' ? 'partner_uncertain' : key.endsWith('_antecedent') ? (plan.antecedent ?? 'none') : /^segment_\d+_answer$/u.test(key) ? (plan.answers ?? 'unknown') : key.endsWith('_act') ? (publicAct ?? (plan.act && labels.includes(plan.act) ? plan.act : 'assert')) : key === 'observe_aspect' ? 'orientation' : labels[0];
       if (!labels.includes(choice) && !(key === 'action' && plan.forceAction)) throw new Error(`scripted choice ${choice} is not offered for ${key}: ${labels.slice(0, 8)}`);
       answers[key] = { type: 'choice', choice, probabilities: Object.fromEntries(labels.map(l => [l, key === 'action' ? plan.actionScores?.[l] ?? (l === choice ? 1 : 0) : l === choice ? 1 : 0])) };
     }

@@ -8,6 +8,7 @@ import { buildLocalClassificationState, LOCAL_FUNCTION_CRITERIA, LOCAL_FUNCTION_
 import { isHolisticV3Plus } from "../decision/contract.ts";
 import type { JevQuestionLayout } from "../decision/contract.ts";
 import { LOCAL_ACTS } from "./contract.ts";
+import type { LocalAnswersChecked } from "./contract.ts";
 import type { LocalClassificationInput, LocalFunctionClassifier, LocalFunctionVerdict } from "./contract.ts";
 
 export const JEV_LOCAL_TEST_MODEL = "typesafe/jev-1.14";
@@ -46,7 +47,7 @@ export type JevChoiceEvidence = {
   costUsd: number | null;
   error: JevLocalTestErrorCode | null;
 };
-type ChoiceCallOptions = { signal?: AbortSignal; timeoutMs?: number };
+type ChoiceCallOptions = { signal?: AbortSignal; timeoutMs?: number; answerField?: boolean };
 export type JevChoiceTransport = {
   readonly lastEvidence: JevChoiceEvidence | null;
   readonly spentUsd: number;
@@ -105,7 +106,14 @@ const INSTRUCTIONS = [
 /** The original classifier's whitelist, with safe aliases for graph IDs containing ':'.
  * Choice <=255: https://openrouter.ai/blog/tutorials/how-to-use-jev/
  * Existing input bounds give <=64 questions and <=161 antecedent choices. */
-export function buildJevLocalTestPayload(input: LocalClassificationInput, questionLayout: JevQuestionLayout = "two_stage_v1", dialoguePolicy?: string): JevLocalTestPayload {
+/** jev_generation_retry_v12 only: a third closed question per segment, whether the part answers the point the AI just checked. `unknown` is listed first: a caller that takes the first label reads no answer. */
+export const ANSWERS_CHECKED_CRITERIA: Readonly<Record<string, string>> = Object.freeze({
+  unknown: "直前の公開AI発話に確かめた点がない、または答えかどうか公開上の根拠だけでは判定できない。",
+  not_an_answer: "確かめた点への答えではない。「分かりました」「なるほど」のような理解・納得の表明や相槌、質問、否定、別の話題、AIが確かめていない点への発言を含む。",
+  answers_checked_point: "直前の公開AI発話が確かめた点（図形の特徴・対応を確かめる質問）に対して、はい・そう・その通り・合っているなど、その内容を肯定して答えている。特徴を付け足していてもよい。",
+});
+const ANSWERS_CHECKED_LABEL: Readonly<Record<string, LocalAnswersChecked>> = Object.freeze({ answers_checked_point: "yes", not_an_answer: "no", unknown: "unknown" });
+export function buildJevLocalTestPayload(input: LocalClassificationInput, questionLayout: JevQuestionLayout = "two_stage_v1", dialoguePolicy?: string, answerField = false): JevLocalTestPayload {
   let state: string;
   try { state = buildLocalClassificationState(input); } catch { fail("invalid_request"); }
   const snapshot = JSON.parse(state) as State;
@@ -119,6 +127,10 @@ export function buildJevLocalTestPayload(input: LocalClassificationInput, questi
       "\nこの部分の局所機能を選んでください。根拠不足ならunknownです。", criteria: { ...(questionLayout === "two_stage_v3" ? isHolisticV3Plus(dialoguePolicy) ? LOCAL_FUNCTION_CRITERIA_HOLISTIC_V3 : LOCAL_FUNCTION_CRITERIA_V3 : LOCAL_FUNCTION_CRITERIA) } };
     questions[`segment_${i}_antecedent`] = { type: "choice", instructions: INSTRUCTIONS + scope +
       "\nこの部分が応答する先行命題を選んでください。前の質問の回答は参照できません。曖昧ならnone。", criteria: { ...antecedents } };
+  });
+  if (answerField) snapshot.segments.forEach((_s, i) => {
+    questions[`segment_${i}_answer`] = { type: "choice", instructions: INSTRUCTIONS + `\n判定対象はstate内のsegments[${i}]だけです。` +
+      "\nこの部分が、直前の公開AI発話が確かめた点への答えかどうかを選んでください。理解や納得を示すだけの返事は答えではありません。根拠不足ならunknownです。", criteria: { ...ANSWERS_CHECKED_CRITERIA } };
   });
   return { model: JEV_LOCAL_TEST_MODEL, state, questions };
 }
@@ -141,7 +153,11 @@ function parseChoices(raw: unknown, payload: JevLocalTestPayload): LocalFunction
     const prior = input.priorClaims.find((_c, n) => `claim_${n}` === antecedent);
     return { segmentId: s.segmentId, act: act.label, respondsToClaimId: prior?.id ?? null, rawScore: act.rawScore };
   });
-  try { return parseLocalFunctionVerdicts(verdicts, input); } catch { fail("invalid_response"); }
+  const answered = Object.hasOwn(payload.questions, "segment_0_answer") ? input.segments.map((_s, i) => ANSWERS_CHECKED_LABEL[choice(`segment_${i}_answer`).label]) : null;
+  try {
+    const parsed = parseLocalFunctionVerdicts(verdicts, input);
+    return answered ? parsed.map((v, i) => ({ ...v, answersChecked: answered[i] })) : parsed;
+  } catch { fail("invalid_response"); }
 }
 
 /** Shared fixed-model transport. Constructing/importing it reads no key.
@@ -283,7 +299,7 @@ export function createJevLocalTestClassifier(options: JevLocalTestOptions = {}):
     leaks: transport.leaks,
     async classify(input, callOptions = {}) {
       const callIndex = transport.callCount + 1;
-      return await transport.request(() => buildJevLocalTestPayload(input, options.questionLayout, options.dialoguePolicy), callOptions, (raw, payload) => {
+      return await transport.request(() => buildJevLocalTestPayload(input, options.questionLayout, options.dialoguePolicy, callOptions.answerField === true), callOptions, (raw, payload) => {
         const choices = parseChoices(raw, payload);
         // Keep the published result until transport finally publishes its successor.
         // At most the completed snapshot and this in-flight parse are retained.

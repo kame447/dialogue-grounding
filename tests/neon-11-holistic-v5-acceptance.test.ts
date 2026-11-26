@@ -106,6 +106,7 @@ function dialogue(profile: Profile, strategy: Label, checkpoint = start()) {
             choice = labels.find(label => JSON.parse(criteria[label]).value === expected);
           }
           if (key === 'segment_0_act') choice = turn.local?.act;
+          if (key === 'segment_0_answer') choice = 'unknown';
           if (key === 'segment_0_antecedent') {
             const antecedent = turn.local?.antecedent;
             choice = antecedent ? labels.find(label => criteria[label].includes(JSON.stringify(antecedent))) : 'none';

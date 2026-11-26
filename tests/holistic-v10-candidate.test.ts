@@ -13,8 +13,8 @@ const v8 = 'jev_generation_retry_v8', v9 = 'jev_generation_retry_v9', v10 = 'jev
 const said = ['こちらの図では、輪の切れ目から左下へ向かって、とがった左向きの先が見えます。'];
 const leaks = (text: string, version: string, human: readonly string[] = said) => findOrientationLeaks(text, 'holistic_v5', version as any, human);
 
-test('v10 contains v9 (v11 is now the default of a new v5 trial)', () => {
-  assert.equal(defaultGenerationRetryVersion('two_stage_v3', 'holistic_v5'), 'jev_generation_retry_v11');
+test('v10 contains v9 (v12 is now the default of a new v5 trial)', () => {
+  assert.equal(defaultGenerationRetryVersion('two_stage_v3', 'holistic_v5'), 'jev_generation_retry_v12');
   assert.deepEqual([v8, v9, v10].map(isGenerationV9), [false, true, true]);
   assert.deepEqual([v8, v9, v10].map(isGenerationV10), [false, false, true]);
 });

@@ -149,6 +149,7 @@ async function participant(t: TestContext, strategy: Label) {
           if (key === 'segment_0_support') choice = 'expressed';
         }
         if (isHumanLocal && key === 'segment_0_act') choice = script.act;
+        if (isHumanLocal && key === 'segment_0_answer') choice = 'unknown';
         if (isHumanLocal && key === 'segment_0_antecedent') {
           choice = 'none';
           if (script.antecedent) {

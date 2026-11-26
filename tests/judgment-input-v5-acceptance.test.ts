@@ -104,10 +104,11 @@ function session(profile: Profile, strategy: Label, start: Checkpoint) {
             }
             case 'draft_naming': choice = current.action === 'agree' ? 'adopt_chosen' : 'none'; break;
             default: {
-              const match = /^segment_(\d+)_(act|antecedent)$/u.exec(key);
+              const match = /^segment_(\d+)_(act|antecedent|answer)$/u.exec(key);
               const segment = match && segments[Number(match[1])];
               assert.ok(segment && match, 'each question must refer to an extracted clause');
               if (match[2] === 'act') { choice = segment.act; break; }
+              if (match[2] === 'answer') { choice = 'unknown'; break; }
               const antecedent = segment.antecedent;
               if (!antecedent) {
                 choice = 'none';
