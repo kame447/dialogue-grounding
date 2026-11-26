@@ -198,6 +198,7 @@ function abortIf(signal) {
  *   jevDecision?: import('../decision/contract.ts').JevDecisionClient | null, maxReobservations?: number, interventionPolicy?: import('./research-profile.ts').InterventionPolicyReference, decisionTimeoutMs?:number,
  *   technicalTrial?: import('../decision/contract.ts').AdaptiveRepairTrial,
  *   generationRetryVersion?: import('./jev-turn.ts').GenerationRetryVersion,
+ *   newTrialAgreeNameScopeVersion?: import('./jev-turn.ts').JevTurnOptions['newTrialAgreeNameScopeVersion'],
  *   onJevTurnTrace?: ((record: import('./jev-turn.ts').JevTurnTrace) => unknown) | null }} options
  * @returns {{slots: readonly string[], initialPrivateState(): any,
  *   initializePrivateState?: (options?: {signal?: AbortSignal}) => Promise<import('./jev-turn.ts').JevPrivateState>,
@@ -262,6 +263,7 @@ export function createDialogueV2(options) {
       ...(options.dialoguePolicy ? { dialoguePolicy: options.dialoguePolicy } : {}),
       ...(options.rotationMode ? { rotationMode: options.rotationMode } : {}),
       generationRetryVersion: options.generationRetryVersion,
+      newTrialAgreeNameScopeVersion: options.newTrialAgreeNameScopeVersion,
       onJevTurnTrace, onLocalGroundingTrace, maxReobservations,
       generation: { task: TASK_INSTRUCTIONS_V2, instructions: holisticV5 ? HOLISTIC_V5_GENERATOR_INSTRUCTIONS_V2 : holisticV1 ? HOLISTIC_V3_GENERATOR_INSTRUCTIONS_V2 : v3Trial ? TRIAL_V3_GENERATOR_INSTRUCTIONS_V2 : options.technicalTrial ? TRIAL_GENERATOR_INSTRUCTIONS_V2 : GENERATOR_INSTRUCTIONS_V2,
         ...(concise ? { concise: CONCISE_INSTRUCTIONS_V2 } : {}), actionScope: holisticV5 ? HOLISTIC_V5_ACTION_SCOPE_V2 : holisticV1 ? HOLISTIC_V3_ACTION_SCOPE_V2 : v3Trial ? TRIAL_V3_ACTION_SCOPE_V2 : options.technicalTrial ? TRIAL_ACTION_SCOPE_V2 : ACTION_SCOPE_V2,

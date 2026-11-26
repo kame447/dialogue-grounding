@@ -21,15 +21,18 @@ const turns = (antecedents: [string, string]): Turn[] => [
 ];
 for (const label of ['bypass-enabled', 'repair-first'] as const) {
   test(`holistic_v5 ${label}: agree stays available after two name-less approval requests and S4 and the dynamic replay verify it`, async () => {
-    const records = await buildRecords({ label, dialoguePolicy: 'holistic_v5', technicalTrial: { version: 'adaptive_repair_v3' }, turns: turns(['claim_0', 'claim_1']) });
-    const trial = records.trials[0], trace = trial.attempts[0];
-    assert.equal(trace.namingRequest, true);
-    assert.equal(trace.executed.action, 'agree');
-    // the name was said in the proposal, the first human turn after the public-basis exchange (turn 3)
-    assert.deepEqual(trial.lastCommittedState.judgments.at(-1).jevTurn.agreeNames, [{ name, figureId: slot, sourceTurn: 3 }]);
-    assert.equal(trial.replay[0].result.status, 'same_material_intervention_verified');
-    assert.equal(trial.replay[0].result.recordedPayloadsReproduced, true);
-    assert.deepEqual(verifyRecords(records).checks.filter(c => /^intervention\.trial\.0\.attempt\.0\./u.test(c.id)).map(c => c.status), ['pass', 'pass', 'pass', 'pass']);
+    for (const agreeNameScopeVersion of ['scoped_v6', 'scoped_v7'] as const) {
+      const records = await buildRecords({ label, dialoguePolicy: 'holistic_v5', agreeNameScopeVersion,
+        technicalTrial: { version: 'adaptive_repair_v3' }, turns: turns(['claim_0', 'claim_1']) });
+      const trial = records.trials[0], trace = trial.attempts[0];
+      assert.equal(trace.namingRequest, true);
+      assert.equal(trace.executed.action, 'agree');
+      // The name was said in the proposal, the first human turn after the public-basis exchange (turn 3).
+      assert.deepEqual(trial.lastCommittedState.judgments.at(-1).jevTurn.agreeNames, [{ name, figureId: slot, sourceTurn: 3 }]);
+      assert.equal(trial.replay[0].result.status, 'same_material_intervention_verified');
+      assert.equal(trial.replay[0].result.recordedPayloadsReproduced, true);
+      assert.deepEqual(verifyRecords(records).checks.filter(c => /^intervention\.trial\.0\.attempt\.0\./u.test(c.id)).map(c => c.status), ['pass', 'pass', 'pass', 'pass']);
+    }
   });
 }
 
