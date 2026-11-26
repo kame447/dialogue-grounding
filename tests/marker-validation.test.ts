@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { interventionForStrategy } from '../dialogue-model/runtime/decision/bypass-acceptance.ts';
-import { claimsLiveAsOf, reconfirmationPossible, turnNameProposals } from '../dialogue-model/runtime/decision/naming-request.ts';
+import { claimsLiveAsOf, reconfirmationPossible, traceMarkerInvalid, turnNameProposals } from '../dialogue-model/runtime/decision/naming-request.ts';
 import { verifyRecords } from '../dialogue-model/runtime/diagnostics/parity-verify/index.ts';
 import { validateJevPrivateStateV2 } from '../dialogue-model/runtime/v2/jev-turn.ts';
 import { buildRecords, OWN } from './support/s4-v3-records.ts';
@@ -96,3 +96,42 @@ for (const label of ['repair-first', 'bypass-enabled'] as const) {
     assert.throws(() => valid(rewritten), { code: 'invalid_state' });
   });
 }
+
+// Audit 31. The restore reads the claims a saved trace holds, in the view the run decided on.
+const gates = { markerAllowed: true, unmarkedChecked: true };
+const claim = (id: string, act: string, sourceTurn: number, respondsTo: string | null, name: string | null = null) =>
+  ({ kind: 'claim', id, act, sourceTurn, respondsTo, name, speaker: 'human', aspect: 'name', targets: [] as string[] });
+const judged = (turnIndex: number, action: string, targetSlot: string | null, name: string | null) =>
+  ({ turnIndex, judgment: { action, targetSlot, candidateName: name, discriminatingFeature: null }, jevTurn: { executed: { action, name } } });
+
+test('B-31A-1: a name approval that the same utterance withdraws is no proposal for the restore, with or without the withdrawn one in the trace', () => {
+  // Turn 4 asks "is that name all right?" (it carries the proposal of turn 2) and withdraws that proposal in the same utterance.
+  const trace = { turnIndex: 4, status: 'committed', local: { claims: [claim('4:local1', 'name_propose', 4, '2:local1', '月枠'), claim('4:local2', 'withdraw', 4, '2:local1')] } };
+  assert.equal(traceMarkerInvalid(trace, [], {}, gates), false, 'no marker is right: the run saw no live proposal');
+  assert.equal(traceMarkerInvalid({ ...trace, namingRequest: true }, [], {}, gates), true, 'a marker would contradict the run\'s own view');
+  // Without the withdrawal the same approval is a proposal, so the marker is required (the unchanged rule).
+  const asked = { turnIndex: 4, status: 'committed', local: { claims: [claim('4:local1', 'name_propose', 4, '2:local1', '月枠')] } };
+  assert.equal(traceMarkerInvalid(asked, [], {}, gates), true);
+  assert.equal(traceMarkerInvalid({ ...asked, namingRequest: true }, [], {}, gates), false);
+  // A withdrawal followed by an independent new name stays a proposal.
+  const renamed = { turnIndex: 4, status: 'committed', local: { claims: [claim('4:local2', 'withdraw', 4, '2:local1'), claim('4:local3', 'name_propose', 4, null, '月輪')] } };
+  assert.equal(traceMarkerInvalid(renamed, [], {}, gates), true);
+  assert.equal(traceMarkerInvalid({ ...renamed, namingRequest: true }, [], {}, gates), false);
+});
+
+test('B-31A-2: a name agreed and then deferred is not agreed when it is proposed again, so that turn is a request and never a reconfirmation', () => {
+  const proposal = [claim('8:local1', 'name_propose', 8, null, '星窓')];
+  const deferred = [judged(4, 'agree', 'figure_0', '星窓'), judged(6, 'defer', 'figure_0', null)];
+  const ledger = { figure_0: { status: 'deferred', name: '星窓' } };
+  assert.equal(reconfirmationPossible(proposal, 8, deferred, ledger), false);
+  const asReconfirm = { turnIndex: 8, status: 'committed', namingReconfirm: true, local: { claims: proposal } };
+  assert.equal(traceMarkerInvalid(asReconfirm, deferred, ledger, gates), true);
+  assert.equal(traceMarkerInvalid({ turnIndex: 8, status: 'committed', namingRequest: true, local: { claims: proposal } }, deferred, ledger, gates), false);
+  // While the agreement stands, the same proposal may be a reconfirmation; so after a feature-only repair, which leaves the ledger alone.
+  const kept = [judged(4, 'agree', 'figure_0', '星窓'), { turnIndex: 6, judgment: { action: 'repair', targetSlot: 'figure_0', candidateName: null, discriminatingFeature: '細い棒' }, jevTurn: { executed: { action: 'repair', name: null } } }];
+  assert.equal(reconfirmationPossible(proposal, 8, kept, { figure_0: { status: 'agreed', name: '星窓' } }), true);
+  // A name agreed, deferred and agreed again is agreed.
+  assert.equal(reconfirmationPossible(proposal, 10, [...deferred, judged(8, 'agree', 'figure_0', '星窓')], { figure_0: { status: 'agreed', name: '星窓' } }), true);
+  // A rename of the agreed name releases the old one.
+  assert.equal(reconfirmationPossible(proposal, 10, [judged(4, 'agree', 'figure_0', '星窓'), judged(6, 'repair', 'figure_0', '月窓')], { figure_0: { status: 'tentative', name: '月窓' } }), false);
+});

@@ -22,7 +22,8 @@ export const hasNameProposal = (claims: readonly NamingClaimLike[], turn: number
  * already killed. The decision of a turn derives its naming marker from this view (priorClaimViews), so a later withdrawal, rename or pruning cannot change it. */
 export function claimsLiveAsOf(records: readonly { kind?: unknown; id?: unknown; turn?: unknown; sourceTurn?: unknown; act?: unknown; respondsTo?: unknown; targetId?: unknown }[],
   turn: number): NamingClaimLike[] {
-  const known = records.filter(r => !!r && typeof r.turn === "number" && r.turn <= turn);
+  // A saved trace's claims carry no update turn; their source turn stands for it.
+  const known = records.filter(r => { const at = r && (typeof r.turn === "number" ? r.turn : r.sourceTurn); return typeof at === "number" && at <= turn; });
   const claims = known.filter(r => r.kind === "claim");
   const dead = new Set<unknown>(known.filter(r => r.kind === "retract").map(r => r.targetId));
   for (const c of claims) if (c.act === "withdraw" && c.respondsTo && !dead.has(c.id)) dead.add(c.respondsTo);
@@ -32,19 +33,43 @@ export function claimsLiveAsOf(records: readonly { kind?: unknown; id?: unknown;
   }
   return claims.filter(c => !dead.has(c.id)) as NamingClaimLike[];
 }
-export type NamingJudgmentEvidence = { turnIndex?: unknown; jevTurn?: { executed?: { action?: unknown; name?: unknown } | null } | null };
-/** Whether a reconfirmation marker is possible for `turn`: every proposal of the turn names something already agreed before it. A name was agreed before the turn when an
- * earlier judgment executed an agree on it; a ledger that holds it without any judgment at or after the turn agreeing it (a ledger the run started with) counts too.
- * The turn that first agreed a name, or a later one, can therefore never be a reconfirmation, whatever the ledger says afterwards. Uses only what a saved judgment
- * history holds: no graph, so pruning and renaming cannot change the answer. */
+export type NamingJudgmentEvidence = { turnIndex?: unknown; judgment?: { action?: unknown; targetSlot?: unknown; candidateName?: unknown; discriminatingFeature?: unknown; followUp?: unknown } | null;
+  jevTurn?: { executed?: { action?: unknown; name?: unknown } | null } | null };
+/** The names the judgments before `turn` left agreed, replayed over an empty ledger with the same acts the run applies (a judgment on no single figure and a feature-only
+ * repair leave the ledger alone). A later defer or repair of an agreed name takes it out again. */
+function namesAgreedBefore(judgments: readonly NamingJudgmentEvidence[], turn: number): Set<string> {
+  const ledger = new Map<string, { status: string; name: string | null }>();
+  const apply = (g: NonNullable<NamingJudgmentEvidence["judgment"]> | null | undefined) => {
+    if (!g || typeof g.targetSlot !== "string") return;
+    const slot = g.targetSlot, current = ledger.get(slot) ?? { status: "unassigned", name: null };
+    const name = typeof g.candidateName === "string" ? g.candidateName : null;
+    if (g.action === "repair") ledger.set(slot, name === null ? { status: "unassigned", name: null } : { status: "tentative", name });
+    else if (g.action === "agree") ledger.set(slot, { status: "agreed", name: name ?? current.name });
+    else if (g.action === "defer") ledger.set(slot, { status: "deferred", name: name ?? current.name });
+    else if (g.action === "revisit") ledger.set(slot, { status: current.status === "agreed" ? "agreed" : (name ?? current.name) === null ? "unassigned" : "tentative", name: name ?? current.name });
+    else if (g.action === "confirm" && name !== null) ledger.set(slot, { status: "tentative", name });
+    else if (name !== null && (g.action === "accept" || g.action === "propose_name")) ledger.set(slot, { status: current.status === "agreed" ? "agreed" : "tentative", name });
+  };
+  for (const x of judgments) {
+    if (typeof x?.turnIndex !== "number" || x.turnIndex >= turn || !x.judgment) continue;
+    const g = x.judgment;
+    if (g.action === "repair" && g.candidateName === null && g.discriminatingFeature !== null && g.discriminatingFeature !== undefined) continue;
+    apply(g);
+    if (g.followUp && typeof g.followUp === "object") apply(g.followUp as NonNullable<NamingJudgmentEvidence["judgment"]>);
+  }
+  return new Set([...ledger.values()].filter(e => e.status === "agreed" && typeof e.name === "string").map(e => namingNameKey(e.name as string)));
+}
+/** Whether a reconfirmation marker is possible for `turn`: every proposal of the turn names something the judgments before it left agreed (a name agreed and then deferred
+ * is not). A ledger that holds the name although no judgment ever agreed it (a ledger the run started with) counts too. The turn that first agreed a name, or a later one,
+ * can never be a reconfirmation, whatever the ledger says afterwards. Uses only what a saved judgment history holds: no graph, so pruning and renaming cannot change it. */
 export function reconfirmationPossible(proposals: readonly NamingClaimLike[], turn: number, judgments: readonly NamingJudgmentEvidence[], ledger: NamingLedgerLike): boolean {
   if (!proposals.length) return false;
-  const agrees = (name: string, before: boolean) => judgments.some(x => typeof x?.turnIndex === "number" && (before ? x.turnIndex < turn : x.turnIndex >= turn) &&
-    x.jevTurn?.executed?.action === "agree" && typeof x.jevTurn.executed.name === "string" && namingNameKey(x.jevTurn.executed.name) === name);
+  const before = namesAgreedBefore(judgments, turn);
+  const everAgreed = (key: string) => judgments.some(x => x?.jevTurn?.executed?.action === "agree" && typeof x.jevTurn.executed.name === "string" && namingNameKey(x.jevTurn.executed.name) === key);
   return proposals.every(p => {
     if (typeof p.name !== "string") return false;
     const key = namingNameKey(p.name);
-    return agrees(key, true) || !agrees(key, false) && Object.values(ledger ?? {}).some(e => e?.status === "agreed" && typeof e.name === "string" && namingNameKey(e.name) === key);
+    return before.has(key) || !everAgreed(key) && Object.values(ledger ?? {}).some(e => e?.status === "agreed" && typeof e.name === "string" && namingNameKey(e.name) === key);
   });
 }
 
@@ -237,4 +262,17 @@ export function targetNamingConflict(claims: readonly NamingClaimLike[], turn: n
 /** A name proposal that answers an earlier name proposal and carries its name (the approval request of local-grounding/verify.ts); from holistic_v4 the answered claim may also be a public adoption (name_accept) that carries the name. */
 export function inheritsProposalName(c: NamingClaimLike, claims: readonly NamingClaimLike[], fromNamedClaim = false): boolean {
   return c.act === "name_propose" && typeof c.respondsTo === "string" && claims.some(p => p.id === c.respondsTo && (p.act === "name_propose" || fromNamedClaim && p.act === "name_accept") && p.name === c.name);
+}
+
+/** Whether a saved trace's naming marker contradicts the claims live when its turn was decided (the restore's check, shared with its tests). A proposal the same utterance
+ * withdrew is not live, so it neither requires a marker nor makes one possible. `markerAllowed`: the version and layout carry markers at all; `unmarkedChecked`: the version
+ * requires a marker on every committed turn with a live proposal. */
+export function traceMarkerInvalid(trace: any, judgments: readonly NamingJudgmentEvidence[], ledger: NamingLedgerLike, { markerAllowed, unmarkedChecked }: { markerAllowed: boolean; unmarkedChecked: boolean }): boolean {
+  const requested = Object.hasOwn(trace, "namingRequest"), reconfirmed = Object.hasOwn(trace, "namingReconfirm"), marked = requested || reconfirmed;
+  const live = Array.isArray(trace.local?.claims) ? claimsLiveAsOf(trace.local.claims, trace.turnIndex) : null;
+  if (marked && (requested && trace.namingRequest !== true || reconfirmed && trace.namingReconfirm !== true || requested && reconfirmed || !markerAllowed ||
+      !live || !hasNameProposal(live, trace.turnIndex))) return true;
+  // A reconfirmation names only what an earlier turn left agreed. The state check cannot see a proposal the graph pruned, so the trace's own claims decide here.
+  if (reconfirmed && trace.status === "committed" && !reconfirmationPossible(turnNameProposals(live ?? [], trace.turnIndex), trace.turnIndex, judgments, ledger)) return true;
+  return !marked && unmarkedChecked && trace.status === "committed" && !!live && hasNameProposal(live, trace.turnIndex);
 }
