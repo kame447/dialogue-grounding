@@ -703,7 +703,7 @@ test('private Terra generation closes on missing configuration, wrong expected I
   assert.equal(posts, 2);
 });
 
-test('dormant P5 dialogue profile keeps management reads available and blocks starts and restores without reserving a slot', async () => {
+test('P5 dialogue profile keeps management reads available and blocks incomplete or mixed bindings', async () => {
   const h = harness();
   const proxy = new InternalParticipantProxy({}, settings);
   h.env.PARTICIPANT_TERRA_ALL_ROLES_ENABLED = 'on';
@@ -731,6 +731,7 @@ test('dormant P5 dialogue profile keeps management reads available and blocks st
     participantDialogueProfile: 'participant_dialogue_v12' }), 400, 'invalid_request');
 
   const p5Approved = { ...approved, plan: { ...approved.plan, participantDialogueProfile: 'participant_dialogue_v13_p5' } };
+  delete p5Approved.plan.memoryPruneVersion;
   await put({ 'reception:v1': p5Approved });
   const listing = await h.admin('/admin/receptions');
   assert.equal(listing.status, 200);
@@ -762,7 +763,7 @@ test('dormant P5 dialogue profile keeps management reads available and blocks st
   const originalOwner = await h.storage.get('base:owner:v1');
   const originalRecord = await h.storage.get(recordKey);
 
-  // Fixture from a future writer. A warm task must not be reused and an eviction must not cause a legacy restore.
+  // A profile change in a stored plan must not reinterpret either a warm or a cold keyless trial.
   const marked = structuredClone(existing);
   marked.plan.participantDialogueProfile = 'participant_dialogue_v13_p5';
   const sent = h.calls.length;
@@ -1389,6 +1390,10 @@ test('pinned capabilities have their own Service entrypoint and no public HTTP r
 });
 
 const v12Dialogue = 'participant_dialogue_v12';
+const v13Dialogue = 'participant_dialogue_v13_p5';
+const p5Question = 'どのような形に見えますか？';
+const p5Reading = '鳥のような形に見えます。';
+const p5Support = '私にも鳥に見えます。';
 const v12Check = '細い部分がつながっています。そちらの形にも半円の切り込みがありますか？';
 const v12Answer = 'はい、こちらの形にも半円の切り込みがあります。';
 
@@ -1405,7 +1410,7 @@ function v12Transport(t: TestContext, h: ReturnType<typeof harness>) {
   let decisionSlot: string;
   const textPhases: string[] = [];
   const prompts: { phase: string; system: string[] }[] = [];
-  const options = { wrongPhase: '', rewrite: false, quotedDraft: false };
+  const options = { wrongPhase: '', rewrite: false, quotedDraft: false, sharedReading: false };
   function segment(quote: string, aspect: string, targets: string[], respondsToTurn: number | null = null) {
     return { segmentId: quote.slice(0, 4), quote, aspect, targets, proposition: quote, name: null, linkedIssueId: null, respondsToTurn };
   }
@@ -1413,13 +1418,15 @@ function v12Transport(t: TestContext, h: ReturnType<typeof harness>) {
     const material = JSON.parse(body.state);
     const criteria = body.questions[name].criteria;
     if (name === 'human_referent' || name === 'target') return 'figure_0';
+    if (options.sharedReading && name === 'shared_construal') return 'use_0';
+    if (options.sharedReading && /^segment_\d+_act$/u.test(name)) return material.aiSeq !== undefined ? 'construe' : 'agree';
     if (/^segment_\d+_act$/u.test(name)) {
       return material.aiSeq !== undefined
         ? Number(name.split('_')[1]) === 1 ? 'ask' : 'assert' : 'agree';
     }
-    if (/^segment_\d+_answer$/u.test(name)) return 'answers_checked_point';
+    if (/^segment_\d+_answer$/u.test(name)) return options.sharedReading ? 'unknown' : 'answers_checked_point';
     if (name.endsWith('_antecedent') && material.aiSeq === undefined) {
-      const index = material.priorClaims?.findLastIndex((c: { act: string }) => c.act === 'ask');
+      const index = material.priorClaims?.findLastIndex((c: { act: string }) => c.act === (options.sharedReading ? 'construe' : 'ask'));
       return index >= 0 && Object.hasOwn(criteria, 'claim_' + index) ? 'claim_' + index : 'none';
     }
     return undefined;
@@ -1446,18 +1453,25 @@ function v12Transport(t: TestContext, h: ReturnType<typeof harness>) {
       const state = JSON.parse(body.messages.slice(1).map((m: { content: string }) => m.content.split('\n').at(-1)).join(''));
       const latest = state.publicTurns.at(-1);
       decisionSlot = state.ownSlots[0];
-      response = JSON.stringify(latest.text === v12Answer
-        ? [segment(v12Answer, 'contour', [], latest.turn - 1)] : []);
+      response = JSON.stringify(options.sharedReading
+        ? latest.text === p5Support ? [segment(p5Support, 'construal', [decisionSlot], latest.turn - 1)] : []
+        : latest.text === v12Answer ? [segment(v12Answer, 'contour', [], latest.turn - 1)] : []);
     } else if (first === MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS) {
       phase = 'ai_extraction';
-      response = JSON.stringify([segment('細い部分がつながっています。', 'part', [decisionSlot]),
-        segment('そちらの形にも半円の切り込みがありますか？', 'question', [])]);
+      if (options.sharedReading) {
+        const { candidateText } = JSON.parse(body.messages[1].content);
+        response = JSON.stringify(candidateText === p5Reading ? [segment(p5Reading, 'construal', [decisionSlot])] : []);
+      } else {
+        response = JSON.stringify([segment('細い部分がつながっています。', 'part', [decisionSlot]),
+          segment('そちらの形にも半円の切り込みがありますか？', 'question', [])]);
+      }
     } else if (last.includes('JSON')) {
       phase = 'final_submission';
       response = JSON.stringify(Object.fromEntries(slots.map(id => [id, null])));
     } else {
       phase = last.includes('公開発話を書き直してください') ? 'rewrite' : 'generation';
-      response = options.rewrite && phase === 'generation' ? 'human_referent'
+      response = options.sharedReading ? (last === p5Question ? p5Reading : 'なるほど。')
+        : options.rewrite && phase === 'generation' ? 'human_referent'
         : options.quotedDraft ? v12Check + '「輪」に見えるところを教えてください。' : v12Check;
       options.rewrite = false;
     }
@@ -1615,16 +1629,17 @@ test('U6-B approval rejects unsupported environment and missing v3 before sendin
   const transport = v12Transport(t, h);
   await h.receive();
   const before = await h.storage.get('reception:v1');
-  for (const profile of ['participant_dialogue_v13_p5', 'unknown']) {
+  h.env.PARTICIPANT_DIALOGUE_PROFILE = 'unknown';
+  await assert.rejects(h.approve(), { code: 'reception_unavailable' });
+  for (const profile of [v12Dialogue, v13Dialogue]) {
     h.env.PARTICIPANT_DIALOGUE_PROFILE = profile;
+    h.env.PARTICIPANT_TERRA_PROFILE = PARTICIPANT_PRODUCTION_PROFILE;
+    h.env.PARTICIPANT_TERRA_ALL_ROLES_ENABLED = undefined;
+    await assert.rejects(h.approve(), { code: 'reception_unavailable' });
+    h.env.PARTICIPANT_TERRA_ALL_ROLES_ENABLED = 'on';
+    h.env.PARTICIPANT_TERRA_PROFILE = undefined;
     await assert.rejects(h.approve(), { code: 'reception_unavailable' });
   }
-  h.env.PARTICIPANT_DIALOGUE_PROFILE = v12Dialogue;
-  h.env.PARTICIPANT_TERRA_ALL_ROLES_ENABLED = undefined;
-  await assert.rejects(h.approve(), { code: 'reception_unavailable' });
-  h.env.PARTICIPANT_TERRA_ALL_ROLES_ENABLED = 'on';
-  h.env.PARTICIPANT_TERRA_PROFILE = undefined;
-  await assert.rejects(h.approve(), { code: 'reception_unavailable' });
   assert.deepEqual(await h.storage.get('reception:v1'), before);
   assert.deepEqual(transport.textPhases, []);
   assert.deepEqual(h.calls, []);
@@ -1765,5 +1780,93 @@ for (const strategy of ['repair-first', 'bypass-enabled']) {
     assert.deepEqual(requests.filter(keys => keys.some(k => ['action', 'target', 'feature'].includes(k))),
       repair ? [['action'], ['target'], ['feature']] : [['action'], ['target']]);
     t.diagnostic(JSON.stringify({ strategy, posts: requests.length, decisionAndVetoDetail: repair ? 3 : 2 }));
+  });
+}
+
+for (const order of [['repair-first', 'bypass-enabled'], ['bypass-enabled', 'repair-first']]) {
+  test('U6 v13 P5 keeps the approved profile, adoption and cold restore in order ' + order[0], async t => {
+    const receptionProtocol = order[0] === 'repair-first' ? figureBankProtocol : protocol;
+    const h = harness(true, { ...receptionProtocol, allowedOrders: [order] });
+    const transport = v12Transport(t, h);
+    transport.options.sharedReading = true;
+    h.controlled.selectedAction = 'accept';
+    h.env.PARTICIPANT_DIALOGUE_PROFILE = v13Dialogue;
+    await h.receive();
+    const approval = await h.approve();
+    assert.equal(approval.plan.participantDialogueProfile, v13Dialogue);
+    assert.equal(approval.plan.participantModelPin.schemaVersion, 'participant_model_pin_v3');
+    assert.equal(approval.plan.memoryPruneVersion, CLAIM_PRUNE_V2);
+    h.env.PARTICIPANT_DIALOGUE_PROFILE = v12Dialogue;
+    h.evict();
+
+    let predecessor: string | undefined;
+    for (const strategy of order) {
+      const { trial } = await jsonOk(await h.start(predecessor));
+      assert.doesNotMatch(JSON.stringify(trial), /participantDialogueProfile|scoped_v7|holistic_v5|claim_prune_v2/u);
+      const id = trial.sessionId, key = 'record:' + id;
+      const start = await h.storage.get(key);
+      assert.equal(start.strategy, strategy);
+      assert.equal(start.assignment.source.plan.participantDialogueProfile, v13Dialogue);
+      assert.equal(start.options.participantDialogueProfile, v13Dialogue);
+      assert.deepEqual(start.options.participantModelPin, approval.plan.participantModelPin);
+      assert.equal(start.options.memoryPruneVersion, CLAIM_PRUNE_V2);
+      assert.equal(start.queueState.privateState.graph.memoryPruneVersion, CLAIM_PRUNE_V2);
+      assert.equal(start.queueState.privateState.agreeNameScopeVersion, 'scoped_v7');
+      assert.equal(start.options.questionLayout, 'two_stage_v3');
+      assert.equal(start.options.dialoguePolicy, 'holistic_v5');
+      assert.equal(start.options.generationRetryVersion, 'jev_generation_retry_v13');
+      assert.equal(start.options.jevNamingRestoreVersion, 'ai_name_acceptances_v1');
+      assert.deepEqual(start.options.technicalTrial, { version: 'adaptive_repair_v3' });
+
+      const send = (text: string) => h.request('message', { expectedRecordId: id, text });
+      const promptStart = transport.prompts.length, callStart = h.calls.length;
+      await jsonOk(await send(p5Question));
+      await h.idle();
+      await jsonOk(await send(p5Support));
+      await h.idle();
+      const stored = await h.storage.get(key);
+      assert.equal(stored.queueState.errorCode, null);
+      const trace = stored.jevTraces.at(-1);
+      assert.equal(trace.status, 'committed');
+      assert.equal(trace.publicSpeech, 'なるほど。');
+      assert.equal(trace.sharedConstruals.length, 1);
+      assert.deepEqual(trace.executed.sharedClaimIds, trace.sharedConstruals[0].claimIds);
+      assert.deepEqual(stored.queueState.privateState.ledger, start.queueState.privateState.ledger);
+      assert.deepEqual(stored.jevLedger.returnedModels.jev.detail, { model: pin.jevModelId, ok: 1 });
+      const sentChoices = h.calls.slice(callStart).filter(x => x.kind === 'choices');
+      for (const key of ['human_referent', 'action', 'target', 'shared_construal']) {
+        const prompt = sentChoices.find(x => Object.hasOwn(x.body.questions, key))?.body.questions[key].instructions;
+        assert.match(prompt ?? '', /相手の画面での図形の場所/u, key);
+      }
+      const prompts = transport.prompts.slice(promptStart);
+      assert.match(prompts.find(p => p.phase === 'dialogue')?.system[0] ?? '', /場所しか手がかりのない部分はtargets: \[\]/u);
+      const generation = prompts.filter(p => p.phase === 'generation').at(-1)?.system.join('\n') ?? '';
+      assert.match(generation, /場所だけでは自分のどの図形か決まりません/u);
+      assert.match(generation, /大まかな共同参照の目印/u);
+
+      const sent = h.calls.length;
+      h.evict();
+      const restored = (await jsonOk(await h.request('state'))).trial;
+      assert.equal(restored.sessionId, id);
+      assert.equal(h.calls.length, sent);
+      assert.deepEqual((await h.storage.get(key)).queueState.privateState, stored.queueState.privateState);
+      await jsonOk(await send('続けましょう。'));
+      await h.idle();
+      const continuing = await h.storage.get(key);
+      assert.equal(continuing.jevTraces.at(-1).status, 'committed');
+      assert.equal(continuing.jevTraces.at(-1).generationRetryVersion, 'jev_generation_retry_v13');
+      await h.complete(id, (await jsonOk(await h.request('state'))).trial);
+      const completed = await h.storage.get(key);
+      assert.equal(completed.status, 'completed');
+      assert.deepEqual(completed.jevLedger.returnedModels.luna, {});
+      if (predecessor === undefined) {
+        await h.storage.transaction(tx => tx.put({ [key]: { ...completed,
+          options: { ...completed.options, generationRetryVersion: 'jev_generation_retry_v12' } } }));
+        assert.equal((await h.start(id)).status, 409);
+        await h.storage.transaction(tx => tx.put({ [key]: completed }));
+      }
+      predecessor = id;
+    }
+    assert.equal(h.controlled.legacyCalls, 0);
   });
 }

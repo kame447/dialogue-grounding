@@ -454,3 +454,106 @@ test(scope + ': a new naming scope is opt-in and restoration uses the saved scop
   invalid.options.generationRetryVersion = 'jev_generation_retry_v11';
   await assert.rejects(makeTask(prepared, { restore: invalid }), { code: 'invalid_options' });
 });
+
+for (const { generationRetryVersion, sharedChoice } of [
+  { generationRetryVersion: 'jev_generation_retry_v12', sharedChoice: 'none' },
+  { generationRetryVersion: 'jev_generation_retry_v13', sharedChoice: 'use_0' },
+  { generationRetryVersion: 'jev_generation_retry_v13', sharedChoice: 'none' },
+] as const) {
+  test('cold restore of P5 detail masking under ' + generationRetryVersion + ' with ' + sharedChoice, async t => {
+    const syntheticImageReference = 'data:image/png;base64,QUJDRA==';
+    const reading = '鳥のような形に見えます。';
+    const feature = '先端に切れ込みが見えます。';
+    const support = '私にも鳥に見えます。';
+    const h = await fixture(t, { questionLayout: 'two_stage_v3', technicalTrial: { version: 'adaptive_repair_v3' } });
+    const fetchImpl: typeof fetch = async (url, init) => {
+      const response = await h.options.fetchImpl(url, init);
+      const request = init?.method === 'POST' ? JSON.parse(String(init.body)) : {};
+      if (!request.questions) return response;
+      const answer = await response.json() as any;
+      for (const [key, chosen] of [['target', 'figure_0'], ['human_referent', 'figure_0'], ['shared_construal', sharedChoice]]) {
+        const offered = request.questions[key]?.criteria;
+        if (offered && Object.hasOwn(offered, chosen)) {
+          answer.answers[key] = { type: 'choice', choice: chosen,
+            probabilities: Object.fromEntries(Object.keys(offered).map(label => [label, Number(label === chosen)])) };
+        }
+      }
+      return Response.json(answer);
+    };
+    const prepared = await prepareParticipantJev({ ...h.options, fetchImpl });
+    let step: 'reading' | 'support' | 'resume' = 'reading';
+    const segment = (quote: string, proposition: string, aspect: string, index: number) => ({
+      segmentId: 'claim-' + index, quote, proposition, aspect, targets: [model.anchors[0].id],
+      name: null, linkedIssueId: null, respondsToTurn: null,
+    });
+    const scripted = {
+      async taskOptions(value: Parameters<typeof prepared.taskOptions>[0]) {
+        const wiring = await prepared.taskOptions(value);
+        const research = wiring.jevResearch!;
+        const classifier: typeof research.localGrounding.classifier = {
+          async classify({ segments, priorClaims }) {
+            const source = priorClaims.find(claim => claim.speaker === 'ai' && claim.aspect === 'construal');
+            return segments.map(({ segmentId, aspect }) => ({ segmentId, act: aspect === 'construal' ? 'agree' : 'assert',
+              respondsToClaimId: aspect === 'construal' ? source?.id ?? null : null, rawScore: null }));
+          },
+        };
+        return {
+          ...wiring,
+          client: {
+            async complete(_messages: unknown[], { phase }: { phase: string }) {
+              const text = phase === 'ai_extraction' ? JSON.stringify(step === 'reading' ? [
+                segment(reading, '鳥', 'construal', 1),
+              ] : []) : phase === 'local_extraction' ? JSON.stringify(step === 'support' ? [
+                segment(support, '鳥', 'construal', 1), segment(feature, syntheticImageReference, 'part', 2),
+              ] : []) : step === 'reading' ? reading : 'なるほど。';
+              return { text, model: modelId };
+            },
+          },
+          jevResearch: { ...research, generationRetryVersion, localGrounding: { ...research.localGrounding, classifier } },
+        };
+      },
+    };
+    const first = await makeTask(scripted);
+    first.task.message('どのように見えますか？', 'reading');
+    await first.task.whenIdle();
+    step = 'support';
+    first.task.message(support + feature, 'support');
+    await first.task.whenIdle();
+    const saved = JSON.parse(JSON.stringify(first.record()));
+    const trace = saved.jevTraces.at(-1);
+    const judgment = saved.queueState.privateState.judgments.at(-1).jevTurn;
+    assert.equal(trace.status, 'committed');
+    assert.equal(trace.publicSpeech, 'なるほど。');
+    assert.equal(saved.options.generationRetryVersion, generationRetryVersion);
+    if (generationRetryVersion === 'jev_generation_retry_v13') {
+      assert.equal(trace.sharedConstruals[0].openDetails[0].proposition, '[redacted]');
+      if (sharedChoice === 'use_0') assert.ok(trace.executed.sharedClaimIds.length);
+      else assert.equal(trace.executed.sharedClaimIds, undefined);
+    } else {
+      assert.equal(trace.sharedConstruals, undefined);
+      assert.equal(judgment.sharedConstruals, undefined);
+    }
+
+    step = 'resume';
+    const sends = h.upstream.counts().posts;
+    const restored = await makeTask(scripted, { restore: saved });
+    assert.equal(h.upstream.counts().posts, sends);
+    assert.deepEqual(restored.record().jevTraces, saved.jevTraces);
+    assert.deepEqual(restored.record().queueState.privateState, saved.queueState.privateState);
+    if (generationRetryVersion === 'jev_generation_retry_v13') {
+      assert.deepEqual(judgment.sharedConstruals, trace.sharedConstruals);
+      const altered = structuredClone(saved);
+      altered.jevTraces.at(-1).sharedConstruals[0].openDetails[0].proposition = '別の特徴';
+      await assert.rejects(makeTask(scripted, { restore: altered }), { code: 'invalid_options' });
+      if (sharedChoice === 'use_0') {
+        const forged = structuredClone(saved);
+        forged.jevTraces.at(-1).decisions.at(-1).sharedClaimIds[1] = '3:forged';
+        await assert.rejects(makeTask(scripted, { restore: forged }), { code: 'invalid_options' });
+      }
+    }
+    restored.task.message('続けましょう。', 'resume');
+    await restored.task.whenIdle();
+    assert.equal(restored.record().jevTraces.at(-1).status, 'committed');
+    assert.equal(restored.record().jevTraces.at(-1).publicSpeech, 'なるほど。');
+  });
+}

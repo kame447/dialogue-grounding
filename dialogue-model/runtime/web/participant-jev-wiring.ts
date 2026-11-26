@@ -27,24 +27,26 @@ import { isHolisticPolicy, isHolisticV3Plus } from '../decision/contract.ts';
 import { hasNameProposal, traceMarkerInvalid } from '../decision/naming-request.ts';
 import { literalSpan } from '../judgment/public-evidence.mjs';
 import { createJevLocalTestClassifier, JevLocalTestError } from '../local-grounding/jev-local-test.ts';
+import { validJevSharedConstrualTrace } from '../v2/jev-turn.ts';
 import type { JevTurnLocalOptions, JevTurnOptions } from '../v2/jev-turn.ts';
 import { RunBudget } from '../diagnostics/parity-live/audit.ts';
 import type { BudgetLimits, SendReceipt } from '../diagnostics/parity-live/audit.ts';
 import { checkModelIdentity, MODEL_CONTRACT_V2 } from '../model-identity-contract.ts';
 import { RESEARCH_MAX_JEV_USD } from '../diagnostics/jev-shadow-eval/local-openrouter.ts';
 import { inferenceHistory } from '../v2/agreement-gate.ts';
-import { defaultGenerationRetryVersion, hasVersionedViewpoint, isGenerationV12, validGenerationRetryVersion, validAgreeNameScope } from '../v2/generation-guard.ts';
+import { defaultGenerationRetryVersion, hasVersionedViewpoint, isGenerationV12, isGenerationV13, validGenerationRetryVersion, validAgreeNameScope } from '../v2/generation-guard.ts';
 import type { GenerationRetryVersion } from '../v2/generation-guard.ts';
 
 export type JevResearchLedger = RunBudget | ParticipantUsageLedger;
 const AI_NAME_ACCEPTANCES_V1 = 'ai_name_acceptances_v1';
 type ParticipantJevVersionPin = Readonly<{
-  generationRetryVersion: 'jev_generation_retry_v12'; namingRestoreVersion: typeof AI_NAME_ACCEPTANCES_V1;
+  generationRetryVersion: 'jev_generation_retry_v12' | 'jev_generation_retry_v13'; namingRestoreVersion: typeof AI_NAME_ACCEPTANCES_V1;
 }>;
 export type JevResearchOptions<Ledger extends JevResearchLedger = RunBudget> = Readonly<{ profile: ResearchTrialProfileV3; observer: ObservationObserver;
   jevDecision: JevDecisionClient; localGrounding: JevTurnLocalOptions; ledger: Ledger; technicalTrial?: AdaptiveRepairTrial;
+  generationRetryVersion?: GenerationRetryVersion;
   newTrialAgreeNameScopeVersion?: JevTurnOptions["newTrialAgreeNameScopeVersion"]; pinnedVersions?: ParticipantJevVersionPin }>;
-type SelectedJevResearchOptions = JevResearchOptions<JevResearchLedger> & { generationRetryVersion?: GenerationRetryVersion;
+type SelectedJevResearchOptions = JevResearchOptions<JevResearchLedger> & {
   namingRestoreVersion?: typeof AI_NAME_ACCEPTANCES_V1; participantPrompts?: true };
 export class ParticipantJevError extends Error {
   readonly code: string;
@@ -76,7 +78,7 @@ function checkedProfile(value: unknown): ResearchTrialProfileV3 {
   return expected;
 }
 /** Plan O records exist only on failed decide() attempts and must re-validate to the identical closed record. */
-function checkedDecisionFailure(trace: any, layout: JevQuestionLayout, usagePolicy?: ParticipantUsageOnly): boolean {
+function checkedDecisionFailure(trace: any, layout: JevQuestionLayout, p5Enabled: boolean, usagePolicy?: ParticipantUsageOnly): boolean {
   // The local v3 rule is recorded together with its evidence; a bare rule name on a trace is a damaged record.
   if (!Object.hasOwn(trace, 'decisionFailure')) return trace.decisionRejectionCode !== 'action_target_not_allowed';
   const f = trace.decisionFailure;
@@ -84,7 +86,7 @@ function checkedDecisionFailure(trace: any, layout: JevQuestionLayout, usagePoli
       Object.getPrototypeOf(f) !== Object.prototype || Reflect.ownKeys(f).length !== 1 || !Object.hasOwn(f, 'evidence')) return false;
   if (f.evidence === null) return trace.decisionRejectionCode !== 'action_target_not_allowed';
   // The trace names its own condition (a typed naming request of a holistic_v3 turn): only then may accept be missing from the first stage.
-  const checked = checkDecisionFailureEvidence(f.evidence, { usagePolicy, acceptOptional: trace.namingRequest === true && Array.isArray(trace.local?.claims) && hasNameProposal(trace.local.claims, trace.turnIndex) });
+  const checked = checkDecisionFailureEvidence(f.evidence, { usagePolicy, p5Enabled, acceptOptional: trace.namingRequest === true && Array.isArray(trace.local?.claims) && hasNameProposal(trace.local.claims, trace.turnIndex) });
   if (checked === null || checked.questionLayout !== layout || researchHash(checked) !== researchHash(jsonData(f.evidence))) return false;
   // A decision the local v3 table refused names its rule twice, in the turn and in the evidence, and in no other way; no native failure may carry it.
   const local = checked.rejectionCode === 'action_target_not_allowed' && checked.stages.length === 0;
@@ -145,6 +147,7 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
     if (provided === null || provided === undefined) return marker === true ? invalid() : null;
     const raw = data(provided);
     const v = data(raw,['profile','observer','jevDecision','localGrounding','ledger',...(Object.hasOwn(raw,'technicalTrial')?['technicalTrial']:[]),
+      ...(Object.hasOwn(raw,'generationRetryVersion')?['generationRetryVersion']:[]),
       ...(Object.hasOwn(raw,'newTrialAgreeNameScopeVersion')?['newTrialAgreeNameScopeVersion']:[]),
       ...(Object.hasOwn(raw,'pinnedVersions')?['pinnedVersions']:[])]);
     const technicalTrial = Object.hasOwn(v,'technicalTrial') ? checkedTechnicalTrial(v.technicalTrial) : undefined;
@@ -160,15 +163,20 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
     const savedGenerationVersion = restore?.options?.generationRetryVersion;
     if (restore && Object.hasOwn(restore.options ?? {}, 'generationRetryVersion') &&
         (!hasVersionedViewpoint(savedGenerationVersion) || !validGenerationRetryVersion(savedGenerationVersion, profile.questionLayout, profile.dialoguePolicy))) return invalid();
+    const requestedGenerationVersion = v.generationRetryVersion;
+    if (!restore && Object.hasOwn(v, 'generationRetryVersion') &&
+        (!hasVersionedViewpoint(requestedGenerationVersion) ||
+          !validGenerationRetryVersion(requestedGenerationVersion, profile.questionLayout, profile.dialoguePolicy))) return invalid();
     const pinned = Object.hasOwn(v, 'pinnedVersions') ? data(v.pinnedVersions, ['generationRetryVersion','namingRestoreVersion']) : null;
-    if (pinned && (pinned.generationRetryVersion !== 'jev_generation_retry_v12' ||
+    if (pinned && (Object.hasOwn(v, 'generationRetryVersion') ||
+        pinned.generationRetryVersion !== 'jev_generation_retry_v12' && pinned.generationRetryVersion !== 'jev_generation_retry_v13' ||
         pinned.namingRestoreVersion !== AI_NAME_ACCEPTANCES_V1 ||
         !validGenerationRetryVersion(pinned.generationRetryVersion, profile.questionLayout, profile.dialoguePolicy) ||
         restore && (savedGenerationVersion !== pinned.generationRetryVersion ||
           restore.options.jevNamingRestoreVersion !== pinned.namingRestoreVersion))) return invalid();
     const generationRetryVersion = profile.dialoguePolicy === 'holistic_v5' && profile.questionLayout === 'two_stage_v3'
       ? restore ? savedGenerationVersion ?? 'jev_generation_retry_v2'
-        : pinned ? 'jev_generation_retry_v12' : defaultGenerationRetryVersion(profile.questionLayout, profile.dialoguePolicy)
+        : (pinned?.generationRetryVersion ?? requestedGenerationVersion) as GenerationRetryVersion | undefined ?? defaultGenerationRetryVersion(profile.questionLayout, profile.dialoguePolicy)
       : undefined;
     const requestedScope = v.newTrialAgreeNameScopeVersion;
     const newTrialAgreeNameScopeVersion = requestedScope === 'scoped_v7' ||
@@ -176,6 +184,7 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
     if (Object.hasOwn(v, 'newTrialAgreeNameScopeVersion') &&
         (newTrialAgreeNameScopeVersion === undefined ||
           !restore && !validAgreeNameScope(newTrialAgreeNameScopeVersion, generationRetryVersion))) return invalid();
+    const p5Enabled = isGenerationV13(generationRetryVersion);
     const namingRestoreVersion = restore ? restore.options?.jevNamingRestoreVersion :
       pinned || isGenerationV12(generationRetryVersion) ? AI_NAME_ACCEPTANCES_V1 : undefined;
     if (restore && Object.hasOwn(restore.options ?? {}, 'jevNamingRestoreVersion') &&
@@ -200,7 +209,7 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
       // A v2 record names its layout; a v1 record never does. profileSha256 below also differs between layouts.
       const savedLayout = Object.hasOwn(restore.options,'questionLayout') ? restore.options.questionLayout : 'two_stage_v1';
       if (savedLayout !== profile.questionLayout || Object.hasOwn(restore.options,'questionLayout') && savedLayout !== 'two_stage_v2' && savedLayout !== 'two_stage_v3') return invalid();
-      if (restore.jevTraces?.some?.((trace:any)=>!checkedDecisionFailure(trace,profile.questionLayout,v.ledger instanceof ParticipantUsageLedger ? PARTICIPANT_USAGE_ONLY : undefined))) return invalid();
+      if (restore.jevTraces?.some?.((trace:any)=>!checkedDecisionFailure(trace,profile.questionLayout,p5Enabled,v.ledger instanceof ParticipantUsageLedger ? PARTICIPANT_USAGE_ONLY : undefined))) return invalid();
       if (restore.options.profileSha256 !== researchHash(profile) ||
           researchHash(jsonData(restore.options.interventionPolicy)) !== researchHash(profile.interventionPolicy) ||
           restore.queueState?.privateState?.schemaVersion !== 'jev_private_state_v2' ||
@@ -212,6 +221,7 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
       // The typed-naming-request marker is recomputed from the turn's verified claims and the stored version, and the copies of a committed turn (trace and saved state)
       // must be equal in every field they share.
       const savedJudgments: any[] = Array.isArray(restore.queueState?.privateState?.judgments) ? restore.queueState.privateState.judgments : [];
+      const ownSlots = restore.queueState.privateState.graph.slots;
       const earlierClaims: any[] = [];
       let previousJudgment: any;
       for (const trace of restore.jevTraces) {
@@ -219,6 +229,7 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
             hasVersionedViewpoint(generationRetryVersion) && trace.finalAction && trace.generationRetryVersion !== generationRetryVersion ||
             Object.hasOwn(trace,'generationRetryVersion') && trace.generationRetryVersion !== 'jev_generation_retry_v2' &&
               !hasVersionedViewpoint(trace.generationRetryVersion)) return invalid();
+        if (!validJevSharedConstrualTrace(trace, ownSlots, generationRetryVersion)) return invalid();
         const committed = trace.status === 'committed';
         const sameTurnAi = namingRestoreVersion && committed ? checkedAiNameAcceptances(trace, previousJudgment, earlierClaims,
           restore.queueState.privateState.graph.records, restore.queueState.events) : [];
@@ -228,8 +239,10 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
         if (committed) {
           const judgment = savedJudgments.find((j: any) => j?.turnIndex === trace.turnIndex && j?.jevTurn?.attemptNumber === trace.attemptNumber);
           if (!judgment) return invalid();
-          for (const key of ['executed','humanReferent','repairProspect','repairGate','repairFacts','draftActs','namingRequest','namingReconfirm'])
+          for (const key of ['executed','humanReferent','repairProspect','repairGate','repairFacts','draftActs','namingRequest','namingReconfirm','sharedConstruals'])
             if (Object.hasOwn(trace, key) !== Object.hasOwn(judgment.jevTurn, key) || Object.hasOwn(trace, key) && researchHash(jsonData(trace[key])) !== researchHash(jsonData(judgment.jevTurn[key]))) return invalid();
+          if (p5Enabled && (researchHash(jsonData(trace.decisions.at(-1))) !== researchHash(jsonData(judgment.jevTurn.decision)) ||
+              researchHash(jsonData(trace.intervention)) !== researchHash(jsonData(judgment.jevTurn.intervention)))) return invalid();
           if (Array.isArray(trace.local?.claims)) earlierClaims.push(...trace.local.claims);
           earlierClaims.push(...sameTurnAi);
           previousJudgment = judgment;

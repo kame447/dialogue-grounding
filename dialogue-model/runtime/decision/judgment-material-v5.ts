@@ -60,6 +60,7 @@ export function encodeMaterialV5(material: any, { actions, nameLedger, answers: 
     ...(material.selected ? { selected: material.selected } : {}),
     ...(material.humanReferent ? { humanReferent: material.humanReferent } : {}),
     ...(material.repairProspect ? { repairProspect: material.repairProspect } : {}),
+    ...(material.sharedConstruals?.length ? { sharedConstruals: material.sharedConstruals } : {}),
     inputBudget: material.inputBudget,
   };
 }
@@ -105,12 +106,12 @@ export function decodeMaterialV5(state: any): any {
   return { ...rest, issueSummary, publicTurns, priorClaims, repairHistory };
 }
 
-/** Claims that must outlive the others when the request is over its budget: names, replies to confirmations, and what those answer. Lower is dropped first. */
+/** Drop order for unprotected claims. Keep names, replies to confirmations, and what those answer longer. */
 export function claimKeepOrder(claims: readonly { id: string; act: string; name: string | null; sourceTurn: number; respondsTo: string | null }[],
-  repairHistory: readonly { partnerClaims: readonly { id: string }[] }[]): string[] {
+  repairHistory: readonly { partnerClaims: readonly { id: string }[] }[], protectedClaims?: ReadonlySet<string>): string[] {
   const replies = new Set(repairHistory.flatMap(r => r.partnerClaims.map(c => c.id)));
   const named = new Set(claims.filter(c => c.name !== null || c.act.startsWith("name_")).map(c => c.id));
   const answered = new Set(claims.filter(c => named.has(c.id) || replies.has(c.id)).map(c => c.respondsTo).filter((id): id is string => id !== null));
   const rank = (c: { id: string; sourceTurn: number }) => (named.has(c.id) ? 2e6 : 0) + (replies.has(c.id) ? 1e6 : 0) + (answered.has(c.id) ? 5e5 : 0) + c.sourceTurn;
-  return [...claims].sort((a, b) => rank(a) - rank(b)).map(c => c.id);
+  return [...claims].sort((a, b) => rank(a) - rank(b)).map(c => c.id).filter(id => !protectedClaims?.has(id));
 }

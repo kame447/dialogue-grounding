@@ -265,7 +265,7 @@ export class TangramSession extends DurableObject<Env> {
       const generationPin = this.env.PARTICIPANT_TERRA_GENERATION_ENABLED === 'on';
       const allTerraPin = this.env.PARTICIPANT_TERRA_ALL_ROLES_ENABLED === 'on';
       const dialogueProfile = this.env.PARTICIPANT_DIALOGUE_PROFILE;
-      if (dialogueProfile !== undefined && (dialogueProfile !== 'participant_dialogue_v12' || !protocol.referenceMemory || !allTerraPin ||
+      if (dialogueProfile !== undefined && (dialogueProfile !== 'participant_dialogue_v12' && dialogueProfile !== 'participant_dialogue_v13_p5' || !protocol.referenceMemory || !allTerraPin ||
           this.env.PARTICIPANT_TERRA_ENABLED !== 'on' || this.env.PARTICIPANT_TERRA_PROFILE !== PARTICIPANT_PRODUCTION_PROFILE)) {
         throw new ReceptionError('reception_unavailable');
       }
@@ -335,8 +335,7 @@ export class TangramSession extends DurableObject<Env> {
     if (!r || !r.plan || !['approved','in_progress'].includes(r.status)) throw new ReceptionError('reception_not_approved');
     if (!Number.isSafeInteger(body.expectedReceptionRevision) || body.expectedReceptionRevision !== r.revision) throw new ReceptionError('trial_changed');
     const plan = r.plan.schemaVersion === 'reception_plan_v1' ? null : r.plan;
-    if (plan?.participantDialogueProfile === 'participant_dialogue_v13_p5' ||
-        plan?.participantDialogueProfile === 'participant_dialogue_v12' && plan.memoryPruneVersion !== CLAIM_PRUNE_V2) {
+    if (plan?.participantDialogueProfile !== undefined && plan.memoryPruneVersion !== CLAIM_PRUNE_V2) {
       throw new BaseSessionError('trial_unavailable');
     }
     const index = r.trials.length;
@@ -836,9 +835,8 @@ export class TangramSession extends DurableObject<Env> {
 
   private async createTrial(binding: Parameters<MakeBaseTask>[0]): Promise<NamingTask> {
     const {seed,strategy,referenceMemory,restore,participantRuntime,initialObservationGeneration,memoryPruneVersion,participantDialogueProfile} = binding;
-    if (participantDialogueProfile === 'participant_dialogue_v13_p5' ||
-        restore && !matchesWorkerDialogueProfile(participantDialogueProfile, restore) ||
-        participantDialogueProfile === 'participant_dialogue_v12' &&
+    if (restore && !matchesWorkerDialogueProfile(participantDialogueProfile, restore) ||
+        participantDialogueProfile !== undefined &&
           (memoryPruneVersion !== CLAIM_PRUNE_V2 || binding.participantModelPin?.schemaVersion !== 'participant_model_pin_v3' ||
             participantRuntime?.profile !== PARTICIPANT_PRODUCTION_PROFILE)) {
       throw new BaseSessionError('trial_unavailable');

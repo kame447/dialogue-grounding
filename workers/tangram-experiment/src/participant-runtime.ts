@@ -50,21 +50,29 @@ const dialogueV12 = {
   newTrialAgreeNameScopeVersion: 'scoped_v7',
 } as const;
 
-const dialogueV12ProfileSha = researchHash(dialogueV12.profile);
+const workerDialogue = {
+  participant_dialogue_v12: dialogueV12,
+  participant_dialogue_v13_p5: {
+    ...dialogueV12,
+    pinnedVersions: { ...dialogueV12.pinnedVersions, generationRetryVersion: 'jev_generation_retry_v13' },
+  },
+} as const;
+const workerDialogueProfileSha = researchHash(dialogueV12.profile);
 
 export function matchesWorkerDialogueProfile(key: ParticipantDialogueProfile | undefined, record: BaseRecord) {
   const { options, queueState } = record;
   if (key === undefined) return !Object.hasOwn(options, 'participantDialogueProfile');
   const state = queueState.privateState as { agreeNameScopeVersion?: unknown; graph?: { memoryPruneVersion?: unknown } } | undefined;
   const technicalTrial = options.technicalTrial as { version?: unknown } | undefined;
-  return key === 'participant_dialogue_v12' && options.participantDialogueProfile === key &&
+  const dialogue = workerDialogue[key];
+  return !!dialogue && options.participantDialogueProfile === key &&
     options.memoryPruneVersion === CLAIM_PRUNE_V2 && state?.graph?.memoryPruneVersion === CLAIM_PRUNE_V2 &&
-    options.profileSha256 === dialogueV12ProfileSha && options.questionLayout === dialogueV12.profile.questionLayout &&
-    options.dialoguePolicy === dialogueV12.profile.dialoguePolicy &&
-    technicalTrial?.version === dialogueV12.technicalTrial.version && Object.keys(technicalTrial).length === 1 &&
-    options.generationRetryVersion === dialogueV12.pinnedVersions.generationRetryVersion &&
-    options.jevNamingRestoreVersion === dialogueV12.pinnedVersions.namingRestoreVersion &&
-    state?.agreeNameScopeVersion === dialogueV12.newTrialAgreeNameScopeVersion;
+    options.profileSha256 === workerDialogueProfileSha && options.questionLayout === dialogue.profile.questionLayout &&
+    options.dialoguePolicy === dialogue.profile.dialoguePolicy &&
+    technicalTrial?.version === dialogue.technicalTrial.version && Object.keys(technicalTrial).length === 1 &&
+    options.generationRetryVersion === dialogue.pinnedVersions.generationRetryVersion &&
+    options.jevNamingRestoreVersion === dialogue.pinnedVersions.namingRestoreVersion &&
+    state?.agreeNameScopeVersion === dialogue.newTrialAgreeNameScopeVersion;
 }
 
 const researchLimits = { maxDeadlineMs: RESEARCH_MAX_DEADLINE_MS };
@@ -125,11 +133,10 @@ export function createWorkerParticipantRuntime({ pin, own, proxy, cache, limits,
   initialObservationGeneration?: InitialObservationGeneration;
 } & ({ limits: Readonly<BudgetLimits>; usage?: never } | { limits?: never; usage: ParticipantUsageLedger })) {
   if (pin.schemaVersion !== 'participant_model_pin_v1' && !usage) throw new NamingTaskError('invalid_options');
-  if (participantDialogueProfile !== undefined &&
-      (participantDialogueProfile !== 'participant_dialogue_v12' || pin.schemaVersion !== 'participant_model_pin_v3' || !usage)) {
+  const dialogue = participantDialogueProfile === undefined ? null : workerDialogue[participantDialogueProfile];
+  if (participantDialogueProfile !== undefined && (!dialogue || pin.schemaVersion !== 'participant_model_pin_v3' || !usage)) {
     throw new NamingTaskError('invalid_options');
   }
-  const dialogue = participantDialogueProfile === 'participant_dialogue_v12' ? dialogueV12 : null;
   const runtimeProfile = dialogue?.profile ?? profile;
   const ledger = usage ?? new RunBudget(limits!);
   const chat: Dispatch = (payload, expected) => usage ? proxy.participantUsageChat!(payload, expected) : proxy.participantChat(payload, expected);

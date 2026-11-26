@@ -23,6 +23,17 @@ function evidence(graph: LocalGraph) {
   return { claims, dead };
 }
 
+export function localIssueState(active: readonly Pick<LocalClaimView, "act">[], wasWithdrawn: boolean): LocalIssueView["state"] {
+  const substantive = active.filter(c => !["acknowledge", "defer", "revisit"].includes(c.act));
+  const supporting = substantive.some(c => ["agree", "name_accept"].includes(c.act));
+  const denying = substantive.some(c => ["deny", "name_reject"].includes(c.act));
+  const focus = active.filter(c => ["defer", "revisit"].includes(c.act)).at(-1);
+  let state: LocalIssueView["state"] = supporting && denying ? "contested" : denying ? "denied" : supporting ? "supported" : "unconfirmed";
+  if (!substantive.length && wasWithdrawn) state = "withdrawn";
+  else if (focus?.act === "defer") state = "deferred";
+  return state;
+}
+
 /** Recomputed on each call; no mutable state is kept beside the claim log. */
 export function deriveLocalIssues(graph: LocalGraph): LocalIssueView[] {
   const { claims, dead } = evidence(graph);
@@ -34,13 +45,7 @@ export function deriveLocalIssues(graph: LocalGraph): LocalIssueView[] {
   return [...groups].map(([issueId, records]) => {
     const latest = records[records.length - 1];
     const active = records.filter(c => !dead.has(c.id) && c.act !== "withdraw");
-    const substantive = active.filter(c => !["acknowledge", "defer", "revisit"].includes(c.act));
-    const supporting = substantive.some(c => ["agree", "name_accept"].includes(c.act));
-    const denying = substantive.some(c => ["deny", "name_reject"].includes(c.act));
-    const focus = active.filter(c => ["defer", "revisit"].includes(c.act)).at(-1);
-    let state: LocalIssueView["state"] = supporting && denying ? "contested" : denying ? "denied" : supporting ? "supported" : "unconfirmed";
-    if (!substantive.length && (records.some(c => dead.has(c.id)) || latest.act === "withdraw")) state = "withdrawn";
-    else if (focus?.act === "defer") state = "deferred";
+    const state = localIssueState(active, records.some(c => dead.has(c.id)) || latest.act === "withdraw");
     let nameState: LocalNameState | null = null;
     let name: string | null = null;
     if (latest.aspect === "name") {
