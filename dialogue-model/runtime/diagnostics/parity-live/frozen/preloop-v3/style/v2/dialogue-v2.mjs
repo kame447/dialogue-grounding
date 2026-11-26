@@ -1,0 +1,530 @@
+import {interventionForStrategy,BYPASS_ACCEPTANCE_V1_TABLE_SHA256} from '../decision/bypass-acceptance.mts';
+import {JevTurnError} from './jev-turn.mts';
+// v2 dialogue: unlabeled scattered boards, opaque own ids, asynchronous human
+// messages. This module is a pure adapter for the human message queue: each
+// runAiTurn works on one immutable public snapshot plus a detached private state
+// and returns the next private state; the queue alone decides whether to commit.
+// v1 (createDialogueSession) is untouched.
+import { createLunaJudge } from "../../../../../../judgment/luna.mjs";
+import { createOwnLedger, validateJudgment, applyJudgment } from "../../../../../../judgment/schema.mjs";
+import { STRATEGIES, TASK_INSTRUCTIONS_V2, ownImageMessage, publicMessages } from "../../../../../../judgment/instructions.mjs";
+import { createReferenceGraph, applyReferenceUpdate, snapshotReferenceGraph, ReferenceGraphError, REFERENCE_LIMITS } from "../../../../../../memory/reference-graph.mjs";
+import { stageMemory, prepareMemory } from "../../../../../../judgment/memory.mjs";
+import { buildDecisionEvidence } from "../../../../../../v2/decision-evidence.mjs";
+import { resolveActiveJudgment } from "../../../../../../v2/active-judge.mjs";
+import { findGuardViolations, rewriteReasons, fallbackUtterance } from "./generation-guard.mts";
+import { startGroundingShadow, validateGroundingShadowOptions } from "../../../../../../v2/grounding-shadow.ts";
+import { prepareLocalGroundingTurn, validateLocalGroundingOptions, localGroundingMemo, findLocalPublicationViolations } from "./local-grounding-turn.mts";
+import { createJevTurnRuntime } from "./jev-turn.mts";
+import { NAME_ACTS, nameShown, effectiveName, humanNamingRecord } from "../../../../../../judgment/name-evidence.mjs";
+
+// Identical across strategies. Holistic first; analysis only when the judge asks for it.
+export const GENERATOR_INSTRUCTIONS_V2 = [
+  "【公開発話の生成】与えられた判断を、相手に向けた自然な日本語のチャット発話にしてください。",
+  "まず相手の発話に短く応じ、必要なら全体の印象・身近なものへの見立てを1つ伝えてください。形の分析は、共通教示の分析トリガー（相手が迷い・曖昧さ・食い違いを表明したか特徴・詳細を求めた、公開対話の矛盾が未解決、または名前を確定しようとする時点で対象を1つに絞れず誤った合意の実害がある）に基づく判断に discriminatingFeature があるときだけにし、その場合も特徴は1つに絞って相手の反応を待ってください。内部に候補が複数残るだけでは分析を始めないでください。",
+  "挨拶や「どれからにしますか」のような漠然とした開始には、短く受け止めて相手に選んでもらうか、簡単な見立てを1つだけ出してください。先回りして詳しい形の説明や名前の一括提案をしないでください。",
+  "1回は1〜2文で返してください。口調は相手の直近の発話と会話の流れに合わせ、敬語には自然な敬語で、くだけた口調には自然なくだけた口調で返し、相槌や言い回しも合わせてください。講義調、長い前置き、特徴の列挙は避けてください。短さ自体は目的ではありません。",
+  "相手が図形の見た目や特徴を尋ねたときは、まずその問いに直接答えてください。説明を求める発話を命名の依頼と取り違えず、相手がどの図形の話か把握できていない段階では、呼び名の提案や採用に進まないでください。見立てを説明に使うことと、名前を決めることは区別してください。見立ての説明はacceptで行い、propose_nameは対象が公開上で相手に伝わり命名の流れに入ったときに候補名を示すものです。",
+  "特徴についての質問への直接の回答は、形の分析の開始には当たりません。自分の画像や観察メモ・判断メモで確かめられる範囲で、ある・ない・確かめられないを区別して答えてください。確かめられていない特徴を相手に合わせて肯定したり、はっきり肯定した直後に同じ特徴を「〜っぽい」のような曖昧な表現へ変えたりしないでください。すでに話題の図形の呼び名や質問内容を毎回言い直さず、答えた後に形式的な確認質問を付け足さないでください。対象や特徴に未解決の曖昧さがあるときだけ、その点を具体的に尋ねてください。「これなら分かりますか？」のように相手の理解を試す聞き方や、何を指すか曖昧な指示語を重ねた聞き返しは避けてください。",
+  "「合意」「候補」「案」「受け取りました」のような手続きを説明する言葉は避け、普段のチャットのように言ってください。合意した後に同じ特徴の説明を繰り返さないでください。",
+  "指定されたactionの対話機能を実現し、自分で別のactionに置き換えないでください。followUpがあれば主actionを先に、両方を全体で1〜2文にまとめてください。",
+  "propose_nameやagreeにdiscriminatingFeatureがあるときは、質問にせず、その特徴に短く触れて自分がどの図形のことと理解したかを相手に示してください。discriminatingFeatureがないときは、相手の見立てを短く受け止め、自分の画像の全体の見立てと結び付けて理解を表してください。必要なら自分の見立てを1つ返せます。判断にない尖り・四角・くぼみなどの形の数や特徴を作って補わないでください。propose_nameでは判断に示された名前を「」で候補として示し、合意は表明しないでください。",
+  "confirmは相手への短い確認、propose_nameは命名の提案として表現し、どちらも合意を表明しないでください。合意を表明できるのはagreeのときだけです。repairでは自己訂正を明示し、repair以外では取り違えや取り消しを表明しないでください。defer/revisitは保留・再訪であることが分かるように伝えてください。acceptでは相手の発話を受け止めます。相手が図形の見た目や特徴を尋ねているときは、確かめられる範囲でその問いに直接答えてよく、名前に決まった・対象を共同で特定できたとは言わないでください。",
+  "targetSlotや内部参照ID、画像内の座標・範囲は自分だけの作業メモです。相手に言わず、位置での指定も求めないでください。相手の画面では配置も向きも異なります。",
+  "自分の画面の向きに依存する上下左右・右向き・上端・下端などの語で形を説明しないでください。特徴を伝えるときは、回転しても変わらない尖りの数や大小・くぼみ・細長さ・四角の有無・部分同士のつながりから選んでください。",
+  "公開履歴と矛盾する説明、同じ確認の言い換え反復、画像にない特徴の追加をしないでください。判断JSON、作業メモ、方略の説明、思考過程は出力せず、公開する発話だけを返してください。",
+].join("\n");
+
+// Opt-in research option (default off), identical across strategies: one dialogue
+// function per turn and chat-like brevity. It removes the unspoken followUp from
+// the validated act before the ledger, memory and generation (see runAiTurn).
+export const UTTERANCE_STYLES = Object.freeze(["default", "concise"]);
+export const CONCISE_INSTRUCTIONS_V2 = [
+  "【短いチャット】この発話では、指定されたactionの対話機能を1つだけ実現してください。挨拶や相槌だけで終えず相手の発話の内容に応じ、相槌は短い一言までにし、次の図形・次の名前・別の話題は出さないでください。",
+  "人間同士のチャットのように、多くは1文で、相手の発話と同じくらいの長さにしてください。相手の言葉の言い直しや自分の見立ての繰り返しはしないでください。確認したい特徴などの必要な内容は削らず、短さのために不自然にしないでください。",
+].join("\n");
+
+const FINAL_INSTRUCTIONS_V2 = [
+  "【実験環境からの非公開最終提出要求。対話相手の発話ではありません】",
+  "対話は終了しました。自分自身の画像と公開対話履歴だけから、自分の6図形それぞれの最終名称を提出してください。",
+  "JSONオブジェクトだけを返してください。キーは作業メモにある自分の6つの内部参照IDで、値は名称の文字列です。合意できていない図形は空文字列にしてください。",
+  "説明、Markdown、追加キーは含めないでください。",
+].join("\n");
+
+const clone = (value) => structuredClone(value);
+// Robustness bound, identical for both strategies: a single Luna call was seen to
+// stall ~85 s live. Worst case per turn: judge 50 s + generation 2 x 40 s + guard rewrite 40 s.
+export const GENERATION_TIMEOUT_MS = 40000;
+const stalled = (error) => error?.name === "AIConnectionError" && (error.code === "timeout" || error.preResponse === true);
+const traceCode = (value) => typeof value === "string" && /^[a-z][a-z0-9_]{0,39}$/.test(value) ? value : "error";
+
+// What the public utterance may claim for each typed act (shared by both strategies).
+export const ACTION_SCOPE_V2 = Object.freeze({
+  accept: "受け止める。特徴を尋ねられたときは、確かめられる範囲で直接答えてよい。名前に決まった・対象を共同で特定できたとは言わない",
+  propose_name: "対象が公開上で相手に伝わり命名の流れに入ったときに、判断の名前を「」で候補として示す。決まった・それでいこうとは言わない",
+  confirm: "確認するだけ。決まった・それでいこうとは言わない",
+  agree: "この名前に決まったことを伝えてよい",
+  repair: "自分の取り違え・決めた名前の訂正であることを明示する",
+  defer: "後で戻ることを伝える。決まったとは言わない",
+  revisit: "保留していた図形に戻る。決まったとは言わない",
+  move_on: "別の図形に進む。決まったとは言わない",
+  close: "終わりにしてよいか相談する",
+});
+
+// Technical-trial Jev path only (#141 b): Jev's repair is a local fix of a public discrepancy, not
+// necessarily the AI's own mistake. Both strategies get the same text; the constants above are unchanged.
+const SELF_CORRECTION_V2 = "repairでは自己訂正を明示し、repair以外では取り違えや取り消しを表明しないでください。";
+const TRIAL_GENERATOR_INSTRUCTIONS_V2 = GENERATOR_INSTRUCTIONS_V2.replace(SELF_CORRECTION_V2,
+  "取り違えや取り消しは、行動がrepairであり、かつこれまでの発話にその根拠があるときだけ表明してください。行動がdeferでもmove_onでもないときは、未解決の図形について保留・先送り・別の図形への移行を提案しないでください。");
+if (TRIAL_GENERATOR_INSTRUCTIONS_V2 === GENERATOR_INSTRUCTIONS_V2) throw new Error("trial generator instructions out of sync");
+const TRIAL_ACTION_SCOPE_V2 = Object.freeze({ ...ACTION_SCOPE_V2,
+  accept: "受け止める。特徴を尋ねられたときは、確かめられる範囲で直接答えてよい。直前の図形が合意済みで相手が次の図形へ進むときは自然に応じてよいが、未解決の図形について保留・先送り・別の図形への移行を提案しない。名前に決まった・対象を共同で特定できたとは言わない",
+  confirm: "判断に示された特徴（discriminatingFeature）を短く確かめる。未解決の図形について保留や命名の先送りを提案しない。決まった・それでいこうとは言わない",
+  repair: "公開上の食い違いを局所的に確かめ直す・直す。自分の取り違えや決めた名前の訂正を明示するのは、これまでの発話にその根拠があるときだけにする" });
+
+// two_stage_v3 technical trial only: additionally rotation-independent wording and no affirmative assertions in confirm.
+const TRIAL_V3_GENERATOR_INSTRUCTIONS_V2 = GENERATOR_INSTRUCTIONS_V2.replace(SELF_CORRECTION_V2,
+  "取り違えや取り消しは、行動がrepairであり、かつこれまでの発話にその根拠があるときだけ表明してください。行動がdeferでもmove_onでもないときは、未解決の図形について保留・先送り・別の図形への移行を提案しないでください。非公開メモやdiscriminatingFeatureには自分側の画面の向きに依存する語（上下左右・側・端・向き・斜め上/下/左/右・縦長・横長等）が含まれることがあるため、公開発話にはそのまま写さず、回転しても変わらない尖り・くぼみ・四角い部分・つながりなどの表現に言い換えるか、同じ節で「こちらの画面では〜」と視点を明示して伝えてください。");
+if (TRIAL_V3_GENERATOR_INSTRUCTIONS_V2 === GENERATOR_INSTRUCTIONS_V2) throw new Error("v3 trial generator instructions out of sync");
+const TRIAL_V3_ACTION_SCOPE_V2 = Object.freeze({ ...TRIAL_ACTION_SCOPE_V2,
+  confirm: "判断に示された特徴（discriminatingFeature）を回転に依存しない表現で短く尋ねて確かめる。観察メモにない特徴を肯定したり、同じ図形だと断定したりしない。未解決の図形について保留や命名の先送りを提案しない。決まった・それでいこうとは言わない",
+  repair: "公開上の食い違いを回転に依存しない表現で局所的に確かめ直す・直す。自分の取り違えや決めた名前の訂正を明示するのは、これまでの発話にその根拠があるときだけにする" });
+
+// Luna participant path (public-act consistency), identical across strategies. The constants above stay
+// as they are for the Jev path. Own-image claims need a basis in the judgment or its memo;
+// a name act shows its name in 「」 (a format rule that never certifies the act).
+const LUNA_REPLACED = new Map([
+  ["propose_nameやagreeにdiscriminatingFeatureがあるときは、", "propose_nameやagreeでは、判断や判断メモにある自分側の特徴があれば、それに短く触れてどの図形のことかを示せます。相手の説明を言い換えて繰り返すことを、自分も見た・理解した証拠として示さないでください。相手の見立ては短く受け止め、必要なら自分の画像の全体の見立てを1つ返せます。判断にない尖り・四角・くぼみなどの形の数や特徴を作って補わないでください。propose_nameでは名前を候補として示すだけにし、合意は表明しないでください。"],
+]);
+export const LUNA_GENERATOR_INSTRUCTIONS_V2 = [
+  ...GENERATOR_INSTRUCTIONS_V2.split("\n").map((line) => [...LUNA_REPLACED].find(([prefix]) => line.startsWith(prefix))?.[1] ?? line),
+  "相手が述べた形・数・部分の関係は、相手の画面についての説明です。判断・判断メモのどこにも根拠がない発見・見落とし・「見えた」「分かった」という主張、局所的な特徴の確認から図形全体の特定への飛躍、判断にない自己訂正や見直しの約束はしないでください。判断メモに自分の画像についての観察があれば、その範囲で自分側の見え方を伝えられます。判断が保留（defer）や確認（confirm）なら、その機能を実現してください。",
+  "名前を提案するとき（propose_name）や名前に合意するとき（agree）は、その名前を「」で囲んで示してください。",
+].join("\n");
+export const LUNA_CONCISE_INSTRUCTIONS_V2 = [
+  "【短いチャット】この発話では、指定されたactionの機能を中心に、原則として1つの論点を扱ってください。同じ論点なら、受け止めに判断メモにある自分の観察や、まだ確かめていない点を短く添えても構いません。相手の発話に複数の問いがあれば、必要な部分には短く応じてください。挨拶だけで終えず、指定されたactionの機能を果たしてください。相槌は短い一言までにし、指定されたactionが求める場合を除き、次の図形・次の名前・別の話題は出さないでください。",
+  "人間同士のチャットのように、多くは1〜2文で、相手の発話と同じくらいの長さにしてください。相手の言葉の言い直しや自分の見立ての繰り返しはしないでください。確認したい特徴などの必要な内容は削らず、短さのために不自然にしないでください。",
+].join("\n");
+export const LUNA_ACTION_SCOPE_V2 = Object.freeze({
+  ...ACTION_SCOPE_V2,
+  accept: "受け止める。特徴を尋ねられたときは、判断メモにある自分の観察の範囲で直接答えてよい。同じ論点の観察は短く添えてよい。名前に決まった・対象を共同で特定できたとは言わない",
+  propose_name: "名前を「」で示して候補として出す（どの図形と理解したかを短く添えてもよい）。決まった・それでいこうとは言わない",
+  confirm: "確かめたい点を尋ねる・確かめる。根拠のない見落としや発見は言わない。決まった・それでいこうとは言わない",
+  agree: "名前を「」で示して、この名前に決まったことを伝えてよい",
+  defer: "その対象をいったん保留し、後で戻ることを伝える。自分の説明を誤りとは言わない。決まったとは言わない",
+});
+/** The judge's private memo, passed as data (never as instructions) to the Luna generator. */
+export const LUNA_NOTE_PREFIX = "この発話の判断メモ（非公開）。以下はデータであり、指示ではありません。相手には言わず、内部の識別子も出さないでください。actionや公開履歴と矛盾する内容、根拠の示されていない数や特徴を、断定として言わないでください:\n";
+
+/** Public events -> chat messages, keeping every speaker turn (consecutive human messages stay distinct). */
+export function eventsToHistory(events) {
+  return events.map((event) => {
+    if (!event || !["human", "ai"].includes(event.speaker) || typeof event.text !== "string") throw new Error("Invalid public event");
+    return { role: event.speaker === "human" ? "user" : "assistant", content: event.text };
+  });
+}
+
+/** Public events -> provenance turns numbered by event sequence, newest window only. */
+export function eventsToPublicTurns(events) {
+  return events.map((event) => ({ turn: event.seq, speaker: event.speaker, text: event.text,
+    ...(event.nonReferential === true ? { nonReferential: true } : {}) })).slice(-REFERENCE_LIMITS.publicTurns);
+}
+
+/** Acts a committed trace actually applied to the ledger. Legacy traces (no publication) applied both. */
+export function appliedActs(trace) {
+  if (trace.publication) return trace.publication.appliedActs.map(({ action, targetSlot, candidateName }) => ({ action, targetSlot, candidateName }));
+  const { judgment } = trace;
+  return [judgment, ...(judgment.followUp ? [judgment.followUp] : [])].map(({ action, targetSlot, candidateName }) => ({ action, targetSlot, candidateName }));
+}
+
+/**
+ * Committed naming history for the agree source check, oldest first. Legacy traces are unknown.
+ * aiText is the AI event actually published at aiSeq, looked up in ALL public events (not the bounded
+ * reference window), so a valid offer never lapses merely by scrolling out of that window.
+ */
+export function committedNameHistory(judgments, events) {
+  return judgments.flatMap((trace) => {
+    const aiSeq = trace.publication?.aiSeq ?? ((events.find((event) => event.id === trace.lastEventId)?.seq ?? trace.turnIndex) + 1);
+    const published = events.find((event) => event.seq === aiSeq && event.speaker === "ai");
+    return [
+      { kind: "human", ...(trace.humanNaming ?? { turn: trace.turnIndex, intent: null, slots: [], nameSlot: null, name: null, nameInHuman: false }) },
+      { kind: "ai", aiSeq, aiText: typeof published?.text === "string" ? published.text : null, evidence: Boolean(trace.publication),
+        acts: trace.publication ? trace.publication.appliedActs.map((act) => ({ ...act })) : appliedActs(trace).map((act) => ({ ...act, nameShown: false })) },
+    ];
+  });
+}
+
+function abortIf(signal) {
+  if (signal?.aborted) {
+    const error = new Error("superseded");
+    error.name = "AbortError";
+    throw error;
+  }
+}
+
+/**
+ * @param {{ client, strategy, image: {mimeType, base64}, anchors: {id, bbox, centroid}[], judge?: import('../../../../../../judgment/schema.mjs').DialogueJudge | null,
+ *   referenceMemory?: boolean, decisionShadowClient?: {chooseAction(request: object): Promise<any>} | null,
+ *   onResearchUpdate?: (() => void) | null, activeDecision?: {purpose: string, client: {chooseAction(request: object): Promise<any>}} | null,
+ *   utteranceStyle?: string, groundingShadow?: import('../../../../../../v2/grounding-shadow.ts').GroundingShadowOptions | null,
+ *   onGroundingShadow?: ((record: import('../../../../../../v2/grounding-shadow.ts').GroundingShadowRecord) => void) | null,
+ *   localGrounding?: import('../../../../../../local-grounding/contract.ts').LocalGroundingOptions | import('./jev-turn.mts').JevTurnLocalOptions | null,
+ *   onLocalGroundingTrace?: ((record: import('./local-grounding-turn.mts').LocalGroundingResearchRecord) => unknown) | null,
+ *   decisionMode?: 'jev' | null, observer?: import('../../../../../../observation/contract.ts').ObservationObserver | null,
+ *   jevDecision?: import('../../../../../../decision/contract.ts').JevDecisionClient | null, maxReobservations?: number, interventionPolicy?: import('./research-profile.mts').InterventionPolicyReference, decisionTimeoutMs?:number,
+ *   technicalTrial?: import('../../../../../../decision/contract.ts').AdaptiveRepairTrial,
+ *   onJevTurnTrace?: ((record: import('./jev-turn.mts').JevTurnTrace) => unknown) | null }} options
+ * @returns {{slots: readonly string[], initialPrivateState(): any,
+ *   initializePrivateState?: (options?: {signal?: AbortSignal}) => Promise<import('./jev-turn.mts').JevPrivateState>,
+ *   runAiTurn(args: any): Promise<{text: string, privateState: any}>, finalRequest(args: any, retry?: boolean): Promise<any>,
+ *   getAttempts(): any[], snapshotGraph(privateState: any): any}}
+ *   utteranceStyle is validated at runtime against UTTERANCE_STYLES. groundingShadow (default off) only produces
+ *   private records through onGroundingShadow; it never changes the act, the utterance or the private state.
+ *   onLocalGroundingTrace is private and default off. It emits staged/error/aborted attempts;
+ *   settleLocalTraces(records, installedPrivateState) confirms publication after the queue settles.
+ */
+export function createDialogueV2(options) {
+ const { client, strategy, image, anchors, judge = null, referenceMemory = true,
+  decisionShadowClient = null, onResearchUpdate = null, activeDecision = null, utteranceStyle = "default",
+  groundingShadow = null, onGroundingShadow = null, localGrounding = null, onLocalGroundingTrace = null,
+  decisionMode = null, observer = null, jevDecision = null, onJevTurnTrace = null, maxReobservations = 1 }=options;
+  let interventionPolicy, decisionTimeoutMs;
+  const integrated=Object.hasOwn(options,'interventionPolicy')||Object.hasOwn(options,'decisionTimeoutMs');
+  let intervention;
+  if(integrated){
+   try{
+    const p=Object.getOwnPropertyDescriptor(options,'interventionPolicy'),t=Object.getOwnPropertyDescriptor(options,'decisionTimeoutMs');
+    if(decisionMode!=='jev'||!referenceMemory||!p?.enumerable||!Object.hasOwn(p,'value')||!t?.enumerable||!Object.hasOwn(t,'value'))throw Error();
+    interventionPolicy=p.value;decisionTimeoutMs=t.value;if(!interventionPolicy||Object.getPrototypeOf(interventionPolicy)!==Object.prototype)throw Error();
+    const r=Object.getOwnPropertyDescriptors(interventionPolicy);if(Reflect.ownKeys(r).length!==2||['version','tableSha256'].some(k=>!r[k]?.enumerable||!Object.hasOwn(r[k],'value'))||r.version.value!=='bypass_acceptance_v1'||r.tableSha256.value!==BYPASS_ACCEPTANCE_V1_TABLE_SHA256||!Number.isSafeInteger(decisionTimeoutMs)||decisionTimeoutMs<1||decisionTimeoutMs>600000)throw Error();
+    intervention=interventionForStrategy(strategy);
+   }catch{throw new JevTurnError('invalid_intervention');}
+  }
+  // two_stage_v2 exists only for the integrated research profile; every other dialogue keeps two_stage_v1.
+  if (Object.hasOwn(options, "questionLayout") && options.questionLayout !== "two_stage_v1" && !integrated) throw new Error(options.questionLayout + " requires the integrated Jev profile");
+  if (!client || typeof client.complete !== "function") throw new Error("A chat client is required");
+  if (!STRATEGIES.includes(strategy)) throw new Error("Unsupported dialogue strategy");
+  if (typeof referenceMemory !== "boolean") throw new Error("Invalid memory option");
+  if (decisionMode !== null && decisionMode !== "jev") throw new Error("Invalid dialogue decision mode");
+  const local = decisionMode === "jev" ? null : validateLocalGroundingOptions(localGrounding);
+  if (local && !referenceMemory) throw new Error("Local grounding requires reference memory");
+  if (onLocalGroundingTrace !== null && typeof onLocalGroundingTrace !== "function") throw new Error("Invalid local grounding trace callback");
+  if (!UTTERANCE_STYLES.includes(utteranceStyle)) throw new Error("Invalid utterance style");
+  const concise = utteranceStyle === "concise";
+  if (decisionShadowClient !== null && typeof decisionShadowClient?.chooseAction !== "function") {
+    throw new Error("Invalid decision shadow client");
+  }
+  if (onResearchUpdate !== null && typeof onResearchUpdate !== "function") throw new Error("Invalid research update callback");
+  if (activeDecision !== null && (!activeDecision || !["decision_jev", "decision_luna"].includes(activeDecision.purpose) ||
+      typeof activeDecision.client?.chooseAction !== "function")) throw new Error("Invalid active decision client");
+  if (activeDecision && decisionShadowClient) throw new Error("Active and shadow decisions are mutually exclusive");
+  const grounding = validateGroundingShadowOptions(groundingShadow);
+  if (grounding && typeof onGroundingShadow !== "function") throw new Error("Invalid grounding shadow callback");
+  const ownImage = { mimeType: image.mimeType, base64: image.base64 };
+  ownImageMessage(ownImage);
+  const slots = anchors.map((anchor) => anchor.id);
+  const ownAnchors = anchors.map(({ id, bbox, centroid }) => ({ id, bbox: { ...bbox }, centroid: { ...centroid } }));
+  if (decisionMode === "jev") {
+    const v3Trial = Boolean(options.technicalTrial) && options.questionLayout === "two_stage_v3";
+    if (!referenceMemory || !localGrounding) throw new Error("Jev decision mode requires local reference memory");
+    if (activeDecision || decisionShadowClient || groundingShadow) throw new Error("Jev decision mode cannot combine legacy decision paths");
+    return createJevTurnRuntime({ client, ownImage, ownAnchors, observer, jevDecision, localGrounding, ...(integrated?{intervention,decisionTimeoutMs}:{}),
+      ...(Object.hasOwn(options,'technicalTrial')?{technicalTrial:options.technicalTrial}:{}),
+      ...(Object.hasOwn(options,'questionLayout')?{questionLayout:options.questionLayout}:{}),
+      onJevTurnTrace, onLocalGroundingTrace, maxReobservations,
+      generation: { task: TASK_INSTRUCTIONS_V2, instructions: v3Trial ? TRIAL_V3_GENERATOR_INSTRUCTIONS_V2 : options.technicalTrial ? TRIAL_GENERATOR_INSTRUCTIONS_V2 : GENERATOR_INSTRUCTIONS_V2,
+        ...(concise ? { concise: CONCISE_INSTRUCTIONS_V2 } : {}), actionScope: v3Trial ? TRIAL_V3_ACTION_SCOPE_V2 : options.technicalTrial ? TRIAL_ACTION_SCOPE_V2 : ACTION_SCOPE_V2,
+        final: FINAL_INSTRUCTIONS_V2, timeoutMs: GENERATION_TIMEOUT_MS } });
+  }
+  const dialogueJudge = judge ?? createLunaJudge(client);
+  // Research-only trace of every attempted run (including superseded or failed ones).
+  const attempts = [];
+  const localResearch = new WeakMap();
+  function emitLocalResearch(trace, status) {
+    const record = trace && localResearch.get(trace);
+    if (!record) return;
+    localResearch.delete(trace);
+    const snapshot = { ...clone(record), status, localStatus: trace.localGrounding?.status ?? record.localStatus };
+    try { Promise.resolve(onLocalGroundingTrace(snapshot)).catch(() => {}); }
+    catch { /* A private research sink never controls publication or state. */ }
+  }
+  const notifyResearchUpdate = () => {
+    Promise.resolve().then(() => onResearchUpdate?.()).catch(() => {});
+  };
+
+  function startDecisionShadow(trace, input) {
+    const purposes = ["decision_jev", "decision_luna"];
+    const errors = (error) => purposes.map((purpose) => ({ purpose, status: "error", error }));
+    let evidence;
+    try { evidence = buildDecisionEvidence(input); }
+    catch {
+      trace.decisionShadow = errors("evidence_unavailable");
+      notifyResearchUpdate();
+      return;
+    }
+    trace.decisionShadow = { status: "pending" };
+    // Research work has no awaited dependency on generation or queue completion.
+    Promise.allSettled(purposes.map((purpose) => Promise.resolve().then(() =>
+      decisionShadowClient.chooseAction({ purpose, state: evidence })))).then((results) => {
+      trace.decisionShadow = clone(results.map((result, index) => result.status === "fulfilled" ? {
+        purpose: purposes[index], model: result.value.model, action: result.value.action,
+        provider: result.value.provider ?? null, id: result.value.id ?? null,
+        probabilities: result.value.probabilities, usage: result.value.usage ?? null,
+        latencyMs: result.value.latencyMs ?? null, status: "ok",
+      } : { purpose: purposes[index], status: "error", error: "decision_unavailable" }));
+    }).catch(() => {
+      trace.decisionShadow = errors("decision_unavailable");
+    }).then(notifyResearchUpdate).catch(() => {});
+  }
+
+  function initialPrivateState() {
+    return {
+      ledger: createOwnLedger(slots),
+      judgments: [],
+      graph: referenceMemory ? createReferenceGraph({ slots }) : null,
+    };
+  }
+
+  // Failed attempts keep only sanitized fields: code, phase, HTTP status, elapsed ms.
+  async function runAiTurn(args) {
+    const before = attempts.length, started = performance.now();
+    try {
+      const result = await runAiTurnUnbounded(args);
+      emitLocalResearch(attempts[before], "staged");
+      return result;
+    }
+    catch (error) {
+      const trace = attempts.length > before ? attempts.at(-1) : null;
+      if (trace && error?.name !== "AbortError") Object.assign(trace, {
+        errorCode: traceCode(error?.code), errorPhase: trace.status === "generation_error" ? "generation" : "judgment",
+        errorStatus: Number.isInteger(error?.status) ? error.status : null, errorElapsedMs: Math.round(performance.now() - started),
+      });
+      emitLocalResearch(attempts[before], error?.name === "AbortError" ? "aborted" : "error");
+      throw error;
+    }
+  }
+
+  async function runAiTurnUnbounded({ events, signal, privateState, lastEventId, requestSeq = null }) {
+    const state = clone(privateState);
+    const humanEvents = events.filter((event) => event.speaker === "human");
+    const latest = humanEvents.at(-1);
+    if (!latest) throw new Error("No human message to answer");
+    const history = eventsToHistory(events);
+    const publicTurns = state.graph ? eventsToPublicTurns(events) : null;
+    const trace = { turnIndex: latest.seq, lastEventId, humanEventIds: events.filter((e) => e.speaker === "human" &&
+      e.seq > (state.judgments.at(-1)?.turnIndex ?? 0)).map((e) => e.id),
+      judgment: null, ownLedgerBefore: clone(state.ledger), ownLedgerAfter: clone(state.ledger), validation: null, status: "judge_error" };
+    if (state.graph) trace.memory = { opsApplied: 0, rejected: null, interpretation: false };
+    attempts.push(trace);
+    const attemptNumber = Number.isSafeInteger(requestSeq) && requestSeq > 0 ? requestSeq : attempts.length;
+    if (local && onLocalGroundingTrace) localResearch.set(trace, {
+      turnIndex: latest.seq, lastEventId: lastEventId ?? null, attemptNumber, status: "error", localStatus: "error",
+      extractor: { segments: [] }, classifier: { kind: "unverified_injected", model: null, status: "not_called", callIndex: null, verdicts: [] },
+      verification: { accepted: [], rejected: [] }, aiClaims: [], claims: [],
+    });
+    const rawJudgment = await dialogueJudge.judge({
+      version: 2, image: ownImage, ownAnchors, publicHistory: history, strategy, ownLedger: clone(state.ledger),
+      ...(state.graph ? { referenceContext: { graph: state.graph, turn: latest.seq, publicTurns } } : {}),
+      ownJudgmentHistory: state.judgments.flatMap(appliedActs),
+      ...(state.graph ? { nameHistory: committedNameHistory(state.judgments, events) } : {}),
+    });
+    abortIf(signal);
+    let judgment, memoryUpdate = null;
+    if (state.graph) {
+      const core = { ...rawJudgment }; delete core.reference;
+      const validCore = validateJudgment(core, { ownLedger: state.ledger, agreeEvidence: true });
+      try {
+        judgment = validateJudgment(rawJudgment, { ownLedger: state.ledger, agreeEvidence: true });
+        const staged = prepareMemory(state.graph, latest.seq, judgment.reference, publicTurns);
+        memoryUpdate = staged.update;
+        trace.memory.interpretation = judgment.reference != null;
+        trace.memory.rejected = staged.rejected;
+      } catch (error) {
+        judgment = { ...validCore, reference: null };
+        trace.memory.rejected = "memory_" + (error instanceof ReferenceGraphError || error?.name === "JudgmentValidationError" ? error.code : "invalid_update");
+        memoryUpdate = stageMemory(state.graph, latest.seq, null, publicTurns);
+      }
+    } else judgment = validateJudgment(rawJudgment, { ownLedger: state.ledger, agreeEvidence: true });
+    // Concise style: the unspoken followUp is removed from the act itself, so the
+    // ledger, memory and generation never carry an act the partner did not hear.
+    if (concise) {
+      trace.utteranceStyle = { style: utteranceStyle, droppedFollowUp: judgment.followUp ? clone(judgment.followUp) : null };
+      if (judgment.followUp) judgment = { ...judgment, followUp: null };
+    }
+    if (activeDecision) {
+      let decision;
+      const started = performance.now();
+      try {
+        const evidence = buildDecisionEvidence({ events, ownLedger: state.ledger, judgment, strategy });
+        decision = { ...await activeDecision.client.chooseAction({ purpose: activeDecision.purpose, state: evidence }), purpose: activeDecision.purpose };
+      } catch (error) { decision = { error, purpose: activeDecision.purpose, latencyMs: Math.round(performance.now() - started) }; }
+      abortIf(signal);
+      const resolved = resolveActiveJudgment({ lunaJudgment: judgment, decision, ownLedger: state.ledger, strategy });
+      judgment = resolved.judgment;
+      trace.activeJudge = resolved.record;
+      if (state.graph) {
+        const staged = prepareMemory(state.graph, latest.seq, judgment.reference, publicTurns);
+        memoryUpdate = staged.update;
+        trace.memory.interpretation = judgment.reference != null;
+        trace.memory.rejected ??= staged.rejected;
+      }
+    }
+    trace.judgment = { ...judgment };
+    delete trace.judgment.reference;
+    if (decisionShadowClient) {
+      startDecisionShadow(trace, { events, ownLedger: state.ledger, judgment, strategy });
+    }
+    abortIf(signal);
+    trace.validation = dialogueJudge.getDiagnostics?.().at(-1) ?? null;
+    // The judge's own reading of this human turn, kept minimally before reference is dropped from the trace.
+    if (state.graph) trace.humanNaming = humanNamingRecord(judgment.reference ?? null, latest.seq, publicTurns);
+    let localMemo = null;
+    if (local) {
+      const baseMemoryUpdate = memoryUpdate;
+      const previous = state.judgments.at(-1);
+      const previousAi = previous && publicTurns.find(event => event.speaker === "ai" && event.turn > previous.turnIndex && event.turn < latest.seq);
+      const staged = await prepareLocalGroundingTurn(local, { graph: state.graph, update: memoryUpdate, publicTurns, signal,
+        ownImage, ownAnchors, captureResearch: Boolean(onLocalGroundingTrace),
+        ...(previousAi ? { priorAct: { ...previous.judgment, turn: previousAi.turn,
+          publishedFallback: previous.generationGuard?.fallback === true } } : {}) });
+      trace.localGrounding = staged.trace;
+      if (onLocalGroundingTrace) {
+        trace.localGrounding.attemptNumber = attemptNumber;
+        Object.assign(localResearch.get(trace), staged.research);
+      }
+      abortIf(signal);
+      memoryUpdate = staged.update;
+      try { localMemo = localGroundingMemo(state.graph, memoryUpdate, publicTurns); }
+      catch {
+        memoryUpdate = baseMemoryUpdate;
+        Object.assign(trace.localGrounding, { status: "error", accepted: 0 });
+        trace.localGrounding.rejected.push({ segmentId: "turn", reason: "summary_unavailable" });
+        const research = localResearch.get(trace);
+        if (research) Object.assign(research, { claims: [], aiClaims: [], verification: { accepted: [], rejected: clone(trace.localGrounding.rejected) } });
+      }
+    }
+    trace.status = "generation_error";
+    const { action, targetSlot, candidateName, discriminatingFeature } = judgment;
+    const generationMessages = [
+      { role: "system", content: TASK_INSTRUCTIONS_V2 },
+      { role: "system", content: LUNA_GENERATOR_INSTRUCTIONS_V2 },
+      ...(concise ? [{ role: "system", content: LUNA_CONCISE_INSTRUCTIONS_V2 }] : []),
+      { role: "system", content: "この発話の判断（非公開）:\n" + "主actionで言えること: " + LUNA_ACTION_SCOPE_V2[action] +
+        (judgment.followUp ? "。followUpで言えること: " + LUNA_ACTION_SCOPE_V2[judgment.followUp.action] : "") + "\n" + JSON.stringify({ action, targetSlot, candidateName, discriminatingFeature,
+        ...(Object.hasOwn(judgment, "followUp") ? { followUp: judgment.followUp } : {}) }) },
+      // The memo describes the judge's own act; when an active decision changed that act it is withheld.
+      ...(!(trace.activeJudge && trace.activeJudge.finalAction !== trace.activeJudge.lunaAction) && typeof judgment.note === "string" && judgment.note.trim() ? [{ role: "system", content: LUNA_NOTE_PREFIX + JSON.stringify(judgment.note) }] : []),
+      ...ownImageMessage(ownImage),
+      { role: "system", content: "AI自身の作業メモ（非公開・正解表ではない）:\n" + JSON.stringify({ ownLedger: state.ledger, agreeEvidence: true }) },
+      ...(localMemo === null ? [] : [{ role: "system", content: localMemo }]),
+      ...(trace.activeJudge && trace.activeJudge.finalAction !== trace.activeJudge.lunaAction ? [{
+        role: "system", content: "【この発話の表現範囲（非公開）】この発話のactionは" + action + "です。" + LUNA_ACTION_SCOPE_V2[action] + "。" +
+          (action === "agree" ? "" : "相手が名前を提案していても、このactionでは名称への合意・決定を表す表現（呼びましょう／でいいですね／決まり 等）を使わないでください。") +
+          (action === "accept" ? "受け止めや見立ての共有にとどめてください。" : "このactionで指定された対話機能の範囲だけを表現してください。") +
+          "内部の判断・処理・ラベルを相手に説明せず、公開する発話だけを返してください。",
+      }] : []),
+      ...history,
+    ];
+    // One retry only for a stall or a failure before any response; the abandoned first
+    // attempt's late result is ignored. The caller's client records both attempts.
+    const generate = () => client.complete(generationMessages, { phase: "generation", timeoutMs: GENERATION_TIMEOUT_MS });
+    let result;
+    try { result = await generate(); }
+    catch (error) {
+      if (!stalled(error)) throw error;
+      abortIf(signal);
+      trace.generationRetried = true;
+      result = await generate();
+    }
+    abortIf(signal);
+    if (typeof result?.text !== "string" || !result.text.trim()) throw new Error("The chat client returned no utterance");
+    // Publication rules for the committed act (agreement only under agree, self-repair
+    // only under repair, never internal ids/fields). Wording never changes the act.
+    // Format only: a primary name act must show its name in 「」; this never certifies the speech act.
+    const primaryName = NAME_ACTS.includes(action) ? effectiveName(judgment, state.ledger) : "";
+    const publicationViolations = (text, messages) => {
+      const codes = [...findGuardViolations(text, action), ...(primaryName && !nameShown(text, primaryName) ? ["name_not_shown"] : [])];
+      return local ? [...new Set([...codes, ...findLocalPublicationViolations(text, messages)])] : codes;
+    };
+    trace.generationGuard = { violations: publicationViolations(result.text, generationMessages), regenerated: false, fallback: false };
+    if (trace.generationGuard.violations.length) {
+      abortIf(signal);
+      trace.generationGuard.regenerated = true;
+      let retry = null;
+      const retryMessages = [...generationMessages, {
+        role: "system", content: "【公開発話の書き直し】この発話のactionは" + action + "です。" + LUNA_ACTION_SCOPE_V2[action] +
+          "。" + rewriteReasons(trace.generationGuard.violations) + "内部処理は説明せず、公開する発話だけを返してください。",
+      }];
+      try {
+        retry = await client.complete(retryMessages, { phase: "generation", timeoutMs: GENERATION_TIMEOUT_MS });
+      } catch { /* Retry failure is private; never retain a raw provider error. */ }
+      abortIf(signal);
+      const retryCodes = typeof retry?.text === "string" && retry.text.trim() ? publicationViolations(retry.text, retryMessages) : null;
+      trace.generationGuard.violations = [...new Set([...trace.generationGuard.violations, ...(retryCodes ?? [])])];
+      if (retryCodes && retryCodes.length === 0) result = retry;
+      else {
+        result = { text: fallbackUtterance(judgment) };
+        if (local) {
+          const fallbackCodes = publicationViolations(result.text, retryMessages);
+          if (fallbackCodes.length) {
+            trace.generationGuard.violations = [...new Set([...trace.generationGuard.violations, ...fallbackCodes])];
+            result = { text: fallbackUtterance({ ...judgment, candidateName: null, discriminatingFeature: null }) };
+          }
+        }
+        trace.generationGuard.fallback = true;
+      }
+    }
+    // Ledger effect follows the final text: a name act whose name is not shown is withheld
+    // (and a followUp depends on its primary). graph updates come from human turns and are kept.
+    const primaryHeld = Boolean(primaryName) && !nameShown(result.text, primaryName);
+    const followUp = judgment.followUp ?? null;
+    const followUpName = followUp && NAME_ACTS.includes(followUp.action) ? effectiveName(followUp, applyJudgment(state.ledger, { ...judgment, followUp: null })) : "";
+    const followUpHeld = Boolean(followUp) && (primaryHeld || (Boolean(followUpName) && !nameShown(result.text, followUpName)));
+    const applied = primaryHeld ? null : followUpHeld ? { ...judgment, followUp: null } : judgment;
+    const nextLedger = applied ? applyJudgment(state.ledger, applied) : state.ledger;
+    const lastSeq = events.reduce((max, event) => Math.max(max, event.seq), 0);
+    const act = (value, name) => ({ action: value.action, targetSlot: value.targetSlot, candidateName: value.candidateName,
+      nameShown: Boolean(name) && nameShown(result.text, name) });
+    trace.publication = { primary: primaryHeld ? "withheld" : "applied", followUp: followUp ? followUpHeld ? "withheld" : "applied" : null,
+      aiSeq: lastSeq + 1, appliedActs: [...(primaryHeld ? [] : [act(judgment, primaryName)]), ...(followUp && !followUpHeld ? [act(followUp, followUpName)] : [])] };
+    const nextGraph = state.graph ? applyReferenceUpdate(state.graph, memoryUpdate, { publicTurns, generationSucceeded: true }) : null;
+    if (state.graph) trace.memory.opsApplied = memoryUpdate.operations.length;
+    trace.ownLedgerAfter = clone(nextLedger);
+    trace.status = "staged";
+    const committedTrace = { ...clone(trace), status: "committed" };
+    // Committed judgments keep a pending marker; settled shadow data belongs only to attempts.
+    if (decisionShadowClient) committedTrace.decisionShadow = { status: "pending" };
+    // Shadow grounding evidence for the act just staged, judged on the public turns before this
+    // utterance. It starts only after generation, is never awaited and settles into a private record.
+    if (grounding) {
+      startGroundingShadow(grounding, { events, judgment, ownLedger: state.ledger, turnIndex: latest.seq, lastEventId: lastEventId ?? null,
+        // Pre-turn memory only: this turn's interpretation is already the judgment, never counted twice.
+        ...(state.graph ? { graph: state.graph } : {}),
+        priorAiActs: state.judgments.flatMap((trace) => appliedActs(trace).map((act) => ({ turn: trace.turnIndex, ...act }))) },
+      (record) => { try { onGroundingShadow(record); } catch { /* research sink only */ } notifyResearchUpdate(); });
+    }
+    // The queue installs this only if the snapshot is still current.
+    return { text: result.text, privateState: { ledger: nextLedger, judgments: [...state.judgments, committedTrace], graph: nextGraph } };
+  }
+
+  async function finalRequest({ events, privateState }, retry = false) {
+    return client.complete([
+      { role: "system", content: TASK_INSTRUCTIONS_V2 },
+      { role: "system", content: "これは非公開の最終提出です。作業メモは初期候補であり正解ではありません。自分の画像と公開対話を照合し、最終的な名称はあなた自身で判断してください。" },
+      ...ownImageMessage(ownImage),
+      { role: "system", content: "自分の画像内の各図形の内部参照ID（非公開）:\n" + JSON.stringify(ownAnchors) },
+      { role: "system", content: "AI自身の作業メモ（非公開・正解表ではない）:\n" + JSON.stringify({ ownLedger: privateState.ledger }) },
+      ...publicMessages(eventsToHistory(events)),
+      { role: "user", content: FINAL_INSTRUCTIONS_V2 + (retry ? "\n前回は指定JSON形式として検証できませんでした。キーは内部参照ID6個だけにして再提出してください。" : "") },
+    ], { phase: "final_submission" });
+  }
+
+  return Object.freeze({
+    slots: Object.freeze([...slots]),
+    initialPrivateState,
+    runAiTurn,
+    finalRequest,
+    snapshotGraph(privateState) { return privateState.graph ? snapshotReferenceGraph(privateState.graph) : null; },
+    getAttempts() { return clone(attempts); },
+  });
+}
