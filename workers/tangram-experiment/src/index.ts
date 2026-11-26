@@ -43,7 +43,7 @@ import { createTrialV2, modelView } from "../../../dialogue-model/runtime/stimul
 import { resolveWorkerParticipantModelPin } from "../../../dialogue-model/runtime/v2/participant-model-pin.ts";
 import { PARTICIPANT_PRODUCTION_PROFILE } from '../../../dialogue-model/runtime/web/participant-usage-policy.ts';
 import { ParticipantUsageLedger, type ParticipantUsageStore } from '../../../dialogue-model/runtime/web/participant-usage.ts';
-import { createWorkerParticipantRuntime, workerParticipantPolicy,
+import { createWorkerParticipantRuntime, workerParticipantPolicy, matchesWorkerDialogueProfile,
   type ParticipantService } from "./participant-runtime.ts";
 export { AdminIndex };
 
@@ -80,6 +80,8 @@ export interface Env extends SoftLimitBindings {
   PARTICIPANT_TERRA_GENERATION_ENABLED?: string;
   PARTICIPANT_TERRA_ALL_ROLES_ENABLED?: string;
   PARTICIPANT_TERRA_PROFILE?: string;
+  // Approval-only opt-in. Accepted plans decide the version of both conditions.
+  PARTICIPANT_DIALOGUE_PROFILE?: string;
   PARTICIPANT_TERRA_LIMITS_JSON?: string;
   // Approval-only opt-in; already approved plans supply their own generation.
   PARTICIPANT_TERRA_INITIAL_OBSERVATION_GENERATION?: string;
@@ -259,9 +261,14 @@ export class TangramSession extends DurableObject<Env> {
       if (!settings.protocol) throw new ReceptionError('protocol_unconfigured');
       const protocol = settings.protocol.protocol, expected = input?.protocol;
       let participant: Pick<Parameters<typeof approveReception>[1],
-        'participantModelPin' | 'participantRuntimeProfile' | 'participantLimits' | 'initialObservationGeneration'> = {};
+        'participantModelPin' | 'participantRuntimeProfile' | 'participantLimits' | 'initialObservationGeneration' | 'participantDialogueProfile'> = {};
       const generationPin = this.env.PARTICIPANT_TERRA_GENERATION_ENABLED === 'on';
       const allTerraPin = this.env.PARTICIPANT_TERRA_ALL_ROLES_ENABLED === 'on';
+      const dialogueProfile = this.env.PARTICIPANT_DIALOGUE_PROFILE;
+      if (dialogueProfile !== undefined && (dialogueProfile !== 'participant_dialogue_v12' || !protocol.referenceMemory || !allTerraPin ||
+          this.env.PARTICIPANT_TERRA_ENABLED !== 'on' || this.env.PARTICIPANT_TERRA_PROFILE !== PARTICIPANT_PRODUCTION_PROFILE)) {
+        throw new ReceptionError('reception_unavailable');
+      }
       if ((generationPin || allTerraPin) && this.env.PARTICIPANT_TERRA_ENABLED !== 'on') throw new ReceptionError('reception_unavailable');
       if (this.env.PARTICIPANT_TERRA_ENABLED === 'on') {
         try {
@@ -277,7 +284,8 @@ export class TangramSession extends DurableObject<Env> {
           const { pin: participantModelPin } = await workerParticipantPolicy(this.env.PARTICIPANT_AI_PROXY, usageOnly, initialObservationGeneration,
             allTerraPin ? 'participant_model_pin_v3' : generationPin ? 'participant_model_pin_v2' : 'participant_model_pin_v1');
           participant = { participantModelPin, ...(initialObservationGeneration ? { initialObservationGeneration } : {}),
-            ...(participantLimits ? { participantLimits } : { participantRuntimeProfile: PARTICIPANT_PRODUCTION_PROFILE }) };
+            ...(participantLimits ? { participantLimits } : { participantRuntimeProfile: PARTICIPANT_PRODUCTION_PROFILE }),
+            ...(dialogueProfile ? { participantDialogueProfile: dialogueProfile } : {}) };
         } catch {
           throw new ReceptionError('reception_unavailable');
         }
@@ -327,7 +335,10 @@ export class TangramSession extends DurableObject<Env> {
     if (!r || !r.plan || !['approved','in_progress'].includes(r.status)) throw new ReceptionError('reception_not_approved');
     if (!Number.isSafeInteger(body.expectedReceptionRevision) || body.expectedReceptionRevision !== r.revision) throw new ReceptionError('trial_changed');
     const plan = r.plan.schemaVersion === 'reception_plan_v1' ? null : r.plan;
-    if (plan?.participantDialogueProfile !== undefined) throw new BaseSessionError('trial_unavailable');
+    if (plan?.participantDialogueProfile === 'participant_dialogue_v13_p5' ||
+        plan?.participantDialogueProfile === 'participant_dialogue_v12' && plan.memoryPruneVersion !== CLAIM_PRUNE_V2) {
+      throw new BaseSessionError('trial_unavailable');
+    }
     const index = r.trials.length;
     if (index >= r.plan.trials.length) throw new ReceptionError('reception_finished');
     let predecessor: string | undefined;
@@ -339,6 +350,7 @@ export class TangramSession extends DurableObject<Env> {
       predecessor = body.expectedRecordId;
       const record = await this.baseReadRecord(predecessor);
       if (!record || record.status !== 'completed') throw new ReceptionError('reception_conflict');
+      if (!matchesWorkerDialogueProfile(plan?.participantDialogueProfile, record)) throw new BaseSessionError('trial_unavailable');
       // Frozen at approval: a later protocol change never adds or removes this requirement.
       if (effectiveBetweenTrials(r.plan) === 'questionnaire_required' && !await this.questionnaireSubmitted(predecessor)) {
         throw new ReceptionError('questionnaire_required');
@@ -710,7 +722,10 @@ export class TangramSession extends DurableObject<Env> {
           if (source?.kind === 'reception_plan_v2' || source?.kind === 'reception_plan_v3') {
             const plan = (await this.readReception())?.plan;
             const dialogueProfile = plan?.schemaVersion === 'reception_plan_v1' ? undefined : plan?.participantDialogueProfile;
-            if (dialogueProfile !== source.plan.participantDialogueProfile) throw new BaseSessionError('trial_unavailable');
+            if (dialogueProfile !== source.plan.participantDialogueProfile ||
+                current?.record && !matchesWorkerDialogueProfile(dialogueProfile, current.record)) {
+              throw new BaseSessionError('trial_unavailable');
+            }
           }
           const r = current && current.record;
           if (r && !await this.baseReadRecord(r.recordId)) return {kind:'expired'};
@@ -821,7 +836,11 @@ export class TangramSession extends DurableObject<Env> {
 
   private async createTrial(binding: Parameters<MakeBaseTask>[0]): Promise<NamingTask> {
     const {seed,strategy,referenceMemory,restore,participantRuntime,initialObservationGeneration,memoryPruneVersion,participantDialogueProfile} = binding;
-    if (participantDialogueProfile !== undefined || (restore && Object.hasOwn(restore.options, 'participantDialogueProfile'))) {
+    if (participantDialogueProfile === 'participant_dialogue_v13_p5' ||
+        restore && !matchesWorkerDialogueProfile(participantDialogueProfile, restore) ||
+        participantDialogueProfile === 'participant_dialogue_v12' &&
+          (memoryPruneVersion !== CLAIM_PRUNE_V2 || binding.participantModelPin?.schemaVersion !== 'participant_model_pin_v3' ||
+            participantRuntime?.profile !== PARTICIPANT_PRODUCTION_PROFILE)) {
       throw new BaseSessionError('trial_unavailable');
     }
     const admittedPolicy = !restore && this.admission?.kind === 'reception' ? this.admission.participantPolicy : undefined;
@@ -839,7 +858,8 @@ export class TangramSession extends DurableObject<Env> {
     const onPersist = async (snapshot: StoredTrial) => {
       const record = pin ? { ...snapshot, options: { ...snapshot.options, participantModelPin: pin,
         ...(initialObservationGeneration ? { initialObservationGeneration } : {}),
-        ...(participantRuntime ? { participantRuntimeProfile: participantRuntime.profile } : {}) } } : snapshot;
+        ...(participantRuntime ? { participantRuntimeProfile: participantRuntime.profile } : {}),
+        ...(participantDialogueProfile ? { participantDialogueProfile } : {}) } } : snapshot;
       await binding.onPersist(record as unknown as BaseRecord);
       await this.scheduleExpiry();
       this.ctx.waitUntil(this.registerSummary(record));
@@ -859,7 +879,7 @@ export class TangramSession extends DurableObject<Env> {
       const trial = createTrialV2({ seed, rotationMode, ...figures });
       const model = modelView(trial);
       const runtime = createWorkerParticipantRuntime({
-        proxy: policy.proxy, pin, ...runtimeMode, initialObservationGeneration,
+        proxy: policy.proxy, pin, ...runtimeMode, initialObservationGeneration, participantDialogueProfile,
         own: { ownImage: { mimeType: model.mimeType, base64: model.png.toString('base64') }, ownAnchors: model.anchors },
         cache: {
           read: key => this.ctx.storage.get(key),
