@@ -5,9 +5,11 @@ import test from "node:test";
 import type { Label, Plan, Turn } from "./support/s4-v3-records.ts";
 import { hash } from "../dialogue-model/runtime/diagnostics/parity-verify/core.ts";
 import { verifyRecords } from "../dialogue-model/runtime/diagnostics/parity-verify/index.ts";
-import { promptSourceManifest } from "../dialogue-model/runtime/diagnostics/parity-live/audit.ts";
+import { RunBudget, promptSourceManifest } from "../dialogue-model/runtime/diagnostics/parity-live/audit.ts";
 import { defaultGenerationRetryVersion, isGenerationV14, validGenerationRetryVersion } from "../dialogue-model/runtime/v2/generation-guard.ts";
 import { validJevSharedConstrualTrace } from "../dialogue-model/runtime/v2/jev-turn.ts";
+import { researchHash } from "../dialogue-model/runtime/v2/research-profile.ts";
+import { selectParticipantJev } from "../dialogue-model/runtime/web/participant-jev-wiring.ts";
 
 // Only this isolated test opts the existing synthetic harness into the new client capability.
 const supportUrl = new URL("./support/s4-v3-records.ts", import.meta.url).href;
@@ -341,3 +343,101 @@ test("the semantic stage follows the executed adoption and coexists with the nam
     assert.equal(end.speech, speech);
   }
 });
+
+for (const label of conditions) {
+  test(label + " refuses a singleton overclaim after narrowing an ambiguous shared candidate", async () => {
+    for (const { targets, target, referent } of [
+      { targets: [left, right], target: "figures_0_1", referent: "multiple" },
+      { targets: [left, right], target: "figures_0_1", referent: "figure_0" },
+      { targets: [left], target: "figure_0", referent: "multiple" },
+    ]) {
+      const prior = [...aiFirst({ targets, target }), unresolved(targets, target)];
+      const last = finish(safeNegation, sail, "figure_0", true, (key, _, context) =>
+        key === "draft_shared_claim" ? context.generationCalls === 1 ? "single_identification_claimed" : "none" : undefined);
+      last.plan.referent = referent;
+      last.plan.drafts = [singleOverclaim, safeNegation];
+      const { records, outcomes } = await runWithVersion(label, [...prior, last], v14);
+      const outcome = outcomes[label].at(-1)!;
+      assert.deepEqual(outcome.trace.executed.target, { kind: "single", figureId: left });
+      assert.equal(outcome.trace.humanReferent?.scores?.[referent === "multiple" ? "multiple" : left], 1);
+      assert.deepEqual(outcome.trace.sharedConstruals?.[0].figureIds, targets);
+      assert.equal(outcome.speech, safeNegation);
+      assert.deepEqual(outcome.trace.generationGuard.violations, ["draft_shared_claim_single_id"]);
+      assertS4Pass(records);
+    }
+  });
+}
+
+for (const label of conditions) {
+  test(label + " S4 and cold restore reject missing or changed checks on a stopped adoption", async () => {
+    const target = "figures_0_1", targets = [left, right];
+    const turn = finish(safeNegation, sail, target);
+    const { records } = await runWithVersion(label, [...aiFirst({ targets, target }), turn], v14);
+    const trial = records.trials[0], { tape } = trial.replay[0], { profile } = trial;
+    const choose = turn.plan.choose!;
+    let trace: any;
+    await assert.rejects(runTurn(profile, label, tape.state, tape.events, {
+      ...turn.plan, drafts: [singleOverclaim, singleOverclaimAlt],
+      choose: (key, criteria, context) => key === "draft_shared_claim" ? "single_identification_claimed" : choose(key, criteria, context),
+    }, technicalTrial, v14), (error: any) => {
+      trace = error.traces.at(-1);
+      return error.code === "unsafe_generation";
+    });
+    assert.equal(trace.draftSharedClaims.length, 2);
+    trial.attempts = [trace];
+    trial.turns = [{ ...trial.turns[0], trace: [structuredClone(trace)], state: structuredClone(tape.state), publicText: null }];
+    trial.lastCommittedState = tape.state;
+    trial.calls = [];
+    trial.http = [];
+    trial.replay = [];
+    records.evidence.pairedReplay = [];
+    const shapeBinding = (input: typeof records) => verifyRecords(input).checks
+      .filter(check => /^intervention\.trial\.0\.attempt\.0\.(shape|binding)$/.test(check.id)).map(check => check.status);
+    const options = { profile, generationRetryVersion: v14, technicalTrial,
+      observer: { observeAll() {}, reobserve() {} }, jevDecision: { decide() {} },
+      localGrounding: { classifier: { classify() {} }, aiPublicClaims: true, timeoutMs: profile.timeouts.localMs },
+      ledger: new RunBudget({ lunaCalls: 5, lunaPosts: 5, lunaTokens: 1000, jevPosts: 10, jevUsd: 0.05 }),
+    };
+    const context = { referenceMemory: true, strategy: label, style: profile.utteranceStyle, legacy: [] };
+    const restore = (attempt: any) => selectParticipantJev({
+      options: { jevResearch: true, profileSha256: researchHash(profile), interventionPolicy: profile.interventionPolicy,
+        questionLayout: "two_stage_v3", dialoguePolicy: "holistic_v5", generationRetryVersion: v14, technicalTrial },
+      queueState: { privateState: tape.state, events: tape.events },
+      jevTraces: [attempt], initialObservation: { memoSha256: researchHash(tape.state.observationMemo) },
+      aiPublicSettlement: [], jevLedger: {},
+    }, options, context);
+    assert.deepEqual(shapeBinding(records), ["pass", "pass"]);
+    assert.equal(restore(trace)?.generationRetryVersion, v14);
+    const passed = (row: any) => {
+      row.choice = "none";
+      row.scores = { none: 1, single_identification_claimed: 0, unconfirmed_detail_claimed: 0 };
+    };
+    const variants = [
+      (attempt: any) => { delete attempt.draftSharedClaims; },
+      (attempt: any) => { attempt.draftSharedClaims.pop(); },
+      (attempt: any) => attempt.draftSharedClaims.forEach(passed),
+      (attempt: any) => passed(attempt.draftSharedClaims[1]),
+    ];
+    const damaged = variants.map(change => {
+      const copy = structuredClone(records), affected = copy.trials[0];
+      for (const attempt of [affected.attempts[0], affected.turns[0].trace[0]]) change(attempt);
+      let restored = false;
+      try { restored = restore(affected.attempts[0]) !== null; }
+      catch (error) { assert.equal((error as { code: string }).code, "invalid_options"); }
+      return { s4: shapeBinding(copy), restored };
+    });
+    assert.deepEqual(damaged, variants.map(() => ({ s4: ["mismatch", "mismatch"], restored: false })));
+
+    await assert.rejects(runTurn(profile, label, tape.state, tape.events, {
+      ...turn.plan, drafts: [singleOverclaim, " "],
+      choose: (key, criteria, context) => key === "draft_shared_claim" ? "single_identification_claimed" : choose(key, criteria, context),
+    }, technicalTrial, v14), (error: any) => {
+      const incomplete = error.traces.at(-1);
+      assert.equal(error.code, "generation_failed");
+      assert.equal(incomplete.generationErrorCode, "empty_response");
+      assert.deepEqual(incomplete.draftSharedClaims.map((row: any) => row.draft), ["initial"]);
+      assert.equal(restore(incomplete)?.generationRetryVersion, v14);
+      return true;
+    });
+  });
+}

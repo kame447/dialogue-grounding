@@ -25,7 +25,7 @@ import { validateObservationMemo, mergeReobservation, observationContextMessages
 import type { JevAction, JevDecision, JevDecisionClient, JevDecisionInput, JevObservationRequest, RepairHistoryEntry, HumanReferentEstimate, RepairProspectMaterial, AdaptiveRepairTrial, PublicNameCandidate, RepairFact, JevQuestionLayout, DialoguePolicy, SharedConstrual } from "../decision/contract.ts";
 import { deriveRepairFacts, validateRepairFacts } from "../decision/repair-facts.ts";
 import { validateJevDecision, validateHumanReferentEstimate, validateRepairProspectEstimate, validateRepairProspectMaterial, unknownRepairProspect, JevDecisionError, JEV_DECISION_INPUT_LIMITS, JEV_DECISION_REJECTION_CODES,
-  projectDecisionFailureEvidence, checkDecisionFailureEvidence, v3AlwaysOffered, TWO_STAGE_V2_CANDIDATE_SETS, candidateSetLabel, V3_TARGET_LABEL_SET, participantJevTargetOffered, retainedParticipantJevMenuValid, draftSharedClaimVerdict } from "../decision/jev-decision.ts";
+  projectDecisionFailureEvidence, checkDecisionFailureEvidence, v3AlwaysOffered, TWO_STAGE_V2_CANDIDATE_SETS, candidateSetLabel, V3_TARGET_LABEL_SET, participantJevTargetOffered, retainedParticipantJevMenuValid, draftSharedClaimVerdict, draftSingleIdentificationSupported } from "../decision/jev-decision.ts";
 import type { JevDecisionFailureEvidence } from "../decision/jev-decision.ts";
 import { prepareLocalGroundingTurn, validateLocalGroundingOptions, findLocalPublicationViolations } from "./local-grounding-turn.ts";
 import type { LocalGroundingResearchRecord, LocalGroundingTrace } from "./local-grounding-turn.ts";
@@ -541,9 +541,31 @@ function persistedDraftSharedClaims(value: unknown, p5Overclaim: boolean): Draft
           Object.values(a.scores).some(n => typeof n !== "number" || !Number.isFinite(n) || n < 0 || n > 1)) throw Error();
     } else if (a.status === "error") {
       if (a.choice !== null || a.scores !== null || typeof a.error !== "string" || !a.error.trim() || a.error.length > 64) throw Error();
+      if (a.error === "empty_utterance" &&
+          (a.draft !== "retry" || a.model !== null || a.responseId !== null || a.costUsd !== null || a.latencyMs !== 0)) throw Error();
     } else throw Error();
   }
   return value as DraftSharedClaimRecord[];
+}
+
+function validDraftSharedOutcome(checks: readonly DraftSharedClaimRecord[], guard: Guard, singleSupported: boolean,
+  terminal: "published" | "stopped" | null): boolean {
+  if (!Array.isArray(guard?.violations) || !guard.violations.every(code => typeof code === "string")) return false;
+  const codes = guard.violations.filter(code => code.startsWith("draft_shared_claim_"));
+  const verdicts = checks.map(check => check.status === "ok"
+    ? draftSharedClaimVerdict(check.choice!, singleSupported) : "draft_shared_claim_unconfirmed");
+  const expected = [...new Set(verdicts.filter(code => code !== null))];
+  if (!stateSame([...codes].sort(), expected.sort()) ||
+      checks.some(check => check.error === "empty_utterance") && !guard.violations.includes("empty_utterance")) return false;
+  if (checks.length === 2 && guard.regenerated !== true) return false;
+  if (terminal === "published") {
+    return guard.fallback === false && checks.length === (guard.regenerated ? 2 : 1) && verdicts.at(-1) === null;
+  }
+  if (terminal === "stopped") {
+    return guard.regenerated === true && guard.fallback === false && checks.length === 2 &&
+      (guard.violations.some(code => !code.startsWith("draft_shared_claim_")) || verdicts.every(code => code !== null));
+  }
+  return true;
 }
 
 /** Check P5 data on all saved attempts, including attempts without a committed judgment. */
@@ -552,13 +574,16 @@ export function validJevSharedConstrualTrace(trace: JevTurnTrace, slots: readonl
     const candidates = Object.hasOwn(trace, "sharedConstruals")
       ? persistedSharedConstruals(trace.sharedConstruals, slots, isGenerationV13(generation)) : [];
     const p5Overclaim = isGenerationV14(generation);
-    if (Object.hasOwn(trace, "draftSharedClaims")) {
-      if (!isGenerationV14(trace.generationRetryVersion) || !(trace.executed && Object.hasOwn(trace.executed, "sharedClaimIds"))) return false;
-      persistedDraftSharedClaims(trace.draftSharedClaims, p5Overclaim);
-    }
-    if (trace.status === "committed" && p5Overclaim) {
-      const expectsSharedCheck = Boolean(trace.executed && Object.hasOwn(trace.executed, "sharedClaimIds"));
-      if (Object.hasOwn(trace, "draftSharedClaims") !== expectsSharedCheck) return false;
+    const hasChecks = Object.hasOwn(trace, "draftSharedClaims");
+    if (p5Overclaim || hasChecks) {
+      const selected = candidates.find(candidate => stateSame(candidate.claimIds, trace.executed?.sharedClaimIds));
+      const terminal = trace.status === "committed" ? "published" :
+        trace.status === "error" && trace.errorCode === "unsafe_generation" ? "stopped" : null;
+      if (hasChecks && (!selected || !isGenerationV14(trace.generationRetryVersion)) ||
+          terminal && selected && !hasChecks) return false;
+      const checks = hasChecks ? persistedDraftSharedClaims(trace.draftSharedClaims, p5Overclaim) : [];
+      const single = draftSingleIdentificationSupported(trace.executed?.target, selected?.figureIds, trace.humanReferent);
+      if (!validDraftSharedOutcome(checks, trace.generationGuard, single, selected ? terminal : null)) return false;
     }
     const namingRequest = trace.namingRequest === true;
     const intervention = typeof trace.intervention === "object" ? trace.intervention : null;
@@ -697,8 +722,9 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
    if(hasDraftShared!==(p5OverclaimEnabled&&Object.hasOwn(z.executed,'sharedClaimIds')))throw Error();
    if(hasDraftShared){
     const checks=persistedDraftSharedClaims(z.draftSharedClaims,p5OverclaimEnabled);
-    const lastCheck=checks.at(-1)!;
-    if(lastCheck.status!=='ok'||lastCheck.choice===null||draftSharedClaimVerdict(lastCheck.choice,z.executed.target.kind)!==null)throw Error();
+    const selected=(z.sharedConstruals as SharedConstrual[]|undefined)?.find(candidate=>stateSame(candidate.claimIds,z.executed.sharedClaimIds));
+    const single=draftSingleIdentificationSupported(z.executed.target,selected?.figureIds,z.humanReferent);
+    if(!selected||!validDraftSharedOutcome(checks,j.generationGuard,single,'published'))throw Error();
    }
    if(noAcceptTurn&&(original.action==='accept'||z.executed.action==='accept'))throw Error();
    if(questionLayout==='two_stage_v3'&&[original,z.executed].some(e=>e.action==='agree'&&
@@ -1256,6 +1282,8 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
           ...(hints.wording && record.namingReconfirm !== true ? ["naming_words"] : []),
           ...(hints.quoted.some(q => !agreedNames.has(normalizeName(q)) && normalizeName(q) !== chosenName) ? ["quoted_other"] : [])];
       };
+      const singleIdentificationSupported = p5OverclaimEnabled &&
+        draftSingleIdentificationSupported(execution.target, shared?.figureIds, record.humanReferent);
       const confirmDraftSharedClaim = async (text: string, draft: "initial" | "retry", found: string[]): Promise<string[]> => {
         if (!p5OverclaimEnabled || !shared) return found;
         const payloadInput: DraftSharedClaimInput = {
@@ -1263,6 +1291,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
           publicTurns,
           selected: { action: judgment.action, target: execution.target, name: judgment.candidateName ?? null, feature: judgment.discriminatingFeature ?? null },
           sharedConstrual: { figureIds: shared.figureIds, construal: shared.construal, openDetails: shared.openDetails },
+          singleIdentificationSupported,
           draft: text,
         };
         let res: DraftSharedClaimResult;
@@ -1284,7 +1313,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
           scores: ok ? structuredClone(res.scores) : null, model: res.model ?? null, responseId: res.responseId ?? null, costUsd: res.costUsd ?? null,
           latencyMs: Number.isFinite(res.latencyMs) ? res.latencyMs : 0, error: ok ? null : res.error ?? "invalid_response" });
         if (!ok) return [...found, "draft_shared_claim_unconfirmed"];
-        const verdict = draftSharedClaimVerdict(res.choice!, execution.target.kind);
+        const verdict = draftSharedClaimVerdict(res.choice!, singleIdentificationSupported);
         return verdict ? [...found, verdict] : found;
       };
       const confirmDraft = async (text: string, draft: "initial" | "retry", found: string[]): Promise<string[]> => {
@@ -1327,7 +1356,14 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
             (restateJudgment ? "\n" + actionMessage.content + "\n" : "") + rewriteReasons(record.generationGuard.violations, options.dialoguePolicy, generationRetryVersion) }];
         result = await interruptible(client.complete(retry, { phase: "generation", timeoutMs: generation.timeoutMs, signal }), signal);
         abortIf(signal);
-        const codes = typeof result?.text === "string" && result.text.trim() ? await checkDraft(result.text, "retry", violations(result.text, retry)) : ["empty_utterance"];
+        const retryText = typeof result?.text === "string" ? result.text : "";
+        const codes = retryText.trim() ? await checkDraft(retryText, "retry", violations(retryText, retry)) : ["empty_utterance"];
+        if (!retryText.trim() && p5OverclaimEnabled && shared) {
+          // An empty rewrite never reaches Jev. Record that outcome without inventing an answer.
+          record.draftSharedClaims!.push({ draft: "retry", draftSha256: await aiHash(retryText), status: "error",
+            choice: null, scores: null, model: null, responseId: null, costUsd: null, latencyMs: 0, error: "empty_utterance" });
+          codes.push("draft_shared_claim_unconfirmed");
+        }
         record.generationGuard.violations = [...new Set([...record.generationGuard.violations, ...codes])];
         if (codes.length) {
           const safeText = questionLayout === "two_stage_v3" && allowsOrientationFallback(generationRetryVersion) ? orientationSafeFallback(judgment) : null;

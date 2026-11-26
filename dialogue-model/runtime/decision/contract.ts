@@ -205,6 +205,7 @@ export type DraftSharedClaimInput = {
   publicTurns: readonly PublicTurn[];
   selected: { action: JevAction; target: JevTarget; name: string | null; feature: string | null };
   sharedConstrual: { figureIds: readonly string[]; construal: string; openDetails: readonly SharedConstrual["openDetails"][number][] };
+  singleIdentificationSupported: boolean;
   draft: string;
 };
 export type DraftSharedClaimResult = { status: "ok" | "error"; choice: DraftSharedClaim | null; scores: Record<string, number> | null; model: string | null;
