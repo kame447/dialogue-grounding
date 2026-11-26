@@ -454,6 +454,18 @@ export class TangramSession extends DurableObject<Env> {
   /** Old deployments may have scheduled an expiry alarm. Clear it without deleting evidence. */
   async alarm(): Promise<void> {
     await this.scheduleExpiry();
+    const index = this.index();
+    if (index) {
+      const tombstones = await this.ctx.storage.get<string[]>('tombstones') ?? [];
+      const stale: string[] = [];
+      for (const id of tombstones) {
+        const summary = await index.get(id);
+        if (summary?.recordId === id && summary.objectId === this.ctx.id.toString()) stale.push(id);
+      }
+      // A manual deletion can commit at the owner while its later index removal fails.
+      // A legacy retention deletion removed its summary before tombstoning the owner.
+      if (stale.length) await index.remove(stale, 'admin');
+    }
     // Re-register the remaining records, so a missed best-effort index write is repaired.
     for (const id of await ledgerIds(this.ctx.storage)) {
       const record = await this.readOwnedArchive(id);

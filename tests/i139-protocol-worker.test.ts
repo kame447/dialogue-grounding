@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { registerHooks } from 'node:module';
 import { existsSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { clone, config, raw } from './support/s5-base/support.ts';
+import { clone, config, defer, raw } from './support/s5-base/support.ts';
+import { recordHash } from '../workers/tangram-experiment/src/admin/index-store.ts';
 
 // Real edge → session DO → AdminIndex. Only the model/task factory is replaced.
 // Synthetic settings exercise the mechanism; none is a research choice.
@@ -22,6 +23,8 @@ globalThis.Request = class extends NativeRequest {
   constructor(input: RequestInfo | URL, init?: RequestInit) { super(input, init?.body ? { ...init, duplex: 'half' } as RequestInit : init); }
 };
 const RF = 'repair-first', BE = 'bypass-enabled';
+const origin = 'https://i139.invalid';
+const adminToken = 'synthetic-admin-token-01234567890123456789';
 const fields = (patch: Record<string, unknown> = {}) => ({ allowedOrders: [[BE, RF], [RF]], seedPolicy: 'per_trial', referenceMemory: false,
   betweenTrials: 'none', receptionNumberFormat: 'daily_seq3', rotationMode: 'relative_0', figureSelection: { mode: 'preset', setId: 'legacy-v1' }, figureSetPolicy: 'shared', ...patch });
 const answers = { mental_effort: 4, task_difficulty: 4, smoothness: 4, bothersome: 4 };
@@ -47,12 +50,15 @@ function memory() {
     async setAlarm() {}, async deleteAlarm() {} };
 }
 /** workerd RPC results carry a non-enumerable function-valued Symbol.dispose. */
-function rpc(target: any, control: { down: boolean }) {
+type IndexControl = { down: boolean; indexRemovalUnavailable: boolean; beforeCall?: (method: PropertyKey) => Promise<void> };
+function rpc(target: any, control: IndexControl) {
   return new Proxy(target, { get(t, key) {
     const value = t[key];
     if (typeof value !== 'function') return value;
     return async (...args: unknown[]) => {
       if (control.down) throw new Error('synthetic index outage');
+      if (control.beforeCall) await control.beforeCall(key);
+      if (key === 'remove' && control.indexRemovalUnavailable) throw new Error('synthetic index removal outage');
       const result = await value.apply(t, args);
       if (result && typeof result === 'object') Object.defineProperty(result, Symbol.dispose, { value() {}, enumerable: false });
       return result;
@@ -62,7 +68,8 @@ function rpc(target: any, control: { down: boolean }) {
 function harness() {
   const stores = new Map<string, ReturnType<typeof memory>>(), objects = new Map<string, any>(), tasks = new Map<string, any>(), inputs: any[] = [];
   const pending: Promise<unknown>[] = []; let modelCalls = 0;
-  const indexStorage = memory(), index = new AdminIndex({ storage: indexStorage }, {}), control = { down: false };
+  const indexStorage = memory(), index = new AdminIndex({ storage: indexStorage }, {});
+  const control: IndexControl = { down: false, indexRemovalUnavailable: false };
   const objectEnv: any = { BASE_ASSIGNMENT_JSON: JSON.stringify(config()), RECEPTION_REQUIRED: 'on',
     ADMIN_INDEX: { idFromName: (id: string) => id, get: () => rpc(index, control) },
     AI_PROXY: { async chat() { modelCalls++; throw Error('no synthetic test may call a model'); } } };
@@ -91,6 +98,7 @@ function harness() {
     return objects.get(id);
   }
   const env = { ...objectEnv, NAMING_SESSIONS: { idFromName: (id: string) => id, idFromString: (id: string) => id, get },
+    ADMIN_TOKEN: adminToken, ADMIN_RATE_LIMIT: { async limit() { return { success: true }; } },
     ASSETS: { async fetch() { return new Response('<html></html>'); } }, START_RATE_LIMIT: { async limit() { return { success: true }; } },
     QUESTIONNAIRE_RATE_LIMIT: { async limit() { return { success: true }; } } };
   const h = { index, indexStorage, control, tasks, inputs, get, stores,
@@ -418,6 +426,219 @@ test('D3: a none plan never waits for a questionnaire, even after the protocol i
   await h.protocol({ betweenTrials: 'questionnaire_required' });
   assert.equal((await state(h, cookie)).reception.status, 'in_progress');
   assert.equal((await start(h, cookie, { expectedRecordId: first })).status, 200); await h.done();
+});
+
+const questionnairePath = (id: string) => `/api/records/${id}/questionnaire`;
+const adminRecordPath = (id: string) => `/admin/record/${id}`;
+const admin = (h: H, path: string, form?: URLSearchParams, headers: Record<string, string> = {}) => h.edge(new Request(origin + path, {
+  method: form ? 'POST' : 'GET', headers: { Authorization: `Bearer ${adminToken}`, Origin: origin, ...headers }, body: form,
+}));
+const removeTrial = (h: H, id: string) => admin(h, adminRecordPath(id) + '/delete', new URLSearchParams({ confirm: id }));
+
+async function deletionFixture(completed: boolean) {
+  const h = await configured(), cookie = await h.browser();
+  await approve(h, cookie);
+  const admitted = await start(h, cookie);
+  assert.equal(admitted.status, 200);
+  const first = (await admitted.json()).trial.sessionId as string;
+  const questionnaire = { answers, comment: 'synthetic questionnaire', submit: true };
+  await h.tasks.get(first).complete();
+  assert.equal((await h.edge(req(questionnairePath(first), questionnaire, cookie))).status, 200);
+  const next = await start(h, cookie, { expectedRecordId: first });
+  assert.equal(next.status, 200);
+  const second = (await next.json()).trial.sessionId as string;
+  if (completed) {
+    await h.tasks.get(second).complete();
+    assert.equal((await h.edge(req(questionnairePath(second), questionnaire, cookie))).status, 200);
+  }
+  await h.object(cookie).alarm(); // Use the production re-index path for the synthetic task records.
+  await h.done();
+  assert.ok(await h.index.get(first));
+  assert.ok(await h.index.get(second));
+  return { h, cookie, first, second };
+}
+
+for (const completed of [false, true]) test(`#209 deletion: ${completed ? 'completed' : 'in-progress'} active trial stays deleted after re-index and restart`, async () => {
+  const { h, cookie, first, second } = await deletionFixture(completed);
+  const previous = h.snapshot(cookie), summary = await h.index.get(second), owner = h.object(cookie);
+  const storedReception = reception(h, cookie);
+  const questionnaire = await h.edge(req(questionnairePath(second), undefined, cookie));
+  if (completed) assert.equal(questionnaire.status, 200);
+  assert.equal(h.tasks.get(second).getState().sessionId, second);
+  const deletePath = adminRecordPath(second) + '/delete';
+  assert.equal((await admin(h, deletePath)).status, 404);
+  assert.equal((await admin(h, deletePath, new URLSearchParams({ confirm: first }))).status, 400);
+  assert.deepEqual(h.snapshot(cookie), previous);
+  assert.deepEqual(await h.index.audit(), []);
+
+  const response = await removeTrial(h, second);
+  assert.equal(response.status, 303);
+  assert.equal(response.headers.get('location'), '/admin?deleted=1');
+  assert.equal(await h.index.get(second), null);
+  const after = h.snapshot(cookie);
+  assert.ok(after.tombstones.includes(second));
+  assert.ok(!Object.hasOwn(after, 'record:' + second) && !Object.hasOwn(after.ledger, second));
+  assert.equal(after['base:owner:v1'].admissions['after:' + first].errorCode, 'record_deleted');
+  assert.deepEqual(reception(h, cookie), storedReception, 'the reception retains its historical trial slot');
+  assert.deepEqual(after['record:' + first], previous['record:' + first]);
+  assert.equal((await h.edge(req(questionnairePath(second), undefined, cookie))).status, 404);
+  assert.equal((await h.edge(req(questionnairePath(first), undefined, cookie))).status, 200);
+  assert.equal((await admin(h, adminRecordPath(second) + '.json')).status, 404);
+  const list = await (await admin(h, '/admin')).text();
+  assert.ok(list.includes(adminRecordPath(first)));
+  assert.ok(!list.includes(adminRecordPath(second)));
+
+  const audit = await h.index.audit();
+  assert.equal(audit.length, 1);
+  assert.deepEqual(audit[0], { recordHash: await recordHash(second), deletedAt: audit[0].deletedAt, reason: 'admin' });
+  assert.equal(Number.isFinite(Date.parse(audit[0].deletedAt)), true);
+  const factories = h.inputs.length;
+  await assert.rejects(h.tasks.get(second).persistNow());
+  assert.equal(await h.index.upsert(summary), false, 'a delayed summary cannot overwrite the index tombstone');
+  await owner.alarm();
+  h.evict();
+  assert.equal((await h.edge(req('/api/state', undefined, cookie))).status, 401);
+  assert.equal((await start(h, cookie, { expectedRecordId: second })).status, 401);
+  const history = await h.edge(req('/api/sessions', undefined, cookie));
+  assert.equal(history.status, 200);
+  const { sessions } = await history.json();
+  assert.equal(sessions.length, 1);
+  assert.equal(sessions[0].resumable, false);
+  assert.equal(sessions[0].activeRecordId, null);
+  assert.deepEqual(sessions[0].records.map((entry: { recordId: string }) => entry.recordId), [first]);
+  assert.equal((await removeTrial(h, second)).status, 404);
+  assert.equal((await h.edge(req(questionnairePath(first), undefined, cookie))).status, 200);
+  assert.equal(h.inputs.length, factories);
+  assert.deepEqual(await h.index.audit(), audit, 'retried deletion creates no duplicate audit entry');
+  assert.deepEqual(h.snapshot(cookie), after);
+  await h.done();
+});
+
+test('#209 deletion: deleting a completed predecessor preserves its successor and its questionnaire', async () => {
+  const { h, cookie, first, second } = await deletionFixture(true);
+  const before = h.snapshot(cookie);
+  assert.equal((await removeTrial(h, first)).status, 303);
+  h.evict();
+  assert.equal((await state(h, cookie)).trial.sessionId, second);
+  assert.deepEqual(h.snapshot(cookie)['record:' + second], before['record:' + second]);
+  assert.deepEqual(reception(h, cookie), before['reception:v1']);
+  assert.equal((await h.edge(req(questionnairePath(first), undefined, cookie))).status, 404);
+  const questionnaire = await h.edge(req(questionnairePath(second), undefined, cookie));
+  assert.equal(questionnaire.status, 200);
+  await h.done();
+});
+
+test('#209 deletion: owner tombstone repairs a stale index and records the audit when re-indexing after an outage', async () => {
+  const { h, cookie, first, second } = await deletionFixture(true);
+  const summary = await h.index.get(second);
+  h.control.indexRemovalUnavailable = true;
+  const attempt = await removeTrial(h, second).catch(() => null);
+  assert.ok(!attempt || attempt.status >= 500, 'only a completed deletion may redirect as successful');
+  assert.ok(h.snapshot(cookie).tombstones.includes(second));
+  assert.equal((await h.edge(req(questionnairePath(second), undefined, cookie))).status, 404);
+  assert.equal((await h.edge(req('/api/state', undefined, cookie))).status, 401);
+  assert.equal((await admin(h, adminRecordPath(second) + '.json')).status, 404);
+  assert.deepEqual(await h.index.get(second), summary, 'only the index write failed');
+  assert.deepEqual(await h.index.audit(), []);
+  await assert.rejects(h.tasks.get(second).persistNow());
+
+  h.control.indexRemovalUnavailable = false;
+  h.evict();
+  await h.object(cookie).alarm();
+  assert.equal(await h.index.get(second), null);
+  assert.equal(await h.index.upsert(summary), false);
+  const audit = await h.index.audit();
+  assert.equal(audit.length, 1);
+  assert.deepEqual(audit[0], { recordHash: await recordHash(second), deletedAt: audit[0].deletedAt, reason: 'admin' });
+  assert.ok(await h.index.get(first));
+  await h.object(cookie).alarm();
+  assert.deepEqual(await h.index.audit(), audit);
+  await h.done();
+});
+
+const roleKey = (id: string) => 'participant-role:' + id;
+const roleAudit = (h: H) => Object.entries(h.indexStorage.snapshot())
+  .filter(([key]) => key.startsWith('participant-role-audit:')).map(([, entry]) => entry);
+const setTrialRole = (h: H, id: string, role: string) =>
+  admin(h, adminRecordPath(id) + '/participant-role', new URLSearchParams({ role }), { Accept: 'application/json' });
+function setBatchRole(h: H, receptionId: string, role: string, shownIds: readonly string[]) {
+  const form = new URLSearchParams({ role });
+  for (const id of shownIds) form.append('recordId', id);
+  return admin(h, `/admin/reception/${receptionId}/participant-role`, form, { Accept: 'application/json' });
+}
+
+test('#209 role integration: batch before deletion classifies both records and deletion removes just its target', async t => {
+  const { h, cookie, first, second } = await deletionFixture(true);
+  const id = reception(h, cookie).receptionId;
+  const owner = h.object(cookie);
+  assert.equal(typeof owner.adminSetReceptionParticipantRole, 'function', 'requires the WS1 implementation');
+  const enteringIndex = defer(), releaseIndex = defer(), enteringDeletion = defer();
+  h.control.beforeCall = async method => {
+    if (method === 'setParticipantRole') { enteringIndex.resolve(); await releaseIndex.promise; }
+  };
+  const originalDelete = owner.adminDelete.bind(owner);
+  t.mock.method(owner, 'adminDelete', (recordId: string) => {
+    enteringDeletion.resolve();
+    return originalDelete(recordId);
+  });
+  const batch = setBatchRole(h, id, 'ai', [first, second]);
+  await enteringIndex.promise;
+  const deletion = removeTrial(h, second);
+  try {
+    await enteringDeletion.promise;
+    assert.ok(h.snapshot(cookie)['record:' + second], 'owner deletion waits for the in-flight batch');
+  } finally { releaseIndex.resolve(); }
+  assert.equal((await batch).status, 200);
+  assert.equal((await deletion).status, 303);
+  assert.equal((await h.indexStorage.get(roleKey(first))).role, 'ai');
+  assert.equal(await h.indexStorage.get(roleKey(second)), undefined);
+  assert.deepEqual(roleAudit(h).map((entry: any) => [entry.kind, entry.recordId, entry.from, entry.to]).sort(),
+    [first, second].sort().map(recordId => ['participant_role_set', recordId, 'unclassified', 'ai']));
+  assert.deepEqual((await h.index.audit()).map((entry: any) => [entry.recordHash, entry.reason]), [[await recordHash(second), 'admin']]);
+  await h.done();
+});
+
+test('#209 role integration: deletion before batch refuses stale IDs even while index cleanup is down', async () => {
+  const { h, cookie, first, second } = await deletionFixture(true);
+  const id = reception(h, cookie).receptionId;
+  assert.equal((await setBatchRole(h, id, 'human', [first, second])).status, 200);
+  const before = h.indexStorage.snapshot();
+  const enteringRemoval = defer(), releaseRemoval = defer();
+  h.control.beforeCall = async method => {
+    if (method === 'remove') { enteringRemoval.resolve(); await releaseRemoval.promise; }
+  };
+  h.control.indexRemovalUnavailable = true;
+  const deletion = removeTrial(h, second).catch(() => null);
+  async function expectStaleRejected() {
+    const single = await setTrialRole(h, second, 'ai');
+    assert.equal(single.status, 404);
+    assert.deepEqual(await single.json(), { error: 'not_found' });
+    const stale = await setBatchRole(h, id, 'ai', [first, second]);
+    assert.equal(stale.status, 409);
+    assert.deepEqual(await stale.json(), { error: 'conflict' });
+    assert.deepEqual(h.indexStorage.snapshot(), before, 'stale requests leave both labels and the audits untouched');
+  }
+  try {
+    await enteringRemoval.promise;
+    assert.ok(h.snapshot(cookie).tombstones.includes(second));
+    await expectStaleRejected();
+  } finally { releaseRemoval.resolve(); }
+  const outcome = await deletion;
+  assert.ok(!outcome || outcome.status >= 500);
+  h.evict();
+  await expectStaleRejected();
+  h.control.indexRemovalUnavailable = false;
+  await h.object(cookie).alarm();
+  assert.equal(await h.index.get(second), null);
+  assert.equal(await h.indexStorage.get(roleKey(second)), undefined);
+  assert.equal((await h.indexStorage.get(roleKey(first))).role, 'human');
+  assert.equal(roleAudit(h).length, 2);
+  assert.deepEqual((await h.index.audit()).map((entry: any) => [entry.recordHash, entry.reason]), [[await recordHash(second), 'admin']]);
+  const survivor = await setBatchRole(h, id, 'ai', [first]);
+  assert.equal(survivor.status, 200, 'the current batch contains only the surviving linked trial');
+  assert.equal((await h.indexStorage.get(roleKey(first))).role, 'ai');
+  assert.equal(await h.indexStorage.get(roleKey(second)), undefined);
+  await h.done();
 });
 
 test('legacy v1 plans and their records restore as the old mechanism', async () => {
