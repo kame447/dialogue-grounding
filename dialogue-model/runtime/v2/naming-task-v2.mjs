@@ -85,7 +85,7 @@ export function parseAiNamesV2(text, slots) {
 export async function createNamingTaskV2({
   client, strategy, seed, referenceMemory = true, runDir = process.env.RESEARCH_RUN_DIR,
   createTrial = createTrialV2, scoreTrial = defaultScoreTrial, judge = null, now = () => Date.now(),
-  restore = null, onPersist = null, onPersistFailure = null, onPersistSlow = null, decisionShadowClient = null, activeDecision = null, utteranceStyle = "default",
+  restore = null, onPersist = null, onPersistFailure = null, decisionShadowClient = null, activeDecision = null, utteranceStyle = "default",
   groundingShadow = null, localGrounding = null, onLocalGroundingTrace = null, jevResearch = null, rotationMode = "relative_pm90",
 }) {
   // Checked before any generation, observation or persist.
@@ -287,30 +287,10 @@ export async function createNamingTaskV2({
     persistStage = "build";
     try { await writeRecord(); } catch (error) { notePersistFailure(error); throw error; }
   }
-  // Writes are serialized, and each one writes the latest state at the moment it starts. So at most one write needs to wait behind the running one:
-  // a persist() that arrives while a write is queued but not started joins it (the state it asked to save is written by that very write).
-  // A call that arrives after a write has started queues a new one, so a change made after the start is still written afterwards.
-  // Every caller still gets the outcome of a write that began after its call; a failed write rejects all of its callers, as before.
-  let queuedWrite = null;
-  const PERSIST_SLOW_MS = 10000;
   function persist() {
-    if (queuedWrite) { queuedWrite.joined++; return queuedWrite.promise; }
-    const entry = { joined: 0, queuedAt: now(), promise: null };
-    const run = async () => {
-      queuedWrite = null;                                  // started: later calls queue the next write
-      const startedAt = now();
-      try { await guardedWrite(); }
-      finally {
-        const waited = startedAt - entry.queuedAt, took = now() - startedAt;
-        if ((waited >= PERSIST_SLOW_MS || took >= PERSIST_SLOW_MS) && typeof onPersistSlow === "function") {
-          try { onPersistSlow({ waitedMs: Math.max(0, Math.round(waited)), tookMs: Math.max(0, Math.round(took)), joined: entry.joined }); } catch { /* diagnostics only */ }
-        }
-      }
-    };
-    entry.promise = writing.then(run, run);
-    queuedWrite = entry;
-    writing = entry.promise.catch(() => {});
-    return entry.promise;
+    const next = writing.then(guardedWrite, guardedWrite);
+    writing = next.catch(() => {});
+    return next;
   }
   async function writeRecord() {
     if (!directory && !onPersist) return;

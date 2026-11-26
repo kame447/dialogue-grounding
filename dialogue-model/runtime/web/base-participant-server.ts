@@ -49,7 +49,7 @@ export function createBaseParticipantServer(options: Record<string, any> = {}) {
         loadedStores.add(store);
         const coordinator=createBaseAssignmentSession({ownerId,store,now,newId:randomUUID,adapter:'local_private_file',
           readConfig:async()=>baseAssignmentFile ? readPrivateAssignment(baseAssignmentFile) : null,
-          makeTask:async value=>createTaskV2({client,...value,onPersistSlow:(slow:{waitedMs:number;tookMs:number;joined:number})=>{try{process.stderr.write('persist_slow waited_ms='+slow.waitedMs+' took_ms='+slow.tookMs+' joined='+slow.joined+'\n');}catch{/* never affects the write */}},onPersistFailure:(failure:{code:string;at:string;reason?:string})=>{try{process.stderr.write('persist_failed code='+failure.code+(failure.reason?' reason='+failure.reason:'')+' at='+failure.at+'\n');}catch{/* never affects the write */}},activeDecision,utteranceStyle,...(groundingShadow?{groundingShadow}:{}),
+          makeTask:async value=>createTaskV2({client,...value,onPersistFailure:(failure:{code:string;at:string;reason?:string})=>{try{process.stderr.write('persist_failed code='+failure.code+(failure.reason?' reason='+failure.reason:'')+' at='+failure.at+'\n');}catch{/* never affects the write */}},activeDecision,utteranceStyle,...(groundingShadow?{groundingShadow}:{}),
             ...(participantJev?await participantJev.taskOptions(value):{}),
             onPersist:async (record:Parameters<typeof value.onPersist>[0])=>{
               if(persistSealed)throw new NamingTaskError('record_write_failed');
