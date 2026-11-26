@@ -110,3 +110,32 @@ test('daily_seq3 formatting and internal day key follow explicitly specified JST
   assert.equal(format('daily_seq3', 999), '999'); assert.equal(format('daily_seq3', 1000), null);
   assert.throws(() => format('unknown', 1));
 });
+
+test('dormant dialogue profiles can be read only with the fixed participant pin and usage profile', async () => {
+  const approve = need(mod, 'approveReception'), validate = need(mod, 'validateReceptionPlan');
+  const terra = { schemaVersion: 'participant_model_pin_v3', terraModelId: 'gpt-6.1-terra',
+    jevModelId: 'typesafe/jev-1.14-20261014' };
+  const participant = { participantModelPin: terra, participantRuntimeProfile: 'participant_production_usage_v1' };
+  for (const schemaVersion of ['reception_protocol_v2', 'reception_protocol_v3']) {
+    const isV3 = schemaVersion === 'reception_protocol_v3';
+    const input = protocol({ schemaVersion, referenceMemory: true, rotationMode: 'relative_pm90',
+      ...(isV3 ? { figureSelection: { mode: 'preset', setId: 'legacy-v1' }, figureSetPolicy: 'shared' } : {}) });
+    const canonical = need(mod, isV3 ? 'canonicalReceptionProtocolV3' : 'canonicalReceptionProtocolV2')(input);
+    const { plan } = await approve(pending(), { expectedRevision: 0, order: 0, protocol: input, approvedAt: now,
+      expected: { protocolId, revision: 3, sha256: createHash('sha256').update(canonical).digest('hex') },
+      randomSeed: () => 7, ...participant, participantDialogueProfile: 'participant_dialogue_v12' });
+    assert.equal(Object.hasOwn(plan, 'participantDialogueProfile'), false);
+    assert.deepEqual(validate(plan), plan);
+    for (const profile of ['participant_dialogue_v12', 'participant_dialogue_v13_p5']) {
+      const saved = { ...plan, participantDialogueProfile: profile };
+      assert.deepEqual(validate(saved), saved);
+      assert.throws(() => validate({ ...saved, participantRuntimeProfile: undefined }), rejects('reception_unavailable'));
+      assert.throws(() => validate({ ...saved, participantModelPin: { ...terra,
+        schemaVersion: 'participant_model_pin_v1', lunaModelId: 'gpt-6-luna' } }), rejects('reception_unavailable'));
+    }
+    for (const bad of ['unknown', undefined, null, ['participant_dialogue_v12']]) {
+      assert.throws(() => validate({ ...plan, participantDialogueProfile: bad }), rejects('reception_unavailable'));
+    }
+    assert.throws(() => validate({ ...plan, participantDialogueVersion: 'participant_dialogue_v12' }), rejects('reception_unavailable'));
+  }
+});
