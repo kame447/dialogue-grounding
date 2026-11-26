@@ -11,6 +11,7 @@
     "MAX_COMPLETION_TOKENS": "8192",
     "DIALOGUE_MODEL": "gpt-6-luna",
     "VISION_MODEL": "gpt-6.1-terra",
+    "DIALOGUE_CANDIDATE_MODEL": "gpt-6.1-terra",
     "RESEARCH_DECISIONS_ENABLED": "true",
     "RESEARCH_GROUNDING_ENABLED": "false"
   }

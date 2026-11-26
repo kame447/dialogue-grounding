@@ -91,3 +91,7 @@ node --env-file=.env dialogue-model/runtime/cli.mjs --show-model で実際のWor
 ## 2軸の根拠判定（Jev・shadow研究用・既定OFF・未デプロイ）
 
 `POST /v1/grounding-evidence`（`{"purpose":"grounding_jev","state":"..."}`）と、読み取り専用の `GET /v1/grounding-policy`、サービスバインディングの `grounding()` RPC は、Jev 1.14 に閉集合の2設問（対象同定の根拠4段階・名称合意の根拠5段階。`no_name` を含む）を1回で問う研究用経路です。応答と `/v1/grounding-policy` には判定基準の版 `criteriaVersion`（現行 `grounding-criteria/v2`）が付きます。Decisions とは別のフラグ `RESEARCH_GROUNDING_ENABLED`（`wrangler.jsonc` の初期値は `"false"`）で有効化し、Secretは同じ `OPENROUTER_DECISIONS_API_KEY` を使います。モデル・設問・基準文はWorker管理で、選択肢外の回答や欠けたスコアは 502 で閉じます。スコアは未校正の相対値です。仕様は `dialogue-model/runtime/grounding/README.md` を参照してください。**この経路はデプロイされておらず、有効化には研究者の承認と上記Secretが必要です。**
+
+## 比較専用の用途 dialogue_turn_candidate
+
+発話生成のモデル比較のためだけの用途です。モデルは Worker の通常変数 `DIALOGUE_CANDIDATE_MODEL`（wrangler.jsonc の既定は gpt-6.1-terra）で決め、クライアントは決めません。既存の `RESEARCH_PROXY_TOKEN` で呼べ、新しい秘密はありません。`DIALOGUE_MODEL`（dialogue_turn）、参加者の経路、pin は変わりません（参加者の経路は dialogue_turn と visual_observation だけを受け付けます）。上流の応答が設定したモデル（または日付付きの同名）を自分で報告しない場合は 502 `invalid_upstream_model` で拒否し、応答の `model` に上流の実返却 ID を載せます。テキストのみ（画像の content は拒否）で、リダイレクトは追いません。変数を消すとこの用途は 400 になります。

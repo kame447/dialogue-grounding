@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { resolvePurposeModel, RESEARCH_AI_PURPOSES } from "./modelPolicy.mjs";
 
 test("research model selection is centralized by purpose", () => {
-  assert.deepEqual(RESEARCH_AI_PURPOSES, ["dialogue_turn", "visual_observation"]);
+  assert.deepEqual(RESEARCH_AI_PURPOSES, ["dialogue_turn", "visual_observation", "dialogue_turn_candidate"]);
   assert.deepEqual(
     resolvePurposeModel({ purpose: "dialogue_turn", model: "malicious-client-model" },
       { DIALOGUE_MODEL: "gpt-4o-mini" }),
@@ -29,4 +29,11 @@ test("model selection rejects unknown purposes and missing or invalid Worker set
     { error: "model_unconfigured" });
   assert.deepEqual(resolvePurposeModel({ purpose: "dialogue_turn" },
     { DIALOGUE_MODEL: "bad model;command" }), { error: "model_unconfigured" });
+});
+
+test("the comparison purpose has its own model variable and never changes dialogue_turn", () => {
+  const env = { DIALOGUE_MODEL: "luna-for-test", DIALOGUE_CANDIDATE_MODEL: "terra-for-test" };
+  assert.deepEqual(resolvePurposeModel({ purpose: "dialogue_turn_candidate", model: "client-choice" }, env), { purpose: "dialogue_turn_candidate", model: "terra-for-test" });
+  assert.equal(resolvePurposeModel({ purpose: "dialogue_turn" }, env).model, "luna-for-test");
+  assert.deepEqual(resolvePurposeModel({ purpose: "dialogue_turn_candidate" }, { DIALOGUE_MODEL: "luna-for-test" }), { error: "model_unconfigured" });
 });

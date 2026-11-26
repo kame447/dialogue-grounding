@@ -1,6 +1,8 @@
 const MODEL_KEYS = Object.freeze({
   dialogue_turn: "DIALOGUE_MODEL",
   visual_observation: "VISION_MODEL",
+  // Comparison only: a candidate model for the dialogue utterance. Never used by a participant path or by the production dialogue_turn purpose.
+  dialogue_turn_candidate: "DIALOGUE_CANDIDATE_MODEL",
 });
 
 export const RESEARCH_AI_PURPOSES = Object.freeze(Object.keys(MODEL_KEYS));

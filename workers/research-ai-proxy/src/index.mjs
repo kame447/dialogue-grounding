@@ -104,6 +104,8 @@ function validateMessage(message) {
   return { role: message.role, content: parts };
 }
 
+// Purposes whose upstream response must itself report the configured model (an exact id or a dated snapshot of it).
+const IDENTITY_CHECKED = new Set(["visual_observation", "dialogue_turn_candidate"]);
 function validatedPayload(body, selectedModel, env) {
   if (!body || typeof body !== "object" || Array.isArray(body) ||
       !Array.isArray(body.messages) || body.messages.length === 0 ||
@@ -280,7 +282,7 @@ export async function handleRequest(request, env, fetchImpl = globalThis.fetch, 
   if ("error" in selected) return reply(400, { error: selected.error });
   const payload = validatedPayload(body, selected.model, env);
   if (!payload) return reply(400, { error: "invalid_request" });
-  if (expectedModel !== null && selected.purpose === "dialogue_turn" &&
+  if ((expectedModel !== null && selected.purpose === "dialogue_turn" || selected.purpose === "dialogue_turn_candidate") &&
       payload.messages.some(message => typeof message.content !== "string")) {
     return reply(400, { error: "invalid_request" });
   }
@@ -300,7 +302,7 @@ export async function handleRequest(request, env, fetchImpl = globalThis.fetch, 
       signal: controller.signal,
       // Cloudflare Workers may forward Authorization across redirects. A
       // visual request must never leave the configured upstream endpoint.
-      ...(expectedModel !== null || selected.purpose === "visual_observation" ? { redirect: "manual" } : {}),
+      ...(expectedModel !== null || IDENTITY_CHECKED.has(selected.purpose) ? { redirect: "manual" } : {}),
     });
     if (!response.ok) {
       return reply(response.status === 429 ? 429 : 502, {
@@ -311,7 +313,7 @@ export async function handleRequest(request, env, fetchImpl = globalThis.fetch, 
     if (expectedModel !== null && data?.model !== expectedModel) return reply(502, { error: "model_mismatch" });
     // Vision provenance must be reported by the upstream itself. Never label
     // missing or unexpected identity as the configured model.
-    if (selected.purpose === "visual_observation" &&
+    if (IDENTITY_CHECKED.has(selected.purpose) &&
         !(typeof data?.model === "string" && (data.model === selected.model ||
           (data.model.startsWith(selected.model + "-") && /^\d{4}-\d{2}-\d{2}$|^\d{8}$/.test(data.model.slice(selected.model.length + 1)))))) {
       return reply(502, { error: "invalid_upstream_model" });

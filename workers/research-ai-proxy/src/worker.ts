@@ -9,6 +9,8 @@ interface ProxyEnvironment {
   UPSTREAM_API_KEY: string;
   DIALOGUE_MODEL: string;
   VISION_MODEL?: string;
+  /** Comparison only (purpose dialogue_turn_candidate); unset disables that purpose. */
+  DIALOGUE_CANDIDATE_MODEL?: string;
   PARTICIPANT_MODEL_PIN_JSON?: string;
   MAX_COMPLETION_TOKENS: string;
   RESEARCH_DECISIONS_ENABLED?: string;

@@ -280,3 +280,38 @@ test("visual upstream redirects fail closed without forwarding authorization or 
   assert.equal(response.headers.get("location"), null);
   assert.deepEqual(await response.json(), { error: "upstream_error" });
 });
+
+
+test("comparison purpose: the candidate model is chosen by the Worker only, the response reports the upstream's own id, and dialogue_turn is unchanged", async () => {
+  const configured = { ...env, DIALOGUE_CANDIDATE_MODEL: "candidate-terra-for-test" };
+  const seen = [];
+  const upstream = async (_url, options) => { const body = JSON.parse(options.body); seen.push(body.model); return Response.json({ ...result, model: body.model + "-20261126" }); };
+  const policy = await handleRequest(request("/v1/model-policy?purpose=dialogue_turn_candidate", env.RESEARCH_PROXY_TOKEN, undefined, "GET"), configured, upstream);
+  assert.deepEqual(await policy.json(), { purpose: "dialogue_turn_candidate", provider: "openai", model: "candidate-terra-for-test", ready: true });
+  const candidate = await handleRequest(request("/v1/chat/completions", env.RESEARCH_PROXY_TOKEN, bodyWith(simpleMessages, { purpose: "dialogue_turn_candidate", model: "client-choice" })), configured, upstream);
+  assert.equal(candidate.status, 200);
+  assert.equal((await candidate.json()).model, "candidate-terra-for-test-20261126");
+  const production = await handleRequest(request("/v1/chat/completions", env.RESEARCH_PROXY_TOKEN, bodyWith(simpleMessages, { purpose: "dialogue_turn" })), configured, upstream);
+  assert.equal(production.status, 200);
+  assert.deepEqual(seen, ["candidate-terra-for-test", env.DIALOGUE_MODEL]);
+  // Not configured: the purpose is refused and nothing leaves the Worker.
+  const absent = await handleRequest(request("/v1/chat/completions", env.RESEARCH_PROXY_TOKEN, bodyWith(simpleMessages, { purpose: "dialogue_turn_candidate" })), env, upstream);
+  assert.equal(absent.status, 400); assert.equal(seen.length, 2);
+});
+
+test("comparison purpose fails closed on a missing or substituted upstream id, accepts only text, and never follows a redirect", async () => {
+  const model = "candidate-terra-for-test";
+  const configured = { ...env, DIALOGUE_CANDIDATE_MODEL: model };
+  for (const returned of [undefined, null, "", env.DIALOGUE_MODEL, model + "-latest"]) {
+    const response = await handleRequest(request("/v1/chat/completions", env.RESEARCH_PROXY_TOKEN, bodyWith(simpleMessages, { purpose: "dialogue_turn_candidate" })), configured,
+      async () => Response.json({ ...result, model: returned }));
+    assert.equal(response.status, 502);
+    assert.deepEqual(await response.json(), { error: "invalid_upstream_model" });
+  }
+  const image = await handleRequest(request("/v1/chat/completions", env.RESEARCH_PROXY_TOKEN, bodyWith([{ role: "user", content: [{ type: "text", text: "a" }] }], { purpose: "dialogue_turn_candidate" })), configured,
+    async () => Response.json({ ...result, model }));
+  assert.equal(image.status, 400);
+  const redirected = await handleRequest(request("/v1/chat/completions", env.RESEARCH_PROXY_TOKEN, bodyWith(simpleMessages, { purpose: "dialogue_turn_candidate" })), configured,
+    async (_url, options) => { assert.equal(options.redirect, "manual"); return new Response(null, { status: 307, headers: { Location: "https://untrusted.invalid/" } }); });
+  assert.equal(redirected.status, 502); assert.equal(redirected.headers.get("location"), null);
+});
