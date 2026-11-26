@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { verifyRecords } from '../dialogue-model/runtime/diagnostics/parity-verify/index.ts';
-import { findTopicShiftClaims, findOrientationLeaks, defaultGenerationRetryVersion, hasVersionedViewpoint, isGenerationV5, isGenerationV6, isGenerationV7, isGenerationV8, isGenerationV9, isGenerationV10, isGenerationV11, validGenerationRetryVersion } from '../dialogue-model/runtime/v2/generation-guard.ts';
+import { findTopicShiftClaims, findOrientationLeaks, defaultGenerationRetryVersion, hasVersionedViewpoint, isGenerationV5, isGenerationV6, isGenerationV7, isGenerationV8, isGenerationV9, isGenerationV10, isGenerationV11, isGenerationV12, validGenerationRetryVersion } from '../dialogue-model/runtime/v2/generation-guard.ts';
 import { buildRecords, type Turn } from './support/s4-v3-records.ts';
 
 const moved = 'うん、次にいこう。';
@@ -20,17 +20,18 @@ test('the guard: only a chosen move_on, defer or close may say the conversation 
   for (const text of [confirming, '次に、細い棒はつながっていますか？', '次の特徴は、穴の数です。', '先に進まず、この形を確かめたいです。', '相手が「次にいこう」と言いました。', '次の形には行きません。']) assert.deepEqual(findTopicShiftClaims(text), [], text);
 });
 
-test('versions: v11 contains v10, v9, v8, v7, v6, v5 and v4; v5 and v4 are not v6; the default of a new v5 trial is v11 (v10, v9, v8, v7, v6 and v5 stay valid for saved records)', () => {
-  assert.equal(defaultGenerationRetryVersion('two_stage_v3', 'holistic_v5'), 'jev_generation_retry_v11');
-  const all = ['jev_generation_retry_v4', 'jev_generation_retry_v5', 'jev_generation_retry_v6', 'jev_generation_retry_v7', 'jev_generation_retry_v8', 'jev_generation_retry_v9', 'jev_generation_retry_v10', 'jev_generation_retry_v11'];
+test('versions: v12 contains v11, v10, v9, v8, v7, v6, v5 and v4; v5 and v4 are not v6; the default of a new v5 trial is v12 (v11, v10, v9, v8, v7, v6 and v5 stay valid for saved records)', () => {
+  assert.equal(defaultGenerationRetryVersion('two_stage_v3', 'holistic_v5'), 'jev_generation_retry_v12');
+  const all = ['jev_generation_retry_v4', 'jev_generation_retry_v5', 'jev_generation_retry_v6', 'jev_generation_retry_v7', 'jev_generation_retry_v8', 'jev_generation_retry_v9', 'jev_generation_retry_v10', 'jev_generation_retry_v11', 'jev_generation_retry_v12'];
   for (const v of all) { assert.ok(hasVersionedViewpoint(v)); assert.ok(validGenerationRetryVersion(v, 'two_stage_v3', 'holistic_v5')); }
-  assert.deepEqual(all.map(isGenerationV5), [false, true, true, true, true, true, true, true]);
-  assert.deepEqual(all.map(isGenerationV6), [false, false, true, true, true, true, true, true]);
-  assert.deepEqual(all.map(isGenerationV7), [false, false, false, true, true, true, true, true]);
-  assert.deepEqual(all.map(isGenerationV8), [false, false, false, false, true, true, true, true]);
-  assert.deepEqual(all.map(isGenerationV9), [false, false, false, false, false, true, true, true]);
-  assert.deepEqual(all.map(isGenerationV10), [false, false, false, false, false, false, true, true]);
-  assert.deepEqual(all.map(isGenerationV11), [false, false, false, false, false, false, false, true]);
+  assert.deepEqual(all.map(isGenerationV5), [false, true, true, true, true, true, true, true, true]);
+  assert.deepEqual(all.map(isGenerationV6), [false, false, true, true, true, true, true, true, true]);
+  assert.deepEqual(all.map(isGenerationV7), [false, false, false, true, true, true, true, true, true]);
+  assert.deepEqual(all.map(isGenerationV8), [false, false, false, false, true, true, true, true, true]);
+  assert.deepEqual(all.map(isGenerationV9), [false, false, false, false, false, true, true, true, true]);
+  assert.deepEqual(all.map(isGenerationV10), [false, false, false, false, false, false, true, true, true]);
+  assert.deepEqual(all.map(isGenerationV11), [false, false, false, false, false, false, false, true, true]);
+  assert.deepEqual(all.map(isGenerationV12), [false, false, false, false, false, false, false, false, true]);
   assert.equal(validGenerationRetryVersion('jev_generation_retry_v6', 'two_stage_v3', 'holistic_v4'), false);
 });
 
