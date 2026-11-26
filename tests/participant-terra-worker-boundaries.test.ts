@@ -13,7 +13,7 @@ import type { ObservationMessage } from '../dialogue-model/runtime/observation/o
 import { INITIAL_OBSERVATION_STRUCTURED_V1 } from '../dialogue-model/runtime/observation/initial-observation-generation.ts';
 
 const configured = {
-  schemaVersion: 'participant_model_pin_v1',
+  schemaVersion: 'participant_model_pin_v1' as const,
   terraModelId: 'gpt-6.1-terra-2026-11-01',
   lunaModelId: 'gpt-6-luna-2026-10-01',
   jevModelId: 'typesafe/jev-1.14-20261001',

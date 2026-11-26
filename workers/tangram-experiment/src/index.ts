@@ -77,6 +77,7 @@ export interface Env extends SoftLimitBindings {
   // Add the private proxy's verified pin to new approvals only.
   PARTICIPANT_TERRA_ENABLED?: string;
   PARTICIPANT_TERRA_GENERATION_ENABLED?: string;
+  PARTICIPANT_TERRA_ALL_ROLES_ENABLED?: string;
   PARTICIPANT_TERRA_PROFILE?: string;
   PARTICIPANT_TERRA_LIMITS_JSON?: string;
   // Approval-only opt-in; already approved plans supply their own generation.
@@ -259,7 +260,8 @@ export class TangramSession extends DurableObject<Env> {
       let participant: Pick<Parameters<typeof approveReception>[1],
         'participantModelPin' | 'participantRuntimeProfile' | 'participantLimits' | 'initialObservationGeneration'> = {};
       const generationPin = this.env.PARTICIPANT_TERRA_GENERATION_ENABLED === 'on';
-      if (generationPin && this.env.PARTICIPANT_TERRA_ENABLED !== 'on') throw new ReceptionError('reception_unavailable');
+      const allTerraPin = this.env.PARTICIPANT_TERRA_ALL_ROLES_ENABLED === 'on';
+      if ((generationPin || allTerraPin) && this.env.PARTICIPANT_TERRA_ENABLED !== 'on') throw new ReceptionError('reception_unavailable');
       if (this.env.PARTICIPANT_TERRA_ENABLED === 'on') {
         try {
           const configuredProfile = this.env.PARTICIPANT_TERRA_PROFILE;
@@ -272,7 +274,7 @@ export class TangramSession extends DurableObject<Env> {
           const participantLimits = usageOnly ? undefined
             : validateParticipantLimits(JSON.parse(this.env.PARTICIPANT_TERRA_LIMITS_JSON ?? 'null'));
           const { pin: participantModelPin } = await workerParticipantPolicy(this.env.PARTICIPANT_AI_PROXY, usageOnly, initialObservationGeneration,
-            generationPin ? 'participant_model_pin_v2' : 'participant_model_pin_v1');
+            allTerraPin ? 'participant_model_pin_v3' : generationPin ? 'participant_model_pin_v2' : 'participant_model_pin_v1');
           participant = { participantModelPin, ...(initialObservationGeneration ? { initialObservationGeneration } : {}),
             ...(participantLimits ? { participantLimits } : { participantRuntimeProfile: PARTICIPANT_PRODUCTION_PROFILE }) };
         } catch {
