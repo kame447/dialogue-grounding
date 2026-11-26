@@ -104,7 +104,9 @@ async function choices(env: ParticipantEnvironment, input: unknown, expectedId: 
   const signal = AbortSignal.timeout(85_000);
   try {
     const response = await fetchImpl(OPENROUTER_DECISIONS_URL, {
-      method: 'POST', redirect: 'error', signal,
+      // Workers' fetch accepts only 'follow' and 'manual': redirect 'error' throws a TypeError before any request is made, so every Jev call failed at once in production.
+      // 'manual' hands a redirect back unfollowed; it is not ok, so it is refused below with the credential never forwarded.
+      method: 'POST', redirect: 'manual', signal,
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + env.OPENROUTER_DECISIONS_API_KEY },
       body: request.wire,
     });
