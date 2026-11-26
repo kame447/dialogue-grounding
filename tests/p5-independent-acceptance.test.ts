@@ -31,6 +31,8 @@ const v12HttpDigests = new Map([
   ["aa8b84ba60f10780328521457fc3abf4bfaa6db6efd32a725924075a9584f884", "a69b96be57143a984f2c7c7fc5c78f7bd82982c97119700a1498776d5ef6f13b"],
   // 17e56bc, 1171a04, 9bc0587
   ["9d686330aa34a516a1e2d95df94d0b030e7308a6463757861b9c94e561e5197a", "fd431c3fa99aef1ab219980d38d44cae3e3167c86f4b2230aaa7c64d99176f00"],
+  // dffce2a separates participant prompts and restores the 671acdb research request bytes.
+  ["0add2f40aaaa01bfdacd1b99418b94e288eb45da6593595304f8d36d0f22de27", "a69b96be57143a984f2c7c7fc5c78f7bd82982c97119700a1498776d5ef6f13b"],
 ]);
 const promptSources = await promptSourceManifest();
 
