@@ -364,15 +364,16 @@ for (const label of ['bypass-enabled', 'repair-first'] as const) {
   });
 }
 
-// G.2 (scoped_v6): a confirm that only states something asks nothing, so a later nameless proposal binds to the figure it described; with a question it still waits for the answer.
+// scoped_v6 keeps a confirm or repair that only states something as a check awaiting an answer (audit 28n, B-28N-1): its description is never public focus, so it cannot
+// replace an earlier unanswered question, a human denial or a figure the partner never confirmed.
 for (const label of ['bypass-enabled', 'repair-first'] as const) {
   const build = (version: string | undefined, speech: string, turns: Turn[] = []) => buildRecords({ label, dialoguePolicy: 'holistic_v5', ...(version ? { generationRetryVersion: version as any } : {}), technicalTrial: { version: 'adaptive_repair_v3' },
     turns: [{ human: 'この形の特徴を教えてください。', plan: { action: 'confirm', target: 'figure_0', referent: 'figure_0', speech, aiActs: ['assert'], aiExtraction: JSON.stringify([seg('s1', speech, 'part', [first])]) } },
       { human: proposal, plan: { action: 'confirm', target: 'figure_0', referent: 'figure_0', name: alias, act: 'name_propose', extraction: JSON.stringify([seg('s1', proposal, 'name', [], alias)]), speech: '輪が細い棒につながる形ですか？' } }, ...turns] });
   const names = async (version: string | undefined, speech: string) => (await build(version, speech)).trials[0].lastCommittedState.judgments.at(-1).jevTurn.agreeNames;
-  test(`${label}: a confirm that only states something does not hold the naming open in v11 (scoped_v6), one that asks does`, async () => {
-    assert.equal((await names(undefined, '輪が台に接している形です。')).length, 1);
-    assert.equal((await names(v10, '輪が台に接している形です。')).length, 0, 'v10 (scoped_v5) waits for an answer to a statement');
+  test(`${label}: a confirm that only states something never becomes public focus in v11 (scoped_v6), as in v10`, async () => {
+    assert.equal((await names(undefined, '輪が台に接している形です。')).length, 0);
+    assert.equal((await names(v10, '輪が台に接している形です。')).length, 0);
     assert.equal((await names(undefined, '輪が台に接している形ですか？')).length, 0);
   });
   // audit 28: a request ("…か教えてください") that extraction dropped may be the question, so the confirm still waits for the answer.

@@ -52,16 +52,6 @@ export function publiclyCheckedNamingTarget(claims: readonly LocalClaimView[], p
           (c.speaker === "ai" ? c.act === "ask" : c.act === "agree" || c.act === "deny" || c.act === "ask")) &&
       event?.speaker === c.speaker && !!c.quote && event.text.includes(c.quote);
   });
-  const sentencesOf = (text: string) => text.normalize("NFKC").split(/(?<=[。!?])/u).map(sentence => sentence.trim()).filter(Boolean);
-  const core = (text: string) => text.normalize("NFKC").replace(/[。!?、,.\s]/gu, "");
-  // scoped_v6: an utterance counts as only stating something when nothing in it asks and every sentence of it was extracted as one of the AI's claims; a sentence extraction dropped
-  // (a request such as "…か教えてください") may be the question, so such a confirm still waits for an answer.
-  const askedSomething = (text: string, turn: number) => {
-    const sentences = sentencesOf(text);
-    if (sentences.some(sentence => /[?]|か(?:ね)?[。、,.]?$/u.test(sentence))) return true;
-    const quotes = claims.filter(c => c.speaker === "ai" && c.sourceTurn === turn && !!c.quote).map(c => core(c.quote));
-    return sentences.some(sentence => !quotes.some(quote => quote !== "" && (core(sentence).includes(quote) || quote.includes(core(sentence)))));
-  };
   const publications = new Map<number, typeof before[number]>();
   for (const judgment of before) {
     const seq = judgment.aiPublic?.aiSeq;
@@ -79,10 +69,9 @@ export function publiclyCheckedNamingTarget(claims: readonly LocalClaimView[], p
       ai.set(c.id, { claim: c, singleton: target?.kind === "single" });
       // Public descriptions corroborate the executed check even when its
       // question has no extracted target or was missed by extraction entirely.
-      // scoped_v6: any number of candidates counts, and a statement-only confirm (nothing asked) is no check, only public focus.
+      // scoped_v6: a described check counts for any number of candidates, not only two. A confirm that only states something stays a check awaiting an answer (it never becomes public focus).
       if ((scope === "scoped_v3" || scope === "scoped_v4" || directReferenceReplies) && c.act !== "ask" && (scope === "scoped_v6" || ids.length <= 2) &&
-          (published?.judgment?.action === "confirm" || published?.judgment?.action === "repair") &&
-          (scope !== "scoped_v6" || askedSomething(publicByTurn.get(c.sourceTurn)?.text ?? "", c.sourceTurn))) {
+          (published?.judgment?.action === "confirm" || published?.judgment?.action === "repair")) {
         describedChecks.add(c.sourceTurn);
       }
     }
