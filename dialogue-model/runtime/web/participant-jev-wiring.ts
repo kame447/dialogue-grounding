@@ -180,7 +180,9 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
       : undefined;
     const requestedScope = v.newTrialAgreeNameScopeVersion;
     const newTrialAgreeNameScopeVersion = requestedScope === 'scoped_v7' ||
-      requestedScope === 'scoped_v8' && v.ledger instanceof RunBudget ? requestedScope : undefined;
+      requestedScope === 'scoped_v8' && v.ledger instanceof RunBudget ||
+      requestedScope === 'scoped_v9' && v.ledger instanceof ParticipantUsageLedger &&
+        pinned?.generationRetryVersion === 'jev_generation_retry_v12' ? requestedScope : undefined;
     if (Object.hasOwn(v, 'newTrialAgreeNameScopeVersion') &&
         (newTrialAgreeNameScopeVersion === undefined ||
           !restore && !validAgreeNameScope(newTrialAgreeNameScopeVersion, generationRetryVersion))) return invalid();
@@ -191,7 +193,8 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
         (namingRestoreVersion !== AI_NAME_ACCEPTANCES_V1 || !isGenerationV12(generationRetryVersion))) return invalid();
     const savedScope = restore?.queueState?.privateState?.agreeNameScopeVersion;
     if (restore && (!validAgreeNameScope(savedScope, generationRetryVersion) ||
-        savedScope === 'scoped_v8' && !(v.ledger instanceof RunBudget))) return invalid();
+        savedScope === 'scoped_v8' && !(v.ledger instanceof RunBudget) ||
+        (savedScope === 'scoped_v9' || newTrialAgreeNameScopeVersion === 'scoped_v9') && savedScope !== newTrialAgreeNameScopeVersion)) return invalid();
     if (context.referenceMemory !== true) return invalid();
     if (!STRATEGIES.includes(context.strategy)) return invalid();
     if (context.legacy.some(v => v !== null && v !== undefined) || context.style !== profile.utteranceStyle) return invalid();

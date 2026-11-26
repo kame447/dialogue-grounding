@@ -1484,19 +1484,23 @@ function v12Transport(t: TestContext, h: ReturnType<typeof harness>) {
   return { lookup, options, textPhases, prompts };
 }
 
-for (const order of [['repair-first', 'bypass-enabled'], ['bypass-enabled', 'repair-first']]) {
-  test('U6-B v12 private Worker transport, restore, and both conditions ' + order[0], async t => {
+for (const { order, dialogueProfile, scope } of [
+  { order: ['repair-first', 'bypass-enabled'], dialogueProfile: v12Dialogue, scope: 'scoped_v7' },
+  { order: ['bypass-enabled', 'repair-first'], dialogueProfile: v12Dialogue, scope: 'scoped_v7' },
+  { order: ['repair-first', 'bypass-enabled'], dialogueProfile: 'participant_dialogue_v12_naming_v2', scope: 'scoped_v9' },
+]) {
+  test('U6-B v12 private Worker transport, restore, and both conditions ' + order[0] + ' ' + scope, async t => {
     const receptionProtocol = order[0] === 'repair-first' ? figureBankProtocol : protocol;
     const h = harness(true, { ...receptionProtocol, allowedOrders: [order] });
     const v12 = v12Transport(t, h);
-    h.env.PARTICIPANT_DIALOGUE_PROFILE = v12Dialogue;
+    h.env.PARTICIPANT_DIALOGUE_PROFILE = dialogueProfile;
     await h.receive();
     const approval = await h.approve();
-    assert.equal(approval.plan.participantDialogueProfile, v12Dialogue);
+    assert.equal(approval.plan.participantDialogueProfile, dialogueProfile);
     assert.equal(approval.plan.schemaVersion, receptionProtocol.schemaVersion === 'reception_protocol_v3' ? 'reception_plan_v3' : 'reception_plan_v2');
     assert.equal(approval.plan.participantModelPin.schemaVersion, 'participant_model_pin_v3');
     assert.equal(approval.plan.memoryPruneVersion, CLAIM_PRUNE_V2);
-    h.env.PARTICIPANT_DIALOGUE_PROFILE = undefined;
+    h.env.PARTICIPANT_DIALOGUE_PROFILE = scope === 'scoped_v9' ? v12Dialogue : undefined;
     h.evict();
 
     const missingPrune = structuredClone(await h.storage.get('reception:v1'));
@@ -1516,19 +1520,19 @@ for (const order of [['repair-first', 'bypass-enabled'], ['bypass-enabled', 'rep
       const key = 'record:' + id;
       const start = await h.storage.get(key);
       assert.equal(start.strategy, strategy);
-      assert.equal(start.assignment.source.plan.participantDialogueProfile, v12Dialogue);
+      assert.equal(start.assignment.source.plan.participantDialogueProfile, dialogueProfile);
       assert.equal(start.assignment.source.plan.memoryPruneVersion, CLAIM_PRUNE_V2);
-      assert.equal(start.options.participantDialogueProfile, v12Dialogue);
+      assert.equal(start.options.participantDialogueProfile, dialogueProfile);
       assert.deepEqual(start.options.participantModelPin, approval.plan.participantModelPin);
       assert.equal(start.options.memoryPruneVersion, CLAIM_PRUNE_V2);
       assert.equal(start.queueState.privateState.graph.memoryPruneVersion, CLAIM_PRUNE_V2);
-      assert.doesNotMatch(JSON.stringify(trial), /participantDialogueProfile|scoped_v7|holistic_v5|claim_prune_v2/u);
+      assert.doesNotMatch(JSON.stringify(trial), /participantDialogueProfile|scoped_v[79]|holistic_v5|claim_prune_v2/u);
       assert.equal(start.options.questionLayout, 'two_stage_v3');
       assert.equal(start.options.dialoguePolicy, 'holistic_v5');
       assert.equal(start.options.generationRetryVersion, 'jev_generation_retry_v12');
       assert.equal(start.options.jevNamingRestoreVersion, 'ai_name_acceptances_v1');
       assert.deepEqual(start.options.technicalTrial, { version: 'adaptive_repair_v3' });
-      assert.equal(start.queueState.privateState.agreeNameScopeVersion, 'scoped_v7');
+      assert.equal(start.queueState.privateState.agreeNameScopeVersion, scope);
 
       h.controlled.observe = true;
       v12.options.rewrite = true;
@@ -1601,6 +1605,10 @@ for (const order of [['repair-first', 'bypass-enabled'], ['bypass-enabled', 'rep
         const owner = await h.storage.get('base:owner:v1');
         const calls = h.calls.length;
         await h.storage.transaction(tx => tx.put({ [key]: { ...saved, options: { ...saved.options, generationRetryVersion: 'jev_generation_retry_v11' } } }));
+        assert.equal((await h.start(id)).status, 409);
+        const mismatchedScope = structuredClone(saved);
+        mismatchedScope.queueState.privateState.agreeNameScopeVersion = scope === 'scoped_v9' ? 'scoped_v7' : 'scoped_v9';
+        await h.storage.transaction(tx => tx.put({ [key]: mismatchedScope }));
         assert.equal((await h.start(id)).status, 409);
         const missingPrune = structuredClone(saved);
         delete missingPrune.queueState.privateState.graph.memoryPruneVersion;
