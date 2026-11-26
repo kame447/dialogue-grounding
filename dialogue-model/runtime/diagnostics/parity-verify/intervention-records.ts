@@ -718,7 +718,8 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
  const humanTexts=(tape.events??[]).filter((e:any)=>e.seq<=t.turnIndex&&e.speaker==='human').map((e:any)=>e.text);
   // v11: the participant's recent words are those since the AI last spoke plus the earlier ones whose claim targets this side's executed figure.
  const recentClaims=liveClaims({records:[...((tape.generationGraph??tape.state?.graph)?.records??[]),...(t.local?.claims??[]).filter((c:any)=>c.kind==='claim')]});
- const recentFor=(executed:any)=>(tape.events??[]).length===0?[]:v11RecentHumanTexts(tape.events,t.turnIndex,recentClaims,executed?.target?.kind==='single'?[executed.target.figureId]:executed?.target?.kind==='multiple'?[...executed.target.figureIds]:[]);
+const idsOf=(target:any):string[]=>target?.kind==='single'?[target.figureId]:target?.kind==='multiple'?[...target.figureIds]:[];
+ const recentFor=(executed:any)=>(tape.events??[]).length===0?[]:v11RecentHumanTexts(tape.events,t.turnIndex,recentClaims,idsOf(executed?.target),new Map((tape.state?.judgments??[]).map((x:any)=>[x.turnIndex,idsOf((x.jevTurn?.executed??x.jevTurn?.decision)?.target)] as const)));
  const recentHumanTexts=recentFor(t.executed);
  if(pairs.length===0)return'missing';
  if(!equal(result.sides,[pair.left,pair.right]))return'invalid';

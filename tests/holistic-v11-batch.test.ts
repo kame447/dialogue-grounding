@@ -264,3 +264,46 @@ for (const label of ['bypass-enabled', 'repair-first'] as const) {
     assert.deepEqual(statuses(older), passed);
   });
 }
+
+// NB-26N-4/5: an utterance whose claims name no figure still counts for the figure the AI answered it on.
+for (const label of ['bypass-enabled', 'repair-first'] as const) {
+  const build = (turns: Turn[]) => buildRecords({ label, dialoguePolicy: 'holistic_v5', technicalTrial: { version: 'adaptive_repair_v3' }, turns });
+  const ask = { action: 'confirm', target: 'figure_0', referent: 'figure_0', speech: 'その先は輪の切れ目につながっていますか？' };
+  const ok = ['こちらの画面では輪に切れ目があるので、そちらでいう左向きの先に対応するかもしれません。', '二つの部分がつながった形ですか？'];
+  test(`${label}: a direction said in an utterance without a target counts after one exchange (NB-26N-4)`, async () => {
+    const said: Turn = { human: '輪の先が左向きです。', plan: { ...ask, act: 'assert', extraction: JSON.stringify([seg('s1', '輪の先が左向きです。', 'part', [])]) } };
+    const record = await build([said, { human: 'はい、つながっています。そちらの図だとどうですか？', plan: { ...ask, drafts: ok } }]);
+    const a = record.trials[0].attempts.at(-1);
+    assert.deepEqual(a.generationGuard, { violations: [], regenerated: false, fallback: false });
+    assert.deepEqual(statuses(record), passed);
+  });
+  test(`${label}: a correction without a target still takes the replaced word back (NB-26N-5)`, async () => {
+    const said: Turn = { human: '輪の切れ目から右上に突起があります。', plan: { ...ask, act: 'assert', extraction: JSON.stringify([seg('s1', '輪の切れ目から右上に突起があります。', 'part', [first])]) } };
+    const fix: Turn = { human: '右上ではなく、左下でした。', plan: { ...ask, act: 'assert', extraction: JSON.stringify([seg('s1', '右上ではなく、左下でした。', 'part', [])]) } };
+    const draft = 'そちらでいう輪の切れ目から右上に、小さな突起がありますね。';
+    const record = await build([said, fix, { human: 'はい、そうです。そちらはどうですか？', plan: { ...ask, drafts: [draft, ok[1]] } }]);
+    const a = record.trials[0].attempts.at(-1);
+    assert.equal(a.generationGuard.regenerated, true);
+    assert.equal(a.publicSpeech, ok[1]);
+    assert.deepEqual(statuses(record), passed);
+  });
+}
+
+// ---- final batch E (audit 25 / 25n non-blockers)
+test('v11 guard: a bracket quotes the participant only, a taken-back word is gone (also by paraphrase or a noun phrase), そちらの+noun+方位 and a following 同じ are assertions, ので/から boundaries', () => {
+  const l = (text: string, human: string[], version = v11) => findOrientationLeaks(text, 'holistic_v5', version as any, human, human, [...human, 'こちらの画面では右上に突起があります。']);
+  // NB-25N-1: a word only the AI said, in brackets
+  assert.deepEqual(l('そちらでいう「右上の突起」が、輪の切れ目についているんですね。', ['左下に突起があります。']), ['shared_view_assumption']);
+  assert.deepEqual(l('そちらでいう「左下の突起」が、輪の切れ目についているんですね。', ['左下に突起があります。']), []);
+  // NB-25N-3
+  assert.deepEqual(l('そちらでいう右向きの先に対応する可能性はありそう。', ['右を向いていません。']), ['shared_view_assumption']);
+  assert.deepEqual(l('そちらでいう右上の突起に対応する可能性はありそう。', ['右上の突起ではなく、左下の突起です。']), ['shared_view_assumption']);
+  // NB-25N-4
+  assert.deepEqual(l('こちらの上の突起は、そちらの輪の右上にあるはずだね。', ['左下にあります。']), ['shared_view_assumption']);
+  assert.deepEqual(l('そちらの左側にも同じ穴がありますね。', ['左側に穴があります。']), ['shared_view_assumption']);
+  // NB-25N-5
+  assert.deepEqual(l('そちらでは左向きに見えるのでしょうか？', ['左向きです。']), []);
+  assert.deepEqual(l('そちらでは左向きに見えませんから、同じ形ですか？', ['左向きです。']), ['shared_view_assumption']);
+  // v10 judges as before (its bracket check accepts any public word of the trial)
+  assert.deepEqual(l('そちらでいう「右上の突起」が、輪の切れ目についているんですね。', ['左下に突起があります。'], v10), []);
+});

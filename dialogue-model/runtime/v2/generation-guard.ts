@@ -373,7 +373,7 @@ const v5ContinuationBreak = /(?<=(?<!から見)て[、,])/u;
 const v5ViewpointBreak = /(?<=[。!?]|(?:ので|から|ため(?:に)?|なら|であれば|とすると)[、,])/u;
 const v5DescriptionBreak = new RegExp(v5ClauseBreak.source + "|" + v5ContinuationBreak.source, "u");
 // v11: "から、" breaks a clause only as "because" (after a predicate), not as "from" (先端から、…).
-const v11Because = "(?<=[るいたうくすつぬむぶ]|だ|です|ます)から";
+const v11Because = "(?<=[るいたうくすつぬむぶんぐ]|だ|です|ます)から";
 const v11ClauseBreak = new RegExp(v5ClauseBreak.source.replace("|から|", "|" + v11Because + "|"), "u");
 const v11ViewpointBreak = new RegExp(v5ViewpointBreak.source.replace("|から|", "|" + v11Because + "|"), "u");
 const v11DescriptionBreak = new RegExp(v11ClauseBreak.source + "|" + v5ContinuationBreak.source, "u");
@@ -413,16 +413,20 @@ const v11TopicViewpoint = new RegExp(
   "(?<own>" + v5OwnView.source + "|" + explicitOwnView.source + "|" + ownTopicView.source + "|" + v11OwnPossessiveView + "|" + v11ColloquialOwnView + ")|" +
   v5PartnerView.source + "|" + explicitPartnerView.source + "|" + partnerTopicView.source + "|" + v9PartnerQuotedView, "gu");
 // v11 cause reading: "のです" and a "から、" that means "from" (先端から、…) are not a premise.
-const descriptionQualifierV11 = /と(?:のこと|教えて|いう(?!前提|仮定|想定)|言っ|おっしゃ|聞い|説明|伺|述べ|話し)|なら|(?:の)?であれば|とすると|とすれば|とは限(?:らな|りませ)|(?:では|じゃ)(?:な(?:い|く)|ありませ)|(?<cause>ので(?!す)|(?:だ|です|ます|ある|いる|見える)から|(?<=[るいたうくすつぬむぶ])から(?=[、,]|$)|ため)/u;
+const descriptionQualifierV11 = /と(?:のこと|教えて|いう(?!前提|仮定|想定)|言っ|おっしゃ|聞い|説明|伺|述べ|話し)|なら|(?:の)?であれば|とすると|とすれば|とは限(?:らな|りませ)|(?:では|じゃ)(?:な(?:い|く)|ありませ)|(?<cause>ので(?!す|しょう)|(?:だ|です|ます|ある|いる|見える)から|(?<=[るいたうくすつぬむぶ])から(?=[、,]|$)|ため)/u;
 // The participant's words as the only source of an excused direction word (v11): from their recent public texts, "左を向いて" counting as "左向き", a word they negated ("右上ではなく") not counting.
 // v11: the participant's words that a quotation may use. Everything the participant said since the AI last spoke, and what they said earlier about the figure this turn is about
 // (an earlier utterance whose own claim targets that figure); an earlier utterance about another figure does not count.
 export function v11RecentHumanTexts(events: readonly { seq: number; speaker: string; text: string }[], latestSeq: number,
-  claims: readonly { speaker: string; sourceTurn: number; targets: readonly string[] }[], targetIds: readonly string[]): string[] {
+  claims: readonly { speaker: string; sourceTurn: number; targets: readonly string[] }[], targetIds: readonly string[],
+  handledTargets: ReadonlyMap<number, readonly string[]> = new Map()): string[] {
   const upTo = events.filter(e => e.seq <= latestSeq);
   const lastAi = Math.max(0, ...upTo.filter(e => e.speaker === "ai").map(e => e.seq));
   const sameFigure = new Set(claims.filter(c => c.speaker === "human" && c.targets.some(id => targetIds.includes(id))).map(c => c.sourceTurn));
-  return upTo.filter(e => e.speaker === "human" && (e.seq > lastAi || sameFigure.has(e.seq))).map(e => e.text);
+  // An utterance whose claims name no figure still belongs to this figure when the AI answered it with a judgment on exactly this figure.
+  const targeted = new Set(claims.filter(c => c.speaker === "human" && c.targets.length > 0).map(c => c.sourceTurn));
+  const handledHere = (seq: number) => { const ids = handledTargets.get(seq); return !targeted.has(seq) && !!ids && ids.length === targetIds.length && ids.every(id => targetIds.includes(id)); };
+  return upTo.filter(e => e.speaker === "human" && (e.seq > lastAi || sameFigure.has(e.seq) || handledHere(e.seq))).map(e => e.text);
 }
 function v11SaidWords(humanTexts: readonly string[], terms: RegExp): Set<string> {
   const said = new Set<string>();
@@ -431,7 +435,9 @@ function v11SaidWords(humanTexts: readonly string[], terms: RegExp): Set<string>
     const corrected = new Set<string>();
     for (const m of t.matchAll(terms)) {
       if (m.groups?.sameFrame !== undefined) continue;
-      if (/^(?:で|じゃ)(?:は)?(?:なく|ない|なか)/u.test(t.slice(m.index + m[0].length))) { corrected.add(m[0]); continue; }
+      const rest = t.slice(m.index + m[0].length);
+      // "右上ではなく", "右上の突起ではなく", "右向きいません" (= 右を向いていません) all take the word back.
+      if (/^(?:の[^、。!?]{0,6})?(?:で|じゃ)(?:は)?(?:なく|ない|なか)|^い(?:ません|ない|なかっ)/u.test(rest)) { corrected.add(m[0]); continue; }
       said.add(m[0]);
     }
     // A word the participant takes back ("右上ではなく") is no longer theirs, also when they said it earlier.
@@ -470,8 +476,9 @@ function v5OrientationLeaks(text: string, expanded: boolean, topic = false, v9 =
       const sameFrame = term.groups?.sameFrame !== undefined;
       const comparesScreens = sameFrame && screenComparison.test(clause.slice(0, term.index));
       // v11: "そちらの上の突起" names the partner's side directly. A word the participant said is theirs (unless it is set against the AI's side, "同じ左側"); any other is an assumption about their view unless it is only asked about.
-      if (v11 && !sameFrame && /(?:そちら|相手)の$/u.test(clause.slice(0, term.index))) {
-        if (said(term[0]) && !/(?:同じ|同様に?|おなじ)(?:そちら|相手)の$/u.test(clause.slice(0, term.index))) continue;
+      // Also "そちらの輪の右上" (a noun between), and "同じ" after the word ("そちらの左側にも同じ穴") sets it against the AI's side.
+      if (v11 && !sameFrame && /(?:そちら|相手)の(?:[^、。!?そ]{0,6}[のたい])?$/u.test(clause.slice(0, term.index))) {
+        if (said(term[0]) && !/(?:同じ|同様に?|おなじ)(?:そちら|相手)の$/u.test(clause.slice(0, term.index)) && !/^[^、。!?]{0,4}(?:同じ|同様|おなじ)/u.test(clause.slice(term.index + term[0].length))) continue;
         const ownDescription = clause.slice(term.index + term[0].length, viewpoints[nextViewpoint]?.index).split(descriptionBreak, 1)[0];
         const ownQualifier = qualifierRule.exec(ownDescription);
         if (ownQualifier ? ownQualifier.groups?.cause !== undefined : !questionEnd.test(ownDescription)) partnerAssertion = true;
@@ -508,8 +515,8 @@ export function findOrientationLeaks(text: string, policy?: DialoguePolicy, vers
   if (policy === "holistic_v5" && isGenerationV11(version)) {
     // v11: the participant's recent words (what they said since the AI last spoke) are the only source of an excused word, inside brackets as well.
     const said = v11SaidWords(recentHumanTexts, v5ExpandedOrientationTerms);
-    // A bracketed span quotes something said in public: its direction words must occur in the public history (either speaker) or in the participant's recent words.
-    const quotable = new Set([...said, ...v11SaidWords(publicTexts, v5ExpandedOrientationTerms)]);
+    // A bracketed span quotes something the participant said: its direction words must occur in their words (taken back ones excluded), never only in the AI's own past turns.
+    const quotable = new Set([...said, ...v11SaidWords(humanTexts, v5ExpandedOrientationTerms)]);
     return v5OrientationLeaks(v11Unbracket(normalize(text), quotable, v5ExpandedOrientationTerms), true, true, true, true, word => said.has(word), true);
   }
   const unquoted = normalize(text).replace(/「[^」]*」|『[^』]*』/gu, "「」");

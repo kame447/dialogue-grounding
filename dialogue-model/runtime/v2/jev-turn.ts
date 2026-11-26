@@ -1047,7 +1047,8 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         ...publicTurns.map(t => ({ role: t.speaker === "human" ? "user" as const : "assistant" as const, content: t.text }))];
       const codeContext = { action: judgment.action, candidateName: judgment.candidateName ?? null, v3: questionLayout === "two_stage_v3", holistic, adaptive, factored, ai: aiEnabled,
         publicTexts: events.filter(e => e.seq <= latest.seq).map(e => e.text), humanTexts: events.filter(e => e.seq <= latest.seq && e.speaker === "human").map(e => e.text),
-        recentHumanTexts: v11RecentHumanTexts(events, latest.seq, claims, targets(execution)),
+        recentHumanTexts: v11RecentHumanTexts(events, latest.seq, claims, targets(execution),
+          new Map(state.judgments.map(j => [j.turnIndex, targets((j.jevTurn.executed ?? j.jevTurn.decision) as Pick<JevDecision, "target">)] as const))),
         dialoguePolicy: options.dialoguePolicy, generationRetryVersion,
         vetoed: isVetoed(record.intervention) };
       const violations = (text: string, context: Message[]) => draftViolationCodes(text, codeContext, context, privateInstructions);
