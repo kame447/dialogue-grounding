@@ -188,6 +188,27 @@ for (const label of ['bypass-enabled', 'repair-first'] as const) {
     const names = record.trials[0].lastCommittedState.judgments.at(-1).jevTurn.agreeNames.map((n: any) => n.name ?? n.candidateName);
     assert.ok(!names.includes(alias), JSON.stringify(names));
   });
+
+  // audit 26: the same question asked twice, and the classifier links the request to the first one: the corrected name is still the one carried.
+  const askedTwice: Turn[] = [
+    { ...plain, plan: { ...plain.plan, speech: 'そちらが見ているのもこの形ですか？', aiActs: ['ask'], aiExtraction: JSON.stringify([seg('s1', 'そちらが見ているのもこの形ですか？', 'question', [first], null, 1)]) } },
+    { ...correction, plan: { ...correction.plan, speech: 'この形のことですか？' } },
+    { ...approve, plan: { ...approve.plan, antecedent: 'claim_1' } },
+  ];
+  test(`${label}: an approval request linked to the earlier of two identical questions still carries the corrected name in v11`, async () => {
+    const record = await build(undefined, askedTwice);
+    const last = record.trials[0].attempts.at(-1);
+    assert.equal(last.local.claims.find((c: any) => c.act === 'name_propose').name, star);
+    assert.equal(last.namingRequest, true);
+    assert.deepEqual(statuses(record), passed);
+    const names = record.trials[0].lastCommittedState.judgments.at(-1).jevTurn.agreeNames.map((n: any) => n.name ?? n.candidateName);
+    assert.ok(!names.includes(alias), JSON.stringify(names));
+    // a single nameless proposal answered through its own question still works
+    const single = await build(undefined, [askedTwice[0], { ...approve, plan: { ...approve.plan, antecedent: 'claim_1', extraction: JSON.stringify([seg('s1', 'それなら、いい？', 'name', [], null, 2)]) } }]);
+    const one = single.trials[0].attempts.at(-1);
+    assert.equal(one.local.claims.find((c: any) => c.act === 'name_propose' && c.sourceTurn === 3).name, alias);
+    assert.equal(one.namingRequest, true);
+  });
 }
 
 // audit 25n (B-25N-1): the proposal an approval request carries comes from the current naming interval only.

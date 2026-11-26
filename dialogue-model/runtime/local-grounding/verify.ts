@@ -133,13 +133,12 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     // An approval request ("is that name fine?") is a name proposal that carries the earlier proposal's name; it is decided before the bare-deictic rule so a short typed request is not turned into an acknowledgement.
     // The antecedent is the claim the classifier chose: the partner's own name proposal, or a public AI claim that carries a name (an adoption, a named confirmation).
     // The name is public either way. The extraction's respondsToTurn names the AI turn that was just answered, so for this act it does not have to be the claim's turn.
-    // v11 (#198): a short approval request that answers the AI's question about a name ("いい？") answers the partner's latest name proposal that question was about:
-    // the latest proposal of the partner in the current naming interval and before the question. The question itself names nothing, so the proposal is the claim the request carries the name from.
+    // v11 (#198): a short approval request that answers the AI's question about a name ("いい？") answers the partner's latest name proposal:
+    // the latest proposal of the partner in the current naming interval and before the request. The question itself names nothing, so the proposal is the claim the request carries the name from.
     if (refinedReplyRules && keepUnboundApproval && prior?.speaker === "ai" && prior.act === "ask" && act === "name_propose" && name === null && aspect === "name") {
-      const asked = prior;
-      // The latest proposal of the partner inside the current naming interval and before the question, whether or not it names a figure: a later, corrected proposal is the one the request answers,
+      // The latest proposal of the partner inside the current naming interval and before this request (not before the question the classifier linked: the same question may have been asked twice), whether or not it names a figure: a later, corrected proposal is the one the request answers,
       // and a proposal from before an agree, defer or move_on is not carried into the next figure.
-      const proposal = active.filter(c => c.speaker === "human" && c.act === "name_propose" && c.aspect === "name" && c.name !== null && c.sourceTurn > namingIntervalStart && c.sourceTurn < asked.sourceTurn)
+      const proposal = active.filter(c => c.speaker === "human" && c.act === "name_propose" && c.aspect === "name" && c.name !== null && c.sourceTurn > namingIntervalStart && c.sourceTurn < turn)
         .sort((x, y) => x.sourceTurn - y.sourceTurn || x.turn - y.turn).at(-1);
       if (proposal) prior = proposal;
     }
