@@ -19,4 +19,6 @@ export function harness(delays:Record<string,number>,localMs=20000,create?: (opt
  return{sent,traces,run,options,image,anchors};
 }
 export async function flush(){for(let i=0;i<5;i++)await new Promise<void>(r=>setImmediate(r));}
-export async function until(predicate:()=>boolean){for(let i=0;i<100;i++){if(predicate())return;await flush();}throw Error('synthetic progress unavailable');}
+// Progress can depend on thread-pool work (e.g. crypto.subtle.digest) whose latency is unbounded by event-loop turns,
+// so the cap is wall-clock (hrtime is not touched by mocked timers/performance.now), not a count of setImmediate turns.
+export async function until(predicate:()=>boolean,limitMs=30000){const start=process.hrtime.bigint();while(!predicate()){if(Number(process.hrtime.bigint()-start)/1e6>limitMs)throw Error('synthetic progress unavailable');await flush();}}
