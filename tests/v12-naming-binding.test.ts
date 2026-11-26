@@ -4,9 +4,12 @@ import { publiclyCheckedNamingTarget } from "../dialogue-model/runtime/decision/
 import type { AgreeNameScopeVersion } from "../dialogue-model/runtime/decision/naming-request.ts";
 import { createOwnLedger } from "../dialogue-model/runtime/judgment/schema.mjs";
 import { createReferenceGraph } from "../dialogue-model/runtime/memory/reference-graph.mjs";
+import { LOCAL_QUESTION_ANSWER_SOURCE } from "../dialogue-model/runtime/local-grounding/contract.ts";
 import type { LocalClaimView, LocalFunctionVerdict, LocalSegmentProposal, PublicTurn } from "../dialogue-model/runtime/local-grounding/contract.ts";
+import { priorClaimViews } from "../dialogue-model/runtime/local-grounding/derive.ts";
 import { verifyLocalUpdate } from "../dialogue-model/runtime/local-grounding/verify.ts";
 import { buildAgreeNamesV3 } from "../dialogue-model/runtime/v2/jev-turn.ts";
+import { s4LocalReverify } from "../dialogue-model/runtime/diagnostics/parity-verify/intervention-records.ts";
 import { verifyRecords } from "../dialogue-model/runtime/diagnostics/parity-verify/index.ts";
 import { buildRecords, OWN, OLD, type Turn, type runTurn } from "./support/s4-v3-records.ts";
 
@@ -163,5 +166,116 @@ for (const label of ["repair-first", "bypass-enabled"] as const) {
     assert.equal(trial.turns[0].publicText, turns[2].plan.speech);
     assert.deepEqual(verifyRecords(records).checks.filter(c => c.id.startsWith("intervention.trial.0.attempt.0.")).map(c => c.status),
       ["pass", "pass", "pass", "pass"]);
+  });
+}
+
+
+test("scoped_v10 retains a direct feature answer to an explicit question only as local evidence", () => {
+  const quote = "はい、細い棒があります。";
+  const reply = claim("4:local1", 4, "human", "agree", "part", quote);
+  const publicTurns = turnsFor([question, reply]);
+  const extraction = segment("answer", quote, "part", [figure], 3);
+  const verdict: LocalFunctionVerdict = { segmentId: "answer", act: "agree", respondsToClaimId: question.id, rawScore: null, answersChecked: "yes" };
+  function verify(retainLocalQuestionAnswers: boolean, prior = question, raw = extraction, answer = verdict) {
+    return verifyLocalUpdate({
+      graph: { ...createReferenceGraph({ slots }), lastTurn: 4, records: [{ kind: "claim", ...prior }] },
+      turn: 4, publicTurns, segments: [raw], verdicts: [answer],
+      directReferenceReplies: true, refinedReplyRules: true, answerFieldRules: true, bindDirectQuestionReplies: true, retainLocalQuestionAnswers,
+    });
+  }
+
+  assert.equal(verify(false).rejected[0]?.reason, "inconsistent_claim_response");
+  const retained = verify(true);
+  assert.deepEqual(retained.rejected, []);
+  assert.deepEqual(retained.operations.map(c => [c.act, c.aspect, c.targets, c.respondsTo, c.source]),
+    [["agree", "question", [figure], question.id, LOCAL_QUESTION_ANSWER_SOURCE]]);
+  for (const targets of [[], [other], [figure, other]]) {
+    assert.equal(verify(true, question, { ...extraction, targets }).operations.length, 0);
+  }
+  assert.equal(verify(true, { ...question, targets: [figure, other] }).operations.length, 0);
+  assert.equal(verify(true, question, { ...extraction, respondsToTurn: 2 }).operations.length, 0);
+  assert.equal(verify(true, question, extraction, { ...verdict, answersChecked: "unknown" }).operations.length, 0);
+
+  // The local answer marker also excludes a reply with literal pointing words.
+  const pointingAnswer = claim("4:local1", 4, "human", "agree", "question", "それです。", {
+    respondsTo: question.id, issueId: question.issueId,
+  });
+  const evidence = [description, question, pointingAnswer, proposal(4)];
+  assert.deepEqual(candidates(evidence, 4, "scoped_v10").map(c => c.figureId), [figure]);
+  const localEvidence = evidence.map(c => c === pointingAnswer ? { ...c, source: LOCAL_QUESTION_ANSWER_SOURCE } : c);
+  assert.deepEqual(candidates(localEvidence, 4, "scoped_v10"), []);
+  const earlierDeny = claim("2:local1", 2, "human", "deny", "referent", "そこではありません。");
+  assert.deepEqual(candidates([earlierDeny, ...evidence], 4, "scoped_v10", [judgment(2, "repair")]).map(c => c.figureId), [figure]);
+  assert.deepEqual(candidates([earlierDeny, ...localEvidence], 4, "scoped_v10", [judgment(2, "repair")]), []);
+});
+
+for (const label of ["repair-first", "bypass-enabled"] as const) {
+  test(`scoped_v10 retains the answer after an orientation or position description in ${label}`, async () => {
+    const memo = structuredClone(OLD.state.observationMemo);
+    memo.figures[0].analytic.shapes = ["端に三角がある", "細い切れ目がある"];
+    const orientation = "傾きがある形です。";
+    const position = "棒のそばに細い部分があります。";
+    const followup = "細い部分に切れ目がありますか？";
+    const affirmed = "はい、細い切れ目があります。";
+    const turns: Turn[] = [
+      { human: "細い棒の形を比べたいです。", plan: {
+        action: "confirm", target: "figure_0", referent: "figure_0", speech: openingDescription + openingQuestion,
+        aiActs: ["assert", "ask"], aiExtraction: JSON.stringify([
+          segment("part", openingDescription, "part", [own]), segment("check", openingQuestion, "question", [own]),
+        ]),
+      } },
+      { human: denial, plan: {
+        action: "repair", target: "figure_0", referent: "figure_0", speech: orientation + position + followup,
+        act: "deny", antecedent: "claim_1", answers: "not_an_answer",
+        extraction: JSON.stringify([segment("denial", denial, "contour", [mistaken, own], 2)]),
+        aiActs: ["assert", "assert", "ask"], aiExtraction: JSON.stringify([
+          segment("orientation", orientation, "orientation", [own]),
+          segment("position", position, "position", [own]),
+          segment("check", followup, "question", [own]),
+        ]),
+      } },
+      { human: affirmed + naming, plan: {
+        action: "confirm", target: "figure_0", referent: "figure_0", speech: openingDescription + openingQuestion,
+        drafts: [openingDescription + openingQuestion],
+        answers: "answers_checked_point",
+        extraction: JSON.stringify([segment("yes", affirmed, "part", [own], 4), segment("name", naming, "name", [own], null, repairedName)]),
+        aiActs: ["assert", "ask"], aiExtraction: JSON.stringify([
+          segment("part", openingDescription, "part", [own]), segment("check", openingQuestion, "question", [own]),
+        ]),
+        choose: (key, choices, { generationCalls }) => {
+          if (generationCalls > 0) return undefined;
+          if (key === "segment_0_act") return "agree";
+          if (key === "segment_1_act") return "name_propose";
+          if (key === "segment_0_antecedent") return Object.entries(choices).find(([, detail]) => detail.includes("5:pub3"))?.[0];
+        },
+      } },
+      { human: "はい、棒は細いです。" + naming, plan: {
+        action: "confirm", target: "figure_0", referent: "figure_0", speech: "細い棒について確認しましょう。",
+        answers: "answers_checked_point",
+        extraction: JSON.stringify([segment("yes", "はい、棒は細いです。", "part", [own], 6), segment("name", naming, "name", [own], null, repairedName)]),
+        choose: (key, choices) => {
+          if (key === "segment_0_act") return "agree";
+          if (key === "segment_1_act") return "name_propose";
+          if (key === "segment_0_antecedent") return Object.entries(choices).find(([, detail]) => detail.includes("7:pub2"))?.[0];
+        },
+      } },
+    ];
+    const outcomes: Awaited<ReturnType<typeof runTurn>>[] = [];
+    const records = await buildRecords({ label, dialoguePolicy: "holistic_v5", generationRetryVersion: "jev_generation_retry_v12",
+      agreeNameScopeVersion: "scoped_v10", technicalTrial: { version: "adaptive_repair_v3" }, memo, turns,
+      onTurn: (side, outcome) => { if (side === label) outcomes.push(outcome); },
+    });
+    assert.ok(outcomes[1].trace.local?.claims.some(c => c.act === "deny" && c.targets[0] === own && c.respondsTo === "3:pub2"));
+    assert.ok(priorClaimViews(outcomes[2].state.graph).some(c => c.source === LOCAL_QUESTION_ANSWER_SOURCE &&
+      c.aspect === "question" && c.respondsTo === "5:pub3" && c.targets[0] === own));
+    assert.deepEqual(outcomes[2].state.judgments.at(-1).jevTurn.agreeNames, []);
+    assert.ok(outcomes[3].trace.local?.claims.some(c => c.source === "partner_labelled_answer" && c.targets[0] === own));
+    assert.deepEqual(outcomes[3].state.judgments.at(-1).jevTurn.agreeNames, []);
+    assert.equal(outcomes[3].state.ledger[own].status, "unassigned");
+    assert.deepEqual(verifyRecords(records).checks.filter(c => c.id.startsWith("intervention.trial.0.attempt.0.")).map(c => c.status),
+      ["pass", "pass", "pass", "pass"]);
+    const tape = records.trials[0].replay[0].tape;
+    const oldScope = { ...tape, state: { ...tape.state, agreeNameScopeVersion: "scoped_v9" } };
+    assert.equal(s4LocalReverify(oldScope, outcomes[3].trace, "holistic_v5", outcomes[3].state.graph), "mismatch");
   });
 }

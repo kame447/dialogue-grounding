@@ -58,7 +58,9 @@ export type LocalNameState = typeof LOCAL_NAME_STATES[number];
 export const AI_BOUND_SOURCE = "ai_bound_target" as const;
 /** `partner_labelled_answer` (jev_generation_retry_v12): a partner agree that answers the AI's checked point because the classifier's closed label said so, not because the quote carries pointing words. Human claims only. */
 export const LABELLED_ANSWER_SOURCE = "partner_labelled_answer" as const;
-export const LOCAL_SOURCES = Object.freeze(["own_observation", "partner_statement", "ai_hypothesis", AI_BOUND_SOURCE, LABELLED_ANSWER_SOURCE] as const);
+/** scoped_v10 retains this answer for the local issue without using it to confirm a naming target. */
+export const LOCAL_QUESTION_ANSWER_SOURCE = "partner_local_question_answer" as const;
+export const LOCAL_SOURCES = Object.freeze(["own_observation", "partner_statement", "ai_hypothesis", AI_BOUND_SOURCE, LABELLED_ANSWER_SOURCE, LOCAL_QUESTION_ANSWER_SOURCE] as const);
 export type LocalSource = typeof LOCAL_SOURCES[number];
 
 export type PublicTurn = { turn: number; speaker: "human" | "ai"; text: string };

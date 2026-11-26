@@ -1,7 +1,7 @@
 import { nameBindsFigure, meaningfulEstimate } from "./referent-binding.ts";
 import type { ReferentEstimateValue } from "./referent-binding.ts";
 import { directsToFigure, isFigureReplyAspect } from "../local-grounding/verify.ts";
-import { LABELLED_ANSWER_SOURCE } from "../local-grounding/contract.ts";
+import { LABELLED_ANSWER_SOURCE, LOCAL_QUESTION_ANSWER_SOURCE } from "../local-grounding/contract.ts";
 import type { LocalClaimView, PublicTurn } from "../local-grounding/contract.ts";
 // holistic_v3 turn kinds from the turn's verified claims and the ledger before the turn. Pure and import-free: the run, the state validation, the participant restore
 // and S4 recompute the markers `namingRequest` and `namingReconfirm` with these functions.
@@ -74,9 +74,12 @@ export function reconfirmationPossible(proposals: readonly NamingClaimLike[], tu
   });
 }
 
-export type AgreeNameScopeVersion = "scoped_v1" | "scoped_v2" | "scoped_v3" | "scoped_v4" | "scoped_v5" | "scoped_v6" | "scoped_v7" | "scoped_v8" | "scoped_v9";
+export type AgreeNameScopeVersion = "scoped_v1" | "scoped_v2" | "scoped_v3" | "scoped_v4" | "scoped_v5" | "scoped_v6" | "scoped_v7" | "scoped_v8" | "scoped_v9" | "scoped_v10";
+export function usesDirectNamingReplies(scope: unknown): scope is "scoped_v9" | "scoped_v10" {
+  return scope === "scoped_v9" || scope === "scoped_v10";
+}
 export function usesPublicNamingTarget(scope: unknown): scope is Exclude<AgreeNameScopeVersion, "scoped_v1"> {
-  return scope === "scoped_v2" || scope === "scoped_v3" || scope === "scoped_v4" || scope === "scoped_v5" || scope === "scoped_v6" || scope === "scoped_v7" || scope === "scoped_v8" || scope === "scoped_v9";
+  return scope === "scoped_v2" || scope === "scoped_v3" || scope === "scoped_v4" || scope === "scoped_v5" || scope === "scoped_v6" || scope === "scoped_v7" || scope === "scoped_v8" || usesDirectNamingReplies(scope);
 }
 
 export type NamingJudgmentLike = {
@@ -88,7 +91,7 @@ export type NamingJudgmentLike = {
 /** A feature answer can lift a denial after the AI has publicly repaired that check. */
 export function answersRepairedNamingCheck(reply: LocalClaimView, question: LocalClaimView, denial: LocalClaimView,
   judgments: readonly NamingJudgmentLike[]): boolean {
-  return question.act === "ask" && question.sourceTurn > denial.sourceTurn &&
+  return reply.source !== LOCAL_QUESTION_ANSWER_SOURCE && question.act === "ask" && question.sourceTurn > denial.sourceTurn &&
     (question.aspect === "referent" || directsToFigure(reply.quote, true)) && judgments.some(j =>
     j.aiPublic?.aiSeq === question.sourceTurn && j.generationGuard?.fallback !== true && j.judgment?.action === "repair" &&
     j.jevTurn?.executed?.target.kind === "single" && j.jevTurn.executed.target.figureId === question.targets[0]);
@@ -104,7 +107,7 @@ const isFigureEvidence = (c: LocalClaimView) => c.name === null &&
 const pointed = (reply: LocalClaimView, direct: boolean) => reply.source === LABELLED_ANSWER_SOURCE || directsToFigure(reply.quote, direct);
 export function publiclyCheckedNamingTarget(claims: readonly LocalClaimView[], publicTurns: readonly PublicTurn[],
   judgments: readonly NamingJudgmentLike[], turn: number, includeAgreed = false, scope: AgreeNameScopeVersion = "scoped_v2"): string | null {
-  const directNamingReplies = scope === "scoped_v9";
+  const directNamingReplies = usesDirectNamingReplies(scope);
   const directConstrualAnswer = scope === "scoped_v7" || scope === "scoped_v8" || directNamingReplies;
   const directReferenceReplies = scope === "scoped_v5" || scope === "scoped_v6" || directConstrualAnswer;
   const before = judgments.filter((j): j is NamingJudgmentLike & { turnIndex: number } => typeof j.turnIndex === "number" && j.turnIndex < turn);
@@ -149,7 +152,7 @@ export function publiclyCheckedNamingTarget(claims: readonly LocalClaimView[], p
   // is evidence even when the function classifier emits assert instead of agree.
   const answers: LocalClaimView[] = [];
   for (const reply of live) {
-    if (reply.speaker !== "human" || reply.targets.length !== 1) continue;
+    if (reply.speaker !== "human" || reply.targets.length !== 1 || reply.source === LOCAL_QUESTION_ANSWER_SOURCE) continue;
     if (!directNamingReplies && reply.act === "assert" && reply.aspect === "referent") { answers.push(reply); continue; }
     const antecedent = reply.respondsTo === null ? undefined : ai.get(reply.respondsTo);
     if (directReferenceReplies && antecedent?.claim.act === "ask" && reply.act === "agree" &&
