@@ -510,8 +510,9 @@ const DRAFT_SHARED_CLAIM_QUESTIONS_S4={draft_shared_claim:{type:'choice',instruc
  unconfirmed_detail_claimed:'state.sharedConstrual.openDetailsにある未確認・保留・争点・否定済みの細部、または公開対話で確認されていない細部について、一致した・同じである・差がない・照合し終えたと断定している（言い換えを含む）。',
 }}};
 function draftSharedClaimsShape(v:any):boolean{
- return Array.isArray(v)&&v.length>=1&&v.length<=2&&v.every((a:any,i:number)=>exact(a,['draft','draftSha256','status','choice','scores','model','responseId','costUsd','latencyMs','error'])&&a.draft===(i===0?'initial':'retry')&&
+ return Array.isArray(v)&&v.length>=1&&v.length<=2&&v.every((a:any,i:number)=>exact(a,['draft','draftSha256','violations','status','choice','scores','model','responseId','costUsd','latencyMs','error'])&&a.draft===(i===0?'initial':'retry')&&
   typeof a.draftSha256==='string'&&/^[a-f0-9]{64}$/.test(a.draftSha256)&&
+  Array.isArray(a.violations)&&a.violations.every((code:any)=>typeof code==='string')&&new Set(a.violations).size===a.violations.length&&
   (a.status==='ok'?DRAFT_SHARED_CLAIMS_S4.includes(a.choice)&&a.error===null&&exact(a.scores,DRAFT_SHARED_CLAIMS_S4)&&Object.values(a.scores).every(probability):a.status==='error'&&a.choice===null&&a.scores===null&&typeof a.error==='string'&&a.error.length>0&&a.error.length<=64)&&
   (a.model===null||typeof a.model==='string'&&a.model.length<=128)&&(a.responseId===null||typeof a.responseId==='string'&&/^gen-[A-Za-z0-9_-]{1,124}$/.test(a.responseId))&&
   (a.costUsd===null||Number.isFinite(a.costUsd)&&a.costUsd>=0)&&Number.isFinite(a.latencyMs)&&a.latencyMs>=0&&
@@ -539,15 +540,16 @@ function draftSharedTraceS4(t:any,p5Overclaim:boolean):boolean{
     selected&&(published||stopped)&&!hasChecks)return false;
  const guard=t.generationGuard,checks=t.draftSharedClaims??[];
  if(!Array.isArray(guard?.violations)||!guard.violations.every((code:any)=>typeof code==='string'))return false;
- const codes=guard.violations.filter((code:string)=>code.startsWith('draft_shared_claim_'));
+ const isSharedCode=(code:string)=>code.startsWith('draft_shared_claim_');
+ if(!checks.length)return !guard.violations.some(isSharedCode);
  const verdicts=draftSharedViolationsS4(checks,draftSingleIdentificationS4(t.executed?.target,selected,t.humanReferent));
- const expected=[...new Set(verdicts.filter(code=>code!==null))];
- if(!equal([...codes].sort(),expected.sort())||
-    checks.some((check:any)=>check.error==='empty_utterance')&&!guard.violations.includes('empty_utterance')||
-    checks.length===2&&guard.regenerated!==true)return false;
- if(selected&&published)return guard.fallback===false&&checks.length===(guard.regenerated?2:1)&&verdicts.at(-1)===null;
- if(selected&&stopped)return guard.regenerated===true&&guard.fallback===false&&checks.length===2&&
-  (guard.violations.some((code:string)=>!code.startsWith('draft_shared_claim_'))||verdicts.every(code=>code!==null));
+ if(checks.some((check:any,i:number)=>!equal(check.violations.filter(isSharedCode),verdicts[i]?[verdicts[i]]:[])||
+    check.violations.includes('empty_utterance')!==(check.error==='empty_utterance')))return false;
+ const union=[...new Set(checks.flatMap((check:any)=>check.violations))];
+ if(!equal(guard.violations,union)||guard.fallback!==false||
+    guard.regenerated!==(checks[0].violations.length>0)||checks.length===2&&!guard.regenerated)return false;
+ if(published)return checks.length===(guard.regenerated?2:1)&&checks.at(-1).violations.length===0;
+ if(stopped)return checks.length===2&&checks[1].violations.length>0;
  return true;
 }
 // Independent trigger recomputation: an agree draft is always asked; any other draft on a typed naming context, a naming-act wording hit, or a quoted string
@@ -1131,6 +1133,14 @@ const idsOf=(target:any):string[]=>target?.kind==='single'?[target.figureId]:tar
      // Only a prompt echo of an instruction outside the recorded messages (AI public claims on) is beyond this record's material.
      if(g?.fallback!==(out.kind==='fallback')||g?.regenerated!==out.regenerated||[...derived].some(c=>!recorded.includes(c))||extra.some(c=>c!=='internal_prompt_echo'||!aiOn))return'invalid';
      if(extra.length)missing=true;
+     // The archived per-draft reasons must also reproduce from that draft and its own Jev answers.
+     for(const [i,row] of (t.draftSharedClaims??[]).entries()){
+      const computed=codes(i),saved:string[]=row.violations;
+      const extras=saved.filter(code=>!computed.includes(code));
+      if(computed.some(code=>!saved.includes(code))||extras.some(code=>!(code==='internal_prompt_echo'&&aiOn||
+        code==='draft_shared_claim_unconfirmed'&&row.status==='error'&&!askedSharedRows.some(answer=>answer.draft===row.draft))))return'invalid';
+      if(extras.length)missing=true;
+     }
      if(out.kind==='fallback'?t.publicSpeech!==fb:t.publicSpeech!==draftTexts.at(-1))return'invalid';
     }
    }
@@ -2080,6 +2090,18 @@ const PROMPT_VERSIONS:readonly PromptVersion[]=[
  {id:'pr213_p5_overclaim_audit_fix',i172:true,styleMode:'research_split',sources:{scheme:'complete_instruction_source_sha256',files:{
   'v2/dialogue-v2.mjs':'0ca530878393721b6d48b55240e2b8c848910758501d90f579b2e0c65a6d1dd6',
   'v2/jev-turn.ts':'bf64172e5bf8930c3d24bfc08a9885b09647c2e1d67086749dee0495e84c8e67',
+  'v2/generation-guard.ts':'3227a80daa0be564b4aae7bc7c50c37841173bf869cbbdde80e95b0822d1867e',
+  'judgment/instructions.mjs':'0add2f40aaaa01bfdacd1b99418b94e288eb45da6593595304f8d36d0f22de27',
+  'observation/observe.ts':'469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad',
+  'local-grounding/extract.ts':'6e9461e860f22923dbece02c7988713422ed81ac32d937f6d59df8eff84bd83e',
+  'local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01',
+  'decision/jev-decision.ts':'07084f1e722e780dd0ca3faed181ba3a36cc31267161cb93fd5c8712828bb19c',
+  'local-grounding/extract-ai.ts':'e489b7ff573fdbe9e4f0adc9b6ee5f0828bd3c6835dcd8cd6555e191161594a6',
+  'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
+ }},fixed:FIXED_I172,native:NATIVE_I172},
+ {id:'pr213_p5_overclaim_per_draft',i172:true,styleMode:'research_split',sources:{scheme:'complete_instruction_source_sha256',files:{
+  'v2/dialogue-v2.mjs':'0ca530878393721b6d48b55240e2b8c848910758501d90f579b2e0c65a6d1dd6',
+  'v2/jev-turn.ts':'6be5b1ca7baae7e168f826cc331f8951fe720c8903f67ae932b0fbabcdcd1d6b',
   'v2/generation-guard.ts':'3227a80daa0be564b4aae7bc7c50c37841173bf869cbbdde80e95b0822d1867e',
   'judgment/instructions.mjs':'0add2f40aaaa01bfdacd1b99418b94e288eb45da6593595304f8d36d0f22de27',
   'observation/observe.ts':'469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad',

@@ -428,6 +428,50 @@ for (const label of conditions) {
     });
     assert.deepEqual(damaged, variants.map(() => ({ s4: ["mismatch", "mismatch"], restored: false })));
 
+    const namingDraft = "名前は「帆」に決まりました。";
+    const verifyMixedStop = async (drafts: string[], retryChoice: string) => {
+      let stopped: any;
+      await assert.rejects(runTurn(profile, label, tape.state, tape.events, {
+        ...turn.plan, drafts, draftAct: "adopt_other",
+        choose: (key, criteria, context) => key === "draft_shared_claim"
+          ? context.generationCalls === 1 ? "single_identification_claimed" : retryChoice
+          : choose(key, criteria, context),
+      }, technicalTrial, v14), (error: any) => {
+        stopped = error.traces.at(-1);
+        return error.code === "unsafe_generation" && stopped.publicSpeech === null;
+      });
+      const witness = structuredClone(records), owner = witness.trials[0];
+      owner.attempts = [stopped];
+      owner.turns[0].trace = [structuredClone(stopped)];
+      assert.deepEqual(shapeBinding(witness), ["pass", "pass"]);
+      assert.equal(restore(stopped)?.generationRetryVersion, v14);
+      return witness;
+    };
+    const mixed = await verifyMixedStop([singleOverclaim + namingDraft, singleOverclaimAlt], "single_identification_claimed");
+    const owner = mixed.trials[0];
+    assert.deepEqual(owner.attempts[0].draftActs.map((row: any) => row.draft), ["initial"]);
+    const [initial, retry] = owner.attempts[0].draftSharedClaims;
+    assert.ok(initial.violations.includes("draft_act_mismatch"));
+    assert.deepEqual(retry.violations, ["draft_shared_claim_single_id"]);
+    const compare = (witness: typeof records) => {
+      let restored = false;
+      try { restored = restore(witness.trials[0].attempts[0]) !== null; }
+      catch (error) { assert.equal((error as { code: string }).code, "invalid_options"); }
+      return { s4: shapeBinding(witness), restored };
+    };
+    const copies = [owner.attempts[0], owner.turns[0].trace[0]];
+    for (const attempt of copies) passed(attempt.draftSharedClaims[1]);
+    const expectedRejection = { s4: ["mismatch", "mismatch"], restored: false };
+    assert.deepEqual(compare(mixed), expectedRejection);
+    for (const attempt of copies) attempt.draftSharedClaims[1].violations = [];
+    assert.deepEqual(compare(mixed), expectedRejection);
+
+    const namingOnlyRetry = await verifyMixedStop([singleOverclaimAlt, namingDraft], "none");
+    const namingStop = namingOnlyRetry.trials[0].attempts[0];
+    assert.deepEqual(namingStop.draftActs.map((row: any) => row.draft), ["retry"]);
+    assert.equal(namingStop.draftSharedClaims[1].choice, "none");
+    assert.ok(namingStop.draftSharedClaims[1].violations.includes("draft_act_mismatch"));
+
     await assert.rejects(runTurn(profile, label, tape.state, tape.events, {
       ...turn.plan, drafts: [singleOverclaim, " "],
       choose: (key, criteria, context) => key === "draft_shared_claim" ? "single_identification_claimed" : choose(key, criteria, context),

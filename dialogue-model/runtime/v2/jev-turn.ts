@@ -127,7 +127,7 @@ function observationFailure(error: unknown, phase: ObservationFailure["observati
 }
 export type DraftActRecord = { draft: "initial" | "retry"; draftSha256: string; triggers: string[]; status: "ok" | "error"; choice: DraftAct | null;
   scores: Record<string, number> | null; model: string | null; responseId: string | null; costUsd: number | null; latencyMs: number; error: string | null };
-export type DraftSharedClaimRecord = { draft: "initial" | "retry"; draftSha256: string; status: "ok" | "error"; choice: DraftSharedClaim | null;
+export type DraftSharedClaimRecord = { draft: "initial" | "retry"; draftSha256: string; violations: string[]; status: "ok" | "error"; choice: DraftSharedClaim | null;
   scores: Record<string, number> | null; model: string | null; responseId: string | null; costUsd: number | null; latencyMs: number; error: string | null };
 export type JevTurnTrace = {
   turnIndex: number; lastEventId: string | null; attemptNumber: number;
@@ -529,9 +529,11 @@ function persistedDraftSharedClaims(value: unknown, p5Overclaim: boolean): Draft
   if (!p5Overclaim || !Array.isArray(value) || value.length < 1 || value.length > 2) throw Error();
   for (let i = 0; i < value.length; i++) {
     const a = value[i];
-    if (!stateExact(a, ["draft", "draftSha256", "status", "choice", "scores", "model", "responseId", "costUsd", "latencyMs", "error"]) ||
+    if (!stateExact(a, ["draft", "draftSha256", "violations", "status", "choice", "scores", "model", "responseId", "costUsd", "latencyMs", "error"]) ||
         a.draft !== (i === 0 ? "initial" : "retry") ||
         typeof a.draftSha256 !== "string" || !/^[a-f0-9]{64}$/u.test(a.draftSha256) ||
+        !Array.isArray(a.violations) || !a.violations.every((code: unknown) => typeof code === "string") ||
+        new Set(a.violations).size !== a.violations.length ||
         !(a.model === null || typeof a.model === "string" && a.model.length <= 128) ||
         !(a.responseId === null || typeof a.responseId === "string" && /^gen-[A-Za-z0-9_-]{1,124}$/.test(a.responseId)) ||
         !(a.costUsd === null || typeof a.costUsd === "number" && Number.isFinite(a.costUsd) && a.costUsd >= 0) ||
@@ -551,20 +553,18 @@ function persistedDraftSharedClaims(value: unknown, p5Overclaim: boolean): Draft
 function validDraftSharedOutcome(checks: readonly DraftSharedClaimRecord[], guard: Guard, singleSupported: boolean,
   terminal: "published" | "stopped" | null): boolean {
   if (!Array.isArray(guard?.violations) || !guard.violations.every(code => typeof code === "string")) return false;
-  const codes = guard.violations.filter(code => code.startsWith("draft_shared_claim_"));
-  const verdicts = checks.map(check => check.status === "ok"
-    ? draftSharedClaimVerdict(check.choice!, singleSupported) : "draft_shared_claim_unconfirmed");
-  const expected = [...new Set(verdicts.filter(code => code !== null))];
-  if (!stateSame([...codes].sort(), expected.sort()) ||
-      checks.some(check => check.error === "empty_utterance") && !guard.violations.includes("empty_utterance")) return false;
-  if (checks.length === 2 && guard.regenerated !== true) return false;
-  if (terminal === "published") {
-    return guard.fallback === false && checks.length === (guard.regenerated ? 2 : 1) && verdicts.at(-1) === null;
+  const isSharedCode = (code: string) => code.startsWith("draft_shared_claim_");
+  if (!checks.length) return !guard.violations.some(isSharedCode);
+  for (const check of checks) {
+    const verdict = check.status === "ok" ? draftSharedClaimVerdict(check.choice!, singleSupported) : "draft_shared_claim_unconfirmed";
+    if (!stateSame(check.violations.filter(isSharedCode), verdict ? [verdict] : []) ||
+        check.violations.includes("empty_utterance") !== (check.error === "empty_utterance")) return false;
   }
-  if (terminal === "stopped") {
-    return guard.regenerated === true && guard.fallback === false && checks.length === 2 &&
-      (guard.violations.some(code => !code.startsWith("draft_shared_claim_")) || verdicts.every(code => code !== null));
-  }
+  const union = [...new Set(checks.flatMap(check => check.violations))];
+  if (!stateSame(guard.violations, union) || guard.fallback !== false ||
+      guard.regenerated !== (checks[0].violations.length > 0) || checks.length === 2 && !guard.regenerated) return false;
+  if (terminal === "published") return checks.length === (guard.regenerated ? 2 : 1) && checks.at(-1)!.violations.length === 0;
+  if (terminal === "stopped") return checks.length === 2 && checks[1].violations.length > 0;
   return true;
 }
 
@@ -1309,12 +1309,13 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
           Object.keys(res.scores).length === DRAFT_SHARED_CLAIMS.length &&
           DRAFT_SHARED_CLAIMS.every(k => typeof res.scores![k] === "number" && Number.isFinite(res.scores![k]) && res.scores![k] >= 0 && res.scores![k] <= 1);
         const ok = validChoice && validScores;
-        (record.draftSharedClaims ??= []).push({ draft, draftSha256: await aiHash(text), status: ok ? "ok" : "error", choice: ok ? res.choice : null,
+        const verdict = ok ? draftSharedClaimVerdict(res.choice!, singleIdentificationSupported) : "draft_shared_claim_unconfirmed";
+        const codes = verdict ? [...found, verdict] : found;
+        (record.draftSharedClaims ??= []).push({ draft, draftSha256: await aiHash(text), violations: [...codes],
+          status: ok ? "ok" : "error", choice: ok ? res.choice : null,
           scores: ok ? structuredClone(res.scores) : null, model: res.model ?? null, responseId: res.responseId ?? null, costUsd: res.costUsd ?? null,
           latencyMs: Number.isFinite(res.latencyMs) ? res.latencyMs : 0, error: ok ? null : res.error ?? "invalid_response" });
-        if (!ok) return [...found, "draft_shared_claim_unconfirmed"];
-        const verdict = draftSharedClaimVerdict(res.choice!, singleIdentificationSupported);
-        return verdict ? [...found, verdict] : found;
+        return codes;
       };
       const confirmDraft = async (text: string, draft: "initial" | "retry", found: string[]): Promise<string[]> => {
         if (!holistic) return found;
@@ -1360,9 +1361,9 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         const codes = retryText.trim() ? await checkDraft(retryText, "retry", violations(retryText, retry)) : ["empty_utterance"];
         if (!retryText.trim() && p5OverclaimEnabled && shared) {
           // An empty rewrite never reaches Jev. Record that outcome without inventing an answer.
-          record.draftSharedClaims!.push({ draft: "retry", draftSha256: await aiHash(retryText), status: "error",
-            choice: null, scores: null, model: null, responseId: null, costUsd: null, latencyMs: 0, error: "empty_utterance" });
           codes.push("draft_shared_claim_unconfirmed");
+          record.draftSharedClaims!.push({ draft: "retry", draftSha256: await aiHash(retryText), violations: [...codes], status: "error",
+            choice: null, scores: null, model: null, responseId: null, costUsd: null, latencyMs: 0, error: "empty_utterance" });
         }
         record.generationGuard.violations = [...new Set([...record.generationGuard.violations, ...codes])];
         if (codes.length) {
