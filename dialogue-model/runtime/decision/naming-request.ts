@@ -19,9 +19,9 @@ export function turnNameProposals(claims: readonly NamingClaimLike[], turn: numb
 }
 export const hasNameProposal = (claims: readonly NamingClaimLike[], turn: number): boolean => turnNameProposals(claims, turn).length > 0;
 
-export type AgreeNameScopeVersion = "scoped_v1" | "scoped_v2" | "scoped_v3" | "scoped_v4" | "scoped_v5";
-export function usesPublicNamingTarget(scope: unknown): scope is "scoped_v2" | "scoped_v3" | "scoped_v4" | "scoped_v5" {
-  return scope === "scoped_v2" || scope === "scoped_v3" || scope === "scoped_v4" || scope === "scoped_v5";
+export type AgreeNameScopeVersion = "scoped_v1" | "scoped_v2" | "scoped_v3" | "scoped_v4" | "scoped_v5" | "scoped_v6";
+export function usesPublicNamingTarget(scope: unknown): scope is "scoped_v2" | "scoped_v3" | "scoped_v4" | "scoped_v5" | "scoped_v6" {
+  return scope === "scoped_v2" || scope === "scoped_v3" || scope === "scoped_v4" || scope === "scoped_v5" || scope === "scoped_v6";
 }
 
 export type NamingJudgmentLike = {
@@ -38,7 +38,7 @@ const isFigureEvidence = (c: LocalClaimView) => c.name === null &&
  * The caller supplies live claims and their public source turns. */
 export function publiclyCheckedNamingTarget(claims: readonly LocalClaimView[], publicTurns: readonly PublicTurn[],
   judgments: readonly NamingJudgmentLike[], turn: number, includeAgreed = false, scope: AgreeNameScopeVersion = "scoped_v2"): string | null {
-  const directReferenceReplies = scope === "scoped_v5";
+  const directReferenceReplies = scope === "scoped_v5" || scope === "scoped_v6";
   const before = judgments.filter((j): j is NamingJudgmentLike & { turnIndex: number } => typeof j.turnIndex === "number" && j.turnIndex < turn);
   const lastBoundary = before.filter(j => ["agree", "defer", "move_on"].includes(j.judgment?.action as string)).at(-1);
   const boundary = lastBoundary?.turnIndex ?? 0;
@@ -52,6 +52,7 @@ export function publiclyCheckedNamingTarget(claims: readonly LocalClaimView[], p
           (c.speaker === "ai" ? c.act === "ask" : c.act === "agree" || c.act === "deny" || c.act === "ask")) &&
       event?.speaker === c.speaker && !!c.quote && event.text.includes(c.quote);
   });
+  const askedSomething = (text: string) => text.normalize("NFKC").split(/(?<=[。!?])/u).some(sentence => /[?]|か(?:ね)?[。、,.]?$/u.test(sentence.trim()));
   const publications = new Map<number, typeof before[number]>();
   for (const judgment of before) {
     const seq = judgment.aiPublic?.aiSeq;
@@ -69,8 +70,10 @@ export function publiclyCheckedNamingTarget(claims: readonly LocalClaimView[], p
       ai.set(c.id, { claim: c, singleton: target?.kind === "single" });
       // Public descriptions corroborate the executed check even when its
       // question has no extracted target or was missed by extraction entirely.
-      if ((scope === "scoped_v3" || scope === "scoped_v4" || directReferenceReplies) && c.act !== "ask" && ids.length <= 2 &&
-          (published?.judgment?.action === "confirm" || published?.judgment?.action === "repair")) {
+      // scoped_v6: any number of candidates counts, and a statement-only confirm (nothing asked) is no check, only public focus.
+      if ((scope === "scoped_v3" || scope === "scoped_v4" || directReferenceReplies) && c.act !== "ask" && (scope === "scoped_v6" || ids.length <= 2) &&
+          (published?.judgment?.action === "confirm" || published?.judgment?.action === "repair") &&
+          (scope !== "scoped_v6" || askedSomething(publicByTurn.get(c.sourceTurn)?.text ?? ""))) {
         describedChecks.add(c.sourceTurn);
       }
     }

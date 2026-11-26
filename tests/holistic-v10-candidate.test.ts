@@ -92,9 +92,10 @@ for (const label of ['bypass-enabled', 'repair-first'] as const) {
     const ids = OWN.ownAnchors.map((a: any) => a.id);
     const intervention = interventionForStrategy(label);
     const state = structuredClone(fresh.trials[0].lastCommittedState);
-    assert.ok(validateJevPrivateStateV2(structuredClone(state), ids, intervention, 'two_stage_v3', 'holistic_v5', v10 as any));
-    assert.ok(validateJevPrivateStateV2(structuredClone(state), ids, intervention, 'two_stage_v3', 'holistic_v5', v9 as any));
-    assert.throws(() => validateJevPrivateStateV2(structuredClone(state), ids, intervention, 'two_stage_v3', 'holistic_v5', v8 as any), { code: 'invalid_state' });
+    const asV10 = structuredClone(state); asV10.agreeNameScopeVersion = 'scoped_v5'; // the naming scope of a v8-v10 state (v11 has scoped_v6)
+    assert.ok(validateJevPrivateStateV2(structuredClone(asV10), ids, intervention, 'two_stage_v3', 'holistic_v5', v10 as any));
+    assert.ok(validateJevPrivateStateV2(structuredClone(asV10), ids, intervention, 'two_stage_v3', 'holistic_v5', v9 as any));
+    assert.throws(() => validateJevPrivateStateV2(structuredClone(asV10), ids, intervention, 'two_stage_v3', 'holistic_v5', v8 as any), { code: 'invalid_state' });
     // A genuine v8 record never holds it; writing it into one is caught by the single-record verifier.
     const old = await buildRecords({ label, dialoguePolicy: 'holistic_v5', generationRetryVersion: v8 as any, technicalTrial: { version: 'adaptive_repair_v3' }, turns: [askTurn, { human: '輪の話ですね。', plan: { action: 'accept', target: 'figure_0', referent: 'figure_0', speech: 'はい。' } }] });
     assert.notEqual(claimOf(old).source, 'ai_bound_target');
