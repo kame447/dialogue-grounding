@@ -2,7 +2,7 @@
 import type { ParticipantProductionProfile } from '../web/participant-usage-policy.ts';
 import type { BudgetLimits } from '../diagnostics/parity-live/audit.ts';
 import type { ParticipantModelPin } from './participant-model-pin.ts';
-import type { ReceptionPlan, ReceptionPlanV1, ReceptionPlanV2, ReceptionPlanV3, RotationMode } from './reception.ts';
+import type { ReceptionPlan, ReceptionPlanV1, ReceptionPlanV2, ReceptionPlanV3, RotationMode, ParticipantDialogueProfile } from './reception.ts';
 import type { ResolvedFigureSelection } from '../stimuli/figure-bank.ts';
 import type { InitialObservationGeneration } from '../observation/initial-observation-generation.ts';
 export { BaseAssignmentError, validateBaseAssignmentConfig, validateBaseStart,
@@ -52,6 +52,7 @@ export type MakeBaseTask = (options: { strategy: Strategy; seed: number; referen
   restore: BaseRecord | null; now: () => number; onPersist: (record: RawBaseRecord) => Promise<void>; rotationMode?: RotationMode;
   figureSelection?: ResolvedFigureSelection; participantModelPin?: ParticipantModelPin; participantLimits?: Readonly<BudgetLimits>;
   initialObservationGeneration?: InitialObservationGeneration;
+  participantDialogueProfile?: ParticipantDialogueProfile;
   participantRuntime?: { profile: ParticipantProductionProfile; assignmentId: string } }) => Promise<BaseTask>;
 export type BaseSessionOptions = { ownerId: string; store: BaseStore; readConfig: () => Promise<BaseAssignmentConfig | null>;
   /** null explicitly declines a plan, so the configured (non-reception) assignment is used. */

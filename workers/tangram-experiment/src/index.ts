@@ -326,6 +326,8 @@ export class TangramSession extends DurableObject<Env> {
     const r = await this.readReception();
     if (!r || !r.plan || !['approved','in_progress'].includes(r.status)) throw new ReceptionError('reception_not_approved');
     if (!Number.isSafeInteger(body.expectedReceptionRevision) || body.expectedReceptionRevision !== r.revision) throw new ReceptionError('trial_changed');
+    const plan = r.plan.schemaVersion === 'reception_plan_v1' ? null : r.plan;
+    if (plan?.participantDialogueProfile !== undefined) throw new BaseSessionError('trial_unavailable');
     const index = r.trials.length;
     if (index >= r.plan.trials.length) throw new ReceptionError('reception_finished');
     let predecessor: string | undefined;
@@ -343,7 +345,6 @@ export class TangramSession extends DurableObject<Env> {
       }
     }
     // A temporarily incompatible proxy must leave the approved slot available for another start.
-    const plan = r.plan.schemaVersion === 'reception_plan_v1' ? null : r.plan;
     const approvedPin = plan?.participantModelPin;
     let participantPolicy;
     if (approvedPin) {
@@ -705,6 +706,12 @@ export class TangramSession extends DurableObject<Env> {
           const owner = readOwner(raw,this.ctx.id.toString());
           const current = owner.activeKey && owner.admissions[owner.activeKey];
           if (current && current.errorCode === 'record_deleted') return {kind:'expired'};
+          const source = current?.assignment.source;
+          if (source?.kind === 'reception_plan_v2' || source?.kind === 'reception_plan_v3') {
+            const plan = (await this.readReception())?.plan;
+            const dialogueProfile = plan?.schemaVersion === 'reception_plan_v1' ? undefined : plan?.participantDialogueProfile;
+            if (dialogueProfile !== source.plan.participantDialogueProfile) throw new BaseSessionError('trial_unavailable');
+          }
           const r = current && current.record;
           if (r && !await this.baseReadRecord(r.recordId)) return {kind:'expired'};
           return {kind:'state',state:owner};
@@ -813,7 +820,10 @@ export class TangramSession extends DurableObject<Env> {
   }
 
   private async createTrial(binding: Parameters<MakeBaseTask>[0]): Promise<NamingTask> {
-    const {seed,strategy,referenceMemory,restore,participantRuntime,initialObservationGeneration,memoryPruneVersion} = binding;
+    const {seed,strategy,referenceMemory,restore,participantRuntime,initialObservationGeneration,memoryPruneVersion,participantDialogueProfile} = binding;
+    if (participantDialogueProfile !== undefined || (restore && Object.hasOwn(restore.options, 'participantDialogueProfile'))) {
+      throw new BaseSessionError('trial_unavailable');
+    }
     const admittedPolicy = !restore && this.admission?.kind === 'reception' ? this.admission.participantPolicy : undefined;
     const policy = binding.participantModelPin === undefined ? null
       : admittedPolicy ?? await workerParticipantPolicy(this.env.PARTICIPANT_AI_PROXY, Boolean(participantRuntime),

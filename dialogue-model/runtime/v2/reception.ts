@@ -25,11 +25,13 @@ export type ReceptionProtocolV2 = { schemaVersion: 'reception_protocol_v2'; prot
   betweenTrials: BetweenTrials; receptionNumberFormat: 'daily_seq3'; rotationMode: RotationMode };
 export type ReceptionPlanV1 = { schemaVersion: 'reception_plan_v1'; protocolId: string; protocolRevision: number;
   protocolSha256: string; order: Strategy[]; trials: { index: number; strategy: Strategy; seed: number; referenceMemory: boolean }[]; approvedAt: string; memoryPruneVersion?: MemoryPruneVersion };
+export type ParticipantDialogueProfile = 'participant_dialogue_v12' | 'participant_dialogue_v13_p5';
 type ParticipantPlanSettings = {
   memoryPruneVersion?: MemoryPruneVersion;
   participantModelPin?: ParticipantModelPin;
   participantLimits?: Readonly<BudgetLimits>;
   participantRuntimeProfile?: ParticipantProductionProfile;
+  participantDialogueProfile?: ParticipantDialogueProfile;
   initialObservationGeneration?: InitialObservationGeneration;
 };
 export type ReceptionPlanV2 = ParticipantPlanSettings & { schemaVersion: 'reception_plan_v2'; protocolId: string; protocolRevision: number;
@@ -160,15 +162,20 @@ function participantPlan(value: unknown) {
   const hasLimits = Object.hasOwn(fields, 'participantLimits');
   const hasProfile = Object.hasOwn(fields, 'participantRuntimeProfile');
   const hasGeneration = Object.hasOwn(fields, 'initialObservationGeneration');
+  const hasDialogueProfile = Object.hasOwn(fields, 'participantDialogueProfile');
   if ((hasLimits || hasProfile || hasGeneration) && !hasPin || hasLimits && hasProfile) return fail();
   const p = object(value, [...PLAN_KEYS,
     ...(hasPrune ? ['memoryPruneVersion'] : []), ...(hasPin ? ['participantModelPin'] : []), ...(hasLimits ? ['participantLimits'] : []),
-    ...(hasProfile ? ['participantRuntimeProfile'] : []), ...(hasGeneration ? ['initialObservationGeneration'] : [])]);
+    ...(hasProfile ? ['participantRuntimeProfile'] : []), ...(hasGeneration ? ['initialObservationGeneration'] : []),
+    ...(hasDialogueProfile ? ['participantDialogueProfile'] : [])]);
   if (hasPrune && p.memoryPruneVersion !== CLAIM_PRUNE_V2) return fail();
   if (hasProfile && p.participantRuntimeProfile !== PARTICIPANT_PRODUCTION_PROFILE) return fail();
   if (hasGeneration && p.initialObservationGeneration !== INITIAL_OBSERVATION_STRUCTURED_V1) return fail();
   const pin = hasPin ? validateParticipantModelPin(p.participantModelPin) : undefined;
   if (pin?.schemaVersion === 'participant_model_pin_v3' && !hasProfile) return fail();
+  const dialogueProfile = p.participantDialogueProfile;
+  if (hasDialogueProfile && (pin?.schemaVersion !== 'participant_model_pin_v3' || !hasProfile ||
+      dialogueProfile !== 'participant_dialogue_v12' && dialogueProfile !== 'participant_dialogue_v13_p5')) return fail();
   const limits = hasLimits ? validateParticipantLimits(p.participantLimits) : undefined;
   const participant: ParticipantPlanSettings = {
     ...(hasPrune ? { memoryPruneVersion: CLAIM_PRUNE_V2 } : {}),
@@ -176,6 +183,7 @@ function participantPlan(value: unknown) {
     ...(limits ? { participantLimits: limits } : {}),
     ...(hasProfile ? { participantRuntimeProfile: PARTICIPANT_PRODUCTION_PROFILE } : {}),
     ...(hasGeneration ? { initialObservationGeneration: INITIAL_OBSERVATION_STRUCTURED_V1 } : {}),
+    ...(hasDialogueProfile ? { participantDialogueProfile: dialogueProfile } : {}),
   };
   return { p, participant };
 }
@@ -284,7 +292,7 @@ function displayed(value: unknown): DisplayedProtocol {
  * v1 (pure, legacy) freezes a v1 plan exactly as before. v2 requires the displayed
  * version and compares it with the same protocol snapshot the plan is copied from.
  */
-export async function approveReception(value: unknown, options: ParticipantPlanSettings & {
+export async function approveReception(value: unknown, options: Omit<ParticipantPlanSettings, 'participantDialogueProfile'> & {
   expectedRevision: number; order: number; protocol: unknown; expected?: unknown; approvedAt: string; randomSeed: () => number;
 }): Promise<Reception> {
   const r = validateReception(value);

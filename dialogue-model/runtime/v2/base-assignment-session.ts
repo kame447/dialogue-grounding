@@ -1,7 +1,7 @@
 import { CLAIM_PRUNE_V2 } from '../memory/reference-graph.mjs';
 import { validateBaseStart, validateBaseAssignmentConfig, canonicalBaseAssignmentConfig, validateBoundBaseRecord } from './base-assignment.ts';
 import { BaseAssignmentError, data, readAssignment, readOwner, UUID, OWNER, safeInt,
-  assignmentRotationMode, assignmentMemoryPruneVersion, assignmentParticipantModelPin, assignmentFigureSelection } from './base-assignment-data.ts';
+  assignmentRotationMode, assignmentMemoryPruneVersion, assignmentParticipantModelPin, assignmentParticipantDialogueProfile, assignmentFigureSelection } from './base-assignment-data.ts';
 import type { BaseSessionOptions, BaseSession, BaseSessionErrorCode, BaseOwnerState, BaseAssignment,
   AdmissionKey, BaseRecord, RawBaseRecord, BaseTask, BaseArchiveWrite, FailureCode, FailureCause, RestoreResult } from './base-assignment.ts';
 export class BaseSessionError extends Error {
@@ -9,6 +9,10 @@ export class BaseSessionError extends Error {
   constructor(code: BaseSessionErrorCode) { super(code); this.name = 'BaseSessionError'; this.code = code; }
 }
 const fail = (code: BaseSessionErrorCode = 'trial_unavailable'): never => { throw new BaseSessionError(code); };
+// Saved profile metadata can be read before the matching runtime is available.
+function requireRunnableAssignment(assignment: BaseAssignment): void {
+  if (assignmentParticipantDialogueProfile(assignment) !== undefined) fail();
+}
 const copy = <T>(v: T): T => structuredClone(v);
 /** External ports cannot select an internal error by throwing a matching string. */
 async function port<T>(fn: () => T | Promise<T>): Promise<T> { try { return await fn(); } catch { return fail(); } }
@@ -93,7 +97,9 @@ export function createBaseAssignmentSession(options: BaseSessionOptions): BaseSe
     } catch { return fail(); }
   }
   async function admit(old: BaseOwnerState, key: AdmissionKey) {
-    const a = await assignment(), next = copy(old);
+    const a = await assignment();
+    requireRunnableAssignment(a);
+    const next = copy(old);
     next.admissions[key] = { schemaVersion: 'base_assigned_session_v1', assignment: a, status: 'preparing', record: null, errorCode: null };
     next.activeKey = key;
     const previous = old.activeKey && old.admissions[old.activeKey]?.record;
@@ -144,6 +150,7 @@ export function createBaseAssignmentSession(options: BaseSessionOptions): BaseSe
       const profile = plan?.participantRuntimeProfile;
       const initialObservationGeneration = plan?.initialObservationGeneration;
       const memoryPruneVersion = assignmentMemoryPruneVersion(a);
+      const participantDialogueProfile = assignmentParticipantDialogueProfile(a);
       try { task = await options.makeTask({ strategy: a.strategy, seed: a.seed, referenceMemory: a.referenceMemory,
         runDir: null, restore: restore ? copy(restore) : null, now: options.now, onPersist,
         ...(pin ? { participantModelPin: pin } : {}),
@@ -151,6 +158,7 @@ export function createBaseAssignmentSession(options: BaseSessionOptions): BaseSe
         ...(limits ? { participantLimits: limits } : {}),
         ...(profile ? { participantRuntime: { profile, assignmentId: a.assignmentId } } : {}),
         ...(initialObservationGeneration ? { initialObservationGeneration } : {}),
+        ...(participantDialogueProfile ? { participantDialogueProfile } : {}),
         ...(restore ? {} : { rotationMode: assignmentRotationMode(a),
           ...(a.source.kind === 'reception_plan_v3' ? { figureSelection: assignmentFigureSelection(a) } : {}) }) }); }
       catch (error) { if (error === token.internal && error instanceof BaseSessionError) throw error; token.cause = failureCauseOf(error); return fail(); }
@@ -182,6 +190,7 @@ export function createBaseAssignmentSession(options: BaseSessionOptions): BaseSe
         const old = await state(), key = old.activeKey;
         if (key === null) return { kind: 'empty' as const };
         const e = old.admissions[key]!;
+        requireRunnableAssignment(e.assignment);
         if (e.status === 'preparing') {
           if (live === key) return fail('busy');
           const next = copy(old); next.admissions[key]!.status = 'failed'; next.admissions[key]!.errorCode = 'start_interrupted';
@@ -205,6 +214,7 @@ export function createBaseAssignmentSession(options: BaseSessionOptions): BaseSe
         const old = await state();
         if (old.activeKey === null) return { kind: 'new' as const, ...await admit(old, 'initial') };
         const e = old.admissions[old.activeKey]!;
+        requireRunnableAssignment(e.assignment);
         if (e.status === 'preparing') return fail('busy');
         if (e.status === 'failed' || !e.record) return fail();
         if (e.record.status !== 'completed') return fail('busy');
@@ -221,9 +231,11 @@ export function createBaseAssignmentSession(options: BaseSessionOptions): BaseSe
         if (typeof id !== 'string' || !UUID.test(id)) return fail('not_found');
         const predecessor = await archived(id);
         if (!predecessor) return fail('not_found');
+        requireRunnableAssignment(predecessor.assignment);
         if (predecessor.status !== 'completed') return fail('busy');
         const key: AdmissionKey = `after:${id}`, existing = old.admissions[key];
         if (existing) {
+          requireRunnableAssignment(existing.assignment);
           if (existing.status === 'failed' && existing.record === null && existing.errorCode === 'record_deleted') return fail('not_found');
           if (existing.status === 'preparing') return fail('busy');
           if (existing.status === 'failed' || !existing.record) return fail();

@@ -108,6 +108,10 @@ export function assignmentParticipantModelPin(a: BaseAssignment) {
 export function assignmentFigureSelection(a: BaseAssignment): ResolvedFigureSelection {
   return a.source.kind === 'reception_plan_v3' ? effectiveFigureSelection(a.source.plan, a.source.trialIndex) : resolveFigureSelection(undefined);
 }
+export function assignmentParticipantDialogueProfile(a: BaseAssignment) {
+  return a.source.kind === 'reception_plan_v2' || a.source.kind === 'reception_plan_v3'
+    ? a.source.plan.participantDialogueProfile : undefined;
+}
 const angles = (value: unknown) => { const o = data(value); if (Object.values(o).some(v => typeof v !== 'number' || !Number.isFinite(v))) throw new Error('angle'); };
 /**
  * New records carry both options.rotationMode and the generated stimulus; only
@@ -163,6 +167,9 @@ export function validateBoundBaseRecord(record: unknown, assignment: unknown): v
     if ((memoryPruneVersion ? options.memoryPruneVersion !== memoryPruneVersion : Object.hasOwn(options, 'memoryPruneVersion')) ||
         graph?.memoryPruneVersion !== memoryPruneVersion) throw new Error('memory_prune_version');
     const generation = plan?.initialObservationGeneration;
+    const dialogueProfile = assignmentParticipantDialogueProfile(a);
+    if (dialogueProfile === undefined ? Object.hasOwn(options, 'participantDialogueProfile')
+      : options.participantDialogueProfile !== dialogueProfile) throw new Error('dialogue_profile');
     if (generation ? options.initialObservationGeneration !== generation : Object.hasOwn(options, 'initialObservationGeneration')) {
       throw new Error('observation_generation');
     }
