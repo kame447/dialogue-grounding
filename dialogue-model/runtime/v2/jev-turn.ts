@@ -139,6 +139,7 @@ export type JevPrivateState = {
   aiPublic?: AiPublicState;
 };
 export type JevTurnOptions = {
+  memoryPruneVersion?: import("../memory/reference-graph.mjs").MemoryPruneVersion;
   usagePolicy?: ParticipantUsageOnly; intervention?: InterventionConfig; decisionTimeoutMs?:number; technicalTrial?: AdaptiveRepairTrial;
   client: ChatClient; ownImage: LocalOwnImage; ownAnchors: readonly LocalOwnAnchor[];
   observer: ObservationObserver; jevDecision: JevDecisionClient; localGrounding: JevTurnLocalOptions;
@@ -147,6 +148,16 @@ export type JevTurnOptions = {
   onLocalGroundingTrace?: ((record: LocalGroundingResearchRecord) => unknown) | null;
   generation: { task: string; instructions: string; concise?: string; actionScope: Record<string, string>; final: string; timeoutMs: number };
 };
+
+/** A failed AI-public batch is atomic; every candidate in that batch was lost. */
+export function memoryCapacityRejectedClaims(records: readonly JevTurnTrace[]): number {
+  return records.reduce((total, record) => {
+    const application = record.aiPublic?.application;
+    return total + (record.local?.verification.rejected.filter(r => r.reason === "memory_capacity_exceeded").length ?? 0) +
+      (application?.capacityRejectedClaims ?? 0) +
+      (application?.nameRejections.filter(r => r.reason === "memory_capacity_exceeded").length ?? 0);
+  }, 0);
+}
 
 /** Confirm only after the caller installs the candidate returned by runAiTurn. */
 export function settleJevTurnTraces(records: readonly JevTurnTrace[], privateState: unknown): JevTurnTrace[] {
@@ -393,7 +404,10 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
    if(!c?.enumerable||!Object.hasOwn(c,'value')||!t?.enumerable||!Object.hasOwn(t,'value')||!Number.isSafeInteger(t.value)||t.value<1||t.value>600000)throw Error();
    intervention=checkedIntervention(c.value);decisionTimeoutMs=t.value;
   }catch{throw new JevTurnError('invalid_intervention');}}
-  const { client, observer, jevDecision, generation, usagePolicy } = options;
+  const { client, observer, jevDecision, generation, usagePolicy, memoryPruneVersion } = options;
+  const checkPruneVersion = (s: JevPrivateState) => {
+    if (s.graph?.memoryPruneVersion !== memoryPruneVersion) throw new JevTurnError("invalid_state");
+  };
   const rejectNewLegacyState=(s:JevPrivateState)=>{
    checkProspectMode(s);
    if(!integrated&&(Object.hasOwn(s,'schemaVersion')||Object.hasOwn(s,'interventionPolicy')||s.judgments?.some(j=>Object.hasOwn(j.jevTurn??{},'executed')||Object.hasOwn(j.jevTurn??{},'intervention'))))throw new JevTurnError('invalid_state');
@@ -434,7 +448,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
     return result;
   }
   function initialPrivateState(): JevPrivateState {
-    return { ...(integrated?{schemaVersion:'jev_private_state_v2' as const,interventionPolicy:{version:'bypass_acceptance_v1' as const,tableSha256:BYPASS_ACCEPTANCE_V1_TABLE_SHA256}}:{}), ledger: createOwnLedger(slots), judgments: [], graph: createReferenceGraph({ slots }) as Graph, observationMemo: null, repairHistory: [],
+    return { ...(integrated?{schemaVersion:'jev_private_state_v2' as const,interventionPolicy:{version:'bypass_acceptance_v1' as const,tableSha256:BYPASS_ACCEPTANCE_V1_TABLE_SHA256}}:{}), ledger: createOwnLedger(slots), judgments: [], graph: createReferenceGraph({ slots, ...(memoryPruneVersion ? { memoryPruneVersion } : {}) }) as Graph, observationMemo: null, repairHistory: [],
       ...(aiEnabled ? { aiPublic: initialAiPublicState() } : {}) };
   }
   async function memoOnce(signal?: AbortSignal) {
@@ -464,6 +478,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
     try {
       abortIf(signal);
       const state = integrated?validateJevPrivateStateV2(privateState,slots,intervention!,usagePolicy):structuredClone(privateState);
+      checkPruneVersion(state);
       if(!integrated&&(Object.hasOwn(state,'schemaVersion')||Object.hasOwn(state,'interventionPolicy')||state.judgments?.some(j=>Object.hasOwn(j.jevTurn??{},'executed')||Object.hasOwn(j.jevTurn??{},'intervention'))))throw new JevTurnError('invalid_state');
       checkProspectMode(state);
       snapshotReferenceGraph(state.graph);
@@ -834,6 +849,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   }
   async function finalRequest({ events, privateState }: { events: Event[]; privateState: JevPrivateState }, retry = false) {
     checkProspectMode(privateState);
+    checkPruneVersion(privateState);
     if(integrated)privateState=validateJevPrivateStateV2(privateState,slots,intervention!,usagePolicy);else rejectNewLegacyState(privateState);
     if (!privateState.observationMemo) throw new JevTurnError("invalid_state");
     const memo = validateObservationMemo(privateState.observationMemo, { ownAnchors });
@@ -843,5 +859,5 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       { role: "user", content: generation.final + (retry ? "\n指定JSON形式で再提出してください。" : "") }], { phase: "final_submission", timeoutMs: generation.timeoutMs });
   }
   return Object.freeze({ slots: Object.freeze([...slots]), initialPrivateState, initializePrivateState, runAiTurn, finalRequest,
-    getAttempts: () => structuredClone(attempts), snapshotGraph: (state: JevPrivateState) => {checkProspectMode(state);if(!integrated)rejectNewLegacyState(state);return snapshotReferenceGraph((integrated?validateJevPrivateStateV2(state,slots,intervention!,usagePolicy):state).graph);} });
+    getAttempts: () => structuredClone(attempts), snapshotGraph: (state: JevPrivateState) => {checkPruneVersion(state);checkProspectMode(state);if(!integrated)rejectNewLegacyState(state);return snapshotReferenceGraph((integrated?validateJevPrivateStateV2(state,slots,intervention!,usagePolicy):state).graph);} });
 }

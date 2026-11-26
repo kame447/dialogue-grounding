@@ -30,6 +30,8 @@ import type {RunManifest,RunManifestV2} from "./manifest.ts";
 import type { AnyRunManifest } from "./manifest.ts";
 import { canonicalLunaPayload, LunaWireError, lunaWire } from "./luna-wire.ts";
 import type { HttpReceipt } from "./luna-wire.ts";
+import { CLAIM_PRUNE_V2, type MemoryPruneVersion } from "../../memory/reference-graph.mjs";
+import { memoryCapacityRejectedClaims } from "../../v2/jev-turn.ts";
 import { createProfileDialogue, pairedReplay } from "./replay.ts";
 import type { ReplayTape, Profile } from "./replay.ts";
 import { wiringCoverage, stageGates } from "./coverage.ts";
@@ -55,6 +57,9 @@ export type Options = { outputDir: string; cacheDir: string; manifest: AnyRunMan
 type Event = { id: string; seq: number; speaker: "human" | "ai"; text: string };
 export type Trial = Omit<ComparableTrial, "turns"> & { order: number; plannedIndex: number; stage: string; profile: Profile; profileSha256: string;
   failure: string | null; cache: ObservationCacheAudit | null; calls: CallReceipt[];
+  memoryPruneVersion?: MemoryPruneVersion;
+  diagnostics?: { memoryCapacityRejectedClaims: number; ledgerFinalMismatch: null };
+  integrityWarnings?: string[];
   turns: Array<IdentityTurn & { trace: JevTurnTrace[]; state: JevPrivateState; wiring: unknown }>;
   notReached: number[]; aiPublicSettlement: unknown; durationMs: number; budget: unknown; http: HttpReceipt[]; attempts: JevTurnTrace[];
   replay: Array<{ tape: ReplayTape | InterventionReplayTape; result: Omit<Awaited<ReturnType<typeof pairedReplay>>, "sides"> | InterventionReplayResult }>; gates?: ReturnType<typeof stageGates>;
@@ -474,6 +479,7 @@ async function runParityLiveImpl(options: Options, deps: Dependencies) {
         let state: JevPrivateState | null = null;
         const events: Event[] = [], traces: JevTurnTrace[] = [];
         const trial: Trial = { scriptId: script.id, label, stage: planned.stage, completed: false, order: trials.length, plannedIndex: index, profile: PROFILE, profileSha256: RESEARCH_TRIAL_PROFILE_SHA256,
+          ...(integrated ? { memoryPruneVersion: CLAIM_PRUNE_V2 } : {}),
           failure: null, cache: null, calls: [], turns: [], notReached: [], aiPublicSettlement: [], durationMs: 0, budget: null, http: [], attempts: [], replay: [], lastCommittedState: null, failureAtTurn: null,
           identity: { image: researchHash(image), anchors: researchHash(anchors), memo: "", prompts: researchHash(promptSources), profile: RESEARCH_TRIAL_PROFILE_SHA256,
             timeouts: researchHash(PROFILE.timeouts), requestedModels: researchHash({ luna: expectedModel, jev: PROFILE.modelPolicy.jevModel }), returnedModels: [] } };
@@ -527,7 +533,7 @@ async function runParityLiveImpl(options: Options, deps: Dependencies) {
             }}:{}),
           };
           const classifier = createJevLocalTestClassifier({ enabled: true, readKey: wire.readKey, fetchImpl: wire.fetchImpl, timeoutMs: PROFILE.timeouts.decisionMs, ...limits })!;
-          const runtime = createProfileDialogue(PROFILE, { client: wire.client, strategy: label, image, anchors, referenceMemory: PROFILE.referenceMemory,
+          const runtime = createProfileDialogue(PROFILE, { memoryPruneVersion: trial.memoryPruneVersion, client: wire.client, strategy: label, image, anchors, referenceMemory: PROFILE.referenceMemory,
             decisionMode: PROFILE.decisionMode, utteranceStyle: PROFILE.utteranceStyle, maxReobservations: PROFILE.maxReobservations,
             observer: { async reobserve(input, opts) { const result = await observer.reobserve(input, opts); tape?.reobservations.push(structuredClone(result)); return result; }, async observeAll(input, opts) {
               if (researchHash(input) !== researchHash(own)) fail("wrong_own_material");
@@ -620,6 +626,12 @@ async function runParityLiveImpl(options: Options, deps: Dependencies) {
           budget.sends.filter(s => s.status === "in_flight").forEach(s => budget.unknown(s));
           trial.attempts = state ? settleJevTurnTraces(traces, state) : structuredClone(traces);
           trial.lastCommittedState = structuredClone(state);
+          if (trial.memoryPruneVersion) {
+            const count = memoryCapacityRejectedClaims(trial.attempts);
+            // This harness replays dialogue turns and has no submission step.
+            trial.diagnostics = { memoryCapacityRejectedClaims: count, ledgerFinalMismatch: null };
+            trial.integrityWarnings = count > 0 ? ["memory_capacity_exceeded"] : [];
+          }
           trial.durationMs = Math.max(0, performance.now() - started);
           trial.identity.returnedModels = [...new Set(trial.calls.flatMap(c => c.model ? [c.model] : []))].sort();
           trial.failureAtTurn = trial.failure ? turn : null;

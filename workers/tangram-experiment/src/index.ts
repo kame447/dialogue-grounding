@@ -3,6 +3,7 @@ import { createChatClient } from "../../../dialogue-model/runtime/client.mjs";
 import { createNamingTaskV2 } from "../../../dialogue-model/runtime/v2/naming-task-v2.mjs";
 import { createGroundingJudgeClient } from "../../../dialogue-model/runtime/grounding/client.ts";
 import { INITIAL_OBSERVATION_STRUCTURED_V1 } from "../../../dialogue-model/runtime/observation/initial-observation-generation.ts";
+import { CLAIM_PRUNE_V2 } from "../../../dialogue-model/runtime/memory/reference-graph.mjs";
 import { NamingTaskError } from "../../../dialogue-model/runtime/naming-error.mjs";
 import { sessionCookie, sessionId } from "./session-cookie.ts";
 import { isExcessiveTraffic, type SoftLimitBindings } from "./soft-limits";
@@ -284,7 +285,8 @@ export class TangramSession extends DurableObject<Env> {
       const r = await this.serialized(() => this.ctx.storage.transaction(async tx => {
         const raw = await tx.get('reception:v1'); if (!raw) throw new ReceptionError('reception_unavailable');
         const next = await approveReception(raw, { expectedRevision:input.expectedRevision, order:input.order, protocol, expected, approvedAt:new Date().toISOString(),
-          randomSeed:() => crypto.getRandomValues(new Uint32Array(1))[0], ...participant });
+          randomSeed:() => crypto.getRandomValues(new Uint32Array(1))[0], ...participant,
+          ...(protocol.referenceMemory ? { memoryPruneVersion: CLAIM_PRUNE_V2 } : {}) });
         await tx.put({ 'reception:v1':next }); return next;
       }));
       await this.indexReception(r); return r;
@@ -811,7 +813,7 @@ export class TangramSession extends DurableObject<Env> {
   }
 
   private async createTrial(binding: Parameters<MakeBaseTask>[0]): Promise<NamingTask> {
-    const {seed,strategy,referenceMemory,restore,participantRuntime,initialObservationGeneration} = binding;
+    const {seed,strategy,referenceMemory,restore,participantRuntime,initialObservationGeneration,memoryPruneVersion} = binding;
     const admittedPolicy = !restore && this.admission?.kind === 'reception' ? this.admission.participantPolicy : undefined;
     const policy = binding.participantModelPin === undefined ? null
       : admittedPolicy ?? await workerParticipantPolicy(this.env.PARTICIPANT_AI_PROXY, Boolean(participantRuntime),
@@ -859,7 +861,7 @@ export class TangramSession extends DurableObject<Env> {
           }),
         },
       });
-      return await createNamingTaskV2(({ ...runtime, seed, strategy, referenceMemory, rotationMode, ...figures,
+      return await createNamingTaskV2(({ ...runtime, seed, strategy, referenceMemory, memoryPruneVersion, rotationMode, ...figures,
         utteranceStyle: runtime.jevResearch.profile.utteranceStyle, createTrial: () => trial, onPersist,
         runDir: null, ...(restore ? { restore } : {}),
       }) as unknown as Parameters<typeof createNamingTaskV2>[0]) as NamingTask;
@@ -892,7 +894,7 @@ export class TangramSession extends DurableObject<Env> {
           return new Response(JSON.stringify(response.data), { status: response.status, headers: { "Content-Type": "application/json" } });
         }),
     } : null;
-    return await createNamingTaskV2(({ client, seed, strategy, referenceMemory, utteranceStyle, runDir: null, groundingShadow, ...rotation,
+    return await createNamingTaskV2(({ client, seed, strategy, referenceMemory, memoryPruneVersion, utteranceStyle, runDir: null, groundingShadow, ...rotation,
       ...(restore ? { restore } : {}),
       // Every write also keeps record:<recordId>, so a later trial never erases this one.
       onPersist,

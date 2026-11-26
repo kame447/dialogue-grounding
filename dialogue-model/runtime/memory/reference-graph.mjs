@@ -57,6 +57,8 @@ export const REFERENCE_LIMITS = Object.freeze({
   observationsPerSlot: 8, unresolvedQuestions: 12, featuresPerSlot: 4,
   recentMentions: 24, recentRepairs: 12,
 });
+/** @typedef {"claim_prune_v2"} MemoryPruneVersion */
+export const CLAIM_PRUNE_V2 = "claim_prune_v2";
 const INTENTS = ["refer", "name_proposal", "name_acceptance", "feature_assertion", "feature_acceptance", "denial", "correction", "acknowledgment"];
 const FIELDS = {
   mention: ["sourceTurn", "speaker", "quote", "slots", "confidence", "epistemic", "intent", "antecedent"],
@@ -149,7 +151,9 @@ function observations(value, ownSlots = SLOTS) {
 }
 function checkGraph(graph) {
   const keys = ["schemaVersion", "revision", "lastTurn", "ownObservations", "records"];
-  if ((!exact(graph, keys) && !exact(graph, [...keys, "slots"])) || graph.schemaVersion !== 1 ||
+  if (!graph || !exact(graph, [...keys, ...(Object.hasOwn(graph, "slots") ? ["slots"] : []),
+    ...(Object.hasOwn(graph, "memoryPruneVersion") ? ["memoryPruneVersion"] : [])]) ||
+      (Object.hasOwn(graph, "memoryPruneVersion") && graph.memoryPruneVersion !== CLAIM_PRUNE_V2) || graph.schemaVersion !== 1 ||
       !index(graph.revision) || !index(graph.lastTurn) || graph.revision > graph.lastTurn ||
       !Array.isArray(graph.records) || graph.records.length > REFERENCE_LIMITS.records) fail("invalid_graph");
   const ownSlots = graphSlots(graph);
@@ -191,13 +195,35 @@ function currentQuestions(records) {
 }
 function latest(records, kind, slot) { return records.findLast((r) => r.kind === kind && r.slot === slot); }
 
+/** @param {{ ownObservations?: {slot:string,feature:string}[], slots?: readonly string[], memoryPruneVersion?: MemoryPruneVersion }} options */
 export function createReferenceGraph(options = {}) {
-  if (![[], ["ownObservations"], ["slots"], ["ownObservations", "slots"]].some((keys) => exact(options, keys))) fail("invalid_observations");
+  if (!options || !exact(options, ["ownObservations", "slots", "memoryPruneVersion"].filter(key => Object.hasOwn(options, key))) ||
+      (Object.hasOwn(options, "memoryPruneVersion") && options.memoryPruneVersion !== CLAIM_PRUNE_V2)) fail("invalid_observations");
   const { ownObservations = [] } = options;
   const ownSlots = options.slots === undefined ? SLOTS : clone(validateSlots(options.slots));
   return freeze({ schemaVersion: 1, revision: 0, lastTurn: 0, ownObservations: observations(ownObservations, ownSlots), records: [],
     ...(options.slots === undefined ? {} : { slots: ownSlots }),
+    ...(options.memoryPruneVersion ? { memoryPruneVersion: options.memoryPruneVersion } : {}),
   });
+}
+
+/** The public name issue and the acceptance that still supports it. */
+export function claimNameState(records, active, claims, dead) {
+  const proposal = records.filter(c => c.act === "name_propose").at(-1);
+  const name = proposal?.name ?? null;
+  let nameState = !proposal ? "no_name" : dead.has(proposal.id) ? "unknown" : "unclear";
+  if (!proposal || dead.has(proposal.id) || proposal.targets.length !== 1) return { name, nameState, acceptance: null };
+  if (active.some(c => c.act === "name_reject" && c.respondsTo === proposal.id)) nameState = "not_agreed";
+  const acceptance = active.findLast(c => c.act === "name_accept" && c.respondsTo === proposal.id &&
+    c.speaker !== proposal.speaker && c.targets.length === 1 && c.targets[0] === proposal.targets[0] &&
+    (c.name === null || c.name === proposal.name));
+  if (!acceptance) return { name, nameState, acceptance: null };
+  const overturned = claims.slice(claims.indexOf(acceptance) + 1).some(c => c.aspect === "name" &&
+    c.targets.some(slot => proposal.targets.includes(slot)) &&
+    ((c.act === "name_propose" && c.name !== proposal.name) ||
+      (c.act === "name_reject" && c.respondsTo === proposal.id) ||
+      (c.act === "withdraw" && (c.respondsTo === proposal.id || c.respondsTo === acceptance.id))));
+  return { name, nameState: overturned ? "not_agreed" : "agreed", acceptance: overturned ? null : acceptance };
 }
 
 function validateSupport(record, records, historical = false) {
@@ -285,6 +311,7 @@ function validateSupport(record, records, historical = false) {
 function prune(graph) {
   const records = graph.records;
   const byId = new Map(records.map((r) => [r.id, r]));
+  const position = new Map(records.map((r, index) => [r.id, index]));
   const dead = inactiveIds(records);
   const unresolved = currentQuestions(records).filter((r) => r.status !== "resolved" && !dead.has(r.id));
   if (unresolved.length > REFERENCE_LIMITS.unresolvedQuestions) fail("capacity_exceeded");
@@ -302,15 +329,36 @@ function prune(graph) {
     }
   }
   const issues = Map.groupBy(claims, (r) => r.issueId);
+  const v2 = graph.memoryPruneVersion === CLAIM_PRUNE_V2;
+  const preferred = [];
+  const agreed = new Map();
+  if (v2) {
+    for (const issue of issues.values()) {
+      if (issue[0].aspect !== "name") continue;
+      const { acceptance } = claimNameState(issue, issue.filter(r => !claimDead.has(r.id) && r.act !== "withdraw"), claims, claimDead);
+      if (acceptance) agreed.set(acceptance.targets[0], Math.max(agreed.get(acceptance.targets[0]) ?? 0, acceptance.sourceTurn));
+      for (const r of issue) if (r.turn === graph.lastTurn) mandatory.add(r.id);
+    }
+  }
   for (const issue of issues.values()) {
     const active = issue.filter((r) => !claimDead.has(r.id) && r.act !== "withdraw");
     const support = active.some((r) => ["agree", "name_accept"].includes(r.act));
     const denial = active.some((r) => ["deny", "name_reject"].includes(r.act));
     const substantive = active.some((r) => !["acknowledge", "withdraw", "defer", "revisit"].includes(r.act));
     const focus = active.filter((r) => ["defer", "revisit"].includes(r.act)).at(-1);
-    if (active.length && ((substantive && ((!support && !denial) || active.at(-1).targets.length !== 1)) ||
-        (support && denial) || focus?.act === "defer")) {
-      issue.forEach((r) => mandatory.add(r.id));
+    const legacyMandatory = active.length && ((substantive && ((!support && !denial) || active.at(-1).targets.length !== 1)) ||
+      (support && denial) || focus?.act === "defer");
+    // A settled check can still constrain a naming decision. In particular,
+    // retain a recent denial ahead of unrelated older unresolved claims.
+    if (v2 ? substantive || focus : legacyMandatory) {
+      if (!v2) issue.forEach((r) => mandatory.add(r.id));
+      else {
+        const targets = new Set(active.flatMap(r => r.targets));
+        const newest = active.at(-1);
+        const earlierThanAgreement = newest.aspect !== "name" && targets.size > 0 &&
+          [...targets].every(slot => newest.sourceTurn < (agreed.get(slot) ?? 0));
+        if (!earlierThanAgreement) preferred.push(issue.reduce((a, b) => a.turn > b.turn ? a : b));
+      }
     }
   }
   for (const slot of graphSlots(graph)) {
@@ -324,17 +372,19 @@ function prune(graph) {
     }
     records.filter((r) => r.kind === "feature" && r.slot === slot).slice(-REFERENCE_LIMITS.featuresPerSlot).forEach((r) => mandatory.add(r.id));
   }
+  const successorCache = new Map();
   function closure(roots) {
     const keep = new Set(roots), pending = [...roots];
     while (pending.length) {
       const id = pending.pop(), record = byId.get(id);
       // Keeping an older question must also keep its successor; otherwise
       // dropping a resolved successor could reopen the old question.
-      const successors = records.filter((r) => (r.kind === "retract" && r.targetId === id) ||
+      let successors = successorCache.get(id);
+      if (!successors) successorCache.set(id, successors = records.filter((r) => (r.kind === "retract" && r.targetId === id) ||
         (record.kind === "claim" && r.kind === "claim" && (r.issueId === record.issueId || r.respondsTo === id ||
-          (record.aspect === "name" && r.aspect === "name" && records.indexOf(r) > records.indexOf(record) && r.targets.some((s) => record.targets.includes(s))))) ||
-        (record.kind === "question" && r.kind === "question" && r.replaces === id));
-      for (const dep of [...dependencies(record), ...successors.map((r) => r.id)]) {
+          (record.aspect === "name" && r.aspect === "name" && position.get(r.id) > position.get(record.id) && r.targets.some((s) => record.targets.includes(s))))) ||
+        (record.kind === "question" && r.kind === "question" && r.replaces === id)).map(r => r.id));
+      for (const dep of [...dependencies(record), ...successors]) {
         if (!keep.has(dep)) { keep.add(dep); pending.push(dep); }
       }
     }
@@ -346,10 +396,24 @@ function prune(graph) {
   const repairs = records.filter((r) => r.kind === "retract" || r.replaces).slice(-REFERENCE_LIMITS.recentRepairs);
   const optional = records.filter((r) => r.kind === "mention").slice(-REFERENCE_LIMITS.recentMentions)
     .concat(claims.slice(-REFERENCE_LIMITS.recentMentions), repairs.flatMap((r) => [byId.get(r.targetId ?? r.replaces), r].filter(Boolean))).reverse();
-  for (const record of optional) {
+  if (v2) {
+    // A batch accepted by the validators must not silently lose a new claim.
+    // Try current operations ahead of older closures, including resolved issues.
+    preferred.push(...claims.filter(r => r.turn === graph.lastTurn));
+    preferred.sort((a, b) => b.turn - a.turn || b.sourceTurn - a.sourceTurn || position.get(b.id) - position.get(a.id));
+    const all = closure(new Set([...mandatory, ...preferred.map(r => r.id)]));
+    if (fits(all)) {
+      preferred.forEach(r => mandatory.add(r.id));
+      kept = all;
+      preferred.length = 0;
+    }
+  }
+  for (const record of [...preferred, ...optional]) {
+    if (v2 && kept.some(r => r.id === record.id)) continue;
     const proposed = closure(new Set([...mandatory, record.id]));
     if (fits(proposed)) { mandatory.add(record.id); kept = proposed; }
   }
+  if (v2 && claims.some(r => r.turn === graph.lastTurn && !kept.some(k => k.id === r.id))) fail("capacity_exceeded");
   return { ...graph, records: kept };
 }
 

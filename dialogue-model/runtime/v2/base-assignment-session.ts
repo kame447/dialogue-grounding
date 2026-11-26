@@ -1,6 +1,7 @@
+import { CLAIM_PRUNE_V2 } from '../memory/reference-graph.mjs';
 import { validateBaseStart, validateBaseAssignmentConfig, canonicalBaseAssignmentConfig, validateBoundBaseRecord } from './base-assignment.ts';
 import { BaseAssignmentError, data, readAssignment, readOwner, UUID, OWNER, safeInt,
-  assignmentRotationMode, assignmentParticipantModelPin, assignmentFigureSelection } from './base-assignment-data.ts';
+  assignmentRotationMode, assignmentMemoryPruneVersion, assignmentParticipantModelPin, assignmentFigureSelection } from './base-assignment-data.ts';
 import type { BaseSessionOptions, BaseSession, BaseSessionErrorCode, BaseOwnerState, BaseAssignment,
   AdmissionKey, BaseRecord, RawBaseRecord, BaseTask, BaseArchiveWrite, FailureCode, FailureCause, RestoreResult } from './base-assignment.ts';
 export class BaseSessionError extends Error {
@@ -34,7 +35,7 @@ function failureCauseOf(error: unknown): FailureCause {
 }
 export function createBaseAssignmentSession(options: BaseSessionOptions): BaseSession {
   try {
-    if (!options || !OWNER.test(options.ownerId) || !['local_private_file', 'worker_binding'].includes(options.adapter) ||
+    if (!options || options.memoryPruneVersion !== undefined && (options.memoryPruneVersion !== CLAIM_PRUNE_V2 || options.adapter !== 'local_private_file') || !OWNER.test(options.ownerId) || !['local_private_file', 'worker_binding'].includes(options.adapter) ||
         typeof options.readConfig !== 'function' || typeof options.makeTask !== 'function' || typeof options.newId !== 'function' ||
         typeof options.now !== 'function' || !options.store || ['read', 'readRecord', 'compareAndSwap'].some(k => typeof (options.store as unknown as Record<string, unknown>)[k] !== 'function')) fail();
   } catch { fail(); }
@@ -87,6 +88,7 @@ export function createBaseAssignmentSession(options: BaseSessionOptions): BaseSe
       return readAssignment({ schemaVersion: 'base_assignment_v1', assignmentId: id, strategy: config.strategy,
         seed: config.seed, referenceMemory: config.referenceMemory,
         source: { kind: 'server_config_v1', adapter: options.adapter, configId: config.configId, revision: config.revision,
+          ...(config.referenceMemory && options.memoryPruneVersion ? { memoryPruneVersion: options.memoryPruneVersion } : {}),
           configSha256: Array.from(digest, b => b.toString(16).padStart(2, '0')).join('') }, createdAt: new Date(ms).toISOString() });
     } catch { return fail(); }
   }
@@ -141,9 +143,11 @@ export function createBaseAssignmentSession(options: BaseSessionOptions): BaseSe
       const limits = plan?.participantLimits;
       const profile = plan?.participantRuntimeProfile;
       const initialObservationGeneration = plan?.initialObservationGeneration;
+      const memoryPruneVersion = assignmentMemoryPruneVersion(a);
       try { task = await options.makeTask({ strategy: a.strategy, seed: a.seed, referenceMemory: a.referenceMemory,
         runDir: null, restore: restore ? copy(restore) : null, now: options.now, onPersist,
         ...(pin ? { participantModelPin: pin } : {}),
+        ...(memoryPruneVersion ? { memoryPruneVersion } : {}),
         ...(limits ? { participantLimits: limits } : {}),
         ...(profile ? { participantRuntime: { profile, assignmentId: a.assignmentId } } : {}),
         ...(initialObservationGeneration ? { initialObservationGeneration } : {}),
