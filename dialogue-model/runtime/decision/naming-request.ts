@@ -74,9 +74,9 @@ export function reconfirmationPossible(proposals: readonly NamingClaimLike[], tu
   });
 }
 
-export type AgreeNameScopeVersion = "scoped_v1" | "scoped_v2" | "scoped_v3" | "scoped_v4" | "scoped_v5" | "scoped_v6" | "scoped_v7";
+export type AgreeNameScopeVersion = "scoped_v1" | "scoped_v2" | "scoped_v3" | "scoped_v4" | "scoped_v5" | "scoped_v6" | "scoped_v7" | "scoped_v8";
 export function usesPublicNamingTarget(scope: unknown): scope is Exclude<AgreeNameScopeVersion, "scoped_v1"> {
-  return scope === "scoped_v2" || scope === "scoped_v3" || scope === "scoped_v4" || scope === "scoped_v5" || scope === "scoped_v6" || scope === "scoped_v7";
+  return scope === "scoped_v2" || scope === "scoped_v3" || scope === "scoped_v4" || scope === "scoped_v5" || scope === "scoped_v6" || scope === "scoped_v7" || scope === "scoped_v8";
 }
 
 export type NamingJudgmentLike = {
@@ -95,7 +95,7 @@ const isFigureEvidence = (c: LocalClaimView) => c.name === null &&
 const pointed = (reply: LocalClaimView, direct: boolean) => reply.source === LABELLED_ANSWER_SOURCE || directsToFigure(reply.quote, direct);
 export function publiclyCheckedNamingTarget(claims: readonly LocalClaimView[], publicTurns: readonly PublicTurn[],
   judgments: readonly NamingJudgmentLike[], turn: number, includeAgreed = false, scope: AgreeNameScopeVersion = "scoped_v2"): string | null {
-  const directConstrualAnswer = scope === "scoped_v7";
+  const directConstrualAnswer = scope === "scoped_v7" || scope === "scoped_v8";
   const directReferenceReplies = scope === "scoped_v5" || scope === "scoped_v6" || directConstrualAnswer;
   const before = judgments.filter((j): j is NamingJudgmentLike & { turnIndex: number } => typeof j.turnIndex === "number" && j.turnIndex < turn);
   const lastBoundary = before.filter(j => ["agree", "defer", "move_on"].includes(j.judgment?.action as string)).at(-1);

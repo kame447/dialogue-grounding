@@ -185,21 +185,29 @@ for (const label of ['bypass-enabled', 'repair-first'] as const) {
     ['only a backchannel', backchannel, true],
     ['only a follow-up question', followUp, true],
   ] as const) {
-    test(label + ': #203 feature menu after accepting ' + scenario, reply === affirmedV12 ? {} : { todo: 'the #203 bundle (same mechanism as G.3): a feature asked stays answered after only an acknowledgement or a question; fixed by T1b (decision/jev-decision.ts and S4 copy), not integrated yet' }, async () => {
-      // The interim accept makes this exercise history, independently of
-      // de-duplication for adjacent confirms.
-      const trial = verifiedTrial(await buildRecords(options(label, [genericCheck, reply, anotherClue], reply === affirmedV12 ? v12 : undefined)));
-      assert.equal(before(trial).judgments[0].jevTurn.executed.feature, notch);
-      if (reply === followUp) {
-        assert.ok(priorClaimViews(before(trial).graph).some(claim =>
-          claim.speaker === 'human' && claim.sourceTurn === 3 && claim.act === 'ask' && claim.quote === reply.human));
+    test(label + ': #203 feature menu after accepting ' + scenario, async () => {
+      // The interim accept exercises the historical feature menu, independently of adjacent confirms.
+      const turns = [genericCheck, reply, anotherClue];
+      for (const scope of ['scoped_v7', 'scoped_v8'] as const) {
+        const trial = verifiedTrial(await buildRecords({ ...options(label, turns, v12), agreeNameScopeVersion: scope }));
+        const state = before(trial);
+        assert.equal(state.agreeNameScopeVersion, scope);
+        assert.equal(state.judgments[0].jevTurn.executed.feature, notch);
+        const replyAct = reply === backchannel ? 'acknowledge' : reply === followUp ? 'ask' : 'agree';
+        assert.ok(state.repairHistory.find((entry: { turn: number }) => entry.turn === 1)
+          ?.partnerClaims.some((claim: { act: string }) => claim.act === replyAct), 'the earlier check retains the typed reply');
+        if (reply === followUp) {
+          assert.ok(priorClaimViews(state.graph).some(claim =>
+            claim.speaker === 'human' && claim.sourceTurn === 3 && claim.act === 'ask' && claim.quote === reply.human));
+        }
+        const hasNotch = scope === 'scoped_v8' && remainsOffered;
+        for (const side of trial.replay[0].result.sides) {
+          const features = Object.values(menu(side, 'feature')).map(value => (JSON.parse(value) as { value: string }).value);
+          assert.ok(features.includes(branch), 'a different valid distinguishing feature remains available');
+          assert.equal(features.includes(notch), hasNotch);
+        }
+        if (!hasNotch) assert.notEqual(lastTrace(trial).executed.feature, notch);
       }
-      for (const side of trial.replay[0].result.sides) {
-        const features = Object.values(menu(side, 'feature')).map(value => (JSON.parse(value) as { value: string }).value);
-        assert.ok(features.includes(branch), 'a different valid distinguishing feature remains available');
-        assert.equal(features.includes(notch), remainsOffered);
-      }
-      if (!remainsOffered) assert.notEqual(lastTrace(trial).executed.feature, notch);
     });
   }
 
