@@ -157,9 +157,18 @@ export function createBaseParticipantServer(options: Record<string, any> = {}) {
       return { receptionMode: 'off', sessions: sortBrowserSessions(summaries) };
     });
   }
-  async function lookupRecord(id:string) {
+  async function lookupRecord(id:string, includeParticipantRole = false, deletingRecord = false) {
     for (const owner of await listBaseOwners(baseStoreRoot)) {
-      const e=await entry(owner);const r=await e.store.readRecord(id);if(r)return {owner,e,r};
+      const store = (await entry(owner)).store;
+      if (includeParticipantRole) {
+        const saved = await store.adminRecord(id);
+        if (saved) return { owner, ...saved };
+      } else {
+        const record = await store.readRecord(id);
+        if (record) return { owner, record, questionnaire: null, participantRole: undefined };
+        // A confirmed retry may finish removing a role file after the trial was already deleted.
+        if (deletingRecord) await store.adminRecord(id, false);
+      }
     }
     return null;
   }
@@ -200,18 +209,36 @@ export function createBaseParticipantServer(options: Record<string, any> = {}) {
         const init:any={method:req.method,headers}; if(req.method!=='GET'&&req.method!=='HEAD'){init.body=req;init.duplex='half';}
         const request=new Request(url,init);
         const preparingNext=req.method==='POST'&&/^\/admin\/record\/[^/]+\/prepare-next$/u.test(url.pathname);
+        const deletingRecord = req.method === 'POST' && /^\/admin\/record\/[^/]+\/delete$/u.test(url.pathname);
         let response: Response;
         try { response=await handleAdmin(request,{token:adminToken,limiter:adminLimiter,retentionDays:0,
-          listPage:async()=>{const items=[];for(const owner of await listBaseOwners(baseStoreRoot)){const e=await entry(owner),c=await e.store.inspect();for(const id of Object.keys(c.archives)){const r=await e.store.readRecord(id);if(r)items.push(summarizeRecord({...r,questionnaire:c.questionnaires[id]??null},owner,summarizeLatency(r)));}}return {items,next:null};},
-          getSummary:async id=>{
-            const found=await lookupRecord(id);
+          listPage: async () => {
+            const items = [];
+            for (const owner of await listBaseOwners(baseStoreRoot)) {
+              for (const { record, questionnaire, participantRole } of await (await entry(owner)).store.adminRecords()) {
+                items.push({ ...summarizeRecord({ ...record, questionnaire }, owner, summarizeLatency(record)), participantRole });
+              }
+            }
+            return { items, next: null };
+          },
+          getSummary:async (id, includeParticipantRole)=>{
+            const found=await lookupRecord(id, includeParticipantRole, deletingRecord);
             if(!found&&preparingNext)for(const owner of await listBaseOwners(baseStoreRoot)){
               const saved=await (await entry(owner)).store.inspect();
               if(saved.tombstones.includes(id))throw new BaseSessionError('not_found');
             }
-            return found?summarizeRecord(found.r,found.owner,summarizeLatency(found.r)):null;
+            if (!found) return null;
+            const summary = summarizeRecord(includeParticipantRole ? { ...found.record, questionnaire: found.questionnaire } : found.record,
+              found.owner, summarizeLatency(found.record));
+            return found.participantRole ? { ...summary, participantRole: found.participantRole } : summary;
           },
-          getRecord:async summary=>{const e=await entry(summary.objectId),r=await e.store.readRecord(summary.recordId),c=await e.store.inspect();return r?{...r,questionnaire:c.questionnaires[summary.recordId]??null}:null;},
+          getRecord: async summary => {
+            const saved = await (await entry(summary.objectId)).store.adminRecord(summary.recordId, false);
+            return saved ? { ...saved.record, questionnaire: saved.questionnaire } : null;
+          },
+          setParticipantRole: async (summary, role) =>
+            await (await entry(summary.objectId)).store.setParticipantRole(summary.recordId, role)
+              ? { ok: true } : { ok: false, error: 'not_found' },
           deleteRecord:async summary=>{
             try { if (!await (await entry(summary.objectId)).store.deleteRecord(summary.recordId)) throw new BaseSessionError('not_found'); }
             catch(error) {

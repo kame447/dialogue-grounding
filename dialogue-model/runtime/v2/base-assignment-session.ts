@@ -1,7 +1,8 @@
 import { validateBaseStart, validateBaseAssignmentConfig, canonicalBaseAssignmentConfig, validateBoundBaseRecord } from './base-assignment.ts';
-import { BaseAssignmentError, data, readAssignment, readOwner, UUID, OWNER, safeInt, assignmentRotationMode } from './base-assignment-data.ts';
+import { BaseAssignmentError, data, readAssignment, readOwner, UUID, OWNER, safeInt,
+  assignmentRotationMode, assignmentParticipantModelPin, assignmentFigureSelection } from './base-assignment-data.ts';
 import type { BaseSessionOptions, BaseSession, BaseSessionErrorCode, BaseOwnerState, BaseAssignment,
-  AdmissionKey, BaseRecord, RawBaseRecord, BaseTask, BaseArchiveWrite, FailureCode, RestoreResult } from './base-assignment.ts';
+  AdmissionKey, BaseRecord, RawBaseRecord, BaseTask, BaseArchiveWrite, FailureCode, FailureCause, RestoreResult } from './base-assignment.ts';
 /** Closed sub-reasons of a store/session rejection (code trial_unavailable). Diagnostics only: the HTTP mapping uses `code`, and the reason never carries text. */
 export type PersistReason = 'cas_conflict' | 'owner_expired' | 'record_deleted' | 'owner_state_invalid' | 'store_invalid' | 'store_io' | 'size_limit';
 export class BaseSessionError extends Error {
@@ -15,6 +16,27 @@ const copy = <T>(v: T): T => structuredClone(v);
 async function port<T>(fn: () => T | Promise<T>): Promise<T> {
   try { return await fn(); }
   catch (error) { return fail('trial_unavailable', error instanceof BaseSessionError ? error.code === 'owner_expired' ? 'owner_expired' : error.reason ?? 'store_io' : 'store_io'); }
+}
+/** Maps a makeTask failure to a closed cause. Reads only own string codes of the known error classes (walking `cause`);
+ * messages, responses and anything else are never copied, and an unrecognised error is 'unknown'. */
+function failureCauseOf(error: unknown): FailureCause {
+  for (let e: unknown = error, depth = 0; e && typeof e === 'object' && depth < 4; e = (e as { cause?: unknown }).cause, depth++) {
+    const o = e as { name?: unknown; code?: unknown; observationErrorCode?: unknown };
+    if (o.name === 'JevTurnError') {
+      if (o.code === 'observation_failed') {
+        const c = o.observationErrorCode;
+        return c === 'timeout' ? 'observation_timeout' : c === 'aborted' ? 'observation_aborted' : c === 'unavailable' ? 'observation_unavailable'
+          : c === 'invalid_json' || c === 'invalid_response' || c === 'invalid_input' ? 'observation_invalid' : 'unknown';
+      }
+      return o.code === 'decision_failed' || o.code === 'generation_failed' || o.code === 'invalid_state' ? o.code : 'unknown';
+    }
+    if (o.name === 'ObservationError') {
+      const c = o.code;
+      return c === 'timeout' ? 'observation_timeout' : c === 'unavailable' ? 'observation_unavailable' : c === 'aborted' ? 'observation_aborted'
+        : c === 'invalid_json' || c === 'invalid_response' || c === 'invalid_input' ? 'observation_invalid' : 'unknown';
+    }
+  }
+  return 'unknown';
 }
 export function createBaseAssignmentSession(options: BaseSessionOptions): BaseSession {
   try {
@@ -83,17 +105,18 @@ export function createBaseAssignmentSession(options: BaseSessionOptions): BaseSe
     live = key;
     return { key, assignment: a };
   }
-  async function failed(key: AdmissionKey, id: string, code: FailureCode) {
+  async function failed(key: AdmissionKey, id: string, code: FailureCode, cause?: FailureCause) {
     try {
       await serial(async () => { const old = await state(), e = old.admissions[key];
         if (!e || e.assignment.assignmentId !== id || e.status !== 'preparing') return;
         const next = copy(old), target = next.admissions[key]!; target.status = 'failed'; target.errorCode = code;
+        if (code === 'initialization_failed' && cause) target.failureCause = cause;
         await commit(old, next, []);
       });
     } catch { /* Preserve the last committed preparing snapshot on storage failure. */ }
   }
   async function construct(key: AdmissionKey, a: BaseAssignment, restore: BaseRecord | null): Promise<BaseTask> {
-    const token: { failed: boolean; internal: unknown; failureCode: FailureCode } = { failed: false, internal: null, failureCode: 'initialization_failed' };
+    const token: { failed: boolean; internal: unknown; failureCode: FailureCode; cause: FailureCause } = { failed: false, internal: null, failureCode: 'initialization_failed', cause: 'unknown' };
     const onPersist = async (raw: RawBaseRecord) => {
       try {
         await serial(async () => {
@@ -119,10 +142,18 @@ export function createBaseAssignmentSession(options: BaseSessionOptions): BaseSe
     };
     try {
       let task: BaseTask;
+      const pin = assignmentParticipantModelPin(a);
+      const plan = a.source.kind === 'reception_plan_v2' || a.source.kind === 'reception_plan_v3' ? a.source.plan : null;
+      const limits = plan?.participantLimits;
+      const profile = plan?.participantRuntimeProfile;
       try { task = await options.makeTask({ strategy: a.strategy, seed: a.seed, referenceMemory: a.referenceMemory,
         runDir: null, restore: restore ? copy(restore) : null, now: options.now, onPersist,
-        ...(restore ? {} : { rotationMode: assignmentRotationMode(a) }) }); }
-      catch (error) { if (error === token.internal && error instanceof BaseSessionError) throw error; return fail(); }
+        ...(pin ? { participantModelPin: pin } : {}),
+        ...(limits ? { participantLimits: limits } : {}),
+        ...(profile ? { participantRuntime: { profile, assignmentId: a.assignmentId } } : {}),
+        ...(restore ? {} : { rotationMode: assignmentRotationMode(a),
+          ...(a.source.kind === 'reception_plan_v3' ? { figureSelection: assignmentFigureSelection(a) } : {}) }) }); }
+      catch (error) { if (error === token.internal && error instanceof BaseSessionError) throw error; token.cause = failureCauseOf(error); return fail(); }
       if (!task || ['getState', 'persistNow', 'whenIdle', 'message', 'retry', 'submitHuman', 'submitAI'].some(k => typeof (task as unknown as Record<string, unknown>)[k] !== 'function')) return fail();
       const view = await port(() => task.getState());
       await serial(async () => {
@@ -139,7 +170,7 @@ export function createBaseAssignmentSession(options: BaseSessionOptions): BaseSe
       return task;
     } catch (error) {
       token.failed = true;
-      if (!restore) await failed(key, a.assignmentId, token.failureCode);
+      if (!restore) await failed(key, a.assignmentId, token.failureCode, token.cause);
       if (error instanceof BaseSessionError && error.code === 'owner_expired') throw error;
       return fail();
     } finally { if (live === key) live = null; }

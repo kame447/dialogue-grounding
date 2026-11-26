@@ -8,6 +8,7 @@
 // (研究者未承認の仮項目). They are not NASA-TLX, Paas or any validated scale, and
 // no total score is computed. See dialogue-model/README.md: the scales are undecided.
 import { createTrialV2, participantView, ROTATION_MODES } from "../stimuli/scatter-v2.mjs";
+import { validateResolvedFigureSelection } from "../stimuli/figure-bank.ts";
 import { NamingTaskError } from "../naming-error.mjs";
 
 export const QUESTIONNAIRE_VERSION = "provisional-v0";
@@ -140,12 +141,17 @@ export function participantReview(record: Record<string, any>) {
   const options = isPlain(record.options) ? record.options : {};
   const rotationMode = Object.hasOwn(options, "rotationMode") ? options.rotationMode : "relative_pm90";
   if (typeof rotationMode !== "string" || !ROTATION_MODES.includes(rotationMode)) throw new NamingTaskError("operation_failed");
+  // A recorded figure selection is replayed so the review shows the same six figures; older records mean the legacy set.
+  let figureSelection: ReturnType<typeof validateResolvedFigureSelection> | undefined;
+  if (Object.hasOwn(options, "figureSelection")) {
+    try { figureSelection = validateResolvedFigureSelection(options.figureSelection); } catch { throw new NamingTaskError("operation_failed"); }
+  }
   const events = (Array.isArray(record.events) ? record.events : []).filter(isPlain)
     .map(({ id, speaker, text, at }) => ({ id, speaker, text, at }));
   const human = isPlain(record.humanSubmission) ? record.humanSubmission : {};
   return {
     recordId: String(record.recordId), status: "completed" as const, startedAt: iso(record.startedAt), updatedAt: iso(record.updatedAt),
-    scene: participantView(createTrialV2({ seed: record.seed, rotationMode })), events,
+    scene: participantView(createTrialV2({ seed: record.seed, rotationMode, ...(figureSelection ? { figureSelection } : {}) })), events,
     humanSubmission: Object.fromEntries(Object.entries(human).map(([slot, name]) => [slot, typeof name === "string" ? name : null])),
     result: participantResult(record.scoring.result),
   };

@@ -390,6 +390,24 @@ function keepPosition(scrollTop) {
 function followToBottom() {
   followHistory = true; keepPosition();
 }
+// The AI's reply in progress: a transient AI bubble at the end of the log. It
+// is display only, never an event, a pending message or a counted message.
+// #chat-status announces the wait, so the bubble is hidden from screen readers.
+// A history rebuild detaches it; renderProgress puts it back at the end.
+const typingBubble = (() => {
+  const li = document.createElement("li"); li.className = "ai typing-message"; li.setAttribute("aria-hidden", "true");
+  const who = document.createElement("strong"); who.textContent = "AI";
+  const dots = document.createElement("div"); dots.className = "typing-indicator";
+  dots.append(...[0, 1, 2].map(() => document.createElement("span")));
+  li.append(who, dots); return li;
+})();
+function renderTyping(show) {
+  const log = $("history");
+  if (show === (log.children[log.children.length - 1] === typingBubble)) return;
+  if (show) log.append(typingBubble); else typingBubble.remove();
+  // A following reader sees the bubble come and go; a reader who scrolled up stays put.
+  keepPosition();
+}
 // ---- Participant-facing progress (display layer) ----------------------------
 // Failures are shown by state, never by cause. The trial has stopped when the
 // server reports a failure, or when something is awaited (an AI reply, a send
@@ -424,7 +442,7 @@ function renderProgress() {
   }
   const stopped = progressStopped();
   const showDots = chatWaiting() && !failed && !stopped;
-  $("typing-indicator").hidden = !showDots;
+  renderTyping(showDots);
   $("chat-recovery").hidden = !stopped;
   const recovery = current?.dialogueRecovery;
   const stoppedMessage = !recovery || submitted() ? STOPPED :
@@ -1210,8 +1228,29 @@ $("chat").addEventListener("submit", (event) => {
   $("utterance").value = ""; followHistory = true; renderHistory();
   $("utterance").focus({ preventScroll: true }); drainMessages();
 });
-// Textarea Enter (including IME) is left to native multiline editing. Sending
-// is an explicit form action; no keydown handler turns Enter into a request.
+// Shift+Enter remains native multiline input. Plain Enter uses the same
+// form action as the send button, except during IME confirmation.
+let composingUtterance = false;
+let settlingComposition = false;
+let compositionTimer;
+$("utterance").addEventListener("compositionstart", () => {
+  clearTimeout(compositionTimer);
+  composingUtterance = true;
+  settlingComposition = false;
+});
+$("utterance").addEventListener("compositionend", () => {
+  composingUtterance = false;
+  settlingComposition = true;
+  clearTimeout(compositionTimer);
+  compositionTimer = setTimeout(() => { settlingComposition = false; }, 0);
+});
+$("utterance").addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" || event.shiftKey || event.ctrlKey || event.altKey || event.metaKey ||
+      event.defaultPrevented || event.isComposing || event.keyCode === 229 ||
+      composingUtterance || settlingComposition) return;
+  event.preventDefault();
+  if (!event.repeat) $("chat").requestSubmit();
+});
 $("retry-chat").addEventListener("click", () => { if (chatOpen()) checkProgress(); });
 $("interrupt-chat").addEventListener("click", () => {
   if (chatOpen() && dialogueFailed() && current?.dialogueRecovery === "retry" && !checking && !sending) {
@@ -1460,8 +1499,36 @@ async function startupAdmission() {
   try { return await api("/api/reception", {}); }
   catch (error) { if (error.status === 404) return state; throw error; }
 }
+// An explicit record link never starts an unrelated trial, even on a clean browser.
+async function resumeLinkedRecord(recordId, TS) {
+  try { TS?.clear(); } catch { /* No binding to retain. */ }
+  clearDraft();
+  try {
+    if (!TS || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/u.test(recordId)) throw new Error('not_found');
+    const sessions = await loadSessions();
+    const matches = sessions.filter(session => session.resumable === true && session.activeRecordId === recordId);
+    if (matches.length !== 1) throw new Error('not_found');
+    const sessionId = matches[0].sessionId;
+    const state = await api('/api/state', undefined, undefined, sessionId);
+    if (state?.trial?.sessionId !== recordId) throw new Error('trial_changed');
+    bindSession(sessionId);
+    $("entry-stage").hidden = true;
+    $("notice").textContent = "";
+    render(state); setControls();
+    // Following ordinary reloads and transitions uses the tab binding, not a stale record link.
+    try { globalThis.history?.replaceState(globalThis.history.state, '', globalThis.location.pathname + globalThis.location.search); } catch { /* The binding still works. */ }
+  } catch {
+    $("notice").textContent = "この試行を開けませんでした。受付一覧から開き直してください。";
+  }
+}
 async function startup() {
   const TS = tabSession();
+  const linked = globalThis.location?.hash?.startsWith('#resume=') ? globalThis.location.hash.slice(8) : null;
+  if (linked !== null) {
+    try { await TS?.resolve(); } catch { /* Fail closed rather than creating a trial. */ }
+    await resumeLinkedRecord(linked, TS);
+    return;
+  }
   // Without tab-session.js the single cookie session is used as before.
   if (!TS) { cookieMode = true; operate(startupAdmission); return; }
   let resolved = null;

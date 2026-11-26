@@ -1,3 +1,4 @@
+import type { ParticipantUsageOnly } from '../web/participant-usage-policy.ts';
 // Explicit technical R policy. The original remains Jev's decision; no semantic oracle.
 import {JEV_ACTIONS} from './contract.ts';
 import type {JevAction,JevDecision,JevDecisionInput,JevTarget,JevExecutedDecision,JevDetailResult,JevDecisionStageEvidence,PublicNameCandidate,JevQuestionLayout} from './contract.ts';
@@ -84,13 +85,13 @@ function checkRepairProspect(value:unknown):void {
   if(!scores||Object.getPrototypeOf(scores)!==Object.prototype||Array.isArray(scores)||Object.values(scores).some(n=>typeof n!=='number'||!Number.isFinite(n)||n<0||n>1))fail('invalid_input');
  }
 }
-function prepare(input:unknown,original:unknown,intervention:unknown,questionLayout:JevQuestionLayout='two_stage_v1'){
+function prepare(input:unknown,original:unknown,intervention:unknown,questionLayout:JevQuestionLayout='two_stage_v1',usagePolicy?:ParticipantUsageOnly){
  const policy=config(intervention);
  const i=boundary(input,'invalid_input',value=>{const optional=['reobservationAllowed','humanReferent','repairProspect','agreeNames','repairFacts','nameLedger','nameSource','namingRequest','namingRequestStrict','judgmentLedger','rotationMode','notationV6','notationV11'].filter(k=>!!value&&typeof value==='object'&&Object.hasOwn(value,k));
   if(!exact(value,['turn','publicTurns','ownSlots','observations','issueSummary','priorClaims','repairHistory','previousAction','publicNames',...optional]))fail('invalid_input');
   if(Object.hasOwn(value,'repairProspect'))checkRepairProspect(value.repairProspect);
   buildJevDecisionPayload(value as JevDecisionInput);return structuredClone(value) as BypassAcceptanceInput;});
- const d=boundary(original,'invalid_original',value=>{const valid=validateJevDecision(value,i,{questionLayout});if(valid.action==='request_observation')fail('invalid_original');return valid;});
+ const d=boundary(original,'invalid_original',value=>{const valid=validateJevDecision(value,i,{questionLayout,usagePolicy});if(valid.action==='request_observation')fail('invalid_original');return valid;});
  return {input:i,decision:d,config:policy,original:project(d),layout:questionLayout};
 }
 type Context=ReturnType<typeof prepare>;
@@ -221,8 +222,8 @@ function detailCode(e:unknown):InterventionInner {
  } catch { /* Hostile proxies/errors cannot escape the closed failure record. */ }
  return {stage:'detail',code:'invalid_response'};
 }
-export async function applyBypassAcceptance(input:unknown,original:unknown,intervention:unknown,completeDetail?:CompleteDetail,options?:BypassAcceptanceOptions):Promise<AcceptanceResult>{
- const ctx=prepare(input,original,intervention,layoutOption(options));
+export async function applyBypassAcceptance(input:unknown,original:unknown,intervention:unknown,completeDetail?:CompleteDetail,options?:BypassAcceptanceOptions,usagePolicy?:ParticipantUsageOnly):Promise<AcceptanceResult>{
+ const ctx=prepare(input,original,intervention,layoutOption(options),usagePolicy);
  if(completeDetail!==undefined&&typeof completeDetail!=='function')fail('invalid_detail_callback');
  const p=plan(ctx,rerankOption(options));
  if(p.disposition==='adopted')return freeze({executed:p.original,intervention:trace(p)});
@@ -238,7 +239,7 @@ export async function applyBypassAcceptance(input:unknown,original:unknown,inter
  try{jsonData(raw);if(!exact(raw,['executed','evidence']))throw Error();checked=structuredClone(raw) as DetailResult;}
  catch{alternativeFailed(p,{stage:'detail',code:'invalid_response'});}
  let expected:ExecutedDecision;
- try{expected=parseJevExecutedDetail(ctx.input,selected,checked.evidence,{questionLayout:layoutOption(options)});}catch(e){alternativeFailed(p,detailCode(e));}
+ try{expected=parseJevExecutedDetail(ctx.input,selected,checked.evidence,{questionLayout:ctx.layout,usagePolicy});}catch(e){alternativeFailed(p,detailCode(e));}
  if(!equal(checked.executed,expected))alternativeFailed(p,{stage:'executed',code:'invalid_executed'});
  return freeze({executed:expected,intervention:trace(p,expected,checked.evidence)});
 }

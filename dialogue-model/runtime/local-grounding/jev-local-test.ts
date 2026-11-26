@@ -1,3 +1,4 @@
+import { PARTICIPANT_USAGE_ONLY, type ParticipantUsageOnly } from '../web/participant-usage-policy.ts';
 import { deadlineLimit, deadlineValue } from '../v2/research-deadline-options.ts';
 import type { ResearchLimits } from '../v2/research-timeouts.ts';
 // Researcher-authorized local experiment (2026-10-20), explicitly enabled only.
@@ -88,6 +89,7 @@ export type JevLocalTestOptions = {
   readKey?: () => Promise<string>;
   fetchImpl?: (url: string, init: RequestInit) => Promise<Response>;
   costCapUsd?: number;
+  usagePolicy?: ParticipantUsageOnly;
   timeoutMs?: number;
   researchLimits?: ResearchLimits;
   /** The profile's Jev layout; only two_stage_v3 carries the casual-proposal criterion. */
@@ -168,6 +170,7 @@ export function createJevChoiceTransport(options: JevChoiceTransportOptions = {}
   const { readKey = keychainKeyReader(), fetchImpl = globalThis.fetch, costCapUsd = DEFAULT_COST_CAP_USD,
     timeoutMs = UPSTREAM_TIMEOUT_MS, researchLimits } = options;
   const limit = deadlineLimit(researchLimits);
+  const usageOnly = options.usagePolicy === PARTICIPANT_USAGE_ONLY;
   if (typeof readKey !== "function" || typeof fetchImpl !== "function" || !finite(costCapUsd) || costCapUsd <= 0 ||
       costCapUsd > maxJevCostCapUsd(researchLimits) || !deadlineValue(timeoutMs, limit)) fail("invalid_options");
   let key: string | null = null;
@@ -204,7 +207,7 @@ export function createJevChoiceTransport(options: JevChoiceTransportOptions = {}
         const payload: JevLocalTestPayload = { model: JEV_LOCAL_TEST_MODEL, state: built.state,
           questions: built.questions as Record<string, ChoiceQuestion> };
         if (!Object.keys(payload.questions).length) { evidence.status = "skipped"; return null; }
-        if (halted || spentUsd >= costCapUsd || spentUsd + maxCost > costCapUsd) fail("cost_cap");
+        if (!usageOnly && (halted || spentUsd >= costCapUsd || spentUsd + maxCost > costCapUsd)) fail("cost_cap");
         busy = true;
         ownsSlot = true;
         const cancelled = new Promise<never>((_resolve, reject) => {
@@ -254,8 +257,8 @@ export function createJevChoiceTransport(options: JevChoiceTransportOptions = {}
           if (!isGroundingModel(data.model, JEV_LOCAL_TEST_MODEL)) fail("model_mismatch");
           evidence.model = data.model;
           evidence.responseId = typeof data.id === "string" && /^gen-[A-Za-z0-9_-]{1,124}$/.test(data.id) ? data.id : null;
-          if (!accounted) fail("cost_unreported");
-          if (spentUsd > costCapUsd) fail("cost_cap");
+          if (!usageOnly && !accounted) fail("cost_unreported");
+          if (!usageOnly && spentUsd > costCapUsd) fail("cost_cap");
           const result = parse ? parse(data.answers, payload) : data.answers as T;
           evidence.status = "ok";
           return result;
@@ -268,7 +271,7 @@ export function createJevChoiceTransport(options: JevChoiceTransportOptions = {}
       } finally {
         clearTimeout(timer);
         callOptions.signal?.removeEventListener("abort", abort);
-        if (delivered && !accounted) halted = true;
+        if (!usageOnly && delivered && !accounted) halted = true;
         if (ownsSlot) busy = false;
         evidence.latencyMs = Math.max(0, Math.round(performance.now() - started));
         // Concurrent calls are rejected; an older completion cannot overwrite their failure proof.

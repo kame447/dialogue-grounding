@@ -76,7 +76,8 @@ async function harness(receptionMode: 'on' | 'off' = 'off') {
   const index = new AdminIndex({ storage: storage() }, {});
   if (receptionMode === 'on') {
     const fields = { allowedOrders: [['repair-first', 'bypass-enabled']], seedPolicy: 'per_trial',
-      referenceMemory: false, betweenTrials: 'questionnaire_required', receptionNumberFormat: 'daily_seq3', rotationMode: 'relative_pm90' };
+      referenceMemory: false, betweenTrials: 'questionnaire_required', receptionNumberFormat: 'daily_seq3', rotationMode: 'relative_pm90',
+      figureSelection: { mode: 'preset', setId: 'legacy-v1' }, figureSetPolicy: 'shared' };
     assert.equal((await index.saveReceptionProtocol({ expectedRevision: 0, fields })).ok, true);
   }
   assert.equal((await index.saveReceptionMode({ expectedRevision: 0, value: receptionMode })).ok, true);
@@ -109,6 +110,7 @@ async function harness(receptionMode: 'on' | 'off' = 'off') {
         record.strategy = input.strategy;
         record.options.referenceMemory = input.referenceMemory;
         record.options.rotationMode = input.rotationMode;
+        if (input.figureSelection) record.options.figureSelection = input.figureSelection; // frozen by a v3 plan
         record.stimulus = { version: 'synthetic-stimulus-v1', rotationMode: input.rotationMode, angles: { human: { h1: 0 }, ai: { a1: 0 } } };
       }
       const persist = () => input.onPersist(clone(record));

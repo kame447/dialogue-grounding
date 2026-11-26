@@ -4,9 +4,12 @@
 // GET /admin/record/<recordId>.json downloads that one full record as JSON.
 import { checkAdmin, presentedToken } from "./auth.ts";
 import { RECEPTIONS_LIVE_JS } from './receptions-live.ts';
-import { ADMIN_CSS, applyFilter, parseFilter, renderDetail, renderList, renderMessage, renderReceptions, renderEntry, renderSettings } from "./render.ts";
+import { ADMIN_CSS, applyFilter, parseFilter, renderDetail, renderList, renderMessage, renderReceptions, renderEntry, renderSettings, renderExperimentPreview, renderFigures } from "./render.ts";
+import { FIGURE_SETS, FIGURE_BANK } from '../../../../dialogue-model/runtime/stimuli/figure-bank.ts';
 import { OBJECT_ID, RECORD_ID } from "./summary.ts";
 import type { AdminSummary } from "./summary.ts";
+import { isParticipantRole, participantRoleView } from "./participant-role.ts";
+import type { AdminRecordSummary, ParticipantRole, ParticipantRoleResult } from "./participant-role.ts";
 import type { LatencySummary } from "./latency.ts";
 import type { AuditEntry } from "./index-store.ts";
 import type { ProtocolFields, ReceptionAdminPort, ReceptionSettingsPort } from './reception-port.ts';
@@ -17,8 +20,9 @@ export type AdminDeps = {
   limiter: AdminLimiter | undefined;
   // Accepted for older callers only; record retention is no longer time-limited.
   retentionDays?: number;
-  listPage(after: string | null): Promise<{ items: AdminSummary[]; next: string | null }>;
-  getSummary(recordId: string): Promise<AdminSummary | null>;
+  listPage(after: string | null): Promise<{ items: AdminRecordSummary[]; next: string | null }>;
+  getSummary(recordId: string, includeParticipantRole?: boolean): Promise<AdminRecordSummary | null>;
+  setParticipantRole?(summary: AdminSummary, role: ParticipantRole): Promise<ParticipantRoleResult>;
   /** Reads record:<recordId> from the owning session object over internal RPC, never the participant API. */
   getRecord(summary: AdminSummary): Promise<unknown | null>;
   /** Deletes the record in its session object, then its index entry (with a content-free audit entry). */
@@ -27,6 +31,8 @@ export type AdminDeps = {
   summarizeLatency(record: unknown): LatencySummary;
   /** Optional S5 operator action; participant cookies do not authorize it. */
   prepareNext?(summary: AdminSummary): Promise<{ kind: 'created' | 'existing'; recordId: string; participantPath: '/' }>;
+  /** True only when the request's participant browser already owns this exact active trial. */
+  canResumeParticipant?(request: Request, recordId: string): Promise<boolean>;
   receptions?: ReceptionAdminPort;
   /** Researcher reception settings (protocol and reception mode). */
   receptionSettings?: ReceptionSettingsPort;
@@ -45,7 +51,8 @@ export const ADMIN_HEADERS: Readonly<Record<string, string>> = Object.freeze({
 /** Only the self-updating reception list may run its own same-origin script and fetch from this origin. */
 export const LIVE_CSP = ADMIN_HEADERS["Content-Security-Policy"] + "; script-src 'self'; connect-src 'self'";
 const REALM = 'Basic realm="tangram-admin", charset="UTF-8"';
-const MAX_FORM_BYTES = 1024;
+// Large enough for the settings form with six custom figure ids; still a hard stop for anything bigger.
+const MAX_FORM_BYTES = 4096;
 
 export const isAdminPath = (pathname: string) => pathname === "/admin" || pathname.startsWith("/admin/");
 
@@ -94,6 +101,45 @@ async function receptionForm(request: Request): Promise<URLSearchParams | null> 
   const bytes = new Uint8Array(length); let offset = 0;
   for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
   try { return new URLSearchParams(new TextDecoder('utf-8', { fatal: true }).decode(bytes)); } catch { return null; }
+}
+
+async function participantRoleMutation(request: Request, deps: AdminDeps, id: string, reception: boolean, fromLog: boolean): Promise<Response> {
+  const back = reception ? { href: '/admin/receptions', label: '受付一覧へ' }
+    : fromLog ? { href: '/admin', label: '実験ログへ' } : { href: '/admin/record/' + id, label: '記録詳細へ' };
+  const fail = (status: number, code: string, message: string, title = '担当者種別を変更していません') => wantsHtml(request)
+    ? respond(status, renderMessage(title, message, back))
+    : receptionError(status, code);
+  if (!RECORD_ID.test(id)) return receptionError(404, 'not_found');
+  const form = await receptionForm(request);
+  const role = form?.get('role'), recordIds = form?.getAll('recordId') ?? [];
+  if (!form || !isParticipantRole(role) || form.getAll('role').length !== 1 ||
+      [...form.keys()].some(key => key !== 'role' && !(reception && key === 'recordId')) ||
+      new Set(recordIds).size !== recordIds.length || recordIds.some(recordId => !RECORD_ID.test(recordId))) {
+    return fail(400, 'invalid_request', '担当者種別と対象の記録を確認してください。');
+  }
+  try {
+    let result: ParticipantRoleResult;
+    if (reception) {
+      result = await deps.receptions!.setParticipantRole!(id, role, recordIds.length ? recordIds : null);
+    } else {
+      const summary = await deps.getSummary(id, true);
+      result = summary?.recordId === id && OBJECT_ID.test(summary.objectId)
+        ? await deps.setParticipantRole!(summary, role)
+        : { ok: false, error: 'not_found' };
+    }
+    if (!result.ok) {
+      if (result.error === 'not_found') return fail(404, 'not_found', '対象の記録が見つかりません。');
+      return fail(409, 'conflict', reception
+        ? '対象の試行記録が変わりました。受付一覧を開き直してください。'
+        : '対象の記録が変わりました。画面を開き直してください。');
+    }
+    if (request.headers.get('Accept')?.split(',').some(value => value.split(';')[0].trim().toLowerCase() === 'application/json')) {
+      return respond(200, JSON.stringify({ [reception ? 'receptionId' : 'recordId']: id, role }), 'application/json; charset=utf-8');
+    }
+    return plain(303, '', { Location: back.href });
+  } catch {
+    return fail(503, 'unavailable', '画面を開き直して担当者種別を確認してください。', '担当者種別の保存結果を確認できません');
+  }
 }
 const receptionError = (status: number, error: string) => respond(status, JSON.stringify({ error }), 'application/json; charset=utf-8');
 /** Browser pages (Accept: text/html without application/json) get a short page; other clients keep the JSON contract. */
@@ -181,18 +227,49 @@ const ORDER_TOKENS: Readonly<Record<string, ProtocolFields['allowedOrders'][numb
   'rf-be': ['repair-first', 'bypass-enabled'], 'be-rf': ['bypass-enabled', 'repair-first'], rf: ['repair-first'], be: ['bypass-enabled'] });
 const SINGLE: Readonly<Record<string, readonly string[]>> = Object.freeze({ seedPolicy: ['shared', 'per_trial'], referenceMemory: ['on', 'off'],
   betweenTrials: ['none', 'questionnaire_required'], rotationMode: ['relative_pm90', 'relative_0'], receptionNumberFormat: ['daily_seq3'] });
+const FIGURE_KEYS = ['figureMode', 'figureSetPolicy', 'figureSetId', 'selectionSeed', 'figureIds'];
+const BANK_IDS = new Set(FIGURE_BANK.map(f => f.id));
+/** The figure source and its allocation, both explicit. Inputs that belong to another mode are ignored; per_trial needs the seeded mode. */
+function figureFields(form: URLSearchParams): Pick<ProtocolFields, 'figureSelection' | 'figureSetPolicy'> | null {
+  const mode = form.getAll('figureMode'), policy = form.getAll('figureSetPolicy');
+  if (mode.length !== 1 || policy.length !== 1 || (policy[0] !== 'shared' && policy[0] !== 'per_trial')) return null;
+  let figureSelection: ProtocolFields['figureSelection'];
+  if (mode[0] === 'preset') {
+    const set = form.getAll('figureSetId');
+    if (set.length !== 1 || !Object.hasOwn(FIGURE_SETS, set[0])) return null;
+    figureSelection = { mode: 'preset', setId: set[0] };
+  } else if (mode[0] === 'seeded_random') {
+    const seeds = form.getAll('selectionSeed');
+    if (seeds.length > 1) return null;
+    const raw = (seeds[0] ?? '').trim();
+    if (raw === '') figureSelection = { mode: 'seeded_random', selectionSeed: null };
+    else {
+      const seed = /^-?\d{1,16}$/u.test(raw) ? Number(raw) : NaN;
+      if (!Number.isSafeInteger(seed)) return null;
+      figureSelection = { mode: 'seeded_random', selectionSeed: seed };
+    }
+  } else if (mode[0] === 'custom') {
+    const ids = form.getAll('figureIds');
+    if (ids.length !== 6 || new Set(ids).size !== 6 || ids.some(id => !BANK_IDS.has(id))) return null;
+    figureSelection = { mode: 'custom', figureIds: FIGURE_BANK.map(f => f.id).filter(id => ids.includes(id)) };
+  } else return null;
+  if (policy[0] === 'per_trial' && figureSelection.mode !== 'seeded_random') return null;
+  return { figureSelection, figureSetPolicy: policy[0] };
+}
 /** Every field must be selected explicitly; nothing missing is filled with a default. */
 function protocolForm(form: URLSearchParams): { expectedRevision: number; fields: ProtocolFields } | null {
   const keys = [...new Set(form.keys())];
-  if (keys.some(k => k !== 'orders' && k !== 'expectedRevision' && !Object.hasOwn(SINGLE, k))) return null;
+  if (keys.some(k => k !== 'orders' && k !== 'expectedRevision' && !Object.hasOwn(SINGLE, k) && !FIGURE_KEYS.includes(k))) return null;
   if (['expectedRevision', ...Object.keys(SINGLE)].some(k => form.getAll(k).length !== 1)) return null;
+  const figures = figureFields(form);
+  if (!figures) return null;
   const expectedRevision = unsigned(form.get('expectedRevision')), orders = form.getAll('orders');
   if (expectedRevision === null || !orders.length || new Set(orders).size !== orders.length || orders.some(o => !Object.hasOwn(ORDER_TOKENS, o))) return null;
   for (const [k, values] of Object.entries(SINGLE)) if (!values.includes(form.get(k)!)) return null;
   return { expectedRevision, fields: { allowedOrders: Object.keys(ORDER_TOKENS).filter(t => orders.includes(t)).map(t => [...ORDER_TOKENS[t]]),
     seedPolicy: form.get('seedPolicy') as ProtocolFields['seedPolicy'], referenceMemory: form.get('referenceMemory') === 'on',
     betweenTrials: form.get('betweenTrials') as ProtocolFields['betweenTrials'], receptionNumberFormat: 'daily_seq3',
-    rotationMode: form.get('rotationMode') as ProtocolFields['rotationMode'] } };
+    rotationMode: form.get('rotationMode') as ProtocolFields['rotationMode'], ...figures } };
 }
 function modeForm(form: URLSearchParams): { expectedRevision: number; value: 'on' | 'off' } | null {
   const keys = [...form.keys()];
@@ -224,11 +301,12 @@ export async function handleAdmin(request: Request, deps: AdminDeps): Promise<Re
   const deletePath = request.method === "POST" ? url.pathname.match(/^\/admin\/record\/([^/]+)\/delete$/) : null;
   const nextPath = request.method === 'POST' && deps.prepareNext ? url.pathname.match(/^\/admin\/record\/([^/]+)\/prepare-next$/) : null;
   const receptionPath = request.method === 'POST' && deps.receptions ? url.pathname.match(/^\/admin\/reception\/([^/]+)\/(approve|cancel)$/) : null;
+  const rolePath = url.pathname.match(/^\/admin\/(record|reception)\/([^/]+)\/participant-role$/u);
   const settingsPath = request.method === 'POST' && deps.receptionSettings ? url.pathname.match(/^\/admin\/reception-settings\/(protocol|mode)$/) : null;
   if (!deps.receptions && (url.pathname === '/admin/receptions' || url.pathname === '/admin/entry' || url.pathname === '/admin/receptions.js')) return notFound();
   if (!deps.receptions?.version && url.pathname === '/admin/receptions/version') return notFound();
   if (!deps.receptionSettings && url.pathname === '/admin/reception-settings') return notFound();
-  if (request.method === "POST" ? !deletePath && !nextPath && !receptionPath && !settingsPath : request.method !== "GET" && request.method !== "HEAD") return notFound();
+  if (request.method === "POST" ? !deletePath && !nextPath && !receptionPath && !settingsPath && !rolePath : request.method !== "GET" && request.method !== "HEAD") return notFound();
   const header = request.headers.get("Authorization");
   // Every credentialed attempt (right or wrong) counts, so guessing is capped per visitor.
   if (presentedToken(header) !== null && !(await deps.limiter.limit({ key: visitorKey(request) })).success) {
@@ -238,6 +316,21 @@ export async function handleAdmin(request: Request, deps: AdminDeps): Promise<Re
   if (auth === "unconfigured") return notFound();
   if (auth !== "ok") return plain(401, "Authentication required", { "WWW-Authenticate": REALM });
 
+  if (rolePath) {
+    const id = rolePath[2];
+    const reception = rolePath[1] === 'reception';
+    if (request.method === 'POST') {
+      if (!sameOrigin(request, url)) return plain(403, 'Forbidden');
+      if (reception ? !deps.receptions?.setParticipantRole : !deps.setParticipantRole) return notFound();
+      return participantRoleMutation(request, deps, id, reception, url.searchParams.get('from') === 'log');
+    }
+    if (reception || !RECORD_ID.test(id)) return receptionError(404, 'not_found');
+    try {
+      const summary = await deps.getSummary(id, true);
+      if (summary?.recordId !== id || !OBJECT_ID.test(summary.objectId) || !await deps.getRecord(summary)) return receptionError(404, 'not_found');
+      return respond(200, JSON.stringify({ recordId: id, role: summary.participantRole?.role ?? 'unclassified' }), 'application/json; charset=utf-8');
+    } catch { return receptionError(503, 'unavailable'); }
+  }
   if (settingsPath) {
     if (!sameOrigin(request, url)) return plain(403, 'Forbidden');
     return settingsMutation(request, deps.receptionSettings!, settingsPath[1]);
@@ -249,6 +342,16 @@ export async function handleAdmin(request: Request, deps: AdminDeps): Promise<Re
   if (receptionPath) {
     if (!sameOrigin(request, url)) return plain(403, 'Forbidden');
     return receptionMutation(request, deps.receptions!, receptionPath[1], receptionPath[2]);
+  }
+  const failedUsagePath = url.pathname.match(/^\/admin\/reception\/([^/]+)\/usage\.json$/u);
+  if (failedUsagePath) {
+    const id = failedUsagePath[1];
+    if (!deps.receptions?.failedStartUsage || !RECORD_ID.test(id)) return notFound();
+    try {
+      const usage = await deps.receptions.failedStartUsage(id);
+      return usage === null ? notFound() : respond(200, JSON.stringify(usage, null, 2), 'application/json; charset=utf-8',
+        { 'Content-Disposition': `attachment; filename="tangram-reception-usage-${id}.json"` });
+    } catch { return receptionError(503, 'reception_unavailable'); }
   }
   if (deps.receptions && url.pathname === '/admin/receptions') {
     try {
@@ -312,28 +415,43 @@ export async function handleAdmin(request: Request, deps: AdminDeps): Promise<Re
     if (!sameOrigin(request, url)) return plain(403, "Forbidden");
     const recordId = deletePath[1];
     if (!RECORD_ID.test(recordId)) return notFound();
-    if (await confirmation(request) !== recordId) return respond(400, renderMessage("削除していません", "確認欄に記録IDを正確に入力してください。"));
+    if (await confirmation(request) !== recordId) return respond(400, renderMessage("削除していません",
+      "確認欄に36文字の記録IDを正確に入力してください。", { href: "/admin", label: "実験ログへ" }));
     const summary = await deps.getSummary(recordId);
     if (!summary || summary.recordId !== recordId || !OBJECT_ID.test(summary.objectId)) return notFound();
     await deps.deleteRecord(summary);
     return respond(303, "", "text/plain; charset=utf-8", { Location: "/admin?deleted=1" });
   }
   if (url.pathname === "/admin/style.css") return respond(200, ADMIN_CSS, "text/css; charset=utf-8");
+  if (url.pathname === "/admin/figures") return respond(200, renderFigures());
   if (url.pathname === "/admin" || url.pathname === "/admin/") {
     const filter = parseFilter(url.searchParams);
     const page = await deps.listPage(url.searchParams.get("after"));
     return respond(200, renderList(applyFilter(page.items, filter), filter, page.next, await deps.audit(), deps.retentionDays,
       url.searchParams.get("deleted") === "1", Boolean(deps.receptions)));
   }
+  const experiment = url.pathname.match(/^\/admin\/record\/([^/]+)\/experiment$/u);
+  if (experiment) {
+    const id = experiment[1];
+    if (!RECORD_ID.test(id)) return notFound();
+    const summary = await deps.getSummary(id);
+    if (!summary || summary.recordId !== id || !OBJECT_ID.test(summary.objectId)) return notFound();
+    const record = await deps.getRecord(summary);
+    if (!record || typeof record !== 'object' || (record as {recordId?: unknown}).recordId !== id) return notFound();
+    if (request.method === 'GET' && await deps.canResumeParticipant?.(request, id)) {
+      return plain(303, '', { Location: '/#resume=' + id });
+    }
+    return respond(200, renderExperimentPreview(record, summary));
+  }
   const match = url.pathname.match(/^\/admin\/record\/([^/.]+)(\.json)?$/);
   if (!match || !RECORD_ID.test(match[1])) return notFound();
   // Only indexed trials are viewable; the owning object comes from the index, not the URL.
-  const summary = await deps.getSummary(match[1]);
+  const summary = await deps.getSummary(match[1], true);
   if (!summary || summary.recordId !== match[1] || !OBJECT_ID.test(summary.objectId)) return notFound();
   const record = await deps.getRecord(summary);
   if (!record) return respond(404, renderMessage("記録がありません", "このセッションには保存済みの記録がありません。"));
   // Researcher export of the full stored record (including the provisional questionnaire), as a download.
-  if (match[2]) return respond(200, JSON.stringify(record, null, 2), "application/json; charset=utf-8",
+  if (match[2]) return respond(200, JSON.stringify({ ...record, participantRole: summary.participantRole ?? participantRoleView() }, null, 2), "application/json; charset=utf-8",
     { "Content-Disposition": `attachment; filename="tangram-record-${summary.recordId}.json"` });
   return respond(200, renderDetail(record, summary, deps.summarizeLatency(record), deps.retentionDays));
 }

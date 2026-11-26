@@ -6,6 +6,8 @@ import { data, OWNER, UUID, readOwner, readAssignment, safeInt, validateBoundBas
 import { BaseSessionError } from '../v2/base-assignment-session.ts';
 import type { PersistReason } from '../v2/base-assignment-session.ts';
 import type { BaseLocalContainer, BaseFileStore, BaseOwnerState, BaseArchiveWrite, BaseRecord } from '../v2/base-assignment.ts';
+import { isParticipantRole, participantRoleView, readParticipantRoleEntry } from '../../../workers/tangram-experiment/src/admin/participant-role.ts';
+import type { ParticipantRoleEntry, ParticipantRoleView } from '../../../workers/tangram-experiment/src/admin/participant-role.ts';
 const fail = (reason: PersistReason = 'store_io') => new BaseSessionError('trial_unavailable', reason);
 const MAX_OWNER_BYTES = 64 * 1024 * 1024;
 const IDLE = 30 * 60 * 1000;
@@ -59,10 +61,14 @@ export type LocalStore = BaseFileStore & {
   alive(): Promise<boolean>;
   /** One questionnaire entry (a copy), without copying the container. */
   questionnaire(id: string): Promise<unknown>;
+  adminRecord(id: string, includeParticipantRole?: boolean): Promise<LocalAdminRecord | null>;
+  adminRecords(): Promise<LocalAdminRecord[]>;
+  setParticipantRole(id: string, role: unknown): Promise<boolean>;
   touch(): Promise<void>;
   saveQuestionnaire(id: string, value: unknown): Promise<void>;
   deleteRecord(id: string): Promise<boolean>;
 };
+type LocalAdminRecord = { record: BaseRecord; questionnaire: unknown; participantRole: ParticipantRoleView };
 export async function registerBaseOwner(root: string, ownerId: string, now: number): Promise<void> {
   await privateDirectory(root); if (!OWNER.test(ownerId) || !safeInt(now) || now < 0) throw fail();
   const value: BaseLocalContainer = { schemaVersion: 'base_local_owner_v1', owner: { schemaVersion: 'base_owner_v1', ownerId,
@@ -117,20 +123,46 @@ export async function openBaseFileStore({root, ownerId, now}: {root: string; own
     return c;
   }
   const expired = (c: BaseLocalContainer) => !safeInt(now()) || now() < 0 || now() - Math.max(c.lastAccessMs, lastAccess) >= IDLE;
-  async function save(c: BaseLocalContainer) {
-    container(c, ownerId);
-    // The text is what the next reader parses: refuse what readPrivate would refuse, and cache what the file holds (not the in-memory object).
-    const text = JSON.stringify(c);
-    if (Buffer.byteLength(text) > MAX_OWNER_BYTES) throw fail('size_limit');
+  async function replacePrivate(target: string, text: string, requireExisting: boolean) {
     const tmp = join(root, '.' + ownerId + '.' + randomUUID() + '.tmp'); let h;
     try {
       h = await open(tmp, 'wx', 0o600); await h.writeFile(text); await h.close(); h = undefined;
       // Refuse a replaced/hard-linked target rather than repairing its permissions.
-      const s = await lstat(file); if (!s.isFile() || s.nlink !== 1 || (s.mode & 0o777) !== 0o600) throw fail();
-      cache = null;
-      await rename(tmp, file);
-    } catch { cache = null; await h?.close().catch(() => {}); await unlink(tmp).catch(() => {}); throw fail(); }
+      const s = await lstat(target).catch((error: NodeJS.ErrnoException) => {
+        if (!requireExisting && error.code === 'ENOENT') return null;
+        throw error;
+      });
+      if (s && (!s.isFile() || s.nlink !== 1 || (s.mode & 0o777) !== 0o600)) throw fail();
+      await rename(tmp, target);
+    } catch { await h?.close().catch(() => {}); await unlink(tmp).catch(() => {}); throw fail(); }
+  }
+  async function save(c: BaseLocalContainer) {
+    container(c, ownerId);
+    const text = JSON.stringify(c);
+    if (Buffer.byteLength(text) > MAX_OWNER_BYTES) throw fail('size_limit');
+    cache = null;
+    await replacePrivate(file, text, true);
     try { const written = await lstat(file); cache = { sig: signature(written), c: JSON.parse(text) as BaseLocalContainer }; } catch { cache = null; }
+  }
+  const participantRoleFile = (id: string) => join(root, ownerId + '.' + id + '.participant-role.json');
+  async function removeRole(id: string): Promise<void> {
+    await unlink(participantRoleFile(id)).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== 'ENOENT') throw fail();
+    });
+  }
+  async function readRole(id: string): Promise<ParticipantRoleEntry | null> {
+    try { return readParticipantRoleEntry(await readPrivate(participantRoleFile(id)), id); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      throw fail();
+    }
+  }
+  const hasRecord = (c: BaseLocalContainer, id: string) =>
+    UUID.test(id) && !c.tombstones.includes(id) && Object.hasOwn(c.archives, id);
+  async function readAdminRecord(c: BaseLocalContainer, id: string, includeParticipantRole = true): Promise<LocalAdminRecord | null> {
+    if (!hasRecord(c, id)) return null;
+    return { record: c.archives[id], questionnaire: c.questionnaires[id] ?? null,
+      participantRole: participantRoleView(includeParticipantRole ? (await readRole(id))?.role : undefined) };
   }
   return {
     read: () => queued(async () => { const c = await loadShared(); return expired(c) ? {kind: 'expired'} : {kind: 'state', state: structuredClone(c.owner)}; }),
@@ -159,6 +191,33 @@ export async function openBaseFileStore({root, ownerId, now}: {root: string; own
       if (safeInt(now()) && now() >= shared.lastAccessMs && now() - shared.lastAccessMs < TOUCH_INTERVAL) return;
       const c = await load(); if (expired(c)) throw new BaseSessionError('owner_expired'); c.lastAccessMs = lastAccess; await save(c);
     }),
+    // Idle expiry is for participant access; a researcher may classify retained records.
+    adminRecord: (id, includeParticipantRole) => queued(async () => {
+      const c = await load();
+      // The tombstone survives a failed unlink or a restart between the two writes.
+      if (c.tombstones.includes(id)) await removeRole(id);
+      return readAdminRecord(c, id, includeParticipantRole);
+    }),
+    adminRecords: () => queued(async () => {
+      const c = await load();
+      for (const id of c.tombstones) await removeRole(id);
+      const records: LocalAdminRecord[] = [];
+      for (const id of Object.keys(c.archives)) {
+        const record = await readAdminRecord(c, id);
+        if (record) records.push(record);
+      }
+      return records;
+    }),
+    setParticipantRole: (id, role) => queued(async () => {
+      const c = await load();
+      if (!hasRecord(c, id) || !isParticipantRole(role)) return false;
+      const previous = await readRole(id);
+      if ((previous?.role ?? 'unclassified') !== role) {
+        const entry: ParticipantRoleEntry = { ...participantRoleView(role), recordId: id, updatedAt: new Date(now()).toISOString() };
+        await replacePrivate(participantRoleFile(id), JSON.stringify(entry), previous !== null);
+      }
+      return true;
+    }),
     saveQuestionnaire: (id, value) => queued(async () => {
       const c = await load(); if (expired(c)) throw new BaseSessionError('owner_expired');
       if (!c.archives[id] || c.tombstones.includes(id)) throw new BaseSessionError('not_found');
@@ -168,8 +227,12 @@ export async function openBaseFileStore({root, ownerId, now}: {root: string; own
       try {
         if (typeof id !== 'string' || !UUID.test(id)) throw fail();
         const c = await load();
+        if (c.tombstones.includes(id)) {
+          await removeRole(id);
+          return false;
+        }
         if (expired(c)) throw new BaseSessionError('owner_expired');
-        if (c.tombstones.includes(id) || !Object.hasOwn(c.archives, id)) return false;
+        if (!Object.hasOwn(c.archives, id)) return false;
         const record = c.archives[id];
         const envelope = Object.values(c.owner.admissions).find(e => e?.record?.recordId === id);
         if (!envelope) throw fail();
@@ -178,7 +241,9 @@ export async function openBaseFileStore({root, ownerId, now}: {root: string; own
         c.tombstones.push(id);
         envelope.record = null; envelope.status = 'failed'; envelope.errorCode = 'record_deleted';
         c.owner.revision += 1;
-        await save(c); return true;
+        await save(c);
+        await removeRole(id);
+        return true;
       } catch (error) {
         if (error instanceof BaseSessionError && error.code === 'owner_expired') throw error;
         throw fail();

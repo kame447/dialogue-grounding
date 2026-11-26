@@ -1,17 +1,25 @@
-import { ReceptionError, validateReception, effectiveRotationMode, effectiveBetweenTrials } from '../../../../dialogue-model/runtime/v2/reception.ts';
+import { PARTICIPANT_PRODUCTION_PROFILE } from '../../../../dialogue-model/runtime/web/participant-usage-policy.ts';
+import { ReceptionError, validateReception, effectiveRotationMode, effectiveBetweenTrials, effectiveFigureSelection } from '../../../../dialogue-model/runtime/v2/reception.ts';
 import { validateReceptionSettings } from './reception-settings.ts';
 import type { Reception, ReceptionSummary } from '../../../../dialogue-model/runtime/v2/reception.ts';
-import type { DisplayedProtocol, ReceptionAdminPort, ReceptionAdminRow, ReceptionAdminResult, ReceptionSettingsPort } from './reception-port.ts';
+import type { DisplayedProtocol, ReceptionAdminPort, ReceptionAdminRow, ReceptionAdminResult, ReceptionFailedStartUsage, ReceptionSettingsPort } from './reception-port.ts';
 import { OBJECT_ID, RECORD_ID } from './summary.ts';
+import { participantRoleView } from './participant-role.ts';
+import type { ParticipantRole, ParticipantRoleResult } from './participant-role.ts';
 
 type Owner = {
   adminReception(): Promise<Reception | null>;
+  adminFailedStartUsage?(receptionId: string): Promise<ReceptionFailedStartUsage | null>;
   adminApproveReception(input: { expectedRevision: number; order: number; protocol: DisplayedProtocol }): Promise<Reception>;
   adminCancelReception(input: { expectedRevision: number }): Promise<Reception>;
+  adminDeletedRecordIds?(recordIds: string[]): Promise<string[]>;
+  adminSetReceptionParticipantRole?(id: string, role: ParticipantRole, expectedRecordIds: string[] | null): Promise<ParticipantRoleResult>;
 };
 type Index = {
   listReceptions(): Promise<ReceptionSummary[]>;
   getReception(id: string): Promise<ReceptionSummary | null>;
+  recordRoles?(recordIds: string[], includeDeleted?: boolean): Promise<Record<string, ParticipantRole | 'deleted'>>;
+  participantRoleRevision?(): Promise<string | null>;
 };
 type Options = { index: Index; owner(objectId: string): Owner | null; readSettings(): Promise<unknown> };
 const PAGE_SIZE = 100;
@@ -19,8 +27,11 @@ const PAGE_SIZE = 100;
 /** Management values always come from the owning DO, never from index extras. */
 function project(r: Reception): ReceptionAdminRow {
   return { receptionId:r.receptionId, number:r.number, createdAt:r.createdAt, status:r.status, revision:r.revision,
-    plan:r.plan ? { order:[...r.plan.order], rotationMode:effectiveRotationMode(r.plan, 0), betweenTrials:effectiveBetweenTrials(r.plan) } : null,
-    trials:r.trials.map(t => ({...t})) };
+    plan:r.plan ? { order:[...r.plan.order], rotationMode:effectiveRotationMode(r.plan, 0), betweenTrials:effectiveBetweenTrials(r.plan),
+      figureSets:r.plan.trials.map((_, index) => effectiveFigureSelection(r.plan!, index).setId ?? '') } : null,
+    trials:r.trials.map(t => ({...t})),
+    ...(r.plan && r.plan.schemaVersion !== 'reception_plan_v1' && r.plan.participantRuntimeProfile === PARTICIPANT_PRODUCTION_PROFILE &&
+      r.trials.some(t => t.recordId === null) ? { hasUnrecordedProductionAdmission: true } : {}) };
 }
 function failure(error: unknown): ReceptionAdminResult {
   // RPC Error objects need not preserve custom .code properties. Accept only
@@ -66,29 +77,53 @@ export function createReceptionAdminPort(options: Options): ReceptionAdminPort {
       if (!s.protocol) return { configured:false, mode:s.mode.value };
       const p = s.protocol.protocol;
       return { configured:true, mode:s.mode.value, protocolId:p.protocolId, revision:s.protocol.revision, sha256:s.protocol.sha256,
-        allowedOrders:p.allowedOrders, rotationMode:p.rotationMode, betweenTrials:p.betweenTrials };
+        allowedOrders:p.allowedOrders, rotationMode:p.rotationMode, betweenTrials:p.betweenTrials,
+        ...(p.schemaVersion === 'reception_protocol_v3' ? { figureSelection:p.figureSelection, figureSetPolicy:p.figureSetPolicy } : {}) };
     },
     async listPage(after) {
       const summaries = await options.index.listReceptions();
       const position = after ? summaries.findIndex(r => r.receptionId === after) : -1;
       const start = position + 1, page = summaries.slice(start,start+PAGE_SIZE), items: ReceptionAdminRow[] = [];
-      const seen = new Set<string>();
+      const seen = new Set<string>(), liveRecords: string[] = [];
       for (const summary of page) {
         if (seen.has(summary.receptionId)) continue;
         const resolved = await resolve(summary,summary.receptionId);
         if (!resolved) continue;
-        seen.add(resolved.reception.receptionId); items.push(project(resolved.reception));
+        seen.add(resolved.reception.receptionId);
+        const item = project(resolved.reception);
+        if (options.index.recordRoles) {
+          const ids = item.trials.flatMap(trial => trial.recordId === null ? [] : [trial.recordId]);
+          const deleted = new Set(ids.length ? await resolved.owner.adminDeletedRecordIds?.(ids) : []);
+          for (const trial of item.trials) {
+            if (trial.recordId === null) continue;
+            if (deleted.has(trial.recordId)) trial.recordDeleted = true;
+            else liveRecords.push(trial.recordId);
+          }
+        }
+        items.push(item);
+      }
+      if (liveRecords.length && options.index.recordRoles) {
+        const roles = await options.index.recordRoles(liveRecords, true);
+        for (const item of items) for (const trial of item.trials) {
+          if (trial.recordId === null || trial.recordDeleted) continue;
+          const role = roles[trial.recordId];
+          if (role === 'deleted') trial.recordDeleted = true;
+          else trial.participantRole = participantRoleView(role);
+        }
       }
       return { items, next:start+PAGE_SIZE < summaries.length ? page.at(-1)!.receptionId : null };
     },
     async version(since) {
       // Change detection only: index rows and settings are hashed, never shown; management values still come from the owner.
-      const [rows, settings] = await Promise.all([options.index.listReceptions(), options.readSettings()]);
+      const [rows, settings, participantRoleRevision] = await Promise.all([
+        options.index.listReceptions(), options.readSettings(), options.index.participantRoleRevision?.(),
+      ]);
       const s = validateReceptionSettings(structuredClone(settings)), list = structuredClone(rows);
       if (!Array.isArray(list)) throw new Error('reception_unavailable');
       const material = JSON.stringify({ receptions: list.map(r => [r?.receptionId, r?.number, r?.status, r?.revision,
         Array.isArray(r?.trials) ? r.trials.map(t => t?.recordId ?? null) : null]),
-        protocol: s.protocol ? [s.protocol.revision, s.protocol.sha256] : null, mode: [s.mode.value, s.mode.revision] });
+        protocol: s.protocol ? [s.protocol.revision, s.protocol.sha256] : null, mode: [s.mode.value, s.mode.revision],
+        participantRoleRevision });
       const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(material)));
       // Only the few index rows that could be new are confirmed with their owner, so a lost index update
       // (e.g. a cancellation) does not keep counting them.
@@ -103,6 +138,17 @@ export function createReceptionAdminPort(options: Options): ReceptionAdminPort {
       return { version: [...digest].map(b => b.toString(16).padStart(2, '0')).join(''), newPending };
     },
     async get(id) { const result = await lookup(id); return result ? project(result.reception) : null; },
+    async setParticipantRole(id, role, expectedRecordIds) {
+      const resolved = await lookup(id);
+      if (!resolved?.owner.adminSetReceptionParticipantRole) return { ok: false, error: 'not_found' };
+      return await resolved.owner.adminSetReceptionParticipantRole(id, role, expectedRecordIds);
+    },
+    async failedStartUsage(id) {
+      const resolved = await lookup(id);
+      if (!resolved?.owner.adminFailedStartUsage) return null;
+      const snapshot = structuredClone(await resolved.owner.adminFailedStartUsage(id));
+      return snapshot?.receptionId === id ? snapshot : null;
+    },
     approve:(id,input) => mutate(id,owner => owner.adminApproveReception(input)),
     cancel:(id,input) => mutate(id,owner => owner.adminCancelReception(input)),
   };

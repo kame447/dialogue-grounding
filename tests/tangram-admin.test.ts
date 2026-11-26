@@ -199,7 +199,7 @@ test("JSON export of one record: same auth and limiter, admin headers, attachmen
   for (const [key, header] of Object.entries(ADMIN_HEADERS)) assert.equal(response.headers.get(key), header, key);
   assert.equal(response.headers.get("Set-Cookie"), null);
   assert.equal(response.headers.get("Access-Control-Allow-Origin"), null);
-  assert.deepEqual(await response.json(), record());
+  assert.deepEqual(await response.json(), { ...record(), participantRole: { schemaVersion: "participant_role_v1", role: "unclassified" } });
   const limited = deps({ limiter: { async limit() { return { success: false }; } } });
   assert.equal((await handleAdmin(req(path, AUTH), limited.value)).status, 429);
 });
@@ -523,4 +523,25 @@ test("participant state is unchanged and /admin is routed before the participant
   assert.doesNotMatch(source, /runExpiry|expireRecords|nextExpiry|\.setAlarm\(/, "no Worker entrypoint invokes expiry or schedules it");
   assert.match(source, /private async scheduleExpiry\(\)[\s\S]*?await this\.ctx\.storage\.deleteAlarm\(\)/);
   assert.doesNotMatch(source, /deleteAll/);
+});
+
+
+test('active experiment link requires admin authentication and redirects only for the owning browser', async () => {
+  const path = `/admin/record/${RECORD}/experiment`;
+  const denied = deps({ canResumeParticipant: async () => { assert.fail('unauthenticated owner lookup'); } });
+  assert.equal((await handleAdmin(req(path), denied.value)).status, 401);
+  assert.equal(denied.calls.getRecord, 0);
+  const owned = deps({ canResumeParticipant: async (_request, id) => id === RECORD });
+  const opened = await handleAdmin(req(path, AUTH), owned.value);
+  assert.equal(opened.status, 303); assert.equal(opened.headers.get('Location'), '/#resume=' + RECORD);
+  assert.equal(opened.headers.get('Set-Cookie'), null);
+  const foreign = deps({ canResumeParticipant: async () => false });
+  const view = await handleAdmin(req(path, AUTH), foreign.value);
+  assert.equal(view.status, 200); const html = await view.text();
+  assert.match(html, /実験画面（閲覧専用）/u);
+  assert.equal((html.match(/<path d=/gu) ?? []).length, 6);
+  assert.match(html, /PRIVATE-UTTERANCE/); assert.match(html, /&lt;script&gt;/);
+  assert.doesNotMatch(html, /<script|<form|PRIVATE-QUEUE|PRIVATE-NAME|PRIVATE-UA|client-PRIVATE|trial-PRIVATE/u);
+  assert.equal(foreign.calls.deleteRecord, 0);
+  assert.equal((await handleAdmin(req(path, AUTH, 'POST'), deps().value)).status, 404);
 });

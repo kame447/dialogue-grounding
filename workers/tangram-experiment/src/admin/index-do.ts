@@ -1,7 +1,8 @@
 import { DurableObject } from "cloudflare:workers";
 import type { AdminSummary } from "./summary";
-import { getSummary, listAudit, listPage, removeSummaries, upsertSummary } from "./index-store.ts";
+import { getSummary, listAudit, listPage, PARTICIPANT_ROLE_REVISION, recordHash, recordRoles, removeSummaries, setParticipantRole, upsertSummary } from "./index-store.ts";
 import type { AuditEntry, DeletionReason } from "./index-store.ts";
+import { OBJECT_ID, RECORD_ID } from "./summary.ts";
 import { formatReceptionNumber, receptionNumberDay } from '../../../../dialogue-model/runtime/v2/reception.ts';
 import type { ReceptionSummary } from '../../../../dialogue-model/runtime/v2/reception.ts';
 import { modeHistory, protocolHistory, readSettings, saveMode, saveProtocol } from './reception-settings.ts';
@@ -45,9 +46,22 @@ export class AdminIndex extends DurableObject {
       return number;
     });
   }
-  async upsert(summary: AdminSummary): Promise<boolean> { return upsertSummary(this.ctx.storage, summary); }
+  async upsert(summary: AdminSummary): Promise<boolean> {
+    return this.ctx.storage.transaction(tx => upsertSummary(tx, summary));
+  }
   async get(recordId: string): Promise<AdminSummary | null> { return getSummary(this.ctx.storage, recordId); }
   async page(after: string | null): Promise<{ items: AdminSummary[]; next: string | null }> { return listPage(this.ctx.storage, after); }
-  async remove(recordIds: string[], reason: DeletionReason): Promise<number> { return removeSummaries(this.ctx.storage, recordIds, reason, Date.now()); }
+  async recordRoles(recordIds: string[], includeDeleted = false) { return recordRoles(this.ctx.storage, recordIds, includeDeleted); }
+  async participantRoleRevision(): Promise<string | null> { return await this.ctx.storage.get<string>(PARTICIPANT_ROLE_REVISION) ?? null; }
+  async setParticipantRole(recordIds: string[], objectId: string, role: unknown): Promise<boolean> {
+    if (!Array.isArray(recordIds) || !OBJECT_ID.test(objectId) ||
+        recordIds.some(id => typeof id !== "string" || !RECORD_ID.test(id))) return false;
+    const targets = await Promise.all(recordIds.map(async recordId => ({ recordId, hash: await recordHash(recordId) })));
+    const at = new Date().toISOString(), revision = crypto.randomUUID();
+    return this.ctx.storage.transaction(tx => setParticipantRole(tx, targets, objectId, role, at, revision));
+  }
+  async remove(recordIds: string[], reason: DeletionReason): Promise<number> {
+    return this.ctx.storage.transaction(tx => removeSummaries(tx, recordIds, reason, Date.now()));
+  }
   async audit(): Promise<AuditEntry[]> { return listAudit(this.ctx.storage); }
 }
