@@ -1,19 +1,30 @@
 // Independent P5 expectations. All dialogue and provider responses are synthetic.
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { LocalClaimView } from "../dialogue-model/runtime/local-grounding/contract.ts";
 import { verifyRecords } from "../dialogue-model/runtime/diagnostics/parity-verify/index.ts";
-import { priorClaimViews } from "../dialogue-model/runtime/local-grounding/derive.ts";
-import { buildRecords, OWN, type Label, type Plan, type Turn } from "./support/s4-v3-records.ts";
+import { hash } from "../dialogue-model/runtime/diagnostics/parity-verify/core.ts";
+import { validGenerationRetryVersion } from "../dialogue-model/runtime/v2/generation-guard.ts";
+import { deriveLocalIssues, priorClaimViews } from "../dialogue-model/runtime/local-grounding/derive.ts";
+import { buildRecords, OWN, runTurn, type Label, type Plan, type Turn } from "./support/s4-v3-records.ts";
 
 const conditions = ["repair-first", "bypass-enabled"] as const;
 const [left, right] = OWN.ownAnchors.map((a: { id: string }) => a.id) as [string, string];
 const sail = "帆";
 const flute = "笛";
+const detail = "切れ込みの形";
 const looseEnd = "切れ込みの形はまだ照合できていません。";
 const useSail = "その見立ては共通の目印になります。" + looseEnd;
 const acknowledgement = "帆に見えるというお話ですね。";
 const rejectSail = "帆という見立ては今回は目印に使いません。";
 const request = "その見立てを目印に、次の特徴を話せますか？";
+const v12 = "jev_generation_retry_v12";
+const p5Version: string = "jev_generation_retry_v13";
+const supportedP5Version = validGenerationRetryVersion(p5Version, "two_stage_v3", "holistic_v5") &&
+  p5Version !== "jev_generation_retry_v1" ? p5Version : undefined;
+const technicalTrial = { version: "adaptive_repair_v3" } as const;
+// Exact HTTP request bodies from the v12 control on 671acdb, before P5.
+const v12HttpDigest = "a69b96be57143a984f2c7c7fc5c78f7bd82982c97119700a1498776d5ef6f13b";
 
 function segment(quote: string, targets: string[], proposition: string, respondsToTurn: number | null = null,
   linkedIssueId: string | null = null, aspect = "construal", name: string | null = null) {
@@ -69,27 +80,36 @@ function finish(speech = useSail, reading = sail, target = "figure_0", chooseUse
     ? (chooseUse ? candidates(criteria).find(c => c.construal === reading)?.key : "none") ?? "none" : undefined } };
 }
 
-function run(label: Label, turns: Turn[]) {
-  return buildRecords({ label, turns, dialoguePolicy: "holistic_v5", generationRetryVersion: "jev_generation_retry_v12",
-    technicalTrial: { version: "adaptive_repair_v3" } }).catch(error => {
+async function run(label: Label, turns: Turn[], version: "p5" | "v12" = "p5") {
+  // The original base predates the v13 parser. Probe its v12 path so a red
+  // assertion can name the absent behavior. Once supported, P5 pins v13.
+  const generationRetryVersion = version === "p5" ? supportedP5Version ?? v12 : v12;
+  const outcomes: Record<Label, Awaited<ReturnType<typeof runTurn>>[]> = { "repair-first": [], "bypass-enabled": [] };
+  const records = await buildRecords({ label, turns, dialoguePolicy: "holistic_v5", generationRetryVersion,
+    technicalTrial,
+    onTurn: (side, outcome) => outcomes[side].push(outcome) }).catch(error => {
     const trace = error.traces?.at(-1);
     if (!trace) throw error;
     throw new Error(JSON.stringify({ error: trace.errorCode, guard: trace.generationGuard,
       decision: trace.decisionFailure, turn: trace.turnIndex }), { cause: error });
   });
+  if (version === "p5" && supportedP5Version) assert.equal(records.trials[0].replay[0].tape.generationRetryVersion, p5Version);
+  return { records, outcomes };
 }
-type Records = Awaited<ReturnType<typeof run>>;
+type Run = Awaited<ReturnType<typeof run>>;
+type Records = Run["records"];
 type Choice = { criteria: Record<string, string> };
-function observed(records: Records, label: Label) {
+function observed({ records, outcomes }: Run, label: Label) {
   const trial = records.trials[0];
   const replay = trial.replay[0];
   const side = replay.result.sides.find((s: { label: Label }) => s.label === label);
   assert.ok(side);
-  const menus = side.requests.flatMap((r: { payload?: { questions?: Record<string, Choice> } }) =>
+  const menus: Choice["criteria"][] = side.requests.flatMap((r: { payload?: { questions?: Record<string, Choice> } }) =>
     r.payload?.questions?.[question] ? [r.payload.questions[question].criteria] : []);
-  return { trial, replay, side, menus, trace: trial.attempts[0], text: trial.turns[0].publicText,
-    judgment: trial.lastCommittedState.judgments.at(-1).jevTurn,
-    claims: priorClaimViews(trial.lastCommittedState.graph, { limit: trial.lastCommittedState.graph.records.length }) };
+  const outcome = outcomes[label].at(-1)!;
+  return { trial, replay, side, menus, outcome, trace: outcome.trace, text: outcome.speech,
+    judgment: outcome.state.judgments.at(-1).jevTurn,
+    claims: priorClaimViews(outcome.state.graph, { limit: outcome.state.graph.records.length }) };
 }
 type Observation = ReturnType<typeof observed>;
 
@@ -99,6 +119,8 @@ function pair(o: Observation, reading: string, targets: string[], sourceTurns: [
   assert.ok(source && support, "fixture must produce verified public construal and support: " +
     JSON.stringify(o.claims.map(({ id, sourceTurn, speaker, act, aspect, proposition, respondsTo }) =>
       ({ id, sourceTurn, speaker, act, aspect, proposition, respondsTo }))));
+  assert.ok(source.act === "construe" || source.act === "assert");
+  assert.equal(support.act, "agree");
   assert.notEqual(source.speaker, support.speaker);
   assert.equal(support.respondsTo, source.id);
   assert.equal(o.menus.length, 1, "decision must offer a closed common-reference choice");
@@ -107,32 +129,79 @@ function pair(o: Observation, reading: string, targets: string[], sourceTurns: [
   const selected = choices.find(c => c.construal === reading);
   assert.ok(selected, "the jointly supported reading must be offered");
   assert.deepEqual([...selected.figureIds].sort(), [...targets].sort());
-  assert.deepEqual([...selected.claimIds].sort(), [source.id, support.id].sort());
+  assert.ok(selected.claimIds.includes(source.id) && selected.claimIds.includes(support.id));
+  for (const id of selected.claimIds) {
+    if (id === source.id) continue;
+    const evidence: LocalClaimView | undefined = o.claims.find(claim => claim.id === id);
+    assert.ok(evidence && evidence.act === "agree" && evidence.speaker !== source.speaker &&
+      evidence.respondsTo === source.id && evidence.targets.some(figure => targets.includes(figure)));
+  }
   return selected;
 }
 
-function s4(records: Records, o: Observation) {
+function interventionChecks(records: Records) {
+  return verifyRecords(records).checks.filter(c => c.id.startsWith("intervention.trial.0.attempt.0."));
+}
+
+function s4({ records }: Run, o: Observation) {
   assert.equal(o.replay.result.status, "same_material_intervention_verified");
   assert.equal(o.replay.result.recordedPayloadsReproduced, true);
-  const checks = verifyRecords(records).checks.filter(c => c.id.startsWith("intervention.trial.0.attempt.0."));
+  const checks = interventionChecks(records);
   assert.ok(checks.some(c => c.id.endsWith(".replay")), "S4 must actually check replay");
   assert.ok(checks.every(c => c.status === "pass"), JSON.stringify(checks));
 }
 
-function effects(o: Observation, candidate: Candidate, published: boolean) {
-  assert.deepEqual([...o.judgment.executed.sharedClaimIds].sort(), [...candidate.claimIds].sort(),
-    "typed choice retains the actual evidence regardless of what gets published");
-  assert.equal(o.trace.sharedPublished, published, "publication reflects the meaning of the delivered utterance");
-  assert.equal(o.trace.publicSpeech, o.text, "public result is tied to the delivered utterance");
-  assert.deepEqual(o.trial.lastCommittedState.ledger, o.replay.tape.state.ledger, "P5 must not agree a name");
+function effects(o: Observation, candidate: Candidate | null, publicSpeech: string) {
+  const expectedIds = candidate ? [...candidate.claimIds].sort() : [];
+  assert.deepEqual([...(o.judgment.executed.sharedClaimIds ?? [])].sort(), expectedIds);
+  assert.deepEqual([...(o.trace.executed.sharedClaimIds ?? [])].sort(), expectedIds);
+  assert.equal(o.text, publicSpeech, "the response delivered by the runtime");
+  assert.equal(o.trace.publicSpeech, o.text, "the trace matches the delivered utterance");
+  if (o.trial.label === o.side.label) assert.equal(o.trial.turns[0].publicText, o.text);
+  assert.deepEqual(o.outcome.state.ledger, o.replay.tape.state.ledger, "P5 must not agree a name");
+}
+
+function checkS4Rejects(records: Records) {
+  const checks = interventionChecks(records);
+  assert.ok(checks.some(c => c.id.endsWith(".replay") && c.status === "mismatch"), JSON.stringify(checks));
+}
+
+function unresolved(targets = [left], target = "figure_0"): Turn {
+  const human = "切れ込みの形はどんな形ですか？";
+  return { human, plan: { ...neutral(looseEnd, target), act: "ask",
+    extraction: segment(human, targets, detail, null, null, "contour") } };
+}
+
+function openDetail(state: Observation["outcome"]["state"], targets: string[]) {
+  const issue = deriveLocalIssues(state.graph).find(value => value.aspect === "contour" &&
+    targets.every(id => value.targets.includes(id)));
+  assert.ok(issue && ["unconfirmed", "deferred", "contested", "denied"].includes(issue.state),
+    "the verified detail remains unresolved");
+  return issue;
+}
+
+function assertGenerationScope(o: Observation, targets: string[]) {
+  const request = o.side.requests.find((value: { phase: string }) => value.phase === "generation");
+  const messages = request?.payload?.messages as { role: string; content: unknown }[] | undefined;
+  assert.ok(messages);
+  const instructions = messages.filter(m => m.role === "system").map(m => String(m.content)).join("\n");
+  assert.equal(o.judgment.executed.target.kind, "multiple");
+  assert.deepEqual([...o.judgment.executed.target.figureIds].sort(), [...targets].sort());
+  assert.ok(instructions.includes('"target":' + JSON.stringify({ kind: "multiple", figureIds: targets })));
+  assert.ok(instructions.includes(detail) && instructions.includes(openDetail(o.replay.tape.state, targets).issueId),
+    "generation must receive the verified unresolved detail");
+}
+
+// The approved ordering can be changed without replacing the fixture.
+function namingRequestMode(): "same-turn" | "separate-turn" {
+  return "same-turn";
 }
 
 for (const label of conditions) {
   test(`P5 ${label}: partner-first support enables joint use, keeps details open, and does not name`, async () => {
     const records = await run(label, [humanFirst(), finish()]);
     const o = observed(records, label);
-    effects(o, pair(o, sail, [left], [1, 2]), true);
-    assert.equal(o.text, useSail);
+    effects(o, pair(o, sail, [left], [1, 2]), useSail);
     s4(records, o);
   });
 
@@ -146,6 +215,8 @@ for (const label of conditions) {
         extraction: segment(text, [left], reading, act === "ask" ? 2 : null) } }, finish(acknowledgement)]);
       const o = observed(records, label);
       assert.ok(o.claims.some(c => c.sourceTurn === 2 && c.act === "construe"));
+      assert.equal(o.claims.find(c => c.sourceTurn === 3 && c.quote === text)?.act, act,
+        "the other speaker's utterance was actually classified");
       assert.deepEqual(o.menus.flatMap(candidates), []);
       assert.deepEqual(o.trial.lastCommittedState.ledger, o.replay.tape.state.ledger);
     }
@@ -165,54 +236,79 @@ for (const label of conditions) {
     const rightRecords = await run(label, [...turns.slice(0, -1), finish("笛に見える形を目印にしましょう。", flute, "figure_1")]);
     const rightObserved = observed(rightRecords, label);
     const offered = pair(o, sail, [left], [2, 3]);
-    assert.ok(!candidates(o.menus[0]).some(c => c.construal === flute && c.figureIds.includes(left)));
-    effects(o, offered, true);
-    effects(rightObserved, pair(rightObserved, flute, [right], [5, 6]), true);
+    assert.ok(candidates(o.menus[0]).every(c => c.figureIds.includes(left) && c.construal !== flute));
+    const rightOffered = pair(rightObserved, flute, [right], [5, 6]);
+    assert.ok(candidates(rightObserved.menus[0]).every(c => c.figureIds.includes(right) && c.construal !== sail));
+    effects(o, offered, useSail);
+    effects(rightObserved, rightOffered, "笛に見える形を目印にしましょう。");
   });
 
   test(`P5 ${label}: a chosen one-character reading survives paraphrase, acknowledgement and refusal`, async () => {
-    for (const [speech, published] of [[`帆に見える形を目印にしましょう。`, true], [useSail, true],
-      [acknowledgement, false], [rejectSail, false]] as const) {
-      const records = await run(label, [...aiFirst(), finish(speech)]);
+    for (const [reading, speech] of [[sail, "帆に見える形を目印にしましょう。"], [sail, useSail],
+      [sail, acknowledgement], [sail, rejectSail], ["帆船", "帆船に見えるというお話ですね。"],
+      ["帆船", "帆船という見立ては今回は共通の目印には使いません。"]]) {
+      const records = await run(label, [...aiFirst({ reading }), finish(speech, reading)]);
       const o = observed(records, label);
-      effects(o, pair(o, sail, [left], [2, 3]), published);
-      assert.equal(o.text, speech);
+      effects(o, pair(o, reading, [left], [2, 3]), speech);
     }
   });
 
-  test(`P5 ${label}: an ambiguous pair permits coarse use and blocks invented identity or detail agreement`, async () => {
+  test(`P5 ${label}: an ambiguous pair retains the open detail and permits coarse use`, async () => {
     const targets = [left, right], target = "figures_0_1";
-    const prior = aiFirst({ targets, target });
-    const safe = "その見立てを目印にしましょう。細部まで同じではありません。";
-    const control = observed(await run(label, [...prior, finish(safe, sail, target)]), label);
-    effects(control, pair(control, sail, targets, [2, 3]), true);
-    assert.equal(control.text, safe);
-    for (const overclaim of [
-      "帆を目印にしましょう。これで互いに見ている形を一つに特定できました。",
-      "帆を目印にしましょう。切れ込みの形も双方で完全に一致しています。",
-      "帆を目印にしましょう。この図形の名前は帆に決まりました。",
-    ]) {
-      const turn = finish(overclaim, sail, target);
-      turn.plan.drafts = [overclaim, safe];
-      const o = observed(await run(label, [...prior, turn]), label);
-      assert.equal(o.text, safe, "a semantically unsafe draft must be corrected before delivery");
-      effects(o, pair(o, sail, targets, [2, 3]), true);
+    const prior = [...aiFirst({ targets, target }), unresolved(targets, target)];
+    for (const speech of ["その見立てを目印にしましょう。細部まで同じではありません。",
+      "同じだと言えるのは大まかな見立てまでです。それを目印にしましょう。"]) {
+      const o = observed(await run(label, [...prior, finish(speech, sail, target)]), label);
+      assertGenerationScope(o, targets);
+      const before = openDetail(o.replay.tape.state, targets);
+      const after = openDetail(o.outcome.state, targets);
+      assert.equal(after.issueId, before.issueId);
+      assert.equal(after.state, before.state);
+      assert.equal(o.trace.generationGuard.regenerated, false);
+      effects(o, pair(o, sail, targets, [2, 3]), speech);
     }
+  });
+
+  test(`P5 ${label}: the existing naming check blocks a draft that adopts a name`, async () => {
+    const unsafe = "帆を目印にしましょう。この図形の名前は「帆」に決まりました。";
+    const safe = "その見立てを目印にしましょう。名前はまだ決めていません。";
+    const turn = finish(safe);
+    const choose = turn.plan.choose!;
+    turn.plan.drafts = [unsafe, safe];
+    turn.plan.choose = (key, criteria, context) => key === "draft_naming"
+      ? context.generationCalls === 1 ? "adopt_other" : "none"
+      : choose(key, criteria, context);
+    const o = observed(await run(label, [...aiFirst(), turn]), label);
+    assert.ok(o.trace.generationGuard.violations.includes("draft_act_mismatch"));
+    assert.equal(o.trace.generationGuard.regenerated, true);
+    effects(o, pair(o, sail, [left], [2, 3]), safe);
   });
 
   test(`P5 ${label}: a naming request gets a separate clarifying response`, async () => {
+    const prior = aiFirst();
     const human = "この図形を「羽」と呼びませんか？";
-    const speech = "その見立ては目印にできます。羽と呼びたいのは、切れ込みのある形ですか？";
-    const turn = finish(speech);
+    const clarification = "羽と呼びたいのは、切れ込みのある形ですか？";
+    const sameTurn = namingRequestMode() === "same-turn";
+    const speech = sameTurn ? "その見立ては目印にできます。" + clarification : clarification;
+    const turn = finish(speech, sail, "figure_0", sameTurn);
     turn.human = human;
     Object.assign(turn.plan, { action: "confirm", act: "name_propose",
       extraction: segment(human, [], "羽という名前の提案", null, null, "name", "羽") });
-    const records = await run(label, [...aiFirst(), turn]);
+    const records = await run(label, [...prior, turn]);
     const o = observed(records, label);
     assert.equal(o.trace.namingRequest, true);
     assert.equal(o.trace.executed.action, "confirm");
-    assert.equal(o.text, speech);
-    effects(o, pair(o, sail, [left], [2, 3]), true);
+    const actionMenu = o.side.requests.find((r: { payload?: { questions?: { action?: Choice } } }) =>
+      r.payload?.questions?.action)?.payload.questions.action.criteria;
+    assert.ok(actionMenu && !Object.hasOwn(actionMenu, "accept"));
+    if (sameTurn) {
+      effects(o, pair(o, sail, [left], [2, 3]), speech);
+    } else {
+      effects(o, null, speech);
+      assert.deepEqual(o.menus, []);
+      const later = observed(await run(label, [...prior, turn, finish()]), label);
+      effects(later, pair(later, sail, [left], [2, 3]), useSail);
+    }
   });
 
   test(`P5 ${label}: later repair can reopen the unresolved feature on the same reference`, async () => {
@@ -220,21 +316,71 @@ for (const label of conditions) {
     const speech = "切れ込みの形をもう一度比べましょう。";
     const follow = { human, plan: { ...neutral(speech), action: "confirm", act: "ask",
       extraction: segment(human, [left], "切れ込みの形", null, null, "contour") } };
-    const records = await run(label, [...aiFirst(), finish(), follow]);
+    const records = await run(label, [...aiFirst(), unresolved(), finish(), follow]);
     const o = observed(records, label);
     const earlier = o.replay.tape.state.judgments.at(-1).jevTurn;
     assert.ok(earlier.executed.sharedClaimIds?.length, "the previous turn actually chose P5");
+    const beforeAdoption = records.outcomes[label].at(-3)!.state;
+    assert.equal(openDetail(o.replay.tape.state, [left]).issueId, openDetail(beforeAdoption, [left]).issueId);
     assert.equal(o.trace.executed.action, "confirm");
     assert.equal(o.trace.executed.target.figureId, left);
     assert.equal(o.text, speech);
     assert.deepEqual(o.trial.lastCommittedState.ledger, o.replay.tape.state.ledger);
     s4(records, o);
   });
+
+  test(`P5 ${label}: v12 on the same public evidence has no P5 choice`, async () => {
+    const control = await run(label, [humanFirst(), finish()], "v12");
+    const o = observed(control, label);
+    assert.equal(o.replay.tape.generationRetryVersion, v12);
+    const source = o.claims.find(c => c.sourceTurn === 1 && c.act === "construe");
+    const support = o.claims.find(c => c.sourceTurn === 2 && c.act === "agree");
+    assert.ok(source && support && support.respondsTo === source.id);
+    assert.deepEqual(o.menus, []);
+    effects(o, null, useSail);
+    s4(control, o);
+    assert.equal(hash(control.outcomes[label].flatMap(outcome => outcome.httpBodies)), v12HttpDigest);
+  });
+
+  test(`P5 ${label}: denying only the right support preserves the left common reading`, async () => {
+    const first = humanFirst([left, right]);
+    first.plan.aiExtraction = segment(first.plan.speech!, [left], sail, 1);
+    const rightSupport = "右の形も大まかに帆に見えます。";
+    const separateSupport: Turn = {
+      human: "右の形についても、どう見えますか？",
+      plan: { ...neutral(rightSupport, "figure_1"), aiExtraction: segment(rightSupport, [right], sail, 1),
+        aiActs: ["agree"], choose: responseTo("1:local1") },
+    };
+    const human = "右の形については、やはり帆に見えるという見立てには同意しません。";
+    const denial: Turn = {
+      human, plan: { ...neutral(acknowledgement, "figure_1"), act: "deny",
+        extraction: segment(human, [right], sail, 4), choose: responseTo("5:pub1") },
+    };
+    const prior = [first, separateSupport, denial];
+    const leftRun = await run(label, [...prior, finish()]);
+    const leftResult = observed(leftRun, label);
+    const rightResult = observed(await run(label, [...prior, finish(acknowledgement, sail, "figure_1")]), label);
+    const removed = leftResult.claims.find(c => c.sourceTurn === 4 && c.act === "agree");
+    const correction = leftResult.claims.find(c => c.sourceTurn === 5 && c.act === "deny");
+    assert.ok(removed && correction, JSON.stringify({
+      claims: leftResult.claims.map(({ id, sourceTurn, targets, act, respondsTo }) => ({ id, sourceTurn, targets, act, respondsTo })),
+      verification: leftRun.outcomes[label].at(-2)?.trace.local?.verification?.rejected,
+    }));
+    assert.deepEqual(removed.targets, [right]);
+    assert.deepEqual(correction.targets, [right]);
+    assert.equal(correction.respondsTo, removed.id);
+    assert.ok(!rightResult.menus.flatMap(candidates).some(c => c.construal === sail));
+    effects(rightResult, null, acknowledgement);
+    const rightBefore = observed(await run(label, [first, separateSupport, finish(useSail, sail, "figure_1")]), label);
+    assert.ok(rightBefore.menus.flatMap(candidates).some(c => c.construal === sail &&
+      c.figureIds.includes(right) && c.claimIds.includes(removed.id)), "the right support was usable before the denial");
+    effects(leftResult, pair(leftResult, sail, [left], [1, 2]), useSail);
+  });
 }
 
 test("P5: S4 accepts each side's own post-veto choice and public result in both saved directions", async () => {
-  for (const label of conditions) for (const [speech, chosen, published] of [
-    [acknowledgement, false, false], [useSail, true, true], [acknowledgement, true, false],
+  for (const label of conditions) for (const [speech, chosen] of [
+    [acknowledgement, false], [useSail, true], [acknowledgement, true],
   ] as const) {
     const turn = finish(speech, sail, "figure_0", chosen);
     Object.assign(turn.plan, { action: "defer", actionScores: { defer: 1, accept: 0.9 },
@@ -245,11 +391,12 @@ test("P5: S4 accepts each side's own post-veto choice and public result in both 
     assert.equal(repair.side.executed?.action, "accept", "repair runs the post-veto action");
     assert.equal(bypass.side.executed?.action, "defer", "bypass keeps the original action");
     const selected = pair(repair, sail, [left], [2, 3]);
-    assert.deepEqual(bypass.menus.flatMap(candidates), []);
-    const o = label === "repair-first" ? repair : bypass;
-    if (label === "repair-first" && chosen) effects(o, selected, published);
-    else assert.ok(!o.judgment.executed.sharedClaimIds?.length);
-    s4(records, o);
+    assert.deepEqual(bypass.menus, []);
+    effects(repair, chosen ? selected : null, speech);
+    effects(bypass, null, turn.plan.speechByLabel!["bypass-enabled"]!);
+    const details = repair.side.requests.filter((r: { role: string }) => r.role === "alternative_detail");
+    assert.ok(details.some((r: { payload?: { questions?: Record<string, Choice> } }) => r.payload?.questions?.[question]));
+    s4(records, label === "repair-first" ? repair : bypass);
   }
 });
 
@@ -265,6 +412,207 @@ test("P5: a long public history retains both direct evidence IDs for the adopted
   const o = observed(records, "repair-first");
   assert.ok(o.claims.filter(c => c.issueId === "1:local1").length > 32,
     "the synthetic evidence on one issue exceeds the old 32-ID boundary");
-  effects(o, pair(o, last, [left], [start, start + 1]), true);
+  effects(o, pair(o, last, [left], [start, start + 1]), "その見立てを目印にしましょう。");
   s4(records, o);
+});
+
+test("P5: four supported readings within the request budget remain available", async () => {
+  const readings = [sail, flute, "提灯", "木の葉"];
+  const turns = [humanFirst(), ...readings.slice(1).flatMap((reading, index) =>
+    aiFirst({ reading, start: 3 + 2 * index, issue: "1:local1" }))];
+  const o = observed(await run("repair-first", [...turns, finish()]), "repair-first");
+  effects(o, pair(o, sail, [left], [1, 2]), useSail);
+  assert.deepEqual(candidates(o.menus[0]).map(candidate => candidate.construal).sort(), [...readings].sort());
+});
+
+function replaceSelectedEvidence(value: unknown, source: string, replacement: string): void {
+  if (!value || typeof value !== "object") return;
+  for (const [key, field] of Object.entries(value)) {
+    if (key === "sharedClaimIds" && Array.isArray(field)) {
+      const index = field.indexOf(source);
+      if (index !== -1) field[index] = replacement;
+    } else {
+      replaceSelectedEvidence(field, source, replacement);
+    }
+  }
+}
+
+// Build the omitted-choice record from the coherent legacy run on the same
+// dialogue. Bind all copies to the newer version, including evidence hashes.
+function recordWithoutP5(legacy: Records): Records {
+  const records = structuredClone(legacy);
+  const retag = (value: unknown): void => {
+    if (!value || typeof value !== "object") return;
+    const row = value as Record<string, unknown>;
+    for (const [key, field] of Object.entries(row)) {
+      if (key === "generationRetryVersion" && field === v12) row[key] = p5Version;
+      else retag(field);
+    }
+  };
+  retag(records);
+  const replay = records.trials[0].replay[0];
+  for (const side of replay.result.sides) {
+    side.materialSha256 = hash(side.material);
+  }
+  const pair = records.evidence.pairedReplay[0];
+  [pair.left, pair.right] = structuredClone(replay.result.sides);
+  return records;
+}
+
+for (const label of conditions) {
+  test(`P5 ${label}: S4 accepts same-turn and next-turn support and rejects forged or omitted evidence`, async () => {
+    const unrelated = unresolved([right], "figure_1");
+    const [proposal, support] = aiFirst({ start: 3 });
+    const adoption = finish();
+    const choose = adoption.plan.choose!;
+    const sameTurn: Turn = { human: support.human, plan: { ...support.plan, speech: useSail,
+      choose: (key, criteria, context) => support.plan.choose?.(key, criteria, context) ?? choose(key, criteria, context) } };
+    for (const turns of [[unrelated, proposal, sameTurn], [unrelated, proposal, support, adoption]]) {
+      const current = await run(label, turns);
+      const o = observed(current, label);
+      const selected = pair(o, sail, [left], [4, 5]);
+      effects(o, selected, useSail);
+      s4(current, o);
+
+      const forged = structuredClone(current.records);
+      const supportId = o.claims.find(c => c.sourceTurn === 5 && c.act === "agree")!.id;
+      assert.ok(selected.claimIds.includes(supportId));
+      replaceSelectedEvidence(forged, supportId, "5:absent");
+      checkS4Rejects(forged);
+
+      const wrong = structuredClone(current.records);
+      const existingButWrong = o.claims.find(c => c.sourceTurn === 1 && c.aspect === "contour" && c.targets.includes(right))!.id;
+      replaceSelectedEvidence(wrong, supportId, existingButWrong);
+      checkS4Rejects(wrong);
+
+      const legacy = await run(label, turns, "v12");
+      const legacyObservation = observed(legacy, label);
+      assert.deepEqual(legacyObservation.menus, []);
+      s4(legacy, legacyObservation);
+      checkS4Rejects(recordWithoutP5(legacy.records));
+    }
+  });
+}
+
+type ScriptedFailure = Error & { drafts?: string[]; traces?: Observation["trace"][] };
+type ApprovedDraftCheck = { question: string; accept: string; reject: string };
+
+async function nonNamingDraftOutcome(label: Label, contract?: ApprovedDraftCheck) {
+  const targets = [left, right], target = "figures_0_1";
+  const prior = [...aiFirst({ targets, target }), unresolved(targets, target)];
+  const safe = "その見立てを目印にしましょう。細部まで同じとは言えません。";
+  const turn = finish(safe, sail, target);
+  const choose = turn.plan.choose!;
+  if (contract) {
+    turn.plan.choose = (key, criteria, context) => key === contract.question
+      ? contract.accept : choose(key, criteria, context);
+  }
+  const reference = observed(await run(label, [...prior, turn]), label);
+  const selected = pair(reference, sail, targets, [2, 3]);
+  effects(reference, selected, safe);
+  assertGenerationScope(reference, targets);
+
+  // The fixture supplies the interpretations. The publication oracle looks at
+  // the actual result, regardless of which authorized validation stopped it.
+  const single = [
+    "これで両方が見ている図形は一つに特定できました。",
+    "もう候補は残っていません。そちらと私が指しているのは一つの同じ図形です。",
+  ];
+  const unverifiedDetail = [
+    "切れ目の形は二人の図形で完全に一致しています。",
+    "お互いの切れ込みを比べ終えました。あの部分に差はありません。",
+  ];
+  for (const variants of [single, unverifiedDetail]) for (const drafts of [
+    [variants[0], safe], [variants[1], safe], variants,
+  ]) {
+    const before = reference.replay.tape.state;
+    const inputState = structuredClone(before);
+    const plan = { ...turn.plan, drafts };
+    let semanticCheckReached = false;
+    if (contract) {
+      plan.choose = (key, criteria, context) => {
+        if (key !== contract.question) return choose(key, criteria, context);
+        semanticCheckReached = true;
+        return drafts[context.generationCalls - 1] === safe ? contract.accept : contract.reject;
+      };
+    }
+    const outcome = await runTurn(reference.trial.profile, label, inputState, reference.replay.tape.events, plan,
+      technicalTrial, supportedP5Version).then(
+        result => ({ ok: true as const, result }), (error: ScriptedFailure) => ({ ok: false as const, error }));
+    if (contract) assert.equal(semanticCheckReached, true);
+    if (outcome.ok) {
+      const result = outcome.result;
+      assert.ok(!variants.includes(result.speech), "the participant must not receive either overclaim");
+      const generated = result.luna.filter(call => call.phase === "generation").map(call => call.response.text);
+      assert.deepEqual(generated, drafts);
+      assert.ok(drafts.includes(safe));
+      assert.equal(result.speech, safe, "the participant must not receive either overclaim");
+      assert.equal(result.trace.publicSpeech, result.speech);
+      assert.equal(result.state.judgments.length, before.judgments.length + 1);
+      assert.equal(result.state.judgments.at(-1).status, "committed");
+      assert.deepEqual(result.state.ledger, before.ledger);
+      assert.equal(openDetail(result.state, targets).state, openDetail(before, targets).state);
+      assert.deepEqual([...result.trace.executed.sharedClaimIds].sort(), [...selected.claimIds].sort());
+    } else {
+      const error = outcome.error;
+      const trace = error.traces?.at(-1);
+      assert.ok(trace, "a guarded stop leaves a trace");
+      assert.equal(trace.errorCode, "unsafe_generation");
+      assert.equal(trace.publicSpeech, null);
+      assert.notEqual(trace.status, "committed");
+      assert.deepEqual([...(trace.executed?.sharedClaimIds ?? [])].sort(), [...selected.claimIds].sort());
+      assert.ok(error.drafts?.length);
+      assert.deepEqual(error.drafts, drafts.slice(0, error.drafts.length));
+      assert.deepEqual(inputState, before, "a guarded stop must not change the prior state");
+    }
+  }
+}
+
+// The publication oracle runs independently of the chosen mechanism. Pass the
+// contract here only after approval of the additional semantic-check request.
+function registerNonNamingDraftChecks(contract?: ApprovedDraftCheck) {
+  for (const label of conditions) {
+    test(`P5 ${label}: non-naming overclaims never reach a committed public turn`, () => nonNamingDraftOutcome(label, contract));
+  }
+  test("P5: the separately approved semantic-check RPC handles the same drafts",
+    { skip: !contract && "Pending research approval and a closed response contract" },
+    async () => {
+      assert.ok(contract);
+      for (const label of conditions) await nonNamingDraftOutcome(label, contract);
+    });
+}
+
+registerNonNamingDraftChecks();
+
+test("P5: S4 rejects a P5 detail answer mixed into a v12 failure record", async () => {
+  const label = "repair-first";
+  const scenario = await run(label, [humanFirst(), finish()], "v12");
+  const o = observed(scenario, label);
+  const plan = { ...neutral(), action: "confirm", failQuestion: "feature" };
+  let failure: ScriptedFailure | undefined;
+  await assert.rejects(runTurn(o.trial.profile, label, o.replay.tape.state, o.replay.tape.events, plan, technicalTrial, v12),
+    (error: ScriptedFailure) => { failure = error; return true; });
+  const trace = failure?.traces?.at(-1);
+  const stage = trace?.decisionFailure?.evidence?.stages.at(-1);
+  assert.equal(stage?.stage, "detail");
+  const control = structuredClone(scenario.records);
+  const trial = control.trials[0];
+  trial.attempts = [{ ...trace, status: "error" }];
+  trial.turns = [{ ...trial.turns[0], trace: structuredClone(trial.attempts), publicText: null,
+    state: structuredClone(o.replay.tape.state) }];
+  trial.lastCommittedState = structuredClone(o.replay.tape.state);
+  trial.calls = [];
+  trial.http = [];
+  trial.replay = [];
+  control.evidence.pairedReplay = [];
+  const controlChecks = interventionChecks(control);
+  const oldShape = controlChecks.find(check => check.id.endsWith(".shape"));
+  assert.equal(oldShape?.status, "pass", JSON.stringify(oldShape));
+  assert.equal(controlChecks.find(check => check.id.endsWith(".binding"))?.status, "pass", JSON.stringify(controlChecks));
+  const mixed = structuredClone(control);
+  const failedStage = { ...stage, choices: { [question]: "none" }, scores: { [question]: { none: 1, use_0: 0 } } };
+  for (const attempt of [mixed.trials[0].attempts[0], mixed.trials[0].turns[0].trace[0]]) {
+    attempt.decisionFailure.evidence.stages.splice(-1, 1, failedStage);
+  }
+  assert.equal(interventionChecks(mixed).find(check => check.id.endsWith(".shape"))?.status, "mismatch");
 });

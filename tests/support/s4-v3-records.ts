@@ -2,6 +2,7 @@
 // Each turn runs through createProfileDialogue with scripted answers that are recorded into a replay tape, so a multi-turn adaptive history
 // (repair history, previous action, prospect) is genuine. The final turn becomes one canonical trial of the NORMAL record set.
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { researchTrialProfileV3 } from '../../dialogue-model/runtime/v2/research-profile.ts';
 import { createProfileDialogue } from '../../dialogue-model/runtime/diagnostics/parity-live/replay.ts';
@@ -27,8 +28,9 @@ export type TrialVersion = 'adaptive_repair_v1' | 'adaptive_repair_v2' | 'adapti
 /** What one scripted turn answers. `target` is a v3 target label; `issue` answers the repair prospect's issue question. */
 export type Plan = { action: string; target: string; issue?: string; prospect?: string; actionScores?: Record<string, number>; speech?: string; inject?: any;
   /** Opt-in override for additional closed questions in independent acceptance tests. */
-  choose?: (question: string, criteria: Readonly<Record<string, string>>) => string | undefined;
+  choose?: (question: string, criteria: Readonly<Record<string, string>>, context: { generationCalls: number }) => string | undefined;
   speechByLabel?: Partial<Record<Label, string>>;
+  failQuestion?: string;
   drafts?: readonly string[];
   draftAct?: DraftAct;
   /** Raw JSON text the local-extraction request returns (public name proposals etc.); `act` answers the classifier's `*_act` questions (default assert). */
@@ -53,24 +55,33 @@ const TEXTS: Record<string, string> = { local_extraction: '[]', ai_extraction: '
 
 export async function runTurn(profile: any, label: Label, state: any, events: any[], plan: Plan, technicalTrial: { version: TrialVersion } | undefined, generationRetryVersion?: RecordedGenerationRetryVersion) {
   const luna: any[] = [], jev: any[] = [], traces: any[] = [], reobservations: any[] = [], boundary = { luna: -1, jev: -1 };
+  const httpBodies: { provider: 'luna' | 'jev'; sha256: string }[] = [];
+  const capture = (provider: 'luna' | 'jev', init: RequestInit | undefined) => {
+    httpBodies.push({ provider, sha256: createHash('sha256').update(String(init?.body)).digest('hex') });
+  };
   let next: any, count = 0, actionCalls = 0, generationCalls = 0, lastAction = '';
   const http = createChatClient({ provider: 'cloudflare', apiKey: 'synthetic-offline-replay-key', purpose: profile.modelPolicy.purpose,
     baseUrl: 'http://offline.invalid/v1', timeoutMs: profile.timeouts.lunaAttemptMs },
-  async () => Response.json({ model: next.model, choices: [{ message: { content: next.text } }], usage: { prompt_tokens: 0, completion_tokens: 0 } }));
+  async (_url: unknown, init: RequestInit | undefined) => {
+    capture('luna', init);
+    return Response.json({ model: next.model, choices: [{ message: { content: next.text } }], usage: { prompt_tokens: 0, completion_tokens: 0 } });
+  });
   const client = { async complete(messages: any[], options: any) {
-    const draft = options.phase === 'generation' && plan.drafts ? plan.drafts[generationCalls++] : undefined;
+    const draft = options.phase === 'generation' ? plan.drafts?.[generationCalls++] : undefined;
     if (options.phase === 'generation' && plan.drafts) assert.ok(draft);
     const response = { text: options.phase === 'local_extraction' && plan.extraction !== undefined ? plan.extraction : options.phase === 'ai_extraction' && plan.aiExtraction !== undefined ? plan.aiExtraction : draft ?? TEXTS[options.phase] ?? plan.speechByLabel?.[label] ?? plan.speech ?? 'もう一度、確かめてみますね。', model: 'synthetic-luna-model', usage: { inputTokens: 0, outputTokens: 0 } };
     luna.push({ phase: options.phase, response }); next = response; return http.complete(messages, options); } };
   const readKey = async () => 'sk-or-SYNTHETIC-offline-replay-key-0000';
   const fetchImpl = async (_url: any, init: any) => {
+    capture('jev', init);
     const body = JSON.parse(init.body), answers: any = {};
+    if (plan.failQuestion && Object.hasOwn(body.questions, plan.failQuestion)) return new Response(null, { status: 502 });
     for (const [key, q] of Object.entries(body.questions) as any) {
       const labels = Object.keys(q.criteria);
       const aiSegment = plan.aiActs && Object.hasOwn(JSON.parse(body.state), 'aiSeq') ? /^segment_(\d+)_act$/u.exec(key) : null;
       const publicAct = aiSegment ? plan.aiActs?.[Number(aiSegment[1])] : undefined;
       if (key === 'action') lastAction = plan.forceAction ?? (plan.reobserve && ++actionCalls === 1 ? 'request_observation' : plan.action);
-      const choice = plan.choose?.(key, q.criteria) ?? (key === 'action' ? lastAction : key === 'target' ? (lastAction === 'request_observation' ? 'figure_0' : plan.target) : key === 'repair_issue' ? plan.issue ?? 'none' : key === 'prospect' ? plan.prospect ?? 'uncertain'
+      const choice = plan.choose?.(key, q.criteria, { generationCalls }) ?? (key === 'action' ? lastAction : key === 'target' ? (lastAction === 'request_observation' ? 'figure_0' : plan.target) : key === 'repair_issue' ? plan.issue ?? 'none' : key === 'prospect' ? plan.prospect ?? 'uncertain'
         : key === 'name' && plan.name ? (labels.find(l => JSON.parse(q.criteria[l]).value === plan.name) ?? labels[0])
         : key === 'human_referent' && plan.referent ? plan.referent
         : key === 'draft_naming' ? (plan.draftAct ?? (plan.action === 'agree' ? 'adopt_chosen' : 'none')) : key === 'basis' ? 'partner_uncertain' : key.endsWith('_antecedent') ? (plan.antecedent ?? 'none') : /^segment_\d+_answer$/u.test(key) ? (plan.answers ?? 'unknown') : key.endsWith('_act') ? (publicAct ?? (plan.act && labels.includes(plan.act) ? plan.act : 'assert')) : key === 'observe_aspect' ? 'orientation' : labels[0]);
@@ -100,9 +111,9 @@ export async function runTurn(profile: any, label: Label, state: any, events: an
     onJevTurnTrace: (t: any) => traces.push(t), generationRetryVersion, ...(technicalTrial ? { technicalTrial } : {}) } as any);
   let result: any;
   try { result = await runtime.runAiTurn({ events, privateState: state, lastEventId: events.at(-1).id, requestSeq: events.at(-1).seq }); }
-  catch (error) { (error as any).traces = traces; throw error; }
+  catch (error) { Object.assign(error as Error, { traces, drafts: luna.filter(call => call.phase === 'generation').map(call => call.response.text) }); throw error; }
   assert.ok(boundary.luna >= 0);
-  return { state: structuredClone(result.privateState), trace: { ...structuredClone(traces.at(-1)), status: 'committed' }, luna, jev, reobservations, boundary, speech: result.text as string };
+  return { state: structuredClone(result.privateState), trace: { ...structuredClone(traces.at(-1)), status: 'committed' }, luna, jev, reobservations, boundary, httpBodies, speech: result.text as string };
 }
 
 export type Turn = { human: string; plan: Plan };
@@ -125,9 +136,10 @@ export function publicFocusTurn(figureIndex = 0): Turn {
   return { human: 'この形の特徴を教えてください。', plan: { action: 'accept', target: 'figure_' + figureIndex, referent: 'figure_' + figureIndex, speech: text,
     aiExtraction: JSON.stringify([{ segmentId: 's1', quote: text, proposition: text, name: null, targets: [OWN.ownAnchors[figureIndex].id], aspect: 'part', linkedIssueId: null, respondsToTurn: null }]) } };
 }
-export async function buildRecords({ label = 'repair-first' as Label, technicalTrial, turns, ledger, dialoguePolicy, memo, generationRetryVersion, agreeNameScopeVersion }: {
+export async function buildRecords({ label = 'repair-first' as Label, technicalTrial, turns, ledger, dialoguePolicy, memo, generationRetryVersion, agreeNameScopeVersion, onTurn }: {
   label?: Label; technicalTrial?: { version: TrialVersion }; turns: Turn[]; ledger?: Record<string, any>; dialoguePolicy?: DialoguePolicy | null; memo?: ObservationMemo; generationRetryVersion?: RecordedGenerationRetryVersion;
   agreeNameScopeVersion?: AgreeNameScopeVersion;
+  onTurn?: (label: Label, result: Awaited<ReturnType<typeof runTurn>>) => void;
 }) {
   const n = structuredClone(normal), tr = n.trials[0], m = n.run.manifest;
   const profile = JSON.parse(JSON.stringify(researchTrialProfileV3(m.lunaRequest, m.timeouts, 'two_stage_v3', dialoguePolicy)));
@@ -140,11 +152,19 @@ export async function buildRecords({ label = 'repair-first' as Label, technicalT
     events = [...events, { id: `human-${++seq}`, seq, speaker: 'human', text: turns[i].human }];
     const run = { state, events: structuredClone(events) };
     const last = i === turns.length - 1;
-    if (!last) { const r = await runTurn(profile, label, state, events, turns[i].plan, technicalTrial, generationRetryVersion); state = r.state; events = [...events, { id: `ai-${++seq}`, seq, speaker: 'ai', text: r.speech }]; continue; }
+    if (!last) {
+      const r = await runTurn(profile, label, state, events, turns[i].plan, technicalTrial, generationRetryVersion);
+      onTurn?.(label, r);
+      state = r.state;
+      events = [...events, { id: `ai-${++seq}`, seq, speaker: 'ai', text: r.speech }];
+      continue;
+    }
     // The final turn is run once per label: the common segment (before the original decision) is shared, each tail is that label's own.
     const runs = { 'repair-first': await runTurn(profile, 'repair-first', run.state, run.events, turns[i].plan, technicalTrial, generationRetryVersion),
       'bypass-enabled': await runTurn(profile, 'bypass-enabled', run.state, run.events, turns[i].plan, technicalTrial, generationRetryVersion) };
     const a = runs['repair-first'], b = runs['bypass-enabled'];
+    onTurn?.('repair-first', a);
+    onTurn?.('bypass-enabled', b);
     assert.deepEqual([a.luna.slice(0, a.boundary.luna), a.jev.slice(0, a.boundary.jev)], [b.luna.slice(0, b.boundary.luna), b.jev.slice(0, b.boundary.jev)]);
     assert.deepEqual(a.reobservations, b.reobservations);
     const seg = (r: any) => ({ luna: r.luna.slice(r.boundary.luna), jev: r.jev.slice(r.boundary.jev), reobservations: [] });
@@ -170,7 +190,7 @@ export async function buildRecords({ label = 'repair-first' as Label, technicalT
     tr.http = recorded.requests.flatMap((r: any, k: number) => r.provider === 'luna' ? [{ method: 'POST', kind: 'completion_post', phase: r.phase, callId: k + 1, sendId: k + 1,
       hashScheme: 'canonical_json_sha256', requestSha256: r.preProjectionPayloadSha256, status: 200, outcome: 'returned' }] : []);
     tr.attempts = [trace];
-    tr.turns = [{ ...structuredClone(tr.turns[0]), turn, publicText: trace.publicSpeech, trace: [structuredClone(trace)], state: structuredClone(after) }];
+    tr.turns = [{ ...structuredClone(tr.turns[0]), turn, publicText: runs[label].speech, trace: [structuredClone(trace)], state: structuredClone(after) }];
     tr.lastCommittedState = structuredClone(after); tr.replay = [{ tape, result }];
     n.evidence.pairedReplay = [{ trialOrder: 0, turn, left: result.sides[0], right: result.sides[1] }];
   }
