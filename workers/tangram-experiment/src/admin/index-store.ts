@@ -6,7 +6,10 @@
 //   "a:<deletedAt>:<hash>"       audit entry {recordHash, deletedAt, reason}; no content
 // Entries live exactly as long as their record: removed only together with it
 // (retention expiry or researcher deletion). No cap, no trim.
-import type { AdminSummary } from "./summary";
+import { RECORD_ID } from "./summary.ts";
+import type { AdminSummary } from "./summary.ts";
+import { isParticipantRole, participantRoleView, readParticipantRoleEntry } from "./participant-role.ts";
+import type { ParticipantRole, ParticipantRoleAudit, ParticipantRoleEntry } from "./participant-role.ts";
 
 export type IndexStorage = {
   get<T = unknown>(key: string): Promise<T | undefined>;
@@ -34,8 +37,6 @@ export async function recordHash(recordId: string): Promise<string> {
 
 /** Adds or refreshes a summary; ignored for an id that was already deleted. */
 export async function upsertSummary(storage: IndexStorage, summary: AdminSummary): Promise<boolean> {
-  // Hash first: from here on only storage operations are awaited, so the Durable
-  // Object's input gate keeps a concurrent upsert from interleaving the read and write.
   const hash = await recordHash(summary.recordId);
   if (await storage.get("d:" + hash)) return false;
   const previous = await storage.get<AdminSummary>("r:" + summary.recordId);
@@ -47,6 +48,39 @@ export async function upsertSummary(storage: IndexStorage, summary: AdminSummary
 
 export async function getSummary(storage: IndexStorage, recordId: string): Promise<AdminSummary | null> {
   return (await storage.get<AdminSummary>("r:" + recordId)) ?? null;
+}
+
+const participantRoleKey = (recordId: string) => "participant-role:" + recordId;
+export const PARTICIPANT_ROLE_REVISION = "participant-role-revision";
+
+/** A classification is joined at read time; it is never part of a stored summary. */
+export async function recordRoles(storage: IndexStorage, recordIds: string[], includeDeleted: boolean): Promise<Record<string, ParticipantRole | "deleted">> {
+  const rows = await Promise.all([...new Set(recordIds)].map(async id => {
+    if (!RECORD_ID.test(id)) throw new Error("invalid_record_id");
+    if (includeDeleted && await storage.get("d:" + await recordHash(id))) return [id, "deleted"] as const;
+    const entry = await storage.get(participantRoleKey(id));
+    return [id, entry === undefined ? "unclassified" : readParticipantRoleEntry(entry, id).role] as const;
+  }));
+  return Object.fromEntries(rows);
+}
+
+/** The session RPC verifies the archives and serializes this mutation with owner deletion. */
+export async function setParticipantRole(storage: IndexStorage, targets: { recordId: string; hash: string }[],
+  objectId: string, role: unknown, at: string, revision: string): Promise<boolean> {
+  if (!isParticipantRole(role) || !targets.length || new Set(targets.map(target => target.recordId)).size !== targets.length) return false;
+  const updates: Record<string, ParticipantRoleEntry | ParticipantRoleAudit | string> = {};
+  for (const { recordId, hash } of targets) {
+    const summary = await getSummary(storage, recordId);
+    if ((summary && (summary.recordId !== recordId || summary.objectId !== objectId)) || await storage.get("d:" + hash)) return false;
+    const key = participantRoleKey(recordId);
+    const old = await storage.get(key);
+    const from = old === undefined ? "unclassified" : readParticipantRoleEntry(old, recordId).role;
+    if (from === role) continue;
+    updates[key] = { ...participantRoleView(role), recordId, updatedAt: at };
+    updates[`participant-role-audit:${at}:${revision}:${recordId}`] = { kind: "participant_role_set", recordId, from, to: role, at };
+  }
+  if (Object.keys(updates).length) await storage.put({ ...updates, [PARTICIPANT_ROLE_REVISION]: revision });
+  return true;
 }
 
 /** Newest first, PAGE_SIZE per page; `after` is the opaque cursor from the previous page. */
@@ -72,13 +106,16 @@ export async function removeSummaries(storage: IndexStorage, recordIds: readonly
   for (const recordId of recordIds) {
     const hash = await recordHash(recordId);
     const previous = await storage.get<AdminSummary>("r:" + recordId);
-    if (previous) await storage.delete(["r:" + recordId, orderKey(previous)]);
+    const keys = [participantRoleKey(recordId)];
+    if (previous) keys.push("r:" + recordId, orderKey(previous));
+    await storage.delete(keys);
     if (await storage.get("d:" + hash)) continue;
     const deletedAt = new Date(now).toISOString();
     const entry: AuditEntry = { recordHash: hash, deletedAt, reason };
     await storage.put({ ["d:" + hash]: true, [`a:${deletedAt}:${hash}`]: entry });
     removed++;
   }
+  if (removed) await storage.put({ [PARTICIPANT_ROLE_REVISION]: crypto.randomUUID() });
   return removed;
 }
 

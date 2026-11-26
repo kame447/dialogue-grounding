@@ -223,7 +223,8 @@ test('with reception port enabled, unrelated legacy records keep list/detail/exp
   const list = await handleAdmin(get('/admin'), f.deps); assert.equal(list.status, 200); assert.ok((await list.text()).includes(`/admin/record/${RECORD}`));
   const detail = await handleAdmin(get(`/admin/record/${RECORD}`), f.deps); assert.equal(detail.status, 200); assert.match(await detail.text(), /synthetic legacy utterance/);
   const exported = await handleAdmin(get(`/admin/record/${RECORD}.json`), f.deps); assert.equal(exported.status, 200);
-  assert.equal(exported.headers.get('Content-Disposition'), `attachment; filename="tangram-record-${RECORD}.json"`); assert.deepEqual(await exported.json(), legacy);
+  assert.equal(exported.headers.get('Content-Disposition'), `attachment; filename="tangram-record-${RECORD}.json"`);
+  assert.deepEqual(await exported.json(), { ...legacy, participantRole: { schemaVersion: 'participant_role_v1', role: 'unclassified' } });
   const deletion = (confirm: string) => new Request(`${ORIGIN}/admin/record/${RECORD}/delete`, { method: 'POST', headers: { Authorization: 'Bearer ' + TOKEN, Origin: ORIGIN, 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ confirm }) });
   assert.equal((await handleAdmin(deletion('incorrect'), f.deps)).status, 400); assert.deepEqual(removed, []);
   const deleted = await handleAdmin(deletion(RECORD), f.deps); assert.equal(deleted.status, 303); assert.equal(deleted.headers.get('Location'), '/admin?deleted=1'); assert.deepEqual(removed, [summary]);

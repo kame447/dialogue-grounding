@@ -199,7 +199,7 @@ test("JSON export of one record: same auth and limiter, admin headers, attachmen
   for (const [key, header] of Object.entries(ADMIN_HEADERS)) assert.equal(response.headers.get(key), header, key);
   assert.equal(response.headers.get("Set-Cookie"), null);
   assert.equal(response.headers.get("Access-Control-Allow-Origin"), null);
-  assert.deepEqual(await response.json(), record());
+  assert.deepEqual(await response.json(), { ...record(), participantRole: { schemaVersion: "participant_role_v1", role: "unclassified" } });
   const limited = deps({ limiter: { async limit() { return { success: false }; } } });
   assert.equal((await handleAdmin(req(path, AUTH), limited.value)).status, 429);
 });

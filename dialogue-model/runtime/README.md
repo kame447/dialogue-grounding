@@ -68,6 +68,8 @@ npm test でローカルHTTP模擬APIとWorker契約を検証します。本物�
 
 ブラウザで http://127.0.0.1:8787 を開きます。参加者には方略・seed の開始フォームを表示せず、サーバーが研究者の設定を検証して試行を用意します。人間側画像、公開チャット、自分の6位置への名称入力フォームが表示されます。方略・seed・assignment は参加者の状態に含めません。サーバーは127.0.0.1のみにbindし、同じブラウザの Cookie と保存済み owner を結び付けます。保存先と設定の詳細は下記を参照してください。上のコマンドは起動方法の例であり、実 API への接続や本実験の開始を承認するものではありません。
 
+通常の会話検証は、受付を使わないローカルWebサーバーで行います。模擬上流を使う場合は、`RESEARCH_AI_PROVIDER=custom` とループバックの `RESEARCH_AI_BASE_URL` を指定します。
+
 ### BASE Web の設定・保存と研究者操作
 
 ローカルWebサーバーには、リポジトリ外の既存ディレクトリを明示します。`--base-store-root` で指定する保存先ディレクトリそのものと、`--base-assignment-file` で指定する設定ファイルの親ディレクトリを0700にします。設定ファイルと保存先内の owner ファイルは0600にし、symlink・hardlink を使いません。`--base-assignment-file` と `--base-store-root` に既定の保存先や条件はありません。未設定・不正な設定では新規 admission を拒否し、保存先が不正なときは復元も行いません。メモリだけの保存へ切り替えることはありません。
@@ -88,7 +90,20 @@ npm test でローカルHTTP模擬APIとWorker契約を検証します。本物�
 
 完了した記録に対する研究者の操作は `POST /admin/record/<recordId>/prepare-next`、JSON body は `{}` です。認証と同一 Origin の確認を通った場合だけ次の試行を作り、最初は201、同じ完了記録への再要求は、同じ after-key（引き継ぎ元の記録IDに結び付けた、次の試行の保存キー）を使い、同じ次の記録IDで200を返します。参加者の画面操作から条件を選び直すことはできません。質問紙が未提出でも技術的には次へ進めますが、その引き継ぎの運用と質問紙の採用は研究者の判断が必要です。
 
-記録を書き出すには、認証後に `GET /admin/record/<recordId>.json` にアクセスします。削除するには、管理画面 `/admin` の一覧から対象の記録の詳細を開き、削除の確認欄にその `<recordId>` を入力して実行します。ローカルWebサーバーの削除は、archive・質問紙・ledger と owner 内の当該 snapshot を同じ更新で取り除き、tombstone と `record_deleted` を残します。遅れた保存で復活させず、削除した試行の割当を新しく作り直しません。次の試行が削除済みの場合、引き継ぎ元への after-key 再要求は404です。現在の試行が削除済みの場合、参加者の start/restore は409です。外部のバックアップや書き出し済みファイル、ディスクの物理的な消去までを保証する処理ではありません。
+記録を書き出すには、認証後に `GET /admin/record/<recordId>.json` にアクセスします。出力の `participantRole.role` は、人間役の担当種別を示す `human`、`ai`、`unclassified` のいずれかです。管理者は保存済みの試行ごとに設定・訂正できます。ローカルでは、参加者のセッションが期限切れになった後も担当種別を編集できます。
+
+ローカルサーバーを停止した状態では、非公開の owner ストアに対して CLI でも確認・編集できます。
+
+```sh
+node dialogue-model/runtime/diagnostics/participant-role.ts get "$BASE_STORE_ROOT" "$RECORD_ID"
+node dialogue-model/runtime/diagnostics/participant-role.ts set "$BASE_STORE_ROOT" "$RECORD_ID" ai
+node dialogue-model/runtime/diagnostics/participant-role.ts list "$BASE_STORE_ROOT" ai
+node dialogue-model/runtime/diagnostics/participant-role.ts extract ai /path/to/private/admin-export.json
+```
+
+`extract` には複数の管理 JSON を指定できます。旧版の JSON で `participantRole` が無ければ未分類として抽出します。
+
+削除するには、管理画面の削除の確認欄に対象の `<recordId>` を入力して実行します。ローカルWebサーバーの削除は、archive・質問紙・ledger と owner 内の当該 snapshot を同じ更新で取り除き、tombstone と `record_deleted` を残します。別ファイルに保存された担当種別も削除します。遅れた保存で復活させず、削除した試行の割当を新しく作り直しません。次の試行が削除済みの場合、引き継ぎ元への after-key 再要求は404です。現在の試行が削除済みの場合、参加者の start/restore は409です。外部のバックアップや書き出し済みファイル、ディスクの物理的な消去までを保証する処理ではありません。
 
 ローカルWebサーバーは会話・提出・暫定採点・割当を、private な owner container に保存します。`RESEARCH_RUN_DIR` による従来の個別ファイル出力とは別です。保存済み owner と同じ Cookie で再起動後も同じ試行を復元し、メモリの状態が無いことを新規割当の理由にしません。ローカルWebサーバーの既存の30分 idle 期限は維持します。期限切れや削除、壊れた binding は復元しません。質問紙提出前の結果は引き続き伏せます。
 
