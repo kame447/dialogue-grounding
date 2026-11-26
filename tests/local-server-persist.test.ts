@@ -3,7 +3,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { tmpdir } from 'node:os';
-import { chmod, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createNamingTaskV2 } from '../dialogue-model/runtime/v2/naming-task-v2.mjs';
 import { openBaseFileStore } from '../dialogue-model/runtime/web/base-assignment-store.ts';
@@ -180,7 +181,7 @@ test('a graceful close writes a skipped access time back; the next process measu
   assert.equal(await next.alive(), true);
 });
 
-const syntheticTask = (value: Any) => createNamingTaskV2({ client: model(), judge: luna, ...value, runDir: null });
+const syntheticTask = (value: Any) => createNamingTaskV2({ ...value, client: model(), judge: luna, runDir: null });
 for (const entrance of ['cookie', 'tab'] as const) {
   test(`the participant server returns the same trial 29 min 02 s after the last access and expires it after 30 min, by ${entrance}`, async t => {
     const dir = await mkdtemp(join(await realpath(tmpdir()), 'HardyWatt-idle-'));
@@ -314,4 +315,85 @@ test('a restored failure history keeps only closed codes, ISO times and closed s
     { code: 'record_store_rejected', at: '2026-11-26T00:00:02.000Z' },
   ]);
   void task;
+});
+
+// ---- 4. Audit 29 (Astra): two utterances merged into one queued write, and that write fails once -----------------------------------------
+import fsp from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
+
+const deferred = () => { let release!: () => void; const promise = new Promise<void>(resolve => { release = resolve; }); return { promise, release }; };
+test('two utterances answered by one reply: a single failed write after the reply does not lose it, and a shutdown reports an unsaved state instead of succeeding', async t => {
+  const dir = await mkdtemp(join(await realpath(tmpdir()), 'HardyWatt-merge-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  await chmod(dir, 0o700);
+  const owners = join(dir, 'owners'); await mkdir(owners, { mode: 0o700 });
+  const assignment = join(dir, 'base.json');
+  await writeFile(assignment, JSON.stringify({ schemaVersion: 'base_assignment_config_v1', configId: '11111111-1111-4111-8111-111111111111', revision: 1, strategy: 'repair-first', seed: 71, referenceMemory: false }), { mode: 0o600 });
+  const gate = deferred(); let generations = 0;
+  const gatedModel = () => ({ async complete(_m: unknown, { phase }: { phase?: string } = {}) {
+    if (phase === 'generation') { await gate.promise; return { text: '返答その' + (++generations) + 'です。' }; }
+    throw new Error('unexpected phase ' + phase);
+  } });
+  const task = (value: Any) => createNamingTaskV2({ ...value, client: gatedModel(), judge: luna, runDir: null });
+  const boot = async () => {
+    const server = await startNamingServer({ port: 0, client: {}, baseAssignmentFile: assignment, baseStoreRoot: owners, createTaskV2: task } as Any);
+    return { server, url: 'http://127.0.0.1:' + (server.address() as { port: number }).port };
+  };
+  let { server, url } = await boot();
+  const page = await fetch(url); const cookie = page.headers.get('set-cookie')!.split(';')[0]; await page.text();
+  const headers = { Cookie: cookie, 'Content-Type': 'application/json' };
+  const started = await (await fetch(url + '/api/start', { method: 'POST', headers, body: '{"version":2}' })).json();
+  const id = started.trial.sessionId;
+  const send = async (text: string, clientId: string) => (await fetch(url + '/api/message', { method: 'POST', headers, body: JSON.stringify({ text, clientId, expectedRecordId: id }) })).status;
+  assert.equal(await send('三角が二つあるやつから話しましょう', 'client-one'), 202);
+  assert.equal(await send('もう一つ、尖っている方です', 'client-two'), 202);
+  // One transient EIO on the first owner-file replacement after the reply is decided.
+  const realRename = fsp.rename; let armed = true, hits = 0;
+  (fsp as Any).rename = async (from: Any, to: Any) => { if (armed && String(to).endsWith('.owner.json')) { armed = false; hits++; throw Object.assign(new Error('synthetic EIO'), { code: 'EIO' }); } return realRename(from, to); };
+  syncBuiltinESMExports();
+  try {
+    gate.release();
+    let state: Any;
+    for (let i = 0; i < 200; i++) {
+      state = await (await fetch(url + '/api/state', { headers })).json();
+      if (state.trial.events.length >= 4 && state.trial.aiStatus === 'idle') break;
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
+    assert.equal(state.trial.events.length, 4, 'the page shows the opening, two utterances and one reply: ' + JSON.stringify([state.trial.aiStatus, state.trial.events.map((e: Any) => e.speaker), state.trial.dialogueRecovery, hits, generations]));
+    const reply = state.trial.events.at(-1).text;
+    assert.equal(hits, 1, 'the injected failure happened');
+    await server.drainAndClose();
+  } finally { (fsp as Any).rename = realRename; syncBuiltinESMExports(); }
+  const files = (await readdir(owners)).filter(name => /^[a-f0-9]{64}\.owner\.json$/.test(name));
+  const owner = files.map(name => JSON.parse(readFileSync(join(owners, name), 'utf8'))).find(container => Object.keys(container.archives).length)!;
+  const record: Any = Object.values(owner.archives)[0];
+  assert.equal(record.events.length, 4, 'the reply the participant read is on disk after a normal shutdown');
+  ({ server, url } = await boot());
+  t.after(() => server.drainAndClose().catch(() => {}));
+  const back = await (await fetch(url + '/api/state', { headers })).json();
+  assert.equal(back.trial.events.length, 4);
+  assert.equal(back.trial.events.at(-1).text, record.events.at(-1).text, 'the same reply after the restart');
+  void id;
+});
+
+test('a shutdown whose newest write failed and was never followed by a successful one does not report success', async t => {
+  const dir = await mkdtemp(join(await realpath(tmpdir()), 'HardyWatt-unsaved-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  await chmod(dir, 0o700);
+  const owners = join(dir, 'owners'); await mkdir(owners, { mode: 0o700 });
+  const assignment = join(dir, 'base.json');
+  await writeFile(assignment, JSON.stringify({ schemaVersion: 'base_assignment_config_v1', configId: '11111111-1111-4111-8111-111111111111', revision: 1, strategy: 'repair-first', seed: 71, referenceMemory: false }), { mode: 0o600 });
+  const server = await startNamingServer({ port: 0, client: {}, baseAssignmentFile: assignment, baseStoreRoot: owners, createTaskV2: syntheticTask } as Any);
+  const url = 'http://127.0.0.1:' + (server.address() as { port: number }).port;
+  const page = await fetch(url); const cookie = page.headers.get('set-cookie')!.split(';')[0]; await page.text();
+  const headers = { Cookie: cookie, 'Content-Type': 'application/json' };
+  const id = (await (await fetch(url + '/api/start', { method: 'POST', headers, body: '{"version":2}' })).json()).trial.sessionId;
+  const realRename = fsp.rename;
+  (fsp as Any).rename = async (from: Any, to: Any) => { if (String(to).endsWith('.owner.json')) throw Object.assign(new Error('synthetic EIO'), { code: 'EIO' }); return realRename(from, to); };
+  syncBuiltinESMExports();
+  try {
+    await fetch(url + '/api/message', { method: 'POST', headers, body: JSON.stringify({ text: '三角が二つあるやつから', clientId: 'client-one', expectedRecordId: id }) });
+    for (let i = 0; i < 100; i++) { const st = await (await fetch(url + '/api/state', { headers })).json(); if (st.trial.events.length >= 3 && st.trial.aiStatus === 'idle') break; await new Promise(resolve => setTimeout(resolve, 25)); }
+    await assert.rejects(server.drainAndClose());
+  } finally { (fsp as Any).rename = realRename; syncBuiltinESMExports(); }
 });
