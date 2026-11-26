@@ -183,6 +183,8 @@ export type JevTurnOptions = {
   rotationMode?: "relative_pm90" | "relative_0";
   /** Offline replay can request the original retry wire text for a historical tape. */
   generationRetryVersion?: GenerationRetryVersion;
+  /** Creation pin only. A resumed trial uses the scope in its saved state. */
+  newTrialAgreeNameScopeVersion?: "scoped_v7";
   client: ChatClient; ownImage: LocalOwnImage; ownAnchors: readonly LocalOwnAnchor[];
   observer: ObservationObserver; jevDecision: JevDecisionClient; localGrounding: JevTurnLocalOptions;
   maxReobservations?: number;
@@ -700,6 +702,11 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   if (!validGenerationRetryVersion(generationRetryVersion, questionLayout, options.dialoguePolicy)) {
     throw new Error("Invalid Jev generation retry version");
   }
+  const newTrialScope = options.newTrialAgreeNameScopeVersion;
+  if (newTrialScope !== undefined && (newTrialScope !== "scoped_v7" || questionLayout !== "two_stage_v3" ||
+      !validAgreeNameScope(newTrialScope, generationRetryVersion))) {
+    throw new Error("Invalid Jev naming scope for a new trial");
+  }
   const restateJudgment = generationRetryVersion !== "jev_generation_retry_v1";
   // The judgment side of holistic_v5 (whole-history material, ledger, rotation premise, chained agree sources) is versioned with the generation side: a v5 record saved before
   // jev_generation_retry_v4 keeps the judgment requests it was recorded with.
@@ -751,7 +758,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   function initialPrivateState(): JevPrivateState {
     const scope = isGenerationV11(generationRetryVersion) ? "scoped_v6" : directReferenceReplies ? "scoped_v5" : isGenerationV7(generationRetryVersion) ? "scoped_v4" : isGenerationV6(generationRetryVersion) ? "scoped_v3" : isGenerationV5(generationRetryVersion) ? "scoped_v2" : "scoped_v1";
     return { ...(integrated?{schemaVersion:'jev_private_state_v2' as const,interventionPolicy:{version:'bypass_acceptance_v1' as const,tableSha256:BYPASS_ACCEPTANCE_V1_TABLE_SHA256}}:{}), ledger: createOwnLedger(slots), judgments: [], graph: createReferenceGraph({ slots }) as Graph, observationMemo: null, repairHistory: [],
-      ...(questionLayout === "two_stage_v3" ? { agreeNameScopeVersion: scope } : {}),
+      ...(questionLayout === "two_stage_v3" ? { agreeNameScopeVersion: newTrialScope ?? scope } : {}),
       ...(aiEnabled ? { aiPublic: initialAiPublicState() } : {}) };
   }
   async function memoOnce(signal?: AbortSignal) {
