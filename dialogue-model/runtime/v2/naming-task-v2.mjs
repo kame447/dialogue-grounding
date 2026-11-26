@@ -257,20 +257,28 @@ export async function createNamingTaskV2({
   // A failed write used to vanish: its callers (a finished turn, a research update) discard the rejection. Each failure is kept as a closed code and a time,
   // reported once to onPersistFailure (the server's standard error), and carried in the next record that is written (research metadata, never shown to a participant).
   const PERSIST_FAILURE_LIMIT = 20;
+  const PERSIST_CODES = new Set(["record_build_failed", "record_store_rejected", "record_invalid", "owner_expired", "record_write_failed"]);
+  // Sub-reasons of record_store_rejected (a store rejection folds several causes into one error code).
+  const PERSIST_REASONS = new Set(["cas_conflict", "owner_expired", "record_deleted", "owner_state_invalid", "store_invalid", "store_io", "size_limit", "store_unknown"]);
+  const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
+  // A restored history is accepted only in the closed form this code writes.
   const persistFailures = Array.isArray(restore?.persistFailures) ? restore.persistFailures.filter((entry) =>
-    entry && typeof entry.code === "string" && typeof entry.at === "string").slice(-PERSIST_FAILURE_LIMIT).map(({ code, at }) => ({ code, at })) : [];
+    entry && PERSIST_CODES.has(entry.code) && typeof entry.at === "string" && ISO_TIME.test(entry.at) && Number.isFinite(Date.parse(entry.at)))
+    .slice(-PERSIST_FAILURE_LIMIT).map(({ code, at, reason }) => ({ code, at, ...(PERSIST_REASONS.has(reason) ? { reason } : {}) })) : [];
   let persistStage = "build";
-  function persistFailureCode(error) {
-    if (persistStage === "build") return "record_build_failed";
+  function persistFailureFields(error) {
+    if (persistStage === "build") return { code: "record_build_failed" };
     switch (error?.code) {
-      case "trial_unavailable": return "record_store_rejected";
-      case "assignment_record_invalid": return "record_invalid";
-      case "owner_expired": return "owner_expired";
-      default: return "record_write_failed";
+      case "trial_unavailable": return { code: "record_store_rejected", reason: PERSIST_REASONS.has(error?.reason) ? error.reason : "store_unknown" };
+      case "assignment_record_invalid": return { code: "record_invalid" };
+      case "owner_expired": return { code: "owner_expired" };
+      default: return { code: "record_write_failed" };
     }
   }
   function notePersistFailure(error) {
-    const failure = { code: persistFailureCode(error), at: new Date(now()).toISOString() };
+    let at;
+    try { at = new Date(now()).toISOString(); } catch { at = new Date(0).toISOString(); }
+    const failure = { ...persistFailureFields(error), at };
     persistFailures.push(failure);
     if (persistFailures.length > PERSIST_FAILURE_LIMIT) persistFailures.splice(0, persistFailures.length - PERSIST_FAILURE_LIMIT);
     try { if (typeof onPersistFailure === "function") onPersistFailure({ ...failure }); } catch { /* A reporting failure never changes the write's outcome. */ }
