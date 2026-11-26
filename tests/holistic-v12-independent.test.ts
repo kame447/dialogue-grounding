@@ -188,3 +188,69 @@ for (const label of ['bypass-enabled', 'repair-first'] as const) {
     assert.ok(statusesOf(flipSource).some((s: string) => s !== 'pass'), 'a flipped provenance must be detected');
   });
 }
+
+// #14 T11: a lexical resemblance about an extracted singleton is not an
+// answer to the previous check unless it links to its verified public claim.
+const frame = '月枠';
+const proposalText = '輪の形を「月枠」と呼びませんか？';
+const checkedReading = 'こちらの形は曲がった輪にも見えます。';
+const construalCheck: Turn = {
+  human: proposalText,
+  plan: {
+    ...genericCheck.plan,
+    speech: checkedReading + 'そちらにも輪のつながりがありますか？',
+    act: 'name_propose',
+    extraction: JSON.stringify([segment('proposal', proposalText, 'name', [first], null, frame)]),
+    aiActs: ['construe'],
+    aiExtraction: JSON.stringify([segment('outline', checkedReading, 'construal', [first])]),
+  },
+};
+function namingCheckReply(action: 'agree' | 'confirm', direct: boolean, act: 'construe' | 'assert', aspect: LocalAspect): Turn {
+  const human = aspect === 'construal' ? 'こちらでは月のように見えます。' : 'こちらにも細い張り出しがあります。';
+  const turn = answerTurn(human, act, aspect, [first]);
+  return {
+    human,
+    plan: {
+      ...turn.plan,
+      action,
+      ...(direct ? {} : { antecedent: 'none', extraction: JSON.stringify([segment('reply', human, aspect, [first])]) }),
+      ...(action === 'agree' ? { name: frame, speech: 'はい、「月枠」と呼びましょう。' } : { speech: '輪のつながりをもう少し確認しましょう。' }),
+    },
+  };
+}
+
+for (const label of ['repair-first', 'bypass-enabled'] as const) {
+  test(`#14 ${label}: scoped_v7 requires a direct link for both forms of construal, preserving part assertions and v6 replay`, async () => {
+    for (const [scope, act, aspect, direct, action] of [
+      ['scoped_v6', 'construe', 'construal', false, 'agree'],
+      ['scoped_v6', 'assert', 'construal', false, 'agree'],
+      ['scoped_v7', 'construe', 'construal', false, 'confirm'],
+      ['scoped_v7', 'assert', 'construal', false, 'confirm'],
+      ['scoped_v7', 'construe', 'construal', true, 'agree'],
+      ['scoped_v7', 'assert', 'construal', true, 'agree'],
+      ['scoped_v7', 'assert', 'part', false, 'agree'],
+    ] as const) {
+      const records = await buildRecords({
+        ...options(label, [construalCheck, namingCheckReply(action, direct, act, aspect)], v12),
+        agreeNameScopeVersion: scope,
+      });
+      const trial = verifiedTrial(records);
+      assert.equal(before(trial).agreeNameScopeVersion, scope);
+      assert.equal(trial.lastCommittedState.agreeNameScopeVersion, scope);
+      const reply = priorClaimViews(trial.lastCommittedState.graph).find(c => c.sourceTurn === 3 && c.act === act);
+      assert.ok(reply, 'the reply must reach the graph under both scopes');
+      assert.equal(reply.aspect, aspect);
+      assert.deepEqual(reply.targets, [first]);
+      assert.equal(reply.respondsTo, direct ? '3:pub1' : null);
+      assert.equal(lastTrace(trial).executed.action, action);
+      for (const side of trial.replay[0].result.sides) assert.equal(Object.hasOwn(menu(side, 'action'), 'agree'), action === 'agree', [scope, act, aspect, direct].join(' '));
+      if (action === 'agree') {
+        assert.deepEqual(candidates(trial), [{ name: frame, figureId: first, sourceTurn: 1 }]);
+        assert.deepEqual(trial.lastCommittedState.ledger[first], { status: 'agreed', name: frame });
+      } else {
+        assert.deepEqual(candidates(trial), []);
+        assert.deepEqual(trial.lastCommittedState.ledger, before(trial).ledger);
+      }
+    }
+  });
+}

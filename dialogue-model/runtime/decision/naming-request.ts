@@ -74,9 +74,9 @@ export function reconfirmationPossible(proposals: readonly NamingClaimLike[], tu
   });
 }
 
-export type AgreeNameScopeVersion = "scoped_v1" | "scoped_v2" | "scoped_v3" | "scoped_v4" | "scoped_v5" | "scoped_v6";
-export function usesPublicNamingTarget(scope: unknown): scope is "scoped_v2" | "scoped_v3" | "scoped_v4" | "scoped_v5" | "scoped_v6" {
-  return scope === "scoped_v2" || scope === "scoped_v3" || scope === "scoped_v4" || scope === "scoped_v5" || scope === "scoped_v6";
+export type AgreeNameScopeVersion = "scoped_v1" | "scoped_v2" | "scoped_v3" | "scoped_v4" | "scoped_v5" | "scoped_v6" | "scoped_v7";
+export function usesPublicNamingTarget(scope: unknown): scope is Exclude<AgreeNameScopeVersion, "scoped_v1"> {
+  return scope === "scoped_v2" || scope === "scoped_v3" || scope === "scoped_v4" || scope === "scoped_v5" || scope === "scoped_v6" || scope === "scoped_v7";
 }
 
 export type NamingJudgmentLike = {
@@ -95,7 +95,8 @@ const isFigureEvidence = (c: LocalClaimView) => c.name === null &&
 const pointed = (reply: LocalClaimView, direct: boolean) => reply.source === LABELLED_ANSWER_SOURCE || directsToFigure(reply.quote, direct);
 export function publiclyCheckedNamingTarget(claims: readonly LocalClaimView[], publicTurns: readonly PublicTurn[],
   judgments: readonly NamingJudgmentLike[], turn: number, includeAgreed = false, scope: AgreeNameScopeVersion = "scoped_v2"): string | null {
-  const directReferenceReplies = scope === "scoped_v5" || scope === "scoped_v6";
+  const directConstrualAnswer = scope === "scoped_v7";
+  const directReferenceReplies = scope === "scoped_v5" || scope === "scoped_v6" || directConstrualAnswer;
   const before = judgments.filter((j): j is NamingJudgmentLike & { turnIndex: number } => typeof j.turnIndex === "number" && j.turnIndex < turn);
   const lastBoundary = before.filter(j => ["agree", "defer", "move_on"].includes(j.judgment?.action as string)).at(-1);
   const boundary = lastBoundary?.turnIndex ?? 0;
@@ -127,7 +128,7 @@ export function publiclyCheckedNamingTarget(claims: readonly LocalClaimView[], p
       // Public descriptions corroborate the executed check even when its
       // question has no extracted target or was missed by extraction entirely.
       // scoped_v6: a described check counts for any number of candidates, not only two. A confirm that only states something stays a check awaiting an answer (it never becomes public focus).
-      if ((scope === "scoped_v3" || scope === "scoped_v4" || directReferenceReplies) && c.act !== "ask" && (scope === "scoped_v6" || ids.length <= 2) &&
+      if ((scope === "scoped_v3" || scope === "scoped_v4" || directReferenceReplies) && c.act !== "ask" && (scope === "scoped_v6" || directConstrualAnswer || ids.length <= 2) &&
           (published?.judgment?.action === "confirm" || published?.judgment?.action === "repair")) {
         describedChecks.add(c.sourceTurn);
       }
@@ -162,6 +163,10 @@ export function publiclyCheckedNamingTarget(claims: readonly LocalClaimView[], p
     if (reply.act !== "assert" && reply.act !== "construe") continue;
     const previousAi = publicTurns.filter(event => event.speaker === "ai" && event.turn < reply.sourceTurn).at(-1);
     if (!previousAi || publicTurns.some(event => event.speaker === "human" && event.turn > previousAi.turn && event.turn < reply.sourceTurn)) continue;
+    // A construal can be classified as an assertion and still describe a
+    // different figure. Count it only if it answers a verified claim in this check.
+    const construal = reply.act === "construe" || reply.aspect === "construal";
+    if (directConstrualAnswer && construal && antecedent?.claim.sourceTurn !== previousAi.turn) continue;
     const check = publications.get(previousAi.turn);
     const target = check?.jevTurn?.executed?.target;
     if (target?.kind === "single" && target.figureId === reply.targets[0] &&
