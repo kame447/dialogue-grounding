@@ -109,6 +109,8 @@ npm run deploy:tangram
 
 操作確認用です。正式な同意取得、正式な質問紙、参加者管理は未実装です（仮アンケートは研究者未承認の試行項目です）。試行データは個別のDurable Objectに格納します。同じブラウザで新しい試行を開始すると再開対象（`active`）は新しい試行に替わりますが、過去の試行の記録は研究者が明示的に削除するまで残ります。研究倫理とデータ保持方針、実験条件を確定するまでは一般募集に使用しないでください。
 
+通常の会話検証は、[受付を使わないローカルWebサーバー](../../dialogue-model/runtime/README.md#base-web-の設定保存と研究者操作)などの隔離経路で行います。本番の試験用受付は、公開受付機能か、承認時に固定される本番プロファイルの検証に限って使います。
+
 ### 参加者の Terra 実行プロファイル
 
 `PARTICIPANT_TERRA_ENABLED=on` と `PARTICIPANT_TERRA_PROFILE=participant_production_usage_v1` を設定した Worker で新規に承認した受付は、`participant_production_usage_v1` と Jev、Luna、Terra の期待返却 ID を受付計画に固定します。両条件と復元は同じ計画を使います。旧受付の保存済み上限と、モデル ID だけを固定した旧受付向けの `PARTICIPANT_TERRA_LIMITS_JSON` の互換経路も残ります。隔離 Worker は新プロファイルを指定せず、従来の予算付き経路を使えます。
