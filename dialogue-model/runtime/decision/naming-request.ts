@@ -163,9 +163,10 @@ export function publiclyCheckedNamingTarget(claims: readonly LocalClaimView[], p
     if (reply.act !== "assert" && reply.act !== "construe") continue;
     const previousAi = publicTurns.filter(event => event.speaker === "ai" && event.turn < reply.sourceTurn).at(-1);
     if (!previousAi || publicTurns.some(event => event.speaker === "human" && event.turn > previousAi.turn && event.turn < reply.sourceTurn)) continue;
-    // A separate construal of the same inferred slot can describe a different
-    // figure. Count it only if it answers a verified claim in this check.
-    if (directConstrualAnswer && reply.act === "construe" && antecedent?.claim.sourceTurn !== previousAi.turn) continue;
+    // A construal can be classified as an assertion and still describe a
+    // different figure. Count it only if it answers a verified claim in this check.
+    const construal = reply.act === "construe" || reply.aspect === "construal";
+    if (directConstrualAnswer && construal && antecedent?.claim.sourceTurn !== previousAi.turn) continue;
     const check = publications.get(previousAi.turn);
     const target = check?.jevTurn?.executed?.target;
     if (target?.kind === "single" && target.figureId === reply.targets[0] &&

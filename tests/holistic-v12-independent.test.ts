@@ -205,40 +205,45 @@ const construalCheck: Turn = {
     aiExtraction: JSON.stringify([segment('outline', checkedReading, 'construal', [first])]),
   },
 };
-function construalReply(action: 'agree' | 'confirm', direct: boolean): Turn {
-  const human = 'こちらでは月のように見えます。';
-  const turn = answerTurn(human, 'construe', 'construal', [first]);
+function namingCheckReply(action: 'agree' | 'confirm', direct: boolean, act: 'construe' | 'assert', aspect: LocalAspect): Turn {
+  const human = aspect === 'construal' ? 'こちらでは月のように見えます。' : 'こちらにも細い張り出しがあります。';
+  const turn = answerTurn(human, act, aspect, [first]);
   return {
     human,
     plan: {
       ...turn.plan,
       action,
-      ...(direct ? {} : { antecedent: 'none', extraction: JSON.stringify([segment('reply', human, 'construal', [first])]) }),
+      ...(direct ? {} : { antecedent: 'none', extraction: JSON.stringify([segment('reply', human, aspect, [first])]) }),
       ...(action === 'agree' ? { name: frame, speech: 'はい、「月枠」と呼びましょう。' } : { speech: '輪のつながりをもう少し確認しましょう。' }),
     },
   };
 }
 
 for (const label of ['repair-first', 'bypass-enabled'] as const) {
-  test(`#14 ${label}: scoped_v7 requires a direct construal answer and scoped_v6 keeps the original replay`, async () => {
-    for (const [scope, direct, action] of [
-      ['scoped_v6', false, 'agree'],
-      ['scoped_v7', false, 'confirm'],
-      ['scoped_v7', true, 'agree'],
+  test(`#14 ${label}: scoped_v7 requires a direct link for both forms of construal, preserving part assertions and v6 replay`, async () => {
+    for (const [scope, act, aspect, direct, action] of [
+      ['scoped_v6', 'construe', 'construal', false, 'agree'],
+      ['scoped_v6', 'assert', 'construal', false, 'agree'],
+      ['scoped_v7', 'construe', 'construal', false, 'confirm'],
+      ['scoped_v7', 'assert', 'construal', false, 'confirm'],
+      ['scoped_v7', 'construe', 'construal', true, 'agree'],
+      ['scoped_v7', 'assert', 'construal', true, 'agree'],
+      ['scoped_v7', 'assert', 'part', false, 'agree'],
     ] as const) {
       const records = await buildRecords({
-        ...options(label, [construalCheck, construalReply(action, direct)], v12),
+        ...options(label, [construalCheck, namingCheckReply(action, direct, act, aspect)], v12),
         agreeNameScopeVersion: scope,
       });
       const trial = verifiedTrial(records);
       assert.equal(before(trial).agreeNameScopeVersion, scope);
       assert.equal(trial.lastCommittedState.agreeNameScopeVersion, scope);
-      const reply = priorClaimViews(trial.lastCommittedState.graph).find(c => c.sourceTurn === 3 && c.act === 'construe');
-      assert.ok(reply, 'the construal must reach the graph under both scopes');
+      const reply = priorClaimViews(trial.lastCommittedState.graph).find(c => c.sourceTurn === 3 && c.act === act);
+      assert.ok(reply, 'the reply must reach the graph under both scopes');
+      assert.equal(reply.aspect, aspect);
       assert.deepEqual(reply.targets, [first]);
       assert.equal(reply.respondsTo, direct ? '3:pub1' : null);
       assert.equal(lastTrace(trial).executed.action, action);
-      for (const side of trial.replay[0].result.sides) assert.equal(Object.hasOwn(menu(side, 'action'), 'agree'), action === 'agree');
+      for (const side of trial.replay[0].result.sides) assert.equal(Object.hasOwn(menu(side, 'action'), 'agree'), action === 'agree', [scope, act, aspect, direct].join(' '));
       if (action === 'agree') {
         assert.deepEqual(candidates(trial), [{ name: frame, figureId: first, sourceTurn: 1 }]);
         assert.deepEqual(trial.lastCommittedState.ledger[first], { status: 'agreed', name: frame });
