@@ -44,6 +44,8 @@ export type ParticipantUsageSnapshot = {
   revision: number; lastHumanSeq: number; halted: boolean;
   phases: Record<Provider, Record<string, Meter>>;
   latest: Record<Provider, Receipt | null>;
+  /** Exact returned IDs from identity-checked successful POSTs, by phase. */
+  returnedModels?: Record<Provider, Record<string, { model: string; ok: number }>>;
 };
 export type ParticipantUsageStore = {
   read(): Promise<unknown>;
@@ -59,19 +61,24 @@ function initial(assignmentId: string, pin: ParticipantModelPin): ParticipantUsa
       jev: Object.fromEntries(phases.jev.map(phase => [phase, empty()])),
       luna: Object.fromEntries(phaseNames(pin, 'luna').map(phase => [phase, empty()])),
       terra: Object.fromEntries(phaseNames(pin, 'terra').map(phase => [phase, empty()])),
-    }, latest: { jev: null, luna: null, terra: null } };
+    }, latest: { jev: null, luna: null, terra: null },
+    returnedModels: { jev: {}, luna: {}, terra: {} } };
 }
 function read(value: unknown, assignmentId: string, pin: ParticipantModelPin): ParticipantUsageSnapshot {
   const template = initial(assignmentId, pin);
-  const saved = data(value, Object.keys(template));
+  const hasReturnedModels = value !== null && typeof value === 'object' && Object.hasOwn(value, 'returnedModels');
+  const saved = data(value, Object.keys(template).filter(key => hasReturnedModels || key !== 'returnedModels'));
   const savedPin = data(saved.pin, Object.keys(pin));
   if (saved.schemaVersion !== template.schemaVersion || saved.assignmentId !== assignmentId ||
       Object.entries(pin).some(([key, model]) => savedPin[key] !== model) ||
       !count(saved.revision) || !count(saved.lastHumanSeq) || typeof saved.halted !== 'boolean') return fail();
   const savedPhases = data(saved.phases, providers), latest = data(saved.latest, providers);
+  const returnedModels = hasReturnedModels ? data(saved.returnedModels, providers) : null;
   for (const provider of providers) {
     const names = phaseNames(pin, provider);
     const group = data(savedPhases[provider], names);
+    const returned = returnedModels ? data(returnedModels[provider]) : null;
+    if (returned && Object.keys(returned).some(phase => !names.includes(phase))) return fail();
     let posts = 0;
     for (const phase of names) {
       const meter = data(group[phase], Object.keys(empty()));
@@ -79,12 +86,18 @@ function read(value: unknown, assignmentId: string, pin: ParticipantModelPin): P
       const m = meter as Meter;
       if (m.cancelledBeforeSend + m.unknownPosts > m.posts || m.missingCostPosts > m.posts - m.cancelledBeforeSend ||
           m.missingInputTokenPosts > m.posts - m.cancelledBeforeSend || m.missingOutputTokenPosts > m.posts - m.cancelledBeforeSend) return fail();
+      if (returned && Object.hasOwn(returned, phase)) {
+        const { model, ok } = data(returned[phase], ['model', 'ok']);
+        if (model !== modelFor(pin, provider) || !count(ok) || ok === 0 ||
+            ok > m.posts - m.cancelledBeforeSend - m.unknownPosts) return fail();
+      }
       posts += m.posts;
     }
     if (!posts && latest[provider] === null) continue;
     const r = data(latest[provider], ['post', 'phase', 'status', 'model', 'costUsd', 'inputTokens', 'outputTokens']);
     if (r.post !== posts || !names.includes(r.phase as string) ||
         !['reserved', 'cancelled', 'failed', 'ok', 'model_mismatch'].includes(r.status as string) ||
+        (returned && r.status === 'ok' && !Object.hasOwn(returned, r.phase as string)) ||
         (r.status === 'ok' ? r.model !== modelFor(pin, provider) :
           r.model !== null && (r.status !== 'failed' || r.model !== modelFor(pin, provider))) ||
         (r.model === null && [r.costUsd, r.inputTokens, r.outputTokens].some(n => n !== null)) ||
@@ -120,7 +133,8 @@ export class ParticipantUsageLedger {
     }
     if (restored === undefined) return fail();
     const durable = read(saved, assignmentId, pin), archived = read(restored, assignmentId, pin);
-    if (durable.revision < archived.revision || (durable.revision === archived.revision &&
+    if (Boolean(durable.returnedModels) !== Boolean(archived.returnedModels) ||
+        durable.revision < archived.revision || (durable.revision === archived.revision &&
         JSON.stringify(durable) !== JSON.stringify(archived))) return fail();
     return new ParticipantUsageLedger(store, durable);
   }
@@ -190,7 +204,7 @@ export class ParticipantUsageLedger {
       if (context) state.lastHumanSeq = Math.max(state.lastHumanSeq, context.humanSeq);
       state.latest[provider] = { post, phase, status: 'reserved', model: null, costUsd: null, inputTokens: null, outputTokens: null };
     });
-    const finish = (status: Receipt['status'], measured: Usage | null = null) => this.change(state => {
+    const finish = (status: Receipt['status'], measured: Usage | null = null, returnedModel?: string) => this.change(state => {
       const m = state.phases[provider][phase];
       const receipt: Receipt = { post, phase, status, model: measured ? expected : null,
         costUsd: measured?.costUsd ?? null, inputTokens: measured?.inputTokens ?? null, outputTokens: measured?.outputTokens ?? null };
@@ -200,6 +214,10 @@ export class ParticipantUsageLedger {
       if (receipt.inputTokens !== null || status === 'cancelled') { m.missingInputTokenPosts--; m.inputTokens += receipt.inputTokens ?? 0; }
       if (receipt.outputTokens !== null || status === 'cancelled') { m.missingOutputTokenPosts--; m.outputTokens += receipt.outputTokens ?? 0; }
       if (status === 'model_mismatch') state.halted = true;
+      if (returnedModel !== undefined && state.returnedModels) {
+        const returned = state.returnedModels[provider];
+        returned[phase] = { model: returnedModel, ok: (returned[phase]?.ok ?? 0) + 1 };
+      }
       if (state.latest[provider]?.post === post) state.latest[provider] = receipt;
     }, 'settle');
     if (active.aborted) { await finish('cancelled'); active.throwIfAborted(); }
@@ -208,16 +226,16 @@ export class ParticipantUsageLedger {
     catch (error) { await finish('failed'); throw error; }
     const raw = response.data as { error?: unknown; model?: unknown;
       usage?: { cost?: unknown; prompt_tokens?: unknown; completion_tokens?: unknown } } | null;
-    if (raw?.error === 'model_mismatch' || response.status === 200 && raw?.model !== expected) {
-      await finish('model_mismatch');
-      return fail();
-    }
-    if (response.status === 200) {
+    const returnedModel = raw?.model;
+    if (response.status === 200 && returnedModel === expected && raw?.error !== 'model_mismatch') {
       await finish('ok', {
         costUsd: amount(raw?.usage?.cost) ? raw.usage.cost : null,
         inputTokens: count(raw?.usage?.prompt_tokens) ? raw.usage.prompt_tokens : null,
         outputTokens: count(raw?.usage?.completion_tokens) ? raw.usage.completion_tokens : null,
-      });
+      }, returnedModel);
+    } else if (raw?.error === 'model_mismatch' || response.status === 200) {
+      await finish('model_mismatch');
+      return fail();
     } else {
       // No metering body is trusted from an HTTP error. Only the private RPC can
       // report identity-verified usage for a successfully received but rejected answer.
