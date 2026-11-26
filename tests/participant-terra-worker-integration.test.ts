@@ -351,7 +351,7 @@ test('per_trial: a second condition whose Terra memo is invalid fails as initial
   assert.equal(JSON.stringify(exported).includes('gen-'), false);
 });
 
-test('the structured generation is frozen at approval for both conditions and survives restore', async t => {
+test('a structured reception keeps its version and second condition across a proxy rollback', async t => {
   const h = harness();
   const generation = INITIAL_OBSERVATION_STRUCTURED_V1;
   const proxy = new InternalParticipantProxy({}, settings);
@@ -381,6 +381,23 @@ test('the structured generation is frozen at approval for both conditions and su
   h.evict();
   assert.equal((await jsonOk(await h.request('state'))).trial.sessionId, first.sessionId);
   await h.complete(first.sessionId, (await jsonOk(await h.request('state'))).trial);
+  const receptionBefore = await h.storage.get('reception:v1');
+  const ownerBefore = await h.storage.get('base:owner:v1');
+  const completedBefore = await h.storage.get('record:' + first.sessionId);
+  const callsBefore = h.calls.length;
+  h.env.PARTICIPANT_AI_PROXY.participantInitialObservationPolicy = async () => { throw new Error('synthetic unknown RPC method'); };
+  h.evict();
+  const blocked = await h.start(first.sessionId);
+  assert.equal(blocked.status, 409);
+  assert.deepEqual(await blocked.json(), { error: 'trial_unavailable' });
+  assert.deepEqual(await h.storage.get('reception:v1'), receptionBefore);
+  assert.deepEqual(await h.storage.get('base:owner:v1'), ownerBefore);
+  assert.deepEqual(await h.storage.get('record:' + first.sessionId), completedBefore);
+  assert.equal((await h.adminRecord(first.sessionId)).status, 'completed');
+  assert.deepEqual((await jsonOk(await h.admin('/admin/reception/' + receptionBefore.receptionId + '/usage.json'))).failedStarts, []);
+  assert.equal(h.calls.length, callsBefore);
+  assert.equal(posts, 1);
+  h.env.PARTICIPANT_AI_PROXY.participantInitialObservationPolicy = () => proxy.participantInitialObservationPolicy();
   const { trial: second } = await jsonOk(await h.start(first.sessionId));
   const secondRecord = await h.storage.get('record:' + second.sessionId);
   assert.equal(secondRecord.options.initialObservationGeneration, generation);
@@ -390,7 +407,7 @@ test('the structured generation is frozen at approval for both conditions and su
   assert.equal(posts, 1);
 });
 
-test('a proxy without the structured capability cannot approve or start that generation', async () => {
+test('a proxy without the structured capability cannot approve or use up the first trial', async () => {
   const h = harness();
   const generation = INITIAL_OBSERVATION_STRUCTURED_V1;
   h.env.PARTICIPANT_TERRA_INITIAL_OBSERVATION_GENERATION = generation;
@@ -399,11 +416,24 @@ test('a proxy without the structured capability cannot approve or start that gen
   assert.equal((await h.storage.get('reception:v1')).plan, null);
   h.env.PARTICIPANT_AI_PROXY.participantInitialObservationPolicy = async () => generation;
   await h.approve();
+  const receptionBefore = await h.storage.get('reception:v1');
+  const ownerBefore = await h.storage.get('base:owner:v1');
   h.env.PARTICIPANT_AI_PROXY.participantInitialObservationPolicy = undefined;
   const reply = await h.start();
   assert.equal(reply.status, 409);
   assert.deepEqual(await reply.json(), { error: 'trial_unavailable' });
   assert.equal(h.calls.length, 0);
+  assert.deepEqual(await h.storage.get('reception:v1'), receptionBefore);
+  assert.deepEqual(await h.storage.get('base:owner:v1'), ownerBefore);
+  h.env.PARTICIPANT_AI_PROXY.participantInitialObservationPolicy = async () => generation;
+  h.controlled.usageChat = async (body, expected) => {
+    assert.equal(body.initial_observation_generation, generation);
+    const { status, data } = await h.env.PARTICIPANT_AI_PROXY.participantChat(body, expected);
+    return { status, data: { ...data, initial_observation_generation: generation } };
+  };
+  const { trial } = await jsonOk(await h.start());
+  assert.equal((await h.storage.get('record:' + trial.sessionId)).options.initialObservationGeneration, generation);
+  assert.deepEqual(h.calls.map(({ kind }) => kind), ['visual_observation']);
 });
 
 test('a reserved initial observation can settle after its assignment is marked interrupted', async () => {

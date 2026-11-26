@@ -40,7 +40,8 @@ import { createTrialV2, modelView } from "../../../dialogue-model/runtime/stimul
 import { resolveWorkerParticipantModelPin } from "../../../dialogue-model/runtime/v2/participant-model-pin.ts";
 import { PARTICIPANT_PRODUCTION_PROFILE } from '../../../dialogue-model/runtime/web/participant-usage-policy.ts';
 import { ParticipantUsageLedger, type ParticipantUsageStore } from '../../../dialogue-model/runtime/web/participant-usage.ts';
-import { createWorkerParticipantRuntime, workerParticipantPolicy, type ParticipantService } from "./participant-runtime.ts";
+import { createWorkerParticipantRuntime, requireWorkerInitialObservationGeneration, workerParticipantPolicy,
+  type ParticipantService } from "./participant-runtime.ts";
 export { AdminIndex };
 
 type Strategy = "repair-first" | "bypass-enabled";
@@ -329,6 +330,12 @@ export class TangramSession extends DurableObject<Env> {
       if (effectiveBetweenTrials(r.plan) === 'questionnaire_required' && !await this.questionnaireSubmitted(predecessor)) {
         throw new ReceptionError('questionnaire_required');
       }
+    }
+    // A temporarily incompatible proxy must leave the approved slot available for another start.
+    const generation = r.plan.schemaVersion === 'reception_plan_v1' ? undefined : r.plan.initialObservationGeneration;
+    if (generation) {
+      try { await requireWorkerInitialObservationGeneration(this.env.PARTICIPANT_AI_PROXY, generation); }
+      catch { throw new BaseSessionError('trial_unavailable'); }
     }
     this.admission = { kind:'reception', receptionId:r.receptionId, expectedRevision:r.revision, index };
     try {
@@ -742,8 +749,7 @@ export class TangramSession extends DurableObject<Env> {
   private async createTrial(binding: Parameters<MakeBaseTask>[0]): Promise<NamingTask> {
     const {seed,strategy,referenceMemory,restore,participantRuntime,initialObservationGeneration} = binding;
     const policy = binding.participantModelPin === undefined ? null
-      : await workerParticipantPolicy(this.env.PARTICIPANT_AI_PROXY, Boolean(participantRuntime),
-        restore ? undefined : initialObservationGeneration);
+      : await workerParticipantPolicy(this.env.PARTICIPANT_AI_PROXY, Boolean(participantRuntime));
     let pin;
     try {
       pin = resolveWorkerParticipantModelPin({

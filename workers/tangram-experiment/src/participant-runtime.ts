@@ -38,6 +38,11 @@ const profile = researchTrialProfileV3({ timeoutMs: null, maxCompletionTokens: n
 });
 const researchLimits = { maxDeadlineMs: RESEARCH_MAX_DEADLINE_MS };
 
+export async function requireWorkerInitialObservationGeneration(proxy: ParticipantService | undefined,
+  generation: InitialObservationGeneration): Promise<void> {
+  if (await proxy?.participantInitialObservationPolicy?.() !== generation) throw new NamingTaskError('ai_unavailable');
+}
+
 export async function workerParticipantPolicy(proxy: ParticipantService | undefined, usageOnly = false,
   initialObservationGeneration?: InitialObservationGeneration) {
   try {
@@ -48,9 +53,7 @@ export async function workerParticipantPolicy(proxy: ParticipantService | undefi
     const raw = await (usageOnly ? proxy.participantUsagePolicy!() : proxy.participantPolicy());
     const pin = validateParticipantModelPin(structuredClone(raw));
     if (!MODEL_CONTRACT_V2.acceptedReturned.includes(pin.jevModelId)) throw new Error();
-    if (initialObservationGeneration && await proxy.participantInitialObservationPolicy?.() !== initialObservationGeneration) {
-      throw new Error();
-    }
+    if (initialObservationGeneration) await requireWorkerInitialObservationGeneration(proxy, initialObservationGeneration);
     return { pin, proxy };
   } catch {
     throw new NamingTaskError('ai_unavailable');
