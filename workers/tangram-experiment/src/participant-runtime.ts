@@ -6,6 +6,7 @@ import { NamingTaskError } from '../../../dialogue-model/runtime/naming-error.mj
 import { createJevDecisionClient, type JevDecisionClientOptions } from '../../../dialogue-model/runtime/decision/jev-decision.ts';
 import { createJevLocalTestClassifier } from '../../../dialogue-model/runtime/local-grounding/jev-local-test.ts';
 import { createWorkerTerraObserver, type WorkerTerraCache } from '../../../dialogue-model/runtime/observation/worker-terra-observer.ts';
+import type { InitialObservationGeneration } from '../../../dialogue-model/runtime/observation/initial-observation-generation.ts';
 import type { ObservationInput } from '../../../dialogue-model/runtime/observation/contract.ts';
 import { ENGINEERING_LIMITS, RunBudget, type BudgetLimits } from '../../../dialogue-model/runtime/diagnostics/parity-live/audit.ts';
 import { participantLedgerFetch, type JevResearchOptions, type JevResearchLedger } from '../../../dialogue-model/runtime/web/participant-jev-wiring.ts';
@@ -21,6 +22,7 @@ export interface ParticipantService {
   participantUsagePolicy?(): Promise<unknown>;
   participantUsageChat?: Dispatch;
   participantUsageChoices?: Dispatch;
+  participantInitialObservationPolicy?(): Promise<unknown>;
 }
 
 const profile = researchTrialProfileV3({ timeoutMs: null, maxCompletionTokens: null }, {
@@ -36,7 +38,8 @@ const profile = researchTrialProfileV3({ timeoutMs: null, maxCompletionTokens: n
 });
 const researchLimits = { maxDeadlineMs: RESEARCH_MAX_DEADLINE_MS };
 
-export async function workerParticipantPolicy(proxy: ParticipantService | undefined, usageOnly = false) {
+export async function workerParticipantPolicy(proxy: ParticipantService | undefined, usageOnly = false,
+  initialObservationGeneration?: InitialObservationGeneration) {
   try {
     if (typeof proxy?.participantPolicy !== 'function' || typeof proxy.participantChat !== 'function' ||
         typeof proxy.participantChoices !== 'function') throw new Error();
@@ -45,6 +48,9 @@ export async function workerParticipantPolicy(proxy: ParticipantService | undefi
     const raw = await (usageOnly ? proxy.participantUsagePolicy!() : proxy.participantPolicy());
     const pin = validateParticipantModelPin(structuredClone(raw));
     if (!MODEL_CONTRACT_V2.acceptedReturned.includes(pin.jevModelId)) throw new Error();
+    if (initialObservationGeneration && await proxy.participantInitialObservationPolicy?.() !== initialObservationGeneration) {
+      throw new Error();
+    }
     return { pin, proxy };
   } catch {
     throw new NamingTaskError('ai_unavailable');
@@ -72,11 +78,12 @@ function boundFetch(dispatch: Dispatch, modelId: string, ledger: RunBudget): typ
   };
 }
 
-export function createWorkerParticipantRuntime({ pin, own, proxy, cache, limits, usage }: {
+export function createWorkerParticipantRuntime({ pin, own, proxy, cache, limits, usage, initialObservationGeneration }: {
   pin: ParticipantModelPin;
   own: ObservationInput;
   proxy: ParticipantService;
   cache: WorkerTerraCache;
+  initialObservationGeneration?: InitialObservationGeneration;
 } & ({ limits: Readonly<BudgetLimits>; usage?: never } | { limits?: never; usage: ParticipantUsageLedger })) {
   const ledger = usage ?? new RunBudget(limits!);
   const chat: Dispatch = (payload, expected) => usage ? proxy.participantUsageChat!(payload, expected) : proxy.participantChat(payload, expected);
@@ -117,7 +124,7 @@ export function createWorkerParticipantRuntime({ pin, own, proxy, cache, limits,
     }) as typeof fetch,
   } : transport;
   const terra = createWorkerTerraObserver({
-    modelPin: pin, own, cache, timeoutMs: profile.timeouts.observationMs, researchLimits,
+    modelPin: pin, own, cache, timeoutMs: profile.timeouts.observationMs, researchLimits, initialObservationGeneration,
     visual: (payload, signal) => usage ? usage.dispatch('terra', chat, payload, signal) : chat(payload, pin.terraModelId),
     ...(usage ? { onCacheHit: () => usage.cacheHit() } : {}),
   });

@@ -5,11 +5,13 @@ import {
 } from './observe.ts';
 import type { ObservationMessage } from './observe.ts';
 import type { ObservationInput, ObservationMemo, ObservationObserver, ObservationOptions } from './contract.ts';
+import type { InitialObservationGeneration } from './initial-observation-generation.ts';
 import { requireExactParticipantModel, validateParticipantModelPin } from '../v2/participant-model-pin.ts';
 import type { ParticipantModelPin } from '../v2/participant-model-pin.ts';
 import type { ResearchLimits } from '../v2/research-timeouts.ts';
 
-type VisualRequest = { purpose: 'visual_observation'; messages: ObservationMessage[] };
+type VisualRequest = { purpose: 'visual_observation'; messages: ObservationMessage[];
+  initial_observation_generation?: InitialObservationGeneration };
 // This port accepts the private service's response before any client-side model fallback.
 type VisualPort = (request: VisualRequest, signal: AbortSignal) => Promise<{ status: number; data: unknown }>;
 type CacheEntry = {
@@ -49,11 +51,14 @@ function object(value: unknown): Record<string, unknown> | null {
   return value && Object.getPrototypeOf(value) === Object.prototype ? value as Record<string, unknown> : null;
 }
 
-function providerText(raw: unknown, modelId: string): string {
+function providerText(raw: unknown, modelId: string, generation?: InitialObservationGeneration): string {
   const data = object(raw);
   try { requireExactParticipantModel(modelId, data?.model); }
   catch { throw new ObservationError('invalid_response'); }
   const first = Array.isArray(data?.choices) ? object(data.choices[0]) : null;
+  if (generation && (data?.initial_observation_generation !== generation || first?.finish_reason !== 'stop')) {
+    throw new ObservationError('invalid_response');
+  }
   const text = responseText(object(first?.message)?.content);
   if (!text.trim()) throw new ObservationError('invalid_response');
   return text;
@@ -63,7 +68,8 @@ function providerText(raw: unknown, modelId: string): string {
  * ID. The runtime supplies the validated issue and current memo for reobservation.
  * Only initial observations are shared through the private cache.
  */
-export function createWorkerTerraObserver({ modelPin, own, visual, cache, timeoutMs, now, researchLimits, onCacheHit }: {
+export function createWorkerTerraObserver({ modelPin, own, visual, cache, timeoutMs, now, researchLimits, onCacheHit,
+  initialObservationGeneration }: {
   modelPin: ParticipantModelPin;
   own: ObservationInput;
   visual: VisualPort;
@@ -72,6 +78,7 @@ export function createWorkerTerraObserver({ modelPin, own, visual, cache, timeou
   now?: () => Date;
   researchLimits?: ResearchLimits;
   onCacheHit?: () => Promise<void>;
+  initialObservationGeneration?: InitialObservationGeneration;
 }): ObservationObserver {
   const { terraModelId } = validateParticipantModelPin(modelPin);
   const bound = ownProjection(own);
@@ -80,16 +87,27 @@ export function createWorkerTerraObserver({ modelPin, own, visual, cache, timeou
     if (JSON.stringify(ownProjection(input)) !== boundJson) throw new ObservationError('invalid_input');
   };
   const observer = createLunaObserver({
-    async complete(messages, { signal }) {
-      const response = await visual({ purpose: 'visual_observation', messages }, signal);
-      if (response?.status !== 200) throw new ObservationError(response?.status === 504 ? 'timeout' : 'unavailable');
-      return { text: providerText(response.data, terraModelId) };
+    async complete(messages, { signal, phase }) {
+      const generation = phase === 'observation_initial' ? initialObservationGeneration : undefined;
+      const response = await visual({ purpose: 'visual_observation', messages,
+        ...(generation ? { initial_observation_generation: generation } : {}) }, signal);
+      if (response?.status !== 200) {
+        const error = object(response?.data)?.error;
+        if (generation && (response?.status === 422 && error === 'upstream_output_limit' ||
+            response?.status === 502 && error === 'invalid_upstream_response')) {
+          throw new ObservationError('invalid_response');
+        }
+        throw new ObservationError(response?.status === 504 ? 'timeout' : 'unavailable');
+      }
+      return { text: providerText(response.data, terraModelId, generation) };
     },
   }, { timeoutMs, now, researchLimits });
 
   let keyPromise: Promise<string> | undefined;
   function cacheKey(): Promise<string> {
-    keyPromise ??= sha256(JSON.stringify([SCHEMA, terraModelId, OBSERVATION_MEMO_VERSION, OBSERVATION_INITIAL_INSTRUCTIONS, boundJson]))
+    const fields = [SCHEMA, terraModelId, OBSERVATION_MEMO_VERSION, OBSERVATION_INITIAL_INSTRUCTIONS, boundJson];
+    if (initialObservationGeneration) fields.push(initialObservationGeneration);
+    keyPromise ??= sha256(JSON.stringify(fields))
       .then(digest => SCHEMA + ':' + digest);
     return keyPromise;
   }

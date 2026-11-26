@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import { createChatClient } from "../../../dialogue-model/runtime/client.mjs";
 import { createNamingTaskV2 } from "../../../dialogue-model/runtime/v2/naming-task-v2.mjs";
 import { createGroundingJudgeClient } from "../../../dialogue-model/runtime/grounding/client.ts";
+import { INITIAL_OBSERVATION_STRUCTURED_V1 } from "../../../dialogue-model/runtime/observation/initial-observation-generation.ts";
 import { NamingTaskError } from "../../../dialogue-model/runtime/naming-error.mjs";
 import { sessionCookie, sessionId } from "./session-cookie.ts";
 import { isExcessiveTraffic, type SoftLimitBindings } from "./soft-limits";
@@ -74,6 +75,8 @@ export interface Env extends SoftLimitBindings {
   PARTICIPANT_TERRA_ENABLED?: string;
   PARTICIPANT_TERRA_PROFILE?: string;
   PARTICIPANT_TERRA_LIMITS_JSON?: string;
+  // Approval-only opt-in; already approved plans supply their own generation.
+  PARTICIPANT_TERRA_INITIAL_OBSERVATION_GENERATION?: string;
   // Deployment-wide AI utterance style for new trials; identical for both strategies.
   V2_UTTERANCE_STYLE?: string;
   NAMING_SESSIONS: DurableObjectNamespace<TangramSession>;
@@ -248,19 +251,22 @@ export class TangramSession extends DurableObject<Env> {
       if (!receptionOpen(settings.mode)) throw new ReceptionError('reception_closed');
       if (!settings.protocol) throw new ReceptionError('protocol_unconfigured');
       const protocol = settings.protocol.protocol, expected = input?.protocol;
-      let participant: Pick<Parameters<typeof approveReception>[1], 'participantModelPin' | 'participantRuntimeProfile' | 'participantLimits'> = {};
+      let participant: Pick<Parameters<typeof approveReception>[1],
+        'participantModelPin' | 'participantRuntimeProfile' | 'participantLimits' | 'initialObservationGeneration'> = {};
       if (this.env.PARTICIPANT_TERRA_ENABLED === 'on') {
         try {
           const configuredProfile = this.env.PARTICIPANT_TERRA_PROFILE;
-          if (configuredProfile === PARTICIPANT_PRODUCTION_PROFILE) {
-            const { pin: participantModelPin } = await workerParticipantPolicy(this.env.PARTICIPANT_AI_PROXY, true);
-            participant = { participantModelPin, participantRuntimeProfile: PARTICIPANT_PRODUCTION_PROFILE };
-          } else {
-            if (configuredProfile !== undefined) throw new Error('unknown participant profile');
-            const participantLimits = validateParticipantLimits(JSON.parse(this.env.PARTICIPANT_TERRA_LIMITS_JSON ?? 'null'));
-            const { pin: participantModelPin } = await workerParticipantPolicy(this.env.PARTICIPANT_AI_PROXY);
-            participant = { participantModelPin, participantLimits };
+          const initialObservationGeneration = this.env.PARTICIPANT_TERRA_INITIAL_OBSERVATION_GENERATION;
+          if (initialObservationGeneration !== undefined && initialObservationGeneration !== INITIAL_OBSERVATION_STRUCTURED_V1) {
+            throw new Error('unknown initial observation generation');
           }
+          const usageOnly = configuredProfile === PARTICIPANT_PRODUCTION_PROFILE;
+          if (configuredProfile !== undefined && !usageOnly) throw new Error('unknown participant profile');
+          const participantLimits = usageOnly ? undefined
+            : validateParticipantLimits(JSON.parse(this.env.PARTICIPANT_TERRA_LIMITS_JSON ?? 'null'));
+          const { pin: participantModelPin } = await workerParticipantPolicy(this.env.PARTICIPANT_AI_PROXY, usageOnly, initialObservationGeneration);
+          participant = { participantModelPin, ...(initialObservationGeneration ? { initialObservationGeneration } : {}),
+            ...(participantLimits ? { participantLimits } : { participantRuntimeProfile: PARTICIPANT_PRODUCTION_PROFILE }) };
         } catch {
           throw new ReceptionError('reception_unavailable');
         }
@@ -734,9 +740,10 @@ export class TangramSession extends DurableObject<Env> {
   }
 
   private async createTrial(binding: Parameters<MakeBaseTask>[0]): Promise<NamingTask> {
-    const {seed,strategy,referenceMemory,restore,participantRuntime} = binding;
+    const {seed,strategy,referenceMemory,restore,participantRuntime,initialObservationGeneration} = binding;
     const policy = binding.participantModelPin === undefined ? null
-      : await workerParticipantPolicy(this.env.PARTICIPANT_AI_PROXY, Boolean(participantRuntime));
+      : await workerParticipantPolicy(this.env.PARTICIPANT_AI_PROXY, Boolean(participantRuntime),
+        restore ? undefined : initialObservationGeneration);
     let pin;
     try {
       pin = resolveWorkerParticipantModelPin({
@@ -747,6 +754,7 @@ export class TangramSession extends DurableObject<Env> {
     }
     const onPersist = async (snapshot: StoredTrial) => {
       const record = pin ? { ...snapshot, options: { ...snapshot.options, participantModelPin: pin,
+        ...(initialObservationGeneration ? { initialObservationGeneration } : {}),
         ...(participantRuntime ? { participantRuntimeProfile: participantRuntime.profile } : {}) } } : snapshot;
       await binding.onPersist(record as unknown as BaseRecord);
       await this.scheduleExpiry();
@@ -767,7 +775,8 @@ export class TangramSession extends DurableObject<Env> {
       const trial = createTrialV2({ seed, rotationMode, ...figures });
       const model = modelView(trial);
       const runtime = createWorkerParticipantRuntime({
-        proxy: policy.proxy, pin, ...runtimeMode, own: { ownImage: { mimeType: model.mimeType, base64: model.png.toString('base64') }, ownAnchors: model.anchors },
+        proxy: policy.proxy, pin, ...runtimeMode, initialObservationGeneration,
+        own: { ownImage: { mimeType: model.mimeType, base64: model.png.toString('base64') }, ownAnchors: model.anchors },
         cache: {
           read: key => this.ctx.storage.get(key),
           putIfAbsent: (key, entry) => this.ctx.storage.transaction(async tx => {

@@ -12,6 +12,7 @@ import { validateParticipantModelPin } from '../dialogue-model/runtime/v2/partic
 import { handleRequest } from '../workers/research-ai-proxy/src/index.mjs';
 import { PARTICIPANT_PRODUCTION_PROFILE } from '../dialogue-model/runtime/web/participant-usage-policy.ts';
 import { configuredParticipantPin, participantChoices, participantUsageChoices } from '../workers/research-ai-proxy/src/participant-transport.ts';
+import { INITIAL_OBSERVATION_STRUCTURED_V1 } from '../dialogue-model/runtime/observation/initial-observation-generation.ts';
 
 registerHooks({ resolve(name, context, next) {
   if (name === 'cloudflare:workers') {
@@ -98,6 +99,7 @@ function harness(enabled = true, selectedProtocol: typeof protocol & {
     PARTICIPANT_TERRA_ENABLED: enabled ? 'on' : 'off',
     PARTICIPANT_TERRA_PROFILE: PARTICIPANT_PRODUCTION_PROFILE as string | undefined,
     PARTICIPANT_TERRA_LIMITS_JSON: JSON.stringify(approvedLimits),
+    PARTICIPANT_TERRA_INITIAL_OBSERVATION_GENERATION: undefined as string | undefined,
     V2_UTTERANCE_STYLE: 'concise',
     AI_PROXY: { async chat() { controlled.legacyCalls++; throw new Error('synthetic legacy call'); } },
     PARTICIPANT_AI_PROXY: {
@@ -129,6 +131,7 @@ function harness(enabled = true, selectedProtocol: typeof protocol & {
         return mock(controlled.luna, text);
       },
       async participantUsagePolicy() { return this.participantPolicy(); },
+      participantInitialObservationPolicy: undefined as (() => Promise<unknown>) | undefined,
       async participantUsageChat(body: any, expected: string) {
         const overridden = await controlled.usageChat?.(body, expected);
         return overridden ?? this.participantChat(body, expected);
@@ -346,6 +349,61 @@ test('per_trial: a second condition whose Terra memo is invalid fails as initial
   assert.equal(failed.usage.phases.jev.action_target.posts + failed.usage.phases.luna.generation.posts, 0);
   assert.deepEqual(await h.storage.get('record:' + firstId), firstRecord, 'the finished first condition is unchanged');
   assert.equal(JSON.stringify(exported).includes('gen-'), false);
+});
+
+test('the structured generation is frozen at approval for both conditions and survives restore', async t => {
+  const h = harness();
+  const generation = INITIAL_OBSERVATION_STRUCTURED_V1;
+  const proxy = new InternalParticipantProxy({}, settings);
+  h.env.PARTICIPANT_TERRA_INITIAL_OBSERVATION_GENERATION = generation;
+  h.env.PARTICIPANT_AI_PROXY.participantInitialObservationPolicy = () => proxy.participantInitialObservationPolicy();
+  let posts = 0;
+  t.mock.method(globalThis, 'fetch', async (_url: unknown, init: RequestInit) => {
+    posts++;
+    const body = JSON.parse(String(init.body));
+    assert.equal(body.response_format?.json_schema?.strict, true);
+    const { data } = await h.env.PARTICIPANT_AI_PROXY.participantChat({ purpose: 'visual_observation', messages: body.messages },
+      pin.terraModelId);
+    return Response.json(data);
+  });
+  h.controlled.usageChat = async (body, expected) => body.purpose === 'visual_observation'
+    ? proxy.participantUsageChat(body, expected) : undefined;
+  await h.receive();
+  const { plan } = await h.approve();
+  assert.equal(plan.initialObservationGeneration, generation);
+  assert.equal(posts, 0);
+  h.env.PARTICIPANT_TERRA_INITIAL_OBSERVATION_GENERATION = undefined;
+  const { trial: first } = await jsonOk(await h.start());
+  const firstRecord = await h.storage.get('record:' + first.sessionId);
+  assert.equal(firstRecord.options.initialObservationGeneration, generation);
+  assert.equal(firstRecord.assignment.source.plan.initialObservationGeneration, generation);
+  assert.equal(posts, 1);
+  h.evict();
+  assert.equal((await jsonOk(await h.request('state'))).trial.sessionId, first.sessionId);
+  await h.complete(first.sessionId, (await jsonOk(await h.request('state'))).trial);
+  const { trial: second } = await jsonOk(await h.start(first.sessionId));
+  const secondRecord = await h.storage.get('record:' + second.sessionId);
+  assert.equal(secondRecord.options.initialObservationGeneration, generation);
+  assert.equal(secondRecord.assignment.source.plan.initialObservationGeneration, generation);
+  assert.equal(secondRecord.initialObservation.memoSha256, firstRecord.initialObservation.memoSha256);
+  assert.equal(secondRecord.jevLedger.phases.terra.initial_observation.cacheHits, 1);
+  assert.equal(posts, 1);
+});
+
+test('a proxy without the structured capability cannot approve or start that generation', async () => {
+  const h = harness();
+  const generation = INITIAL_OBSERVATION_STRUCTURED_V1;
+  h.env.PARTICIPANT_TERRA_INITIAL_OBSERVATION_GENERATION = generation;
+  await h.receive();
+  await assert.rejects(h.approve(), { code: 'reception_unavailable' });
+  assert.equal((await h.storage.get('reception:v1')).plan, null);
+  h.env.PARTICIPANT_AI_PROXY.participantInitialObservationPolicy = async () => generation;
+  await h.approve();
+  h.env.PARTICIPANT_AI_PROXY.participantInitialObservationPolicy = undefined;
+  const reply = await h.start();
+  assert.equal(reply.status, 409);
+  assert.deepEqual(await reply.json(), { error: 'trial_unavailable' });
+  assert.equal(h.calls.length, 0);
 });
 
 test('a reserved initial observation can settle after its assignment is marked interrupted', async () => {

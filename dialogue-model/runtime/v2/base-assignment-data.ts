@@ -150,8 +150,12 @@ export function validateBoundBaseRecord(record: unknown, assignment: unknown): v
     const recordedPin = Object.hasOwn(options, 'participantModelPin')
       ? validateParticipantModelPin(options.participantModelPin) : undefined;
     if (JSON.stringify(pin) !== JSON.stringify(recordedPin) || pin && options.jevResearch !== true) throw new Error('model_pin');
-    const profile = a.source.kind === 'reception_plan_v2' || a.source.kind === 'reception_plan_v3'
-      ? a.source.plan.participantRuntimeProfile : undefined;
+    const plan = a.source.kind === 'reception_plan_v2' || a.source.kind === 'reception_plan_v3' ? a.source.plan : null;
+    const profile = plan?.participantRuntimeProfile;
+    const generation = plan?.initialObservationGeneration;
+    if (generation ? options.initialObservationGeneration !== generation : Object.hasOwn(options, 'initialObservationGeneration')) {
+      throw new Error('observation_generation');
+    }
     const ledger = r.jevLedger && typeof r.jevLedger === 'object' ? data(r.jevLedger) : null;
     if (profile ? options.participantRuntimeProfile !== profile || ledger?.schemaVersion !== PARTICIPANT_PRODUCTION_PROFILE ||
         ledger.assignmentId !== a.assignmentId || Object.hasOwn(ledger, 'limits')
