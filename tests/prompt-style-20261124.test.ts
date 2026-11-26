@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  GENERATOR_INSTRUCTIONS_V2, ACTION_SCOPE_V2, LUNA_GENERATOR_INSTRUCTIONS_V2, LUNA_ACTION_SCOPE_V2,
+  STYLED_GENERATOR_INSTRUCTIONS_V2 as GENERATOR_INSTRUCTIONS_V2, STYLED_ACTION_SCOPE_V2 as ACTION_SCOPE_V2,
+  LUNA_GENERATOR_INSTRUCTIONS_V2, LUNA_ACTION_SCOPE_V2,
 } from '../dialogue-model/runtime/v2/dialogue-v2.mjs';
 import { buildJevDecisionPayload } from '../dialogue-model/runtime/decision/jev-decision.ts';
 import type { JevDecisionInput } from '../dialogue-model/runtime/decision/contract.ts';
@@ -26,25 +27,23 @@ const criteria = (layout: 'two_stage_v1' | 'two_stage_v2' | 'two_stage_v3') =>
   buildJevDecisionPayload(input(), { questionLayout: layout }).questions.action.criteria;
 
 test('tone: fixed polite register is replaced, not contradicted', () => {
-  for (const text of [GENERATOR_INSTRUCTIONS_V2, LUNA_GENERATOR_INSTRUCTIONS_V2]) {
-    assert.doesNotMatch(text, /親しみやすい/);
-    assert.match(text, /敬語には自然な敬語で、くだけた口調には自然なくだけた口調/);
-    assert.match(text, /相槌や言い回しも合わせ/);
-  }
+  const text = GENERATOR_INSTRUCTIONS_V2;
+  assert.doesNotMatch(text, /親しみやすい/);
+  assert.match(text, /敬語には自然な敬語で、くだけた口調には自然なくだけた口調/);
+  assert.match(text, /相槌や言い回しも合わせ/);
 });
 
 test('feature questions: direct answer, three-way observation honesty, no naming jump, no testing questions', () => {
-  for (const text of [GENERATOR_INSTRUCTIONS_V2, LUNA_GENERATOR_INSTRUCTIONS_V2]) {
-    assert.match(text, /まずその問いに直接答えてください/);
-    assert.match(text, /命名の依頼と取り違えず/);
-    assert.match(text, /呼び名の提案や採用に進まないでください/);
-    assert.match(text, /ある・ない・確かめられない/);
-    assert.match(text, /「〜っぽい」のような曖昧な表現へ変えたりしないでください/);
-    assert.match(text, /形式的な確認質問を付け足さない/);
-    assert.match(text, /「これなら分かりますか？」/);
-    assert.match(text, /未解決の曖昧さがあるときだけ、その点を具体的に尋ねてください/);
-    assert.match(text, /形の分析の開始には当たりません/);
-  }
+  const text = GENERATOR_INSTRUCTIONS_V2;
+  assert.match(text, /まずその問いに直接答えてください/);
+  assert.match(text, /命名の依頼と取り違えず/);
+  assert.match(text, /呼び名の提案や採用に進まないでください/);
+  assert.match(text, /ある・ない・確かめられない/);
+  assert.match(text, /「〜っぽい」のような曖昧な表現へ変えたりしないでください/);
+  assert.match(text, /形式的な確認質問を付け足さない/);
+  assert.match(text, /「これなら分かりますか？」/);
+  assert.match(text, /未解決の曖昧さがあるときだけ、その点を具体的に尋ねてください/);
+  assert.match(text, /形の分析の開始には当たりません/);
 });
 
 test('accept no longer forbids answering; naming and joint identification stay forbidden', () => {
@@ -53,12 +52,11 @@ test('accept no longer forbids answering; naming and joint identification stay f
   assert.match(GENERATOR_INSTRUCTIONS_V2, /判断に示された名前を「」で候補として示/);
   assert.doesNotMatch(ACTION_SCOPE_V2.propose_name, /どの図形と理解したかを示すか名前を出すだけ/);
   assert.match(ACTION_SCOPE_V2.propose_name, /判断の名前を「」で候補として示す/);
-  for (const scope of [ACTION_SCOPE_V2, LUNA_ACTION_SCOPE_V2]) {
-    assert.doesNotMatch(scope.accept, /受け止めるだけ/);
-    assert.match(scope.accept, /直接答えてよい/);
-    assert.match(scope.accept, /名前に決まった・対象を共同で特定できたとは言わない/);
-    assert.match(scope.confirm, /決まった・それでいこうとは言わない/);
-  }
+  const scope = ACTION_SCOPE_V2;
+  assert.doesNotMatch(scope.accept, /受け止めるだけ/);
+  assert.match(scope.accept, /直接答えてよい/);
+  assert.match(scope.accept, /名前に決まった・対象を共同で特定できたとは言わない/);
+  assert.match(scope.confirm, /決まった・それでいこうとは言わない/);
 });
 
 test('strategy difference stays: defer/move_on handling is untouched and identical for both strategies', () => {
@@ -66,6 +64,12 @@ test('strategy difference stays: defer/move_on handling is untouched and identic
   for (const text of [GENERATOR_INSTRUCTIONS_V2, LUNA_GENERATOR_INSTRUCTIONS_V2]) assert.match(text, /defer\/revisitは保留・再訪であることが分かるように/);
   assert.match(ACTION_SCOPE_V2.defer, /後で戻る/);
   assert.match(ACTION_SCOPE_V2.move_on, /別の図形に進む/);
+});
+
+test('unversioned Luna keeps the previous tone and the #175 place-only rule', () => {
+  assert.match(LUNA_GENERATOR_INSTRUCTIONS_V2, /親しみやすいです・ます調/);
+  assert.match(LUNA_GENERATOR_INSTRUCTIONS_V2, /場所だけで図形を示したときは形の特徴を尋ね/);
+  assert.match(LUNA_ACTION_SCOPE_V2.accept, /形の特徴を尋ね、自分の図形の観察は添えない/);
 });
 
 test('Jev two_stage_v3 criteria: accept answers feature questions, confirm only for unresolved points, propose_name after the target is shared', () => {
@@ -84,7 +88,7 @@ test('Jev two_stage_v1/v2 criteria stay byte-identical to the prior wording', ()
   }
 });
 
-test('runtime two_stage_v3: both strategies deliver identical prompts across 5 contrast scenarios and pass all guards on casual/polite answers', async () => {
+for (const participantPrompts of [false, true]) test(`runtime two_stage_v3: ${participantPrompts ? 'participant' : 'research'} prompts agree across strategies and pass the guard`, async () => {
   const scenarios = [
     { label: 'appearance_question', human: 'どんな見た目の図形がありますか？', reply: '細長い先に小さな四角がついた形がありますよ。' },
     { label: 'unknown_target', human: 'どの図形の話かまだ分からないです。', reply: 'すみません、細長い部分の端に小さな四角がついている形のことです。' },
@@ -97,8 +101,10 @@ test('runtime two_stage_v3: both strategies deliver identical prompts across 5 c
     for (const strategy of ['repair-first', 'bypass-enabled'] as const) {
       const jevPayloads: unknown[] = [];
       const lunaPayloads: unknown[] = [];
+      const extraction: unknown[] = [];
       const jevDecision = createJevDecisionClient({
-        enabled: true, questionLayout: 'two_stage_v3', readKey: async () => 'sk-or-SYNTHETIC-prompt-style-regression-key',
+        enabled: true, questionLayout: 'two_stage_v3', participantPrompts,
+        readKey: async () => 'sk-or-SYNTHETIC-prompt-style-regression-key',
         fetchImpl: async (_url: string, init?: RequestInit) => {
           const body = JSON.parse(String(init?.body ?? '{}'));
           jevPayloads.push(body);
@@ -115,10 +121,12 @@ test('runtime two_stage_v3: both strategies deliver identical prompts across 5 c
         client: {
           async complete(messages: unknown[], options?: { phase?: string }) {
             if (options?.phase === 'generation') { lunaPayloads.push(messages); return { text: s.reply }; }
+            if (options?.phase === 'local_extraction') extraction.push(messages);
             return { text: JSON.stringify({ segments: [] }) };
           },
         },
         strategy, image: s4Image, anchors: s4Anchors, referenceMemory: true, decisionMode: 'jev', questionLayout: 'two_stage_v3',
+        participantPrompts,
         technicalTrial: { version: 'adaptive_repair_v3' },
         interventionPolicy: { version: 'bypass_acceptance_v1', tableSha256: BYPASS_ACCEPTANCE_V1_TABLE_SHA256 },
         decisionTimeoutMs: 5000,
@@ -140,6 +148,10 @@ test('runtime two_stage_v3: both strategies deliver identical prompts across 5 c
       assert.deepEqual(findGuardViolations(s.reply, 'accept'), [], s.label);
       assert.deepEqual(findOrientationLeaks(s.reply), [], s.label);
       assert.deepEqual(findLocalPublicationViolations(s.reply, lunaPayloads[0] as { role: string; content: string }[]), [], s.label);
+      assert.ok(jevPayloads.length && extraction.length && lunaPayloads.length, s.label);
+      for (const requests of [jevPayloads, extraction, lunaPayloads]) {
+        assert.equal(JSON.stringify(requests).includes('相手の画面での図形の場所'), participantPrompts, s.label);
+      }
       captures[strategy] = { jev: jevPayloads, luna: lunaPayloads };
     }
     assert.deepEqual(captures['repair-first'], captures['bypass-enabled'], `strategy parity for ${s.label}`);

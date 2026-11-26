@@ -1,4 +1,4 @@
-// S4 verifies the untouched historical records. Exact request replay uses the runtime that produced the tape.
+// S4 verifies the untouched historical records. Both runtimes must reproduce the recorded research prompts.
 // The records come from the archived runtime of that commit; without the Git history the tests are skipped.
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -28,7 +28,7 @@ const turnsFor = (antecedent: string, s3: string) => [
 
 for (const label of ['repair-first', 'bypass-enabled'] as const) {
   for (const antecedent of ['claim_1', 'claim_2']) {
-    test(`B2 ${label} ${antecedent}: a holistic_v3 tape passes current S4 and verifies only under the recorded runtime`, async t => {
+    test(`B2 ${label} ${antecedent}: a holistic_v3 tape passes current S4 and both runtimes reproduce its requests`, async t => {
       try { await gitExec('git', ['cat-file', '-e', REVISION + '^{commit}'], { cwd: gitRoot }); }
       catch (error) {
         if (error instanceof Error && 'code' in error && (error.code === 1 || error.code === 128)) { t.skip('historical Git objects are unavailable in this checkout'); return; }
@@ -54,8 +54,8 @@ for (const label of ['repair-first', 'bypass-enabled'] as const) {
       assert.equal(exactReplay.status, 'same_material_intervention_verified', JSON.stringify(exactReplay.error));
       assert.equal(exactReplay.recordedPayloadsReproduced, true);
       const currentReplay = await pairedInterventionReplay(tape, archived.OWN as never, MODEL, profile);
-      assert.equal(currentReplay.status, 'same_material_intervention_mismatch', JSON.stringify(currentReplay.error));
-      assert.equal(currentReplay.recordedPayloadsReproduced, false);
+      assert.equal(currentReplay.status, 'same_material_intervention_verified', JSON.stringify(currentReplay.error));
+      assert.equal(currentReplay.recordedPayloadsReproduced, true);
       assert.equal(currentReplay.commonEqual, true);
       assert.equal(currentReplay.policyConformant, true);
     });

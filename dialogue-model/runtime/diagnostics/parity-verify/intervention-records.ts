@@ -15,6 +15,7 @@ import type {RecordedGenerationRetryVersion} from '../../v2/generation-guard.ts'
 import {checkModelIdentity} from '../../model-identity-contract.ts';
 import {resolveModelPolicy} from '../../model-policy.ts';
 import {verifyLocalUpdate,applyVerifiedOperation,bindPublishedReferenceQuestion,isFigureReplyAspect} from '../../local-grounding/verify.ts';
+import {CLAIM_PRUNE_V2,REFERENCE_LIMITS,previewReferenceUpdate,snapshotReferenceGraph} from '../../memory/reference-graph.mjs';
 import {AI_BOUND_SOURCE,LABELLED_ANSWER_SOURCE} from '../../local-grounding/contract.ts';
 import {check,hash,equal,row,rows,list,META_KEYS} from './core.ts';
 import type {Check,Records} from './core.ts';
@@ -506,7 +507,7 @@ function s4HumanProposedNames(tape:any,trace:any):Set<string>{
 // operations are then applied to the graph before the turn in the run's own order (the AI claims first) and through its own step, so an operation the memory refused at its limit
 // is refused here too. What it adopts and rejects must be what the trace holds: a record whose approval request was handled under another version's rule cannot pass.
 // A redacted value is an unknown value: a redacted proposition is carried as recorded (no decision reads it). A turn whose decision needs a redacted quote or name cannot be redone: 'unknown'.
-function s4LocalReverify(tape:any,t:any,policy:string,after:any):'ok'|'mismatch'|'unknown'{
+export function s4LocalReverify(tape:any,t:any,policy:string,after:any):'ok'|'mismatch'|'unknown'{
  // The ai_bound_target provenance exists only in v9 and later records (the same boundary the stored state is checked for).
  if(!isGenerationV9(tape?.generationRetryVersion)){const bound=(g:any)=>Array.isArray(g?.records)&&g.records.some((c:any)=>c?.kind==='claim'&&c.source===AI_BOUND_SOURCE);if(bound(after)||bound(tape?.state?.graph))return'mismatch';}
  // The partner_labelled_answer provenance exists only in v12 records.
@@ -517,12 +518,33 @@ function s4LocalReverify(tape:any,t:any,policy:string,after:any):'ok'|'mismatch'
  if(!after||!Array.isArray(after.records)||!tape?.state?.graph||!Array.isArray(tape.state.graph.records))return'ok';
  if(local.extractor.segments.some((x:any)=>x?.quote==='[redacted]'||x?.name==='[redacted]')||local.claims.some((c:any)=>c?.name==='[redacted]'))return'unknown';
  const savedIds=new Set(local.claims.map((c:any)=>c.id));
- const base={...after,records:after.records.filter((r:any)=>!(r?.kind==='claim'&&savedIds.has(r.id)))};
- const turn=t.turnIndex,publicTurns=(tape.events??[]).filter((e:any)=>e.seq<=turn).map((e:any)=>({turn:e.seq,speaker:e.speaker,text:String(e.text)}));
+ const before=tape.state.graph;
+ const pruneVersion=before.memoryPruneVersion;
+ if(pruneVersion!==after.memoryPruneVersion||pruneVersion!==undefined&&pruneVersion!==CLAIM_PRUNE_V2)return'mismatch';
+ let base={...after,records:after.records.filter((r:any)=>!(r?.kind==='claim'&&savedIds.has(r.id)))};
+ const aiOps=after.records.filter((r:any)=>r?.kind==='claim'&&r.speaker==='ai'&&r.turn===t.turnIndex).map(({turn:_t,...op}:any)=>op);
+ const turn=t.turnIndex,events:any[]=tape.events??[];
+ const visible=events.filter(e=>e.seq<=turn);
+ // The tape keeps the full transcript. Reference updates use the same recent
+ // window and scripted-event provenance as the online verifier.
+ const versioned=pruneVersion===CLAIM_PRUNE_V2;
+ const window=versioned?visible.filter(e=>!tape.state.aiPublic||events.filter(other=>other.seq===e.seq).length===1)
+  .slice(-REFERENCE_LIMITS.publicTurns):visible;
+ const publicTurns=window.map(e=>({turn:e.seq,speaker:e.speaker,text:String(e.text),
+  ...(versioned&&e.nonReferential?{nonReferential:true}: {})}));
  const segments=local.extractor.segments.map(({act:_a,redacted:_r,...s}:any)=>s);
  const verdicts=local.classifier.verdicts.map((v:any)=>({segmentId:v.segmentId,act:v.act,respondsToClaimId:v.respondsToClaimId,rawScore:null,...(isGenerationV12(tape.generationRetryVersion)&&v.answersChecked!==undefined?{answersChecked:v.answersChecked}:{})}));
  let applied:any[]=[],rejected:string[]=[];
  try{
+  let update:any={expectedRevision:before.revision,turn,operations:[]};
+  for(const op of aiOps){
+   const step=applyVerifiedOperation(before,update,op,publicTurns);
+   if(step.applied)update=step.update;
+   else if(pruneVersion===CLAIM_PRUNE_V2)return'mismatch';
+  }
+  // A later human operation may evict an earlier claim cited by the classifier.
+  // Replay the AI-public/name prefix against the actual pre-turn graph first.
+  if(pruneVersion===CLAIM_PRUNE_V2)base=previewReferenceUpdate(before,update,{publicTurns});
   let referenceQuestionBindings:ReadonlyMap<string,string>|undefined;
   const directReferenceReplies=isGenerationV8(tape.generationRetryVersion);
   if(isGenerationV7(tape.generationRetryVersion)){
@@ -538,10 +560,6 @@ function s4LocalReverify(tape:any,t:any,policy:string,after:any):'ok'|'mismatch'
   }
   const verified:any=verifyLocalUpdate({graph:base,turn,publicTurns,segments,verdicts,keepUnboundApproval:true,approvalFromNamedClaim:isHolisticV4Plus(policy),referenceQuestionBindings,directReferenceReplies,refinedReplyRules:isGenerationV11(tape.generationRetryVersion),answerFieldRules:isGenerationV12(tape.generationRetryVersion),namingIntervalStart:(tape.state?.judgments??[]).filter((x:any)=>['agree','defer','move_on'].includes(x.judgment?.action)).at(-1)?.turnIndex??0} as any);
   rejected=verified.rejected.map((r:any)=>String(r.reason));
-  const before=tape.state.graph;
-  let update:any={expectedRevision:before.revision,turn,operations:[]};
-  const aiOps=after.records.filter((r:any)=>r?.kind==='claim'&&r.speaker==='ai'&&r.turn===turn).map(({turn:_t,...op}:any)=>op);
-  for(const op of aiOps){const step=applyVerifiedOperation(before,update,op,publicTurns);if(step.applied)update=step.update;}
   for(const op of verified.operations){const step=applyVerifiedOperation(before,update,op,publicTurns);if(step.applied){update=step.update;applied.push(op);}else rejected.push(step.reason);}
  }catch{return'mismatch';}
  const shape=(c:any)=>JSON.stringify([c.id,c.act,c.aspect,c.targets,c.name,c.respondsTo]);
@@ -802,6 +820,14 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
  if(entries.length===0)return'missing';if(entries.length!==1||pairs.length>1)return'invalid';
  const v=promptVersion(records,tr);if(!v)return'invalid';
  const {tape,result}=entries[0],pair=pairs[0];
+ const pruneVersion = tape?.state?.graph?.memoryPruneVersion;
+ const committed = tr.turns?.find((u:any)=>u.turn===t.turnIndex)?.state?.graph;
+ const finalGraph = tr.lastCommittedState?.graph;
+ if ([tr.memoryPruneVersion,committed?.memoryPruneVersion,finalGraph?.memoryPruneVersion].some(version=>version!==pruneVersion)) return 'invalid';
+ if (pruneVersion !== undefined) {
+  if (pruneVersion !== CLAIM_PRUNE_V2) return 'invalid';
+  try { snapshotReferenceGraph(tape.state.graph); snapshotReferenceGraph(committed); } catch { return 'invalid'; }
+ }
  if(!validAgreeNameScope(tape?.state?.agreeNameScopeVersion,tape?.generationRetryVersion))return'invalid';
  try{
  if(!exact(tape,['schemaVersion','state','events','common','tails','recorded',...(Object.hasOwn(tape??{},'technicalTrial')?['technicalTrial']:[]),...(Object.hasOwn(tape??{},'generationRetryVersion')?['generationRetryVersion']:[])])||tape.schemaVersion!=='parity_intervention_replay_v1'||!exact(result,['schemaVersion','status','error','commonEqual','policyConformant','recordedPayloadsReproduced','actualLunaHttpMeasured','hashScheme','excludedEnvelopeFields','sides'])||result.schemaVersion!=='parity_intervention_replay_result_v1'||result.status!=='same_material_intervention_verified'||result.error!==null||result.commonEqual!==true||result.policyConformant!==true||result.recordedPayloadsReproduced!==true||typeof result.actualLunaHttpMeasured!=='boolean'||result.hashScheme!=='canonical_json_sha256_not_raw_body_bytes'||!equal(result.excludedEnvelopeFields,META_KEYS)||!Array.isArray(result.sides)||result.sides.length!==2)return'invalid';
@@ -856,7 +882,7 @@ const idsOf=(target:any):string[]=>target?.kind==='single'?[target.figureId]:tar
   const response={luna:[...tape.common.luna,...tape.tails[label].luna],jev:[...tape.common.jev,...tape.tails[label].jev]},indices={luna:0,jev:0};
   for(const r of s.requests){if(!exact(r,['provider','phase','payload','payloadDomain','payloadSha256','preProjectionPayloadSha256','role',...(Object.hasOwn(r,'completeMessagesSha256')?['completeMessagesSha256']:[])])||!['luna','jev'].includes(r.provider)||!['common','alternative_detail','generation','post_generation'].includes(r.role)||r.payloadDomain!=='canonical_http_json'||hash(r.payload)!==r.payloadSha256||typeof r.preProjectionPayloadSha256!=='string'||!/^[a-f0-9]{64}$/.test(r.preProjectionPayloadSha256))return'invalid';
    const p=r.payload,provider=r.provider as 'luna'|'jev',answer=response[provider][indices[provider]++];if(!answer)return'missing';
-   const exV1=v.i172?EXTRACTION_V1_I172_S4:EXTRACTION_V1_S4,exV2=v.i172?EXTRACTION_V2_I172_S4:EXTRACTION_V2_S4;
+   const exV1=usesPositionPrompt(v)?EXTRACTION_V1_I172_S4:EXTRACTION_V1_S4,exV2=usesPositionPrompt(v)?EXTRACTION_V2_I172_S4:EXTRACTION_V2_S4;
    if(provider==='luna'&&H()&&r.phase==='local_extraction'&&!(Array.isArray(p?.messages)&&p.messages[0]?.role==='system'&&p.messages[0].content===(H2()?exV2:exV1)))return'invalid';
    if(provider==='luna'){if(answer.phase!==r.phase||!exact(p,['purpose','messages',...(tr.profile.lunaRequest.maxCompletionTokens===null?[]:['max_completion_tokens'])])||p.purpose!=='dialogue_turn'||!Array.isArray(p.messages)||hash(p.messages)!==r.completeMessagesSha256&&!projectedOwnImage(p.messages,m.own?.ownImage)||r.phase==='observation_targeted'&&!observationRequestProof(p.messages,current,m))return'invalid';
     if((r.phase==='generation')!==(r.role==='generation'))return'invalid';
@@ -1161,7 +1187,8 @@ const LEGEND_V5='stateの記法: publicTurnsは全公開発話を番号順に一
 const LEGEND_V11='answerClaimsは、figuresの返答のclaim idがclaimsにない行動のためだけに添える行で、各行は [claim id, 出典の発話番号, act, 対象, 命題] です。グラフから外れた回答の出典の発話番号はnullになります。';
 const ROTATION_V5='課題の条件として、相手の盤面は自分の盤面と同じ図形を±90度ほど回転して提示しています（relative_pm90）。向きや方位を表す語（上・下・左・右・縦・横など）は、相手と自分で一致しない前提で扱い、向きに依存しない特徴で照合してください。';
 const parseMaterial=(text:string):any=>{const x=JSON.parse(text);return x?.view==='judgment_v5'?decodeMaterialV5(x):x;};
-const activeNative=():PromptVersion['native']=>CTX.prompt?CTX.prompt.native:NATIVE_I172;
+const usesPositionPrompt=(v:PromptVersion):boolean=>v.i172&&!(v.styleMode==='research_split'&&CTX.v3);
+const activeNative=():PromptVersion['native']=>CTX.prompt?(usesPositionPrompt(CTX.prompt)?CTX.prompt.native:NATIVE):CTX.v3?NATIVE:NATIVE_I172;
 const nativeInstructions=(s:any,layout='two_stage_v1',prospect=false)=>{const nat=activeNative();return(layout==='two_stage_v3'?nat.common.replace(NATIVE_V2.v1Stages,NATIVE_V3.stages):layout==='two_stage_v2'?nat.common.replace(NATIVE_V2.v1Stages,NATIVE_V2.stages):nat.common)+(Object.hasOwn(s,'humanReferent')?'\n'+nat.referent:'')+(prospect&&Object.hasOwn(s,'repairProspect')?'\n'+ADAPT.prospect:'')+(CTX.facts?'\n'+ADAPT.facts:'')+(s?.view==='judgment_v5'?'\n'+LEGEND_V5+(s.notationV11===true?'\n'+LEGEND_V11:'')+(s.rotationMode==='relative_pm90'?'\n'+ROTATION_V5:''):'');};
 function originalQuestions(body:any,input:any,layout='two_stage_v1'):boolean|null{
   if(!sharedMaterial(input))return false;
@@ -1340,8 +1367,8 @@ function choiceResponse(body:any,response:any):boolean{
 // executed while checking a record. No condition or original decision is input.
 // Prompt-style update (prompt-style-20261124): the current text and the prior text are both verified exactly.
 function generationMessages(messages:any[],trace:any,execution:any,tape:any,profile:any,index:number,codes?:readonly string[],draft?:RetryDraftEvidence):boolean{
- const v=CTX.prompt,i172=v?v.i172:true;
- if(v?.styleMode==='profile'&&!H()){
+ const v=CTX.prompt,i172=v?usesPositionPrompt(v):!CTX.v3;
+ if((v?.styleMode==='profile'||v?.styleMode==='research_split'&&!CTX.v3)&&!H()){
   return generationMessagesWith(messages,trace,execution,tape,profile,FIXED_I172,{v3:[V3_TRIAL_PROFILE_I172],legacy:TRIAL_PROFILE_I172},index,codes,draft);
  }
  if(v&&v.styleMode==='legacy'&&!CTX.v3&&!H()){
@@ -1689,7 +1716,7 @@ const FIXED_HOLISTIC_V5_I172={...FIXED_HOLISTIC_I172,
   confirm:rep(TRIAL_HOLISTIC_I172.scope.confirm,'回転に依存しない表現で','形の参照枠に関する共通教示に沿って'),
   repair:rep(TRIAL_HOLISTIC_I172.scope.repair,'回転に依存しない表現で','形の参照枠に関する共通教示に沿って')}};
 
-type PromptVersion={id:string;sources:unknown;i172:boolean;styleMode:'legacy'|'merged'|'profile';
+type PromptVersion={id:string;sources:unknown;i172:boolean;styleMode:'legacy'|'merged'|'profile'|'research_split';
  fixed:{task:string;generator:string;concise:string;scope:Readonly<Record<string,string>>;act:string;detail:string};
  native:{common:string;referent:string;actions:Readonly<Record<string,string>>}};
 
@@ -1793,6 +1820,20 @@ const PROMPT_VERSIONS:readonly PromptVersion[]=[
  {id:'i172_f7e55ad',i172:true,styleMode:'legacy',sources:{scheme:'complete_instruction_source_sha256',files:{'v2/dialogue-v2.mjs':'7740298e05d1f4de4d5e4b34a3519e61772cc8f44c0a5ae091ad43201ba09552','v2/jev-turn.ts':'1e21cb640669562a7ac6aa2fae414c58b41561930235cb5b0639fd3c8bc6a91a','v2/generation-guard.ts':'f1641117798e1538a6db4ebb97e8ac33a2da14e926c405f4a7c7f6c8b751ad46','judgment/instructions.mjs':'9d686330aa34a516a1e2d95df94d0b030e7308a6463757861b9c94e561e5197a','observation/observe.ts':'469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad','local-grounding/extract.ts':'df3926ea3cbf74bcf6bf934534fe88080280c9c8c3162fa34cc33dd00545e9ce','local-grounding/jev-local-test.ts':'3546705fffd22faf4133ddc9807129abfb50d7d5a004610f4172a51e94dc1b1b','decision/jev-decision.ts':'bae8254da3250f6af1231ae10221e707d3839e449ed8e8a324d7d4bff585babb','local-grounding/extract-ai.ts':'61c88803ddd0dd8690dadbd707afdb1111e894fb8dcc396562cd6eb85217ebd5','local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7'}},fixed:FIXED_I172,native:NATIVE_I172},
  // Main at bcb8211 (same instruction text as the baseline; the code changes since 2dbf7e2 do not touch prompt text):
  {id:'mainbcb8211',i172:false,styleMode:'legacy',sources:{scheme:'complete_instruction_source_sha256',files:{'v2/dialogue-v2.mjs':'092a7d3ff87462cf4df9f06e25fa23f5d6394c14e5c30dd35c9c894723ad160c','v2/jev-turn.ts':'77619037549ac800b750b4d3ffe6fd0c342ddc1af5508050132ac19b5ffb0dd8','v2/generation-guard.ts':'f1641117798e1538a6db4ebb97e8ac33a2da14e926c405f4a7c7f6c8b751ad46','judgment/instructions.mjs':'aa8b84ba60f10780328521457fc3abf4bfaa6db6efd32a725924075a9584f884','observation/observe.ts':'469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad','local-grounding/extract.ts':'1f3af472bca173e83bcb0bf07e4b98c15fb98bc1b960aedc28e0a4970563764e','local-grounding/jev-local-test.ts':'95e1509bd5a4dbc6f1687605d24b6848c311cb631db480adce5bc5eeed052492','decision/jev-decision.ts':'a7503c1904b3fe55a90458c1ad996b76432491f9640087321d871e5468851b33','local-grounding/extract-ai.ts':'61c88803ddd0dd8690dadbd707afdb1111e894fb8dcc396562cd6eb85217ebd5','local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7'}},fixed:FIXED,native:NATIVE},
+ // The pruning change does not alter the #172 instructions. Source digests
+ // still differ because the producer hashes the complete instruction files.
+ {id:'claim_prune_v2_main',i172:true,styleMode:'legacy',sources:{scheme:'complete_instruction_source_sha256',files:{
+  'v2/dialogue-v2.mjs':'ea06a6f77a258cd80ddcf6be7806cb7dae23865a7a3f593388b2ef9662bd4dd4',
+  'v2/jev-turn.ts':'b6b6e656509c675061358bdd40acf2f65e1cf2e6e3da6acf085ec4163b8bfc24',
+  'v2/generation-guard.ts':'f1641117798e1538a6db4ebb97e8ac33a2da14e926c405f4a7c7f6c8b751ad46',
+  'judgment/instructions.mjs':'9d686330aa34a516a1e2d95df94d0b030e7308a6463757861b9c94e561e5197a',
+  'observation/observe.ts':'469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad',
+  'local-grounding/extract.ts':'df3926ea3cbf74bcf6bf934534fe88080280c9c8c3162fa34cc33dd00545e9ce',
+  'local-grounding/jev-local-test.ts':'95e1509bd5a4dbc6f1687605d24b6848c311cb631db480adce5bc5eeed052492',
+  'decision/jev-decision.ts':'9ac52e6997de9ce4631c01ceff097b98b6f7fba491373c81e9577191f8d45677',
+  'local-grounding/extract-ai.ts':'61c88803ddd0dd8690dadbd707afdb1111e894fb8dcc396562cd6eb85217ebd5',
+  'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
+ }},fixed:FIXED_I172,native:NATIVE_I172},
  // #172 text merged with main bcb8211 (eaa8e9c):
  {id:'i172_eaa8e9c',i172:true,styleMode:'legacy',sources:{scheme:'complete_instruction_source_sha256',files:{'v2/dialogue-v2.mjs':'51aa2db12f9b8ebe14c7d3271a44adff7a6dcee8d601b9b4ab8c353ee1dc5769','v2/jev-turn.ts':'77619037549ac800b750b4d3ffe6fd0c342ddc1af5508050132ac19b5ffb0dd8','v2/generation-guard.ts':'f1641117798e1538a6db4ebb97e8ac33a2da14e926c405f4a7c7f6c8b751ad46','judgment/instructions.mjs':'9d686330aa34a516a1e2d95df94d0b030e7308a6463757861b9c94e561e5197a','observation/observe.ts':'469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad','local-grounding/extract.ts':'df3926ea3cbf74bcf6bf934534fe88080280c9c8c3162fa34cc33dd00545e9ce','local-grounding/jev-local-test.ts':'95e1509bd5a4dbc6f1687605d24b6848c311cb631db480adce5bc5eeed052492','decision/jev-decision.ts':'210455c2519e4148c4b72eee83790c45508cb0a7832bffdee611f6ab8f6bbf18','local-grounding/extract-ai.ts':'61c88803ddd0dd8690dadbd707afdb1111e894fb8dcc396562cd6eb85217ebd5','local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7'}},fixed:FIXED_I172,native:NATIVE_I172},
  // PR #213 (671acdb) merged with main (0673602): #172 + prompt-style-20261124 + holistic_v5 + v12.
@@ -1830,6 +1871,44 @@ const PROMPT_VERSIONS:readonly PromptVersion[]=[
  {id:'pr213_main_p5_u4',i172:true,styleMode:'profile',sources:PR213_P5_U4_SOURCES,fixed:FIXED_I172,native:NATIVE_I172},
  {id:'pr213_main_p5_u3_restore_fix',i172:true,styleMode:'profile',sources:{...PR213_P5_U4_SOURCES,files:{...PR213_P5_U4_SOURCES.files,
   'v2/jev-turn.ts':'d0cfc7520a388b8aa07dd25cc342f8af718f9c14d7ccd28d12eef6b70dc57388',
+ }},fixed:FIXED_I172,native:NATIVE_I172},
+ {id:'pr213_research_prompt_split',i172:true,styleMode:'research_split',sources:{scheme:'complete_instruction_source_sha256',files:{
+  'v2/dialogue-v2.mjs':'78651c8d76bd5e81e69fd08efd7e60596e2f7258e4f5b3e485963b20998bacc2',
+  'v2/jev-turn.ts':'425277bcb1f58ec7b83bbd8702135084b9e1803dcca4eae9ce9b13a45fd64832',
+  'v2/generation-guard.ts':'6e4f8d75d62f79f9b324f60873d692d861a72feffcefcb2717df9a3f075217f2',
+  'judgment/instructions.mjs':'0add2f40aaaa01bfdacd1b99418b94e288eb45da6593595304f8d36d0f22de27',
+  'observation/observe.ts':'469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad',
+  'local-grounding/extract.ts':'6e9461e860f22923dbece02c7988713422ed81ac32d937f6d59df8eff84bd83e',
+  'local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01',
+  'decision/jev-decision.ts':'d6b707bbc8c52f2209b7b2afca59d3800587b9725bb5348cf4d8e4ec894e6675',
+  'local-grounding/extract-ai.ts':'e489b7ff573fdbe9e4f0adc9b6ee5f0828bd3c6835dcd8cd6555e191161594a6',
+  'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
+ }},fixed:FIXED_I172,native:NATIVE_I172},
+ // Capacity binding changes these source digests while preserving all three prompt families.
+ {id:'pr213_claim_prune_v2',i172:true,styleMode:'research_split',sources:{scheme:'complete_instruction_source_sha256',files:{
+  'v2/dialogue-v2.mjs':'0ca530878393721b6d48b55240e2b8c848910758501d90f579b2e0c65a6d1dd6',
+  'v2/jev-turn.ts':'93b62419952a152d7a788f3d312c5e24a1cc5def7c4037fa6206cfdd14f30b18',
+  'v2/generation-guard.ts':'6e4f8d75d62f79f9b324f60873d692d861a72feffcefcb2717df9a3f075217f2',
+  'judgment/instructions.mjs':'0add2f40aaaa01bfdacd1b99418b94e288eb45da6593595304f8d36d0f22de27',
+  'observation/observe.ts':'469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad',
+  'local-grounding/extract.ts':'6e9461e860f22923dbece02c7988713422ed81ac32d937f6d59df8eff84bd83e',
+  'local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01',
+  'decision/jev-decision.ts':'d6b707bbc8c52f2209b7b2afca59d3800587b9725bb5348cf4d8e4ec894e6675',
+  'local-grounding/extract-ai.ts':'e489b7ff573fdbe9e4f0adc9b6ee5f0828bd3c6835dcd8cd6555e191161594a6',
+  'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
+ }},fixed:FIXED_I172,native:NATIVE_I172},
+ // P5 port onto the prompt split and capacity-versioned runtime.
+ {id:'pr213_p5_capacity_prompt_split',i172:true,styleMode:'research_split',sources:{scheme:'complete_instruction_source_sha256',files:{
+  'v2/dialogue-v2.mjs':'0ca530878393721b6d48b55240e2b8c848910758501d90f579b2e0c65a6d1dd6',
+  'v2/jev-turn.ts':'ad30a76ffd499aea1f3e95f057166e40e886db32c4cbbd34fb0527d46f690e84',
+  'v2/generation-guard.ts':'2aa3c56525d6460b01212721109b4d260316fed828604ed928b9bb3cfd9d5ddd',
+  'judgment/instructions.mjs':'0add2f40aaaa01bfdacd1b99418b94e288eb45da6593595304f8d36d0f22de27',
+  'observation/observe.ts':'469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad',
+  'local-grounding/extract.ts':'6e9461e860f22923dbece02c7988713422ed81ac32d937f6d59df8eff84bd83e',
+  'local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01',
+  'decision/jev-decision.ts':'d0dae14eef1102eed26808cd5fef62b64292fdcf68eba75d29f3bc883d04a91b',
+  'local-grounding/extract-ai.ts':'e489b7ff573fdbe9e4f0adc9b6ee5f0828bd3c6835dcd8cd6555e191161594a6',
+  'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
  }},fixed:FIXED_I172,native:NATIVE_I172},
  ...HISTORICAL_MAIN_PROMPT_SOURCES.map(({id, files}) => ({
   id, i172: false, styleMode: 'legacy' as const, sources: {scheme: 'complete_instruction_source_sha256', files: {...HISTORICAL_MAIN_SHARED_SOURCES, ...files}},

@@ -15,7 +15,7 @@ import { nameBindsFigure } from "../decision/referent-binding.ts";
 import { hasNameProposal, claimsLiveAsOf, reconfirmationPossible, namingTurnKind, namingIntervalEstimates, inheritedTargetClaimIds, agreeCandidateAllowed, inheritsProposalName, turnNameProposals, namingNameKey, targetNamingConflict, publiclyCheckedNamingTarget, usesPublicNamingTarget, type AgreeNameScopeVersion } from "../decision/naming-request.ts";
 import { priorClaimViews, summarizeLocalIssues } from "../local-grounding/derive.ts";
 import { deriveSharedConstrualsFromGraph } from "../local-grounding/shared-construal.ts";
-import { createMemoLocalExtractor, LOCAL_EXTRACTION_INSTRUCTIONS, MEMO_LOCAL_EXTRACTION_INSTRUCTIONS, MEMO_LOCAL_EXTRACTION_INSTRUCTIONS_HOLISTIC } from "../local-grounding/extract.ts";
+import { createMemoLocalExtractor, LOCAL_EXTRACTION_INSTRUCTIONS, MEMO_LOCAL_EXTRACTION_INSTRUCTIONS, MEMO_LOCAL_EXTRACTION_INSTRUCTIONS_HOLISTIC, memoExtractionPrompt } from "../local-grounding/extract.ts";
 import { LOCAL_CLASSIFICATION_INSTRUCTIONS } from "../local-grounding/classify.ts";
 import type { LocalGroundingOptions, LocalOwnImage, LocalOwnAnchor, PublicTurn, LocalClaimView } from "../local-grounding/contract.ts";
 import { AI_BOUND_SOURCE, LABELLED_ANSWER_SOURCE } from "../local-grounding/contract.ts";
@@ -179,11 +179,13 @@ export type JevPrivateState = {
   aiPublic?: AiPublicState;
 };
 export type JevTurnOptions = {
+  memoryPruneVersion?: import("../memory/reference-graph.mjs").MemoryPruneVersion;
   usagePolicy?: ParticipantUsageOnly; intervention?: InterventionConfig; decisionTimeoutMs?:number; technicalTrial?: AdaptiveRepairTrial;
   /** Omitted means two_stage_v1. Must match the decision client's own layout when it declares one. */
   questionLayout?: JevQuestionLayout;
   /** The policy the trial was created with (profile.dialoguePolicy); only two_stage_v3 reads it. */
   dialoguePolicy?: DialoguePolicy;
+  participantPrompts?: boolean;
   /** The stimulus rotation of the trial (holistic_v5 reads it); omitted means relative_pm90, the original mode. */
   rotationMode?: "relative_pm90" | "relative_0";
   /** Offline replay can request the original retry wire text for a historical tape. */
@@ -197,6 +199,16 @@ export type JevTurnOptions = {
   onLocalGroundingTrace?: ((record: LocalGroundingResearchRecord) => unknown) | null;
   generation: { task: string; instructions: string; concise?: string; actionScope: Record<string, string>; final: string; timeoutMs: number };
 };
+
+/** A failed AI-public batch is atomic; every candidate in that batch was lost. */
+export function memoryCapacityRejectedClaims(records: readonly JevTurnTrace[]): number {
+  return records.reduce((total, record) => {
+    const application = record.aiPublic?.application;
+    return total + (record.local?.verification.rejected.filter(r => r.reason === "memory_capacity_exceeded").length ?? 0) +
+      (application?.capacityRejectedClaims ?? 0) +
+      (application?.nameRejections.filter(r => r.reason === "memory_capacity_exceeded").length ?? 0);
+  }, 0);
+}
 
 /** Confirm only after the caller installs the candidate returned by runAiTurn. */
 export function settleJevTurnTraces(records: readonly JevTurnTrace[], privateState: unknown): JevTurnTrace[] {
@@ -763,7 +775,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
    if(!c?.enumerable||!Object.hasOwn(c,'value')||!t?.enumerable||!Object.hasOwn(t,'value')||!Number.isSafeInteger(t.value)||t.value<1||t.value>600000)throw Error();
    intervention=checkedIntervention(c.value);decisionTimeoutMs=t.value;
   }catch{throw new JevTurnError('invalid_intervention');}}
-  const { client, observer, jevDecision, generation, usagePolicy } = options;
+  const { client, observer, jevDecision, generation, usagePolicy, memoryPruneVersion } = options;
   // One layout per runtime: validation, acceptance, restore and the client's own requests must agree.
   const questionLayout: JevQuestionLayout = options.questionLayout ?? "two_stage_v1";
   const holistic = questionLayout === "two_stage_v3" && isHolisticPolicy(options.dialoguePolicy);
@@ -794,6 +806,9 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   if (declaredLayout !== undefined && declaredLayout !== questionLayout) throw new Error("Jev question layout mismatch");
   const participantMenu = jevDecision?.participantTargetMenuVersion === PARTICIPANT_TARGET_MENU_VERSION;
   if (participantMenu && questionLayout !== "two_stage_v1") throw new Error("Participant target menu requires two_stage_v1");
+  const checkPruneVersion = (s: JevPrivateState) => {
+    if (s.graph?.memoryPruneVersion !== memoryPruneVersion) throw new JevTurnError("invalid_state");
+  };
   const rejectNewLegacyState=(s:JevPrivateState)=>{
    checkProspectMode(s);
    if(!integrated&&(Object.hasOwn(s,'schemaVersion')||Object.hasOwn(s,'interventionPolicy')||s.judgments?.some(j=>Object.hasOwn(j.jevTurn??{},'executed')||Object.hasOwn(j.jevTurn??{},'intervention'))))throw new JevTurnError('invalid_state');
@@ -813,9 +828,10 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   const attempts: JevTurnTrace[] = [];
   let attemptsStarted = 0;
   let initialMemo: Promise<ObservationMemo> | null = null, initialRecorded = false;
-  const actInstructions = isHolisticPolicy(options.dialoguePolicy) ? HOLISTIC_ACT_INSTRUCTIONS : ACT_INSTRUCTIONS;
+  const researchV3 = questionLayout === "two_stage_v3" && options.participantPrompts !== true;
+  const actInstructions = questionLayout === "two_stage_v3" || isHolisticPolicy(options.dialoguePolicy) ? HOLISTIC_ACT_INSTRUCTIONS : ACT_INSTRUCTIONS;
   const privateInstructions = [generation.task, generation.instructions, generation.concise ?? "", ACT_INSTRUCTIONS, HOLISTIC_ACT_INSTRUCTIONS, DETAIL_INSTRUCTIONS, REVISIT_MULTIPLE_INSTRUCTIONS, LOCAL_EXTRACTION_INSTRUCTIONS,
-    MEMO_LOCAL_EXTRACTION_INSTRUCTIONS, ...(holisticV2 ? [MEMO_LOCAL_EXTRACTION_INSTRUCTIONS_HOLISTIC] : []), LOCAL_CLASSIFICATION_INSTRUCTIONS, OBSERVATION_INITIAL_INSTRUCTIONS,
+    MEMO_LOCAL_EXTRACTION_INSTRUCTIONS, ...(researchV3 ? [memoExtractionPrompt(holisticV2, true)] : []), ...(holisticV2 ? [MEMO_LOCAL_EXTRACTION_INSTRUCTIONS_HOLISTIC] : []), LOCAL_CLASSIFICATION_INSTRUCTIONS, OBSERVATION_INITIAL_INSTRUCTIONS,
     OBSERVATION_TARGETED_INSTRUCTIONS, ...(aiEnabled ? aiPromptBodies : []),
     ...(p5Enabled ? [SHARED_CONSTRUAL_INSTRUCTIONS, SHARED_CONSTRUAL_CONFIRM_INSTRUCTIONS] : [])].map(content => ({ role: "system", content }));
   function project<T>(value: T): T {
@@ -838,7 +854,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   const directReferenceReplies = isGenerationV8(generationRetryVersion);
   function initialPrivateState(): JevPrivateState {
     const scope = isGenerationV11(generationRetryVersion) ? "scoped_v6" : directReferenceReplies ? "scoped_v5" : isGenerationV7(generationRetryVersion) ? "scoped_v4" : isGenerationV6(generationRetryVersion) ? "scoped_v3" : isGenerationV5(generationRetryVersion) ? "scoped_v2" : "scoped_v1";
-    return { ...(integrated?{schemaVersion:'jev_private_state_v2' as const,interventionPolicy:{version:'bypass_acceptance_v1' as const,tableSha256:BYPASS_ACCEPTANCE_V1_TABLE_SHA256}}:{}), ledger: createOwnLedger(slots), judgments: [], graph: createReferenceGraph({ slots }) as Graph, observationMemo: null, repairHistory: [],
+    return { ...(integrated?{schemaVersion:'jev_private_state_v2' as const,interventionPolicy:{version:'bypass_acceptance_v1' as const,tableSha256:BYPASS_ACCEPTANCE_V1_TABLE_SHA256}}:{}), ledger: createOwnLedger(slots), judgments: [], graph: createReferenceGraph({ slots, ...(memoryPruneVersion ? { memoryPruneVersion } : {}) }) as Graph, observationMemo: null, repairHistory: [],
       ...(questionLayout === "two_stage_v3" ? { agreeNameScopeVersion: newTrialScope ?? scope } : {}),
       ...(aiEnabled ? { aiPublic: initialAiPublicState() } : {}) };
   }
@@ -873,6 +889,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       abortIf(signal);
       const state = integrated?validateJevPrivateStateV2(privateState,slots,intervention!,questionLayout,options.dialoguePolicy,generationRetryVersion,usagePolicy):structuredClone(privateState);
       if (!integrated && !validAgreeNameScope(state.agreeNameScopeVersion, generationRetryVersion)) throw new JevTurnError("invalid_state");
+      checkPruneVersion(state);
       if(!integrated&&(Object.hasOwn(state,'schemaVersion')||Object.hasOwn(state,'interventionPolicy')||state.judgments?.some(j=>Object.hasOwn(j.jevTurn??{},'executed')||Object.hasOwn(j.jevTurn??{},'intervention'))))throw new JevTurnError('invalid_state');
       checkProspectMode(state);
       snapshotReferenceGraph(state.graph);
@@ -893,7 +910,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       const local = { ...options.localGrounding, ...(holisticV3 ? { keepUnboundApproval: true } : {}), ...(holisticV4 ? { approvalFromNamedClaim: true } : {}), extractor: createMemoLocalExtractor({ complete(messages, options) {
         if (messages.some(message => typeof message.content !== "string")) throw new JevTurnError("invalid_state");
         return client.complete(messages as Message[], options);
-      } }, { getMemo: () => structuredClone(memo), holistic: holisticV2, ...(options.localGrounding.researchLimits === undefined ? {} : { researchLimits: options.localGrounding.researchLimits, timeoutMs: options.localGrounding.timeoutMs }) }) };
+      } }, { getMemo: () => structuredClone(memo), holistic: holisticV2, researchV3, ...(options.localGrounding.researchLimits === undefined ? {} : { researchLimits: options.localGrounding.researchLimits, timeoutMs: options.localGrounding.timeoutMs }) }) };
       const priorAct = previousAi ? { ...previous.judgment, turn: previousAi.turn, publishedFallback: previous.generationGuard.fallback,
         ...(previousExecution!.target.kind === "multiple" ? { targetCandidates: [...previousExecution!.target.figureIds] } : {}) } : undefined;
       let initialUpdate = stageMemory(state.graph, latest.seq, null, publicTurns);
@@ -1428,6 +1445,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   }
   async function finalRequest({ events, privateState }: { events: Event[]; privateState: JevPrivateState }, retry = false) {
     checkProspectMode(privateState);
+    checkPruneVersion(privateState);
     if(integrated)privateState=validateJevPrivateStateV2(privateState,slots,intervention!,questionLayout,options.dialoguePolicy,generationRetryVersion,usagePolicy);else rejectNewLegacyState(privateState);
     if (!privateState.observationMemo) throw new JevTurnError("invalid_state");
     const memo = validateObservationMemo(privateState.observationMemo, { ownAnchors });
@@ -1439,5 +1457,5 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       { role: "user", content: generation.final + (retry ? "\n指定JSON形式で再提出してください。" + confirmed : "") }], { phase: "final_submission", timeoutMs: generation.timeoutMs });
   }
   return Object.freeze({ slots: Object.freeze([...slots]), initialPrivateState, initializePrivateState, runAiTurn, finalRequest,
-    getAttempts: () => structuredClone(attempts), snapshotGraph: (state: JevPrivateState) => {checkProspectMode(state);if(!integrated)rejectNewLegacyState(state);return snapshotReferenceGraph((integrated?validateJevPrivateStateV2(state,slots,intervention!,questionLayout,options.dialoguePolicy,generationRetryVersion,usagePolicy):state).graph);} });
+    getAttempts: () => structuredClone(attempts), snapshotGraph: (state: JevPrivateState) => {checkPruneVersion(state);checkProspectMode(state);if(!integrated)rejectNewLegacyState(state);return snapshotReferenceGraph((integrated?validateJevPrivateStateV2(state,slots,intervention!,questionLayout,options.dialoguePolicy,generationRetryVersion,usagePolicy):state).graph);} });
 }

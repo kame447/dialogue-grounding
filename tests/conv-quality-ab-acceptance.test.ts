@@ -17,7 +17,7 @@ import { validateObservationMemo } from '../dialogue-model/runtime/observation/o
 import { researchTrialProfileV3 } from '../dialogue-model/runtime/v2/research-profile.ts';
 import type { JevPrivateState, JevTurnTrace } from '../dialogue-model/runtime/v2/jev-turn.ts';
 import { anchors, deadlines, ids, image, memo } from './support/s4-integration/harness.ts';
-import { MODEL, normal } from './support/s4-v3-records.ts';
+import { bindCurrentS4PromptSources, MODEL, normal } from './support/s4-v3-records.ts';
 
 const [slot, otherSlot] = ids;
 const feature = '丸い輪に細い棒が接する';
@@ -277,6 +277,7 @@ async function checkS4(repair: Snapshot, bypass: Snapshot): Promise<void> {
     assert.deepEqual(result.sides.map(side => side.executed), [repair.trace.executed, bypass.trace.executed]);
 
     const records = structuredClone(normal);
+    await bindCurrentS4PromptSources(records);
     const trial = records.trials[0];
     const profileSha256 = hash(profile);
     for (const source of [records.run, records.summary, trial, records.run.manifest]) {

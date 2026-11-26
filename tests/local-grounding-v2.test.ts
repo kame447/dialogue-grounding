@@ -50,9 +50,8 @@ test("local grounding omitted and null keep requests, private state and traces b
   // re-captured again for Argon's Japanese review, which changes only one particle here (見立てには → 見立ては).
   // Guards the request, output state and trace bytes, not just null's alias.
   const bytes = JSON.stringify({ result: a, calls: implicit.calls, attempts: implicit.dialogue.getAttempts() });
-  // Re-pinned for prompt-style-20261124 + #172 (partner-position sentence in TASK_INSTRUCTIONS_V2 and place-only accept wording):
-  // restoring the prior prompt texts reproduces the previous digests (457ff593... on PR #213, bf0739bd... on main).
-  assert.equal(createHash("sha256").update(bytes).digest("hex"), "249a802de2e5cafb1ab836cb058ea2b24add11ff3efee4387f7f59ebf7c27899");
+  // The unversioned Luna path uses the fixed main prompt.
+  assert.equal(createHash("sha256").update(bytes).digest("hex"), "bf0739bda0b2bc396c9c689861a0ebe2498e75dd31fc09351ebdab35b29a4ded");
   assert.ok(!JSON.stringify(implicit.dialogue.getAttempts()).includes("localGrounding"));
   assert.ok(!JSON.stringify(implicit.calls).includes("局所問題の作業メモ"));
 });
