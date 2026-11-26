@@ -26,6 +26,9 @@ export type Label = 'repair-first' | 'bypass-enabled';
 export type TrialVersion = 'adaptive_repair_v1' | 'adaptive_repair_v2' | 'adaptive_repair_v3';
 /** What one scripted turn answers. `target` is a v3 target label; `issue` answers the repair prospect's issue question. */
 export type Plan = { action: string; target: string; issue?: string; prospect?: string; actionScores?: Record<string, number>; speech?: string; inject?: any;
+  /** Opt-in override for additional closed questions in independent acceptance tests. */
+  choose?: (question: string, criteria: Readonly<Record<string, string>>) => string | undefined;
+  speechByLabel?: Partial<Record<Label, string>>;
   drafts?: readonly string[];
   draftAct?: DraftAct;
   /** Raw JSON text the local-extraction request returns (public name proposals etc.); `act` answers the classifier's `*_act` questions (default assert). */
@@ -57,7 +60,7 @@ export async function runTurn(profile: any, label: Label, state: any, events: an
   const client = { async complete(messages: any[], options: any) {
     const draft = options.phase === 'generation' && plan.drafts ? plan.drafts[generationCalls++] : undefined;
     if (options.phase === 'generation' && plan.drafts) assert.ok(draft);
-    const response = { text: options.phase === 'local_extraction' && plan.extraction !== undefined ? plan.extraction : options.phase === 'ai_extraction' && plan.aiExtraction !== undefined ? plan.aiExtraction : draft ?? TEXTS[options.phase] ?? plan.speech ?? 'もう一度、確かめてみますね。', model: 'synthetic-luna-model', usage: { inputTokens: 0, outputTokens: 0 } };
+    const response = { text: options.phase === 'local_extraction' && plan.extraction !== undefined ? plan.extraction : options.phase === 'ai_extraction' && plan.aiExtraction !== undefined ? plan.aiExtraction : draft ?? TEXTS[options.phase] ?? plan.speechByLabel?.[label] ?? plan.speech ?? 'もう一度、確かめてみますね。', model: 'synthetic-luna-model', usage: { inputTokens: 0, outputTokens: 0 } };
     luna.push({ phase: options.phase, response }); next = response; return http.complete(messages, options); } };
   const readKey = async () => 'sk-or-SYNTHETIC-offline-replay-key-0000';
   const fetchImpl = async (_url: any, init: any) => {
@@ -67,10 +70,10 @@ export async function runTurn(profile: any, label: Label, state: any, events: an
       const aiSegment = plan.aiActs && Object.hasOwn(JSON.parse(body.state), 'aiSeq') ? /^segment_(\d+)_act$/u.exec(key) : null;
       const publicAct = aiSegment ? plan.aiActs?.[Number(aiSegment[1])] : undefined;
       if (key === 'action') lastAction = plan.forceAction ?? (plan.reobserve && ++actionCalls === 1 ? 'request_observation' : plan.action);
-      const choice = key === 'action' ? lastAction : key === 'target' ? (lastAction === 'request_observation' ? 'figure_0' : plan.target) : key === 'repair_issue' ? plan.issue ?? 'none' : key === 'prospect' ? plan.prospect ?? 'uncertain'
+      const choice = plan.choose?.(key, q.criteria) ?? (key === 'action' ? lastAction : key === 'target' ? (lastAction === 'request_observation' ? 'figure_0' : plan.target) : key === 'repair_issue' ? plan.issue ?? 'none' : key === 'prospect' ? plan.prospect ?? 'uncertain'
         : key === 'name' && plan.name ? (labels.find(l => JSON.parse(q.criteria[l]).value === plan.name) ?? labels[0])
         : key === 'human_referent' && plan.referent ? plan.referent
-        : key === 'draft_naming' ? (plan.draftAct ?? (plan.action === 'agree' ? 'adopt_chosen' : 'none')) : key === 'basis' ? 'partner_uncertain' : key.endsWith('_antecedent') ? (plan.antecedent ?? 'none') : /^segment_\d+_answer$/u.test(key) ? (plan.answers ?? 'unknown') : key.endsWith('_act') ? (publicAct ?? (plan.act && labels.includes(plan.act) ? plan.act : 'assert')) : key === 'observe_aspect' ? 'orientation' : labels[0];
+        : key === 'draft_naming' ? (plan.draftAct ?? (plan.action === 'agree' ? 'adopt_chosen' : 'none')) : key === 'basis' ? 'partner_uncertain' : key.endsWith('_antecedent') ? (plan.antecedent ?? 'none') : /^segment_\d+_answer$/u.test(key) ? (plan.answers ?? 'unknown') : key.endsWith('_act') ? (publicAct ?? (plan.act && labels.includes(plan.act) ? plan.act : 'assert')) : key === 'observe_aspect' ? 'orientation' : labels[0]);
       if (!labels.includes(choice) && !(key === 'action' && plan.forceAction)) throw new Error(`scripted choice ${choice} is not offered for ${key}: ${labels.slice(0, 8)}`);
       answers[key] = { type: 'choice', choice, probabilities: Object.fromEntries(labels.map(l => [l, key === 'action' ? plan.actionScores?.[l] ?? (l === choice ? 1 : 0) : l === choice ? 1 : 0])) };
     }
