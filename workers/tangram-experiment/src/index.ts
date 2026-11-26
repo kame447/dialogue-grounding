@@ -9,8 +9,10 @@ import { AdminIndex } from "./admin/index-do";
 import type { ReceptionFailedStartUsage } from './admin/reception-port.ts';
 import { createReceptionAdminPort, createReceptionSettingsPort } from './admin/reception-adapter.ts';
 import { handleAdmin, isAdminPath, type AdminLimiter } from "./admin/routes.ts";
-import { summarizeRecord, type AdminSummary } from "./admin/summary.ts";
+import { summarizeRecord } from "./admin/summary.ts";
 import type { AuditEntry } from "./admin/index-store.ts";
+import { isParticipantRole, participantRoleView } from "./admin/participant-role.ts";
+import type { ParticipantRoleResult } from "./admin/participant-role.ts";
 import { summarizeLatency } from "./admin/latency.ts";
 import { ACTIVE_KEY, backfillActive, deleteArchived, ledgerIds, readArchived,
   readQuestionnaire, retentionDays, writeQuestionnaire } from "./admin/archive.ts";
@@ -378,6 +380,44 @@ export class TangramSession extends DurableObject<Env> {
     return questionnaire ? { ...record, questionnaire } : record;
   }
 
+  async adminDeletedRecordIds(recordIds: string[]): Promise<string[]> {
+    const deleted = new Set(await this.ctx.storage.get<string[]>('tombstones'));
+    return recordIds.filter(id => deleted.has(id));
+  }
+
+  async adminSetParticipantRole(recordId: string, role: unknown): Promise<ParticipantRoleResult> {
+    if (!RECORD_ID.test(recordId) || !isParticipantRole(role)) return { ok: false, error: 'not_found' };
+    return this.serialized(async () => {
+      if ((await this.adminDeletedRecordIds([recordId])).length || !await this.readOwnedArchive(recordId)) {
+        return { ok: false, error: 'not_found' };
+      }
+      return await this.index()?.setParticipantRole([recordId], this.ctx.id.toString(), role)
+        ? { ok: true } : { ok: false, error: 'conflict' };
+    });
+  }
+
+  async adminSetReceptionParticipantRole(id: string, role: unknown, expectedRecordIds: string[] | null): Promise<ParticipantRoleResult> {
+    if (!RECORD_ID.test(id) || !isParticipantRole(role)) return { ok: false, error: 'not_found' };
+    return this.serialized(async () => {
+      // Trial admissions and deletion share this queue. Re-read the linked IDs here
+      // so a newly saved trial cannot slip into a previously displayed batch.
+      const reception = await this.readReception();
+      if (!reception || reception.receptionId !== id) return { ok: false, error: 'not_found' };
+      const linked = reception.trials.flatMap(trial => trial.recordId === null ? [] : [trial.recordId]);
+      const deleted = new Set(await this.adminDeletedRecordIds(linked));
+      const ids: string[] = [];
+      for (const recordId of linked) {
+        if (!deleted.has(recordId) && await this.readOwnedArchive(recordId)) ids.push(recordId);
+      }
+      if (!ids.length || expectedRecordIds !== null &&
+          (new Set(expectedRecordIds).size !== ids.length || ids.some(recordId => !expectedRecordIds.includes(recordId)))) {
+        return { ok: false, error: 'conflict' };
+      }
+      return await this.index()?.setParticipantRole(ids, this.ctx.id.toString(), role)
+        ? { ok: true } : { ok: false, error: 'conflict' };
+    });
+  }
+
   /** Researcher deletion (authenticated /admin only): removes the record now and tombstones its id. */
   async adminDelete(recordId: string): Promise<boolean> {
     const existed = await this.serialized(() => this.ctx.storage.transaction(async tx => {
@@ -414,6 +454,18 @@ export class TangramSession extends DurableObject<Env> {
   /** Old deployments may have scheduled an expiry alarm. Clear it without deleting evidence. */
   async alarm(): Promise<void> {
     await this.scheduleExpiry();
+    const index = this.index();
+    if (index) {
+      const tombstones = await this.ctx.storage.get<string[]>('tombstones') ?? [];
+      const stale: string[] = [];
+      for (const id of tombstones) {
+        const summary = await index.get(id);
+        if (summary?.recordId === id && summary.objectId === this.ctx.id.toString()) stale.push(id);
+      }
+      // A manual deletion can commit at the owner while its later index removal fails.
+      // A legacy retention deletion removed its summary before tombstoning the owner.
+      if (stale.length) await index.remove(stale, 'admin');
+    }
     // Re-register the remaining records, so a missed best-effort index write is repaired.
     for (const id of await ledgerIds(this.ctx.storage)) {
       const record = await this.readOwnedArchive(id);
@@ -962,12 +1014,12 @@ export class TangramSession extends DurableObject<Env> {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
-    // Researcher-only, read-only, with its own headers; never reaches assets or the participant API.
+    // Researcher-only, with its own headers; never reaches assets or the participant API.
     if (isAdminPath(url.pathname)) {
       const index = env.ADMIN_INDEX ? env.ADMIN_INDEX.get(env.ADMIN_INDEX.idFromName(ADMIN_INDEX_NAME)) : null;
       // Internal RPC to the owning object named by the index; the participant API is never used.
-      const owner = (summary: AdminSummary) => {
-        try { return env.NAMING_SESSIONS.get(env.NAMING_SESSIONS.idFromString(summary.objectId)); } catch { return null; }
+      const owner = (objectId: string) => {
+        try { return env.NAMING_SESSIONS.get(env.NAMING_SESSIONS.idFromString(objectId)); } catch { return null; }
       };
       return handleAdmin(request, {
         token: index ? env.ADMIN_TOKEN : undefined,
@@ -975,9 +1027,7 @@ export default {
         receptions: index ? createReceptionAdminPort({
           index,
           readSettings:() => index.readReceptionSettings(),
-          owner:objectId => {
-            try { return env.NAMING_SESSIONS.get(env.NAMING_SESSIONS.idFromString(objectId)); } catch { return null; }
-          },
+          owner,
         }) : undefined,
         receptionSettings: index ? createReceptionSettingsPort(index) : undefined,
         canResumeParticipant: async (request, recordId) => {
@@ -991,12 +1041,40 @@ export default {
             return history.sessions.some(session => session.resumable && session.activeRecordId === recordId);
           } catch { return false; }
         },
-        listPage: async (after) => (await index!.page(after)) as { items: AdminSummary[]; next: string | null },
-        getSummary: async (recordId) => (await index!.get(recordId)) as AdminSummary | null,
-        getRecord: async (summary) => (await owner(summary)?.adminRecord(summary.recordId)) ?? null,
+        listPage: async after => {
+          const { items, next } = await index!.page(after);
+          const recordsByOwner = new Map<string, string[]>();
+          for (const { objectId, recordId } of items) {
+            const ids = recordsByOwner.get(objectId);
+            if (ids) ids.push(recordId);
+            else recordsByOwner.set(objectId, [recordId]);
+          }
+          const deleted = new Set((await Promise.all([...recordsByOwner].map(async ([objectId, ids]) =>
+            await owner(objectId)?.adminDeletedRecordIds(ids) ?? []))).flat());
+          if (deleted.size) {
+            // An owner deletion can commit before index removal fails. Reconcile
+            // on ordinary list reads and omit tombstoned rows even during the outage.
+            try { await index!.remove([...deleted], "admin"); } catch { /* Retry on a later list read. */ }
+          }
+          const live = items.filter(item => !deleted.has(item.recordId));
+          const roles = await index!.recordRoles(live.map(item => item.recordId), true);
+          return { items: live.flatMap(item => {
+            const role = roles[item.recordId];
+            return role === 'deleted' ? [] : [{ ...item, participantRole: participantRoleView(role) }];
+          }), next };
+        },
+        getSummary: async (recordId, includeParticipantRole) => {
+          const summary = await index!.get(recordId);
+          if (!summary || !includeParticipantRole) return summary;
+          const role = (await index!.recordRoles([recordId]))[recordId];
+          return { ...summary, participantRole: participantRoleView(role === 'deleted' ? undefined : role) };
+        },
+        setParticipantRole: async (summary, role) => await owner(summary.objectId)?.adminSetParticipantRole(summary.recordId, role)
+          ?? { ok: false, error: 'not_found' },
+        getRecord: async (summary) => (await owner(summary.objectId)?.adminRecord(summary.recordId)) ?? null,
         // Record first, then its index entry (with a content-free audit entry); both steps are idempotent.
         deleteRecord: async (summary) => {
-          const session = owner(summary);
+          const session = owner(summary.objectId);
           if (!session) throw new Error("invalid_object");
           await session.adminDelete(summary.recordId);
           await index!.remove([summary.recordId], "admin");
@@ -1004,7 +1082,7 @@ export default {
         audit: async () => (await index!.audit()) as AuditEntry[],
         summarizeLatency,
         prepareNext: async summary => {
-          const session = owner(summary); if (!session) throw new BaseSessionError('not_found');
+          const session = owner(summary.objectId); if (!session) throw new BaseSessionError('not_found');
           return await session.adminPrepareNext(summary.recordId);
         },
       });

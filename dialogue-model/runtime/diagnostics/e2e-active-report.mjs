@@ -8,6 +8,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { normalizeName } from "../scoring.mjs";
+import { participantRoleFromExport } from "../../../workers/tangram-experiment/src/admin/participant-role.ts";
 
 const acts = (entry) => [entry.judgment, entry.judgment?.followUp].filter((act) => act?.action);
 const count = (values) => values.reduce((out, value) => ({ ...out, [value]: (out[value] ?? 0) + 1 }), {});
@@ -49,6 +50,7 @@ export function summarizeSession(record) {
   const finalMismatches = (record.scoring.result?.figures ?? []).filter((figure) => !figure.matched)
     .map((figure) => ({ figure: figure.figureId, human: figure.human?.rawName ?? null, ai: figure.ai?.rawName ?? null }));
   return {
+    recordId: record.recordId ?? null, participantRole: participantRoleFromExport(record.participantRole),
     seed: record.seed, strategy: record.strategy, activeDecision: record.options?.activeDecision ?? null,
     humanMessages: (record.events ?? []).filter((event) => event.speaker === "human").length,
     aiTurns: committed.length,

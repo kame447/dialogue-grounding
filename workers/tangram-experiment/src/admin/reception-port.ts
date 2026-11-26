@@ -1,5 +1,6 @@
 import type { FailureCode, FailureCause } from '../../../../dialogue-model/runtime/v2/base-assignment.ts';
 import type { ParticipantUsageSnapshot } from '../../../../dialogue-model/runtime/web/participant-usage.ts';
+import type { ParticipantRole, ParticipantRoleResult, ParticipantRoleView } from './participant-role.ts';
 
 /** Researcher-only projections. These types are not the persisted reception or protocol schema. */
 export type ReceptionStrategy = 'repair-first' | 'bypass-enabled';
@@ -13,7 +14,7 @@ export type ReceptionAdminRow = {
   /** Frozen plan values; a v1 plan reads as relative_pm90 / none. */
   plan: { order: ReceptionStrategy[]; rotationMode: 'relative_pm90' | 'relative_0'; betweenTrials: 'none' | 'questionnaire_required';
     /** Frozen figure set id per trial; plans before the figure bank read as the legacy set. */ figureSets?: string[] } | null;
-  trials: { index: number; recordId: string | null }[];
+  trials: { index: number; recordId: string | null; participantRole?: ParticipantRoleView; recordDeleted?: true }[];
   hasUnrecordedProductionAdmission?: true;
 };
 
@@ -52,6 +53,7 @@ export type ReceptionAdminPort = {
   listPage(after: string | null): Promise<{ items: ReceptionAdminRow[]; next: string | null }>;
   /** Read authoritative participant state, rather than trusting an index snapshot for a mutation. */
   get(receptionId: string): Promise<ReceptionAdminRow | null>;
+  setParticipantRole?(receptionId: string, role: ParticipantRole, expectedRecordIds: string[] | null): Promise<ParticipantRoleResult>;
   /** Reads metering for failed starts with no archived record, without restoring a participant task. */
   failedStartUsage?(receptionId: string): Promise<ReceptionFailedStartUsage | null>;
   /** The owning DO must CAS revision and pending status, validate the current protocol/order and freeze the plan. */

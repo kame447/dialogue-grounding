@@ -220,7 +220,10 @@ for (const kind of ['assigned', 'legacy_archive', 'legacy_active'] as Kind[]) {
     assert.equal((await x.index.get(ID))?.recordId, ID);
     const exported = await x.admin('/admin/record/' + ID + '.json');
     assert.equal(exported.status, 200);
-    assert.deepEqual(await exported.json(), before);
+    assert.deepEqual(await exported.json(), {
+      ...before,
+      participantRole: { schemaVersion: 'participant_role_v1', role: 'unclassified' },
+    });
     await x.flush();
   });
 
