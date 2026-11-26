@@ -11,7 +11,7 @@ import {generationGuardCodes,draftViolationCodes,deriveGenerationOutcome,orienta
 import type {RecordedGenerationRetryVersion} from '../../v2/generation-guard.ts';
 import {checkModelIdentity} from '../../model-identity-contract.ts';
 import {resolveModelPolicy} from '../../model-policy.ts';
-import {verifyLocalUpdate,applyVerifiedOperation,bindPublishedReferenceQuestion} from '../../local-grounding/verify.ts';
+import {verifyLocalUpdate,applyVerifiedOperation,bindPublishedReferenceQuestion,isFigureReplyAspect} from '../../local-grounding/verify.ts';
 import {AI_BOUND_SOURCE} from '../../local-grounding/contract.ts';
 import {check,hash,equal,row,rows,list,META_KEYS} from './core.ts';
 import type {Check,Records} from './core.ts';
@@ -612,7 +612,7 @@ function agreeSource(tr:any,t:any,key:string,tape:any,legacyV3=false):'invalid'|
    const aiSharedIds=new Set(live.filter((c:any)=>c.speaker==='ai'&&c.sourceTurn>lastBoundary&&c.sourceTurn<t.turnIndex).flatMap((c:any)=>c.targets));
    const claimTargets=(c:any):string[]=>Array.isArray(c.targets)&&c.targets.length?c.targets:live.find((p:any)=>p.id===c.respondsTo)?.targets??[];
    const deniedQuestion=isGenerationV11(tape.generationRetryVersion);
-   const referentClaims=live.filter((c:any)=>c.speaker==='human'&&(c.aspect==='referent'||deniedQuestion&&c.aspect==='question'&&c.act==='deny')&&c.sourceTurn>lastBoundary);
+   const referentClaims=live.filter((c:any)=>c.speaker==='human'&&(c.aspect==='referent'||deniedQuestion&&c.act==='deny'&&(c.aspect==='question'||isFigureReplyAspect(c.aspect)&&live.find((p:any)=>p.id===c.respondsTo)?.speaker==='ai'&&live.find((p:any)=>p.id===c.respondsTo)?.act==='ask'))&&c.sourceTurn>lastBoundary);
    // A denial stands until the partner agrees with an AI public claim that refers only to that figure, and the referent estimate puts it strictly first.
    const referentAt=(at:number)=>at===t.turnIndex?z.humanReferent:preJudgments.find((x:any)=>x.turnIndex===at)?.jevTurn?.humanReferent??null;
    const selects=(m:any,id:string)=>!!m&&m.status==='ok'&&!!m.scores&&typeof m.scores[id]==='number'&&Object.entries(m.scores).every(([k,v]:any)=>k===id||m.scores[id]>v);

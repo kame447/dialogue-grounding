@@ -307,3 +307,59 @@ test('v11 guard: a bracket quotes the participant only, a taken-back word is gon
   // v10 judges as before (its bracket check accepts any public word of the trial)
   assert.deepEqual(l('そちらでいう「右上の突起」が、輪の切れ目についているんですね。', ['左下に突起があります。'], v10), []);
 });
+
+// NB-25N-6: a denial of the figure that answers an ask about a feature (normalized to deny/part) also keeps the figure from being agreed.
+for (const label of ['bypass-enabled', 'repair-first'] as const) {
+  const build = (version: string | undefined, turns: Turn[]) =>
+    buildRecords({ label, dialoguePolicy: 'holistic_v5', ...(version ? { generationRetryVersion: version as any } : {}), technicalTrial: { version: 'adaptive_repair_v3' }, turns });
+  const featureQuestion = 'そちらの輪にも途中に切れ目がありますか？';
+  const checkPart: Turn = { human: '輪のついた形を見比べたいです。', plan: { action: 'confirm', target: 'figure_0', referent: 'figure_0', speech: featureQuestion, aiActs: ['ask'],
+    aiExtraction: JSON.stringify([seg('s1', featureQuestion, 'part', [first])]) } };
+  const denyIt: Turn = { human: 'いえ、その図形ではありません。', plan: { action: 'accept', target: 'figure_0', referent: 'figure_0', speech: '輪が台につながっています。', act: 'deny', antecedent: 'claim_0',
+    aiActs: ['assert'], aiExtraction: JSON.stringify([seg('s1', '輪が台につながっています。', 'part', [first])]), extraction: JSON.stringify([seg('s1', 'いえ、その図形ではありません。', 'referent', [first], null, 2)]) } };
+  const describeIt: Turn = { human: 'そうですか。', plan: { action: 'accept', target: 'figure_0', referent: 'figure_0', speech: '輪が台につながっています。', aiActs: ['assert'],
+    aiExtraction: JSON.stringify([seg('s1', '輪が台につながっています。', 'part', [first])]) } };
+  const nameless: Turn = { human: proposal, plan: { action: 'confirm', target: 'figure_0', referent: 'figure_0', name: alias, act: 'name_propose', extraction: JSON.stringify([seg('s1', proposal, 'name', [], alias)]), speech: '輪が細い棒につながる形ですか？' } };
+  test(`${label}: a denial answering an ask about a feature keeps the denied figure out of the agree candidates in v11; a v10 record keeps its judgment`, async () => {
+    const names = async (version: string | undefined) => (await build(version, [checkPart, denyIt, describeIt, nameless])).trials[0].lastCommittedState.judgments.at(-1).jevTurn.agreeNames;
+    assert.deepEqual(await names(undefined), []);
+    assert.equal((await names(v10)).length, 1);
+  });
+}
+
+// NB-26N-3: withdrawing a name proposal that named no figure withdraws it, so the old name does not stay open for an approval request.
+for (const label of ['bypass-enabled', 'repair-first'] as const) {
+  const build = (version: string | undefined, turns: Turn[]) =>
+    buildRecords({ label, dialoguePolicy: 'holistic_v5', ...(version ? { generationRetryVersion: version as any } : {}), technicalTrial: { version: 'adaptive_repair_v3' }, turns });
+  const first: Turn = { human: proposal, plan: { action: 'confirm', target: 'figure_0', referent: 'figure_0', name: alias, act: 'name_propose', extraction: JSON.stringify([seg('s1', proposal, 'name', [], alias)]), speech: '輪の形ですか？' } };
+  const drop: Turn = { human: 'やっぱり、その名前はやめます。', plan: { action: 'confirm', target: 'figure_0', referent: 'figure_0', act: 'withdraw', antecedent: 'claim_0', speech: '輪の形ですか？',
+    extraction: JSON.stringify([seg('s1', 'やっぱり、その名前はやめます。', 'name', [], null, 1)]) } };
+  test(`${label}: a withdrawn nameless proposal is withdrawn in v11 and was rejected before`, async () => {
+    const newer = await build(undefined, [first, drop]);
+    const a = newer.trials[0].attempts.at(-1);
+    assert.deepEqual(a.local.verification.rejected, []);
+    assert.deepEqual(a.local.claims.map((c: any) => c.act), ['withdraw']);
+    assert.deepEqual(statuses(newer), passed);
+    const older = await build(v10, [first, drop]);
+    assert.deepEqual(older.trials[0].attempts.at(-1).local.verification.rejected.map((r: any) => r.reason), ['inconsistent_claim_response']);
+    assert.deepEqual(statuses(older), passed);
+  });
+}
+
+// NB-26N-2: a proposal for one figure is not carried to a question about another figure.
+for (const label of ['bypass-enabled', 'repair-first'] as const) {
+  const second = OWN.ownAnchors[1].id as string;
+  const build = (turns: Turn[]) => buildRecords({ label, dialoguePolicy: 'holistic_v5', technicalTrial: { version: 'adaptive_repair_v3' }, turns });
+  const star = '星窓', text = '「星窓」とかどう？';
+  const proposeFirst: Turn = { human: text, plan: { action: 'confirm', target: 'figure_0', referent: 'figure_0', name: star, act: 'name_propose', extraction: JSON.stringify([seg('s1', text, 'name', [first], star)]), speech: '輪の形ですか？' } };
+  const other: Turn = { human: '別の図形のことです。', plan: { action: 'confirm', target: 'figure_1', referent: 'figure_1', speech: 'この形のことですか？', aiActs: ['ask'], aiExtraction: JSON.stringify([seg('s1', 'この形のことですか？', 'question', [second], null, 3)]) } };
+  const approve: Turn = { human: 'それなら、いい？', plan: { action: 'confirm', target: 'figure_1', referent: 'figure_1', act: 'name_propose', antecedent: 'claim_1', speech: '輪の形ですか？',
+    extraction: JSON.stringify([seg('s1', 'それなら、いい？', 'name', [], null, 4)]) } };
+  test(`${label}: an approval request about another figure does not take over the first figure's name in v11`, async () => {
+    const record = await build([proposeFirst, other, approve]);
+    const a = record.trials[0].attempts.at(-1);
+    assert.deepEqual(a.local.claims.filter((c: any) => c.act === 'name_propose' && c.sourceTurn === 5), []);
+    assert.notEqual(a.namingRequest, true);
+    assert.deepEqual(statuses(record), passed);
+  });
+}

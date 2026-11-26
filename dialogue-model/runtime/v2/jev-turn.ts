@@ -32,6 +32,7 @@ import { createMemoAiExtractor, MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS, AiPublic
 import { createJevAiFunctionClassifier, createJevAiSupportChecker, AI_FUNCTION_INSTRUCTIONS, AI_SUPPORT_INSTRUCTIONS,
   AI_RESPONSE_SUPPORT_INSTRUCTIONS, AI_FUNCTION_CRITERIA, AI_SUPPORT_CHOICES, AI_ACT_DESCRIPTIONS } from "../local-grounding/jev-ai-public.ts";
 import { initialAiPublicState, validateAiPublicState, prependAiPublic, verifyAiPublicUpdate } from "../local-grounding/verify-ai.ts";
+import { isFigureReplyAspect } from "../local-grounding/verify.ts";
 import type { AiPublicState, AiPublicPending, AiPublicResearch, AiStageEvidence, AiPublicInput } from "../local-grounding/contract.ts";
 import { JevLocalTestError } from "../local-grounding/jev-local-test.ts";
 import type { JevChoiceTransportOptions, JevChoiceEvidence } from "../local-grounding/jev-local-test.ts";
@@ -300,7 +301,7 @@ export function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns
   // The partner's own latest word on whether a figure is the one meant: a referent denial (targets taken from the claim it answers when it has none)
   // blocks agreement on that figure until a later referent claim of theirs re-affirms it. This is about the target, not about the proposed name.
   const claimTargets = (c: LocalClaimView) => c.targets.length ? c.targets : claims.find(p => p.id === c.respondsTo)?.targets ?? [];
-  const referentClaims = claims.filter(c => c.speaker === "human" && (c.aspect === "referent" || deniedQuestion && c.aspect === "question" && c.act === "deny") && c.sourceTurn > lastBoundary);
+  const referentClaims = claims.filter(c => c.speaker === "human" && (c.aspect === "referent" || deniedQuestion && c.act === "deny" && (c.aspect === "question" || isFigureReplyAspect(c.aspect) && claims.find(p => p.id === c.respondsTo)?.speaker === "ai" && claims.find(p => p.id === c.respondsTo)?.act === "ask")) && c.sourceTurn > lastBoundary);
   // A denial stands until the partner agrees with an AI public claim that refers only to that figure, and the referent estimate puts it strictly first.
   // An agree about one member of the AI's candidate set, a bare assert and other acts leave the denial in place.
   const referentAt = (at: number) => at === turn ? current : judgments.find(j => j.turnIndex === at)?.jevTurn.humanReferent ?? null;

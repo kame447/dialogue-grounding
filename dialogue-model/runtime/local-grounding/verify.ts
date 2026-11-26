@@ -140,7 +140,8 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
       // and a proposal from before an agree, defer or move_on is not carried into the next figure.
       const proposal = active.filter(c => c.speaker === "human" && c.act === "name_propose" && c.aspect === "name" && c.name !== null && c.sourceTurn > namingIntervalStart && c.sourceTurn < turn)
         .sort((x, y) => x.sourceTurn - y.sourceTurn || x.turn - y.turn).at(-1);
-      if (proposal) prior = proposal;
+      // (NB-26N-2) A proposal that named a figure is carried only to a question about that figure: after the partner left a figure without any boundary action, the next figure's question does not take its old name.
+      if (proposal && (proposal.targets.length === 0 || prior.targets.length === 0 || overlap(proposal.targets, prior.targets))) prior = proposal;
     }
     const approvalRequest = keepUnboundApproval && !!prior && act === "name_propose" && name === null && aspect === "name" && prior.aspect === "name" &&
       (approvalFromNamedClaim ? ["name_propose", "name_accept"].includes(prior.act) : prior.act === "name_propose" && prior.speaker === "human") && prior.name !== null;
@@ -191,8 +192,12 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     // It is a plain question, not an approval request (the typed naming request counts name proposals only).
     const unboundNameQuestion = keepUnboundApproval && !!prior && act === "ask" && aspect === "name" && prior.aspect === "name" && prior.act === "name_propose";
     const unboundApproval = (approvalRequest || unboundNameQuestion) && prior!.targets.length === 0 && targets.length === 0;
+    // v11 (NB-26N-3): withdrawing one's own name proposal that named no figure withdraws it (neither side names a figure, so there is none to contradict).
+    const unboundWithdraw = refinedReplyRules && act === "withdraw" && prior?.speaker === "human" && prior.act === "name_propose" && prior.aspect === "name" &&
+      prior.targets.length === 0 && targets.length === 0 && (aspect === "name" || aspect === "progress");
+    if (unboundWithdraw) aspect = "name";
     if (prior && independentActs.has(act) && prior.sourceTurn < turn &&
-        (prior.aspect !== aspect || !unboundApproval && !overlap(prior.targets, targets.length ? targets : prior.targets) ||
+        (prior.aspect !== aspect || !unboundApproval && !unboundWithdraw && !overlap(prior.targets, targets.length ? targets : prior.targets) ||
           (!(approvalRequest && approvalFromNamedClaim) && segment.respondsToTurn !== null && segment.respondsToTurn !== prior.sourceTurn))) {
       droppedAntecedent = prior.id; prior = null;
     }
@@ -203,7 +208,7 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     // Deferring or revisiting an issue inherits its aspect only when extraction
     // supplied generic progress. Explicit semantic disagreements remain invalid.
     if (prior && aspect === "progress" && ["defer", "revisit"].includes(act)) aspect = prior.aspect;
-    if (prior && (prior.sourceTurn >= turn || prior.aspect !== aspect || !unboundApproval && !overlap(prior.targets, targets) ||
+    if (prior && (prior.sourceTurn >= turn || prior.aspect !== aspect || !unboundApproval && !unboundWithdraw && !overlap(prior.targets, targets) ||
         (!(approvalRequest && approvalFromNamedClaim) && segment.respondsToTurn !== null && segment.respondsToTurn !== prior.sourceTurn))) {
       reject("inconsistent_claim_response"); continue;
     }

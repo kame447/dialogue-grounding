@@ -224,8 +224,8 @@ function validateSupport(record, records, historical = false) {
     if (prior.id === record.id || prior.sourceTurn > record.sourceTurn || prior.turn > record.turn ||
         prior.aspect !== record.aspect || prior.issueId !== record.issueId ||
         !(prior.targets.some((slot) => record.targets.includes(slot)) ||
-          // holistic_v3: an approval question about a name that answers an unbound name proposal (neither names a figure).
-          ["name_propose", "ask"].includes(record.act) && record.aspect === "name" && prior.act === "name_propose" && prior.targets.length === 0 && record.targets.length === 0)) fail("inconsistent_claim_response");
+          // holistic_v3: an approval question about a name that answers an unbound name proposal (neither names a figure); v11: so does the partner withdrawing that proposal.
+          ["name_propose", "ask", "withdraw"].includes(record.act) && record.aspect === "name" && prior.act === "name_propose" && prior.targets.length === 0 && record.targets.length === 0)) fail("inconsistent_claim_response");
     const visited = new Set([record.id]);
     let cursor = prior;
     while (cursor) {
