@@ -382,6 +382,33 @@ for (const strategy of strategies) for (const [label, local, marked] of combos) 
 }
 
 
+// Audit 32 B-32A-1: the confirmation of an earlier confirmation, and a withdrawal of the original proposal, in one utterance. The withdrawal reaches the
+// confirmation through the proposal, so the restore needs the claims of the earlier turns to see the same live view as the run.
+const reconfirmSeg = { text: 'その名前で決めていいですか？', aspect: 'name' as const, act: 'name_propose' as const, targets: [] as string[],
+  antecedent: { speaker: 'human' as const, proposition: confirmSeg.text } };
+const nearerWithdraw = { ...withdrawSeg, antecedent: { speaker: 'human' as const, proposition: confirmSeg.text } };
+for (const strategy of strategies) for (const [label, last] of [
+  ['withdraw of the original proposal through the confirmation (the audit 32 case)', [reconfirmSeg, withdrawSeg]],
+  ['control: withdraw of the nearer confirmation', [reconfirmSeg, nearerWithdraw]],
+] as Array<[string, Segment[]]>) {
+  test(strategy + ' B-32A-1: ' + label + ' restores after a restart and takes the next utterance', async () => {
+    const trial = session(strategy, memo, profile, 200);
+    await trial.start();
+    await trial.say(broad);
+    await keepNamePending(trial);
+    const asked = await trial.say({ human: confirmSeg.text, local: [confirmSeg], action: 'confirm', target: 0, feature: ringGap, drafts: [reply] });
+    assert.equal(asked.trace.status, 'committed', 'turn: ' + asked.trace.errorCode);
+    const turn = await trial.say({ human: last.map(s => s.text).join(''), local: last, action: 'confirm', target: 0, feature: baseWidth, drafts: ['台が環より細いか確認してもいいですか？'] });
+    assert.equal(turn.trace.status, 'committed', 'turn: ' + turn.trace.errorCode + ' ' + JSON.stringify(turn.trace.decisionRejectionCode ?? null));
+    const saved = trial.record() as any;
+    const restarted = session(strategy, memo, profile, 200);
+    await restarted.start();
+    await restarted.restoreFrom(saved);
+    const next = await restarted.say({ human: '台の幅についてはどうですか？', action: 'confirm', target: 0, feature: ringGap, drafts: [reply] });
+    assert.equal(next.trace.status, 'committed', 'next utterance: ' + next.trace.errorCode);
+  });
+}
+
 // Audit 31 B-31A-2: holistic_v3; an agreed name that was deferred and then proposed again is a request, not a reconfirmation.
 const reproposeText = 'さっきの「' + originalName + '」でいいですか？';
 const reproposal: Segment = { text: reproposeText, aspect: 'name', act: 'name_propose', name: originalName, targets: [first] };

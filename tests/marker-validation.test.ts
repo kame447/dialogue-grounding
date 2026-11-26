@@ -135,3 +135,27 @@ test('B-31A-2: a name agreed and then deferred is not agreed when it is proposed
   // A rename of the agreed name releases the old one.
   assert.equal(reconfirmationPossible(proposal, 10, [judged(4, 'agree', 'figure_0', '星窓'), judged(6, 'repair', 'figure_0', '月窓')], { figure_0: { status: 'tentative', name: '月窓' } }), false);
 });
+
+// Audit 32 (B-32A-1). A withdrawal reaches a proposal through a confirmation of it that an earlier turn made.
+test('B-32A-1: a turn that confirms a confirmation and withdraws the original proposal needs no marker, and the earlier turns\' claims decide that', () => {
+  const t2 = [claim('2:local1', 'name_propose', 2, null, '月枠')];
+  const t4 = [claim('4:local1', 'name_propose', 4, '2:local1', '月枠')];
+  const turn6 = { turnIndex: 6, status: 'committed', local: { claims: [claim('6:local1', 'name_propose', 6, '4:local1', '月枠'), claim('6:local2', 'withdraw', 6, '2:local1')] } };
+  const earlier = [...t2, ...t4];
+  assert.equal(traceMarkerInvalid(turn6, [], {}, gates, earlier), false, 'the run saw the confirmation of 4 die with the proposal of 2: no marker is right');
+  assert.equal(traceMarkerInvalid({ ...turn6, namingRequest: true }, [], {}, gates, earlier), true, 'a marker would contradict that view');
+  // Without the earlier claims the restore cannot see the dependency and (as in the audit) refuses the true record: the claims must be passed.
+  assert.equal(traceMarkerInvalid(turn6, [], {}, gates), true);
+  // Controls: withdrawing the nearer confirmation, the direct withdrawal of the proposal, and an independent new name.
+  const nearer = { turnIndex: 6, status: 'committed', local: { claims: [claim('6:local1', 'name_propose', 6, '4:local1', '月枠'), claim('6:local2', 'withdraw', 6, '4:local1')] } };
+  assert.equal(traceMarkerInvalid(nearer, [], {}, gates, earlier), false);
+  const direct = { turnIndex: 4, status: 'committed', local: { claims: [claim('4:local1', 'name_propose', 4, '2:local1', '月枠'), claim('4:local2', 'withdraw', 4, '2:local1')] } };
+  assert.equal(traceMarkerInvalid(direct, [], {}, gates, t2), false);
+  const renamed = { turnIndex: 6, status: 'committed', local: { claims: [claim('6:local2', 'withdraw', 6, '2:local1'), claim('6:local3', 'name_propose', 6, null, '月輪')] } };
+  assert.equal(traceMarkerInvalid(renamed, [], {}, gates, earlier), true);
+  assert.equal(traceMarkerInvalid({ ...renamed, namingRequest: true }, [], {}, gates, earlier), false);
+  // A confirmation that no withdrawal touched stays a proposal.
+  const alive = { turnIndex: 6, status: 'committed', local: { claims: [claim('6:local1', 'name_propose', 6, '4:local1', '月枠')] } };
+  assert.equal(traceMarkerInvalid(alive, [], {}, gates, earlier), true);
+  assert.equal(traceMarkerInvalid({ ...alive, namingRequest: true }, [], {}, gates, earlier), false);
+});

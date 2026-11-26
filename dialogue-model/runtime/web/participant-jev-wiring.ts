@@ -145,14 +145,16 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
       // The typed-naming-request marker is recomputed from the turn's verified claims and the stored version, and the copies of a committed turn (trace and saved state)
       // must be equal in every field they share.
       const savedJudgments: any[] = Array.isArray(restore.queueState?.privateState?.judgments) ? restore.queueState.privateState.judgments : [];
+      const earlierClaims: any[] = [];
       for (const trace of restore.jevTraces) {
         if (hasVersionedViewpoint(trace.generationRetryVersion) && trace.generationRetryVersion !== generationRetryVersion ||
             hasVersionedViewpoint(generationRetryVersion) && trace.finalAction && trace.generationRetryVersion !== generationRetryVersion ||
             Object.hasOwn(trace,'generationRetryVersion') && trace.generationRetryVersion !== 'jev_generation_retry_v2' &&
               !hasVersionedViewpoint(trace.generationRetryVersion)) return invalid();
         if (traceMarkerInvalid(trace, savedJudgments, restore.queueState?.privateState?.ledger, { markerAllowed: isHolisticV3Plus(profile.dialoguePolicy) && profile.questionLayout === 'two_stage_v3',
-          unmarkedChecked: isHolisticV3Plus(profile.dialoguePolicy) })) return invalid();
+          unmarkedChecked: isHolisticV3Plus(profile.dialoguePolicy) }, earlierClaims)) return invalid();
         if (trace.status === 'committed') {
+          if (Array.isArray(trace.local?.claims)) earlierClaims.push(...trace.local.claims);
           const judgment = savedJudgments.find((j: any) => j?.turnIndex === trace.turnIndex && j?.jevTurn?.attemptNumber === trace.attemptNumber);
           if (!judgment) return invalid();
           for (const key of ['executed','humanReferent','repairProspect','repairGate','repairFacts','draftActs','namingRequest','namingReconfirm'])

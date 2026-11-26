@@ -270,9 +270,12 @@ export function inheritsProposalName(c: NamingClaimLike, claims: readonly Naming
 /** Whether a saved trace's naming marker contradicts the claims live when its turn was decided (the restore's check, shared with its tests). A proposal the same utterance
  * withdrew is not live, so it neither requires a marker nor makes one possible. `markerAllowed`: the version and layout carry markers at all; `unmarkedChecked`: the version
  * requires a marker on every committed turn with a live proposal. */
-export function traceMarkerInvalid(trace: any, judgments: readonly NamingJudgmentEvidence[], ledger: NamingLedgerLike, { markerAllowed, unmarkedChecked }: { markerAllowed: boolean; unmarkedChecked: boolean }): boolean {
+export function traceMarkerInvalid(trace: any, judgments: readonly NamingJudgmentEvidence[], ledger: NamingLedgerLike, { markerAllowed, unmarkedChecked }: { markerAllowed: boolean; unmarkedChecked: boolean },
+  earlierClaims: readonly any[] = []): boolean {
   const requested = Object.hasOwn(trace, "namingRequest"), reconfirmed = Object.hasOwn(trace, "namingReconfirm"), marked = requested || reconfirmed;
-  const live = Array.isArray(trace.local?.claims) ? claimsLiveAsOf(trace.local.claims, trace.turnIndex) : null;
+  // `earlierClaims`: the claims the earlier committed turns' traces hold. A withdrawal reaches a proposal through a confirmation of it that an earlier turn made, and that
+  // confirmation (not in this turn's own claims) dies with the proposal, so it must be present for the turn's view to be the one the decision saw.
+  const live = Array.isArray(trace.local?.claims) ? claimsLiveAsOf([...earlierClaims, ...trace.local.claims], trace.turnIndex) : null;
   if (marked && (requested && trace.namingRequest !== true || reconfirmed && trace.namingReconfirm !== true || requested && reconfirmed || !markerAllowed ||
       !live || !hasNameProposal(live, trace.turnIndex))) return true;
   // A reconfirmation names only what an earlier turn left agreed. The state check cannot see a proposal the graph pruned, so the trace's own claims decide here.
