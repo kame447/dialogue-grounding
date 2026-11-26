@@ -104,9 +104,10 @@ async function receptionForm(request: Request): Promise<URLSearchParams | null> 
 }
 
 async function participantRoleMutation(request: Request, deps: AdminDeps, id: string, reception: boolean, fromLog: boolean): Promise<Response> {
-  const back = reception ? '/admin/receptions' : fromLog ? '/admin' : '/admin/record/' + id;
-  const fail = (status: number, code: string, message: string) => wantsHtml(request)
-    ? respond(status, renderMessage('人間役の担当種別', message, { href: back, label: '戻る' }))
+  const back = reception ? { href: '/admin/receptions', label: '受付一覧へ' }
+    : fromLog ? { href: '/admin', label: '実験ログへ' } : { href: '/admin/record/' + id, label: '記録詳細へ' };
+  const fail = (status: number, code: string, message: string, title = '担当者種別を変更していません') => wantsHtml(request)
+    ? respond(status, renderMessage(title, message, back))
     : receptionError(status, code);
   if (!RECORD_ID.test(id)) return receptionError(404, 'not_found');
   const form = await receptionForm(request);
@@ -114,7 +115,7 @@ async function participantRoleMutation(request: Request, deps: AdminDeps, id: st
   if (!form || !isParticipantRole(role) || form.getAll('role').length !== 1 ||
       [...form.keys()].some(key => key !== 'role' && !(reception && key === 'recordId')) ||
       new Set(recordIds).size !== recordIds.length || recordIds.some(recordId => !RECORD_ID.test(recordId))) {
-    return fail(400, 'invalid_request', '担当種別と対象の記録を確認してください。');
+    return fail(400, 'invalid_request', '担当者種別と対象の記録を確認してください。');
   }
   try {
     let result: ParticipantRoleResult;
@@ -128,13 +129,17 @@ async function participantRoleMutation(request: Request, deps: AdminDeps, id: st
     }
     if (!result.ok) {
       if (result.error === 'not_found') return fail(404, 'not_found', '対象の記録が見つかりません。');
-      return fail(409, 'conflict', '対象の試行記録が変わりました。画面を開き直してください。');
+      return fail(409, 'conflict', reception
+        ? '対象の試行記録が変わりました。受付一覧を開き直してください。'
+        : '対象の記録が変わりました。画面を開き直してください。');
     }
     if (request.headers.get('Accept')?.split(',').some(value => value.split(';')[0].trim().toLowerCase() === 'application/json')) {
       return respond(200, JSON.stringify({ [reception ? 'receptionId' : 'recordId']: id, role }), 'application/json; charset=utf-8');
     }
-    return plain(303, '', { Location: back });
-  } catch { return fail(503, 'unavailable', '保存結果を確認できませんでした。画面を開き直して担当種別を確認してください。'); }
+    return plain(303, '', { Location: back.href });
+  } catch {
+    return fail(503, 'unavailable', '画面を開き直して担当者種別を確認してください。', '担当者種別の保存結果を確認できません');
+  }
 }
 const receptionError = (status: number, error: string) => respond(status, JSON.stringify({ error }), 'application/json; charset=utf-8');
 /** Browser pages (Accept: text/html without application/json) get a short page; other clients keep the JSON contract. */
@@ -410,7 +415,8 @@ export async function handleAdmin(request: Request, deps: AdminDeps): Promise<Re
     if (!sameOrigin(request, url)) return plain(403, "Forbidden");
     const recordId = deletePath[1];
     if (!RECORD_ID.test(recordId)) return notFound();
-    if (await confirmation(request) !== recordId) return respond(400, renderMessage("削除していません", "確認欄に記録IDを正確に入力してください。"));
+    if (await confirmation(request) !== recordId) return respond(400, renderMessage("削除していません",
+      "確認欄に36文字の記録IDを正確に入力してください。", { href: "/admin", label: "実験ログへ" }));
     const summary = await deps.getSummary(recordId);
     if (!summary || summary.recordId !== recordId || !OBJECT_ID.test(summary.objectId)) return notFound();
     await deps.deleteRecord(summary);

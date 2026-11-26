@@ -125,11 +125,13 @@ function participantRoleForm(action: string, recordIds: readonly string[] = []):
   return `<form method="post" action="${escapeHtml(action)}">
 ${recordIds.map(id => `<input type="hidden" name="recordId" value="${escapeHtml(id)}">`).join("")}
 <label>変更後 <select name="role" required>${option("", "", "選択")}${roleOptions("")}</select></label>
-<button>変更</button></form>`;
+<button>${recordIds.length ? "一括変更" : "変更"}</button></form>`;
 }
 
 function deleteRecordForm(recordId: string): string {
-  return `<form method="post" action="/admin/record/${escapeHtml(recordId)}/delete"><label>確認（記録ID） <input name="confirm" autocomplete="off" required></label>
+  const id = escapeHtml(recordId);
+  return `<p>記録ID <code>${id}</code></p>
+<form method="post" action="/admin/record/${id}/delete"><label>確認（記録ID） <input name="confirm" autocomplete="off" required></label>
 <button>この記録を削除</button></form>`;
 }
 
@@ -157,8 +159,8 @@ export function renderList(summaries: AdminRecordSummary[], filter: ListFilter, 
     const id = escapeHtml(s.recordId);
     const actions = RECORD_ID.test(s.recordId) ? `<details class="row-action"><summary>担当者種別を変更</summary>
 ${participantRoleForm(`/admin/record/${s.recordId}/participant-role?from=log`)}</details>
-<details class="row-action danger"><summary>記録を削除</summary><p>記録ID <code>${id}</code></p>
-<p>アンケートも削除されます。削除は取り消せません。</p>${deleteRecordForm(s.recordId)}</details>` : "";
+<details class="row-action danger"><summary>記録を削除</summary>
+<p>仮アンケートも削除されます。削除は取り消せません。</p>${deleteRecordForm(s.recordId)}</details>` : "";
     return `<tr>${td("記録", `<div><a href="/admin/record/${id}">${escapeHtml(s.recordId.slice(0, 8))}</a></div><div class="muted">${timeTag(s.updatedAt)}</div>
 <div>担当者種別 ${PARTICIPANT_ROLE_LABELS[participantRole(s)]}</div>${actions}`, "id")}
 ${td("状態", `<div class="badges">${statusBadge(s.status)}${aiBadge(s.aiStatus)}${surveyBadge(s.questionnaire)}</div>`)}
@@ -265,7 +267,7 @@ export function renderDetail(record: unknown, summary: AdminRecordSummary, laten
   const dl = (items: [string, string][]) => `<dl class="summary">${items.map(([k, v]) => `<div><dt>${escapeHtml(k)}</dt><dd>${v}</dd></div>`).join("")}</dl>`;
   const id = escapeHtml(summary.recordId);
   const surveyState = isPlain(r.questionnaire) && typeof r.questionnaire.status === "string" ? r.questionnaire.status : summary.questionnaire;
-  return page(`記録 ${summary.recordId.slice(0, 8)}`, `<p><a href="/admin">← 一覧</a></p>
+  return page(`記録 ${summary.recordId.slice(0, 8)}`, `<p><a href="/admin">← 実験ログへ</a></p>
 <h1>記録 ${id}</h1>
 <p><a href="/admin/record/${id}.json">JSONで保存（この記録の全項目）</a></p>
 ${dl([["状態", `<div class="badges">${statusBadge(summary.status)}${aiBadge(summary.aiStatus)}${surveyBadge(surveyState)}</div>`], ["開始", timeTag(summary.startedAt)], ["更新", timeTag(summary.updatedAt)],
@@ -344,7 +346,7 @@ export function renderReceptions(items: ReceptionAdminRow[], next: string | null
       return recordId ? `<div><a href="/admin/record/${escapeHtml(recordId)}">${escapeHtml(recordId)}</a> <span>${PARTICIPANT_ROLE_LABELS[role]}</span></div>` : '';
     }).join('');
     const recordIds = trials.flatMap(trial => trial.recordId === null ? [] : [trial.recordId]);
-    const bulk = recordIds.length && RECORD_ID.test(entry.receptionId) ? `<details class="row-action"><summary>担当者種別を一括変更</summary>
+    const bulk = recordIds.length && RECORD_ID.test(entry.receptionId) ? `<details class="row-action"><summary>担当者種別を一括変更（${recordIds.length}件）</summary>
 ${participantRoleForm(`/admin/reception/${entry.receptionId}/participant-role`, recordIds)}</details>` : '';
     const rowKey = JSON.stringify([entry.revision, protocolKey, trials]);
     return `<tr data-id="${escapeHtml(entry.receptionId)}" data-status="${escapeHtml(entry.status)}" data-created="${escapeHtml(entry.createdAt)}" data-key="${escapeHtml(rowKey)}">${td('受付番号', escapeHtml(entry.number ?? '未割当'))}${td('受付時刻', timeTag(entry.createdAt))}
