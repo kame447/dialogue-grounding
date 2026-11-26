@@ -127,7 +127,15 @@ function validatedPayload(body, selectedModel, env) {
   return { model: selectedModel, messages, max_completion_tokens: requested };
 }
 
-function sanitizeResult(data, model, usageOnly) {
+function sanitizeUsage(usage, includeCost) {
+  return {
+    prompt_tokens: Number.isFinite(usage?.prompt_tokens) ? usage.prompt_tokens : null,
+    completion_tokens: Number.isFinite(usage?.completion_tokens) ? usage.completion_tokens : null,
+    ...(includeCost ? { cost: Number.isFinite(usage?.cost) && usage.cost >= 0 ? usage.cost : null } : {}),
+  };
+}
+
+function sanitizeResult(data, model, includeCost) {
   const choice = data?.choices?.[0];
   const content = choice?.message?.content;
   if (!(typeof content === "string" && content.trim()) &&
@@ -141,13 +149,7 @@ function sanitizeResult(data, model, usageOnly) {
       message: { role: "assistant", content },
       finish_reason: choice.finish_reason ?? null,
     }],
-    usage: {
-      prompt_tokens: Number.isFinite(data?.usage?.prompt_tokens) ?
-        data.usage.prompt_tokens : null,
-      completion_tokens: Number.isFinite(data?.usage?.completion_tokens) ?
-        data.usage.completion_tokens : null,
-      ...(usageOnly ? { cost: Number.isFinite(data?.usage?.cost) && data.usage.cost >= 0 ? data.usage.cost : null } : {}),
-    },
+    usage: sanitizeUsage(data?.usage, includeCost),
   };
 }
 
@@ -282,7 +284,8 @@ export async function handleRequest(request, env, fetchImpl = globalThis.fetch, 
   if ("error" in selected) return reply(400, { error: selected.error });
   const payload = validatedPayload(body, selected.model, env);
   if (!payload) return reply(400, { error: "invalid_request" });
-  if ((expectedModel !== null && selected.purpose === "dialogue_turn" || selected.purpose === "dialogue_turn_candidate") &&
+  const isCandidate = selected.purpose === "dialogue_turn_candidate";
+  if ((isCandidate || (expectedModel !== null && selected.purpose === "dialogue_turn")) &&
       payload.messages.some(message => typeof message.content !== "string")) {
     return reply(400, { error: "invalid_request" });
   }
@@ -300,8 +303,8 @@ export async function handleRequest(request, env, fetchImpl = globalThis.fetch, 
       },
       body: JSON.stringify(payload),
       signal: controller.signal,
-      // Cloudflare Workers may forward Authorization across redirects. A
-      // visual request must never leave the configured upstream endpoint.
+      // Cloudflare Workers may forward Authorization across redirects.
+      // Keep these requests on the configured upstream endpoint.
       ...(expectedModel !== null || IDENTITY_CHECKED.has(selected.purpose) ? { redirect: "manual" } : {}),
     });
     if (!response.ok) {
@@ -311,8 +314,7 @@ export async function handleRequest(request, env, fetchImpl = globalThis.fetch, 
     }
     const data = await response.json();
     if (expectedModel !== null && data?.model !== expectedModel) return reply(502, { error: "model_mismatch" });
-    // Vision provenance must be reported by the upstream itself. Never label
-    // missing or unexpected identity as the configured model.
+    // Vision and comparison responses must report the upstream model identity.
     if (IDENTITY_CHECKED.has(selected.purpose) &&
         !(typeof data?.model === "string" && (data.model === selected.model ||
           (data.model.startsWith(selected.model + "-") && /^\d{4}-\d{2}-\d{2}$|^\d{8}$/.test(data.model.slice(selected.model.length + 1)))))) {
@@ -320,9 +322,10 @@ export async function handleRequest(request, env, fetchImpl = globalThis.fetch, 
     }
     const rejected = (status, error) => {
       if (expectedModel !== null && usageOnly) onRejectedUsage?.(verifiedParticipantUsage(expectedModel, data?.usage));
+      if (isCandidate) return reply(status, { error, model: data.model, usage: sanitizeUsage(data.usage, true) });
       return reply(status, { error });
     };
-    const result = sanitizeResult(data, selected.model, expectedModel !== null && usageOnly);
+    const result = sanitizeResult(data, selected.model, isCandidate || (expectedModel !== null && usageOnly));
     if (result && expectedModel !== null) {
       const { message, finish_reason } = result.choices[0];
       if (Array.isArray(message.content)) {

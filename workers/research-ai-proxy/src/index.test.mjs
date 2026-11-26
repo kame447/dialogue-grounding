@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { registerHooks } from "node:module";
 import { handleRequest } from "./index.mjs";
 
 const env = {
@@ -160,9 +161,10 @@ test("upstream 429 and invalid response are handled without forwarding raw data"
   assert.equal((await invalid.json()).error, "invalid_upstream_response");
   const exhausted = await handleRequest(req(), env, async () => Response.json({
     choices: [{ message: { role: "assistant", content: "" }, finish_reason: "length" }],
+    usage: { ...result.usage, cost: 0.012 },
   }));
   assert.equal(exhausted.status, 422);
-  assert.equal((await exhausted.json()).error, "upstream_output_limit");
+  assert.deepEqual(await exhausted.json(), { error: "upstream_output_limit" });
 });
 
 test("completion cap accepts the research setting of 8192 and rejects larger values", async () => {
@@ -299,7 +301,7 @@ test("comparison purpose: the candidate model is chosen by the Worker only, the 
   assert.equal(absent.status, 400); assert.equal(seen.length, 2);
 });
 
-test("comparison purpose fails closed on a missing or substituted upstream id, accepts only text, and never follows a redirect", async () => {
+test("comparison purpose fails closed on a missing or substituted upstream id and accepts only text", async () => {
   const model = "candidate-terra-for-test";
   const configured = { ...env, DIALOGUE_CANDIDATE_MODEL: model };
   for (const returned of [undefined, null, "", env.DIALOGUE_MODEL, model + "-latest"]) {
@@ -311,7 +313,65 @@ test("comparison purpose fails closed on a missing or substituted upstream id, a
   const image = await handleRequest(request("/v1/chat/completions", env.RESEARCH_PROXY_TOKEN, bodyWith([{ role: "user", content: [{ type: "text", text: "a" }] }], { purpose: "dialogue_turn_candidate" })), configured,
     async () => Response.json({ ...result, model }));
   assert.equal(image.status, 400);
-  const redirected = await handleRequest(request("/v1/chat/completions", env.RESEARCH_PROXY_TOKEN, bodyWith(simpleMessages, { purpose: "dialogue_turn_candidate" })), configured,
-    async (_url, options) => { assert.equal(options.redirect, "manual"); return new Response(null, { status: 307, headers: { Location: "https://untrusted.invalid/" } }); });
-  assert.equal(redirected.status, 502); assert.equal(redirected.headers.get("location"), null);
+});
+
+test("comparison purpose rejects an upstream redirect without following it", async () => {
+  const configured = { ...env, DIALOGUE_CANDIDATE_MODEL: "candidate-terra-for-test" };
+  const body = bodyWith(simpleMessages, { purpose: "dialogue_turn_candidate" });
+  const calls = [];
+  const response = await handleRequest(request("/v1/chat/completions", env.RESEARCH_PROXY_TOKEN, body), configured,
+    async (url, options) => {
+      calls.push({ url, redirect: options.redirect });
+      return new Response(null, { status: 307, headers: { Location: "https://untrusted.invalid/" } });
+    });
+  assert.equal(response.status, 502);
+  assert.equal(response.headers.get("location"), null);
+  assert.deepEqual(await response.json(), { error: "upstream_error" });
+  assert.deepEqual(calls, [{ url: "https://api.openai.com/v1/chat/completions", redirect: "manual" }]);
+});
+
+test("comparison HTTP and RPC preserve measured usage on success and rejection", async (t) => {
+  const hook = registerHooks({ resolve(name, context, next) {
+    if (name !== "cloudflare:workers") return next(name, context);
+    return { url: "data:text/javascript,export class WorkerEntrypoint { constructor(ctx, env) { this.env = env; } }", shortCircuit: true };
+  } });
+  let worker;
+  try {
+    worker = await import("./worker.ts");
+  } finally {
+    hook.deregister();
+  }
+
+  const model = "candidate-terra-for-test-20261126";
+  const configured = { ...env, DIALOGUE_CANDIDATE_MODEL: "candidate-terra-for-test" };
+  const body = bodyWith(simpleMessages, { purpose: "dialogue_turn_candidate" });
+  const proxy = new worker.InternalResearchProxy({}, configured);
+  const entrypoints = {
+    async HTTP() {
+      const response = await worker.default.fetch(request("/v1/chat/completions", env.RESEARCH_PROXY_TOKEN, body), configured);
+      return { status: response.status, data: await response.json() };
+    },
+    RPC: () => proxy.chat(body),
+  };
+  const usageCases = [
+    { name: "measured", upstream: { ...result.usage, cost: 0.012 }, expected: { ...result.usage, cost: 0.012 } },
+    { name: "zero", upstream: { prompt_tokens: 0, completion_tokens: 0, cost: 0 }, expected: { prompt_tokens: 0, completion_tokens: 0, cost: 0 } },
+    { name: "missing cost", upstream: result.usage, expected: { ...result.usage, cost: null } },
+    { name: "missing", upstream: undefined, expected: { prompt_tokens: null, completion_tokens: null, cost: null } },
+  ];
+  const outcomes = [
+    { status: 200, choices: result.choices, data: { choices: result.choices } },
+    { status: 422, choices: [{ message: { content: "" }, finish_reason: "length" }], data: { error: "upstream_output_limit" } },
+    { status: 502, choices: [], data: { error: "invalid_upstream_response" } },
+  ];
+  for (const [surface, send] of Object.entries(entrypoints)) {
+    for (const { status, choices, data } of outcomes) {
+      for (const { name, upstream, expected } of usageCases) {
+        await t.test(`${surface} ${status} ${name}`, async (caseTest) => {
+          caseTest.mock.method(globalThis, "fetch", async () => Response.json({ model, choices, usage: upstream }));
+          assert.deepEqual(await send(), { status, data: { ...data, model, usage: expected } });
+        });
+      }
+    }
+  }
 });
