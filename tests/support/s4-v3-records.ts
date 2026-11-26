@@ -29,6 +29,8 @@ export type TrialVersion = 'adaptive_repair_v1' | 'adaptive_repair_v2' | 'adapti
 export type Plan = { action: string; target: string; issue?: string; prospect?: string; actionScores?: Record<string, number>; speech?: string; inject?: any;
   drafts?: readonly string[];
   draftAct?: DraftAct;
+  sharedConstrual?: string;
+  failSharedDetail?: true;
   /** Raw JSON text the local-extraction request returns (public name proposals etc.); `act` answers the classifier's `*_act` questions (default assert). */
   extraction?: string; act?: string;
   /** The turn's first decision is a request_observation of figure_0 (one self-side reobservation); `action`/`target` are the terminal decision after it. */
@@ -63,6 +65,7 @@ export async function runTurn(profile: any, label: Label, state: any, events: an
   const readKey = async () => 'sk-or-SYNTHETIC-offline-replay-key-0000';
   const fetchImpl = async (_url: any, init: any) => {
     const body = JSON.parse(init.body), answers: any = {};
+    if (plan.failSharedDetail && Object.hasOwn(body.questions, 'shared_construal')) return new Response('', {status: 502});
     for (const [key, q] of Object.entries(body.questions) as any) {
       const labels = Object.keys(q.criteria);
       const aiSegment = plan.aiActs && Object.hasOwn(JSON.parse(body.state), 'aiSeq') ? /^segment_(\d+)_act$/u.exec(key) : null;
@@ -71,6 +74,7 @@ export async function runTurn(profile: any, label: Label, state: any, events: an
       const choice = key === 'action' ? lastAction : key === 'target' ? (lastAction === 'request_observation' ? 'figure_0' : plan.target) : key === 'repair_issue' ? plan.issue ?? 'none' : key === 'prospect' ? plan.prospect ?? 'uncertain'
         : key === 'name' && plan.name ? (labels.find(l => JSON.parse(q.criteria[l]).value === plan.name) ?? labels[0])
         : key === 'human_referent' && plan.referent ? plan.referent
+        : key === 'shared_construal' && plan.sharedConstrual ? plan.sharedConstrual
         : key === 'draft_naming' ? (plan.draftAct ?? (plan.action === 'agree' ? 'adopt_chosen' : 'none')) : key === 'basis' ? 'partner_uncertain' : key.endsWith('_antecedent') ? (plan.antecedent ?? 'none') : /^segment_\d+_answer$/u.test(key) ? (plan.answers ?? 'unknown') : key.endsWith('_act') ? (publicAct ?? (plan.act && labels.includes(plan.act) ? plan.act : 'assert')) : key === 'observe_aspect' ? 'orientation' : labels[0];
       if (!labels.includes(choice) && !(key === 'action' && plan.forceAction)) throw new Error(`scripted choice ${choice} is not offered for ${key}: ${labels.slice(0, 8)}`);
       answers[key] = { type: 'choice', choice, probabilities: Object.fromEntries(labels.map(l => [l, key === 'action' ? plan.actionScores?.[l] ?? (l === choice ? 1 : 0) : l === choice ? 1 : 0])) };
