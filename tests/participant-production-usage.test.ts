@@ -92,3 +92,20 @@ test('402, 429 and timeout remain unobserved while a verified rejected reply set
   assert.equal(restored.snapshot().latest.jev?.model, pin.jevModelId);
   assert.equal(restored.halted, false);
 });
+
+test('an all-Terra ledger rejects Luna reservations and archives with legacy phase attribution', async () => {
+  const allTerra = validateParticipantModelPin({
+    schemaVersion: 'participant_model_pin_v3', terraModelId: pin.terraModelId, jevModelId: pin.jevModelId,
+  });
+  const store = memory();
+  const ledger = await ParticipantUsageLedger.open(store, 'synthetic-assignment', allTerra);
+  const initial = ledger.snapshot();
+  await assert.rejects(ledger.dispatch('luna', async () => assert.fail('unexpected dispatch'), {}), { code: 'ai_unavailable' });
+  assert.deepEqual(ledger.snapshot(), initial);
+
+  const mixed = structuredClone(initial);
+  mixed.phases.luna.dialogue = mixed.phases.terra.dialogue;
+  delete mixed.phases.terra.dialogue;
+  assert.throws(() => ParticipantUsageLedger.readSnapshot(mixed, initial.assignmentId, allTerra));
+  assert.deepEqual((await ParticipantUsageLedger.open(store, initial.assignmentId, allTerra, initial)).snapshot(), initial);
+});

@@ -1,7 +1,7 @@
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import type { VerifiedParticipantUsage } from './participant-usage-fields.ts';
 import { handleRequest } from './index.mjs';
-import { configuredParticipantPin, configuredParticipantGenerationPin, participantChoices, participantUsageChoices } from './participant-transport.ts';
+import { configuredParticipantPin, configuredParticipantGenerationPin, configuredParticipantAllTerraPin, participantChoices, participantUsageChoices } from './participant-transport.ts';
 import { INITIAL_OBSERVATION_STRUCTURED_V1 } from '../../../dialogue-model/runtime/observation/initial-observation-generation.ts';
 
 interface ProxyEnvironment {
@@ -92,6 +92,10 @@ export class InternalParticipantProxy extends WorkerEntrypoint<ProxyEnvironment>
 
   async participantUsagePolicyV2() {
     return configuredParticipantGenerationPin(this.env);
+  }
+
+  async participantUsagePolicyV3() {
+    return configuredParticipantAllTerraPin(this.env);
   }
 
   async participantUsageGeneration(payload: unknown, expectedModel: string): Promise<InternalResult> {

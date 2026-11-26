@@ -163,6 +163,7 @@ function participantPlan(value: unknown) {
   if (hasProfile && p.participantRuntimeProfile !== PARTICIPANT_PRODUCTION_PROFILE) return fail();
   if (hasGeneration && p.initialObservationGeneration !== INITIAL_OBSERVATION_STRUCTURED_V1) return fail();
   const pin = hasPin ? validateParticipantModelPin(p.participantModelPin) : undefined;
+  if (pin?.schemaVersion === 'participant_model_pin_v3' && !hasProfile) return fail();
   const limits = hasLimits ? validateParticipantLimits(p.participantLimits) : undefined;
   const participant: ParticipantPlanSettings = {
     ...(pin ? { participantModelPin: pin } : {}),

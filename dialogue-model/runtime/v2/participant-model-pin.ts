@@ -10,12 +10,18 @@ export type LegacyParticipantModelPin = ModelIds & Readonly<{ schemaVersion: 'pa
 export type GenerationParticipantModelPin = ModelIds & Readonly<{
   schemaVersion: 'participant_model_pin_v2'; generationModelId: string;
 }>;
-export type ParticipantModelPin = LegacyParticipantModelPin | GenerationParticipantModelPin;
+export type AllTerraParticipantModelPin = Pick<ModelIds, 'terraModelId' | 'jevModelId'> &
+  Readonly<{ schemaVersion: 'participant_model_pin_v3' }>;
+export type ParticipantModelPin = LegacyParticipantModelPin | GenerationParticipantModelPin | AllTerraParticipantModelPin;
 
 const KEYS = ['schemaVersion', 'terraModelId', 'lunaModelId', 'jevModelId'];
 const TERRA = /^gpt-6\.1-terra(?:-(?:\d{4}-\d{2}-\d{2}|\d{8}))?$/u;
 const LUNA = /^gpt-6-luna(?:-(?:\d{4}-\d{2}-\d{2}|\d{8}))?$/u;
-export const participantGenerationPhase = (phase: unknown) => phase === 'generation' || phase === 'final_submission';
+export function participantChatProvider(pin: ParticipantModelPin, phase: unknown): 'luna' | 'terra' {
+  return pin.schemaVersion === 'participant_model_pin_v3' ||
+    (pin.schemaVersion === 'participant_model_pin_v2' && (phase === 'generation' || phase === 'final_submission'))
+    ? 'terra' : 'luna';
+}
 const JEV = /^typesafe\/jev-1\.14(?:-\d{8})?$/u;
 
 export class ParticipantModelPinError extends Error {
@@ -43,15 +49,22 @@ function field(value: object, key: string): unknown {
   return descriptor.value;
 }
 
+export function validateParticipantModelPin<Version extends ParticipantModelPin['schemaVersion']>(
+  value: { schemaVersion: Version; [key: string]: unknown },
+): Extract<ParticipantModelPin, { schemaVersion: Version }>;
+export function validateParticipantModelPin(value: unknown): ParticipantModelPin;
 export function validateParticipantModelPin(value: unknown): ParticipantModelPin {
   const item = record(value);
   const schemaVersion = field(item, 'schemaVersion');
-  const keys = schemaVersion === 'participant_model_pin_v2' ? [...KEYS, 'generationModelId'] : KEYS;
+  const keys = schemaVersion === 'participant_model_pin_v3' ? ['schemaVersion', 'terraModelId', 'jevModelId']
+    : schemaVersion === 'participant_model_pin_v2' ? [...KEYS, 'generationModelId'] : KEYS;
   if (Reflect.ownKeys(item).length !== keys.length || !keys.every(key => Object.hasOwn(item, key))) return invalid();
-  const terraModelId = field(item, 'terraModelId'), lunaModelId = field(item, 'lunaModelId'), jevModelId = field(item, 'jevModelId');
+  const terraModelId = field(item, 'terraModelId'), jevModelId = field(item, 'jevModelId');
   if (typeof terraModelId !== 'string' || !TERRA.test(terraModelId) ||
-      typeof lunaModelId !== 'string' || !LUNA.test(lunaModelId) ||
       typeof jevModelId !== 'string' || !JEV.test(jevModelId)) return invalid();
+  if (schemaVersion === 'participant_model_pin_v3') return Object.freeze({ schemaVersion, terraModelId, jevModelId });
+  const lunaModelId = field(item, 'lunaModelId');
+  if (typeof lunaModelId !== 'string' || !LUNA.test(lunaModelId)) return invalid();
   const ids = { terraModelId, lunaModelId, jevModelId };
   if (schemaVersion === 'participant_model_pin_v1') return Object.freeze({ schemaVersion, ...ids });
   if (schemaVersion !== 'participant_model_pin_v2' || field(item, 'generationModelId') !== terraModelId) return invalid();
@@ -65,11 +78,8 @@ export function requireExactParticipantModel(expectedId: string, returnedId: unk
 
 function requireSamePin(expected: ParticipantModelPin, value: unknown): void {
   const actual = validateParticipantModelPin(value);
-  requireExactParticipantModel(expected.schemaVersion, actual.schemaVersion);
-  // A v2 generation ID is constrained to its exact Terra ID.
-  for (const field of ['terraModelId', 'lunaModelId', 'jevModelId'] as const) {
-    requireExactParticipantModel(expected[field], actual[field]);
-  }
+  // Each pin is already validated, including the v2 generation ID constraint.
+  for (const [key, id] of Object.entries(expected)) requireExactParticipantModel(id, field(actual, key));
 }
 
 /** A plan approved without a pin keeps the old Worker runtime, including its

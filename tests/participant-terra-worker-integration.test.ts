@@ -100,6 +100,7 @@ function harness(enabled = true, selectedProtocol: typeof protocol & {
     PARTICIPANT_TERRA_ENABLED: enabled ? 'on' : 'off',
     PARTICIPANT_TERRA_PROFILE: PARTICIPANT_PRODUCTION_PROFILE as string | undefined,
     PARTICIPANT_TERRA_GENERATION_ENABLED: undefined as string | undefined,
+    PARTICIPANT_TERRA_ALL_ROLES_ENABLED: undefined as string | undefined,
     PARTICIPANT_TERRA_LIMITS_JSON: JSON.stringify(approvedLimits),
     PARTICIPANT_TERRA_INITIAL_OBSERVATION_GENERATION: undefined as string | undefined,
     V2_UTTERANCE_STYLE: 'concise',
@@ -135,6 +136,7 @@ function harness(enabled = true, selectedProtocol: typeof protocol & {
       },
       async participantUsagePolicy() { return this.participantPolicy(); },
       participantUsagePolicyV2: undefined as (() => Promise<unknown>) | undefined,
+      participantUsagePolicyV3: undefined as (() => Promise<unknown>) | undefined,
       participantUsageGeneration: undefined as ((body: unknown, expected: string) => Promise<any>) | undefined,
       participantInitialObservationPolicy: undefined as (() => Promise<unknown>) | undefined,
       async participantUsageChat(body: any, expected: string) {
@@ -416,7 +418,7 @@ test('a Luna approval still uses Luna after Terra becomes the new default, inclu
   const h = harness();
   await h.receive();
   await h.approve();
-  h.env.PARTICIPANT_TERRA_GENERATION_ENABLED = 'on';
+  h.env.PARTICIPANT_TERRA_ALL_ROLES_ENABLED = 'on';
   h.env.PARTICIPANT_AI_PROXY.participantUsagePolicyV2 = async () => assert.fail('saved Luna requires the original policy');
   const first = (await jsonOk(await h.start())).trial;
   h.evict();
@@ -464,7 +466,7 @@ test('new Terra approval routes generation and final submissions to exact Terra 
   });
   const approved = await h.approve();
   assert.deepEqual(approved.plan.participantModelPin, generationPin);
-  h.env.PARTICIPANT_TERRA_GENERATION_ENABLED = 'off';
+  h.env.PARTICIPANT_TERRA_ALL_ROLES_ENABLED = 'on';
   let predecessor: string | undefined;
   for (const strategy of ['bypass-enabled', 'repair-first']) {
     const before = await h.storage.get('reception:v1');
@@ -509,6 +511,159 @@ test('new Terra approval routes generation and final submissions to exact Terra 
   assert.deepEqual(posts, ['generation', 'final_submission', 'generation', 'final_submission']);
 });
 
+test('v3 routes all four text roles to real private Terra transport and preserves both condition slots', async t => {
+  const h = harness();
+  const proxy = new InternalParticipantProxy({}, { ...settings, VISION_MODEL: pin.terraModelId });
+  const expectedPin = { schemaVersion: 'participant_model_pin_v3', terraModelId: pin.terraModelId, jevModelId: pin.jevModelId };
+  const service = h.env.PARTICIPANT_AI_PROXY;
+  const lookup = () => proxy.participantUsagePolicyV3();
+  const routeText = (body: unknown, expected: string) => proxy.participantUsageGeneration(body, expected);
+  h.env.PARTICIPANT_TERRA_ALL_ROLES_ENABLED = 'on';
+  h.env.PARTICIPANT_TERRA_GENERATION_ENABLED = 'on';
+  service.participantUsagePolicyV2 = () => proxy.participantUsagePolicyV2();
+  service.participantUsageGeneration = routeText;
+  h.controlled.usageChat = async (body, expected) => {
+    assert.equal(body.purpose, 'visual_observation');
+    assert.equal(expected, pin.terraModelId);
+    return proxy.participantUsageChat(body, expected);
+  };
+  const posts: string[] = [];
+  let slots: string[] = [];
+  t.mock.method(globalThis, 'fetch', async (_url: unknown, init: RequestInit) => {
+    const body = JSON.parse(String(init.body));
+    assert.equal(body.model, pin.terraModelId);
+    const first = body.messages[0].content, last = String(body.messages.at(-1).content);
+    let phase: string, response: string;
+    if (body.messages.some((message: { content: unknown }) => Array.isArray(message.content))) {
+      const args = JSON.parse(body.messages[1].content);
+      if (args.figureIds) {
+        phase = 'reobservation';
+        response = JSON.stringify({ figures: args.figureIds.map((figureId: string) =>
+          ({ figureId, supports: ['三角を含む'], contradicts: [], unknown: [] })) });
+      } else {
+        phase = 'initial_observation';
+        slots = args.ownAnchors.map(({ id }: { id: string }) => id);
+        response = JSON.stringify({ figures: slots.map(id => ({ id, holistic: [],
+          analytic: { shapes: ['三角'], composition: '辺がつながる', relations: [] }, unknowns: [] })) });
+      }
+    } else if (first === MEMO_LOCAL_EXTRACTION_INSTRUCTIONS || first === MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS) {
+      phase = first === MEMO_LOCAL_EXTRACTION_INSTRUCTIONS ? 'dialogue' : 'ai_extraction';
+      response = '[]';
+    } else if (last.includes('JSON')) {
+      phase = 'final_submission';
+      response = JSON.stringify(Object.fromEntries(slots.map(id => [id, '合成名'])));
+    } else {
+      phase = last.includes('公開発話を書き直してください') ? 'rewrite' : 'generation';
+      response = phase === 'generation' ? 'human_referent' : 'なるほど、聞かせてくれてありがとう。';
+    }
+    posts.push(phase);
+    assert.doesNotMatch(JSON.stringify(body), /ANSWER_KEY_CANARY|participantModelPin|service-binding-only/u);
+    return Response.json({ ...chatResponse(pin.terraModelId, response),
+      usage: { cost: phase === 'ai_extraction' ? null : 0.021, prompt_tokens: 17, completion_tokens: 6 } });
+  });
+  await h.receive();
+  const received = await h.storage.get('reception:v1');
+  await assert.rejects(h.approve(), { code: 'reception_unavailable' });
+  service.participantUsagePolicyV3 = service.participantUsagePolicyV2;
+  await assert.rejects(h.approve(), { code: 'reception_unavailable' });
+  service.participantUsagePolicyV3 = lookup;
+  service.participantUsageGeneration = undefined;
+  await assert.rejects(h.approve(), { code: 'reception_unavailable' });
+  assert.deepEqual(await h.storage.get('reception:v1'), received);
+  assert.equal(posts.length, 0);
+  service.participantUsageGeneration = routeText;
+
+  const approved = await h.approve();
+  assert.deepEqual(approved.plan.participantModelPin, expectedPin);
+  h.env.PARTICIPANT_TERRA_ALL_ROLES_ENABLED = 'off';
+  let predecessor: string | undefined;
+  for (const strategy of ['bypass-enabled', 'repair-first']) {
+    const before = await h.storage.get('reception:v1');
+    const owner = await h.storage.get('base:owner:v1');
+    const countBefore: number = posts.length;
+    service.participantUsagePolicyV3 = undefined;
+    assert.equal((await h.start(predecessor)).status, 409);
+    service.participantUsagePolicyV3 = async () => ({ ...expectedPin, terraModelId: 'gpt-6.1-terra-2026-11-02' });
+    assert.equal((await h.start(predecessor)).status, 409);
+    assert.deepEqual(await h.storage.get('reception:v1'), before);
+    assert.deepEqual(await h.storage.get('base:owner:v1'), owner);
+    assert.equal(posts.length, countBefore);
+
+    service.participantUsagePolicyV3 = lookup;
+    const { trial } = await jsonOk(await h.start(predecessor));
+    h.controlled.observe = true;
+    await jsonOk(await h.request('message', { expectedRecordId: trial.sessionId, text: '三角の部分があります。' }));
+    await h.idle();
+    const state = (await jsonOk(await h.request('state'))).trial;
+    assert.ok(state.events.some((event: { text: string }) => event.text === 'なるほど、聞かせてくれてありがとう。'));
+    await h.complete(trial.sessionId, state);
+    const saved = await h.storage.get('record:' + trial.sessionId);
+    assert.equal(saved.strategy, strategy);
+    assert.deepEqual(saved.options.participantModelPin, expectedPin);
+    assert.equal(saved.jevTraces[0].generationGuard.regenerated, true);
+    const { phases, latest } = saved.jevLedger;
+    assert.deepEqual(phases.luna, {});
+    assert.equal(latest.luna, null);
+    assert.equal(latest.terra.model, pin.terraModelId);
+    assert.equal(latest.terra.phase, 'final_submission');
+    assert.equal(latest.jev.model, pin.jevModelId);
+    assert.ok(phases.jev.action_target.posts > 0);
+    const expectedPosts = { initial_observation: predecessor ? 0 : 1, reobservation: 1,
+      dialogue: 1, generation: 2, ai_extraction: 1, final_submission: 1 };
+    for (const [phase, count] of Object.entries(expectedPosts)) {
+      const meter = phases.terra[phase];
+      assert.deepEqual([meter.posts, meter.inputTokens, meter.outputTokens, meter.unknownPosts,
+        meter.missingCostPosts, meter.knownUsd], [count, 17 * count, 6 * count, 0,
+        phase === 'ai_extraction' ? count : 0, phase === 'ai_extraction' ? 0 : 0.021 * count]);
+    }
+    assert.equal(phases.terra.initial_observation.cacheHits, predecessor ? 1 : 0);
+    h.evict();
+    assert.equal((await jsonOk(await h.request('state'))).trial.sessionId, trial.sessionId);
+    assert.deepEqual((await h.adminRecord(trial.sessionId)).jevLedger, saved.jevLedger);
+    predecessor = trial.sessionId;
+  }
+  const perCondition = ['dialogue', 'reobservation', 'generation', 'rewrite', 'ai_extraction', 'final_submission'];
+  assert.deepEqual(posts, ['initial_observation', ...perCondition, ...perCondition]);
+});
+
+test('v3 rejects wrong or missing model IDs from either extraction before publication', async t => {
+  for (const [phase, id] of [['dialogue', pin.lunaModelId], ['ai_extraction', undefined]] as const) {
+    const h = harness();
+    const proxy = new InternalParticipantProxy({}, settings);
+    h.env.PARTICIPANT_TERRA_ALL_ROLES_ENABLED = 'on';
+    h.env.PARTICIPANT_AI_PROXY.participantUsagePolicyV3 = () => proxy.participantUsagePolicyV3();
+    h.env.PARTICIPANT_AI_PROXY.participantUsageGeneration = (body, expected) => proxy.participantUsageGeneration(body, expected);
+    const posts: string[] = [];
+    const mock = t.mock.method(globalThis, 'fetch', async (_url: unknown, init: RequestInit) => {
+      const body = JSON.parse(String(init.body));
+      assert.equal(body.model, pin.terraModelId);
+      const first = body.messages[0].content;
+      const current = first === MEMO_LOCAL_EXTRACTION_INSTRUCTIONS ? 'dialogue'
+        : first === MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS ? 'ai_extraction' : 'generation';
+      posts.push(current);
+      return Response.json(chatResponse(current === phase ? id : pin.terraModelId,
+        current === 'generation' ? 'なるほど、聞かせてくれてありがとう。' : '[]'));
+    });
+    await h.receive();
+    await h.approve();
+    const { trial } = await jsonOk(await h.start());
+    const event = await jsonOk(await h.request('message', { expectedRecordId: trial.sessionId, text: '三角の部分があります。' }));
+    await h.idle();
+    const saved = await h.adminRecord(trial.sessionId);
+    assert.equal(saved.queueState.errorCode, 'ai_unavailable');
+    assert.deepEqual(saved.queueState.pendingHumanEventIds, [event.eventId]);
+    assert.equal(saved.events.at(-1).id, event.eventId);
+    assert.equal(saved.jevLedger.halted, true);
+    assert.equal(saved.jevLedger.latest.terra.phase, phase);
+    assert.equal(saved.jevLedger.latest.terra.status, 'model_mismatch');
+    assert.equal(saved.jevLedger.latest.terra.model, null);
+    assert.equal(saved.jevLedger.phases.terra[phase].unknownPosts, 1);
+    assert.equal(saved.jevLedger.latest.luna, null);
+    assert.deepEqual(posts, phase === 'dialogue' ? ['dialogue'] : ['dialogue', 'generation', 'ai_extraction']);
+    mock.mock.restore();
+  }
+});
+
 test('private Terra generation closes on missing configuration, wrong expected ID and wrong actual ID', async t => {
   const proxy = new InternalParticipantProxy({}, settings);
   const unavailable = new InternalParticipantProxy({}, { ...settings, PARTICIPANT_MODEL_PIN_JSON: undefined });
@@ -520,6 +675,7 @@ test('private Terra generation closes on missing configuration, wrong expected I
     return Response.json(chatResponse(returned, '非公開の模擬応答'));
   });
   assert.equal(await unavailable.participantUsagePolicyV2(), null);
+  assert.equal(await unavailable.participantUsagePolicyV3(), null);
   assert.equal((await unavailable.participantUsageGeneration(body, pin.terraModelId)).status, 503);
   assert.equal((await proxy.participantUsageGeneration(body, pin.lunaModelId)).status, 409);
   assert.equal((await proxy.participantUsageGeneration({ ...body, purpose: 'visual_observation' }, pin.terraModelId)).status, 400);

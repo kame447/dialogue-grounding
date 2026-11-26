@@ -3,7 +3,7 @@ import { MODEL_CONTRACT_V2 } from '../../../dialogue-model/runtime/model-identit
 // Private Service-binding transport. Never exposed through the Worker's fetch handler.
 import { DECISION_MODELS, OPENROUTER_DECISIONS_URL, decisionConfig } from './decisions.mjs';
 import { resolvePurposeModel } from './modelPolicy.mjs';
-import { requireExactParticipantModel, validateParticipantModelPin, type GenerationParticipantModelPin } from '../../../dialogue-model/runtime/v2/participant-model-pin.ts';
+import { requireExactParticipantModel, validateParticipantModelPin, type GenerationParticipantModelPin, type AllTerraParticipantModelPin } from '../../../dialogue-model/runtime/v2/participant-model-pin.ts';
 
 type ParticipantEnvironment = {
   PARTICIPANT_MODEL_PIN_JSON?: string;
@@ -41,6 +41,12 @@ export function configuredParticipantGenerationPin(env: ParticipantEnvironment):
   const pin = configuredParticipantPin(env);
   if (!pin) return null;
   return { ...pin, schemaVersion: 'participant_model_pin_v2', generationModelId: pin.terraModelId };
+}
+
+export function configuredParticipantAllTerraPin(env: ParticipantEnvironment): AllTerraParticipantModelPin | null {
+  const pin = configuredParticipantPin(env);
+  if (!pin) return null;
+  return { schemaVersion: 'participant_model_pin_v3', terraModelId: pin.terraModelId, jevModelId: pin.jevModelId };
 }
 
 const MAX_BODY = 1024 * 1024;
