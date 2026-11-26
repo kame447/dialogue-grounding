@@ -189,3 +189,29 @@ for (const label of ['bypass-enabled', 'repair-first'] as const) {
     assert.ok(!names.includes(alias), JSON.stringify(names));
   });
 }
+
+// audit 25n (B-25N-1): the proposal an approval request carries comes from the current naming interval only.
+for (const label of ['bypass-enabled', 'repair-first'] as const) {
+  const build = (version: string | undefined, turns: Turn[]) =>
+    buildRecords({ label, dialoguePolicy: 'holistic_v5', ...(version ? { generationRetryVersion: version as any } : {}), technicalTrial: { version: 'adaptive_repair_v3' }, turns });
+  const second = OWN.ownAnchors[1].id as string;
+  const outline2 = '折れた棒に小さな輪がついています。', question2 = '指しているのはこの図形でしょうか？';
+  const check: Turn = { human: '輪のついた形を見比べたいです。', plan: { action: 'confirm', target: 'figure_0', referent: 'figure_0', speech: outline2 + question2, aiActs: ['assert', 'ask'],
+    aiExtraction: JSON.stringify([seg('s1', outline2, 'part', [first]), seg('s2', question2, 'question', [first])]) } };
+  const pointing: Turn = { human: 'それそれ', plan: { action: 'accept', target: 'figure_0', referent: 'figure_0', speech: '輪のある形の話ですね。', act: 'agree', antecedent: 'claim_1',
+    extraction: JSON.stringify([seg('s1', 'それそれ', 'question', [], null, 2)]) } };
+  const plain: Turn = { human: proposal, plan: { action: 'confirm', target: 'figure_0', referent: 'figure_0', name: alias, act: 'name_propose', extraction: JSON.stringify([seg('s1', proposal, 'name', [], alias)]), speech: '輪が細い棒につながる形ですか？' } };
+  const leave: Turn = { human: 'はい、それでお願いします。', plan: { action: 'agree', target: 'figure_0', referent: 'figure_0', name: alias, speech: 'いいですね。「月枠」にしましょう。' } };
+  const next: Turn = { human: '別の図形のことです。', plan: { action: 'confirm', target: 'figure_1', referent: 'figure_1', speech: 'この形のことですか？', aiActs: ['ask'], aiExtraction: JSON.stringify([seg('s1', 'この形のことですか？', 'question', [second], null, 9)]) } };
+  const approve: Turn = { human: 'それなら、いい？', plan: { action: 'confirm', target: 'figure_1', referent: 'figure_1', act: 'name_propose', antecedent: 'claim_4',
+    extraction: JSON.stringify([seg('s1', 'それなら、いい？', 'name', [], null, 10)]), speech: '輪の形ですか？' } };
+  test(`${label}: an approval request in the next naming interval does not carry a name from before the boundary in v11`, async () => {
+    const record = await build(undefined, [check, pointing, plain, leave, next, approve]);
+    const last = record.trials[0].attempts.at(-1);
+    const boundary = record.trials[0].lastCommittedState.judgments.some((j: any) => ['agree', 'defer', 'move_on'].includes(j.judgment.action));
+    assert.ok(boundary, 'a boundary judgment was executed');
+    assert.deepEqual(last.local.claims.filter((c: any) => c.act === 'name_propose' && c.name === alias), []);
+    assert.notEqual(last.namingRequest, true);
+    assert.deepEqual(statuses(record), passed);
+  });
+}

@@ -44,6 +44,8 @@ type VerificationInput = {
   directReferenceReplies?: boolean;
   /** jev_generation_retry_v11: an ask rewrites its aspect to the question's only when it answers that question or names no turn. */
   refinedReplyRules?: boolean;
+  /** v11: the turn after which the current naming interval starts (the last agree, defer or move_on); a name proposal before it is never carried by an approval request. */
+  namingIntervalStart?: number;
   graph: LocalGraph;
   turn: number;
   publicTurns: readonly PublicTurn[];
@@ -85,7 +87,7 @@ function opposesPointingReply(segment: LocalSegmentProposal, question: LocalClai
 const overlap = (a: readonly string[], b: readonly string[]) => a.some(slot => b.includes(slot));
 
 /** Only the CURRENT public human turn may supply a new segment's quote. */
-export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts, keepUnboundApproval = false, approvalFromNamedClaim = false, referenceQuestionBindings, directReferenceReplies = false, refinedReplyRules = false }: VerificationInput): LocalVerifiedUpdate {
+export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts, keepUnboundApproval = false, approvalFromNamedClaim = false, referenceQuestionBindings, directReferenceReplies = false, refinedReplyRules = false, namingIntervalStart = 0 }: VerificationInput): LocalVerifiedUpdate {
   const result: LocalVerifiedUpdate = { operations: [], rejected: [] };
   // Revalidate JSON-restored graphs before using any model-selected pointer.
   snapshotReferenceGraph(graph);
@@ -131,15 +133,15 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     // An approval request ("is that name fine?") is a name proposal that carries the earlier proposal's name; it is decided before the bare-deictic rule so a short typed request is not turned into an acknowledgement.
     // The antecedent is the claim the classifier chose: the partner's own name proposal, or a public AI claim that carries a name (an adoption, a named confirmation).
     // The name is public either way. The extraction's respondsToTurn names the AI turn that was just answered, so for this act it does not have to be the claim's turn.
-    // v11 (#198): a short approval request that answers the AI's question about a name ("いい？") answers the partner's open name proposal that question was about:
-    // the latest unspecific, unanswered proposal of the partner before the question. The question itself names nothing, so the proposal is the claim the request carries the name from.
+    // v11 (#198): a short approval request that answers the AI's question about a name ("いい？") answers the partner's latest name proposal that question was about:
+    // the latest proposal of the partner in the current naming interval and before the question. The question itself names nothing, so the proposal is the claim the request carries the name from.
     if (refinedReplyRules && keepUnboundApproval && prior?.speaker === "ai" && prior.act === "ask" && act === "name_propose" && name === null && aspect === "name") {
       const asked = prior;
-      // The latest proposal of the partner before the question, whether or not it names a figure: a later, corrected proposal is the one the request answers.
-      const latest = active.filter(c => c.speaker === "human" && c.act === "name_propose" && c.aspect === "name" && c.name !== null && c.sourceTurn < asked.sourceTurn)
+      // The latest proposal of the partner inside the current naming interval and before the question, whether or not it names a figure: a later, corrected proposal is the one the request answers,
+      // and a proposal from before an agree, defer or move_on is not carried into the next figure.
+      const proposal = active.filter(c => c.speaker === "human" && c.act === "name_propose" && c.aspect === "name" && c.name !== null && c.sourceTurn > namingIntervalStart && c.sourceTurn < asked.sourceTurn)
         .sort((x, y) => x.sourceTurn - y.sourceTurn || x.turn - y.turn).at(-1);
-      const proposal = latest;
-      if (proposal && !active.some(c => c.respondsTo === proposal.id && ["name_accept", "name_reject"].includes(c.act))) prior = proposal;
+      if (proposal) prior = proposal;
     }
     const approvalRequest = keepUnboundApproval && !!prior && act === "name_propose" && name === null && aspect === "name" && prior.aspect === "name" &&
       (approvalFromNamedClaim ? ["name_propose", "name_accept"].includes(prior.act) : prior.act === "name_propose" && prior.speaker === "human") && prior.name !== null;
