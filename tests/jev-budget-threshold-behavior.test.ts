@@ -8,7 +8,7 @@ import { participantLedgerFetch } from '../dialogue-model/runtime/web/participan
 const jevBody = JSON.stringify({ questions: { action: { criteria: {} } } });
 const post = (fetchImpl: typeof fetch) => fetchImpl('https://offline.invalid/v1', { method: 'POST', body: jevBody });
 
-for (const jevUsd of [0.05, 0.15, 0.45]) {
+for (const jevUsd of [0.05, 0.15, 0.45, 1]) {
   test(`jevUsd ${jevUsd}: the response that reaches the limit halts the ledger and the next send is refused before it leaves`, async () => {
     const ledger = new RunBudget({ lunaCalls: 100, lunaTokens: 1e9, lunaPosts: 100, jevPosts: 10000, jevUsd });
     let sent = 0;

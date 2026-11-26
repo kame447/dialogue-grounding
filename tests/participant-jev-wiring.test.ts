@@ -111,7 +111,7 @@ test('J-S1/S4/S8: insecure file, assignment mismatch, style and legacy decision 
 test('J-S2/S3/S6/S7: schema, cache digest, timeout relationship and missing limits refuse startup',async t=>{
   const h=await fixture(t);
   for(const changes of [{schemaVersion:'unknown'},{memoSha256:'0'.repeat(64)},{limits:null},{timeouts:{...timeouts,lunaAttemptMs:85001}},
-    {timeouts:{...timeouts,generationMs:timeouts.trialMs}},{limits:{...limits,jevUsd:0.450001}},{unexpected:'not-allowed'}]){
+    {timeouts:{...timeouts,generationMs:timeouts.trialMs}},{limits:{...limits,jevUsd:1.000001}},{unexpected:'not-allowed'}]){
     await writeFile(h.options.configFile,JSON.stringify({...h.config,...changes}));
     await assert.rejects(prepareParticipantJev(h.options),{code:'invalid_config'});
   }
