@@ -20,6 +20,7 @@ import { createJevAiFunctionClassifier, createJevAiSupportChecker } from "../dia
 import { DEFAULT_COST_CAP_USD, RESEARCH_MAX_JEV_USD } from "../dialogue-model/runtime/diagnostics/jev-shadow-eval/local-openrouter.ts";
 import { researchHash, researchTrialProfileV3 } from "../dialogue-model/runtime/v2/research-profile.ts";
 import { RESEARCH_MAX_DEADLINE_MS } from "../dialogue-model/runtime/v2/research-timeouts.ts";
+import { PARTICIPANT_USAGE_ONLY } from "../dialogue-model/runtime/web/participant-usage-policy.ts";
 import { OPENROUTER_DECISIONS_URL } from "../workers/research-ai-proxy/src/grounding.ts";
 
 const KEY = "sk-or-SYNTHETIC-two-stage-v2-key-0000000";
@@ -297,6 +298,24 @@ test("B1: onFailureEvidence receives only this decide call's failed evidence, an
   const v2Projected = projectDecisionFailureEvidence(v2Seen[0], "two_stage_v2")!;
   assert.equal(v2Projected.rejectionCode, "name_required"); assert.deepEqual(Object.keys(v2Projected.stages[0].choices), ["action", "target"]);
   assert.equal(projectDecisionFailureEvidence(v2Seen[0], "two_stage_v1"), null, "a v2 stage-one shape is not a v1 record");
+});
+
+// Usage-only participant (#194): the provider reports no cost. The failure evidence of a parsed stage then carries
+// costUsd null and must be stored and restored; without the usage-only capability it stays refused, as before.
+test("B1b: a usage-only decision failure keeps a null cost and checks; without the capability the same record is refused", async t => {
+  for (const layout of ["two_stage_v1", "two_stage_v2"] as const) {
+    const http = await httpMock(t, staged({ stage1: { action: "agree", target: "figure_1" } }, () => null));
+    const c = client(http.fetchImpl, layout, { usagePolicy: PARTICIPANT_USAGE_ONLY }), seen: unknown[] = [];
+    await assert.rejects(c.decide(rich(), { onFailureEvidence: e => seen.push(e) }), code("inconsistent_decision"));
+    assert.equal(seen.length, 1);
+    const projected = projectDecisionFailureEvidence(seen[0], layout, { usagePolicy: PARTICIPANT_USAGE_ONLY })!;
+    assert.ok(projected, "usage-only evidence is projected");
+    assert.equal(projected.costUsd, null); assert.equal(projected.stages[0].costUsd, null); assert.ok(projected.stages[0].model !== null);
+    assert.deepEqual(checkDecisionFailureEvidence(structuredClone(projected), { usagePolicy: PARTICIPANT_USAGE_ONLY }), projected);
+    // Control: no capability, no null cost on a parsed stage.
+    assert.equal(projectDecisionFailureEvidence(seen[0], layout), null);
+    assert.equal(checkDecisionFailureEvidence(structuredClone(projected)), null);
+  }
 });
 
 test("B3: the closed failure record rejects any key, label, value or stage outside its shape", async t => {
