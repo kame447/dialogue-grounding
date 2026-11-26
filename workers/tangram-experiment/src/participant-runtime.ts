@@ -11,8 +11,12 @@ import type { ObservationInput } from '../../../dialogue-model/runtime/observati
 import { ENGINEERING_LIMITS, RunBudget, type BudgetLimits } from '../../../dialogue-model/runtime/diagnostics/parity-live/audit.ts';
 import { participantLedgerFetch, type JevResearchOptions, type JevResearchLedger } from '../../../dialogue-model/runtime/web/participant-jev-wiring.ts';
 import { participantChatProvider, requireExactParticipantModel, validateParticipantModelPin, type ParticipantModelPin } from '../../../dialogue-model/runtime/v2/participant-model-pin.ts';
-import { researchTrialProfileV3, RESEARCH_TRIAL_PROFILE_V1 } from '../../../dialogue-model/runtime/v2/research-profile.ts';
+import { researchHash, researchTrialProfileV3, RESEARCH_TRIAL_PROFILE_V1 } from '../../../dialogue-model/runtime/v2/research-profile.ts';
 import { RESEARCH_MAX_DEADLINE_MS, RESEARCH_MAX_LUNA_ATTEMPT_MS } from '../../../dialogue-model/runtime/v2/research-timeouts.ts';
+
+import type { BaseRecord } from '../../../dialogue-model/runtime/v2/base-assignment.ts';
+import type { ParticipantDialogueProfile } from '../../../dialogue-model/runtime/v2/reception.ts';
+import { CLAIM_PRUNE_V2 } from '../../../dialogue-model/runtime/memory/reference-graph.mjs';
 
 type Dispatch = (payload: unknown, expectedModelId: string) => Promise<ParticipantDispatchResult>;
 export interface ParticipantService {
@@ -39,6 +43,30 @@ const profile = researchTrialProfileV3({ timeoutMs: null, maxCompletionTokens: n
   lunaAttemptMs: RESEARCH_MAX_LUNA_ATTEMPT_MS,
   trialMs: ENGINEERING_LIMITS.trialMs,
 });
+const dialogueV12 = {
+  profile: researchTrialProfileV3(profile.lunaRequest, profile.timeouts, 'two_stage_v3', 'holistic_v5'),
+  technicalTrial: { version: 'adaptive_repair_v3' },
+  pinnedVersions: { generationRetryVersion: 'jev_generation_retry_v12', namingRestoreVersion: 'ai_name_acceptances_v1' },
+  newTrialAgreeNameScopeVersion: 'scoped_v7',
+} as const;
+
+const dialogueV12ProfileSha = researchHash(dialogueV12.profile);
+
+export function matchesWorkerDialogueProfile(key: ParticipantDialogueProfile | undefined, record: BaseRecord) {
+  const { options, queueState } = record;
+  if (key === undefined) return !Object.hasOwn(options, 'participantDialogueProfile');
+  const state = queueState.privateState as { agreeNameScopeVersion?: unknown; graph?: { memoryPruneVersion?: unknown } } | undefined;
+  const technicalTrial = options.technicalTrial as { version?: unknown } | undefined;
+  return key === 'participant_dialogue_v12' && options.participantDialogueProfile === key &&
+    options.memoryPruneVersion === CLAIM_PRUNE_V2 && state?.graph?.memoryPruneVersion === CLAIM_PRUNE_V2 &&
+    options.profileSha256 === dialogueV12ProfileSha && options.questionLayout === dialogueV12.profile.questionLayout &&
+    options.dialoguePolicy === dialogueV12.profile.dialoguePolicy &&
+    technicalTrial?.version === dialogueV12.technicalTrial.version && Object.keys(technicalTrial).length === 1 &&
+    options.generationRetryVersion === dialogueV12.pinnedVersions.generationRetryVersion &&
+    options.jevNamingRestoreVersion === dialogueV12.pinnedVersions.namingRestoreVersion &&
+    state?.agreeNameScopeVersion === dialogueV12.newTrialAgreeNameScopeVersion;
+}
+
 const researchLimits = { maxDeadlineMs: RESEARCH_MAX_DEADLINE_MS };
 
 async function requireWorkerInitialObservationGeneration(proxy: ParticipantService | undefined,
@@ -88,14 +116,21 @@ function boundFetch(dispatch: Dispatch, modelId: string, ledger: RunBudget): typ
   };
 }
 
-export function createWorkerParticipantRuntime({ pin, own, proxy, cache, limits, usage, initialObservationGeneration }: {
+export function createWorkerParticipantRuntime({ pin, own, proxy, cache, limits, usage, initialObservationGeneration, participantDialogueProfile }: {
   pin: ParticipantModelPin;
   own: ObservationInput;
   proxy: ParticipantService;
   cache: WorkerTerraCache;
+  participantDialogueProfile?: ParticipantDialogueProfile;
   initialObservationGeneration?: InitialObservationGeneration;
 } & ({ limits: Readonly<BudgetLimits>; usage?: never } | { limits?: never; usage: ParticipantUsageLedger })) {
   if (pin.schemaVersion !== 'participant_model_pin_v1' && !usage) throw new NamingTaskError('invalid_options');
+  if (participantDialogueProfile !== undefined &&
+      (participantDialogueProfile !== 'participant_dialogue_v12' || pin.schemaVersion !== 'participant_model_pin_v3' || !usage)) {
+    throw new NamingTaskError('invalid_options');
+  }
+  const dialogue = participantDialogueProfile === 'participant_dialogue_v12' ? dialogueV12 : null;
+  const runtimeProfile = dialogue?.profile ?? profile;
   const ledger = usage ?? new RunBudget(limits!);
   const chat: Dispatch = (payload, expected) => usage ? proxy.participantUsageChat!(payload, expected) : proxy.participantChat(payload, expected);
   const choices: Dispatch = (payload, expected) => usage ? proxy.participantUsageChoices!(payload, expected) : proxy.participantChoices(payload, expected);
@@ -153,14 +188,16 @@ export function createWorkerParticipantRuntime({ pin, own, proxy, cache, limits,
     ...(usage ? { onCacheHit: () => usage.cacheHit() } : {}),
   });
   const jevResearch: JevResearchOptions<JevResearchLedger> = {
-    profile, ledger,
+    ...(dialogue ?? {}), profile: runtimeProfile, ledger,
     observer: usage ? {
       observeAll: (input, options) => usage.logical('terra', 'initial_observation', () => terra.observeAll(input, options)),
       reobserve: (input, options) => usage.logical('terra', 'reobservation', () => terra.reobserve(input, options)),
     } : terra,
-    jevDecision: createJevDecisionClient({ ...transport, enabled: true, questionLayout: profile.questionLayout, participantTargetMenu: true })!,
+    jevDecision: createJevDecisionClient({ ...transport, enabled: true, questionLayout: runtimeProfile.questionLayout,
+      participantTargetMenu: !dialogue, participantPrompts: dialogue !== null })!,
     localGrounding: {
-      classifier: createJevLocalTestClassifier({ ...localTransport, enabled: true, timeoutMs: profile.timeouts.localMs })!,
+      classifier: createJevLocalTestClassifier({ ...localTransport, enabled: true, timeoutMs: profile.timeouts.localMs,
+        ...(dialogue ? { questionLayout: dialogue.profile.questionLayout, dialoguePolicy: dialogue.profile.dialoguePolicy } : {}) })!,
       aiPublicTransport, timeoutMs: profile.timeouts.localMs,
       researchLimits, aiPublicClaims: profile.localGrounding.aiPublicClaims,
     },
