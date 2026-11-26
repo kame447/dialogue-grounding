@@ -771,7 +771,8 @@ test('private Jev proxy checks raw identity, uses only the fixed endpoint and re
   for (const model of [undefined, 'typesafe/jev-1.14-20261002', pin.jevModelId]) {
     const response = await participantChoices(settings, body, pin.jevModelId, async (url, init) => {
       assert.equal(String(url), 'https://openrouter.ai/api/alpha/decisions');
-      assert.equal(init?.redirect, 'error');
+      // Workers' fetch rejects redirect 'error' with a TypeError; only 'follow' and 'manual' exist there, and a redirect must never be followed with the key.
+      assert.equal(init?.redirect, 'manual');
       assert.deepEqual(JSON.parse(String(init?.body)), body);
       return Response.json({ model, id: 'gen-synthetic', answers: answers(questions), usage: { cost: 0 }, raw: 'RAW_CANARY' });
     });
@@ -779,6 +780,13 @@ test('private Jev proxy checks raw identity, uses only the fixed endpoint and re
     else {
       assert.equal(response.status, 200);
       assert.equal('raw' in response.data, false);
+    }
+  }
+  // A redirect is handed back unfollowed and refused; neither choices path forwards the key to another host.
+  for (const choices of [participantChoices, participantUsageChoices]) {
+    for (const status of [301, 302, 307, 308]) {
+      const redirected = await choices(settings, body, pin.jevModelId, async () => new Response(null, { status, headers: { Location: 'https://other.invalid/' } }));
+      assert.deepEqual(redirected, { status: 502, data: { error: 'upstream_error' } });
     }
   }
   let sent = false;
