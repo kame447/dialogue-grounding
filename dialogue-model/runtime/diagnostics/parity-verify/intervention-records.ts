@@ -3,6 +3,8 @@ import {createHash as nodeSha256} from 'node:crypto';
 // producer validator or replay executor. Only supplied data and code-owned
 // version constants are evidence; successful producer flags are not an oracle.
 import {jevChoiceAnswersValid,jevReportedCost,jevResponseId} from '../../decision/jev-choice-response.ts';
+import {JEV_DECISION_MODEL} from '../../decision/jev-decision.ts';
+import {isGroundingModel} from '../../../../workers/research-ai-proxy/src/grounding.ts';
 import {nameBindsFigure} from '../../decision/referent-binding.ts';
 import {hasNameProposal,namingTurnKind,namingIntervalEstimates,inheritedTargetClaimIds,agreeCandidateAllowed,inheritsProposalName,targetNamingConflict,publiclyCheckedNamingTarget,usesPublicNamingTarget} from '../../decision/naming-request.ts';
 import {decodeMaterialV5} from '../../decision/judgment-material-v5.ts';
@@ -201,6 +203,10 @@ const alwaysV3=()=>CTX.acceptOptional?ALWAYS_V3_ALL.filter(a=>a!=='accept'):ALWA
 const ANY_TARGET=['accept','defer','move_on','close'];
 // Adaptive-only context of the attempt being replayed, set at the start of the (synchronous) replay proof: whether repairFacts
 // existed (its guidance sentence is part of every instruction), and the saved per-figure agreeNames (known=false: no source).
+/** Whether a recorded partner-referent response is one the real client accepts: the Jev model, a reported cost, and exactly the asked choice answer with one probability per label. */
+function referentResponseAccepted(answer:any,slots:readonly string[]):boolean{
+ return isGroundingModel(answer?.model,JEV_DECISION_MODEL)&&jevReportedCost(answer)!==null&&jevChoiceAnswersValid(answer?.answers,{human_referent:[...slots.map((_,i)=>'figure_'+i),'none','multiple']});
+}
 type ReplayContext={policy:string|null;agreeMatch:{l0:boolean;l2:boolean}|null;facts:boolean;agree:any[]|undefined;known:boolean;v3:boolean;trial:boolean;ledger:Record<string,{status:string;name:string|null}>|undefined;legacyV3:boolean;style:null|'legacy'|'style'|'loop'|'holistic';humanNames?:Set<string>|null;namingRequest?:boolean;namingReconfirm?:boolean;acceptOptional?:boolean;critKind?:'V1'|'V3'|'H3'|null};
 const defaultContext:ReplayContext={policy:null,agreeMatch:null,facts:false,agree:undefined,known:true,v3:false,trial:false,ledger:undefined,legacyV3:false,style:null,humanNames:null,critKind:null};
 const CTX={...defaultContext};
@@ -885,6 +891,11 @@ const idsOf=(target:any):string[]=>target?.kind==='single'?[target.figureId]:tar
     const byId=ra?Object.fromEntries(Object.entries(ra.probabilities).map(([k,v])=>[/^figure_\d+$/.test(k)?slotsOf[Number(k.slice(7))]:k,v])):null;
     if(!ra||!equal(hr.scores,byId)||hr.model!==refAnswer.answer.model||hr.responseId!==jevResponseId(refAnswer.answer)||hr.costUsd!==jevReportedCost(refAnswer.answer))return'invalid';
    }
+   // A partner-referent estimate reported as unknown while the tape holds a response the real client accepts (the Jev model, a reported cost, and exactly the asked
+   // choice answer with one probability per label) is a contradiction: that response would have been an ok estimate. A failed or unusable response stays unknown.
+   else if(hr&&hr.status==='unknown'&&refAnswer){
+    if(referentResponseAccepted(refAnswer.answer,refAnswer.slots??[]))return'invalid';
+   }
   }
   if(label===tr.label&&t.status==='committed'){
    const acts:any[]=t.draftActs??[],guardCodes:string[]=(t.generationGuard?.violations??[]).filter((c:string)=>c.startsWith('draft_act_'));
@@ -1265,7 +1276,7 @@ function prospectMaterial(input:any,answers:any){
   scores:{repair_issue:answers.repair_issue.probabilities,prospect:answers.prospect.probabilities,basis:answers.basis.probabilities}};
 }
 /** Test hook for the independent reconstructions; changes no verdict. */
-export const s4Probe={issueSummary,originalQuestions,targetQuestion,targetProof,rankProof,expectedRerank,agreeSource,legal,decisionShape,traceShape,relation,s4HasNonOrientationLeak,
+export const s4Probe={referentResponseAccepted,issueSummary,originalQuestions,targetQuestion,targetProof,rankProof,expectedRerank,agreeSource,legal,decisionShape,traceShape,relation,s4HasNonOrientationLeak,
  setContext:(c:Partial<typeof CTX>)=>Object.assign(CTX,defaultContext,c),prospectQuestions:(input:any,facts:boolean)=>prospectQuestions(input,facts),prospectMaterial:(input:any,answers:any)=>prospectMaterial(input,answers),trialVersion:(t:any,claim:any)=>trialVersion(t,claim)};
 export function interventionChecks(records:Records):Check[]{
  const broken=(reason='intervention_trace_invalid')=>{

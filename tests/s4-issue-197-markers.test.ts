@@ -88,3 +88,34 @@ for (const policy of ['holistic_v3', 'holistic_v5'] as const) for (const label o
     assert.ok(interventionStatuses(record).some(status => status !== 'pass'));
   });
 }
+
+// NB-25N-7: the static check also refuses a successful-looking tape answer whose estimate the record reports as unknown. The predicate is the real client's acceptance of the response.
+import { s4Probe } from '../dialogue-model/runtime/diagnostics/parity-verify/intervention-records.ts';
+test('NB-25N-7: a recorded partner-referent response is accepted only when the real client would accept it', () => {
+  const slotIds = ['s-a', 's-b'];
+  const ok = { model: 'typesafe/jev-1.14', id: 'gen-x', usage: { cost: 0 },
+    answers: { human_referent: { type: 'choice', choice: 'figure_0', probabilities: { figure_0: 0.7, figure_1: 0.1, none: 0.1, multiple: 0.1 } } } };
+  const accepted = (answer: unknown) => s4Probe.referentResponseAccepted(answer, slotIds);
+  assert.equal(accepted(ok), true);
+  assert.equal(accepted({ ...ok, model: 'typesafe/jev-1.14-20261014' }), true, 'a dated snapshot of the model');
+  assert.equal(accepted({ ...ok, model: 'other/model' }), false, 'model mismatch is a failed send, so unknown is genuine');
+  assert.equal(accepted({ ...ok, usage: {} }), false, 'an unreported cost is a failed send');
+  assert.equal(accepted({ ...ok, answers: { human_referent: { ...ok.answers.human_referent, choice: 'figure_9' } } }), false, 'a label that was not offered');
+  assert.equal(accepted({ ...ok, answers: { human_referent: { ...ok.answers.human_referent, probabilities: { figure_0: 2, figure_1: 0, none: 0, multiple: 0 } } } }), false, 'a probability outside 0..1');
+  assert.equal(accepted({ ...ok, answers: { human_referent: ok.answers.human_referent, extra: ok.answers.human_referent } }), false, 'an answer to a question that was not asked');
+  assert.equal(accepted(null), false);
+});
+
+// NB-25N-8: a turn with two name proposals, one already agreed and one new, is a request; the state check and the runtime derivation agree (every proposal must be a reconfirmation).
+// The mixed turn cannot be built through the harness (the verifier drops a second proposal that repeats an agreed one), so the shared functions are pinned directly.
+import { reconfirmationPossible } from '../dialogue-model/runtime/decision/naming-request.ts';
+test('NB-25N-8: reconfirmationPossible needs every proposal of the turn to name something already agreed', () => {
+  const agreedEarlier = [{ turnIndex: 3, jevTurn: { executed: { action: 'agree', name: '小さな鍵' } } }];
+  const proposal = (name: string) => ({ speaker: 'human', act: 'name_propose', name, sourceTurn: 9 });
+  const ledger = { a: { status: 'agreed', name: '小さな鍵' } };
+  assert.equal(reconfirmationPossible([proposal('小さな鍵')], 9, agreedEarlier, ledger), true);
+  assert.equal(reconfirmationPossible([proposal('小さな鍵'), proposal('折れ棒')], 9, agreedEarlier, ledger), false, 'one new name makes the turn a request');
+  assert.equal(reconfirmationPossible([proposal('折れ棒'), proposal('小さな鍵')], 9, agreedEarlier, ledger), false, 'in either order');
+  assert.equal(reconfirmationPossible([proposal('小さな鍵'), proposal('小さな鍵')], 9, agreedEarlier, ledger), true);
+  assert.equal(reconfirmationPossible([], 9, agreedEarlier, ledger), false);
+});
