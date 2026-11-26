@@ -1,6 +1,7 @@
+import {fileURLToPath} from 'node:url';
 import {createJevTurnRuntime} from '../../dialogue-model/runtime/v2/jev-turn.ts';
 import {createMockJevDecisionClient} from '../../dialogue-model/runtime/decision/mocks.ts';
-export const root='/Users/Shogo/.agentstack/worktrees/NobleHooke-live';
+export const root=fileURLToPath(new URL('../../',import.meta.url));
 export const text='A square part is present.';
 export function harness(delays:Record<string,number>,localMs=20000,create?: (options:any)=>any){
  const anchors=Array.from({length:6},(_,i)=>({id:`s-000${i+1}`,bbox:{x:i,y:0,w:1,h:1},centroid:{x:i,y:0}}));
