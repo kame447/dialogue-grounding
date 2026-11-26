@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { LocalClaimView, LocalIssueView } from "../dialogue-model/runtime/local-grounding/contract.ts";
+import { verifyLocalUpdate } from "../dialogue-model/runtime/local-grounding/verify.ts";
 import { deriveLocalIssues, priorClaimViews } from "../dialogue-model/runtime/local-grounding/derive.ts";
 import { deriveSharedConstruals, deriveSharedConstrualsFromGraph } from "../dialogue-model/runtime/local-grounding/shared-construal.ts";
 import { applyReferenceUpdate, createReferenceGraph } from "../dialogue-model/runtime/memory/reference-graph.mjs";
@@ -214,4 +215,33 @@ test("v13 inherits the v12 rules and remains an explicit opt-in", () => {
   assert.equal(validAgreeNameScope("scoped_v5", v13), false);
   assert.equal(allowsOrientationFallback(v13), false);
   assert.equal(defaultGenerationRetryVersion("two_stage_v3", "holistic_v5"), v12);
+});
+
+test("partial withdrawal of a verified detail leaves it open only for the other figure", () => {
+  const reading = claim(1, { speaker: "human", targets: [A, B] });
+  const readingB = claim(1, { speaker: "human", id: "1:other", issueId: "1:other", targets: [B], proposition: "鳥にも見える" });
+  const detail = claim(1, { speaker: "human", id: "1:tip", issueId: "1:tip", aspect: "part", act: "assert",
+    targets: [A, B], quote: "先に切込みがある", proposition: "先に切込み" });
+  const support = agree(2, reading, { targets: [A, B] });
+  const supportB = agree(2, readingB, { id: "2:other", issueId: readingB.issueId, targets: [B] });
+  const graph = commitClaims(commitClaims(createReferenceGraph({ slots: SLOTS }), reading, readingB, detail), support, supportB);
+  const open = [{ issueId: detail.issueId, aspect: "part", proposition: detail.proposition, state: "unconfirmed" }];
+  const candidates = (source: typeof graph) => deriveSharedConstrualsFromGraph(source, SLOTS).sharedConstruals;
+  assert.deepEqual(candidates(graph).map(c => [c.figureIds, c.openDetails]), [[[A, B], open], [[B], open]]);
+  const withdraw = (targets: string[]) => {
+    const publicTurns = [{ turn: detail.sourceTurn, speaker: detail.speaker, text: detail.quote },
+      { turn: 3, speaker: "human" as const, text: "切込みについての説明は撤回します。" }];
+    const verified = verifyLocalUpdate({ graph, turn: 3, publicTurns, segments: [{
+      segmentId: "withdraw", targets, aspect: "part", proposition: "切込みの説明の撤回",
+      quote: publicTurns.at(-1)!.text, name: null, linkedIssueId: detail.issueId, respondsToTurn: 1,
+    }], verdicts: [{ segmentId: "withdraw", act: "withdraw", respondsToClaimId: detail.id, rawScore: null }] });
+    assert.deepEqual(verified.rejected, []);
+    assert.deepEqual(verified.operations[0].targets, targets);
+    return applyReferenceUpdate(graph, { expectedRevision: graph.revision, turn: 3, operations: verified.operations },
+      { generationSucceeded: true, publicTurns });
+  };
+  const partial = withdraw([B]);
+  assert.equal(deriveLocalIssues(partial).find(issue => issue.issueId === detail.issueId)?.state, "withdrawn");
+  assert.deepEqual(candidates(partial).map(c => [c.figureIds, c.openDetails]), [[[A, B], open], [[B], []]]);
+  assert.deepEqual(candidates(withdraw([A, B])).map(c => c.openDetails), [[], []]);
 });

@@ -17,7 +17,7 @@ const slots = ["own-0", "own-1", "own-2", "own-3", "own-4", "own-5"];
 const target = { kind: "single" as const, figureId: slots[0] };
 const readKey = async () => "sk-or-SYNTHETIC-p5-decision-000000";
 
-function fixture({ fill = false, longEvidence = false } = {}): JevDecisionInput {
+function fixture({ fill = false, longEvidence = false, fillLength = 600 } = {}): JevDecisionInput {
   const reading: LocalClaimView = {
     id: "1:reading", turn: 1, sourceTurn: 1, issueId: "1:reading", speaker: "human", source: "partner_statement",
     act: "construe", aspect: "construal", targets: [slots[0]], name: null, quote: "鳥に見えます", proposition: "鳥のような形",
@@ -36,7 +36,7 @@ function fixture({ fill = false, longEvidence = false } = {}): JevDecisionInput 
       { turn: 1, speaker: reading.speaker, text: format(reading.quote) },
       { turn: 2, speaker: support.speaker, text: format(support.quote) },
       ...Array.from({ length: turn - 3 }, (_, i) => ({ turn: i + 3, speaker: "ai" as const,
-        text: fill ? `公開発話 ${i + 3}` + "保".repeat(600) : "次に確認しましょう。" })),
+        text: fill ? `公開発話 ${i + 3}` + "保".repeat(fillLength) : "次に確認しましょう。" })),
       { turn, speaker: "human", text: "大まかにはそれで大丈夫です。" },
     ],
     observations: { observedAt: "2000-01-01T00:00:00Z", figures: slots.map(id => ({
@@ -48,7 +48,7 @@ function fixture({ fill = false, longEvidence = false } = {}): JevDecisionInput 
   };
 }
 
-function mockTransport() {
+function mockTransport({ chooseIssue = false } = {}) {
   const sent: JevDecisionPayload[] = [];
   let preferredAction = "accept";
   let failDetail = false;
@@ -57,7 +57,7 @@ function mockTransport() {
     sent.push(payload);
     if (failDetail && Object.hasOwn(payload.questions, "shared_construal")) return new Response("", { status: 502 });
     const preferences: Record<string, string> = { action: preferredAction, target: "figure_0", shared_construal: "use_0",
-      human_referent: "none", repair_issue: "none", prospect: "uncertain", basis: "none" };
+      human_referent: "none", repair_issue: chooseIssue ? "issue_0" : "none", prospect: "uncertain", basis: "none" };
     return Response.json({ model: JEV_DECISION_MODEL, id: "gen-synthetic", usage: { cost: 0 },
       answers: Object.fromEntries(Object.entries(payload.questions).map(([key, question]) => {
         const labels = Object.keys(question.criteria);
@@ -106,6 +106,33 @@ test("referent, prospect, action, target, detail and veto detail keep the same P
     assert.deepEqual(material.publicTurns.slice(0, 2), ["U1 h: 鳥に見えます", "U2 ai: こちらも鳥に見えます"]);
     if (first === undefined) first = material;
     else assert.deepEqual(material, first);
+  }
+});
+
+
+test("an actual repair prospect preserves the same compacted material at the 20,000-character boundary", async () => {
+  const input = fixture({ fill: true, fillLength: 263 });
+  const { client, sent } = mockTransport({ chooseIssue: true });
+  const referent = await client.estimateReferent(input);
+  assert.equal(referent.status, "ok");
+  input.humanReferent = { status: referent.status, scores: referent.scores };
+  input.repairProspect = await client.estimateRepairProspect(input);
+  assert.equal(input.repairProspect.status, "ok");
+  assert.deepEqual(input.repairProspect.issue, { choice: "issue", turn: 2, issueId: "2:detail" });
+  const decision = await client.decide(input, v3);
+  assert.deepEqual(decision.sharedClaimIds, input.sharedConstruals![0].claimIds);
+  assert.equal(sent.length, 5);
+  const [referentState, prospectState, actionState] = sent.map(payload => JSON.parse(payload.state));
+  assert.equal(referentState.humanReferent, undefined);
+  assert.deepEqual(prospectState.humanReferent, input.humanReferent);
+  assert.deepEqual(actionState.repairProspect, input.repairProspect);
+  assert.ok(actionState.inputBudget.omitted.publicTurns > 0, "fixture reaches the compaction boundary");
+  for (const [i, payload] of sent.entries()) {
+    const { selected, humanReferent, repairProspect, ...material } = JSON.parse(payload.state);
+    const { humanReferent: referenceEstimate, ...common } = prospectState;
+    assert.ok(payload.state.length <= 20000);
+    assert.deepEqual(material, common, "common material at send " + i);
+    assert.deepEqual(material.claims.map((claim: string[]) => claim[0]), ["1:reading", "2:support"]);
   }
 });
 

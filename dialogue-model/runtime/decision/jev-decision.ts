@@ -470,7 +470,11 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
   const answerRows = new Map<string, { sourceTurn: number | null; act: string; proposition: string; targets: readonly string[] }>(
     [...answerSource.values()].flat().filter(c => !withdrawn.has(c.id)).map(c => [c.id, { sourceTurn: claimSource.get(c.id) ?? null, act: c.act, proposition: c.proposition, targets: c.targets }]));
   const render = (m: unknown) => JSON.stringify(v5 ? encodeMaterialV5(m, { actions: ledgerActions!, answers, ...(resolveAnswers ? { answerRows } : {}), rotationMode: input.rotationMode ?? "relative_pm90", ...(input.notationV6 ? { notationV6: true } : {}), ...(input.notationV11 ? { notationV11: true } : {}), ...(nameLedger ? { nameLedger } : {}) }) : m);
+  // P5 reserves the closed answer shapes before the first estimation request.
+  // Appending the real answers must leave the retained public material identical.
+  const laterAnswers = p5Enabled ? p5AnswerBudget(slots, input.repairHistory, input.turn) : undefined;
   const over = () => {
+    if (laterAnswers) return render({ ...material, selected: undefined, ...laterAnswers }).length + reserve > 20000;
     state = render(material);
     return (v3 && selection ? render({ ...material, selected: undefined }).length : state.length) + reserve > 20000;
   };
@@ -531,6 +535,7 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
   if (over() && material.issueSummary.length > 2000) { omitted.issueSummaryChars = material.issueSummary.length - 2000; material.issueSummary = material.issueSummary.slice(0, 2000); }
   while (over() && dropClaim()) { /* all that is left */ }
   if (over()) fail("invalid_input"); // Never truncate the indispensable public source utterances.
+  if (p5Enabled) state = render(material);
   const budget: DecisionInputBudget = { maxChars: 20000, stateChars: state.length, omitted: structuredClone(omitted) };
   // Public agree evidence whose source turn did not survive compaction can no longer be shown as evidence (two_stage_v3).
   const liveTurns = new Set(publicTurns.map(t => t.turn));
@@ -628,6 +633,23 @@ export function buildHumanReferentPayload(input: JevDecisionInput): JevDecisionP
 function prospectIssues(history: readonly RepairHistoryEntry[], turn: number) {
   return history.filter(r => r.turn < turn).slice().sort((a, b) => a.turn - b.turn).slice(-8);
 }
+const prospectIssueLabels = (issues: readonly RepairHistoryEntry[]) => [...issues.map((_, i) => `issue_${i}`), "none", "unknown"];
+function p5AnswerBudget(slots: readonly string[], history: readonly RepairHistoryEntry[], turn: number) {
+  const issues = prospectIssues(history, turn);
+  // [0, 1] binary64 values can need 17 significant digits. At the JSON
+  // fixed-decimal boundary (1e-6) this yields up to 24 characters.
+  const scores = (labels: readonly string[]) => Object.fromEntries(labels.map(label => [label, 0.0000010000000000000002]));
+  const longest = <T>(choices: readonly T[]) => choices.reduce((a, b) => JSON.stringify(a).length >= JSON.stringify(b).length ? a : b);
+  const issue = longest<NonNullable<RepairProspectMaterial["issue"]>>([
+    { choice: "unknown" },
+    ...issues.map(({ turn, issueId }) => ({ choice: "issue" as const, turn, issueId })),
+  ]);
+  return {
+    humanReferent: { status: "ok", scores: scores(referentLabels(slots)) } satisfies HumanReferentMaterial,
+    repairProspect: { status: "ok", issue, prospect: longest(REPAIR_PROSPECTS), basis: longest(REPAIR_PROSPECT_BASES),
+      scores: { repair_issue: scores(prospectIssueLabels(issues)), prospect: scores(REPAIR_PROSPECTS), basis: scores(REPAIR_PROSPECT_BASES) } },
+  };
+}
 export const unknownRepairProspect = (): RepairProspectMaterial => ({ status: "unknown", issue: null, prospect: null, basis: null, scores: null });
 /** Strict private material boundary, also used for saved turns without a request catalog. */
 export function validateRepairProspectMaterial(value: unknown, history: readonly RepairHistoryEntry[], turn: number): RepairProspectMaterial {
@@ -636,7 +658,7 @@ export function validateRepairProspectMaterial(value: unknown, history: readonly
     if ([value.issue, value.prospect, value.basis, value.scores].some(v => v !== null)) fail("invalid_response");
     return unknownRepairProspect();
   }
-  const issues = prospectIssues(history, turn), labels = [...issues.map((_, i) => `issue_${i}`), "none", "unknown"];
+  const issues = prospectIssues(history, turn), labels = prospectIssueLabels(issues);
   if (value.status !== "ok" || !includes(REPAIR_PROSPECTS, value.prospect) || !includes(REPAIR_PROSPECT_BASES, value.basis) ||
       !exact(value.scores, ["repair_issue", "prospect", "basis"]) || !exact(value.scores.repair_issue, labels) ||
       !exact(value.scores.prospect, [...REPAIR_PROSPECTS]) || !exact(value.scores.basis, [...REPAIR_PROSPECT_BASES]) ||

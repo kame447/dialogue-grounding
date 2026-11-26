@@ -1,6 +1,6 @@
 import type { SharedConstrual } from "../decision/contract.ts";
 import type { LocalClaimView, LocalIssueView } from "./contract.ts";
-import { deriveLocalIssues } from "./derive.ts";
+import { deriveLocalIssues, localIssueState } from "./derive.ts";
 import type { LocalGraph } from "./verify.ts";
 
 const WITHDRAWING = ["deny", "name_reject", "withdraw"];
@@ -100,7 +100,23 @@ export function deriveSharedConstrualsFromGraph(graph: LocalGraph, ownSlots: rea
     if (claim.targets.length && !targets.length) return [];
     return [{ ...claim, targets }];
   });
-  const sharedConstruals = deriveSharedConstruals(scoped, issues, ownSlots);
+  const withdrawnIssues = new Set(claims.filter(claim => claim.act === "withdraw" && DETAIL_ASPECTS.includes(claim.aspect))
+    .map(claim => claim.issueId));
+  const liveDetails = new Map<string, LocalClaimView[]>();
+  for (const claim of scoped) {
+    if (claim.act === "withdraw" || !withdrawnIssues.has(claim.issueId)) continue;
+    const group = liveDetails.get(claim.issueId) ?? [];
+    group.push(claim);
+    liveDetails.set(claim.issueId, group);
+  }
+  const scopedIssues = issues.map(issue => {
+    if (!withdrawnIssues.has(issue.issueId)) return issue;
+    // The legacy issue view treats any withdrawal as applying to the entire
+    // claim. For P5, scope and status come from the claims still live per figure.
+    const live = liveDetails.get(issue.issueId) ?? [];
+    return { ...issue, state: localIssueState(live, true), targets: ownSlots.filter(id => live.some(claim => claim.targets.includes(id))) };
+  });
+  const sharedConstruals = deriveSharedConstruals(scoped, scopedIssues, ownSlots);
   const references = new Set(sharedConstruals.flatMap(candidate => candidate.claimIds));
   return { sharedConstruals, proofClaims: scoped.filter(claim => references.has(claim.id)) };
 }
