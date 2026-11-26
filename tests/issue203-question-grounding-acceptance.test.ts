@@ -96,8 +96,11 @@ function verifiedTrial(records: Awaited<ReturnType<typeof buildRecords>>) {
   return trial;
 }
 
+type MenuPayload = { questions?: Record<string, { criteria?: Record<string, string> } | undefined> };
+
 function menu(side: InterventionReplaySide, key: 'action' | 'feature'): Record<string, string> {
-  const offered = side.requests.find(request => request.payload?.questions?.[key])?.payload.questions[key].criteria;
+  const payloads = side.requests.map(request => request.payload as MenuPayload | undefined);
+  const offered = payloads.find(payload => payload?.questions?.[key])?.questions?.[key]?.criteria;
   assert.ok(offered, 'the real Jev request must contain the ' + key + ' menu');
   return offered;
 }
