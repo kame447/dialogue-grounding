@@ -155,12 +155,13 @@ function session(strategy: Strategy, observation: Memo = memo, trialProfile = pr
           if (key === 'name' || key === 'feature') {
             choice = Object.keys(criteria).find(label => JSON.parse(criteria[label]).value === turn[key]) ?? Object.keys(criteria)[0];
           }
-          const segmentQuestion = /^segment_(\d+)_(act|antecedent|support)$/u.exec(key);
+          const segmentQuestion = /^segment_(\d+)_(act|antecedent|support|answer)$/u.exec(key);
           if (segmentQuestion) {
             const segment = (state.aiSeq !== undefined || segmentQuestion[2] === 'support' ? turn.publicClaims : turn.local)?.[Number(segmentQuestion[1])];
             assert.ok(segment, 'script missing a local claim');
             if (segmentQuestion[2] === 'act') choice = segment.act;
             if (segmentQuestion[2] === 'support') choice = 'expressed';
+            if (segmentQuestion[2] === 'answer') choice = 'unknown';
             if (segmentQuestion[2] === 'antecedent') {
               const antecedent = segment.antecedent;
               choice = 'none';
