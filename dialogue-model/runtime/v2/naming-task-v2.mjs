@@ -218,6 +218,7 @@ export async function createNamingTaskV2({
       interventionPolicy: jev.profile.interventionPolicy, decisionTimeoutMs: jev.profile.timeouts.decisionMs,
       ...(jev.profile.questionLayout !== "two_stage_v1" ? { questionLayout: jev.profile.questionLayout } : {}),
       ...(jev.profile.dialoguePolicy ? { dialoguePolicy: jev.profile.dialoguePolicy } : {}),
+      ...(jev.participantPrompts ? { participantPrompts: true } : {}),
       generationRetryVersion: jev.generationRetryVersion,
       newTrialAgreeNameScopeVersion: jev.newTrialAgreeNameScopeVersion,
       onJevTurnTrace: (record) => {

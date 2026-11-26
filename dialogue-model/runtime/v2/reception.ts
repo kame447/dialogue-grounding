@@ -292,7 +292,7 @@ function displayed(value: unknown): DisplayedProtocol {
  * v1 (pure, legacy) freezes a v1 plan exactly as before. v2 requires the displayed
  * version and compares it with the same protocol snapshot the plan is copied from.
  */
-export async function approveReception(value: unknown, options: Omit<ParticipantPlanSettings, 'participantDialogueProfile'> & {
+export async function approveReception(value: unknown, options: ParticipantPlanSettings & {
   expectedRevision: number; order: number; protocol: unknown; expected?: unknown; approvedAt: string; randomSeed: () => number;
 }): Promise<Reception> {
   const r = validateReception(value);
@@ -301,6 +301,7 @@ export async function approveReception(value: unknown, options: Omit<Participant
     ...(options.participantModelPin !== undefined ? { participantModelPin: options.participantModelPin } : {}),
     ...(options.participantLimits !== undefined ? { participantLimits: options.participantLimits } : {}),
     ...(options.participantRuntimeProfile !== undefined ? { participantRuntimeProfile: options.participantRuntimeProfile } : {}),
+    ...(options.participantDialogueProfile !== undefined ? { participantDialogueProfile: options.participantDialogueProfile } : {}),
     ...(options.initialObservationGeneration !== undefined ? { initialObservationGeneration: options.initialObservationGeneration } : {}),
   };
   if (options.protocol && typeof options.protocol === 'object' && (options.protocol as { schemaVersion?: unknown }).schemaVersion === 'reception_protocol_v3') {
