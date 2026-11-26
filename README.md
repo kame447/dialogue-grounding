@@ -2,6 +2,8 @@
 
 現在の研究目的・実験計画・評価方針・未決定事項は、[現行の研究・実験計画（SSOT）](dialogue-model/README.md)に集約しています。研究計画を知りたい場合は、この1ファイルだけを参照してください。
 
+実装の優先度、進捗の確認、担当やブランチの整理については、[開発・運用記録と作業資産の整理](docs/development-operations.md)を参照してください。
+
 ## タングラム共同命名 v2 公開デモ
 
 現在の操作確認ページは [タングラム共同命名 v2](https://tangram-grounding-experiment.kame-website.workers.dev/) です（認証不要）。Cloudflare上のTypeScriptエントリポイント、デプロイ手順と制約は [公開版README](workers/tangram-experiment/README.md) を参照してください。
