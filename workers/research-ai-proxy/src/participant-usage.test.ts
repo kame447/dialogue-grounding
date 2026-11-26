@@ -83,3 +83,24 @@ test('output-limit metadata reaches only the pinned private caller and never the
       [{ model: pin.lunaModelId, costUsd: 0.037, inputTokens: 70, outputTokens: null }] : []);
   }
 });
+
+// #206 item 3: the chat upstream (api.openai.com, UPSTREAM_PROVIDER openai) reports token counts and no cost; only a numeric `usage.cost` from the upstream is forwarded.
+// A missing cost therefore stays missing (null), never zero and never computed: the proxy holds no price table.
+test('usage-only chat: an upstream that reports no cost yields cost null with the tokens kept; a reported cost is forwarded unchanged', async () => {
+  const call = async (usage: unknown, purpose: 'dialogue_turn' | 'visual_observation', model: string) => {
+    const request = new Request('https://proxy.invalid/v1/chat/completions', { method: 'POST',
+      headers: { Authorization: 'Bearer ' + env.RESEARCH_PROXY_TOKEN, 'Content-Type': 'application/json' },
+      body: JSON.stringify(purpose === 'dialogue_turn' ? { purpose, messages: [{ role: 'user', content: 'synthetic' }] }
+        : { purpose, messages: [{ role: 'user', content: 'synthetic' }] }) });
+    const response = await handleRequest(request, env, async () => Response.json({ model, choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }], usage }), model, true);
+    assert.equal(response.status, 200);
+    return (await response.json() as { usage: Record<string, unknown> }).usage;
+  };
+  for (const [purpose, model] of [['dialogue_turn', pin.lunaModelId], ['visual_observation', pin.terraModelId]] as const) {
+    assert.deepEqual(await call({ prompt_tokens: 120, completion_tokens: 30, total_tokens: 150 }, purpose, model), { prompt_tokens: 120, completion_tokens: 30, cost: null }, purpose + ': no upstream cost');
+    assert.deepEqual(await call({ prompt_tokens: 120, completion_tokens: 30, cost: 0.0125 }, purpose, model), { prompt_tokens: 120, completion_tokens: 30, cost: 0.0125 }, purpose + ': a reported cost is kept');
+    for (const bad of [-1, '0.1', null, Number.NaN]) {
+      assert.equal((await call({ prompt_tokens: 1, completion_tokens: 1, cost: bad }, purpose, model)).cost, null, purpose + ': an unusable cost is missing, not zero');
+    }
+  }
+});

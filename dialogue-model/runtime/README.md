@@ -27,6 +27,8 @@
 
 操作確認用の最新ページは <https://tangram-grounding-experiment.kame-website.workers.dev/> （認証不要）です。公開サーバーはTypeScript Worker + Durable Objectで、内部サービスバインディングを通して既存の研究AI Workerを利用します。ローカル版 `http://127.0.0.1:8787` はMac上でのみ利用できます。公開版の手順は [workers/tangram-experiment/README.md](../../workers/tangram-experiment/README.md) を参照してください。
 
+**会話画面の処理中と停滞の表示。** AIの返答を待つ間、サーバーから処理中（`busy: true`）の応答が届くたびに画面は待機表示を維持します。この間は60秒を超えても停滞の案内を表示せず、読み上げ領域は「AIが返答を作成しています」を維持します。返答を待っている状態で進行を60秒間確認できない場合は、「進行を確認できません。実験担当者にお知らせください。」と「状態を確認」を表示します。サーバーが処理の失敗を返した場合は、その時点で復旧操作を表示します。画面の待機時間で試行を終了したり、発話を自動で再送したりすることはありません。
+
 ## 推奨: Cloudflare Worker経由
 
 上流のAIサービスのAPIキーは研究用のCloudflare Workerだけに保存します。クライアントの .env にはWorker接続用トークンだけを持たせます。研究用CLIで `dialogue_turn` を送る経路では、モデルIDをCloudflare側の `DIALOGUE_MODEL` が決定します。最初に ../../workers/research-ai-proxy/README.md の接続・設定手順を参照してください。
