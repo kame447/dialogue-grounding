@@ -2,7 +2,7 @@ import type { ParticipantUsageOnly } from '../web/participant-usage-policy.ts';
 // Explicit technical R policy. The original remains Jev's decision; no semantic oracle.
 import {JEV_ACTIONS,PARTICIPANT_TARGET_MENU_VERSION} from './contract.ts';
 import type {JevAction,JevDecision,JevDecisionInput,JevTarget,JevExecutedDecision,JevDetailResult,JevDecisionStageEvidence,PublicNameCandidate,JevQuestionLayout} from './contract.ts';
-import {buildJevDecisionPayload,buildJevDecisionDetailPayload,validateJevDecision,parseJevExecutedDetail,JevDecisionError,JEV_DECISION_INPUT_LIMITS,v3AlwaysOffered,participantJevTargetOffered,retainedParticipantJevMenuValid} from './jev-decision.ts';
+import {buildJevDecisionPayload,buildJevDecisionDetailPayload,validateJevDecision,parseJevExecutedDetail,JevDecisionError,JEV_DECISION_INPUT_LIMITS,v3AlwaysOffered,participantJevTargetOffered,retainedParticipantJevMenuValid,jevSharedConstrualOffered} from './jev-decision.ts';
 
 export const BYPASS_ACCEPTANCE_V1_CANONICAL_JSON = '{"policies":{"bypass-enabled":{"policy":"bypass_acceptance_v1:accept","vetoActions":[]},"repair-first":{"policy":"bypass_acceptance_v1:veto","vetoActions":["defer","move_on"]}},"version":"bypass_acceptance_v1"}';
 export const BYPASS_ACCEPTANCE_V1_TABLE_SHA256 = '376d569120ca36a3eceaf5ab95410f7eb83f25fbb681e7566a684b97c35165c8';
@@ -68,7 +68,9 @@ function config(v:unknown):InterventionConfig {return boundary(v,'invalid_interv
  const expected=value.policy==='bypass_acceptance_v1:accept'?interventionForStrategy('bypass-enabled'):value.policy==='bypass_acceptance_v1:veto'?interventionForStrategy('repair-first'):null;
  if(!expected||!equal(value,expected))fail('invalid_intervention');return expected;
 });}
-function project(d:JevDecision):ExecutedDecision {return {action:d.action as ExecutedDecision['action'],target:structuredClone(d.target),name:d.name,feature:d.feature,observe:null,...(Object.hasOwn(d,'detailFigureIds')?{detailFigureIds:[...d.detailFigureIds!]}:{})};}
+function project(d:JevDecision):ExecutedDecision {return {action:d.action as ExecutedDecision['action'],target:structuredClone(d.target),name:d.name,feature:d.feature,observe:null,
+ ...(Object.hasOwn(d,'detailFigureIds')?{detailFigureIds:[...d.detailFigureIds!]}:{}),
+ ...(d.sharedClaimIds?{sharedClaimIds:[...d.sharedClaimIds]}:{})};}
 function checkRepairProspect(value:unknown):void {
  if(!exact(value,['status','issue','prospect','basis','scores']))fail('invalid_input');
  if(value.status==='unknown'){
@@ -87,10 +89,11 @@ function checkRepairProspect(value:unknown):void {
 }
 function prepare(input:unknown,original:unknown,intervention:unknown,questionLayout:JevQuestionLayout='two_stage_v1',usagePolicy?:ParticipantUsageOnly){
  const policy=config(intervention);
- const i=boundary(input,'invalid_input',value=>{const optional=['reobservationAllowed','humanReferent','repairProspect','agreeNames','repairFacts','participantLedger','nameLedger','nameSource','namingRequest','namingRequestStrict','judgmentLedger','rotationMode','notationV6','notationV11'].filter(k=>!!value&&typeof value==='object'&&Object.hasOwn(value,k));
+ const i=boundary(input,'invalid_input',value=>{const optional=['reobservationAllowed','humanReferent','repairProspect','agreeNames','repairFacts','participantLedger','nameLedger','nameSource','namingRequest','namingRequestStrict','judgmentLedger','rotationMode','notationV6','notationV11','p5Enabled','sharedConstruals'].filter(k=>!!value&&typeof value==='object'&&Object.hasOwn(value,k));
   if(!exact(value,['turn','publicTurns','ownSlots','observations','issueSummary','priorClaims','repairHistory','previousAction','publicNames',...optional]))fail('invalid_input');
   if(Object.hasOwn(value,'repairProspect'))checkRepairProspect(value.repairProspect);
-  buildJevDecisionPayload(value as JevDecisionInput);return structuredClone(value) as BypassAcceptanceInput;});
+  buildJevDecisionPayload(value as JevDecisionInput,value.p5Enabled===true?{questionLayout}:undefined);
+  return structuredClone(value) as BypassAcceptanceInput;});
  const d=boundary(original,'invalid_original',value=>{const valid=validateJevDecision(value,i,{questionLayout,usagePolicy});if(valid.action==='request_observation')fail('invalid_original');return valid;});
  return {input:i,decision:d,config:policy,original:project(d),layout:questionLayout};
 }
@@ -236,7 +239,8 @@ export async function applyBypassAcceptance(input:unknown,original:unknown,inter
  const p=plan(ctx,rerankOption(options));
  if(p.disposition==='adopted')return freeze({executed:p.original,intervention:trace(p)});
  const selected=p.rerank!.selected!;
- if(!['propose_name','agree','confirm','repair'].includes(selected.action)){
+ if(!['propose_name','agree','confirm','repair'].includes(selected.action)&&
+  !(selected.action==='accept'&&jevSharedConstrualOffered(ctx.input,selected,{questionLayout:ctx.layout}))){
   const executed:ExecutedDecision={...selected,name:null,feature:null,observe:null,detailFigureIds:[]};
   return freeze({executed,intervention:trace(p,executed)});
  }

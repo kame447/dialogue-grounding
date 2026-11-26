@@ -4,7 +4,7 @@ import type { ResearchLimits } from '../v2/research-timeouts.ts';
 import { buildJevDecisionPayload, JevDecisionError, validateJevDecision } from "./jev-decision.ts";
 import type { JevDecision, JevDecisionClient, JevDecisionInput } from "./contract.ts";
 
-type Core = Pick<JevDecision, "action" | "target" | "name" | "feature" | "observe" | "detailFigureIds">;
+type Core = Pick<JevDecision, "action" | "target" | "name" | "feature" | "observe" | "detailFigureIds" | "sharedClaimIds">;
 type Callback = (input: JevDecisionInput, options: { signal: AbortSignal; timeoutMs: number; callIndex: number }) => Core | Promise<Core>;
 export function createMockJevDecisionClient(fn: Callback, { delayMs = 0, timeoutMs = 15000, researchLimits }: { delayMs?: number; timeoutMs?: number; researchLimits?: ResearchLimits } = {}): JevDecisionClient & {
   readonly metadata: Readonly<{ decisionKind: "mock"; calibrated: false }>; readonly callCount: number;
@@ -24,7 +24,8 @@ export function createMockJevDecisionClient(fn: Callback, { delayMs = 0, timeout
       if (!deadlineValue(raw, limit)) throw new JevDecisionError("invalid_options");
       const deadline = researchLimits === undefined ? raw : Math.min(timeoutMs, raw);
       if (!Number.isSafeInteger(deadline) || deadline < 1 || deadline > limit) throw new JevDecisionError("invalid_options");
-      buildJevDecisionPayload(input);
+      const validation = input?.p5Enabled === true ? { questionLayout: "two_stage_v3" as const } : undefined;
+      buildJevDecisionPayload(input, validation);
       const snapshot = structuredClone(input);
       const controller = new AbortController();
       let timer: ReturnType<typeof setTimeout> | undefined, delay: ReturnType<typeof setTimeout> | undefined;
@@ -42,8 +43,9 @@ export function createMockJevDecisionClient(fn: Callback, { delayMs = 0, timeout
           if (controller.signal.aborted) throw new JevDecisionError(options.signal?.aborted ? "aborted" : "timeout");
           return validateJevDecision({ action: result.action, target: result.target, name: result.name, feature: result.feature, observe: result.observe,
             ...(result.detailFigureIds === undefined ? {} : { detailFigureIds: result.detailFigureIds }),
+            ...(result.sharedClaimIds === undefined ? {} : { sharedClaimIds: result.sharedClaimIds }),
             decisionKind: "mock", calibrated: false, evidence: { model: null, responseId: null, choices: {}, scores: {},
-              latencyMs: Math.max(0, Math.round(performance.now() - started)), costUsd: 0 } }, snapshot);
+              latencyMs: Math.max(0, Math.round(performance.now() - started)), costUsd: 0 } }, snapshot, validation);
         };
         return await Promise.race([run(), cancelled]);
       } catch (error) {

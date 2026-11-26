@@ -110,6 +110,8 @@ export type JevDecisionInput = {
   notationV6?: true;
   /** jev_generation_retry_v11 only: the legend also describes the `answerClaims` rows (an answer the graph no longer carries has a null source turn). */
   notationV11?: true;
+  /** Private material mode from the trial's generation version. */
+  p5Enabled?: true;
   sharedConstruals?: SharedConstrual[];
 };
 export type DecisionInputBudget = {

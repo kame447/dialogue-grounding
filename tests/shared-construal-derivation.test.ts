@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { LocalClaimView, LocalIssueView } from "../dialogue-model/runtime/local-grounding/contract.ts";
 import { deriveLocalIssues, priorClaimViews } from "../dialogue-model/runtime/local-grounding/derive.ts";
-import { deriveSharedConstruals } from "../dialogue-model/runtime/local-grounding/shared-construal.ts";
+import { deriveSharedConstruals, deriveSharedConstrualsFromGraph } from "../dialogue-model/runtime/local-grounding/shared-construal.ts";
 import { applyReferenceUpdate, createReferenceGraph } from "../dialogue-model/runtime/memory/reference-graph.mjs";
 import {
   allowsOrientationFallback, defaultGenerationRetryVersion, hasVersionedViewpoint, isGenerationV5,
@@ -31,6 +31,14 @@ function agree(turn: number, reading: LocalClaimView, fields: Partial<LocalClaim
 
 const derive = (claims: LocalClaimView[], issues: LocalIssueView[] = []) =>
   deriveSharedConstruals(claims, issues, SLOTS);
+
+function commitClaims(graph: ReturnType<typeof createReferenceGraph>, ...claims: LocalClaimView[]) {
+  const { turn, speaker } = claims[0];
+  const operations = claims.map(({ turn: _turn, ...fields }) => ({ kind: "claim", ...fields }));
+  return applyReferenceUpdate(graph, { expectedRevision: graph.revision, turn, operations }, {
+    generationSucceeded: true, publicTurns: [{ turn, speaker, text: claims.map(c => c.quote).join("") }],
+  });
+}
 
 test("04b-1: either speaker can state the reading and receive the other's support", () => {
   const readings = [claim(1), claim(1, { speaker: "human", act: "assert" })];
@@ -138,29 +146,41 @@ test("a verified denial of B's support leaves the original reading and support f
   const reading = claim(1, { speaker: "human", targets: [A, B], proposition: "鳥のように見える", quote: "どちらも鳥みたいです。" });
   const supportA = agree(2, reading, { targets: [A], quote: "A は鳥に見えます。" });
   const supportB = agree(2, reading, { id: "2:other", targets: [B], quote: "B も鳥に見えます。" });
-  function commit(graph: ReturnType<typeof createReferenceGraph>, ...claims: LocalClaimView[]) {
-    const { turn, speaker } = claims[0];
-    const operations = claims.map(({ turn: _turn, ...fields }) => ({ kind: "claim", ...fields }));
-    return applyReferenceUpdate(graph, { expectedRevision: graph.revision, turn, operations }, {
-      generationSucceeded: true, publicTurns: [{ turn, speaker, text: claims.map(c => c.quote).join("") }],
-    });
-  }
-  const graph = commit(commit(createReferenceGraph({ slots: SLOTS }), reading), supportA, supportB);
+  const graph = commitClaims(commitClaims(createReferenceGraph({ slots: SLOTS }), reading), supportA, supportB);
   const candidates = (source: typeof graph) => deriveSharedConstruals(priorClaimViews(source), deriveLocalIssues(source), SLOTS);
   const [before] = candidates(graph);
   assert.deepEqual(before.figureIds, [A, B]);
   assert.deepEqual(before.claimIds, [reading.id, supportA.id, supportB.id]);
 
   const denyB = claim(3, { speaker: "human", act: "deny", targets: [B], respondsTo: supportB.id, quote: "B は鳥ではなさそうです。" });
-  assert.deepEqual(candidates(commit(graph, denyB)), [{
+  assert.deepEqual(candidates(commitClaims(graph, denyB)), [{
     ...before, figureIds: [A], claimIds: [reading.id, supportA.id],
   }]);
   const withdrawB = claim(3, { act: "withdraw", targets: [B], respondsTo: supportB.id, quote: "B を鳥とした見立ては撤回します。" });
-  assert.deepEqual(candidates(commit(graph, withdrawB)), [{
+  assert.deepEqual(candidates(commitClaims(graph, withdrawB)), [{
     ...before, figureIds: [A], claimIds: [reading.id, supportA.id],
   }]);
   const withdrawReading = claim(3, { speaker: "human", act: "withdraw", targets: [A, B], respondsTo: reading.id, quote: "鳥という見立ては撤回します。" });
-  assert.deepEqual(candidates(commit(graph, withdrawReading)), []);
+  assert.deepEqual(candidates(commitClaims(graph, withdrawReading)), []);
+});
+
+test("partial withdrawal of a multi-figure support or reading keeps the same evidence for the other figure", () => {
+  const reading = claim(1, { targets: [A, B] });
+  const support = agree(2, reading, { targets: [A, B] });
+  const graph = commitClaims(commitClaims(createReferenceGraph({ slots: SLOTS }), reading), support);
+  const [original] = derive(priorClaimViews(graph));
+  assert.deepEqual(original.figureIds, [A, B]);
+  for (const antecedent of [support, reading]) {
+    const withdraw = claim(3, { act: "withdraw", targets: [B], respondsTo: antecedent.id, speaker: antecedent.speaker });
+    const partial = commitClaims(graph, withdraw);
+    const { sharedConstruals, proofClaims } = deriveSharedConstrualsFromGraph(partial, SLOTS);
+    assert.deepEqual(sharedConstruals, [{ ...original, figureIds: [A] }]);
+    assert.deepEqual(proofClaims.map(claim => claim.id), original.claimIds);
+    assert.deepEqual(proofClaims.find(claim => claim.id === antecedent.id)?.targets, [A]);
+    assert.ok(!priorClaimViews(partial).some(claim => claim.id === antecedent.id));
+    const whole = commitClaims(graph, { ...withdraw, targets: [A, B] });
+    assert.deepEqual(deriveSharedConstrualsFromGraph(whole, SLOTS), { sharedConstruals: [], proofClaims: [] });
+  }
 });
 
 test("a denial directed at the original reading applies to the figures it covers", () => {

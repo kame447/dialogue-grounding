@@ -1563,6 +1563,24 @@ const HISTORICAL_MAIN_PROMPT_SOURCES = [
   'decision/jev-decision.ts': 'f6d5dc0df57928298b6e35d47e8e4709b317597347992b7c8809d7e4867ebd99',
  }},
 ];
+const PR213_MAIN_0673602_SOURCES = { scheme: 'complete_instruction_source_sha256', files: {
+  'v2/dialogue-v2.mjs': 'fd6d39d2df423ea6c081cb24c388e3b501050fa3a9ab3b667fc615a681909ce9',
+  'v2/jev-turn.ts': '3b2fa8480466d569caa92a703ef9671486a0d8bea61c31df20ba8bcfed4cab1c',
+  'v2/generation-guard.ts': '2fe3427e492abe2b2246236ed2bb095f3c9046578f43ae4a39e0440b36d27f10',
+  'judgment/instructions.mjs': '9d686330aa34a516a1e2d95df94d0b030e7308a6463757861b9c94e561e5197a',
+  'observation/observe.ts': '469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad',
+  'local-grounding/extract.ts': '1ba522173730b170b7d61784d99c234a051f2cc49b09fe50b3f7e5181e5527d3',
+  'local-grounding/jev-local-test.ts': '64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01',
+  'decision/jev-decision.ts': '051ca0ac7b1d3091d0bc3b9fa91148a82467d4445be2180217285ecfed82d23d',
+  'local-grounding/extract-ai.ts': 'e489b7ff573fdbe9e4f0adc9b6ee5f0828bd3c6835dcd8cd6555e191161594a6',
+  'local-grounding/jev-ai-public.ts': '6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7'
+} };
+const PR213_P5_U1_SOURCES = { ...PR213_MAIN_0673602_SOURCES, files: { ...PR213_MAIN_0673602_SOURCES.files,
+ 'v2/generation-guard.ts': '2161ddaee73b7fba42c6bd0624c7dcd410540f00fa1ac026344cdd8d30d9d34a',
+}};
+const PR213_P5_U2_SOURCES = { ...PR213_P5_U1_SOURCES, files: { ...PR213_P5_U1_SOURCES.files,
+ 'decision/jev-decision.ts': '808590f0d58aa4b8a445c2d9a58049927c65dd22f77336f5667f3a591b77560a',
+}};
 // A record's run.promptSources (the producer's whole-file digests of the instruction sources) selects exactly one
 // version, and the replay text must be that version's text. Unregistered sources, or sources and text from
 // different versions, never pass. A later source change needs its own entry here.
@@ -1576,7 +1594,10 @@ const PROMPT_VERSIONS:readonly PromptVersion[]=[
  // #172 text merged with main bcb8211 (eaa8e9c):
  {id:'i172_eaa8e9c',i172:true,styleMode:'legacy',sources:{scheme:'complete_instruction_source_sha256',files:{'v2/dialogue-v2.mjs':'51aa2db12f9b8ebe14c7d3271a44adff7a6dcee8d601b9b4ab8c353ee1dc5769','v2/jev-turn.ts':'77619037549ac800b750b4d3ffe6fd0c342ddc1af5508050132ac19b5ffb0dd8','v2/generation-guard.ts':'f1641117798e1538a6db4ebb97e8ac33a2da14e926c405f4a7c7f6c8b751ad46','judgment/instructions.mjs':'9d686330aa34a516a1e2d95df94d0b030e7308a6463757861b9c94e561e5197a','observation/observe.ts':'469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad','local-grounding/extract.ts':'df3926ea3cbf74bcf6bf934534fe88080280c9c8c3162fa34cc33dd00545e9ce','local-grounding/jev-local-test.ts':'95e1509bd5a4dbc6f1687605d24b6848c311cb631db480adce5bc5eeed052492','decision/jev-decision.ts':'210455c2519e4148c4b72eee83790c45508cb0a7832bffdee611f6ab8f6bbf18','local-grounding/extract-ai.ts':'61c88803ddd0dd8690dadbd707afdb1111e894fb8dcc396562cd6eb85217ebd5','local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7'}},fixed:FIXED_I172,native:NATIVE_I172},
  // PR #213 (671acdb) merged with main (0673602): #172 + prompt-style-20261124 + holistic_v5 + v12.
- {id:'pr213_main_0673602',i172:true,styleMode:'merged',sources:{scheme:'complete_instruction_source_sha256',files:{'v2/dialogue-v2.mjs':'fd6d39d2df423ea6c081cb24c388e3b501050fa3a9ab3b667fc615a681909ce9','v2/jev-turn.ts':'3b2fa8480466d569caa92a703ef9671486a0d8bea61c31df20ba8bcfed4cab1c','v2/generation-guard.ts':'2fe3427e492abe2b2246236ed2bb095f3c9046578f43ae4a39e0440b36d27f10','judgment/instructions.mjs':'9d686330aa34a516a1e2d95df94d0b030e7308a6463757861b9c94e561e5197a','observation/observe.ts':'469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad','local-grounding/extract.ts':'1ba522173730b170b7d61784d99c234a051f2cc49b09fe50b3f7e5181e5527d3','local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01','decision/jev-decision.ts':'051ca0ac7b1d3091d0bc3b9fa91148a82467d4445be2180217285ecfed82d23d','local-grounding/extract-ai.ts':'e489b7ff573fdbe9e4f0adc9b6ee5f0828bd3c6835dcd8cd6555e191161594a6','local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7'}},fixed:FIXED_STYLE_I172,native:NATIVE_I172},
+ {id:'pr213_main_0673602',i172:true,styleMode:'merged',sources:PR213_MAIN_0673602_SOURCES,fixed:FIXED_STYLE_I172,native:NATIVE_I172},
+ // The P5 opt-in preserves the merged instructions for earlier generations.
+ {id:'pr213_main_p5_u1',i172:true,styleMode:'merged',sources:PR213_P5_U1_SOURCES,fixed:FIXED_STYLE_I172,native:NATIVE_I172},
+ {id:'pr213_main_p5_u2',i172:true,styleMode:'merged',sources:PR213_P5_U2_SOURCES,fixed:FIXED_STYLE_I172,native:NATIVE_I172},
  ...HISTORICAL_MAIN_PROMPT_SOURCES.map(({id, files}) => ({
   id, i172: false, styleMode: 'legacy' as const, sources: {scheme: 'complete_instruction_source_sha256', files: {...HISTORICAL_MAIN_SHARED_SOURCES, ...files}},
   fixed: FIXED, native: NATIVE,

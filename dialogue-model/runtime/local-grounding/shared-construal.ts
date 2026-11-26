@@ -1,5 +1,7 @@
 import type { SharedConstrual } from "../decision/contract.ts";
 import type { LocalClaimView, LocalIssueView } from "./contract.ts";
+import { deriveLocalIssues } from "./derive.ts";
+import type { LocalGraph } from "./verify.ts";
 
 const WITHDRAWING = ["deny", "name_reject", "withdraw"];
 const DETAIL_ASPECTS = ["referent", "part", "contour", "orientation", "position"];
@@ -22,10 +24,10 @@ export function deriveSharedConstruals(
     replies.push(claim);
     group.set(claim.respondsTo, replies);
   }
-  // A withdrawal retracts its linked claim. A denial can contest just the
-  // figures it names, whether it answers the reading or a supporting claim.
+  // An explicit target scopes the revision to that figure, whether the reply
+  // answers the reading or one of its supporting claims.
   const disputed = (claimId: string, figureId: string) => disputes.get(claimId)?.some(reply =>
-    reply.act === "withdraw" || reply.targets.length === 0 || reply.targets.includes(figureId));
+    reply.targets.length === 0 || reply.targets.includes(figureId));
 
   const facts: { lastTurn: number; fact: SharedConstrual }[] = [];
   for (const reading of claims) {
@@ -65,4 +67,40 @@ export function deriveSharedConstruals(
     facts.push({ lastTurn, fact: { id: `sc:${reading.id}`, claimIds, figureIds, construal, openDetails } });
   }
   return facts.sort((a, b) => b.lastTurn - a.lastTurn).map(({ fact }) => fact);
+}
+
+/** v13-only view. Other graph readers keep their original whole-claim withdrawal rules. */
+export function deriveSharedConstrualsFromGraph(graph: LocalGraph, ownSlots: readonly string[]):
+  { sharedConstruals: SharedConstrual[]; proofClaims: LocalClaimView[] } {
+  const issues = deriveLocalIssues(graph);
+  const records = graph.records as readonly { kind: string; targetId?: string }[];
+  const claims = records.filter((record): record is { kind: "claim" } & LocalClaimView => record.kind === "claim")
+    .sort((a, b) => a.sourceTurn - b.sourceTurn || a.turn - b.turn);
+  const retracted = records.filter(record => record.kind === "retract").map(record => record.targetId!);
+  const deadByFigure = new Map(ownSlots.map(id => {
+    const dead = new Set(retracted);
+    for (const claim of claims) {
+      if (claim.act === "withdraw" && claim.respondsTo && !dead.has(claim.id) &&
+          (!claim.targets.length || claim.targets.includes(id))) dead.add(claim.respondsTo);
+    }
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const claim of claims) {
+        if (claim.act !== "withdraw" && claim.respondsTo && dead.has(claim.respondsTo) && !dead.has(claim.id)) {
+          dead.add(claim.id);
+          changed = true;
+        }
+      }
+    }
+    return [id, dead] as const;
+  }));
+  const scoped = claims.flatMap(({ kind: _kind, ...claim }) => {
+    const targets = claim.targets.filter(id => !deadByFigure.get(id)?.has(claim.id));
+    if (claim.targets.length && !targets.length) return [];
+    return [{ ...claim, targets }];
+  });
+  const sharedConstruals = deriveSharedConstruals(scoped, issues, ownSlots);
+  const references = new Set(sharedConstruals.flatMap(candidate => candidate.claimIds));
+  return { sharedConstruals, proofClaims: scoped.filter(claim => references.has(claim.id)) };
 }
