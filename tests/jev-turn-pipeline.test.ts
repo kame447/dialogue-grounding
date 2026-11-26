@@ -107,6 +107,24 @@ test("a private observation's name cannot establish shared agreement", async () 
   assert.equal(h.records[0].decisionRejectionCode, "agree_without_public_proposal");
 });
 
+test("participant turn keeps only an allowlisted early decision rejection", async () => {
+  for (const rule of ["detail_target_required", "raw_provider_canary"] as const) {
+    const error = new JevDecisionError("invalid_decision");
+    Object.defineProperty(error, "decisionRejectionCode", { value: rule });
+    const h = harness({ jevDecision: {
+      participantTargetMenuVersion: "action_conditioned_targets_v1",
+      async decide() { throw error; },
+    } });
+    await assert.rejects(h.run(), { code: "invalid_decision" });
+    const trace = h.records[0];
+    assert.equal(trace.decisionMenuVersion, "action_conditioned_targets_v1");
+    assert.equal(trace.decisionRejectionCode, rule === "detail_target_required" ? rule : undefined);
+    assert.deepEqual(trace.decisions, []);
+    assert.equal(trace.publicSpeech, null);
+    assert.doesNotMatch(JSON.stringify(trace), /raw_provider_canary/);
+  }
+});
+
 test("targeted observation appends only requested evidence, then Jev chooses again", async () => {
   const inputs: JevDecisionInput[] = [];
   const h = harness({ jevDecision: createMockJevDecisionClient(input => {

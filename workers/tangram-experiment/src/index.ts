@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import { createChatClient } from "../../../dialogue-model/runtime/client.mjs";
 import { createNamingTaskV2 } from "../../../dialogue-model/runtime/v2/naming-task-v2.mjs";
 import { createGroundingJudgeClient } from "../../../dialogue-model/runtime/grounding/client.ts";
+import { INITIAL_OBSERVATION_STRUCTURED_V1 } from "../../../dialogue-model/runtime/observation/initial-observation-generation.ts";
 import { NamingTaskError } from "../../../dialogue-model/runtime/naming-error.mjs";
 import { sessionCookie, sessionId } from "./session-cookie.ts";
 import { isExcessiveTraffic, type SoftLimitBindings } from "./soft-limits";
@@ -41,7 +42,8 @@ import { createTrialV2, modelView } from "../../../dialogue-model/runtime/stimul
 import { resolveWorkerParticipantModelPin } from "../../../dialogue-model/runtime/v2/participant-model-pin.ts";
 import { PARTICIPANT_PRODUCTION_PROFILE } from '../../../dialogue-model/runtime/web/participant-usage-policy.ts';
 import { ParticipantUsageLedger, type ParticipantUsageStore } from '../../../dialogue-model/runtime/web/participant-usage.ts';
-import { createWorkerParticipantRuntime, workerParticipantPolicy, type ParticipantService } from "./participant-runtime.ts";
+import { createWorkerParticipantRuntime, workerParticipantPolicy,
+  type ParticipantService } from "./participant-runtime.ts";
 export { AdminIndex };
 
 type Strategy = "repair-first" | "bypass-enabled";
@@ -74,8 +76,12 @@ export interface Env extends SoftLimitBindings {
   PARTICIPANT_CONTACT_TEXT?: string;
   // Add the private proxy's verified pin to new approvals only.
   PARTICIPANT_TERRA_ENABLED?: string;
+  PARTICIPANT_TERRA_GENERATION_ENABLED?: string;
+  PARTICIPANT_TERRA_ALL_ROLES_ENABLED?: string;
   PARTICIPANT_TERRA_PROFILE?: string;
   PARTICIPANT_TERRA_LIMITS_JSON?: string;
+  // Approval-only opt-in; already approved plans supply their own generation.
+  PARTICIPANT_TERRA_INITIAL_OBSERVATION_GENERATION?: string;
   // Deployment-wide AI utterance style for new trials; identical for both strategies.
   V2_UTTERANCE_STYLE?: string;
   NAMING_SESSIONS: DurableObjectNamespace<TangramSession>;
@@ -157,7 +163,8 @@ export class TangramSession extends DurableObject<Env> {
   private receptionQueue: Promise<unknown> = Promise.resolve();
   private browserQueue: Promise<unknown> = Promise.resolve();
   // The explicit intent of the admission in progress: a reception plan trial, or the configured legacy assignment.
-  private admission: { kind: 'reception'; receptionId: string; expectedRevision: number; index: number } | { kind: 'legacy' } | null = null;
+  private admission: { kind: 'reception'; receptionId: string; expectedRevision: number; index: number;
+    participantPolicy?: Awaited<ReturnType<typeof workerParticipantPolicy>> } | { kind: 'legacy' } | null = null;
 
   /** One consistent settings snapshot from the global index. Unreadable or damaged settings fail closed. */
   private async settings(): Promise<ReceptionSettings> {
@@ -250,19 +257,26 @@ export class TangramSession extends DurableObject<Env> {
       if (!receptionOpen(settings.mode)) throw new ReceptionError('reception_closed');
       if (!settings.protocol) throw new ReceptionError('protocol_unconfigured');
       const protocol = settings.protocol.protocol, expected = input?.protocol;
-      let participant: Pick<Parameters<typeof approveReception>[1], 'participantModelPin' | 'participantRuntimeProfile' | 'participantLimits'> = {};
+      let participant: Pick<Parameters<typeof approveReception>[1],
+        'participantModelPin' | 'participantRuntimeProfile' | 'participantLimits' | 'initialObservationGeneration'> = {};
+      const generationPin = this.env.PARTICIPANT_TERRA_GENERATION_ENABLED === 'on';
+      const allTerraPin = this.env.PARTICIPANT_TERRA_ALL_ROLES_ENABLED === 'on';
+      if ((generationPin || allTerraPin) && this.env.PARTICIPANT_TERRA_ENABLED !== 'on') throw new ReceptionError('reception_unavailable');
       if (this.env.PARTICIPANT_TERRA_ENABLED === 'on') {
         try {
           const configuredProfile = this.env.PARTICIPANT_TERRA_PROFILE;
-          if (configuredProfile === PARTICIPANT_PRODUCTION_PROFILE) {
-            const { pin: participantModelPin } = await workerParticipantPolicy(this.env.PARTICIPANT_AI_PROXY, true);
-            participant = { participantModelPin, participantRuntimeProfile: PARTICIPANT_PRODUCTION_PROFILE };
-          } else {
-            if (configuredProfile !== undefined) throw new Error('unknown participant profile');
-            const participantLimits = validateParticipantLimits(JSON.parse(this.env.PARTICIPANT_TERRA_LIMITS_JSON ?? 'null'));
-            const { pin: participantModelPin } = await workerParticipantPolicy(this.env.PARTICIPANT_AI_PROXY);
-            participant = { participantModelPin, participantLimits };
+          const initialObservationGeneration = this.env.PARTICIPANT_TERRA_INITIAL_OBSERVATION_GENERATION;
+          if (initialObservationGeneration !== undefined && initialObservationGeneration !== INITIAL_OBSERVATION_STRUCTURED_V1) {
+            throw new Error('unknown initial observation generation');
           }
+          const usageOnly = configuredProfile === PARTICIPANT_PRODUCTION_PROFILE;
+          if (configuredProfile !== undefined && !usageOnly) throw new Error('unknown participant profile');
+          const participantLimits = usageOnly ? undefined
+            : validateParticipantLimits(JSON.parse(this.env.PARTICIPANT_TERRA_LIMITS_JSON ?? 'null'));
+          const { pin: participantModelPin } = await workerParticipantPolicy(this.env.PARTICIPANT_AI_PROXY, usageOnly, initialObservationGeneration,
+            allTerraPin ? 'participant_model_pin_v3' : generationPin ? 'participant_model_pin_v2' : 'participant_model_pin_v1');
+          participant = { participantModelPin, ...(initialObservationGeneration ? { initialObservationGeneration } : {}),
+            ...(participantLimits ? { participantLimits } : { participantRuntimeProfile: PARTICIPANT_PRODUCTION_PROFILE }) };
         } catch {
           throw new ReceptionError('reception_unavailable');
         }
@@ -326,7 +340,18 @@ export class TangramSession extends DurableObject<Env> {
         throw new ReceptionError('questionnaire_required');
       }
     }
-    this.admission = { kind:'reception', receptionId:r.receptionId, expectedRevision:r.revision, index };
+    // A temporarily incompatible proxy must leave the approved slot available for another start.
+    const plan = r.plan.schemaVersion === 'reception_plan_v1' ? null : r.plan;
+    const approvedPin = plan?.participantModelPin;
+    let participantPolicy;
+    if (approvedPin) {
+      try {
+        participantPolicy = await workerParticipantPolicy(this.env.PARTICIPANT_AI_PROXY,
+          Boolean(plan.participantRuntimeProfile), plan.initialObservationGeneration, approvedPin.schemaVersion);
+        resolveWorkerParticipantModelPin({ approvedPin, configuredPin: participantPolicy.pin });
+      } catch { throw new BaseSessionError('trial_unavailable'); }
+    }
+    this.admission = { kind:'reception', receptionId:r.receptionId, expectedRevision:r.revision, index, participantPolicy };
     try {
       if (predecessor) {
         await this.assignmentSession().prepareNext(predecessor);
@@ -786,9 +811,11 @@ export class TangramSession extends DurableObject<Env> {
   }
 
   private async createTrial(binding: Parameters<MakeBaseTask>[0]): Promise<NamingTask> {
-    const {seed,strategy,referenceMemory,restore,participantRuntime} = binding;
+    const {seed,strategy,referenceMemory,restore,participantRuntime,initialObservationGeneration} = binding;
+    const admittedPolicy = !restore && this.admission?.kind === 'reception' ? this.admission.participantPolicy : undefined;
     const policy = binding.participantModelPin === undefined ? null
-      : await workerParticipantPolicy(this.env.PARTICIPANT_AI_PROXY, Boolean(participantRuntime));
+      : admittedPolicy ?? await workerParticipantPolicy(this.env.PARTICIPANT_AI_PROXY, Boolean(participantRuntime),
+        undefined, binding.participantModelPin.schemaVersion);
     let pin;
     try {
       pin = resolveWorkerParticipantModelPin({
@@ -799,6 +826,7 @@ export class TangramSession extends DurableObject<Env> {
     }
     const onPersist = async (snapshot: StoredTrial) => {
       const record = pin ? { ...snapshot, options: { ...snapshot.options, participantModelPin: pin,
+        ...(initialObservationGeneration ? { initialObservationGeneration } : {}),
         ...(participantRuntime ? { participantRuntimeProfile: participantRuntime.profile } : {}) } } : snapshot;
       await binding.onPersist(record as unknown as BaseRecord);
       await this.scheduleExpiry();
@@ -819,7 +847,8 @@ export class TangramSession extends DurableObject<Env> {
       const trial = createTrialV2({ seed, rotationMode, ...figures });
       const model = modelView(trial);
       const runtime = createWorkerParticipantRuntime({
-        proxy: policy.proxy, pin, ...runtimeMode, own: { ownImage: { mimeType: model.mimeType, base64: model.png.toString('base64') }, ownAnchors: model.anchors },
+        proxy: policy.proxy, pin, ...runtimeMode, initialObservationGeneration,
+        own: { ownImage: { mimeType: model.mimeType, base64: model.png.toString('base64') }, ownAnchors: model.anchors },
         cache: {
           read: key => this.ctx.storage.get(key),
           putIfAbsent: (key, entry) => this.ctx.storage.transaction(async tx => {

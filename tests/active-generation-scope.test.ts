@@ -95,8 +95,9 @@ test("normal mode keeps its pinned byte sequence and same-action active/fallback
   // Re-pinned for the Luna public-act consistency change after checking the only input differences from 0fe6e52 are the Luna generator
   // text, the Luna agree scope and the private judge memo (image, history and directives unchanged). Re-pinned again for
   // Argon's Japanese review: this agree/default request differs from the previous pin only by one particle (見立てには → 見立ては).
-  // Re-pinned for prompt-style-20261124 (tone adaptation, direct answers to feature questions, accept scope): restoring the prior dialogue-v2.mjs text reproduces the previous digest.
-  assert.equal(createHash("sha256").update(JSON.stringify(normal.calls)).digest("hex"), "6f03b08b376545606aca35b42f3259d74761dafe9a9810eb3db36cb49e7be53e");
+  // Re-pinned for prompt-style-20261124 + #172 (partner-position sentence in TASK_INSTRUCTIONS_V2 and place-only accept wording):
+  // restoring the prior prompt texts reproduces the previous digests (6f03b08b... on PR #213, 7744ba72... on main).
+  assert.equal(createHash("sha256").update(JSON.stringify(normal.calls)).digest("hex"), "850502eba577dc0d5dea93ff77ca0bf920b03b023b45c5d3626eab5464912cc4");
   const unchanged = await capture(), fallback = await capture({ failDecision: true });
   assert.deepEqual(unchanged.calls, normal.calls); assert.deepEqual(fallback.calls, normal.calls);
   assert.equal(directive(unchanged.calls[0]).length, 0); assert.equal(directive(fallback.calls[0]).length, 0);

@@ -146,11 +146,13 @@ export function createBaseAssignmentSession(options: BaseSessionOptions): BaseSe
       const plan = a.source.kind === 'reception_plan_v2' || a.source.kind === 'reception_plan_v3' ? a.source.plan : null;
       const limits = plan?.participantLimits;
       const profile = plan?.participantRuntimeProfile;
+      const initialObservationGeneration = plan?.initialObservationGeneration;
       try { task = await options.makeTask({ strategy: a.strategy, seed: a.seed, referenceMemory: a.referenceMemory,
         runDir: null, restore: restore ? copy(restore) : null, now: options.now, onPersist,
         ...(pin ? { participantModelPin: pin } : {}),
         ...(limits ? { participantLimits: limits } : {}),
         ...(profile ? { participantRuntime: { profile, assignmentId: a.assignmentId } } : {}),
+        ...(initialObservationGeneration ? { initialObservationGeneration } : {}),
         ...(restore ? {} : { rotationMode: assignmentRotationMode(a),
           ...(a.source.kind === 'reception_plan_v3' ? { figureSelection: assignmentFigureSelection(a) } : {}) }) }); }
       catch (error) { if (error === token.internal && error instanceof BaseSessionError) throw error; token.cause = failureCauseOf(error); return fail(); }

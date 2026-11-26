@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { NamingTaskError } from '../naming-error.mjs';
 import { data } from '../v2/base-assignment-data.ts';
 import { PARTICIPANT_PRODUCTION_PROFILE } from './participant-usage-policy.ts';
-import type { ParticipantModelPin } from '../v2/participant-model-pin.ts';
+import { participantChatProvider, type ParticipantModelPin } from '../v2/participant-model-pin.ts';
 
 type Provider = 'jev' | 'luna' | 'terra';
 export type ParticipantDispatchResult = { status: number; data: unknown; verifiedUsage?: unknown };
@@ -11,6 +11,16 @@ const phases = {
   jev: ['action_target', 'detail', 'human_referent', 'local', 'ai_function', 'ai_support', 'choice'],
   luna: ['generation', 'final_submission', 'ai_extraction', 'dialogue'],
   terra: ['initial_observation', 'reobservation'],
+};
+const splitPhases = { ...phases, luna: ['ai_extraction', 'dialogue'],
+  terra: [...phases.terra, 'generation', 'final_submission'] };
+const allTerraPhases = { ...splitPhases, luna: [], terra: [...splitPhases.terra, ...splitPhases.luna] };
+const phaseNames = (pin: ParticipantModelPin, provider: Provider): string[] => {
+  switch (pin.schemaVersion) {
+    case 'participant_model_pin_v1': return phases[provider];
+    case 'participant_model_pin_v2': return splitPhases[provider];
+    case 'participant_model_pin_v3': return allTerraPhases[provider];
+  }
 };
 const providers: Provider[] = ['jev', 'luna', 'terra'];
 const count = (n: unknown): n is number => Number.isSafeInteger(n) && (n as number) >= 0;
@@ -40,14 +50,15 @@ export type ParticipantUsageStore = {
   update(write: (current: unknown) => ParticipantUsageSnapshot, kind?: 'settle'): Promise<ParticipantUsageSnapshot>;
 };
 const modelFor = (pin: ParticipantModelPin, provider: Provider) =>
-  provider === 'jev' ? pin.jevModelId : provider === 'luna' ? pin.lunaModelId : pin.terraModelId;
+  provider === 'jev' ? pin.jevModelId : provider === 'terra' ? pin.terraModelId
+    : pin.schemaVersion === 'participant_model_pin_v3' ? null : pin.lunaModelId;
 function initial(assignmentId: string, pin: ParticipantModelPin): ParticipantUsageSnapshot {
   return { schemaVersion: PARTICIPANT_PRODUCTION_PROFILE, assignmentId, pin: structuredClone(pin),
     revision: 0, lastHumanSeq: 0, halted: false,
     phases: {
       jev: Object.fromEntries(phases.jev.map(phase => [phase, empty()])),
-      luna: Object.fromEntries(phases.luna.map(phase => [phase, empty()])),
-      terra: Object.fromEntries(phases.terra.map(phase => [phase, empty()])),
+      luna: Object.fromEntries(phaseNames(pin, 'luna').map(phase => [phase, empty()])),
+      terra: Object.fromEntries(phaseNames(pin, 'terra').map(phase => [phase, empty()])),
     }, latest: { jev: null, luna: null, terra: null } };
 }
 function read(value: unknown, assignmentId: string, pin: ParticipantModelPin): ParticipantUsageSnapshot {
@@ -59,9 +70,10 @@ function read(value: unknown, assignmentId: string, pin: ParticipantModelPin): P
       !count(saved.revision) || !count(saved.lastHumanSeq) || typeof saved.halted !== 'boolean') return fail();
   const savedPhases = data(saved.phases, providers), latest = data(saved.latest, providers);
   for (const provider of providers) {
-    const group = data(savedPhases[provider], phases[provider]);
+    const names = phaseNames(pin, provider);
+    const group = data(savedPhases[provider], names);
     let posts = 0;
-    for (const phase of phases[provider]) {
+    for (const phase of names) {
       const meter = data(group[phase], Object.keys(empty()));
       if (Object.entries(meter).some(([key, n]) => key === 'knownUsd' ? !amount(n) : !count(n))) return fail();
       const m = meter as Meter;
@@ -71,7 +83,7 @@ function read(value: unknown, assignmentId: string, pin: ParticipantModelPin): P
     }
     if (!posts && latest[provider] === null) continue;
     const r = data(latest[provider], ['post', 'phase', 'status', 'model', 'costUsd', 'inputTokens', 'outputTokens']);
-    if (r.post !== posts || !phases[provider].includes(r.phase as string) ||
+    if (r.post !== posts || !names.includes(r.phase as string) ||
         !['reserved', 'cancelled', 'failed', 'ok', 'model_mismatch'].includes(r.status as string) ||
         (r.status === 'ok' ? r.model !== modelFor(pin, provider) :
           r.model !== null && (r.status !== 'failed' || r.model !== modelFor(pin, provider))) ||
@@ -138,7 +150,12 @@ export class ParticipantUsageLedger {
     if (state.revision >= this.current.revision) this.current = state;
   }
 
+  chatProvider(phase: string) {
+    return participantChatProvider(this.current.pin, phase);
+  }
+
   async logical<T>(provider: 'luna' | 'terra', phase: string, operation: () => Promise<T>) {
+    if (!phaseNames(this.current.pin, provider).includes(phase)) return fail();
     await this.change(state => {
       if (state.halted) return fail();
       state.phases[provider][phase].calls++;
@@ -152,11 +169,12 @@ export class ParticipantUsageLedger {
 
   async dispatch(provider: Provider, invoke: Dispatch, payload: unknown, signal?: AbortSignal | null) {
     const context = this.scope.getStore();
-    const phase = context?.phase && phases[provider].includes(context.phase) ? context.phase
+    const phase = context?.phase && phaseNames(this.current.pin, provider).includes(context.phase) ? context.phase
       : provider === 'jev' ? choicePhase(payload) : provider === 'luna' ? 'dialogue' : 'initial_observation';
     const signals = [signal, context?.signal].filter((value): value is AbortSignal => Boolean(value));
     const active = AbortSignal.any(signals);
     const expected = modelFor(this.current.pin, provider);
+    if (expected === null) return fail();
     let post = 0;
     active.throwIfAborted();
     await this.change(state => {
