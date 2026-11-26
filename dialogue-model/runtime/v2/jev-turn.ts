@@ -1,8 +1,8 @@
 import { PARTICIPANT_USAGE_ONLY, type ParticipantUsageOnly } from '../web/participant-usage-policy.ts';
 import {applyBypassAcceptance,interventionForStrategy,BypassAcceptanceError,BYPASS_ACCEPTANCE_V1_TABLE_SHA256,isOpenIssueRerankRecord} from '../decision/bypass-acceptance.ts';
 import type {ExecutedDecision,InterventionConfig,InterventionTrace} from '../decision/bypass-acceptance.ts';
-import {JEV_ACTIONS,PARTICIPANT_TARGET_MENU_VERSION,isHolisticPolicy,isHolisticV2Plus,isHolisticV3Plus,isHolisticV4Plus} from '../decision/contract.ts';
-import type {DraftAct} from '../decision/contract.ts';
+import {JEV_ACTIONS,DRAFT_SHARED_CLAIMS,PARTICIPANT_TARGET_MENU_VERSION,isHolisticPolicy,isHolisticV2Plus,isHolisticV3Plus,isHolisticV4Plus} from '../decision/contract.ts';
+import type {DraftAct,DraftSharedClaim,DraftSharedClaimInput,DraftSharedClaimResult,JevDecisionCallOptions} from '../decision/contract.ts';
 import {validateOwnLedger} from '../judgment/schema.mjs';
 // Decision 0002, opt-in only. The queue owns publication; this module returns a
 // detached candidate state and never turns a model score into shared evidence.
@@ -25,11 +25,11 @@ import { validateObservationMemo, mergeReobservation, observationContextMessages
 import type { JevAction, JevDecision, JevDecisionClient, JevDecisionInput, JevObservationRequest, RepairHistoryEntry, HumanReferentEstimate, RepairProspectMaterial, AdaptiveRepairTrial, PublicNameCandidate, RepairFact, JevQuestionLayout, DialoguePolicy, SharedConstrual } from "../decision/contract.ts";
 import { deriveRepairFacts, validateRepairFacts } from "../decision/repair-facts.ts";
 import { validateJevDecision, validateHumanReferentEstimate, validateRepairProspectEstimate, validateRepairProspectMaterial, unknownRepairProspect, JevDecisionError, JEV_DECISION_INPUT_LIMITS, JEV_DECISION_REJECTION_CODES,
-  projectDecisionFailureEvidence, checkDecisionFailureEvidence, v3AlwaysOffered, TWO_STAGE_V2_CANDIDATE_SETS, candidateSetLabel, V3_TARGET_LABEL_SET, participantJevTargetOffered, retainedParticipantJevMenuValid } from "../decision/jev-decision.ts";
+  projectDecisionFailureEvidence, checkDecisionFailureEvidence, v3AlwaysOffered, TWO_STAGE_V2_CANDIDATE_SETS, candidateSetLabel, V3_TARGET_LABEL_SET, participantJevTargetOffered, retainedParticipantJevMenuValid, draftSharedClaimVerdict } from "../decision/jev-decision.ts";
 import type { JevDecisionFailureEvidence } from "../decision/jev-decision.ts";
 import { prepareLocalGroundingTurn, validateLocalGroundingOptions, findLocalPublicationViolations } from "./local-grounding-turn.ts";
 import type { LocalGroundingResearchRecord, LocalGroundingTrace } from "./local-grounding-turn.ts";
-import { findNamingActHints, hasOrientationWords, draftViolationCodes, deriveGenerationOutcome, orientationSafeFallback, rewriteReasons, isGenerationV5, isGenerationV6, isGenerationV7, isGenerationV8, isGenerationV9, isGenerationV10, isGenerationV11, isGenerationV12, isGenerationV13, v11RecentHumanTexts, hasVersionedViewpoint, defaultGenerationRetryVersion, validGenerationRetryVersion, validAgreeNameScope, allowsOrientationFallback } from "./generation-guard.ts";
+import { findNamingActHints, hasOrientationWords, draftViolationCodes, deriveGenerationOutcome, orientationSafeFallback, rewriteReasons, isGenerationV5, isGenerationV6, isGenerationV7, isGenerationV8, isGenerationV9, isGenerationV10, isGenerationV11, isGenerationV12, isGenerationV13, isGenerationV14, v11RecentHumanTexts, hasVersionedViewpoint, defaultGenerationRetryVersion, validGenerationRetryVersion, validAgreeNameScope, allowsOrientationFallback } from "./generation-guard.ts";
 import { createMemoAiExtractor, MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS, AiPublicError, aiHash, emptyAiEvidence } from "../local-grounding/extract-ai.ts";
 import { createJevAiFunctionClassifier, createJevAiSupportChecker, AI_FUNCTION_INSTRUCTIONS, AI_SUPPORT_INSTRUCTIONS,
   AI_RESPONSE_SUPPORT_INSTRUCTIONS, AI_FUNCTION_CRITERIA, AI_SUPPORT_CHOICES, AI_ACT_DESCRIPTIONS } from "../local-grounding/jev-ai-public.ts";
@@ -127,6 +127,8 @@ function observationFailure(error: unknown, phase: ObservationFailure["observati
 }
 export type DraftActRecord = { draft: "initial" | "retry"; draftSha256: string; triggers: string[]; status: "ok" | "error"; choice: DraftAct | null;
   scores: Record<string, number> | null; model: string | null; responseId: string | null; costUsd: number | null; latencyMs: number; error: string | null };
+export type DraftSharedClaimRecord = { draft: "initial" | "retry"; draftSha256: string; status: "ok" | "error"; choice: DraftSharedClaim | null;
+  scores: Record<string, number> | null; model: string | null; responseId: string | null; costUsd: number | null; latencyMs: number; error: string | null };
 export type JevTurnTrace = {
   turnIndex: number; lastEventId: string | null; attemptNumber: number;
   status: "staged" | "committed" | "superseded" | "error" | "aborted";
@@ -153,6 +155,8 @@ export type JevTurnTrace = {
   namingReconfirm?: true;
   /** holistic_v1 only: every draft-naming question asked this attempt, in order (initial draft, then the retry). */
   draftActs?: DraftActRecord[];
+  /** jev_generation_retry_v14 only: every draft-shared-claim overclaim check asked this attempt, in order (initial draft, then the retry). */
+  draftSharedClaims?: DraftSharedClaimRecord[];
   errorCode?: JevTurnErrorCode;
   observationErrorCode?: ObservationErrorCode;
   observationPhase?: ObservationFailure["observationPhase"];
@@ -167,7 +171,7 @@ export type JevTurnTrace = {
 };
 type CommittedAct = {
   turnIndex: number; lastEventId: string | null; status: "committed"; judgment: Judgment;
-  generationGuard: Guard; jevTurn: { attemptNumber: number; decision: JevDecision; executed?:ExecutedDecision; intervention?:InterventionTrace; humanReferent?: JevHumanReferentTrace; repairProspect?: RepairProspectMaterial; repairGate?: RepairGate; draftActs?: DraftActRecord[]; namingRequest?: true; namingReconfirm?: true; agreeNames?: PublicNameCandidate[]; repairFacts?: RepairFact[]; sharedConstruals?: SharedConstrual[] };
+  generationGuard: Guard; jevTurn: { attemptNumber: number; decision: JevDecision; executed?:ExecutedDecision; intervention?:InterventionTrace; humanReferent?: JevHumanReferentTrace; repairProspect?: RepairProspectMaterial; repairGate?: RepairGate; draftActs?: DraftActRecord[]; draftSharedClaims?: DraftSharedClaimRecord[]; namingRequest?: true; namingReconfirm?: true; agreeNames?: PublicNameCandidate[]; repairFacts?: RepairFact[]; sharedConstruals?: SharedConstrual[] };
   localGrounding: LocalGroundingTrace;
   aiPublic?: { aiSeq: number; textSha256: string };
 };
@@ -521,11 +525,41 @@ function persistedSharedChoice(decision: Pick<JevDecision, "action" | "target" |
   return true;
 }
 
+function persistedDraftSharedClaims(value: unknown, p5Overclaim: boolean): DraftSharedClaimRecord[] {
+  if (!p5Overclaim || !Array.isArray(value) || value.length < 1 || value.length > 2) throw Error();
+  for (let i = 0; i < value.length; i++) {
+    const a = value[i];
+    if (!stateExact(a, ["draft", "draftSha256", "status", "choice", "scores", "model", "responseId", "costUsd", "latencyMs", "error"]) ||
+        a.draft !== (i === 0 ? "initial" : "retry") ||
+        typeof a.draftSha256 !== "string" || !/^[a-f0-9]{64}$/u.test(a.draftSha256) ||
+        !(a.model === null || typeof a.model === "string" && a.model.length <= 128) ||
+        !(a.responseId === null || typeof a.responseId === "string" && /^gen-[A-Za-z0-9_-]{1,124}$/.test(a.responseId)) ||
+        !(a.costUsd === null || typeof a.costUsd === "number" && Number.isFinite(a.costUsd) && a.costUsd >= 0) ||
+        typeof a.latencyMs !== "number" || !Number.isFinite(a.latencyMs) || a.latencyMs < 0) throw Error();
+    if (a.status === "ok") {
+      if (!DRAFT_SHARED_CLAIMS.includes(a.choice) || a.error !== null || !stateExact(a.scores, [...DRAFT_SHARED_CLAIMS]) ||
+          Object.values(a.scores).some(n => typeof n !== "number" || !Number.isFinite(n) || n < 0 || n > 1)) throw Error();
+    } else if (a.status === "error") {
+      if (a.choice !== null || a.scores !== null || typeof a.error !== "string" || !a.error.trim() || a.error.length > 64) throw Error();
+    } else throw Error();
+  }
+  return value as DraftSharedClaimRecord[];
+}
+
 /** Check P5 data on all saved attempts, including attempts without a committed judgment. */
 export function validJevSharedConstrualTrace(trace: JevTurnTrace, slots: readonly string[], generation?: GenerationRetryVersion): boolean {
   try {
     const candidates = Object.hasOwn(trace, "sharedConstruals")
       ? persistedSharedConstruals(trace.sharedConstruals, slots, isGenerationV13(generation)) : [];
+    const p5Overclaim = isGenerationV14(generation);
+    if (Object.hasOwn(trace, "draftSharedClaims")) {
+      if (!isGenerationV14(trace.generationRetryVersion) || !(trace.executed && Object.hasOwn(trace.executed, "sharedClaimIds"))) return false;
+      persistedDraftSharedClaims(trace.draftSharedClaims, p5Overclaim);
+    }
+    if (trace.status === "committed" && p5Overclaim) {
+      const expectsSharedCheck = Boolean(trace.executed && Object.hasOwn(trace.executed, "sharedClaimIds"));
+      if (Object.hasOwn(trace, "draftSharedClaims") !== expectsSharedCheck) return false;
+    }
     const namingRequest = trace.namingRequest === true;
     const intervention = typeof trace.intervention === "object" ? trace.intervention : null;
     for (const decision of trace.decisions) {
@@ -571,7 +605,7 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
  checkedIntervention(intervention);
  if(questionLayout!=='two_stage_v1'&&questionLayout!=='two_stage_v2'&&questionLayout!=='two_stage_v3')throw new JevTurnError('invalid_state');
  try{
-  stateJson(value);const s=value as any;const p5Enabled=questionLayout==='two_stage_v3'&&policy==='holistic_v5'&&isGenerationV13(generation);validateOwnLedger(Object.fromEntries(ownSlots.map(k=>[k,{status:'unassigned',name:null}])));
+  stateJson(value);const s=value as any;const p5Enabled=questionLayout==='two_stage_v3'&&policy==='holistic_v5'&&isGenerationV13(generation);const p5OverclaimEnabled=questionLayout==='two_stage_v3'&&policy==='holistic_v5'&&isGenerationV14(generation);validateOwnLedger(Object.fromEntries(ownSlots.map(k=>[k,{status:'unassigned',name:null}])));
   const hasAgreeNameScope=Object.hasOwn(s??{},'agreeNameScopeVersion');
   if(!stateExact(s,['schemaVersion','interventionPolicy','ledger','graph','judgments','observationMemo','repairHistory',...(Object.hasOwn(s??{},'aiPublic')?['aiPublic']:[]),...(hasAgreeNameScope?['agreeNameScopeVersion']:[])])||s.schemaVersion!=='jev_private_state_v2'||!stateSame(s.interventionPolicy,{version:'bypass_acceptance_v1',tableSha256:BYPASS_ACCEPTANCE_V1_TABLE_SHA256}))throw Error();
   if(!validAgreeNameScope(s.agreeNameScopeVersion,generation)||hasAgreeNameScope&&
@@ -589,7 +623,7 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
   const seen=new Set<string>();
   for(const j of s.judgments){
    if(!stateExact(j,['turnIndex','lastEventId','status','judgment','generationGuard','jevTurn','localGrounding',...(Object.hasOwn(j,'aiPublic')?['aiPublic']:[])])||j.status!=='committed'||!Number.isSafeInteger(j.turnIndex)||j.turnIndex<1||!(j.lastEventId===null||typeof j.lastEventId==='string'&&j.lastEventId.length<=160))throw Error();
-   const z=j.jevTurn;if(!stateExact(z,['attemptNumber','decision','executed','intervention',...(Object.hasOwn(z??{},'humanReferent')?['humanReferent']:[]),...(Object.hasOwn(z??{},'repairProspect')?['repairProspect']:[]),...(Object.hasOwn(z??{},'repairGate')?['repairGate']:[]),...(Object.hasOwn(z??{},'draftActs')?['draftActs']:[]),...(Object.hasOwn(z??{},'namingRequest')?['namingRequest']:[]),...(Object.hasOwn(z??{},'namingReconfirm')?['namingReconfirm']:[]),...(Object.hasOwn(z??{},'agreeNames')?['agreeNames']:[]),...(Object.hasOwn(z??{},'repairFacts')?['repairFacts']:[]),...(Object.hasOwn(z??{},'sharedConstruals')?['sharedConstruals']:[])])||!Number.isSafeInteger(z.attemptNumber)||z.attemptNumber<1)throw Error();
+   const z=j.jevTurn;if(!stateExact(z,['attemptNumber','decision','executed','intervention',...(Object.hasOwn(z??{},'humanReferent')?['humanReferent']:[]),...(Object.hasOwn(z??{},'repairProspect')?['repairProspect']:[]),...(Object.hasOwn(z??{},'repairGate')?['repairGate']:[]),...(Object.hasOwn(z??{},'draftActs')?['draftActs']:[]),...(Object.hasOwn(z??{},'draftSharedClaims')?['draftSharedClaims']:[]),...(Object.hasOwn(z??{},'namingRequest')?['namingRequest']:[]),...(Object.hasOwn(z??{},'namingReconfirm')?['namingReconfirm']:[]),...(Object.hasOwn(z??{},'agreeNames')?['agreeNames']:[]),...(Object.hasOwn(z??{},'repairFacts')?['repairFacts']:[]),...(Object.hasOwn(z??{},'sharedConstruals')?['sharedConstruals']:[])])||!Number.isSafeInteger(z.attemptNumber)||z.attemptNumber<1)throw Error();
    // The saved turn names its own condition: accept may be missing from its scores and ranking only for a typed naming request (holistic_v3), and only on v3.
    // The marker was derived when the turn was decided, from the claims live then. Here it is checked against the same view of the graph as of that turn (a later withdrawal,
    // rename or pruning cannot change it), and only as far as the graph still holds the turn's proposals: a proposal the graph pruned can no longer be recomputed from the
@@ -659,6 +693,13 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
     if(!actionKeysOk||!stateSame(d.evidence.choices,es[0].choices)||!stateSame(d.evidence.scores,es[0].scores)||es[0].choices.action!==d.action||d.evidence.model!==es.at(-1).model||d.evidence.responseId!==es.at(-1).responseId||d.evidence.costUsd!==(es.some((e:any)=>e.costUsd===null)?null:es.reduce((n:number,e:any)=>n+e.costUsd,0)))throw Error();
    }else if(d.evidence.decisionMenuVersion!==undefined||d.evidence.model!==null||Object.keys(d.evidence.choices).length||Object.keys(d.evidence.scores).length||d.evidence.stages?.length)throw Error();
    const original=executionProjection(d);persistedExecution(original,ownSlots);persistedExecution(z.executed,ownSlots);
+   const hasDraftShared=Object.hasOwn(z,'draftSharedClaims');
+   if(hasDraftShared!==(p5OverclaimEnabled&&Object.hasOwn(z.executed,'sharedClaimIds')))throw Error();
+   if(hasDraftShared){
+    const checks=persistedDraftSharedClaims(z.draftSharedClaims,p5OverclaimEnabled);
+    const lastCheck=checks.at(-1)!;
+    if(lastCheck.status!=='ok'||lastCheck.choice===null||draftSharedClaimVerdict(lastCheck.choice,z.executed.target.kind)!==null)throw Error();
+   }
    if(noAcceptTurn&&(original.action==='accept'||z.executed.action==='accept'))throw Error();
    if(questionLayout==='two_stage_v3'&&[original,z.executed].some(e=>e.action==='agree'&&
     (e.target.kind!=='single'||!hasAgreeNameV3(z.agreeNames,e.name,e.target.figureId))))throw Error();
@@ -798,6 +839,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
     throw new Error("Invalid Jev naming scope for a new trial");
   }
   const p5Enabled = isGenerationV13(generationRetryVersion);
+  const p5OverclaimEnabled = isGenerationV14(generationRetryVersion);
   const restateJudgment = generationRetryVersion !== "jev_generation_retry_v1";
   // The judgment side of holistic_v5 (whole-history material, ledger, rotation premise, chained agree sources) is versioned with the generation side: a v5 record saved before
   // jev_generation_retry_v4 keeps the judgment requests it was recorded with.
@@ -1214,6 +1256,37 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
           ...(hints.wording && record.namingReconfirm !== true ? ["naming_words"] : []),
           ...(hints.quoted.some(q => !agreedNames.has(normalizeName(q)) && normalizeName(q) !== chosenName) ? ["quoted_other"] : [])];
       };
+      const confirmDraftSharedClaim = async (text: string, draft: "initial" | "retry", found: string[]): Promise<string[]> => {
+        if (!p5OverclaimEnabled || !shared) return found;
+        const payloadInput: DraftSharedClaimInput = {
+          turn: latest.seq,
+          publicTurns,
+          selected: { action: judgment.action, target: execution.target, name: judgment.candidateName ?? null, feature: judgment.discriminatingFeature ?? null },
+          sharedConstrual: { figureIds: shared.figureIds, construal: shared.construal, openDetails: shared.openDetails },
+          draft: text,
+        };
+        let res: DraftSharedClaimResult;
+        try {
+          const callOptions: JevDecisionCallOptions = { signal, timeoutMs: options.decisionTimeoutMs, dialoguePolicy: options.dialoguePolicy };
+          if (!jevDecision.classifyDraftSharedClaim) throw new Error("unavailable");
+          res = await interruptible(jevDecision.classifyDraftSharedClaim(payloadInput, callOptions), signal);
+        } catch {
+          abortIf(signal);
+          res = { status: "error", choice: null, scores: null, model: null, responseId: null, costUsd: null, latencyMs: 0, error: "unavailable" };
+        }
+        abortIf(signal);
+        const validChoice = res.status === "ok" && res.choice !== null && DRAFT_SHARED_CLAIMS.includes(res.choice);
+        const validScores = validChoice && res.scores !== null && typeof res.scores === "object" &&
+          Object.keys(res.scores).length === DRAFT_SHARED_CLAIMS.length &&
+          DRAFT_SHARED_CLAIMS.every(k => typeof res.scores![k] === "number" && Number.isFinite(res.scores![k]) && res.scores![k] >= 0 && res.scores![k] <= 1);
+        const ok = validChoice && validScores;
+        (record.draftSharedClaims ??= []).push({ draft, draftSha256: await aiHash(text), status: ok ? "ok" : "error", choice: ok ? res.choice : null,
+          scores: ok ? structuredClone(res.scores) : null, model: res.model ?? null, responseId: res.responseId ?? null, costUsd: res.costUsd ?? null,
+          latencyMs: Number.isFinite(res.latencyMs) ? res.latencyMs : 0, error: ok ? null : res.error ?? "invalid_response" });
+        if (!ok) return [...found, "draft_shared_claim_unconfirmed"];
+        const verdict = draftSharedClaimVerdict(res.choice!, execution.target.kind);
+        return verdict ? [...found, verdict] : found;
+      };
       const confirmDraft = async (text: string, draft: "initial" | "retry", found: string[]): Promise<string[]> => {
         if (!holistic) return found;
         const triggers = draftTriggers(text);
@@ -1238,11 +1311,13 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         const wrong = judgment.action === "agree" ? res.choice !== "adopt_chosen" : adopts;
         return wrong ? [...found, "draft_act_mismatch"] : found;
       };
+      const checkDraft = async (text: string, draft: "initial" | "retry", found: string[]) =>
+        confirmDraftSharedClaim(text, draft, await confirmDraft(text, draft, found));
       errorCode = "generation_failed";
       let result = await interruptible(client.complete(messages, { phase: "generation", timeoutMs: generation.timeoutMs, signal }), signal);
       abortIf(signal);
       if (typeof result?.text !== "string" || !result.text.trim()) throw new JevTurnError("generation_failed", undefined, { generationErrorCode: "invalid_response" });
-      record.generationGuard.violations = await confirmDraft(result.text, "initial", violations(result.text, messages));
+      record.generationGuard.violations = await checkDraft(result.text, "initial", violations(result.text, messages));
       const firstCodes = [...record.generationGuard.violations];
       if (record.generationGuard.violations.length) {
         record.generationGuard.regenerated = true;
@@ -1252,7 +1327,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
             (restateJudgment ? "\n" + actionMessage.content + "\n" : "") + rewriteReasons(record.generationGuard.violations, options.dialoguePolicy, generationRetryVersion) }];
         result = await interruptible(client.complete(retry, { phase: "generation", timeoutMs: generation.timeoutMs, signal }), signal);
         abortIf(signal);
-        const codes = typeof result?.text === "string" && result.text.trim() ? await confirmDraft(result.text, "retry", violations(result.text, retry)) : ["empty_utterance"];
+        const codes = typeof result?.text === "string" && result.text.trim() ? await checkDraft(result.text, "retry", violations(result.text, retry)) : ["empty_utterance"];
         record.generationGuard.violations = [...new Set([...record.generationGuard.violations, ...codes])];
         if (codes.length) {
           const safeText = questionLayout === "two_stage_v3" && allowsOrientationFallback(generationRetryVersion) ? orientationSafeFallback(judgment) : null;
@@ -1287,6 +1362,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
             ...(factored ? { repairFacts: structuredClone(baseInput.repairFacts!) } : {}),
             ...(gate ? { repairGate: structuredClone(gate) } : {}),
             ...(record.draftActs?.length ? { draftActs: structuredClone(record.draftActs) } : {}),
+            ...(record.draftSharedClaims?.length ? { draftSharedClaims: structuredClone(record.draftSharedClaims) } : {}),
             ...(record.namingRequest ? { namingRequest: true as const } : {}),
             ...(record.namingReconfirm ? { namingReconfirm: true as const } : {}) },
           localGrounding: { ...prepared.trace, attemptNumber }, ...(aiEnabled ? { aiPublic: { aiSeq: aiPending!.aiSeq, textSha256: aiPending!.textSha256 } } : {}) }],

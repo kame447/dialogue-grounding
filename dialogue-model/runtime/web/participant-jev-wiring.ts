@@ -235,7 +235,7 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
         if (committed) {
           const judgment = savedJudgments.find((j: any) => j?.turnIndex === trace.turnIndex && j?.jevTurn?.attemptNumber === trace.attemptNumber);
           if (!judgment) return invalid();
-          for (const key of ['executed','humanReferent','repairProspect','repairGate','repairFacts','draftActs','namingRequest','namingReconfirm','sharedConstruals'])
+          for (const key of ['executed','humanReferent','repairProspect','repairGate','repairFacts','draftActs','draftSharedClaims','namingRequest','namingReconfirm','sharedConstruals'])
             if (Object.hasOwn(trace, key) !== Object.hasOwn(judgment.jevTurn, key) || Object.hasOwn(trace, key) && researchHash(jsonData(trace[key])) !== researchHash(jsonData(judgment.jevTurn[key]))) return invalid();
           if (p5Enabled && (researchHash(jsonData(trace.decisions.at(-1))) !== researchHash(jsonData(judgment.jevTurn.decision)) ||
               researchHash(jsonData(trace.intervention)) !== researchHash(jsonData(judgment.jevTurn.intervention)))) return invalid();
@@ -335,7 +335,7 @@ export function participantLedgerFetch(ledger:RunBudget,provider:'luna'|'jev',ex
     if (init.signal?.aborted) throw Object.assign(Error('aborted'),{name:'AbortError'});
     const context=scope(ledger).getStore();
     const body=JSON.parse(String(init.body));
-    const entry=ledger.reserve(provider,context?.phase??(body.questions?.action?'decision':body.questions?.human_referent?'human_referent':'jev'),context?.turn??null) as WireReceipt;
+    const entry=ledger.reserve(provider,context?.phase??(body.questions?.action?'decision':body.questions?.human_referent?'human_referent':body.questions?.draft_shared_claim?'draft_shared_claim':'jev'),context?.turn??null) as WireReceipt;
     Object.assign(entry,{requestSha256:researchHash(body),requestedId:provider==='jev'?MODEL_CONTRACT_V2.requested:expectedLunaModel,
       returnedId:null,version:null,boundary:context?.boundary??'common'});
     ledger.sent(entry);
@@ -475,6 +475,13 @@ export async function prepareParticipantJev(options:{configFile:string;baseAssig
           const res=await scope(ledger).run({turn:parent?.turn??null,phase:'jev_draft_act',boundary:'tail'},()=>nativeDecision.classifyDraftAct!(...args));
           // The native client reports a failed question as status "error"; the shared budget still has to learn of a cap or identity stop.
           if(res.status==='error'&&res.error){ledger.refuse('jev_draft_act',res.error);if(['cost_cap','cost_unreported','model_mismatch'].includes(res.error))ledger.stop(res.error);}
+          return res;
+        }} : {}),
+        ...(isHolisticPolicy(profile.dialoguePolicy)&&nativeDecision.classifyDraftSharedClaim ? {classifyDraftSharedClaim:async(...args:Parameters<NonNullable<typeof nativeDecision.classifyDraftSharedClaim>>)=>{
+          ledger.beforeSend();
+          const parent=scope(ledger).getStore();
+          const res=await scope(ledger).run({turn:parent?.turn??null,phase:'jev_draft_shared_claim',boundary:'tail'},()=>nativeDecision.classifyDraftSharedClaim!(...args));
+          if(res.status==='error'&&res.error){ledger.refuse('jev_draft_shared_claim',res.error);if(['cost_cap','cost_unreported','model_mismatch'].includes(res.error))ledger.stop(res.error);}
           return res;
         }} : {}),
         completeDetail:(...args:Parameters<typeof nativeDecision.completeDetail>)=>{
