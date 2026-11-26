@@ -40,6 +40,36 @@ test('the pre-#172 main sources with the baseline text pass, and with the #172 t
   assert.deepEqual(interventionChecks(crossed).filter(c => !c.id.endsWith('.replay')), expected.filter((c: any) => !c.id.endsWith('.replay')));
 });
 
+// Audit B-175A-1 matched these adopted captures to the actual source manifests and
+// paired replay of the normal tape from the corresponding main revisions.
+const historicalMain = [
+  ['49d1ab7d', 'failure-path-s4i-59d5ab0'],
+  ['f52e6695', 'failure-path-adaptive-a480a88'],
+  ['6e4aad0b', 'failure-path-adaptive-aa6673d'],
+  ['0fe6e526', 'failure-path-memory-default-8e8910b'],
+  ['c3e35cb0', 'failure-path-rotation-1fbb836'],
+  ['419b64ec', 'failure-path-agree-names-a62eb00'],
+  ['e71bb7be', 'failure-path-reobservation-persist-5935067'],
+  ['76360f59', 'failure-path-argon-wording-44c0610'],
+] as const;
+
+for (const [revision, capture] of historicalMain) {
+  const sources = JSON.parse(await readFile(new URL(`./fixtures/parity-verify/${capture}/producer-records.json`, import.meta.url), 'utf8'))
+    .observation_timeout.run.promptSources;
+  test(`historical main ${revision}: baseline replay passes and #172 text is refused`, () => {
+    const matching = withSources(original, sources);
+    assert.deepEqual(interventionChecks(matching), expected);
+    assert.equal(verifyRecords(matching).checks.find(c => c.id === 'intervention.trial.0.attempt.0.replay')?.status, 'pass');
+    assert.deepEqual(replay(withSources(current, sources)),
+      { id: 'intervention.trial.0.attempt.0.replay', status: 'mismatch', reason: 'intervention_replay_mismatch' });
+
+    const mixed = structuredClone(sources);
+    mixed.files['judgment/instructions.mjs'] = current.run.promptSources.files['judgment/instructions.mjs'];
+    assert.deepEqual(replay(withSources(original, mixed)),
+      { id: 'intervention.trial.0.attempt.0.replay', status: 'mismatch', reason: 'intervention_replay_mismatch' });
+  });
+}
+
 test('crossed sources and text are a replay mismatch in both directions', () => {
   for (const crossed of [withSources(current, original.run.promptSources), withSources(original, current.run.promptSources)]) {
     assert.deepEqual(replay(crossed), { id: 'intervention.trial.0.attempt.0.replay', status: 'mismatch', reason: 'intervention_replay_mismatch' });
