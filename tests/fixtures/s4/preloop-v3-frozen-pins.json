@@ -21,12 +21,28 @@
      "normalizedSha256": "020ca5ee98b932835e3ce316f84cd0b097fab1a645b4598563331581fbcd9d2e"
     },
     {
+     "source": "dialogue-model/runtime/judgment/instructions.mjs",
+     "sourceBlob": "6b26a74ea8d88b0583c2c457e96e434320a6449f",
+     "sourceSha256": "aa8b84ba60f10780328521457fc3abf4bfaa6db6efd32a725924075a9584f884",
+     "frozen": "legacy/judgment/instructions.mjs",
+     "frozenSha256": "df1c997c39d281a72a6dbac92defd5569f0f3727049daea03a4b5fdb1af80c0a",
+     "normalizedSha256": "2c65b8bd0b0093bf17e5f9972f4973e21e5d605385ea6be3dad626ab28aae832"
+    },
+    {
      "source": "dialogue-model/runtime/local-grounding/classify.ts",
      "sourceBlob": "ecba4722ec0ec5973193456a0eb36008950b3fb5",
      "sourceSha256": "d564d287ac64c8478c6bf382dd8f250d52fd82b6be5b6100cc598cee47762333",
      "frozen": "legacy/local-grounding/classify.mts",
      "frozenSha256": "e80624039700f34225d07a99f128eef2cfa075a21249fa5afc8bb41b0da76b11",
      "normalizedSha256": "7498a017ebe4a88ec9acb107cfc45caee232dc3c4011fc7c32339574b58d7abe"
+    },
+    {
+     "source": "dialogue-model/runtime/local-grounding/extract.ts",
+     "sourceBlob": "da3b40d1a3d9ed4f002083feccf7d6d140c76cdb",
+     "sourceSha256": "1f3af472bca173e83bcb0bf07e4b98c15fb98bc1b960aedc28e0a4970563764e",
+     "frozen": "legacy/local-grounding/extract.mts",
+     "frozenSha256": "e9f4f47e0217b19dca899633b9870f270124509a4ae47a28d1ab25bb2ed5ce8b",
+     "normalizedSha256": "2d3724e533f00ecf441094805168ae3b75edd3ab89b673befd249090b2ec23e7"
     },
     {
      "source": "dialogue-model/runtime/local-grounding/jev-ai-public.ts",
@@ -57,7 +73,7 @@
      "sourceBlob": "d015c28824e85fa4372c016c4eee8093f179226b",
      "sourceSha256": "d0a0354b767523d3921c60e84cdb179951d01bcb0fba4f2aaa329894c239eee3",
      "frozen": "legacy/v2/dialogue-v2.mjs",
-     "frozenSha256": "0798e9f9a19d16d23f2f67cbdb32699ddd4cab49fce8cd0473deaecf9b8428d9",
+     "frozenSha256": "a1e4d571dcc0ba7c63ec2e267a024e85fab682620de130daf595f2aa41362896",
      "normalizedSha256": "45a8631c849b7e52e9d8de392ab1ba492e76e32ccd8ddc3927c3f95851429f85"
     },
     {
@@ -73,7 +89,7 @@
      "sourceBlob": "7f675616eb577a021977b4d565082673cbc63b67",
      "sourceSha256": "baf2ad6f574a8a75345de749c1218ae7d32e1342446d9e78e6b5d0af0b52ceb1",
      "frozen": "legacy/v2/jev-turn.mts",
-     "frozenSha256": "20ae6a16f3f3aa0ed5ae4993f1fdbb0ea550c402456e2816febcbbb9d91767d1",
+     "frozenSha256": "13a07fd0af23f9d36ce862b1780c944ab1417db0d9fbb04756034f1499d6bfcd",
      "normalizedSha256": "82bcd9318b4df462136f0efcc342c001c002de2ea031d95fa45b3091a121a3c1"
     },
     {
@@ -81,7 +97,7 @@
      "sourceBlob": "0e18f7e10142eee5918e20f453fa76ed1ac71616",
      "sourceSha256": "04f064b8549e1bb0694195764f7b69b12f356392180814ed9620c8ce8508d0f5",
      "frozen": "legacy/v2/local-grounding-turn.mts",
-     "frozenSha256": "e901579f567250214c9e99243e5d411f1074caeddd63371080ccc89942355ce4",
+     "frozenSha256": "737077ba221e6493bee6c7d04bd084de8aceb60710b6abec60b514217dea75a4",
      "normalizedSha256": "38836ffb1fac47ef9158a760973993f02ab75882f3bd8ff85c047ac835d6576a"
     },
     {
@@ -114,12 +130,28 @@
      "normalizedSha256": "a9b3e02fbda8345bf941363354920d4cbfa791b326918eae8aad1b322bf3bf2c"
     },
     {
+     "source": "dialogue-model/runtime/judgment/instructions.mjs",
+     "sourceBlob": "6b26a74ea8d88b0583c2c457e96e434320a6449f",
+     "sourceSha256": "aa8b84ba60f10780328521457fc3abf4bfaa6db6efd32a725924075a9584f884",
+     "frozen": "style/judgment/instructions.mjs",
+     "frozenSha256": "df1c997c39d281a72a6dbac92defd5569f0f3727049daea03a4b5fdb1af80c0a",
+     "normalizedSha256": "2c65b8bd0b0093bf17e5f9972f4973e21e5d605385ea6be3dad626ab28aae832"
+    },
+    {
      "source": "dialogue-model/runtime/local-grounding/classify.ts",
      "sourceBlob": "ecba4722ec0ec5973193456a0eb36008950b3fb5",
      "sourceSha256": "d564d287ac64c8478c6bf382dd8f250d52fd82b6be5b6100cc598cee47762333",
      "frozen": "style/local-grounding/classify.mts",
      "frozenSha256": "e80624039700f34225d07a99f128eef2cfa075a21249fa5afc8bb41b0da76b11",
      "normalizedSha256": "7498a017ebe4a88ec9acb107cfc45caee232dc3c4011fc7c32339574b58d7abe"
+    },
+    {
+     "source": "dialogue-model/runtime/local-grounding/extract.ts",
+     "sourceBlob": "da3b40d1a3d9ed4f002083feccf7d6d140c76cdb",
+     "sourceSha256": "1f3af472bca173e83bcb0bf07e4b98c15fb98bc1b960aedc28e0a4970563764e",
+     "frozen": "style/local-grounding/extract.mts",
+     "frozenSha256": "e9f4f47e0217b19dca899633b9870f270124509a4ae47a28d1ab25bb2ed5ce8b",
+     "normalizedSha256": "2d3724e533f00ecf441094805168ae3b75edd3ab89b673befd249090b2ec23e7"
     },
     {
      "source": "dialogue-model/runtime/local-grounding/jev-ai-public.ts",
@@ -150,7 +182,7 @@
      "sourceBlob": "fb60a37d83d09950baf20214ae7c061af27239e4",
      "sourceSha256": "1a331fb27a7d81672ad84e9d64f43cd79ec101cea634dcdd365c4b668630c1bf",
      "frozen": "style/v2/dialogue-v2.mjs",
-     "frozenSha256": "473b2382fcbfee8a8bf319f0018be5575e38e8ce7f3855462fbc5ebe3f6938c7",
+     "frozenSha256": "3d5a02598145c9d3ef2a28df41d3c696a3d23f1acb2cb5374cd23bfd6f919e19",
      "normalizedSha256": "edf58ab4bf711fd22c43bcad85bf165644b2b70b63bf8b9d192f504e3653e43f"
     },
     {
@@ -166,7 +198,7 @@
      "sourceBlob": "42d8c29fea8d4280b314d0ab87c540a9748aff89",
      "sourceSha256": "304534096e3c6bf6fe7b45094f24a9e06f2c533afef25581b643c17c7a06c6f9",
      "frozen": "style/v2/jev-turn.mts",
-     "frozenSha256": "60cd9e1387589b07b11f2b30c35c0271b0f4a192f86640593b91094cfd9dae01",
+     "frozenSha256": "a987b67236a8ba2a5cda1f4ac52702bb7da0cab7b3e677b2941a96644dc3f581",
      "normalizedSha256": "6a7548cab20b6a6e56068924b98d7c5d19a184ccd60cadcc0cf0b4522d758ed6"
     },
     {
@@ -174,7 +206,7 @@
      "sourceBlob": "0e18f7e10142eee5918e20f453fa76ed1ac71616",
      "sourceSha256": "04f064b8549e1bb0694195764f7b69b12f356392180814ed9620c8ce8508d0f5",
      "frozen": "style/v2/local-grounding-turn.mts",
-     "frozenSha256": "e901579f567250214c9e99243e5d411f1074caeddd63371080ccc89942355ce4",
+     "frozenSha256": "737077ba221e6493bee6c7d04bd084de8aceb60710b6abec60b514217dea75a4",
      "normalizedSha256": "38836ffb1fac47ef9158a760973993f02ab75882f3bd8ff85c047ac835d6576a"
     },
     {

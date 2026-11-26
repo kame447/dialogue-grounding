@@ -5,7 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { TASK_INSTRUCTIONS_V2, JUDGE_POLICIES, STRATEGIES } from "../dialogue-model/runtime/judgment/instructions.mjs";
 import { createNamingTaskV2 } from "../dialogue-model/runtime/v2/naming-task-v2.mjs";
-import { GENERATOR_INSTRUCTIONS_V2, LUNA_GENERATOR_INSTRUCTIONS_V2, ACTION_SCOPE_V2, LUNA_ACTION_SCOPE_V2 } from "../dialogue-model/runtime/v2/dialogue-v2.mjs";
+import { GENERATOR_INSTRUCTIONS_V2, LUNA_GENERATOR_INSTRUCTIONS_V2, ACTION_SCOPE_V2, LUNA_ACTION_SCOPE_V2, HOLISTIC_V3_ACTION_SCOPE_V2 } from "../dialogue-model/runtime/v2/dialogue-v2.mjs";
 import { createTrialV2, modelView } from "../dialogue-model/runtime/stimuli/scatter-v2.mjs";
 import { MEMO_LOCAL_EXTRACTION_INSTRUCTIONS } from "../dialogue-model/runtime/local-grounding/extract.ts";
 import { buildJevDecisionPayload, buildJevDecisionDetailPayload, buildHumanReferentPayload, createJevDecisionClient } from "../dialogue-model/runtime/decision/jev-decision.ts";
@@ -76,6 +76,8 @@ test("each prompt that reads the human turn separates a partner's board place fr
   }
   assert.match(ACTION_SCOPE_V2.accept, /^相手が場所だけで図形を示したときは、場所だけでは分からないことを短く伝えて形の特徴を尋ねる。それ以外は受け止めるだけ。名前に決まったとは言わない$/);
   assert.match(LUNA_ACTION_SCOPE_V2.accept, /形の特徴を尋ね、自分の図形の観察は添えない。それ以外は受け止め、判断メモにある同じ論点の自分の観察は短く添えてよい。名前に決まったとは言わない$/);
+  assert.match(HOLISTIC_V3_ACTION_SCOPE_V2.accept, /場所だけでは分からないことを短く伝えて形の特徴を尋ね/);
+  assert.match(HOLISTIC_V3_ACTION_SCOPE_V2.accept, /図形の見た目や特徴を尋ねられたときは、確かめられる範囲で直接答えてよい/);
 });
 
 // The Luna v2 path, as the public Worker builds it (createNamingTaskV2 without Jev research).

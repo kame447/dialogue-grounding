@@ -1235,6 +1235,9 @@ function choiceResponse(body:any,response:any):boolean{
 // Prompt-style update (prompt-style-20261124): the current text and the prior text are both verified exactly.
 function generationMessages(messages:any[],trace:any,execution:any,tape:any,profile:any,index:number,codes?:readonly string[],draft?:RetryDraftEvidence):boolean{
  const v=CTX.prompt,i172=v?v.i172:true;
+ if(v?.styleMode==='profile'&&!H()){
+  return generationMessagesWith(messages,trace,execution,tape,profile,FIXED_I172,{v3:[V3_TRIAL_PROFILE_I172],legacy:TRIAL_PROFILE_I172},index,codes,draft);
+ }
  if(v&&v.styleMode==='legacy'&&!CTX.v3&&!H()){
   return generationMessagesWith(messages,trace,execution,tape,profile,v.fixed,{v3:[TRIAL,TRIAL_V3_PREV],legacy:LEGACY_TRIAL},index,codes,draft);
  }
@@ -1489,6 +1492,10 @@ const FIXED_STYLE_I172={...FIXED_STYLE,
  scope:{...FIXED_STYLE.scope,accept:'相手が場所だけで図形を示したときは、場所だけでは分からないことを短く伝えて形の特徴を尋ねる。それ以外は受け止める。特徴を尋ねられたときは、確かめられる範囲で直接答えてよい。名前に決まった・対象を共同で特定できたとは言わない'}};
 const LEGACY_TRIAL_STYLE_I172={...LEGACY_TRIAL_STYLE,scope:{...LEGACY_TRIAL_STYLE.scope,accept:'相手が場所だけで図形を示したときは、場所だけでは分からないことを短く伝えて形の特徴を尋ねる。それ以外は受け止める。特徴を尋ねられたときは、確かめられる範囲で直接答えてよい。直前の図形が合意済みで相手が次の図形へ進むときは自然に応じてよいが、未解決の図形について保留・先送り・別の図形への移行を提案しない。名前に決まった・対象を共同で特定できたとは言わない'}};
 const TRIAL_STYLE_I172={...TRIAL_STYLE,scope:{...TRIAL_STYLE.scope,accept:LEGACY_TRIAL_STYLE_I172.scope.accept}};
+const TRIAL_PROFILE_I172={...LEGACY_TRIAL,
+ generator:"取り違えや取り消しは、行動がrepairであり、かつこれまでの発話にその根拠があるときだけ表明してください。",
+ scope:{repair:LEGACY_TRIAL.scope.repair}};
+const V3_TRIAL_PROFILE_I172={...TRIAL,scope:{confirm:TRIAL.scope.confirm,repair:TRIAL.scope.repair}};
 const FIXED_HOLISTIC_I172={...FIXED_STYLE_I172,generator:rep(rep(FIXED_STYLE_I172.generator,"まず相手の発話に短く応じ、必要なら全体の印象・身近なものへの見立てを1つ伝えてください。形の分析は、共通教示の分析トリガー（相手が迷い・曖昧さ・食い違いを表明したか特徴・詳細を求めた、公開対話の矛盾が未解決、または名前を確定しようとする時点で対象を1つに絞れず誤った合意の実害がある）に基づく判断に discriminatingFeature があるときだけにし、その場合も特徴は1つに絞って相手の反応を待ってください。内部に候補が複数残るだけでは分析を始めないでください。","図形全体を尋ねられた最初の説明（どんな図形か、残りはどんな形かなど）では、まず自分の観察と公開対話に根拠のある全体の見立て・印象・大まかな形を短く先に伝えてください。見立ては相手が対象の候補をつかむためのもので、特定の見立てを決まりにせず、自然な見立てが作れないときは無理に物の名前を当てはめず全体の形を伝えてかまいません。全体の見立てを述べることは、名前の提案や採用ではありません。形の分析（部分の形・つながり・配置）は、判断にdiscriminatingFeatureがあるときだけ、その特徴を1つに絞って述べて相手の反応を待ってください。最初から細部を尋ねられたときはその質問に直接答え、毎回先頭へ見立てを付けないでください。判断が求めていない部品の確認や、すでに肯定された特徴の再確認を自分から足さず、否定された見立てを新しい根拠なく繰り返さないでください。内部に候補が複数残るだけでは分析を始めないでください。"),"1回は1〜2文で返してください。口調は","1回は1〜2文で返してください（複数の図形をまとめて尋ねられたときは、求められた図形それぞれに短く答えてください）。口調は")};
 const TRIAL_HOLISTIC_I172={...TRIAL_STYLE_I172,scope:{...TRIAL_STYLE_I172.scope,accept:rep(TRIAL_STYLE_I172.scope.accept,"受け止める。特徴を尋ねられたときは、確かめられる範囲で直接答えてよい。","受け止める。図形の見た目や特徴を尋ねられたときは、確かめられる範囲で直接答えてよい。図形全体を初めて尋ねられたときは全体の見立てを先に短く、複数の図形を尋ねられたときは求められた図形それぞれに短く答える。"),confirm:rep(TRIAL_STYLE_I172.scope.confirm,"決まった・それでいこうとは言わない","判断で選ばれた特徴だけを確かめ、ほかの部品の確認を足さない。"+"決まった・それでいこうとは言わない")}};
 const FIXED_HOLISTIC_V5_I172={...FIXED_HOLISTIC_I172,
@@ -1499,7 +1506,7 @@ const FIXED_HOLISTIC_V5_I172={...FIXED_HOLISTIC_I172,
   confirm:rep(TRIAL_HOLISTIC_I172.scope.confirm,'回転に依存しない表現で','形の参照枠に関する共通教示に沿って'),
   repair:rep(TRIAL_HOLISTIC_I172.scope.repair,'回転に依存しない表現で','形の参照枠に関する共通教示に沿って')}};
 
-type PromptVersion={id:string;sources:unknown;i172:boolean;styleMode:'legacy'|'merged';
+type PromptVersion={id:string;sources:unknown;i172:boolean;styleMode:'legacy'|'merged'|'profile';
  fixed:{task:string;generator:string;concise:string;scope:Readonly<Record<string,string>>;act:string;detail:string};
  native:{common:string;referent:string;actions:Readonly<Record<string,string>>}};
 
@@ -1577,6 +1584,19 @@ const PROMPT_VERSIONS:readonly PromptVersion[]=[
  {id:'i172_eaa8e9c',i172:true,styleMode:'legacy',sources:{scheme:'complete_instruction_source_sha256',files:{'v2/dialogue-v2.mjs':'51aa2db12f9b8ebe14c7d3271a44adff7a6dcee8d601b9b4ab8c353ee1dc5769','v2/jev-turn.ts':'77619037549ac800b750b4d3ffe6fd0c342ddc1af5508050132ac19b5ffb0dd8','v2/generation-guard.ts':'f1641117798e1538a6db4ebb97e8ac33a2da14e926c405f4a7c7f6c8b751ad46','judgment/instructions.mjs':'9d686330aa34a516a1e2d95df94d0b030e7308a6463757861b9c94e561e5197a','observation/observe.ts':'469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad','local-grounding/extract.ts':'df3926ea3cbf74bcf6bf934534fe88080280c9c8c3162fa34cc33dd00545e9ce','local-grounding/jev-local-test.ts':'95e1509bd5a4dbc6f1687605d24b6848c311cb631db480adce5bc5eeed052492','decision/jev-decision.ts':'210455c2519e4148c4b72eee83790c45508cb0a7832bffdee611f6ab8f6bbf18','local-grounding/extract-ai.ts':'61c88803ddd0dd8690dadbd707afdb1111e894fb8dcc396562cd6eb85217ebd5','local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7'}},fixed:FIXED_I172,native:NATIVE_I172},
  // PR #213 (671acdb) merged with main (0673602): #172 + prompt-style-20261124 + holistic_v5 + v12.
  {id:'pr213_main_0673602',i172:true,styleMode:'merged',sources:{scheme:'complete_instruction_source_sha256',files:{'v2/dialogue-v2.mjs':'fd6d39d2df423ea6c081cb24c388e3b501050fa3a9ab3b667fc615a681909ce9','v2/jev-turn.ts':'3b2fa8480466d569caa92a703ef9671486a0d8bea61c31df20ba8bcfed4cab1c','v2/generation-guard.ts':'2fe3427e492abe2b2246236ed2bb095f3c9046578f43ae4a39e0440b36d27f10','judgment/instructions.mjs':'9d686330aa34a516a1e2d95df94d0b030e7308a6463757861b9c94e561e5197a','observation/observe.ts':'469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad','local-grounding/extract.ts':'1ba522173730b170b7d61784d99c234a051f2cc49b09fe50b3f7e5181e5527d3','local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01','decision/jev-decision.ts':'051ca0ac7b1d3091d0bc3b9fa91148a82467d4445be2180217285ecfed82d23d','local-grounding/extract-ai.ts':'e489b7ff573fdbe9e4f0adc9b6ee5f0828bd3c6835dcd8cd6555e191161594a6','local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7'}},fixed:FIXED_STYLE_I172,native:NATIVE_I172},
+ // The recorded dialogue policy selects the generation wording for this source set.
+ {id:'pr213_profile_generation',i172:true,styleMode:'profile',sources:{scheme:'complete_instruction_source_sha256',files:{
+  'v2/dialogue-v2.mjs':'45be48652de70d915a8836fafb2689cd2c169ad0b860e985b5ff53985e3ef796',
+  'v2/jev-turn.ts':'6310d664ed166cf5998814fac4ab1782b0770f96cd80f867d16f8b4b2142c332',
+  'v2/generation-guard.ts':'2fe3427e492abe2b2246236ed2bb095f3c9046578f43ae4a39e0440b36d27f10',
+  'judgment/instructions.mjs':'9d686330aa34a516a1e2d95df94d0b030e7308a6463757861b9c94e561e5197a',
+  'observation/observe.ts':'469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad',
+  'local-grounding/extract.ts':'1ba522173730b170b7d61784d99c234a051f2cc49b09fe50b3f7e5181e5527d3',
+  'local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01',
+  'decision/jev-decision.ts':'051ca0ac7b1d3091d0bc3b9fa91148a82467d4445be2180217285ecfed82d23d',
+  'local-grounding/extract-ai.ts':'e489b7ff573fdbe9e4f0adc9b6ee5f0828bd3c6835dcd8cd6555e191161594a6',
+  'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
+ }},fixed:FIXED_I172,native:NATIVE_I172},
  ...HISTORICAL_MAIN_PROMPT_SOURCES.map(({id, files}) => ({
   id, i172: false, styleMode: 'legacy' as const, sources: {scheme: 'complete_instruction_source_sha256', files: {...HISTORICAL_MAIN_SHARED_SOURCES, ...files}},
   fixed: FIXED, native: NATIVE,

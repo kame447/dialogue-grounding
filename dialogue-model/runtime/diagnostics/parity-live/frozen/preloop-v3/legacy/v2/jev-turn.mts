@@ -10,7 +10,7 @@ import { normalizeName } from "../../../../../../judgment/name-evidence.mjs";
 import { stageMemory } from "../../../../../../judgment/memory.mjs";
 import { createReferenceGraph, applyReferenceUpdate, previewReferenceUpdate, snapshotReferenceGraph, REFERENCE_LIMITS } from "../../../../../../memory/reference-graph.mjs";
 import { priorClaimViews, summarizeLocalIssues } from "../../../../../../local-grounding/derive.ts";
-import { createMemoLocalExtractor, LOCAL_EXTRACTION_INSTRUCTIONS, MEMO_LOCAL_EXTRACTION_INSTRUCTIONS } from "../../../../../../local-grounding/extract.ts";
+import { createMemoLocalExtractor, LOCAL_EXTRACTION_INSTRUCTIONS, MEMO_LOCAL_EXTRACTION_INSTRUCTIONS } from "../local-grounding/extract.mts";
 import { LOCAL_CLASSIFICATION_INSTRUCTIONS } from "../local-grounding/classify.mts";
 import type { LocalGroundingOptions, LocalOwnImage, LocalOwnAnchor, PublicTurn, LocalClaimView } from "../../../../../../local-grounding/contract.ts";
 import type { ObservationMemo, ObservationObserver, ReobservationResult } from "../../../../../../observation/contract.ts";

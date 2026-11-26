@@ -1,4 +1,4 @@
-// holistic_v3 is reproduced as it was at 80d0cfd: a tape made by that runtime replays verified here, and its S4 checks pass unedited.
+// S4 verifies the untouched historical records. Exact request replay uses the runtime that produced the tape.
 // The records come from the archived runtime of that commit; without the Git history the tests are skipped.
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -28,7 +28,7 @@ const turnsFor = (antecedent: string, s3: string) => [
 
 for (const label of ['repair-first', 'bypass-enabled'] as const) {
   for (const antecedent of ['claim_1', 'claim_2']) {
-    test(`B2 ${label} ${antecedent}: a holistic_v3 tape made at ${REVISION} replays verified and passes S4 unedited`, async t => {
+    test(`B2 ${label} ${antecedent}: a holistic_v3 tape passes current S4 and verifies only under the recorded runtime`, async t => {
       try { await gitExec('git', ['cat-file', '-e', REVISION + '^{commit}'], { cwd: gitRoot }); }
       catch (error) {
         if (error instanceof Error && 'code' in error && (error.code === 1 || error.code === 128)) { t.skip('historical Git objects are unavailable in this checkout'); return; }
@@ -46,8 +46,18 @@ for (const label of ['repair-first', 'bypass-enabled'] as const) {
       const statuses = ['shape', 'binding', 'execution', 'replay'].map(kind => checks.find(c => c.id === 'intervention.trial.0.attempt.0.' + kind)?.status);
       assert.deepEqual(statuses, ['pass', 'pass', 'pass', 'pass']);
       const { tape } = trial.replay[0];
-      const result = await pairedInterventionReplay(tape, archived.OWN as never, MODEL, JSON.parse(JSON.stringify(trial.profile)));
-      assert.equal(result.status, 'same_material_intervention_verified', JSON.stringify(result.error));
+      const recordedRuntime = await import(pathToFileURL(join(directory, 'dialogue-model/runtime/diagnostics/parity-live/intervention-replay.ts')).href) as {
+        pairedInterventionReplay: typeof pairedInterventionReplay;
+      };
+      const profile = JSON.parse(JSON.stringify(trial.profile));
+      const exactReplay = await recordedRuntime.pairedInterventionReplay(tape, archived.OWN as never, MODEL, profile);
+      assert.equal(exactReplay.status, 'same_material_intervention_verified', JSON.stringify(exactReplay.error));
+      assert.equal(exactReplay.recordedPayloadsReproduced, true);
+      const currentReplay = await pairedInterventionReplay(tape, archived.OWN as never, MODEL, profile);
+      assert.equal(currentReplay.status, 'same_material_intervention_mismatch', JSON.stringify(currentReplay.error));
+      assert.equal(currentReplay.recordedPayloadsReproduced, false);
+      assert.equal(currentReplay.commonEqual, true);
+      assert.equal(currentReplay.policyConformant, true);
     });
   }
 }

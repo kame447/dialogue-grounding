@@ -6,6 +6,7 @@ import { readFile } from 'node:fs/promises';
 import { researchTrialProfileV3 } from '../../dialogue-model/runtime/v2/research-profile.ts';
 import { createProfileDialogue } from '../../dialogue-model/runtime/diagnostics/parity-live/replay.ts';
 import { pairedInterventionReplay } from '../../dialogue-model/runtime/diagnostics/parity-live/intervention-replay.ts';
+import { promptSourceManifest } from '../../dialogue-model/runtime/diagnostics/parity-live/audit.ts';
 import { hash } from '../../dialogue-model/runtime/diagnostics/parity-verify/core.ts';
 import { createJevDecisionClient } from '../../dialogue-model/runtime/decision/jev-decision.ts';
 import type { DialoguePolicy, DraftAct } from '../../dialogue-model/runtime/decision/contract.ts';
@@ -127,6 +128,8 @@ export async function buildRecords({ label = 'repair-first' as Label, technicalT
   agreeNameScopeVersion?: AgreeNameScopeVersion;
 }) {
   const n = structuredClone(normal), tr = n.trials[0], m = n.run.manifest;
+  n.run.promptSources = await promptSourceManifest();
+  tr.identity.prompts = hash(n.run.promptSources);
   const profile = JSON.parse(JSON.stringify(researchTrialProfileV3(m.lunaRequest, m.timeouts, 'two_stage_v3', dialoguePolicy)));
   const digest = hash(profile);
   for (const s of [n.run, n.summary, tr]) { s.profile = structuredClone(profile); s.profileSha256 = digest; }

@@ -7,7 +7,7 @@ import { summarizeLocalIssues, priorClaimViews } from "../../../../../../local-g
 import { validateReferenceUpdate, previewReferenceUpdate, ReferenceGraphError } from "../../../../../../memory/reference-graph.mjs";
 import { findInternalLeaks } from "./generation-guard.mts";
 import { literalSpan } from "../../../../../../judgment/public-evidence.mjs";
-import { LOCAL_EXTRACTION_INSTRUCTIONS, LocalExtractionError, type LocalExtractionErrorCode } from "../../../../../../local-grounding/extract.ts";
+import { LOCAL_EXTRACTION_INSTRUCTIONS, LocalExtractionError, type LocalExtractionErrorCode } from "../local-grounding/extract.mts";
 import { LOCAL_CLASSIFICATION_INSTRUCTIONS, LocalClassificationError, type LocalClassificationErrorCode } from "../local-grounding/classify.mts";
 
 export const LOCAL_GROUNDING_TIMEOUT_MS = 20_000;
