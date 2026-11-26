@@ -104,6 +104,11 @@ export async function openBaseFileStore({root, ownerId, now}: {root: string; own
     await replacePrivate(file, c, true);
   }
   const participantRoleFile = (id: string) => join(root, ownerId + '.' + id + '.participant-role.json');
+  async function removeRole(id: string): Promise<void> {
+    await unlink(participantRoleFile(id)).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== 'ENOENT') throw fail();
+    });
+  }
   async function readRole(id: string): Promise<ParticipantRoleEntry | null> {
     try { return readParticipantRoleEntry(await readPrivate(participantRoleFile(id)), id); }
     catch (error) {
@@ -135,9 +140,15 @@ export async function openBaseFileStore({root, ownerId, now}: {root: string; own
     }),
     inspect: () => queued(load),
     // Idle expiry is for participant access; a researcher may classify retained records.
-    adminRecord: (id, includeParticipantRole) => queued(async () => readAdminRecord(await load(), id, includeParticipantRole)),
+    adminRecord: (id, includeParticipantRole) => queued(async () => {
+      const c = await load();
+      // The tombstone survives a failed unlink or a restart between the two writes.
+      if (c.tombstones.includes(id)) await removeRole(id);
+      return readAdminRecord(c, id, includeParticipantRole);
+    }),
     adminRecords: () => queued(async () => {
       const c = await load();
+      for (const id of c.tombstones) await removeRole(id);
       const records: LocalAdminRecord[] = [];
       for (const id of Object.keys(c.archives)) {
         const record = await readAdminRecord(c, id);
@@ -165,8 +176,12 @@ export async function openBaseFileStore({root, ownerId, now}: {root: string; own
       try {
         if (typeof id !== 'string' || !UUID.test(id)) throw fail();
         const c = await load();
+        if (c.tombstones.includes(id)) {
+          await removeRole(id);
+          return false;
+        }
         if (expired(c)) throw new BaseSessionError('owner_expired');
-        if (c.tombstones.includes(id) || !Object.hasOwn(c.archives, id)) return false;
+        if (!Object.hasOwn(c.archives, id)) return false;
         const record = c.archives[id];
         const envelope = Object.values(c.owner.admissions).find(e => e?.record?.recordId === id);
         if (!envelope) throw fail();
@@ -176,9 +191,7 @@ export async function openBaseFileStore({root, ownerId, now}: {root: string; own
         envelope.record = null; envelope.status = 'failed'; envelope.errorCode = 'record_deleted';
         c.owner.revision += 1;
         await save(c);
-        await unlink(participantRoleFile(id)).catch((error: NodeJS.ErrnoException) => {
-          if (error.code !== 'ENOENT') throw error;
-        });
+        await removeRole(id);
         return true;
       } catch (error) {
         if (error instanceof BaseSessionError && error.code === 'owner_expired') throw error;

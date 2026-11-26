@@ -9,7 +9,7 @@ import { AdminIndex } from "./admin/index-do";
 import type { ReceptionFailedStartUsage } from './admin/reception-port.ts';
 import { createReceptionAdminPort, createReceptionSettingsPort } from './admin/reception-adapter.ts';
 import { handleAdmin, isAdminPath, type AdminLimiter } from "./admin/routes.ts";
-import { summarizeRecord, type AdminSummary } from "./admin/summary.ts";
+import { summarizeRecord } from "./admin/summary.ts";
 import type { AuditEntry } from "./admin/index-store.ts";
 import { isParticipantRole, participantRoleView } from "./admin/participant-role.ts";
 import type { ParticipantRoleResult } from "./admin/participant-role.ts";
@@ -1018,8 +1018,8 @@ export default {
     if (isAdminPath(url.pathname)) {
       const index = env.ADMIN_INDEX ? env.ADMIN_INDEX.get(env.ADMIN_INDEX.idFromName(ADMIN_INDEX_NAME)) : null;
       // Internal RPC to the owning object named by the index; the participant API is never used.
-      const owner = (summary: AdminSummary) => {
-        try { return env.NAMING_SESSIONS.get(env.NAMING_SESSIONS.idFromString(summary.objectId)); } catch { return null; }
+      const owner = (objectId: string) => {
+        try { return env.NAMING_SESSIONS.get(env.NAMING_SESSIONS.idFromString(objectId)); } catch { return null; }
       };
       return handleAdmin(request, {
         token: index ? env.ADMIN_TOKEN : undefined,
@@ -1027,9 +1027,7 @@ export default {
         receptions: index ? createReceptionAdminPort({
           index,
           readSettings:() => index.readReceptionSettings(),
-          owner:objectId => {
-            try { return env.NAMING_SESSIONS.get(env.NAMING_SESSIONS.idFromString(objectId)); } catch { return null; }
-          },
+          owner,
         }) : undefined,
         receptionSettings: index ? createReceptionSettingsPort(index) : undefined,
         canResumeParticipant: async (request, recordId) => {
@@ -1045,10 +1043,24 @@ export default {
         },
         listPage: async after => {
           const { items, next } = await index!.page(after);
-          const roles = await index!.recordRoles(items.map(item => item.recordId));
-          return { items: items.map(item => {
+          const recordsByOwner = new Map<string, string[]>();
+          for (const { objectId, recordId } of items) {
+            const ids = recordsByOwner.get(objectId);
+            if (ids) ids.push(recordId);
+            else recordsByOwner.set(objectId, [recordId]);
+          }
+          const deleted = new Set((await Promise.all([...recordsByOwner].map(async ([objectId, ids]) =>
+            await owner(objectId)?.adminDeletedRecordIds(ids) ?? []))).flat());
+          if (deleted.size) {
+            // An owner deletion can commit before index removal fails. Reconcile
+            // on ordinary list reads and omit tombstoned rows even during the outage.
+            try { await index!.remove([...deleted], "admin"); } catch { /* Retry on a later list read. */ }
+          }
+          const live = items.filter(item => !deleted.has(item.recordId));
+          const roles = await index!.recordRoles(live.map(item => item.recordId), true);
+          return { items: live.flatMap(item => {
             const role = roles[item.recordId];
-            return { ...item, participantRole: participantRoleView(role === 'deleted' ? undefined : role) };
+            return role === 'deleted' ? [] : [{ ...item, participantRole: participantRoleView(role) }];
           }), next };
         },
         getSummary: async (recordId, includeParticipantRole) => {
@@ -1057,12 +1069,12 @@ export default {
           const role = (await index!.recordRoles([recordId]))[recordId];
           return { ...summary, participantRole: participantRoleView(role === 'deleted' ? undefined : role) };
         },
-        setParticipantRole: async (summary, role) => await owner(summary)?.adminSetParticipantRole(summary.recordId, role)
+        setParticipantRole: async (summary, role) => await owner(summary.objectId)?.adminSetParticipantRole(summary.recordId, role)
           ?? { ok: false, error: 'not_found' },
-        getRecord: async (summary) => (await owner(summary)?.adminRecord(summary.recordId)) ?? null,
+        getRecord: async (summary) => (await owner(summary.objectId)?.adminRecord(summary.recordId)) ?? null,
         // Record first, then its index entry (with a content-free audit entry); both steps are idempotent.
         deleteRecord: async (summary) => {
-          const session = owner(summary);
+          const session = owner(summary.objectId);
           if (!session) throw new Error("invalid_object");
           await session.adminDelete(summary.recordId);
           await index!.remove([summary.recordId], "admin");
@@ -1070,7 +1082,7 @@ export default {
         audit: async () => (await index!.audit()) as AuditEntry[],
         summarizeLatency,
         prepareNext: async summary => {
-          const session = owner(summary); if (!session) throw new BaseSessionError('not_found');
+          const session = owner(summary.objectId); if (!session) throw new BaseSessionError('not_found');
           return await session.adminPrepareNext(summary.recordId);
         },
       });

@@ -68,7 +68,8 @@ function rpc(target: any, control: IndexControl) {
 function harness() {
   const stores = new Map<string, ReturnType<typeof memory>>(), objects = new Map<string, any>(), tasks = new Map<string, any>(), inputs: any[] = [];
   const pending: Promise<unknown>[] = []; let modelCalls = 0;
-  const indexStorage = memory(), index = new AdminIndex({ storage: indexStorage }, {});
+  const indexStorage = memory();
+  let index = new AdminIndex({ storage: indexStorage }, {});
   const control: IndexControl = { down: false, indexRemovalUnavailable: false };
   const objectEnv: any = { BASE_ASSIGNMENT_JSON: JSON.stringify(config()), RECEPTION_REQUIRED: 'on',
     ADMIN_INDEX: { idFromName: (id: string) => id, get: () => rpc(index, control) },
@@ -101,12 +102,13 @@ function harness() {
     ADMIN_TOKEN: adminToken, ADMIN_RATE_LIMIT: { async limit() { return { success: true }; } },
     ASSETS: { async fetch() { return new Response('<html></html>'); } }, START_RATE_LIMIT: { async limit() { return { success: true }; } },
     QUESTIONNAIRE_RATE_LIMIT: { async limit() { return { success: true }; } } };
-  const h = { index, indexStorage, control, tasks, inputs, get, stores,
+  const h = { get index() { return index; }, indexStorage, control, tasks, inputs, get, stores,
     edge: (r: Request) => edge.fetch(r, env) as Promise<Response>,
     async browser() { const r = await edge.fetch(req('/'), env); assert.equal(r.status, 200); return r.headers.get('set-cookie')!.split(';')[0]; },
     object: (cookie: string) => get(cookie.split('=')[1]),
     snapshot: (cookie: string) => stores.get(cookie.split('=')[1])!.snapshot(),
     evict() { objects.clear(); },
+    evictIndex() { index = new AdminIndex({ storage: indexStorage }, {}); },
     async done() { await Promise.all(pending); assert.equal(modelCalls, 0); },
     async protocol(patch: Record<string, unknown> = {}) {
       const current = (await index.readReceptionSettings()).protocol;
@@ -566,6 +568,46 @@ function setBatchRole(h: H, receptionId: string, role: string, shownIds: readonl
   for (const id of shownIds) form.append('recordId', id);
   return admin(h, `/admin/reception/${receptionId}/participant-role`, form, { Accept: 'application/json' });
 }
+
+test('#209 deletion: ordinary admin list reads hide a tombstoned trial and finish index cleanup after restart', async () => {
+  const { h, cookie, first, second } = await deletionFixture(true);
+  const receptionId = reception(h, cookie).receptionId;
+  assert.equal((await setBatchRole(h, receptionId, 'ai', [first, second])).status, 200);
+  const summary = await h.index.get(second);
+  h.control.indexRemovalUnavailable = true;
+  const attempt = await removeTrial(h, second).catch(() => null);
+  assert.ok(!attempt || attempt.status >= 500);
+  assert.ok(h.snapshot(cookie).tombstones.includes(second));
+
+  async function checkList() {
+    const response = await admin(h, '/admin?role=ai');
+    assert.equal(response.status, 200);
+    const text = await response.text();
+    assert.ok(text.includes(adminRecordPath(first)));
+    assert.ok(!text.includes(adminRecordPath(second)));
+  }
+  await checkList();
+  assert.equal((await h.indexStorage.get(roleKey(second))).role, 'ai', 'index cleanup is still unavailable');
+  assert.deepEqual(await h.index.audit(), []);
+
+  h.control.indexRemovalUnavailable = false;
+  h.evict();
+  h.evictIndex();
+  const history = await h.edge(req('/api/sessions', undefined, cookie));
+  assert.equal(history.status, 200);
+  assert.equal((await h.indexStorage.get(roleKey(second))).role, 'ai', 'participant reads leave index repair to admin');
+  await checkList();
+  assert.equal(await h.index.get(second), null);
+  assert.equal(await h.indexStorage.get(roleKey(second)), undefined);
+  assert.equal((await h.indexStorage.get(roleKey(first))).role, 'ai');
+  assert.equal((await admin(h, adminRecordPath(second) + '.json')).status, 404);
+  assert.equal(await h.index.upsert(summary), false);
+  const audit = await h.index.audit();
+  assert.deepEqual(audit.map((entry: any) => [entry.recordHash, entry.reason]), [[await recordHash(second), 'admin']]);
+  await checkList();
+  assert.deepEqual(await h.index.audit(), audit);
+  await h.done();
+});
 
 test('#209 role integration: batch before deletion classifies both records and deletion removes just its target', async t => {
   const { h, cookie, first, second } = await deletionFixture(true);

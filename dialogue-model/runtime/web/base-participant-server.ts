@@ -155,7 +155,7 @@ export function createBaseParticipantServer(options: Record<string, any> = {}) {
       return { receptionMode: 'off', sessions: sortBrowserSessions(summaries) };
     });
   }
-  async function lookupRecord(id:string, includeParticipantRole = false) {
+  async function lookupRecord(id:string, includeParticipantRole = false, deletingRecord = false) {
     for (const owner of await listBaseOwners(baseStoreRoot)) {
       const store = (await entry(owner)).store;
       if (includeParticipantRole) {
@@ -164,6 +164,8 @@ export function createBaseParticipantServer(options: Record<string, any> = {}) {
       } else {
         const record = await store.readRecord(id);
         if (record) return { owner, record, questionnaire: null, participantRole: undefined };
+        // A confirmed retry may finish removing a role file after the trial was already deleted.
+        if (deletingRecord) await store.adminRecord(id, false);
       }
     }
     return null;
@@ -205,6 +207,7 @@ export function createBaseParticipantServer(options: Record<string, any> = {}) {
         const init:any={method:req.method,headers}; if(req.method!=='GET'&&req.method!=='HEAD'){init.body=req;init.duplex='half';}
         const request=new Request(url,init);
         const preparingNext=req.method==='POST'&&/^\/admin\/record\/[^/]+\/prepare-next$/u.test(url.pathname);
+        const deletingRecord = req.method === 'POST' && /^\/admin\/record\/[^/]+\/delete$/u.test(url.pathname);
         let response: Response;
         try { response=await handleAdmin(request,{token:adminToken,limiter:adminLimiter,retentionDays:0,
           listPage: async () => {
@@ -217,7 +220,7 @@ export function createBaseParticipantServer(options: Record<string, any> = {}) {
             return { items, next: null };
           },
           getSummary:async (id, includeParticipantRole)=>{
-            const found=await lookupRecord(id, includeParticipantRole);
+            const found=await lookupRecord(id, includeParticipantRole, deletingRecord);
             if(!found&&preparingNext)for(const owner of await listBaseOwners(baseStoreRoot)){
               const saved=await (await entry(owner)).store.inspect();
               if(saved.tombstones.includes(id))throw new BaseSessionError('not_found');

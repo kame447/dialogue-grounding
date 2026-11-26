@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import fs from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -12,6 +14,9 @@ const cli = fileURLToPath(new URL('../dialogue-model/runtime/diagnostics/partici
 const authorization = { Authorization: 'Bearer ' + ADMIN };
 const rolePath = (id: string) => '/admin/record/' + id + '/participant-role';
 const view = (role: string) => ({ schemaVersion: 'participant_role_v1', role });
+const remove = (w: Awaited<ReturnType<typeof web>>, id: string) =>
+  fetch(w.base() + '/admin/record/' + id + '/delete', { method: 'POST', redirect: 'manual',
+    headers: { ...authorization, Origin: w.base() }, body: new URLSearchParams({ confirm: id }) });
 
 async function set(w: Awaited<ReturnType<typeof web>>, id: string, role: string, auth = true): Promise<Response> {
   return fetch(w.base() + rolePath(id), { method: 'POST', redirect: 'manual',
@@ -73,10 +78,55 @@ test('I209 local delete removes the separate role file and rejects delayed updat
   assert.equal(r.status, 200);
   const id = (await r.json()).trial.sessionId;
   assert.equal((await set(w, id, 'ai')).status, 200);
-  const deleted = await fetch(w.base() + '/admin/record/' + id + '/delete', { method: 'POST', redirect: 'manual',
-    headers: { ...authorization, Origin: w.base() }, body: new URLSearchParams({ confirm: id }) });
+  const deleted = await remove(w, id);
   assert.equal(deleted.status, 303);
   assert.ok(!(await readdir(w.storeRoot)).some(file => file.endsWith('.participant-role.json')));
   assert.equal((await set(w, id, 'human')).status, 404);
   assert.equal((await w.request(rolePath(id), undefined, authorization, false)).status, 404);
 });
+
+for (const recovery of ['delete retry', 'admin list after restart']) {
+  test(`I209 local role cleanup resumes through ${recovery} after a failed unlink`, async t => {
+    const w = await web(t);
+    await w.page();
+    const start = await w.request('/api/start', { version: 2 });
+    assert.equal(start.status, 200);
+    const id = (await start.json()).trial.sessionId;
+    await w.tasks[0].complete();
+    assert.equal((await set(w, id, 'ai')).status, 200);
+    const names = await readdir(w.storeRoot);
+    const ownerPath = join(w.storeRoot, names.find(name => name.endsWith('.owner.json'))!);
+    const rolePathOnDisk = join(w.storeRoot, names.find(name => name.endsWith('.' + id + '.participant-role.json'))!);
+    const roleBefore = await readFile(rolePathOnDisk);
+    const unlink = fs.unlink;
+    let fired = false;
+    fs.unlink = async path => {
+      if (path === rolePathOnDisk && !fired) {
+        fired = true;
+        throw Object.assign(new Error('synthetic role unlink failure'), { code: 'EIO' });
+      }
+      return unlink(path);
+    };
+    syncBuiltinESMExports();
+    try { assert.equal((await remove(w, id)).status, 409); }
+    finally { fs.unlink = unlink; syncBuiltinESMExports(); }
+    assert.equal(fired, true);
+    const deletedOwner = await readFile(ownerPath);
+    const saved = JSON.parse(deletedOwner.toString('utf8'));
+    assert.ok(saved.tombstones.includes(id));
+    assert.equal(saved.archives[id], undefined);
+    assert.deepEqual(await readFile(rolePathOnDisk), roleBefore);
+
+    if (recovery === 'delete retry') {
+      assert.equal((await remove(w, id)).status, 404, 'already deleted trial retains the existing response');
+    } else {
+      await w.restart();
+      const list = await w.request('/admin?role=ai', undefined, authorization, false);
+      assert.equal(list.status, 200);
+      assert.ok(!(await list.text()).includes('/admin/record/' + id));
+    }
+    await assert.rejects(stat(rolePathOnDisk), { code: 'ENOENT' });
+    assert.deepEqual(await readFile(ownerPath), deletedOwner);
+    assert.equal((await set(w, id, 'human')).status, 404);
+  });
+}
