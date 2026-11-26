@@ -375,4 +375,15 @@ for (const label of ['bypass-enabled', 'repair-first'] as const) {
     assert.equal((await names(v10, '輪が台に接している形です。')).length, 0, 'v10 (scoped_v5) waits for an answer to a statement');
     assert.equal((await names(undefined, '輪が台に接している形ですか？')).length, 0);
   });
+  // audit 28: a request ("…か教えてください") that extraction dropped may be the question, so the confirm still waits for the answer.
+  test(`${label}: a confirm whose request sentence was not extracted still waits for the answer in v11 (audit 28)`, async () => {
+    const speech = 'こちらの図では輪の縁に切れ目があります。そちらの輪にも切れ目があるか教えてください。';
+    const turns: Turn[] = [{ human: '輪の形を見比べたいです。', plan: { action: 'confirm', target: 'figure_0', referent: 'figure_0', speech, aiActs: ['assert'],
+        aiExtraction: JSON.stringify([seg('s1', 'こちらの図では輪の縁に切れ目があります。', 'part', [first])]) } },
+      { human: '切れ目のない方の輪は「月枠」と呼びませんか？', plan: { action: 'confirm', target: 'figure_0', referent: 'figure_0', name: alias, act: 'name_propose',
+        extraction: JSON.stringify([seg('s1', '切れ目のない方の輪は「月枠」と呼びませんか？', 'name', [], alias)]), speech: '輪が細い棒につながる形ですか？' } }];
+    const record = await buildRecords({ label, dialoguePolicy: 'holistic_v5', technicalTrial: { version: 'adaptive_repair_v3' }, turns });
+    assert.deepEqual(record.trials[0].lastCommittedState.judgments.at(-1).jevTurn.agreeNames, []);
+    assert.deepEqual(statuses(record), passed);
+  });
 }
