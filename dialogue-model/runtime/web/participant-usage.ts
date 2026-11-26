@@ -260,6 +260,6 @@ function choicePhase(payload: unknown): string {
   if (keys.includes('human_referent')) return 'human_referent';
   if (keys.includes('action')) return 'action_target';
   if (keys.some(key => key.endsWith('_support'))) return 'ai_support';
-  if (keys.some(key => ['name', 'feature', 'observation', 'discriminating_feature', 'aspect'].includes(key))) return 'detail';
+  if (keys.some(key => ['name', 'feature', 'observation', 'discriminating_feature', 'aspect', 'shared_construal', 'observe_targets'].includes(key))) return 'detail';
   return 'choice';
 }
