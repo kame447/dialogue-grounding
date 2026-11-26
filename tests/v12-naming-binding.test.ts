@@ -57,12 +57,13 @@ test("a part description without an answer link cannot establish the naming targ
   }
 });
 
-function verifyReply(prior: LocalClaimView, act: "agree" | "deny", bindDirectQuestionReplies: boolean, respondsToTurn = 3) {
+function verifyReply(prior: LocalClaimView, act: "agree" | "deny", bindDirectQuestionReplies: boolean, respondsToTurn = 3,
+  targets = [other]) {
   const graph = { ...createReferenceGraph({ slots }), lastTurn: 4, records: [
     { ...prior, kind: "claim" as const },
   ] };
   const quote = act === "deny" ? "いいえ、棒はありません。" : "はい、細い棒があります。";
-  const segment: LocalSegmentProposal = { segmentId: "seg", quote, targets: [other], aspect: "part", proposition: quote,
+  const segment: LocalSegmentProposal = { segmentId: "seg", quote, targets, aspect: "part", proposition: quote,
     name: null, linkedIssueId: null, respondsToTurn };
   const verdict: LocalFunctionVerdict = { segmentId: "seg", act, respondsToClaimId: prior.id,
     rawScore: null, answersChecked: act === "agree" ? "yes" : "no" };
@@ -73,20 +74,22 @@ function verifyReply(prior: LocalClaimView, act: "agree" | "deny", bindDirectQue
 
 test("only a direct affirmation or denial of a public singleton question takes its verified target", () => {
   for (const act of ["agree", "deny"] as const) {
-    const old = verifyReply(question, act, false);
-    assert.deepEqual(old.operations, []);
-    assert.equal(old.rejected[0]?.reason, "inconsistent_claim_response");
-    const current = verifyReply(question, act, true);
-    assert.deepEqual(current.rejected, []);
-    assert.deepEqual(current.operations.map(c => [c.act, c.aspect, c.targets, c.respondsTo]),
-      [[act, "question", [figure], question.id]]);
+    for (const targets of [[other], [other, figure], [figure, other]]) {
+      const old = verifyReply(question, act, false, 3, targets);
+      assert.deepEqual(old.operations, []);
+      assert.equal(old.rejected[0]?.reason, "inconsistent_claim_response");
+      const current = verifyReply(question, act, true, 3, targets);
+      assert.deepEqual(current.rejected, []);
+      assert.deepEqual(current.operations.map(c => [c.act, c.aspect, c.targets, c.respondsTo]),
+        [[act, "question", [figure], question.id]]);
+    }
     assert.deepEqual(verifyReply({ ...question, targets: [figure, slots[2]] }, act, true).operations, []);
     assert.deepEqual(verifyReply(question, act, true, 2).operations, []);
   }
 });
 
 test("a later question does not erase a denied target, but a confirmed public repair can", () => {
-  const verified = verifyReply(question, "deny", true).operations[0];
+  const verified = verifyReply(question, "deny", true, 3, [other, figure]).operations[0];
   assert.ok(verified);
   const denial = { ...verified, turn: 4 };
   const laterDescription = { ...description, id: "6:pub1", issueId: "6:pub1", sourceTurn: 5, turn: 6 };
@@ -131,7 +134,7 @@ for (const label of ["repair-first", "bypass-enabled"] as const) {
       { human: denial, plan: {
         action: "repair", target: "figure_0", referent: "figure_0", speech: repairedDescription + repairedQuestion,
         act: "deny", antecedent: "claim_1", answers: "not_an_answer",
-        extraction: JSON.stringify([segment("denial", denial, "contour", [mistaken], 2)]),
+        extraction: JSON.stringify([segment("denial", denial, "contour", [mistaken, own], 2)]),
         aiActs: ["assert", "ask"], aiExtraction: JSON.stringify([
           segment("part", repairedDescription, "part", [own]), segment("check", repairedQuestion, "question", [own]),
         ]),

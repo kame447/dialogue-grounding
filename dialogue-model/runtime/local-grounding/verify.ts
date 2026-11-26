@@ -154,13 +154,13 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     const checkedFigure = prior && (referenceQuestionBindings?.get(prior.id) ?? (prior.source === AI_BOUND_SOURCE ? prior.targets[0] : undefined));
     const boundQuestion = checkedFigure && prior?.act === "ask" && previousClaims.includes(prior) &&
       prior.targets.length === 1 && prior.targets[0] === checkedFigure ? prior : null;
-    // The question, rather than a conflicting extraction target, defines what
-    // a verified direct affirmation or denial answers.
+    // The question defines the target of a direct affirmation or denial, even
+    // when the extraction also includes other figures.
     if (bindDirectQuestionReplies && prior?.act === "ask" && previousClaims.includes(prior) &&
         (act === "agree" || act === "deny") && name === null &&
         isFigureReplyAspect(aspect) && isFigureReplyAspect(prior.aspect) && prior.targets.length === 1 &&
         (segment.respondsToTurn === null || segment.respondsToTurn === prior.sourceTurn) &&
-        targets.length > 0 && !targets.includes(prior.targets[0])) {
+        targets.length > 0 && (targets.length !== 1 || targets[0] !== prior.targets[0])) {
       targets = [...prior.targets];
     }
     // v12: the classifier's closed label stands in for the quote's pointing words; every other condition below (agree, no name, the question's only figure, nothing opposing) is unchanged.
