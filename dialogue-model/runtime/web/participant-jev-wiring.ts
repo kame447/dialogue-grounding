@@ -166,7 +166,7 @@ export function participantLunaClient(client:ChatClient,ledger:JevResearchLedger
     if (options.signal?.aborted) throw Object.assign(Error('aborted'),{name:'AbortError'});
     if (ledger instanceof ParticipantUsageLedger) {
       const phase = ['generation','final_submission','ai_extraction'].includes(options.phase) ? options.phase : 'dialogue';
-      return ledger.logical('luna', phase, () => timed.complete(messages,options));
+      return ledger.logical(ledger.chatProvider(phase), phase, () => timed.complete(messages,options));
     }
     ledger.beforeSend();ledger.lunaCalls++;
     const parent=scope(ledger).getStore(),phase=options.phase ?? null;

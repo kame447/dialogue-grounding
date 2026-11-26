@@ -98,6 +98,7 @@ function harness(enabled = true, selectedProtocol: typeof protocol & {
   const env = {
     PARTICIPANT_TERRA_ENABLED: enabled ? 'on' : 'off',
     PARTICIPANT_TERRA_PROFILE: PARTICIPANT_PRODUCTION_PROFILE as string | undefined,
+    PARTICIPANT_TERRA_GENERATION_ENABLED: undefined as string | undefined,
     PARTICIPANT_TERRA_LIMITS_JSON: JSON.stringify(approvedLimits),
     PARTICIPANT_TERRA_INITIAL_OBSERVATION_GENERATION: undefined as string | undefined,
     V2_UTTERANCE_STYLE: 'concise',
@@ -131,6 +132,8 @@ function harness(enabled = true, selectedProtocol: typeof protocol & {
         return mock(controlled.luna, text);
       },
       async participantUsagePolicy() { return this.participantPolicy(); },
+      participantUsagePolicyV2: undefined as (() => Promise<unknown>) | undefined,
+      participantUsageGeneration: undefined as ((body: unknown, expected: string) => Promise<any>) | undefined,
       participantInitialObservationPolicy: undefined as (() => Promise<unknown>) | undefined,
       async participantUsageChat(body: any, expected: string) {
         const overridden = await controlled.usageChat?.(body, expected);
@@ -407,6 +410,118 @@ test('a structured reception keeps its version and second condition across a pro
   assert.equal(posts, 1);
 });
 
+test('a Luna approval still uses Luna after Terra becomes the new default, including restore and condition two', async () => {
+  const h = harness();
+  await h.receive();
+  await h.approve();
+  h.env.PARTICIPANT_TERRA_GENERATION_ENABLED = 'on';
+  h.env.PARTICIPANT_AI_PROXY.participantUsagePolicyV2 = async () => assert.fail('saved Luna requires the original policy');
+  const first = (await jsonOk(await h.start())).trial;
+  h.evict();
+  assert.equal((await jsonOk(await h.request('state'))).trial.sessionId, first.sessionId);
+  await h.complete(first.sessionId, first);
+  const second = (await jsonOk(await h.start(first.sessionId))).trial;
+  await jsonOk(await h.request('message', { expectedRecordId: second.sessionId, text: '三角の部分があります。' }));
+  await h.idle();
+  for (const id of [first.sessionId, second.sessionId]) {
+    const saved = await h.storage.get('record:' + id);
+    assert.deepEqual(saved.options.participantModelPin, pin);
+    assert.equal(saved.jevLedger.latest.luna.model, pin.lunaModelId);
+    assert.equal(Object.hasOwn(saved.jevLedger.phases.terra, 'generation'), false);
+  }
+});
+
+test('new Terra approval routes generation and final submissions to exact Terra in both conditions', async t => {
+  const h = harness();
+  const generationPin = { ...pin, schemaVersion: 'participant_model_pin_v2', generationModelId: pin.terraModelId };
+  const proxy = new InternalParticipantProxy({}, settings);
+  h.env.PARTICIPANT_TERRA_GENERATION_ENABLED = 'on';
+  await h.receive();
+  await assert.rejects(h.approve(), { code: 'reception_unavailable' });
+  const lookupGenerationPin = () => proxy.participantUsagePolicyV2();
+  h.env.PARTICIPANT_AI_PROXY.participantUsagePolicyV2 = lookupGenerationPin;
+  h.env.PARTICIPANT_AI_PROXY.participantUsageGeneration = (body, expected) => proxy.participantUsageGeneration(body, expected);
+  h.env.PARTICIPANT_TERRA_ENABLED = 'off';
+  await assert.rejects(h.approve(), { code: 'reception_unavailable' });
+  h.env.PARTICIPANT_TERRA_ENABLED = 'on';
+  const posts: string[] = [];
+  const text = 'そうなんですね、教えてくれてありがとう。';
+  t.mock.method(globalThis, 'fetch', async (_url: unknown, init: RequestInit) => {
+    const body = JSON.parse(String(init.body));
+    assert.equal(body.model, pin.terraModelId);
+    assert.ok(body.messages.every((message: { content: unknown }) => typeof message.content === 'string'));
+    const final = String(body.messages.at(-1).content).includes('JSON');
+    posts.push(final ? 'final_submission' : 'generation');
+    const visual = h.calls.find(call => call.kind === 'visual_observation');
+    const { ownAnchors } = JSON.parse(visual?.body.messages[1].content) as { ownAnchors: Array<{ id: string }> };
+    return Response.json({
+      ...chatResponse(pin.terraModelId, final ? JSON.stringify(Object.fromEntries(ownAnchors.map(({ id }) => [id, '合成名']))) : text),
+      usage: { cost: 0.021, prompt_tokens: 17, completion_tokens: 6 },
+    });
+  });
+  const approved = await h.approve();
+  assert.deepEqual(approved.plan.participantModelPin, generationPin);
+  h.env.PARTICIPANT_TERRA_GENERATION_ENABLED = 'off';
+  let predecessor: string | undefined;
+  for (const strategy of ['bypass-enabled', 'repair-first']) {
+    const before = await h.storage.get('reception:v1');
+    const owner = await h.storage.get('base:owner:v1');
+    const other = 'gpt-6.1-terra-2026-11-02';
+    h.env.PARTICIPANT_AI_PROXY.participantUsagePolicyV2 = async () => ({ ...generationPin, terraModelId: other, generationModelId: other });
+    assert.equal((await h.start(predecessor)).status, 409);
+    assert.deepEqual(await h.storage.get('reception:v1'), before);
+    assert.deepEqual(await h.storage.get('base:owner:v1'), owner);
+    h.env.PARTICIPANT_AI_PROXY.participantUsagePolicyV2 = lookupGenerationPin;
+    const { trial } = await jsonOk(await h.start(predecessor));
+    h.controlled.observe = true;
+    await jsonOk(await h.request('message', { expectedRecordId: trial.sessionId, text: '三角の部分があります。' }));
+    await h.idle();
+    const state = (await jsonOk(await h.request('state'))).trial;
+    assert.ok(state.events.some((event: { text: string }) => event.text === text));
+    await h.complete(trial.sessionId, state);
+    const saved = await h.storage.get('record:' + trial.sessionId);
+    assert.equal(saved.strategy, strategy);
+    assert.deepEqual(saved.options.participantModelPin, generationPin);
+    assert.ok(saved.requests.some((row: any) => row.kind === 'generation' && row.model === pin.terraModelId));
+    const { phases, latest } = saved.jevLedger;
+    assert.equal(latest.terra.model, pin.terraModelId);
+    assert.equal(latest.terra.phase, 'final_submission');
+    assert.equal(latest.jev.model, pin.jevModelId);
+    assert.ok(phases.luna.ai_extraction.posts > 0);
+    assert.equal(latest.luna.model, pin.lunaModelId);
+    for (const phase of ['generation', 'final_submission']) {
+      const meter = phases.terra[phase];
+      assert.deepEqual([meter.calls, meter.posts, meter.knownUsd, meter.inputTokens, meter.outputTokens], [1, 1, 0.021, 17, 6]);
+    }
+    assert.ok(phases.terra.reobservation.posts > 0);
+    h.evict();
+    assert.equal((await jsonOk(await h.request('state'))).trial.sessionId, trial.sessionId);
+    predecessor = trial.sessionId;
+  }
+  assert.deepEqual(posts, ['generation', 'final_submission', 'generation', 'final_submission']);
+});
+
+test('private Terra generation closes on missing configuration, wrong expected ID and wrong actual ID', async t => {
+  const proxy = new InternalParticipantProxy({}, settings);
+  const unavailable = new InternalParticipantProxy({}, { ...settings, PARTICIPANT_MODEL_PIN_JSON: undefined });
+  const body = { purpose: 'dialogue_turn', messages: [{ role: 'user', content: '合成発話' }], model: pin.lunaModelId };
+  let returned: unknown, posts = 0;
+  t.mock.method(globalThis, 'fetch', async (_url: unknown, init: RequestInit) => {
+    posts++;
+    assert.equal(JSON.parse(String(init.body)).model, pin.terraModelId);
+    return Response.json(chatResponse(returned, '非公開の模擬応答'));
+  });
+  assert.equal(await unavailable.participantUsagePolicyV2(), null);
+  assert.equal((await unavailable.participantUsageGeneration(body, pin.terraModelId)).status, 503);
+  assert.equal((await proxy.participantUsageGeneration(body, pin.lunaModelId)).status, 409);
+  assert.equal((await proxy.participantUsageGeneration({ ...body, purpose: 'visual_observation' }, pin.terraModelId)).status, 400);
+  assert.equal(posts, 0);
+  for (returned of [undefined, pin.lunaModelId]) {
+    assert.deepEqual(await proxy.participantUsageGeneration(body, pin.terraModelId), { status: 502, data: { error: 'model_mismatch' } });
+  }
+  assert.equal(posts, 2);
+});
+
 test('a proxy without the structured capability cannot approve or use up the first trial', async () => {
   const h = harness();
   const generation = INITIAL_OBSERVATION_STRUCTURED_V1;
@@ -467,18 +582,19 @@ test('a reserved initial observation can settle after its assignment is marked i
   assert.equal(sends, 1);
 });
 
-test('a failed start before reservation has no usage journal in the reception export', async () => {
+test('an unavailable saved policy leaves the reception and usage journal unchanged', async () => {
   const h = harness();
   await h.receive();
   const { receptionId } = await h.approve();
   h.controlled.policy = null;
+  const before = await h.storage.get('reception:v1');
+  const owner = await h.storage.get('base:owner:v1');
   assert.equal((await h.start()).status, 409);
   h.evict();
   const snapshot = await jsonOk(await h.admin('/admin/reception/' + receptionId + '/usage.json'));
-  const { assignmentId, trialIndex, errorCode, usage } = snapshot.failedStarts[0];
-  assert.equal(snapshot.failedStarts.length, 1);
-  assert.match(assignmentId, /^[0-9a-f-]+$/u);
-  assert.deepEqual({ trialIndex, errorCode, usage }, { trialIndex: 0, errorCode: 'initialization_failed', usage: null });
+  assert.deepEqual(snapshot.failedStarts, []);
+  assert.deepEqual(await h.storage.get('reception:v1'), before);
+  assert.deepEqual(await h.storage.get('base:owner:v1'), owner);
   assert.equal(h.calls.length, 0);
 });
 

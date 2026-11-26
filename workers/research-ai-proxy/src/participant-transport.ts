@@ -3,7 +3,7 @@ import { MODEL_CONTRACT_V2 } from '../../../dialogue-model/runtime/model-identit
 // Private Service-binding transport. Never exposed through the Worker's fetch handler.
 import { DECISION_MODELS, OPENROUTER_DECISIONS_URL, decisionConfig } from './decisions.mjs';
 import { resolvePurposeModel } from './modelPolicy.mjs';
-import { requireExactParticipantModel, validateParticipantModelPin } from '../../../dialogue-model/runtime/v2/participant-model-pin.ts';
+import { requireExactParticipantModel, validateParticipantModelPin, type GenerationParticipantModelPin } from '../../../dialogue-model/runtime/v2/participant-model-pin.ts';
 
 type ParticipantEnvironment = {
   PARTICIPANT_MODEL_PIN_JSON?: string;
@@ -24,6 +24,7 @@ const failure = (status: number, error: string) => ({ status, data: { error } })
 export function configuredParticipantPin(env: ParticipantEnvironment) {
   try {
     const pin = validateParticipantModelPin(JSON.parse(env.PARTICIPANT_MODEL_PIN_JSON ?? 'null'));
+    if (pin.schemaVersion !== 'participant_model_pin_v1') return null;
     const luna = resolvePurposeModel({ purpose: 'dialogue_turn' }, env).model;
     const terra = resolvePurposeModel({ purpose: 'visual_observation' }, env).model;
     const jev = decisionConfig(env);
@@ -34,6 +35,12 @@ export function configuredParticipantPin(env: ParticipantEnvironment) {
         typeof terra !== 'string' || !['gpt-6.1-terra', pin.terraModelId].includes(terra)) return null;
     return pin;
   } catch { return null; }
+}
+
+export function configuredParticipantGenerationPin(env: ParticipantEnvironment): GenerationParticipantModelPin | null {
+  const pin = configuredParticipantPin(env);
+  if (!pin) return null;
+  return { ...pin, schemaVersion: 'participant_model_pin_v2', generationModelId: pin.terraModelId };
 }
 
 const MAX_BODY = 1024 * 1024;

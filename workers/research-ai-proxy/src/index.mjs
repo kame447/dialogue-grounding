@@ -212,7 +212,8 @@ async function handleDecisions(request, env, fetchImpl, route = DECISION_ROUTE) 
 }
 
 export async function handleRequest(request, env, fetchImpl = globalThis.fetch, expectedModel = /** @type {string|null} */ (null), usageOnly = false,
-  /** @type {((usage: import('./participant-usage-fields.ts').VerifiedParticipantUsage) => void) | undefined} */ onRejectedUsage = undefined) {
+  /** @type {((usage: import('./participant-usage-fields.ts').VerifiedParticipantUsage) => void) | undefined} */ onRejectedUsage = undefined,
+  sendExactModel = false) {
   const pathname = new URL(request.url).pathname;
   if (!["/health", "/v1/chat/completions", "/v1/model-policy", "/v1/decisions", "/v1/decision-policy", "/v1/grounding-evidence", "/v1/grounding-policy"].includes(pathname)) {
     return reply(404, { error: "not_found" });
@@ -288,7 +289,8 @@ export async function handleRequest(request, env, fetchImpl = globalThis.fetch, 
       body.initial_observation_generation !== INITIAL_OBSERVATION_STRUCTURED_V1)) {
     return reply(400, { error: "invalid_request" });
   }
-  const payload = validatedPayload(body, selected.model, env, structured);
+  const model = sendExactModel && expectedModel !== null ? expectedModel : selected.model;
+  const payload = validatedPayload(body, model, env, structured);
   if (!payload) return reply(400, { error: "invalid_request" });
   if (expectedModel !== null && selected.purpose === "dialogue_turn" &&
       payload.messages.some(message => typeof message.content !== "string")) {
@@ -338,7 +340,7 @@ export async function handleRequest(request, env, fetchImpl = globalThis.fetch, 
         return rejected(502, "invalid_upstream_response");
       }
     }
-    const result = sanitizeResult(data, selected.model, expectedModel !== null && usageOnly);
+    const result = sanitizeResult(data, model, expectedModel !== null && usageOnly);
     if (result && expectedModel !== null) {
       const { message, finish_reason } = result.choices[0];
       if (Array.isArray(message.content)) {
