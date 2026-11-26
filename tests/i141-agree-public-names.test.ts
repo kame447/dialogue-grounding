@@ -66,11 +66,12 @@ test('(e) omitted agreeNames preserves the pre-change serialized payload bytes',
   const v = input();
   const payloads = [buildJevDecisionPayload(v), buildJevDecisionDetailPayload(v, { action: 'agree', target }),
     buildJevDecisionDetailPayload(v, { action: 'propose_name', target })];
-  // Captured from main 5302bda before implementation; never regenerated in a test.
+  // Captured from main 5302bda before implementation; never regenerated in a test. Re-pinned for #172, whose only
+  // change is the shared partner-position line in Jev's instructions (removing it reproduces the 5302bda bytes).
   assert.deepEqual(payloads.map(p => createHash('sha256').update(JSON.stringify(p)).digest('hex')), [
-    '437787ed45d50fa2d58dbda28df9c13eca40287fd3c43121be9626200cac39bb',
-    '84cf20b0f40aa5e87082a52bbd15ffcc0bd1d7bfddbe1de22e98ce802e032802',
-    '21dabc57a648a179914536819ea5810cf4be1d36a0f93a21873b6672f4c356f9',
+    'c1ec1cd19414fe3b957a78b277ded13d53dc12bbc69ec93f33c33deee713c731',
+    '76e43c0229730ce1e7b601c65f49e1fcc7c65280e1f1e3ba94620ab9f49803bc',
+    '9ec7c45f0ca09795770a8e87c1edeaa53771a2a65c332cde93379f0ad75b76b2',
   ]);
 });
 
