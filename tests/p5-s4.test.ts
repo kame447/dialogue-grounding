@@ -7,7 +7,8 @@ import { buildRecords, initialState, normal, OWN, runTurn, type Turn } from './s
 
 const version = 'jev_generation_retry_v13';
 const policy = 'holistic_v5';
-const slot = OWN.ownAnchors[0].id;
+const ownSlots: string[] = OWN.ownAnchors.map((anchor: { id: string }) => anchor.id);
+const slot = ownSlots[0];
 const bird = '鳥のような形です。';
 const agreement = '私にも鳥のように見えます。';
 const segment = (quote: string, respondsToTurn: number | null) => ({
@@ -84,19 +85,19 @@ test('v13 accepts its own failed accept detail shape and v12 rejects that extra 
     assert.equal(error.code, 'decision_failed');
     const trace = error.traces.at(-1);
     assert.deepEqual(trace.decisionFailure.evidence.stages.map((s: any) => s.stage), ['action', 'target', 'detail']);
-    assert.ok(s4Probe.traceShape(trace, 'two_stage_v3', policy));
+    assert.ok(s4Probe.traceShape(trace, 'two_stage_v3', policy, ownSlots));
     const legacy = structuredClone(trace);
     // Early v12 failures did not carry a generation marker. Isolate the
     // stage rule by making the other clues to v13 absent.
     delete legacy.generationRetryVersion;
     delete legacy.sharedConstruals;
-    assert.equal(s4Probe.traceShape(legacy, 'two_stage_v3', policy), false);
+    assert.equal(s4Probe.traceShape(legacy, 'two_stage_v3', policy, ownSlots), false);
     const evidence = legacy.decisionFailure.evidence;
     evidence.stages.pop();
     const last = evidence.stages.at(-1);
     Object.assign(evidence, { model: last.model, responseId: last.responseId,
       costUsd: evidence.stages.reduce((sum: number, stage: any) => sum + stage.costUsd, 0) });
-    assert.ok(s4Probe.traceShape(legacy, 'two_stage_v3', policy));
+    assert.ok(s4Probe.traceShape(legacy, 'two_stage_v3', policy, ownSlots));
     // A deadline may expire after the provider answers the detail stage. In
     // that case the failure records the closed menu and its answered choice.
     const answered = structuredClone(trace), answer = accepted.trace.decisions[0].evidence;
@@ -106,15 +107,15 @@ test('v13 accepts its own failed accept detail shape and v12 rejects that extra 
         ...stage, status: 'ok', error: null, rejectionCode: null,
       })),
     });
-    assert.ok(s4Probe.traceShape(answered, 'two_stage_v3', policy));
+    assert.ok(s4Probe.traceShape(answered, 'two_stage_v3', policy, ownSlots));
     const answeredLegacy = structuredClone(answered);
     delete answeredLegacy.sharedConstruals;
     delete answeredLegacy.generationRetryVersion;
-    assert.equal(s4Probe.traceShape(answeredLegacy, 'two_stage_v3', policy), false);
+    assert.equal(s4Probe.traceShape(answeredLegacy, 'two_stage_v3', policy, ownSlots), false);
     const detail = answered.decisionFailure.evidence.stages[2];
     detail.choices.shared_construal = 'use_2';
     detail.scores.shared_construal = { none: 0, use_2: 1 };
-    assert.equal(s4Probe.traceShape(answered, 'two_stage_v3', policy), false);
+    assert.equal(s4Probe.traceShape(answered, 'two_stage_v3', policy, ownSlots), false);
     return true;
   });
 });
@@ -149,7 +150,21 @@ test('v13 S4 verifies shared construal alongside one feature in a strict naming 
   assert.deepEqual(checks.map(c => c.status), ['pass', 'pass', 'pass', 'pass'], JSON.stringify(checks));
   assert.equal(trial.attempts[0].namingRequest, true);
   assert.deepEqual(Object.keys(trial.attempts[0].decisions[0].evidence.stages[2].choices), ['feature', 'shared_construal']);
-  assert.deepEqual(trial.lastCommittedState.ledger, trial.replay[0].tape.state.ledger);
+  const { tape } = trial.replay[0];
+  assert.deepEqual(trial.lastCommittedState.ledger, tape.state.ledger);
+  const events = [...tape.events];
+  events[events.length - 1] = { ...events.at(-1), text: '切り込みの形も同じでしょうか？' };
+  await assert.rejects(runTurn(trial.profile, 'repair-first', tape.state, events, {
+    action: 'confirm', target: 'figure_0', referent: 'figure_0', failQuestion: 'feature',
+  }, undefined, version), (error: any) => {
+    assert.equal(error.code, 'decision_failed');
+    const trace = error.traces.at(-1);
+    assert.equal(trace.namingRequest, undefined);
+    assert.equal(trace.sharedConstruals.length, 1);
+    assert.deepEqual(trace.decisionFailure.evidence.stages.map((stage: any) => stage.stage), ['action', 'target', 'detail']);
+    assert.ok(s4Probe.traceShape(trace, 'two_stage_v3', policy, ownSlots));
+    return true;
+  });
 });
 
 test('v13 S4 rejects a changed generation prompt on the comparison side despite consistent hashes', async () => {
@@ -166,4 +181,86 @@ test('v13 S4 rejects a changed generation prompt on the comparison side despite 
   records.evidence.pairedReplay[0].left = structuredClone(repair);
   const checks = checksFor(records);
   assert.deepEqual(checks.map(c => c.status), ['pass', 'pass', 'pass', 'mismatch'], JSON.stringify(checks));
+});
+
+for (const label of ['repair-first', 'bypass-enabled'] as const) {
+  test('v13 S4 rejects a forged public quote in the installed proof under ' + label, async () => {
+    const accepted = { ...support, plan: { ...support.plan, action: 'accept', actionScores: { accept: 1 } } };
+    const next = { human: 'その見立てで進めましょう。', plan: {
+      action: 'accept', target: 'figure_0', sharedConstrual: 'use_0', speech: 'なるほど。',
+    } };
+    const records = await buildRecords({ label, generationRetryVersion: version, dialoguePolicy: policy,
+      agreeNameScopeVersion: 'scoped_v7', turns: [opening, accepted, next] });
+    assert.ok(checksFor(records).every(c => c.status === 'pass'));
+    const trial = records.trials[0];
+    const [sourceId] = trial.attempts[0].executed.sharedClaimIds;
+    const claims = [trial.turns[0].state, trial.lastCommittedState].map(state =>
+      state.graph.records.find((record: any) => record.id === sourceId));
+    for (const claim of claims) {
+      assert.equal(claim.speaker, 'ai');
+      claim.quote = '偽'.repeat(claim.quote.length);
+    }
+    assert.deepEqual(checksFor(records).map(c => c.status), ['pass', 'pass', 'pass', 'mismatch']);
+    for (const claim of claims) claim.quote = '[redacted]';
+    assert.deepEqual(checksFor(records).map(c => c.status), ['pass', 'pass', 'pass', 'not_reached']);
+  });
+}
+
+test('v13 S4 binds failed shared detail to the saved candidates and selected target', async () => {
+  const label = 'bypass-enabled';
+  const plan = { ...support.plan, action: 'accept', actionScores: { accept: 1 } };
+  const records = await buildRecords({ label, generationRetryVersion: version, dialoguePolicy: policy,
+    agreeNameScopeVersion: 'scoped_v7', turns: [opening, { ...support, plan }] });
+  const trial = records.trials[0], tape = trial.replay[0].tape;
+  const answer = trial.attempts[0].decisions.at(-1).evidence;
+  let trace: any;
+  await assert.rejects(runTurn(trial.profile, label, tape.state, tape.events, {
+    ...plan, failSharedDetail: true,
+  }, undefined, version), (error: any) => { trace = error.traces.at(-1); return error.code === 'decision_failed'; });
+  assert.ok(trace);
+  trial.attempts = [trace];
+  trial.turns = [{ ...trial.turns[0], trace: [structuredClone(trace)], state: structuredClone(tape.state), publicText: null }];
+  trial.lastCommittedState = tape.state;
+  trial.calls = [];
+  trial.http = [];
+  trial.replay = [];
+  records.evidence.pairedReplay = [];
+  assert.deepEqual(checksFor(records).slice(0, 2).map(c => c.status), ['pass', 'pass']);
+  const editCopies = (data: any, edit: (attempt: any) => void) => {
+    const tr = data.trials[0];
+    [tr.attempts[0], tr.turns[0].trace[0]].forEach(edit);
+  };
+  const missing = structuredClone(records);
+  editCopies(missing, attempt => { delete attempt.sharedConstruals; });
+  const wrongTarget = structuredClone(records);
+  editCopies(wrongTarget, attempt => {
+    const target = attempt.decisionFailure.evidence.stages[1];
+    assert.ok(Object.hasOwn(target.scores.target, 'figure_1'));
+    target.choices.target = 'figure_1';
+  });
+  const answered = structuredClone(records);
+  editCopies(answered, attempt => {
+    Object.assign(attempt.decisionFailure.evidence, {
+      error: 'timeout', model: answer.model, responseId: answer.responseId, costUsd: answer.costUsd,
+      inputBudget: answer.inputBudget, stages: answer.stages.map((stage: any) => ({
+        ...structuredClone(stage), status: 'ok', error: null, rejectionCode: null,
+      })),
+    });
+  });
+  assert.deepEqual(checksFor(answered).slice(0, 2).map(c => c.status), ['pass', 'pass']);
+  editCopies(answered, attempt => {
+    const detail = attempt.decisionFailure.evidence.stages[2];
+    detail.choices.shared_construal = 'use_1';
+    detail.scores.shared_construal = { none: 0, use_0: 0, use_1: 1 };
+  });
+  const shapeAndBinding = (attack: any) => checksFor(attack).slice(0, 2).map(c => c.status);
+  assert.deepEqual({
+    missingCandidateBeforeAnswer: shapeAndBinding(missing),
+    candidateOutsideSelectedTarget: shapeAndBinding(wrongTarget),
+    extraConsecutiveLabel: shapeAndBinding(answered),
+  }, {
+    missingCandidateBeforeAnswer: ['mismatch', 'mismatch'],
+    candidateOutsideSelectedTarget: ['mismatch', 'mismatch'],
+    extraConsecutiveLabel: ['mismatch', 'mismatch'],
+  });
 });
