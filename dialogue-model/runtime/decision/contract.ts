@@ -1,5 +1,6 @@
 // Decision 0002, opt-in research contract. Jev alone selects the next action;
 // observations and repair progress are materials, never an answer key or policy.
+import type { OwnLedger } from "../judgment/schema.mjs";
 import type { ObservationMemo } from "../observation/contract.ts";
 import type { LocalAct, LocalClaimView, PublicTurn } from "../local-grounding/contract.ts";
 
@@ -77,6 +78,8 @@ export type JevDecisionInput = {
   publicNames: readonly PublicNameCandidate[];
   /** Opt-in agreement candidates backed by eligible public naming claims. */
   agreeNames?: PublicNameCandidate[];
+  /** Private participant ledger for candidate validation. Never serialized to Jev. */
+  participantLedger?: OwnLedger;
   /** C sets false after its engineering limit for targeted reobservation is reached. */
   reobservationAllowed?: boolean;
   humanReferent?: HumanReferentMaterial;
@@ -102,6 +105,7 @@ export type JevDecisionStageEvidence = {
   inputBudget?: DecisionInputBudget;
 };
 export type JevDecisionEvidence = Omit<JevDecisionStageEvidence, "stage"> & {
+  decisionMenuVersion?: typeof PARTICIPANT_TARGET_MENU_VERSION;
   /** Real calls retain every executed stage; mocks omit this or supply an empty array. */
   stages?: JevDecisionStageEvidence[];
 };
@@ -122,7 +126,9 @@ export type JevDecisionCallOptions = { signal?: AbortSignal; timeoutMs?: number 
 export type JevExecutedDecision = Omit<Pick<JevDecision, "action" | "target" | "name" | "feature" | "observe" | "detailFigureIds">,
   "action" | "observe"> & { action: Exclude<JevAction, "request_observation">; observe: null };
 export type JevDetailResult = { executed: JevExecutedDecision; evidence: JevDecisionStageEvidence };
+export const PARTICIPANT_TARGET_MENU_VERSION = "action_conditioned_targets_v1";
 export type JevDecisionClient = {
+  readonly participantTargetMenuVersion?: typeof PARTICIPANT_TARGET_MENU_VERSION;
   decide(input: JevDecisionInput, options?: JevDecisionCallOptions): Promise<JevDecision>;
   estimateRepairProspect?(input: JevDecisionInput, options?: JevDecisionCallOptions): Promise<RepairProspectMaterial>;
   estimateReferent?(input: JevDecisionInput, options?: JevDecisionCallOptions): Promise<HumanReferentEstimate>;

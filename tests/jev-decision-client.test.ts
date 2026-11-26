@@ -14,8 +14,7 @@ import { OPENROUTER_DECISIONS_URL } from "../workers/research-ai-proxy/src/groun
 
 const KEY = "sk-or-SYNTHETIC-jev-decision-key-000000";
 const readKey = async () => KEY;
-function fixture(): JevDecisionInput {
-  const slots = Array.from({ length: 6 }, (_, i) => `own-${i}`);
+function fixture(slots = Array.from({ length: 6 }, (_, i) => `own-${i}`)): JevDecisionInput {
   return { turn: 2, ownSlots: slots, publicTurns: [{ turn: 1, speaker: "ai", text: "この形を船と呼ぶのはどうですか" }, { turn: 2, speaker: "human", text: "牛に見えるけど、名前は船でいいです" }],
     observations: { observedAt: "2026-10-20T00:00:00.000Z", figures: slots.map((id, i) => ({ id, region: { x: i * 10, y: 0, w: 9, h: 9 },
       holistic: [{ construal: i === 0 ? "馬" : `見立て${i}`, basis: ["頭のような部分"], status: "hypothesis" }],
@@ -144,6 +143,114 @@ test("only target-scoped name/feature answers are used; irrelevant answers canno
   await assert.rejects(client.decide(fixture()), code("invalid_decision"));
   assert.equal(client.lastEvidence?.status, "error"); assert.equal(client.lastEvidence?.choices.target, "multiple");
   assert.equal(client.lastEvidence?.rejectionCode, "name_requires_single_target");
+});
+
+function event16Fixture(ownSlots?: string[]): JevDecisionInput {
+  const base = fixture(ownSlots);
+  const target = base.ownSlots[4];
+  const name = { name: "塔", figureId: target, sourceTurn: 16 };
+  return { ...base, turn: 16, publicTurns: [
+    ...Array.from({ length: 15 }, (_, i) => ({ turn: i + 1,
+      speaker: i % 2 === 0 ? "ai" as const : "human" as const,
+      text: i % 2 === 0 ? "上に細い部分がある形ですか？" : "細い部分があるように見えます。" })),
+    { turn: 16, speaker: "human", text: "この図形は塔と呼びたいです。続けましょう。" },
+  ], previousAction: { turn: 15, action: "confirm", target: { kind: "single", figureId: target }, name: null, feature: "三角4" },
+    publicNames: [name], agreeNames: [name],
+    priorClaims: [
+      { id: "claim-name", issueId: "issue-name", turn: 16, sourceTurn: 16, speaker: "human", targets: [target],
+        aspect: "name", act: "name_propose", source: "partner_statement", proposition: "この図形は塔と呼びたい", name: "塔",
+        quote: "この図形は塔と呼びたいです", respondsTo: null },
+      { id: "claim-progress", issueId: "issue-progress", turn: 16, sourceTurn: 16, speaker: "human", targets: [],
+        aspect: "progress", act: "assert", source: "partner_statement", proposition: "続けましょう", name: null,
+        quote: "続けましょう", respondsTo: null },
+    ],
+  };
+}
+
+test("event 16 shape: two separately offered answers in v1 fail before the detail POST", async () => {
+  let action = "agree";
+  let requests = 0;
+  const client = createJevDecisionClient({ enabled: true, readKey, async fetchImpl(_url, init) {
+    requests++;
+    const payload = JSON.parse(String(init.body)) as JevDecisionPayload;
+    assert.ok(Object.hasOwn(payload.questions.action.criteria, action));
+    assert.ok(Object.hasOwn(payload.questions.target.criteria, "none"));
+    return Response.json(answer(payload, { action, target: "none" }));
+  } })!;
+  for (const [choice, rule] of [["agree", "name_requires_single_target"], ["confirm", "detail_target_required"]]) {
+    action = choice;
+    await assert.rejects(client.decide(event16Fixture()), code("invalid_decision"));
+    assert.equal(client.lastEvidence?.rejectionCode, rule);
+    assert.deepEqual(client.lastEvidence?.stages.map(({ stage, status }) => [stage, status]), [["action_target", "error"]]);
+  }
+  assert.equal(requests, 2);
+});
+
+test("participant menu offers only a valid action's target and keeps the detail POST", async () => {
+  const input = event16Fixture();
+  const payloads: JevDecisionPayload[] = [];
+  const client = createJevDecisionClient({ enabled: true, participantTargetMenu: true, readKey, async fetchImpl(_url, init) {
+    const payload = JSON.parse(String(init.body)) as JevDecisionPayload;
+    payloads.push(payload);
+    if (payload.questions.action) {
+      assert.deepEqual(Object.keys(payload.questions.agree_target.criteria), ["figure_4"]);
+      assert.ok(!Object.hasOwn(payload.questions.propose_target.criteria, "none"));
+      assert.ok(!Object.hasOwn(payload.questions.feature_target.criteria, "none"));
+      assert.ok(!Object.hasOwn(payload.questions.observation_target.criteria, "none"));
+      assert.ok(Object.hasOwn(payload.questions.feature_target.criteria, "subset_3"));
+      assert.ok(Object.hasOwn(payload.questions.general_target.criteria, "none"));
+      assert.equal(payload.questions.target, undefined);
+      return Response.json(answer(payload, { action: "agree", agree_target: "figure_4", general_target: "none" }));
+    }
+    assert.deepEqual(Object.keys(payload.questions), ["name"]);
+    return Response.json(answer(payload));
+  } })!;
+  const decision = await client.decide(input);
+  assert.deepEqual(validateJevDecision(decision, input), decision);
+  assert.equal(decision.name, "塔");
+  assert.deepEqual(decision.target, { kind: "single", figureId: input.ownSlots[4] });
+  assert.equal(payloads.length, 2);
+  assert.throws(() => validateJevDecision({ ...decision, target: { kind: "single", figureId: input.ownSlots[0] } }, input));
+});
+
+test("participant name offers require public agreement evidence and respect the current ledger", async () => {
+  const input = event16Fixture(Array.from({ length: 6 }, (_, i) => `s-000${i + 1}`));
+  input.participantLedger = Object.fromEntries(input.ownSlots.map(slot => [slot, { name: null, status: "unassigned" }]));
+  input.participantLedger[input.ownSlots[0]] = { name: "塔", status: "agreed" };
+  input.agreeNames = [];
+  const client = createJevDecisionClient({ enabled: true, participantTargetMenu: true, readKey, async fetchImpl(_url, init) {
+    const payload = JSON.parse(String(init.body)) as JevDecisionPayload;
+    assert.equal(Object.hasOwn(JSON.parse(payload.state), "participantLedger"), false);
+    if (payload.questions.action) {
+      assert.equal(payload.questions.action.criteria.agree, undefined);
+      assert.equal(payload.questions.agree_target, undefined);
+      if (input.agreeNames?.length) assert.equal(payload.questions.propose_target.criteria.figure_4, undefined);
+      else assert.ok(payload.questions.propose_target.criteria.figure_4);
+      return Response.json(answer(payload));
+    }
+    assert.fail("The chosen accept action must not request a name.");
+  } })!;
+  assert.equal((await client.decide(input)).action, "accept");
+  input.agreeNames = input.publicNames.map(name => ({ ...name }));
+  input.observations.figures[4].holistic = [];
+  assert.equal((await client.decide(input)).action, "accept");
+});
+
+test("participant menu omits actions whose legal target catalog is empty", async () => {
+  const input = event16Fixture();
+  input.reobservationAllowed = false;
+  input.publicNames = [];
+  input.agreeNames = [];
+  input.observations.figures.forEach(figure => {
+    figure.holistic = []; figure.analytic = { shapes: [], composition: "", relations: [] };
+  });
+  const client = createJevDecisionClient({ enabled: true, participantTargetMenu: true, readKey, async fetchImpl(_url, init) {
+    const payload = JSON.parse(String(init.body)) as JevDecisionPayload;
+    assert.deepEqual(Object.keys(payload.questions), ["action", "general_target", "revisit_target"]);
+    assert.deepEqual(Object.keys(payload.questions.action.criteria), ["accept", "defer", "revisit", "move_on", "close"]);
+    return Response.json(answer(payload));
+  } })!;
+  assert.equal((await client.decide(input)).action, "accept");
 });
 
 test("rejected first-stage selections retain closed labels and fixed reasons without a second call", async t => {

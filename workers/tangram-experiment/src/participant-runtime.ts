@@ -155,7 +155,7 @@ export function createWorkerParticipantRuntime({ pin, own, proxy, cache, limits,
       observeAll: (input, options) => usage.logical('terra', 'initial_observation', () => terra.observeAll(input, options)),
       reobserve: (input, options) => usage.logical('terra', 'reobservation', () => terra.reobserve(input, options)),
     } : terra,
-    jevDecision: createJevDecisionClient({ ...transport, enabled: true, questionLayout: profile.questionLayout })!,
+    jevDecision: createJevDecisionClient({ ...transport, enabled: true, questionLayout: profile.questionLayout, participantTargetMenu: true })!,
     localGrounding: {
       classifier: createJevLocalTestClassifier({ ...localTransport, enabled: true, timeoutMs: profile.timeouts.localMs })!,
       aiPublicTransport, timeoutMs: profile.timeouts.localMs,

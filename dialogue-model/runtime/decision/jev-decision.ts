@@ -5,9 +5,10 @@ import type { ResearchLimits } from '../v2/research-timeouts.ts';
 import { keychainKeyReader, DEFAULT_COST_CAP_USD, UPSTREAM_TIMEOUT_MS } from "../diagnostics/jev-shadow-eval/local-openrouter.ts";
 import { isGroundingModel, OPENROUTER_DECISIONS_URL } from "../../../workers/research-ai-proxy/src/grounding.ts";
 import { LOCAL_ACTS, LOCAL_ASPECTS, LOCAL_SOURCES } from "../local-grounding/contract.ts";
+import { validateJudgment, validateOwnLedger, JudgmentValidationError } from "../judgment/schema.mjs";
 import { literalSpan } from "../judgment/public-evidence.mjs";
 import { validateRepairFacts } from "./repair-facts.ts";
-import { JEV_ACTIONS, OBSERVATION_ASPECTS, REPAIR_PROSPECTS, REPAIR_PROSPECT_BASES } from "./contract.ts";
+import { JEV_ACTIONS, OBSERVATION_ASPECTS, REPAIR_PROSPECTS, REPAIR_PROSPECT_BASES, PARTICIPANT_TARGET_MENU_VERSION } from "./contract.ts";
 import type { JevAction, JevDecision, JevDecisionClient, JevDecisionInput, JevDecisionEvidence, JevObservationRequest,
   JevQuestionLayout, JevTarget, RepairHistoryEntry, DecisionInputBudget, JevDecisionStageEvidence, JevDecisionCallOptions,
   HumanReferentEstimate, HumanReferentMaterial, JevExecutedDecision, JevDetailResult, RepairProspectMaterial, RepairFact } from "./contract.ts";
@@ -24,9 +25,11 @@ export const JEV_DECISION_REJECTION_CODES = Object.freeze(["observation_target_r
 export type JevDecisionRejectionCode = typeof JEV_DECISION_REJECTION_CODES[number];
 export class JevDecisionError extends Error {
   code: JevDecisionErrorCode;
-  constructor(code: JevDecisionErrorCode) {
+  readonly decisionRejectionCode?: JevDecisionRejectionCode;
+  constructor(code: JevDecisionErrorCode, rule?: JevDecisionRejectionCode) {
     const safe = CODES.includes(code) ? code : "invalid_response";
     super(safe); this.name = safe === "aborted" ? "AbortError" : "JevDecisionError"; this.code = safe;
+    if (rule !== undefined && JEV_DECISION_REJECTION_CODES.includes(rule)) this.decisionRejectionCode = rule;
   }
 }
 function fail(code: JevDecisionErrorCode): never { throw new JevDecisionError(code); }
@@ -106,7 +109,7 @@ function cleanHumanReferentMaterial(value: unknown, slots: readonly string[]): H
 
 /** Whitelist at every level. No images, strategy names, gold, future turns or current pre-action. */
 export type JevActionTarget = Pick<JevDecision, "action" | "target">;
-function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage_v1", selected?: JevActionTarget, referentOnly = false) {
+function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage_v1", selected?: JevActionTarget, referentOnly = false, reserveDetail = false) {
   if (layout !== "two_stage_v1") fail("invalid_options");
   if (!input || !positive(input.turn) || !strings(input.ownSlots, 6, 160) || input.ownSlots.length !== 6 || unique(input.ownSlots).length !== 6 ||
       !Array.isArray(input.publicTurns) || input.publicTurns.length > JEV_DECISION_INPUT_LIMITS.publicTurns || !text(input.issueSummary, 12000, true) ||
@@ -115,6 +118,8 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
       !(input.agreeNames === undefined || Array.isArray(input.agreeNames) && input.agreeNames.length <= JEV_DECISION_INPUT_LIMITS.publicNames) ||
       !(input.reobservationAllowed === undefined || typeof input.reobservationAllowed === "boolean")) fail("invalid_input");
   const slots = [...input.ownSlots];
+  const participantLedger = input.participantLedger === undefined ? undefined : validateOwnLedger(input.participantLedger);
+  if (participantLedger && !exact(participantLedger, slots)) fail("invalid_input");
   const ownIds = (v: unknown): v is string[] => strings(v, 6, 160) && unique(v).length === v.length && v.every(s => slots.includes(s));
   const publicTurns = input.publicTurns.filter(t => t?.turn <= input.turn && (t.turn < input.turn || t.speaker === "human")).map(t => {
     if (!positive(t.turn) || !includes(["human", "ai"], t.speaker) || !text(t.text, 12000)) fail("invalid_input");
@@ -205,7 +210,11 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
     ...(!referentOnly && input.repairProspect !== undefined ? { repairProspect: validateRepairProspectMaterial(input.repairProspect, input.repairHistory, input.turn) } : {}),
     inputBudget: { maxChars: 20000, omitted } };
   let state = "";
-  const over = () => { state = JSON.stringify(material); return state.length > 20000; };
+  // The detail request appends a selected action/target to this state.
+  const detailChars = reserveDetail ? JSON.stringify({ selected: {
+    action: "request_observation", target: { kind: "multiple", figureIds: slots },
+  } }).length - 1 : 0;
+  const over = () => { state = JSON.stringify(material); return state.length + detailChars > 20000; };
   const latestAi = [...publicTurns].reverse().find(t => t.speaker === "ai")?.turn;
   const dropPublic = (count = 1) => {
     const removable = publicTurns.filter(t => t.turn !== input.turn && t.turn !== latestAi && t.turn !== previousAction?.turn);
@@ -219,6 +228,9 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
     }
     for (let i = publicNames.length - 1; i >= 0; i--) if (!turns.has(publicNames[i].sourceTurn)) {
       publicNames.splice(i, 1); omitted.publicNames++;
+    }
+    if (participantLedger && agreeNames) {
+      for (let i = agreeNames.length - 1; i >= 0; i--) if (!turns.has(agreeNames[i].sourceTurn)) agreeNames.splice(i, 1);
     }
     return true;
   };
@@ -257,6 +269,21 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
   ...(agreeNames === undefined ? {} : { agreeNames: observations.map(o => unique(agreeNames.filter(n => n.figureId === null || n.figureId === o.figureId).map(n => n.name))) }),
   features: observations.map(o => unique([...o.analytic.shapes, o.analytic.composition, ...o.analytic.relations,
     ...o.reobservations.flatMap(r => r.supports)].filter(v => !!v.trim() && v.length <= 400))) };
+  if (participantLedger) {
+    const allowedName = (action: "propose_name" | "agree", targetSlot: string, candidateName: string) => {
+      try {
+        validateJudgment({ action, targetSlot, candidateName, discriminatingFeature: null, note: null }, { ownLedger: participantLedger });
+        // Publication compares the trimmed judgment to the exact public claim.
+        return action !== "agree" || candidateName === candidateName.trim();
+      } catch (error) {
+        if (error instanceof JudgmentValidationError) return false;
+        throw error;
+      }
+    };
+    catalog.names = catalog.names.map((values, i) => values.filter(name => allowedName("propose_name", slots[i], name)));
+    catalog.agreeNames = (catalog.agreeNames ?? slots.map(() => [])).map((values, i) =>
+      values.filter(name => allowedName("agree", slots[i], name)));
+  }
   if ([...catalog.names, ...(catalog.agreeNames ?? []), ...catalog.features].some(v => v.length > 254)) fail("invalid_input");
   const slotCriteria = Object.fromEntries(slots.map((id, i) => [`figure_${i}`, `自分の候補図形 ${JSON.stringify(id)}。観察メモを参照。` ]));
   const questions: Record<string, Question> = {};
@@ -355,13 +382,117 @@ export function validateHumanReferentEstimate(value: unknown, input: JevDecision
 }
 
 type Reject = (rule: JevDecisionRejectionCode, code?: JevDecisionErrorCode) => never;
-const rejectDecision: Reject = (_rule, code = "inconsistent_decision") => fail(code);
+const rejectDecision: Reject = (rule, code = "inconsistent_decision") => { throw new JevDecisionError(code, rule); };
 const needsDetail = (action: JevAction) => ["propose_name", "agree", "confirm", "repair", "request_observation"].includes(action);
 const targetIds = (target: JevTarget): string[] => target.kind === "single" ? [target.figureId] : target.kind === "multiple" ? [...target.figureIds] : [];
 function checkSelection(selected: JevActionTarget, reject: Reject = rejectDecision) {
   if (["propose_name", "agree"].includes(selected.action) && selected.target.kind !== "single") reject("name_requires_single_target", "invalid_decision");
   if (needsDetail(selected.action) && !targetIds(selected.target).length) reject("detail_target_required", "invalid_decision");
 }
+function participantTargetQuestion(action: JevAction) {
+  if (action === "propose_name") return "propose_target";
+  if (action === "agree") return "agree_target";
+  if (action === "confirm" || action === "repair") return "feature_target";
+  if (action === "request_observation") return "observation_target";
+  if (action === "revisit") return "revisit_target";
+  return "general_target";
+}
+
+function participantTargets(slots: readonly string[]) {
+  const targets = new Map<string, JevTarget>([["none", { kind: "none" }]]);
+  slots.forEach((figureId, i) => targets.set("figure_" + i, { kind: "single", figureId }));
+  for (let mask = 1; mask < 2 ** slots.length; mask++) {
+    const figureIds = slots.filter((_id, i) => (mask & (1 << i)) !== 0);
+    if (figureIds.length > 1) targets.set("subset_" + mask, { kind: "multiple", figureIds });
+  }
+  return targets;
+}
+
+/** Keep the action and its legal target in one POST. Each independent target
+ * answer is conditional on an action family. Only the chosen family is read. */
+function prepareParticipantTargetMenu(p: ReturnType<typeof prepare>) {
+  const targets = participantTargets(p.slots);
+  const byFamily = {
+    general_target: () => true,
+    propose_target: (ids: string[]) => ids.length === 1 && p.catalog.names[p.slots.indexOf(ids[0])].length > 0,
+    agree_target: (ids: string[]) => ids.length === 1 && (p.catalog.agreeNames?.[p.slots.indexOf(ids[0])]?.length ?? 0) > 0,
+    feature_target: (ids: string[]) => ids.some(id => p.catalog.features[p.slots.indexOf(id)].length > 0),
+    observation_target: (ids: string[]) => ids.length > 0 && p.reobservationAllowed,
+    revisit_target: (ids: string[]) => ids.length === 1,
+  };
+  const labels = {
+    general_target: "accept / defer / move_on / close",
+    propose_target: "propose_name",
+    agree_target: "agree",
+    feature_target: "confirm / repair",
+    observation_target: "request_observation",
+    revisit_target: "revisit",
+  };
+  const action = p.payload.questions.action;
+  const questions: Record<string, Question> = { action: { ...action,
+    instructions: action.instructions + "\n対象の問いは行動の種類ごとの仮定です。最適な行動を選んでください。",
+    criteria: {} } };
+  for (const [key, allowed] of Object.entries(byFamily)) {
+    const family = key as keyof typeof labels;
+    const criteria = Object.fromEntries([...targets].flatMap(([label, target]) => {
+      const ids = targetIds(target);
+      return allowed(ids) ? [[label, ids.length ? "自分の候補図形 " + JSON.stringify(ids) : "対象なし・未特定。"]] : [];
+    }));
+    if (Object.keys(criteria).length) questions[family] = { type: "choice",
+      instructions: "次の行動が " + labels[family] + " だと仮定した場合、その行動が扱う対象を選んでください。観察メモと公開発話を参照してください。",
+      criteria };
+  }
+  questions.action.criteria = Object.fromEntries(Object.entries(action.criteria)
+    .filter(([key]) => Object.hasOwn(questions, participantTargetQuestion(key as JevAction))));
+  return { ...p, targets, payload: { ...p.payload, questions } };
+}
+function decodeParticipantSelection(choices: Record<string, string>, menu: ReturnType<typeof prepareParticipantTargetMenu>): JevActionTarget {
+  const action = choices.action as JevAction;
+  const question = participantTargetQuestion(action);
+  const label = choices[question], target = menu.targets.get(label);
+  if (!target || !Object.hasOwn(menu.payload.questions[question].criteria, label)) return fail("invalid_response");
+  return { action, target };
+}
+
+/** Read the recorded offer without reconstructing omitted prompt material. */
+export function participantJevTargetOffered(first: JevDecisionStageEvidence, action: JevAction,
+  target: JevTarget, slots: readonly string[]): boolean {
+  const ids = targetIds(target);
+  const label = target.kind === "none" ? "none" : target.kind === "single" ? "figure_" + slots.indexOf(target.figureId)
+    : "subset_" + ids.reduce((mask, id) => mask | (1 << slots.indexOf(id)), 0);
+  return ids.every(id => slots.includes(id)) && Object.hasOwn(first.scores.action ?? {}, action) &&
+    Object.hasOwn(first.scores[participantTargetQuestion(action)] ?? {}, label);
+}
+
+export function retainedParticipantJevMenuValid(first: JevDecisionStageEvidence, slots: readonly string[],
+  selected: JevActionTarget): boolean {
+  const targets = participantTargets(slots);
+  const required = ["general_target", "revisit_target"];
+  const families = [...new Set(JEV_ACTIONS.map(participantTargetQuestion))];
+  const scoreKeys = Object.keys(first.scores);
+  if (required.some(key => !scoreKeys.includes(key)) ||
+      scoreKeys.some(key => key !== "action" && !families.includes(key as typeof families[number]))) return false;
+  const actions = JEV_ACTIONS.filter(action => scoreKeys.includes(participantTargetQuestion(action)));
+  if (!exact(first.scores.action, [...actions]) || first.choices.action !== selected.action) return false;
+  for (const family of families) {
+    if (!Object.hasOwn(first.scores, family)) continue;
+    const labels = Object.keys(first.scores[family]);
+    if (labels.length === 0 || !labels.every(label => {
+      const target = targets.get(label);
+      if (!target) return false;
+      if (family === "general_target") return true;
+      if (["propose_target", "agree_target", "revisit_target"].includes(family)) return target.kind === "single";
+      return target.kind !== "none";
+    })) return false;
+    if (family === "general_target" && labels.length !== targets.size ||
+        family === "revisit_target" && labels.length !== slots.length ||
+        family === "observation_target" && labels.length !== targets.size - 1) return false;
+  }
+  const chosen = targets.get(first.choices[participantTargetQuestion(selected.action)]);
+  return participantJevTargetOffered(first, selected.action, selected.target, slots) &&
+    JSON.stringify(chosen) === JSON.stringify(selected.target);
+}
+
 function decodeSelection(choices: Record<string, string>, p: ReturnType<typeof prepare>, reject: Reject = rejectDecision): JevActionTarget {
   const index = p.slots.findIndex((_id, i) => choices.target === `figure_${i}`);
   let target: JevTarget = index >= 0 ? { kind: "single", figureId: p.slots[index] } : { kind: "none" };
@@ -475,7 +606,7 @@ function detailJsonData(value: unknown, seen = new Set<object>()): void {
 function prepareExecutedDetail(input: JevDecisionInput, selected: JevActionTarget) {
   try {
     detailJsonData(input); detailJsonData(selected);
-    const optional = ["reobservationAllowed", "humanReferent", "repairProspect", "agreeNames", "repairFacts"].filter(key => Object.hasOwn(input, key));
+    const optional = ["reobservationAllowed", "humanReferent", "repairProspect", "agreeNames", "repairFacts", "participantLedger"].filter(key => Object.hasOwn(input, key));
     if (!exact(input, ["turn", "publicTurns", "ownSlots", "observations", "issueSummary", "priorClaims", "repairHistory", "previousAction", "publicNames", ...optional])) fail("invalid_input");
     if (!exact(selected, ["action", "target"]) || !includes(["propose_name", "agree", "confirm", "repair"], selected.action)) fail("invalid_input");
     const snapshot = structuredClone(input), selection = structuredClone(selected);
@@ -508,7 +639,9 @@ export function parseJevExecutedDetail(input: JevDecisionInput, selected: JevAct
 
 /** Also validates injected clients at C's publication boundary; never repairs a malformed decision. */
 export function validateJevDecision(value: unknown, input: JevDecisionInput, usagePolicy?: ParticipantUsageOnly): JevDecision {
-  const p = prepare(input);
+  const menuVersion = object(value) && object(value.evidence) ? value.evidence.decisionMenuVersion : undefined;
+  const constrained = menuVersion === PARTICIPANT_TARGET_MENU_VERSION;
+  const p = prepare(input, "two_stage_v1", undefined, false, constrained);
   const optional = object(value) && Object.hasOwn(value, "detailFigureIds") ? ["detailFigureIds"] : [];
   if (!exact(value, ["action", "target", "name", "feature", "observe", "evidence", "decisionKind", "calibrated", ...optional]) ||
       !includes(JEV_ACTIONS, value.action) || value.calibrated !== false || !includes(["jev_local_test", "mock"], value.decisionKind) ||
@@ -517,12 +650,12 @@ export function validateJevDecision(value: unknown, input: JevDecisionInput, usa
   if (selected.action === "request_observation" && !p.reobservationAllowed) fail("inconsistent_decision");
   const d = prepareDetail(input, selected);
   const e = value.evidence;
-  const evidenceKeys = ["model", "responseId", "choices", "scores", "latencyMs", "costUsd",
+  const evidenceKeys = ["model", "responseId", "choices", "scores", "latencyMs", "costUsd", ...(constrained ? ["decisionMenuVersion"] : []),
     ...(object(e) && Object.hasOwn(e, "inputBudget") ? ["inputBudget"] : []), ...(object(e) && Object.hasOwn(e, "stages") ? ["stages"] : [])];
   if (!exact(e, evidenceKeys) || !(e.responseId === null || typeof e.responseId === "string" && /^gen-[A-Za-z0-9_-]{1,124}$/.test(e.responseId)) ||
       !finite(e.latencyMs) || e.latencyMs < 0 || !(e.costUsd === null || finite(e.costUsd) && e.costUsd >= 0)) fail("invalid_response");
   if (value.decisionKind === "mock") {
-    if (e.model !== null || !exact(e.choices, []) || !exact(e.scores, []) || e.stages !== undefined && (!Array.isArray(e.stages) || e.stages.length)) fail("invalid_response");
+    if (constrained || e.model !== null || !exact(e.choices, []) || !exact(e.scores, []) || e.stages !== undefined && (!Array.isArray(e.stages) || e.stages.length)) fail("invalid_response");
     const kind = ["propose_name", "agree"].includes(selected.action) ? "name" : ["confirm", "repair"].includes(selected.action) ? "feature" : null;
     const candidate = kind ? d?.candidates.find(c => c.value === value[kind]) : null;
     if ((kind === "name" ? !candidate : value.name !== null) || (kind === "feature" ? !candidate : value.feature !== null)) fail("inconsistent_decision");
@@ -538,8 +671,9 @@ export function validateJevDecision(value: unknown, input: JevDecisionInput, usa
   } else {
     if (!isGroundingModel(e.model, JEV_DECISION_MODEL)) fail("model_mismatch");
     if (!Array.isArray(e.stages) || e.stages.length !== (d ? 2 : 1)) fail("invalid_response");
-    const first = closedEvidence(e.stages[0], p, "action_target", usagePolicy);
-    const actual = decodeSelection(first.choices, p);
+    const menu = constrained ? prepareParticipantTargetMenu(p) : null;
+    const first = closedEvidence(e.stages[0], menu ?? p, "action_target", usagePolicy);
+    const actual = menu ? decodeParticipantSelection(first.choices, menu) : decodeSelection(first.choices, p);
     if (JSON.stringify(actual) !== JSON.stringify(selected)) fail("inconsistent_decision");
     const last = d ? closedEvidence(e.stages[1], d, "detail", usagePolicy) : first;
     const expected = decodeDetail(actual, d, d ? last.choices : {});
@@ -556,7 +690,7 @@ export type JevDecisionStageCallEvidence = JevDecisionStageEvidence & { status: 
 export type JevDecisionCallEvidence = Omit<JevDecisionEvidence, "stages"> & { callIndex: number; status: "ok" | "error"; error: JevDecisionErrorCode | null;
   rejectionCode: JevDecisionRejectionCode | null; stages: JevDecisionStageCallEvidence[] };
 export type JevDecisionClientOptions = { enabled?: boolean; readKey?: () => Promise<string>; fetchImpl?: (url: string, init: RequestInit) => Promise<Response>;
-  costCapUsd?: number; usagePolicy?: ParticipantUsageOnly; timeoutMs?: number; researchLimits?: ResearchLimits; questionLayout?: JevQuestionLayout };
+  costCapUsd?: number; usagePolicy?: ParticipantUsageOnly; timeoutMs?: number; researchLimits?: ResearchLimits; questionLayout?: JevQuestionLayout; participantTargetMenu?: boolean };
 
 /** Approved Keychain/transport/observed-cost stop rule, shared across both stages.
  * One deadline per decision, no retry or fallback; unknown billable outcomes stop the instance. */
@@ -571,7 +705,7 @@ export function createJevDecisionClient(options: JevDecisionClientOptions = {}):
 }) | null {
   if (options.enabled !== true) return null;
   const { readKey = keychainKeyReader(), fetchImpl = globalThis.fetch, costCapUsd = DEFAULT_COST_CAP_USD, timeoutMs = UPSTREAM_TIMEOUT_MS,
-    questionLayout = "two_stage_v1", researchLimits } = options;
+    questionLayout = "two_stage_v1", researchLimits, participantTargetMenu = false } = options;
   const limit = deadlineLimit(researchLimits);
   const usageOnly = options.usagePolicy === PARTICIPANT_USAGE_ONLY;
   if (typeof readKey !== "function" || typeof fetchImpl !== "function" || !finite(costCapUsd) || costCapUsd <= 0 ||
@@ -617,7 +751,7 @@ export function createJevDecisionClient(options: JevDecisionClientOptions = {}):
         const raw = researchLimits === undefined ? callOptions.timeoutMs ?? timeoutMs : callOptions.timeoutMs === undefined ? timeoutMs : callOptions.timeoutMs;
         if (!deadlineValue(raw, limit)) fail("invalid_options");
         const deadline = Math.min(timeoutMs, raw);
-        const p = referent === "prospect" ? prepareRepairProspect(input) : referent ? prepareReferent(input) : prepare(input, questionLayout);
+        const p = referent === "prospect" ? prepareRepairProspect(input) : referent ? prepareReferent(input) : prepare(input, questionLayout, undefined, false, participantTargetMenu && !detail);
         referentSlots = p.slots;
         const snapshot = structuredClone(input);
         evidence.inputBudget = structuredClone(p.budget);
@@ -705,7 +839,8 @@ export function createJevDecisionClient(options: JevDecisionClientOptions = {}):
             evidence.status = "ok";
             return { executed: decodeDetail(detail.selected, detail.prepared, stage.choices) as JevExecutedDecision, evidence: stage };
           }
-          const first = await perform("action_target", p);
+          const menu = participantTargetMenu && !referent ? prepareParticipantTargetMenu(p) : null;
+          const first = await perform("action_target", menu ?? p);
           check();
           if (referent === "prospect") {
             evidence.status = "ok";
@@ -720,20 +855,21 @@ export function createJevDecisionClient(options: JevDecisionClientOptions = {}):
             referentResult = referentEstimate();
             return referentResult;
           }
-          const selected = decodeSelection(first.choices, p, reject);
+          const selected = menu ? decodeParticipantSelection(first.choices, menu) : decodeSelection(first.choices, p, reject);
           const d = prepareDetail(snapshot, selected, reject);
           const stages = [first];
           if (d) stages.push(await perform("detail", d));
           check();
           const core = decodeDetail(selected, d, d ? stages[1].choices : {});
-          const measured: JevDecisionEvidence = { model: evidence.model, responseId: evidence.responseId, choices: first.choices, scores: first.scores,
+          const measured: JevDecisionEvidence = { ...(menu ? { decisionMenuVersion: PARTICIPANT_TARGET_MENU_VERSION } : {}), model: evidence.model, responseId: evidence.responseId, choices: first.choices, scores: first.scores,
             latencyMs: Math.max(0, Math.round(performance.now() - started)), costUsd: stages.some(stage => stage.costUsd === null) ? null : evidence.costUsd, inputBudget: p.budget, stages };
           evidence.status = "ok";
           return { ...core, evidence: measured, decisionKind: "jev_local_test" as const, calibrated: false as const };
         };
         return await Promise.race([run(), cancelled]);
       } catch (error) {
-        const safe = new JevDecisionError(error instanceof JevDecisionError ? error.code : "invalid_response");
+        const safe = new JevDecisionError(error instanceof JevDecisionError ? error.code : "invalid_response",
+          evidence.rejectionCode ?? undefined);
         evidence.error = safe.code;
         const stage = evidence.stages.at(-1);
         if (stage && stage.status !== "ok") { stage.error = safe.code; stage.latencyMs = Math.max(0, Math.round(performance.now() - stageStarted)); }
@@ -763,6 +899,7 @@ export function createJevDecisionClient(options: JevDecisionClientOptions = {}):
       }
   }
   return Object.freeze({
+    ...(participantTargetMenu ? { participantTargetMenuVersion: PARTICIPANT_TARGET_MENU_VERSION } : {}),
     metadata: Object.freeze({ decisionKind: "jev_local_test" as const, calibrated: false as const, model: JEV_DECISION_MODEL, questionLayout }),
     get lastEvidence() { return structuredClone(lastEvidence); }, get spentUsd() { return spentUsd; }, get callCount() { return callCount; }, leaks,
     get lastReferentEvidence() { return structuredClone(lastReferentEvidence); }, get referentCallCount() { return referentCallCount; },
