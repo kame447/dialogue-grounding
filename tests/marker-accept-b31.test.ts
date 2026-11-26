@@ -3,6 +3,9 @@
 // action choice and conversational progress require the scripted live evaluation.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import { createChatClient } from '../dialogue-model/runtime/client.mjs';
 import { participantLedgerFetch } from '../dialogue-model/runtime/web/participant-jev-wiring.ts';
@@ -16,9 +19,11 @@ import { priorClaimViews } from '../dialogue-model/runtime/local-grounding/deriv
 import { createJevLocalTestClassifier } from '../dialogue-model/runtime/local-grounding/jev-local-test.ts';
 import type { ObservationInput } from '../dialogue-model/runtime/observation/contract.ts';
 import { createTrialV2, modelView } from '../dialogue-model/runtime/stimuli/scatter-v2.mjs';
+import type { MakeBaseTask } from '../dialogue-model/runtime/v2/base-assignment.ts';
 import type { JevPrivateState, JevTurnTrace } from '../dialogue-model/runtime/v2/jev-turn.ts';
 import { createNamingTaskV2 } from '../dialogue-model/runtime/v2/naming-task-v2.mjs';
 import { researchTrialProfileV3 } from '../dialogue-model/runtime/v2/research-profile.ts';
+import { createBaseParticipantServer } from '../dialogue-model/runtime/web/base-participant-server.ts';
 import { deadlines } from './support/s4-integration/harness.ts';
 import { buildRecords } from './support/s4-v3-records.ts';
 
@@ -77,7 +82,8 @@ type Turn = {
 };
 type Names = Record<string, string | null>;
 type SavedTrial = {
-  options: { dialoguePolicy?: string };
+  updatedAt: string;
+  options: { dialoguePolicy?: string; jevNamingRestoreVersion?: string };
   ownLedger: JevPrivateState['ledger'];
   queueState: { privateState: JevPrivateState; pendingHumanEventIds: string[]; closed: boolean };
   jevTraces: JevTurnTrace[];
@@ -114,7 +120,7 @@ function session(strategy: Strategy, observation: Memo = memo, trialProfile = pr
   let draftForTransport = '';
   let generationPosts = 0;
   let ledger: RunBudget;
-  const create = async (restore?: SavedTrial) => {
+  const create = async (restore?: SavedTrial | null, base?: Parameters<MakeBaseTask>[0], now?: () => number) => {
     ledger = new RunBudget({ lunaCalls, lunaPosts: 90, lunaTokens: 100000, jevPosts: 90, jevUsd: 1 });
     const generationClient = createChatClient({ apiKey: 'synthetic-only', baseUrl: 'https://offline.example/v1', model: 'synthetic-luna' },
       participantLedgerFetch(ledger, 'luna', 'synthetic-luna', async () => {
@@ -184,7 +190,9 @@ function session(strategy: Strategy, observation: Memo = memo, trialProfile = pr
       },
     };
     return createNamingTaskV2({
+      ...base,
       strategy, seed, runDir: null, createTrial: () => trial, restore: restore ?? null,
+      ...(now ? { now } : {}),
       utteranceStyle: trialProfile.utteranceStyle,
       client: { async complete(messages: Message[], { phase, timeoutMs }: { phase: string; timeoutMs?: number }) {
         if (phase === 'final_submission') {
@@ -219,7 +227,10 @@ function session(strategy: Strategy, observation: Memo = memo, trialProfile = pr
           timeoutMs: trialProfile.timeouts.localMs,
         },
       },
-      onPersist(record: unknown) { saved = structuredClone(record) as SavedTrial; },
+      async onPersist(record: unknown) {
+        if (base) await base.onPersist(record as Parameters<typeof base.onPersist>[0]);
+        saved = structuredClone(record) as SavedTrial;
+      },
     });
   };
   let task: Awaited<ReturnType<typeof createNamingTaskV2>>;
@@ -227,10 +238,22 @@ function session(strategy: Strategy, observation: Memo = memo, trialProfile = pr
     assert.ok(saved);
     return saved;
   }
+  function script(turn: Turn) {
+    current = turn;
+    actionRequests = [];
+    draftRequests = [];
+    generationRequests = [];
+  }
   return {
     async start() { task = await create(); },
+    async startHttp(base: Parameters<MakeBaseTask>[0]) {
+      task = await create(base.restore as unknown as SavedTrial | null, base);
+      return task;
+    },
+    script,
+    whenIdle: () => task.whenIdle(),
     async restore() { task = await create(JSON.parse(JSON.stringify(record())) as SavedTrial); },
-    async restoreFrom(saved: unknown) { task = await create(JSON.parse(JSON.stringify(saved)) as SavedTrial); },
+    async restoreFrom(saved: unknown, now?: () => number) { task = await create(JSON.parse(JSON.stringify(saved)) as SavedTrial, undefined, now); },
     /** The ordinary restore entrance, from a record whose generation version is the given one (a version pinned by a saved record decides the trial). */
     async restoreAs(version: string) {
       const saved = JSON.parse(JSON.stringify(record())) as SavedTrial & { options: { generationRetryVersion?: string } };
@@ -248,10 +271,7 @@ function session(strategy: Strategy, observation: Memo = memo, trialProfile = pr
       return generationRequests.length;
     },
     async say(turn: Turn) {
-      current = turn;
-      actionRequests = [];
-      draftRequests = [];
-      generationRequests = [];
+      script(turn);
       const initial = record();
       const { eventId } = task.message(turn.human, 'synthetic-holistic-' + task.getState().events.length);
       await task.whenIdle();
@@ -407,6 +427,146 @@ for (const strategy of strategies) for (const [label, last] of [
     await restarted.restoreFrom(saved);
     const next = await restarted.say({ human: '台の幅についてはどうですか？', action: 'confirm', target: 0, feature: ringGap, drafts: [reply] });
     assert.equal(next.trace.status, 'committed', 'next utterance: ' + next.trace.errorCode);
+  });
+}
+
+// Audit 33 B-33N-A1: the withdrawal propagates through the AI's public acceptance.
+const confirmAiName: Segment = {
+  ...confirmSeg, antecedent: { speaker: 'ai', proposition: originalName },
+};
+type AiApplication = NonNullable<JevTurnTrace['aiPublic']>['application'] & {
+  nameAcceptances?: { id: string; respondsTo: string }[];
+};
+const aiApplication = (trace: JevTurnTrace) => trace.aiPublic?.application as AiApplication | undefined;
+function oldNamingRestore(record: SavedTrial) {
+  const old = structuredClone(record);
+  delete old.options.jevNamingRestoreVersion;
+  for (const trace of old.jevTraces) {
+    const application = aiApplication(trace);
+    if (application) delete application.nameAcceptances;
+  }
+  return old;
+}
+for (const strategy of strategies) for (const twoTurns of [false, true]) {
+  test(`${strategy} B-33N-A1: ${twoTurns ? 'two turns' : 'same turn'} survives a file-store restart`, async t => {
+    const root = await mkdtemp(join(await realpath(tmpdir()), 'marker-restart-'));
+    const baseStoreRoot = join(root, 'owners');
+    const baseAssignmentFile = join(root, 'assignment.json');
+    let server: ReturnType<typeof createBaseParticipantServer> | undefined;
+    t.after(async () => {
+      await server?.drainAndClose();
+      await rm(root, { recursive: true, force: true });
+    });
+    await mkdir(baseStoreRoot, { mode: 0o700 });
+    await writeFile(baseAssignmentFile, JSON.stringify({ schemaVersion: 'base_assignment_config_v1',
+      configId: '11111111-1111-4111-8111-111111111111', revision: 1, strategy, seed, referenceMemory: true }), { mode: 0o600 });
+    let harness = session(strategy, memo, profile, 200);
+    async function boot() {
+      const instance = createBaseParticipantServer({ baseAssignmentFile, baseStoreRoot, createTaskV2: harness.startHttp });
+      server = instance;
+      await new Promise<void>((resolve, reject) => {
+        instance.once('error', reject);
+        instance.listen(0, '127.0.0.1', resolve);
+      });
+      const address = instance.address();
+      assert.ok(address && typeof address !== 'string');
+      return `http://127.0.0.1:${address.port}`;
+    }
+    let url = await boot();
+    const page = await fetch(url);
+    const cookie = page.headers.get('set-cookie')?.split(';')[0];
+    assert.ok(cookie);
+    await page.text();
+    const headers = { Cookie: cookie, 'Content-Type': 'application/json' };
+    const call = (path: string, body?: unknown) => fetch(url + path, { headers,
+      ...(body === undefined ? {} : { method: 'POST', body: JSON.stringify(body) }) });
+    const started = await call('/api/start', { version: 2 });
+    assert.equal(started.status, 200);
+    const { trial: { sessionId } } = await started.json();
+    const send = (human: string) => call('/api/message', { text: human, expectedRecordId: sessionId });
+    async function say(turn: Turn) {
+      harness.script(turn);
+      const response = await send(turn.human);
+      assert.equal(response.status, 202);
+      await response.json();
+      await harness.whenIdle();
+      const trace = harness.record().jevTraces.at(-1);
+      assert.ok(trace);
+      assert.equal(trace.status, 'committed', trace.errorCode ?? 'turn not committed');
+      return trace;
+    }
+    await say(broad);
+    const agreed = await say({ ...holdProposal, action: 'agree', name: originalName, drafts: [agreeSpeech],
+      draftActs: { [agreeSpeech]: 'adopt_chosen' } });
+    assert.equal(agreed.executed?.action, 'agree');
+    if (twoTurns) {
+      const confirmation = await say({ human: confirmAiName.text, local: [confirmAiName], action: 'confirm', target: 0,
+        feature: ringGap, drafts: [reply] });
+      assert.equal(confirmation.local?.claims[0].respondsTo, '6:ai1');
+      assert.equal(confirmation.namingReconfirm, true);
+      const old = oldNamingRestore(harness.record());
+      const legacy = session(strategy, memo, profile, 200);
+      await legacy.restoreFrom(old, () => Date.parse(old.updatedAt));
+      assert.equal(JSON.stringify(legacy.record()), JSON.stringify(old), 'the old-format record round-trips byte for byte');
+    }
+    const local = [twoTurns ? reconfirmSeg : confirmAiName, withdrawSeg];
+    const last = await say({ human: local.map(claim => claim.text).join(''), local, action: 'confirm', target: 0,
+      feature: baseWidth, drafts: ['台が環より細いか確認してもいいですか？'] });
+    assert.deepEqual(last.local?.claims.map(claim => claim.respondsTo), [twoTurns ? '6:local1' : '6:ai1', '4:local2']);
+    assert.equal(last.namingRequest, undefined);
+    assert.equal(last.namingReconfirm, undefined);
+    const saved = harness.record();
+    const acceptance = saved.queueState.privateState.graph.records.find(claim => claim.id === '6:ai1');
+    assert.ok(acceptance);
+    assert.equal((acceptance as { act?: string }).act, 'name_accept');
+    const before = await call('/api/state');
+    assert.equal(before.status, 200);
+    const { trial: { events } } = await before.json();
+    assert.equal(events.length, twoTurns ? 9 : 7);
+
+    await server!.drainAndClose();
+    harness = session(strategy, memo, profile, 200);
+    url = await boot();
+    const restored = await call('/api/state');
+    const restoredState = await restored.json();
+    const next: Turn = { human: '環の切れ目についてはどうですか？', action: 'confirm', target: 0, feature: ringGap, drafts: [reply] };
+    harness.script(next);
+    const resumed = await send(next.human);
+    const resumedState = await resumed.json();
+    assert.deepEqual([restored.status, resumed.status], [200, 202],
+      JSON.stringify([restoredState.error ?? null, resumedState.error ?? null]));
+    assert.deepEqual(restoredState.trial.events, events);
+    await harness.whenIdle();
+    assert.equal(harness.record().jevTraces.at(-1)?.status, 'committed');
+    const final = await call('/api/state');
+    assert.equal(final.status, 200);
+    assert.equal((await final.json()).trial.events.length, events.length + 2);
+
+    assert.equal(saved.options.jevNamingRestoreVersion, 'ai_name_acceptances_v1');
+    const acceptanceTurn = saved.jevTraces.find(trace => trace.turnIndex === 6);
+    assert.ok(acceptanceTurn);
+    assert.deepEqual(aiApplication(acceptanceTurn)?.nameAcceptances, [{ id: '6:ai1', respondsTo: '4:local2' }]);
+    const checkRestore = session(strategy, memo, profile, 200);
+    await assert.rejects(checkRestore.restoreFrom(oldNamingRestore(saved)), { code: 'invalid_options' });
+    const wrong = structuredClone(saved);
+    const wrongTurn = wrong.jevTraces.find(trace => trace.turnIndex === 6);
+    assert.ok(wrongTurn);
+    aiApplication(wrongTurn)!.nameAcceptances![0].respondsTo = '4:local1';
+    await assert.rejects(checkRestore.restoreFrom(wrong), { code: 'invalid_options' });
+    if (twoTurns) {
+      const pruned = structuredClone(saved);
+      const issueId = (acceptance as typeof acceptance & { issueId: string }).issueId;
+      const graph = pruned.queueState.privateState.graph;
+      // A pruned issue is absent from the current graph, including all its dependent claims.
+      graph.records = graph.records.filter(claim => (claim as typeof claim & { issueId?: string }).issueId !== issueId);
+      assert.ok(!graph.records.some(claim => claim.id === acceptance.id));
+      await checkRestore.restoreFrom(pruned);
+      const marked = structuredClone(pruned);
+      const trace = marked.jevTraces.at(-1)!;
+      trace.namingReconfirm = true;
+      marked.queueState.privateState.judgments.at(-1)!.jevTurn.namingReconfirm = true;
+      await assert.rejects(checkRestore.restoreFrom(marked), { code: 'invalid_options' });
+    }
   });
 }
 

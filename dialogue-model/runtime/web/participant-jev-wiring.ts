@@ -22,6 +22,7 @@ import { createJevDecisionClient, JevDecisionError, validateRepairProspectMateri
 import type { JevDecisionClient, AdaptiveRepairTrial, JevQuestionLayout } from '../decision/contract.ts';
 import { isHolisticPolicy, isHolisticV3Plus } from '../decision/contract.ts';
 import { hasNameProposal, traceMarkerInvalid } from '../decision/naming-request.ts';
+import { literalSpan } from '../judgment/public-evidence.mjs';
 import { createJevLocalTestClassifier, JevLocalTestError } from '../local-grounding/jev-local-test.ts';
 import type { JevTurnLocalOptions } from '../v2/jev-turn.ts';
 import { RunBudget } from '../diagnostics/parity-live/audit.ts';
@@ -29,13 +30,15 @@ import type { BudgetLimits, SendReceipt } from '../diagnostics/parity-live/audit
 import { checkModelIdentity, MODEL_CONTRACT_V2 } from '../model-identity-contract.ts';
 import { RESEARCH_MAX_JEV_USD } from '../diagnostics/jev-shadow-eval/local-openrouter.ts';
 import { inferenceHistory } from '../v2/agreement-gate.ts';
-import { defaultGenerationRetryVersion, hasVersionedViewpoint, validGenerationRetryVersion, validAgreeNameScope } from '../v2/generation-guard.ts';
+import { defaultGenerationRetryVersion, hasVersionedViewpoint, isGenerationV12, validGenerationRetryVersion, validAgreeNameScope } from '../v2/generation-guard.ts';
 import type { GenerationRetryVersion } from '../v2/generation-guard.ts';
 
 export type JevResearchLedger = RunBudget;
 export type JevResearchOptions = Readonly<{ profile: ResearchTrialProfileV3; observer: ObservationObserver;
   jevDecision: JevDecisionClient; localGrounding: JevTurnLocalOptions; ledger: JevResearchLedger; technicalTrial?: AdaptiveRepairTrial }>;
-type SelectedJevResearchOptions = JevResearchOptions & { generationRetryVersion?: GenerationRetryVersion };
+const AI_NAME_ACCEPTANCES_V1 = 'ai_name_acceptances_v1';
+type SelectedJevResearchOptions = JevResearchOptions & { generationRetryVersion?: GenerationRetryVersion;
+  namingRestoreVersion?: typeof AI_NAME_ACCEPTANCES_V1 };
 export class ParticipantJevError extends Error {
   readonly code: string;
   constructor(code: 'invalid_config' | 'wrong_own_material' | 'initialization_failed' | 'model_mismatch') {
@@ -82,6 +85,39 @@ function checkedDecisionFailure(trace: any, layout: JevQuestionLayout): boolean 
   return trace.decisionRejectionCode !== 'action_target_not_allowed';
 }
 
+/** Restore only the dependency of a verified AI acceptance. Its local ID belongs to the turn that installed it. */
+function checkedAiNameAcceptances(trace: any, previousJudgment: any, earlierClaims: readonly any[], graphRecords: readonly any[], events: readonly any[]) {
+  const { nameAcceptances, nameIds } = trace.aiPublic?.application ?? {};
+  if (!Array.isArray(nameAcceptances) || !Array.isArray(nameIds)) return invalid();
+  const retained = new Map(graphRecords.filter(record => record.turn === trace.turnIndex).map(record => [record.id, record]));
+  const execution = previousJudgment?.jevTurn?.executed;
+  const aiSeq = previousJudgment?.aiPublic?.aiSeq;
+  const source = events[aiSeq - 1];
+  const prefix = `${trace.turnIndex}:ai`;
+  const seen = new Set<string>();
+  const claims = nameAcceptances.map(value => {
+    const { id, respondsTo } = data(value, ['id', 'respondsTo']);
+    if (typeof id !== 'string' || !id.startsWith(prefix) || !/^[1-9]\d*$/u.test(id.slice(prefix.length)) ||
+        !nameIds.includes(id) || seen.has(id) || typeof respondsTo !== 'string') return invalid();
+    const proposal = earlierClaims.find(c => c?.id === respondsTo);
+    const retainedClaim = retained.get(id);
+    const human = events[proposal?.sourceTurn - 1];
+    if (execution?.action !== 'agree' || execution.target?.kind !== 'single' || aiSeq !== previousJudgment.turnIndex + 1 ||
+        source?.seq !== aiSeq || source?.speaker !== 'ai' ||
+        aiSeq >= trace.turnIndex || source.nonReferential || previousJudgment.generationGuard?.fallback ||
+        proposal?.kind !== 'claim' || proposal.speaker !== 'human' || proposal.act !== 'name_propose' || proposal.aspect !== 'name' ||
+        proposal.sourceTurn >= aiSeq || proposal.targets?.length !== 1 || proposal.targets[0] !== execution.target.figureId ||
+        typeof proposal.name !== 'string' || literalSpan(source.text, execution.name)?.text !== proposal.name ||
+        human?.speaker !== 'human' || typeof human.text !== 'string' || !human.text.includes(proposal.name) ||
+        retainedClaim && (retainedClaim.kind !== 'claim' || retainedClaim.act !== 'name_accept' || retainedClaim.speaker !== 'ai' ||
+          retainedClaim.sourceTurn !== aiSeq || retainedClaim.respondsTo !== respondsTo)) return invalid();
+    seen.add(id);
+    return { kind: 'claim', id, turn: trace.turnIndex, act: 'name_accept', respondsTo };
+  });
+  if ([...retained.values()].some(c => c.kind === 'claim' && c.speaker === 'ai' && c.act === 'name_accept' && !seen.has(c.id))) return invalid();
+  return claims;
+}
+
 /** R2: classify restore before any queue, initial observer, or model work. */
 export function selectParticipantJev(restore: any, provided: unknown, context: {
   referenceMemory: boolean; strategy: string; style: string; legacy: unknown[];
@@ -92,7 +128,7 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
       if (marker !== undefined && marker !== true && marker !== false) return invalid();
       if (marker !== true) {
         const state = restore.queueState?.privateState;
-        if (['profileSha256','interventionPolicy','technicalTrial','questionLayout','dialoguePolicy','generationRetryVersion'].some(k => Object.hasOwn(restore.options ?? {},k)) ||
+        if (['profileSha256','interventionPolicy','technicalTrial','questionLayout','dialoguePolicy','generationRetryVersion','jevNamingRestoreVersion'].some(k => Object.hasOwn(restore.options ?? {},k)) ||
             ['jevTraces','aiPublicSettlement','initialObservation','jevLedger'].some(k => Object.hasOwn(restore,k)) ||
             state && (['schemaVersion','interventionPolicy','observationMemo','repairHistory','aiPublic'].some(k=>Object.hasOwn(state,k)) ||
               state.judgments?.some((j: any) => j.jevTurn))) return invalid();
@@ -118,6 +154,10 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
     const generationRetryVersion = profile.dialoguePolicy === 'holistic_v5' && profile.questionLayout === 'two_stage_v3'
       ? restore ? savedGenerationVersion ?? 'jev_generation_retry_v2' : defaultGenerationRetryVersion(profile.questionLayout, profile.dialoguePolicy)
       : undefined;
+    const namingRestoreVersion = restore ? restore.options?.jevNamingRestoreVersion :
+      isGenerationV12(generationRetryVersion) ? AI_NAME_ACCEPTANCES_V1 : undefined;
+    if (restore && Object.hasOwn(restore.options ?? {}, 'jevNamingRestoreVersion') &&
+        (namingRestoreVersion !== AI_NAME_ACCEPTANCES_V1 || !isGenerationV12(generationRetryVersion))) return invalid();
     if (restore && !validAgreeNameScope(restore.queueState?.privateState?.agreeNameScopeVersion, generationRetryVersion)) return invalid();
     if (context.referenceMemory !== true) return invalid();
     if (!STRATEGIES.includes(context.strategy)) return invalid();
@@ -146,19 +186,26 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
       // must be equal in every field they share.
       const savedJudgments: any[] = Array.isArray(restore.queueState?.privateState?.judgments) ? restore.queueState.privateState.judgments : [];
       const earlierClaims: any[] = [];
+      let previousJudgment: any;
       for (const trace of restore.jevTraces) {
         if (hasVersionedViewpoint(trace.generationRetryVersion) && trace.generationRetryVersion !== generationRetryVersion ||
             hasVersionedViewpoint(generationRetryVersion) && trace.finalAction && trace.generationRetryVersion !== generationRetryVersion ||
             Object.hasOwn(trace,'generationRetryVersion') && trace.generationRetryVersion !== 'jev_generation_retry_v2' &&
               !hasVersionedViewpoint(trace.generationRetryVersion)) return invalid();
+        const committed = trace.status === 'committed';
+        const sameTurnAi = namingRestoreVersion && committed ? checkedAiNameAcceptances(trace, previousJudgment, earlierClaims,
+          restore.queueState.privateState.graph.records, restore.queueState.events) : [];
+        if (!namingRestoreVersion && Object.hasOwn(trace.aiPublic?.application ?? {}, 'nameAcceptances')) return invalid();
         if (traceMarkerInvalid(trace, savedJudgments, restore.queueState?.privateState?.ledger, { markerAllowed: isHolisticV3Plus(profile.dialoguePolicy) && profile.questionLayout === 'two_stage_v3',
-          unmarkedChecked: isHolisticV3Plus(profile.dialoguePolicy) }, earlierClaims)) return invalid();
-        if (trace.status === 'committed') {
-          if (Array.isArray(trace.local?.claims)) earlierClaims.push(...trace.local.claims);
+          unmarkedChecked: isHolisticV3Plus(profile.dialoguePolicy) }, sameTurnAi.length ? [...earlierClaims, ...sameTurnAi] : earlierClaims)) return invalid();
+        if (committed) {
           const judgment = savedJudgments.find((j: any) => j?.turnIndex === trace.turnIndex && j?.jevTurn?.attemptNumber === trace.attemptNumber);
           if (!judgment) return invalid();
           for (const key of ['executed','humanReferent','repairProspect','repairGate','repairFacts','draftActs','namingRequest','namingReconfirm'])
             if (Object.hasOwn(trace, key) !== Object.hasOwn(judgment.jevTurn, key) || Object.hasOwn(trace, key) && researchHash(jsonData(trace[key])) !== researchHash(jsonData(judgment.jevTurn[key]))) return invalid();
+          if (Array.isArray(trace.local?.claims)) earlierClaims.push(...trace.local.claims);
+          earlierClaims.push(...sameTurnAi);
+          previousJudgment = judgment;
         }
       }
       // v2/v3 prospects are asked over open entries; v1 retains the full history.
@@ -174,7 +221,8 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
     // A classifier built for another version than the selected one is replaced by one for the selected version (a restored record keeps its stored criteria).
     const rebuilt = typeof (local.classifier as any)?.forPolicy === 'function' ? (local.classifier as any).forPolicy(profile.dialoguePolicy) : undefined;
     if (rebuilt) local = {...local,classifier:rebuilt};
-    return {profile,observer,jevDecision,localGrounding:local,ledger:v.ledger,...(technicalTrial?{technicalTrial}:{}),...(generationRetryVersion?{generationRetryVersion}:{})};
+    return {profile,observer,jevDecision,localGrounding:local,ledger:v.ledger,...(technicalTrial?{technicalTrial}:{}),...(generationRetryVersion?{generationRetryVersion}:{}),
+      ...(namingRestoreVersion?{namingRestoreVersion}:{})};
   } catch { return invalid(); }
 }
 

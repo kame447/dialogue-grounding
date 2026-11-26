@@ -233,8 +233,10 @@ function session(strategy: Strategy, observation: Memo = memo, trialProfile = pr
     async restoreFrom(saved: unknown) { task = await create(JSON.parse(JSON.stringify(saved)) as SavedTrial); },
     /** The ordinary restore entrance, from a record whose generation version is the given one (a version pinned by a saved record decides the trial). */
     async restoreAs(version: string) {
-      const saved = JSON.parse(JSON.stringify(record())) as SavedTrial & { options: { generationRetryVersion?: string } };
+      const saved = JSON.parse(JSON.stringify(record())) as SavedTrial & { options: { generationRetryVersion?: string; jevNamingRestoreVersion?: string } };
       saved.options.generationRetryVersion = version;
+      // These fixtures restore a zero-turn record written by an earlier producer.
+      delete saved.options.jevNamingRestoreVersion;
       // The naming scope of a saved record follows its generation version (v11 scoped_v6, v8-v10 scoped_v5, v7 scoped_v4, v6 scoped_v3).
       const state = (saved as any).queueState?.privateState;
       if (state && Object.hasOwn(state, 'agreeNameScopeVersion')) state.agreeNameScopeVersion = ({ 11: 'scoped_v6', 10: 'scoped_v5', 9: 'scoped_v5', 8: 'scoped_v5', 7: 'scoped_v4', 6: 'scoped_v3' } as Record<number, string>)[Number(version.replace('jev_generation_retry_v', ''))] ?? state.agreeNameScopeVersion;

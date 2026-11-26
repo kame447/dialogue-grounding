@@ -209,6 +209,17 @@ export async function createNamingTaskV2({
     try {
       const result = await (jev ? withParticipantJevTurn(jev.ledger, input.requestSeq, () => dialogue.runAiTurn(input)) : dialogue.runAiTurn(input));
       if (jev?.ledger.halted) throw new NamingTaskError("ai_unavailable");
+      if (jev?.namingRestoreVersion) {
+        const trace = jevTraces.at(-1);
+        if (trace?.status === "staged" && trace.lastEventId === input.lastEventId && trace.aiPublic) {
+          const application = trace.aiPublic.application;
+          const nameIds = new Set(application.nameIds);
+          // Keep the dependencies before a later turn can prune them. The usual trace settlement still identifies the committed attempt.
+          application.nameAcceptances = result.privateState.graph.records
+            .filter(claim => claim.kind === "claim" && claim.act === "name_accept" && nameIds.has(claim.id))
+            .map(({ id, respondsTo }) => ({ id, respondsTo }));
+        }
+      }
       timing.outcome = "returned";
       return result;
     } catch (error) {
@@ -348,6 +359,7 @@ export async function createNamingTaskV2({
           ...(jev.profile.questionLayout !== "two_stage_v1" ? { questionLayout: jev.profile.questionLayout } : {}),
           // The policy a new two_stage_v3 trial was created with; a record without one never gains it.
           ...(jev.profile.dialoguePolicy ? { dialoguePolicy: jev.profile.dialoguePolicy } : {}),
+          ...(jev.namingRestoreVersion ? { jevNamingRestoreVersion: jev.namingRestoreVersion } : {}),
           ...(hasVersionedViewpoint(jev.generationRetryVersion) ? { generationRetryVersion: jev.generationRetryVersion } : {}) } : {}) },
       ...(rotation.legacy ? {} : { stimulus: clone(stimulus) }),
       status: result ? "completed" : closed ? "submitting" : "dialogue",
