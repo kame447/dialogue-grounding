@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { registerHooks } from 'node:module';
 import { existsSync } from 'node:fs';
@@ -8,6 +8,7 @@ import { MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS } from '../dialogue-model/runtim
 import { canonicalReceptionProtocolV2, canonicalReceptionProtocolV3, receptionProtocolSha256, receptionSummary, validateReceptionPlan } from '../dialogue-model/runtime/v2/reception.ts';
 import { createTrialV2, modelView } from '../dialogue-model/runtime/stimuli/scatter-v2.mjs';
 import { FIGURE_SETS } from '../dialogue-model/runtime/stimuli/figure-bank.ts';
+import { REFERENCE_LIMITS } from '../dialogue-model/runtime/memory/reference-graph.mjs';
 import { validateBoundBaseRecord } from '../dialogue-model/runtime/v2/base-assignment-data.ts';
 import { validateParticipantModelPin } from '../dialogue-model/runtime/v2/participant-model-pin.ts';
 import { handleRequest } from '../workers/research-ai-proxy/src/index.mjs';
@@ -51,14 +52,19 @@ const chatResponse = (model: unknown, content: string) => ({
   model, choices: [{ message: { content }, finish_reason: 'stop' }], usage: { prompt_tokens: 5, completion_tokens: 3 },
 });
 type Choices = Record<string, { criteria: Record<string, string> }>;
-function answers(questions: Choices, observe = false, selectedAction?: string) {
+function answers(questions: Choices, observe = false, selectedAction?: string,
+  choose?: (name: string) => string | undefined, secondAction?: string) {
   return Object.fromEntries(Object.entries(questions).map(([name, { criteria }]) => {
     const keys = Object.keys(criteria);
-    const selection = name === 'action' && selectedAction ? selectedAction
-      : observe ? { action: 'request_observation', target: 'figure_0', observation_target: 'figure_0' }[name as 'action' | 'target' | 'observation_target'] : undefined;
-    const choice = selection && keys.includes(selection) ? selection
-      : name === 'action' && keys.includes('accept') ? 'accept' : keys.includes('none') ? 'none' : keys[0];
-    return [name, { type: 'choice', choice, probabilities: Object.fromEntries(keys.map(key => [key, Number(choice === key)])) }];
+    const selection = observe && name === 'action' ? 'request_observation'
+      : name === 'action' && selectedAction ? selectedAction
+        : observe && (name === 'target' || name === 'observation_target') ? 'figure_0' : undefined;
+    const scripted = choose?.(name);
+    if (scripted !== undefined) assert.ok(keys.includes(scripted), 'scripted choice must be offered: ' + name);
+    const choice = scripted ?? (selection && keys.includes(selection) ? selection
+      : name === 'action' && keys.includes('accept') ? 'accept' : keys.includes('none') ? 'none' : keys[0]);
+    return [name, { type: 'choice', choice, probabilities: Object.fromEntries(keys.map(key =>
+      [key, choice === key ? 1 : name === 'action' && key === secondAction ? 0.9 : 0])) }];
   }));
 }
 
@@ -94,7 +100,9 @@ function harness(enabled = true, selectedProtocol: typeof protocol & {
   const displayed = { protocolId: selectedProtocol.protocolId, revision: selectedProtocol.revision, sha256 };
   const storage = memory(), calls: Array<{ kind: string; expected: string; body: any }> = [];
   const controlled: { policy: unknown; terra: unknown; luna: unknown; jev: unknown; legacyCalls: number; observe: boolean; mixedUsage: boolean; invalidTerra?: boolean; rejectJev?: boolean; selectedAction?: string; observationName?: string;
-    usageChat?: (body: any, expected: string) => Promise<any>; holdChoice?: () => Promise<void> } =
+    usageChat?: (body: any, expected: string) => Promise<any>; holdChoice?: () => Promise<void>;
+    choose?: (name: string, body: { state: string; questions: Choices }) => string | undefined;
+    wrongChoiceModel?: (questions: Choices) => boolean; secondAction?: string } =
     { policy: { ...pin }, terra: pin.terraModelId, luna: pin.lunaModelId, jev: pin.jevModelId, legacyCalls: 0, observe: false, mixedUsage: false };
   let slots: string[] = [];
   const env = {
@@ -102,6 +110,7 @@ function harness(enabled = true, selectedProtocol: typeof protocol & {
     PARTICIPANT_TERRA_PROFILE: PARTICIPANT_PRODUCTION_PROFILE as string | undefined,
     PARTICIPANT_TERRA_GENERATION_ENABLED: undefined as string | undefined,
     PARTICIPANT_TERRA_ALL_ROLES_ENABLED: undefined as string | undefined,
+    PARTICIPANT_DIALOGUE_PROFILE: undefined as string | undefined,
     PARTICIPANT_TERRA_LIMITS_JSON: JSON.stringify(approvedLimits),
     PARTICIPANT_TERRA_INITIAL_OBSERVATION_GENERATION: undefined as string | undefined,
     V2_UTTERANCE_STYLE: 'concise',
@@ -157,8 +166,10 @@ function harness(enabled = true, selectedProtocol: typeof protocol & {
             model: pin.jevModelId, answers: {}, usage: { cost: 0.012, input_tokens: 18, output_tokens: 5 },
           }));
         }
-        const data = { id: 'gen-synthetic', model: controlled.jev, usage: controlled.mixedUsage ? { cost: body.questions.action ? 0.07 : null, input_tokens: 5, output_tokens: 3 } : { cost: 0 },
-          answers: answers(body.questions, observe, controlled.selectedAction) };
+        const model = controlled.wrongChoiceModel?.(body.questions) ? 'typesafe/jev-1.14-20261002' : controlled.jev;
+        const data = { id: 'gen-synthetic', model, usage: controlled.mixedUsage ? { cost: body.questions.action ? 0.07 : null, input_tokens: 5, output_tokens: 3 } : { cost: 0 },
+          answers: answers(body.questions, observe, controlled.selectedAction,
+            name => controlled.choose?.(name, body), controlled.secondAction) };
         // Exercise the proxy's real validation of each positive Jev stage.
         return controlled.jev === pin.jevModelId ? (usageOnly ? participantUsageChoices : participantChoices)(settings, body, expected, async () => Response.json(data))
           : { status: 200, data };
@@ -692,7 +703,7 @@ test('private Terra generation closes on missing configuration, wrong expected I
   assert.equal(posts, 2);
 });
 
-test('dormant dialogue profiles keep management reads available and block starts and restores without reserving a slot', async () => {
+test('dormant P5 dialogue profile keeps management reads available and blocks starts and restores without reserving a slot', async () => {
   const h = harness();
   const proxy = new InternalParticipantProxy({}, settings);
   h.env.PARTICIPANT_TERRA_ALL_ROLES_ENABLED = 'on';
@@ -719,28 +730,34 @@ test('dormant dialogue profiles keep management reads available and block starts
   await error(await h.request('start', { version: 2, expectedReceptionRevision: approved.revision,
     participantDialogueProfile: 'participant_dialogue_v12' }), 400, 'invalid_request');
 
-  for (const profile of ['participant_dialogue_v12', 'participant_dialogue_v13_p5']) {
-    const saved = { ...approved, plan: { ...approved.plan, participantDialogueProfile: profile } };
-    await put({ 'reception:v1': saved });
-    const listing = await h.admin('/admin/receptions');
-    assert.equal(listing.status, 200);
-    assert.ok((await listing.text()).includes('data-id="' + approved.receptionId + '"'));
-    await error(await h.start(), 409, 'trial_unavailable');
-    assert.deepEqual(await h.storage.get('reception:v1'), saved);
-    assert.deepEqual(await h.storage.get('base:owner:v1'), before);
-    assert.equal(h.calls.length, 0);
-  }
+  const p5Approved = { ...approved, plan: { ...approved.plan, participantDialogueProfile: 'participant_dialogue_v13_p5' } };
+  await put({ 'reception:v1': p5Approved });
+  const listing = await h.admin('/admin/receptions');
+  assert.equal(listing.status, 200);
+  assert.ok((await listing.text()).includes('data-id="' + approved.receptionId + '"'));
+  await error(await h.start(), 409, 'trial_unavailable');
+  assert.deepEqual(await h.storage.get('reception:v1'), p5Approved);
+  assert.deepEqual(await h.storage.get('base:owner:v1'), before);
+  assert.equal(h.calls.length, 0);
   await put({ 'reception:v1': { ...approved, plan: { ...approved.plan, participantDialogueProfile: 'unknown' } } });
   await error(await h.start(), 409, 'reception_unavailable');
   assert.deepEqual(await h.storage.get('base:owner:v1'), before);
   assert.equal(h.calls.length, 0);
 
   await put({ 'reception:v1': approved });
+  h.env.PARTICIPANT_DIALOGUE_PROFILE = v12Dialogue;
   const { trial } = await jsonOk(await h.start());
   const recordKey = 'record:' + trial.sessionId;
+  await jsonOk(await h.request('message', { expectedRecordId: trial.sessionId, text: '形を確認したいです。' }));
+  await h.idle();
+  const legacy = await h.storage.get(recordKey);
+  assert.equal(Object.hasOwn(legacy.options, 'participantDialogueProfile'), false);
+  assert.equal(legacy.jevTraces[0].decisionMenuVersion, 'action_conditioned_targets_v1');
   h.evict();
-  assert.equal((await jsonOk(await h.request('state'))).trial.sessionId, trial.sessionId);
-  await h.complete(trial.sessionId, trial);
+  const restored = (await jsonOk(await h.request('state'))).trial;
+  assert.equal(restored.sessionId, trial.sessionId);
+  assert.deepEqual((await h.storage.get(recordKey)).queueState.privateState, legacy.queueState.privateState);
+  await h.complete(trial.sessionId, restored);
   const existing = await h.storage.get('reception:v1');
   const originalOwner = await h.storage.get('base:owner:v1');
   const originalRecord = await h.storage.get(recordKey);
@@ -1370,3 +1387,344 @@ test('pinned capabilities have their own Service entrypoint and no public HTTP r
   }), settings);
   assert.equal(response.status, 404);
 });
+
+const v12Dialogue = 'participant_dialogue_v12';
+const v12Check = '細い部分がつながっています。そちらの形にも半円の切り込みがありますか？';
+const v12Answer = 'はい、こちらの形にも半円の切り込みがあります。';
+
+function v12Transport(t: TestContext, h: ReturnType<typeof harness>) {
+  const env = h.env;
+  const proxy = new InternalParticipantProxy({}, { ...settings, VISION_MODEL: pin.terraModelId });
+  const lookup = () => proxy.participantUsagePolicyV3();
+  env.PARTICIPANT_TERRA_ALL_ROLES_ENABLED = 'on';
+  env.PARTICIPANT_AI_PROXY.participantUsagePolicyV3 = lookup;
+  env.PARTICIPANT_AI_PROXY.participantUsageGeneration = (body, expected) => proxy.participantUsageGeneration(body, expected);
+  h.controlled.usageChat = (body, expected) => proxy.participantUsageChat(body, expected);
+  h.controlled.selectedAction = 'confirm';
+  let slots: string[] = [];
+  let decisionSlot: string;
+  const textPhases: string[] = [];
+  const options = { wrongPhase: '', rewrite: false, quotedDraft: false };
+  function segment(quote: string, aspect: string, targets: string[], respondsToTurn: number | null = null) {
+    return { segmentId: quote.slice(0, 4), quote, aspect, targets, proposition: quote, name: null, linkedIssueId: null, respondsToTurn };
+  }
+  h.controlled.choose = (name, body) => {
+    const material = JSON.parse(body.state);
+    const criteria = body.questions[name].criteria;
+    if (name === 'human_referent' || name === 'target') return 'figure_0';
+    if (/^segment_\d+_act$/u.test(name)) {
+      return material.aiSeq !== undefined
+        ? Number(name.split('_')[1]) === 1 ? 'ask' : 'assert' : 'agree';
+    }
+    if (/^segment_\d+_answer$/u.test(name)) return 'answers_checked_point';
+    if (name.endsWith('_antecedent') && material.aiSeq === undefined) {
+      const index = material.priorClaims?.findLastIndex((c: { act: string }) => c.act === 'ask');
+      return index >= 0 && Object.hasOwn(criteria, 'claim_' + index) ? 'claim_' + index : 'none';
+    }
+    return undefined;
+  };
+  t.mock.method(globalThis, 'fetch', async (_url: unknown, init: RequestInit) => {
+    const body = JSON.parse(String(init.body));
+    assert.equal(body.model, pin.terraModelId);
+    const first = String(body.messages[0].content), last = String(body.messages.at(-1).content);
+    let phase: string, response: string;
+    if (body.messages.some((message: { content: unknown }) => Array.isArray(message.content))) {
+      const args = JSON.parse(body.messages[1].content);
+      if (args.figureIds) {
+        phase = 'reobservation';
+        response = JSON.stringify({ figures: args.figureIds.map((figureId: string) =>
+          ({ figureId, supports: ['半円の切り込みがある'], contradicts: [], unknown: [] })) });
+      } else {
+        phase = 'initial_observation';
+        slots = args.ownAnchors.map(({ id }: { id: string }) => id);
+        response = JSON.stringify({ figures: slots.map(id => ({ id, holistic: [],
+          analytic: { shapes: ['半円の切り込み'], composition: '細い部分がつながる', relations: [] }, unknowns: [] })) });
+      }
+    } else if (first.startsWith(MEMO_LOCAL_EXTRACTION_INSTRUCTIONS)) {
+      phase = 'dialogue';
+      const state = JSON.parse(body.messages.slice(1).map((m: { content: string }) => m.content.split('\n').at(-1)).join(''));
+      const latest = state.publicTurns.at(-1);
+      decisionSlot = state.ownSlots[0];
+      response = JSON.stringify(latest.text === v12Answer
+        ? [segment(v12Answer, 'contour', [], latest.turn - 1)] : []);
+    } else if (first === MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS) {
+      phase = 'ai_extraction';
+      response = JSON.stringify([segment('細い部分がつながっています。', 'part', [decisionSlot]),
+        segment('そちらの形にも半円の切り込みがありますか？', 'question', [])]);
+    } else if (last.includes('JSON')) {
+      phase = 'final_submission';
+      response = JSON.stringify(Object.fromEntries(slots.map(id => [id, null])));
+    } else {
+      phase = last.includes('公開発話を書き直してください') ? 'rewrite' : 'generation';
+      response = options.rewrite && phase === 'generation' ? 'human_referent'
+        : options.quotedDraft ? v12Check + '「輪」に見えるところを教えてください。' : v12Check;
+      options.rewrite = false;
+    }
+    assert.doesNotMatch(JSON.stringify(body), /participantModelPin|service-binding-only|ANSWER_KEY_CANARY/u);
+    textPhases.push(phase);
+    return Response.json(chatResponse(options.wrongPhase === phase ? pin.lunaModelId : pin.terraModelId, response));
+  });
+  return { lookup, options, textPhases };
+}
+
+for (const order of [['repair-first', 'bypass-enabled'], ['bypass-enabled', 'repair-first']]) {
+  test('U6-B v12 private Worker transport, restore, and both conditions ' + order[0], async t => {
+    const receptionProtocol = order[0] === 'repair-first' ? figureBankProtocol : protocol;
+    const h = harness(true, { ...receptionProtocol, allowedOrders: [order] });
+    const v12 = v12Transport(t, h);
+    h.env.PARTICIPANT_DIALOGUE_PROFILE = v12Dialogue;
+    await h.receive();
+    const approval = await h.approve();
+    assert.equal(approval.plan.participantDialogueProfile, v12Dialogue);
+    assert.equal(approval.plan.schemaVersion, receptionProtocol.schemaVersion === 'reception_protocol_v3' ? 'reception_plan_v3' : 'reception_plan_v2');
+    assert.equal(approval.plan.participantModelPin.schemaVersion, 'participant_model_pin_v3');
+    h.env.PARTICIPANT_DIALOGUE_PROFILE = undefined;
+    h.evict();
+
+    let predecessor: string | undefined;
+    for (const strategy of order) {
+      const { trial } = await jsonOk(await h.start(predecessor));
+      const id = trial.sessionId;
+      const key = 'record:' + id;
+      const start = await h.storage.get(key);
+      assert.equal(start.strategy, strategy);
+      assert.equal(start.assignment.source.plan.participantDialogueProfile, v12Dialogue);
+      assert.equal(start.options.participantDialogueProfile, v12Dialogue);
+      assert.doesNotMatch(JSON.stringify(trial), /participantDialogueProfile|scoped_v7|holistic_v5/u);
+      assert.equal(start.options.questionLayout, 'two_stage_v3');
+      assert.equal(start.options.dialoguePolicy, 'holistic_v5');
+      assert.equal(start.options.generationRetryVersion, 'jev_generation_retry_v12');
+      assert.equal(start.options.jevNamingRestoreVersion, 'ai_name_acceptances_v1');
+      assert.deepEqual(start.options.technicalTrial, { version: 'adaptive_repair_v3' });
+      assert.equal(start.queueState.privateState.agreeNameScopeVersion, 'scoped_v7');
+
+      h.controlled.observe = true;
+      v12.options.rewrite = true;
+      const sendMessage = (text: string, clientId: string) => h.request('message', { expectedRecordId: id, text, clientId });
+      let count = h.calls.length;
+      await jsonOk(await sendMessage('形を一つ確認したいです。', 'check'));
+      await h.idle();
+      const turnOne = h.calls.slice(count).filter(x => x.kind === 'choices').map(x => Object.keys(x.body.questions));
+      const checked = await h.storage.get(key);
+      assert.equal(checked.queueState.errorCode, null);
+      assert.equal(checked.jevTraces[0].generationGuard.regenerated, true);
+      assert.equal(checked.jevTraces[0].reobservations.length, 1, JSON.stringify(turnOne));
+      assert.deepEqual(checked.jevTraces[0].decisions.map((x: any) => x.evidence.stages.map((s: any) => s.stage)),
+        [['action', 'target', 'detail'], ['action', 'target', 'detail']]);
+      count = h.calls.length;
+      await jsonOk(await sendMessage(v12Answer, 'answer'));
+      await h.idle();
+      const turnTwo = h.calls.slice(count).filter(x => x.kind === 'choices').map(x => Object.keys(x.body.questions));
+      const answered = await h.storage.get(key);
+      assert.equal(answered.queueState.errorCode, null);
+      const last = answered.jevTraces.at(-1);
+      assert.equal(last.local.claims[0]?.source, 'partner_labelled_answer',
+        JSON.stringify({ local: last.local.verification, localStatus: last.local.localStatus,
+          classifier: last.local.classifier?.verdicts, application: last.aiPublic?.application, turnTwo }));
+      assert.equal(answered.jevTraces.at(-1).executed.action, 'confirm');
+      t.diagnostic(JSON.stringify({ strategy, check: turnOne, answer: turnTwo }));
+
+      h.controlled.rejectJev = true;
+      await jsonOk(await sendMessage('もう一度形を比べたいです。', 'pending'));
+      await h.idle();
+      const pending = await h.storage.get(key);
+      assert.equal(pending.queueState.errorCode, 'ai_unavailable');
+      const pendingId = pending.queueState.pendingHumanEventIds[0];
+      count = h.calls.length;
+      h.evict();
+      assert.equal((await jsonOk(await h.request('state'))).trial.events.at(-1).id, pendingId);
+      assert.equal(h.calls.length, count);
+      h.controlled.rejectJev = false;
+      await jsonOk(await h.request('retry', { expectedRecordId: id }));
+      await h.idle();
+      const retried = await h.storage.get(key);
+      assert.deepEqual(retried.queueState.pendingHumanEventIds, []);
+      assert.equal(retried.jevTraces.at(-1).lastEventId, pendingId);
+      await h.complete(id, (await jsonOk(await h.request('state'))).trial);
+      const saved = await h.storage.get(key);
+      assert.equal(saved.status, 'completed');
+      assert.deepEqual(saved.jevLedger.returnedModels.luna, {});
+      for (const stat of Object.values(saved.jevLedger.returnedModels.terra) as { model: string }[]) assert.equal(stat.model, pin.terraModelId);
+      for (const stat of Object.values(saved.jevLedger.returnedModels.jev) as { model: string }[]) assert.equal(stat.model, pin.jevModelId);
+
+      if (predecessor === undefined) {
+        const reception = await h.storage.get('reception:v1');
+        const owner = await h.storage.get('base:owner:v1');
+        const calls = h.calls.length;
+        await h.storage.transaction(tx => tx.put({ [key]: { ...saved, options: { ...saved.options, generationRetryVersion: 'jev_generation_retry_v11' } } }));
+        assert.equal((await h.start(id)).status, 409);
+        assert.deepEqual(await h.storage.get('reception:v1'), reception);
+        assert.deepEqual(await h.storage.get('base:owner:v1'), owner);
+        assert.equal(h.calls.length, calls);
+        await h.storage.transaction(tx => tx.put({ [key]: saved }));
+        h.env.PARTICIPANT_AI_PROXY.participantUsagePolicyV3 = undefined;
+        assert.equal((await h.start(id)).status, 409);
+        assert.deepEqual(await h.storage.get('reception:v1'), reception);
+        h.env.PARTICIPANT_AI_PROXY.participantUsagePolicyV3 = v12.lookup;
+      }
+      predecessor = id;
+    }
+    assert.equal(v12.textPhases.filter(x => x === 'reobservation').length, 2);
+    assert.equal(v12.textPhases.filter(x => x === 'rewrite').length, 2);
+    assert.equal(v12.textPhases.filter(x => x === 'final_submission').length, 2);
+    assert.equal(h.controlled.legacyCalls, 0);
+  });
+}
+
+test('U6-B approval rejects unsupported environment and missing v3 before sending', async t => {
+  const h = harness();
+  const transport = v12Transport(t, h);
+  await h.receive();
+  const before = await h.storage.get('reception:v1');
+  for (const profile of ['participant_dialogue_v13_p5', 'unknown']) {
+    h.env.PARTICIPANT_DIALOGUE_PROFILE = profile;
+    await assert.rejects(h.approve(), { code: 'reception_unavailable' });
+  }
+  h.env.PARTICIPANT_DIALOGUE_PROFILE = v12Dialogue;
+  h.env.PARTICIPANT_TERRA_ALL_ROLES_ENABLED = undefined;
+  await assert.rejects(h.approve(), { code: 'reception_unavailable' });
+  h.env.PARTICIPANT_TERRA_ALL_ROLES_ENABLED = 'on';
+  h.env.PARTICIPANT_TERRA_PROFILE = undefined;
+  await assert.rejects(h.approve(), { code: 'reception_unavailable' });
+  assert.deepEqual(await h.storage.get('reception:v1'), before);
+  assert.deepEqual(transport.textPhases, []);
+  assert.deepEqual(h.calls, []);
+});
+
+for (const phase of ['initial_observation', 'dialogue', 'reobservation', 'generation', 'rewrite', 'ai_extraction', 'final_submission']) {
+  test('U6-B rejects a mismatched Terra model during ' + phase, async t => {
+    const h = harness();
+    const transport = v12Transport(t, h);
+    h.env.PARTICIPANT_DIALOGUE_PROFILE = v12Dialogue;
+    await h.receive();
+    await h.approve();
+    transport.options.wrongPhase = phase;
+    const started = await h.start();
+    if (phase === 'initial_observation') {
+      assert.equal(started.status, 409);
+      assert.deepEqual(await started.json(), { error: 'trial_unavailable' });
+      assert.deepEqual(transport.textPhases, [phase]);
+      return;
+    }
+    const { trial } = await jsonOk(started);
+    const id = trial.sessionId;
+    if (phase === 'final_submission') {
+      const submitted = await h.request('names', { expectedRecordId: id, confirm: true, expectedEventCount: trial.events.length,
+        names: Object.fromEntries(trial.scene.shapes.map(({ id }: { id: string }) => [id, null])) });
+      assert.notEqual(submitted.status, 200);
+      const record = await h.storage.get('record:' + id);
+      assert.equal(record.aiSubmission, null);
+      assert.equal(record.jevLedger.halted, true);
+    } else {
+      transport.options.rewrite = phase === 'rewrite';
+      h.controlled.observe = phase === 'reobservation';
+      await jsonOk(await h.request('message', { expectedRecordId: id, text: '形を一つ確認したいです。' }));
+      await h.idle();
+      const record = await h.storage.get('record:' + id);
+      assert.equal(record.queueState.errorCode, 'ai_unavailable');
+      assert.equal(record.jevLedger.halted, true);
+      assert.equal(record.queueState.privateState.judgments.length, 0);
+      assert.ok(!record.events.some((e: { text: string }) => e.text === v12Check));
+    }
+    assert.equal(transport.textPhases.at(-1), phase);
+  });
+}
+
+for (const stage of ['human_referent', 'action', 'target', 'observe_targets', 'feature',
+  'local_answer', 'ai_function', 'ai_support', 'repair_issue', 'draft_naming']) {
+  test('U6-B rejects a mismatched Jev model during ' + stage, async t => {
+    const h = harness();
+    const transport = v12Transport(t, h);
+    h.env.PARTICIPANT_DIALOGUE_PROFILE = v12Dialogue;
+    await h.receive();
+    await h.approve();
+    const { trial } = await jsonOk(await h.start());
+    const id = trial.sessionId;
+    const send = (text: string) => h.request('message', { expectedRecordId: id, text });
+    const prior = stage === 'local_answer' || stage === 'repair_issue';
+    if (prior) {
+      await jsonOk(await send('形を一つ確認したいです。'));
+      await h.idle();
+    }
+    transport.options.quotedDraft = stage === 'draft_naming';
+    h.controlled.observe = stage === 'observe_targets';
+    let mismatches = 0;
+    h.controlled.wrongChoiceModel = questions => {
+      const keys = Object.keys(questions);
+      const mismatch = stage === 'local_answer' ? keys.some(k => k.endsWith('_answer'))
+        : stage === 'ai_function' ? keys.some(k => k.endsWith('_act')) && !keys.some(k => k.endsWith('_answer'))
+          : stage === 'ai_support' ? keys.some(k => k.endsWith('_support')) : Object.hasOwn(questions, stage);
+      if (mismatch) mismatches++;
+      return mismatch;
+    };
+    await jsonOk(await send(prior ? v12Answer : '形を一つ確認したいです。'));
+    await h.idle();
+    const record = await h.storage.get('record:' + id);
+    assert.equal(mismatches, 1, 'the intended private RPC must receive the mismatched reply');
+    assert.equal(record.queueState.errorCode, 'ai_unavailable');
+    assert.equal(record.jevLedger.halted, true);
+    assert.equal(record.queueState.privateState.judgments.length, Number(prior));
+    assert.equal(record.jevLedger.latest.jev.status, 'model_mismatch');
+  });
+}
+
+test('U6-B long dialogue stays within the existing private choice transport bounds', async t => {
+  const h = harness();
+  const transport = v12Transport(t, h);
+  h.env.PARTICIPANT_DIALOGUE_PROFILE = v12Dialogue;
+  await h.receive();
+  await h.approve();
+  const { trial } = await jsonOk(await h.start());
+  const id = trial.sessionId;
+  const turns = REFERENCE_LIMITS.publicTurns + 1;
+  for (let i = 0; i < turns; i++) {
+    await jsonOk(await h.request('message', { expectedRecordId: id, clientId: 'long-' + i,
+      text: (i + 1) + '回目。' + '折れ曲がる輪郭の細い部分について、形のつながりを順番に比べたいです。'.repeat(7) }));
+    await h.idle();
+    const record = await h.storage.get('record:' + id);
+    assert.equal(record.queueState.errorCode, null, 'turn ' + (i + 1));
+    assert.equal(record.queueState.privateState.judgments.length, i + 1);
+  }
+  const requests = h.calls.filter(x => x.kind === 'choices').map(x => x.body);
+  const max = (numbers: number[]) => Math.max(...numbers);
+  const measured = {
+    turns,
+    posts: requests.length,
+    maxStateChars: max(requests.map(x => x.state.length)),
+    maxQuestions: max(requests.map(x => Object.keys(x.questions).length)),
+    maxOptions: max(requests.flatMap(x => Object.values(x.questions as Choices).map(q => Object.keys(q.criteria).length))),
+    maxBytes: max(requests.map(x => new TextEncoder().encode(JSON.stringify(x)).byteLength)),
+  };
+  assert.ok(measured.maxStateChars <= 40_000);
+  assert.ok(measured.maxQuestions <= 128);
+  assert.ok(measured.maxOptions <= 256);
+  assert.ok(measured.maxBytes <= 1024 * 1024);
+  assert.equal(transport.textPhases.filter(x => x === 'generation').length, turns);
+  t.diagnostic(JSON.stringify(measured));
+});
+
+for (const strategy of ['repair-first', 'bypass-enabled']) {
+  test('U6-B ' + strategy + ' counts the decision and any veto detail by request', async t => {
+    const h = harness(true, { ...protocol, allowedOrders: [[strategy]] });
+    v12Transport(t, h);
+    h.env.PARTICIPANT_DIALOGUE_PROFILE = v12Dialogue;
+    h.controlled.selectedAction = 'defer';
+    h.controlled.secondAction = 'confirm';
+    await h.receive();
+    await h.approve();
+    const { trial } = await jsonOk(await h.start());
+    await jsonOk(await h.request('message', { expectedRecordId: trial.sessionId, text: '形を一つ確認したいです。' }));
+    await h.idle();
+    const saved = await h.storage.get('record:' + trial.sessionId);
+    assert.equal(saved.queueState.errorCode, null);
+    const trace = saved.jevTraces[0], repair = strategy === 'repair-first';
+    assert.equal(trace.decisions[0].action, 'defer');
+    assert.equal(trace.executed.action, repair ? 'confirm' : 'defer');
+    assert.equal(trace.intervention.disposition, repair ? 'rejected' : 'adopted');
+    assert.deepEqual(trace.decisions[0].evidence.stages.map((s: { stage: string }) => s.stage), ['action', 'target']);
+    const requests = h.calls.filter(x => x.kind === 'choices').map(x => Object.keys(x.body.questions));
+    assert.deepEqual(requests.filter(keys => keys.some(k => ['action', 'target', 'feature'].includes(k))),
+      repair ? [['action'], ['target'], ['feature']] : [['action'], ['target']]);
+    t.diagnostic(JSON.stringify({ strategy, posts: requests.length, decisionAndVetoDetail: repair ? 3 : 2 }));
+  });
+}

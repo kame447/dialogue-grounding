@@ -13,7 +13,7 @@ export class BaseSessionError extends Error {
 const fail = (code: BaseSessionErrorCode = 'trial_unavailable', reason?: PersistReason): never => { throw new BaseSessionError(code, reason); };
 // Saved profile metadata can be read before the matching runtime is available.
 function requireRunnableAssignment(assignment: BaseAssignment): void {
-  if (assignmentParticipantDialogueProfile(assignment) !== undefined) fail();
+  if (assignmentParticipantDialogueProfile(assignment) === 'participant_dialogue_v13_p5') fail();
 }
 const copy = <T>(v: T): T => structuredClone(v);
 /** External ports cannot select an internal error by throwing a matching string. */

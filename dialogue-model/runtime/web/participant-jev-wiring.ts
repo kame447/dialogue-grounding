@@ -37,10 +37,13 @@ import { defaultGenerationRetryVersion, hasVersionedViewpoint, isGenerationV12, 
 import type { GenerationRetryVersion } from '../v2/generation-guard.ts';
 
 export type JevResearchLedger = RunBudget | ParticipantUsageLedger;
+const AI_NAME_ACCEPTANCES_V1 = 'ai_name_acceptances_v1';
+type ParticipantJevVersionPin = Readonly<{
+  generationRetryVersion: 'jev_generation_retry_v12'; namingRestoreVersion: typeof AI_NAME_ACCEPTANCES_V1;
+}>;
 export type JevResearchOptions<Ledger extends JevResearchLedger = RunBudget> = Readonly<{ profile: ResearchTrialProfileV3; observer: ObservationObserver;
   jevDecision: JevDecisionClient; localGrounding: JevTurnLocalOptions; ledger: Ledger; technicalTrial?: AdaptiveRepairTrial;
-  newTrialAgreeNameScopeVersion?: JevTurnOptions["newTrialAgreeNameScopeVersion"] }>;
-const AI_NAME_ACCEPTANCES_V1 = 'ai_name_acceptances_v1';
+  newTrialAgreeNameScopeVersion?: JevTurnOptions["newTrialAgreeNameScopeVersion"]; pinnedVersions?: ParticipantJevVersionPin }>;
 type SelectedJevResearchOptions = JevResearchOptions<JevResearchLedger> & { generationRetryVersion?: GenerationRetryVersion;
   namingRestoreVersion?: typeof AI_NAME_ACCEPTANCES_V1 };
 export class ParticipantJevError extends Error {
@@ -142,7 +145,8 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
     if (provided === null || provided === undefined) return marker === true ? invalid() : null;
     const raw = data(provided);
     const v = data(raw,['profile','observer','jevDecision','localGrounding','ledger',...(Object.hasOwn(raw,'technicalTrial')?['technicalTrial']:[]),
-      ...(Object.hasOwn(raw,'newTrialAgreeNameScopeVersion')?['newTrialAgreeNameScopeVersion']:[])]);
+      ...(Object.hasOwn(raw,'newTrialAgreeNameScopeVersion')?['newTrialAgreeNameScopeVersion']:[]),
+      ...(Object.hasOwn(raw,'pinnedVersions')?['pinnedVersions']:[])]);
     const technicalTrial = Object.hasOwn(v,'technicalTrial') ? checkedTechnicalTrial(v.technicalTrial) : undefined;
     // The frozen order is outer shape, explicit profile, memory, strategy.
     let profile = checkedProfile(v.profile);
@@ -156,15 +160,22 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
     const savedGenerationVersion = restore?.options?.generationRetryVersion;
     if (restore && Object.hasOwn(restore.options ?? {}, 'generationRetryVersion') &&
         (!hasVersionedViewpoint(savedGenerationVersion) || !validGenerationRetryVersion(savedGenerationVersion, profile.questionLayout, profile.dialoguePolicy))) return invalid();
+    const pinned = Object.hasOwn(v, 'pinnedVersions') ? data(v.pinnedVersions, ['generationRetryVersion','namingRestoreVersion']) : null;
+    if (pinned && (pinned.generationRetryVersion !== 'jev_generation_retry_v12' ||
+        pinned.namingRestoreVersion !== AI_NAME_ACCEPTANCES_V1 ||
+        !validGenerationRetryVersion(pinned.generationRetryVersion, profile.questionLayout, profile.dialoguePolicy) ||
+        restore && (savedGenerationVersion !== pinned.generationRetryVersion ||
+          restore.options.jevNamingRestoreVersion !== pinned.namingRestoreVersion))) return invalid();
     const generationRetryVersion = profile.dialoguePolicy === 'holistic_v5' && profile.questionLayout === 'two_stage_v3'
-      ? restore ? savedGenerationVersion ?? 'jev_generation_retry_v2' : defaultGenerationRetryVersion(profile.questionLayout, profile.dialoguePolicy)
+      ? restore ? savedGenerationVersion ?? 'jev_generation_retry_v2'
+        : pinned ? 'jev_generation_retry_v12' : defaultGenerationRetryVersion(profile.questionLayout, profile.dialoguePolicy)
       : undefined;
     const newTrialAgreeNameScopeVersion = v.newTrialAgreeNameScopeVersion;
     if (Object.hasOwn(v, 'newTrialAgreeNameScopeVersion') &&
         (newTrialAgreeNameScopeVersion !== 'scoped_v7' || !restore &&
           !validAgreeNameScope(newTrialAgreeNameScopeVersion, generationRetryVersion))) return invalid();
     const namingRestoreVersion = restore ? restore.options?.jevNamingRestoreVersion :
-      isGenerationV12(generationRetryVersion) ? AI_NAME_ACCEPTANCES_V1 : undefined;
+      pinned || isGenerationV12(generationRetryVersion) ? AI_NAME_ACCEPTANCES_V1 : undefined;
     if (restore && Object.hasOwn(restore.options ?? {}, 'jevNamingRestoreVersion') &&
         (namingRestoreVersion !== AI_NAME_ACCEPTANCES_V1 || !isGenerationV12(generationRetryVersion))) return invalid();
     if (restore && !validAgreeNameScope(restore.queueState?.privateState?.agreeNameScopeVersion, generationRetryVersion)) return invalid();
