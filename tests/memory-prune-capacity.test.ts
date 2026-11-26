@@ -111,6 +111,50 @@ test("recent negative checks survive naming under pressure with both records in 
   assert.ok(!claims.some(c => c.id === "1:part0"));
 });
 
+test("a same-turn acknowledgement and naming claim cannot displace a denial for a retained referent", () => {
+  const fillerTargets = slots.slice(1, 5);
+  const filler = (turn: number, index: number, id: string) =>
+    claim(turn, id, { targets: [fillerTargets[index]], issueId: `1:filler${index}` });
+  let graph = createReferenceGraph({ slots, memoryPruneVersion: CLAIM_PRUNE_V2 });
+  const count = REFERENCE_LIMITS.records - fillerTargets.length - 3;
+  for (let used = 0; used < count; used += REFERENCE_LIMITS.operations) {
+    const turn = graph.lastTurn + 1;
+    graph = apply(graph, turn, Array.from({ length: Math.min(count - used, REFERENCE_LIMITS.operations) }, (_, index) =>
+      filler(turn, (used + index) % fillerTargets.length, "filler" + index)));
+  }
+  const focus = claim(graph.lastTurn + 1, "focus", { targets: [left], aspect: "referent" });
+  graph = apply(graph, focus.sourceTurn, [focus]);
+  const check = claim(graph.lastTurn + 1, "check", { targets: [left], speaker: "ai", source: "ai_hypothesis" });
+  graph = apply(graph, check.sourceTurn, [check]);
+  const denial = claim(graph.lastTurn + 1, "deny", { targets: [left], act: "deny", respondsTo: check.id, issueId: check.issueId });
+  graph = apply(graph, denial.sourceTurn, [denial]);
+  const fillerTurn = graph.lastTurn + 1;
+  graph = apply(graph, fillerTurn, fillerTargets.map((_, index) => filler(fillerTurn, index, "filler" + index)));
+  assert.equal(graph.records.length, REFERENCE_LIMITS.records);
+
+  const turn = graph.lastTurn + 1;
+  const name = proposal(turn);
+  const acknowledgement: LocalSegmentProposal = { segmentId: "ack", quote: "分かりました。",
+    targets: [], aspect: "progress", proposition: "話を受け止めた", name: null, linkedIssueId: null, respondsToTurn: null };
+  const naming: LocalSegmentProposal = { segmentId: "name", quote: name.quote, targets: name.targets,
+    aspect: "name", proposition: name.proposition, name: name.name, linkedIssueId: null, respondsToTurn: null };
+  const publicTurns: PublicTurn[] = [{ turn, speaker: "human", text: acknowledgement.quote + name.quote }];
+  for (const includeAck of [false, true]) {
+    const segments = includeAck ? [acknowledgement, naming] : [naming];
+    const verified = verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts: segments.map(s => ({
+      segmentId: s.segmentId, act: s === naming ? "name_propose" : "acknowledge",
+      respondsToClaimId: null, rawScore: null,
+    })) });
+    assert.deepEqual(verified.rejected, []);
+    assert.equal(verified.operations.length, segments.length);
+    const after = applyReferenceUpdate(graph, { expectedRevision: graph.revision, turn, operations: verified.operations },
+      { publicTurns, generationSucceeded: true });
+    const retained = new Set(after.records.map((record: Claim) => record.id));
+    assert.ok(retained.has(check.id) && retained.has(denial.id), "keep the recent check and its denial together");
+    for (const op of verified.operations) assert.ok(retained.has(op.id));
+  }
+});
+
 test("pre-human replay must reconstruct the graph before a same-turn name evicts an antecedent", () => {
   const graph = saturated(REFERENCE_LIMITS.records - 1, CLAIM_PRUNE_V2);
   const turn = graph.lastTurn + 2;
@@ -255,7 +299,7 @@ test("an explicit local research setting is frozen for both strategies and survi
   }
 });
 
-test("S4 accepts the recorded pruning version and rejects a trial/tape disagreement", async () => {
+test("S4 binds the pruning version of the trial, tape and both saved graphs", async () => {
   const records = JSON.parse(await readFile(new URL("./support/s4-integration/i172/NORMAL-RECORDS.json", import.meta.url), "utf8"));
   const trial = records.trials[0];
   const replay = trial.replay[0];
@@ -264,6 +308,14 @@ test("S4 accepts the recorded pruning version and rejects a trial/tape disagreem
     ownAnchors: replay.result.sides[0].material.own.ownAnchors,
   };
   const model = replay.result.sides[0].material.model;
+  const status = () => interventionChecks(records).find(check => check.id.endsWith(".replay"))?.status;
+  assert.equal(status(), "pass");
+  const committed = [trial.lastCommittedState.graph, ...trial.turns.map((turn: { state: { graph: Graph } }) => turn.state.graph)];
+  for (const version of [CLAIM_PRUNE_V2, "unrecognized_pruning"]) {
+    for (const graph of committed) graph.memoryPruneVersion = version;
+    assert.equal(status(), "mismatch");
+    for (const graph of committed) delete graph.memoryPruneVersion;
+  }
   trial.memoryPruneVersion = CLAIM_PRUNE_V2;
   for (const state of [replay.tape.state, trial.lastCommittedState, ...trial.turns.map((turn: { state: unknown }) => turn.state)]) {
     state.graph.memoryPruneVersion = CLAIM_PRUNE_V2;
@@ -273,8 +325,10 @@ test("S4 accepts the recorded pruning version and rejects a trial/tape disagreem
   [records.evidence.pairedReplay[0].left, records.evidence.pairedReplay[0].right] = replay.result.sides;
   records.run.promptSources = await promptSourceManifest();
   trial.identity.prompts = hash(records.run.promptSources);
-  const status = () => interventionChecks(records).find(check => check.id.endsWith(".replay"))?.status;
   assert.equal(status(), "pass");
+  delete trial.lastCommittedState.graph.memoryPruneVersion;
+  assert.equal(status(), "mismatch");
+  trial.lastCommittedState.graph.memoryPruneVersion = CLAIM_PRUNE_V2;
   delete trial.memoryPruneVersion;
   assert.equal(status(), "mismatch");
 });

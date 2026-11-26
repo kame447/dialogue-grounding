@@ -106,11 +106,11 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
  const v=promptVersion(records,tr);if(!v)return'invalid';
  const {tape,result}=entries[0],pair=pairs[0];
  const pruneVersion = tape?.state?.graph?.memoryPruneVersion;
- if (pruneVersion !== tr.memoryPruneVersion) return 'invalid';
+ const committed = tr.turns?.find((u:any)=>u.turn===t.turnIndex)?.state?.graph;
+ const finalGraph = tr.lastCommittedState?.graph;
+ if ([tr.memoryPruneVersion,committed?.memoryPruneVersion,finalGraph?.memoryPruneVersion].some(version=>version!==pruneVersion)) return 'invalid';
  if (pruneVersion !== undefined) {
   if (pruneVersion !== CLAIM_PRUNE_V2) return 'invalid';
-  const committed = tr.turns?.find((u:any)=>u.turn===t.turnIndex)?.state?.graph;
-  if (committed?.memoryPruneVersion !== pruneVersion) return 'invalid';
   try { snapshotReferenceGraph(tape.state.graph); snapshotReferenceGraph(committed); } catch { return 'invalid'; }
  }
  if(!exact(tape,['schemaVersion','state','events','common','tails','recorded'])||tape.schemaVersion!=='parity_intervention_replay_v1'||!exact(result,['schemaVersion','status','error','commonEqual','policyConformant','recordedPayloadsReproduced','actualLunaHttpMeasured','hashScheme','excludedEnvelopeFields','sides'])||result.schemaVersion!=='parity_intervention_replay_result_v1'||result.status!=='same_material_intervention_verified'||result.error!==null||result.commonEqual!==true||result.policyConformant!==true||result.recordedPayloadsReproduced!==true||typeof result.actualLunaHttpMeasured!=='boolean'||result.hashScheme!=='canonical_json_sha256_not_raw_body_bytes'||!equal(result.excludedEnvelopeFields,META_KEYS)||!Array.isArray(result.sides)||result.sides.length!==2)return'invalid';

@@ -332,7 +332,15 @@ function prune(graph) {
   const v2 = graph.memoryPruneVersion === CLAIM_PRUNE_V2;
   const preferred = [];
   const agreed = new Map();
+  const latestDenial = new Map();
   if (v2) {
+    // A later public denial can invalidate a positive claim about the same
+    // figure even when it belongs to a different issue.
+    for (const r of claims) {
+      if (r.speaker === "human" && r.act === "deny" && r.aspect !== "name" && r.aspect !== "progress" && !claimDead.has(r.id)) {
+        for (const slot of r.targets) latestDenial.set(slot, r);
+      }
+    }
     for (const issue of issues.values()) {
       if (issue[0].aspect !== "name") continue;
       const { acceptance } = claimNameState(issue, issue.filter(r => !claimDead.has(r.id) && r.act !== "withdraw"), claims, claimDead);
@@ -384,7 +392,13 @@ function prune(graph) {
         (record.kind === "claim" && r.kind === "claim" && (r.issueId === record.issueId || r.respondsTo === id ||
           (record.aspect === "name" && r.aspect === "name" && position.get(r.id) > position.get(record.id) && r.targets.some((s) => record.targets.includes(s))))) ||
         (record.kind === "question" && r.kind === "question" && r.replaces === id)).map(r => r.id));
-      for (const dep of [...dependencies(record), ...successors]) {
+      const denial = v2 && record.kind === "claim" && record.targets.length === 1 &&
+        record.aspect !== "name" && record.aspect !== "progress" &&
+        ["assert", "agree", "construe"].includes(record.act) && !claimDead.has(id) ? latestDenial.get(record.targets[0]) : undefined;
+      // If the blocker does not fit, the older positive claim cannot be
+      // retained on its own and reopen a naming decision.
+      const blockers = denial && denial.sourceTurn >= record.sourceTurn ? [denial.id] : [];
+      for (const dep of [...dependencies(record), ...successors, ...blockers]) {
         if (!keep.has(dep)) { keep.add(dep); pending.push(dep); }
       }
     }
@@ -398,9 +412,13 @@ function prune(graph) {
     .concat(claims.slice(-REFERENCE_LIMITS.recentMentions), repairs.flatMap((r) => [byId.get(r.targetId ?? r.replaces), r].filter(Boolean))).reverse();
   if (v2) {
     // A batch accepted by the validators must not silently lose a new claim.
-    // Try current operations ahead of older closures, including resolved issues.
+    // Keep the negative checks ahead of unrelated issues when space is tight.
+    const denials = new Set(latestDenial.values());
+    const priority = (r) => r.turn === graph.lastTurn ? 2 : denials.has(r) ? 1 : 0;
+    preferred.push(...denials);
     preferred.push(...claims.filter(r => r.turn === graph.lastTurn));
-    preferred.sort((a, b) => b.turn - a.turn || b.sourceTurn - a.sourceTurn || position.get(b.id) - position.get(a.id));
+    preferred.sort((a, b) => priority(b) - priority(a) ||
+      b.turn - a.turn || b.sourceTurn - a.sourceTurn || position.get(b.id) - position.get(a.id));
     const all = closure(new Set([...mandatory, ...preferred.map(r => r.id)]));
     if (fits(all)) {
       preferred.forEach(r => mandatory.add(r.id));
