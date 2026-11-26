@@ -90,6 +90,7 @@ test('402, 429 and timeout remain unobserved while a verified rejected reply set
   assert.deepEqual([measured.posts, measured.unknownPosts, measured.missingCostPosts, measured.knownUsd,
     measured.inputTokens, measured.outputTokens], [5, 4, 4, 0.012, 18, 5]);
   assert.equal(restored.snapshot().latest.jev?.model, pin.jevModelId);
+  assert.deepEqual(restored.snapshot().returnedModels?.jev, {});
   assert.equal(restored.halted, false);
 });
 
@@ -108,4 +109,20 @@ test('an all-Terra ledger rejects Luna reservations and archives with legacy pha
   delete mixed.phases.terra.dialogue;
   assert.throws(() => ParticipantUsageLedger.readSnapshot(mixed, initial.assignmentId, allTerra));
   assert.deepEqual((await ParticipantUsageLedger.open(store, initial.assignmentId, allTerra, initial)).snapshot(), initial);
+});
+
+
+test('archives without returned model evidence restore in their original format', async () => {
+  const assignment = 'synthetic-assignment';
+  const store = memory();
+  const ledger = await ParticipantUsageLedger.open(store, assignment, pin);
+  const legacy = ledger.snapshot();
+  delete legacy.returnedModels;
+  await store.update(() => legacy);
+
+  const restored = await ParticipantUsageLedger.open(store, assignment, pin, legacy);
+  assert.deepEqual(restored.snapshot(), legacy);
+  await restored.dispatch('jev', async () => ({ status: 200, data: { model: pin.jevModelId } }), { questions: { action: {} } });
+  assert.equal(Object.hasOwn(restored.snapshot(), 'returnedModels'), false);
+  assert.equal(restored.snapshot().latest.jev?.model, pin.jevModelId);
 });
