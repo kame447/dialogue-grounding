@@ -1688,7 +1688,7 @@ for (const strategy of strategies) {
         publicClaims: [{ text: description, act: 'assert', aspect: 'part', targets: [first] }, { text: askAboutShape, act: 'ask', aspect: 'question', targets: [first] }],
         local: [{ text: second, act: 'name_propose', aspect: 'name', targets: [first], name: correctedName }] });
       assert.equal(asked.trace.status, 'committed');
-      const aiTurn = asked.after.jevTraces.at(-1).turnIndex + 1;
+      const aiTurn = asked.after.jevTraces.at(-1)!.turnIndex + 1;
       const reply = 'はい、その形です。それなら、その名前でいい？';
       const agreeSpeechCorrected = 'この形は「' + correctedName + '」と呼びましょう。';
       const named = await dialogue.say({ human: reply, action: 'agree', target: 0, name: correctedName, agreeSpeech: agreeSpeechCorrected,
@@ -1698,7 +1698,7 @@ for (const strategy of strategies) {
           { text: 'それなら、その名前でいい？', act: 'name_propose', aspect: 'name', targets: [], respondsToTurn: aiTurn, antecedent: { speaker: 'ai', proposition: askAboutShape } },
         ] });
       assert.equal(named.trace.status, 'committed', 'named:' + named.trace.errorCode);
-      const offered = (named.after.queueState.privateState.judgments.at(-1).jevTurn.agreeNames as Array<{ name: string }>).map(entry => entry.name).sort();
+      const offered = (named.after.queueState.privateState.judgments.at(-1)!.jevTurn.agreeNames as Array<{ name: string }>).map(entry => entry.name).sort();
       assert.deepEqual(offered, [correctedName], 'the corrected name alone is a candidate');
       assert.equal(named.speech, agreeSpeechCorrected);
       assert.deepEqual(named.after.ownLedger[first], { status: 'agreed', name: correctedName });
@@ -1721,7 +1721,7 @@ for (const strategy of strategies) {
       ] });
     assert.equal(named.trace.status, 'committed', 'named:' + named.trace.errorCode);
     assert.equal(Boolean(named.trace.namingRequest), true);
-    assert.deepEqual((named.after.queueState.privateState.judgments.at(-1).jevTurn.agreeNames as Array<{ name: string }>).map(entry => entry.name), [originalName]);
+    assert.deepEqual((named.after.queueState.privateState.judgments.at(-1)!.jevTurn.agreeNames as Array<{ name: string }>).map(entry => entry.name), [originalName]);
     assert.deepEqual(named.after.ownLedger[first], { status: 'agreed', name: originalName });
   });
 
@@ -1760,7 +1760,7 @@ for (const strategy of strategies) {
       local: [correction === null ? { text: human, act: 'ask', aspect: 'question', targets: [] }
         : { text: human, act: 'name_propose', aspect: 'name', targets: [first], name: correctedName }] });
     assert.equal(asked.trace.status, 'committed');
-    return asked.after.jevTraces.at(-1).turnIndex + 1;
+    return asked.after.jevTraces.at(-1)!.turnIndex + 1;
   };
   const approval = (aiTurn: number) => ({
     // The first half answers the latest question; the second half is tied to the earlier, identical one.
@@ -1782,7 +1782,7 @@ for (const strategy of strategies) {
       const named = await dialogue.say({ human: reply, action: 'agree', target: 0, name: correctedName, agreeSpeech: speech, drafts: [speech],
         draftActs: { [speech]: 'adopt_chosen' }, ...approval(aiTurn) });
       assert.equal(named.trace.status, 'committed', 'named:' + named.trace.errorCode);
-      const offered = (named.after.queueState.privateState.judgments.at(-1).jevTurn.agreeNames as Array<{ name: string }>).map(entry => entry.name).sort();
+      const offered = (named.after.queueState.privateState.judgments.at(-1)!.jevTurn.agreeNames as Array<{ name: string }>).map(entry => entry.name).sort();
       assert.deepEqual(offered, [correctedName], 'the corrected name alone is a candidate');
       assert.equal(named.speech, speech);
       assert.deepEqual(named.after.ownLedger[first], { status: 'agreed', name: correctedName });
@@ -1802,7 +1802,7 @@ for (const strategy of strategies) {
       draftActs: { [speech]: 'adopt_chosen' }, ...approval(aiTurn) });
     assert.equal(named.trace.status, 'committed', 'named:' + named.trace.errorCode);
     assert.equal(Boolean(named.trace.namingRequest), true);
-    assert.deepEqual((named.after.queueState.privateState.judgments.at(-1).jevTurn.agreeNames as Array<{ name: string }>).map(entry => entry.name), [originalName]);
+    assert.deepEqual((named.after.queueState.privateState.judgments.at(-1)!.jevTurn.agreeNames as Array<{ name: string }>).map(entry => entry.name), [originalName]);
     assert.deepEqual(named.after.ownLedger[first], { status: 'agreed', name: originalName });
   });
 }
