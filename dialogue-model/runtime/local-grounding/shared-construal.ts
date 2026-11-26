@@ -54,17 +54,18 @@ export function deriveSharedConstruals(
     const figureIds = ownSlots.filter(id => latestByFigure.has(id));
     const latest = figureIds.map(id => latestByFigure.get(id)!);
     const claimIds = [reading.id, ...new Set(latest.map(reply => reply.id))];
-    const openDetails = issues.filter(issue =>
+    const openDetails = new Map<string, SharedConstrual["openDetails"][number]>();
+    const eligibleDetails = issues.filter(issue =>
       DETAIL_ASPECTS.includes(issue.aspect) && OPEN_STATES.includes(issue.state) &&
       issue.targets.some(id => latestByFigure.has(id)),
-    ).sort((a, b) => b.lastTurn - a.lastTurn).map(issue => ({
-      issueId: issue.issueId,
-      aspect: issue.aspect,
-      proposition: firstClaimByIssue.get(issue.issueId)?.proposition.trim() ?? "",
-      state: issue.state,
-    }));
+    ).sort((a, b) => b.lastTurn - a.lastTurn);
+    for (const issue of eligibleDetails) {
+      if (openDetails.has(issue.issueId)) continue;
+      openDetails.set(issue.issueId, { issueId: issue.issueId, aspect: issue.aspect,
+        proposition: firstClaimByIssue.get(issue.issueId)?.proposition.trim() ?? "", state: issue.state });
+    }
     const lastTurn = latest.reduce((turn, reply) => Math.max(turn, reply.sourceTurn), reading.sourceTurn);
-    facts.push({ lastTurn, fact: { id: `sc:${reading.id}`, claimIds, figureIds, construal, openDetails } });
+    facts.push({ lastTurn, fact: { id: `sc:${reading.id}`, claimIds, figureIds, construal, openDetails: [...openDetails.values()] } });
   }
   return facts.sort((a, b) => b.lastTurn - a.lastTurn).map(({ fact }) => fact);
 }
@@ -109,12 +110,16 @@ export function deriveSharedConstrualsFromGraph(graph: LocalGraph, ownSlots: rea
     group.push(claim);
     liveDetails.set(claim.issueId, group);
   }
-  const scopedIssues = issues.map(issue => {
-    if (!withdrawnIssues.has(issue.issueId)) return issue;
-    // The legacy issue view treats any withdrawal as applying to the entire
-    // claim. For P5, scope and status come from the claims still live per figure.
+  const scopedIssues = issues.flatMap(issue => {
+    if (!withdrawnIssues.has(issue.issueId)) return [issue];
+    // A surviving agreement on one figure does not settle the detail on
+    // another figure whose agreement was withdrawn.
     const live = liveDetails.get(issue.issueId) ?? [];
-    return { ...issue, state: localIssueState(live, true), targets: ownSlots.filter(id => live.some(claim => claim.targets.includes(id))) };
+    return ownSlots.flatMap(id => {
+      const relevant = live.filter(claim => claim.targets.includes(id) || !claim.targets.length && !deadByFigure.get(id)!.has(claim.id));
+      return relevant.some(claim => claim.targets.includes(id))
+        ? [{ ...issue, state: localIssueState(relevant, true), targets: [id] }] : [];
+    });
   });
   const sharedConstruals = deriveSharedConstruals(scoped, scopedIssues, ownSlots);
   const references = new Set(sharedConstruals.flatMap(candidate => candidate.claimIds));

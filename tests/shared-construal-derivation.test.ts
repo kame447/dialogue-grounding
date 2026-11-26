@@ -245,3 +245,34 @@ test("partial withdrawal of a verified detail leaves it open only for the other 
   assert.deepEqual(candidates(partial).map(c => [c.figureIds, c.openDetails]), [[[A, B], open], [[B], []]]);
   assert.deepEqual(candidates(withdraw([A, B])).map(c => c.openDetails), [[], []]);
 });
+
+test("withdrawing agreement with one figure's detail reopens that figure alone", () => {
+  const readings = [A, B].map((target, i) => claim(1, {
+    id: "1:reading-" + i, issueId: "1:reading-" + i, targets: [target],
+  }));
+  const detail = claim(1, { id: "1:tip", issueId: "1:tip", aspect: "part", act: "assert",
+    targets: [A, B], quote: "先に切込みがあります。", proposition: "先に切込み" });
+  const approvals = readings.map((reading, i) => agree(2, reading, {
+    id: "2:reading-" + i, issueId: reading.issueId, targets: reading.targets,
+  }));
+  const detailApproval = agree(2, detail, { id: "2:tip", issueId: detail.issueId, aspect: "part", targets: [A, B],
+    quote: "私も先に切込みが見えます。", proposition: detail.proposition });
+  const graph = commitClaims(commitClaims(createReferenceGraph({ slots: SLOTS }), ...readings, detail), ...approvals, detailApproval);
+  const candidates = (source: typeof graph) => deriveSharedConstrualsFromGraph(source, SLOTS).sharedConstruals;
+  assert.deepEqual(candidates(graph).map(c => c.openDetails), [[], []]);
+  const reopened = [{ issueId: detail.issueId, aspect: "part", proposition: detail.proposition, state: "unconfirmed" }];
+  for (const target of [A, B]) {
+    const publicTurns = [{ turn: 2, speaker: detailApproval.speaker, text: detailApproval.quote },
+      { turn: 3, speaker: "human" as const, text: "その方の切込みへの同意を撤回します。" }];
+    const verified = verifyLocalUpdate({ graph, turn: 3, publicTurns, segments: [{
+      segmentId: "withdraw", targets: [target], aspect: "part", proposition: "細部への同意を撤回",
+      quote: publicTurns[1].text, name: null, linkedIssueId: detail.issueId, respondsToTurn: 2,
+    }], verdicts: [{ segmentId: "withdraw", act: "withdraw", respondsToClaimId: detailApproval.id, rawScore: null }] });
+    assert.deepEqual(verified.rejected, []);
+    assert.deepEqual(verified.operations[0].targets, [target]);
+    const partial = applyReferenceUpdate(graph, { expectedRevision: graph.revision, turn: 3, operations: verified.operations },
+      { generationSucceeded: true, publicTurns });
+    assert.deepEqual(candidates(partial).map(c => [c.figureIds, c.openDetails]),
+      [A, B].map(id => [[id], id === target ? reopened : []]));
+  }
+});
