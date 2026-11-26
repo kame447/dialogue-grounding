@@ -102,7 +102,7 @@ test('v13 accepts its own failed accept detail shape and v12 rejects that extra 
     const answered = structuredClone(trace), answer = accepted.trace.decisions[0].evidence;
     Object.assign(answered.decisionFailure.evidence, {
       error: 'timeout', model: answer.model, responseId: answer.responseId, costUsd: answer.costUsd,
-      inputBudget: answer.inputBudget, stages: answer.stages.map((stage: any) => ({
+      inputBudget: answer.inputBudget, stages: answer.stages!.map((stage: any) => ({
         ...stage, status: 'ok', error: null, rejectionCode: null,
       })),
     });
