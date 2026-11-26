@@ -85,7 +85,7 @@ export function parseAiNamesV2(text, slots) {
 export async function createNamingTaskV2({
   client, strategy, seed, referenceMemory = true, runDir = process.env.RESEARCH_RUN_DIR,
   createTrial = createTrialV2, scoreTrial = defaultScoreTrial, judge = null, now = () => Date.now(),
-  restore = null, onPersist = null, decisionShadowClient = null, activeDecision = null, utteranceStyle = "default",
+  restore = null, onPersist = null, onPersistFailure = null, decisionShadowClient = null, activeDecision = null, utteranceStyle = "default",
   groundingShadow = null, localGrounding = null, onLocalGroundingTrace = null, jevResearch = null, rotationMode = "relative_pm90",
 }) {
   // Checked before any generation, observation or persist.
@@ -254,8 +254,33 @@ export async function createNamingTaskV2({
 
   // Writes are serialized; each writes the latest state.
   let writing = Promise.resolve();
+  // A failed write used to vanish: its callers (a finished turn, a research update) discard the rejection. Each failure is kept as a closed code and a time,
+  // reported once to onPersistFailure (the server's standard error), and carried in the next record that is written (research metadata, never shown to a participant).
+  const PERSIST_FAILURE_LIMIT = 20;
+  const persistFailures = Array.isArray(restore?.persistFailures) ? restore.persistFailures.filter((entry) =>
+    entry && typeof entry.code === "string" && typeof entry.at === "string").slice(-PERSIST_FAILURE_LIMIT).map(({ code, at }) => ({ code, at })) : [];
+  let persistStage = "build";
+  function persistFailureCode(error) {
+    if (persistStage === "build") return "record_build_failed";
+    switch (error?.code) {
+      case "trial_unavailable": return "record_store_rejected";
+      case "assignment_record_invalid": return "record_invalid";
+      case "owner_expired": return "owner_expired";
+      default: return "record_write_failed";
+    }
+  }
+  function notePersistFailure(error) {
+    const failure = { code: persistFailureCode(error), at: new Date(now()).toISOString() };
+    persistFailures.push(failure);
+    if (persistFailures.length > PERSIST_FAILURE_LIMIT) persistFailures.splice(0, persistFailures.length - PERSIST_FAILURE_LIMIT);
+    try { if (typeof onPersistFailure === "function") onPersistFailure({ ...failure }); } catch { /* A reporting failure never changes the write's outcome. */ }
+  }
+  async function guardedWrite() {
+    persistStage = "build";
+    try { await writeRecord(); } catch (error) { notePersistFailure(error); throw error; }
+  }
   function persist() {
-    const next = writing.then(writeRecord, writeRecord);
+    const next = writing.then(guardedWrite, guardedWrite);
     writing = next.catch(() => {});
     return next;
   }
@@ -292,12 +317,14 @@ export async function createNamingTaskV2({
         initialObservation: clone(initialObservation), jevLedger: jev.ledger.snapshot() } : {}),
       humanSubmission, aiSubmission, closed, finalError,
       ...(dialogueInterruption ? { dialogueInterruption } : {}),
+      ...(persistFailures.length ? { persistFailures: persistFailures.map((entry) => ({ ...entry })) } : {}),
       queueState: queue.getDurableState(), scoring: result ? { key: trial.key, result } : null, requests, turnTimings,
       diagnostics: aiSubmission ? {
         ledgerFinalMismatch: (() => { const slots = dialogue.slots.filter((s) => (privateState.ledger[s].name ?? null) !== (aiSubmission[s] ?? null)); return { count: slots.length, slots }; })(),
         ledgerStatusCounts: Object.fromEntries(STATUSES.map((status) => [status, dialogue.slots.filter((s) => privateState.ledger[s].status === status).length])),
       } : null,
     };
+    persistStage = "write";
     if (onPersist) await onPersist(record);
     if (!directory) return;
     const temporary = join(directory, "." + recordId + ".tmp");

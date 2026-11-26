@@ -49,7 +49,7 @@ export function createBaseParticipantServer(options: Record<string, any> = {}) {
         loadedStores.add(store);
         const coordinator=createBaseAssignmentSession({ownerId,store,now,newId:randomUUID,adapter:'local_private_file',
           readConfig:async()=>baseAssignmentFile ? readPrivateAssignment(baseAssignmentFile) : null,
-          makeTask:async value=>createTaskV2({client,...value,activeDecision,utteranceStyle,...(groundingShadow?{groundingShadow}:{}),
+          makeTask:async value=>createTaskV2({client,...value,onPersistFailure:(failure:{code:string;at:string})=>{try{process.stderr.write('persist_failed code='+failure.code+' at='+failure.at+'\n');}catch{/* never affects the write */}},activeDecision,utteranceStyle,...(groundingShadow?{groundingShadow}:{}),
             ...(participantJev?await participantJev.taskOptions(value):{}),
             onPersist:async (record:Parameters<typeof value.onPersist>[0])=>{
               if(persistSealed)throw new NamingTaskError('record_write_failed');
@@ -70,7 +70,7 @@ export function createBaseParticipantServer(options: Record<string, any> = {}) {
     await privateDirectory(baseStoreRoot);
     try { await lstat(join(baseStoreRoot,ownerId+'.owner.json')); }
     catch(e) { if ((e as NodeJS.ErrnoException).code==='ENOENT') return null; throw failure(); }
-    const e=await entry(ownerId);const saved=await e.store.read();return saved.kind==='expired'?null:e;
+    const e=await entry(ownerId);return await e.store.alive()?e:null;
   }
   const tabFile = (ownerId: string) => join(baseStoreRoot, ownerId + '.browser-sessions.json');
   async function readTabs(ownerId: string): Promise<BrowserSession[]> {
@@ -306,7 +306,7 @@ export function createBaseParticipantServer(options: Record<string, any> = {}) {
       else task=(await e.coordinator.restore()).task;
       const store=e.store;
       const state=async()=>{const v=task?{...task.getState()}:null;if(v){delete v.strategy;delete v.seed;delete v.visualAid;delete v.referenceMemory;}
-        const c=await store.inspect();return {trial:v?lockResult(v,c.questionnaires[v.sessionId as string]??null):null,hideStrategy:true,busy:Boolean(v?.busy)};};
+        const q=v?await store.questionnaire(v.sessionId as string):null;return {trial:v?lockResult(v,q):null,hideStrategy:true,busy:Boolean(v?.busy)};};
       if(path==='/api/state'||path==='/api/start')return json(200,await state());
       if(!task)throw new NamingTaskError('trial_required');
       const live=task.getState();

@@ -7,6 +7,8 @@ import { BaseSessionError } from '../v2/base-assignment-session.ts';
 import type { BaseLocalContainer, BaseFileStore, BaseOwnerState, BaseArchiveWrite, BaseRecord } from '../v2/base-assignment.ts';
 const fail = () => new BaseSessionError('trial_unavailable');
 const IDLE = 30 * 60 * 1000;
+/** A touch rewrites the whole owner file, so it is skipped while the stored access time is this recent (far below IDLE). */
+const TOUCH_INTERVAL = 60 * 1000;
 export async function privateDirectory(root: string): Promise<string> {
   if (typeof root !== 'string' || !root || resolve(root) !== root || await realpath(root) !== root) throw fail();
   for (let path = root;; path = dirname(path)) {
@@ -47,6 +49,10 @@ function container(raw: unknown, ownerId: string): BaseLocalContainer {
 }
 export type LocalStore = BaseFileStore & {
   inspect(): Promise<BaseLocalContainer>;
+  /** Whether the owner has not idled out; no copy of the container is made. */
+  alive(): Promise<boolean>;
+  /** One questionnaire entry (a copy), without copying the container. */
+  questionnaire(id: string): Promise<unknown>;
   touch(): Promise<void>;
   saveQuestionnaire(id: string, value: unknown): Promise<void>;
   deleteRecord(id: string): Promise<boolean>;
@@ -79,6 +85,21 @@ export async function openBaseFileStore({root, ownerId, now}: {root: string; own
     if (closed) throw fail(); await privateDirectory(root);
     return container(await readPrivate(file), ownerId);
   }
+  // This store holds the owner's lock, so the file changes only through save() below. A read-only operation reuses the container that was
+  // validated for the file's current identity (device, inode, size, times); any other change of the file is read and validated again.
+  // The cache is never handed out: a mutating operation still starts from load(), and a reader receives a copy.
+  let cache: { sig: string; c: BaseLocalContainer } | null = null;
+  const signature = (s: Awaited<ReturnType<typeof lstat>>) => [s.dev, s.ino, s.size, s.mtimeMs, s.ctimeMs, s.nlink, s.mode].join(':');
+  async function loadShared(): Promise<BaseLocalContainer> {
+    if (closed) throw fail(); await privateDirectory(root);
+    const before = await lstat(file);
+    if (!before.isFile() || before.nlink !== 1 || (before.mode & 0o777) !== 0o600) throw fail();
+    if (cache && cache.sig === signature(before)) return cache.c;
+    const c = container(await readPrivate(file), ownerId);
+    const after = await lstat(file);
+    cache = signature(after) === signature(before) ? { sig: signature(before), c } : null;
+    return c;
+  }
   const expired = (c: BaseLocalContainer) => !safeInt(now()) || now() < 0 || now() - c.lastAccessMs >= IDLE;
   async function save(c: BaseLocalContainer) {
     container(c, ownerId);
@@ -87,12 +108,15 @@ export async function openBaseFileStore({root, ownerId, now}: {root: string; own
       h = await open(tmp, 'wx', 0o600); await h.writeFile(JSON.stringify(c)); await h.close(); h = undefined;
       // Refuse a replaced/hard-linked target rather than repairing its permissions.
       const s = await lstat(file); if (!s.isFile() || s.nlink !== 1 || (s.mode & 0o777) !== 0o600) throw fail();
+      cache = null;
       await rename(tmp, file);
-    } catch { await h?.close().catch(() => {}); await unlink(tmp).catch(() => {}); throw fail(); }
+    } catch { cache = null; await h?.close().catch(() => {}); await unlink(tmp).catch(() => {}); throw fail(); }
+    // The caller does not change c after a successful save, so it can serve later readers (which copy it).
+    try { const written = await lstat(file); cache = { sig: signature(written), c }; } catch { cache = null; }
   }
   return {
-    read: () => queued(async () => { const c = await load(); return expired(c) ? {kind: 'expired'} : {kind: 'state', state: c.owner}; }),
-    readRecord: id => queued(async () => { const c = await load(); if (expired(c) || !UUID.test(id) || c.tombstones.includes(id)) return null; return c.archives[id] ?? null; }),
+    read: () => queued(async () => { const c = await loadShared(); return expired(c) ? {kind: 'expired'} : {kind: 'state', state: structuredClone(c.owner)}; }),
+    readRecord: id => queued(async () => { const c = await loadShared(); if (expired(c) || !UUID.test(id) || c.tombstones.includes(id)) return null; const r = c.archives[id]; return r === undefined ? null : structuredClone(r); }),
     compareAndSwap: (revision: number, next: BaseOwnerState, writes: readonly BaseArchiveWrite[]) => queued(async () => {
       const c = await load(); if (expired(c)) throw fail();
       if (c.owner.revision !== revision) return false;
@@ -105,8 +129,15 @@ export async function openBaseFileStore({root, ownerId, now}: {root: string; own
       }
       c.owner = owner; c.lastAccessMs = now(); await save(c); return true;
     }),
-    inspect: () => queued(load),
-    touch: () => queued(async () => { const c = await load(); if (expired(c)) throw new BaseSessionError('owner_expired'); c.lastAccessMs = now(); await save(c); }),
+    inspect: () => queued(async () => structuredClone(await loadShared())),
+    alive: () => queued(async () => !expired(await loadShared())),
+    questionnaire: id => queued(async () => { const c = await loadShared(); const q = Object.hasOwn(c.questionnaires, id) ? c.questionnaires[id] : undefined; return q === undefined ? null : structuredClone(q); }),
+    touch: () => queued(async () => {
+      const shared = await loadShared(); if (expired(shared)) throw new BaseSessionError('owner_expired');
+      // Rewriting the whole owner file for a read is what made long dialogues slow; extend the expiry at most once per interval.
+      if (safeInt(now()) && now() >= shared.lastAccessMs && now() - shared.lastAccessMs < TOUCH_INTERVAL) return;
+      const c = await load(); if (expired(c)) throw new BaseSessionError('owner_expired'); c.lastAccessMs = now(); await save(c);
+    }),
     saveQuestionnaire: (id, value) => queued(async () => {
       const c = await load(); if (expired(c)) throw new BaseSessionError('owner_expired');
       if (!c.archives[id] || c.tombstones.includes(id)) throw new BaseSessionError('not_found');
