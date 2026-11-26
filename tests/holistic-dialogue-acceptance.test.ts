@@ -59,7 +59,7 @@ type Segment = {
   act: LocalAct;
   targets?: string[];
   name?: string;
-  antecedent?: Pick<LocalClaimView, 'speaker' | 'proposition'>;
+  antecedent?: Pick<LocalClaimView, 'speaker' | 'proposition'> & { pick?: 'first' | 'last' };
   respondsToTurn?: number;
 };
 type Turn = {
@@ -165,8 +165,10 @@ function session(strategy: Strategy, observation: Memo = memo, trialProfile = pr
               const antecedent = segment.antecedent;
               choice = 'none';
               if (antecedent) {
-                const index = state.priorClaims?.findIndex(claim => claim.speaker === antecedent.speaker &&
-                  claim.proposition === antecedent.proposition) ?? -1;
+                const matching = (state.priorClaims ?? []).flatMap((claim, at) => claim.speaker === antecedent.speaker &&
+                  claim.proposition === antecedent.proposition ? [at] : []);
+                // Two published questions can carry the same wording; the classifier may pick either one (audit 26).
+                const index = (antecedent.pick === 'last' ? matching.at(-1) : matching[0]) ?? -1;
                 assert.ok(index >= 0, 'antecedent must be offered');
                 choice = 'claim_' + index;
               }
@@ -1742,4 +1744,65 @@ for (const strategy of strategies) {
       assert.equal(turn.trace.generationRetryVersion, version);
     });
   }
+}
+
+// Audit 26 (Astra): the same confirming question asked twice. The classifier may tie the nameless approval request to the earlier of the two identical questions.
+for (const strategy of strategies) {
+  const repeated = 'そちらが見ているのもこの形ですか？';
+  const description = '台は輪より細く見えます。';
+  const proposalOf = (name: string) => '「' + name + '」と呼びませんか？';
+  const ask = async (dialogue: ReturnType<typeof session>, opening: Pick<Turn, 'human' | 'local'>, correction: string | null) => {
+    const check = await audit16Check(dialogue, 0, { questionTargets: [first], opening });
+    assert.equal(check.quote, repeated);
+    const human = correction ?? '本当にこの形ですよね？';
+    const asked = await dialogue.say({ human, action: 'confirm', target: 0, feature: baseWidth, drafts: [description + repeated],
+      publicClaims: [{ text: description, act: 'assert', aspect: 'part', targets: [first] }, { text: repeated, act: 'ask', aspect: 'question', targets: [first] }],
+      local: [correction === null ? { text: human, act: 'ask', aspect: 'question', targets: [] }
+        : { text: human, act: 'name_propose', aspect: 'name', targets: [first], name: correctedName }] });
+    assert.equal(asked.trace.status, 'committed');
+    return asked.after.jevTraces.at(-1).turnIndex + 1;
+  };
+  const approval = (aiTurn: number) => ({
+    // The first half answers the latest question; the second half is tied to the earlier, identical one.
+    local: [
+      { text: 'はい、その形です。', act: 'agree' as const, aspect: 'question' as const, targets: [first], respondsToTurn: aiTurn, antecedent: { speaker: 'ai' as const, proposition: repeated, pick: 'last' as const } },
+      { text: 'それなら、その名前でいい？', act: 'name_propose' as const, aspect: 'name' as const, targets: [], respondsToTurn: aiTurn, antecedent: { speaker: 'ai' as const, proposition: repeated, pick: 'first' as const } },
+    ],
+  });
+  const reply = 'はい、その形です。それなら、その名前でいい？';
+  for (const version of [v10, v11]) {
+    test(`Audit 26 ${strategy} ${version.slice(-2)}: a corrected name stays alone through publication, ledger, restore and submission when the approval request is tied to the earlier identical question (#198)`, async () => {
+      const dialogue = session(strategy);
+      await dialogue.start();
+      await dialogue.restoreAs(version);
+      const first_ = 'この形は' + proposalOf(originalName);
+      const aiTurn = await ask(dialogue, { human: first_, local: [{ text: first_, act: 'name_propose', aspect: 'name', targets: [], name: originalName }] },
+        'やっぱり、この環飾りは' + proposalOf(correctedName));
+      const speech = 'この形は「' + correctedName + '」と呼びましょう。';
+      const named = await dialogue.say({ human: reply, action: 'agree', target: 0, name: correctedName, agreeSpeech: speech, drafts: [speech],
+        draftActs: { [speech]: 'adopt_chosen' }, ...approval(aiTurn) });
+      assert.equal(named.trace.status, 'committed', 'named:' + named.trace.errorCode);
+      const offered = (named.after.queueState.privateState.judgments.at(-1).jevTurn.agreeNames as Array<{ name: string }>).map(entry => entry.name).sort();
+      assert.deepEqual(offered, [correctedName], 'the corrected name alone is a candidate');
+      assert.equal(named.speech, speech);
+      assert.deepEqual(named.after.ownLedger[first], { status: 'agreed', name: correctedName });
+      await dialogue.restore();
+      await dialogue.submit([Object.fromEntries(figureIds.map(figureId => [figureId, figureId === first ? correctedName : null]))]);
+      assert.deepEqual(dialogue.record().ownLedger[first], { status: 'agreed', name: correctedName });
+    });
+  }
+  // Control: with a single proposal the same approval request keeps inheriting the name.
+  test(`Audit 26 ${strategy} v11: with a single proposal and a repeated question the approval request still inherits the name (#198)`, async () => {
+    const dialogue = session(strategy);
+    await dialogue.start();
+    const first_ = 'この形は' + proposalOf(originalName);
+    const aiTurn = await ask(dialogue, { human: first_, local: [{ text: first_, act: 'name_propose', aspect: 'name', targets: [], name: originalName }] }, null);
+    const speech = 'この形は「' + originalName + '」と呼びましょう。';
+    const named = await dialogue.say({ human: reply, action: 'agree', target: 0, name: originalName, agreeSpeech: speech, drafts: [speech],
+      draftActs: { [speech]: 'adopt_chosen' }, ...approval(aiTurn) });
+    assert.equal(named.trace.status, 'committed', 'named:' + named.trace.errorCode);
+    assert.equal(Boolean(named.trace.namingRequest), true);
+    assert.deepEqual((named.after.queueState.privateState.judgments.at(-1).jevTurn.agreeNames as Array<{ name: string }>).map(entry => entry.name), [originalName]);
+    assert.deepEqual(named.after.ownLedger[first], { status: 'agreed', name: originalName });
+  });
 }
