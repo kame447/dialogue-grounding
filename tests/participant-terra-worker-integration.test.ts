@@ -301,7 +301,8 @@ for (const selected of [protocol, figureBankProtocol]) test(
   assert.equal(snapshot.receptionId, receptionId);
   const [failed] = snapshot.failedStarts;
   assert.deepEqual(snapshot.failedStarts.map(({ usage: _usage, ...value }: any) => value),
-    [{ assignmentId, trialIndex: 0, errorCode: 'initialization_failed' }]);
+    [{ assignmentId, trialIndex: 0, errorCode: 'initialization_failed', failureCause: 'observation_invalid' }]);
+  assert.equal(entry.failureCause, 'observation_invalid');
   assert.deepEqual(failed.usage, await h.storage.get('participant-usage:' + assignmentId));
   const meter = failed.usage.phases.terra.initial_observation;
   assert.deepEqual([meter.posts, meter.knownUsd, meter.inputTokens, meter.outputTokens, meter.missingCostPosts], [1, 0.021, 17, 6, 0]);

@@ -1,4 +1,4 @@
-import type { FailureCode } from '../../../../dialogue-model/runtime/v2/base-assignment.ts';
+import type { FailureCode, FailureCause } from '../../../../dialogue-model/runtime/v2/base-assignment.ts';
 import type { ParticipantUsageSnapshot } from '../../../../dialogue-model/runtime/web/participant-usage.ts';
 
 /** Researcher-only projections. These types are not the persisted reception or protocol schema. */
@@ -19,7 +19,7 @@ export type ReceptionAdminRow = {
 
 export type ReceptionFailedStartUsage = {
   receptionId: string;
-  failedStarts: { assignmentId: string; trialIndex: number; errorCode: Exclude<FailureCode, 'record_deleted'>;
+  failedStarts: { assignmentId: string; trialIndex: number; errorCode: Exclude<FailureCode, 'record_deleted'>; failureCause?: FailureCause;
     usage: ParticipantUsageSnapshot | null }[];
 };
 export type ReceptionMode = 'on' | 'off' | 'unset';

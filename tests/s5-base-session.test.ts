@@ -35,3 +35,24 @@ it('unknown predecessor has not_found and no generation',async()=>{const h=harne
 it('old completed archive without after-key cannot replace different active',async()=>{const h=harness({state:active()}),s=create(h),old=bound();old.recordId='88888888-8888-4888-8888-888888888888';old.status='completed';old.closed=true;old.assignment.assignmentId='77777777-7777-4777-8777-777777777777';h.archives.set(old.recordId,old);const before=JSON.stringify(h.state);await assert.rejects(s.prepareNext(old.recordId),sessionError('busy'));assert.equal(JSON.stringify(h.state),before);assert.equal(h.stats.factory,0)});
 it('retired callback refreshes only old archive, never active pointer',async()=>{const h=harness(),s=create(h);await s.start({version:2});await h.tasks[0].complete();const old=h.tasks[0].record.recordId;await s.prepareNext(old);const key=h.state.activeKey,current=clone(h.state.admissions[key]);await h.tasks[0].emit({updatedAt:'2000-01-01T00:00:02.000Z'});assert.equal(h.state.activeKey,key);assert.deepEqual(h.state.admissions[key],current);assert.equal(h.archives.get(old).updatedAt,'2000-01-01T00:00:02.000Z')});
 it('deleted next result is not regenerated',async()=>{const h=harness(),s=create(h);await s.start({version:2});await h.tasks[0].complete();const old=h.tasks[0].record.recordId,n=await s.prepareNext(old);h.archives.delete(n.recordId);await assert.rejects(s.prepareNext(old),sessionError('not_found'));assert.equal(h.stats.factory,2)});
+const named=(name:string,props:Record<string,unknown>,extra?:Record<string,unknown>)=>Object.assign(new Error('LEAKMARK '+name+' sk-secret'),{name,...props,...extra});
+for(const [label,error,cause] of [
+  ['observation timeout',named('JevTurnError',{code:'observation_failed',observationErrorCode:'timeout'}),'observation_timeout'],
+  ['observation invalid json',named('JevTurnError',{code:'observation_failed',observationErrorCode:'invalid_json'}),'observation_invalid'],
+  ['observation model unavailable',named('JevTurnError',{code:'observation_failed',observationErrorCode:'unavailable'}),'observation_unavailable'],
+  ['decision failed',named('JevTurnError',{code:'decision_failed'}),'decision_failed'],
+  ['bare observation error',named('ObservationError',{code:'timeout'}),'observation_timeout'],
+  ['wrapped in a cause chain',Object.assign(new Error('wrapper'),{cause:named('JevTurnError',{code:'observation_failed',observationErrorCode:'timeout'})}),'observation_timeout'],
+  ['unknown error with a spoofed code',Object.assign(new Error('private'),{code:'observation_timeout'}),'unknown'],
+  ['unknown observation code',named('JevTurnError',{code:'observation_failed',observationErrorCode:'something_new'}),'unknown'],
+] as const)it('failure cause is a closed code: '+label,async()=>{const h=harness({factoryErrorBefore:error as Error});await unavailable(create(h).start({version:2}));const e=h.state.admissions.initial;assert.equal(e.status,'failed');assert.equal(e.errorCode,'initialization_failed');assert.equal(e.failureCause,cause);assert.ok(!JSON.stringify(h.state).includes('sk-secret'));assert.ok(!JSON.stringify(h.state).includes('LEAKMARK'))});
+it('failure cause is written only for initialization_failed, never for the record-write codes',async()=>{const h=harness({factoryErrorAfter:Error('private')});await unavailable(create(h).start({version:2}));assert.equal(h.state.admissions.initial.errorCode,'initialization_failed');assert.equal(h.state.admissions.initial.failureCause,'unknown')});
+it('owner state with a failure cause restores; a forged or misplaced cause is refused; an older entry without it stays valid',async()=>{
+  const mk=(patch:Record<string,unknown>)=>{const st=active();Object.assign(st.admissions.initial,patch);return st};
+  const failedOk={status:'failed',record:null,errorCode:'initialization_failed'};
+  for(const [patch,ok] of [[{...failedOk},true],[{...failedOk,failureCause:'observation_timeout'},true],[{...failedOk,failureCause:'free text'},false],[{...failedOk,failureCause:7},false],
+    [{status:'failed',record:null,errorCode:'record_write_failed',failureCause:'unknown'},false],[{failureCause:'unknown'},false]] as const){
+    const h=harness({state:mk(patch as any)});const r=create(h).restore();
+    if(ok)await r.catch(()=>{}); else await unavailable(r);
+  }
+});
