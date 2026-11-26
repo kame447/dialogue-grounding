@@ -4,6 +4,7 @@ import test from "node:test";
 import type { LocalClaimView } from "../dialogue-model/runtime/local-grounding/contract.ts";
 import { verifyRecords } from "../dialogue-model/runtime/diagnostics/parity-verify/index.ts";
 import { hash } from "../dialogue-model/runtime/diagnostics/parity-verify/core.ts";
+import { promptSourceManifest } from "../dialogue-model/runtime/diagnostics/parity-live/audit.ts";
 import { validGenerationRetryVersion } from "../dialogue-model/runtime/v2/generation-guard.ts";
 import { deriveLocalIssues, priorClaimViews } from "../dialogue-model/runtime/local-grounding/derive.ts";
 import { buildRecords, OWN, runTurn, type Label, type Plan, type Turn } from "./support/s4-v3-records.ts";
@@ -23,8 +24,15 @@ const p5Version: string = "jev_generation_retry_v13";
 const supportedP5Version = validGenerationRetryVersion(p5Version, "two_stage_v3", "holistic_v5") &&
   p5Version !== "jev_generation_retry_v1" ? p5Version : undefined;
 const technicalTrial = { version: "adaptive_repair_v3" } as const;
-// Exact HTTP request bodies from the v12 control on 671acdb, before P5.
-const v12HttpDigest = "a69b96be57143a984f2c7c7fc5c78f7bd82982c97119700a1498776d5ef6f13b";
+// Independently measured with P5 off on both producer lineages. S4 also checks
+// the complete manifest of the code that actually issued the requests.
+const v12HttpDigests = new Map([
+  // 671acdb
+  ["aa8b84ba60f10780328521457fc3abf4bfaa6db6efd32a725924075a9584f884", "a69b96be57143a984f2c7c7fc5c78f7bd82982c97119700a1498776d5ef6f13b"],
+  // 17e56bc, 1171a04, 9bc0587
+  ["9d686330aa34a516a1e2d95df94d0b030e7308a6463757861b9c94e561e5197a", "fd431c3fa99aef1ab219980d38d44cae3e3167c86f4b2230aaa7c64d99176f00"],
+]);
+const promptSources = await promptSourceManifest();
 
 function segment(quote: string, targets: string[], proposition: string, respondsToTurn: number | null = null,
   linkedIssueId: string | null = null, aspect = "construal", name: string | null = null) {
@@ -86,7 +94,7 @@ async function run(label: Label, turns: Turn[], version: "p5" | "v12" = "p5") {
   const generationRetryVersion = version === "p5" ? supportedP5Version ?? v12 : v12;
   const outcomes: Record<Label, Awaited<ReturnType<typeof runTurn>>[]> = { "repair-first": [], "bypass-enabled": [] };
   const records = await buildRecords({ label, turns, dialoguePolicy: "holistic_v5", generationRetryVersion,
-    technicalTrial,
+    technicalTrial, promptSources,
     onTurn: (side, outcome) => outcomes[side].push(outcome) }).catch(error => {
     const trace = error.traces?.at(-1);
     if (!trace) throw error;
@@ -151,14 +159,29 @@ function s4({ records }: Run, o: Observation) {
   assert.ok(checks.every(c => c.status === "pass"), JSON.stringify(checks));
 }
 
-function effects(o: Observation, candidate: Candidate | null, publicSpeech: string) {
+function effects(o: Observation, candidate: Candidate | null, publicSpeech: string, expectedLedger = o.replay.tape.state.ledger) {
   const expectedIds = candidate ? [...candidate.claimIds].sort() : [];
   assert.deepEqual([...(o.judgment.executed.sharedClaimIds ?? [])].sort(), expectedIds);
-  assert.deepEqual([...(o.trace.executed.sharedClaimIds ?? [])].sort(), expectedIds);
-  assert.equal(o.text, publicSpeech, "the response delivered by the runtime");
+  assert.deepEqual([...(o.trace.executed?.sharedClaimIds ?? [])].sort(), expectedIds);
+  assert.equal(o.outcome.publication.status, "committed");
+  assertPublication(o.outcome.publication, o.replay.tape.events, publicSpeech);
+  assert.equal(o.text, publicSpeech, "the response delivered to the participant");
   assert.equal(o.trace.publicSpeech, o.text, "the trace matches the delivered utterance");
   if (o.trial.label === o.side.label) assert.equal(o.trial.turns[0].publicText, o.text);
-  assert.deepEqual(o.outcome.state.ledger, o.replay.tape.state.ledger, "P5 must not agree a name");
+  assert.deepEqual(o.outcome.state.ledger, expectedLedger, "only an explicitly expected ledger change is allowed");
+}
+
+type Publication = Observation["outcome"]["publication"];
+type PublicEvent = { id: string; seq: number; speaker: string; text: string };
+function visible(events: readonly PublicEvent[]) {
+  return events.map(({ id, seq, speaker, text }) => ({ id, seq, speaker, text }));
+}
+function assertPublication(outcome: Publication, prior: readonly PublicEvent[], speech: string | null) {
+  const published = outcome.publicEvents.slice(prior.length);
+  assert.deepEqual(visible(outcome.publicEvents.slice(0, prior.length)), visible(prior));
+  assert.deepEqual(visible(outcome.durable.events), visible(outcome.publicEvents));
+  assert.deepEqual(published.map(({ speaker, text }) => ({ speaker, text })),
+    speech === null ? [] : [{ speaker: "ai", text: speech }]);
 }
 
 function checkS4Rejects(records: Records) {
@@ -323,6 +346,7 @@ for (const label of conditions) {
     const beforeAdoption = records.outcomes[label].at(-3)!.state;
     assert.equal(openDetail(o.replay.tape.state, [left]).issueId, openDetail(beforeAdoption, [left]).issueId);
     assert.equal(o.trace.executed.action, "confirm");
+    assert.equal(o.trace.executed.target.kind, "single");
     assert.equal(o.trace.executed.target.figureId, left);
     assert.equal(o.text, speech);
     assert.deepEqual(o.trial.lastCommittedState.ledger, o.replay.tape.state.ledger);
@@ -338,8 +362,13 @@ for (const label of conditions) {
     assert.ok(source && support && support.respondsTo === source.id);
     assert.deepEqual(o.menus, []);
     effects(o, null, useSail);
+    const lineage = promptSources.files["judgment/instructions.mjs"];
+    const expected = v12HttpDigests.get(lineage);
+    assert.ok(expected, `v12 sends have no frozen control for instruction source ${lineage}`);
+    assert.deepEqual(control.records.run.promptSources, promptSources);
+    assert.equal(o.trial.identity.prompts, hash(promptSources));
+    assert.equal(hash(control.outcomes[label].flatMap(outcome => outcome.httpBodies)), expected);
     s4(control, o);
-    assert.equal(hash(control.outcomes[label].flatMap(outcome => outcome.httpBodies)), v12HttpDigest);
   });
 
   test(`P5 ${label}: denying only the right support preserves the left common reading`, async () => {
@@ -393,7 +422,10 @@ test("P5: S4 accepts each side's own post-veto choice and public result in both 
     const selected = pair(repair, sail, [left], [2, 3]);
     assert.deepEqual(bypass.menus, []);
     effects(repair, chosen ? selected : null, speech);
-    effects(bypass, null, turn.plan.speechByLabel!["bypass-enabled"]!);
+    const previousLedger = bypass.replay.tape.state.ledger;
+    assert.deepEqual(previousLedger[left], { status: "unassigned", name: null });
+    effects(bypass, null, turn.plan.speechByLabel!["bypass-enabled"]!,
+      { ...previousLedger, [left]: { status: "deferred", name: null } });
     const details = repair.side.requests.filter((r: { role: string }) => r.role === "alternative_detail");
     assert.ok(details.some((r: { payload?: { questions?: Record<string, Choice> } }) => r.payload?.questions?.[question]));
     s4(records, label === "repair-first" ? repair : bypass);
@@ -494,7 +526,7 @@ for (const label of conditions) {
   });
 }
 
-type ScriptedFailure = Error & { drafts?: string[]; traces?: Observation["trace"][] };
+type ScriptedFailure = Error & { drafts?: string[]; traces?: Observation["trace"][]; publication?: Publication };
 type ApprovedDraftCheck = { question: string; accept: string; reject: string };
 
 async function nonNamingDraftOutcome(label: Label, contract?: ApprovedDraftCheck) {
@@ -542,7 +574,8 @@ async function nonNamingDraftOutcome(label: Label, contract?: ApprovedDraftCheck
     if (contract) assert.equal(semanticCheckReached, true);
     if (outcome.ok) {
       const result = outcome.result;
-      assert.ok(!variants.includes(result.speech), "the participant must not receive either overclaim");
+      assert.equal(result.publication.status, "committed");
+      assertPublication(result.publication, reference.replay.tape.events, safe);
       const generated = result.luna.filter(call => call.phase === "generation").map(call => call.response.text);
       assert.deepEqual(generated, drafts);
       assert.ok(drafts.includes(safe));
@@ -552,7 +585,7 @@ async function nonNamingDraftOutcome(label: Label, contract?: ApprovedDraftCheck
       assert.equal(result.state.judgments.at(-1).status, "committed");
       assert.deepEqual(result.state.ledger, before.ledger);
       assert.equal(openDetail(result.state, targets).state, openDetail(before, targets).state);
-      assert.deepEqual([...result.trace.executed.sharedClaimIds].sort(), [...selected.claimIds].sort());
+      assert.deepEqual([...(result.trace.executed?.sharedClaimIds ?? [])].sort(), [...selected.claimIds].sort());
     } else {
       const error = outcome.error;
       const trace = error.traces?.at(-1);
@@ -561,9 +594,12 @@ async function nonNamingDraftOutcome(label: Label, contract?: ApprovedDraftCheck
       assert.equal(trace.publicSpeech, null);
       assert.notEqual(trace.status, "committed");
       assert.deepEqual([...(trace.executed?.sharedClaimIds ?? [])].sort(), [...selected.claimIds].sort());
+      assert.ok(error.publication);
+      assert.equal(error.publication.status, "error");
+      assertPublication(error.publication, reference.replay.tape.events, null);
       assert.ok(error.drafts?.length);
       assert.deepEqual(error.drafts, drafts.slice(0, error.drafts.length));
-      assert.deepEqual(inputState, before, "a guarded stop must not change the prior state");
+      assert.deepEqual(error.publication.durable.privateState, before, "a guarded stop keeps the prior saved state");
     }
   }
 }
@@ -584,35 +620,162 @@ function registerNonNamingDraftChecks(contract?: ApprovedDraftCheck) {
 
 registerNonNamingDraftChecks();
 
-test("P5: S4 rejects a P5 detail answer mixed into a v12 failure record", async () => {
+test("P5 v12 control: the publication queue distinguishes commit, regeneration, stop and stale", async () => {
   const label = "repair-first";
-  const scenario = await run(label, [humanFirst(), finish()], "v12");
+  const safe = "その見立ては確かめておきましょう。名前はまだ決めていません。";
+  const firstDraft = "この図形の名前は「帆」に決まりました。";
+  const secondUnsafeDraft = "名前は「帆」で合意しましたね。";
+  const normal = observed(await run(label, [humanFirst(), finish(safe)], "v12"), label);
+  const { state, events } = normal.replay.tape;
+  const input = { ...neutral(safe), drafts: [firstDraft, safe] };
+  const exercise = (plan: Plan) => runTurn(normal.trial.profile, label, state, events, plan, technicalTrial, v12);
+  const drafted = (drafts: readonly string[]): Plan => ({ ...input, drafts, choose: (key, _criteria, context) =>
+    key === "draft_naming" ? drafts[context.generationCalls - 1] === safe ? "none" : "adopt_other" : undefined });
+  effects(normal, null, safe);
+  const regenerated = await exercise(drafted([firstDraft, safe]));
+  assert.equal(regenerated.trace.generationGuard.regenerated, true);
+  assert.deepEqual(regenerated.luna.filter(call => call.phase === "generation").map(call => call.response.text), [firstDraft, safe]);
+  assert.equal(regenerated.publication.status, "committed");
+  assertPublication(regenerated.publication, events, safe);
+  assert.equal(regenerated.state.judgments.length, state.judgments.length + 1);
+
+  const drafts = [firstDraft, secondUnsafeDraft];
+  await assert.rejects(exercise(drafted(drafts)), (error: ScriptedFailure) => {
+    assert.equal(error.traces?.at(-1)?.errorCode, "unsafe_generation");
+    assert.deepEqual(error.drafts, drafts);
+    assert.ok(error.publication);
+    assert.equal(error.publication.status, "error");
+    assertPublication(error.publication, events, null);
+    assert.deepEqual(error.publication.durable.privateState, state);
+    return true;
+  });
+
+  const correction = "すみません、今の質問を訂正します。";
+  const stale = await exercise({ ...neutral(safe), correctionBeforeCommit: correction });
+  assert.equal(stale.candidateText, normal.text);
+  assert.equal(stale.speech, null);
+  assert.equal(stale.trace.status, "superseded");
+  assert.equal(stale.publication.status, "stale");
+  const newest = stale.publication.publicEvents.at(-1);
+  assert.ok(newest);
+  assert.equal(newest.speaker, "human");
+  assert.equal(newest.text, correction);
+  assertPublication(stale.publication, [...events, newest], null);
+  assert.deepEqual(stale.publication.durable.privateState, state);
+});
+
+async function failureWitness(version: "v12" | "p5") {
+  const label = "repair-first";
+  const human = "この図形を「羽」と呼びませんか？";
+  const plan: Plan = { ...neutral("羽と呼びたい図形を確かめられますか？"), action: "confirm", act: "name_propose",
+    extraction: segment(human, [], "羽という名前の提案", null, null, "name", "羽"),
+    choose: key => key === question ? "none" : undefined };
+  const scenario = await run(label, [humanFirst(), { human, plan }], version);
   const o = observed(scenario, label);
-  const plan = { ...neutral(), action: "confirm", failQuestion: "feature" };
+  const parsed = o.trace.decisions.at(-1)?.evidence?.stages;
+  assert.ok(parsed);
+  const detail = parsed.at(-1);
+  assert.equal(detail?.stage, "detail");
+  assert.ok(detail?.model && detail.responseId && detail.costUsd !== null && detail.inputBudget);
+  const inputBudget = detail.inputBudget;
+  assert.deepEqual(Object.keys(detail.choices).sort(), version === "p5" ? ["feature", question] : ["feature"]);
+
   let failure: ScriptedFailure | undefined;
-  await assert.rejects(runTurn(o.trial.profile, label, o.replay.tape.state, o.replay.tape.events, plan, technicalTrial, v12),
-    (error: ScriptedFailure) => { failure = error; return true; });
+  await assert.rejects(runTurn(o.trial.profile, label, o.replay.tape.state, o.replay.tape.events,
+    { ...plan, failQuestion: "feature" }, technicalTrial, o.replay.tape.generationRetryVersion),
+  (error: ScriptedFailure) => { failure = error; return true; });
   const trace = failure?.traces?.at(-1);
-  const stage = trace?.decisionFailure?.evidence?.stages.at(-1);
-  assert.equal(stage?.stage, "detail");
-  const control = structuredClone(scenario.records);
-  const trial = control.trials[0];
-  trial.attempts = [{ ...trace, status: "error" }];
+  const evidence = trace?.decisionFailure?.evidence;
+  assert.ok(trace && evidence);
+  assert.equal(trace.status, "error");
+  const failedDetail = evidence.stages.at(-1);
+  assert.ok(failedDetail);
+  assert.equal(failedDetail.stage, "detail");
+  assert.equal(failedDetail.status, "error");
+  assert.deepEqual(failedDetail.choices, {});
+  assert.deepEqual(failedDetail.scores, {});
+  assert.deepEqual(evidence.stages.slice(0, -1).map(s => s.choices), parsed.slice(0, -1).map(s => s.choices));
+  assert.ok(failure?.publication);
+  assert.equal(failure.publication.status, "error");
+  assertPublication(failure.publication, o.replay.tape.events, null);
+  assert.deepEqual(failure.publication.durable.privateState, o.replay.tape.state);
+  const records = structuredClone(scenario.records);
+  const trial = records.trials[0];
+  trial.attempts = [trace];
   trial.turns = [{ ...trial.turns[0], trace: structuredClone(trial.attempts), publicText: null,
-    state: structuredClone(o.replay.tape.state) }];
-  trial.lastCommittedState = structuredClone(o.replay.tape.state);
+    state: failure.publication.durable.privateState }];
+  trial.lastCommittedState = failure.publication.durable.privateState;
   trial.calls = [];
   trial.http = [];
   trial.replay = [];
-  control.evidence.pairedReplay = [];
-  const controlChecks = interventionChecks(control);
-  const oldShape = controlChecks.find(check => check.id.endsWith(".shape"));
-  assert.equal(oldShape?.status, "pass", JSON.stringify(oldShape));
-  assert.equal(controlChecks.find(check => check.id.endsWith(".binding"))?.status, "pass", JSON.stringify(controlChecks));
-  const mixed = structuredClone(control);
-  const failedStage = { ...stage, choices: { [question]: "none" }, scores: { [question]: { none: 1, use_0: 0 } } };
-  for (const attempt of [mixed.trials[0].attempts[0], mixed.trials[0].turns[0].trace[0]]) {
-    attempt.decisionFailure.evidence.stages.splice(-1, 1, failedStage);
+  records.evidence.pairedReplay = [];
+  failureChecks(records, "pass");
+
+  // Keep the actual HTTP failure as a positive control. In a separate fixture,
+  // model a failure after the detail was parsed, using the successful twin's
+  // closed choices, scores, and provenance in both stored copies.
+  const parsedFailure = structuredClone(records);
+  for (const attempt of failureCopies(parsedFailure)) {
+    const parsedEvidence = attempt.decisionFailure!.evidence!;
+    parsedEvidence.stages.splice(-1, 1, { ...detail, inputBudget, status: "ok", error: null, rejectionCode: null });
+    parsedEvidence.model = detail.model;
+    parsedEvidence.responseId = detail.responseId;
+    parsedEvidence.costUsd = parsedEvidence.stages.reduce((total, s) => total + (s.costUsd ?? 0), 0);
+    parsedEvidence.latencyMs = parsedEvidence.stages.reduce((total, s) => total + s.latencyMs, 0);
   }
-  assert.equal(interventionChecks(mixed).find(check => check.id.endsWith(".shape"))?.status, "mismatch");
+  return parsedFailure;
+}
+
+function failureChecks(records: Records, expectedShape: "pass" | "mismatch") {
+  const checks = interventionChecks(records);
+  const shape = checks.find(check => check.id.endsWith(".shape"));
+  assert.equal(shape?.status, expectedShape, JSON.stringify(checks));
+  if (expectedShape === "pass") {
+    assert.equal(checks.find(check => check.id.endsWith(".binding"))?.status, "pass", JSON.stringify(checks));
+  } else {
+    assert.equal(shape?.reason, "intervention_trace_invalid", JSON.stringify(checks));
+  }
+}
+
+function failureCopies(records: Records) {
+  return [records.trials[0].attempts[0], records.trials[0].turns[0].trace[0]] as Observation["trace"][];
+}
+
+test("P5: S4 rejects only the added P5 answer in an otherwise valid v12 failure record", async () => {
+  const control = await failureWitness("v12");
+  failureChecks(control, "pass");
+  const mixed = structuredClone(control);
+  for (const attempt of failureCopies(mixed)) {
+    const detail = attempt.decisionFailure!.evidence!.stages.at(-1)!;
+    detail.choices[question] = "none";
+    detail.scores[question] = { none: 1, use_0: 0 };
+  }
+  failureChecks(mixed, "mismatch");
+});
+
+test("P5: S4 accepts the v13 failure evidence and rejects it under v12", async () => {
+  assert.ok(supportedP5Version, "P5 v13 runtime and S4 support are required for this acceptance case");
+  const control = await failureWitness("p5");
+  const originals = failureCopies(control);
+  for (const attempt of originals) {
+    assert.equal(attempt.generationRetryVersion, p5Version, "the producer identifies the failed decision's version");
+  }
+  failureChecks(control, "pass");
+
+  // Keep the actual v12 outer trace, including its version and public state.
+  // Only the validated v13 failure evidence crosses into that v12 trace.
+  const mixed = await failureWitness("v12");
+  failureChecks(mixed, "pass");
+  for (const [index, attempt] of failureCopies(mixed).entries()) {
+    const original = originals[index];
+    assert.equal(attempt.generationRetryVersion, undefined);
+    assert.deepEqual([attempt.turnIndex, attempt.lastEventId, attempt.attemptNumber, attempt.errorCode],
+      [original.turnIndex, original.lastEventId, original.attemptNumber, original.errorCode]);
+    const legacy = attempt.decisionFailure!.evidence!;
+    const p5 = original.decisionFailure!.evidence!;
+    assert.equal(legacy.callIndex, p5.callIndex);
+    assert.deepEqual(legacy.stages.slice(0, -1).map(s => s.choices), p5.stages.slice(0, -1).map(s => s.choices));
+    attempt.decisionFailure = structuredClone(original.decisionFailure);
+  }
+  failureChecks(mixed, "mismatch");
 });

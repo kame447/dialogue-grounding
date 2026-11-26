@@ -12,6 +12,10 @@ import { createJevDecisionClient } from '../../dialogue-model/runtime/decision/j
 import type { DialoguePolicy, DraftAct } from '../../dialogue-model/runtime/decision/contract.ts';
 import { createJevLocalTestClassifier } from '../../dialogue-model/runtime/local-grounding/jev-local-test.ts';
 import { createChatClient } from '../../dialogue-model/runtime/client.mjs';
+import { createHumanMessageSequencer } from '../../dialogue-model/runtime/web/human-message-queue.mjs';
+import { settleJevTurnTraces } from '../../dialogue-model/runtime/v2/jev-turn.ts';
+import type { JevTurnTrace } from '../../dialogue-model/runtime/v2/jev-turn.ts';
+import { promptSourceManifest } from '../../dialogue-model/runtime/diagnostics/parity-live/audit.ts';
 import { buildReobservationMessages } from '../../dialogue-model/runtime/observation/observe.ts';
 import type { AgreeNameScopeVersion } from '../../dialogue-model/runtime/decision/naming-request.ts';
 import { defaultGenerationRetryVersion, isGenerationV6, isGenerationV7, isGenerationV8, isGenerationV11 } from '../../dialogue-model/runtime/v2/generation-guard.ts';
@@ -25,12 +29,17 @@ export const MODEL = normal.trials[0].replay[0].result.sides[0].material.model;
 export const OLD = normal.trials[0].replay[0].tape;
 export type Label = 'repair-first' | 'bypass-enabled';
 export type TrialVersion = 'adaptive_repair_v1' | 'adaptive_repair_v2' | 'adaptive_repair_v3';
+// The acceptance suite also runs against the base, whose trace predates P5.
+type AcceptanceTrace = JevTurnTrace & { executed?: (NonNullable<JevTurnTrace['executed']> & { sharedClaimIds?: string[] }) | null };
+type ExecutedTrace = AcceptanceTrace & { executed: NonNullable<AcceptanceTrace['executed']> };
 /** What one scripted turn answers. `target` is a v3 target label; `issue` answers the repair prospect's issue question. */
 export type Plan = { action: string; target: string; issue?: string; prospect?: string; actionScores?: Record<string, number>; speech?: string; inject?: any;
   /** Opt-in override for additional closed questions in independent acceptance tests. */
   choose?: (question: string, criteria: Readonly<Record<string, string>>, context: { generationCalls: number }) => string | undefined;
   speechByLabel?: Partial<Record<Label, string>>;
   failQuestion?: string;
+  /** A real human queue event that supersedes the staged candidate before publication. */
+  correctionBeforeCommit?: string;
   drafts?: readonly string[];
   draftAct?: DraftAct;
   /** Raw JSON text the local-extraction request returns (public name proposals etc.); `act` answers the classifier's `*_act` questions (default assert). */
@@ -109,11 +118,36 @@ export async function runTurn(profile: any, label: Label, state: any, events: an
       ...(['holistic_v3', 'holistic_v5'].includes(profile.dialoguePolicy) ? { dialoguePolicy: profile.dialoguePolicy } : {}) })!,
       aiPublicTransport: { readKey, fetchImpl, timeoutMs: profile.timeouts.decisionMs } },
     onJevTurnTrace: (t: any) => traces.push(t), generationRetryVersion, ...(technicalTrial ? { technicalTrial } : {}) } as any);
-  let result: any;
-  try { result = await runtime.runAiTurn({ events, privateState: state, lastEventId: events.at(-1).id, requestSeq: events.at(-1).seq }); }
-  catch (error) { Object.assign(error as Error, { traces, drafts: luna.filter(call => call.phase === 'generation').map(call => call.response.text) }); throw error; }
+  const at = '2000-01-01T00:00:00.000Z';
+  // Older synthetic callers use speaker-prefixed IDs. The queue restores the
+  // same transcript under its own event IDs.
+  const queueEvents = events.map(event => ({ ...event, id: `event-${event.seq}`, turn: event.seq, at }));
+  const queue = createHumanMessageSequencer({ now: () => Date.parse(at), initialState: {
+    events: queueEvents,
+    privateState: state, pendingHumanEventIds: [queueEvents.at(-1)!.id], clients: [],
+    requestSeq: queueEvents.at(-1)!.seq - 1,
+  } as any });
+  const request = queue.beginRequest();
+  assert.ok(request);
+  const publication = () => ({ publicEvents: queue.getSnapshot().events, durable: queue.getDurableState() });
+  let result: Awaited<ReturnType<typeof runtime.runAiTurn>>;
+  try { result = await runtime.runAiTurn(request); }
+  catch (error) {
+    const disposition = queue.failRequest(request);
+    Object.assign(error as Error, { traces, publication: { ...publication(), status: disposition.status },
+      drafts: luna.filter(call => call.phase === 'generation').map(call => call.response.text) });
+    throw error;
+  }
   assert.ok(boundary.luna >= 0);
-  return { state: structuredClone(result.privateState), trace: { ...structuredClone(traces.at(-1)), status: 'committed' }, luna, jev, reobservations, boundary, httpBodies, speech: result.text as string };
+  if (plan.correctionBeforeCommit) queue.acceptHuman({ text: plan.correctionBeforeCommit });
+  const disposition = queue.completeRequest(request, result);
+  const outcome = publication();
+  const saved = outcome.durable.privateState;
+  const trace = settleJevTurnTraces(traces, saved).at(-1)! as AcceptanceTrace;
+  assert.ok(trace.executed, 'a staged v3 candidate has an execution trace');
+  const published = disposition.status === 'committed' ? disposition.event ?? null : null;
+  return { state: saved, trace: trace as ExecutedTrace, luna, jev, reobservations, boundary, httpBodies,
+    candidateText: result.text, speech: published?.text ?? null, publication: { ...outcome, status: disposition.status } };
 }
 
 export type Turn = { human: string; plan: Plan };
@@ -136,33 +170,39 @@ export function publicFocusTurn(figureIndex = 0): Turn {
   return { human: 'この形の特徴を教えてください。', plan: { action: 'accept', target: 'figure_' + figureIndex, referent: 'figure_' + figureIndex, speech: text,
     aiExtraction: JSON.stringify([{ segmentId: 's1', quote: text, proposition: text, name: null, targets: [OWN.ownAnchors[figureIndex].id], aspect: 'part', linkedIssueId: null, respondsToTurn: null }]) } };
 }
-export async function buildRecords({ label = 'repair-first' as Label, technicalTrial, turns, ledger, dialoguePolicy, memo, generationRetryVersion, agreeNameScopeVersion, onTurn }: {
+export async function buildRecords({ label = 'repair-first' as Label, technicalTrial, turns, ledger, dialoguePolicy, memo, generationRetryVersion, agreeNameScopeVersion, onTurn, promptSources }: {
   label?: Label; technicalTrial?: { version: TrialVersion }; turns: Turn[]; ledger?: Record<string, any>; dialoguePolicy?: DialoguePolicy | null; memo?: ObservationMemo; generationRetryVersion?: RecordedGenerationRetryVersion;
   agreeNameScopeVersion?: AgreeNameScopeVersion;
   onTurn?: (label: Label, result: Awaited<ReturnType<typeof runTurn>>) => void;
+  promptSources?: Awaited<ReturnType<typeof promptSourceManifest>>;
 }) {
   const n = structuredClone(normal), tr = n.trials[0], m = n.run.manifest;
   const profile = JSON.parse(JSON.stringify(researchTrialProfileV3(m.lunaRequest, m.timeouts, 'two_stage_v3', dialoguePolicy)));
   const digest = hash(profile);
   for (const s of [n.run, n.summary, tr]) { s.profile = structuredClone(profile); s.profileSha256 = digest; }
   tr.identity.profile = digest; tr.label = label; m.trials[0].label = label; n.summary.runOrder[0].label = label;
+  if (promptSources) { n.run.promptSources = promptSources; tr.identity.prompts = hash(promptSources); }
   let state: any = initialState({ profile, ledger, memo, generationRetryVersion, agreeNameScopeVersion });
-  let events: any[] = [], seq = 0;
+  let events: any[] = [];
   for (let i = 0; i < turns.length; i++) {
-    events = [...events, { id: `human-${++seq}`, seq, speaker: 'human', text: turns[i].human }];
+    const seq = events.length + 1;
+    events = [...events, { id: `event-${seq}`, seq, speaker: 'human', text: turns[i].human }];
     const run = { state, events: structuredClone(events) };
     const last = i === turns.length - 1;
     if (!last) {
       const r = await runTurn(profile, label, state, events, turns[i].plan, technicalTrial, generationRetryVersion);
+      assert.equal(r.publication.status, 'committed');
       onTurn?.(label, r);
       state = r.state;
-      events = [...events, { id: `ai-${++seq}`, seq, speaker: 'ai', text: r.speech }];
+      events = r.publication.publicEvents.map(({ id, seq, speaker, text }) => ({ id, seq, speaker, text }));
       continue;
     }
     // The final turn is run once per label: the common segment (before the original decision) is shared, each tail is that label's own.
     const runs = { 'repair-first': await runTurn(profile, 'repair-first', run.state, run.events, turns[i].plan, technicalTrial, generationRetryVersion),
       'bypass-enabled': await runTurn(profile, 'bypass-enabled', run.state, run.events, turns[i].plan, technicalTrial, generationRetryVersion) };
     const a = runs['repair-first'], b = runs['bypass-enabled'];
+    assert.equal(a.publication.status, 'committed');
+    assert.equal(b.publication.status, 'committed');
     onTurn?.('repair-first', a);
     onTurn?.('bypass-enabled', b);
     assert.deepEqual([a.luna.slice(0, a.boundary.luna), a.jev.slice(0, a.boundary.jev)], [b.luna.slice(0, b.boundary.luna), b.jev.slice(0, b.boundary.jev)]);
