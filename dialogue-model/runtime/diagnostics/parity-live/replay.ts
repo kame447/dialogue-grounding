@@ -81,7 +81,7 @@ export async function pairedReplay(tape: ReplayTape, own: ObservationInput, expe
     };
     const readKey = async () => "sk-or-SYNTHETIC-offline-replay-key-0000";
     const jev = { enabled: true, readKey, fetchImpl, timeoutMs: profile.timeouts.decisionMs, ...(profile.id === "research_trial_profile_v2" ? { researchLimits: { maxDeadlineMs: RESEARCH_MAX_DEADLINE_MS } } : {}) };
-    const runtime = createProfileDialogue(profile, { client, image: own.ownImage, anchors: [...own.ownAnchors], strategy: label,
+    const runtime = createProfileDialogue(profile, { memoryPruneVersion: frozen.state.graph?.memoryPruneVersion, client, image: own.ownImage, anchors: [...own.ownAnchors], strategy: label,
       observer: { async observeAll() { return structuredClone(frozen.state.observationMemo!); }, async reobserve(input) {
         const next = frozen.reobservations[observationIndex++]; if (!next) throw new Error("replay_observation_unreached");
         await client.complete(buildReobservationMessages(input), { phase: "observation_targeted" });

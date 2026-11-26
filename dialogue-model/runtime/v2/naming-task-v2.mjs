@@ -18,7 +18,8 @@ import { STATUSES } from "../judgment/schema.mjs";
 import { selectParticipantJev, participantLunaClient, withParticipantJevTurn, restoreParticipantJevLedger,
   participantInitialObservation } from "../web/participant-jev-wiring.ts";
 import { researchHash } from "./research-profile.ts";
-import { settleJevTurnTraces, settleAiPublicClaims } from "./jev-turn.ts";
+import { CLAIM_PRUNE_V2 } from "../memory/reference-graph.mjs";
+import { memoryCapacityRejectedClaims, settleJevTurnTraces, settleAiPublicClaims } from "./jev-turn.ts";
 
 export const VERSION = 2;
 const SCRIPTED_OPENING = "まず、どの図形から話しましょうか？";
@@ -99,13 +100,14 @@ export function parseAiNamesV2(text, slots) {
  *   decisionShadowClient?: {chooseAction(request: object): Promise<any>} | null,
  *   activeDecision?: {purpose: string, client: {chooseAction(request: object): Promise<any>}} | null,
  *   utteranceStyle?: string, rotationMode?: string, groundingShadow?: import('./grounding-shadow.ts').GroundingShadowOptions | null,
+ *   memoryPruneVersion?: import("../memory/reference-graph.mjs").MemoryPruneVersion,
  *   localGrounding?: import('../local-grounding/contract.ts').LocalGroundingOptions | null,
  *   jevResearch?: import('../web/participant-jev-wiring.ts').JevResearchOptions<import('../web/participant-jev-wiring.ts').JevResearchLedger> | null,
  *   onLocalGroundingTrace?: ((record: import('./local-grounding-turn.ts').LocalGroundingResearchRecord) => unknown) | null }} options
  *   groundingShadow is a researcher-only, default-off shadow; a restored trial keeps it only if it started with it.
  */
 export async function createNamingTaskV2({
-  client, strategy, seed, referenceMemory = true, runDir = process.env.RESEARCH_RUN_DIR,
+  client, strategy, seed, referenceMemory = true, memoryPruneVersion, runDir = process.env.RESEARCH_RUN_DIR,
   createTrial = createTrialV2, scoreTrial = defaultScoreTrial, judge = null, now = () => Date.now(),
   restore = null, onPersist = null, decisionShadowClient = null, activeDecision = null, utteranceStyle = "default",
   groundingShadow = null, localGrounding = null, onLocalGroundingTrace = null, jevResearch = null, rotationMode = "relative_pm90", figureSelection = undefined,
@@ -115,6 +117,14 @@ export async function createNamingTaskV2({
   const figures = trialFigures(restore, figureSelection, rotation);
   // Restored trials retain their recorded condition, including legacy memory-off trials.
   if (restore) referenceMemory = restore.options?.referenceMemory === undefined ? false : restore.options.referenceMemory;
+  if (restore) {
+    const saved = restore.options?.memoryPruneVersion;
+    if ((memoryPruneVersion !== undefined && memoryPruneVersion !== saved) ||
+        (Object.hasOwn(restore.options ?? {}, "memoryPruneVersion") && saved !== CLAIM_PRUNE_V2) ||
+        restore.queueState?.privateState?.graph?.memoryPruneVersion !== saved) throw new NamingTaskError("invalid_options");
+    memoryPruneVersion = saved;
+  }
+  if (memoryPruneVersion !== undefined && (memoryPruneVersion !== CLAIM_PRUNE_V2 || !referenceMemory)) throw new NamingTaskError("invalid_options");
   const style = restore?.options?.utteranceStyle ?? utteranceStyle;
   const jev = selectParticipantJev(restore, jevResearch, { referenceMemory, strategy, style,
     legacy: [localGrounding, activeDecision, decisionShadowClient, groundingShadow] });
@@ -185,7 +195,7 @@ export async function createNamingTaskV2({
     },
   };
   const dialogue = createDialogueV2({ client: trackingClient, strategy, image: { mimeType: model.mimeType, base64: model.png.toString("base64") },
-    anchors: model.anchors, judge, referenceMemory, decisionShadowClient: trackDecisions(decisionShadowClient, "decision_shadow"),
+    anchors: model.anchors, judge, referenceMemory, memoryPruneVersion, decisionShadowClient: trackDecisions(decisionShadowClient, "decision_shadow"),
     activeDecision: activeDecision && { ...activeDecision, client: trackDecisions(activeDecision.client, "decision_active") }, utteranceStyle: style,
     groundingShadow: grounding, onGroundingShadow: grounding ? (record) => { groundingRecords.push(record); } : null,
     localGrounding: local, onLocalGroundingTrace,
@@ -272,7 +282,7 @@ export async function createNamingTaskV2({
     const privateState = queue.getPrivateState();
     const record = {
       recordId, version: VERSION, trialId: trial.trialId, seed, strategy, startedAt, updatedAt: new Date(now()).toISOString(),
-      options: { visualAid: false, referenceMemory, decisionShadow: Boolean(decisionShadowClient), activeDecision: activeDecision?.purpose ?? null, utteranceStyle: style,
+      options: { visualAid: false, referenceMemory, ...(memoryPruneVersion ? { memoryPruneVersion } : {}), decisionShadow: Boolean(decisionShadowClient), activeDecision: activeDecision?.purpose ?? null, utteranceStyle: style,
         // Legacy records keep their original shape; they never gain rotation fields on restore.
         ...(rotation.legacy ? {} : { rotationMode: rotation.mode }),
         // Present only for a trial that selected figures, so earlier records keep their shape.
@@ -295,9 +305,10 @@ export async function createNamingTaskV2({
         initialObservation: clone(initialObservation), jevLedger: jev.ledger.snapshot() } : {}),
       humanSubmission, aiSubmission, closed, finalError,
       queueState: queue.getDurableState(), scoring: result ? { key: trial.key, result } : null, requests, turnTimings,
-      diagnostics: aiSubmission ? {
-        ledgerFinalMismatch: (() => { const slots = dialogue.slots.filter((s) => (privateState.ledger[s].name ?? null) !== (aiSubmission[s] ?? null)); return { count: slots.length, slots }; })(),
-        ledgerStatusCounts: Object.fromEntries(STATUSES.map((status) => [status, dialogue.slots.filter((s) => privateState.ledger[s].status === status).length])),
+      diagnostics: aiSubmission || memoryPruneVersion ? {
+        ...(memoryPruneVersion ? { memoryCapacityRejectedClaims: memoryCapacityRejectedClaims(jevTraces) } : {}),
+        ledgerFinalMismatch: aiSubmission ? (() => { const slots = dialogue.slots.filter((s) => (privateState.ledger[s].name ?? null) !== (aiSubmission[s] ?? null)); return { count: slots.length, slots }; })() : null,
+        ...(aiSubmission ? { ledgerStatusCounts: Object.fromEntries(STATUSES.map((status) => [status, dialogue.slots.filter((s) => privateState.ledger[s].status === status).length])) } : {}),
       } : null,
     };
     if (onPersist) await onPersist(record);

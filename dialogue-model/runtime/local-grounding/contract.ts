@@ -197,6 +197,7 @@ export type AiPublicApplication = {
   aiSeq: number | null; status: AiPublicLog["status"] | "none"; reasons: string[];
   claims: Array<{ id: string; candidateKey: string; sourceTurn: number }>;
   nameIds: string[]; nameRejections: LocalRejection[];
+  capacityRejectedClaims?: number;
 };
 export type AiStageEvidence = {
   status: "not_called" | "skipped" | "ok" | "error"; calls: number;

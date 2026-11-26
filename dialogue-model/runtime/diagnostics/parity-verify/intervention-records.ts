@@ -1,6 +1,7 @@
 // Independent record-only S4 checks. Never imports an online runtime, transport,
 // producer validator or replay executor. Only supplied data and code-owned
 // version constants are evidence; successful producer flags are not an oracle.
+import { CLAIM_PRUNE_V2, snapshotReferenceGraph } from "../../memory/reference-graph.mjs";
 import {checkModelIdentity} from '../../model-identity-contract.ts';
 import {resolveModelPolicy} from '../../model-policy.ts';
 import {check,hash,equal,row,rows,list,META_KEYS} from './core.ts';
@@ -104,6 +105,14 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
  if(entries.length===0)return'missing';if(entries.length!==1||pairs.length>1)return'invalid';
  const v=promptVersion(records,tr);if(!v)return'invalid';
  const {tape,result}=entries[0],pair=pairs[0];
+ const pruneVersion = tape?.state?.graph?.memoryPruneVersion;
+ const committed = tr.turns?.find((u:any)=>u.turn===t.turnIndex)?.state?.graph;
+ const finalGraph = tr.lastCommittedState?.graph;
+ if ([tr.memoryPruneVersion,committed?.memoryPruneVersion,finalGraph?.memoryPruneVersion].some(version=>version!==pruneVersion)) return 'invalid';
+ if (pruneVersion !== undefined) {
+  if (pruneVersion !== CLAIM_PRUNE_V2) return 'invalid';
+  try { snapshotReferenceGraph(tape.state.graph); snapshotReferenceGraph(committed); } catch { return 'invalid'; }
+ }
  if(!exact(tape,['schemaVersion','state','events','common','tails','recorded'])||tape.schemaVersion!=='parity_intervention_replay_v1'||!exact(result,['schemaVersion','status','error','commonEqual','policyConformant','recordedPayloadsReproduced','actualLunaHttpMeasured','hashScheme','excludedEnvelopeFields','sides'])||result.schemaVersion!=='parity_intervention_replay_result_v1'||result.status!=='same_material_intervention_verified'||result.error!==null||result.commonEqual!==true||result.policyConformant!==true||result.recordedPayloadsReproduced!==true||typeof result.actualLunaHttpMeasured!=='boolean'||result.hashScheme!=='canonical_json_sha256_not_raw_body_bytes'||!equal(result.excludedEnvelopeFields,META_KEYS)||!Array.isArray(result.sides)||result.sides.length!==2)return'invalid';
  if(pairs.length===0)return'missing';
  if(!equal(result.sides,[pair.left,pair.right]))return'invalid';
@@ -403,6 +412,20 @@ const PROMPT_VERSIONS:readonly PromptVersion[]=[
  {id:'mainbcb8211',sources:{scheme:'complete_instruction_source_sha256',files:{'v2/dialogue-v2.mjs':'092a7d3ff87462cf4df9f06e25fa23f5d6394c14e5c30dd35c9c894723ad160c','v2/jev-turn.ts':'77619037549ac800b750b4d3ffe6fd0c342ddc1af5508050132ac19b5ffb0dd8','v2/generation-guard.ts':'f1641117798e1538a6db4ebb97e8ac33a2da14e926c405f4a7c7f6c8b751ad46','judgment/instructions.mjs':'aa8b84ba60f10780328521457fc3abf4bfaa6db6efd32a725924075a9584f884','observation/observe.ts':'469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad','local-grounding/extract.ts':'1f3af472bca173e83bcb0bf07e4b98c15fb98bc1b960aedc28e0a4970563764e','local-grounding/jev-local-test.ts':'95e1509bd5a4dbc6f1687605d24b6848c311cb631db480adce5bc5eeed052492','decision/jev-decision.ts':'a7503c1904b3fe55a90458c1ad996b76432491f9640087321d871e5468851b33','local-grounding/extract-ai.ts':'61c88803ddd0dd8690dadbd707afdb1111e894fb8dcc396562cd6eb85217ebd5','local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7'}},fixed:FIXED,native:NATIVE},
  // #172 text merged with main bcb8211 (eaa8e9c):
  {id:'i172_eaa8e9c',sources:{scheme:'complete_instruction_source_sha256',files:{'v2/dialogue-v2.mjs':'51aa2db12f9b8ebe14c7d3271a44adff7a6dcee8d601b9b4ab8c353ee1dc5769','v2/jev-turn.ts':'77619037549ac800b750b4d3ffe6fd0c342ddc1af5508050132ac19b5ffb0dd8','v2/generation-guard.ts':'f1641117798e1538a6db4ebb97e8ac33a2da14e926c405f4a7c7f6c8b751ad46','judgment/instructions.mjs':'9d686330aa34a516a1e2d95df94d0b030e7308a6463757861b9c94e561e5197a','observation/observe.ts':'469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad','local-grounding/extract.ts':'df3926ea3cbf74bcf6bf934534fe88080280c9c8c3162fa34cc33dd00545e9ce','local-grounding/jev-local-test.ts':'95e1509bd5a4dbc6f1687605d24b6848c311cb631db480adce5bc5eeed052492','decision/jev-decision.ts':'210455c2519e4148c4b72eee83790c45508cb0a7832bffdee611f6ab8f6bbf18','local-grounding/extract-ai.ts':'61c88803ddd0dd8690dadbd707afdb1111e894fb8dcc396562cd6eb85217ebd5','local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7'}},fixed:FIXED_I172,native:NATIVE_I172},
+ // The pruning change does not alter the #172 instructions. Source digests
+ // still differ because the producer hashes the complete instruction files.
+ {id:'claim_prune_v2_main',sources:{scheme:'complete_instruction_source_sha256',files:{
+  'v2/dialogue-v2.mjs':'ea06a6f77a258cd80ddcf6be7806cb7dae23865a7a3f593388b2ef9662bd4dd4',
+  'v2/jev-turn.ts':'b6b6e656509c675061358bdd40acf2f65e1cf2e6e3da6acf085ec4163b8bfc24',
+  'v2/generation-guard.ts':'f1641117798e1538a6db4ebb97e8ac33a2da14e926c405f4a7c7f6c8b751ad46',
+  'judgment/instructions.mjs':'9d686330aa34a516a1e2d95df94d0b030e7308a6463757861b9c94e561e5197a',
+  'observation/observe.ts':'469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad',
+  'local-grounding/extract.ts':'df3926ea3cbf74bcf6bf934534fe88080280c9c8c3162fa34cc33dd00545e9ce',
+  'local-grounding/jev-local-test.ts':'95e1509bd5a4dbc6f1687605d24b6848c311cb631db480adce5bc5eeed052492',
+  'decision/jev-decision.ts':'9ac52e6997de9ce4631c01ceff097b98b6f7fba491373c81e9577191f8d45677',
+  'local-grounding/extract-ai.ts':'61c88803ddd0dd8690dadbd707afdb1111e894fb8dcc396562cd6eb85217ebd5',
+  'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
+ }},fixed:FIXED_I172,native:NATIVE_I172},
  ...HISTORICAL_MAIN_PROMPT_SOURCES.map(({id, files}) => ({
   id, sources: {scheme: 'complete_instruction_source_sha256', files: {...HISTORICAL_MAIN_SHARED_SOURCES, ...files}},
   fixed: FIXED, native: NATIVE,

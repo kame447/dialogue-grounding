@@ -10,6 +10,8 @@ import { FIGURE_SETS, resolveFigureSelection, validateResolvedFigureSelection } 
 import type { ResolvedFigureSelection } from '../stimuli/figure-bank.ts';
 import { INITIAL_OBSERVATION_STRUCTURED_V1, type InitialObservationGeneration } from '../observation/initial-observation-generation.ts';
 
+import { CLAIM_PRUNE_V2, type MemoryPruneVersion } from '../memory/reference-graph.mjs';
+
 export type ReceptionProtocol = { schemaVersion: 'reception_protocol_v1'; protocolId: string; revision: number;
   allowedOrders: Strategy[][]; seedPolicy: 'shared' | 'per_trial'; referenceMemory: boolean;
   betweenTrials: 'none'; receptionNumberFormat: 'daily_seq3' };
@@ -22,9 +24,10 @@ export type ReceptionProtocolV2 = { schemaVersion: 'reception_protocol_v2'; prot
   allowedOrders: Strategy[][]; seedPolicy: 'shared' | 'per_trial'; referenceMemory: boolean;
   betweenTrials: BetweenTrials; receptionNumberFormat: 'daily_seq3'; rotationMode: RotationMode };
 export type ReceptionPlanV1 = { schemaVersion: 'reception_plan_v1'; protocolId: string; protocolRevision: number;
-  protocolSha256: string; order: Strategy[]; trials: { index: number; strategy: Strategy; seed: number; referenceMemory: boolean }[]; approvedAt: string };
+  protocolSha256: string; order: Strategy[]; trials: { index: number; strategy: Strategy; seed: number; referenceMemory: boolean }[]; approvedAt: string; memoryPruneVersion?: MemoryPruneVersion };
 export type ParticipantDialogueProfile = 'participant_dialogue_v12' | 'participant_dialogue_v13_p5';
 type ParticipantPlanSettings = {
+  memoryPruneVersion?: MemoryPruneVersion;
   participantModelPin?: ParticipantModelPin;
   participantLimits?: Readonly<BudgetLimits>;
   participantRuntimeProfile?: ParticipantProductionProfile;
@@ -154,6 +157,7 @@ export const receptionProtocolSha256 = (canonical: string): string => createHash
 const PLAN_KEYS = ['schemaVersion','protocolId','protocolRevision','protocolSha256','order','betweenTrials','trials','approvedAt'];
 function participantPlan(value: unknown) {
   const fields = value && typeof value === 'object' ? value : {};
+  const hasPrune = Object.hasOwn(fields, 'memoryPruneVersion');
   const hasPin = Object.hasOwn(fields, 'participantModelPin');
   const hasLimits = Object.hasOwn(fields, 'participantLimits');
   const hasProfile = Object.hasOwn(fields, 'participantRuntimeProfile');
@@ -161,9 +165,10 @@ function participantPlan(value: unknown) {
   const hasDialogueProfile = Object.hasOwn(fields, 'participantDialogueProfile');
   if ((hasLimits || hasProfile || hasGeneration) && !hasPin || hasLimits && hasProfile) return fail();
   const p = object(value, [...PLAN_KEYS,
-    ...(hasPin ? ['participantModelPin'] : []), ...(hasLimits ? ['participantLimits'] : []),
+    ...(hasPrune ? ['memoryPruneVersion'] : []), ...(hasPin ? ['participantModelPin'] : []), ...(hasLimits ? ['participantLimits'] : []),
     ...(hasProfile ? ['participantRuntimeProfile'] : []), ...(hasGeneration ? ['initialObservationGeneration'] : []),
     ...(hasDialogueProfile ? ['participantDialogueProfile'] : [])]);
+  if (hasPrune && p.memoryPruneVersion !== CLAIM_PRUNE_V2) return fail();
   if (hasProfile && p.participantRuntimeProfile !== PARTICIPANT_PRODUCTION_PROFILE) return fail();
   if (hasGeneration && p.initialObservationGeneration !== INITIAL_OBSERVATION_STRUCTURED_V1) return fail();
   const pin = hasPin ? validateParticipantModelPin(p.participantModelPin) : undefined;
@@ -173,6 +178,7 @@ function participantPlan(value: unknown) {
       dialogueProfile !== 'participant_dialogue_v12' && dialogueProfile !== 'participant_dialogue_v13_p5')) return fail();
   const limits = hasLimits ? validateParticipantLimits(p.participantLimits) : undefined;
   const participant: ParticipantPlanSettings = {
+    ...(hasPrune ? { memoryPruneVersion: CLAIM_PRUNE_V2 } : {}),
     ...(pin ? { participantModelPin: pin } : {}),
     ...(limits ? { participantLimits: limits } : {}),
     ...(hasProfile ? { participantRuntimeProfile: PARTICIPANT_PRODUCTION_PROFILE } : {}),
@@ -189,7 +195,7 @@ function validatePlanV2(value: unknown): ReceptionPlanV2 {
     !Array.isArray(p.trials) || p.trials.length !== strategies.length) return fail();
   const trials = p.trials.map((raw: unknown, index: number) => {
     const t = object(raw, ['index','strategy','seed','referenceMemory','rotationMode']);
-    if (t.index !== index || t.strategy !== strategies[index] || !int(t.seed) || typeof t.referenceMemory !== 'boolean' || participant.participantModelPin && !t.referenceMemory || !rotation(t.rotationMode)) return fail();
+    if (t.index !== index || t.strategy !== strategies[index] || !int(t.seed) || typeof t.referenceMemory !== 'boolean' || (participant.participantModelPin || participant.memoryPruneVersion) && !t.referenceMemory || !rotation(t.rotationMode)) return fail();
     return { index, strategy: strategies[index], seed: t.seed, referenceMemory: t.referenceMemory, rotationMode: t.rotationMode as RotationMode };
   });
   return { schemaVersion: 'reception_plan_v2', protocolId: p.protocolId, protocolRevision: p.protocolRevision,
@@ -208,7 +214,7 @@ function validatePlanV3(value: unknown): ReceptionPlanV3 {
     !Array.isArray(p.trials) || p.trials.length !== strategies.length) return fail();
   const trials = p.trials.map((raw: unknown, index: number) => {
     const t = object(raw, ['index','strategy','seed','referenceMemory','rotationMode','figureSelection']);
-    if (t.index !== index || t.strategy !== strategies[index] || !int(t.seed) || typeof t.referenceMemory !== 'boolean' || participant.participantModelPin && !t.referenceMemory || !rotation(t.rotationMode)) return fail();
+    if (t.index !== index || t.strategy !== strategies[index] || !int(t.seed) || typeof t.referenceMemory !== 'boolean' || (participant.participantModelPin || participant.memoryPruneVersion) && !t.referenceMemory || !rotation(t.rotationMode)) return fail();
     return { index, strategy: strategies[index], seed: t.seed, referenceMemory: t.referenceMemory, rotationMode: t.rotationMode as RotationMode,
       figureSelection: resolvedSelection(t.figureSelection) };
   });
@@ -220,18 +226,21 @@ export function validateReceptionPlan(value: unknown): ReceptionPlan {
   try {
     if (value && typeof value === 'object' && (value as { schemaVersion?: unknown }).schemaVersion === 'reception_plan_v2') return validatePlanV2(value);
     if (value && typeof value === 'object' && (value as { schemaVersion?: unknown }).schemaVersion === 'reception_plan_v3') return validatePlanV3(value);
-    const p = object(value, ['schemaVersion','protocolId','protocolRevision','protocolSha256','order','trials','approvedAt']);
+    const hasPrune = value && typeof value === 'object' && Object.hasOwn(value, 'memoryPruneVersion');
+    const p = object(value, ['schemaVersion','protocolId','protocolRevision','protocolSha256','order','trials','approvedAt',
+      ...(hasPrune ? ['memoryPruneVersion'] : [])]);
+    if (hasPrune && p.memoryPruneVersion !== CLAIM_PRUNE_V2) return fail();
     const strategies = order(p.order);
     if (p.schemaVersion !== 'reception_plan_v1' || !uuid.test(p.protocolId) || !int(p.protocolRevision) || p.protocolRevision < 1 ||
       typeof p.protocolSha256 !== 'string' || !owner.test(p.protocolSha256) || !iso(p.approvedAt) ||
       !Array.isArray(p.trials) || p.trials.length !== strategies.length) return fail();
     const trials = p.trials.map((raw: unknown, index: number) => {
       const t = object(raw, ['index','strategy','seed','referenceMemory']);
-      if (t.index !== index || t.strategy !== strategies[index] || !int(t.seed) || typeof t.referenceMemory !== 'boolean') return fail();
+      if (t.index !== index || t.strategy !== strategies[index] || !int(t.seed) || typeof t.referenceMemory !== 'boolean' || hasPrune && !t.referenceMemory) return fail();
       return { index, strategy: strategies[index], seed: t.seed, referenceMemory: t.referenceMemory };
     });
     return { schemaVersion: 'reception_plan_v1', protocolId: p.protocolId, protocolRevision: p.protocolRevision,
-      protocolSha256: p.protocolSha256, order: strategies, trials, approvedAt: p.approvedAt };
+      protocolSha256: p.protocolSha256, order: strategies, trials, approvedAt: p.approvedAt, ...(hasPrune ? { memoryPruneVersion: CLAIM_PRUNE_V2 } : {}) };
   } catch { return fail(); }
 }
 /** Effective values: a v1 plan predates these settings and means the old mechanism. */
@@ -288,6 +297,7 @@ export async function approveReception(value: unknown, options: Omit<Participant
 }): Promise<Reception> {
   const r = validateReception(value);
   const participant = {
+    ...(options.memoryPruneVersion !== undefined ? { memoryPruneVersion: options.memoryPruneVersion } : {}),
     ...(options.participantModelPin !== undefined ? { participantModelPin: options.participantModelPin } : {}),
     ...(options.participantLimits !== undefined ? { participantLimits: options.participantLimits } : {}),
     ...(options.participantRuntimeProfile !== undefined ? { participantRuntimeProfile: options.participantRuntimeProfile } : {}),
@@ -345,14 +355,16 @@ export async function approveReception(value: unknown, options: Omit<Participant
       ...participant, trials:selected.map((strategy, index) => ({ index, strategy, seed:seeds[index] ?? seeds[0], referenceMemory:p.referenceMemory, rotationMode:p.rotationMode })) });
     return validateReception({ ...r, status:'approved', plan, revision:r.revision+1 });
   }
-  if (Object.keys(participant).length) return fail('protocol_unconfigured');
+  const { memoryPruneVersion, ...legacyParticipant } = participant;
+  if (Object.keys(legacyParticipant).length) return fail('protocol_unconfigured');
   const p = validateReceptionProtocol(options.protocol);
   if (r.status !== 'pending' || r.revision !== options.expectedRevision) return fail('reception_conflict');
   if (!int(options.order) || !p.allowedOrders[options.order]) return fail('invalid_order');
   const selected = p.allowedOrders[options.order], seeds = selected.map((_, i) => i === 0 || p.seedPolicy === 'per_trial' ? options.randomSeed() : null);
   const plan = validateReceptionPlan({ schemaVersion:'reception_plan_v1', protocolId:p.protocolId, protocolRevision:p.revision,
     protocolSha256:createHash('sha256').update(canonicalReceptionProtocol(p)).digest('hex'), order:selected,
-    trials:selected.map((strategy, index) => ({ index, strategy, seed:seeds[index] ?? seeds[0], referenceMemory:p.referenceMemory })), approvedAt:options.approvedAt });
+    trials:selected.map((strategy, index) => ({ index, strategy, seed:seeds[index] ?? seeds[0], referenceMemory:p.referenceMemory })), approvedAt:options.approvedAt,
+    ...(memoryPruneVersion ? { memoryPruneVersion } : {}) });
   return validateReception({ ...r, status:'approved', plan, revision:r.revision+1 });
 }
 export function cancelReception(value: unknown, expectedRevision: number): Reception {

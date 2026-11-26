@@ -13,7 +13,8 @@ export type BaseAssignmentConfig = Readonly<{ schemaVersion: 'base_assignment_co
   revision: number; strategy: Strategy; seed: number; referenceMemory: boolean }>;
 export type BaseAssignment = Readonly<{ schemaVersion: 'base_assignment_v1'; assignmentId: string;
   strategy: Strategy; seed: number; referenceMemory: boolean;
-  source: Readonly<{ kind: 'server_config_v1'; adapter: SourceAdapter; configId: string; revision: number; configSha256: string }> |
+  source: Readonly<{ kind: 'server_config_v1'; adapter: SourceAdapter; configId: string; revision: number; configSha256: string;
+    memoryPruneVersion?: import('../memory/reference-graph.mjs').MemoryPruneVersion }> |
     Readonly<{ kind: 'reception_plan_v1'; adapter: SourceAdapter; receptionId: string; protocolId: string; protocolRevision: number;
       protocolSha256: string; trialIndex: number; plan: ReceptionPlanV1 }> |
     Readonly<{ kind: 'reception_plan_v2'; adapter: SourceAdapter; receptionId: string; protocolId: string; protocolRevision: number;
@@ -47,6 +48,7 @@ export type BaseTask = { getState(): Record<string, unknown>; persistNow(): Prom
 /** rotationMode is present for new tasks only; a restored task takes its mode from the record.
  * figureSelection is passed for new reception_plan_v3 tasks only; older sources keep the legacy record shape. */
 export type MakeBaseTask = (options: { strategy: Strategy; seed: number; referenceMemory: boolean; runDir: null;
+  memoryPruneVersion?: import('../memory/reference-graph.mjs').MemoryPruneVersion;
   restore: BaseRecord | null; now: () => number; onPersist: (record: RawBaseRecord) => Promise<void>; rotationMode?: RotationMode;
   figureSelection?: ResolvedFigureSelection; participantModelPin?: ParticipantModelPin; participantLimits?: Readonly<BudgetLimits>;
   initialObservationGeneration?: InitialObservationGeneration;
@@ -55,6 +57,7 @@ export type MakeBaseTask = (options: { strategy: Strategy; seed: number; referen
 export type BaseSessionOptions = { ownerId: string; store: BaseStore; readConfig: () => Promise<BaseAssignmentConfig | null>;
   /** null explicitly declines a plan, so the configured (non-reception) assignment is used. */
   readPlan?: () => Promise<{ receptionId: string; plan: ReceptionPlan; trialIndex: number } | null>;
+  memoryPruneVersion?: import('../memory/reference-graph.mjs').MemoryPruneVersion;
   makeTask: MakeBaseTask; newId: () => string; now: () => number; adapter: SourceAdapter };
 export type StartResult = { kind: 'started' | 'completed'; task: BaseTask };
 export type RestoreResult = { kind: 'empty'; task: null } | { kind: 'restored'; task: BaseTask };
