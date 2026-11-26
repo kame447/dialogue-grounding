@@ -1,23 +1,29 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { interventionForStrategy, isOpenIssueRerankRecord } from '../dialogue-model/runtime/decision/bypass-acceptance.ts';
-import { checkDecisionFailureEvidence, buildJevDecisionDetailPayload, buildJevDecisionPayload, buildJevTargetPayload, createJevDecisionClient, JEV_ACTION_CRITERIA, JEV_DECISION_MODEL } from '../dialogue-model/runtime/decision/jev-decision.ts';
+import { candidateSetLabel, checkDecisionFailureEvidence, buildJevDecisionDetailPayload, buildJevDecisionPayload, buildJevTargetPayload, createJevDecisionClient, JEV_ACTION_CRITERIA, JEV_DECISION_MODEL } from '../dialogue-model/runtime/decision/jev-decision.ts';
 import type { JevDecisionPayload } from '../dialogue-model/runtime/decision/jev-decision.ts';
 import type { JevAction, JevDecisionInput, RepairHistoryEntry } from '../dialogue-model/runtime/decision/contract.ts';
 import { s4Probe } from '../dialogue-model/runtime/diagnostics/parity-verify/intervention-records.ts';
 import type { LocalAct, LocalSegmentProposal } from '../dialogue-model/runtime/local-grounding/contract.ts';
 import { validateObservationMemo } from '../dialogue-model/runtime/observation/observe.ts';
-import { createJevTurnRuntime, validateJevPrivateStateV2 } from '../dialogue-model/runtime/v2/jev-turn.ts';
+import { createJevTurnRuntime, settleJevTurnTraces, validateJevPrivateStateV2, validJevSharedConstrualTrace } from '../dialogue-model/runtime/v2/jev-turn.ts';
+import { researchHash, researchTrialProfileV3 } from '../dialogue-model/runtime/v2/research-profile.ts';
+import { selectParticipantJev } from '../dialogue-model/runtime/web/participant-jev-wiring.ts';
+import { RunBudget } from '../dialogue-model/runtime/diagnostics/parity-live/audit.ts';
 import { anchors, ids, image, memo } from './support/s4-integration/harness.ts';
 
 const V3 = { questionLayout: 'two_stage_v3' } as const;
 const UNRELATED_NAME = '灯台';
 const NEW_NAME = '風車';
 const single = (index: number) => ({ kind: 'single' as const, figureId: ids[index] });
-type Segment = Omit<LocalSegmentProposal, 'segmentId' | 'linkedIssueId' | 'respondsToTurn'> & { act: LocalAct; respondsTo?: number; linkPrior?: true; antecedentOf?: 'ai_name_accept' | 'ai_name_propose' | 'ai_feature' };
+const P5 = 'jev_generation_retry_v13' as const;
+const V12 = 'jev_generation_retry_v12' as const;
+type Segment = Omit<LocalSegmentProposal, 'segmentId' | 'linkedIssueId' | 'respondsToTurn'> & { act: LocalAct; respondsTo?: number; linkPrior?: true; antecedentOf?: 'ai_name_accept' | 'ai_name_propose' | 'ai_feature' | 'ai_construal' };
 type Plan = {
   action: JevAction;
-  target?: number;
+  target?: number | number[];
+  shared?: 'none' | 'use_0';
   name?: string;
   drafts: string[];
   segments?: Segment[];
@@ -33,11 +39,12 @@ type Plan = {
 };
 
 function fixture(strategy: 'bypass-enabled' | 'repair-first' = 'bypass-enabled',
-  { aiPublic = false, observations = memo(), historicalNameScope = false, holistic = false }:
-  { aiPublic?: boolean; observations?: ReturnType<typeof memo>; historicalNameScope?: boolean; holistic?: boolean | 'holistic_v1' | 'holistic_v2' | 'holistic_v3' | 'holistic_v4' } = {}) {
+  { aiPublic = false, observations = memo(), historicalNameScope = false, holistic = false, generationRetryVersion }:
+  { aiPublic?: boolean; observations?: ReturnType<typeof memo>; historicalNameScope?: boolean; holistic?: boolean | 'holistic_v1' | 'holistic_v2' | 'holistic_v3' | 'holistic_v4' | 'holistic_v5'; generationRetryVersion?: typeof P5 | typeof V12 } = {}) {
   const intervention = interventionForStrategy(strategy);
   const inputs: JevDecisionInput[] = [];
   const extractionSystem: string[] = [];
+  const generationRequests: Array<Array<{ role: string; content: string }>> = [];
   const wire: JevDecisionPayload[] = [];
   const events: Parameters<ReturnType<typeof createJevTurnRuntime>['runAiTurn']>[0]['events'] = [];
   let plan: Plan;
@@ -49,12 +56,15 @@ function fixture(strategy: 'bypass-enabled' | 'repair-first' = 'bypass-enabled',
       if (Object.hasOwn(request.questions, 'draft_naming') && plan.draftActs?.[0] === 'fail') { plan.draftActs.shift(); throw new Error('scripted question failure'); }
       const answers = Object.fromEntries(Object.entries(request.questions).map(([key, question]) => {
         const labels = Object.keys(question.criteria);
+        const target = Array.isArray(plan.target) ? candidateSetLabel(plan.target)
+          : plan.target === undefined ? 'none' : 'figure_' + plan.target;
         const choice = key === 'action' ? plan.action
-          : key === 'target' ? (plan.target === undefined ? 'none' : `figure_${plan.target}`)
+          : key === 'target' ? target
+          : key === 'shared_construal' ? plan.shared ?? 'none'
           : key === 'repair_issue' ? (plan.prospect ? 'issue_0' : 'none')
           : key === 'prospect' ? plan.prospect ?? 'uncertain'
           : key === 'draft_naming' ? plan.draftActs!.shift()
-          : key === 'human_referent' ? (plan.referent ?? (plan.target === undefined ? 'none' : `figure_${plan.target}`))
+          : key === 'human_referent' ? (plan.referent ?? (Array.isArray(plan.target) ? 'multiple' : target))
           : key === 'name' && plan.name ? labels.find(label => JSON.parse(question.criteria[label]).value === plan.name)
           : labels[0];
         if (key === 'target' && plan.badTarget) return [key, { type: 'choice', choice: 'not_a_label', probabilities: Object.fromEntries(labels.map(label => [label, 0])) }];
@@ -67,7 +77,7 @@ function fixture(strategy: 'bypass-enabled' | 'repair-first' = 'bypass-enabled',
     },
   })!;
   const runtime = createJevTurnRuntime({
-    ...V3, intervention, decisionTimeoutMs: 3000, ...(holistic ? { dialoguePolicy: holistic === true ? 'holistic_v2' as const : holistic } : {}),
+    ...V3, intervention, ...(generationRetryVersion ? { generationRetryVersion } : {}), decisionTimeoutMs: 3000, ...(holistic ? { dialoguePolicy: holistic === true ? 'holistic_v2' as const : holistic } : {}),
     ...(strategy === 'repair-first' ? { technicalTrial: { version: 'adaptive_repair_v3' as const } } : {}),
     ownAnchors: anchors, ownImage: { ...image, mimeType: 'image/png' }, maxReobservations: 0,
     observer: { async observeAll() { return validateObservationMemo(observations); }, async reobserve() { throw Error('no reobservation expected'); } },
@@ -97,6 +107,7 @@ function fixture(strategy: 'bypass-enabled' | 'repair-first' = 'bypass-enabled',
           const chosen = plan.segments![index].antecedentOf;
           const antecedent = chosen === 'ai_name_propose' ? priorClaims.filter(c => c.speaker === 'ai' && c.act === 'name_propose').at(-1)
             : chosen === 'ai_name_accept' ? priorClaims.filter(c => c.speaker === 'ai' && c.act === 'name_accept').at(-1)
+            : chosen === 'ai_construal' ? priorClaims.filter(c => c.speaker === 'ai' && c.aspect === 'construal').at(-1)
             : chosen === 'ai_feature' ? priorClaims.filter(c => c.speaker === 'ai' && c.aspect !== 'name').at(-1)
             : referentDenial ? priorClaims.filter(c => c.speaker === 'ai').at(-1)
             : antecedentAct && priorClaims.filter(c => c.speaker === (act === 'ask' || act === 'name_propose' ? 'human' : 'ai') && c.act === antecedentAct).at(-1);
@@ -113,6 +124,7 @@ function fixture(strategy: 'bypass-enabled' | 'repair-first' = 'bypass-enabled',
           respondsToTurn: respondsTo ?? (act === 'deny' || act === 'name_accept' || act === 'agree' ? events.at(-2)!.seq : null),
         }))) };
         assert.equal(phase, 'generation');
+        generationRequests.push(structuredClone(_messages));
         const text = drafts.shift();
         assert.notEqual(text, undefined, 'unexpected additional generation');
         return { text: text! };
@@ -133,7 +145,7 @@ function fixture(strategy: 'bypass-enabled' | 'repair-first' = 'bypass-enabled',
     return { input: inputs.at(-1)!, requests: wire.slice(start), text: result.text, state, events: events.slice(0, -1),
       trace: runtime.getAttempts().at(-1)!, saved: state.judgments.at(-1)!.jevTurn };
   }
-  return { exchange, state: () => state, attempt: () => runtime.getAttempts().at(-1), intervention, extractionSystem };
+  return { exchange, state: () => state, attempt: () => runtime.getAttempts().at(-1), intervention, extractionSystem, generationRequests };
 }
 
 function naming(quote: string, name: string, targets: string[] = [], act: LocalAct = 'name_propose'): Segment {
@@ -1622,3 +1634,180 @@ test('05s (holistic_v3): affirming a reconfirmed agreed name does not open the n
     assert.deepEqual(other.trace.draftActs!.map(a => [a.draft, a.triggers, a.choice]), [['initial', ['quoted_other'], 'adopt_other']], strategy);
   }
 });
+
+const sharedFigures = [ids[0], ids[1]];
+const readingText = '鳥に見えます。先端に細い部分も見えます。';
+const supportText = '私にもその二つは鳥のように見えます。';
+const sharedReading: Plan = {
+  action: 'accept', target: [0, 1], drafts: [readingText],
+  aiSegments: [
+    { segmentId: 'bird', quote: '鳥に見えます。', targets: sharedFigures, aspect: 'construal', proposition: '鳥', name: null, linkedIssueId: null, respondsToTurn: null },
+    { segmentId: 'tip', quote: '先端に細い部分も見えます。', targets: sharedFigures, aspect: 'part', proposition: '先端に細い部分がある', name: null, linkedIssueId: null, respondsToTurn: null },
+  ],
+};
+const sharedSupport: Segment = {
+  act: 'agree', quote: supportText, targets: sharedFigures, aspect: 'construal', proposition: '鳥', name: null, antecedentOf: 'ai_construal',
+};
+const sharedPrivateMessage = (f: ReturnType<typeof fixture>) =>
+  f.generationRequests.at(-1)!.find(message => message.content.includes('名称に合意したとは言わないでください。'));
+
+for (const strategy of ['bypass-enabled', 'repair-first'] as const) {
+  test('P5 ' + strategy + ': same-turn two-figure proof survives generation and restore independently of the draft', async () => {
+    const f = fixture(strategy, { aiPublic: true, holistic: 'holistic_v5', generationRetryVersion: P5 });
+    const first = await f.exchange('どのように見えますか？', sharedReading);
+    const accepted = await f.exchange(supportText, {
+      action: 'accept', target: [0, 1], shared: 'use_0', drafts: ['なるほど。'], segments: [sharedSupport],
+    });
+    const [candidate] = accepted.saved.sharedConstruals!;
+    assert.equal(candidate.construal, '鳥');
+    assert.deepEqual(candidate.figureIds, sharedFigures);
+    assert.equal(candidate.claimIds.length, 2);
+    const proof = candidate.claimIds.map(id => accepted.input.priorClaims.find(claim => claim.id === id));
+    assert.deepEqual(proof.map(claim => claim?.speaker), ['ai', 'human']);
+    assert.deepEqual(proof.map(claim => claim?.sourceTurn), [2, 3]);
+    assert.equal(proof[1]?.respondsTo, proof[0]?.id);
+    const detailRequest = accepted.requests.find(request => request.questions.shared_construal)!;
+    assert.deepEqual(Object.keys(detailRequest.questions), ['shared_construal']);
+    assert.deepEqual(Object.keys(detailRequest.questions.shared_construal.criteria), ['none', 'use_0']);
+    assert.match(JSON.stringify(accepted.requests[0]), /sharedConstruals/);
+    assert.deepEqual(accepted.saved.decision.target, { kind: 'multiple', figureIds: sharedFigures });
+    assert.deepEqual(accepted.saved.decision.sharedClaimIds, candidate.claimIds);
+    assert.deepEqual(accepted.saved.executed?.sharedClaimIds, candidate.claimIds);
+    assert.deepEqual(accepted.trace.sharedConstruals, accepted.saved.sharedConstruals);
+    assert.equal(accepted.trace.publicSpeech, 'なるほど。');
+    assert.deepEqual(accepted.state.ledger, first.state.ledger);
+    const privateMessage = sharedPrivateMessage(f)?.content ?? '';
+    const prompt = JSON.parse(privateMessage.split('\n')[1]);
+    assert.deepEqual(prompt, { figureIds: sharedFigures, construal: '鳥', openDetails: candidate.openDetails });
+    assert.ok(prompt.openDetails.some((detail: any) => detail.aspect === 'part' && detail.state === 'unconfirmed'));
+
+    const persisted = JSON.parse(JSON.stringify(accepted.state));
+    assert.deepEqual(validateJevPrivateStateV2(persisted, ids, f.intervention, 'two_stage_v3', 'holistic_v5', P5), persisted);
+    assert.ok(validJevSharedConstrualTrace(accepted.trace, ids, P5));
+    assert.equal(validJevSharedConstrualTrace(accepted.trace, ids, V12), false);
+    assert.throws(() => validateJevPrivateStateV2(persisted, ids, f.intervention, 'two_stage_v3', 'holistic_v5', V12), { code: 'invalid_state' });
+    const damaged = structuredClone(persisted);
+    const saved = damaged.judgments.at(-1)!.jevTurn;
+    delete saved.decision.evidence.stages.at(-1).scores.shared_construal.none;
+    assert.throws(() => validateJevPrivateStateV2(damaged, ids, f.intervention, 'two_stage_v3', 'holistic_v5', P5), { code: 'invalid_state' });
+    const forged = structuredClone(accepted.trace);
+    forged.decisions.at(-1)!.sharedClaimIds = [candidate.claimIds[0], '3:absent'];
+    assert.equal(validJevSharedConstrualTrace(forged, ids, P5), false);
+    await f.exchange('続けましょう。', { action: 'accept', target: 0, shared: 'none', drafts: ['わかりました。'] });
+    assert.equal(sharedPrivateMessage(f), undefined);
+  });
+}
+
+test('P5 vetoed defer can complete accept detail; a typed naming request confirms only the selected feature', async () => {
+  const f = fixture('repair-first', { aiPublic: true, holistic: 'holistic_v5', generationRetryVersion: P5 });
+  await f.exchange('どのように見えますか？', sharedReading);
+  const reranked = await f.exchange(supportText, {
+    action: 'defer', target: 0, shared: 'use_0', actionScores: { accept: 0.9 }, drafts: ['なるほど。'], segments: [sharedSupport],
+  });
+  assert.equal(reranked.saved.decision.action, 'defer');
+  assert.equal(reranked.saved.intervention?.detailEvidence?.choices.shared_construal, 'use_0');
+  assert.equal(reranked.saved.executed?.action, 'accept');
+  assert.deepEqual(reranked.saved.executed?.sharedClaimIds, reranked.saved.sharedConstruals![0].claimIds);
+  assert.ok(sharedPrivateMessage(f));
+  const proposal = 'この形を「灯台」と呼ぶのはどうですか？';
+  const confirm = { action: 'confirm', target: 0, shared: 'use_0',
+    segments: [naming(proposal, '灯台', [ids[0]])] } as const;
+  const confirmed = await f.exchange(proposal, {
+    ...confirm, segments: [...confirm.segments], drafts: ['その特徴を確かめてもよいですか？'], draftActs: ['none'],
+  });
+  const request = confirmed.requests.find(request => request.questions.shared_construal)!;
+  assert.deepEqual(Object.keys(request.questions), ['feature', 'shared_construal']);
+  assert.ok(confirmed.saved.namingRequest);
+  assert.match(sharedPrivateMessage(f)?.content ?? '', /選ばれた特徴だけを質問/);
+  assert.deepEqual(confirmed.state.ledger, reranked.state.ledger);
+});
+
+test('v12 keeps the same history on its original two-stage accept and excludes P5 data', async () => {
+  const f = fixture('bypass-enabled', { aiPublic: true, holistic: 'holistic_v5', generationRetryVersion: V12 });
+  await f.exchange('どのように見えますか？', sharedReading);
+  const result = await f.exchange(supportText, {
+    action: 'accept', target: [0, 1], drafts: ['なるほど。'], segments: [sharedSupport],
+  });
+  assert.equal(result.input.p5Enabled, undefined);
+  assert.equal(result.saved.sharedConstruals, undefined);
+  assert.equal(result.trace.sharedConstruals, undefined);
+  assert.deepEqual(result.saved.decision.evidence.stages?.map(stage => stage.stage), ['action', 'target']);
+  assert.equal(sharedPrivateMessage(f), undefined);
+  assert.ok(validJevSharedConstrualTrace(result.trace, ids, V12));
+});
+
+test('P5 restore keeps the recorded version and rejects inconsistent trace copies', async () => {
+  const f = fixture('bypass-enabled', { aiPublic: true, holistic: 'holistic_v5', generationRetryVersion: P5 });
+  const first = await f.exchange('どのように見えますか？', sharedReading);
+  const accepted = await f.exchange(supportText, {
+    action: 'accept', target: [0, 1], shared: 'use_0', drafts: ['なるほど。'], segments: [sharedSupport],
+  });
+  const profile = researchTrialProfileV3({ timeoutMs: null, maxCompletionTokens: 1000 }, {
+    observationMs: 3000, localMs: 3000, decisionMs: 3000, lunaAttemptMs: 3000, generationMs: 3000, trialMs: 20000,
+  }, 'two_stage_v3', 'holistic_v5');
+  const options = {
+    profile, generationRetryVersion: P5,
+    observer: { observeAll() {}, reobserve() {} }, jevDecision: { decide() {} },
+    localGrounding: { classifier: { classify() {} }, aiPublicClaims: true, timeoutMs: 3000 },
+    ledger: new RunBudget({ lunaCalls: 5, lunaPosts: 5, lunaTokens: 1000, jevPosts: 10, jevUsd: 0.05 }),
+  };
+  const context = { referenceMemory: true, strategy: 'bypass-enabled', style: profile.utteranceStyle, legacy: [] };
+  const selected = selectParticipantJev(null, options, context);
+  assert.equal(selected?.generationRetryVersion, P5);
+  assert.equal(selected?.namingRestoreVersion, 'ai_name_acceptances_v1');
+  const oldProfile = researchTrialProfileV3(profile.lunaRequest, profile.timeouts, 'two_stage_v1');
+  assert.throws(() => selectParticipantJev(null, { ...options, profile: oldProfile }, context), { code: 'invalid_options' });
+
+  const traces = settleJevTurnTraces([first.trace, accepted.trace], accepted.state);
+  for (const trace of traces) {
+    // The task recorder projects these dependencies from the graph; this synthetic history has no name claims.
+    assert.ok(trace.aiPublic?.application);
+    Object.assign(trace.aiPublic.application, { nameAcceptances: [] });
+  }
+  const record = {
+    options: { jevResearch: true, profileSha256: researchHash(profile), interventionPolicy: profile.interventionPolicy,
+      questionLayout: 'two_stage_v3', dialoguePolicy: 'holistic_v5', generationRetryVersion: P5, jevNamingRestoreVersion: 'ai_name_acceptances_v1' },
+    queueState: { privateState: accepted.state, events: accepted.events },
+    jevTraces: traces, initialObservation: { memoSha256: researchHash(accepted.state.observationMemo) }, aiPublicSettlement: [], jevLedger: {},
+  };
+  assert.equal(selectParticipantJev(record, { ...options, generationRetryVersion: V12 }, context)?.generationRetryVersion, P5);
+  for (const corrupt of [
+    (saved: typeof record) => { saved.jevTraces.at(-1)!.sharedConstruals![0].construal = '水車'; },
+    (saved: typeof record) => { delete saved.jevTraces.at(-1)!.decisions.at(-1)!.sharedClaimIds; },
+    (saved: typeof record) => { delete saved.queueState.privateState.judgments.at(-1)!.jevTurn.sharedConstruals; },
+  ]) {
+    const damaged = structuredClone(record);
+    corrupt(damaged);
+    assert.throws(() => selectParticipantJev(damaged, options, context), { code: 'invalid_options' });
+  }
+});
+
+test('P5 confirms a feature without publishing a rejected naming adoption', async () => {
+  const f = fixture('bypass-enabled', { aiPublic: true, holistic: 'holistic_v5', generationRetryVersion: P5 });
+  await f.exchange('どのように見えますか？', sharedReading);
+  const before = f.state();
+  const proposal = 'この形を「灯台」と呼ぶのはどうですか？';
+  await assert.rejects(f.exchange(supportText + proposal, {
+    action: 'confirm', target: 0, shared: 'use_0',
+    segments: [sharedSupport, naming(proposal, '灯台', [ids[0]])],
+    draftActs: ['adopt_other', 'adopt_other'], drafts: ['では、名前は灯台で。', 'では、灯台で。'],
+  }), { code: 'unsafe_generation' });
+  assert.equal(f.state(), before);
+  const trace = f.attempt()!;
+  assert.deepEqual(trace.draftActs?.map(act => act.choice), ['adopt_other', 'adopt_other']);
+  assert.ok(trace.generationGuard.violations.includes('draft_act_mismatch'));
+  assert.equal(trace.publicSpeech, null);
+  assert.ok(trace.executed?.sharedClaimIds);
+});
+
+for (const generationRetryVersion of [V12, P5]) {
+  test(generationRetryVersion + ' stops after two orientation violations', async () => {
+    const f = fixture('bypass-enabled', { aiPublic: true, holistic: 'holistic_v5', generationRetryVersion });
+    await assert.rejects(f.exchange('形の特徴を確かめましょう。', {
+      action: 'confirm', target: 0, drafts: ['右側に細い部分がありますか？', '左側に細い部分がありますか？'],
+    }), { code: 'unsafe_generation' });
+    assert.deepEqual(f.attempt()?.generationGuard, { violations: ['orientation_leak'], regenerated: true, fallback: false });
+    assert.equal(f.attempt()?.publicSpeech, null);
+    assert.equal(f.state().judgments.length, 0);
+  });
+}

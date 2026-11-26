@@ -14,6 +14,7 @@ import { createReferenceGraph, applyReferenceUpdate, previewReferenceUpdate, sna
 import { nameBindsFigure } from "../decision/referent-binding.ts";
 import { hasNameProposal, claimsLiveAsOf, reconfirmationPossible, namingTurnKind, namingIntervalEstimates, inheritedTargetClaimIds, agreeCandidateAllowed, inheritsProposalName, turnNameProposals, namingNameKey, targetNamingConflict, publiclyCheckedNamingTarget, usesPublicNamingTarget, type AgreeNameScopeVersion } from "../decision/naming-request.ts";
 import { priorClaimViews, summarizeLocalIssues } from "../local-grounding/derive.ts";
+import { deriveSharedConstrualsFromGraph } from "../local-grounding/shared-construal.ts";
 import { createMemoLocalExtractor, LOCAL_EXTRACTION_INSTRUCTIONS, MEMO_LOCAL_EXTRACTION_INSTRUCTIONS, MEMO_LOCAL_EXTRACTION_INSTRUCTIONS_HOLISTIC } from "../local-grounding/extract.ts";
 import { LOCAL_CLASSIFICATION_INSTRUCTIONS } from "../local-grounding/classify.ts";
 import type { LocalGroundingOptions, LocalOwnImage, LocalOwnAnchor, PublicTurn, LocalClaimView } from "../local-grounding/contract.ts";
@@ -21,14 +22,14 @@ import { AI_BOUND_SOURCE, LABELLED_ANSWER_SOURCE } from "../local-grounding/cont
 import type { ObservationMemo, ObservationObserver, ReobservationResult } from "../observation/contract.ts";
 import { validateObservationMemo, mergeReobservation, observationContextMessages, ObservationError, type ObservationErrorCode,
   OBSERVATION_INITIAL_INSTRUCTIONS, OBSERVATION_TARGETED_INSTRUCTIONS, OBSERVATION_MEMO_VERSION } from "../observation/observe.ts";
-import type { JevAction, JevDecision, JevDecisionClient, JevDecisionInput, JevObservationRequest, RepairHistoryEntry, HumanReferentEstimate, RepairProspectMaterial, AdaptiveRepairTrial, PublicNameCandidate, RepairFact, JevQuestionLayout, DialoguePolicy } from "../decision/contract.ts";
+import type { JevAction, JevDecision, JevDecisionClient, JevDecisionInput, JevObservationRequest, RepairHistoryEntry, HumanReferentEstimate, RepairProspectMaterial, AdaptiveRepairTrial, PublicNameCandidate, RepairFact, JevQuestionLayout, DialoguePolicy, SharedConstrual } from "../decision/contract.ts";
 import { deriveRepairFacts, validateRepairFacts } from "../decision/repair-facts.ts";
 import { validateJevDecision, validateHumanReferentEstimate, validateRepairProspectEstimate, validateRepairProspectMaterial, unknownRepairProspect, JevDecisionError, JEV_DECISION_INPUT_LIMITS, JEV_DECISION_REJECTION_CODES,
   projectDecisionFailureEvidence, checkDecisionFailureEvidence, v3AlwaysOffered, TWO_STAGE_V2_CANDIDATE_SETS, candidateSetLabel, V3_TARGET_LABEL_SET, participantJevTargetOffered, retainedParticipantJevMenuValid } from "../decision/jev-decision.ts";
 import type { JevDecisionFailureEvidence } from "../decision/jev-decision.ts";
 import { prepareLocalGroundingTurn, validateLocalGroundingOptions, findLocalPublicationViolations } from "./local-grounding-turn.ts";
 import type { LocalGroundingResearchRecord, LocalGroundingTrace } from "./local-grounding-turn.ts";
-import { findNamingActHints, hasOrientationWords, draftViolationCodes, deriveGenerationOutcome, orientationSafeFallback, rewriteReasons, isGenerationV5, isGenerationV6, isGenerationV7, isGenerationV8, isGenerationV9, isGenerationV10, isGenerationV11, isGenerationV12, v11RecentHumanTexts, hasVersionedViewpoint, defaultGenerationRetryVersion, validGenerationRetryVersion, validAgreeNameScope, allowsOrientationFallback } from "./generation-guard.ts";
+import { findNamingActHints, hasOrientationWords, draftViolationCodes, deriveGenerationOutcome, orientationSafeFallback, rewriteReasons, isGenerationV5, isGenerationV6, isGenerationV7, isGenerationV8, isGenerationV9, isGenerationV10, isGenerationV11, isGenerationV12, isGenerationV13, v11RecentHumanTexts, hasVersionedViewpoint, defaultGenerationRetryVersion, validGenerationRetryVersion, validAgreeNameScope, allowsOrientationFallback } from "./generation-guard.ts";
 import { createMemoAiExtractor, MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS, AiPublicError, aiHash, emptyAiEvidence } from "../local-grounding/extract-ai.ts";
 import { createJevAiFunctionClassifier, createJevAiSupportChecker, AI_FUNCTION_INSTRUCTIONS, AI_SUPPORT_INSTRUCTIONS,
   AI_RESPONSE_SUPPORT_INSTRUCTIONS, AI_FUNCTION_CRITERIA, AI_SUPPORT_CHOICES, AI_ACT_DESCRIPTIONS } from "../local-grounding/jev-ai-public.ts";
@@ -55,6 +56,8 @@ const ACCEPT_FEATURE_REPLY_V5 = "acceptで相手が図形の有無や特定の�
 const CONFIRM_NAMING_REQUEST_V5 = "判断で選ばれた対象について、その特徴だけを確かめてください。相手が出した呼び名を採用・再提案しないでください。その案に触れる場合は、相手の提案だと分かる引用に留めてください。";
 const NAMING_CONFLICT_V5 = "選ばれた図形にはすでに合意済みの名前（agreedName）があり、今回の相手の案（proposedNames）とは異なります。選ばれた行動で対象を確かめる際は、相手が同じ図形と別の図形のどちらについて話しているかを確かめてください。この案を採用して合意済みの名前を変更しないでください。明示的な改名は、判断が選んだrepairの範囲で扱います。";
 const FEATURE_VIEWPOINT_V5 = "以下のdiscriminatingFeatureにある上下左右・横長などの向きの語は、自分側の画面での見え方です。公開発話では、回転しても変わらない形や部分同士のつながりに言い換えてください。向きが区別に必要なら、その語と同じ節で「こちらの画面では」などと自分側の見え方だと明示し、相手には形の対応を尋ねてください。";
+const SHARED_CONSTRUAL_INSTRUCTIONS = "次の見立ては大まかな共同参照の目印に使えます。候補の範囲を保ち、未確認・保留の細部が一致した、図形を一つに同定した、名称に合意したとは言わないでください。内部のIDや項目名を公開発話に含めないでください。";
+const SHARED_CONSTRUAL_CONFIRM_INSTRUCTIONS = "次の共有の見立てを目印にしながら、選ばれた特徴だけを質問してください。未確認・保留の細部が一致した、図形を一つに同定した、名称に合意したとは言わないでください。内部のIDや項目名を公開発話に含めないでください。";
 const isVetoed = (intervention: unknown) => typeof intervention === "object" && intervention !== null && (intervention as { reasonCode?: unknown }).reasonCode === "vetoed_bypass_action";
 // jev_generation_retry_v6: the strategy refused the Jev move and the chosen act is another one; the public turn must not say the conversation moves on.
 const VETOED_MOVE_V6 = "選ばれた行動は、話題や図形を次へ移すことではありません。相手が次へ進むことを提案していても応じず、次へ進むと述べずに、選ばれた対象や特徴の確認を、このactionの範囲で行ってください。";
@@ -133,6 +136,7 @@ export type JevTurnTrace = {
   repairProspect?: RepairProspectMaterial;
   repairGate?: RepairGate;
   repairFacts?: RepairFact[];
+  sharedConstruals?: SharedConstrual[];
   decisions: JevDecision[];
   intervention: "none_pending_researcher_decision" | InterventionTrace | null;
   schemaVersion?: "jev_turn_trace_v2"; executed?: ExecutedDecision | null;
@@ -162,7 +166,7 @@ export type JevTurnTrace = {
 };
 type CommittedAct = {
   turnIndex: number; lastEventId: string | null; status: "committed"; judgment: Judgment;
-  generationGuard: Guard; jevTurn: { attemptNumber: number; decision: JevDecision; executed?:ExecutedDecision; intervention?:InterventionTrace; humanReferent?: JevHumanReferentTrace; repairProspect?: RepairProspectMaterial; repairGate?: RepairGate; draftActs?: DraftActRecord[]; namingRequest?: true; namingReconfirm?: true; agreeNames?: PublicNameCandidate[]; repairFacts?: RepairFact[] };
+  generationGuard: Guard; jevTurn: { attemptNumber: number; decision: JevDecision; executed?:ExecutedDecision; intervention?:InterventionTrace; humanReferent?: JevHumanReferentTrace; repairProspect?: RepairProspectMaterial; repairGate?: RepairGate; draftActs?: DraftActRecord[]; namingRequest?: true; namingReconfirm?: true; agreeNames?: PublicNameCandidate[]; repairFacts?: RepairFact[]; sharedConstruals?: SharedConstrual[] };
   localGrounding: LocalGroundingTrace;
   aiPublic?: { aiSeq: number; textSha256: string };
 };
@@ -455,9 +459,77 @@ function checkedIntervention(x:unknown):InterventionConfig {
  try{stateJson(x);const c=x as InterventionConfig;if(!stateSame(c,interventionForStrategy(c.policy==='bypass_acceptance_v1:accept'?'bypass-enabled':c.policy==='bypass_acceptance_v1:veto'?'repair-first':null)))throw Error();return structuredClone(c);}
  catch{throw new JevTurnError('invalid_intervention');}
 }
-function executionProjection(d:JevDecision):ExecutedDecision {return{action:d.action as ExecutedDecision['action'],target:structuredClone(d.target),name:d.name,feature:d.feature,observe:null,...(Object.hasOwn(d,'detailFigureIds')?{detailFigureIds:structuredClone(d.detailFigureIds!)}:{})};}
+function executionProjection(d:JevDecision):ExecutedDecision {return{action:d.action as ExecutedDecision['action'],target:structuredClone(d.target),name:d.name,feature:d.feature,observe:null,...(Object.hasOwn(d,'detailFigureIds')?{detailFigureIds:structuredClone(d.detailFigureIds!)}:{}),...(d.sharedClaimIds?{sharedClaimIds:[...d.sharedClaimIds]}:{})};}
+function persistedSharedConstruals(value: unknown, slots: readonly string[], p5Enabled: boolean): SharedConstrual[] {
+  if (!p5Enabled || !Array.isArray(value) || !value.length) throw Error();
+  const ref = (id: unknown) => typeof id === "string" && id.trim().length > 0 && id.length <= 128;
+  const ids = new Set<string>();
+  for (const candidate of value) {
+    if (!stateExact(candidate, ["id", "claimIds", "figureIds", "construal", "openDetails"]) || !ref(candidate.id) || ids.has(candidate.id) ||
+        !Array.isArray(candidate.claimIds) || candidate.claimIds.length < 2 || !candidate.claimIds.every(ref) ||
+        new Set(candidate.claimIds).size !== candidate.claimIds.length || candidate.id !== "sc:" + candidate.claimIds[0] ||
+        !Array.isArray(candidate.figureIds) || !candidate.figureIds.length ||
+        !stateSame(candidate.figureIds, slots.filter(id => candidate.figureIds.includes(id))) ||
+        candidate.claimIds.length > candidate.figureIds.length + 1 ||
+        typeof candidate.construal !== "string" || !candidate.construal.trim() || candidate.construal.length > 160 ||
+        !Array.isArray(candidate.openDetails)) throw Error();
+    for (const detail of candidate.openDetails) {
+      if (!stateExact(detail, ["issueId", "aspect", "proposition", "state"]) || !ref(detail.issueId) ||
+          !["referent", "part", "contour", "orientation", "position"].includes(detail.aspect) ||
+          !["unconfirmed", "deferred", "contested", "denied"].includes(detail.state) ||
+          typeof detail.proposition !== "string" || detail.proposition.length > 160) throw Error();
+    }
+    ids.add(candidate.id);
+  }
+  return value;
+}
+const hasSharedChoice = (evidence: any) => Object.hasOwn(evidence?.choices ?? {}, "shared_construal") ||
+  Object.hasOwn(evidence?.scores ?? {}, "shared_construal");
+function persistedSharedChoice(decision: Pick<JevDecision, "action" | "target" | "sharedClaimIds">,
+  detail: any, candidates: readonly SharedConstrual[], namingRequest: boolean, native: boolean): boolean {
+  const offered = candidates.length && (decision.action === "accept" || decision.action === "confirm" && namingRequest)
+    ? candidates.filter(candidate => targets(decision).every(id => candidate.figureIds.includes(id))) : [];
+  const chosen = Object.hasOwn(decision, "sharedClaimIds");
+  if (!native || !offered.length) {
+    if (hasSharedChoice(detail) || chosen && !offered.some(candidate => stateSame(decision.sharedClaimIds, candidate.claimIds))) throw Error();
+    return false;
+  }
+  // The stage is required even for 'none'. Archived judgments may outlive
+  // their graph claims, but the stage must match the recorded menu exactly.
+  const labels = offered.map((_, i) => "use_" + i);
+  const questions = decision.action === "accept" ? ["shared_construal"] : ["feature", "shared_construal"];
+  const choice = detail?.choices?.shared_construal;
+  const candidate = offered[labels.indexOf(choice)];
+  if (!stateExact(detail?.choices, questions) || !stateExact(detail?.scores, questions) ||
+      !stateExact(detail.scores.shared_construal, ["none", ...labels]) ||
+      !(choice === "none" ? !chosen : candidate && stateSame(decision.sharedClaimIds, candidate.claimIds))) throw Error();
+  return true;
+}
+
+/** Check P5 data on all saved attempts, including attempts without a committed judgment. */
+export function validJevSharedConstrualTrace(trace: JevTurnTrace, slots: readonly string[], generation?: GenerationRetryVersion): boolean {
+  try {
+    const candidates = Object.hasOwn(trace, "sharedConstruals")
+      ? persistedSharedConstruals(trace.sharedConstruals, slots, isGenerationV13(generation)) : [];
+    const namingRequest = trace.namingRequest === true;
+    const intervention = typeof trace.intervention === "object" ? trace.intervention : null;
+    for (const decision of trace.decisions) {
+      const stages = decision.evidence.stages ?? [];
+      if (hasSharedChoice(decision.evidence) || stages.some(stage => stage.stage !== "detail" && hasSharedChoice(stage))) return false;
+      persistedSharedChoice(decision, stages.at(-1), candidates, namingRequest, decision.decisionKind === "jev_local_test");
+    }
+    if (intervention?.alternative) {
+      persistedSharedChoice(intervention.alternative, intervention.detailEvidence, candidates, namingRequest, true);
+    } else if (hasSharedChoice(intervention?.detailEvidence)) return false;
+    if ([trace.executed, intervention?.original].some(execution => execution && Object.hasOwn(execution, "sharedClaimIds") &&
+        !candidates.some(candidate => stateSame(candidate.claimIds, execution.sharedClaimIds) &&
+          targets(execution).every(id => candidate.figureIds.includes(id)) &&
+          (execution.action === "accept" || execution.action === "confirm" && namingRequest)))) return false;
+    return (candidates.length === 0 || isGenerationV13(trace.generationRetryVersion));
+  } catch { return false; }
+}
 function persistedExecution(x:any,slots:readonly string[]):void {
- if(!stateExact(x,['action','target','name','feature','observe',...(Object.hasOwn(x??{},'detailFigureIds')?['detailFigureIds']:[])])||!JEV_ACTIONS.includes(x.action)||x.action==='request_observation'||x.observe!==null||
+ if(!stateExact(x,['action','target','name','feature','observe',...(Object.hasOwn(x??{},'detailFigureIds')?['detailFigureIds']:[]),...(Object.hasOwn(x??{},'sharedClaimIds')?['sharedClaimIds']:[])])||!JEV_ACTIONS.includes(x.action)||x.action==='request_observation'||x.observe!==null||
   ![x.name,x.feature].every(v=>v===null||typeof v==='string'&&v.trim().length>0&&v.length<=400))throw Error();
  const t=x.target;let selected:string[]=[];
  if(t?.kind==='none'){if(!stateExact(t,['kind']))throw Error();}
@@ -484,7 +556,7 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
  checkedIntervention(intervention);
  if(questionLayout!=='two_stage_v1'&&questionLayout!=='two_stage_v2'&&questionLayout!=='two_stage_v3')throw new JevTurnError('invalid_state');
  try{
-  stateJson(value);const s=value as any;validateOwnLedger(Object.fromEntries(ownSlots.map(k=>[k,{status:'unassigned',name:null}])));
+  stateJson(value);const s=value as any;const p5Enabled=questionLayout==='two_stage_v3'&&policy==='holistic_v5'&&isGenerationV13(generation);validateOwnLedger(Object.fromEntries(ownSlots.map(k=>[k,{status:'unassigned',name:null}])));
   const hasAgreeNameScope=Object.hasOwn(s??{},'agreeNameScopeVersion');
   if(!stateExact(s,['schemaVersion','interventionPolicy','ledger','graph','judgments','observationMemo','repairHistory',...(Object.hasOwn(s??{},'aiPublic')?['aiPublic']:[]),...(hasAgreeNameScope?['agreeNameScopeVersion']:[])])||s.schemaVersion!=='jev_private_state_v2'||!stateSame(s.interventionPolicy,{version:'bypass_acceptance_v1',tableSha256:BYPASS_ACCEPTANCE_V1_TABLE_SHA256}))throw Error();
   if(!validAgreeNameScope(s.agreeNameScopeVersion,generation)||hasAgreeNameScope&&
@@ -502,7 +574,7 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
   const seen=new Set<string>();
   for(const j of s.judgments){
    if(!stateExact(j,['turnIndex','lastEventId','status','judgment','generationGuard','jevTurn','localGrounding',...(Object.hasOwn(j,'aiPublic')?['aiPublic']:[])])||j.status!=='committed'||!Number.isSafeInteger(j.turnIndex)||j.turnIndex<1||!(j.lastEventId===null||typeof j.lastEventId==='string'&&j.lastEventId.length<=160))throw Error();
-   const z=j.jevTurn;if(!stateExact(z,['attemptNumber','decision','executed','intervention',...(Object.hasOwn(z??{},'humanReferent')?['humanReferent']:[]),...(Object.hasOwn(z??{},'repairProspect')?['repairProspect']:[]),...(Object.hasOwn(z??{},'repairGate')?['repairGate']:[]),...(Object.hasOwn(z??{},'draftActs')?['draftActs']:[]),...(Object.hasOwn(z??{},'namingRequest')?['namingRequest']:[]),...(Object.hasOwn(z??{},'namingReconfirm')?['namingReconfirm']:[]),...(Object.hasOwn(z??{},'agreeNames')?['agreeNames']:[]),...(Object.hasOwn(z??{},'repairFacts')?['repairFacts']:[])])||!Number.isSafeInteger(z.attemptNumber)||z.attemptNumber<1)throw Error();
+   const z=j.jevTurn;if(!stateExact(z,['attemptNumber','decision','executed','intervention',...(Object.hasOwn(z??{},'humanReferent')?['humanReferent']:[]),...(Object.hasOwn(z??{},'repairProspect')?['repairProspect']:[]),...(Object.hasOwn(z??{},'repairGate')?['repairGate']:[]),...(Object.hasOwn(z??{},'draftActs')?['draftActs']:[]),...(Object.hasOwn(z??{},'namingRequest')?['namingRequest']:[]),...(Object.hasOwn(z??{},'namingReconfirm')?['namingReconfirm']:[]),...(Object.hasOwn(z??{},'agreeNames')?['agreeNames']:[]),...(Object.hasOwn(z??{},'repairFacts')?['repairFacts']:[]),...(Object.hasOwn(z??{},'sharedConstruals')?['sharedConstruals']:[])])||!Number.isSafeInteger(z.attemptNumber)||z.attemptNumber<1)throw Error();
    // The saved turn names its own condition: accept may be missing from its scores and ranking only for a typed naming request (holistic_v3), and only on v3.
    // The marker was derived when the turn was decided, from the claims live then. Here it is checked against the same view of the graph as of that turn (a later withdrawal,
    // rename or pruning cannot change it), and only as far as the graph still holds the turn's proposals: a proposal the graph pruned can no longer be recomputed from the
@@ -527,11 +599,14 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
    if(Object.hasOwn(z,'repairProspect'))validateRepairProspectMaterial(z.repairProspect,Object.hasOwn(z,'repairGate')?inferenceHistory(s.repairHistory,z.repairGate):s.repairHistory,j.turnIndex);
    if(Object.hasOwn(z,'repairFacts'))validateRepairFacts(z.repairFacts,Object.hasOwn(z,'repairGate')?inferenceHistory(s.repairHistory,z.repairGate):s.repairHistory,j.turnIndex);
    const key=JSON.stringify([j.turnIndex,j.lastEventId,z.attemptNumber]);if(seen.has(key))throw Error();seen.add(key);
-   const d=z.decision;if(!stateExact(d,['action','target','name','feature','observe','evidence','decisionKind','calibrated',...(Object.hasOwn(d??{},'detailFigureIds')?['detailFigureIds']:[])])||!['mock','jev_local_test'].includes(d.decisionKind)||d.calibrated!==false)throw Error();
+   const candidates=Object.hasOwn(z,'sharedConstruals')?persistedSharedConstruals(z.sharedConstruals,ownSlots,p5Enabled):[];
+   const d=z.decision;if(!stateExact(d,['action','target','name','feature','observe','evidence','decisionKind','calibrated',...(Object.hasOwn(d??{},'detailFigureIds')?['detailFigureIds']:[]),...(Object.hasOwn(d??{},'sharedClaimIds')?['sharedClaimIds']:[])])||!['mock','jev_local_test'].includes(d.decisionKind)||d.calibrated!==false)throw Error();
    persistedEvidence(d.evidence);
+   if(hasSharedChoice(d.evidence)||d.evidence.stages?.some((stage:any)=>stage.stage!=='detail'&&hasSharedChoice(stage)))throw Error();
+   const sharedDetail=persistedSharedChoice(d,d.evidence.stages?.at(-1),candidates,isRequest,d.decisionKind==='jev_local_test');
    if(d.decisionKind==='jev_local_test'){
     // two_stage_v2 keeps a candidate-set stage between action_target and detail for every multiple target.
-    const detail=['propose_name','agree','confirm','repair'].includes(d.action),setStage=questionLayout==='two_stage_v2'&&d.target?.kind==='multiple';
+    const detail=sharedDetail||['propose_name','agree','confirm','repair'].includes(d.action),setStage=questionLayout==='two_stage_v2'&&d.target?.kind==='multiple';
     // two_stage_v3 keeps exactly action, target, [detail]; a target label must decode to the saved decision's own target.
     const v3=questionLayout==='two_stage_v3';
     const participantMenu=d.evidence.decisionMenuVersion===PARTICIPANT_TARGET_MENU_VERSION;
@@ -582,7 +657,8 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
     if(!veto||m?.status!=='ok'||m.issue.choice!=='issue'||m.issue.turn!==src?.issueTurn||m.issue.issueId!==src?.issueId||
        !s.repairHistory.some((r:RepairHistoryEntry)=>r.turn===src.issueTurn&&r.issueId===src.issueId&&r.turn<j.turnIndex)||
        !isOpenIssueRerankRecord(t,d,z.executed,ownSlots,p&&{action:p.action,target:p.target},hasAgreeNames?z.agreeNames:undefined,questionLayout,m,acceptOptional))throw Error();
-    if(['confirm','repair'].includes(z.executed.action))persistedEvidence(t.detailEvidence,'detail',usagePolicy);else if(t.detailEvidence!==null)throw Error();
+    const sharedAlternative=persistedSharedChoice(z.executed,t.detailEvidence,candidates,isRequest,true);
+    if(sharedAlternative||['confirm','repair'].includes(z.executed.action))persistedEvidence(t.detailEvidence,'detail',usagePolicy);else if(t.detailEvidence!==null)throw Error();
    }
    else if(t.disposition==='rejected'){
     if(!veto||!['defer','move_on'].includes(d.action)||t.reasonCode!=='vetoed_bypass_action'||!stateSame(t.alternative,z.executed)||!stateSame(z.executed.target,original.target)||['defer','move_on'].includes(z.executed.action))throw Error();
@@ -600,7 +676,8 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
         actions.has('revisit')===(original.target.kind!=='none')&&
         !(original.target.kind!=='single'&&(actions.has('agree')||actions.has('propose_name')));
     if(!(acceptOptional||actions.has('accept'))||!actions.has('close')||r.ranking[0].action!==z.executed.action||!validRanking)throw Error();
-    const detail=['propose_name','agree','confirm','repair'].includes(z.executed.action);if(detail){persistedEvidence(t.detailEvidence,'detail',usagePolicy);}else if(t.detailEvidence!==null)throw Error();
+    const sharedAlternative=persistedSharedChoice(z.executed,t.detailEvidence,candidates,isRequest,true);
+    const detail=sharedAlternative||['propose_name','agree','confirm','repair'].includes(z.executed.action);if(detail){persistedEvidence(t.detailEvidence,'detail',usagePolicy);}else if(t.detailEvidence!==null)throw Error();
    }else throw Error();
    if(questionLayout==='two_stage_v3'&&['repair','confirm','revisit'].includes(j.judgment?.action)){
     // The repair-history entry created for this judgment keeps the executed candidate set; only a later human reply may update it (progress leaves unknown).
@@ -700,6 +777,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   if (!validGenerationRetryVersion(generationRetryVersion, questionLayout, options.dialoguePolicy)) {
     throw new Error("Invalid Jev generation retry version");
   }
+  const p5Enabled = isGenerationV13(generationRetryVersion);
   const restateJudgment = generationRetryVersion !== "jev_generation_retry_v1";
   // The judgment side of holistic_v5 (whole-history material, ledger, rotation premise, chained agree sources) is versioned with the generation side: a v5 record saved before
   // jev_generation_retry_v4 keeps the judgment requests it was recorded with.
@@ -729,7 +807,8 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   let initialMemo: Promise<ObservationMemo> | null = null, initialRecorded = false;
   const privateInstructions = [generation.task, generation.instructions, generation.concise ?? "", ACT_INSTRUCTIONS, DETAIL_INSTRUCTIONS, REVISIT_MULTIPLE_INSTRUCTIONS, LOCAL_EXTRACTION_INSTRUCTIONS,
     MEMO_LOCAL_EXTRACTION_INSTRUCTIONS, ...(holisticV2 ? [MEMO_LOCAL_EXTRACTION_INSTRUCTIONS_HOLISTIC] : []), LOCAL_CLASSIFICATION_INSTRUCTIONS, OBSERVATION_INITIAL_INSTRUCTIONS,
-    OBSERVATION_TARGETED_INSTRUCTIONS, ...(aiEnabled ? aiPromptBodies : [])].map(content => ({ role: "system", content }));
+    OBSERVATION_TARGETED_INSTRUCTIONS, ...(aiEnabled ? aiPromptBodies : []),
+    ...(p5Enabled ? [SHARED_CONSTRUAL_INSTRUCTIONS, SHARED_CONSTRUAL_CONFIRM_INSTRUCTIONS] : [])].map(content => ({ role: "system", content }));
   function project<T>(value: T): T {
     let redacted = false;
     const safe = (item: unknown): unknown => {
@@ -776,6 +855,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
     const record: JevTurnTrace = { turnIndex: latest.seq, lastEventId, attemptNumber, status: "error", initialObservation: null,
       reobservations: [], local: null, humanReferent: null, decisions: [], intervention: integrated?null:"none_pending_researcher_decision", ...(integrated?{schemaVersion:"jev_turn_trace_v2" as const,executed:null}:{}), finalAction: null,
       publicSpeech: null, observationMemo: null, repairHistory: [], ...(factored ? { repairFacts: [] } : {}), generationGuard: { violations: [], regenerated: false, fallback: false } };
+    if (p5Enabled) record.generationRetryVersion = generationRetryVersion;
     let errorCode: JevTurnErrorCode = "invalid_state";
     const decideFailure: { failed: boolean; evidence?: unknown } = { failed: false };
     let localRule: "action_target_not_allowed" | null = null;
@@ -881,6 +961,16 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       if (factored) {
         baseInput.repairFacts = deriveRepairFacts(repairHistory, state.judgments, baseInput.repairHistory);
         record.repairFacts = structuredClone(baseInput.repairFacts);
+      }
+      if (p5Enabled) {
+        baseInput.p5Enabled = true;
+        const { sharedConstruals, proofClaims } = deriveSharedConstrualsFromGraph(graph, slots);
+        if (sharedConstruals.length) {
+          const wireClaims = new Map([...claims, ...proofClaims].map(claim => [claim.id, claim]));
+          baseInput.priorClaims = [...wireClaims.values()].sort((a, b) => a.sourceTurn - b.sourceTurn || a.turn - b.turn);
+          baseInput.sharedConstruals = sharedConstruals;
+          record.sharedConstruals = structuredClone(sharedConstruals);
+        }
       }
       // Estimate the HUMAN utterance's referent once, before any action choice.
       // It is private evidence, never a target selection or a graph operation.
@@ -1059,9 +1149,13 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
           featureViewpoint +
           JSON.stringify({ ...judgment, target: execution.target,
           ...(execution.detailFigureIds ? { detailFigureIds: execution.detailFigureIds } : {}) }) };
+      const shared = execution.sharedClaimIds && baseInput.sharedConstruals?.find(candidate => stateSame(candidate.claimIds, execution.sharedClaimIds));
       const messages: Message[] = [{ role: "system", content: generation.task }, { role: "system", content: generation.instructions },
         ...(generation.concise ? [{ role: "system" as const, content: generation.concise }] : []),
         actionMessage,
+        ...(shared ? [{ role: "system" as const, content: (execution.action === "confirm"
+          ? SHARED_CONSTRUAL_CONFIRM_INSTRUCTIONS : SHARED_CONSTRUAL_INSTRUCTIONS) + "\n" +
+          JSON.stringify({ figureIds: shared.figureIds, construal: shared.construal, openDetails: shared.openDetails }) }] : []),
         ...(multipleFeature ? [{ role: "system" as const, content: DETAIL_INSTRUCTIONS }] : []),
         ...(ambiguousRevisit ? [{ role: "system" as const, content: REVISIT_MULTIPLE_INSTRUCTIONS }] : []),
         ...(namingState ? [{ role: "system" as const, content: PRIVATE_NAMING_STATE_V5 + "\n" + JSON.stringify(namingState) }] : []),
@@ -1160,6 +1254,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         observationMemo: memo, repairHistory, judgments: [...state.judgments, { turnIndex: latest.seq, lastEventId, status: "committed", judgment,
           generationGuard: structuredClone(record.generationGuard), jevTurn: { attemptNumber, decision, ...(integrated?{executed:execution,intervention:record.intervention as InterventionTrace}:{}), humanReferent: structuredClone(record.humanReferent), ...(record.repairProspect === undefined ? {} : { repairProspect: structuredClone(record.repairProspect) }),
             ...(adaptive || participantMenu || questionLayout === "two_stage_v3" ? { agreeNames: structuredClone(baseInput.agreeNames!) } : {}),
+            ...(record.sharedConstruals ? { sharedConstruals: structuredClone(record.sharedConstruals) } : {}),
             ...(factored ? { repairFacts: structuredClone(baseInput.repairFacts!) } : {}),
             ...(gate ? { repairGate: structuredClone(gate) } : {}),
             ...(record.draftActs?.length ? { draftActs: structuredClone(record.draftActs) } : {}),
@@ -1193,11 +1288,11 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         catch { code = errorCode; }
       }
       record.status = code === "aborted" ? "aborted" : "error"; record.errorCode = code;
-      if (decideFailure.failed && record.status === "error") record.decisionFailure = { evidence: projectDecisionFailureEvidence(decideFailure.evidence, questionLayout, { acceptOptional: record.namingRequest === true, usagePolicy, decisionMenuVersion: record.decisionMenuVersion }) };
+      if (decideFailure.failed && record.status === "error") record.decisionFailure = { evidence: projectDecisionFailureEvidence(decideFailure.evidence, questionLayout, { acceptOptional: record.namingRequest === true, usagePolicy, decisionMenuVersion: record.decisionMenuVersion, p5Enabled }) };
       else if (localRule !== null && record.status === "error") {
         record.decisionRejectionCode = localRule;
         record.decisionFailure = { evidence: checkDecisionFailureEvidence({ schemaVersion: "jev_decision_failure_v1", questionLayout, callIndex: attemptNumber, error: "invalid_decision",
-          rejectionCode: localRule, model: null, responseId: null, costUsd: null, latencyMs: 0, inputBudget: null, stages: [] }, { acceptOptional: record.namingRequest === true, usagePolicy }) };
+          rejectionCode: localRule, model: null, responseId: null, costUsd: null, latencyMs: 0, inputBudget: null, stages: [] }, { acceptOptional: record.namingRequest === true, usagePolicy, p5Enabled }) };
       }
       if (code === "generation_failed") record.generationErrorCode = normalizeGenerationErrorCode(error);
       const observation = observationPhase ? observationFailure(error, observationPhase, signal?.aborted) : undefined;
