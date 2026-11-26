@@ -235,6 +235,7 @@ export class TangramSession extends DurableObject<Env> {
             !plan.participantModelPin) throw new ReceptionError('reception_unavailable');
         const journal = await tx.get(participantUsageKey(assignmentId));
         failedStarts.push({ assignmentId, trialIndex: source.trialIndex, errorCode: entry.errorCode,
+          ...(entry.failureCause ? { failureCause: entry.failureCause } : {}),
           usage: journal === undefined ? null : ParticipantUsageLedger.readSnapshot(journal, assignmentId, plan.participantModelPin) });
       }
       return { receptionId, failedStarts };

@@ -301,13 +301,51 @@ for (const selected of [protocol, figureBankProtocol]) test(
   assert.equal(snapshot.receptionId, receptionId);
   const [failed] = snapshot.failedStarts;
   assert.deepEqual(snapshot.failedStarts.map(({ usage: _usage, ...value }: any) => value),
-    [{ assignmentId, trialIndex: 0, errorCode: 'initialization_failed' }]);
+    [{ assignmentId, trialIndex: 0, errorCode: 'initialization_failed', failureCause: 'observation_invalid' }]);
+  assert.equal(entry.failureCause, 'observation_invalid');
   assert.deepEqual(failed.usage, await h.storage.get('participant-usage:' + assignmentId));
   const meter = failed.usage.phases.terra.initial_observation;
   assert.deepEqual([meter.posts, meter.knownUsd, meter.inputTokens, meter.outputTokens, meter.missingCostPosts], [1, 0.021, 17, 6, 0]);
   assert.equal((await h.request('state')).status, 409);
   assert.equal((await h.start()).status, 409);
   assert.equal(h.calls.length, 1);
+});
+
+// Production runs per_trial: the second condition has its own stimulus, so it calls Terra again instead of reusing the first memo (a shared seed never exercises this).
+test('per_trial: a second condition whose Terra memo is invalid fails as initialization_failed with a closed cause, and the first condition stays intact', async () => {
+  const h = harness(true, { ...protocol, seedPolicy: 'per_trial' } as typeof protocol);
+  await h.receive();
+  const { receptionId } = await h.approve();
+  const first = await jsonOk(await h.start());
+  const firstId = first.trial.sessionId;
+  await h.complete(firstId, (await jsonOk(await h.request('state'))).trial);
+  const firstRecord = await h.storage.get('record:' + firstId);
+  assert.equal(h.calls.filter(call => call.kind === 'visual_observation').length, 1);
+
+  const before = h.calls.length;
+  h.controlled.invalidTerra = true;
+  const second = await h.start(firstId);
+  assert.equal(second.status, 409);
+  assert.deepEqual(await second.json(), { error: 'trial_unavailable' });
+  const owner = await h.storage.get('base:owner:v1');
+  const failedKey = Object.keys(owner.admissions).find(key => owner.admissions[key].status === 'failed');
+  assert.ok(failedKey, 'the second condition is a failed admission');
+  const entry = owner.admissions[failedKey];
+  assert.equal(entry.assignment.source.trialIndex, 1);
+  assert.equal(entry.errorCode, 'initialization_failed');
+  assert.equal(entry.failureCause, 'observation_invalid');
+  assert.equal(entry.record, null);
+  assert.deepEqual(h.calls.slice(before).map(call => call.kind), ['visual_observation'], 'a new stimulus asks Terra again (per_trial), once, and nothing else is called');
+
+  const exported = await jsonOk(await h.admin('/admin/reception/' + receptionId + '/usage.json'));
+  const [failed] = exported.failedStarts;
+  assert.deepEqual(exported.failedStarts.map(({ usage: _usage, ...value }: any) => value),
+    [{ assignmentId: entry.assignment.assignmentId, trialIndex: 1, errorCode: 'initialization_failed', failureCause: 'observation_invalid' }]);
+  const meter = failed.usage.phases.terra.initial_observation;
+  assert.deepEqual([meter.posts, meter.missingCostPosts], [1, 0], 'the Terra call is metered as received (ok at HTTP level)');
+  assert.equal(failed.usage.phases.jev.action_target.posts + failed.usage.phases.luna.generation.posts, 0);
+  assert.deepEqual(await h.storage.get('record:' + firstId), firstRecord, 'the finished first condition is unchanged');
+  assert.equal(JSON.stringify(exported).includes('gen-'), false);
 });
 
 test('a reserved initial observation can settle after its assignment is marked interrupted', async () => {

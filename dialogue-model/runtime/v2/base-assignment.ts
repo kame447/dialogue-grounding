@@ -26,8 +26,12 @@ export type RawBaseRecord = { recordId: string; version: 2; seed: number; strate
   queueState: { pendingHumanEventIds: string[]; errorCode: string | null; [key: string]: unknown }; [key: string]: unknown };
 export type BaseRecord = RawBaseRecord & { assignment: BaseAssignment };
 export type FailureCode = 'start_interrupted' | 'initialization_failed' | 'record_write_failed' | 'assignment_record_invalid' | 'record_deleted';
+/** Closed diagnostic cause of an initialization_failed start. Never carries a message, response body, key or prompt. */
+export type FailureCause = typeof import('./base-assignment-data.ts').FAILURE_CAUSES[number];
 export type BaseAssignedEnvelope = { schemaVersion: 'base_assigned_session_v1'; assignment: BaseAssignment;
-  status: 'preparing' | 'active' | 'failed'; record: BaseRecord | null; errorCode: FailureCode | null };
+  status: 'preparing' | 'active' | 'failed'; record: BaseRecord | null; errorCode: FailureCode | null;
+  /** Only on a failed start with errorCode initialization_failed; absent on every other entry and on older records. */
+  failureCause?: FailureCause };
 export type AdmissionKey = 'initial' | `after:${string}`;
 export type BaseOwnerState = { schemaVersion: 'base_owner_v1'; ownerId: string; revision: number;
   activeKey: AdmissionKey | null; admissions: Partial<Record<AdmissionKey, BaseAssignedEnvelope>> };
