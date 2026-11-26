@@ -978,7 +978,10 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
           const wireClaims = new Map([...claims, ...proofClaims].map(claim => [claim.id, claim]));
           baseInput.priorClaims = [...wireClaims.values()].sort((a, b) => a.sourceTurn - b.sourceTurn || a.turn - b.turn);
           baseInput.sharedConstruals = sharedConstruals;
-          record.sharedConstruals = structuredClone(sharedConstruals);
+          // The committed judgment and research trace share this protected copy.
+          const stored = project({ sharedConstruals });
+          record.sharedConstruals = stored.sharedConstruals;
+          if (Object.hasOwn(stored, "redacted")) record.redacted = true;
         }
       }
       // Estimate the HUMAN utterance's referent once, before any action choice.

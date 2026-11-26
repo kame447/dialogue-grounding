@@ -1771,6 +1771,18 @@ const PR213_P5_U1_SOURCES = { ...PR213_MAIN_0673602_SOURCES, files: { ...PR213_M
 const PR213_P5_U2_SOURCES = { ...PR213_P5_U1_SOURCES, files: { ...PR213_P5_U1_SOURCES.files,
  'decision/jev-decision.ts': '808590f0d58aa4b8a445c2d9a58049927c65dd22f77336f5667f3a591b77560a',
 }};
+const PR213_P5_U4_SOURCES = {scheme:'complete_instruction_source_sha256',files:{
+  'v2/dialogue-v2.mjs':'b1adcfc87ad94129a7cbf782f9e2943be411737ce5640fdb6e712439ec9c8f1d',
+  'v2/jev-turn.ts':'9b21d08ca3d906a8c763944833b22378ac128b5f0c223d6b6d7cbb26907f9c63',
+  'v2/generation-guard.ts':'2aa3c56525d6460b01212721109b4d260316fed828604ed928b9bb3cfd9d5ddd',
+  'judgment/instructions.mjs':'9d686330aa34a516a1e2d95df94d0b030e7308a6463757861b9c94e561e5197a',
+  'observation/observe.ts':'469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad',
+  'local-grounding/extract.ts':'1ba522173730b170b7d61784d99c234a051f2cc49b09fe50b3f7e5181e5527d3',
+  'local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01',
+  'decision/jev-decision.ts':'77db4464a9b59ba6d2c7fbf326c263e2a659ddddb6cc6a7334c62df690675fd6',
+  'local-grounding/extract-ai.ts':'e489b7ff573fdbe9e4f0adc9b6ee5f0828bd3c6835dcd8cd6555e191161594a6',
+  'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
+ }};
 // A record's run.promptSources (the producer's whole-file digests of the instruction sources) selects exactly one
 // version, and the replay text must be that version's text. Unregistered sources, or sources and text from
 // different versions, never pass. A later source change needs its own entry here.
@@ -1815,17 +1827,9 @@ const PROMPT_VERSIONS:readonly PromptVersion[]=[
   'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
  }},fixed:FIXED_I172,native:NATIVE_I172},
  // P5 port with T11 and the profile-bound generation wording.
- {id:'pr213_main_p5_u4',i172:true,styleMode:'profile',sources:{scheme:'complete_instruction_source_sha256',files:{
-  'v2/dialogue-v2.mjs':'b1adcfc87ad94129a7cbf782f9e2943be411737ce5640fdb6e712439ec9c8f1d',
-  'v2/jev-turn.ts':'9b21d08ca3d906a8c763944833b22378ac128b5f0c223d6b6d7cbb26907f9c63',
-  'v2/generation-guard.ts':'2aa3c56525d6460b01212721109b4d260316fed828604ed928b9bb3cfd9d5ddd',
-  'judgment/instructions.mjs':'9d686330aa34a516a1e2d95df94d0b030e7308a6463757861b9c94e561e5197a',
-  'observation/observe.ts':'469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad',
-  'local-grounding/extract.ts':'1ba522173730b170b7d61784d99c234a051f2cc49b09fe50b3f7e5181e5527d3',
-  'local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01',
-  'decision/jev-decision.ts':'77db4464a9b59ba6d2c7fbf326c263e2a659ddddb6cc6a7334c62df690675fd6',
-  'local-grounding/extract-ai.ts':'e489b7ff573fdbe9e4f0adc9b6ee5f0828bd3c6835dcd8cd6555e191161594a6',
-  'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
+ {id:'pr213_main_p5_u4',i172:true,styleMode:'profile',sources:PR213_P5_U4_SOURCES,fixed:FIXED_I172,native:NATIVE_I172},
+ {id:'pr213_main_p5_u3_restore_fix',i172:true,styleMode:'profile',sources:{...PR213_P5_U4_SOURCES,files:{...PR213_P5_U4_SOURCES.files,
+  'v2/jev-turn.ts':'d0cfc7520a388b8aa07dd25cc342f8af718f9c14d7ccd28d12eef6b70dc57388',
  }},fixed:FIXED_I172,native:NATIVE_I172},
  ...HISTORICAL_MAIN_PROMPT_SOURCES.map(({id, files}) => ({
   id, i172: false, styleMode: 'legacy' as const, sources: {scheme: 'complete_instruction_source_sha256', files: {...HISTORICAL_MAIN_SHARED_SOURCES, ...files}},
