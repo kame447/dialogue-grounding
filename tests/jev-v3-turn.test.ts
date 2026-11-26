@@ -602,10 +602,15 @@ test('R3 pruning: once the claim and its withdrawal are gone from the graph, the
 
 import { researchTrialProfileV3 } from '../dialogue-model/runtime/v2/research-profile.ts';
 import { LOCAL_FUNCTION_CRITERIA_V3, LOCAL_FUNCTION_CRITERIA_HOLISTIC_V3 } from '../dialogue-model/runtime/local-grounding/classify.ts';
-// A record stored under an older policy never had the markers of a holistic_v5 trial (the generation version, the scoped_v2 naming scope); the clone drops them as a real older record would not carry them.
+// Match the stored shape of records written before the generation and naming version markers.
 function asOlderRecord(saved: any, policy: string) {
   const older = structuredClone(saved);
   older.options.dialoguePolicy = policy;
+  delete older.options.jevNamingRestoreVersion;
+  for (const trace of older.jevTraces) {
+    const application = trace.aiPublic?.application;
+    if (application) delete application.nameAcceptances;
+  }
   const strip = (value: any) => {
     if (!value || typeof value !== 'object') return;
     delete value.generationRetryVersion; delete value.agreeNameScopeVersion;
