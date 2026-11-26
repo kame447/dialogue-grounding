@@ -418,13 +418,14 @@ test('#142 J1: the P1 path is relative_pm90 only; relative_0 tasks and records f
   assert.equal(h.upstream.counts().posts,0);
 });
 
-test('#14: a new naming scope is opt-in and restoration uses the saved scope', async t => {
+for (const scope of ['scoped_v7', 'scoped_v8'] as const)
+test(scope + ': a new naming scope is opt-in and restoration uses the saved scope', async t => {
   const h = await fixture(t, { questionLayout: 'two_stage_v3', technicalTrial: { version: 'adaptive_repair_v3' } });
   const prepared = await prepareParticipantJev(h.options);
   const optedIn = {
     async taskOptions(value: Parameters<typeof prepared.taskOptions>[0]) {
       const wiring = await prepared.taskOptions(value);
-      return { ...wiring, jevResearch: { ...wiring.jevResearch!, newTrialAgreeNameScopeVersion: 'scoped_v7' as const } };
+      return { ...wiring, jevResearch: { ...wiring.jevResearch!, newTrialAgreeNameScopeVersion: scope } };
     },
   };
   const old = await makeTask(prepared);
@@ -438,7 +439,7 @@ test('#14: a new naming scope is opt-in and restoration uses the saved scope', a
   assert.equal(oldSaved.jevTraces[0].status, 'committed');
   assert.equal(newSaved.jevTraces[0].status, 'committed');
   assert.equal(oldSaved.queueState.privateState.agreeNameScopeVersion, 'scoped_v6');
-  assert.equal(newSaved.queueState.privateState.agreeNameScopeVersion, 'scoped_v7');
+  assert.equal(newSaved.queueState.privateState.agreeNameScopeVersion, scope);
   assert.equal(oldSaved.options.generationRetryVersion, 'jev_generation_retry_v12');
   assert.equal(newSaved.options.generationRetryVersion, 'jev_generation_retry_v12');
   const sends = h.upstream.counts().posts;

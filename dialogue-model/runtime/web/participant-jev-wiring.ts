@@ -170,15 +170,19 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
       ? restore ? savedGenerationVersion ?? 'jev_generation_retry_v2'
         : pinned ? 'jev_generation_retry_v12' : defaultGenerationRetryVersion(profile.questionLayout, profile.dialoguePolicy)
       : undefined;
-    const newTrialAgreeNameScopeVersion = v.newTrialAgreeNameScopeVersion;
+    const requestedScope = v.newTrialAgreeNameScopeVersion;
+    const newTrialAgreeNameScopeVersion = requestedScope === 'scoped_v7' ||
+      requestedScope === 'scoped_v8' && v.ledger instanceof RunBudget ? requestedScope : undefined;
     if (Object.hasOwn(v, 'newTrialAgreeNameScopeVersion') &&
-        (newTrialAgreeNameScopeVersion !== 'scoped_v7' || !restore &&
-          !validAgreeNameScope(newTrialAgreeNameScopeVersion, generationRetryVersion))) return invalid();
+        (newTrialAgreeNameScopeVersion === undefined ||
+          !restore && !validAgreeNameScope(newTrialAgreeNameScopeVersion, generationRetryVersion))) return invalid();
     const namingRestoreVersion = restore ? restore.options?.jevNamingRestoreVersion :
       pinned || isGenerationV12(generationRetryVersion) ? AI_NAME_ACCEPTANCES_V1 : undefined;
     if (restore && Object.hasOwn(restore.options ?? {}, 'jevNamingRestoreVersion') &&
         (namingRestoreVersion !== AI_NAME_ACCEPTANCES_V1 || !isGenerationV12(generationRetryVersion))) return invalid();
-    if (restore && !validAgreeNameScope(restore.queueState?.privateState?.agreeNameScopeVersion, generationRetryVersion)) return invalid();
+    const savedScope = restore?.queueState?.privateState?.agreeNameScopeVersion;
+    if (restore && (!validAgreeNameScope(savedScope, generationRetryVersion) ||
+        savedScope === 'scoped_v8' && !(v.ledger instanceof RunBudget))) return invalid();
     if (context.referenceMemory !== true) return invalid();
     if (!STRATEGIES.includes(context.strategy)) return invalid();
     if (context.legacy.some(v => v !== null && v !== undefined) || context.style !== profile.utteranceStyle) return invalid();
@@ -246,7 +250,7 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
     if (rebuilt) local = {...local,classifier:rebuilt};
     return {profile,observer,jevDecision,localGrounding:local,ledger:v.ledger,...(technicalTrial?{technicalTrial}:{}),...(generationRetryVersion?{generationRetryVersion}:{}),
       ...(pinned ? {participantPrompts:true as const} : {}),
-      ...(!restore && newTrialAgreeNameScopeVersion === 'scoped_v7' ? {newTrialAgreeNameScopeVersion} : {}),
+      ...(!restore && newTrialAgreeNameScopeVersion !== undefined ? {newTrialAgreeNameScopeVersion} : {}),
       ...(namingRestoreVersion?{namingRestoreVersion}:{})};
   } catch { return invalid(); }
 }

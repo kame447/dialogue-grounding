@@ -102,6 +102,8 @@ export type JevDecisionInput = {
   notationV6?: true;
   /** jev_generation_retry_v11 only: the legend also describes the `answerClaims` rows (an answer the graph no longer carries has a null source turn). */
   notationV11?: true;
+  /** scoped_v8 only: backchannels and follow-up questions do not answer a feature check. Never serialized to Jev. */
+  featureReplyFilter?: true;
 };
 export type DecisionInputBudget = {
   maxChars: 20000;
