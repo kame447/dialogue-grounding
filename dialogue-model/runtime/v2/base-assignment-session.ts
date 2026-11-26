@@ -155,8 +155,8 @@ export function createBaseAssignmentSession(options: BaseSessionOptions): BaseSe
       const limits = plan?.participantLimits;
       const profile = plan?.participantRuntimeProfile;
       const initialObservationGeneration = plan?.initialObservationGeneration;
-      const participantDialogueProfile = assignmentParticipantDialogueProfile(a);
       const memoryPruneVersion = assignmentMemoryPruneVersion(a);
+      const participantDialogueProfile = assignmentParticipantDialogueProfile(a);
       try { task = await options.makeTask({ strategy: a.strategy, seed: a.seed, referenceMemory: a.referenceMemory,
         runDir: null, restore: restore ? copy(restore) : null, now: options.now, onPersist,
         ...(pin ? { participantModelPin: pin } : {}),
