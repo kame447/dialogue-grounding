@@ -86,7 +86,7 @@ function checkRepairProspect(value:unknown):void {
 }
 function prepare(input:unknown,original:unknown,intervention:unknown,questionLayout:JevQuestionLayout='two_stage_v1'){
  const policy=config(intervention);
- const i=boundary(input,'invalid_input',value=>{const optional=['reobservationAllowed','humanReferent','repairProspect','agreeNames','repairFacts','nameLedger','nameSource','namingRequest','namingRequestStrict','judgmentLedger','rotationMode','notationV6'].filter(k=>!!value&&typeof value==='object'&&Object.hasOwn(value,k));
+ const i=boundary(input,'invalid_input',value=>{const optional=['reobservationAllowed','humanReferent','repairProspect','agreeNames','repairFacts','nameLedger','nameSource','namingRequest','namingRequestStrict','judgmentLedger','rotationMode','notationV6','notationV11'].filter(k=>!!value&&typeof value==='object'&&Object.hasOwn(value,k));
   if(!exact(value,['turn','publicTurns','ownSlots','observations','issueSummary','priorClaims','repairHistory','previousAction','publicNames',...optional]))fail('invalid_input');
   if(Object.hasOwn(value,'repairProspect'))checkRepairProspect(value.repairProspect);
   buildJevDecisionPayload(value as JevDecisionInput);return structuredClone(value) as BypassAcceptanceInput;});

@@ -315,6 +315,25 @@ export function findTopicShiftClaimsV7(text: string): string[] {
   return sentences.some((s) => topicShiftClaimsV7.some((pattern) => pattern.test(s))) ? ["unsupported_topic_shift"] : [];
 }
 
+// jev_generation_retry_v11 (#204): the verb stems 移・進・切り替え・変え after "次の図形に" count only as a move that is being made. A negated move ("進まず", "移りません"), a move that is only announced as
+// the next thing to do after something else ("移る前に"), and a past mention ("移ったとき", "切り替えた") do not. The "do it" forms of the next figure ("次の図形にしよう") and "次を見ましょう" count too.
+const v11ShiftStem = "(?:移|進|切り替え|変え)";
+const v11ShiftNotMade = /^(?:[まみめらりれ]?(?:ず|ん?ません|ない|なかっ|たく(?:ない|なかっ))|る前|った|んだ|ん?で[いおき]|した|して(?:い|しま|から|きた)|えた|えて(?:い|から|きた)|てから|たとき|ただけ)/u;
+const v11ShiftHead = new RegExp(`(?:次の|別の|他の)(?:図形|形|話題|ところ)(?:へ|に)${v11ShiftStem}`, "gu");
+const v11DoForms: ReadonlyArray<RegExp> = [
+  new RegExp(`(?:次|別|他)の(?:図形|形|もの|ところ)(?:に|へ)(?:し(?:よう|ましょう|ませんか|てみよう|てみましょう)|(?:して)?(?:い|行|いこう)く?)(?![^。!?]{0,4}(?:ません|ない|ず))`, "u"),
+  new RegExp(`(?:次|つぎ)を(?:見(?:てみ)?(?:よう|ましょう|たい)|確認(?:しよう|しましょう|してみよう|したい)|扱(?:おう|いましょう)|やろう|やりましょう|話(?:そう|しましょう))(?![^。!?]{0,4}(?:ません|ない|ず))`, "u"),
+];
+/** The jev_generation_retry_v11 form of findTopicShiftClaimsV7. */
+export function findTopicShiftClaimsV11(text: string): string[] {
+  const sentences = normalize(text).replace(/「[^」]*」|『[^』]*』/gu, "「」").split(/(?<=[。!?])/u);
+  const stemMoves = (s: string) => [...s.matchAll(v11ShiftHead)].some(m => !v11ShiftNotMade.test(s.slice(m.index + m[0].length)));
+  // The act forms ("次の図形へ進もう") are the v7 patterns without their bare-stem branch, which is judged above.
+  const actPatterns = topicShiftClaimsV7.filter(pattern => !pattern.source.includes("|移|進|切り替え|変え"));
+  const actForm = new RegExp(`(?:次の|別の|他の)(?:図形|形|話題|ところ)(?:へ|に)(?:${topicShiftAct.source})`, "u");
+  return sentences.some(s => stemMoves(s) || actForm.test(s) || actPatterns.some(pattern => pattern.test(s)) || v11DoForms.some(pattern => pattern.test(s))) ? ["unsupported_topic_shift"] : [];
+}
+
 const internalId =/(?<![A-Za-z0-9])s-[0-9a-f]{4}(?![A-Za-z0-9])/iu;
 const internalField = /(?<![A-Za-z])(?:targetSlot|candidateName|discriminatingFeature|ownLedger|ledger|judgment)(?![A-Za-z])|\{"[^"]{1,40}":/u;
 
@@ -388,8 +407,10 @@ const v11QuotedPhrase = /^(?:とがっている|とがっていた|とがった|
 const v11PartnerQuotedStart = v10PartnerQuotedStart;
 // v11 own side: also "こちらの上の中央" (a direction followed by 中央).
 const v11OwnPossessiveView = "(?:こちら|私|わたし|自分)の(?=" + orientationWords.source + "|" + directionalCenter.source + ")|(?:こちら|私|わたし|自分)の(?:画面|図形|側)で(?!は|なく|ない|なかっ|なけれ|じゃな)";
+// v11 (#205): the colloquial self words state this side's view too ("僕の画面では", "僕から見ると", "こっちの画面では").
+const v11ColloquialOwnView = "(?:僕|ぼく|俺|おれ|こっち)(?:の(?:画面|図形|側|画像|見え方))?(?:では(?!なく|ない|なかっ|なけれ|じゃな)|でも|も|だと|で見ると|から見ると|から見れば|から見たら|から見て)";
 const v11TopicViewpoint = new RegExp(
-  "(?<own>" + v5OwnView.source + "|" + explicitOwnView.source + "|" + ownTopicView.source + "|" + v11OwnPossessiveView + ")|" +
+  "(?<own>" + v5OwnView.source + "|" + explicitOwnView.source + "|" + ownTopicView.source + "|" + v11OwnPossessiveView + "|" + v11ColloquialOwnView + ")|" +
   v5PartnerView.source + "|" + explicitPartnerView.source + "|" + partnerTopicView.source + "|" + v9PartnerQuotedView, "gu");
 // v11 cause reading: "のです" and a "から、" that means "from" (先端から、…) are not a premise.
 const descriptionQualifierV11 = /と(?:のこと|教えて|いう(?!前提|仮定|想定)|言っ|おっしゃ|聞い|説明|伺|述べ|話し)|なら|(?:の)?であれば|とすると|とすれば|とは限(?:らな|りませ)|(?:では|じゃ)(?:な(?:い|く)|ありませ)|(?<cause>ので(?!す)|(?:だ|です|ます|ある|いる|見える)から|(?<=[るいたうくすつぬむぶ])から(?=[、,]|$)|ため)/u;
@@ -433,6 +454,7 @@ const questionEnd = /(?:\?|か(?:ね)?[。、,.]?)$/u;
 // The first qualifier after a term belongs to that description. A later question cannot undo a causal premise.
 const descriptionQualifier = /と(?:のこと|教えて|いう(?!前提|仮定|想定)|言っ|おっしゃ|聞い|説明|伺|述べ|話し)|なら|(?:の)?であれば|とすると|とすれば|とは限(?:らな|りませ)|(?:では|じゃ)(?:な(?:い|く)|ありませ)|(?<cause>ので|(?:だ|です|ます|ある|いる|見える)から|から(?=[、,]|$)|ため)/u;
 
+const v11ConfirmTail = /^(?![^。!?]*(?:そう|はず|かも|だろう|でしょう|らしい|ような|ようだ|みたい|思い|思う|違い))[^。!?]*(?:[んの]ですよ?ね|(?:という|とのこと)ですね|[んの]ですか)[。!?]?$/u;
 function v5OrientationLeaks(text: string, expanded: boolean, topic = false, v9 = false, v10 = false, said: (word: string) => boolean = () => false, v11 = false): string[] {
   const markers = v11 && topic ? v11TopicViewpoint : v9 && topic ? v9TopicViewpoint : topic ? v5TopicViewpoint : expanded ? v5ExpandedViewpoint : v5Viewpoint;
   const qualifierRule = v11 ? descriptionQualifierV11 : descriptionQualifier;
@@ -470,7 +492,8 @@ function v5OrientationLeaks(text: string, expanded: boolean, topic = false, v9 =
           if (term.index >= from && term.index < from + phrase.length && (!v10 || said(term[0]))) continue;
         }
       }
-      // v11: a direction word the participant said, under the partner's own marker, repeats their statement; it is not an assumption about their view.
+      // v11 (#205): a direction word the participant said about their own screen, taken back to them in a confirming form ("…あるんですね"), is not an assumption about their view.
+      if (v11 && preceding && !sameFrame && said(term[0]) && v11ConfirmTail.test(clause.slice(term.index + term[0].length))) continue;
       // A later viewpoint starts a new description even when there is no clause punctuation.
       const description = clause.slice(term.index + term[0].length, viewpoints[nextViewpoint]?.index).split(descriptionBreak, 1)[0];
       const qualifier = qualifierRule.exec(description);
@@ -615,7 +638,7 @@ export function generationGuardCodes(text: string, c: GenerationCodeContext): st
     ...(c.v3 ? findOrientationLeaks(text, c.dialoguePolicy, c.generationRetryVersion, c.humanTexts, c.recentHumanTexts, c.publicTexts) : []),
     ...(c.v3 ? findWorkingNoteLeaks(text, c.publicTexts) : []),
     ...(c.v3 && isGenerationV6(c.generationRetryVersion) && c.action !== "move_on" && c.action !== "defer" && c.action !== "close" &&
-      (c.vetoed === true || c.action === "confirm" || c.action === "repair") ? (isGenerationV7(c.generationRetryVersion) ? findTopicShiftClaimsV7(text) : findTopicShiftClaims(text)) : []),
+      (c.vetoed === true || c.action === "confirm" || c.action === "repair") ? (isGenerationV11(c.generationRetryVersion) ? findTopicShiftClaimsV11(text) : isGenerationV7(c.generationRetryVersion) ? findTopicShiftClaimsV7(text) : findTopicShiftClaims(text)) : []),
     ...(c.v3 && c.action === "agree" && c.candidateName !== null ? findAgreeNameMismatch(text, c.candidateName) : []),
     ...(c.v3 && c.action === "propose_name" && c.candidateName !== null ? findProposeNameMismatch(text, c.candidateName) : []),
     ...(c.adaptive && /repair[_-]?prospect|repair_issue|candidate_narrowed|candidate_widened|other_figure_benefit|no_open_issue|issue_\d+/iu.test(squeezed) ? ["internal_field"] : []),

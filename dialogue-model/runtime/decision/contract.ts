@@ -98,6 +98,8 @@ export type JevDecisionInput = {
   rotationMode?: "relative_pm90" | "relative_0";
   /** jev_generation_retry_v6 only: every question of the request, the repair-prospect questions included, carries the notation legend and the rotation premise. */
   notationV6?: true;
+  /** jev_generation_retry_v11 only: the legend also describes the `answerClaims` rows (an answer the graph no longer carries has a null source turn). */
+  notationV11?: true;
 };
 export type DecisionInputBudget = {
   maxChars: 20000;

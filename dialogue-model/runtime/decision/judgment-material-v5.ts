@@ -16,6 +16,7 @@ export type MaterialV5Context = { actions: readonly LedgerAction[]; nameLedger?:
   rotationMode?: string;
   /** jev_generation_retry_v6: written into the state so a verifier knows every question carried the legend. */
   notationV6?: boolean;
+  notationV11?: boolean;
   /** The answering claims the ledger points at, by id: one that is not a row of `claims` is written as an `answerClaims` row, so every id is defined in the same request. */
   answerRows?: ReadonlyMap<string, { sourceTurn: number | null; act: string; proposition: string; targets: readonly string[] }> };
 /** Appended to every question's instructions of a holistic_v5 judgment request, and nowhere else. */
@@ -23,12 +24,15 @@ export const JUDGMENT_V5_LEGEND = "stateの記法: publicTurnsは全公開発話
   " [claim id, 出典の発話番号, act, aspect, 対象, 名前, 返答先のclaim id, 命題, issueId] で、発言そのものは出典の発話番号の行を参照してください。" +
   "f0〜f5はownSlotsの順の自分の図形です。issuesは局所の論点で、各行は [issue id, aspect, 対象, state, nameState, 名前, 最後の発話番号, claim id] です。figuresは図形ごとに、名称の状態（statusとname）と、これまでに実行した行動 [行動, 発話番号, 名前または特徴, 返答のclaim id] を並べた履歴です。";
 
+/** jev_generation_retry_v11: appended after the legend when a figure's history points at an answer the request's claims do not carry. */
+export const JUDGMENT_V11_ANSWER_LEGEND = "answerClaimsは、figuresの返答のclaim idがclaimsにない行動のためだけに添える行で、各行は [claim id, 出典の発話番号, act, 対象, 命題] です。グラフから外れた回答の出典の発話番号はnullになります。";
+
 const alias = (slots: readonly string[], id: string) => "f" + slots.indexOf(id);
 const unalias = (slots: readonly string[], f: string) => slots[Number(String(f).slice(1))];
 const line = (t: { turn: number; speaker: string; text: string }) => `U${t.turn} ${t.speaker === "human" ? "h" : "ai"}: ${t.text}`;
 const LINE = /^U(\d+) (h|ai): ([\s\S]*)$/u;
 
-export function encodeMaterialV5(material: any, { actions, nameLedger, answers: allAnswers, rotationMode, answerRows, notationV6 }: MaterialV5Context): Record<string, unknown> {
+export function encodeMaterialV5(material: any, { actions, nameLedger, answers: allAnswers, rotationMode, answerRows, notationV6, notationV11 }: MaterialV5Context): Record<string, unknown> {
   const slots: string[] = material.ownSlots;
   const al = (ids: readonly string[]) => ids.map(id => alias(slots, id));
   const answers = allAnswers ?? new Map<number, string[]>(material.repairHistory.map((r: any) => [r.turn, r.partnerClaims.map((c: any) => c.id)]));
@@ -43,7 +47,7 @@ export function encodeMaterialV5(material: any, { actions, nameLedger, answers: 
     for (const id of ids) if (figures[alias(slots, id)]) figures[alias(slots, id)].actions.push(entry);
   }
   return {
-    view: JUDGMENT_VIEW_V5, ...(rotationMode ? { rotationMode } : {}), ...(notationV6 ? { notationV6: true } : {}), turn: material.turn, ownSlots: slots,
+    view: JUDGMENT_VIEW_V5, ...(rotationMode ? { rotationMode } : {}), ...(notationV6 ? { notationV6: true } : {}), ...(notationV11 ? { notationV11: true } : {}), turn: material.turn, ownSlots: slots,
     publicTurns: material.publicTurns.map(line),
     observations: material.observations, ...compactIssues(material.issueSummary, slots, new Set(material.priorClaims.map((c: any) => c.id))),
     claims: material.priorClaims.map((c: any) => [c.id, c.sourceTurn, c.act, c.aspect, al(c.targets), c.name, c.respondsTo, c.proposition, c.issueId]),

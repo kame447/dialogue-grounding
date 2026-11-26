@@ -8,7 +8,7 @@ import { literalSpan } from "../judgment/public-evidence.mjs";
 import { validateOwnLedger } from "../judgment/schema.mjs";
 import { normalizeName } from "../scoring.mjs";
 import { validateRepairFacts } from "./repair-facts.ts";
-import { encodeMaterialV5, claimKeepOrder, JUDGMENT_V5_LEGEND } from "./judgment-material-v5.ts";
+import { encodeMaterialV5, claimKeepOrder, JUDGMENT_V5_LEGEND, JUDGMENT_V11_ANSWER_LEGEND } from "./judgment-material-v5.ts";
 import type { LedgerAction } from "./judgment-material-v5.ts";
 import { jevChoiceAnswersValid } from "./jev-choice-response.ts";
 import { JEV_ACTIONS, DRAFT_ACTS, OBSERVATION_ASPECTS, REPAIR_PROSPECTS, REPAIR_PROSPECT_BASES, isHolisticPolicy } from "./contract.ts";
@@ -122,7 +122,7 @@ export const TWO_STAGE_V3_TARGET_INSTRUCTIONS = "stateのselected.actionが第1�
 export const TWO_STAGE_V2_CANDIDATE_SET_INSTRUCTIONS = "第1段で対象をmultiple（一つに絞れない）としました。この行動で対象候補として扱う自分の図形の集合を、2図形以上の組合せから一つ選んでください。公開発話と観察メモに根拠がある図形を含め、根拠のない図形は含めないでください。";
 export const TWO_STAGE_V2_CANDIDATE_SET_CRITERION = (figureIds: readonly string[]) => `自分の候補図形の集合 ${JSON.stringify(figureIds)}。観察メモを参照。`;
 /** holistic_v5: the notation legend and the task's rotation condition, for every question (the referent estimate included). */
-const v5Suffix = (input: JevDecisionInput) => input.judgmentLedger === undefined ? "" : "\n" + JUDGMENT_V5_LEGEND + ((input.rotationMode ?? "relative_pm90") === "relative_pm90" ? "\n" + ROTATION_V5 : "");
+const v5Suffix = (input: JevDecisionInput) => input.judgmentLedger === undefined ? "" : "\n" + JUDGMENT_V5_LEGEND + (input.notationV11 === true ? "\n" + JUDGMENT_V11_ANSWER_LEGEND : "") + ((input.rotationMode ?? "relative_pm90") === "relative_pm90" ? "\n" + ROTATION_V5 : "");
 const decisionInstructions = (input: JevDecisionInput, prospect = false, layout: JevQuestionLayout = "two_stage_v1") =>
   (layout === "two_stage_v3" ? COMMON_V3 : layout === "two_stage_v2" ? COMMON_V2 : COMMON) + (input.humanReferent === undefined ? "" : "\n" + HUMAN_REFERENT_GUIDANCE) + (!prospect || input.repairProspect === undefined ? "" : "\n" + REPAIR_PROSPECT_GUIDANCE) + factsGuidance(input) + v5Suffix(input);
 const LAYOUTS: readonly JevQuestionLayout[] = Object.freeze(["two_stage_v1", "two_stage_v2", "two_stage_v3"]);
@@ -266,6 +266,7 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
     if (keys.length !== slots.length || !keys.every(id => slots.includes(id))) fail("invalid_input");
   }
   if (!(input.notationV6 === undefined || input.notationV6 === true && input.judgmentLedger !== undefined)) fail("invalid_input");
+  if (!(input.notationV11 === undefined || input.notationV11 === true && input.notationV6 === true)) fail("invalid_input");
   if (!(input.rotationMode === undefined || input.rotationMode === "relative_pm90" || input.rotationMode === "relative_0")) fail("invalid_input");
   let ledgerActions: LedgerAction[] | undefined;
   if (input.judgmentLedger !== undefined) {
@@ -400,7 +401,7 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
   const resolveAnswers = (ledgerActions ?? []).some(a => a.answers !== undefined);
   const answerRows = new Map<string, { sourceTurn: number | null; act: string; proposition: string; targets: readonly string[] }>(
     [...answerSource.values()].flat().filter(c => !withdrawn.has(c.id)).map(c => [c.id, { sourceTurn: claimSource.get(c.id) ?? null, act: c.act, proposition: c.proposition, targets: c.targets }]));
-  const render = (m: unknown) => JSON.stringify(v5 ? encodeMaterialV5(m, { actions: ledgerActions!, answers, ...(resolveAnswers ? { answerRows } : {}), rotationMode: input.rotationMode ?? "relative_pm90", ...(input.notationV6 ? { notationV6: true } : {}), ...(nameLedger ? { nameLedger } : {}) }) : m);
+  const render = (m: unknown) => JSON.stringify(v5 ? encodeMaterialV5(m, { actions: ledgerActions!, answers, ...(resolveAnswers ? { answerRows } : {}), rotationMode: input.rotationMode ?? "relative_pm90", ...(input.notationV6 ? { notationV6: true } : {}), ...(input.notationV11 ? { notationV11: true } : {}), ...(nameLedger ? { nameLedger } : {}) }) : m);
   const over = () => {
     state = render(material);
     return (v3 && selection ? render({ ...material, selected: undefined }).length : state.length) + reserve > 20000;
@@ -799,7 +800,7 @@ function detailJsonData(value: unknown, seen = new Set<object>()): void {
 function prepareExecutedDetail(input: JevDecisionInput, selected: JevActionTarget, layout: JevQuestionLayout = "two_stage_v1") {
   try {
     detailJsonData(input); detailJsonData(selected);
-    const optional = ["reobservationAllowed", "humanReferent", "repairProspect", "agreeNames", "repairFacts", "nameLedger", "nameSource", "namingRequest", "namingRequestStrict", "judgmentLedger", "rotationMode", "notationV6"].filter(key => Object.hasOwn(input, key));
+    const optional = ["reobservationAllowed", "humanReferent", "repairProspect", "agreeNames", "repairFacts", "nameLedger", "nameSource", "namingRequest", "namingRequestStrict", "judgmentLedger", "rotationMode", "notationV6", "notationV11"].filter(key => Object.hasOwn(input, key));
     if (!exact(input, ["turn", "publicTurns", "ownSlots", "observations", "issueSummary", "priorClaims", "repairHistory", "previousAction", "publicNames", ...optional])) fail("invalid_input");
     if (!exact(selected, ["action", "target"]) || !includes(["propose_name", "agree", "confirm", "repair"], selected.action)) fail("invalid_input");
     const snapshot = structuredClone(input), selection = structuredClone(selected);

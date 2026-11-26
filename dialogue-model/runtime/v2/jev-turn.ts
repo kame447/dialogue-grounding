@@ -838,6 +838,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
             .map(e => ({ turn: e.seq, speaker: e.speaker, text: e.text }));
           baseInput.rotationMode = options.rotationMode ?? "relative_pm90";
           if (isGenerationV6(generationRetryVersion)) baseInput.notationV6 = true;
+          if (isGenerationV11(generationRetryVersion)) baseInput.notationV11 = true;
           baseInput.judgmentLedger = state.judgments.map(j => { const d = j.jevTurn.executed ?? j.jevTurn.decision;
             // jev_generation_retry_v5: each action also carries its answers from the whole repair history (the field's presence, even empty, selects the answer-resolving material).
             const answers = isGenerationV5(generationRetryVersion) ? { answers: (repairHistory.find(r => r.turn === j.turnIndex)?.partnerClaims ?? []).map(c => ({ id: c.id, act: c.act, proposition: c.proposition, targets: [...c.targets] })) } : {};

@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { verifyRecords } from '../dialogue-model/runtime/diagnostics/parity-verify/index.ts';
-import { defaultGenerationRetryVersion, findOrientationLeaks, isGenerationV10, isGenerationV11 } from '../dialogue-model/runtime/v2/generation-guard.ts';
+import { defaultGenerationRetryVersion, findOrientationLeaks, findTopicShiftClaimsV7, findTopicShiftClaimsV11, isGenerationV10, isGenerationV11 } from '../dialogue-model/runtime/v2/generation-guard.ts';
 import { buildRecords, OWN } from './support/s4-v3-records.ts';
 import type { Turn } from './support/s4-v3-records.ts';
 
@@ -234,5 +234,33 @@ for (const label of ['bypass-enabled', 'repair-first'] as const) {
     assert.deepEqual(last.local.claims.filter((c: any) => c.act === 'name_propose' && c.name === alias), []);
     assert.notEqual(last.namingRequest, true);
     assert.deepEqual(statuses(record), passed);
+  });
+}
+
+// ---- final batch: #204 topic shift (negations, announcements, past mentions; the missed forms), #205 colloquial self markers and confirmations, the judgment legend.
+test('v11 does not read a negated, announced or past move as a topic shift, and reads the missed forms as one; v7 judges as before', () => {
+  const notShifts = ['次の図形に進まず、この二つのどちらか確かめましょう。', '次の図形に移る前に、中央の穴について確認してもいいですか？', '次の図形へ移りません。',
+    'さっき別の図形に移ったときに話した特徴です。', '別の形に切り替えずに、今の形を確かめましょう。', '次に、中央の穴を確認させてください。'];
+  const shifts = ['別の形にしよう。', '次の図形にしよう。', '次を見ましょう。', '次の図形に進みましょう。', '次の図形に移ります。', '別の形に切り替えましょう。', '次の図形へ進もう。', '次いこう。'];
+  for (const t of notShifts) { assert.deepEqual(findTopicShiftClaimsV11(t), [], t); if (!t.startsWith('次に、')) assert.deepEqual(findTopicShiftClaimsV7(t), ['unsupported_topic_shift'], t); }
+  for (const t of shifts) assert.deepEqual(findTopicShiftClaimsV11(t), ['unsupported_topic_shift'], t);
+});
+test('v11 takes the colloquial self markers and a confirmation of a direction the participant said; guesses and assertions stay rejected', () => {
+  const said = ['こちらは右上に小さな突起があります。'];
+  const l = (text: string, version: string) => findOrientationLeaks(text, 'holistic_v5', version as any, said, said, said);
+  for (const t of ['僕の画面では、右上に突起があります。', '僕から見ると、左側に穴があります。', 'こっちの画面では右端がとがっています。']) { assert.deepEqual(l(t, v11), [], t); assert.deepEqual(l(t, v10), ['orientation_leak'], t); }
+  for (const t of ['そちらは右上に突起があるんですね。', 'そちらは右上に突起があるのですね。']) assert.deepEqual(l(t, v11), [], t);
+  for (const t of ['そちらは右上に突起がありますね。', 'そちらは右上に突起があるはずです。', 'そちらは左下に突起があるんですね。', 'そちらは右上に突起がありそうなんですね。'])
+    assert.deepEqual(l(t, v11), ['shared_view_assumption'], t);
+});
+for (const label of ['bypass-enabled', 'repair-first'] as const) {
+  test(`${label}: a v11 trial's judgment requests describe the answerClaims rows; a v10 trial's do not; S4 agrees`, async () => {
+    const turns: Turn[] = [{ human: '輪の先が左向きです。', plan: { action: 'confirm', target: 'figure_0', referent: 'figure_0', speech: '輪の形ですか？' } }];
+    const build = (version?: string) => buildRecords({ label, dialoguePolicy: 'holistic_v5', ...(version ? { generationRetryVersion: version as any } : {}), technicalTrial: { version: 'adaptive_repair_v3' }, turns });
+    const newer = await build(), older = await build(v10);
+    assert.ok(JSON.stringify(newer).includes('answerClaimsは'));
+    assert.ok(!JSON.stringify(older).includes('answerClaimsは'));
+    assert.deepEqual(statuses(newer), passed);
+    assert.deepEqual(statuses(older), passed);
   });
 }
