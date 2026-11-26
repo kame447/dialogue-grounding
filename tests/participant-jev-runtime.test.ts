@@ -5,8 +5,10 @@ import { createNamingTaskV2 } from '../dialogue-model/runtime/v2/naming-task-v2.
 import { researchTrialProfileV3 } from '../dialogue-model/runtime/v2/research-profile.ts';
 import { createTrialV2, modelView } from '../dialogue-model/runtime/stimuli/scatter-v2.mjs';
 import { createMockJevDecisionClient } from '../dialogue-model/runtime/decision/mocks.ts';
+import { createJevDecisionClient } from '../dialogue-model/runtime/decision/jev-decision.ts';
 import { createDialogueV2 } from '../dialogue-model/runtime/v2/dialogue-v2.mjs';
 import { RunBudget } from '../dialogue-model/runtime/diagnostics/parity-live/audit.ts';
+import { scoreTrial as scoreNames } from '../dialogue-model/runtime/scoring.mjs';
 
 const seed = 909;
 const trial = createTrialV2({seed}), own = modelView(trial);
@@ -131,3 +133,114 @@ test('J-F1: a generation failure requires retry; explicit retry can then complet
   await task.retry();assert.equal(task.getState().aiStatus,'idle');
   assert.deepEqual(h.record().jevTraces.map((r:any)=>r.status),['error','committed']);
 });
+
+const v3 = researchTrialProfileV3(profile.lunaRequest, timeouts, 'two_stage_v3', 'holistic_v3');
+const ownSlots: string[] = own.anchors.map(({ id }: { id: string }) => id);
+const [agreedSlot, otherSlot] = ownSlots;
+const agreedName = '札A';
+const proposal = 'この形の呼び名は札Aがよさそうです。';
+const agreement = '「札A」にしましょう。';
+const emptyNames: Record<string, string | null> = Object.fromEntries(ownSlots.map(id => [id, null]));
+const movedName = { ...emptyNames, [otherSlot]: agreedName };
+
+function agreementTrial(strategy: 'repair-first' | 'bypass-enabled',
+  answers: Array<Record<string, string | null>>, drafts = [agreement]) {
+  let generationCalls = 0;
+  const finalRequests: Array<Array<{ role: string; content: string }>> = [];
+  const submissions: Array<Record<string, string>> = [];
+  const h = setup({ strategy, utteranceStyle: v3.utteranceStyle,
+    scoreTrial(data: { key: { human: Record<string, string>; ai: Record<string, string> };
+      humanSubmission: Record<string, string>; aiSubmission: Record<string, string> }) {
+      submissions.push(data.aiSubmission);
+      return scoreNames(data);
+    },
+    client: { async complete(messages: typeof finalRequests[number], { phase }: { phase: string }) {
+      let text = '[]';
+      if (phase === 'local_extraction') text = JSON.stringify([{ segmentId: '1', quote: proposal, proposition: proposal,
+        aspect: 'name', name: agreedName, targets: [agreedSlot], linkedIssueId: null, respondsToTurn: null }]);
+      if (phase === 'generation') {
+        assert.ok(drafts[generationCalls], 'unexpected generation');
+        text = drafts[generationCalls++];
+      }
+      if (phase === 'final_submission') {
+        const answer = answers[finalRequests.length];
+        assert.ok(answer, 'unexpected final request');
+        finalRequests.push(messages);
+        text = JSON.stringify(answer);
+      }
+      return { text, model: 'synthetic-luna' };
+    } },
+  });
+  let responses = 0;
+  const native = createJevDecisionClient({ enabled: true, questionLayout: 'two_stage_v3', timeoutMs: v3.timeouts.decisionMs,
+    readKey: async () => 'sk-or-SYNTHETIC-final-name-0000000000',
+    async fetchImpl(_url, init) {
+      const { model, questions } = JSON.parse(String(init.body));
+      const choices = Object.fromEntries(Object.entries(questions).map(([key, question]: [string, any]) => {
+        const labels = Object.keys(question.criteria);
+        const choice = key === 'action' ? 'agree' : key === 'target' || key === 'human_referent' ? 'figure_0' : labels[0];
+        assert.ok(labels.includes(choice));
+        return [key, { type: 'choice', choice, probabilities: Object.fromEntries(labels.map(label => [label, Number(label === choice)])) }];
+      }));
+      return Response.json({ model, id: 'gen-agreed-final-' + ++responses, usage: { cost: 0 }, answers: choices });
+    } })!;
+  h.options.jevResearch = { ...h.jevResearch, profile: v3, technicalTrial: { version: 'adaptive_repair_v3' }, jevDecision: native,
+    localGrounding: { ...h.jevResearch.localGrounding, classifier: {
+      async classify() { return [{ segmentId: '1', act: 'name_propose', respondsToClaimId: null, rawScore: 1 }]; },
+    } } };
+  return { ...h, finalRequests, submissions, generationCalls: () => generationCalls };
+}
+
+for (const strategy of ['repair-first', 'bypass-enabled'] as const) {
+  test('v3 final submission retries a wrong agreed slot using the committed names (' + strategy + ')', async () => {
+    const corrected: Record<string, string | null> = { ...emptyNames, [agreedSlot]: '札Ａ', [otherSlot]: '別の候補' };
+    const h = agreementTrial(strategy, [movedName, corrected]);
+    const task = await createNamingTaskV2(h.options);
+    task.message(proposal, 'first');
+    await task.whenIdle();
+    const before = h.record();
+    assert.equal(before.events.at(-1).text, agreement);
+    assert.deepEqual(before.ownLedger[agreedSlot], { status: 'agreed', name: agreedName });
+    const restored = await createNamingTaskV2({ ...h.options, restore: JSON.parse(JSON.stringify(before)) });
+    await restored.submitHuman({ names: Object.fromEntries(restored.getState().scene.shapes.map(({ id }: { id: string }) => [id, null])) });
+    await restored.submitAI();
+    assert.equal(h.finalRequests.length, 2);
+    assert.equal(h.finalRequests[1].at(-1)?.content.split('\n').at(-1), JSON.stringify({ [agreedSlot]: agreedName }));
+    assert.deepEqual(h.record().aiSubmission, corrected);
+    assert.equal(h.submissions.length, 1);
+    assert.equal(h.submissions[0][agreedSlot], corrected[agreedSlot]);
+    assert.deepEqual(h.record().ownLedger, before.ownLedger);
+  });
+
+  test('v3 final submission persists no names and does not score after a second mismatch (' + strategy + ')', async () => {
+    const h = agreementTrial(strategy, [movedName, { ...emptyNames, [agreedSlot]: '別名' }]);
+    const task = await createNamingTaskV2(h.options);
+    task.message(proposal, 'first');
+    await task.whenIdle();
+    await task.submitHuman({ names: Object.fromEntries(task.getState().scene.shapes.map(({ id }: { id: string }) => [id, null])) });
+    await assert.rejects(task.submitAI(), { code: 'submission_error' });
+    assert.equal(h.finalRequests.length, 2);
+    assert.equal(h.record().finalError, 'submission_error');
+    assert.equal(h.record().aiSubmission, null);
+    assert.equal(h.record().scoring, null);
+    assert.equal(h.submissions.length, 0);
+    assert.deepEqual(h.record().ownLedger[agreedSlot], { status: 'agreed', name: agreedName });
+  });
+
+  test('v3 does not publish an empty fallback or commit when both agree drafts fail (' + strategy + ')', async () => {
+    const h = agreementTrial(strategy, [], ['名前の案を聞きました。', '候補を確認しています。']);
+    const task = await createNamingTaskV2(h.options);
+    const before = h.record().queueState.privateState;
+    task.message(proposal, 'first');
+    await task.whenIdle();
+    const record = h.record();
+    assert.equal(h.generationCalls(), 2);
+    assert.equal(task.getState().aiStatus, 'error');
+    assert.equal(record.jevTraces[0].errorCode, 'unsafe_generation');
+    assert.equal(record.jevTraces[0].generationGuard.fallback, false);
+    assert.equal(record.jevTraces[0].publicSpeech, null);
+    assert.equal(record.events.filter((event: { speaker: string }) => event.speaker === 'ai').length, 1);
+    assert.equal(record.queueState.pendingHumanEventIds.length, 1);
+    assert.deepEqual(record.queueState.privateState, before);
+  });
+}

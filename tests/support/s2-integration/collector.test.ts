@@ -2,10 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {resolve} from 'node:path';
-import {pathToFileURL} from 'node:url';
+import {fileURLToPath, pathToFileURL} from 'node:url';
 const fixtureRoot=new URL('./',import.meta.url);
 const base=()=>JSON.parse(readFileSync(new URL('RECORDS-ACCEPTED-SETUP.json',fixtureRoot),'utf8'));
-const root=process.env.S2_SOURCE_ROOT??'/Users/Shogo/.agentstack/worktrees/SandyNoether';
+const root=process.env.S2_SOURCE_ROOT??fileURLToPath(new URL('../../../',import.meta.url));
 const target=resolve(root,'dialogue-model/runtime/diagnostics/parity-verify/model-observations.ts');
 let module:any=null,missing=false;
 try {module=await import(pathToFileURL(target).href)} catch(error:any){

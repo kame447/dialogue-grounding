@@ -31,6 +31,7 @@ let activitySince = 0;
 let chatStalled = false;
 let chatDisconnected = false;
 let checking = false;
+let showingIncompleteTrial = false;
 // An explicit resume of stopped server work is in flight (shown as activity).
 let resuming = false;
 // Progress at the moment a failed operation put STOPPED in the top notice; the
@@ -112,7 +113,7 @@ const errors = {
 const knownOutcome = (code) => typeof errors[code] === "string";
 const participantMessage = (code) => knownOutcome(code) ? errors[code] : STOPPED;
 async function api(path, body, signal, sessionId) {
-  if (body !== undefined && ["/api/message", "/api/retry", "/api/names", "/api/ai-submit"].includes(path)) {
+  if (body !== undefined && ["/api/message", "/api/retry", "/api/interrupt", "/api/names", "/api/ai-submit"].includes(path)) {
     body = { ...body, expectedRecordId: Object.hasOwn(body, "expectedRecordId") ? body.expectedRecordId : current?.sessionId };
     if (path === "/api/names" && requestSession() && !Object.hasOwn(body, "expectedEventCount")) body.expectedEventCount = events().length;
   }
@@ -416,6 +417,7 @@ function renderTyping(show) {
 // stays invisible while polling recovers it. The participant sees STOPPED where
 // the current screen shows it, with one recovery action in the trial view;
 // nothing is retried automatically.
+const recoveryPending = () => Boolean(current?.dialogueRecovery && current.dialogueRecovery !== "active");
 const dialogueFailed = () => Boolean(dialogueOpen() && current?.aiStatus === "error" && !resuming);
 const submissionFailed = () => Boolean(submitted() && !trialCompleted() && !resuming &&
   (current?.finalError || ["scoring_error", "submission_error"].includes(current?.status)));
@@ -425,7 +427,7 @@ const progressStopped = () => Boolean(!reviewing && (chatStalled || (current && 
 // submission); anywhere else the top notice shows it.
 const stopShownInView = () => progressStopped() && Boolean(current) && participantStage() === (submitted() ? "names" : "chat");
 const progressSignature = () => JSON.stringify([trialIdentity(current), events().at(-1)?.id, current?.aiStatus,
-  submitted(), current?.status, current?.aiSubmitted, current?.finalError]);
+  submitted(), current?.status, current?.aiSubmitted, current?.finalError, current?.dialogueRecovery]);
 function renderProgress() {
   const failed = pending.some((item) => item.status === "failed");
   const awaited = Boolean(!reviewing && (current ? !trialCompleted() && (submitted() || chatWaiting() || chatDisconnected) : chatDisconnected));
@@ -442,10 +444,20 @@ function renderProgress() {
   const showDots = chatWaiting() && !failed && !stopped;
   renderTyping(showDots);
   $("chat-recovery").hidden = !stopped;
-  $("chat-recovery-message").textContent = STOPPED;
+  const recovery = current?.dialogueRecovery;
+  const stoppedMessage = !recovery || submitted() ? STOPPED :
+    recovery === "paused" || recovery === "unavailable" ? "会話を中断しました。" : "";
+  $("chat-recovery-message").textContent = stoppedMessage;
+  $("retry-chat").textContent = recovery === "retry" || recovery === "paused" ? "再開" : "状態を確認";
+  $("retry-chat").hidden = recovery === "unavailable";
   $("retry-chat").disabled = working || checking || sending || !chatOpen();
+  $("interrupt-chat").hidden = recovery !== "retry" || !dialogueFailed();
+  $("interrupt-chat").disabled = working || checking || sending || !chatOpen();
+  $("leave-incomplete-trial").textContent = "試行を中断";
+  $("leave-incomplete-trial").hidden = recovery !== "unavailable" || !dialogueFailed();
+  $("leave-incomplete-trial").disabled = working || checking || sending || !chatOpen();
   $("chat-status").textContent = failed ? "送信を確認できませんでした。送り直すには、そのメッセージの「再送」を押してください。" :
-    stopped ? STOPPED : showDots ? "AIが返答を作成しています" : "";
+    stopped ? stoppedMessage : showDots ? "AIが返答を作成しています" : "";
   if (current) {
     $("submission-status").textContent = submissionWarning || (!submitted() ? "" : stopped ? STOPPED :
       trialCompleted() ? "双方の提出が完了しました。" : "名前を提出しました。AIの提出を待っています。");
@@ -453,7 +465,7 @@ function renderProgress() {
   retrySubmission.hidden = !(submitted() && stopped);
   retrySubmission.disabled = working || checking;
   if (!reviewing) {
-    if (stopped && !stopShownInView()) $("notice").textContent = STOPPED;
+    if (stopped && !stopShownInView()) $("notice").textContent = stoppedMessage;
     else if ($("notice").textContent === STOPPED && (stopped || operationStop !== progressSignature())) {
       $("notice").textContent = ""; operationStop = null;
     }
@@ -471,10 +483,17 @@ async function checkProgress() {
   try {
     // Only a fresh state of the same trial decides; a failed read resumes nothing.
     if (!await refreshState() || trialIdentity(current) !== trial) return;
-    const path = dialogueOpen() ? (current?.aiStatus === "error" && !serverBusy ? "/api/retry" : null)
+    const path = dialogueOpen() ? (current?.aiStatus === "error" && current?.dialogueRecovery !== "unavailable" && !serverBusy ? "/api/retry" : null)
       : submitted() && !trialCompleted() && (submissionFailed() || !current?.aiSubmitted) ? "/api/ai-submit" : null;
-    if (path && !reviewing) { resuming = true; renderProgress(); await operate(() => api(path, {})); }
-  } finally { checking = false; resuming = false; renderProgress(); }
+    if (path && !reviewing) {
+      resuming = true; renderProgress();
+      const recovery = path === "/api/retry" && Boolean(current?.dialogueRecovery);
+      await operate(() => recovery ? boundedRequest(path, {}, CHAT_STALL_MS) : api(path, {}), { recovery });
+    }
+  } finally {
+    checking = false; resuming = false; renderProgress();
+    if (current?.dialogueRecovery === "active" && pending.some(item => item.status === "queued")) drainMessages();
+  }
 }
 function retryMessage(item) {
   if (working || sending || !chatOpen() || item.status !== "failed" || !pending.includes(item)) return;
@@ -538,6 +557,7 @@ function canStart() {
   return startReady && (!current || trialCompleted() && reception?.status === "in_progress") && !working && !serverBusy && !reviewing;
 }
 function render(state) {
+  if (showingIncompleteTrial) return;
   const trial = state.trial;
   if (trialIdentity(trial) !== trialIdentity(current)) {
     // A poll can observe the switch before the in-flight POST returns 409.
@@ -562,6 +582,7 @@ function render(state) {
     $("notice").textContent = participantMessage("trial_changed");
   }
   current = trial; serverBusy = Boolean(state.busy);
+  if (!reviewing && recoveryPending()) localStage = "chat";
   renderStartStage(state);
   $("trial").hidden = !trial || preparing;
   if (!trial) { loadRecords(); renderRecords(); setControls(); scheduleRefresh(); return; }
@@ -596,9 +617,9 @@ function setControls() {
   renderLeave();
   $("start-trial").disabled = !canStart();
   renderProgress();
-  $("history").querySelectorAll("button").forEach((node) => { node.disabled = working || sending || !chatOpen(); });
-  for (const id of ["utterance", "send-message"]) $(id).disabled = working || !chatOpen();
-  $("finish-conversation").disabled = working || sending || pending.some((item) => item.status === "queued") || !dialogueOpen() || !scene()?.shapes?.length;
+  $("history").querySelectorAll("button").forEach((node) => { node.disabled = working || sending || !chatOpen() || recoveryPending(); });
+  for (const id of ["utterance", "send-message"]) $(id).disabled = working || !chatOpen() || recoveryPending();
+  $("finish-conversation").disabled = working || sending || pending.some((item) => item.status === "queued") || !dialogueOpen() || recoveryPending() || !scene()?.shapes?.length;
   $("back-to-chat").disabled = working;
   $("finish-conversation").hidden = submitted();
   $("chat").hidden = submitted();
@@ -611,11 +632,12 @@ function setControls() {
 }
 function scheduleRefresh() {
   clearTimeout(refreshTimer);
-  if (document.visibilityState === "hidden") return;
+  if (showingIncompleteTrial || document.visibilityState === "hidden") return;
   if (!current && reception && !reviewing) { refreshTimer = setTimeout(() => refreshState(), 5000); return; }
   if (current && !preparing && !reviewing) refreshTimer = setTimeout(() => refreshState(), aiThinking() || pending.length ? 700 : 2000);
 }
 async function refreshState() {
+  if (showingIncompleteTrial) return false;
   if (refreshRequest) return refreshRequest;
   if (entryMode()) return false;
   const epoch = generation;
@@ -630,7 +652,7 @@ async function refreshState() {
   })();
   return refreshRequest;
 }
-async function operate(action) {
+async function operate(action, { recovery = false } = {}) {
   if (working) return;
   stateEpoch++;
   working = true; setControls();
@@ -645,7 +667,7 @@ async function operate(action) {
     resuming = false;
     await refreshState();
     // A stop the trial view already shows is not repeated at the top.
-    $("notice").textContent = !knownOutcome(error?.code) && stopShownInView() ? "" : participantMessage(error?.code);
+    $("notice").textContent = !knownOutcome(error?.code) && (recovery || stopShownInView()) ? "" : participantMessage(error?.code);
     operationStop = $("notice").textContent === STOPPED ? progressSignature() : null;
   }
   finally { working = false; setControls(); }
@@ -662,12 +684,12 @@ async function boundedRequest(path, body, timeoutMs = MESSAGE_ACK_MS) {
   } finally { clearTimeout(timer); }
 }
 async function drainMessages() {
-  if (sending) return;
+  if (sending || recoveryPending()) return;
   sending = true;
   const epoch = generation;
   try {
     for (const item of pending.filter((message) => message.status === "queued")) {
-      if (epoch !== generation) break;
+      if (epoch !== generation || recoveryPending()) break;
       item.status = "sending"; renderHistory(); setControls();
       try {
         let state;
@@ -1093,7 +1115,7 @@ function earlierRecords() {
   return reviewing ? [] : records.items.filter((item) => !item.active && item.recordId !== trialIdentity(current) && item.status === "completed");
 }
 function renderRecords() {
-  const others = earlierRecords();
+  const others = showingIncompleteTrial ? [] : earlierRecords();
   const history = $("record-history");
   history.hidden = !others.length;
   const unanswered = others.filter((item) => item.questionnaire !== "submitted").length;
@@ -1199,7 +1221,7 @@ if (viewport) {
 }
 $("chat").addEventListener("submit", (event) => {
   event.preventDefault();
-  if (working || !chatOpen()) return;
+  if (working || !chatOpen() || recoveryPending()) return;
   const text = $("utterance").value;
   if (!text.trim()) return;
   pending.push({ text, clientId: newClientId(), status: "queued" });
@@ -1230,6 +1252,23 @@ $("utterance").addEventListener("keydown", (event) => {
   if (!event.repeat) $("chat").requestSubmit();
 });
 $("retry-chat").addEventListener("click", () => { if (chatOpen()) checkProgress(); });
+$("interrupt-chat").addEventListener("click", () => {
+  if (chatOpen() && dialogueFailed() && current?.dialogueRecovery === "retry" && !checking && !sending) {
+    operate(() => boundedRequest("/api/interrupt", {}), { recovery: true });
+  }
+});
+$("leave-incomplete-trial").addEventListener("click", () => {
+  if (working || checking || sending || !chatOpen() || !dialogueFailed() || current?.dialogueRecovery !== "unavailable") return;
+  // The server already recorded the pending turn. Leaving only changes this screen.
+  showingIncompleteTrial = true;
+  generation++;
+  clearTimeout(refreshTimer);
+  clearTimeout(typingTimer);
+  for (const id of ["trial", "trial-progress", "record-history"]) $(id).hidden = true;
+  $("notice").textContent = "";
+  $("incomplete-stage").hidden = false;
+  $("incomplete-title").focus();
+});
 $("finish-conversation").addEventListener("click", () => changeStage("names"));
 $("back-to-chat").addEventListener("click", () => changeStage("chat"));
 $("name-form").addEventListener("submit", (event) => {

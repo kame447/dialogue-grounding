@@ -20,6 +20,7 @@ import { createJevDecisionClient, buildJevDecisionPayload, buildHumanReferentPay
 import { createJevLocalTestClassifier } from "../../local-grounding/jev-local-test.ts";
 import { settleJevTurnTraces, settleAiPublicClaims } from "../../v2/jev-turn.ts";
 import type { JevPrivateState, JevTurnTrace } from "../../v2/jev-turn.ts";
+import { isHolisticV3Plus } from "../../decision/contract.ts";
 import type { JevDecisionClient } from "../../decision/contract.ts";
 import type { ObservationCacheAudit } from "../../observation/cache.ts";
 import { isGroundingModel } from "../../../../workers/research-ai-proxy/src/grounding.ts";
@@ -512,7 +513,7 @@ async function runParityLiveImpl(options: Options, deps: Dependencies) {
           const cached = await createObservationCache({ directory: cacheDir, modelId: expectedModel, onMiss: "error", ...limits });
           const observer = createLunaObserver(wire.client, { timeoutMs: PROFILE.timeouts.observationMs, ...limits });
           const core = createJevDecisionClient({ enabled: true, readKey: wire.readKey, fetchImpl: wire.fetchImpl,
-            timeoutMs: PROFILE.timeouts.decisionMs, questionLayout: PROFILE.questionLayout, ...limits })!;
+            timeoutMs: PROFILE.timeouts.decisionMs, questionLayout: PROFILE.questionLayout, ...(isHolisticV3Plus((PROFILE as { dialoguePolicy?: string }).dialoguePolicy) ? { dialoguePolicy: (PROFILE as { dialoguePolicy: string }).dialoguePolicy } : {}), ...limits })!;
           let inputs = { humanReferent: [] as string[], actionInputs: [] as string[], humanMaterial: [] as string[], actionMaterial: [] as string[] };
           const jevDecision: JevDecisionClient = {
             async estimateReferent(input, opts) {
@@ -532,7 +533,7 @@ async function runParityLiveImpl(options: Options, deps: Dependencies) {
               catch(error){wire.adapterResult('decision',error instanceof JevDecisionError?error.code:'decision_error');if(error instanceof JevDecisionError&&error.code==='cost_cap')stop('cost_cap');throw error;}
             }}:{}),
           };
-          const classifier = createJevLocalTestClassifier({ enabled: true, readKey: wire.readKey, fetchImpl: wire.fetchImpl, timeoutMs: PROFILE.timeouts.decisionMs, ...limits })!;
+          const classifier = createJevLocalTestClassifier({ enabled: true, readKey: wire.readKey, fetchImpl: wire.fetchImpl, timeoutMs: PROFILE.timeouts.decisionMs, questionLayout: PROFILE.questionLayout, ...(isHolisticV3Plus((PROFILE as { dialoguePolicy?: string }).dialoguePolicy) ? { dialoguePolicy: (PROFILE as { dialoguePolicy: string }).dialoguePolicy } : {}), ...limits })!;
           const runtime = createProfileDialogue(PROFILE, { memoryPruneVersion: trial.memoryPruneVersion, client: wire.client, strategy: label, image, anchors, referenceMemory: PROFILE.referenceMemory,
             decisionMode: PROFILE.decisionMode, utteranceStyle: PROFILE.utteranceStyle, maxReobservations: PROFILE.maxReobservations,
             observer: { async reobserve(input, opts) { const result = await observer.reobserve(input, opts); tape?.reobservations.push(structuredClone(result)); return result; }, async observeAll(input, opts) {
@@ -584,7 +585,7 @@ async function runParityLiveImpl(options: Options, deps: Dependencies) {
               const cut=commonBoundary as {luna:number;jev:number;reobservations:number}|null;
               const common={luna:tape.luna.slice(0,cut?.luna??tape.luna.length),jev:tape.jev.slice(0,cut?.jev??tape.jev.length),reobservations:tape.reobservations.slice(0,cut?.reobservations??tape.reobservations.length)};
               const tail={luna:tape.luna.slice(cut?.luna??tape.luna.length),jev:tape.jev.slice(cut?.jev??tape.jev.length),reobservations:tape.reobservations.slice(cut?.reobservations??tape.reobservations.length)};
-              const versioned:InterventionReplayTape={schemaVersion:'parity_intervention_replay_v1',state:structuredClone(tape.state) as InterventionReplayTape['state'],events:structuredClone(tape.events),common,tails:{'repair-first':label==='repair-first'?tail:null,'bypass-enabled':label==='bypass-enabled'?tail:null},recorded:{label,expectedRequests:structuredClone(tape.expectedRequests)}};
+              const versioned:InterventionReplayTape={schemaVersion:'parity_intervention_replay_v1',state:structuredClone(tape.state) as InterventionReplayTape['state'],events:structuredClone(tape.events),common,tails:{'repair-first':label==='repair-first'?tail:null,'bypass-enabled':label==='bypass-enabled'?tail:null},recorded:{label,expectedRequests:structuredClone(tape.expectedRequests)},...(PROFILE.questionLayout==='two_stage_v3'?{generationRetryVersion:trace!.generationRetryVersion??'jev_generation_retry_v2'}:{})};
               const replayResult=await pairedInterventionReplay(versioned,own,expectedModel,PROFILE as import('../../v2/research-profile.ts').ResearchTrialProfileV3);
               trial.replay.push({tape:versioned,result:replayResult});
               if(replayResult.sides.length===2)evidence.pair(trial.order,turn,replayResult.sides[0],replayResult.sides[1]);

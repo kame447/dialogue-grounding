@@ -4,7 +4,7 @@ import {readFileSync} from 'node:fs';
 import {mkdtemp, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {pathToFileURL} from 'node:url';
+import {fileURLToPath, pathToFileURL} from 'node:url';
 import {runParityLive} from '../../../dialogue-model/runtime/diagnostics/parity-live/live.ts';
 import {createProfileDialogue} from '../../../dialogue-model/runtime/diagnostics/parity-live/replay.ts';
 import {fairness, wireValidation} from '../../../dialogue-model/runtime/diagnostics/parity-verify/fairness.ts';
@@ -13,6 +13,7 @@ import {collectModelObservations} from '../../../dialogue-model/runtime/diagnost
 import {aggregateClassifiedModelObservations} from '../../../dialogue-model/runtime/model-observations.ts';
 import type {Dependencies} from '../../../dialogue-model/runtime/diagnostics/parity-live/live.ts';
 const base=():any=>JSON.parse(readFileSync(new URL('./RECORDS-ACCEPTED-SETUP.json',import.meta.url),'utf8'));
+const sourceRoot=process.env.S2_SOURCE_ROOT??fileURLToPath(new URL('../../../',import.meta.url));
 const alias='typesafe/jev-1.14',snapshot=alias+'-20261014';
 const find=(r:any,id:string)=>verifyRecords(r).checks.find(c=>c.id===id);
 test('explicit Jev identity uses fixed relation; Luna remains exact',()=>{
@@ -51,7 +52,7 @@ test('online allowed snapshot is preserved exactly',async t=>{const {result}=awa
 test('unknown cost keeps primary precedence over returned-name rejection',async t=>{const {result}=await run(t,alias+'-20990101',{unknownCost:true});assert.notEqual(result.trials[0].failure,'model_unknown_version');assert.ok(result.trials[0].failure)});
 // New scoped series, separate from the old frozen suites. Document item3 is
 // replaced by 727be2e2; actual gates and internal projection are distinct surfaces.
-let scoped:any=null;try{scoped=await import(pathToFileURL(join(process.env.S2_SOURCE_ROOT!,'dialogue-model/runtime/diagnostics/parity-verify/model-checks.ts')).href)}catch(e:any){if(e.code!=='ERR_MODULE_NOT_FOUND')throw e}
+let scoped:any=null;try{scoped=await import(pathToFileURL(join(sourceRoot,'dialogue-model/runtime/diagnostics/parity-verify/model-checks.ts')).href)}catch(e:any){if(e.code!=='ERR_MODULE_NOT_FOUND')throw e}
 const component=(r:any,n=0)=>{assert.ok(scoped,'internal identity component absent');return scoped.scopedModelCheck(r,collectModelObservations(r),n)};
 test('scope accepted target, unrelated main timeout cannot migrate primary',()=>{const r=base();const c=component(r);assert.equal(c.id,'smoke.model_technical.0');assert.equal(c.status,'pass');assert.equal(c.reason,'all_observed_accepted')});
 test('scope missing other started owner is excluded only with proven mapping',()=>{const r=base();r.summary.runOrder.push({scriptId:'SYNTH1',label:'bypass-enabled'});r.summary.skipped=[];assert.equal(component(r).status,'pass');assert.equal(find(r,'identity.model_technical')?.status,'not_reached')});

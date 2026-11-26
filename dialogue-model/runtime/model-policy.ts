@@ -40,7 +40,7 @@ export function resolveModelPolicy(profile: unknown): ResolvedModelPolicy {
     if (d.id.value !== 'research_trial_profile_v2' && d.id.value !== 'research_trial_profile_v3') throw Error();
     const integrated = d.id.value === 'research_trial_profile_v3';
     const keys = Reflect.ownKeys(d);
-    if (keys.some(k => typeof k !== 'string' || !rootKeys.includes(k) && !(integrated && k === 'interventionPolicy')) ||
+    if (keys.some(k => typeof k !== 'string' || !rootKeys.includes(k) && !(integrated && (k === 'interventionPolicy' || k === 'dialoguePolicy'))) ||
         rootKeys.filter(k => k !== 'modelContract').some(k => !d[k] || !Object.hasOwn(d[k], 'value'))) throw Error();
     const v = Object.fromEntries(rootKeys.filter(k => k !== 'modelContract').map(k => [k, d[k].value]));
     if (integrated) {
@@ -55,7 +55,9 @@ export function resolveModelPolicy(profile: unknown): ResolvedModelPolicy {
       if(rootKeys.filter(k=>k!=='modelContract').some(k=>!d[k].enumerable)) throw Error(); data(v);
     }
     if (v.referenceMemory !== true || v.decisionMode !== 'jev' || v.humanReferent !== true ||
-        v.initialObservation !== 'cache_required' || v.questionLayout !== 'two_stage_v1' || v.utteranceStyle !== 'default' || v.maxReobservations !== 1) throw Error();
+        v.initialObservation !== 'cache_required' ||
+        // Only the integrated profile may name the explicit two_stage_v2 or two_stage_v3 layout; v2 profiles stay two_stage_v1.
+        v.questionLayout !== 'two_stage_v1' && !(integrated && (v.questionLayout === 'two_stage_v2' || v.questionLayout === 'two_stage_v3')) || v.utteranceStyle !== 'default' || v.maxReobservations !== 1) throw Error();
     fixed(v.localGrounding, {enabled: true, aiPublicClaims: true});
     fixed(v.modelPolicy, {purpose: 'dialogue_turn', resolver: 'research_worker', jevModel: MODEL_CONTRACT_V2.requested});
     validateResearchTimeouts(fields(v.timeouts, ['observationMs', 'localMs', 'decisionMs', 'lunaAttemptMs', 'generationMs', 'trialMs']));

@@ -12,5 +12,6 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["dialogue-model/**/*.ts", "tests/**/*.ts"]
+  "include": ["dialogue-model/**/*.ts", "tests/**/*.ts"],
+  "exclude": ["dialogue-model/runtime/diagnostics/parity-live/frozen/**"]
 }

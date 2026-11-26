@@ -7,31 +7,45 @@ import {JevTurnError} from './jev-turn.ts';
 // v1 (createDialogueSession) is untouched.
 import { createLunaJudge } from "../judgment/luna.mjs";
 import { createOwnLedger, validateJudgment, applyJudgment } from "../judgment/schema.mjs";
-import { STRATEGIES, TASK_INSTRUCTIONS_V2, ownImageMessage, publicMessages } from "../judgment/instructions.mjs";
+import { STRATEGIES, TASK_INSTRUCTIONS_V2, RESEARCH_TASK_INSTRUCTIONS_V2, ownImageMessage, publicMessages } from "../judgment/instructions.mjs";
 import { createReferenceGraph, applyReferenceUpdate, snapshotReferenceGraph, ReferenceGraphError, REFERENCE_LIMITS } from "../memory/reference-graph.mjs";
 import { stageMemory, prepareMemory } from "../judgment/memory.mjs";
 import { buildDecisionEvidence } from "./decision-evidence.mjs";
 import { resolveActiveJudgment } from "./active-judge.mjs";
-import { findGuardViolations, rewriteReasons, fallbackUtterance } from "./generation-guard.ts";
+import { findGuardViolations, rewriteReasons, fallbackUtterance, HOLISTIC_V5_VIEWPOINT_RULE } from "./generation-guard.ts";
 import { startGroundingShadow, validateGroundingShadowOptions } from "./grounding-shadow.ts";
 import { prepareLocalGroundingTurn, validateLocalGroundingOptions, localGroundingMemo, findLocalPublicationViolations } from "./local-grounding-turn.ts";
 import { createJevTurnRuntime } from "./jev-turn.ts";
 import { NAME_ACTS, nameShown, effectiveName, humanNamingRecord } from "../judgment/name-evidence.mjs";
+import { isHolisticPolicy } from "../decision/contract.ts";
 
+const EARLIER_ORIENTATION_RULE = "自分の画面の向きに依存する上下左右・右向き・上端・下端などの語で形を説明しないでください。特徴を伝えるときは、回転しても変わらない尖りの数や大小・くぼみ・細長さ・四角の有無・部分同士のつながりから選んでください。";
 // Identical across strategies. Holistic first; analysis only when the judge asks for it.
-export const GENERATOR_INSTRUCTIONS_V2 = [
+const generatorInstructions = (styled) => [
   "【公開発話の生成】与えられた判断を、相手に向けた自然な日本語のチャット発話にしてください。",
   "まず相手の発話に短く応じ、必要なら全体の印象・身近なものへの見立てを1つ伝えてください。形の分析は、共通教示の分析トリガー（相手が迷い・曖昧さ・食い違いを表明したか特徴・詳細を求めた、公開対話の矛盾が未解決、または名前を確定しようとする時点で対象を1つに絞れず誤った合意の実害がある）に基づく判断に discriminatingFeature があるときだけにし、その場合も特徴は1つに絞って相手の反応を待ってください。内部に候補が複数残るだけでは分析を始めないでください。",
   "挨拶や「どれからにしますか」のような漠然とした開始には、短く受け止めて相手に選んでもらうか、簡単な見立てを1つだけ出してください。先回りして詳しい形の説明や名前の一括提案をしないでください。",
-  "1回は1〜2文、親しみやすいです・ます調で返してください。講義調、長い前置き、特徴の列挙は避けてください。短さ自体は目的ではありません。",
+  ...(styled ? [
+    "1回は1〜2文で返してください。口調は相手の直近の発話と会話の流れに合わせ、敬語には自然な敬語で、くだけた口調には自然なくだけた口調で返し、相槌や言い回しも合わせてください。講義調、長い前置き、特徴の列挙は避けてください。短さ自体は目的ではありません。",
+    "相手が図形の見た目や特徴を尋ねたときは、まずその問いに直接答えてください。説明を求める発話を命名の依頼と取り違えず、相手がどの図形の話か把握できていない段階では、呼び名の提案や採用に進まないでください。見立てを説明に使うことと、名前を決めることは区別してください。見立ての説明はacceptで行い、propose_nameは対象が公開上で相手に伝わり命名の流れに入ったときに候補名を示すものです。",
+    "特徴についての質問への直接の回答は、形の分析の開始には当たりません。自分の画像や観察メモ・判断メモで確かめられる範囲で、ある・ない・確かめられないを区別して答えてください。確かめられていない特徴を相手に合わせて肯定したり、はっきり肯定した直後に同じ特徴を「〜っぽい」のような曖昧な表現へ変えたりしないでください。すでに話題の図形の呼び名や質問内容を毎回言い直さず、答えた後に形式的な確認質問を付け足さないでください。対象や特徴に未解決の曖昧さがあるときだけ、その点を具体的に尋ねてください。「これなら分かりますか？」のように相手の理解を試す聞き方や、何を指すか曖昧な指示語を重ねた聞き返しは避けてください。",
+  ] : [
+    "1回は1〜2文、親しみやすいです・ます調で返してください。講義調、長い前置き、特徴の列挙は避けてください。短さ自体は目的ではありません。",
+  ]),
   "「合意」「候補」「案」「受け取りました」のような手続きを説明する言葉は避け、普段のチャットのように言ってください。合意した後に同じ特徴の説明を繰り返さないでください。",
   "指定されたactionの対話機能を実現し、自分で別のactionに置き換えないでください。followUpがあれば主actionを先に、両方を全体で1〜2文にまとめてください。",
-  "propose_nameやagreeにdiscriminatingFeatureがあるときは、質問にせず、その特徴に短く触れて自分がどの図形のことと理解したかを相手に示してください。discriminatingFeatureがないときは、相手の見立てを短く受け止め、自分の画像の全体の見立てと結び付けて理解を表してください。必要なら自分の見立てを1つ返せます。判断にない尖り・四角・くぼみなどの形の数や特徴を作って補わないでください。propose_nameでは相手が出した名前を候補として受けるだけにし、合意は表明しないでください。",
-  "confirmは相手への短い確認、propose_nameは命名の提案として表現し、どちらも合意を表明しないでください。合意を表明できるのはagreeのときだけです。repairでは自己訂正を明示し、repair以外では取り違えや取り消しを表明しないでください。defer/revisitは保留・再訪であることが分かるように伝えてください。acceptでは、相手が場所だけで図形を示したときは形の特徴を尋ね、それ以外は受け止めるだけにしてください。",
+  styled
+    ? "propose_nameやagreeにdiscriminatingFeatureがあるときは、質問にせず、その特徴に短く触れて自分がどの図形のことと理解したかを相手に示してください。discriminatingFeatureがないときは、相手の見立てを短く受け止め、自分の画像の全体の見立てと結び付けて理解を表してください。必要なら自分の見立てを1つ返せます。判断にない尖り・四角・くぼみなどの形の数や特徴を作って補わないでください。propose_nameでは判断に示された名前を「」で候補として示し、合意は表明しないでください。"
+    : "propose_nameやagreeにdiscriminatingFeatureがあるときは、質問にせず、その特徴に短く触れて自分がどの図形のことと理解したかを相手に示してください。discriminatingFeatureがないときは、相手の見立てを短く受け止め、自分の画像の全体の見立てと結び付けて理解を表してください。必要なら自分の見立てを1つ返せます。判断にない尖り・四角・くぼみなどの形の数や特徴を作って補わないでください。propose_nameでは相手が出した名前を候補として受けるだけにし、合意は表明しないでください。",
+  styled
+    ? "confirmは相手への短い確認、propose_nameは命名の提案として表現し、どちらも合意を表明しないでください。合意を表明できるのはagreeのときだけです。repairでは自己訂正を明示し、repair以外では取り違えや取り消しを表明しないでください。defer/revisitは保留・再訪であることが分かるように伝えてください。acceptでは、相手が場所だけで図形を示したときは形の特徴を尋ね、それ以外は相手の発話を受け止めます。相手が図形の見た目や特徴を尋ねているときは、確かめられる範囲でその問いに直接答えてよく、名前に決まった・対象を共同で特定できたとは言わないでください。"
+    : "confirmは相手への短い確認、propose_nameは命名の提案として表現し、どちらも合意を表明しないでください。合意を表明できるのはagreeのときだけです。repairでは自己訂正を明示し、repair以外では取り違えや取り消しを表明しないでください。defer/revisitは保留・再訪であることが分かるように伝えてください。acceptでは、相手が場所だけで図形を示したときは形の特徴を尋ね、それ以外は受け止めるだけにしてください。",
   "targetSlotや内部参照ID、画像内の座標・範囲は自分だけの作業メモです。相手に言わず、位置での指定も求めないでください。相手の画面では配置も向きも異なります。",
-  "自分の画面の向きに依存する上下左右・右向き・上端・下端などの語で形を説明しないでください。特徴を伝えるときは、回転しても変わらない尖りの数や大小・くぼみ・細長さ・四角の有無・部分同士のつながりから選んでください。",
+  EARLIER_ORIENTATION_RULE,
   "公開履歴と矛盾する説明、同じ確認の言い換え反復、画像にない特徴の追加をしないでください。判断JSON、作業メモ、方略の説明、思考過程は出力せず、公開する発話だけを返してください。",
 ].join("\n");
+export const GENERATOR_INSTRUCTIONS_V2 = generatorInstructions(false);
+export const STYLED_GENERATOR_INSTRUCTIONS_V2 = generatorInstructions(true);
 
 // Opt-in research option (default off), identical across strategies: one dialogue
 // function per turn and chat-like brevity. It removes the unspoken followUp from
@@ -68,6 +82,10 @@ export const ACTION_SCOPE_V2 = Object.freeze({
   move_on: "別の図形に進む。決まったとは言わない",
   close: "終わりにしてよいか相談する",
 });
+export const STYLED_ACTION_SCOPE_V2 = Object.freeze({ ...ACTION_SCOPE_V2,
+  accept: "相手が場所だけで図形を示したときは、場所だけでは分からないことを短く伝えて形の特徴を尋ねる。それ以外は受け止める。特徴を尋ねられたときは、確かめられる範囲で直接答えてよい。名前に決まった・対象を共同で特定できたとは言わない",
+  propose_name: "対象が公開上で相手に伝わり命名の流れに入ったときに、判断の名前を「」で候補として示す。決まった・それでいこうとは言わない",
+});
 
 // Technical-trial Jev path only (#141 b): Jev's repair is a local fix of a public discrepancy, not
 // necessarily the AI's own mistake. Both strategies get the same text; the constants above are unchanged.
@@ -77,6 +95,45 @@ const TRIAL_GENERATOR_INSTRUCTIONS_V2 = GENERATOR_INSTRUCTIONS_V2.replace(SELF_C
 if (TRIAL_GENERATOR_INSTRUCTIONS_V2 === GENERATOR_INSTRUCTIONS_V2) throw new Error("trial generator instructions out of sync");
 const TRIAL_ACTION_SCOPE_V2 = Object.freeze({ ...ACTION_SCOPE_V2,
   repair: "公開上の食い違いを局所的に確かめ直す・直す。自分の取り違えや決めた名前の訂正を明示するのは、これまでの発話にその根拠があるときだけにする" });
+
+const STYLED_TRIAL_GENERATOR_INSTRUCTIONS_V2 = STYLED_GENERATOR_INSTRUCTIONS_V2.replace(SELF_CORRECTION_V2,
+  "取り違えや取り消しは、行動がrepairであり、かつこれまでの発話にその根拠があるときだけ表明してください。行動がdeferでもmove_onでもないときは、未解決の図形について保留・先送り・別の図形への移行を提案しないでください。");
+if (STYLED_TRIAL_GENERATOR_INSTRUCTIONS_V2 === STYLED_GENERATOR_INSTRUCTIONS_V2) throw new Error("trial generator instructions out of sync");
+const STYLED_TRIAL_ACTION_SCOPE_V2 = Object.freeze({ ...STYLED_ACTION_SCOPE_V2,
+  accept: "相手が場所だけで図形を示したときは、場所だけでは分からないことを短く伝えて形の特徴を尋ねる。それ以外は受け止める。特徴を尋ねられたときは、確かめられる範囲で直接答えてよい。直前の図形が合意済みで相手が次の図形へ進むときは自然に応じてよいが、未解決の図形について保留・先送り・別の図形への移行を提案しない。名前に決まった・対象を共同で特定できたとは言わない",
+  confirm: "判断に示された特徴（discriminatingFeature）を短く確かめる。未解決の図形について保留や命名の先送りを提案しない。決まった・それでいこうとは言わない",
+  repair: "公開上の食い違いを局所的に確かめ直す・直す。自分の取り違えや決めた名前の訂正を明示するのは、これまでの発話にその根拠があるときだけにする" });
+
+const replaceOnce = (text, from, to) => {
+  if (text.split(from).length !== 2) throw new Error("holistic-first text out of sync");
+  return text.replace(from, () => to);
+};
+
+// two_stage_v3 technical trial only: additionally rotation-independent wording and no affirmative assertions in confirm.
+const EARLIER_TRIAL_ORIENTATION_RULE = "非公開メモやdiscriminatingFeatureには自分側の画面の向きに依存する語（上下左右・側・端・向き・斜め上/下/左/右・縦長・横長等）が含まれることがあるため、公開発話にはそのまま写さず、回転しても変わらない尖り・くぼみ・四角い部分・つながりなどの表現に言い換えるか、同じ節で「こちらの画面では〜」と視点を明示して伝えてください。";
+const trialV3GeneratorInstructions = (instructions) => replaceOnce(instructions, SELF_CORRECTION_V2,
+  "取り違えや取り消しは、行動がrepairであり、かつこれまでの発話にその根拠があるときだけ表明してください。行動がdeferでもmove_onでもないときは、未解決の図形について保留・先送り・別の図形への移行を提案しないでください。" + EARLIER_TRIAL_ORIENTATION_RULE);
+const STYLED_TRIAL_V3_GENERATOR_INSTRUCTIONS_V2 = trialV3GeneratorInstructions(STYLED_GENERATOR_INSTRUCTIONS_V2);
+const trialV3ActionScope = (scope) => Object.freeze({ ...scope,
+  confirm: "判断に示された特徴（discriminatingFeature）を回転に依存しない表現で短く尋ねて確かめる。観察メモにない特徴を肯定したり、同じ図形だと断定したりしない。未解決の図形について保留や命名の先送りを提案しない。決まった・それでいこうとは言わない",
+  repair: "公開上の食い違いを回転に依存しない表現で局所的に確かめ直す・直す。自分の取り違えや決めた名前の訂正を明示するのは、これまでの発話にその根拠があるときだけにする" });
+const STYLED_TRIAL_V3_ACTION_SCOPE_V2 = trialV3ActionScope(STYLED_TRIAL_ACTION_SCOPE_V2);
+
+// two_stage_v3 technical trial, holistic-first (holistic-first-20261124): the whole reading first and the parts only when they are needed to tell figures apart; a new text
+// added beside the older v3 trial constants above, which stay as they are. Identical for both strategies; neither names a specific reading nor gives a fixed sentence.
+const HOLISTIC_V3_GENERATOR_INSTRUCTIONS_V2 = replaceOnce(replaceOnce(STYLED_TRIAL_V3_GENERATOR_INSTRUCTIONS_V2,
+  'まず相手の発話に短く応じ、必要なら全体の印象・身近なものへの見立てを1つ伝えてください。形の分析は、共通教示の分析トリガー（相手が迷い・曖昧さ・食い違いを表明したか特徴・詳細を求めた、公開対話の矛盾が未解決、または名前を確定しようとする時点で対象を1つに絞れず誤った合意の実害がある）に基づく判断に discriminatingFeature があるときだけにし、その場合も特徴は1つに絞って相手の反応を待ってください。内部に候補が複数残るだけでは分析を始めないでください。', '図形全体を尋ねられた最初の説明（どんな図形か、残りはどんな形かなど）では、まず自分の観察と公開対話に根拠のある全体の見立て・印象・大まかな形を短く先に伝えてください。見立ては相手が対象の候補をつかむためのもので、特定の見立てを決まりにせず、自然な見立てが作れないときは無理に物の名前を当てはめず全体の形を伝えてかまいません。全体の見立てを述べることは、名前の提案や採用ではありません。形の分析（部分の形・つながり・配置）は、判断にdiscriminatingFeatureがあるときだけ、その特徴を1つに絞って述べて相手の反応を待ってください。最初から細部を尋ねられたときはその質問に直接答え、毎回先頭へ見立てを付けないでください。判断が求めていない部品の確認や、すでに肯定された特徴の再確認を自分から足さず、否定された見立てを新しい根拠なく繰り返さないでください。内部に候補が複数残るだけでは分析を始めないでください。'),
+  '1回は1〜2文で返してください。口調は', '1回は1〜2文で返してください（複数の図形をまとめて尋ねられたときは、求められた図形それぞれに短く答えてください）。口調は');
+export const HOLISTIC_V3_ACTION_SCOPE_V2 = Object.freeze({ ...STYLED_TRIAL_V3_ACTION_SCOPE_V2,
+  accept: replaceOnce(STYLED_TRIAL_V3_ACTION_SCOPE_V2.accept, '受け止める。特徴を尋ねられたときは、確かめられる範囲で直接答えてよい。', '受け止める。図形の見た目や特徴を尋ねられたときは、確かめられる範囲で直接答えてよい。図形全体を初めて尋ねられたときは全体の見立てを先に短く、複数の図形を尋ねられたときは求められた図形それぞれに短く答える。'),
+  confirm: STYLED_TRIAL_V3_ACTION_SCOPE_V2.confirm.replace("決まった・それでいこうとは言わない", () => '判断で選ばれた特徴だけを確かめ、ほかの部品の確認を足さない。' + "決まった・それでいこうとは言わない") });
+
+const HOLISTIC_V5_GENERATOR_INSTRUCTIONS_V2 = replaceOnce(
+  replaceOnce(HOLISTIC_V3_GENERATOR_INSTRUCTIONS_V2, EARLIER_ORIENTATION_RULE, HOLISTIC_V5_VIEWPOINT_RULE),
+  EARLIER_TRIAL_ORIENTATION_RULE, "");
+const HOLISTIC_V5_ACTION_SCOPE_V2 = Object.freeze({ ...HOLISTIC_V3_ACTION_SCOPE_V2,
+  confirm: replaceOnce(HOLISTIC_V3_ACTION_SCOPE_V2.confirm, "回転に依存しない表現で", "形の参照枠に関する共通教示に沿って"),
+  repair: replaceOnce(HOLISTIC_V3_ACTION_SCOPE_V2.repair, "回転に依存しない表現で", "形の参照枠に関する共通教示に沿って") });
 
 // Luna participant path (public-act consistency), identical across strategies. The constants above stay
 // as they are for the Jev path. Own-image claims need a basis in the judgment or its memo;
@@ -163,6 +220,9 @@ function abortIf(signal) {
  *   usagePolicy?: import('../web/participant-usage-policy.ts').ParticipantUsageOnly,
  *   jevDecision?: import('../decision/contract.ts').JevDecisionClient | null, maxReobservations?: number, interventionPolicy?: import('./research-profile.ts').InterventionPolicyReference, decisionTimeoutMs?:number,
  *   technicalTrial?: import('../decision/contract.ts').AdaptiveRepairTrial,
+ *   participantPrompts?: boolean,
+ *   generationRetryVersion?: import('./jev-turn.ts').GenerationRetryVersion,
+ *   newTrialAgreeNameScopeVersion?: import('./jev-turn.ts').JevTurnOptions['newTrialAgreeNameScopeVersion'],
  *   onJevTurnTrace?: ((record: import('./jev-turn.ts').JevTurnTrace) => unknown) | null }} options
  * @returns {{slots: readonly string[], initialPrivateState(): any,
  *   initializePrivateState?: (options?: {signal?: AbortSignal}) => Promise<import('./jev-turn.ts').JevPrivateState>,
@@ -190,6 +250,8 @@ export function createDialogueV2(options) {
     intervention=interventionForStrategy(strategy);
    }catch{throw new JevTurnError('invalid_intervention');}
   }
+  // two_stage_v2 exists only for the integrated research profile; every other dialogue keeps two_stage_v1.
+  if (Object.hasOwn(options, "questionLayout") && options.questionLayout !== "two_stage_v1" && !integrated) throw new Error(options.questionLayout + " requires the integrated Jev profile");
   if (!client || typeof client.complete !== "function") throw new Error("A chat client is required");
   if (!STRATEGIES.includes(strategy)) throw new Error("Unsupported dialogue strategy");
   if (typeof referenceMemory !== "boolean") throw new Error("Invalid memory option");
@@ -213,14 +275,45 @@ export function createDialogueV2(options) {
   const slots = anchors.map((anchor) => anchor.id);
   const ownAnchors = anchors.map(({ id, bbox, centroid }) => ({ id, bbox: { ...bbox }, centroid: { ...centroid } }));
   if (decisionMode === "jev") {
+    const v3Trial = Boolean(options.technicalTrial) && options.questionLayout === "two_stage_v3";
+    // The saved research or participant profile owns the policy. An absent
+    // policy keeps the production #175 wording, including after restore.
+    const v3 = options.questionLayout === "two_stage_v3";
+    const researchV3 = v3 && options.participantPrompts !== true;
+    const styled = v3 || isHolisticPolicy(options.dialoguePolicy);
+    const holisticV1 = v3Trial && isHolisticPolicy(options.dialoguePolicy);
+    const holisticV5 = options.questionLayout === "two_stage_v3" && options.dialoguePolicy === "holistic_v5";
+    const baseInstructions = styled ? STYLED_GENERATOR_INSTRUCTIONS_V2 : GENERATOR_INSTRUCTIONS_V2;
+    const baseScope = styled ? STYLED_ACTION_SCOPE_V2 : ACTION_SCOPE_V2;
+    const trialInstructions = styled ? STYLED_TRIAL_GENERATOR_INSTRUCTIONS_V2 : TRIAL_GENERATOR_INSTRUCTIONS_V2;
+    const trialScope = styled ? STYLED_TRIAL_ACTION_SCOPE_V2 : TRIAL_ACTION_SCOPE_V2;
+    const instructions = holisticV5 ? HOLISTIC_V5_GENERATOR_INSTRUCTIONS_V2 : holisticV1 ? HOLISTIC_V3_GENERATOR_INSTRUCTIONS_V2
+      : v3Trial ? STYLED_TRIAL_V3_GENERATOR_INSTRUCTIONS_V2 : options.technicalTrial ? trialInstructions : baseInstructions;
+    const actionScope = holisticV5 ? HOLISTIC_V5_ACTION_SCOPE_V2 : holisticV1 ? HOLISTIC_V3_ACTION_SCOPE_V2
+      : v3Trial ? STYLED_TRIAL_V3_ACTION_SCOPE_V2 : options.technicalTrial ? trialScope : baseScope;
+    // #175 is part of the participant prompt. The research layouts retain their own recorded wording.
+    const generation = {
+      task: researchV3 ? RESEARCH_TASK_INSTRUCTIONS_V2 : TASK_INSTRUCTIONS_V2,
+      instructions: researchV3 ? replaceOnce(instructions,
+        "acceptでは、相手が場所だけで図形を示したときは形の特徴を尋ね、それ以外は相手の発話を受け止めます。",
+        "acceptでは相手の発話を受け止めます。") : instructions,
+      actionScope: researchV3 ? { ...actionScope, accept: replaceOnce(actionScope.accept,
+        "相手が場所だけで図形を示したときは、場所だけでは分からないことを短く伝えて形の特徴を尋ねる。それ以外は受け止める。",
+        "受け止める。") } : actionScope,
+      ...(concise ? { concise: CONCISE_INSTRUCTIONS_V2 } : {}),
+      final: FINAL_INSTRUCTIONS_V2, timeoutMs: GENERATION_TIMEOUT_MS,
+    };
     if (!referenceMemory || !localGrounding) throw new Error("Jev decision mode requires local reference memory");
     if (activeDecision || decisionShadowClient || groundingShadow) throw new Error("Jev decision mode cannot combine legacy decision paths");
     return createJevTurnRuntime({ client, ownImage, ownAnchors, observer, jevDecision, localGrounding, usagePolicy, memoryPruneVersion, ...(integrated?{intervention,decisionTimeoutMs}:{}),
       ...(Object.hasOwn(options,'technicalTrial')?{technicalTrial:options.technicalTrial}:{}),
+      ...(Object.hasOwn(options,'questionLayout')?{questionLayout:options.questionLayout}:{}),
+      ...(options.dialoguePolicy ? { dialoguePolicy: options.dialoguePolicy } : {}),
+      ...(options.rotationMode ? { rotationMode: options.rotationMode } : {}),
+      generationRetryVersion: options.generationRetryVersion,
+      newTrialAgreeNameScopeVersion: options.newTrialAgreeNameScopeVersion,
       onJevTurnTrace, onLocalGroundingTrace, maxReobservations,
-      generation: { task: TASK_INSTRUCTIONS_V2, instructions: options.technicalTrial ? TRIAL_GENERATOR_INSTRUCTIONS_V2 : GENERATOR_INSTRUCTIONS_V2,
-        ...(concise ? { concise: CONCISE_INSTRUCTIONS_V2 } : {}), actionScope: options.technicalTrial ? TRIAL_ACTION_SCOPE_V2 : ACTION_SCOPE_V2,
-        final: FINAL_INSTRUCTIONS_V2, timeoutMs: GENERATION_TIMEOUT_MS } });
+      participantPrompts: options.participantPrompts, generation });
   }
   const dialogueJudge = judge ?? createLunaJudge(client);
   // Research-only trace of every attempted run (including superseded or failed ones).

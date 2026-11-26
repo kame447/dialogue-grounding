@@ -1,10 +1,10 @@
 // The models propose interpretations; only this boundary assigns public evidence,
 // graph IDs and issue IDs. No score is used to promote an interpretation.
-import { LOCAL_ASPECTS, LOCAL_ACTS } from "./contract.ts";
-import type { LocalSegmentProposal, LocalFunctionVerdict, LocalVerificationResult, LocalClaimView, PublicTurn } from "./contract.ts";
+import { AI_BOUND_SOURCE, LABELLED_ANSWER_SOURCE, LOCAL_ASPECTS, LOCAL_ACTS, LOCAL_ANSWERS_CHECKED } from "./contract.ts";
+import type { AiPublicPending, LocalSegmentProposal, LocalFunctionVerdict, LocalVerificationResult, LocalClaimView, PublicTurn } from "./contract.ts";
 import { isBareDeictic, literalSpan, quoteAround } from "../judgment/public-evidence.mjs";
 import { SLOTS } from "../stimuli/board.mjs";
-import { REFERENCE_LIMITS, snapshotReferenceGraph } from "../memory/reference-graph.mjs";
+import { REFERENCE_LIMITS, snapshotReferenceGraph, validateReferenceUpdate, ReferenceGraphError } from "../memory/reference-graph.mjs";
 import { priorClaimViews } from "./derive.ts";
 
 export type LocalGraph = { records: readonly unknown[]; slots?: readonly string[]; memoryPruneVersion?: import("../memory/reference-graph.mjs").MemoryPruneVersion };
@@ -22,6 +22,12 @@ export type LocalVerificationDiagnostic = {
   resolvedIssueId: string;
 } | {
   segmentId: string;
+  reason: "targets_inherited";
+  /** holistic_v3 only: the claim whose empty extracted targets were copied from the claim it answers. */
+  claimId: string;
+  respondsToClaimId: string;
+} | {
+  segmentId: string;
   reason: "antecedent_missing";
   /** Invalid model text is never retained; only graph-ref syntax can survive. */
   respondsToClaimId: string | null;
@@ -29,6 +35,19 @@ export type LocalVerificationDiagnostic = {
 };
 export type LocalVerifiedUpdate = LocalVerificationResult & { diagnostics?: LocalVerificationDiagnostic[] };
 type VerificationInput = {
+  /** holistic_v3 only: see LocalGroundingOptions.keepUnboundApproval. */
+  keepUnboundApproval?: boolean;
+  /** holistic_v4 only: see LocalGroundingOptions.approvalFromNamedClaim. */
+  approvalFromNamedClaim?: boolean;
+  /** v7: questions bound through the committed single-figure check and its public description. */
+  referenceQuestionBindings?: ReadonlyMap<string, string>;
+  directReferenceReplies?: boolean;
+  /** jev_generation_retry_v11: an ask rewrites its aspect to the question's only when it answers that question or names no turn. */
+  refinedReplyRules?: boolean;
+  /** jev_generation_retry_v12: an agree the classifier labelled as answering the checked point (answersChecked "yes") counts as the pointing reply the quote's own words would otherwise have to carry. */
+  answerFieldRules?: boolean;
+  /** v11: the turn after which the current naming interval starts (the last agree, defer or move_on); a name proposal before it is never carried by an approval request. */
+  namingIntervalStart?: number;
   graph: LocalGraph;
   turn: number;
   publicTurns: readonly PublicTurn[];
@@ -41,10 +60,36 @@ const text = (value: unknown): value is string => typeof value === "string" && v
 const ref = (value: unknown) => typeof value === "string" && /^[1-9]\d*:[a-zA-Z0-9_-]{1,32}$/u.test(value);
 const responses = new Set(["agree", "deny", "name_accept", "name_reject", "withdraw"]);
 const independentActs = new Set(["assert", "construe", "name_propose", "ask"]);
+// A typed agree still needs words that point to the checked figure for this
+// cross-aspect reply. A standalone acknowledgment or a name question is not enough.
+export function directsToFigure(quote: string, directReferenceReplies = false): boolean {
+  const normalized = quote.normalize("NFKC");
+  if (!directReferenceReplies) return /(?:(?:^|[\s、,]|まさに|確かに)(?:これ|それ)|(?:この|その|同じ)(?:図形|形))(?:のこと)?(?:です[よね]?|だ[よね]?)?[。!\s]*$/u.test(normalized);
+  // Speech-like spelling can separate a pointing word with punctuation or repeat it.
+  return /(?:(?:^|[\s、,!。.]|まさに|確かに|そうそう)(?:これ(?:これ)?|それ(?:それ)?)|(?:この|その|同じ)(?:図形|形))(?:のこと)?(?:です[よね]?|だ[よね]?)?[\s、,!。.]*$/u.test(normalized);
+}
+const figureReplyAspects = new Set(["referent", "part", "contour", "construal", "orientation", "position", "question"]);
+export const isFigureReplyAspect = (aspect: string): boolean => figureReplyAspects.has(aspect);
+
+function opposesPointingReply(segment: LocalSegmentProposal, question: LocalClaimView, figure: string, humanText: string,
+  segments: readonly LocalSegmentProposal[], verdicts: readonly LocalFunctionVerdict[], ownSlots: readonly string[]): boolean {
+  if (/[?？]|じゃない|ではない|違う|違います|別の(?:図形|形)/u.test(segment.quote.normalize("NFKC"))) return true;
+  return segments.some(other => {
+    if (!other || other.segmentId === segment.segmentId || !figureReplyAspects.has(other.aspect) ||
+        !text(other.quote) || !literalSpan(humanText, other.quote) || !Array.isArray(other.targets) ||
+        !other.targets.every(id => ownSlots.includes(id))) return false;
+    if (other.targets.some(id => id !== figure)) return true;
+    const matching = verdicts.filter(v => v?.segmentId === other.segmentId);
+    if (matching.length !== 1) return false;
+    const verdict = matching[0];
+    return (verdict.act === "deny" || verdict.act === "ask") &&
+      (verdict.respondsToClaimId === question.id || other.respondsToTurn === question.sourceTurn);
+  });
+}
 const overlap = (a: readonly string[], b: readonly string[]) => a.some(slot => b.includes(slot));
 
 /** Only the CURRENT public human turn may supply a new segment's quote. */
-export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts }: VerificationInput): LocalVerifiedUpdate {
+export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts, keepUnboundApproval = false, approvalFromNamedClaim = false, referenceQuestionBindings, directReferenceReplies = false, refinedReplyRules = false, answerFieldRules = false, namingIntervalStart = 0 }: VerificationInput): LocalVerifiedUpdate {
   const result: LocalVerifiedUpdate = { operations: [], rejected: [] };
   // Revalidate JSON-restored graphs before using any model-selected pointer.
   snapshotReferenceGraph(graph);
@@ -71,7 +116,8 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     }
     const matches = verdicts.filter(v => v?.segmentId === segment.segmentId);
     const verdict = matches[0];
-    if (matches.length !== 1 || !exact(verdict, ["segmentId", "act", "respondsToClaimId", "rawScore"]) ||
+    if (matches.length !== 1 || !exact(verdict, answerFieldRules && matches.length === 1 && Object.hasOwn(verdict ?? {}, "answersChecked") ? ["segmentId", "act", "respondsToClaimId", "rawScore", "answersChecked"] : ["segmentId", "act", "respondsToClaimId", "rawScore"]) ||
+        verdict.answersChecked !== undefined && !LOCAL_ANSWERS_CHECKED.includes(verdict.answersChecked) ||
         !LOCAL_ACTS.includes(verdict.act) || !(verdict.respondsToClaimId === null || ref(verdict.respondsToClaimId) || independentActs.has(verdict.act)) ||
         !(verdict.rawScore === null || (typeof verdict.rawScore === "number" && Number.isFinite(verdict.rawScore)))) {
       reject("invalid_verdict"); continue;
@@ -87,11 +133,58 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     let aspect = segment.aspect;
     let linkedIssue = segment.linkedIssueId;
     let name = segment.name;
-    if (isBareDeictic(quote) || /^(?:それ|これ|あれ)で(?:いい|良い|よい)(?:です)?[。！!？?\s]*$/u.test(quote.normalize("NFKC").trim())) {
+    // An approval request ("is that name fine?") is a name proposal that carries the earlier proposal's name; it is decided before the bare-deictic rule so a short typed request is not turned into an acknowledgement.
+    // The antecedent is the claim the classifier chose: the partner's own name proposal, or a public AI claim that carries a name (an adoption, a named confirmation).
+    // The name is public either way. The extraction's respondsToTurn names the AI turn that was just answered, so for this act it does not have to be the claim's turn.
+    // v11 (#198): a short approval request that answers the AI's question about a name ("いい？") answers the partner's latest name proposal:
+    // the latest proposal of the partner in the current naming interval and before the request. The question itself names nothing, so the proposal is the claim the request carries the name from.
+    if (refinedReplyRules && keepUnboundApproval && prior?.speaker === "ai" && prior.act === "ask" && act === "name_propose" && name === null && aspect === "name") {
+      // The latest proposal of the partner inside the current naming interval and before this request (not before the question the classifier linked: the same question may have been asked twice), whether or not it names a figure: a later, corrected proposal is the one the request answers,
+      // and a proposal from before an agree, defer or move_on is not carried into the next figure.
+      const proposal = active.filter(c => c.speaker === "human" && c.act === "name_propose" && c.aspect === "name" && c.name !== null && c.sourceTurn > namingIntervalStart && c.sourceTurn < turn)
+        .sort((x, y) => x.sourceTurn - y.sourceTurn || x.turn - y.turn).at(-1);
+      // (NB-26N-2) A proposal that named a figure is carried only to a question about that figure: after the partner left a figure without any boundary action, the next figure's question does not take its old name.
+      if (proposal && (proposal.targets.length === 0 || prior.targets.length === 0 || overlap(proposal.targets, prior.targets))) prior = proposal;
+    }
+    const approvalRequest = keepUnboundApproval && !!prior && act === "name_propose" && name === null && aspect === "name" && prior.aspect === "name" &&
+      (approvalFromNamedClaim ? ["name_propose", "name_accept"].includes(prior.act) : prior.act === "name_propose" && prior.speaker === "human") && prior.name !== null;
+    // jev_generation_retry_v9: a question whose target the binding supplied keeps that provenance in its claim, so the rule below also holds on later turns.
+    const checkedFigure = prior && (referenceQuestionBindings?.get(prior.id) ?? (prior.source === AI_BOUND_SOURCE ? prior.targets[0] : undefined));
+    const boundQuestion = checkedFigure && prior?.act === "ask" && previousClaims.includes(prior) &&
+      prior.targets.length === 1 && prior.targets[0] === checkedFigure ? prior : null;
+    // v12: the classifier's closed label stands in for the quote's pointing words; every other condition below (agree, no name, the question's only figure, nothing opposing) is unchanged.
+    const labelled = !!boundQuestion && !directsToFigure(quote, directReferenceReplies) && answerFieldRules && verdict.answersChecked === "yes";
+    const pointsToFigure = !!boundQuestion && (directsToFigure(quote, directReferenceReplies) || labelled);
+    const agreesWithCheckedFigure = !!boundQuestion && pointsToFigure && act === "agree" && name === null &&
+      (directReferenceReplies ? figureReplyAspects.has(aspect) && figureReplyAspects.has(boundQuestion.aspect) :
+        aspect === "referent" && boundQuestion.aspect === "question") &&
+      (targets.length === 0 || targets.length === 1 && targets[0] === boundQuestion.targets[0]) &&
+      (!directReferenceReplies || !opposesPointingReply(segment, boundQuestion, boundQuestion.targets[0], human.text, segments, verdicts, ownSlots));
+    // A same-aspect extraction of a pointing reply must pass the direct check too.
+    // A supplied target is used only by a reply that passed the direct check; any other agree is the v7 case (a response to a question that has no target).
+    if (directReferenceReplies && boundQuestion && act === "agree" && !agreesWithCheckedFigure &&
+        (boundQuestion.aspect === "question" || pointsToFigure || boundQuestion.source === AI_BOUND_SOURCE || isSuppliedBinding(referenceQuestionBindings, boundQuestion.id))) {
+      reject("inconsistent_claim_response"); continue;
+    }
+    if (agreesWithCheckedFigure && boundQuestion) aspect = boundQuestion.aspect;
+    // v12: a reply counted because of the label (not the quote's own words) keeps that provenance in its claim, so the naming scope reads it the same way on later turns.
+    const labelledAnswer = agreesWithCheckedFigure && labelled;
+    // v9: a supplied target is the question's only for a reply that passed the direct check. Any other reply that adds information
+    // (agree was rejected above; assert and construe here) is judged against the question as extracted, which named no figure.
+    if (prior && prior.source === AI_BOUND_SOURCE && !agreesWithCheckedFigure && ["agree", "assert", "construe"].includes(act)) prior = { ...prior, targets: [] };
+    if (directReferenceReplies && prior && name === null && figureReplyAspects.has(aspect) &&
+        figureReplyAspects.has(prior.aspect) && prior.targets.length === 1 &&
+        (targets.length === 0 || targets.length === 1 && targets[0] === prior.targets[0])) {
+      const withdrawnQuestion = act === "withdraw" && prior.speaker === "human" && prior.act === "agree" &&
+        active.some(c => c.id === prior?.respondsTo && c.speaker === "ai" && c.act === "ask");
+      if (withdrawnQuestion || (act === "deny" || act === "ask") && prior.speaker === "ai" && prior.act === "ask" &&
+          !(refinedReplyRules && act === "ask" && segment.respondsToTurn !== null && segment.respondsToTurn !== prior.sourceTurn)) aspect = prior.aspect;
+    }
+    if (!agreesWithCheckedFigure && (isBareDeictic(quote) || /^(?:それ|これ|あれ)で(?:いい|良い|よい)(?:です)?[。！!？?\s]*$/u.test(quote.normalize("NFKC").trim()))) {
       // ai1 is the program-owned primary act. A secondary feature (ai2) cannot
       // receive a bare acknowledgment, even if the classifier selected its ID.
       const primary = previousClaims.filter(c => c.id === `${c.turn}:ai1`);
-      if (primary.length !== 1 || !prior || prior.id !== primary[0].id || !responses.has(act)) {
+      if (!approvalRequest && (primary.length !== 1 || !prior || prior.id !== primary[0].id || !responses.has(act))) {
         act = "acknowledge"; prior = null; targets = []; linkedIssue = null; name = null;
       }
     }
@@ -100,19 +193,30 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     let droppedAntecedent: string | null = null;
     // Independent statements do not require an antecedent. Check before target
     // inheritance so discarding a pointer cannot transfer its figure candidates.
+    // An approval question about a name, linked by the classifier to an earlier name proposal while neither names a figure, has no figure to contradict: the link stays.
+    // An approval request ("is that name fine?") is a name proposal that carries the earlier proposal's name; neither names a figure, so there is none to contradict.
+    // A question about a name (ask) that the classifier links to an earlier unbound name proposal keeps its link too: it asks about the same name, naming no figure.
+    // It is a plain question, not an approval request (the typed naming request counts name proposals only).
+    const unboundNameQuestion = keepUnboundApproval && !!prior && act === "ask" && aspect === "name" && prior.aspect === "name" && prior.act === "name_propose";
+    const unboundApproval = (approvalRequest || unboundNameQuestion) && prior!.targets.length === 0 && targets.length === 0;
+    // v11 (NB-26N-3): withdrawing one's own name proposal that named no figure withdraws it (neither side names a figure, so there is none to contradict).
+    const unboundWithdraw = refinedReplyRules && act === "withdraw" && prior?.speaker === "human" && prior.act === "name_propose" && prior.aspect === "name" &&
+      prior.targets.length === 0 && targets.length === 0 && (aspect === "name" || aspect === "progress");
+    if (unboundWithdraw) aspect = "name";
     if (prior && independentActs.has(act) && prior.sourceTurn < turn &&
-        (prior.aspect !== aspect || !overlap(prior.targets, targets.length ? targets : prior.targets) ||
-          (segment.respondsToTurn !== null && segment.respondsToTurn !== prior.sourceTurn))) {
+        (prior.aspect !== aspect || !unboundApproval && !unboundWithdraw && !overlap(prior.targets, targets.length ? targets : prior.targets) ||
+          (!(approvalRequest && approvalFromNamedClaim) && segment.respondsToTurn !== null && segment.respondsToTurn !== prior.sourceTurn))) {
       droppedAntecedent = prior.id; prior = null;
     }
     // Only absence of a target can inherit the verified antecedent's candidates.
     // A nonempty, contradictory target is never moved to a different figure.
+    const inheritedTargets = prior !== null && targets.length === 0 && prior.targets.length > 0;
     if (prior && targets.length === 0) targets = [...prior.targets];
     // Deferring or revisiting an issue inherits its aspect only when extraction
     // supplied generic progress. Explicit semantic disagreements remain invalid.
     if (prior && aspect === "progress" && ["defer", "revisit"].includes(act)) aspect = prior.aspect;
-    if (prior && (prior.sourceTurn >= turn || prior.aspect !== aspect || !overlap(prior.targets, targets) ||
-        (segment.respondsToTurn !== null && segment.respondsToTurn !== prior.sourceTurn))) {
+    if (prior && (prior.sourceTurn >= turn || prior.aspect !== aspect || !unboundApproval && !unboundWithdraw && !overlap(prior.targets, targets) ||
+        (!(approvalRequest && approvalFromNamedClaim) && segment.respondsToTurn !== null && segment.respondsToTurn !== prior.sourceTurn))) {
       reject("inconsistent_claim_response"); continue;
     }
     if (prior && (act === "withdraw" ? prior.speaker !== "human" : responses.has(act) && prior.speaker === "human")) {
@@ -125,7 +229,8 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     if (act === "construe" && aspect !== "construal" || act.startsWith("name_") && aspect !== "name") {
       reject("act_aspect_mismatch"); continue;
     }
-    if (act === "name_propose") {
+    if (act === "name_propose" && approvalRequest && prior) name = prior.name;
+    else if (act === "name_propose") {
       const span = name === null ? null : literalSpan(quote, name);
       if (!span) { reject("nonpublic_name"); continue; }
       name = span.text;
@@ -158,7 +263,8 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     const issueId = prior?.issueId ?? linkedIssue ?? id;
     result.operations.push({ kind: "claim", id, issueId,
       targets, aspect, act, proposition: segment.proposition, name,
-      speaker: "human", sourceTurn: turn, quote, respondsTo: prior?.id ?? null, source: "partner_statement" });
+      speaker: "human", sourceTurn: turn, quote, respondsTo: prior?.id ?? null, source: labelledAnswer ? LABELLED_ANSWER_SOURCE : "partner_statement" });
+    if (keepUnboundApproval && inheritedTargets) (result.diagnostics ??= []).push({ segmentId: segment.segmentId, reason: "targets_inherited", claimId: id, respondsToClaimId: prior!.id });
     if (overriddenIssue || droppedIssue) (result.diagnostics ??= []).push({ segmentId: segment.segmentId, reason: "issue_link_overridden",
       linkedIssueId: ref(proposedIssue) ? proposedIssue : null, resolvedIssueId: issueId });
     if (droppedAntecedent !== null) (result.diagnostics ??= []).push({ segmentId: segment.segmentId, reason: "antecedent_dropped",
@@ -167,6 +273,20 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
       respondsToClaimId: ref(verdict.respondsToClaimId) ? verdict.respondsToClaimId : null, resolvedIssueId: issueId });
   }
   return result;
+}
+
+/** The reason a verified operation the memory then refused is recorded under (the run and S4 share it). */
+export const memoryRejectionReason = (code: unknown): string => "memory_" + (typeof code === "string" && /^[a-z][a-z0-9_]{0,59}$/.test(code) ? code : "invalid_update");
+/** The run's own step for one verified operation: append it to the update and let the memory validate the whole update, so an operation beyond the memory's limits is refused
+ * while the earlier ones stand. S4 applies the redone operations through this same function, in the same order, on the graph before the turn. */
+export function applyVerifiedOperation<U extends { operations: unknown[] }>(graph: LocalGraph, update: U, operation: unknown, publicTurns: readonly PublicTurn[]):
+  { applied: true; update: U } | { applied: false; reason: string } {
+  const candidate = { ...update, operations: [...update.operations, operation] };
+  try { return { applied: true, update: validateReferenceUpdate(graph, candidate, { publicTurns }) as unknown as U }; }
+  catch (error) {
+    if (!(error instanceof ReferenceGraphError)) throw error;
+    return { applied: false, reason: memoryRejectionReason((error as { code?: unknown }).code) };
+  }
 }
 
 export type LocalPriorAct = {
@@ -182,6 +302,38 @@ export type LocalPriorAct = {
   publishedFallback?: boolean;
   followUp?: Omit<LocalPriorAct, "turn" | "followUp" | "publishedFallback"> | null;
 };
+
+/** Bind one targetless question to the executed figure only when the already
+ * published description supports that single figure. Pending extraction stays raw. */
+const SUPPLIED_SUFFIX = "#supplied";
+/** True when the binding gave the question its figure (its extraction had none), as opposed to confirming a target the extraction already carried. */
+export const isSuppliedBinding = (bindings: ReadonlyMap<string, string> | undefined, questionId: string): boolean => bindings?.has(questionId + SUPPLIED_SUFFIX) === true;
+export function bindPublishedReferenceQuestion(pending: AiPublicPending | null | undefined,
+  prior: Pick<LocalPriorAct, "turn" | "action" | "targetSlot" | "publishedFallback"> | undefined,
+  source: (PublicTurn & { nonReferential?: boolean }) | undefined, turn: number, directReferenceReplies = false): Map<string, string> {
+  const bound = new Map<string, string>();
+  if (!pending || !prior || prior.publishedFallback || !prior.targetSlot ||
+      (prior.action !== "confirm" && prior.action !== "repair") ||
+      source?.speaker !== "ai" || source.nonReferential || source.turn !== pending.aiSeq || source.turn !== prior.turn ||
+      (pending.status !== "ready" && pending.status !== "partial")) return bound;
+  const cited = pending.candidates.filter(c => c.sourceTurn === source.turn && source.text.includes(c.quote));
+  const questions = cited.filter(c => c.act === "ask");
+  const descriptions = cited.filter(c => ["assert", "agree", "construe"].includes(c.act) &&
+    ["referent", "part", "contour", "construal"].includes(c.aspect) && c.targets.length > 0);
+  const question = questions[0];
+  const figure = prior.targetSlot;
+  if (questions.length === 1 &&
+      (directReferenceReplies ? figureReplyAspects.has(question.aspect) : question.aspect === "question") &&
+      (question.targets.length === 0 || directReferenceReplies && question.targets.length === 1 && question.targets[0] === figure) &&
+      descriptions.some(c => c.targets.length === 1 && c.targets[0] === figure) &&
+      descriptions.every(c => c.targets.includes(figure))) {
+    bound.set(`${turn}:pub${question.ordinal}`, figure);
+    // Only a question whose extraction left the target empty gets the executed figure from this binding. That supplied
+    // target is evidence only for a reply that passes the direct check (see isSuppliedBinding).
+    if (question.targets.length === 0) bound.set(`${turn}:pub${question.ordinal}${SUPPLIED_SUFFIX}`, figure);
+  }
+  return bound;
+}
 
 /** Recover literal names from a committed act whose AI turn is public.
  * Private plan features are disabled by default. legacy_private_plan exists only

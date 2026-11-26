@@ -4,18 +4,24 @@ import { BaseAssignmentError, data, readAssignment, readOwner, UUID, OWNER, safe
   assignmentRotationMode, assignmentMemoryPruneVersion, assignmentParticipantModelPin, assignmentParticipantDialogueProfile, assignmentFigureSelection } from './base-assignment-data.ts';
 import type { BaseSessionOptions, BaseSession, BaseSessionErrorCode, BaseOwnerState, BaseAssignment,
   AdmissionKey, BaseRecord, RawBaseRecord, BaseTask, BaseArchiveWrite, FailureCode, FailureCause, RestoreResult } from './base-assignment.ts';
+/** Closed sub-reasons of a store/session rejection (code trial_unavailable). Diagnostics only: the HTTP mapping uses `code`, and the reason never carries text. */
+export type PersistReason = 'cas_conflict' | 'owner_expired' | 'record_deleted' | 'owner_state_invalid' | 'store_invalid' | 'store_io' | 'size_limit';
 export class BaseSessionError extends Error {
   readonly code: BaseSessionErrorCode;
-  constructor(code: BaseSessionErrorCode) { super(code); this.name = 'BaseSessionError'; this.code = code; }
+  readonly reason?: PersistReason;
+  constructor(code: BaseSessionErrorCode, reason?: PersistReason) { super(code); this.name = 'BaseSessionError'; this.code = code; if (reason) this.reason = reason; }
 }
-const fail = (code: BaseSessionErrorCode = 'trial_unavailable'): never => { throw new BaseSessionError(code); };
+const fail = (code: BaseSessionErrorCode = 'trial_unavailable', reason?: PersistReason): never => { throw new BaseSessionError(code, reason); };
 // Saved profile metadata can be read before the matching runtime is available.
 function requireRunnableAssignment(assignment: BaseAssignment): void {
   if (assignmentParticipantDialogueProfile(assignment) !== undefined) fail();
 }
 const copy = <T>(v: T): T => structuredClone(v);
 /** External ports cannot select an internal error by throwing a matching string. */
-async function port<T>(fn: () => T | Promise<T>): Promise<T> { try { return await fn(); } catch { return fail(); } }
+async function port<T>(fn: () => T | Promise<T>): Promise<T> {
+  try { return await fn(); }
+  catch (error) { return fail('trial_unavailable', error instanceof BaseSessionError ? error.code === 'owner_expired' ? 'owner_expired' : error.reason ?? 'store_io' : 'store_io'); }
+}
 /** Maps a makeTask failure to a closed cause. Reads only own string codes of the known error classes (walking `cause`);
  * messages, responses and anything else are never copied, and an unrecognised error is 'unknown'. */
 function failureCauseOf(error: unknown): FailureCause {
@@ -62,9 +68,9 @@ export function createBaseAssignmentSession(options: BaseSessionOptions): BaseSe
   }
   async function commit(old: BaseOwnerState, next: BaseOwnerState, writes: BaseArchiveWrite[], conflict: BaseSessionErrorCode = 'trial_unavailable') {
     next.revision = old.revision + 1;
-    try { readOwner(next, options.ownerId); } catch { fail(); }
+    try { readOwner(next, options.ownerId); } catch { fail('trial_unavailable', 'owner_state_invalid'); }
     const result = await port(() => options.store.compareAndSwap(old.revision, copy(next), copy(writes)));
-    if (result === false) fail(conflict); if (result !== true) fail();
+    if (result === false) fail(conflict, 'cas_conflict'); if (result !== true) fail('trial_unavailable', 'store_invalid');
   }
   async function archived(id: string): Promise<BaseRecord | null> {
     const value = await port(() => options.store.readRecord(id));
@@ -122,16 +128,16 @@ export function createBaseAssignmentSession(options: BaseSessionOptions): BaseSe
     const onPersist = async (raw: RawBaseRecord) => {
       try {
         await serial(async () => {
-          if (token.failed) return fail();
+          if (token.failed) return fail('trial_unavailable', 'owner_state_invalid');
           const old = await state(), e = old.admissions[key];
-          if (!e || e.status === 'failed' || e.assignment.assignmentId !== a.assignmentId) return fail();
+          if (!e || e.status === 'failed' || e.assignment.assignmentId !== a.assignmentId) return fail('trial_unavailable', 'owner_state_invalid');
           const value = data(raw);
-          if (Object.hasOwn(value, 'assignment') && JSON.stringify(readAssignment(value.assignment)) !== JSON.stringify(a)) return fail();
+          if (Object.hasOwn(value, 'assignment') && JSON.stringify(readAssignment(value.assignment)) !== JSON.stringify(a)) return fail('trial_unavailable', 'owner_state_invalid');
           const record = { ...copy(value), assignment: a } as BaseRecord;
           validateBoundBaseRecord(record, a);
-          if (e.record && e.record.recordId !== record.recordId) return fail();
+          if (e.record && e.record.recordId !== record.recordId) return fail('trial_unavailable', 'owner_state_invalid');
           // A deleted/expired record must not be resurrected by a late callback.
-          if (e.status === 'active' && e.record && !await archived(e.record.recordId)) return fail();
+          if (e.status === 'active' && e.record && !await archived(e.record.recordId)) return fail('trial_unavailable', 'record_deleted');
           const next = copy(old); next.admissions[key]!.record = record;
           // activeKey stays exactly as read: retired writes never move it.
           await commit(old, next, [{ assignmentId: a.assignmentId, record }]);

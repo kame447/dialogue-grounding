@@ -1,0 +1,223 @@
+{
+ "note": "Frozen pre-loop (legacy, style) runtime files for the S4 dynamic replay. Inspection only: never imported by a live path. Each file is the original blob with only relative import specifiers rewritten.",
+ "lineages": {
+  "legacy": {
+   "commit": "58a95113ed19effca56e8bd58bd4a46638764231",
+   "files": [
+    {
+     "source": "dialogue-model/runtime/decision/bypass-acceptance.ts",
+     "sourceBlob": "1eca7647cdd413f0f6296d81ec4d4367fccf71fd",
+     "sourceSha256": "056f50e22f874d15e4b14769fc4f8b082c8eadad729e01c388df125fc40e9f14",
+     "frozen": "legacy/decision/bypass-acceptance.mts",
+     "frozenSha256": "db92d97beec8a995cd5131d4651ddfbb77f02cd3c0c1489066e9222c3f5b3b48",
+     "normalizedSha256": "b510c8b29eb75305e547d135de520c70ad5265295ee4061f1ccf6e00b341d6e4"
+    },
+    {
+     "source": "dialogue-model/runtime/decision/jev-decision.ts",
+     "sourceBlob": "3aa1609fa4970a9f7cf8fab852bf36d58c9c80b3",
+     "sourceSha256": "80db8776ae9276a2d3aea34aabb84586a076d38d63e33a42dd86e1df19a31006",
+     "frozen": "legacy/decision/jev-decision.mts",
+     "frozenSha256": "0909bea9e466ea8004f55edf70746637adebce8987e4cddf1f2200a95b767a3f",
+     "normalizedSha256": "020ca5ee98b932835e3ce316f84cd0b097fab1a645b4598563331581fbcd9d2e"
+    },
+    {
+     "source": "dialogue-model/runtime/judgment/instructions.mjs",
+     "sourceBlob": "6b26a74ea8d88b0583c2c457e96e434320a6449f",
+     "sourceSha256": "aa8b84ba60f10780328521457fc3abf4bfaa6db6efd32a725924075a9584f884",
+     "frozen": "legacy/judgment/instructions.mjs",
+     "frozenSha256": "df1c997c39d281a72a6dbac92defd5569f0f3727049daea03a4b5fdb1af80c0a",
+     "normalizedSha256": "2c65b8bd0b0093bf17e5f9972f4973e21e5d605385ea6be3dad626ab28aae832"
+    },
+    {
+     "source": "dialogue-model/runtime/local-grounding/classify.ts",
+     "sourceBlob": "ecba4722ec0ec5973193456a0eb36008950b3fb5",
+     "sourceSha256": "d564d287ac64c8478c6bf382dd8f250d52fd82b6be5b6100cc598cee47762333",
+     "frozen": "legacy/local-grounding/classify.mts",
+     "frozenSha256": "e80624039700f34225d07a99f128eef2cfa075a21249fa5afc8bb41b0da76b11",
+     "normalizedSha256": "7498a017ebe4a88ec9acb107cfc45caee232dc3c4011fc7c32339574b58d7abe"
+    },
+    {
+     "source": "dialogue-model/runtime/local-grounding/extract.ts",
+     "sourceBlob": "da3b40d1a3d9ed4f002083feccf7d6d140c76cdb",
+     "sourceSha256": "1f3af472bca173e83bcb0bf07e4b98c15fb98bc1b960aedc28e0a4970563764e",
+     "frozen": "legacy/local-grounding/extract.mts",
+     "frozenSha256": "e9f4f47e0217b19dca899633b9870f270124509a4ae47a28d1ab25bb2ed5ce8b",
+     "normalizedSha256": "2d3724e533f00ecf441094805168ae3b75edd3ab89b673befd249090b2ec23e7"
+    },
+    {
+     "source": "dialogue-model/runtime/local-grounding/jev-ai-public.ts",
+     "sourceBlob": "0e39423fa2ada09ea873a036db0d67101af7e8d1",
+     "sourceSha256": "6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7",
+     "frozen": "legacy/local-grounding/jev-ai-public.mts",
+     "frozenSha256": "e1894952c7117a42030e2a950892656421d5fe61b72ab1a7698cf70351f6f2fe",
+     "normalizedSha256": "117cdd1267a6849ebf8baac22989f043e9b228c8cee27e56c6848c96a676674c"
+    },
+    {
+     "source": "dialogue-model/runtime/local-grounding/jev-local-test.ts",
+     "sourceBlob": "eaa4b724e5b238a0585d660200d730499e65ea48",
+     "sourceSha256": "ad4cc001f2a0921407bb1879ec76f7c5014997ffb6a2ba25d1d6fc04c8f1790e",
+     "frozen": "legacy/local-grounding/jev-local-test.mts",
+     "frozenSha256": "10a6f4f7b2d3fe5a71ab7e342116a3358e3b1a479e3fb9c6f1fd0c5a6e0c7221",
+     "normalizedSha256": "94c3dcfd0f6f035d115001bb5a6a6af090fa0cae7097391815e6e4ba29b9eb4d"
+    },
+    {
+     "source": "dialogue-model/runtime/local-grounding/verify-ai.ts",
+     "sourceBlob": "a8ca7a9b7fae20a5485ae7a85844f26fae0ab454",
+     "sourceSha256": "e594e960634b8fa6597049edf41e31c0dc674a361619e921a37429380ea0dc9a",
+     "frozen": "legacy/local-grounding/verify-ai.mts",
+     "frozenSha256": "0a5a9bfbd9fdeb065e0084325d69b69e9a4853558d749f92100cb091659e3ac1",
+     "normalizedSha256": "208b5e8cf8a83a4ad080e2f11b8b990c21abe26775d616711d0766e752450d36"
+    },
+    {
+     "source": "dialogue-model/runtime/v2/dialogue-v2.mjs",
+     "sourceBlob": "d015c28824e85fa4372c016c4eee8093f179226b",
+     "sourceSha256": "d0a0354b767523d3921c60e84cdb179951d01bcb0fba4f2aaa329894c239eee3",
+     "frozen": "legacy/v2/dialogue-v2.mjs",
+     "frozenSha256": "a1e4d571dcc0ba7c63ec2e267a024e85fab682620de130daf595f2aa41362896",
+     "normalizedSha256": "45a8631c849b7e52e9d8de392ab1ba492e76e32ccd8ddc3927c3f95851429f85"
+    },
+    {
+     "source": "dialogue-model/runtime/v2/generation-guard.ts",
+     "sourceBlob": "c303bb7556d63e95d6436274199b583b666a380f",
+     "sourceSha256": "b0a7520eb843dc8c2484491f1ef9503b6b43c3ad8ae0cddced37b49630be7189",
+     "frozen": "legacy/v2/generation-guard.mts",
+     "frozenSha256": "b0a7520eb843dc8c2484491f1ef9503b6b43c3ad8ae0cddced37b49630be7189",
+     "normalizedSha256": "b0a7520eb843dc8c2484491f1ef9503b6b43c3ad8ae0cddced37b49630be7189"
+    },
+    {
+     "source": "dialogue-model/runtime/v2/jev-turn.ts",
+     "sourceBlob": "7f675616eb577a021977b4d565082673cbc63b67",
+     "sourceSha256": "baf2ad6f574a8a75345de749c1218ae7d32e1342446d9e78e6b5d0af0b52ceb1",
+     "frozen": "legacy/v2/jev-turn.mts",
+     "frozenSha256": "13a07fd0af23f9d36ce862b1780c944ab1417db0d9fbb04756034f1499d6bfcd",
+     "normalizedSha256": "82bcd9318b4df462136f0efcc342c001c002de2ea031d95fa45b3091a121a3c1"
+    },
+    {
+     "source": "dialogue-model/runtime/v2/local-grounding-turn.ts",
+     "sourceBlob": "0e18f7e10142eee5918e20f453fa76ed1ac71616",
+     "sourceSha256": "04f064b8549e1bb0694195764f7b69b12f356392180814ed9620c8ce8508d0f5",
+     "frozen": "legacy/v2/local-grounding-turn.mts",
+     "frozenSha256": "737077ba221e6493bee6c7d04bd084de8aceb60710b6abec60b514217dea75a4",
+     "normalizedSha256": "38836ffb1fac47ef9158a760973993f02ab75882f3bd8ff85c047ac835d6576a"
+    },
+    {
+     "source": "dialogue-model/runtime/v2/research-profile.ts",
+     "sourceBlob": "bba4ee7667074eb986e10931ee9ecaac8708f6c1",
+     "sourceSha256": "49e4be8ab4475ea831119c1afc441e3e26aa12b195d041aa47e341cc74a5a6e8",
+     "frozen": "legacy/v2/research-profile.mts",
+     "frozenSha256": "40504f15a7e1c84f35921568e93a30372ef4a648cdbb16ce5e174ae571449ab9",
+     "normalizedSha256": "38d86b5e1045d0b5b6de629248404182b948fcbbef4b01b875c2e56c75826de7"
+    }
+   ]
+  },
+  "style": {
+   "commit": "07116ae12249f73a49854c4d79d5d22ab60ba640",
+   "files": [
+    {
+     "source": "dialogue-model/runtime/decision/bypass-acceptance.ts",
+     "sourceBlob": "1eca7647cdd413f0f6296d81ec4d4367fccf71fd",
+     "sourceSha256": "056f50e22f874d15e4b14769fc4f8b082c8eadad729e01c388df125fc40e9f14",
+     "frozen": "style/decision/bypass-acceptance.mts",
+     "frozenSha256": "db92d97beec8a995cd5131d4651ddfbb77f02cd3c0c1489066e9222c3f5b3b48",
+     "normalizedSha256": "b510c8b29eb75305e547d135de520c70ad5265295ee4061f1ccf6e00b341d6e4"
+    },
+    {
+     "source": "dialogue-model/runtime/decision/jev-decision.ts",
+     "sourceBlob": "8ee944bc50bbeb13c6973727d01973d2c0381205",
+     "sourceSha256": "d9e610fc73390e677b262d22b8f5fe689b8b17faa5b01830071ddd0de2d6ceb3",
+     "frozen": "style/decision/jev-decision.mts",
+     "frozenSha256": "c72fc7da9dc26574938b74f06bc75fcce8a4924141f2656db3cf042baca0692d",
+     "normalizedSha256": "a9b3e02fbda8345bf941363354920d4cbfa791b326918eae8aad1b322bf3bf2c"
+    },
+    {
+     "source": "dialogue-model/runtime/judgment/instructions.mjs",
+     "sourceBlob": "6b26a74ea8d88b0583c2c457e96e434320a6449f",
+     "sourceSha256": "aa8b84ba60f10780328521457fc3abf4bfaa6db6efd32a725924075a9584f884",
+     "frozen": "style/judgment/instructions.mjs",
+     "frozenSha256": "df1c997c39d281a72a6dbac92defd5569f0f3727049daea03a4b5fdb1af80c0a",
+     "normalizedSha256": "2c65b8bd0b0093bf17e5f9972f4973e21e5d605385ea6be3dad626ab28aae832"
+    },
+    {
+     "source": "dialogue-model/runtime/local-grounding/classify.ts",
+     "sourceBlob": "ecba4722ec0ec5973193456a0eb36008950b3fb5",
+     "sourceSha256": "d564d287ac64c8478c6bf382dd8f250d52fd82b6be5b6100cc598cee47762333",
+     "frozen": "style/local-grounding/classify.mts",
+     "frozenSha256": "e80624039700f34225d07a99f128eef2cfa075a21249fa5afc8bb41b0da76b11",
+     "normalizedSha256": "7498a017ebe4a88ec9acb107cfc45caee232dc3c4011fc7c32339574b58d7abe"
+    },
+    {
+     "source": "dialogue-model/runtime/local-grounding/extract.ts",
+     "sourceBlob": "da3b40d1a3d9ed4f002083feccf7d6d140c76cdb",
+     "sourceSha256": "1f3af472bca173e83bcb0bf07e4b98c15fb98bc1b960aedc28e0a4970563764e",
+     "frozen": "style/local-grounding/extract.mts",
+     "frozenSha256": "e9f4f47e0217b19dca899633b9870f270124509a4ae47a28d1ab25bb2ed5ce8b",
+     "normalizedSha256": "2d3724e533f00ecf441094805168ae3b75edd3ab89b673befd249090b2ec23e7"
+    },
+    {
+     "source": "dialogue-model/runtime/local-grounding/jev-ai-public.ts",
+     "sourceBlob": "0e39423fa2ada09ea873a036db0d67101af7e8d1",
+     "sourceSha256": "6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7",
+     "frozen": "style/local-grounding/jev-ai-public.mts",
+     "frozenSha256": "e1894952c7117a42030e2a950892656421d5fe61b72ab1a7698cf70351f6f2fe",
+     "normalizedSha256": "117cdd1267a6849ebf8baac22989f043e9b228c8cee27e56c6848c96a676674c"
+    },
+    {
+     "source": "dialogue-model/runtime/local-grounding/jev-local-test.ts",
+     "sourceBlob": "eaa4b724e5b238a0585d660200d730499e65ea48",
+     "sourceSha256": "ad4cc001f2a0921407bb1879ec76f7c5014997ffb6a2ba25d1d6fc04c8f1790e",
+     "frozen": "style/local-grounding/jev-local-test.mts",
+     "frozenSha256": "10a6f4f7b2d3fe5a71ab7e342116a3358e3b1a479e3fb9c6f1fd0c5a6e0c7221",
+     "normalizedSha256": "94c3dcfd0f6f035d115001bb5a6a6af090fa0cae7097391815e6e4ba29b9eb4d"
+    },
+    {
+     "source": "dialogue-model/runtime/local-grounding/verify-ai.ts",
+     "sourceBlob": "a8ca7a9b7fae20a5485ae7a85844f26fae0ab454",
+     "sourceSha256": "e594e960634b8fa6597049edf41e31c0dc674a361619e921a37429380ea0dc9a",
+     "frozen": "style/local-grounding/verify-ai.mts",
+     "frozenSha256": "0a5a9bfbd9fdeb065e0084325d69b69e9a4853558d749f92100cb091659e3ac1",
+     "normalizedSha256": "208b5e8cf8a83a4ad080e2f11b8b990c21abe26775d616711d0766e752450d36"
+    },
+    {
+     "source": "dialogue-model/runtime/v2/dialogue-v2.mjs",
+     "sourceBlob": "fb60a37d83d09950baf20214ae7c061af27239e4",
+     "sourceSha256": "1a331fb27a7d81672ad84e9d64f43cd79ec101cea634dcdd365c4b668630c1bf",
+     "frozen": "style/v2/dialogue-v2.mjs",
+     "frozenSha256": "3d5a02598145c9d3ef2a28df41d3c696a3d23f1acb2cb5374cd23bfd6f919e19",
+     "normalizedSha256": "edf58ab4bf711fd22c43bcad85bf165644b2b70b63bf8b9d192f504e3653e43f"
+    },
+    {
+     "source": "dialogue-model/runtime/v2/generation-guard.ts",
+     "sourceBlob": "e64e2d6be5f3a9f7633c2e42f9d79fb0eb14d0b7",
+     "sourceSha256": "f3ad3b42daea3281fbe22dc2e0cf76d62c29e30b0ca34542828e6490bdd40b3b",
+     "frozen": "style/v2/generation-guard.mts",
+     "frozenSha256": "f3ad3b42daea3281fbe22dc2e0cf76d62c29e30b0ca34542828e6490bdd40b3b",
+     "normalizedSha256": "f3ad3b42daea3281fbe22dc2e0cf76d62c29e30b0ca34542828e6490bdd40b3b"
+    },
+    {
+     "source": "dialogue-model/runtime/v2/jev-turn.ts",
+     "sourceBlob": "42d8c29fea8d4280b314d0ab87c540a9748aff89",
+     "sourceSha256": "304534096e3c6bf6fe7b45094f24a9e06f2c533afef25581b643c17c7a06c6f9",
+     "frozen": "style/v2/jev-turn.mts",
+     "frozenSha256": "a987b67236a8ba2a5cda1f4ac52702bb7da0cab7b3e677b2941a96644dc3f581",
+     "normalizedSha256": "6a7548cab20b6a6e56068924b98d7c5d19a184ccd60cadcc0cf0b4522d758ed6"
+    },
+    {
+     "source": "dialogue-model/runtime/v2/local-grounding-turn.ts",
+     "sourceBlob": "0e18f7e10142eee5918e20f453fa76ed1ac71616",
+     "sourceSha256": "04f064b8549e1bb0694195764f7b69b12f356392180814ed9620c8ce8508d0f5",
+     "frozen": "style/v2/local-grounding-turn.mts",
+     "frozenSha256": "737077ba221e6493bee6c7d04bd084de8aceb60710b6abec60b514217dea75a4",
+     "normalizedSha256": "38836ffb1fac47ef9158a760973993f02ab75882f3bd8ff85c047ac835d6576a"
+    },
+    {
+     "source": "dialogue-model/runtime/v2/research-profile.ts",
+     "sourceBlob": "bba4ee7667074eb986e10931ee9ecaac8708f6c1",
+     "sourceSha256": "49e4be8ab4475ea831119c1afc441e3e26aa12b195d041aa47e341cc74a5a6e8",
+     "frozen": "style/v2/research-profile.mts",
+     "frozenSha256": "40504f15a7e1c84f35921568e93a30372ef4a648cdbb16ce5e174ae571449ab9",
+     "normalizedSha256": "38d86b5e1045d0b5b6de629248404182b948fcbbef4b01b875c2e56c75826de7"
+    }
+   ]
+  }
+ }
+}

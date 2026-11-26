@@ -586,3 +586,35 @@ test("progress revisit still requires an outstanding deferral and an issue link 
   const standalone = run(null, "defer");
   assert.equal(standalone.operations[0].aspect, "progress"); assert.equal(standalone.operations[0].issueId, "2:local1");
 });
+
+function humanNameGraph(targets: string[]) {
+  const publicTurns: PublicTurn[] = [{ turn: 1, speaker: "human", text: "船はどう" }];
+  const first = verifyLocalUpdate({ graph: createReferenceGraph(), turn: 1, publicTurns,
+    segments: [segment({ quote: "船はどう", targets, aspect: "name", proposition: "船と呼ぶ提案", name: "船" })], verdicts: [verdict({ act: "name_propose" })] });
+  assert.deepEqual(first.rejected, []);
+  return { graph: commit(createReferenceGraph(), 1, first.operations as never, publicTurns), id: first.operations[0].issueId as string };
+}
+test("05r-2: a short typed approval request for the human's own name proposal stays an approval request, not an acknowledgement", () => {
+  const { graph, id } = humanNameGraph([]);
+  const run = (act: LocalFunctionVerdict["act"], keepUnboundApproval: boolean) => verifyLocalUpdate({ graph, turn: 2, keepUnboundApproval,
+    publicTurns: [{ turn: 2, speaker: "human", text: "それでいい？" }],
+    segments: [segment({ quote: "それでいい？", targets: [], aspect: "name", proposition: "船でよいか", name: null })],
+    verdicts: [verdict({ act, respondsToClaimId: id })] });
+  const request = run("name_propose", true);
+  assert.deepEqual(request.rejected, []);
+  assert.deepEqual(request.operations.map(o => [o.act, o.name, o.respondsTo]), [["name_propose", "船", id]]);
+  // The v1/v2 holistic path (flag off) and a classifier that did not type a name proposal keep the acknowledgement rule.
+  assert.equal(run("name_propose", false).operations[0]?.act, "acknowledge");
+  assert.equal(run("agree", true).operations[0]?.act, "acknowledge");
+});
+
+test("05r-3: a dropped antecedent supplies no name: only that name-less proposal is rejected and the turn's other claim survives", () => {
+  const { graph, id } = humanNameGraph([A]);
+  const segments = [segment({ segmentId: "s1", quote: "ここには穴があります", targets: [B], aspect: "part", proposition: "穴がある" }),
+    segment({ segmentId: "s2", quote: "それでいい？", targets: [B], aspect: "name", proposition: "船でよいか", name: null })];
+  const result = verifyLocalUpdate({ graph, turn: 2, keepUnboundApproval: true,
+    publicTurns: [{ turn: 2, speaker: "human", text: "ここには穴があります。それでいい？" }],
+    segments, verdicts: [verdict({ segmentId: "s1", act: "assert" }), verdict({ segmentId: "s2", act: "name_propose", respondsToClaimId: id })] });
+  assert.deepEqual(result.operations.map(o => [o.proposition, o.act]), [["穴がある", "assert"]]);
+  assert.deepEqual(result.rejected, [{ segmentId: "s2", reason: "nonpublic_name" }]);
+});

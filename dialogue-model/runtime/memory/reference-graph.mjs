@@ -120,8 +120,8 @@ function checkRecord(record, ownSlots = SLOTS) {
         !index(record.sourceTurn) || record.sourceTurn === 0 || record.sourceTurn > record.turn ||
         !(record.respondsTo === null || ref(record.respondsTo)) ||
         !(record.name === null || (record.aspect === "name" && text(record.name, 160))) ||
-        (record.speaker === "human" && record.source !== "partner_statement") ||
-        (record.speaker === "ai" && record.source === "partner_statement") ||
+        (record.speaker === "human" && record.source !== "partner_statement" && record.source !== "partner_labelled_answer") ||
+        (record.speaker === "ai" && (record.source === "partner_statement" || record.source === "partner_labelled_answer")) ||
         (record.act === "construe" && record.aspect !== "construal") ||
         (record.act.startsWith("name_") && record.aspect !== "name")) fail("invalid_claim");
   } else if (record.kind === "feature") {
@@ -240,13 +240,18 @@ function validateSupport(record, records, historical = false) {
     const responseActs = ["agree", "deny", "name_accept", "name_reject", "withdraw"];
     if (records.some((r) => r.kind === "claim" && r.issueId === record.issueId && r.aspect !== record.aspect)) fail("inconsistent_claim_issue");
     if (responseActs.includes(record.act) && !record.respondsTo) fail("missing_claim_response");
-    if (record.act === "name_propose" && (!record.name || !record.quote.includes(record.name))) fail("unsupported_claim_name");
+    // holistic_v3: an approval request carries the name of the human proposal it answers, without repeating it.
+    const inheritsName = record.act === "name_propose" && !!record.respondsTo && byId.get(record.respondsTo)?.kind === "claim" && ["name_propose", "name_accept"].includes(byId.get(record.respondsTo).act) &&
+      byId.get(record.respondsTo).name === record.name;
+    if (record.act === "name_propose" && (!record.name || !inheritsName && !record.quote.includes(record.name))) fail("unsupported_claim_name");
     if (!record.respondsTo) return;
     const prior = byId.get(record.respondsTo);
     if (prior?.kind !== "claim" || (!historical && dead.has(prior.id))) fail("missing_provenance");
     if (prior.id === record.id || prior.sourceTurn > record.sourceTurn || prior.turn > record.turn ||
         prior.aspect !== record.aspect || prior.issueId !== record.issueId ||
-        !prior.targets.some((slot) => record.targets.includes(slot))) fail("inconsistent_claim_response");
+        !(prior.targets.some((slot) => record.targets.includes(slot)) ||
+          // holistic_v3: an approval question about a name that answers an unbound name proposal (neither names a figure); v11: so does the partner withdrawing that proposal.
+          ["name_propose", "ask", "withdraw"].includes(record.act) && record.aspect === "name" && prior.act === "name_propose" && prior.targets.length === 0 && record.targets.length === 0)) fail("inconsistent_claim_response");
     const visited = new Set([record.id]);
     let cursor = prior;
     while (cursor) {

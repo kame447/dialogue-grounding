@@ -46,7 +46,7 @@ done
 - `ADMIN_TOKEN` はローカル管理 export 用。32〜512文字の既存仕様を満たすものを operator が用意する。URL やコマンド引数に秘密を含めない。
 - `ENV_FILE`、`GUARD_MODULE`、`SERIALIZER_MODULE` は統合担当の private な既存設定。env file は0600、親 directory・記録保存先・owner store・観察 cache は0700。symlink や共有 hardlink の設定ファイルは使わない。
 
-参加者設定は `participant_jev_config_v1` の既存項目を維持し、v3 の設定ファイルにだけ `"technicalTrial":{"version":"adaptive_repair_v3"}` を加える。比較用 v2 は `adaptive_repair_v2` とする。`lunaRequest`、timeouts、cacheDirectory、modelId、memoSha256、seed、limits は同じ値にする。limits は `lunaCalls/lunaTokens/lunaPosts/jevPosts/jevUsd` 全項目を明示し、試行前に研究者が決める。jevUsd は既存の上限0.05 USD以下であり、推奨予算や hard な総費用上限ではない。
+参加者設定は `participant_jev_config_v1` の既存項目を維持し、v3 の設定ファイルにだけ `"technicalTrial":{"version":"adaptive_repair_v3"}` を加える。比較用 v2 は `adaptive_repair_v2` とする。`lunaRequest`、timeouts、cacheDirectory、modelId、memoSha256、seed、limits は同じ値にする。limits は `lunaCalls/lunaTokens/lunaPosts/jevPosts/jevUsd` 全項目を明示し、試行前に研究者が決める。jevUsd は、研究用ハーネスが研究の上限を渡して実行するときは `RESEARCH_MAX_JEV_USD`（`jev-shadow-eval/local-openrouter.ts`）までを受け付ける値で、上限を渡さない呼び出しの既定は `DEFAULT_COST_CAP_USD`（0.05 USD）のまま。どちらも推奨予算や hard な総費用上限ではない。値は定数を正とし、この手順書に数値を写さない。
 
 assignment は既存の private `base_assignment_config_v1` を使い、同じ seed と referenceMemory=true で両方略を別々に起動する。既存 P1 配線は `relative_pm90` のみ。研究者が回転条件を変える場合は別途その経路の対応・検証が必要で、この試運転で独断変更しない。観察 cache は同一の memo を共用し、cache MISS・hash 不一致なら参加者開始前に停止する。新規 warm-up が必要なら、それ自体を別途承認・計上し、`participant-jev-warm.ts` の既存手順を使う。
 

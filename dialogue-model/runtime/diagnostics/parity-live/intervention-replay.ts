@@ -1,12 +1,15 @@
 // Explicit offline replay. Native serializers consume only supplied synthetic or
 // already recorded material; no provider, key store or filesystem is contacted.
 import {createChatClient} from '../../client.mjs';
+import {isHolisticV3Plus} from '../../decision/contract.ts';
 import {createJevDecisionClient} from '../../decision/jev-decision.ts';
 import {createJevLocalTestClassifier} from '../../local-grounding/jev-local-test.ts';
 import {buildReobservationMessages} from '../../observation/observe.ts';
 import {researchHash} from '../../v2/research-profile.ts';
 import {resolveInterventionPolicy} from '../../intervention-policy.ts';
 import {createProfileDialogue} from './replay.ts';
+import {hasVersionedViewpoint,validGenerationRetryVersion} from '../../v2/generation-guard.ts';
+import type {RecordedGenerationRetryVersion} from '../../v2/generation-guard.ts';
 import {EVIDENCE_NORMALIZED_ENVELOPE_FIELDS,imageProjection,projectReplayValue} from './evidence.ts';
 import type {ReplaySide} from './evidence.ts';
 import type {ReplayTape} from './replay.ts';
@@ -15,7 +18,9 @@ import type {ObservationInput} from '../../observation/contract.ts';
 import type {JevPrivateStateV2,JevTurnTrace} from '../../v2/jev-turn.ts';
 import type {ExecutedDecision,InterventionTrace} from '../../decision/bypass-acceptance.ts';
 export type ReplaySegment=Pick<ReplayTape,'luna'|'jev'|'reobservations'>;
-export type InterventionReplayTape={schemaVersion:'parity_intervention_replay_v1';state:JevPrivateStateV2;events:ReplayTape['events'];common:ReplaySegment;tails:Record<'repair-first'|'bypass-enabled',ReplaySegment|null>;recorded:{label:'repair-first'|'bypass-enabled';expectedRequests:ReplayTape['expectedRequests']}};
+/** Record-derived adaptive trial of the replayed attempt (the S4 verifier derives it from the record's own trace and refuses any other claim); absent for a non-adaptive trial. */
+export type ReplayTechnicalTrial={version:'adaptive_repair_v1'|'adaptive_repair_v2'|'adaptive_repair_v3'};
+export type InterventionReplayTape={schemaVersion:'parity_intervention_replay_v1';state:JevPrivateStateV2;events:ReplayTape['events'];common:ReplaySegment;tails:Record<'repair-first'|'bypass-enabled',ReplaySegment|null>;recorded:{label:'repair-first'|'bypass-enabled';expectedRequests:ReplayTape['expectedRequests']};technicalTrial?:ReplayTechnicalTrial;generationRetryVersion?:RecordedGenerationRetryVersion};
 type Role='common'|'alternative_detail'|'generation'|'post_generation';
 export type InterventionReplaySide=Omit<ReplaySide,'requests'>&{requests:Array<ReplaySide['requests'][number]&{role:Role}>;executed:ExecutedDecision|null;intervention:InterventionTrace|null};
 type ReplayError='replay_material_invalid'|'replay_material_missing'|'replay_unused_material'|'replay_pipeline_failed';
@@ -35,14 +40,15 @@ export async function pairedInterventionReplay(tape:InterventionReplayTape,own:O
  let materialFailure:ReplayError|null=null;
  const stop=(s:ReplayError):never=>{materialFailure??=s;throw Error(s);};
  try{
-  data(tape);if(!exact(tape,['schemaVersion','state','events','common','tails','recorded'])||tape.schemaVersion!=='parity_intervention_replay_v1'||!exact(tape.tails,['repair-first','bypass-enabled'])||!exact(tape.recorded,['label','expectedRequests'])||!['repair-first','bypass-enabled'].includes(tape.recorded.label)||!Array.isArray(tape.recorded.expectedRequests)||!Array.isArray(tape.events)||!tape.events.length)stop('replay_material_invalid');
+  data(tape);if(!exact(tape,['schemaVersion','state','events','common','tails','recorded',...(Object.hasOwn(tape,'technicalTrial')?['technicalTrial']:[]),...(Object.hasOwn(tape,'generationRetryVersion')?['generationRetryVersion']:[])])||(Object.hasOwn(tape,'technicalTrial')&&(!exact(tape.technicalTrial,['version'])||!['adaptive_repair_v1','adaptive_repair_v2','adaptive_repair_v3'].includes(tape.technicalTrial!.version)))||tape.schemaVersion!=='parity_intervention_replay_v1'||!exact(tape.tails,['repair-first','bypass-enabled'])||!exact(tape.recorded,['label','expectedRequests'])||!['repair-first','bypass-enabled'].includes(tape.recorded.label)||!Array.isArray(tape.recorded.expectedRequests)||!Array.isArray(tape.events)||!tape.events.length)stop('replay_material_invalid');
+  if(Object.hasOwn(tape,'generationRetryVersion')&&((tape.generationRetryVersion!=='jev_generation_retry_v2'&&!hasVersionedViewpoint(tape.generationRetryVersion))||!validGenerationRetryVersion(tape.generationRetryVersion,profile.questionLayout,profile.dialoguePolicy)))stop('replay_material_invalid');
   if(!tape.common||!tape.tails['repair-first']||!tape.tails['bypass-enabled'])stop('replay_material_missing');
   for(const s of [tape.common,...Object.values(tape.tails)])if(!exact(s,['luna','jev','reobservations'])||!Array.isArray(s!.luna)||!Array.isArray(s!.jev)||!Array.isArray(s!.reobservations))stop('replay_material_invalid');
   data(own);data(profile);if(resolveInterventionPolicy(profile).profileId!=='research_trial_profile_v3'||typeof expectedModel!=='string'||!expectedModel)stop('replay_material_invalid');
   const replay=async(label:'repair-first'|'bypass-enabled')=>{
    const frozen=structuredClone(tape),tail=frozen.tails[label]!,segments={common:frozen.common,tail},indices={common:{luna:0,jev:0,reobservations:0},tail:{luna:0,jev:0,reobservations:0}};
    let finalOriginal=false,inAlternative=false,generated=false;let traces:JevTurnTrace[]=[];
-   const material={state:structuredClone(frozen.state),events:structuredClone(frozen.events),common:structuredClone(frozen.common),tail:structuredClone(tail),own:{ownImage:imageProjection(own.ownImage),ownAnchors:structuredClone(own.ownAnchors)},model:expectedModel,profile:structuredClone(profile),boundary:{luna:'canonical_http_json',jev:'canonical_http_json',hashScheme:'canonical_json_sha256_not_raw_body_bytes'}};
+   const material={state:structuredClone(frozen.state),events:structuredClone(frozen.events),common:structuredClone(frozen.common),tail:structuredClone(tail),own:{ownImage:imageProjection(own.ownImage),ownAnchors:structuredClone(own.ownAnchors)},model:expectedModel,profile:structuredClone(profile),boundary:{luna:'canonical_http_json',jev:'canonical_http_json',hashScheme:'canonical_json_sha256_not_raw_body_bytes'},...(frozen.technicalTrial?{technicalTrial:structuredClone(frozen.technicalTrial)}:{}),...(frozen.generationRetryVersion?{generationRetryVersion:frozen.generationRetryVersion}:{})};
    const side:InterventionReplaySide={label,material,materialSha256:researchHash(material),requests:[],executed:null,intervention:null};result.sides.push(side);
    const capture=(provider:'luna'|'jev',phase:string,body:any)=>{
     const payload=projectReplayValue(body,own.ownImage);let role:Role=!finalOriginal?'common':inAlternative?'alternative_detail':provider==='luna'&&phase==='generation'?'generation':'post_generation';
@@ -54,16 +60,18 @@ export async function pairedInterventionReplay(tape:InterventionReplayTape,own:O
     capture('luna',lunaPhase,JSON.parse(String(init?.body)));return Response.json({model:lunaResponse.model,choices:[{message:{content:lunaResponse.text}}],usage:{prompt_tokens:lunaResponse.usage?.inputTokens,completion_tokens:lunaResponse.usage?.outputTokens}});
    });
    const client={async complete(messages:any[],options:any){const n=take('luna') as ReplayTape['luna'][number];if(n.phase!==options.phase)stop('replay_material_invalid');lunaPhase=options.phase;lunaResponse=n.response;if(lunaPhase==='generation')generated=true;return http.complete(messages,options);}};
-   const fetchImpl=async(_url:any,init:any)=>{const b=JSON.parse(init.body),keys=Object.keys(b.questions),s=JSON.parse(b.state),phase=keys.includes('human_referent')?'human_referent':keys.some(k=>k.endsWith('_support'))?'ai_support':keys.some(k=>k.endsWith('_act'))?Object.hasOwn(s,'aiSeq')?'ai_function':'local_function':'decision';capture('jev',phase,b);return Response.json(take('jev'));};
+   const fetchImpl=async(_url:any,init:any)=>{const b=JSON.parse(init.body),keys=Object.keys(b.questions),s=JSON.parse(b.state),phase=keys.includes('human_referent')?'human_referent':keys.includes('draft_naming')?'draft_naming':keys.includes('repair_issue')?'repair_prospect':keys.some(k=>k.endsWith('_support'))?'ai_support':keys.some(k=>k.endsWith('_act'))?Object.hasOwn(s,'aiSeq')?'ai_function':'local_function':'decision';capture('jev',phase,b);return Response.json(take('jev'));};
    const readKey=async()=> 'sk-or-SYNTHETIC-offline-replay-key-0000';
    const native=createJevDecisionClient({enabled:true,readKey,fetchImpl,timeoutMs:profile.timeouts.decisionMs,researchLimits:{maxDeadlineMs:600000},questionLayout:profile.questionLayout})!;
    // Optional human-referent capability is absent only when no such recorded
    // response was supplied. It remains unknown, never a fabricated estimate.
    const hasReferent=frozen.common.jev.some(r=>Object.hasOwn((r.answers??{}) as object,'human_referent'));
+   // Likewise the adaptive repair prospect: only an adaptive tape whose recorded responses hold one can ask it.
+   const hasProspect=!!frozen.technicalTrial&&frozen.common.jev.some(r=>Object.hasOwn((r.answers??{}) as object,'repair_issue'));
    const jev={async decide(input:any,options:any){const d=await native.decide(input,options);if(d.action!=='request_observation'){
      for(const k of ['luna','jev','reobservations'] as const)if(indices.common[k]!==segments.common[k].length)stop('replay_unused_material');finalOriginal=true;}return d;},
-    async completeDetail(input:any,selected:any,options:any){inAlternative=true;try{return await native.completeDetail!(input,selected,options);}finally{inAlternative=false;}},...(hasReferent?{estimateReferent:native.estimateReferent!.bind(native)}:{})};
-   const runtime=createProfileDialogue(profile,{memoryPruneVersion:frozen.state.graph?.memoryPruneVersion,client,image:own.ownImage,anchors:[...own.ownAnchors],strategy:label,observer:{async observeAll(){return structuredClone(frozen.state.observationMemo!);},async reobserve(input){const next=take('reobservations') as any;await client.complete(buildReobservationMessages(input),{phase:'observation_targeted'});return next;}},jevDecision:jev,localGrounding:{classifier:createJevLocalTestClassifier({enabled:true,readKey,fetchImpl,timeoutMs:profile.timeouts.localMs,researchLimits:{maxDeadlineMs:600000}})!,aiPublicTransport:{readKey,fetchImpl,timeoutMs:profile.timeouts.decisionMs}},onJevTurnTrace:(t:JevTurnTrace)=>traces.push(t)});
+    async completeDetail(input:any,selected:any,options:any){inAlternative=true;try{return await native.completeDetail!(input,selected,options);}finally{inAlternative=false;}},...(hasReferent?{estimateReferent:native.estimateReferent!.bind(native)}:{}),...(hasProspect?{estimateRepairProspect:native.estimateRepairProspect!.bind(native)}:{}),...((profile as {dialoguePolicy?:string}).dialoguePolicy?{classifyDraftAct:native.classifyDraftAct!.bind(native)}:{})};
+   const runtime=createProfileDialogue(profile,{memoryPruneVersion:frozen.state.graph?.memoryPruneVersion,client,image:own.ownImage,anchors:[...own.ownAnchors],strategy:label,generationRetryVersion:frozen.generationRetryVersion??'jev_generation_retry_v1',observer:{async observeAll(){return structuredClone(frozen.state.observationMemo!);},async reobserve(input){const next=take('reobservations') as any;await client.complete(buildReobservationMessages(input),{phase:'observation_targeted'});return next;}},jevDecision:jev,localGrounding:{classifier:createJevLocalTestClassifier({enabled:true,readKey,fetchImpl,timeoutMs:profile.timeouts.localMs,researchLimits:{maxDeadlineMs:600000},questionLayout:profile.questionLayout,...(isHolisticV3Plus(profile.dialoguePolicy)?{dialoguePolicy:profile.dialoguePolicy}:{})})!,aiPublicTransport:{readKey,fetchImpl,timeoutMs:profile.timeouts.decisionMs}},onJevTurnTrace:(t:JevTurnTrace)=>traces.push(t),...(frozen.technicalTrial?{technicalTrial:structuredClone(frozen.technicalTrial)}:{})});
    try{await runtime.runAiTurn({events:frozen.events,privateState:frozen.state,lastEventId:frozen.events.at(-1)!.id,requestSeq:frozen.events.at(-1)!.seq});}
    finally{const t=traces.at(-1);if(t){side.executed=structuredClone(t.executed??null);side.intervention=typeof t.intervention==='object'?structuredClone(t.intervention):null;}}
    if(!finalOriginal||!generated||!side.executed||!side.intervention)stop('replay_material_missing');

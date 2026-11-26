@@ -22,6 +22,10 @@
     </header>
     <p id="notice" role="status" aria-live="polite"></p>
     <button id="leave-session" type="button" class="secondary" hidden>受付に戻る</button>
+    <section id="incomplete-stage" class="panel" aria-labelledby="incomplete-title" hidden>
+      <h2 id="incomplete-title" tabindex="-1">試行は未完了です</h2>
+      <p>受け付けた入力は保存されています。この画面を閉じてください。</p>
+    </section>
     <section id="entry-stage" class="panel entry" aria-labelledby="entry-title" hidden>
       <h2 id="entry-title">課題を始める</h2>
       <button id="new-session" type="button">新しく始める</button>
@@ -70,7 +74,7 @@
               <ol id="history" role="log" tabindex="0" aria-live="polite" aria-label="AIとの会話履歴"></ol>
               <button id="new-messages" type="button" class="new-messages" hidden><span aria-hidden="true">↓</span> 新しいメッセージ</button>
             </div>
-            <form id="chat"><div id="chat-recovery" class="chat-recovery" hidden><p id="chat-recovery-message"></p><button id="retry-chat" type="button" class="quiet">状態を確認</button></div>
+            <form id="chat"><div id="chat-recovery" class="chat-recovery" hidden><p id="chat-recovery-message"></p><button id="retry-chat" type="button" class="quiet">状態を確認</button><button id="interrupt-chat" type="button" class="quiet" hidden>中断</button><button id="leave-incomplete-trial" type="button" class="quiet" hidden></button></div>
               <label for="utterance" class="sr-only">メッセージ</label><textarea id="utterance" name="utterance" rows="2" maxlength="2000" required placeholder="メッセージを入力…" aria-describedby="send-hint"></textarea>
               <div class="chat-actions"><span id="send-hint" class="muted">Enterで送信・Shift＋Enterで改行</span><button id="send-message">送信 <span aria-hidden="true">↑</span></button></div>
             </form>

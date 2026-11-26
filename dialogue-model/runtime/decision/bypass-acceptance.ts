@@ -1,8 +1,8 @@
 import type { ParticipantUsageOnly } from '../web/participant-usage-policy.ts';
 // Explicit technical R policy. The original remains Jev's decision; no semantic oracle.
 import {JEV_ACTIONS,PARTICIPANT_TARGET_MENU_VERSION} from './contract.ts';
-import type {JevAction,JevDecision,JevDecisionInput,JevTarget,JevExecutedDecision,JevDetailResult,JevDecisionStageEvidence,PublicNameCandidate} from './contract.ts';
-import {buildJevDecisionPayload,buildJevDecisionDetailPayload,validateJevDecision,parseJevExecutedDetail,JevDecisionError,JEV_DECISION_INPUT_LIMITS,participantJevTargetOffered,retainedParticipantJevMenuValid} from './jev-decision.ts';
+import type {JevAction,JevDecision,JevDecisionInput,JevTarget,JevExecutedDecision,JevDetailResult,JevDecisionStageEvidence,PublicNameCandidate,JevQuestionLayout} from './contract.ts';
+import {buildJevDecisionPayload,buildJevDecisionDetailPayload,validateJevDecision,parseJevExecutedDetail,JevDecisionError,JEV_DECISION_INPUT_LIMITS,v3AlwaysOffered,participantJevTargetOffered,retainedParticipantJevMenuValid} from './jev-decision.ts';
 
 export const BYPASS_ACCEPTANCE_V1_CANONICAL_JSON = '{"policies":{"bypass-enabled":{"policy":"bypass_acceptance_v1:accept","vetoActions":[]},"repair-first":{"policy":"bypass_acceptance_v1:veto","vetoActions":["defer","move_on"]}},"version":"bypass_acceptance_v1"}';
 export const BYPASS_ACCEPTANCE_V1_TABLE_SHA256 = '376d569120ca36a3eceaf5ab95410f7eb83f25fbb681e7566a684b97c35165c8';
@@ -21,7 +21,8 @@ export type RepairProspectMaterial=
     scores:{repair_issue:Record<string,number>;prospect:Record<string,number>;basis:Record<string,number>}}
  | {status:'unknown';issue:null;prospect:null;basis:null;scores:null};
 export type BypassAcceptanceInput=JevDecisionInput&{repairProspect?:RepairProspectMaterial};
-export type BypassAcceptanceOptions={rerank?:'saved_action_scores_v1'|'open_issue_v1'};
+/** questionLayout only selects how the original decision's evidence is validated; the table and its SHA-256 are unchanged. */
+export type BypassAcceptanceOptions={rerank?:'saved_action_scores_v1'|'open_issue_v1';questionLayout?:JevQuestionLayout};
 type Ranking=readonly {action:ExecutedDecision['action'];score:number}[];
 type Selection={action:ExecutedDecision['action'];target:JevTarget}|null;
 export type OpenIssueRerank={policyId:'saved_action_scores_open_issue_v1';ranking:Ranking;selected:Selection;source:{issueTurn:number;issueId:string|null;choice:'issue';candidates:string[]}};
@@ -84,14 +85,14 @@ function checkRepairProspect(value:unknown):void {
   if(!scores||Object.getPrototypeOf(scores)!==Object.prototype||Array.isArray(scores)||Object.values(scores).some(n=>typeof n!=='number'||!Number.isFinite(n)||n<0||n>1))fail('invalid_input');
  }
 }
-function prepare(input:unknown,original:unknown,intervention:unknown,usagePolicy?:ParticipantUsageOnly){
+function prepare(input:unknown,original:unknown,intervention:unknown,questionLayout:JevQuestionLayout='two_stage_v1',usagePolicy?:ParticipantUsageOnly){
  const policy=config(intervention);
- const i=boundary(input,'invalid_input',value=>{const optional=['reobservationAllowed','humanReferent','repairProspect','agreeNames','repairFacts','participantLedger'].filter(k=>!!value&&typeof value==='object'&&Object.hasOwn(value,k));
+ const i=boundary(input,'invalid_input',value=>{const optional=['reobservationAllowed','humanReferent','repairProspect','agreeNames','repairFacts','participantLedger','nameLedger','nameSource','namingRequest','namingRequestStrict','judgmentLedger','rotationMode','notationV6','notationV11'].filter(k=>!!value&&typeof value==='object'&&Object.hasOwn(value,k));
   if(!exact(value,['turn','publicTurns','ownSlots','observations','issueSummary','priorClaims','repairHistory','previousAction','publicNames',...optional]))fail('invalid_input');
   if(Object.hasOwn(value,'repairProspect'))checkRepairProspect(value.repairProspect);
   buildJevDecisionPayload(value as JevDecisionInput);return structuredClone(value) as BypassAcceptanceInput;});
- const d=boundary(original,'invalid_original',value=>{const valid=validateJevDecision(value,i,usagePolicy);if(valid.action==='request_observation')fail('invalid_original');return valid;});
- return {input:i,decision:d,config:policy,original:project(d)};
+ const d=boundary(original,'invalid_original',value=>{const valid=validateJevDecision(value,i,{questionLayout,usagePolicy});if(valid.action==='request_observation')fail('invalid_original');return valid;});
+ return {input:i,decision:d,config:policy,original:project(d),layout:questionLayout};
 }
 type Context=ReturnType<typeof prepare>;
 function trace(p:AcceptancePlan,alternative:ExecutedDecision|null=null,detailEvidence:JevDecisionStageEvidence|null=null):InterventionTrace{return {schemaVersion:'jev_intervention_v1',policy:p.policy,disposition:p.disposition,reasonCode:p.reasonCode,original:p.original,rerank:p.rerank,alternative,detailEvidence,failure:null};}
@@ -99,18 +100,25 @@ function alternativeFailed(p:AcceptancePlan,inner:InterventionInner):never {thro
 function rerankOption(options:BypassAcceptanceOptions|undefined):BypassAcceptanceOptions['rerank'] {
  if(options===undefined)return 'saved_action_scores_v1';
  return boundary(options,'invalid_options',v=>{
-  if(!exact(v,Object.hasOwn(v as object,'rerank')?['rerank']:[])||Object.hasOwn(v,'rerank')&&!['saved_action_scores_v1','open_issue_v1'].includes(v.rerank as string))fail('invalid_options');
+  const keys=['rerank','questionLayout'].filter(k=>Object.hasOwn(v as object,k));
+  if(!exact(v,keys)||Object.hasOwn(v,'rerank')&&!['saved_action_scores_v1','open_issue_v1'].includes(v.rerank as string)||
+   Object.hasOwn(v,'questionLayout')&&!['two_stage_v1','two_stage_v2','two_stage_v3'].includes(v.questionLayout as string))fail('invalid_options');
   return v.rerank as BypassAcceptanceOptions['rerank']??'saved_action_scores_v1';
  });
+}
+function layoutOption(options:BypassAcceptanceOptions|undefined):JevQuestionLayout {
+ rerankOption(options);return options?.questionLayout??'two_stage_v1';
 }
 function sameTarget(a:JevTarget,b:JevTarget):boolean {
  if(a.kind!==b.kind)return false;
  if(a.kind==='multiple'&&b.kind==='multiple')return equal([...a.figureIds].sort(),[...b.figureIds].sort());
  return equal(a,b);
 }
-function openIssueRerank(input:BypassAcceptanceInput,scores:Record<string,number>,participantStage?:JevDecisionStageEvidence):OpenIssueRerank|null {
+// two_stage_v3 only: its detail checks see the layout's own legality rule; v1/v2 keep the unchanged default-layout call.
+const layoutArg=(layout:JevQuestionLayout)=>layout==='two_stage_v3'?{questionLayout:layout}:undefined;
+function openIssueRerank(input:BypassAcceptanceInput,scores:Record<string,number>,layout:JevQuestionLayout='two_stage_v1',missing:()=>never=()=>{throw Error();},participantStage?:JevDecisionStageEvidence):OpenIssueRerank|null {
  const material=input.repairProspect;
- if(material?.status!=='ok'||material.issue.choice!=='issue')return null;
+ if(material?.status!=='ok'||layout==='two_stage_v3'&&material.prospect==='no_open_issue'||material.issue.choice!=='issue')return null;
  const issue=material.issue;
  const entry=input.repairHistory.find(r=>r.turn<input.turn&&r.turn===issue.turn&&r.issueId===issue.issueId);
  if(!entry?.candidatesAfter.length)return null;
@@ -120,8 +128,9 @@ function openIssueRerank(input:BypassAcceptanceInput,scores:Record<string,number
  for(const action of JEV_ACTIONS){
   if(action!=='repair'&&action!=='confirm'&&!(action==='revisit'&&revisit))continue;
   if(participantStage&&!participantJevTargetOffered(participantStage,action,target,input.ownSlots))continue;
-  try{buildJevDecisionDetailPayload(input,{action,target});}
+  try{buildJevDecisionDetailPayload(input,{action,target},layoutArg(layout));}
   catch(e){if(e instanceof JevDecisionError&&['invalid_decision','inconsistent_decision'].includes(e.code))continue;fail('invalid_input');}
+  if(layout==='two_stage_v3'&&!Number.isFinite(scores[action]))missing();
   ranking.push({action,score:scores[action]});
  }
  ranking.sort((a,b)=>b.score-a.score||JEV_ACTIONS.indexOf(a.action)-JEV_ACTIONS.indexOf(b.action));
@@ -133,9 +142,12 @@ function openIssueRerank(input:BypassAcceptanceInput,scores:Record<string,number
  * be reconstructed here. Revisit requires the preceding committed execution.
  */
 export function isOpenIssueRerankRecord(intervention:unknown,decision:unknown,executed:unknown,ownSlots:readonly string[],
- previousAction?:{action:JevAction;target:JevTarget}|null,agreeNames?:readonly PublicNameCandidate[]):boolean {
+ previousAction?:{action:JevAction;target:JevTarget}|null,agreeNames?:readonly PublicNameCandidate[],questionLayout:JevQuestionLayout='two_stage_v1',
+ repairProspect?:BypassAcceptanceInput['repairProspect'],acceptOptional=false):boolean {
  try{
-  jsonData([intervention,decision,executed,ownSlots,previousAction??null,agreeNames??null]);
+  jsonData([intervention,decision,executed,ownSlots,previousAction??null,agreeNames??null,repairProspect??null]);
+  // Restore checks the recorded issue. Older v3 turns could rerank an explicit issue even with no_open_issue.
+  if(repairProspect!==undefined&&(repairProspect.status!=='ok'||repairProspect.issue.choice!=='issue'))return false;
   if(!Array.isArray(ownSlots)||!ownSlots.length||ownSlots.some(id=>typeof id!=='string'||!id.length)||new Set(ownSlots).size!==ownSlots.length)return false;
   if(agreeNames!==undefined&&(!Array.isArray(agreeNames)||agreeNames.length>JEV_DECISION_INPUT_LIMITS.publicNames||agreeNames.some(n=>!exact(n,['name','figureId','sourceTurn'])||
     typeof n.name!=='string'||!n.name.trim()||n.name.length>80||!(n.figureId===null||ownSlots.includes(n.figureId))||typeof n.sourceTurn!=='number'||!Number.isSafeInteger(n.sourceTurn)||n.sourceTurn<1)))return false;
@@ -153,48 +165,56 @@ export function isOpenIssueRerankRecord(intervention:unknown,decision:unknown,ex
   const r=t.rerank;
   if(!r||r.policyId!=='saved_action_scores_open_issue_v1'||!exact(r,['policyId','ranking','selected','source'])||
    !exact(r.source,['issueTurn','issueId','choice','candidates'])||r.source.choice!=='issue'||!Number.isSafeInteger(r.source.issueTurn)||r.source.issueTurn<1||
+   repairProspect?.issue?.choice==='issue'&&(repairProspect.issue.turn!==r.source.issueTurn||repairProspect.issue.issueId!==r.source.issueId)||
    // The issue's candidates are recorded at decision time; later history updates never redefine the target.
    !Array.isArray(r.source.candidates)||!ownTarget(e?.target)||!equal(e.target,r.source.candidates.length===1?{kind:'single',figureId:r.source.candidates[0]}:{kind:'multiple',figureIds:r.source.candidates})||
    !(r.source.issueId===null||typeof r.source.issueId==='string'&&r.source.issueId.length>0&&r.source.issueId.length<=128)||
    !e||!ownTarget(e.target)||!equal(r.selected,{action:e.action,target:e.target})||!Array.isArray(r.ranking)||!r.ranking.length)return false;
   const first=d.evidence?.stages?.[0],scores=first?.scores?.action;
-  const participant=d.evidence?.decisionMenuVersion===PARTICIPANT_TARGET_MENU_VERSION;
   const actionsWithEvidence=JEV_ACTIONS.filter(a=>a!=='agree'||agreeNames===undefined||agreeNames.some(n=>n.figureId===null||ownSlots.includes(n.figureId)));
-  const menuOk=participant&&first ? retainedParticipantJevMenuValid(first,ownSlots,d)
-    : exact(scores,actionsWithEvidence)||exact(scores,actionsWithEvidence.filter(a=>a!=='request_observation'));
-  if(first?.stage!=='action_target'||!scores||!menuOk||Object.values(scores).some(n=>typeof n!=='number'||!Number.isFinite(n)||n<0||n>1))return false;
+  // two_stage_v3 scores only the actions that had a legal target and detail, so the label set is a subset that must hold the always-legal ones.
+  const v3=questionLayout==='two_stage_v3';
+  const participant=d.evidence?.decisionMenuVersion===PARTICIPANT_TARGET_MENU_VERSION;
+  if(participant&&questionLayout!=='two_stage_v1')return false;
+  if(!scores||typeof scores!=='object')return false;
+  const labelsOk=v3?Object.keys(scores).every(k=>(JEV_ACTIONS as readonly string[]).includes(k))&&v3AlwaysOffered(acceptOptional).every(k=>Object.hasOwn(scores,k))
+    :participant&&first?retainedParticipantJevMenuValid(first,ownSlots,d)
+    :(exact(scores,actionsWithEvidence)||exact(scores,actionsWithEvidence.filter(a=>a!=='request_observation')));
+  if(first?.stage!==(v3?'action':'action_target')||!labelsOk||
+   Object.values(scores).some(n=>typeof n!=='number'||!Number.isFinite(n)||n<0||n>1))return false;
   const revisit=previousAction?.action==='defer'&&ownTarget(previousAction.target)&&sameTarget(previousAction.target,e.target);
   const actions=new Set<string>();let previous:Ranking[number]|null=null;
   for(const raw of r.ranking){
    if(!exact(raw,['action','score']))return false;
    const a=raw as unknown as Ranking[number];
    if(!['repair','confirm',...(revisit?['revisit']:[])].includes(a.action)||actions.has(a.action)||
-    participant&&!participantJevTargetOffered(first,a.action,e.target,ownSlots)||
+    participant&&(!first||!participantJevTargetOffered(first,a.action,e.target,ownSlots))||
     typeof a.score!=='number'||a.score!==scores[a.action]||previous&&(a.score>previous.score||a.score===previous.score&&JEV_ACTIONS.indexOf(a.action)<JEV_ACTIONS.indexOf(previous.action)))return false;
    actions.add(a.action);previous=a;
   }
-  const revisitOffered=revisit&&(!participant||participantJevTargetOffered(first,'revisit',e.target,ownSlots));
+  const revisitOffered=revisit&&(!participant||!!first&&participantJevTargetOffered(first,'revisit',e.target,ownSlots));
   return r.ranking[0].action===e.action&&actions.has('confirm')===actions.has('repair')&&actions.has('revisit')===revisitOffered;
  }catch{return false;}
 }
 function plan(ctx:Context,rerank:BypassAcceptanceOptions['rerank']):AcceptancePlan {
- const {input,decision,config,original}=ctx;
+ const {input,decision,config,original,layout}=ctx;
  const p:AcceptancePlan={original,policy:config.policy,disposition:'adopted',reasonCode:config.policy==='bypass_acceptance_v1:accept'?'no_intervention':'not_in_veto_set',rerank:null};
  if(!config.vetoActions.includes(original.action))return freeze(p);
  p.disposition='rejected';p.reasonCode='vetoed_bypass_action';
  const first=decision.evidence.stages?.[0],scores=first?.scores.action;
- const participantStage=decision.evidence.decisionMenuVersion===PARTICIPANT_TARGET_MENU_VERSION?first:undefined;
+ const participantStage=layout==='two_stage_v1'&&decision.evidence.decisionMenuVersion===PARTICIPANT_TARGET_MENU_VERSION?first:undefined;
  if(decision.decisionKind!=='jev_local_test'||!scores)alternativeFailed(p,{stage:'rerank',code:'invalid_scores'});
  if(rerank==='open_issue_v1'){
-  const open=openIssueRerank(input,scores,participantStage);if(open){p.rerank=open;return freeze(p);}
+  const open=openIssueRerank(input,scores,layout,()=>alternativeFailed(p,{stage:'rerank',code:'invalid_scores'}),participantStage);if(open){p.rerank=open;return freeze(p);}
  }
  const ranking:Rerank['ranking'][number][]=[];
  for(const action of JEV_ACTIONS){
   if(action==='request_observation'||config.vetoActions.includes(action))continue;
   if(action==='revisit'&&original.target.kind==='none')continue;
   if(participantStage&&!participantJevTargetOffered(participantStage,action,original.target,input.ownSlots))continue;
-  try{buildJevDecisionDetailPayload(input,{action,target:original.target});}
+  try{buildJevDecisionDetailPayload(input,{action,target:original.target},layoutArg(layout));}
   catch(e){if(e instanceof JevDecisionError&&['invalid_decision','inconsistent_decision'].includes(e.code))continue;fail('invalid_input');}
+  if(layout==='two_stage_v3'&&!Number.isFinite(scores[action]))alternativeFailed(p,{stage:'rerank',code:'invalid_scores'});
   ranking.push({action,score:scores[action]});
  }
  ranking.sort((a,b)=>b.score-a.score||JEV_ACTIONS.indexOf(a.action)-JEV_ACTIONS.indexOf(b.action));
@@ -202,7 +222,7 @@ function plan(ctx:Context,rerank:BypassAcceptanceOptions['rerank']):AcceptancePl
  if(!p.rerank.selected)alternativeFailed(p,{stage:'rerank',code:'no_valid_alternative'});
  return freeze(p);
 }
-export function planBypassAcceptance(input:unknown,original:unknown,intervention:unknown,options?:BypassAcceptanceOptions):AcceptancePlan{return plan(prepare(input,original,intervention),rerankOption(options));}
+export function planBypassAcceptance(input:unknown,original:unknown,intervention:unknown,options?:BypassAcceptanceOptions):AcceptancePlan{return plan(prepare(input,original,intervention,layoutOption(options)),rerankOption(options));}
 function detailCode(e:unknown):InterventionInner {
  try {
   const d=e&&typeof e==='object'?Object.getOwnPropertyDescriptor(e,'code'):undefined;
@@ -211,7 +231,7 @@ function detailCode(e:unknown):InterventionInner {
  return {stage:'detail',code:'invalid_response'};
 }
 export async function applyBypassAcceptance(input:unknown,original:unknown,intervention:unknown,completeDetail?:CompleteDetail,options?:BypassAcceptanceOptions,usagePolicy?:ParticipantUsageOnly):Promise<AcceptanceResult>{
- const ctx=prepare(input,original,intervention,usagePolicy);
+ const ctx=prepare(input,original,intervention,layoutOption(options),usagePolicy);
  if(completeDetail!==undefined&&typeof completeDetail!=='function')fail('invalid_detail_callback');
  const p=plan(ctx,rerankOption(options));
  if(p.disposition==='adopted')return freeze({executed:p.original,intervention:trace(p)});
@@ -227,7 +247,7 @@ export async function applyBypassAcceptance(input:unknown,original:unknown,inter
  try{jsonData(raw);if(!exact(raw,['executed','evidence']))throw Error();checked=structuredClone(raw) as DetailResult;}
  catch{alternativeFailed(p,{stage:'detail',code:'invalid_response'});}
  let expected:ExecutedDecision;
- try{expected=parseJevExecutedDetail(ctx.input,selected,checked.evidence,usagePolicy);}catch(e){alternativeFailed(p,detailCode(e));}
+ try{expected=parseJevExecutedDetail(ctx.input,selected,checked.evidence,{questionLayout:ctx.layout,usagePolicy});}catch(e){alternativeFailed(p,detailCode(e));}
  if(!equal(checked.executed,expected))alternativeFailed(p,{stage:'executed',code:'invalid_executed'});
  return freeze({executed:expected,intervention:trace(p,expected,checked.evidence)});
 }

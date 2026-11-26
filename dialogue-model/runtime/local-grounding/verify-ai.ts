@@ -1,12 +1,12 @@
 // Slice A: AI-only verifier and deterministic deferred insertion. Human rules stay unchanged.
-import { LOCAL_ASPECTS } from "./contract.ts";
+import { AI_BOUND_SOURCE, LOCAL_ASPECTS } from "./contract.ts";
 import type { AiPublicCandidate, AiPublicPending, AiPublicState, AiPublicApplication, LocalClaimView,
   LocalSegmentProposal, LocalFunctionVerdict, AiSupport, PublicTurn, AiPublicLog } from "./contract.ts";
 import { AiPublicError, aiExact, aiText, aiIndex, aiHash } from "./extract-ai.ts";
 import { AI_RESPONSE_ACTS, AI_FUNCTION_CRITERIA } from "./jev-ai-public.ts";
 import { literalSpan } from "../judgment/public-evidence.mjs";
 import { priorClaimViews } from "./derive.ts";
-import { recordAiClaims } from "./verify.ts";
+import { bindPublishedReferenceQuestion, isSuppliedBinding, recordAiClaims } from "./verify.ts";
 import type { LocalGraph, LocalPriorAct } from "./verify.ts";
 import { CLAIM_PRUNE_V2, REFERENCE_LIMITS, ReferenceGraphError, validateReferenceUpdate, snapshotReferenceGraph } from "../memory/reference-graph.mjs";
 
@@ -125,15 +125,20 @@ export function validateAiPublicState(value: unknown, slots: readonly string[], 
 }
 type Update = { expectedRevision: number; turn: number; operations: Array<{ kind: string; id: string }> };
 type Event = { seq: number; speaker: string; text: string; nonReferential?: boolean };
-export async function prependAiPublic({ graph, update, state, events, publicTurns, priorAct }: {
+export async function prependAiPublic({ graph, update, state, events, publicTurns, priorAct, bindReferenceQuestions = false, directReferenceReplies = false, markBoundTargets = false }: {
   graph: LocalGraph; update: Update; state: AiPublicState; events: readonly Event[]; publicTurns: readonly PublicTurn[]; priorAct?: LocalPriorAct;
-}): Promise<{ update: Update; state: AiPublicState; application: AiPublicApplication }> {
+  bindReferenceQuestions?: boolean;
+  directReferenceReplies?: boolean;
+  /** v9: a question whose target the binding supplied keeps that provenance in its claim (source ai_bound_target). */
+  markBoundTargets?: boolean;
+}): Promise<{ update: Update; state: AiPublicState; application: AiPublicApplication; referenceQuestionBindings?: ReadonlyMap<string, string> }> {
   const next = structuredClone(state), pending = next.pending;
   const application: AiPublicApplication = { aiSeq: pending?.aiSeq ?? null, status: "none", reasons: [], claims: [], nameIds: [], nameRejections: [] };
   const names = priorAct ? recordAiClaims({ graph, turn: update.turn, publicTurns, priorAct, featureSource: "none" }) : { operations: [], rejected: [] };
   const capacity = (error: unknown) => graph.memoryPruneVersion === CLAIM_PRUNE_V2 &&
     error instanceof ReferenceGraphError && error.code === "capacity_exceeded";
   let current = update;
+  let referenceQuestionBindings: ReadonlyMap<string, string> | undefined;
   if (pending) {
     const reject = (code: string) => { application.status = "not_applied"; application.reasons = [code]; };
     const matching = events.filter(e => e.seq === pending.aiSeq);
@@ -148,9 +153,12 @@ export async function prependAiPublic({ graph, update, state, events, publicTurn
     } else if (current.operations.length + pending.candidates.length + names.operations.length > REFERENCE_LIMITS.operations) reject("op_limit_pre");
     else {
       const active = priorClaimViews(graph, { limit: REFERENCE_LIMITS.records });
+      const bindings = bindReferenceQuestions ?
+        bindPublishedReferenceQuestion(pending, priorAct, publicTurns.find(t => t.turn === pending.aiSeq), update.turn, directReferenceReplies) : undefined;
       const operations = pending.candidates.map(c => {
         const { candidateKey: _key, ordinal, segmentId: _segment, ...fields } = c, id = `${update.turn}:pub${ordinal}`;
-        return { kind: "claim", id, ...fields, issueId: fields.issueId ?? id };
+        const figure = bindings?.get(id);
+        return { kind: "claim", id, ...fields, ...(figure ? { targets: [figure] } : {}), ...(figure && markBoundTargets && isSuppliedBinding(bindings, id) ? { source: AI_BOUND_SOURCE } : {}), issueId: fields.issueId ?? id };
       });
       let proposed = current;
       for (const [index, op] of operations.entries()) {
@@ -170,6 +178,7 @@ export async function prependAiPublic({ graph, update, state, events, publicTurn
         }
       }
       if (application.status !== "not_applied") {
+        if (bindings?.size) referenceQuestionBindings = bindings;
         current = proposed; application.status = pending.status === "partial" ? "partial" : "applied";
         application.reasons = [...pending.reasons];
         application.claims = pending.candidates.map(c => ({ id: `${update.turn}:pub${c.ordinal}`, candidateKey: c.candidateKey, sourceTurn: c.sourceTurn }));
@@ -185,5 +194,5 @@ export async function prependAiPublic({ graph, update, state, events, publicTurn
     try { current = validateReferenceUpdate(graph, { ...current, operations: [...current.operations, name] }, { publicTurns }); application.nameIds.push(name.id); }
     catch (error) { application.nameRejections.push({ segmentId: name.id, reason: capacity(error) ? "memory_capacity_exceeded" : "memory_invalid_update" }); }
   }
-  return { update: current, state: next, application };
+  return { update: current, state: next, application, ...(referenceQuestionBindings ? { referenceQuestionBindings } : {}) };
 }

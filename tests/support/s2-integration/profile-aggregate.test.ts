@@ -2,10 +2,10 @@
 // No producer, transport, key reader, real run or external network.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {pathToFileURL} from 'node:url';
+import {fileURLToPath, pathToFileURL} from 'node:url';
 import {join} from 'node:path';
 import {createHash} from 'node:crypto';
-const root=process.env.S2_SOURCE_ROOT??'/Users/Shogo/.agentstack/worktrees/SandyNoether';
+const root=process.env.S2_SOURCE_ROOT??fileURLToPath(new URL('../../../',import.meta.url));
 async function optional(path:string){try{return await import(pathToFileURL(join(root,path)).href);}catch(e){if((e as NodeJS.ErrnoException).code==='ERR_MODULE_NOT_FOUND')return null;throw e;}}
 const policy=await optional('dialogue-model/runtime/model-policy.ts');
 const aggregate=await optional('dialogue-model/runtime/model-observations.ts');

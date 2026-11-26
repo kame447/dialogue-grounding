@@ -7,6 +7,7 @@ import type { ResearchTrialProfileV2, ResearchTrialProfileV3 } from '../../v2/re
 // Offline native-pipeline replay. Recorded model results are fixed materials,
 // never semantic expectations, and this module performs no network/key reads.
 import { createDialogueV2 } from "../../v2/dialogue-v2.mjs";
+import { isHolisticV3Plus } from "../../decision/contract.ts";
 import { createJevDecisionClient } from "../../decision/jev-decision.ts";
 import { createJevLocalTestClassifier } from "../../local-grounding/jev-local-test.ts";
 import { researchHash } from "../../v2/research-profile.ts";
@@ -30,10 +31,15 @@ export const REPLAY_EXCLUDED_ENVELOPE_FIELDS = EVIDENCE_NORMALIZED_ENVELOPE_FIEL
 export function createProfileDialogue(profile: Profile, options: Parameters<typeof createDialogueV2>[0]) {
   const intervention=resolveInterventionPolicy(profile);
   if(Object.hasOwn(options,'interventionPolicy')||Object.hasOwn(options,'decisionTimeoutMs'))throw new JevTurnError('invalid_intervention');
+  // The verified profile owns the question layout: no caller override, and two_stage_v2 only on the integrated (v3) profile.
+  if(Object.hasOwn(options,'questionLayout'))throw new Error('Jev question layout is set by the profile');
+  const layout=profile.questionLayout;
+  if(layout!=='two_stage_v1'&&(layout!=='two_stage_v2'&&layout!=='two_stage_v3'||intervention.mode!=='explicit'))throw new Error('Invalid Jev question layout for this profile');
   const local = options.localGrounding as JevTurnLocalOptions | undefined;
   const research = profile.id !== "research_trial_profile_v1";
   const researchLimits = research ? { maxDeadlineMs: RESEARCH_MAX_DEADLINE_MS } : undefined;
-  return createDialogueV2({ ...options, ...(intervention.mode==='explicit'?{interventionPolicy:intervention.interventionPolicy!,decisionTimeoutMs:profile.timeouts.decisionMs}:{}), client: research ? researchGenerationClient(options.client, profile.timeouts.generationMs) : options.client, referenceMemory: profile.referenceMemory, decisionMode: profile.decisionMode,
+  return createDialogueV2({ ...options, ...(intervention.mode==='explicit'?{interventionPolicy:intervention.interventionPolicy!,decisionTimeoutMs:profile.timeouts.decisionMs}:{}),
+    ...(layout!=='two_stage_v1'?{questionLayout:layout}:{}), ...(profile.id==='research_trial_profile_v3'&&profile.dialoguePolicy?{dialoguePolicy:profile.dialoguePolicy}:{}), client: research ? researchGenerationClient(options.client, profile.timeouts.generationMs) : options.client, referenceMemory: profile.referenceMemory, decisionMode: profile.decisionMode,
     utteranceStyle: profile.utteranceStyle, maxReobservations: profile.maxReobservations,
     localGrounding: { ...options.localGrounding!, ...(research ? { researchLimits, aiPublicTransport: { ...local?.aiPublicTransport, timeoutMs: profile.timeouts.decisionMs, researchLimits } } : {}), timeoutMs: profile.timeouts.localMs, aiPublicClaims: profile.localGrounding.aiPublicClaims } });
 }
@@ -87,7 +93,7 @@ export async function pairedReplay(tape: ReplayTape, own: ObservationInput, expe
         await client.complete(buildReobservationMessages(input), { phase: "observation_targeted" });
         return structuredClone(next);
       } }, jevDecision: createJevDecisionClient({ ...jev, questionLayout: profile.questionLayout })!,
-      localGrounding: { classifier: createJevLocalTestClassifier(jev)!, aiPublicTransport: { readKey, fetchImpl, timeoutMs: profile.timeouts.decisionMs } } });
+      localGrounding: { classifier: createJevLocalTestClassifier({ ...jev, questionLayout: profile.questionLayout, ...(isHolisticV3Plus((profile as { dialoguePolicy?: string }).dialoguePolicy) ? { dialoguePolicy: (profile as unknown as { dialoguePolicy: string }).dialoguePolicy } : {}) })!, aiPublicTransport: { readKey, fetchImpl, timeoutMs: profile.timeouts.decisionMs } } });
     await runtime.runAiTurn({ events: frozen.events, privateState: frozen.state, lastEventId: frozen.events.at(-1)!.id, requestSeq: frozen.events.at(-1)!.seq });
     if (lunaIndex !== frozen.luna.length || jevIndex !== frozen.jev.length || observationIndex !== frozen.reobservations.length) throw new Error("replay_unused_material");
     return { requests, contextSha256: researchHash({ profile, requestedModels: { purpose: profile.modelPolicy.purpose, luna: expectedModel, jev: profile.modelPolicy.jevModel },

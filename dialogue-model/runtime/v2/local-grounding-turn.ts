@@ -1,11 +1,10 @@
 // One opt-in local interpretation transaction. Model work can only propose
 // operations; the dialogue queue still owns publication and state installation.
-import { LOCAL_ACTS, LOCAL_ASPECTS } from "../local-grounding/contract.ts";
+import { LOCAL_ACTS, LOCAL_ASPECTS, LOCAL_ANSWERS_CHECKED } from "../local-grounding/contract.ts";
 import type { LocalAct, LocalOwnImage, LocalOwnAnchor, LocalFunctionVerdict, LocalSegmentProposal, LocalGroundingOptions, PublicTurn, LocalRejection, LocalVerificationResult } from "../local-grounding/contract.ts";
-import { verifyLocalUpdate, recordAiClaims, type LocalVerificationDiagnostic } from "../local-grounding/verify.ts";
+import { verifyLocalUpdate, recordAiClaims, applyVerifiedOperation, type LocalVerificationDiagnostic } from "../local-grounding/verify.ts";
 import { summarizeLocalIssues, priorClaimViews } from "../local-grounding/derive.ts";
-import { validateReferenceUpdate, previewReferenceUpdate, ReferenceGraphError } from "../memory/reference-graph.mjs";
-import { findInternalLeaks } from "./generation-guard.ts";
+import { previewReferenceUpdate } from "../memory/reference-graph.mjs";
 import { literalSpan } from "../judgment/public-evidence.mjs";
 import { LOCAL_EXTRACTION_INSTRUCTIONS, LocalExtractionError, type LocalExtractionErrorCode } from "../local-grounding/extract.ts";
 import { LOCAL_CLASSIFICATION_INSTRUCTIONS, LocalClassificationError, type LocalClassificationErrorCode } from "../local-grounding/classify.ts";
@@ -13,28 +12,8 @@ import { LOCAL_CLASSIFICATION_INSTRUCTIONS, LocalClassificationError, type Local
 export const LOCAL_GROUNDING_TIMEOUT_MS = 20_000;
 type Message = { role: string; content: unknown };
 
-/** Opt-in publication checks. Only fixed codes leave this function; private
- * instructions and the matched draft text never enter research records. */
-export function findLocalPublicationViolations(text: string, messages: readonly Message[]): string[] {
-  const normalized = text.normalize("NFKC");
-  // Preserve token boundaries: the legacy guard removes whitespace, which can
-  // join a field and an opaque id into a single unmatched token.
-  const separated = normalized.replace(/[\s\u200b-\u200d\ufeff]+/gu, "、");
-  const codes = findInternalLeaks(separated);
-  if (/(?<![A-Za-z])(?:issueId|nameState|claimIds|sourceTurn|respondsTo|localGrounding|classifierKind)(?![A-Za-z])/u.test(separated)) codes.push("internal_field");
-  if (/(?<![A-Za-z0-9])[1-9]\d*:(?:local|ai)[1-9]\d*(?![A-Za-z0-9])/u.test(separated)) codes.push("internal_id");
-  const compact = (value: string) => value.normalize("NFKC").replace(/[\s\u200b-\u200d\ufeff]+/gu, "");
-  const reply = compact(normalized);
-  if (messages.some(message => message.role === "system" && typeof message.content === "string" &&
-      message.content.split(/\r?\n/u).some(line => line.trim().length >= 24 && reply.includes(compact(line.trim().slice(0, 80)))))) {
-    codes.push("internal_prompt_echo");
-  }
-  if (/data\s*:\s*image\s*\//iu.test(normalized)) codes.push("internal_image");
-  if (/\bBearer[ \t]+[A-Za-z0-9._~+/-]+={0,2}|\bsk-[A-Za-z0-9_-]{8,}\b|\bAIza[A-Za-z0-9_-]{20,}\b|\b(?:api[_-]?key|x-api-key)\s*[:=]\s*["']?[A-Za-z0-9._~+/-]{8,}/iu.test(normalized)) {
-    codes.push("internal_credential");
-  }
-  return [...new Set(codes)];
-}
+export { findLocalPublicationViolations } from "./generation-guard.ts";
+import { findLocalPublicationViolations } from "./generation-guard.ts";
 
 type Graph = { revision: number; lastTurn: number; slots: string[]; records: Array<{ kind: string; id: string }>;
   memoryPruneVersion?: import("../memory/reference-graph.mjs").MemoryPruneVersion };
@@ -53,7 +32,7 @@ type ResearchClaim = LocalVerificationResult["operations"][number] & { redacted?
 export type LocalGroundingResearchData = {
   extractor: { segments: Array<LocalSegmentProposal & { act?: LocalAct; redacted?: true }>; errorCode?: LocalExtractionErrorCode };
   classifier: { kind: LocalGroundingTrace["classifierKind"]; model: string | null; status: "not_called" | "ok" | "error" | "skipped";
-    callIndex: number | null; verdicts: Array<Pick<LocalFunctionVerdict, "segmentId" | "act" | "respondsToClaimId">>; errorCode?: LocalClassificationErrorCode };
+    callIndex: number | null; verdicts: Array<Pick<LocalFunctionVerdict, "segmentId" | "act" | "respondsToClaimId" | "answersChecked">>; errorCode?: LocalClassificationErrorCode };
   verification: { accepted: string[]; rejected: LocalRejection[]; diagnostics?: LocalVerificationDiagnostic[] };
   aiClaims: ResearchClaim[];
   claims: ResearchClaim[];
@@ -104,7 +83,8 @@ export function validateLocalGroundingOptions(value: unknown): LocalGroundingOpt
       (options.timeoutMs !== undefined && (typeof options.timeoutMs !== "number" || !Number.isFinite(options.timeoutMs) || options.timeoutMs <= 0))) {
     throw new Error("Invalid local grounding options");
   }
-  return { extractor: options.extractor, classifier: options.classifier, timeoutMs: options.timeoutMs ?? LOCAL_GROUNDING_TIMEOUT_MS };
+  return { extractor: options.extractor, classifier: options.classifier, timeoutMs: options.timeoutMs ?? LOCAL_GROUNDING_TIMEOUT_MS,
+    ...(options.keepUnboundApproval === true ? { keepUnboundApproval: true } : {}), ...(options.approvalFromNamedClaim === true ? { approvalFromNamedClaim: true } : {}) };
 }
 
 // Never copy untrusted segment IDs or exception/provider messages into traces.
@@ -130,6 +110,12 @@ export async function prepareLocalGroundingTurn(options: LocalGroundingOptions, 
   graph: Graph; update: Update; publicTurns: readonly PublicTurn[]; signal?: AbortSignal;
   ownImage: LocalOwnImage; ownAnchors: readonly LocalOwnAnchor[];
   captureResearch?: boolean;
+  referenceQuestionBindings?: ReadonlyMap<string, string>;
+  directReferenceReplies?: boolean;
+  refinedReplyRules?: boolean;
+  /** jev_generation_retry_v12: the classifier also labels whether an agree answers the checked point, and verification reads the label. */
+  answerFieldRules?: boolean;
+  namingIntervalStart?: number;
   priorAct?: Parameters<typeof recordAiClaims>[0]["priorAct"];
 }): Promise<{ update: Update; trace: LocalGroundingTrace; research?: LocalGroundingResearchData }> {
   const started = performance.now();
@@ -204,18 +190,14 @@ export async function prepareLocalGroundingTurn(options: LocalGroundingOptions, 
     const merge = (verified: LocalVerificationResult) => {
       rejected.push(...verified.rejected.map((r, i) => ({ segmentId: segmentCode(r.segmentId, i), reason: reasonCode(r.reason) })));
       for (const operation of verified.operations) {
-        const candidate = { ...update, operations: [...update.operations, operation] };
-        try {
-          update = validateReferenceUpdate(input.graph, candidate, { publicTurns }); accepted++;
+        const step = applyVerifiedOperation(input.graph, update, operation, publicTurns);
+        if (step.applied) {
+          update = step.update; accepted++;
           if (research) {
             const claim = researchClaim(operation);
             (claim.speaker === "ai" ? research.aiClaims : research.claims).push(claim);
           }
-        }
-        catch (error) {
-          if (!(error instanceof ReferenceGraphError)) throw error;
-          rejected.push({ segmentId: `operation_${accepted + rejected.length + 1}`, reason: "memory_" + reasonCode(error.code) });
-        }
+        } else rejected.push({ segmentId: `operation_${accepted + rejected.length + 1}`, reason: step.reason });
       }
     };
     // Both current opt-in callers use this boundary. Never select legacy mode
@@ -260,7 +242,8 @@ export async function prepareLocalGroundingTurn(options: LocalGroundingOptions, 
     if (research) research.classifier.status = "error";
     try {
       verdicts = await options.classifier.classify({ turn: input.update.turn, publicTurns: structuredClone(publicTurns),
-        segments: structuredClone(segments), priorClaims }, { signal: controller.signal, timeoutMs: Math.max(1, Math.ceil(deadline - performance.now())) });
+        segments: structuredClone(segments), priorClaims }, { signal: controller.signal, timeoutMs: Math.max(1, Math.ceil(deadline - performance.now())),
+        ...(input.answerFieldRules === true ? { answerField: true } : {}) });
       if (research) research.classifier.status = classifierKind === "jev_local_test" ? "error" : "ok";
     } catch (error) {
       if (research) research.classifier.errorCode = classificationErrorCode(error);
@@ -280,11 +263,12 @@ export async function prepareLocalGroundingTurn(options: LocalGroundingOptions, 
         const recorded = research.extractor.segments.find(segment => segment.segmentId === segmentId);
         if (recorded) recorded.act = verdict.act;
         return [{ segmentId, act: verdict.act,
-          respondsToClaimId: priorClaims.some(claim => claim.id === verdict.respondsToClaimId) ? verdict.respondsToClaimId : null }];
+          respondsToClaimId: priorClaims.some(claim => claim.id === verdict.respondsToClaimId) ? verdict.respondsToClaimId : null,
+          ...(input.answerFieldRules === true && verdict.answersChecked !== undefined && LOCAL_ANSWERS_CHECKED.includes(verdict.answersChecked) ? { answersChecked: verdict.answersChecked } : {}) }];
       });
     }
     phase = "verification_failed";
-    const verified = verifyLocalUpdate({ graph, turn: input.update.turn, publicTurns, segments, verdicts });
+    const verified = verifyLocalUpdate({ graph, turn: input.update.turn, publicTurns, segments, verdicts, keepUnboundApproval: options.keepUnboundApproval === true, approvalFromNamedClaim: options.approvalFromNamedClaim === true, referenceQuestionBindings: input.referenceQuestionBindings, directReferenceReplies: input.directReferenceReplies, refinedReplyRules: input.refinedReplyRules, answerFieldRules: input.answerFieldRules, namingIntervalStart: input.namingIntervalStart });
     if (research && verified.diagnostics?.length) research.verification.diagnostics = verified.diagnostics
       .flatMap((diagnostic, index): LocalVerificationDiagnostic[] => {
         const segmentId = segmentCode(diagnostic.segmentId, index);
@@ -292,6 +276,8 @@ export async function prepareLocalGroundingTurn(options: LocalGroundingOptions, 
           linkedIssueId: diagnostic.linkedIssueId, resolvedIssueId: diagnostic.resolvedIssueId }];
         if (diagnostic.reason === "antecedent_dropped") return [{ segmentId, reason: "antecedent_dropped",
           respondsToClaimId: diagnostic.respondsToClaimId, resolvedIssueId: diagnostic.resolvedIssueId }];
+        if (diagnostic.reason === "targets_inherited") return [{ segmentId, reason: "targets_inherited",
+          claimId: diagnostic.claimId, respondsToClaimId: diagnostic.respondsToClaimId }];
         if (diagnostic.reason === "antecedent_missing") return [{ segmentId, reason: "antecedent_missing",
           respondsToClaimId: diagnostic.respondsToClaimId, resolvedIssueId: diagnostic.resolvedIssueId }];
         return [];

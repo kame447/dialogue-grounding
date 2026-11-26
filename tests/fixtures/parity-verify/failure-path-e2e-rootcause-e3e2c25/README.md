@@ -1,0 +1,4 @@
+# Synthetic failure capture: holistic_v5 integration with jev_generation_retry_v12 (D1 answer label), the B-32A-1 restore fix and the co2 / #197 fixes
+
+Source commit e3e2c25 (full ID in capture-metadata.json). Two captures with `node tests/support/generate-failure-fixture.ts <dir>` on a clean tree differ only at 15 run-ID leaves.
+Compared with failure-path-e2e-rootcause-c737b00 the records differ at those 15 run-ID leaves and at the prompt-source digests of v2/jev-turn.ts, v2/generation-guard.ts and local-grounding/jev-local-test.ts (five scenarios) plus the identity/prompts digests that follow from them; the leaf-path set (6917) is unchanged. The metadata differs in baseCommit and the source digests of the changed runtime files. Earlier capture directories stay byte-identical. No real API, Keychain, .env, study data or live run was used.

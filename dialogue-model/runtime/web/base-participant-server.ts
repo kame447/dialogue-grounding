@@ -42,6 +42,8 @@ export function createBaseParticipantServer(options: Record<string, any> = {}) {
   const loadedStores = new Set<LocalStore>();
   const handlers = new Set<Promise<void>>(), persists = new Set<Promise<void>>();
   let draining = false, persistSealed = false, drainFailed = false;
+  // Owners whose newest write failed and has not been followed by a successful one: the latest state is not on disk, so a shutdown must not report success.
+  const unsaved = new Set<string>();
   let drainPromise: Promise<void> | undefined;
   async function entry(ownerId: string) {
     let p = entries.get(ownerId);
@@ -52,12 +54,12 @@ export function createBaseParticipantServer(options: Record<string, any> = {}) {
         const coordinator=createBaseAssignmentSession({ownerId,store,now,newId:randomUUID,adapter:'local_private_file',
           ...(memoryPruneVersion ? { memoryPruneVersion } : {}),
           readConfig:async()=>baseAssignmentFile ? readPrivateAssignment(baseAssignmentFile) : null,
-          makeTask:async value=>createTaskV2({client,...value,activeDecision,utteranceStyle,...(groundingShadow?{groundingShadow}:{}),
+          makeTask:async value=>createTaskV2({client,...value,onPersistSlow:(slow:{waitedMs:number;tookMs:number;joined:number})=>{try{process.stderr.write('persist_slow waited_ms='+slow.waitedMs+' took_ms='+slow.tookMs+' joined='+slow.joined+'\n');}catch{/* never affects the write */}},onPersistFailure:(failure:{code:string;at:string;reason?:string})=>{try{process.stderr.write('persist_failed code='+failure.code+(failure.reason?' reason='+failure.reason:'')+' at='+failure.at+'\n');}catch{/* never affects the write */}},activeDecision,utteranceStyle,...(groundingShadow?{groundingShadow}:{}),
             ...(participantJev?await participantJev.taskOptions(value):{}),
             onPersist:async (record:Parameters<typeof value.onPersist>[0])=>{
               if(persistSealed)throw new NamingTaskError('record_write_failed');
               const work=Promise.resolve().then(()=>value.onPersist(record));persists.add(work);
-              work.then(()=>persists.delete(work),()=>{if(draining)drainFailed=true;persists.delete(work);});
+              work.then(()=>{persists.delete(work);unsaved.delete(ownerId);},()=>{if(draining)drainFailed=true;persists.delete(work);unsaved.add(ownerId);});
               await work;
             }})});
         let pending: Promise<unknown> = Promise.resolve();
@@ -73,7 +75,7 @@ export function createBaseParticipantServer(options: Record<string, any> = {}) {
     await privateDirectory(baseStoreRoot);
     try { await lstat(join(baseStoreRoot,ownerId+'.owner.json')); }
     catch(e) { if ((e as NodeJS.ErrnoException).code==='ENOENT') return null; throw failure(); }
-    const e=await entry(ownerId);const saved=await e.store.read();return saved.kind==='expired'?null:e;
+    const e=await entry(ownerId);return await e.store.alive()?e:null;
   }
   const tabFile = (ownerId: string) => join(baseStoreRoot, ownerId + '.browser-sessions.json');
   async function readTabs(ownerId: string): Promise<BrowserSession[]> {
@@ -279,7 +281,7 @@ export function createBaseParticipantServer(options: Record<string, any> = {}) {
         const bytes=await readFile(join(PUBLIC,file));res.end(type==='text/html'?participantContactHTML(bytes.toString('utf8'),options.participantContactText):bytes);return;
       }
       const recordPath=path.match(/^\/api\/records\/([^/]+)\/(review|questionnaire)$/u);
-      const action=req.method==='POST'&&['/api/start','/api/message','/api/names','/api/retry','/api/ai-submit'].includes(path);
+      const action=req.method==='POST'&&['/api/start','/api/message','/api/names','/api/retry','/api/interrupt','/api/ai-submit'].includes(path);
       const sessions=path==='/api/sessions'&&['GET','POST'].includes(req.method!);
       if(!sessions&&!action&&!(req.method==='GET'&&['/api/state','/api/records'].includes(path))&&!(recordPath&&['GET','POST'].includes(req.method!)))return json(404,{error:'not_found'});
       if(!cookie)return json(401,{error:'session_required'});
@@ -336,7 +338,7 @@ export function createBaseParticipantServer(options: Record<string, any> = {}) {
       else task=(await e.coordinator.restore()).task;
       const store=e.store;
       const state=async()=>{const v=task?{...task.getState()}:null;if(v){delete v.strategy;delete v.seed;delete v.visualAid;delete v.referenceMemory;}
-        const c=await store.inspect();return {trial:v?lockResult(v,c.questionnaires[v.sessionId as string]??null):null,hideStrategy:true,busy:Boolean(v?.busy)};};
+        const q=v?await store.questionnaire(v.sessionId as string):null;return {trial:v?lockResult(v,q):null,hideStrategy:true,busy:Boolean(v?.busy)};};
       if(path==='/api/state'||path==='/api/start')return json(200,await state());
       if(!task)throw new NamingTaskError('trial_required');
       const live=task.getState();
@@ -347,6 +349,10 @@ export function createBaseParticipantServer(options: Record<string, any> = {}) {
         return json(202,{eventId:receipt.eventId,...await state()});
       }
       if(path==='/api/retry')await task.retry();
+      if(path==='/api/interrupt'){
+        if(typeof task.interruptDialogue!=='function'||live.dialogueRecovery!=='retry'&&live.dialogueRecovery!=='paused')return json(409,{error:'ai_busy'});
+        await task.interruptDialogue();
+      }
       if(path==='/api/names'){
         if(input.confirm!==true)throw new NamingTaskError('invalid_submission');
         validateEventCount(input,live.events);
@@ -384,7 +390,13 @@ export function createBaseParticipantServer(options: Record<string, any> = {}) {
       await new Promise<void>(resolve=>setImmediate(resolve));
       server.closeIdleConnections();
       await sockets;
-      while(persists.size)await Promise.all([...persists]);
+      // A failed write may be retried by the calls that were waiting on it; give that retry the chance to start before deciding that nothing is left to write.
+      for(;;){
+        while(persists.size)await Promise.allSettled([...persists]);
+        await new Promise<void>(resolve=>setImmediate(resolve));
+        if(!persists.size)break;
+      }
+      if(unsaved.size)drainFailed=true;
       // No await between observing no started writers and sealing the callback entry.
       persistSealed=true;
       if(drainFailed)throw new Error('shutdown_incomplete');

@@ -1,0 +1,29 @@
+{
+  "source": {
+    "commits": [
+      "58a9511",
+      "07116ae"
+    ],
+    "file": "dialogue-model/runtime/local-grounding/classify.ts",
+    "constant": "LOCAL_FUNCTION_CRITERIA"
+  },
+  "fingerprint": {
+    "algorithm": "sha256 of UTF-8 JSON.stringify(constant)",
+    "sha256": "6928dac5034e64294c2308c18671e2820c67ea9f7e2af721f66b56d9792769fc"
+  },
+  "criteria": {
+    "assert": "局所命題の特徴・向き等を述べる。",
+    "construe": "何に見えるかという見立てを述べる。命名とは区別する。",
+    "agree": "特定できる先行命題に同意する。別の論点へ波及させない。",
+    "deny": "特定できる先行命題を否定・訂正する。",
+    "ask": "既存の呼び名を使っているか、図形の特徴や対応はどうなっているかなど、事実を尋ねる。呼び名を提案する疑問形はname_propose。",
+    "name_propose": "対象の呼び名として名前を明示的に提案する。「〜と呼びましょうか？」「〜と呼んでもいいですか？」「〜で決めてもいいですか？」「〜でいいですか？」など、呼び名を提案する丁寧な疑問形も含める。見立てだけは含めない。",
+    "name_accept": "特定できる先行する名称提案を相手が採用する。",
+    "name_reject": "特定できる先行する名称提案を拒否する。",
+    "defer": "局所問題を未解決のまま保留する。",
+    "revisit": "以前に保留した局所問題へ戻る。",
+    "withdraw": "話者が自分の先行命題を撤回する。",
+    "acknowledge": "相槌・受け止めのみ。相槌だけを同意や名称採用にしない。",
+    "unknown": "公開上の根拠不足や応答先が曖昧で判定できない。"
+  }
+}
