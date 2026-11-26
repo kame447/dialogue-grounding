@@ -8,6 +8,8 @@ import { ADMIN_CSS, applyFilter, parseFilter, renderDetail, renderList, renderMe
 import { FIGURE_SETS, FIGURE_BANK } from '../../../../dialogue-model/runtime/stimuli/figure-bank.ts';
 import { OBJECT_ID, RECORD_ID } from "./summary.ts";
 import type { AdminSummary } from "./summary.ts";
+import { isParticipantRole, participantRoleView } from "./participant-role.ts";
+import type { AdminRecordSummary, ParticipantRole, ParticipantRoleResult } from "./participant-role.ts";
 import type { LatencySummary } from "./latency.ts";
 import type { AuditEntry } from "./index-store.ts";
 import type { ProtocolFields, ReceptionAdminPort, ReceptionSettingsPort } from './reception-port.ts';
@@ -18,8 +20,9 @@ export type AdminDeps = {
   limiter: AdminLimiter | undefined;
   // Accepted for older callers only; record retention is no longer time-limited.
   retentionDays?: number;
-  listPage(after: string | null): Promise<{ items: AdminSummary[]; next: string | null }>;
-  getSummary(recordId: string): Promise<AdminSummary | null>;
+  listPage(after: string | null): Promise<{ items: AdminRecordSummary[]; next: string | null }>;
+  getSummary(recordId: string, includeParticipantRole?: boolean): Promise<AdminRecordSummary | null>;
+  setParticipantRole?(summary: AdminSummary, role: ParticipantRole): Promise<ParticipantRoleResult>;
   /** Reads record:<recordId> from the owning session object over internal RPC, never the participant API. */
   getRecord(summary: AdminSummary): Promise<unknown | null>;
   /** Deletes the record in its session object, then its index entry (with a content-free audit entry). */
@@ -98,6 +101,40 @@ async function receptionForm(request: Request): Promise<URLSearchParams | null> 
   const bytes = new Uint8Array(length); let offset = 0;
   for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
   try { return new URLSearchParams(new TextDecoder('utf-8', { fatal: true }).decode(bytes)); } catch { return null; }
+}
+
+async function participantRoleMutation(request: Request, deps: AdminDeps, id: string, reception: boolean, fromLog: boolean): Promise<Response> {
+  const back = reception ? '/admin/receptions' : fromLog ? '/admin' : '/admin/record/' + id;
+  const fail = (status: number, code: string, message: string) => wantsHtml(request)
+    ? respond(status, renderMessage('人間役の担当種別', message, { href: back, label: '戻る' }))
+    : receptionError(status, code);
+  if (!RECORD_ID.test(id)) return receptionError(404, 'not_found');
+  const form = await receptionForm(request);
+  const role = form?.get('role'), recordIds = form?.getAll('recordId') ?? [];
+  if (!form || !isParticipantRole(role) || form.getAll('role').length !== 1 ||
+      [...form.keys()].some(key => key !== 'role' && !(reception && key === 'recordId')) ||
+      new Set(recordIds).size !== recordIds.length || recordIds.some(recordId => !RECORD_ID.test(recordId))) {
+    return fail(400, 'invalid_request', '担当種別と対象の記録を確認してください。');
+  }
+  try {
+    let result: ParticipantRoleResult;
+    if (reception) {
+      result = await deps.receptions!.setParticipantRole!(id, role, recordIds.length ? recordIds : null);
+    } else {
+      const summary = await deps.getSummary(id, true);
+      result = summary?.recordId === id && OBJECT_ID.test(summary.objectId)
+        ? await deps.setParticipantRole!(summary, role)
+        : { ok: false, error: 'not_found' };
+    }
+    if (!result.ok) {
+      if (result.error === 'not_found') return fail(404, 'not_found', '対象の記録が見つかりません。');
+      return fail(409, 'conflict', '対象の試行記録が変わりました。画面を開き直してください。');
+    }
+    if (request.headers.get('Accept')?.split(',').some(value => value.split(';')[0].trim().toLowerCase() === 'application/json')) {
+      return respond(200, JSON.stringify({ [reception ? 'receptionId' : 'recordId']: id, role }), 'application/json; charset=utf-8');
+    }
+    return plain(303, '', { Location: back });
+  } catch { return fail(503, 'unavailable', '保存結果を確認できませんでした。画面を開き直して担当種別を確認してください。'); }
 }
 const receptionError = (status: number, error: string) => respond(status, JSON.stringify({ error }), 'application/json; charset=utf-8');
 /** Browser pages (Accept: text/html without application/json) get a short page; other clients keep the JSON contract. */
@@ -259,11 +296,12 @@ export async function handleAdmin(request: Request, deps: AdminDeps): Promise<Re
   const deletePath = request.method === "POST" ? url.pathname.match(/^\/admin\/record\/([^/]+)\/delete$/) : null;
   const nextPath = request.method === 'POST' && deps.prepareNext ? url.pathname.match(/^\/admin\/record\/([^/]+)\/prepare-next$/) : null;
   const receptionPath = request.method === 'POST' && deps.receptions ? url.pathname.match(/^\/admin\/reception\/([^/]+)\/(approve|cancel)$/) : null;
+  const rolePath = url.pathname.match(/^\/admin\/(record|reception)\/([^/]+)\/participant-role$/u);
   const settingsPath = request.method === 'POST' && deps.receptionSettings ? url.pathname.match(/^\/admin\/reception-settings\/(protocol|mode)$/) : null;
   if (!deps.receptions && (url.pathname === '/admin/receptions' || url.pathname === '/admin/entry' || url.pathname === '/admin/receptions.js')) return notFound();
   if (!deps.receptions?.version && url.pathname === '/admin/receptions/version') return notFound();
   if (!deps.receptionSettings && url.pathname === '/admin/reception-settings') return notFound();
-  if (request.method === "POST" ? !deletePath && !nextPath && !receptionPath && !settingsPath : request.method !== "GET" && request.method !== "HEAD") return notFound();
+  if (request.method === "POST" ? !deletePath && !nextPath && !receptionPath && !settingsPath && !rolePath : request.method !== "GET" && request.method !== "HEAD") return notFound();
   const header = request.headers.get("Authorization");
   // Every credentialed attempt (right or wrong) counts, so guessing is capped per visitor.
   if (presentedToken(header) !== null && !(await deps.limiter.limit({ key: visitorKey(request) })).success) {
@@ -273,6 +311,21 @@ export async function handleAdmin(request: Request, deps: AdminDeps): Promise<Re
   if (auth === "unconfigured") return notFound();
   if (auth !== "ok") return plain(401, "Authentication required", { "WWW-Authenticate": REALM });
 
+  if (rolePath) {
+    const id = rolePath[2];
+    const reception = rolePath[1] === 'reception';
+    if (request.method === 'POST') {
+      if (!sameOrigin(request, url)) return plain(403, 'Forbidden');
+      if (reception ? !deps.receptions?.setParticipantRole : !deps.setParticipantRole) return notFound();
+      return participantRoleMutation(request, deps, id, reception, url.searchParams.get('from') === 'log');
+    }
+    if (reception || !RECORD_ID.test(id)) return receptionError(404, 'not_found');
+    try {
+      const summary = await deps.getSummary(id, true);
+      if (summary?.recordId !== id || !OBJECT_ID.test(summary.objectId) || !await deps.getRecord(summary)) return receptionError(404, 'not_found');
+      return respond(200, JSON.stringify({ recordId: id, role: summary.participantRole?.role ?? 'unclassified' }), 'application/json; charset=utf-8');
+    } catch { return receptionError(503, 'unavailable'); }
+  }
   if (settingsPath) {
     if (!sameOrigin(request, url)) return plain(403, 'Forbidden');
     return settingsMutation(request, deps.receptionSettings!, settingsPath[1]);
@@ -387,12 +440,12 @@ export async function handleAdmin(request: Request, deps: AdminDeps): Promise<Re
   const match = url.pathname.match(/^\/admin\/record\/([^/.]+)(\.json)?$/);
   if (!match || !RECORD_ID.test(match[1])) return notFound();
   // Only indexed trials are viewable; the owning object comes from the index, not the URL.
-  const summary = await deps.getSummary(match[1]);
+  const summary = await deps.getSummary(match[1], true);
   if (!summary || summary.recordId !== match[1] || !OBJECT_ID.test(summary.objectId)) return notFound();
   const record = await deps.getRecord(summary);
   if (!record) return respond(404, renderMessage("記録がありません", "このセッションには保存済みの記録がありません。"));
   // Researcher export of the full stored record (including the provisional questionnaire), as a download.
-  if (match[2]) return respond(200, JSON.stringify(record, null, 2), "application/json; charset=utf-8",
+  if (match[2]) return respond(200, JSON.stringify({ ...record, participantRole: summary.participantRole ?? participantRoleView() }, null, 2), "application/json; charset=utf-8",
     { "Content-Disposition": `attachment; filename="tangram-record-${summary.recordId}.json"` });
   return respond(200, renderDetail(record, summary, deps.summarizeLatency(record), deps.retentionDays));
 }

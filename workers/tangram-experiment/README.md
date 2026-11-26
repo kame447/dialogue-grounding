@@ -47,15 +47,16 @@ npm run deploy:tangram
 
 ## 研究者用ログページ（`/admin`）
 
-研究者だけが、試行の一覧と詳細（公開発話、ターンごとの判断、実行の記録とエラーコード、外部要求の段階と遅延、生成ガード、提出と採点、仮アンケートの回答）を読み取りで確認できます。`/api/state` が返す内容は増えていません。
+研究者だけが、試行の一覧と詳細（公開発話、ターンごとの判断、実行の記録とエラーコード、外部要求の段階と遅延、生成ガード、提出と採点、仮アンケートの回答）を確認できます。人間役の担当種別も試行ごとに確認・変更できます。
 
 - 認証：Worker Secret `ADMIN_TOKEN`（32文字以上のランダム値）。`Authorization: Bearer <token>`、またはBasic認証（ユーザー名 `researcher`、パスワードにトークン）で送ります。ブラウザではBasic認証の入力欄が出ます。URLのクエリにトークンを入れても無視します。
   - Secretが未設定、32文字未満、またはレート制限のbindingがない場合、`/admin` は404を返します（fail closed）。
   - 認証情報を伴う要求は、正誤にかかわらず同じIPから30回／60秒まで（`ADMIN_RATE_LIMIT`）。超えると429です。
   - 応答には `Cache-Control: no-store`、`X-Robots-Tag: noindex`、スクリプトを一切許可しないCSPを付けます。CORSは許可しません。
 - 設定：`npx wrangler secret put ADMIN_TOKEN --config workers/tangram-experiment/wrangler.jsonc`（研究者が実行）。トークンはリポジトリ・ログ・URLに書かないでください。
-- 一覧は試行（recordId）ごとで、同じブラウザでの過去の試行も表示します。更新が新しい順に1ページ100件で、状態・エラー・参照メモリで絞り込めます（絞り込みは表示中のページ内に適用）。「仮アンケート」列は状態（なし・下書き・提出済み）だけを示します。回答と自由記述は一覧の索引に入れず、詳細ページだけに表示します。
-- JSONでの保存：`GET /admin/record/<recordId>.json` は、その試行の保存済み記録全体（仮アンケートを含む）を `Content-Disposition: attachment` のJSONファイルとして返します。認証、レート制限、応答ヘッダーは詳細ページと同じです。一覧に登録された試行だけが対象です。ファイルには非公開の判断や正解表も含まれるため、リポジトリやGitHubには置かないでください。
+- 一覧は試行（recordId）ごとで、同じブラウザでの過去の試行も表示します。更新が新しい順に1ページ100件で、状態・エラー・参照メモリ・人間役の担当種別で絞り込めます（絞り込みは表示中のページ内に適用）。「仮アンケート」列は状態（なし・下書き・提出済み）だけを示します。回答と自由記述は一覧の索引に入れず、詳細ページだけに表示します。
+- JSONでの保存：`GET /admin/record/<recordId>.json` は、その試行の保存済み記録全体（仮アンケートを含む）を `Content-Disposition: attachment` のJSONファイルとして返します。管理用の `participantRole` は `schemaVersion: "participant_role_v1"` と `role: "human" | "ai" | "unclassified"` を持ちます。認証、レート制限、応答ヘッダーは詳細ページと同じです。一覧に登録された試行だけが対象です。ファイルには非公開の判断や正解表も含まれるため、リポジトリやGitHubには置かないでください。
+- 担当種別の管理 API は `GET /admin/record/<recordId>/participant-role` と、同じ URL への同一オリジンの `POST` です。フォームの `role` に JSON 出力と同じ値を指定します。受付に紐付く試行を一括で変更する場合は、`POST /admin/reception/<receptionId>/participant-role` で `role` を送ります。対象を画面で確認済みの場合は `recordId` を全対象分送ると、保存済み試行の集合に変化があれば409を返します。
 
 ## 根拠判定のshadow（`GROUNDING_SHADOW`・既定OFF）
 
@@ -73,6 +74,8 @@ npm run deploy:tangram
 | 同じDurable Objectの `ledger`・`tombstones` | recordIdと最終更新時刻だけ／削除済みのrecordIdだけ（内容なし。過去の自動削除分も含む） | 自動削除しない。記録を明示的に削除すると、そのIDを `ledger` から除き、`tombstones` に残す |
 | `AdminIndex`（Durable Object、全体で1つ）の `r:` と `u:` | 一覧用の要約（recordId、Durable Object ID、開始・更新時刻、方略、参照メモリ、発話様式、状態、件数、エラーコード、遅延の集計）。Cookie・IP・User-Agent・発話本文・名前は含みません | 対応する記録と同時に削除 |
 | `AdminIndex` の `a:`・`d:` | 削除の監査記録（recordIdのハッシュ、削除日時、理由。新しい削除は `admin`、過去の `retention` も保持）。内容は含みません | 自動削除しない |
+| `AdminIndex` の `participant-role:<recordId>` | 人間役の担当種別と更新時刻。未設定の記録は未分類 | 対応する記録の索引と同時に削除 |
+| `AdminIndex` の `participant-role-audit:` | 担当種別の変更前後、記録ID、変更時刻 | 操作の監査として保存 |
 
 - 自動削除なし：初期化、参加者の再訪、保存、仮アンケート提出、管理ページの閲覧で、経過時間による削除は行いません。削除用alarmは新規に予約せず、既に予約された古いalarmも発火時には解除するだけで、削除処理は呼びません。古いalarmによる索引への再登録は残します。
 - 一覧と記録の対応：一覧に表示される項目は記録を明示的に削除すると同時に削除されます。一覧への登録は記録の保存とは別の処理で、失敗しても参加者の試行には影響しません。再開対象の試行はアクセス・保存時に、セッション内の全記録は既存の古いalarmが発火した際に再登録を試みます。新しいalarmは予約しないため、再開対象でない過去の試行の登録失敗が自動で修復される保証はありません。削除済みのIDは一覧に再登録しません。並行した更新の際に、表示順のための内部キー（recordIdだけを含む）が残ることがありますが、一覧には表示されず、内容も含みません。
