@@ -417,3 +417,39 @@ test('#142 J1: the P1 path is relative_pm90 only; relative_0 tasks and records f
   await assert.rejects(prepared.taskOptions({strategy:'repair-first',seed,referenceMemory:true,restore:zero}),{code:'invalid_config'});
   assert.equal(h.upstream.counts().posts,0);
 });
+
+test('#14: a new naming scope is opt-in and restoration uses the saved scope', async t => {
+  const h = await fixture(t, { questionLayout: 'two_stage_v3', technicalTrial: { version: 'adaptive_repair_v3' } });
+  const prepared = await prepareParticipantJev(h.options);
+  const optedIn = {
+    async taskOptions(value: Parameters<typeof prepared.taskOptions>[0]) {
+      const wiring = await prepared.taskOptions(value);
+      return { ...wiring, jevResearch: { ...wiring.jevResearch!, newTrialAgreeNameScopeVersion: 'scoped_v7' as const } };
+    },
+  };
+  const old = await makeTask(prepared);
+  const fresh = await makeTask(optedIn);
+  old.task.message('この形について話しましょう。', 'legacy');
+  fresh.task.message('この形について話しましょう。', 'new');
+  await old.task.whenIdle();
+  await fresh.task.whenIdle();
+  const oldSaved = old.record();
+  const newSaved = fresh.record();
+  assert.equal(oldSaved.jevTraces[0].status, 'committed');
+  assert.equal(newSaved.jevTraces[0].status, 'committed');
+  assert.equal(oldSaved.queueState.privateState.agreeNameScopeVersion, 'scoped_v6');
+  assert.equal(newSaved.queueState.privateState.agreeNameScopeVersion, 'scoped_v7');
+  assert.equal(oldSaved.options.generationRetryVersion, 'jev_generation_retry_v12');
+  assert.equal(newSaved.options.generationRetryVersion, 'jev_generation_retry_v12');
+  const sends = h.upstream.counts().posts;
+  for (const [source, resumeWith] of [[oldSaved, optedIn], [newSaved, prepared]] as const) {
+    const restored = await makeTask(resumeWith, { restore: structuredClone(source) });
+    assert.deepEqual(restored.record().queueState.privateState, source.queueState.privateState);
+    assert.deepEqual(restored.record().jevTraces, source.jevTraces);
+    assert.deepEqual(restored.record().options, source.options);
+  }
+  assert.equal(h.upstream.counts().posts, sends);
+  const invalid = structuredClone(newSaved);
+  invalid.options.generationRetryVersion = 'jev_generation_retry_v11';
+  await assert.rejects(makeTask(prepared, { restore: invalid }), { code: 'invalid_options' });
+});

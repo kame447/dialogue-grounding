@@ -28,7 +28,7 @@ import { hasNameProposal, traceMarkerInvalid } from '../decision/naming-request.
 import { literalSpan } from '../judgment/public-evidence.mjs';
 import { createJevLocalTestClassifier, JevLocalTestError } from '../local-grounding/jev-local-test.ts';
 import { validJevSharedConstrualTrace } from '../v2/jev-turn.ts';
-import type { JevTurnLocalOptions } from '../v2/jev-turn.ts';
+import type { JevTurnLocalOptions, JevTurnOptions } from '../v2/jev-turn.ts';
 import { RunBudget } from '../diagnostics/parity-live/audit.ts';
 import type { BudgetLimits, SendReceipt } from '../diagnostics/parity-live/audit.ts';
 import { checkModelIdentity, MODEL_CONTRACT_V2 } from '../model-identity-contract.ts';
@@ -39,7 +39,9 @@ import type { GenerationRetryVersion } from '../v2/generation-guard.ts';
 
 export type JevResearchLedger = RunBudget | ParticipantUsageLedger;
 export type JevResearchOptions<Ledger extends JevResearchLedger = RunBudget> = Readonly<{ profile: ResearchTrialProfileV3; observer: ObservationObserver;
-  jevDecision: JevDecisionClient; localGrounding: JevTurnLocalOptions; ledger: Ledger; technicalTrial?: AdaptiveRepairTrial; generationRetryVersion?: GenerationRetryVersion }>;
+  jevDecision: JevDecisionClient; localGrounding: JevTurnLocalOptions; ledger: Ledger; technicalTrial?: AdaptiveRepairTrial;
+  generationRetryVersion?: GenerationRetryVersion;
+  newTrialAgreeNameScopeVersion?: JevTurnOptions["newTrialAgreeNameScopeVersion"] }>;
 const AI_NAME_ACCEPTANCES_V1 = 'ai_name_acceptances_v1';
 type SelectedJevResearchOptions = JevResearchOptions<JevResearchLedger> & { namingRestoreVersion?: typeof AI_NAME_ACCEPTANCES_V1 };
 export class ParticipantJevError extends Error {
@@ -140,7 +142,9 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
     }
     if (provided === null || provided === undefined) return marker === true ? invalid() : null;
     const raw = data(provided);
-    const v = data(raw,['profile','observer','jevDecision','localGrounding','ledger',...(Object.hasOwn(raw,'technicalTrial')?['technicalTrial']:[]),...(Object.hasOwn(raw,'generationRetryVersion')?['generationRetryVersion']:[])]);
+    const v = data(raw,['profile','observer','jevDecision','localGrounding','ledger',...(Object.hasOwn(raw,'technicalTrial')?['technicalTrial']:[]),
+      ...(Object.hasOwn(raw,'generationRetryVersion')?['generationRetryVersion']:[]),
+      ...(Object.hasOwn(raw,'newTrialAgreeNameScopeVersion')?['newTrialAgreeNameScopeVersion']:[])]);
     const technicalTrial = Object.hasOwn(v,'technicalTrial') ? checkedTechnicalTrial(v.technicalTrial) : undefined;
     // The frozen order is outer shape, explicit profile, memory, strategy.
     let profile = checkedProfile(v.profile);
@@ -161,6 +165,10 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
     const generationRetryVersion = profile.dialoguePolicy === 'holistic_v5' && profile.questionLayout === 'two_stage_v3'
       ? restore ? savedGenerationVersion ?? 'jev_generation_retry_v2' : requestedGenerationVersion as GenerationRetryVersion | undefined ?? defaultGenerationRetryVersion(profile.questionLayout, profile.dialoguePolicy)
       : undefined;
+    const newTrialAgreeNameScopeVersion = v.newTrialAgreeNameScopeVersion;
+    if (Object.hasOwn(v, 'newTrialAgreeNameScopeVersion') &&
+        (newTrialAgreeNameScopeVersion !== 'scoped_v7' || !restore &&
+          !validAgreeNameScope(newTrialAgreeNameScopeVersion, generationRetryVersion))) return invalid();
     const p5Enabled = isGenerationV13(generationRetryVersion);
     const namingRestoreVersion = restore ? restore.options?.jevNamingRestoreVersion :
       isGenerationV12(generationRetryVersion) ? AI_NAME_ACCEPTANCES_V1 : undefined;
@@ -237,6 +245,7 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
     const rebuilt = typeof (local.classifier as any)?.forPolicy === 'function' ? (local.classifier as any).forPolicy(profile.dialoguePolicy) : undefined;
     if (rebuilt) local = {...local,classifier:rebuilt};
     return {profile,observer,jevDecision,localGrounding:local,ledger:v.ledger,...(technicalTrial?{technicalTrial}:{}),...(generationRetryVersion?{generationRetryVersion}:{}),
+      ...(!restore && newTrialAgreeNameScopeVersion === 'scoped_v7' ? {newTrialAgreeNameScopeVersion} : {}),
       ...(namingRestoreVersion?{namingRestoreVersion}:{})};
   } catch { return invalid(); }
 }

@@ -8,6 +8,7 @@ import { readFile } from 'node:fs/promises';
 import { researchTrialProfileV3 } from '../dialogue-model/runtime/v2/research-profile.ts';
 import { createProfileDialogue } from '../dialogue-model/runtime/diagnostics/parity-live/replay.ts';
 import { pairedInterventionReplay } from '../dialogue-model/runtime/diagnostics/parity-live/intervention-replay.ts';
+import { promptSourceManifest } from '../dialogue-model/runtime/diagnostics/parity-live/audit.ts';
 import { interventionChecks, s4Probe } from '../dialogue-model/runtime/diagnostics/parity-verify/intervention-records.ts';
 import { hash } from '../dialogue-model/runtime/diagnostics/parity-verify/core.ts';
 import { createJevDecisionClient, TWO_STAGE_V2_CANDIDATE_SETS, candidateSetLabel } from '../dialogue-model/runtime/decision/jev-decision.ts';
@@ -68,6 +69,8 @@ async function recordedRun(profile: any, tape: any, label: 'repair-first' | 'byp
 async function records(layout: 'two_stage_v2' | 'two_stage_v3', jev: any[], { reobservation = false, label = 'bypass-enabled' as 'repair-first' | 'bypass-enabled', generationText = null as string | null, humanText = null as string | null,
   retry = null as { drafts: [string, string]; current: boolean; fallback?: boolean } | null, policy = null as 'holistic_v1' | 'holistic_v2' | 'holistic_v3' | null, draftAnswers = [] as Array<string | { choice: string; extra: Record<string, unknown> }> } = {}) {
   const n = structuredClone(normal), tr = n.trials[0], m = n.run.manifest;
+  n.run.promptSources = await promptSourceManifest();
+  tr.identity.prompts = hash(n.run.promptSources);
   const profile = JSON.parse(JSON.stringify(researchTrialProfileV3(m.lunaRequest, m.timeouts, layout, policy)));
   const digest = hash(profile);
   for (const s of [n.run, n.summary, tr]) { s.profile = structuredClone(profile); s.profileSha256 = digest; }

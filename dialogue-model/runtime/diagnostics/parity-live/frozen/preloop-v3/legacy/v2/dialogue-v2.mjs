@@ -7,7 +7,7 @@ import {JevTurnError} from './jev-turn.mts';
 // v1 (createDialogueSession) is untouched.
 import { createLunaJudge } from "../../../../../../judgment/luna.mjs";
 import { createOwnLedger, validateJudgment, applyJudgment } from "../../../../../../judgment/schema.mjs";
-import { STRATEGIES, TASK_INSTRUCTIONS_V2, ownImageMessage, publicMessages } from "../../../../../../judgment/instructions.mjs";
+import { STRATEGIES, TASK_INSTRUCTIONS_V2, ownImageMessage, publicMessages } from "../judgment/instructions.mjs";
 import { createReferenceGraph, applyReferenceUpdate, snapshotReferenceGraph, ReferenceGraphError, REFERENCE_LIMITS } from "../../../../../../memory/reference-graph.mjs";
 import { stageMemory, prepareMemory } from "../../../../../../judgment/memory.mjs";
 import { buildDecisionEvidence } from "../../../../../../v2/decision-evidence.mjs";

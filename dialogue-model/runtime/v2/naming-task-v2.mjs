@@ -209,6 +209,7 @@ export async function createNamingTaskV2({
       ...(jev.profile.questionLayout !== "two_stage_v1" ? { questionLayout: jev.profile.questionLayout } : {}),
       ...(jev.profile.dialoguePolicy ? { dialoguePolicy: jev.profile.dialoguePolicy } : {}),
       generationRetryVersion: jev.generationRetryVersion,
+      newTrialAgreeNameScopeVersion: jev.newTrialAgreeNameScopeVersion,
       onJevTurnTrace: (record) => {
         jevTraces.push(clone(record));
         if (!usage && Object.values(record.aiPublic?.stages ?? {}).some(stage => stage.error === "cost_cap")) jev.ledger.stop("cost_cap");

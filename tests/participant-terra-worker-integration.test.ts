@@ -8,6 +8,7 @@ import { MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS } from '../dialogue-model/runtim
 import { canonicalReceptionProtocolV2, canonicalReceptionProtocolV3, receptionProtocolSha256, receptionSummary, validateReceptionPlan } from '../dialogue-model/runtime/v2/reception.ts';
 import { createTrialV2, modelView } from '../dialogue-model/runtime/stimuli/scatter-v2.mjs';
 import { FIGURE_SETS } from '../dialogue-model/runtime/stimuli/figure-bank.ts';
+import { validateBoundBaseRecord } from '../dialogue-model/runtime/v2/base-assignment-data.ts';
 import { validateParticipantModelPin } from '../dialogue-model/runtime/v2/participant-model-pin.ts';
 import { handleRequest } from '../workers/research-ai-proxy/src/index.mjs';
 import { PARTICIPANT_PRODUCTION_PROFILE } from '../dialogue-model/runtime/web/participant-usage-policy.ts';
@@ -601,17 +602,20 @@ test('v3 routes all four text roles to real private Terra transport and preserve
     assert.equal(saved.strategy, strategy);
     assert.deepEqual(saved.options.participantModelPin, expectedPin);
     assert.equal(saved.jevTraces[0].generationGuard.regenerated, true);
-    const { phases, latest } = saved.jevLedger;
+    const { phases, latest, returnedModels } = saved.jevLedger;
     assert.deepEqual(phases.luna, {});
     assert.equal(latest.luna, null);
     assert.equal(latest.terra.model, pin.terraModelId);
     assert.equal(latest.terra.phase, 'final_submission');
     assert.equal(latest.jev.model, pin.jevModelId);
     assert.ok(phases.jev.action_target.posts > 0);
+    assert.deepEqual(returnedModels.luna, {});
+    assert.deepEqual(returnedModels.jev.action_target, { model: pin.jevModelId, ok: phases.jev.action_target.posts });
     const expectedPosts = { initial_observation: predecessor ? 0 : 1, reobservation: 1,
       dialogue: 1, generation: 2, ai_extraction: 1, final_submission: 1 };
     for (const [phase, count] of Object.entries(expectedPosts)) {
       const meter = phases.terra[phase];
+      assert.deepEqual(returnedModels.terra[phase], count ? { model: pin.terraModelId, ok: count } : undefined);
       assert.deepEqual([meter.posts, meter.inputTokens, meter.outputTokens, meter.unknownPosts,
         meter.missingCostPosts, meter.knownUsd], [count, 17 * count, 6 * count, 0,
         phase === 'ai_extraction' ? count : 0, phase === 'ai_extraction' ? 0 : 0.021 * count]);
@@ -620,6 +624,7 @@ test('v3 routes all four text roles to real private Terra transport and preserve
     h.evict();
     assert.equal((await jsonOk(await h.request('state'))).trial.sessionId, trial.sessionId);
     assert.deepEqual((await h.adminRecord(trial.sessionId)).jevLedger, saved.jevLedger);
+    assert.doesNotMatch(JSON.stringify(await jsonOk(await h.request('state'))), /returnedModels/u);
     predecessor = trial.sessionId;
   }
   const perCondition = ['dialogue', 'reobservation', 'generation', 'rewrite', 'ai_extraction', 'final_submission'];
@@ -657,6 +662,7 @@ test('v3 rejects wrong or missing model IDs from either extraction before public
     assert.equal(saved.jevLedger.latest.terra.phase, phase);
     assert.equal(saved.jevLedger.latest.terra.status, 'model_mismatch');
     assert.equal(saved.jevLedger.latest.terra.model, null);
+    assert.equal(saved.jevLedger.returnedModels.terra[phase], undefined);
     assert.equal(saved.jevLedger.phases.terra[phase].unknownPosts, 1);
     assert.equal(saved.jevLedger.latest.luna, null);
     assert.deepEqual(posts, phase === 'dialogue' ? ['dialogue'] : ['dialogue', 'generation', 'ai_extraction']);
@@ -684,6 +690,100 @@ test('private Terra generation closes on missing configuration, wrong expected I
     assert.deepEqual(await proxy.participantUsageGeneration(body, pin.terraModelId), { status: 502, data: { error: 'model_mismatch' } });
   }
   assert.equal(posts, 2);
+});
+
+test('dormant dialogue profiles keep management reads available and block starts and restores without reserving a slot', async () => {
+  const h = harness();
+  const proxy = new InternalParticipantProxy({}, settings);
+  h.env.PARTICIPANT_TERRA_ALL_ROLES_ENABLED = 'on';
+  h.env.PARTICIPANT_AI_PROXY.participantUsagePolicyV3 = () => proxy.participantUsagePolicyV3();
+  h.env.PARTICIPANT_AI_PROXY.participantUsageGeneration = async (payload, expected) => {
+    const body = payload as { messages: { content: string }[] };
+    if (!body.messages.at(-1)?.content.includes('JSON')) {
+      return { status: 200, data: chatResponse(expected, 'なるほど、聞かせてくれてありがとう。') };
+    }
+    const initial = h.calls.find(call => call.kind === 'visual_observation');
+    const { ownAnchors } = JSON.parse(initial?.body.messages[1].content) as { ownAnchors: { id: string }[] };
+    return { status: 200, data: chatResponse(expected, JSON.stringify(Object.fromEntries(ownAnchors.map(({ id }) => [id, '合成名'])))) };
+  };
+  const error = async (response: Response, status: number, code: string) => {
+    assert.equal(response.status, status);
+    assert.deepEqual(await response.json(), { error: code });
+  };
+  const put = (items: Record<string, unknown>) => h.storage.transaction(tx => tx.put(items));
+
+  await h.receive();
+  const approved = await h.approve();
+  assert.equal(Object.hasOwn(approved.plan, 'participantDialogueProfile'), false);
+  const before = await h.storage.get('base:owner:v1');
+  await error(await h.request('start', { version: 2, expectedReceptionRevision: approved.revision,
+    participantDialogueProfile: 'participant_dialogue_v12' }), 400, 'invalid_request');
+
+  for (const profile of ['participant_dialogue_v12', 'participant_dialogue_v13_p5']) {
+    const saved = { ...approved, plan: { ...approved.plan, participantDialogueProfile: profile } };
+    await put({ 'reception:v1': saved });
+    const listing = await h.admin('/admin/receptions');
+    assert.equal(listing.status, 200);
+    assert.ok((await listing.text()).includes('data-id="' + approved.receptionId + '"'));
+    await error(await h.start(), 409, 'trial_unavailable');
+    assert.deepEqual(await h.storage.get('reception:v1'), saved);
+    assert.deepEqual(await h.storage.get('base:owner:v1'), before);
+    assert.equal(h.calls.length, 0);
+  }
+  await put({ 'reception:v1': { ...approved, plan: { ...approved.plan, participantDialogueProfile: 'unknown' } } });
+  await error(await h.start(), 409, 'reception_unavailable');
+  assert.deepEqual(await h.storage.get('base:owner:v1'), before);
+  assert.equal(h.calls.length, 0);
+
+  await put({ 'reception:v1': approved });
+  const { trial } = await jsonOk(await h.start());
+  const recordKey = 'record:' + trial.sessionId;
+  h.evict();
+  assert.equal((await jsonOk(await h.request('state'))).trial.sessionId, trial.sessionId);
+  await h.complete(trial.sessionId, trial);
+  const existing = await h.storage.get('reception:v1');
+  const originalOwner = await h.storage.get('base:owner:v1');
+  const originalRecord = await h.storage.get(recordKey);
+
+  // Fixture from a future writer. A warm task must not be reused and an eviction must not cause a legacy restore.
+  const marked = structuredClone(existing);
+  marked.plan.participantDialogueProfile = 'participant_dialogue_v13_p5';
+  const sent = h.calls.length;
+  await put({ 'reception:v1': marked });
+  await error(await h.request('retry', { expectedRecordId: trial.sessionId }), 409, 'trial_unavailable');
+  assert.deepEqual(await h.storage.get('base:owner:v1'), originalOwner);
+  assert.equal(h.calls.length, sent);
+
+  const owner = structuredClone(originalOwner);
+  const admission = owner.admissions[owner.activeKey];
+  admission.assignment.source.plan = structuredClone(marked.plan);
+  const record = structuredClone(originalRecord);
+  record.assignment = structuredClone(admission.assignment);
+  record.options.participantDialogueProfile = marked.plan.participantDialogueProfile;
+  assert.doesNotThrow(() => validateBoundBaseRecord(record, admission.assignment));
+  for (const profile of [undefined, 'participant_dialogue_v12']) {
+    const mismatched = { ...record, options: { ...record.options, participantDialogueProfile: profile } };
+    assert.throws(() => validateBoundBaseRecord(mismatched, admission.assignment), { code: 'assignment_record_invalid' });
+  }
+  assert.throws(() => validateBoundBaseRecord({ ...originalRecord, options: record.options }, originalRecord.assignment),
+    { code: 'assignment_record_invalid' });
+  admission.record = record;
+  await put({ 'reception:v1': marked, 'base:owner:v1': owner, active: record, [recordKey]: record });
+
+  await error(await h.request('retry', { expectedRecordId: trial.sessionId }), 409, 'trial_unavailable');
+  h.evict();
+  await error(await h.request('retry', { expectedRecordId: trial.sessionId }), 409, 'trial_unavailable');
+  await error(await h.start(trial.sessionId), 409, 'trial_unavailable');
+  assert.deepEqual(await h.storage.get('reception:v1'), marked);
+  assert.deepEqual(await h.storage.get('base:owner:v1'), owner);
+  assert.deepEqual(await h.storage.get(recordKey), record);
+  assert.equal(h.calls.length, sent);
+  assert.deepEqual((await h.adminRecord(trial.sessionId)).options, record.options);
+
+  await put({ 'reception:v1': existing, 'base:owner:v1': originalOwner, active: originalRecord, [recordKey]: originalRecord });
+  const next = (await jsonOk(await h.start(trial.sessionId))).trial;
+  assert.equal(Object.hasOwn((await h.storage.get('record:' + next.sessionId)).options, 'participantDialogueProfile'), false);
+  assert.deepEqual(await h.storage.get(recordKey), originalRecord);
 });
 
 test('a proxy without the structured capability cannot approve or use up the first trial', async () => {
