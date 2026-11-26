@@ -74,9 +74,9 @@ export function reconfirmationPossible(proposals: readonly NamingClaimLike[], tu
   });
 }
 
-export type AgreeNameScopeVersion = "scoped_v1" | "scoped_v2" | "scoped_v3" | "scoped_v4" | "scoped_v5" | "scoped_v6" | "scoped_v7" | "scoped_v8";
+export type AgreeNameScopeVersion = "scoped_v1" | "scoped_v2" | "scoped_v3" | "scoped_v4" | "scoped_v5" | "scoped_v6" | "scoped_v7" | "scoped_v8" | "scoped_v9";
 export function usesPublicNamingTarget(scope: unknown): scope is Exclude<AgreeNameScopeVersion, "scoped_v1"> {
-  return scope === "scoped_v2" || scope === "scoped_v3" || scope === "scoped_v4" || scope === "scoped_v5" || scope === "scoped_v6" || scope === "scoped_v7" || scope === "scoped_v8";
+  return scope === "scoped_v2" || scope === "scoped_v3" || scope === "scoped_v4" || scope === "scoped_v5" || scope === "scoped_v6" || scope === "scoped_v7" || scope === "scoped_v8" || scope === "scoped_v9";
 }
 
 export type NamingJudgmentLike = {
@@ -84,6 +84,15 @@ export type NamingJudgmentLike = {
   jevTurn?: { humanReferent?: unknown; executed?: { target: { kind: string; figureId?: string; figureIds?: readonly string[] } } } | null;
   aiPublic?: { aiSeq?: number };
 };
+
+/** A feature answer can lift a denial after the AI has publicly repaired that check. */
+export function answersRepairedNamingCheck(reply: LocalClaimView, question: LocalClaimView, denial: LocalClaimView,
+  judgments: readonly NamingJudgmentLike[]): boolean {
+  return question.act === "ask" && question.sourceTurn > denial.sourceTurn &&
+    (question.aspect === "referent" || directsToFigure(reply.quote, true)) && judgments.some(j =>
+    j.aiPublic?.aiSeq === question.sourceTurn && j.generationGuard?.fallback !== true && j.judgment?.action === "repair" &&
+    j.jevTurn?.executed?.target.kind === "single" && j.jevTurn.executed.target.figureId === question.targets[0]);
+}
 
 const isFigureEvidence = (c: LocalClaimView) => c.name === null &&
   ["referent", "part", "contour", "construal"].includes(c.aspect);
@@ -95,7 +104,8 @@ const isFigureEvidence = (c: LocalClaimView) => c.name === null &&
 const pointed = (reply: LocalClaimView, direct: boolean) => reply.source === LABELLED_ANSWER_SOURCE || directsToFigure(reply.quote, direct);
 export function publiclyCheckedNamingTarget(claims: readonly LocalClaimView[], publicTurns: readonly PublicTurn[],
   judgments: readonly NamingJudgmentLike[], turn: number, includeAgreed = false, scope: AgreeNameScopeVersion = "scoped_v2"): string | null {
-  const directConstrualAnswer = scope === "scoped_v7" || scope === "scoped_v8";
+  const directNamingReplies = scope === "scoped_v9";
+  const directConstrualAnswer = scope === "scoped_v7" || scope === "scoped_v8" || directNamingReplies;
   const directReferenceReplies = scope === "scoped_v5" || scope === "scoped_v6" || directConstrualAnswer;
   const before = judgments.filter((j): j is NamingJudgmentLike & { turnIndex: number } => typeof j.turnIndex === "number" && j.turnIndex < turn);
   const lastBoundary = before.filter(j => ["agree", "defer", "move_on"].includes(j.judgment?.action as string)).at(-1);
@@ -140,7 +150,7 @@ export function publiclyCheckedNamingTarget(claims: readonly LocalClaimView[], p
   const answers: LocalClaimView[] = [];
   for (const reply of live) {
     if (reply.speaker !== "human" || reply.targets.length !== 1) continue;
-    if (reply.act === "assert" && reply.aspect === "referent") { answers.push(reply); continue; }
+    if (!directNamingReplies && reply.act === "assert" && reply.aspect === "referent") { answers.push(reply); continue; }
     const antecedent = reply.respondsTo === null ? undefined : ai.get(reply.respondsTo);
     if (directReferenceReplies && antecedent?.claim.act === "ask" && reply.act === "agree" &&
         (reply.aspect === "question" || pointed(reply, true))) {
@@ -157,12 +167,15 @@ export function publiclyCheckedNamingTarget(claims: readonly LocalClaimView[], p
     if (reply.act === "agree" && antecedent && (antecedent.singleton || describedChecks.has(antecedent.claim.sourceTurn)) &&
         antecedent.claim.sourceTurn < reply.sourceTurn && antecedent.claim.aspect === reply.aspect &&
         antecedent.claim.targets.length === 1 && antecedent.claim.targets[0] === reply.targets[0] &&
+        (!directNamingReplies || !describedChecks.has(antecedent.claim.sourceTurn) || antecedent.claim.act === "ask") &&
         (reply.aspect !== "question" || antecedent.claim.act === "ask" && antecedent.singleton && describedChecks.has(antecedent.claim.sourceTurn) && pointed(reply, directReferenceReplies))) {
       answers.push(reply); continue;
     }
     if (reply.act !== "assert" && reply.act !== "construe") continue;
     const previousAi = publicTurns.filter(event => event.speaker === "ai" && event.turn < reply.sourceTurn).at(-1);
     if (!previousAi || publicTurns.some(event => event.speaker === "human" && event.turn > previousAi.turn && event.turn < reply.sourceTurn)) continue;
+    if (directNamingReplies && (antecedent?.claim.act !== "ask" || antecedent.claim.sourceTurn !== previousAi.turn ||
+        antecedent.claim.targets.length !== 1 || antecedent.claim.targets[0] !== reply.targets[0])) continue;
     // A construal can be classified as an assertion and still describe a
     // different figure. Count it only if it answers a verified claim in this check.
     const construal = reply.act === "construe" || reply.aspect === "construal";

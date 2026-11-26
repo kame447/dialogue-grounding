@@ -46,6 +46,8 @@ type VerificationInput = {
   refinedReplyRules?: boolean;
   /** jev_generation_retry_v12: an agree the classifier labelled as answering the checked point (answersChecked "yes") counts as the pointing reply the quote's own words would otherwise have to carry. */
   answerFieldRules?: boolean;
+  /** scoped_v9: a direct reply to a public singleton question uses the question's target. */
+  bindDirectQuestionReplies?: boolean;
   /** v11: the turn after which the current naming interval starts (the last agree, defer or move_on); a name proposal before it is never carried by an approval request. */
   namingIntervalStart?: number;
   graph: LocalGraph;
@@ -89,7 +91,7 @@ function opposesPointingReply(segment: LocalSegmentProposal, question: LocalClai
 const overlap = (a: readonly string[], b: readonly string[]) => a.some(slot => b.includes(slot));
 
 /** Only the CURRENT public human turn may supply a new segment's quote. */
-export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts, keepUnboundApproval = false, approvalFromNamedClaim = false, referenceQuestionBindings, directReferenceReplies = false, refinedReplyRules = false, answerFieldRules = false, namingIntervalStart = 0 }: VerificationInput): LocalVerifiedUpdate {
+export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts, keepUnboundApproval = false, approvalFromNamedClaim = false, referenceQuestionBindings, directReferenceReplies = false, refinedReplyRules = false, answerFieldRules = false, bindDirectQuestionReplies = false, namingIntervalStart = 0 }: VerificationInput): LocalVerifiedUpdate {
   const result: LocalVerifiedUpdate = { operations: [], rejected: [] };
   // Revalidate JSON-restored graphs before using any model-selected pointer.
   snapshotReferenceGraph(graph);
@@ -152,6 +154,15 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     const checkedFigure = prior && (referenceQuestionBindings?.get(prior.id) ?? (prior.source === AI_BOUND_SOURCE ? prior.targets[0] : undefined));
     const boundQuestion = checkedFigure && prior?.act === "ask" && previousClaims.includes(prior) &&
       prior.targets.length === 1 && prior.targets[0] === checkedFigure ? prior : null;
+    // The question defines the target of a direct affirmation or denial, even
+    // when the extraction also includes other figures.
+    if (bindDirectQuestionReplies && prior?.act === "ask" && previousClaims.includes(prior) &&
+        (act === "agree" || act === "deny") && name === null &&
+        isFigureReplyAspect(aspect) && isFigureReplyAspect(prior.aspect) && prior.targets.length === 1 &&
+        (segment.respondsToTurn === null || segment.respondsToTurn === prior.sourceTurn) &&
+        targets.length > 0 && (targets.length !== 1 || targets[0] !== prior.targets[0])) {
+      targets = [...prior.targets];
+    }
     // v12: the classifier's closed label stands in for the quote's pointing words; every other condition below (agree, no name, the question's only figure, nothing opposing) is unchanged.
     const labelled = !!boundQuestion && !directsToFigure(quote, directReferenceReplies) && answerFieldRules && verdict.answersChecked === "yes";
     const pointsToFigure = !!boundQuestion && (directsToFigure(quote, directReferenceReplies) || labelled);
@@ -208,8 +219,8 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
           (!(approvalRequest && approvalFromNamedClaim) && segment.respondsToTurn !== null && segment.respondsToTurn !== prior.sourceTurn))) {
       droppedAntecedent = prior.id; prior = null;
     }
-    // Only absence of a target can inherit the verified antecedent's candidates.
-    // A nonempty, contradictory target is never moved to a different figure.
+    // Outside the direct-question rule above, only absence of a target can
+    // inherit the verified antecedent's candidates.
     const inheritedTargets = prior !== null && targets.length === 0 && prior.targets.length > 0;
     if (prior && targets.length === 0) targets = [...prior.targets];
     // Deferring or revisiting an issue inherits its aspect only when extraction

@@ -115,6 +115,7 @@ export async function prepareLocalGroundingTurn(options: LocalGroundingOptions, 
   refinedReplyRules?: boolean;
   /** jev_generation_retry_v12: the classifier also labels whether an agree answers the checked point, and verification reads the label. */
   answerFieldRules?: boolean;
+  bindDirectQuestionReplies?: boolean;
   namingIntervalStart?: number;
   priorAct?: Parameters<typeof recordAiClaims>[0]["priorAct"];
 }): Promise<{ update: Update; trace: LocalGroundingTrace; research?: LocalGroundingResearchData }> {
@@ -268,7 +269,7 @@ export async function prepareLocalGroundingTurn(options: LocalGroundingOptions, 
       });
     }
     phase = "verification_failed";
-    const verified = verifyLocalUpdate({ graph, turn: input.update.turn, publicTurns, segments, verdicts, keepUnboundApproval: options.keepUnboundApproval === true, approvalFromNamedClaim: options.approvalFromNamedClaim === true, referenceQuestionBindings: input.referenceQuestionBindings, directReferenceReplies: input.directReferenceReplies, refinedReplyRules: input.refinedReplyRules, answerFieldRules: input.answerFieldRules, namingIntervalStart: input.namingIntervalStart });
+    const verified = verifyLocalUpdate({ graph, turn: input.update.turn, publicTurns, segments, verdicts, keepUnboundApproval: options.keepUnboundApproval === true, approvalFromNamedClaim: options.approvalFromNamedClaim === true, referenceQuestionBindings: input.referenceQuestionBindings, directReferenceReplies: input.directReferenceReplies, refinedReplyRules: input.refinedReplyRules, answerFieldRules: input.answerFieldRules, bindDirectQuestionReplies: input.bindDirectQuestionReplies, namingIntervalStart: input.namingIntervalStart });
     if (research && verified.diagnostics?.length) research.verification.diagnostics = verified.diagnostics
       .flatMap((diagnostic, index): LocalVerificationDiagnostic[] => {
         const segmentId = segmentCode(diagnostic.segmentId, index);

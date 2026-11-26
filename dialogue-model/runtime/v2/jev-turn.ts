@@ -12,7 +12,7 @@ import { normalizeName } from "../judgment/name-evidence.mjs";
 import { stageMemory } from "../judgment/memory.mjs";
 import { createReferenceGraph, applyReferenceUpdate, previewReferenceUpdate, snapshotReferenceGraph, REFERENCE_LIMITS } from "../memory/reference-graph.mjs";
 import { nameBindsFigure } from "../decision/referent-binding.ts";
-import { hasNameProposal, claimsLiveAsOf, reconfirmationPossible, namingTurnKind, namingIntervalEstimates, inheritedTargetClaimIds, agreeCandidateAllowed, inheritsProposalName, turnNameProposals, namingNameKey, targetNamingConflict, publiclyCheckedNamingTarget, usesPublicNamingTarget, type AgreeNameScopeVersion } from "../decision/naming-request.ts";
+import { hasNameProposal, claimsLiveAsOf, reconfirmationPossible, namingTurnKind, namingIntervalEstimates, inheritedTargetClaimIds, agreeCandidateAllowed, inheritsProposalName, turnNameProposals, namingNameKey, targetNamingConflict, publiclyCheckedNamingTarget, usesPublicNamingTarget, answersRepairedNamingCheck, type AgreeNameScopeVersion } from "../decision/naming-request.ts";
 import { priorClaimViews, summarizeLocalIssues } from "../local-grounding/derive.ts";
 import { deriveSharedConstrualsFromGraph } from "../local-grounding/shared-construal.ts";
 import { createMemoLocalExtractor, LOCAL_EXTRACTION_INSTRUCTIONS, MEMO_LOCAL_EXTRACTION_INSTRUCTIONS, MEMO_LOCAL_EXTRACTION_INSTRUCTIONS_HOLISTIC, memoExtractionPrompt } from "../local-grounding/extract.ts";
@@ -191,7 +191,7 @@ export type JevTurnOptions = {
   /** Offline replay can request the original retry wire text for a historical tape. */
   generationRetryVersion?: GenerationRetryVersion;
   /** Creation pin only. A resumed trial uses the scope in its saved state. */
-  newTrialAgreeNameScopeVersion?: "scoped_v7" | "scoped_v8";
+  newTrialAgreeNameScopeVersion?: "scoped_v7" | "scoped_v8" | "scoped_v9";
   client: ChatClient; ownImage: LocalOwnImage; ownAnchors: readonly LocalOwnAnchor[];
   observer: ObservationObserver; jevDecision: JevDecisionClient; localGrounding: JevTurnLocalOptions;
   maxReobservations?: number;
@@ -324,7 +324,7 @@ export function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns
   // The partner's own latest word on whether a figure is the one meant: a referent denial (targets taken from the claim it answers when it has none)
   // blocks agreement on that figure until a later referent claim of theirs re-affirms it. This is about the target, not about the proposed name.
   const claimTargets = (c: LocalClaimView) => c.targets.length ? c.targets : claims.find(p => p.id === c.respondsTo)?.targets ?? [];
-  const referentClaims = claims.filter(c => c.speaker === "human" && (c.aspect === "referent" || deniedQuestion && c.act === "deny" && (c.aspect === "question" || isFigureReplyAspect(c.aspect) && claims.find(p => p.id === c.respondsTo)?.speaker === "ai" && claims.find(p => p.id === c.respondsTo)?.act === "ask")) && c.sourceTurn > lastBoundary);
+  const referentClaims = claims.filter(c => c.speaker === "human" && (c.aspect === "referent" || agreeNameScopeVersion === "scoped_v9" && c.act === "agree" && isFigureReplyAspect(c.aspect) || deniedQuestion && c.act === "deny" && (c.aspect === "question" || isFigureReplyAspect(c.aspect) && claims.find(p => p.id === c.respondsTo)?.speaker === "ai" && claims.find(p => p.id === c.respondsTo)?.act === "ask")) && c.sourceTurn > lastBoundary);
   // A denial stands until the partner agrees with an AI public claim that refers only to that figure, and the referent estimate puts it strictly first.
   // An agree about one member of the AI's candidate set, a bare assert and other acts leave the denial in place.
   const referentAt = (at: number) => at === turn ? current : judgments.find(j => j.turnIndex === at)?.jevTurn.humanReferent ?? null;
@@ -338,6 +338,7 @@ export function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns
       if (c.act !== "agree") return false;
       const antecedent = claims.find(p => p.id === c.respondsTo);
       return antecedent?.speaker === "ai" && antecedent.targets.length === 1 && antecedent.targets[0] === id &&
+        (c.aspect === "referent" || answersRepairedNamingCheck(c, antecedent, lastDeny, judgments)) &&
         (c.targets.length === 0 || c.targets.length === 1 && c.targets[0] === id) && selects(referentAt(c.sourceTurn), id);
     });
   };
@@ -793,7 +794,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
     throw new Error("Invalid Jev generation retry version");
   }
   const newTrialScope = options.newTrialAgreeNameScopeVersion;
-  if (newTrialScope !== undefined && (newTrialScope !== "scoped_v7" && newTrialScope !== "scoped_v8" || questionLayout !== "two_stage_v3" ||
+  if (newTrialScope !== undefined && (newTrialScope !== "scoped_v7" && newTrialScope !== "scoped_v8" && newTrialScope !== "scoped_v9" || questionLayout !== "two_stage_v3" ||
       !validAgreeNameScope(newTrialScope, generationRetryVersion))) {
     throw new Error("Invalid Jev naming scope for a new trial");
   }
@@ -928,6 +929,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       }
       const prepared = await prepareLocalGroundingTurn(local, { graph: state.graph,
         update: initialUpdate, publicTurns, signal, ownImage, ownAnchors, captureResearch: true, referenceQuestionBindings, directReferenceReplies, refinedReplyRules: isGenerationV11(generationRetryVersion), answerFieldRules: isGenerationV12(generationRetryVersion),
+        bindDirectQuestionReplies: state.agreeNameScopeVersion === "scoped_v9",
         namingIntervalStart: state.judgments.filter(j => ["agree", "defer", "move_on"].includes(j.judgment.action)).at(-1)?.turnIndex ?? 0,
         ...(!aiEnabled && previousAi ? { priorAct: { ...previous.judgment, turn: previousAi.turn, publishedFallback: previous.generationGuard.fallback,
           ...(previousExecution!.target.kind === "multiple" ? { targetCandidates: [...previousExecution!.target.figureIds] } : {}) } } : {}) });
