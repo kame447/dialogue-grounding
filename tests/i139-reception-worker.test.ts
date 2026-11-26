@@ -4,6 +4,8 @@ import { registerHooks } from 'node:module';
 import { existsSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { clone, config, raw } from './support/s5-base/support.ts';
+import { summarizeRecord } from '../workers/tangram-experiment/src/admin/summary.ts';
+import { summarizeLatency } from '../workers/tangram-experiment/src/admin/latency.ts';
 
 registerHooks({ resolve(s, c, next) {
   if (s === 'cloudflare:workers') return { url: 'data:text/javascript,export class DurableObject {constructor(ctx,env){this.ctx=ctx;this.env=env}}', shortCircuit: true };
@@ -62,7 +64,7 @@ function harness(overrides: Record<string, unknown> = {}, settings: 'on' | 'unse
   const stores = new Map<string, ReturnType<typeof memory>>(), objects = new Map<string, any>();
   const tasks = new Map<string, any>(), pending: Promise<unknown>[] = []; let modelCalls = 0, factories = 0;
   const indexStorage = memory();
-  const index = new AdminIndex({ storage: indexStorage }, {});
+  let index = new AdminIndex({ storage: indexStorage }, {});
   const configured = settings === 'unset' ? Promise.resolve()
     : settings === 'off' ? (async () => { assert.equal((await index.saveReceptionMode({ expectedRevision: 0, value: 'off' })).ok, true); })() : (async () => {
     assert.equal((await index.saveReceptionProtocol({ expectedRevision: 0, fields: settingsFields() })).ok, true);
@@ -97,13 +99,14 @@ function harness(overrides: Record<string, unknown> = {}, settings: 'on' | 'unse
   }
   const env = { ...objectEnv, NAMING_SESSIONS: { idFromName: (id: string) => id, idFromString: (id: string) => id, get },
     ASSETS: { async fetch() { return new Response('<html></html>'); } }, START_RATE_LIMIT: { async limit() { return { success: true }; } } };
-  return { index, indexStorage, objectEnv, tasks, get,
+  return { get index() { return index; }, indexStorage, objectEnv, tasks, get,
     edge: (r: Request) => edge.fetch(r, env) as Promise<Response>,
     async displayed() { await configured; const p = (await index.readReceptionSettings()).protocol; return { protocolId: p.protocol.protocolId, revision: p.revision, sha256: p.sha256 }; },
     async browser() { await configured; const r = await edge.fetch(req('/'), env); assert.equal(r.status, 200); return r.headers.get('set-cookie')!.split(';')[0]; },
     object: (cookie: string) => get(cookie.split('=')[1]),
     snapshot: (cookie: string) => stores.get(cookie.split('=')[1])!.snapshot(),
-    evict() { objects.clear(); }, get factories() { return factories; },
+    evict() { objects.clear(); }, evictIndex() { index = new AdminIndex({ storage: indexStorage }, {}); },
+    get factories() { return factories; },
     async done() { await Promise.all(pending); assert.equal(modelCalls, 0); },
   };
 }
@@ -420,4 +423,114 @@ test('legacy mode with reception explicitly off keeps exact BASE admission behav
   const optional = await h.object(cookie).fetch(new Request('https://i139.invalid/api/reception', { method: 'POST' }));
   assert.equal(optional.status, 404, 'chosen local/legacy compatibility contract: absent reception API');
   await h.done();
+});
+
+const ROLE_ADMIN_TOKEN = 'synthetic-i209-admin-token-only-0123456789';
+const roleEnv = { ADMIN_TOKEN: ROLE_ADMIN_TOKEN, ADMIN_RATE_LIMIT: { async limit() { return { success: true }; } } };
+const rolePath = (id: string) => '/admin/record/' + id + '/participant-role';
+const roleKey = (id: string) => 'participant-role:' + id;
+function adminRequest(path: string, opts: { role?: string; ids?: string[]; auth?: boolean; origin?: string; cookie?: string } = {}) {
+  const headers = new Headers({ Accept: 'application/json' });
+  if (opts.auth !== false) headers.set('Authorization', 'Bearer ' + ROLE_ADMIN_TOKEN);
+  if (opts.cookie) headers.set('Cookie', opts.cookie);
+  if (opts.role === undefined) return new Request('https://i139.invalid' + path, { headers });
+  headers.set('Origin', opts.origin ?? 'https://i139.invalid');
+  const body = new URLSearchParams({ role: opts.role });
+  for (const id of opts.ids ?? []) body.append('recordId', id);
+  return new Request('https://i139.invalid' + path, { method: 'POST', headers, body });
+}
+
+async function adminRole(h: ReturnType<typeof harness>, id: string) {
+  const response = await h.edge(adminRequest(rolePath(id)));
+  const result = await response.json();
+  assert.equal(response.status, 200, result.error);
+  return result.role;
+}
+
+async function indexSyntheticTrial(h: ReturnType<typeof harness>, cookie: string, id: string) {
+  // The synthetic createTrial replaces the production onPersist wrapper that writes this projection.
+  const record = h.snapshot(cookie)['record:' + id];
+  await h.index.upsert(summarizeRecord(record, h.object(cookie).ctx.id.toString(), summarizeLatency(record)));
+}
+
+test('I209 classifies a completed reception atomically and allows a per-record correction', async () => {
+  const h = harness(roleEnv), cookie = await h.browser(), r = await approved(h, cookie);
+  const first = (await (await start(h, cookie)).json()).trial.sessionId;
+  await h.tasks.get(first).complete();
+  await h.done();
+  await indexSyntheticTrial(h, cookie, first);
+  const batch = '/admin/reception/' + r.receptionId + '/participant-role';
+  const role = (id: string) => adminRole(h, id);
+  assert.equal(await role(first), 'unclassified');
+  const staleIds = [first];
+  const second = (await (await start(h, cookie, { expectedRecordId: first })).json()).trial.sessionId;
+  await h.tasks.get(second).complete();
+  await h.done();
+  await indexSyntheticTrial(h, cookie, second);
+  const versionPath = '/admin/receptions/version';
+  const beforeVersion = await (await h.edge(adminRequest(versionPath))).json();
+  const original = h.snapshot(cookie);
+  const publicBefore = await (await h.edge(req('/api/records', undefined, cookie))).json();
+  assert.equal((await h.edge(adminRequest(batch, { role: 'ai', ids: staleIds }))).status, 409);
+  assert.equal((await h.edge(adminRequest(batch, { role: 'ai', auth: false, cookie }))).status, 401);
+  assert.equal((await h.edge(adminRequest(rolePath(first), { role: 'ai', origin: 'https://wrong.invalid' }))).status, 403);
+  assert.equal((await h.edge(adminRequest(rolePath(first), { role: 'AI' }))).status, 400);
+  assert.equal(await role(first), 'unclassified');
+  assert.equal(await role(second), 'unclassified');
+  assert.equal((await h.edge(adminRequest(batch, { role: 'ai', ids: [first, second] }))).status, 200);
+  assert.equal(await role(first), 'ai');
+  assert.equal(await role(second), 'ai');
+  assert.notDeepEqual(await (await h.edge(adminRequest(versionPath))).json(), beforeVersion);
+  const update = await h.edge(adminRequest(rolePath(second), { role: 'human' }));
+  assert.equal(update.status, 200);
+  assert.deepEqual(await update.json(), { recordId: second, role: 'human' });
+  h.evictIndex();
+  assert.equal(await role(first), 'ai');
+  assert.equal(await role(second), 'human');
+  const exported = await (await h.edge(adminRequest('/admin/record/' + second + '.json'))).json();
+  assert.deepEqual(exported.participantRole, { schemaVersion: 'participant_role_v1', role: 'human' });
+  delete exported.participantRole;
+  assert.deepEqual(exported, original['record:' + second]);
+  assert.deepEqual(h.snapshot(cookie), original);
+  assert.deepEqual(await (await h.edge(req('/api/records', undefined, cookie))).json(), publicBefore);
+  const stored = await h.indexStorage.get(roleKey(second));
+  assert.deepEqual(stored, { schemaVersion: 'participant_role_v1', recordId: second, role: 'human', updatedAt: stored.updatedAt });
+  const audit = Object.entries(h.indexStorage.snapshot()).filter(([key]) => key.startsWith('participant-role-audit:')).map(([, value]) => value);
+  assert.equal(audit.length, 3);
+  assert.ok(audit.some(entry => entry.kind === 'participant_role_set' && entry.recordId === second && entry.from === 'ai' && entry.to === 'human'));
+  assert.equal((await h.edge(adminRequest(batch, { role: 'unclassified' }))).status, 200, 'role-only API uses all live trials');
+  assert.equal(await role(first), 'unclassified');
+  assert.equal(await role(second), 'unclassified');
+});
+
+test('I209 classifies reception-OFF and old archive-only records', async () => {
+  const h = harness(roleEnv, 'off'), cookie = await h.browser();
+  const current = (await (await h.object(cookie).fetch(req('/api/start', { version: 2 }))).json()).trial.sessionId;
+  await h.done();
+  await indexSyntheticTrial(h, cookie, current);
+  const oldOwner = 'a'.repeat(64), oldId = '00000000-0000-4000-8000-000000000209';
+  const old = { ...raw(), recordId: oldId };
+  await h.get(oldOwner).ctx.storage.put({ ['record:' + oldId]: old });
+  await h.index.upsert(summarizeRecord(old, oldOwner, summarizeLatency(old)));
+  for (const id of [current, oldId]) {
+    assert.equal(await adminRole(h, id), 'unclassified');
+    assert.equal((await h.edge(adminRequest(rolePath(id), { role: 'ai' }))).status, 200);
+    assert.equal(await adminRole(h, id), 'ai');
+  }
+  assert.deepEqual(await h.get(oldOwner).ctx.storage.get('record:' + oldId), old);
+  await h.tasks.get(current).persistNow();
+  await indexSyntheticTrial(h, cookie, current);
+  await h.done();
+  assert.equal(await adminRole(h, current), 'ai');
+  const indexed = await h.index.get(current);
+  const roleBeforeDelete = await h.indexStorage.get(roleKey(current));
+  assert.equal(await h.object(cookie).adminDelete(current), true);
+  // Model a failed second deletion step: the index still has the old summary and role.
+  assert.equal((await h.edge(adminRequest(rolePath(current)))).status, 404);
+  assert.equal((await h.edge(adminRequest(rolePath(current), { role: 'human' }))).status, 404);
+  assert.deepEqual(await h.indexStorage.get(roleKey(current)), roleBeforeDelete);
+  await h.index.remove([current], 'admin');
+  assert.equal(await h.indexStorage.get(roleKey(current)), undefined);
+  assert.equal(await h.index.upsert(indexed), false);
+  assert.equal(await adminRole(h, oldId), 'ai');
 });

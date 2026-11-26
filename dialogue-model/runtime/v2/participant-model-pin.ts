@@ -1,15 +1,21 @@
 // Private, researcher-owned runtime identity. Neither strategy nor participant
 // input selects a model. Persist a detached copy at reception approval.
-export type ParticipantModelPin = Readonly<{
-  schemaVersion: 'participant_model_pin_v1';
+type ModelIds = Readonly<{
   terraModelId: string;
   lunaModelId: string;
   jevModelId: string;
 }>;
 
+export type LegacyParticipantModelPin = ModelIds & Readonly<{ schemaVersion: 'participant_model_pin_v1' }>;
+export type GenerationParticipantModelPin = ModelIds & Readonly<{
+  schemaVersion: 'participant_model_pin_v2'; generationModelId: string;
+}>;
+export type ParticipantModelPin = LegacyParticipantModelPin | GenerationParticipantModelPin;
+
 const KEYS = ['schemaVersion', 'terraModelId', 'lunaModelId', 'jevModelId'];
 const TERRA = /^gpt-6\.1-terra(?:-(?:\d{4}-\d{2}-\d{2}|\d{8}))?$/u;
 const LUNA = /^gpt-6-luna(?:-(?:\d{4}-\d{2}-\d{2}|\d{8}))?$/u;
+export const participantGenerationPhase = (phase: unknown) => phase === 'generation' || phase === 'final_submission';
 const JEV = /^typesafe\/jev-1\.14(?:-\d{8})?$/u;
 
 export class ParticipantModelPinError extends Error {
@@ -39,13 +45,17 @@ function field(value: object, key: string): unknown {
 
 export function validateParticipantModelPin(value: unknown): ParticipantModelPin {
   const item = record(value);
-  if (Reflect.ownKeys(item).length !== KEYS.length || !KEYS.every(key => Object.hasOwn(item, key))) return invalid();
-  const schemaVersion = field(item, 'schemaVersion'), terraModelId = field(item, 'terraModelId');
-  const lunaModelId = field(item, 'lunaModelId'), jevModelId = field(item, 'jevModelId');
-  if (schemaVersion !== 'participant_model_pin_v1' || typeof terraModelId !== 'string' || !TERRA.test(terraModelId) ||
+  const schemaVersion = field(item, 'schemaVersion');
+  const keys = schemaVersion === 'participant_model_pin_v2' ? [...KEYS, 'generationModelId'] : KEYS;
+  if (Reflect.ownKeys(item).length !== keys.length || !keys.every(key => Object.hasOwn(item, key))) return invalid();
+  const terraModelId = field(item, 'terraModelId'), lunaModelId = field(item, 'lunaModelId'), jevModelId = field(item, 'jevModelId');
+  if (typeof terraModelId !== 'string' || !TERRA.test(terraModelId) ||
       typeof lunaModelId !== 'string' || !LUNA.test(lunaModelId) ||
       typeof jevModelId !== 'string' || !JEV.test(jevModelId)) return invalid();
-  return Object.freeze({ schemaVersion, terraModelId, lunaModelId, jevModelId });
+  const ids = { terraModelId, lunaModelId, jevModelId };
+  if (schemaVersion === 'participant_model_pin_v1') return Object.freeze({ schemaVersion, ...ids });
+  if (schemaVersion !== 'participant_model_pin_v2' || field(item, 'generationModelId') !== terraModelId) return invalid();
+  return Object.freeze({ schemaVersion, ...ids, generationModelId: terraModelId });
 }
 
 // Check the actual provider response field before any adapter can fill it in.
@@ -55,6 +65,8 @@ export function requireExactParticipantModel(expectedId: string, returnedId: unk
 
 function requireSamePin(expected: ParticipantModelPin, value: unknown): void {
   const actual = validateParticipantModelPin(value);
+  requireExactParticipantModel(expected.schemaVersion, actual.schemaVersion);
+  // A v2 generation ID is constrained to its exact Terra ID.
   for (const field of ['terraModelId', 'lunaModelId', 'jevModelId'] as const) {
     requireExactParticipantModel(expected[field], actual[field]);
   }

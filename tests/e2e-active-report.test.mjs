@@ -37,6 +37,7 @@ function record() {
 
 test("summarises a completed active-judge session against the key, after submission only", () => {
   const s = summarizeSession(record());
+  assert.deepEqual(s.participantRole, { schemaVersion: "participant_role_v1", role: "unclassified" });
   assert.equal(s.matched, 1);
   assert.equal(s.humanMessages, 3);
   assert.equal(s.aiTurns, 3, "superseded judgments are not counted as turns");
@@ -51,6 +52,13 @@ test("summarises a completed active-judge session against the key, after submiss
   assert.equal(s.lunaRequests.errors, 1);
   assert.equal(s.supersededAttempts, 1);
   assert.deepEqual(s.finalMismatches, [{ figure: "F4", human: "犬", ai: null }]);
+});
+
+test("extracted participant role labels do not change calculated metrics", () => {
+  const baseline = summarizeSession(record());
+  const participantRole = { schemaVersion: "participant_role_v1", role: "ai" };
+  const actual = summarizeSession({ ...record(), participantRole });
+  assert.deepEqual(actual, { ...baseline, participantRole });
 });
 
 test("refuses unfinished trials so it cannot be used mid-session", () => {

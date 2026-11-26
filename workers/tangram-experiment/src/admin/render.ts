@@ -2,10 +2,12 @@
 // self-hosted /admin/receptions.js (receptions-live.ts); every other page has none.
 // Every value from a record is escaped; unknown nested values are shown as
 // escaped JSON, so new record fields cannot break the page or inject markup.
-import type { AdminSummary } from "./summary";
+import type { AdminSummary } from "./summary.ts";
 import type { LatencySummary } from "./latency";
 import type { AuditEntry } from "./index-store";
 import type { ReceptionAdminRow, ReceptionProtocolStatus, SettingsView } from './reception-port.ts';
+import { isParticipantRole } from './participant-role.ts';
+import type { AdminRecordSummary, ParticipantRole } from './participant-role.ts';
 import { RECORD_ID } from './summary.ts';
 import { renderTurnSheet } from "./turn-sheet.ts";
 import { renderQrSvg } from './qr.ts';
@@ -34,6 +36,9 @@ input[type="radio"],input[type="checkbox"]{width:18px;height:18px;margin:2px 0 0
 .fields{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));margin-bottom:12px}
 .ops form{display:grid;gap:6px;margin:0 0 10px;max-width:300px}.ops form:last-child{margin-bottom:0}.ops label{display:grid;gap:2px;margin:0}
 .ops form+form{padding-top:10px;border-top:1px solid #eee}
+.row-action{margin-top:6px}.row-action>summary{cursor:pointer}.row-action p{margin:6px 0}.row-action code{overflow-wrap:anywhere}
+.row-action form{display:flex;flex-wrap:wrap;gap:6px;align-items:end;margin:6px 0}.row-action label{display:grid;gap:2px;margin:0;min-width:0}
+.reception-trials a{overflow-wrap:anywhere}.reception-trials>div+div{margin-top:4px}
 #reception-new{margin:12px 0;padding:8px 12px;border-left:3px solid var(--accent);background:var(--tint);font-weight:600}
 #reception-new:empty,#reception-sync:empty{display:none}tr.new>td{background:var(--tint)}
 .experiment-preview{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:start}.experiment-preview section{min-width:0;background:#fff;border:1px solid var(--line);border-radius:6px;padding:12px}.experiment-preview h2{margin:0 0 12px}.experiment-preview svg{display:block;width:100%;height:auto;background:#fafafa}.experiment-preview svg path{fill:#333}.experiment-preview .chat{max-height:70vh;overflow:auto}@media(max-width:699px){.experiment-preview{grid-template-columns:1fr}}
@@ -83,7 +88,11 @@ function page(title: string, body: string, wide = false): string {
 <body${wide ? ' class="record-detail"' : ""}>${body}</body></html>`;
 }
 
-export type ListFilter = { status: string; error: "any" | "with" | "without"; memory: "any" | "on" | "off" };
+const PARTICIPANT_ROLE_LABELS: Record<ParticipantRole, string> = { human: "人間", ai: "AI", unclassified: "未分類" };
+const participantRole = (item: Pick<AdminRecordSummary, "participantRole">): ParticipantRole =>
+  isParticipantRole(item.participantRole?.role) ? item.participantRole.role : "unclassified";
+
+export type ListFilter = { status: string; error: "any" | "with" | "without"; memory: "any" | "on" | "off"; role?: ParticipantRole };
 export const STATUS_FILTERS = ["any", "active", "dialogue", "submitting", "completed"] as const;
 // The log and the reception list share one vocabulary: 実施中 / 提出中 / 終了.
 const STATUS_LABELS: Record<string, string> = { dialogue: "実施中", submitting: "提出中", completed: "終了" };
@@ -95,18 +104,37 @@ export function parseFilter(params: URLSearchParams): ListFilter {
   const status = params.get("status") ?? "any";
   const error = params.get("error");
   const memory = params.get("memory");
+  const role = params.get("role");
   return { status: (STATUS_FILTERS as readonly string[]).includes(status) ? status : "any",
-    error: error === "with" || error === "without" ? error : "any", memory: memory === "on" || memory === "off" ? memory : "any" };
+    error: error === "with" || error === "without" ? error : "any", memory: memory === "on" || memory === "off" ? memory : "any",
+    ...(isParticipantRole(role) ? { role } : {}) };
 }
 
-export function applyFilter(summaries: AdminSummary[], filter: ListFilter): AdminSummary[] {
+export function applyFilter(summaries: AdminRecordSummary[], filter: ListFilter): AdminRecordSummary[] {
   return summaries.filter((s) => (filter.status === "any" || (filter.status === "active" ? s.status === "dialogue" || s.status === "submitting" : s.status === filter.status)) &&
     (filter.error === "any" || (filter.error === "with") === s.errorCodes.length > 0) &&
-    (filter.memory === "any" || (filter.memory === "on") === s.referenceMemory));
+    (filter.memory === "any" || (filter.memory === "on") === s.referenceMemory) &&
+    (filter.role === undefined || participantRole(s) === filter.role));
 }
 
 const option = (value: string, current: string, label = value) =>
   `<option value="${escapeHtml(value)}"${value === current ? " selected" : ""}>${escapeHtml(label)}</option>`;
+const roleOptions = (current: string) => Object.entries(PARTICIPANT_ROLE_LABELS).map(([value, label]) => option(value, current, label)).join("");
+
+function participantRoleForm(action: string, recordIds: readonly string[] = []): string {
+  return `<form method="post" action="${escapeHtml(action)}">
+${recordIds.map(id => `<input type="hidden" name="recordId" value="${escapeHtml(id)}">`).join("")}
+<label>変更後 <select name="role" required>${option("", "", "選択")}${roleOptions("")}</select></label>
+<button>${recordIds.length ? "一括変更" : "変更"}</button></form>`;
+}
+
+function deleteRecordForm(recordId: string): string {
+  const id = escapeHtml(recordId);
+  return `<p>記録ID <code>${id}</code></p>
+<form method="post" action="/admin/record/${id}/delete"><label>確認（記録ID） <input name="confirm" autocomplete="off" required></label>
+<button>この記録を削除</button></form>`;
+}
+
 const ms = (value: number | null | undefined) => typeof value === "number" ? `${Math.round(value)}` : "—";
 
 /** JST "YYYY-MM-DD HH:mm:ss"; the stored ISO value stays in datetime/title. Unparseable values are shown as they are. */
@@ -122,20 +150,30 @@ const statusBadge = (status: string) => badge(statusLabel(status), status === "c
 const aiBadge = (aiStatus: string) => badge("AI " + aiStatus, aiStatus === "error" ? "bad" : "");
 const surveyBadge = (value: string) => badge("仮アンケート" + (QUESTIONNAIRE_LABELS[value] ?? QUESTIONNAIRE_LABELS.none), value === "submitted" ? "done" : value === "draft" ? "warn" : "");
 
-export function renderList(summaries: AdminSummary[], filter: ListFilter, next: string | null, audit: AuditEntry[],
+export function renderList(summaries: AdminRecordSummary[], filter: ListFilter, next: string | null, audit: AuditEntry[],
   _retentionDays?: number, deleted = false, receptions = false): string {
-  const query = (extra: Record<string, string>) => "?" + new URLSearchParams({ status: filter.status, error: filter.error, memory: filter.memory, ...extra });
+  const query = (extra: Record<string, string>) => "?" + new URLSearchParams({ status: filter.status, error: filter.error, memory: filter.memory,
+    ...(filter.role ? { role: filter.role } : {}), ...extra });
   const td = (label: string, content: string, cls = "") => `<td data-label="${escapeHtml(label)}"${cls ? ` class="${cls}"` : ""}><div class="cell">${content}</div></td>`;
-  const rows = summaries.map((s) => `<tr>${td("記録", `<div><a href="/admin/record/${escapeHtml(s.recordId)}">${escapeHtml(s.recordId.slice(0, 8))}</a></div><div class="muted">${timeTag(s.updatedAt)}</div>`, "id")}
+  const rows = summaries.map((s) => {
+    const id = escapeHtml(s.recordId);
+    const actions = RECORD_ID.test(s.recordId) ? `<details class="row-action"><summary>担当者種別を変更</summary>
+${participantRoleForm(`/admin/record/${s.recordId}/participant-role?from=log`)}</details>
+<details class="row-action danger"><summary>記録を削除</summary>
+<p>仮アンケートも削除されます。削除は取り消せません。</p>${deleteRecordForm(s.recordId)}</details>` : "";
+    return `<tr>${td("記録", `<div><a href="/admin/record/${id}">${escapeHtml(s.recordId.slice(0, 8))}</a></div><div class="muted">${timeTag(s.updatedAt)}</div>
+<div>担当者種別 ${PARTICIPANT_ROLE_LABELS[participantRole(s)]}</div>${actions}`, "id")}
 ${td("状態", `<div class="badges">${statusBadge(s.status)}${aiBadge(s.aiStatus)}${surveyBadge(s.questionnaire)}</div>`)}
 ${td("条件", `<div>${escapeHtml(s.strategy)}</div><div class="muted">メモリ ${s.referenceMemory ? "ON" : "OFF"} · ${escapeHtml(s.utteranceStyle)}</div>`)}
 ${td("発話・確定", `<div>人/AI ${s.counts.humanMessages}/${s.counts.aiMessages}</div><div class="muted">確定/試行 ${s.counts.committedTurns}/${s.counts.attempts}</div>`)}
 ${td("応答・エラー", `<div>p50/p95 ${ms(s.latency.turn.p50Ms)} / ${ms(s.latency.turn.p95Ms)} ms${s.latency.slowestPhase ? ` · 最遅 ${escapeHtml(s.latency.slowestPhase.phase)}` : ""}</div>
-<div class="muted">要求エラー ${s.counts.requestErrors}</div>${s.errorCodes.length ? `<div class="bad">${escapeHtml(s.errorCodes.join(", "))}</div>` : ""}`)}</tr>`).join("");
-  return page("実験ログ（研究者用）", `${receptions ? adminNav('/admin') : ''}<h1>実験ログ（研究者用・読み取り専用）</h1>
+<div class="muted">要求エラー ${s.counts.requestErrors}</div>${s.errorCodes.length ? `<div class="bad">${escapeHtml(s.errorCodes.join(", "))}</div>` : ""}`)}</tr>`;
+  }).join("");
+  return page("実験ログ（研究者用）", `${receptions ? adminNav('/admin') : ''}<h1>実験ログ（研究者用）</h1>
 <form method="get" action="/admin" class="filters"><label>状態 <select name="status">${STATUS_FILTERS.map((v) => option(v, filter.status, STATUS_FILTER_LABELS[v])).join("")}</select></label>
 <label>エラー <select name="error">${option("any", filter.error, "すべて")}${option("with", filter.error, "あり")}${option("without", filter.error, "なし")}</select></label>
 <label>参照メモリ <select name="memory">${option("any", filter.memory, "すべて")}${option("on", filter.memory, "ON")}${option("off", filter.memory, "OFF")}</select></label>
+<label>担当者種別 <select name="role">${option("", filter.role ?? "", "すべて")}${roleOptions(filter.role ?? "")}</select></label>
 <button>絞り込み</button></form>
 ${deleted ? `<p class="bad">記録を削除しました。</p>` : ""}
 <p class="muted">更新が新しい順に ${PAGE_LIMIT_NOTE}（同じブラウザの過去の試行を含む）。絞り込みはこのページ内に適用します。記録は自動では削除されません（手動での削除のみ）。</p>
@@ -202,7 +240,7 @@ function recordedFigures(r: Record<string, any>): unknown {
   return '未記録（従来の6図形 F1–F6）';
 }
 
-export function renderDetail(record: unknown, summary: AdminSummary, latency: LatencySummary, _retentionDays?: number): string {
+export function renderDetail(record: unknown, summary: AdminRecordSummary, latency: LatencySummary, _retentionDays?: number): string {
   const r = isPlain(record) ? record : {};
   const judgments = list(r.judgments).filter(isPlain).map((j) => [j.turnIndex, j.judgment?.action, j.judgment?.targetSlot,
     j.judgment?.candidateName, j.judgment?.discriminatingFeature, j.judgment?.followUp ?? null, j.activeJudge ?? null]);
@@ -229,10 +267,12 @@ export function renderDetail(record: unknown, summary: AdminSummary, latency: La
   const dl = (items: [string, string][]) => `<dl class="summary">${items.map(([k, v]) => `<div><dt>${escapeHtml(k)}</dt><dd>${v}</dd></div>`).join("")}</dl>`;
   const id = escapeHtml(summary.recordId);
   const surveyState = isPlain(r.questionnaire) && typeof r.questionnaire.status === "string" ? r.questionnaire.status : summary.questionnaire;
-  return page(`記録 ${summary.recordId.slice(0, 8)}`, `<p><a href="/admin">← 一覧</a></p>
+  return page(`記録 ${summary.recordId.slice(0, 8)}`, `<p><a href="/admin">← 実験ログへ</a></p>
 <h1>記録 ${id}</h1>
 <p><a href="/admin/record/${id}.json">JSONで保存（この記録の全項目）</a></p>
 ${dl([["状態", `<div class="badges">${statusBadge(summary.status)}${aiBadge(summary.aiStatus)}${surveyBadge(surveyState)}</div>`], ["開始", timeTag(summary.startedAt)], ["更新", timeTag(summary.updatedAt)],
+  ["担当者種別", PARTICIPANT_ROLE_LABELS[participantRole(summary)] + (RECORD_ID.test(summary.recordId) ?
+    `<details class="row-action"><summary>変更</summary>${participantRoleForm(`/admin/record/${summary.recordId}/participant-role`)}</details>` : "")],
   ["方略", escapeHtml(summary.strategy)], ["参照メモリ", summary.referenceMemory ? "ON" : "OFF"], ["発話様式", escapeHtml(summary.utteranceStyle)],
   ["発話 人/AI", `${summary.counts.humanMessages}/${summary.counts.aiMessages}`], ["確定/試行", `${summary.counts.committedTurns}/${summary.counts.attempts}`],
   ["応答 p50/p95", `${ms(latency.turn.p50Ms)} / ${ms(latency.turn.p95Ms)} ms`],
@@ -251,8 +291,7 @@ ${fold("詳細メタデータ・キュー・提出と採点の生データ", tab
   ["最終エラー", r.finalError ?? null], ["件数", summary.counts], ["人間の提出", r.humanSubmission ?? null], ["AIの提出", r.aiSubmission ?? null],
   ["診断", r.diagnostics ?? null], ["採点", r.scoring ?? null], ["初回観察", r.initialObservation ?? null], ["最終参照グラフ", r.referenceGraph ?? null], ["最終参照台帳", r.ownLedger ?? null], ["図形セット", recordedFigures(r)]]))}
 ${fold("削除", `<p class="muted">この記録は自動では削除されません。削除する場合は、記録IDを確認欄に入力してください（仮アンケートの回答も削除されます）。削除は取り消せません。</p>
-<form method="post" action="/admin/record/${id}/delete"><label>確認（記録ID） <input name="confirm" autocomplete="off" required></label>
-<button>この記録を削除</button></form>`, "danger")}`, true);
+${deleteRecordForm(summary.recordId)}`, "danger")}`, true);
 }
 
 export function renderMessage(title: string, message: string, back: { href: string; label: string } = { href: '/admin', label: '一覧へ' }): string {
@@ -290,18 +329,30 @@ export function renderReceptions(items: ReceptionAdminRow[], next: string | null
   const protocolKey = protocol.configured ? `${protocol.mode}:${protocol.protocolId}:${protocol.revision}:${protocol.sha256}` : `${protocol.mode}:none`;
   const td = (label: string, content: string, extra = '') => `<td data-label="${escapeHtml(label)}"${extra}>${content}</td>`;
   const rows = [...items].sort((a, b) => Number(b.status === 'pending') - Number(a.status === 'pending')).map(entry => {
-    const unstarted = !entry.trials.some(trial => trial.recordId !== null);
+    const unstarted = !entry.trials.some(trial => trial.recordId !== null || trial.recordDeleted);
     const cancel = unstarted && (entry.status === 'pending' || entry.status === 'approved');
-    const lastRecord = entry.trials.at(-1)?.recordId;
-    const open = entry.status === 'in_progress' && lastRecord && RECORD_ID.test(lastRecord)
+    const trials = entry.trials.map(trial => ({
+      recordId: !trial.recordDeleted && trial.recordId && RECORD_ID.test(trial.recordId) ? trial.recordId : null,
+      deleted: trial.recordDeleted === true,
+      role: participantRole(trial),
+    }));
+    const lastRecord = trials.at(-1)?.recordId;
+    const open = entry.status === 'in_progress' && lastRecord
       ? `<a href="/admin/record/${escapeHtml(lastRecord)}/experiment" target="_blank" rel="noopener noreferrer">実験画面を開く</a>` : '';
     const usage = entry.hasUnrecordedProductionAdmission && RECORD_ID.test(entry.receptionId)
       ? `<a href="/admin/reception/${escapeHtml(entry.receptionId)}/usage.json">開始失敗の使用量 JSON</a>` : '';
-    return `<tr data-id="${escapeHtml(entry.receptionId)}" data-status="${escapeHtml(entry.status)}" data-created="${escapeHtml(entry.createdAt)}" data-key="${escapeHtml(entry.revision + ':' + protocolKey)}">${td('受付番号', escapeHtml(entry.number ?? '未割当'))}${td('受付時刻', timeTag(entry.createdAt))}
+    const trialLinks = trials.map(({ recordId, deleted, role }) => {
+      if (deleted) return '<div class="muted">削除済み</div>';
+      return recordId ? `<div><a href="/admin/record/${escapeHtml(recordId)}">${escapeHtml(recordId)}</a> <span>${PARTICIPANT_ROLE_LABELS[role]}</span></div>` : '';
+    }).join('');
+    const recordIds = trials.flatMap(trial => trial.recordId === null ? [] : [trial.recordId]);
+    const bulk = recordIds.length && RECORD_ID.test(entry.receptionId) ? `<details class="row-action"><summary>担当者種別を一括変更（${recordIds.length}件）</summary>
+${participantRoleForm(`/admin/reception/${entry.receptionId}/participant-role`, recordIds)}</details>` : '';
+    const rowKey = JSON.stringify([entry.revision, protocolKey, trials]);
+    return `<tr data-id="${escapeHtml(entry.receptionId)}" data-status="${escapeHtml(entry.status)}" data-created="${escapeHtml(entry.createdAt)}" data-key="${escapeHtml(rowKey)}">${td('受付番号', escapeHtml(entry.number ?? '未割当'))}${td('受付時刻', timeTag(entry.createdAt))}
 ${td('状態', receptionBadge(entry.status))}${td('条件順序', escapeHtml(entry.plan?.order.join(' → ') ?? ''))}
 ${td('図形セット', escapeHtml(figureSetSummary(entry.plan?.figureSets ?? [])))}${td('回転', escapeHtml(entry.plan ? ROTATION_LABELS[entry.plan.rotationMode] ?? '' : ''))}${td('試行の間', escapeHtml(entry.plan ? BETWEEN_LABELS[entry.plan.betweenTrials] ?? '' : ''))}
-${td('試行記録', entry.trials.filter(trial => trial.recordId && RECORD_ID.test(trial.recordId)).map(trial =>
-      `<a href="/admin/record/${escapeHtml(trial.recordId)}">${escapeHtml(trial.recordId)}</a>`).join('<br>'))}
+${td('試行記録', trialLinks ? `<div class="reception-trials">${trialLinks}</div>${bulk}` : '')}
 ${td('操作', `${entry.status === 'pending' && unstarted && protocol.configured && protocol.mode !== 'off' ? form(entry, 'approve') : ''}${cancel ? form(entry, 'cancel') : ''}${open}${usage}`, ' class="ops"')}</tr>`;
   }).join('');
   const names = ['受付番号', '受付時刻', '状態', '条件順序', '図形セット', '回転', '試行の間', '試行記録', '操作'];

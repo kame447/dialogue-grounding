@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { NamingTaskError } from '../naming-error.mjs';
 import { data } from '../v2/base-assignment-data.ts';
 import { PARTICIPANT_PRODUCTION_PROFILE } from './participant-usage-policy.ts';
-import type { ParticipantModelPin } from '../v2/participant-model-pin.ts';
+import { participantGenerationPhase, type ParticipantModelPin } from '../v2/participant-model-pin.ts';
 
 type Provider = 'jev' | 'luna' | 'terra';
 export type ParticipantDispatchResult = { status: number; data: unknown; verifiedUsage?: unknown };
@@ -12,6 +12,10 @@ const phases = {
   luna: ['generation', 'final_submission', 'ai_extraction', 'dialogue'],
   terra: ['initial_observation', 'reobservation'],
 };
+const splitPhases = { ...phases, luna: ['ai_extraction', 'dialogue'],
+  terra: [...phases.terra, 'generation', 'final_submission'] };
+const phaseNames = (pin: ParticipantModelPin, provider: Provider) =>
+  (pin.schemaVersion === 'participant_model_pin_v2' ? splitPhases : phases)[provider];
 const providers: Provider[] = ['jev', 'luna', 'terra'];
 const count = (n: unknown): n is number => Number.isSafeInteger(n) && (n as number) >= 0;
 const amount = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n >= 0;
@@ -46,8 +50,8 @@ function initial(assignmentId: string, pin: ParticipantModelPin): ParticipantUsa
     revision: 0, lastHumanSeq: 0, halted: false,
     phases: {
       jev: Object.fromEntries(phases.jev.map(phase => [phase, empty()])),
-      luna: Object.fromEntries(phases.luna.map(phase => [phase, empty()])),
-      terra: Object.fromEntries(phases.terra.map(phase => [phase, empty()])),
+      luna: Object.fromEntries(phaseNames(pin, 'luna').map(phase => [phase, empty()])),
+      terra: Object.fromEntries(phaseNames(pin, 'terra').map(phase => [phase, empty()])),
     }, latest: { jev: null, luna: null, terra: null } };
 }
 function read(value: unknown, assignmentId: string, pin: ParticipantModelPin): ParticipantUsageSnapshot {
@@ -59,9 +63,10 @@ function read(value: unknown, assignmentId: string, pin: ParticipantModelPin): P
       !count(saved.revision) || !count(saved.lastHumanSeq) || typeof saved.halted !== 'boolean') return fail();
   const savedPhases = data(saved.phases, providers), latest = data(saved.latest, providers);
   for (const provider of providers) {
-    const group = data(savedPhases[provider], phases[provider]);
+    const names = phaseNames(pin, provider);
+    const group = data(savedPhases[provider], names);
     let posts = 0;
-    for (const phase of phases[provider]) {
+    for (const phase of names) {
       const meter = data(group[phase], Object.keys(empty()));
       if (Object.entries(meter).some(([key, n]) => key === 'knownUsd' ? !amount(n) : !count(n))) return fail();
       const m = meter as Meter;
@@ -71,7 +76,7 @@ function read(value: unknown, assignmentId: string, pin: ParticipantModelPin): P
     }
     if (!posts && latest[provider] === null) continue;
     const r = data(latest[provider], ['post', 'phase', 'status', 'model', 'costUsd', 'inputTokens', 'outputTokens']);
-    if (r.post !== posts || !phases[provider].includes(r.phase as string) ||
+    if (r.post !== posts || !names.includes(r.phase as string) ||
         !['reserved', 'cancelled', 'failed', 'ok', 'model_mismatch'].includes(r.status as string) ||
         (r.status === 'ok' ? r.model !== modelFor(pin, provider) :
           r.model !== null && (r.status !== 'failed' || r.model !== modelFor(pin, provider))) ||
@@ -138,6 +143,10 @@ export class ParticipantUsageLedger {
     if (state.revision >= this.current.revision) this.current = state;
   }
 
+  chatProvider(phase: string) {
+    return this.current.pin.schemaVersion === 'participant_model_pin_v2' && participantGenerationPhase(phase) ? 'terra' : 'luna';
+  }
+
   async logical<T>(provider: 'luna' | 'terra', phase: string, operation: () => Promise<T>) {
     await this.change(state => {
       if (state.halted) return fail();
@@ -152,7 +161,7 @@ export class ParticipantUsageLedger {
 
   async dispatch(provider: Provider, invoke: Dispatch, payload: unknown, signal?: AbortSignal | null) {
     const context = this.scope.getStore();
-    const phase = context?.phase && phases[provider].includes(context.phase) ? context.phase
+    const phase = context?.phase && phaseNames(this.current.pin, provider).includes(context.phase) ? context.phase
       : provider === 'jev' ? choicePhase(payload) : provider === 'luna' ? 'dialogue' : 'initial_observation';
     const signals = [signal, context?.signal].filter((value): value is AbortSignal => Boolean(value));
     const active = AbortSignal.any(signals);

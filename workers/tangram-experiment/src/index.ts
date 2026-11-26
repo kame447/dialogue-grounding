@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import { createChatClient } from "../../../dialogue-model/runtime/client.mjs";
 import { createNamingTaskV2 } from "../../../dialogue-model/runtime/v2/naming-task-v2.mjs";
 import { createGroundingJudgeClient } from "../../../dialogue-model/runtime/grounding/client.ts";
+import { INITIAL_OBSERVATION_STRUCTURED_V1 } from "../../../dialogue-model/runtime/observation/initial-observation-generation.ts";
 import { NamingTaskError } from "../../../dialogue-model/runtime/naming-error.mjs";
 import { sessionCookie, sessionId } from "./session-cookie.ts";
 import { isExcessiveTraffic, type SoftLimitBindings } from "./soft-limits";
@@ -9,8 +10,10 @@ import { AdminIndex } from "./admin/index-do";
 import type { ReceptionFailedStartUsage } from './admin/reception-port.ts';
 import { createReceptionAdminPort, createReceptionSettingsPort } from './admin/reception-adapter.ts';
 import { handleAdmin, isAdminPath, type AdminLimiter } from "./admin/routes.ts";
-import { summarizeRecord, type AdminSummary } from "./admin/summary.ts";
+import { summarizeRecord } from "./admin/summary.ts";
 import type { AuditEntry } from "./admin/index-store.ts";
+import { isParticipantRole, participantRoleView } from "./admin/participant-role.ts";
+import type { ParticipantRoleResult } from "./admin/participant-role.ts";
 import { summarizeLatency } from "./admin/latency.ts";
 import { ACTIVE_KEY, backfillActive, deleteArchived, ledgerIds, readArchived,
   readQuestionnaire, retentionDays, writeQuestionnaire } from "./admin/archive.ts";
@@ -39,7 +42,8 @@ import { createTrialV2, modelView } from "../../../dialogue-model/runtime/stimul
 import { resolveWorkerParticipantModelPin } from "../../../dialogue-model/runtime/v2/participant-model-pin.ts";
 import { PARTICIPANT_PRODUCTION_PROFILE } from '../../../dialogue-model/runtime/web/participant-usage-policy.ts';
 import { ParticipantUsageLedger, type ParticipantUsageStore } from '../../../dialogue-model/runtime/web/participant-usage.ts';
-import { createWorkerParticipantRuntime, workerParticipantPolicy, type ParticipantService } from "./participant-runtime.ts";
+import { createWorkerParticipantRuntime, workerParticipantPolicy,
+  type ParticipantService } from "./participant-runtime.ts";
 export { AdminIndex };
 
 type Strategy = "repair-first" | "bypass-enabled";
@@ -72,8 +76,11 @@ export interface Env extends SoftLimitBindings {
   PARTICIPANT_CONTACT_TEXT?: string;
   // Add the private proxy's verified pin to new approvals only.
   PARTICIPANT_TERRA_ENABLED?: string;
+  PARTICIPANT_TERRA_GENERATION_ENABLED?: string;
   PARTICIPANT_TERRA_PROFILE?: string;
   PARTICIPANT_TERRA_LIMITS_JSON?: string;
+  // Approval-only opt-in; already approved plans supply their own generation.
+  PARTICIPANT_TERRA_INITIAL_OBSERVATION_GENERATION?: string;
   // Deployment-wide AI utterance style for new trials; identical for both strategies.
   V2_UTTERANCE_STYLE?: string;
   NAMING_SESSIONS: DurableObjectNamespace<TangramSession>;
@@ -155,7 +162,8 @@ export class TangramSession extends DurableObject<Env> {
   private receptionQueue: Promise<unknown> = Promise.resolve();
   private browserQueue: Promise<unknown> = Promise.resolve();
   // The explicit intent of the admission in progress: a reception plan trial, or the configured legacy assignment.
-  private admission: { kind: 'reception'; receptionId: string; expectedRevision: number; index: number } | { kind: 'legacy' } | null = null;
+  private admission: { kind: 'reception'; receptionId: string; expectedRevision: number; index: number;
+    participantPolicy?: Awaited<ReturnType<typeof workerParticipantPolicy>> } | { kind: 'legacy' } | null = null;
 
   /** One consistent settings snapshot from the global index. Unreadable or damaged settings fail closed. */
   private async settings(): Promise<ReceptionSettings> {
@@ -248,19 +256,25 @@ export class TangramSession extends DurableObject<Env> {
       if (!receptionOpen(settings.mode)) throw new ReceptionError('reception_closed');
       if (!settings.protocol) throw new ReceptionError('protocol_unconfigured');
       const protocol = settings.protocol.protocol, expected = input?.protocol;
-      let participant: Pick<Parameters<typeof approveReception>[1], 'participantModelPin' | 'participantRuntimeProfile' | 'participantLimits'> = {};
+      let participant: Pick<Parameters<typeof approveReception>[1],
+        'participantModelPin' | 'participantRuntimeProfile' | 'participantLimits' | 'initialObservationGeneration'> = {};
+      const generationPin = this.env.PARTICIPANT_TERRA_GENERATION_ENABLED === 'on';
+      if (generationPin && this.env.PARTICIPANT_TERRA_ENABLED !== 'on') throw new ReceptionError('reception_unavailable');
       if (this.env.PARTICIPANT_TERRA_ENABLED === 'on') {
         try {
           const configuredProfile = this.env.PARTICIPANT_TERRA_PROFILE;
-          if (configuredProfile === PARTICIPANT_PRODUCTION_PROFILE) {
-            const { pin: participantModelPin } = await workerParticipantPolicy(this.env.PARTICIPANT_AI_PROXY, true);
-            participant = { participantModelPin, participantRuntimeProfile: PARTICIPANT_PRODUCTION_PROFILE };
-          } else {
-            if (configuredProfile !== undefined) throw new Error('unknown participant profile');
-            const participantLimits = validateParticipantLimits(JSON.parse(this.env.PARTICIPANT_TERRA_LIMITS_JSON ?? 'null'));
-            const { pin: participantModelPin } = await workerParticipantPolicy(this.env.PARTICIPANT_AI_PROXY);
-            participant = { participantModelPin, participantLimits };
+          const initialObservationGeneration = this.env.PARTICIPANT_TERRA_INITIAL_OBSERVATION_GENERATION;
+          if (initialObservationGeneration !== undefined && initialObservationGeneration !== INITIAL_OBSERVATION_STRUCTURED_V1) {
+            throw new Error('unknown initial observation generation');
           }
+          const usageOnly = configuredProfile === PARTICIPANT_PRODUCTION_PROFILE;
+          if (configuredProfile !== undefined && !usageOnly) throw new Error('unknown participant profile');
+          const participantLimits = usageOnly ? undefined
+            : validateParticipantLimits(JSON.parse(this.env.PARTICIPANT_TERRA_LIMITS_JSON ?? 'null'));
+          const { pin: participantModelPin } = await workerParticipantPolicy(this.env.PARTICIPANT_AI_PROXY, usageOnly, initialObservationGeneration,
+            generationPin ? 'participant_model_pin_v2' : 'participant_model_pin_v1');
+          participant = { participantModelPin, ...(initialObservationGeneration ? { initialObservationGeneration } : {}),
+            ...(participantLimits ? { participantLimits } : { participantRuntimeProfile: PARTICIPANT_PRODUCTION_PROFILE }) };
         } catch {
           throw new ReceptionError('reception_unavailable');
         }
@@ -324,7 +338,18 @@ export class TangramSession extends DurableObject<Env> {
         throw new ReceptionError('questionnaire_required');
       }
     }
-    this.admission = { kind:'reception', receptionId:r.receptionId, expectedRevision:r.revision, index };
+    // A temporarily incompatible proxy must leave the approved slot available for another start.
+    const plan = r.plan.schemaVersion === 'reception_plan_v1' ? null : r.plan;
+    const approvedPin = plan?.participantModelPin;
+    let participantPolicy;
+    if (approvedPin) {
+      try {
+        participantPolicy = await workerParticipantPolicy(this.env.PARTICIPANT_AI_PROXY,
+          Boolean(plan.participantRuntimeProfile), plan.initialObservationGeneration, approvedPin.schemaVersion);
+        resolveWorkerParticipantModelPin({ approvedPin, configuredPin: participantPolicy.pin });
+      } catch { throw new BaseSessionError('trial_unavailable'); }
+    }
+    this.admission = { kind:'reception', receptionId:r.receptionId, expectedRevision:r.revision, index, participantPolicy };
     try {
       if (predecessor) {
         await this.assignmentSession().prepareNext(predecessor);
@@ -378,6 +403,44 @@ export class TangramSession extends DurableObject<Env> {
     return questionnaire ? { ...record, questionnaire } : record;
   }
 
+  async adminDeletedRecordIds(recordIds: string[]): Promise<string[]> {
+    const deleted = new Set(await this.ctx.storage.get<string[]>('tombstones'));
+    return recordIds.filter(id => deleted.has(id));
+  }
+
+  async adminSetParticipantRole(recordId: string, role: unknown): Promise<ParticipantRoleResult> {
+    if (!RECORD_ID.test(recordId) || !isParticipantRole(role)) return { ok: false, error: 'not_found' };
+    return this.serialized(async () => {
+      if ((await this.adminDeletedRecordIds([recordId])).length || !await this.readOwnedArchive(recordId)) {
+        return { ok: false, error: 'not_found' };
+      }
+      return await this.index()?.setParticipantRole([recordId], this.ctx.id.toString(), role)
+        ? { ok: true } : { ok: false, error: 'conflict' };
+    });
+  }
+
+  async adminSetReceptionParticipantRole(id: string, role: unknown, expectedRecordIds: string[] | null): Promise<ParticipantRoleResult> {
+    if (!RECORD_ID.test(id) || !isParticipantRole(role)) return { ok: false, error: 'not_found' };
+    return this.serialized(async () => {
+      // Trial admissions and deletion share this queue. Re-read the linked IDs here
+      // so a newly saved trial cannot slip into a previously displayed batch.
+      const reception = await this.readReception();
+      if (!reception || reception.receptionId !== id) return { ok: false, error: 'not_found' };
+      const linked = reception.trials.flatMap(trial => trial.recordId === null ? [] : [trial.recordId]);
+      const deleted = new Set(await this.adminDeletedRecordIds(linked));
+      const ids: string[] = [];
+      for (const recordId of linked) {
+        if (!deleted.has(recordId) && await this.readOwnedArchive(recordId)) ids.push(recordId);
+      }
+      if (!ids.length || expectedRecordIds !== null &&
+          (new Set(expectedRecordIds).size !== ids.length || ids.some(recordId => !expectedRecordIds.includes(recordId)))) {
+        return { ok: false, error: 'conflict' };
+      }
+      return await this.index()?.setParticipantRole(ids, this.ctx.id.toString(), role)
+        ? { ok: true } : { ok: false, error: 'conflict' };
+    });
+  }
+
   /** Researcher deletion (authenticated /admin only): removes the record now and tombstones its id. */
   async adminDelete(recordId: string): Promise<boolean> {
     const existed = await this.serialized(() => this.ctx.storage.transaction(async tx => {
@@ -414,6 +477,18 @@ export class TangramSession extends DurableObject<Env> {
   /** Old deployments may have scheduled an expiry alarm. Clear it without deleting evidence. */
   async alarm(): Promise<void> {
     await this.scheduleExpiry();
+    const index = this.index();
+    if (index) {
+      const tombstones = await this.ctx.storage.get<string[]>('tombstones') ?? [];
+      const stale: string[] = [];
+      for (const id of tombstones) {
+        const summary = await index.get(id);
+        if (summary?.recordId === id && summary.objectId === this.ctx.id.toString()) stale.push(id);
+      }
+      // A manual deletion can commit at the owner while its later index removal fails.
+      // A legacy retention deletion removed its summary before tombstoning the owner.
+      if (stale.length) await index.remove(stale, 'admin');
+    }
     // Re-register the remaining records, so a missed best-effort index write is repaired.
     for (const id of await ledgerIds(this.ctx.storage)) {
       const record = await this.readOwnedArchive(id);
@@ -734,9 +809,11 @@ export class TangramSession extends DurableObject<Env> {
   }
 
   private async createTrial(binding: Parameters<MakeBaseTask>[0]): Promise<NamingTask> {
-    const {seed,strategy,referenceMemory,restore,participantRuntime} = binding;
+    const {seed,strategy,referenceMemory,restore,participantRuntime,initialObservationGeneration} = binding;
+    const admittedPolicy = !restore && this.admission?.kind === 'reception' ? this.admission.participantPolicy : undefined;
     const policy = binding.participantModelPin === undefined ? null
-      : await workerParticipantPolicy(this.env.PARTICIPANT_AI_PROXY, Boolean(participantRuntime));
+      : admittedPolicy ?? await workerParticipantPolicy(this.env.PARTICIPANT_AI_PROXY, Boolean(participantRuntime),
+        undefined, binding.participantModelPin.schemaVersion);
     let pin;
     try {
       pin = resolveWorkerParticipantModelPin({
@@ -747,6 +824,7 @@ export class TangramSession extends DurableObject<Env> {
     }
     const onPersist = async (snapshot: StoredTrial) => {
       const record = pin ? { ...snapshot, options: { ...snapshot.options, participantModelPin: pin,
+        ...(initialObservationGeneration ? { initialObservationGeneration } : {}),
         ...(participantRuntime ? { participantRuntimeProfile: participantRuntime.profile } : {}) } } : snapshot;
       await binding.onPersist(record as unknown as BaseRecord);
       await this.scheduleExpiry();
@@ -767,7 +845,8 @@ export class TangramSession extends DurableObject<Env> {
       const trial = createTrialV2({ seed, rotationMode, ...figures });
       const model = modelView(trial);
       const runtime = createWorkerParticipantRuntime({
-        proxy: policy.proxy, pin, ...runtimeMode, own: { ownImage: { mimeType: model.mimeType, base64: model.png.toString('base64') }, ownAnchors: model.anchors },
+        proxy: policy.proxy, pin, ...runtimeMode, initialObservationGeneration,
+        own: { ownImage: { mimeType: model.mimeType, base64: model.png.toString('base64') }, ownAnchors: model.anchors },
         cache: {
           read: key => this.ctx.storage.get(key),
           putIfAbsent: (key, entry) => this.ctx.storage.transaction(async tx => {
@@ -962,12 +1041,12 @@ export class TangramSession extends DurableObject<Env> {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
-    // Researcher-only, read-only, with its own headers; never reaches assets or the participant API.
+    // Researcher-only, with its own headers; never reaches assets or the participant API.
     if (isAdminPath(url.pathname)) {
       const index = env.ADMIN_INDEX ? env.ADMIN_INDEX.get(env.ADMIN_INDEX.idFromName(ADMIN_INDEX_NAME)) : null;
       // Internal RPC to the owning object named by the index; the participant API is never used.
-      const owner = (summary: AdminSummary) => {
-        try { return env.NAMING_SESSIONS.get(env.NAMING_SESSIONS.idFromString(summary.objectId)); } catch { return null; }
+      const owner = (objectId: string) => {
+        try { return env.NAMING_SESSIONS.get(env.NAMING_SESSIONS.idFromString(objectId)); } catch { return null; }
       };
       return handleAdmin(request, {
         token: index ? env.ADMIN_TOKEN : undefined,
@@ -975,9 +1054,7 @@ export default {
         receptions: index ? createReceptionAdminPort({
           index,
           readSettings:() => index.readReceptionSettings(),
-          owner:objectId => {
-            try { return env.NAMING_SESSIONS.get(env.NAMING_SESSIONS.idFromString(objectId)); } catch { return null; }
-          },
+          owner,
         }) : undefined,
         receptionSettings: index ? createReceptionSettingsPort(index) : undefined,
         canResumeParticipant: async (request, recordId) => {
@@ -991,12 +1068,40 @@ export default {
             return history.sessions.some(session => session.resumable && session.activeRecordId === recordId);
           } catch { return false; }
         },
-        listPage: async (after) => (await index!.page(after)) as { items: AdminSummary[]; next: string | null },
-        getSummary: async (recordId) => (await index!.get(recordId)) as AdminSummary | null,
-        getRecord: async (summary) => (await owner(summary)?.adminRecord(summary.recordId)) ?? null,
+        listPage: async after => {
+          const { items, next } = await index!.page(after);
+          const recordsByOwner = new Map<string, string[]>();
+          for (const { objectId, recordId } of items) {
+            const ids = recordsByOwner.get(objectId);
+            if (ids) ids.push(recordId);
+            else recordsByOwner.set(objectId, [recordId]);
+          }
+          const deleted = new Set((await Promise.all([...recordsByOwner].map(async ([objectId, ids]) =>
+            await owner(objectId)?.adminDeletedRecordIds(ids) ?? []))).flat());
+          if (deleted.size) {
+            // An owner deletion can commit before index removal fails. Reconcile
+            // on ordinary list reads and omit tombstoned rows even during the outage.
+            try { await index!.remove([...deleted], "admin"); } catch { /* Retry on a later list read. */ }
+          }
+          const live = items.filter(item => !deleted.has(item.recordId));
+          const roles = await index!.recordRoles(live.map(item => item.recordId), true);
+          return { items: live.flatMap(item => {
+            const role = roles[item.recordId];
+            return role === 'deleted' ? [] : [{ ...item, participantRole: participantRoleView(role) }];
+          }), next };
+        },
+        getSummary: async (recordId, includeParticipantRole) => {
+          const summary = await index!.get(recordId);
+          if (!summary || !includeParticipantRole) return summary;
+          const role = (await index!.recordRoles([recordId]))[recordId];
+          return { ...summary, participantRole: participantRoleView(role === 'deleted' ? undefined : role) };
+        },
+        setParticipantRole: async (summary, role) => await owner(summary.objectId)?.adminSetParticipantRole(summary.recordId, role)
+          ?? { ok: false, error: 'not_found' },
+        getRecord: async (summary) => (await owner(summary.objectId)?.adminRecord(summary.recordId)) ?? null,
         // Record first, then its index entry (with a content-free audit entry); both steps are idempotent.
         deleteRecord: async (summary) => {
-          const session = owner(summary);
+          const session = owner(summary.objectId);
           if (!session) throw new Error("invalid_object");
           await session.adminDelete(summary.recordId);
           await index!.remove([summary.recordId], "admin");
@@ -1004,7 +1109,7 @@ export default {
         audit: async () => (await index!.audit()) as AuditEntry[],
         summarizeLatency,
         prepareNext: async summary => {
-          const session = owner(summary); if (!session) throw new BaseSessionError('not_found');
+          const session = owner(summary.objectId); if (!session) throw new BaseSessionError('not_found');
           return await session.adminPrepareNext(summary.recordId);
         },
       });
