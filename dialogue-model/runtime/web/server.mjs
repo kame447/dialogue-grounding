@@ -94,6 +94,7 @@ export async function main(argv = process.argv.slice(2), env = process.env,
     clientConfig: config, utteranceStyle: values["utterance-style"] ?? "default", activeDecision, groundingShadow,
   }) : null;
   const server = await startServer({ port: Number(values.port), client, participantJev, runDir: env.RESEARCH_RUN_DIR, hideStrategy: values["hide-strategy"], activeDecision, ...operatorOptions,
+    ...(env.PARTICIPANT_MEMORY_PRUNE_VERSION !== undefined ? { memoryPruneVersion: env.PARTICIPANT_MEMORY_PRUNE_VERSION } : {}),
     baseAssignmentFile: values["base-assignment-file"], baseStoreRoot: values["base-store-root"],
     utteranceStyle: values["utterance-style"] ?? "default", ...(groundingShadow ? { groundingShadow } : {}) });
   console.log("共同命名課題: http://127.0.0.1:" + server.address().port);

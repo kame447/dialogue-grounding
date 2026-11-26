@@ -8,13 +8,13 @@ import { literalSpan } from "../judgment/public-evidence.mjs";
 import { priorClaimViews } from "./derive.ts";
 import { bindPublishedReferenceQuestion, isSuppliedBinding, recordAiClaims } from "./verify.ts";
 import type { LocalGraph, LocalPriorAct } from "./verify.ts";
-import { REFERENCE_LIMITS, validateReferenceUpdate, snapshotReferenceGraph } from "../memory/reference-graph.mjs";
+import { CLAIM_PRUNE_V2, REFERENCE_LIMITS, ReferenceGraphError, validateReferenceUpdate, snapshotReferenceGraph } from "../memory/reference-graph.mjs";
 
 const ref = (v: unknown): v is string => typeof v === "string" && /^[1-9]\d*:[a-zA-Z0-9_-]{1,32}$/u.test(v);
 const reasonCodes = new Set(["name_by_literal_path", "nonpublic_quote", "empty_extraction", "skipped_fallback", "invalid_segment",
   "invalid_verdict", "unknown_act", "ai_acknowledge_not_recorded", "unsupported_expression", "missing_claim_response", "nonpublic_claim_response",
   "inconsistent_claim_speaker", "inconsistent_claim_response", "not_deferred", "act_aspect_mismatch", "antecedent_ignored_independent",
-  "duplicate_seq", "event_missing", "not_ai", "non_referential", "hash_mismatch", "source_out_of_window", "op_limit_pre", "prior_pruned", "structural_rejection",
+  "duplicate_seq", "event_missing", "not_ai", "non_referential", "hash_mismatch", "source_out_of_window", "op_limit_pre", "prior_pruned", "structural_rejection", "memory_capacity_exceeded",
   ...["ai_extraction", "ai_function", "ai_support"].flatMap(stage => ["invalid_input", "invalid_state", "invalid_json", "invalid_response", "invalid_quote",
     "duplicate_segment", "timeout", "aborted", "unavailable", "invalid_options", "invalid_request", "model_mismatch", "key_unavailable", "key_leak",
     "unauthorized", "payment_required", "not_found", "rate_limited", "upstream_error", "network_error", "cost_cap", "cost_unreported", "busy"].map(code => stage + "_" + code))]);
@@ -135,6 +135,8 @@ export async function prependAiPublic({ graph, update, state, events, publicTurn
   const next = structuredClone(state), pending = next.pending;
   const application: AiPublicApplication = { aiSeq: pending?.aiSeq ?? null, status: "none", reasons: [], claims: [], nameIds: [], nameRejections: [] };
   const names = priorAct ? recordAiClaims({ graph, turn: update.turn, publicTurns, priorAct, featureSource: "none" }) : { operations: [], rejected: [] };
+  const capacity = (error: unknown) => graph.memoryPruneVersion === CLAIM_PRUNE_V2 &&
+    error instanceof ReferenceGraphError && error.code === "capacity_exceeded";
   let current = update;
   let referenceQuestionBindings: ReadonlyMap<string, string> | undefined;
   if (pending) {
@@ -167,7 +169,13 @@ export async function prependAiPublic({ graph, update, state, events, publicTurn
         if (prior && ((["agree", "deny"].includes(source.act) && prior.speaker !== "human") || source.act === "withdraw" && prior.speaker !== "ai")) { reject("inconsistent_claim_speaker"); break; }
         if (source.act === "revisit" && active.filter(c => c.issueId === source.issueId && ["defer", "revisit"].includes(c.act)).at(-1)?.act !== "defer") { reject("not_deferred"); break; }
         try { proposed = validateReferenceUpdate(graph, { ...proposed, operations: [...proposed.operations, op] }, { publicTurns }); }
-        catch { reject("structural_rejection"); break; }
+        catch (error) {
+          if (capacity(error)) {
+            application.capacityRejectedClaims = operations.length;
+            reject("memory_capacity_exceeded");
+          } else reject("structural_rejection");
+          break;
+        }
       }
       if (application.status !== "not_applied") {
         if (bindings?.size) referenceQuestionBindings = bindings;
@@ -184,7 +192,7 @@ export async function prependAiPublic({ graph, update, state, events, publicTurn
   application.nameRejections = structuredClone(names.rejected);
   for (const name of names.operations) {
     try { current = validateReferenceUpdate(graph, { ...current, operations: [...current.operations, name] }, { publicTurns }); application.nameIds.push(name.id); }
-    catch { application.nameRejections.push({ segmentId: name.id, reason: "memory_invalid_update" }); }
+    catch (error) { application.nameRejections.push({ segmentId: name.id, reason: capacity(error) ? "memory_capacity_exceeded" : "memory_invalid_update" }); }
   }
   return { update: current, state: next, application, ...(referenceQuestionBindings ? { referenceQuestionBindings } : {}) };
 }

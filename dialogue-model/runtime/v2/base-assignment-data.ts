@@ -1,5 +1,6 @@
 // Shared validation internals. node:crypto is already available to the Worker
 // under its existing nodejs_compat flag (also used by the stimulus generator).
+import { CLAIM_PRUNE_V2 } from '../memory/reference-graph.mjs';
 import { createHash } from 'node:crypto';
 import type { BaseAssignmentConfig, BaseAssignment, BaseRecord, BaseOwnerState } from './base-assignment.ts';
 import { validateReceptionPlan, effectiveRotationMode, effectiveFigureSelection, effectiveParticipantModelPin, ROTATION_MODES } from './reception.ts';
@@ -79,13 +80,15 @@ export function readAssignment(value: unknown): BaseAssignment {
           trialIndex:s.trialIndex, plan }), createdAt:a.createdAt }) as BaseAssignment;
     }
     // Preserve every existing server_config_v1 field and digest validation.
-    const s = data(rawSource, ['kind', 'adapter', 'configId', 'revision', 'configSha256']);
+    const hasPrune = Object.hasOwn(rawSource, 'memoryPruneVersion');
+    const s = data(rawSource, ['kind', 'adapter', 'configId', 'revision', 'configSha256', ...(hasPrune ? ['memoryPruneVersion'] : [])]);
+    if (hasPrune && (s.memoryPruneVersion !== CLAIM_PRUNE_V2 || s.adapter !== 'local_private_file' || a.referenceMemory !== true)) throw new Error('memory_prune_version');
     if (a.schemaVersion !== 'base_assignment_v1' || typeof a.assignmentId !== 'string' || !V4.test(a.assignmentId) ||
         !strategy(a.strategy) || !safeInt(a.seed) || typeof a.referenceMemory !== 'boolean' || s.kind !== 'server_config_v1' ||
         !['local_private_file', 'worker_binding'].some(v => v === s.adapter) || typeof s.configId !== 'string' || !V4.test(s.configId) ||
         !positive(s.revision) || typeof s.configSha256 !== 'string' || !SHA.test(s.configSha256) || typeof a.createdAt !== 'string' ||
         !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(a.createdAt) || new Date(a.createdAt).toISOString() !== a.createdAt) throw new Error('assignment');
-    const result = { schemaVersion: 'base_assignment_v1', assignmentId: a.assignmentId, strategy: a.strategy, seed: a.seed, referenceMemory: a.referenceMemory, source: Object.freeze({ kind: s.kind, adapter: s.adapter, configId: s.configId, revision: s.revision, configSha256: s.configSha256 }), createdAt: a.createdAt } as BaseAssignment;
+    const result = { schemaVersion: 'base_assignment_v1', assignmentId: a.assignmentId, strategy: a.strategy, seed: a.seed, referenceMemory: a.referenceMemory, source: Object.freeze({ kind: s.kind, adapter: s.adapter, configId: s.configId, revision: s.revision, configSha256: s.configSha256, ...(hasPrune ? { memoryPruneVersion: CLAIM_PRUNE_V2 } : {}) }), createdAt: a.createdAt } as BaseAssignment;
     const canonical = canonicalBaseAssignmentConfig(configFromAssignment(result));
     if (createHash('sha256').update(canonical).digest('hex') !== s.configSha256) throw new Error('digest');
     return Object.freeze(result);
@@ -94,6 +97,9 @@ export function readAssignment(value: unknown): BaseAssignment {
 /** The stimulus mode an assignment requires. server_config_v1 and v1 plans predate the setting. */
 export function assignmentRotationMode(a: BaseAssignment): RotationMode {
   return a.source.kind === 'server_config_v1' ? 'relative_pm90' : effectiveRotationMode(a.source.plan, a.source.trialIndex);
+}
+export function assignmentMemoryPruneVersion(a: BaseAssignment) {
+  return a.source.kind === 'server_config_v1' ? a.source.memoryPruneVersion : a.source.plan.memoryPruneVersion;
 }
 export function assignmentParticipantModelPin(a: BaseAssignment) {
   return a.source.kind === 'server_config_v1' ? undefined : effectiveParticipantModelPin(a.source.plan);
@@ -156,6 +162,10 @@ export function validateBoundBaseRecord(record: unknown, assignment: unknown): v
     if (JSON.stringify(pin) !== JSON.stringify(recordedPin) || pin && options.jevResearch !== true) throw new Error('model_pin');
     const plan = a.source.kind === 'reception_plan_v2' || a.source.kind === 'reception_plan_v3' ? a.source.plan : null;
     const profile = plan?.participantRuntimeProfile;
+    const memoryPruneVersion = assignmentMemoryPruneVersion(a);
+    const graph = (queue.privateState as { graph?: { memoryPruneVersion?: unknown } } | null)?.graph;
+    if ((memoryPruneVersion ? options.memoryPruneVersion !== memoryPruneVersion : Object.hasOwn(options, 'memoryPruneVersion')) ||
+        graph?.memoryPruneVersion !== memoryPruneVersion) throw new Error('memory_prune_version');
     const generation = plan?.initialObservationGeneration;
     const dialogueProfile = assignmentParticipantDialogueProfile(a);
     if (dialogueProfile === undefined ? Object.hasOwn(options, 'participantDialogueProfile')

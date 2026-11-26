@@ -2,7 +2,7 @@
 // own slots, never ground truth or a participant-facing agreement flag.
 import type { LocalClaimView, LocalIssueView, LocalNameState } from "./contract.ts";
 import type { LocalGraph } from "./verify.ts";
-import { snapshotReferenceGraph, REFERENCE_LIMITS } from "../memory/reference-graph.mjs";
+import { snapshotReferenceGraph, REFERENCE_LIMITS, claimNameState } from "../memory/reference-graph.mjs";
 
 type Claim = LocalClaimView & { kind: "claim" };
 function evidence(graph: LocalGraph) {
@@ -22,7 +22,6 @@ function evidence(graph: LocalGraph) {
   }
   return { claims, dead };
 }
-const overlap = (a: Claim, b: Claim) => a.targets.some(slot => b.targets.includes(slot));
 
 /** Recomputed on each call; no mutable state is kept beside the claim log. */
 export function deriveLocalIssues(graph: LocalGraph): LocalIssueView[] {
@@ -45,22 +44,9 @@ export function deriveLocalIssues(graph: LocalGraph): LocalIssueView[] {
     let nameState: LocalNameState | null = null;
     let name: string | null = null;
     if (latest.aspect === "name") {
-      const proposal = records.filter(c => c.act === "name_propose").at(-1);
-      name = proposal?.name ?? null;
-      nameState = !proposal ? "no_name" : dead.has(proposal.id) ? "unknown" : "unclear";
-      if (proposal && !dead.has(proposal.id) && proposal.targets.length === 1) {
-        if (active.some(c => c.act === "name_reject" && c.respondsTo === proposal.id)) nameState = "not_agreed";
-        const acceptance = active.filter(c => c.act === "name_accept" && c.respondsTo === proposal.id &&
-          c.speaker !== proposal.speaker && c.targets.length === 1 && c.targets[0] === proposal.targets[0] && (c.name === null || c.name === proposal.name)).at(-1);
-        if (acceptance) {
-          const after = claims.slice(claims.indexOf(acceptance) + 1);
-          const overturned = after.some(c => c.aspect === "name" && overlap(c, proposal) &&
-            ((c.act === "name_propose" && c.name !== proposal.name) ||
-              (c.act === "name_reject" && c.respondsTo === proposal.id) ||
-              (c.act === "withdraw" && (c.respondsTo === proposal.id || c.respondsTo === acceptance.id))));
-          nameState = overturned ? "not_agreed" : "agreed";
-        }
-      }
+      const result = claimNameState(records, active, claims, dead);
+      name = result.name;
+      nameState = result.nameState as LocalNameState;
     }
     return { issueId, aspect: latest.aspect, targets: [...latest.targets], state, nameState, name,
       claimIds: records.map(c => c.id), lastTurn: latest.turn };

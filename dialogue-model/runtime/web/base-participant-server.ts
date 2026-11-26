@@ -1,3 +1,4 @@
+import { CLAIM_PRUNE_V2 } from '../memory/reference-graph.mjs';
 import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { randomBytes, randomUUID } from 'node:crypto';
@@ -32,7 +33,8 @@ type Entry = {store: LocalStore; coordinator: BaseSession; serial<T>(fn: () => P
 type DrainableServer = ReturnType<typeof createServer> & { drainAndClose(): Promise<void> };
 export function createBaseParticipantServer(options: Record<string, any> = {}) {
   if (Object.hasOwn(options,'baseAssignment')) throw failure();
-  const {client,baseAssignmentFile,baseStoreRoot,now=Date.now,createTaskV2=createNamingTaskV2,utteranceStyle='default',activeDecision=null,groundingShadow=null,participantJev=null,adminToken,adminLimiter}=options;
+  const {client,baseAssignmentFile,baseStoreRoot,now=Date.now,createTaskV2=createNamingTaskV2,memoryPruneVersion,utteranceStyle='default',activeDecision=null,groundingShadow=null,participantJev=null,adminToken,adminLimiter}=options;
+  if (memoryPruneVersion !== undefined && memoryPruneVersion !== CLAIM_PRUNE_V2) throw new Error('Invalid memory pruning version');
   if (!['default','concise'].includes(utteranceStyle)) throw new Error('Invalid utterance style');
   if (activeDecision !== null && (!['decision_jev','decision_luna'].includes(activeDecision?.purpose) || typeof activeDecision.client?.chooseAction !== 'function')) throw new Error('Invalid active decision client');
   const entries = new Map<string,Promise<Entry>>();
@@ -50,6 +52,7 @@ export function createBaseParticipantServer(options: Record<string, any> = {}) {
         const store=await openBaseFileStore({root:baseStoreRoot,ownerId,now});
         loadedStores.add(store);
         const coordinator=createBaseAssignmentSession({ownerId,store,now,newId:randomUUID,adapter:'local_private_file',
+          ...(memoryPruneVersion ? { memoryPruneVersion } : {}),
           readConfig:async()=>baseAssignmentFile ? readPrivateAssignment(baseAssignmentFile) : null,
           makeTask:async value=>createTaskV2({client,...value,onPersistSlow:(slow:{waitedMs:number;tookMs:number;joined:number})=>{try{process.stderr.write('persist_slow waited_ms='+slow.waitedMs+' took_ms='+slow.tookMs+' joined='+slow.joined+'\n');}catch{/* never affects the write */}},onPersistFailure:(failure:{code:string;at:string;reason?:string})=>{try{process.stderr.write('persist_failed code='+failure.code+(failure.reason?' reason='+failure.reason:'')+' at='+failure.at+'\n');}catch{/* never affects the write */}},activeDecision,utteranceStyle,...(groundingShadow?{groundingShadow}:{}),
             ...(participantJev?await participantJev.taskOptions(value):{}),
