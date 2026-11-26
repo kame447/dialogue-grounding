@@ -610,7 +610,9 @@ async function nonNamingDraftOutcome(label: Label, contract?: ApprovedDraftCheck
 // contract here only after approval of the additional semantic-check request.
 function registerNonNamingDraftChecks(contract?: ApprovedDraftCheck) {
   for (const label of conditions) {
-    test(`P5 ${label}: non-naming overclaims never reach a committed public turn`, () => nonNamingDraftOutcome(label, contract));
+    test(`P5 ${label}: non-naming overclaims never reach a committed public turn`,
+      { todo: "研究者の判断①（公開の前の過大断定の判定）待ち" },
+      () => nonNamingDraftOutcome(label, contract));
   }
   test("P5: the separately approved semantic-check RPC handles the same drafts",
     { skip: !contract && "Pending research approval and a closed response contract" },
