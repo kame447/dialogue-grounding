@@ -209,6 +209,7 @@ function abortIf(signal) {
 
 /**
  * @param {{ client, strategy, image: {mimeType, base64}, anchors: {id, bbox, centroid}[], judge?: import('../judgment/schema.mjs').DialogueJudge | null,
+ *   memoryPruneVersion?: import("../memory/reference-graph.mjs").MemoryPruneVersion,
  *   referenceMemory?: boolean, decisionShadowClient?: {chooseAction(request: object): Promise<any>} | null,
  *   onResearchUpdate?: (() => void) | null, activeDecision?: {purpose: string, client: {chooseAction(request: object): Promise<any>}} | null,
  *   utteranceStyle?: string, groundingShadow?: import('./grounding-shadow.ts').GroundingShadowOptions | null,
@@ -233,7 +234,7 @@ function abortIf(signal) {
  *   settleLocalTraces(records, installedPrivateState) confirms publication after the queue settles.
  */
 export function createDialogueV2(options) {
- const { client, strategy, image, anchors, judge = null, referenceMemory = true,
+ const { client, strategy, image, anchors, judge = null, referenceMemory = true, memoryPruneVersion,
   decisionShadowClient = null, onResearchUpdate = null, activeDecision = null, utteranceStyle = "default",
   groundingShadow = null, onGroundingShadow = null, localGrounding = null, onLocalGroundingTrace = null,
   decisionMode = null, observer = null, jevDecision = null, usagePolicy, onJevTurnTrace = null, maxReobservations = 1 }=options;
@@ -304,7 +305,7 @@ export function createDialogueV2(options) {
     };
     if (!referenceMemory || !localGrounding) throw new Error("Jev decision mode requires local reference memory");
     if (activeDecision || decisionShadowClient || groundingShadow) throw new Error("Jev decision mode cannot combine legacy decision paths");
-    return createJevTurnRuntime({ client, ownImage, ownAnchors, observer, jevDecision, localGrounding, usagePolicy, ...(integrated?{intervention,decisionTimeoutMs}:{}),
+    return createJevTurnRuntime({ client, ownImage, ownAnchors, observer, jevDecision, localGrounding, usagePolicy, memoryPruneVersion, ...(integrated?{intervention,decisionTimeoutMs}:{}),
       ...(Object.hasOwn(options,'technicalTrial')?{technicalTrial:options.technicalTrial}:{}),
       ...(Object.hasOwn(options,'questionLayout')?{questionLayout:options.questionLayout}:{}),
       ...(options.dialoguePolicy ? { dialoguePolicy: options.dialoguePolicy } : {}),
@@ -359,7 +360,7 @@ export function createDialogueV2(options) {
     return {
       ledger: createOwnLedger(slots),
       judgments: [],
-      graph: referenceMemory ? createReferenceGraph({ slots }) : null,
+      graph: referenceMemory ? createReferenceGraph({ slots, ...(memoryPruneVersion ? { memoryPruneVersion } : {}) }) : null,
     };
   }
 
@@ -384,6 +385,7 @@ export function createDialogueV2(options) {
 
   async function runAiTurnUnbounded({ events, signal, privateState, lastEventId, requestSeq = null }) {
     const state = clone(privateState);
+    if (state.graph?.memoryPruneVersion !== memoryPruneVersion) throw new Error("Invalid memory pruning version");
     const humanEvents = events.filter((event) => event.speaker === "human");
     const latest = humanEvents.at(-1);
     if (!latest) throw new Error("No human message to answer");

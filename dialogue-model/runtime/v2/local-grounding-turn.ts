@@ -15,7 +15,8 @@ type Message = { role: string; content: unknown };
 export { findLocalPublicationViolations } from "./generation-guard.ts";
 import { findLocalPublicationViolations } from "./generation-guard.ts";
 
-type Graph = { revision: number; lastTurn: number; slots: string[]; records: Array<{ kind: string; id: string }> };
+type Graph = { revision: number; lastTurn: number; slots: string[]; records: Array<{ kind: string; id: string }>;
+  memoryPruneVersion?: import("../memory/reference-graph.mjs").MemoryPruneVersion };
 type Update = { expectedRevision: number; turn: number; operations: Array<{ kind: string; id: string }> };
 export type LocalGroundingTrace = {
   status: "ok" | "error" | "timeout" | "aborted";

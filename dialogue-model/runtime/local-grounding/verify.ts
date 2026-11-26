@@ -7,7 +7,7 @@ import { SLOTS } from "../stimuli/board.mjs";
 import { REFERENCE_LIMITS, snapshotReferenceGraph, validateReferenceUpdate, ReferenceGraphError } from "../memory/reference-graph.mjs";
 import { priorClaimViews } from "./derive.ts";
 
-export type LocalGraph = { records: readonly unknown[]; slots?: readonly string[] };
+export type LocalGraph = { records: readonly unknown[]; slots?: readonly string[]; memoryPruneVersion?: import("../memory/reference-graph.mjs").MemoryPruneVersion };
 export type LocalVerificationDiagnostic = {
   segmentId: string;
   reason: "issue_link_overridden";
