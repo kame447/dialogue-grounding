@@ -101,19 +101,30 @@ const V1_BASE_DIGESTS: Record<string, string> = {
   "rich.detail.agreeSingle": "fbc03c8bfb3fa9b1b3c22fa65981c46a8ae8491e21b9f2c43be50691c225767e",
 };
 
-test("C2-1: two_stage_v1 request bodies stay byte-identical to the base commit", () => {
+const v1Builders = { buildJevDecisionPayload, buildJevDecisionDetailPayload, buildHumanReferentPayload, buildRepairProspectPayload };
+function v1Bodies(builders: typeof v1Builders) {
+  const bodies: Record<string, unknown> = {};
   for (const [name, input] of Object.entries({ base: base(), rich: rich() })) {
-    assert.equal(sha(buildJevDecisionPayload(input)), V1_BASE_DIGESTS[`${name}.stage1`]);
-    assert.equal(sha(buildJevDecisionPayload(input, { questionLayout: "two_stage_v1" })), V1_BASE_DIGESTS[`${name}.stage1`]);
-    assert.equal(sha(buildHumanReferentPayload(input)), V1_BASE_DIGESTS[`${name}.referent`]);
-    assert.equal(sha(buildRepairProspectPayload(input)), V1_BASE_DIGESTS[`${name}.prospect`]);
+    bodies[`${name}.stage1`] = builders.buildJevDecisionPayload(input);
+    bodies[`${name}.explicit`] = builders.buildJevDecisionPayload(input, { questionLayout: "two_stage_v1" });
+    bodies[`${name}.referent`] = builders.buildHumanReferentPayload(input);
+    bodies[`${name}.prospect`] = builders.buildRepairProspectPayload(input);
     const selections = { confirmSingle: { action: "confirm", target: { kind: "single", figureId: "own-1" } },
       repairMultiple: { action: "repair", target: { kind: "multiple", figureIds: ["own-0", "own-2"] } },
       proposeSingle: { action: "propose_name", target: { kind: "single", figureId: "own-0" } },
       observeMultiple: { action: "request_observation", target: { kind: "multiple", figureIds: ["own-1", "own-3"] } },
       ...(name === "rich" ? { agreeSingle: { action: "agree", target: { kind: "single", figureId: "own-0" } } } : {}) } as const;
-    for (const [label, selected] of Object.entries(selections)) assert.equal(sha(buildJevDecisionDetailPayload(input, selected as never)), V1_BASE_DIGESTS[`${name}.detail.${label}`], label);
+    for (const [label, selected] of Object.entries(selections)) bodies[`${name}.detail.${label}`] = builders.buildJevDecisionDetailPayload(input, selected as never);
   }
+  return bodies;
+}
+test("C2-1: v1 retains the historic and #175 request bytes in their respective builders", async () => {
+  const historical = await import(new URL('../dialogue-model/runtime/diagnostics/parity-live/frozen/preloop-v3/legacy/decision/jev-decision.mts', import.meta.url).href) as typeof v1Builders;
+  for (const [label, body] of Object.entries(v1Bodies(historical))) {
+    assert.equal(sha(body), V1_BASE_DIGESTS[label.replace(/\.explicit$/u, '.stage1')], label);
+  }
+  // Calculated from the same inputs at main b8c119e, after #175.
+  assert.equal(sha(v1Bodies(v1Builders)), "3ba08d2e262aca7dd9c0b84dc86377a33a5ff1f2a9d91666f8691a9fd5515204");
   assert.equal(Object.keys(buildJevDecisionPayload(base()).questions).length, 8);
   assert.equal(createJevDecisionClient({ enabled: true, readKey })!.metadata.questionLayout, "two_stage_v1");
   // The v1 research profile is unchanged; only an explicit v2 changes its digest.

@@ -6,6 +6,7 @@ import type { TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { RunBudget, CALL_CAPS, ENGINEERING_LIMITS } from '../dialogue-model/runtime/diagnostics/parity-live/audit.ts';
 import { DEFAULT_COST_CAP_USD } from '../dialogue-model/runtime/diagnostics/jev-shadow-eval/local-openrouter.ts';
+import { createJevDecisionClient } from '../dialogue-model/runtime/decision/jev-decision.ts';
 import { MEMO_LOCAL_EXTRACTION_INSTRUCTIONS } from '../dialogue-model/runtime/local-grounding/extract.ts';
 import { MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS } from '../dialogue-model/runtime/local-grounding/extract-ai.ts';
 import { canonicalReceptionProtocolV2, receptionProtocolSha256 } from '../dialogue-model/runtime/v2/reception.ts';
@@ -479,6 +480,7 @@ for (const modelOnly of [false, true]) {
 
 test('diagnostic and isolated budgets still stop at the approved limits', () => {
   assert.equal(DEFAULT_COST_CAP_USD, 0.05);
+  assert.throws(() => createJevDecisionClient({ enabled: true, costCapUsd: 0.051 }), { code: 'invalid_options' });
   assert.equal(ENGINEERING_LIMITS.trialMs, 15 * 60 * 1000);
   assert.deepEqual([CALL_CAPS.observation_initial, CALL_CAPS.observation_targeted, CALL_CAPS.decision, CALL_CAPS.generation], [1, 1, 4, 2]);
   const isolatedConfig = {
@@ -489,7 +491,9 @@ test('diagnostic and isolated budgets still stop at the approved limits', () => 
     seed: 421, limits: previousLimits, technicalTrial: { version: 'adaptive_repair_v3' },
   };
   assert.deepEqual(validateParticipantJevConfig(isolatedConfig).config.limits, previousLimits);
-  assert.throws(() => validateParticipantJevConfig({ ...isolatedConfig, limits: { ...previousLimits, jevUsd: 0.051 } }),
+  const researchCap = { ...previousLimits, jevUsd: 1 };
+  assert.deepEqual(validateParticipantJevConfig({ ...isolatedConfig, limits: researchCap }).config.limits, researchCap);
+  assert.throws(() => validateParticipantJevConfig({ ...isolatedConfig, limits: { ...previousLimits, jevUsd: 1.001 } }),
     { code: 'invalid_config' });
   assert.throws(() => validateParticipantJevConfig({ ...isolatedConfig, participantRuntimeProfile: productionProfile }),
     { code: 'invalid_config' });
@@ -497,6 +501,10 @@ test('diagnostic and isolated budgets still stop at the approved limits', () => 
   ledger.observe(ledger.reserve('jev', 'decision', 1), { costUsd: previousLimits.jevUsd });
   assert.equal(ledger.haltReason, 'observed_jev_budget');
   assert.throws(() => ledger.reserve('jev', 'decision', 2), /budget_stop/u);
+  const isolated = new RunBudget(researchCap);
+  isolated.observe(isolated.reserve('jev', 'decision', 1), { costUsd: researchCap.jevUsd });
+  assert.equal(isolated.haltReason, 'observed_jev_budget');
+  assert.throws(() => isolated.reserve('jev', 'decision', 2), /budget_stop/u);
   const missing = new RunBudget(previousLimits);
   missing.observe(missing.reserve('jev', 'decision', 1), { costUsd: null });
   assert.equal(missing.stopReason(), 'jev_cost_unknown');

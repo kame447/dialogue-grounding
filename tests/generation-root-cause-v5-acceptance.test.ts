@@ -24,7 +24,7 @@ import { prepareParticipantJev } from '../dialogue-model/runtime/web/participant
 import { researchTrialProfileV3 } from '../dialogue-model/runtime/v2/research-profile.ts';
 import type { ResearchTrialProfileV3 } from '../dialogue-model/runtime/v2/research-profile.ts';
 import type { JevTurnTrace } from '../dialogue-model/runtime/v2/jev-turn.ts';
-import { MODEL, normal, OLD, OWN } from './support/s4-v3-records.ts';
+import { bindCurrentS4PromptSources, MODEL, normal, OLD, OWN } from './support/s4-v3-records.ts';
 import type { Label } from './support/s4-v3-records.ts';
 
 const strategies = ['repair-first', 'bypass-enabled'] as const;
@@ -332,6 +332,7 @@ async function checkReplay(rows: readonly Outcome[], index: number, profile: Res
   assert.equal(replay.policyConformant, true);
 
   const records = structuredClone(normal);
+  await bindCurrentS4PromptSources(records);
   const trial = records.trials[0];
   const profileSha256 = hash(profile);
   for (const header of [records.run, records.summary, trial, records.run.manifest]) {

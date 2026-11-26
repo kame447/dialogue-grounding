@@ -1074,7 +1074,7 @@ test('holistic_v1 (05d-2): only an agreed name is excluded from the quoted-strin
   assert.equal(mention2.trace.draftActs, undefined);
 });
 
-import { MEMO_LOCAL_EXTRACTION_INSTRUCTIONS, MEMO_LOCAL_EXTRACTION_INSTRUCTIONS_HOLISTIC } from '../dialogue-model/runtime/local-grounding/extract.ts';
+import { memoExtractionPrompt } from '../dialogue-model/runtime/local-grounding/extract.ts';
 test('holistic_v1 (extraction): a casual naming proposal or approval question is an aspect-name matter in new trials only; earlier requests keep their bytes', async () => {
   const casual = 'これ、かかしとかどう？';
   const seg = (): Segment => ({ quote: casual, name: 'かかし', targets: [ids[3]], act: 'name_propose', aspect: 'name', proposition: casual });
@@ -1082,12 +1082,12 @@ test('holistic_v1 (extraction): a casual naming proposal or approval question is
   await share(f, 3);
   const r = await f.exchange(casual, { action: 'accept', target: 3, draftActs: ['none'], segments: [seg()], drafts: ['どの図形の話か確かめたいです。'] });
   assert.equal(r.input.priorClaims.find(c => c.name === 'かかし')?.act, 'name_propose');
-  assert.equal(f.extractionSystem.at(-1), MEMO_LOCAL_EXTRACTION_INSTRUCTIONS_HOLISTIC);
-  assert.match(MEMO_LOCAL_EXTRACTION_INSTRUCTIONS_HOLISTIC, /aspectをnameにします/u);
-  assert.ok(MEMO_LOCAL_EXTRACTION_INSTRUCTIONS_HOLISTIC.startsWith(MEMO_LOCAL_EXTRACTION_INSTRUCTIONS));
+  assert.equal(f.extractionSystem.at(-1), memoExtractionPrompt(true, true));
+  assert.match(memoExtractionPrompt(true, true), /aspectをnameにします/u);
+  assert.ok(memoExtractionPrompt(true, true).startsWith(memoExtractionPrompt(false, true)));
   const old = fixture('bypass-enabled', { aiPublic: true });
   await share(old, 3);
-  assert.equal(old.extractionSystem.at(-1), MEMO_LOCAL_EXTRACTION_INSTRUCTIONS);
+  assert.equal(old.extractionSystem.at(-1), memoExtractionPrompt(false, true));
 });
 
 test('holistic_v2 (names, 05j-B2): a name the partner proposed for several figures is never an AI propose_name candidate; a neutral mention still is', async () => {
@@ -1105,7 +1105,7 @@ test('holistic_v2 (names, 05j-B2): a name the partner proposed for several figur
   const old = fixture('bypass-enabled', { aiPublic: true, holistic: 'holistic_v1' });
   const o = await old.exchange('どんな図形がありますか？', { action: 'accept', target: 0, drafts: ['全体は丸みのある形です。'] });
   assert.ok(actions(o).includes('propose_name'), 'holistic_v1 offers the memo readings');
-  assert.equal(old.extractionSystem.at(-1), MEMO_LOCAL_EXTRACTION_INSTRUCTIONS, 'holistic_v1 keeps the earlier extraction text');
+  assert.equal(old.extractionSystem.at(-1), memoExtractionPrompt(false, true), 'holistic_v1 keeps the earlier extraction text');
 });
 
 test('holistic_v2 (names, 05k-B2): a partner name stays out of the candidates when the input limit drops its source claim, with and without the shortening, in both strategies', async () => {

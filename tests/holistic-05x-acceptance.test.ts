@@ -26,7 +26,7 @@ import type { JevPrivateState, JevTurnTrace } from '../dialogue-model/runtime/v2
 import { createNamingTaskV2 } from '../dialogue-model/runtime/v2/naming-task-v2.mjs';
 import { researchHash, researchTrialProfileV3 } from '../dialogue-model/runtime/v2/research-profile.ts';
 import { prepareParticipantJev } from '../dialogue-model/runtime/web/participant-jev-wiring.ts';
-import { MODEL, normal, OLD, OWN } from './support/s4-v3-records.ts';
+import { bindCurrentS4PromptSources, MODEL, normal, OLD, OWN } from './support/s4-v3-records.ts';
 import type { buildRecords, Label, Plan, Turn } from './support/s4-v3-records.ts';
 
 type Policy = 'holistic_v3' | 'holistic_v4';
@@ -184,6 +184,7 @@ async function s4Turn(profile: Profile, label: Label, state: InterventionReplayT
 
 async function currentRecords(label: Label, policy: Policy, turns: Turn[]): Promise<Records> {
   const records = structuredClone(normal);
+  await bindCurrentS4PromptSources(records);
   const trial = records.trials[0];
   const manifest = records.run.manifest;
   const profile = researchTrialProfileV3(manifest.lunaRequest, manifest.timeouts, 'two_stage_v3', policy);

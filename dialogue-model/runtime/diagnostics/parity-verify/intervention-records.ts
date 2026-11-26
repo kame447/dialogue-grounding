@@ -783,7 +783,7 @@ const idsOf=(target:any):string[]=>target?.kind==='single'?[target.figureId]:tar
   const response={luna:[...tape.common.luna,...tape.tails[label].luna],jev:[...tape.common.jev,...tape.tails[label].jev]},indices={luna:0,jev:0};
   for(const r of s.requests){if(!exact(r,['provider','phase','payload','payloadDomain','payloadSha256','preProjectionPayloadSha256','role',...(Object.hasOwn(r,'completeMessagesSha256')?['completeMessagesSha256']:[])])||!['luna','jev'].includes(r.provider)||!['common','alternative_detail','generation','post_generation'].includes(r.role)||r.payloadDomain!=='canonical_http_json'||hash(r.payload)!==r.payloadSha256||typeof r.preProjectionPayloadSha256!=='string'||!/^[a-f0-9]{64}$/.test(r.preProjectionPayloadSha256))return'invalid';
    const p=r.payload,provider=r.provider as 'luna'|'jev',answer=response[provider][indices[provider]++];if(!answer)return'missing';
-   const exV1=v.i172?EXTRACTION_V1_I172_S4:EXTRACTION_V1_S4,exV2=v.i172?EXTRACTION_V2_I172_S4:EXTRACTION_V2_S4;
+   const exV1=usesPositionPrompt(v)?EXTRACTION_V1_I172_S4:EXTRACTION_V1_S4,exV2=usesPositionPrompt(v)?EXTRACTION_V2_I172_S4:EXTRACTION_V2_S4;
    if(provider==='luna'&&H()&&r.phase==='local_extraction'&&!(Array.isArray(p?.messages)&&p.messages[0]?.role==='system'&&p.messages[0].content===(H2()?exV2:exV1)))return'invalid';
    if(provider==='luna'){if(answer.phase!==r.phase||!exact(p,['purpose','messages',...(tr.profile.lunaRequest.maxCompletionTokens===null?[]:['max_completion_tokens'])])||p.purpose!=='dialogue_turn'||!Array.isArray(p.messages)||hash(p.messages)!==r.completeMessagesSha256&&!projectedOwnImage(p.messages,m.own?.ownImage)||r.phase==='observation_targeted'&&!observationRequestProof(p.messages,current,m))return'invalid';
     if((r.phase==='generation')!==(r.role==='generation'))return'invalid';
@@ -1082,7 +1082,8 @@ const LEGEND_V5='stateの記法: publicTurnsは全公開発話を番号順に一
 const LEGEND_V11='answerClaimsは、figuresの返答のclaim idがclaimsにない行動のためだけに添える行で、各行は [claim id, 出典の発話番号, act, 対象, 命題] です。グラフから外れた回答の出典の発話番号はnullになります。';
 const ROTATION_V5='課題の条件として、相手の盤面は自分の盤面と同じ図形を±90度ほど回転して提示しています（relative_pm90）。向きや方位を表す語（上・下・左・右・縦・横など）は、相手と自分で一致しない前提で扱い、向きに依存しない特徴で照合してください。';
 const parseMaterial=(text:string):any=>{const x=JSON.parse(text);return x?.view==='judgment_v5'?decodeMaterialV5(x):x;};
-const activeNative=():PromptVersion['native']=>CTX.prompt?CTX.prompt.native:NATIVE_I172;
+const usesPositionPrompt=(v:PromptVersion):boolean=>v.i172&&!(v.styleMode==='research_split'&&CTX.v3);
+const activeNative=():PromptVersion['native']=>CTX.prompt?(usesPositionPrompt(CTX.prompt)?CTX.prompt.native:NATIVE):CTX.v3?NATIVE:NATIVE_I172;
 const nativeInstructions=(s:any,layout='two_stage_v1',prospect=false)=>{const nat=activeNative();return(layout==='two_stage_v3'?nat.common.replace(NATIVE_V2.v1Stages,NATIVE_V3.stages):layout==='two_stage_v2'?nat.common.replace(NATIVE_V2.v1Stages,NATIVE_V2.stages):nat.common)+(Object.hasOwn(s,'humanReferent')?'\n'+nat.referent:'')+(prospect&&Object.hasOwn(s,'repairProspect')?'\n'+ADAPT.prospect:'')+(CTX.facts?'\n'+ADAPT.facts:'')+(s?.view==='judgment_v5'?'\n'+LEGEND_V5+(s.notationV11===true?'\n'+LEGEND_V11:'')+(s.rotationMode==='relative_pm90'?'\n'+ROTATION_V5:''):'');};
 function originalQuestions(body:any,input:any,layout='two_stage_v1'):boolean|null{
   if(body.model!=='typesafe/jev-1.14'||!Array.isArray(input.ownSlots)||input.ownSlots.length!==6||!Array.isArray(input.observations)||!Array.isArray(input.publicNames)||Object.hasOwn(input,'nameLedger'))return false;
@@ -1234,8 +1235,8 @@ function choiceResponse(body:any,response:any):boolean{
 // executed while checking a record. No condition or original decision is input.
 // Prompt-style update (prompt-style-20261124): the current text and the prior text are both verified exactly.
 function generationMessages(messages:any[],trace:any,execution:any,tape:any,profile:any,index:number,codes?:readonly string[],draft?:RetryDraftEvidence):boolean{
- const v=CTX.prompt,i172=v?v.i172:true;
- if(v?.styleMode==='profile'&&!H()){
+ const v=CTX.prompt,i172=v?usesPositionPrompt(v):!CTX.v3;
+ if((v?.styleMode==='profile'||v?.styleMode==='research_split'&&!CTX.v3)&&!H()){
   return generationMessagesWith(messages,trace,execution,tape,profile,FIXED_I172,{v3:[V3_TRIAL_PROFILE_I172],legacy:TRIAL_PROFILE_I172},index,codes,draft);
  }
  if(v&&v.styleMode==='legacy'&&!CTX.v3&&!H()){
@@ -1506,7 +1507,7 @@ const FIXED_HOLISTIC_V5_I172={...FIXED_HOLISTIC_I172,
   confirm:rep(TRIAL_HOLISTIC_I172.scope.confirm,'回転に依存しない表現で','形の参照枠に関する共通教示に沿って'),
   repair:rep(TRIAL_HOLISTIC_I172.scope.repair,'回転に依存しない表現で','形の参照枠に関する共通教示に沿って')}};
 
-type PromptVersion={id:string;sources:unknown;i172:boolean;styleMode:'legacy'|'merged'|'profile';
+type PromptVersion={id:string;sources:unknown;i172:boolean;styleMode:'legacy'|'merged'|'profile'|'research_split';
  fixed:{task:string;generator:string;concise:string;scope:Readonly<Record<string,string>>;act:string;detail:string};
  native:{common:string;referent:string;actions:Readonly<Record<string,string>>}};
 
@@ -1607,6 +1608,18 @@ const PROMPT_VERSIONS:readonly PromptVersion[]=[
   'local-grounding/extract.ts':'1ba522173730b170b7d61784d99c234a051f2cc49b09fe50b3f7e5181e5527d3',
   'local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01',
   'decision/jev-decision.ts':'051ca0ac7b1d3091d0bc3b9fa91148a82467d4445be2180217285ecfed82d23d',
+  'local-grounding/extract-ai.ts':'e489b7ff573fdbe9e4f0adc9b6ee5f0828bd3c6835dcd8cd6555e191161594a6',
+  'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
+ }},fixed:FIXED_I172,native:NATIVE_I172},
+ {id:'pr213_research_prompt_split',i172:true,styleMode:'research_split',sources:{scheme:'complete_instruction_source_sha256',files:{
+  'v2/dialogue-v2.mjs':'78651c8d76bd5e81e69fd08efd7e60596e2f7258e4f5b3e485963b20998bacc2',
+  'v2/jev-turn.ts':'425277bcb1f58ec7b83bbd8702135084b9e1803dcca4eae9ce9b13a45fd64832',
+  'v2/generation-guard.ts':'6e4f8d75d62f79f9b324f60873d692d861a72feffcefcb2717df9a3f075217f2',
+  'judgment/instructions.mjs':'0add2f40aaaa01bfdacd1b99418b94e288eb45da6593595304f8d36d0f22de27',
+  'observation/observe.ts':'469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad',
+  'local-grounding/extract.ts':'6e9461e860f22923dbece02c7988713422ed81ac32d937f6d59df8eff84bd83e',
+  'local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01',
+  'decision/jev-decision.ts':'d6b707bbc8c52f2209b7b2afca59d3800587b9725bb5348cf4d8e4ec894e6675',
   'local-grounding/extract-ai.ts':'e489b7ff573fdbe9e4f0adc9b6ee5f0828bd3c6835dcd8cd6555e191161594a6',
   'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
  }},fixed:FIXED_I172,native:NATIVE_I172},
