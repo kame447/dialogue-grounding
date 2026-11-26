@@ -1666,3 +1666,80 @@ for (const strategy of strategies) {
     });
   }
 }
+
+// Audit 25 (Astra): reproductions of the two v11 regressions, through the ordinary entrance in both strategies. Synthetic wording only.
+const correctedName = '星窓';
+for (const strategy of strategies) {
+  const askAboutShape = '輪より台が細いこの図形のことですか？';
+  const proposalOf = (name: string) => '「' + name + '」と呼びませんか？';
+  for (const version of [v10, v11]) {
+    test(`Audit 25 ${strategy} ${version.slice(-2)}: a corrected name is not offered again after a nameless approval request (#198)`, async () => {
+      const dialogue = session(strategy);
+      await dialogue.start();
+      await dialogue.restoreAs(version);
+      const first_ = 'この形は' + proposalOf(originalName);
+      await audit16Check(dialogue, 0, { questionTargets: [first],
+        opening: { human: first_, local: [{ text: first_, act: 'name_propose', aspect: 'name', targets: [], name: originalName }] } });
+      const second = 'やっぱり、この環飾りは' + proposalOf(correctedName);
+      const description = '台は輪より細く見えます。';
+      const asked = await dialogue.say({ human: second, action: 'confirm', target: 0, feature: baseWidth, drafts: [description + askAboutShape],
+        publicClaims: [{ text: description, act: 'assert', aspect: 'part', targets: [first] }, { text: askAboutShape, act: 'ask', aspect: 'question', targets: [first] }],
+        local: [{ text: second, act: 'name_propose', aspect: 'name', targets: [first], name: correctedName }] });
+      assert.equal(asked.trace.status, 'committed');
+      const aiTurn = asked.after.jevTraces.at(-1).turnIndex + 1;
+      const reply = 'はい、その形です。それなら、その名前でいい？';
+      const agreeSpeechCorrected = 'この形は「' + correctedName + '」と呼びましょう。';
+      const named = await dialogue.say({ human: reply, action: 'agree', target: 0, name: correctedName, agreeSpeech: agreeSpeechCorrected,
+        drafts: [agreeSpeechCorrected], draftActs: { [agreeSpeechCorrected]: 'adopt_chosen' },
+        local: [
+          { text: 'はい、その形です。', act: 'agree', aspect: 'question', targets: [first], respondsToTurn: aiTurn, antecedent: { speaker: 'ai', proposition: askAboutShape } },
+          { text: 'それなら、その名前でいい？', act: 'name_propose', aspect: 'name', targets: [], respondsToTurn: aiTurn, antecedent: { speaker: 'ai', proposition: askAboutShape } },
+        ] });
+      assert.equal(named.trace.status, 'committed', 'named:' + named.trace.errorCode);
+      const offered = (named.after.queueState.privateState.judgments.at(-1).jevTurn.agreeNames as Array<{ name: string }>).map(entry => entry.name).sort();
+      assert.deepEqual(offered, [correctedName], 'the corrected name alone is a candidate');
+      assert.equal(named.speech, agreeSpeechCorrected);
+      assert.deepEqual(named.after.ownLedger[first], { status: 'agreed', name: correctedName });
+      await dialogue.restore();
+      await dialogue.submit([Object.fromEntries(figureIds.map(figureId => [figureId, figureId === first ? correctedName : null]))]);
+      assert.deepEqual(dialogue.record().ownLedger[first], { status: 'agreed', name: correctedName });
+    });
+  }
+  test(`Audit 25 ${strategy} v11: with a single proposal the approval request still inherits the name (#198)`, async () => {
+    const dialogue = session(strategy);
+    await dialogue.start();
+    const previous = 'この形は' + proposalOf(originalName);
+    const question = await audit16Check(dialogue, 0, { questionTargets: [first],
+      opening: { human: previous, local: [{ text: previous, act: 'name_propose', aspect: 'name', targets: [], name: originalName }] } });
+    const reply = 'はい、その形です。それなら、その名前でいい？';
+    const named = await dialogue.say({ human: reply, action: 'agree', target: 0, name: originalName, agreeSpeech, drafts: [agreeSpeech], draftActs: { [agreeSpeech]: 'adopt_chosen' },
+      local: [
+        { text: 'はい、その形です。', act: 'agree', aspect: 'question', targets: [first], respondsToTurn: question.sourceTurn, antecedent: { speaker: 'ai', proposition: question.quote } },
+        { text: 'それなら、その名前でいい？', act: 'name_propose', aspect: 'name', targets: [], respondsToTurn: question.sourceTurn, antecedent: { speaker: 'ai', proposition: question.quote } },
+      ] });
+    assert.equal(named.trace.status, 'committed', 'named:' + named.trace.errorCode);
+    assert.equal(Boolean(named.trace.namingRequest), true);
+    assert.deepEqual((named.after.queueState.privateState.judgments.at(-1).jevTurn.agreeNames as Array<{ name: string }>).map(entry => entry.name), [originalName]);
+    assert.deepEqual(named.after.ownLedger[first], { status: 'agreed', name: originalName });
+  });
+
+  // #204: a legitimate quotation about the same figure after one exchange is published, in v11 as in v10.
+  for (const version of [v10, v11]) {
+    test(`Audit 25 ${strategy} ${version.slice(-2)}: a quotation about the same figure after one exchange is published (#204)`, async () => {
+      const dialogue = session(strategy);
+      await dialogue.start();
+      await dialogue.restoreAs(version);
+      const said = 'こちらの図では、輪の先が左向きです。';
+      await dialogue.say({ ...broad, ...sayingTurn(said), drafts: ['その先は輪の切れ目につながっていますか？'],
+        publicClaims: [{ text: 'その先は輪の切れ目につながっていますか？', act: 'ask', aspect: 'question', targets: [first] }] });
+      const human = 'はい、つながっています。そちらの図だとどうですか？';
+      const initial = 'こちらの画面では輪に切れ目があるので、そちらでいう左向きの先に対応するかもしれません。';
+      const retry = 'そちらでいう左向きの先は、こちらの画面では輪の切れ目に当たる部分でしょうか？';
+      const turn = await dialogue.say({ ...broad, human, drafts: [initial, retry], publicClaims: claimOf(initial),
+        local: [{ text: human, act: 'agree', aspect: 'question', targets: [first] }] });
+      assert.equal(turn.trace.status, 'committed', turn.trace.errorCode ?? 'the turn was held');
+      assert.ok(turn.speech === initial || turn.speech === retry, 'one of the two drafts is published');
+      assert.equal(turn.trace.generationRetryVersion, version);
+    });
+  }
+}
