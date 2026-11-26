@@ -601,17 +601,20 @@ test('v3 routes all four text roles to real private Terra transport and preserve
     assert.equal(saved.strategy, strategy);
     assert.deepEqual(saved.options.participantModelPin, expectedPin);
     assert.equal(saved.jevTraces[0].generationGuard.regenerated, true);
-    const { phases, latest } = saved.jevLedger;
+    const { phases, latest, returnedModels } = saved.jevLedger;
     assert.deepEqual(phases.luna, {});
     assert.equal(latest.luna, null);
     assert.equal(latest.terra.model, pin.terraModelId);
     assert.equal(latest.terra.phase, 'final_submission');
     assert.equal(latest.jev.model, pin.jevModelId);
     assert.ok(phases.jev.action_target.posts > 0);
+    assert.deepEqual(returnedModels.luna, {});
+    assert.deepEqual(returnedModels.jev.action_target, { model: pin.jevModelId, ok: phases.jev.action_target.posts });
     const expectedPosts = { initial_observation: predecessor ? 0 : 1, reobservation: 1,
       dialogue: 1, generation: 2, ai_extraction: 1, final_submission: 1 };
     for (const [phase, count] of Object.entries(expectedPosts)) {
       const meter = phases.terra[phase];
+      assert.deepEqual(returnedModels.terra[phase], count ? { model: pin.terraModelId, ok: count } : undefined);
       assert.deepEqual([meter.posts, meter.inputTokens, meter.outputTokens, meter.unknownPosts,
         meter.missingCostPosts, meter.knownUsd], [count, 17 * count, 6 * count, 0,
         phase === 'ai_extraction' ? count : 0, phase === 'ai_extraction' ? 0 : 0.021 * count]);
@@ -620,6 +623,7 @@ test('v3 routes all four text roles to real private Terra transport and preserve
     h.evict();
     assert.equal((await jsonOk(await h.request('state'))).trial.sessionId, trial.sessionId);
     assert.deepEqual((await h.adminRecord(trial.sessionId)).jevLedger, saved.jevLedger);
+    assert.doesNotMatch(JSON.stringify(await jsonOk(await h.request('state'))), /returnedModels/u);
     predecessor = trial.sessionId;
   }
   const perCondition = ['dialogue', 'reobservation', 'generation', 'rewrite', 'ai_extraction', 'final_submission'];
@@ -657,6 +661,7 @@ test('v3 rejects wrong or missing model IDs from either extraction before public
     assert.equal(saved.jevLedger.latest.terra.phase, phase);
     assert.equal(saved.jevLedger.latest.terra.status, 'model_mismatch');
     assert.equal(saved.jevLedger.latest.terra.model, null);
+    assert.equal(saved.jevLedger.returnedModels.terra[phase], undefined);
     assert.equal(saved.jevLedger.phases.terra[phase].unknownPosts, 1);
     assert.equal(saved.jevLedger.latest.luna, null);
     assert.deepEqual(posts, phase === 'dialogue' ? ['dialogue'] : ['dialogue', 'generation', 'ai_extraction']);
