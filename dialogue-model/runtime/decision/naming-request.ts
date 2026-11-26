@@ -18,6 +18,35 @@ export function turnNameProposals(claims: readonly NamingClaimLike[], turn: numb
   return claims.filter(c => !!c && c.speaker === "human" && c.act === "name_propose" && typeof c.name === "string" && c.name !== "" && c.sourceTurn === turn);
 }
 export const hasNameProposal = (claims: readonly NamingClaimLike[], turn: number): boolean => turnNameProposals(claims, turn).length > 0;
+/** The claims of a reference graph as the turn `turn` saw them: only records that existed by then, without the claims a withdrawal, a retraction or a dead response had
+ * already killed. The decision of a turn derives its naming marker from this view (priorClaimViews), so a later withdrawal, rename or pruning cannot change it. */
+export function claimsLiveAsOf(records: readonly { kind?: unknown; id?: unknown; turn?: unknown; sourceTurn?: unknown; act?: unknown; respondsTo?: unknown; targetId?: unknown }[],
+  turn: number): NamingClaimLike[] {
+  const known = records.filter(r => !!r && typeof r.turn === "number" && r.turn <= turn);
+  const claims = known.filter(r => r.kind === "claim");
+  const dead = new Set<unknown>(known.filter(r => r.kind === "retract").map(r => r.targetId));
+  for (const c of claims) if (c.act === "withdraw" && c.respondsTo && !dead.has(c.id)) dead.add(c.respondsTo);
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const c of claims) if (c.act !== "withdraw" && c.respondsTo && dead.has(c.respondsTo) && !dead.has(c.id)) { dead.add(c.id); changed = true; }
+  }
+  return claims.filter(c => !dead.has(c.id)) as NamingClaimLike[];
+}
+export type NamingJudgmentEvidence = { turnIndex?: unknown; jevTurn?: { executed?: { action?: unknown; name?: unknown } | null } | null };
+/** Whether a reconfirmation marker is possible for `turn`: every proposal of the turn names something already agreed before it. A name was agreed before the turn when an
+ * earlier judgment executed an agree on it; a ledger that holds it without any judgment at or after the turn agreeing it (a ledger the run started with) counts too.
+ * The turn that first agreed a name, or a later one, can therefore never be a reconfirmation, whatever the ledger says afterwards. Uses only what a saved judgment
+ * history holds: no graph, so pruning and renaming cannot change the answer. */
+export function reconfirmationPossible(proposals: readonly NamingClaimLike[], turn: number, judgments: readonly NamingJudgmentEvidence[], ledger: NamingLedgerLike): boolean {
+  if (!proposals.length) return false;
+  const agrees = (name: string, before: boolean) => judgments.some(x => typeof x?.turnIndex === "number" && (before ? x.turnIndex < turn : x.turnIndex >= turn) &&
+    x.jevTurn?.executed?.action === "agree" && typeof x.jevTurn.executed.name === "string" && namingNameKey(x.jevTurn.executed.name) === name);
+  return proposals.every(p => {
+    if (typeof p.name !== "string") return false;
+    const key = namingNameKey(p.name);
+    return agrees(key, true) || !agrees(key, false) && Object.values(ledger ?? {}).some(e => e?.status === "agreed" && typeof e.name === "string" && namingNameKey(e.name) === key);
+  });
+}
 
 export type AgreeNameScopeVersion = "scoped_v1" | "scoped_v2" | "scoped_v3" | "scoped_v4" | "scoped_v5" | "scoped_v6";
 export function usesPublicNamingTarget(scope: unknown): scope is "scoped_v2" | "scoped_v3" | "scoped_v4" | "scoped_v5" | "scoped_v6" {

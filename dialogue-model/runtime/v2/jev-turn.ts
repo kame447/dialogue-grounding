@@ -11,7 +11,7 @@ import { normalizeName } from "../judgment/name-evidence.mjs";
 import { stageMemory } from "../judgment/memory.mjs";
 import { createReferenceGraph, applyReferenceUpdate, previewReferenceUpdate, snapshotReferenceGraph, REFERENCE_LIMITS } from "../memory/reference-graph.mjs";
 import { nameBindsFigure } from "../decision/referent-binding.ts";
-import { hasNameProposal, namingTurnKind, namingIntervalEstimates, inheritedTargetClaimIds, agreeCandidateAllowed, inheritsProposalName, turnNameProposals, namingNameKey, targetNamingConflict, publiclyCheckedNamingTarget, usesPublicNamingTarget, type AgreeNameScopeVersion } from "../decision/naming-request.ts";
+import { hasNameProposal, claimsLiveAsOf, reconfirmationPossible, namingTurnKind, namingIntervalEstimates, inheritedTargetClaimIds, agreeCandidateAllowed, inheritsProposalName, turnNameProposals, namingNameKey, targetNamingConflict, publiclyCheckedNamingTarget, usesPublicNamingTarget, type AgreeNameScopeVersion } from "../decision/naming-request.ts";
 import { priorClaimViews, summarizeLocalIssues } from "../local-grounding/derive.ts";
 import { createMemoLocalExtractor, LOCAL_EXTRACTION_INSTRUCTIONS, MEMO_LOCAL_EXTRACTION_INSTRUCTIONS, MEMO_LOCAL_EXTRACTION_INSTRUCTIONS_HOLISTIC } from "../local-grounding/extract.ts";
 import { LOCAL_CLASSIFICATION_INSTRUCTIONS } from "../local-grounding/classify.ts";
@@ -497,20 +497,15 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
    if(!stateExact(j,['turnIndex','lastEventId','status','judgment','generationGuard','jevTurn','localGrounding',...(Object.hasOwn(j,'aiPublic')?['aiPublic']:[])])||j.status!=='committed'||!Number.isSafeInteger(j.turnIndex)||j.turnIndex<1||!(j.lastEventId===null||typeof j.lastEventId==='string'&&j.lastEventId.length<=160))throw Error();
    const z=j.jevTurn;if(!stateExact(z,['attemptNumber','decision','executed','intervention',...(Object.hasOwn(z??{},'humanReferent')?['humanReferent']:[]),...(Object.hasOwn(z??{},'repairProspect')?['repairProspect']:[]),...(Object.hasOwn(z??{},'repairGate')?['repairGate']:[]),...(Object.hasOwn(z??{},'draftActs')?['draftActs']:[]),...(Object.hasOwn(z??{},'namingRequest')?['namingRequest']:[]),...(Object.hasOwn(z??{},'namingReconfirm')?['namingReconfirm']:[]),...(Object.hasOwn(z??{},'agreeNames')?['agreeNames']:[]),...(Object.hasOwn(z??{},'repairFacts')?['repairFacts']:[])])||!Number.isSafeInteger(z.attemptNumber)||z.attemptNumber<1)throw Error();
    // The saved turn names its own condition: accept may be missing from its scores and ranking only for a typed naming request (holistic_v3), and only on v3.
-   // The marker is derived from typed values the state itself holds: the version and the turn's name proposals in the graph. It is present exactly for a holistic_v3 turn
-   // that carries one, so a marker can be neither forged, removed nor moved to another turn.
-   const turnClaims=(s.graph?.records??[]).filter((r:any)=>r?.kind==='claim'),proposed=isHolisticV3Plus(policy)&&questionLayout==='two_stage_v3'&&hasNameProposal(turnClaims,j.turnIndex);
-   const isRequest=Object.hasOwn(z,'namingRequest'),isReconfirm=Object.hasOwn(z,'namingReconfirm');
-   // The graph prunes a name proposal once a later name claim supersedes it (the newest name claim per figure is kept), so an earlier turn's proposal may be gone
-   // while its marker, set when the turn was decided, stands. Such a marker is accepted only when a later name claim exists to have pruned it; the kind
-   // (request or reconfirm) of a turn whose proposal is gone can no longer be derived from the state and is not rechecked.
-   const proposalGone=!proposed&&(isRequest||isReconfirm)&&isHolisticV3Plus(policy)&&questionLayout==='two_stage_v3'&&turnClaims.some((c:any)=>c?.aspect==='name'&&c.sourceTurn>j.turnIndex);
-   // A turn with a name proposal carries exactly one of the two markers; one without carries none. A reconfirmation also needs an agreed ledger name equal to a proposal's name.
-   if(isRequest&&z.namingRequest!==true||isReconfirm&&z.namingReconfirm!==true||isRequest&&isReconfirm||(isRequest||isReconfirm)!==proposed&&!proposalGone)throw Error();
-   if(isReconfirm&&!proposalGone&&!turnNameProposals(turnClaims,j.turnIndex).some((p:any)=>Object.values(s.ledger??{}).some((e:any)=>e?.status==='agreed'&&typeof e.name==='string'&&namingNameKey(e.name)===namingNameKey(p.name))))throw Error();
-   // The name a reconfirmation reconfirms was agreed by an earlier turn's executed agree, not by this turn: the final ledger alone cannot tell the turn that first agreed it from a later one.
-   if(isReconfirm&&!proposalGone){const proposed=turnNameProposals(turnClaims,j.turnIndex).map((p:any)=>namingNameKey(p.name));
-    if(!s.judgments.some((x:any)=>x!==j&&x?.turnIndex<j.turnIndex&&x.jevTurn?.executed?.action==='agree'&&typeof x.jevTurn.executed.name==='string'&&proposed.includes(namingNameKey(x.jevTurn.executed.name))))throw Error();}
+   // The marker was derived when the turn was decided, from the claims live then. Here it is checked against the same view of the graph as of that turn (a later withdrawal,
+   // rename or pruning cannot change it), and only as far as the graph still holds the turn's proposals: a proposal the graph pruned can no longer be recomputed from the
+   // state, so an older turn's marker stands (the saved trace carries the full claims, and the restore and S4 check them). The newest turn is never pruned and is exact.
+   const turnClaims=claimsLiveAsOf(s.graph?.records??[],j.turnIndex),gated=isHolisticV3Plus(policy)&&questionLayout==='two_stage_v3',proposed=gated&&hasNameProposal(turnClaims,j.turnIndex);
+   const isRequest=Object.hasOwn(z,'namingRequest'),isReconfirm=Object.hasOwn(z,'namingReconfirm'),newest=s.judgments.at(-1)===j;
+   if(isRequest&&z.namingRequest!==true||isReconfirm&&z.namingReconfirm!==true||isRequest&&isReconfirm||(isRequest||isReconfirm)&&!gated)throw Error();
+   if(proposed?!(isRequest||isReconfirm):newest&&(isRequest||isReconfirm))throw Error();
+   // A reconfirmation names only what an earlier turn agreed (the same function the restore applies to the saved trace).
+   if(isReconfirm&&proposed&&!reconfirmationPossible(turnNameProposals(turnClaims,j.turnIndex),j.turnIndex,s.judgments,s.ledger))throw Error();
    const acceptOptional=z.namingRequest===true;
    // holistic_v4: an unadopted name's request never offered accept, so no saved score of it and no executed accept can stand for such a turn.
    const noAcceptTurn=isHolisticV4Plus(policy)&&questionLayout==='two_stage_v3'&&z.namingRequest===true;

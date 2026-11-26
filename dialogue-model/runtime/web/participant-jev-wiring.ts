@@ -21,7 +21,7 @@ import type { ObservationInput, ObservationObserver } from '../observation/contr
 import { createJevDecisionClient, JevDecisionError, validateRepairProspectMaterial, checkDecisionFailureEvidence } from '../decision/jev-decision.ts';
 import type { JevDecisionClient, AdaptiveRepairTrial, JevQuestionLayout } from '../decision/contract.ts';
 import { isHolisticPolicy, isHolisticV3Plus } from '../decision/contract.ts';
-import { hasNameProposal } from '../decision/naming-request.ts';
+import { hasNameProposal, turnNameProposals, reconfirmationPossible } from '../decision/naming-request.ts';
 import { createJevLocalTestClassifier, JevLocalTestError } from '../local-grounding/jev-local-test.ts';
 import type { JevTurnLocalOptions } from '../v2/jev-turn.ts';
 import { RunBudget } from '../diagnostics/parity-live/audit.ts';
@@ -153,6 +153,8 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
         const requested = Object.hasOwn(trace,'namingRequest'), reconfirmed = Object.hasOwn(trace,'namingReconfirm'), marked = requested || reconfirmed;
         if (marked && (requested && trace.namingRequest !== true || reconfirmed && trace.namingReconfirm !== true || requested && reconfirmed || !isHolisticV3Plus(profile.dialoguePolicy) ||
             profile.questionLayout !== 'two_stage_v3' || !Array.isArray(trace.local?.claims) || !hasNameProposal(trace.local.claims, trace.turnIndex))) return invalid();
+        // A reconfirmation names only what an earlier turn agreed. The state check cannot see a proposal the graph pruned, so the trace's own claims decide here (B-30A-2).
+        if (reconfirmed && trace.status === 'committed' && !reconfirmationPossible(turnNameProposals(trace.local.claims, trace.turnIndex), trace.turnIndex, savedJudgments, restore.queueState?.privateState?.ledger)) return invalid();
         if (!marked && isHolisticV3Plus(profile.dialoguePolicy) && trace.status === 'committed' && Array.isArray(trace.local?.claims) && hasNameProposal(trace.local.claims, trace.turnIndex)) return invalid();
         if (trace.status === 'committed') {
           const judgment = savedJudgments.find((j: any) => j?.turnIndex === trace.turnIndex && j?.jevTurn?.attemptNumber === trace.attemptNumber);
