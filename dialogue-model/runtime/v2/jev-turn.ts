@@ -191,7 +191,7 @@ export type JevTurnOptions = {
   /** Offline replay can request the original retry wire text for a historical tape. */
   generationRetryVersion?: GenerationRetryVersion;
   /** Creation pin only. A resumed trial uses the scope in its saved state. */
-  newTrialAgreeNameScopeVersion?: "scoped_v7";
+  newTrialAgreeNameScopeVersion?: "scoped_v7" | "scoped_v8";
   client: ChatClient; ownImage: LocalOwnImage; ownAnchors: readonly LocalOwnAnchor[];
   observer: ObservationObserver; jevDecision: JevDecisionClient; localGrounding: JevTurnLocalOptions;
   maxReobservations?: number;
@@ -793,7 +793,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
     throw new Error("Invalid Jev generation retry version");
   }
   const newTrialScope = options.newTrialAgreeNameScopeVersion;
-  if (newTrialScope !== undefined && (newTrialScope !== "scoped_v7" || questionLayout !== "two_stage_v3" ||
+  if (newTrialScope !== undefined && (newTrialScope !== "scoped_v7" && newTrialScope !== "scoped_v8" || questionLayout !== "two_stage_v3" ||
       !validAgreeNameScope(newTrialScope, generationRetryVersion))) {
     throw new Error("Invalid Jev naming scope for a new trial");
   }
@@ -965,6 +965,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
           baseInput.rotationMode = options.rotationMode ?? "relative_pm90";
           if (isGenerationV6(generationRetryVersion)) baseInput.notationV6 = true;
           if (isGenerationV11(generationRetryVersion)) baseInput.notationV11 = true;
+          if (state.agreeNameScopeVersion === "scoped_v8") baseInput.featureReplyFilter = true;
           baseInput.judgmentLedger = state.judgments.map(j => { const d = j.jevTurn.executed ?? j.jevTurn.decision;
             // jev_generation_retry_v5: each action also carries its answers from the whole repair history (the field's presence, even empty, selects the answer-resolving material).
             const answers = isGenerationV5(generationRetryVersion) ? { answers: (repairHistory.find(r => r.turn === j.turnIndex)?.partnerClaims ?? []).map(c => ({ id: c.id, act: c.act, proposition: c.proposition, targets: [...c.targets] })) } : {};

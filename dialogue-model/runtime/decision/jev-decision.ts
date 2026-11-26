@@ -328,6 +328,7 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
   }
   if (!(input.notationV6 === undefined || input.notationV6 === true && input.judgmentLedger !== undefined)) fail("invalid_input");
   if (!(input.notationV11 === undefined || input.notationV11 === true && input.notationV6 === true)) fail("invalid_input");
+  if (!(input.featureReplyFilter === undefined || input.featureReplyFilter === true && input.notationV11 === true)) fail("invalid_input");
   if (!(input.rotationMode === undefined || input.rotationMode === "relative_pm90" || input.rotationMode === "relative_0")) fail("invalid_input");
   let ledgerActions: LedgerAction[] | undefined;
   if (input.judgmentLedger !== undefined) {
@@ -609,7 +610,7 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
       { include: "公開発話の対象候補に含む。", exclude: "対象候補に含まない。" });
   });
   return { payload: { model: JEV_DECISION_MODEL, state, questions } as JevDecisionPayload, slots, catalog, human: humans[0].text, reobservationAllowed, noAccept,
-    budget, layout, previousAction, publicTurns, repairHistory, ledgerActions, answers, shared };
+    budget, layout, previousAction, publicTurns, repairHistory, ledgerActions, answers, answerRows, shared };
 }
 
 export function buildJevDecisionPayload(input: JevDecisionInput, { questionLayout = "two_stage_v1", dialoguePolicy }: { questionLayout?: JevQuestionLayout; dialoguePolicy?: DialoguePolicy } = {}): JevDecisionPayload {
@@ -889,14 +890,19 @@ export function buildJevTargetPayload(input: JevDecisionInput, action: JevAction
 }
 
 type DetailCandidate = { value: string; figureIds: string[] };
-function unaskedConfirmFeatures({ previousAction, publicTurns, repairHistory, ledgerActions, answers }: ReturnType<typeof prepare>,
-  scope: readonly string[], candidates: DetailCandidate[]): DetailCandidate[] {
+function unaskedConfirmFeatures({ previousAction, publicTurns, repairHistory, ledgerActions, answers, answerRows }: ReturnType<typeof prepare>,
+  scope: readonly string[], candidates: DetailCandidate[], featureReplyFilter?: true): DetailCandidate[] {
   const sameScope = (ids: readonly string[]) => ids.length === scope.length && ids.every(id => scope.includes(id));
   // holistic_v5: a feature already asked of a figure in this scope is not asked again, however long ago and whatever the scopes in between were
   // (a request to look at the figure again, a revisit, lifts it). Before holistic_v5 only the unbroken same-scope run counts (below).
   // Only a feature the partner answered (and did not withdraw) counts: a question still without an answer may be asked again.
+  const answered = (turn: number) => answers.get(turn)?.some(id => {
+    if (!featureReplyFilter) return true;
+    const act = answerRows.get(id)?.act;
+    return act !== undefined && act !== "acknowledge" && act !== "ask";
+  });
   const asked = new Set<string>(ledgerActions === undefined || previousAction?.action === "revisit" ? [] :
-    ledgerActions.filter(a => ["confirm", "repair"].includes(a.action) && a.feature !== null && (answers?.get(a.turn)?.length ?? 0) > 0 &&
+    ledgerActions.filter(a => ["confirm", "repair"].includes(a.action) && a.feature !== null && answered(a.turn) &&
       targetIds(a.target).some(id => scope.includes(id))).map(a => a.feature!));
   if (!previousAction || !sameScope(targetIds(previousAction.target))) {
     const left = candidates.filter(c => !asked.has(c.value));
@@ -963,7 +969,7 @@ function prepareDetail(input: JevDecisionInput, selected: JevActionTarget, rejec
     if (candidates.length > 255) fail("invalid_input"); // Explicit bound, never silently omit a choice.
   }
   const offered = layout === "two_stage_v3" && ["confirm", "repair"].includes(selected.action)
-    ? unaskedConfirmFeatures(p, scope, candidates) : candidates;
+    ? unaskedConfirmFeatures(p, scope, candidates, input.featureReplyFilter) : candidates;
   const subsets: string[][] = [];
   const questions: Record<string, Question> = {};
   if (selected.action === "request_observation") {
@@ -1043,7 +1049,7 @@ function detailJsonData(value: unknown, seen = new Set<object>()): void {
 function prepareExecutedDetail(input: JevDecisionInput, selected: JevActionTarget, layout: JevQuestionLayout = "two_stage_v1", participantPrompts = false) {
   try {
     detailJsonData(input); detailJsonData(selected);
-    const optional = ["reobservationAllowed", "humanReferent", "repairProspect", "agreeNames", "repairFacts", "participantLedger", "nameLedger", "nameSource", "namingRequest", "namingRequestStrict", "judgmentLedger", "rotationMode", "notationV6", "notationV11", "p5Enabled", "sharedConstruals"].filter(key => Object.hasOwn(input, key));
+    const optional = ["reobservationAllowed", "humanReferent", "repairProspect", "agreeNames", "repairFacts", "participantLedger", "nameLedger", "nameSource", "namingRequest", "namingRequestStrict", "judgmentLedger", "rotationMode", "notationV6", "notationV11", "featureReplyFilter", "p5Enabled", "sharedConstruals"].filter(key => Object.hasOwn(input, key));
     if (!exact(input, ["turn", "publicTurns", "ownSlots", "observations", "issueSummary", "priorClaims", "repairHistory", "previousAction", "publicNames", ...optional])) fail("invalid_input");
     if (!exact(selected, ["action", "target"]) || !includes(input.p5Enabled === true
       ? ["propose_name", "agree", "confirm", "repair", "accept"] : ["propose_name", "agree", "confirm", "repair"], selected.action)) fail("invalid_input");

@@ -218,8 +218,8 @@ const ANY_TARGET=['accept','defer','move_on','close'];
 function referentResponseAccepted(answer:any,slots:readonly string[]):boolean{
  return isGroundingModel(answer?.model,JEV_DECISION_MODEL)&&jevReportedCost(answer)!==null&&jevChoiceAnswersValid(answer?.answers,{human_referent:[...slots.map((_,i)=>'figure_'+i),'none','multiple']});
 }
-type ReplayContext={p5:boolean;shared:SharedConstrual[];proof:Map<string,any>;policy:string|null;agreeMatch:{l0:boolean;l2:boolean}|null;facts:boolean;agree:any[]|undefined;known:boolean;v3:boolean;trial:boolean;ledger:Record<string,{status:string;name:string|null}>|undefined;legacyV3:boolean;style:null|'legacy'|'style'|'loop'|'holistic';humanNames?:Set<string>|null;namingRequest?:boolean;namingReconfirm?:boolean;acceptOptional?:boolean;critKind?:'V1'|'V3'|'H3'|null;prompt?:PromptVersion|null};
-const defaultContext:ReplayContext={p5:false,shared:[],proof:new Map(),policy:null,agreeMatch:null,facts:false,agree:undefined,known:true,v3:false,trial:false,ledger:undefined,legacyV3:false,style:null,humanNames:null,critKind:null,prompt:null};
+type ReplayContext={p5:boolean;featureReplyFilter:boolean;shared:SharedConstrual[];proof:Map<string,any>;policy:string|null;agreeMatch:{l0:boolean;l2:boolean}|null;facts:boolean;agree:any[]|undefined;known:boolean;v3:boolean;trial:boolean;ledger:Record<string,{status:string;name:string|null}>|undefined;legacyV3:boolean;style:null|'legacy'|'style'|'loop'|'holistic';humanNames?:Set<string>|null;namingRequest?:boolean;namingReconfirm?:boolean;acceptOptional?:boolean;critKind?:'V1'|'V3'|'H3'|null;prompt?:PromptVersion|null};
+const defaultContext:ReplayContext={p5:false,featureReplyFilter:false,shared:[],proof:new Map(),policy:null,agreeMatch:null,facts:false,agree:undefined,known:true,v3:false,trial:false,ledger:undefined,legacyV3:false,style:null,humanNames:null,critKind:null,prompt:null};
 const CTX={...defaultContext};
 const H=()=>isHolisticPolicy(CTX.policy);
 const H2=()=>isHolisticV2Plus(CTX.policy);
@@ -864,7 +864,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
    const src=agreeSource(tr,t,key,p5&&graph?{...tape,generationGraph:graph}:tape,legacyV3,{layout,policy,generation:version,namingRequest});
    if(src==='invalid')return'invalid';
    if(p5&&!src.p5Facts)return'missing';
-   Object.assign(CTX,{p5,shared:src.p5Facts?.shared??[],proof:src.p5Facts?.proof??new Map(),critKind:null,prompt:v,facts:Array.isArray(t.repairFacts),agree:src.names,known:src.known,v3:layout==='two_stage_v3',trial:trial!==null,ledger:tape.state?.ledger,legacyV3,style:null,policy:tr.profile?.dialoguePolicy??null,humanNames:isHolisticV2Plus(tr.profile?.dialoguePolicy)?s4HumanProposedNames(tape,t):null,namingRequest:namingKind==='request',namingReconfirm:namingKind==='reconfirm',acceptOptional:t.namingRequest===true});
+   Object.assign(CTX,{p5,featureReplyFilter:tape.state?.agreeNameScopeVersion==='scoped_v8',shared:src.p5Facts?.shared??[],proof:src.p5Facts?.proof??new Map(),critKind:null,prompt:v,facts:Array.isArray(t.repairFacts),agree:src.names,known:src.known,v3:layout==='two_stage_v3',trial:trial!==null,ledger:tape.state?.ledger,legacyV3,style:null,policy:tr.profile?.dialoguePolicy??null,humanNames:isHolisticV2Plus(tr.profile?.dialoguePolicy)?s4HumanProposedNames(tape,t):null,namingRequest:namingKind==='request',namingReconfirm:namingKind==='reconfirm',acceptOptional:t.namingRequest===true});
    const sharedPublic=p5?sharedPublicSources(tape.events,t.turnIndex):true;
    if(sharedPublic===false)return'invalid';
    if(isHolisticV3Plus(tr.profile?.dialoguePolicy)&&layout==='two_stage_v3'){
@@ -1111,7 +1111,7 @@ const idsOf=(target:any):string[]=>target?.kind==='single'?[target.figureId]:tar
  const withoutLatency=(i:any)=>i?.detailEvidence?{...i,detailEvidence:{...i.detailEvidence,latencyMs:0}}:i;
  if(!equal(actual.executed,t.executed)||!latencyOk(actual.intervention)||!latencyOk(t.intervention)||!equal(withoutLatency(actual.intervention),withoutLatency(t.intervention)))return'invalid';
  return missing?'missing':'ok';
- }finally{CTX.prompt=null;}
+ }finally{CTX.prompt=null;CTX.featureReplyFilter=false;}
 }
 // Every supplied actual POST belongs to exactly one call of its own phase and send, and
 // the final send of a successful call returned. Unmatched or misbound rows cannot disappear.
@@ -1326,7 +1326,22 @@ function unaskedConfirmFeatures(input:any,target:any,candidates:{value:string;fi
  const sameScope=(ids:string[])=>ids.length===scope.length&&ids.every(id=>scope.includes(id));
  // holistic_v5: a feature already asked of a figure in this scope (the ledger's confirm/repair rows) is not asked again; a revisit just before lifts it.
  const asked=new Set<string>();
- if(input?.view==='judgment_v5'&&prev?.action!=='revisit')for(const [i,id] of (input.ownSlots??[]).entries())if(scope.includes(id))for(const a of input.figures?.['f'+i]?.actions??[])if((a[0]==='confirm'||a[0]==='repair')&&typeof a[2]==='string'&&Array.isArray(a[3])&&a[3].length)asked.add(a[2]);
+ if(input?.view==='judgment_v5'&&prev?.action!=='revisit'){
+  // The request carries acts for the referred replies, including those no longer in the compact graph.
+  const replyActs=new Map<string,string>();
+  if(CTX.featureReplyFilter){
+   for(const {id,act} of input.priorClaims)replyActs.set(id,act);
+   for(const [id,,act] of input.answerClaims??[])replyActs.set(id,act);
+  }
+  for(const [i,id] of input.ownSlots.entries())if(scope.includes(id))for(const a of input.figures?.['f'+i]?.actions??[]){
+   if((a[0]!=='confirm'&&a[0]!=='repair')||typeof a[2]!=='string'||!Array.isArray(a[3]))continue;
+   if(a[3].some((id:string)=>{
+    if(!CTX.featureReplyFilter)return true;
+    const act=replyActs.get(id);
+    return typeof act==='string'&&act!=='acknowledge'&&act!=='ask';
+   }))asked.add(a[2]);
+  }
+ }
  if(!prev||!sameScope(idsOf(prev.target))){const left=candidates.filter(c=>!asked.has(c.value));return asked.size&&left.length?left:candidates;}
  if((prev.action==='confirm'||!CTX.legacyV3&&prev.action==='repair')&&prev.feature)asked.add(prev.feature);
  if(['confirm','repair','revisit'].includes(prev.action)){
@@ -1959,6 +1974,32 @@ const PROMPT_VERSIONS:readonly PromptVersion[]=[
   'local-grounding/extract.ts':'6e9461e860f22923dbece02c7988713422ed81ac32d937f6d59df8eff84bd83e',
   'local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01',
   'decision/jev-decision.ts':'d0dae14eef1102eed26808cd5fef62b64292fdcf68eba75d29f3bc883d04a91b',
+  'local-grounding/extract-ai.ts':'e489b7ff573fdbe9e4f0adc9b6ee5f0828bd3c6835dcd8cd6555e191161594a6',
+  'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
+ }},fixed:FIXED_I172,native:NATIVE_I172},
+ // The research feature menu is selected by the saved scope.
+ {id:'i203_scoped_v8',i172:true,styleMode:'research_split',sources:{scheme:'complete_instruction_source_sha256',files:{
+  'v2/dialogue-v2.mjs':'0ca530878393721b6d48b55240e2b8c848910758501d90f579b2e0c65a6d1dd6',
+  'v2/jev-turn.ts':'79387d888d841ef9c4354c668551c57852cddf253c602e4e7483e5b8b413b44c',
+  'v2/generation-guard.ts':'6e883e8a146a0394405b25f489f1edaab6f840687e80c08a0bc232bbdf59e087',
+  'judgment/instructions.mjs':'0add2f40aaaa01bfdacd1b99418b94e288eb45da6593595304f8d36d0f22de27',
+  'observation/observe.ts':'469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad',
+  'local-grounding/extract.ts':'6e9461e860f22923dbece02c7988713422ed81ac32d937f6d59df8eff84bd83e',
+  'local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01',
+  'decision/jev-decision.ts':'0ae825fb74383f07e7a449d69862ef2dfcb1da98ba5d3464f4e7149cd4580db5',
+  'local-grounding/extract-ai.ts':'e489b7ff573fdbe9e4f0adc9b6ee5f0828bd3c6835dcd8cd6555e191161594a6',
+  'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
+ }},fixed:FIXED_I172,native:NATIVE_I172},
+ // P5 port with the saved scoped_v8 research feature menu.
+ {id:'i203_p5_main_fd995b0',i172:true,styleMode:'research_split',sources:{scheme:'complete_instruction_source_sha256',files:{
+  'v2/dialogue-v2.mjs':'0ca530878393721b6d48b55240e2b8c848910758501d90f579b2e0c65a6d1dd6',
+  'v2/jev-turn.ts':'f157a7d085a4ad79601ccb793bffe28139fb4f97326d8e45aad7c5631e64878c',
+  'v2/generation-guard.ts':'93ea935be4ca519bea5b724a437db11c6a3f47d38a6ca37dfc10deb408a8a9e9',
+  'judgment/instructions.mjs':'0add2f40aaaa01bfdacd1b99418b94e288eb45da6593595304f8d36d0f22de27',
+  'observation/observe.ts':'469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad',
+  'local-grounding/extract.ts':'6e9461e860f22923dbece02c7988713422ed81ac32d937f6d59df8eff84bd83e',
+  'local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01',
+  'decision/jev-decision.ts':'8176e7e0765e3267ad049cfcd16c6f7a16ab6fbdec4afcb743d1f090b6809706',
   'local-grounding/extract-ai.ts':'e489b7ff573fdbe9e4f0adc9b6ee5f0828bd3c6835dcd8cd6555e191161594a6',
   'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
  }},fixed:FIXED_I172,native:NATIVE_I172},
