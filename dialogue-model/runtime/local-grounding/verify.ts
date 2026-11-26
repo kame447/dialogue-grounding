@@ -135,8 +135,10 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     // the latest unspecific, unanswered proposal of the partner before the question. The question itself names nothing, so the proposal is the claim the request carries the name from.
     if (refinedReplyRules && keepUnboundApproval && prior?.speaker === "ai" && prior.act === "ask" && act === "name_propose" && name === null && aspect === "name") {
       const asked = prior;
-      const proposal = active.filter(c => c.speaker === "human" && c.act === "name_propose" && c.aspect === "name" && c.name !== null && c.targets.length === 0 && c.sourceTurn < asked.sourceTurn)
+      // The latest proposal of the partner before the question, whether or not it names a figure: a later, corrected proposal is the one the request answers.
+      const latest = active.filter(c => c.speaker === "human" && c.act === "name_propose" && c.aspect === "name" && c.name !== null && c.sourceTurn < asked.sourceTurn)
         .sort((x, y) => x.sourceTurn - y.sourceTurn || x.turn - y.turn).at(-1);
+      const proposal = latest;
       if (proposal && !active.some(c => c.respondsTo === proposal.id && ["name_accept", "name_reject"].includes(c.act))) prior = proposal;
     }
     const approvalRequest = keepUnboundApproval && !!prior && act === "name_propose" && name === null && aspect === "name" && prior.aspect === "name" &&

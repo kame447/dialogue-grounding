@@ -27,7 +27,7 @@ import { validateJevDecision, validateHumanReferentEstimate, validateRepairProsp
 import type { JevDecisionFailureEvidence } from "../decision/jev-decision.ts";
 import { prepareLocalGroundingTurn, validateLocalGroundingOptions, findLocalPublicationViolations } from "./local-grounding-turn.ts";
 import type { LocalGroundingResearchRecord, LocalGroundingTrace } from "./local-grounding-turn.ts";
-import { findNamingActHints, hasOrientationWords, draftViolationCodes, deriveGenerationOutcome, orientationSafeFallback, rewriteReasons, isGenerationV5, isGenerationV6, isGenerationV7, isGenerationV8, isGenerationV9, isGenerationV10, isGenerationV11, hasVersionedViewpoint, defaultGenerationRetryVersion, validGenerationRetryVersion, validAgreeNameScope, allowsOrientationFallback } from "./generation-guard.ts";
+import { findNamingActHints, hasOrientationWords, draftViolationCodes, deriveGenerationOutcome, orientationSafeFallback, rewriteReasons, isGenerationV5, isGenerationV6, isGenerationV7, isGenerationV8, isGenerationV9, isGenerationV10, isGenerationV11, v11RecentHumanTexts, hasVersionedViewpoint, defaultGenerationRetryVersion, validGenerationRetryVersion, validAgreeNameScope, allowsOrientationFallback } from "./generation-guard.ts";
 import { createMemoAiExtractor, MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS, AiPublicError, aiHash, emptyAiEvidence } from "../local-grounding/extract-ai.ts";
 import { createJevAiFunctionClassifier, createJevAiSupportChecker, AI_FUNCTION_INSTRUCTIONS, AI_SUPPORT_INSTRUCTIONS,
   AI_RESPONSE_SUPPORT_INSTRUCTIONS, AI_FUNCTION_CRITERIA, AI_SUPPORT_CHOICES, AI_ACT_DESCRIPTIONS } from "../local-grounding/jev-ai-public.ts";
@@ -1045,7 +1045,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         ...publicTurns.map(t => ({ role: t.speaker === "human" ? "user" as const : "assistant" as const, content: t.text }))];
       const codeContext = { action: judgment.action, candidateName: judgment.candidateName ?? null, v3: questionLayout === "two_stage_v3", holistic, adaptive, factored, ai: aiEnabled,
         publicTexts: events.filter(e => e.seq <= latest.seq).map(e => e.text), humanTexts: events.filter(e => e.seq <= latest.seq && e.speaker === "human").map(e => e.text),
-        recentHumanTexts: events.filter(e => e.seq <= latest.seq && e.speaker === "human" && e.seq > Math.max(0, ...events.filter(o => o.seq <= latest.seq && o.speaker === "ai").map(o => o.seq))).map(e => e.text),
+        recentHumanTexts: v11RecentHumanTexts(events, latest.seq, claims, targets(execution)),
         dialoguePolicy: options.dialoguePolicy, generationRetryVersion,
         vetoed: isVetoed(record.intervention) };
       const violations = (text: string, context: Message[]) => draftViolationCodes(text, codeContext, context, privateInstructions);

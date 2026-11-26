@@ -147,3 +147,45 @@ for (const label of ['bypass-enabled', 'repair-first'] as const) {
     assert.deepEqual(statuses(old), passed);
   });
 }
+
+// ---- audit 25: the v11 rules stay with the same figure and the latest proposal.
+for (const label of ['bypass-enabled', 'repair-first'] as const) {
+  const build = (version: string | undefined, turns: Turn[]) =>
+    buildRecords({ label, dialoguePolicy: 'holistic_v5', ...(version ? { generationRetryVersion: version as any } : {}), technicalTrial: { version: 'adaptive_repair_v3' }, turns });
+  const ownWords = '輪の先が左向きです。';
+  const sameFigureTurns = (figure: string, drafts: string[]): Turn[] => [
+    { human: ownWords, plan: { action: 'confirm', target: 'figure_0', referent: 'figure_0', act: 'assert', extraction: JSON.stringify([seg('s1', ownWords, 'part', [figure])]), speech: 'その先は輪の切れ目につながっていますか？' } },
+    { human: 'はい、つながっています。そちらの図だとどうですか？', plan: { action: 'confirm', target: 'figure_0', referent: 'figure_0', drafts } },
+  ];
+  const quoting = ['こちらの画面では輪に切れ目があるので、そちらでいう左向きの先に対応するかもしれません。', '二つの部分がつながった形ですか？'];
+  test(`${label}: v11 excuses a direction the participant said about this figure before the AI's question, and not one said about another figure`, async () => {
+    const same = await build(undefined, sameFigureTurns(first, quoting));
+    const a = same.trials[0].attempts.at(-1);
+    assert.deepEqual(a.generationGuard, { violations: [], regenerated: false, fallback: false });
+    assert.equal(a.publicSpeech, quoting[0]);
+    assert.deepEqual(statuses(same), passed);
+    const other = await build(undefined, sameFigureTurns(OWN.ownAnchors[1].id as string, quoting));
+    const b = other.trials[0].attempts.at(-1);
+    assert.equal(b.generationGuard.regenerated, true);
+    assert.equal(b.publicSpeech, quoting[1]);
+    assert.deepEqual(statuses(other), passed);
+  });
+
+  // #198 after a correction: the approval request answers the latest proposal, so the replaced name does not come back.
+  const star = '星窓', corrected = '「星窓」とかどう？';
+  const correction: Turn = { human: corrected, plan: { action: 'confirm', target: 'figure_0', referent: 'figure_0', name: star, act: 'name_propose', extraction: JSON.stringify([seg('s1', corrected, 'name', [first], star)]),
+    speech: 'この形のことですか？', aiActs: ['ask'], aiExtraction: JSON.stringify([seg('s1', 'この形のことですか？', 'question', [first], null, 3)]) } };
+  const approve: Turn = { human: 'それなら、いい？', plan: { action: 'confirm', target: 'figure_0', referent: 'figure_0', act: 'name_propose', antecedent: 'claim_2',
+    extraction: JSON.stringify([seg('s1', 'それなら、いい？', 'name', [], null, 4)]), speech: '輪の形ですか？' } };
+  const plain: Turn = { human: proposal, plan: { action: 'confirm', target: 'figure_0', referent: 'figure_0', name: alias, act: 'name_propose', extraction: JSON.stringify([seg('s1', proposal, 'name', [], alias)]), speech: '輪が細い棒につながる形ですか？' } };
+  test(`${label}: an approval request after a corrected proposal never carries the replaced name in v11`, async () => {
+    const record = await build(undefined, [plain, correction, approve]);
+    const last = record.trials[0].attempts.at(-1);
+    const claim = last.local.claims.find((c: any) => c.act === 'name_propose');
+    assert.equal(claim.name, star);
+    assert.equal(last.namingRequest, true);
+    assert.deepEqual(statuses(record), passed);
+    const names = record.trials[0].lastCommittedState.judgments.at(-1).jevTurn.agreeNames.map((n: any) => n.name ?? n.candidateName);
+    assert.ok(!names.includes(alias), JSON.stringify(names));
+  });
+}

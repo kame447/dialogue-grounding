@@ -394,15 +394,27 @@ const v11TopicViewpoint = new RegExp(
 // v11 cause reading: "のです" and a "から、" that means "from" (先端から、…) are not a premise.
 const descriptionQualifierV11 = /と(?:のこと|教えて|いう(?!前提|仮定|想定)|言っ|おっしゃ|聞い|説明|伺|述べ|話し)|なら|(?:の)?であれば|とすると|とすれば|とは限(?:らな|りませ)|(?:では|じゃ)(?:な(?:い|く)|ありませ)|(?<cause>ので(?!す)|(?:だ|です|ます|ある|いる|見える)から|(?<=[るいたうくすつぬむぶ])から(?=[、,]|$)|ため)/u;
 // The participant's words as the only source of an excused direction word (v11): from their recent public texts, "左を向いて" counting as "左向き", a word they negated ("右上ではなく") not counting.
+// v11: the participant's words that a quotation may use. Everything the participant said since the AI last spoke, and what they said earlier about the figure this turn is about
+// (an earlier utterance whose own claim targets that figure); an earlier utterance about another figure does not count.
+export function v11RecentHumanTexts(events: readonly { seq: number; speaker: string; text: string }[], latestSeq: number,
+  claims: readonly { speaker: string; sourceTurn: number; targets: readonly string[] }[], targetIds: readonly string[]): string[] {
+  const upTo = events.filter(e => e.seq <= latestSeq);
+  const lastAi = Math.max(0, ...upTo.filter(e => e.speaker === "ai").map(e => e.seq));
+  const sameFigure = new Set(claims.filter(c => c.speaker === "human" && c.targets.some(id => targetIds.includes(id))).map(c => c.sourceTurn));
+  return upTo.filter(e => e.speaker === "human" && (e.seq > lastAi || sameFigure.has(e.seq))).map(e => e.text);
+}
 function v11SaidWords(humanTexts: readonly string[], terms: RegExp): Set<string> {
   const said = new Set<string>();
   for (const raw of humanTexts) {
     const t = normalize(raw).replace(/([上下左右])を向(?:いて|いた|く|き)/gu, "$1向き");
+    const corrected = new Set<string>();
     for (const m of t.matchAll(terms)) {
       if (m.groups?.sameFrame !== undefined) continue;
-      if (/^(?:で|じゃ)(?:は)?(?:なく|ない|なか)/u.test(t.slice(m.index + m[0].length))) continue;
+      if (/^(?:で|じゃ)(?:は)?(?:なく|ない|なか)/u.test(t.slice(m.index + m[0].length))) { corrected.add(m[0]); continue; }
       said.add(m[0]);
     }
+    // A word the participant takes back ("右上ではなく") is no longer theirs, also when they said it earlier.
+    for (const word of corrected) said.delete(word);
   }
   return said;
 }

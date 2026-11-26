@@ -7,7 +7,7 @@ import {nameBindsFigure} from '../../decision/referent-binding.ts';
 import {hasNameProposal,namingTurnKind,namingIntervalEstimates,inheritedTargetClaimIds,agreeCandidateAllowed,inheritsProposalName,targetNamingConflict,publiclyCheckedNamingTarget,usesPublicNamingTarget} from '../../decision/naming-request.ts';
 import {decodeMaterialV5} from '../../decision/judgment-material-v5.ts';
 import {isHolisticPolicy,isHolisticV2Plus,isHolisticV3Plus,isHolisticV4Plus} from '../../decision/contract.ts';
-import {generationGuardCodes,draftViolationCodes,deriveGenerationOutcome,orientationSafeFallback,findOrientationLeaks,hasOrientationWords,hasVersionedViewpoint,isGenerationV5,isGenerationV6,isGenerationV7,isGenerationV8,isGenerationV9,isGenerationV11,validGenerationRetryVersion,validAgreeNameScope,allowsOrientationFallback} from '../../v2/generation-guard.ts';
+import {generationGuardCodes,draftViolationCodes,deriveGenerationOutcome,orientationSafeFallback,findOrientationLeaks,v11RecentHumanTexts,hasOrientationWords,hasVersionedViewpoint,isGenerationV5,isGenerationV6,isGenerationV7,isGenerationV8,isGenerationV9,isGenerationV11,validGenerationRetryVersion,validAgreeNameScope,allowsOrientationFallback} from '../../v2/generation-guard.ts';
 import type {RecordedGenerationRetryVersion} from '../../v2/generation-guard.ts';
 import {checkModelIdentity} from '../../model-identity-contract.ts';
 import {resolveModelPolicy} from '../../model-policy.ts';
@@ -716,8 +716,10 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
  const restatedRetry=version!==undefined;
  const publicTexts=(tape.events??[]).filter((e:any)=>e.seq<=t.turnIndex).map((e:any)=>e.text);
  const humanTexts=(tape.events??[]).filter((e:any)=>e.seq<=t.turnIndex&&e.speaker==='human').map((e:any)=>e.text);
- const lastAiSeq=Math.max(0,...(tape.events??[]).filter((e:any)=>e.seq<=t.turnIndex&&e.speaker==='ai').map((e:any)=>e.seq));
- const recentHumanTexts=(tape.events??[]).filter((e:any)=>e.seq<=t.turnIndex&&e.speaker==='human'&&e.seq>lastAiSeq).map((e:any)=>e.text);
+  // v11: the participant's recent words are those since the AI last spoke plus the earlier ones whose claim targets this side's executed figure.
+ const recentClaims=liveClaims({records:[...((tape.generationGraph??tape.state?.graph)?.records??[]),...(t.local?.claims??[]).filter((c:any)=>c.kind==='claim')]});
+ const recentFor=(executed:any)=>(tape.events??[]).length===0?[]:v11RecentHumanTexts(tape.events,t.turnIndex,recentClaims,executed?.target?.kind==='single'?[executed.target.figureId]:executed?.target?.kind==='multiple'?[...executed.target.figureIds]:[]);
+ const recentHumanTexts=recentFor(t.executed);
  if(pairs.length===0)return'missing';
  if(!equal(result.sides,[pair.left,pair.right]))return'invalid';
  if(!tape.tails?.['repair-first']||!tape.tails?.['bypass-enabled'])return'missing';
@@ -740,8 +742,8 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
      const codes=label===tr.label&&t.status==='committed'?t.generationGuard.violations:undefined;
      // The comparison condition's retry reason is checked against that condition's own first draft, which this verifier classifies itself.
      const v3Retry=layout==='two_stage_v3';
-     const draft=generationCount===1&&(codes===undefined||hasVersionedViewpoint(version))?{orientation:v3Retry&&s4HasOrientationLeak(prevDraft,version,humanTexts,recentHumanTexts,publicTexts),
-       ...(hasVersionedViewpoint(version)&&typeof prevDraft==='string'?{orientationCodes:findOrientationLeaks(prevDraft,'holistic_v5',version,humanTexts,recentHumanTexts,publicTexts)}:{}),naming:typeof prevDraft==='string'&&s4NamingDecision(prevDraft.normalize('NFKC').replace(/[\s\u200b-\u200d\ufeff]/gu,''),s.executed?.action),workingNote:v3Retry&&restatedRetry&&s4HasWorkingNote(prevDraft,publicTexts),...(H()?{draftAct:lastVerdict}:{})}:undefined;
+     const draft=generationCount===1&&(codes===undefined||hasVersionedViewpoint(version))?{orientation:v3Retry&&s4HasOrientationLeak(prevDraft,version,humanTexts,recentFor(s.executed),publicTexts),
+       ...(hasVersionedViewpoint(version)&&typeof prevDraft==='string'?{orientationCodes:findOrientationLeaks(prevDraft,'holistic_v5',version,humanTexts,recentFor(s.executed),publicTexts)}:{}),naming:typeof prevDraft==='string'&&s4NamingDecision(prevDraft.normalize('NFKC').replace(/[\s\u200b-\u200d\ufeff]/gu,''),s.executed?.action),workingNote:v3Retry&&restatedRetry&&s4HasWorkingNote(prevDraft,publicTexts),...(H()?{draftAct:lastVerdict}:{})}:undefined;
      if(!generationMessages(p.messages,t,s.executed,{...tape,vetoed:s.intervention?.reasonCode==='vetoed_bypass_action',generationGraph:(tr.turns??[]).find((u:any)=>u.turn===t.turnIndex)?.state?.graph},m.profile,generationCount++,codes,draft))return'invalid';
      prevDraft=answer?.response?.text??answer?.text;draftTexts.push(prevDraft);genMessages.push(p.messages);lastVerdict=null;
     }
@@ -851,7 +853,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
    // The outcome of each side is derived from its own drafts and question answers by the run's own pure functions (generation-guard): publish the first,
    // publish the rewrite, the derived orientation-only fallback, or stop (a stop is never a committed turn).
    {
-    const aiOn=tr.profile?.localGrounding?.aiPublicClaims===true||Object.hasOwn(tr.lastCommittedState??{},'aiPublic'),cc={action:ex.action as any,candidateName:typeof ex.name==='string'?ex.name:null,v3:true,holistic:true,adaptive:!!CTX.trial,factored:!!CTX.facts,ai:aiOn,publicTexts,humanTexts,recentHumanTexts,dialoguePolicy:H5()?'holistic_v5' as const:undefined,generationRetryVersion:version??'jev_generation_retry_v1',vetoed:s.intervention?.reasonCode==='vetoed_bypass_action'};
+    const aiOn=tr.profile?.localGrounding?.aiPublicClaims===true||Object.hasOwn(tr.lastCommittedState??{},'aiPublic'),cc={action:ex.action as any,candidateName:typeof ex.name==='string'?ex.name:null,v3:true,holistic:true,adaptive:!!CTX.trial,factored:!!CTX.facts,ai:aiOn,publicTexts,humanTexts,recentHumanTexts:recentFor(s.executed),dialoguePolicy:H5()?'holistic_v5' as const:undefined,generationRetryVersion:version??'jev_generation_retry_v1',vetoed:s.intervention?.reasonCode==='vetoed_bypass_action'};
     const actCode=(i:number)=>{const row=askedRows.find(y=>y.draft===(i===0?'initial':'retry'));return row&&row.verdict!==null?[row.verdict as string]:[];};
     // The same composition as the run (guard codes + the local publication checks against that send's own recorded messages); no private instruction is stored.
     const codes=(i:number)=>typeof draftTexts[i]==='string'?[...new Set([...draftViolationCodes(draftTexts[i],cc,genMessages[i]??[]),...actCode(i)])]:['empty_utterance'];
