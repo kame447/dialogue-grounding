@@ -1,7 +1,8 @@
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import type { VerifiedParticipantUsage } from './participant-usage-fields.ts';
 import { handleRequest } from './index.mjs';
-import { configuredParticipantPin, participantChoices, participantUsageChoices } from './participant-transport.ts';
+import { configuredParticipantPin, configuredParticipantGenerationPin, participantChoices, participantUsageChoices } from './participant-transport.ts';
+import { INITIAL_OBSERVATION_STRUCTURED_V1 } from '../../../dialogue-model/runtime/observation/initial-observation-generation.ts';
 
 interface ProxyEnvironment {
   RESEARCH_PROXY_TOKEN: string;
@@ -23,7 +24,8 @@ interface InternalResult {
 }
 
 // A module function, not a method: every public method of the entrypoint is callable over RPC.
-async function forward(env: ProxyEnvironment, path: '/v1/chat/completions' | '/v1/grounding-evidence', payload: unknown, expectedModel: string | null = null, usageOnly = false): Promise<InternalResult> {
+async function forward(env: ProxyEnvironment, path: '/v1/chat/completions' | '/v1/grounding-evidence', payload: unknown, expectedModel: string | null = null, usageOnly = false,
+  sendExactModel = false): Promise<InternalResult> {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return { status: 400, data: { error: 'invalid_request' } };
   }
@@ -40,7 +42,7 @@ async function forward(env: ProxyEnvironment, path: '/v1/chat/completions' | '/v
     body,
   });
   let verifiedUsage: VerifiedParticipantUsage | undefined;
-  const result = await handleRequest(request, env, globalThis.fetch, expectedModel, usageOnly, value => { verifiedUsage = value; });
+  const result = await handleRequest(request, env, globalThis.fetch, expectedModel, usageOnly, value => { verifiedUsage = value; }, sendExactModel);
   return { status: result.status, data: await result.json(), ...(verifiedUsage ? { verifiedUsage } : {}) };
 }
 
@@ -76,12 +78,31 @@ export class InternalParticipantProxy extends WorkerEntrypoint<ProxyEnvironment>
     return configuredParticipantPin(this.env);
   }
 
+  async participantInitialObservationPolicy() {
+    return configuredParticipantPin(this.env) ? INITIAL_OBSERVATION_STRUCTURED_V1 : null;
+  }
+
   async participantChat(payload: unknown, expectedModel: string): Promise<InternalResult> {
     return participantChat(this.env, payload, expectedModel, false);
   }
 
   async participantUsagePolicy() {
     return configuredParticipantPin(this.env);
+  }
+
+  async participantUsagePolicyV2() {
+    return configuredParticipantGenerationPin(this.env);
+  }
+
+  async participantUsageGeneration(payload: unknown, expectedModel: string): Promise<InternalResult> {
+    const pin = configuredParticipantGenerationPin(this.env);
+    if (!pin) return { status: 503, data: { error: 'service_unconfigured' } };
+    if (expectedModel !== pin.generationModelId) return { status: 409, data: { error: 'model_mismatch' } };
+    if (!payload || typeof payload !== 'object' || !Object.hasOwn(payload, 'purpose') ||
+        (payload as { purpose: unknown }).purpose !== 'dialogue_turn') {
+      return { status: 400, data: { error: 'invalid_request' } };
+    }
+    return forward(this.env, '/v1/chat/completions', payload, pin.generationModelId, true, true);
   }
 
   async participantUsageChat(payload: unknown, expectedModel: string): Promise<InternalResult> {

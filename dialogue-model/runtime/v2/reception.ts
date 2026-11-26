@@ -8,6 +8,7 @@ import type { ParticipantModelPin } from './participant-model-pin.ts';
 import { ROTATION_MODES as STIMULUS_ROTATION_MODES } from '../stimuli/scatter-v2.mjs';
 import { FIGURE_SETS, resolveFigureSelection, validateResolvedFigureSelection } from '../stimuli/figure-bank.ts';
 import type { ResolvedFigureSelection } from '../stimuli/figure-bank.ts';
+import { INITIAL_OBSERVATION_STRUCTURED_V1, type InitialObservationGeneration } from '../observation/initial-observation-generation.ts';
 
 export type ReceptionProtocol = { schemaVersion: 'reception_protocol_v1'; protocolId: string; revision: number;
   allowedOrders: Strategy[][]; seedPolicy: 'shared' | 'per_trial'; referenceMemory: boolean;
@@ -26,6 +27,7 @@ type ParticipantPlanSettings = {
   participantModelPin?: ParticipantModelPin;
   participantLimits?: Readonly<BudgetLimits>;
   participantRuntimeProfile?: ParticipantProductionProfile;
+  initialObservationGeneration?: InitialObservationGeneration;
 };
 export type ReceptionPlanV2 = ParticipantPlanSettings & { schemaVersion: 'reception_plan_v2'; protocolId: string; protocolRevision: number;
   protocolSha256: string; order: Strategy[]; betweenTrials: BetweenTrials; approvedAt: string;
@@ -153,17 +155,20 @@ function participantPlan(value: unknown) {
   const hasPin = Object.hasOwn(fields, 'participantModelPin');
   const hasLimits = Object.hasOwn(fields, 'participantLimits');
   const hasProfile = Object.hasOwn(fields, 'participantRuntimeProfile');
-  if ((hasLimits || hasProfile) && !hasPin || hasLimits && hasProfile) return fail();
+  const hasGeneration = Object.hasOwn(fields, 'initialObservationGeneration');
+  if ((hasLimits || hasProfile || hasGeneration) && !hasPin || hasLimits && hasProfile) return fail();
   const p = object(value, [...PLAN_KEYS,
     ...(hasPin ? ['participantModelPin'] : []), ...(hasLimits ? ['participantLimits'] : []),
-    ...(hasProfile ? ['participantRuntimeProfile'] : [])]);
+    ...(hasProfile ? ['participantRuntimeProfile'] : []), ...(hasGeneration ? ['initialObservationGeneration'] : [])]);
   if (hasProfile && p.participantRuntimeProfile !== PARTICIPANT_PRODUCTION_PROFILE) return fail();
+  if (hasGeneration && p.initialObservationGeneration !== INITIAL_OBSERVATION_STRUCTURED_V1) return fail();
   const pin = hasPin ? validateParticipantModelPin(p.participantModelPin) : undefined;
   const limits = hasLimits ? validateParticipantLimits(p.participantLimits) : undefined;
   const participant: ParticipantPlanSettings = {
     ...(pin ? { participantModelPin: pin } : {}),
     ...(limits ? { participantLimits: limits } : {}),
     ...(hasProfile ? { participantRuntimeProfile: PARTICIPANT_PRODUCTION_PROFILE } : {}),
+    ...(hasGeneration ? { initialObservationGeneration: INITIAL_OBSERVATION_STRUCTURED_V1 } : {}),
   };
   return { p, participant };
 }
@@ -277,6 +282,7 @@ export async function approveReception(value: unknown, options: ParticipantPlanS
     ...(options.participantModelPin !== undefined ? { participantModelPin: options.participantModelPin } : {}),
     ...(options.participantLimits !== undefined ? { participantLimits: options.participantLimits } : {}),
     ...(options.participantRuntimeProfile !== undefined ? { participantRuntimeProfile: options.participantRuntimeProfile } : {}),
+    ...(options.initialObservationGeneration !== undefined ? { initialObservationGeneration: options.initialObservationGeneration } : {}),
   };
   if (options.protocol && typeof options.protocol === 'object' && (options.protocol as { schemaVersion?: unknown }).schemaVersion === 'reception_protocol_v3') {
     const p = validateReceptionProtocolV3(options.protocol), canonical = JSON.stringify(p), sha256 = receptionProtocolSha256(canonical);
@@ -330,7 +336,7 @@ export async function approveReception(value: unknown, options: ParticipantPlanS
       ...participant, trials:selected.map((strategy, index) => ({ index, strategy, seed:seeds[index] ?? seeds[0], referenceMemory:p.referenceMemory, rotationMode:p.rotationMode })) });
     return validateReception({ ...r, status:'approved', plan, revision:r.revision+1 });
   }
-  if (options.participantModelPin !== undefined || options.participantLimits !== undefined || options.participantRuntimeProfile !== undefined) return fail('protocol_unconfigured');
+  if (Object.keys(participant).length) return fail('protocol_unconfigured');
   const p = validateReceptionProtocol(options.protocol);
   if (r.status !== 'pending' || r.revision !== options.expectedRevision) return fail('reception_conflict');
   if (!int(options.order) || !p.allowedOrders[options.order]) return fail('invalid_order');

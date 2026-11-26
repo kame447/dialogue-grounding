@@ -2,6 +2,9 @@ import { verifiedParticipantUsage } from './participant-usage-fields.ts';
 import { resolvePurposeModel } from "./modelPolicy.mjs";
 import { OPENROUTER_DECISIONS_URL, DECISION_MODELS, decisionConfig, buildDecisionPayload, sanitizeDecision } from "./decisions.mjs";
 import { GROUNDING_CRITERIA_VERSION, GROUNDING_MODELS, GROUNDING_LEVELS, groundingConfig, buildGroundingPayload, sanitizeGroundingVerdict } from "./grounding.ts";
+import { INITIAL_OBSERVATION_STRUCTURED_V1 } from "../../../dialogue-model/runtime/observation/initial-observation-generation.ts";
+import { OBSERVATION_INITIAL_INSTRUCTIONS } from "../../../dialogue-model/runtime/observation/observe.ts";
+import { INITIAL_OBSERVATION_FORMAT } from "./initial-observation-format.ts";
 
 const UPSTREAM_URLS = Object.freeze({
   openai: "https://api.openai.com/v1/chat/completions",
@@ -104,7 +107,7 @@ function validateMessage(message) {
   return { role: message.role, content: parts };
 }
 
-function validatedPayload(body, selectedModel, env) {
+function validatedPayload(body, selectedModel, env, structured) {
   if (!body || typeof body !== "object" || Array.isArray(body) ||
       !Array.isArray(body.messages) || body.messages.length === 0 ||
       body.messages.length > MAX_MESSAGES) return null;
@@ -122,7 +125,9 @@ function validatedPayload(body, selectedModel, env) {
     limit : body.max_completion_tokens;
   if (!Number.isSafeInteger(requested) || requested < 1 || requested > limit) return null;
 
-  return { model: selectedModel, messages, max_completion_tokens: requested };
+  if (structured && (messages[0].role !== "system" || messages[0].content !== OBSERVATION_INITIAL_INSTRUCTIONS)) return null;
+  return { model: selectedModel, messages, max_completion_tokens: requested,
+    ...(structured ? { response_format: INITIAL_OBSERVATION_FORMAT } : {}) };
 }
 
 function sanitizeResult(data, model, usageOnly) {
@@ -207,7 +212,8 @@ async function handleDecisions(request, env, fetchImpl, route = DECISION_ROUTE) 
 }
 
 export async function handleRequest(request, env, fetchImpl = globalThis.fetch, expectedModel = /** @type {string|null} */ (null), usageOnly = false,
-  /** @type {((usage: import('./participant-usage-fields.ts').VerifiedParticipantUsage) => void) | undefined} */ onRejectedUsage = undefined) {
+  /** @type {((usage: import('./participant-usage-fields.ts').VerifiedParticipantUsage) => void) | undefined} */ onRejectedUsage = undefined,
+  sendExactModel = false) {
   const pathname = new URL(request.url).pathname;
   if (!["/health", "/v1/chat/completions", "/v1/model-policy", "/v1/decisions", "/v1/decision-policy", "/v1/grounding-evidence", "/v1/grounding-policy"].includes(pathname)) {
     return reply(404, { error: "not_found" });
@@ -278,7 +284,13 @@ export async function handleRequest(request, env, fetchImpl = globalThis.fetch, 
 
   const selected = resolvePurposeModel(body, env);
   if ("error" in selected) return reply(400, { error: selected.error });
-  const payload = validatedPayload(body, selected.model, env);
+  const structured = Object.hasOwn(body, "initial_observation_generation");
+  if (structured && (selected.purpose !== "visual_observation" || provider !== "openai" ||
+      body.initial_observation_generation !== INITIAL_OBSERVATION_STRUCTURED_V1)) {
+    return reply(400, { error: "invalid_request" });
+  }
+  const model = sendExactModel && expectedModel !== null ? expectedModel : selected.model;
+  const payload = validatedPayload(body, model, env, structured);
   if (!payload) return reply(400, { error: "invalid_request" });
   if (expectedModel !== null && selected.purpose === "dialogue_turn" &&
       payload.messages.some(message => typeof message.content !== "string")) {
@@ -320,7 +332,15 @@ export async function handleRequest(request, env, fetchImpl = globalThis.fetch, 
       if (expectedModel !== null && usageOnly) onRejectedUsage?.(verifiedParticipantUsage(expectedModel, data?.usage));
       return reply(status, { error });
     };
-    const result = sanitizeResult(data, selected.model, expectedModel !== null && usageOnly);
+    if (structured) {
+      const choice = data?.choices?.[0];
+      if (choice?.finish_reason === "length") return rejected(422, "upstream_output_limit");
+      if (choice?.finish_reason !== "stop" || choice.message?.refusal != null ||
+          (Array.isArray(choice.message?.content) && choice.message.content.some(part => part?.type === "refusal"))) {
+        return rejected(502, "invalid_upstream_response");
+      }
+    }
+    const result = sanitizeResult(data, model, expectedModel !== null && usageOnly);
     if (result && expectedModel !== null) {
       const { message, finish_reason } = result.choices[0];
       if (Array.isArray(message.content)) {
@@ -334,7 +354,8 @@ export async function handleRequest(request, env, fetchImpl = globalThis.fetch, 
         return rejected(502, "invalid_upstream_response");
       }
     }
-    if (result) return reply(200, result);
+    if (result) return reply(200, structured
+      ? { ...result, initial_observation_generation: INITIAL_OBSERVATION_STRUCTURED_V1 } : result);
     // Empty text after hitting the cap is deterministic for the same request,
     // so it is reported as non-retryable instead of a transient upstream error.
     return data?.choices?.[0]?.finish_reason === "length" ?

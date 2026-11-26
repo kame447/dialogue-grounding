@@ -10,6 +10,7 @@ import {
 import type { WorkerTerraCache } from '../dialogue-model/runtime/observation/worker-terra-observer.ts';
 import type { ReobservationInput } from '../dialogue-model/runtime/observation/contract.ts';
 import type { ObservationMessage } from '../dialogue-model/runtime/observation/observe.ts';
+import { INITIAL_OBSERVATION_STRUCTURED_V1 } from '../dialogue-model/runtime/observation/initial-observation-generation.ts';
 
 const configured = {
   schemaVersion: 'participant_model_pin_v1',
@@ -173,6 +174,103 @@ test('initial memo is shared for the same exact model and board and isolated by 
   assert.equal(entries.size, 3);
   assert.equal(requests, 3);
   assert.ok(!JSON.stringify([...entries]).includes(own.ownImage.base64));
+});
+
+test('the structured initial request uses the fixed proxy schema and a separate cache key', async () => {
+  const { cache, entries } = memory();
+  const generation = INITIAL_OBSERVATION_STRUCTURED_V1;
+  const env = {
+    RESEARCH_PROXY_TOKEN: 'synthetic-only-proxy-token-for-tests-184',
+    UPSTREAM_API_KEY: 'synthetic-only-upstream-key',
+    DIALOGUE_MODEL: pin.lunaModelId,
+    VISION_MODEL: pin.terraModelId,
+  };
+  const calls: Array<{ initial: boolean; payload: any }> = [];
+  let upstreamChoice = { message: { content: JSON.stringify(initial) }, finish_reason: 'stop' };
+  const observer = (initialObservationGeneration?: typeof generation, sharedCache?: WorkerTerraCache) =>
+    createWorkerTerraObserver({ own, modelPin: pin, now, initialObservationGeneration, cache: sharedCache,
+      async visual(payload) {
+        const request = new Request('https://mock.invalid/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + env.RESEARCH_PROXY_TOKEN },
+          body: JSON.stringify({ ...payload, response_format: { type: 'json_object' }, schema: 'synthetic-client-schema' }),
+        });
+        const isInitial = !Object.hasOwn(JSON.parse(String(payload.messages[1].content)), 'figureIds');
+        const reply = await handleRequest(request, env, async (_url, init) => {
+          calls.push({ initial: isInitial, payload: JSON.parse(String(init?.body)) });
+          const choice = isInitial ? upstreamChoice : { ...upstreamChoice, message: { content: JSON.stringify(targeted) } };
+          return Response.json({ model: pin.terraModelId, choices: [choice], usage: { prompt_tokens: 5, completion_tokens: 3 } });
+        }, pin.terraModelId);
+        return { status: reply.status, data: await reply.json() };
+      } });
+
+  const legacy = await observer(undefined, cache).observeAll(own);
+  const [legacyKey] = entries.keys();
+  // This board's key, captured from b30521f.
+  assert.equal(legacyKey, 'terra_initial_observation_v1:cf46abec22b6ec66bc9c5e54cc4e84504fcf63dc9b13f2e625939e2dd5a36a83');
+  const legacyEntry = structuredClone(entries.get(legacyKey));
+  const structured = observer(generation, cache);
+  const memo = await structured.observeAll(own);
+  assert.deepEqual(memo, legacy);
+  assert.equal(entries.size, 2);
+  assert.deepEqual(entries.get(legacyKey), legacyEntry);
+  assert.deepEqual(await observer(undefined, cache).observeAll(own), legacy);
+  assert.deepEqual(await structured.observeAll(own), memo);
+  assert.equal(calls.length, 2, 'each generation reads only its own previously written memo');
+  assert.deepEqual((await structured.reobserve({ ...own, memo, figureIds: [selected],
+    issue: { aspect: 'part', question: '確認', partnerConstrual: null } })).figures, targeted.figures);
+
+  const [old, next, reobserve] = calls;
+  assert.deepEqual(calls.map(call => call.initial), [true, true, false]);
+  const { response_format: format, ...sent } = next.payload;
+  assert.deepEqual(sent, old.payload, 'the generation selector and incoming schema never leave the proxy');
+  assert.equal(Object.hasOwn(reobserve.payload, 'response_format'), false);
+  assert.equal(format.type, 'json_schema');
+  assert.equal(format.json_schema.strict, true);
+  const schema = format.json_schema.schema;
+  const figures = schema.properties.figures;
+  assert.deepEqual([figures.minItems, figures.maxItems], [6, 6]);
+  for (const [object, keys] of [
+    [schema, ['figures']],
+    [figures.items, ['id', 'holistic', 'analytic', 'unknowns']],
+    [figures.items.properties.holistic.items, ['construal', 'basis', 'status']],
+    [figures.items.properties.analytic, ['shapes', 'composition', 'relations']],
+  ]) {
+    assert.deepEqual(object.required, keys);
+    assert.equal(object.additionalProperties, false);
+  }
+  for (const body of [
+    { purpose: 'visual_observation', messages: reobserve.payload.messages },
+    { purpose: 'dialogue_turn', messages: old.payload.messages },
+  ]) {
+    const reply = await handleRequest(new Request('https://mock.invalid/v1/chat/completions', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + env.RESEARCH_PROXY_TOKEN },
+      body: JSON.stringify({ ...body, initial_observation_generation: generation }),
+    }), env, async () => assert.fail('structured generation must only reach upstream for initial observation'));
+    assert.equal(reply.status, 400);
+    assert.deepEqual(await reply.json(), { error: 'invalid_request' });
+  }
+
+  const validText = JSON.stringify(initial);
+  const duplicate = { figures: [initial.figures[1], ...initial.figures.slice(1)] };
+  const extra = { ...initial, extra: 'synthetic' };
+  for (const choice of [
+    { message: { content: validText, refusal: 'synthetic refusal' }, finish_reason: 'stop' },
+    { message: { content: validText }, finish_reason: 'length' },
+    { message: { content: validText }, finish_reason: 'content_filter' },
+    { message: { content: JSON.stringify(duplicate) }, finish_reason: 'stop' },
+    { message: { content: JSON.stringify(extra) }, finish_reason: 'stop' },
+  ]) {
+    upstreamChoice = choice;
+    const empty = memory();
+    await assert.rejects(observer(generation, empty.cache).observeAll(own), { code: 'invalid_response' });
+    assert.equal(empty.entries.size, 0);
+  }
+  const oldProxy = createWorkerTerraObserver({ own, modelPin: pin, now, initialObservationGeneration: generation,
+    async visual() {
+      return { status: 200, data: { model: pin.terraModelId, choices: [{ message: { content: validText }, finish_reason: 'stop' }] } };
+    } });
+  await assert.rejects(oldProxy.observeAll(own), { code: 'invalid_response' });
 });
 
 test('cache corruption rejects without a model call and the first stored memo wins', async () => {
