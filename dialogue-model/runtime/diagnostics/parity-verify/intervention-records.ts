@@ -11,6 +11,7 @@ import {namingDenialTargets,namingReconfirmation} from '../../decision/naming-re
 import {decodeMaterialV5} from '../../decision/judgment-material-v5.ts';
 import {isHolisticPolicy,isHolisticV2Plus,isHolisticV3Plus,isHolisticV4Plus} from '../../decision/contract.ts';
 import {generationGuardCodes,draftViolationCodes,deriveGenerationOutcome,orientationSafeFallback,findOrientationLeaks,v11RecentHumanTexts,hasOrientationWords,hasVersionedViewpoint,isGenerationV5,isGenerationV6,isGenerationV7,isGenerationV8,isGenerationV9,isGenerationV11,isGenerationV12,isGenerationV13,isGenerationV14,validGenerationRetryVersion,validAgreeNameScope,allowsOrientationFallback} from '../../v2/generation-guard.ts';
+import {isGenerationV15,currentTurnNamingSource,namingCodesWithoutQuestion,contentPublicationRecovery} from '../../v2/generation-guard.ts';
 import type {SharedConstrual} from '../../decision/contract.ts';
 import type {RecordedGenerationRetryVersion} from '../../v2/generation-guard.ts';
 import {checkModelIdentity} from '../../model-identity-contract.ts';
@@ -68,7 +69,7 @@ const RETRY_REASONS:readonly RetryReason[]=[
  {codes:['internal_id','internal_field','internal_image','internal_credential','internal_prompt_echo'],text:'前の下書きには内部の参照IDや作業メモの項目が含まれていました。それらを出さずに書き直してください。'},
  {codes:['working_note'],text:'前の下書きに、英語の作業メモや複数の返答案が混じっていました。日本語の一つの返答だけにして書き直してください。'},
  {codes:['draft_act_mismatch'],text:'前の下書きの命名に関する行為が、選んだ行動と合っていませんでした。選んだ行動の範囲で、命名に関する行為を行動に合わせて書き直してください。'},
- {codes:['draft_act_unconfirmed'],text:'前の下書きの命名に関する行為を確認できませんでした。選んだ行動の範囲で、命名に関する行為が明確になるように書き直してください。'},
+ {codes:['draft_act_unconfirmed','draft_act_missing_evidence'],text:'前の下書きの命名に関する行為を確認できませんでした。選んだ行動の範囲で、命名に関する行為が明確になるように書き直してください。'},
  {codes:['name_not_shown'],text:'このactionで扱う名前を、「」で囲んで発話の中に示してください。'},
  {codes:['draft_shared_claim_single_id'],text:'前の下書きは、候補が一つに絞れていないのに同じ一つの図形に特定できたと断定していました。候補の範囲を保ち、単一の図形に決まったと断定せずに書き直してください。'},
  {codes:['draft_shared_claim_unconfirmed_detail'],text:'前の下書きは、未確認・保留の細部が一致したと断定していました。未確認・保留の細部を一致と断定せず、大まかな共有見立ての範囲で書き直してください。'},
@@ -484,18 +485,38 @@ const DRAFT_NAMING_QUESTIONS_V5_S4={draft_naming:{
     none:'形の見立て、特徴への同意や特徴だけを確かめる質問など、命名に関する行為をしていない。'
   }
 }};
+const SEMANTIC_NAMING_QUESTIONS_S4={draft_naming:{
+ type:'choice',
+ instructions:DRAFT_NAMING_QUESTIONS_V5_S4.draft_naming.instructions+
+  '図形と名前の組を判定します。括弧、空白、異なる表記は意味が同じなら可。明示した名前にも、違う図形・別名・複数の組への確定が含まれればadopt_otherです。'+
+  '『それでいきましょう』のような指示だけの採用は、直前の公開発話から組が一意で、現在手番にその組の根拠がある場合だけadopt_contextです。'+
+  '選択値そのものを公開の根拠とみなさないでください。名前を尋ねることと、未確定の名前を提案することと、名前を決めることを区別してください。',
+ criteria:{...DRAFT_NAMING_QUESTIONS_V5_S4.draft_naming.criteria,
+  adopt_chosen:'この下書きが、選択対象だけに対し、選択名と意味上同じ名前を明示して採用する。',
+  adopt_other:'別名、別の図形、複数の図形を採用する。または採用を表明したがその組が一意に特定できない。',
+  adopt_context:'名前を明示せず採用する。state.semanticNaming.currentTurnSourceがtrueで、直前の公開文から選択した図形と名前の組だけを一意に指す。',
+  propose_chosen:'選択対象と選択名の組を未確定の呼び名として提案する。採用・確定や別の組の提案を含まない。',
+  propose_question:'別の図形・名前の組、または一意でない組を未確定の名前として提案する。',
+ }
+}};
 const DRAFT_TRIGGERS_S4=['agree_action','typed_context','naming_words','quoted_other'];
-function draftActsShape(v:any):boolean{
+function draftActsShape(v:any,semantic:boolean):boolean{
+ const acts=semantic?Object.keys(SEMANTIC_NAMING_QUESTIONS_S4.draft_naming.criteria):DRAFT_ACTS_S4;
  return Array.isArray(v)&&v.length>=1&&v.length<=2&&v.every((a:any,i:number)=>exact(a,['draft','draftSha256','triggers','status','choice','scores','model','responseId','costUsd','latencyMs','error'])&&(a.draft==='initial'&&i===0||a.draft==='retry'&&(i===0||v[i-1].draft==='initial'))&&
   typeof a.draftSha256==='string'&&/^[a-f0-9]{64}$/.test(a.draftSha256)&&Array.isArray(a.triggers)&&a.triggers.length>=1&&a.triggers.every((x:any)=>DRAFT_TRIGGERS_S4.includes(x))&&
-  (a.status==='ok'?DRAFT_ACTS_S4.includes(a.choice)&&a.error===null&&!!a.scores&&Object.keys(a.scores).sort().join()===[...DRAFT_ACTS_S4].sort().join():a.status==='error'&&a.choice===null&&a.scores===null&&typeof a.error==='string'&&a.error.length<=64)&&
+  (a.status==='ok'?acts.includes(a.choice)&&a.error===null&&!!a.scores&&Object.keys(a.scores).sort().join()===[...acts].sort().join():a.status==='error'&&a.choice===null&&a.scores===null&&typeof a.error==='string'&&a.error.length<=64)&&
   Number.isFinite(a.latencyMs)&&a.latencyMs>=0);
 }
 const s4AgreedNames=(tape:any,ex:any):Set<string>=>new Set<string>((ex.target.kind==='single'?[ex.target.figureId]:ex.target.kind==='multiple'?ex.target.figureIds:[]).map((id:string)=>tape.state.ledger?.[id]).filter((e:any)=>e&&e.status==='agreed'&&typeof e.name==='string').map((e:any)=>ledgerName(e.name)));
 const generationCodesClean=(text:string,cc:any,messages:any[])=>draftViolationCodes(text,cc,messages).length===0;
 const s4Sha256=(text:string)=>nodeSha256('sha256').update(text,'utf8').digest('hex');
 // The verdict is a pure function of the label and the executed action: agree publishes only adopt_chosen, any other act never adopts a name.
-function draftActVerdict(choice:string,action:string):string|null{
+function draftActVerdict(choice:string,action:string,semantic?:{currentTurnSource:boolean}):string|null{
+ if(semantic){
+  if(action==='agree')return choice==='adopt_chosen'||choice==='adopt_context'&&semantic.currentTurnSource?null:'draft_act_mismatch';
+  if(action==='propose_name')return choice==='propose_chosen'?null:'draft_act_mismatch';
+  return ['adopt_chosen','adopt_other','adopt_context','propose_chosen','propose_question'].includes(choice)?'draft_act_mismatch':null;
+ }
  return action==='agree'?(choice==='adopt_chosen'?null:'draft_act_mismatch'):(choice==='adopt_chosen'||choice==='adopt_other'?'draft_act_mismatch':null);
 }
 // jev_generation_retry_v14: isolated pre-publication semantic check for P5 non-naming overclaims (code-owned copy of decision/jev-decision.ts).
@@ -663,7 +684,8 @@ function s4OpenHumanProposal(tape:any,trace:any,askCounts=true):boolean{
 }
 function traceShape(t:any,layout='two_stage_v1',policy?:string,ownSlots:readonly string[]=[]):boolean{
  const req=['schemaVersion','turnIndex','lastEventId','attemptNumber','status','initialObservation','reobservations','local','humanReferent','decisions','intervention','executed','finalAction','publicSpeech','observationMemo','repairHistory','generationGuard'];
- const opt=['errorCode','observationErrorCode','observationPhase','decisionRejectionCode','generationErrorCode','decisionMenuVersion','redacted','aiPublic','decisionFailure','repairProspect','repairGate','repairFacts','generationRetryVersion','draftActs','draftSharedClaims','namingRequest','namingReconfirm','sharedConstruals'];
+ const semantic=isGenerationV15(t?.generationRetryVersion);
+ const opt=['errorCode','observationErrorCode','observationPhase','decisionRejectionCode','generationErrorCode','decisionMenuVersion','redacted','aiPublic','decisionFailure','repairProspect','repairGate','repairFacts','generationRetryVersion','draftActs','draftSharedClaims','namingRequest','namingReconfirm','sharedConstruals',...(semantic?['publicationRecovery']:[])];
  if(!exact(t,[...req,...opt.filter(k=>Object.hasOwn(t??{},k))])||t.schemaVersion!=='jev_turn_trace_v2'||!ident(t)||!['committed','staged','superseded','error','aborted'].includes(t.status)||!Array.isArray(t.decisions)||!Array.isArray(t.reobservations)||!Array.isArray(t.repairHistory)||!primitiveText(t.publicSpeech,10000))return false;
  if(Object.hasOwn(t,'decisionMenuVersion')&&(layout!=='two_stage_v1'||t.decisionMenuVersion!==PARTICIPANT_MENU_VERSION))return false;
  if(Object.hasOwn(t,'namingRequest')&&(layout!=='two_stage_v3'||t.namingRequest!==true||Object.hasOwn(t,'namingReconfirm')||!hasNameProposal(t.local?.claims??[],t.turnIndex)))return false;
@@ -673,7 +695,7 @@ function traceShape(t:any,layout='two_stage_v1',policy?:string,ownSlots:readonly
  if(Object.hasOwn(t,'sharedConstruals')&&(!p5||!sharedShape(t.sharedConstruals)))return false;
  if(Object.hasOwn(t,'generationRetryVersion')&&(t.generationRetryVersion==='jev_generation_retry_v1'||!validGenerationRetryVersion(t.generationRetryVersion,layout,policy)||
    (hasVersionedViewpoint(t.generationRetryVersion)?!p5&&(!t.executed||!t.finalAction):t.generationGuard?.regenerated!==true)))return false;
- if(Object.hasOwn(t,'draftActs')&&(layout!=='two_stage_v3'||!draftActsShape(t.draftActs)))return false;
+ if(Object.hasOwn(t,'draftActs')&&(layout!=='two_stage_v3'||!draftActsShape(t.draftActs,semantic)))return false;
  if(!draftSharedTraceS4(t,p5Overclaim))return false;
  if(t.intervention!==null){const i=t.intervention;if(!exact(i,['schemaVersion','policy','disposition','reasonCode','original','rerank','alternative','detailEvidence','failure'])||i.schemaVersion!=='jev_intervention_v1'||!['bypass_acceptance_v1:accept','bypass_acceptance_v1:veto'].includes(i.policy)||!['adopted','rejected'].includes(i.disposition)||!['no_intervention','not_in_veto_set','vetoed_bypass_action','alternative_failed'].includes(i.reasonCode))return false;}
  // Plan O: only a failed decide() attempt carries its closed failure record; older records simply lack it.
@@ -690,7 +712,9 @@ function traceShape(t:any,layout='two_stage_v1',policy?:string,ownSlots:readonly
   if(!t.decisions.every((d:any)=>decisionShape(d,layout,p5,t.sharedConstruals,t.namingRequest===true))||
    ![t.executed,t.intervention?.original,t.intervention?.alternative].every(x=>sharedFields(x,p5))||
    carriesSharedChoice(t.intervention?.detailEvidence)&&!p5)return false;
-  const guardFallbackOk = t.generationGuard?.fallback === false || allowsOrientationFallback(t.generationRetryVersion) &&
+  const hasRecovery=Object.hasOwn(t,'publicationRecovery');
+  const guardFallbackOk = hasRecovery ? semantic&&t.generationGuard?.fallback===true&&t.generationGuard.regenerated===true&&
+    ['committed','staged','superseded'].includes(t.status) : t.generationGuard?.fallback === false || allowsOrientationFallback(t.generationRetryVersion) &&
     layout === 'two_stage_v3' && t.generationGuard?.fallback === true && t.generationGuard?.regenerated === true &&
     Array.isArray(t.generationGuard?.violations) && t.generationGuard.violations.length === 1 && t.generationGuard.violations[0] === 'orientation_leak';
   return exact(t.generationGuard,['violations','regenerated','fallback'])&&Array.isArray(t.generationGuard.violations)&&typeof t.generationGuard.regenerated==='boolean'&&guardFallbackOk;
@@ -730,6 +754,10 @@ function relation(t:any,label:any,slots:string[],layout='two_stage_v1',p5=false)
    (offered.length||['propose_name','agree','confirm','repair'].includes(t.executed.action)?i.detailEvidence?.stage!=='detail':i.detailEvidence!==null))return false;
  }
  const e=t.executed,g=t.finalAction;if(g===null)return ['error','aborted'].includes(t.status);
+ if(t.publicationRecovery){
+  const recovered=Array.isArray(t.generationGuard?.violations)&&contentPublicationRecovery(t.generationGuard.violations,e);
+  return !!recovered&&equal(t.publicationRecovery,recovered.recovery)&&equal(g,recovered.judgment)&&t.publicSpeech===recovered.text;
+ }
  return g.action===e.action&&g.targetSlot===(e.target.kind==='single'?e.target.figureId:null)&&g.candidateName===e.name&&g.discriminatingFeature===e.feature;
 }
 function policyCheck(records:any):Check{
@@ -949,6 +977,9 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
  const humanTexts=(tape.events??[]).filter((e:any)=>e.seq<=t.turnIndex&&e.speaker==='human').map((e:any)=>e.text);
   // v11: the participant's recent words are those since the AI last spoke plus the earlier ones whose claim targets this side's executed figure.
  const recentClaims=liveClaims({records:[...((tape.generationGraph??tape.state?.graph)?.records??[]),...(t.local?.claims??[]).filter((c:any)=>c.kind==='claim')]});
+ const semanticFor=(execution:any)=>isGenerationV15(version)
+   ? {currentTurnSource:currentTurnNamingSource(execution,CTX.agree??[],t.turnIndex,
+     recentClaims.filter(c=>c.speaker==='human'&&c.act==='name_propose'&&c.aspect==='name'))} : undefined;
 const idsOf=(target:any):string[]=>target?.kind==='single'?[target.figureId]:target?.kind==='multiple'?[...target.figureIds]:[];
  const recentFor=(executed:any)=>(tape.events??[]).length===0?[]:v11RecentHumanTexts(tape.events,t.turnIndex,recentClaims,idsOf(executed?.target),new Map((tape.state?.judgments??[]).map((x:any)=>[x.turnIndex,idsOf((x.jevTurn?.executed??x.jevTurn?.decision)?.target)] as const)));
  const recentHumanTexts=recentFor(t.executed);
@@ -961,8 +992,25 @@ const idsOf=(target:any):string[]=>target?.kind==='single'?[target.figureId]:tar
  let missing=sharedPublic===null;
  for(const [n,label]of ['repair-first','bypass-enabled'].entries()){
   const s=result.sides[n],m=s?.material;if(!exact(s,['label','material','materialSha256','requests','executed','intervention'])||s.label!==label||!exact(m,['state','events','common','tail','own','model','profile','boundary',...(CTX.trial?['technicalTrial']:[]),...(tape.generationRetryVersion?['generationRetryVersion']:[])])||m.generationRetryVersion!==tape.generationRetryVersion||hash(m)!==s.materialSha256||(CTX.trial&&!equal(m.technicalTrial,tape.technicalTrial))||!equal(m.state,tape.state)||!equal(m.events,tape.events)||!equal(m.common,tape.common)||!equal(m.tail,tape.tails[label])||!equal(m.profile,tr.profile)||!Array.isArray(s.requests)||!equal(m.boundary,{luna:'canonical_http_json',jev:'canonical_http_json',hashScheme:'canonical_json_sha256_not_raw_body_bytes'}))return'invalid';
-  if(!relation({...t,executed:s.executed,intervention:s.intervention,finalAction:s.executed?{action:s.executed.action,targetSlot:s.executed.target.kind==='single'?s.executed.target.figureId:null,candidateName:s.executed.name,discriminatingFeature:s.executed.feature}:null},label,Object.keys(tape.state.ledger),layout,p5))return'invalid';
+  if(!relation({...t,publicationRecovery:undefined,executed:s.executed,intervention:s.intervention,finalAction:s.executed?{action:s.executed.action,targetSlot:s.executed.target.kind==='single'?s.executed.target.figureId:null,candidateName:s.executed.name,discriminatingFeature:s.executed.feature}:null},label,Object.keys(tape.state.ledger),layout,p5))return'invalid';
   let originalInput:any=null,pendingSet=false,pendingTarget=false,current:any=null,currentInput:any=null,turnDecision=-1,prospect:any=null,generationCount=0,prevDraft:any=null,lastVerdict:string|null=null,lastSharedVerdict:string|null=null;let refAnswer:any=null;const draftTexts:any[]=[],genMessages:any[]=[],askedDrafts:number[]=[],askedRows:any[]=[],draftVerdicts:(string|null)[]=[],askedSharedDrafts:number[]=[],askedSharedRows:any[]=[];
+  const aiOn=tr.profile?.localGrounding?.aiPublicClaims===true||Object.hasOwn(tr.lastCommittedState??{},'aiPublic');
+  const codeContext=()=>({action:s.executed.action as any,candidateName:typeof s.executed.name==='string'?s.executed.name:null,
+   v3:true,holistic:true,adaptive:!!CTX.trial,factored:!!CTX.facts,ai:aiOn,publicTexts,humanTexts,recentHumanTexts:recentFor(s.executed),
+   dialoguePolicy:H5()?'holistic_v5' as const:undefined,generationRetryVersion:version??'jev_generation_retry_v1',vetoed:s.intervention?.reasonCode==='vetoed_bypass_action'});
+  const codesForDraft=(i:number)=>{
+   const draft=draftTexts[i],name=i===0?'initial':'retry';
+   if(typeof draft!=='string'||isGenerationV15(version)&&!draft.trim())return['empty_utterance'];
+   const row=askedRows.find(y=>y.draft===name),shared=askedSharedRows.find(y=>y.draft===name);
+   let lexical=draftViolationCodes(draft,codeContext(),genMessages[i]??[],p5?SHARED_PRIVATE:[]);
+   const extra=row&&row.verdict!==null?[row.verdict as string]:[];
+   if(isGenerationV15(version)){
+    if(!row)lexical=namingCodesWithoutQuestion(lexical,draft,s.executed.action,s.executed.name);
+    else if(row.verdict===null&&['agree','propose_name'].includes(s.executed.action))lexical=lexical.filter(code=>code!=='name_mismatch'&&code!=='name_not_shown');
+   }
+   if(shared&&shared.verdict!==null)extra.push(shared.verdict);
+   return [...new Set([...lexical,...extra])];
+  };
   const sharedDetailCalls=new Set<number>();let sharedAlternative=false;
   const response={luna:[...tape.common.luna,...tape.tails[label].luna],jev:[...tape.common.jev,...tape.tails[label].jev]},indices={luna:0,jev:0};
   for(const r of s.requests){if(!exact(r,['provider','phase','payload','payloadDomain','payloadSha256','preProjectionPayloadSha256','role',...(Object.hasOwn(r,'completeMessagesSha256')?['completeMessagesSha256']:[])])||!['luna','jev'].includes(r.provider)||!['common','alternative_detail','generation','post_generation'].includes(r.role)||r.payloadDomain!=='canonical_http_json'||hash(r.payload)!==r.payloadSha256||typeof r.preProjectionPayloadSha256!=='string'||!/^[a-f0-9]{64}$/.test(r.preProjectionPayloadSha256))return'invalid';
@@ -974,7 +1022,8 @@ const idsOf=(target:any):string[]=>target?.kind==='single'?[target.figureId]:tar
     if(r.role==='generation'){
      // Only the recorded condition has a saved guard trace. A committed retry
      // has no new violations, or the successful fallback has orientation alone.
-     const codes=label===tr.label&&t.status==='committed'?t.generationGuard.violations:undefined;
+     const codes=isGenerationV15(version)?generationCount===1?codesForDraft(0):undefined:
+      label===tr.label&&t.status==='committed'?t.generationGuard.violations:undefined;
      // The comparison condition's retry reason is checked against that condition's own first draft, which this verifier classifies itself.
      const v3Retry=layout==='two_stage_v3';
      const draft=generationCount===1&&(codes===undefined||hasVersionedViewpoint(version))?{orientation:v3Retry&&s4HasOrientationLeak(prevDraft,version,humanTexts,recentFor(s.executed),publicTexts),
@@ -1000,16 +1049,18 @@ const idsOf=(target:any):string[]=>target?.kind==='single'?[target.figureId]:tar
      if(Object.hasOwn(p.questions,'draft_naming')){
       // holistic_v1: the closed question about the draft's naming act, rebuilt exactly from this material and the previous generation draft.
       const gi=generationCount-1,ex=s.executed;
-      const questions=H5()?DRAFT_NAMING_QUESTIONS_V5_S4:DRAFT_NAMING_QUESTIONS_S4;
+      const semanticNaming=ex&&semanticFor(ex);
+      const questions=semanticNaming?SEMANTIC_NAMING_QUESTIONS_S4:H5()?DRAFT_NAMING_QUESTIONS_V5_S4:DRAFT_NAMING_QUESTIONS_S4;
       if(!H()||r.role!=='post_generation'||gi<0||!ex||typeof prevDraft!=='string'||askedDrafts.includes(gi)||!equal(p.questions,questions)||p.model!=='typesafe/jev-1.14')return'invalid';
       const agreed=s4AgreedNames(tape,ex);
       const trig=s4DraftTriggers(prevDraft,ex.action,s4TypedContext(tape,t),agreed,ex.action==='propose_name'&&typeof ex.name==='string'?ledgerName(ex.name):null,!!CTX.namingReconfirm);
       const turns=(tape.events??[]).filter((e:any)=>e.seq<=t.turnIndex).slice(-12).map((e:any)=>({turn:e.seq,speaker:e.speaker,text:String(e.text).slice(0,400)}));
-      if(!trig.length||p.state!==JSON.stringify({turn:t.turnIndex,publicTurns:turns,reasons:trig,selected:{action:ex.action,target:ex.target,name:ex.name},draft:prevDraft}))return'invalid';
+      if(!trig.length||p.state!==JSON.stringify({turn:t.turnIndex,publicTurns:turns,reasons:trig,selected:{action:ex.action,target:ex.target,name:ex.name},draft:prevDraft,
+        ...(semanticNaming?{semanticNaming}:{})}))return'invalid';
       // A response the client cannot use (a label outside the six) is recorded as an error act: that send is unconfirmed, never a pass.
       // Usability is the real client's own contract (shared pure functions): a reported cost and answers of exactly the asked question.
       const reported=jevReportedCost(answer),usable=reported!==null&&jevChoiceAnswersValid(answer.answers,{draft_naming:Object.keys(questions.draft_naming.criteria)});
-      const v=usable?draftActVerdict(answer.answers.draft_naming.choice,ex.action):'draft_act_unconfirmed';draftVerdicts.push(v);lastVerdict=v;askedDrafts.push(gi);
+      const v=usable?draftActVerdict(answer.answers.draft_naming.choice,ex.action,semanticNaming):'draft_act_unconfirmed';draftVerdicts.push(v);lastVerdict=v;askedDrafts.push(gi);
       askedRows.push({draft:gi===0?'initial':'retry',triggers:trig,invalid:!usable,reason:usable?null:reported===null?'cost_unreported':'invalid_response',choice:usable?answer.answers.draft_naming.choice:null,scores:usable?answer.answers.draft_naming.probabilities:null,model:answer.model,responseId:jevResponseId(answer),costUsd:reported,verdict:v});
       continue;
      }
@@ -1115,7 +1166,7 @@ const idsOf=(target:any):string[]=>target?.kind==='single'?[target.figureId]:tar
     const lostAct=label===tr.label?(t.draftActs??[]).find((a:any)=>a.draft===name&&a.status==='error'):undefined;
     if(target&&!row){if(lostAct){missing=true;continue;}return'invalid';}
     if(!target&&row)return'invalid';
-    if(row&&row.verdict!==null&&i===generationCount-1)return'invalid';
+    if(!isGenerationV15(version)&&row&&row.verdict!==null&&i===generationCount-1)return'invalid';
     const sharedRow=askedSharedRows.find(x=>x.draft===name),sharedTarget=CTX.p5Overclaim&&Boolean(ex.sharedClaimIds);
     const lostShared=label===tr.label?(t.draftSharedClaims??[]).find((a:any)=>a.draft===name&&a.status==='error'):undefined;
     if(sharedTarget&&!sharedRow){if(lostShared){missing=true;continue;}return'invalid';}
@@ -1125,24 +1176,25 @@ const idsOf=(target:any):string[]=>target?.kind==='single'?[target.figureId]:tar
    // The outcome of each side is derived from its own drafts and question answers by the run's own pure functions (generation-guard): publish the first,
    // publish the rewrite, the derived orientation-only fallback, or stop (a stop is never a committed turn).
    {
-    const aiOn=tr.profile?.localGrounding?.aiPublicClaims===true||Object.hasOwn(tr.lastCommittedState??{},'aiPublic'),cc={action:ex.action as any,candidateName:typeof ex.name==='string'?ex.name:null,v3:true,holistic:true,adaptive:!!CTX.trial,factored:!!CTX.facts,ai:aiOn,publicTexts,humanTexts,recentHumanTexts:recentFor(s.executed),dialoguePolicy:H5()?'holistic_v5' as const:undefined,generationRetryVersion:version??'jev_generation_retry_v1',vetoed:s.intervention?.reasonCode==='vetoed_bypass_action'};
-    const actCode=(i:number)=>{const row=askedRows.find(y=>y.draft===(i===0?'initial':'retry'));return row&&row.verdict!==null?[row.verdict as string]:[];};
-    const sharedClaimCode=(i:number)=>{const row=askedSharedRows.find(y=>y.draft===(i===0?'initial':'retry'));return row&&row.verdict!==null?[row.verdict as string]:[];};
+    const cc=codeContext();
     // The same composition as the run (guard codes + the local publication checks against that send's own recorded messages); no private instruction is stored.
-    const codes=(i:number)=>typeof draftTexts[i]==='string'?[...new Set([...draftViolationCodes(draftTexts[i],cc,genMessages[i]??[],p5?SHARED_PRIVATE:[]),...actCode(i),...sharedClaimCode(i)])]:['empty_utterance'];
+    const codes=codesForDraft;
     const fb=allowsOrientationFallback(version)?orientationSafeFallback({action:ex.action,candidateName:cc.candidateName,discriminatingFeature:typeof ex.feature==='string'?ex.feature:null} as any):null;
     const clean=fb!==null&&generationCodesClean(fb,cc,genMessages[generationCount-1]??[]);
     let out=deriveGenerationOutcome(codes(0),generationCount===2?codes(1):null,fb,clean);
     // A regeneration that the known drafts cannot explain is a contradiction, except where a hidden instruction (AI public claims on: the remaining private
     // instructions are not in the recorded messages) could have been echoed: that needs material the record does not hold (not reached, not a mismatch).
     if(out.kind==='publish_first'&&generationCount===2&&aiOn){out=deriveGenerationOutcome([...codes(0),'internal_prompt_echo'],codes(1),fb,clean);missing=true;}
-    if(out.kind==='stop'||out.regenerated!==(generationCount===2))return'invalid';
+    const recovered=isGenerationV15(version)&&out.kind==='stop'&&out.regenerated?contentPublicationRecovery(out.violations,ex):null;
+    if(recovered&&draftViolationCodes(recovered.text,{...cc,action:recovered.judgment.action,candidateName:null},genMessages[generationCount-1]??[],p5?SHARED_PRIVATE:[]).length)return'invalid';
+    if(out.kind==='stop'&&!recovered||out.regenerated!==(generationCount===2))return'invalid';
     if(label===tr.label){
      const g=t.generationGuard,derived=new Set(out.violations),recorded:string[]=g?.violations??[];
      const extra=recorded.filter(c=>!derived.has(c));
      // Codes decided by a draft's own text (image, credential, ids, fields) are re-derived here: a recorded one absent from the text is a contradiction.
      // Only a prompt echo of an instruction outside the recorded messages (AI public claims on) is beyond this record's material.
-     if(g?.fallback!==(out.kind==='fallback')||g?.regenerated!==out.regenerated||[...derived].some(c=>!recorded.includes(c))||extra.some(c=>c!=='internal_prompt_echo'||!aiOn))return'invalid';
+     if(g?.fallback!==(out.kind==='fallback'||!!recovered)||g?.regenerated!==out.regenerated||[...derived].some(c=>!recorded.includes(c))||extra.some(c=>c!=='internal_prompt_echo'||!aiOn))return'invalid';
+     if(recovered?!equal(t.publicationRecovery,recovered.recovery)||!equal(t.finalAction,recovered.judgment):Object.hasOwn(t,'publicationRecovery'))return'invalid';
      if(extra.length)missing=true;
      // The archived per-draft reasons must also reproduce from that draft and its own Jev answers.
      for(const [i,row] of (t.draftSharedClaims??[]).entries()){
@@ -1152,7 +1204,7 @@ const idsOf=(target:any):string[]=>target?.kind==='single'?[target.figureId]:tar
         code==='draft_shared_claim_unconfirmed'&&row.status==='error'&&!askedSharedRows.some(answer=>answer.draft===row.draft))))return'invalid';
       if(extras.length)missing=true;
      }
-     if(out.kind==='fallback'?t.publicSpeech!==fb:t.publicSpeech!==draftTexts.at(-1))return'invalid';
+     if(t.publicSpeech!==(recovered?.text??(out.kind==='fallback'?fb:draftTexts.at(-1))))return'invalid';
     }
    }
   }
@@ -1185,9 +1237,10 @@ const idsOf=(target:any):string[]=>target?.kind==='single'?[target.figureId]:tar
      if(row.invalid?a.status!=='error'||a.choice!==null||a.scores!==null||a.error!==row.reason:a.status!=='ok'||a.error!==null||a.choice!==row.choice||!equal(a.scores,row.scores))return'invalid';
     }
     if(askedRows.some(x=>!acts.some(a=>a.draft===x.draft)))return'invalid';
-    if(acts.some(a=>a.status==='error')!==guardCodes.includes('draft_act_unconfirmed')||acts.some(a=>a.status==='ok'&&draftActVerdict(a.choice,s.executed?.action)!==null)!==guardCodes.includes('draft_act_mismatch'))return'invalid';
+    if(acts.some(a=>a.status==='error')!==guardCodes.includes('draft_act_unconfirmed')||
+      !isGenerationV15(version)&&acts.some(a=>a.status==='ok'&&draftActVerdict(a.choice,s.executed?.action)!==null)!==guardCodes.includes('draft_act_mismatch'))return'invalid';
     // Fallback sentence: both drafts were orientation-only and every question asked of them succeeded and fit the act.
-    if(t.generationGuard?.fallback===true&&(draftTexts.length!==2||guardCodes.length>0||acts.some(a=>a.status!=='ok')))return'invalid';
+    if(t.generationGuard?.fallback===true&&!t.publicationRecovery&&(draftTexts.length!==2||guardCodes.length>0||acts.some(a=>a.status!=='ok')))return'invalid';
 
    }
    const sharedChecks:any[]=t.draftSharedClaims??[],sharedCodes:string[]=(t.generationGuard?.violations??[]).filter((c:string)=>c.startsWith('draft_shared_claim_'));
@@ -1211,7 +1264,7 @@ const idsOf=(target:any):string[]=>target?.kind==='single'?[target.figureId]:tar
  }
  if(!equal(result.sides[0].requests.filter((r:any)=>r.role==='common'),result.sides[1].requests.filter((r:any)=>r.role==='common')))return'invalid';
  if(actual.requests.length!==expected.length||calls.length!==expected.length)return'invalid';const used=new Set();
- if(t.generationGuard?.fallback===true){
+ if(t.generationGuard?.fallback===true&&!t.publicationRecovery){
   const gens=actual.requests.filter((r:any)=>r.provider==='luna'&&r.role==='generation');
   const genTexts=[...(tape.common?.luna??[]),...(tape.tails?.[tr.label]?.luna??[])].filter((x:any)=>x?.phase==='generation').map((x:any)=>x?.response?.text??x?.text);
   if(gens.length!==2||genTexts.length!==2||
@@ -1783,18 +1836,18 @@ export function interventionChecks(records:Records):Check[]{
      if(!ownTurns.length||!related.length||!js.length||!tr.lastCommittedState)missing=true;
      if(ownTurns.some((v:any)=>v.turn!==t.turnIndex||v.publicText!==t.publicSpeech))conflict=true;
      if(t.generationGuard?.fallback===true){
-      const expectedFallback=expectedOrientationFallback(t.finalAction);
+      const expectedFallback=t.publicationRecovery?contentPublicationRecovery(t.generationGuard.violations,t.executed)?.text:expectedOrientationFallback(t.finalAction);
       const aiOn=tr.profile?.localGrounding?.aiPublicClaims===true||Object.hasOwn(tr.lastCommittedState??{},'aiPublic')||js.some((j:any)=>Object.hasOwn(j,'aiPublic'))||Boolean(t.aiPublic);
       if(layout!=='two_stage_v3'||!expectedFallback||t.publicSpeech!==expectedFallback||(aiOn&&t.aiPublic?.pending?.status!=='skipped_fallback'))conflict=true;
      }
-     const first=js[0];if(js.some((j:any)=>j.status!=='committed'||!equal(j,first)||!equal(j.jevTurn.decision,t.decisions.at(-1))||!equal(j.jevTurn.executed,t.executed)||!equal(j.jevTurn.intervention,t.intervention)||!equal(j.judgment,t.finalAction)||
+     const first=js[0];if(js.some((j:any)=>j.status!=='committed'||!equal(j,first)||!equal(j.jevTurn.decision,t.decisions.at(-1))||!equal(j.jevTurn.executed,t.executed)||!equal(j.jevTurn.intervention,t.intervention)||!equal(j.judgment,t.finalAction)||!equal(j.publicationRecovery??null,t.publicationRecovery??null)||
       // Every field the trace and the saved turn share is equal in both copies (an absent field in one and present in the other is a difference).
       ['humanReferent','repairProspect','repairGate','repairFacts','draftActs','draftSharedClaims','namingRequest','namingReconfirm','sharedConstruals'].some((k:string)=>Object.hasOwn(j.jevTurn,k)!==Object.hasOwn(t,k)||Object.hasOwn(t,k)&&!equal(j.jevTurn[k],t[k]))))conflict=true;
      const last=turns.at(-1)?.state;if(last&&tr.lastCommittedState&&!equal(last,tr.lastCommittedState))conflict=true;
       // An ambiguous action (a multiple revisit or confirm/repair, an unresolved defer) never rewrites a slot: every slot's name and status after the turn,
       // in the turn state and in the last committed state when that is this turn, equals the ledger before it.
       const ex=t.executed,ambiguous=!!ex&&(ex.action==='revisit'&&ex.target?.kind==='multiple'||ex.action==='defer'&&ex.target?.kind!=='single'||['confirm','repair'].includes(ex.action)&&ex.target?.kind==='multiple');
-      if(ambiguous){
+      if(ambiguous||t.publicationRecovery){
        const before=(Array.isArray(tr.replay)?tr.replay:[]).find((v:any)=>v?.tape?.events?.at(-1)?.seq===t.turnIndex)?.tape?.state?.ledger??[...turns].filter((v:any)=>v.turn<t.turnIndex).sort((a:any,b:any)=>a.turn-b.turn).at(-1)?.state?.ledger;
        const after=[...turns.filter((v:any)=>v.turn===t.turnIndex).map((v:any)=>v.state),tr.lastCommittedState].filter((x:any)=>x&&stateJudgments(x).length&&judgmentKey(stateJudgments(x).at(-1))===key).map((x:any)=>x.ledger);
        if(!before||!after.length)missing=true;else if(after.some((l:any)=>!equal(l,before)))conflict=true;
@@ -2225,6 +2278,30 @@ const PROMPT_VERSIONS:readonly PromptVersion[]=[
   'local-grounding/extract.ts':'6e9461e860f22923dbece02c7988713422ed81ac32d937f6d59df8eff84bd83e',
   'local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01',
   'decision/jev-decision.ts':'2104c917e6e3df85eed3b17105167d5f983ed9c0ed6f71ab5e03ee98248fed88',
+  'local-grounding/extract-ai.ts':'e489b7ff573fdbe9e4f0adc9b6ee5f0828bd3c6835dcd8cd6555e191161594a6',
+  'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
+ }},fixed:FIXED_I172,native:NATIVE_I172},
+ {id:'p5_semantic_name_guard_v15',i172:true,styleMode:'research_split',sources:{scheme:'complete_instruction_source_sha256',files:{
+  'v2/dialogue-v2.mjs':'0ca530878393721b6d48b55240e2b8c848910758501d90f579b2e0c65a6d1dd6',
+  'v2/jev-turn.ts':'f3691b1f66edf7ff74bf79d045d58be2d0dc5495419dfde791fea2b4be124878',
+  'v2/generation-guard.ts':'a99d1d85f5f12bb74bb127afa25be8dc5f0e6bd7d3019d63c4bad623c24045f5',
+  'judgment/instructions.mjs':'0add2f40aaaa01bfdacd1b99418b94e288eb45da6593595304f8d36d0f22de27',
+  'observation/observe.ts':'469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad',
+  'local-grounding/extract.ts':'6e9461e860f22923dbece02c7988713422ed81ac32d937f6d59df8eff84bd83e',
+  'local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01',
+  'decision/jev-decision.ts':'b9b969d78a329dcc0ba0f9672c08b94254a87285e42391e39cbbf11869f2da57',
+  'local-grounding/extract-ai.ts':'e489b7ff573fdbe9e4f0adc9b6ee5f0828bd3c6835dcd8cd6555e191161594a6',
+  'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
+ }},fixed:FIXED_I172,native:NATIVE_I172},
+ {id:'p5_semantic_name_guard_v15_orientation_recovery',i172:true,styleMode:'research_split',sources:{scheme:'complete_instruction_source_sha256',files:{
+  'v2/dialogue-v2.mjs':'0ca530878393721b6d48b55240e2b8c848910758501d90f579b2e0c65a6d1dd6',
+  'v2/jev-turn.ts':'f3691b1f66edf7ff74bf79d045d58be2d0dc5495419dfde791fea2b4be124878',
+  'v2/generation-guard.ts':'7e7618df672cf79545ad9934ee49311966a1ec04c9dae0da2869f4755ea3cba5',
+  'judgment/instructions.mjs':'0add2f40aaaa01bfdacd1b99418b94e288eb45da6593595304f8d36d0f22de27',
+  'observation/observe.ts':'469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad',
+  'local-grounding/extract.ts':'6e9461e860f22923dbece02c7988713422ed81ac32d937f6d59df8eff84bd83e',
+  'local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01',
+  'decision/jev-decision.ts':'b9b969d78a329dcc0ba0f9672c08b94254a87285e42391e39cbbf11869f2da57',
   'local-grounding/extract-ai.ts':'e489b7ff573fdbe9e4f0adc9b6ee5f0828bd3c6835dcd8cd6555e191161594a6',
   'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
  }},fixed:FIXED_I172,native:NATIVE_I172},
