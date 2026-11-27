@@ -49,9 +49,9 @@ test('bounded graph keeps an older naming source and unanswered question under c
   }
   const old = fill(CLAIM_PRUNE_V2);
   const graph = fill(CLAIM_PRUNE_V3);
-  assert.equal(old.records.some(row => row.id === question.id), false);
+  assert.equal(old.records.some((row: { id: string }) => row.id === question.id), false);
   assert.ok(graph.records.length <= REFERENCE_LIMITS.records);
-  assert.ok(graph.records.some(row => row.id === question.id));
+  assert.ok(graph.records.some((row: { id: string }) => row.id === question.id));
   const turns = [question, proposal].map(row => ({ turn: row.sourceTurn, speaker: row.speaker, text: row.quote }));
   const evidence = buildReferenceEvidence(JSON.parse(JSON.stringify(graph)), turns, graph.lastTurn, null);
   assert.deepEqual(evidence.history.map(row => row.sourceTurn).sort(), [1, 2]);
