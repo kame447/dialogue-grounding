@@ -23,6 +23,9 @@ const oldName = "音符";
 const name = "くぎ";
 const original = "「音符」と呼びませんか。";
 const proposal = "呼び名を変えて、「くぎ」にしませんか？";
+const namedSubject = "この図形を「くぎ」と呼びませんか？";
+const firstCount = "突起は一つです。";
+const correctedCount = "突起は二つです。";
 const identity = "私が見ている図形と同じです。";
 const featureReply = "一つです。";
 const agreement = "はい、「くぎ」と呼びましょう。";
@@ -77,16 +80,19 @@ function deniedCheck(requireContrast = true, feature = property): Turn {
 }
 
 type Answer = "identity" | "both" | "feature" | "wrong" | "explicit-count" |
-  "other-part" | "other-topic" | "negative-identity" | "uncertain-identity" | "clipped-negation";
+  "other-part" | "other-topic" | "negative-identity" | "uncertain-identity" | "clipped-negation" |
+  "corrected-count" | "named-subject";
 function answer(form: Answer): Turn {
-  const positive = form === "identity" || form === "explicit-count";
+  const positive = form === "identity" || form === "explicit-count" || form === "named-subject";
   const response = ({
     wrong: "穴があります。",
+    "corrected-count": firstCount + "訂正します。" + correctedCount,
     "explicit-count": "突起は１つあります。",
     "other-part": "数えたのは穴です。穴は一つです。",
     "other-topic": "穴を数えました。一つです。",
   } as Partial<Record<Answer, string>>)[form] ?? featureReply;
-  const quotedValue = form === "other-part" || form === "other-topic" ? featureReply : response;
+  const quotedValue = form === "corrected-count" ? firstCount : form === "other-part" || form === "other-topic" ? featureReply : response;
+  const naming = form === "named-subject" ? namedSubject : proposal;
   const identityText = ({
     "negative-identity": "私が見ている図形と同じではありません。",
     "uncertain-identity": "同じ図形かは分かりません。",
@@ -94,16 +100,28 @@ function answer(form: Answer): Turn {
   } as Partial<Record<Answer, string>>)[form] ?? identity;
   const quotedIdentity = form === "clipped-negation" ? "同じ図形" : identityText;
   const referent = form === "feature" ? [] : [segment("identity", quotedIdentity, "referent", form === "both" ? [own, other] : [own], 4)];
-  return { human: response + (referent.length ? identityText : "") + proposal, plan: {
+  const segments = [
+    segment("feature", quotedValue, "contour", [own], 4, property),
+    ...(form === "corrected-count" ? [segment("correction", correctedCount, "contour", [own])] : []),
+    ...referent,
+    segment("name", naming, "name", [own], null, naming, name),
+  ];
+  return { human: response + (referent.length ? identityText : "") + naming, plan: {
     action: positive ? "agree" : "close", target: "figure_0", referent: "figure_0", speech: positive ? agreement : "その特徴について聞きました。",
     answers: "answers_checked_point",
-    extraction: extraction(segment("feature", quotedValue, "contour", [own], 4, property), ...referent,
-      segment("name", proposal, "name", [own], null, proposal, name)),
+    extraction: extraction(...segments),
     choose: (key, choices) => {
-      const acts: Record<string, string> = { segment_0_act: "agree", segment_1_act: referent.length ? "agree" : "name_propose", segment_2_act: "name_propose" };
-      if (key === "segment_0_antecedent") return antecedent(choices, "5:pub2");
-      if (key === "segment_1_antecedent" && referent.length) return antecedent(choices, "5:pub1");
-      if (acts[key] && Object.hasOwn(choices, acts[key])) return acts[key];
+      const part = /^segment_(\d+)_(act|antecedent)$/u.exec(key);
+      if (part) {
+        const id = segments[Number(part[1])]?.segmentId;
+        if (part[2] === "act") {
+          const act = id === "name" ? "name_propose" : id === "correction" ? "assert" : "agree";
+          if (Object.hasOwn(choices, act)) return act;
+        }
+        if (part[2] === "antecedent" && (id === "feature" || id === "identity")) {
+          return antecedent(choices, id === "feature" ? "5:pub2" : "5:pub1");
+        }
+      }
       // A naming request cannot choose accept. Non-agreement on a different
       // topic is available to both strategies without an extra visual check.
       if (key === "action" && !positive) {
@@ -176,10 +194,10 @@ for (const label of ["repair-first", "bypass-enabled"] as const satisfies readon
 }
 
 for (const label of ["repair-first", "bypass-enabled"] as const) {
-  for (const form of ["identity", "explicit-count"] as const) {
-    test(`naming v5 accepts ${form} with the observation's ある suffix in ${label}`, async () => {
+  for (const form of ["identity", "explicit-count", "named-subject"] as const) {
+    test(`naming v5 accepts ${form} in ${label}`, async () => {
       const outcomes: Awaited<ReturnType<typeof runTurn>>[] = [];
-      const feature = "突起が一つある";
+      const feature = form === "named-subject" ? property : "突起が一つある";
       const records = await buildRecords({ ...v5, label, memo: observation("count", feature),
         turns: [opening, deniedCheck(true, feature), answer(form)],
         onTurn: (side, outcome) => { if (side === label) outcomes.push(outcome); },
@@ -238,7 +256,7 @@ for (const label of ["repair-first", "bypass-enabled"] as const) {
     assert.deepEqual(replayStatus(records), ["pass", "pass", "pass", "pass"]);
   });
 
-  for (const form of ["both", "feature", "wrong", "other-part", "other-topic", "negative-identity", "uncertain-identity", "clipped-negation"] as const) {
+  for (const form of ["both", "feature", "wrong", "other-part", "other-topic", "negative-identity", "uncertain-identity", "clipped-negation", "corrected-count"] as const) {
     test(`naming v5 holds the name after a ${form} response in ${label}`, async () => {
       const outcomes: Awaited<ReturnType<typeof runTurn>>[] = [];
       const records = await buildRecords({ ...v5, label, memo: observation(), turns: [opening, deniedCheck(), answer(form)],
@@ -246,6 +264,10 @@ for (const label of ["repair-first", "bypass-enabled"] as const) {
       });
       const result = outcomes.at(-1)!;
       assert.equal(result.publication.status, "committed");
+      if (form === "corrected-count") {
+        assert.deepEqual(result.trace.local?.claims.filter(c => c.quote === firstCount || c.quote === correctedCount).map(c => [c.act, c.quote, c.targets]),
+          [["agree", firstCount, [own]], ["assert", correctedCount, [own]]]);
+      }
       assert.equal(result.state.judgments.at(-1).jevTurn.executed.action, "close");
       assert.equal(result.speech, "その特徴について聞きました。");
       assert.deepEqual(result.state.judgments.at(-1).jevTurn.agreeNames, []);

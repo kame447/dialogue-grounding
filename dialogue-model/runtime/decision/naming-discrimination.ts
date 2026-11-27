@@ -168,7 +168,7 @@ function opposesIdentity(text: string): boolean {
 }
 
 function isNamingClause(text: string, names: ReadonlySet<string>): boolean {
-  const proposal = /^(?:呼び名を変えて[、,]\s*)?[「『]([^「」『』]+)[」』](?:と呼び(?:ませんか|ましょう)|にし(?:ませんか|ましょう)|と呼ぼう|にしよう|で(?:いい|どう)(?:ですか)?)[。.!?]*$/u.exec(text);
+  const proposal = /^(?:呼び名を変えて[、,]\s*|この図形を)?[「『]([^「」『』]+)[」』](?:と呼び(?:ませんか|ましょう)|にし(?:ませんか|ましょう)|と呼ぼう|にしよう|で(?:いい|どう)(?:ですか)?)[。.!?]*$/u.exec(text);
   return proposal !== null && names.has(normalizeName(proposal[1]));
 }
 
@@ -211,6 +211,12 @@ export function namingContrastAnswer(denials: NamingDenials, memo: ObservationMe
   const proposals = new Set(claims.flatMap(c => c.speaker === "human" && c.sourceTurn === turn && c.act === "name_propose" &&
     c.name !== null && c.targets.includes(figureId) ? [normalizeName(c.name)] : []));
   const key = featureKey(feature), count = parseCount(key);
+  // A turn with a different explicit value for the same part and unit cannot
+  // settle this check, even if its first answer matches the requested count.
+  if (count?.part && clauses.some(({ text }) => {
+    const said = parseCount(featureKey(withoutAck(text)));
+    return said?.part === count.part && said.unit === count.unit && said.number !== count.number;
+  })) return null;
   const ids = replies.filter(({ segment, clause, antecedent }) => {
     if (antecedent !== ask.id || !isFigureReplyAspect(segment.aspect) || /[?？…]/u.test(clause.text)) return false;
     const answer = featureKey(withoutAck(clause.text));
