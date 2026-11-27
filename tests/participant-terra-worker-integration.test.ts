@@ -1500,7 +1500,7 @@ function v12Transport(t: TestContext, h: ReturnType<typeof harness>) {
   return { lookup, options, textPhases, prompts };
 }
 
-test('human-led move-on pins the new intervention and keeps v15 through participant Worker restore', async t => {
+test('human-led move-on keeps the v15 pin and requires its committed trace on cold restore', async t => {
   const h = harness(true, { ...figureBankProtocol, allowedOrders: [['repair-first', 'bypass-enabled']] });
   v12Transport(t, h);
   const profile = 'participant_dialogue_v13_p5_human_led_move_on';
@@ -1516,7 +1516,8 @@ test('human-led move-on pins the new intervention and keeps v15 through particip
   const id = trial.sessionId;
   await jsonOk(await h.request('message', { expectedRecordId: id, text: 'いったん別の話に移りたいです。' }));
   await h.idle();
-  const record = await h.storage.get('record:' + id);
+  const recordKey = 'record:' + id;
+  const record = await h.storage.get(recordKey);
   assert.equal(record.queueState.errorCode, null);
   assert.equal(record.options.generationRetryVersion, 'jev_generation_retry_v15');
   assert.equal(record.queueState.privateState.agreeNameScopeVersion, 'scoped_v11');
@@ -1529,6 +1530,18 @@ test('human-led move-on pins the new intervention and keeps v15 through particip
   assert.equal(restored.trial.sessionId, id);
   assert.equal(h.calls.length, posts);
   assert.doesNotMatch(JSON.stringify(restored), /humanMoveOn|human_move_on_source|interventionPolicy|bypass_acceptance_v2/u);
+
+  const missingTrace = { ...record, jevTraces: [] };
+  await h.storage.transaction(async tx => {
+    const owner = await tx.get('base:owner:v1');
+    owner.admissions[owner.activeKey].record = missingTrace;
+    await tx.put({ 'base:owner:v1': owner, [recordKey]: missingTrace });
+  });
+  h.evict();
+  const rejected = await h.request('state');
+  assert.equal(rejected.status, 409);
+  assert.deepEqual(await rejected.json(), { error: 'trial_unavailable' });
+  assert.equal(h.calls.length, posts);
 });
 
 for (const strategy of ['repair-first', 'bypass-enabled']) {

@@ -214,7 +214,8 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
       // A v2 record names its layout; a v1 record never does. profileSha256 below also differs between layouts.
       const savedLayout = Object.hasOwn(restore.options,'questionLayout') ? restore.options.questionLayout : 'two_stage_v1';
       if (savedLayout !== profile.questionLayout || Object.hasOwn(restore.options,'questionLayout') && savedLayout !== 'two_stage_v2' && savedLayout !== 'two_stage_v3') return invalid();
-      if (restore.jevTraces?.some?.((trace:any)=>!checkedDecisionFailure(trace,profile.questionLayout,p5Enabled,v.ledger instanceof ParticipantUsageLedger ? PARTICIPANT_USAGE_ONLY : undefined,profile.interventionPolicy.version==='bypass_acceptance_v2'))) return invalid();
+      const humanLedMoveOn = profile.interventionPolicy.version === 'bypass_acceptance_v2';
+      if (restore.jevTraces?.some?.((trace:any)=>!checkedDecisionFailure(trace,profile.questionLayout,p5Enabled,v.ledger instanceof ParticipantUsageLedger ? PARTICIPANT_USAGE_ONLY : undefined,humanLedMoveOn))) return invalid();
       if (restore.options.profileSha256 !== researchHash(profile) ||
           researchHash(jsonData(restore.options.interventionPolicy)) !== researchHash(profile.interventionPolicy) ||
           restore.queueState?.privateState?.schemaVersion !== 'jev_private_state_v2' ||
@@ -226,6 +227,7 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
       // The typed-naming-request marker is recomputed from the turn's verified claims and the stored version, and the copies of a committed turn (trace and saved state)
       // must be equal in every field they share.
       const savedJudgments: any[] = Array.isArray(restore.queueState?.privateState?.judgments) ? restore.queueState.privateState.judgments : [];
+      const unmatchedHumanMoves = new Set(humanLedMoveOn ? savedJudgments.filter(j => j?.jevTurn?.intervention?.reasonCode === 'human_led_move_on') : []);
       const ownSlots = restore.queueState.privateState.graph.slots;
       const earlierClaims: any[] = [];
       let previousJudgment: any;
@@ -248,13 +250,17 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
           if (!judgment) return invalid();
           for (const key of ['executed','humanReferent','repairProspect','repairGate','repairFacts','draftActs','draftSharedClaims','namingRequest','namingReconfirm','sharedConstruals'])
             if (Object.hasOwn(trace, key) !== Object.hasOwn(judgment.jevTurn, key) || Object.hasOwn(trace, key) && researchHash(jsonData(trace[key])) !== researchHash(jsonData(judgment.jevTurn[key]))) return invalid();
-          if (p5Enabled && (researchHash(jsonData(trace.decisions.at(-1))) !== researchHash(jsonData(judgment.jevTurn.decision)) ||
+          const humanMove = humanLedMoveOn && judgment.jevTurn.intervention?.reasonCode === 'human_led_move_on';
+          if ((p5Enabled || humanMove) && (researchHash(jsonData(trace.decisions.at(-1))) !== researchHash(jsonData(judgment.jevTurn.decision)) ||
               researchHash(jsonData(trace.intervention)) !== researchHash(jsonData(judgment.jevTurn.intervention)))) return invalid();
+          if (humanMove && (!trace.intervention?.humanMoveOn || trace.lastEventId !== judgment.lastEventId ||
+              !unmatchedHumanMoves.delete(judgment))) return invalid();
           if (Array.isArray(trace.local?.claims)) earlierClaims.push(...trace.local.claims);
           earlierClaims.push(...sameTurnAi);
           previousJudgment = judgment;
         }
       }
+      if (unmatchedHumanMoves.size) return invalid();
       // v2/v3 prospects are asked over open entries; v1 retains the full history.
       const v2 = technicalTrial?.version === 'adaptive_repair_v2' || technicalTrial?.version === 'adaptive_repair_v3';
       if (restore.jevTraces.some((trace:any)=>Object.hasOwn(trace,'repairGate') ? !v2 : v2 && Object.hasOwn(trace,'repairProspect'))) return invalid();
