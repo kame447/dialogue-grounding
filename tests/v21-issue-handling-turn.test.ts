@@ -240,3 +240,50 @@ test("v21 only validates a mixed policy history with the paired replay's explici
   mixed.judgments[0].generatedPublication.recovery.intervention.policy = "bypass_acceptance_v3:accept";
   assert.throws(() => validate("bypass-enabled", history));
 });
+
+for (const strategy of ["repair-first", "bypass-enabled"] as const)
+for (const answerMode of ["labelled", "local"] as const) {
+  test(`v21 ${strategy} commits a verified short answer without narrowing the referent (${answerMode})`, async () => {
+    const before = initialState({ profile, generationRetryVersion: ISSUE_HANDLING_GENERATION, agreeNameScopeVersion: "jev_naming_v2" });
+    const labelled = answerMode === "labelled";
+    const human = { id: "event-1", seq: 1, speaker: "human", text: "似ている形をもう少し確かめたいです。" };
+    const description = "丸い切り込みが見えます。", question = "そちらにもありますか？";
+    const slots = OWN.ownAnchors.map(({ id }: { id: string }) => id);
+    const choose = (key: string) => ({ human_move_on_source: "other", visual_purpose: "unknown", commitment_state: "insufficient" } as Record<string, string>)[key];
+    const claim = (id: string, text: string, aspect: string, targets: string[], reply: number | null = null) => ({
+      segmentId: id, quote: text, proposition: text, targets, aspect, name: null, linkedIssueId: null, respondsToTurn: reply,
+    });
+    const first = await runTurn(profile, strategy, before, [human], { action: "confirm", target: labelled ? "figure_0" : "figures_0_1", choose,
+      speech: draft(description + question), aiActs: ["assert", "ask"], aiExtraction: JSON.stringify({
+        segments: [claim("description", description, "part", [slots[0]]), claim("question", question, "question", labelled ? [] : [slots[0]])],
+        visualFeatures: { sources: [] },
+      }),
+    }, technicalTrial, ISSUE_HANDLING_GENERATION);
+    assert.equal(first.publication.status, "committed");
+    const answer = "はい、そうです。";
+    const next = await runTurn(profile, strategy, first.state, [...first.publication.publicEvents,
+      { id: "event-3", seq: 3, speaker: "human", text: answer }], {
+      action: "accept", target: "none", choose, speech: "分かりました。",
+      extraction: JSON.stringify([claim("answer", answer, labelled ? "question" : "part", labelled ? [] : [slots[0]], 2)]),
+      act: "agree", antecedent: "claim_1", answers: "answers_checked_point",
+    }, technicalTrial, ISSUE_HANDLING_GENERATION);
+    assert.equal(next.publication.status, "committed");
+    const [answerClaim] = next.trace.local?.claims ?? [];
+    assert.ok(answerClaim);
+    assert.deepEqual([answerClaim.act, answerClaim.aspect, answerClaim.source, answerClaim.targets],
+      ["agree", "question", labelled ? "partner_labelled_answer" : "partner_local_question_answer", [slots[0]]]);
+    const [entry] = next.state.repairHistory;
+    assert.deepEqual(entry.addedClaimIds, [answerClaim.id]);
+    assert.equal(entry.progress, "changed");
+    assert.deepEqual(entry.candidatesAfter, slots.slice(0, labelled ? 1 : 2));
+    const validate = (state: unknown) => validateJevPrivateStateV2(state, slots, issueHandlingForStrategy(strategy), "two_stage_v3",
+      "holistic_v5", ISSUE_HANDLING_GENERATION, undefined, next.publication.durable.events);
+    assert.doesNotThrow(() => validate(next.state));
+    const pruned = structuredClone(next.state);
+    pruned.graph.records = pruned.graph.records.filter((record: { id: string }) => record.id !== answerClaim.id);
+    assert.doesNotThrow(() => validate(pruned));
+    const narrowed = structuredClone(next.state);
+    narrowed.repairHistory[0].candidatesAfter = [slots[labelled ? 1 : 0]];
+    assert.throws(() => validate(narrowed));
+  });
+}

@@ -444,6 +444,13 @@ const targets = (decision: Pick<JevDecision, "target">) => decision.target.kind 
 const contentKey = (claim: LocalClaimView) => JSON.stringify([claim.aspect, claim.act, claim.proposition, claim.name]);
 const INFORMATION_ACTS = new Set(["assert", "agree", "deny", "construe", "name_propose", "name_accept", "name_reject"]);
 const figureInformation = (claim: LocalClaimView) => INFORMATION_ACTS.has(claim.act) && !["question", "progress"].includes(claim.aspect);
+const verifiedRepairAnswer = (claim: LocalClaimView) =>
+  (claim.source === LABELLED_ANSWER_SOURCE || claim.source === LOCAL_QUESTION_ANSWER_SOURCE) &&
+  claim.respondsTo !== null && (claim.act === "agree" || claim.act === "deny");
+const repairInformation = (claim: LocalClaimView, linkedEvidenceOnly: boolean) =>
+  figureInformation(claim) || linkedEvidenceOnly && verifiedRepairAnswer(claim);
+const repairReferentAct = (act: LocalClaimView["act"]) => act === "assert" || act === "agree";
+const repairReferentEvidence = (claim: LocalClaimView) => claim.aspect === "referent" && repairReferentAct(claim.act);
 const sameSet = (a: readonly string[], b: readonly string[]) => a.length === b.length && new Set(a).size === a.length && a.every(id => b.includes(id));
 // Shared with the publication rejection below; no new semantic acceptance rule.
 const eligibleAgreeClaim = (c: LocalClaimView) => c.aspect === "name" && c.name !== null && c.targets.length === 1 &&
@@ -614,16 +621,13 @@ export function updateRepairHistory(history: readonly RepairHistoryEntry[], befo
     (linked(c) || answered && !context?.linkedEvidenceOnly &&
       (!c.targets.length || c.targets.some(id => pending.candidatesBefore.includes(id)))));
   if (!replies.length && !answered) return result;
-  const isVerifiedAnswer = (c: LocalClaimView) =>
-    (c.source === LABELLED_ANSWER_SOURCE || c.source === LOCAL_QUESTION_ANSWER_SOURCE) &&
-    c.respondsTo !== null && (c.act === "agree" || c.act === "deny");
-  const isInformation = (c: LocalClaimView) => figureInformation(c) || context?.linkedEvidenceOnly === true && isVerifiedAnswer(c);
+  const isInformation = (c: LocalClaimView) => repairInformation(c, context?.linkedEvidenceOnly === true);
   const information = replies.filter(isInformation);
   const previousContent = before.filter(c => c.speaker === "human" && isInformation(c));
   const novel = information.filter(c => {
     if (!c.targets.length) return false;
     const duplicate = previousContent.some(prior => contentKey(prior) === contentKey(c) && prior.targets.some(id => c.targets.includes(id)) &&
-      (!context?.linkedEvidenceOnly || prior.issueId === c.issueId && (!isVerifiedAnswer(c) || prior.respondsTo === c.respondsTo)));
+      (!context?.linkedEvidenceOnly || prior.issueId === c.issueId && (!verifiedRepairAnswer(c) || prior.respondsTo === c.respondsTo)));
     previousContent.push(c);
     return !duplicate;
   });
@@ -631,7 +635,7 @@ export function updateRepairHistory(history: readonly RepairHistoryEntry[], befo
   pending.partnerClaims = replies.map(({ id, act, proposition, targets }) => ({ id, act, proposition, targets: [...targets] }));
   // A linked objection or supporting detail can inform repair without determining the referent.
   const referentEvidence = context?.linkedEvidenceOnly
-    ? information.filter(c => c.aspect === "referent" && (c.act === "assert" || c.act === "agree")) : information;
+    ? information.filter(repairReferentEvidence) : information;
   pending.candidatesAfter = referentEvidence.length ? [...new Set(referentEvidence.flatMap(c => c.targets))] : [...pending.candidatesBefore];
   pending.addedClaimIds = novel.map(c => c.id);
   pending.removedClaimIds = before.filter(c => c.issueId === pending.issueId && !after.some(next => next.id === c.id)).map(c => c.id);
@@ -1366,29 +1370,42 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
      // No later turn exists, so no human reply could have updated this entry yet: it is exactly as created. A progress label never opens it.
      if(entry.progress!=='unknown'||!same||claimsOf.length||entry.addedClaimIds?.length||entry.removedClaimIds?.length||Object.hasOwn(entry,'missingReasons')||Object.hasOwn(entry,'humanRejections'))throw Error();
     }else{
-     // A later committed turn exists. Mirror updateRepairHistory exactly: the candidate set is the union of the targets of the information claims among the
-     // partner claims, or the original set when there is none; missingReasons only ever turn the progress into unknown and never change the set.
-     // Resolve every partner claim against the live graph: a claim still there is judged exactly as the generator did (figureInformation);
-     // a pruned one is judged by its act alone, and every way it could count is allowed.
-     // The generator puts only novel information claims into addedClaimIds, so an id listed there was an information claim then, even when a later
-     // withdrawal or pruning removed the claim from the graph; a withdrawn claim that is still recorded resolves from its record.
+     // v21 distinguishes verified information from evidence that identifies the referent.
+     // A pruned claim's saved act bounds what it could have contributed without recovering its aspect.
      const addedSet=new Set<string>(Array.isArray(entry.addedClaimIds)?entry.addedClaimIds:[]);
      const resolved:any[]=[],unresolved:any[]=[],named:Set<string>=new Set();
      for(const c of claimsOf){
       if(!c||!Array.isArray(c.targets)||typeof c.id!=='string')throw Error();
       const g=graphClaims.get(c.id);
-      if(g){if(g.act!==c.act||!stateSame(g.targets,c.targets))throw Error();if(figureInformation(g)){resolved.push(c);if(c.targets.length)named.add(c.id);}}
-      else if(addedSet.has(c.id)){if(!INFORMATION_ACTS.has(c.act)||!c.targets.length)throw Error();resolved.push(c);named.add(c.id);}
-      else if(INFORMATION_ACTS.has(c.act)){unresolved.push(c);if(c.targets.length)named.add(c.id);}
+      if(g){
+       if(g.act!==c.act||!stateSame(g.targets,c.targets))throw Error();
+       if(repairInformation(g,issueHandling)){
+        if(!issueHandling||repairReferentEvidence(g))resolved.push(c);
+        if(c.targets.length)named.add(c.id);
+       }
+      }else if(addedSet.has(c.id)){
+       if(!INFORMATION_ACTS.has(c.act)||!c.targets.length)throw Error();
+       if(!issueHandling)resolved.push(c);
+       else if(repairReferentAct(c.act))unresolved.push(c);
+       named.add(c.id);
+      }else if(INFORMATION_ACTS.has(c.act)){
+       if(!issueHandling||repairReferentAct(c.act))unresolved.push(c);
+       if(c.targets.length)named.add(c.id);
+      }
      }
      const expected=(list:any[])=>list.length?[...new Set(list.flatMap((c:any)=>c.targets))]:[...ids];
      let setOk:boolean;
      if(!unresolved.length)setOk=stateSame(after,expected(resolved));
+     else if(issueHandling){
+      const compatible=unresolved.filter(c=>c.targets.every((id:string)=>after.includes(id)));
+      setOk=!resolved.length&&same||resolved.length+compatible.length>0&&sameSet(after,expected([...resolved,...compatible]));
+     }
      else if(unresolved.length>8)setOk=resolved.every((c:any)=>c.targets.every((id:string)=>after.includes(id)))&&after.every((id:string)=>[...resolved,...unresolved].some((c:any)=>c.targets.includes(id)));
      else{setOk=false;for(let mask=0;mask<1<<unresolved.length&&!setOk;mask++){const exp=expected([...resolved,...unresolved.filter((_:any,n:number)=>mask>>n&1)]);setOk=exp.length===after.length&&exp.every((id:string)=>after.includes(id));}}
      if(!setOk)throw Error();
      const added=Array.isArray(entry.addedClaimIds)?entry.addedClaimIds:[];
-     if(new Set(added).size!==added.length||!added.every((id:string)=>named.has(id)&&claimsOf.find((c:any)=>c.id===id).targets.every((t:string)=>after.includes(t))))throw Error();
+     if(new Set(added).size!==added.length||!added.every((id:string)=>named.has(id)&&
+       (issueHandling||claimsOf.find((c:any)=>c.id===id).targets.every((t:string)=>after.includes(t)))))throw Error();
      const narrowed=after.length>0&&after.length<ids.length&&after.every((id:string)=>ids.includes(id));
      const reasons=Array.isArray(entry.missingReasons)?entry.missingReasons.length:0;
      if(entry.progress==='changed'){if(!(added.length||narrowed))throw Error();}
@@ -1670,7 +1687,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         state.repairHistory.some(r => r.turn === previous.turnIndex && r.action === "confirm" && r.question === previousAi.text);
       let repairHistory = updateRepairHistory(state.repairHistory, beforeClaims, claims, latest.seq,
         previous && previousAi && ["repair", "confirm", "revisit"].includes(previous.judgment.action) ? { answeredRepairTurn: previous.turnIndex,
-          ...(repairQuality ? { linkedEvidenceOnly: true as const } : {}),
+          ...(repairQuality || issueHandling ? { linkedEvidenceOnly: true as const } : {}),
           ...(aiEnabled ? { aiPublic: { humanOk: prepared.trace.status === "ok", rejected: prepared.trace.rejected,
             aiComplete: !!answersNamingRecovery || state.aiPublic!.log.some(log => log.aiSeq === previousAi.turn && log.status === "applied") } } : {}) }
           : aiEnabled ? { answeredRepairTurn: -1, aiPublic: { humanOk: prepared.trace.status === "ok", rejected: prepared.trace.rejected, aiComplete: false } } : undefined);
