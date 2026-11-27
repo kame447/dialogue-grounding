@@ -2,6 +2,7 @@ import type { LedgerAction } from "./judgment-material-v5.ts";
 import type { ShapeTerminologyVersion } from "../shape-terminology.ts";
 import type { JudgmentMaterialVersion, JevPublicationRecoveryContext } from "./repair-quality.ts";
 import type { ReferenceEvidence } from "../local-grounding/reference-evidence.ts";
+import type { CarryDestination, ExtraSelection, JevActionV21, JevIssueRef, ISSUE_HANDLING_VERSION } from "./issue-handling.ts";
 // Decision 0002, opt-in research contract. Jev alone selects the next action;
 // observations and repair progress are materials, never an answer key or policy.
 import type { ObservationMemo } from "../observation/contract.ts";
@@ -10,13 +11,14 @@ import type { OwnLedger } from "../judgment/schema.mjs";
 
 export const JEV_ACTIONS = Object.freeze(["accept", "propose_name", "confirm", "repair", "defer", "revisit", "agree", "move_on", "close", "request_observation"] as const);
 export type JevAction = typeof JEV_ACTIONS[number];
+export type JevDecisionAction = JevAction | JevActionV21;
 export const OBSERVATION_ASPECTS = Object.freeze(["orientation", "part", "contour", "construal", "referent"] as const);
 export type DecisionObservationAspect = typeof OBSERVATION_ASPECTS[number];
 export type JevTarget = { kind: "single"; figureId: string } | { kind: "multiple"; figureIds: string[] } | { kind: "none" };
 export const JEV_VISUAL_PURPOSE_VERSION = "jev_visual_purpose_v1";
 export const JEV_VISUAL_PURPOSE_GENERATION = "jev_generation_retry_v19";
-export function usesJevVisualPurpose(generation: unknown): generation is typeof JEV_VISUAL_PURPOSE_GENERATION {
-  return generation === JEV_VISUAL_PURPOSE_GENERATION;
+export function usesJevVisualPurpose(generation: unknown): generation is typeof JEV_VISUAL_PURPOSE_GENERATION | "jev_generation_retry_v21" {
+  return generation === JEV_VISUAL_PURPOSE_GENERATION || generation === "jev_generation_retry_v21";
 }
 export type JevVisualPurpose =
   | { kind: "clarify_reference" | "resolve_mismatch" | "unknown" }
@@ -87,7 +89,8 @@ export type JevNamingGrounding = {
   verdict: "grounded" | "unresolved" | "contradicted" | "unconfirmed";
   evidenceTurn: number | null;
 };
-export type JevPriorAction = { turn: number; action: JevAction; target: JevTarget; name: string | null; feature: string | null };
+export type JevPriorAction = { turn: number; action: JevDecisionAction; target: JevTarget; name: string | null; feature: string | null;
+  decisionTurn?: number; issue?: JevIssueRef; destination?: CarryDestination; visualPurpose?: JevVisualPurpose };
 /** Human utterance referent, independent of the next action's target. No winner or calibration. */
 export type HumanReferentMaterial = { status: "ok" | "unknown"; scores: Record<string, number> | null };
 export type HumanReferentEstimate = HumanReferentMaterial & {
@@ -125,8 +128,13 @@ export type JevDecisionInput = {
   jevNaming?: { localRejections: Array<{ quote: string; reason: string }> };
   judgmentMaterialVersion?: JudgmentMaterialVersion;
   visualPurposeVersion?: typeof JEV_VISUAL_PURPOSE_VERSION;
+  issueHandlingVersion?: typeof ISSUE_HANDLING_VERSION;
   shapeTerminologyVersion?: ShapeTerminologyVersion;
-  publicationRecoveryContext?: JevPublicationRecoveryContext;
+  publicationRecoveryContext?: Omit<JevPublicationRecoveryContext, "previous"> & {
+    previous: Omit<JevPublicationRecoveryContext["previous"], "action"> & {
+      action: Exclude<JevDecisionAction, "request_observation">; issue?: JevIssueRef; destination?: CarryDestination;
+    };
+  };
   referenceEvidence?: ReferenceEvidence;
   /** Private participant ledger for candidate validation. Never serialized to Jev. */
   participantLedger?: OwnLedger;
@@ -170,7 +178,7 @@ export type DecisionInputBudget = {
 export type JevDecisionStageEvidence = {
   /** multiple_candidates exists only in two_stage_v2, between action_target and detail.
    * action and target exist only in two_stage_v3 (action, then the target the chosen action may take, then detail). */
-  stage: "action_target" | "multiple_candidates" | "detail" | "action" | "target";
+  stage: "action_target" | "multiple_candidates" | "detail" | "action" | "target" | "extras";
   model: string | null;
   responseId: string | null;
   /** Wire choice labels, with complete uncalibrated score maps for research only. */
@@ -187,12 +195,16 @@ export type JevDecisionEvidence = Omit<JevDecisionStageEvidence, "stage"> & {
   stages?: JevDecisionStageEvidence[];
 };
 export type JevDecision = {
-  action: JevAction;
+  action: JevDecisionAction;
   target: JevTarget;
   name: string | null;
   feature: string | null;
   /** v19 confirm/repair only. A dialogue objective, with a public source when it identifies an issue. */
   visualPurpose?: JevVisualPurpose;
+  issue?: JevIssueRef;
+  destination?: CarryDestination;
+  alternativeSharedClaimIds?: string[];
+  extras?: ExtraSelection[];
   /** Sources of the selected name/feature, within target; never a narrowed target. */
   detailFigureIds?: string[];
   sharedClaimIds?: string[];
@@ -245,8 +257,8 @@ export const SEMANTIC_DRAFT_ACTS = [...DRAFT_ACTS, "adopt_context", "propose_cho
 export type DraftAct = typeof SEMANTIC_DRAFT_ACTS[number] | "withdraw_selected";
 export type DraftMoveOn = { choice: "honors_request" | "mismatch"; scores: Record<string, number> };
 export type DraftActInput = { turn: number; publicTurns: readonly PublicTurn[]; reasons: readonly string[];
-  selected: { action: JevAction; target: JevTarget; name: string | null }; draft: string;
-  semanticNaming?: { currentTurnSource: boolean }; withdrawPriorName?: string; moveOnDraft?: string };
+  selected: { action: JevDecisionAction; target: JevTarget; name: string | null }; draft: string;
+  semanticNaming?: { currentTurnSource: boolean }; withdrawPriorName?: string; moveOnDraft?: string; issueHandlingVersion?: typeof ISSUE_HANDLING_VERSION };
 export type DraftActResult = { status: "ok" | "error"; choice: DraftAct | null; scores: Record<string, number> | null; model: string | null;
   responseId: string | null; costUsd: number | null; latencyMs: number; error: string | null; moveOn?: DraftMoveOn };
 /** What a P5 draft claims beyond the shared construal (jev_generation_retry_v14): a closed set judged by Jev. */
@@ -255,7 +267,7 @@ export type DraftSharedClaim = typeof DRAFT_SHARED_CLAIMS[number];
 export type DraftSharedClaimInput = {
   turn: number;
   publicTurns: readonly PublicTurn[];
-  selected: { action: JevAction; target: JevTarget; name: string | null; feature: string | null };
+  selected: { action: JevDecisionAction; target: JevTarget; name: string | null; feature: string | null };
   sharedConstrual: { figureIds: readonly string[]; construal: string; openDetails: readonly SharedConstrual["openDetails"][number][] };
   singleIdentificationSupported: boolean;
   draft: string;

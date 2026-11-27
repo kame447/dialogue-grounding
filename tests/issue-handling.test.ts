@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { BYPASS_ACCEPTANCE_V1_CANONICAL_JSON, BYPASS_ACCEPTANCE_V1_TABLE_SHA256 } from '../dialogue-model/runtime/decision/bypass-acceptance.ts';
 import { BYPASS_ACCEPTANCE_V2_CANONICAL_JSON, BYPASS_ACCEPTANCE_V2_TABLE_SHA256 } from '../dialogue-model/runtime/decision/human-led-move-on.ts';
-import { BYPASS_ACCEPTANCE_V3_CANONICAL_JSON, BYPASS_ACCEPTANCE_V3_TABLE_SHA256, applyIssueHandling, issueHandlingForStrategy } from '../dialogue-model/runtime/decision/issue-handling.ts';
+import { BYPASS_ACCEPTANCE_V3_CANONICAL_JSON, BYPASS_ACCEPTANCE_V3_TABLE_SHA256, applyIssueHandling, issueHandlingForStrategy, issueHandlingMatchesSource } from '../dialogue-model/runtime/decision/issue-handling.ts';
 import type { IssueHandlingInput, JevIssueRef, SwitchFunction, NonBypassAlternative } from '../dialogue-model/runtime/decision/issue-handling.ts';
 import type { JevDecisionStageEvidence, RepairHistoryEntry } from '../dialogue-model/runtime/decision/contract.ts';
 
@@ -21,9 +21,8 @@ const base = { turn: 10, ownSlots: [a.figureId, b.figureId, 'shape-c', 'shape-d'
 const forecast: IssueHandlingInput['repairProspect'] = { status: 'ok', issue: { choice: 'issue', turn: 8, issueId: current.issueId },
   prospect: 'stalled', basis: 'repetition', scores: { repair_issue: {}, prospect: {}, basis: {} } };
 const recorded = { ...base, repairHistory: [history], repairProspect: forecast,
-  priorClaims: [{ id: current.claimId, turn: 7, issueId: current.issueId, sourceTurn: 7, source: 'partner_statement',
-    speaker: 'human', targets: [a.figureId], aspect: 'question', act: 'ask', proposition: '台は丸いですか？', quote: '台は丸いですか？',
-    name: null, respondsTo: null }] } satisfies IssueHandlingInput;
+  priorClaims: [{ id: current.claimId, turn: 7, issueId: current.issueId, sourceTurn: 7,
+    speaker: 'human', targets: [a.figureId], aspect: 'question', act: 'ask' }] } satisfies IssueHandlingInput;
 
 function decision(action: Decision['action'], { target = a as Decision['target'], issue = unknown as JevIssueRef,
   initiator = 'other', switchFunction = 'resolve_old_issue' as SwitchFunction,
@@ -70,12 +69,12 @@ test('grounded hold, including an unknown issue, inherits the complete scope of 
 });
 
 test('carry-over uses claim, latest relevant history, then previous action as its anchor', () => {
-  const prev = { turn: 9, action: 'confirm', target: a, name: null, feature: null } as const;
+  const prev = { turn: 9, decisionTurn: 8, action: 'confirm', target: a, name: null, feature: null } as const;
   const input = { ...recorded, previousAction: prev, repairHistory: [history, { ...history, turn: 9 }] };
   for (const [data, original, anchor] of [
     [input, decision('carry_over', { issue: current, alternative: 'consult' }), { kind: 'issue_claim', claimId: current.claimId, sourceTurn: current.sourceTurn }],
     [input, decision('carry_over', { alternative: 'consult' }), { kind: 'repair_history', turn: 9 }],
-    [{ ...input, repairHistory: [] }, decision('carry_over', { alternative: 'consult' }), { kind: 'previous_action', turn: 9 }],
+    [{ ...input, repairHistory: [] }, decision('carry_over', { alternative: 'consult' }), { kind: 'previous_action', turn: 8 }],
   ] as const) {
     const accepted = applyIssueHandling(data, original, 'bypass-enabled');
     const refused = applyIssueHandling(data, original, 'repair-first');
@@ -113,20 +112,39 @@ test('revisit may become carry-over with an unbound destination; its alternative
   assert.equal(adopted.intervention.original.action, 'revisit');
   assert.equal(adopted.intervention.handling.via, 'revisit');
   assert.deepEqual(adopted.intervention.handling.source, { target: a, issue: current, derivation: 'repair_prospect_issue' });
-  assert.deepEqual(adopted.intervention.handling.anchor, { kind: 'repair_history', turn: 8 });
+  assert.deepEqual(adopted.intervention.handling.anchor, { kind: 'issue_claim', claimId: current.claimId, sourceTurn: current.sourceTurn });
   assert.equal(refused.executed.action, 'consult');
   assert.deepEqual(refused.executed.issue, current);
   assert.deepEqual(refused.executed.target, a);
 });
 
+test('revisit-derived carry-over records the newest overlapping history when no claim supplies its anchor', () => {
+  const original = decision('revisit', { target: b, switchFunction: 'secure_progress', alternative: 'consult' });
+  const input = { ...base, repairHistory: [{ ...history, turn: 1 }, { ...history, turn: 3 }],
+    repairProspect: { ...forecast, issue: { choice: 'issue', turn: 1, issueId: history.issueId } } } satisfies IssueHandlingInput;
+  const result = applyIssueHandling(input, original, 'repair-first');
+  assert.deepEqual(result.intervention.handling.source, { target: a, issue: unknown, derivation: 'repair_prospect_issue' });
+  assert.deepEqual(result.intervention.handling.anchor, { kind: 'repair_history', turn: 3 });
+  assert.equal(result.intervention.disposition, 'rejected');
+});
+
 test('an empty prospect falls back to the preceding execution; returning within that figure stays in its scope', () => {
-  const currentAction = { turn: 9, action: 'confirm', target: a, name: null, feature: null, visualPurpose: current } as const;
+  const currentAction = { turn: 9, decisionTurn: 8, action: 'confirm', target: a, name: null, feature: null, visualPurpose: current } as const;
   const input = { ...recorded, repairHistory: [{ ...history, candidatesAfter: [] }], previousAction: currentAction };
   const found = applyIssueHandling(input, decision('revisit', { issue: old, switchFunction: 'secure_progress' }), 'bypass-enabled');
   assert.deepEqual(found.intervention.handling.source, { target: a, issue: current, derivation: 'previous_action' });
   assert.deepEqual(found.executed.destination, { kind: 'same_figure_other_issue' });
   const pruned = applyIssueHandling({ ...input, priorClaims: [] }, decision('revisit', { issue: old, switchFunction: 'secure_progress' }), 'bypass-enabled');
   assert.deepEqual(pruned.intervention.handling.source?.issue, unknown);
+  assert.deepEqual(pruned.intervention.handling.anchor, { kind: 'previous_action', turn: 8 });
+});
+
+test('the later retained claim wins at the same source and claim turns', () => {
+  const latest = { ...recorded.priorClaims[0], id: '7:local1' };
+  const input = { ...recorded, priorClaims: [...recorded.priorClaims, latest] };
+  const original = decision('revisit', { target: b, switchFunction: 'secure_progress' });
+  const result = applyIssueHandling(input, original, 'repair-first');
+  assert.deepEqual(result.intervention.handling.anchor, { kind: 'issue_claim', claimId: latest.id, sourceTurn: 7 });
 });
 
 test('revisit stays common when it resolves the old issue, the function is unclear, or there is no distinct current problem', () => {
@@ -153,4 +171,20 @@ test('recording D8 does not change the plan or introduce another veto action', (
       assert.equal(result.executed.action, action);
     }
   }
+});
+
+test('previous-action anchors and unscoped human sources use the decision turn, not the AI event number', () => {
+  const perTurnIssue = { kind: 'resolve_issue', claimId: '9:local0', issueId: '9:local0', sourceTurn: 9 } as const;
+  const { claimId, issueId, sourceTurn } = perTurnIssue;
+  const input: IssueHandlingInput = { ...base, turn: 11,
+    priorClaims: [{ ...recorded.priorClaims[0], id: claimId, issueId, sourceTurn, turn: 9, targets: [] }],
+    previousAction: { action: 'hold_open', target: a, issue: perTurnIssue, name: null, feature: null, turn: 10, decisionTurn: 9 },
+  };
+  const original = decision('revisit', { target: b, switchFunction: 'secure_progress' });
+  const result = applyIssueHandling(input, original, 'repair-first');
+  assert.deepEqual(result.intervention.handling.anchor, { kind: 'issue_claim', claimId, sourceTurn });
+  assert.deepEqual(result.executed.visualPurpose, perTurnIssue);
+  assert.equal(issueHandlingMatchesSource(perTurnIssue, a, input.turn, input.priorClaims[0], input.previousAction), true);
+  assert.equal(issueHandlingMatchesSource(perTurnIssue, b, input.turn, input.priorClaims[0], input.previousAction), false);
+  assert.equal(issueHandlingMatchesSource(perTurnIssue, a, input.turn, input.priorClaims[0]), false);
 });

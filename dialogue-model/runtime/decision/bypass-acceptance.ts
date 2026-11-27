@@ -164,7 +164,7 @@ function openIssueRerank(input:BypassAcceptanceInput,scores:Record<string,number
  * be reconstructed here. Revisit requires the preceding committed execution.
  */
 export function isOpenIssueRerankRecord(intervention:unknown,decision:unknown,executed:unknown,ownSlots:readonly string[],
- previousAction?:{action:JevAction;target:JevTarget}|null,agreeNames?:readonly PublicNameCandidate[],questionLayout:JevQuestionLayout='two_stage_v1',
+ previousAction?:Pick<NonNullable<JevDecisionInput['previousAction']>,'action'|'target'>|null,agreeNames?:readonly PublicNameCandidate[],questionLayout:JevQuestionLayout='two_stage_v1',
  repairProspect?:BypassAcceptanceInput['repairProspect'],acceptOptional=false):boolean {
  try{
   jsonData([intervention,decision,executed,ownSlots,previousAction??null,agreeNames??null,repairProspect??null]);
