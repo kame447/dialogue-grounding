@@ -17,8 +17,8 @@ export type DecisionObservationAspect = typeof OBSERVATION_ASPECTS[number];
 export type JevTarget = { kind: "single"; figureId: string } | { kind: "multiple"; figureIds: string[] } | { kind: "none" };
 export const JEV_VISUAL_PURPOSE_VERSION = "jev_visual_purpose_v1";
 export const JEV_VISUAL_PURPOSE_GENERATION = "jev_generation_retry_v19";
-export function usesJevVisualPurpose(generation: unknown): generation is typeof JEV_VISUAL_PURPOSE_GENERATION | "jev_generation_retry_v21" {
-  return generation === JEV_VISUAL_PURPOSE_GENERATION || generation === "jev_generation_retry_v21";
+export function usesJevVisualPurpose(generation: unknown): generation is typeof JEV_VISUAL_PURPOSE_GENERATION | "jev_generation_retry_v21" | "jev_generation_retry_v22" {
+  return generation === JEV_VISUAL_PURPOSE_GENERATION || generation === "jev_generation_retry_v21" || generation === "jev_generation_retry_v22";
 }
 export type JevVisualPurpose =
   | { kind: "clarify_reference" | "resolve_mismatch" | "unknown" }
