@@ -37,10 +37,12 @@ import {AI_BOUND_SOURCE,LABELLED_ANSWER_SOURCE,LOCAL_QUESTION_ANSWER_SOURCE} fro
 import {check,hash,equal,row,rows,list,META_KEYS} from './core.ts';
 import type {Check,Records,Row} from './core.ts';
 import {NAMING_GUIDANCE,holdPublication,namingHold,namingInputMatches,namingMaterial,namingQuestions,namingRecoveryHistoryMatches,namingVerdict} from './naming-records.ts';
+import {draftTopicShiftMatches,TOPIC_SHIFT_CHOICES,TOPIC_SHIFT_RETRY_REASON} from './draft-topic-shift-records.ts';
+import {retainedClassificationMatches,retainedGenerationMatches,retainedReferenceHistory,RETAINED_REFERENCE_EXTRACTION} from './retained-reference-records.ts';
 import {extractionEvidenceForJob,isIssueHandlingExecution,issueHandlingDecisionShape,issueHandlingExtraRequestsMatch,issueHandlingFailureStage,issueHandlingFeatureScope,
  issueHandlingBasisMatches,issueHandlingCloseMatches,issueHandlingLedger,issueHandlingPartsMatch,issueHandlingPublicationPath,
  issueHandlingRelation,issueHandlingReplayBoundary,issueHandlingRequestMatches,issueHandlingSourcesMatch,
- publishedIssueHandlings,publishedPreviousExtras,S4_ISSUE_HANDLING_GENERATION,S4_ISSUE_HANDLING_POLICY,S4_ISSUE_HANDLING_TABLE_SHA256} from './issue-handling-records.ts';
+ publishedIssueHandlings,publishedPreviousExtras,s4UsesIssueHandling,S4_ISSUE_HANDLING_POLICY,S4_ISSUE_HANDLING_TABLE_SHA256} from './issue-handling-records.ts';
 const POLICY='376d569120ca36a3eceaf5ab95410f7eb83f25fbb681e7566a684b97c35165c8';
 const ACTIONS=['accept','propose_name','confirm','repair','defer','revisit','agree','move_on','close','request_observation'];
 const INNER_CODES=['invalid_scores','no_valid_alternative','detail_unavailable','invalid_executed','invalid_options','invalid_input','invalid_response','invalid_decision','inconsistent_decision','model_mismatch','key_unavailable','key_leak','unauthorized','payment_required','not_found','rate_limited','upstream_error','network_error','timeout','aborted','cost_cap','cost_unreported','busy'];
@@ -72,6 +74,14 @@ const MULTI_ISSUE_START_S4='この発話では、items に並ぶ扱いをすべ�
 const MULTI_ISSUE_REPAIR_S4='この扱いの部分では、その論点について判断を保留したり話を移したりせず、選ばれた論点を、この行動の範囲で確かめてください。';
 const MULTI_ISSUE_DRAFT_S4='出力は parts と observationFeatures を持つ JSON オブジェクトです。parts は、発話に現れる順の配列で、各要素は item（items の番号）と text（その扱いを述べる公開の文）を持ちます。items のすべての番号を、ちょうど 1 回ずつ使ってください。observationFeatures は、発話の全体で使った観察の出所の配列です。使わなければ空配列です。';
 const MULTI_ISSUE_DEFERRAL_S4='扱いに carry_over も consult も含まれないときは、未解決の図形について保留・先送り・別の図形への移行を提案しないでください。';
+const RECONFIRM_NAME_V22_S4='今回は既に合意した呼び名の再確認です。命名の記録で同じ図形に合意済みの名前であれば、その名前で決まっていると肯定してかまいません。新しい採用や提案をせず、見立てに言い換えないでください。';
+const AGREED_NAME_REFERENCE_V22_S4='合意済みの名前は、選ばれた行動の範囲で、その図形の呼び名としてそのまま参照できます。暫定・保留の名前を決まったものとして扱わないでください。';
+const MULTI_ISSUE_STAY_V22_S4='この扱いの部分では、その論点について判断を保留したり話を移したりしないでください。';
+const CONFIRM_NO_DEFERRAL_V22_S4='未解決の図形について保留や命名の先送りを提案しないでください。';
+const CONFIRM_SCOPE_V22_S4='判断で選ばれた論点（目的）について、形の参照枠に関する共通教示に沿って短く尋ねて確かめてください。観察メモにない特徴を肯定したり、同じ図形だと断定したりしないでください。'+
+ CONFIRM_NO_DEFERRAL_V22_S4+'選ばれた論点に必要な点だけを確かめ、ほかの部品の確認を足さないでください。決まった・それでいこうとは言わないでください。';
+const AGREED_NAME_RULE_V22_S4='どちらも新しい合意を表明しないでください。新しい名前の合意を表明できるのはagreeのときだけです。合意済みの名前は、選ばれた行動の範囲で既に決まっている名前として参照できます。';
+const NEW_NAME_RESTRICTION_V22_S4='新しい名前が決まったり、新たに対象を共同で特定できたりしたとは言わないでください。';
 // Final scope wording approved for §4.7 and the item scopes in §6.2.
 const ISSUE_ACTION_SCOPES: Readonly<Record<string,string>>={
  hold_open:'相手の提示に短く反応し、issueの論点について、理解できた、採用する、食い違っている、のいずれも言い切らないでください。ためらい、相手の言葉の短い反復、観察メモに根拠のある候補を独り言のように挙げることのいずれかで、判断がまだ定まらないことを伝えてください。直接の問いや確認の依頼を作らず、相手が自分から補足できるところで発話を終えてください。保留、後回し、移行、名前や対象の確定を宣言しないでください。publicQuestionsに観察メモで答えられる別の問いがあれば先に短く答えてください。issueのkindがresolve_issueのときは、出所のある局所論点を指します。',
@@ -79,7 +89,8 @@ const ISSUE_ACTION_SCOPES: Readonly<Record<string,string>>={
  consult:'issueの論点がまだ合わせられていないことを短く伝え、確かめ続けるか、別の進め方にするかを相手に尋ねてください。進み方は相手に委ね、自分から移ったり、どちらかに誘導したりしないでください。解決や放棄を表明せず、自分側の観察の特徴は述べないでください。',
  revisit:'以前に未解決のまま残したissueの論点に戻り、そこを解決したいことが伝わるようにしてください。戻ることを一言で伝え、確かめたい点を一つ扱えます。決まったとは言わないでください。',
 };
-const isJevNamingScope=(scope:unknown)=>scope==='jev_naming_v1'||scope==='jev_naming_v2';
+const isJevNamingScope=(scope:unknown)=>scope==='jev_naming_v1'||scope==='jev_naming_v2'||scope==='jev_naming_v3';
+const rechecksJevNamingAnswers=(scope:unknown)=>scope==='jev_naming_v2'||scope==='jev_naming_v3';
 const CONFIRM_FEATURE_VIEWPOINT_V5_S4='以下のdiscriminatingFeatureは自分側の観察です。選ばれた特徴を確かめるのに必要な形や部分同士のつながりを、回転しても変わらない表現で優先して伝えてください。別の特徴を列挙したり、相手が使った方位を自分側の観察として写したりしないでください。方位が区別に必要な箇所では、その語と同じ節で、その語より前に「こちらの画面では」など自分側の見え方を明示する標識を置き、相手には形の対応を尋ねてください。別の節や文にある標識に頼らないでください。';
 // Closed, ordered reason text for the original and restated-judgment prompts.
 type RetryReason={codes:readonly string[];text:string;legacy?:string};
@@ -107,19 +118,23 @@ const RETRY_REASONS:readonly RetryReason[]=[
 ];
 const RETRY_REASONS_SPECIFIC=RETRY_REASONS.flatMap(reason=>reason.codes.includes('orientation_leak')?SPECIFIC_VIEWPOINT_REASONS:[reason]);
 const RETRY_REASONS_V16=[...RETRY_REASONS_SPECIFIC,{codes:['confirmation_detail_mismatch'],text:'前の下書きでは選んだ確認特徴を照合できませんでした。その特徴を尋ねる文を作り、指定されたJSONの形で返してください。'}];
+const RETRY_REASONS_V22=[...RETRY_REASONS_SPECIFIC.map(reason=>reason.codes.includes('unsupported_topic_shift')
+ ?{codes:['unsupported_topic_shift','draft_topic_shift_unconfirmed'],text:TOPIC_SHIFT_RETRY_REASON}:reason),
+ {codes:['visual_feature_mismatch'],text:'前の下書きでは、公開文で使われた特徴の出所を観察メモと照合できませんでした。対象と論点を保ち、根拠のある特徴を使うか、不確かさを伝えてください。指定されたJSONの形で返してください。'}];
 // codes: the recorded condition's own guard violations (exact). draft: for the comparison condition, what its OWN first draft shows to this verifier
 // (an orientation leak; any other leak, which is where a name/agreement decision, an id or a field would show): the orientation reason must be present exactly
 // when the draft has an orientation leak, and the name/agreement-decision reason can appear only if the draft has some other leak. Other families stay open.
 type RetryDraftEvidence={orientation:boolean;orientationCodes?:readonly string[];naming:boolean;workingNote:boolean;draftAct?:string|null;draftSharedClaim?:string|null;confirmationMismatch?:boolean};
-function retryReasonsMatch(text:string,version:RecordedGenerationRetryVersion|undefined,codes?:readonly string[],draft?:RetryDraftEvidence):boolean{
+function retryReasonsMatch(text:string,version:RecordedGenerationRetryVersion|undefined,codes?:readonly string[],draft?:RetryDraftEvidence,topicRewrite?:boolean):boolean{
  if(!text)return false;
  const specific=hasVersionedViewpoint(version),restated=version!==undefined;
- const reasons=confirmationDraftV16(version)?RETRY_REASONS_V16:specific?RETRY_REASONS_SPECIFIC:RETRY_REASONS;
+ const reasons=String(version)==='jev_generation_retry_v22'?RETRY_REASONS_V22:confirmationDraftV16(version)?RETRY_REASONS_V16:specific?RETRY_REASONS_SPECIFIC:RETRY_REASONS;
  for(const reason of reasons){
   const viewpoint=!specific&&H5()&&reason.codes.includes('orientation_leak');
   const reasonText=viewpoint?'前の下書きの方位の参照枠を明確にして書き直してください。'+VIEWPOINT_RULE_V5_S4:reason.text;
   const match=text.startsWith(reasonText)?reasonText:!viewpoint&&!restated&&reason.legacy&&text.startsWith(reason.legacy)?reason.legacy:null;
   if(codes&&(reason.codes.some(code=>codes.includes(code))||viewpoint&&codes.includes('shared_view_assumption'))!==Boolean(match))return false;
+  if(topicRewrite!==undefined&&reason.text===TOPIC_SHIFT_RETRY_REASON&&topicRewrite!==Boolean(match))return false;
   const orientationReason=reason.codes.includes('orientation_leak')||reason.codes.includes('shared_view_assumption');
   if(specific&&orientationReason&&draft?.orientationCodes!==undefined&&
      reason.codes.some(code=>draft.orientationCodes!.includes(code))!==Boolean(match))return false;
@@ -569,17 +584,22 @@ const SEMANTIC_NAMING_QUESTIONS_S4={draft_naming:{
  }
 }};
 const DRAFT_TRIGGERS_S4=['agree_action','typed_context','naming_words','quoted_other'];
-function draftActsShape(v:any,semantic:boolean,generated=false):boolean{
+function draftActsShape(v:any,semantic:boolean,generated=false,topicShift=false):boolean{
  const baseActs=semantic?Object.keys(SEMANTIC_NAMING_QUESTIONS_S4.draft_naming.criteria):DRAFT_ACTS_S4;
  return Array.isArray(v)&&v.length>=1&&v.length<=2&&v.every((a:any,i:number)=>{
   const moving=Object.hasOwn(a??{},'moveOn'),withdraw=generated&&a?.triggers?.includes('withdraw_prior_name');
   const acts=withdraw?[...baseActs,'withdraw_selected']:baseActs;
-  const triggers=generated?[...DRAFT_TRIGGERS_S4,'withdraw_prior_name','human_led_transition']:DRAFT_TRIGGERS_S4;
-  return exact(a,['draft','draftSha256','triggers','status','choice','scores','model','responseId','costUsd','latencyMs','error',...(generated&&moving?['moveOn']:[])])&&(a.draft==='initial'&&i===0||a.draft==='retry'&&(i===0||v[i-1].draft==='initial'))&&
+  const triggers=generated?[...DRAFT_TRIGGERS_S4,'withdraw_prior_name','human_led_transition',...(topicShift?['topic_shift']:[])]:DRAFT_TRIGGERS_S4;
+  const hasShift=Object.hasOwn(a??{},'topicShift');
+  const names=Array.isArray(a?.triggers)&&a.triggers.some((trigger:string)=>trigger!=='topic_shift');
+  return exact(a,['draft','draftSha256','triggers','status','choice','scores','model','responseId','costUsd','latencyMs','error',...(generated&&moving?['moveOn']:[]),...(topicShift&&hasShift?['topicShift']:[])])&&(a.draft==='initial'&&i===0||a.draft==='retry'&&(i===0||v[i-1].draft==='initial'))&&
   typeof a.draftSha256==='string'&&/^[a-f0-9]{64}$/.test(a.draftSha256)&&Array.isArray(a.triggers)&&a.triggers.length>=1&&a.triggers.every((x:any)=>triggers.includes(x))&&
+  (!topicShift||a.triggers.at(-1)==='topic_shift'&&(a.status==='ok'?
+   exact(a.topicShift,['choice','scores'])&&TOPIC_SHIFT_CHOICES.includes(a.topicShift.choice)&&exact(a.topicShift.scores,TOPIC_SHIFT_CHOICES)&&
+   Object.values(a.topicShift.scores).every(score=>typeof score==='number'&&Number.isFinite(score)&&score>=0&&score<=1):!hasShift))&&
   (!moving||a.status==='ok'&&a.triggers.includes('human_led_transition')&&exact(a.moveOn,['choice','scores'])&&
    ['honors_request','mismatch'].includes(a.moveOn.choice)&&exact(a.moveOn.scores,['honors_request','mismatch']))&&
-  (a.status==='ok'?acts.includes(a.choice)&&a.error===null&&!!a.scores&&Object.keys(a.scores).sort().join()===[...acts].sort().join():a.status==='error'&&a.choice===null&&a.scores===null&&typeof a.error==='string'&&a.error.length<=64)&&
+  (a.status==='ok'?a.error===null&&(topicShift&&!names?a.choice===null&&a.scores===null:acts.includes(a.choice)&&!!a.scores&&Object.keys(a.scores).sort().join()===[...acts].sort().join()):a.status==='error'&&a.choice===null&&a.scores===null&&typeof a.error==='string'&&a.error.length<=64)&&
   Number.isFinite(a.latencyMs)&&a.latencyMs>=0;});
 }
 const s4AgreedNames=(tape:any,ex:any):Set<string>=>new Set<string>((ex.target.kind==='single'?[ex.target.figureId]:ex.target.kind==='multiple'?ex.target.figureIds:[]).map((id:string)=>tape.state.ledger?.[id]).filter((e:any)=>e&&e.status==='agreed'&&typeof e.name==='string').map((e:any)=>ledgerName(e.name)));
@@ -689,6 +709,7 @@ export function s4LocalReverify(tape:any,t:any,policy:string,after:any):'ok'|'mi
  const savedIds=new Set(local.claims.map((c:any)=>c.id));
  const before=tape.state.graph;
  const pruneVersion=before.memoryPruneVersion;
+ const v22=tape.generationRetryVersion==='jev_generation_retry_v22';
  if(pruneVersion!==after.memoryPruneVersion||pruneVersion!==undefined&&!isClaimPruneVersion(pruneVersion))return'mismatch';
  let base={...after,records:after.records.filter((r:any)=>!(r?.kind==='claim'&&savedIds.has(r.id)))};
  const aiOps=after.records.filter((r:any)=>r?.kind==='claim'&&r.speaker==='ai'&&r.turn===t.turnIndex).map(({turn:_t,...op}:any)=>op);
@@ -697,10 +718,10 @@ export function s4LocalReverify(tape:any,t:any,policy:string,after:any):'ok'|'mi
  // The tape keeps the full transcript. Reference updates use the same recent
  // window and scripted-event provenance as the online verifier.
  const versioned=isClaimPruneVersion(pruneVersion);
- const window=versioned?visible.filter(e=>!tape.state.aiPublic||events.filter(other=>other.seq===e.seq).length===1)
+ const window=versioned||v22?visible.filter(e=>!tape.state.aiPublic||events.filter(other=>other.seq===e.seq).length===1)
   .slice(-REFERENCE_LIMITS.publicTurns):visible;
  const publicTurns=window.map(e=>({turn:e.seq,speaker:e.speaker,text:String(e.text),
-  ...(versioned&&e.nonReferential?{nonReferential:true}: {})}));
+  ...((versioned||v22)&&e.nonReferential?{nonReferential:true}: {})}));
  const segments=local.extractor.segments.map(({act:_a,redacted:_r,...s}:any)=>s);
  const verdicts=local.classifier.verdicts.map((v:any)=>({segmentId:v.segmentId,act:v.act,respondsToClaimId:v.respondsToClaimId,rawScore:null,...(isGenerationV12(tape.generationRetryVersion)&&v.answersChecked!==undefined?{answersChecked:v.answersChecked}:{})}));
  let applied:any[]=[],rejected:{segmentId:string;reason:string}[]=[];
@@ -709,11 +730,20 @@ export function s4LocalReverify(tape:any,t:any,policy:string,after:any):'ok'|'mi
   for(const op of aiOps){
    const step=applyVerifiedOperation(before,update,op,publicTurns);
    if(step.applied)update=step.update;
-   else if(versioned)return'mismatch';
+   else if(versioned||v22)return'mismatch';
   }
   // A later human operation may evict an earlier claim cited by the classifier.
   // Replay the AI-public/name prefix against the actual pre-turn graph first.
-  if(versioned)base=previewReferenceUpdate(before,update,{publicTurns});
+  if(versioned||v22)base=previewReferenceUpdate(before,update,{publicTurns});
+  const retained=v22?
+   retainedReferenceHistory(liveClaims(base),events,publicTurns,turn):undefined;
+  const namingIntervalStart=(tape.state?.judgments??[]).filter((j:any)=>{
+   const act=j.judgment?.action;
+   if(!v22)return ['agree','defer','move_on'].includes(act);
+   const destination=j.generatedPublication?.recovery?.executed?.destination??j.jevTurn?.executed?.destination;
+   return act==='agree'||!!j.generatedPublication?.transition||act==='carry_over'&&
+    ['partner_choice','other_figure','old_issue'].includes(destination?.kind);
+  }).at(-1)?.turnIndex??0;
   let referenceQuestionBindings:ReadonlyMap<string,string>|undefined;
   const directReferenceReplies=isGenerationV8(tape.generationRetryVersion);
   if(isGenerationV7(tape.generationRetryVersion)){
@@ -727,7 +757,9 @@ export function s4LocalReverify(tape:any,t:any,policy:string,after:any):'ok'|'mi
     referenceQuestionBindings=bindPublishedReferenceQuestion(pending,prior,{turn:e.seq,speaker:e.speaker,text:e.text,nonReferential:e.nonReferential},turn,directReferenceReplies);
    }
   }
-  const verified:any=verifyLocalUpdate({graph:base,turn,publicTurns,segments,verdicts,keepUnboundApproval:true,approvalFromNamedClaim:isHolisticV4Plus(policy),referenceQuestionBindings,directReferenceReplies,refinedReplyRules:isGenerationV11(tape.generationRetryVersion),answerFieldRules:isGenerationV12(tape.generationRetryVersion),bindDirectQuestionReplies:usesDirectNamingReplies(scope),retainLocalQuestionAnswers:retainsLocalQuestionAnswers(scope),unbindPartNonAnswers:scope==='jev_naming_v2',namingIntervalStart:(tape.state?.judgments??[]).filter((x:any)=>['agree','defer','move_on'].includes(x.judgment?.action)).at(-1)?.turnIndex??0} as any);
+  const verified:any=verifyLocalUpdate({graph:base,turn,publicTurns,segments,verdicts,keepUnboundApproval:true,approvalFromNamedClaim:isHolisticV4Plus(policy),referenceQuestionBindings,directReferenceReplies,refinedReplyRules:isGenerationV11(tape.generationRetryVersion),answerFieldRules:isGenerationV12(tape.generationRetryVersion),bindDirectQuestionReplies:usesDirectNamingReplies(scope),retainLocalQuestionAnswers:retainsLocalQuestionAnswers(scope),unbindPartNonAnswers:rechecksJevNamingAnswers(scope),
+   ...(scope==='jev_naming_v3'?{retainDelayedPartAnswers:true}:{}),...(v22?{retainedReferenceHistory:retained}:{}),
+   namingIntervalStart} as any);
   rejected=verified.rejected.map((r:any,i:number)=>({segmentId:/^s[0-9]{1,4}$/.test(r.segmentId)?r.segmentId:'segment_'+(i+1),
    reason:/^[a-z][a-z0-9_]{0,59}$/.test(r.reason)?r.reason:'invalid_update'}));
   for(const op of verified.operations){const step=applyVerifiedOperation(before,update,op,publicTurns);if(step.applied){update=step.update;applied.push(op);}else rejected.push({segmentId:'operation_'+(applied.length+rejected.length+1),reason:step.reason});}
@@ -767,7 +799,7 @@ function traceShape(t:any,layout='two_stage_v1',policy?:string,ownSlots:readonly
  if(!exact(t,[...req,...opt.filter(k=>Object.hasOwn(t??{},k))])||t.schemaVersion!=='jev_turn_trace_v2'||!ident(t)||!['committed','staged','superseded','error','aborted'].includes(t.status)||!Array.isArray(t.decisions)||!Array.isArray(t.reobservations)||!Array.isArray(t.repairHistory)||!primitiveText(t.publicSpeech,issueHandling?12000:10000))return false;
  if(Object.hasOwn(t,'decisionMenuVersion')&&(layout!=='two_stage_v1'||t.decisionMenuVersion!==PARTICIPANT_MENU_VERSION))return false;
  if(issueHandling?(Object.hasOwn(t,'generationRetryVersion')||['staged','committed','superseded'].includes(t.status))&&
-    t.generationRetryVersion!==S4_ISSUE_HANDLING_GENERATION:t.generationRetryVersion===S4_ISSUE_HANDLING_GENERATION)return false;
+    !s4UsesIssueHandling(t.generationRetryVersion):s4UsesIssueHandling(t.generationRetryVersion))return false;
  if(Object.hasOwn(t,'namingRequest')&&(layout!=='two_stage_v3'||t.namingRequest!==true||Object.hasOwn(t,'namingReconfirm')||!hasNameProposal(t.local?.claims??[],t.turnIndex)))return false;
  if(Object.hasOwn(t,'namingReconfirm')&&(layout!=='two_stage_v3'||t.namingReconfirm!==true||!hasNameProposal(t.local?.claims??[],t.turnIndex)))return false;
  CTX.acceptOptional=!jevNaming&&t?.namingRequest===true;
@@ -781,7 +813,7 @@ function traceShape(t:any,layout='two_stage_v1',policy?:string,ownSlots:readonly
  if(Object.hasOwn(t,'sharedConstruals')&&(!p5||!sharedShape(t.sharedConstruals)))return false;
  if(Object.hasOwn(t,'generationRetryVersion')&&(t.generationRetryVersion==='jev_generation_retry_v1'||!validGenerationRetryVersion(t.generationRetryVersion,layout,policy)||
    (hasVersionedViewpoint(t.generationRetryVersion)?!p5&&(!t.executed||!t.finalAction):t.generationGuard?.regenerated!==true)))return false;
- if(Object.hasOwn(t,'draftActs')&&(layout!=='two_stage_v3'||!draftActsShape(t.draftActs,semantic,generated)))return false;
+ if(Object.hasOwn(t,'draftActs')&&(layout!=='two_stage_v3'||!draftActsShape(t.draftActs,semantic,generated,t.generationRetryVersion==='jev_generation_retry_v22')))return false;
  if(generated&&(['staged','committed','superseded'].includes(t.status)||Object.hasOwn(t,'generatedPublication'))&&
    !generatedPublicationShape(t,ownSlots,p5,issueHandling))return false;
  if(!draftSharedTraceS4(t,p5Overclaim))return false;
@@ -929,6 +961,8 @@ function generatedPublicationShape(t:any,slots:readonly string[],p5:boolean,issu
     t.decisions.at(-1)?.evidence?.stages?.[0]?.choices?.[MOVE_ON_SOURCE_QUESTION]!=='human_request'||
     last?.moveOn?.choice!=='honors_request'||t.publicSpeech!==null&&(t.publicSpeech[m.start-1]!=='\n'||
       s4Sha256(t.publicSpeech.slice(m.start))!==m.textSha256||s4Sha256(t.publicSpeech.slice(0,m.start-1))!==last.draftSha256)))return false;
+ if(t.generationRetryVersion==='jev_generation_retry_v22'&&(last?.status!=='ok'||last.topicShift?.choice!=='within_plan'||
+    typeof t.publicSpeech==='string'&&s4Sha256(m?t.publicSpeech.slice(0,m.start-1):t.publicSpeech)!==last.draftSha256))return false;
  return !w||t.publicSpeech===null||s4Sha256(m?t.publicSpeech.slice(0,m.start-1):t.publicSpeech)===last.draftSha256;
 }
 
@@ -1181,17 +1215,32 @@ function trialVersion(t:any,claim:any):string|null|'invalid'{
   if(!exact(claim,['version']))return'invalid';
   return derived!==null?(claim.version===derived?derived:'invalid'):claim.version==='adaptive_repair_v1'?'adaptive_repair_v1':'invalid';
 }
-function issueHandlingGenerationScope(messages:any[],execution:any,finals:any,visual:boolean,combined:boolean):boolean {
+function issueHandlingGenerationScope(messages:any[],execution:any,finals:any,visual:boolean,combined:boolean,
+ v22=false,quality=false,reconfirm=false,ledger?:Row):boolean {
  const action=messages.find(message=>message.role==='system'&&typeof message.content==='string'&&
   message.content.startsWith('Jevが選んだ行動だけを文章にしてください。'));
  if(!action||action.content.includes(VETOED_MOVE_V6_S4))return false;
  const lines=action.content.split('\n'),wire=lines.at(-1);
  if(lines[0]!==FIXED_HOLISTIC_V5_I172.act)return false;
+ if(v22){
+  const instruction=messages[1]?.content;
+  const agreed=Object.keys(ledger??{}).sort().map(figureId=>({figureId,status:row(ledger?.[figureId]).status,name:row(ledger?.[figureId]).name}));
+  const naming=PRIVATE_NAMING_STATE_V5_S4+'\n'+AGREED_NAME_REFERENCE_V22_S4+'\n'+JSON.stringify(agreed);
+  const reconfirmLine=lines.indexOf(RECONFIRM_NAME_V22_S4);
+  if(typeof instruction!=='string'||!instruction.includes(AGREED_NAME_RULE_V22_S4)||!instruction.includes(NEW_NAME_RESTRICTION_V22_S4)||
+     lines.includes(RECONFIRM_NAME_V5_S4)||messages.filter(message=>message.role==='system'&&message.content.startsWith(PRIVATE_NAMING_STATE_V5_S4)).length!==1||
+     !messages.some(message=>message.role==='system'&&message.content===naming)||
+     (execution.action==='accept'&&reconfirm?reconfirmLine<0||lines[reconfirmLine-1]!==ACCEPT_FEATURE_REPLY_V5_S4:reconfirmLine!==-1))return false;
+ }
  const scopeFor=(action:string)=>{
   const scopes: Readonly<Record<string,string>>=FIXED_HOLISTIC_V5_I172.scope;
   const scope=ISSUE_ACTION_SCOPES[action]??scopes[action];
-  return action==='accept'?scope?.replace(
-   '相手が場所だけで図形を示したときは、場所だけでは分からないことを短く伝えて形の特徴を尋ねる。それ以外は受け止める。','受け止める。'):scope;
+  if(action==='confirm'&&v22)return CONFIRM_SCOPE_V22_S4;
+  if(action==='hold_open'&&v22)return scope.replace('相手の言葉の短い反復','相手が示した特徴や見立ての短い反復');
+  if(action!=='accept')return scope;
+  const accept=scope.replace('相手が場所だけで図形を示したときは、場所だけでは分からないことを短く伝えて形の特徴を尋ねる。それ以外は受け止める。','受け止める。');
+  return v22?accept.replace('名前に決まった・対象を共同で特定できたとは言わない',
+   '新しい名前が決まったり、新たに対象を共同で特定できたりしたとは言わない。既に合意した名前はそのまま参照できる'):accept;
  };
  if(!execution.extras?.length){
   const expected={...finals,target:execution.target,...(visual&&execution.visualPurpose?{visualPurpose:execution.visualPurpose}:{}),
@@ -1200,6 +1249,7 @@ function issueHandlingGenerationScope(messages:any[],execution:any,finals:any,vi
   if(wire!==JSON.stringify(expected))return false;
   const hasVisualSelection=['confirm','repair'].includes(execution.action);
   if(lines[1]!==(visual&&hasVisualSelection?VISUAL_FEATURE_SELECTION_V19:scopeFor(execution.action)))return false;
+  if(v22&&visual&&execution.action==='confirm'&&lines[2]!==CONFIRM_SCOPE_V22_S4)return false;
   const keepIssue=lines.some((line:string)=>line.includes('選ばれた論点をこの行動の範囲で確かめてください。'));
   if(keepIssue!==(hasVisualSelection&&!combined)||visual&&
      (lines.includes(VISUAL_FEATURE_SELECTION_V19)!==hasVisualSelection||
@@ -1215,19 +1265,46 @@ function issueHandlingGenerationScope(messages:any[],execution:any,finals:any,vi
  const wantsFeatureSelection=items.some(item=>['confirm','repair'].includes(item.action));
  if(lines.includes(VISUAL_FEATURE_SELECTION_V19)!==wantsFeatureSelection||
     wantsFeatureSelection&&lines[2]!==VISUAL_FEATURE_SELECTION_V19)return false;
- const rowStart=wantsFeatureSelection?3:2;
+ let rowIndex=wantsFeatureSelection?3:2;
  if(!items.every((item,index)=>{
-  const scope=['confirm','repair'].includes(item.action)?MULTI_ISSUE_REPAIR_S4:scopeFor(item.action);
-  return scope!==undefined&&lines[rowStart+index]==='items の '+index+' 番: '+scope;
+  const scope=['confirm','repair'].includes(item.action)?v22?
+   (item.action==='confirm'?CONFIRM_SCOPE_V22_S4.replace(CONFIRM_NO_DEFERRAL_V22_S4,''):
+    scopeFor('repair')+'。')+MULTI_ISSUE_STAY_V22_S4:MULTI_ISSUE_REPAIR_S4:scopeFor(item.action);
+  if(scope===undefined||lines[rowIndex++]!=='items の '+index+' 番: '+scope)return false;
+  if(v22&&quality&&item.action==='accept'){
+   const guidance=['この accept の部分に適用します。',...normalRepairQualityGuidance('accept').split('\n')];
+   if(!equal(lines.slice(rowIndex,rowIndex+guidance.length),guidance))return false;
+   rowIndex+=guidance.length;
+  }
+  return true;
  }))return false;
  const sources=lines.indexOf(VISUAL_FEATURE_SOURCES_V19);
- return sources>=rowStart+items.length&&lines[sources+1]===MULTI_ISSUE_DRAFT_S4&&lines[sources+2]?.startsWith('{"publicQuestions":');
+ return sources>=rowIndex&&lines[sources+1]===MULTI_ISSUE_DRAFT_S4&&lines[sources+2]?.startsWith('{"publicQuestions":');
+}
+function generatedRetryMessagesMatch(generations:any[],topics:ReadonlyMap<number,string>,version:RecordedGenerationRetryVersion):boolean {
+ for(let index=0;index<generations.length;index+=2){
+  const {messages:initial,...options}=generations[index].payload;
+  if(!Array.isArray(initial))return false;
+  const last=initial.at(-1)?.content;
+  if(typeof last==='string'&&last.startsWith(RETRY_INSTRUCTION))return false;
+  if(index+1===generations.length)break;
+  const {messages:retry,...retryOptions}=generations[index+1].payload;
+  if(!Array.isArray(retry)||!equal(retry.slice(0,-1),initial)||!equal(retryOptions,options))return false;
+  const instruction=retry.at(-1);
+  const action=initial.find((message:any)=>message.role==='system'&&typeof message.content==='string'&&
+   message.content.startsWith('Jevが選んだ行動だけを文章にしてください。'));
+  const prefix=RETRY_INSTRUCTION+'\n'+action?.content+'\n';
+  if(!action||instruction?.role!=='system'||typeof instruction.content!=='string'||!instruction.content.startsWith(prefix))return false;
+  const reason=instruction.content.slice(prefix.length),topic=topics.get(index);
+  if(reason?!retryReasonsMatch(reason,version,undefined,undefined,topic!==undefined&&topic!=='within_plan'):topic!==undefined)return false;
+ }
+ return true;
 }
 function generatedReplayProof(tr:any,t:any,tape:any,result:any,pair:any,
   referenceEvidence:ReturnType<typeof buildReferenceEvidence>|null,graph:any):'missing'|'invalid'|'ok' {
  if(!pair)return'missing';
  if(!equal(result.sides,[pair.left,pair.right])||tape.recorded.label!==tr.label)return'invalid';
- if(tape.generationRetryVersion===S4_ISSUE_HANDLING_GENERATION&&!equal(
+ if(s4UsesIssueHandling(tape.generationRetryVersion)&&!equal(
    pair.left.requests?.filter((request:any)=>request.role==='common'),
    pair.right.requests?.filter((request:any)=>request.role==='common')))return'invalid';
  const previous=tr.turns?.filter((v:any)=>v.turn<t.turnIndex).sort((a:any,b:any)=>a.turn-b.turn).at(-1)?.state;
@@ -1237,10 +1314,26 @@ function generatedReplayProof(tr:any,t:any,tape:any,result:any,pair:any,
    equal(st.scores,Object.fromEntries(Object.entries(a.answers).map(([k,v]:any)=>[k,v.probabilities])));
  const withoutLatency=(v:any):any=>Array.isArray(v)?v.map(withoutLatency):v&&typeof v==='object'?
    Object.fromEntries(Object.entries(v).filter(([key])=>key!=='latencyMs').map(([k,x])=>[k,withoutLatency(x)])):v;
- const issueHandling=tape.generationRetryVersion===S4_ISSUE_HANDLING_GENERATION;
+ const issueHandling=s4UsesIssueHandling(tape.generationRetryVersion);
+ const v22=tape.generationRetryVersion==='jev_generation_retry_v22';
  const visual=issueHandling||isGenerationV19(tape.generationRetryVersion);
  const terms=visual||isGenerationV18(tape.generationRetryVersion);
  const issueCtx=issueHandling?issueHandlingContext(t,tape.state,graph,tape.events):null;
+ const history=tape.events.filter((event:any)=>event.seq<=t.turnIndex);
+ const publicTurns=history.filter((event:any)=>tape.events.filter((other:any)=>other.seq===event.seq).length===1)
+  .slice(-REFERENCE_LIMITS.publicTurns).map((event:any)=>({turn:event.seq,speaker:event.speaker,text:event.text,
+   ...(event.nonReferential?{nonReferential:true}:{})}));
+ const recent=publicTurns.map(({turn,speaker,text}:any)=>({turn,speaker,text}));
+ const draftTurns=recent.slice(-12).map((event:any)=>({...event,text:event.text.slice(0,400)}));
+ const before=tape.state.graph;
+ const aiOps=v22?(graph?.records??[]).filter((claim:any)=>claim.kind==='claim'&&claim.speaker==='ai'&&claim.turn===t.turnIndex)
+  .map(({turn:_turn,...claim}:any)=>claim):[];
+ const localClaims=v22?liveClaims(aiOps.length?previewReferenceUpdate(before,{expectedRevision:before.revision,turn:t.turnIndex,operations:aiOps},{publicTurns}):before):[];
+ const localHistory=v22?retainedReferenceHistory(localClaims,history,recent,t.turnIndex):[];
+ const generationHistory=v22?retainedReferenceHistory(liveClaims(graph),history,recent,t.turnIndex):[];
+ const moveSource=t.decisions?.at(-1)?.evidence?.stages?.[0];
+ const humanRequestedMove=moveSource?.choices?.[MOVE_ON_SOURCE_QUESTION]==='human_request'&&
+  validMoveOnSource(moveSource.choices[MOVE_ON_SOURCE_QUESTION],moveSource.scores?.[MOVE_ON_SOURCE_QUESTION]);
  const generationPlans=new Map<string,unknown>();
  for(const [n,label] of ['repair-first','bypass-enabled'].entries()){
   const s=result.sides[n],m=s?.material,tail=tape.tails?.[label],p=s?.generatedPublication;
@@ -1261,15 +1354,19 @@ function generatedReplayProof(tr:any,t:any,tape:any,result:any,pair:any,
   }else if(visual&&!visualPurposeSourcesMatch(p,s.executed,Object.keys(tape.state.ledger),t.turnIndex,tape.events,
      [...(tape.state.graph?.records??[]),...(t.local?.claims??[]),...(graph?.records??[])]))return'invalid';
   const finals={action:ex.action,targetSlot:ex.target.kind==='single'?ex.target.figureId:null,candidateName:ex.name,discriminatingFeature:ex.feature,note:null};
+  const priorDrafts=(p.recovery?.reason==='publication_mismatch'?2:0)+(p.continuation?.reason==='draft_mismatch'?2:0);
   const decisions=t.decisions??[];
   const stages=decisions.flatMap((d:any)=>d.evidence?.stages??[]),recovery=p.recovery?.decision?.evidence?.stages??[];
   const ownerByStage=new Map(decisions.flatMap((d:any)=>(d.evidence?.stages??[]).map((stage:any)=>[stage,d] as const)));
   const counters={luna:0,jev:0};const recorded={luna:[...tape.common.luna,...tail.luna],jev:[...tape.common.jev,...tail.jev]};
   let nameEvidence:any=null,lastDraft:any=null,lastRaw:any=null,originalActions=0,recoveryActions=0;
+  let localExtraction:unknown;
   let lastExtraction:{request:any;answer:any}|null=null;
   let functionAnswers:any=null;
   const decisionsWithExtras=new Set(), actionMaterial=new Map<any,any>();
   const generations:any[]=[];
+  const inspectedTopics=new Map<number,string>();
+  const topicActRecords:any[]=[];
   for(const req of s.requests){
    if(!['luna','jev'].includes(req.provider)||req.payloadDomain!=='canonical_http_json'||hash(req.payload)!==req.payloadSha256)return'invalid';
    const provider=req.provider as keyof typeof counters,answer=recorded[provider][counters[provider]++];
@@ -1280,16 +1377,23 @@ function generatedReplayProof(tr:any,t:any,tape:any,result:any,pair:any,
      const promptIndex=req.phase==='generation'?1:['local_extraction','ai_extraction'].includes(req.phase)?0:-1;
      if(promptIndex>=0){
       const prompt=req.payload.messages?.[promptIndex];
-      if(prompt?.role!=='system'||typeof prompt.content!=='string'||
+     const suffix='\n'+SHAPE_TERMINOLOGY+(v22&&req.phase==='local_extraction'&&localHistory.length?'\n'+RETAINED_REFERENCE_EXTRACTION:'');
+     if(prompt?.role!=='system'||typeof prompt.content!=='string'||
          (visual&&req.phase==='ai_extraction'
           ? ![memoAiExtractionPrompt(SHAPE_TERMINOLOGY_GENERATION),memoAiExtractionPrompt(SHAPE_TERMINOLOGY_GENERATION,true)].includes(prompt.content)
-          : !prompt.content.endsWith('\n'+SHAPE_TERMINOLOGY)))return'invalid';
+          : !prompt.content.endsWith(suffix)))return'invalid';
       if(!visual&&req.phase==='ai_extraction'&&label===tr.label&&
          !equal(t.aiPublic?.prompts?.extraction,{version:2,sha256:s4Sha256(prompt.content)}))return'invalid';
      }
     }
+    if(v22&&req.phase==='local_extraction'){
+     const input=JSON.parse(req.payload.messages.slice(1).map((message:any)=>message.content.split('\n').at(-1)).join(''));
+     if(!equal(input.publicTurns,recent)||(localHistory.length?!equal(input.retainedReferenceHistory,localHistory):Object.hasOwn(input,'retainedReferenceHistory')))return'invalid';
+     localExtraction=answer.response?.text??answer.text;
+    }
     if(req.phase==='generation'){
      if(req.role!=='generation'||hash(req.payload.messages)!==req.completeMessagesSha256)return'invalid';
+     if(v22&&!retainedGenerationMatches(req.payload.messages,recent,generationHistory))return'invalid';
      lastRaw=answer.response?.text??answer.text;lastDraft=null;lastExtraction=null;functionAnswers=null;
      generations.push(req);
     }
@@ -1302,8 +1406,35 @@ function generatedReplayProof(tr:any,t:any,tape:any,result:any,pair:any,
       Object.values(req.payload.questions).some((question:any)=>typeof question.instructions!=='string'||
         !question.instructions.endsWith('\n'+SHAPE_TERMINOLOGY)))return'invalid';
    const input=parseMaterial(req.payload.state);
+   if(v22&&req.phase==='local_function'&&(localHistory.length||input.priorClaims?.some((claim:any)=>Object.hasOwn(claim,'retained')))){
+    if(typeof localExtraction!=='string')return'invalid';
+    const proposals=JSON.parse(localExtraction);
+    const human=recent.find((event:any)=>event.turn===t.turnIndex&&event.speaker==='human');
+    if(!Array.isArray(proposals)||!human)return'invalid';
+    const segments=proposals.flatMap((proposal:any)=>{
+     const quote=literalSpan(human.text,proposal.quote)?.text;
+     return quote&&quote.length<=160?[{...proposal,quote}]:[];
+    });
+    if(!retainedClassificationMatches(input,localClaims,recent,t.turnIndex,localHistory,segments))return'invalid';
+   }
    if(req.phase==='draft_naming'){
     if(req.role!=='post_generation'||typeof lastRaw!=='string'||lastDraft!==null)return'invalid';
+    if(v22){
+     const index=generations.length-1,final=index>=priorDrafts;
+     const candidate=final?ex:index<2&&p.recovery?.reason==='publication_mismatch'?s.executed:p.recovery?.executed;
+     const combined=final?p.transition!==null:Object.hasOwn(input,'moveOnDraft');
+     const checked=answer.answers.draft_topic_shift;
+     if(!candidate||!issueCtx||combined&&!humanRequestedMove||!TOPIC_SHIFT_CHOICES.includes(checked?.choice)||
+        !Array.isArray(input.reasons)||input.reasons.at(-1)!=='topic_shift'||
+        Object.hasOwn(req.payload.questions,'draft_naming')!==(input.reasons.length>1)||
+        !draftTopicShiftMatches(input,req.payload.questions.draft_topic_shift,lastRaw,candidate,humanRequestedMove,combined,
+         issueHandlingFeatureScope(candidate,issueCtx.slots,final&&!!p.continuation)!==null,draftTurns,t.turnIndex))return'invalid';
+     inspectedTopics.set(index,checked.choice);
+     if(final)topicActRecords.push({draft:index%2===0?'initial':'retry',draftSha256:s4Sha256(input.draft),triggers:input.reasons,status:'ok',
+      choice:answer.answers.draft_naming?.choice??null,scores:answer.answers.draft_naming?.probabilities??null,model:answer.model,
+      responseId:jevResponseId(answer),costUsd:jevReportedCost(answer),error:null,topicShift:{choice:checked.choice,scores:checked.probabilities},
+      ...(answer.answers.draft_human_move_on?{moveOn:{choice:answer.answers.draft_human_move_on.choice,scores:answer.answers.draft_human_move_on.probabilities}}:{})});
+    }
     lastDraft={state:input,answers:answer.answers};continue;
    }
    const questionKeys=Object.keys(req.payload.questions);
@@ -1363,9 +1494,17 @@ function generatedReplayProof(tr:any,t:any,tape:any,result:any,pair:any,
   }
   if(issueCtx&&[...actionMaterial].some(([decision,input])=>!decisionsWithExtras.has(decision)&&
      !issueHandlingExtraRequestsMatch(decision,input,issueCtx)))return'invalid';
-  const priorDrafts=(p.recovery?.reason==='publication_mismatch'?2:0)+(p.continuation?.reason==='draft_mismatch'?2:0);
   if(counters.luna!==recorded.luna.length||counters.jev!==recorded.jev.length||originalActions!==t.decisions.length||recoveryActions!==(p.recovery?1:0)||
      ![1,2].includes(generations.length-priorDrafts)||typeof lastRaw!=='string')return'invalid';
+  if(v22&&(inspectedTopics.get(generations.length-1)!=='within_plan'||!generatedRetryMessagesMatch(generations,inspectedTopics,tape.generationRetryVersion)||
+     label===tr.label&&!equal(withoutLatency(t.draftActs),topicActRecords)))return'invalid';
+  if(v22&&label===tr.label){
+   const topicCodes=['unsupported_topic_shift','draft_topic_shift_unconfirmed'];
+   const expected=topicActRecords.flatMap(record=>record.topicShift.choice==='within_plan'?[]:
+    [record.topicShift.choice==='unsupported_shift'?topicCodes[0]:topicCodes[1]]);
+   if(!equal(t.generationGuard.violations.filter((code:string)=>topicCodes.includes(code)),expected)||
+      t.generationGuard.regenerated!==(generations.length-priorDrafts===2))return'invalid';
+  }
   const hasFeature=!visual&&ex.action==='confirm'&&!p.continuation,combined=p.transition!==null;
   const issueSlots=issueCtx?issueHandlingFeatureScope(ex,issueCtx.slots,!!p.continuation):null;
   const visualDetail=issueCtx?issueSlots!==null:visual&&!p.continuation&&['confirm','repair'].includes(ex.action);
@@ -1414,11 +1553,7 @@ function generatedReplayProof(tr:any,t:any,tape:any,result:any,pair:any,
   const speech=move===null?text:text+'\n'+move;
   if(!text.trim()||s4Sha256(speech)!==p.textSha256||combined&&(p.transition.start!==text.length+1||s4Sha256(move!)!==p.transition.textSha256||
       lastDraft?.state?.moveOnDraft!==move||lastDraft.answers?.draft_human_move_on?.choice!=='honors_request'))return'invalid';
-  const history=tape.events.filter((event:any)=>event.seq<=t.turnIndex);
   if(issueHandling){
-   const publicTurns=history.filter((event:any)=>tape.events.filter((other:any)=>other.seq===event.seq).length===1)
-    .slice(-REFERENCE_LIMITS.publicTurns).map((event:any)=>({turn:event.seq,speaker:event.speaker,text:event.text,
-     ...(event.nonReferential?{nonReferential:true}:{})}));
    if(!issueHandlingReplayBoundary(s.publicationBoundary,s.requests,visualDetail,{turn:t.turnIndex,requestSeq:tape.requestSeq,
       speech,memo:t.observationMemo,publicTurns,profileSha256:hash(tr.profile),extraction,
       supportExpected:Object.entries(row(functionAnswers)).some(([key,value])=>key.endsWith('_act')&&
@@ -1426,14 +1561,16 @@ function generatedReplayProof(tr:any,t:any,tape:any,result:any,pair:any,
       ...(label===tr.label?{graphRevision:graph?.revision}:{})}))return'invalid';
    if(!issueHandlingPartsMatch(p,ex,speech,draftParts))return'invalid';
    const messages=generations.at(-1).payload.messages;
-   if(!issueHandlingGenerationScope(messages,ex,finals,visualDetail,combined))return'invalid';
+   if(!issueHandlingGenerationScope(messages,ex,finals,visualDetail,combined,v22,tr.profile?.judgmentMaterialVersion===JEV_REPAIR_QUALITY_VERSION,
+      t.namingReconfirm===true,tape.state.ledger))return'invalid';
    const start=messages.at(-1)?.content?.startsWith('公開発話を書き直してください。')?messages.slice(0,-1):messages;
    const key=hash({execution:ex,recovery:p.recovery?.reason??null,continuation:p.continuation?.choice??null,combined});
    if(generationPlans.has(key)&&!equal(generationPlans.get(key),start))return'invalid';
    generationPlans.set(key,start);
   }
   if((!p.recovery||issueHandling)&&tr.profile?.judgmentMaterialVersion===JEV_REPAIR_QUALITY_VERSION){
-   const guidance=(visualDetail||issueHandling&&(p.recovery||draftParts)?'':normalRepairQualityGuidance(ex.action)+'\n')+JSON.stringify({publicQuestions:repairQualityPublicQuestions(t.turnIndex,
+   const afterRecovery=v22&&p.recovery&&!draftParts&&ex.action==='accept';
+   const guidance=(afterRecovery||!(visualDetail||issueHandling&&(p.recovery||draftParts))?normalRepairQualityGuidance(ex.action)+'\n':'')+JSON.stringify({publicQuestions:repairQualityPublicQuestions(t.turnIndex,
     history.slice(-32).map((e:any)=>({turn:e.seq,speaker:e.speaker,text:e.text})),liveClaims(graph))})+'\n';
    if(!generations.at(-1).payload.messages.some((m:any)=>m.role==='system'&&m.content.includes(guidance)))return'invalid';
   }
@@ -1485,7 +1622,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
  }
  if(!validAgreeNameScope(tape?.state?.agreeNameScopeVersion,tape?.generationRetryVersion))return'invalid';
  try{
- const issueHandling=tape.generationRetryVersion===S4_ISSUE_HANDLING_GENERATION;
+ const issueHandling=s4UsesIssueHandling(tape.generationRetryVersion);
  if(!exact(tape,['schemaVersion','state','events','common','tails','recorded',...(Object.hasOwn(tape??{},'technicalTrial')?['technicalTrial']:[]),...(Object.hasOwn(tape??{},'generationRetryVersion')?['generationRetryVersion']:[]),...(issueHandling?['requestSeq']:[])])||issueHandling&&(!Number.isSafeInteger(tape.requestSeq)||tape.requestSeq<1)||tape.schemaVersion!=='parity_intervention_replay_v1'||!exact(result,['schemaVersion','status','error','commonEqual','policyConformant','recordedPayloadsReproduced','actualLunaHttpMeasured','hashScheme','excludedEnvelopeFields','sides'])||result.schemaVersion!=='parity_intervention_replay_result_v1'||result.status!=='same_material_intervention_verified'||result.error!==null||result.commonEqual!==true||result.policyConformant!==true||result.recordedPayloadsReproduced!==true||typeof result.actualLunaHttpMeasured!=='boolean'||result.hashScheme!=='canonical_json_sha256_not_raw_body_bytes'||!equal(result.excludedEnvelopeFields,META_KEYS)||!Array.isArray(result.sides)||result.sides.length!==2)return'invalid';
  // The replay plan declares a shared version. An attempt without a retry has no retry wire text to bind.
  const version=tape.generationRetryVersion;
@@ -1499,8 +1636,9 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
  if(pruneVersion===CLAIM_PRUNE_V3&&(!referenceEvidence||
    !equal(referenceEvidence.localAlternatives,committedState?.referenceAlternatives??[])))return'invalid';
  if(isGenerationV17(version)){
-  if(tape.state.agreeNameScopeVersion==='jev_naming_v2'&&
-     (committedState?.agreeNameScopeVersion!=='jev_naming_v2'||s4LocalReverify(tape,t,tr.profile.dialoguePolicy,committed)!=='ok'))return'invalid';
+  const scope=tape.state.agreeNameScopeVersion;
+  if((rechecksJevNamingAnswers(scope)||version==='jev_generation_retry_v22')&&
+     (committedState?.agreeNameScopeVersion!==scope||s4LocalReverify(tape,t,tr.profile.dialoguePolicy,committed)!=='ok'))return'invalid';
   return generatedReplayProof(tr,t,tape,result,pair,referenceEvidence,committed);
  }
   const policy=tr.profile?.dialoguePolicy??null;
@@ -3203,6 +3341,23 @@ const PROMPT_VERSIONS:readonly PromptVersion[]=[
   'shape-terminology.ts':'80fddf9e0947ae4e8dad85f3cf5e27700a070f0897225a565967623012ac3cf9',
   'v2/visual-feature-evidence.ts':'20ae51252417432409a12425bca621d5c0ceb5705aea30578c8bcda852f4bf03',
   'v2/deferred-ai-extraction.ts':'231b3cf3705de880fb7d82c8cc79ba0a93754d3cf4c2ccdba78caaaa132ff0a4',
+  'v2/issue-publication.ts':'d17114f66ce8ce79cf1c4e1d6f34b2116976215009fc4e33e9540be1bcba1dcb',
+  'decision/human-led-move-on.ts':'7c5dc7ff16877f1d9ff5cb6a777895c91aeb28fa6e31af1e7ab3d4ad5ed8d048',
+ }},fixed:FIXED_I172,native:NATIVE_I172},
+ {id:'p5_pilot012_issue_handling_v22',i172:true,fourFigures:true,styleMode:'research_split',sources:{scheme:'complete_instruction_source_sha256',files:{
+  'v2/dialogue-v2.mjs':'2b5469bf4a7280153042b0e34d6527c3f999252af5b2b4d0a841aa366d567a7c',
+  'v2/jev-turn.ts':'e537b52c76efafb6c21a1c595ede134696a6a61cfeed8aee15c810a1d753b289',
+  'v2/generation-guard.ts':'03273196b7ff5e2b57f59a9e8c0de89336c1a2b9a2ee6a15d18f239d79ba0966',
+  'judgment/instructions.mjs':'eeb20c812729d04e52437a064b31fcd8af60ee2da8b1f6e73d99c4eb8dc8a785',
+  'observation/observe.ts':'eac863a50455665daa62812157d68512a7e33bed9fda271b4e7af4f44b38dde4',
+  'local-grounding/extract.ts':'0bf5f7969d79cbe2c71feea4281e1280139f291fee1c2186bcfaf8d3af27e88c',
+  'local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01',
+  'decision/jev-decision.ts':'ae9a21d875d722a4044ee43421874b1d3e3fae48bc05c023320ea82bcd1ff330',
+  'local-grounding/extract-ai.ts':'c2179cafb7ebdb88d3605b1c681fd20ca6705a1eab7d50dbf2ed7a845458fb24',
+  'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
+  'shape-terminology.ts':'80fddf9e0947ae4e8dad85f3cf5e27700a070f0897225a565967623012ac3cf9',
+  'v2/visual-feature-evidence.ts':'20ae51252417432409a12425bca621d5c0ceb5705aea30578c8bcda852f4bf03',
+  'v2/deferred-ai-extraction.ts':'f857726bb2892faa020fef5e87f184f6e52cac5b1915c7f6e2068f400252d585',
   'v2/issue-publication.ts':'d17114f66ce8ce79cf1c4e1d6f34b2116976215009fc4e33e9540be1bcba1dcb',
   'decision/human-led-move-on.ts':'7c5dc7ff16877f1d9ff5cb6a777895c91aeb28fa6e31af1e7ab3d4ad5ed8d048',
  }},fixed:FIXED_I172,native:NATIVE_I172},
