@@ -38,7 +38,7 @@ async function saved(extra: string[][]) {
   return { status: response.status, fields: (f.calls[0]?.args[0] as any)?.fields, writes: f.calls.length };
 }
 
-test('figure catalogue page: authenticated, strict CSP, 30 figures and 5 candidate sets drawn as inline SVG with no inline style', async () => {
+test('figure catalogue page: authenticated, strict CSP, 30 figures and six candidate sets drawn as inline SVG with no inline style', async () => {
   const f = fixture();
   assert.equal((await handleAdmin(new Request(ORIGIN + '/admin/figures'), f.deps)).status, 401);
   const response = await handleAdmin(new Request(ORIGIN + '/admin/figures', { headers: auth }), f.deps);
@@ -46,7 +46,7 @@ test('figure catalogue page: authenticated, strict CSP, 30 figures and 5 candida
   assert.match(response.headers.get('Content-Security-Policy') ?? '', /style-src 'self'/u);
   const html = await response.text();
   assert.equal(FIGURE_BANK.length, 30);
-  assert.equal((html.match(/<svg /gu) ?? []).length, 30 + 30, 'all figures once plus every candidate set (5 x 6)');
+  assert.equal((html.match(/<svg /gu) ?? []).length, 30 + 30 + 4, 'all figures once, five legacy sets of six and the four-figure pilot set');
   for (const id of Object.keys(FIGURE_SETS)) assert.ok(html.includes(`<h3>${id}</h3>`), id);
   assert.doesNotMatch(html, /<style|\sstyle=/u);
   assert.match(html, /予備検討用/u);
@@ -165,4 +165,46 @@ test('experiment preview draws the recorded figures; an invalid selection never 
   assert.notDeepEqual(expected(selection), expected());
   const broken = renderExperimentPreview(record({ ...selection, figureIds: ['F1', 'F2', 'F3', 'F4', 'F5', 'F6'] }), summary);
   assert.match(broken, /図形を表示できません/u); assert.match(broken, /合成の発話/u);
+});
+
+
+test('four-figure protocol form saves preset, random and custom choices without changing the six-figure form', async () => {
+  const preset = await saved([['figureMode', 'preset'], ['figureSetId', 'pilot-four-v1'], ['figureSetPolicy', 'shared']]);
+  assert.equal(preset.status, 303);
+  assert.deepEqual(preset.fields.figureSelection, { mode: 'preset', setId: 'pilot-four-v1' });
+  const random = await saved([['figureMode', 'seeded_random'], ['figureCount', '4'], ['selectionSeed', '41'], ['figureSetPolicy', 'per_trial']]);
+  assert.equal(random.status, 303);
+  assert.deepEqual(random.fields.figureSelection, { mode: 'seeded_random', selectionSeed: 41, figureCount: 4 });
+  assert.equal(random.fields.figureSetPolicy, 'per_trial');
+  const custom = await saved([['figureMode', 'custom'], ...['F4', 'F1', 'F3', 'F2'].map(id => ['figureIds', id]), ['figureSetPolicy', 'shared']]);
+  assert.equal(custom.status, 303);
+  assert.deepEqual(custom.fields.figureSelection, { mode: 'custom', figureIds: ['F1', 'F2', 'F3', 'F4'] });
+  for (const count of ['3', '5', '7', '4.0', '04', '']) {
+    const invalid = await saved([['figureMode', 'seeded_random'], ['figureCount', count], ['figureSetPolicy', 'shared']]);
+    assert.equal(invalid.status, 400, count); assert.equal(invalid.writes, 0, count);
+  }
+  const repeated = await saved([['figureMode', 'seeded_random'], ['figureCount', '4'], ['figureCount', '6'], ['figureSetPolicy', 'shared']]);
+  assert.equal(repeated.status, 400); assert.equal(repeated.writes, 0);
+  for (const count of [4, 6]) {
+    const html = renderSettings(settingsView({ ...PROTOCOL_V2, schemaVersion: 'reception_protocol_v3', figureSetPolicy: 'per_trial',
+      figureSelection: { mode: 'seeded_random', selectionSeed: 41, ...(count === 4 ? { figureCount: 4 } : {}) } }) as any);
+    assert.ok(html.includes(`<option value="${count}" selected>${count}</option>`));
+  }
+});
+
+test('saving a four-figure revision preserves the previous six-figure protocol and all other settings', async () => {
+  const storage = memory();
+  const fields = { allowedOrders: [['repair-first', 'bypass-enabled']], seedPolicy: 'per_trial', referenceMemory: true,
+    betweenTrials: 'questionnaire_required', receptionNumberFormat: 'daily_seq3', rotationMode: 'relative_0',
+    figureSelection: { mode: 'seeded_random', selectionSeed: 41 }, figureSetPolicy: 'per_trial' };
+  const time = Date.parse('2026-11-27T00:00:00.000Z');
+  assert.deepEqual(await saveProtocol(storage, { expectedRevision: 0, fields }, time, randomUUID), { ok: true, revision: 1 });
+  const before = await readSettings(storage);
+  assert.deepEqual(await saveProtocol(storage, { expectedRevision: 1,
+    fields: { ...fields, figureSelection: { ...fields.figureSelection, figureCount: 4 } } }, time + 1000, randomUUID), { ok: true, revision: 2 });
+  const after = await readSettings(storage), history = await protocolHistory(storage);
+  assert.equal(after.protocol?.protocol.protocolId, before.protocol?.protocol.protocolId);
+  assert.deepEqual(history[1], before.protocol);
+  assert.deepEqual(after.protocol?.protocol, { ...before.protocol!.protocol, revision: 2,
+    figureSelection: { ...fields.figureSelection, figureCount: 4 } });
 });

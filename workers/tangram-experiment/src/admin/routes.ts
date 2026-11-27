@@ -5,7 +5,7 @@
 import { checkAdmin, presentedToken } from "./auth.ts";
 import { RECEPTIONS_LIVE_JS } from './receptions-live.ts';
 import { ADMIN_CSS, applyFilter, parseFilter, renderDetail, renderList, renderMessage, renderReceptions, renderEntry, renderSettings, renderExperimentPreview, renderFigures } from "./render.ts";
-import { FIGURE_SETS, FIGURE_BANK } from '../../../../dialogue-model/runtime/stimuli/figure-bank.ts';
+import { FIGURE_SETS, FIGURE_BANK, isSupportedFigureCount } from '../../../../dialogue-model/runtime/stimuli/figure-bank.ts';
 import { OBJECT_ID, RECORD_ID } from "./summary.ts";
 import type { AdminSummary } from "./summary.ts";
 import { isParticipantRole, participantRoleView } from "./participant-role.ts";
@@ -236,7 +236,7 @@ const ORDER_TOKENS: Readonly<Record<string, ProtocolFields['allowedOrders'][numb
   'rf-be': ['repair-first', 'bypass-enabled'], 'be-rf': ['bypass-enabled', 'repair-first'], rf: ['repair-first'], be: ['bypass-enabled'] });
 const SINGLE: Readonly<Record<string, readonly string[]>> = Object.freeze({ seedPolicy: ['shared', 'per_trial'], referenceMemory: ['on', 'off'],
   betweenTrials: ['none', 'questionnaire_required'], rotationMode: ['relative_pm90', 'relative_0'], receptionNumberFormat: ['daily_seq3'] });
-const FIGURE_KEYS = ['figureMode', 'figureSetPolicy', 'figureSetId', 'selectionSeed', 'figureIds'];
+const FIGURE_KEYS = ['figureMode', 'figureSetPolicy', 'figureSetId', 'selectionSeed', 'figureIds', 'figureCount'];
 const BANK_IDS = new Set(FIGURE_BANK.map(f => f.id));
 /** The figure source and its allocation, both explicit. Inputs that belong to another mode are ignored; per_trial needs the seeded mode. */
 function figureFields(form: URLSearchParams): Pick<ProtocolFields, 'figureSelection' | 'figureSetPolicy'> | null {
@@ -248,18 +248,20 @@ function figureFields(form: URLSearchParams): Pick<ProtocolFields, 'figureSelect
     if (set.length !== 1 || !Object.hasOwn(FIGURE_SETS, set[0])) return null;
     figureSelection = { mode: 'preset', setId: set[0] };
   } else if (mode[0] === 'seeded_random') {
-    const seeds = form.getAll('selectionSeed');
-    if (seeds.length > 1) return null;
+    const seeds = form.getAll('selectionSeed'), counts = form.getAll('figureCount');
+    if (seeds.length > 1 || counts.length > 1 || counts.some(value => value !== '4' && value !== '6')) return null;
+    const figureCount = counts.length ? Number(counts[0]) as 4 | 6 : undefined;
+    const size = figureCount === undefined ? {} : { figureCount };
     const raw = (seeds[0] ?? '').trim();
-    if (raw === '') figureSelection = { mode: 'seeded_random', selectionSeed: null };
+    if (raw === '') figureSelection = { mode: 'seeded_random', selectionSeed: null, ...size };
     else {
       const seed = /^-?\d{1,16}$/u.test(raw) ? Number(raw) : NaN;
       if (!Number.isSafeInteger(seed)) return null;
-      figureSelection = { mode: 'seeded_random', selectionSeed: seed };
+      figureSelection = { mode: 'seeded_random', selectionSeed: seed, ...size };
     }
   } else if (mode[0] === 'custom') {
     const ids = form.getAll('figureIds');
-    if (ids.length !== 6 || new Set(ids).size !== 6 || ids.some(id => !BANK_IDS.has(id))) return null;
+    if (!isSupportedFigureCount(ids.length) || new Set(ids).size !== ids.length || ids.some(id => !BANK_IDS.has(id))) return null;
     figureSelection = { mode: 'custom', figureIds: FIGURE_BANK.map(f => f.id).filter(id => ids.includes(id)) };
   } else return null;
   if (policy[0] === 'per_trial' && figureSelection.mode !== 'seeded_random') return null;

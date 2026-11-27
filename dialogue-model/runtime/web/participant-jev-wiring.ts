@@ -35,13 +35,14 @@ import type { BudgetLimits, SendReceipt } from '../diagnostics/parity-live/audit
 import { checkModelIdentity, MODEL_CONTRACT_V2 } from '../model-identity-contract.ts';
 import { RESEARCH_MAX_JEV_USD } from '../diagnostics/jev-shadow-eval/local-openrouter.ts';
 import { inferenceHistory } from '../v2/agreement-gate.ts';
-import { defaultGenerationRetryVersion, hasVersionedViewpoint, isGenerationV12, isGenerationV13, validGenerationRetryVersion, validAgreeNameScope } from '../v2/generation-guard.ts';
+import { defaultGenerationRetryVersion, hasVersionedViewpoint, isGenerationV12, isGenerationV13, isGenerationV17, validGenerationRetryVersion, validAgreeNameScope } from '../v2/generation-guard.ts';
+import type { ShapeTerminologyVersion } from '../shape-terminology.ts';
 import type { GenerationRetryVersion } from '../v2/generation-guard.ts';
 
 export type JevResearchLedger = RunBudget | ParticipantUsageLedger;
 const AI_NAME_ACCEPTANCES_V1 = 'ai_name_acceptances_v1';
 type ParticipantJevVersionPin = Readonly<{
-  generationRetryVersion: 'jev_generation_retry_v12' | 'jev_generation_retry_v13' | 'jev_generation_retry_v15' | 'jev_generation_retry_v16' | 'jev_generation_retry_v17'; namingRestoreVersion: typeof AI_NAME_ACCEPTANCES_V1;
+  generationRetryVersion: 'jev_generation_retry_v12' | 'jev_generation_retry_v13' | 'jev_generation_retry_v15' | 'jev_generation_retry_v16' | 'jev_generation_retry_v17' | ShapeTerminologyVersion; namingRestoreVersion: typeof AI_NAME_ACCEPTANCES_V1;
 }>;
 export type JevResearchOptions<Ledger extends JevResearchLedger = RunBudget> = Readonly<{ profile: ResearchTrialProfileV3; observer: ObservationObserver;
   jevDecision: JevDecisionClient; localGrounding: JevTurnLocalOptions; ledger: Ledger; technicalTrial?: AdaptiveRepairTrial;
@@ -80,7 +81,7 @@ function checkedProfile(value: unknown): ResearchTrialProfileV3 {
   return expected;
 }
 /** Plan O records exist only on failed decide() attempts and must re-validate to the identical closed record. */
-function checkedDecisionFailure(trace: any, layout: JevQuestionLayout, p5Enabled: boolean, usagePolicy?: ParticipantUsageOnly, humanLedMoveOn = false): boolean {
+function checkedDecisionFailure(trace: any, layout: JevQuestionLayout, p5Enabled: boolean, usagePolicy?: ParticipantUsageOnly, humanLedMoveOn = false, figureCount = 6): boolean {
   // The local v3 rule is recorded together with its evidence; a bare rule name on a trace is a damaged record.
   if (!Object.hasOwn(trace, 'decisionFailure')) return trace.decisionRejectionCode !== 'action_target_not_allowed';
   const f = trace.decisionFailure;
@@ -88,7 +89,7 @@ function checkedDecisionFailure(trace: any, layout: JevQuestionLayout, p5Enabled
       Object.getPrototypeOf(f) !== Object.prototype || Reflect.ownKeys(f).length !== 1 || !Object.hasOwn(f, 'evidence')) return false;
   if (f.evidence === null) return trace.decisionRejectionCode !== 'action_target_not_allowed';
   // The trace names its own condition (a typed naming request of a holistic_v3 turn): only then may accept be missing from the first stage.
-  const checked = checkDecisionFailureEvidence(f.evidence, { usagePolicy, p5Enabled, humanLedMoveOn, acceptOptional: trace.namingRequest === true && Array.isArray(trace.local?.claims) && hasNameProposal(trace.local.claims, trace.turnIndex) });
+  const checked = checkDecisionFailureEvidence(f.evidence, { usagePolicy, p5Enabled, humanLedMoveOn, figureCount, acceptOptional: trace.namingRequest === true && Array.isArray(trace.local?.claims) && hasNameProposal(trace.local.claims, trace.turnIndex) });
   if (checked === null || checked.questionLayout !== layout || researchHash(checked) !== researchHash(jsonData(f.evidence))) return false;
   // A decision the local v3 table refused names its rule twice, in the turn and in the evidence, and in no other way; no native failure may carry it.
   const local = checked.rejectionCode === 'action_target_not_allowed' && checked.stages.length === 0;
@@ -175,7 +176,7 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
     if (pinned && (Object.hasOwn(v, 'generationRetryVersion') ||
         pinned.generationRetryVersion !== 'jev_generation_retry_v12' && pinned.generationRetryVersion !== 'jev_generation_retry_v13' &&
         pinned.generationRetryVersion !== 'jev_generation_retry_v15' && pinned.generationRetryVersion !== 'jev_generation_retry_v16' &&
-        pinned.generationRetryVersion !== 'jev_generation_retry_v17' ||
+        !isGenerationV17(pinned.generationRetryVersion) ||
         pinned.namingRestoreVersion !== AI_NAME_ACCEPTANCES_V1 ||
         !validGenerationRetryVersion(pinned.generationRetryVersion, profile.questionLayout, profile.dialoguePolicy) ||
         restore && (savedGenerationVersion !== pinned.generationRetryVersion ||
@@ -192,7 +193,7 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
     if (Object.hasOwn(v, 'newTrialAgreeNameScopeVersion') &&
         (newTrialAgreeNameScopeVersion === undefined ||
           !restore && !validAgreeNameScope(newTrialAgreeNameScopeVersion, generationRetryVersion))) return invalid();
-    if (generationRetryVersion === 'jev_generation_retry_v17' && (!pinned ||
+    if (isGenerationV17(generationRetryVersion) && (!pinned ||
         !(v.ledger instanceof ParticipantUsageLedger) || v.ledger.snapshot().pin.schemaVersion !== 'participant_model_pin_v3' ||
         newTrialAgreeNameScopeVersion !== 'jev_naming_v1')) return invalid();
     const p5Enabled = isGenerationV13(generationRetryVersion);
@@ -222,7 +223,7 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
       const savedLayout = Object.hasOwn(restore.options,'questionLayout') ? restore.options.questionLayout : 'two_stage_v1';
       if (savedLayout !== profile.questionLayout || Object.hasOwn(restore.options,'questionLayout') && savedLayout !== 'two_stage_v2' && savedLayout !== 'two_stage_v3') return invalid();
       const humanLedMoveOn = profile.interventionPolicy.version === 'bypass_acceptance_v2';
-      if (restore.jevTraces?.some?.((trace:any)=>!checkedDecisionFailure(trace,profile.questionLayout,p5Enabled,v.ledger instanceof ParticipantUsageLedger ? PARTICIPANT_USAGE_ONLY : undefined,humanLedMoveOn))) return invalid();
+      if (restore.jevTraces?.some?.((trace:any)=>!checkedDecisionFailure(trace,profile.questionLayout,p5Enabled,v.ledger instanceof ParticipantUsageLedger ? PARTICIPANT_USAGE_ONLY : undefined,humanLedMoveOn, restore.queueState?.privateState?.observationMemo?.figures?.length))) return invalid();
       if (restore.options.profileSha256 !== researchHash(profile) ||
           researchHash(jsonData(restore.options.interventionPolicy)) !== researchHash(profile.interventionPolicy) ||
           restore.queueState?.privateState?.schemaVersion !== 'jev_private_state_v2' ||
@@ -255,11 +256,11 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
         if (committed) {
           const judgment = savedJudgments.find((j: any) => j?.turnIndex === trace.turnIndex && j?.jevTurn?.attemptNumber === trace.attemptNumber);
           if (!judgment) return invalid();
-          if (generationRetryVersion === 'jev_generation_retry_v17' &&
+          if (isGenerationV17(generationRetryVersion) &&
               (!trace.generatedPublication || !judgment.generatedPublication ||
                 researchHash(jsonData(trace.generatedPublication)) !== researchHash(jsonData(judgment.generatedPublication)) ||
                 !restore.queueState.events.some((event: any) => event.seq === trace.turnIndex + 1 && event.speaker === 'ai' && event.text === trace.publicSpeech)) ||
-              generationRetryVersion !== 'jev_generation_retry_v17' && Object.hasOwn(trace, 'generatedPublication')) return invalid();
+              !isGenerationV17(generationRetryVersion) && Object.hasOwn(trace, 'generatedPublication')) return invalid();
           for (const key of ['executed','humanReferent','repairProspect','repairGate','repairFacts','draftActs','draftSharedClaims','namingRequest','namingReconfirm','sharedConstruals'])
             if (Object.hasOwn(trace, key) !== Object.hasOwn(judgment.jevTurn, key) || Object.hasOwn(trace, key) && researchHash(jsonData(trace[key])) !== researchHash(jsonData(judgment.jevTurn[key]))) return invalid();
           const humanMove = humanLedMoveOn && judgment.jevTurn.intervention?.reasonCode === 'human_led_move_on';

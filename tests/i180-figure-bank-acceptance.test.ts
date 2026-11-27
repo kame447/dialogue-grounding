@@ -89,13 +89,15 @@ function resolvePlan(protocol: ReceptionProtocolV3, random: number[]) {
   return approveReception(reception, { ...shown, protocol, expected: shown.protocol, approvedAt: now, randomSeed: seed });
 }
 
-test('all five presets, a pinned seeded draw and a custom set place six matching figures in both rotation modes', () => {
-  const { FIGURE_BANK, FIGURE_SETS, resolveFigureSelection } = figureBank();
+test('legacy and four-figure presets, seeded and custom sets preserve their matching figures in both rotation modes', () => {
+  const { FIGURE_BANK, FIGURE_SETS, PILOT_FIGURE_SET_ID, resolveFigureSelection } = figureBank();
   assert.deepEqual(FIGURE_BANK.map(figure => figure.id), Array.from({ length: 30 }, (_, index) => 'F' + (index + 1)));
   assert.deepEqual(validateFigures(FIGURE_BANK), { valid: true, errors: [] });
-  assert.deepEqual(Object.keys(FIGURE_SETS), ['legacy-v1', 'bank-set-a', 'bank-set-b', 'bank-set-c', 'bank-set-d']);
-  assert.deepEqual(Object.values(FIGURE_SETS), Array.from({ length: 5 }, (_, set) =>
+  const legacySets = Object.entries(FIGURE_SETS).filter(([id]) => id !== PILOT_FIGURE_SET_ID);
+  assert.deepEqual(legacySets.map(([id]) => id), ['legacy-v1', 'bank-set-a', 'bank-set-b', 'bank-set-c', 'bank-set-d']);
+  assert.deepEqual(legacySets.map(([, ids]) => ids), Array.from({ length: 5 }, (_, set) =>
     Array.from({ length: 6 }, (_, index) => 'F' + (set * 6 + index + 1))));
+  assert.deepEqual(FIGURE_SETS[PILOT_FIGURE_SET_ID], ['F1', 'F2', 'F3', 'F4']);
   const specs = [
     ...Object.entries(FIGURE_SETS).map(([setId, expected]) => ({ selection: { mode: 'preset', setId }, expected })),
     { selection: { mode: 'seeded_random', selectionSeed: 41 }, expected: knownRandom },
@@ -115,7 +117,7 @@ test('all five presets, a pinned seeded draw and a custom set place six matching
           }
         }
       }
-      assert.equal(new Set([...layout.human, ...layout.ai].map(figure => figure.id)).size, 12);
+      assert.equal(new Set([...layout.human, ...layout.ai].map(figure => figure.id)).size, expected.length * 2);
       for (const shape of layout.human) {
         const same = layout.ai.find(candidate => candidate.figureId === shape.figureId)!;
         const delta = (same.rotation - shape.rotation + 360) % 360;

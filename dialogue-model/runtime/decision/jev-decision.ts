@@ -1,3 +1,4 @@
+import { isSupportedFigureCount } from '../stimuli/figure-bank.ts';
 import { MOVE_ON_SOURCE_QUESTION } from "./human-led-move-on.ts";
 import { PARTICIPANT_USAGE_ONLY, type ParticipantUsageOnly } from '../web/participant-usage-policy.ts';
 import { deadlineLimit, deadlineValue } from '../v2/research-deadline-options.ts';
@@ -7,6 +8,7 @@ import { keychainKeyReader, DEFAULT_COST_CAP_USD, UPSTREAM_TIMEOUT_MS, maxJevCos
 import { isGroundingModel, OPENROUTER_DECISIONS_URL } from "../../../workers/research-ai-proxy/src/grounding.ts";
 import { LOCAL_ACTS, LOCAL_ASPECTS, LOCAL_SOURCES } from "../local-grounding/contract.ts";
 import type { LocalClaimView } from "../local-grounding/contract.ts";
+import { isGenerationV18, withShapeTerminologyQuestions } from "../shape-terminology.ts";
 import { hasRetainedNameSource, validReferenceEvidence } from "../local-grounding/reference-evidence.ts";
 import { namingWithdrawalQuestion } from "./jev-naming.ts";
 import { literalSpan } from "../judgment/public-evidence.mjs";
@@ -18,7 +20,7 @@ import { JEV_REPAIR_QUALITY_VERSION, PUBLICATION_CONTINUATION_QUESTION, PUBLICAT
   REPAIR_QUALITY_DETAIL, REPAIR_QUALITY_GUIDANCE, REPAIR_QUALITY_NEW_INFORMATION, REPAIR_QUALITY_PROGRESSING,
   REPAIR_QUALITY_PROSPECT } from "./repair-quality.ts";
 import { nameBindsFigure } from "./referent-binding.ts";
-import { encodeMaterialV5, claimKeepOrder, JUDGMENT_V5_LEGEND, JUDGMENT_V11_ANSWER_LEGEND } from "./judgment-material-v5.ts";
+import { encodeMaterialV5, claimKeepOrder, judgmentV5Legend, JUDGMENT_V11_ANSWER_LEGEND } from "./judgment-material-v5.ts";
 import type { LedgerAction } from "./judgment-material-v5.ts";
 import { jevChoiceAnswersValid } from "./jev-choice-response.ts";
 import { JEV_ACTIONS, DRAFT_ACTS, DRAFT_SHARED_CLAIMS, OBSERVATION_ASPECTS, REPAIR_PROSPECTS, REPAIR_PROSPECT_BASES, PARTICIPANT_TARGET_MENU_VERSION, isHolisticPolicy } from "./contract.ts";
@@ -143,7 +145,7 @@ export const TWO_STAGE_V3_TARGET_INSTRUCTIONS = "stateのselected.actionが第1�
 export const TWO_STAGE_V2_CANDIDATE_SET_INSTRUCTIONS = "第1段で対象をmultiple（一つに絞れない）としました。この行動で対象候補として扱う自分の図形の集合を、2図形以上の組合せから一つ選んでください。公開発話と観察メモに根拠がある図形を含め、根拠のない図形は含めないでください。";
 export const TWO_STAGE_V2_CANDIDATE_SET_CRITERION = (figureIds: readonly string[]) => `自分の候補図形の集合 ${JSON.stringify(figureIds)}。観察メモを参照。`;
 /** holistic_v5: the notation legend and the task's rotation condition, for every question (the referent estimate included). */
-const v5Suffix = (input: JevDecisionInput) => input.judgmentLedger === undefined ? "" : "\n" + JUDGMENT_V5_LEGEND + (input.notationV11 === true ? "\n" + JUDGMENT_V11_ANSWER_LEGEND : "") + ((input.rotationMode ?? "relative_pm90") === "relative_pm90" ? "\n" + ROTATION_V5 : "");
+const v5Suffix = (input: JevDecisionInput) => input.judgmentLedger === undefined ? "" : "\n" + judgmentV5Legend(input.ownSlots.length) + (input.notationV11 === true ? "\n" + JUDGMENT_V11_ANSWER_LEGEND : "") + ((input.rotationMode ?? "relative_pm90") === "relative_pm90" ? "\n" + ROTATION_V5 : "");
 const decisionInstructions = (input: JevDecisionInput, prospect = false, layout: JevQuestionLayout = "two_stage_v1", participantPrompts = false) =>
   (layout === "two_stage_v3" ? (participantPrompts ? COMMON_V3 : RESEARCH_COMMON_V3) : layout === "two_stage_v2" ? COMMON_V2 : COMMON) + (input.humanReferent === undefined ? "" : "\n" + HUMAN_REFERENT_GUIDANCE) + (!prospect || input.repairProspect === undefined ? "" : "\n" + REPAIR_PROSPECT_GUIDANCE) + factsGuidance(input) + v5Suffix(input) +
   (input.jevNaming ? "\n" + JEV_NAMING_GUIDANCE : "") +
@@ -162,6 +164,10 @@ export const TWO_STAGE_V2_CANDIDATE_SETS: readonly (readonly number[])[] = Objec
   }
   return sets.map(set => Object.freeze(set));
 })());
+export function candidateSetsFor(figureCount: number): readonly (readonly number[])[] {
+  if (!isSupportedFigureCount(figureCount)) fail("invalid_input");
+  return figureCount === 6 ? TWO_STAGE_V2_CANDIDATE_SETS : TWO_STAGE_V2_CANDIDATE_SETS.filter(set => set.every(i => i < figureCount));
+}
 export const candidateSetLabel = (indices: readonly number[]) => "figures_" + indices.join("_");
 // holistic_v1: what a draft does about naming, judged by meaning (no particular phrase is a condition). The program only compares the label with the action.
 const HUMAN_MOVE_ON_ACTION_NOTE = '\n今回の人間が話題の移行を明示的に主導したときは、命名や同定の解決を前提とせずmove_onで受け止めてください。';
@@ -331,12 +337,16 @@ export type JevV3TargetOption = { label: string; target: JevTarget };
 function legalTargetsV3(action: JevAction, m: V3Material): JevV3TargetOption[] {
   const all: JevV3TargetOption[] = [{ label: "none", target: { kind: "none" } },
     ...m.slots.map((id, i) => ({ label: `figure_${i}`, target: { kind: "single", figureId: id } as JevTarget })),
-    ...TWO_STAGE_V2_CANDIDATE_SETS.map(set => ({ label: candidateSetLabel(set), target: { kind: "multiple", figureIds: set.map(i => m.slots[i]) } as JevTarget }))];
+    ...candidateSetsFor(m.slots.length).map(set => ({ label: candidateSetLabel(set), target: { kind: "multiple", figureIds: set.map(i => m.slots[i]) } as JevTarget }))];
   return all.filter(o => legalActionTargetV3(action, o.target, m));
 }
 const legalActionsV3 = (m: V3Material): JevAction[] => JEV_ACTIONS.filter(a => legalTargetsV3(a, m).length > 0);
 /** Every label a two_stage_v3 target question can carry. */
 export const V3_TARGET_LABEL_SET: readonly string[] = Object.freeze(["none", ...Array.from({ length: 6 }, (_, i) => `figure_${i}`), ...TWO_STAGE_V2_CANDIDATE_SETS.map(candidateSetLabel)]);
+export function v3TargetLabels(figureCount: number): readonly string[] {
+  if (!isSupportedFigureCount(figureCount)) fail("invalid_input");
+  return figureCount === 6 ? V3_TARGET_LABEL_SET : ["none", ...Array.from({ length: figureCount }, (_, i) => `figure_${i}`), ...candidateSetsFor(figureCount).map(candidateSetLabel)];
+}
 export const TWO_STAGE_V2_OBSERVE_TARGETS = "選択済みの対象候補の範囲で、再観察が必要な図形の集合を選んでください。";
 const OBSERVE_QUESTIONS = {
   orientation: "指定図形の向き・部分間の方向関係について、公開発話を支える根拠・反証・不明点を確認してください。",
@@ -413,7 +423,7 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
   pendingMultiple?: JevAction, pendingAction?: JevAction, policy?: DialoguePolicy, reserveDetail = false, participantPrompts = false) {
   if (!includes(LAYOUTS, layout) || pendingMultiple !== undefined && (layout !== "two_stage_v2" || selected !== undefined) ||
       pendingAction !== undefined && (layout !== "two_stage_v3" || selected !== undefined || pendingMultiple !== undefined)) fail("invalid_options");
-  if (!input || !positive(input.turn) || !strings(input.ownSlots, 6, 160) || input.ownSlots.length !== 6 || unique(input.ownSlots).length !== 6 ||
+  if (!input || !positive(input.turn) || !strings(input.ownSlots, 6, 160) || !isSupportedFigureCount(input.ownSlots.length) || unique(input.ownSlots).length !== input.ownSlots.length ||
       !Array.isArray(input.publicTurns) || input.publicTurns.length > JEV_DECISION_INPUT_LIMITS.publicTurns || !text(input.issueSummary, 12000, true) ||
       !Array.isArray(input.priorClaims) || input.priorClaims.length > 160 || !Array.isArray(input.repairHistory) || input.repairHistory.length > JEV_DECISION_INPUT_LIMITS.repairHistory ||
       !Array.isArray(input.publicNames) || input.publicNames.length > JEV_DECISION_INPUT_LIMITS.publicNames ||
@@ -424,6 +434,7 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
   if (input.humanLedMoveOn !== undefined && (input.humanLedMoveOn !== true || layout !== "two_stage_v3")) fail("invalid_input");
   const repairQuality = input.judgmentMaterialVersion === JEV_REPAIR_QUALITY_VERSION;
   if (input.judgmentMaterialVersion !== undefined && (!repairQuality || layout !== "two_stage_v3" || input.judgmentLedger === undefined)) fail("invalid_input");
+  if (input.shapeTerminologyVersion !== undefined && (!isGenerationV18(input.shapeTerminologyVersion) || layout !== "two_stage_v3")) fail("invalid_input");
   const p5Enabled = input.p5Enabled === true;
   if (!(input.p5Enabled === undefined || p5Enabled && input.judgmentLedger !== undefined) ||
       !p5Enabled && input.sharedConstruals !== undefined) fail("invalid_input");
@@ -486,7 +497,7 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
   if (referenceEvidence !== undefined && (layout !== "two_stage_v3" || input.judgmentLedger === undefined ||
       !validReferenceEvidence(referenceEvidence, slots, input.turn, input.publicTurns))) fail("invalid_input");
   const figures = input.observations?.figures;
-  if (!Array.isArray(figures) || figures.length !== 6 || unique(figures.map(f => f?.id)).length !== 6) fail("invalid_input");
+  if (!Array.isArray(figures) || figures.length !== slots.length || unique(figures.map(f => f?.id)).length !== slots.length) fail("invalid_input");
   const observations = slots.map(figureId => {
     const f = figures.find(f => f?.id === figureId);
     if (!f || !Array.isArray(f.holistic) || f.holistic.length > 32 || !f.analytic || !strings(f.analytic.shapes, 32, 1000) ||
@@ -1010,11 +1021,11 @@ function prepareCandidateSet(input: JevDecisionInput, action: JevAction) {
   const p = prepare(input, "two_stage_v2", undefined, false, action);
   const questions: Record<string, Question> = { candidate_set: { type: "choice",
     instructions: decisionInstructions(input, false, "two_stage_v2") + "\n" + TWO_STAGE_V2_CANDIDATE_SET_INSTRUCTIONS,
-    criteria: Object.fromEntries(TWO_STAGE_V2_CANDIDATE_SETS.map(set => [candidateSetLabel(set), TWO_STAGE_V2_CANDIDATE_SET_CRITERION(set.map(i => p.slots[i]))])) } };
+    criteria: Object.fromEntries(candidateSetsFor(p.slots.length).map(set => [candidateSetLabel(set), TWO_STAGE_V2_CANDIDATE_SET_CRITERION(set.map(i => p.slots[i]))])) } };
   return { ...p, payload: { ...p.payload, questions } };
 }
 function decodeCandidateSet(label: unknown, slots: readonly string[]): string[] {
-  const set = TWO_STAGE_V2_CANDIDATE_SETS.find(s => candidateSetLabel(s) === label);
+  const set = candidateSetsFor(slots.length).find(s => candidateSetLabel(s) === label);
   if (!set) fail("invalid_response");
   return set!.map(i => slots[i]);
 }
@@ -1244,7 +1255,7 @@ function detailJsonData(value: unknown, seen = new Set<object>()): void {
 function prepareExecutedDetail(input: JevDecisionInput, selected: JevActionTarget, layout: JevQuestionLayout = "two_stage_v1", participantPrompts = false) {
   try {
     detailJsonData(input); detailJsonData(selected);
-    const optional = ["reobservationAllowed", "humanReferent", "repairProspect", "agreeNames", "jevNaming", "repairFacts", "participantLedger", "nameLedger", "nameSource", "namingRequest", "namingRequestStrict", "judgmentLedger", "rotationMode", "notationV6", "notationV11", "featureReplyFilter", "discriminatingConfirmation", "p5Enabled", "sharedConstruals", "humanLedMoveOn", "judgmentMaterialVersion", "publicationRecoveryContext", "referenceEvidence"].filter(key => Object.hasOwn(input, key));
+    const optional = ["reobservationAllowed", "humanReferent", "repairProspect", "agreeNames", "jevNaming", "repairFacts", "participantLedger", "nameLedger", "nameSource", "namingRequest", "namingRequestStrict", "judgmentLedger", "rotationMode", "notationV6", "notationV11", "featureReplyFilter", "discriminatingConfirmation", "p5Enabled", "sharedConstruals", "humanLedMoveOn", "judgmentMaterialVersion", "publicationRecoveryContext", "referenceEvidence", "shapeTerminologyVersion"].filter(key => Object.hasOwn(input, key));
     if (!exact(input, ["turn", "publicTurns", "ownSlots", "observations", "issueSummary", "priorClaims", "repairHistory", "previousAction", "publicNames", ...optional])) fail("invalid_input");
     if (!exact(selected, ["action", "target"]) || !includes(input.p5Enabled === true
       ? ["propose_name", "agree", "confirm", "repair", "accept"] : ["propose_name", "agree", "confirm", "repair"], selected.action)) fail("invalid_input");
@@ -1369,10 +1380,6 @@ export type JevDecisionFailureEvidence = { schemaVersion: "jev_decision_failure_
 const FAILURE_KEYS = ["schemaVersion", "questionLayout", "callIndex", "error", "rejectionCode", "model", "responseId", "costUsd", "latencyMs", "inputBudget", "stages"];
 const FAILURE_STAGE_KEYS = ["stage", "status", "error", "rejectionCode", "model", "responseId", "costUsd", "latencyMs", "inputBudget", "choices", "scores"];
 const BUDGET_OMITTED_KEYS = ["publicTurns", "claims", "publicNames", "repairHistory", "reobservations", "observationDetails", "observationChars", "issueSummaryChars"];
-const TARGET_LABELS = ["none", "multiple", ...Array.from({ length: 6 }, (_, i) => `figure_${i}`)];
-const CANDIDATE_SET_LABELS = TWO_STAGE_V2_CANDIDATE_SETS.map(candidateSetLabel);
-const PARTICIPANT_MENU_SLOTS = ["0", "1", "2", "3", "4", "5"] as const;
-const PARTICIPANT_MENU_TARGETS = participantTargets(PARTICIPANT_MENU_SLOTS);
 const PARTICIPANT_MENU_FAMILIES = [...new Set(JEV_ACTIONS.map(participantTargetQuestion))];
 const PARTICIPANT_MENU_REQUIRED = ["general_target", "revisit_target"] as const;
 const responseIdValue = (v: unknown) => v === null || typeof v === "string" && /^gen-[A-Za-z0-9_-]{1,124}$/.test(v);
@@ -1388,30 +1395,32 @@ function closedBudget(v: unknown): DecisionInputBudget | null {
   return { maxChars: 20000, stateChars: v.stateChars, omitted: Object.fromEntries(BUDGET_OMITTED_KEYS.map(k => [k, omitted[k]])) as DecisionInputBudget["omitted"] };
 }
 /** The question sets each stage may carry under a layout; labels are checked per question below. */
-function failureQuestionSets(stage: unknown, layout: JevQuestionLayout, p5Enabled: boolean, humanLedMoveOn: boolean): string[][] {
+function failureQuestionSets(stage: unknown, layout: JevQuestionLayout, p5Enabled: boolean, humanLedMoveOn: boolean, figureCount: number): string[][] {
   if (layout === "two_stage_v3") return stage === "action" ? [humanLedMoveOn ? ["action", MOVE_ON_SOURCE_QUESTION] : ["action"]] : stage === "target" ? [["target"]]
     : stage === "detail" ? [["name"], ["feature"], ["observe_targets", "observe_aspect"],
       ...(p5Enabled ? [["shared_construal"], ["feature", "shared_construal"]] : [])] : [];
-  if (stage === "action_target") return [layout === "two_stage_v1" ? ["action", "target", ...Array.from({ length: 6 }, (_, i) => `candidate_${i}`)] : ["action", "target"]];
+  if (stage === "action_target") return [layout === "two_stage_v1" ? ["action", "target", ...Array.from({ length: figureCount }, (_, i) => `candidate_${i}`)] : ["action", "target"]];
   if (stage === "multiple_candidates") return layout === "two_stage_v2" ? [["candidate_set"]] : [];
   if (stage === "detail") return [["name"], ["feature"], ["observe_targets", "observe_aspect"]];
   return [];
 }
-function failureLabelsValid(question: string, labels: readonly string[], layout: JevQuestionLayout): boolean {
+function failureLabelsValid(question: string, labels: readonly string[], layout: JevQuestionLayout, figureCount: number): boolean {
   if (question === MOVE_ON_SOURCE_QUESTION) return sameLabels(labels, Object.keys(MOVE_ON_SOURCE_CRITERIA));
   if (question === "action") return labels.length > 0 && labels.every(l => includes(JEV_ACTIONS, l)) && unique(labels).length === labels.length;
-  if (question === "target" && layout === "two_stage_v3") return labels.length > 0 && labels.every(l => V3_TARGET_LABEL_SET.includes(l)) && unique(labels).length === labels.length;
-  if (question === "target") return sameLabels(labels, TARGET_LABELS);
-  if (/^candidate_[0-5]$/.test(question)) return sameLabels(labels, ["include", "exclude"]);
-  if (question === "candidate_set") return sameLabels(labels, CANDIDATE_SET_LABELS);
+  if (question === "target" && layout === "two_stage_v3") return labels.length > 0 && labels.every(l => v3TargetLabels(figureCount).includes(l)) && unique(labels).length === labels.length;
+  if (question === "target") return sameLabels(labels, ["none", "multiple", ...Array.from({ length: figureCount }, (_, i) => `figure_${i}`)]);
+  if (/^candidate_[0-5]$/.test(question) && Number(question.slice("candidate_".length)) < figureCount) return sameLabels(labels, ["include", "exclude"]);
+  if (question === "candidate_set") return sameLabels(labels, candidateSetsFor(figureCount).map(candidateSetLabel));
   if (question === "name" || question === "feature") return indexedLabels(question, labels, Array.from({ length: 255 }, (_, i) => i + 1));
-  if (question === "observe_targets") return indexedLabels("subset", labels, [1, 3, 7, 15, 31, 63]);
+  if (question === "observe_targets") return indexedLabels("subset", labels, Array.from({ length: figureCount }, (_, i) => 2 ** (i + 1) - 1));
   if (question === "observe_aspect") return sameLabels(labels, [...OBSERVATION_ASPECTS]);
   if (question === "shared_construal") return labels.length > 1 &&
     sameLabels(labels, ["none", ...Array.from({ length: labels.length - 1 }, (_, i) => sharedLabel(i))]);
   return false;
 }
-function participantFailureActionTargetValid(questions: readonly string[], choices: Record<string, unknown>, scores: Record<string, unknown>): boolean {
+function participantFailureActionTargetValid(questions: readonly string[], choices: Record<string, unknown>, scores: Record<string, unknown>, figureCount: number): boolean {
+  const menuSlots = Array.from({ length: figureCount }, (_, i) => String(i));
+  const menuTargets = participantTargets(menuSlots);
   if (!questions.includes("action") || PARTICIPANT_MENU_REQUIRED.some(key => !questions.includes(key)) ||
       questions.some(key => key !== "action" && !PARTICIPANT_MENU_FAMILIES.includes(key as typeof PARTICIPANT_MENU_FAMILIES[number]))) return false;
   const actions = JEV_ACTIONS.filter(action => questions.includes(participantTargetQuestion(action)));
@@ -1423,20 +1432,20 @@ function participantFailureActionTargetValid(questions: readonly string[], choic
     if (!object(familyScores)) return false;
     const labels = Object.keys(familyScores);
     if (!labels.length || !includes(labels, choices[family]) || !Object.values(familyScores).every(probability) || !labels.every(label => {
-      const target = PARTICIPANT_MENU_TARGETS.get(label);
+      const target = menuTargets.get(label);
       if (!target) return false;
       if (family === "general_target") return true;
       if (["propose_target", "agree_target", "revisit_target"].includes(family)) return target.kind === "single";
       return target.kind !== "none";
     })) return false;
-    if (family === "general_target" && labels.length !== PARTICIPANT_MENU_TARGETS.size ||
-        family === "revisit_target" && labels.length !== PARTICIPANT_MENU_SLOTS.length ||
-        family === "observation_target" && labels.length !== PARTICIPANT_MENU_TARGETS.size - 1) return false;
+    if (family === "general_target" && labels.length !== menuTargets.size ||
+        family === "revisit_target" && labels.length !== menuSlots.length ||
+        family === "observation_target" && labels.length !== menuTargets.size - 1) return false;
   }
   return true;
 }
 function failureStage(s: unknown, layout: JevQuestionLayout, last: boolean, p5Enabled: boolean, usagePolicy?: ParticipantUsageOnly,
-  decisionMenuVersion?: typeof PARTICIPANT_TARGET_MENU_VERSION, humanLedMoveOn = false): JevDecisionFailureStage | null {
+  decisionMenuVersion?: typeof PARTICIPANT_TARGET_MENU_VERSION, humanLedMoveOn = false, figureCount = 6): JevDecisionFailureStage | null {
   if (!exact(s, FAILURE_STAGE_KEYS) || !includes(["ok", "error"], s.status) || !(s.error === null || includes(CODES, s.error)) ||
       !(s.rejectionCode === null || includes(JEV_DECISION_REJECTION_CODES, s.rejectionCode)) ||
       !(s.model === null || isGroundingModel(s.model, JEV_DECISION_MODEL)) || !responseIdValue(s.responseId) ||
@@ -1450,12 +1459,12 @@ function failureStage(s: unknown, layout: JevQuestionLayout, last: boolean, p5En
   else {
     if (s.model === null || (s.costUsd === null && usagePolicy !== PARTICIPANT_USAGE_ONLY)) return null;
     if (decisionMenuVersion === PARTICIPANT_TARGET_MENU_VERSION && s.stage === "action_target") {
-      if (!participantFailureActionTargetValid(questions, choices, scores)) return null;
+      if (!participantFailureActionTargetValid(questions, choices, scores, figureCount)) return null;
     } else {
-      if (!failureQuestionSets(s.stage, layout, p5Enabled, humanLedMoveOn).some(set => sameLabels(questions, set))) return null;
+      if (!failureQuestionSets(s.stage, layout, p5Enabled, humanLedMoveOn, figureCount).some(set => sameLabels(questions, set))) return null;
       for (const q of questions) {
         const labels = scores[q];
-        if (!object(labels) || !failureLabelsValid(q, Object.keys(labels), layout) || !includes(Object.keys(labels), choices[q]) ||
+        if (!object(labels) || !failureLabelsValid(q, Object.keys(labels), layout, figureCount) || !includes(Object.keys(labels), choices[q]) ||
             !Object.values(labels).every(probability)) return null;
       }
     }
@@ -1552,9 +1561,10 @@ function failureConsistent(e: JevDecisionFailureEvidence, acceptOptional: boolea
   return outcome === "done" ? e.rejectionCode === null : e.rejectionCode === outcome;
 }
 /** Restore-time check of a saved failure record. Returns a rebuilt copy, or null for any key, label or value outside the closed shape. */
-export function checkDecisionFailureEvidence(value: unknown, { acceptOptional = false, p5Enabled = false, usagePolicy, humanLedMoveOn = false }:
-  { acceptOptional?: boolean; p5Enabled?: boolean; usagePolicy?: ParticipantUsageOnly; humanLedMoveOn?: boolean } = {}): JevDecisionFailureEvidence | null {
+export function checkDecisionFailureEvidence(value: unknown, { acceptOptional = false, p5Enabled = false, usagePolicy, humanLedMoveOn = false, figureCount = 6 }:
+  { acceptOptional?: boolean; p5Enabled?: boolean; usagePolicy?: ParticipantUsageOnly; humanLedMoveOn?: boolean; figureCount?: number } = {}): JevDecisionFailureEvidence | null {
   try {
+    if (!isSupportedFigureCount(figureCount)) return null;
     const hasMenu = object(value) && Object.hasOwn(value, "decisionMenuVersion");
     const keys = hasMenu ? [...FAILURE_KEYS, "decisionMenuVersion"] : FAILURE_KEYS;
     if (!exact(value, keys) || value.schemaVersion !== "jev_decision_failure_v1" || !includes(LAYOUTS, value.questionLayout) ||
@@ -1571,7 +1581,7 @@ export function checkDecisionFailureEvidence(value: unknown, { acceptOptional = 
       : ["", "action_target", "action_target,multiple_candidates", "action_target,detail", "action_target,multiple_candidates,detail"];
     const inputBudget = value.inputBudget === null ? null : closedBudget(value.inputBudget);
     if (!orders.includes(order) || value.inputBudget !== null && !inputBudget) return null;
-    const stages = raw.map((s, i) => failureStage(s, layout, i === raw.length - 1, p5Enabled, usagePolicy, menuVersion, humanLedMoveOn));
+    const stages = raw.map((s, i) => failureStage(s, layout, i === raw.length - 1, p5Enabled, usagePolicy, menuVersion, humanLedMoveOn, figureCount));
     if (stages.some(s => s === null)) return null;
     const checked: JevDecisionFailureEvidence = { schemaVersion: "jev_decision_failure_v1", questionLayout: layout,
       ...(menuVersion ? { decisionMenuVersion: menuVersion } : {}), callIndex: value.callIndex as number,
@@ -1584,7 +1594,7 @@ export function checkDecisionFailureEvidence(value: unknown, { acceptOptional = 
 /** Projects the evidence a decide() call handed to onFailureEvidence. Untrusted input: anything outside the closed
  * client evidence shape yields null, which the caller records as an unknown breakdown. */
 export function projectDecisionFailureEvidence(raw: unknown, questionLayout: JevQuestionLayout,
-  opts: { acceptOptional?: boolean; p5Enabled?: boolean; humanLedMoveOn?: boolean; usagePolicy?: ParticipantUsageOnly; decisionMenuVersion?: typeof PARTICIPANT_TARGET_MENU_VERSION } = {}): JevDecisionFailureEvidence | null {
+  opts: { acceptOptional?: boolean; p5Enabled?: boolean; humanLedMoveOn?: boolean; figureCount?: number; usagePolicy?: ParticipantUsageOnly; decisionMenuVersion?: typeof PARTICIPANT_TARGET_MENU_VERSION } = {}): JevDecisionFailureEvidence | null {
   try {
     if (!object(raw) || !includes(LAYOUTS, questionLayout)) return null;
     const keys = ["model", "responseId", "choices", "scores", "latencyMs", "costUsd", "callIndex", "status", "error", "rejectionCode", "stages",
@@ -1696,7 +1706,7 @@ export function createJevDecisionClient(options: JevDecisionClientOptions = {}):
               key = rawKey;
             }
             check();
-            const payload = prepared.payload, body = JSON.stringify(payload);
+            const payload = withShapeTerminologyQuestions(prepared.payload, input.shapeTerminologyVersion), body = JSON.stringify(payload);
             if (leaks(body)) fail("key_leak");
             delivered = true; accounted = false;
             let response: Response;

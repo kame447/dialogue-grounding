@@ -1,5 +1,5 @@
 import { CLAIM_PRUNE_V2 } from '../memory/reference-graph.mjs';
-import { isP5ParticipantDialogueProfile, participantMemoryPruneVersion, PILOT012_PARTICIPANT_PROFILE } from './reception.ts';
+import { isP5ParticipantDialogueProfile, isPilot012ParticipantDialogueProfile, participantMemoryPruneVersion } from './reception.ts';
 import { validateBaseStart, validateBaseAssignmentConfig, canonicalBaseAssignmentConfig, validateBoundBaseRecord } from './base-assignment.ts';
 import { BaseAssignmentError, data, readAssignment, readOwner, UUID, OWNER, safeInt,
   assignmentRotationMode, assignmentMemoryPruneVersion, assignmentParticipantModelPin, assignmentParticipantDialogueProfile, assignmentFigureSelection } from './base-assignment-data.ts';
@@ -15,7 +15,7 @@ export class BaseSessionError extends Error {
 const fail = (code: BaseSessionErrorCode = 'trial_unavailable', reason?: PersistReason): never => { throw new BaseSessionError(code, reason); };
 function requireRunnableAssignment(assignment: BaseAssignment, adapter: BaseSessionOptions['adapter']): void {
   const profile = assignmentParticipantDialogueProfile(assignment);
-  if ((isP5ParticipantDialogueProfile(profile) || profile === PILOT012_PARTICIPANT_PROFILE) &&
+  if ((isP5ParticipantDialogueProfile(profile) || isPilot012ParticipantDialogueProfile(profile)) &&
       (adapter !== 'worker_binding' || assignmentParticipantModelPin(assignment)?.schemaVersion !== 'participant_model_pin_v3' ||
         assignmentMemoryPruneVersion(assignment) !== participantMemoryPruneVersion(profile))) fail();
 }

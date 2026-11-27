@@ -1,4 +1,5 @@
 import type { LedgerAction } from "./judgment-material-v5.ts";
+import type { ShapeTerminologyVersion } from "../shape-terminology.ts";
 import type { JudgmentMaterialVersion, JevPublicationRecoveryContext } from "./repair-quality.ts";
 import type { ReferenceEvidence } from "../local-grounding/reference-evidence.ts";
 // Decision 0002, opt-in research contract. Jev alone selects the next action;
@@ -95,6 +96,7 @@ export type JevDecisionInput = {
   agreeNames?: PublicNameCandidate[];
   jevNaming?: { localRejections: Array<{ quote: string; reason: string }> };
   judgmentMaterialVersion?: JudgmentMaterialVersion;
+  shapeTerminologyVersion?: ShapeTerminologyVersion;
   publicationRecoveryContext?: JevPublicationRecoveryContext;
   referenceEvidence?: ReferenceEvidence;
   /** Private participant ledger for candidate validation. Never serialized to Jev. */

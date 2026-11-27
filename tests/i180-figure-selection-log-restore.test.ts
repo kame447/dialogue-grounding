@@ -207,3 +207,58 @@ test('participant review replays the recorded selection without exposing figure 
   assert.notDeepEqual(participantReview(legacy).scene, review.scene, 'without a selection the legacy figures are shown');
   assert.throws(() => participantReview({ ...completed, options: { ...completed.options, figureSelection: { ...selection, figureIds: ['F1', 'F2', 'F3', 'F4', 'F5', 'F6'] } } }));
 });
+
+
+test('four-figure seeded approval freezes the selected count for both strategies and keeps legacy omissions at six', async () => {
+  for (const policy of ['shared', 'per_trial']) {
+    const p = protocol({ figureSetPolicy: policy, figureSelection: { mode: 'seeded_random', selectionSeed: 41, figureCount: 4 } });
+    const { plan } = await approve(p, [77]);
+    assert.deepEqual(plan.trials.map((t: any) => t.figureSelection.figureIds.length), [4, 4]);
+    assert.deepEqual(validateReceptionPlan(structuredClone(plan)), plan);
+    assert.deepEqual(plan.trials.map((t: any) => t.strategy), ['repair-first', 'bypass-enabled']);
+    if (policy === 'shared') assert.deepEqual(plan.trials[0].figureSelection, plan.trials[1].figureSelection);
+    else assert.notDeepEqual([...plan.trials[0].figureSelection.figureIds].sort(), [...plan.trials[1].figureSelection.figureIds].sort());
+  }
+  const old = await approve(protocol({ figureSelection: { mode: 'seeded_random', selectionSeed: 41 } }), [77]);
+  assert.deepEqual(old.plan.trials.map((t: any) => t.figureSelection.figureIds.length), [6, 6]);
+  for (const figureCount of [0, 3, 5, 7, '4', null, undefined]) {
+    assert.throws(() => validateReceptionProtocolV3(protocol({ figureSelection: { mode: 'seeded_random', selectionSeed: 41, figureCount } })));
+  }
+});
+
+test('four-figure tasks restore, accept exactly four names, finish at 4/4 and replay their own board in both conditions', async () => {
+  const selection = resolveFigureSelection({ mode: 'seeded_random', selectionSeed: 41, figureCount: 4 });
+  const material = createTrialV2({ seed: 77, figureSelection: selection });
+  const namesByFigure = Object.fromEntries(selection.figureIds.map((id, i) => [id, `名称${i + 1}`]));
+  const namesFor = (side: 'human' | 'ai') => Object.fromEntries(Object.entries(material.key[side]).map(([slot, id]) => [slot, namesByFigure[id as string]]));
+  for (const strategy of ['repair-first', 'bypass-enabled']) {
+    const submittedPrompts: string[] = [];
+    const model = { async complete(messages: any[], options: any = {}) {
+      if (options.phase === 'final_submission') {
+        submittedPrompts.push(messages.at(-1).content);
+        return { text: JSON.stringify(namesFor('ai')) };
+      }
+      return { text: 'こんにちは。' };
+    } };
+    const original = await task({ strategy, figureSelection: selection, client: model });
+    assert.equal(original.t.getState().scene.shapes.length, 4);
+    original.t.message('こんにちは。', 'synthetic-four-hello');
+    await original.t.whenIdle();
+    const snapshot = original.last();
+    const restored = await task({ strategy, restore: snapshot, figureSelection: resolveFigureSelection(undefined), client: model });
+    assert.equal(restored.last().trialId, snapshot.trialId);
+    assert.deepEqual(restored.t.getState().scene, original.t.getState().scene);
+    assert.equal(Object.keys(restored.t.researcherView().privateState.ledger).length, 4);
+    await assert.rejects(restored.t.submitHuman({ names: { ...namesFor('human'), 's-ffff': '余分' } }), (e: any) => e.code === 'invalid_submission');
+    await restored.t.submitHuman({ names: namesFor('human') });
+    await restored.t.submitAI();
+    const state = restored.t.getState();
+    assert.equal(state.status, 'completed');
+    assert.equal(state.result.total, 4); assert.equal(state.result.matchedCount, 4); assert.equal(state.result.success, true);
+    assert.match(submittedPrompts[0], /4図形/u); assert.doesNotMatch(submittedPrompts[0], /6図形|6つ/u);
+    const review = participantReview(restored.last());
+    assert.deepEqual(review.scene, state.scene);
+    assert.equal(review.scene.shapes.length, 4);
+    for (const secret of ['figureSelection', 'figureIds', 'bankVersion', 'selectionSeed']) assert.ok(!JSON.stringify(state).includes(secret));
+  }
+});

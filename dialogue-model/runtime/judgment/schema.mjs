@@ -41,7 +41,7 @@ const exactKeys = (value, keys) => value && typeof value === "object" && !Array.
   Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
 const nullableText = (value, limit) => value === null || (typeof value === "string" && value.trim().length > 0 && value.length <= limit);
 
-/** v1 uses the fixed position names; v2 passes the AI's six opaque own ids. @returns {OwnLedger} */
+/** v1 uses the fixed position names; v2 passes the AI's four or six opaque own ids. @returns {OwnLedger} */
 export function createOwnLedger(slots = SLOTS) {
   const own = ledgerSlots(Object.fromEntries(slots.map((slot) => [slot, null])));
   return Object.fromEntries(own.map((slot) => [slot, { status: "unassigned", name: null }]));

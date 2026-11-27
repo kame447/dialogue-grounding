@@ -7,7 +7,7 @@ import { lstat, mkdir, open, rename, unlink } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { outsideRepositoryDirectory } from "../naming-task.mjs";
-import { createLunaObserver, OBSERVATION_INITIAL_INSTRUCTIONS, OBSERVATION_MEMO_VERSION,
+import { createLunaObserver, observationInitialInstructions, OBSERVATION_MEMO_VERSION,
   snapshotObservationInput, validateObservationMemo, ObservationError } from "./observe.ts";
 import type { ObservationClient } from "./observe.ts";
 import type { ObservationInput, ObservationMemo, ObservationOptions } from "./contract.ts";
@@ -84,7 +84,7 @@ export function createObservationCacheKey(input: ObservationInput, { modelId }: 
   if (bytes.toString("base64") !== own.ownImage.base64) fail("invalid_input");
   const ordered = [...own.ownAnchors].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
   return { imageHash: hash(bytes), anchorsHash: hash(canonical(ordered)), modelId,
-    instructionHash: hash(OBSERVATION_INITIAL_INSTRUCTIONS), formatVersion: OBSERVATION_MEMO_VERSION };
+    instructionHash: hash(observationInitialInstructions(own.ownAnchors.length)), formatVersion: OBSERVATION_MEMO_VERSION };
 }
 /** Filename is data-independent except for its validated key hash; no paths from model text. */
 export function observationCacheFileName(key: ObservationCacheKey): string {

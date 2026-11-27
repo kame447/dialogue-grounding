@@ -1,4 +1,5 @@
 import type { FailureCode, FailureCause } from '../../../../dialogue-model/runtime/v2/base-assignment.ts';
+import type { FigureCount } from '../../../../dialogue-model/runtime/stimuli/figure-bank.ts';
 import type { ParticipantUsageSnapshot } from '../../../../dialogue-model/runtime/web/participant-usage.ts';
 import type { ParticipantRole, ParticipantRoleResult, ParticipantRoleView } from './participant-role.ts';
 import type { PreobservationUsage } from '../participant-preobservation.ts';
@@ -33,7 +34,7 @@ export type ReceptionMode = 'on' | 'off' | 'unset';
 export type FigureSetPolicy = 'shared' | 'per_trial';
 export type ProtocolFigureSelection =
   | { mode: 'preset'; setId: string }
-  | { mode: 'seeded_random'; selectionSeed: number | null }
+  | { mode: 'seeded_random'; selectionSeed: number | null; figureCount?: FigureCount }
   | { mode: 'custom'; figureIds: readonly string[] };
 export type ReceptionProtocolStatus = { configured: false; mode: ReceptionMode } | {
   configured: true;

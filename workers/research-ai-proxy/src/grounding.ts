@@ -81,19 +81,26 @@ export function buildGroundingPayload(body: unknown): GroundingPayload | null {
       typeof record.purpose !== "string" || !Object.hasOwn(GROUNDING_MODELS, record.purpose) ||
       typeof record.state !== "string" || !record.state.trim() ||
       record.state.length > GROUNDING_MAX_STATE_CHARS) return null;
+  let common = COMMON_INSTRUCTIONS;
+  try {
+    const state = JSON.parse(record.state);
+    if (state?.aiOwnNotes?.notes && Object.keys(state.aiOwnNotes.notes).length === 4) {
+      common = COMMON_INSTRUCTIONS.map(line => line.replace("同じ6図形", "同じ4図形"));
+    }
+  } catch { /* Older callers may supply plain text state. */ }
   return {
     model: GROUNDING_MODELS[record.purpose as GroundingPurpose],
     state: record.state.trim(),
     questions: {
       identification: {
         type: "choice",
-        instructions: [...COMMON_INSTRUCTIONS,
+        instructions: [...common,
           "問: 判定対象の図形（aiSideClaims の対象、なければ直近で話題の図形）について、相手とAIが同じ図形を指していることの公開対話上の証拠はどの段階ですか。"].join("\n"),
         criteria: IDENTIFICATION_CRITERIA,
       },
       name_agreement: {
         type: "choice",
-        instructions: [...COMMON_INSTRUCTIONS,
+        instructions: [...common,
           "問: 判定対象の図形について、名称（識別可能な呼び名）を両者が共同で採用したことの公開対話上の証拠はどの段階ですか。名称が正しい図形を指しているかはこの問では判定しません。",
           "公開対話の発話だけから判断してください。名称がこの図形について出たのか、別の図形について出たのかを区別してください。見立てや印象の共有（「〇〇みたい」）は対象の特定のためのもので、名前の提案ではありません。名前の明示的な提案がないこと（no_name）、提案はあるが共同採用が未確定であること（unclear）、提案が採用されなかったこと（not_agreed）を区別してください。"].join("\n"),
         criteria: NAME_AGREEMENT_CRITERIA,

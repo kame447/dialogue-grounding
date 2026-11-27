@@ -24,7 +24,7 @@ const p5Version: string = "jev_generation_retry_v13";
 const supportedP5Version = validGenerationRetryVersion(p5Version, "two_stage_v3", "holistic_v5") &&
   p5Version !== "jev_generation_retry_v1" ? p5Version : undefined;
 const technicalTrial = { version: "adaptive_repair_v3" } as const;
-// Independently measured with P5 off on both producer lineages. S4 also checks
+// Independently measured with P5 off. S4 also checks
 // the complete manifest of the code that actually issued the requests.
 const v12HttpDigests = new Map([
   // 671acdb
@@ -33,6 +33,8 @@ const v12HttpDigests = new Map([
   ["9d686330aa34a516a1e2d95df94d0b030e7308a6463757861b9c94e561e5197a", "fd431c3fa99aef1ab219980d38d44cae3e3167c86f4b2230aaa7c64d99176f00"],
   // dffce2a separates participant prompts and restores the 671acdb research request bytes.
   ["0add2f40aaaa01bfdacd1b99418b94e288eb45da6593595304f8d36d0f22de27", "a69b96be57143a984f2c7c7fc5c78f7bd82982c97119700a1498776d5ef6f13b"],
+  // Figure-count support retains the existing six-figure research request bytes.
+  ["eeb20c812729d04e52437a064b31fcd8af60ee2da8b1f6e73d99c4eb8dc8a785", "a69b96be57143a984f2c7c7fc5c78f7bd82982c97119700a1498776d5ef6f13b"],
 ]);
 const promptSources = await promptSourceManifest();
 

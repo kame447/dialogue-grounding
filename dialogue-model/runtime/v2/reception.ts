@@ -6,8 +6,8 @@ import { DEFAULT_COST_CAP_USD } from '../diagnostics/jev-shadow-eval/local-openr
 import { validateParticipantModelPin } from './participant-model-pin.ts';
 import type { ParticipantModelPin } from './participant-model-pin.ts';
 import { ROTATION_MODES as STIMULUS_ROTATION_MODES } from '../stimuli/scatter-v2.mjs';
-import { FIGURE_SETS, resolveFigureSelection, validateResolvedFigureSelection } from '../stimuli/figure-bank.ts';
-import type { ResolvedFigureSelection } from '../stimuli/figure-bank.ts';
+import { FIGURE_SETS, isSupportedFigureCount, resolveFigureSelection, validateResolvedFigureSelection } from '../stimuli/figure-bank.ts';
+import type { FigureCount, ResolvedFigureSelection } from '../stimuli/figure-bank.ts';
 import { INITIAL_OBSERVATION_STRUCTURED_V2, isInitialObservationGeneration, type InitialObservationGeneration } from '../observation/initial-observation-generation.ts';
 
 import { CLAIM_PRUNE_V2, CLAIM_PRUNE_V3, type MemoryPruneVersion } from '../memory/reference-graph.mjs';
@@ -31,8 +31,10 @@ type P5ParticipantDialogueProfile = 'participant_dialogue_v13_p5' | 'participant
   'participant_dialogue_v13_p5_discriminating_confirmation' |
   'participant_dialogue_v13_p5_semantic_guard_jev_naming' | 'participant_dialogue_v13_p5_jev_naming_v16_human_led_move_on';
 export const PILOT012_PARTICIPANT_PROFILE = 'participant_dialogue_v17_pilot012';
+export const PILOT012_V18_PARTICIPANT_PROFILE = 'participant_dialogue_v18_pilot012';
+type Pilot012ParticipantDialogueProfile = typeof PILOT012_PARTICIPANT_PROFILE | typeof PILOT012_V18_PARTICIPANT_PROFILE;
 export type ParticipantDialogueProfile = 'participant_dialogue_v12' | 'participant_dialogue_v12_naming_v2' |
-  'participant_dialogue_v12_naming_v3' | 'participant_dialogue_v12_naming_v4' | P5ParticipantDialogueProfile | typeof PILOT012_PARTICIPANT_PROFILE;
+  'participant_dialogue_v12_naming_v3' | 'participant_dialogue_v12_naming_v4' | P5ParticipantDialogueProfile | Pilot012ParticipantDialogueProfile;
 export function isP5ParticipantDialogueProfile(value: unknown): value is P5ParticipantDialogueProfile {
   return value === 'participant_dialogue_v13_p5' || value === 'participant_dialogue_v13_p5_naming_v4' ||
     value === 'participant_dialogue_v13_p5_semantic_guard' || value === 'participant_dialogue_v13_p5_human_led_move_on' ||
@@ -40,13 +42,16 @@ export function isP5ParticipantDialogueProfile(value: unknown): value is P5Parti
     value === 'participant_dialogue_v13_p5_semantic_guard_jev_naming' ||
     value === 'participant_dialogue_v13_p5_jev_naming_v16_human_led_move_on';
 }
+export function isPilot012ParticipantDialogueProfile(value: unknown): value is Pilot012ParticipantDialogueProfile {
+  return value === PILOT012_PARTICIPANT_PROFILE || value === PILOT012_V18_PARTICIPANT_PROFILE;
+}
 export function isParticipantDialogueProfile(value: unknown): value is ParticipantDialogueProfile {
   return value === 'participant_dialogue_v12' || value === 'participant_dialogue_v12_naming_v2' ||
     value === 'participant_dialogue_v12_naming_v3' || value === 'participant_dialogue_v12_naming_v4' ||
-    isP5ParticipantDialogueProfile(value) || value === PILOT012_PARTICIPANT_PROFILE;
+    isP5ParticipantDialogueProfile(value) || isPilot012ParticipantDialogueProfile(value);
 }
 export function participantMemoryPruneVersion(profile?: ParticipantDialogueProfile): MemoryPruneVersion {
-  return profile === PILOT012_PARTICIPANT_PROFILE ? CLAIM_PRUNE_V3 : CLAIM_PRUNE_V2;
+  return isPilot012ParticipantDialogueProfile(profile) ? CLAIM_PRUNE_V3 : CLAIM_PRUNE_V2;
 }
 type ParticipantPlanSettings = {
   memoryPruneVersion?: MemoryPruneVersion;
@@ -63,7 +68,7 @@ export type FigureSetPolicy = 'shared' | 'per_trial';
 /** Researcher-chosen figure source. `selectionSeed: null` asks the approval step to draw one seed. */
 export type ProtocolFigureSelection =
   | { mode: 'preset'; setId: string }
-  | { mode: 'seeded_random'; selectionSeed: number | null }
+  | { mode: 'seeded_random'; selectionSeed: number | null; figureCount?: FigureCount }
   | { mode: 'custom'; figureIds: readonly string[] };
 export type ReceptionProtocolV3 = { schemaVersion: 'reception_protocol_v3'; protocolId: string; revision: number;
   allowedOrders: Strategy[][]; seedPolicy: 'shared' | 'per_trial'; referenceMemory: boolean;
@@ -142,14 +147,17 @@ export function validateReceptionProtocolV2(value: unknown): ReceptionProtocolV2
 export function canonicalReceptionProtocolV2(value: unknown): string { return JSON.stringify(validateReceptionProtocolV2(value)); }
 function protocolFigureSelection(value: unknown): ProtocolFigureSelection {
   const head = object(value, Array.isArray((value as { figureIds?: unknown } | null)?.figureIds) ? ['mode','figureIds']
-    : value && typeof value === 'object' && 'setId' in value ? ['mode','setId'] : ['mode','selectionSeed']);
+    : value && typeof value === 'object' && 'setId' in value ? ['mode','setId']
+      : ['mode','selectionSeed', ...(value && typeof value === 'object' && Object.hasOwn(value, 'figureCount') ? ['figureCount'] : [])]);
   if (head.mode === 'preset') {
     if (typeof head.setId !== 'string' || !Object.hasOwn(FIGURE_SETS, head.setId)) return fail();
     return { mode: 'preset', setId: head.setId };
   }
   if (head.mode === 'seeded_random') {
     if (head.selectionSeed !== null && !int(head.selectionSeed)) return fail();
-    return { mode: 'seeded_random', selectionSeed: head.selectionSeed };
+    if (Object.hasOwn(head, 'figureCount') && !isSupportedFigureCount(head.figureCount)) return fail();
+    return { mode: 'seeded_random', selectionSeed: head.selectionSeed,
+      ...(Object.hasOwn(head, 'figureCount') ? { figureCount: head.figureCount as FigureCount } : {}) };
   }
   if (head.mode === 'custom') {
     try { return { mode: 'custom', figureIds: [...resolveFigureSelection({ mode: 'custom', figureIds: head.figureIds }).figureIds] }; } catch { return fail(); }
@@ -200,7 +208,7 @@ function participantPlan(value: unknown) {
       !isParticipantDialogueProfile(dialogueProfile))) return fail();
   const memoryPruneVersion = participantMemoryPruneVersion(dialogueProfile);
   if (hasPrune && p.memoryPruneVersion !== memoryPruneVersion) return fail();
-  if (dialogueProfile === PILOT012_PARTICIPANT_PROFILE &&
+  if (isPilot012ParticipantDialogueProfile(dialogueProfile) &&
       (!hasPrune || generation !== INITIAL_OBSERVATION_STRUCTURED_V2)) return fail();
   const limits = hasLimits ? validateParticipantLimits(p.participantLimits) : undefined;
   const participant: ParticipantPlanSettings = {
@@ -347,18 +355,18 @@ export async function approveReception(value: unknown, options: ParticipantPlanS
     try {
       if (p.figureSetPolicy === 'shared') {
         const one = p.figureSelection.mode === 'seeded_random'
-          ? resolveFigureSelection({ mode: 'seeded_random', selectionSeed: p.figureSelection.selectionSeed ?? options.randomSeed() })
+          ? resolveFigureSelection({ ...p.figureSelection, selectionSeed: p.figureSelection.selectionSeed ?? options.randomSeed() })
           : resolveFigureSelection(p.figureSelection);
         selected.forEach(() => figures.push(one));
       } else {
         if (p.figureSelection.mode !== 'seeded_random') return fail();
-        const base = p.figureSelection.selectionSeed;
+        const selection = p.figureSelection, base = selection.selectionSeed;
         selected.forEach((_, i) => {
           let seed = base === null ? options.randomSeed() : base + i;
-          // Distinct seeds can still draw the same six figures in a different order.
+          // Distinct seeds can still draw the same figures in a different order.
           for (let attempt = 0; attempt < 32; attempt++) {
             if (!int(seed)) throw new Error('seed');
-            const candidate = resolveFigureSelection({ mode: 'seeded_random', selectionSeed: seed });
+            const candidate = resolveFigureSelection({ ...selection, selectionSeed: seed });
             if (!figures.some(prior => candidate.figureIds.every(id => prior.figureIds.includes(id)))) {
               figures.push(candidate);
               return;

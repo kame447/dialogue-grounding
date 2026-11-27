@@ -25,7 +25,7 @@ export function buildDecisionEvidence({ events, ownLedger, judgment, strategy })
     typeof value === "string" && value.length <= max ? value : (() => { throw new TypeError("invalid_ai_hypothesis"); })();
 
   const payload = {
-    task: "二者による6図形の共同命名。見立ての類似と図形の同定と名称への合意は異なる。",
+    task: `二者による${Object.keys(ledger).length}図形の共同命名。見立ての類似と図形の同定と名称への合意は異なる。`,
     strategy: strategy === "repair-first" ? "確認・修復を早めに選ぶ" : "必要に応じて判断保留や後の再訪を許容する",
     publicUtterances: events.slice(-MAX_UTTERANCES).map(({ speaker, text }) => ({
       speaker: speaker === "human" ? "相手" : "AI", text,

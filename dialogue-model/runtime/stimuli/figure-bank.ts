@@ -6,6 +6,10 @@ import { PIECES } from './pieces.mjs';
 // experimental condition: set membership and the selection mode need researcher approval.
 export const FIGURE_BANK_VERSION = 'tangram-bank-v1';
 export const LEGACY_FIGURE_SET_ID = 'legacy-v1';
+export const PILOT_FIGURE_SET_ID = 'pilot-four-v1';
+export const SUPPORTED_FIGURE_COUNTS = Object.freeze([4, 6] as const);
+export type FigureCount = typeof SUPPORTED_FIGURE_COUNTS[number];
+export const isSupportedFigureCount = (value: unknown): value is FigureCount => SUPPORTED_FIGURE_COUNTS.some(count => count === value);
 
 type Point = readonly [number, number];
 export type BankPiece = { readonly id: string; readonly type: string; readonly points: readonly Point[] };
@@ -56,11 +60,13 @@ const added: readonly BankFigure[] = addedCoordinates.map((polygons, index) => O
 export const FIGURE_BANK: readonly BankFigure[] = Object.freeze([...(FIGURES as readonly BankFigure[]), ...added]);
 
 const bankIds = new Set(FIGURE_BANK.map(f => f.id));
+// Preserve the count used by pre-pilot selections that do not record one.
 export const FIGURE_SET_SIZE = 6;
 
 // Researcher pilot candidates, not formally adopted experimental conditions.
 export const FIGURE_SETS: Readonly<Record<string, readonly string[]>> = Object.freeze({
   'legacy-v1': Object.freeze(['F1', 'F2', 'F3', 'F4', 'F5', 'F6']),
+  [PILOT_FIGURE_SET_ID]: Object.freeze(['F1', 'F2', 'F3', 'F4']),
   'bank-set-a': Object.freeze(['F7', 'F8', 'F9', 'F10', 'F11', 'F12']),
   'bank-set-b': Object.freeze(['F13', 'F14', 'F15', 'F16', 'F17', 'F18']),
   'bank-set-c': Object.freeze(['F19', 'F20', 'F21', 'F22', 'F23', 'F24']),
@@ -69,7 +75,7 @@ export const FIGURE_SETS: Readonly<Record<string, readonly string[]>> = Object.f
 
 export type FigureSelectionSpec =
   | { mode: 'preset'; setId: string }
-  | { mode: 'seeded_random'; selectionSeed: number }
+  | { mode: 'seeded_random'; selectionSeed: number; figureCount?: FigureCount }
   | { mode: 'custom'; figureIds: readonly string[] };
 
 export type ResolvedFigureSelection = {
@@ -83,13 +89,13 @@ export type ResolvedFigureSelection = {
 const sha256 = (text: string) => createHash('sha256').update(text).digest();
 
 function validateFigureIds(value: unknown): string[] {
-  if (!Array.isArray(value) || value.length !== FIGURE_SET_SIZE) throw new TypeError('figureIds must list exactly six figures');
+  if (!Array.isArray(value) || !isSupportedFigureCount(value.length)) throw new TypeError('figureIds must list four or six figures');
   if (!value.every(id => typeof id === 'string' && bankIds.has(id))) throw new TypeError('unknown figure id');
   if (new Set(value).size !== value.length) throw new TypeError('figureIds must not repeat');
   return [...value];
 }
 
-function seededFigureIds(selectionSeed: number): string[] {
+function seededFigureIds(selectionSeed: number, figureCount: FigureCount): string[] {
   const ids = FIGURE_BANK.map(f => f.id);
   const digest = sha256(`${FIGURE_BANK_VERSION}:selection:${selectionSeed}`);
   // Fisher-Yates driven by a SHA-256 stream (one hash per draw, rejection-free modulo of 32 bits).
@@ -98,7 +104,7 @@ function seededFigureIds(selectionSeed: number): string[] {
     const j = value % (i + 1);
     [ids[i], ids[j]] = [ids[j], ids[i]];
   }
-  return ids.slice(0, FIGURE_SET_SIZE);
+  return ids.slice(0, figureCount);
 }
 
 const isRecord = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -112,7 +118,9 @@ function expectedSelection(mode: unknown, spec: Record<string, unknown>): Resolv
   if (mode === 'seeded_random') {
     const seed = spec.selectionSeed;
     if (typeof seed !== 'number' || !Number.isSafeInteger(seed)) throw new TypeError('selectionSeed must be a safe integer');
-    const figureIds = seededFigureIds(seed);
+    const figureCount = Object.hasOwn(spec, 'figureCount') ? spec.figureCount : FIGURE_SET_SIZE;
+    if (!isSupportedFigureCount(figureCount)) throw new TypeError('figureCount must be four or six');
+    const figureIds = seededFigureIds(seed, figureCount);
     return { bankVersion: FIGURE_BANK_VERSION, mode, setId: 'seeded-' + sha256(`${FIGURE_BANK_VERSION}:${seed}:${figureIds.join(',')}`).toString('hex').slice(0, 8), selectionSeed: seed, figureIds };
   }
   if (mode === 'custom') {
@@ -138,7 +146,8 @@ export function resolveFigureSelection(spec?: unknown): ResolvedFigureSelection 
   if (spec === undefined) return expectedSelection('preset', { setId: LEGACY_FIGURE_SET_ID });
   if (!isRecord(spec)) throw new TypeError('figure selection must be an object');
   const rawKeys = typeof spec.mode === 'string' && Object.hasOwn(SPEC_KEYS, spec.mode) ? SPEC_KEYS[spec.mode] : null;
-  if (rawKeys && hasExactKeys(spec, rawKeys)) return expectedSelection(spec.mode, spec);
+  const keys = rawKeys && spec.mode === 'seeded_random' && Object.hasOwn(spec, 'figureCount') ? [...rawKeys, 'figureCount'] : rawKeys;
+  if (keys && hasExactKeys(spec, keys)) return expectedSelection(spec.mode, spec);
   return validateResolvedFigureSelection(spec);
 }
 
@@ -151,7 +160,7 @@ export function validateResolvedFigureSelection(value: unknown): ResolvedFigureS
   const mode = value.mode;
   const expected = mode === 'custom' ? expectedSelection(mode, { figureIds: ids })
     : mode === 'preset' ? expectedSelection(mode, { setId: value.setId })
-    : mode === 'seeded_random' ? expectedSelection(mode, { selectionSeed: value.selectionSeed })
+    : mode === 'seeded_random' ? expectedSelection(mode, { selectionSeed: value.selectionSeed, figureCount: ids.length })
     : expectedSelection(mode, {});
   const same = expected.setId === value.setId && expected.selectionSeed === value.selectionSeed
     && expected.figureIds.length === ids.length && expected.figureIds.every((id, i) => id === ids[i]);

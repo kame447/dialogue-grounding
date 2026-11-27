@@ -2,10 +2,8 @@ import { verifiedParticipantUsage } from './participant-usage-fields.ts';
 import { resolvePurposeModel } from "./modelPolicy.mjs";
 import { OPENROUTER_DECISIONS_URL, DECISION_MODELS, decisionConfig, buildDecisionPayload, sanitizeDecision } from "./decisions.mjs";
 import { GROUNDING_CRITERIA_VERSION, GROUNDING_MODELS, GROUNDING_LEVELS, groundingConfig, buildGroundingPayload, sanitizeGroundingVerdict } from "./grounding.ts";
-import { INITIAL_OBSERVATION_STRUCTURED_V2, INITIAL_OBSERVATION_V2_INSTRUCTIONS,
-  isInitialObservationGeneration } from "../../../dialogue-model/runtime/observation/initial-observation-generation.ts";
-import { OBSERVATION_INITIAL_INSTRUCTIONS } from "../../../dialogue-model/runtime/observation/observe.ts";
-import { INITIAL_OBSERVATION_FORMAT } from "./initial-observation-format.ts";
+import { isInitialObservationGeneration } from "../../../dialogue-model/runtime/observation/initial-observation-generation.ts";
+import { initialObservationFormatForMessages } from "./initial-observation-format.ts";
 
 const UPSTREAM_URLS = Object.freeze({
   openai: "https://api.openai.com/v1/chat/completions",
@@ -108,7 +106,7 @@ function validateMessage(message) {
   return { role: message.role, content: parts };
 }
 
-function validatedPayload(body, selectedModel, env, observationInstructions) {
+function validatedPayload(body, selectedModel, env, generation) {
   if (!body || typeof body !== "object" || Array.isArray(body) ||
       !Array.isArray(body.messages) || body.messages.length === 0 ||
       body.messages.length > MAX_MESSAGES) return null;
@@ -126,9 +124,10 @@ function validatedPayload(body, selectedModel, env, observationInstructions) {
     limit : body.max_completion_tokens;
   if (!Number.isSafeInteger(requested) || requested < 1 || requested > limit) return null;
 
-  if (observationInstructions && (messages[0].role !== "system" || messages[0].content !== observationInstructions)) return null;
+  const format = generation ? initialObservationFormatForMessages(messages, generation) : null;
+  if (generation && !format) return null;
   return { model: selectedModel, messages, max_completion_tokens: requested,
-    ...(observationInstructions ? { response_format: INITIAL_OBSERVATION_FORMAT } : {}) };
+    ...(generation ? { response_format: format } : {}) };
 }
 
 function sanitizeResult(data, model, usageOnly) {
@@ -291,10 +290,8 @@ export async function handleRequest(request, env, fetchImpl = globalThis.fetch, 
       !isInitialObservationGeneration(generation))) {
     return reply(400, { error: "invalid_request" });
   }
-  const observationInstructions = structured ? generation === INITIAL_OBSERVATION_STRUCTURED_V2
-    ? INITIAL_OBSERVATION_V2_INSTRUCTIONS : OBSERVATION_INITIAL_INSTRUCTIONS : undefined;
   const model = sendExactModel && expectedModel !== null ? expectedModel : selected.model;
-  const payload = validatedPayload(body, model, env, observationInstructions);
+  const payload = validatedPayload(body, model, env, generation);
   if (!payload) return reply(400, { error: "invalid_request" });
   if (expectedModel !== null && selected.purpose === "dialogue_turn" &&
       payload.messages.some(message => typeof message.content !== "string")) {

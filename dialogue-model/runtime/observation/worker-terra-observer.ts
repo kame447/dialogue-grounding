@@ -1,11 +1,11 @@
 import { responseText } from '../client.mjs';
 import {
-  createLunaObserver, ObservationError, OBSERVATION_INITIAL_INSTRUCTIONS,
+  createLunaObserver, ObservationError, observationInitialInstructions,
   OBSERVATION_MEMO_VERSION, snapshotObservationInput, validateObservationMemo,
 } from './observe.ts';
 import type { ObservationMessage } from './observe.ts';
 import type { ObservationInput, ObservationMemo, ObservationObserver, ObservationOptions } from './contract.ts';
-import { INITIAL_OBSERVATION_STRUCTURED_V2, INITIAL_OBSERVATION_V2_INSTRUCTIONS,
+import { INITIAL_OBSERVATION_STRUCTURED_V2,
   type InitialObservationGeneration } from './initial-observation-generation.ts';
 import { requireExactParticipantModel, validateParticipantModelPin } from '../v2/participant-model-pin.ts';
 import type { ParticipantModelPin } from '../v2/participant-model-pin.ts';
@@ -44,16 +44,15 @@ function ownProjection(input: ObservationInput) {
   };
 }
 
-function initialKey(terraModelId: string, boundJson: string, generation?: InitialObservationGeneration) {
-  const instructions = generation === INITIAL_OBSERVATION_STRUCTURED_V2
-    ? INITIAL_OBSERVATION_V2_INSTRUCTIONS : OBSERVATION_INITIAL_INSTRUCTIONS;
-  const fields = [SCHEMA, terraModelId, OBSERVATION_MEMO_VERSION, instructions, boundJson];
+function initialKey(terraModelId: string, boundJson: string, figureCount: number, generation?: InitialObservationGeneration) {
+  const fields = [SCHEMA, terraModelId, OBSERVATION_MEMO_VERSION, observationInitialInstructions(figureCount, generation), boundJson];
   if (generation) fields.push(generation);
   return sha256(JSON.stringify(fields)).then(digest => SCHEMA + ':' + digest);
 }
 
 export function workerTerraInitialKey(pin: ParticipantModelPin, own: ObservationInput, generation?: InitialObservationGeneration) {
-  return initialKey(validateParticipantModelPin(pin).terraModelId, JSON.stringify(ownProjection(own)), generation);
+  const projected = ownProjection(own);
+  return initialKey(validateParticipantModelPin(pin).terraModelId, JSON.stringify(projected), projected.ownAnchors.length, generation);
 }
 
 function checkAbort(options?: ObservationOptions): void {
@@ -103,7 +102,7 @@ export function createWorkerTerraObserver({ modelPin, own, visual, cache, timeou
     async complete(messages, { signal, phase }) {
       const generation = phase === 'observation_initial' ? initialObservationGeneration : undefined;
       const requestMessages: ObservationMessage[] = generation === INITIAL_OBSERVATION_STRUCTURED_V2
-        ? [{ role: 'system', content: INITIAL_OBSERVATION_V2_INSTRUCTIONS }, ...messages.slice(1)] : messages;
+        ? [{ role: 'system', content: observationInitialInstructions(bound.ownAnchors.length, generation) }, ...messages.slice(1)] : messages;
       const response = await visual({ purpose: 'visual_observation', messages: requestMessages,
         ...(generation ? { initial_observation_generation: generation } : {}) }, signal);
       if (response?.status !== 200) {
@@ -139,7 +138,7 @@ export function createWorkerTerraObserver({ modelPin, own, visual, cache, timeou
       checkOwn(input);
       if (!cache) return observer.observeAll(bound, options);
       try {
-        const key = await (keyPromise ??= initialKey(terraModelId, boundJson, initialObservationGeneration));
+        const key = await (keyPromise ??= initialKey(terraModelId, boundJson, bound.ownAnchors.length, initialObservationGeneration));
         const hit = await cache.read(key, options?.signal);
         checkAbort(options);
         if (hit !== null && hit !== undefined) {

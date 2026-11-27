@@ -437,7 +437,7 @@ test("opaque slots reject IDs from another board or the legacy board at every gr
   throws(() => apply(createReferenceGraph(), 1, [mention(1, "m", { slots: [target] })]), "invalid_mention");
 });
 
-test("explicit slot sets contain exactly six unique bounded strings", () => {
+test("explicit slot sets reject unsupported counts, duplicates and unbounded strings", () => {
   const invalid = [null, "slots", [], OPAQUE_SLOTS.slice(1), [...OPAQUE_SLOTS, "s-extra"],
     [...OPAQUE_SLOTS.slice(0, 5), OPAQUE_SLOTS[0]], [...OPAQUE_SLOTS.slice(0, 5), ""],
     [...OPAQUE_SLOTS.slice(0, 5), "  "], [...OPAQUE_SLOTS.slice(0, 5), 7],

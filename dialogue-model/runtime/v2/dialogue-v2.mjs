@@ -7,7 +7,7 @@ import {JevTurnError} from './jev-turn.ts';
 // v1 (createDialogueSession) is untouched.
 import { createLunaJudge } from "../judgment/luna.mjs";
 import { createOwnLedger, validateJudgment, applyJudgment } from "../judgment/schema.mjs";
-import { STRATEGIES, TASK_INSTRUCTIONS_V2, RESEARCH_TASK_INSTRUCTIONS_V2, ownImageMessage, publicMessages } from "../judgment/instructions.mjs";
+import { STRATEGIES, taskInstructionsV2, ownImageMessage, publicMessages } from "../judgment/instructions.mjs";
 import { createReferenceGraph, applyReferenceUpdate, snapshotReferenceGraph, ReferenceGraphError, REFERENCE_LIMITS } from "../memory/reference-graph.mjs";
 import { stageMemory, prepareMemory } from "../judgment/memory.mjs";
 import { buildDecisionEvidence } from "./decision-evidence.mjs";
@@ -274,6 +274,9 @@ export function createDialogueV2(options) {
   const ownImage = { mimeType: image.mimeType, base64: image.base64 };
   ownImageMessage(ownImage);
   const slots = anchors.map((anchor) => anchor.id);
+  const taskInstructions = taskInstructionsV2(slots.length);
+  const finalInstructions = slots.length === 6 ? FINAL_INSTRUCTIONS_V2
+    : FINAL_INSTRUCTIONS_V2.replace("自分の6図形", `自分の${slots.length}図形`).replace("自分の6つの内部参照ID", `自分の${slots.length}つの内部参照ID`);
   const ownAnchors = anchors.map(({ id, bbox, centroid }) => ({ id, bbox: { ...bbox }, centroid: { ...centroid } }));
   if (decisionMode === "jev") {
     const v3Trial = Boolean(options.technicalTrial) && options.questionLayout === "two_stage_v3";
@@ -294,7 +297,7 @@ export function createDialogueV2(options) {
       : v3Trial ? STYLED_TRIAL_V3_ACTION_SCOPE_V2 : options.technicalTrial ? trialScope : baseScope;
     // #175 is part of the participant prompt. The research layouts retain their own recorded wording.
     const generation = {
-      task: researchV3 ? RESEARCH_TASK_INSTRUCTIONS_V2 : TASK_INSTRUCTIONS_V2,
+      task: taskInstructionsV2(slots.length, researchV3),
       instructions: researchV3 ? replaceOnce(instructions,
         "acceptでは、相手が場所だけで図形を示したときは形の特徴を尋ね、それ以外は相手の発話を受け止めます。",
         "acceptでは相手の発話を受け止めます。") : instructions,
@@ -302,7 +305,7 @@ export function createDialogueV2(options) {
         "相手が場所だけで図形を示したときは、場所だけでは分からないことを短く伝えて形の特徴を尋ねる。それ以外は受け止める。",
         "受け止める。") } : actionScope,
       ...(concise ? { concise: CONCISE_INSTRUCTIONS_V2 } : {}),
-      final: FINAL_INSTRUCTIONS_V2, timeoutMs: GENERATION_TIMEOUT_MS,
+      final: finalInstructions, timeoutMs: GENERATION_TIMEOUT_MS,
     };
     if (!referenceMemory || !localGrounding) throw new Error("Jev decision mode requires local reference memory");
     if (activeDecision || decisionShadowClient || groundingShadow) throw new Error("Jev decision mode cannot combine legacy decision paths");
@@ -488,7 +491,7 @@ export function createDialogueV2(options) {
     trace.status = "generation_error";
     const { action, targetSlot, candidateName, discriminatingFeature } = judgment;
     const generationMessages = [
-      { role: "system", content: TASK_INSTRUCTIONS_V2 },
+      { role: "system", content: taskInstructions },
       { role: "system", content: LUNA_GENERATOR_INSTRUCTIONS_V2 },
       ...(concise ? [{ role: "system", content: LUNA_CONCISE_INSTRUCTIONS_V2 }] : []),
       { role: "system", content: "この発話の判断（非公開）:\n" + "主actionで言えること: " + LUNA_ACTION_SCOPE_V2[action] +
@@ -591,13 +594,13 @@ export function createDialogueV2(options) {
 
   async function finalRequest({ events, privateState }, retry = false) {
     return client.complete([
-      { role: "system", content: TASK_INSTRUCTIONS_V2 },
+      { role: "system", content: taskInstructions },
       { role: "system", content: "これは非公開の最終提出です。作業メモは初期候補であり正解ではありません。自分の画像と公開対話を照合し、最終的な名称はあなた自身で判断してください。" },
       ...ownImageMessage(ownImage),
       { role: "system", content: "自分の画像内の各図形の内部参照ID（非公開）:\n" + JSON.stringify(ownAnchors) },
       { role: "system", content: "AI自身の作業メモ（非公開・正解表ではない）:\n" + JSON.stringify({ ownLedger: privateState.ledger }) },
       ...publicMessages(eventsToHistory(events)),
-      { role: "user", content: FINAL_INSTRUCTIONS_V2 + (retry ? "\n前回は指定JSON形式として検証できませんでした。キーは内部参照ID6個だけにして再提出してください。" : "") },
+      { role: "user", content: finalInstructions + (retry ? `\n前回は指定JSON形式として検証できませんでした。キーは内部参照ID${slots.length}個だけにして再提出してください。` : "") },
     ], { phase: "final_submission" });
   }
 

@@ -85,8 +85,8 @@ export function createLunaJudge(client, { candidateConflict = false, timeBudgetM
     async judge({ image = null, rotationImage = null, referenceContext = null, publicHistory, strategy, ownLedger, ownJudgmentHistory = [], version = 1, ownAnchors = null, nameHistory = [] }) {
       if (!STRATEGIES.includes(strategy)) throw new Error("Unsupported dialogue strategy");
       if (candidateConflict && version !== 2) throw new Error("Candidate conflict requires version 2");
-      const taskInstructions = taskInstructionsFor(version);
       const ledger = validateOwnLedger(ownLedger);
+      const taskInstructions = taskInstructionsFor(version, Object.keys(ledger).length);
       const previous = ownJudgmentHistory.map(({ action, targetSlot, candidateName = null }) => {
         if (!ACTIONS.includes(action) || !(targetSlot === null || Object.hasOwn(ledger, targetSlot)) ||
             !(candidateName === null || (typeof candidateName === "string" && candidateName.trim().length > 0 && candidateName.length <= 200)) ||
