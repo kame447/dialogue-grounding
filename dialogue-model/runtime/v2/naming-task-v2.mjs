@@ -20,6 +20,7 @@ import { selectParticipantJev, participantLunaClient, withParticipantJevTurn, re
   participantInitialObservation } from "../web/participant-jev-wiring.ts";
 import { allowsOrientationFallback, generateOpeningV17, hasVersionedViewpoint, isGenerationV17 } from "./generation-guard.ts";
 import { researchHash } from "./research-profile.ts";
+import { isDeferredAiExtractionGeneration } from "./deferred-ai-extraction.ts";
 import { CLAIM_PRUNE_V3, isClaimPruneVersion } from "../memory/reference-graph.mjs";
 import { agreedNamesFromLedger, memoryCapacityRejectedClaims, settleJevTurnTraces, settleAiPublicClaims } from "./jev-turn.ts";
 
@@ -173,6 +174,12 @@ export async function createNamingTaskV2({
   let aiPublicSettlement = jev && restore ? clone(restore.aiPublicSettlement) : null;
   let initialObservation = jev && restore ? clone(restore.initialObservation) : null;
   const usage = jev?.ledger instanceof ParticipantUsageLedger ? jev.ledger : null;
+  const deferredExtraction = isDeferredAiExtractionGeneration(jev?.generationRetryVersion);
+  const deferredTimings = deferredExtraction && Array.isArray(restore?.deferredAiExtractionTimings)
+    ? clone(restore.deferredAiExtractionTimings) : [];
+  let administrativelyInterrupted = false;
+  let pendingPublicationId = null, publicationAtMs = null, deferredSaveFailed = false;
+  let deferredCompletion = null;
   if (jev && restore && !usage) restoreParticipantJevLedger(jev.ledger, restore.jevLedger);
   if (dialogueInterruption === "budget_exhausted" && (usage || !jev?.ledger.stopReason())) throw new NamingTaskError("invalid_options");
   const effectiveClient = jev ? participantLunaClient(client, jev.ledger, jev.profile) : client;
@@ -222,6 +229,7 @@ export async function createNamingTaskV2({
       ...(jev.profile.dialoguePolicy ? { dialoguePolicy: jev.profile.dialoguePolicy } : {}),
       ...(jev.participantPrompts ? { participantPrompts: true } : {}),
       generationRetryVersion: jev.generationRetryVersion,
+      ...(deferredExtraction ? { deferredAiExtractionProfileSha256: researchHash(jev.profile) } : {}),
       judgmentMaterialVersion: jev.profile.judgmentMaterialVersion,
       newTrialAgreeNameScopeVersion: jev.newTrialAgreeNameScopeVersion,
       onJevTurnTrace: (record) => {
@@ -244,8 +252,17 @@ export async function createNamingTaskV2({
     const attemptIndex = dialogue.getAttempts().length;
     const timing = { requestSeq: input.requestSeq, lastEventId: input.lastEventId, pendingEventIds: input.pendingHumanEvents.map((event) => event.id),
       startedAtMs: now(), endedAtMs: null, outcome: "running", errorCode: null, judgeAttempts: null, validationFailures: [],
-      judgeFallback: false, guardRegenerated: false, guardFallback: false };
+      judgeFallback: false, guardRegenerated: false, guardFallback: false,
+      ...(deferredExtraction ? { humanAcceptedAtMs: Date.parse(input.pendingHumanEvents.at(-1).at), publicationDurableAtMs: null } : {}) };
     turnTimings.push(timing);
+    if (deferredExtraction) {
+      const source = input.events.filter(event => event.speaker === "ai").at(-1);
+      const previous = deferredTimings.findLast(entry => entry.eventId === source?.id && entry.status === "complete");
+      if (previous && previous.nextHumanProcessingAtMs === null) {
+        previous.nextHumanAcceptedAtMs = Date.parse(input.pendingHumanEvents[0].at);
+        previous.nextHumanProcessingAtMs = timing.startedAtMs;
+      }
+    }
     currentRequestSeq = input.requestSeq;
     try {
       if (usage) await persist(); // Ensure the accepted input and clientId are durable before any RPC.
@@ -282,6 +299,22 @@ export async function createNamingTaskV2({
     }
   }
   let initialQueue = restore?.queueState;
+  function traceIndexForExtraction(job, privateState) {
+    const prior = privateState.judgments.at(-1);
+    return jevTraces.findLastIndex(record => record.turnIndex === prior?.turnIndex &&
+      record.lastEventId === job.humanEventId && record.attemptNumber === prior?.jevTurn.attemptNumber);
+  }
+  if (deferredExtraction && initialQueue?.privateState.deferredAiExtraction) {
+    initialQueue = clone(initialQueue);
+    const job = initialQueue.privateState.deferredAiExtraction;
+    if (initialQueue.closed || initialQueue.requestSeq !== job.requestSeq ||
+        !jevTraces[traceIndexForExtraction(job, initialQueue.privateState)]?.aiPublic) throw new NamingTaskError("invalid_options");
+    if (job.state === "running") {
+      job.state = "failed"; job.error = "delivery_unknown";
+      const timing = deferredTimings.findLast(entry => entry.eventId === job.eventId && entry.status === "running");
+      if (timing) timing.status = "delivery_unknown";
+    }
+  }
   if (initialQueue && usage?.needsExplicitRetry(initialQueue.pendingHumanEventIds.at(-1))) {
     // A restored POST may already have reached the provider. Reuse the existing queue error/retry path.
     initialQueue = { ...initialQueue, errorCode: 'ai_unavailable' };
@@ -291,7 +324,81 @@ export async function createNamingTaskV2({
       return await generateOpeningV17(messages => trackingClient.complete(messages, { phase: "generation" }));
     } catch { return null; } // Usage and request diagnostics retain closed codes.
   }
+  async function saveDeferredState() {
+    try {
+      await persist();
+      if (administrativelyInterrupted) return false;
+      if (pendingPublicationId !== null) {
+        pendingPublicationId = null;
+        publicationAtMs = now();
+        turnTimings.at(-1).publicationDurableAtMs = publicationAtMs;
+      }
+      deferredSaveFailed = false;
+      return true;
+    } catch {
+      if (!administrativelyInterrupted) deferredSaveFailed = true;
+      return false;
+    }
+  }
+  async function afterPublication(event) {
+    pendingPublicationId = event.id;
+    return saveDeferredState();
+  }
+  async function finalizeDeferredExtraction(replacePrivateState) {
+    // The queue holds the running job until the record has the result.
+    // A failed write leaves this candidate available for retry without an RPC.
+    const completion = deferredCompletion;
+    if (!await saveDeferredState() || !replacePrivateState(completion.privateState)) return false;
+    jevTraces[completion.traceIndex] = completion.trace;
+    completion.timing.durableAtMs = now();
+    deferredCompletion = null;
+    if (!completion.failed) publicationAtMs = null;
+    return !completion.failed;
+  }
+  async function beforeRequest({ state, replacePrivateState, signal, retry }) {
+    if (administrativelyInterrupted || signal.aborted) return false;
+    if (deferredCompletion) return retry && finalizeDeferredExtraction(replacePrivateState);
+    if (deferredSaveFailed && (!retry || !await saveDeferredState())) return false;
+    const privateState = state.privateState;
+    const job = privateState.deferredAiExtraction;
+    if (!job) return true;
+    if (job.state === "failed" && !retry || usage?.halted) return false;
+    const traceIndex = traceIndexForExtraction(job, privateState);
+    const trace = jevTraces[traceIndex];
+    if (!trace?.aiPublic || !dialogue.completeDeferredAiExtraction) return false;
+    job.state = "running"; job.error = null;
+    const timing = { eventId: job.eventId, requestSeq: job.requestSeq, publishedAtMs: publicationAtMs,
+      startedAtMs: now(), finishedAtMs: null, durableAtMs: null, status: "running",
+      nextHumanAcceptedAtMs: null, nextHumanProcessingAtMs: null };
+    deferredTimings.push(timing);
+    if (!replacePrivateState(privateState) || !await saveDeferredState() || signal.aborted) return false;
+    let pending;
+    const research = clone(trace.aiPublic);
+    try {
+      currentRequestSeq = job.requestSeq;
+      const work = () => dialogue.completeDeferredAiExtraction(privateState, state.events, research, signal);
+      pending = await (usage ? usage.runTurn(job.humanEventId, signal, work) : work());
+    } catch {
+      pending = null;
+    } finally {
+      if (currentRequestSeq === job.requestSeq) currentRequestSeq = null;
+    }
+    if (signal.aborted || administrativelyInterrupted) return false;
+    timing.finishedAtMs = now();
+    const failed = usage?.halted || !pending || pending.status === "failed";
+    if (failed) {
+      job.state = "failed"; job.error = usage?.halted ? "model_mismatch" : "extraction_failed";
+      timing.status = job.error;
+    } else {
+      privateState.aiPublic.pending = pending;
+      delete privateState.deferredAiExtraction;
+      timing.status = "complete";
+    }
+    deferredCompletion = { privateState, traceIndex, trace: { ...trace, aiPublic: research }, timing, failed };
+    return finalizeDeferredExtraction(replacePrivateState);
+  }
   const createQueue = (opening, saved) => createHumanMessageQueue({ runAiTurn: timedAiTurn, initialPrivateState, now,
+    ...(deferredExtraction ? { afterPublication, beforeRequest } : {}),
     initialEvents: opening === null ? [] : [{ speaker: "ai", text: opening, nonReferential: true }],
     ...(saved ? { initialState: saved } : {}) });
   const opening = generatedOpening ? restore ? null : await openingText() : SCRIPTED_OPENING;
@@ -413,7 +520,11 @@ export async function createNamingTaskV2({
     if (!directory && !onPersist) return;
     const snapshot = queue.getSnapshot();
     markBudgetInterruption(snapshot);
-    const privateState = queue.getPrivateState();
+    const durableQueue = queue.getDurableState();
+    const completion = deferredCompletion;
+    if (completion) durableQueue.privateState = clone(completion.privateState);
+    const privateState = durableQueue.privateState;
+    const savedTraces = completion ? jevTraces.map((trace, index) => index === completion.traceIndex ? completion.trace : trace) : jevTraces;
     const record = {
       recordId, version: VERSION, trialId: trial.trialId, seed, strategy, startedAt, updatedAt: new Date(now()).toISOString(),
       options: { visualAid: false, referenceMemory, ...(memoryPruneVersion ? { memoryPruneVersion } : {}), decisionShadow: Boolean(decisionShadowClient), activeDecision: activeDecision?.purpose ?? null, utteranceStyle: style,
@@ -441,12 +552,13 @@ export async function createNamingTaskV2({
       judgments: privateState.judgments, attempts: allAttempts(), ownLedger: privateState.ledger,
       ...(grounding || groundingRecords.length ? { groundingShadow: clone(groundingRecords) } : {}),
       ...(referenceMemory ? { referenceGraph: dialogue.snapshotGraph(privateState) } : {}),
-      ...(jev ? { jevTraces: settleJevTurnTraces(jevTraces, privateState), aiPublicSettlement: clone(aiPublicSettlement),
+      ...(jev ? { jevTraces: settleJevTurnTraces(savedTraces, privateState), aiPublicSettlement: clone(aiPublicSettlement),
         initialObservation: clone(initialObservation), jevLedger: jev.ledger.snapshot() } : {}),
       humanSubmission, aiSubmission, closed, finalError,
       ...(dialogueInterruption ? { dialogueInterruption } : {}),
       ...(persistFailures.length ? { persistFailures: persistFailures.map((entry) => ({ ...entry })) } : {}),
-      queueState: queue.getDurableState(), scoring: result ? { key: trial.key, result } : null, requests, turnTimings,
+      queueState: durableQueue, scoring: result ? { key: trial.key, result } : null, requests, turnTimings,
+      ...(deferredExtraction ? { deferredAiExtractionTimings: clone(deferredTimings) } : {}),
       diagnostics: aiSubmission || memoryPruneVersion ? {
         ...(memoryPruneVersion ? { memoryCapacityRejectedClaims: memoryCapacityRejectedClaims(jevTraces) } : {}),
         ledgerFinalMismatch: aiSubmission ? (() => { const slots = dialogue.slots.filter((s) => (privateState.ledger[s].name ?? null) !== (aiSubmission[s] ?? null)); return { count: slots.length, slots }; })() : null,
@@ -478,6 +590,11 @@ export async function createNamingTaskV2({
   // error leaves messages pending: the participant must retry, not lose them.
   function assertSettled() {
     if (openingPending()) throw new NamingTaskError("ai_retry_required");
+    if (deferredExtraction) {
+      const job = queue.getPrivateState().deferredAiExtraction;
+      if (deferredSaveFailed || job?.state === "failed" || usage?.halted) throw new NamingTaskError("ai_retry_required");
+      if (job || pendingPublicationId !== null || deferredCompletion) throw new NamingTaskError("ai_busy");
+    }
     const snapshot = queue.getSnapshot();
     if (snapshot.status === "error") throw new NamingTaskError("ai_retry_required");
     if (snapshot.status !== "idle" || snapshot.pendingHumanEventIds.length) throw new NamingTaskError("ai_busy");
@@ -506,6 +623,12 @@ export async function createNamingTaskV2({
       openingWritePending = false;
       return;
     }
+    if (deferredExtraction && (deferredSaveFailed || queue.getPrivateState().deferredAiExtraction)) {
+      await queue.retry();
+      checkAdminInterruption();
+      await persist();
+      return;
+    }
     const snapshot = queue.getSnapshot();
     if (snapshot.status !== "error") return;
     markBudgetInterruption(snapshot);
@@ -518,7 +641,8 @@ export async function createNamingTaskV2({
   }
 
   await persist();
-  let administrativelyInterrupted = false;
+  if (deferredExtraction && initialQueue && (initialQueue.privateState.deferredAiExtraction ||
+      queue.getSnapshot().status === "pending")) queue.startPublishedWork();
   const checkAdminInterruption = () => {
     if (administrativelyInterrupted) throw new NamingTaskError("trial_interrupted");
   };
@@ -558,17 +682,23 @@ export async function createNamingTaskV2({
     getState() {
       const snapshot = queue.getSnapshot();
       const openingUnavailable = openingPending();
-      const recovery = snapshot.status !== "error" && !openingUnavailable ? "active" : dialogueRecoveryEnabled && !usage && jev.ledger.stopReason() ? "unavailable" :
+      const job = deferredExtraction ? queue.getPrivateState().deferredAiExtraction : null;
+      const extractionError = deferredExtraction && (deferredSaveFailed || job?.state === "failed" || usage?.halted);
+      const recovery = snapshot.status !== "error" && !openingUnavailable && !extractionError ? "active" :
+        deferredExtraction && usage?.halted || dialogueRecoveryEnabled && !usage && jev.ledger.stopReason() ? "unavailable" :
         dialogueInterruption === "participant_paused" ? "paused" : "retry";
+      const visibleEvents = publicEvents();
+      const cutoff = pendingPublicationId === null ? -1 : visibleEvents.findIndex(event => event.id === pendingPublicationId);
+      const thinking = cutoff >= 0 || snapshot.status === "pending" || snapshot.status === "processing";
       return clone({
         // No seed or seed-derived trial id: either would let a client regenerate the boards and key.
         version: VERSION, sessionId: recordId, scene,
-        events: openingUnavailable ? [] : publicEvents(),
-        aiStatus: snapshot.status === "pending" || snapshot.status === "processing" ? "thinking" : snapshot.status === "error" || openingUnavailable ? "error" : "idle",
+        events: openingUnavailable ? [] : cutoff < 0 ? visibleEvents : visibleEvents.slice(0, cutoff),
+        aiStatus: extractionError ? "error" : thinking ? "thinking" : snapshot.status === "error" || openingUnavailable ? "error" : "idle",
         submitted: humanSubmission !== null, aiSubmitted: aiSubmission !== null, closed,
         ...(dialogueRecoveryEnabled ? { dialogueRecovery: recovery } : {}),
         status: result ? "completed" : closed ? "submitting" : "dialogue",
-        busy: snapshot.status === "pending" || snapshot.status === "processing",
+        busy: !extractionError && thinking,
         // Participant-facing result: own slots and names only, never figure ids.
         ...(result ? { result: { provisional: result.provisional, success: result.success, matchedCount: result.matchedCount, total: result.total,
           figures: result.figures.map(({ human, ai, matched }) => ({ human: { slot: human.slot, rawName: human.rawName }, ai: { rawName: ai.rawName }, matched })) } } : {}),

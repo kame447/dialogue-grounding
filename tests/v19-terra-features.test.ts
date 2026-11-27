@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { verifyRecords } from "../dialogue-model/runtime/diagnostics/parity-verify/index.ts";
 import { VISUAL_FEATURE_GENERATION } from "../dialogue-model/runtime/v2/generation-guard.ts";
+import { DEFERRED_AI_EXTRACTION_GENERATION } from "../dialogue-model/runtime/v2/deferred-ai-extraction.ts";
 import type { ObservationMemo } from "../dialogue-model/runtime/observation/contract.ts";
 import type { LocalOwnAnchor } from "../dialogue-model/runtime/local-grounding/contract.ts";
 import { readVisualFeatureDraft, readVisualFeatureEvidence } from "../dialogue-model/runtime/v2/visual-feature-evidence.ts";
@@ -25,11 +26,12 @@ const memo = (count: 4 | 6): ObservationMemo => ({
   })),
 });
 
+for (const generationRetryVersion of [VISUAL_FEATURE_GENERATION, DEFERRED_AI_EXTRACTION_GENERATION] as const)
 for (const [count, action] of [[4, "confirm"], [6, "repair"]] as const) {
-  test(`v19 ${count}-figure ${action} independently binds used features in both strategies`, async () => {
+  test(`${generationRetryVersion} ${count}-figure ${action} independently binds used features in both strategies`, async () => {
     const sources = [{ quote: text, source: firstSource }];
     const draft = (source: typeof firstSource) => JSON.stringify({ text, observationFeatures: [source] });
-    const records = await buildRecords({ ...profile, figureCount: count, memo: memo(count), turns: [{ human, plan: {
+    const records = await buildRecords({ ...profile, generationRetryVersion, figureCount: count, memo: memo(count), turns: [{ human, plan: {
       action, target: "figure_0",
       drafts: count === 4 ? [draft(commonSource), draft(firstSource)] : [draft(firstSource)],
       aiExtraction: JSON.stringify({ segments: [], visualFeatures: { sources } }),

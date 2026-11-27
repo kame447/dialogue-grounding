@@ -315,6 +315,7 @@ export function createDialogueV2(options) {
       ...(options.dialoguePolicy ? { dialoguePolicy: options.dialoguePolicy } : {}),
       ...(options.rotationMode ? { rotationMode: options.rotationMode } : {}),
       generationRetryVersion: options.generationRetryVersion,
+      deferredAiExtractionProfileSha256: options.deferredAiExtractionProfileSha256,
       judgmentMaterialVersion: options.judgmentMaterialVersion,
       newTrialAgreeNameScopeVersion: options.newTrialAgreeNameScopeVersion,
       onJevTurnTrace, onLocalGroundingTrace, maxReobservations,
