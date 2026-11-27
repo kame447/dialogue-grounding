@@ -4,7 +4,6 @@ import { createNamingTaskV2 } from "../../../dialogue-model/runtime/v2/naming-ta
 import { createGroundingJudgeClient } from "../../../dialogue-model/runtime/grounding/client.ts";
 import { INITIAL_OBSERVATION_STRUCTURED_V2, isInitialObservationGeneration } from "../../../dialogue-model/runtime/observation/initial-observation-generation.ts";
 import { workerTerraInitialKey } from "../../../dialogue-model/runtime/observation/worker-terra-observer.ts";
-import { CLAIM_PRUNE_V2 } from "../../../dialogue-model/runtime/memory/reference-graph.mjs";
 import { NamingTaskError } from "../../../dialogue-model/runtime/naming-error.mjs";
 import { sessionCookie, sessionId } from "./session-cookie.ts";
 import { isExcessiveTraffic, type SoftLimitBindings } from "./soft-limits";
@@ -31,7 +30,8 @@ import { participantContactHTML } from "../../../dialogue-model/runtime/v2/parti
 import { PARTICIPANT_STOP_HTML } from "../../../dialogue-model/runtime/v2/participant-stop-page.ts";
 import { ReceptionError, validateReception, createReception, approveReception, cancelReception,
   participantReception, receptionSummary, effectiveBetweenTrials, effectiveFigureSelection, effectiveRotationMode,
-  validateParticipantLimits, isParticipantDialogueProfile } from '../../../dialogue-model/runtime/v2/reception.ts';
+  validateParticipantLimits, isParticipantDialogueProfile, participantMemoryPruneVersion,
+  PILOT012_PARTICIPANT_PROFILE } from '../../../dialogue-model/runtime/v2/reception.ts';
 import { isSubmittedQuestionnaire } from '../../../dialogue-model/runtime/v2/questionnaire-gate.ts';
 import { receptionOpen, validateReceptionSettings } from './admin/reception-settings.ts';
 import type { ProtocolEntry, ReceptionSettings } from './admin/reception-settings.ts';
@@ -296,9 +296,14 @@ export class TangramSession extends DurableObject<Env> {
       if (this.env.PARTICIPANT_TERRA_ENABLED === 'on') {
         try {
           const configuredProfile = this.env.PARTICIPANT_TERRA_PROFILE;
-          const initialObservationGeneration = this.env.PARTICIPANT_TERRA_INITIAL_OBSERVATION_GENERATION;
+          const configuredObservation = this.env.PARTICIPANT_TERRA_INITIAL_OBSERVATION_GENERATION;
+          const initialObservationGeneration = dialogueProfile === PILOT012_PARTICIPANT_PROFILE
+            ? configuredObservation ?? INITIAL_OBSERVATION_STRUCTURED_V2 : configuredObservation;
           if (initialObservationGeneration !== undefined && !isInitialObservationGeneration(initialObservationGeneration)) {
             throw new Error('unknown initial observation generation');
+          }
+          if (dialogueProfile === PILOT012_PARTICIPANT_PROFILE && initialObservationGeneration !== INITIAL_OBSERVATION_STRUCTURED_V2) {
+            throw new Error('initial observation generation differs from dialogue profile');
           }
           const usageOnly = configuredProfile === PARTICIPANT_PRODUCTION_PROFILE;
           if (configuredProfile !== undefined && !usageOnly) throw new Error('unknown participant profile');
@@ -317,7 +322,7 @@ export class TangramSession extends DurableObject<Env> {
         const raw = await tx.get('reception:v1'); if (!raw) throw new ReceptionError('reception_unavailable');
         const next = await approveReception(raw, { expectedRevision:input.expectedRevision, order:input.order, protocol, expected, approvedAt:new Date().toISOString(),
           randomSeed:() => crypto.getRandomValues(new Uint32Array(1))[0], ...participant,
-          ...(protocol.referenceMemory ? { memoryPruneVersion: CLAIM_PRUNE_V2 } : {}) });
+          ...(protocol.referenceMemory ? { memoryPruneVersion: participantMemoryPruneVersion(participant.participantDialogueProfile) } : {}) });
         await tx.put({ 'reception:v1':next }); return next;
       }));
       await this.schedulePreobservations(r.plan, participantPolicy?.proxy);
@@ -392,7 +397,8 @@ export class TangramSession extends DurableObject<Env> {
     if (!r || !r.plan || !['approved','in_progress'].includes(r.status)) throw new ReceptionError('reception_not_approved');
     if (!Number.isSafeInteger(body.expectedReceptionRevision) || body.expectedReceptionRevision !== r.revision) throw new ReceptionError('trial_changed');
     const plan = r.plan.schemaVersion === 'reception_plan_v1' ? null : r.plan;
-    if (plan?.participantDialogueProfile !== undefined && plan.memoryPruneVersion !== CLAIM_PRUNE_V2) {
+    if (plan?.participantDialogueProfile !== undefined &&
+        plan.memoryPruneVersion !== participantMemoryPruneVersion(plan.participantDialogueProfile)) {
       throw new BaseSessionError('trial_unavailable');
     }
     const index = r.trials.length;
@@ -894,7 +900,8 @@ export class TangramSession extends DurableObject<Env> {
     const {seed,strategy,referenceMemory,restore,participantRuntime,initialObservationGeneration,memoryPruneVersion,participantDialogueProfile} = binding;
     if (restore && !matchesWorkerDialogueProfile(participantDialogueProfile, restore) ||
         participantDialogueProfile !== undefined &&
-          (memoryPruneVersion !== CLAIM_PRUNE_V2 || binding.participantModelPin?.schemaVersion !== 'participant_model_pin_v3' ||
+          (memoryPruneVersion !== participantMemoryPruneVersion(participantDialogueProfile) ||
+            binding.participantModelPin?.schemaVersion !== 'participant_model_pin_v3' ||
             participantRuntime?.profile !== PARTICIPANT_PRODUCTION_PROFILE)) {
       throw new BaseSessionError('trial_unavailable');
     }

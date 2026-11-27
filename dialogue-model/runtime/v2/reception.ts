@@ -8,9 +8,9 @@ import type { ParticipantModelPin } from './participant-model-pin.ts';
 import { ROTATION_MODES as STIMULUS_ROTATION_MODES } from '../stimuli/scatter-v2.mjs';
 import { FIGURE_SETS, resolveFigureSelection, validateResolvedFigureSelection } from '../stimuli/figure-bank.ts';
 import type { ResolvedFigureSelection } from '../stimuli/figure-bank.ts';
-import { isInitialObservationGeneration, type InitialObservationGeneration } from '../observation/initial-observation-generation.ts';
+import { INITIAL_OBSERVATION_STRUCTURED_V2, isInitialObservationGeneration, type InitialObservationGeneration } from '../observation/initial-observation-generation.ts';
 
-import { CLAIM_PRUNE_V2, type MemoryPruneVersion } from '../memory/reference-graph.mjs';
+import { CLAIM_PRUNE_V2, CLAIM_PRUNE_V3, type MemoryPruneVersion } from '../memory/reference-graph.mjs';
 
 export type ReceptionProtocol = { schemaVersion: 'reception_protocol_v1'; protocolId: string; revision: number;
   allowedOrders: Strategy[][]; seedPolicy: 'shared' | 'per_trial'; referenceMemory: boolean;
@@ -29,8 +29,9 @@ type P5ParticipantDialogueProfile = 'participant_dialogue_v13_p5' | 'participant
   'participant_dialogue_v13_p5_semantic_guard' | 'participant_dialogue_v13_p5_human_led_move_on' |
   'participant_dialogue_v13_p5_discriminating_confirmation' |
   'participant_dialogue_v13_p5_semantic_guard_jev_naming' | 'participant_dialogue_v13_p5_jev_naming_v16_human_led_move_on';
+export const PILOT012_PARTICIPANT_PROFILE = 'participant_dialogue_v17_pilot012';
 export type ParticipantDialogueProfile = 'participant_dialogue_v12' | 'participant_dialogue_v12_naming_v2' |
-  'participant_dialogue_v12_naming_v3' | 'participant_dialogue_v12_naming_v4' | P5ParticipantDialogueProfile;
+  'participant_dialogue_v12_naming_v3' | 'participant_dialogue_v12_naming_v4' | P5ParticipantDialogueProfile | typeof PILOT012_PARTICIPANT_PROFILE;
 export function isP5ParticipantDialogueProfile(value: unknown): value is P5ParticipantDialogueProfile {
   return value === 'participant_dialogue_v13_p5' || value === 'participant_dialogue_v13_p5_naming_v4' ||
     value === 'participant_dialogue_v13_p5_semantic_guard' || value === 'participant_dialogue_v13_p5_human_led_move_on' ||
@@ -41,7 +42,10 @@ export function isP5ParticipantDialogueProfile(value: unknown): value is P5Parti
 export function isParticipantDialogueProfile(value: unknown): value is ParticipantDialogueProfile {
   return value === 'participant_dialogue_v12' || value === 'participant_dialogue_v12_naming_v2' ||
     value === 'participant_dialogue_v12_naming_v3' || value === 'participant_dialogue_v12_naming_v4' ||
-    isP5ParticipantDialogueProfile(value);
+    isP5ParticipantDialogueProfile(value) || value === PILOT012_PARTICIPANT_PROFILE;
+}
+export function participantMemoryPruneVersion(profile?: ParticipantDialogueProfile): MemoryPruneVersion {
+  return profile === PILOT012_PARTICIPANT_PROFILE ? CLAIM_PRUNE_V3 : CLAIM_PRUNE_V2;
 }
 type ParticipantPlanSettings = {
   memoryPruneVersion?: MemoryPruneVersion;
@@ -185,7 +189,6 @@ function participantPlan(value: unknown) {
     ...(hasPrune ? ['memoryPruneVersion'] : []), ...(hasPin ? ['participantModelPin'] : []), ...(hasLimits ? ['participantLimits'] : []),
     ...(hasProfile ? ['participantRuntimeProfile'] : []), ...(hasGeneration ? ['initialObservationGeneration'] : []),
     ...(hasDialogueProfile ? ['participantDialogueProfile'] : [])]);
-  if (hasPrune && p.memoryPruneVersion !== CLAIM_PRUNE_V2) return fail();
   if (hasProfile && p.participantRuntimeProfile !== PARTICIPANT_PRODUCTION_PROFILE) return fail();
   const generation = isInitialObservationGeneration(p.initialObservationGeneration) ? p.initialObservationGeneration : undefined;
   if (hasGeneration && generation === undefined) return fail();
@@ -194,9 +197,13 @@ function participantPlan(value: unknown) {
   const dialogueProfile = p.participantDialogueProfile;
   if (hasDialogueProfile && (pin?.schemaVersion !== 'participant_model_pin_v3' || !hasProfile ||
       !isParticipantDialogueProfile(dialogueProfile))) return fail();
+  const memoryPruneVersion = participantMemoryPruneVersion(dialogueProfile);
+  if (hasPrune && p.memoryPruneVersion !== memoryPruneVersion) return fail();
+  if (dialogueProfile === PILOT012_PARTICIPANT_PROFILE &&
+      (!hasPrune || generation !== INITIAL_OBSERVATION_STRUCTURED_V2)) return fail();
   const limits = hasLimits ? validateParticipantLimits(p.participantLimits) : undefined;
   const participant: ParticipantPlanSettings = {
-    ...(hasPrune ? { memoryPruneVersion: CLAIM_PRUNE_V2 } : {}),
+    ...(hasPrune ? { memoryPruneVersion } : {}),
     ...(pin ? { participantModelPin: pin } : {}),
     ...(limits ? { participantLimits: limits } : {}),
     ...(hasProfile ? { participantRuntimeProfile: PARTICIPANT_PRODUCTION_PROFILE } : {}),

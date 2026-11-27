@@ -4,6 +4,7 @@ import { MODEL_CONTRACT_V2 } from '../../../dialogue-model/runtime/model-identit
 import { createChatClient } from '../../../dialogue-model/runtime/client.mjs';
 import { NamingTaskError } from '../../../dialogue-model/runtime/naming-error.mjs';
 import { createJevDecisionClient, type JevDecisionClientOptions } from '../../../dialogue-model/runtime/decision/jev-decision.ts';
+import { JEV_REPAIR_QUALITY_VERSION } from '../../../dialogue-model/runtime/decision/repair-quality.ts';
 import { createJevLocalTestClassifier } from '../../../dialogue-model/runtime/local-grounding/jev-local-test.ts';
 import { createWorkerTerraObserver, type WorkerTerraCache } from '../../../dialogue-model/runtime/observation/worker-terra-observer.ts';
 import { INITIAL_OBSERVATION_STRUCTURED_V1, INITIAL_OBSERVATION_STRUCTURED_V2,
@@ -16,8 +17,8 @@ import { researchHash, researchTrialProfileV3, RESEARCH_TRIAL_PROFILE_V1 } from 
 import { RESEARCH_MAX_DEADLINE_MS, RESEARCH_MAX_LUNA_ATTEMPT_MS } from '../../../dialogue-model/runtime/v2/research-timeouts.ts';
 
 import type { BaseRecord } from '../../../dialogue-model/runtime/v2/base-assignment.ts';
-import type { ParticipantDialogueProfile } from '../../../dialogue-model/runtime/v2/reception.ts';
-import { CLAIM_PRUNE_V2 } from '../../../dialogue-model/runtime/memory/reference-graph.mjs';
+import { participantMemoryPruneVersion, PILOT012_PARTICIPANT_PROFILE,
+  type ParticipantDialogueProfile } from '../../../dialogue-model/runtime/v2/reception.ts';
 
 type Dispatch = (payload: unknown, expectedModelId: string) => Promise<ParticipantDispatchResult>;
 export interface ParticipantService {
@@ -83,6 +84,12 @@ const workerDialogue = {
   participant_dialogue_v13_p5_discriminating_confirmation: dialogueV13P5DiscriminatingConfirmation,
   participant_dialogue_v13_p5_jev_naming_v16_human_led_move_on: { ...dialogueV13P5DiscriminatingConfirmation,
     newTrialAgreeNameScopeVersion: 'jev_naming_v1' },
+  [PILOT012_PARTICIPANT_PROFILE]: { ...dialogueV13P5HumanLedMoveOn,
+    newTrialAgreeNameScopeVersion: 'jev_naming_v1',
+    profile: researchTrialProfileV3(profile.lunaRequest, profile.timeouts, 'two_stage_v3', 'holistic_v5',
+      'bypass_acceptance_v2', JEV_REPAIR_QUALITY_VERSION),
+    pinnedVersions: { ...dialogueV13P5HumanLedMoveOn.pinnedVersions, generationRetryVersion: 'jev_generation_retry_v17' },
+  },
 } as const;
 
 export function matchesWorkerDialogueProfile(key: ParticipantDialogueProfile | undefined, record: BaseRecord) {
@@ -91,8 +98,10 @@ export function matchesWorkerDialogueProfile(key: ParticipantDialogueProfile | u
   const state = queueState.privateState as { agreeNameScopeVersion?: unknown; graph?: { memoryPruneVersion?: unknown } } | undefined;
   const technicalTrial = options.technicalTrial as { version?: unknown } | undefined;
   const dialogue = workerDialogue[key];
+  const memoryPruneVersion = participantMemoryPruneVersion(key);
   return !!dialogue && options.participantDialogueProfile === key &&
-    options.memoryPruneVersion === CLAIM_PRUNE_V2 && state?.graph?.memoryPruneVersion === CLAIM_PRUNE_V2 &&
+    options.memoryPruneVersion === memoryPruneVersion && state?.graph?.memoryPruneVersion === memoryPruneVersion &&
+    (key !== PILOT012_PARTICIPANT_PROFILE || options.initialObservationGeneration === INITIAL_OBSERVATION_STRUCTURED_V2) &&
     options.profileSha256 === researchHash(dialogue.profile) && options.questionLayout === dialogue.profile.questionLayout &&
     options.dialoguePolicy === dialogue.profile.dialoguePolicy &&
     technicalTrial?.version === dialogue.technicalTrial.version && Object.keys(technicalTrial).length === 1 &&
@@ -191,7 +200,8 @@ export function createWorkerParticipantRuntime({ pin, own, proxy, cache, limits,
   ({ limits: Readonly<BudgetLimits>; usage?: never } | { limits?: never; usage: ParticipantUsageLedger })) {
   if (pin.schemaVersion !== 'participant_model_pin_v1' && !usage) throw new NamingTaskError('invalid_options');
   const dialogue = participantDialogueProfile === undefined ? null : workerDialogue[participantDialogueProfile];
-  if (participantDialogueProfile !== undefined && (!dialogue || pin.schemaVersion !== 'participant_model_pin_v3' || !usage)) {
+  if (participantDialogueProfile !== undefined && (!dialogue || pin.schemaVersion !== 'participant_model_pin_v3' || !usage ||
+      participantDialogueProfile === PILOT012_PARTICIPANT_PROFILE && initialObservationGeneration !== INITIAL_OBSERVATION_STRUCTURED_V2)) {
     throw new NamingTaskError('invalid_options');
   }
   const runtimeProfile = dialogue?.profile ?? profile;

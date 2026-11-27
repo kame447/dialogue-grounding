@@ -5,10 +5,11 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { MEMO_LOCAL_EXTRACTION_INSTRUCTIONS, memoExtractionPrompt } from '../dialogue-model/runtime/local-grounding/extract.ts';
 import { MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS } from '../dialogue-model/runtime/local-grounding/extract-ai.ts';
-import { canonicalReceptionProtocolV2, canonicalReceptionProtocolV3, receptionProtocolSha256, receptionSummary, validateReceptionPlan } from '../dialogue-model/runtime/v2/reception.ts';
+import { canonicalReceptionProtocolV2, canonicalReceptionProtocolV3, PILOT012_PARTICIPANT_PROFILE,
+  receptionProtocolSha256, receptionSummary, validateReceptionPlan } from '../dialogue-model/runtime/v2/reception.ts';
 import { createTrialV2, modelView } from '../dialogue-model/runtime/stimuli/scatter-v2.mjs';
 import { FIGURE_SETS } from '../dialogue-model/runtime/stimuli/figure-bank.ts';
-import { CLAIM_PRUNE_V2, REFERENCE_LIMITS } from '../dialogue-model/runtime/memory/reference-graph.mjs';
+import { CLAIM_PRUNE_V2, CLAIM_PRUNE_V3, REFERENCE_LIMITS } from '../dialogue-model/runtime/memory/reference-graph.mjs';
 import { validateBoundBaseRecord } from '../dialogue-model/runtime/v2/base-assignment-data.ts';
 import { validateParticipantModelPin } from '../dialogue-model/runtime/v2/participant-model-pin.ts';
 import { handleRequest } from '../workers/research-ai-proxy/src/index.mjs';
@@ -1618,6 +1619,77 @@ test('Terra preobserve v2 keeps approval, start and first response timing privat
     clock.firstHumanReceivedAt, clock.firstAiReplyAt].map(Date.parse);
   assert.ok(times.every((time, i) => Number.isFinite(time) && (i === 0 || time >= times[i - 1])));
   assert.equal(transport.textPhases.filter(p => p === 'initial_observation').length, 1);
+});
+
+test('pilot012 pins the integrated versions at approval and preserves them through both trials and cold restore', async t => {
+  const h = harness(true, figureBankProtocol, true);
+  const transport = v12Transport(t, h);
+  transport.options.sharedReading = true;
+  h.controlled.selectedAction = 'accept';
+  h.env.PARTICIPANT_DIALOGUE_PROFILE = PILOT012_PARTICIPANT_PROFILE;
+  h.env.PARTICIPANT_AI_PROXY.participantInitialObservationPolicy = transport.observationPolicy;
+  await h.receive();
+
+  h.env.PARTICIPANT_TERRA_INITIAL_OBSERVATION_GENERATION = INITIAL_OBSERVATION_STRUCTURED_V1;
+  await assert.rejects(h.approve(), { code: 'reception_unavailable' });
+  assert.equal((await h.storage.get('reception:v1')).plan, null);
+  h.env.PARTICIPANT_TERRA_INITIAL_OBSERVATION_GENERATION = undefined;
+
+  const { plan } = await h.approve();
+  assert.equal(plan.participantDialogueProfile, PILOT012_PARTICIPANT_PROFILE);
+  assert.equal(plan.participantModelPin.schemaVersion, 'participant_model_pin_v3');
+  assert.equal(plan.memoryPruneVersion, CLAIM_PRUNE_V3);
+  assert.equal(plan.initialObservationGeneration, INITIAL_OBSERVATION_STRUCTURED_V2);
+  assert.throws(() => validateReceptionPlan({ ...plan, memoryPruneVersion: CLAIM_PRUNE_V2 }));
+  assert.throws(() => validateReceptionPlan({ ...plan, initialObservationGeneration: INITIAL_OBSERVATION_STRUCTURED_V1 }));
+  assert.throws(() => validateReceptionPlan({ ...plan, participantDialogueProfile: v13NamingV4Dialogue }));
+  await h.settleBackground();
+
+  h.env.PARTICIPANT_DIALOGUE_PROFILE = v13NamingV4Dialogue;
+  h.env.PARTICIPANT_TERRA_INITIAL_OBSERVATION_GENERATION = INITIAL_OBSERVATION_STRUCTURED_V1;
+  h.evict();
+  let predecessor: string | undefined;
+  for (const strategy of plan.order) {
+    const { trial } = await jsonOk(await h.start(predecessor));
+    const id = trial.sessionId;
+    const key = 'record:' + id;
+    const start = await h.storage.get(key);
+    assert.equal(start.strategy, strategy);
+    assert.deepEqual(start.assignment.source.plan, plan);
+    assert.deepEqual(start.options.participantModelPin, plan.participantModelPin);
+    assert.equal(start.options.participantDialogueProfile, PILOT012_PARTICIPANT_PROFILE);
+    assert.equal(start.options.initialObservationGeneration, INITIAL_OBSERVATION_STRUCTURED_V2);
+    assert.equal(start.options.memoryPruneVersion, CLAIM_PRUNE_V3);
+    assert.equal(start.queueState.privateState.graph.memoryPruneVersion, CLAIM_PRUNE_V3);
+    assert.equal(start.queueState.privateState.agreeNameScopeVersion, 'jev_naming_v1');
+    assert.equal(start.options.generationRetryVersion, 'jev_generation_retry_v17');
+    assert.equal(start.options.interventionPolicy.version, 'bypass_acceptance_v2');
+    assert.deepEqual(start.options.technicalTrial, { version: 'adaptive_repair_v3' });
+    assert.equal(start.events[0].origin, 'generated_opening');
+    assert.doesNotMatch(JSON.stringify(trial), /participantDialogueProfile|claim_prune_v3|jev_repair_quality_v1|structured_outputs_v2/u);
+
+    const callStart = h.calls.length;
+    await jsonOk(await h.request('message', { expectedRecordId: id, text: p5Question }));
+    await h.idle();
+    const stored = await h.storage.get(key);
+    assert.equal(stored.queueState.errorCode, null);
+    assert.equal(stored.jevTraces.at(-1).status, 'committed');
+    const action = h.calls.slice(callStart).find(call => call.kind === 'choices' && Object.hasOwn(call.body.questions, 'action'));
+    assert.ok(action);
+    const material = JSON.parse(action.body.state);
+    assert.equal(material.judgmentMaterialVersion, 'jev_repair_quality_v1');
+    assert.ok(material.referenceEvidence);
+
+    const sent = [...transport.textPhases];
+    h.evict();
+    const restored = (await jsonOk(await h.request('state'))).trial;
+    assert.equal(restored.sessionId, id);
+    assert.deepEqual(transport.textPhases, sent);
+    assert.deepEqual((await h.storage.get(key)).queueState.privateState, stored.queueState.privateState);
+    await h.complete(id, restored);
+    predecessor = id;
+  }
+  assert.equal(transport.textPhases.filter(phase => phase === 'initial_observation').length, 1);
 });
 
 test('Terra preobserve makes a separate validated memo for each distinct frozen AI board', async () => {
