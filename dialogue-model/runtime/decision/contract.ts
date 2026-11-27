@@ -116,6 +116,8 @@ export type JevDecisionInput = {
   discriminatingConfirmation?: true;
   /** Private material mode from the trial's generation version. */
   p5Enabled?: true;
+  /** The versioned intervention adds only an action-stage question. */
+  humanLedMoveOn?: true;
   sharedConstruals?: SharedConstrual[];
 };
 export type DecisionInputBudget = {

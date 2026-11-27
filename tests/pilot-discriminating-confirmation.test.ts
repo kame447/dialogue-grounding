@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { verifyRecords } from "../dialogue-model/runtime/diagnostics/parity-verify/index.ts";
 import { hash } from "../dialogue-model/runtime/diagnostics/parity-verify/core.ts";
+import { MOVE_ON_SOURCE_QUESTION } from "../dialogue-model/runtime/decision/human-led-move-on.ts";
 import { buildRecords, OLD, OWN } from "./support/s4-v3-records.ts";
 import type { Label, Turn } from "./support/s4-v3-records.ts";
 
@@ -131,12 +132,12 @@ for (const label of ["repair-first", "bypass-enabled"] as const) {
   });
 }
 
-test("v16 keeps repair-first veto and bypass-enabled's original action on the same material", async () => {
+test("v16 with bypass_acceptance_v2 keeps repair-first veto and bypass-enabled's original action on the same material", async () => {
   const turns: Turn[] = [{ human: "この形はまだ見分けられません。", plan: { action: "defer", target: "figure_0",
     actionScores: { defer: 0.6, confirm: 0.3, repair: 0.1 }, choose: draft(useful),
     speechByLabel: { "repair-first": confirmationDraft(useful, "細長い板に三角形が接している形ですか？"),
       "bypass-enabled": "この形の話には、あとで戻りましょう。" } } }];
-  const records = await buildRecords({ ...options, generationRetryVersion: newVersion, memo, turns });
+  const records = await buildRecords({ ...options, generationRetryVersion: newVersion, interventionVersion: "bypass_acceptance_v2", memo, turns });
   const result = records.trials[0].replay[0].result;
   assert.equal(result.commonEqual, true);
   assert.deepEqual(result.sides.map((side: any) => [side.label, side.executed.action, side.intervention.disposition]), [
@@ -144,6 +145,10 @@ test("v16 keeps repair-first veto and bypass-enabled's original action on the sa
   ]);
   assertConfirmWire(requests(records, "repair-first"), useful);
   assert.ok(!requests(records, "bypass-enabled").some(request => request.payload.questions?.feature));
+  for (const label of ["repair-first", "bypass-enabled"] as const) {
+    const action = requests(records, label).find(request => request.payload.questions?.action);
+    assert.ok(action?.payload.questions?.[MOVE_ON_SOURCE_QUESTION]);
+  }
   assertS4(records);
 });
 
