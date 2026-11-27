@@ -8,6 +8,7 @@ import { keychainKeyReader, DEFAULT_COST_CAP_USD, UPSTREAM_TIMEOUT_MS, maxJevCos
 import { isGroundingModel, OPENROUTER_DECISIONS_URL } from "../../../workers/research-ai-proxy/src/grounding.ts";
 import { LOCAL_ACTS, LOCAL_ASPECTS, LOCAL_SOURCES } from "../local-grounding/contract.ts";
 import type { LocalClaimView } from "../local-grounding/contract.ts";
+import { isGenerationV18, withShapeTerminologyQuestions } from "../shape-terminology.ts";
 import { hasRetainedNameSource, validReferenceEvidence } from "../local-grounding/reference-evidence.ts";
 import { namingWithdrawalQuestion } from "./jev-naming.ts";
 import { literalSpan } from "../judgment/public-evidence.mjs";
@@ -433,6 +434,7 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
   if (input.humanLedMoveOn !== undefined && (input.humanLedMoveOn !== true || layout !== "two_stage_v3")) fail("invalid_input");
   const repairQuality = input.judgmentMaterialVersion === JEV_REPAIR_QUALITY_VERSION;
   if (input.judgmentMaterialVersion !== undefined && (!repairQuality || layout !== "two_stage_v3" || input.judgmentLedger === undefined)) fail("invalid_input");
+  if (input.shapeTerminologyVersion !== undefined && (!isGenerationV18(input.shapeTerminologyVersion) || layout !== "two_stage_v3")) fail("invalid_input");
   const p5Enabled = input.p5Enabled === true;
   if (!(input.p5Enabled === undefined || p5Enabled && input.judgmentLedger !== undefined) ||
       !p5Enabled && input.sharedConstruals !== undefined) fail("invalid_input");
@@ -1253,7 +1255,7 @@ function detailJsonData(value: unknown, seen = new Set<object>()): void {
 function prepareExecutedDetail(input: JevDecisionInput, selected: JevActionTarget, layout: JevQuestionLayout = "two_stage_v1", participantPrompts = false) {
   try {
     detailJsonData(input); detailJsonData(selected);
-    const optional = ["reobservationAllowed", "humanReferent", "repairProspect", "agreeNames", "jevNaming", "repairFacts", "participantLedger", "nameLedger", "nameSource", "namingRequest", "namingRequestStrict", "judgmentLedger", "rotationMode", "notationV6", "notationV11", "featureReplyFilter", "discriminatingConfirmation", "p5Enabled", "sharedConstruals", "humanLedMoveOn", "judgmentMaterialVersion", "publicationRecoveryContext", "referenceEvidence"].filter(key => Object.hasOwn(input, key));
+    const optional = ["reobservationAllowed", "humanReferent", "repairProspect", "agreeNames", "jevNaming", "repairFacts", "participantLedger", "nameLedger", "nameSource", "namingRequest", "namingRequestStrict", "judgmentLedger", "rotationMode", "notationV6", "notationV11", "featureReplyFilter", "discriminatingConfirmation", "p5Enabled", "sharedConstruals", "humanLedMoveOn", "judgmentMaterialVersion", "publicationRecoveryContext", "referenceEvidence", "shapeTerminologyVersion"].filter(key => Object.hasOwn(input, key));
     if (!exact(input, ["turn", "publicTurns", "ownSlots", "observations", "issueSummary", "priorClaims", "repairHistory", "previousAction", "publicNames", ...optional])) fail("invalid_input");
     if (!exact(selected, ["action", "target"]) || !includes(input.p5Enabled === true
       ? ["propose_name", "agree", "confirm", "repair", "accept"] : ["propose_name", "agree", "confirm", "repair"], selected.action)) fail("invalid_input");
@@ -1704,7 +1706,7 @@ export function createJevDecisionClient(options: JevDecisionClientOptions = {}):
               key = rawKey;
             }
             check();
-            const payload = prepared.payload, body = JSON.stringify(payload);
+            const payload = withShapeTerminologyQuestions(prepared.payload, input.shapeTerminologyVersion), body = JSON.stringify(payload);
             if (leaks(body)) fail("key_leak");
             delivered = true; accounted = false;
             let response: Response;

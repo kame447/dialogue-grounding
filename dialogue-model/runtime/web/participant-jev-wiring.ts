@@ -35,13 +35,14 @@ import type { BudgetLimits, SendReceipt } from '../diagnostics/parity-live/audit
 import { checkModelIdentity, MODEL_CONTRACT_V2 } from '../model-identity-contract.ts';
 import { RESEARCH_MAX_JEV_USD } from '../diagnostics/jev-shadow-eval/local-openrouter.ts';
 import { inferenceHistory } from '../v2/agreement-gate.ts';
-import { defaultGenerationRetryVersion, hasVersionedViewpoint, isGenerationV12, isGenerationV13, validGenerationRetryVersion, validAgreeNameScope } from '../v2/generation-guard.ts';
+import { defaultGenerationRetryVersion, hasVersionedViewpoint, isGenerationV12, isGenerationV13, isGenerationV17, validGenerationRetryVersion, validAgreeNameScope } from '../v2/generation-guard.ts';
+import type { ShapeTerminologyVersion } from '../shape-terminology.ts';
 import type { GenerationRetryVersion } from '../v2/generation-guard.ts';
 
 export type JevResearchLedger = RunBudget | ParticipantUsageLedger;
 const AI_NAME_ACCEPTANCES_V1 = 'ai_name_acceptances_v1';
 type ParticipantJevVersionPin = Readonly<{
-  generationRetryVersion: 'jev_generation_retry_v12' | 'jev_generation_retry_v13' | 'jev_generation_retry_v15' | 'jev_generation_retry_v16' | 'jev_generation_retry_v17'; namingRestoreVersion: typeof AI_NAME_ACCEPTANCES_V1;
+  generationRetryVersion: 'jev_generation_retry_v12' | 'jev_generation_retry_v13' | 'jev_generation_retry_v15' | 'jev_generation_retry_v16' | 'jev_generation_retry_v17' | ShapeTerminologyVersion; namingRestoreVersion: typeof AI_NAME_ACCEPTANCES_V1;
 }>;
 export type JevResearchOptions<Ledger extends JevResearchLedger = RunBudget> = Readonly<{ profile: ResearchTrialProfileV3; observer: ObservationObserver;
   jevDecision: JevDecisionClient; localGrounding: JevTurnLocalOptions; ledger: Ledger; technicalTrial?: AdaptiveRepairTrial;
@@ -175,7 +176,7 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
     if (pinned && (Object.hasOwn(v, 'generationRetryVersion') ||
         pinned.generationRetryVersion !== 'jev_generation_retry_v12' && pinned.generationRetryVersion !== 'jev_generation_retry_v13' &&
         pinned.generationRetryVersion !== 'jev_generation_retry_v15' && pinned.generationRetryVersion !== 'jev_generation_retry_v16' &&
-        pinned.generationRetryVersion !== 'jev_generation_retry_v17' ||
+        !isGenerationV17(pinned.generationRetryVersion) ||
         pinned.namingRestoreVersion !== AI_NAME_ACCEPTANCES_V1 ||
         !validGenerationRetryVersion(pinned.generationRetryVersion, profile.questionLayout, profile.dialoguePolicy) ||
         restore && (savedGenerationVersion !== pinned.generationRetryVersion ||
@@ -192,7 +193,7 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
     if (Object.hasOwn(v, 'newTrialAgreeNameScopeVersion') &&
         (newTrialAgreeNameScopeVersion === undefined ||
           !restore && !validAgreeNameScope(newTrialAgreeNameScopeVersion, generationRetryVersion))) return invalid();
-    if (generationRetryVersion === 'jev_generation_retry_v17' && (!pinned ||
+    if (isGenerationV17(generationRetryVersion) && (!pinned ||
         !(v.ledger instanceof ParticipantUsageLedger) || v.ledger.snapshot().pin.schemaVersion !== 'participant_model_pin_v3' ||
         newTrialAgreeNameScopeVersion !== 'jev_naming_v1')) return invalid();
     const p5Enabled = isGenerationV13(generationRetryVersion);
@@ -255,11 +256,11 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
         if (committed) {
           const judgment = savedJudgments.find((j: any) => j?.turnIndex === trace.turnIndex && j?.jevTurn?.attemptNumber === trace.attemptNumber);
           if (!judgment) return invalid();
-          if (generationRetryVersion === 'jev_generation_retry_v17' &&
+          if (isGenerationV17(generationRetryVersion) &&
               (!trace.generatedPublication || !judgment.generatedPublication ||
                 researchHash(jsonData(trace.generatedPublication)) !== researchHash(jsonData(judgment.generatedPublication)) ||
                 !restore.queueState.events.some((event: any) => event.seq === trace.turnIndex + 1 && event.speaker === 'ai' && event.text === trace.publicSpeech)) ||
-              generationRetryVersion !== 'jev_generation_retry_v17' && Object.hasOwn(trace, 'generatedPublication')) return invalid();
+              !isGenerationV17(generationRetryVersion) && Object.hasOwn(trace, 'generatedPublication')) return invalid();
           for (const key of ['executed','humanReferent','repairProspect','repairGate','repairFacts','draftActs','draftSharedClaims','namingRequest','namingReconfirm','sharedConstruals'])
             if (Object.hasOwn(trace, key) !== Object.hasOwn(judgment.jevTurn, key) || Object.hasOwn(trace, key) && researchHash(jsonData(trace[key])) !== researchHash(jsonData(judgment.jevTurn[key]))) return invalid();
           const humanMove = humanLedMoveOn && judgment.jevTurn.intervention?.reasonCode === 'human_led_move_on';

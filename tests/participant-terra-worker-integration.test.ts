@@ -4,8 +4,8 @@ import { registerHooks } from 'node:module';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { MEMO_LOCAL_EXTRACTION_INSTRUCTIONS, memoExtractionPrompt } from '../dialogue-model/runtime/local-grounding/extract.ts';
-import { MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS } from '../dialogue-model/runtime/local-grounding/extract-ai.ts';
-import { canonicalReceptionProtocolV2, canonicalReceptionProtocolV3, PILOT012_PARTICIPANT_PROFILE,
+import { MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS, memoAiExtractionPrompt } from '../dialogue-model/runtime/local-grounding/extract-ai.ts';
+import { canonicalReceptionProtocolV2, canonicalReceptionProtocolV3, PILOT012_PARTICIPANT_PROFILE, PILOT012_V18_PARTICIPANT_PROFILE,
   receptionProtocolSha256, receptionSummary, validateReceptionPlan } from '../dialogue-model/runtime/v2/reception.ts';
 import { createTrialV2, modelView } from '../dialogue-model/runtime/stimuli/scatter-v2.mjs';
 import { FIGURE_SETS, PILOT_FIGURE_SET_ID } from '../dialogue-model/runtime/stimuli/figure-bank.ts';
@@ -18,6 +18,7 @@ import { configuredParticipantPin, participantChoices, participantUsageChoices }
 import { INITIAL_OBSERVATION_STRUCTURED_V1, INITIAL_OBSERVATION_STRUCTURED_V2,
   type InitialObservationGeneration } from '../dialogue-model/runtime/observation/initial-observation-generation.ts';
 import { buildObservationMessages } from '../dialogue-model/runtime/observation/observe.ts';
+import { SHAPE_TERMINOLOGY, SHAPE_TERMINOLOGY_GENERATION } from '../dialogue-model/runtime/shape-terminology.ts';
 
 registerHooks({ resolve(name, context, next) {
   if (name === 'cloudflare:workers') {
@@ -1493,7 +1494,9 @@ function v12Transport(t: TestContext, h: ReturnType<typeof harness>) {
         response = JSON.stringify({ figures: slots.map(id => ({ id, holistic: [],
           analytic: { shapes: ['半円の切り込み'], composition: '細い部分がつながる', relations: [] }, unknowns: [] })) });
       }
-    } else if (first === memoExtractionPrompt(true, false) || first === memoExtractionPrompt(true, true)) {
+    } else if (first === memoExtractionPrompt(true, false) || first === memoExtractionPrompt(true, true) ||
+        first === memoExtractionPrompt(true, false, SHAPE_TERMINOLOGY_GENERATION) ||
+        first === memoExtractionPrompt(true, true, SHAPE_TERMINOLOGY_GENERATION)) {
       phase = 'dialogue';
       const state = JSON.parse(body.messages.slice(1).map((m: { content: string }) => m.content.split('\n').at(-1)).join(''));
       const latest = state.publicTurns.at(-1);
@@ -1501,7 +1504,7 @@ function v12Transport(t: TestContext, h: ReturnType<typeof harness>) {
       response = JSON.stringify(options.sharedReading
         ? latest.text === p5Support ? [segment(p5Support, 'construal', [decisionSlot], latest.turn - 1)] : []
         : latest.text === v12Answer ? [segment(v12Answer, 'contour', [], latest.turn - 1)] : []);
-    } else if (first === MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS) {
+    } else if (first === MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS || first === memoAiExtractionPrompt(SHAPE_TERMINOLOGY_GENERATION)) {
       phase = 'ai_extraction';
       if (options.sharedReading) {
         const { candidateText } = JSON.parse(body.messages[1].content);
@@ -1626,12 +1629,14 @@ test('Terra preobserve v2 keeps approval, start and first response timing privat
   assert.equal(transport.textPhases.filter(p => p === 'initial_observation').length, 1);
 });
 
-test('pilot012 pins the integrated versions at approval and preserves them through both trials and cold restore', async t => {
+async function verifyPilot012WorkerProfile(t: TestContext,
+  participantProfile: typeof PILOT012_PARTICIPANT_PROFILE | typeof PILOT012_V18_PARTICIPANT_PROFILE,
+  generation: 'jev_generation_retry_v17' | typeof SHAPE_TERMINOLOGY_GENERATION) {
   const h = harness(true, figureBankProtocol, true);
   const transport = v12Transport(t, h);
   transport.options.sharedReading = true;
   h.controlled.selectedAction = 'accept';
-  h.env.PARTICIPANT_DIALOGUE_PROFILE = PILOT012_PARTICIPANT_PROFILE;
+  h.env.PARTICIPANT_DIALOGUE_PROFILE = participantProfile;
   h.env.PARTICIPANT_AI_PROXY.participantInitialObservationPolicy = transport.observationPolicy;
   await h.receive();
 
@@ -1641,7 +1646,7 @@ test('pilot012 pins the integrated versions at approval and preserves them throu
   h.env.PARTICIPANT_TERRA_INITIAL_OBSERVATION_GENERATION = undefined;
 
   const { plan } = await h.approve();
-  assert.equal(plan.participantDialogueProfile, PILOT012_PARTICIPANT_PROFILE);
+  assert.equal(plan.participantDialogueProfile, participantProfile);
   assert.equal(plan.participantModelPin.schemaVersion, 'participant_model_pin_v3');
   assert.equal(plan.memoryPruneVersion, CLAIM_PRUNE_V3);
   assert.equal(plan.initialObservationGeneration, INITIAL_OBSERVATION_STRUCTURED_V2);
@@ -1650,7 +1655,8 @@ test('pilot012 pins the integrated versions at approval and preserves them throu
   assert.throws(() => validateReceptionPlan({ ...plan, participantDialogueProfile: v13NamingV4Dialogue }));
   await h.settleBackground();
 
-  h.env.PARTICIPANT_DIALOGUE_PROFILE = v13NamingV4Dialogue;
+  h.env.PARTICIPANT_DIALOGUE_PROFILE = participantProfile === PILOT012_PARTICIPANT_PROFILE
+    ? PILOT012_V18_PARTICIPANT_PROFILE : PILOT012_PARTICIPANT_PROFILE;
   h.env.PARTICIPANT_TERRA_INITIAL_OBSERVATION_GENERATION = INITIAL_OBSERVATION_STRUCTURED_V1;
   h.evict();
   let predecessor: string | undefined;
@@ -1662,12 +1668,14 @@ test('pilot012 pins the integrated versions at approval and preserves them throu
     assert.equal(start.strategy, strategy);
     assert.deepEqual(start.assignment.source.plan, plan);
     assert.deepEqual(start.options.participantModelPin, plan.participantModelPin);
-    assert.equal(start.options.participantDialogueProfile, PILOT012_PARTICIPANT_PROFILE);
+    assert.equal(start.options.participantDialogueProfile, participantProfile);
     assert.equal(start.options.initialObservationGeneration, INITIAL_OBSERVATION_STRUCTURED_V2);
     assert.equal(start.options.memoryPruneVersion, CLAIM_PRUNE_V3);
     assert.equal(start.queueState.privateState.graph.memoryPruneVersion, CLAIM_PRUNE_V3);
     assert.equal(start.queueState.privateState.agreeNameScopeVersion, 'jev_naming_v1');
-    assert.equal(start.options.generationRetryVersion, 'jev_generation_retry_v17');
+    assert.equal(start.options.generationRetryVersion, generation);
+    assert.equal(start.options.dialoguePolicy, 'holistic_v5');
+    assert.equal(start.options.questionLayout, 'two_stage_v3');
     assert.equal(start.options.interventionPolicy.version, 'bypass_acceptance_v2');
     assert.deepEqual(start.options.technicalTrial, { version: 'adaptive_repair_v3' });
     assert.equal(start.events[0].origin, 'generated_opening');
@@ -1695,7 +1703,13 @@ test('pilot012 pins the integrated versions at approval and preserves them throu
     predecessor = id;
   }
   assert.equal(transport.textPhases.filter(phase => phase === 'initial_observation').length, 1);
-});
+}
+
+test('pilot012 pins the integrated versions at approval and preserves them through both trials and cold restore',
+  t => verifyPilot012WorkerProfile(t, PILOT012_PARTICIPANT_PROFILE, 'jev_generation_retry_v17'));
+
+test('pilot012 v18 pins the terminology generation at approval and preserves it through both trials and cold restore',
+  t => verifyPilot012WorkerProfile(t, PILOT012_V18_PARTICIPANT_PROFILE, SHAPE_TERMINOLOGY_GENERATION));
 
 test('Terra preobserve makes a separate validated memo for each distinct frozen AI board', async () => {
   const h = harness(true, { ...figureBankProtocol, figureSetPolicy: 'per_trial',
@@ -2419,12 +2433,14 @@ for (const { order, dialogueProfile, scope, generationVersion = 'jev_generation_
   });
 }
 
-test('four-figure production Worker completes both conditions through observation, dialogue, cold restore, scoring and review', async t => {
+for (const { dialogueProfile, generation } of [
+  { dialogueProfile: PILOT012_PARTICIPANT_PROFILE, generation: 'jev_generation_retry_v17' },
+  { dialogueProfile: PILOT012_V18_PARTICIPANT_PROFILE, generation: SHAPE_TERMINOLOGY_GENERATION },
+]) test(`four-figure production Worker (${generation}) completes both conditions through observation, dialogue, cold restore, scoring and review`, async t => {
   const h = harness(true, { ...figureBankProtocol, seedPolicy: 'per_trial',
     figureSelection: { mode: 'preset', setId: PILOT_FIGURE_SET_ID } });
   const transport = v12Transport(t, h);
   transport.options.structuredConfirmation = true;
-  const dialogueProfile = PILOT012_PARTICIPANT_PROFILE;
   h.env.PARTICIPANT_DIALOGUE_PROFILE = dialogueProfile;
   h.env.PARTICIPANT_TERRA_INITIAL_OBSERVATION_GENERATION = INITIAL_OBSERVATION_STRUCTURED_V2;
   h.env.PARTICIPANT_AI_PROXY.participantInitialObservationPolicy = transport.observationPolicy;
@@ -2448,17 +2464,27 @@ test('four-figure production Worker completes both conditions through observatio
     assert.equal(initial.strategy, strategy);
     assert.equal(initial.options.participantDialogueProfile, dialogueProfile);
     assert.equal(initial.options.initialObservationGeneration, INITIAL_OBSERVATION_STRUCTURED_V2);
-    assert.equal(initial.options.generationRetryVersion, 'jev_generation_retry_v17');
+    assert.equal(initial.options.generationRetryVersion, generation);
     assert.equal(initial.queueState.privateState.graph.memoryPruneVersion, CLAIM_PRUNE_V3);
     assert.equal(initial.queueState.privateState.observationMemo.figures.length, 4);
     assert.equal(initial.queueState.privateState.graph.slots.length, 4);
     assert.equal(Object.keys(initial.queueState.privateState.ledger).length, 4);
     assert.equal(initial.jevLedger.phases.terra.initial_observation.posts, 1);
+    const callStart = h.calls.length, promptStart = transport.prompts.length;
     await jsonOk(await h.request('message', { expectedRecordId: id, text: '形を一つ確認したいです。', clientId: 'four-figure-turn' }));
     await h.idle();
     const speaking = await h.storage.get(recordKey);
     assert.equal(speaking.queueState.errorCode, null);
     assert.equal(speaking.jevTraces.at(-1).status, 'committed');
+    const action = h.calls.slice(callStart).find(call => call.kind === 'choices' && Object.hasOwn(call.body.questions, 'action'));
+    assert.ok(action);
+    const usesTerminology = generation === SHAPE_TERMINOLOGY_GENERATION;
+    assert.equal(action.body.questions.action.instructions.includes(SHAPE_TERMINOLOGY), usesTerminology);
+    for (const phase of ['dialogue', 'generation', 'ai_extraction']) {
+      const prompt = transport.prompts.slice(promptStart).find(call => call.phase === phase);
+      assert.ok(prompt, phase);
+      assert.equal(prompt.system.join('\n').includes(SHAPE_TERMINOLOGY), usesTerminology, phase);
+    }
     assert.ok(speaking.events.some((event: any) => event.speaker === 'ai' && event.text === v12Check),
       JSON.stringify({ events: speaking.events, executed: speaking.jevTraces.at(-1).executed, publicSpeech: speaking.jevTraces.at(-1).publicSpeech, textPhases: transport.textPhases }));
     const publicBeforeRestore = (await jsonOk(await h.request('state'))).trial;
