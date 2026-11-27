@@ -750,9 +750,9 @@ export type PublicationRecovery =
   { reason: NamingHoldReason; act: "confirm_current_topic" };
 const CURRENT_TOPIC_CONFIRMATION = "今お話ししている形は、どの特徴を目印にすると見分けられそうですか？";
 
-export function namingPublicationHold(reason: NamingHoldReason, figureId: string) {
+export function namingPublicationHold(reason: NamingHoldReason) {
   const recovery: PublicationRecovery = { reason, act: "confirm_current_topic" };
-  const judgment = { action: "confirm" as const, targetSlot: figureId, candidateName: null, discriminatingFeature: null, note: null };
+  const judgment = { action: "confirm" as const, targetSlot: null, candidateName: null, discriminatingFeature: null, note: null };
   return { recovery, judgment, text: CURRENT_TOPIC_CONFIRMATION };
 }
 const RECOVERABLE_CONTENT = new Set([

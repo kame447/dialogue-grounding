@@ -8,7 +8,7 @@ import { buildJevNamingMaterial, readJevNamingGrounding } from "../dialogue-mode
 import { createOwnLedger } from "../dialogue-model/runtime/judgment/schema.mjs";
 import type { LocalSegmentProposal, PublicTurn } from "../dialogue-model/runtime/local-grounding/contract.ts";
 import { researchTrialProfileV3 } from "../dialogue-model/runtime/v2/research-profile.ts";
-import { initialState, normal, OLD, OWN, runTurn } from "./support/s4-v3-records.ts";
+import { buildRecords, initialState, normal, OLD, OWN, runTurn } from "./support/s4-v3-records.ts";
 
 const slots: string[] = OWN.ownAnchors.map((slot: { id: string }) => slot.id);
 const feature = "丸い穴がある";
@@ -122,6 +122,39 @@ test("wire: only the selected pair with an existing public source can be grounde
   assert.equal(outcome("grounded_name_0", "turn_9").verdict, "unconfirmed");
   assert.equal(outcome("unresolved", "none").verdict, "unresolved");
   assert.equal(outcome("contradicted", "none").verdict, "contradicted");
+});
+
+test("the next Jev request keeps the published recovery question open to all own figures", async () => {
+  const reply = "もう一つの形には丸い穴があります。";
+  const records = await buildRecords({
+    dialoguePolicy: "holistic_v5", generationRetryVersion: v15, agreeNameScopeVersion: "jev_naming_v1", technicalTrial, memo,
+    turns: [
+      { human: propose, plan: { action: "agree", target: "figure_0", referent: "none", act: "name_propose",
+        extraction: JSON.stringify([segment(propose, "name", name)]), choose: key =>
+          key === "naming_grounding" ? "unresolved" : key === "naming_evidence" ? "none" : undefined } },
+      { human: reply, plan: { action: "accept", target: "figure_1", referent: "figure_1", act: "assert",
+        extraction: JSON.stringify([{ ...segment(reply, "part"), targets: [slots[1]] }]), speech: "丸い穴が目印になるんですね。" } },
+    ],
+  });
+  const trial = records.trials[0];
+  const { tape, result } = trial.replay[0];
+  const recovered = tape.state.judgments.at(-1);
+  const row = tape.state.repairHistory.at(-1);
+  assert.equal(recovered.jevTurn.executed.target.figureId, slots[0]);
+  assert.deepEqual(row.candidatesBefore, slots);
+  for (const side of result.sides) {
+    const action = side.requests.find((r: { provider: string; payload: { questions?: { action?: unknown } } }) =>
+      r.provider === "jev" && Object.hasOwn(r.payload.questions ?? {}, "action"));
+    assert.ok(action);
+    const state = JSON.parse(action.payload.state);
+    assert.deepEqual(state.previousAction, { turn: 2, action: "confirm",
+      target: { kind: "multiple", figureIds: row.candidatesBefore }, name: null, feature: null });
+    assert.deepEqual(Object.values(state.figures).map((figure: any) => figure.actions[0]),
+      slots.map(() => ["confirm", 1, null, ["3:local1"]]));
+  }
+  assert.equal(recovered.judgment.targetSlot, null);
+  assert.deepEqual(trial.lastCommittedState.repairHistory[0].partnerClaims[0].targets, [slots[1]]);
+  assert.deepEqual(trial.lastCommittedState.ledger, tape.state.ledger);
 });
 
 for (const label of ["repair-first", "bypass-enabled"] as const) {
