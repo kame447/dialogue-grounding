@@ -16,14 +16,15 @@ import type {ReplayTape} from './replay.ts';
 import type {ResearchTrialProfileV3} from '../../v2/research-profile.ts';
 import type {ObservationInput} from '../../observation/contract.ts';
 import type {JevPrivateStateV2,JevTurnTrace} from '../../v2/jev-turn.ts';
-import type {ExecutedDecision,InterventionTrace} from '../../decision/bypass-acceptance.ts';
 export type ReplaySegment=Pick<ReplayTape,'luna'|'jev'|'reobservations'>;
 /** Record-derived adaptive trial of the replayed attempt (the S4 verifier derives it from the record's own trace and refuses any other claim); absent for a non-adaptive trial. */
 export type ReplayTechnicalTrial={version:'adaptive_repair_v1'|'adaptive_repair_v2'|'adaptive_repair_v3'};
-export type InterventionReplayTape={schemaVersion:'parity_intervention_replay_v1';state:JevPrivateStateV2;events:ReplayTape['events'];common:ReplaySegment;tails:Record<'repair-first'|'bypass-enabled',ReplaySegment|null>;recorded:{label:'repair-first'|'bypass-enabled';expectedRequests:ReplayTape['expectedRequests']};technicalTrial?:ReplayTechnicalTrial;generationRetryVersion?:RecordedGenerationRetryVersion};
+export type InterventionReplayTape={schemaVersion:'parity_intervention_replay_v1';state:JevPrivateStateV2;events:ReplayTape['events'];common:ReplaySegment;tails:Record<'repair-first'|'bypass-enabled',ReplaySegment|null>;recorded:{label:'repair-first'|'bypass-enabled';expectedRequests:ReplayTape['expectedRequests']};technicalTrial?:ReplayTechnicalTrial;generationRetryVersion?:RecordedGenerationRetryVersion;requestSeq?:number};
 type Role='common'|'alternative_detail'|'publication_decision'|'publication_alternative_detail'|'generation'|'post_generation';
-export type InterventionReplaySide=Omit<ReplaySide,'requests'>&{requests:Array<ReplaySide['requests'][number]&{role:Role}>;executed:ExecutedDecision|null;intervention:InterventionTrace|null;
- generatedPublication?:JevTurnTrace['generatedPublication']};
+export type InterventionReplaySide=Omit<ReplaySide,'requests'>&{requests:Array<ReplaySide['requests'][number]&{role:Role}>;executed:NonNullable<JevTurnTrace['executed']>|null;
+ intervention:Extract<JevTurnTrace['intervention'],object>|null;
+ generatedPublication?:JevTurnTrace['generatedPublication'];
+ publicationBoundary?:{requestsBeforePublication:number;job:NonNullable<JevPrivateStateV2['deferredAiExtraction']>|null;graphRevision:number}};
 type ReplayError='replay_material_invalid'|'replay_material_missing'|'replay_unused_material'|'replay_pipeline_failed';
 export type InterventionReplayResult={schemaVersion:'parity_intervention_replay_result_v1';status:'same_material_intervention_verified'|'same_material_intervention_mismatch'|'not_reached';error:ReplayError|null;commonEqual:boolean;policyConformant:boolean;recordedPayloadsReproduced:boolean;actualLunaHttpMeasured:boolean;hashScheme:'canonical_json_sha256_not_raw_body_bytes';excludedEnvelopeFields:readonly string[];sides:InterventionReplaySide[]};
 function data(x:unknown,seen=new Set<object>()):void{
@@ -41,7 +42,8 @@ export async function pairedInterventionReplay(tape:InterventionReplayTape,own:O
  let materialFailure:ReplayError|null=null;
  const stop=(s:ReplayError):never=>{materialFailure??=s;throw Error(s);};
  try{
-  data(tape);if(!exact(tape,['schemaVersion','state','events','common','tails','recorded',...(Object.hasOwn(tape,'technicalTrial')?['technicalTrial']:[]),...(Object.hasOwn(tape,'generationRetryVersion')?['generationRetryVersion']:[])])||(Object.hasOwn(tape,'technicalTrial')&&(!exact(tape.technicalTrial,['version'])||!['adaptive_repair_v1','adaptive_repair_v2','adaptive_repair_v3'].includes(tape.technicalTrial!.version)))||tape.schemaVersion!=='parity_intervention_replay_v1'||!exact(tape.tails,['repair-first','bypass-enabled'])||!exact(tape.recorded,['label','expectedRequests'])||!['repair-first','bypass-enabled'].includes(tape.recorded.label)||!Array.isArray(tape.recorded.expectedRequests)||!Array.isArray(tape.events)||!tape.events.length)stop('replay_material_invalid');
+  const issueHandling=String(tape?.generationRetryVersion)==='jev_generation_retry_v21';
+  data(tape);if(!exact(tape,['schemaVersion','state','events','common','tails','recorded',...(Object.hasOwn(tape,'technicalTrial')?['technicalTrial']:[]),...(Object.hasOwn(tape,'generationRetryVersion')?['generationRetryVersion']:[]),...(issueHandling?['requestSeq']:[])])||(Object.hasOwn(tape,'technicalTrial')&&(!exact(tape.technicalTrial,['version'])||!['adaptive_repair_v1','adaptive_repair_v2','adaptive_repair_v3'].includes(tape.technicalTrial!.version)))||tape.schemaVersion!=='parity_intervention_replay_v1'||!exact(tape.tails,['repair-first','bypass-enabled'])||!exact(tape.recorded,['label','expectedRequests'])||!['repair-first','bypass-enabled'].includes(tape.recorded.label)||!Array.isArray(tape.recorded.expectedRequests)||!Array.isArray(tape.events)||!tape.events.length||issueHandling&&(!Number.isSafeInteger(tape.requestSeq)||tape.requestSeq!<1))stop('replay_material_invalid');
   if(Object.hasOwn(tape,'generationRetryVersion')&&((tape.generationRetryVersion!=='jev_generation_retry_v2'&&!hasVersionedViewpoint(tape.generationRetryVersion))||!validGenerationRetryVersion(tape.generationRetryVersion,profile.questionLayout,profile.dialoguePolicy)))stop('replay_material_invalid');
   if(!tape.common||!tape.tails['repair-first']||!tape.tails['bypass-enabled'])stop('replay_material_missing');
   for(const s of [tape.common,...Object.values(tape.tails)])if(!exact(s,['luna','jev','reobservations'])||!Array.isArray(s!.luna)||!Array.isArray(s!.jev)||!Array.isArray(s!.reobservations))stop('replay_material_invalid');
@@ -49,7 +51,7 @@ export async function pairedInterventionReplay(tape:InterventionReplayTape,own:O
   const replay=async(label:'repair-first'|'bypass-enabled')=>{
    const frozen=structuredClone(tape),tail=frozen.tails[label]!,segments={common:frozen.common,tail},indices={common:{luna:0,jev:0,reobservations:0},tail:{luna:0,jev:0,reobservations:0}};
    let finalOriginal=false,inAlternative=false,inPublication=false,generated=false;let traces:JevTurnTrace[]=[];
-   const material={state:structuredClone(frozen.state),events:structuredClone(frozen.events),common:structuredClone(frozen.common),tail:structuredClone(tail),own:{ownImage:imageProjection(own.ownImage),ownAnchors:structuredClone(own.ownAnchors)},model:expectedModel,profile:structuredClone(profile),boundary:{luna:'canonical_http_json',jev:'canonical_http_json',hashScheme:'canonical_json_sha256_not_raw_body_bytes'},...(frozen.technicalTrial?{technicalTrial:structuredClone(frozen.technicalTrial)}:{}),...(frozen.generationRetryVersion?{generationRetryVersion:frozen.generationRetryVersion}:{})};
+   const material={state:structuredClone(frozen.state),events:structuredClone(frozen.events),common:structuredClone(frozen.common),tail:structuredClone(tail),own:{ownImage:imageProjection(own.ownImage),ownAnchors:structuredClone(own.ownAnchors)},model:expectedModel,profile:structuredClone(profile),boundary:{luna:'canonical_http_json',jev:'canonical_http_json',hashScheme:'canonical_json_sha256_not_raw_body_bytes'},...(frozen.technicalTrial?{technicalTrial:structuredClone(frozen.technicalTrial)}:{}),...(frozen.generationRetryVersion?{generationRetryVersion:frozen.generationRetryVersion}:{}),...(issueHandling?{requestSeq:frozen.requestSeq}:{})};
    const side:InterventionReplaySide={label,material,materialSha256:researchHash(material),requests:[],executed:null,intervention:null};result.sides.push(side);
    const capture=(provider:'luna'|'jev',phase:string,body:any)=>{
     const payload=projectReplayValue(body,own.ownImage);let role:Role=!finalOriginal?'common':inPublication?
@@ -74,8 +76,21 @@ export async function pairedInterventionReplay(tape:InterventionReplayTape,own:O
     let d;try{d=await native.decide(input,options);}finally{inPublication=false;}if(d.action!=='request_observation'){
      for(const k of ['luna','jev','reobservations'] as const)if(indices.common[k]!==segments.common[k].length)stop('replay_unused_material');finalOriginal=true;}return d;},
     async completeDetail(input:any,selected:any,options:any){inAlternative=true;inPublication=isGenerationV17(frozen.generationRetryVersion)&&Object.hasOwn(input,'publicationRecoveryContext');try{return await native.completeDetail!(input,selected,options);}finally{inAlternative=false;inPublication=false;}},...(hasReferent?{estimateReferent:native.estimateReferent!.bind(native)}:{}),...(hasProspect?{estimateRepairProspect:native.estimateRepairProspect!.bind(native)}:{}),...((profile as {dialoguePolicy?:string}).dialoguePolicy?{classifyDraftAct:native.classifyDraftAct!.bind(native),classifyDraftSharedClaim:native.classifyDraftSharedClaim!.bind(native)}:{})};
-   const runtime=createProfileDialogue(profile,{memoryPruneVersion:frozen.state.graph?.memoryPruneVersion,client,image:own.ownImage,anchors:[...own.ownAnchors],strategy:label,generationRetryVersion:frozen.generationRetryVersion??'jev_generation_retry_v1',observer:{async observeAll(){return structuredClone(frozen.state.observationMemo!);},async reobserve(input){const next=take('reobservations') as any;await client.complete(buildReobservationMessages(input),{phase:'observation_targeted'});return next;}},jevDecision:jev,localGrounding:{classifier:createJevLocalTestClassifier({enabled:true,readKey,fetchImpl,timeoutMs:profile.timeouts.localMs,researchLimits:{maxDeadlineMs:600000},questionLayout:profile.questionLayout,...(isHolisticV3Plus(profile.dialoguePolicy)?{dialoguePolicy:profile.dialoguePolicy}:{})})!,aiPublicTransport:{readKey,fetchImpl,timeoutMs:profile.timeouts.decisionMs}},onJevTurnTrace:(t:JevTurnTrace)=>traces.push(t),...(frozen.technicalTrial?{technicalTrial:structuredClone(frozen.technicalTrial)}:{})});
-   try{await runtime.runAiTurn({events:frozen.events,privateState:frozen.state,lastEventId:frozen.events.at(-1)!.id,requestSeq:frozen.events.at(-1)!.seq});}
+   const runtime=createProfileDialogue(profile,{memoryPruneVersion:frozen.state.graph?.memoryPruneVersion,client,image:own.ownImage,anchors:[...own.ownAnchors],strategy:label,generationRetryVersion:frozen.generationRetryVersion??'jev_generation_retry_v1',observer:{async observeAll(){return structuredClone(frozen.state.observationMemo!);},async reobserve(input){const next=take('reobservations') as any;await client.complete(buildReobservationMessages(input),{phase:'observation_targeted'});return next;}},jevDecision:jev,localGrounding:{classifier:createJevLocalTestClassifier({enabled:true,readKey,fetchImpl,timeoutMs:profile.timeouts.localMs,researchLimits:{maxDeadlineMs:600000},questionLayout:profile.questionLayout,...(isHolisticV3Plus(profile.dialoguePolicy)?{dialoguePolicy:profile.dialoguePolicy}:{})})!,aiPublicTransport:{readKey,fetchImpl,timeoutMs:profile.timeouts.decisionMs}},onJevTurnTrace:(t:JevTurnTrace)=>traces.push(t),...(frozen.technicalTrial?{technicalTrial:structuredClone(frozen.technicalTrial)}:{}),...(issueHandling?{deferredAiExtractionProfileSha256:researchHash(profile)}:{})});
+   try{
+    const staged=await runtime.runAiTurn({events:frozen.events,privateState:frozen.state,lastEventId:frozen.events.at(-1)!.id,requestSeq:frozen.requestSeq??frozen.events.at(-1)!.seq});
+    if(issueHandling){
+     const state=staged.privateState,job=state.deferredAiExtraction;
+     side.publicationBoundary={requestsBeforePublication:side.requests.length,job:structuredClone(job??null),graphRevision:state.graph.revision};
+     if(job){
+      const research=traces.at(-1)?.aiPublic;
+      if(!research||!('completeDeferredAiExtraction' in runtime)||typeof runtime.completeDeferredAiExtraction!=='function')throw Error('replay_pipeline_failed');
+      job.state='running';
+      const publication={id:job.eventId,seq:job.aiSeq,speaker:'ai' as const,text:staged.text};
+      await runtime.completeDeferredAiExtraction(state,[...frozen.events,publication],research);
+     }
+    }
+   }
    finally{const t=traces.at(-1);if(t){side.executed=structuredClone(t.executed??null);side.intervention=typeof t.intervention==='object'?structuredClone(t.intervention):null;
     if(t.generatedPublication)side.generatedPublication=structuredClone(t.generatedPublication);}}
    const recovery=traces.at(-1)?.publicationRecovery;

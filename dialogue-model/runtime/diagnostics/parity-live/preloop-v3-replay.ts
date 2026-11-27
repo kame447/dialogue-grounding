@@ -12,7 +12,7 @@ import type {ReplaySide} from './evidence.ts';
 import type {ReplayTape} from './replay.ts';
 import type {ResearchTrialProfileV3} from '../../v2/research-profile.ts';
 import type {ObservationInput} from '../../observation/contract.ts';
-import type {JevPrivateStateV2,JevTurnTrace} from '../../v2/jev-turn.ts';
+import type {JevPrivateStateV2} from '../../v2/jev-turn.ts';
 import type {ExecutedDecision,InterventionTrace} from '../../decision/bypass-acceptance.ts';
 export type ReplaySegment=Pick<ReplayTape,'luna'|'jev'|'reobservations'>;
 /** Record-derived adaptive trial of the replayed attempt (the S4 verifier derives it from the record's own trace and refuses any other claim); absent for a non-adaptive trial. */
@@ -20,6 +20,7 @@ export type ReplayTechnicalTrial={version:'adaptive_repair_v1'|'adaptive_repair_
 export type PreLoopReplayTape={schemaVersion:'parity_intervention_replay_v1';state:JevPrivateStateV2;events:ReplayTape['events'];common:ReplaySegment;tails:Record<'repair-first'|'bypass-enabled',ReplaySegment|null>;recorded:{label:'repair-first'|'bypass-enabled';expectedRequests:ReplayTape['expectedRequests']};technicalTrial?:ReplayTechnicalTrial};
 type Role='common'|'alternative_detail'|'generation'|'post_generation';
 export type InterventionReplaySide=Omit<ReplaySide,'requests'>&{requests:Array<ReplaySide['requests'][number]&{role:Role}>;executed:ExecutedDecision|null;intervention:InterventionTrace|null};
+type FrozenTurnTrace={executed?:ExecutedDecision|null;intervention?:InterventionTrace|string|null};
 type ReplayError='replay_material_invalid'|'replay_material_missing'|'replay_unused_material'|'replay_pipeline_failed';
 export type InterventionReplayResult={schemaVersion:'parity_intervention_replay_result_v1';status:'same_material_intervention_verified'|'same_material_intervention_mismatch'|'not_reached';error:ReplayError|null;commonEqual:boolean;policyConformant:boolean;recordedPayloadsReproduced:boolean;actualLunaHttpMeasured:boolean;hashScheme:'canonical_json_sha256_not_raw_body_bytes';excludedEnvelopeFields:readonly string[];sides:InterventionReplaySide[]};
 function data(x:unknown,seen=new Set<object>()):void{
@@ -74,7 +75,7 @@ export async function pairedPreLoopV3Replay(tape:PreLoopReplayTape,own:Observati
   data(own);data(profile);if((profile as any).dialoguePolicy!==undefined)stop('replay_material_invalid');if(resolveInterventionPolicy(profile).profileId!=='research_trial_profile_v3'||typeof expectedModel!=='string'||!expectedModel)stop('replay_material_invalid');
   const replay=async(label:'repair-first'|'bypass-enabled')=>{
    const frozen=structuredClone(tape),tail=frozen.tails[label]!,segments={common:frozen.common,tail},indices={common:{luna:0,jev:0,reobservations:0},tail:{luna:0,jev:0,reobservations:0}};
-   let finalOriginal=false,inAlternative=false,generated=false;let traces:JevTurnTrace[]=[];
+   let finalOriginal=false,inAlternative=false,generated=false;let traces:FrozenTurnTrace[]=[];
    const material={state:structuredClone(frozen.state),events:structuredClone(frozen.events),common:structuredClone(frozen.common),tail:structuredClone(tail),own:{ownImage:imageProjection(own.ownImage),ownAnchors:structuredClone(own.ownAnchors)},model:expectedModel,profile:structuredClone(profile),boundary:{luna:'canonical_http_json',jev:'canonical_http_json',hashScheme:'canonical_json_sha256_not_raw_body_bytes'},...(frozen.technicalTrial?{technicalTrial:structuredClone(frozen.technicalTrial)}:{}),};
    const side:InterventionReplaySide={label,material,materialSha256:researchHash(material),requests:[],executed:null,intervention:null};result.sides.push(side);
    const capture=(provider:'luna'|'jev',phase:string,body:any)=>{
@@ -98,7 +99,7 @@ export async function pairedPreLoopV3Replay(tape:PreLoopReplayTape,own:Observati
    const jev={async decide(input:any,options:any){const d=await native.decide(input,options);if(d.action!=='request_observation'){
      for(const k of ['luna','jev','reobservations'] as const)if(indices.common[k]!==segments.common[k].length)stop('replay_unused_material');finalOriginal=true;}return d;},
     async completeDetail(input:any,selected:any,options:any){inAlternative=true;try{return await native.completeDetail!(input,selected,options);}finally{inAlternative=false;}},...(hasReferent?{estimateReferent:native.estimateReferent!.bind(native)}:{}),...(hasProspect?{estimateRepairProspect:native.estimateRepairProspect!.bind(native)}:{}),...((profile as {dialoguePolicy?:string}).dialoguePolicy?{classifyDraftAct:native.classifyDraftAct!.bind(native)}:{})};
-   const runtime=profileDialogue(F,profile,{client,image:own.ownImage,anchors:[...own.ownAnchors],strategy:label,observer:{async observeAll(){return structuredClone(frozen.state.observationMemo!);},async reobserve(input:any){const next=take('reobservations') as any;await client.complete(buildReobservationMessages(input),{phase:'observation_targeted'});return next;}},jevDecision:jev,localGrounding:{classifier:F.createJevLocalTestClassifier({enabled:true,readKey,fetchImpl,timeoutMs:profile.timeouts.localMs,researchLimits:{maxDeadlineMs:600000},questionLayout:profile.questionLayout})!,aiPublicTransport:{readKey,fetchImpl,timeoutMs:profile.timeouts.decisionMs}},onJevTurnTrace:(t:JevTurnTrace)=>traces.push(t),...(frozen.technicalTrial?{technicalTrial:structuredClone(frozen.technicalTrial)}:{})});
+   const runtime=profileDialogue(F,profile,{client,image:own.ownImage,anchors:[...own.ownAnchors],strategy:label,observer:{async observeAll(){return structuredClone(frozen.state.observationMemo!);},async reobserve(input:any){const next=take('reobservations') as any;await client.complete(buildReobservationMessages(input),{phase:'observation_targeted'});return next;}},jevDecision:jev,localGrounding:{classifier:F.createJevLocalTestClassifier({enabled:true,readKey,fetchImpl,timeoutMs:profile.timeouts.localMs,researchLimits:{maxDeadlineMs:600000},questionLayout:profile.questionLayout})!,aiPublicTransport:{readKey,fetchImpl,timeoutMs:profile.timeouts.decisionMs}},onJevTurnTrace:(t:FrozenTurnTrace)=>traces.push(t),...(frozen.technicalTrial?{technicalTrial:structuredClone(frozen.technicalTrial)}:{})});
    try{await runtime.runAiTurn({events:frozen.events,privateState:frozen.state,lastEventId:frozen.events.at(-1)!.id,requestSeq:frozen.events.at(-1)!.seq});}
    finally{const t=traces.at(-1);if(t){side.executed=structuredClone(t.executed??null);side.intervention=typeof t.intervention==='object'?structuredClone(t.intervention):null;}}
    if(!finalOriginal||!generated||!side.executed||!side.intervention)stop('replay_material_missing');
