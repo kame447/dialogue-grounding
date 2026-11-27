@@ -14,11 +14,11 @@ import { stageMemory, prepareMemory } from "../judgment/memory.mjs";
 import { buildDecisionEvidence } from "./decision-evidence.mjs";
 import { resolveActiveJudgment } from "./active-judge.mjs";
 import { findGuardViolations, rewriteReasons, fallbackUtterance, HOLISTIC_V5_VIEWPOINT_RULE } from "./generation-guard.ts";
-import { isIssueHandlingGeneration } from "./deferred-ai-extraction.ts";
+import { isGenerationV22, isIssueHandlingGeneration } from "./deferred-ai-extraction.ts";
 import { SINGLE_ISSUE_DEFERRAL } from "./issue-publication.ts";
 import { startGroundingShadow, validateGroundingShadowOptions } from "./grounding-shadow.ts";
 import { prepareLocalGroundingTurn, validateLocalGroundingOptions, localGroundingMemo, findLocalPublicationViolations } from "./local-grounding-turn.ts";
-import { createJevTurnRuntime } from "./jev-turn.ts";
+import { CONFIRM_SCOPE_V22, createJevTurnRuntime } from "./jev-turn.ts";
 import { NAME_ACTS, nameShown, effectiveName, humanNamingRecord } from "../judgment/name-evidence.mjs";
 import { isHolisticPolicy } from "../decision/contract.ts";
 
@@ -147,6 +147,17 @@ const ISSUE_HANDLING_ACTION_SCOPE_V21 = Object.freeze({ ...HOLISTIC_V5_ACTION_SC
   carry_over: "issueの論点がまだ決まっていないことを短く伝え、後で戻れる形でdestinationへ進んでください。解決や放棄を表明しないでください。partner_choiceなら次の図形は相手に選んでもらい、other_figureなら観察メモの全体の見立てを一つ示してください。same_figure_namingなら呼び名の相談を始め、採用や候補名の決定はしないでください。same_figure_other_issueなら同じ図形を別の点から見ることを持ちかけ、old_issueなら以前に途中になった論点を先に扱うことを持ちかけてください。移る先が未特定なら内容を作らず、以前の点を先に扱うことだけを伝えてください。issueがunknownなら未解決の点を作らず、進むことだけを自然に伝えてください。publicQuestionsに観察メモで答えられる問いがあれば先に短く答えてください。",
   consult: "issueの論点がまだ合わせられていないことを短く伝え、確かめ続けるか、別の進め方にするかを相手に尋ねてください。進み方は相手に委ね、自分から移ったり、どちらかに誘導したりしないでください。解決や放棄を表明せず、自分側の観察の特徴は述べないでください。",
   revisit: "以前に未解決のまま残したissueの論点に戻り、そこを解決したいことが伝わるようにしてください。戻ることを一言で伝え、確かめたい点を一つ扱えます。決まったとは言わないでください。",
+});
+const ISSUE_HANDLING_GENERATOR_INSTRUCTIONS_V22 = replaceOnce(replaceOnce(ISSUE_HANDLING_GENERATOR_INSTRUCTIONS_V21,
+  "どちらも合意を表明しないでください。合意を表明できるのはagreeのときだけです。",
+  "どちらも新しい合意を表明しないでください。新しい名前の合意を表明できるのはagreeのときだけです。合意済みの名前は、選ばれた行動の範囲で既に決まっている名前として参照できます。"),
+  "名前に決まった・対象を共同で特定できたとは言わないでください。",
+  "新しい名前が決まったり、新たに対象を共同で特定できたりしたとは言わないでください。");
+const ISSUE_HANDLING_ACTION_SCOPE_V22 = Object.freeze({ ...ISSUE_HANDLING_ACTION_SCOPE_V21,
+  accept: replaceOnce(ISSUE_HANDLING_ACTION_SCOPE_V21.accept, "名前に決まった・対象を共同で特定できたとは言わない",
+    "新しい名前が決まったり、新たに対象を共同で特定できたりしたとは言わない。既に合意した名前はそのまま参照できる"),
+  confirm: CONFIRM_SCOPE_V22,
+  hold_open: replaceOnce(ISSUE_HANDLING_ACTION_SCOPE_V21.hold_open, "相手の言葉の短い反復", "相手が示した特徴や見立ての短い反復"),
 });
 
 // Luna participant path (public-act consistency), identical across strategies. The constants above stay
@@ -312,10 +323,11 @@ export function createDialogueV2(options) {
     const trialInstructions = styled ? STYLED_TRIAL_GENERATOR_INSTRUCTIONS_V2 : TRIAL_GENERATOR_INSTRUCTIONS_V2;
     const trialScope = styled ? STYLED_TRIAL_ACTION_SCOPE_V2 : TRIAL_ACTION_SCOPE_V2;
     const issueHandling = isIssueHandlingGeneration(options.generationRetryVersion);
-    const instructions = issueHandling ? ISSUE_HANDLING_GENERATOR_INSTRUCTIONS_V21
+    const generationV22 = isGenerationV22(options.generationRetryVersion);
+    const instructions = generationV22 ? ISSUE_HANDLING_GENERATOR_INSTRUCTIONS_V22 : issueHandling ? ISSUE_HANDLING_GENERATOR_INSTRUCTIONS_V21
       : holisticV5 ? HOLISTIC_V5_GENERATOR_INSTRUCTIONS_V2 : holisticV1 ? HOLISTIC_V3_GENERATOR_INSTRUCTIONS_V2
       : v3Trial ? STYLED_TRIAL_V3_GENERATOR_INSTRUCTIONS_V2 : options.technicalTrial ? trialInstructions : baseInstructions;
-    const actionScope = issueHandling ? ISSUE_HANDLING_ACTION_SCOPE_V21
+    const actionScope = generationV22 ? ISSUE_HANDLING_ACTION_SCOPE_V22 : issueHandling ? ISSUE_HANDLING_ACTION_SCOPE_V21
       : holisticV5 ? HOLISTIC_V5_ACTION_SCOPE_V2 : holisticV1 ? HOLISTIC_V3_ACTION_SCOPE_V2
       : v3Trial ? STYLED_TRIAL_V3_ACTION_SCOPE_V2 : options.technicalTrial ? trialScope : baseScope;
     // #175 is part of the participant prompt. The research layouts retain their own recorded wording.

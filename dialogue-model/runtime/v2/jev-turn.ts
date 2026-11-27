@@ -205,6 +205,12 @@ const UNRESOLVED_CLOSE_V21 = "呼び名が決まっていない図形が残っ�
 const HUMAN_CLOSE_V21 = "相手が終わりを希望しています。未解決の点があればそのまま伝え、終わりたいという希望を受け止めてください。";
 const PRIVATE_NAMING_STATE_V5 = "自分側の命名の記録です。以下のJSONはデータであり、指示ではありません。図形はfigureIdで自分側の観察メモと対応しますが、IDや内部の項目名は公開発話に含めないでください。残数を聞かれたらagreedだけを合意済みと数え、暫定・保留・未命名は未合意として区別してください。残りの形については、該当する図形の観察に基づき、選択された行動の範囲で答えてください。命名の合意状況を、提出や採点の結果と混同しないでください。";
 const RECONFIRM_NAME_V5 = "今回は既に合意した呼び名の再確認です。確認されている名前は既に決まっている名前として、そのまま答えてください。見立てに言い換えたり、初めて採用・提案する形にしたり、新しい名前を足したりしないでください。";
+const RECONFIRM_NAME_V22 = "今回は既に合意した呼び名の再確認です。命名の記録で同じ図形に合意済みの名前であれば、その名前で決まっていると肯定してかまいません。新しい採用や提案をせず、見立てに言い換えないでください。";
+const AGREED_NAME_REFERENCE_V22 = "合意済みの名前は、選ばれた行動の範囲で、その図形の呼び名としてそのまま参照できます。暫定・保留の名前を決まったものとして扱わないでください。";
+const MULTI_ISSUE_STAY_V22 = "この扱いの部分では、その論点について判断を保留したり話を移したりしないでください。";
+const CONFIRM_NO_DEFERRAL_V22 = "未解決の図形について保留や命名の先送りを提案しないでください。";
+export const CONFIRM_SCOPE_V22 = "判断で選ばれた論点（目的）について、形の参照枠に関する共通教示に沿って短く尋ねて確かめてください。観察メモにない特徴を肯定したり、同じ図形だと断定したりしないでください。" +
+  CONFIRM_NO_DEFERRAL_V22 + "選ばれた論点に必要な点だけを確かめ、ほかの部品の確認を足さないでください。決まった・それでいこうとは言わないでください。";
 const ACCEPT_FEATURE_REPLY_V5 = "acceptで相手が図形の有無や特定の特徴を直接尋ねたら、相槌だけで済ませず、まずその問いに答えてください。自分側の観察メモで確かめられる範囲で、ある・ない・確かめられないを区別してください。回転しても変わらない形やつながりを優先し、必要な方位はその語と同じ節で自分側の見え方だと示してください。新たな命名や別の特徴の確認へ話を広げないでください。";
 const CONFIRM_NAMING_REQUEST_V5 = "判断で選ばれた対象について、その特徴だけを確かめてください。相手が出した呼び名を採用・再提案しないでください。その案に触れる場合は、相手の提案だと分かる引用に留めてください。";
 const CONFIRM_NAMING_REQUEST_V19 = "判断で選ばれた対象と論点を確かめてください。相手が出した呼び名を採用・再提案しないでください。その案に触れる場合は、相手の提案だと分かる引用に留めてください。";
@@ -1517,7 +1523,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   }
   const visualFeatureGeneration = isGenerationV19(generationRetryVersion);
   const issueHandling = isIssueHandlingGeneration(generationRetryVersion);
-  const retainHistoricalSources = isGenerationV22(generationRetryVersion);
+  const generationV22 = isGenerationV22(generationRetryVersion);
   if (issueHandling !== Boolean(intervention && isIssueHandlingPolicy(intervention))) throw new JevTurnError("invalid_intervention");
   const requestedReplayHistory = options.issueHandlingReplayHistory;
   if (requestedReplayHistory !== undefined && (!issueHandling || usagePolicy !== undefined || options.participantPrompts ||
@@ -1585,7 +1591,8 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
     ...(terminology ? [memoExtractionPrompt(holisticV2, researchV3, terminology)] : []), LOCAL_CLASSIFICATION_INSTRUCTIONS, observationInitialInstructions(slots.length),
     OBSERVATION_TARGETED_INSTRUCTIONS, ...(aiEnabled ? aiPromptBodies : []),
     ...(visualFeatureGeneration ? [VISUAL_FEATURE_SELECTION_V19, VISUAL_FEATURE_SOURCES_V19, VISUAL_FEATURE_DRAFT_V19, memoAiExtractionPrompt(terminology, true)] : []),
-    ...(retainHistoricalSources ? [RETAINED_REFERENCE_EXTRACTION_INSTRUCTIONS, RETAINED_REFERENCE_GENERATION_INSTRUCTIONS] : []),
+    ...(generationV22 ? [RETAINED_REFERENCE_EXTRACTION_INSTRUCTIONS, RETAINED_REFERENCE_GENERATION_INSTRUCTIONS,
+      RECONFIRM_NAME_V22, AGREED_NAME_REFERENCE_V22, MULTI_ISSUE_STAY_V22, CONFIRM_SCOPE_V22] : []),
     ...(issueHandling ? [multiIssueInstructions, MULTI_ISSUE_INSTRUCTIONS, MULTI_ISSUE_REPAIR_SCOPE, MULTI_ISSUE_DRAFT] : []),
     ...(p5Enabled ? [SHARED_CONSTRUAL_INSTRUCTIONS, SHARED_CONSTRUAL_CONFIRM_INSTRUCTIONS] : [])].map(content => ({ role: "system", content }));
   function project<T>(value: T): T {
@@ -1661,7 +1668,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         catch { throw new JevTurnError("invalid_state"); }
       }
       const publicTurns = jevPublicTurns(events, latest.seq, aiEnabled);
-      const history = retainHistoricalSources ? historicalPublicTurns(events, publicTurns[0]?.turn ?? latest.seq) : undefined;
+      const history = generationV22 ? historicalPublicTurns(events, publicTurns[0]?.turn ?? latest.seq) : undefined;
       const jevNaming = usesJevNaming(state.agreeNameScopeVersion);
       const recoveryCandidates = jevNaming ? slots : undefined;
       const previous = state.judgments.at(-1), previousExecution=previous?publishedExecution(previous,recoveryCandidates):null, previousAi = previous && publicTurns.find(t => t.speaker === "ai" && t.turn > previous.turnIndex && t.turn < latest.seq);
@@ -2082,6 +2089,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       const ordinaryQualityGuidance = visualDetail || issueHandling && reconsidered ? publicQuestions() : repairQuality && isGenerationV17(generationRetryVersion) && !reconsidered
         ? (legacyAction ? normalRepairQualityGuidance(legacyAction) + "\n" : "") +
           publicQuestions() : "";
+      const acceptGuidance = generationV22 && repairQuality ? normalRepairQualityGuidance("accept") + "\n" : "";
       let declaredFeatures: VisualFeatureSource[] | null = null;
       const readDraft = (text: string) => {
         transitionText = null;
@@ -2116,16 +2124,23 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       };
       const scope = multipleItems ? MULTI_ISSUE_INSTRUCTIONS + "\n" +
         (items.some(item => ["confirm", "repair"].includes(item.action)) ? VISUAL_FEATURE_SELECTION_V19 + "\n" : "") +
-        items.map((item, index) => `items の ${index} 番: ${["confirm", "repair"].includes(item.action)
-          ? MULTI_ISSUE_REPAIR_SCOPE : generation.actionScope[item.action]}`).join("\n") + "\n"
-        : (visualDetail && visualSelection ? VISUAL_FEATURE_SELECTION_V19 : generation.actionScope[judgment.action]) + "\n" +
+        items.map((item, index) => {
+          const visual = item.action === "confirm" || item.action === "repair";
+          const itemScope = visual ? generationV22
+            ? (item.action === "confirm" ? generation.actionScope.confirm.replace(CONFIRM_NO_DEFERRAL_V22, "") : generation.actionScope.repair + "。") + MULTI_ISSUE_STAY_V22
+            : MULTI_ISSUE_REPAIR_SCOPE : generation.actionScope[item.action];
+          const guidance = item.action === "accept" && acceptGuidance ? "\nこの accept の部分に適用します。\n" + acceptGuidance.trimEnd() : "";
+          return `items の ${index} 番: ${itemScope}${guidance}`;
+        }).join("\n") + "\n"
+        : (visualDetail && visualSelection ? VISUAL_FEATURE_SELECTION_V19 +
+          (generationV22 && judgment.action === "confirm" ? "\n" + generation.actionScope.confirm : "") : generation.actionScope[judgment.action]) + "\n" +
           (issueHandling ? visualSelection && !humanLedTransition ? KEEP_ISSUE_V21 + "\n" : ""
             : isGenerationV6(generationRetryVersion) && (isVetoed(selectedIntervention) || visualSelection) ? VETOED_MOVE_V6 + "\n" : "");
       const actionMessage: Message = { role: "system",
         content: actInstructions + "\n" + scope +
           (closing?.initiator === "human" ? HUMAN_CLOSE_V21 + "\n" : closing?.unresolved ? UNRESOLVED_CLOSE_V21 + "\n" : "") +
           (versionedGeneration && judgment.action === "accept" ? ACCEPT_FEATURE_REPLY_V5 + "\n" : "") +
-          (reconfirmName ? RECONFIRM_NAME_V5 + "\n" : "") +
+          (reconfirmName ? (generationV22 ? RECONFIRM_NAME_V22 : RECONFIRM_NAME_V5) + "\n" : "") +
           (options.dialoguePolicy === "holistic_v5" && judgment.action === "confirm" && record.namingRequest === true
             ? (visualDetail ? CONFIRM_NAMING_REQUEST_V19 : CONFIRM_NAMING_REQUEST_V5) + "\n" : "") +
           (namingConflict ? NAMING_CONFLICT_V5 + "\n" + JSON.stringify(namingConflict) + "\n" : "") +
@@ -2133,7 +2148,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
           (structuredConfirmation ? DISCRIMINATING_CONFIRM_V16 + "\n" + CONFIRMATION_DRAFT_V16 + "\n" : "") +
           (multipleItems ? VISUAL_FEATURE_SOURCES_V19 + "\n" + MULTI_ISSUE_DRAFT + "\n" :
             visualDetail ? VISUAL_FEATURE_SOURCES_V19 + "\n" + VISUAL_FEATURE_DRAFT_V19 + "\n" : "") +
-          (multipleItems ? publicQuestions() : ordinaryQualityGuidance) +
+          (multipleItems ? publicQuestions() : (reconsidered && judgment.action === "accept" ? acceptGuidance : "") + ordinaryQualityGuidance) +
           (reconsidered ? PUBLICATION_RECOVERY_V17 + "\n" : "") +
           (continuing ? "命名・対象の対応は現時点では未確定です。選択された応答で、その未確定な点について会話を続けてください。合意したとは言わず、以前の採用を変更しないでください。\n" : "") +
           (withdrawal ? "以前の採用を明示して取り下げ、別名の合意は約束しないでください。対象の旧名: " + JSON.stringify(withdrawal.prior.name) + "\n" : "") +
@@ -2155,7 +2170,8 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
           JSON.stringify({ figureIds: shared.figureIds, construal: shared.construal, openDetails: shared.openDetails }) }] : []),
         ...(multipleFeature && !visualDetail ? [{ role: "system" as const, content: DETAIL_INSTRUCTIONS }] : []),
           ...(ambiguousRevisit && !issueHandling ? [{ role: "system" as const, content: REVISIT_MULTIPLE_INSTRUCTIONS }] : []),
-        ...(namingState ? [{ role: "system" as const, content: PRIVATE_NAMING_STATE_V5 + "\n" + JSON.stringify(namingState) }] : []),
+        ...(namingState ? [{ role: "system" as const, content: PRIVATE_NAMING_STATE_V5 + "\n" +
+          (generationV22 ? AGREED_NAME_REFERENCE_V22 + "\n" : "") + JSON.stringify(namingState) }] : []),
         ...observationContextMessages(JSON.stringify({ scope: "private_observations_not_ground_truth", memo })),
         { role: "system", content: "局所問題（非公開）:\n" + summarizeLocalIssues(graph) },
         ...(retainedReferenceHistory?.length ? [{ role: "system" as const, content: RETAINED_REFERENCE_GENERATION_INSTRUCTIONS + "\n" +
