@@ -1648,8 +1648,8 @@ test('Terra preobserve v2 keeps approval, start and first response timing privat
 });
 
 async function verifyPilot012WorkerProfile(t: TestContext,
-  participantProfile: typeof PILOT012_PARTICIPANT_PROFILE | typeof PILOT012_V18_PARTICIPANT_PROFILE,
-  generation: 'jev_generation_retry_v17' | typeof SHAPE_TERMINOLOGY_GENERATION) {
+  participantProfile: typeof PILOT012_PARTICIPANT_PROFILE | typeof PILOT012_V18_PARTICIPANT_PROFILE | typeof PILOT012_V19_PARTICIPANT_PROFILE,
+  generation: 'jev_generation_retry_v17' | typeof SHAPE_TERMINOLOGY_GENERATION | typeof VISUAL_FEATURE_GENERATION) {
   const h = harness(true, figureBankProtocol, true);
   const transport = v12Transport(t, h);
   transport.options.sharedReading = true;
@@ -1680,6 +1680,7 @@ async function verifyPilot012WorkerProfile(t: TestContext,
   let predecessor: string | undefined;
   for (const strategy of plan.order) {
     const { trial } = await jsonOk(await h.start(predecessor));
+    assert.equal(trial.scene.shapes.length, 6);
     const id = trial.sessionId;
     const key = 'record:' + id;
     const start = await h.storage.get(key);
@@ -1710,6 +1711,7 @@ async function verifyPilot012WorkerProfile(t: TestContext,
     const material = JSON.parse(action.body.state);
     assert.equal(material.judgmentMaterialVersion, 'jev_repair_quality_v1');
     assert.ok(material.referenceEvidence);
+    assert.equal(material.visualPurposeVersion, generation === VISUAL_FEATURE_GENERATION ? 'jev_visual_purpose_v1' : undefined);
 
     const sent = [...transport.textPhases];
     h.evict();
@@ -1728,6 +1730,9 @@ test('pilot012 pins the integrated versions at approval and preserves them throu
 
 test('pilot012 v18 pins the terminology generation at approval and preserves it through both trials and cold restore',
   t => verifyPilot012WorkerProfile(t, PILOT012_V18_PARTICIPANT_PROFILE, SHAPE_TERMINOLOGY_GENERATION));
+
+test('pilot012 v19 preserves the approved six-figure profile through both trials and cold restore',
+  t => verifyPilot012WorkerProfile(t, PILOT012_V19_PARTICIPANT_PROFILE, VISUAL_FEATURE_GENERATION));
 
 test('Terra preobserve makes a separate validated memo for each distinct frozen AI board', async () => {
   const h = harness(true, { ...figureBankProtocol, figureSetPolicy: 'per_trial',
@@ -2472,7 +2477,7 @@ for (const { dialogueProfile, generation } of [
   assert.equal(approved.plan.memoryPruneVersion, CLAIM_PRUNE_V3);
   assert.deepEqual(approved.plan.trials.map((trial: any) => trial.figureSelection.figureIds),
     [['F1', 'F2', 'F3', 'F4'], ['F1', 'F2', 'F3', 'F4']]);
-  const privateFields = /figureSelection|figureIds|figureSetId|bankVersion|observationMemo|ownAnchors|participantModelPin|jevLedger|jevTraces|data:image/u;
+  const privateFields = /figureSelection|figureIds|figureSetId|bankVersion|observationMemo|ownAnchors|participantModelPin|jevLedger|jevTraces|visualPurpose|visualFeatures|data:image/u;
   let predecessor: string | undefined;
   for (const strategy of ['bypass-enabled', 'repair-first']) {
     const { trial } = await jsonOk(await h.start(predecessor));
