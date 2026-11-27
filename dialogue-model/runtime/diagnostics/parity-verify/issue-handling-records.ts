@@ -4,7 +4,9 @@ import type { Row } from "./core.ts";
 
 // Independently pinned to the adopted v21 specification, not to the runtime's
 // decision or intervention implementation.
-export const S4_ISSUE_HANDLING_GENERATION = "jev_generation_retry_v21";
+export function s4UsesIssueHandling(version: unknown): boolean {
+  return version === "jev_generation_retry_v21" || version === "jev_generation_retry_v22";
+}
 export const S4_ISSUE_HANDLING_VERSION = "jev_issue_handling_v1";
 export const S4_ISSUE_HANDLING_POLICY = "bypass_acceptance_v3";
 export const S4_ISSUE_HANDLING_TABLE_SHA256 = "f73ca8d09ee097721d43f8b71764faa5e65dd2596a9badffe55860081973dc2b";
