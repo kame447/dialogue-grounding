@@ -18,7 +18,8 @@ import type {RecordedGenerationRetryVersion} from '../../v2/generation-guard.ts'
 import {checkModelIdentity} from '../../model-identity-contract.ts';
 import {resolveModelPolicy} from '../../model-policy.ts';
 import {verifyLocalUpdate,applyVerifiedOperation,bindPublishedReferenceQuestion,isFigureReplyAspect} from '../../local-grounding/verify.ts';
-import {CLAIM_PRUNE_V2,REFERENCE_LIMITS,previewReferenceUpdate,snapshotReferenceGraph} from '../../memory/reference-graph.mjs';
+import {CLAIM_PRUNE_V3,isClaimPruneVersion,REFERENCE_LIMITS,previewReferenceUpdate,snapshotReferenceGraph} from '../../memory/reference-graph.mjs';
+import {buildReferenceEvidence,validReferenceAlternatives} from '../../local-grounding/reference-evidence.ts';
 import {AI_BOUND_SOURCE,LABELLED_ANSWER_SOURCE,LOCAL_QUESTION_ANSWER_SOURCE} from '../../local-grounding/contract.ts';
 import {check,hash,equal,row,rows,list,META_KEYS} from './core.ts';
 import type {Check,Records} from './core.ts';
@@ -624,14 +625,14 @@ export function s4LocalReverify(tape:any,t:any,policy:string,after:any):'ok'|'mi
  const savedIds=new Set(local.claims.map((c:any)=>c.id));
  const before=tape.state.graph;
  const pruneVersion=before.memoryPruneVersion;
- if(pruneVersion!==after.memoryPruneVersion||pruneVersion!==undefined&&pruneVersion!==CLAIM_PRUNE_V2)return'mismatch';
+ if(pruneVersion!==after.memoryPruneVersion||pruneVersion!==undefined&&!isClaimPruneVersion(pruneVersion))return'mismatch';
  let base={...after,records:after.records.filter((r:any)=>!(r?.kind==='claim'&&savedIds.has(r.id)))};
  const aiOps=after.records.filter((r:any)=>r?.kind==='claim'&&r.speaker==='ai'&&r.turn===t.turnIndex).map(({turn:_t,...op}:any)=>op);
  const turn=t.turnIndex,events:any[]=tape.events??[];
  const visible=events.filter(e=>e.seq<=turn);
  // The tape keeps the full transcript. Reference updates use the same recent
  // window and scripted-event provenance as the online verifier.
- const versioned=pruneVersion===CLAIM_PRUNE_V2;
+ const versioned=isClaimPruneVersion(pruneVersion);
  const window=versioned?visible.filter(e=>!tape.state.aiPublic||events.filter(other=>other.seq===e.seq).length===1)
   .slice(-REFERENCE_LIMITS.publicTurns):visible;
  const publicTurns=window.map(e=>({turn:e.seq,speaker:e.speaker,text:String(e.text),
@@ -644,11 +645,11 @@ export function s4LocalReverify(tape:any,t:any,policy:string,after:any):'ok'|'mi
   for(const op of aiOps){
    const step=applyVerifiedOperation(before,update,op,publicTurns);
    if(step.applied)update=step.update;
-   else if(pruneVersion===CLAIM_PRUNE_V2)return'mismatch';
+   else if(versioned)return'mismatch';
   }
   // A later human operation may evict an earlier claim cited by the classifier.
   // Replay the AI-public/name prefix against the actual pre-turn graph first.
-  if(pruneVersion===CLAIM_PRUNE_V2)base=previewReferenceUpdate(before,update,{publicTurns});
+  if(versioned)base=previewReferenceUpdate(before,update,{publicTurns});
   let referenceQuestionBindings:ReadonlyMap<string,string>|undefined;
   const directReferenceReplies=isGenerationV8(tape.generationRetryVersion);
   if(isGenerationV7(tape.generationRetryVersion)){
@@ -978,11 +979,12 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
  const v=promptVersion(records,tr);if(!v)return'invalid';
  const {tape,result}=entries[0],pair=pairs[0];
  const pruneVersion = tape?.state?.graph?.memoryPruneVersion;
- const committed = tr.turns?.find((u:any)=>u.turn===t.turnIndex)?.state?.graph;
+ const committedState = tr.turns?.find((u:any)=>u.turn===t.turnIndex)?.state;
+ const committed = committedState?.graph;
  const finalGraph = tr.lastCommittedState?.graph;
  if ([tr.memoryPruneVersion,committed?.memoryPruneVersion,finalGraph?.memoryPruneVersion].some(version=>version!==pruneVersion)) return 'invalid';
  if (pruneVersion !== undefined) {
-  if (pruneVersion !== CLAIM_PRUNE_V2) return 'invalid';
+  if (!isClaimPruneVersion(pruneVersion)) return 'invalid';
   try { snapshotReferenceGraph(tape.state.graph); snapshotReferenceGraph(committed); } catch { return 'invalid'; }
  }
  if(!validAgreeNameScope(tape?.state?.agreeNameScopeVersion,tape?.generationRetryVersion))return'invalid';
@@ -1024,6 +1026,13 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
  const namingClaims=jevNaming?liveClaims(graph??tr.lastCommittedState?.graph).sort((a:any,b:any)=>a.sourceTurn-b.sourceTurn||a.turn-b.turn).slice(-160):[];
  const naming=jevNaming?namingMaterial(namingClaims,namingTurns,t):null;
  const namingPublicWindow=namingTurns.slice(-REFERENCE_LIMITS.publicTurns);
+ const referenceEvidence=pruneVersion===CLAIM_PRUNE_V3?(()=>{
+  const turns=s4NamingPublicTurns(tape,t),previous=tape.state.referenceAlternatives??[];
+  if(!validReferenceAlternatives(previous,Object.keys(tape.state.ledger),tape.state.graph.lastTurn,turns))return null;
+  return buildReferenceEvidence(committed,turns,t.turnIndex,t.local?.localStatus==='ok'?t.local:undefined,previous);
+ })():null;
+ if(pruneVersion===CLAIM_PRUNE_V3&&(!referenceEvidence||
+   !equal(referenceEvidence.localAlternatives,committedState?.referenceAlternatives??[])))return'invalid';
  const restatedRetry=version!==undefined;
  const publicTexts=(tape.events??[]).filter((e:any)=>e.seq<=t.turnIndex).map((e:any)=>e.text);
  const humanTexts=(tape.events??[]).filter((e:any)=>e.seq<=t.turnIndex&&e.speaker==='human').map((e:any)=>e.text);
@@ -1156,6 +1165,7 @@ const idsOf=(target:any):string[]=>target?.kind==='single'?[target.figureId]:tar
       if(naming?(!Array.isArray(m.own?.ownAnchors)||!equal(st.ownSlots,m.own.ownAnchors.map((a:any)=>a.id))||
         !namingInputMatches(st,naming,namingTurns,namingClaims)||
         !namingRecoveryHistoryMatches(st,tape.state.judgments,namingPublicWindow)):Object.hasOwn(st,'namingEvidence'))return'invalid';
+      if(referenceEvidence?!equal(st.referenceEvidence,referenceEvidence):Object.hasOwn(st,'referenceEvidence'))return'invalid';
       if(naming&&Object.hasOwn(p.questions,'action')){
        const hr=t.humanReferent;
        if(!hr||!equal(st.humanReferent,{status:hr.status,scores:hr.scores}))return'invalid';
@@ -2513,6 +2523,18 @@ const PROMPT_VERSIONS:readonly PromptVersion[]=[
  {id:'p5_jev_naming_v16_human_led_move_on',i172:true,styleMode:'research_split',sources:{scheme:'complete_instruction_source_sha256',files:{
   'v2/dialogue-v2.mjs':'f9c37058b338e7cf55ebfef6b9a3f542deb7e234d40c8c3ce6919b659760ad95',
   'v2/jev-turn.ts':'6ed560472308f5263f80de20c37a2fc380e15635d7a5f4de550f3cfa84ed3559',
+  'v2/generation-guard.ts':'49fc02d7e3940309e5f3fb5c0390e12cfdca48df5968d4c762d179d728378c26',
+  'judgment/instructions.mjs':'0add2f40aaaa01bfdacd1b99418b94e288eb45da6593595304f8d36d0f22de27',
+  'observation/observe.ts':'469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad',
+  'local-grounding/extract.ts':'6e9461e860f22923dbece02c7988713422ed81ac32d937f6d59df8eff84bd83e',
+  'local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01',
+  'decision/jev-decision.ts':'1773f89ee98b90d5cc587ca171bdc8c5eba3c39bfd2a49ed236d94a15df29154',
+  'local-grounding/extract-ai.ts':'e489b7ff573fdbe9e4f0adc9b6ee5f0828bd3c6835dcd8cd6555e191161594a6',
+  'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
+ }},fixed:FIXED_I172,native:NATIVE_I172},
+ {id:'p5_reference_evidence_prune_v3',i172:true,styleMode:'research_split',sources:{scheme:'complete_instruction_source_sha256',files:{
+  'v2/dialogue-v2.mjs':'f9c37058b338e7cf55ebfef6b9a3f542deb7e234d40c8c3ce6919b659760ad95',
+  'v2/jev-turn.ts':'ae9c3a301f5331d730e85317250acecd04fda8e78fd224341bd30d32a97213e1',
   'v2/generation-guard.ts':'49fc02d7e3940309e5f3fb5c0390e12cfdca48df5968d4c762d179d728378c26',
   'judgment/instructions.mjs':'0add2f40aaaa01bfdacd1b99418b94e288eb45da6593595304f8d36d0f22de27',
   'observation/observe.ts':'469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad',

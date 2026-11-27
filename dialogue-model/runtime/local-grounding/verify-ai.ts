@@ -8,7 +8,7 @@ import { literalSpan } from "../judgment/public-evidence.mjs";
 import { priorClaimViews } from "./derive.ts";
 import { bindPublishedReferenceQuestion, isSuppliedBinding, recordAiClaims } from "./verify.ts";
 import type { LocalGraph, LocalPriorAct } from "./verify.ts";
-import { CLAIM_PRUNE_V2, REFERENCE_LIMITS, ReferenceGraphError, validateReferenceUpdate, snapshotReferenceGraph } from "../memory/reference-graph.mjs";
+import { isClaimPruneVersion, REFERENCE_LIMITS, ReferenceGraphError, validateReferenceUpdate, snapshotReferenceGraph } from "../memory/reference-graph.mjs";
 
 const ref = (v: unknown): v is string => typeof v === "string" && /^[1-9]\d*:[a-zA-Z0-9_-]{1,32}$/u.test(v);
 const reasonCodes = new Set(["name_by_literal_path", "nonpublic_quote", "empty_extraction", "skipped_fallback", "invalid_segment",
@@ -135,7 +135,7 @@ export async function prependAiPublic({ graph, update, state, events, publicTurn
   const next = structuredClone(state), pending = next.pending;
   const application: AiPublicApplication = { aiSeq: pending?.aiSeq ?? null, status: "none", reasons: [], claims: [], nameIds: [], nameRejections: [] };
   const names = priorAct ? recordAiClaims({ graph, turn: update.turn, publicTurns, priorAct, featureSource: "none" }) : { operations: [], rejected: [] };
-  const capacity = (error: unknown) => graph.memoryPruneVersion === CLAIM_PRUNE_V2 &&
+  const capacity = (error: unknown) => isClaimPruneVersion(graph.memoryPruneVersion) &&
     error instanceof ReferenceGraphError && error.code === "capacity_exceeded";
   let current = update;
   let referenceQuestionBindings: ReadonlyMap<string, string> | undefined;
