@@ -12,7 +12,7 @@ import {namingDenialTargets,namingReconfirmation} from '../../decision/naming-re
 import {decodeMaterialV5} from '../../decision/judgment-material-v5.ts';
 import {isHolisticPolicy,isHolisticV2Plus,isHolisticV3Plus,isHolisticV4Plus} from '../../decision/contract.ts';
 import {generationGuardCodes,draftViolationCodes,deriveGenerationOutcome,orientationSafeFallback,findOrientationLeaks,v11RecentHumanTexts,hasOrientationWords,hasVersionedViewpoint,isGenerationV5,isGenerationV6,isGenerationV7,isGenerationV8,isGenerationV9,isGenerationV11,isGenerationV12,isGenerationV13,isGenerationV14,validGenerationRetryVersion,validAgreeNameScope,allowsOrientationFallback} from '../../v2/generation-guard.ts';
-import {isGenerationV15,isGenerationV16,confirmationDraftText,currentTurnNamingSource,namingCodesWithoutQuestion,contentPublicationRecovery} from '../../v2/generation-guard.ts';
+import {isGenerationV15,isGenerationV16,isGenerationV17,canReconsiderPublication,confirmationDraftText,currentTurnNamingSource,namingCodesWithoutQuestion,contentPublicationRecovery} from '../../v2/generation-guard.ts';
 import type {SharedConstrual} from '../../decision/contract.ts';
 import type {RecordedGenerationRetryVersion} from '../../v2/generation-guard.ts';
 import {checkModelIdentity} from '../../model-identity-contract.ts';
@@ -510,12 +510,18 @@ const SEMANTIC_NAMING_QUESTIONS_S4={draft_naming:{
  }
 }};
 const DRAFT_TRIGGERS_S4=['agree_action','typed_context','naming_words','quoted_other'];
-function draftActsShape(v:any,semantic:boolean):boolean{
- const acts=semantic?Object.keys(SEMANTIC_NAMING_QUESTIONS_S4.draft_naming.criteria):DRAFT_ACTS_S4;
- return Array.isArray(v)&&v.length>=1&&v.length<=2&&v.every((a:any,i:number)=>exact(a,['draft','draftSha256','triggers','status','choice','scores','model','responseId','costUsd','latencyMs','error'])&&(a.draft==='initial'&&i===0||a.draft==='retry'&&(i===0||v[i-1].draft==='initial'))&&
-  typeof a.draftSha256==='string'&&/^[a-f0-9]{64}$/.test(a.draftSha256)&&Array.isArray(a.triggers)&&a.triggers.length>=1&&a.triggers.every((x:any)=>DRAFT_TRIGGERS_S4.includes(x))&&
+function draftActsShape(v:any,semantic:boolean,generated=false):boolean{
+ const baseActs=semantic?Object.keys(SEMANTIC_NAMING_QUESTIONS_S4.draft_naming.criteria):DRAFT_ACTS_S4;
+ return Array.isArray(v)&&v.length>=1&&v.length<=2&&v.every((a:any,i:number)=>{
+  const moving=Object.hasOwn(a??{},'moveOn'),withdraw=generated&&a?.triggers?.includes('withdraw_prior_name');
+  const acts=withdraw?[...baseActs,'withdraw_selected']:baseActs;
+  const triggers=generated?[...DRAFT_TRIGGERS_S4,'withdraw_prior_name','human_led_transition']:DRAFT_TRIGGERS_S4;
+  return exact(a,['draft','draftSha256','triggers','status','choice','scores','model','responseId','costUsd','latencyMs','error',...(generated&&moving?['moveOn']:[])])&&(a.draft==='initial'&&i===0||a.draft==='retry'&&(i===0||v[i-1].draft==='initial'))&&
+  typeof a.draftSha256==='string'&&/^[a-f0-9]{64}$/.test(a.draftSha256)&&Array.isArray(a.triggers)&&a.triggers.length>=1&&a.triggers.every((x:any)=>triggers.includes(x))&&
+  (!moving||a.status==='ok'&&a.triggers.includes('human_led_transition')&&exact(a.moveOn,['choice','scores'])&&
+   ['honors_request','mismatch'].includes(a.moveOn.choice)&&exact(a.moveOn.scores,['honors_request','mismatch']))&&
   (a.status==='ok'?acts.includes(a.choice)&&a.error===null&&!!a.scores&&Object.keys(a.scores).sort().join()===[...acts].sort().join():a.status==='error'&&a.choice===null&&a.scores===null&&typeof a.error==='string'&&a.error.length<=64)&&
-  Number.isFinite(a.latencyMs)&&a.latencyMs>=0);
+  Number.isFinite(a.latencyMs)&&a.latencyMs>=0;});
 }
 const s4AgreedNames=(tape:any,ex:any):Set<string>=>new Set<string>((ex.target.kind==='single'?[ex.target.figureId]:ex.target.kind==='multiple'?ex.target.figureIds:[]).map((id:string)=>tape.state.ledger?.[id]).filter((e:any)=>e&&e.status==='agreed'&&typeof e.name==='string').map((e:any)=>ledgerName(e.name)));
 const generationCodesClean=(text:string,cc:any,messages:any[])=>draftViolationCodes(text,cc,messages).length===0;
@@ -697,7 +703,8 @@ function s4OpenHumanProposal(tape:any,trace:any,askCounts=true):boolean{
 function traceShape(t:any,layout='two_stage_v1',policy?:string,ownSlots:readonly string[]=[],humanLedMoveOn=false,jevNaming=false):boolean{
  const req=['schemaVersion','turnIndex','lastEventId','attemptNumber','status','initialObservation','reobservations','local','humanReferent','decisions','intervention','executed','finalAction','publicSpeech','observationMemo','repairHistory','generationGuard'];
  const semantic=isGenerationV15(t?.generationRetryVersion);
- const opt=['errorCode','observationErrorCode','observationPhase','decisionRejectionCode','generationErrorCode','decisionMenuVersion','redacted','aiPublic','decisionFailure','repairProspect','repairGate','repairFacts','generationRetryVersion','draftActs','draftSharedClaims','namingRequest','namingReconfirm','sharedConstruals',...(semantic?['publicationRecovery']:[]),...(semantic&&jevNaming?['namingGrounding']:[])];
+ const generated=isGenerationV17(t?.generationRetryVersion);
+ const opt=['errorCode','observationErrorCode','observationPhase','decisionRejectionCode','generationErrorCode','decisionMenuVersion','redacted','aiPublic','decisionFailure','repairProspect','repairGate','repairFacts','generationRetryVersion','draftActs','draftSharedClaims','namingRequest','namingReconfirm','sharedConstruals',...(generated?['generatedPublication']:semantic?['publicationRecovery']:[]),...(semantic&&jevNaming?['namingGrounding']:[])];
  if(!exact(t,[...req,...opt.filter(k=>Object.hasOwn(t??{},k))])||t.schemaVersion!=='jev_turn_trace_v2'||!ident(t)||!['committed','staged','superseded','error','aborted'].includes(t.status)||!Array.isArray(t.decisions)||!Array.isArray(t.reobservations)||!Array.isArray(t.repairHistory)||!primitiveText(t.publicSpeech,10000))return false;
  if(Object.hasOwn(t,'decisionMenuVersion')&&(layout!=='two_stage_v1'||t.decisionMenuVersion!==PARTICIPANT_MENU_VERSION))return false;
  if(Object.hasOwn(t,'namingRequest')&&(layout!=='two_stage_v3'||t.namingRequest!==true||Object.hasOwn(t,'namingReconfirm')||!hasNameProposal(t.local?.claims??[],t.turnIndex)))return false;
@@ -713,7 +720,9 @@ function traceShape(t:any,layout='two_stage_v1',policy?:string,ownSlots:readonly
  if(Object.hasOwn(t,'sharedConstruals')&&(!p5||!sharedShape(t.sharedConstruals)))return false;
  if(Object.hasOwn(t,'generationRetryVersion')&&(t.generationRetryVersion==='jev_generation_retry_v1'||!validGenerationRetryVersion(t.generationRetryVersion,layout,policy)||
    (hasVersionedViewpoint(t.generationRetryVersion)?!p5&&(!t.executed||!t.finalAction):t.generationGuard?.regenerated!==true)))return false;
- if(Object.hasOwn(t,'draftActs')&&(layout!=='two_stage_v3'||!draftActsShape(t.draftActs,semantic)))return false;
+ if(Object.hasOwn(t,'draftActs')&&(layout!=='two_stage_v3'||!draftActsShape(t.draftActs,semantic,generated)))return false;
+ if(generated&&(['staged','committed','superseded'].includes(t.status)||Object.hasOwn(t,'generatedPublication'))&&
+   !generatedPublicationShape(t,ownSlots,p5))return false;
  if(!draftSharedTraceS4(t,p5Overclaim))return false;
  if(t.intervention!==null){
   const i=t.intervention,version=humanLedMoveOn?'bypass_acceptance_v2':'bypass_acceptance_v1';
@@ -768,6 +777,60 @@ function draftRecovery(violations:readonly string[],execution:any,jevNaming:bool
  }
  return recovery;
 }
+
+function generatedExecution(p:any,original:any,slots:readonly string[]) {
+ const continuation=p?.continuation;
+ if(!continuation)return p?.recovery?.executed??original;
+ const asks=continuation.choice==='ask_unresolved';
+ return {action:asks?'confirm':'accept',target:asks?{kind:'multiple',figureIds:slots}:{kind:'none'},name:null,feature:null,observe:null};
+}
+
+function generatedPublicationShape(t:any,slots:readonly string[],p5:boolean):boolean {
+ const p=t.generatedPublication;
+ const unpublished=p?.textSha256===null&&['error','aborted'].includes(t.status)&&t.publicSpeech===null;
+ if(!exact(p,['recovery','continuation','grounding','withdrawal','transition','textSha256'])||t.generationGuard?.fallback!==false||
+    !unpublished&&(typeof p.textSha256!=='string'||!/^[a-f0-9]{64}$/.test(p.textSha256))||
+    t.publicSpeech!==null&&s4Sha256(t.publicSpeech)!==p.textSha256)return false;
+ const r=p.recovery,c=p.continuation,ex=generatedExecution(p,t.executed,slots);
+ if(!executed(r?.executed??t.executed,[...slots],p5)||r!==null&&(!exact(r,['reason','violations','decision','executed','intervention'])||
+    !Array.isArray(r.violations)||!['naming_conflict','naming_unresolved','publication_mismatch'].includes(r.reason)||
+    (r.reason==='publication_mismatch'?!canReconsiderPublication(r.violations):r.violations.length!==0)))return false;
+ if(c!==null&&(!r||!exact(c,['choice','reason','violations'])||c.choice!==r.decision?.evidence?.stages?.[0]?.choices?.publication_continuation||
+    !['acknowledge_unresolved','ask_unresolved'].includes(c.choice)||!['decision_unresolved','draft_mismatch'].includes(c.reason)||
+    !Array.isArray(c.violations)||(c.reason==='draft_mismatch'?!canReconsiderPublication(c.violations):c.violations.length!==0||r.executed.action!=='agree')))return false;
+ if(ex.action==='agree'?p.grounding?.verdict!=='grounded'||!Number.isSafeInteger(p.grounding.evidenceTurn)||
+    p.grounding.evidenceTurn<1||p.grounding.evidenceTurn>t.turnIndex:p.grounding!==null)return false;
+ const g=t.finalAction;
+ if(!g||g.action!==ex.action||g.targetSlot!==(ex.target.kind==='single'?ex.target.figureId:null)||g.candidateName!==ex.name||
+    g.discriminatingFeature!==ex.feature)return false;
+ const w=p.withdrawal,m=p.transition,last=t.draftActs?.at(-1);
+ if(w!==null&&(!exact(w,['figureId','prior','sourceTurn'])||!r||r.reason==='publication_mismatch'||ex.action!=='repair'||
+    ex.target.kind!=='single'||w.figureId!==ex.target.figureId||w.sourceTurn!==t.turnIndex||!exact(w.prior,['status','name'])||
+    typeof w.prior.name!=='string'||!w.prior.name||!unpublished&&last?.choice!=='withdraw_selected'))return false;
+ if(unpublished)return m===null;
+ if(m!==null&&(!exact(m,['sourceTurn','start','textSha256'])||m.sourceTurn!==t.turnIndex||
+    !Number.isSafeInteger(m.start)||m.start<2||typeof m.textSha256!=='string'||!/^[a-f0-9]{64}$/.test(m.textSha256)||
+    t.decisions.at(-1)?.evidence?.stages?.[0]?.choices?.[MOVE_ON_SOURCE_QUESTION]!=='human_request'||
+    last?.moveOn?.choice!=='honors_request'||t.publicSpeech!==null&&(t.publicSpeech[m.start-1]!=='\n'||
+      s4Sha256(t.publicSpeech.slice(m.start))!==m.textSha256||s4Sha256(t.publicSpeech.slice(0,m.start-1))!==last.draftSha256)))return false;
+ return !w||t.publicSpeech===null||s4Sha256(m?t.publicSpeech.slice(0,m.start-1):t.publicSpeech)===last.draftSha256;
+}
+
+function generatedLedger(before:any,ex:any,withdrawal:any){
+ if(ex.target.kind!=='single')return before;
+ const id=ex.target.figureId,prior=before[id],name=ex.name??prior?.name;
+ if(!prior)return null;
+ if(withdrawal)return equal(prior,withdrawal.prior)?{...before,[id]:{status:'unassigned',name:null}}:null;
+ if(name!==null&&['agree','defer','revisit','propose_name'].includes(ex.action)&&Object.entries(before).some(([other,entry]:[string,any])=>
+    other!==id&&entry.name!==null&&ledgerName(entry.name)===ledgerName(name)))return null;
+ if(ex.action==='agree')return name!==null&&(prior.name===null||prior.status==='tentative'||ledgerName(prior.name)===ledgerName(name))?
+     {...before,[id]:{status:'agreed',name}}:null;
+ if(ex.action==='propose_name')return {...before,[id]:{status:prior.status==='agreed'?'agreed':'tentative',name}};
+ if(ex.action==='defer')return {...before,[id]:{status:'deferred',name}};
+ if(ex.action==='revisit')return {...before,[id]:{status:prior.status==='agreed'?'agreed':name===null?'unassigned':'tentative',name}};
+ return before;
+}
+
 function relation(t:any,label:any,slots:string[],layout='two_stage_v1',p5=false,humanLedMoveOn=false,jevNaming=false):boolean{
  if(t.executed===null&&t.intervention===null)return ['error','aborted'].includes(t.status)&&t.finalAction===null&&t.publicSpeech===null;
  const i=t.intervention,d=t.decisions.at(-1),version=humanLedMoveOn?'bypass_acceptance_v2':'bypass_acceptance_v1';
@@ -795,6 +858,16 @@ function relation(t:any,label:any,slots:string[],layout='two_stage_v1',p5=false,
    (offered.length||['propose_name','agree','confirm','repair'].includes(t.executed.action)?i.detailEvidence?.stage!=='detail':i.detailEvidence!==null))return false;
  }
  const e=t.executed,g=t.finalAction;if(g===null)return ['error','aborted'].includes(t.status);
+ if(isGenerationV17(t.generationRetryVersion)&&t.generatedPublication){
+  if(!generatedPublicationShape(t,slots,p5))return false;
+  const replacement=t.generatedPublication.recovery;
+  if(!replacement)return true;
+  const final=replacement.executed;
+  return relation({...t,generationRetryVersion:undefined,generatedPublication:undefined,
+   decisions:[replacement.decision],executed:final,intervention:replacement.intervention,publicationRecovery:undefined,
+   finalAction:{action:final.action,targetSlot:final.target.kind==='single'?final.target.figureId:null,candidateName:final.name,discriminatingFeature:final.feature}},
+   label,slots,layout,p5,humanLedMoveOn,jevNaming);
+ }
  if(t.publicationRecovery){
   const recovered=holdPublication(t.publicationRecovery.reason)??
    (Array.isArray(t.generationGuard?.violations)&&draftRecovery(t.generationGuard.violations,e,jevNaming,t.generationRetryVersion));
@@ -971,6 +1044,106 @@ function trialVersion(t:any,claim:any):string|null|'invalid'{
   if(!exact(claim,['version']))return'invalid';
   return derived!==null?(claim.version===derived?derived:'invalid'):claim.version==='adaptive_repair_v1'?'adaptive_repair_v1':'invalid';
 }
+function generatedReplayProof(tr:any,t:any,tape:any,result:any,pair:any):'missing'|'invalid'|'ok' {
+ if(!pair)return'missing';
+ if(!equal(result.sides,[pair.left,pair.right])||tape.recorded.label!==tr.label)return'invalid';
+ const previous=tr.turns?.filter((v:any)=>v.turn<t.turnIndex).sort((a:any,b:any)=>a.turn-b.turn).at(-1)?.state;
+ if(previous&&!equal(previous,tape.state))return'invalid';
+ const compareChoice=(st:any,r:any,a:any)=>st?.responseId===jevResponseId(a)&&st?.model===a.model&&st?.costUsd===jevReportedCost(a)&&
+   st?.inputBudget?.stateChars===r.payload.state.length&&equal(st.choices,Object.fromEntries(Object.entries(a.answers).map(([k,v]:any)=>[k,v.choice])))&&
+   equal(st.scores,Object.fromEntries(Object.entries(a.answers).map(([k,v]:any)=>[k,v.probabilities])));
+ const withoutLatency=(v:any):any=>Array.isArray(v)?v.map(withoutLatency):v&&typeof v==='object'?
+   Object.fromEntries(Object.entries(v).filter(([key])=>key!=='latencyMs').map(([k,x])=>[k,withoutLatency(x)])):v;
+ for(const [n,label] of ['repair-first','bypass-enabled'].entries()){
+  const s=result.sides[n],m=s?.material,tail=tape.tails?.[label],p=s?.generatedPublication;
+  if(!tail)return'missing';
+  if(!s||s.label!==label||hash(m)!==s.materialSha256||!equal(m.state,tape.state)||!equal(m.events,tape.events)||
+     !equal(m.profile,tr.profile)||!equal(m.common,tape.common)||!equal(m.tail,tail)||m.generationRetryVersion!==tape.generationRetryVersion||
+     !p||!Array.isArray(s.requests))return'invalid';
+  const selected=p.recovery?.decision??t.decisions.at(-1),intervention=p.recovery?.intervention??s.intervention;
+  const ex=generatedExecution(p,s.executed,Object.keys(tape.state.ledger));
+  if(!ex||!selected||!intervention)return'invalid';
+  const finals={action:ex.action,targetSlot:ex.target.kind==='single'?ex.target.figureId:null,candidateName:ex.name,discriminatingFeature:ex.feature,note:null};
+  const stages=(t.decisions??[]).flatMap((d:any)=>d.evidence?.stages??[]),recovery=p.recovery?.decision?.evidence?.stages??[];
+  const counters={luna:0,jev:0};const recorded={luna:[...tape.common.luna,...tail.luna],jev:[...tape.common.jev,...tail.jev]};
+  let nameEvidence:any=null,lastDraft:any=null,lastRaw:any=null,originalActions=0,recoveryActions=0;
+  const generations:any[]=[];
+  for(const req of s.requests){
+   if(!['luna','jev'].includes(req.provider)||req.payloadDomain!=='canonical_http_json'||hash(req.payload)!==req.payloadSha256)return'invalid';
+   const provider=req.provider as keyof typeof counters,answer=recorded[provider][counters[provider]++];
+   if(!answer)return'missing';
+   if(provider==='luna'){
+    if(req.phase!==answer.phase)return'invalid';
+    if(req.phase==='generation'){
+     if(req.role!=='generation'||hash(req.payload.messages)!==req.completeMessagesSha256)return'invalid';
+     lastRaw=answer.response?.text??answer.text;lastDraft=null;
+     generations.push(req);
+    }
+    continue;
+   }
+   if(hash(req.payload)!==req.preProjectionPayloadSha256||!choiceResponse(req.payload,answer)||checkModelIdentity(req.payload.model,answer.model).status!=='accepted')return'invalid';
+   const input=parseMaterial(req.payload.state);
+   if(req.phase==='draft_naming'){
+    if(req.role!=='post_generation'||typeof lastRaw!=='string'||lastDraft!==null)return'invalid';
+    lastDraft={state:input,answers:answer.answers};continue;
+   }
+   if(req.phase!=='decision')continue;
+   const deciding=req.role==='publication_decision',alternative=req.role==='alternative_detail'||req.role==='publication_alternative_detail';
+   const expectedStages=req.role==='common'?stages:deciding?recovery:[req.role==='alternative_detail'?s.intervention?.detailEvidence:intervention.detailEvidence];
+   if(!expectedStages.some((saved:any)=>compareChoice(saved,req,answer)))return'invalid';
+   if(deciding||req.role==='publication_alternative_detail'){
+    if(!p.recovery||!equal(input.publicationRecoveryContext,{previous:{action:s.executed.action,target:s.executed.target,name:s.executed.name,feature:s.executed.feature},reason:p.recovery.reason}))return'invalid';
+   }else if(Object.hasOwn(input,'publicationRecoveryContext'))return'invalid';
+   if(Object.hasOwn(req.payload.questions,'action')){
+    if(deciding){
+     recoveryActions++;
+     if(!exact(req.payload.questions.publication_continuation?.criteria,['acknowledge_unresolved','ask_unresolved'])||
+        !['acknowledge_unresolved','ask_unresolved'].includes(answer.answers?.publication_continuation?.choice)||
+        p.continuation&&p.continuation.choice!==answer.answers.publication_continuation.choice)return'invalid';
+    }else originalActions++;
+   }
+   if((p.recovery?deciding||req.role==='publication_alternative_detail':req.role==='common'||alternative)&&input.selected?.action===ex.action&&equal(input.selected.target,ex.target))nameEvidence=input.namingEvidence;
+  }
+  const priorDrafts=(p.recovery?.reason==='publication_mismatch'?2:0)+(p.continuation?.reason==='draft_mismatch'?2:0);
+  if(counters.luna!==recorded.luna.length||counters.jev!==recorded.jev.length||originalActions!==t.decisions.length||recoveryActions!==(p.recovery?1:0)||
+     ![1,2].includes(generations.length-priorDrafts)||typeof lastRaw!=='string')return'invalid';
+  const hasFeature=ex.action==='confirm'&&!p.continuation,combined=p.transition!==null;
+  let text=lastRaw,move:string|null=null;
+  if(combined){
+   const raw=JSON.parse(lastRaw);
+   if(!exact(raw,hasFeature?['text','moveOn','checkedFeature']:['text','moveOn'])||typeof raw.text!=='string'||!raw.text.trim()||
+      typeof raw.moveOn!=='string'||!raw.moveOn.trim()||hasFeature&&raw.checkedFeature!==ex.feature)return'invalid';
+   text=raw.text;move=raw.moveOn;
+  }else if(hasFeature){const draft=confirmationDraftText(lastRaw,ex.feature);if(draft===null)return'invalid';text=draft;}
+  const speech=move===null?text:text+'\n'+move;
+  if(!text.trim()||s4Sha256(speech)!==p.textSha256||combined&&(p.transition.start!==text.length+1||s4Sha256(move!)!==p.transition.textSha256||
+      lastDraft?.state?.moveOnDraft!==move||lastDraft.answers?.draft_human_move_on?.choice!=='honors_request'))return'invalid';
+  const history=tape.events.filter((event:any)=>event.seq<=t.turnIndex);
+  const publicTexts=history.map((event:any)=>event.text);
+  const humanTexts=history.filter((event:any)=>event.speaker==='human').map((event:any)=>event.text);
+  const codes=(draft:string,action:any,name:string|null,holistic:boolean)=>draftViolationCodes(draft,{action,candidateName:name,v3:true,holistic,
+    adaptive:!!tape.technicalTrial,factored:Array.isArray(t.repairFacts),ai:true,publicTexts,humanTexts,recentHumanTexts:humanTexts,
+    dialoguePolicy:'holistic_v5',generationRetryVersion:'jev_generation_retry_v17',vetoed:intervention.reasonCode==='vetoed_bypass_action'},generations.at(-1).payload.messages);
+  if(codes(text,ex.action,ex.name,true).some(code=>!(lastDraft&&['agree','propose_name'].includes(ex.action)&&
+      ['name_not_shown','name_mismatch'].includes(code)))||move!==null&&codes(move,'move_on',null,false).length)return'invalid';
+  if(lastDraft&&(!equal(lastDraft.state.selected,{action:ex.action,target:ex.target,name:ex.name})||lastDraft.state.draft!==text))return'invalid';
+  if(ex.action==='agree'){
+   const support=namingVerdict(ex,intervention,selected,nameEvidence?.names??[]);
+   const source=tape.events.find((e:any)=>e.seq===support?.evidenceTurn&&e.speaker==='human');
+   const literal=typeof ex.name==='string'&&typeof source?.text==='string'&&source.text.includes(ex.name);
+   const answer=lastDraft?.answers?.draft_naming?.choice;
+   if(!equal(support,p.grounding)||support?.verdict!=='grounded'||!literal||answer!=='adopt_chosen'&&
+      !(answer==='adopt_context'&&lastDraft.state.semanticNaming?.currentTurnSource===true&&support.evidenceTurn===t.turnIndex))return'invalid';
+  }else if(lastDraft&&['adopt_chosen','adopt_other','adopt_context'].includes(lastDraft.answers?.draft_naming?.choice))return'invalid';
+  if(p.withdrawal&&(!equal(p.withdrawal.prior,tape.state.ledger?.[p.withdrawal.figureId])||
+      lastDraft?.state?.withdrawPriorName!==p.withdrawal.prior.name||lastDraft.answers?.draft_naming?.choice!=='withdraw_selected'))return'invalid';
+  if(label===tr.label&&(!equal(withoutLatency(p),withoutLatency(t.generatedPublication))||!equal(finals,t.finalAction)||speech!==t.publicSpeech||
+     !equal(s.executed,t.executed)||!equal(withoutLatency(s.intervention),withoutLatency(t.intervention))||
+     !equal(s.requests.map((q:any)=>[q.provider,q.phase,q.preProjectionPayloadSha256]),tape.recorded.expectedRequests.map((q:any)=>[q.provider,q.phase,q.requestSha256]))))return'invalid';
+ }
+ return equal(result.sides[0].requests.filter((r:any)=>r.role==='common'),result.sides[1].requests.filter((r:any)=>r.role==='common'))?'ok':'invalid';
+}
+
 function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'ok'{
  const layout=layoutOf(tr.profile);
  const entries=(tr.replay??[]).filter((r:any)=>{const e=r.tape?.events?.at(-1);return e?.seq===t.turnIndex&&e.id===t.lastEventId;}),pairs=(records.evidence?.pairedReplay??[]).filter((p:any)=>p.trialOrder===tr.order&&p.turn===t.turnIndex);
@@ -992,6 +1165,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
  const version=tape.generationRetryVersion;
  if(Object.hasOwn(tape,'generationRetryVersion')&&(version==='jev_generation_retry_v1'||!validGenerationRetryVersion(version,layout,tr.profile?.dialoguePolicy))||
     (t.generationGuard.regenerated||hasVersionedViewpoint(version)||hasVersionedViewpoint(t.generationRetryVersion))&&version!==t.generationRetryVersion)return'invalid';
+ if(isGenerationV17(version))return generatedReplayProof(tr,t,tape,result,pair);
   const policy=tr.profile?.dialoguePolicy??null;
   const p5=p5At(layout,policy,version),p5Overclaim=p5OverclaimAt(layout,policy,version);
   if(p5&&fullProfile(tr.profile))return'invalid';
@@ -1973,17 +2147,21 @@ export function interventionChecks(records:Records):Check[]{
       if(!equal(t.repairHistory.filter((entry:any)=>entry.turn===t.turnIndex),[history])||ownTurns.some((v:any)=>
        !equal(v.state?.repairHistory?.filter((entry:any)=>entry.turn===t.turnIndex),[history])))conflict=true;
      }
-     const first=js[0];if(js.some((j:any)=>j.status!=='committed'||!equal(j,first)||!equal(j.jevTurn.decision,t.decisions.at(-1))||!equal(j.jevTurn.executed,t.executed)||!equal(j.jevTurn.intervention,t.intervention)||!equal(j.judgment,t.finalAction)||!equal(j.publicationRecovery??null,t.publicationRecovery??null)||!equal(j.namingGrounding??null,t.namingGrounding??null)||
+     const first=js[0];if(js.some((j:any)=>j.status!=='committed'||!equal(j,first)||!equal(j.jevTurn.decision,t.decisions.at(-1))||!equal(j.jevTurn.executed,t.executed)||!equal(j.jevTurn.intervention,t.intervention)||!equal(j.judgment,t.finalAction)||!equal(j.publicationRecovery??null,t.publicationRecovery??null)||!equal(j.generatedPublication??null,t.generatedPublication??null)||!equal(j.namingGrounding??null,t.namingGrounding??null)||
       // Every field the trace and the saved turn share is equal in both copies (an absent field in one and present in the other is a difference).
       ['humanReferent','repairProspect','repairGate','repairFacts','draftActs','draftSharedClaims','namingRequest','namingReconfirm','sharedConstruals'].some((k:string)=>Object.hasOwn(j.jevTurn,k)!==Object.hasOwn(t,k)||Object.hasOwn(t,k)&&!equal(j.jevTurn[k],t[k]))))conflict=true;
      const last=turns.at(-1)?.state;if(last&&tr.lastCommittedState&&!equal(last,tr.lastCommittedState))conflict=true;
       // An ambiguous action (a multiple revisit or confirm/repair, an unresolved defer) never rewrites a slot: every slot's name and status after the turn,
       // in the turn state and in the last committed state when that is this turn, equals the ledger before it.
-      const ex=t.executed,ambiguous=!!ex&&(ex.action==='revisit'&&ex.target?.kind==='multiple'||ex.action==='defer'&&ex.target?.kind!=='single'||['confirm','repair'].includes(ex.action)&&ex.target?.kind==='multiple');
-      if(ambiguous||t.publicationRecovery||t.intervention?.humanMoveOn){
+      const ex=generatedExecution(t.generatedPublication,t.executed,failureSlots),ambiguous=!!ex&&(ex.action==='revisit'&&ex.target?.kind==='multiple'||ex.action==='defer'&&ex.target?.kind!=='single'||['confirm','repair'].includes(ex.action)&&ex.target?.kind==='multiple');
+      if(ambiguous||t.publicationRecovery||t.intervention?.humanMoveOn||t.generatedPublication){
        const before=(Array.isArray(tr.replay)?tr.replay:[]).find((v:any)=>v?.tape?.events?.at(-1)?.seq===t.turnIndex)?.tape?.state?.ledger??[...turns].filter((v:any)=>v.turn<t.turnIndex).sort((a:any,b:any)=>a.turn-b.turn).at(-1)?.state?.ledger;
        const after=[...turns.filter((v:any)=>v.turn===t.turnIndex).map((v:any)=>v.state),tr.lastCommittedState].filter((x:any)=>x&&stateJudgments(x).length&&judgmentKey(stateJudgments(x).at(-1))===key).map((x:any)=>x.ledger);
-       if(!before||!after.length)missing=true;else if(after.some((l:any)=>!equal(l,before)))conflict=true;
+       if(!before||!after.length)missing=true;
+       else if(t.generatedPublication){
+        const next=generatedLedger(before,ex,t.generatedPublication.withdrawal);
+        if(!next||after.some((l:any)=>!equal(l,next)))conflict=true;
+       }else if(after.some((l:any)=>!equal(l,before)))conflict=true;
       }
     }else if(js.length)conflict=true;
     const malformedReplay=!Array.isArray(suppliedReplay)||suppliedReplay.some((v:any)=>!v?.tape||!Array.isArray(v.tape.events)||!v.tape.events.length||!v.result);
@@ -2519,6 +2697,18 @@ const PROMPT_VERSIONS:readonly PromptVersion[]=[
   'local-grounding/extract.ts':'6e9461e860f22923dbece02c7988713422ed81ac32d937f6d59df8eff84bd83e',
   'local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01',
   'decision/jev-decision.ts':'1773f89ee98b90d5cc587ca171bdc8c5eba3c39bfd2a49ed236d94a15df29154',
+  'local-grounding/extract-ai.ts':'e489b7ff573fdbe9e4f0adc9b6ee5f0828bd3c6835dcd8cd6555e191161594a6',
+  'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
+ }},fixed:FIXED_I172,native:NATIVE_I172},
+ {id:'p5_pilot012_generated_publication_v17',i172:true,styleMode:'research_split',sources:{scheme:'complete_instruction_source_sha256',files:{
+  'v2/dialogue-v2.mjs':'f9c37058b338e7cf55ebfef6b9a3f542deb7e234d40c8c3ce6919b659760ad95',
+  'v2/jev-turn.ts':'aaaeeccabade67c782cf1f0c22a042f11e468460d8d585175007a972ff2e0e4b',
+  'v2/generation-guard.ts':'816bbf968a934099a19bb3d2fb8217262349a739f43eee54ecdb98973d00755f',
+  'judgment/instructions.mjs':'0add2f40aaaa01bfdacd1b99418b94e288eb45da6593595304f8d36d0f22de27',
+  'observation/observe.ts':'469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad',
+  'local-grounding/extract.ts':'6e9461e860f22923dbece02c7988713422ed81ac32d937f6d59df8eff84bd83e',
+  'local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01',
+  'decision/jev-decision.ts':'4c35220e923afdf4879ec431b87d9009e6e8558348e471bc6243a501c085ae8c',
   'local-grounding/extract-ai.ts':'e489b7ff573fdbe9e4f0adc9b6ee5f0828bd3c6835dcd8cd6555e191161594a6',
   'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
  }},fixed:FIXED_I172,native:NATIVE_I172},
