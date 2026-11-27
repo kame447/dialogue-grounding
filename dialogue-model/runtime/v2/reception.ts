@@ -8,7 +8,7 @@ import type { ParticipantModelPin } from './participant-model-pin.ts';
 import { ROTATION_MODES as STIMULUS_ROTATION_MODES } from '../stimuli/scatter-v2.mjs';
 import { FIGURE_SETS, resolveFigureSelection, validateResolvedFigureSelection } from '../stimuli/figure-bank.ts';
 import type { ResolvedFigureSelection } from '../stimuli/figure-bank.ts';
-import { INITIAL_OBSERVATION_STRUCTURED_V1, type InitialObservationGeneration } from '../observation/initial-observation-generation.ts';
+import { isInitialObservationGeneration, type InitialObservationGeneration } from '../observation/initial-observation-generation.ts';
 
 import { CLAIM_PRUNE_V2, type MemoryPruneVersion } from '../memory/reference-graph.mjs';
 
@@ -187,7 +187,8 @@ function participantPlan(value: unknown) {
     ...(hasDialogueProfile ? ['participantDialogueProfile'] : [])]);
   if (hasPrune && p.memoryPruneVersion !== CLAIM_PRUNE_V2) return fail();
   if (hasProfile && p.participantRuntimeProfile !== PARTICIPANT_PRODUCTION_PROFILE) return fail();
-  if (hasGeneration && p.initialObservationGeneration !== INITIAL_OBSERVATION_STRUCTURED_V1) return fail();
+  const generation = isInitialObservationGeneration(p.initialObservationGeneration) ? p.initialObservationGeneration : undefined;
+  if (hasGeneration && generation === undefined) return fail();
   const pin = hasPin ? validateParticipantModelPin(p.participantModelPin) : undefined;
   if (pin?.schemaVersion === 'participant_model_pin_v3' && !hasProfile) return fail();
   const dialogueProfile = p.participantDialogueProfile;
@@ -199,7 +200,7 @@ function participantPlan(value: unknown) {
     ...(pin ? { participantModelPin: pin } : {}),
     ...(limits ? { participantLimits: limits } : {}),
     ...(hasProfile ? { participantRuntimeProfile: PARTICIPANT_PRODUCTION_PROFILE } : {}),
-    ...(hasGeneration ? { initialObservationGeneration: INITIAL_OBSERVATION_STRUCTURED_V1 } : {}),
+    ...(generation ? { initialObservationGeneration: generation } : {}),
     ...(hasDialogueProfile ? { participantDialogueProfile: dialogueProfile } : {}),
   };
   return { p, participant };

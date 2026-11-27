@@ -10,7 +10,8 @@ import {
 import type { WorkerTerraCache } from '../dialogue-model/runtime/observation/worker-terra-observer.ts';
 import type { ReobservationInput } from '../dialogue-model/runtime/observation/contract.ts';
 import type { ObservationMessage } from '../dialogue-model/runtime/observation/observe.ts';
-import { INITIAL_OBSERVATION_STRUCTURED_V1 } from '../dialogue-model/runtime/observation/initial-observation-generation.ts';
+import { INITIAL_OBSERVATION_STRUCTURED_V1, INITIAL_OBSERVATION_STRUCTURED_V2, INITIAL_OBSERVATION_V2_INSTRUCTIONS,
+  type InitialObservationGeneration } from '../dialogue-model/runtime/observation/initial-observation-generation.ts';
 
 const configured = {
   schemaVersion: 'participant_model_pin_v1' as const,
@@ -187,7 +188,7 @@ test('the structured initial request uses the fixed proxy schema and a separate 
   };
   const calls: Array<{ initial: boolean; payload: any }> = [];
   let upstreamChoice = { message: { content: JSON.stringify(initial) }, finish_reason: 'stop' };
-  const observer = (initialObservationGeneration?: typeof generation, sharedCache?: WorkerTerraCache) =>
+  const observer = (initialObservationGeneration?: InitialObservationGeneration, sharedCache?: WorkerTerraCache) =>
     createWorkerTerraObserver({ own, modelPin: pin, now, initialObservationGeneration, cache: sharedCache,
       async visual(payload) {
         const request = new Request('https://mock.invalid/v1/chat/completions', {
@@ -271,6 +272,26 @@ test('the structured initial request uses the fixed proxy schema and a separate 
       return { status: 200, data: { model: pin.terraModelId, choices: [{ message: { content: validText }, finish_reason: 'stop' }] } };
     } });
   await assert.rejects(oldProxy.observeAll(own), { code: 'invalid_response' });
+
+  upstreamChoice = { message: { content: validText }, finish_reason: 'stop' };
+  const beforeV2 = calls.length;
+  const v2 = observer(INITIAL_OBSERVATION_STRUCTURED_V2, cache);
+  assert.deepEqual(await v2.observeAll(own), legacy);
+  assert.deepEqual(await v2.observeAll(own), legacy);
+  assert.equal(entries.size, 3);
+  assert.equal(calls.length, beforeV2 + 1, 'v2 misses the legacy and v1 cache entries, then hits its own');
+  const v2Body = calls.at(-1)!.payload;
+  assert.equal(v2Body.messages[0].content, INITIAL_OBSERVATION_V2_INSTRUCTIONS);
+  assert.notEqual(v2Body.messages[0].content, next.payload.messages[0].content);
+  assert.deepEqual(v2Body.messages.slice(1), next.payload.messages.slice(1));
+  assert.deepEqual(v2Body.response_format, format);
+  for (const messages of [next.payload.messages, reobserve.payload.messages]) {
+    const reply = await handleRequest(new Request('https://mock.invalid/v1/chat/completions', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + env.RESEARCH_PROXY_TOKEN },
+      body: JSON.stringify({ purpose: 'visual_observation', messages, initial_observation_generation: INITIAL_OBSERVATION_STRUCTURED_V2 }),
+    }), env, async () => assert.fail('v2 must pass through its fixed initial instruction'));
+    assert.equal(reply.status, 400);
+  }
 });
 
 test('cache corruption rejects without a model call and the first stored memo wins', async () => {

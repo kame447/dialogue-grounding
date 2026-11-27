@@ -6,7 +6,8 @@ import { NamingTaskError } from '../../../dialogue-model/runtime/naming-error.mj
 import { createJevDecisionClient, type JevDecisionClientOptions } from '../../../dialogue-model/runtime/decision/jev-decision.ts';
 import { createJevLocalTestClassifier } from '../../../dialogue-model/runtime/local-grounding/jev-local-test.ts';
 import { createWorkerTerraObserver, type WorkerTerraCache } from '../../../dialogue-model/runtime/observation/worker-terra-observer.ts';
-import type { InitialObservationGeneration } from '../../../dialogue-model/runtime/observation/initial-observation-generation.ts';
+import { INITIAL_OBSERVATION_STRUCTURED_V1, INITIAL_OBSERVATION_STRUCTURED_V2,
+  type InitialObservationGeneration } from '../../../dialogue-model/runtime/observation/initial-observation-generation.ts';
 import type { ObservationInput } from '../../../dialogue-model/runtime/observation/contract.ts';
 import { ENGINEERING_LIMITS, RunBudget, type BudgetLimits } from '../../../dialogue-model/runtime/diagnostics/parity-live/audit.ts';
 import { participantLedgerFetch, type JevResearchOptions, type JevResearchLedger } from '../../../dialogue-model/runtime/web/participant-jev-wiring.ts';
@@ -29,7 +30,7 @@ export interface ParticipantService {
   participantUsagePolicyV3?(): Promise<unknown>;
   participantUsageGeneration?: Dispatch;
   participantUsageChoices?: Dispatch;
-  participantInitialObservationPolicy?(): Promise<unknown>;
+  participantInitialObservationPolicy?(generation?: InitialObservationGeneration): Promise<unknown>;
 }
 
 const profile = researchTrialProfileV3({ timeoutMs: null, maxCompletionTokens: null }, {
@@ -104,7 +105,9 @@ const researchLimits = { maxDeadlineMs: RESEARCH_MAX_DEADLINE_MS };
 
 async function requireWorkerInitialObservationGeneration(proxy: ParticipantService | undefined,
   generation: InitialObservationGeneration): Promise<void> {
-  if (await proxy?.participantInitialObservationPolicy?.() !== generation) throw new NamingTaskError('ai_unavailable');
+  const supported = generation === INITIAL_OBSERVATION_STRUCTURED_V1
+    ? await proxy?.participantInitialObservationPolicy?.() : await proxy?.participantInitialObservationPolicy?.(generation);
+  if (supported !== generation) throw new NamingTaskError('ai_unavailable');
 }
 
 export async function workerParticipantPolicy(proxy: ParticipantService | undefined, usageOnly = false,
@@ -116,12 +119,17 @@ export async function workerParticipantPolicy(proxy: ParticipantService | undefi
     if (usageOnly && (typeof proxy.participantUsagePolicy !== 'function' ||
         typeof proxy.participantUsageChat !== 'function' || typeof proxy.participantUsageChoices !== 'function')) throw new Error();
     if (schemaVersion !== 'participant_model_pin_v1' && (!usageOnly || typeof proxy.participantUsageGeneration !== 'function')) throw new Error();
-    const raw = await (schemaVersion === 'participant_model_pin_v3' ? proxy.participantUsagePolicyV3?.()
+    const policy = schemaVersion === 'participant_model_pin_v3' ? proxy.participantUsagePolicyV3?.()
       : schemaVersion === 'participant_model_pin_v2' ? proxy.participantUsagePolicyV2?.()
-      : usageOnly ? proxy.participantUsagePolicy!() : proxy.participantPolicy());
+      : usageOnly ? proxy.participantUsagePolicy!() : proxy.participantPolicy();
+    const raw = initialObservationGeneration === INITIAL_OBSERVATION_STRUCTURED_V2
+      ? (await Promise.all([policy, requireWorkerInitialObservationGeneration(proxy, initialObservationGeneration)]))[0]
+      : await policy;
     const pin = validateParticipantModelPin(structuredClone(raw));
     if (pin.schemaVersion !== schemaVersion || !MODEL_CONTRACT_V2.acceptedReturned.includes(pin.jevModelId)) throw new Error();
-    if (initialObservationGeneration) await requireWorkerInitialObservationGeneration(proxy, initialObservationGeneration);
+    if (initialObservationGeneration === INITIAL_OBSERVATION_STRUCTURED_V1) {
+      await requireWorkerInitialObservationGeneration(proxy, initialObservationGeneration);
+    }
     return { pin, proxy };
   } catch {
     throw new NamingTaskError('ai_unavailable');
