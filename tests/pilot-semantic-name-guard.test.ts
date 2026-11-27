@@ -82,6 +82,23 @@ test("a contextual name needs a unique current public pair", () => {
 });
 
 for (const label of strategies) {
+  test(`${label} recovers when both drafts use a direction without a viewpoint`, async () => {
+    const draft = "左側に丸い穴が一つある形ですか？";
+    const turn: Turn = {
+      human: "その形を見分ける特徴はありますか？",
+      plan: { action: "confirm", target: "figure_0", referent: "figure_0", drafts: [draft, draft] },
+    };
+    const { last, records } = await record(label, turn);
+    assert.equal(last.publication.status, "committed");
+    assert.equal(last.trace.executed.action, "confirm");
+    assert.equal(last.trace.finalAction?.action, "confirm");
+    assert.equal(last.trace.publicationRecovery?.act, "restate_selected_action");
+    assert.deepEqual(last.trace.generationGuard.violations, ["orientation_leak"]);
+    assert.equal(last.speech, "その形の特徴について、もう少し詳しく教えてもらえますか？");
+    assert.deepEqual(last.state.ledger, records.trials[0].replay[0].tape.state.ledger);
+    checks(records);
+  });
+
   for (const [wording, choice] of [
     ["「「へ」の煙突」にしましょう。", "adopt_chosen"],
     ["“へ”の煙突にしましょう。", "adopt_chosen"],
@@ -160,7 +177,7 @@ test("an unambiguous selected proposal needs no new Jev request", () => {
 
 test("only content codes admit a local recovery; credential and unavailable checks still stop", () => {
   const selection = { action: "confirm", target: { kind: "single", figureId: figure } } as const;
-  const codes = ["unsupported_topic_shift"];
+  const codes = ["orientation_leak", "unsupported_topic_shift"];
   assert.equal(contentPublicationRecovery(codes, selection)?.judgment.action, "confirm");
   assert.equal(contentPublicationRecovery(["draft_shared_claim_unconfirmed_detail"], selection)?.judgment.action, "confirm");
   for (const code of ["internal_credential", "internal_image", "internal_prompt_echo", "draft_act_unconfirmed", "empty_utterance"]) {

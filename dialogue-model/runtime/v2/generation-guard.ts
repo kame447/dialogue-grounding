@@ -746,7 +746,7 @@ export function deriveGenerationOutcome(first: readonly string[], retry: readonl
 export type PublicationRecovery = { reason: "draft_content_mismatch"; act: "confirm_current_topic" | "restate_selected_action" };
 const RECOVERABLE_CONTENT = new Set([
   "name_mismatch", "name_not_shown", "draft_act_mismatch", "draft_act_missing_evidence",
-  "self_repair", "unsolicited_deferral", "unsupported_topic_shift", "shared_view_assumption",
+  "self_repair", "unsolicited_deferral", "unsupported_topic_shift", "orientation_leak", "shared_view_assumption",
   "draft_shared_claim_single_id", "draft_shared_claim_unconfirmed_detail",
 ]);
 
