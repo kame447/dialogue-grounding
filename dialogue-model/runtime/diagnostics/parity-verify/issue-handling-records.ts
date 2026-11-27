@@ -5,7 +5,10 @@ import type { Row } from "./core.ts";
 // Independently pinned to the adopted v21 specification, not to the runtime's
 // decision or intervention implementation.
 export function s4UsesIssueHandling(version: unknown): boolean {
-  return version === "jev_generation_retry_v21" || version === "jev_generation_retry_v22";
+  return version === "jev_generation_retry_v21" || s4UsesV22GenerationRules(version);
+}
+export function s4UsesV22GenerationRules(version: unknown): boolean {
+  return version === "jev_generation_retry_v22" || version === "jev_generation_retry_v23";
 }
 export const S4_ISSUE_HANDLING_VERSION = "jev_issue_handling_v1";
 export const S4_ISSUE_HANDLING_POLICY = "bypass_acceptance_v3";

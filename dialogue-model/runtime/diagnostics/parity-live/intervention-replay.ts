@@ -9,6 +9,7 @@ import {researchHash} from '../../v2/research-profile.ts';
 import {resolveInterventionPolicy} from '../../intervention-policy.ts';
 import {createProfileDialogue} from './replay.ts';
 import {hasVersionedViewpoint,isGenerationV17,validGenerationRetryVersion} from '../../v2/generation-guard.ts';
+import {isIssueHandlingGeneration,usesV22GenerationRules} from '../../v2/deferred-ai-extraction.ts';
 import type {RecordedGenerationRetryVersion} from '../../v2/generation-guard.ts';
 import {EVIDENCE_NORMALIZED_ENVELOPE_FIELDS,imageProjection,projectReplayValue} from './evidence.ts';
 import type {ReplaySide} from './evidence.ts';
@@ -42,7 +43,7 @@ export async function pairedInterventionReplay(tape:InterventionReplayTape,own:O
  let materialFailure:ReplayError|null=null;
  const stop=(s:ReplayError):never=>{materialFailure??=s;throw Error(s);};
  try{
-  const issueHandling=['jev_generation_retry_v21','jev_generation_retry_v22'].includes(tape?.generationRetryVersion??'');
+  const issueHandling=isIssueHandlingGeneration(tape?.generationRetryVersion);
   data(tape);if(!exact(tape,['schemaVersion','state','events','common','tails','recorded',...(Object.hasOwn(tape,'technicalTrial')?['technicalTrial']:[]),...(Object.hasOwn(tape,'generationRetryVersion')?['generationRetryVersion']:[]),...(issueHandling?['requestSeq']:[])])||(Object.hasOwn(tape,'technicalTrial')&&(!exact(tape.technicalTrial,['version'])||!['adaptive_repair_v1','adaptive_repair_v2','adaptive_repair_v3'].includes(tape.technicalTrial!.version)))||tape.schemaVersion!=='parity_intervention_replay_v1'||!exact(tape.tails,['repair-first','bypass-enabled'])||!exact(tape.recorded,['label','expectedRequests'])||!['repair-first','bypass-enabled'].includes(tape.recorded.label)||!Array.isArray(tape.recorded.expectedRequests)||!Array.isArray(tape.events)||!tape.events.length||issueHandling&&(!Number.isSafeInteger(tape.requestSeq)||tape.requestSeq!<1))stop('replay_material_invalid');
   if(Object.hasOwn(tape,'generationRetryVersion')&&((tape.generationRetryVersion!=='jev_generation_retry_v2'&&!hasVersionedViewpoint(tape.generationRetryVersion))||!validGenerationRetryVersion(tape.generationRetryVersion,profile.questionLayout,profile.dialoguePolicy)))stop('replay_material_invalid');
   if(!tape.common||!tape.tails['repair-first']||!tape.tails['bypass-enabled'])stop('replay_material_missing');
@@ -64,7 +65,7 @@ export async function pairedInterventionReplay(tape:InterventionReplayTape,own:O
     capture('luna',lunaPhase,JSON.parse(String(init?.body)));return Response.json({model:lunaResponse.model,choices:[{message:{content:lunaResponse.text}}],usage:{prompt_tokens:lunaResponse.usage?.inputTokens,completion_tokens:lunaResponse.usage?.outputTokens}});
    });
    const client={async complete(messages:any[],options:any){const n=take('luna') as ReplayTape['luna'][number];if(n.phase!==options.phase)stop('replay_material_invalid');lunaPhase=options.phase;lunaResponse=n.response;if(lunaPhase==='generation')generated=true;return http.complete(messages,options);}};
-   const fetchImpl=async(_url:any,init:any)=>{const b=JSON.parse(init.body),keys=Object.keys(b.questions),s=JSON.parse(b.state),draftAct=keys.includes('draft_naming')||String(frozen.generationRetryVersion)==='jev_generation_retry_v22'&&keys.includes('draft_topic_shift'),phase=keys.includes('human_referent')?'human_referent':draftAct?'draft_naming':keys.includes('draft_shared_claim')?'draft_shared_claim':keys.includes('repair_issue')?'repair_prospect':keys.some(k=>k.endsWith('_support'))?'ai_support':keys.some(k=>k.endsWith('_act'))?Object.hasOwn(s,'aiSeq')?'ai_function':'local_function':'decision';capture('jev',phase,b);return Response.json(take('jev'));};
+   const fetchImpl=async(_url:any,init:any)=>{const b=JSON.parse(init.body),keys=Object.keys(b.questions),s=JSON.parse(b.state),draftAct=keys.includes('draft_naming')||usesV22GenerationRules(frozen.generationRetryVersion)&&keys.includes('draft_topic_shift'),phase=keys.includes('human_referent')?'human_referent':draftAct?'draft_naming':keys.includes('draft_shared_claim')?'draft_shared_claim':keys.includes('repair_issue')?'repair_prospect':keys.some(k=>k.endsWith('_support'))?'ai_support':keys.some(k=>k.endsWith('_act'))?Object.hasOwn(s,'aiSeq')?'ai_function':'local_function':'decision';capture('jev',phase,b);return Response.json(take('jev'));};
    const readKey=async()=> 'sk-or-SYNTHETIC-offline-replay-key-0000';
    const native=createJevDecisionClient({enabled:true,readKey,fetchImpl,timeoutMs:profile.timeouts.decisionMs,researchLimits:{maxDeadlineMs:600000},questionLayout:profile.questionLayout})!;
    // Optional human-referent capability is absent only when no such recorded
