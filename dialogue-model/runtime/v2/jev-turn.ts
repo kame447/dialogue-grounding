@@ -80,6 +80,8 @@ type ChatClient = { complete(messages: Message[], options: { phase: string; time
 type Guard = { violations: string[]; regenerated: boolean; fallback: boolean };
 type RuntimeExecution = ExecutedDecision | ExecutedDecisionV21;
 type RuntimePolicy = InterventionConfig | IssueHandlingPolicy;
+/** A paired diagnostic replay only changes the policy applied to its new judgment. */
+export type IssueHandlingReplayHistory = Readonly<{ strategy: "repair-first" | "bypass-enabled"; judgmentCount: number }>;
 type RuntimeIntervention = InterventionTrace | (InterventionTraceV2 & { rerank?: never; detailEvidence?: never });
 type PublicationReconsideration = {
   reason: "naming_conflict" | "naming_unresolved" | "publication_mismatch";
@@ -354,6 +356,7 @@ export type JevPrivateState = {
   deferredAiExtraction?: DeferredAiPublicJob;
 };
 export type JevTurnOptions = {
+  issueHandlingReplayHistory?: IssueHandlingReplayHistory;
   memoryPruneVersion?: import("../memory/reference-graph.mjs").MemoryPruneVersion;
   usagePolicy?: ParticipantUsageOnly; intervention?: RuntimePolicy; decisionTimeoutMs?:number; technicalTrial?: AdaptiveRepairTrial;
   /** Omitted means two_stage_v1. Must match the decision client's own layout when it declares one. */
@@ -665,6 +668,11 @@ function stateSame(a:any,b:any):boolean {
 const isIssueHandlingPolicy = (policy: RuntimePolicy): policy is IssueHandlingPolicy =>
   policy.policy === "bypass_acceptance_v3:accept" || policy.policy === "bypass_acceptance_v3:veto";
 const strategyForPolicy = (policy: RuntimePolicy) => policy.policy.endsWith(":veto") ? "repair-first" : "bypass-enabled";
+function validReplayHistory(history: IssueHandlingReplayHistory): boolean {
+  return stateExact(history, ["strategy", "judgmentCount"]) &&
+    (history.strategy === "repair-first" || history.strategy === "bypass-enabled") &&
+    Number.isSafeInteger(history.judgmentCount) && history.judgmentCount >= 0;
+}
 const referenceForPolicy = (policy: RuntimePolicy) => isIssueHandlingPolicy(policy) ? issueHandlingReference : interventionReference(interventionVersion(policy.policy));
 
 function checkedIntervention(x:unknown):RuntimePolicy {
@@ -1126,7 +1134,7 @@ function validateGeneratedPublication(j: CommittedAct, ledger: OwnLedger, ownSlo
   return ledgerAfterPublication(ledger, j.judgment, execution, withdrawal, issueHandling);
 }
 
-export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string[],intervention:RuntimePolicy,questionLayout:JevQuestionLayout='two_stage_v1',policy?:string,generation?:GenerationRetryVersion,usagePolicy?:ParticipantUsageOnly,events?:readonly Event[]):JevPrivateStateV2 {
+export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string[],intervention:RuntimePolicy,questionLayout:JevQuestionLayout='two_stage_v1',policy?:string,generation?:GenerationRetryVersion,usagePolicy?:ParticipantUsageOnly,events?:readonly Event[],replayHistory?:IssueHandlingReplayHistory):JevPrivateStateV2 {
  checkedIntervention(intervention);
  const reference=referenceForPolicy(intervention),version=reference.version,issueHandling=generation===ISSUE_HANDLING_GENERATION;
  const humanLedMoveOn=version==='bypass_acceptance_v2'||issueHandling;
@@ -1154,6 +1162,8 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
   if(!isGenerationV12(generation)&&Array.isArray(s.graph?.records)&&s.graph.records.some((r:any)=>r?.kind==='claim'&&r.source===LABELLED_ANSWER_SOURCE))throw Error();
   if(!retainsLocalQuestionAnswers(s.agreeNameScopeVersion)&&s.graph.records.some((r:any)=>r?.kind==='claim'&&r.source===LOCAL_QUESTION_ANSWER_SOURCE))throw Error();
   if(!sameSet(Object.keys(graph.ownSlots),ownSlots)||!Array.isArray(s.judgments)||!Array.isArray(s.repairHistory))throw Error();
+  if(replayHistory!==undefined&&(!issueHandling||usagePolicy!==undefined||!validReplayHistory(replayHistory)||replayHistory.judgmentCount>s.judgments.length))throw Error();
+  const recorded=replayHistory?{ policy:issueHandlingForStrategy(replayHistory.strategy), judgmentCount:replayHistory.judgmentCount }:undefined;
   if(s.observationMemo!==null){const m=validateObservationMemo(s.observationMemo);if(!sameSet(m.figures.map(f=>f.id),ownSlots))throw Error();}
   if(Object.hasOwn(s,'aiPublic'))validateAiPublicState(s.aiPublic,ownSlots,Number.MAX_SAFE_INTEGER,s.graph);
   if (isDeferredAiExtractionGeneration(generation) && s.aiPublic && s.judgments.length) {
@@ -1288,8 +1298,9 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
    if(questionLayout==='two_stage_v3'&&[original,z.executed].some(e=>e.action==='agree'&&
     (e.target.kind!=='single'||!hasAgreeNameV3(z.agreeNames,e.name,jevNaming?null:e.target.figureId))))throw Error();
    const t=z.intervention, humanMoveOn=humanLedMoveOn&&isHumanMoveOnAnswer(d.evidence.stages?.[0]);
+   const judgmentPolicy=recorded&&index<recorded.judgmentCount?recorded.policy:intervention;
    const handlingInput=issueHandling?restoreHandlingInput(j,s.judgments[index-1],ownSlots,s.repairHistory,graphClaims,publicTurns,newest):undefined;
-   if(handlingInput)validateIssueHandlingExecution(handlingInput,d,intervention,t,z.executed);
+   if(handlingInput)validateIssueHandlingExecution(handlingInput,d,judgmentPolicy,t,z.executed);
    else {
    if(!stateExact(t,['schemaVersion','policy','disposition','reasonCode','original','rerank','alternative','detailEvidence','failure',...(humanMoveOn?['humanMoveOn']:[])])||
      t.schemaVersion!=='jev_intervention_v1'||t.failure!==null||!stateSame(t.original,original))throw Error();
@@ -1397,7 +1408,7 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
     if(!stateSame(j.namingGrounding,grounding))throw Error();
    }else if(Object.hasOwn(j,'namingGrounding'))throw Error();
    if (ledgerAtPublication) {
-    ledgerAtPublication = validateGeneratedPublication(j, ledgerAtPublication, ownSlots, intervention, publicTurns, z.agreeNames, generation,
+    ledgerAtPublication = validateGeneratedPublication(j, ledgerAtPublication, ownSlots, judgmentPolicy, publicTurns, z.agreeNames, generation,
       s.observationMemo, graphClaims, usagePolicy, handlingInput);
     continue;
    }
@@ -1477,6 +1488,10 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   const visualFeatureGeneration = isGenerationV19(generationRetryVersion);
   const issueHandling = generationRetryVersion === ISSUE_HANDLING_GENERATION;
   if (issueHandling !== Boolean(intervention && isIssueHandlingPolicy(intervention))) throw new JevTurnError("invalid_intervention");
+  const requestedReplayHistory = options.issueHandlingReplayHistory;
+  if (requestedReplayHistory !== undefined && (!issueHandling || usagePolicy !== undefined || options.participantPrompts ||
+      !validReplayHistory(requestedReplayHistory))) throw new JevTurnError("invalid_intervention");
+  const replayHistory = requestedReplayHistory && { ...requestedReplayHistory };
   const visualPurpose = usesJevVisualPurpose(generationRetryVersion) || isDeferredAiExtractionGeneration(generationRetryVersion);
   const deferredProfile = options.deferredAiExtractionProfileSha256;
   if (deferredProfile !== undefined && (!isDeferredAiExtractionGeneration(generationRetryVersion) ||
@@ -1595,7 +1610,8 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
     const humanLedMoveOn = intervention !== null && (isIssueHandlingPolicy(intervention) || interventionVersion(intervention.policy) === "bypass_acceptance_v2");
     try {
       abortIf(signal);
-      const state = integrated?validateJevPrivateStateV2(privateState,slots,intervention!,questionLayout,options.dialoguePolicy,generationRetryVersion,usagePolicy,events):structuredClone(privateState);
+      const state = integrated?validateJevPrivateStateV2(privateState,slots,intervention!,questionLayout,options.dialoguePolicy,generationRetryVersion,usagePolicy,events,replayHistory):structuredClone(privateState);
+      if (replayHistory && state.judgments.length !== replayHistory.judgmentCount) throw new JevTurnError("invalid_state");
       if (state.deferredAiExtraction) throw new JevTurnError("invalid_state");
       if (!integrated && !validAgreeNameScope(state.agreeNameScopeVersion, generationRetryVersion)) throw new JevTurnError("invalid_state");
       checkPruneVersion(state);
@@ -2402,7 +2418,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       }
       // The state this turn would commit is checked by the same validation every later persist and turn start applies, before anything is published:
       // a state the validator refuses must never become the committed one.
-      if (integrated) validateJevPrivateStateV2(nextState, slots, intervention!, questionLayout, options.dialoguePolicy, generationRetryVersion, usagePolicy);
+      if (integrated) validateJevPrivateStateV2(nextState, slots, intervention!, questionLayout, options.dialoguePolicy, generationRetryVersion, usagePolicy, undefined, replayHistory);
       record.status = "staged"; record.publicSpeech = result.text; record.local.status = "staged";
       return { text: result.text, privateState: nextState };
       } finally {deadline?.close();}
@@ -2586,7 +2602,8 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
     return pending;
   }
   async function completeDeferredAiExtraction(privateState: JevPrivateState, events: Event[], research: AiPublicResearch, signal?: AbortSignal) {
-    const state = validateJevPrivateStateV2(privateState, slots, intervention!, questionLayout, options.dialoguePolicy, generationRetryVersion, usagePolicy, events);
+    const state = validateJevPrivateStateV2(privateState, slots, intervention!, questionLayout, options.dialoguePolicy, generationRetryVersion, usagePolicy, events, replayHistory);
+    if (replayHistory && state.judgments.length !== replayHistory.judgmentCount + 1) throw new JevTurnError("invalid_state");
     const job = state.deferredAiExtraction;
     const publication = events.find(event => event.id === job?.eventId);
     if (!job || job.state !== "running" || job.profileSha256 !== deferredProfile || !publication ||

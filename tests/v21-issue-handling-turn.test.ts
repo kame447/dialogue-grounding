@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { isNamingIntervalBoundary } from "../dialogue-model/runtime/decision/naming-request.ts";
-import { issueHandlingForStrategy } from "../dialogue-model/runtime/decision/issue-handling.ts";
+import { applyIssueHandling, issueHandlingForStrategy } from "../dialogue-model/runtime/decision/issue-handling.ts";
 import { ISSUE_HANDLING_GENERATION } from "../dialogue-model/runtime/v2/deferred-ai-extraction.ts";
 import { generationGuardCodes } from "../dialogue-model/runtime/v2/generation-guard.ts";
 import { validateJevPrivateStateV2 } from "../dialogue-model/runtime/v2/jev-turn.ts";
 import { researchTrialProfileV3 } from "../dialogue-model/runtime/v2/research-profile.ts";
+import { PARTICIPANT_USAGE_ONLY } from "../dialogue-model/runtime/web/participant-usage-policy.ts";
 import { initialState, normal, OWN, runTurn, type Plan } from "./support/s4-v3-records.ts";
 
 const { lunaRequest, timeouts } = normal.run.manifest;
@@ -209,4 +210,33 @@ test("v21 limits observation sources to the visual items when naming and confirm
   tampered.judgments[0].generatedPublication.visualFeatures.sources[0].source = source(named.id);
   assert.throws(() => validateJevPrivateStateV2(tampered, OWN.ownAnchors.map(({ id }: { id: string }) => id),
     issueHandlingForStrategy("bypass-enabled"), "two_stage_v3", "holistic_v5", ISSUE_HANDLING_GENERATION, undefined, result.publication.durable.events));
+});
+
+test("v21 only validates a mixed policy history with the paired replay's explicit prefix", async () => {
+  const before = initialState({ profile, generationRetryVersion: ISSUE_HANDLING_GENERATION, agreeNameScopeVersion: "jev_naming_v2" });
+  const event = { id: "event-1", seq: 1, speaker: "human", text: "この形のつながりを確かめたいです。" };
+  const plan: Plan = { action: "confirm", target: "figure_0", speech: draft(alternativeText),
+    aiExtraction: JSON.stringify({ segments: [], visualFeatures: { sources: [] } }),
+    choose: key => ({ human_move_on_source: "other", commitment_state: "insufficient", visual_purpose: "clarify_reference",
+      publication_continuation: "acknowledge_unresolved" } as Record<string, string>)[key] };
+  const first = await runTurn(profile, "repair-first", before, [event],
+    { ...plan, drafts: ["{}", "{}", draft(alternativeText)] }, technicalTrial, ISSUE_HANDLING_GENERATION);
+  assert.equal(first.trace.generatedPublication?.recovery?.intervention.policy, "bypass_acceptance_v3:veto");
+  const next = await runTurn(profile, "repair-first", first.state, [...first.publication.publicEvents,
+    { id: "event-3", seq: 3, speaker: "human", text: "切り込みの形も分かりますか？" }], plan, technicalTrial, ISSUE_HANDLING_GENERATION);
+  const slots = OWN.ownAnchors.map(({ id }: { id: string }) => id);
+  const mixed = structuredClone(next.state);
+  const { jevTurn } = mixed.judgments[1];
+  Object.assign(jevTurn, applyIssueHandling({ ownSlots: slots, turn: 3, priorClaims: [], repairHistory: [], previousAction: null },
+    jevTurn.decision, "bypass-enabled"));
+  const history = { strategy: "repair-first", judgmentCount: 1 } as const;
+  const validate = (strategy: string, replayHistory?: typeof history, usagePolicy?: typeof PARTICIPANT_USAGE_ONLY) => validateJevPrivateStateV2(mixed,
+    slots, issueHandlingForStrategy(strategy), "two_stage_v3", "holistic_v5", ISSUE_HANDLING_GENERATION, usagePolicy,
+    next.publication.durable.events, replayHistory);
+  assert.throws(() => validate("repair-first"));
+  assert.throws(() => validate("bypass-enabled"));
+  assert.doesNotThrow(() => validate("bypass-enabled", history));
+  assert.throws(() => validate("bypass-enabled", history, PARTICIPANT_USAGE_ONLY));
+  mixed.judgments[0].generatedPublication.recovery.intervention.policy = "bypass_acceptance_v3:accept";
+  assert.throws(() => validate("bypass-enabled", history));
 });
