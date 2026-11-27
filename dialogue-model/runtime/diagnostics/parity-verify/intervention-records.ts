@@ -763,9 +763,9 @@ function agreeSource(tr:any,t:any,key:string,tape:any,legacyV3=false,mode?:Repla
    // A denial stands until the partner agrees with an AI public claim that refers only to that figure, and the referent estimate puts it strictly first.
    const referentAt=(at:number)=>at===t.turnIndex?z.humanReferent:preJudgments.find((x:any)=>x.turnIndex===at)?.jevTurn?.humanReferent??null;
    const selects=(m:any,id:string)=>!!m&&m.status==='ok'&&!!m.scores&&typeof m.scores[id]==='number'&&Object.entries(m.scores).every(([k,v]:any)=>k===id||m.scores[id]>v);
-   const referentDenied=(id:string)=>{
+   const referentDenied=(id:string,reconfirmedName:boolean)=>{
     const lastDeny=referentClaims.filter((c:any)=>c.act==='deny'&&denialTargets(c).includes(id)).at(-1);
-    if(!lastDeny||reconfirmation?.denialId===lastDeny.id&&checkedTarget===id)return false;
+    if(!lastDeny||reconfirmedName&&reconfirmation?.denialId===lastDeny.id)return false;
     return !referentClaims.slice(referentClaims.indexOf(lastDeny)+1).some((c:any)=>{
      if(c.act!=='agree')return false;
      const antecedent=live.find((p:any)=>p.id===c.respondsTo);
@@ -800,6 +800,8 @@ function agreeSource(tr:any,t:any,key:string,tape:any,legacyV3=false,mode?:Repla
     if(!s)return[];
     return eligibleSlots.filter(id=>{
      if(checkedTarget!==undefined&&id!==checkedTarget)return false;
+     const reconfirmedName=reconfirmation?.figureId===id&&reconfirmation.names.has(norm(name));
+     if(publicTarget===null&&!reconfirmedName)return false;
      if(perFigure&&proposals.some((p:any)=>{
       if(p.sourceTurn<=c.sourceTurn)return false;
       const linked=p.respondsTo===c.id||antecedent!==undefined&&p.respondsTo===antecedent.id;
@@ -807,7 +809,7 @@ function agreeSource(tr:any,t:any,key:string,tape:any,legacyV3=false,mode?:Repla
       if(norm(p.name)!==norm(name))return linked||slot===id;
       return slot!==null&&slot!==id&&(linked||targets.length===1);
      }))return false;
-     if(level>=2&&referentDenied(id))return false;
+     if(level>=2&&referentDenied(id,reconfirmedName))return false;
      if(requiresFocus&&!wasFocused(id))return false;
      if(prevPublicIds.size&&!prevPublicIds.has(id))return false;
      return !openClaims.some((r:any)=>r.speaker==='human'&&r.sourceTurn>c.sourceTurn&&(r.act==='deny'||r.act==='name_reject')&&r.name===name&&(r.respondsTo===c.id||(Array.isArray(r.targets)&&r.targets.includes(id))));
@@ -2041,7 +2043,7 @@ const PROMPT_VERSIONS:readonly PromptVersion[]=[
  // Complete source fingerprint for the participant naming reconfirmation rules.
  {id:'v12_naming_reconfirmation_scoped_v11',i172:true,styleMode:'research_split',sources:{scheme:'complete_instruction_source_sha256',files:{
   'v2/dialogue-v2.mjs':'0ca530878393721b6d48b55240e2b8c848910758501d90f579b2e0c65a6d1dd6',
-  'v2/jev-turn.ts':'c28e7b5526cd49c633e067ae45db8ce294ace695e22bb8885e2ec6f871a347d6',
+  'v2/jev-turn.ts':'31cc7ff5346c19d5c790c39c44baf9f07b99e992a4d6ed1647572ff8284f945a',
   'v2/generation-guard.ts':'824f7ff96ef1ef6d388721dff6ed44b6684f2266e5d8c5f00f31d248e44f453e',
   'judgment/instructions.mjs':'0add2f40aaaa01bfdacd1b99418b94e288eb45da6593595304f8d36d0f22de27',
   'observation/observe.ts':'469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad',

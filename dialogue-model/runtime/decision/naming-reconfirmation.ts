@@ -1,4 +1,5 @@
 import { literalSpan } from "../judgment/public-evidence.mjs";
+import { normalizeName } from "../judgment/name-evidence.mjs";
 import type { LocalClaimView, LocalFunctionVerdict, LocalSegmentProposal, PublicTurn } from "../local-grounding/contract.ts";
 import { isFigureReplyAspect } from "../local-grounding/verify.ts";
 import type { NamingJudgmentLike } from "./naming-request.ts";
@@ -9,7 +10,7 @@ export type NamingResponseEvidence = {
   extractor: { segments: readonly LocalSegmentProposal[] };
   classifier: { status: string; verdicts: readonly Pick<LocalFunctionVerdict, "segmentId" | "act" | "respondsToClaimId" | "answersChecked">[] };
 };
-type Reconfirmation = { figureId: string; denialId: string };
+type Reconfirmation = { figureId: string; denialId: string; names: ReadonlySet<string> };
 
 function publishedClaim(claim: LocalClaimView, event: NamingTurn | undefined): boolean {
   return event?.speaker === "ai" && !event.nonReferential && claim.speaker === "ai" &&
@@ -37,7 +38,7 @@ export function namingDenialTargets(denial: LocalClaimView, antecedent: LocalCla
 
 /** Reconcile a direct feature answer and a distinct identity answer to the same
  * published check. Both remain local evidence, and this dispenses only with the
- * one denial identified here for the current naming turn. */
+ * one denial for names the partner proposed for this figure on this turn. */
 export function namingReconfirmation(claims: readonly LocalClaimView[], turns: readonly NamingTurn[],
   judgments: readonly NamingJudgmentLike[], turn: number, boundary: number,
   current: ReferentEstimate | null, evidence: NamingResponseEvidence | undefined): Reconfirmation | null {
@@ -55,8 +56,9 @@ export function namingReconfirmation(claims: readonly LocalClaimView[], turns: r
   const question = questions[0];
   if (questions.length !== 1 || question.aspect !== "question" ||
       question.targets.length !== 1 || question.targets[0] !== figureId) return null;
-  if (!claims.some(c => c.speaker === "human" && c.sourceTurn === turn && c.act === "name_propose" &&
-      c.name !== null && c.targets.includes(figureId))) return null;
+  const names = new Set(claims.filter(c => c.speaker === "human" && c.sourceTurn === turn && c.act === "name_propose" &&
+    c.name !== null && c.targets.includes(figureId)).map(c => normalizeName(c.name)));
+  if (names.size === 0) return null;
 
   const priorDenial = claims.filter(c => c.speaker === "human" && c.act === "deny" && c.aspect === "question" &&
     c.sourceTurn > boundary && c.sourceTurn < turn && c.targets.length === 1 && c.targets[0] === figureId &&
@@ -84,5 +86,5 @@ export function namingReconfirmation(claims: readonly LocalClaimView[], turns: r
     publicClaims.some(c => c.id === verdict.respondsToClaimId && c.act !== "ask" && c.targets.includes(figureId)));
   const paired = features.some(feature => identities.some(identity =>
     feature.span.end <= identity.span.start || identity.span.end <= feature.span.start));
-  return paired ? { figureId, denialId: priorDenial.id } : null;
+  return paired ? { figureId, denialId: priorDenial.id, names } : null;
 }

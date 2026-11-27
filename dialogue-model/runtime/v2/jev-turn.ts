@@ -336,9 +336,9 @@ export function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns
   const referentAt = (at: number) => at === turn ? current : judgments.find(j => j.turnIndex === at)?.jevTurn.humanReferent ?? null;
   const selects = (m: { status: string; scores: Record<string, number> | null } | null, id: string) =>
     !!m && m.status === "ok" && !!m.scores && typeof m.scores[id] === "number" && Object.entries(m.scores).every(([key, value]) => key === id || m.scores![id] > value);
-  const referentDenied = (id: string) => {
+  const referentDenied = (id: string, reconfirmedName: boolean) => {
     const lastDeny = referentClaims.filter(c => c.act === "deny" && denialTargets(c).includes(id)).at(-1);
-    if (!lastDeny || reconfirmation?.denialId === lastDeny.id && checkedTarget === id) return false;
+    if (!lastDeny || reconfirmedName && reconfirmation?.denialId === lastDeny.id) return false;
     const after = referentClaims.slice(referentClaims.indexOf(lastDeny) + 1);
     return !after.some(c => {
       if (c.act !== "agree") return false;
@@ -379,6 +379,8 @@ export function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns
     const occupied = slots.filter(id => ledger[id].name !== null && normalizeName(ledger[id].name) === normalized);
     return (referentRule ? candidates.filter(id => agreeCandidateAllowed(c, id, turn, turnHasProposal, inheritedIds, intervalEstimates)) : candidates).filter(id => {
       if (checkedTarget !== undefined && id !== checkedTarget) return false;
+      const reconfirmedName = reconfirmation?.figureId === id && reconfirmation.names.has(normalized);
+      if (publicTarget === null && !reconfirmedName) return false;
       // Supersession applies to this candidate, using a verified reply or an explicitly bound target.
       if (scoped && proposals.some(p => {
         if (p.sourceTurn <= c.sourceTurn) return false;
@@ -387,7 +389,7 @@ export function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns
         if (normalizeName(p.name!) !== normalized) return linked || slot === id;
         return slot !== null && slot !== id && (linked || c.targets.length === 1);
       })) return false;
-      if (referentDenied(id)) return false;
+      if (referentDenied(id, reconfirmedName)) return false;
       if (requiresFocus && !wasFocused(id)) return false;
       if (prevPublicIds.size && !prevPublicIds.has(id)) return false;
       const entry = ledger[id];

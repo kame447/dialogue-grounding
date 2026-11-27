@@ -11,6 +11,8 @@ import { buildRecords, OWN, OLD, type Turn, type runTurn } from "./support/s4-v3
 const slots = ["s-0001", "s-0002", "s-0003", "s-0004", "s-0005", "s-0006"];
 const [primary, alternate] = slots;
 const name = "音符";
+const previousName = "丸み";
+const previousNaming = "「丸み」と呼びませんか。";
 const introduction = "細い棒があります。";
 const question = "端に切れ目が見えますか？";
 const no = "いいえ、私が見ているのは別の場所です。";
@@ -65,12 +67,13 @@ test("a mixed denial vetoes the figure actually checked, while a genuinely multi
 });
 
 test("reconfirmation requires distinct linked feature and identity answers, with no new denial", () => {
+  const original = claim("2:local1", 2, "human", "name_propose", "name", [alternate], previousNaming, null, previousName);
   const earlier = claim("4:pub2", 3, "ai", "ask", "question", [alternate], question);
   const denial = claim("4:local1", 4, "human", "deny", "question", [alternate], no, earlier.id);
   const orientationClaim = claim("6:pub1", 5, "ai", "assert", "orientation", [primary, alternate], orientation);
   const checked = claim("6:pub2", 5, "ai", "ask", "question", [alternate], question);
   const proposal = claim("6:local1", 6, "human", "name_propose", "name", [primary, alternate], naming, null, name);
-  const claims = [earlier, denial, orientationClaim, checked, proposal];
+  const claims = [original, earlier, denial, orientationClaim, checked, proposal];
   const checks = [judgment(2, "confirm", alternate), judgment(4, "confirm", alternate)];
   const feature = segment("feature", yes, "contour", [alternate], 5);
   const referent = segment("identity", identity, "referent", [primary, alternate], 5);
@@ -79,7 +82,11 @@ test("reconfirmation requires distinct linked feature and identity answers, with
   const response: NamingResponseEvidence = { extractor: { segments: [feature, referent] },
     classifier: { status: "ok", verdicts: [featureVerdict, identityVerdict] } };
   assert.deepEqual(candidates(claims, checks, "scoped_v10", yes + identity, response), []);
-  assert.deepEqual(candidates(claims, checks, "scoped_v11", yes + identity, response).map(c => c.figureId), [alternate]);
+  const renewed = { name, figureId: alternate, sourceTurn: 6 };
+  assert.deepEqual(candidates(claims, checks, "scoped_v11", yes + identity, response), [renewed]);
+  const sameName = { ...original, name, quote: naming, proposition: naming };
+  assert.deepEqual(candidates([sameName, ...claims.slice(1)], checks, "scoped_v11", yes + identity, response),
+    [{ ...renewed, sourceTurn: 2 }, renewed]);
   for (const missing of [
     { ...response, classifier: { ...response.classifier, verdicts: [featureVerdict] } },
     { ...response, classifier: { ...response.classifier, verdicts: [featureVerdict, { ...identityVerdict, respondsToClaimId: null }] } },
@@ -92,29 +99,37 @@ test("reconfirmation requires distinct linked feature and identity answers, with
 });
 
 for (const label of ["repair-first", "bypass-enabled"] as const) {
-  test(`scoped_v11 executes and saves an agreement following explicit reconfirmation in ${label}`, async () => {
+  test(`scoped_v11 offers and saves only the renewed name after a rename in ${label}`, async () => {
     const [own, other] = OWN.ownAnchors.map((anchor: { id: string }) => anchor.id);
     const memo = structuredClone(OLD.state.observationMemo);
     memo.figures[0].analytic.shapes = ["端に切れ目がある", "傾きがある"];
     const turns: Turn[] = [
-      { human: "細い棒の形を比べたいです。", plan: {
+      { human: previousNaming, plan: {
         action: "confirm", target: "figure_0", referent: "figure_0", speech: introduction + question,
+        act: "name_propose", extraction: JSON.stringify([
+          segment("name", previousNaming, "name", [own], null, previousName),
+        ]),
         aiActs: ["assert", "ask"], aiExtraction: JSON.stringify([
           segment("part", introduction, "part", [own]), segment("check", question, "question", [own]),
         ]),
       } },
       { human: no, plan: {
         action: "confirm", target: "figure_0", referent: "figure_0", speech: orientation + position + question,
-        act: "deny", antecedent: "claim_1", answers: "not_an_answer",
+        drafts: [orientation + position + question], act: "deny", answers: "not_an_answer",
         extraction: JSON.stringify([segment("denial", no, "contour", [own], 2)]),
         aiActs: ["assert", "assert", "ask"], aiExtraction: JSON.stringify([
           segment("orientation", orientation, "orientation", [own, other]),
           segment("position", position, "position", [own]),
           segment("check", question, "question", [own]),
         ]),
+        choose: (key, choices, { generationCalls }) => {
+          if (generationCalls === 0 && key === "segment_0_antecedent") {
+            return Object.entries(choices).find(([, detail]) => detail.includes("3:pub2"))?.[0];
+          }
+        },
       } },
-      { human: yes + identity + naming, plan: {
-        action: "agree", target: "figure_0", referent: "figure_0", name, speech: "はい、「音符」と呼びましょう。",
+      { human: yes + identity + "呼び名を変えて、" + naming, plan: {
+        action: "agree", target: "figure_0", referent: "figure_0", speech: "はい、「音符」と呼びましょう。",
         answers: "answers_checked_point",
         extraction: JSON.stringify([
           segment("yes", yes, "contour", [own], 4), segment("identity", identity, "referent", [own, other], 4),
@@ -133,11 +148,13 @@ for (const label of ["repair-first", "bypass-enabled"] as const) {
       agreeNameScopeVersion: "scoped_v11", technicalTrial: { version: "adaptive_repair_v3" }, memo, turns,
       onTurn: (side, outcome) => { if (side === label) outcomes.push(outcome); },
     });
+    assert.ok(outcomes[0].trace.local?.claims.some(c => c.act === "name_propose" && c.name === previousName && c.targets[0] === own));
     assert.ok(outcomes[1].trace.local?.claims.some(c => c.act === "deny" && c.targets[0] === own));
     const result = outcomes[2];
     assert.deepEqual(result.state.judgments.at(-1).jevTurn.agreeNames, [{ name, figureId: own, sourceTurn: 5 }]);
     assert.equal(result.state.judgments.at(-1).jevTurn.executed.action, "agree");
     assert.equal(result.publication.status, "committed");
+    assert.equal(result.speech, turns[2].plan.speech);
     assert.deepEqual(result.state.ledger[own], { status: "agreed", name });
     assert.deepEqual(verifyRecords(records).checks.filter(c => c.id.startsWith("intervention.trial.0.attempt.0.")).map(c => c.status),
       ["pass", "pass", "pass", "pass"]);
