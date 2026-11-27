@@ -63,10 +63,12 @@ for (const label of ['repair-first', 'bypass-enabled'] as const) {
           plan: { action: 'accept', target: 'none', speech: '少しずつ見比べてみましょう。',
             choose: question => question === 'human_move_on_source' ? 'other' : undefined } }] });
       assert.deepEqual(statuses(records).map(check => check.status), ['pass', 'pass', 'pass', 'pass'], JSON.stringify(statuses(records)));
-      assert.equal(Object.keys(records.run.promptSources.files).length, 11);
-      const incomplete = structuredClone(records.run.promptSources);
-      delete incomplete.files['shape-terminology.ts'];
-      assert.ok(statuses(changeSources(records, incomplete)).some(check => check.status === 'mismatch'));
+      for (const source of ['shape-terminology.ts', 'v2/visual-feature-evidence.ts']) {
+        assert.match(records.run.promptSources.files[source], /^[a-f0-9]{64}$/, source);
+        const incomplete = structuredClone(records.run.promptSources);
+        delete incomplete.files[source];
+        assert.ok(statuses(changeSources(records, incomplete)).some(check => check.status === 'mismatch'), source);
+      }
     });
   }
 }
