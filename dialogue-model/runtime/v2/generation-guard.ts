@@ -1,58 +1,63 @@
 // A lexical publication guard, not evidence of shared identification. Only the
 // validated judgment determines state; detected wording never changes its act.
-import type { DialoguePolicy } from "../decision/contract.ts";
+import type { DialoguePolicy, DraftAct, JevExecutedDecision, PublicNameCandidate } from "../decision/contract.ts";
 // v3 was reserved for the experiment that extended fixed responses.
 // v9 contains every behaviour of v8 and widens only which wordings the orientation check accepts as a stated viewpoint or as the partner's own words. v8 contains every behaviour of v7 and adds the direct pointing-reply match to a targetless or differently-extracted confirm question. v7 contains every behaviour of v6 and widens the unsupported-topic-shift check to the particle-less and "next figure" wordings. v6 contains every behaviour of v5 and adds the unsupported-topic-shift check. v5 contains every behaviour of v4 (viewpoint rules, no fixed-sentence fallback, the whole-history judgment material, the private naming state) and adds the confirm-specific viewpoint note and the topic markers.
-export type GenerationRetryVersion = "jev_generation_retry_v1" | "jev_generation_retry_v2" | "jev_generation_retry_v4" | "jev_generation_retry_v5" | "jev_generation_retry_v6" | "jev_generation_retry_v7" | "jev_generation_retry_v8" | "jev_generation_retry_v9" | "jev_generation_retry_v10" | "jev_generation_retry_v11" | "jev_generation_retry_v12" | "jev_generation_retry_v13" | "jev_generation_retry_v14";
+export type GenerationRetryVersion = "jev_generation_retry_v1" | "jev_generation_retry_v2" | "jev_generation_retry_v4" | "jev_generation_retry_v5" | "jev_generation_retry_v6" | "jev_generation_retry_v7" | "jev_generation_retry_v8" | "jev_generation_retry_v9" | "jev_generation_retry_v10" | "jev_generation_retry_v11" | "jev_generation_retry_v12" | "jev_generation_retry_v13" | "jev_generation_retry_v14" | "jev_generation_retry_v15";
 export type RecordedGenerationRetryVersion = Exclude<GenerationRetryVersion, "jev_generation_retry_v1">;
 
-export function hasVersionedViewpoint(version: unknown): version is "jev_generation_retry_v4" | "jev_generation_retry_v5" | "jev_generation_retry_v6" | "jev_generation_retry_v7" | "jev_generation_retry_v8" | "jev_generation_retry_v9" | "jev_generation_retry_v10" | "jev_generation_retry_v11" | "jev_generation_retry_v12" | "jev_generation_retry_v13" | "jev_generation_retry_v14" {
-  return version === "jev_generation_retry_v4" || version === "jev_generation_retry_v5" || version === "jev_generation_retry_v6" || version === "jev_generation_retry_v7" || version === "jev_generation_retry_v8" || version === "jev_generation_retry_v9" || version === "jev_generation_retry_v10" || version === "jev_generation_retry_v11" || version === "jev_generation_retry_v12" || version === "jev_generation_retry_v13" || version === "jev_generation_retry_v14";
+export function hasVersionedViewpoint(version: unknown): version is "jev_generation_retry_v4" | "jev_generation_retry_v5" | "jev_generation_retry_v6" | "jev_generation_retry_v7" | "jev_generation_retry_v8" | "jev_generation_retry_v9" | "jev_generation_retry_v10" | "jev_generation_retry_v11" | "jev_generation_retry_v12" | "jev_generation_retry_v13" | "jev_generation_retry_v14" | "jev_generation_retry_v15" {
+  return version === "jev_generation_retry_v4" || version === "jev_generation_retry_v5" || version === "jev_generation_retry_v6" || version === "jev_generation_retry_v7" || version === "jev_generation_retry_v8" || version === "jev_generation_retry_v9" || version === "jev_generation_retry_v10" || version === "jev_generation_retry_v11" || version === "jev_generation_retry_v12" || version === "jev_generation_retry_v13" || version === "jev_generation_retry_v14" || isGenerationV15(version);
 }
 /** v5 or later: what v4 does, plus the confirm viewpoint note, the topic markers and the answer-resolving judgment material. */
-export function isGenerationV5(version: unknown): version is "jev_generation_retry_v5" | "jev_generation_retry_v6" | "jev_generation_retry_v7" | "jev_generation_retry_v8" | "jev_generation_retry_v9" | "jev_generation_retry_v10" | "jev_generation_retry_v11" | "jev_generation_retry_v12" | "jev_generation_retry_v13" | "jev_generation_retry_v14" {
-  return version === "jev_generation_retry_v5" || version === "jev_generation_retry_v6" || version === "jev_generation_retry_v7" || version === "jev_generation_retry_v8" || version === "jev_generation_retry_v9" || version === "jev_generation_retry_v10" || version === "jev_generation_retry_v11" || version === "jev_generation_retry_v12" || version === "jev_generation_retry_v13" || version === "jev_generation_retry_v14";
+export function isGenerationV5(version: unknown): version is "jev_generation_retry_v5" | "jev_generation_retry_v6" | "jev_generation_retry_v7" | "jev_generation_retry_v8" | "jev_generation_retry_v9" | "jev_generation_retry_v10" | "jev_generation_retry_v11" | "jev_generation_retry_v12" | "jev_generation_retry_v13" | "jev_generation_retry_v14" | "jev_generation_retry_v15" {
+  return version === "jev_generation_retry_v5" || version === "jev_generation_retry_v6" || version === "jev_generation_retry_v7" || version === "jev_generation_retry_v8" || version === "jev_generation_retry_v9" || version === "jev_generation_retry_v10" || version === "jev_generation_retry_v11" || version === "jev_generation_retry_v12" || version === "jev_generation_retry_v13" || version === "jev_generation_retry_v14" || isGenerationV15(version);
 }
 /** v6 or later: v5 plus the unsupported-topic-shift check (a draft that moves on while the chosen action is not a move), the scoped_v3 agreement scope and the notation on every question. */
-export function isGenerationV6(version: unknown): version is "jev_generation_retry_v6" | "jev_generation_retry_v7" | "jev_generation_retry_v8" | "jev_generation_retry_v9" | "jev_generation_retry_v10" | "jev_generation_retry_v11" | "jev_generation_retry_v12" | "jev_generation_retry_v13" | "jev_generation_retry_v14" {
-  return version === "jev_generation_retry_v6" || version === "jev_generation_retry_v7" || version === "jev_generation_retry_v8" || version === "jev_generation_retry_v9" || version === "jev_generation_retry_v10" || version === "jev_generation_retry_v11" || version === "jev_generation_retry_v12" || version === "jev_generation_retry_v13" || version === "jev_generation_retry_v14";
+export function isGenerationV6(version: unknown): version is "jev_generation_retry_v6" | "jev_generation_retry_v7" | "jev_generation_retry_v8" | "jev_generation_retry_v9" | "jev_generation_retry_v10" | "jev_generation_retry_v11" | "jev_generation_retry_v12" | "jev_generation_retry_v13" | "jev_generation_retry_v14" | "jev_generation_retry_v15" {
+  return version === "jev_generation_retry_v6" || version === "jev_generation_retry_v7" || version === "jev_generation_retry_v8" || version === "jev_generation_retry_v9" || version === "jev_generation_retry_v10" || version === "jev_generation_retry_v11" || version === "jev_generation_retry_v12" || version === "jev_generation_retry_v13" || version === "jev_generation_retry_v14" || isGenerationV15(version);
 }
 /** v7 or later: v6 plus the widened topic-shift wordings (particle-less "次いこう", "次の図形を見てみよう"), the scoped_v4 agreement scope and the reference-question binding. */
-export function isGenerationV7(version: unknown): version is "jev_generation_retry_v7" | "jev_generation_retry_v8" | "jev_generation_retry_v9" | "jev_generation_retry_v10" | "jev_generation_retry_v11" | "jev_generation_retry_v12" | "jev_generation_retry_v13" | "jev_generation_retry_v14" {
-  return version === "jev_generation_retry_v7" || version === "jev_generation_retry_v8" || version === "jev_generation_retry_v9" || version === "jev_generation_retry_v10" || version === "jev_generation_retry_v11" || version === "jev_generation_retry_v12" || version === "jev_generation_retry_v13" || version === "jev_generation_retry_v14";
+export function isGenerationV7(version: unknown): version is "jev_generation_retry_v7" | "jev_generation_retry_v8" | "jev_generation_retry_v9" | "jev_generation_retry_v10" | "jev_generation_retry_v11" | "jev_generation_retry_v12" | "jev_generation_retry_v13" | "jev_generation_retry_v14" | "jev_generation_retry_v15" {
+  return version === "jev_generation_retry_v7" || version === "jev_generation_retry_v8" || version === "jev_generation_retry_v9" || version === "jev_generation_retry_v10" || version === "jev_generation_retry_v11" || version === "jev_generation_retry_v12" || version === "jev_generation_retry_v13" || version === "jev_generation_retry_v14" || isGenerationV15(version);
 }
 /** v8 or later: v7 plus the direct pointing-reply match (a participant's agree that points at the public confirm question) and the scoped_v5 agreement scope. */
-export function isGenerationV8(version: unknown): version is "jev_generation_retry_v8" | "jev_generation_retry_v9" | "jev_generation_retry_v10" | "jev_generation_retry_v11" | "jev_generation_retry_v12" | "jev_generation_retry_v13" | "jev_generation_retry_v14" {
-  return version === "jev_generation_retry_v8" || version === "jev_generation_retry_v9" || version === "jev_generation_retry_v10" || version === "jev_generation_retry_v11" || version === "jev_generation_retry_v12" || version === "jev_generation_retry_v13" || version === "jev_generation_retry_v14";
+export function isGenerationV8(version: unknown): version is "jev_generation_retry_v8" | "jev_generation_retry_v9" | "jev_generation_retry_v10" | "jev_generation_retry_v11" | "jev_generation_retry_v12" | "jev_generation_retry_v13" | "jev_generation_retry_v14" | "jev_generation_retry_v15" {
+  return version === "jev_generation_retry_v8" || version === "jev_generation_retry_v9" || version === "jev_generation_retry_v10" || version === "jev_generation_retry_v11" || version === "jev_generation_retry_v12" || version === "jev_generation_retry_v13" || version === "jev_generation_retry_v14" || isGenerationV15(version);
 }
 /** v9 or later: v8 plus the wider wordings the orientation check accepts as a stated viewpoint ("こちらの画面で", "こちらの上の…") and as the partner's own words ("そちらでいう…"), and the ai_bound_target provenance of a bound question target. */
-export function isGenerationV9(version: unknown): version is "jev_generation_retry_v9" | "jev_generation_retry_v10" | "jev_generation_retry_v11" | "jev_generation_retry_v12" | "jev_generation_retry_v13" | "jev_generation_retry_v14" {
-  return version === "jev_generation_retry_v9" || version === "jev_generation_retry_v10" || version === "jev_generation_retry_v11" || version === "jev_generation_retry_v12" || version === "jev_generation_retry_v13" || version === "jev_generation_retry_v14";
+export function isGenerationV9(version: unknown): version is "jev_generation_retry_v9" | "jev_generation_retry_v10" | "jev_generation_retry_v11" | "jev_generation_retry_v12" | "jev_generation_retry_v13" | "jev_generation_retry_v14" | "jev_generation_retry_v15" {
+  return version === "jev_generation_retry_v9" || version === "jev_generation_retry_v10" || version === "jev_generation_retry_v11" || version === "jev_generation_retry_v12" || version === "jev_generation_retry_v13" || version === "jev_generation_retry_v14" || isGenerationV15(version);
 }
 /** v10 or later: v9 plus the narrower quotation exemption: a direction word inside the phrase quoted after "そちらでいう" is excused only when the participant used that very word in public. */
-export function isGenerationV10(version: unknown): version is "jev_generation_retry_v10" | "jev_generation_retry_v11" | "jev_generation_retry_v12" | "jev_generation_retry_v13" | "jev_generation_retry_v14" {
-  return version === "jev_generation_retry_v10" || version === "jev_generation_retry_v11" || version === "jev_generation_retry_v12" || version === "jev_generation_retry_v13" || version === "jev_generation_retry_v14";
+export function isGenerationV10(version: unknown): version is "jev_generation_retry_v10" | "jev_generation_retry_v11" | "jev_generation_retry_v12" | "jev_generation_retry_v13" | "jev_generation_retry_v14" | "jev_generation_retry_v15" {
+  return version === "jev_generation_retry_v10" || version === "jev_generation_retry_v11" || version === "jev_generation_retry_v12" || version === "jev_generation_retry_v13" || version === "jev_generation_retry_v14" || isGenerationV15(version);
 }
 /** v11 or later: v10 plus the participant's words as the one source of an excused direction word (recent, not negated, also inside brackets and after "そちらの"), the wider own/partner viewpoint forms,
  * the cause reading that no longer takes "から、" (from) or "のです" as a premise, and the reference-question reply rules (ask rewrite, denied question). */
-export function isGenerationV11(version: unknown): version is "jev_generation_retry_v11" | "jev_generation_retry_v12" | "jev_generation_retry_v13" | "jev_generation_retry_v14" {
-  return version === "jev_generation_retry_v11" || version === "jev_generation_retry_v12" || version === "jev_generation_retry_v13" || version === "jev_generation_retry_v14";
+export function isGenerationV11(version: unknown): version is "jev_generation_retry_v11" | "jev_generation_retry_v12" | "jev_generation_retry_v13" | "jev_generation_retry_v14" | "jev_generation_retry_v15" {
+  return version === "jev_generation_retry_v11" || version === "jev_generation_retry_v12" || version === "jev_generation_retry_v13" || version === "jev_generation_retry_v14" || isGenerationV15(version);
 }
 /** jev_generation_retry_v12 (D1 / #203 G.1, contains v11): the classifier also labels whether an agree answers the point the AI checked, and a typed agree that does so counts as the answer. */
-export function isGenerationV12(version: unknown): version is "jev_generation_retry_v12" | "jev_generation_retry_v13" | "jev_generation_retry_v14" {
-  return version === "jev_generation_retry_v12" || version === "jev_generation_retry_v13" || version === "jev_generation_retry_v14";
+export function isGenerationV12(version: unknown): version is "jev_generation_retry_v12" | "jev_generation_retry_v13" | "jev_generation_retry_v14" | "jev_generation_retry_v15" {
+  return version === "jev_generation_retry_v12" || version === "jev_generation_retry_v13" || version === "jev_generation_retry_v14" || isGenerationV15(version);
 }
 /** v13 or later opts into P5 shared construals on top of the v12 rules. */
-export function isGenerationV13(version: unknown): version is "jev_generation_retry_v13" | "jev_generation_retry_v14" {
-  return version === "jev_generation_retry_v13" || version === "jev_generation_retry_v14";
+export function isGenerationV13(version: unknown): version is "jev_generation_retry_v13" | "jev_generation_retry_v14" | "jev_generation_retry_v15" {
+  return version === "jev_generation_retry_v13" || version === "jev_generation_retry_v14" || isGenerationV15(version);
 }
 /** v14 opts into the isolated pre-publication Jev semantic check for P5 non-naming overclaims (draft_shared_claim). */
 export function isGenerationV14(version: unknown): version is "jev_generation_retry_v14" {
   return version === "jev_generation_retry_v14";
 }
+/** v15 inherits v13's requests; the separate v14 shared-claim check remains opt-in. */
+export function isGenerationV15(version: unknown): version is "jev_generation_retry_v15" {
+  return version === "jev_generation_retry_v15";
+}
+
 export function validAgreeNameScope(scope: unknown, generation: unknown): boolean {
   if (scope === "scoped_v9" || scope === "scoped_v10") return generation === "jev_generation_retry_v12";
-  if (scope === "scoped_v11") return generation === "jev_generation_retry_v12" || generation === "jev_generation_retry_v13";
+  if (scope === "scoped_v11") return generation === "jev_generation_retry_v12" || generation === "jev_generation_retry_v13" || isGenerationV15(generation);
   if (scope === "scoped_v7" || scope === "scoped_v8") return isGenerationV12(generation);
   if (isGenerationV11(generation)) return scope === "scoped_v6";
   if (isGenerationV8(generation)) return scope === "scoped_v5";
@@ -571,6 +576,53 @@ export function findGuardViolations(text: string, action: Action): string[] {
 const AGREEMENT_CODES = new Set(patterns.map(([code]) => code));
 /** True for the naming-decision wording families (pre-holistic set); holistic_v1 uses them only as a question trigger, never as a blocker. */
 export const isAgreementWordCode = (code: string) => AGREEMENT_CODES.has(code);
+export function currentTurnNamingSource(execution: Pick<JevExecutedDecision, "action" | "target" | "name">,
+  candidates: readonly PublicNameCandidate[], turn: number,
+  proposals: readonly { sourceTurn: number; name: string | null; targets: readonly string[] }[] = []): boolean {
+  if (execution.action !== "agree" || execution.target.kind !== "single" || !execution.name) return false;
+  const figureId = execution.target.figureId, selectedName = normalize(execution.name);
+  if (proposals.some(p => p.sourceTurn === turn && (p.name === null || normalize(p.name) !== selectedName ||
+    p.targets.length > 0 && (p.targets.length !== 1 || p.targets[0] !== figureId)))) return false;
+  const current = candidates.filter(candidate => candidate.sourceTurn === turn);
+  return current.length > 0 && current.every(candidate =>
+    candidate.figureId === figureId && normalize(candidate.name) === selectedName);
+}
+
+/** A semantic result can replace only the literal-name checks for the selected act. */
+export function semanticNamingCodes(found: readonly string[], action: Action, choice: DraftAct | null,
+  currentTurnSource: boolean): string[] {
+  const naming = action === "agree" || action === "propose_name";
+  if (!choice) return [...found, "draft_act_unconfirmed"];
+  const adoption = choice === "adopt_chosen" || choice === "adopt_other" || choice === "adopt_context";
+  const proposal = choice === "propose_chosen" || choice === "propose_question";
+  const matches = action === "agree" ? choice === "adopt_chosen" || choice === "adopt_context" && currentTurnSource
+    : action === "propose_name" ? choice === "propose_chosen" : !adoption && !proposal;
+  if (!matches) return [...found, "draft_act_mismatch"];
+  return naming ? found.filter(code => code !== "name_mismatch" && code !== "name_not_shown") : [...found];
+}
+
+/** No new Jev send when the old trigger would not have asked. A self-contained
+ * question that proposes only the selected name for the current shape is decidable
+ * locally; other drafts need the existing semantic check. */
+export function namingCodesWithoutQuestion(found: readonly string[], text: string, action: Action, name: string | null): string[] {
+  const draft = normalize(text);
+  if (action !== "propose_name") {
+    return /(?:と|って)呼(?:びませんか|ぶのはどう(?:ですか|でしょう)|んでみませんか)\?/u.test(draft)
+      ? [...found, "draft_act_mismatch"] : [...found];
+  }
+  const label = name ? normalize(name) : "";
+  if (label && !/[。.!！?？、,;；]/u.test(label)) {
+    const bare = label.replace(/[「」『』"“”]/gu, "");
+    const forms = new Set([label, "「" + label + "」", "『" + label + "』", '"' + label + '"',
+      ...(bare ? [bare, "「" + bare + "」", "『" + bare + "』"] : [])]);
+    const suffixes = ["と呼びませんか?", "と呼ぶのはどうですか?", "と呼ぶのはどうでしょう?", "と呼んでみませんか?", "にしませんか?"];
+    const current = draft.replace(/^(?:この形|この図形|その形)を/u, "");
+    if ([...forms].some(form => suffixes.some(suffix => current === form + suffix))) {
+      return found.filter(code => code !== "name_mismatch" && code !== "name_not_shown");
+    }
+  }
+  return [...found, "draft_act_missing_evidence"];
+}
 /** holistic_v1 question trigger: the naming-act wording families (pre-holistic set, 「で呼…」「で決め…」, and the 「呼び名・名前は『X』です」 type), and
  * quoted strings. Codes only, never matched text. */
 export function findNamingActHints(text: string): { wording: boolean; quoted: string[] } {
@@ -599,7 +651,7 @@ export function rewriteReasons(codes: readonly string[], policy?: DialoguePolicy
     codes.some((code) => code.startsWith("internal_")) ? "前の下書きには内部の参照IDや作業メモの項目が含まれていました。それらを出さずに書き直してください。" : "",
     codes.includes("working_note") ? "前の下書きに、英語の作業メモや複数の返答案が混じっていました。日本語の一つの返答だけにして書き直してください。" : "",
     codes.includes("draft_act_mismatch") ? "前の下書きの命名に関する行為が、選んだ行動と合っていませんでした。選んだ行動の範囲で、命名に関する行為を行動に合わせて書き直してください。" : "",
-    codes.includes("draft_act_unconfirmed") ? "前の下書きの命名に関する行為を確認できませんでした。選んだ行動の範囲で、命名に関する行為が明確になるように書き直してください。" : "",
+    codes.includes("draft_act_unconfirmed") || codes.includes("draft_act_missing_evidence") ? "前の下書きの命名に関する行為を確認できませんでした。選んだ行動の範囲で、命名に関する行為が明確になるように書き直してください。" : "",
     codes.includes("name_not_shown") ? "このactionで扱う名前を、「」で囲んで発話の中に示してください。" : "",
     codes.includes("draft_shared_claim_single_id") ? "前の下書きは、候補が一つに絞れていないのに同じ一つの図形に特定できたと断定していました。候補の範囲を保ち、単一の図形に決まったと断定せずに書き直してください。" : "",
     codes.includes("draft_shared_claim_unconfirmed_detail") ? "前の下書きは、未確認・保留の細部が一致したと断定していました。未確認・保留の細部を一致と断定せず、大まかな共有見立ての範囲で書き直してください。" : "",
@@ -664,7 +716,7 @@ export function generationGuardCodes(text: string, c: GenerationCodeContext): st
     ...(c.v3 ? findOrientationLeaks(text, c.dialoguePolicy, c.generationRetryVersion, c.humanTexts, c.recentHumanTexts, c.publicTexts) : []),
     ...(c.v3 ? findWorkingNoteLeaks(text, c.publicTexts) : []),
     ...(c.v3 && isGenerationV6(c.generationRetryVersion) && c.action !== "move_on" && c.action !== "defer" && c.action !== "close" &&
-      (c.vetoed === true || c.action === "confirm" || c.action === "repair") ? (isGenerationV11(c.generationRetryVersion) ? findTopicShiftClaimsV11(text) : isGenerationV7(c.generationRetryVersion) ? findTopicShiftClaimsV7(text) : findTopicShiftClaims(text)) : []),
+      (isGenerationV15(c.generationRetryVersion) || c.vetoed === true || c.action === "confirm" || c.action === "repair") ? (isGenerationV11(c.generationRetryVersion) ? findTopicShiftClaimsV11(text) : isGenerationV7(c.generationRetryVersion) ? findTopicShiftClaimsV7(text) : findTopicShiftClaims(text)) : []),
     ...(c.v3 && c.action === "agree" && c.candidateName !== null ? findAgreeNameMismatch(text, c.candidateName) : []),
     ...(c.v3 && c.action === "propose_name" && c.candidateName !== null ? findProposeNameMismatch(text, c.candidateName) : []),
     ...(c.adaptive && /repair[_-]?prospect|repair_issue|candidate_narrowed|candidate_widened|other_figure_benefit|no_open_issue|issue_\d+/iu.test(squeezed) ? ["internal_field"] : []),
@@ -689,6 +741,26 @@ export function deriveGenerationOutcome(first: readonly string[], retry: readonl
   if (!retry.length) return { kind: "publish_retry", regenerated: true, violations: union };
   const orientationOnly = union.length === 1 && union[0] === "orientation_leak" && retry.length === 1 && retry[0] === "orientation_leak";
   return { kind: orientationOnly && fallbackText !== null && fallbackClean ? "fallback" : "stop", regenerated: true, violations: union };
+}
+
+export type PublicationRecovery = { reason: "draft_content_mismatch"; act: "confirm_current_topic" | "restate_selected_action" };
+const RECOVERABLE_CONTENT = new Set([
+  "name_mismatch", "name_not_shown", "draft_act_mismatch", "draft_act_missing_evidence",
+  "self_repair", "unsolicited_deferral", "unsupported_topic_shift", "shared_view_assumption",
+  "draft_shared_claim_single_id", "draft_shared_claim_unconfirmed_detail",
+]);
+
+/** Only completed content checks can lead here. Transport, malformed results and
+ * leakage codes must continue through the existing error path. */
+export function contentPublicationRecovery(violations: readonly string[], execution: Pick<JevExecutedDecision, "action" | "target">) {
+  if (!violations.length || violations.some(code => !RECOVERABLE_CONTENT.has(code))) return null;
+  const naming = execution.action === "agree" || execution.action === "propose_name";
+  const action = naming ? "confirm" : execution.action;
+  const text = naming ? "今お話ししている形は、どの特徴を目印にすると見分けられそうですか？" : orientationNeutral[action];
+  if (!text) return null;
+  const recovery: PublicationRecovery = { reason: "draft_content_mismatch", act: naming ? "confirm_current_topic" : "restate_selected_action" };
+  return { recovery, text, judgment: { action, targetSlot: execution.target.kind === "single" ? execution.target.figureId : null,
+    candidateName: null, discriminatingFeature: null, note: null } };
 }
 
 /** Fail closed on unsafe bounded strings: schema-valid text is still untrusted. */

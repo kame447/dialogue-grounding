@@ -62,6 +62,8 @@ const workerDialogue = {
   participant_dialogue_v12_naming_v4: { ...dialogueV12, newTrialAgreeNameScopeVersion: 'scoped_v11' },
   participant_dialogue_v13_p5: dialogueV13P5,
   participant_dialogue_v13_p5_naming_v4: { ...dialogueV13P5, newTrialAgreeNameScopeVersion: 'scoped_v11' },
+  participant_dialogue_v13_p5_semantic_guard: { ...dialogueV13P5, newTrialAgreeNameScopeVersion: 'scoped_v11',
+    pinnedVersions: { ...dialogueV13P5.pinnedVersions, generationRetryVersion: 'jev_generation_retry_v15' } },
 } as const;
 const workerDialogueProfileSha = researchHash(dialogueV12.profile);
 
