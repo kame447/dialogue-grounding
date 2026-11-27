@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { GENERATION_V22, ISSUE_HANDLING_GENERATION } from "../dialogue-model/runtime/v2/deferred-ai-extraction.ts";
+import { GENERATION_RETRY_V22 as GENERATION_V22, ISSUE_HANDLING_GENERATION } from "../dialogue-model/runtime/v2/deferred-ai-extraction.ts";
 import { buildJevDraftActPayload } from "../dialogue-model/runtime/decision/jev-decision.ts";
 import type { DraftTopicShiftResult } from "../dialogue-model/runtime/decision/contract.ts";
 import { issueHandlingForStrategy } from "../dialogue-model/runtime/decision/issue-handling.ts";

@@ -6,11 +6,11 @@ import { literalSpan } from "../judgment/public-evidence.mjs";
 
 export const DEFERRED_AI_EXTRACTION_GENERATION = "jev_generation_retry_v20";
 export const ISSUE_HANDLING_GENERATION = "jev_generation_retry_v21";
-export const GENERATION_V22 = "jev_generation_retry_v22";
-export const isGenerationV22 = (value: unknown): value is typeof GENERATION_V22 => value === GENERATION_V22;
-export const isIssueHandlingGeneration = (value: unknown): value is typeof ISSUE_HANDLING_GENERATION | typeof GENERATION_V22 =>
+export const GENERATION_RETRY_V22 = "jev_generation_retry_v22";
+export const isGenerationV22 = (value: unknown): value is typeof GENERATION_RETRY_V22 => value === GENERATION_RETRY_V22;
+export const isIssueHandlingGeneration = (value: unknown): value is typeof ISSUE_HANDLING_GENERATION | typeof GENERATION_RETRY_V22 =>
   value === ISSUE_HANDLING_GENERATION || isGenerationV22(value);
-export const isDeferredAiExtractionGeneration = (value: unknown): value is typeof DEFERRED_AI_EXTRACTION_GENERATION | typeof ISSUE_HANDLING_GENERATION | typeof GENERATION_V22 =>
+export const isDeferredAiExtractionGeneration = (value: unknown): value is typeof DEFERRED_AI_EXTRACTION_GENERATION | typeof ISSUE_HANDLING_GENERATION | typeof GENERATION_RETRY_V22 =>
   value === DEFERRED_AI_EXTRACTION_GENERATION || isIssueHandlingGeneration(value);
 
 export type DeferredAiExtractionJob = {

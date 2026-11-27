@@ -3,6 +3,7 @@ import type { ResearchLimits } from '../v2/research-timeouts.ts';
 // Closed-set interpretation only; this module never promotes claims or changes policy.
 import { LOCAL_ACTS, LOCAL_ASPECTS, LOCAL_SOURCES } from "./contract.ts";
 import type { LocalAct, LocalClassificationInput, LocalFunctionClassifier, LocalFunctionVerdict } from "./contract.ts";
+import { retainedClaimMatches, validRetainedReferenceHistory } from "./reference-evidence.ts";
 
 export type LocalClassificationErrorCode = "invalid_input" | "invalid_json" | "invalid_response" | "segment_mismatch" |
   "timeout" | "aborted" | "unavailable";
@@ -75,30 +76,51 @@ export function buildLocalClassificationState(input: LocalClassificationInput): 
     });
   const current = publicTurns.filter((t) => t.turn === input.turn && t.speaker === "human");
   if (current.length !== 1) fail("invalid_input");
+  const retained = input.retainedReferenceHistory;
+  if (retained !== undefined && !validRetainedReferenceHistory(retained, publicTurns, input.turn)) fail("invalid_input");
   const ids = new Set<string>();
   const segments = input.segments.map((s) => {
     if (!s || !text(s.segmentId, 64) || ids.has(s.segmentId) || !text(s.quote, 160) || !current[0].text.includes(s.quote) ||
         !targets(s.targets) || !includes(LOCAL_ASPECTS, s.aspect) || !text(s.proposition, 160) ||
         !(s.name === null || s.aspect === "name" && text(s.name, 80)) || !nullableText(s.linkedIssueId, 128) ||
-        !(s.respondsToTurn === null || positive(s.respondsToTurn) && s.respondsToTurn < input.turn && publicTurns.some((t) => t.turn === s.respondsToTurn))) fail("invalid_input");
+        !(s.respondsToTurn === null || positive(s.respondsToTurn) && s.respondsToTurn < input.turn &&
+          (publicTurns.some((t) => t.turn === s.respondsToTurn) || retained?.some(row => row.sourceTurn === s.respondsToTurn)))) fail("invalid_input");
     ids.add(s.segmentId);
     return { segmentId: s.segmentId, quote: s.quote, targets: [...s.targets], aspect: s.aspect, proposition: s.proposition,
       name: s.name, linkedIssueId: s.linkedIssueId, respondsToTurn: s.respondsToTurn };
   });
   const claimIds = new Set<string>();
   const priorClaims = input.priorClaims.filter((c) => c?.turn <= input.turn && c.sourceTurn < input.turn &&
-    publicTurns.some((t) => t.turn === c.sourceTurn && t.speaker === c.speaker)).map((c) => {
+    (publicTurns.some((t) => t.turn === c.sourceTurn && t.speaker === c.speaker) ||
+      retained?.some(row => retainedClaimMatches(row, c)))).map((c) => {
+    const historical = retained?.find(row => retainedClaimMatches(row, c));
     if (!text(c.id, 128) || claimIds.has(c.id) || !positive(c.turn) || !positive(c.sourceTurn) || c.sourceTurn > c.turn ||
         !targets(c.targets) || !includes(LOCAL_ASPECTS, c.aspect) || !includes(LOCAL_ACTS, c.act) || c.act === ("unknown" as string) ||
         !includes(["human", "ai"], c.speaker) || !includes(LOCAL_SOURCES, c.source) || !text(c.proposition, 160) ||
         !(c.name === null || c.aspect === "name" && text(c.name, 80)) || !text(c.quote, 160) ||
-        !publicTurns.some((t) => t.turn === c.sourceTurn && t.speaker === c.speaker && t.text.includes(c.quote))) fail("invalid_input");
+        !(historical || publicTurns.some((t) => t.turn === c.sourceTurn && t.speaker === c.speaker && t.text.includes(c.quote)))) fail("invalid_input");
     claimIds.add(c.id);
     // Only the candidate provenance needed for functional classification is forwarded.
     return { id: c.id, aspect: c.aspect, targets: [...c.targets], act: c.act, speaker: c.speaker,
-      sourceTurn: c.sourceTurn, proposition: c.proposition, name: c.name };
+      sourceTurn: c.sourceTurn, proposition: c.proposition, name: c.name,
+      ...(historical ? { quote: historical.quote, respondsTo: historical.respondsTo, retained: true as const } : {}) };
   });
-  const state = JSON.stringify({ turn: input.turn, publicTurns, segments, priorClaims });
+  const stateFor = (claims: typeof priorClaims) => JSON.stringify({ turn: input.turn, publicTurns,
+    segments: retained ? segments.map(segment => segment.respondsToTurn !== null &&
+      retained.some(row => row.sourceTurn === segment.respondsToTurn) &&
+      !claims.some(claim => claim.retained && claim.sourceTurn === segment.respondsToTurn)
+      ? { ...segment, respondsToTurn: null } : segment) : segments,
+    priorClaims: claims });
+  let state = stateFor(priorClaims);
+  // Supplementary rows can use the spare budget, preserving every recent row.
+  const historicalIds = (retained ?? []).map(row => row.claimId).reverse();
+  for (const id of historicalIds) {
+    if (state.length <= 20000) break;
+    const index = priorClaims.findIndex(claim => claim.id === id && claim.retained);
+    if (index < 0) continue;
+    priorClaims.splice(index, 1);
+    state = stateFor(priorClaims);
+  }
   if (state.length > 20000) fail("invalid_input");
   return state;
 }
