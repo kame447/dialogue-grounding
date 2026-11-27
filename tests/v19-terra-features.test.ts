@@ -3,6 +3,7 @@ import test from "node:test";
 import { verifyRecords } from "../dialogue-model/runtime/diagnostics/parity-verify/index.ts";
 import { VISUAL_FEATURE_GENERATION } from "../dialogue-model/runtime/v2/generation-guard.ts";
 import type { ObservationMemo } from "../dialogue-model/runtime/observation/contract.ts";
+import type { LocalOwnAnchor } from "../dialogue-model/runtime/local-grounding/contract.ts";
 import { readVisualFeatureDraft, readVisualFeatureEvidence } from "../dialogue-model/runtime/v2/visual-feature-evidence.ts";
 import { buildRecords, OWN } from "./support/s4-v3-records.ts";
 
@@ -17,7 +18,7 @@ const profile = { dialoguePolicy: "holistic_v5", technicalTrial: { version: "ada
   agreeNameScopeVersion: "jev_naming_v1", generationRetryVersion: VISUAL_FEATURE_GENERATION } as const;
 const memo = (count: 4 | 6): ObservationMemo => ({
   observedAt: "2000-01-01T00:00:00.000Z",
-  figures: OWN.ownAnchors.slice(0, count).map(anchor => ({
+  figures: OWN.ownAnchors.slice(0, count).map((anchor: LocalOwnAnchor) => ({
     id: anchor.id, region: anchor.bbox, holistic: [], unknowns: [], reobservations: [],
     analytic: { shapes: ["三角の部分"], composition: "小さい部分と大きい部分",
       relations: anchor.id === first.id ? ["小さい部分と細い台の接続"] : [] },
@@ -63,6 +64,41 @@ test("v19 allows an honest unresolved response and preserves the selected target
     assert.deepEqual(turn.trace.generatedPublication?.visualFeatures, { sources: [] });
     assert.equal(turn.speech, unclear);
   } });
+});
+
+test("v19 links the chosen public issue and keeps an existing name through visual repair", async () => {
+  const ask = "細い台とのつながり方が違いますか？";
+  const before = { status: "agreed", name: "帆" };
+  const proposal = "その形を「帆」と呼びましょう。";
+  const records = await buildRecords({ ...profile, memo: memo(6), turns: [{ human: proposal, plan: {
+    action: "agree", target: "figure_0", name: before.name, act: "name_propose", referent: "figure_0",
+    speech: "ええ、「帆」にしましょう。",
+    extraction: JSON.stringify([{ segmentId: "name", quote: proposal, proposition: proposal, targets: [first.id],
+      aspect: "name", name: before.name, linkedIssueId: null, respondsToTurn: null }]),
+    choose: key => key === "naming_grounding" ? "grounded_name_0" : key === "naming_evidence" ? "turn_1"
+      : key === "human_move_on_source" ? "other" : undefined,
+  } }, { human: ask, plan: {
+    action: "repair", target: "figure_0", act: "ask",
+    extraction: JSON.stringify([{ segmentId: "question", quote: ask, proposition: ask, targets: [first.id],
+      aspect: "question", name: null, linkedIssueId: null, respondsToTurn: null }]),
+    speech: JSON.stringify({ text, observationFeatures: [firstSource] }),
+    aiExtraction: JSON.stringify({ segments: [], visualFeatures: { sources: [{ quote: text, source: firstSource }] } }),
+    choose: (key, criteria) => key === "visual_purpose" ? Object.keys(criteria).find(label =>
+      label.startsWith("issue_") && JSON.parse(criteria[label]).sourceTurn === 3)
+      : key === "human_move_on_source" ? "other" : undefined,
+  } }],
+  onTurn(_label, turn) {
+    assert.deepEqual(turn.state.ledger[first.id], before);
+    if (turn.trace.turnIndex === 1) return;
+    const purpose = turn.trace.executed.visualPurpose;
+    assert.equal(purpose?.kind, "resolve_issue");
+    assert.equal(turn.state.repairHistory.at(-1).issueId, purpose.issueId);
+    assert.equal(turn.state.repairHistory.at(-1).question, text);
+    assert.equal(turn.trace.generatedPublication?.visualPurposeSources?.[0].quote, ask);
+  } });
+  const checks = verifyRecords(records).checks.filter(check => check.id.startsWith("intervention.trial.0.attempt.0."));
+  assert.equal(checks.length, 4);
+  for (const check of checks) assert.equal(check.status, "pass", JSON.stringify(check));
 });
 
 test("v19 feature references must resolve on the selected figures and the extracted quote must come from the utterance", () => {

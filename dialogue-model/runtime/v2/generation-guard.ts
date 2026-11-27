@@ -753,6 +753,7 @@ export function generationGuardCodes(text: string, c: GenerationCodeContext): st
     ...(c.adaptive && /repair[_-]?prospect|repair_issue|candidate_narrowed|candidate_widened|other_figure_benefit|no_open_issue|issue_\d+/iu.test(squeezed) ? ["internal_field"] : []),
     ...(c.factored && /repair_?facts|reply_?vs_?previous|not_comparable|widened_or_shifted|same_?question|local_?gaps/iu.test(squeezed) ? ["internal_field"] : []),
     ...(/human[_-]?referent/iu.test(squeezed) ? ["internal_field"] : []),
+    ...(isGenerationV19(c.generationRetryVersion) && /(?<![A-Za-z])(?:visualPurpose|observationFeatures|visualFeatures|detailFigureIds)(?![A-Za-z])/u.test(squeezed) ? ["internal_field"] : []),
     ...(c.ai && /\d+:pub\d+/u.test(text.normalize("NFKC").replace(/[\s\u200b-\u200d\ufeff]+/gu, "")) ? ["internal_id"] : [])])];
 }
 export type GenerationOutcome = { kind: "publish_first" | "publish_retry" | "fallback" | "stop"; regenerated: boolean; violations: string[] };

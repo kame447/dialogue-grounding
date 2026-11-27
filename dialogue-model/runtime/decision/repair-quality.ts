@@ -1,12 +1,13 @@
 import type { LocalClaimView, PublicTurn } from "../local-grounding/contract.ts";
-import type { JevAction, JevDecisionStageEvidence, JevExecutedDecision, RepairHistoryEntry } from "./contract.ts";
+import { localIssueState } from "../local-grounding/derive.ts";
+import type { JevAction, JevDecisionStageEvidence, JevExecutedDecision, JevTarget, JevVisualPurpose, RepairHistoryEntry } from "./contract.ts";
 
 export const JEV_REPAIR_QUALITY_VERSION = "jev_repair_quality_v1";
 export type JudgmentMaterialVersion = typeof JEV_REPAIR_QUALITY_VERSION;
 
 export const PUBLICATION_RECOVERY_REASONS = ["naming_conflict", "naming_unresolved", "publication_mismatch"] as const;
 export type JevPublicationRecoveryContext = {
-  previous: Pick<JevExecutedDecision, "action" | "target" | "name" | "feature">;
+  previous: Pick<JevExecutedDecision, "action" | "target" | "name" | "feature" | "visualPurpose">;
   reason: typeof PUBLICATION_RECOVERY_REASONS[number];
 };
 
@@ -70,6 +71,33 @@ export const REPAIR_QUALITY_ACTION: Partial<Record<JevAction, string>> = {
 };
 
 export const REPAIR_QUALITY_DETAIL = "公開の問い、局所論点、今までの確認に対する人の同意・否定・訂正を読み、今の対象に必要で実質的に情報を増やせる特徴を選んでください。候補を弁別する必要があるときは、候補を見比べて差が分かる形やつながりを使い、共通の特徴の再質問を避けます。候補の説明が無いことを特徴の不存在とみなしません。既に扱った特徴は、未解決の矛盾を別の根拠で調べるなど理由がある場合に選べます。";
+export const VISUAL_PURPOSE_QUESTION = "visual_purpose";
+export const VISUAL_PURPOSE_GUIDANCE = "確認・修復では、まず行動と対象を決め、次にその範囲で解消すべき対話上の論点を選びます。発話で扱う具体的な視覚特徴はTerraが選びます。相手の問い・肯否・訂正に着目し、観察メモに記述がないことを特徴がない証拠や、別の共通特徴を尋ねる理由にしないでください。自分の画像の再観察で解けると判断した場合は、対象と論点を指定して再観察を選べます。";
+export const VISUAL_PURPOSE_CRITERIA = Object.freeze({
+  clarify_reference: "相手がどの図形を指しているか、または候補間の対応を明らかにする。",
+  resolve_mismatch: "同じ対象について公開対話のどこで理解が食い違ったかを確かめる。",
+  unknown: "対象の範囲は保ち、どの論点かはまだ特定できない。無関係な特徴や一致を仮定しない。",
+});
+export const visualIssueLabel = (index: number) => `issue_${index}`;
+export function visualPurposeSources(claims: readonly LocalClaimView[], target: JevTarget): LocalClaimView[] {
+  const scope = target.kind === "none" ? [] : target.kind === "single" ? [target.figureId] : target.figureIds;
+  const grouped = new Map<string, LocalClaimView[]>();
+  for (const claim of claims) {
+    if (claim.aspect === "progress" || claim.act === "withdraw" || !claim.targets.some(id => scope.includes(id))) continue;
+    const group = grouped.get(claim.issueId) ?? [];
+    group.push(claim);
+    grouped.set(claim.issueId, group);
+  }
+  return [...grouped.values()].flatMap(group => {
+    const active = [...group].sort((a, b) => a.sourceTurn - b.sourceTurn || a.turn - b.turn);
+    const sources = active.filter(c => !["acknowledge", "defer", "revisit"].includes(c.act));
+    if (localIssueState(active, false) === "supported" && sources.at(-1)?.act !== "ask") return [];
+    return sources;
+  });
+}
+export function issuePurpose(claim: LocalClaimView): Extract<JevVisualPurpose, { kind: "resolve_issue" }> {
+  return { kind: "resolve_issue", issueId: claim.issueId, claimId: claim.id, sourceTurn: claim.sourceTurn };
+}
 export const REPAIR_QUALITY_PROSPECT = "今の修復論点に関する新しい内容、候補の実際の変化、または次に確かめられる具体的な根拠を示せるときに進展の見込みを認めてください。別の論点の新発話、相槌、質問の反復、局所で確認できた一部の情報だけでは判断しません。欠測・棄却や不明は矛盾や解決の根拠になりません。";
 export const REPAIR_QUALITY_PROGRESSING = "今も解ける局所論点に、次の修復で実質的に情報を増やす具体的な根拠がある。";
 export const REPAIR_QUALITY_NEW_INFORMATION = "今の修復論点に関して、観察や公開の応答から新しい実質的な内容が得られた。";
