@@ -82,11 +82,15 @@ export function reconfirmationPossible(proposals: readonly NamingClaimLike[], tu
   });
 }
 
-export type AgreeNameScopeVersion = "scoped_v1" | "scoped_v2" | "scoped_v3" | "scoped_v4" | "scoped_v5" | "scoped_v6" | "scoped_v7" | "scoped_v8" | "scoped_v9" | "scoped_v10" | "scoped_v11" | "jev_naming_v1";
-export function retainsLocalQuestionAnswers(scope: unknown): scope is "scoped_v10" | "scoped_v11" | "jev_naming_v1" {
-  return scope === "scoped_v10" || scope === "scoped_v11" || scope === "jev_naming_v1";
+type JevNamingScope = "jev_naming_v1" | "jev_naming_v2";
+export type AgreeNameScopeVersion = "scoped_v1" | "scoped_v2" | "scoped_v3" | "scoped_v4" | "scoped_v5" | "scoped_v6" | "scoped_v7" | "scoped_v8" | "scoped_v9" | "scoped_v10" | "scoped_v11" | JevNamingScope;
+export function usesJevNaming(scope: unknown): scope is JevNamingScope {
+  return scope === "jev_naming_v1" || scope === "jev_naming_v2";
 }
-export function usesDirectNamingReplies(scope: unknown): scope is "scoped_v9" | "scoped_v10" | "scoped_v11" | "jev_naming_v1" {
+export function retainsLocalQuestionAnswers(scope: unknown): scope is "scoped_v10" | "scoped_v11" | JevNamingScope {
+  return scope === "scoped_v10" || scope === "scoped_v11" || usesJevNaming(scope);
+}
+export function usesDirectNamingReplies(scope: unknown): scope is "scoped_v9" | "scoped_v10" | "scoped_v11" | JevNamingScope {
   return scope === "scoped_v9" || retainsLocalQuestionAnswers(scope);
 }
 export function usesPublicNamingTarget(scope: unknown): scope is Exclude<AgreeNameScopeVersion, "scoped_v1"> {
@@ -95,9 +99,18 @@ export function usesPublicNamingTarget(scope: unknown): scope is Exclude<AgreeNa
 
 export type NamingJudgmentLike = {
   turnIndex?: unknown; judgment?: { action?: unknown } | null; generationGuard?: { fallback?: boolean } | null;
-  jevTurn?: { humanReferent?: unknown; executed?: { target: { kind: string; figureId?: string; figureIds?: readonly string[] } } } | null;
+  jevTurn?: { humanReferent?: unknown; executed?: { target: { kind: string; figureId?: string; figureIds?: readonly string[] }; destination?: { kind: string } } } | null;
+  generatedPublication?: { transition?: unknown; recovery?: { executed?: { action?: string; destination?: { kind: string } } } | null } | null;
   aiPublic?: { aiSeq?: number };
 };
+
+export function isNamingIntervalBoundary(judgment: NamingJudgmentLike, issueHandling = false): boolean {
+  const action = judgment.judgment?.action;
+  if (!issueHandling) return action === "agree" || action === "defer" || action === "move_on";
+  const destination = judgment.generatedPublication?.recovery?.executed?.destination ?? judgment.jevTurn?.executed?.destination;
+  return action === "agree" || !!judgment.generatedPublication?.transition ||
+    action === "carry_over" && (destination?.kind === "partner_choice" || destination?.kind === "other_figure" || destination?.kind === "old_issue");
+}
 
 /** A feature answer can lift a denial after the AI has publicly repaired that check. */
 export function answersRepairedNamingCheck(reply: LocalClaimView, question: LocalClaimView, denial: LocalClaimView,
@@ -117,12 +130,13 @@ const isFigureEvidence = (c: LocalClaimView) => c.name === null &&
 /** The reply points to the figure by its own words, or (v12) was counted as the answer because the classifier's label said so. */
 const pointed = (reply: LocalClaimView, direct: boolean) => reply.source === LABELLED_ANSWER_SOURCE || directsToFigure(reply.quote, direct);
 export function publiclyCheckedNamingTarget(claims: readonly LocalClaimView[], publicTurns: readonly PublicTurn[],
-  judgments: readonly NamingJudgmentLike[], turn: number, includeAgreed = false, scope: AgreeNameScopeVersion = "scoped_v2"): string | null {
+  judgments: readonly NamingJudgmentLike[], turn: number, includeAgreed = false, scope: AgreeNameScopeVersion = "scoped_v2",
+  issueHandling = false): string | null {
   const directNamingReplies = usesDirectNamingReplies(scope);
   const directConstrualAnswer = scope === "scoped_v7" || scope === "scoped_v8" || directNamingReplies;
   const directReferenceReplies = scope === "scoped_v5" || scope === "scoped_v6" || directConstrualAnswer;
   const before = judgments.filter((j): j is NamingJudgmentLike & { turnIndex: number } => typeof j.turnIndex === "number" && j.turnIndex < turn);
-  const lastBoundary = before.filter(j => ["agree", "defer", "move_on"].includes(j.judgment?.action as string)).at(-1);
+  const lastBoundary = before.filter(j => isNamingIntervalBoundary(j, issueHandling)).at(-1);
   const boundary = lastBoundary?.turnIndex ?? 0;
   const publicByTurn = new Map(publicTurns.map(t => [t.turn, t]));
   const live = claims.filter(c => {
@@ -231,8 +245,9 @@ export function publiclyCheckedNamingTarget(claims: readonly LocalClaimView[], p
   return figure;
 }
 /** The partner's referent estimates of the current naming interval (after the last agree, defer or move_on, before this turn), oldest first, then this turn's. */
-export function namingIntervalEstimates(judgments: readonly NamingJudgmentLike[], turn: number, current: ReferentEstimateValue): ReferentEstimateValue[] {
-  const lastBoundary = judgments.filter(j => typeof j?.turnIndex === "number" && ["agree", "defer", "move_on"].includes(j.judgment?.action as string)).at(-1)?.turnIndex as number | undefined ?? 0;
+export function namingIntervalEstimates(judgments: readonly NamingJudgmentLike[], turn: number, current: ReferentEstimateValue,
+  issueHandling = false): ReferentEstimateValue[] {
+  const lastBoundary = judgments.filter(j => typeof j?.turnIndex === "number" && isNamingIntervalBoundary(j, issueHandling)).at(-1)?.turnIndex as number | undefined ?? 0;
   return [...judgments.filter(j => typeof j?.turnIndex === "number" && j.turnIndex > lastBoundary && j.turnIndex < turn).map(j => (j.jevTurn?.humanReferent ?? null) as ReferentEstimateValue), current];
 }
 

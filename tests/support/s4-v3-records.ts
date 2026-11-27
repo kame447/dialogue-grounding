@@ -4,13 +4,12 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { researchTrialProfileV3 } from '../../dialogue-model/runtime/v2/research-profile.ts';
+import { researchHash, researchTrialProfileV3 } from '../../dialogue-model/runtime/v2/research-profile.ts';
 import { createProfileDialogue } from '../../dialogue-model/runtime/diagnostics/parity-live/replay.ts';
 import { pairedInterventionReplay } from '../../dialogue-model/runtime/diagnostics/parity-live/intervention-replay.ts';
 import { hash } from '../../dialogue-model/runtime/diagnostics/parity-verify/core.ts';
 import { createJevDecisionClient } from '../../dialogue-model/runtime/decision/jev-decision.ts';
 import type { DialoguePolicy, DraftAct } from '../../dialogue-model/runtime/decision/contract.ts';
-import type { InterventionVersion } from '../../dialogue-model/runtime/decision/bypass-acceptance.ts';
 import type { JudgmentMaterialVersion } from '../../dialogue-model/runtime/decision/repair-quality.ts';
 import { createJevLocalTestClassifier } from '../../dialogue-model/runtime/local-grounding/jev-local-test.ts';
 import { createChatClient } from '../../dialogue-model/runtime/client.mjs';
@@ -71,7 +70,10 @@ export type Plan = { action: string; target: string; issue?: string; prospect?: 
   referent?: string };
 const TEXTS: Record<string, string> = { local_extraction: '[]', ai_extraction: '[]' };
 
-export async function runTurn(profile: any, label: Label, state: any, events: any[], plan: Plan, technicalTrial: { version: TrialVersion } | undefined, generationRetryVersion?: RecordedGenerationRetryVersion, own = OWN) {
+export async function runTurn(profile: any, label: Label, state: any, events: any[], plan: Plan, technicalTrial: { version: TrialVersion } | undefined, generationRetryVersion?: RecordedGenerationRetryVersion, own = OWN, recordedLabel = label) {
+  const issueHandling = String(generationRetryVersion) === 'jev_generation_retry_v21';
+  const issueHandlingReplayHistory = issueHandling && label !== recordedLabel && state.judgments.length
+    ? { strategy: recordedLabel, judgmentCount: state.judgments.length } : undefined;
   const luna: any[] = [], jev: any[] = [], traces: any[] = [], reobservations: any[] = [], boundary = { luna: -1, jev: -1 };
   const httpBodies: { provider: 'luna' | 'jev'; sha256: string }[] = [];
   const capture = (provider: 'luna' | 'jev', init: RequestInit | undefined) => {
@@ -118,7 +120,8 @@ export async function runTurn(profile: any, label: Label, state: any, events: an
     completeDetail: (i: any, s: any, o: any) => native.completeDetail!(i, s, o),
     // The partner-referent estimate is asked only for a turn that scripts one (plan.referent), so every other record keeps its request stream.
     ...(plan.referent ? { estimateReferent: (i: any, o: any) => native.estimateReferent!(i, o) } : {}),
-    ...(profile.dialoguePolicy ? { classifyDraftAct: (i: any, o: any) => native.classifyDraftAct!(i, o) } : {}),
+    ...(profile.dialoguePolicy ? { classifyDraftAct: (i: any, o: any) => native.classifyDraftAct!(i, o),
+      ...(issueHandling ? { classifyDraftSharedClaim: (i: any, o: any) => native.classifyDraftSharedClaim!(i, o) } : {}) } : {}),
     ...(technicalTrial ? { estimateRepairProspect: (i: any, o: any) => native.estimateRepairProspect!(i, o) } : {}) };
   const runtime = createProfileDialogue(profile, { client, image: own.ownImage, anchors: [...own.ownAnchors], strategy: label,
     observer: { async observeAll() { return structuredClone({ ...OLD.state.observationMemo, figures: OLD.state.observationMemo.figures.filter((f: { id: string }) => own.ownAnchors.some((a: { id: string }) => a.id === f.id)) }); },
@@ -128,7 +131,9 @@ export async function runTurn(profile: any, label: Label, state: any, events: an
     localGrounding: { classifier: createJevLocalTestClassifier({ enabled: true, readKey, fetchImpl, timeoutMs: profile.timeouts.localMs, researchLimits: { maxDeadlineMs: 600000 }, questionLayout: profile.questionLayout,
       ...(['holistic_v3', 'holistic_v5'].includes(profile.dialoguePolicy) ? { dialoguePolicy: profile.dialoguePolicy } : {}) })!,
       aiPublicTransport: { readKey, fetchImpl, timeoutMs: profile.timeouts.decisionMs } },
-    onJevTurnTrace: (t: any) => traces.push(t), generationRetryVersion, ...(technicalTrial ? { technicalTrial } : {}) } as any);
+    onJevTurnTrace: (t: any) => traces.push(t), generationRetryVersion, ...(technicalTrial ? { technicalTrial } : {}),
+    ...(issueHandling ? { deferredAiExtractionProfileSha256: researchHash(profile) } : {}),
+    ...(issueHandlingReplayHistory ? { issueHandlingReplayHistory } : {}) } as any);
   const at = '2000-01-01T00:00:00.000Z';
   // Older synthetic callers use speaker-prefixed IDs. The queue restores the
   // same transcript under its own event IDs.
@@ -154,12 +159,24 @@ export async function runTurn(profile: any, label: Label, state: any, events: an
   const disposition = queue.completeRequest(request, result);
   const outcome = publication();
   const saved = outcome.durable.privateState;
+  const job = saved.deferredAiExtraction;
+  if (issueHandling && disposition.status === 'committed' && job) {
+    assert.ok('completeDeferredAiExtraction' in runtime && typeof runtime.completeDeferredAiExtraction === 'function');
+    assert.equal(job.state, 'queued');
+    job.state = 'running';
+    const pending = await runtime.completeDeferredAiExtraction(saved, outcome.publicEvents, traces.at(-1).aiPublic);
+    assert.notEqual(pending.status, 'failed');
+    saved.aiPublic.pending = pending;
+    delete saved.deferredAiExtraction;
+  }
   const trace = settleJevTurnTraces(traces, saved).at(-1)! as AcceptanceTrace;
   assert.ok(trace.executed, 'a staged v3 candidate has an execution trace');
   const published = disposition.status === 'committed' ? disposition.event ?? null : null;
   return { state: saved, trace: trace as ExecutedTrace, luna, jev, reobservations, boundary, httpBodies,
-    candidateText: result.text, speech: published?.text ?? null, publication: { ...outcome, status: disposition.status } };
+    candidateText: result.text, speech: published?.text ?? null, publication: { ...outcome, status: disposition.status },
+    ...(issueHandling ? { requestSeq: request.requestSeq } : {}) };
 }
+
 
 export type Turn = { human: string; plan: Plan };
 /** NORMAL rebuilt as one canonical trial whose final turn follows the earlier scripted turns (all of them under `label`). */
@@ -187,7 +204,7 @@ export async function buildRecords({ label = 'repair-first' as Label, technicalT
   agreeNameScopeVersion?: AgreeNameScopeVersion;
   onTurn?: (label: Label, result: Awaited<ReturnType<typeof runTurn>>) => void;
   promptSources?: Awaited<ReturnType<typeof promptSourceManifest>>;
-  interventionVersion?: InterventionVersion;
+  interventionVersion?: Parameters<typeof researchTrialProfileV3>[4];
   judgmentMaterialVersion?: JudgmentMaterialVersion;
   figureCount?: 4 | 6;
 }) {
@@ -220,8 +237,8 @@ export async function buildRecords({ label = 'repair-first' as Label, technicalT
       continue;
     }
     // The final turn is run once per label: the common segment (before the original decision) is shared, each tail is that label's own.
-    const runs = { 'repair-first': await runTurn(profile, 'repair-first', run.state, run.events, turns[i].plan, technicalTrial, generationRetryVersion, own),
-      'bypass-enabled': await runTurn(profile, 'bypass-enabled', run.state, run.events, turns[i].plan, technicalTrial, generationRetryVersion, own) };
+    const runs = { 'repair-first': await runTurn(profile, 'repair-first', run.state, run.events, turns[i].plan, technicalTrial, generationRetryVersion, own, label),
+      'bypass-enabled': await runTurn(profile, 'bypass-enabled', run.state, run.events, turns[i].plan, technicalTrial, generationRetryVersion, own, label) };
     const a = runs['repair-first'], b = runs['bypass-enabled'];
     assert.equal(a.publication.status, 'committed');
     assert.equal(b.publication.status, 'committed');
@@ -234,7 +251,8 @@ export async function buildRecords({ label = 'repair-first' as Label, technicalT
     const tape: any = { schemaVersion: 'parity_intervention_replay_v1', state: run.state, events: run.events,
       common: { luna: a.luna.slice(0, a.boundary.luna), jev: a.jev.slice(0, a.boundary.jev), reobservations: structuredClone(a.reobservations) },
       tails: { 'repair-first': seg(a), 'bypass-enabled': seg(b) }, recorded: { label, expectedRequests: [] }, ...(technicalTrial ? { technicalTrial } : {}),
-      ...(version ? { generationRetryVersion: version } : {}) };
+      ...(version ? { generationRetryVersion: version } : {}),
+      ...(String(version) === 'jev_generation_retry_v21' ? { requestSeq: runs[label].requestSeq } : {}) };
     const probe: any = await pairedInterventionReplay(tape, own as any, MODEL, profile);
     assert.equal(probe.status === 'not_reached', false, String(probe.error));
     const recorded = probe.sides.find((s: any) => s.label === label);

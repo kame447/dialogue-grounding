@@ -2,13 +2,16 @@
 // Public history is one numbered speaker line per event; a claim is a row that points at its source line by number instead of quoting it;
 // figures are f0..f3 or f0..f5 in ownSlots order; the ledger lists each figure's agreed name and every action that was executed on it.
 // encode and decode are exact inverses except for the claims' quotes, which a reference replaces (a decoded claim has quote "" and a nominal source).
-import type { JevAction, JevTarget } from "./contract.ts";
+import type { JevDecisionAction, JevTarget } from "./contract.ts";
+import { issueTargetIds, ISSUE_HANDLING_VERSION } from "./issue-handling.ts";
+import type { CarryDestination, ExecutedExtra, JevIssueRef } from "./issue-handling.ts";
 import { isSupportedFigureCount } from "../stimuli/figure-bank.ts";
 import { repairQualityEvidence } from "./repair-quality.ts";
 
 export const JUDGMENT_VIEW_V5 = "judgment_v5";
 /** An action executed on figures in an earlier turn (the ledger's typed history). */
-export type LedgerAction = { turn: number; action: JevAction; target: JevTarget; name: string | null; feature: string | null;
+export type LedgerAction = { turn: number; action: JevDecisionAction; target: JevTarget; name: string | null; feature: string | null;
+  issue?: JevIssueRef; destination?: CarryDestination; extras?: readonly ExecutedExtra[];
   /** The partner claims that answered this action's check, read from the whole (ungated) repair history: they stay defined even after the issue closed. */
   answers?: readonly { id: string; act: string; proposition: string; targets: readonly string[] }[] };
 export type MaterialV5Context = { actions: readonly LedgerAction[]; nameLedger?: Record<string, { status: string; name: string | null }>;
@@ -33,11 +36,37 @@ export function judgmentV5Legend(figureCount: number = 6): string {
 
 /** jev_generation_retry_v11: appended after the legend when a figure's history points at an answer the request's claims do not carry. */
 export const JUDGMENT_V11_ANSWER_LEGEND = "answerClaimsは、figuresの返答のclaim idがclaimsにない行動のためだけに添える行で、各行は [claim id, 出典の発話番号, act, 対象, 命題] です。グラフから外れた回答の出典の発話番号はnullになります。";
+export const ISSUE_HANDLING_LEGEND = "handlingsの各行は [手番, 実際に公開した行動, 対象の図形, 論点のIDまたは種類, 移る先] です。移る先の図形はf番号、旧い論点は[old_issue, 論点のIDまたは種類, 図形の配列]で表します。";
+export const PREVIOUS_EXTRAS_LEGEND = "previousExtrasの各行は、直前に公開した追加の扱いの [行動, 対象の図形, 論点のID] です。";
 
 const alias = (slots: readonly string[], id: string) => "f" + slots.indexOf(id);
 const unalias = (slots: readonly string[], f: string) => slots[Number(String(f).slice(1))];
 const line = (t: { turn: number; speaker: string; text: string }) => `U${t.turn} ${t.speaker === "human" ? "h" : "ai"}: ${t.text}`;
 const LINE = /^U(\d+) (h|ai): ([\s\S]*)$/u;
+
+type HandledLedgerAction = Pick<LedgerAction, "turn" | "action" | "target" | "destination"> & { issue: JevIssueRef };
+
+export function recentHandlings(actions: readonly LedgerAction[]): HandledLedgerAction[] {
+  const rows: HandledLedgerAction[] = [];
+  for (const action of [...actions].sort((a, b) => a.turn - b.turn)) {
+    if (action.issue && ["hold_open", "carry_over", "consult", "revisit"].includes(action.action)) rows.push({ ...action, issue: action.issue });
+    for (const extra of action.extras ?? []) {
+      if ("issue" in extra) rows.push({ turn: action.turn, action: extra.action, target: extra.target, issue: extra.issue });
+    }
+  }
+  return rows.slice(-16);
+}
+
+const issueLabel = (issue: JevIssueRef) => issue.kind === "resolve_issue" ? issue.issueId : issue.kind;
+
+function handlingRows(actions: readonly LedgerAction[], slots: readonly string[]) {
+  return recentHandlings(actions).map(({ turn, action, target, issue, destination }) => {
+    const next = destination?.kind === "other_figure" ? [destination.kind, alias(slots, destination.figureId)]
+      : destination?.kind === "old_issue" ? [destination.kind, issueLabel(destination.issue), destination.targets.map(id => alias(slots, id))]
+        : destination?.kind ?? null;
+    return [turn, action, issueTargetIds(target).map(id => alias(slots, id)), issueLabel(issue), next];
+  });
+}
 
 export function encodeMaterialV5(material: any, { actions, nameLedger, answers: allAnswers, rotationMode, answerRows, notationV6, notationV11 }: MaterialV5Context): Record<string, unknown> {
   const slots: string[] = material.ownSlots;
@@ -71,6 +100,13 @@ export function encodeMaterialV5(material: any, { actions, nameLedger, answers: 
     ...(material.namingEvidence ? { namingEvidence: material.namingEvidence } : {}),
     ...(material.referenceEvidence ? { referenceEvidence: material.referenceEvidence } : {}),
     ...(material.visualPurposeVersion ? { visualPurposeVersion: material.visualPurposeVersion } : {}),
+    ...(material.issueHandlingVersion === ISSUE_HANDLING_VERSION ? {
+      issueHandlingVersion: ISSUE_HANDLING_VERSION, handlings: handlingRows(actions, slots),
+      ...(material.previousExtras?.length ? {
+        previousExtras: (material.previousExtras as readonly ExecutedExtra[]).map(extra =>
+          [extra.action, al(issueTargetIds(extra.target)), issueLabel("issue" in extra ? extra.issue : extra.visualPurpose)]),
+      } : {}),
+    } : {}),
     ...(material.judgmentMaterialVersion ? {
       judgmentMaterialVersion: material.judgmentMaterialVersion,
       repairQuality: repairQualityEvidence(material.turn, material.publicTurns, material.priorClaims, material.repairHistory),

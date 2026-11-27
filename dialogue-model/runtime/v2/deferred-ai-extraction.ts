@@ -1,8 +1,13 @@
 import { createHash } from "node:crypto";
+import { LOCAL_ASPECTS } from "../local-grounding/contract.ts";
+import type { LocalSegmentProposal, PublicTurn } from "../local-grounding/contract.ts";
+import { aiExact, aiIndex, aiText, type AiExtractionDiagnostics } from "../local-grounding/extract-ai.ts";
+import { literalSpan } from "../judgment/public-evidence.mjs";
 
 export const DEFERRED_AI_EXTRACTION_GENERATION = "jev_generation_retry_v20";
-export const isDeferredAiExtractionGeneration = (value: unknown): value is typeof DEFERRED_AI_EXTRACTION_GENERATION =>
-  value === DEFERRED_AI_EXTRACTION_GENERATION;
+export const ISSUE_HANDLING_GENERATION = "jev_generation_retry_v21";
+export const isDeferredAiExtractionGeneration = (value: unknown): value is typeof DEFERRED_AI_EXTRACTION_GENERATION | typeof ISSUE_HANDLING_GENERATION =>
+  value === DEFERRED_AI_EXTRACTION_GENERATION || value === ISSUE_HANDLING_GENERATION;
 
 export type DeferredAiExtractionJob = {
   schemaVersion: "deferred_ai_extraction_v1";
@@ -19,21 +24,69 @@ export type DeferredAiExtractionJob = {
   error: "extraction_failed" | "model_mismatch" | "delivery_unknown" | null;
 };
 
+export type DeferredClassificationExtraction = {
+  segments: LocalSegmentProposal[];
+  rejected: AiExtractionDiagnostics["rejected"];
+  sha256: string;
+};
+export type DeferredAiClassificationJob = Omit<DeferredAiExtractionJob, "schemaVersion" | "error"> & {
+  schemaVersion: "deferred_ai_classification_v1";
+  extraction: DeferredClassificationExtraction;
+  error: "classification_failed" | "model_mismatch" | "delivery_unknown" | null;
+};
+export type DeferredAiPublicJob = DeferredAiExtractionJob | DeferredAiClassificationJob;
+
 export const extractionDigest = (text: string): string => createHash("sha256").update(text, "utf8").digest("hex");
 const digest = /^[a-f0-9]{64}$/u;
 const keys = ["schemaVersion", "eventId", "aiSeq", "humanEventId", "requestSeq", "textSha256", "memoSha256",
   "publicTurnsSha256", "profileSha256", "graphRevision", "state", "error"] as const;
 
-export function validDeferredExtractionJob(value: unknown): value is DeferredAiExtractionJob {
-  if (!value || typeof value !== "object" || Object.getPrototypeOf(value) !== Object.prototype ||
-      Reflect.ownKeys(value).length !== keys.length || !keys.every(key => Object.hasOwn(value, key))) return false;
-  const job = value as DeferredAiExtractionJob;
-  return job.schemaVersion === "deferred_ai_extraction_v1" &&
+function classificationDigest({ segments, rejected }: Omit<DeferredClassificationExtraction, "sha256">): string {
+  return extractionDigest(JSON.stringify({
+    rejected: rejected.map(({ reason, segmentId }) => ({ reason, segmentId })),
+    segments: segments.map(({ aspect, linkedIssueId, name, proposition, quote, respondsToTurn, segmentId, targets }) =>
+      ({ aspect, linkedIssueId, name, proposition, quote, respondsToTurn, segmentId, targets })),
+  }));
+}
+
+export function classificationExtraction(segments: LocalSegmentProposal[], rejected: AiExtractionDiagnostics["rejected"]): DeferredClassificationExtraction {
+  return { segments, rejected, sha256: classificationDigest({ segments, rejected }) };
+}
+
+export function validDeferredAiPublicJob(value: unknown, slots: readonly string[], allowClassification: boolean): value is DeferredAiPublicJob {
+  if (!value || typeof value !== "object" || Object.getPrototypeOf(value) !== Object.prototype) return false;
+  const job = value as DeferredAiPublicJob;
+  const classification = job.schemaVersion === "deferred_ai_classification_v1";
+  const expected = classification ? [...keys, "extraction"] : keys;
+  if (Reflect.ownKeys(value).length !== expected.length || !expected.every(key => Object.hasOwn(value, key)) ||
+      (classification ? !allowClassification : job.schemaVersion !== "deferred_ai_extraction_v1")) return false;
+  return (
     Number.isSafeInteger(job.aiSeq) && job.aiSeq > 1 && job.eventId === `event-${job.aiSeq}` &&
     job.humanEventId === `event-${job.aiSeq - 1}` &&
     Number.isSafeInteger(job.requestSeq) && job.requestSeq > 0 &&
     Number.isSafeInteger(job.graphRevision) && job.graphRevision >= 0 &&
     [job.textSha256, job.memoSha256, job.publicTurnsSha256, job.profileSha256].every(s => typeof s === "string" && digest.test(s)) &&
     (job.state === "queued" || job.state === "running" ? job.error === null : job.state === "failed" &&
-      (job.error === "extraction_failed" || job.error === "model_mismatch" || job.error === "delivery_unknown"));
+      (job.error === (classification ? "classification_failed" : "extraction_failed") || job.error === "model_mismatch" || job.error === "delivery_unknown")) &&
+    (!classification || validClassificationExtraction(job.extraction, job.aiSeq, slots)));
+}
+
+function validClassificationExtraction(value: unknown, aiSeq: number, slots: readonly string[]): boolean {
+  if (!aiExact(value, ["segments", "rejected", "sha256"]) || !Array.isArray(value.segments) || !Array.isArray(value.rejected) ||
+      value.segments.length + value.rejected.length > 32 || typeof value.sha256 !== "string" || !digest.test(value.sha256)) return false;
+  const keys = ["segmentId", "quote", "targets", "aspect", "proposition", "name", "linkedIssueId", "respondsToTurn"];
+  if (!value.segments.every(segment => aiExact(segment, keys) && aiText(segment.segmentId, 64) && aiText(segment.quote) &&
+      aiText(segment.proposition) && (LOCAL_ASPECTS as readonly unknown[]).includes(segment.aspect) && segment.aspect !== "name" &&
+      Array.isArray(segment.targets) && new Set(segment.targets).size === segment.targets.length && segment.targets.every(slot => slots.includes(slot)) &&
+      segment.name === null && (segment.linkedIssueId === null || aiText(segment.linkedIssueId, 128)) &&
+      (segment.respondsToTurn === null || aiIndex(segment.respondsToTurn) && segment.respondsToTurn < aiSeq)) ||
+      !value.rejected.every(segment => aiExact(segment, ["segmentId", "reason"]) && aiText(segment.segmentId, 64) &&
+        (segment.reason === "name_by_literal_path" || segment.reason === "nonpublic_quote"))) return false;
+  const ids = [...value.segments, ...value.rejected].map(segment => segment.segmentId);
+  return new Set(ids).size === ids.length && classificationDigest({ segments: value.segments, rejected: value.rejected }) === value.sha256;
+}
+
+export function classificationMatchesPublication(job: DeferredAiClassificationJob, text: string, publicTurns: readonly PublicTurn[]): boolean {
+  return job.extraction.segments.every(segment => literalSpan(text, segment.quote)?.text === segment.quote &&
+    (segment.respondsToTurn === null || publicTurns.some(turn => turn.turn === segment.respondsToTurn)));
 }

@@ -387,7 +387,8 @@ export async function createNamingTaskV2({
     timing.finishedAtMs = now();
     const failed = usage?.halted || !pending || pending.status === "failed";
     if (failed) {
-      job.state = "failed"; job.error = usage?.halted ? "model_mismatch" : "extraction_failed";
+      job.state = "failed"; job.error = usage?.halted ? "model_mismatch" :
+        job.schemaVersion === "deferred_ai_classification_v1" ? "classification_failed" : "extraction_failed";
       timing.status = job.error;
     } else {
       privateState.aiPublic.pending = pending;
