@@ -2797,6 +2797,18 @@ const PROMPT_VERSIONS:readonly PromptVersion[]=[
   'local-grounding/extract-ai.ts':'e489b7ff573fdbe9e4f0adc9b6ee5f0828bd3c6835dcd8cd6555e191161594a6',
   'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
  }},fixed:FIXED_I172,native:NATIVE_I172},
+ {id:'p5_pilot012_four_figures',i172:true,styleMode:'research_split',sources:{scheme:'complete_instruction_source_sha256',files:{
+  'v2/dialogue-v2.mjs':'7e5b556765f879751b39f4129bea49fd8de788c49368215737e699b9b33374d7',
+  'v2/jev-turn.ts':'2da44341f07c4488da646498f54401f0fe66a46eeff459072042a9ebe93dfff4',
+  'v2/generation-guard.ts':'816bbf968a934099a19bb3d2fb8217262349a739f43eee54ecdb98973d00755f',
+  'judgment/instructions.mjs':'eeb20c812729d04e52437a064b31fcd8af60ee2da8b1f6e73d99c4eb8dc8a785',
+  'observation/observe.ts':'eac863a50455665daa62812157d68512a7e33bed9fda271b4e7af4f44b38dde4',
+  'local-grounding/extract.ts':'6e9461e860f22923dbece02c7988713422ed81ac32d937f6d59df8eff84bd83e',
+  'local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01',
+  'decision/jev-decision.ts':'f49298e86d889d97f792fd3a4290ee6e211a5118db85203df594c7592c0dfd7c',
+  'local-grounding/extract-ai.ts':'e489b7ff573fdbe9e4f0adc9b6ee5f0828bd3c6835dcd8cd6555e191161594a6',
+  'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
+ }},fixed:FIXED_I172,native:NATIVE_I172},
  ...HISTORICAL_MAIN_PROMPT_SOURCES.map(({id, files}) => ({
   id, i172: false, styleMode: 'legacy' as const, sources: {scheme: 'complete_instruction_source_sha256', files: {...HISTORICAL_MAIN_SHARED_SOURCES, ...files}},
   fixed: FIXED, native: NATIVE,
