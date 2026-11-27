@@ -8,6 +8,7 @@ import { MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS, memoAiExtractionPrompt } from '
 import { canonicalReceptionProtocolV2, canonicalReceptionProtocolV3, PILOT012_PARTICIPANT_PROFILE, PILOT012_V18_PARTICIPANT_PROFILE,
   PILOT012_V19_PARTICIPANT_PROFILE, PILOT012_V20_PARTICIPANT_PROFILE, receptionProtocolSha256, receptionSummary, validateReceptionPlan } from '../dialogue-model/runtime/v2/reception.ts';
 import { DEFERRED_AI_EXTRACTION_GENERATION } from '../dialogue-model/runtime/v2/deferred-ai-extraction.ts';
+import { createNamingTaskV2 } from '../dialogue-model/runtime/v2/naming-task-v2.mjs';
 import { VISUAL_FEATURE_GENERATION } from '../dialogue-model/runtime/v2/generation-guard.ts';
 import { VISUAL_FEATURE_DRAFT_V19 } from '../dialogue-model/runtime/v2/visual-feature-evidence.ts';
 import { createTrialV2, modelView } from '../dialogue-model/runtime/stimuli/scatter-v2.mjs';
@@ -17,6 +18,9 @@ import { validateBoundBaseRecord } from '../dialogue-model/runtime/v2/base-assig
 import { validateParticipantModelPin } from '../dialogue-model/runtime/v2/participant-model-pin.ts';
 import { handleRequest } from '../workers/research-ai-proxy/src/index.mjs';
 import { PARTICIPANT_PRODUCTION_PROFILE } from '../dialogue-model/runtime/web/participant-usage-policy.ts';
+import { ParticipantUsageLedger } from '../dialogue-model/runtime/web/participant-usage.ts';
+import type { LocalClaimView, LocalSegmentProposal } from '../dialogue-model/runtime/local-grounding/contract.ts';
+import { createWorkerParticipantRuntime } from '../workers/tangram-experiment/src/participant-runtime.ts';
 import { configuredParticipantPin, participantChoices, participantUsageChoices } from '../workers/research-ai-proxy/src/participant-transport.ts';
 import { INITIAL_OBSERVATION_STRUCTURED_V1, INITIAL_OBSERVATION_STRUCTURED_V2,
   type InitialObservationGeneration } from '../dialogue-model/runtime/observation/initial-observation-generation.ts';
@@ -188,10 +192,11 @@ function harness(enabled = true, selectedProtocol: typeof protocol & {
         const overridden = await controlled.usageChat?.(body, expected);
         return overridden ?? this.participantChat(body, expected);
       },
-      async participantUsageChoices(body: { state: string; questions: Choices }, expected: string) {
+      async participantUsageChoices(body: unknown, expected: string) {
         return this.participantChoices(body, expected, true);
       },
-      async participantChoices(body: { state: string; questions: Choices }, expected: string, usageOnly = false) {
+      async participantChoices(payload: unknown, expected: string, usageOnly = false) {
+        const body = payload as { state: string; questions: Choices };
         calls.push({ kind: 'choices', expected, body });
         await controlled.holdChoice?.();
         const observe = controlled.observe && Object.hasOwn(body.questions.action?.criteria ?? {}, 'request_observation');
@@ -1747,6 +1752,151 @@ test('pilot012 v19 preserves the approved six-figure profile through both trials
   t => verifyPilot012WorkerProfile(t, PILOT012_V19_PARTICIPANT_PROFILE, VISUAL_FEATURE_GENERATION));
 test('pilot012 v20 preserves the approved six-figure profile through both trials and cold restore',
   t => verifyPilot012WorkerProfile(t, PILOT012_V20_PARTICIPANT_PROFILE, DEFERRED_AI_EXTRACTION_GENERATION));
+
+for (const strategy of ['repair-first', 'bypass-enabled'] as const)
+for (const scope of ['jev_naming_v1', 'jev_naming_v2'] as const)
+for (const control of ['non-answer', 'acknowledge', 'actual-answer'] as const) {
+  test(`#202 part reply ${strategy} ${scope} ${control}`, async t => {
+    const h = harness();
+    v12Transport(t, h);
+    const figureSelection = { mode: 'preset', setId: 'bank-set-b' };
+    const seed = 202, trial = createTrialV2({ seed, figureSelection }), own = modelView(trial);
+    const figure = own.anchors[0].id;
+    const { terraModelId, jevModelId } = pin;
+    const modelPin = validateParticipantModelPin({ schemaVersion: 'participant_model_pin_v3', terraModelId, jevModelId });
+    const usageKey = 'synthetic-usage';
+    const usage = await ParticipantUsageLedger.open({
+      read: () => h.storage.get(usageKey),
+      update: write => h.storage.transaction(async tx => {
+        const snapshot = write(await tx.get(usageKey));
+        await tx.put(usageKey, snapshot);
+        return snapshot;
+      }),
+    }, 'synthetic-assignment', modelPin);
+    const runtime = createWorkerParticipantRuntime({ pin: modelPin, usage,
+      own: { ownImage: { mimeType: own.mimeType, base64: own.png.toString('base64') }, ownAnchors: own.anchors },
+      proxy: h.env.PARTICIPANT_AI_PROXY,
+      cache: { async read() { return undefined; }, async putIfAbsent(_key, entry) { return entry; } },
+      initialObservationGeneration: INITIAL_OBSERVATION_STRUCTURED_V2,
+      participantDialogueProfile: PILOT012_V20_PARTICIPANT_PROFILE,
+    });
+    // Select the new scope at the runtime boundary without assigning it to a Worker profile.
+    const jevResearch = scope === 'jev_naming_v1' ? runtime.jevResearch
+      : { ...runtime.jevResearch, newTrialAgreeNameScopeVersion: scope };
+    const prompt = '似ている図形を見ています。';
+    const question = 'そちらの形にも半円の切り込みが一つありますか？';
+    const followup = '切り込みのある形について、もう少し教えてください。';
+    const reply = control === 'actual-answer' ? 'はい、こちらの形にも半円の切り込みが一つあります。' : '質問の意味は分かりました。';
+    const name = '月の舟', proposal = `呼び名は「${name}」にしませんか？`;
+    const accepted = `では「${name}」と呼びましょう。`;
+    const observationSource = { figureId: figure, path: ['analytic', 'shapes', 0] };
+    const segment = (quote: string, aspect: LocalSegmentProposal['aspect'], targets: string[], respondsToTurn: number | null, name: string | null = null): LocalSegmentProposal =>
+      ({ segmentId: 'segment', quote, proposition: quote, aspect, targets, respondsToTurn, name, linkedIssueId: null });
+    let step = 0, questionTurn = 0, answerTurn = 0, namingTurn = 0;
+    const openingFetch = globalThis.fetch;
+    t.mock.method(globalThis, 'fetch', async (url: string, init: RequestInit) => {
+      if (!step) return openingFetch(url, init);
+      const body = JSON.parse(String(init.body));
+      const first = body.messages[0].content;
+      const fromPrompt = () => JSON.parse(body.messages.slice(1).map((m: { content: string }) => m.content.split('\n').at(-1)).join(''));
+      let text: string;
+      if (first === memoExtractionPrompt(true, false, SHAPE_TERMINOLOGY_GENERATION)) {
+        const latest = fromPrompt().publicTurns.at(-1);
+        if (step === 2) answerTurn = latest.turn;
+        if (step === 3) namingTurn = latest.turn;
+        text = JSON.stringify(step === 2 ? [segment(reply, 'part', [], questionTurn)] : step === 3 ? [segment(proposal, 'name', [], null, name)] : []);
+      } else if (first === memoAiExtractionPrompt(SHAPE_TERMINOLOGY_GENERATION, true)) {
+        const { candidateText } = fromPrompt();
+        assert.equal(candidateText, step === 1 ? question : followup);
+        text = JSON.stringify({ segments: step === 1 ? [segment(question, 'part', [figure], null)] : [],
+          visualFeatures: { sources: [{ source: observationSource, quote: candidateText }] } });
+      } else if (first === memoAiExtractionPrompt(SHAPE_TERMINOLOGY_GENERATION)) {
+        text = '[]';
+      } else if (body.messages.some((m: { content: unknown }) => String(m.content).includes(VISUAL_FEATURE_DRAFT_V19))) {
+        text = JSON.stringify({ text: step === 1 ? question : followup, observationFeatures: [observationSource] });
+      } else {
+        text = step === 2 ? 'なるほど。' : accepted;
+      }
+      return Response.json(chatResponse(terraModelId, text));
+    });
+
+    // Mock a Jev that uses the linked part agreement in its judgment material.
+    const hasLinkedAgree = (claims: unknown[][]) => claims.some(claim => claim[1] === answerTurn &&
+      claim[2] === 'agree' && claim[3] === 'part' && Array.isArray(claim[4]) &&
+      claim[4].length === 1 && claim[4][0] === 'f0' && typeof claim[6] === 'string');
+    h.controlled.choose = (key, body) => {
+      const state = JSON.parse(body.state);
+      const options = body.questions[key].criteria;
+      if (key === 'action') return step === 1 ? 'confirm' : step === 2 ? 'accept' : hasLinkedAgree(state.claims) ? 'agree' : 'confirm';
+      if (key === 'target') return Object.hasOwn(options, 'none') && step === 2 ? 'none' : 'figure_0';
+      if (key === 'human_move_on_source') return 'other';
+      if (key === 'human_referent') return 'none';
+      if (key === 'visual_purpose') return 'unknown';
+      if (key === 'naming_grounding') return 'grounded_name_0';
+      if (key === 'naming_evidence') return 'turn_' + namingTurn;
+      if (key === 'draft_naming') return step === 3 && state.selected.action === 'agree' ? 'adopt_chosen' : 'none';
+      if (key.endsWith('_act')) {
+        if (state.aiSeq !== undefined) return 'ask';
+        if (step === 2) return control === 'acknowledge' ? 'acknowledge' : 'agree';
+        if (step === 3) return 'name_propose';
+      }
+      if (key.endsWith('_answer') && step === 2) return control === 'actual-answer' ? 'answers_checked_point' : 'not_an_answer';
+      if (key.endsWith('_antecedent') && state.aiSeq === undefined && step === 2 && control !== 'acknowledge') {
+        const index = state.priorClaims.findIndex((claim: LocalClaimView) => claim.sourceTurn === questionTurn && claim.act === 'ask');
+        assert.ok(index >= 0);
+        return 'claim_' + index;
+      }
+      return undefined;
+    };
+
+    let saved: any;
+    const options = { ...runtime, jevResearch, seed, strategy, figureSelection, referenceMemory: true,
+      memoryPruneVersion: CLAIM_PRUNE_V3, utteranceStyle: jevResearch.profile.utteranceStyle, createTrial: () => trial, runDir: null,
+      onPersist: (record: unknown) => { saved = structuredClone(record); } } as const;
+    const task = await createNamingTaskV2(options);
+    const send = async (human: string) => {
+      task.message(human, 'synthetic-' + ++step);
+      await task.whenIdle();
+      assert.equal(saved.queueState.errorCode, null);
+      const trace = saved.jevTraces.at(-1);
+      assert.equal(trace.status, 'committed');
+      return trace;
+    };
+
+    await send(prompt);
+    assert.equal(saved.options.generationRetryVersion, DEFERRED_AI_EXTRACTION_GENERATION);
+    assert.equal(saved.queueState.privateState.agreeNameScopeVersion, scope);
+    assert.equal(saved.events.at(-1).text, question);
+    questionTurn = saved.events.at(-1).seq;
+    const response = await send(reply);
+    const claims: LocalClaimView[] = saved.queueState.privateState.graph.records;
+    const ask = claims.find(c => c.sourceTurn === questionTurn && c.act === 'ask');
+    assert.ok(ask);
+    assert.equal(ask.aspect, 'part');
+    assert.equal(ask.source, 'ai_hypothesis');
+    assert.deepEqual(ask.targets, [figure]);
+    const observed = claims.find(c => c.sourceTurn === answerTurn && c.speaker === 'human');
+    assert.ok(observed);
+    const shouldAgree = control === 'actual-answer' || scope === 'jev_naming_v1' && control === 'non-answer';
+    assert.deepEqual([observed.act, observed.targets, observed.respondsTo, observed.issueId], shouldAgree
+      ? ['agree', [figure], ask.id, ask.issueId] : ['acknowledge', [], null, observed.id]);
+    assert.equal(observed.quote, reply);
+    const [verdict] = response.local.classifier.verdicts;
+    assert.deepEqual([verdict.act, verdict.answersChecked], [control === 'acknowledge' ? 'acknowledge' : 'agree', control === 'actual-answer' ? 'yes' : 'no']);
+    assert.equal(saved.ownLedger[figure].status, 'unassigned');
+
+    const beforeNaming = h.calls.length;
+    const final = await send(proposal);
+    const actionCall = h.calls.slice(beforeNaming).find(call => call.kind === 'choices' && call.body.questions.action);
+    assert.ok(actionCall);
+    const namingState = JSON.parse(actionCall.body.state);
+    assert.equal(hasLinkedAgree(namingState.claims), shouldAgree);
+    assert.deepEqual(namingState.namingEvidence.names, [{ name, figureId: null, sourceTurn: namingTurn }]);
+    assert.equal(final.finalAction.action, shouldAgree ? 'agree' : 'confirm');
+    assert.deepEqual(saved.ownLedger[figure], shouldAgree ? { name, status: 'agreed' } : { name: null, status: 'unassigned' });
+    assert.equal(saved.events.at(-1).text, shouldAgree ? accepted : followup);
+  });
+}
 
 async function deferredHarness(t: TestContext) {
   const h = harness(true, figureBankProtocol);

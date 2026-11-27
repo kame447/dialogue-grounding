@@ -18,7 +18,7 @@ import { CLAIM_PRUNE_V3, createReferenceGraph, applyReferenceUpdate, previewRefe
 import { buildReferenceEvidence, validReferenceAlternatives } from "../local-grounding/reference-evidence.ts";
 import type { LocalReferenceAlternative, ReferenceEvidence } from "../local-grounding/reference-evidence.ts";
 import { nameBindsFigure } from "../decision/referent-binding.ts";
-import { hasNameProposal, claimsLiveAsOf, reconfirmationPossible, namingTurnKind, namingIntervalEstimates, inheritedTargetClaimIds, agreeCandidateAllowed, inheritsProposalName, turnNameProposals, namingNameKey, targetNamingConflict, publiclyCheckedNamingTarget, usesPublicNamingTarget, usesDirectNamingReplies, retainsLocalQuestionAnswers, answersRepairedNamingCheck, type AgreeNameScopeVersion } from "../decision/naming-request.ts";
+import { hasNameProposal, claimsLiveAsOf, reconfirmationPossible, namingTurnKind, namingIntervalEstimates, inheritedTargetClaimIds, agreeCandidateAllowed, inheritsProposalName, turnNameProposals, namingNameKey, targetNamingConflict, publiclyCheckedNamingTarget, usesPublicNamingTarget, usesDirectNamingReplies, retainsLocalQuestionAnswers, usesJevNaming, answersRepairedNamingCheck, type AgreeNameScopeVersion } from "../decision/naming-request.ts";
 import { namingDenialTargets, namingReconfirmation, type NamingResponseEvidence } from "../decision/naming-reconfirmation.ts";
 import { priorClaimViews, summarizeLocalIssues } from "../local-grounding/derive.ts";
 import { deriveSharedConstrualsFromGraph } from "../local-grounding/shared-construal.ts";
@@ -288,7 +288,7 @@ export type JevTurnOptions = {
   deferredAiExtractionProfileSha256?: string;
   judgmentMaterialVersion?: JudgmentMaterialVersion;
   /** Creation pin only. A resumed trial uses the scope in its saved state. */
-  newTrialAgreeNameScopeVersion?: "scoped_v7" | "scoped_v8" | "scoped_v9" | "scoped_v10" | "scoped_v11" | "jev_naming_v1";
+  newTrialAgreeNameScopeVersion?: "scoped_v7" | "scoped_v8" | "scoped_v9" | "scoped_v10" | "scoped_v11" | "jev_naming_v1" | "jev_naming_v2";
   client: ChatClient; ownImage: LocalOwnImage; ownAnchors: readonly LocalOwnAnchor[];
   observer: ObservationObserver; jevDecision: JevDecisionClient; localGrounding: JevTurnLocalOptions;
   maxReobservations?: number;
@@ -889,7 +889,7 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
   if(!stateExact(s,['schemaVersion','interventionPolicy','ledger','graph','judgments','observationMemo','repairHistory',...(Object.hasOwn(s??{},'aiPublic')?['aiPublic']:[]),...(hasAgreeNameScope?['agreeNameScopeVersion']:[]),...(referenceEvidenceEnabled&&hasAlternatives?['referenceAlternatives']:[]),...(isDeferredAiExtractionGeneration(generation)&&hasDeferred?['deferredAiExtraction']:[])])||s.schemaVersion!=='jev_private_state_v2'||!stateSame(s.interventionPolicy,interventionReference(version)))throw Error();
   if(!validAgreeNameScope(s.agreeNameScopeVersion,generation)||hasAgreeNameScope&&
     (s.agreeNameScopeVersion===undefined||questionLayout!=='two_stage_v3'||s.agreeNameScopeVersion!=='scoped_v1'&&policy!=='holistic_v5'))throw Error();
-  const jevNaming=s.agreeNameScopeVersion==='jev_naming_v1';
+  const jevNaming=usesJevNaming(s.agreeNameScopeVersion);
   const publicTurns=jevNaming&&events?events.map(e=>({turn:e.seq,speaker:e.speaker,text:e.text})):undefined;
   validateOwnLedger(s.ledger);if(!sameSet(Object.keys(s.ledger),ownSlots))throw Error();const graph=snapshotReferenceGraph(s.graph);
   if(referenceEvidenceEnabled&&(questionLayout!=='two_stage_v3'||policy!=='holistic_v5'||!hasVersionedViewpoint(generation)))throw Error();
@@ -1342,7 +1342,8 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         catch { throw new JevTurnError("invalid_state"); }
       }
       const publicTurns = jevPublicTurns(events, latest.seq, aiEnabled);
-      const recoveryCandidates = state.agreeNameScopeVersion === "jev_naming_v1" ? slots : undefined;
+      const jevNaming = usesJevNaming(state.agreeNameScopeVersion);
+      const recoveryCandidates = jevNaming ? slots : undefined;
       const previous = state.judgments.at(-1), previousExecution=previous?publishedExecution(previous,recoveryCandidates):null, previousAi = previous && publicTurns.find(t => t.speaker === "ai" && t.turn > previous.turnIndex && t.turn < latest.seq);
       const local = { ...options.localGrounding, ...(holisticV3 ? { keepUnboundApproval: true } : {}), ...(holisticV4 ? { approvalFromNamedClaim: true } : {}), extractor: createMemoLocalExtractor({ complete(messages, options) {
         if (messages.some(message => typeof message.content !== "string")) throw new JevTurnError("invalid_state");
@@ -1367,6 +1368,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         update: initialUpdate, publicTurns, signal, ownImage, ownAnchors, captureResearch: true, referenceQuestionBindings, directReferenceReplies, refinedReplyRules: isGenerationV11(generationRetryVersion), answerFieldRules: isGenerationV12(generationRetryVersion),
         bindDirectQuestionReplies: usesDirectNamingReplies(state.agreeNameScopeVersion),
         retainLocalQuestionAnswers: retainsLocalQuestionAnswers(state.agreeNameScopeVersion),
+        unbindPartNonAnswers: state.agreeNameScopeVersion === "jev_naming_v2",
         namingIntervalStart: state.judgments.filter(j => ["agree", "defer", "move_on"].includes(j.judgment.action) || j.generatedPublication?.transition).at(-1)?.turnIndex ?? 0,
         ...(!aiEnabled && previousAi ? { priorAct: { ...previous.judgment, turn: previousAi.turn, publishedFallback: previous.generationGuard.fallback,
           ...(previousExecution!.target.kind === "multiple" ? { targetCandidates: [...previousExecution!.target.figureIds] } : {}) } } : {}) });
@@ -1375,7 +1377,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       const graph = previewReferenceUpdate(state.graph, prepared.update, { publicTurns }) as Graph;
       const beforeClaims = priorClaimViews(state.graph, { limit: REFERENCE_LIMITS.records });
       const claims = priorClaimViews(graph, { limit: REFERENCE_LIMITS.records });
-      const answersNamingRecovery = state.agreeNameScopeVersion === "jev_naming_v1" && previous && previousAi &&
+      const answersNamingRecovery = jevNaming && previous && previousAi &&
         !previousAi.nonReferential && previous.publicationRecovery?.act === "confirm_current_topic" &&
         state.repairHistory.some(r => r.turn === previous.turnIndex && r.action === "confirm" && r.question === previousAi.text);
       let repairHistory = updateRepairHistory(state.repairHistory, beforeClaims, claims, latest.seq,
@@ -1408,7 +1410,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       }
       if (participantMenu) baseInput.participantLedger = state.ledger;
       if (questionLayout === "two_stage_v3") {
-        if (state.agreeNameScopeVersion === "jev_naming_v1") {
+        if (jevNaming) {
           const { names, localRejections } = buildJevNamingMaterial(claims, agreeTurns, latest.seq, prepared.research);
           baseInput.agreeNames = names;
           baseInput.jevNaming = { localRejections };

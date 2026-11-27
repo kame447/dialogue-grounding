@@ -82,11 +82,15 @@ export function reconfirmationPossible(proposals: readonly NamingClaimLike[], tu
   });
 }
 
-export type AgreeNameScopeVersion = "scoped_v1" | "scoped_v2" | "scoped_v3" | "scoped_v4" | "scoped_v5" | "scoped_v6" | "scoped_v7" | "scoped_v8" | "scoped_v9" | "scoped_v10" | "scoped_v11" | "jev_naming_v1";
-export function retainsLocalQuestionAnswers(scope: unknown): scope is "scoped_v10" | "scoped_v11" | "jev_naming_v1" {
-  return scope === "scoped_v10" || scope === "scoped_v11" || scope === "jev_naming_v1";
+type JevNamingScope = "jev_naming_v1" | "jev_naming_v2";
+export type AgreeNameScopeVersion = "scoped_v1" | "scoped_v2" | "scoped_v3" | "scoped_v4" | "scoped_v5" | "scoped_v6" | "scoped_v7" | "scoped_v8" | "scoped_v9" | "scoped_v10" | "scoped_v11" | JevNamingScope;
+export function usesJevNaming(scope: unknown): scope is JevNamingScope {
+  return scope === "jev_naming_v1" || scope === "jev_naming_v2";
 }
-export function usesDirectNamingReplies(scope: unknown): scope is "scoped_v9" | "scoped_v10" | "scoped_v11" | "jev_naming_v1" {
+export function retainsLocalQuestionAnswers(scope: unknown): scope is "scoped_v10" | "scoped_v11" | JevNamingScope {
+  return scope === "scoped_v10" || scope === "scoped_v11" || usesJevNaming(scope);
+}
+export function usesDirectNamingReplies(scope: unknown): scope is "scoped_v9" | "scoped_v10" | "scoped_v11" | JevNamingScope {
   return scope === "scoped_v9" || retainsLocalQuestionAnswers(scope);
 }
 export function usesPublicNamingTarget(scope: unknown): scope is Exclude<AgreeNameScopeVersion, "scoped_v1"> {
