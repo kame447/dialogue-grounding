@@ -15,9 +15,58 @@ on:
       - "workers/tangram-experiment/**"
       - ".github/workflows/dialogue-runtime-tests.yml"
       - ".github/workflows/deploy-tangram.yml"
+      - ".github/scripts/test-shards*.ts"
+  workflow_dispatch:
+    inputs:
+      shard_count:
+        description: Test shards for a timing comparison
+        type: choice
+        options: ["4", "2"]
+        default: "4"
+
+concurrency:
+  group: dialogue-runtime-tests-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  SHARD_COUNT: ${{ inputs.shard_count || '4' }}
 
 jobs:
-  test:
+  test-plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      shards: ${{ steps.plan.outputs.shards }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node --test .github/scripts/test-shards.test.ts
+      - name: Verify test coverage and plan the matrix
+        id: plan
+        run: node .github/scripts/test-shards.ts plan >> "$GITHUB_OUTPUT"
+
+  test-shard:
+    needs: test-plan
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.test-plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+      - name: Test shard ${{ matrix.shard }}
+        env:
+          SHARD: ${{ matrix.shard }}
+          TEST_SHARDS: ${{ needs.test-plan.outputs.shards }}
+        run: node .github/scripts/test-shards.ts run "$SHARD"
+
+  typecheck-and-dry-run:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -25,8 +74,24 @@ jobs:
         with:
           node-version: "22"
       - run: npm ci
-      - run: npm test
       - run: npx tsc -p workers/tangram-experiment/tsconfig.json
       - run: npm run typecheck:runtime
       - run: npm run deploy:tangram:dry
       - run: npm run deploy:research-proxy:dry
+
+  # Keep the existing required check name for the whole workflow.
+  test:
+    needs: [test-plan, test-shard, typecheck-and-dry-run]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all checks to pass
+        env:
+          PLAN: ${{ needs.test-plan.result }}
+          SHARDS: ${{ needs.test-shard.result }}
+          TYPECHECK_AND_DRY_RUN: ${{ needs.typecheck-and-dry-run.result }}
+        run: |
+          if [ "$PLAN" != success ] || [ "$SHARDS" != success ] || [ "$TYPECHECK_AND_DRY_RUN" != success ]; then
+            echo "::error::Plan: $PLAN; shards: $SHARDS; typecheck and dry-run: $TYPECHECK_AND_DRY_RUN"
+            exit 1
+          fi
