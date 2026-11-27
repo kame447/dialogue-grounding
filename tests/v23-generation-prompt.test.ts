@@ -18,6 +18,8 @@ const plan = (options: Partial<Prompt> = {}) => generationActionPromptV23({
 });
 const contract = (prompt: string) => prompt.split("\n").find(line => line.startsWith("【出力】"));
 const count = (prompt: string, text: string) => prompt.split(text).length - 1;
+const repairOnly = "取り違えや名前の取り消しを表明できるのは、repair の行動（複数の扱いでは repair の部分）だけです。";
+const procedureWords = "「合意」「候補」「案」「受け取りました」などの手続き語";
 
 test("v23 の課題教示は図形数と公開できる材料を示し、古い方略の選択を委ねない", () => {
   for (const size of [4, 6]) {
@@ -76,6 +78,30 @@ test("v23 は確認、修復、受け止め、保留の範囲を扱いごとに�
   }
 });
 
+test("v23 は命名の扱いで相手の見立てへの理解を示すよう指示する", () => {
+  const proposal = "相手の見立てを短く受け止め、観察メモに基づく全体の見立てと結び付けて理解を示してください。必要なら自分の見立てを一つ返せます。";
+  const agreement = "相手の見立てを短く受け止め、観察メモに基づく全体の見立てと結び付けて、どの図形のことと理解したかを示してください。合意した後に同じ特徴を説明し直さないでください。";
+  for (const [action, expected, other, namingRule] of [
+    ["propose_name", proposal, agreement, /計画にある名前を「」で候補として示してください/],
+    ["agree", agreement, proposal, /計画にある名前を「」で示し、その名前に決まったことを伝えてください/],
+  ] as const) {
+    const item = { action, name: "帆", target: single };
+    for (const items of [[item], [item, repair]]) {
+      const prompt = plan({ items, visualDetail: items.length > 1 });
+      const line = prompt.split("\n").find(line =>
+        line.startsWith(items.length > 1 ? `items の 0 番（${action}）: ` : `【行動 ${action}】`));
+      assert.ok(line);
+      assert.ok(line.includes(expected));
+      assert.match(line, namingRule);
+      if (action === "propose_name") assert.match(line, /合意は表明しないでください/);
+      assert.equal(count(prompt, expected), 1);
+      assert.equal(count(prompt, other), 0);
+      assert.equal(count(prompt, "これまでの発話に根拠がある時だけ"), items.length - 1);
+    }
+  }
+  assert.doesNotMatch(plan({ items: [accept, repair], visualDetail: true }), /相手の見立てを短く受け止め/);
+});
+
 test("v23 の終了と呼び名の取り下げに矛盾する別の指示を重ねない", () => {
   const close = { action: "close", target: { kind: "none" } } as const;
   for (const [closing, expected] of [
@@ -131,8 +157,17 @@ async function run(human: string, plan: Plan, label: Label = "bypass-enabled",
       if (provider === "luna") terra.push({ body, messages: JSON.parse(body).messages });
     } }, technical, version);
   assert.equal(result.publication.status, "committed");
-  return { ...result, events: result.publication.publicEvents as History["events"],
-    terra: terra.filter((_, i) => result.luna[i].phase === "generation") };
+  const generation = terra.filter((_, i) => result.luna[i].phase === "generation");
+  if (version === GENERATION_RETRY_V23) {
+    for (const { messages } of generation) {
+      const system = messages.filter(message => message.role === "system");
+      for (const instruction of [repairOnly, procedureWords]) {
+        assert.equal(count(system[1].content, instruction), 1);
+        assert.ok(system.filter((_, index) => index !== 1).every(message => !message.content.includes(instruction)));
+      }
+    }
+  }
+  return { ...result, events: result.publication.publicEvents as History["events"], terra: generation };
 }
 
 test("v23 は主な扱いが単一対象でも追加の扱いの複数候補を保ち、同じ計画を両方略で同じバイトで送る", async () => {
