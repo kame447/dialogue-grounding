@@ -220,6 +220,7 @@ export async function createNamingTaskV2({
       ...(jev.profile.dialoguePolicy ? { dialoguePolicy: jev.profile.dialoguePolicy } : {}),
       ...(jev.participantPrompts ? { participantPrompts: true } : {}),
       generationRetryVersion: jev.generationRetryVersion,
+      judgmentMaterialVersion: jev.profile.judgmentMaterialVersion,
       newTrialAgreeNameScopeVersion: jev.newTrialAgreeNameScopeVersion,
       onJevTurnTrace: (record) => {
         jevTraces.push(clone(record));

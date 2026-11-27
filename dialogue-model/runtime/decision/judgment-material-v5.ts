@@ -3,6 +3,7 @@
 // figures are f0..f5 in ownSlots order; the ledger lists each figure's agreed name and every action that was executed on it.
 // encode and decode are exact inverses except for the claims' quotes, which a reference replaces (a decoded claim has quote "" and a nominal source).
 import type { JevAction, JevTarget } from "./contract.ts";
+import { repairQualityEvidence } from "./repair-quality.ts";
 
 export const JUDGMENT_VIEW_V5 = "judgment_v5";
 /** An action executed on figures in an earlier turn (the ledger's typed history). */
@@ -62,6 +63,12 @@ export function encodeMaterialV5(material: any, { actions, nameLedger, answers: 
     ...(material.repairProspect ? { repairProspect: material.repairProspect } : {}),
     ...(material.sharedConstruals?.length ? { sharedConstruals: material.sharedConstruals } : {}),
     ...(material.namingEvidence ? { namingEvidence: material.namingEvidence } : {}),
+    ...(material.referenceEvidence ? { referenceEvidence: material.referenceEvidence } : {}),
+    ...(material.judgmentMaterialVersion ? {
+      judgmentMaterialVersion: material.judgmentMaterialVersion,
+      repairQuality: repairQualityEvidence(material.turn, material.publicTurns, material.priorClaims, material.repairHistory),
+      ...(material.publicationRecoveryContext ? { publicationRecoveryContext: material.publicationRecoveryContext } : {}),
+    } : {}),
     inputBudget: material.inputBudget,
   };
 }
