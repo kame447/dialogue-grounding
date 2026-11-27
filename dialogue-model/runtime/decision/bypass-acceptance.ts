@@ -89,10 +89,10 @@ function checkRepairProspect(value:unknown):void {
 }
 function prepare(input:unknown,original:unknown,intervention:unknown,questionLayout:JevQuestionLayout='two_stage_v1',usagePolicy?:ParticipantUsageOnly){
  const policy=config(intervention);
- const i=boundary(input,'invalid_input',value=>{const optional=['reobservationAllowed','humanReferent','repairProspect','agreeNames','repairFacts','participantLedger','nameLedger','nameSource','namingRequest','namingRequestStrict','judgmentLedger','rotationMode','notationV6','notationV11','featureReplyFilter','p5Enabled','sharedConstruals'].filter(k=>!!value&&typeof value==='object'&&Object.hasOwn(value,k));
+ const i=boundary(input,'invalid_input',value=>{const optional=['reobservationAllowed','humanReferent','repairProspect','agreeNames','repairFacts','participantLedger','nameLedger','nameSource','namingRequest','namingRequestStrict','judgmentLedger','rotationMode','notationV6','notationV11','featureReplyFilter','p5Enabled','sharedConstruals','namingDenials'].filter(k=>!!value&&typeof value==='object'&&Object.hasOwn(value,k));
   if(!exact(value,['turn','publicTurns','ownSlots','observations','issueSummary','priorClaims','repairHistory','previousAction','publicNames',...optional]))fail('invalid_input');
   if(Object.hasOwn(value,'repairProspect'))checkRepairProspect(value.repairProspect);
-  buildJevDecisionPayload(value as JevDecisionInput,value.p5Enabled===true?{questionLayout}:undefined);
+  buildJevDecisionPayload(value as JevDecisionInput,value.p5Enabled===true||Object.hasOwn(value,'namingDenials')?{questionLayout}:undefined);
   return structuredClone(value) as BypassAcceptanceInput;});
  const d=boundary(original,'invalid_original',value=>{const valid=validateJevDecision(value,i,{questionLayout,usagePolicy});if(valid.action==='request_observation')fail('invalid_original');return valid;});
  return {input:i,decision:d,config:policy,original:project(d),layout:questionLayout};

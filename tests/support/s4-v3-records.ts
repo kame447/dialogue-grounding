@@ -170,6 +170,7 @@ export function initialState({ profile, ledger, memo, generationRetryVersion, ag
   const created = generationRetryVersion ?? (profile.dialoguePolicy === 'holistic_v5' ? defaultGenerationRetryVersion('two_stage_v3', 'holistic_v5') : undefined);
   const scope = agreeNameScopeVersion ?? (isGenerationV11(created) ? 'scoped_v6' : isGenerationV8(created) ? 'scoped_v5' : isGenerationV7(created) ? 'scoped_v4' : isGenerationV6(created) ? 'scoped_v3' : undefined);
   if (scope) state.agreeNameScopeVersion = scope;
+  if (scope === 'scoped_v12') state.namingDenials = {};
   if (memo) state.observationMemo = structuredClone(memo);
   return state;
 }

@@ -112,6 +112,8 @@ export type JevDecisionInput = {
   notationV11?: true;
   /** scoped_v8 only: backchannels and follow-up questions do not answer a feature check. Never serialized to Jev. */
   featureReplyFilter?: true;
+  /** Participant naming v5. Private per-figure denials used to filter the confirmation offer. */
+  namingDenials?: import("./naming-discrimination.ts").NamingDenials;
   /** Private material mode from the trial's generation version. */
   p5Enabled?: true;
   sharedConstruals?: SharedConstrual[];

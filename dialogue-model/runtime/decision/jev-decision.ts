@@ -1,3 +1,4 @@
+import { contrastFeatures, includesNamingDenial, validNamingDenials } from "./naming-discrimination.ts";
 import { PARTICIPANT_USAGE_ONLY, type ParticipantUsageOnly } from '../web/participant-usage-policy.ts';
 import { deadlineLimit, deadlineValue } from '../v2/research-deadline-options.ts';
 import type { ResearchLimits } from '../v2/research-timeouts.ts';
@@ -196,21 +197,33 @@ export function buildJevDraftActPayload(input: DraftActInput, policy?: DialogueP
 /** two_stage_v3 legality: the single source of the (action, target) table. A pair is legal when the target kind is allowed for the action
  * and the material actually holds the name/feature candidates or the observation allowance that action needs for that target. */
 const V3_ANY_TARGET_ACTIONS: readonly JevAction[] = Object.freeze(["accept", "defer", "move_on", "close"]);
-type V3Material = { slots: readonly string[]; catalog: Catalog; reobservationAllowed: boolean; noAccept?: boolean };
+type V3Material = { slots: readonly string[]; catalog: Catalog; reobservationAllowed: boolean; noAccept?: boolean;
+  contrast?: { denials: NonNullable<JevDecisionInput["namingDenials"]>; features: string[][] } };
+function inNamingReview(m: V3Material, ids: readonly string[]): boolean {
+  return m.contrast !== undefined && includesNamingDenial(m.contrast.denials, ids);
+}
+function scopedFeatures(m: V3Material, ids: readonly string[]): string[][] {
+  return inNamingReview(m, ids) ? m.contrast!.features : m.catalog.features;
+}
+function hasFeatureTarget(m: V3Material, ids: readonly string[]): boolean {
+  if (ids.length !== 1 && inNamingReview(m, ids)) return false;
+  const features = scopedFeatures(m, ids);
+  return ids.some(id => features[m.slots.indexOf(id)].length > 0);
+}
 function legalActionTargetV3(action: JevAction, target: JevTarget, m: V3Material): boolean {
   if (action === "accept" && m.noAccept) return false;
   if (V3_ANY_TARGET_ACTIONS.includes(action)) return true;
   if (target.kind === "none") return false;
   const ids = targetIds(target);
   if (action === "revisit") return true;
-  if (action === "request_observation") return m.reobservationAllowed;
+  if (action === "request_observation") return m.reobservationAllowed && !inNamingReview(m, ids);
   if (action === "propose_name" || action === "agree") {
-    if (target.kind !== "single") return false;
+    if (target.kind !== "single" || action === "propose_name" && inNamingReview(m, ids)) return false;
     // two_stage_v3: agree rests on explicit public agree evidence only; without it (no agreeNames) agree is never legal.
     const names = action === "agree" ? m.catalog.agreeNames ?? m.slots.map(() => []) : m.catalog.names;
     return names[m.slots.indexOf(ids[0])].length > 0;
   }
-  return ids.some(id => m.catalog.features[m.slots.indexOf(id)].length > 0); // confirm, repair
+  return hasFeatureTarget(m, ids); // confirm, repair
 }
 export type JevV3TargetOption = { label: string; target: JevTarget };
 /** Closed target options for one action, in the fixed order none, figure_0..5, then the 57 candidate sets by size. */
@@ -586,6 +599,10 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
   }
   // holistic_v3: a typed naming request with no agree candidate leaves accept out of the legal actions (the program only narrows; Jev still chooses).
   // holistic_v4: an unadopted name asked for never gets accept, even when an agree is legal (the answer is agree, a check, or what the strategy allows).
+  const denials = input.namingDenials;
+  if (denials !== undefined && (!v3 || !validNamingDenials(denials, slots, input.turn))) fail("invalid_input");
+  const contrast = denials && Object.keys(denials).length > 0 ? { denials, features: slots.map(id =>
+    contrastFeatures(input.observations, slots, id).filter(feature => catalog.features[slots.indexOf(id)].includes(feature))) } : undefined;
   const noAccept = v3 && namingRequestInput && (input.namingRequestStrict === true || !(catalog.agreeNames ?? []).some(names => names.length > 0));
   if ([...catalog.names, ...(catalog.agreeNames ?? []), ...catalog.features].some(v => v.length > 254)) fail("invalid_input");
   const slotCriteria = Object.fromEntries(slots.map((id, i) => [`figure_${i}`, `自分の候補図形 ${JSON.stringify(id)}。観察メモを参照。` ]));
@@ -596,7 +613,7 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
   if (layout === "two_stage_v3") {
     // Only actions with at least one legal target and detail in the material that survived the budget; scores of all of them are saved.
     add("action", "次の行動を一つ選んでください。request_observationは公開発話を生成する前の追加観察要求です。", Object.fromEntries(
-      legalActionsV3({ slots, catalog, reobservationAllowed, noAccept }).map(a => [a, v3Criteria(policy)[a] +
+      legalActionsV3({ slots, catalog, reobservationAllowed, noAccept, contrast }).map(a => [a, v3Criteria(policy)[a] +
         (!shared.length ? "" : a === "accept" ? "\n" + SHARED_ACCEPT : a === "confirm" || a === "repair" ? "\n" + SHARED_CONFIRM : "")])));
   } else {
   add("action", "次の行動を一つ選んでください。request_observationは公開発話を生成する前の追加観察要求です。", Object.fromEntries(
@@ -610,7 +627,7 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
       { include: "公開発話の対象候補に含む。", exclude: "対象候補に含まない。" });
   });
   return { payload: { model: JEV_DECISION_MODEL, state, questions } as JevDecisionPayload, slots, catalog, human: humans[0].text, reobservationAllowed, noAccept,
-    budget, layout, previousAction, publicTurns, repairHistory, ledgerActions, answers, answerRows, shared };
+    budget, layout, previousAction, publicTurns, repairHistory, ledgerActions, answers, answerRows, shared, contrast };
 }
 
 export function buildJevDecisionPayload(input: JevDecisionInput, { questionLayout = "two_stage_v1", dialoguePolicy }: { questionLayout?: JevQuestionLayout; dialoguePolicy?: DialoguePolicy } = {}): JevDecisionPayload {
@@ -749,10 +766,10 @@ function prepareParticipantTargetMenu(p: ReturnType<typeof prepare>) {
   const targets = participantTargets(p.slots);
   const byFamily = {
     general_target: () => true,
-    propose_target: (ids: string[]) => ids.length === 1 && p.catalog.names[p.slots.indexOf(ids[0])].length > 0,
+    propose_target: (ids: string[]) => ids.length === 1 && !inNamingReview(p, ids) && p.catalog.names[p.slots.indexOf(ids[0])].length > 0,
     agree_target: (ids: string[]) => ids.length === 1 && (p.catalog.agreeNames?.[p.slots.indexOf(ids[0])]?.length ?? 0) > 0,
-    feature_target: (ids: string[]) => ids.some(id => p.catalog.features[p.slots.indexOf(id)].length > 0),
-    observation_target: (ids: string[]) => ids.length > 0 && p.reobservationAllowed,
+    feature_target: (ids: string[]) => hasFeatureTarget(p, ids),
+    observation_target: (ids: string[]) => ids.length > 0 && p.reobservationAllowed && !inNamingReview(p, ids),
     revisit_target: (ids: string[]) => ids.length === 1,
   };
   const labels = {
@@ -959,7 +976,7 @@ function prepareDetail(input: JevDecisionInput, selected: JevActionTarget, rejec
     for (const id of scope) {
       const index = p.slots.indexOf(id);
       const catalog = selected.action === "agree" && p.catalog.agreeNames !== undefined ? p.catalog.agreeNames
-        : ["propose_name", "agree"].includes(selected.action) ? p.catalog.names : p.catalog.features;
+        : ["propose_name", "agree"].includes(selected.action) ? p.catalog.names : scopedFeatures(p, scope);
       for (const value of catalog[index]) {
         const old = candidates.find(c => c.value === value);
         if (old) old.figureIds.push(id); else candidates.push({ value, figureIds: [id] });
