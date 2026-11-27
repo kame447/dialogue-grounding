@@ -62,6 +62,7 @@ export function isGenerationV16(version: unknown): version is "jev_generation_re
 export function validAgreeNameScope(scope: unknown, generation: unknown): boolean {
   if (scope === "scoped_v9" || scope === "scoped_v10") return generation === "jev_generation_retry_v12";
   if (scope === "scoped_v11") return generation === "jev_generation_retry_v12" || generation === "jev_generation_retry_v13" || isGenerationV15(generation);
+  if (scope === "jev_naming_v1") return isGenerationV15(generation);
   if (scope === "scoped_v7" || scope === "scoped_v8") return isGenerationV12(generation);
   if (isGenerationV11(generation)) return scope === "scoped_v6";
   if (isGenerationV8(generation)) return scope === "scoped_v5";
@@ -760,7 +761,17 @@ export function deriveGenerationOutcome(first: readonly string[], retry: readonl
   return { kind: orientationOnly && fallbackText !== null && fallbackClean ? "fallback" : "stop", regenerated: true, violations: union };
 }
 
-export type PublicationRecovery = { reason: "draft_content_mismatch"; act: "confirm_current_topic" | "restate_selected_action" };
+export type NamingHoldReason = "naming_grounding_unresolved" | "naming_ledger_conflict";
+export type PublicationRecovery =
+  { reason: "draft_content_mismatch"; act: "confirm_current_topic" | "restate_selected_action" } |
+  { reason: NamingHoldReason; act: "confirm_current_topic" };
+const CURRENT_TOPIC_CONFIRMATION = "今お話ししている形は、どの特徴を目印にすると見分けられそうですか？";
+
+export function namingPublicationHold(reason: NamingHoldReason) {
+  const recovery: PublicationRecovery = { reason, act: "confirm_current_topic" };
+  const judgment = { action: "confirm" as const, targetSlot: null, candidateName: null, discriminatingFeature: null, note: null };
+  return { recovery, judgment, text: CURRENT_TOPIC_CONFIRMATION };
+}
 const RECOVERABLE_CONTENT = new Set([
   "name_mismatch", "name_not_shown", "draft_act_mismatch", "draft_act_missing_evidence",
   "self_repair", "unsolicited_deferral", "unsupported_topic_shift", "orientation_leak", "shared_view_assumption",
@@ -776,7 +787,7 @@ export function contentPublicationRecovery(violations: readonly string[], execut
     !(confirmDetail && code === "confirmation_detail_mismatch"))) return null;
   const naming = execution.action === "agree" || execution.action === "propose_name";
   const action = naming ? "confirm" : execution.action;
-  const text = naming ? "今お話ししている形は、どの特徴を目印にすると見分けられそうですか？" : orientationNeutral[action];
+  const text = naming ? CURRENT_TOPIC_CONFIRMATION : orientationNeutral[action];
   if (!text) return null;
   const recovery: PublicationRecovery = { reason: "draft_content_mismatch", act: naming ? "confirm_current_topic" : "restate_selected_action" };
   return { recovery, text, judgment: { action, targetSlot: execution.target.kind === "single" ? execution.target.figureId : null,

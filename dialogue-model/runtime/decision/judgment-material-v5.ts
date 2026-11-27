@@ -61,6 +61,7 @@ export function encodeMaterialV5(material: any, { actions, nameLedger, answers: 
     ...(material.humanReferent ? { humanReferent: material.humanReferent } : {}),
     ...(material.repairProspect ? { repairProspect: material.repairProspect } : {}),
     ...(material.sharedConstruals?.length ? { sharedConstruals: material.sharedConstruals } : {}),
+    ...(material.namingEvidence ? { namingEvidence: material.namingEvidence } : {}),
     inputBudget: material.inputBudget,
   };
 }

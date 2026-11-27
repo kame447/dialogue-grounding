@@ -52,6 +52,10 @@ export type SharedConstrual = {
   openDetails: { issueId: string; aspect: string; proposition: string; state: string }[];
 };
 export type PublicNameCandidate = { name: string; figureId: string | null; sourceTurn: number };
+export type JevNamingGrounding = {
+  verdict: "grounded" | "unresolved" | "contradicted" | "unconfirmed";
+  evidenceTurn: number | null;
+};
 export type JevPriorAction = { turn: number; action: JevAction; target: JevTarget; name: string | null; feature: string | null };
 /** Human utterance referent, independent of the next action's target. No winner or calibration. */
 export type HumanReferentMaterial = { status: "ok" | "unknown"; scores: Record<string, number> | null };
@@ -87,6 +91,7 @@ export type JevDecisionInput = {
   publicNames: readonly PublicNameCandidate[];
   /** Opt-in agreement candidates backed by eligible public naming claims. */
   agreeNames?: PublicNameCandidate[];
+  jevNaming?: { localRejections: Array<{ quote: string; reason: string }> };
   /** Private participant ledger for candidate validation. Never serialized to Jev. */
   participantLedger?: OwnLedger;
   /** Local v3 proposal legality only. The request never serializes the ledger. */
