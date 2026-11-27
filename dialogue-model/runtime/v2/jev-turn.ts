@@ -1000,7 +1000,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         try { state.aiPublic = validateAiPublicState(state.aiPublic, slots, latest.seq - 1, state.graph); }
         catch { throw new JevTurnError("invalid_state"); }
       }
-      const publicTurns: PublicTurn[] = events.filter(e => e.seq <= latest.seq &&
+      const publicTurns: Array<PublicTurn & Pick<Event, "nonReferential">> = events.filter(e => e.seq <= latest.seq &&
         (!aiEnabled || events.filter(other => other.seq === e.seq).length === 1)).slice(-REFERENCE_LIMITS.publicTurns).map(e => ({ turn: e.seq, speaker: e.speaker, text: e.text,
         ...(e.nonReferential ? { nonReferential: true } : {}) }));
       const previous = state.judgments.at(-1), previousExecution=previous?publishedExecution(previous):null, previousAi = previous && publicTurns.find(t => t.speaker === "ai" && t.turn > previous.turnIndex && t.turn < latest.seq);
@@ -1035,10 +1035,13 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       const graph = previewReferenceUpdate(state.graph, prepared.update, { publicTurns }) as Graph;
       const beforeClaims = priorClaimViews(state.graph, { limit: REFERENCE_LIMITS.records });
       const claims = priorClaimViews(graph, { limit: REFERENCE_LIMITS.records });
+      const answersNamingRecovery = state.agreeNameScopeVersion === "jev_naming_v1" && previous && previousAi &&
+        !previousAi.nonReferential && previous.publicationRecovery?.act === "confirm_current_topic" &&
+        state.repairHistory.some(r => r.turn === previous.turnIndex && r.action === "confirm" && r.question === previousAi.text);
       let repairHistory = updateRepairHistory(state.repairHistory, beforeClaims, claims, latest.seq,
         previous && previousAi && ["repair", "confirm", "revisit"].includes(previous.judgment.action) ? { answeredRepairTurn: previous.turnIndex,
           ...(aiEnabled ? { aiPublic: { humanOk: prepared.trace.status === "ok", rejected: prepared.trace.rejected,
-            aiComplete: state.aiPublic!.log.some(log => log.aiSeq === previousAi.turn && log.status === "applied") } } : {}) }
+            aiComplete: !!answersNamingRecovery || state.aiPublic!.log.some(log => log.aiSeq === previousAi.turn && log.status === "applied") } } : {}) }
           : aiEnabled ? { answeredRepairTurn: -1, aiPublic: { humanOk: prepared.trace.status === "ok", rejected: prepared.trace.rejected, aiComplete: false } } : undefined);
       // v2: decide the gate from the judgments and claims as they stand now; Jev infers over the open entries only.
       const gate = gated ? agreementGate(repairHistory, state.judgments, claims, latest.seq, state.ledger) : null;
@@ -1235,7 +1238,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         const interventionTrace = record.intervention;
         const detail = interventionTrace && typeof interventionTrace === "object" && interventionTrace.disposition === "rejected"
           ? interventionTrace.detailEvidence : decision!.evidence.stages?.at(-1);
-        record.namingGrounding = readJevNamingGrounding(detail, agreeTurns);
+        record.namingGrounding = readJevNamingGrounding(detail, agreeTurns, execution.name, baseInput.agreeNames!);
         if (record.namingGrounding.verdict !== "grounded") namingHoldReason = "naming_grounding_unresolved";
       }
       // P3 can retain an unresolved referent. Keep its whole candidate set in
@@ -1331,7 +1334,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         ? baseInput.agreeNames!.map(n => ({ ...n, figureId: act.targetSlot })) : baseInput.agreeNames ?? [];
       const semanticNaming = isGenerationV15(generationRetryVersion)
         ? { currentTurnSource: currentTurnNamingSource(execution, contextualNames, latest.seq,
-          claims.filter(c => c.speaker === "human" && c.act === "name_propose" && c.aspect === "name")) } : undefined;
+          baseInput.jevNaming ? [] : claims.filter(c => c.speaker === "human" && c.act === "name_propose" && c.aspect === "name")) } : undefined;
       const chosenName = judgment.action === "propose_name" && typeof judgment.candidateName === "string" ? normalizeName(judgment.candidateName) : null;
       // Only an agreed name is excluded from the quoted-string hint; a tentative name is not.
       const agreedNames = new Set(targets(execution).map(id => state.ledger[id]).filter(e => e?.status === "agreed" && typeof e.name === "string").map(e => normalizeName(e.name as string)));
@@ -1466,6 +1469,14 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
           }
         }
       }
+      }
+      if (baseInput.jevNaming && record.publicationRecovery?.act === "confirm_current_topic") {
+        // A generic public check keeps the actual reply attached to this turn
+        // without treating the original naming target as established.
+        repairHistory = [...repairHistory, { turn: latest.seq, issueId: null, action: "confirm", question: result.text,
+          partnerClaims: [], candidatesBefore: [...slots], candidatesAfter: [...slots], addedClaimIds: [], removedClaimIds: [],
+          progress: "unknown" }];
+        record.repairHistory = repairHistory;
       }
       let aiPending: AiPublicPending | null = null;
       if (aiEnabled) {

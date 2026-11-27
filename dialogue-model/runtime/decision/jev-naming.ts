@@ -43,14 +43,15 @@ export function buildJevNamingMaterial(claims: readonly LocalClaimView[], turns:
 }
 
 /** Projection of the existing detail result, never a program judgment of meaning. */
-export function readJevNamingGrounding(detail: JevDecisionStageEvidence | null | undefined,
-  turns: readonly PublicTurn[]): JevNamingGrounding {
+export function readJevNamingGrounding(detail: Pick<JevDecisionStageEvidence, "stage" | "choices"> | null | undefined,
+  turns: readonly PublicTurn[], name: string | null, names: readonly PublicNameCandidate[]): JevNamingGrounding {
   const choices = detail?.stage === "detail" ? detail.choices : undefined;
   const verdict = choices?.naming_grounding;
   const namedGrounding = typeof choices?.name === "string" && verdict === "grounded_" + choices.name;
   const source = /^turn_([1-9][0-9]*)$/u.exec(choices?.naming_evidence ?? "");
   const evidenceTurn = source ? Number(source[1]) : null;
-  const current = evidenceTurn !== null && turns.some(t => t.turn === evidenceTurn);
+  const current = name !== null && evidenceTurn !== null && names.some(n => n.name === name && n.sourceTurn === evidenceTurn) &&
+    turns.some(t => t.turn === evidenceTurn && t.speaker === "human" && literalSpan(t.text, name));
   return {
     verdict: verdict === "unresolved" || verdict === "contradicted" ? verdict
       : namedGrounding && current ? "grounded" : "unconfirmed",
