@@ -106,7 +106,7 @@ function looksAligned(entries) {
     const values = entries.map(p => p.center[axis]).sort((a, b) => a - b);
     const band = axis === 'x' ? BOARD_WIDTH * 0.1 : BOARD_HEIGHT * 0.12;
     if (values.some((v, i) => i + 3 < values.length && values[i + 3] - v <= band)) return true;
-    return values[2] - values[0] <= band && values[5] - values[3] <= band;
+    return values.length === 6 && values[2] - values[0] <= band && values[5] - values[3] <= band;
   });
 }
 
@@ -144,15 +144,15 @@ function placeSide(definitions, random, otherSide = []) {
       if (!accepted) break;
       placed.push(accepted);
     }
-    if (placed.length === 6 && !looksAligned(placed)) return shuffle(placed, random);
+    if (placed.length === definitions.length && !looksAligned(placed)) return shuffle(placed, random);
   }
   throw new Error('Unable to place scattered silhouettes within budget');
 }
 
-function localIds(seed, side, used) {
+function localIds(seed, side, used, figureCount) {
   const ids = [];
   // Collision resolution is deterministic, including across the two sides.
-  for (let nonce = 0; ids.length < 6; nonce++) {
+  for (let nonce = 0; ids.length < figureCount; nonce++) {
     const id = `s-${digest(seed, `${side}:id:${nonce}`).toString('hex').slice(0, 4)}`;
     if (!used.has(id)) { used.add(id); ids.push(id); }
   }
@@ -175,7 +175,7 @@ export function createLayoutsV2({ seed, rotationMode = 'relative_pm90', figureSe
   const humanRotations = new Map(FIGURES.map(f => [f.id, Math.floor(rotations() * 4) * 90]));
   const human = {}, ai = {};
   for (const [side, result] of [['human', human], ['ai', ai]]) {
-    const ids = localIds(seed, side, used);
+    const ids = localIds(seed, side, used, FIGURES.length);
     const figures = shuffle(FIGURES, randomSource(seed, `${side}:identity`));
     result.definitions = figures.map((f, i) => ({
       id: ids[i], figureId: f.id,

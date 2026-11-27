@@ -40,7 +40,7 @@ test('legacy selection is byte-identical to the unspecified call and the seed 20
   assert.equal(Object.hasOwn(trialStimulusV2(a)!, 'bankVersion'), false);
 });
 
-test('every preset and seeded_random selection places six identical figures on both sides', () => {
+test('every preset and seeded_random selection places its recorded figures on both sides', () => {
   const specs = [
     ...PRESETS.flatMap(setId => SEEDS.map(seed => ({ seed, spec: { mode: 'preset', setId } }))),
     ...Array.from({ length: 20 }, (_, i) => ({ seed: 100 + i, spec: { mode: 'seeded_random', selectionSeed: i * 37 - 5 } })),
@@ -50,7 +50,7 @@ test('every preset and seeded_random selection places six identical figures on b
     const resolved = resolveFigureSelection(spec);
     const trial = createTrialV2({ seed, figureSelection: spec });
     const human = Object.values(trial.key.human) as string[], ai = Object.values(trial.key.ai) as string[];
-    assert.equal(new Set(human).size, 6);
+    assert.equal(new Set(human).size, resolved.figureIds.length);
     assert.deepEqual([...human].sort(), [...resolved.figureIds].sort());
     assert.deepEqual([...ai].sort(), [...resolved.figureIds].sort());
     const stim = trialStimulusV2(trial)!;

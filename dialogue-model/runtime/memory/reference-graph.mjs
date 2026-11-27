@@ -1,4 +1,5 @@
 import { SLOTS } from "../stimuli/board.mjs";
+import { isSupportedFigureCount } from "../stimuli/figure-bank.ts";
 import { LOCAL_ASPECTS, LOCAL_ACTS, LOCAL_SOURCES, LABELLED_ANSWER_SOURCE, LOCAL_QUESTION_ANSWER_SOURCE } from "../local-grounding/contract.ts";
 
 /**
@@ -7,7 +8,7 @@ import { LOCAL_ASPECTS, LOCAL_ACTS, LOCAL_SOURCES, LABELLED_ANSWER_SOURCE, LOCAL
  *
  * createReferenceGraph({ ownObservations: [{ slot, feature }], slots? }) takes ONLY
  * descriptions grounded in the AI's own image, not generated dialogue text.
- * Optional slots are six unique nonempty strings (at most 160 chars each),
+ * Optional slots are four or six unique nonempty strings (at most 160 chars each),
  * scoped to this graph; no board correspondence is inferred from their values.
  * Explicit slots are persisted in the graph. Omitting slots preserves the exact
  * legacy v1 graph/view/summary shapes and uses SLOTS, including JSON restores.
@@ -79,12 +80,12 @@ const text = (value, max) => typeof value === "string" && value.trim().length > 
 const index = (value) => Number.isSafeInteger(value) && value >= 0;
 const ref = (value) => typeof value === "string" && /^[1-9]\d*:[a-zA-Z0-9_-]{1,32}$/.test(value);
 const refs = (value) => Array.isArray(value) && value.length > 0 && value.length <= 8 && value.every(ref) && new Set(value).size === value.length;
-const slots = (value, empty = false, ownSlots = SLOTS) => Array.isArray(value) && (empty || value.length > 0) && value.length <= 6 &&
+const slots = (value, empty = false, ownSlots = SLOTS) => Array.isArray(value) && (empty || value.length > 0) && value.length <= ownSlots.length &&
   value.every((slot) => ownSlots.includes(slot)) && new Set(value).size === value.length;
 const graphSlots = (graph) => Object.hasOwn(graph, "slots") ? graph.slots : SLOTS;
 function validateSlots(value) {
-  if (!Array.isArray(value) || value.length !== 6 || ![...value].every((slot) => text(slot, 160)) ||
-      new Set(value).size !== 6) fail("invalid_slots");
+  if (!Array.isArray(value) || !isSupportedFigureCount(value.length) || ![...value].every((slot) => text(slot, 160)) ||
+      new Set(value).size !== value.length) fail("invalid_slots");
   return value;
 }
 const clone = (value) => structuredClone(value);
@@ -139,7 +140,7 @@ function checkRecord(record, ownSlots = SLOTS) {
   } else if (!ref(record.targetId) || !ref(record.mentionId) || !text(record.reason, 160)) fail("invalid_retraction");
 }
 function observations(value, ownSlots = SLOTS) {
-  if (!Array.isArray(value) || value.length > 6 * REFERENCE_LIMITS.observationsPerSlot) fail("invalid_observations");
+  if (!Array.isArray(value) || value.length > ownSlots.length * REFERENCE_LIMITS.observationsPerSlot) fail("invalid_observations");
   const seen = new Set();
   for (const item of value) {
     if (!exact(item, ["slot", "feature"]) || !text(item.feature, 160)) fail("invalid_observations");

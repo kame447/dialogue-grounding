@@ -1,4 +1,5 @@
 import { SLOTS } from './stimuli/board.mjs';
+import { isSupportedFigureCount } from './stimuli/figure-bank.ts';
 
 // Provisional orthographic normalization; semantic synonyms remain distinct.
 export function normalizeName(name) {
@@ -8,14 +9,14 @@ export function normalizeName(name) {
 
 const OPAQUE_SLOT = /^s-[0-9a-f]{4}$/;
 
-// v1 keys use the six fixed position names; v2 keys use six opaque per-side ids
-// (in the order the key lists them). Either way each side has exactly six slots.
+// v1 keys retain the six fixed positions. v2 keys use four or six opaque
+// per-side ids, in the order recorded by the scoring key.
 export function slotsOf(map) {
-  if (!map || typeof map !== 'object' || Array.isArray(map)) throw new TypeError('Key must contain all six slots');
+  if (!map || typeof map !== 'object' || Array.isArray(map)) throw new TypeError('Key must contain all trial slots');
   const keys = Object.keys(map);
   if (keys.length === SLOTS.length && SLOTS.every(slot => Object.hasOwn(map, slot))) return SLOTS;
-  if (keys.length === SLOTS.length && keys.every(slot => OPAQUE_SLOT.test(slot))) return Object.freeze([...keys]);
-  throw new TypeError('Key must contain all six slots');
+  if (isSupportedFigureCount(keys.length) && keys.every(slot => OPAQUE_SLOT.test(slot))) return Object.freeze([...keys]);
+  throw new TypeError('Key must contain all trial slots');
 }
 
 function validateKey(key) {
@@ -23,12 +24,12 @@ function validateKey(key) {
   const sides = ['human', 'ai'].map(side => {
     const map = key[side];
     const slots = slotsOf(map);
-    if (!slots.every(slot => typeof map[slot] === 'string' && map[slot].length)) throw new TypeError('Key must contain all six slots');
+    if (!slots.every(slot => typeof map[slot] === 'string' && map[slot].length)) throw new TypeError('Key must contain all trial slots');
     const ids = slots.map(slot => map[slot]);
     if (new Set(ids).size !== slots.length) throw new TypeError('Key must be a bijection');
     return ids;
   });
-  if (!sides[0].every(id => sides[1].includes(id))) throw new TypeError('Key sides must contain the same figure IDs');
+  if (sides[0].length !== sides[1].length || !sides[0].every(id => sides[1].includes(id))) throw new TypeError('Key sides must contain the same figure IDs');
 }
 
 function collect(map, submission) {
@@ -60,8 +61,8 @@ export function scoreTrial({ key, humanSubmission, aiSubmission }) {
   return {
     provisional: true,
     normalization: 'NFKC・前後空白除去・内部空白除去・カタカナ→ひらがな（暫定）',
-    success: matchedCount === SLOTS.length && human.duplicateNames.length === 0 && ai.duplicateNames.length === 0,
-    matchedCount, total: SLOTS.length, figures,
+    success: matchedCount === figures.length && human.duplicateNames.length === 0 && ai.duplicateNames.length === 0,
+    matchedCount, total: figures.length, figures,
     duplicateNames: { human: human.duplicateNames, ai: ai.duplicateNames },
     unnamed: { human: human.unnamed, ai: ai.unnamed },
   };
