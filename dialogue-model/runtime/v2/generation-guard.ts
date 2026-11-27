@@ -2,7 +2,8 @@
 // validated judgment determines state; detected wording never changes its act.
 import type { DialoguePolicy, DraftAct, JevExecutedDecision, PublicNameCandidate } from "../decision/contract.ts";
 import { isGenerationV18, type ShapeTerminologyVersion } from "../shape-terminology.ts";
-type GenerationV17Plus = "jev_generation_retry_v17" | ShapeTerminologyVersion;
+export const VISUAL_FEATURE_GENERATION = "jev_generation_retry_v19";
+type GenerationV17Plus = "jev_generation_retry_v17" | ShapeTerminologyVersion | typeof VISUAL_FEATURE_GENERATION;
 // v3 was reserved for the experiment that extended fixed responses.
 // v9 contains every behaviour of v8 and widens only which wordings the orientation check accepts as a stated viewpoint or as the partner's own words. v8 contains every behaviour of v7 and adds the direct pointing-reply match to a targetless or differently-extracted confirm question. v7 contains every behaviour of v6 and widens the unsupported-topic-shift check to the particle-less and "next figure" wordings. v6 contains every behaviour of v5 and adds the unsupported-topic-shift check. v5 contains every behaviour of v4 (viewpoint rules, no fixed-sentence fallback, the whole-history judgment material, the private naming state) and adds the confirm-specific viewpoint note and the topic markers.
 export type GenerationRetryVersion = "jev_generation_retry_v1" | "jev_generation_retry_v2" | "jev_generation_retry_v4" | "jev_generation_retry_v5" | "jev_generation_retry_v6" | "jev_generation_retry_v7" | "jev_generation_retry_v8" | "jev_generation_retry_v9" | "jev_generation_retry_v10" | "jev_generation_retry_v11" | "jev_generation_retry_v12" | "jev_generation_retry_v13" | "jev_generation_retry_v14" | "jev_generation_retry_v15" | "jev_generation_retry_v16" | GenerationV17Plus;
@@ -62,7 +63,11 @@ export function isGenerationV16(version: unknown): version is "jev_generation_re
 }
 
 export function isGenerationV17(version: unknown): version is GenerationV17Plus {
-  return version === "jev_generation_retry_v17" || isGenerationV18(version);
+  return version === "jev_generation_retry_v17" || isGenerationV18(version) || isGenerationV19(version);
+}
+
+export function isGenerationV19(version: unknown): version is typeof VISUAL_FEATURE_GENERATION {
+  return version === VISUAL_FEATURE_GENERATION;
 }
 
 export function validAgreeNameScope(scope: unknown, generation: unknown): boolean {
@@ -668,7 +673,8 @@ export function rewriteReasons(codes: readonly string[], policy?: DialoguePolicy
     codes.includes("draft_shared_claim_single_id") ? "前の下書きは、候補が一つに絞れていないのに同じ一つの図形に特定できたと断定していました。候補の範囲を保ち、単一の図形に決まったと断定せずに書き直してください。" : "",
     codes.includes("draft_shared_claim_unconfirmed_detail") ? "前の下書きは、未確認・保留の細部が一致したと断定していました。未確認・保留の細部を一致と断定せず、大まかな共有見立ての範囲で書き直してください。" : "",
     codes.includes("draft_shared_claim_unconfirmed") ? "前の下書きに名前以外の過大断定がないか確認できませんでした。候補の範囲と未確認・保留の細部を守り、大まかな共有見立ての範囲が明確になるように書き直してください。" : "",
-    isGenerationV16(version) && codes.includes("confirmation_detail_mismatch") ? "前の下書きでは選んだ確認特徴を照合できませんでした。その特徴を尋ねる文を作り、指定されたJSONの形で返してください。" : "",
+    isGenerationV19(version) && codes.includes("visual_feature_mismatch") ? "前の下書きでは、公開文で使われた特徴の出所を観察メモと照合できませんでした。対象と論点を保ち、根拠のある特徴を使うか、不確かさを伝えてください。指定されたJSONの形で返してください。" : "",
+    isGenerationV16(version) && !isGenerationV19(version) && codes.includes("confirmation_detail_mismatch") ? "前の下書きでは選んだ確認特徴を照合できませんでした。その特徴を尋ねる文を作り、指定されたJSONの形で返してください。" : "",
   ].join("");
 }
 
@@ -820,8 +826,9 @@ export function contentPublicationRecovery(violations: readonly string[], execut
     candidateName: null, discriminatingFeature: null, note: null } };
 }
 
-export function canReconsiderPublication(violations: readonly string[]) {
-  return violations.length > 0 && violations.every(code => RECOVERABLE_CONTENT.has(code) || code === "confirmation_detail_mismatch");
+export function canReconsiderPublication(violations: readonly string[], version?: GenerationRetryVersion) {
+  return violations.length > 0 && violations.every(code => RECOVERABLE_CONTENT.has(code) ||
+    code === "confirmation_detail_mismatch" || isGenerationV19(version) && code === "visual_feature_mismatch");
 }
 
 /** Fail closed on unsafe bounded strings: schema-valid text is still untrusted. */

@@ -225,5 +225,5 @@ export type AiPublicResearch = {
   application: AiPublicApplication | null; pending: AiPublicPending | null;
   stages: { ai_extraction: AiStageEvidence; ai_function: AiStageEvidence; ai_support: AiStageEvidence };
   observationMemo: { version: number; sha256: string } | null;
-  prompts: { extraction: { version: 1 | 2; sha256: string }; function: { version: 1; sha256: string }; support: { version: 1; sha256: string } };
+  prompts: { extraction: { version: 1 | 2 | 3; sha256: string }; function: { version: 1; sha256: string }; support: { version: 1; sha256: string } };
 };
