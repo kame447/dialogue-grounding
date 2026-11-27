@@ -2,6 +2,7 @@ import type { FailureCode, FailureCause } from '../../../../dialogue-model/runti
 import type { ParticipantUsageSnapshot } from '../../../../dialogue-model/runtime/web/participant-usage.ts';
 import type { ParticipantRole, ParticipantRoleResult, ParticipantRoleView } from './participant-role.ts';
 import type { PreobservationUsage } from '../participant-preobservation.ts';
+import type { participantStartTiming } from './latency.ts';
 
 /** Researcher-only projections. These types are not the persisted reception or protocol schema. */
 export type ReceptionStrategy = 'repair-first' | 'bypass-enabled';
@@ -24,6 +25,7 @@ export type ReceptionFailedStartUsage = {
   failedStarts: { assignmentId: string; trialIndex: number; errorCode: Exclude<FailureCode, 'record_deleted'>; failureCause?: FailureCause;
     usage: ParticipantUsageSnapshot | null }[];
   preobservations?: PreobservationUsage[];
+  timing?: { approvedAt: string; trials: ReturnType<typeof participantStartTiming>[] };
 };
 export type ReceptionMode = 'on' | 'off' | 'unset';
 export type FigureSetPolicy = 'shared' | 'per_trial';

@@ -4,9 +4,11 @@ import { MODEL_CONTRACT_V2 } from '../../../dialogue-model/runtime/model-identit
 import { createChatClient } from '../../../dialogue-model/runtime/client.mjs';
 import { NamingTaskError } from '../../../dialogue-model/runtime/naming-error.mjs';
 import { createJevDecisionClient, type JevDecisionClientOptions } from '../../../dialogue-model/runtime/decision/jev-decision.ts';
+import { JEV_REPAIR_QUALITY_VERSION } from '../../../dialogue-model/runtime/decision/repair-quality.ts';
 import { createJevLocalTestClassifier } from '../../../dialogue-model/runtime/local-grounding/jev-local-test.ts';
 import { createWorkerTerraObserver, type WorkerTerraCache } from '../../../dialogue-model/runtime/observation/worker-terra-observer.ts';
-import type { InitialObservationGeneration } from '../../../dialogue-model/runtime/observation/initial-observation-generation.ts';
+import { INITIAL_OBSERVATION_STRUCTURED_V1, INITIAL_OBSERVATION_STRUCTURED_V2,
+  type InitialObservationGeneration } from '../../../dialogue-model/runtime/observation/initial-observation-generation.ts';
 import type { ObservationInput } from '../../../dialogue-model/runtime/observation/contract.ts';
 import { ENGINEERING_LIMITS, RunBudget, type BudgetLimits } from '../../../dialogue-model/runtime/diagnostics/parity-live/audit.ts';
 import { participantLedgerFetch, type JevResearchOptions, type JevResearchLedger } from '../../../dialogue-model/runtime/web/participant-jev-wiring.ts';
@@ -15,8 +17,8 @@ import { researchHash, researchTrialProfileV3, RESEARCH_TRIAL_PROFILE_V1 } from 
 import { RESEARCH_MAX_DEADLINE_MS, RESEARCH_MAX_LUNA_ATTEMPT_MS } from '../../../dialogue-model/runtime/v2/research-timeouts.ts';
 
 import type { BaseRecord } from '../../../dialogue-model/runtime/v2/base-assignment.ts';
-import type { ParticipantDialogueProfile } from '../../../dialogue-model/runtime/v2/reception.ts';
-import { CLAIM_PRUNE_V2 } from '../../../dialogue-model/runtime/memory/reference-graph.mjs';
+import { participantMemoryPruneVersion, PILOT012_PARTICIPANT_PROFILE,
+  type ParticipantDialogueProfile } from '../../../dialogue-model/runtime/v2/reception.ts';
 
 type Dispatch = (payload: unknown, expectedModelId: string) => Promise<ParticipantDispatchResult>;
 export interface ParticipantService {
@@ -29,7 +31,7 @@ export interface ParticipantService {
   participantUsagePolicyV3?(): Promise<unknown>;
   participantUsageGeneration?: Dispatch;
   participantUsageChoices?: Dispatch;
-  participantInitialObservationPolicy?(): Promise<unknown>;
+  participantInitialObservationPolicy?(generation?: InitialObservationGeneration): Promise<unknown>;
 }
 
 const profile = researchTrialProfileV3({ timeoutMs: null, maxCompletionTokens: null }, {
@@ -82,6 +84,12 @@ const workerDialogue = {
   participant_dialogue_v13_p5_discriminating_confirmation: dialogueV13P5DiscriminatingConfirmation,
   participant_dialogue_v13_p5_jev_naming_v16_human_led_move_on: { ...dialogueV13P5DiscriminatingConfirmation,
     newTrialAgreeNameScopeVersion: 'jev_naming_v1' },
+  [PILOT012_PARTICIPANT_PROFILE]: { ...dialogueV13P5HumanLedMoveOn,
+    newTrialAgreeNameScopeVersion: 'jev_naming_v1',
+    profile: researchTrialProfileV3(profile.lunaRequest, profile.timeouts, 'two_stage_v3', 'holistic_v5',
+      'bypass_acceptance_v2', JEV_REPAIR_QUALITY_VERSION),
+    pinnedVersions: { ...dialogueV13P5HumanLedMoveOn.pinnedVersions, generationRetryVersion: 'jev_generation_retry_v17' },
+  },
 } as const;
 
 export function matchesWorkerDialogueProfile(key: ParticipantDialogueProfile | undefined, record: BaseRecord) {
@@ -90,8 +98,10 @@ export function matchesWorkerDialogueProfile(key: ParticipantDialogueProfile | u
   const state = queueState.privateState as { agreeNameScopeVersion?: unknown; graph?: { memoryPruneVersion?: unknown } } | undefined;
   const technicalTrial = options.technicalTrial as { version?: unknown } | undefined;
   const dialogue = workerDialogue[key];
+  const memoryPruneVersion = participantMemoryPruneVersion(key);
   return !!dialogue && options.participantDialogueProfile === key &&
-    options.memoryPruneVersion === CLAIM_PRUNE_V2 && state?.graph?.memoryPruneVersion === CLAIM_PRUNE_V2 &&
+    options.memoryPruneVersion === memoryPruneVersion && state?.graph?.memoryPruneVersion === memoryPruneVersion &&
+    (key !== PILOT012_PARTICIPANT_PROFILE || options.initialObservationGeneration === INITIAL_OBSERVATION_STRUCTURED_V2) &&
     options.profileSha256 === researchHash(dialogue.profile) && options.questionLayout === dialogue.profile.questionLayout &&
     options.dialoguePolicy === dialogue.profile.dialoguePolicy &&
     technicalTrial?.version === dialogue.technicalTrial.version && Object.keys(technicalTrial).length === 1 &&
@@ -104,7 +114,9 @@ const researchLimits = { maxDeadlineMs: RESEARCH_MAX_DEADLINE_MS };
 
 async function requireWorkerInitialObservationGeneration(proxy: ParticipantService | undefined,
   generation: InitialObservationGeneration): Promise<void> {
-  if (await proxy?.participantInitialObservationPolicy?.() !== generation) throw new NamingTaskError('ai_unavailable');
+  const supported = generation === INITIAL_OBSERVATION_STRUCTURED_V1
+    ? await proxy?.participantInitialObservationPolicy?.() : await proxy?.participantInitialObservationPolicy?.(generation);
+  if (supported !== generation) throw new NamingTaskError('ai_unavailable');
 }
 
 export async function workerParticipantPolicy(proxy: ParticipantService | undefined, usageOnly = false,
@@ -116,12 +128,17 @@ export async function workerParticipantPolicy(proxy: ParticipantService | undefi
     if (usageOnly && (typeof proxy.participantUsagePolicy !== 'function' ||
         typeof proxy.participantUsageChat !== 'function' || typeof proxy.participantUsageChoices !== 'function')) throw new Error();
     if (schemaVersion !== 'participant_model_pin_v1' && (!usageOnly || typeof proxy.participantUsageGeneration !== 'function')) throw new Error();
-    const raw = await (schemaVersion === 'participant_model_pin_v3' ? proxy.participantUsagePolicyV3?.()
+    const policy = schemaVersion === 'participant_model_pin_v3' ? proxy.participantUsagePolicyV3?.()
       : schemaVersion === 'participant_model_pin_v2' ? proxy.participantUsagePolicyV2?.()
-      : usageOnly ? proxy.participantUsagePolicy!() : proxy.participantPolicy());
+      : usageOnly ? proxy.participantUsagePolicy!() : proxy.participantPolicy();
+    const raw = initialObservationGeneration === INITIAL_OBSERVATION_STRUCTURED_V2
+      ? (await Promise.all([policy, requireWorkerInitialObservationGeneration(proxy, initialObservationGeneration)]))[0]
+      : await policy;
     const pin = validateParticipantModelPin(structuredClone(raw));
     if (pin.schemaVersion !== schemaVersion || !MODEL_CONTRACT_V2.acceptedReturned.includes(pin.jevModelId)) throw new Error();
-    if (initialObservationGeneration) await requireWorkerInitialObservationGeneration(proxy, initialObservationGeneration);
+    if (initialObservationGeneration === INITIAL_OBSERVATION_STRUCTURED_V1) {
+      await requireWorkerInitialObservationGeneration(proxy, initialObservationGeneration);
+    }
     return { pin, proxy };
   } catch {
     throw new NamingTaskError('ai_unavailable');
@@ -183,7 +200,8 @@ export function createWorkerParticipantRuntime({ pin, own, proxy, cache, limits,
   ({ limits: Readonly<BudgetLimits>; usage?: never } | { limits?: never; usage: ParticipantUsageLedger })) {
   if (pin.schemaVersion !== 'participant_model_pin_v1' && !usage) throw new NamingTaskError('invalid_options');
   const dialogue = participantDialogueProfile === undefined ? null : workerDialogue[participantDialogueProfile];
-  if (participantDialogueProfile !== undefined && (!dialogue || pin.schemaVersion !== 'participant_model_pin_v3' || !usage)) {
+  if (participantDialogueProfile !== undefined && (!dialogue || pin.schemaVersion !== 'participant_model_pin_v3' || !usage ||
+      participantDialogueProfile === PILOT012_PARTICIPANT_PROFILE && initialObservationGeneration !== INITIAL_OBSERVATION_STRUCTURED_V2)) {
     throw new NamingTaskError('invalid_options');
   }
   const runtimeProfile = dialogue?.profile ?? profile;

@@ -5,6 +5,7 @@ import { validateResearchTimeouts } from './research-timeouts.ts';
 import type { ResearchTimeoutsV2 } from './research-timeouts.ts';
 import { isHolisticPolicy } from '../decision/contract.ts';
 import type { JevQuestionLayout, DialoguePolicy } from '../decision/contract.ts';
+import { JEV_REPAIR_QUALITY_VERSION, type JudgmentMaterialVersion } from '../decision/repair-quality.ts';
 // Node-only research harness profile. Historical runtime defaults are untouched.
 import { createHash } from "node:crypto";
 import { GENERATION_TIMEOUT_MS } from "./dialogue-v2.mjs";
@@ -59,15 +60,18 @@ export function researchTrialProfileV2(lunaRequest: LunaRequestSettings, timeout
 }
 
 export type InterventionPolicyReference = Readonly<{version:InterventionVersion;tableSha256:string}>;
-export type ResearchTrialProfileV3 = Omit<ResearchTrialProfileV2,'id'|'questionLayout'> & {id:'research_trial_profile_v3';interventionPolicy:InterventionPolicyReference;dialoguePolicy?:DialoguePolicy;questionLayout:JevQuestionLayout};
+export type ResearchTrialProfileV3 = Omit<ResearchTrialProfileV2,'id'|'questionLayout'> & {id:'research_trial_profile_v3';interventionPolicy:InterventionPolicyReference;dialoguePolicy?:DialoguePolicy;questionLayout:JevQuestionLayout;judgmentMaterialVersion?:JudgmentMaterialVersion};
 /** two_stage_v1 (the default) returns the unchanged profile. An explicit two_stage_v2 changes only questionLayout,
  * so its profileSha256 differs and records of one layout cannot be restored under the other. */
 /** dialoguePolicy: undefined = holistic_v5 for a new two_stage_v3 profile; null = a record or tape without a policy. An explicitly recorded policy is preserved. */
-export function researchTrialProfileV3(lunaRequest:LunaRequestSettings,timeouts:ResearchTimeoutsV2,questionLayout:JevQuestionLayout='two_stage_v1',dialoguePolicy?:DialoguePolicy|null,interventionVersion:InterventionVersion='bypass_acceptance_v1'):Readonly<ResearchTrialProfileV3> {
+export function researchTrialProfileV3(lunaRequest:LunaRequestSettings,timeouts:ResearchTimeoutsV2,questionLayout:JevQuestionLayout='two_stage_v1',dialoguePolicy?:DialoguePolicy|null,interventionVersion:InterventionVersion='bypass_acceptance_v1',judgmentMaterialVersion?:JudgmentMaterialVersion):Readonly<ResearchTrialProfileV3> {
  if(questionLayout!=='two_stage_v1'&&questionLayout!=='two_stage_v2'&&questionLayout!=='two_stage_v3')throw new Error('invalid_question_layout');
  if(interventionVersion==='bypass_acceptance_v2'&&(questionLayout!=='two_stage_v3'||dialoguePolicy!==undefined&&dialoguePolicy!=='holistic_v5'))throw new Error('invalid_question_layout');
+ if(judgmentMaterialVersion!==undefined&&(judgmentMaterialVersion!==JEV_REPAIR_QUALITY_VERSION||questionLayout!=='two_stage_v3'||
+  dialoguePolicy!==undefined&&dialoguePolicy!=='holistic_v5'))throw new Error('invalid_judgment_material_version');
  return frozen({...researchTrialProfileV2(lunaRequest,timeouts),id:'research_trial_profile_v3' as const,
   interventionPolicy:interventionReference(interventionVersion),
+  ...(judgmentMaterialVersion!==undefined?{judgmentMaterialVersion}:{}),
   ...(questionLayout!=='two_stage_v1'?{questionLayout}:{}),
   ...(questionLayout==='two_stage_v3'&&(dialoguePolicy===undefined||isHolisticPolicy(dialoguePolicy))?{dialoguePolicy:dialoguePolicy??'holistic_v5'}:{})});
 }

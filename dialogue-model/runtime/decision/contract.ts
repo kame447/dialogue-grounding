@@ -1,4 +1,6 @@
 import type { LedgerAction } from "./judgment-material-v5.ts";
+import type { JudgmentMaterialVersion, JevPublicationRecoveryContext } from "./repair-quality.ts";
+import type { ReferenceEvidence } from "../local-grounding/reference-evidence.ts";
 // Decision 0002, opt-in research contract. Jev alone selects the next action;
 // observations and repair progress are materials, never an answer key or policy.
 import type { ObservationMemo } from "../observation/contract.ts";
@@ -92,6 +94,9 @@ export type JevDecisionInput = {
   /** Opt-in agreement candidates backed by eligible public naming claims. */
   agreeNames?: PublicNameCandidate[];
   jevNaming?: { localRejections: Array<{ quote: string; reason: string }> };
+  judgmentMaterialVersion?: JudgmentMaterialVersion;
+  publicationRecoveryContext?: JevPublicationRecoveryContext;
+  referenceEvidence?: ReferenceEvidence;
   /** Private participant ledger for candidate validation. Never serialized to Jev. */
   participantLedger?: OwnLedger;
   /** Local v3 proposal legality only. The request never serializes the ledger. */
@@ -204,12 +209,13 @@ export const isHolisticPolicy = (p: unknown): p is DialoguePolicy => p === "holi
 /** What a draft does about naming (holistic_v1): a closed set judged by Jev for the executed target and name. */
 export const DRAFT_ACTS = ["adopt_chosen", "adopt_other", "decline_or_hold", "propose_question", "recount_only", "none"] as const;
 export const SEMANTIC_DRAFT_ACTS = [...DRAFT_ACTS, "adopt_context", "propose_chosen"] as const;
-export type DraftAct = typeof SEMANTIC_DRAFT_ACTS[number];
+export type DraftAct = typeof SEMANTIC_DRAFT_ACTS[number] | "withdraw_selected";
+export type DraftMoveOn = { choice: "honors_request" | "mismatch"; scores: Record<string, number> };
 export type DraftActInput = { turn: number; publicTurns: readonly PublicTurn[]; reasons: readonly string[];
   selected: { action: JevAction; target: JevTarget; name: string | null }; draft: string;
-  semanticNaming?: { currentTurnSource: boolean } };
+  semanticNaming?: { currentTurnSource: boolean }; withdrawPriorName?: string; moveOnDraft?: string };
 export type DraftActResult = { status: "ok" | "error"; choice: DraftAct | null; scores: Record<string, number> | null; model: string | null;
-  responseId: string | null; costUsd: number | null; latencyMs: number; error: string | null };
+  responseId: string | null; costUsd: number | null; latencyMs: number; error: string | null; moveOn?: DraftMoveOn };
 /** What a P5 draft claims beyond the shared construal (jev_generation_retry_v14): a closed set judged by Jev. */
 export const DRAFT_SHARED_CLAIMS = ["none", "single_identification_claimed", "unconfirmed_detail_claimed"] as const;
 export type DraftSharedClaim = typeof DRAFT_SHARED_CLAIMS[number];

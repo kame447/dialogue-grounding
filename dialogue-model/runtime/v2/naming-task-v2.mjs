@@ -18,9 +18,9 @@ import { STATUSES } from "../judgment/schema.mjs";
 import { normalizeName as normalizeAgreedName } from "../judgment/name-evidence.mjs";
 import { selectParticipantJev, participantLunaClient, withParticipantJevTurn, restoreParticipantJevLedger,
   participantInitialObservation } from "../web/participant-jev-wiring.ts";
-import { allowsOrientationFallback, hasVersionedViewpoint } from "./generation-guard.ts";
+import { allowsOrientationFallback, generateOpeningV17, hasVersionedViewpoint, isGenerationV17 } from "./generation-guard.ts";
 import { researchHash } from "./research-profile.ts";
-import { CLAIM_PRUNE_V2 } from "../memory/reference-graph.mjs";
+import { CLAIM_PRUNE_V3, isClaimPruneVersion } from "../memory/reference-graph.mjs";
 import { agreedNamesFromLedger, memoryCapacityRejectedClaims, settleJevTurnTraces, settleAiPublicClaims } from "./jev-turn.ts";
 
 export const VERSION = 2;
@@ -122,14 +122,16 @@ export async function createNamingTaskV2({
   if (restore) {
     const saved = restore.options?.memoryPruneVersion;
     if ((memoryPruneVersion !== undefined && memoryPruneVersion !== saved) ||
-        (Object.hasOwn(restore.options ?? {}, "memoryPruneVersion") && saved !== CLAIM_PRUNE_V2) ||
+        (Object.hasOwn(restore.options ?? {}, "memoryPruneVersion") && !isClaimPruneVersion(saved)) ||
         restore.queueState?.privateState?.graph?.memoryPruneVersion !== saved) throw new NamingTaskError("invalid_options");
     memoryPruneVersion = saved;
   }
-  if (memoryPruneVersion !== undefined && (memoryPruneVersion !== CLAIM_PRUNE_V2 || !referenceMemory)) throw new NamingTaskError("invalid_options");
+  if (memoryPruneVersion !== undefined && (!isClaimPruneVersion(memoryPruneVersion) || !referenceMemory)) throw new NamingTaskError("invalid_options");
   const style = restore?.options?.utteranceStyle ?? utteranceStyle;
   const jev = selectParticipantJev(restore, jevResearch, { referenceMemory, strategy, style,
     legacy: [localGrounding, activeDecision, decisionShadowClient, groundingShadow] });
+  if (memoryPruneVersion === CLAIM_PRUNE_V3 && !jev) throw new NamingTaskError("invalid_options");
+  const generatedOpening = isGenerationV17(jev?.generationRetryVersion);
   const dialogueRecoveryEnabled = !!jev && !allowsOrientationFallback(jev.generationRetryVersion);
   let dialogueInterruption = restore?.dialogueInterruption;
   if (restore && Object.hasOwn(restore, "dialogueInterruption") &&
@@ -220,6 +222,7 @@ export async function createNamingTaskV2({
       ...(jev.profile.dialoguePolicy ? { dialoguePolicy: jev.profile.dialoguePolicy } : {}),
       ...(jev.participantPrompts ? { participantPrompts: true } : {}),
       generationRetryVersion: jev.generationRetryVersion,
+      judgmentMaterialVersion: jev.profile.judgmentMaterialVersion,
       newTrialAgreeNameScopeVersion: jev.newTrialAgreeNameScopeVersion,
       onJevTurnTrace: (record) => {
         jevTraces.push(clone(record));
@@ -283,10 +286,31 @@ export async function createNamingTaskV2({
     // A restored POST may already have reached the provider. Reuse the existing queue error/retry path.
     initialQueue = { ...initialQueue, errorCode: 'ai_unavailable' };
   }
-  const queue = createHumanMessageQueue({ runAiTurn: timedAiTurn,
-    initialPrivateState, now,
-    initialEvents: [{ speaker: "ai", text: SCRIPTED_OPENING, nonReferential: true }],
-    ...(initialQueue ? { initialState: initialQueue } : {}) });
+  async function openingText() {
+    try {
+      return await generateOpeningV17(messages => trackingClient.complete(messages, { phase: "generation" }));
+    } catch { return null; } // Usage and request diagnostics retain closed codes.
+  }
+  const createQueue = (opening, saved) => createHumanMessageQueue({ runAiTurn: timedAiTurn, initialPrivateState, now,
+    initialEvents: opening === null ? [] : [{ speaker: "ai", text: opening, nonReferential: true }],
+    ...(saved ? { initialState: saved } : {}) });
+  const opening = generatedOpening ? restore ? null : await openingText() : SCRIPTED_OPENING;
+  if (generatedOpening && restore) {
+    const events = initialQueue.events;
+    if (!Array.isArray(events) || (events.length ? events[0]?.speaker !== "ai" || events[0]?.nonReferential !== true ||
+        restore.events?.[0]?.origin !== "generated_opening" || restore.events[0].text !== events[0].text :
+        initialQueue.errorCode !== "ai_unavailable" || initialQueue.closed || initialQueue.pendingHumanEventIds.length ||
+        initialPrivateState.judgments.length)) throw new NamingTaskError("invalid_options");
+  }
+  if (generatedOpening && !restore && opening === null) {
+    // Admit the empty, recoverable trial so a failed opening does not strand
+    // the assignment or create a second usage ledger on retry.
+    initialQueue = { privateState: initialPrivateState, events: [], pendingHumanEventIds: [], clients: [],
+      closed: false, errorCode: "ai_unavailable", requestSeq: 0, lastMillis: 0 };
+  }
+  let queue = createQueue(opening, initialQueue);
+  let openingWritePending = false;
+  const openingPending = () => generatedOpening && (openingWritePending || queue.getSnapshot().events.length === 0);
   const recordId = restore?.recordId ?? randomUUID();
   const startedAt = restore?.startedAt ?? new Date(now()).toISOString();
   let humanSubmission = restore?.humanSubmission ?? null, aiSubmission = restore?.aiSubmission ?? null,
@@ -410,8 +434,8 @@ export async function createNamingTaskV2({
       ...(rotation.legacy ? {} : { stimulus: clone(stimulus) }),
       status: result ? "completed" : closed ? "submitting" : "dialogue",
       // Origin is research metadata only; queue/model/participant events stay ordinary public speech.
-      events: snapshot.events.map((event) => event.seq === 1 && event.speaker === "ai" && event.text === SCRIPTED_OPENING
-        ? { ...event, origin: "scripted_opening" } : event),
+      events: snapshot.events.map((event) => event.seq === 1 && event.speaker === "ai" && (generatedOpening || event.text === SCRIPTED_OPENING)
+        ? { ...event, origin: generatedOpening ? "generated_opening" : "scripted_opening" } : event),
       // Same role/content shape as v1 so offline metrics apply unchanged.
       publicHistory: snapshot.events.map((e) => ({ role: e.speaker === "human" ? "user" : "assistant", content: e.text })),
       judgments: privateState.judgments, attempts: allAttempts(), ownLedger: privateState.ledger,
@@ -453,6 +477,7 @@ export async function createNamingTaskV2({
   // Submissions require every human message to have been answered. An upstream
   // error leaves messages pending: the participant must retry, not lose them.
   function assertSettled() {
+    if (openingPending()) throw new NamingTaskError("ai_retry_required");
     const snapshot = queue.getSnapshot();
     if (snapshot.status === "error") throw new NamingTaskError("ai_retry_required");
     if (snapshot.status !== "idle" || snapshot.pendingHumanEventIds.length) throw new NamingTaskError("ai_busy");
@@ -469,6 +494,17 @@ export async function createNamingTaskV2({
 
   let recoveryInFlight = null;
   async function resumePendingDialogue() {
+    if (openingPending()) {
+      if (!openingWritePending) {
+        const text = await openingText();
+        if (text === null) { await persist(); throw new NamingTaskError("ai_unavailable"); }
+        openingWritePending = true;
+        queue = createQueue(text, null);
+      }
+      await persist();
+      openingWritePending = false;
+      return;
+    }
     const snapshot = queue.getSnapshot();
     if (snapshot.status !== "error") return;
     markBudgetInterruption(snapshot);
@@ -485,6 +521,7 @@ export async function createNamingTaskV2({
     /** Accept a human message immediately, even while the AI is thinking. */
     message(text, clientId) {
       if (closed) throw new NamingTaskError("dialogue_closed");
+      if (openingPending()) throw new NamingTaskError("ai_retry_required");
       if (typeof text !== "string" || !text.trim() || text.length > 2000) throw new NamingTaskError("invalid_message");
       if (dialogueRecoveryEnabled) {
         const snapshot = queue.getSnapshot();
@@ -504,20 +541,21 @@ export async function createNamingTaskV2({
     },
     async interruptDialogue() {
       const snapshot = queue.getSnapshot();
-      if (!dialogueRecoveryEnabled || snapshot.status !== "error" || recoveryInFlight) throw new NamingTaskError("ai_busy");
+      if (!dialogueRecoveryEnabled || snapshot.status !== "error" || recoveryInFlight || openingPending()) throw new NamingTaskError("ai_busy");
       markBudgetInterruption(snapshot);
       dialogueInterruption ??= "participant_paused";
       await persist();
     },
     getState() {
       const snapshot = queue.getSnapshot();
-      const recovery = snapshot.status !== "error" ? "active" : dialogueRecoveryEnabled && !usage && jev.ledger.stopReason() ? "unavailable" :
+      const openingUnavailable = openingPending();
+      const recovery = snapshot.status !== "error" && !openingUnavailable ? "active" : dialogueRecoveryEnabled && !usage && jev.ledger.stopReason() ? "unavailable" :
         dialogueInterruption === "participant_paused" ? "paused" : "retry";
       return clone({
         // No seed or seed-derived trial id: either would let a client regenerate the boards and key.
         version: VERSION, sessionId: recordId, scene,
-        events: publicEvents(),
-        aiStatus: snapshot.status === "pending" || snapshot.status === "processing" ? "thinking" : snapshot.status === "error" ? "error" : "idle",
+        events: openingUnavailable ? [] : publicEvents(),
+        aiStatus: snapshot.status === "pending" || snapshot.status === "processing" ? "thinking" : snapshot.status === "error" || openingUnavailable ? "error" : "idle",
         submitted: humanSubmission !== null, aiSubmitted: aiSubmission !== null, closed,
         ...(dialogueRecoveryEnabled ? { dialogueRecovery: recovery } : {}),
         status: result ? "completed" : closed ? "submitting" : "dialogue",
