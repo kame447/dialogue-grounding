@@ -112,6 +112,8 @@ export type JevDecisionInput = {
   notationV11?: true;
   /** scoped_v8 only: backchannels and follow-up questions do not answer a feature check. Never serialized to Jev. */
   featureReplyFilter?: true;
+  /** v16 only: quality guidance and contrast candidates for confirm detail. Never serialized in decision state. */
+  discriminatingConfirmation?: true;
   /** Private material mode from the trial's generation version. */
   p5Enabled?: true;
   sharedConstruals?: SharedConstrual[];

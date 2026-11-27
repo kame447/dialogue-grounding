@@ -32,6 +32,7 @@ import { prepareLocalGroundingTurn, validateLocalGroundingOptions, findLocalPubl
 import type { LocalGroundingResearchRecord, LocalGroundingTrace } from "./local-grounding-turn.ts";
 import { findNamingActHints, hasOrientationWords, draftViolationCodes, deriveGenerationOutcome, orientationSafeFallback, rewriteReasons, isGenerationV5, isGenerationV6, isGenerationV7, isGenerationV8, isGenerationV9, isGenerationV10, isGenerationV11, isGenerationV12, isGenerationV13, isGenerationV14, v11RecentHumanTexts, hasVersionedViewpoint, defaultGenerationRetryVersion, validGenerationRetryVersion, validAgreeNameScope, allowsOrientationFallback } from "./generation-guard.ts";
 import { isGenerationV15, currentTurnNamingSource, semanticNamingCodes, namingCodesWithoutQuestion, contentPublicationRecovery, type PublicationRecovery } from "./generation-guard.ts";
+import { isGenerationV16 } from "./generation-guard.ts";
 import { SEMANTIC_DRAFT_ACTS } from "../decision/contract.ts";
 import { createMemoAiExtractor, MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS, AiPublicError, aiHash, emptyAiEvidence } from "../local-grounding/extract-ai.ts";
 import { createJevAiFunctionClassifier, createJevAiSupportChecker, AI_FUNCTION_INSTRUCTIONS, AI_SUPPORT_INSTRUCTIONS,
@@ -58,6 +59,7 @@ const PRIVATE_NAMING_STATE_V5 = "自分側の命名の記録です。以下のJS
 const RECONFIRM_NAME_V5 = "今回は既に合意した呼び名の再確認です。確認されている名前は既に決まっている名前として、そのまま答えてください。見立てに言い換えたり、初めて採用・提案する形にしたり、新しい名前を足したりしないでください。";
 const ACCEPT_FEATURE_REPLY_V5 = "acceptで相手が図形の有無や特定の特徴を直接尋ねたら、相槌だけで済ませず、まずその問いに答えてください。自分側の観察メモで確かめられる範囲で、ある・ない・確かめられないを区別してください。回転しても変わらない形やつながりを優先し、必要な方位はその語と同じ節で自分側の見え方だと示してください。新たな命名や別の特徴の確認へ話を広げないでください。";
 const CONFIRM_NAMING_REQUEST_V5 = "判断で選ばれた対象について、その特徴だけを確かめてください。相手が出した呼び名を採用・再提案しないでください。その案に触れる場合は、相手の提案だと分かる引用に留めてください。";
+const DISCRIMINATING_CONFIRM_V16 = "選ばれた特徴を根拠に、公開対話でまだ答えられていない点を一つ、同じ論点で尋ねてください。すでに肯定・否定・訂正された点や、それだけでは候補の区別にも部分の照合にも役立たない共通の特徴を、言い換えて再質問しないでください。選ばれた特徴が共通の目印なら、自分の見え方や相手の説明を手がかりに、同じ特徴について残っている部分の対応や説明の意味を尋ねてください。別の特徴を選び直さず、観察にない形や相手の画面の見え方を補わないでください。相手から呼び名を決めたいという申し出があれば、現在の確認に結びつけ、採用や同定は断定しないでください。";
 const NAMING_CONFLICT_V5 = "選ばれた図形にはすでに合意済みの名前（agreedName）があり、今回の相手の案（proposedNames）とは異なります。選ばれた行動で対象を確かめる際は、相手が同じ図形と別の図形のどちらについて話しているかを確かめてください。この案を採用して合意済みの名前を変更しないでください。明示的な改名は、判断が選んだrepairの範囲で扱います。";
 const FEATURE_VIEWPOINT_V5 = "以下のdiscriminatingFeatureにある上下左右・横長などの向きの語は、自分側の画面での見え方です。公開発話では、回転しても変わらない形や部分同士のつながりに言い換えてください。向きが区別に必要なら、その語と同じ節で「こちらの画面では」などと自分側の見え方だと明示し、相手には形の対応を尋ねてください。";
 const SHARED_CONSTRUAL_INSTRUCTIONS = "次の見立ては大まかな共同参照の目印に使えます。候補の範囲を保ち、未確認・保留の細部が一致した、図形を一つに同定した、名称に合意したとは言わないでください。内部のIDや項目名を公開発話に含めないでください。";
@@ -1085,6 +1087,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       }
       if (p5Enabled) {
         baseInput.p5Enabled = true;
+        if (isGenerationV16(generationRetryVersion)) baseInput.discriminatingConfirmation = true;
         const { sharedConstruals, proofClaims } = deriveSharedConstrualsFromGraph(graph, slots);
         if (sharedConstruals.length) {
           const wireClaims = new Map([...claims, ...proofClaims].map(claim => [claim.id, claim]));
@@ -1272,6 +1275,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
           (options.dialoguePolicy === "holistic_v5" && judgment.action === "confirm" && record.namingRequest === true ? CONFIRM_NAMING_REQUEST_V5 + "\n" : "") +
           (namingConflict ? NAMING_CONFLICT_V5 + "\n" + JSON.stringify(namingConflict) + "\n" : "") +
           featureViewpoint +
+          (isGenerationV16(generationRetryVersion) && judgment.action === "confirm" ? DISCRIMINATING_CONFIRM_V16 + "\n" : "") +
           JSON.stringify({ ...judgment, target: execution.target,
           ...(execution.detailFigureIds ? { detailFigureIds: execution.detailFigureIds } : {}) }) };
       const shared = execution.sharedClaimIds && baseInput.sharedConstruals?.find(candidate => stateSame(candidate.claimIds, execution.sharedClaimIds));

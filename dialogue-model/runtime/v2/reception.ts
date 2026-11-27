@@ -25,11 +25,13 @@ export type ReceptionProtocolV2 = { schemaVersion: 'reception_protocol_v2'; prot
   betweenTrials: BetweenTrials; receptionNumberFormat: 'daily_seq3'; rotationMode: RotationMode };
 export type ReceptionPlanV1 = { schemaVersion: 'reception_plan_v1'; protocolId: string; protocolRevision: number;
   protocolSha256: string; order: Strategy[]; trials: { index: number; strategy: Strategy; seed: number; referenceMemory: boolean }[]; approvedAt: string; memoryPruneVersion?: MemoryPruneVersion };
-type P5ParticipantDialogueProfile = 'participant_dialogue_v13_p5' | 'participant_dialogue_v13_p5_naming_v4' | 'participant_dialogue_v13_p5_semantic_guard';
+type P5ParticipantDialogueProfile = 'participant_dialogue_v13_p5' | 'participant_dialogue_v13_p5_naming_v4' |
+  'participant_dialogue_v13_p5_semantic_guard' | 'participant_dialogue_v13_p5_discriminating_confirmation';
 export type ParticipantDialogueProfile = 'participant_dialogue_v12' | 'participant_dialogue_v12_naming_v2' |
   'participant_dialogue_v12_naming_v3' | 'participant_dialogue_v12_naming_v4' | P5ParticipantDialogueProfile;
 export function isP5ParticipantDialogueProfile(value: unknown): value is P5ParticipantDialogueProfile {
-  return value === 'participant_dialogue_v13_p5' || value === 'participant_dialogue_v13_p5_naming_v4' || value === 'participant_dialogue_v13_p5_semantic_guard';
+  return value === 'participant_dialogue_v13_p5' || value === 'participant_dialogue_v13_p5_naming_v4' ||
+    value === 'participant_dialogue_v13_p5_semantic_guard' || value === 'participant_dialogue_v13_p5_discriminating_confirmation';
 }
 export function isParticipantDialogueProfile(value: unknown): value is ParticipantDialogueProfile {
   return value === 'participant_dialogue_v12' || value === 'participant_dialogue_v12_naming_v2' ||

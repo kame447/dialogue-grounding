@@ -11,7 +11,7 @@ import {namingDenialTargets,namingReconfirmation} from '../../decision/naming-re
 import {decodeMaterialV5} from '../../decision/judgment-material-v5.ts';
 import {isHolisticPolicy,isHolisticV2Plus,isHolisticV3Plus,isHolisticV4Plus} from '../../decision/contract.ts';
 import {generationGuardCodes,draftViolationCodes,deriveGenerationOutcome,orientationSafeFallback,findOrientationLeaks,v11RecentHumanTexts,hasOrientationWords,hasVersionedViewpoint,isGenerationV5,isGenerationV6,isGenerationV7,isGenerationV8,isGenerationV9,isGenerationV11,isGenerationV12,isGenerationV13,isGenerationV14,validGenerationRetryVersion,validAgreeNameScope,allowsOrientationFallback} from '../../v2/generation-guard.ts';
-import {isGenerationV15,currentTurnNamingSource,namingCodesWithoutQuestion,contentPublicationRecovery} from '../../v2/generation-guard.ts';
+import {isGenerationV15,isGenerationV16,currentTurnNamingSource,namingCodesWithoutQuestion,contentPublicationRecovery} from '../../v2/generation-guard.ts';
 import type {SharedConstrual} from '../../decision/contract.ts';
 import type {RecordedGenerationRetryVersion} from '../../v2/generation-guard.ts';
 import {checkModelIdentity} from '../../model-identity-contract.ts';
@@ -1141,11 +1141,11 @@ const idsOf=(target:any):string[]=>target?.kind==='single'?[target.figureId]:tar
     else if(Object.hasOwn(st,'selected')){
      if(r.role==='alternative_detail'){
       const selection=s.executed;
-      if(selection&&selection.action!=='request_observation'){const detail=detailProof(p,answer,selection,originalInput,s.intervention.detailEvidence,layout);if(detail===null)return'missing';if(!detail)return'invalid';if(Object.hasOwn(p.questions,'shared_construal'))sharedAlternative=true;}
+      if(selection&&selection.action!=='request_observation'){const detail=detailProof(p,answer,selection,originalInput,s.intervention.detailEvidence,layout,isGenerationV16(version));if(detail===null)return'missing';if(!detail)return'invalid';if(Object.hasOwn(p.questions,'shared_construal'))sharedAlternative=true;}
      }else{
       if(r.role!=='common'||!current||pendingSet)return'invalid';
       const detail=current.action==='request_observation'?observeProof(p,answer,current,currentInput,layout)
-       :detailProof(p,answer,project(current),currentInput,current.evidence?.stages?.find((e:any)=>e.stage==='detail'),layout);
+       :detailProof(p,answer,project(current),currentInput,current.evidence?.stages?.find((e:any)=>e.stage==='detail'),layout,isGenerationV16(version));
       if(detail===null)return'missing';if(!detail)return'invalid';
       if(Object.hasOwn(p.questions,'shared_construal'))sharedDetailCalls.add(turnDecision);
      }
@@ -1552,7 +1552,8 @@ function detailResponseProof(body:any,response:any,evidence:any,input:any,questi
   equal(evidence.choices,Object.fromEntries(Object.entries(response.answers).map(([k,v]:any)=>[k,v.choice])))&&
   equal(evidence.scores,Object.fromEntries(Object.entries(response.answers).map(([k,v]:any)=>[k,v.probabilities])));
 }
-function detailProof(body:any,response:any,selection:any,original:any,evidence:any,layout='two_stage_v1'):boolean|null{
+const DISCRIMINATING_CONFIRM_DETAIL_S4 = "今の論点で何が未確認かを、観察メモと公開発話の意味から判断してください。候補の弁別が必要なら、候補によって違いがあり、まだ答えられていない特徴を優先してください。全候補に共通するだけの特徴や、既に肯定・否定・訂正された点の言い換えは、いまの論点に情報を加えない限り繰り返さないでください。候補を減らす必要がない場合は、同じ論点で未確認の部分の形や対応を確かめる特徴を選んでください。弁別できる特徴が無ければ、同じ論点で相手の説明と見比べられる特徴を選んでください。明示された呼び名の決定の申し出は、いま確かめている対象についての発話として扱い、名称や対象の確定とはみなさないでください。観察メモに記載がないことは、その特徴がない根拠にはなりません。";
+function detailProof(body:any,response:any,selection:any,original:any,evidence:any,layout='two_stage_v1',discriminatingConfirmation=false):boolean|null{
  const input=parseMaterial(body.state);if(!original||!equal(input.selected,{action:selection.action,target:selection.target}))return false;
  const same=sameMaterial(input,original);if(same!==true)return same;
  // agree under a v3 attempt without a known saved evidence source cannot be told from forgery.
@@ -1562,7 +1563,19 @@ function detailProof(body:any,response:any,selection:any,original:any,evidence:a
  if(selection.action==='accept')return !!sharedQuestion&&detailResponseProof(body,response,evidence,input,{shared_construal:sharedQuestion})&&
   sharedAnswer(selection,response.answers.shared_construal.choice,offered)&&selection.name===null&&selection.feature===null&&equal(selection.detailFigureIds??[],[]);
  if(!sharedQuestion&&Object.hasOwn(selection,'sharedClaimIds'))return false;
- const kind=['propose_name','agree'].includes(selection.action)?'name':'feature',rawCs=selection.action==='agree'&&CTX.agree!==undefined?agreeCatalog(input,selection.target):catalog(input,selection.target,kind),cs=layout==='two_stage_v3'&&(selection.action==='confirm'||!CTX.legacyV3&&selection.action==='repair')?unaskedConfirmFeatures(input,selection.target,rawCs):rawCs,criteria=Object.fromEntries(cs.map((c,i)=>[kind+'_'+i,JSON.stringify(c)])),questions={[kind]:{type:'choice',instructions:nativeInstructions(input,layout)+`\n第1段の${selection.action}に必要な${kind==='name'?'名称':'確認特徴'}だけを選んでください。出典図形は特徴の出所であり、対象候補を単一に確定するものではありません。`,criteria}};
+ const confirmation=discriminatingConfirmation&&selection.action==='confirm'?'\n'+DISCRIMINATING_CONFIRM_DETAIL_S4:'';
+ const kind=['propose_name','agree'].includes(selection.action)?'name':'feature';
+ const rawCs=selection.action==='agree'&&CTX.agree!==undefined?agreeCatalog(input,selection.target):catalog(input,selection.target,kind);
+ let cs=layout==='two_stage_v3'&&(selection.action==='confirm'||!CTX.legacyV3&&selection.action==='repair')
+  ?unaskedConfirmFeatures(input,selection.target,rawCs):rawCs;
+ if(discriminatingConfirmation&&selection.action==='confirm'){
+  const comparisonIds=selection.target.kind==='multiple'?selection.target.figureIds:input.ownSlots;
+  const common=new Set(catalog(input,{kind:'multiple',figureIds:comparisonIds},'feature')
+   .filter(candidate=>candidate.figureIds.length===comparisonIds.length).map(candidate=>candidate.value));
+  if(cs.every(candidate=>common.has(candidate.value)))cs=[...cs,...rawCs.filter(candidate=>!common.has(candidate.value))];
+ }
+ const criteria=Object.fromEntries(cs.map((c,i)=>[kind+'_'+i,JSON.stringify(c)]));
+ const questions={[kind]:{type:'choice',instructions:nativeInstructions(input,layout)+`\n第1段の${selection.action}に必要な${kind==='name'?'名称':'確認特徴'}だけを選んでください。出典図形は特徴の出所であり、対象候補を単一に確定するものではありません。`+confirmation,criteria}};
  const expected=sharedQuestion?{...questions,shared_construal:sharedQuestion}:questions;
  if(!detailResponseProof(body,response,evidence,input,expected)||sharedQuestion&&
    !sharedAnswer(selection,response.answers.shared_construal.choice,offered))return false;
@@ -1592,6 +1605,7 @@ function generationMessages(messages:any[],trace:any,execution:any,tape:any,prof
  if(CTX.style==='legacy')return generationMessagesWith(messages,trace,execution,tape,profile,fixedBase,{v3:[TRIAL,TRIAL_V3_PREV],legacy:LEGACY_TRIAL},index,codes,draft);
  return generationMessagesWith(messages,trace,execution,tape,profile,fixedBase,{v3:[TRIAL,TRIAL_V3_PREV],legacy:LEGACY_TRIAL},index,codes,draft)||generationMessagesWith(messages,trace,execution,tape,profile,fixedStyle,{v3:[trialStyle],legacy:legacyTrialStyle},index,codes,draft);
 }
+const DISCRIMINATING_CONFIRM_V16_S4 = "選ばれた特徴を根拠に、公開対話でまだ答えられていない点を一つ、同じ論点で尋ねてください。すでに肯定・否定・訂正された点や、それだけでは候補の区別にも部分の照合にも役立たない共通の特徴を、言い換えて再質問しないでください。選ばれた特徴が共通の目印なら、自分の見え方や相手の説明を手がかりに、同じ特徴について残っている部分の対応や説明の意味を尋ねてください。別の特徴を選び直さず、観察にない形や相手の画面の見え方を補わないでください。相手から呼び名を決めたいという申し出があれば、現在の確認に結びつけ、採用や同定は断定しないでください。";
 function generationMessagesWith(messages:any[],trace:any,execution:any,tape:any,profile:any,FIXED:any,trials:{v3:any[];legacy:any},index:number,codes?:readonly string[],draft?:RetryDraftEvidence):boolean{
  if(!trace.finalAction||!execution)return false;const g={action:execution.action,targetSlot:execution.target.kind==='single'?execution.target.figureId:null,candidateName:execution.name,discriminatingFeature:execution.feature,note:null};
  const graph=tape.generationGraph??tape.state.graph;
@@ -1612,7 +1626,8 @@ function generationMessagesWith(messages:any[],trace:any,execution:any,tape:any,
   const acceptNote=versionedGeneration&&accept?ACCEPT_FEATURE_REPLY_V5_S4+'\n':'';
   const reconfirmNote=versionedGeneration&&accept&&CTX.namingReconfirm?RECONFIRM_NAME_V5_S4+'\n':'';
   const vetoNote=isGenerationV6(tape.generationRetryVersion)&&(tape.vetoed===true||execution.action==='confirm'||execution.action==='repair')?VETOED_MOVE_V6_S4+'\n':'';
-  const actionMessage={role:'system',content:FIXED.act+'\n'+scope+'\n'+vetoNote+acceptNote+reconfirmNote+namingNote+conflictNote+featureNote+JSON.stringify({...g,target:execution.target,...(Object.hasOwn(execution,'detailFigureIds')?{detailFigureIds:execution.detailFigureIds}:{})})};
+  const confirmation=isGenerationV16(tape.generationRetryVersion)&&execution.action==='confirm'?DISCRIMINATING_CONFIRM_V16_S4+'\n':'';
+  const actionMessage={role:'system',content:FIXED.act+'\n'+scope+'\n'+vetoNote+acceptNote+reconfirmNote+namingNote+conflictNote+featureNote+confirmation+JSON.stringify({...g,target:execution.target,...(Object.hasOwn(execution,'detailFigureIds')?{detailFigureIds:execution.detailFigureIds}:{})})};
   const shared=execution.sharedClaimIds&&CTX.p5?CTX.shared.find(f=>equal(f.claimIds,execution.sharedClaimIds)):undefined;
   if(execution.sharedClaimIds&&!shared)return false;
   const sharedMessage=shared?{role:'system',content:(execution.action==='confirm'?SHARED_CONSTRUAL_CONFIRM_INSTRUCTIONS:SHARED_CONSTRUAL_INSTRUCTIONS)+'\n'+
@@ -2302,6 +2317,18 @@ const PROMPT_VERSIONS:readonly PromptVersion[]=[
   'local-grounding/extract.ts':'6e9461e860f22923dbece02c7988713422ed81ac32d937f6d59df8eff84bd83e',
   'local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01',
   'decision/jev-decision.ts':'b9b969d78a329dcc0ba0f9672c08b94254a87285e42391e39cbbf11869f2da57',
+  'local-grounding/extract-ai.ts':'e489b7ff573fdbe9e4f0adc9b6ee5f0828bd3c6835dcd8cd6555e191161594a6',
+  'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
+ }},fixed:FIXED_I172,native:NATIVE_I172},
+ {id:'p5_discriminating_confirmation_v16',i172:true,styleMode:'research_split',sources:{scheme:'complete_instruction_source_sha256',files:{
+  'v2/dialogue-v2.mjs':'0ca530878393721b6d48b55240e2b8c848910758501d90f579b2e0c65a6d1dd6',
+  'v2/jev-turn.ts':'8be437df3a26438524ff5a14d0f151327cba2aa24b50336983c7c5c11f6bab52',
+  'v2/generation-guard.ts':'32ba4a3fc9161c5191a0a1af819cd2330db7abea7fd72f5fb62b854e4e1458c1',
+  'judgment/instructions.mjs':'0add2f40aaaa01bfdacd1b99418b94e288eb45da6593595304f8d36d0f22de27',
+  'observation/observe.ts':'469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad',
+  'local-grounding/extract.ts':'6e9461e860f22923dbece02c7988713422ed81ac32d937f6d59df8eff84bd83e',
+  'local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01',
+  'decision/jev-decision.ts':'974551ec4103da7d48b5fcd411bd00f95852db51af67b116310faa9c1828c85e',
   'local-grounding/extract-ai.ts':'e489b7ff573fdbe9e4f0adc9b6ee5f0828bd3c6835dcd8cd6555e191161594a6',
   'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
  }},fixed:FIXED_I172,native:NATIVE_I172},
