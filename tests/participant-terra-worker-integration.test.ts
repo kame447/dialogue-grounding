@@ -7,7 +7,7 @@ import { MEMO_LOCAL_EXTRACTION_INSTRUCTIONS, memoExtractionPrompt } from '../dia
 import { MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS } from '../dialogue-model/runtime/local-grounding/extract-ai.ts';
 import { canonicalReceptionProtocolV2, canonicalReceptionProtocolV3, receptionProtocolSha256, receptionSummary, validateReceptionPlan } from '../dialogue-model/runtime/v2/reception.ts';
 import { createTrialV2, modelView } from '../dialogue-model/runtime/stimuli/scatter-v2.mjs';
-import { FIGURE_SETS } from '../dialogue-model/runtime/stimuli/figure-bank.ts';
+import { FIGURE_SETS, PILOT_FIGURE_SET_ID } from '../dialogue-model/runtime/stimuli/figure-bank.ts';
 import { CLAIM_PRUNE_V2, REFERENCE_LIMITS } from '../dialogue-model/runtime/memory/reference-graph.mjs';
 import { validateBoundBaseRecord } from '../dialogue-model/runtime/v2/base-assignment-data.ts';
 import { validateParticipantModelPin } from '../dialogue-model/runtime/v2/participant-model-pin.ts';
@@ -94,6 +94,7 @@ function memory() {
   });
   return {
     async get(key: string) { return view(items).get(key); },
+    async put(entries: Record<string, unknown>) { await view(items).put(entries); },
     async list(prefix: string) { return view(items).list({ prefix }); },
     async deleteAlarm() {},
     transaction<T>(fn: (tx: ReturnType<typeof view>) => Promise<T>) {
@@ -1452,7 +1453,7 @@ function v12Transport(t: TestContext, h: ReturnType<typeof harness>) {
   let decisionSlot: string;
   const textPhases: string[] = [];
   const prompts: { phase: string; system: string[] }[] = [];
-  const options = { wrongPhase: '', rewrite: false, quotedDraft: false, sharedReading: false };
+  const options = { wrongPhase: '', rewrite: false, quotedDraft: false, sharedReading: false, structuredConfirmation: false };
   function segment(quote: string, aspect: string, targets: string[], respondsToTurn: number | null = null) {
     return { segmentId: quote.slice(0, 4), quote, aspect, targets, proposition: quote, name: null, linkedIssueId: null, respondsToTurn };
   }
@@ -1507,6 +1508,10 @@ function v12Transport(t: TestContext, h: ReturnType<typeof harness>) {
         response = JSON.stringify([segment('細い部分がつながっています。', 'part', [decisionSlot]),
           segment('そちらの形にも半円の切り込みがありますか？', 'question', [])]);
       }
+    } else if (options.structuredConfirmation && body.messages.some((message: { content: unknown }) =>
+      String(message.content).includes('checkedFeatureとtext'))) {
+      phase = last.includes('公開発話を書き直してください') ? 'rewrite' : 'generation';
+      response = JSON.stringify({ checkedFeature: '半円の切り込み', text: v12Check });
     } else if (last.includes('JSON')) {
       phase = 'final_submission';
       response = JSON.stringify(Object.fromEntries(slots.map(id => [id, null])));
@@ -2295,3 +2300,80 @@ for (const { order, dialogueProfile, scope, generationVersion = 'jev_generation_
     assert.ok(h.calls.every(call => call.kind !== 'choices' || !Object.hasOwn(call.body.questions, 'draft_shared_claim')));
   });
 }
+
+test('four-figure production Worker completes both conditions through observation, dialogue, cold restore, scoring and review', async t => {
+  const h = harness(true, { ...figureBankProtocol, seedPolicy: 'per_trial',
+    figureSelection: { mode: 'preset', setId: PILOT_FIGURE_SET_ID } });
+  const transport = v12Transport(t, h);
+  transport.options.structuredConfirmation = true;
+  const dialogueProfile = 'participant_dialogue_v13_p5_jev_naming_v16_human_led_move_on';
+  h.env.PARTICIPANT_DIALOGUE_PROFILE = dialogueProfile;
+  h.env.PARTICIPANT_TERRA_INITIAL_OBSERVATION_GENERATION = INITIAL_OBSERVATION_STRUCTURED_V1;
+  h.env.PARTICIPANT_AI_PROXY.participantInitialObservationPolicy = transport.observationPolicy;
+  await h.receive();
+  const approved = await h.approve();
+  assert.equal(approved.plan.participantRuntimeProfile, PARTICIPANT_PRODUCTION_PROFILE);
+  assert.equal(approved.plan.participantModelPin.schemaVersion, 'participant_model_pin_v3');
+  assert.equal(approved.plan.participantDialogueProfile, dialogueProfile);
+  assert.deepEqual(approved.plan.trials.map((trial: any) => trial.figureSelection.figureIds),
+    [['F1', 'F2', 'F3', 'F4'], ['F1', 'F2', 'F3', 'F4']]);
+  const privateFields = /figureSelection|figureIds|figureSetId|bankVersion|observationMemo|ownAnchors|participantModelPin|jevLedger|jevTraces|data:image/u;
+  let predecessor: string | undefined;
+  for (const strategy of ['bypass-enabled', 'repair-first']) {
+    const { trial } = await jsonOk(await h.start(predecessor));
+    const id = trial.sessionId, recordKey = 'record:' + id;
+    assert.equal(trial.scene.shapes.length, 4);
+    assert.doesNotMatch(JSON.stringify(trial), privateFields);
+    const initial = await h.storage.get(recordKey);
+    assert.equal(initial.strategy, strategy);
+    assert.equal(initial.options.participantDialogueProfile, dialogueProfile);
+    assert.equal(initial.queueState.privateState.observationMemo.figures.length, 4);
+    assert.equal(initial.queueState.privateState.graph.slots.length, 4);
+    assert.equal(Object.keys(initial.queueState.privateState.ledger).length, 4);
+    assert.equal(initial.jevLedger.phases.terra.initial_observation.posts, 1);
+    await jsonOk(await h.request('message', { expectedRecordId: id, text: '形を一つ確認したいです。', clientId: 'four-figure-turn' }));
+    await h.idle();
+    const speaking = await h.storage.get(recordKey);
+    assert.equal(speaking.queueState.errorCode, null);
+    assert.equal(speaking.jevTraces.at(-1).status, 'committed');
+    assert.ok(speaking.events.some((event: any) => event.speaker === 'ai' && event.text === v12Check),
+      JSON.stringify({ events: speaking.events, executed: speaking.jevTraces.at(-1).executed, publicSpeech: speaking.jevTraces.at(-1).publicSpeech, textPhases: transport.textPhases }));
+    const publicBeforeRestore = (await jsonOk(await h.request('state'))).trial;
+    const callsBeforeRestore = h.calls.length, textBeforeRestore = transport.textPhases.length;
+    h.evict();
+    const restored = (await jsonOk(await h.request('state'))).trial;
+    assert.equal(restored.sessionId, id);
+    assert.deepEqual(restored.scene, trial.scene);
+    assert.deepEqual(restored.events, publicBeforeRestore.events);
+    assert.deepEqual((await h.storage.get(recordKey)).queueState.privateState, speaking.queueState.privateState);
+    assert.equal(h.calls.length, callsBeforeRestore);
+    assert.equal(transport.textPhases.length, textBeforeRestore);
+    await h.complete(id, restored);
+    const completed = await h.storage.get(recordKey);
+    assert.equal(completed.status, 'completed');
+    assert.equal(Object.keys(completed.humanSubmission).length, 4);
+    assert.equal(Object.keys(completed.aiSubmission).length, 4);
+    assert.equal(completed.scoring.result.total, 4);
+    assert.equal(completed.scoring.result.figures.length, 4);
+    validateBoundBaseRecord(completed, completed.assignment);
+    h.evict();
+    const locked = await jsonOk(await h.request('records/' + id + '/review'));
+    assert.equal(locked.resultLocked, true);
+    assert.equal(Object.hasOwn(locked, 'result'), false);
+    assert.deepEqual(locked.scene, trial.scene);
+    const { form } = await jsonOk(await h.request('records/' + id + '/questionnaire'));
+    await jsonOk(await h.request('records/' + id + '/questionnaire', {
+      answers: Object.fromEntries(form.items.map((item: { id: string }) => [item.id, 4])), comment: '', submit: true,
+    }));
+    const review = await jsonOk(await h.request('records/' + id + '/review'));
+    assert.equal(review.resultLocked, false);
+    assert.equal(review.result.total, 4);
+    assert.equal(review.result.figures.length, 4);
+    assert.deepEqual(review.scene, trial.scene);
+    assert.doesNotMatch(JSON.stringify(review), privateFields);
+    assert.deepEqual((await h.storage.get('reception:v1')).plan, approved.plan);
+    predecessor = id;
+  }
+  assert.equal(transport.textPhases.filter(phase => phase === 'initial_observation').length, 2);
+  assert.equal(h.controlled.legacyCalls, 0);
+});
