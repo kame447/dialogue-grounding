@@ -430,12 +430,12 @@ export function renderSettings(view: SettingsView): string {
   // A protocol saved before the figure bank has no figure fields: they stay unselected so the researcher chooses them.
   const selection = p?.figureSelection, policy = p?.figureSetPolicy;
   const customIds = new Set(selection?.mode === 'custom' ? selection.figureIds : []);
-  const randomCount = selection?.mode === 'seeded_random' ? selection.figureCount ?? 6 : 4;
+  const randomCount = selection?.mode === 'seeded_random' ? selection.figureCount ?? 6 : undefined;
   const figureSource = `<fieldset class="figure-source"><legend>図形セット</legend>
 <div><label><input type="radio" name="figureMode" value="preset" required${selection?.mode === 'preset' ? ' checked' : ''}> プリセット</label>
 <div class="sub">${Object.keys(FIGURE_SETS).map(id => `<label><input type="radio" name="figureSetId" value="${escapeHtml(id)}"${selection?.mode === 'preset' && selection.setId === id ? ' checked' : ''}> ${escapeHtml(FIGURE_SET_LABELS[id] ?? id)}</label>`).join('')}</div></div>
 <div><label><input type="radio" name="figureMode" value="seeded_random" required${selection?.mode === 'seeded_random' ? ' checked' : ''}> シード乱数</label>
-<div class="sub"><label>図形数 <select name="figureCount">${[4, 6].map(count => `<option value="${count}"${randomCount === count ? ' selected' : ''}>${count}</option>`).join('')}</select></label><label>シード <input type="text" name="selectionSeed" inputmode="numeric" autocomplete="off" placeholder="空欄で自動"${selection?.mode === 'seeded_random' && selection.selectionSeed !== null ? ` value="${escapeHtml(selection.selectionSeed)}"` : ''}></label></div></div>
+<div class="sub"><label>図形数 <select name="figureCount"><option value="">選択してください</option>${[4, 6].map(count => `<option value="${count}"${randomCount === count ? ' selected' : ''}>${count}</option>`).join('')}</select></label><label>シード <input type="text" name="selectionSeed" inputmode="numeric" autocomplete="off" placeholder="空欄で自動"${selection?.mode === 'seeded_random' && selection.selectionSeed !== null ? ` value="${escapeHtml(selection.selectionSeed)}"` : ''}></label></div></div>
 <div><label><input type="radio" name="figureMode" value="custom" required${selection?.mode === 'custom' ? ' checked' : ''}> 図形を選ぶ（4個または6個）</label>
 <div class="sub">${FIGURE_BANK.map(f => `<label><input type="checkbox" name="figureIds" value="${escapeHtml(f.id)}"${customIds.has(f.id) ? ' checked' : ''}> ${escapeHtml(f.id)}</label>`).join('')}</div></div></fieldset>`;
   const mark = (on: boolean) => on ? ' checked' : '';
