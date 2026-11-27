@@ -1,3 +1,5 @@
+import { BYPASS_ACCEPTANCE_V2_CANONICAL_JSON, BYPASS_ACCEPTANCE_V2_TABLE_SHA256, humanMoveOnEvidence, isHumanMoveOnAnswer } from './human-led-move-on.ts';
+import type { HumanMoveOnEvidence } from './human-led-move-on.ts';
 import type { ParticipantUsageOnly } from '../web/participant-usage-policy.ts';
 // Explicit technical R policy. The original remains Jev's decision; no semantic oracle.
 import {JEV_ACTIONS,PARTICIPANT_TARGET_MENU_VERSION} from './contract.ts';
@@ -12,7 +14,19 @@ export const BYPASS_ACCEPTANCE_V1 = freeze(JSON.parse(BYPASS_ACCEPTANCE_V1_CANON
  policy:'bypass_acceptance_v1:accept'|'bypass_acceptance_v1:veto';vetoActions:JevAction[]}>;
 });
 export type ExecutedDecision=JevExecutedDecision;
-export type InterventionConfig={policy:'bypass_acceptance_v1:accept'|'bypass_acceptance_v1:veto';vetoActions:readonly JevAction[];tableSha256:string};
+export type InterventionVersion = 'bypass_acceptance_v1' | 'bypass_acceptance_v2';
+export type InterventionConfig={policy:`${InterventionVersion}:accept`|`${InterventionVersion}:veto`;vetoActions:readonly JevAction[];tableSha256:string};
+const BYPASS_ACCEPTANCE_V2 = freeze(JSON.parse(BYPASS_ACCEPTANCE_V2_CANONICAL_JSON) as {
+ policies: Record<'repair-first' | 'bypass-enabled', Pick<InterventionConfig, 'policy' | 'vetoActions'>>;
+});
+export function interventionReference(version: unknown): { version: InterventionVersion; tableSha256: string } {
+ if (version === 'bypass_acceptance_v1') return { version, tableSha256: BYPASS_ACCEPTANCE_V1_TABLE_SHA256 };
+ if (version === 'bypass_acceptance_v2') return { version, tableSha256: BYPASS_ACCEPTANCE_V2_TABLE_SHA256 };
+ return fail('invalid_intervention');
+}
+export function interventionVersion(policy: InterventionConfig['policy']): InterventionVersion {
+ return policy === 'bypass_acceptance_v2:accept' || policy === 'bypass_acceptance_v2:veto' ? 'bypass_acceptance_v2' : 'bypass_acceptance_v1';
+}
 // Temporary local copy of SHARED-TYPES-r1; contract.ts is owned by B1.
 export type RepairProspectMaterial=
  | {status:'ok';issue:{choice:'issue';turn:number;issueId:string|null}|{choice:'none'}|{choice:'unknown'};
@@ -27,10 +41,10 @@ type Ranking=readonly {action:ExecutedDecision['action'];score:number}[];
 type Selection={action:ExecutedDecision['action'];target:JevTarget}|null;
 export type OpenIssueRerank={policyId:'saved_action_scores_open_issue_v1';ranking:Ranking;selected:Selection;source:{issueTurn:number;issueId:string|null;choice:'issue';candidates:string[]}};
 export type Rerank={policyId:'saved_action_scores_v1';ranking:Ranking;selected:Selection}|OpenIssueRerank;
-export type AcceptancePlan={original:ExecutedDecision;policy:InterventionConfig['policy'];disposition:'adopted'|'rejected';reasonCode:'no_intervention'|'not_in_veto_set'|'vetoed_bypass_action';rerank:Rerank|null};
+export type AcceptancePlan={original:ExecutedDecision;policy:InterventionConfig['policy'];disposition:'adopted'|'rejected';reasonCode:'no_intervention'|'not_in_veto_set'|'vetoed_bypass_action'|'human_led_move_on';rerank:Rerank|null;humanMoveOn?:HumanMoveOnEvidence};
 const DETAIL_CODES=['invalid_options','invalid_input','invalid_response','invalid_decision','inconsistent_decision','model_mismatch','key_unavailable','key_leak','unauthorized','payment_required','not_found','rate_limited','upstream_error','network_error','timeout','aborted','cost_cap','cost_unreported','busy'] as const;
 export type InterventionInner={stage:'rerank'|'detail'|'executed';code:'invalid_scores'|'no_valid_alternative'|'detail_unavailable'|'invalid_executed'|typeof DETAIL_CODES[number]};
-export type InterventionTrace={schemaVersion:'jev_intervention_v1';policy:InterventionConfig['policy'];disposition:'adopted'|'rejected';reasonCode:AcceptancePlan['reasonCode']|'alternative_failed';original:ExecutedDecision;rerank:Rerank|null;alternative:ExecutedDecision|null;detailEvidence:JevDecisionStageEvidence|null;failure:{reasonCode:'alternative_failed';inner:InterventionInner}|null};
+export type InterventionTrace={schemaVersion:'jev_intervention_v1';policy:InterventionConfig['policy'];disposition:'adopted'|'rejected';reasonCode:AcceptancePlan['reasonCode']|'alternative_failed';original:ExecutedDecision;rerank:Rerank|null;alternative:ExecutedDecision|null;detailEvidence:JevDecisionStageEvidence|null;failure:{reasonCode:'alternative_failed';inner:InterventionInner}|null;humanMoveOn?:HumanMoveOnEvidence};
 export type AcceptanceResult={executed:ExecutedDecision;intervention:InterventionTrace};
 export type DetailResult=JevDetailResult;
 export type CompleteDetail=(input:JevDecisionInput,selected:{action:ExecutedDecision['action'];target:JevTarget})=>Promise<DetailResult>;
@@ -59,13 +73,16 @@ function equal(a:unknown,b:unknown):boolean {
  if(a===b)return true;if(!a||!b||typeof a!=='object'||typeof b!=='object'||Array.isArray(a)!==Array.isArray(b))return false;
  const ak=Object.keys(a).sort(),bk=Object.keys(b).sort();return ak.length===bk.length&&ak.every((k,i)=>k===bk[i]&&equal((a as Record<string,unknown>)[k],(b as Record<string,unknown>)[k]));
 }
-export function interventionForStrategy(strategy:unknown):InterventionConfig {
+export function interventionForStrategy(strategy:unknown, version:unknown='bypass_acceptance_v1'):InterventionConfig {
  if(strategy!=='repair-first'&&strategy!=='bypass-enabled')fail('invalid_intervention');
- return freeze({...structuredClone(BYPASS_ACCEPTANCE_V1.policies[strategy]),tableSha256:BYPASS_ACCEPTANCE_V1_TABLE_SHA256});
+ const reference = interventionReference(version);
+ const table = reference.version === 'bypass_acceptance_v2' ? BYPASS_ACCEPTANCE_V2 : BYPASS_ACCEPTANCE_V1;
+ return freeze({...structuredClone(table.policies[strategy]),tableSha256:reference.tableSha256});
 }
 function config(v:unknown):InterventionConfig {return boundary(v,'invalid_intervention',value=>{
  if(!exact(value,['policy','vetoActions','tableSha256']))fail('invalid_intervention');
- const expected=value.policy==='bypass_acceptance_v1:accept'?interventionForStrategy('bypass-enabled'):value.policy==='bypass_acceptance_v1:veto'?interventionForStrategy('repair-first'):null;
+ const id=value.policy,version=id==='bypass_acceptance_v2:accept'||id==='bypass_acceptance_v2:veto'?'bypass_acceptance_v2':'bypass_acceptance_v1';
+ const expected=id===version+':accept'?interventionForStrategy('bypass-enabled',version):id===version+':veto'?interventionForStrategy('repair-first',version):null;
  if(!expected||!equal(value,expected))fail('invalid_intervention');return expected;
 });}
 function project(d:JevDecision):ExecutedDecision {return {action:d.action as ExecutedDecision['action'],target:structuredClone(d.target),name:d.name,feature:d.feature,observe:null,
@@ -89,16 +106,17 @@ function checkRepairProspect(value:unknown):void {
 }
 function prepare(input:unknown,original:unknown,intervention:unknown,questionLayout:JevQuestionLayout='two_stage_v1',usagePolicy?:ParticipantUsageOnly){
  const policy=config(intervention);
- const i=boundary(input,'invalid_input',value=>{const optional=['reobservationAllowed','humanReferent','repairProspect','agreeNames','repairFacts','participantLedger','nameLedger','nameSource','namingRequest','namingRequestStrict','judgmentLedger','rotationMode','notationV6','notationV11','featureReplyFilter','p5Enabled','sharedConstruals'].filter(k=>!!value&&typeof value==='object'&&Object.hasOwn(value,k));
+ const i=boundary(input,'invalid_input',value=>{const optional=['reobservationAllowed','humanReferent','repairProspect','agreeNames','repairFacts','participantLedger','nameLedger','nameSource','namingRequest','namingRequestStrict','judgmentLedger','rotationMode','notationV6','notationV11','featureReplyFilter','p5Enabled','sharedConstruals','humanLedMoveOn'].filter(k=>!!value&&typeof value==='object'&&Object.hasOwn(value,k));
   if(!exact(value,['turn','publicTurns','ownSlots','observations','issueSummary','priorClaims','repairHistory','previousAction','publicNames',...optional]))fail('invalid_input');
   if(Object.hasOwn(value,'repairProspect'))checkRepairProspect(value.repairProspect);
-  buildJevDecisionPayload(value as JevDecisionInput,value.p5Enabled===true?{questionLayout}:undefined);
+  if(value.humanLedMoveOn!==(interventionVersion(policy.policy)==='bypass_acceptance_v2'?true:undefined))fail('invalid_input');
+  buildJevDecisionPayload(value as JevDecisionInput,value.p5Enabled===true||value.humanLedMoveOn===true?{questionLayout}:undefined);
   return structuredClone(value) as BypassAcceptanceInput;});
  const d=boundary(original,'invalid_original',value=>{const valid=validateJevDecision(value,i,{questionLayout,usagePolicy});if(valid.action==='request_observation')fail('invalid_original');return valid;});
  return {input:i,decision:d,config:policy,original:project(d),layout:questionLayout};
 }
 type Context=ReturnType<typeof prepare>;
-function trace(p:AcceptancePlan,alternative:ExecutedDecision|null=null,detailEvidence:JevDecisionStageEvidence|null=null):InterventionTrace{return {schemaVersion:'jev_intervention_v1',policy:p.policy,disposition:p.disposition,reasonCode:p.reasonCode,original:p.original,rerank:p.rerank,alternative,detailEvidence,failure:null};}
+function trace(p:AcceptancePlan,alternative:ExecutedDecision|null=null,detailEvidence:JevDecisionStageEvidence|null=null):InterventionTrace{return {schemaVersion:'jev_intervention_v1',policy:p.policy,disposition:p.disposition,reasonCode:p.reasonCode,original:p.original,rerank:p.rerank,alternative,detailEvidence,failure:null,...(p.humanMoveOn?{humanMoveOn:p.humanMoveOn}:{})};}
 function alternativeFailed(p:AcceptancePlan,inner:InterventionInner):never {throw new BypassAcceptanceError('alternative_failed',{...trace(p),disposition:'rejected',reasonCode:'alternative_failed',failure:{reasonCode:'alternative_failed',inner}});}
 function rerankOption(options:BypassAcceptanceOptions|undefined):BypassAcceptanceOptions['rerank'] {
  if(options===undefined)return 'saved_action_scores_v1';
@@ -162,7 +180,7 @@ export function isOpenIssueRerankRecord(intervention:unknown,decision:unknown,ex
   };
   const t=intervention as InterventionTrace,d=decision as JevDecision,e=executed as ExecutedDecision;
   if(!exact(t,['schemaVersion','policy','disposition','reasonCode','original','rerank','alternative','detailEvidence','failure'])||
-   t.schemaVersion!=='jev_intervention_v1'||t.policy!=='bypass_acceptance_v1:veto'||t.disposition!=='rejected'||
+   t.schemaVersion!=='jev_intervention_v1'||!['bypass_acceptance_v1:veto','bypass_acceptance_v2:veto'].includes(t.policy)||t.disposition!=='rejected'||
    t.reasonCode!=='vetoed_bypass_action'||t.failure!==null||!d||d.decisionKind!=='jev_local_test'||!['defer','move_on'].includes(d.action)||
    !ownTarget(d.target,true)||!equal(t.original,project(d))||!equal(t.alternative,e))return false;
   const r=t.rerank;
@@ -201,7 +219,10 @@ export function isOpenIssueRerankRecord(intervention:unknown,decision:unknown,ex
 }
 function plan(ctx:Context,rerank:BypassAcceptanceOptions['rerank']):AcceptancePlan {
  const {input,decision,config,original,layout}=ctx;
- const p:AcceptancePlan={original,policy:config.policy,disposition:'adopted',reasonCode:config.policy==='bypass_acceptance_v1:accept'?'no_intervention':'not_in_veto_set',rerank:null};
+ const p:AcceptancePlan={original,policy:config.policy,disposition:'adopted',reasonCode:config.policy.endsWith(':accept')?'no_intervention':'not_in_veto_set',rerank:null};
+ if(input.humanLedMoveOn && original.action==='move_on' && isHumanMoveOnAnswer(decision.evidence.stages?.[0])){
+  return freeze({...p,reasonCode:'human_led_move_on',humanMoveOn:humanMoveOnEvidence(input.turn,input.repairHistory)});
+ }
  if(!config.vetoActions.includes(original.action))return freeze(p);
  p.disposition='rejected';p.reasonCode='vetoed_bypass_action';
  const first=decision.evidence.stages?.[0],scores=first?.scores.action;
