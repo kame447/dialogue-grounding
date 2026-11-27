@@ -402,7 +402,7 @@ const SETTING_CHOICES: [string, string, [string, string][]][] = [
   ['rotationMode', '回転', [['relative_pm90', '相対 ±90°（従来）'], ['relative_0', '相対 0°（向きを一致）']]],
   ['receptionNumberFormat', '受付番号', [['daily_seq3', '日ごとの3桁の連番']]],
 ];
-const FIGURE_SET_LABELS: Record<string, string> = { 'legacy-v1': 'legacy-v1（従来 F1–F6）', 'bank-set-a': 'bank-set-a（F7–F12）', 'bank-set-b': 'bank-set-b（F13–F18）',
+const FIGURE_SET_LABELS: Record<string, string> = { 'pilot-four-v1': '4図形（F1–F4）', 'legacy-v1': 'legacy-v1（従来 F1–F6）', 'bank-set-a': 'bank-set-a（F7–F12）', 'bank-set-b': 'bank-set-b（F13–F18）',
   'bank-set-c': 'bank-set-c（F19–F24）', 'bank-set-d': 'bank-set-d（F25–F30）' };
 const MODE_LABELS: Record<string, string> = { on: '現在：使う', off: '現在：使わない', unset: '既定（使う）' };
 
@@ -415,12 +415,13 @@ export function renderSettings(view: SettingsView): string {
   // A protocol saved before the figure bank has no figure fields: they stay unselected so the researcher chooses them.
   const selection = p?.figureSelection, policy = p?.figureSetPolicy;
   const customIds = new Set(selection?.mode === 'custom' ? selection.figureIds : []);
+  const randomCount = selection?.mode === 'seeded_random' ? selection.figureCount ?? 6 : 4;
   const figureSource = `<fieldset class="figure-source"><legend>図形セット</legend>
 <div><label><input type="radio" name="figureMode" value="preset" required${selection?.mode === 'preset' ? ' checked' : ''}> プリセット</label>
 <div class="sub">${Object.keys(FIGURE_SETS).map(id => `<label><input type="radio" name="figureSetId" value="${escapeHtml(id)}"${selection?.mode === 'preset' && selection.setId === id ? ' checked' : ''}> ${escapeHtml(FIGURE_SET_LABELS[id] ?? id)}</label>`).join('')}</div></div>
 <div><label><input type="radio" name="figureMode" value="seeded_random" required${selection?.mode === 'seeded_random' ? ' checked' : ''}> シード乱数</label>
-<div class="sub"><label>シード <input type="text" name="selectionSeed" inputmode="numeric" autocomplete="off" placeholder="空欄で自動"${selection?.mode === 'seeded_random' && selection.selectionSeed !== null ? ` value="${escapeHtml(selection.selectionSeed)}"` : ''}></label></div></div>
-<div><label><input type="radio" name="figureMode" value="custom" required${selection?.mode === 'custom' ? ' checked' : ''}> 6図形を選ぶ</label>
+<div class="sub"><label>図形数 <select name="figureCount">${[4, 6].map(count => `<option value="${count}"${randomCount === count ? ' selected' : ''}>${count}</option>`).join('')}</select></label><label>シード <input type="text" name="selectionSeed" inputmode="numeric" autocomplete="off" placeholder="空欄で自動"${selection?.mode === 'seeded_random' && selection.selectionSeed !== null ? ` value="${escapeHtml(selection.selectionSeed)}"` : ''}></label></div></div>
+<div><label><input type="radio" name="figureMode" value="custom" required${selection?.mode === 'custom' ? ' checked' : ''}> 図形を選ぶ（4個または6個）</label>
 <div class="sub">${FIGURE_BANK.map(f => `<label><input type="checkbox" name="figureIds" value="${escapeHtml(f.id)}"${customIds.has(f.id) ? ' checked' : ''}> ${escapeHtml(f.id)}</label>`).join('')}</div></div></fieldset>`;
   const mark = (on: boolean) => on ? ' checked' : '';
   const fieldset = (name: string, legend: string, choices: [string, string][]) => `<fieldset><legend>${escapeHtml(legend)}</legend>${choices.map(([value, label]) =>

@@ -6,8 +6,8 @@ import { DEFAULT_COST_CAP_USD } from '../diagnostics/jev-shadow-eval/local-openr
 import { validateParticipantModelPin } from './participant-model-pin.ts';
 import type { ParticipantModelPin } from './participant-model-pin.ts';
 import { ROTATION_MODES as STIMULUS_ROTATION_MODES } from '../stimuli/scatter-v2.mjs';
-import { FIGURE_SETS, resolveFigureSelection, validateResolvedFigureSelection } from '../stimuli/figure-bank.ts';
-import type { ResolvedFigureSelection } from '../stimuli/figure-bank.ts';
+import { FIGURE_SETS, isSupportedFigureCount, resolveFigureSelection, validateResolvedFigureSelection } from '../stimuli/figure-bank.ts';
+import type { FigureCount, ResolvedFigureSelection } from '../stimuli/figure-bank.ts';
 import { INITIAL_OBSERVATION_STRUCTURED_V1, type InitialObservationGeneration } from '../observation/initial-observation-generation.ts';
 
 import { CLAIM_PRUNE_V2, type MemoryPruneVersion } from '../memory/reference-graph.mjs';
@@ -58,7 +58,7 @@ export type FigureSetPolicy = 'shared' | 'per_trial';
 /** Researcher-chosen figure source. `selectionSeed: null` asks the approval step to draw one seed. */
 export type ProtocolFigureSelection =
   | { mode: 'preset'; setId: string }
-  | { mode: 'seeded_random'; selectionSeed: number | null }
+  | { mode: 'seeded_random'; selectionSeed: number | null; figureCount?: FigureCount }
   | { mode: 'custom'; figureIds: readonly string[] };
 export type ReceptionProtocolV3 = { schemaVersion: 'reception_protocol_v3'; protocolId: string; revision: number;
   allowedOrders: Strategy[][]; seedPolicy: 'shared' | 'per_trial'; referenceMemory: boolean;
@@ -137,14 +137,17 @@ export function validateReceptionProtocolV2(value: unknown): ReceptionProtocolV2
 export function canonicalReceptionProtocolV2(value: unknown): string { return JSON.stringify(validateReceptionProtocolV2(value)); }
 function protocolFigureSelection(value: unknown): ProtocolFigureSelection {
   const head = object(value, Array.isArray((value as { figureIds?: unknown } | null)?.figureIds) ? ['mode','figureIds']
-    : value && typeof value === 'object' && 'setId' in value ? ['mode','setId'] : ['mode','selectionSeed']);
+    : value && typeof value === 'object' && 'setId' in value ? ['mode','setId']
+      : ['mode','selectionSeed', ...(value && typeof value === 'object' && Object.hasOwn(value, 'figureCount') ? ['figureCount'] : [])]);
   if (head.mode === 'preset') {
     if (typeof head.setId !== 'string' || !Object.hasOwn(FIGURE_SETS, head.setId)) return fail();
     return { mode: 'preset', setId: head.setId };
   }
   if (head.mode === 'seeded_random') {
     if (head.selectionSeed !== null && !int(head.selectionSeed)) return fail();
-    return { mode: 'seeded_random', selectionSeed: head.selectionSeed };
+    if (Object.hasOwn(head, 'figureCount') && !isSupportedFigureCount(head.figureCount)) return fail();
+    return { mode: 'seeded_random', selectionSeed: head.selectionSeed,
+      ...(Object.hasOwn(head, 'figureCount') ? { figureCount: head.figureCount as FigureCount } : {}) };
   }
   if (head.mode === 'custom') {
     try { return { mode: 'custom', figureIds: [...resolveFigureSelection({ mode: 'custom', figureIds: head.figureIds }).figureIds] }; } catch { return fail(); }
@@ -333,18 +336,18 @@ export async function approveReception(value: unknown, options: ParticipantPlanS
     try {
       if (p.figureSetPolicy === 'shared') {
         const one = p.figureSelection.mode === 'seeded_random'
-          ? resolveFigureSelection({ mode: 'seeded_random', selectionSeed: p.figureSelection.selectionSeed ?? options.randomSeed() })
+          ? resolveFigureSelection({ ...p.figureSelection, selectionSeed: p.figureSelection.selectionSeed ?? options.randomSeed() })
           : resolveFigureSelection(p.figureSelection);
         selected.forEach(() => figures.push(one));
       } else {
         if (p.figureSelection.mode !== 'seeded_random') return fail();
-        const base = p.figureSelection.selectionSeed;
+        const selection = p.figureSelection, base = selection.selectionSeed;
         selected.forEach((_, i) => {
           let seed = base === null ? options.randomSeed() : base + i;
-          // Distinct seeds can still draw the same six figures in a different order.
+          // Distinct seeds can still draw the same figures in a different order.
           for (let attempt = 0; attempt < 32; attempt++) {
             if (!int(seed)) throw new Error('seed');
-            const candidate = resolveFigureSelection({ mode: 'seeded_random', selectionSeed: seed });
+            const candidate = resolveFigureSelection({ ...selection, selectionSeed: seed });
             if (!figures.some(prior => candidate.figureIds.every(id => prior.figureIds.includes(id)))) {
               figures.push(candidate);
               return;
