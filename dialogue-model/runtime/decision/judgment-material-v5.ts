@@ -70,6 +70,7 @@ export function encodeMaterialV5(material: any, { actions, nameLedger, answers: 
     ...(material.sharedConstruals?.length ? { sharedConstruals: material.sharedConstruals } : {}),
     ...(material.namingEvidence ? { namingEvidence: material.namingEvidence } : {}),
     ...(material.referenceEvidence ? { referenceEvidence: material.referenceEvidence } : {}),
+    ...(material.visualPurposeVersion ? { visualPurposeVersion: material.visualPurposeVersion } : {}),
     ...(material.judgmentMaterialVersion ? {
       judgmentMaterialVersion: material.judgmentMaterialVersion,
       repairQuality: repairQualityEvidence(material.turn, material.publicTurns, material.priorClaims, material.repairHistory),

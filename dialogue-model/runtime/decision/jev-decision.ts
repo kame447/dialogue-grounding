@@ -18,12 +18,15 @@ import { validateRepairFacts } from "./repair-facts.ts";
 import { JEV_REPAIR_QUALITY_VERSION, PUBLICATION_CONTINUATION_QUESTION, PUBLICATION_RECOVERY_REASONS, publicationContinuationQuestion,
   REPAIR_QUALITY_ACTION, REPAIR_QUALITY_CANDIDATE_NARROWED,
   REPAIR_QUALITY_DETAIL, REPAIR_QUALITY_GUIDANCE, REPAIR_QUALITY_NEW_INFORMATION, REPAIR_QUALITY_PROGRESSING,
-  REPAIR_QUALITY_PROSPECT } from "./repair-quality.ts";
+  REPAIR_QUALITY_PROSPECT, VISUAL_PURPOSE_CRITERIA, VISUAL_PURPOSE_GUIDANCE, VISUAL_PURPOSE_QUESTION,
+  issuePurpose, visualIssueLabel, visualPurposeSources } from "./repair-quality.ts";
 import { nameBindsFigure } from "./referent-binding.ts";
 import { encodeMaterialV5, claimKeepOrder, judgmentV5Legend, JUDGMENT_V11_ANSWER_LEGEND } from "./judgment-material-v5.ts";
 import type { LedgerAction } from "./judgment-material-v5.ts";
 import { jevChoiceAnswersValid } from "./jev-choice-response.ts";
-import { JEV_ACTIONS, DRAFT_ACTS, DRAFT_SHARED_CLAIMS, OBSERVATION_ASPECTS, REPAIR_PROSPECTS, REPAIR_PROSPECT_BASES, PARTICIPANT_TARGET_MENU_VERSION, isHolisticPolicy } from "./contract.ts";
+import { JEV_ACTIONS, DRAFT_ACTS, DRAFT_SHARED_CLAIMS, OBSERVATION_ASPECTS, REPAIR_PROSPECTS, REPAIR_PROSPECT_BASES, PARTICIPANT_TARGET_MENU_VERSION,
+  JEV_VISUAL_PURPOSE_VERSION, isHolisticPolicy, isJevVisualPurpose, visualPurposeMatchesSource } from "./contract.ts";
+import type { JevVisualPurpose } from "./contract.ts";
 import type { JevAction, JevDecision, JevDecisionClient, JevDecisionInput, JevDecisionEvidence, JevObservationRequest,
   JevQuestionLayout, JevTarget, RepairHistoryEntry, DecisionInputBudget, JevDecisionStageEvidence, JevDecisionCallOptions, DialoguePolicy,
   HumanReferentEstimate, HumanReferentMaterial, JevExecutedDecision, JevDetailResult, RepairProspectMaterial, RepairFact, DraftAct, DraftActInput, DraftActResult, DraftSharedClaim, DraftSharedClaimInput, DraftSharedClaimResult, SharedConstrual } from "./contract.ts";
@@ -149,7 +152,8 @@ const v5Suffix = (input: JevDecisionInput) => input.judgmentLedger === undefined
 const decisionInstructions = (input: JevDecisionInput, prospect = false, layout: JevQuestionLayout = "two_stage_v1", participantPrompts = false) =>
   (layout === "two_stage_v3" ? (participantPrompts ? COMMON_V3 : RESEARCH_COMMON_V3) : layout === "two_stage_v2" ? COMMON_V2 : COMMON) + (input.humanReferent === undefined ? "" : "\n" + HUMAN_REFERENT_GUIDANCE) + (!prospect || input.repairProspect === undefined ? "" : "\n" + REPAIR_PROSPECT_GUIDANCE) + factsGuidance(input) + v5Suffix(input) +
   (input.jevNaming ? "\n" + JEV_NAMING_GUIDANCE : "") +
-  (input.judgmentMaterialVersion === JEV_REPAIR_QUALITY_VERSION ? "\n" + REPAIR_QUALITY_GUIDANCE : "");
+  (input.judgmentMaterialVersion === JEV_REPAIR_QUALITY_VERSION ? "\n" + REPAIR_QUALITY_GUIDANCE : "") +
+  (input.visualPurposeVersion === JEV_VISUAL_PURPOSE_VERSION ? "\n" + VISUAL_PURPOSE_GUIDANCE : "");
 const LAYOUTS: readonly JevQuestionLayout[] = Object.freeze(["two_stage_v1", "two_stage_v2", "two_stage_v3"]);
 /** Closed two_stage_v2 candidate sets: every subset of the six own slots with 2-6 members (15+20+15+6+1 = 57),
  * ordered by size, then lexicographically by slot index. Labels name the slot indices, so they are reconstructable. */
@@ -316,7 +320,8 @@ export function draftSharedClaimVerdict(choice: DraftSharedClaim, singleIdentifi
 /** two_stage_v3 legality: the single source of the (action, target) table. A pair is legal when the target kind is allowed for the action
  * and the material actually holds the name/feature candidates or the observation allowance that action needs for that target. */
 const V3_ANY_TARGET_ACTIONS: readonly JevAction[] = Object.freeze(["accept", "defer", "move_on", "close"]);
-type V3Material = { slots: readonly string[]; catalog: Catalog; reobservationAllowed: boolean; noAccept?: boolean };
+const isVisualAction = (action: unknown) => action === "confirm" || action === "repair";
+type V3Material = { slots: readonly string[]; catalog: Catalog; reobservationAllowed: boolean; noAccept?: boolean; visualPurpose?: boolean };
 function legalActionTargetV3(action: JevAction, target: JevTarget, m: V3Material): boolean {
   if (action === "accept" && m.noAccept) return false;
   if (V3_ANY_TARGET_ACTIONS.includes(action)) return true;
@@ -330,7 +335,7 @@ function legalActionTargetV3(action: JevAction, target: JevTarget, m: V3Material
     const names = action === "agree" ? m.catalog.agreeNames ?? m.slots.map(() => []) : m.catalog.names;
     return names[m.slots.indexOf(ids[0])].length > 0;
   }
-  return ids.some(id => m.catalog.features[m.slots.indexOf(id)].length > 0); // confirm, repair
+  return m.visualPurpose === true || ids.some(id => m.catalog.features[m.slots.indexOf(id)].length > 0); // confirm, repair
 }
 export type JevV3TargetOption = { label: string; target: JevTarget };
 /** Closed target options for one action, in the fixed order none, figure_0..5, then the 57 candidate sets by size. */
@@ -434,6 +439,8 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
   if (input.humanLedMoveOn !== undefined && (input.humanLedMoveOn !== true || layout !== "two_stage_v3")) fail("invalid_input");
   const repairQuality = input.judgmentMaterialVersion === JEV_REPAIR_QUALITY_VERSION;
   if (input.judgmentMaterialVersion !== undefined && (!repairQuality || layout !== "two_stage_v3" || input.judgmentLedger === undefined)) fail("invalid_input");
+  const visualPurpose = input.visualPurposeVersion === JEV_VISUAL_PURPOSE_VERSION;
+  if (input.visualPurposeVersion !== undefined && (!visualPurpose || !repairQuality || input.discriminatingConfirmation !== undefined)) fail("invalid_input");
   if (input.shapeTerminologyVersion !== undefined && (!isGenerationV18(input.shapeTerminologyVersion) || layout !== "two_stage_v3")) fail("invalid_input");
   const p5Enabled = input.p5Enabled === true;
   if (!(input.p5Enabled === undefined || p5Enabled && input.judgmentLedger !== undefined) ||
@@ -444,13 +451,17 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
   let publicationRecoveryContext: JevDecisionInput["publicationRecoveryContext"];
   if (input.publicationRecoveryContext !== undefined) {
     const value = input.publicationRecoveryContext;
+    const hasPurpose = object(value) && object(value.previous) && Object.hasOwn(value.previous, "visualPurpose");
     if (!repairQuality || !exact(value, ["reason", "previous"]) || !includes(PUBLICATION_RECOVERY_REASONS, value.reason) ||
-        !exact(value.previous, ["action", "target", "name", "feature"]) ||
+        !exact(value.previous, ["action", "target", "name", "feature", ...(hasPurpose ? ["visualPurpose"] : [])]) ||
         !includes(JEV_ACTIONS.filter(action => action !== "request_observation"), value.previous.action) ||
         !(value.previous.name === null || text(value.previous.name, 80)) ||
-        !(value.previous.feature === null || text(value.previous.feature, 400))) fail("invalid_input");
+        !(value.previous.feature === null || text(value.previous.feature, 400)) ||
+        hasPurpose !== (visualPurpose && isVisualAction(value.previous.action)) ||
+        hasPurpose && (value.previous.feature !== null || !isJevVisualPurpose(value.previous.visualPurpose))) fail("invalid_input");
     publicationRecoveryContext = { reason: value.reason, previous: { action: value.previous.action,
-      target: cleanTarget(value.previous.target, slots), name: value.previous.name, feature: value.previous.feature } };
+      target: cleanTarget(value.previous.target, slots), name: value.previous.name, feature: value.previous.feature,
+      ...(hasPurpose ? { visualPurpose: structuredClone(value.previous.visualPurpose) } : {}) } };
   }
   let participantLedger: JevDecisionInput["participantLedger"];
   if (input.participantLedger !== undefined) {
@@ -529,6 +540,11 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
       name: c.name, speaker: c.speaker, sourceTurn: c.sourceTurn, quote: c.quote, respondsTo: c.respondsTo, source: c.source };
   });
   const shared = input.sharedConstruals === undefined ? [] : cleanSharedConstruals(input.sharedConstruals, priorClaims, slots);
+  const previousRecovery = publicationRecoveryContext?.previous;
+  if (previousRecovery?.visualPurpose?.kind === "resolve_issue" &&
+      !priorClaims.some(claim => visualPurposeMatchesSource(previousRecovery.visualPurpose!, previousRecovery.target, claim))) fail("invalid_input");
+  const purposeSources = visualPurpose && selected && isVisualAction(selected.action)
+    ? visualPurposeSources(priorClaims, selected.target) : [];
   const protectedClaims = new Set(shared.flatMap(candidate => candidate.claimIds));
   const protectedSources = new Set(priorClaims.filter(claim => protectedClaims.has(claim.id))
     .map(claim => `${claim.sourceTurn}:${claim.speaker}`));
@@ -601,6 +617,7 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
     ...(shared.length ? { sharedConstruals: shared } : {}),
     ...(jevNaming ? { namingEvidence: { names: agreeNames!, localRejections: jevNaming.localRejections } } : {}),
     ...(repairQuality ? { judgmentMaterialVersion: JEV_REPAIR_QUALITY_VERSION, publicationRecoveryContext } : {}),
+    ...(visualPurpose ? { visualPurposeVersion: JEV_VISUAL_PURPOSE_VERSION } : {}),
     ...(referenceEvidence !== undefined ? { referenceEvidence } : {}),
     inputBudget: { maxChars: 20000, omitted } };
   let state = "";
@@ -703,7 +720,7 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
   const catalog: Catalog = { names: observations.map(o => unique([...(publicOnlyNames && !repairQuality ? [] : o.holistic.map(h => h.construal).filter(n => n.length <= 80)),
     ...publicNames.filter(n => n.figureId === null || n.figureId === o.figureId).map(n => n.name)])),
   ...(agreeLive === undefined ? {} : { agreeNames: observations.map(o => unique(agreeLive.filter(n => n.figureId === null || n.figureId === o.figureId).map(n => n.name))) }),
-  features: observations.map(o => unique([...o.analytic.shapes, o.analytic.composition, ...o.analytic.relations,
+  features: observations.map(o => visualPurpose ? [] : unique([...o.analytic.shapes, o.analytic.composition, ...o.analytic.relations,
     ...o.reobservations.flatMap(r => r.supports)].filter(v => !!v.trim() && v.length <= 400))) };
   if (participantLedger) {
     const allowedName = (action: "propose_name" | "agree", targetSlot: string, candidateName: string) => {
@@ -754,7 +771,10 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
     // Only actions with at least one legal target and detail in the material that survived the budget; scores of all of them are saved.
     add("action", "次の行動を一つ選んでください。request_observationは公開発話を生成する前の追加観察要求です。" +
       (repairQuality && input.humanLedMoveOn ? "人が命名と移行を同時に求めたときは、この問いで命名の扱いを選び、移行の出所は別の問いに残してください。" : ""), Object.fromEntries(
-      legalActionsV3({ slots, catalog, reobservationAllowed, noAccept }).map(a => [a, v3Criteria(policy)[a] +
+      legalActionsV3({ slots, catalog, reobservationAllowed, noAccept, visualPurpose }).map(a => [a,
+        (visualPurpose && a === "confirm"
+          ? "対象や話の理解に未解決点があり、相手の情報で確かめられるときに選ぶ。答えられる問いは直接答える。既に明らかになった点は聞き直さず、次に解消すべき論点を判断する。"
+          : visualPurpose && a === "request_observation" ? v3Criteria(policy)[a].replace("Lunaへ", "Terraへ") : v3Criteria(policy)[a]) +
         (input.humanLedMoveOn && a === "move_on" ? HUMAN_MOVE_ON_ACTION_NOTE : "") +
         (!shared.length ? "" : a === "accept" ? "\n" + SHARED_ACCEPT : a === "confirm" || a === "repair" ? "\n" + SHARED_CONFIRM : "") +
         (repairQuality && REPAIR_QUALITY_ACTION[a] ? "\n" + REPAIR_QUALITY_ACTION[a] : "")])));
@@ -771,8 +791,10 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
     add(`candidate_${i}`, `対象がmultipleの場合の候補集合: 図形 ${JSON.stringify(id)} を候補に含めますか。multipleでは2図形以上を含めてください。単一対象やnoneならこの回答は使いません。`,
       { include: "公開発話の対象候補に含む。", exclude: "対象候補に含まない。" });
   });
+  const retainedIds = visualPurpose ? new Set(priorClaims.map(c => c.id)) : undefined;
   return { payload: { model: JEV_DECISION_MODEL, state, questions } as JevDecisionPayload, slots, catalog, human: humans[0].text, reobservationAllowed, noAccept,
-    budget, layout, previousAction, publicTurns, repairHistory, ledgerActions, answers, answerRows, shared, agreeLive };
+    budget, layout, previousAction, publicTurns, repairHistory, ledgerActions, answers, answerRows, shared, agreeLive, visualPurpose,
+    purposeSources: purposeSources.filter(c => retainedIds?.has(c.id)) };
 }
 
 export function buildJevDecisionPayload(input: JevDecisionInput, { questionLayout = "two_stage_v1", dialoguePolicy }: { questionLayout?: JevQuestionLayout; dialoguePolicy?: DialoguePolicy } = {}): JevDecisionPayload {
@@ -1115,13 +1137,14 @@ function prepareDetail(input: JevDecisionInput, selected: JevActionTarget, rejec
     ? base.shared.filter(candidate => scope.every(id => candidate.figureIds.includes(id))) : [];
   if (selected.action === "accept" && sharedOffered.length) {
     const p = prepare(input, layout, selected);
-    return { ...p, candidates: [] as DetailCandidate[], subsets: [] as string[][], sharedOffered,
+    return { ...p, candidates: [] as DetailCandidate[], subsets: [] as string[][], sharedOffered, purposeOptions: null,
       payload: { ...p.payload, questions: { shared_construal: sharedQuestion(input, sharedOffered, false, participantPrompts) } } };
   }
   if (!needsDetail(selected.action)) return null;
   const p = prepare(input, layout, selected);
+  const choosePurpose = p.visualPurpose && isVisualAction(selected.action);
   const candidates: DetailCandidate[] = [];
-  if (selected.action !== "request_observation") {
+  if (selected.action !== "request_observation" && !choosePurpose) {
     for (const id of scope) {
       const index = p.slots.indexOf(id);
       const catalog = selected.action === "agree" && p.catalog.agreeNames !== undefined ? p.catalog.agreeNames
@@ -1146,6 +1169,7 @@ function prepareDetail(input: JevDecisionInput, selected: JevActionTarget, rejec
   }
   const subsets: string[][] = [];
   const questions: Record<string, Question> = {};
+  let purposeOptions: Record<string, JevVisualPurpose> | null = null;
   if (selected.action === "request_observation") {
     for (let mask = 1; mask < 2 ** scope.length; mask++) subsets.push(scope.filter((_id, i) => mask & (1 << i)));
     questions.observe_targets = { type: "choice", instructions: decisionInstructions(input, false, layout, participantPrompts) +
@@ -1153,6 +1177,20 @@ function prepareDetail(input: JevDecisionInput, selected: JevActionTarget, rejec
       criteria: Object.fromEntries(subsets.map((ids, i) => [`subset_${i}`, JSON.stringify(ids)])) };
     questions.observe_aspect = { type: "choice", instructions: decisionInstructions(input, false, layout, participantPrompts) + "\n第1段の再観察要求について、確認する視覚論点を選んでください。",
       criteria: Object.fromEntries(OBSERVATION_ASPECTS.map(a => [a, OBSERVE_QUESTIONS[a]])) };
+  } else if (choosePurpose) {
+    const byIssue = new Map<string, JevVisualPurpose>();
+    for (const claim of p.purposeSources) {
+      byIssue.set(claim.issueId, issuePurpose(claim));
+    }
+    const purposes = [...byIssue.values()].map((purpose, i) => [visualIssueLabel(i), purpose] as const);
+    purposeOptions = { clarify_reference: { kind: "clarify_reference" }, resolve_mismatch: { kind: "resolve_mismatch" },
+      unknown: { kind: "unknown" }, ...Object.fromEntries(purposes) };
+    questions[VISUAL_PURPOSE_QUESTION] = {
+      type: "choice",
+      instructions: decisionInstructions(input, false, layout, participantPrompts) +
+        "\n選択済みの行動と対象で、いま解消すべき論点を一つ選んでください。局所論点はclaimsとその公開の出所を照合してください。明示された問いがあるときは、その問いを考慮してください。対象や論点が絞れないときは不明を選べます。",
+      criteria: { ...VISUAL_PURPOSE_CRITERIA, ...Object.fromEntries(purposes.map(([label, purpose]) => [label, JSON.stringify(purpose)])) },
+    };
   } else {
     const kind = ["propose_name", "agree"].includes(selected.action) ? "name" : "feature";
     const confirmation = repairQuality && kind === "feature" ? "\n" + REPAIR_QUALITY_DETAIL
@@ -1191,7 +1229,7 @@ function prepareDetail(input: JevDecisionInput, selected: JevActionTarget, rejec
           JSON.stringify({ sourceTurn, names, target: selected.target })])) },
     };
   }
-  return { ...p, candidates: offered, subsets, sharedOffered, payload: { ...p.payload, questions } };
+  return { ...p, candidates: offered, subsets, sharedOffered, purposeOptions, payload: { ...p.payload, questions } };
 }
 
 /** Stage two is conditional on stage one's closed action/target selection. */
@@ -1211,7 +1249,7 @@ function decodeDetail(selected: JevActionTarget, p: ReturnType<typeof prepareDet
       const figureIds = p.subsets.find((_ids, i) => choices.observe_targets === `subset_${i}`)!;
       const aspect = choices.observe_aspect as JevObservationRequest["aspect"];
       observe = { figureIds: [...figureIds], aspect, question: OBSERVE_QUESTIONS[aspect] + "\n今回の公開人間発話（引用）: " + p.human.slice(0, 160), partnerConstrual: null };
-    } else if (selected.action !== "accept") {
+    } else if (selected.action !== "accept" && !p.purposeOptions) {
       const kind = ["propose_name", "agree"].includes(selected.action) ? "name" : "feature";
       const c = p.candidates.find((_c, i) => choices[kind] === `${kind}_${i}`)!;
       if (kind === "name") name = c.value; else feature = c.value;
@@ -1219,7 +1257,9 @@ function decodeDetail(selected: JevActionTarget, p: ReturnType<typeof prepareDet
     }
   }
   const shared = p?.sharedOffered.find((_candidate, i) => choices.shared_construal === sharedLabel(i));
-  return { ...selected, name, feature, observe, detailFigureIds, ...(shared ? { sharedClaimIds: [...shared.claimIds] } : {}) };
+  const visualPurpose = p?.purposeOptions?.[choices[VISUAL_PURPOSE_QUESTION]];
+  return { ...selected, name, feature, observe, detailFigureIds, ...(shared ? { sharedClaimIds: [...shared.claimIds] } : {}),
+    ...(visualPurpose ? { visualPurpose } : {}) };
 }
 function closedEvidence(value: unknown, p: { payload: JevDecisionPayload; budget: DecisionInputBudget }, stage: JevDecisionStageEvidence["stage"], usagePolicy?: ParticipantUsageOnly): JevDecisionStageEvidence {
   if (!exact(value, ["stage", "model", "responseId", "choices", "scores", "latencyMs", "costUsd", "inputBudget"]) || value.stage !== stage ||
@@ -1255,7 +1295,7 @@ function detailJsonData(value: unknown, seen = new Set<object>()): void {
 function prepareExecutedDetail(input: JevDecisionInput, selected: JevActionTarget, layout: JevQuestionLayout = "two_stage_v1", participantPrompts = false) {
   try {
     detailJsonData(input); detailJsonData(selected);
-    const optional = ["reobservationAllowed", "humanReferent", "repairProspect", "agreeNames", "jevNaming", "repairFacts", "participantLedger", "nameLedger", "nameSource", "namingRequest", "namingRequestStrict", "judgmentLedger", "rotationMode", "notationV6", "notationV11", "featureReplyFilter", "discriminatingConfirmation", "p5Enabled", "sharedConstruals", "humanLedMoveOn", "judgmentMaterialVersion", "publicationRecoveryContext", "referenceEvidence", "shapeTerminologyVersion"].filter(key => Object.hasOwn(input, key));
+    const optional = ["reobservationAllowed", "humanReferent", "repairProspect", "agreeNames", "jevNaming", "repairFacts", "participantLedger", "nameLedger", "nameSource", "namingRequest", "namingRequestStrict", "judgmentLedger", "rotationMode", "notationV6", "notationV11", "featureReplyFilter", "discriminatingConfirmation", "p5Enabled", "sharedConstruals", "humanLedMoveOn", "judgmentMaterialVersion", "publicationRecoveryContext", "referenceEvidence", "shapeTerminologyVersion", "visualPurposeVersion"].filter(key => Object.hasOwn(input, key));
     if (!exact(input, ["turn", "publicTurns", "ownSlots", "observations", "issueSummary", "priorClaims", "repairHistory", "previousAction", "publicNames", ...optional])) fail("invalid_input");
     if (!exact(selected, ["action", "target"]) || !includes(input.p5Enabled === true
       ? ["propose_name", "agree", "confirm", "repair", "accept"] : ["propose_name", "agree", "confirm", "repair"], selected.action)) fail("invalid_input");
@@ -1300,13 +1340,17 @@ export function validateJevDecision(value: unknown, input: JevDecisionInput,
   const p = prepare(input, questionLayout, undefined, false, undefined, undefined, undefined, constrained);
   const hasDetail = object(value) && Object.hasOwn(value, "detailFigureIds");
   const hasShared = object(value) && Object.hasOwn(value, "sharedClaimIds");
+  const hasPurpose = object(value) && Object.hasOwn(value, "visualPurpose");
   if (!exact(value, ["action", "target", "name", "feature", "observe", "evidence", "decisionKind", "calibrated",
-      ...(hasDetail ? ["detailFigureIds"] : []), ...(hasShared ? ["sharedClaimIds"] : [])]) ||
+      ...(hasDetail ? ["detailFigureIds"] : []), ...(hasShared ? ["sharedClaimIds"] : []), ...(hasPurpose ? ["visualPurpose"] : [])]) ||
       !includes(JEV_ACTIONS, value.action) || value.calibrated !== false || !includes(["jev_local_test", "mock"], value.decisionKind) ||
       !(value.name === null || text(value.name, 80)) || !(value.feature === null || text(value.feature, 400))) fail("invalid_response");
   const selected: JevActionTarget = { action: value.action as JevAction, target: cleanTarget(value.target, p.slots, "invalid_response") };
   if (selected.action === "request_observation" && !p.reobservationAllowed) fail("inconsistent_decision");
   const d = prepareDetail(input, selected, rejectDecision, questionLayout);
+  if (hasPurpose !== !!d?.purposeOptions || hasPurpose &&
+      (!isJevVisualPurpose(value.visualPurpose) || value.feature !== null ||
+        !Array.isArray(value.detailFigureIds) || value.detailFigureIds.length !== 0)) fail("inconsistent_decision");
   if (hasShared && (!Array.isArray(value.sharedClaimIds) || !value.sharedClaimIds.every(ref) ||
       !d?.sharedOffered.some(f => JSON.stringify(f.claimIds) === JSON.stringify(value.sharedClaimIds)))) fail("inconsistent_decision");
   const e = value.evidence;
@@ -1317,9 +1361,10 @@ export function validateJevDecision(value: unknown, input: JevDecisionInput,
   if (value.decisionKind === "mock") {
     if (constrained || input.publicationRecoveryContext !== undefined || e.model !== null || !exact(e.choices, []) || !exact(e.scores, []) ||
         e.stages !== undefined && (!Array.isArray(e.stages) || e.stages.length)) fail("invalid_response");
-    const kind = ["propose_name", "agree"].includes(selected.action) ? "name" : ["confirm", "repair"].includes(selected.action) ? "feature" : null;
+    const kind = ["propose_name", "agree"].includes(selected.action) ? "name" : isVisualAction(selected.action) && !hasPurpose ? "feature" : null;
     const candidate = kind ? d?.candidates.find(c => c.value === value[kind]) : null;
     if ((kind === "name" ? !candidate : value.name !== null) || (kind === "feature" ? !candidate : value.feature !== null)) fail("inconsistent_decision");
+    if (hasPurpose && !Object.values(d!.purposeOptions!).some(purpose => JSON.stringify(purpose) === JSON.stringify(value.visualPurpose))) fail("inconsistent_decision");
     if (selected.action === "request_observation") {
       const o = value.observe, scope = targetIds(selected.target);
       if (!p.reobservationAllowed || !exact(o, ["figureIds", "aspect", "question", "partnerConstrual"]) || !strings(o.figureIds, 6, 160) ||
@@ -1354,7 +1399,8 @@ export function validateJevDecision(value: unknown, input: JevDecisionInput,
     const last = d ? closedEvidence(e.stages.at(-1), d, "detail", usagePolicy) : set ?? first;
     const expected = decodeDetail(actual, d, d ? last.choices : {});
     if (JSON.stringify({ ...selected, name: value.name, feature: value.feature, observe: value.observe, detailFigureIds: value.detailFigureIds,
-      ...(hasShared ? { sharedClaimIds: value.sharedClaimIds } : {}) }) !== JSON.stringify(expected)) fail("inconsistent_decision");
+      ...(hasShared ? { sharedClaimIds: value.sharedClaimIds } : {}),
+      ...(hasPurpose ? { visualPurpose: value.visualPurpose } : {}) }) !== JSON.stringify(expected)) fail("inconsistent_decision");
     const stages = [first, ...(set ? [set] : []), ...(d ? [last] : [])];
     const costUsd = stages.some(stage => stage.costUsd === null) ? null : stages.reduce((sum, stage) => sum + stage.costUsd!, 0);
     if (e.model !== last.model || e.responseId !== last.responseId || e.costUsd !== costUsd ||
@@ -1395,10 +1441,11 @@ function closedBudget(v: unknown): DecisionInputBudget | null {
   return { maxChars: 20000, stateChars: v.stateChars, omitted: Object.fromEntries(BUDGET_OMITTED_KEYS.map(k => [k, omitted[k]])) as DecisionInputBudget["omitted"] };
 }
 /** The question sets each stage may carry under a layout; labels are checked per question below. */
-function failureQuestionSets(stage: unknown, layout: JevQuestionLayout, p5Enabled: boolean, humanLedMoveOn: boolean, figureCount: number): string[][] {
+function failureQuestionSets(stage: unknown, layout: JevQuestionLayout, p5Enabled: boolean, humanLedMoveOn: boolean, figureCount: number, visualPurpose: boolean): string[][] {
+  const visualDetail = visualPurpose ? VISUAL_PURPOSE_QUESTION : "feature";
   if (layout === "two_stage_v3") return stage === "action" ? [humanLedMoveOn ? ["action", MOVE_ON_SOURCE_QUESTION] : ["action"]] : stage === "target" ? [["target"]]
-    : stage === "detail" ? [["name"], ["feature"], ["observe_targets", "observe_aspect"],
-      ...(p5Enabled ? [["shared_construal"], ["feature", "shared_construal"]] : [])] : [];
+    : stage === "detail" ? [["name"], [visualDetail], ["observe_targets", "observe_aspect"],
+      ...(p5Enabled ? [["shared_construal"], [visualDetail, "shared_construal"]] : [])] : [];
   if (stage === "action_target") return [layout === "two_stage_v1" ? ["action", "target", ...Array.from({ length: figureCount }, (_, i) => `candidate_${i}`)] : ["action", "target"]];
   if (stage === "multiple_candidates") return layout === "two_stage_v2" ? [["candidate_set"]] : [];
   if (stage === "detail") return [["name"], ["feature"], ["observe_targets", "observe_aspect"]];
@@ -1412,6 +1459,11 @@ function failureLabelsValid(question: string, labels: readonly string[], layout:
   if (/^candidate_[0-5]$/.test(question) && Number(question.slice("candidate_".length)) < figureCount) return sameLabels(labels, ["include", "exclude"]);
   if (question === "candidate_set") return sameLabels(labels, candidateSetsFor(figureCount).map(candidateSetLabel));
   if (question === "name" || question === "feature") return indexedLabels(question, labels, Array.from({ length: 255 }, (_, i) => i + 1));
+  if (question === VISUAL_PURPOSE_QUESTION) {
+    const core = Object.keys(VISUAL_PURPOSE_CRITERIA);
+    return labels.length >= core.length && sameLabels(labels, [...core,
+      ...Array.from({ length: labels.length - core.length }, (_, i) => visualIssueLabel(i))]);
+  }
   if (question === "observe_targets") return indexedLabels("subset", labels, Array.from({ length: figureCount }, (_, i) => 2 ** (i + 1) - 1));
   if (question === "observe_aspect") return sameLabels(labels, [...OBSERVATION_ASPECTS]);
   if (question === "shared_construal") return labels.length > 1 &&
@@ -1445,7 +1497,7 @@ function participantFailureActionTargetValid(questions: readonly string[], choic
   return true;
 }
 function failureStage(s: unknown, layout: JevQuestionLayout, last: boolean, p5Enabled: boolean, usagePolicy?: ParticipantUsageOnly,
-  decisionMenuVersion?: typeof PARTICIPANT_TARGET_MENU_VERSION, humanLedMoveOn = false, figureCount = 6): JevDecisionFailureStage | null {
+  decisionMenuVersion?: typeof PARTICIPANT_TARGET_MENU_VERSION, humanLedMoveOn = false, figureCount = 6, visualPurpose = false): JevDecisionFailureStage | null {
   if (!exact(s, FAILURE_STAGE_KEYS) || !includes(["ok", "error"], s.status) || !(s.error === null || includes(CODES, s.error)) ||
       !(s.rejectionCode === null || includes(JEV_DECISION_REJECTION_CODES, s.rejectionCode)) ||
       !(s.model === null || isGroundingModel(s.model, JEV_DECISION_MODEL)) || !responseIdValue(s.responseId) ||
@@ -1461,7 +1513,7 @@ function failureStage(s: unknown, layout: JevQuestionLayout, last: boolean, p5En
     if (decisionMenuVersion === PARTICIPANT_TARGET_MENU_VERSION && s.stage === "action_target") {
       if (!participantFailureActionTargetValid(questions, choices, scores, figureCount)) return null;
     } else {
-      if (!failureQuestionSets(s.stage, layout, p5Enabled, humanLedMoveOn, figureCount).some(set => sameLabels(questions, set))) return null;
+      if (!failureQuestionSets(s.stage, layout, p5Enabled, humanLedMoveOn, figureCount, visualPurpose).some(set => sameLabels(questions, set))) return null;
       for (const q of questions) {
         const labels = scores[q];
         if (!object(labels) || !failureLabelsValid(q, Object.keys(labels), layout, figureCount) || !includes(Object.keys(labels), choices[q]) ||
@@ -1500,7 +1552,7 @@ function stageOneOutcome(layout: JevQuestionLayout, choices: Record<string, stri
 }
 /** two_stage_v3: action, then target, then detail. A rule can only be named on the last stage; the target stage names none of
  * the v1/v2 rules except the closed legality rule and the detail-availability rules the detail preparation raises. */
-function failureConsistentV3(e: JevDecisionFailureEvidence, acceptOptional: boolean, p5Enabled: boolean): boolean {
+function failureConsistentV3(e: JevDecisionFailureEvidence, acceptOptional: boolean, p5Enabled: boolean, visualPurpose: boolean): boolean {
   const [first, second, third] = e.stages, action = first.choices.action as JevAction;
   if (!v3AlwaysOffered(acceptOptional).every(a => Object.hasOwn(first.scores.action, a)) || !Object.hasOwn(first.scores.action, action)) return false;
   if (first.stage !== "action" || second && second.stage !== "target" || third && third.stage !== "detail") return false;
@@ -1510,15 +1562,17 @@ function failureConsistentV3(e: JevDecisionFailureEvidence, acceptOptional: bool
     if (e.stages.length !== 3 || e.rejectionCode !== null) return false;
     const questions = Object.keys(third.choices);
     if (action === "accept") return p5Enabled && (questions.length === 0 || sameLabels(questions, ["shared_construal"]));
-    if (questions.includes("shared_construal")) return p5Enabled && acceptOptional && action === "confirm" && questions.includes("feature");
+    if (visualPurpose && questions.length && questions.includes(VISUAL_PURPOSE_QUESTION) !== isVisualAction(action)) return false;
+    if (questions.includes("shared_construal")) return p5Enabled && acceptOptional && action === "confirm" &&
+      questions.includes(visualPurpose ? VISUAL_PURPOSE_QUESTION : "feature");
     return needsDetail(action);
   }
-  const detailRule = ["propose_name", "agree"].includes(action) ? "name_required" : ["confirm", "repair"].includes(action) ? "feature_required" : null;
+  const detailRule = ["propose_name", "agree"].includes(action) ? "name_required" : !visualPurpose && isVisualAction(action) ? "feature_required" : null;
   return e.rejectionCode === null || e.rejectionCode === "action_target_not_allowed" || e.rejectionCode === detailRule && detailRule !== null;
 }
 /** The record's own internal consistency: totals derived from its stages, the rule against the stage-one answer and the
  * stages that answer leads to. Needs no original prompt or response; an unknown cost stays null, never zero. */
-function failureConsistent(e: JevDecisionFailureEvidence, acceptOptional: boolean, p5Enabled: boolean): boolean {
+function failureConsistent(e: JevDecisionFailureEvidence, acceptOptional: boolean, p5Enabled: boolean, visualPurpose: boolean): boolean {
   const { stages } = e, last = stages.at(-1);
   // two_stage_v3: a decision the local table refused before any publication has no provider stage, response or cost.
   if (e.questionLayout === "two_stage_v3" && stages.length === 0 && e.rejectionCode === "action_target_not_allowed")
@@ -1538,7 +1592,7 @@ function failureConsistent(e: JevDecisionFailureEvidence, acceptOptional: boolea
   if (stages.some(s => Object.keys(s.choices).length > 0 && s.status === "error" && s.rejectionCode === null)) return false;
   const first = stages[0];
   if (!first || !Object.keys(first.choices).length) return stages.length <= 1 && e.rejectionCode === null;
-  if (e.questionLayout === "two_stage_v3") return failureConsistentV3(e, acceptOptional, p5Enabled);
+  if (e.questionLayout === "two_stage_v3") return failureConsistentV3(e, acceptOptional, p5Enabled, visualPurpose);
   if (e.decisionMenuVersion === PARTICIPANT_TARGET_MENU_VERSION) {
     const action = first.choices.action as JevAction, outcome = needsDetail(action) ? "detail" : "done", [, second] = stages;
     if (second) return outcome === "detail" && second.stage === "detail" && stages.length === 2 && e.rejectionCode === null;
@@ -1561,8 +1615,8 @@ function failureConsistent(e: JevDecisionFailureEvidence, acceptOptional: boolea
   return outcome === "done" ? e.rejectionCode === null : e.rejectionCode === outcome;
 }
 /** Restore-time check of a saved failure record. Returns a rebuilt copy, or null for any key, label or value outside the closed shape. */
-export function checkDecisionFailureEvidence(value: unknown, { acceptOptional = false, p5Enabled = false, usagePolicy, humanLedMoveOn = false, figureCount = 6 }:
-  { acceptOptional?: boolean; p5Enabled?: boolean; usagePolicy?: ParticipantUsageOnly; humanLedMoveOn?: boolean; figureCount?: number } = {}): JevDecisionFailureEvidence | null {
+export function checkDecisionFailureEvidence(value: unknown, { acceptOptional = false, p5Enabled = false, usagePolicy, humanLedMoveOn = false, figureCount = 6, visualPurpose = false }:
+  { acceptOptional?: boolean; p5Enabled?: boolean; usagePolicy?: ParticipantUsageOnly; humanLedMoveOn?: boolean; figureCount?: number; visualPurpose?: boolean } = {}): JevDecisionFailureEvidence | null {
   try {
     if (!isSupportedFigureCount(figureCount)) return null;
     const hasMenu = object(value) && Object.hasOwn(value, "decisionMenuVersion");
@@ -1573,7 +1627,7 @@ export function checkDecisionFailureEvidence(value: unknown, { acceptOptional = 
         !(value.model === null || isGroundingModel(value.model, JEV_DECISION_MODEL)) || !responseIdValue(value.responseId) ||
         !(value.costUsd === null || nonNegative(value.costUsd)) || !nonNegative(value.latencyMs) || !Array.isArray(value.stages)) return null;
     const layout = value.questionLayout as JevQuestionLayout, raw = value.stages as unknown[];
-    if ((p5Enabled || humanLedMoveOn) && layout !== "two_stage_v3") return null;
+    if ((p5Enabled || humanLedMoveOn || visualPurpose) && layout !== "two_stage_v3") return null;
     const menuVersion = hasMenu ? PARTICIPANT_TARGET_MENU_VERSION : undefined;
     const order = raw.map(s => object(s) ? s.stage : null).join(",");
     const orders = layout === "two_stage_v1" ? ["", "action_target", "action_target,detail"]
@@ -1581,20 +1635,20 @@ export function checkDecisionFailureEvidence(value: unknown, { acceptOptional = 
       : ["", "action_target", "action_target,multiple_candidates", "action_target,detail", "action_target,multiple_candidates,detail"];
     const inputBudget = value.inputBudget === null ? null : closedBudget(value.inputBudget);
     if (!orders.includes(order) || value.inputBudget !== null && !inputBudget) return null;
-    const stages = raw.map((s, i) => failureStage(s, layout, i === raw.length - 1, p5Enabled, usagePolicy, menuVersion, humanLedMoveOn, figureCount));
+    const stages = raw.map((s, i) => failureStage(s, layout, i === raw.length - 1, p5Enabled, usagePolicy, menuVersion, humanLedMoveOn, figureCount, visualPurpose));
     if (stages.some(s => s === null)) return null;
     const checked: JevDecisionFailureEvidence = { schemaVersion: "jev_decision_failure_v1", questionLayout: layout,
       ...(menuVersion ? { decisionMenuVersion: menuVersion } : {}), callIndex: value.callIndex as number,
       error: value.error as JevDecisionErrorCode, rejectionCode: value.rejectionCode as JevDecisionRejectionCode | null, model: value.model as string | null,
       responseId: value.responseId as string | null, costUsd: value.costUsd as number | null, latencyMs: value.latencyMs as number, inputBudget,
       stages: stages as JevDecisionFailureStage[] };
-    return failureConsistent(checked, acceptOptional, p5Enabled) ? checked : null;
+    return failureConsistent(checked, acceptOptional, p5Enabled, visualPurpose) ? checked : null;
   } catch { return null; }
 }
 /** Projects the evidence a decide() call handed to onFailureEvidence. Untrusted input: anything outside the closed
  * client evidence shape yields null, which the caller records as an unknown breakdown. */
 export function projectDecisionFailureEvidence(raw: unknown, questionLayout: JevQuestionLayout,
-  opts: { acceptOptional?: boolean; p5Enabled?: boolean; humanLedMoveOn?: boolean; figureCount?: number; usagePolicy?: ParticipantUsageOnly; decisionMenuVersion?: typeof PARTICIPANT_TARGET_MENU_VERSION } = {}): JevDecisionFailureEvidence | null {
+  opts: { acceptOptional?: boolean; p5Enabled?: boolean; humanLedMoveOn?: boolean; figureCount?: number; usagePolicy?: ParticipantUsageOnly; visualPurpose?: boolean; decisionMenuVersion?: typeof PARTICIPANT_TARGET_MENU_VERSION } = {}): JevDecisionFailureEvidence | null {
   try {
     if (!object(raw) || !includes(LAYOUTS, questionLayout)) return null;
     const keys = ["model", "responseId", "choices", "scores", "latencyMs", "costUsd", "callIndex", "status", "error", "rejectionCode", "stages",

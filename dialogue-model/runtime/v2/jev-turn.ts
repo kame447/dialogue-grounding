@@ -31,6 +31,7 @@ import { validateObservationMemo, mergeReobservation, observationContextMessages
   observationInitialInstructions, OBSERVATION_TARGETED_INSTRUCTIONS, OBSERVATION_MEMO_VERSION } from "../observation/observe.ts";
 import type { JevAction, JevDecision, JevDecisionClient, JevDecisionInput, JevObservationRequest, RepairHistoryEntry, HumanReferentEstimate, RepairProspectMaterial, AdaptiveRepairTrial, PublicNameCandidate, RepairFact, JevQuestionLayout, DialoguePolicy, SharedConstrual } from "../decision/contract.ts";
 import type { JevNamingGrounding } from "../decision/contract.ts";
+import { JEV_VISUAL_PURPOSE_VERSION, usesJevVisualPurpose } from "../decision/contract.ts";
 import { buildJevNamingMaterial, readJevNamingGrounding, readNamingWithdrawal, type NamingWithdrawal } from "../decision/jev-naming.ts";
 import { deriveRepairFacts, validateRepairFacts } from "../decision/repair-facts.ts";
 import { JEV_REPAIR_QUALITY_VERSION, normalRepairQualityGuidance, readPublicationContinuation, repairQualityPublicQuestions, type JudgmentMaterialVersion } from "../decision/repair-quality.ts";
@@ -570,7 +571,7 @@ function checkedIntervention(x:unknown):InterventionConfig {
   return structuredClone(c);}
  catch{throw new JevTurnError('invalid_intervention');}
 }
-function executionProjection(d:JevDecision):ExecutedDecision {return{action:d.action as ExecutedDecision['action'],target:structuredClone(d.target),name:d.name,feature:d.feature,observe:null,...(Object.hasOwn(d,'detailFigureIds')?{detailFigureIds:structuredClone(d.detailFigureIds!)}:{}),...(d.sharedClaimIds?{sharedClaimIds:[...d.sharedClaimIds]}:{})};}
+function executionProjection(d:JevDecision):ExecutedDecision {return{action:d.action as ExecutedDecision['action'],target:structuredClone(d.target),name:d.name,feature:d.feature,observe:null,...(Object.hasOwn(d,'detailFigureIds')?{detailFigureIds:structuredClone(d.detailFigureIds!)}:{}),...(d.sharedClaimIds?{sharedClaimIds:[...d.sharedClaimIds]}:{}),...(d.visualPurpose?{visualPurpose:structuredClone(d.visualPurpose)}:{})};}
 function persistedSharedConstruals(value: unknown, slots: readonly string[], p5Enabled: boolean): SharedConstrual[] {
   if (!p5Enabled || !Array.isArray(value) || !value.length) throw Error();
   const ref = (id: unknown) => typeof id === "string" && id.trim().length > 0 && id.length <= 128;
@@ -1131,6 +1132,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
     throw new Error("Invalid Jev generation retry version");
   }
   const terminology = isGenerationV18(generationRetryVersion) ? generationRetryVersion : undefined;
+  const visualPurpose = usesJevVisualPurpose(generationRetryVersion);
   const generationInstructions = withShapeTerminology(generation.instructions, terminology);
   const repairQuality = options.judgmentMaterialVersion === JEV_REPAIR_QUALITY_VERSION;
   if (options.judgmentMaterialVersion !== undefined && (!repairQuality || questionLayout !== "two_stage_v3" ||
@@ -1305,6 +1307,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       const baseInput: JevDecisionInput & { referenceEvidence?: ReferenceEvidence } = { turn: latest.seq, publicTurns, ownSlots: [...slots], observations: memo,
         ...(terminology ? { shapeTerminologyVersion: terminology } : {}),
         ...(repairQuality ? { judgmentMaterialVersion: JEV_REPAIR_QUALITY_VERSION } : {}),
+        ...(visualPurpose ? { visualPurposeVersion: JEV_VISUAL_PURPOSE_VERSION } : {}),
         issueSummary: summarizeLocalIssues(graph), priorClaims: claims, repairHistory: gate ? inferenceHistory(repairHistory, gate) : repairHistory,
         previousAction: previous && previousAi ? previous.generatedPublication?.transition ?
           { turn: previousAi.turn, action: "move_on", target: { kind: "none" }, name: null, feature: null } :
@@ -1363,7 +1366,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       }
       if (p5Enabled) {
         baseInput.p5Enabled = true;
-        if (isGenerationV16(generationRetryVersion)) baseInput.discriminatingConfirmation = true;
+        if (isGenerationV16(generationRetryVersion) && !visualPurpose) baseInput.discriminatingConfirmation = true;
         const { sharedConstruals, proofClaims } = deriveSharedConstrualsFromGraph(graph, slots);
         if (sharedConstruals.length) {
           const wireClaims = new Map([...claims, ...proofClaims].map(claim => [claim.id, claim]));
@@ -1940,7 +1943,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         catch { code = errorCode; }
       }
       record.status = code === "aborted" ? "aborted" : "error"; record.errorCode = code;
-      if (decideFailure.failed && record.status === "error") record.decisionFailure = { evidence: projectDecisionFailureEvidence(decideFailure.evidence, questionLayout, { acceptOptional: record.namingRequest === true, usagePolicy, decisionMenuVersion: record.decisionMenuVersion, p5Enabled, humanLedMoveOn, figureCount: slots.length }) };
+      if (decideFailure.failed && record.status === "error") record.decisionFailure = { evidence: projectDecisionFailureEvidence(decideFailure.evidence, questionLayout, { acceptOptional: record.namingRequest === true, usagePolicy, decisionMenuVersion: record.decisionMenuVersion, p5Enabled, humanLedMoveOn, figureCount: slots.length, visualPurpose }) };
       else if (localRule !== null && record.status === "error") {
         record.decisionRejectionCode = localRule;
         record.decisionFailure = { evidence: checkDecisionFailureEvidence({ schemaVersion: "jev_decision_failure_v1", questionLayout, callIndex: attemptNumber, error: "invalid_decision",
