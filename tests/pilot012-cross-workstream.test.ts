@@ -4,6 +4,8 @@ import test from 'node:test';
 import { createMockJevDecisionClient } from '../dialogue-model/runtime/decision/mocks.ts';
 import { RunBudget } from '../dialogue-model/runtime/diagnostics/parity-live/audit.ts';
 import { verifyRecords } from '../dialogue-model/runtime/diagnostics/parity-verify/index.ts';
+import { INITIAL_OBSERVATION_STRUCTURED_V2 } from '../dialogue-model/runtime/observation/initial-observation-generation.ts';
+import { createWorkerTerraObserver } from '../dialogue-model/runtime/observation/worker-terra-observer.ts';
 import { scoreTrial } from '../dialogue-model/runtime/scoring.mjs';
 import { createTrialV2, modelView } from '../dialogue-model/runtime/stimuli/scatter-v2.mjs';
 import { createNamingTaskV2 } from '../dialogue-model/runtime/v2/naming-task-v2.mjs';
@@ -15,7 +17,7 @@ import type { LocalOwnAnchor } from '../dialogue-model/runtime/local-grounding/c
 import type { ObservationMemo } from '../dialogue-model/runtime/observation/contract.ts';
 import type { JevTurnTrace } from '../dialogue-model/runtime/v2/jev-turn.ts';
 import type { ParticipantUsageSnapshot, ParticipantUsageStore } from '../dialogue-model/runtime/web/participant-usage.ts';
-import { initialState, normal, OWN, runTurn } from './support/s4-v3-records.ts';
+import { buildRecords, initialState, normal, OWN, runTurn } from './support/s4-v3-records.ts';
 import type { Label } from './support/s4-v3-records.ts';
 
 const seed = 12012;
@@ -163,6 +165,26 @@ test('v17 restores the failed opening, publishes only the retried Terra output, 
   const opening = 'どの形が気になりますか。そこから話しましょう。';
   let calls = 0;
   let observations = 0;
+  const cache = new Map<string, unknown>();
+  const observer = createWorkerTerraObserver({ modelPin: pin,
+    own: { ownImage: { mimeType: 'image/png', base64: modelView(trial).png.toString('base64') }, ownAnchors },
+    initialObservationGeneration: INITIAL_OBSERVATION_STRUCTURED_V2, now: () => new Date(at),
+    cache: {
+      async read(key) { return cache.get(key); },
+      async putIfAbsent(key, entry) { if (!cache.has(key)) cache.set(key, entry); return cache.get(key); },
+    },
+    async visual(request) {
+      observations++;
+      assert.equal(request.initial_observation_generation, INITIAL_OBSERVATION_STRUCTURED_V2);
+      const payload = JSON.stringify(request);
+      for (const slot of Object.keys(trial.key.human)) assert.equal(payload.includes(slot), false);
+      const figures = memo.figures.map(({ region: _region, reobservations: _history, ...figure }) => ({ ...figure,
+        holistic: ['洗濯ばさみ', '笛'].map(construal => ({ construal, basis: ['丸い部分と細い台が接している'], status: 'hypothesis' })),
+      }));
+      return { status: 200, data: { model: pin.terraModelId, initial_observation_generation: INITIAL_OBSERVATION_STRUCTURED_V2,
+        choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ figures }) } }] } };
+    },
+  });
   const client = { async complete(_messages: unknown, { phase }: { phase: string }) {
     assert.equal(phase, 'generation');
     if (++calls === 1) throw new Error('synthetic provider failure before the opening');
@@ -179,7 +201,7 @@ test('v17 restores the failed opening, publishes only the retried Terra output, 
       },
       jevResearch: { ...research, ledger, newTrialAgreeNameScopeVersion: 'jev_naming_v1',
         pinnedVersions: { generationRetryVersion: integratedGeneration, namingRestoreVersion: 'ai_name_acceptances_v1' },
-        observer: { ...research.observer, async observeAll() { observations++; return structuredClone(memo); } },
+        observer,
       },
     });
     return { task, record: fixture.record };
@@ -194,7 +216,7 @@ test('v17 restores the failed opening, publishes only the retried Terra output, 
   assert.equal(calls, 1);
   assert.equal(observations, 1);
   await resumed.task.retry();
-  const events = resumed.task.getState().events;
+  const events: { speaker: string; text: string }[] = resumed.task.getState().events;
   assert.deepEqual(events.map(({ speaker, text }) => ({ speaker, text })), [{ speaker: 'ai', text: opening }]);
   assert.equal(resumed.record().events[0]?.origin, 'generated_opening');
   assert.equal(resumed.record().options.generationRetryVersion, integratedGeneration);
@@ -205,6 +227,7 @@ test('v17 restores the failed opening, publishes only the retried Terra output, 
   assert.equal(restored.task.getState().aiStatus, 'idle');
   assert.equal(calls, 2);
   assert.equal(observations, 1);
+  assert.equal(cache.size, 1);
 });
 
 test('v17 stages targeted reobservation, then preserves the two strategies on identical move-on inputs', async () => {
@@ -257,16 +280,18 @@ test('v17 stages targeted reobservation, then preserves the two strategies on id
   assert.deepEqual(attempts[0], attempts[1], 'before intervention both strategies send the same requests');
 });
 
-test('v17 publishes a generated repair and the human-led transition together without confirming a conflicting name', async () => {
-  const profile = researchTrialProfileV3(lunaRequest, timeouts, 'two_stage_v3', 'holistic_v5',
-    'bypass_acceptance_v2', 'jev_repair_quality_v1');
+for (const scenario of [
+  { reconsideredAction: 'repair', publicAction: 'repair', continuation: null },
+  { reconsideredAction: 'agree', publicAction: 'accept', continuation: 'acknowledge_unresolved' },
+  { reconsideredAction: 'agree', publicAction: 'confirm', continuation: 'ask_unresolved' },
+] as const) test(`v17 ${scenario.publicAction} after a naming conflict preserves the prior name and the human-led transition`, async () => {
   const figure = OWN.ownAnchors[0].id;
   const priorName = '砂時計';
   const newName = '砂入れ';
   const original = `その形を「${priorName}」と呼びましょう。`;
   const proposal = `呼び名は「${newName}」にしたいです。`;
   const move = 'この名前の話はいったん置いて、別の図形に進みましょう。';
-  const recovery = '呼び名はまだ揃っていないですね。';
+  const recovery = scenario.publicAction === 'confirm' ? '呼び名について、どの点がまだ気になっていますか？' : '呼び名はまだ揃っていないですね。';
   const transition = 'では、もう一つの図形の話に移りましょう。';
   const segment = (quote: string, name: string) => JSON.stringify([{ segmentId: 's1', quote, proposition: quote, name,
     targets: [figure], aspect: 'name', linkedIssueId: null, respondsToTurn: null }]);
@@ -276,43 +301,61 @@ test('v17 publishes a generated repair and the human-led transition together wit
     return answer;
   }
 
-  for (const label of ['repair-first', 'bypass-enabled'] as const) {
-    const starting = initialState({ profile, generationRetryVersion: integratedGeneration, agreeNameScopeVersion: 'jev_naming_v1' });
-    const named = await runTurn(profile, label, starting, [{ seq: 1, speaker: 'human', text: original }], {
+  const finals: Awaited<ReturnType<typeof runTurn>>[] = [];
+  let priorLedger: unknown;
+  let actionCalls = 0;
+  const records = await buildRecords({ technicalTrial, dialoguePolicy: 'holistic_v5', interventionVersion: 'bypass_acceptance_v2',
+    judgmentMaterialVersion: 'jev_repair_quality_v1', generationRetryVersion: integratedGeneration, agreeNameScopeVersion: 'jev_naming_v1',
+    turns: [{ human: original, plan: {
       action: 'agree', target: 'figure_0', name: priorName, referent: 'figure_0',
       speech: `ええ、「${priorName}」にしましょう。`, act: 'name_propose', extraction: segment(original, priorName),
       choose: (question, criteria) => question === 'naming_grounding' ? grounding(criteria, priorName)
         : question === 'naming_evidence' ? 'turn_1' : question === 'human_move_on_source' ? 'other' : undefined,
-    }, technicalTrial, integratedGeneration);
-    assert.deepEqual(named.state.ledger[figure], { status: 'agreed', name: priorName });
-
-    let actionCalls = 0;
-    const final = await runTurn(profile, label, named.state, [...named.publication.publicEvents,
-      { seq: 3, speaker: 'human', text: `${proposal}${move}` }], {
+    } }, { human: `${proposal}${move}`, plan: {
       action: 'agree', target: 'figure_0', name: newName, referent: 'figure_0',
       act: 'name_propose', extraction: segment(proposal, newName),
       speech: JSON.stringify({ text: recovery, moveOn: transition }),
       choose(question, criteria) {
-        if (question === 'action') return actionCalls++ === 0 ? 'agree' : 'repair';
+        if (question === 'action') return actionCalls++ % 2 === 0 ? 'agree' : scenario.reconsideredAction;
         if (question === 'human_move_on_source') return 'human_request';
         if (question === 'naming_grounding') return grounding(criteria, newName);
         if (question === 'naming_evidence') return 'turn_3';
         if (question === 'draft_naming') return 'none';
         if (question === 'draft_human_move_on') return 'honors_request';
         if (question === 'naming_withdrawal') return 'retain';
+        if (question === 'publication_continuation') return scenario.continuation ?? 'acknowledge_unresolved';
       },
-    }, technicalTrial, integratedGeneration);
-    assert.equal(actionCalls, 2);
+    } }],
+    onTurn(_label, turn) {
+      if (turn.trace.turnIndex === 1) {
+        assert.deepEqual(turn.state.ledger[figure], { status: 'agreed', name: priorName });
+        priorLedger = turn.state.ledger;
+      } else finals.push(turn);
+    },
+  });
+  assert.equal(actionCalls, 4);
+  assert.equal(finals.length, 2);
+  for (const final of finals) {
     assert.equal(final.trace.decisions.at(-1)?.action, 'agree');
     assert.equal(final.trace.executed.action, 'agree');
     assert.equal(final.trace.generatedPublication?.recovery?.reason, 'naming_conflict');
-    assert.equal(final.trace.generatedPublication?.recovery?.executed.action, 'repair');
-    assert.equal(final.trace.finalAction?.action, 'repair');
+    assert.equal(final.trace.generatedPublication?.recovery?.executed.action, scenario.reconsideredAction);
+    assert.equal(final.trace.generatedPublication?.continuation?.choice ?? null, scenario.continuation);
+    assert.equal(final.trace.finalAction?.action, scenario.publicAction);
+    assert.equal(final.trace.finalAction?.candidateName, null);
     assert.equal(final.trace.generatedPublication?.transition?.sourceTurn, 3);
     assert.equal(final.trace.generatedPublication?.withdrawal, null);
     assert.equal(final.trace.generationGuard.fallback, false);
     assert.equal(final.speech, `${recovery}\n${transition}`);
     assert.equal(final.trace.generatedPublication?.textSha256, createHash('sha256').update(final.speech!).digest('hex'));
-    assert.deepEqual(final.state.ledger, named.state.ledger);
+    assert.deepEqual(final.state.ledger, priorLedger);
   }
+  const replay = records.trials[0].replay[0].result;
+  assert.equal(replay.commonEqual, true);
+  for (const side of replay.sides) {
+    assert.ok(side.requests.some((call: { role: string }) => call.role === 'publication_decision'));
+  }
+  const checks = verifyRecords(records).checks.filter(check => check.id.startsWith('intervention.trial.0.attempt.0.'));
+  assert.equal(checks.length, 4);
+  for (const check of checks) assert.equal(check.status, 'pass', check.id);
 });
