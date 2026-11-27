@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import {
   STYLED_GENERATOR_INSTRUCTIONS_V2 as GENERATOR_INSTRUCTIONS_V2, STYLED_ACTION_SCOPE_V2 as ACTION_SCOPE_V2,
   LUNA_GENERATOR_INSTRUCTIONS_V2, LUNA_ACTION_SCOPE_V2,
@@ -12,6 +13,10 @@ import { createJevDecisionClient } from '../dialogue-model/runtime/decision/jev-
 import { findGuardViolations, findOrientationLeaks, findProposeNameMismatch, rewriteReasons } from '../dialogue-model/runtime/v2/generation-guard.ts';
 import { findLocalPublicationViolations } from '../dialogue-model/runtime/v2/local-grounding-turn.ts';
 import { anchors as s4Anchors, image as s4Image, memo as s4Memo } from './support/s4-integration/harness.ts';
+
+const styledLuna = await import(new URL(
+  '../dialogue-model/runtime/diagnostics/parity-live/frozen/preloop-v3/style/v2/dialogue-v2.mjs', import.meta.url,
+).href) as { LUNA_GENERATOR_INSTRUCTIONS_V2: string; LUNA_ACTION_SCOPE_V2: typeof LUNA_ACTION_SCOPE_V2 };
 
 const slots = Array.from({ length: 6 }, (_, i) => `s-000${i}`);
 function input(): JevDecisionInput {
@@ -27,23 +32,25 @@ const criteria = (layout: 'two_stage_v1' | 'two_stage_v2' | 'two_stage_v3') =>
   buildJevDecisionPayload(input(), { questionLayout: layout }).questions.action.criteria;
 
 test('tone: fixed polite register is replaced, not contradicted', () => {
-  const text = GENERATOR_INSTRUCTIONS_V2;
-  assert.doesNotMatch(text, /親しみやすい/);
-  assert.match(text, /敬語には自然な敬語で、くだけた口調には自然なくだけた口調/);
-  assert.match(text, /相槌や言い回しも合わせ/);
+  for (const text of [GENERATOR_INSTRUCTIONS_V2, styledLuna.LUNA_GENERATOR_INSTRUCTIONS_V2]) {
+    assert.doesNotMatch(text, /親しみやすい/);
+    assert.match(text, /敬語には自然な敬語で、くだけた口調には自然なくだけた口調/);
+    assert.match(text, /相槌や言い回しも合わせ/);
+  }
 });
 
 test('feature questions: direct answer, three-way observation honesty, no naming jump, no testing questions', () => {
-  const text = GENERATOR_INSTRUCTIONS_V2;
-  assert.match(text, /まずその問いに直接答えてください/);
-  assert.match(text, /命名の依頼と取り違えず/);
-  assert.match(text, /呼び名の提案や採用に進まないでください/);
-  assert.match(text, /ある・ない・確かめられない/);
-  assert.match(text, /「〜っぽい」のような曖昧な表現へ変えたりしないでください/);
-  assert.match(text, /形式的な確認質問を付け足さない/);
-  assert.match(text, /「これなら分かりますか？」/);
-  assert.match(text, /未解決の曖昧さがあるときだけ、その点を具体的に尋ねてください/);
-  assert.match(text, /形の分析の開始には当たりません/);
+  for (const text of [GENERATOR_INSTRUCTIONS_V2, styledLuna.LUNA_GENERATOR_INSTRUCTIONS_V2]) {
+    assert.match(text, /まずその問いに直接答えてください/);
+    assert.match(text, /命名の依頼と取り違えず/);
+    assert.match(text, /呼び名の提案や採用に進まないでください/);
+    assert.match(text, /ある・ない・確かめられない/);
+    assert.match(text, /「〜っぽい」のような曖昧な表現へ変えたりしないでください/);
+    assert.match(text, /形式的な確認質問を付け足さない/);
+    assert.match(text, /「これなら分かりますか？」/);
+    assert.match(text, /未解決の曖昧さがあるときだけ、その点を具体的に尋ねてください/);
+    assert.match(text, /形の分析の開始には当たりません/);
+  }
 });
 
 test('accept no longer forbids answering; naming and joint identification stay forbidden', () => {
@@ -52,11 +59,12 @@ test('accept no longer forbids answering; naming and joint identification stay f
   assert.match(GENERATOR_INSTRUCTIONS_V2, /判断に示された名前を「」で候補として示/);
   assert.doesNotMatch(ACTION_SCOPE_V2.propose_name, /どの図形と理解したかを示すか名前を出すだけ/);
   assert.match(ACTION_SCOPE_V2.propose_name, /判断の名前を「」で候補として示す/);
-  const scope = ACTION_SCOPE_V2;
-  assert.doesNotMatch(scope.accept, /受け止めるだけ/);
-  assert.match(scope.accept, /直接答えてよい/);
-  assert.match(scope.accept, /名前に決まった・対象を共同で特定できたとは言わない/);
-  assert.match(scope.confirm, /決まった・それでいこうとは言わない/);
+  for (const scope of [ACTION_SCOPE_V2, styledLuna.LUNA_ACTION_SCOPE_V2]) {
+    assert.doesNotMatch(scope.accept, /受け止めるだけ/);
+    assert.match(scope.accept, /直接答えてよい/);
+    assert.match(scope.accept, /名前に決まった・対象を共同で特定できたとは言わない/);
+    assert.match(scope.confirm, /決まった・それでいこうとは言わない/);
+  }
 });
 
 test('strategy difference stays: defer/move_on handling is untouched and identical for both strategies', () => {
@@ -70,6 +78,12 @@ test('unversioned Luna keeps the previous tone and the #175 place-only rule', ()
   assert.match(LUNA_GENERATOR_INSTRUCTIONS_V2, /親しみやすいです・ます調/);
   assert.match(LUNA_GENERATOR_INSTRUCTIONS_V2, /場所だけで図形を示したときは形の特徴を尋ね/);
   assert.match(LUNA_ACTION_SCOPE_V2.accept, /形の特徴を尋ね、自分の図形の観察は添えない/);
+});
+
+test('the archived styled Luna instructions and action scope retain the b34fc87 bytes', () => {
+  const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+  assert.equal(digest(styledLuna.LUNA_GENERATOR_INSTRUCTIONS_V2), '6391d3f252c9cbac9c55ebb70c34135da803e8465c617ce8bfd34f525197dcec');
+  assert.equal(digest(styledLuna.LUNA_ACTION_SCOPE_V2), '750ea68b9b933ba0cdbbba61e8db7fe761288cd484e04ad5d3643c0533457569');
 });
 
 test('Jev two_stage_v3 criteria: accept answers feature questions, confirm only for unresolved points, propose_name after the target is shared', () => {

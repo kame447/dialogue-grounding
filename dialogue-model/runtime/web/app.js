@@ -445,7 +445,7 @@ function renderProgress() {
   renderTyping(showDots);
   $("chat-recovery").hidden = !stopped;
   const recovery = current?.dialogueRecovery;
-  const stoppedMessage = !recovery || submitted() ? STOPPED :
+  const stoppedMessage = !recovery || recovery === "active" || submitted() ? STOPPED :
     recovery === "paused" || recovery === "unavailable" ? "会話を中断しました。" : "";
   $("chat-recovery-message").textContent = stoppedMessage;
   $("retry-chat").textContent = recovery === "retry" || recovery === "paused" ? "再開" : "状態を確認";
@@ -456,8 +456,10 @@ function renderProgress() {
   $("leave-incomplete-trial").textContent = "試行を中断";
   $("leave-incomplete-trial").hidden = recovery !== "unavailable" || !dialogueFailed();
   $("leave-incomplete-trial").disabled = working || checking || sending || !chatOpen();
-  $("chat-status").textContent = failed ? "送信を確認できませんでした。送り直すには、そのメッセージの「再送」を押してください。" :
+  const status = $("chat-status");
+  const statusMessage = failed ? "送信を確認できませんでした。送り直すには、そのメッセージの「再送」を押してください。" :
     stopped ? stoppedMessage : showDots ? "AIが返答を作成しています" : "";
+  if (status.textContent !== statusMessage) status.textContent = statusMessage;
   if (current) {
     $("submission-status").textContent = submissionWarning || (!submitted() ? "" : stopped ? STOPPED :
       trialCompleted() ? "双方の提出が完了しました。" : "名前を提出しました。AIの提出を待っています。");
@@ -582,6 +584,11 @@ function render(state) {
     $("notice").textContent = participantMessage("trial_changed");
   }
   current = trial; serverBusy = Boolean(state.busy);
+  // Refresh the watchdog only when a server response confirms ongoing work.
+  // Repainting the UI must not renew a report received before polling stopped.
+  if (state.busy === true && !chatDisconnected && !dialogueFailed() && !submissionFailed()) {
+    activitySince = Date.now(); chatStalled = false;
+  }
   if (!reviewing && recoveryPending()) localStage = "chat";
   renderStartStage(state);
   $("trial").hidden = !trial || preparing;

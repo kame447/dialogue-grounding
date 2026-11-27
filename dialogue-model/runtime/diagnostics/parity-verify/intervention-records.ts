@@ -6,7 +6,8 @@ import {jevChoiceAnswersValid,jevReportedCost,jevResponseId} from '../../decisio
 import {JEV_DECISION_MODEL} from '../../decision/jev-decision.ts';
 import {isGroundingModel} from '../../../../workers/research-ai-proxy/src/grounding.ts';
 import {nameBindsFigure} from '../../decision/referent-binding.ts';
-import {hasNameProposal,namingTurnKind,namingIntervalEstimates,inheritedTargetClaimIds,agreeCandidateAllowed,inheritsProposalName,targetNamingConflict,publiclyCheckedNamingTarget,usesPublicNamingTarget} from '../../decision/naming-request.ts';
+import {hasNameProposal,namingTurnKind,namingIntervalEstimates,inheritedTargetClaimIds,agreeCandidateAllowed,inheritsProposalName,targetNamingConflict,publiclyCheckedNamingTarget,usesPublicNamingTarget,usesDirectNamingReplies,retainsLocalQuestionAnswers,answersRepairedNamingCheck} from '../../decision/naming-request.ts';
+import {namingDenialTargets,namingReconfirmation} from '../../decision/naming-reconfirmation.ts';
 import {decodeMaterialV5} from '../../decision/judgment-material-v5.ts';
 import {isHolisticPolicy,isHolisticV2Plus,isHolisticV3Plus,isHolisticV4Plus} from '../../decision/contract.ts';
 import {generationGuardCodes,draftViolationCodes,deriveGenerationOutcome,orientationSafeFallback,findOrientationLeaks,v11RecentHumanTexts,hasOrientationWords,hasVersionedViewpoint,isGenerationV5,isGenerationV6,isGenerationV7,isGenerationV8,isGenerationV9,isGenerationV11,isGenerationV12,isGenerationV13,isGenerationV14,validGenerationRetryVersion,validAgreeNameScope,allowsOrientationFallback} from '../../v2/generation-guard.ts';
@@ -16,7 +17,7 @@ import {checkModelIdentity} from '../../model-identity-contract.ts';
 import {resolveModelPolicy} from '../../model-policy.ts';
 import {verifyLocalUpdate,applyVerifiedOperation,bindPublishedReferenceQuestion,isFigureReplyAspect} from '../../local-grounding/verify.ts';
 import {CLAIM_PRUNE_V2,REFERENCE_LIMITS,previewReferenceUpdate,snapshotReferenceGraph} from '../../memory/reference-graph.mjs';
-import {AI_BOUND_SOURCE,LABELLED_ANSWER_SOURCE} from '../../local-grounding/contract.ts';
+import {AI_BOUND_SOURCE,LABELLED_ANSWER_SOURCE,LOCAL_QUESTION_ANSWER_SOURCE} from '../../local-grounding/contract.ts';
 import {check,hash,equal,row,rows,list,META_KEYS} from './core.ts';
 import type {Check,Records} from './core.ts';
 const POLICY='376d569120ca36a3eceaf5ab95410f7eb83f25fbb681e7566a684b97c35165c8';
@@ -222,8 +223,8 @@ const ANY_TARGET=['accept','defer','move_on','close'];
 function referentResponseAccepted(answer:any,slots:readonly string[]):boolean{
  return isGroundingModel(answer?.model,JEV_DECISION_MODEL)&&jevReportedCost(answer)!==null&&jevChoiceAnswersValid(answer?.answers,{human_referent:[...slots.map((_,i)=>'figure_'+i),'none','multiple']});
 }
-type ReplayContext={p5:boolean;p5Overclaim:boolean;shared:SharedConstrual[];proof:Map<string,any>;policy:string|null;agreeMatch:{l0:boolean;l2:boolean}|null;facts:boolean;agree:any[]|undefined;known:boolean;v3:boolean;trial:boolean;ledger:Record<string,{status:string;name:string|null}>|undefined;legacyV3:boolean;style:null|'legacy'|'style'|'loop'|'holistic';humanNames?:Set<string>|null;namingRequest?:boolean;namingReconfirm?:boolean;acceptOptional?:boolean;critKind?:'V1'|'V3'|'H3'|null;prompt?:PromptVersion|null};
-const defaultContext:ReplayContext={p5:false,p5Overclaim:false,shared:[],proof:new Map(),policy:null,agreeMatch:null,facts:false,agree:undefined,known:true,v3:false,trial:false,ledger:undefined,legacyV3:false,style:null,humanNames:null,critKind:null,prompt:null};
+type ReplayContext={p5:boolean;p5Overclaim:boolean;featureReplyFilter:boolean;shared:SharedConstrual[];proof:Map<string,any>;policy:string|null;agreeMatch:{l0:boolean;l2:boolean}|null;facts:boolean;agree:any[]|undefined;known:boolean;v3:boolean;trial:boolean;ledger:Record<string,{status:string;name:string|null}>|undefined;legacyV3:boolean;style:null|'legacy'|'style'|'loop'|'holistic';humanNames?:Set<string>|null;namingRequest?:boolean;namingReconfirm?:boolean;acceptOptional?:boolean;critKind?:'V1'|'V3'|'H3'|null;prompt?:PromptVersion|null};
+const defaultContext:ReplayContext={p5:false,p5Overclaim:false,featureReplyFilter:false,shared:[],proof:new Map(),policy:null,agreeMatch:null,facts:false,agree:undefined,known:true,v3:false,trial:false,ledger:undefined,legacyV3:false,style:null,humanNames:null,critKind:null,prompt:null};
 const CTX={...defaultContext};
 const H=()=>isHolisticPolicy(CTX.policy);
 const H2=()=>isHolisticV2Plus(CTX.policy);
@@ -582,6 +583,8 @@ export function s4LocalReverify(tape:any,t:any,policy:string,after:any):'ok'|'mi
  if(!isGenerationV9(tape?.generationRetryVersion)){const bound=(g:any)=>Array.isArray(g?.records)&&g.records.some((c:any)=>c?.kind==='claim'&&c.source===AI_BOUND_SOURCE);if(bound(after)||bound(tape?.state?.graph))return'mismatch';}
  // The partner_labelled_answer provenance exists only in v12 records.
  if(!isGenerationV12(tape?.generationRetryVersion)){const lab=(g:any)=>Array.isArray(g?.records)&&g.records.some((c:any)=>c?.kind==='claim'&&c.source===LABELLED_ANSWER_SOURCE);if(lab(after)||lab(tape?.state?.graph))return'mismatch';}
+ const scope=tape?.state?.agreeNameScopeVersion;
+ if(!retainsLocalQuestionAnswers(scope)&&[after,tape.state?.graph].some(g=>Array.isArray(g?.records)&&g.records.some((c:any)=>c?.kind==='claim'&&c.source===LOCAL_QUESTION_ANSWER_SOURCE)))return'mismatch';
  const local=t?.local;
  if(!local||!Array.isArray(local.extractor?.segments)||!Array.isArray(local.classifier?.verdicts)||!Array.isArray(local.claims)||local.status!=='committed'&&local.status!=='staged'&&local.status!=='error')return'ok';
  if(local.localStatus!==undefined&&local.localStatus!=='ok')return'ok';
@@ -628,7 +631,7 @@ export function s4LocalReverify(tape:any,t:any,policy:string,after:any):'ok'|'mi
     referenceQuestionBindings=bindPublishedReferenceQuestion(pending,prior,{turn:e.seq,speaker:e.speaker,text:e.text,nonReferential:e.nonReferential},turn,directReferenceReplies);
    }
   }
-  const verified:any=verifyLocalUpdate({graph:base,turn,publicTurns,segments,verdicts,keepUnboundApproval:true,approvalFromNamedClaim:isHolisticV4Plus(policy),referenceQuestionBindings,directReferenceReplies,refinedReplyRules:isGenerationV11(tape.generationRetryVersion),answerFieldRules:isGenerationV12(tape.generationRetryVersion),namingIntervalStart:(tape.state?.judgments??[]).filter((x:any)=>['agree','defer','move_on'].includes(x.judgment?.action)).at(-1)?.turnIndex??0} as any);
+  const verified:any=verifyLocalUpdate({graph:base,turn,publicTurns,segments,verdicts,keepUnboundApproval:true,approvalFromNamedClaim:isHolisticV4Plus(policy),referenceQuestionBindings,directReferenceReplies,refinedReplyRules:isGenerationV11(tape.generationRetryVersion),answerFieldRules:isGenerationV12(tape.generationRetryVersion),bindDirectQuestionReplies:usesDirectNamingReplies(scope),retainLocalQuestionAnswers:retainsLocalQuestionAnswers(scope),namingIntervalStart:(tape.state?.judgments??[]).filter((x:any)=>['agree','defer','move_on'].includes(x.judgment?.action)).at(-1)?.turnIndex??0} as any);
   rejected=verified.rejected.map((r:any)=>String(r.reason));
   for(const op of verified.operations){const step=applyVerifiedOperation(before,update,op,publicTurns);if(step.applied){update=step.update;applied.push(op);}else rejected.push(step.reason);}
  }catch{return'mismatch';}
@@ -650,7 +653,7 @@ function s4NamingKind(tape:any,trace:any):'none'|'request'|'reconfirm'{
 function s4NamingPublicTurns(tape:any,trace:any){
  const events:any[]=tape.events??[];
  return events.filter(e=>e.seq<=trace.turnIndex&&events.filter(o=>o.seq===e.seq).length===1)
-  .map(e=>({turn:e.seq,speaker:e.speaker,text:e.text}));
+  .map(e=>({turn:e.seq,speaker:e.speaker,text:e.text,...(e.nonReferential?{nonReferential:true}:{})}));
 }
 const s4TypedContext=(tape:any,trace:any)=>H3()?!!CTX.namingRequest:s4OpenHumanProposal(tape,trace,true);
 function s4OpenHumanProposal(tape:any,trace:any,askCounts=true):boolean{
@@ -793,8 +796,12 @@ function agreeSource(tr:any,t:any,key:string,tape:any,legacyV3=false,mode?:Repla
    const publicClaims=live.filter((c:any)=>c.aspect==='name'&&typeof c.name==='string'&&c.name!==null&&win.some((e:any)=>e.seq===c.sourceTurn));
    const preLedger=tape?.state?.ledger??state.ledger??{};
    const preJudgments=tape?.state?.judgments??(state.judgments??[]).filter((x:any)=>x.turnIndex<t.turnIndex);
-   const checkedTarget=usesPublicNamingTarget(version)?publiclyCheckedNamingTarget(live,s4NamingPublicTurns(tape,t),preJudgments,t.turnIndex,false,version):undefined;
+   const namingTurns=s4NamingPublicTurns(tape,t);
    const lastBoundary=preJudgments.filter((x:any)=>['agree','defer','move_on'].includes(x.judgment?.action)).at(-1)?.turnIndex??0;
+   const reconfirmation=version==='scoped_v11'?namingReconfirmation(live,namingTurns,preJudgments,t.turnIndex,lastBoundary,
+    z.humanReferent,t.local?.localStatus==='ok'?t.local:undefined):null;
+   const publicTarget=usesPublicNamingTarget(version)?publiclyCheckedNamingTarget(live,namingTurns,preJudgments,t.turnIndex,false,version):undefined;
+   const checkedTarget=publicTarget===null&&reconfirmation?reconfirmation.figureId:publicTarget;
    const openClaims=publicClaims.filter((c:any)=>c.sourceTurn>lastBoundary),proposals=openClaims.filter(isHumanProposal);
    const latestProposal=proposals.at(-1)?.sourceTurn;
    const latestUnboundProposal=scoped?proposals.filter((p:any)=>p.targets.length===0).at(-1)?.sourceTurn:undefined;
@@ -811,18 +818,20 @@ function agreeSource(tr:any,t:any,key:string,tape:any,legacyV3=false,mode?:Repla
    // The criteria version determines whether unbound proposals need public grounding (level 2). The state version independently
    // selects per-figure supersession within that grounded rule. Older states retain their recorded whole-interval supersession.
    const aiSharedIds=new Set(live.filter((c:any)=>c.speaker==='ai'&&c.sourceTurn>lastBoundary&&c.sourceTurn<t.turnIndex).flatMap((c:any)=>c.targets));
-   const claimTargets=(c:any):string[]=>Array.isArray(c.targets)&&c.targets.length?c.targets:live.find((p:any)=>p.id===c.respondsTo)?.targets??[];
+   const denialTargets=(c:any)=>namingDenialTargets(c,live.find((p:any)=>p.id===c.respondsTo),namingTurns,preJudgments,version);
    const deniedQuestion=isGenerationV11(generation);
-   const referentClaims=live.filter((c:any)=>c.speaker==='human'&&(c.aspect==='referent'||deniedQuestion&&c.act==='deny'&&(c.aspect==='question'||isFigureReplyAspect(c.aspect)&&live.find((p:any)=>p.id===c.respondsTo)?.speaker==='ai'&&live.find((p:any)=>p.id===c.respondsTo)?.act==='ask'))&&c.sourceTurn>lastBoundary);
+   const referentClaims=live.filter((c:any)=>c.speaker==='human'&&(c.aspect==='referent'||usesDirectNamingReplies(version)&&c.act==='agree'&&isFigureReplyAspect(c.aspect)||deniedQuestion&&c.act==='deny'&&(c.aspect==='question'||isFigureReplyAspect(c.aspect)&&live.find((p:any)=>p.id===c.respondsTo)?.speaker==='ai'&&live.find((p:any)=>p.id===c.respondsTo)?.act==='ask'))&&c.sourceTurn>lastBoundary);
    // A denial stands until the partner agrees with an AI public claim that refers only to that figure, and the referent estimate puts it strictly first.
    const referentAt=(at:number)=>at===t.turnIndex?z.humanReferent:preJudgments.find((x:any)=>x.turnIndex===at)?.jevTurn?.humanReferent??null;
    const selects=(m:any,id:string)=>!!m&&m.status==='ok'&&!!m.scores&&typeof m.scores[id]==='number'&&Object.entries(m.scores).every(([k,v]:any)=>k===id||m.scores[id]>v);
-   const referentDenied=(id:string)=>{
-    const lastDeny=referentClaims.filter((c:any)=>c.act==='deny'&&claimTargets(c).includes(id)).at(-1);if(!lastDeny)return false;
+   const referentDenied=(id:string,reconfirmedName:boolean)=>{
+    const lastDeny=referentClaims.filter((c:any)=>c.act==='deny'&&denialTargets(c).includes(id)).at(-1);
+    if(!lastDeny||reconfirmedName&&reconfirmation?.denialId===lastDeny.id)return false;
     return !referentClaims.slice(referentClaims.indexOf(lastDeny)+1).some((c:any)=>{
      if(c.act!=='agree')return false;
      const antecedent=live.find((p:any)=>p.id===c.respondsTo);
      return antecedent?.speaker==='ai'&&antecedent.targets.length===1&&antecedent.targets[0]===id&&
+      (c.aspect==='referent'||answersRepairedNamingCheck(c,antecedent,lastDeny,preJudgments))&&
       (c.targets.length===0||c.targets.length===1&&c.targets[0]===id)&&selects(referentAt(c.sourceTurn),id);
     });
    };
@@ -852,6 +861,8 @@ function agreeSource(tr:any,t:any,key:string,tape:any,legacyV3=false,mode?:Repla
     if(!s)return[];
     return eligibleSlots.filter(id=>{
      if(checkedTarget!==undefined&&id!==checkedTarget)return false;
+     const reconfirmedName=reconfirmation?.figureId===id&&reconfirmation.names.has(norm(name));
+     if(publicTarget===null&&!reconfirmedName)return false;
      if(perFigure&&proposals.some((p:any)=>{
       if(p.sourceTurn<=c.sourceTurn)return false;
       const linked=p.respondsTo===c.id||antecedent!==undefined&&p.respondsTo===antecedent.id;
@@ -859,7 +870,7 @@ function agreeSource(tr:any,t:any,key:string,tape:any,legacyV3=false,mode?:Repla
       if(norm(p.name)!==norm(name))return linked||slot===id;
       return slot!==null&&slot!==id&&(linked||targets.length===1);
      }))return false;
-     if(level>=2&&referentDenied(id))return false;
+     if(level>=2&&referentDenied(id,reconfirmedName))return false;
      if(requiresFocus&&!wasFocused(id))return false;
      if(prevPublicIds.size&&!prevPublicIds.has(id))return false;
      return !openClaims.some((r:any)=>r.speaker==='human'&&r.sourceTurn>c.sourceTurn&&(r.act==='deny'||r.act==='name_reject')&&r.name===name&&(r.respondsTo===c.id||(Array.isArray(r.targets)&&r.targets.includes(id))));
@@ -925,7 +936,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
    const src=agreeSource(tr,t,key,p5&&graph?{...tape,generationGraph:graph}:tape,legacyV3,{layout,policy,generation:version,namingRequest});
    if(src==='invalid')return'invalid';
    if(p5&&!src.p5Facts)return'missing';
-   Object.assign(CTX,{p5,p5Overclaim,shared:src.p5Facts?.shared??[],proof:src.p5Facts?.proof??new Map(),critKind:null,prompt:v,facts:Array.isArray(t.repairFacts),agree:src.names,known:src.known,v3:layout==='two_stage_v3',trial:trial!==null,ledger:tape.state?.ledger,legacyV3,style:null,policy:tr.profile?.dialoguePolicy??null,humanNames:isHolisticV2Plus(tr.profile?.dialoguePolicy)?s4HumanProposedNames(tape,t):null,namingRequest:namingKind==='request',namingReconfirm:namingKind==='reconfirm',acceptOptional:t.namingRequest===true});
+   Object.assign(CTX,{p5,p5Overclaim,featureReplyFilter:tape.state?.agreeNameScopeVersion==='scoped_v8',shared:src.p5Facts?.shared??[],proof:src.p5Facts?.proof??new Map(),critKind:null,prompt:v,facts:Array.isArray(t.repairFacts),agree:src.names,known:src.known,v3:layout==='two_stage_v3',trial:trial!==null,ledger:tape.state?.ledger,legacyV3,style:null,policy:tr.profile?.dialoguePolicy??null,humanNames:isHolisticV2Plus(tr.profile?.dialoguePolicy)?s4HumanProposedNames(tape,t):null,namingRequest:namingKind==='request',namingReconfirm:namingKind==='reconfirm',acceptOptional:t.namingRequest===true});
    const sharedPublic=p5?sharedPublicSources(tape.events,t.turnIndex):true;
    if(sharedPublic===false)return'invalid';
    if(isHolisticV3Plus(tr.profile?.dialoguePolicy)&&layout==='two_stage_v3'){
@@ -1224,7 +1235,7 @@ const idsOf=(target:any):string[]=>target?.kind==='single'?[target.figureId]:tar
  const withoutLatency=(i:any)=>i?.detailEvidence?{...i,detailEvidence:{...i.detailEvidence,latencyMs:0}}:i;
  if(!equal(actual.executed,t.executed)||!latencyOk(actual.intervention)||!latencyOk(t.intervention)||!equal(withoutLatency(actual.intervention),withoutLatency(t.intervention)))return'invalid';
  return missing?'missing':'ok';
- }finally{CTX.prompt=null;}
+ }finally{CTX.prompt=null;CTX.featureReplyFilter=false;}
 }
 // Every supplied actual POST belongs to exactly one call of its own phase and send, and
 // the final send of a successful call returned. Unmatched or misbound rows cannot disappear.
@@ -1439,7 +1450,22 @@ function unaskedConfirmFeatures(input:any,target:any,candidates:{value:string;fi
  const sameScope=(ids:string[])=>ids.length===scope.length&&ids.every(id=>scope.includes(id));
  // holistic_v5: a feature already asked of a figure in this scope (the ledger's confirm/repair rows) is not asked again; a revisit just before lifts it.
  const asked=new Set<string>();
- if(input?.view==='judgment_v5'&&prev?.action!=='revisit')for(const [i,id] of (input.ownSlots??[]).entries())if(scope.includes(id))for(const a of input.figures?.['f'+i]?.actions??[])if((a[0]==='confirm'||a[0]==='repair')&&typeof a[2]==='string'&&Array.isArray(a[3])&&a[3].length)asked.add(a[2]);
+ if(input?.view==='judgment_v5'&&prev?.action!=='revisit'){
+  // The request carries acts for the referred replies, including those no longer in the compact graph.
+  const replyActs=new Map<string,string>();
+  if(CTX.featureReplyFilter){
+   for(const {id,act} of input.priorClaims)replyActs.set(id,act);
+   for(const [id,,act] of input.answerClaims??[])replyActs.set(id,act);
+  }
+  for(const [i,id] of input.ownSlots.entries())if(scope.includes(id))for(const a of input.figures?.['f'+i]?.actions??[]){
+   if((a[0]!=='confirm'&&a[0]!=='repair')||typeof a[2]!=='string'||!Array.isArray(a[3]))continue;
+   if(a[3].some((id:string)=>{
+    if(!CTX.featureReplyFilter)return true;
+    const act=replyActs.get(id);
+    return typeof act==='string'&&act!=='acknowledge'&&act!=='ask';
+   }))asked.add(a[2]);
+  }
+ }
  if(!prev||!sameScope(idsOf(prev.target))){const left=candidates.filter(c=>!asked.has(c.value));return asked.size&&left.length?left:candidates;}
  if((prev.action==='confirm'||!CTX.legacyV3&&prev.action==='repair')&&prev.feature)asked.add(prev.feature);
  if(['confirm','repair','revisit'].includes(prev.action)){
@@ -2075,6 +2101,71 @@ const PROMPT_VERSIONS:readonly PromptVersion[]=[
   'local-grounding/extract-ai.ts':'e489b7ff573fdbe9e4f0adc9b6ee5f0828bd3c6835dcd8cd6555e191161594a6',
   'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
  }},fixed:FIXED_I172,native:NATIVE_I172},
+ // The research feature menu is selected by the saved scope.
+ {id:'i203_scoped_v8',i172:true,styleMode:'research_split',sources:{scheme:'complete_instruction_source_sha256',files:{
+  'v2/dialogue-v2.mjs':'0ca530878393721b6d48b55240e2b8c848910758501d90f579b2e0c65a6d1dd6',
+  'v2/jev-turn.ts':'79387d888d841ef9c4354c668551c57852cddf253c602e4e7483e5b8b413b44c',
+  'v2/generation-guard.ts':'6e883e8a146a0394405b25f489f1edaab6f840687e80c08a0bc232bbdf59e087',
+  'judgment/instructions.mjs':'0add2f40aaaa01bfdacd1b99418b94e288eb45da6593595304f8d36d0f22de27',
+  'observation/observe.ts':'469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad',
+  'local-grounding/extract.ts':'6e9461e860f22923dbece02c7988713422ed81ac32d937f6d59df8eff84bd83e',
+  'local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01',
+  'decision/jev-decision.ts':'0ae825fb74383f07e7a449d69862ef2dfcb1da98ba5d3464f4e7149cd4580db5',
+  'local-grounding/extract-ai.ts':'e489b7ff573fdbe9e4f0adc9b6ee5f0828bd3c6835dcd8cd6555e191161594a6',
+  'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
+ }},fixed:FIXED_I172,native:NATIVE_I172},
+ // P5 port with the saved scoped_v8 research feature menu.
+ {id:'i203_p5_main_fd995b0',i172:true,styleMode:'research_split',sources:{scheme:'complete_instruction_source_sha256',files:{
+  'v2/dialogue-v2.mjs':'0ca530878393721b6d48b55240e2b8c848910758501d90f579b2e0c65a6d1dd6',
+  'v2/jev-turn.ts':'f157a7d085a4ad79601ccb793bffe28139fb4f97326d8e45aad7c5631e64878c',
+  'v2/generation-guard.ts':'93ea935be4ca519bea5b724a437db11c6a3f47d38a6ca37dfc10deb408a8a9e9',
+  'judgment/instructions.mjs':'0add2f40aaaa01bfdacd1b99418b94e288eb45da6593595304f8d36d0f22de27',
+  'observation/observe.ts':'469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad',
+  'local-grounding/extract.ts':'6e9461e860f22923dbece02c7988713422ed81ac32d937f6d59df8eff84bd83e',
+  'local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01',
+  'decision/jev-decision.ts':'8176e7e0765e3267ad049cfcd16c6f7a16ab6fbdec4afcb743d1f090b6809706',
+  'local-grounding/extract-ai.ts':'e489b7ff573fdbe9e4f0adc9b6ee5f0828bd3c6835dcd8cd6555e191161594a6',
+  'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
+ }},fixed:FIXED_I172,native:NATIVE_I172},
+ // The opt-in v12 naming binding uses the stored scope and the same prompt families.
+ {id:'v12_naming_binding_scoped_v9',i172:true,styleMode:'research_split',sources:{scheme:'complete_instruction_source_sha256',files:{
+  'v2/dialogue-v2.mjs':'0ca530878393721b6d48b55240e2b8c848910758501d90f579b2e0c65a6d1dd6',
+  'v2/jev-turn.ts':'ccc443548d93ca148b82e12b38972b245a800d58cad9e240d97569d67a2bdacd',
+  'v2/generation-guard.ts':'d261c6c08373dd524ef9c980547cc8e4568bd11a4901f5f27b22ba6fc755bee5',
+  'judgment/instructions.mjs':'0add2f40aaaa01bfdacd1b99418b94e288eb45da6593595304f8d36d0f22de27',
+  'observation/observe.ts':'469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad',
+  'local-grounding/extract.ts':'6e9461e860f22923dbece02c7988713422ed81ac32d937f6d59df8eff84bd83e',
+  'local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01',
+  'decision/jev-decision.ts':'8176e7e0765e3267ad049cfcd16c6f7a16ab6fbdec4afcb743d1f090b6809706',
+  'local-grounding/extract-ai.ts':'e489b7ff573fdbe9e4f0adc9b6ee5f0828bd3c6835dcd8cd6555e191161594a6',
+  'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
+ }},fixed:FIXED_I172,native:NATIVE_I172},
+ // The v12 local-answer scope keeps the same participant and research prompts.
+ {id:'v12_local_question_answers_scoped_v10',i172:true,styleMode:'research_split',sources:{scheme:'complete_instruction_source_sha256',files:{
+  'v2/dialogue-v2.mjs':'0ca530878393721b6d48b55240e2b8c848910758501d90f579b2e0c65a6d1dd6',
+  'v2/jev-turn.ts':'4d410db328d64eda890a4b1fec996db170dd3a28c05e0aae554368b56e15f36e',
+  'v2/generation-guard.ts':'85efc3b6b200880212c98d669dbe8e205fc6a7a48196fb4162d29d36a1b4ce2c',
+  'judgment/instructions.mjs':'0add2f40aaaa01bfdacd1b99418b94e288eb45da6593595304f8d36d0f22de27',
+  'observation/observe.ts':'469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad',
+  'local-grounding/extract.ts':'6e9461e860f22923dbece02c7988713422ed81ac32d937f6d59df8eff84bd83e',
+  'local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01',
+  'decision/jev-decision.ts':'8176e7e0765e3267ad049cfcd16c6f7a16ab6fbdec4afcb743d1f090b6809706',
+  'local-grounding/extract-ai.ts':'e489b7ff573fdbe9e4f0adc9b6ee5f0828bd3c6835dcd8cd6555e191161594a6',
+  'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
+ }},fixed:FIXED_I172,native:NATIVE_I172},
+ // Complete source fingerprint for the participant naming reconfirmation rules.
+ {id:'v12_naming_reconfirmation_scoped_v11',i172:true,styleMode:'research_split',sources:{scheme:'complete_instruction_source_sha256',files:{
+  'v2/dialogue-v2.mjs':'0ca530878393721b6d48b55240e2b8c848910758501d90f579b2e0c65a6d1dd6',
+  'v2/jev-turn.ts':'31cc7ff5346c19d5c790c39c44baf9f07b99e992a4d6ed1647572ff8284f945a',
+  'v2/generation-guard.ts':'824f7ff96ef1ef6d388721dff6ed44b6684f2266e5d8c5f00f31d248e44f453e',
+  'judgment/instructions.mjs':'0add2f40aaaa01bfdacd1b99418b94e288eb45da6593595304f8d36d0f22de27',
+  'observation/observe.ts':'469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad',
+  'local-grounding/extract.ts':'6e9461e860f22923dbece02c7988713422ed81ac32d937f6d59df8eff84bd83e',
+  'local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01',
+  'decision/jev-decision.ts':'8176e7e0765e3267ad049cfcd16c6f7a16ab6fbdec4afcb743d1f090b6809706',
+  'local-grounding/extract-ai.ts':'e489b7ff573fdbe9e4f0adc9b6ee5f0828bd3c6835dcd8cd6555e191161594a6',
+  'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
+ }},fixed:FIXED_I172,native:NATIVE_I172},
  {id:'pr213_p5_overclaim_prototype',i172:true,styleMode:'research_split',sources:{scheme:'complete_instruction_source_sha256',files:{
   'v2/dialogue-v2.mjs':'0ca530878393721b6d48b55240e2b8c848910758501d90f579b2e0c65a6d1dd6',
   'v2/jev-turn.ts':'a9448a58768d9f6ffaa5f7975fa30ce09523e7cf727a823a907f9c0b412c400c',
@@ -2108,6 +2199,19 @@ const PROMPT_VERSIONS:readonly PromptVersion[]=[
   'local-grounding/extract.ts':'6e9461e860f22923dbece02c7988713422ed81ac32d937f6d59df8eff84bd83e',
   'local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01',
   'decision/jev-decision.ts':'07084f1e722e780dd0ca3faed181ba3a36cc31267161cb93fd5c8712828bb19c',
+  'local-grounding/extract-ai.ts':'e489b7ff573fdbe9e4f0adc9b6ee5f0828bd3c6835dcd8cd6555e191161594a6',
+  'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
+ }},fixed:FIXED_I172,native:NATIVE_I172},
+ // Combined v14 and #229 instruction sources for the isolated merge.
+ {id:'p5_overclaim_main_5f40931',i172:true,styleMode:'research_split',sources:{scheme:'complete_instruction_source_sha256',files:{
+  'v2/dialogue-v2.mjs':'0ca530878393721b6d48b55240e2b8c848910758501d90f579b2e0c65a6d1dd6',
+  'v2/jev-turn.ts':'bd39c73e2a8fb31258b9789e904b4e9b2bee37705d7717526741f44ba106a87a',
+  'v2/generation-guard.ts':'79cfb76644051dd62e4beee5a38e53410c96eb488680e491727cd2bac1969fd7',
+  'judgment/instructions.mjs':'0add2f40aaaa01bfdacd1b99418b94e288eb45da6593595304f8d36d0f22de27',
+  'observation/observe.ts':'469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad',
+  'local-grounding/extract.ts':'6e9461e860f22923dbece02c7988713422ed81ac32d937f6d59df8eff84bd83e',
+  'local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01',
+  'decision/jev-decision.ts':'2104c917e6e3df85eed3b17105167d5f983ed9c0ed6f71ab5e03ee98248fed88',
   'local-grounding/extract-ai.ts':'e489b7ff573fdbe9e4f0adc9b6ee5f0828bd3c6835dcd8cd6555e191161594a6',
   'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
  }},fixed:FIXED_I172,native:NATIVE_I172},

@@ -52,6 +52,9 @@ const dialogueV12 = {
 
 const workerDialogue = {
   participant_dialogue_v12: dialogueV12,
+  participant_dialogue_v12_naming_v2: { ...dialogueV12, newTrialAgreeNameScopeVersion: 'scoped_v9' },
+  participant_dialogue_v12_naming_v3: { ...dialogueV12, newTrialAgreeNameScopeVersion: 'scoped_v10' },
+  participant_dialogue_v12_naming_v4: { ...dialogueV12, newTrialAgreeNameScopeVersion: 'scoped_v11' },
   participant_dialogue_v13_p5: {
     ...dialogueV12,
     pinnedVersions: { ...dialogueV12.pinnedVersions, generationRetryVersion: 'jev_generation_retry_v13' },

@@ -21,15 +21,17 @@
 
 保存記録には有効時だけ `options.localGrounding: true` が入り、claim は既存の `queueState.privateState.graph` と一緒に復元されます。再開時には研究者側から同じ抽出器・分類器を再注入してください。元々オフだった保存試行は、再注入だけではオンになりません。
 
-**判断の権限と観察（2026-10-20採用、未実装）：** 次の対話行動はJevが単独で選び、Lunaは試行の開始時に自分側の全図形を一度観察し、以後はJevが必要と判断したときだけ再観察する。[現行計画](../README.md#判断の権限と観察2026-10-20採用)と[決定0002](../decisions/0002-jev-decision-and-visual-observation.md)を参照。このディレクトリの現行のコード（Lunaの判断から始めるv2、Jevの2軸シャドーと行動の上書き、局所部分更新の試作と評価ハーネス）は、この方針より前の構成であり、新しい構成の実装ではない。
+**本番の判断と観察（2026-11-27反映）：** 新しい受付（`participant_model_pin_v3`）では、Jevが対話行動を選び、Terra（`gpt-6.1-terra`）が観察・抽出・発話の生成と再生成・最終提出の文章生成を担います。初回観察にはサーバーが固定した `structured_outputs_v1` を使います。pinを保存した旧受付では、そのpinを使います。モデルの割当は[正本の「対話モデルと情報の統制」](../README.md#対話モデルと情報の統制)、設計の経緯は[決定0002](../decisions/0002-jev-decision-and-visual-observation.md)を参照してください。
 
 ## 公開版（v2）
 
 操作確認用の最新ページは <https://tangram-grounding-experiment.kame-website.workers.dev/> （認証不要）です。公開サーバーはTypeScript Worker + Durable Objectで、内部サービスバインディングを通して既存の研究AI Workerを利用します。ローカル版 `http://127.0.0.1:8787` はMac上でのみ利用できます。公開版の手順は [workers/tangram-experiment/README.md](../../workers/tangram-experiment/README.md) を参照してください。
 
+**会話画面の処理中と停滞の表示。** AIの返答を待つ間、サーバーから処理中（`busy: true`）の応答が届くたびに画面は待機表示を維持します。この間は60秒を超えても停滞の案内を表示せず、読み上げ領域は「AIが返答を作成しています」を維持します。返答を待っている状態で進行を60秒間確認できない場合は、「進行を確認できません。実験担当者にお知らせください。」と「状態を確認」を表示します。サーバーが処理の失敗を返した場合は、その時点で復旧操作を表示します。画面の待機時間で試行を終了したり、発話を自動で再送したりすることはありません。
+
 ## 推奨: Cloudflare Worker経由
 
-上流のAIサービスのAPIキーは研究用のCloudflare Workerだけに保存します。クライアントの .env にはWorker接続用トークンだけを持たせます。モデルIDはCloudflare側の DIALOGUE_MODEL が決定し、クライアントからは purpose: dialogue_turn のみを送ります。最初に ../../workers/research-ai-proxy/README.md の接続・設定手順を参照してください。
+上流のAIサービスのAPIキーは研究用のCloudflare Workerだけに保存します。クライアントの .env にはWorker接続用トークンだけを持たせます。研究用CLIで `dialogue_turn` を送る経路では、モデルIDをCloudflare側の `DIALOGUE_MODEL` が決定します。最初に ../../workers/research-ai-proxy/README.md の接続・設定手順を参照してください。
 
 Node.js 22以上で実行します。
 
@@ -161,7 +163,7 @@ v2 の記録には、AI の各試行（キューの `requestSeq` ごと）の `t
 
 ### 判断層と発話生成器（操作確認用の実装）
 
-`judgment/schema.mjs` はJSDocの `DialogueJudge` / `Judgment` / `OwnLedger` と実行時バリデータを定義します。`createLunaJudge(client)` は同じ既存クライアントを使い、Workerに `purpose=dialogue_turn` を送信します。モデルIDを独自に決定しません。`createJevJudge()` は未実装を明示するエラーを返すスタブです。Jevの導入・採用を意味しません。
+ここでは旧構成の操作確認用の経路を説明します。`judgment/schema.mjs` はJSDocの `DialogueJudge` / `Judgment` / `OwnLedger` と実行時バリデータを定義します。`createLunaJudge(client)` は渡されたクライアントを使い、Workerに `purpose=dialogue_turn` を送信します。`createJevJudge()` は旧構成のスタブです。本番の参加者経路は `decision/jev-decision.ts` の判断クライアントを使います。
 
 判断フェーズには上流の停滞に備えた時間予算（50秒、両方略共通）があります。接続失敗・タイムアウトのときは既存の安全な判断（accept）に戻して発話を続け、`validation` に `fallback: true` と `connection_*`（または `time_budget`）の失敗コードを残します。発話生成は1回40秒で、停滞か応答前の接続失敗のときだけ1回再試行します。**action の分布などを分析するときは、これらのフォールバックのターンを除外してください**（方略の判断ではなく接続上の代替です）。
 

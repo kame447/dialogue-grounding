@@ -29,7 +29,7 @@ import type { BaseOwnerState, BaseRecord, BaseSession, MakeBaseTask, OwnerRead }
 import { participantContactHTML } from "../../../dialogue-model/runtime/v2/participant-contact.ts";
 import { PARTICIPANT_STOP_HTML } from "../../../dialogue-model/runtime/v2/participant-stop-page.ts";
 import { ReceptionError, validateReception, createReception, approveReception, cancelReception,
-  participantReception, receptionSummary, effectiveBetweenTrials, validateParticipantLimits } from '../../../dialogue-model/runtime/v2/reception.ts';
+  participantReception, receptionSummary, effectiveBetweenTrials, validateParticipantLimits, isParticipantDialogueProfile } from '../../../dialogue-model/runtime/v2/reception.ts';
 import { isSubmittedQuestionnaire } from '../../../dialogue-model/runtime/v2/questionnaire-gate.ts';
 import { receptionOpen, validateReceptionSettings } from './admin/reception-settings.ts';
 import type { ProtocolEntry, ReceptionSettings } from './admin/reception-settings.ts';
@@ -265,7 +265,7 @@ export class TangramSession extends DurableObject<Env> {
       const generationPin = this.env.PARTICIPANT_TERRA_GENERATION_ENABLED === 'on';
       const allTerraPin = this.env.PARTICIPANT_TERRA_ALL_ROLES_ENABLED === 'on';
       const dialogueProfile = this.env.PARTICIPANT_DIALOGUE_PROFILE;
-      if (dialogueProfile !== undefined && (dialogueProfile !== 'participant_dialogue_v12' && dialogueProfile !== 'participant_dialogue_v13_p5' || !protocol.referenceMemory || !allTerraPin ||
+      if (dialogueProfile !== undefined && (!isParticipantDialogueProfile(dialogueProfile) || !protocol.referenceMemory || !allTerraPin ||
           this.env.PARTICIPANT_TERRA_ENABLED !== 'on' || this.env.PARTICIPANT_TERRA_PROFILE !== PARTICIPANT_PRODUCTION_PROFILE)) {
         throw new ReceptionError('reception_unavailable');
       }
