@@ -1,4 +1,4 @@
-import {interventionForStrategy,BYPASS_ACCEPTANCE_V1_TABLE_SHA256} from '../decision/bypass-acceptance.ts';
+import {interventionForStrategy,interventionReference} from '../decision/bypass-acceptance.ts';
 import {JevTurnError} from './jev-turn.ts';
 // v2 dialogue: unlabeled scattered boards, opaque own ids, asynchronous human
 // messages. This module is a pure adapter for the human message queue: each
@@ -246,8 +246,8 @@ export function createDialogueV2(options) {
     const p=Object.getOwnPropertyDescriptor(options,'interventionPolicy'),t=Object.getOwnPropertyDescriptor(options,'decisionTimeoutMs');
     if(decisionMode!=='jev'||!referenceMemory||!p?.enumerable||!Object.hasOwn(p,'value')||!t?.enumerable||!Object.hasOwn(t,'value'))throw Error();
     interventionPolicy=p.value;decisionTimeoutMs=t.value;if(!interventionPolicy||Object.getPrototypeOf(interventionPolicy)!==Object.prototype)throw Error();
-    const r=Object.getOwnPropertyDescriptors(interventionPolicy);if(Reflect.ownKeys(r).length!==2||['version','tableSha256'].some(k=>!r[k]?.enumerable||!Object.hasOwn(r[k],'value'))||r.version.value!=='bypass_acceptance_v1'||r.tableSha256.value!==BYPASS_ACCEPTANCE_V1_TABLE_SHA256||!Number.isSafeInteger(decisionTimeoutMs)||decisionTimeoutMs<1||decisionTimeoutMs>600000)throw Error();
-    intervention=interventionForStrategy(strategy);
+    const r=Object.getOwnPropertyDescriptors(interventionPolicy);if(Reflect.ownKeys(r).length!==2||['version','tableSha256'].some(k=>!r[k]?.enumerable||!Object.hasOwn(r[k],'value'))||r.tableSha256.value!==interventionReference(r.version.value).tableSha256||!Number.isSafeInteger(decisionTimeoutMs)||decisionTimeoutMs<1||decisionTimeoutMs>600000)throw Error();
+    intervention=interventionForStrategy(strategy,r.version.value);
    }catch{throw new JevTurnError('invalid_intervention');}
   }
   // two_stage_v2 exists only for the integrated research profile; every other dialogue keeps two_stage_v1.

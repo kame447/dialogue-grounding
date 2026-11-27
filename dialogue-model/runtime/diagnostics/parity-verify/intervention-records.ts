@@ -1,3 +1,4 @@
+import { BYPASS_ACCEPTANCE_V2_TABLE_SHA256, MOVE_ON_SOURCE_QUESTION, validMoveOnSource } from '../../decision/human-led-move-on.ts';
 import {createHash as nodeSha256} from 'node:crypto';
 // Independent record-only S4 checks. Never imports an online runtime, transport,
 // producer validator or replay executor. Only supplied data and code-owned
@@ -11,7 +12,7 @@ import {namingDenialTargets,namingReconfirmation} from '../../decision/naming-re
 import {decodeMaterialV5} from '../../decision/judgment-material-v5.ts';
 import {isHolisticPolicy,isHolisticV2Plus,isHolisticV3Plus,isHolisticV4Plus} from '../../decision/contract.ts';
 import {generationGuardCodes,draftViolationCodes,deriveGenerationOutcome,orientationSafeFallback,findOrientationLeaks,v11RecentHumanTexts,hasOrientationWords,hasVersionedViewpoint,isGenerationV5,isGenerationV6,isGenerationV7,isGenerationV8,isGenerationV9,isGenerationV11,isGenerationV12,isGenerationV13,isGenerationV14,validGenerationRetryVersion,validAgreeNameScope,allowsOrientationFallback} from '../../v2/generation-guard.ts';
-import {isGenerationV15,currentTurnNamingSource,namingCodesWithoutQuestion,contentPublicationRecovery} from '../../v2/generation-guard.ts';
+import {isGenerationV15,isGenerationV16,confirmationDraftText,currentTurnNamingSource,namingCodesWithoutQuestion,contentPublicationRecovery} from '../../v2/generation-guard.ts';
 import type {SharedConstrual} from '../../decision/contract.ts';
 import type {RecordedGenerationRetryVersion} from '../../v2/generation-guard.ts';
 import {checkModelIdentity} from '../../model-identity-contract.ts';
@@ -77,14 +78,15 @@ const RETRY_REASONS:readonly RetryReason[]=[
  {codes:['draft_shared_claim_unconfirmed'],text:'前の下書きに名前以外の過大断定がないか確認できませんでした。候補の範囲と未確認・保留の細部を守り、大まかな共有見立ての範囲が明確になるように書き直してください。'},
 ];
 const RETRY_REASONS_SPECIFIC=RETRY_REASONS.flatMap(reason=>reason.codes.includes('orientation_leak')?SPECIFIC_VIEWPOINT_REASONS:[reason]);
+const RETRY_REASONS_V16=[...RETRY_REASONS_SPECIFIC,{codes:['confirmation_detail_mismatch'],text:'前の下書きでは選んだ確認特徴を照合できませんでした。その特徴を尋ねる文を作り、指定されたJSONの形で返してください。'}];
 // codes: the recorded condition's own guard violations (exact). draft: for the comparison condition, what its OWN first draft shows to this verifier
 // (an orientation leak; any other leak, which is where a name/agreement decision, an id or a field would show): the orientation reason must be present exactly
 // when the draft has an orientation leak, and the name/agreement-decision reason can appear only if the draft has some other leak. Other families stay open.
-type RetryDraftEvidence={orientation:boolean;orientationCodes?:readonly string[];naming:boolean;workingNote:boolean;draftAct?:string|null;draftSharedClaim?:string|null};
+type RetryDraftEvidence={orientation:boolean;orientationCodes?:readonly string[];naming:boolean;workingNote:boolean;draftAct?:string|null;draftSharedClaim?:string|null;confirmationMismatch?:boolean};
 function retryReasonsMatch(text:string,version:RecordedGenerationRetryVersion|undefined,codes?:readonly string[],draft?:RetryDraftEvidence):boolean{
  if(!text)return false;
  const specific=hasVersionedViewpoint(version),restated=version!==undefined;
- const reasons=specific?RETRY_REASONS_SPECIFIC:RETRY_REASONS;
+ const reasons=confirmationDraftV16(version)?RETRY_REASONS_V16:specific?RETRY_REASONS_SPECIFIC:RETRY_REASONS;
  for(const reason of reasons){
   const viewpoint=!specific&&H5()&&reason.codes.includes('orientation_leak');
   const reasonText=viewpoint?'前の下書きの方位の参照枠を明確にして書き直してください。'+VIEWPOINT_RULE_V5_S4:reason.text;
@@ -98,6 +100,7 @@ function retryReasonsMatch(text:string,version:RecordedGenerationRetryVersion|un
    if(!specific&&reason.codes.includes('orientation_leak')&&draft.orientation!==Boolean(match))return false;
    if(reason.codes.includes('naming_decision')&&draft.naming!==Boolean(match))return false;
    if(reason.codes.includes('working_note')&&draft.workingNote!==Boolean(match))return false;
+   if(draft.confirmationMismatch!==undefined&&reason.codes.includes('confirmation_detail_mismatch')&&draft.confirmationMismatch!==Boolean(match))return false;
    if(draft.draftAct!==undefined&&reason.codes.some(c=>c.startsWith('draft_act_'))&&Boolean(draft.draftAct&&reason.codes.includes(draft.draftAct))!==Boolean(match))return false;
    if(draft.draftSharedClaim!==undefined&&reason.codes.some(c=>c.startsWith('draft_shared_claim_'))&&Boolean(draft.draftSharedClaim&&reason.codes.includes(draft.draftSharedClaim))!==Boolean(match))return false;
   }
@@ -225,8 +228,8 @@ const ANY_TARGET=['accept','defer','move_on','close'];
 function referentResponseAccepted(answer:any,slots:readonly string[]):boolean{
  return isGroundingModel(answer?.model,JEV_DECISION_MODEL)&&jevReportedCost(answer)!==null&&jevChoiceAnswersValid(answer?.answers,{human_referent:[...slots.map((_,i)=>'figure_'+i),'none','multiple']});
 }
-type ReplayContext={p5:boolean;p5Overclaim:boolean;featureReplyFilter:boolean;shared:SharedConstrual[];proof:Map<string,any>;policy:string|null;agreeMatch:{l0:boolean;l2:boolean}|null;facts:boolean;agree:any[]|undefined;known:boolean;v3:boolean;trial:boolean;ledger:Record<string,{status:string;name:string|null}>|undefined;legacyV3:boolean;style:null|'legacy'|'style'|'loop'|'holistic';humanNames?:Set<string>|null;namingRequest?:boolean;namingReconfirm?:boolean;acceptOptional?:boolean;critKind?:'V1'|'V3'|'H3'|null;prompt?:PromptVersion|null;jevNaming?:boolean};
-const defaultContext:ReplayContext={p5:false,p5Overclaim:false,featureReplyFilter:false,shared:[],proof:new Map(),policy:null,agreeMatch:null,facts:false,agree:undefined,known:true,v3:false,trial:false,ledger:undefined,legacyV3:false,style:null,humanNames:null,critKind:null,prompt:null,jevNaming:false};
+type ReplayContext={humanLedMoveOn:boolean;p5:boolean;p5Overclaim:boolean;featureReplyFilter:boolean;shared:SharedConstrual[];proof:Map<string,any>;policy:string|null;agreeMatch:{l0:boolean;l2:boolean}|null;facts:boolean;agree:any[]|undefined;known:boolean;v3:boolean;trial:boolean;ledger:Record<string,{status:string;name:string|null}>|undefined;legacyV3:boolean;style:null|'legacy'|'style'|'loop'|'holistic';humanNames?:Set<string>|null;namingRequest?:boolean;namingReconfirm?:boolean;acceptOptional?:boolean;critKind?:'V1'|'V3'|'H3'|null;prompt?:PromptVersion|null;jevNaming?:boolean};
+const defaultContext:ReplayContext={humanLedMoveOn:false,p5:false,p5Overclaim:false,featureReplyFilter:false,shared:[],proof:new Map(),policy:null,agreeMatch:null,facts:false,agree:undefined,known:true,v3:false,trial:false,ledger:undefined,legacyV3:false,style:null,humanNames:null,critKind:null,prompt:null,jevNaming:false};
 const CTX={...defaultContext};
 const H=()=>isHolisticPolicy(CTX.policy);
 const H2=()=>isHolisticV2Plus(CTX.policy);
@@ -249,7 +252,9 @@ const exact=(x:any,keys:string[])=>!!x&&Object.getPrototypeOf(x)===Object.protot
 const ident=(t:any)=>Number.isSafeInteger(t?.turnIndex)&&t.turnIndex>0&&Number.isSafeInteger(t?.attemptNumber)&&t.attemptNumber>0&&(t.lastEventId===null||typeof t.lastEventId==='string'&&t.lastEventId.length<=160)?JSON.stringify([t.turnIndex,t.lastEventId,t.attemptNumber]):null;
 const judgmentKey=(j:any)=>ident({...j,attemptNumber:j?.jevTurn?.attemptNumber});
 const primitiveText=(x:any,n=400)=>x===null||typeof x==='string'&&x.trim().length>0&&x.length<=n;
-const reference=(p:any)=>exact(p,['version','tableSha256'])&&p.version==='bypass_acceptance_v1'&&p.tableSha256===POLICY;
+const reference=(p:any)=>exact(p,['version','tableSha256'])&&
+ (p.version==='bypass_acceptance_v1'&&p.tableSha256===POLICY||
+  p.version==='bypass_acceptance_v2'&&p.tableSha256===BYPASS_ACCEPTANCE_V2_TABLE_SHA256);
 function fullProfile(p:any):string|null{
  try{
   if(!p||Object.getPrototypeOf(p)!==Object.prototype)return'intervention_profile_invalid';
@@ -264,7 +269,9 @@ function fullProfile(p:any):string|null{
   if(!d.enumerable||!Object.hasOwn(d,'value'))return'intervention_contract_invalid';
   const v=d.value;try{data(v);}catch{return'intervention_contract_invalid';}
   if(!exact(v,['version','tableSha256'])||typeof v.version!=='string'||!v.version||typeof v.tableSha256!=='string'||!/^[a-f0-9]{64}$/.test(v.tableSha256))return'intervention_contract_invalid';
-  return v.version!=='bypass_acceptance_v1'?'intervention_contract_unknown':v.tableSha256!==POLICY?'intervention_table_mismatch':null;
+  if(v.version!=='bypass_acceptance_v1'&&v.version!=='bypass_acceptance_v2')return'intervention_contract_unknown';
+  if(v.version==='bypass_acceptance_v2'&&(p.questionLayout!=='two_stage_v3'||p.dialoguePolicy!=='holistic_v5'))return'intervention_profile_invalid';
+  return reference(v)?null:'intervention_table_mismatch';
  }catch(e){const code=e&&typeof e==='object'?Object.getOwnPropertyDescriptor(e,'code'):null;return code&&Object.hasOwn(code,'value')&&['model_profile_invalid','model_contract_missing','model_contract_invalid','model_contract_unknown','model_table_mismatch'].includes(code.value)?code.value:'intervention_profile_invalid';}
 }
 function activated(x:any,seen=new Set<object>()):boolean{
@@ -326,7 +333,7 @@ function budgetShape(b:any):boolean{
  const ks=['publicTurns','claims','publicNames','repairHistory','reobservations','observationDetails','observationChars','issueSummaryChars'];
  return exact(b,['maxChars','stateChars','omitted'])&&b.maxChars===20000&&Number.isSafeInteger(b.stateChars)&&b.stateChars>=0&&b.stateChars<=20000&&exact(b.omitted,ks)&&ks.every(k=>Number.isSafeInteger(b.omitted[k])&&b.omitted[k]>=0);
 }
-function decisionShape(d:any,layout='two_stage_v1',p5=false,shared:readonly SharedConstrual[]=[],namingRequest=false):boolean{
+function decisionShape(d:any,layout='two_stage_v1',p5=false,shared:readonly SharedConstrual[]=[],namingRequest=false,humanLedMoveOn=false):boolean{
  if(!exact(d,['action','target','name','feature','observe','evidence','decisionKind','calibrated',...(Object.hasOwn(d??{},'detailFigureIds')?['detailFigureIds']:[]),...(Object.hasOwn(d??{},'sharedClaimIds')?['sharedClaimIds']:[])])||!sharedFields(d,p5)||!ACTIONS.includes(d.action)||!['mock','jev_local_test'].includes(d.decisionKind)||d.calibrated!==false||!primitiveText(d.name,80)||!primitiveText(d.feature)||!evidenceShape(d.evidence))return false;
  if(Object.hasOwn(d.evidence,'decisionMenuVersion')&&(layout!=='two_stage_v1'||d.decisionKind!=='jev_local_test'))return false;
  if(d.action==='request_observation'){if(!exact(d.observe,['figureIds','aspect','question','partnerConstrual'])||!Array.isArray(d.observe.figureIds)||!['orientation','part','contour','construal','referent'].includes(d.observe.aspect)||!primitiveText(d.observe.question,1000)||!primitiveText(d.observe.partnerConstrual))return false;}else if(d.observe!==null)return false;
@@ -340,7 +347,8 @@ function decisionShape(d:any,layout='two_stage_v1',p5=false,shared:readonly Shar
   if(v3){
    // action, then the target the action may take: closed single-question stages; the label must be of the decision's own target kind.
    const k=Object.keys(stages[0].scores.action??{}),tl=stages[1]?.scores?.target?Object.keys(stages[1].scores.target):[],label=stages[1]?.choices?.target;
-   if(!equal(Object.keys(stages[0].choices),['action'])||stages[0].choices.action!==d.action||!k.every((x:string)=>ACTIONS.includes(x))||![...alwaysV3(),d.action].every((x:string)=>k.includes(x)))return false;
+   if(!equal(Object.keys(stages[0].choices),humanLedMoveOn?['action',MOVE_ON_SOURCE_QUESTION]:['action'])||
+    humanLedMoveOn&&!validMoveOnSource(stages[0].choices[MOVE_ON_SOURCE_QUESTION],stages[0].scores[MOVE_ON_SOURCE_QUESTION])||stages[0].choices.action!==d.action||!k.every((x:string)=>ACTIONS.includes(x))||![...alwaysV3(),d.action].every((x:string)=>k.includes(x)))return false;
    if(!evidenceShape(stages[1],'target')||!equal(Object.keys(stages[1].choices),['target'])||!equal(Object.keys(stages[1].scores),['target'])||!tl.length||new Set(tl).size!==tl.length||!tl.every((x:string)=>TARGET_V3_LABELS.includes(x)))return false;
    const kind=d.target?.kind,want=kind==='none'?label==='none':kind==='single'?/^figure_[0-5]$/.test(label):kind==='multiple'&&SET_LABELS.includes(label)&&SETS[SET_LABELS.indexOf(label)].length===d.target.figureIds?.length;
    if(!want)return false;
@@ -354,6 +362,7 @@ function decisionShape(d:any,layout='two_stage_v1',p5=false,shared:readonly Shar
 }
 // Labels each failure-record question may carry; indexed labels run 0..n-1 without gaps.
 function failureLabels(q:string,ls:string[],layout='two_stage_v1',p5=false):boolean{
+ if(q===MOVE_ON_SOURCE_QUESTION)return equal([...ls].sort(),Object.keys(MOVE_ON_SOURCE_CRITERIA).sort());
  if(q==='shared_construal')return p5&&ls.length>=2&&equal(ls.slice().sort(),sharedLabels(ls.length-1).sort());
  const unique=new Set(ls).size===ls.length,indexed=(prefix:string,sizes:number[])=>unique&&sizes.includes(ls.length)&&ls.every(l=>l.startsWith(prefix+'_')&&String(Number(l.slice(prefix.length+1)))===l.slice(prefix.length+1)&&Number(l.slice(prefix.length+1))<ls.length);
  if(q==='action')return unique&&ls.every(l=>ACTIONS.includes(l))&&(layout==='two_stage_v3'?alwaysV3().every(a=>ls.includes(a)):ACTIONS.every(a=>['agree','request_observation'].includes(a)||ls.includes(a)));
@@ -379,24 +388,24 @@ function participantFailureStageValid(qs:string[],choices:any,scores:any):boolea
  }
  return true;
 }
-function failureStage(s:any,layout:string,last:boolean,participantMenu=false,p5=false,namingRequest=false):boolean{
+function failureStage(s:any,layout:string,last:boolean,participantMenu=false,p5=false,namingRequest=false,humanLedMoveOn=false):boolean{
  if(!exact(s,['stage','status','error','rejectionCode','model','responseId','costUsd','latencyMs','inputBudget','choices','scores'])||!['ok','error'].includes(s.status)||!(s.error===null||DECISION_CODES.includes(s.error))||!(s.rejectionCode===null||Object.hasOwn(RULE_ERRORS,s.rejectionCode))||!(s.model===null||checkModelIdentity(JEV_MODEL,s.model).status==='accepted')||!(s.responseId===null||typeof s.responseId==='string'&&/^gen-[A-Za-z0-9_-]{1,124}$/.test(s.responseId))||!(s.costUsd===null||Number.isFinite(s.costUsd)&&s.costUsd>=0)||!Number.isFinite(s.latencyMs)||s.latencyMs<0||!budgetShape(s.inputBudget)||!exact(s.choices,Object.keys(s.choices??{}))||!exact(s.scores,Object.keys(s.choices)))return false;
  const qs=Object.keys(s.choices);
  // decide() stops at the first failing stage; answers exist only once a stage is parsed, and then cost and model are known.
  if(!last&&s.status!=='ok'||s.status==='ok'&&(s.error!==null||s.rejectionCode!==null||!qs.length))return false;
  if(!qs.length)return true;
  if(participantMenu&&s.stage==='action_target')return s.model!==null&&s.costUsd!==null&&participantFailureStageValid(qs,s.choices,s.scores);
- const sets=layout==='two_stage_v3'?(s.stage==='action'?[['action']]:s.stage==='target'?[['target']]:s.stage==='detail'?[['name'],['feature'],['observe_aspect','observe_targets'],...(p5?[['shared_construal'],...(namingRequest?[['feature','shared_construal']]:[])]:[])]:[]):s.stage==='action_target'?[layout==='two_stage_v1'?['action','target','candidate_0','candidate_1','candidate_2','candidate_3','candidate_4','candidate_5']:['action','target']]:s.stage==='multiple_candidates'?[['candidate_set']]:s.stage==='detail'?[['name'],['feature'],['observe_aspect','observe_targets']]:[];
+ const sets=layout==='two_stage_v3'?(s.stage==='action'?[humanLedMoveOn?['action',MOVE_ON_SOURCE_QUESTION]:['action']]:s.stage==='target'?[['target']]:s.stage==='detail'?[['name'],['feature'],['observe_aspect','observe_targets'],...(p5?[['shared_construal'],...(namingRequest?[['feature','shared_construal']]:[])]:[])]:[]):s.stage==='action_target'?[layout==='two_stage_v1'?['action','target','candidate_0','candidate_1','candidate_2','candidate_3','candidate_4','candidate_5']:['action','target']]:s.stage==='multiple_candidates'?[['candidate_set']]:s.stage==='detail'?[['name'],['feature'],['observe_aspect','observe_targets']]:[];
  return s.model!==null&&s.costUsd!==null&&sets.some(set=>equal([...qs].sort(),[...set].sort()))&&qs.every(q=>{const scores=s.scores[q],ls=Object.keys(scores??{});return exact(scores,ls)&&failureLabels(q,ls,layout,p5)&&typeof s.choices[q]==='string'&&ls.includes(s.choices[q])&&Object.values(scores).every(probability);});
 }
 // Plan O owner record of one failed decide(): closed shape, then its own totals, rule and stage path. No producer validator is used.
 function failureRecord(f:any,layout:string,p5:boolean,namingRequest:boolean,
- candidates:readonly SharedConstrual[],ownSlots:readonly string[]):boolean{
+ candidates:readonly SharedConstrual[],ownSlots:readonly string[],humanLedMoveOn=false):boolean{
  if(!exact(f,['evidence']))return false;const e=f.evidence;if(e===null)return true;
  const hasMenu=!!e&&typeof e==='object'&&Object.hasOwn(e,'decisionMenuVersion');
  if(!exact(e,['schemaVersion','questionLayout',...(hasMenu?['decisionMenuVersion']:[]),'callIndex','error','rejectionCode','model','responseId','costUsd','latencyMs','inputBudget','stages'])||e.schemaVersion!=='jev_decision_failure_v1'||e.questionLayout!==layout||hasMenu&&(e.decisionMenuVersion!==PARTICIPANT_MENU_VERSION||layout!=='two_stage_v1')||!Number.isSafeInteger(e.callIndex)||e.callIndex<1||!DECISION_CODES.includes(e.error)||!(e.rejectionCode===null||RULE_ERRORS[e.rejectionCode]===e.error)||!(e.model===null||checkModelIdentity(JEV_MODEL,e.model).status==='accepted')||!(e.responseId===null||typeof e.responseId==='string'&&/^gen-[A-Za-z0-9_-]{1,124}$/.test(e.responseId))||!(e.costUsd===null||Number.isFinite(e.costUsd)&&e.costUsd>=0)||!Number.isFinite(e.latencyMs)||e.latencyMs<0||!(e.inputBudget===null||budgetShape(e.inputBudget))||!Array.isArray(e.stages))return false;
  const ss=e.stages,order=ss.map((s:any)=>s?.stage).join(','),orders=layout==='two_stage_v3'?['','action','action,target','action,target,detail']:['','action_target','action_target,detail',...(layout==='two_stage_v2'?['action_target,multiple_candidates','action_target,multiple_candidates,detail']:[])];
- if(!orders.includes(order)||!ss.every((s:any,i:number)=>failureStage(s,layout,i===ss.length-1,hasMenu,p5,namingRequest)))return false;
+ if(!orders.includes(order)||!ss.every((s:any,i:number)=>failureStage(s,layout,i===ss.length-1,hasMenu,p5,namingRequest,humanLedMoveOn)))return false;
   // two_stage_v3 only: a decision refused by the local legality table before any publication has no provider stage, response, model or cost.
   if(layout==='two_stage_v3'&&ss.length===0&&e.rejectionCode==='action_target_not_allowed')return e.error==='invalid_decision'&&e.model===null&&e.responseId===null&&e.costUsd===null&&e.inputBudget===null&&e.latencyMs===0;
  // Totals as the client accumulates them; an unknown cost stays null, never zero.
@@ -685,7 +694,7 @@ function s4OpenHumanProposal(tape:any,trace:any,askCounts=true):boolean{
  const claims=liveClaims({records:[...(graph?.records??[]),...(trace.local?.claims??[]).filter((c:any)=>c.kind==='claim')]});
  return claims.some((c:any)=>c.speaker==='human'&&c.sourceTurn===trace.turnIndex&&(c.act==='name_propose'&&typeof c.name==='string'||askCounts&&c.act==='ask'&&c.aspect==='name'&&claims.some((q:any)=>q.id===c.respondsTo&&q.act==='name_propose'&&typeof q.name==='string')));
 }
-function traceShape(t:any,layout='two_stage_v1',policy?:string,ownSlots:readonly string[]=[],jevNaming=false):boolean{
+function traceShape(t:any,layout='two_stage_v1',policy?:string,ownSlots:readonly string[]=[],humanLedMoveOn=false,jevNaming=false):boolean{
  const req=['schemaVersion','turnIndex','lastEventId','attemptNumber','status','initialObservation','reobservations','local','humanReferent','decisions','intervention','executed','finalAction','publicSpeech','observationMemo','repairHistory','generationGuard'];
  const semantic=isGenerationV15(t?.generationRetryVersion);
  const opt=['errorCode','observationErrorCode','observationPhase','decisionRejectionCode','generationErrorCode','decisionMenuVersion','redacted','aiPublic','decisionFailure','repairProspect','repairGate','repairFacts','generationRetryVersion','draftActs','draftSharedClaims','namingRequest','namingReconfirm','sharedConstruals',...(semantic?['publicationRecovery']:[]),...(semantic&&jevNaming?['namingGrounding']:[])];
@@ -706,9 +715,15 @@ function traceShape(t:any,layout='two_stage_v1',policy?:string,ownSlots:readonly
    (hasVersionedViewpoint(t.generationRetryVersion)?!p5&&(!t.executed||!t.finalAction):t.generationGuard?.regenerated!==true)))return false;
  if(Object.hasOwn(t,'draftActs')&&(layout!=='two_stage_v3'||!draftActsShape(t.draftActs,semantic)))return false;
  if(!draftSharedTraceS4(t,p5Overclaim))return false;
- if(t.intervention!==null){const i=t.intervention;if(!exact(i,['schemaVersion','policy','disposition','reasonCode','original','rerank','alternative','detailEvidence','failure'])||i.schemaVersion!=='jev_intervention_v1'||!['bypass_acceptance_v1:accept','bypass_acceptance_v1:veto'].includes(i.policy)||!['adopted','rejected'].includes(i.disposition)||!['no_intervention','not_in_veto_set','vetoed_bypass_action','alternative_failed'].includes(i.reasonCode))return false;}
+ if(t.intervention!==null){
+  const i=t.intervention,version=humanLedMoveOn?'bypass_acceptance_v2':'bypass_acceptance_v1';
+  const human=humanLedMoveOn&&i.reasonCode==='human_led_move_on';
+  if(!exact(i,['schemaVersion','policy','disposition','reasonCode','original','rerank','alternative','detailEvidence','failure',...(human?['humanMoveOn']:[])])||
+    i.schemaVersion!=='jev_intervention_v1'||![version+':accept',version+':veto'].includes(i.policy)||!['adopted','rejected'].includes(i.disposition)||
+    !human&&!['no_intervention','not_in_veto_set','vetoed_bypass_action','alternative_failed'].includes(i.reasonCode))return false;
+ }
  // Plan O: only a failed decide() attempt carries its closed failure record; older records simply lack it.
- if(Object.hasOwn(t,'decisionFailure')&&(t.status!=='error'||!['decision_failed','invalid_decision'].includes(t.errorCode)||!failureRecord(t.decisionFailure,layout,p5,t.namingRequest===true,t.sharedConstruals??[],ownSlots)))return false;
+ if(Object.hasOwn(t,'decisionFailure')&&(t.status!=='error'||!['decision_failed','invalid_decision'].includes(t.errorCode)||!failureRecord(t.decisionFailure,layout,p5,t.namingRequest===true,t.sharedConstruals??[],ownSlots,humanLedMoveOn)))return false;
   // The local rule name is kept in both places or neither, only on two_stage_v3 and only as an invalid_decision.
   const local=t.decisionFailure?.evidence?.rejectionCode==='action_target_not_allowed'&&t.decisionFailure.evidence.stages?.length===0;
   if(local&&(t.decisionRejectionCode!=='action_target_not_allowed'||t.errorCode!=='invalid_decision'))return false;
@@ -718,7 +733,7 @@ function traceShape(t:any,layout='two_stage_v1',policy?:string,ownSlots:readonly
   if(Object.hasOwn(t,'decisionRejectionCode')&&!(t.decisionRejectionCode==='agree_without_public_proposal'||t.decisionRejectionCode==='action_target_not_allowed'&&local||judgment||participantEarly))return false;
  if(Object.hasOwn(t,'repairProspect')&&!prospectShape(t.repairProspect))return false;
   if(Object.hasOwn(t,'repairFacts')&&!Array.isArray(t.repairFacts)||Object.hasOwn(t,'repairGate')&&(!t.repairGate||typeof t.repairGate!=='object'))return false;
-  if(!t.decisions.every((d:any)=>decisionShape(d,layout,p5,t.sharedConstruals,t.namingRequest===true))||
+  if(!t.decisions.every((d:any)=>decisionShape(d,layout,p5,t.sharedConstruals,t.namingRequest===true,humanLedMoveOn))||
    ![t.executed,t.intervention?.original,t.intervention?.alternative].every(x=>sharedFields(x,p5))||
    carriesSharedChoice(t.intervention?.detailEvidence)&&!p5)return false;
   const hasRecovery=Object.hasOwn(t,'publicationRecovery');
@@ -746,19 +761,26 @@ function openRerank(r:any,t:any,d:any,scores:any,layout='two_stage_v1'):boolean{
  for(let n=0;n<r.ranking.length;n++){const x=r.ranking[n],p=r.ranking[n-1];if(!exact(x,['action','score'])||!Number.isFinite(x.score)||x.score<0||x.score>1||x.score!==scores[x.action]||p&&(p.score<x.score||p.score===x.score&&ACTIONS.indexOf(p.action)>ACTIONS.indexOf(x.action)))return false;}
  return true;
 }
-function draftRecovery(violations:readonly string[],execution:any,jevNaming:boolean){
- const recovery=contentPublicationRecovery(violations,execution);
+function draftRecovery(violations:readonly string[],execution:any,jevNaming:boolean,version:RecordedGenerationRetryVersion|undefined){
+ const recovery=contentPublicationRecovery(violations,execution,version);
  if(jevNaming&&recovery?.recovery.act==='confirm_current_topic'){
   return {...recovery,judgment:{...recovery.judgment,targetSlot:null}};
  }
  return recovery;
 }
-function relation(t:any,label:any,slots:string[],layout='two_stage_v1',p5=false,jevNaming=false):boolean{
+function relation(t:any,label:any,slots:string[],layout='two_stage_v1',p5=false,humanLedMoveOn=false,jevNaming=false):boolean{
  if(t.executed===null&&t.intervention===null)return ['error','aborted'].includes(t.status)&&t.finalAction===null&&t.publicSpeech===null;
- const i=t.intervention,d=t.decisions.at(-1);if(!i||!d||!equal(i.original,project(d))||i.policy!==(label==='repair-first'?'bypass_acceptance_v1:veto':'bypass_acceptance_v1:accept'))return false;
+ const i=t.intervention,d=t.decisions.at(-1),version=humanLedMoveOn?'bypass_acceptance_v2':'bypass_acceptance_v1';
+ if(!i||!d||!equal(i.original,project(d))||i.policy!==version+(label==='repair-first'?':veto':':accept'))return false;
+ const first=d.evidence?.stages?.[0], human=humanLedMoveOn&&d.action==='move_on'&&first?.choices?.[MOVE_ON_SOURCE_QUESTION]==='human_request';
+ if(human){
+  const openRepairTurns=t.repairHistory.filter((entry:any)=>entry.turn<t.turnIndex&&
+    !(t.repairGate?.closed??[]).some((closed:any)=>closed.turn===entry.turn&&closed.issueId===entry.issueId)).map((entry:any)=>entry.turn);
+  if(i.disposition!=='adopted'||i.reasonCode!=='human_led_move_on'||!equal(i.humanMoveOn,{source:'human',publicTurn:t.turnIndex,openRepairTurns}))return false;
+ }else if(Object.hasOwn(i,'humanMoveOn')||i.reasonCode==='human_led_move_on')return false;
  if(i.reasonCode==='alternative_failed')return t.executed===null&&i.disposition==='rejected'&&['defer','move_on'].includes(d.action)&&i.policy.endsWith(':veto')&&exact(i.failure,['reasonCode','inner'])&&i.failure.reasonCode==='alternative_failed'&&exact(i.failure.inner,['stage','code'])&&['rerank','detail','executed'].includes(i.failure.inner.stage)&&typeof i.failure.inner.code==='string'&&INNER_CODES.includes(i.failure.inner.code)&&t.finalAction===null&&t.publicSpeech===null;
  if(!executed(t.executed,slots,p5)||!executed(i.original,slots,p5)||i.failure!==null)return false;
- if(i.disposition==='adopted'){if(i.reasonCode!==(label==='bypass-enabled'?'no_intervention':'not_in_veto_set')||label==='repair-first'&&['defer','move_on'].includes(d.action)||!equal(t.executed,i.original)||[i.rerank,i.alternative,i.detailEvidence].some(x=>x!==null))return false;}
+ if(i.disposition==='adopted'){if(i.reasonCode!==(human?'human_led_move_on':label==='bypass-enabled'?'no_intervention':'not_in_veto_set')||label==='repair-first'&&!human&&['defer','move_on'].includes(d.action)||!equal(t.executed,i.original)||[i.rerank,i.alternative,i.detailEvidence].some(x=>x!==null))return false;}
  else{
   const open=i.rerank?.policyId==='saved_action_scores_open_issue_v1';
   if(label!=='repair-first'||!['defer','move_on'].includes(d.action)||i.reasonCode!=='vetoed_bypass_action'||!equal(t.executed,i.alternative)||!open&&!equal(t.executed.target,i.original.target)||['defer','move_on'].includes(t.executed.action))return false;
@@ -775,7 +797,7 @@ function relation(t:any,label:any,slots:string[],layout='two_stage_v1',p5=false,
  const e=t.executed,g=t.finalAction;if(g===null)return ['error','aborted'].includes(t.status);
  if(t.publicationRecovery){
   const recovered=holdPublication(t.publicationRecovery.reason)??
-   (Array.isArray(t.generationGuard?.violations)&&draftRecovery(t.generationGuard.violations,e,jevNaming));
+   (Array.isArray(t.generationGuard?.violations)&&draftRecovery(t.generationGuard.violations,e,jevNaming,t.generationRetryVersion));
   return !!recovered&&equal(t.publicationRecovery,recovered.recovery)&&equal(g,recovered.judgment)&&t.publicSpeech===recovered.text;
  }
  return g.action===e.action&&g.targetSlot===(e.target.kind==='single'?e.target.figureId:null)&&g.candidateName===e.name&&g.discriminatingFeature===e.feature;
@@ -991,7 +1013,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
    const src=agreeSource(tr,t,key,p5&&graph?{...tape,generationGraph:graph}:tape,legacyV3,{layout,policy,generation:version,namingRequest});
    if(src==='invalid')return'invalid';
    if(p5&&!src.p5Facts)return'missing';
-   Object.assign(CTX,{p5,p5Overclaim,featureReplyFilter:tape.state?.agreeNameScopeVersion==='scoped_v8',shared:src.p5Facts?.shared??[],proof:src.p5Facts?.proof??new Map(),critKind:null,prompt:v,facts:Array.isArray(t.repairFacts),agree:src.names,known:src.known,v3:layout==='two_stage_v3',trial:trial!==null,ledger:tape.state?.ledger,legacyV3,style:null,policy:tr.profile?.dialoguePolicy??null,humanNames:isHolisticV2Plus(tr.profile?.dialoguePolicy)?s4HumanProposedNames(tape,t):null,namingRequest:namingKind==='request',namingReconfirm:namingKind==='reconfirm',acceptOptional:!jevNaming&&t.namingRequest===true,jevNaming});
+   Object.assign(CTX,{humanLedMoveOn:tr.profile?.interventionPolicy?.version==='bypass_acceptance_v2',p5,p5Overclaim,featureReplyFilter:tape.state?.agreeNameScopeVersion==='scoped_v8',shared:src.p5Facts?.shared??[],proof:src.p5Facts?.proof??new Map(),critKind:null,prompt:v,facts:Array.isArray(t.repairFacts),agree:src.names,known:src.known,v3:layout==='two_stage_v3',trial:trial!==null,ledger:tape.state?.ledger,legacyV3,style:null,policy:tr.profile?.dialoguePolicy??null,humanNames:isHolisticV2Plus(tr.profile?.dialoguePolicy)?s4HumanProposedNames(tape,t):null,namingRequest:namingKind==='request',namingReconfirm:namingKind==='reconfirm',acceptOptional:!jevNaming&&t.namingRequest===true,jevNaming});
    const sharedPublic=p5?sharedPublicSources(tape.events,t.turnIndex):true;
    if(sharedPublic===false)return'invalid';
    if(isHolisticV3Plus(tr.profile?.dialoguePolicy)&&layout==='two_stage_v3'){
@@ -1025,7 +1047,9 @@ const idsOf=(target:any):string[]=>target?.kind==='single'?[target.figureId]:tar
  let missing=sharedPublic===null;
  for(const [n,label]of ['repair-first','bypass-enabled'].entries()){
   const s=result.sides[n],m=s?.material;if(!exact(s,['label','material','materialSha256','requests','executed','intervention'])||s.label!==label||!exact(m,['state','events','common','tail','own','model','profile','boundary',...(CTX.trial?['technicalTrial']:[]),...(tape.generationRetryVersion?['generationRetryVersion']:[])])||m.generationRetryVersion!==tape.generationRetryVersion||hash(m)!==s.materialSha256||(CTX.trial&&!equal(m.technicalTrial,tape.technicalTrial))||!equal(m.state,tape.state)||!equal(m.events,tape.events)||!equal(m.common,tape.common)||!equal(m.tail,tape.tails[label])||!equal(m.profile,tr.profile)||!Array.isArray(s.requests)||!equal(m.boundary,{luna:'canonical_http_json',jev:'canonical_http_json',hashScheme:'canonical_json_sha256_not_raw_body_bytes'}))return'invalid';
-  if(!relation({...t,publicationRecovery:undefined,executed:s.executed,intervention:s.intervention,finalAction:s.executed?{action:s.executed.action,targetSlot:s.executed.target.kind==='single'?s.executed.target.figureId:null,candidateName:s.executed.name,discriminatingFeature:s.executed.feature}:null},label,Object.keys(tape.state.ledger),layout,p5))return'invalid';
+  if(!relation({...t,publicationRecovery:undefined,executed:s.executed,intervention:s.intervention,finalAction:s.executed?{action:s.executed.action,targetSlot:s.executed.target.kind==='single'?s.executed.target.figureId:null,candidateName:s.executed.name,discriminatingFeature:s.executed.feature}:null},label,Object.keys(tape.state.ledger),layout,p5,CTX.humanLedMoveOn))return'invalid';
+  if(s.intervention?.humanMoveOn&&!tape.events?.some((event:any)=>
+    event.speaker==='human'&&event.seq===s.intervention.humanMoveOn.publicTurn&&event.id===t.lastEventId))return'invalid';
   const grounding=naming?namingVerdict(s.executed,s.intervention,t.decisions.at(-1),naming.names):undefined;
   const held=namingHold(grounding,s.executed,tape.state.ledger);
   if(label===tr.label&&!equal(t.namingGrounding??null,grounding??null))return'invalid';
@@ -1035,8 +1059,10 @@ const idsOf=(target:any):string[]=>target?.kind==='single'?[target.figureId]:tar
   const codeContext=()=>({action:s.executed.action as any,candidateName:typeof s.executed.name==='string'?s.executed.name:null,
    v3:true,holistic:true,adaptive:!!CTX.trial,factored:!!CTX.facts,ai:aiOn,publicTexts,humanTexts,recentHumanTexts:recentFor(s.executed),
    dialoguePolicy:H5()?'holistic_v5' as const:undefined,generationRetryVersion:version??'jev_generation_retry_v1',vetoed:s.intervention?.reasonCode==='vetoed_bypass_action'});
+  const structuredConfirmation=confirmationDraftV16(version)&&s.executed?.action==='confirm';
   const codesForDraft=(i:number)=>{
    const draft=draftTexts[i],name=i===0?'initial':'retry';
+   if(structuredConfirmation&&draft===null)return['confirmation_detail_mismatch'];
    if(typeof draft!=='string'||isGenerationV15(version)&&!draft.trim())return['empty_utterance'];
    const row=askedRows.find(y=>y.draft===name),shared=askedSharedRows.find(y=>y.draft===name);
    let lexical=draftViolationCodes(draft,codeContext(),genMessages[i]??[],p5?SHARED_PRIVATE:[]);
@@ -1064,9 +1090,11 @@ const idsOf=(target:any):string[]=>target?.kind==='single'?[target.figureId]:tar
      // The comparison condition's retry reason is checked against that condition's own first draft, which this verifier classifies itself.
      const v3Retry=layout==='two_stage_v3';
      const draft=generationCount===1&&(codes===undefined||hasVersionedViewpoint(version))?{orientation:v3Retry&&s4HasOrientationLeak(prevDraft,version,humanTexts,recentFor(s.executed),publicTexts),
-       ...(hasVersionedViewpoint(version)&&typeof prevDraft==='string'?{orientationCodes:findOrientationLeaks(prevDraft,'holistic_v5',version,humanTexts,recentFor(s.executed),publicTexts)}:{}),naming:typeof prevDraft==='string'&&s4NamingDecision(prevDraft.normalize('NFKC').replace(/[\s\u200b-\u200d\ufeff]/gu,''),s.executed?.action),workingNote:v3Retry&&restatedRetry&&s4HasWorkingNote(prevDraft,publicTexts),...(H()?{draftAct:lastVerdict,draftSharedClaim:CTX.p5Overclaim?lastSharedVerdict:null}:{})}:undefined;
+       ...(hasVersionedViewpoint(version)&&typeof prevDraft==='string'?{orientationCodes:findOrientationLeaks(prevDraft,'holistic_v5',version,humanTexts,recentFor(s.executed),publicTexts)}:{}),naming:typeof prevDraft==='string'&&s4NamingDecision(prevDraft.normalize('NFKC').replace(/[\s\u200b-\u200d\ufeff]/gu,''),s.executed?.action),workingNote:v3Retry&&restatedRetry&&s4HasWorkingNote(prevDraft,publicTexts),confirmationMismatch:structuredConfirmation&&prevDraft===null,...(H()?{draftAct:lastVerdict,draftSharedClaim:CTX.p5Overclaim?lastSharedVerdict:null}:{})}:undefined;
      if(!generationMessages(p.messages,t,s.executed,{...tape,vetoed:s.intervention?.reasonCode==='vetoed_bypass_action',generationGraph:(tr.turns??[]).find((u:any)=>u.turn===t.turnIndex)?.state?.graph},m.profile,generationCount++,codes,draft))return'invalid';
-     prevDraft=answer?.response?.text??answer?.text;draftTexts.push(prevDraft);genMessages.push(p.messages);lastVerdict=null;lastSharedVerdict=null;
+     const rawDraft=answer?.response?.text??answer?.text;
+     prevDraft=structuredConfirmation?confirmationDraftText(typeof rawDraft==='string'?rawDraft:'',s.executed.feature):rawDraft;
+     draftTexts.push(prevDraft);genMessages.push(p.messages);lastVerdict=null;lastSharedVerdict=null;
     }
    }
    else{
@@ -1165,7 +1193,12 @@ const idsOf=(target:any):string[]=>target?.kind==='single'?[target.figureId]:tar
        // Stage one is the action question alone; its target is proven by the target request that must follow.
        pendingTarget=true;if(final)originalInput=st;
        const oq=originalQuestions(p,st,layout);if(oq===null)return'missing';
-       if(!oq||final&&!rankProof(s.intervention,d,st)||d.action!==a.action.choice||!d.evidence?.stages?.some((e:any)=>e.stage==='action'&&e.model===answer.model&&e.responseId===answer.id&&e.costUsd===answer.usage?.cost&&e.inputBudget?.stateChars===p.state.length&&equal(e.inputBudget?.omitted,st.inputBudget?.omitted)&&equal(e.choices,{action:a.action.choice})&&equal(e.scores,{action:a.action.probabilities})))return'invalid';
+       const source=a[MOVE_ON_SOURCE_QUESTION],choices={action:a.action.choice,...(CTX.humanLedMoveOn?{[MOVE_ON_SOURCE_QUESTION]:source?.choice}:{})};
+       const scores={action:a.action.probabilities,...(CTX.humanLedMoveOn?{[MOVE_ON_SOURCE_QUESTION]:source?.probabilities}:{})};
+       if(!oq||CTX.humanLedMoveOn&&(!choiceResponse(p,answer)||!st.publicTurns?.some((turn:any)=>turn.turn===st.turn&&turn.speaker==='human'))||
+         final&&!rankProof(s.intervention,d,st)||d.action!==a.action.choice||!d.evidence?.stages?.some((e:any)=>
+         e.stage==='action'&&e.model===answer.model&&e.responseId===answer.id&&e.costUsd===answer.usage?.cost&&e.inputBudget?.stateChars===p.state.length&&
+         equal(e.inputBudget?.omitted,st.inputBudget?.omitted)&&equal(e.choices,choices)&&equal(e.scores,scores)))return'invalid';
        continue;
       }
      // two_stage_v2: a multiple target's figures are proven by the candidate-set request that must follow.
@@ -1185,12 +1218,12 @@ const idsOf=(target:any):string[]=>target?.kind==='single'?[target.figureId]:tar
     else if(Object.hasOwn(st,'selected')){
      if(r.role==='alternative_detail'){
       const selection=s.executed;
-      if(selection&&selection.action!=='request_observation'){const detail=detailProof(p,answer,selection,originalInput,s.intervention.detailEvidence,layout);if(detail===null)return'missing';if(!detail)return'invalid';if(Object.hasOwn(p.questions,'shared_construal'))sharedAlternative=true;
+      if(selection&&selection.action!=='request_observation'){const detail=detailProof(p,answer,selection,originalInput,s.intervention.detailEvidence,layout,isGenerationV16(version));if(detail===null)return'missing';if(!detail)return'invalid';if(Object.hasOwn(p.questions,'shared_construal'))sharedAlternative=true;
        if(Object.hasOwn(p.questions,'naming_grounding'))alternativeNamingDetail=true;}
      }else{
       if(r.role!=='common'||!current||pendingSet)return'invalid';
       const detail=current.action==='request_observation'?observeProof(p,answer,current,currentInput,layout)
-       :detailProof(p,answer,project(current),currentInput,current.evidence?.stages?.find((e:any)=>e.stage==='detail'),layout);
+       :detailProof(p,answer,project(current),currentInput,current.evidence?.stages?.find((e:any)=>e.stage==='detail'),layout,isGenerationV16(version));
       if(detail===null)return'missing';if(!detail)return'invalid';
       if(Object.hasOwn(p.questions,'shared_construal'))sharedDetailCalls.add(turnDecision);
       if(Object.hasOwn(p.questions,'naming_grounding'))namingDetail=true;
@@ -1238,7 +1271,7 @@ const idsOf=(target:any):string[]=>target?.kind==='single'?[target.figureId]:tar
     // A regeneration that the known drafts cannot explain is a contradiction, except where a hidden instruction (AI public claims on: the remaining private
     // instructions are not in the recorded messages) could have been echoed: that needs material the record does not hold (not reached, not a mismatch).
     if(out.kind==='publish_first'&&generationCount===2&&aiOn){out=deriveGenerationOutcome([...codes(0),'internal_prompt_echo'],codes(1),fb,clean);missing=true;}
-    const recovered=isGenerationV15(version)&&out.kind==='stop'&&out.regenerated?draftRecovery(out.violations,ex,jevNaming):null;
+    const recovered=isGenerationV15(version)&&out.kind==='stop'&&out.regenerated?draftRecovery(out.violations,ex,jevNaming,version):null;
     if(recovered&&draftViolationCodes(recovered.text,{...cc,action:recovered.judgment.action,candidateName:null},genMessages[generationCount-1]??[],p5?SHARED_PRIVATE:[]).length)return'invalid';
     if(out.kind==='stop'&&!recovered||out.regenerated!==(generationCount===2))return'invalid';
     if(label===tr.label){
@@ -1444,6 +1477,13 @@ const parseMaterial=(text:string):any=>{const x=JSON.parse(text);return x?.view=
 const usesPositionPrompt=(v:PromptVersion):boolean=>v.i172&&!(v.styleMode==='research_split'&&CTX.v3);
 const activeNative=():PromptVersion['native']=>CTX.prompt?(usesPositionPrompt(CTX.prompt)?CTX.prompt.native:NATIVE):CTX.v3?NATIVE:NATIVE_I172;
 const nativeInstructions=(s:any,layout='two_stage_v1',prospect=false)=>{const nat=activeNative();return(layout==='two_stage_v3'?nat.common.replace(NATIVE_V2.v1Stages,NATIVE_V3.stages):layout==='two_stage_v2'?nat.common.replace(NATIVE_V2.v1Stages,NATIVE_V2.stages):nat.common)+(Object.hasOwn(s,'humanReferent')?'\n'+nat.referent:'')+(prospect&&Object.hasOwn(s,'repairProspect')?'\n'+ADAPT.prospect:'')+(CTX.facts?'\n'+ADAPT.facts:'')+(s?.view==='judgment_v5'?'\n'+LEGEND_V5+(s.notationV11===true?'\n'+LEGEND_V11:'')+(s.rotationMode==='relative_pm90'?'\n'+ROTATION_V5:''):'')+(CTX.jevNaming?'\n'+NAMING_GUIDANCE:'');};
+const HUMAN_MOVE_ON_ACTION_NOTE = '\n今回の人間が話題の移行を明示的に主導したときは、命名や同定の解決を前提とせずmove_onで受け止めてください。';
+const MOVE_ON_SOURCE_INSTRUCTIONS = '今回の人間の公開発話と直前までの公開文脈から、話題の移行を誰が主導したか判定してください。図形の同定や名称の合意は問っていません。';
+const MOVE_ON_SOURCE_CRITERIA = Object.freeze({
+  human_request: '今回の人間自身が、今の図形・論点から別の図形・論点に移ることを明示的に提案・要求した。直前のAIによる移行の誘いへの同意は含まない。',
+  other: '人からの明示の移行希望はない。単なる相槌、別の対象への言及、引用、AIからの移行の誘いへの同意もここに含む。',
+  unclear: '人自身が移行を求めたのか、公開文脈から一意に判断できない。',
+});
 function originalQuestions(body:any,input:any,layout='two_stage_v1'):boolean|null{
   if(sharedMaterial(input)===false)return false;
   if(body.model!=='typesafe/jev-1.14'||!Array.isArray(input.ownSlots)||input.ownSlots.length!==6||!Array.isArray(input.observations)||!Array.isArray(input.publicNames)||Object.hasOwn(input,'nameLedger'))return false;
@@ -1462,7 +1502,10 @@ function originalQuestions(body:any,input:any,layout='two_stage_v1'):boolean|nul
    // holistic_v3: a typed naming request with no legal agree leaves accept out (the same table as the run's).
    const noAccept=s4NoAccept(input);
    const make=(actions:any)=>{add('action',text,Object.fromEntries(ACTIONS.filter(a=>!(noAccept&&a==='accept')&&targets.some(o=>legal(a,o.target,input))).map(a=>
-    [a,(CTX.legacyV3&&a==='request_observation'?NATIVE.actions.request_observation:actions[a])+sharedActionNote(a)])));return q.action;};
+    [a,(CTX.legacyV3&&a==='request_observation'?NATIVE.actions.request_observation:actions[a])+
+       (CTX.humanLedMoveOn&&a==='move_on'?HUMAN_MOVE_ON_ACTION_NOTE:'')+sharedActionNote(a)])));
+    if(CTX.humanLedMoveOn)add(MOVE_ON_SOURCE_QUESTION,MOVE_ON_SOURCE_INSTRUCTIONS,MOVE_ON_SOURCE_CRITERIA);
+    return q;};
    // One saved attempt is wholly one text version; the loop version also drops the partner's own proposed names from the propose_name catalog.
    const was=CTX.style;
    for(const [version,actions] of [['holistic',NATIVE_V3_HOLISTIC.actions],['loop',NATIVE_V3_LOOP.actions],['style',NATIVE_V3_STYLE.actions],['legacy',NATIVE_V3.actions]] as const){
@@ -1473,7 +1516,7 @@ function originalQuestions(body:any,input:any,layout='two_stage_v1'):boolean|nul
     // once the classification set of the turn is known, the request text has to be of the lineage that sent it. A turn whose lineage cannot be identified keeps both sets allowed.
     if(CTX.v3&&CTX.policy===null&&CTX.critKind!=null&&CTX.critKind!==(version==='legacy'||version==='style'?'V1':'V3'))continue;
     CTX.style=version;
-    if(equal({action:make(actions)},body.questions)){
+    if(equal(make(actions),body.questions)){
      // The saved agree candidates must follow the rule of this very criteria version: the current text only the grounded, undenied figures; older texts the earlier one.
      if(CTX.agreeMatch&&!(version==='loop'||version==='holistic'?CTX.agreeMatch.l2:CTX.agreeMatch.l0)){CTX.style=was;return false;}
      return true;
@@ -1481,7 +1524,7 @@ function originalQuestions(body:any,input:any,layout='two_stage_v1'):boolean|nul
    }
    CTX.style=was;
    // A record without the policy whose request text is the holistic text cannot be identified as any earlier version: never a reproduction success.
-   if(!H()&&CTX.style===null){const was2=CTX.policy;let same=false;for(const pol of ['holistic_v1','holistic_v2','holistic_v3','holistic_v4'] as const){CTX.policy=pol;if(equal({action:make(NATIVE_V3_HOLISTIC.actions)},body.questions))same=true;}CTX.policy=was2;if(same)return null;}
+   if(!H()&&CTX.style===null){const was2=CTX.policy;let same=false;for(const pol of ['holistic_v1','holistic_v2','holistic_v3','holistic_v4'] as const){CTX.policy=pol;if(equal(make(NATIVE_V3_HOLISTIC.actions),body.questions))same=true;}CTX.policy=was2;if(same)return null;}
    return false;
   }
   add('action',text,Object.fromEntries(ACTIONS.filter(a=>(a!=='request_observation'||input.reobservationAllowed)&&(a!=='agree'||agreeOffered)).map(a=>[a,activeNative().actions[a]])));
@@ -1612,7 +1655,8 @@ function detailResponseProof(body:any,response:any,evidence:any,input:any,questi
   equal(evidence.choices,Object.fromEntries(Object.entries(response.answers).map(([k,v]:any)=>[k,v.choice])))&&
   equal(evidence.scores,Object.fromEntries(Object.entries(response.answers).map(([k,v]:any)=>[k,v.probabilities])));
 }
-function detailProof(body:any,response:any,selection:any,original:any,evidence:any,layout='two_stage_v1'):boolean|null{
+const DISCRIMINATING_CONFIRM_DETAIL_S4 = "今の論点で何が未確認かを、観察メモと公開発話の意味から判断してください。候補の弁別が必要なら、候補によって違いがあり、まだ答えられていない特徴を優先してください。全候補に共通するだけの特徴や、既に肯定・否定・訂正された点の言い換えは、いまの論点に情報を加えない限り繰り返さないでください。候補を減らす必要がない場合は、同じ論点で未確認の部分の形や対応を確かめる特徴を選んでください。弁別できる特徴が無ければ、同じ論点で相手の説明と見比べられる特徴を選んでください。明示された呼び名の決定の申し出は、いま確かめている対象についての発話として扱い、名称や対象の確定とはみなさないでください。観察メモに記載がないことは、その特徴がない根拠にはなりません。";
+function detailProof(body:any,response:any,selection:any,original:any,evidence:any,layout='two_stage_v1',discriminatingConfirmation=false):boolean|null{
  const input=parseMaterial(body.state);if(!original||!equal(input.selected,{action:selection.action,target:selection.target}))return false;
  const same=sameMaterial(input,original);if(same!==true)return same;
  // agree under a v3 attempt without a known saved evidence source cannot be told from forgery.
@@ -1622,7 +1666,19 @@ function detailProof(body:any,response:any,selection:any,original:any,evidence:a
  if(selection.action==='accept')return !!sharedQuestion&&detailResponseProof(body,response,evidence,input,{shared_construal:sharedQuestion})&&
   sharedAnswer(selection,response.answers.shared_construal.choice,offered)&&selection.name===null&&selection.feature===null&&equal(selection.detailFigureIds??[],[]);
  if(!sharedQuestion&&Object.hasOwn(selection,'sharedClaimIds'))return false;
- const kind=['propose_name','agree'].includes(selection.action)?'name':'feature',rawCs=selection.action==='agree'&&CTX.agree!==undefined?agreeCatalog(input,selection.target):catalog(input,selection.target,kind),cs=layout==='two_stage_v3'&&(selection.action==='confirm'||!CTX.legacyV3&&selection.action==='repair')?unaskedConfirmFeatures(input,selection.target,rawCs):rawCs,criteria=Object.fromEntries(cs.map((c,i)=>[kind+'_'+i,JSON.stringify(c)])),questions={[kind]:{type:'choice',instructions:nativeInstructions(input,layout)+`\n第1段の${selection.action}に必要な${kind==='name'?'名称':'確認特徴'}だけを選んでください。出典図形は特徴の出所であり、対象候補を単一に確定するものではありません。`,criteria}};
+ const confirmation=discriminatingConfirmation&&selection.action==='confirm'?'\n'+DISCRIMINATING_CONFIRM_DETAIL_S4:'';
+ const kind=['propose_name','agree'].includes(selection.action)?'name':'feature';
+ const rawCs=selection.action==='agree'&&CTX.agree!==undefined?agreeCatalog(input,selection.target):catalog(input,selection.target,kind);
+ let cs=layout==='two_stage_v3'&&(selection.action==='confirm'||!CTX.legacyV3&&selection.action==='repair')
+  ?unaskedConfirmFeatures(input,selection.target,rawCs):rawCs;
+ if(discriminatingConfirmation&&selection.action==='confirm'){
+  const comparisonIds=selection.target.kind==='multiple'?selection.target.figureIds:input.ownSlots;
+  const common=new Set(catalog(input,{kind:'multiple',figureIds:comparisonIds},'feature')
+   .filter(candidate=>candidate.figureIds.length===comparisonIds.length).map(candidate=>candidate.value));
+  if(cs.every(candidate=>common.has(candidate.value)))cs=[...cs,...rawCs.filter(candidate=>!common.has(candidate.value))];
+ }
+ const criteria=Object.fromEntries(cs.map((c,i)=>[kind+'_'+i,JSON.stringify(c)]));
+ const questions={[kind]:{type:'choice',instructions:nativeInstructions(input,layout)+`\n第1段の${selection.action}に必要な${kind==='name'?'名称':'確認特徴'}だけを選んでください。出典図形は特徴の出所であり、対象候補を単一に確定するものではありません。`+confirmation,criteria}};
  const expected={...questions,...(sharedQuestion?{shared_construal:sharedQuestion}:{}),
   ...(CTX.jevNaming&&selection.action==='agree'?namingQuestions(nativeInstructions(input,layout),selection.target,cs,input.namingEvidence.names):{})};
  if(!detailResponseProof(body,response,evidence,input,expected)||sharedQuestion&&
@@ -1653,6 +1709,11 @@ function generationMessages(messages:any[],trace:any,execution:any,tape:any,prof
  if(CTX.style==='legacy')return generationMessagesWith(messages,trace,execution,tape,profile,fixedBase,{v3:[TRIAL,TRIAL_V3_PREV],legacy:LEGACY_TRIAL},index,codes,draft);
  return generationMessagesWith(messages,trace,execution,tape,profile,fixedBase,{v3:[TRIAL,TRIAL_V3_PREV],legacy:LEGACY_TRIAL},index,codes,draft)||generationMessagesWith(messages,trace,execution,tape,profile,fixedStyle,{v3:[trialStyle],legacy:legacyTrialStyle},index,codes,draft);
 }
+const DISCRIMINATING_CONFIRM_V16_S4 = "選ばれた特徴を根拠に、公開対話でまだ答えられていない点を一つ、同じ論点で尋ねてください。すでに肯定・否定・訂正された点や、それだけでは候補の区別にも部分の照合にも役立たない共通の特徴を、言い換えて再質問しないでください。選ばれた特徴が共通の目印なら、自分の見え方や相手の説明を手がかりに、同じ特徴について残っている部分の対応や説明の意味を尋ねてください。別の特徴を選び直さず、観察にない形や相手の画面の見え方を補わないでください。相手から呼び名を決めたいという申し出があれば、現在の確認に結びつけ、採用や同定は断定しないでください。";
+const CONFIRMATION_DRAFT_V16_S4 = '回答はキーがcheckedFeatureとtextのJSONオブジェクト1個だけにしてください。textは相手に向けた自然な確認文です。checkedFeatureはその確認文が実際に尋ねている特徴に対応する観察メモの値を、表記を変えずに入れてください。確認文ではその値と同じ表記にそろえる必要はありません。';
+// The first v16 PR revision used plain generation responses and has its own source fingerprint.
+const confirmationDraftV16=(version:RecordedGenerationRetryVersion|undefined)=>
+ isGenerationV16(version)&&CTX.prompt?.id!=='p5_discriminating_confirmation_v16';
 function generationMessagesWith(messages:any[],trace:any,execution:any,tape:any,profile:any,FIXED:any,trials:{v3:any[];legacy:any},index:number,codes?:readonly string[],draft?:RetryDraftEvidence):boolean{
  if(!trace.finalAction||!execution)return false;const g={action:execution.action,targetSlot:execution.target.kind==='single'?execution.target.figureId:null,candidateName:execution.name,discriminatingFeature:execution.feature,note:null};
  const graph=tape.generationGraph??tape.state.graph;
@@ -1673,7 +1734,9 @@ function generationMessagesWith(messages:any[],trace:any,execution:any,tape:any,
   const acceptNote=versionedGeneration&&accept?ACCEPT_FEATURE_REPLY_V5_S4+'\n':'';
   const reconfirmNote=versionedGeneration&&accept&&CTX.namingReconfirm?RECONFIRM_NAME_V5_S4+'\n':'';
   const vetoNote=isGenerationV6(tape.generationRetryVersion)&&(tape.vetoed===true||execution.action==='confirm'||execution.action==='repair')?VETOED_MOVE_V6_S4+'\n':'';
-  const actionMessage={role:'system',content:FIXED.act+'\n'+scope+'\n'+vetoNote+acceptNote+reconfirmNote+namingNote+conflictNote+featureNote+JSON.stringify({...g,target:execution.target,...(Object.hasOwn(execution,'detailFigureIds')?{detailFigureIds:execution.detailFigureIds}:{})})};
+  const confirmation=isGenerationV16(tape.generationRetryVersion)&&execution.action==='confirm'
+   ?DISCRIMINATING_CONFIRM_V16_S4+'\n'+(confirmationDraftV16(tape.generationRetryVersion)?CONFIRMATION_DRAFT_V16_S4+'\n':''):'';
+  const actionMessage={role:'system',content:FIXED.act+'\n'+scope+'\n'+vetoNote+acceptNote+reconfirmNote+namingNote+conflictNote+featureNote+confirmation+JSON.stringify({...g,target:execution.target,...(Object.hasOwn(execution,'detailFigureIds')?{detailFigureIds:execution.detailFigureIds}:{})})};
   const shared=execution.sharedClaimIds&&CTX.p5?CTX.shared.find(f=>equal(f.claimIds,execution.sharedClaimIds)):undefined;
   if(execution.sharedClaimIds&&!shared)return false;
   const sharedMessage=shared?{role:'system',content:(execution.action==='confirm'?SHARED_CONSTRUAL_CONFIRM_INSTRUCTIONS:SHARED_CONSTRUAL_INSTRUCTIONS)+'\n'+
@@ -1881,9 +1944,10 @@ export function interventionChecks(records:Records):Check[]{
     const suppliedReplay=tr.replay??[];
     const replayEntries=Array.isArray(suppliedReplay)?suppliedReplay.filter((v:any)=>v?.tape?.events?.at(-1)?.seq===t.turnIndex):[];
     const layout=layoutOf(tr.profile),policy=tr.profile?.dialoguePolicy,p5=p5At(layout,policy,t.generationRetryVersion);
+    const humanLedMoveOn=tr.profile?.interventionPolicy?.version==='bypass_acceptance_v2';
     const failureSlots=Object.keys(tr.lastCommittedState?.ledger??replayEntries[0]?.tape?.state?.ledger??ownTurns[0]?.state?.ledger??{});
     const jevNaming=(ownTurns[0]?.state?.agreeNameScopeVersion??tr.lastCommittedState?.agreeNameScopeVersion??replayEntries[0]?.tape?.state?.agreeNameScopeVersion)==='jev_naming_v1';
-    if(!traceShape(t,layout,policy,failureSlots,jevNaming)||!related.every((c:any)=>traceShape(c,layout,policy,failureSlots,jevNaming))){
+    if(!traceShape(t,layout,policy,failureSlots,humanLedMoveOn,jevNaming)||!related.every((c:any)=>traceShape(c,layout,policy,failureSlots,humanLedMoveOn,jevNaming))){
      for(const k of ['shape','binding','execution','replay'])add(k,'mismatch','intervention_trace_invalid');continue;
     }
     add('shape','pass','closed_intervention_trace');
@@ -1899,7 +1963,7 @@ export function interventionChecks(records:Records):Check[]{
      if(ownTurns.some((v:any)=>v.turn!==t.turnIndex||v.publicText!==t.publicSpeech))conflict=true;
      if(t.generationGuard?.fallback===true){
       const expectedFallback=t.publicationRecovery?(holdPublication(t.publicationRecovery.reason)??
-       draftRecovery(t.generationGuard.violations,t.executed,jevNaming))?.text:expectedOrientationFallback(t.finalAction);
+       draftRecovery(t.generationGuard.violations,t.executed,jevNaming,t.generationRetryVersion))?.text:expectedOrientationFallback(t.finalAction);
       const aiOn=tr.profile?.localGrounding?.aiPublicClaims===true||Object.hasOwn(tr.lastCommittedState??{},'aiPublic')||js.some((j:any)=>Object.hasOwn(j,'aiPublic'))||Boolean(t.aiPublic);
       if(layout!=='two_stage_v3'||!expectedFallback||t.publicSpeech!==expectedFallback||(aiOn&&t.aiPublic?.pending?.status!=='skipped_fallback'))conflict=true;
      }
@@ -1916,7 +1980,7 @@ export function interventionChecks(records:Records):Check[]{
       // An ambiguous action (a multiple revisit or confirm/repair, an unresolved defer) never rewrites a slot: every slot's name and status after the turn,
       // in the turn state and in the last committed state when that is this turn, equals the ledger before it.
       const ex=t.executed,ambiguous=!!ex&&(ex.action==='revisit'&&ex.target?.kind==='multiple'||ex.action==='defer'&&ex.target?.kind!=='single'||['confirm','repair'].includes(ex.action)&&ex.target?.kind==='multiple');
-      if(ambiguous||t.publicationRecovery){
+      if(ambiguous||t.publicationRecovery||t.intervention?.humanMoveOn){
        const before=(Array.isArray(tr.replay)?tr.replay:[]).find((v:any)=>v?.tape?.events?.at(-1)?.seq===t.turnIndex)?.tape?.state?.ledger??[...turns].filter((v:any)=>v.turn<t.turnIndex).sort((a:any,b:any)=>a.turn-b.turn).at(-1)?.state?.ledger;
        const after=[...turns.filter((v:any)=>v.turn===t.turnIndex).map((v:any)=>v.state),tr.lastCommittedState].filter((x:any)=>x&&stateJudgments(x).length&&judgmentKey(stateJudgments(x).at(-1))===key).map((x:any)=>x.ledger);
        if(!before||!after.length)missing=true;else if(after.some((l:any)=>!equal(l,before)))conflict=true;
@@ -1942,14 +2006,14 @@ export function interventionChecks(records:Records):Check[]{
     if(missing){
      add('binding','not_reached','intervention_trace_missing');
      // A malformed execution relation outranks a missing owner source (malformed → contradictory → missing).
-     if(!committed&&!relation(t,tr.label,ledgerSlots,layout,p5,jevNaming))add('execution','mismatch','intervention_execution_mismatch');else add('execution','not_reached','intervention_trace_missing');
+     if(!committed&&!relation(t,tr.label,ledgerSlots,layout,p5,humanLedMoveOn,jevNaming))add('execution','mismatch','intervention_execution_mismatch');else add('execution','not_reached','intervention_trace_missing');
      // Replay is required only for committed attempts; a missing owner is not a replay contradiction.
      if(malformedReplay)add('replay','mismatch','intervention_replay_mismatch');
      else if(committed)add('replay','not_reached','intervention_trace_missing');else add('replay','pass','versioned_intervention_replay',{applicable:false});
      continue;
     }
     add('binding','pass','committed_execution_binding');
-    const rel=relation(t,tr.label,ledgerSlots,layout,p5,jevNaming);add('execution',rel?'pass':'mismatch',rel?'validated_executed_projection':'intervention_execution_mismatch',t.intervention===null&&t.executed===null?{applicable:false}:undefined);
+    const rel=relation(t,tr.label,ledgerSlots,layout,p5,humanLedMoveOn,jevNaming);add('execution',rel?'pass':'mismatch',rel?'validated_executed_projection':'intervention_execution_mismatch',t.intervention===null&&t.executed===null?{applicable:false}:undefined);
     if(malformedReplay){add('replay','mismatch','intervention_replay_mismatch');continue;}
     if(!committed&&!replayEntries.length){add('replay','pass','versioned_intervention_replay',{applicable:false});continue;}
     const proof=replayProof(r,tr,t,key!);add('replay',proof==='ok'?'pass':proof==='missing'?'not_reached':'mismatch',proof==='ok'?'versioned_intervention_replay':proof==='missing'?'intervention_replay_missing':'intervention_replay_mismatch');
@@ -2395,6 +2459,66 @@ const PROMPT_VERSIONS:readonly PromptVersion[]=[
   'local-grounding/extract.ts':'6e9461e860f22923dbece02c7988713422ed81ac32d937f6d59df8eff84bd83e',
   'local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01',
   'decision/jev-decision.ts':'ac62e50df5478283f7d16ae8ee4832d34a4237302ef4418095b3f09e9fa99991',
+  'local-grounding/extract-ai.ts':'e489b7ff573fdbe9e4f0adc9b6ee5f0828bd3c6835dcd8cd6555e191161594a6',
+  'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
+ }},fixed:FIXED_I172,native:NATIVE_I172},
+ {id:'p5_discriminating_confirmation_v16',i172:true,styleMode:'research_split',sources:{scheme:'complete_instruction_source_sha256',files:{
+  'v2/dialogue-v2.mjs':'0ca530878393721b6d48b55240e2b8c848910758501d90f579b2e0c65a6d1dd6',
+  'v2/jev-turn.ts':'8be437df3a26438524ff5a14d0f151327cba2aa24b50336983c7c5c11f6bab52',
+  'v2/generation-guard.ts':'32ba4a3fc9161c5191a0a1af819cd2330db7abea7fd72f5fb62b854e4e1458c1',
+  'judgment/instructions.mjs':'0add2f40aaaa01bfdacd1b99418b94e288eb45da6593595304f8d36d0f22de27',
+  'observation/observe.ts':'469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad',
+  'local-grounding/extract.ts':'6e9461e860f22923dbece02c7988713422ed81ac32d937f6d59df8eff84bd83e',
+  'local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01',
+  'decision/jev-decision.ts':'974551ec4103da7d48b5fcd411bd00f95852db51af67b116310faa9c1828c85e',
+  'local-grounding/extract-ai.ts':'e489b7ff573fdbe9e4f0adc9b6ee5f0828bd3c6835dcd8cd6555e191161594a6',
+  'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
+ }},fixed:FIXED_I172,native:NATIVE_I172},
+ {id:'p5_discriminating_confirmation_v16_draft_binding',i172:true,styleMode:'research_split',sources:{scheme:'complete_instruction_source_sha256',files:{
+  'v2/dialogue-v2.mjs':'0ca530878393721b6d48b55240e2b8c848910758501d90f579b2e0c65a6d1dd6',
+  'v2/jev-turn.ts':'afa585c532f118d7cf361878c5197cf072719e0c28d50738662c63524ecc27b6',
+  'v2/generation-guard.ts':'6ba7c39a65d3a4c3910835d68fdf2a625894d6b810ed95f1494b8a63b96ea2cb',
+  'judgment/instructions.mjs':'0add2f40aaaa01bfdacd1b99418b94e288eb45da6593595304f8d36d0f22de27',
+  'observation/observe.ts':'469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad',
+  'local-grounding/extract.ts':'6e9461e860f22923dbece02c7988713422ed81ac32d937f6d59df8eff84bd83e',
+  'local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01',
+  'decision/jev-decision.ts':'974551ec4103da7d48b5fcd411bd00f95852db51af67b116310faa9c1828c85e',
+  'local-grounding/extract-ai.ts':'e489b7ff573fdbe9e4f0adc9b6ee5f0828bd3c6835dcd8cd6555e191161594a6',
+  'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
+ }},fixed:FIXED_I172,native:NATIVE_I172},
+ {id:'p5_human_led_move_on_v2',i172:true,styleMode:'research_split',sources:{scheme:'complete_instruction_source_sha256',files:{
+  'v2/dialogue-v2.mjs':'f9c37058b338e7cf55ebfef6b9a3f542deb7e234d40c8c3ce6919b659760ad95',
+  'v2/jev-turn.ts':'c1c6f38c619f5c0ad0730b1b35a01722584556c89b14733c42d1f38aa7bf4561',
+  'v2/generation-guard.ts':'7e7618df672cf79545ad9934ee49311966a1ec04c9dae0da2869f4755ea3cba5',
+  'judgment/instructions.mjs':'0add2f40aaaa01bfdacd1b99418b94e288eb45da6593595304f8d36d0f22de27',
+  'observation/observe.ts':'469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad',
+  'local-grounding/extract.ts':'6e9461e860f22923dbece02c7988713422ed81ac32d937f6d59df8eff84bd83e',
+  'local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01',
+  'decision/jev-decision.ts':'f3d8b65de7052372810591c87158aafd93944e067267265ff5280e009e217d28',
+  'local-grounding/extract-ai.ts':'e489b7ff573fdbe9e4f0adc9b6ee5f0828bd3c6835dcd8cd6555e191161594a6',
+  'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
+ }},fixed:FIXED_I172,native:NATIVE_I172},
+ {id:'p5_discriminating_confirmation_v16_human_led_move_on',i172:true,styleMode:'research_split',sources:{scheme:'complete_instruction_source_sha256',files:{
+  'v2/dialogue-v2.mjs':'f9c37058b338e7cf55ebfef6b9a3f542deb7e234d40c8c3ce6919b659760ad95',
+  'v2/jev-turn.ts':'aec7dc4fd98e88fcb4a89bf8eaf8092013bfe4f4891bb1cf64253b8171026288',
+  'v2/generation-guard.ts':'6ba7c39a65d3a4c3910835d68fdf2a625894d6b810ed95f1494b8a63b96ea2cb',
+  'judgment/instructions.mjs':'0add2f40aaaa01bfdacd1b99418b94e288eb45da6593595304f8d36d0f22de27',
+  'observation/observe.ts':'469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad',
+  'local-grounding/extract.ts':'6e9461e860f22923dbece02c7988713422ed81ac32d937f6d59df8eff84bd83e',
+  'local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01',
+  'decision/jev-decision.ts':'cd82a15c7516e4ca970591681ef4f4442af9b9776528843b317bba686628c3d8',
+  'local-grounding/extract-ai.ts':'e489b7ff573fdbe9e4f0adc9b6ee5f0828bd3c6835dcd8cd6555e191161594a6',
+  'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
+ }},fixed:FIXED_I172,native:NATIVE_I172},
+ {id:'p5_jev_naming_v16_human_led_move_on',i172:true,styleMode:'research_split',sources:{scheme:'complete_instruction_source_sha256',files:{
+  'v2/dialogue-v2.mjs':'f9c37058b338e7cf55ebfef6b9a3f542deb7e234d40c8c3ce6919b659760ad95',
+  'v2/jev-turn.ts':'6ed560472308f5263f80de20c37a2fc380e15635d7a5f4de550f3cfa84ed3559',
+  'v2/generation-guard.ts':'49fc02d7e3940309e5f3fb5c0390e12cfdca48df5968d4c762d179d728378c26',
+  'judgment/instructions.mjs':'0add2f40aaaa01bfdacd1b99418b94e288eb45da6593595304f8d36d0f22de27',
+  'observation/observe.ts':'469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad',
+  'local-grounding/extract.ts':'6e9461e860f22923dbece02c7988713422ed81ac32d937f6d59df8eff84bd83e',
+  'local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01',
+  'decision/jev-decision.ts':'1773f89ee98b90d5cc587ca171bdc8c5eba3c39bfd2a49ed236d94a15df29154',
   'local-grounding/extract-ai.ts':'e489b7ff573fdbe9e4f0adc9b6ee5f0828bd3c6835dcd8cd6555e191161594a6',
   'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
  }},fixed:FIXED_I172,native:NATIVE_I172},

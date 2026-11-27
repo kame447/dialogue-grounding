@@ -1,5 +1,6 @@
 // Pure version selection. Model-only validation deliberately precedes policy values.
 import {resolveModelPolicy} from './model-policy.ts';
+import {BYPASS_ACCEPTANCE_V2_TABLE_SHA256} from './decision/human-led-move-on.ts';
 // Frozen C reference literal, not a caller-supplied/recomputed policy table.
 const BYPASS_ACCEPTANCE_V1_TABLE_SHA256='376d569120ca36a3eceaf5ab95410f7eb83f25fbb681e7566a684b97c35165c8';
 import type {InterventionPolicyReference} from './v2/research-profile.ts';
@@ -31,7 +32,9 @@ export function resolveInterventionPolicy(profile:unknown):ResolvedInterventionP
   version=r.version.value;digest=r.tableSha256.value;
   if(typeof version!=='string'||!version.length||typeof digest!=='string'||!/^[0-9a-f]{64}$/.test(digest))throw Error();
  }catch{fail('intervention_contract_invalid');}
- if(version!=='bypass_acceptance_v1')fail('intervention_contract_unknown');
- if(digest!==BYPASS_ACCEPTANCE_V1_TABLE_SHA256)fail('intervention_table_mismatch');
- return Object.freeze({profileId:id,mode:'explicit',interventionPolicy:Object.freeze({version:'bypass_acceptance_v1',tableSha256:BYPASS_ACCEPTANCE_V1_TABLE_SHA256})});
+ if(version!=='bypass_acceptance_v1'&&version!=='bypass_acceptance_v2')return fail('intervention_contract_unknown');
+ if(version==='bypass_acceptance_v2'&&(d.questionLayout?.value!=='two_stage_v3'||d.dialoguePolicy?.value!=='holistic_v5'))return fail('intervention_profile_invalid');
+ const expected=version==='bypass_acceptance_v1'?BYPASS_ACCEPTANCE_V1_TABLE_SHA256:BYPASS_ACCEPTANCE_V2_TABLE_SHA256;
+ if(digest!==expected)fail('intervention_table_mismatch');
+ return Object.freeze({profileId:id,mode:'explicit',interventionPolicy:Object.freeze({version,tableSha256:expected})});
 }

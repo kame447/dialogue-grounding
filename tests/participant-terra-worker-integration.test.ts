@@ -15,6 +15,7 @@ import { handleRequest } from '../workers/research-ai-proxy/src/index.mjs';
 import { PARTICIPANT_PRODUCTION_PROFILE } from '../dialogue-model/runtime/web/participant-usage-policy.ts';
 import { configuredParticipantPin, participantChoices, participantUsageChoices } from '../workers/research-ai-proxy/src/participant-transport.ts';
 import { INITIAL_OBSERVATION_STRUCTURED_V1 } from '../dialogue-model/runtime/observation/initial-observation-generation.ts';
+import { buildObservationMessages } from '../dialogue-model/runtime/observation/observe.ts';
 
 registerHooks({ resolve(name, context, next) {
   if (name === 'cloudflare:workers') {
@@ -81,11 +82,19 @@ function memory() {
   let pending: Promise<unknown> = Promise.resolve();
   const view = (m: Map<string, any>) => ({
     async get(key: string) { return structuredClone(m.get(key)); },
-    async put(entries: Record<string, unknown>) { for (const [key, value] of Object.entries(entries)) m.set(key, structuredClone(value)); },
+    async put(entries: Record<string, unknown> | string, value?: unknown) {
+      for (const [key, item] of Object.entries(typeof entries === 'string' ? { [entries]: value } : entries)) {
+        m.set(key, structuredClone(item));
+      }
+    },
+    async list({ prefix }: { prefix: string }) {
+      return new Map([...m].filter(([key]) => key.startsWith(prefix)).map(([key, value]) => [key, structuredClone(value)]));
+    },
     async delete(key: string) { return m.delete(key); },
   });
   return {
     async get(key: string) { return view(items).get(key); },
+    async list(prefix: string) { return view(items).list({ prefix }); },
     async deleteAlarm() {},
     transaction<T>(fn: (tx: ReturnType<typeof view>) => Promise<T>) {
       const update = pending.then(async () => {
@@ -99,16 +108,24 @@ function memory() {
   };
 }
 
+function gate() {
+  let resolve!: () => void;
+  const promise = new Promise<void>(done => { resolve = done; });
+  return { promise, resolve };
+}
+
 function harness(enabled = true, selectedProtocol: typeof protocol & {
-  figureSelection?: { mode: string; setId: string }; figureSetPolicy?: string;
-} = protocol) {
+  figureSelection?: { mode: string; setId?: string; selectionSeed?: number }; figureSetPolicy?: string;
+} = protocol, preobserve = false) {
   const canonical = selectedProtocol.schemaVersion === 'reception_protocol_v3'
     ? canonicalReceptionProtocolV3(selectedProtocol) : canonicalReceptionProtocolV2(selectedProtocol);
   const sha256 = receptionProtocolSha256(canonical);
   const displayed = { protocolId: selectedProtocol.protocolId, revision: selectedProtocol.revision, sha256 };
   const storage = memory(), calls: Array<{ kind: string; expected: string; body: any }> = [];
+  const background: Promise<unknown>[] = [];
   const controlled: { policy: unknown; terra: unknown; luna: unknown; jev: unknown; legacyCalls: number; observe: boolean; mixedUsage: boolean; invalidTerra?: boolean; rejectJev?: boolean; selectedAction?: string; observationName?: string;
     usageChat?: (body: any, expected: string) => Promise<any>; holdChoice?: () => Promise<void>;
+    onStartObservationRead?: () => void;
     choose?: (name: string, body: { state: string; questions: Choices }) => string | undefined;
     wrongChoiceModel?: (questions: Choices) => boolean; secondAction?: string } =
     { policy: { ...pin }, terra: pin.terraModelId, luna: pin.lunaModelId, jev: pin.jevModelId, legacyCalls: 0, observe: false, mixedUsage: false };
@@ -185,19 +202,28 @@ function harness(enabled = true, selectedProtocol: typeof protocol & {
     },
   };
 
-  function makeSession() {
-    const session = new TangramSession({ storage, id: { toString: () => 'c'.repeat(64) }, waitUntil() {} }, env);
+  function makeSession(warmup: boolean) {
+    const session = new TangramSession({ storage, id: { toString: () => 'c'.repeat(64) },
+      waitUntil(promise: Promise<unknown>) { background.push(promise); } }, env);
     session.settings = async () => ({ mode: { value: 'on', revision: 1 }, protocol: { protocol: selectedProtocol, revision: selectedProtocol.revision, sha256 } });
+    // Existing start-path cases use the same frozen approval with no warmup scheduled, as on a pre-deployment reception.
+    if (!warmup) session.schedulePreobservations = async () => {};
+    const cache = session.preobservations.startCache, read = cache.read;
+    cache.read = (key: string, signal?: AbortSignal) => {
+      controlled.onStartObservationRead?.();
+      return read(key, signal);
+    };
     return session;
   }
-  let session = makeSession();
+  let session = makeSession(preobserve);
   const request = (path: string, body?: unknown, method = body === undefined ? 'GET' : 'POST') =>
     session.fetch(new Request('https://session.invalid/api/' + path, { method, ...(body === undefined ? {}
       : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }) })) as Promise<Response>;
 
   return {
     storage, calls, controlled, env, request,
-    evict() { session = makeSession(); },
+    async settleBackground() { await Promise.all(background.splice(0)); },
+    evict(warmup = preobserve) { session = makeSession(warmup); },
     adminRecord(recordId: string) { return session.adminRecord(recordId); },
     browserRequest(request: Request) {
       return participantWorker.fetch(request, { ...env,
@@ -1497,8 +1523,231 @@ function v12Transport(t: TestContext, h: ReturnType<typeof harness>) {
       .map((message: { content: unknown }) => String(message.content)) });
     return Response.json(chatResponse(options.wrongPhase === phase ? pin.lunaModelId : pin.terraModelId, response));
   });
-  return { lookup, options, textPhases, prompts };
+  return { lookup, options, textPhases, prompts, observationPolicy: () => proxy.participantInitialObservationPolicy() };
 }
+
+test('Terra preobserve keeps the approved P5 pin, accounts a shared board once, and starts from the cache after eviction', async t => {
+  const h = harness(true, figureBankProtocol, true);
+  const transport = v12Transport(t, h);
+  h.env.PARTICIPANT_DIALOGUE_PROFILE = v13NamingV4Dialogue;
+  h.env.PARTICIPANT_TERRA_INITIAL_OBSERVATION_GENERATION = INITIAL_OBSERVATION_STRUCTURED_V1;
+  h.env.PARTICIPANT_AI_PROXY.participantInitialObservationPolicy = transport.observationPolicy;
+  await h.receive();
+  const [result, duplicate] = await Promise.allSettled([h.approve(), h.approve()]);
+  assert.equal(result.status, 'fulfilled');
+  assert.equal(duplicate.status, 'rejected');
+  if (result.status !== 'fulfilled' || duplicate.status !== 'rejected') assert.fail();
+  assert.equal(duplicate.reason.code, 'reception_conflict');
+  const approved = result.value;
+  assert.equal(approved.plan.participantDialogueProfile, v13NamingV4Dialogue);
+  assert.equal(approved.plan.participantModelPin.schemaVersion, 'participant_model_pin_v3');
+  await h.settleBackground();
+  assert.deepEqual(transport.textPhases, ['initial_observation']);
+  assert.equal((await h.storage.get('base:owner:v1')).activeKey, null);
+  assert.deepEqual((await h.storage.get('reception:v1')).trials, []);
+  const usagePath = '/admin/reception/' + approved.receptionId + '/usage.json';
+  assert.equal((await h.admin(usagePath, false)).status, 401);
+  const exported = await jsonOk(await h.admin(usagePath));
+  assert.deepEqual(exported.failedStarts, []);
+  assert.equal(exported.preobservations.length, 1);
+  const [warm] = exported.preobservations;
+  assert.deepEqual(warm.trialIndices, [0, 1]);
+  assert.equal(warm.status, 'ready');
+  assert.ok(Date.parse(warm.finishedAt) >= Date.parse(warm.startedAt));
+  assert.equal(warm.usage.assignmentId, undefined);
+  assert.deepEqual(warm.usage.returnedModels.terra.initial_observation, { model: pin.terraModelId, ok: 1 });
+  const meter = warm.usage.phases.terra.initial_observation;
+  assert.deepEqual([meter.calls, meter.posts, meter.unknownPosts, meter.inputTokens, meter.outputTokens, meter.missingCostPosts], [1, 1, 0, 5, 3, 1]);
+  h.evict();
+  assert.deepEqual(await jsonOk(await h.admin(usagePath)), exported);
+  const start = await jsonOk(await h.start());
+  const record = await h.storage.get('record:' + start.trial.sessionId);
+  const initial = record.jevLedger.phases.terra.initial_observation;
+  assert.deepEqual([initial.calls, initial.posts, initial.cacheHits], [1, 0, 1]);
+  assert.deepEqual(transport.textPhases, ['initial_observation']);
+  assert.doesNotMatch(JSON.stringify(start), /preobservations|returnedModels|terra_initial_observation|gpt-6|ownAnchors|knownUsd/u);
+  await h.complete(start.trial.sessionId, start.trial);
+  const second = await jsonOk(await h.start(start.trial.sessionId));
+  const secondRecord = await h.storage.get('record:' + second.trial.sessionId);
+  const secondInitial = secondRecord.jevLedger.phases.terra.initial_observation;
+  assert.deepEqual([secondInitial.posts, secondInitial.cacheHits], [0, 1]);
+  assert.deepEqual(transport.textPhases.filter(phase => phase === 'initial_observation'), ['initial_observation']);
+});
+
+test('Terra preobserve makes a separate validated memo for each distinct frozen AI board', async () => {
+  const h = harness(true, { ...figureBankProtocol, figureSetPolicy: 'per_trial',
+    figureSelection: { mode: 'seeded_random', selectionSeed: 201 } }, true);
+  await h.receive();
+  const approved = await h.approve();
+  await h.settleBackground();
+  const visual = h.calls.filter(({ kind }) => kind === 'visual_observation');
+  assert.equal(visual.length, 2);
+  for (const { seed, rotationMode, figureSelection } of approved.plan.trials) {
+    const model = modelView(createTrialV2({ seed, rotationMode, figureSelection }));
+    const expected = buildObservationMessages({
+      ownImage: { mimeType: model.mimeType, base64: model.png.toString('base64') },
+      ownAnchors: [...model.anchors].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+    });
+    assert.equal(visual.filter(({ body }) => JSON.stringify(body.messages) === JSON.stringify(expected)).length, 1);
+  }
+  const entries = await h.storage.list('terra_initial_observation_v1:');
+  assert.equal(entries.size, 2);
+  const { preobservations } = await jsonOk(await h.admin('/admin/reception/' + approved.receptionId + '/usage.json'));
+  assert.deepEqual(preobservations.map(({ trialIndices }: any) => trialIndices[0]).sort(), [0, 1]);
+  for (const { status, usage } of preobservations) {
+    assert.equal(status, 'ready');
+    assert.equal(usage.phases.terra.initial_observation.posts, 1);
+  }
+});
+
+test('Terra preobserve joins a concurrent start after approval returns while Terra is still running', { timeout: 10_000 }, async () => {
+  const h = harness(true, protocol, true);
+  const entered = gate(), release = gate(), reading = gate();
+  h.controlled.onStartObservationRead = reading.resolve;
+  let visualPosts = 0;
+  h.controlled.usageChat = async ({ purpose }) => {
+    assert.equal(purpose, 'visual_observation');
+    ++visualPosts;
+    entered.resolve();
+    await release.promise;
+  };
+  await h.receive();
+  const approved = await h.approve();
+  await entered.promise;
+  const { preobservations } = await jsonOk(await h.admin('/admin/reception/' + approved.receptionId + '/usage.json'));
+  assert.equal(preobservations[0].status, 'preparing');
+  assert.equal(preobservations[0].usage.phases.terra.initial_observation.unknownPosts, 1);
+  const start = h.start();
+  try {
+    await reading.promise;
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(visualPosts, 1);
+  } finally { release.resolve(); }
+  const { trial } = await jsonOk(await start);
+  await h.settleBackground();
+  const record = await h.storage.get('record:' + trial.sessionId);
+  assert.equal(visualPosts, 1);
+  assert.deepEqual([record.jevLedger.phases.terra.initial_observation.posts,
+    record.jevLedger.phases.terra.initial_observation.cacheHits], [0, 1]);
+});
+
+test('Terra preobserve does not warm an old approved reception on eviction or approval replay', async () => {
+  const h = harness();
+  await h.receive();
+  const approved = await h.approve();
+  h.evict(true);
+  const duplicate = h.approve();
+  await assert.rejects(duplicate, { code: 'reception_conflict' });
+  await h.settleBackground();
+  assert.deepEqual(h.calls, []);
+  assert.deepEqual(await jsonOk(await h.admin('/admin/reception/' + approved.receptionId + '/usage.json')),
+    { receptionId: approved.receptionId, failedStarts: [] });
+  await jsonOk(await h.start());
+  assert.deepEqual(h.calls.map(({ kind }) => kind), ['visual_observation']);
+});
+
+test('Terra preobserve leaves approvals using the legacy capped ledger on their existing start path', async () => {
+  const h = harness(true, protocol, true);
+  h.env.PARTICIPANT_TERRA_PROFILE = undefined;
+  await h.receive();
+  const approved = await h.approve();
+  await h.settleBackground();
+  assert.deepEqual(approved.plan.participantLimits, approvedLimits);
+  assert.deepEqual(h.calls, []);
+  await jsonOk(await h.start());
+  assert.deepEqual(h.calls.map(({ kind }) => kind), ['visual_observation']);
+});
+
+for (const failure of ['invalid_response', 'timeout', 'interrupted', 'cold_restart']) {
+  test('Terra preobserve falls back after ' + failure + ' and preserves separate usage', async () => {
+    const h = harness(true, protocol, true);
+    const entered = gate(), interrupt = gate();
+    const bodies: string[] = [];
+    h.controlled.usageChat = async (body, expected) => {
+      assert.equal(expected, pin.terraModelId);
+      bodies.push(JSON.stringify(body));
+      if (bodies.length > 1) return;
+      entered.resolve();
+      if (failure === 'timeout') return { status: 504, data: { error: 'synthetic_private_timeout' } };
+      if (failure === 'cold_restart') {
+        await interrupt.promise;
+        throw new Error('synthetic proxy interruption');
+      }
+      if (failure === 'interrupted') throw new Error('synthetic proxy interruption');
+      return { status: 200, data: { ...chatResponse(pin.terraModelId, '{}'),
+        usage: { cost: 0.021, prompt_tokens: 17, completion_tokens: 6 } } };
+    };
+    await h.receive();
+    const approved = await h.approve();
+    try {
+      await entered.promise;
+      if (failure === 'cold_restart') h.evict();
+      else await h.settleBackground();
+      const { trial } = await jsonOk(await h.start());
+      const record = await h.storage.get('record:' + trial.sessionId);
+      assert.deepEqual([record.jevLedger.phases.terra.initial_observation.posts,
+        record.jevLedger.phases.terra.initial_observation.cacheHits], [1, 0]);
+      assert.deepEqual(bodies, [bodies[0], bodies[0]]);
+      const { preobservations } = await jsonOk(await h.admin('/admin/reception/' + approved.receptionId + '/usage.json'));
+      const [warm] = preobservations;
+      assert.equal(warm.status, failure === 'cold_restart' ? 'unconfirmed' : 'failed');
+      assert.equal(warm.usage.phases.terra.initial_observation.posts, 1);
+      assert.equal(warm.usage.phases.terra.initial_observation.unknownPosts, failure === 'invalid_response' ? 0 : 1);
+      if (failure === 'invalid_response') {
+        assert.deepEqual(warm.usage.returnedModels.terra.initial_observation, { model: pin.terraModelId, ok: 1 });
+        assert.equal(warm.usage.phases.terra.initial_observation.knownUsd, 0.021);
+      }
+      if (failure === 'timeout') assert.equal(warm.errorCode, 'timeout');
+    } finally {
+      interrupt.resolve();
+      await h.settleBackground();
+    }
+  });
+}
+
+test('human-led move-on keeps the v15 pin and requires its committed trace on cold restore', async t => {
+  const h = harness(true, { ...figureBankProtocol, allowedOrders: [['repair-first', 'bypass-enabled']] });
+  v12Transport(t, h);
+  const profile = 'participant_dialogue_v13_p5_human_led_move_on';
+  h.env.PARTICIPANT_DIALOGUE_PROFILE = profile;
+  const choose = h.controlled.choose;
+  h.controlled.choose = (name, body) => name === 'human_move_on_source' ? 'human_request'
+    : name === 'target' ? 'none' : choose?.(name, body);
+  h.controlled.selectedAction = 'move_on';
+  await h.receive();
+  const approval = await h.approve();
+  assert.equal(approval.plan.participantDialogueProfile, profile);
+  const { trial } = await jsonOk(await h.start());
+  const id = trial.sessionId;
+  await jsonOk(await h.request('message', { expectedRecordId: id, text: 'いったん別の話に移りたいです。' }));
+  await h.idle();
+  const recordKey = 'record:' + id;
+  const record = await h.storage.get(recordKey);
+  assert.equal(record.queueState.errorCode, null);
+  assert.equal(record.options.generationRetryVersion, 'jev_generation_retry_v15');
+  assert.equal(record.queueState.privateState.agreeNameScopeVersion, 'scoped_v11');
+  assert.equal(record.options.interventionPolicy.version, 'bypass_acceptance_v2');
+  assert.equal(record.jevTraces[0].intervention.reasonCode, 'human_led_move_on');
+  const posts = h.calls.length;
+  h.env.PARTICIPANT_DIALOGUE_PROFILE = 'participant_dialogue_v13_p5_semantic_guard';
+  h.evict();
+  const restored = await jsonOk(await h.request('state'));
+  assert.equal(restored.trial.sessionId, id);
+  assert.equal(h.calls.length, posts);
+  assert.doesNotMatch(JSON.stringify(restored), /humanMoveOn|human_move_on_source|interventionPolicy|bypass_acceptance_v2/u);
+
+  const missingTrace = { ...record, jevTraces: [] };
+  await h.storage.transaction(async tx => {
+    const owner = await tx.get('base:owner:v1');
+    owner.admissions[owner.activeKey].record = missingTrace;
+    await tx.put({ 'base:owner:v1': owner, [recordKey]: missingTrace });
+  });
+  h.evict();
+  const rejected = await h.request('state');
+  assert.equal(rejected.status, 409);
+  assert.deepEqual(await rejected.json(), { error: 'trial_unavailable' });
+  assert.equal(h.calls.length, posts);
+});
 
 for (const strategy of ['repair-first', 'bypass-enabled']) {
   test('#206 Worker interrupt pauses a failed ' + strategy + ' turn across cold restore', async t => {
@@ -1932,13 +2181,16 @@ for (const strategy of ['repair-first', 'bypass-enabled']) {
   });
 }
 
-for (const { order, dialogueProfile, scope } of [
+for (const { order, dialogueProfile, scope, generationVersion = 'jev_generation_retry_v13' } of [
   { order: ['repair-first', 'bypass-enabled'], dialogueProfile: v13Dialogue, scope: 'scoped_v7' },
   { order: ['bypass-enabled', 'repair-first'], dialogueProfile: v13Dialogue, scope: 'scoped_v7' },
   { order: ['repair-first', 'bypass-enabled'], dialogueProfile: v13NamingV4Dialogue, scope: 'scoped_v11' },
   { order: ['bypass-enabled', 'repair-first'], dialogueProfile: v13NamingV4Dialogue, scope: 'scoped_v11' },
+  { order: ['repair-first', 'bypass-enabled'], dialogueProfile: 'participant_dialogue_v13_p5_discriminating_confirmation',
+    scope: 'scoped_v11', generationVersion: 'jev_generation_retry_v16' },
 ]) {
-  test('U6 v13 P5 keeps the approved profile, adoption and cold restore in order ' + order[0] + ' ' + scope, async t => {
+  const version = generationVersion === 'jev_generation_retry_v16' ? 'v16' : 'v13';
+  test('U6 ' + version + ' P5 keeps the approved profile, adoption and cold restore in order ' + order[0] + ' ' + scope, async t => {
     const receptionProtocol = order[0] === 'repair-first' ? figureBankProtocol : protocol;
     const h = harness(true, { ...receptionProtocol, allowedOrders: [order] });
     const transport = v12Transport(t, h);
@@ -1968,7 +2220,7 @@ for (const { order, dialogueProfile, scope } of [
       assert.equal(start.queueState.privateState.agreeNameScopeVersion, scope);
       assert.equal(start.options.questionLayout, 'two_stage_v3');
       assert.equal(start.options.dialoguePolicy, 'holistic_v5');
-      assert.equal(start.options.generationRetryVersion, 'jev_generation_retry_v13');
+      assert.equal(start.options.generationRetryVersion, generationVersion);
       assert.equal(start.options.jevNamingRestoreVersion, 'ai_name_acceptances_v1');
       assert.deepEqual(start.options.technicalTrial, { version: 'adaptive_repair_v3' });
 
@@ -2026,7 +2278,7 @@ for (const { order, dialogueProfile, scope } of [
       await h.idle();
       const continuing = await h.storage.get(key);
       assert.equal(continuing.jevTraces.at(-1).status, 'committed');
-      assert.equal(continuing.jevTraces.at(-1).generationRetryVersion, 'jev_generation_retry_v13');
+      assert.equal(continuing.jevTraces.at(-1).generationRetryVersion, generationVersion);
       await h.complete(id, (await jsonOk(await h.request('state'))).trial);
       const completed = await h.storage.get(key);
       assert.equal(completed.status, 'completed');

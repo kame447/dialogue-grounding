@@ -72,6 +72,9 @@ function memory() {
     async put(updates: Record<string, unknown>) {
       for (const [key, value] of Object.entries(updates)) values.set(key, structuredClone(value));
     },
+    async list({ prefix }: { prefix: string }) {
+      return new Map([...values].filter(([key]) => key.startsWith(prefix)).map(([key, value]) => [key, structuredClone(value)]));
+    },
     async delete(key: string) { return values.delete(key); },
   });
   return {
@@ -120,6 +123,7 @@ function choicePhase(body: { state: string; questions: Choices }) {
 function harness(t: TestContext) {
   let storage = memory();
   const calls: WireCall[] = [];
+  const background: Promise<unknown>[] = [];
   let ownSlots: string[] = [];
   const controlled = {
     reply: undefined as Reply | undefined,
@@ -204,7 +208,8 @@ function harness(t: TestContext) {
     GLOBAL_ACTION_RATE_LIMIT: rate, QUESTIONNAIRE_RATE_LIMIT: rate,
   };
   function worker() {
-    const instance = new participantModule.TangramSession({ storage, id: { toString: () => id }, waitUntil() {} }, env);
+    const instance = new participantModule.TangramSession({ storage, id: { toString: () => id },
+      waitUntil(promise: Promise<unknown>) { background.push(promise); } }, env);
     instance.settings = async () => ({ mode: { value: 'on', revision: 1 }, protocol: { protocol, revision: 1, sha256 } });
     return instance;
   }
@@ -217,6 +222,8 @@ function harness(t: TestContext) {
   const reception = () => storage.get('reception:v1');
   return {
     calls, controlled, env, request, reception,
+    async settleBackground() { await Promise.all(background.splice(0)); },
+    async approvalUsage() { return session.adminFailedStartUsage((await reception()).receptionId); },
     async receive() {
       assert.equal(await session.registerBaseOwner(), true);
       await ok(await request('reception', undefined, 'POST'));
@@ -278,14 +285,31 @@ test('both newly approved production conditions continue past all old Jev and Lu
   const h = harness(t);
   h.controlled.charge = true;
   await h.receive();
+  await h.settleBackground();
   const initialPlan = (await h.reception()).plan;
+  assert.deepEqual(h.calls.slice(), [{ role: 'terra', phase: 'observation_initial', model: proxyEnv.VISION_MODEL,
+    status: 200, cost: billing.terra }]);
+  const approvalUsage = await h.approvalUsage();
+  assert.deepEqual(approvalUsage.failedStarts, []);
+  assert.equal(approvalUsage.preobservations.length, 1);
+  const [warm] = approvalUsage.preobservations;
+  assert.deepEqual(warm.trialIndices, [0, 1]);
+  assert.equal(warm.status, 'ready');
+  assert.deepEqual(warm.usage.returnedModels.terra.initial_observation, { model: pin.terraModelId, ok: 1 });
+  const warmMeter = warm.usage.phases.terra.initial_observation;
+  assert.deepEqual([warmMeter.calls, warmMeter.posts, warmMeter.inputTokens, warmMeter.outputTokens,
+    warmMeter.knownUsd, warmMeter.missingCostPosts, warmMeter.unknownPosts],
+    [1, 1, tokens.prompt_tokens, tokens.completion_tokens, billing.terra, 0, 0]);
+  assert.equal(total(warm.usage, 'terra', 'posts'), 1);
+  assert.equal(total(warm.usage, 'jev', 'posts'), 0);
+  assert.equal(total(warm.usage, 'luna', 'posts'), 0);
   let previous: string | undefined;
   const archived = new Map<string, ProductionUsage>();
   for (const strategy of ['bypass-enabled', 'repair-first']) {
-    const state = await h.start(previous);
-    const recordId = state.trial.sessionId;
     const beginning = h.calls.length;
-    const sentBeforeTrial = h.calls.filter(call => call.role === 'terra').length;
+    const state = await h.start(previous);
+    assert.equal(h.calls.slice(beginning).length, 0, 'start reads the validated memo without sending');
+    const recordId = state.trial.sessionId;
     let record = await h.record(recordId);
     assert.equal(record.strategy, strategy);
     const baselineAi = publicAi(record);
@@ -314,8 +338,7 @@ test('both newly approved production conditions continue past all old Jev and Lu
     assert.ok(num('luna') * (tokens.prompt_tokens + tokens.completion_tokens) > previousLimits.lunaTokens);
     assert.ok(num('jev') * billing.jev > previousLimits.jevUsd);
     assert.equal(trialCalls.filter(call => call.role === 'terra' && call.phase === 'observation_targeted').length, 1);
-    assert.equal(sentBeforeTrial, previous ? 2 : 1, 'shared initial memo incurs only one upstream request');
-    assertProductionAccounting(record, h.calls, beginning, previous === undefined);
+    assertProductionAccounting(record, trialCalls);
     h.env.PARTICIPANT_TERRA_ENABLED = 'off';
     h.env.PARTICIPANT_TERRA_PROFILE = undefined;
     h.env.PARTICIPANT_TERRA_LIMITS_JSON = 'invalid legacy configuration';
@@ -330,11 +353,11 @@ test('both newly approved production conditions continue past all old Jev and Lu
     const next = await turn(h, recordId, strategy + '-restored');
     assert.equal(recordPublicError(next), null);
     assert.equal(publicAi(next), baselineAi + turns + 1);
-    assertProductionAccounting(next, h.calls, beginning, previous === undefined);
+    assertProductionAccounting(next, h.calls.slice(beginning));
     await h.finish(recordId, (await ok(await h.request('state'))).trial);
     const completed = await h.record(recordId);
     assert.equal(completed.status, 'completed');
-    assertProductionAccounting(completed, h.calls, beginning, previous === undefined);
+    assertProductionAccounting(completed, h.calls.slice(beginning));
     archived.set(recordId, productionUsage(completed));
     assert.deepEqual((await h.reception()).plan, initialPlan);
     previous = recordId;
@@ -342,6 +365,7 @@ test('both newly approved production conditions continue past all old Jev and Lu
   for (const [recordId, usage] of archived) {
     assert.deepEqual(productionUsage(await h.adminRecord(recordId)), usage);
   }
+  assert.deepEqual(await h.approvalUsage(), approvalUsage);
 });
 
 type Meter = {
@@ -371,9 +395,8 @@ function productionUsage(record: { jevLedger: unknown } | null) {
 const total = (usage: ProductionUsage, role: Role, field: keyof Meter) =>
   Object.values(usage.phases[role]).reduce((count, phase) => count + phase[field], 0);
 
-function assertProductionAccounting(record: { jevLedger: unknown }, calls: WireCall[], beginning: number, firstTrial: boolean) {
+function assertProductionAccounting(record: { jevLedger: unknown }, posts: WireCall[]) {
   const usage = productionUsage(record);
-  const posts = calls.slice(firstTrial ? beginning - 1 : beginning);
   const models = { luna: pin.lunaModelId, jev: pin.jevModelId, terra: pin.terraModelId };
   for (const role of ['luna', 'jev', 'terra'] as const) {
     const sends = posts.filter(post => post.role === role);
@@ -395,22 +418,29 @@ function assertProductionAccounting(record: { jevLedger: unknown }, calls: WireC
       role + '/' + recorded);
   }
   assert.ok(total(usage, 'luna', 'calls') > previousLimits.lunaCalls);
-  assert.equal(total(usage, 'terra', 'cacheHits'), firstTrial ? 0 : 1);
+  const initial = usage.phases.terra.initial_observation;
+  assert.deepEqual([initial.calls, initial.posts, initial.cacheHits], [1, 0, 1]);
 }
 
 test('a normal response with missing cost is recorded independently from a 402 or 429 upstream failure', async t => {
   const h = harness(t);
-  await h.receive();
   h.controlled.missingCost.add('terra');
+  await h.receive();
+  await h.settleBackground();
+  const [warm] = (await h.approvalUsage()).preobservations;
+  const warmMeter = warm.usage.phases.terra.initial_observation;
+  assert.deepEqual([warmMeter.posts, warmMeter.missingCostPosts, warmMeter.inputTokens, warmMeter.unknownPosts], [1, 1, 5, 0]);
+  const fromStart = h.calls.length;
   const recordId = (await h.start()).trial.sessionId;
   const initial = await h.record(recordId);
   h.controlled.missingCost.add('jev').add('luna');
+  h.controlled.reobserve = true;
   const published = await turn(h, recordId, 'unreported-cost');
   assert.equal(recordPublicError(published), null);
   assert.equal(publicAi(published), publicAi(initial) + 1);
   const missing = productionUsage(published);
   for (const role of ['jev', 'luna', 'terra'] as const) {
-    const count = h.calls.filter(call => call.role === role).length;
+    const count = h.calls.slice(fromStart).filter(call => call.role === role).length;
     assert.ok(count > 0);
     assert.equal(total(missing, role, 'missingCostPosts'), count);
     assert.equal(total(missing, role, 'inputTokens'), count * 5);
