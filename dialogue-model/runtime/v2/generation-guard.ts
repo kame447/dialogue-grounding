@@ -74,6 +74,7 @@ export function isGenerationV19(version: unknown): version is VisualFeatureGener
 }
 
 export function validAgreeNameScope(scope: unknown, generation: unknown): boolean {
+  if (scope === "jev_naming_v3") return isGenerationV22(generation);
   if (scope === "jev_naming_v2") return isDeferredAiExtractionGeneration(generation);
   if (isGenerationV17(generation)) return scope === "jev_naming_v1";
   if (scope === "scoped_v9" || scope === "scoped_v10") return generation === "jev_generation_retry_v12";
@@ -662,7 +663,9 @@ export function rewriteReasons(codes: readonly string[], policy?: DialoguePolicy
     codes.includes("self_repair") ? "前の下書きは自分の取り違え・訂正・取り消しを表していました。このactionでは訂正を表明せず、このactionの範囲で書き直してください。" : "",
     codes.includes("name_mismatch") ? "前の下書きは、このactionで扱う名前とは別の名前を提案・決定・合意として述べていました。このactionで扱う名前だけを「」で示して書き直してください。" : "",
     codes.includes("unsolicited_deferral") ? "前の下書きは未解決の図形について保留や先送りを提案していました。保留・先送りを提案せず、このactionの範囲で書き直してください。" : "",
-    codes.includes("unsupported_topic_shift") ? "前の下書きは話題や図形を次へ移すと述べていましたが、選んだ行動は移行ではありません。移行に触れず、選ばれた対象や特徴の確認など、このactionの範囲で書き直してください。" : "",
+    isGenerationV22(version) && (codes.includes("unsupported_topic_shift") || codes.includes("draft_topic_shift_unconfirmed"))
+      ? "前の下書きの話題の扱いを、実行計画と相手の発話に照らして書き直してください。各部分は選んだ扱いに沿わせ、予定にない移行や異なる行き先を加えないでください。"
+      : codes.includes("unsupported_topic_shift") ? "前の下書きは話題や図形を次へ移すと述べていましたが、選んだ行動は移行ではありません。移行に触れず、選ばれた対象や特徴の確認など、このactionの範囲で書き直してください。" : "",
     specificViewpoint
       ? codes.includes("orientation_leak") ? "前の下書きに、自分側の見え方だと示されていない方位の語（上下左右・端・向き・斜め・縦長・横長など）がありました。公開発話では、回転しても変わらない形や部分同士のつながりに言い換えてください。方位が区別に必要なら、その語と同じ節で自分側の画面での見え方だと明示し、相手には形の対応を尋ねてください。" : ""
       : policy === "holistic_v5"
@@ -753,7 +756,7 @@ export function generationGuardCodes(text: string, c: GenerationCodeContext): st
   return [...new Set([...findGuardViolations(text, c.action).filter(code => !c.holistic || explicitNonAdoption || !isAgreementWordCode(code)),
     ...(c.v3 ? findOrientationLeaks(text, c.dialoguePolicy, c.generationRetryVersion, c.humanTexts, c.recentHumanTexts, c.publicTexts) : []),
     ...(c.v3 ? findWorkingNoteLeaks(text, c.publicTexts) : []),
-    ...(c.v3 && isGenerationV6(c.generationRetryVersion) && !["move_on", "defer", "close", "carry_over", "consult"].includes(c.action) &&
+    ...(c.v3 && !isGenerationV22(c.generationRetryVersion) && isGenerationV6(c.generationRetryVersion) && !["move_on", "defer", "close", "carry_over", "consult"].includes(c.action) &&
       (isGenerationV15(c.generationRetryVersion) || c.vetoed === true || c.action === "confirm" || c.action === "repair") ? (isGenerationV11(c.generationRetryVersion) ? findTopicShiftClaimsV11(text) : isGenerationV7(c.generationRetryVersion) ? findTopicShiftClaimsV7(text) : findTopicShiftClaims(text)) : []),
     ...(c.v3 && c.action === "agree" && c.candidateName !== null ? findAgreeNameMismatch(text, c.candidateName) : []),
     ...(c.v3 && c.action === "propose_name" && c.candidateName !== null ? findProposeNameMismatch(text, c.candidateName) : []),

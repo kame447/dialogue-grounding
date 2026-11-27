@@ -5,8 +5,8 @@ import {applyBypassAcceptance,interventionForStrategy,BypassAcceptanceError,inte
 import type {ExecutedDecision,InterventionConfig,InterventionTrace} from '../decision/bypass-acceptance.ts';
 import {applyIssueHandling, COMMITMENT_STATES, ISSUE_HANDLING_VERSION, JEV_ACTIONS_V21, issueHandlingForStrategy, issueHandlingReference, issueHandlingMatchesSource, previousIssueHandlingTransition, issueTargetIds} from '../decision/issue-handling.ts';
 import type {ExecutedDecisionV21, InterventionTraceV2, IssueHandlingInput, IssueHandlingPolicy} from '../decision/issue-handling.ts';
-import {JEV_ACTIONS,DRAFT_SHARED_CLAIMS,PARTICIPANT_TARGET_MENU_VERSION,isHolisticPolicy,isHolisticV2Plus,isHolisticV3Plus,isHolisticV4Plus} from '../decision/contract.ts';
-import type {DraftAct,DraftMoveOn,DraftSharedClaim,DraftSharedClaimInput,DraftSharedClaimResult,JevDecisionCallOptions} from '../decision/contract.ts';
+import {JEV_ACTIONS,DRAFT_SHARED_CLAIMS,DRAFT_TOPIC_SHIFT_CHOICES,PARTICIPANT_TARGET_MENU_VERSION,isHolisticPolicy,isHolisticV2Plus,isHolisticV3Plus,isHolisticV4Plus} from '../decision/contract.ts';
+import type {DraftAct,DraftMoveOn,DraftTopicShiftResult,DraftSharedClaim,DraftSharedClaimInput,DraftSharedClaimResult,JevDecisionCallOptions} from '../decision/contract.ts';
 import { createHash } from "node:crypto";
 import {validateOwnLedger} from '../judgment/schema.mjs';
 // Decision 0002, opt-in only. The queue owns publication; this module returns a
@@ -46,8 +46,8 @@ import { findNamingActHints, hasOrientationWords, draftViolationCodes, deriveGen
 import { isGenerationV15, currentTurnNamingSource, semanticNamingCodes, namingCodesWithoutQuestion, contentPublicationRecovery, namingPublicationHold,
   type NamingHoldReason, type PublicationRecovery } from "./generation-guard.ts";
 import { isGenerationV16, isGenerationV17, isGenerationV19, confirmationDraftText, canReconsiderPublication, HUMAN_MOVE_ON_V17, PUBLICATION_RECOVERY_V17 } from "./generation-guard.ts";
-import { ISSUE_HANDLING_GENERATION, classificationExtraction, classificationMatchesPublication, extractionDigest,
-  isDeferredAiExtractionGeneration, isGenerationV22, isIssueHandlingGeneration, validDeferredAiPublicJob, type DeferredAiPublicJob,
+import { ISSUE_HANDLING_GENERATION, isGenerationV22, isIssueHandlingGeneration, classificationExtraction, classificationMatchesPublication, extractionDigest,
+  isDeferredAiExtractionGeneration, validDeferredAiPublicJob, type DeferredAiPublicJob,
   type DeferredClassificationExtraction } from "./deferred-ai-extraction.ts";
 import { isJevVisualPurpose, SEMANTIC_DRAFT_ACTS, visualPurposeMatchesSource } from "../decision/contract.ts";
 import { createMemoAiExtractor, memoAiExtractionPrompt, AiPublicError, aiHash, emptyAiEvidence } from "../local-grounding/extract-ai.ts";
@@ -288,7 +288,7 @@ function observationFailure(error: unknown, phase: ObservationFailure["observati
 }
 export type DraftActRecord = { draft: "initial" | "retry"; draftSha256: string; triggers: string[]; status: "ok" | "error"; choice: DraftAct | null;
   scores: Record<string, number> | null; model: string | null; responseId: string | null; costUsd: number | null; latencyMs: number; error: string | null;
-  moveOn?: DraftMoveOn };
+  moveOn?: DraftMoveOn; topicShift?: DraftTopicShiftResult };
 export type DraftSharedClaimRecord = { draft: "initial" | "retry"; draftSha256: string; violations: string[]; status: "ok" | "error"; choice: DraftSharedClaim | null;
   scores: Record<string, number> | null; model: string | null; responseId: string | null; costUsd: number | null; latencyMs: number; error: string | null };
 export type JevTurnTrace = {
@@ -390,7 +390,7 @@ export type JevTurnOptions = {
   deferredAiExtractionProfileSha256?: string;
   judgmentMaterialVersion?: JudgmentMaterialVersion;
   /** Creation pin only. A resumed trial uses the scope in its saved state. */
-  newTrialAgreeNameScopeVersion?: "scoped_v7" | "scoped_v8" | "scoped_v9" | "scoped_v10" | "scoped_v11" | "jev_naming_v1" | "jev_naming_v2";
+  newTrialAgreeNameScopeVersion?: "scoped_v7" | "scoped_v8" | "scoped_v9" | "scoped_v10" | "scoped_v11" | "jev_naming_v1" | "jev_naming_v2" | "jev_naming_v3";
   client: ChatClient; ownImage: LocalOwnImage; ownAnchors: readonly LocalOwnAnchor[];
   observer: ObservationObserver; jevDecision: JevDecisionClient; localGrounding: JevTurnLocalOptions;
   maxReobservations?: number;
@@ -677,6 +677,11 @@ export function updateRepairHistory(history: readonly RepairHistoryEntry[], befo
 const V3_ACTION_KINDS={accept:['none','single','multiple'],defer:['none','single','multiple'],move_on:['none','single','multiple'],close:['none','single','multiple'],
   propose_name:['single'],agree:['single'],confirm:['single','multiple'],repair:['single','multiple'],revisit:['single','multiple']} as const;
 const stateExact=(x:any,keys:string[])=>!!x&&Object.getPrototypeOf(x)===Object.prototype&&Reflect.ownKeys(x).length===keys.length&&keys.every(k=>Object.hasOwn(x,k));
+function validDraftTopicShift(value: DraftTopicShiftResult | undefined): value is DraftTopicShiftResult {
+  return !!value && stateExact(value, ["choice", "scores"]) && DRAFT_TOPIC_SHIFT_CHOICES.includes(value.choice) &&
+    stateExact(value.scores, [...DRAFT_TOPIC_SHIFT_CHOICES]) && Object.values(value.scores).every(score =>
+      Number.isFinite(score) && score >= 0 && score <= 1);
+}
 function stateJson(x:unknown,seen=new Set<object>()):void {
  if(x===null||typeof x==='string'||typeof x==='boolean'||typeof x==='number'&&Number.isFinite(x))return;
  if(!x||typeof x!=='object'||seen.has(x))throw Error();const array=Array.isArray(x),keys=Reflect.ownKeys(x);
@@ -1133,6 +1138,8 @@ function validateGeneratedPublication(j: CommittedAct, ledger: OwnLedger, ownSlo
     }
   }
   const lastDraft = j.jevTurn.draftActs?.at(-1);
+  if (isGenerationV22(generation) && (lastDraft?.status !== "ok" || !lastDraft.triggers.includes("topic_shift") ||
+      !validDraftTopicShift(lastDraft.topicShift) || lastDraft.topicShift.choice !== "within_plan" || !digestShape(lastDraft.draftSha256))) throw Error();
   const turns = publicTurns ?? [{ turn: j.turnIndex, speaker: "human" as const, text: "" }];
   const proposedWithdrawal = recovery && execution.action === "repair" && recovery.reason !== "publication_mismatch"
     ? readNamingWithdrawal(detail, ledger, execution.target, j.turnIndex, turns) : null;
@@ -1147,6 +1154,7 @@ function validateGeneratedPublication(j: CommittedAct, ledger: OwnLedger, ownSlo
   if (publicTurns) {
     const speech = publicTurns.find(event => event.turn === j.turnIndex + 1 && event.speaker === "ai")?.text;
     if (speech === undefined || textDigest(speech) !== publication.textSha256) throw Error();
+    if (isGenerationV22(generation) && textDigest(transition ? speech.slice(0, transition.start - 1) : speech) !== lastDraft?.draftSha256) throw Error();
     if (items.length > 1 && !validIssuePublicationParts(publication.parts, items.length, speech, transition?.start)) throw Error();
     if (visualDetail && !readVisualFeatureEvidence(publication.visualFeatures, memo!, visualTargets,
         transition ? speech.slice(0, transition.start - 1) : speech)) throw Error();
@@ -1524,6 +1532,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   const visualFeatureGeneration = isGenerationV19(generationRetryVersion);
   const issueHandling = isIssueHandlingGeneration(generationRetryVersion);
   const generationV22 = isGenerationV22(generationRetryVersion);
+  const semanticTopicShift = generationV22;
   if (issueHandling !== Boolean(intervention && isIssueHandlingPolicy(intervention))) throw new JevTurnError("invalid_intervention");
   const requestedReplayHistory = options.issueHandlingReplayHistory;
   if (requestedReplayHistory !== undefined && (!issueHandling || usagePolicy !== undefined || options.participantPrompts ||
@@ -1696,7 +1705,8 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         update: initialUpdate, publicTurns, historicalPublicTurns: history, signal, ownImage, ownAnchors, captureResearch: true, referenceQuestionBindings, directReferenceReplies, refinedReplyRules: isGenerationV11(generationRetryVersion), answerFieldRules: isGenerationV12(generationRetryVersion),
         bindDirectQuestionReplies: usesDirectNamingReplies(state.agreeNameScopeVersion),
         retainLocalQuestionAnswers: retainsLocalQuestionAnswers(state.agreeNameScopeVersion),
-        unbindPartNonAnswers: state.agreeNameScopeVersion === "jev_naming_v2",
+        unbindPartNonAnswers: state.agreeNameScopeVersion === "jev_naming_v2" || state.agreeNameScopeVersion === "jev_naming_v3",
+        retainDelayedPartAnswers: state.agreeNameScopeVersion === "jev_naming_v3",
         namingIntervalStart: state.judgments.filter(j => isNamingIntervalBoundary(j, issueHandling) || j.generatedPublication?.transition).at(-1)?.turnIndex ?? 0,
         ...(!aiEnabled && previousAi ? { priorAct: { ...previous.judgment, turn: previousAi.turn, publishedFallback: previous.generationGuard.fallback,
           ...(previousExecution!.target.kind === "multiple" ? { targetCandidates: [...previousExecution!.target.figureIds] } : {}) } } : {}) });
@@ -2250,7 +2260,8 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       };
       const confirmDraft = async (text: string, draft: "initial" | "retry", found: string[]): Promise<string[]> => {
         if (!holistic) return found;
-        const triggers = draftTriggers(text);
+        const namingTriggers = draftTriggers(text);
+        const triggers = semanticTopicShift ? [...namingTriggers, "topic_shift"] : namingTriggers;
         if (!triggers.length) return semanticNaming ? namingCodesWithoutQuestion(found, text, judgment.action, judgment.candidateName) : found;
         let res: Awaited<ReturnType<NonNullable<JevDecisionClient["classifyDraftAct"]>>>;
         try {
@@ -2260,22 +2271,41 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
             ...(issueHandling ? { issueHandlingVersion: ISSUE_HANDLING_VERSION } : {}),
             ...(semanticNaming ? { semanticNaming } : {}),
             ...(withdrawal?.prior.name ? { withdrawPriorName: withdrawal.prior.name } : {}),
-            ...(transitionText === null ? {} : { moveOnDraft: transitionText }) },
+            ...(transitionText === null ? {} : { moveOnDraft: transitionText }),
+            ...(semanticTopicShift ? { topicShiftPlan: {
+              humanRequestedMove: participantRequestedMove(decision!),
+              sections: (publicationParts ? recordIssuePublicationParts(publicationParts.parts) : [{ item: 0, start: 0, end: text.length }])
+                .map(({ item, start, end }) => {
+                  const part = items[item];
+                  return { item, start, end, action: part.action, target: part.target,
+                    ...("issue" in part && part.issue ? { issue: part.issue } : {}),
+                    ...("destination" in part && part.destination ? { destination: part.destination } : {}) };
+                }),
+            } } : {}) },
             { signal, timeoutMs: options.decisionTimeoutMs, dialoguePolicy: options.dialoguePolicy }), signal);
         } catch (error) {
           abortIf(signal);
           res = { status: "error", choice: null, scores: null, model: null, responseId: null, costUsd: null, latencyMs: 0, error: "unavailable" };
         }
         abortIf(signal);
-        if (semanticNaming && res.status === "ok" && (!res.choice ||
+        if (semanticNaming && namingTriggers.length && res.status === "ok" && (!res.choice ||
             !(res.choice === "withdraw_selected" ? withdrawal : SEMANTIC_DRAFT_ACTS.includes(res.choice)))) {
           res = { ...res, status: "error", choice: null, scores: null, error: "invalid_response" };
         }
-        (record.draftActs ??= []).push({ draft, draftSha256: await aiHash(text), triggers, status: res.status === "ok" && res.choice ? "ok" : "error", choice: res.status === "ok" ? res.choice : null,
+        const topicShift = semanticTopicShift && res.status === "ok" && validDraftTopicShift(res.topicShift) ? res.topicShift : undefined;
+        if (semanticTopicShift && res.status === "ok" && !topicShift) {
+          res = { ...res, status: "error", choice: null, scores: null, error: "invalid_response" };
+        }
+        (record.draftActs ??= []).push({ draft, draftSha256: await aiHash(text), triggers, status: res.status === "ok" && (res.choice || topicShift) ? "ok" : "error", choice: res.status === "ok" ? res.choice : null,
           scores: res.status === "ok" ? res.scores : null, model: res.model ?? null, responseId: res.responseId ?? null, costUsd: res.costUsd ?? null,
           latencyMs: Number.isFinite(res.latencyMs) ? res.latencyMs : 0, error: res.status === "ok" ? null : res.error ?? "invalid_response",
+          ...(topicShift ? { topicShift } : {}),
           ...(res.status === "ok" && res.moveOn ? { moveOn: res.moveOn } : {}) });
         // Other violations (orientation etc.) never excuse the question: the orientation-only fallback needs both drafts' questions to succeed and fit the act.
+        if (semanticTopicShift && topicShift?.choice !== "within_plan") {
+          found = [...found, topicShift?.choice === "unsupported_shift" ? "unsupported_topic_shift" : "draft_topic_shift_unconfirmed"];
+        }
+        if (!namingTriggers.length) return semanticNaming ? namingCodesWithoutQuestion(found, text, judgment.action, judgment.candidateName) : found;
         if (transitionText !== null && res.moveOn?.choice !== "honors_request") found = [...found, "draft_act_mismatch"];
         if (withdrawal) return res.status === "ok" && res.choice === "withdraw_selected" ? found : [...found, "draft_act_mismatch"];
         if (semanticNaming) return semanticNamingCodes(found, judgment.action, res.status === "ok" ? res.choice : null,

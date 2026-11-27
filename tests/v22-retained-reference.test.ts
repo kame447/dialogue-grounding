@@ -6,7 +6,7 @@ import type { LocalClaimView, PublicTurn } from "../dialogue-model/runtime/local
 import { priorClaimViews } from "../dialogue-model/runtime/local-grounding/derive.ts";
 import { buildRetainedReferenceHistory, REFERENCE_EVIDENCE_MAX_CHARS } from "../dialogue-model/runtime/local-grounding/reference-evidence.ts";
 import { applyReferenceUpdate, createReferenceGraph } from "../dialogue-model/runtime/memory/reference-graph.mjs";
-import { GENERATION_RETRY_V22 } from "../dialogue-model/runtime/v2/generation-guard.ts";
+import { GENERATION_RETRY_V22, validAgreeNameScope } from "../dialogue-model/runtime/v2/generation-guard.ts";
 import { researchTrialProfileV3 } from "../dialogue-model/runtime/v2/research-profile.ts";
 import { initialState, normal, OWN, runTurn, type Label, type Plan } from "./support/s4-v3-records.ts";
 
@@ -26,16 +26,28 @@ const emptyObservation = (segments: ReturnType<typeof segment>[]) => JSON.string
 const selected = (key: string) => ({ human_move_on_source: "other", commitment_state: "insufficient" } as Record<string, string>)[key];
 const filler: Plan = { action: "accept", target: "none", speech: "ありがとうございます。", aiExtraction: "[]", choose: selected };
 
-let history: ReturnType<typeof makeHistory> | undefined;
-async function makeHistory() {
-  const state = initialState({ profile, generationRetryVersion: baseline, agreeNameScopeVersion: "jev_naming_v2" });
+type Generation = NonNullable<Parameters<typeof runTurn>[6]>;
+const histories = new Map<Generation, ReturnType<typeof makeHistory>>();
+function historyFor(version: Generation) {
+  const history = histories.get(version) ?? makeHistory(version);
+  histories.set(version, history);
+  return history;
+}
+
+async function makeHistory(version: Generation, supplyQuestionTarget = false, exchanges = 75) {
+  const state = initialState({ profile, generationRetryVersion: version,
+    agreeNameScopeVersion: version === GENERATION_RETRY_V22 ? "jev_naming_v3" : "jev_naming_v2" });
   state.graph.memoryPruneVersion = "claim_prune_v3";
+  const description = "細長い三角が帆に見えます。";
+  const aiSegments = supplyQuestionTarget ? [
+    { ...segment(description, "part", null), segmentId: "description" }, segment(question, "part", null, []),
+  ] : [segment(question, "part", null)];
   const opening = await runTurn(profile, "repair-first", state,
     [{ id: "event-1", seq: 1, speaker: "human", text: metaphor }],
-    { action: "confirm", target: "figure_0", speech: draft(question), act: "construe",
+    { action: "confirm", target: "figure_0", speech: draft(supplyQuestionTarget ? description + question : question), act: "construe",
       extraction: JSON.stringify([segment(metaphor, "construal", null)]),
-      aiExtraction: emptyObservation([segment(question, "part", null)]), aiActs: ["ask"], choose: selected },
-    technicalTrial, baseline);
+      aiExtraction: emptyObservation(aiSegments), aiActs: supplyQuestionTarget ? ["assert", "ask"] : ["ask"], choose: selected },
+    technicalTrial, version);
   const name = "灯台";
   const naming = "この形を灯台と呼びましょう。";
   const named = await runTurn(profile, "repair-first", opening.state,
@@ -44,24 +56,24 @@ async function makeHistory() {
       speech: "はい、「灯台」と呼びましょう。", aiExtraction: "[]",
       extraction: JSON.stringify([{ ...segment(naming, "name", null, [OWN.ownAnchors[1].id]), name }]),
       choose: key => selected(key) ?? ({ naming_grounding: "grounded_name_0", naming_evidence: "turn_3" } as Record<string, string>)[key] },
-    technicalTrial, baseline);
+    technicalTrial, version);
   let saved = named.state;
   let events = named.publication.publicEvents;
-  for (let i = 2; i < 75; i++) {
+  for (let i = 2; i < exchanges; i++) {
     const seq = events.length + 1;
     const response = await runTurn(profile, "repair-first", saved,
       [...events, { id: `event-${seq}`, seq, speaker: "human", text: `照合の途中の発話 ${i}。` }],
-      filler, technicalTrial, baseline);
+      filler, technicalTrial, version);
     assert.equal(response.publication.status, "committed");
     saved = response.state;
     events = response.publication.publicEvents;
   }
-  assert.equal(events.length, 150);
+  assert.equal(events.length, exchanges * 2);
   return { saved, events };
 }
 
-async function final(label: Label, version: Parameters<typeof runTurn>[6], text: string, plan: Partial<Plan>, turnHistory?: Awaited<typeof history>) {
-  const { saved, events } = turnHistory ?? await (history ??= makeHistory());
+async function final(label: Label, version: Generation, text: string, plan: Partial<Plan>, turnHistory?: Awaited<ReturnType<typeof makeHistory>>) {
+  const { saved, events } = turnHistory ?? await historyFor(version);
   const requests: { provider: "luna" | "jev"; body: any; bytes: number }[] = [];
   const seq = events.length + 1;
   const result = await runTurn(profile, label, saved,
@@ -97,8 +109,8 @@ function requestInputs(result: Awaited<ReturnType<typeof final>>) {
     generation: context && JSON.parse(context.content.slice(context.content.indexOf("\n") + 1)).retainedReferenceHistory };
 }
 
-test("v22 can link a delayed substantive reply using a retained source without adding calls", async t => {
-  const prior = await (history ??= makeHistory());
+test("v22 can link a delayed substantive reply without adding to the topic-guard calls", async t => {
+  const prior = await historyFor(GENERATION_RETRY_V22);
   const ask = prior.saved.graph.records.find((record: { quote?: string }) => record.quote === question);
   assert.ok(ask);
   const plan: Partial<Plan> = { extraction: JSON.stringify([segment(answer, "part", 2)]), act: "agree",
@@ -119,8 +131,11 @@ test("v22 can link a delayed substantive reply using a retained source without a
   assert.equal(classification.priorClaims.find((row: { id: string }) => row.id === ask.id)?.quote, question);
   assert.equal(classification.segments[0].respondsToTurn, 2);
   assert.deepEqual(left.httpBodies, right.httpBodies);
-  const control = await final("repair-first", baseline, answer, { extraction: JSON.stringify([segment(answer, "part", null)]), act: "acknowledge" }, prior);
-  assert.deepEqual(left.httpBodies.map(row => row.provider), control.httpBodies.map(row => row.provider));
+  const control = await final("repair-first", baseline, answer, { extraction: JSON.stringify([segment(answer, "part", null)]), act: "acknowledge" });
+  const topicGuard = left.requests.filter(request => request.provider === "jev" && request.body.questions?.draft_topic_shift);
+  assert.equal(topicGuard.length, 1);
+  assert.deepEqual(Object.keys(topicGuard[0].body.questions), ["draft_topic_shift"]);
+  assert.deepEqual(left.requests.filter(request => !topicGuard.includes(request)).map(row => row.provider), control.requests.map(row => row.provider));
   t.diagnostic("v21/v22 outbound bytes: " + [control, left].map(result => result.requests.reduce((total, request) => total + request.bytes, 0)).join(" / ") +
     "; calls: " + left.httpBodies.length + "; archive chars: " + JSON.stringify(extraction.retainedReferenceHistory).length);
   assert.ok(left.state.graph.records.some((row: { respondsTo?: string; quote?: string; act?: string }) =>
@@ -173,7 +188,7 @@ test("v22 retains only budgeted excerpts and does not displace the recent classi
 });
 
 test("v22 leaves unavailable antecedents and acknowledgements out of positive local and naming evidence", async () => {
-  const prior = await (history ??= makeHistory());
+  const prior = await historyFor(GENERATION_RETRY_V22);
   const missing = await final("repair-first", GENERATION_RETRY_V22, answer,
     { extraction: JSON.stringify([segment(answer, "part", 6)]), act: "agree" }, prior);
   assert.equal(missing.trace.local?.extractor.errorCode, "invalid_response");
@@ -193,5 +208,30 @@ test("v22 leaves unavailable antecedents and acknowledgements out of positive lo
   for (const run of [missing, ack, nonAnswer]) {
     assert.equal(run.publication.status, "committed");
     assert.deepEqual(run.state.ledger, prior.saved.ledger);
+  }
+});
+
+test("v22 naming v3 uses a retained question with a supplied target only for the substantive delay", async () => {
+  assert.equal(validAgreeNameScope("jev_naming_v3", baseline), false);
+  assert.equal(validAgreeNameScope("jev_naming_v3", GENERATION_RETRY_V22), true);
+  const prior = await makeHistory(GENERATION_RETRY_V22, true, 18);
+  const ask = prior.saved.graph.records.find((record: LocalClaimView) => record.quote === question);
+  assert.ok(ask);
+  assert.deepEqual([ask.source, ask.act, ask.targets], ["ai_bound_target", "ask", [figure]]);
+  const chooseAntecedent: Plan["choose"] = (key, criteria) => key === "segment_0_antecedent"
+    ? Object.keys(criteria).find(choice => criteria[choice].includes(JSON.stringify(ask.id))) : selected(key);
+  for (const label of ["repair-first", "bypass-enabled"] as const) {
+    const reply = await final(label, GENERATION_RETRY_V22, answer, { act: "agree", answers: "unknown", choose: chooseAntecedent,
+      extraction: JSON.stringify([segment(answer, "part", 2)]) }, prior);
+    const inputs = requestInputs(reply);
+    assert.ok(!inputs.extraction.publicTurns.some((turn: PublicTurn) => turn.turn === 2));
+    assert.ok(inputs.extraction.retainedReferenceHistory.some((row: { claimId: string }) => row.claimId === ask.id));
+    assert.deepEqual(reply.trace.local?.claims.map(({ act, targets, respondsTo }) => [act, targets, respondsTo]), [["agree", [figure], ask.id]]);
+    const nonAnswer = "質問の意味は分かりました。";
+    const acknowledgment = await final(label, GENERATION_RETRY_V22, nonAnswer, { act: "agree", answers: "not_an_answer", choose: chooseAntecedent,
+      extraction: JSON.stringify([segment(nonAnswer, "part", 2, [])]) }, prior);
+    assert.deepEqual(acknowledgment.trace.local?.claims.map(({ act, targets, respondsTo }) => [act, targets, respondsTo]), [["acknowledge", [], null]]);
+    assert.deepEqual(reply.state.ledger, prior.saved.ledger);
+    assert.deepEqual(acknowledgment.state.ledger, prior.saved.ledger);
   }
 });

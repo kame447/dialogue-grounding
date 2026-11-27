@@ -42,7 +42,7 @@ type ExecutedTrace = AcceptanceTrace & { executed: NonNullable<AcceptanceTrace['
 /** What one scripted turn answers. `target` is a v3 target label; `issue` answers the repair prospect's issue question. */
 export type Plan = { action: string; target: string; issue?: string; prospect?: string; actionScores?: Record<string, number>; speech?: string; inject?: any;
   /** Opt-in override for additional closed questions in independent acceptance tests. */
-  choose?: (question: string, criteria: Readonly<Record<string, string>>, context: { generationCalls: number }) => string | undefined;
+  choose?: (question: string, criteria: Readonly<Record<string, string>>, context: { generationCalls: number; state: string }) => string | undefined;
   speechByLabel?: Partial<Record<Label, string>>;
   failQuestion?: string;
   /** A real human queue event that supersedes the staged candidate before publication. */
@@ -106,7 +106,7 @@ export async function runTurn(profile: any, label: Label, state: any, events: an
       const aiSegment = plan.aiActs && Object.hasOwn(JSON.parse(body.state), 'aiSeq') ? /^segment_(\d+)_act$/u.exec(key) : null;
       const publicAct = aiSegment ? plan.aiActs?.[Number(aiSegment[1])] : undefined;
       if (key === 'action') lastAction = plan.forceAction ?? (plan.reobserve && ++actionCalls === 1 ? 'request_observation' : plan.action);
-      const choice = plan.choose?.(key, q.criteria, { generationCalls }) ?? (key === 'action' ? lastAction : key === 'target' ? (lastAction === 'request_observation' ? 'figure_0' : plan.target) : key === 'repair_issue' ? plan.issue ?? 'none' : key === 'prospect' ? plan.prospect ?? 'uncertain'
+      const choice = plan.choose?.(key, q.criteria, { generationCalls, state: body.state }) ?? (key === 'action' ? lastAction : key === 'target' ? (lastAction === 'request_observation' ? 'figure_0' : plan.target) : key === 'repair_issue' ? plan.issue ?? 'none' : key === 'prospect' ? plan.prospect ?? 'uncertain'
         : key === 'name' && plan.name ? (labels.find(l => JSON.parse(q.criteria[l]).value === plan.name) ?? labels[0])
         : key === 'human_referent' && plan.referent ? plan.referent
         : key === 'shared_construal' && plan.sharedConstrual ? plan.sharedConstrual

@@ -37,14 +37,24 @@ async function run(text: string, plan: Plan, version: RecordedGenerationRetryVer
   const seq = events.length + 1;
   const state = history?.state ?? initialState({ profile, generationRetryVersion: version, agreeNameScopeVersion: "jev_naming_v2" });
   const requests: Message[][] = [];
+  const posts: { provider: "luna" | "jev"; questions: string[] }[] = [];
   const result = await runTurn(profile, label, state, [...events, { id: `event-${seq}`, seq, speaker: "human", text }],
     { aiExtraction: "[]", ...plan, captureRequest: (provider, body) => {
-      if (provider === "luna") requests.push(JSON.parse(body).messages);
+      const payload = JSON.parse(body);
+      posts.push({ provider, questions: Object.keys(payload.questions ?? {}) });
+      if (provider === "luna") requests.push(payload.messages);
     } }, technicalTrial, version);
   assert.equal(result.publication.status, "committed");
   const generation = requests.filter((_, index) => result.luna[index].phase === "generation");
   const action = (index = generation.length - 1) => generation[index].find(message => message.content.startsWith("Jevが選んだ行動だけ"))!.content;
-  return { ...result, generation, action, events: result.publication.publicEvents as Event[] };
+  return { ...result, generation, action, posts, events: result.publication.publicEvents as Event[] };
+}
+
+function compareCallCountsWithV21(current: Awaited<ReturnType<typeof run>>, old: Awaited<ReturnType<typeof run>>) {
+  const topicShift = current.posts.filter(post => post.questions.includes("draft_topic_shift"));
+  assert.deepEqual(topicShift, [{ provider: "jev", questions: ["draft_topic_shift"] }]);
+  assert.ok(old.posts.every(post => !post.questions.includes("draft_topic_shift")));
+  assert.deepEqual(current.posts.filter(post => post !== topicShift[0]).map(post => post.provider), old.posts.map(post => post.provider));
 }
 
 test("v22 delivers the accept guidance once for ordinary, multipart and recovered execution", async () => {
@@ -59,7 +69,7 @@ test("v22 delivers the accept guidance once for ordinary, multipart and recovere
   assert.match(both.action(), /items の 0 番:[^\n]+\nこの accept の部分に適用します。/u);
   const old = await run(question + otherQuestion, multiple, v21);
   assert.ok(!old.action().includes(advice));
-  assert.deepEqual(both.httpBodies.map(request => request.provider), old.httpBodies.map(request => request.provider));
+  compareCallCountsWithV21(both, old);
 
   const recovery: Plan = { action: "confirm", target: "figure_0", drafts: ["{}", "{}", firstReply],
     choose: (key, _criteria, { generationCalls }) => generationCalls >= 2 && key === "action" ? "accept" :
@@ -71,7 +81,7 @@ test("v22 delivers the accept guidance once for ordinary, multipart and recovere
   assert.equal(recovered.action().split(advice).length, 2);
   const oldRecovery = await run("舟に見えます。", recovery, v21);
   assert.ok(!oldRecovery.action().includes(advice));
-  assert.deepEqual(recovered.httpBodies.map(request => request.provider), oldRecovery.httpBodies.map(request => request.provider));
+  compareCallCountsWithV21(recovered, oldRecovery);
 });
 
 test("v22 distinguishes the two visual parts and leaves the hold wording on the adopted action", async () => {
