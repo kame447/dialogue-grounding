@@ -73,6 +73,7 @@ export function isGenerationV19(version: unknown): version is VisualFeatureGener
 }
 
 export function validAgreeNameScope(scope: unknown, generation: unknown): boolean {
+  if (scope === "jev_naming_v2") return isDeferredAiExtractionGeneration(generation);
   if (isGenerationV17(generation)) return scope === "jev_naming_v1";
   if (scope === "scoped_v9" || scope === "scoped_v10") return generation === "jev_generation_retry_v12";
   if (scope === "scoped_v11") return generation === "jev_generation_retry_v12" || generation === "jev_generation_retry_v13" || isGenerationV15(generation);

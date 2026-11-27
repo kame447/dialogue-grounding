@@ -106,6 +106,7 @@ const workerDialogue = {
     pinnedVersions: { ...dialogueV17Pilot012.pinnedVersions, generationRetryVersion: DEFERRED_AI_EXTRACTION_GENERATION },
   },
   [PILOT012_V21_PARTICIPANT_PROFILE]: { ...dialogueV17Pilot012,
+    newTrialAgreeNameScopeVersion: 'jev_naming_v2',
     profile: researchTrialProfileV3(profile.lunaRequest, profile.timeouts, 'two_stage_v3', 'holistic_v5',
       'bypass_acceptance_v3', JEV_REPAIR_QUALITY_VERSION),
     pinnedVersions: { ...dialogueV17Pilot012.pinnedVersions, generationRetryVersion: ISSUE_HANDLING_GENERATION },

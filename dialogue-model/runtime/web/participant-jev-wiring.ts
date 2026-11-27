@@ -11,7 +11,7 @@ import { createTrialV2, modelView } from '../stimuli/scatter-v2.mjs';
 import { STRATEGIES } from '../judgment/instructions.mjs';
 import { isLegacyFigureSelection, resolveFigureSelection, validateResolvedFigureSelection } from '../stimuli/figure-bank.ts';
 import { data } from '../v2/base-assignment-data.ts';
-import { usesDirectNamingReplies } from '../decision/naming-request.ts';
+import { usesDirectNamingReplies, usesJevNaming } from '../decision/naming-request.ts';
 import { privateDirectory, readPrivateAssignment } from './base-assignment-store.ts';
 import { researchHash, researchTrialProfileV3 } from '../v2/research-profile.ts';
 import type { ResearchTrialProfileV3 } from '../v2/research-profile.ts';
@@ -202,7 +202,7 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
           !restore && !validAgreeNameScope(newTrialAgreeNameScopeVersion, generationRetryVersion))) return invalid();
     if (isGenerationV17(generationRetryVersion) && (!pinned ||
         !(v.ledger instanceof ParticipantUsageLedger) || v.ledger.snapshot().pin.schemaVersion !== 'participant_model_pin_v3' ||
-        newTrialAgreeNameScopeVersion !== 'jev_naming_v1')) return invalid();
+        !usesJevNaming(newTrialAgreeNameScopeVersion))) return invalid();
     const p5Enabled = isGenerationV13(generationRetryVersion);
     const namingRestoreVersion = restore ? restore.options?.jevNamingRestoreVersion :
       pinned || isGenerationV12(generationRetryVersion) ? AI_NAME_ACCEPTANCES_V1 : undefined;

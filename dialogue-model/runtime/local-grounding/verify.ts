@@ -49,6 +49,8 @@ type VerificationInput = {
   /** scoped_v9: a direct reply to a public singleton question uses the question's target. */
   bindDirectQuestionReplies?: boolean;
   retainLocalQuestionAnswers?: boolean;
+  /** jev_naming_v2: keep explicit non-answers to a single-figure part question as unbound acknowledgments. */
+  unbindPartNonAnswers?: boolean;
   /** v11: the turn after which the current naming interval starts (the last agree, defer or move_on); a name proposal before it is never carried by an approval request. */
   namingIntervalStart?: number;
   graph: LocalGraph;
@@ -92,7 +94,7 @@ function opposesPointingReply(segment: LocalSegmentProposal, question: LocalClai
 const overlap = (a: readonly string[], b: readonly string[]) => a.some(slot => b.includes(slot));
 
 /** Only the CURRENT public human turn may supply a new segment's quote. */
-export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts, keepUnboundApproval = false, approvalFromNamedClaim = false, referenceQuestionBindings, directReferenceReplies = false, refinedReplyRules = false, answerFieldRules = false, bindDirectQuestionReplies = false, retainLocalQuestionAnswers = false, namingIntervalStart = 0 }: VerificationInput): LocalVerifiedUpdate {
+export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts, keepUnboundApproval = false, approvalFromNamedClaim = false, referenceQuestionBindings, directReferenceReplies = false, refinedReplyRules = false, answerFieldRules = false, bindDirectQuestionReplies = false, retainLocalQuestionAnswers = false, unbindPartNonAnswers = false, namingIntervalStart = 0 }: VerificationInput): LocalVerifiedUpdate {
   const result: LocalVerifiedUpdate = { operations: [], rejected: [] };
   // Revalidate JSON-restored graphs before using any model-selected pointer.
   snapshotReferenceGraph(graph);
@@ -136,6 +138,14 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     let aspect = segment.aspect;
     let linkedIssue = segment.linkedIssueId;
     let name = segment.name;
+    if (unbindPartNonAnswers && act === "agree" && aspect === "part" && verdict.answersChecked === "no" &&
+        name === null && targets.length === 0 && prior?.speaker === "ai" && prior.act === "ask" &&
+        prior.aspect === "part" && prior.targets.length === 1 && prior.sourceTurn < turn &&
+        (segment.respondsToTurn === null || segment.respondsToTurn === prior.sourceTurn)) {
+      act = "acknowledge";
+      prior = null;
+      linkedIssue = null;
+    }
     // An approval request ("is that name fine?") is a name proposal that carries the earlier proposal's name; it is decided before the bare-deictic rule so a short typed request is not turned into an acknowledgement.
     // The antecedent is the claim the classifier chose: the partner's own name proposal, or a public AI claim that carries a name (an adoption, a named confirmation).
     // The name is public either way. The extraction's respondsToTurn names the AI turn that was just answered, so for this act it does not have to be the claim's turn.
