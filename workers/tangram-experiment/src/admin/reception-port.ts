@@ -1,6 +1,7 @@
 import type { FailureCode, FailureCause } from '../../../../dialogue-model/runtime/v2/base-assignment.ts';
 import type { ParticipantUsageSnapshot } from '../../../../dialogue-model/runtime/web/participant-usage.ts';
 import type { ParticipantRole, ParticipantRoleResult, ParticipantRoleView } from './participant-role.ts';
+import type { PreobservationUsage } from '../participant-preobservation.ts';
 
 /** Researcher-only projections. These types are not the persisted reception or protocol schema. */
 export type ReceptionStrategy = 'repair-first' | 'bypass-enabled';
@@ -22,6 +23,7 @@ export type ReceptionFailedStartUsage = {
   receptionId: string;
   failedStarts: { assignmentId: string; trialIndex: number; errorCode: Exclude<FailureCode, 'record_deleted'>; failureCause?: FailureCause;
     usage: ParticipantUsageSnapshot | null }[];
+  preobservations?: PreobservationUsage[];
 };
 export type ReceptionMode = 'on' | 'off' | 'unset';
 export type FigureSetPolicy = 'shared' | 'per_trial';
@@ -54,7 +56,7 @@ export type ReceptionAdminPort = {
   /** Read authoritative participant state, rather than trusting an index snapshot for a mutation. */
   get(receptionId: string): Promise<ReceptionAdminRow | null>;
   setParticipantRole?(receptionId: string, role: ParticipantRole, expectedRecordIds: string[] | null): Promise<ParticipantRoleResult>;
-  /** Reads metering for failed starts with no archived record, without restoring a participant task. */
+  /** Reads reception-level metering, including failed starts and approval-time observations. */
   failedStartUsage?(receptionId: string): Promise<ReceptionFailedStartUsage | null>;
   /** The owning DO must CAS revision and pending status, validate the current protocol/order and freeze the plan. */
   approve(receptionId: string, input: { order: number; expectedRevision: number; protocol: DisplayedProtocol }): Promise<ReceptionAdminResult>;
