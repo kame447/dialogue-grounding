@@ -36,9 +36,10 @@ export const PILOT012_V19_PARTICIPANT_PROFILE = 'participant_dialogue_v19_pilot0
 export const PILOT012_V20_PARTICIPANT_PROFILE = 'participant_dialogue_v20_deferred_ai_extraction';
 export const PILOT012_V21_PARTICIPANT_PROFILE = 'participant_dialogue_v21_issue_handling';
 export const PILOT012_V22_PARTICIPANT_PROFILE = 'participant_dialogue_v22_issue_fixes';
+export const PILOT012_V23_PARTICIPANT_PROFILE = 'participant_dialogue_v23_prompt_consolidation';
 type Pilot012ParticipantDialogueProfile = typeof PILOT012_PARTICIPANT_PROFILE | typeof PILOT012_V18_PARTICIPANT_PROFILE |
   typeof PILOT012_V19_PARTICIPANT_PROFILE | typeof PILOT012_V20_PARTICIPANT_PROFILE | typeof PILOT012_V21_PARTICIPANT_PROFILE |
-  typeof PILOT012_V22_PARTICIPANT_PROFILE;
+  typeof PILOT012_V22_PARTICIPANT_PROFILE | typeof PILOT012_V23_PARTICIPANT_PROFILE;
 export type ParticipantDialogueProfile = 'participant_dialogue_v12' | 'participant_dialogue_v12_naming_v2' |
   'participant_dialogue_v12_naming_v3' | 'participant_dialogue_v12_naming_v4' | P5ParticipantDialogueProfile | Pilot012ParticipantDialogueProfile;
 export function isP5ParticipantDialogueProfile(value: unknown): value is P5ParticipantDialogueProfile {
@@ -51,7 +52,7 @@ export function isP5ParticipantDialogueProfile(value: unknown): value is P5Parti
 export function isPilot012ParticipantDialogueProfile(value: unknown): value is Pilot012ParticipantDialogueProfile {
   return value === PILOT012_PARTICIPANT_PROFILE || value === PILOT012_V18_PARTICIPANT_PROFILE ||
     value === PILOT012_V19_PARTICIPANT_PROFILE || value === PILOT012_V20_PARTICIPANT_PROFILE ||
-    value === PILOT012_V21_PARTICIPANT_PROFILE || value === PILOT012_V22_PARTICIPANT_PROFILE;
+    value === PILOT012_V21_PARTICIPANT_PROFILE || value === PILOT012_V22_PARTICIPANT_PROFILE || value === PILOT012_V23_PARTICIPANT_PROFILE;
 }
 export function isParticipantDialogueProfile(value: unknown): value is ParticipantDialogueProfile {
   return value === 'participant_dialogue_v12' || value === 'participant_dialogue_v12_naming_v2' ||

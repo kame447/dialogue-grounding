@@ -7,9 +7,10 @@ import { MEMO_LOCAL_EXTRACTION_INSTRUCTIONS, memoExtractionPrompt } from '../dia
 import { MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS, memoAiExtractionPrompt } from '../dialogue-model/runtime/local-grounding/extract-ai.ts';
 import { canonicalReceptionProtocolV2, canonicalReceptionProtocolV3, PILOT012_PARTICIPANT_PROFILE, PILOT012_V18_PARTICIPANT_PROFILE,
   PILOT012_V19_PARTICIPANT_PROFILE, PILOT012_V20_PARTICIPANT_PROFILE, PILOT012_V21_PARTICIPANT_PROFILE, PILOT012_V22_PARTICIPANT_PROFILE,
+  PILOT012_V23_PARTICIPANT_PROFILE,
   receptionProtocolSha256, receptionSummary, validateReceptionPlan } from '../dialogue-model/runtime/v2/reception.ts';
-import { DEFERRED_AI_EXTRACTION_GENERATION, GENERATION_RETRY_V22, ISSUE_HANDLING_GENERATION,
-  isGenerationV22, isIssueHandlingGeneration } from '../dialogue-model/runtime/v2/deferred-ai-extraction.ts';
+import { DEFERRED_AI_EXTRACTION_GENERATION, GENERATION_RETRY_V22, GENERATION_RETRY_V23, ISSUE_HANDLING_GENERATION,
+  isGenerationV23, isIssueHandlingGeneration, usesV22GenerationRules } from '../dialogue-model/runtime/v2/deferred-ai-extraction.ts';
 import { createNamingTaskV2 } from '../dialogue-model/runtime/v2/naming-task-v2.mjs';
 import { VISUAL_FEATURE_GENERATION } from '../dialogue-model/runtime/v2/generation-guard.ts';
 import { VISUAL_FEATURE_DRAFT_V19 } from '../dialogue-model/runtime/v2/visual-feature-evidence.ts';
@@ -1546,7 +1547,8 @@ function v12Transport(t: TestContext, h: ReturnType<typeof harness>) {
         response = JSON.stringify([segment('細い部分がつながっています。', 'part', [decisionSlot]),
           segment('そちらの形にも半円の切り込みがありますか？', 'question', [])]);
       }
-    } else if (body.messages.some((message: { content: unknown }) => String(message.content).includes(VISUAL_FEATURE_DRAFT_V19))) {
+    } else if (body.messages.some((message: { content: unknown }) => String(message.content).includes(VISUAL_FEATURE_DRAFT_V19) ||
+        String(message.content).includes('【出力】text・observationFeatures のキーだけ'))) {
       phase = 'generation';
       response = JSON.stringify({ text: v12Check, observationFeatures: [visualSource()] });
     } else if (options.structuredConfirmation && body.messages.some((message: { content: unknown }) =>
@@ -1669,9 +1671,10 @@ test('Terra preobserve v2 keeps approval, start and first response timing privat
 
 async function verifyPilot012WorkerProfile(t: TestContext,
   participantProfile: typeof PILOT012_PARTICIPANT_PROFILE | typeof PILOT012_V18_PARTICIPANT_PROFILE | typeof PILOT012_V19_PARTICIPANT_PROFILE |
-    typeof PILOT012_V20_PARTICIPANT_PROFILE | typeof PILOT012_V21_PARTICIPANT_PROFILE | typeof PILOT012_V22_PARTICIPANT_PROFILE,
+    typeof PILOT012_V20_PARTICIPANT_PROFILE | typeof PILOT012_V21_PARTICIPANT_PROFILE | typeof PILOT012_V22_PARTICIPANT_PROFILE |
+    typeof PILOT012_V23_PARTICIPANT_PROFILE,
   generation: 'jev_generation_retry_v17' | typeof SHAPE_TERMINOLOGY_GENERATION | typeof VISUAL_FEATURE_GENERATION |
-    typeof DEFERRED_AI_EXTRACTION_GENERATION | typeof ISSUE_HANDLING_GENERATION | typeof GENERATION_RETRY_V22) {
+    typeof DEFERRED_AI_EXTRACTION_GENERATION | typeof ISSUE_HANDLING_GENERATION | typeof GENERATION_RETRY_V22 | typeof GENERATION_RETRY_V23) {
   const h = harness(true, figureBankProtocol, true);
   const transport = v12Transport(t, h);
   transport.options.sharedReading = true;
@@ -1695,8 +1698,8 @@ async function verifyPilot012WorkerProfile(t: TestContext,
   assert.throws(() => validateReceptionPlan({ ...plan, participantDialogueProfile: v13NamingV4Dialogue }));
   await h.settleBackground();
 
-  h.env.PARTICIPANT_DIALOGUE_PROFILE = participantProfile === PILOT012_V22_PARTICIPANT_PROFILE ? PILOT012_V21_PARTICIPANT_PROFILE
-    : participantProfile === PILOT012_V21_PARTICIPANT_PROFILE ? PILOT012_V22_PARTICIPANT_PROFILE
+  h.env.PARTICIPANT_DIALOGUE_PROFILE = participantProfile === PILOT012_V22_PARTICIPANT_PROFILE ? PILOT012_V23_PARTICIPANT_PROFILE
+    : participantProfile === PILOT012_V23_PARTICIPANT_PROFILE || participantProfile === PILOT012_V21_PARTICIPANT_PROFILE ? PILOT012_V22_PARTICIPANT_PROFILE
     : participantProfile === PILOT012_PARTICIPANT_PROFILE ? PILOT012_V18_PARTICIPANT_PROFILE : PILOT012_PARTICIPANT_PROFILE;
   h.env.PARTICIPANT_TERRA_INITIAL_OBSERVATION_GENERATION = INITIAL_OBSERVATION_STRUCTURED_V1;
   h.evict();
@@ -1715,9 +1718,9 @@ async function verifyPilot012WorkerProfile(t: TestContext,
     assert.equal(start.options.memoryPruneVersion, CLAIM_PRUNE_V3);
     assert.equal(start.queueState.privateState.graph.memoryPruneVersion, CLAIM_PRUNE_V3);
     const issueHandling = isIssueHandlingGeneration(generation);
-    const generationV22 = isGenerationV22(generation);
+    const v22Rules = usesV22GenerationRules(generation);
     assert.equal(start.queueState.privateState.agreeNameScopeVersion,
-      generationV22 ? 'jev_naming_v3' : issueHandling ? 'jev_naming_v2' : 'jev_naming_v1');
+      v22Rules ? 'jev_naming_v3' : issueHandling ? 'jev_naming_v2' : 'jev_naming_v1');
     assert.equal(start.options.generationRetryVersion, generation);
     assert.equal(start.options.dialoguePolicy, 'holistic_v5');
     assert.equal(start.options.questionLayout, 'two_stage_v3');
@@ -1746,7 +1749,7 @@ async function verifyPilot012WorkerProfile(t: TestContext,
       assert.equal(stored.queueState.privateState.deferredAiExtraction, undefined);
       assert.equal(stored.queueState.privateState.aiPublic.pending.aiSeq, stored.queueState.events.at(-1).seq);
       const topicChecks = h.calls.slice(callStart).filter(call => call.kind === 'choices' && call.body.questions.draft_topic_shift);
-      assert.equal(topicChecks.length, generationV22 ? 1 : 0);
+      assert.equal(topicChecks.length, v22Rules ? 1 : 0);
     }
 
     const sent = [...transport.textPhases];
@@ -1776,6 +1779,8 @@ test('pilot012 v21 preserves the approved six-figure profile through both trials
   t => verifyPilot012WorkerProfile(t, PILOT012_V21_PARTICIPANT_PROFILE, ISSUE_HANDLING_GENERATION));
 test('pilot012 v22 pins both new versions through six-figure trials and cold restore',
   t => verifyPilot012WorkerProfile(t, PILOT012_V22_PARTICIPANT_PROFILE, GENERATION_RETRY_V22));
+test('pilot012 v23 preserves the approved six-figure profile through both trials and cold restore',
+  t => verifyPilot012WorkerProfile(t, PILOT012_V23_PARTICIPANT_PROFILE, GENERATION_RETRY_V23));
 
 for (const strategy of ['repair-first', 'bypass-enabled'] as const)
 for (const scope of ['jev_naming_v1', 'jev_naming_v2'] as const)
@@ -1924,7 +1929,7 @@ for (const control of ['non-answer', 'acknowledge', 'actual-answer'] as const) {
 
 async function deferredHarness(t: TestContext,
   profile: typeof PILOT012_V20_PARTICIPANT_PROFILE | typeof PILOT012_V21_PARTICIPANT_PROFILE |
-    typeof PILOT012_V22_PARTICIPANT_PROFILE = PILOT012_V20_PARTICIPANT_PROFILE,
+    typeof PILOT012_V22_PARTICIPANT_PROFILE | typeof PILOT012_V23_PARTICIPANT_PROFILE = PILOT012_V20_PARTICIPANT_PROFILE,
   visual = false, figureCount: 4 | 6 = 6) {
   const h = harness(true, figureCount === 4 ? { ...figureBankProtocol,
     figureSelection: { mode: 'preset', setId: PILOT_FIGURE_SET_ID } } : figureBankProtocol);
@@ -1940,7 +1945,7 @@ async function deferredHarness(t: TestContext,
   const { trial } = await jsonOk(await h.start());
   const id = trial.sessionId, key = 'record:' + id;
   assert.equal((await h.storage.get(key)).options.generationRetryVersion,
-    profile === PILOT012_V22_PARTICIPANT_PROFILE ? GENERATION_RETRY_V22 :
+    profile === PILOT012_V23_PARTICIPANT_PROFILE ? GENERATION_RETRY_V23 : profile === PILOT012_V22_PARTICIPANT_PROFILE ? GENERATION_RETRY_V22 :
       profile === PILOT012_V21_PARTICIPANT_PROFILE ? ISSUE_HANDLING_GENERATION : DEFERRED_AI_EXTRACTION_GENERATION);
   assert.equal(trial.scene.shapes.length, figureCount);
   return { h, transport, id, key, plan };
@@ -1949,6 +1954,11 @@ async function deferredHarness(t: TestContext,
 const aiFunctionRequest = (body: { state: string; questions: Choices }) => Object.hasOwn(JSON.parse(body.state), 'aiSeq') &&
   Object.keys(body.questions).some(key => key.endsWith('_act'));
 const aiSupportRequest = (body: { questions: Choices }) => Object.keys(body.questions).some(key => key.endsWith('_support'));
+const issueHandlingProfiles = [
+  ['v21', PILOT012_V21_PARTICIPANT_PROFILE],
+  ['v22', PILOT012_V22_PARTICIPANT_PROFILE],
+  ['v23', PILOT012_V23_PARTICIPANT_PROFILE],
+] as const;
 
 test('v21 durably publishes verified visual evidence and a classification-only job before any classification', { timeout: 20_000 }, async t => {
   const { h, transport, id, key } = await deferredHarness(t, PILOT012_V21_PARTICIPANT_PROFILE, true);
@@ -2001,7 +2011,7 @@ test('v21 durably publishes verified visual evidence and a classification-only j
   assert.equal(transport.textPhases.filter(phase => phase === 'ai_extraction').length, 1);
 });
 
-for (const [version, profile] of [['v21', PILOT012_V21_PARTICIPANT_PROFILE], ['v22', PILOT012_V22_PARTICIPANT_PROFILE]] as const)
+for (const [version, profile] of issueHandlingProfiles)
 for (const savedState of ['queued', 'running'] as const) {
   test(`${version} restores a ${savedState} classification job without repeating extraction`, async t => {
     const { h, transport, id, key } = await deferredHarness(t, profile, true);
@@ -2246,7 +2256,7 @@ for (const savedState of ['queued', 'running'] as const) test(`v20 restores a ${
   await restoreSavedDeferredJob(await deferredHarness(t), savedState);
 });
 
-for (const [version, profile] of [['v21', PILOT012_V21_PARTICIPANT_PROFILE], ['v22', PILOT012_V22_PARTICIPANT_PROFILE]] as const)
+for (const [version, profile] of issueHandlingProfiles)
 for (const count of [4, 6] as const) test(`${version} restores a queued extraction and submits both ${count}-figure conditions`, async t => {
   const context = await deferredHarness(t, profile, false, count);
   const { h, plan } = context;
@@ -2272,6 +2282,9 @@ for (const count of [4, 6] as const) test(`${version} restores a queued extracti
 
 test('v22 restores a running extraction only after explicit retry', async t => {
   await restoreSavedDeferredJob(await deferredHarness(t, PILOT012_V22_PARTICIPANT_PROFILE), 'running');
+});
+test('v23 restores a running extraction only after explicit retry', async t => {
+  await restoreSavedDeferredJob(await deferredHarness(t, PILOT012_V23_PARTICIPANT_PROFILE), 'running');
 });
 
 test('v20 model mismatch preserves the published reply and blocks later decisions and submission', async t => {
@@ -3046,6 +3059,7 @@ for (const { dialogueProfile, generation } of [
   { dialogueProfile: PILOT012_V20_PARTICIPANT_PROFILE, generation: DEFERRED_AI_EXTRACTION_GENERATION },
   { dialogueProfile: PILOT012_V21_PARTICIPANT_PROFILE, generation: ISSUE_HANDLING_GENERATION },
   { dialogueProfile: PILOT012_V22_PARTICIPANT_PROFILE, generation: GENERATION_RETRY_V22 },
+  { dialogueProfile: PILOT012_V23_PARTICIPANT_PROFILE, generation: GENERATION_RETRY_V23 },
 ]) test(`four-figure production Worker (${generation}) completes both conditions through observation, dialogue, cold restore, scoring and review`, async t => {
   const h = harness(true, { ...figureBankProtocol, seedPolicy: 'per_trial',
     figureSelection: { mode: 'preset', setId: PILOT_FIGURE_SET_ID } });
@@ -3063,7 +3077,7 @@ for (const { dialogueProfile, generation } of [
   assert.equal(approved.plan.memoryPruneVersion, CLAIM_PRUNE_V3);
   assert.deepEqual(approved.plan.trials.map((trial: any) => trial.figureSelection.figureIds),
     [['F1', 'F2', 'F3', 'F4'], ['F1', 'F2', 'F3', 'F4']]);
-  const issueHandling = isIssueHandlingGeneration(generation), generationV22 = isGenerationV22(generation);
+  const issueHandling = isIssueHandlingGeneration(generation), v22Rules = usesV22GenerationRules(generation);
   const privateFields = /figureSelection|figureIds|figureSetId|bankVersion|observationMemo|ownAnchors|participantModelPin|jevLedger|jevTraces|visualPurpose|visualFeatures|data:image/u;
   let predecessor: string | undefined;
   for (const strategy of ['bypass-enabled', 'repair-first']) {
@@ -3077,7 +3091,7 @@ for (const { dialogueProfile, generation } of [
     assert.equal(initial.options.initialObservationGeneration, INITIAL_OBSERVATION_STRUCTURED_V2);
     assert.equal(initial.options.generationRetryVersion, generation);
     assert.equal(initial.queueState.privateState.agreeNameScopeVersion,
-      generationV22 ? 'jev_naming_v3' : issueHandling ? 'jev_naming_v2' : 'jev_naming_v1');
+      v22Rules ? 'jev_naming_v3' : issueHandling ? 'jev_naming_v2' : 'jev_naming_v1');
     assert.equal(initial.queueState.privateState.graph.memoryPruneVersion, CLAIM_PRUNE_V3);
     assert.equal(initial.queueState.privateState.observationMemo.figures.length, 4);
     assert.equal(initial.queueState.privateState.graph.slots.length, 4);
@@ -3118,13 +3132,15 @@ for (const { dialogueProfile, generation } of [
         { figureId: trace.executed.target.figureId, path: ['analytic', 'shapes', 0] });
       assert.equal(transport.textPhases.slice(promptStart).filter(phase => phase === 'ai_extraction').length, 1);
       assert.equal((trace.draftActs ?? []).filter((draft: { topicShift?: { choice: string } }) =>
-        draft.topicShift?.choice === 'within_plan').length, generationV22 ? 1 : 0);
+        draft.topicShift?.choice === 'within_plan').length, v22Rules ? 1 : 0);
     }
     assert.equal(action.body.questions.action.instructions.includes(SHAPE_TERMINOLOGY), usesTerminology);
     for (const phase of ['dialogue', 'generation', 'ai_extraction']) {
       const prompt = transport.prompts.slice(promptStart).find(call => call.phase === phase);
       assert.ok(prompt, phase);
       assert.equal(prompt.system.join('\n').includes(SHAPE_TERMINOLOGY), usesTerminology, phase);
+      if (phase === 'generation') assert.equal(prompt.system.some(instruction => instruction.includes('【出力】text・observationFeatures のキーだけ')),
+        isGenerationV23(generation));
     }
     assert.ok(speaking.events.some((event: any) => event.speaker === 'ai' && event.text === v12Check),
       JSON.stringify({ events: speaking.events, executed: speaking.jevTraces.at(-1).executed, publicSpeech: speaking.jevTraces.at(-1).publicSpeech, textPhases: transport.textPhases }));
@@ -3156,16 +3172,16 @@ for (const { dialogueProfile, generation } of [
       assert.equal(h.calls.length, callsBeforeRestore);
       if (issueHandling) {
         const oldScope = structuredClone(speaking);
-        oldScope.queueState.privateState.agreeNameScopeVersion = generationV22 ? 'jev_naming_v2' : 'jev_naming_v1';
+        oldScope.queueState.privateState.agreeNameScopeVersion = v22Rules ? 'jev_naming_v2' : 'jev_naming_v1';
         await replaceRecord(oldScope);
         assert.equal((await h.request('state')).status, 409);
         const missing = structuredClone(speaking);
         missing.jevTraces.pop();
         await replaceRecord(missing);
         assert.equal((await h.request('state')).status, 409);
-        if (generationV22) {
+        if (v22Rules) {
           const wrongGeneration = structuredClone(speaking);
-          wrongGeneration.options.generationRetryVersion = ISSUE_HANDLING_GENERATION;
+          wrongGeneration.options.generationRetryVersion = isGenerationV23(generation) ? GENERATION_RETRY_V22 : ISSUE_HANDLING_GENERATION;
           await replaceRecord(wrongGeneration);
           assert.equal((await h.request('state')).status, 409);
         }
