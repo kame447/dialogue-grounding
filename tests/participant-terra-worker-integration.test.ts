@@ -14,7 +14,8 @@ import { validateParticipantModelPin } from '../dialogue-model/runtime/v2/partic
 import { handleRequest } from '../workers/research-ai-proxy/src/index.mjs';
 import { PARTICIPANT_PRODUCTION_PROFILE } from '../dialogue-model/runtime/web/participant-usage-policy.ts';
 import { configuredParticipantPin, participantChoices, participantUsageChoices } from '../workers/research-ai-proxy/src/participant-transport.ts';
-import { INITIAL_OBSERVATION_STRUCTURED_V1 } from '../dialogue-model/runtime/observation/initial-observation-generation.ts';
+import { INITIAL_OBSERVATION_STRUCTURED_V1, INITIAL_OBSERVATION_STRUCTURED_V2,
+  type InitialObservationGeneration } from '../dialogue-model/runtime/observation/initial-observation-generation.ts';
 import { buildObservationMessages } from '../dialogue-model/runtime/observation/observe.ts';
 
 registerHooks({ resolve(name, context, next) {
@@ -173,7 +174,7 @@ function harness(enabled = true, selectedProtocol: typeof protocol & {
       participantUsagePolicyV2: undefined as (() => Promise<unknown>) | undefined,
       participantUsagePolicyV3: undefined as (() => Promise<unknown>) | undefined,
       participantUsageGeneration: undefined as ((body: unknown, expected: string) => Promise<any>) | undefined,
-      participantInitialObservationPolicy: undefined as (() => Promise<unknown>) | undefined,
+      participantInitialObservationPolicy: undefined as ((generation?: InitialObservationGeneration) => Promise<unknown>) | undefined,
       async participantUsageChat(body: any, expected: string) {
         const overridden = await controlled.usageChat?.(body, expected);
         return overridden ?? this.participantChat(body, expected);
@@ -1523,7 +1524,8 @@ function v12Transport(t: TestContext, h: ReturnType<typeof harness>) {
       .map((message: { content: unknown }) => String(message.content)) });
     return Response.json(chatResponse(options.wrongPhase === phase ? pin.lunaModelId : pin.terraModelId, response));
   });
-  return { lookup, options, textPhases, prompts, observationPolicy: () => proxy.participantInitialObservationPolicy() };
+  return { lookup, options, textPhases, prompts,
+    observationPolicy: (generation?: InitialObservationGeneration) => proxy.participantInitialObservationPolicy(generation) };
 }
 
 test('Terra preobserve keeps the approved P5 pin, accounts a shared board once, and starts from the cache after eviction', async t => {
@@ -1572,6 +1574,50 @@ test('Terra preobserve keeps the approved P5 pin, accounts a shared board once, 
   const secondInitial = secondRecord.jevLedger.phases.terra.initial_observation;
   assert.deepEqual([secondInitial.posts, secondInitial.cacheHits], [0, 1]);
   assert.deepEqual(transport.textPhases.filter(phase => phase === 'initial_observation'), ['initial_observation']);
+});
+
+test('Terra preobserve v2 keeps approval, start and first response timing private across eviction', async t => {
+  const h = harness(true, figureBankProtocol, true);
+  const transport = v12Transport(t, h);
+  h.env.PARTICIPANT_DIALOGUE_PROFILE = v13NamingV4Dialogue;
+  const env = h.env.PARTICIPANT_AI_PROXY;
+  h.env.PARTICIPANT_TERRA_INITIAL_OBSERVATION_GENERATION = INITIAL_OBSERVATION_STRUCTURED_V2;
+  await h.receive();
+  env.participantInitialObservationPolicy = () => transport.observationPolicy();
+  await assert.rejects(h.approve(), { code: 'reception_unavailable' });
+  assert.equal(transport.textPhases.length, 0);
+  env.participantInitialObservationPolicy = transport.observationPolicy;
+  const approved = await h.approve();
+  assert.equal(approved.plan.initialObservationGeneration, INITIAL_OBSERVATION_STRUCTURED_V2);
+  await h.settleBackground();
+
+  env.participantInitialObservationPolicy = () => transport.observationPolicy();
+  assert.equal((await h.start()).status, 409);
+  assert.deepEqual((await h.storage.get('reception:v1')).trials, []);
+  env.participantInitialObservationPolicy = transport.observationPolicy;
+  const start = await jsonOk(await h.start());
+  const recordId = start.trial.sessionId;
+  assert.deepEqual(transport.textPhases, ['initial_observation']);
+  await jsonOk(await h.request('message', { expectedRecordId: recordId, text: '細い部分が目印になりそうですね。' }));
+  await h.idle();
+  h.evict();
+  const participant = await jsonOk(await h.request('state'));
+  assert.doesNotMatch(JSON.stringify([start, participant]), /startRequestReceivedAt|initialMemoReadStartedAt|initialMemoReadyAt|trialStartedAt|firstHumanReceivedAt|firstAiReplyAt|initialObservationCacheHit/u);
+
+  const path = '/admin/reception/' + approved.receptionId + '/usage.json';
+  assert.equal((await h.admin(path, false)).status, 401);
+  const { timing, preobservations } = await jsonOk(await h.admin(path));
+  assert.equal(timing.approvedAt, approved.plan.approvedAt);
+  assert.equal(preobservations.length, 1);
+  assert.deepEqual(preobservations[0].trialIndices, [0, 1]);
+  const [clock] = timing.trials;
+  assert.equal(clock.trialIndex, 0);
+  assert.equal(clock.initialObservationCacheHit, true);
+  const times = [timing.approvedAt, preobservations[0].startedAt, preobservations[0].finishedAt,
+    clock.startRequestReceivedAt, clock.initialMemoReadStartedAt, clock.initialMemoReadyAt, clock.trialStartedAt,
+    clock.firstHumanReceivedAt, clock.firstAiReplyAt].map(Date.parse);
+  assert.ok(times.every((time, i) => Number.isFinite(time) && (i === 0 || time >= times[i - 1])));
+  assert.equal(transport.textPhases.filter(p => p === 'initial_observation').length, 1);
 });
 
 test('Terra preobserve makes a separate validated memo for each distinct frozen AI board', async () => {

@@ -1213,7 +1213,8 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       // It is private evidence, never a target selection or a graph operation.
       errorCode = "decision_failed";
       const referentInput = structuredClone({ ...baseInput, reobservationAllowed: maxReobservations > 0 });
-      const observationMemo = { version: OBSERVATION_MEMO_VERSION, sha256: await interruptible(observationHash(memo), signal) };
+      const referentMemo = memo;
+      const observationMemo = { version: OBSERVATION_MEMO_VERSION, sha256: await interruptible(observationHash(referentMemo), signal) };
       let estimate: HumanReferentEstimate = { status: "unknown", scores: null, model: null, responseId: null,
         costUsd: null, latencyMs: 0, inputBudget: null, calibrated: false };
       record.humanReferent = { ...estimate, turnIndex: latest.seq, observationMemo };
@@ -1591,7 +1592,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       if (aiEnabled) {
         aiPending = await prepareAiPublic({ turn: latest.seq, aiSeq: latest.seq + 1, candidateText: result.text, publicTurns,
           ownSlots: slots, ownAnchors: [...ownAnchors], observations: generationMemo!, issueSummary: generationIssues! }, graph, record.aiPublic!, signal,
-          record.generationGuard.fallback);
+          record.generationGuard.fallback, memo === referentMemo ? observationMemo.sha256 : undefined);
         abortIf(signal);
         state.aiPublic!.pending = aiPending;
       }
@@ -1662,11 +1663,15 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       if (safe.local) emit(options.onLocalGroundingTrace, safe.local);
     }
   }
-  async function prepareAiPublic(input: AiPublicInput, graph: Graph, research: AiPublicResearch, signal?: AbortSignal, fallback = false): Promise<AiPublicPending> {
+  async function prepareAiPublic(input: AiPublicInput, graph: Graph, research: AiPublicResearch, signal?: AbortSignal, fallback = false,
+    observationSha256?: string): Promise<AiPublicPending> {
     const snapshot = structuredClone(input);
     const timeoutMs = options.localGrounding.timeoutMs ?? 20000, deadline = performance.now() + timeoutMs;
-    const pending: AiPublicPending = { aiSeq: snapshot.aiSeq, textSha256: await aiHash(snapshot.candidateText), candidates: [], status: "empty", reasons: [] };
-    research.observationMemo = { version: OBSERVATION_MEMO_VERSION, sha256: await observationHash(snapshot.observations) };
+    // Reobservation installs a new memo. Only the unchanged memo can reuse the referent digest.
+    const [textSha256, memoSha256] = await Promise.all([aiHash(snapshot.candidateText),
+      observationSha256 ?? observationHash(snapshot.observations)]);
+    const pending: AiPublicPending = { aiSeq: snapshot.aiSeq, textSha256, candidates: [], status: "empty", reasons: [] };
+    research.observationMemo = { version: OBSERVATION_MEMO_VERSION, sha256: memoSha256 };
     if (fallback) { pending.status = "skipped_fallback"; pending.reasons = ["skipped_fallback"]; research.pending = pending; return pending; }
     const controller = new AbortController();
     let settled = false;
