@@ -371,7 +371,7 @@ export type JevTurnOptions = {
   deferredAiExtractionProfileSha256?: string;
   judgmentMaterialVersion?: JudgmentMaterialVersion;
   /** Creation pin only. A resumed trial uses the scope in its saved state. */
-  newTrialAgreeNameScopeVersion?: "scoped_v7" | "scoped_v8" | "scoped_v9" | "scoped_v10" | "scoped_v11" | "jev_naming_v1" | "jev_naming_v2";
+  newTrialAgreeNameScopeVersion?: "scoped_v7" | "scoped_v8" | "scoped_v9" | "scoped_v10" | "scoped_v11" | "jev_naming_v1" | "jev_naming_v2" | "jev_naming_v3";
   client: ChatClient; ownImage: LocalOwnImage; ownAnchors: readonly LocalOwnAnchor[];
   observer: ObservationObserver; jevDecision: JevDecisionClient; localGrounding: JevTurnLocalOptions;
   maxReobservations?: number;
@@ -1673,7 +1673,8 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         update: initialUpdate, publicTurns, signal, ownImage, ownAnchors, captureResearch: true, referenceQuestionBindings, directReferenceReplies, refinedReplyRules: isGenerationV11(generationRetryVersion), answerFieldRules: isGenerationV12(generationRetryVersion),
         bindDirectQuestionReplies: usesDirectNamingReplies(state.agreeNameScopeVersion),
         retainLocalQuestionAnswers: retainsLocalQuestionAnswers(state.agreeNameScopeVersion),
-        unbindPartNonAnswers: state.agreeNameScopeVersion === "jev_naming_v2",
+        unbindPartNonAnswers: state.agreeNameScopeVersion === "jev_naming_v2" || state.agreeNameScopeVersion === "jev_naming_v3",
+        retainDelayedPartAnswers: state.agreeNameScopeVersion === "jev_naming_v3",
         namingIntervalStart: state.judgments.filter(j => isNamingIntervalBoundary(j, issueHandling) || j.generatedPublication?.transition).at(-1)?.turnIndex ?? 0,
         ...(!aiEnabled && previousAi ? { priorAct: { ...previous.judgment, turn: previousAi.turn, publishedFallback: previous.generationGuard.fallback,
           ...(previousExecution!.target.kind === "multiple" ? { targetCandidates: [...previousExecution!.target.figureIds] } : {}) } } : {}) });
