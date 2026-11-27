@@ -46,8 +46,6 @@ const PARTICIPANT_MENU_FAMILIES=['general_target','propose_target','agree_target
 const PARTICIPANT_MENU_REQUIRED=['general_target','revisit_target'] as const;
 const PARTICIPANT_MENU_SUBSETS=Array.from({length:64},(_,m)=>m).filter(m=>(m&(m-1))!==0).map(m=>'subset_'+m);
 const PARTICIPANT_MENU_SINGLE_LABELS=[0,1,2,3,4,5].map(i=>'figure_'+i);
-const PARTICIPANT_MENU_NON_NONE_LABELS=[...PARTICIPANT_MENU_SINGLE_LABELS,...PARTICIPANT_MENU_SUBSETS];
-const PARTICIPANT_MENU_ALL_LABELS=['none',...PARTICIPANT_MENU_NON_NONE_LABELS];
 const participantFamilyFor=(action:string)=>action==='propose_name'?'propose_target':action==='agree'?'agree_target':action==='confirm'||action==='repair'?'feature_target':action==='request_observation'?'observation_target':action==='revisit'?'revisit_target':'general_target';
 const ORIENTATION_SAFE_FALLBACK:Record<string,string>={accept:'なるほど、そう見えるんですね。',confirm:'その形の特徴について、もう少し詳しく教えてもらえますか？',repair:'すみません、どの形の特徴かもう一度確認させてください。',defer:'この形の話には、あとで戻りたいです。',revisit:'先ほどの形について、もう一度お話しできますか？',move_on:'別の形についても、見立てを聞かせてもらえますか？',close:'ここでお話を終えてもよいですか？'};
 const RETRY_INSTRUCTION='公開発話を書き直してください。選択済みの行動を変更しないでください。';
@@ -222,6 +220,10 @@ function expectedOrientationFallback(action:any):string|null{
 }
 const SETS:number[][]=[];for(let n=2;n<=6;n++){const walk=(at:number,chosen:number[]):void=>{if(chosen.length===n){SETS.push(chosen);return;}for(let i=at;i<6;i++)walk(i+1,[...chosen,i]);};walk(0,[]);}
 const SET_LABELS=SETS.map(set=>'figures_'+set.join('_'));
+const setsForCount=(count:number)=>count===6?SETS:SETS.filter(set=>set.every(index=>index<count));
+const setLabelsForCount=(count:number)=>count===6?SET_LABELS:setsForCount(count).map(set=>'figures_'+set.join('_'));
+const targetLabelsForCount=(count:number)=>count===6?TARGET_V3_LABELS:['none',...Array.from({length:count},(_,i)=>'figure_'+i),...setLabelsForCount(count)];
+const figureCountAllowed=(count:number,prompt:PromptVersion|null|undefined)=>count===6||count===4&&prompt?.fourFigures===true;
 // two_stage_v3: the target labels a target question can carry, and the actions stage one always offers (any target or a figure always exists).
 const TARGET_V3_LABELS=['none',...[0,1,2,3,4,5].map(i=>'figure_'+i),...SET_LABELS];
 // The actions every v3 stage-one question offers (the readers of saved scores have no input to rebuild the closed set from): accept is required unless the trial is holistic_v3,
@@ -342,7 +344,8 @@ function budgetShape(b:any):boolean{
  const ks=['publicTurns','claims','publicNames','repairHistory','reobservations','observationDetails','observationChars','issueSummaryChars'];
  return exact(b,['maxChars','stateChars','omitted'])&&b.maxChars===20000&&Number.isSafeInteger(b.stateChars)&&b.stateChars>=0&&b.stateChars<=20000&&exact(b.omitted,ks)&&ks.every(k=>Number.isSafeInteger(b.omitted[k])&&b.omitted[k]>=0);
 }
-function decisionShape(d:any,layout='two_stage_v1',p5=false,shared:readonly SharedConstrual[]=[],namingRequest=false,humanLedMoveOn=false):boolean{
+function decisionShape(d:any,layout='two_stage_v1',p5=false,shared:readonly SharedConstrual[]=[],namingRequest=false,humanLedMoveOn=false,figureCount=6):boolean{
+ const targetLabels=targetLabelsForCount(figureCount),setLabels=setLabelsForCount(figureCount),sets=setsForCount(figureCount);
  if(!exact(d,['action','target','name','feature','observe','evidence','decisionKind','calibrated',...(Object.hasOwn(d??{},'detailFigureIds')?['detailFigureIds']:[]),...(Object.hasOwn(d??{},'sharedClaimIds')?['sharedClaimIds']:[])])||!sharedFields(d,p5)||!ACTIONS.includes(d.action)||!['mock','jev_local_test'].includes(d.decisionKind)||d.calibrated!==false||!primitiveText(d.name,80)||!primitiveText(d.feature)||!evidenceShape(d.evidence))return false;
  if(Object.hasOwn(d.evidence,'decisionMenuVersion')&&(layout!=='two_stage_v1'||d.decisionKind!=='jev_local_test'))return false;
  if(d.action==='request_observation'){if(!exact(d.observe,['figureIds','aspect','question','partnerConstrual'])||!Array.isArray(d.observe.figureIds)||!['orientation','part','contour','construal','referent'].includes(d.observe.aspect)||!primitiveText(d.observe.question,1000)||!primitiveText(d.observe.partnerConstrual))return false;}else if(d.observe!==null)return false;
@@ -358,32 +361,35 @@ function decisionShape(d:any,layout='two_stage_v1',p5=false,shared:readonly Shar
    const k=Object.keys(stages[0].scores.action??{}),tl=stages[1]?.scores?.target?Object.keys(stages[1].scores.target):[],label=stages[1]?.choices?.target;
    if(!equal(Object.keys(stages[0].choices),humanLedMoveOn?['action',MOVE_ON_SOURCE_QUESTION]:['action'])||
     humanLedMoveOn&&!validMoveOnSource(stages[0].choices[MOVE_ON_SOURCE_QUESTION],stages[0].scores[MOVE_ON_SOURCE_QUESTION])||stages[0].choices.action!==d.action||!k.every((x:string)=>ACTIONS.includes(x))||![...alwaysV3(),d.action].every((x:string)=>k.includes(x)))return false;
-   if(!evidenceShape(stages[1],'target')||!equal(Object.keys(stages[1].choices),['target'])||!equal(Object.keys(stages[1].scores),['target'])||!tl.length||new Set(tl).size!==tl.length||!tl.every((x:string)=>TARGET_V3_LABELS.includes(x)))return false;
-   const kind=d.target?.kind,want=kind==='none'?label==='none':kind==='single'?/^figure_[0-5]$/.test(label):kind==='multiple'&&SET_LABELS.includes(label)&&SETS[SET_LABELS.indexOf(label)].length===d.target.figureIds?.length;
+   if(!evidenceShape(stages[1],'target')||!equal(Object.keys(stages[1].choices),['target'])||!equal(Object.keys(stages[1].scores),['target'])||!tl.length||new Set(tl).size!==tl.length||!tl.every((x:string)=>targetLabels.includes(x)))return false;
+   const kind=d.target?.kind,want=kind==='none'?label==='none':kind==='single'?/^figure_[0-5]$/.test(label):kind==='multiple'&&setLabels.includes(label)&&sets[setLabels.indexOf(label)].length===d.target.figureIds?.length;
    if(!want)return false;
   }else if(layout==='two_stage_v2'){
    if(!equal(Object.keys(stages[0].choices).sort(),['action','target'])||(stages[0].choices.target==='multiple')!==set)return false;
    const c=stages[1];
-   if(set&&(!evidenceShape(c,'multiple_candidates')||!equal(Object.keys(c.choices),['candidate_set'])||!equal(Object.keys(c.scores),['candidate_set'])||!equal(Object.keys(c.scores.candidate_set).sort(),[...SET_LABELS].sort())||SETS[SET_LABELS.indexOf(c.choices.candidate_set)]?.length!==d.target.figureIds?.length))return false;
+   if(set&&(!evidenceShape(c,'multiple_candidates')||!equal(Object.keys(c.choices),['candidate_set'])||!equal(Object.keys(c.scores),['candidate_set'])||!equal(Object.keys(c.scores.candidate_set).sort(),[...setLabels].sort())||sets[setLabels.indexOf(c.choices.candidate_set)]?.length!==d.target.figureIds?.length))return false;
   }
  }
  return true;
 }
 // Labels each failure-record question may carry; indexed labels run 0..n-1 without gaps.
-function failureLabels(q:string,ls:string[],layout='two_stage_v1',p5=false):boolean{
+function failureLabels(q:string,ls:string[],layout='two_stage_v1',p5=false,figureCount=6):boolean{
+ const setLabels=setLabelsForCount(figureCount);
  if(q===MOVE_ON_SOURCE_QUESTION)return equal([...ls].sort(),Object.keys(MOVE_ON_SOURCE_CRITERIA).sort());
  if(q==='shared_construal')return p5&&ls.length>=2&&equal(ls.slice().sort(),sharedLabels(ls.length-1).sort());
  const unique=new Set(ls).size===ls.length,indexed=(prefix:string,sizes:number[])=>unique&&sizes.includes(ls.length)&&ls.every(l=>l.startsWith(prefix+'_')&&String(Number(l.slice(prefix.length+1)))===l.slice(prefix.length+1)&&Number(l.slice(prefix.length+1))<ls.length);
  if(q==='action')return unique&&ls.every(l=>ACTIONS.includes(l))&&(layout==='two_stage_v3'?alwaysV3().every(a=>ls.includes(a)):ACTIONS.every(a=>['agree','request_observation'].includes(a)||ls.includes(a)));
- if(q==='target'&&layout==='two_stage_v3')return unique&&ls.length>0&&ls.every(l=>TARGET_V3_LABELS.includes(l));
- if(q==='target')return unique&&ls.length===8&&['none','multiple',...[0,1,2,3,4,5].map(i=>'figure_'+i)].every(l=>ls.includes(l));
- if(/^candidate_[0-5]$/.test(q))return unique&&ls.length===2&&ls.includes('include')&&ls.includes('exclude');
- if(q==='candidate_set')return unique&&ls.length===SET_LABELS.length&&SET_LABELS.every(l=>ls.includes(l));
+ if(q==='target'&&layout==='two_stage_v3')return unique&&ls.length>0&&ls.every(l=>targetLabelsForCount(figureCount).includes(l));
+ if(q==='target')return unique&&ls.length===figureCount+2&&['none','multiple',...Array.from({length:figureCount},(_,i)=>'figure_'+i)].every(l=>ls.includes(l));
+ if(/^candidate_[0-5]$/.test(q)&&Number(q.slice(10))<figureCount)return unique&&ls.length===2&&ls.includes('include')&&ls.includes('exclude');
+ if(q==='candidate_set')return unique&&ls.length===setLabels.length&&setLabels.every(l=>ls.includes(l));
  if(q==='name'||q==='feature')return indexed(q,Array.from({length:255},(_,i)=>i+1));
- if(q==='observe_targets')return indexed('subset',[1,3,7,15,31,63]);
+ if(q==='observe_targets')return indexed('subset',Array.from({length:figureCount},(_,i)=>2**(i+1)-1));
  return q==='observe_aspect'&&unique&&ls.length===5&&['orientation','part','contour','construal','referent'].every(l=>ls.includes(l));
 }
-function participantFailureStageValid(qs:string[],choices:any,scores:any):boolean{
+function participantFailureStageValid(qs:string[],choices:any,scores:any,figureCount=6):boolean{
+ const singles=PARTICIPANT_MENU_SINGLE_LABELS.slice(0,figureCount);
+ const nonNone=[...singles,...PARTICIPANT_MENU_SUBSETS.filter(label=>Number(label.slice(7))<2**figureCount)],all=['none',...nonNone];
  if(!qs.includes('action')||PARTICIPANT_MENU_REQUIRED.some(k=>!qs.includes(k))||qs.some(k=>k!=='action'&&!(PARTICIPANT_MENU_FAMILIES as readonly string[]).includes(k)))return false;
  const actions=ACTIONS.filter(a=>qs.includes(participantFamilyFor(a)));
  const as=scores.action;if(!exact(as,[...actions])||typeof choices.action!=='string'||!actions.includes(choices.action)||!Object.values(as).every(probability))return false;
@@ -391,21 +397,21 @@ function participantFailureStageValid(qs:string[],choices:any,scores:any):boolea
   if(!Object.hasOwn(scores,family))continue;
   const fs=scores[family],ls=Object.keys(fs??{});
   if(!exact(fs,ls)||!ls.length||typeof choices[family]!=='string'||!ls.includes(choices[family])||!Object.values(fs).every(probability))return false;
-  const allowed=family==='general_target'?PARTICIPANT_MENU_ALL_LABELS:['propose_target','agree_target','revisit_target'].includes(family)?PARTICIPANT_MENU_SINGLE_LABELS:PARTICIPANT_MENU_NON_NONE_LABELS;
+  const allowed=family==='general_target'?all:['propose_target','agree_target','revisit_target'].includes(family)?singles:nonNone;
   if(!ls.every(l=>allowed.includes(l)))return false;
-  if(family==='general_target'&&ls.length!==PARTICIPANT_MENU_ALL_LABELS.length||family==='revisit_target'&&ls.length!==PARTICIPANT_MENU_SINGLE_LABELS.length||family==='observation_target'&&ls.length!==PARTICIPANT_MENU_NON_NONE_LABELS.length)return false;
+  if(family==='general_target'&&ls.length!==all.length||family==='revisit_target'&&ls.length!==singles.length||family==='observation_target'&&ls.length!==nonNone.length)return false;
  }
  return true;
 }
-function failureStage(s:any,layout:string,last:boolean,participantMenu=false,p5=false,namingRequest=false,humanLedMoveOn=false):boolean{
+function failureStage(s:any,layout:string,last:boolean,participantMenu=false,p5=false,namingRequest=false,humanLedMoveOn=false,figureCount=6):boolean{
  if(!exact(s,['stage','status','error','rejectionCode','model','responseId','costUsd','latencyMs','inputBudget','choices','scores'])||!['ok','error'].includes(s.status)||!(s.error===null||DECISION_CODES.includes(s.error))||!(s.rejectionCode===null||Object.hasOwn(RULE_ERRORS,s.rejectionCode))||!(s.model===null||checkModelIdentity(JEV_MODEL,s.model).status==='accepted')||!(s.responseId===null||typeof s.responseId==='string'&&/^gen-[A-Za-z0-9_-]{1,124}$/.test(s.responseId))||!(s.costUsd===null||Number.isFinite(s.costUsd)&&s.costUsd>=0)||!Number.isFinite(s.latencyMs)||s.latencyMs<0||!budgetShape(s.inputBudget)||!exact(s.choices,Object.keys(s.choices??{}))||!exact(s.scores,Object.keys(s.choices)))return false;
  const qs=Object.keys(s.choices);
  // decide() stops at the first failing stage; answers exist only once a stage is parsed, and then cost and model are known.
  if(!last&&s.status!=='ok'||s.status==='ok'&&(s.error!==null||s.rejectionCode!==null||!qs.length))return false;
  if(!qs.length)return true;
- if(participantMenu&&s.stage==='action_target')return s.model!==null&&s.costUsd!==null&&participantFailureStageValid(qs,s.choices,s.scores);
- const sets=layout==='two_stage_v3'?(s.stage==='action'?[humanLedMoveOn?['action',MOVE_ON_SOURCE_QUESTION]:['action']]:s.stage==='target'?[['target']]:s.stage==='detail'?[['name'],['feature'],['observe_aspect','observe_targets'],...(p5?[['shared_construal'],...(namingRequest?[['feature','shared_construal']]:[])]:[])]:[]):s.stage==='action_target'?[layout==='two_stage_v1'?['action','target','candidate_0','candidate_1','candidate_2','candidate_3','candidate_4','candidate_5']:['action','target']]:s.stage==='multiple_candidates'?[['candidate_set']]:s.stage==='detail'?[['name'],['feature'],['observe_aspect','observe_targets']]:[];
- return s.model!==null&&s.costUsd!==null&&sets.some(set=>equal([...qs].sort(),[...set].sort()))&&qs.every(q=>{const scores=s.scores[q],ls=Object.keys(scores??{});return exact(scores,ls)&&failureLabels(q,ls,layout,p5)&&typeof s.choices[q]==='string'&&ls.includes(s.choices[q])&&Object.values(scores).every(probability);});
+ if(participantMenu&&s.stage==='action_target')return s.model!==null&&s.costUsd!==null&&participantFailureStageValid(qs,s.choices,s.scores,figureCount);
+ const sets=layout==='two_stage_v3'?(s.stage==='action'?[humanLedMoveOn?['action',MOVE_ON_SOURCE_QUESTION]:['action']]:s.stage==='target'?[['target']]:s.stage==='detail'?[['name'],['feature'],['observe_aspect','observe_targets'],...(p5?[['shared_construal'],...(namingRequest?[['feature','shared_construal']]:[])]:[])]:[]):s.stage==='action_target'?[layout==='two_stage_v1'?['action','target',...Array.from({length:figureCount},(_,i)=>'candidate_'+i)]:['action','target']]:s.stage==='multiple_candidates'?[['candidate_set']]:s.stage==='detail'?[['name'],['feature'],['observe_aspect','observe_targets']]:[];
+ return s.model!==null&&s.costUsd!==null&&sets.some(set=>equal([...qs].sort(),[...set].sort()))&&qs.every(q=>{const scores=s.scores[q],ls=Object.keys(scores??{});return exact(scores,ls)&&failureLabels(q,ls,layout,p5,figureCount)&&typeof s.choices[q]==='string'&&ls.includes(s.choices[q])&&Object.values(scores).every(probability);});
 }
 // Plan O owner record of one failed decide(): closed shape, then its own totals, rule and stage path. No producer validator is used.
 function failureRecord(f:any,layout:string,p5:boolean,namingRequest:boolean,
@@ -414,7 +420,7 @@ function failureRecord(f:any,layout:string,p5:boolean,namingRequest:boolean,
  const hasMenu=!!e&&typeof e==='object'&&Object.hasOwn(e,'decisionMenuVersion');
  if(!exact(e,['schemaVersion','questionLayout',...(hasMenu?['decisionMenuVersion']:[]),'callIndex','error','rejectionCode','model','responseId','costUsd','latencyMs','inputBudget','stages'])||e.schemaVersion!=='jev_decision_failure_v1'||e.questionLayout!==layout||hasMenu&&(e.decisionMenuVersion!==PARTICIPANT_MENU_VERSION||layout!=='two_stage_v1')||!Number.isSafeInteger(e.callIndex)||e.callIndex<1||!DECISION_CODES.includes(e.error)||!(e.rejectionCode===null||RULE_ERRORS[e.rejectionCode]===e.error)||!(e.model===null||checkModelIdentity(JEV_MODEL,e.model).status==='accepted')||!(e.responseId===null||typeof e.responseId==='string'&&/^gen-[A-Za-z0-9_-]{1,124}$/.test(e.responseId))||!(e.costUsd===null||Number.isFinite(e.costUsd)&&e.costUsd>=0)||!Number.isFinite(e.latencyMs)||e.latencyMs<0||!(e.inputBudget===null||budgetShape(e.inputBudget))||!Array.isArray(e.stages))return false;
  const ss=e.stages,order=ss.map((s:any)=>s?.stage).join(','),orders=layout==='two_stage_v3'?['','action','action,target','action,target,detail']:['','action_target','action_target,detail',...(layout==='two_stage_v2'?['action_target,multiple_candidates','action_target,multiple_candidates,detail']:[])];
- if(!orders.includes(order)||!ss.every((s:any,i:number)=>failureStage(s,layout,i===ss.length-1,hasMenu,p5,namingRequest,humanLedMoveOn)))return false;
+ if(!orders.includes(order)||!ss.every((s:any,i:number)=>failureStage(s,layout,i===ss.length-1,hasMenu,p5,namingRequest,humanLedMoveOn,ownSlots.length||6)))return false;
   // two_stage_v3 only: a decision refused by the local legality table before any publication has no provider stage, response, model or cost.
   if(layout==='two_stage_v3'&&ss.length===0&&e.rejectionCode==='action_target_not_allowed')return e.error==='invalid_decision'&&e.model===null&&e.responseId===null&&e.costUsd===null&&e.inputBudget===null&&e.latencyMs===0;
  // Totals as the client accumulates them; an unknown cost stays null, never zero.
@@ -435,7 +441,7 @@ function failureRecord(f:any,layout:string,p5:boolean,namingRequest:boolean,
     const shared=carriesSharedChoice(thr),keys=Object.keys(thr.choices);
     if(p5&&(act==='accept'||act==='confirm'&&namingRequest)){
      const target=v3Targets({ownSlots}).find(option=>option.label===sec.choices.target)?.target;
-     if(!target||candidates.length>0&&(ownSlots.length!==6||
+     if(!target||candidates.length>0&&(![4,6].includes(ownSlots.length)||
         candidates.some(candidate=>candidate.figureIds.some(id=>!ownSlots.includes(id)))))return false;
      const offered=sharedOffered({action:act,target},candidates,namingRequest);
      if(offered.length){
@@ -751,7 +757,7 @@ function traceShape(t:any,layout='two_stage_v1',policy?:string,ownSlots:readonly
   if(Object.hasOwn(t,'decisionRejectionCode')&&!(t.decisionRejectionCode==='agree_without_public_proposal'||t.decisionRejectionCode==='action_target_not_allowed'&&local||judgment||participantEarly))return false;
  if(Object.hasOwn(t,'repairProspect')&&!prospectShape(t.repairProspect))return false;
   if(Object.hasOwn(t,'repairFacts')&&!Array.isArray(t.repairFacts)||Object.hasOwn(t,'repairGate')&&(!t.repairGate||typeof t.repairGate!=='object'))return false;
-  if(!t.decisions.every((d:any)=>decisionShape(d,layout,p5,t.sharedConstruals,t.namingRequest===true,humanLedMoveOn))||
+  if(!t.decisions.every((d:any)=>decisionShape(d,layout,p5,t.sharedConstruals,t.namingRequest===true,humanLedMoveOn,ownSlots.length||6))||
    ![t.executed,t.intervention?.original,t.intervention?.alternative].every(x=>sharedFields(x,p5))||
    carriesSharedChoice(t.intervention?.detailEvidence)&&!p5)return false;
   const hasRecovery=Object.hasOwn(t,'publicationRecovery');
@@ -1186,6 +1192,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
  if(entries.length===0)return'missing';if(entries.length!==1||pairs.length>1)return'invalid';
  const v=promptVersion(records,tr);if(!v)return'invalid';
  const {tape,result}=entries[0],pair=pairs[0];
+ if(!figureCountAllowed(Object.keys(tape?.state?.ledger??{}).length,v))return'invalid';
  const pruneVersion = tape?.state?.graph?.memoryPruneVersion;
  const committedState = tr.turns?.find((u:any)=>u.turn===t.turnIndex)?.state;
  const committed = committedState?.graph;
@@ -1670,7 +1677,7 @@ function s4NoAccept(input:any):boolean{
 }
 function v3Targets(input:any):{label:string;target:any}[]{
  const ids:string[]=input.ownSlots;
- return [{label:'none',target:{kind:'none'}},...ids.map((id,i)=>({label:'figure_'+i,target:{kind:'single',figureId:id}})),...SETS.map((s,k)=>({label:SET_LABELS[k],target:{kind:'multiple',figureIds:s.map(i=>ids[i])}}))];
+ return [{label:'none',target:{kind:'none'}},...ids.map((id,i)=>({label:'figure_'+i,target:{kind:'single',figureId:id}})),...setsForCount(ids.length).map(s=>({label:'figures_'+s.join('_'),target:{kind:'multiple',figureIds:s.map(i=>ids[i])}}))];
 }
 const sameTarget=(a:any,b:any)=>!!a&&!!b&&a.kind===b.kind&&(a.kind==='none'||(a.kind==='single'?a.figureId===b.figureId:equal([...a.figureIds].sort(),[...b.figureIds].sort())));
 const byScore=(rows:{action:string;score:number}[])=>rows.sort((a,b)=>b.score-a.score||ACTIONS.indexOf(a.action)-ACTIONS.indexOf(b.action));
@@ -1695,12 +1702,13 @@ function rankProof(i:any,d:any,input:any):boolean{
 }
 // holistic_v5 writes the same material in a compact form (decision/judgment-material-v5.ts); S4 reads it back to the older shape before it re-derives anything.
 const LEGEND_V5='stateの記法: publicTurnsは全公開発話を番号順に一度ずつ並べた行（U番号 h=人間 / ai: 発話）です。claimsの各行は [claim id, 出典の発話番号, act, aspect, 対象, 名前, 返答先のclaim id, 命題, issueId] で、発言そのものは出典の発話番号の行を参照してください。f0〜f5はownSlotsの順の自分の図形です。issuesは局所の論点で、各行は [issue id, aspect, 対象, state, nameState, 名前, 最後の発話番号, claim id] です。figuresは図形ごとに、名称の状態（statusとname）と、これまでに実行した行動 [行動, 発話番号, 名前または特徴, 返答のclaim id] を並べた履歴です。';
+const legendForInput=(input:any)=>input.ownSlots?.length===4&&CTX.prompt?.fourFigures?LEGEND_V5.replace('f0〜f5','f0〜f3'):LEGEND_V5;
 const LEGEND_V11='answerClaimsは、figuresの返答のclaim idがclaimsにない行動のためだけに添える行で、各行は [claim id, 出典の発話番号, act, 対象, 命題] です。グラフから外れた回答の出典の発話番号はnullになります。';
 const ROTATION_V5='課題の条件として、相手の盤面は自分の盤面と同じ図形を±90度ほど回転して提示しています（relative_pm90）。向きや方位を表す語（上・下・左・右・縦・横など）は、相手と自分で一致しない前提で扱い、向きに依存しない特徴で照合してください。';
 const parseMaterial=(text:string):any=>{const x=JSON.parse(text);return x?.view==='judgment_v5'?decodeMaterialV5(x):x;};
 const usesPositionPrompt=(v:PromptVersion):boolean=>v.i172&&!(v.styleMode==='research_split'&&CTX.v3);
 const activeNative=():PromptVersion['native']=>CTX.prompt?(usesPositionPrompt(CTX.prompt)?CTX.prompt.native:NATIVE):CTX.v3?NATIVE:NATIVE_I172;
-const nativeInstructions=(s:any,layout='two_stage_v1',prospect=false)=>{const nat=activeNative();return(layout==='two_stage_v3'?nat.common.replace(NATIVE_V2.v1Stages,NATIVE_V3.stages):layout==='two_stage_v2'?nat.common.replace(NATIVE_V2.v1Stages,NATIVE_V2.stages):nat.common)+(Object.hasOwn(s,'humanReferent')?'\n'+nat.referent:'')+(prospect&&Object.hasOwn(s,'repairProspect')?'\n'+ADAPT.prospect:'')+(CTX.facts?'\n'+ADAPT.facts:'')+(s?.view==='judgment_v5'?'\n'+LEGEND_V5+(s.notationV11===true?'\n'+LEGEND_V11:'')+(s.rotationMode==='relative_pm90'?'\n'+ROTATION_V5:''):'')+(CTX.jevNaming?'\n'+NAMING_GUIDANCE:'')+
+const nativeInstructions=(s:any,layout='two_stage_v1',prospect=false)=>{const nat=activeNative();return(layout==='two_stage_v3'?nat.common.replace(NATIVE_V2.v1Stages,NATIVE_V3.stages):layout==='two_stage_v2'?nat.common.replace(NATIVE_V2.v1Stages,NATIVE_V2.stages):nat.common)+(Object.hasOwn(s,'humanReferent')?'\n'+nat.referent:'')+(prospect&&Object.hasOwn(s,'repairProspect')?'\n'+ADAPT.prospect:'')+(CTX.facts?'\n'+ADAPT.facts:'')+(s?.view==='judgment_v5'?'\n'+legendForInput(s)+(s.notationV11===true?'\n'+LEGEND_V11:'')+(s.rotationMode==='relative_pm90'?'\n'+ROTATION_V5:''):'')+(CTX.jevNaming?'\n'+NAMING_GUIDANCE:'')+
  (s?.judgmentMaterialVersion===JEV_REPAIR_QUALITY_VERSION?'\n'+REPAIR_QUALITY_GUIDANCE:'');};
 const HUMAN_MOVE_ON_ACTION_NOTE = '\n今回の人間が話題の移行を明示的に主導したときは、命名や同定の解決を前提とせずmove_onで受け止めてください。';
 const MOVE_ON_SOURCE_INSTRUCTIONS = '今回の人間の公開発話と直前までの公開文脈から、話題の移行を誰が主導したか判定してください。図形の同定や名称の合意は問っていません。';
@@ -1718,7 +1726,7 @@ function publicationContinuationProof(questions:any,input:any,stage:any,generati
 }
 function originalQuestions(body:any,input:any,layout='two_stage_v1'):boolean|null{
   if(sharedMaterial(input)===false)return false;
-  if(body.model!=='typesafe/jev-1.14'||!Array.isArray(input.ownSlots)||input.ownSlots.length!==6||!Array.isArray(input.observations)||!Array.isArray(input.publicNames)||Object.hasOwn(input,'nameLedger'))return false;
+  if(body.model!=='typesafe/jev-1.14'||!Array.isArray(input.ownSlots)||!figureCountAllowed(input.ownSlots.length,CTX.prompt)||!Array.isArray(input.observations)||!Array.isArray(input.publicNames)||Object.hasOwn(input,'nameLedger'))return false;
   // holistic_v2 never sends a name the partner proposed among the public names (decided from the turn's full claims, not from the shortened ones).
   if(H2()&&CTX.humanNames&&input.publicNames.some((n:any)=>CTX.humanNames!.has(ledgerName(String(n?.name)))))return false;
   // An agree label can be missing only for want of eligible saved agreeNames; with no saved source that cannot be told from forgery.
@@ -1789,13 +1797,14 @@ function sameMaterial(input:any,original:any):boolean|null{
  if(equal(strip(input),strip(original)))return true;
  const before=original.inputBudget?.omitted,after=input.inputBudget?.omitted;return before&&after&&Object.keys(before).some(k=>after[k]>before[k])&&Object.keys(before).every(k=>after[k]>=before[k])?null:false;
 }
-// two_stage_v2 candidate-set request: the same material plus the stage-one selection, the fixed 57 subsets, and the evidence and target it produced.
+// two_stage_v2 candidate-set request: the same material, stage-one selection, every nonsingleton own-figure subset, and the evidence and target it produced.
 function setProof(body:any,response:any,d:any,original:any,layout:string):boolean|null{
  const input=parseMaterial(body.state);if(layout!=='two_stage_v2'||!original||!d||!equal(input.selected,{action:d.action,target:{kind:'multiple'}}))return false;
  const same=sameMaterial(input,original);if(same!==true)return same;
- const criteria=Object.fromEntries(SETS.map((set,i)=>[SET_LABELS[i],`自分の候補図形の集合 ${JSON.stringify(set.map(k=>input.ownSlots[k]))}。観察メモを参照。`]));
+ const sets=setsForCount(input.ownSlots.length),labels=setLabelsForCount(input.ownSlots.length);
+ const criteria=Object.fromEntries(sets.map((set,i)=>[labels[i],`自分の候補図形の集合 ${JSON.stringify(set.map(k=>input.ownSlots[k]))}。観察メモを参照。`]));
  if(!equal(body.questions,{candidate_set:{type:'choice',instructions:nativeInstructions(input,layout)+'\n'+NATIVE_V2.candidateSet,criteria}}))return false;
- const e=d.evidence?.stages?.find((x:any)=>x.stage==='multiple_candidates'),a=response.answers.candidate_set,set=SETS[SET_LABELS.indexOf(a.choice)];
+ const e=d.evidence?.stages?.find((x:any)=>x.stage==='multiple_candidates'),a=response.answers.candidate_set,set=sets[labels.indexOf(a.choice)];
  return !!set&&!!e&&e.model===response.model&&e.responseId===response.id&&e.costUsd===response.usage?.cost&&e.inputBudget?.stateChars===body.state.length&&equal(e.inputBudget?.omitted,input.inputBudget?.omitted)&&
   equal(e.choices,{candidate_set:a.choice})&&equal(e.scores,{candidate_set:a.probabilities})&&equal(d.target,{kind:'multiple',figureIds:set.map(k=>input.ownSlots[k])});
 }
@@ -1987,7 +1996,10 @@ function generationMessagesWith(messages:any[],trace:any,execution:any,tape:any,
   if(execution.sharedClaimIds&&!shared)return false;
   const sharedMessage=shared?{role:'system',content:(execution.action==='confirm'?SHARED_CONSTRUAL_CONFIRM_INSTRUCTIONS:SHARED_CONSTRUAL_INSTRUCTIONS)+'\n'+
     JSON.stringify({figureIds:shared.figureIds,construal:shared.construal,openDetails:shared.openDetails})}:null;
-  const expected:any[]=[{role:'system',content:FIXED.task},{role:'system',content:!H5()&&tape.technicalTrial?FIXED.generator.replace(trial.from,trial.generator):FIXED.generator},...(profile.utteranceStyle==='concise'?[{role:'system',content:FIXED.concise}]:[]),actionMessage,...(sharedMessage?[sharedMessage]:[]),...(['confirm','repair'].includes(execution.action)&&execution.target.kind==='multiple'?[{role:'system',content:FIXED.detail}]:[]),...(layoutOf(profile)==='two_stage_v3'&&execution.action==='revisit'&&execution.target.kind==='multiple'?[{role:'system',content:REVISIT_MULTIPLE}]:[])];
+  const figureCount=Object.keys(tape.state.ledger).length;
+  if(!figureCountAllowed(figureCount,CTX.prompt))return false;
+  const task=figureCount===4?FIXED.task.replace('タングラム6図形','タングラム4図形'):FIXED.task;
+  const expected:any[]=[{role:'system',content:task},{role:'system',content:!H5()&&tape.technicalTrial?FIXED.generator.replace(trial.from,trial.generator):FIXED.generator},...(profile.utteranceStyle==='concise'?[{role:'system',content:FIXED.concise}]:[]),actionMessage,...(sharedMessage?[sharedMessage]:[]),...(['confirm','repair'].includes(execution.action)&&execution.target.kind==='multiple'?[{role:'system',content:FIXED.detail}]:[]),...(layoutOf(profile)==='two_stage_v3'&&execution.action==='revisit'&&execution.target.kind==='multiple'?[{role:'system',content:REVISIT_MULTIPLE}]:[])];
   if(versionedGeneration){
    const namingState=Object.keys(tape.state.ledger).sort().map(figureId=>({figureId,status:tape.state.ledger[figureId].status,name:tape.state.ledger[figureId].name}));
    expected.push({role:'system',content:PRIVATE_NAMING_STATE_V5_S4+'\n'+JSON.stringify(namingState)});
@@ -2139,7 +2151,7 @@ const PROSPECT_TEXT={base:"公開履歴・観察メモ・修復履歴だけを�
 const PROSPECT_CRITERIA={prospect:{progressing:"修復が進む見込みがある。",stalled:"修復が停滞する見込みがある。",uncertain:"見込みは不確か。",no_open_issue:"修復する対象がない。"},
  basis:{new_information:"新しい情報が得られた。",candidate_narrowed:"候補が狭まった。",candidate_widened:"候補が広がった。",repetition:"同じやり取りの反復。",partner_uncertain:"相手の不確かさ。",other_figure_benefit:"別の図形を扱う利点がある。",none:"該当する根拠なし（修復対象がない場合を含む）。"}};
 function prospectQuestions(input:any,facts:boolean,layout='two_stage_v1'){
- const issues=(input.repairHistory??[]).filter((r:any)=>r.turn<input.turn).slice().sort((a:any,b:any)=>a.turn-b.turn).slice(-8),ins=PROSPECT_TEXT.base+(facts?'\n'+ADAPT.facts:'')+(input.notationV6===true?'\n'+LEGEND_V5+(input.notationV11===true?'\n'+LEGEND_V11:'')+(input.rotationMode==='relative_pm90'?'\n'+ROTATION_V5:''):'');
+ const issues=(input.repairHistory??[]).filter((r:any)=>r.turn<input.turn).slice().sort((a:any,b:any)=>a.turn-b.turn).slice(-8),ins=PROSPECT_TEXT.base+(facts?'\n'+ADAPT.facts:'')+(input.notationV6===true?'\n'+legendForInput(input)+(input.notationV11===true?'\n'+LEGEND_V11:'')+(input.rotationMode==='relative_pm90'?'\n'+ROTATION_V5:''):'');
  const q=(suffix:string,criteria:any)=>({type:'choice',instructions:ins+suffix,criteria});
  const quality=input.judgmentMaterialVersion===JEV_REPAIR_QUALITY_VERSION;
  const qualityInstructions=quality?'\n'+REPAIR_QUALITY_GUIDANCE+REPAIR_QUALITY_PROSPECT:'';
@@ -2197,7 +2209,8 @@ export function interventionChecks(records:Records):Check[]{
     const humanLedMoveOn=tr.profile?.interventionPolicy?.version==='bypass_acceptance_v2';
     const failureSlots=Object.keys(tr.lastCommittedState?.ledger??replayEntries[0]?.tape?.state?.ledger??ownTurns[0]?.state?.ledger??{});
     const jevNaming=(ownTurns[0]?.state?.agreeNameScopeVersion??tr.lastCommittedState?.agreeNameScopeVersion??replayEntries[0]?.tape?.state?.agreeNameScopeVersion)==='jev_naming_v1';
-    if(!traceShape(t,layout,policy,failureSlots,humanLedMoveOn,jevNaming)||!related.every((c:any)=>traceShape(c,layout,policy,failureSlots,humanLedMoveOn,jevNaming))){
+    if(failureSlots.length===4&&!promptVersion(r,tr)?.fourFigures||failureSlots.length>0&&![4,6].includes(failureSlots.length)||
+       !traceShape(t,layout,policy,failureSlots,humanLedMoveOn,jevNaming)||!related.every((c:any)=>traceShape(c,layout,policy,failureSlots,humanLedMoveOn,jevNaming))){
      for(const k of ['shape','binding','execution','replay'])add(k,'mismatch','intervention_trace_invalid');continue;
     }
     add('shape','pass','closed_intervention_trace');
@@ -2347,7 +2360,7 @@ const FIXED_HOLISTIC_V5_I172={...FIXED_HOLISTIC_I172,
   confirm:rep(TRIAL_HOLISTIC_I172.scope.confirm,'回転に依存しない表現で','形の参照枠に関する共通教示に沿って'),
   repair:rep(TRIAL_HOLISTIC_I172.scope.repair,'回転に依存しない表現で','形の参照枠に関する共通教示に沿って')}};
 
-type PromptVersion={id:string;sources:unknown;i172:boolean;styleMode:'legacy'|'merged'|'profile'|'research_split';
+type PromptVersion={id:string;sources:unknown;i172:boolean;fourFigures?:boolean;styleMode:'legacy'|'merged'|'profile'|'research_split';
  fixed:{task:string;generator:string;concise:string;scope:Readonly<Record<string,string>>;act:string;detail:string};
  native:{common:string;referent:string;actions:Readonly<Record<string,string>>}};
 
@@ -2812,7 +2825,9 @@ const PROMPT_VERSIONS:readonly PromptVersion[]=[
   'local-grounding/extract-ai.ts':'e489b7ff573fdbe9e4f0adc9b6ee5f0828bd3c6835dcd8cd6555e191161594a6',
   'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
  }},fixed:FIXED_I172,native:NATIVE_I172},
- {id:'p5_pilot012_four_figures',i172:true,styleMode:'research_split',sources:{scheme:'complete_instruction_source_sha256',files:{
+ // Four-figure support changes these whole-file hashes while preserving the six-figure research request bytes.
+ // Keep the earlier lineage registered independently; unknown or mixed source sets still fail closed.
+ {id:'p5_pilot012_four_figures',i172:true,fourFigures:true,styleMode:'research_split',sources:{scheme:'complete_instruction_source_sha256',files:{
   'v2/dialogue-v2.mjs':'7e5b556765f879751b39f4129bea49fd8de788c49368215737e699b9b33374d7',
   'v2/jev-turn.ts':'2da44341f07c4488da646498f54401f0fe66a46eeff459072042a9ebe93dfff4',
   'v2/generation-guard.ts':'816bbf968a934099a19bb3d2fb8217262349a739f43eee54ecdb98973d00755f',
@@ -2837,7 +2852,7 @@ const PROMPT_VERSIONS:readonly PromptVersion[]=[
   'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
   'shape-terminology.ts':'80fddf9e0947ae4e8dad85f3cf5e27700a070f0897225a565967623012ac3cf9',
  }},fixed:FIXED_I172,native:NATIVE_I172},
- {id:'p5_pilot012_four_figures_v18',i172:true,styleMode:'research_split',sources:{scheme:'complete_instruction_source_sha256',files:{
+ {id:'p5_pilot012_four_figures_v18',i172:true,fourFigures:true,styleMode:'research_split',sources:{scheme:'complete_instruction_source_sha256',files:{
   'v2/dialogue-v2.mjs':'7e5b556765f879751b39f4129bea49fd8de788c49368215737e699b9b33374d7',
   'v2/jev-turn.ts':'ea896fbd52e78e626166d5340f6aca9fcd9edfe1735b850589e56263cbbc50c4',
   'v2/generation-guard.ts':'4dccd8688a7e6233edfaacd2b2f67d30d19797f01f9c46fbf37d22ef58b9fe1e',
