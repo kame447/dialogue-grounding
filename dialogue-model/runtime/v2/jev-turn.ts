@@ -12,7 +12,8 @@ import { normalizeName } from "../judgment/name-evidence.mjs";
 import { stageMemory } from "../judgment/memory.mjs";
 import { createReferenceGraph, applyReferenceUpdate, previewReferenceUpdate, snapshotReferenceGraph, REFERENCE_LIMITS } from "../memory/reference-graph.mjs";
 import { nameBindsFigure } from "../decision/referent-binding.ts";
-import { hasNameProposal, claimsLiveAsOf, reconfirmationPossible, namingTurnKind, namingIntervalEstimates, inheritedTargetClaimIds, agreeCandidateAllowed, inheritsProposalName, turnNameProposals, namingNameKey, targetNamingConflict, publiclyCheckedNamingTarget, usesPublicNamingTarget, usesDirectNamingReplies, answersRepairedNamingCheck, type AgreeNameScopeVersion } from "../decision/naming-request.ts";
+import { hasNameProposal, claimsLiveAsOf, reconfirmationPossible, namingTurnKind, namingIntervalEstimates, inheritedTargetClaimIds, agreeCandidateAllowed, inheritsProposalName, turnNameProposals, namingNameKey, targetNamingConflict, publiclyCheckedNamingTarget, usesPublicNamingTarget, usesDirectNamingReplies, retainsLocalQuestionAnswers, answersRepairedNamingCheck, type AgreeNameScopeVersion } from "../decision/naming-request.ts";
+import { namingDenialTargets, namingReconfirmation, type NamingResponseEvidence } from "../decision/naming-reconfirmation.ts";
 import { priorClaimViews, summarizeLocalIssues } from "../local-grounding/derive.ts";
 import { deriveSharedConstrualsFromGraph } from "../local-grounding/shared-construal.ts";
 import { createMemoLocalExtractor, LOCAL_EXTRACTION_INSTRUCTIONS, MEMO_LOCAL_EXTRACTION_INSTRUCTIONS, MEMO_LOCAL_EXTRACTION_INSTRUCTIONS_HOLISTIC, memoExtractionPrompt } from "../local-grounding/extract.ts";
@@ -191,7 +192,7 @@ export type JevTurnOptions = {
   /** Offline replay can request the original retry wire text for a historical tape. */
   generationRetryVersion?: GenerationRetryVersion;
   /** Creation pin only. A resumed trial uses the scope in its saved state. */
-  newTrialAgreeNameScopeVersion?: "scoped_v7" | "scoped_v8" | "scoped_v9" | "scoped_v10";
+  newTrialAgreeNameScopeVersion?: "scoped_v7" | "scoped_v8" | "scoped_v9" | "scoped_v10" | "scoped_v11";
   client: ChatClient; ownImage: LocalOwnImage; ownAnchors: readonly LocalOwnAnchor[];
   observer: ObservationObserver; jevDecision: JevDecisionClient; localGrounding: JevTurnLocalOptions;
   maxReobservations?: number;
@@ -293,7 +294,7 @@ export function chainedNameSource(claim: LocalClaimView, publicClaims: readonly 
 }
 export function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns: readonly PublicTurn[], turn: number,
   slots: readonly string[], { ledger, judgments, agreeNameScopeVersion }: Pick<JevPrivateState, "ledger" | "judgments" | "agreeNameScopeVersion">,
-  current: { status: string; scores: Record<string, number> | null } | null = null, referentRule = false, inheritedIds: ReadonlySet<string> = new Set(), fromNamedClaim = false, chainedSource = false, deniedQuestion = false): PublicNameCandidate[] {
+  current: { status: string; scores: Record<string, number> | null } | null = null, referentRule = false, inheritedIds: ReadonlySet<string> = new Set(), fromNamedClaim = false, chainedSource = false, deniedQuestion = false, responseEvidence?: NamingResponseEvidence): PublicNameCandidate[] {
   const turnHasProposal = hasNameProposal(claims, turn);
   const isHumanProposal = (c: LocalClaimView) => c.speaker === "human" && c.act === "name_propose";
   const publicClaims = claims.filter(c => c.aspect === "name" && c.name !== null &&
@@ -303,7 +304,11 @@ export function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns
   const openClaims = publicClaims.filter(c => c.sourceTurn > lastBoundary);
   const proposals = openClaims.filter(isHumanProposal);
   const scoped = agreeNameScopeVersion !== undefined;
-  const checkedTarget = usesPublicNamingTarget(agreeNameScopeVersion) ? publiclyCheckedNamingTarget(claims, publicTurns, judgments, turn, false, agreeNameScopeVersion) : undefined;
+  const reconfirmation = agreeNameScopeVersion === "scoped_v11" ?
+    namingReconfirmation(claims, publicTurns, judgments, turn, lastBoundary, current, responseEvidence) : null;
+  const publicTarget = usesPublicNamingTarget(agreeNameScopeVersion) ?
+    publiclyCheckedNamingTarget(claims, publicTurns, judgments, turn, false, agreeNameScopeVersion) : undefined;
+  const checkedTarget = publicTarget === null && reconfirmation ? reconfirmation.figureId : publicTarget;
   if (checkedTarget === null) return [];
   const latestProposal = (scoped ? proposals.filter(p => p.targets.length === 0) : proposals).at(-1)?.sourceTurn;
   const focusedTurns = judgments.flatMap(({ turnIndex, jevTurn }) => {
@@ -323,16 +328,17 @@ export function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns
   const intervalEstimates = [...judgments.filter(j => j.turnIndex > lastBoundary && j.turnIndex < turn).map(j => j.jevTurn.humanReferent ?? null), current];
   // The partner's own latest word on whether a figure is the one meant: a referent denial (targets taken from the claim it answers when it has none)
   // blocks agreement on that figure until a later referent claim of theirs re-affirms it. This is about the target, not about the proposed name.
-  const claimTargets = (c: LocalClaimView) => c.targets.length ? c.targets : claims.find(p => p.id === c.respondsTo)?.targets ?? [];
+  const denialTargets = (c: LocalClaimView) => namingDenialTargets(c, claims.find(p => p.id === c.respondsTo),
+    publicTurns, judgments, agreeNameScopeVersion);
   const referentClaims = claims.filter(c => c.speaker === "human" && (c.aspect === "referent" || usesDirectNamingReplies(agreeNameScopeVersion) && c.act === "agree" && isFigureReplyAspect(c.aspect) || deniedQuestion && c.act === "deny" && (c.aspect === "question" || isFigureReplyAspect(c.aspect) && claims.find(p => p.id === c.respondsTo)?.speaker === "ai" && claims.find(p => p.id === c.respondsTo)?.act === "ask")) && c.sourceTurn > lastBoundary);
   // A denial stands until the partner agrees with an AI public claim that refers only to that figure, and the referent estimate puts it strictly first.
   // An agree about one member of the AI's candidate set, a bare assert and other acts leave the denial in place.
   const referentAt = (at: number) => at === turn ? current : judgments.find(j => j.turnIndex === at)?.jevTurn.humanReferent ?? null;
   const selects = (m: { status: string; scores: Record<string, number> | null } | null, id: string) =>
     !!m && m.status === "ok" && !!m.scores && typeof m.scores[id] === "number" && Object.entries(m.scores).every(([key, value]) => key === id || m.scores![id] > value);
-  const referentDenied = (id: string) => {
-    const lastDeny = referentClaims.filter(c => c.act === "deny" && claimTargets(c).includes(id)).at(-1);
-    if (!lastDeny) return false;
+  const referentDenied = (id: string, reconfirmedName: boolean) => {
+    const lastDeny = referentClaims.filter(c => c.act === "deny" && denialTargets(c).includes(id)).at(-1);
+    if (!lastDeny || reconfirmedName && reconfirmation?.denialId === lastDeny.id) return false;
     const after = referentClaims.slice(referentClaims.indexOf(lastDeny) + 1);
     return !after.some(c => {
       if (c.act !== "agree") return false;
@@ -373,6 +379,8 @@ export function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns
     const occupied = slots.filter(id => ledger[id].name !== null && normalizeName(ledger[id].name) === normalized);
     return (referentRule ? candidates.filter(id => agreeCandidateAllowed(c, id, turn, turnHasProposal, inheritedIds, intervalEstimates)) : candidates).filter(id => {
       if (checkedTarget !== undefined && id !== checkedTarget) return false;
+      const reconfirmedName = reconfirmation?.figureId === id && reconfirmation.names.has(normalized);
+      if (publicTarget === null && !reconfirmedName) return false;
       // Supersession applies to this candidate, using a verified reply or an explicitly bound target.
       if (scoped && proposals.some(p => {
         if (p.sourceTurn <= c.sourceTurn) return false;
@@ -381,7 +389,7 @@ export function buildAgreeNamesV3(claims: readonly LocalClaimView[], publicTurns
         if (normalizeName(p.name!) !== normalized) return linked || slot === id;
         return slot !== null && slot !== id && (linked || c.targets.length === 1);
       })) return false;
-      if (referentDenied(id)) return false;
+      if (referentDenied(id, reconfirmedName)) return false;
       if (requiresFocus && !wasFocused(id)) return false;
       if (prevPublicIds.size && !prevPublicIds.has(id)) return false;
       const entry = ledger[id];
@@ -582,7 +590,7 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
   if(!isGenerationV9(generation)&&Array.isArray(s.graph?.records)&&s.graph.records.some((r:any)=>r?.kind==='claim'&&r.source===AI_BOUND_SOURCE))throw Error();
   // The partner_labelled_answer provenance exists only in v12 records.
   if(!isGenerationV12(generation)&&Array.isArray(s.graph?.records)&&s.graph.records.some((r:any)=>r?.kind==='claim'&&r.source===LABELLED_ANSWER_SOURCE))throw Error();
-  if(s.agreeNameScopeVersion!=='scoped_v10'&&s.graph.records.some((r:any)=>r?.kind==='claim'&&r.source===LOCAL_QUESTION_ANSWER_SOURCE))throw Error();
+  if(!retainsLocalQuestionAnswers(s.agreeNameScopeVersion)&&s.graph.records.some((r:any)=>r?.kind==='claim'&&r.source===LOCAL_QUESTION_ANSWER_SOURCE))throw Error();
   if(!sameSet(Object.keys(graph.ownSlots),ownSlots)||!Array.isArray(s.judgments)||!Array.isArray(s.repairHistory))throw Error();
   if(s.observationMemo!==null){const m=validateObservationMemo(s.observationMemo);if(!sameSet(m.figures.map(f=>f.id),ownSlots))throw Error();}
   if(Object.hasOwn(s,'aiPublic'))validateAiPublicState(s.aiPublic,ownSlots,Number.MAX_SAFE_INTEGER,s.graph);
@@ -931,7 +939,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       const prepared = await prepareLocalGroundingTurn(local, { graph: state.graph,
         update: initialUpdate, publicTurns, signal, ownImage, ownAnchors, captureResearch: true, referenceQuestionBindings, directReferenceReplies, refinedReplyRules: isGenerationV11(generationRetryVersion), answerFieldRules: isGenerationV12(generationRetryVersion),
         bindDirectQuestionReplies: usesDirectNamingReplies(state.agreeNameScopeVersion),
-        retainLocalQuestionAnswers: state.agreeNameScopeVersion === "scoped_v10",
+        retainLocalQuestionAnswers: retainsLocalQuestionAnswers(state.agreeNameScopeVersion),
         namingIntervalStart: state.judgments.filter(j => ["agree", "defer", "move_on"].includes(j.judgment.action)).at(-1)?.turnIndex ?? 0,
         ...(!aiEnabled && previousAi ? { priorAct: { ...previous.judgment, turn: previousAi.turn, publishedFallback: previous.generationGuard.fallback,
           ...(previousExecution!.target.kind === "multiple" ? { targetCandidates: [...previousExecution!.target.figureIds] } : {}) } } : {}) });
@@ -956,7 +964,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
           .map(c => ({ name: c.name!, figureId: c.targets.length === 1 ? c.targets[0] : null, sourceTurn: c.sourceTurn })) };
       // holistic_v5 reads the candidates' public sources from the whole history, not from the last 32 events.
       const agreeTurns = judgmentV5
-        ? events.filter(e => e.seq <= latest.seq && (!aiEnabled || events.filter(other => other.seq === e.seq).length === 1)).map(e => ({ turn: e.seq, speaker: e.speaker, text: e.text }))
+        ? events.filter(e => e.seq <= latest.seq && (!aiEnabled || events.filter(other => other.seq === e.seq).length === 1)).map(e => ({ turn: e.seq, speaker: e.speaker, text: e.text, ...(e.nonReferential ? { nonReferential: true } : {}) }))
         : publicTurns;
       if (participantMenu) baseInput.participantLedger = state.ledger;
       if (questionLayout === "two_stage_v3") {
@@ -1042,7 +1050,8 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         if (kind === "request") { baseInput.namingRequest = true; if (holisticV4) baseInput.namingRequestStrict = true; record.namingRequest = true; } else if (kind === "reconfirm") record.namingReconfirm = true;
       }
       // The estimate of this very exchange backs a re-affirmation of a denied figure, so the candidates are completed only now.
-      if (questionLayout === "two_stage_v3") baseInput.agreeNames = buildAgreeNamesV3(claims, agreeTurns, latest.seq, slots, state, baseInput.humanReferent, holisticV3, inheritedTargetClaimIds(prepared.research?.verification?.diagnostics), holisticV4, judgmentV5, isGenerationV11(generationRetryVersion));
+      if (questionLayout === "two_stage_v3") baseInput.agreeNames = buildAgreeNamesV3(claims, agreeTurns, latest.seq, slots, state, baseInput.humanReferent, holisticV3, inheritedTargetClaimIds(prepared.research?.verification?.diagnostics), holisticV4, judgmentV5,
+        isGenerationV11(generationRetryVersion), prepared.trace.status === "ok" ? prepared.research : undefined);
       if (adaptive && baseInput.repairHistory.length && typeof jevDecision.estimateRepairProspect === "function") {
         record.repairHistory = structuredClone(repairHistory);
         let prospect = unknownRepairProspect();

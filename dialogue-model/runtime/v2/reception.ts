@@ -25,9 +25,9 @@ export type ReceptionProtocolV2 = { schemaVersion: 'reception_protocol_v2'; prot
   betweenTrials: BetweenTrials; receptionNumberFormat: 'daily_seq3'; rotationMode: RotationMode };
 export type ReceptionPlanV1 = { schemaVersion: 'reception_plan_v1'; protocolId: string; protocolRevision: number;
   protocolSha256: string; order: Strategy[]; trials: { index: number; strategy: Strategy; seed: number; referenceMemory: boolean }[]; approvedAt: string; memoryPruneVersion?: MemoryPruneVersion };
-export type ParticipantDialogueProfile = 'participant_dialogue_v12' | 'participant_dialogue_v12_naming_v2' | 'participant_dialogue_v12_naming_v3' | 'participant_dialogue_v13_p5';
+export type ParticipantDialogueProfile = 'participant_dialogue_v12' | 'participant_dialogue_v12_naming_v2' | 'participant_dialogue_v12_naming_v3' | 'participant_dialogue_v12_naming_v4' | 'participant_dialogue_v13_p5';
 export function isParticipantDialogueProfile(value: unknown): value is ParticipantDialogueProfile {
-  return value === 'participant_dialogue_v12' || value === 'participant_dialogue_v12_naming_v2' || value === 'participant_dialogue_v12_naming_v3' || value === 'participant_dialogue_v13_p5';
+  return value === 'participant_dialogue_v12' || value === 'participant_dialogue_v12_naming_v2' || value === 'participant_dialogue_v12_naming_v3' || value === 'participant_dialogue_v12_naming_v4' || value === 'participant_dialogue_v13_p5';
 }
 type ParticipantPlanSettings = {
   memoryPruneVersion?: MemoryPruneVersion;
