@@ -131,7 +131,9 @@ test('approval preserves the keyless default and round-trips explicit v12 with t
     const { plan: v12 } = await approve(pending(), { ...options, participantDialogueProfile: 'participant_dialogue_v12' });
     assert.deepEqual(v12, { ...plan, participantDialogueProfile: 'participant_dialogue_v12' });
     const v13 = { ...plan, participantDialogueProfile: 'participant_dialogue_v13_p5' };
-    for (const saved of [v12, v13]) {
+    const { plan: v13NamingV4 } = await approve(pending(), { ...options, participantDialogueProfile: 'participant_dialogue_v13_p5_naming_v4' });
+    assert.deepEqual(v13NamingV4, { ...plan, participantDialogueProfile: 'participant_dialogue_v13_p5_naming_v4' });
+    for (const saved of [v12, v13, v13NamingV4]) {
       assert.deepEqual(validate(JSON.parse(JSON.stringify(saved))), saved);
       assert.throws(() => validate({ ...saved, participantRuntimeProfile: undefined }), rejects('reception_unavailable'));
       assert.throws(() => validate({ ...saved, participantModelPin: { ...terra,

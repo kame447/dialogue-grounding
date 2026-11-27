@@ -183,7 +183,7 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
     const newTrialAgreeNameScopeVersion = requestedScope === 'scoped_v7' ||
       requestedScope === 'scoped_v8' && v.ledger instanceof RunBudget ||
       usesDirectNamingReplies(requestedScope) && v.ledger instanceof ParticipantUsageLedger &&
-        pinned?.generationRetryVersion === 'jev_generation_retry_v12' ? requestedScope : undefined;
+        pinned !== null && validAgreeNameScope(requestedScope, pinned.generationRetryVersion) ? requestedScope : undefined;
     if (Object.hasOwn(v, 'newTrialAgreeNameScopeVersion') &&
         (newTrialAgreeNameScopeVersion === undefined ||
           !restore && !validAgreeNameScope(newTrialAgreeNameScopeVersion, generationRetryVersion))) return invalid();
