@@ -1484,6 +1484,50 @@ function v12Transport(t: TestContext, h: ReturnType<typeof harness>) {
   return { lookup, options, textPhases, prompts };
 }
 
+for (const [status, cause] of [[504, 'observation_timeout'], [503, 'observation_unavailable']] as const) {
+  test('#206 Worker initial observation records ' + cause + ' only in private usage', async t => {
+    const h = harness();
+    const transport = v12Transport(t, h);
+    h.env.PARTICIPANT_DIALOGUE_PROFILE = v12Dialogue;
+    let visualCalls = 0;
+    h.controlled.usageChat = async (body, expected) => {
+      assert.equal(body.purpose, 'visual_observation');
+      assert.equal(expected, pin.terraModelId);
+      visualCalls++;
+      return { status, data: { error: 'synthetic_private_upstream_canary' } };
+    };
+    await h.receive();
+    const { receptionId } = await h.approve();
+    const response = await h.start();
+    assert.equal(response.status, 409);
+    assert.deepEqual(await response.json(), { error: 'trial_unavailable' });
+    const owner = await h.storage.get('base:owner:v1');
+    const entry = owner.admissions[owner.activeKey];
+    assert.equal(entry.status, 'failed');
+    assert.equal(entry.record, null);
+    assert.equal(entry.errorCode, 'initialization_failed');
+    assert.equal(entry.failureCause, cause);
+
+    h.evict();
+    const path = '/admin/reception/' + receptionId + '/usage.json';
+    assert.equal((await h.admin(path, false)).status, 401);
+    const exported = await jsonOk(await h.admin(path));
+    assert.equal(exported.failedStarts.length, 1);
+    const [failed] = exported.failedStarts;
+    assert.deepEqual(
+      { assignmentId: failed.assignmentId, trialIndex: failed.trialIndex, errorCode: failed.errorCode, failureCause: failed.failureCause },
+      { assignmentId: entry.assignment.assignmentId, trialIndex: 0, errorCode: 'initialization_failed', failureCause: cause },
+    );
+    const meter = failed.usage.phases.terra.initial_observation;
+    assert.equal(meter.posts, 1);
+    assert.doesNotMatch(JSON.stringify(exported), /synthetic_private_upstream_canary/u);
+    assert.equal((await h.start()).status, 409);
+    assert.equal(visualCalls, 1);
+    assert.deepEqual(transport.textPhases, []);
+    assert.deepEqual(h.calls, []);
+  });
+}
+
 for (const { order, dialogueProfile, scope } of [
   { order: ['repair-first', 'bypass-enabled'], dialogueProfile: v12Dialogue, scope: 'scoped_v7' },
   { order: ['bypass-enabled', 'repair-first'], dialogueProfile: v12Dialogue, scope: 'scoped_v7' },
