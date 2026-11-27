@@ -11,7 +11,7 @@ import {namingDenialTargets,namingReconfirmation} from '../../decision/naming-re
 import {decodeMaterialV5} from '../../decision/judgment-material-v5.ts';
 import {isHolisticPolicy,isHolisticV2Plus,isHolisticV3Plus,isHolisticV4Plus} from '../../decision/contract.ts';
 import {generationGuardCodes,draftViolationCodes,deriveGenerationOutcome,orientationSafeFallback,findOrientationLeaks,v11RecentHumanTexts,hasOrientationWords,hasVersionedViewpoint,isGenerationV5,isGenerationV6,isGenerationV7,isGenerationV8,isGenerationV9,isGenerationV11,isGenerationV12,isGenerationV13,isGenerationV14,validGenerationRetryVersion,validAgreeNameScope,allowsOrientationFallback} from '../../v2/generation-guard.ts';
-import {isGenerationV15,isGenerationV16,currentTurnNamingSource,namingCodesWithoutQuestion,contentPublicationRecovery} from '../../v2/generation-guard.ts';
+import {isGenerationV15,isGenerationV16,confirmationDraftText,currentTurnNamingSource,namingCodesWithoutQuestion,contentPublicationRecovery} from '../../v2/generation-guard.ts';
 import type {SharedConstrual} from '../../decision/contract.ts';
 import type {RecordedGenerationRetryVersion} from '../../v2/generation-guard.ts';
 import {checkModelIdentity} from '../../model-identity-contract.ts';
@@ -76,14 +76,15 @@ const RETRY_REASONS:readonly RetryReason[]=[
  {codes:['draft_shared_claim_unconfirmed'],text:'前の下書きに名前以外の過大断定がないか確認できませんでした。候補の範囲と未確認・保留の細部を守り、大まかな共有見立ての範囲が明確になるように書き直してください。'},
 ];
 const RETRY_REASONS_SPECIFIC=RETRY_REASONS.flatMap(reason=>reason.codes.includes('orientation_leak')?SPECIFIC_VIEWPOINT_REASONS:[reason]);
+const RETRY_REASONS_V16=[...RETRY_REASONS_SPECIFIC,{codes:['confirmation_detail_mismatch'],text:'前の下書きでは選んだ確認特徴を照合できませんでした。その特徴を尋ねる文を作り、指定されたJSONの形で返してください。'}];
 // codes: the recorded condition's own guard violations (exact). draft: for the comparison condition, what its OWN first draft shows to this verifier
 // (an orientation leak; any other leak, which is where a name/agreement decision, an id or a field would show): the orientation reason must be present exactly
 // when the draft has an orientation leak, and the name/agreement-decision reason can appear only if the draft has some other leak. Other families stay open.
-type RetryDraftEvidence={orientation:boolean;orientationCodes?:readonly string[];naming:boolean;workingNote:boolean;draftAct?:string|null;draftSharedClaim?:string|null};
+type RetryDraftEvidence={orientation:boolean;orientationCodes?:readonly string[];naming:boolean;workingNote:boolean;draftAct?:string|null;draftSharedClaim?:string|null;confirmationMismatch?:boolean};
 function retryReasonsMatch(text:string,version:RecordedGenerationRetryVersion|undefined,codes?:readonly string[],draft?:RetryDraftEvidence):boolean{
  if(!text)return false;
  const specific=hasVersionedViewpoint(version),restated=version!==undefined;
- const reasons=specific?RETRY_REASONS_SPECIFIC:RETRY_REASONS;
+ const reasons=confirmationDraftV16(version)?RETRY_REASONS_V16:specific?RETRY_REASONS_SPECIFIC:RETRY_REASONS;
  for(const reason of reasons){
   const viewpoint=!specific&&H5()&&reason.codes.includes('orientation_leak');
   const reasonText=viewpoint?'前の下書きの方位の参照枠を明確にして書き直してください。'+VIEWPOINT_RULE_V5_S4:reason.text;
@@ -97,6 +98,7 @@ function retryReasonsMatch(text:string,version:RecordedGenerationRetryVersion|un
    if(!specific&&reason.codes.includes('orientation_leak')&&draft.orientation!==Boolean(match))return false;
    if(reason.codes.includes('naming_decision')&&draft.naming!==Boolean(match))return false;
    if(reason.codes.includes('working_note')&&draft.workingNote!==Boolean(match))return false;
+   if(draft.confirmationMismatch!==undefined&&reason.codes.includes('confirmation_detail_mismatch')&&draft.confirmationMismatch!==Boolean(match))return false;
    if(draft.draftAct!==undefined&&reason.codes.some(c=>c.startsWith('draft_act_'))&&Boolean(draft.draftAct&&reason.codes.includes(draft.draftAct))!==Boolean(match))return false;
    if(draft.draftSharedClaim!==undefined&&reason.codes.some(c=>c.startsWith('draft_shared_claim_'))&&Boolean(draft.draftSharedClaim&&reason.codes.includes(draft.draftSharedClaim))!==Boolean(match))return false;
   }
@@ -755,7 +757,7 @@ function relation(t:any,label:any,slots:string[],layout='two_stage_v1',p5=false)
  }
  const e=t.executed,g=t.finalAction;if(g===null)return ['error','aborted'].includes(t.status);
  if(t.publicationRecovery){
-  const recovered=Array.isArray(t.generationGuard?.violations)&&contentPublicationRecovery(t.generationGuard.violations,e);
+  const recovered=Array.isArray(t.generationGuard?.violations)&&contentPublicationRecovery(t.generationGuard.violations,e,t.generationRetryVersion);
   return !!recovered&&equal(t.publicationRecovery,recovered.recovery)&&equal(g,recovered.judgment)&&t.publicSpeech===recovered.text;
  }
  return g.action===e.action&&g.targetSlot===(e.target.kind==='single'?e.target.figureId:null)&&g.candidateName===e.name&&g.discriminatingFeature===e.feature;
@@ -998,8 +1000,10 @@ const idsOf=(target:any):string[]=>target?.kind==='single'?[target.figureId]:tar
   const codeContext=()=>({action:s.executed.action as any,candidateName:typeof s.executed.name==='string'?s.executed.name:null,
    v3:true,holistic:true,adaptive:!!CTX.trial,factored:!!CTX.facts,ai:aiOn,publicTexts,humanTexts,recentHumanTexts:recentFor(s.executed),
    dialoguePolicy:H5()?'holistic_v5' as const:undefined,generationRetryVersion:version??'jev_generation_retry_v1',vetoed:s.intervention?.reasonCode==='vetoed_bypass_action'});
+  const structuredConfirmation=confirmationDraftV16(version)&&s.executed?.action==='confirm';
   const codesForDraft=(i:number)=>{
    const draft=draftTexts[i],name=i===0?'initial':'retry';
+   if(structuredConfirmation&&draft===null)return['confirmation_detail_mismatch'];
    if(typeof draft!=='string'||isGenerationV15(version)&&!draft.trim())return['empty_utterance'];
    const row=askedRows.find(y=>y.draft===name),shared=askedSharedRows.find(y=>y.draft===name);
    let lexical=draftViolationCodes(draft,codeContext(),genMessages[i]??[],p5?SHARED_PRIVATE:[]);
@@ -1027,9 +1031,11 @@ const idsOf=(target:any):string[]=>target?.kind==='single'?[target.figureId]:tar
      // The comparison condition's retry reason is checked against that condition's own first draft, which this verifier classifies itself.
      const v3Retry=layout==='two_stage_v3';
      const draft=generationCount===1&&(codes===undefined||hasVersionedViewpoint(version))?{orientation:v3Retry&&s4HasOrientationLeak(prevDraft,version,humanTexts,recentFor(s.executed),publicTexts),
-       ...(hasVersionedViewpoint(version)&&typeof prevDraft==='string'?{orientationCodes:findOrientationLeaks(prevDraft,'holistic_v5',version,humanTexts,recentFor(s.executed),publicTexts)}:{}),naming:typeof prevDraft==='string'&&s4NamingDecision(prevDraft.normalize('NFKC').replace(/[\s\u200b-\u200d\ufeff]/gu,''),s.executed?.action),workingNote:v3Retry&&restatedRetry&&s4HasWorkingNote(prevDraft,publicTexts),...(H()?{draftAct:lastVerdict,draftSharedClaim:CTX.p5Overclaim?lastSharedVerdict:null}:{})}:undefined;
+       ...(hasVersionedViewpoint(version)&&typeof prevDraft==='string'?{orientationCodes:findOrientationLeaks(prevDraft,'holistic_v5',version,humanTexts,recentFor(s.executed),publicTexts)}:{}),naming:typeof prevDraft==='string'&&s4NamingDecision(prevDraft.normalize('NFKC').replace(/[\s\u200b-\u200d\ufeff]/gu,''),s.executed?.action),workingNote:v3Retry&&restatedRetry&&s4HasWorkingNote(prevDraft,publicTexts),confirmationMismatch:structuredConfirmation&&prevDraft===null,...(H()?{draftAct:lastVerdict,draftSharedClaim:CTX.p5Overclaim?lastSharedVerdict:null}:{})}:undefined;
      if(!generationMessages(p.messages,t,s.executed,{...tape,vetoed:s.intervention?.reasonCode==='vetoed_bypass_action',generationGraph:(tr.turns??[]).find((u:any)=>u.turn===t.turnIndex)?.state?.graph},m.profile,generationCount++,codes,draft))return'invalid';
-     prevDraft=answer?.response?.text??answer?.text;draftTexts.push(prevDraft);genMessages.push(p.messages);lastVerdict=null;lastSharedVerdict=null;
+     const rawDraft=answer?.response?.text??answer?.text;
+     prevDraft=structuredConfirmation?confirmationDraftText(typeof rawDraft==='string'?rawDraft:'',s.executed.feature):rawDraft;
+     draftTexts.push(prevDraft);genMessages.push(p.messages);lastVerdict=null;lastSharedVerdict=null;
     }
    }
    else{
@@ -1185,7 +1191,7 @@ const idsOf=(target:any):string[]=>target?.kind==='single'?[target.figureId]:tar
     // A regeneration that the known drafts cannot explain is a contradiction, except where a hidden instruction (AI public claims on: the remaining private
     // instructions are not in the recorded messages) could have been echoed: that needs material the record does not hold (not reached, not a mismatch).
     if(out.kind==='publish_first'&&generationCount===2&&aiOn){out=deriveGenerationOutcome([...codes(0),'internal_prompt_echo'],codes(1),fb,clean);missing=true;}
-    const recovered=isGenerationV15(version)&&out.kind==='stop'&&out.regenerated?contentPublicationRecovery(out.violations,ex):null;
+    const recovered=isGenerationV15(version)&&out.kind==='stop'&&out.regenerated?contentPublicationRecovery(out.violations,ex,version):null;
     if(recovered&&draftViolationCodes(recovered.text,{...cc,action:recovered.judgment.action,candidateName:null},genMessages[generationCount-1]??[],p5?SHARED_PRIVATE:[]).length)return'invalid';
     if(out.kind==='stop'&&!recovered||out.regenerated!==(generationCount===2))return'invalid';
     if(label===tr.label){
@@ -1606,6 +1612,10 @@ function generationMessages(messages:any[],trace:any,execution:any,tape:any,prof
  return generationMessagesWith(messages,trace,execution,tape,profile,fixedBase,{v3:[TRIAL,TRIAL_V3_PREV],legacy:LEGACY_TRIAL},index,codes,draft)||generationMessagesWith(messages,trace,execution,tape,profile,fixedStyle,{v3:[trialStyle],legacy:legacyTrialStyle},index,codes,draft);
 }
 const DISCRIMINATING_CONFIRM_V16_S4 = "選ばれた特徴を根拠に、公開対話でまだ答えられていない点を一つ、同じ論点で尋ねてください。すでに肯定・否定・訂正された点や、それだけでは候補の区別にも部分の照合にも役立たない共通の特徴を、言い換えて再質問しないでください。選ばれた特徴が共通の目印なら、自分の見え方や相手の説明を手がかりに、同じ特徴について残っている部分の対応や説明の意味を尋ねてください。別の特徴を選び直さず、観察にない形や相手の画面の見え方を補わないでください。相手から呼び名を決めたいという申し出があれば、現在の確認に結びつけ、採用や同定は断定しないでください。";
+const CONFIRMATION_DRAFT_V16_S4 = '回答はキーがcheckedFeatureとtextのJSONオブジェクト1個だけにしてください。textは相手に向けた自然な確認文です。checkedFeatureはその確認文が実際に尋ねている特徴に対応する観察メモの値を、表記を変えずに入れてください。確認文ではその値と同じ表記にそろえる必要はありません。';
+// The first v16 PR revision used plain generation responses and has its own source fingerprint.
+const confirmationDraftV16=(version:RecordedGenerationRetryVersion|undefined)=>
+ isGenerationV16(version)&&CTX.prompt?.id!=='p5_discriminating_confirmation_v16';
 function generationMessagesWith(messages:any[],trace:any,execution:any,tape:any,profile:any,FIXED:any,trials:{v3:any[];legacy:any},index:number,codes?:readonly string[],draft?:RetryDraftEvidence):boolean{
  if(!trace.finalAction||!execution)return false;const g={action:execution.action,targetSlot:execution.target.kind==='single'?execution.target.figureId:null,candidateName:execution.name,discriminatingFeature:execution.feature,note:null};
  const graph=tape.generationGraph??tape.state.graph;
@@ -1626,7 +1636,8 @@ function generationMessagesWith(messages:any[],trace:any,execution:any,tape:any,
   const acceptNote=versionedGeneration&&accept?ACCEPT_FEATURE_REPLY_V5_S4+'\n':'';
   const reconfirmNote=versionedGeneration&&accept&&CTX.namingReconfirm?RECONFIRM_NAME_V5_S4+'\n':'';
   const vetoNote=isGenerationV6(tape.generationRetryVersion)&&(tape.vetoed===true||execution.action==='confirm'||execution.action==='repair')?VETOED_MOVE_V6_S4+'\n':'';
-  const confirmation=isGenerationV16(tape.generationRetryVersion)&&execution.action==='confirm'?DISCRIMINATING_CONFIRM_V16_S4+'\n':'';
+  const confirmation=isGenerationV16(tape.generationRetryVersion)&&execution.action==='confirm'
+   ?DISCRIMINATING_CONFIRM_V16_S4+'\n'+(confirmationDraftV16(tape.generationRetryVersion)?CONFIRMATION_DRAFT_V16_S4+'\n':''):'';
   const actionMessage={role:'system',content:FIXED.act+'\n'+scope+'\n'+vetoNote+acceptNote+reconfirmNote+namingNote+conflictNote+featureNote+confirmation+JSON.stringify({...g,target:execution.target,...(Object.hasOwn(execution,'detailFigureIds')?{detailFigureIds:execution.detailFigureIds}:{})})};
   const shared=execution.sharedClaimIds&&CTX.p5?CTX.shared.find(f=>equal(f.claimIds,execution.sharedClaimIds)):undefined;
   if(execution.sharedClaimIds&&!shared)return false;
@@ -1851,7 +1862,7 @@ export function interventionChecks(records:Records):Check[]{
      if(!ownTurns.length||!related.length||!js.length||!tr.lastCommittedState)missing=true;
      if(ownTurns.some((v:any)=>v.turn!==t.turnIndex||v.publicText!==t.publicSpeech))conflict=true;
      if(t.generationGuard?.fallback===true){
-      const expectedFallback=t.publicationRecovery?contentPublicationRecovery(t.generationGuard.violations,t.executed)?.text:expectedOrientationFallback(t.finalAction);
+      const expectedFallback=t.publicationRecovery?contentPublicationRecovery(t.generationGuard.violations,t.executed,t.generationRetryVersion)?.text:expectedOrientationFallback(t.finalAction);
       const aiOn=tr.profile?.localGrounding?.aiPublicClaims===true||Object.hasOwn(tr.lastCommittedState??{},'aiPublic')||js.some((j:any)=>Object.hasOwn(j,'aiPublic'))||Boolean(t.aiPublic);
       if(layout!=='two_stage_v3'||!expectedFallback||t.publicSpeech!==expectedFallback||(aiOn&&t.aiPublic?.pending?.status!=='skipped_fallback'))conflict=true;
      }
@@ -2324,6 +2335,18 @@ const PROMPT_VERSIONS:readonly PromptVersion[]=[
   'v2/dialogue-v2.mjs':'0ca530878393721b6d48b55240e2b8c848910758501d90f579b2e0c65a6d1dd6',
   'v2/jev-turn.ts':'8be437df3a26438524ff5a14d0f151327cba2aa24b50336983c7c5c11f6bab52',
   'v2/generation-guard.ts':'32ba4a3fc9161c5191a0a1af819cd2330db7abea7fd72f5fb62b854e4e1458c1',
+  'judgment/instructions.mjs':'0add2f40aaaa01bfdacd1b99418b94e288eb45da6593595304f8d36d0f22de27',
+  'observation/observe.ts':'469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad',
+  'local-grounding/extract.ts':'6e9461e860f22923dbece02c7988713422ed81ac32d937f6d59df8eff84bd83e',
+  'local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01',
+  'decision/jev-decision.ts':'974551ec4103da7d48b5fcd411bd00f95852db51af67b116310faa9c1828c85e',
+  'local-grounding/extract-ai.ts':'e489b7ff573fdbe9e4f0adc9b6ee5f0828bd3c6835dcd8cd6555e191161594a6',
+  'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
+ }},fixed:FIXED_I172,native:NATIVE_I172},
+ {id:'p5_discriminating_confirmation_v16_draft_binding',i172:true,styleMode:'research_split',sources:{scheme:'complete_instruction_source_sha256',files:{
+  'v2/dialogue-v2.mjs':'0ca530878393721b6d48b55240e2b8c848910758501d90f579b2e0c65a6d1dd6',
+  'v2/jev-turn.ts':'afa585c532f118d7cf361878c5197cf072719e0c28d50738662c63524ecc27b6',
+  'v2/generation-guard.ts':'6ba7c39a65d3a4c3910835d68fdf2a625894d6b810ed95f1494b8a63b96ea2cb',
   'judgment/instructions.mjs':'0add2f40aaaa01bfdacd1b99418b94e288eb45da6593595304f8d36d0f22de27',
   'observation/observe.ts':'469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad',
   'local-grounding/extract.ts':'6e9461e860f22923dbece02c7988713422ed81ac32d937f6d59df8eff84bd83e',

@@ -660,7 +660,20 @@ export function rewriteReasons(codes: readonly string[], policy?: DialoguePolicy
     codes.includes("draft_shared_claim_single_id") ? "前の下書きは、候補が一つに絞れていないのに同じ一つの図形に特定できたと断定していました。候補の範囲を保ち、単一の図形に決まったと断定せずに書き直してください。" : "",
     codes.includes("draft_shared_claim_unconfirmed_detail") ? "前の下書きは、未確認・保留の細部が一致したと断定していました。未確認・保留の細部を一致と断定せず、大まかな共有見立ての範囲で書き直してください。" : "",
     codes.includes("draft_shared_claim_unconfirmed") ? "前の下書きに名前以外の過大断定がないか確認できませんでした。候補の範囲と未確認・保留の細部を守り、大まかな共有見立ての範囲が明確になるように書き直してください。" : "",
+    isGenerationV16(version) && codes.includes("confirmation_detail_mismatch") ? "前の下書きでは選んだ確認特徴を照合できませんでした。その特徴を尋ねる文を作り、指定されたJSONの形で返してください。" : "",
   ].join("");
+}
+
+/** Only the structured feature label is exact. The public wording is the model's text. */
+export function confirmationDraftText(raw: string, selectedFeature: string | null): string | null {
+  if (selectedFeature === null) return null;
+  try {
+    const value = JSON.parse(raw) as { checkedFeature?: unknown; text?: unknown } | null;
+    if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).length !== 2 ||
+        !Object.hasOwn(value, "checkedFeature") || !Object.hasOwn(value, "text") || value.checkedFeature !== selectedFeature ||
+        typeof value.text !== "string" || !value.text.trim()) return null;
+    return value.text;
+  } catch { return null; }
 }
 
 const neutral: Record<Action, string> = {
@@ -756,8 +769,11 @@ const RECOVERABLE_CONTENT = new Set([
 
 /** Only completed content checks can lead here. Transport, malformed results and
  * leakage codes must continue through the existing error path. */
-export function contentPublicationRecovery(violations: readonly string[], execution: Pick<JevExecutedDecision, "action" | "target">) {
-  if (!violations.length || violations.some(code => !RECOVERABLE_CONTENT.has(code))) return null;
+export function contentPublicationRecovery(violations: readonly string[], execution: Pick<JevExecutedDecision, "action" | "target">,
+  version?: GenerationRetryVersion) {
+  const confirmDetail = isGenerationV16(version) && execution.action === "confirm";
+  if (!violations.length || violations.some(code => !RECOVERABLE_CONTENT.has(code) &&
+    !(confirmDetail && code === "confirmation_detail_mismatch"))) return null;
   const naming = execution.action === "agree" || execution.action === "propose_name";
   const action = naming ? "confirm" : execution.action;
   const text = naming ? "今お話ししている形は、どの特徴を目印にすると見分けられそうですか？" : orientationNeutral[action];

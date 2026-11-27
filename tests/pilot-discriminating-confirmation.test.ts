@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { verifyRecords } from "../dialogue-model/runtime/diagnostics/parity-verify/index.ts";
+import { hash } from "../dialogue-model/runtime/diagnostics/parity-verify/core.ts";
 import { buildRecords, OLD, OWN } from "./support/s4-v3-records.ts";
 import type { Label, Turn } from "./support/s4-v3-records.ts";
 
@@ -28,6 +29,13 @@ function segment(quote: string, proposition: string, aspect: string, targets: st
 function draft(feature: string): Turn["plan"]["choose"] {
   return (key, criteria) => key === "feature"
     ? Object.keys(criteria).find(label => JSON.parse(criteria[label]).value === feature) : undefined;
+}
+
+const confirmationDraft = (checkedFeature: string, text: string) => JSON.stringify({ checkedFeature, text });
+
+function structuredTurn(turn: Turn, feature: string): Turn {
+  assert.ok(turn.plan.speech);
+  return { ...turn, plan: { ...turn.plan, speech: confirmationDraft(feature, turn.plan.speech) } };
 }
 
 const first: Turn = { human: "この形の特徴を確認できますか？",
@@ -81,6 +89,7 @@ function assertConfirmWire(wire: Request[], feature: string) {
   const confirmation = generation.find(message => message.role === "system" && message.content.includes("選ばれた特徴を根拠に"));
   assert.ok(confirmation);
   assert.match(confirmation.content, /別の特徴を選び直さず/);
+  assert.match(confirmation.content, /checkedFeatureとtext/);
   assert.ok(confirmation.content.includes(JSON.stringify({ discriminatingFeature: feature }).slice(1, -1)));
 }
 
@@ -92,7 +101,8 @@ for (const label of ["repair-first", "bypass-enabled"] as const) {
       speech: "今の案の形は、板に四角い切れ目があるものですか？" } };
     const turns = [first, betterAfterYes, betterAfterName];
     const before = await buildRecords({ ...options, label, generationRetryVersion: oldVersion, memo, turns });
-    const after = await buildRecords({ ...options, label, generationRetryVersion: newVersion, memo, turns });
+    const after = await buildRecords({ ...options, label, generationRetryVersion: newVersion, memo,
+      turns: [structuredTurn(first, common), structuredTurn(betterAfterYes, useful), structuredTurn(betterAfterName, notch)] });
     const trial = after.trials[0];
     const original = before.trials[0].attempts[0];
     const updated = trial.attempts[0];
@@ -124,7 +134,8 @@ for (const label of ["repair-first", "bypass-enabled"] as const) {
 test("v16 keeps repair-first veto and bypass-enabled's original action on the same material", async () => {
   const turns: Turn[] = [{ human: "この形はまだ見分けられません。", plan: { action: "defer", target: "figure_0",
     actionScores: { defer: 0.6, confirm: 0.3, repair: 0.1 }, choose: draft(useful),
-    speechByLabel: { "repair-first": "細長い板に三角形が接している形ですか？", "bypass-enabled": "この形の話には、あとで戻りましょう。" } } }];
+    speechByLabel: { "repair-first": confirmationDraft(useful, "細長い板に三角形が接している形ですか？"),
+      "bypass-enabled": "この形の話には、あとで戻りましょう。" } } }];
   const records = await buildRecords({ ...options, generationRetryVersion: newVersion, memo, turns });
   const result = records.trials[0].replay[0].result;
   assert.equal(result.commonEqual, true);
@@ -144,7 +155,8 @@ test("v16 reoffers contrast from the same target when the only unasked feature i
   const followUp: Turn = { human: "その部分がまだよく分かりません。", plan: { ...first.plan, choose: draft(useful),
     speech: "こちらでは細長い板に三角形が接して見えます。そちらではどこがつながっていますか？" } };
   const before = await buildRecords({ ...options, generationRetryVersion: oldVersion, memo: sparse, turns: [firstCheck, followUp] });
-  const after = await buildRecords({ ...options, generationRetryVersion: newVersion, memo: sparse, turns: [firstCheck, followUp] });
+  const after = await buildRecords({ ...options, generationRetryVersion: newVersion, memo: sparse,
+    turns: [structuredTurn(firstCheck, useful), structuredTurn(followUp, useful)] });
   const criteria = (wire: Request[]) => Object.values(wire.find(r => r.payload.questions?.feature)!.payload.questions!.feature.criteria)
     .map(value => JSON.parse(value));
   for (const label of ["repair-first", "bypass-enabled"] as const) {
@@ -163,7 +175,8 @@ test("v16 reoffers contrast from the same target when the only unasked feature i
   for (const figure of sparse.figures) figure.analytic.shapes = [common];
   const noContrast: Turn = { ...followUp, plan: { ...followUp.plan, choose: draft(common),
     speech: "輪郭が直線という見立てですが、どの部分の輪郭を指していますか？" } };
-  const stillChecking = await buildRecords({ ...options, generationRetryVersion: newVersion, memo: sparse, turns: [noContrast] });
+  const stillChecking = await buildRecords({ ...options, generationRetryVersion: newVersion, memo: sparse,
+    turns: [structuredTurn(noContrast, common)] });
   assert.deepEqual(criteria(requests(stillChecking, "repair-first")), [{ value: common, figureIds: [ownIds[0]] }]);
   assert.equal(stillChecking.trials[0].attempts[0].executed.action, "confirm");
   assert.equal(stillChecking.trials[0].turns[0].publicText, noContrast.plan.speech);
@@ -191,7 +204,8 @@ test("v16 preserves supported naming and the non-confirmation requests byte for 
 test("v16 confirmation retries retain v15 orientation recovery", async () => {
   const leaked = "左側が細長い形ですか？";
   const turns: Turn[] = [{ human: "形の特徴をもう一度お願いします。", plan: {
-    action: "confirm", target: "figure_0", referent: "figure_0", choose: draft(useful), drafts: [leaked, leaked],
+    action: "confirm", target: "figure_0", referent: "figure_0", choose: draft(useful),
+    drafts: [confirmationDraft(useful, leaked), confirmationDraft(useful, leaked)],
   } }];
   const records = await buildRecords({ ...options, generationRetryVersion: newVersion, memo, turns });
   const { executed, generationGuard, publicationRecovery } = records.trials[0].attempts[0];
@@ -200,4 +214,69 @@ test("v16 confirmation retries retain v15 orientation recovery", async () => {
   assert.equal(publicationRecovery.act, "restate_selected_action");
   assert.equal(records.trials[0].turns[0].publicText, "その形の特徴について、もう少し詳しく教えてもらえますか？");
   assertS4(records);
+});
+
+test("v16 rewrites a confirmation that asks about the already affirmed common feature", async () => {
+  const correctQuestion = "帯のような部分に三角の先がくっついて見えますか？";
+  const wrongDetail = { ...affirmed, plan: { ...affirmed.plan, choose: draft(useful),
+    drafts: [repeatedQuestion, confirmationDraft(useful, correctQuestion)] } };
+  const records = await buildRecords({ ...options, generationRetryVersion: newVersion, memo,
+    turns: [structuredTurn(first, common), wrongDetail] });
+  const trial = records.trials[0];
+  assert.equal(trial.attempts[0].executed.feature, useful);
+  assert.equal(trial.attempts[0].generationGuard.regenerated, true);
+  assert.equal(trial.turns[0].publicText, correctQuestion);
+  for (const label of ["repair-first", "bypass-enabled"] as const) {
+    const wire = requests(records, label);
+    assert.equal(wire.filter(request => request.phase === "generation").length, 2);
+    assert.equal(wire.filter(request => request.payload.questions?.draft_naming).length, 0);
+  }
+  assertS4(records);
+});
+
+test("v16 recovers the same confirmation after two mismatched feature declarations", async () => {
+  const wrongDraft = confirmationDraft(common, repeatedQuestion);
+  const mismatch = { ...affirmed, plan: { ...affirmed.plan, choose: draft(useful), drafts: [wrongDraft, wrongDraft] } };
+  for (const label of ["repair-first", "bypass-enabled"] as const) {
+    const records = await buildRecords({ ...options, label, generationRetryVersion: newVersion, memo,
+      turns: [structuredTurn(first, common), mismatch] });
+    const trial = records.trials[0];
+    const { executed, generationGuard, publicationRecovery } = trial.attempts[0];
+    assert.equal(executed.action, "confirm");
+    assert.deepEqual(executed.target, { kind: "single", figureId: ownIds[0] });
+    assert.equal(executed.feature, useful);
+    assert.equal(generationGuard.regenerated, true);
+    assert.deepEqual(generationGuard.violations, ["confirmation_detail_mismatch"]);
+    assert.equal(publicationRecovery.act, "restate_selected_action");
+    assert.equal(trial.turns[0].publicText, "その形の特徴について、もう少し詳しく教えてもらえますか？");
+    assert.ok(Object.values(trial.lastCommittedState.ledger).every(value => (value as { name: string | null }).name === null));
+    assert.equal(requests(records, label).filter(request => request.phase === "generation").length, 2);
+    assert.equal(requests(records, label).filter(request => request.payload.questions?.draft_naming).length, 0);
+    assertS4(records);
+  }
+});
+
+test("v16 S4 rejects a changed feature declaration even when the recorded public text still matches", async () => {
+  const good = { ...affirmed, plan: { ...affirmed.plan, choose: draft(useful),
+    speech: "帯のような部分に三角の先がくっついて見えますか？" } };
+  for (const label of ["repair-first", "bypass-enabled"] as const) {
+    const records = await buildRecords({ ...options, label, generationRetryVersion: newVersion, memo,
+      turns: [structuredTurn(first, common), structuredTurn(good, useful)] });
+    assertS4(records);
+    const replay = records.trials[0].replay[0];
+    const side = replay.result.sides.find((value: { label: Label }) => value.label === label);
+    const rewriteFeature = (tail: { luna: { phase: string; response: { text: string } }[] }) => {
+      const completion = tail.luna.find(call => call.phase === "generation");
+      assert.ok(completion);
+      assert.deepEqual(JSON.parse(completion.response.text), { checkedFeature: useful, text: good.plan.speech });
+      completion.response.text = confirmationDraft(common, good.plan.speech);
+    };
+    rewriteFeature(replay.tape.tails[label]);
+    rewriteFeature(side.material.tail);
+    side.materialSha256 = hash(side.material);
+    const pair = records.evidence.pairedReplay[0];
+    [pair.left, pair.right] = structuredClone(replay.result.sides);
+    const result = verifyRecords(records).checks.find(check => check.id === "intervention.trial.0.attempt.0.replay");
+    assert.equal(result?.status, "mismatch");
+  }
 });

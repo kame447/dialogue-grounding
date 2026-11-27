@@ -32,7 +32,7 @@ import { prepareLocalGroundingTurn, validateLocalGroundingOptions, findLocalPubl
 import type { LocalGroundingResearchRecord, LocalGroundingTrace } from "./local-grounding-turn.ts";
 import { findNamingActHints, hasOrientationWords, draftViolationCodes, deriveGenerationOutcome, orientationSafeFallback, rewriteReasons, isGenerationV5, isGenerationV6, isGenerationV7, isGenerationV8, isGenerationV9, isGenerationV10, isGenerationV11, isGenerationV12, isGenerationV13, isGenerationV14, v11RecentHumanTexts, hasVersionedViewpoint, defaultGenerationRetryVersion, validGenerationRetryVersion, validAgreeNameScope, allowsOrientationFallback } from "./generation-guard.ts";
 import { isGenerationV15, currentTurnNamingSource, semanticNamingCodes, namingCodesWithoutQuestion, contentPublicationRecovery, type PublicationRecovery } from "./generation-guard.ts";
-import { isGenerationV16 } from "./generation-guard.ts";
+import { isGenerationV16, confirmationDraftText } from "./generation-guard.ts";
 import { SEMANTIC_DRAFT_ACTS } from "../decision/contract.ts";
 import { createMemoAiExtractor, MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS, AiPublicError, aiHash, emptyAiEvidence } from "../local-grounding/extract-ai.ts";
 import { createJevAiFunctionClassifier, createJevAiSupportChecker, AI_FUNCTION_INSTRUCTIONS, AI_SUPPORT_INSTRUCTIONS,
@@ -60,6 +60,7 @@ const RECONFIRM_NAME_V5 = "今回は既に合意した呼び名の再確認で�
 const ACCEPT_FEATURE_REPLY_V5 = "acceptで相手が図形の有無や特定の特徴を直接尋ねたら、相槌だけで済ませず、まずその問いに答えてください。自分側の観察メモで確かめられる範囲で、ある・ない・確かめられないを区別してください。回転しても変わらない形やつながりを優先し、必要な方位はその語と同じ節で自分側の見え方だと示してください。新たな命名や別の特徴の確認へ話を広げないでください。";
 const CONFIRM_NAMING_REQUEST_V5 = "判断で選ばれた対象について、その特徴だけを確かめてください。相手が出した呼び名を採用・再提案しないでください。その案に触れる場合は、相手の提案だと分かる引用に留めてください。";
 const DISCRIMINATING_CONFIRM_V16 = "選ばれた特徴を根拠に、公開対話でまだ答えられていない点を一つ、同じ論点で尋ねてください。すでに肯定・否定・訂正された点や、それだけでは候補の区別にも部分の照合にも役立たない共通の特徴を、言い換えて再質問しないでください。選ばれた特徴が共通の目印なら、自分の見え方や相手の説明を手がかりに、同じ特徴について残っている部分の対応や説明の意味を尋ねてください。別の特徴を選び直さず、観察にない形や相手の画面の見え方を補わないでください。相手から呼び名を決めたいという申し出があれば、現在の確認に結びつけ、採用や同定は断定しないでください。";
+const CONFIRMATION_DRAFT_V16 = '回答はキーがcheckedFeatureとtextのJSONオブジェクト1個だけにしてください。textは相手に向けた自然な確認文です。checkedFeatureはその確認文が実際に尋ねている特徴に対応する観察メモの値を、表記を変えずに入れてください。確認文ではその値と同じ表記にそろえる必要はありません。';
 const NAMING_CONFLICT_V5 = "選ばれた図形にはすでに合意済みの名前（agreedName）があり、今回の相手の案（proposedNames）とは異なります。選ばれた行動で対象を確かめる際は、相手が同じ図形と別の図形のどちらについて話しているかを確かめてください。この案を採用して合意済みの名前を変更しないでください。明示的な改名は、判断が選んだrepairの範囲で扱います。";
 const FEATURE_VIEWPOINT_V5 = "以下のdiscriminatingFeatureにある上下左右・横長などの向きの語は、自分側の画面での見え方です。公開発話では、回転しても変わらない形や部分同士のつながりに言い換えてください。向きが区別に必要なら、その語と同じ節で「こちらの画面では」などと自分側の見え方だと明示し、相手には形の対応を尋ねてください。";
 const SHARED_CONSTRUAL_INSTRUCTIONS = "次の見立ては大まかな共同参照の目印に使えます。候補の範囲を保ち、未確認・保留の細部が一致した、図形を一つに同定した、名称に合意したとは言わないでください。内部のIDや項目名を公開発話に含めないでください。";
@@ -828,7 +829,7 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
    }
    const e=z.executed,g=j.judgment;
    if(Object.hasOwn(j,'publicationRecovery')){
-    const recovered=Array.isArray(j.generationGuard?.violations)&&contentPublicationRecovery(j.generationGuard.violations,e);
+    const recovered=Array.isArray(j.generationGuard?.violations)&&contentPublicationRecovery(j.generationGuard.violations,e,generation);
     if(!recovered||!j.generationGuard.regenerated||!j.generationGuard.fallback||
       !stateSame(j.publicationRecovery,recovered.recovery)||!stateSame(g,recovered.judgment))throw Error();
    }else if(g.action!==e.action||g.targetSlot!==(e.target.kind==='single'?e.target.figureId:null)||g.candidateName!==e.name||g.discriminatingFeature!==e.feature||
@@ -1267,6 +1268,8 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       const namingState = versionedGeneration ? Object.keys(state.ledger).sort().map(figureId => ({
         figureId, status: state.ledger[figureId].status, name: state.ledger[figureId].name,
       })) : null;
+      const structuredConfirmation = isGenerationV16(generationRetryVersion) && judgment.action === "confirm";
+      const readDraft = (text: string) => structuredConfirmation ? confirmationDraftText(text, execution.feature) : text;
       const actionMessage: Message = { role: "system",
         content: actInstructions + "\n" + generation.actionScope[judgment.action] + "\n" +
           (isGenerationV6(generationRetryVersion) && (isVetoed(record.intervention) || judgment.action === "confirm" || judgment.action === "repair") ? VETOED_MOVE_V6 + "\n" : "") +
@@ -1275,7 +1278,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
           (options.dialoguePolicy === "holistic_v5" && judgment.action === "confirm" && record.namingRequest === true ? CONFIRM_NAMING_REQUEST_V5 + "\n" : "") +
           (namingConflict ? NAMING_CONFLICT_V5 + "\n" + JSON.stringify(namingConflict) + "\n" : "") +
           featureViewpoint +
-          (isGenerationV16(generationRetryVersion) && judgment.action === "confirm" ? DISCRIMINATING_CONFIRM_V16 + "\n" : "") +
+          (structuredConfirmation ? DISCRIMINATING_CONFIRM_V16 + "\n" + CONFIRMATION_DRAFT_V16 + "\n" : "") +
           JSON.stringify({ ...judgment, target: execution.target,
           ...(execution.detailFigureIds ? { detailFigureIds: execution.detailFigureIds } : {}) }) };
       const shared = execution.sharedClaimIds && baseInput.sharedConstruals?.find(candidate => stateSame(candidate.claimIds, execution.sharedClaimIds));
@@ -1388,7 +1391,10 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       let result = await interruptible(client.complete(messages, { phase: "generation", timeoutMs: generation.timeoutMs, signal }), signal);
       abortIf(signal);
       if (typeof result?.text !== "string" || !result.text.trim()) throw new JevTurnError("generation_failed", undefined, { generationErrorCode: "invalid_response" });
-      record.generationGuard.violations = await checkDraft(result.text, "initial", violations(result.text, messages));
+      const firstText = readDraft(result.text);
+      record.generationGuard.violations = firstText === null ? ["confirmation_detail_mismatch"]
+        : await checkDraft(firstText, "initial", violations(firstText, messages));
+      if (structuredConfirmation && firstText !== null) result = { ...result, text: firstText };
       const firstCodes = [...record.generationGuard.violations];
       if (record.generationGuard.violations.length) {
         record.generationGuard.regenerated = true;
@@ -1398,9 +1404,11 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
             (restateJudgment ? "\n" + actionMessage.content + "\n" : "") + rewriteReasons(record.generationGuard.violations, options.dialoguePolicy, generationRetryVersion) }];
         result = await interruptible(client.complete(retry, { phase: "generation", timeoutMs: generation.timeoutMs, signal }), signal);
         abortIf(signal);
-        const retryText = typeof result?.text === "string" ? result.text : "";
-        const codes = retryText.trim() ? await checkDraft(retryText, "retry", violations(retryText, retry)) : ["empty_utterance"];
-        if (!retryText.trim() && p5OverclaimEnabled && shared) {
+        const retryText = readDraft(typeof result?.text === "string" ? result.text : "");
+        const codes = retryText === null ? ["confirmation_detail_mismatch"] : retryText.trim()
+          ? await checkDraft(retryText, "retry", violations(retryText, retry)) : ["empty_utterance"];
+        if (structuredConfirmation && retryText !== null) result = { ...result, text: retryText };
+        if (retryText !== null && !retryText.trim() && p5OverclaimEnabled && shared) {
           // An empty rewrite never reaches Jev. Record that outcome without inventing an answer.
           codes.push("draft_shared_claim_unconfirmed");
           record.draftSharedClaims!.push({ draft: "retry", draftSha256: await aiHash(retryText), violations: [...codes], status: "error",
@@ -1411,7 +1419,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
           const safeText = questionLayout === "two_stage_v3" && allowsOrientationFallback(generationRetryVersion) ? orientationSafeFallback(judgment) : null;
           // The same pure derivation S4 applies: only an orientation-only pair of drafts, with a clean derived sentence, may fall back.
           const outcome = deriveGenerationOutcome(firstCodes, codes, safeText, safeText !== null && violations(safeText, retry).length === 0);
-          const recovery = semanticNaming ? contentPublicationRecovery(outcome.violations, execution) : null;
+          const recovery = semanticNaming ? contentPublicationRecovery(outcome.violations, execution, generationRetryVersion) : null;
           if (recovery) {
             const context = { ...codeContext, action: recovery.judgment.action, candidateName: null };
             if (draftViolationCodes(recovery.text, context, retry, privateInstructions).length) throw new JevTurnError("unsafe_generation");
