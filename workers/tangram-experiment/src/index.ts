@@ -30,8 +30,8 @@ import { participantContactHTML } from "../../../dialogue-model/runtime/v2/parti
 import { PARTICIPANT_STOP_HTML } from "../../../dialogue-model/runtime/v2/participant-stop-page.ts";
 import { ReceptionError, validateReception, createReception, approveReception, cancelReception, terminateReception,
   participantReception, receptionSummary, effectiveBetweenTrials, effectiveFigureSelection, effectiveRotationMode,
-  validateParticipantLimits, isParticipantDialogueProfile, participantMemoryPruneVersion,
-  PILOT012_PARTICIPANT_PROFILE } from '../../../dialogue-model/runtime/v2/reception.ts';
+  validateParticipantLimits, isParticipantDialogueProfile, isPilot012ParticipantDialogueProfile,
+  participantMemoryPruneVersion } from '../../../dialogue-model/runtime/v2/reception.ts';
 import { isAdminTermination, isIncompleteTrialStatus } from '../../../dialogue-model/runtime/v2/admin-termination.ts';
 import type { AdminTermination } from '../../../dialogue-model/runtime/v2/admin-termination.ts';
 import { isSubmittedQuestionnaire } from '../../../dialogue-model/runtime/v2/questionnaire-gate.ts';
@@ -303,12 +303,13 @@ export class TangramSession extends DurableObject<Env> {
         try {
           const configuredProfile = this.env.PARTICIPANT_TERRA_PROFILE;
           const configuredObservation = this.env.PARTICIPANT_TERRA_INITIAL_OBSERVATION_GENERATION;
-          const initialObservationGeneration = dialogueProfile === PILOT012_PARTICIPANT_PROFILE
+          const pilot012Profile = isPilot012ParticipantDialogueProfile(dialogueProfile);
+          const initialObservationGeneration = pilot012Profile
             ? configuredObservation ?? INITIAL_OBSERVATION_STRUCTURED_V2 : configuredObservation;
           if (initialObservationGeneration !== undefined && !isInitialObservationGeneration(initialObservationGeneration)) {
             throw new Error('unknown initial observation generation');
           }
-          if (dialogueProfile === PILOT012_PARTICIPANT_PROFILE && initialObservationGeneration !== INITIAL_OBSERVATION_STRUCTURED_V2) {
+          if (pilot012Profile && initialObservationGeneration !== INITIAL_OBSERVATION_STRUCTURED_V2) {
             throw new Error('initial observation generation differs from dialogue profile');
           }
           const usageOnly = configuredProfile === PARTICIPANT_PRODUCTION_PROFILE;

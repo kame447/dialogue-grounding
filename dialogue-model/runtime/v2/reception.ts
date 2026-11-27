@@ -31,8 +31,10 @@ type P5ParticipantDialogueProfile = 'participant_dialogue_v13_p5' | 'participant
   'participant_dialogue_v13_p5_discriminating_confirmation' |
   'participant_dialogue_v13_p5_semantic_guard_jev_naming' | 'participant_dialogue_v13_p5_jev_naming_v16_human_led_move_on';
 export const PILOT012_PARTICIPANT_PROFILE = 'participant_dialogue_v17_pilot012';
+export const PILOT012_V18_PARTICIPANT_PROFILE = 'participant_dialogue_v18_pilot012';
+type Pilot012ParticipantDialogueProfile = typeof PILOT012_PARTICIPANT_PROFILE | typeof PILOT012_V18_PARTICIPANT_PROFILE;
 export type ParticipantDialogueProfile = 'participant_dialogue_v12' | 'participant_dialogue_v12_naming_v2' |
-  'participant_dialogue_v12_naming_v3' | 'participant_dialogue_v12_naming_v4' | P5ParticipantDialogueProfile | typeof PILOT012_PARTICIPANT_PROFILE;
+  'participant_dialogue_v12_naming_v3' | 'participant_dialogue_v12_naming_v4' | P5ParticipantDialogueProfile | Pilot012ParticipantDialogueProfile;
 export function isP5ParticipantDialogueProfile(value: unknown): value is P5ParticipantDialogueProfile {
   return value === 'participant_dialogue_v13_p5' || value === 'participant_dialogue_v13_p5_naming_v4' ||
     value === 'participant_dialogue_v13_p5_semantic_guard' || value === 'participant_dialogue_v13_p5_human_led_move_on' ||
@@ -40,13 +42,16 @@ export function isP5ParticipantDialogueProfile(value: unknown): value is P5Parti
     value === 'participant_dialogue_v13_p5_semantic_guard_jev_naming' ||
     value === 'participant_dialogue_v13_p5_jev_naming_v16_human_led_move_on';
 }
+export function isPilot012ParticipantDialogueProfile(value: unknown): value is Pilot012ParticipantDialogueProfile {
+  return value === PILOT012_PARTICIPANT_PROFILE || value === PILOT012_V18_PARTICIPANT_PROFILE;
+}
 export function isParticipantDialogueProfile(value: unknown): value is ParticipantDialogueProfile {
   return value === 'participant_dialogue_v12' || value === 'participant_dialogue_v12_naming_v2' ||
     value === 'participant_dialogue_v12_naming_v3' || value === 'participant_dialogue_v12_naming_v4' ||
-    isP5ParticipantDialogueProfile(value) || value === PILOT012_PARTICIPANT_PROFILE;
+    isP5ParticipantDialogueProfile(value) || isPilot012ParticipantDialogueProfile(value);
 }
 export function participantMemoryPruneVersion(profile?: ParticipantDialogueProfile): MemoryPruneVersion {
-  return profile === PILOT012_PARTICIPANT_PROFILE ? CLAIM_PRUNE_V3 : CLAIM_PRUNE_V2;
+  return isPilot012ParticipantDialogueProfile(profile) ? CLAIM_PRUNE_V3 : CLAIM_PRUNE_V2;
 }
 type ParticipantPlanSettings = {
   memoryPruneVersion?: MemoryPruneVersion;
@@ -200,7 +205,7 @@ function participantPlan(value: unknown) {
       !isParticipantDialogueProfile(dialogueProfile))) return fail();
   const memoryPruneVersion = participantMemoryPruneVersion(dialogueProfile);
   if (hasPrune && p.memoryPruneVersion !== memoryPruneVersion) return fail();
-  if (dialogueProfile === PILOT012_PARTICIPANT_PROFILE &&
+  if (isPilot012ParticipantDialogueProfile(dialogueProfile) &&
       (!hasPrune || generation !== INITIAL_OBSERVATION_STRUCTURED_V2)) return fail();
   const limits = hasLimits ? validateParticipantLimits(p.participantLimits) : undefined;
   const participant: ParticipantPlanSettings = {
