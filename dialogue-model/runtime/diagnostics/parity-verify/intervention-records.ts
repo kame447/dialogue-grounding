@@ -72,6 +72,14 @@ const MULTI_ISSUE_START_S4='この発話では、items に並ぶ扱いをすべ�
 const MULTI_ISSUE_REPAIR_S4='この扱いの部分では、その論点について判断を保留したり話を移したりせず、選ばれた論点を、この行動の範囲で確かめてください。';
 const MULTI_ISSUE_DRAFT_S4='出力は parts と observationFeatures を持つ JSON オブジェクトです。parts は、発話に現れる順の配列で、各要素は item（items の番号）と text（その扱いを述べる公開の文）を持ちます。items のすべての番号を、ちょうど 1 回ずつ使ってください。observationFeatures は、発話の全体で使った観察の出所の配列です。使わなければ空配列です。';
 const MULTI_ISSUE_DEFERRAL_S4='扱いに carry_over も consult も含まれないときは、未解決の図形について保留・先送り・別の図形への移行を提案しないでください。';
+// Final scope wording approved for §4.7 and the item scopes in §6.2.
+const ISSUE_ACTION_SCOPES: Readonly<Record<string,string>>={
+ hold_open:'相手の提示に短く反応し、issueの論点について、理解できた、採用する、食い違っている、のいずれも言い切らないでください。ためらい、相手の言葉の短い反復、観察メモに根拠のある候補を独り言のように挙げることのいずれかで、判断がまだ定まらないことを伝えてください。直接の問いや確認の依頼を作らず、相手が自分から補足できるところで発話を終えてください。保留、後回し、移行、名前や対象の確定を宣言しないでください。publicQuestionsに観察メモで答えられる別の問いがあれば先に短く答えてください。issueのkindがresolve_issueのときは、出所のある局所論点を指します。',
+ carry_over:'issueの論点がまだ決まっていないことを短く伝え、後で戻れる形でdestinationへ進んでください。解決や放棄を表明しないでください。partner_choiceなら次の図形は相手に選んでもらい、other_figureなら観察メモの全体の見立てを一つ示してください。same_figure_namingなら呼び名の相談を始め、採用や候補名の決定はしないでください。same_figure_other_issueなら同じ図形を別の点から見ることを持ちかけ、old_issueなら以前に途中になった論点を先に扱うことを持ちかけてください。移る先が未特定なら内容を作らず、以前の点を先に扱うことだけを伝えてください。issueがunknownなら未解決の点を作らず、進むことだけを自然に伝えてください。publicQuestionsに観察メモで答えられる問いがあれば先に短く答えてください。',
+ consult:'issueの論点がまだ合わせられていないことを短く伝え、確かめ続けるか、別の進め方にするかを相手に尋ねてください。進み方は相手に委ね、自分から移ったり、どちらかに誘導したりしないでください。解決や放棄を表明せず、自分側の観察の特徴は述べないでください。',
+ revisit:'以前に未解決のまま残したissueの論点に戻り、そこを解決したいことが伝わるようにしてください。戻ることを一言で伝え、確かめたい点を一つ扱えます。決まったとは言わないでください。',
+};
+const isJevNamingScope=(scope:unknown)=>scope==='jev_naming_v1'||scope==='jev_naming_v2';
 const CONFIRM_FEATURE_VIEWPOINT_V5_S4='以下のdiscriminatingFeatureは自分側の観察です。選ばれた特徴を確かめるのに必要な形や部分同士のつながりを、回転しても変わらない表現で優先して伝えてください。別の特徴を列挙したり、相手が使った方位を自分側の観察として写したりしないでください。方位が区別に必要な箇所では、その語と同じ節で、その語より前に「こちらの画面では」など自分側の見え方を明示する標識を置き、相手には形の対応を尋ねてください。別の節や文にある標識に頼らないでください。';
 // Closed, ordered reason text for the original and restated-judgment prompts.
 type RetryReason={codes:readonly string[];text:string;legacy?:string};
@@ -719,14 +727,14 @@ export function s4LocalReverify(tape:any,t:any,policy:string,after:any):'ok'|'mi
     referenceQuestionBindings=bindPublishedReferenceQuestion(pending,prior,{turn:e.seq,speaker:e.speaker,text:e.text,nonReferential:e.nonReferential},turn,directReferenceReplies);
    }
   }
-  const verified:any=verifyLocalUpdate({graph:base,turn,publicTurns,segments,verdicts,keepUnboundApproval:true,approvalFromNamedClaim:isHolisticV4Plus(policy),referenceQuestionBindings,directReferenceReplies,refinedReplyRules:isGenerationV11(tape.generationRetryVersion),answerFieldRules:isGenerationV12(tape.generationRetryVersion),bindDirectQuestionReplies:usesDirectNamingReplies(scope),retainLocalQuestionAnswers:retainsLocalQuestionAnswers(scope),namingIntervalStart:(tape.state?.judgments??[]).filter((x:any)=>['agree','defer','move_on'].includes(x.judgment?.action)).at(-1)?.turnIndex??0} as any);
+  const verified:any=verifyLocalUpdate({graph:base,turn,publicTurns,segments,verdicts,keepUnboundApproval:true,approvalFromNamedClaim:isHolisticV4Plus(policy),referenceQuestionBindings,directReferenceReplies,refinedReplyRules:isGenerationV11(tape.generationRetryVersion),answerFieldRules:isGenerationV12(tape.generationRetryVersion),bindDirectQuestionReplies:usesDirectNamingReplies(scope),retainLocalQuestionAnswers:retainsLocalQuestionAnswers(scope),unbindPartNonAnswers:scope==='jev_naming_v2',namingIntervalStart:(tape.state?.judgments??[]).filter((x:any)=>['agree','defer','move_on'].includes(x.judgment?.action)).at(-1)?.turnIndex??0} as any);
   rejected=verified.rejected.map((r:any,i:number)=>({segmentId:/^s[0-9]{1,4}$/.test(r.segmentId)?r.segmentId:'segment_'+(i+1),
    reason:/^[a-z][a-z0-9_]{0,59}$/.test(r.reason)?r.reason:'invalid_update'}));
   for(const op of verified.operations){const step=applyVerifiedOperation(before,update,op,publicTurns);if(step.applied){update=step.update;applied.push(op);}else rejected.push({segmentId:'operation_'+(applied.length+rejected.length+1),reason:step.reason});}
  }catch{return'mismatch';}
  const shape=(c:any)=>JSON.stringify([c.id,c.act,c.aspect,c.targets,c.name,c.respondsTo]);
  if(applied.length!==local.claims.length||applied.some((c:any,i:number)=>shape(c)!==shape(local.claims[i])))return'mismatch';
- if(scope==='jev_naming_v1')return equal(rejected,local.verification?.rejected)?'ok':'mismatch';
+ if(isJevNamingScope(scope))return equal(rejected,local.verification?.rejected)?'ok':'mismatch';
  const reasons=(list:string[])=>[...list].sort().join();
  return reasons(rejected.map(r=>r.reason))===reasons((local.verification?.rejected??[]).map((r:any)=>String(r.reason)))?'ok':'mismatch';
 }
@@ -1055,14 +1063,14 @@ function agreeSource(tr:any,t:any,key:string,tape:any,legacyV3=false,mode?:Repla
     sharedOffered(z.executed,p5Facts.shared,mode?.namingRequest??false),true))return'invalid';
   }else if(Object.hasOwn(z,'sharedConstruals'))return'invalid';
   if(!Array.isArray(names)||names.some((n:any)=>!exact(n,['name','figureId','sourceTurn'])||typeof n.name!=='string'||!n.name.trim()||n.name.length>80||
-   (version==='jev_naming_v1'?n.figureId!==null:!slots.includes(n.figureId))||!Number.isSafeInteger(n.sourceTurn)||n.sourceTurn<1||n.sourceTurn>t.turnIndex))return'invalid';
+   (isJevNamingScope(version)?n.figureId!==null:!slots.includes(n.figureId))||!Number.isSafeInteger(n.sourceTurn)||n.sourceTurn<1||n.sourceTurn>t.turnIndex))return'invalid';
   // The runtime's own window: the events up to this turn, a seq that appears twice dropped when AI public claims are on, the last 32; the live
   // claims of the graph after this turn ordered by (sourceTurn, turn), the last 160. The source is the claim's own turn when it holds the name,
   // otherwise the earliest windowed turn that does (an inherited name).
   const aiPublic=tr.profile?.localGrounding?.aiPublicClaims===true;
   const upTo:any[]=(tape.events??[]).filter((e:any)=>e.seq<=t.turnIndex),win=(aiPublic?upTo.filter((e:any)=>upTo.filter((o:any)=>o.seq===e.seq).length===1):upTo).slice(policy==='holistic_v5'&&hasVersionedViewpoint(generation??t.generationRetryVersion)?0:-32);
   const live=liveClaims(state.graph).sort((a:any,b:any)=>a.sourceTurn-b.sourceTurn||a.turn-b.turn).slice(-160);
-  if(version==='jev_naming_v1'){
+  if(isJevNamingScope(version)){
    const publicTurns=s4NamingPublicTurns(tape,t),material=namingMaterial(live,publicTurns,t);
    return equal(material.names,names)?{known:true,names,p5Facts}:'invalid';
   }
@@ -1178,12 +1186,20 @@ function issueHandlingGenerationScope(messages:any[],execution:any,finals:any,vi
   message.content.startsWith('Jevが選んだ行動だけを文章にしてください。'));
  if(!action||action.content.includes(VETOED_MOVE_V6_S4))return false;
  const lines=action.content.split('\n'),wire=lines.at(-1);
+ if(lines[0]!==FIXED_HOLISTIC_V5_I172.act)return false;
+ const scopeFor=(action:string)=>{
+  const scopes: Readonly<Record<string,string>>=FIXED_HOLISTIC_V5_I172.scope;
+  const scope=ISSUE_ACTION_SCOPES[action]??scopes[action];
+  return action==='accept'?scope?.replace(
+   '相手が場所だけで図形を示したときは、場所だけでは分からないことを短く伝えて形の特徴を尋ねる。それ以外は受け止める。','受け止める。'):scope;
+ };
  if(!execution.extras?.length){
   const expected={...finals,target:execution.target,...(visual&&execution.visualPurpose?{visualPurpose:execution.visualPurpose}:{}),
    ...(execution.issue?{issue:execution.issue}:{}),...(execution.destination?{destination:execution.destination}:{}),
    ...(execution.detailFigureIds?{detailFigureIds:execution.detailFigureIds}:{})};
   if(wire!==JSON.stringify(expected))return false;
   const hasVisualSelection=['confirm','repair'].includes(execution.action);
+  if(lines[1]!==(visual&&hasVisualSelection?VISUAL_FEATURE_SELECTION_V19:scopeFor(execution.action)))return false;
   const keepIssue=lines.some((line:string)=>line.includes('選ばれた論点をこの行動の範囲で確かめてください。'));
   if(keepIssue!==(hasVisualSelection&&!combined)||visual&&
      (lines.includes(VISUAL_FEATURE_SELECTION_V19)!==hasVisualSelection||
@@ -1201,9 +1217,8 @@ function issueHandlingGenerationScope(messages:any[],execution:any,finals:any,vi
     wantsFeatureSelection&&lines[2]!==VISUAL_FEATURE_SELECTION_V19)return false;
  const rowStart=wantsFeatureSelection?3:2;
  if(!items.every((item,index)=>{
-  const prefix='items の '+index+' 番: ',instruction=lines[rowStart+index];
-  return ['confirm','repair'].includes(item.action)?instruction===prefix+MULTI_ISSUE_REPAIR_S4:
-   instruction?.startsWith(prefix)&&instruction.length>prefix.length;
+  const scope=['confirm','repair'].includes(item.action)?MULTI_ISSUE_REPAIR_S4:scopeFor(item.action);
+  return scope!==undefined&&lines[rowStart+index]==='items の '+index+' 番: '+scope;
  }))return false;
  const sources=lines.indexOf(VISUAL_FEATURE_SOURCES_V19);
  return sources>=rowStart+items.length&&lines[sources+1]===MULTI_ISSUE_DRAFT_S4&&lines[sources+2]?.startsWith('{"publicQuestions":');
@@ -1483,7 +1498,11 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
  })():null;
  if(pruneVersion===CLAIM_PRUNE_V3&&(!referenceEvidence||
    !equal(referenceEvidence.localAlternatives,committedState?.referenceAlternatives??[])))return'invalid';
- if(isGenerationV17(version))return generatedReplayProof(tr,t,tape,result,pair,referenceEvidence,committed);
+ if(isGenerationV17(version)){
+  if(tape.state.agreeNameScopeVersion==='jev_naming_v2'&&
+     (committedState?.agreeNameScopeVersion!=='jev_naming_v2'||s4LocalReverify(tape,t,tr.profile.dialoguePolicy,committed)!=='ok'))return'invalid';
+  return generatedReplayProof(tr,t,tape,result,pair,referenceEvidence,committed);
+ }
   const policy=tr.profile?.dialoguePolicy??null;
   const p5=p5At(layout,policy,version),p5Overclaim=p5OverclaimAt(layout,policy,version);
   if(p5&&fullProfile(tr.profile))return'invalid';
@@ -1493,7 +1512,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
   const legacyV3=targetInstructions.length>0&&targetInstructions.every((instructions:any)=>
     typeof instructions==='string'&&instructions.endsWith('\n'+LEGACY_V3_TARGET));
    const trial=trialVersion(t,tape.technicalTrial);if(trial==='invalid')return'invalid';
-   const jevNaming=tape.state?.agreeNameScopeVersion==='jev_naming_v1';
+   const jevNaming=isJevNamingScope(tape.state?.agreeNameScopeVersion);
    const namingTurns=jevNaming?s4NamingPublicTurns(tape,t):[];
    const namingTape=usesPublicNamingTarget(tape.state?.agreeNameScopeVersion)?
     {...tape,generationGraph:(tr.turns??[]).find((v:any)=>v.turn===t.turnIndex)?.state?.graph??tr.lastCommittedState?.graph}:tape;
@@ -2476,7 +2495,7 @@ export function interventionChecks(records:Records):Check[]{
     const humanLedMoveOn=tr.profile?.interventionPolicy?.version==='bypass_acceptance_v2';
     const issueHandling=tr.profile?.interventionPolicy?.version===S4_ISSUE_HANDLING_POLICY;
     const failureSlots=Object.keys(tr.lastCommittedState?.ledger??replayEntries[0]?.tape?.state?.ledger??ownTurns[0]?.state?.ledger??{});
-    const jevNaming=(ownTurns[0]?.state?.agreeNameScopeVersion??tr.lastCommittedState?.agreeNameScopeVersion??replayEntries[0]?.tape?.state?.agreeNameScopeVersion)==='jev_naming_v1';
+    const jevNaming=isJevNamingScope(ownTurns[0]?.state?.agreeNameScopeVersion??tr.lastCommittedState?.agreeNameScopeVersion??replayEntries[0]?.tape?.state?.agreeNameScopeVersion);
     if(failureSlots.length===4&&!promptVersion(r,tr)?.fourFigures||failureSlots.length>0&&![4,6].includes(failureSlots.length)||
        !traceShape(t,layout,policy,failureSlots,humanLedMoveOn,jevNaming,issueHandling)||
        !related.every((c:any)=>traceShape(c,layout,policy,failureSlots,humanLedMoveOn,jevNaming,issueHandling))){
@@ -3171,9 +3190,9 @@ const PROMPT_VERSIONS:readonly PromptVersion[]=[
   'v2/deferred-ai-extraction.ts':'19f5f861a60907ca5f72e196a18ead2ab43da7ffbe43f19ab1ff2361b9f070e1',
  }},fixed:FIXED_I172,native:NATIVE_I172},
  {id:'p5_pilot012_issue_handling_v21',i172:true,fourFigures:true,styleMode:'research_split',sources:{scheme:'complete_instruction_source_sha256',files:{
-  'v2/dialogue-v2.mjs':'56ebe4c697b59f1236449187de12ed0d553be84a5cb002e2f9ef67e180de2086',
-  'v2/jev-turn.ts':'b00869cde8ef53ee536dbf391c017e281bf5fa832293e5bfea0962021772a8fc',
-  'v2/generation-guard.ts':'db1d8882ac3b0fb310c786b0f92b779cb93e0e9f3cebbed141dc73950d9bb107',
+  'v2/dialogue-v2.mjs':'64e24a7abb64c9925e95f0ad748ce6ae2a295e843a25cedae16edb7d0eaa2ae5',
+  'v2/jev-turn.ts':'d2bc6a602dad159ad43d8e8f0129b63a430cd18685b0eea57ec44af9215b1b91',
+  'v2/generation-guard.ts':'e047fbcf5d7135d6b22bcfed0eae3d477715f57db4da3744fb87bbb6ff8ce145',
   'judgment/instructions.mjs':'eeb20c812729d04e52437a064b31fcd8af60ee2da8b1f6e73d99c4eb8dc8a785',
   'observation/observe.ts':'eac863a50455665daa62812157d68512a7e33bed9fda271b4e7af4f44b38dde4',
   'local-grounding/extract.ts':'bcd38c326e4a931c3117092cd966001ab0dd744cabfcd1424001780cbf9a8ddb',

@@ -303,6 +303,16 @@ for (const figureCount of [4, 6] as const) {
       side.publicationBoundary.job.extraction.sha256 = "0".repeat(64);
     }
     assert.ok(interventionChecks(altered).some(check => check.id.endsWith(".replay") && check.status === "mismatch"));
+    if (figureCount === 4) {
+      const changedScope = structuredClone(records);
+      for (const side of [changedScope.trials[0].replay[0].result.sides[1], changedScope.evidence.pairedReplay[0].right]) {
+        const request = side.requests.find((entry: { phase: string }) => entry.phase === "generation");
+        const message = request.payload.messages.find((entry: { content: string }) => entry.content.includes("items の 1 番: 相手の提示に短く反応し"));
+        message.content = message.content.replace(/items の 1 番: [^\n]+/u, "items の 1 番: 相手に次の図形を選んでもらってください。");
+        request.payloadSha256 = hash(request.payload);
+      }
+      assert.ok(interventionChecks(changedScope).some(check => check.id.endsWith(".replay") && check.status === "mismatch"));
+    }
   });
 }
 
@@ -316,7 +326,7 @@ test("v21 S4 uses naming detail before extras and keeps the common generation id
   const records = await buildRecords({
     figureCount: 4, dialoguePolicy: "holistic_v5", interventionVersion: "bypass_acceptance_v3",
     judgmentMaterialVersion: "jev_repair_quality_v1", technicalTrial: { version: "adaptive_repair_v3" },
-    generationRetryVersion: "jev_generation_retry_v21", agreeNameScopeVersion: "jev_naming_v1",
+    generationRetryVersion: "jev_generation_retry_v21", agreeNameScopeVersion: "jev_naming_v2",
     turns: [{ human: proposal + ask, plan: {
       action: "agree", target: "figure_0", referent: "figure_0", name,
       extraction: JSON.stringify([segment(proposal, 0, "name", name), segment(ask, 1, "question", null)]),
@@ -334,4 +344,40 @@ test("v21 S4 uses naming detail before extras and keeps the common generation id
   const trial = records.trials[0];
   assert.deepEqual(trial.lastCommittedState.ledger[OWN.ownAnchors[0].id], { name, status: "agreed" });
   assert.deepEqual(trial.replay[0].result.sides[0].generatedPublication.visualFeatures, { sources: [] });
+});
+
+test("v21 S4 with jev_naming_v2 rejects the old target and antecedent on a non-answer", async () => {
+  const figureId = OWN.ownAnchors[0].id;
+  const question = "舟の先は尖っていますか？", acknowledgement = "質問の意味は分かりました。";
+  const segment = (quote: string, targets: string[], respondsToTurn: number | null) => ({
+    segmentId: "s0", quote, targets, aspect: "part", proposition: quote, name: null, linkedIssueId: null, respondsToTurn,
+  });
+  const records = await buildRecords({
+    figureCount: 4, dialoguePolicy: "holistic_v5", interventionVersion: "bypass_acceptance_v3",
+    judgmentMaterialVersion: "jev_repair_quality_v1", technicalTrial: { version: "adaptive_repair_v3" },
+    generationRetryVersion: "jev_generation_retry_v21", agreeNameScopeVersion: "jev_naming_v2",
+    turns: [
+      { human: "舟の話から始めましょう。", plan: { action: "confirm", target: "figure_0",
+        speech: JSON.stringify({ text: question, observationFeatures: [] }), aiActs: ["ask"],
+        aiExtraction: JSON.stringify({ segments: [segment(question, [figureId], null)], visualFeatures: { sources: [] } }),
+        choose: key => key === "human_move_on_source" ? "other" : key === "commitment_state" ? "insufficient" : undefined,
+      } },
+      { human: acknowledgement, plan: { action: "accept", target: "none", speech: "ありがとうございます。",
+        act: "agree", antecedent: "claim_0", answers: "not_an_answer", extraction: JSON.stringify([segment(acknowledgement, [], 2)]),
+        choose: key => key === "human_move_on_source" ? "other" : key === "commitment_state" ? "not_due" : undefined,
+      } },
+    ],
+  });
+  const trial = records.trials[0];
+  const claim = trial.attempts[0].local.claims[0];
+  assert.equal(claim.act, "acknowledge");
+  assert.deepEqual(claim.targets, []);
+  assert.equal(claim.respondsTo, null);
+  const checks = interventionChecks(records);
+  const replay = checks.find(check => check.id.endsWith(".replay") && check.status === "pass");
+  assert.ok(replay, JSON.stringify(checks));
+  for (const trace of [trial.attempts[0], trial.turns[0].trace[0]]) {
+    Object.assign(trace.local.claims[0], { act: "agree", targets: [figureId], respondsTo: "2:pub1" });
+  }
+  assert.equal(interventionChecks(records).find(check => check.id === replay.id)?.status, "mismatch");
 });

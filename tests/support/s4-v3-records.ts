@@ -70,8 +70,10 @@ export type Plan = { action: string; target: string; issue?: string; prospect?: 
   referent?: string };
 const TEXTS: Record<string, string> = { local_extraction: '[]', ai_extraction: '[]' };
 
-export async function runTurn(profile: any, label: Label, state: any, events: any[], plan: Plan, technicalTrial: { version: TrialVersion } | undefined, generationRetryVersion?: RecordedGenerationRetryVersion, own = OWN) {
+export async function runTurn(profile: any, label: Label, state: any, events: any[], plan: Plan, technicalTrial: { version: TrialVersion } | undefined, generationRetryVersion?: RecordedGenerationRetryVersion, own = OWN, recordedLabel = label) {
   const issueHandling = String(generationRetryVersion) === 'jev_generation_retry_v21';
+  const issueHandlingReplayHistory = issueHandling && label !== recordedLabel && state.judgments.length
+    ? { strategy: recordedLabel, judgmentCount: state.judgments.length } : undefined;
   const luna: any[] = [], jev: any[] = [], traces: any[] = [], reobservations: any[] = [], boundary = { luna: -1, jev: -1 };
   const httpBodies: { provider: 'luna' | 'jev'; sha256: string }[] = [];
   const capture = (provider: 'luna' | 'jev', init: RequestInit | undefined) => {
@@ -130,7 +132,8 @@ export async function runTurn(profile: any, label: Label, state: any, events: an
       ...(['holistic_v3', 'holistic_v5'].includes(profile.dialoguePolicy) ? { dialoguePolicy: profile.dialoguePolicy } : {}) })!,
       aiPublicTransport: { readKey, fetchImpl, timeoutMs: profile.timeouts.decisionMs } },
     onJevTurnTrace: (t: any) => traces.push(t), generationRetryVersion, ...(technicalTrial ? { technicalTrial } : {}),
-    ...(issueHandling ? { deferredAiExtractionProfileSha256: researchHash(profile) } : {}) } as any);
+    ...(issueHandling ? { deferredAiExtractionProfileSha256: researchHash(profile) } : {}),
+    ...(issueHandlingReplayHistory ? { issueHandlingReplayHistory } : {}) } as any);
   const at = '2000-01-01T00:00:00.000Z';
   // Older synthetic callers use speaker-prefixed IDs. The queue restores the
   // same transcript under its own event IDs.
@@ -234,8 +237,8 @@ export async function buildRecords({ label = 'repair-first' as Label, technicalT
       continue;
     }
     // The final turn is run once per label: the common segment (before the original decision) is shared, each tail is that label's own.
-    const runs = { 'repair-first': await runTurn(profile, 'repair-first', run.state, run.events, turns[i].plan, technicalTrial, generationRetryVersion, own),
-      'bypass-enabled': await runTurn(profile, 'bypass-enabled', run.state, run.events, turns[i].plan, technicalTrial, generationRetryVersion, own) };
+    const runs = { 'repair-first': await runTurn(profile, 'repair-first', run.state, run.events, turns[i].plan, technicalTrial, generationRetryVersion, own, label),
+      'bypass-enabled': await runTurn(profile, 'bypass-enabled', run.state, run.events, turns[i].plan, technicalTrial, generationRetryVersion, own, label) };
     const a = runs['repair-first'], b = runs['bypass-enabled'];
     assert.equal(a.publication.status, 'committed');
     assert.equal(b.publication.status, 'committed');
