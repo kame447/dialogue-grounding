@@ -44,7 +44,8 @@ import { isGenerationV15, currentTurnNamingSource, semanticNamingCodes, namingCo
   type NamingHoldReason, type PublicationRecovery } from "./generation-guard.ts";
 import { isGenerationV16, isGenerationV17, confirmationDraftText, canReconsiderPublication, HUMAN_MOVE_ON_V17, PUBLICATION_RECOVERY_V17 } from "./generation-guard.ts";
 import { SEMANTIC_DRAFT_ACTS } from "../decision/contract.ts";
-import { createMemoAiExtractor, MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS, AiPublicError, aiHash, emptyAiEvidence } from "../local-grounding/extract-ai.ts";
+import { createMemoAiExtractor, memoAiExtractionPrompt, AiPublicError, aiHash, emptyAiEvidence } from "../local-grounding/extract-ai.ts";
+import { isGenerationV18, withShapeTerminology } from "../shape-terminology.ts";
 import { createJevAiFunctionClassifier, createJevAiSupportChecker, AI_FUNCTION_INSTRUCTIONS, AI_SUPPORT_INSTRUCTIONS,
   AI_RESPONSE_SUPPORT_INSTRUCTIONS, AI_FUNCTION_CRITERIA, AI_SUPPORT_CHOICES, AI_ACT_DESCRIPTIONS } from "../local-grounding/jev-ai-public.ts";
 import { initialAiPublicState, validateAiPublicState, prependAiPublic, verifyAiPublicUpdate } from "../local-grounding/verify-ai.ts";
@@ -1131,6 +1132,8 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   if (!validGenerationRetryVersion(generationRetryVersion, questionLayout, options.dialoguePolicy)) {
     throw new Error("Invalid Jev generation retry version");
   }
+  const terminology = isGenerationV18(generationRetryVersion) ? generationRetryVersion : undefined;
+  const generationInstructions = withShapeTerminology(generation.instructions, terminology);
   const repairQuality = options.judgmentMaterialVersion === JEV_REPAIR_QUALITY_VERSION;
   if (options.judgmentMaterialVersion !== undefined && (!repairQuality || questionLayout !== "two_stage_v3" ||
       options.dialoguePolicy !== "holistic_v5" || !hasVersionedViewpoint(generationRetryVersion))) {
@@ -1168,18 +1171,19 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   const ownImage = structuredClone(options.ownImage), ownAnchors = structuredClone(options.ownAnchors), slots = ownAnchors.map(a => a.id);
   validateLocalGroundingOptions({ ...options.localGrounding, extractor: { async extract() { return []; } } });
   const aiEnabled = options.localGrounding.aiPublicClaims === true;
-  const aiExtractor = aiEnabled ? createMemoAiExtractor(client) : null;
+  const aiExtractor = aiEnabled ? createMemoAiExtractor(client, terminology) : null;
   const aiFunction = aiEnabled ? createJevAiFunctionClassifier({ ...options.localGrounding.aiPublicTransport, ...(options.localGrounding.researchLimits === undefined ? {} : { researchLimits: options.localGrounding.researchLimits }) }) : null;
   const aiSupport = aiEnabled ? createJevAiSupportChecker({ ...options.localGrounding.aiPublicTransport, ...(options.localGrounding.researchLimits === undefined ? {} : { researchLimits: options.localGrounding.researchLimits }) }) : null;
-  const aiPromptBodies = [MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS, AI_FUNCTION_INSTRUCTIONS + "\n" + JSON.stringify(AI_FUNCTION_CRITERIA),
+  const aiPromptBodies = [memoAiExtractionPrompt(terminology), AI_FUNCTION_INSTRUCTIONS + "\n" + JSON.stringify(AI_FUNCTION_CRITERIA),
     AI_SUPPORT_INSTRUCTIONS + "\n" + AI_RESPONSE_SUPPORT_INSTRUCTIONS + "\n" + JSON.stringify({ AI_SUPPORT_CHOICES, AI_ACT_DESCRIPTIONS })];
   const attempts: JevTurnTrace[] = [];
   let attemptsStarted = 0;
   let initialMemo: Promise<ObservationMemo> | null = null, initialRecorded = false;
   const researchV3 = questionLayout === "two_stage_v3" && options.participantPrompts !== true;
   const actInstructions = questionLayout === "two_stage_v3" || isHolisticPolicy(options.dialoguePolicy) ? HOLISTIC_ACT_INSTRUCTIONS : ACT_INSTRUCTIONS;
-  const privateInstructions = [generation.task, generation.instructions, generation.concise ?? "", ACT_INSTRUCTIONS, HOLISTIC_ACT_INSTRUCTIONS, DETAIL_INSTRUCTIONS, REVISIT_MULTIPLE_INSTRUCTIONS, LOCAL_EXTRACTION_INSTRUCTIONS,
-    MEMO_LOCAL_EXTRACTION_INSTRUCTIONS, ...(researchV3 ? [memoExtractionPrompt(holisticV2, true)] : []), ...(holisticV2 ? [MEMO_LOCAL_EXTRACTION_INSTRUCTIONS_HOLISTIC] : []), LOCAL_CLASSIFICATION_INSTRUCTIONS, OBSERVATION_INITIAL_INSTRUCTIONS,
+  const privateInstructions = [generation.task, generationInstructions, generation.concise ?? "", ACT_INSTRUCTIONS, HOLISTIC_ACT_INSTRUCTIONS, DETAIL_INSTRUCTIONS, REVISIT_MULTIPLE_INSTRUCTIONS, LOCAL_EXTRACTION_INSTRUCTIONS,
+    MEMO_LOCAL_EXTRACTION_INSTRUCTIONS, ...(researchV3 ? [memoExtractionPrompt(holisticV2, true)] : []), ...(holisticV2 ? [MEMO_LOCAL_EXTRACTION_INSTRUCTIONS_HOLISTIC] : []),
+    ...(terminology ? [memoExtractionPrompt(holisticV2, researchV3, terminology)] : []), LOCAL_CLASSIFICATION_INSTRUCTIONS, OBSERVATION_INITIAL_INSTRUCTIONS,
     OBSERVATION_TARGETED_INSTRUCTIONS, ...(aiEnabled ? aiPromptBodies : []),
     ...(p5Enabled ? [SHARED_CONSTRUAL_INSTRUCTIONS, SHARED_CONSTRUAL_CONFIRM_INSTRUCTIONS] : [])].map(content => ({ role: "system", content }));
   function project<T>(value: T): T {
@@ -1260,7 +1264,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       const local = { ...options.localGrounding, ...(holisticV3 ? { keepUnboundApproval: true } : {}), ...(holisticV4 ? { approvalFromNamedClaim: true } : {}), extractor: createMemoLocalExtractor({ complete(messages, options) {
         if (messages.some(message => typeof message.content !== "string")) throw new JevTurnError("invalid_state");
         return client.complete(messages as Message[], options);
-      } }, { getMemo: () => structuredClone(memo), holistic: holisticV2, researchV3, ...(options.localGrounding.researchLimits === undefined ? {} : { researchLimits: options.localGrounding.researchLimits, timeoutMs: options.localGrounding.timeoutMs }) }) };
+      } }, { getMemo: () => structuredClone(memo), holistic: holisticV2, researchV3, terminology, ...(options.localGrounding.researchLimits === undefined ? {} : { researchLimits: options.localGrounding.researchLimits, timeoutMs: options.localGrounding.timeoutMs }) }) };
       const priorAct = previousAi ? { ...previous.judgment, turn: previousAi.turn, publishedFallback: previous.generationGuard.fallback,
         ...(previousExecution!.target.kind === "multiple" ? { targetCandidates: [...previousExecution!.target.figureIds] } : {}) } : undefined;
       let initialUpdate = stageMemory(state.graph, latest.seq, null, publicTurns);
@@ -1273,7 +1277,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         state.aiPublic = pre.state; initialUpdate = pre.update;
         record.aiPublic = { phase: "ai_public_claims", application: pre.application, pending: null, observationMemo: null,
           stages: { ai_extraction: emptyAiEvidence(), ai_function: emptyAiEvidence(), ai_support: emptyAiEvidence() },
-          prompts: { extraction: { version: 1, sha256: await aiHash(aiPromptBodies[0]) }, function: { version: 1, sha256: await aiHash(aiPromptBodies[1]) },
+          prompts: { extraction: { version: terminology ? 2 : 1, sha256: await aiHash(aiPromptBodies[0]) }, function: { version: 1, sha256: await aiHash(aiPromptBodies[1]) },
             support: { version: 1, sha256: await aiHash(aiPromptBodies[2]) } } };
       }
       const prepared = await prepareLocalGroundingTurn(local, { graph: state.graph,
@@ -1301,6 +1305,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       const gate = gated ? agreementGate(repairHistory, state.judgments, claims, latest.seq, state.ledger) : null;
       if (gate) record.repairGate = structuredClone(gate);
       const baseInput: JevDecisionInput & { referenceEvidence?: ReferenceEvidence } = { turn: latest.seq, publicTurns, ownSlots: [...slots], observations: memo,
+        ...(terminology ? { shapeTerminologyVersion: terminology } : {}),
         ...(repairQuality ? { judgmentMaterialVersion: JEV_REPAIR_QUALITY_VERSION } : {}),
         issueSummary: summarizeLocalIssues(graph), priorClaims: claims, repairHistory: gate ? inferenceHistory(repairHistory, gate) : repairHistory,
         previousAction: previous && previousAi ? previous.generatedPublication?.transition ?
@@ -1665,7 +1670,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
           JSON.stringify({ ...judgment, target: execution.target,
           ...(execution.detailFigureIds ? { detailFigureIds: execution.detailFigureIds } : {}) }) };
       const shared = execution.sharedClaimIds && baseInput.sharedConstruals?.find(candidate => stateSame(candidate.claimIds, execution.sharedClaimIds));
-      const messages: Message[] = [{ role: "system", content: generation.task }, { role: "system", content: generation.instructions },
+      const messages: Message[] = [{ role: "system", content: generation.task }, { role: "system", content: generationInstructions },
         ...(generation.concise ? [{ role: "system" as const, content: generation.concise }] : []),
         actionMessage,
         ...(shared ? [{ role: "system" as const, content: (execution.action === "confirm"

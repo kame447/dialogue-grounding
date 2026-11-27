@@ -8,6 +8,7 @@ import { literalSpan } from "../judgment/public-evidence.mjs";
 import { ownImageMessage } from "../judgment/instructions.mjs";
 import { validateObservationMemo, observationContextMessages } from "../observation/observe.ts";
 import type { ObservationMemo } from "../observation/contract.ts";
+import { withShapeTerminology, type ShapeTerminologyVersion } from "../shape-terminology.ts";
 
 export type LocalExtractionErrorCode = "invalid_input" | "invalid_json" | "invalid_response" | "invalid_quote" |
   "duplicate_segment" | "timeout" | "aborted" | "unavailable";
@@ -198,28 +199,30 @@ const RESEARCH_MEMO_LOCAL_EXTRACTION_INSTRUCTIONS = memoExtractionInstructions(
 const HOLISTIC_MEMO_EXTRACTION_SUFFIX = "\n" +
   "くだけた命名の提案（「〜とかどう？」「〜でいい？」など呼び名を提案する疑問形）と、先行する呼び名についての承認の質問（「さっきの〜でいい？」）は、aspectをnameにします。nameには今回の発話で提案された名称の字句を入れ、今回の発話に名称の字句がない承認の質問ではnullにします。見立てだけの部分はconstrualのままにします。";
 export const MEMO_LOCAL_EXTRACTION_INSTRUCTIONS_HOLISTIC = MEMO_LOCAL_EXTRACTION_INSTRUCTIONS + HOLISTIC_MEMO_EXTRACTION_SUFFIX;
-export function memoExtractionPrompt(holistic: boolean, researchV3: boolean): string {
+export function memoExtractionPrompt(holistic: boolean, researchV3: boolean, terminology?: ShapeTerminologyVersion): string {
   const base = researchV3 ? RESEARCH_MEMO_LOCAL_EXTRACTION_INSTRUCTIONS : MEMO_LOCAL_EXTRACTION_INSTRUCTIONS;
-  return holistic ? base + HOLISTIC_MEMO_EXTRACTION_SUFFIX : base;
+  return withShapeTerminology(holistic ? base + HOLISTIC_MEMO_EXTRACTION_SUFFIX : base, terminology);
 }
-export function buildMemoExtractionMessages(input: LocalExtractionInput, memo: ObservationMemo, holistic = false, researchV3 = false): TextMessage[] {
+export function buildMemoExtractionMessages(input: LocalExtractionInput, memo: ObservationMemo, holistic = false, researchV3 = false,
+  terminology?: ShapeTerminologyVersion): TextMessage[] {
   const { ownImage: _image, ...context } = extractionSnapshot(input);
   let observations: ObservationMemo;
   try { observations = validateObservationMemo(memo, { ownAnchors: context.ownAnchors }); }
   catch { return fail("invalid_input"); }
   const state = JSON.stringify({ ...context, observations });
   if (state.length > 192000) fail("invalid_input");
-  return [{ role: "system", content: memoExtractionPrompt(holistic, researchV3) }, ...observationContextMessages(state)];
+  return [{ role: "system", content: memoExtractionPrompt(holistic, researchV3, terminology) }, ...observationContextMessages(state)];
 }
 
 /** Opt-in memo interpretation. No image content is sent; the legacy input stays compatible. */
-export function createMemoLocalExtractor(client: Client, { getMemo, timeoutMs, researchLimits, holistic = false, researchV3 = false }: {
+export function createMemoLocalExtractor(client: Client, { getMemo, timeoutMs, researchLimits, holistic = false, researchV3 = false, terminology }: {
   getMemo: () => ObservationMemo; timeoutMs?: number; researchLimits?: ResearchLimits; holistic?: boolean; researchV3?: boolean;
+  terminology?: ShapeTerminologyVersion;
 }): DiagnosedLocalExtractor {
   if (typeof getMemo !== "function") fail("invalid_input");
   return createLocalExtractor(client, { timeoutMs, researchLimits }, input => {
     let memo: ObservationMemo;
     try { memo = getMemo(); } catch { return fail("invalid_input"); }
-    return buildMemoExtractionMessages(input, memo, holistic, researchV3);
+    return buildMemoExtractionMessages(input, memo, holistic, researchV3, terminology);
   });
 }

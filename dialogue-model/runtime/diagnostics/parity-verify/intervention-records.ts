@@ -10,6 +10,7 @@ import {nameBindsFigure} from '../../decision/referent-binding.ts';
 import {hasNameProposal,namingTurnKind,namingIntervalEstimates,inheritedTargetClaimIds,agreeCandidateAllowed,inheritsProposalName,targetNamingConflict,publiclyCheckedNamingTarget,usesPublicNamingTarget,usesDirectNamingReplies,retainsLocalQuestionAnswers,answersRepairedNamingCheck} from '../../decision/naming-request.ts';
 import {namingDenialTargets,namingReconfirmation} from '../../decision/naming-reconfirmation.ts';
 import {decodeMaterialV5} from '../../decision/judgment-material-v5.ts';
+import {isGenerationV18,SHAPE_TERMINOLOGY,withShapeTerminology} from '../../shape-terminology.ts';
 import {JEV_REPAIR_QUALITY_VERSION,PUBLICATION_CONTINUATION_QUESTION,publicationContinuationQuestion,readPublicationContinuation,
  REPAIR_QUALITY_ACTION,REPAIR_QUALITY_CANDIDATE_NARROWED,REPAIR_QUALITY_DETAIL,
  REPAIR_QUALITY_GUIDANCE,REPAIR_QUALITY_NEW_INFORMATION,REPAIR_QUALITY_PROGRESSING,REPAIR_QUALITY_PROSPECT,
@@ -1083,6 +1084,15 @@ function generatedReplayProof(tr:any,t:any,tape:any,result:any,pair:any,
    if(!answer)return'missing';
    if(provider==='luna'){
     if(req.phase!==answer.phase)return'invalid';
+    if(isGenerationV18(tape.generationRetryVersion)){
+     const promptIndex=req.phase==='generation'?1:['local_extraction','ai_extraction'].includes(req.phase)?0:-1;
+     if(promptIndex>=0){
+      const prompt=req.payload.messages?.[promptIndex];
+      if(prompt?.role!=='system'||typeof prompt.content!=='string'||!prompt.content.endsWith('\n'+SHAPE_TERMINOLOGY))return'invalid';
+      if(req.phase==='ai_extraction'&&label===tr.label&&
+         !equal(t.aiPublic?.prompts?.extraction,{version:2,sha256:s4Sha256(prompt.content)}))return'invalid';
+     }
+    }
     if(req.phase==='generation'){
      if(req.role!=='generation'||hash(req.payload.messages)!==req.completeMessagesSha256)return'invalid';
      lastRaw=answer.response?.text??answer.text;lastDraft=null;
@@ -1091,6 +1101,9 @@ function generatedReplayProof(tr:any,t:any,tape:any,result:any,pair:any,
     continue;
    }
    if(hash(req.payload)!==req.preProjectionPayloadSha256||!choiceResponse(req.payload,answer)||checkModelIdentity(req.payload.model,answer.model).status!=='accepted')return'invalid';
+   if(isGenerationV18(tape.generationRetryVersion)&&['human_referent','repair_prospect','decision'].includes(req.phase)&&
+      Object.values(req.payload.questions).some((question:any)=>typeof question.instructions!=='string'||
+        !question.instructions.endsWith('\n'+SHAPE_TERMINOLOGY)))return'invalid';
    const input=parseMaterial(req.payload.state);
    if(req.phase==='draft_naming'){
     if(req.role!=='post_generation'||typeof lastRaw!=='string'||lastDraft!==null)return'invalid';
@@ -1113,7 +1126,7 @@ function generatedReplayProof(tr:any,t:any,tape:any,result:any,pair:any,
    if(Object.hasOwn(req.payload.questions,'action')){
     if(deciding){
      recoveryActions++;
-     const continuation=publicationContinuationProof(req.payload.questions,input,recovery[0]);
+     const continuation=publicationContinuationProof(req.payload.questions,input,recovery[0],tape.generationRetryVersion);
      if(!continuation||p.continuation&&p.continuation.choice!==continuation)return'invalid';
     }else{
      if(Object.hasOwn(req.payload.questions,PUBLICATION_CONTINUATION_QUESTION))return'invalid';
@@ -1146,7 +1159,7 @@ function generatedReplayProof(tr:any,t:any,tape:any,result:any,pair:any,
   const humanTexts=history.filter((event:any)=>event.speaker==='human').map((event:any)=>event.text);
   const codes=(draft:string,action:any,name:string|null,holistic:boolean)=>draftViolationCodes(draft,{action,candidateName:name,v3:true,holistic,
     adaptive:!!tape.technicalTrial,factored:Array.isArray(t.repairFacts),ai:true,publicTexts,humanTexts,recentHumanTexts:humanTexts,
-    dialoguePolicy:'holistic_v5',generationRetryVersion:'jev_generation_retry_v17',vetoed:intervention.reasonCode==='vetoed_bypass_action'},generations.at(-1).payload.messages);
+    dialoguePolicy:'holistic_v5',generationRetryVersion:tape.generationRetryVersion,vetoed:intervention.reasonCode==='vetoed_bypass_action'},generations.at(-1).payload.messages);
   if(codes(text,ex.action,ex.name,true).some(code=>!(lastDraft&&['agree','propose_name'].includes(ex.action)&&
       ['name_not_shown','name_mismatch'].includes(code)))||move!==null&&codes(move,'move_on',null,false).length)return'invalid';
   if(lastDraft&&(!equal(lastDraft.state.selected,{action:ex.action,target:ex.target,name:ex.name})||lastDraft.state.draft!==text))return'invalid';
@@ -1697,9 +1710,11 @@ const MOVE_ON_SOURCE_CRITERIA = Object.freeze({
   unclear: '人自身が移行を求めたのか、公開文脈から一意に判断できない。',
 });
 // The normal decision validator and the v17 recovery proof bind their own stage.
-function publicationContinuationProof(questions:any,input:any,stage:any){
+function publicationContinuationProof(questions:any,input:any,stage:any,generationVersion?:unknown){
  if(input.judgmentMaterialVersion!==JEV_REPAIR_QUALITY_VERSION||!input.publicationRecoveryContext)return null;
- return equal(questions?.[PUBLICATION_CONTINUATION_QUESTION],publicationContinuationQuestion())?readPublicationContinuation(stage):null;
+ const expected=publicationContinuationQuestion();
+ return equal(questions?.[PUBLICATION_CONTINUATION_QUESTION],{...expected,instructions:withShapeTerminology(expected.instructions,generationVersion)})
+  ?readPublicationContinuation(stage):null;
 }
 function originalQuestions(body:any,input:any,layout='two_stage_v1'):boolean|null{
   if(sharedMaterial(input)===false)return false;
@@ -2796,6 +2811,19 @@ const PROMPT_VERSIONS:readonly PromptVersion[]=[
   'decision/jev-decision.ts':'17bb7fd4f7d0b0d5563ded6b2bd447b81f801fc09df53194753a67d88b1e289a',
   'local-grounding/extract-ai.ts':'e489b7ff573fdbe9e4f0adc9b6ee5f0828bd3c6835dcd8cd6555e191161594a6',
   'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
+ }},fixed:FIXED_I172,native:NATIVE_I172},
+ {id:'p5_shape_terminology_v18',i172:true,styleMode:'research_split',sources:{scheme:'complete_instruction_source_sha256',files:{
+  'v2/dialogue-v2.mjs':'72fc26551f5ec18b38525f966b1a6cfe06ce1225f1d8b8273ddcce671cdc300f',
+  'v2/jev-turn.ts':'6c0d994c9da1e37f8b4ae47fc48a1063952508cc34c4d65b9415c177057c9e3c',
+  'v2/generation-guard.ts':'4dccd8688a7e6233edfaacd2b2f67d30d19797f01f9c46fbf37d22ef58b9fe1e',
+  'judgment/instructions.mjs':'0add2f40aaaa01bfdacd1b99418b94e288eb45da6593595304f8d36d0f22de27',
+  'observation/observe.ts':'469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad',
+  'local-grounding/extract.ts':'bcd38c326e4a931c3117092cd966001ab0dd744cabfcd1424001780cbf9a8ddb',
+  'local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01',
+  'decision/jev-decision.ts':'fd327b0907241e55882305e6735e0e1589bdf94ae85e3e2d83f4132ac1b08268',
+  'local-grounding/extract-ai.ts':'54b9db682bc36bd6f6a1e5e34cf0d7068317f02964a06da826ad937c9c7f8597',
+  'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
+  'shape-terminology.ts':'80fddf9e0947ae4e8dad85f3cf5e27700a070f0897225a565967623012ac3cf9',
  }},fixed:FIXED_I172,native:NATIVE_I172},
  ...HISTORICAL_MAIN_PROMPT_SOURCES.map(({id, files}) => ({
   id, i172: false, styleMode: 'legacy' as const, sources: {scheme: 'complete_instruction_source_sha256', files: {...HISTORICAL_MAIN_SHARED_SOURCES, ...files}},
