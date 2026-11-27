@@ -51,6 +51,8 @@ type VerificationInput = {
   retainLocalQuestionAnswers?: boolean;
   /** jev_naming_v2: keep explicit non-answers to a single-figure part question as unbound acknowledgments. */
   unbindPartNonAnswers?: boolean;
+  /** jev_naming_v3: retain a delayed part answer with its own target and matching public question. */
+  retainDelayedPartAnswers?: boolean;
   /** v11: the turn after which the current naming interval starts (the last agree, defer or move_on); a name proposal before it is never carried by an approval request. */
   namingIntervalStart?: number;
   graph: LocalGraph;
@@ -94,7 +96,7 @@ function opposesPointingReply(segment: LocalSegmentProposal, question: LocalClai
 const overlap = (a: readonly string[], b: readonly string[]) => a.some(slot => b.includes(slot));
 
 /** Only the CURRENT public human turn may supply a new segment's quote. */
-export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts, keepUnboundApproval = false, approvalFromNamedClaim = false, referenceQuestionBindings, directReferenceReplies = false, refinedReplyRules = false, answerFieldRules = false, bindDirectQuestionReplies = false, retainLocalQuestionAnswers = false, unbindPartNonAnswers = false, namingIntervalStart = 0 }: VerificationInput): LocalVerifiedUpdate {
+export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts, keepUnboundApproval = false, approvalFromNamedClaim = false, referenceQuestionBindings, directReferenceReplies = false, refinedReplyRules = false, answerFieldRules = false, bindDirectQuestionReplies = false, retainLocalQuestionAnswers = false, unbindPartNonAnswers = false, retainDelayedPartAnswers = false, namingIntervalStart = 0 }: VerificationInput): LocalVerifiedUpdate {
   const result: LocalVerifiedUpdate = { operations: [], rejected: [] };
   // Revalidate JSON-restored graphs before using any model-selected pointer.
   snapshotReferenceGraph(graph);
@@ -204,7 +206,19 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     const labelledAnswer = agreesWithCheckedFigure && labelled;
     // v9: a supplied target is the question's only for a reply that passed the direct check. Any other reply that adds information
     // (agree was rejected above; assert and construe here) is judged against the question as extracted, which named no figure.
-    if (prior && prior.source === AI_BOUND_SOURCE && !agreesWithCheckedFigure && ["agree", "assert", "construe"].includes(act)) prior = { ...prior, targets: [] };
+    if (prior?.source === AI_BOUND_SOURCE && !agreesWithCheckedFigure && ["agree", "assert", "construe"].includes(act)) {
+      const question = prior;
+      // The classifier links an affirmative act to its question. The separate answersChecked
+      // label concerns the immediately preceding AI reply, so it can be unknown for a delayed answer.
+      const retained = retainDelayedPartAnswers && act === "agree" && aspect === "part" && name === null &&
+        verdict.answersChecked !== undefined && verdict.answersChecked !== "no" && question.speaker === "ai" &&
+        question.act === "ask" && question.aspect === "part" && question.targets.length === 1 &&
+        segment.targets.length === 1 && segment.targets[0] === question.targets[0] &&
+        segment.respondsToTurn === question.sourceTurn && previous !== undefined && previous.turn > question.sourceTurn &&
+        publicTurns.some(event => event.speaker === "ai" && event.turn === question.sourceTurn &&
+          !(event as PublicTurn & { nonReferential?: boolean }).nonReferential && literalSpan(event.text, question.quote));
+      if (!retained) prior = { ...prior, targets: [] };
+    }
     if (directReferenceReplies && prior && name === null && figureReplyAspects.has(aspect) &&
         figureReplyAspects.has(prior.aspect) && prior.targets.length === 1 &&
         (targets.length === 0 || targets.length === 1 && targets[0] === prior.targets[0])) {
