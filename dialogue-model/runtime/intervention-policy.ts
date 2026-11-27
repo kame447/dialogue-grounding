@@ -8,7 +8,7 @@ export type ResolvedInterventionPolicy=Readonly<{profileId:'research_trial_profi
 type Code='intervention_profile_invalid'|'intervention_contract_missing'|'intervention_contract_invalid'|'intervention_contract_unknown'|'intervention_table_mismatch';
 export class InterventionIntegrationError extends Error {readonly code:Code;constructor(code:Code){super(code);this.name='InterventionIntegrationError';this.code=code;}}
 const fail=(code:Code):never=>{throw new InterventionIntegrationError(code);};
-const keys=['id','referenceMemory','decisionMode','humanReferent','localGrounding','initialObservation','questionLayout','utteranceStyle','maxReobservations','modelPolicy','timeouts','lunaRequest','outputLimit','modelContract','dialoguePolicy','interventionPolicy'];
+const keys=['id','referenceMemory','decisionMode','humanReferent','localGrounding','initialObservation','questionLayout','utteranceStyle','maxReobservations','modelPolicy','timeouts','lunaRequest','outputLimit','modelContract','dialoguePolicy','interventionPolicy','judgmentMaterialVersion'];
 export function resolveInterventionPolicy(profile:unknown):ResolvedInterventionPolicy {
  let d!:PropertyDescriptorMap,id!:ResolvedInterventionPolicy['profileId'];
  try{

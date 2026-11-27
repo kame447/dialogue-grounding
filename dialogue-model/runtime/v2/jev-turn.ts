@@ -32,6 +32,7 @@ import type { JevAction, JevDecision, JevDecisionClient, JevDecisionInput, JevOb
 import type { JevNamingGrounding } from "../decision/contract.ts";
 import { buildJevNamingMaterial, readJevNamingGrounding } from "../decision/jev-naming.ts";
 import { deriveRepairFacts, validateRepairFacts } from "../decision/repair-facts.ts";
+import { JEV_REPAIR_QUALITY_VERSION, normalRepairQualityGuidance, repairQualityPublicQuestions, type JudgmentMaterialVersion } from "../decision/repair-quality.ts";
 import { validateJevDecision, validateHumanReferentEstimate, validateRepairProspectEstimate, validateRepairProspectMaterial, unknownRepairProspect, JevDecisionError, JEV_DECISION_INPUT_LIMITS, JEV_DECISION_REJECTION_CODES,
   projectDecisionFailureEvidence, checkDecisionFailureEvidence, v3AlwaysOffered, TWO_STAGE_V2_CANDIDATE_SETS, candidateSetLabel, V3_TARGET_LABEL_SET, participantJevTargetOffered, retainedParticipantJevMenuValid, draftSharedClaimVerdict, draftSingleIdentificationSupported } from "../decision/jev-decision.ts";
 import type { JevDecisionFailureEvidence } from "../decision/jev-decision.ts";
@@ -40,7 +41,7 @@ import type { LocalGroundingResearchRecord, LocalGroundingTrace } from "./local-
 import { findNamingActHints, hasOrientationWords, draftViolationCodes, deriveGenerationOutcome, orientationSafeFallback, rewriteReasons, isGenerationV5, isGenerationV6, isGenerationV7, isGenerationV8, isGenerationV9, isGenerationV10, isGenerationV11, isGenerationV12, isGenerationV13, isGenerationV14, v11RecentHumanTexts, hasVersionedViewpoint, defaultGenerationRetryVersion, validGenerationRetryVersion, validAgreeNameScope, allowsOrientationFallback } from "./generation-guard.ts";
 import { isGenerationV15, currentTurnNamingSource, semanticNamingCodes, namingCodesWithoutQuestion, contentPublicationRecovery, namingPublicationHold,
   type NamingHoldReason, type PublicationRecovery } from "./generation-guard.ts";
-import { isGenerationV16, confirmationDraftText } from "./generation-guard.ts";
+import { isGenerationV16, isGenerationV17, confirmationDraftText } from "./generation-guard.ts";
 import { SEMANTIC_DRAFT_ACTS } from "../decision/contract.ts";
 import { createMemoAiExtractor, MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS, AiPublicError, aiHash, emptyAiEvidence } from "../local-grounding/extract-ai.ts";
 import { createJevAiFunctionClassifier, createJevAiSupportChecker, AI_FUNCTION_INSTRUCTIONS, AI_SUPPORT_INSTRUCTIONS,
@@ -221,6 +222,7 @@ export type JevTurnOptions = {
   rotationMode?: "relative_pm90" | "relative_0";
   /** Offline replay can request the original retry wire text for a historical tape. */
   generationRetryVersion?: GenerationRetryVersion;
+  judgmentMaterialVersion?: JudgmentMaterialVersion;
   /** Creation pin only. A resumed trial uses the scope in its saved state. */
   newTrialAgreeNameScopeVersion?: "scoped_v7" | "scoped_v8" | "scoped_v9" | "scoped_v10" | "scoped_v11" | "jev_naming_v1";
   client: ChatClient; ownImage: LocalOwnImage; ownAnchors: readonly LocalOwnAnchor[];
@@ -453,7 +455,7 @@ const hasAgreeNameV3 = (names: readonly PublicNameCandidate[], name: string | nu
 /** Decision 0002: new figure information or strict candidate narrowing only.
  * Difficulty, backchannels, repeated content and record pruning add no progress. */
 export function updateRepairHistory(history: readonly RepairHistoryEntry[], before: readonly LocalClaimView[],
-  after: readonly LocalClaimView[], turn: number, context?: { answeredRepairTurn: number;
+  after: readonly LocalClaimView[], turn: number, context?: { answeredRepairTurn: number; linkedEvidenceOnly?: true;
     aiPublic?: { humanOk: boolean; rejected: Array<{ segmentId: string; reason: string }>; aiComplete: boolean } }): RepairHistoryEntry[] {
   const result = structuredClone(history) as RepairHistoryEntry[];
   const pending = context?.aiPublic ? result.find(entry => entry.turn === context.answeredRepairTurn && entry.turn < turn && entry.progress === "unknown")
@@ -462,21 +464,30 @@ export function updateRepairHistory(history: readonly RepairHistoryEntry[], befo
   const roots = after.filter(c => c.speaker === "ai" && c.sourceTurn > pending.turn && c.sourceTurn < turn &&
     c.targets.some(id => pending.candidatesBefore.includes(id)));
   const answered = context?.answeredRepairTurn === pending.turn;
+  const linked = (c: LocalClaimView) => c.issueId === pending.issueId || roots.some(root => c.respondsTo === root.id);
   const replies = after.filter(c => c.speaker === "human" && c.sourceTurn === turn &&
-    (c.issueId === pending.issueId || roots.some(root => c.respondsTo === root.id) || answered &&
+    (linked(c) || answered && !context?.linkedEvidenceOnly &&
       (!c.targets.length || c.targets.some(id => pending.candidatesBefore.includes(id)))));
   if (!replies.length && !answered) return result;
-  const information = replies.filter(figureInformation);
-  const previousContent = before.filter(c => c.speaker === "human" && figureInformation(c));
+  const isVerifiedAnswer = (c: LocalClaimView) =>
+    (c.source === LABELLED_ANSWER_SOURCE || c.source === LOCAL_QUESTION_ANSWER_SOURCE) &&
+    c.respondsTo !== null && (c.act === "agree" || c.act === "deny");
+  const isInformation = (c: LocalClaimView) => figureInformation(c) || context?.linkedEvidenceOnly === true && isVerifiedAnswer(c);
+  const information = replies.filter(isInformation);
+  const previousContent = before.filter(c => c.speaker === "human" && isInformation(c));
   const novel = information.filter(c => {
     if (!c.targets.length) return false;
-    const duplicate = previousContent.some(prior => contentKey(prior) === contentKey(c) && prior.targets.some(id => c.targets.includes(id)));
+    const duplicate = previousContent.some(prior => contentKey(prior) === contentKey(c) && prior.targets.some(id => c.targets.includes(id)) &&
+      (!context?.linkedEvidenceOnly || prior.issueId === c.issueId && (!isVerifiedAnswer(c) || prior.respondsTo === c.respondsTo)));
     previousContent.push(c);
     return !duplicate;
   });
   pending.issueId ??= replies[0]?.issueId ?? roots.at(-1)?.issueId ?? null;
   pending.partnerClaims = replies.map(({ id, act, proposition, targets }) => ({ id, act, proposition, targets: [...targets] }));
-  pending.candidatesAfter = information.length ? [...new Set(information.flatMap(c => c.targets))] : [...pending.candidatesBefore];
+  // A linked objection or supporting detail can inform repair without determining the referent.
+  const referentEvidence = context?.linkedEvidenceOnly
+    ? information.filter(c => c.aspect === "referent" && (c.act === "assert" || c.act === "agree")) : information;
+  pending.candidatesAfter = referentEvidence.length ? [...new Set(referentEvidence.flatMap(c => c.targets))] : [...pending.candidatesBefore];
   pending.addedClaimIds = novel.map(c => c.id);
   pending.removedClaimIds = before.filter(c => c.issueId === pending.issueId && !after.some(next => next.id === c.id)).map(c => c.id);
   const narrowed = pending.candidatesAfter.length > 0 && pending.candidatesAfter.length < pending.candidatesBefore.length &&
@@ -978,6 +989,11 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   if (!validGenerationRetryVersion(generationRetryVersion, questionLayout, options.dialoguePolicy)) {
     throw new Error("Invalid Jev generation retry version");
   }
+  const repairQuality = options.judgmentMaterialVersion === JEV_REPAIR_QUALITY_VERSION;
+  if (options.judgmentMaterialVersion !== undefined && (!repairQuality || questionLayout !== "two_stage_v3" ||
+      options.dialoguePolicy !== "holistic_v5" || !hasVersionedViewpoint(generationRetryVersion))) {
+    throw new Error("Invalid Jev judgment material version");
+  }
   const newTrialScope = options.newTrialAgreeNameScopeVersion;
   if (newTrialScope !== undefined && (newTrialScope !== "scoped_v7" && newTrialScope !== "scoped_v8" && !usesDirectNamingReplies(newTrialScope) || questionLayout !== "two_stage_v3" ||
       !validAgreeNameScope(newTrialScope, generationRetryVersion))) {
@@ -1134,6 +1150,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         state.repairHistory.some(r => r.turn === previous.turnIndex && r.action === "confirm" && r.question === previousAi.text);
       let repairHistory = updateRepairHistory(state.repairHistory, beforeClaims, claims, latest.seq,
         previous && previousAi && ["repair", "confirm", "revisit"].includes(previous.judgment.action) ? { answeredRepairTurn: previous.turnIndex,
+          ...(repairQuality ? { linkedEvidenceOnly: true as const } : {}),
           ...(aiEnabled ? { aiPublic: { humanOk: prepared.trace.status === "ok", rejected: prepared.trace.rejected,
             aiComplete: !!answersNamingRecovery || state.aiPublic!.log.some(log => log.aiSeq === previousAi.turn && log.status === "applied") } } : {}) }
           : aiEnabled ? { answeredRepairTurn: -1, aiPublic: { humanOk: prepared.trace.status === "ok", rejected: prepared.trace.rejected, aiComplete: false } } : undefined);
@@ -1141,6 +1158,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       const gate = gated ? agreementGate(repairHistory, state.judgments, claims, latest.seq, state.ledger) : null;
       if (gate) record.repairGate = structuredClone(gate);
       const baseInput: JevDecisionInput & { referenceEvidence?: ReferenceEvidence } = { turn: latest.seq, publicTurns, ownSlots: [...slots], observations: memo,
+        ...(repairQuality ? { judgmentMaterialVersion: JEV_REPAIR_QUALITY_VERSION } : {}),
         issueSummary: summarizeLocalIssues(graph), priorClaims: claims, repairHistory: gate ? inferenceHistory(repairHistory, gate) : repairHistory,
         previousAction: previous && previousAi ? { turn: previousAi.turn, action: previousExecution!.action, target: previousExecution!.target,
           name: previousExecution!.name, feature: previousExecution!.feature } : null,
@@ -1396,6 +1414,9 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         figureId, status: state.ledger[figureId].status, name: state.ledger[figureId].name,
       })) : null;
       const structuredConfirmation = isGenerationV16(generationRetryVersion) && judgment.action === "confirm";
+      const ordinaryQualityGuidance = repairQuality && isGenerationV17(generationRetryVersion)
+        ? normalRepairQualityGuidance(judgment.action) + "\n" +
+          JSON.stringify({ publicQuestions: repairQualityPublicQuestions(latest.seq, publicTurns, claims) }) + "\n" : "";
       const readDraft = (text: string) => structuredConfirmation ? confirmationDraftText(text, execution.feature) : text;
       const actionMessage: Message = { role: "system",
         content: actInstructions + "\n" + generation.actionScope[judgment.action] + "\n" +
@@ -1406,6 +1427,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
           (namingConflict ? NAMING_CONFLICT_V5 + "\n" + JSON.stringify(namingConflict) + "\n" : "") +
           featureViewpoint +
           (structuredConfirmation ? DISCRIMINATING_CONFIRM_V16 + "\n" + CONFIRMATION_DRAFT_V16 + "\n" : "") +
+          ordinaryQualityGuidance +
           JSON.stringify({ ...judgment, target: execution.target,
           ...(execution.detailFigureIds ? { detailFigureIds: execution.detailFigureIds } : {}) }) };
       const shared = execution.sharedClaimIds && baseInput.sharedConstruals?.find(candidate => stateSame(candidate.claimIds, execution.sharedClaimIds));

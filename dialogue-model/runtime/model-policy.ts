@@ -1,5 +1,6 @@
 import { MODEL_CONTRACT_V2, MODEL_CONTRACT_V2_TABLE_SHA256 } from './model-identity-contract.ts';
 import { validateResearchTimeouts } from './v2/research-timeouts.ts';
+import { JEV_REPAIR_QUALITY_VERSION } from './decision/repair-quality.ts';
 
 export type ModelContractReference = Readonly<{version: 'model-contract-v2'; tableSha256: string}>;
 export type ResolvedModelPolicy = Readonly<{
@@ -40,9 +41,12 @@ export function resolveModelPolicy(profile: unknown): ResolvedModelPolicy {
     if (d.id.value !== 'research_trial_profile_v2' && d.id.value !== 'research_trial_profile_v3') throw Error();
     const integrated = d.id.value === 'research_trial_profile_v3';
     const keys = Reflect.ownKeys(d);
-    if (keys.some(k => typeof k !== 'string' || !rootKeys.includes(k) && !(integrated && (k === 'interventionPolicy' || k === 'dialoguePolicy'))) ||
+    if (keys.some(k => typeof k !== 'string' || !rootKeys.includes(k) && !(integrated && (k === 'interventionPolicy' || k === 'dialoguePolicy' || k === 'judgmentMaterialVersion'))) ||
         rootKeys.filter(k => k !== 'modelContract').some(k => !d[k] || !Object.hasOwn(d[k], 'value'))) throw Error();
     const v = Object.fromEntries(rootKeys.filter(k => k !== 'modelContract').map(k => [k, d[k].value]));
+    const judgment = d.judgmentMaterialVersion;
+    if (judgment && (!judgment.enumerable || !Object.hasOwn(judgment, 'value') || judgment.value !== JEV_REPAIR_QUALITY_VERSION ||
+        v.questionLayout !== 'two_stage_v3' || d.dialoguePolicy?.value !== 'holistic_v5')) throw Error();
     if (integrated) {
       const data = (x: unknown, seen = new Set<object>()): void => {
         if (x === null || typeof x === 'string' || typeof x === 'boolean' || typeof x === 'number' && Number.isFinite(x)) return;

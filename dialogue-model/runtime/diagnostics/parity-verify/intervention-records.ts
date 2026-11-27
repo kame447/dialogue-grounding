@@ -10,10 +10,15 @@ import {nameBindsFigure} from '../../decision/referent-binding.ts';
 import {hasNameProposal,namingTurnKind,namingIntervalEstimates,inheritedTargetClaimIds,agreeCandidateAllowed,inheritsProposalName,targetNamingConflict,publiclyCheckedNamingTarget,usesPublicNamingTarget,usesDirectNamingReplies,retainsLocalQuestionAnswers,answersRepairedNamingCheck} from '../../decision/naming-request.ts';
 import {namingDenialTargets,namingReconfirmation} from '../../decision/naming-reconfirmation.ts';
 import {decodeMaterialV5} from '../../decision/judgment-material-v5.ts';
+import {JEV_REPAIR_QUALITY_VERSION,PUBLICATION_CONTINUATION_QUESTION,publicationContinuationQuestion,readPublicationContinuation,
+ REPAIR_QUALITY_ACTION,REPAIR_QUALITY_CANDIDATE_NARROWED,REPAIR_QUALITY_DETAIL,
+ REPAIR_QUALITY_GUIDANCE,REPAIR_QUALITY_NEW_INFORMATION,REPAIR_QUALITY_PROGRESSING,REPAIR_QUALITY_PROSPECT,
+ normalRepairQualityGuidance,repairQualityEvidence,repairQualityPublicQuestions} from '../../decision/repair-quality.ts';
+import {namingWithdrawalQuestion} from '../../decision/jev-naming.ts';
 import {isHolisticPolicy,isHolisticV2Plus,isHolisticV3Plus,isHolisticV4Plus} from '../../decision/contract.ts';
 import {generationGuardCodes,draftViolationCodes,deriveGenerationOutcome,orientationSafeFallback,findOrientationLeaks,v11RecentHumanTexts,hasOrientationWords,hasVersionedViewpoint,isGenerationV5,isGenerationV6,isGenerationV7,isGenerationV8,isGenerationV9,isGenerationV11,isGenerationV12,isGenerationV13,isGenerationV14,validGenerationRetryVersion,validAgreeNameScope,allowsOrientationFallback} from '../../v2/generation-guard.ts';
-import {isGenerationV15,isGenerationV16,confirmationDraftText,currentTurnNamingSource,namingCodesWithoutQuestion,contentPublicationRecovery} from '../../v2/generation-guard.ts';
-import type {SharedConstrual} from '../../decision/contract.ts';
+import {isGenerationV15,isGenerationV16,isGenerationV17,confirmationDraftText,currentTurnNamingSource,namingCodesWithoutQuestion,contentPublicationRecovery} from '../../v2/generation-guard.ts';
+import type {JevAction,SharedConstrual} from '../../decision/contract.ts';
 import type {RecordedGenerationRetryVersion} from '../../v2/generation-guard.ts';
 import {checkModelIdentity} from '../../model-identity-contract.ts';
 import {resolveModelPolicy} from '../../model-policy.ts';
@@ -261,9 +266,11 @@ function fullProfile(p:any):string|null{
   if(!p||Object.getPrototypeOf(p)!==Object.prototype)return'intervention_profile_invalid';
   const ds=Object.getOwnPropertyDescriptors(p),id=ds.id;
   if(!id?.enumerable||!Object.hasOwn(id,'value')||typeof id.value!=='string'||!profiles.includes(id.value))return'intervention_profile_invalid';
-  const v3=id.value==='research_trial_profile_v3',allowed=['id','referenceMemory','decisionMode','humanReferent','localGrounding','initialObservation','questionLayout','utteranceStyle','maxReobservations','modelPolicy','timeouts','lunaRequest','outputLimit','modelContract','interventionPolicy','dialoguePolicy'];
+  const v3=id.value==='research_trial_profile_v3',allowed=['id','referenceMemory','decisionMode','humanReferent','localGrounding','initialObservation','questionLayout','utteranceStyle','maxReobservations','modelPolicy','timeouts','lunaRequest','outputLimit','modelContract','interventionPolicy','dialoguePolicy','judgmentMaterialVersion'];
   // dialoguePolicy (holistic_v1) exists only on a two_stage_v3 profile; its absence is the older text.
   if(v3&&Object.hasOwn(p,'dialoguePolicy')&&(!isHolisticPolicy(p.dialoguePolicy)||p.questionLayout!=='two_stage_v3'))return'intervention_profile_invalid';
+  if(Object.hasOwn(p,'judgmentMaterialVersion')&&(!v3||p.judgmentMaterialVersion!==JEV_REPAIR_QUALITY_VERSION||
+     p.questionLayout!=='two_stage_v3'||p.dialoguePolicy!=='holistic_v5'))return'intervention_profile_invalid';
   if(v3&&Reflect.ownKeys(p).some(k=>typeof k!=='string'||!allowed.includes(k))||!v3&&Object.hasOwn(p,'interventionPolicy'))return'intervention_profile_invalid';
   resolveModelPolicy(p);if(!v3)return null;
   const d=ds.interventionPolicy;if(!d)return'intervention_contract_missing';
@@ -1162,6 +1169,11 @@ const idsOf=(target:any):string[]=>target?.kind==='single'?[target.figureId]:tar
      }
      if(['human_referent','repair_issue','action','target','shared_construal'].some(key=>Object.hasOwn(p.questions,key))||
         Object.hasOwn(st,'selected')){
+      if(st.judgmentMaterialVersion!==tr.profile?.judgmentMaterialVersion)return'invalid';
+      if(st.judgmentMaterialVersion===JEV_REPAIR_QUALITY_VERSION){
+       if(st.view!=='judgment_v5'||!equal(st.repairQuality,repairQualityEvidence(st.turn,st.publicTurns,st.priorClaims,st.repairHistory)))return'invalid';
+       if(p.questions.human_referent&&!p.questions.human_referent.instructions?.endsWith('\n'+REPAIR_QUALITY_GUIDANCE))return'invalid';
+      }else if(Object.hasOwn(st,'repairQuality')||Object.hasOwn(st,'publicationRecoveryContext'))return'invalid';
       if(naming?(!Array.isArray(m.own?.ownAnchors)||!equal(st.ownSlots,m.own.ownAnchors.map((a:any)=>a.id))||
         !namingInputMatches(st,naming,namingTurns,namingClaims)||
         !namingRecoveryHistoryMatches(st,tape.state.judgments,namingPublicWindow)):Object.hasOwn(st,'namingEvidence'))return'invalid';
@@ -1407,7 +1419,7 @@ const ledgerName=(name:string)=>name.normalize('NFKC').trim().replace(/\s/gu,'')
 function catalog(input:any,target:any,kind:'name'|'feature'):{value:string;figureIds:string[]}[]{
  const ids=target.kind==='single'?[target.figureId]:target.kind==='multiple'?target.figureIds:[],out:{value:string;figureIds:string[]}[]=[];
  for(const id of ids){const o=input.observations.find((o:any)=>o.figureId===id);if(!o)continue;
-  const values:string[]=kind==='name'?[...(H2()?[]:o.holistic.map((h:any)=>h.construal).filter((v:any)=>typeof v==='string'&&v.length<=80)),...input.publicNames.filter((n:any)=>n.figureId===null||n.figureId===id).map((n:any)=>n.name)]:[...o.analytic.shapes,o.analytic.composition,...o.analytic.relations,...o.reobservations.flatMap((r:any)=>r.supports)].filter((v:any)=>typeof v==='string'&&v.trim()&&v.length<=400);
+  const values:string[]=kind==='name'?[...(H2()&&input.judgmentMaterialVersion!==JEV_REPAIR_QUALITY_VERSION?[]:o.holistic.map((h:any)=>h.construal).filter((v:any)=>typeof v==='string'&&v.length<=80)),...input.publicNames.filter((n:any)=>n.figureId===null||n.figureId===id).map((n:any)=>n.name)]:[...o.analytic.shapes,o.analytic.composition,...o.analytic.relations,...o.reobservations.flatMap((r:any)=>r.supports)].filter((v:any)=>typeof v==='string'&&v.trim()&&v.length<=400);
   const ledger=kind==='name'&&CTX.v3&&!CTX.legacyV3?CTX.ledger:undefined;
   const partner=kind==='name'&&CTX.v3&&(CTX.style==='loop'||CTX.style==='holistic')?(Array.isArray(input.priorClaims)?input.priorClaims:[]).filter((c:any)=>c?.speaker==='human'&&c.act==='name_propose'&&typeof c.name==='string'&&c.name!==''&&c.turn<=input.turn&&c.sourceTurn<=input.turn&&Array.isArray(c.targets)):[];
   const entry=ledger?.[id];if(entry?.status==='agreed')continue;
@@ -1486,7 +1498,8 @@ const ROTATION_V5='課題の条件として、相手の盤面は自分の盤面�
 const parseMaterial=(text:string):any=>{const x=JSON.parse(text);return x?.view==='judgment_v5'?decodeMaterialV5(x):x;};
 const usesPositionPrompt=(v:PromptVersion):boolean=>v.i172&&!(v.styleMode==='research_split'&&CTX.v3);
 const activeNative=():PromptVersion['native']=>CTX.prompt?(usesPositionPrompt(CTX.prompt)?CTX.prompt.native:NATIVE):CTX.v3?NATIVE:NATIVE_I172;
-const nativeInstructions=(s:any,layout='two_stage_v1',prospect=false)=>{const nat=activeNative();return(layout==='two_stage_v3'?nat.common.replace(NATIVE_V2.v1Stages,NATIVE_V3.stages):layout==='two_stage_v2'?nat.common.replace(NATIVE_V2.v1Stages,NATIVE_V2.stages):nat.common)+(Object.hasOwn(s,'humanReferent')?'\n'+nat.referent:'')+(prospect&&Object.hasOwn(s,'repairProspect')?'\n'+ADAPT.prospect:'')+(CTX.facts?'\n'+ADAPT.facts:'')+(s?.view==='judgment_v5'?'\n'+LEGEND_V5+(s.notationV11===true?'\n'+LEGEND_V11:'')+(s.rotationMode==='relative_pm90'?'\n'+ROTATION_V5:''):'')+(CTX.jevNaming?'\n'+NAMING_GUIDANCE:'');};
+const nativeInstructions=(s:any,layout='two_stage_v1',prospect=false)=>{const nat=activeNative();return(layout==='two_stage_v3'?nat.common.replace(NATIVE_V2.v1Stages,NATIVE_V3.stages):layout==='two_stage_v2'?nat.common.replace(NATIVE_V2.v1Stages,NATIVE_V2.stages):nat.common)+(Object.hasOwn(s,'humanReferent')?'\n'+nat.referent:'')+(prospect&&Object.hasOwn(s,'repairProspect')?'\n'+ADAPT.prospect:'')+(CTX.facts?'\n'+ADAPT.facts:'')+(s?.view==='judgment_v5'?'\n'+LEGEND_V5+(s.notationV11===true?'\n'+LEGEND_V11:'')+(s.rotationMode==='relative_pm90'?'\n'+ROTATION_V5:''):'')+(CTX.jevNaming?'\n'+NAMING_GUIDANCE:'')+
+ (s?.judgmentMaterialVersion===JEV_REPAIR_QUALITY_VERSION?'\n'+REPAIR_QUALITY_GUIDANCE:'');};
 const HUMAN_MOVE_ON_ACTION_NOTE = '\n今回の人間が話題の移行を明示的に主導したときは、命名や同定の解決を前提とせずmove_onで受け止めてください。';
 const MOVE_ON_SOURCE_INSTRUCTIONS = '今回の人間の公開発話と直前までの公開文脈から、話題の移行を誰が主導したか判定してください。図形の同定や名称の合意は問っていません。';
 const MOVE_ON_SOURCE_CRITERIA = Object.freeze({
@@ -1494,6 +1507,11 @@ const MOVE_ON_SOURCE_CRITERIA = Object.freeze({
   other: '人からの明示の移行希望はない。単なる相槌、別の対象への言及、引用、AIからの移行の誘いへの同意もここに含む。',
   unclear: '人自身が移行を求めたのか、公開文脈から一意に判断できない。',
 });
+// The normal decision validator and the v17 recovery proof bind their own stage.
+function publicationContinuationProof(questions:any,input:any,stage:any){
+ if(input.judgmentMaterialVersion!==JEV_REPAIR_QUALITY_VERSION||!input.publicationRecoveryContext)return null;
+ return equal(questions?.[PUBLICATION_CONTINUATION_QUESTION],publicationContinuationQuestion())?readPublicationContinuation(stage):null;
+}
 function originalQuestions(body:any,input:any,layout='two_stage_v1'):boolean|null{
   if(sharedMaterial(input)===false)return false;
   if(body.model!=='typesafe/jev-1.14'||!Array.isArray(input.ownSlots)||input.ownSlots.length!==6||!Array.isArray(input.observations)||!Array.isArray(input.publicNames)||Object.hasOwn(input,'nameLedger'))return false;
@@ -1505,7 +1523,9 @@ function originalQuestions(body:any,input:any,layout='two_stage_v1'):boolean|nul
   if(CTX.v3&&!CTX.known)return null;
   const q:any={},add=(k:string,instructions:string,criteria:any)=>q[k]={type:'choice',instructions:nativeInstructions(input,layout,true)+'\n'+instructions,criteria};
   const agreeOffered=CTX.agree===undefined||CTX.agree.some((n:any)=>n.figureId===null||input.ownSlots.includes(n.figureId));
-  const text='次の行動を一つ選んでください。request_observationは公開発話を生成する前の追加観察要求です。';
+  const quality=input.judgmentMaterialVersion===JEV_REPAIR_QUALITY_VERSION;
+  const text='次の行動を一つ選んでください。request_observationは公開発話を生成する前の追加観察要求です。'+
+   (quality&&CTX.humanLedMoveOn?'人が命名と移行を同時に求めたときは、この問いで命名の扱いを選び、移行の出所は別の問いに残してください。':'');
   if(layout==='two_stage_v3'){
    // Only actions with at least one legal target and detail in this very material; the target is asked afterwards (targetQuestion).
    const targets=v3Targets(input);
@@ -1513,8 +1533,10 @@ function originalQuestions(body:any,input:any,layout='two_stage_v1'):boolean|nul
    const noAccept=s4NoAccept(input);
    const make=(actions:any)=>{add('action',text,Object.fromEntries(ACTIONS.filter(a=>!(noAccept&&a==='accept')&&targets.some(o=>legal(a,o.target,input))).map(a=>
     [a,(CTX.legacyV3&&a==='request_observation'?NATIVE.actions.request_observation:actions[a])+
-       (CTX.humanLedMoveOn&&a==='move_on'?HUMAN_MOVE_ON_ACTION_NOTE:'')+sharedActionNote(a)])));
+       (CTX.humanLedMoveOn&&a==='move_on'?HUMAN_MOVE_ON_ACTION_NOTE:'')+sharedActionNote(a)+
+       (quality&&REPAIR_QUALITY_ACTION[a as JevAction]?'\n'+REPAIR_QUALITY_ACTION[a as JevAction]:'')])));
     if(CTX.humanLedMoveOn)add(MOVE_ON_SOURCE_QUESTION,MOVE_ON_SOURCE_INSTRUCTIONS,MOVE_ON_SOURCE_CRITERIA);
+    if(quality&&input.publicationRecoveryContext)q[PUBLICATION_CONTINUATION_QUESTION]=publicationContinuationQuestion();
     return q;};
    // One saved attempt is wholly one text version; the loop version also drops the partner's own proposed names from the propose_name catalog.
    const was=CTX.style;
@@ -1676,12 +1698,14 @@ function detailProof(body:any,response:any,selection:any,original:any,evidence:a
  if(selection.action==='accept')return !!sharedQuestion&&detailResponseProof(body,response,evidence,input,{shared_construal:sharedQuestion})&&
   sharedAnswer(selection,response.answers.shared_construal.choice,offered)&&selection.name===null&&selection.feature===null&&equal(selection.detailFigureIds??[],[]);
  if(!sharedQuestion&&Object.hasOwn(selection,'sharedClaimIds'))return false;
- const confirmation=discriminatingConfirmation&&selection.action==='confirm'?'\n'+DISCRIMINATING_CONFIRM_DETAIL_S4:'';
  const kind=['propose_name','agree'].includes(selection.action)?'name':'feature';
+ const quality=input.judgmentMaterialVersion===JEV_REPAIR_QUALITY_VERSION;
+ const confirmation=quality&&kind==='feature'?'\n'+REPAIR_QUALITY_DETAIL:
+  discriminatingConfirmation&&selection.action==='confirm'?'\n'+DISCRIMINATING_CONFIRM_DETAIL_S4:'';
  const rawCs=selection.action==='agree'&&CTX.agree!==undefined?agreeCatalog(input,selection.target):catalog(input,selection.target,kind);
- let cs=layout==='two_stage_v3'&&(selection.action==='confirm'||!CTX.legacyV3&&selection.action==='repair')
+ let cs=!quality&&layout==='two_stage_v3'&&(selection.action==='confirm'||!CTX.legacyV3&&selection.action==='repair')
   ?unaskedConfirmFeatures(input,selection.target,rawCs):rawCs;
- if(discriminatingConfirmation&&selection.action==='confirm'){
+ if(!quality&&discriminatingConfirmation&&selection.action==='confirm'){
   const comparisonIds=selection.target.kind==='multiple'?selection.target.figureIds:input.ownSlots;
   const common=new Set(catalog(input,{kind:'multiple',figureIds:comparisonIds},'feature')
    .filter(candidate=>candidate.figureIds.length===comparisonIds.length).map(candidate=>candidate.value));
@@ -1689,7 +1713,12 @@ function detailProof(body:any,response:any,selection:any,original:any,evidence:a
  }
  const criteria=Object.fromEntries(cs.map((c,i)=>[kind+'_'+i,JSON.stringify(c)]));
  const questions={[kind]:{type:'choice',instructions:nativeInstructions(input,layout)+`\n第1段の${selection.action}に必要な${kind==='name'?'名称':'確認特徴'}だけを選んでください。出典図形は特徴の出所であり、対象候補を単一に確定するものではありません。`+confirmation,criteria}};
+ const recovery=input.publicationRecoveryContext;
+ const withdrawal=quality&&selection.action==='repair'&&recovery&&recovery.reason!=='publication_mismatch'&&
+  selection.target.kind==='single'&&recovery.previous?.target?.kind==='single'&&selection.target.figureId===recovery.previous.target.figureId
+  ?namingWithdrawalQuestion(CTX.ledger as Parameters<typeof namingWithdrawalQuestion>[0],selection.target,input.turn):null;
  const expected={...questions,...(sharedQuestion?{shared_construal:sharedQuestion}:{}),
+  ...(withdrawal?{naming_withdrawal:withdrawal}:{}),
   ...(CTX.jevNaming&&selection.action==='agree'?namingQuestions(nativeInstructions(input,layout),selection.target,cs,input.namingEvidence.names):{})};
  if(!detailResponseProof(body,response,evidence,input,expected)||sharedQuestion&&
    !sharedAnswer(selection,response.answers.shared_construal.choice,offered))return false;
@@ -1746,7 +1775,10 @@ function generationMessagesWith(messages:any[],trace:any,execution:any,tape:any,
   const vetoNote=isGenerationV6(tape.generationRetryVersion)&&(tape.vetoed===true||execution.action==='confirm'||execution.action==='repair')?VETOED_MOVE_V6_S4+'\n':'';
   const confirmation=isGenerationV16(tape.generationRetryVersion)&&execution.action==='confirm'
    ?DISCRIMINATING_CONFIRM_V16_S4+'\n'+(confirmationDraftV16(tape.generationRetryVersion)?CONFIRMATION_DRAFT_V16_S4+'\n':''):'';
-  const actionMessage={role:'system',content:FIXED.act+'\n'+scope+'\n'+vetoNote+acceptNote+reconfirmNote+namingNote+conflictNote+featureNote+confirmation+JSON.stringify({...g,target:execution.target,...(Object.hasOwn(execution,'detailFigureIds')?{detailFigureIds:execution.detailFigureIds}:{})})};
+  const ordinaryQuality=profile.judgmentMaterialVersion===JEV_REPAIR_QUALITY_VERSION&&isGenerationV17(tape.generationRetryVersion)
+   ?normalRepairQualityGuidance(execution.action)+'\n'+JSON.stringify({publicQuestions:repairQualityPublicQuestions(trace.turnIndex,
+     tape.events.filter((e:any)=>e.seq<=trace.turnIndex).slice(-32).map((e:any)=>({turn:e.seq,speaker:e.speaker,text:e.text})),liveClaims(graph))})+'\n':'';
+  const actionMessage={role:'system',content:FIXED.act+'\n'+scope+'\n'+vetoNote+acceptNote+reconfirmNote+namingNote+conflictNote+featureNote+confirmation+ordinaryQuality+JSON.stringify({...g,target:execution.target,...(Object.hasOwn(execution,'detailFigureIds')?{detailFigureIds:execution.detailFigureIds}:{})})};
   const shared=execution.sharedClaimIds&&CTX.p5?CTX.shared.find(f=>equal(f.claimIds,execution.sharedClaimIds)):undefined;
   if(execution.sharedClaimIds&&!shared)return false;
   const sharedMessage=shared?{role:'system',content:(execution.action==='confirm'?SHARED_CONSTRUAL_CONFIRM_INSTRUCTIONS:SHARED_CONSTRUAL_INSTRUCTIONS)+'\n'+
@@ -1905,8 +1937,11 @@ const PROSPECT_CRITERIA={prospect:{progressing:"修復が進む見込みがあ�
 function prospectQuestions(input:any,facts:boolean,layout='two_stage_v1'){
  const issues=(input.repairHistory??[]).filter((r:any)=>r.turn<input.turn).slice().sort((a:any,b:any)=>a.turn-b.turn).slice(-8),ins=PROSPECT_TEXT.base+(facts?'\n'+ADAPT.facts:'')+(input.notationV6===true?'\n'+LEGEND_V5+(input.notationV11===true?'\n'+LEGEND_V11:'')+(input.rotationMode==='relative_pm90'?'\n'+ROTATION_V5:''):'');
  const q=(suffix:string,criteria:any)=>({type:'choice',instructions:ins+suffix,criteria});
+ const quality=input.judgmentMaterialVersion===JEV_REPAIR_QUALITY_VERSION;
+ const qualityInstructions=quality?'\n'+REPAIR_QUALITY_GUIDANCE+REPAIR_QUALITY_PROSPECT:'';
  return{issues,questions:{repair_issue:q(PROSPECT_TEXT.issue+(layout==='two_stage_v3'?NATIVE_V3.repairIssueGuidance:''),Object.fromEntries([...issues.map((r:any,i:number)=>['issue_'+i,JSON.stringify({turn:r.turn,action:r.action,question:r.question,candidatesAfter:r.candidatesAfter})]),['none','修復の理由が残る局所問題はない。'],['unknown','判断できない。']])),
-  prospect:q(PROSPECT_TEXT.prospect,PROSPECT_CRITERIA.prospect),basis:q(PROSPECT_TEXT.basis,PROSPECT_CRITERIA.basis)}};
+  prospect:q(qualityInstructions+PROSPECT_TEXT.prospect,quality?{...PROSPECT_CRITERIA.prospect,progressing:REPAIR_QUALITY_PROGRESSING}:PROSPECT_CRITERIA.prospect),
+  basis:q(qualityInstructions+PROSPECT_TEXT.basis,quality?{...PROSPECT_CRITERIA.basis,new_information:REPAIR_QUALITY_NEW_INFORMATION,candidate_narrowed:REPAIR_QUALITY_CANDIDATE_NARROWED}:PROSPECT_CRITERIA.basis)}};
 }
 function prospectMaterial(input:any,answers:any){
  const {issues}=prospectQuestions(input,false),label=answers.repair_issue.choice,entry=issues[Number(String(label).slice(6))];
@@ -1915,6 +1950,7 @@ function prospectMaterial(input:any,answers:any){
 }
 /** Test hook for the independent reconstructions; changes no verdict. */
 export const s4Probe={referentResponseAccepted,issueSummary,originalQuestions,targetQuestion,targetProof,rankProof,expectedRerank,agreeSource,legal,decisionShape,traceShape,relation,s4HasNonOrientationLeak,
+ publicationContinuationProof,
  setContext:(c:Partial<typeof CTX>)=>Object.assign(CTX,defaultContext,c),prospectQuestions:(input:any,facts:boolean)=>prospectQuestions(input,facts),prospectMaterial:(input:any,answers:any)=>prospectMaterial(input,answers),trialVersion:(t:any,claim:any)=>trialVersion(t,claim)};
 export function interventionChecks(records:Records):Check[]{
  const broken=(reason='intervention_trace_invalid')=>{
