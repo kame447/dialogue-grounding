@@ -57,8 +57,13 @@ export const REFERENCE_LIMITS = Object.freeze({
   observationsPerSlot: 8, unresolvedQuestions: 12, featuresPerSlot: 4,
   recentMentions: 24, recentRepairs: 12,
 });
-/** @typedef {"claim_prune_v2"} MemoryPruneVersion */
+/** @typedef {"claim_prune_v2" | "claim_prune_v3"} MemoryPruneVersion */
 export const CLAIM_PRUNE_V2 = "claim_prune_v2";
+export const CLAIM_PRUNE_V3 = "claim_prune_v3";
+/** @returns {value is MemoryPruneVersion} */
+export function isClaimPruneVersion(value) {
+  return value === CLAIM_PRUNE_V2 || value === CLAIM_PRUNE_V3;
+}
 const INTENTS = ["refer", "name_proposal", "name_acceptance", "feature_assertion", "feature_acceptance", "denial", "correction", "acknowledgment"];
 const FIELDS = {
   mention: ["sourceTurn", "speaker", "quote", "slots", "confidence", "epistemic", "intent", "antecedent"],
@@ -155,7 +160,7 @@ function checkGraph(graph) {
   const keys = ["schemaVersion", "revision", "lastTurn", "ownObservations", "records"];
   if (!graph || !exact(graph, [...keys, ...(Object.hasOwn(graph, "slots") ? ["slots"] : []),
     ...(Object.hasOwn(graph, "memoryPruneVersion") ? ["memoryPruneVersion"] : [])]) ||
-      (Object.hasOwn(graph, "memoryPruneVersion") && graph.memoryPruneVersion !== CLAIM_PRUNE_V2) || graph.schemaVersion !== 1 ||
+      (Object.hasOwn(graph, "memoryPruneVersion") && !isClaimPruneVersion(graph.memoryPruneVersion)) || graph.schemaVersion !== 1 ||
       !index(graph.revision) || !index(graph.lastTurn) || graph.revision > graph.lastTurn ||
       !Array.isArray(graph.records) || graph.records.length > REFERENCE_LIMITS.records) fail("invalid_graph");
   const ownSlots = graphSlots(graph);
@@ -200,7 +205,7 @@ function latest(records, kind, slot) { return records.findLast((r) => r.kind ===
 /** @param {{ ownObservations?: {slot:string,feature:string}[], slots?: readonly string[], memoryPruneVersion?: MemoryPruneVersion }} options */
 export function createReferenceGraph(options = {}) {
   if (!options || !exact(options, ["ownObservations", "slots", "memoryPruneVersion"].filter(key => Object.hasOwn(options, key))) ||
-      (Object.hasOwn(options, "memoryPruneVersion") && options.memoryPruneVersion !== CLAIM_PRUNE_V2)) fail("invalid_observations");
+      (Object.hasOwn(options, "memoryPruneVersion") && !isClaimPruneVersion(options.memoryPruneVersion))) fail("invalid_observations");
   const { ownObservations = [] } = options;
   const ownSlots = options.slots === undefined ? SLOTS : clone(validateSlots(options.slots));
   return freeze({ schemaVersion: 1, revision: 0, lastTurn: 0, ownObservations: observations(ownObservations, ownSlots), records: [],
@@ -336,11 +341,12 @@ function prune(graph) {
     }
   }
   const issues = Map.groupBy(claims, (r) => r.issueId);
-  const v2 = graph.memoryPruneVersion === CLAIM_PRUNE_V2;
+  const versioned = isClaimPruneVersion(graph.memoryPruneVersion);
+  const v3 = graph.memoryPruneVersion === CLAIM_PRUNE_V3;
   const preferred = [];
   const agreed = new Map();
   const latestDenial = new Map();
-  if (v2) {
+  if (versioned) {
     // A later public denial can invalidate a positive claim about the same
     // figure even when it belongs to a different issue.
     for (const r of claims) {
@@ -355,6 +361,19 @@ function prune(graph) {
       for (const r of issue) if (r.turn === graph.lastTurn) mandatory.add(r.id);
     }
   }
+  const claimReplies = v3 ? new Set(claims.filter(r => ["agree", "name_accept"].includes(r.act) && !claimDead.has(r.id)).map(r => r.respondsTo)) : new Set();
+  const priorityClaims = new Map();
+  if (v3) {
+    for (const r of claims) {
+      const category = ["withdraw", "deny", "name_reject"].includes(r.act) ? "correction"
+        : claimDead.has(r.id) ? null
+        : r.aspect === "name" ? "name"
+        : r.act === "ask" && r.speaker === "human" && !claimReplies.has(r.id) ? "question"
+        : r.act === "defer" ? "deferred" : null;
+      if (!category || category === "correction" && claimDead.has(r.id)) continue;
+      for (const target of r.targets.length ? r.targets : [null]) priorityClaims.set(JSON.stringify([target, category]), r);
+    }
+  }
   for (const issue of issues.values()) {
     const active = issue.filter((r) => !claimDead.has(r.id) && r.act !== "withdraw");
     const support = active.some((r) => ["agree", "name_accept"].includes(r.act));
@@ -365,8 +384,8 @@ function prune(graph) {
       (support && denial) || focus?.act === "defer");
     // A settled check can still constrain a naming decision. In particular,
     // retain a recent denial ahead of unrelated older unresolved claims.
-    if (v2 ? substantive || focus : legacyMandatory) {
-      if (!v2) issue.forEach((r) => mandatory.add(r.id));
+    if (versioned ? substantive || focus : legacyMandatory) {
+      if (!versioned) issue.forEach((r) => mandatory.add(r.id));
       else {
         const targets = new Set(active.flatMap(r => r.targets));
         const newest = active.at(-1);
@@ -399,7 +418,7 @@ function prune(graph) {
         (record.kind === "claim" && r.kind === "claim" && (r.issueId === record.issueId || r.respondsTo === id ||
           (record.aspect === "name" && r.aspect === "name" && position.get(r.id) > position.get(record.id) && r.targets.some((s) => record.targets.includes(s))))) ||
         (record.kind === "question" && r.kind === "question" && r.replaces === id)).map(r => r.id));
-      const denial = v2 && record.kind === "claim" && record.targets.length === 1 &&
+      const denial = versioned && record.kind === "claim" && record.targets.length === 1 &&
         record.aspect !== "name" && record.aspect !== "progress" &&
         ["assert", "agree", "construe"].includes(record.act) && !claimDead.has(id) ? latestDenial.get(record.targets[0]) : undefined;
       // If the blocker does not fit, the older positive claim cannot be
@@ -417,11 +436,13 @@ function prune(graph) {
   const repairs = records.filter((r) => r.kind === "retract" || r.replaces).slice(-REFERENCE_LIMITS.recentRepairs);
   const optional = records.filter((r) => r.kind === "mention").slice(-REFERENCE_LIMITS.recentMentions)
     .concat(claims.slice(-REFERENCE_LIMITS.recentMentions), repairs.flatMap((r) => [byId.get(r.targetId ?? r.replaces), r].filter(Boolean))).reverse();
-  if (v2) {
+  if (versioned) {
     // A batch accepted by the validators must not silently lose a new claim.
     // Keep the negative checks ahead of unrelated issues when space is tight.
     const denials = new Set(latestDenial.values());
-    const priority = (r) => r.turn === graph.lastTurn ? 2 : denials.has(r) ? 1 : 0;
+    const important = new Set(priorityClaims.values());
+    const priority = (r) => r.turn === graph.lastTurn ? 3 : important.has(r) ? 2 : denials.has(r) ? 1 : 0;
+    preferred.push(...important);
     preferred.push(...denials);
     preferred.push(...claims.filter(r => r.turn === graph.lastTurn));
     preferred.sort((a, b) => priority(b) - priority(a) ||
@@ -434,11 +455,11 @@ function prune(graph) {
     }
   }
   for (const record of [...preferred, ...optional]) {
-    if (v2 && kept.some(r => r.id === record.id)) continue;
+    if (versioned && kept.some(r => r.id === record.id)) continue;
     const proposed = closure(new Set([...mandatory, record.id]));
     if (fits(proposed)) { mandatory.add(record.id); kept = proposed; }
   }
-  if (v2 && claims.some(r => r.turn === graph.lastTurn && !kept.some(k => k.id === r.id))) fail("capacity_exceeded");
+  if (versioned && claims.some(r => r.turn === graph.lastTurn && !kept.some(k => k.id === r.id))) fail("capacity_exceeded");
   return { ...graph, records: kept };
 }
 

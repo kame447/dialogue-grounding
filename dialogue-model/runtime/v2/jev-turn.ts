@@ -14,7 +14,9 @@ import { createOwnLedger, validateJudgment, applyJudgment, JudgmentValidationErr
 import { normalizeName } from "../judgment/name-evidence.mjs";
 import { literalSpan } from "../judgment/public-evidence.mjs";
 import { stageMemory } from "../judgment/memory.mjs";
-import { createReferenceGraph, applyReferenceUpdate, previewReferenceUpdate, snapshotReferenceGraph, REFERENCE_LIMITS } from "../memory/reference-graph.mjs";
+import { CLAIM_PRUNE_V3, createReferenceGraph, applyReferenceUpdate, previewReferenceUpdate, snapshotReferenceGraph, REFERENCE_LIMITS } from "../memory/reference-graph.mjs";
+import { buildReferenceEvidence, validReferenceAlternatives } from "../local-grounding/reference-evidence.ts";
+import type { LocalReferenceAlternative, ReferenceEvidence } from "../local-grounding/reference-evidence.ts";
 import { nameBindsFigure } from "../decision/referent-binding.ts";
 import { hasNameProposal, claimsLiveAsOf, reconfirmationPossible, namingTurnKind, namingIntervalEstimates, inheritedTargetClaimIds, agreeCandidateAllowed, inheritsProposalName, turnNameProposals, namingNameKey, targetNamingConflict, publiclyCheckedNamingTarget, usesPublicNamingTarget, usesDirectNamingReplies, retainsLocalQuestionAnswers, answersRepairedNamingCheck, type AgreeNameScopeVersion } from "../decision/naming-request.ts";
 import { namingDenialTargets, namingReconfirmation, type NamingResponseEvidence } from "../decision/naming-reconfirmation.ts";
@@ -31,6 +33,7 @@ import type { JevAction, JevDecision, JevDecisionClient, JevDecisionInput, JevOb
 import type { JevNamingGrounding } from "../decision/contract.ts";
 import { buildJevNamingMaterial, readJevNamingGrounding, readNamingWithdrawal, type NamingWithdrawal } from "../decision/jev-naming.ts";
 import { deriveRepairFacts, validateRepairFacts } from "../decision/repair-facts.ts";
+import { JEV_REPAIR_QUALITY_VERSION, normalRepairQualityGuidance, readPublicationContinuation, repairQualityPublicQuestions, type JudgmentMaterialVersion } from "../decision/repair-quality.ts";
 import { validateJevDecision, validateHumanReferentEstimate, validateRepairProspectEstimate, validateRepairProspectMaterial, unknownRepairProspect, JevDecisionError, JEV_DECISION_INPUT_LIMITS, JEV_DECISION_REJECTION_CODES,
   projectDecisionFailureEvidence, checkDecisionFailureEvidence, v3AlwaysOffered, TWO_STAGE_V2_CANDIDATE_SETS, candidateSetLabel, V3_TARGET_LABEL_SET, participantJevTargetOffered, retainedParticipantJevMenuValid, draftSharedClaimVerdict, draftSingleIdentificationSupported } from "../decision/jev-decision.ts";
 import type { JevDecisionFailureEvidence } from "../decision/jev-decision.ts";
@@ -249,6 +252,7 @@ export type JevPrivateState = {
   agreeNameScopeVersion?: AgreeNameScopeVersion;
   ledger: OwnLedger; graph: Graph; judgments: CommittedAct[];
   observationMemo: ObservationMemo | null; repairHistory: RepairHistoryEntry[];
+  referenceAlternatives?: LocalReferenceAlternative[];
   aiPublic?: AiPublicState;
 };
 export type JevTurnOptions = {
@@ -263,6 +267,7 @@ export type JevTurnOptions = {
   rotationMode?: "relative_pm90" | "relative_0";
   /** Offline replay can request the original retry wire text for a historical tape. */
   generationRetryVersion?: GenerationRetryVersion;
+  judgmentMaterialVersion?: JudgmentMaterialVersion;
   /** Creation pin only. A resumed trial uses the scope in its saved state. */
   newTrialAgreeNameScopeVersion?: "scoped_v7" | "scoped_v8" | "scoped_v9" | "scoped_v10" | "scoped_v11" | "jev_naming_v1";
   client: ChatClient; ownImage: LocalOwnImage; ownAnchors: readonly LocalOwnAnchor[];
@@ -495,7 +500,7 @@ const hasAgreeNameV3 = (names: readonly PublicNameCandidate[], name: string | nu
 /** Decision 0002: new figure information or strict candidate narrowing only.
  * Difficulty, backchannels, repeated content and record pruning add no progress. */
 export function updateRepairHistory(history: readonly RepairHistoryEntry[], before: readonly LocalClaimView[],
-  after: readonly LocalClaimView[], turn: number, context?: { answeredRepairTurn: number;
+  after: readonly LocalClaimView[], turn: number, context?: { answeredRepairTurn: number; linkedEvidenceOnly?: true;
     aiPublic?: { humanOk: boolean; rejected: Array<{ segmentId: string; reason: string }>; aiComplete: boolean } }): RepairHistoryEntry[] {
   const result = structuredClone(history) as RepairHistoryEntry[];
   const pending = context?.aiPublic ? result.find(entry => entry.turn === context.answeredRepairTurn && entry.turn < turn && entry.progress === "unknown")
@@ -504,21 +509,30 @@ export function updateRepairHistory(history: readonly RepairHistoryEntry[], befo
   const roots = after.filter(c => c.speaker === "ai" && c.sourceTurn > pending.turn && c.sourceTurn < turn &&
     c.targets.some(id => pending.candidatesBefore.includes(id)));
   const answered = context?.answeredRepairTurn === pending.turn;
+  const linked = (c: LocalClaimView) => c.issueId === pending.issueId || roots.some(root => c.respondsTo === root.id);
   const replies = after.filter(c => c.speaker === "human" && c.sourceTurn === turn &&
-    (c.issueId === pending.issueId || roots.some(root => c.respondsTo === root.id) || answered &&
+    (linked(c) || answered && !context?.linkedEvidenceOnly &&
       (!c.targets.length || c.targets.some(id => pending.candidatesBefore.includes(id)))));
   if (!replies.length && !answered) return result;
-  const information = replies.filter(figureInformation);
-  const previousContent = before.filter(c => c.speaker === "human" && figureInformation(c));
+  const isVerifiedAnswer = (c: LocalClaimView) =>
+    (c.source === LABELLED_ANSWER_SOURCE || c.source === LOCAL_QUESTION_ANSWER_SOURCE) &&
+    c.respondsTo !== null && (c.act === "agree" || c.act === "deny");
+  const isInformation = (c: LocalClaimView) => figureInformation(c) || context?.linkedEvidenceOnly === true && isVerifiedAnswer(c);
+  const information = replies.filter(isInformation);
+  const previousContent = before.filter(c => c.speaker === "human" && isInformation(c));
   const novel = information.filter(c => {
     if (!c.targets.length) return false;
-    const duplicate = previousContent.some(prior => contentKey(prior) === contentKey(c) && prior.targets.some(id => c.targets.includes(id)));
+    const duplicate = previousContent.some(prior => contentKey(prior) === contentKey(c) && prior.targets.some(id => c.targets.includes(id)) &&
+      (!context?.linkedEvidenceOnly || prior.issueId === c.issueId && (!isVerifiedAnswer(c) || prior.respondsTo === c.respondsTo)));
     previousContent.push(c);
     return !duplicate;
   });
   pending.issueId ??= replies[0]?.issueId ?? roots.at(-1)?.issueId ?? null;
   pending.partnerClaims = replies.map(({ id, act, proposition, targets }) => ({ id, act, proposition, targets: [...targets] }));
-  pending.candidatesAfter = information.length ? [...new Set(information.flatMap(c => c.targets))] : [...pending.candidatesBefore];
+  // A linked objection or supporting detail can inform repair without determining the referent.
+  const referentEvidence = context?.linkedEvidenceOnly
+    ? information.filter(c => c.aspect === "referent" && (c.act === "assert" || c.act === "agree")) : information;
+  pending.candidatesAfter = referentEvidence.length ? [...new Set(referentEvidence.flatMap(c => c.targets))] : [...pending.candidatesBefore];
   pending.addedClaimIds = novel.map(c => c.id);
   pending.removedClaimIds = before.filter(c => c.issueId === pending.issueId && !after.some(next => next.id === c.id)).map(c => c.id);
   const narrowed = pending.candidatesAfter.length > 0 && pending.candidatesAfter.length < pending.candidatesBefore.length &&
@@ -776,7 +790,7 @@ function validateGeneratedPublication(j: CommittedAct, ledger: OwnLedger, ownSlo
   if (continuation) {
     if (!recovery || !stateExact(continuation, ["choice", "reason", "violations"]) ||
         !["acknowledge_unresolved", "ask_unresolved"].includes(continuation.choice) ||
-        continuation.choice !== recovery.decision.evidence.stages?.[0]?.choices.publication_continuation ||
+        continuation.choice !== readPublicationContinuation(recovery.decision.evidence.stages?.[0]) ||
         !Array.isArray(continuation.violations) || !["decision_unresolved", "draft_mismatch"].includes(continuation.reason) ||
         (continuation.reason === "draft_mismatch" ? !canReconsiderPublication(continuation.violations) :
           continuation.violations.length !== 0 || executedDecision.action !== "agree")) throw Error();
@@ -824,12 +838,17 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
  try{
   stateJson(value);const s=value as any;const p5Enabled=questionLayout==='two_stage_v3'&&policy==='holistic_v5'&&isGenerationV13(generation);const p5OverclaimEnabled=questionLayout==='two_stage_v3'&&policy==='holistic_v5'&&isGenerationV14(generation);validateOwnLedger(Object.fromEntries(ownSlots.map(k=>[k,{status:'unassigned',name:null}])));
   const hasAgreeNameScope=Object.hasOwn(s??{},'agreeNameScopeVersion');
-  if(!stateExact(s,['schemaVersion','interventionPolicy','ledger','graph','judgments','observationMemo','repairHistory',...(Object.hasOwn(s??{},'aiPublic')?['aiPublic']:[]),...(hasAgreeNameScope?['agreeNameScopeVersion']:[])])||s.schemaVersion!=='jev_private_state_v2'||!stateSame(s.interventionPolicy,interventionReference(version)))throw Error();
+  const referenceEvidenceEnabled=s?.graph?.memoryPruneVersion===CLAIM_PRUNE_V3;
+  const hasAlternatives=Object.hasOwn(s??{},'referenceAlternatives');
+  if(!stateExact(s,['schemaVersion','interventionPolicy','ledger','graph','judgments','observationMemo','repairHistory',...(Object.hasOwn(s??{},'aiPublic')?['aiPublic']:[]),...(hasAgreeNameScope?['agreeNameScopeVersion']:[]),...(referenceEvidenceEnabled&&hasAlternatives?['referenceAlternatives']:[])])||s.schemaVersion!=='jev_private_state_v2'||!stateSame(s.interventionPolicy,interventionReference(version)))throw Error();
   if(!validAgreeNameScope(s.agreeNameScopeVersion,generation)||hasAgreeNameScope&&
     (s.agreeNameScopeVersion===undefined||questionLayout!=='two_stage_v3'||s.agreeNameScopeVersion!=='scoped_v1'&&policy!=='holistic_v5'))throw Error();
   const jevNaming=s.agreeNameScopeVersion==='jev_naming_v1';
   const publicTurns=jevNaming&&events?events.map(e=>({turn:e.seq,speaker:e.speaker,text:e.text})):undefined;
   validateOwnLedger(s.ledger);if(!sameSet(Object.keys(s.ledger),ownSlots))throw Error();const graph=snapshotReferenceGraph(s.graph);
+  if(referenceEvidenceEnabled&&(questionLayout!=='two_stage_v3'||policy!=='holistic_v5'||!hasVersionedViewpoint(generation)))throw Error();
+  if(hasAlternatives&&!validReferenceAlternatives(s.referenceAlternatives,ownSlots,s.graph.lastTurn,
+   events?.map(e=>({turn:e.seq,speaker:e.speaker,text:e.text}))))throw Error();
   // The ai_bound_target provenance exists only in v9 and later records; an earlier version carrying it is refused.
   if(!isGenerationV9(generation)&&Array.isArray(s.graph?.records)&&s.graph.records.some((r:any)=>r?.kind==='claim'&&r.source===AI_BOUND_SOURCE))throw Error();
   // The partner_labelled_answer provenance exists only in v12 records.
@@ -1112,6 +1131,11 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   if (!validGenerationRetryVersion(generationRetryVersion, questionLayout, options.dialoguePolicy)) {
     throw new Error("Invalid Jev generation retry version");
   }
+  const repairQuality = options.judgmentMaterialVersion === JEV_REPAIR_QUALITY_VERSION;
+  if (options.judgmentMaterialVersion !== undefined && (!repairQuality || questionLayout !== "two_stage_v3" ||
+      options.dialoguePolicy !== "holistic_v5" || !hasVersionedViewpoint(generationRetryVersion))) {
+    throw new Error("Invalid Jev judgment material version");
+  }
   const newTrialScope = options.newTrialAgreeNameScopeVersion;
   if (newTrialScope !== undefined && (newTrialScope !== "scoped_v7" && newTrialScope !== "scoped_v8" && !usesDirectNamingReplies(newTrialScope) || questionLayout !== "two_stage_v3" ||
       !validAgreeNameScope(newTrialScope, generationRetryVersion))) {
@@ -1124,6 +1148,8 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   // The judgment side of holistic_v5 (whole-history material, ledger, rotation premise, chained agree sources) is versioned with the generation side: a v5 record saved before
   // jev_generation_retry_v4 keeps the judgment requests it was recorded with.
   const judgmentV5 = options.dialoguePolicy === "holistic_v5" && hasVersionedViewpoint(generationRetryVersion);
+  const referenceEvidenceEnabled = memoryPruneVersion === CLAIM_PRUNE_V3;
+  if (referenceEvidenceEnabled && (!judgmentV5 || questionLayout !== "two_stage_v3")) throw new JevTurnError("invalid_state");
   const declaredLayout = (jevDecision as { metadata?: { questionLayout?: unknown } } | undefined)?.metadata?.questionLayout;
   if (declaredLayout !== undefined && declaredLayout !== questionLayout) throw new Error("Jev question layout mismatch");
   const participantMenu = jevDecision?.participantTargetMenuVersion === PARTICIPANT_TARGET_MENU_VERSION;
@@ -1267,13 +1293,15 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         state.repairHistory.some(r => r.turn === previous.turnIndex && r.action === "confirm" && r.question === previousAi.text);
       let repairHistory = updateRepairHistory(state.repairHistory, beforeClaims, claims, latest.seq,
         previous && previousAi && ["repair", "confirm", "revisit"].includes(previous.judgment.action) ? { answeredRepairTurn: previous.turnIndex,
+          ...(repairQuality ? { linkedEvidenceOnly: true as const } : {}),
           ...(aiEnabled ? { aiPublic: { humanOk: prepared.trace.status === "ok", rejected: prepared.trace.rejected,
             aiComplete: !!answersNamingRecovery || state.aiPublic!.log.some(log => log.aiSeq === previousAi.turn && log.status === "applied") } } : {}) }
           : aiEnabled ? { answeredRepairTurn: -1, aiPublic: { humanOk: prepared.trace.status === "ok", rejected: prepared.trace.rejected, aiComplete: false } } : undefined);
       // v2: decide the gate from the judgments and claims as they stand now; Jev infers over the open entries only.
       const gate = gated ? agreementGate(repairHistory, state.judgments, claims, latest.seq, state.ledger) : null;
       if (gate) record.repairGate = structuredClone(gate);
-      const baseInput: JevDecisionInput = { turn: latest.seq, publicTurns, ownSlots: [...slots], observations: memo,
+      const baseInput: JevDecisionInput & { referenceEvidence?: ReferenceEvidence } = { turn: latest.seq, publicTurns, ownSlots: [...slots], observations: memo,
+        ...(repairQuality ? { judgmentMaterialVersion: JEV_REPAIR_QUALITY_VERSION } : {}),
         issueSummary: summarizeLocalIssues(graph), priorClaims: claims, repairHistory: gate ? inferenceHistory(repairHistory, gate) : repairHistory,
         previousAction: previous && previousAi ? previous.generatedPublication?.transition ?
           { turn: previousAi.turn, action: "move_on", target: { kind: "none" }, name: null, feature: null } :
@@ -1285,6 +1313,10 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       const agreeTurns = judgmentV5
         ? events.filter(e => e.seq <= latest.seq && (!aiEnabled || events.filter(other => other.seq === e.seq).length === 1)).map(e => ({ turn: e.seq, speaker: e.speaker, text: e.text, ...(e.nonReferential ? { nonReferential: true } : {}) }))
         : publicTurns;
+      if (referenceEvidenceEnabled) {
+        baseInput.referenceEvidence = buildReferenceEvidence(graph, agreeTurns, latest.seq,
+          prepared.trace.status === "ok" ? prepared.research : undefined, state.referenceAlternatives);
+      }
       if (participantMenu) baseInput.participantLedger = state.ledger;
       if (questionLayout === "two_stage_v3") {
         if (state.agreeNameScopeVersion === "jev_naming_v1") {
@@ -1344,7 +1376,8 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       // It is private evidence, never a target selection or a graph operation.
       errorCode = "decision_failed";
       const referentInput = structuredClone({ ...baseInput, reobservationAllowed: maxReobservations > 0 });
-      const observationMemo = { version: OBSERVATION_MEMO_VERSION, sha256: await interruptible(observationHash(memo), signal) };
+      const referentMemo = memo;
+      const observationMemo = { version: OBSERVATION_MEMO_VERSION, sha256: await interruptible(observationHash(referentMemo), signal) };
       let estimate: HumanReferentEstimate = { status: "unknown", scores: null, model: null, responseId: null,
         costUsd: null, latencyMs: 0, inputBudget: null, calibrated: false };
       record.humanReferent = { ...estimate, turnIndex: latest.seq, observationMemo };
@@ -1513,7 +1546,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         delete record.draftActs;
       }
       function continueWithoutSettlement(reason: PublicationContinuation["reason"], violations: string[]) {
-        const choice = reconsideration?.decision.evidence.stages?.[0]?.choices.publication_continuation;
+        const choice = readPublicationContinuation(reconsideration?.decision.evidence.stages?.[0]);
         if (choice !== "acknowledge_unresolved" && choice !== "ask_unresolved") {
           throw new JevTurnError("generation_failed", undefined, { generationErrorCode: "invalid_response" });
         }
@@ -1599,6 +1632,9 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         figureId, status: state.ledger[figureId].status, name: state.ledger[figureId].name,
       })) : null;
       const structuredConfirmation = isGenerationV16(generationRetryVersion) && judgment.action === "confirm" && !continuing;
+      const ordinaryQualityGuidance = repairQuality && isGenerationV17(generationRetryVersion) && !reconsidered
+        ? normalRepairQualityGuidance(judgment.action) + "\n" +
+          JSON.stringify({ publicQuestions: repairQualityPublicQuestions(latest.seq, publicTurns, claims) }) + "\n" : "";
       const readDraft = (text: string) => {
         transitionText = null;
         if (!humanLedTransition) return structuredConfirmation ? confirmationDraftText(text, execution.feature) : text;
@@ -1621,6 +1657,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
           (namingConflict ? NAMING_CONFLICT_V5 + "\n" + JSON.stringify(namingConflict) + "\n" : "") +
           featureViewpoint +
           (structuredConfirmation ? DISCRIMINATING_CONFIRM_V16 + "\n" + CONFIRMATION_DRAFT_V16 + "\n" : "") +
+          ordinaryQualityGuidance +
           (reconsidered ? PUBLICATION_RECOVERY_V17 + "\n" : "") +
           (continuing ? "命名・対象の対応は現時点では未確定です。選択された応答で、その未確定な点について会話を続けてください。合意したとは言わず、以前の採用を変更しないでください。\n" : "") +
           (withdrawal ? "以前の採用を明示して取り下げ、別名の合意は約束しないでください。対象の旧名: " + JSON.stringify(withdrawal.prior.name) + "\n" : "") +
@@ -1846,7 +1883,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       if (aiEnabled) {
         aiPending = await prepareAiPublic({ turn: latest.seq, aiSeq: latest.seq + 1, candidateText: result.text, publicTurns,
           ownSlots: slots, ownAnchors: [...ownAnchors], observations: generationMemo!, issueSummary: generationIssues! }, graph, record.aiPublic!, signal,
-          record.generationGuard.fallback);
+          record.generationGuard.fallback, memo === referentMemo ? observationMemo.sha256 : undefined);
         abortIf(signal);
         state.aiPublic!.pending = aiPending;
       }
@@ -1873,6 +1910,9 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         ...(aiEnabled ? { aiPublic: state.aiPublic } : {}) };
       // Keep the naming policy from the original snapshot, including its absence on historical v3 tapes.
       if (state.agreeNameScopeVersion) nextState.agreeNameScopeVersion = state.agreeNameScopeVersion;
+      if (baseInput.referenceEvidence?.localAlternatives.length) {
+        nextState.referenceAlternatives = structuredClone(baseInput.referenceEvidence.localAlternatives);
+      }
       // The state this turn would commit is checked by the same validation every later persist and turn start applies, before anything is published:
       // a state the validator refuses must never become the committed one.
       if (integrated) validateJevPrivateStateV2(nextState, slots, intervention!, questionLayout, options.dialoguePolicy, generationRetryVersion, usagePolicy);
@@ -1916,11 +1956,15 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       if (safe.local) emit(options.onLocalGroundingTrace, safe.local);
     }
   }
-  async function prepareAiPublic(input: AiPublicInput, graph: Graph, research: AiPublicResearch, signal?: AbortSignal, fallback = false): Promise<AiPublicPending> {
+  async function prepareAiPublic(input: AiPublicInput, graph: Graph, research: AiPublicResearch, signal?: AbortSignal, fallback = false,
+    observationSha256?: string): Promise<AiPublicPending> {
     const snapshot = structuredClone(input);
     const timeoutMs = options.localGrounding.timeoutMs ?? 20000, deadline = performance.now() + timeoutMs;
-    const pending: AiPublicPending = { aiSeq: snapshot.aiSeq, textSha256: await aiHash(snapshot.candidateText), candidates: [], status: "empty", reasons: [] };
-    research.observationMemo = { version: OBSERVATION_MEMO_VERSION, sha256: await observationHash(snapshot.observations) };
+    // Reobservation installs a new memo. Only the unchanged memo can reuse the referent digest.
+    const [textSha256, memoSha256] = await Promise.all([aiHash(snapshot.candidateText),
+      observationSha256 ?? observationHash(snapshot.observations)]);
+    const pending: AiPublicPending = { aiSeq: snapshot.aiSeq, textSha256, candidates: [], status: "empty", reasons: [] };
+    research.observationMemo = { version: OBSERVATION_MEMO_VERSION, sha256: memoSha256 };
     if (fallback) { pending.status = "skipped_fallback"; pending.reasons = ["skipped_fallback"]; research.pending = pending; return pending; }
     const controller = new AbortController();
     let settled = false;

@@ -1,4 +1,6 @@
 import type { LedgerAction } from "./judgment-material-v5.ts";
+import type { JudgmentMaterialVersion, JevPublicationRecoveryContext } from "./repair-quality.ts";
+import type { ReferenceEvidence } from "../local-grounding/reference-evidence.ts";
 // Decision 0002, opt-in research contract. Jev alone selects the next action;
 // observations and repair progress are materials, never an answer key or policy.
 import type { ObservationMemo } from "../observation/contract.ts";
@@ -92,6 +94,9 @@ export type JevDecisionInput = {
   /** Opt-in agreement candidates backed by eligible public naming claims. */
   agreeNames?: PublicNameCandidate[];
   jevNaming?: { localRejections: Array<{ quote: string; reason: string }> };
+  judgmentMaterialVersion?: JudgmentMaterialVersion;
+  publicationRecoveryContext?: JevPublicationRecoveryContext;
+  referenceEvidence?: ReferenceEvidence;
   /** Private participant ledger for candidate validation. Never serialized to Jev. */
   participantLedger?: OwnLedger;
   /** Local v3 proposal legality only. The request never serializes the ledger. */

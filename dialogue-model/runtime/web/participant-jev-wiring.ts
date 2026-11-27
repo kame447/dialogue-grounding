@@ -74,7 +74,8 @@ function checkedProfile(value: unknown): ResearchTrialProfileV3 {
   const profile = jsonData(value) as ResearchTrialProfileV3;
   if (resolveInterventionPolicy(profile).mode !== 'explicit') return invalid();
   // The stored value (or its absence) decides the version: a profile without dialoguePolicy is rebuilt without one.
-  const expected = researchTrialProfileV3(profile.lunaRequest, profile.timeouts, profile.questionLayout, profile.dialoguePolicy ?? null, profile.interventionPolicy.version);
+  const expected = researchTrialProfileV3(profile.lunaRequest, profile.timeouts, profile.questionLayout, profile.dialoguePolicy ?? null,
+    profile.interventionPolicy.version, profile.judgmentMaterialVersion);
   if (researchHash(profile) !== researchHash(expected)) return invalid();
   return expected;
 }
@@ -160,7 +161,8 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
       const savedPolicy = Object.hasOwn(restore.options ?? {}, 'dialoguePolicy') ? restore.options.dialoguePolicy : undefined;
       if (savedPolicy !== undefined && !isHolisticPolicy(savedPolicy)) return invalid();
       // The stored value (or its absence) decides the version, whatever the creation default is now.
-      if (savedPolicy !== profile.dialoguePolicy) profile = researchTrialProfileV3(profile.lunaRequest, profile.timeouts, profile.questionLayout, savedPolicy ?? null, profile.interventionPolicy.version);
+      if (savedPolicy !== profile.dialoguePolicy) profile = researchTrialProfileV3(profile.lunaRequest, profile.timeouts, profile.questionLayout, savedPolicy ?? null,
+        profile.interventionPolicy.version, profile.judgmentMaterialVersion);
     }
     const savedGenerationVersion = restore?.options?.generationRetryVersion;
     if (restore && Object.hasOwn(restore.options ?? {}, 'generationRetryVersion') &&

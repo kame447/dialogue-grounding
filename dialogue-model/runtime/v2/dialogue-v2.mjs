@@ -222,6 +222,7 @@ function abortIf(signal) {
  *   technicalTrial?: import('../decision/contract.ts').AdaptiveRepairTrial,
  *   participantPrompts?: boolean,
  *   generationRetryVersion?: import('./jev-turn.ts').GenerationRetryVersion,
+ *   judgmentMaterialVersion?: import('../decision/repair-quality.ts').JudgmentMaterialVersion,
  *   newTrialAgreeNameScopeVersion?: import('./jev-turn.ts').JevTurnOptions['newTrialAgreeNameScopeVersion'],
  *   onJevTurnTrace?: ((record: import('./jev-turn.ts').JevTurnTrace) => unknown) | null }} options
  * @returns {{slots: readonly string[], initialPrivateState(): any,
@@ -311,6 +312,7 @@ export function createDialogueV2(options) {
       ...(options.dialoguePolicy ? { dialoguePolicy: options.dialoguePolicy } : {}),
       ...(options.rotationMode ? { rotationMode: options.rotationMode } : {}),
       generationRetryVersion: options.generationRetryVersion,
+      judgmentMaterialVersion: options.judgmentMaterialVersion,
       newTrialAgreeNameScopeVersion: options.newTrialAgreeNameScopeVersion,
       onJevTurnTrace, onLocalGroundingTrace, maxReobservations,
       participantPrompts: options.participantPrompts, generation });

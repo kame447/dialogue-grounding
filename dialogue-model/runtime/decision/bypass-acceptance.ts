@@ -106,11 +106,11 @@ function checkRepairProspect(value:unknown):void {
 }
 function prepare(input:unknown,original:unknown,intervention:unknown,questionLayout:JevQuestionLayout='two_stage_v1',usagePolicy?:ParticipantUsageOnly){
  const policy=config(intervention);
- const i=boundary(input,'invalid_input',value=>{const optional=['reobservationAllowed','humanReferent','repairProspect','agreeNames','jevNaming','repairFacts','participantLedger','nameLedger','nameSource','namingRequest','namingRequestStrict','judgmentLedger','rotationMode','notationV6','notationV11','featureReplyFilter','discriminatingConfirmation','p5Enabled','sharedConstruals','humanLedMoveOn'].filter(k=>!!value&&typeof value==='object'&&Object.hasOwn(value,k));
+ const i=boundary(input,'invalid_input',value=>{const optional=['reobservationAllowed','humanReferent','repairProspect','agreeNames','jevNaming','repairFacts','participantLedger','nameLedger','nameSource','namingRequest','namingRequestStrict','judgmentLedger','rotationMode','notationV6','notationV11','featureReplyFilter','discriminatingConfirmation','p5Enabled','sharedConstruals','humanLedMoveOn','judgmentMaterialVersion','publicationRecoveryContext','referenceEvidence'].filter(k=>!!value&&typeof value==='object'&&Object.hasOwn(value,k));
   if(!exact(value,['turn','publicTurns','ownSlots','observations','issueSummary','priorClaims','repairHistory','previousAction','publicNames',...optional]))fail('invalid_input');
   if(Object.hasOwn(value,'repairProspect'))checkRepairProspect(value.repairProspect);
   if(value.humanLedMoveOn!==(interventionVersion(policy.policy)==='bypass_acceptance_v2'?true:undefined))fail('invalid_input');
-  buildJevDecisionPayload(value as JevDecisionInput,value.p5Enabled===true||value.humanLedMoveOn===true?{questionLayout}:undefined);
+ buildJevDecisionPayload(value as JevDecisionInput,value.p5Enabled===true||value.humanLedMoveOn===true||value.judgmentMaterialVersion!==undefined||value.referenceEvidence!==undefined?{questionLayout}:undefined);
   return structuredClone(value) as BypassAcceptanceInput;});
  const d=boundary(original,'invalid_original',value=>{const valid=validateJevDecision(value,i,{questionLayout,usagePolicy});if(valid.action==='request_observation')fail('invalid_original');return valid;});
  return {input:i,decision:d,config:policy,original:project(d),layout:questionLayout};

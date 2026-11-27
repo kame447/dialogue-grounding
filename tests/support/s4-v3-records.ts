@@ -11,6 +11,7 @@ import { hash } from '../../dialogue-model/runtime/diagnostics/parity-verify/cor
 import { createJevDecisionClient } from '../../dialogue-model/runtime/decision/jev-decision.ts';
 import type { DialoguePolicy, DraftAct } from '../../dialogue-model/runtime/decision/contract.ts';
 import type { InterventionVersion } from '../../dialogue-model/runtime/decision/bypass-acceptance.ts';
+import type { JudgmentMaterialVersion } from '../../dialogue-model/runtime/decision/repair-quality.ts';
 import { createJevLocalTestClassifier } from '../../dialogue-model/runtime/local-grounding/jev-local-test.ts';
 import { createChatClient } from '../../dialogue-model/runtime/client.mjs';
 import { createHumanMessageSequencer } from '../../dialogue-model/runtime/web/human-message-queue.mjs';
@@ -113,7 +114,7 @@ export async function runTurn(profile: any, label: Label, state: any, events: an
   const native = createJevDecisionClient({ enabled: true, readKey, fetchImpl, timeoutMs: profile.timeouts.decisionMs,
     researchLimits: { maxDeadlineMs: 600000 }, questionLayout: profile.questionLayout })!;
   const jevDecision: any = { async decide(input: any, options: any) { if (plan.inject) return structuredClone(plan.inject); const d = await native.decide(input, options);
-      if (d.action !== 'request_observation') { boundary.luna = luna.length; boundary.jev = jev.length; } return d; },
+      if (d.action !== 'request_observation' && boundary.luna === -1) { boundary.luna = luna.length; boundary.jev = jev.length; } return d; },
     completeDetail: (i: any, s: any, o: any) => native.completeDetail!(i, s, o),
     // The partner-referent estimate is asked only for a turn that scripts one (plan.referent), so every other record keeps its request stream.
     ...(plan.referent ? { estimateReferent: (i: any, o: any) => native.estimateReferent!(i, o) } : {}),
@@ -181,16 +182,17 @@ export function publicFocusTurn(figureIndex = 0): Turn {
   return { human: 'この形の特徴を教えてください。', plan: { action: 'accept', target: 'figure_' + figureIndex, referent: 'figure_' + figureIndex, speech: text,
     aiExtraction: JSON.stringify([{ segmentId: 's1', quote: text, proposition: text, name: null, targets: [OWN.ownAnchors[figureIndex].id], aspect: 'part', linkedIssueId: null, respondsToTurn: null }]) } };
 }
-export async function buildRecords({ label = 'repair-first' as Label, technicalTrial, turns, ledger, dialoguePolicy, memo, generationRetryVersion, agreeNameScopeVersion, onTurn, promptSources, interventionVersion }: {
+export async function buildRecords({ label = 'repair-first' as Label, technicalTrial, turns, ledger, dialoguePolicy, memo, generationRetryVersion, agreeNameScopeVersion, onTurn, promptSources, interventionVersion, judgmentMaterialVersion }: {
   label?: Label; technicalTrial?: { version: TrialVersion }; turns: Turn[]; ledger?: Record<string, any>; dialoguePolicy?: DialoguePolicy | null; memo?: ObservationMemo; generationRetryVersion?: RecordedGenerationRetryVersion;
   agreeNameScopeVersion?: AgreeNameScopeVersion;
   onTurn?: (label: Label, result: Awaited<ReturnType<typeof runTurn>>) => void;
   promptSources?: Awaited<ReturnType<typeof promptSourceManifest>>;
   interventionVersion?: InterventionVersion;
+  judgmentMaterialVersion?: JudgmentMaterialVersion;
 }) {
   const n = structuredClone(normal), tr = n.trials[0], m = n.run.manifest;
   await bindCurrentS4PromptSources(n, promptSources);
-  const profile = JSON.parse(JSON.stringify(researchTrialProfileV3(m.lunaRequest, m.timeouts, 'two_stage_v3', dialoguePolicy, interventionVersion)));
+  const profile = JSON.parse(JSON.stringify(researchTrialProfileV3(m.lunaRequest, m.timeouts, 'two_stage_v3', dialoguePolicy, interventionVersion, judgmentMaterialVersion)));
   const digest = hash(profile);
   for (const s of [n.run, n.summary, tr]) { s.profile = structuredClone(profile); s.profileSha256 = digest; }
   tr.identity.profile = digest; tr.label = label; m.trials[0].label = label; n.summary.runOrder[0].label = label;

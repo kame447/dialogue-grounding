@@ -20,7 +20,7 @@ import { selectParticipantJev, participantLunaClient, withParticipantJevTurn, re
   participantInitialObservation } from "../web/participant-jev-wiring.ts";
 import { allowsOrientationFallback, generateOpeningV17, hasVersionedViewpoint, isGenerationV17 } from "./generation-guard.ts";
 import { researchHash } from "./research-profile.ts";
-import { CLAIM_PRUNE_V2 } from "../memory/reference-graph.mjs";
+import { CLAIM_PRUNE_V3, isClaimPruneVersion } from "../memory/reference-graph.mjs";
 import { agreedNamesFromLedger, memoryCapacityRejectedClaims, settleJevTurnTraces, settleAiPublicClaims } from "./jev-turn.ts";
 
 export const VERSION = 2;
@@ -122,14 +122,15 @@ export async function createNamingTaskV2({
   if (restore) {
     const saved = restore.options?.memoryPruneVersion;
     if ((memoryPruneVersion !== undefined && memoryPruneVersion !== saved) ||
-        (Object.hasOwn(restore.options ?? {}, "memoryPruneVersion") && saved !== CLAIM_PRUNE_V2) ||
+        (Object.hasOwn(restore.options ?? {}, "memoryPruneVersion") && !isClaimPruneVersion(saved)) ||
         restore.queueState?.privateState?.graph?.memoryPruneVersion !== saved) throw new NamingTaskError("invalid_options");
     memoryPruneVersion = saved;
   }
-  if (memoryPruneVersion !== undefined && (memoryPruneVersion !== CLAIM_PRUNE_V2 || !referenceMemory)) throw new NamingTaskError("invalid_options");
+  if (memoryPruneVersion !== undefined && (!isClaimPruneVersion(memoryPruneVersion) || !referenceMemory)) throw new NamingTaskError("invalid_options");
   const style = restore?.options?.utteranceStyle ?? utteranceStyle;
   const jev = selectParticipantJev(restore, jevResearch, { referenceMemory, strategy, style,
     legacy: [localGrounding, activeDecision, decisionShadowClient, groundingShadow] });
+  if (memoryPruneVersion === CLAIM_PRUNE_V3 && !jev) throw new NamingTaskError("invalid_options");
   const generatedOpening = isGenerationV17(jev?.generationRetryVersion);
   const dialogueRecoveryEnabled = !!jev && !allowsOrientationFallback(jev.generationRetryVersion);
   let dialogueInterruption = restore?.dialogueInterruption;
@@ -221,6 +222,7 @@ export async function createNamingTaskV2({
       ...(jev.profile.dialoguePolicy ? { dialoguePolicy: jev.profile.dialoguePolicy } : {}),
       ...(jev.participantPrompts ? { participantPrompts: true } : {}),
       generationRetryVersion: jev.generationRetryVersion,
+      judgmentMaterialVersion: jev.profile.judgmentMaterialVersion,
       newTrialAgreeNameScopeVersion: jev.newTrialAgreeNameScopeVersion,
       onJevTurnTrace: (record) => {
         jevTraces.push(clone(record));
