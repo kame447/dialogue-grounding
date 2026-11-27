@@ -10,6 +10,7 @@ import { pairedInterventionReplay } from '../../dialogue-model/runtime/diagnosti
 import { hash } from '../../dialogue-model/runtime/diagnostics/parity-verify/core.ts';
 import { createJevDecisionClient } from '../../dialogue-model/runtime/decision/jev-decision.ts';
 import type { DialoguePolicy, DraftAct } from '../../dialogue-model/runtime/decision/contract.ts';
+import type { InterventionVersion } from '../../dialogue-model/runtime/decision/bypass-acceptance.ts';
 import { createJevLocalTestClassifier } from '../../dialogue-model/runtime/local-grounding/jev-local-test.ts';
 import { createChatClient } from '../../dialogue-model/runtime/client.mjs';
 import { createHumanMessageSequencer } from '../../dialogue-model/runtime/web/human-message-queue.mjs';
@@ -167,6 +168,7 @@ export type Turn = { human: string; plan: Plan };
 export function initialState({ profile, ledger, memo, generationRetryVersion, agreeNameScopeVersion }: { profile: any; ledger?: Record<string, any>; memo?: ObservationMemo;
   generationRetryVersion?: RecordedGenerationRetryVersion; agreeNameScopeVersion?: AgreeNameScopeVersion }) {
   const state: any = structuredClone(OLD.state); if (ledger) state.ledger = structuredClone(ledger);
+  state.interventionPolicy = structuredClone(profile.interventionPolicy);
   const created = generationRetryVersion ?? (profile.dialoguePolicy === 'holistic_v5' ? defaultGenerationRetryVersion('two_stage_v3', 'holistic_v5') : undefined);
   const scope = agreeNameScopeVersion ?? (isGenerationV11(created) ? 'scoped_v6' : isGenerationV8(created) ? 'scoped_v5' : isGenerationV7(created) ? 'scoped_v4' : isGenerationV6(created) ? 'scoped_v3' : undefined);
   if (scope) state.agreeNameScopeVersion = scope;
@@ -179,15 +181,16 @@ export function publicFocusTurn(figureIndex = 0): Turn {
   return { human: 'この形の特徴を教えてください。', plan: { action: 'accept', target: 'figure_' + figureIndex, referent: 'figure_' + figureIndex, speech: text,
     aiExtraction: JSON.stringify([{ segmentId: 's1', quote: text, proposition: text, name: null, targets: [OWN.ownAnchors[figureIndex].id], aspect: 'part', linkedIssueId: null, respondsToTurn: null }]) } };
 }
-export async function buildRecords({ label = 'repair-first' as Label, technicalTrial, turns, ledger, dialoguePolicy, memo, generationRetryVersion, agreeNameScopeVersion, onTurn, promptSources }: {
+export async function buildRecords({ label = 'repair-first' as Label, technicalTrial, turns, ledger, dialoguePolicy, memo, generationRetryVersion, agreeNameScopeVersion, onTurn, promptSources, interventionVersion }: {
   label?: Label; technicalTrial?: { version: TrialVersion }; turns: Turn[]; ledger?: Record<string, any>; dialoguePolicy?: DialoguePolicy | null; memo?: ObservationMemo; generationRetryVersion?: RecordedGenerationRetryVersion;
   agreeNameScopeVersion?: AgreeNameScopeVersion;
   onTurn?: (label: Label, result: Awaited<ReturnType<typeof runTurn>>) => void;
   promptSources?: Awaited<ReturnType<typeof promptSourceManifest>>;
+  interventionVersion?: InterventionVersion;
 }) {
   const n = structuredClone(normal), tr = n.trials[0], m = n.run.manifest;
   await bindCurrentS4PromptSources(n, promptSources);
-  const profile = JSON.parse(JSON.stringify(researchTrialProfileV3(m.lunaRequest, m.timeouts, 'two_stage_v3', dialoguePolicy)));
+  const profile = JSON.parse(JSON.stringify(researchTrialProfileV3(m.lunaRequest, m.timeouts, 'two_stage_v3', dialoguePolicy, interventionVersion)));
   const digest = hash(profile);
   for (const s of [n.run, n.summary, tr]) { s.profile = structuredClone(profile); s.profileSha256 = digest; }
   tr.identity.profile = digest; tr.label = label; m.trials[0].label = label; n.summary.runOrder[0].label = label;

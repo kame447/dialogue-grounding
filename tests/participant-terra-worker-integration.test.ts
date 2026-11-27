@@ -1500,6 +1500,37 @@ function v12Transport(t: TestContext, h: ReturnType<typeof harness>) {
   return { lookup, options, textPhases, prompts };
 }
 
+test('human-led move-on pins the new intervention and keeps v15 through participant Worker restore', async t => {
+  const h = harness(true, { ...figureBankProtocol, allowedOrders: [['repair-first', 'bypass-enabled']] });
+  v12Transport(t, h);
+  const profile = 'participant_dialogue_v13_p5_human_led_move_on';
+  h.env.PARTICIPANT_DIALOGUE_PROFILE = profile;
+  const choose = h.controlled.choose;
+  h.controlled.choose = (name, body) => name === 'human_move_on_source' ? 'human_request'
+    : name === 'target' ? 'none' : choose?.(name, body);
+  h.controlled.selectedAction = 'move_on';
+  await h.receive();
+  const approval = await h.approve();
+  assert.equal(approval.plan.participantDialogueProfile, profile);
+  const { trial } = await jsonOk(await h.start());
+  const id = trial.sessionId;
+  await jsonOk(await h.request('message', { expectedRecordId: id, text: 'いったん別の話に移りたいです。' }));
+  await h.idle();
+  const record = await h.storage.get('record:' + id);
+  assert.equal(record.queueState.errorCode, null);
+  assert.equal(record.options.generationRetryVersion, 'jev_generation_retry_v15');
+  assert.equal(record.queueState.privateState.agreeNameScopeVersion, 'scoped_v11');
+  assert.equal(record.options.interventionPolicy.version, 'bypass_acceptance_v2');
+  assert.equal(record.jevTraces[0].intervention.reasonCode, 'human_led_move_on');
+  const posts = h.calls.length;
+  h.env.PARTICIPANT_DIALOGUE_PROFILE = 'participant_dialogue_v13_p5_semantic_guard';
+  h.evict();
+  const restored = await jsonOk(await h.request('state'));
+  assert.equal(restored.trial.sessionId, id);
+  assert.equal(h.calls.length, posts);
+  assert.doesNotMatch(JSON.stringify(restored), /humanMoveOn|human_move_on_source|interventionPolicy|bypass_acceptance_v2/u);
+});
+
 for (const strategy of ['repair-first', 'bypass-enabled']) {
   test('#206 Worker interrupt pauses a failed ' + strategy + ' turn across cold restore', async t => {
     const order = strategy === 'repair-first' ? ['repair-first', 'bypass-enabled'] : ['bypass-enabled', 'repair-first'];

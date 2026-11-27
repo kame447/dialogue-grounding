@@ -64,8 +64,10 @@ const workerDialogue = {
   participant_dialogue_v13_p5_naming_v4: { ...dialogueV13P5, newTrialAgreeNameScopeVersion: 'scoped_v11' },
   participant_dialogue_v13_p5_semantic_guard: { ...dialogueV13P5, newTrialAgreeNameScopeVersion: 'scoped_v11',
     pinnedVersions: { ...dialogueV13P5.pinnedVersions, generationRetryVersion: 'jev_generation_retry_v15' } },
+  participant_dialogue_v13_p5_human_led_move_on: { ...dialogueV13P5, newTrialAgreeNameScopeVersion: 'scoped_v11',
+    profile: researchTrialProfileV3(profile.lunaRequest, profile.timeouts, 'two_stage_v3', 'holistic_v5', 'bypass_acceptance_v2'),
+    pinnedVersions: { ...dialogueV13P5.pinnedVersions, generationRetryVersion: 'jev_generation_retry_v15' } },
 } as const;
-const workerDialogueProfileSha = researchHash(dialogueV12.profile);
 
 export function matchesWorkerDialogueProfile(key: ParticipantDialogueProfile | undefined, record: BaseRecord) {
   const { options, queueState } = record;
@@ -75,7 +77,7 @@ export function matchesWorkerDialogueProfile(key: ParticipantDialogueProfile | u
   const dialogue = workerDialogue[key];
   return !!dialogue && options.participantDialogueProfile === key &&
     options.memoryPruneVersion === CLAIM_PRUNE_V2 && state?.graph?.memoryPruneVersion === CLAIM_PRUNE_V2 &&
-    options.profileSha256 === workerDialogueProfileSha && options.questionLayout === dialogue.profile.questionLayout &&
+    options.profileSha256 === researchHash(dialogue.profile) && options.questionLayout === dialogue.profile.questionLayout &&
     options.dialoguePolicy === dialogue.profile.dialoguePolicy &&
     technicalTrial?.version === dialogue.technicalTrial.version && Object.keys(technicalTrial).length === 1 &&
     options.generationRetryVersion === dialogue.pinnedVersions.generationRetryVersion &&
