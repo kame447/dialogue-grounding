@@ -19,6 +19,7 @@ import { SHAPE_TERMINOLOGY_GENERATION } from '../../../dialogue-model/runtime/sh
 
 import type { BaseRecord } from '../../../dialogue-model/runtime/v2/base-assignment.ts';
 import { isPilot012ParticipantDialogueProfile, participantMemoryPruneVersion, PILOT012_PARTICIPANT_PROFILE, PILOT012_V18_PARTICIPANT_PROFILE,
+  PILOT012_V19_PARTICIPANT_PROFILE,
   type ParticipantDialogueProfile } from '../../../dialogue-model/runtime/v2/reception.ts';
 
 type Dispatch = (payload: unknown, expectedModelId: string) => Promise<ParticipantDispatchResult>;
@@ -96,6 +97,9 @@ const workerDialogue = {
   [PILOT012_PARTICIPANT_PROFILE]: dialogueV17Pilot012,
   [PILOT012_V18_PARTICIPANT_PROFILE]: { ...dialogueV17Pilot012,
     pinnedVersions: { ...dialogueV17Pilot012.pinnedVersions, generationRetryVersion: SHAPE_TERMINOLOGY_GENERATION },
+  },
+  [PILOT012_V19_PARTICIPANT_PROFILE]: { ...dialogueV17Pilot012,
+    pinnedVersions: { ...dialogueV17Pilot012.pinnedVersions, generationRetryVersion: 'jev_generation_retry_v19' },
   },
 } as const;
 

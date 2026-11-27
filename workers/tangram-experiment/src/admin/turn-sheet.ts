@@ -88,10 +88,16 @@ export function renderTurnSheet(record: Data, latency: LatencySummary, {escape, 
     }).join("") || judgments.map(j => line("対象", targetText(j.jevTurn?.executed?.target ?? j.jevTurn?.decision?.target ?? j.judgment?.targetSlot))).join("") ||
       attempts.map(a => line("試行対象", a.judgment?.targetSlot)).join("");
     const decision = traces.map(t => {
+      const publication = t.generatedPublication, executed = publication?.recovery?.executed ?? t.executed;
+      const purpose = executed?.visualPurpose;
+      const features = records(publication?.visualFeatures?.sources);
       return '<div class="turn-block">' + line("試行", t.attemptNumber) + line("選択", values(records(t.decisions).map(d => d.action))) +
         line("方略介入", values([t.intervention?.disposition, t.intervention?.reasonCode])) +
         line("実行", t.executed?.action ?? t.finalAction?.action) + line("実行名", t.executed ? t.executed.name : t.finalAction ? t.finalAction.candidateName : null) +
         line("実行特徴", t.executed ? t.executed.feature : t.finalAction ? t.finalAction.discriminatingFeature : null) +
+        line("判断の目的", values([purpose?.kind, purpose?.sourceTurn ? "発話 " + purpose.sourceTurn : null])) +
+        (t.status === "committed" ? features.map(feature => line("公開した特徴・観察の出所",
+          values([feature.quote, feature.source?.figureId, Array.isArray(feature.source?.path) ? feature.source.path.join(" / ") : null]))).join("") : "") +
         line("修復見込み", values([t.repairProspect?.prospect, t.repairProspect?.basis])) + '</div>';
     }).join("") || judgments.map(j => line("確定行動", j.judgment?.action) + line("名前", j.judgment?.candidateName) + line("特徴", j.judgment?.discriminatingFeature) + line("判断メモ", j.judgment?.note)).join("") ||
       attempts.map(a => line("試行判断", a.judgment?.action)).join("");

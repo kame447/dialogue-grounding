@@ -6,7 +6,9 @@ import { fileURLToPath } from 'node:url';
 import { MEMO_LOCAL_EXTRACTION_INSTRUCTIONS, memoExtractionPrompt } from '../dialogue-model/runtime/local-grounding/extract.ts';
 import { MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS, memoAiExtractionPrompt } from '../dialogue-model/runtime/local-grounding/extract-ai.ts';
 import { canonicalReceptionProtocolV2, canonicalReceptionProtocolV3, PILOT012_PARTICIPANT_PROFILE, PILOT012_V18_PARTICIPANT_PROFILE,
-  receptionProtocolSha256, receptionSummary, validateReceptionPlan } from '../dialogue-model/runtime/v2/reception.ts';
+  PILOT012_V19_PARTICIPANT_PROFILE, receptionProtocolSha256, receptionSummary, validateReceptionPlan } from '../dialogue-model/runtime/v2/reception.ts';
+import { VISUAL_FEATURE_GENERATION } from '../dialogue-model/runtime/v2/generation-guard.ts';
+import { VISUAL_FEATURE_DRAFT_V19 } from '../dialogue-model/runtime/v2/visual-feature-evidence.ts';
 import { createTrialV2, modelView } from '../dialogue-model/runtime/stimuli/scatter-v2.mjs';
 import { FIGURE_SETS, PILOT_FIGURE_SET_ID } from '../dialogue-model/runtime/stimuli/figure-bank.ts';
 import { CLAIM_PRUNE_V2, CLAIM_PRUNE_V3, REFERENCE_LIMITS } from '../dialogue-model/runtime/memory/reference-graph.mjs';
@@ -1454,9 +1456,11 @@ function v12Transport(t: TestContext, h: ReturnType<typeof harness>) {
   h.controlled.selectedAction = 'confirm';
   let slots: string[] = [];
   let decisionSlot: string;
+  const visualSource = () => ({ figureId: decisionSlot, path: ['analytic', 'shapes', 0] });
   const textPhases: string[] = [];
   const prompts: { phase: string; system: string[] }[] = [];
-  const options = { wrongPhase: '', rewrite: false, quotedDraft: false, sharedReading: false, structuredConfirmation: false };
+  const options = { wrongPhase: '', rewrite: false, quotedDraft: false, sharedReading: false, structuredConfirmation: false,
+    failVisualExtraction: false };
   function segment(quote: string, aspect: string, targets: string[], respondsToTurn: number | null = null) {
     return { segmentId: quote.slice(0, 4), quote, aspect, targets, proposition: quote, name: null, linkedIssueId: null, respondsToTurn };
   }
@@ -1504,6 +1508,17 @@ function v12Transport(t: TestContext, h: ReturnType<typeof harness>) {
       response = JSON.stringify(options.sharedReading
         ? latest.text === p5Support ? [segment(p5Support, 'construal', [decisionSlot], latest.turn - 1)] : []
         : latest.text === v12Answer ? [segment(v12Answer, 'contour', [], latest.turn - 1)] : []);
+    } else if (first === memoAiExtractionPrompt(SHAPE_TERMINOLOGY_GENERATION, true)) {
+      phase = 'ai_extraction';
+      if (options.failVisualExtraction) {
+        options.failVisualExtraction = false;
+        return new Response(null, { status: 502 });
+      }
+      const { candidateText } = JSON.parse(body.messages.slice(1).map((m: { content: string }) => m.content.split('\n').at(-1)).join(''));
+      assert.equal(candidateText, v12Check);
+      response = JSON.stringify({ segments: [], visualFeatures: { sources: [
+        { source: visualSource(), quote: 'そちらの形にも半円の切り込みがありますか？' },
+      ] } });
     } else if (first === MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS || first === memoAiExtractionPrompt(SHAPE_TERMINOLOGY_GENERATION)) {
       phase = 'ai_extraction';
       if (options.sharedReading) {
@@ -1513,6 +1528,9 @@ function v12Transport(t: TestContext, h: ReturnType<typeof harness>) {
         response = JSON.stringify([segment('細い部分がつながっています。', 'part', [decisionSlot]),
           segment('そちらの形にも半円の切り込みがありますか？', 'question', [])]);
       }
+    } else if (body.messages.some((message: { content: unknown }) => String(message.content).includes(VISUAL_FEATURE_DRAFT_V19))) {
+      phase = 'generation';
+      response = JSON.stringify({ text: v12Check, observationFeatures: [visualSource()] });
     } else if (options.structuredConfirmation && body.messages.some((message: { content: unknown }) =>
       String(message.content).includes('checkedFeatureとtext'))) {
       phase = last.includes('公開発話を書き直してください') ? 'rewrite' : 'generation';
@@ -1630,8 +1648,8 @@ test('Terra preobserve v2 keeps approval, start and first response timing privat
 });
 
 async function verifyPilot012WorkerProfile(t: TestContext,
-  participantProfile: typeof PILOT012_PARTICIPANT_PROFILE | typeof PILOT012_V18_PARTICIPANT_PROFILE,
-  generation: 'jev_generation_retry_v17' | typeof SHAPE_TERMINOLOGY_GENERATION) {
+  participantProfile: typeof PILOT012_PARTICIPANT_PROFILE | typeof PILOT012_V18_PARTICIPANT_PROFILE | typeof PILOT012_V19_PARTICIPANT_PROFILE,
+  generation: 'jev_generation_retry_v17' | typeof SHAPE_TERMINOLOGY_GENERATION | typeof VISUAL_FEATURE_GENERATION) {
   const h = harness(true, figureBankProtocol, true);
   const transport = v12Transport(t, h);
   transport.options.sharedReading = true;
@@ -1662,6 +1680,7 @@ async function verifyPilot012WorkerProfile(t: TestContext,
   let predecessor: string | undefined;
   for (const strategy of plan.order) {
     const { trial } = await jsonOk(await h.start(predecessor));
+    assert.equal(trial.scene.shapes.length, 6);
     const id = trial.sessionId;
     const key = 'record:' + id;
     const start = await h.storage.get(key);
@@ -1692,6 +1711,7 @@ async function verifyPilot012WorkerProfile(t: TestContext,
     const material = JSON.parse(action.body.state);
     assert.equal(material.judgmentMaterialVersion, 'jev_repair_quality_v1');
     assert.ok(material.referenceEvidence);
+    assert.equal(material.visualPurposeVersion, generation === VISUAL_FEATURE_GENERATION ? 'jev_visual_purpose_v1' : undefined);
 
     const sent = [...transport.textPhases];
     h.evict();
@@ -1710,6 +1730,9 @@ test('pilot012 pins the integrated versions at approval and preserves them throu
 
 test('pilot012 v18 pins the terminology generation at approval and preserves it through both trials and cold restore',
   t => verifyPilot012WorkerProfile(t, PILOT012_V18_PARTICIPANT_PROFILE, SHAPE_TERMINOLOGY_GENERATION));
+
+test('pilot012 v19 preserves the approved six-figure profile through both trials and cold restore',
+  t => verifyPilot012WorkerProfile(t, PILOT012_V19_PARTICIPANT_PROFILE, VISUAL_FEATURE_GENERATION));
 
 test('Terra preobserve makes a separate validated memo for each distinct frozen AI board', async () => {
   const h = harness(true, { ...figureBankProtocol, figureSetPolicy: 'per_trial',
@@ -2436,6 +2459,7 @@ for (const { order, dialogueProfile, scope, generationVersion = 'jev_generation_
 for (const { dialogueProfile, generation } of [
   { dialogueProfile: PILOT012_PARTICIPANT_PROFILE, generation: 'jev_generation_retry_v17' },
   { dialogueProfile: PILOT012_V18_PARTICIPANT_PROFILE, generation: SHAPE_TERMINOLOGY_GENERATION },
+  { dialogueProfile: PILOT012_V19_PARTICIPANT_PROFILE, generation: VISUAL_FEATURE_GENERATION },
 ]) test(`four-figure production Worker (${generation}) completes both conditions through observation, dialogue, cold restore, scoring and review`, async t => {
   const h = harness(true, { ...figureBankProtocol, seedPolicy: 'per_trial',
     figureSelection: { mode: 'preset', setId: PILOT_FIGURE_SET_ID } });
@@ -2453,7 +2477,7 @@ for (const { dialogueProfile, generation } of [
   assert.equal(approved.plan.memoryPruneVersion, CLAIM_PRUNE_V3);
   assert.deepEqual(approved.plan.trials.map((trial: any) => trial.figureSelection.figureIds),
     [['F1', 'F2', 'F3', 'F4'], ['F1', 'F2', 'F3', 'F4']]);
-  const privateFields = /figureSelection|figureIds|figureSetId|bankVersion|observationMemo|ownAnchors|participantModelPin|jevLedger|jevTraces|data:image/u;
+  const privateFields = /figureSelection|figureIds|figureSetId|bankVersion|observationMemo|ownAnchors|participantModelPin|jevLedger|jevTraces|visualPurpose|visualFeatures|data:image/u;
   let predecessor: string | undefined;
   for (const strategy of ['bypass-enabled', 'repair-first']) {
     const { trial } = await jsonOk(await h.start(predecessor));
@@ -2470,15 +2494,40 @@ for (const { dialogueProfile, generation } of [
     assert.equal(initial.queueState.privateState.graph.slots.length, 4);
     assert.equal(Object.keys(initial.queueState.privateState.ledger).length, 4);
     assert.equal(initial.jevLedger.phases.terra.initial_observation.posts, 1);
+    const visual = generation === VISUAL_FEATURE_GENERATION;
+    transport.options.failVisualExtraction = visual && predecessor === undefined;
     const callStart = h.calls.length, promptStart = transport.prompts.length;
     await jsonOk(await h.request('message', { expectedRecordId: id, text: '形を一つ確認したいです。', clientId: 'four-figure-turn' }));
     await h.idle();
+    if (visual && predecessor === undefined) {
+      const failed = await h.storage.get(recordKey);
+      assert.equal(failed.queueState.errorCode, 'ai_unavailable');
+      assert.equal(failed.jevTraces.at(-1).status, 'error');
+      assert.equal(failed.jevTraces.at(-1).publicSpeech, null);
+      assert.equal(failed.queueState.pendingHumanEventIds.length, 1);
+      assert.equal(failed.events.at(-1).speaker, 'human');
+      assert.deepEqual(failed.queueState.privateState, initial.queueState.privateState);
+      h.evict();
+      const pending = (await jsonOk(await h.request('state'))).trial;
+      assert.equal(pending.dialogueRecovery, 'retry');
+      await jsonOk(await h.request('retry', { expectedRecordId: id }));
+      await h.idle();
+    }
     const speaking = await h.storage.get(recordKey);
     assert.equal(speaking.queueState.errorCode, null);
     assert.equal(speaking.jevTraces.at(-1).status, 'committed');
     const action = h.calls.slice(callStart).find(call => call.kind === 'choices' && Object.hasOwn(call.body.questions, 'action'));
     assert.ok(action);
-    const usesTerminology = generation === SHAPE_TERMINOLOGY_GENERATION;
+    const usesTerminology = visual || generation === SHAPE_TERMINOLOGY_GENERATION;
+    if (visual) {
+      const trace = speaking.jevTraces.at(-1);
+      assert.equal(trace.executed.feature, null);
+      assert.deepEqual(trace.executed.detailFigureIds, []);
+      assert.deepEqual(trace.executed.visualPurpose, { kind: 'clarify_reference' });
+      assert.deepEqual(trace.generatedPublication.visualFeatures.sources[0].source,
+        { figureId: trace.executed.target.figureId, path: ['analytic', 'shapes', 0] });
+      assert.equal(transport.textPhases.slice(promptStart).filter(phase => phase === 'ai_extraction').length, 1);
+    }
     assert.equal(action.body.questions.action.instructions.includes(SHAPE_TERMINOLOGY), usesTerminology);
     for (const phase of ['dialogue', 'generation', 'ai_extraction']) {
       const prompt = transport.prompts.slice(promptStart).find(call => call.phase === phase);
@@ -2497,6 +2546,25 @@ for (const { dialogueProfile, generation } of [
     assert.deepEqual((await h.storage.get(recordKey)).queueState.privateState, speaking.queueState.privateState);
     assert.equal(h.calls.length, callsBeforeRestore);
     assert.equal(transport.textPhases.length, textBeforeRestore);
+    if (visual && predecessor === undefined) {
+      const replaceRecord = async (record: typeof speaking) => {
+        await h.storage.transaction(async tx => {
+          const owner = await tx.get('base:owner:v1');
+          owner.admissions[owner.activeKey].record = record;
+          await tx.put({ 'base:owner:v1': owner, [recordKey]: record });
+        });
+        h.evict();
+      };
+      const changed = structuredClone(speaking);
+      changed.jevTraces.at(-1).generatedPublication.visualFeatures.sources[0].quote = '公開されていない特徴';
+      changed.queueState.privateState.judgments.at(-1).generatedPublication.visualFeatures.sources[0].quote = '公開されていない特徴';
+      await replaceRecord(changed);
+      const rejected = await h.request('state');
+      assert.equal(rejected.status, 409);
+      assert.equal(h.calls.length, callsBeforeRestore);
+      await replaceRecord(speaking);
+      assert.equal((await jsonOk(await h.request('state'))).trial.sessionId, id);
+    }
     await h.complete(id, restored);
     const completed = await h.storage.get(recordKey);
     assert.equal(completed.status, 'completed');

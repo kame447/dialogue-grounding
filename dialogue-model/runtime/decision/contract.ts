@@ -13,6 +13,34 @@ export type JevAction = typeof JEV_ACTIONS[number];
 export const OBSERVATION_ASPECTS = Object.freeze(["orientation", "part", "contour", "construal", "referent"] as const);
 export type DecisionObservationAspect = typeof OBSERVATION_ASPECTS[number];
 export type JevTarget = { kind: "single"; figureId: string } | { kind: "multiple"; figureIds: string[] } | { kind: "none" };
+export const JEV_VISUAL_PURPOSE_VERSION = "jev_visual_purpose_v1";
+export const JEV_VISUAL_PURPOSE_GENERATION = "jev_generation_retry_v19";
+export function usesJevVisualPurpose(generation: unknown): generation is typeof JEV_VISUAL_PURPOSE_GENERATION {
+  return generation === JEV_VISUAL_PURPOSE_GENERATION;
+}
+export type JevVisualPurpose =
+  | { kind: "clarify_reference" | "resolve_mismatch" | "unknown" }
+  | { kind: "resolve_issue"; issueId: string; claimId: string; sourceTurn: number };
+/** Structural check for persisted decisions. Binding must also check the public source. */
+export function isJevVisualPurpose(value: unknown): value is JevVisualPurpose {
+  if (value === null || typeof value !== "object" || Object.getPrototypeOf(value) !== Object.prototype ||
+      !Object.hasOwn(value, "kind")) return false;
+  const { kind, issueId, claimId, sourceTurn } = value as Record<string, unknown>;
+  const keys = Reflect.ownKeys(value);
+  if (kind === "clarify_reference" || kind === "resolve_mismatch" || kind === "unknown") return keys.length === 1;
+  return kind === "resolve_issue" && keys.length === 4 && ["issueId", "claimId", "sourceTurn"].every(key => Object.hasOwn(value, key)) &&
+    typeof issueId === "string" && !!issueId.trim() && issueId.length <= 128 &&
+    typeof claimId === "string" && !!claimId.trim() && claimId.length <= 128 &&
+    typeof sourceTurn === "number" && Number.isSafeInteger(sourceTurn) && sourceTurn > 0;
+}
+/** The claim supplied here has already been checked against its public utterance. */
+export function visualPurposeMatchesSource(purpose: JevVisualPurpose, target: JevTarget,
+  claim: Pick<LocalClaimView, "id" | "issueId" | "sourceTurn" | "targets">): boolean {
+  return purpose.kind === "resolve_issue" && purpose.issueId === claim.issueId && purpose.claimId === claim.id &&
+    purpose.sourceTurn === claim.sourceTurn &&
+    (target.kind === "single" ? claim.targets.includes(target.figureId) :
+      target.kind === "multiple" && target.figureIds.some(id => claim.targets.includes(id)));
+}
 export type JevObservationRequest = {
   figureIds: string[];
   aspect: DecisionObservationAspect;
@@ -96,6 +124,7 @@ export type JevDecisionInput = {
   agreeNames?: PublicNameCandidate[];
   jevNaming?: { localRejections: Array<{ quote: string; reason: string }> };
   judgmentMaterialVersion?: JudgmentMaterialVersion;
+  visualPurposeVersion?: typeof JEV_VISUAL_PURPOSE_VERSION;
   shapeTerminologyVersion?: ShapeTerminologyVersion;
   publicationRecoveryContext?: JevPublicationRecoveryContext;
   referenceEvidence?: ReferenceEvidence;
@@ -162,6 +191,8 @@ export type JevDecision = {
   target: JevTarget;
   name: string | null;
   feature: string | null;
+  /** v19 confirm/repair only. A dialogue objective, with a public source when it identifies an issue. */
+  visualPurpose?: JevVisualPurpose;
   /** Sources of the selected name/feature, within target; never a narrowed target. */
   detailFigureIds?: string[];
   sharedClaimIds?: string[];
@@ -177,7 +208,7 @@ export type JevDecisionCallOptions = { signal?: AbortSignal; timeoutMs?: number;
    * validated by projectDecisionFailureEvidence; never invoked for referent, prospect or detail calls. */
   onFailureEvidence?: (evidence: unknown) => void };
 /** Execution projection, independently evidenced after an opt-in acceptance step. */
-export type JevExecutedDecision = Omit<Pick<JevDecision, "action" | "target" | "name" | "feature" | "observe" | "detailFigureIds" | "sharedClaimIds">,
+export type JevExecutedDecision = Omit<Pick<JevDecision, "action" | "target" | "name" | "feature" | "observe" | "detailFigureIds" | "sharedClaimIds" | "visualPurpose">,
   "action" | "observe"> & { action: Exclude<JevAction, "request_observation">; observe: null };
 export type JevDetailResult = { executed: JevExecutedDecision; evidence: JevDecisionStageEvidence };
 export const PARTICIPANT_TARGET_MENU_VERSION = "action_conditioned_targets_v1";

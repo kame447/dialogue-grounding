@@ -35,7 +35,9 @@ export function claimsLiveAsOf(records: readonly { kind?: unknown; id?: unknown;
   return claims.filter(c => !dead.has(c.id)) as NamingClaimLike[];
 }
 export type NamingJudgmentEvidence = { turnIndex?: unknown; judgment?: { action?: unknown; targetSlot?: unknown; candidateName?: unknown; discriminatingFeature?: unknown; followUp?: unknown } | null;
-  jevTurn?: { executed?: { action?: unknown; name?: unknown } | null } | null };
+  jevTurn?: { executed?: { action?: unknown; name?: unknown; visualPurpose?: unknown } | null } | null;
+  generatedPublication?: { recovery?: { executed?: { visualPurpose?: unknown } } | null;
+    withdrawal?: { figureId?: unknown } | null } | null };
 /** The names the judgments before `turn` left agreed, replayed over an empty ledger with the same acts the run applies (a judgment on no single figure and a feature-only
  * repair leave the ledger alone). A later defer or repair of an agreed name takes it out again. */
 function namesAgreedBefore(judgments: readonly NamingJudgmentEvidence[], turn: number): Set<string> {
@@ -54,6 +56,12 @@ function namesAgreedBefore(judgments: readonly NamingJudgmentEvidence[], turn: n
   for (const x of judgments) {
     if (typeof x?.turnIndex !== "number" || x.turnIndex >= turn || !x.judgment) continue;
     const g = x.judgment;
+    const execution = x.generatedPublication?.recovery?.executed ?? x.jevTurn?.executed;
+    if (g.action === "repair" && g.candidateName === null && execution?.visualPurpose !== undefined) {
+      const figureId = x.generatedPublication?.withdrawal?.figureId;
+      if (typeof figureId === "string" && figureId === g.targetSlot) ledger.set(figureId, { status: "unassigned", name: null });
+      continue;
+    }
     if (g.action === "repair" && g.candidateName === null && g.discriminatingFeature !== null && g.discriminatingFeature !== undefined) continue;
     apply(g);
     if (g.followUp && typeof g.followUp === "object") apply(g.followUp as NonNullable<NamingJudgmentEvidence["judgment"]>);
