@@ -63,13 +63,14 @@ function trial(id = "trial-private") {
   } };
 }
 const tick = async () => { for (let i = 0; i < 40; i++) await Promise.resolve(); };
-async function ui(initial = trial(), handler) {
+async function ui(initial = trial(), handler, { tabSessionId, busy = false } = {}) {
   const { root, ids: e } = makeDOM();
-  let state = { trial: initial }, timerId = 0, now = 10000, clientSequence = 0;
+  let state = { trial: initial, busy }, timerId = 0, now = 10000, clientSequence = 0;
   const timers = new Map(), calls = [];
   runInNewContext(script, {
     Date: class extends Date { static now() { return now; } },
     crypto: { randomUUID: () => "browser-client-" + ++clientSequence },
+    ...(tabSessionId ? { TangramTabSession: { resolve: async () => ({ kind: "restored", sessionId: tabSessionId }) } } : {}),
     document: { getElementById: (id) => e[id], createElement: (tag) => new Element(tag), createElementNS: (_, tag) => new Element(tag) },
     FormData: class {
       constructor(form) { this.values = Object.entries(form.elements).map(([name, node]) => [name, node.value]); }
@@ -79,6 +80,8 @@ async function ui(initial = trial(), handler) {
     clearTimeout: (id) => timers.delete(id),
     fetch: async (path, options) => {
       const body = options?.body ? JSON.parse(options.body) : undefined;
+      const tabHeader = options?.headers?.["X-Tab-Session"];
+      if (tabSessionId) assert.equal(tabHeader, tabSessionId, path);
       calls.push({ path, body });
       const custom = await handler?.({ path, body, state });
       let value = state;
@@ -135,6 +138,96 @@ test("opening is the first ordinary AI bubble; send immediately clears, refocuse
   assert.equal(messageCalls(calls)[0].body.clientId, "browser-client-1");
   held.release(); await tick();
   assert.equal(messageNodes(e).length, 2);
+});
+
+test("active AI work, a held POST and polling keep the next draft and its IME editable", async () => {
+  const initial = { ...trial(), status: "dialogue", aiStatus: "thinking", dialogueRecovery: "active" };
+  const post = gate(), stateRead = gate();
+  let posts = 0, reads = 0;
+  const app = await ui(initial, async ({ path }) => {
+    if (path === "/api/message" && ++posts === 1) await post.wait;
+    if (path === "/api/state" && ++reads === 2) await stateRead.wait;
+  }, { tabSessionId: "mock-tab", busy: true });
+  const { e, calls } = app;
+  assert.equal(typingShown(e), true);
+  assert.equal(e.utterance.disabled, false);
+  assert.equal(e["send-message"].disabled, false);
+
+  send(e, "最初の発話"); await tick();
+  assert.equal(e.utterance.disabled, false);
+  assert.equal(e.utterance.focused, true);
+  e.utterance.value = "にほんご";
+  e.utterance.fire("compositionstart");
+  await app.poll();
+  assert.equal(reads, 2, "state request is in flight");
+  assert.equal(e.utterance.disabled, false);
+  assert.equal(e.utterance.value, "にほんご");
+  stateRead.release(); await tick();
+  assert.equal(e.utterance.disabled, false);
+  assert.equal(e.utterance.value, "にほんご");
+  assert.equal(e.utterance.fire("keydown", { key: "Enter" }).prevented, false);
+  assert.equal(messageCalls(calls).length, 1);
+
+  e.utterance.value = "日本語の補足";
+  e.utterance.fire("compositionend");
+  assert.equal(e.utterance.fire("keydown", { key: "Enter" }).prevented, false);
+  await app.advance(0);
+  assert.equal(e["send-message"].disabled, false, "the second message can be queued before the first receipt");
+  e.utterance.fire("keydown", { key: "Enter" });
+  assert.equal(messageCalls(calls).length, 1);
+  e.utterance.value = "まだ送っていない文";
+  post.release(); await tick(); await app.poll();
+  assert.equal(e.utterance.value, "まだ送っていない文");
+  assert.deepEqual(messageCalls(calls).map(({ body }) => [body.text, body.clientId, body.expectedRecordId]), [
+    ["最初の発話", "browser-client-1", initial.sessionId],
+    ["日本語の補足", "browser-client-2", initial.sessionId],
+  ]);
+  assert.deepEqual(messageBodies(e).slice(1), ["最初の発話", "日本語の補足"]);
+});
+
+test("a held resume keeps the draft editable and sends it only on a later deliberate submit", async () => {
+  const initial = { ...trial(), status: "dialogue", aiStatus: "error", dialogueRecovery: "retry" };
+  const resume = gate();
+  const app = await ui(initial, async ({ path, state }) => {
+    if (path === "/api/retry") {
+      await resume.wait;
+      state.trial.aiStatus = "idle";
+      state.trial.dialogueRecovery = "active";
+      return { status: 200, body: state };
+    }
+  }, { tabSessionId: "mock-tab" });
+  const { e, calls } = app;
+  for (const recovery of ["paused", "unavailable", "retry"]) {
+    app.getState().trial.dialogueRecovery = recovery;
+    await app.poll();
+    assert.equal(e.utterance.disabled, false, recovery);
+    assert.equal(e["send-message"].disabled, true, recovery);
+  }
+  e.utterance.value = "復旧前の下書き";
+  e.chat.fire("submit"); await tick();
+  assert.equal(messageCalls(calls).length, 0);
+  e["retry-chat"].fire("click"); await tick();
+  assert.deepEqual(calls.filter(call => call.path === "/api/retry").map(call => call.body), [
+    { expectedRecordId: initial.sessionId },
+  ]);
+  assert.equal(e.utterance.disabled, false, "working while the /api/retry receipt is pending");
+  assert.equal(e["send-message"].disabled, true);
+  e.utterance.fire("compositionstart");
+  e.utterance.value = "復旧中に編集中";
+  e.utterance.fire("keydown", { key: "Enter", isComposing: true });
+  resume.release(); await tick();
+  assert.equal(e.utterance.value, "復旧中に編集中");
+  assert.equal(e.utterance.disabled, false);
+  assert.equal(e["send-message"].disabled, false);
+  assert.equal(messageCalls(calls).length, 0);
+  assert.equal(e.utterance.fire("keydown", { key: "Enter" }).prevented, false);
+  e.utterance.fire("compositionend"); await app.advance(0);
+  assert.equal(messageCalls(calls).length, 0);
+  e.utterance.fire("keydown", { key: "Enter" }); await tick(); await app.poll();
+  assert.deepEqual(messageCalls(calls).map(({ body }) => [body.text, body.expectedRecordId]), [
+    ["復旧中に編集中", initial.sessionId],
+  ]);
+  assert.equal(messageBodies(e).filter(text => text === "復旧中に編集中").length, 1);
 });
 
 test("202 with state reconciles the optimistic human once by clientId", async () => {

@@ -149,6 +149,8 @@ const trialCompleted = () => resultsReady() || Boolean(submitted() && (current?.
 const resultsUnlocked = () => resultsReady() && current?.resultLocked !== true && ["submitted", "unavailable"].includes(surveyAvailability());
 const participantStage = () => resolveStage({ localStage, reviewStage, submitted: submitted(), completed: trialCompleted(), survey: surveyAvailability() });
 const chatOpen = () => dialogueOpen() && participantStage() === "chat";
+const canEditComposer = () => chatOpen() && !reviewing && !showingIncompleteTrial;
+const canSendMessage = () => canEditComposer() && !working && !recoveryPending();
 const aiThinking = () => current?.aiStatus === "thinking" || serverBusy;
 function svgNode(tag, attributes = {}) {
   const node = document.createElementNS(SVG, tag);
@@ -625,7 +627,8 @@ function setControls() {
   $("start-trial").disabled = !canStart();
   renderProgress();
   $("history").querySelectorAll("button").forEach((node) => { node.disabled = working || sending || !chatOpen() || recoveryPending(); });
-  for (const id of ["utterance", "send-message"]) $(id).disabled = working || !chatOpen() || recoveryPending();
+  $("utterance").disabled = !canEditComposer();
+  $("send-message").disabled = !canSendMessage();
   $("finish-conversation").disabled = working || sending || pending.some((item) => item.status === "queued") || !dialogueOpen() || recoveryPending() || !scene()?.shapes?.length;
   $("back-to-chat").disabled = working;
   $("finish-conversation").hidden = submitted();
@@ -1162,13 +1165,14 @@ async function openRecord(recordId, stage, origin = {}) {
   if (working || reviewing) return;
   if (sending || pending.length) { $("notice").textContent = "送信中または未送信のメッセージがあります。送信を確認してから以前の試行を開いてください。"; return; }
   flushSurveyDraft();
-  const composer = { trial: trialIdentity(current), text: $("utterance").value };
   await operate(async () => {
     const sessionId = origin.sessionId ?? activeTabSessionId;
     const review = await api(recordPath(recordId, "review"), undefined, undefined, sessionId);
     if (!review || review.recordId !== recordId || !review.scene?.shapes?.length) throw Object.assign(new Error("not_found"), { code: "not_found" });
+    const text = $("utterance").value;
+    stashedComposer = text ? { trial: trialIdentity(current), text } : null;
     clearTimeout(refreshTimer); stateEpoch++;
-    reviewing = { recordId, sessionId, fromEntry: Boolean(origin.fromEntry) }; $("entry-stage").hidden = true; stashedComposer = composer.text ? composer : null;
+    reviewing = { recordId, sessionId, fromEntry: Boolean(origin.fromEntry) }; $("entry-stage").hidden = true;
     preparing = false;
     return { busy: false, trial: reviewTrial(recordId, review) };
   });
@@ -1228,7 +1232,7 @@ if (viewport) {
 }
 $("chat").addEventListener("submit", (event) => {
   event.preventDefault();
-  if (working || !chatOpen() || recoveryPending()) return;
+  if (!canSendMessage()) return;
   const text = $("utterance").value;
   if (!text.trim()) return;
   pending.push({ text, clientId: newClientId(), status: "queued" });

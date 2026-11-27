@@ -104,6 +104,7 @@ async function ui({ initial = trial(), storage = new Map(), local = new Map(), s
         const id = decodeURIComponent(match[1]);
         if (backend.noSurvey) return reply(404, { error: "not_found" });
         if (match[2] === "review") {
+          if (backend.reviewWait) await backend.reviewWait;
           if (!backend.reviews.has(id)) return reply(404, { error: "not_found" });
           const review = structuredClone(backend.reviews.get(id));
           if (locked(id, true)) { delete review.result; review.resultLocked = true; }
@@ -196,6 +197,8 @@ test("names -> questionnaire -> results with read-only review and a draft that s
   e["stage-nav"].querySelectorAll("button").find((b) => b.getAttribute("data-stage") === "chat").fire("click");
   assert.deepEqual(visibleStage(e), ["conversation-stage"]);
   assert.equal(e.chat.hidden, true, "no composer after submission");
+  assert.equal(e.utterance.disabled, true);
+  assert.equal(e["send-message"].disabled, true);
   assert.equal(e["finish-conversation"].hidden, true);
   assert.equal(e.history.focused, true);
   assert.match(e.history.textContent, /公開された相談/u);
@@ -288,7 +291,9 @@ test("earlier completed trials are reachable while a newer trial is in dialogue;
   const storage = new Map([["joint-naming-v2-draft", JSON.stringify({ trial: "rec-active", stage: "chat", answers: [["s-a", "下書きの名前"]] })]]);
   const local = new Map([["joint-naming-survey:rec-gone", JSON.stringify({ answers: { q_one: 1 }, comment: "期限切れ", synced: false })],
     ["joint-naming-survey:rec-earlier", JSON.stringify({ answers: { q_one: 6 }, comment: "", synced: false })]]);
-  const app = await ui({ storage, local, server: { records, reviews } });
+  let releaseReview;
+  const reviewWait = new Promise(resolve => { releaseReview = resolve; });
+  const app = await ui({ storage, local, server: { records, reviews, reviewWait } });
   const { e, calls } = app;
   assert.equal(e["record-history"].hidden, false);
   assert.match(e["record-summary"].textContent, /アンケート未回答 1件/u);
@@ -298,6 +303,10 @@ test("earlier completed trials are reachable while a newer trial is in dialogue;
   assert.deepEqual(buttons.map((b) => b.textContent), ["会話を見る", "アンケートに回答"]);
   e.utterance.value = "書きかけのメッセージ";
   buttons[1].fire("click"); await tick();
+  assert.equal(e.utterance.disabled, false, "the active draft is still editable while review is loading");
+  assert.equal(e["send-message"].disabled, true);
+  e.utterance.value = "閲覧を開く間にも編集した文";
+  releaseReview(); await tick();
   assert.deepEqual(visibleStage(e), ["questionnaire-stage"]);
   assert.equal(e["exit-review"].hidden, false);
   assert.match(e["review-notice"].textContent, /以前の試行を表示しています/u);
@@ -305,6 +314,9 @@ test("earlier completed trials are reachable while a newer trial is in dialogue;
   e["stage-nav"].querySelectorAll("button").find((b) => b.getAttribute("data-stage") === "chat").fire("click");
   assert.match(e.history.textContent, /以前の会話/u);
   assert.equal(e.chat.hidden, true);
+  assert.equal(e.utterance.disabled, true);
+  assert.equal(e.utterance.value, "");
+  assert.equal(e["send-message"].disabled, true);
   const stateCalls = calls.filter((call) => call.path === "/api/state").length;
   await app.poll(); await app.poll();
   assert.equal(calls.filter((call) => call.path === "/api/state").length, stateCalls, "the active trial never replaces the review");
@@ -322,7 +334,7 @@ test("earlier completed trials are reachable while a newer trial is in dialogue;
   assert.equal(calls.some((call) => ["/api/names", "/api/message", "/api/retry", "/api/ai-submit"].includes(call.path)), false, "nothing from the review reaches active-trial routes");
   e["exit-review"].fire("click"); await tick();
   assert.deepEqual(visibleStage(e), ["conversation-stage"]);
-  assert.equal(e.utterance.value, "書きかけのメッセージ", "unsent composer text returns");
+  assert.equal(e.utterance.value, "閲覧を開く間にも編集した文", "the latest unsent composer text returns");
   assert.match(e.board.textContent, /下書きの名前/u);
   assert.equal(e.chat.hidden, false);
 });
