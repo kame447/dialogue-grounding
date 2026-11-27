@@ -179,6 +179,11 @@ export function createHumanMessageSequencer({
       return true;
     },
     close() { closed = true; if (active) active.invalid = true; },
+    replacePrivateState(value) {
+      if (closed || active) return false;
+      privateState = clonePrivate(value);
+      return true;
+    },
     getPrivateState() { return clonePrivate(privateState); },
     getDurableState() {
       // Durable state is private: unlike polling copies, it retains script provenance.
@@ -204,12 +209,23 @@ export function createHumanMessageSequencer({
  * error pause; it never rejects with a raw upstream exception. retry() resumes
  * retained pending events explicitly, without re-enqueuing or renumbering them.
  */
-export function createHumanMessageQueue({ runAiTurn, ...options } = {}) {
+export function createHumanMessageQueue({ runAiTurn, afterPublication, beforeRequest, ...options } = {}) {
   if (typeof runAiTurn !== "function") fail("invalid_runner");
   const state = createHumanMessageSequencer(options);
-  let running = null, controller = null, current = null, retryRequested = false;
-  async function drain() {
+  let running = null, controller = null, publishedWorkController = null, current = null, retryRequested = false;
+  async function drain(retry) {
     for (;;) {
+      if (beforeRequest) {
+        if (state.getSnapshot().status === "closed") return false;
+        publishedWorkController = new AbortController();
+        try {
+          if (!await beforeRequest({
+            state: state.getDurableState(), replacePrivateState: state.replacePrivateState,
+            signal: publishedWorkController.signal, retry,
+          })) return false;
+        } finally { publishedWorkController = null; }
+        retry = false;
+      }
       current = state.beginRequest();
       if (!current) return;
       controller = new AbortController();
@@ -222,18 +238,23 @@ export function createHumanMessageQueue({ runAiTurn, ...options } = {}) {
         outcome = state.failRequest(current);
       } finally { current = null; controller = null; }
       if (outcome.status === "error") return;
+      if (outcome.status === "committed" && afterPublication && !await afterPublication(outcome.event)) return false;
     }
   }
   function start() {
     if (!running) {
       // Assign before invoking user code, including synchronous mock adapters.
+      const retry = retryRequested;
       retryRequested = false;
-      running = Promise.resolve().then(drain).finally(() => {
+      let workBlocked = false;
+      const turns = Promise.resolve().then(() => drain(retry));
+      const finished = beforeRequest || afterPublication ? turns.then(result => { workBlocked = result === false; }) : turns;
+      running = finished.finally(() => {
         running = null;
         const status = state.getSnapshot().status;
         // A new human message/retry may arrive after drain returns but before
         // this finalizer runs. Do not strand it in that microtask boundary.
-        if (status === "pending" || (retryRequested && status === "error")) start();
+        if ((!workBlocked && status === "pending") || (retryRequested && (beforeRequest || status === "error"))) start();
       });
     }
     return running;
@@ -252,10 +273,11 @@ export function createHumanMessageQueue({ runAiTurn, ...options } = {}) {
     getSnapshot: state.getSnapshot,
     getPrivateState: state.getPrivateState,
     getDurableState: state.getDurableState,
+    startPublishedWork: start,
     retry() { retryRequested = true; start(); return whenIdle(); },
     whenIdle,
-    close() { state.close(); controller?.abort(); },
+    close() { state.close(); controller?.abort(); publishedWorkController?.abort(); },
   });
-  if (options.initialState && state.getSnapshot().status === "pending") start();
+  if (!beforeRequest && options.initialState && state.getSnapshot().status === "pending") start();
   return queue;
 }

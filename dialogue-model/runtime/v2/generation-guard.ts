@@ -2,8 +2,9 @@
 // validated judgment determines state; detected wording never changes its act.
 import type { DialoguePolicy, DraftAct, JevExecutedDecision, PublicNameCandidate } from "../decision/contract.ts";
 import { isGenerationV18, type ShapeTerminologyVersion } from "../shape-terminology.ts";
+import { DEFERRED_AI_EXTRACTION_GENERATION, isDeferredAiExtractionGeneration } from "./deferred-ai-extraction.ts";
 export const VISUAL_FEATURE_GENERATION = "jev_generation_retry_v19";
-type GenerationV17Plus = "jev_generation_retry_v17" | ShapeTerminologyVersion | typeof VISUAL_FEATURE_GENERATION;
+type GenerationV17Plus = "jev_generation_retry_v17" | ShapeTerminologyVersion | typeof VISUAL_FEATURE_GENERATION | typeof DEFERRED_AI_EXTRACTION_GENERATION;
 // v3 was reserved for the experiment that extended fixed responses.
 // v9 contains every behaviour of v8 and widens only which wordings the orientation check accepts as a stated viewpoint or as the partner's own words. v8 contains every behaviour of v7 and adds the direct pointing-reply match to a targetless or differently-extracted confirm question. v7 contains every behaviour of v6 and widens the unsupported-topic-shift check to the particle-less and "next figure" wordings. v6 contains every behaviour of v5 and adds the unsupported-topic-shift check. v5 contains every behaviour of v4 (viewpoint rules, no fixed-sentence fallback, the whole-history judgment material, the private naming state) and adds the confirm-specific viewpoint note and the topic markers.
 export type GenerationRetryVersion = "jev_generation_retry_v1" | "jev_generation_retry_v2" | "jev_generation_retry_v4" | "jev_generation_retry_v5" | "jev_generation_retry_v6" | "jev_generation_retry_v7" | "jev_generation_retry_v8" | "jev_generation_retry_v9" | "jev_generation_retry_v10" | "jev_generation_retry_v11" | "jev_generation_retry_v12" | "jev_generation_retry_v13" | "jev_generation_retry_v14" | "jev_generation_retry_v15" | "jev_generation_retry_v16" | GenerationV17Plus;
@@ -66,8 +67,8 @@ export function isGenerationV17(version: unknown): version is GenerationV17Plus 
   return version === "jev_generation_retry_v17" || isGenerationV18(version) || isGenerationV19(version);
 }
 
-export function isGenerationV19(version: unknown): version is typeof VISUAL_FEATURE_GENERATION {
-  return version === VISUAL_FEATURE_GENERATION;
+export function isGenerationV19(version: unknown): version is typeof VISUAL_FEATURE_GENERATION | typeof DEFERRED_AI_EXTRACTION_GENERATION {
+  return version === VISUAL_FEATURE_GENERATION || isDeferredAiExtractionGeneration(version);
 }
 
 export function validAgreeNameScope(scope: unknown, generation: unknown): boolean {

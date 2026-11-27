@@ -44,6 +44,8 @@ import { findNamingActHints, hasOrientationWords, draftViolationCodes, deriveGen
 import { isGenerationV15, currentTurnNamingSource, semanticNamingCodes, namingCodesWithoutQuestion, contentPublicationRecovery, namingPublicationHold,
   type NamingHoldReason, type PublicationRecovery } from "./generation-guard.ts";
 import { isGenerationV16, isGenerationV17, isGenerationV19, confirmationDraftText, canReconsiderPublication, HUMAN_MOVE_ON_V17, PUBLICATION_RECOVERY_V17 } from "./generation-guard.ts";
+import { extractionDigest, isDeferredAiExtractionGeneration, validDeferredExtractionJob,
+  type DeferredAiExtractionJob } from "./deferred-ai-extraction.ts";
 import { isJevVisualPurpose, SEMANTIC_DRAFT_ACTS, visualPurposeMatchesSource } from "../decision/contract.ts";
 import { createMemoAiExtractor, memoAiExtractionPrompt, AiPublicError, aiHash, emptyAiEvidence } from "../local-grounding/extract-ai.ts";
 import { isGenerationV18, SHAPE_TERMINOLOGY_GENERATION, withShapeTerminology } from "../shape-terminology.ts";
@@ -63,6 +65,11 @@ import type { RepairGate } from "./agreement-gate.ts";
 
 type Graph = Parameters<typeof prepareLocalGroundingTurn>[1]["graph"];
 type Event = { id: string; seq: number; speaker: "human" | "ai"; text: string; nonReferential?: boolean };
+function jevPublicTurns(events: readonly Event[], through: number, aiEnabled: boolean) {
+  return events.filter(e => e.seq <= through && (!aiEnabled || events.filter(other => other.seq === e.seq).length === 1))
+    .slice(-REFERENCE_LIMITS.publicTurns).map(e => ({ turn: e.seq, speaker: e.speaker, text: e.text,
+      ...(e.nonReferential ? { nonReferential: true as const } : {}) }));
+}
 type Message = { role: "system" | "user" | "assistant"; content: string };
 type ChatClient = { complete(messages: Message[], options: { phase: string; timeoutMs: number; signal?: AbortSignal }): Promise<{ text: string }> };
 type Guard = { violations: string[]; regenerated: boolean; fallback: boolean };
@@ -264,6 +271,7 @@ export type JevPrivateState = {
   observationMemo: ObservationMemo | null; repairHistory: RepairHistoryEntry[];
   referenceAlternatives?: LocalReferenceAlternative[];
   aiPublic?: AiPublicState;
+  deferredAiExtraction?: DeferredAiExtractionJob;
 };
 export type JevTurnOptions = {
   memoryPruneVersion?: import("../memory/reference-graph.mjs").MemoryPruneVersion;
@@ -277,6 +285,7 @@ export type JevTurnOptions = {
   rotationMode?: "relative_pm90" | "relative_0";
   /** Offline replay can request the original retry wire text for a historical tape. */
   generationRetryVersion?: GenerationRetryVersion;
+  deferredAiExtractionProfileSha256?: string;
   judgmentMaterialVersion?: JudgmentMaterialVersion;
   /** Creation pin only. A resumed trial uses the scope in its saved state. */
   newTrialAgreeNameScopeVersion?: "scoped_v7" | "scoped_v8" | "scoped_v9" | "scoped_v10" | "scoped_v11" | "jev_naming_v1";
@@ -876,7 +885,8 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
   const hasAgreeNameScope=Object.hasOwn(s??{},'agreeNameScopeVersion');
   const referenceEvidenceEnabled=s?.graph?.memoryPruneVersion===CLAIM_PRUNE_V3;
   const hasAlternatives=Object.hasOwn(s??{},'referenceAlternatives');
-  if(!stateExact(s,['schemaVersion','interventionPolicy','ledger','graph','judgments','observationMemo','repairHistory',...(Object.hasOwn(s??{},'aiPublic')?['aiPublic']:[]),...(hasAgreeNameScope?['agreeNameScopeVersion']:[]),...(referenceEvidenceEnabled&&hasAlternatives?['referenceAlternatives']:[])])||s.schemaVersion!=='jev_private_state_v2'||!stateSame(s.interventionPolicy,interventionReference(version)))throw Error();
+  const hasDeferred=Object.hasOwn(s??{},'deferredAiExtraction');
+  if(!stateExact(s,['schemaVersion','interventionPolicy','ledger','graph','judgments','observationMemo','repairHistory',...(Object.hasOwn(s??{},'aiPublic')?['aiPublic']:[]),...(hasAgreeNameScope?['agreeNameScopeVersion']:[]),...(referenceEvidenceEnabled&&hasAlternatives?['referenceAlternatives']:[]),...(isDeferredAiExtractionGeneration(generation)&&hasDeferred?['deferredAiExtraction']:[])])||s.schemaVersion!=='jev_private_state_v2'||!stateSame(s.interventionPolicy,interventionReference(version)))throw Error();
   if(!validAgreeNameScope(s.agreeNameScopeVersion,generation)||hasAgreeNameScope&&
     (s.agreeNameScopeVersion===undefined||questionLayout!=='two_stage_v3'||s.agreeNameScopeVersion!=='scoped_v1'&&policy!=='holistic_v5'))throw Error();
   const jevNaming=s.agreeNameScopeVersion==='jev_naming_v1';
@@ -893,6 +903,28 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
   if(!sameSet(Object.keys(graph.ownSlots),ownSlots)||!Array.isArray(s.judgments)||!Array.isArray(s.repairHistory))throw Error();
   if(s.observationMemo!==null){const m=validateObservationMemo(s.observationMemo);if(!sameSet(m.figures.map(f=>f.id),ownSlots))throw Error();}
   if(Object.hasOwn(s,'aiPublic'))validateAiPublicState(s.aiPublic,ownSlots,Number.MAX_SAFE_INTEGER,s.graph);
+  if (isDeferredAiExtractionGeneration(generation) && s.aiPublic && s.judgments.length) {
+    const source = hasDeferred ? s.deferredAiExtraction : s.aiPublic.pending;
+    const committed = s.judgments.at(-1)?.aiPublic;
+    if (!source || source.aiSeq !== committed?.aiSeq || source.textSha256 !== committed.textSha256) throw Error();
+  }
+  if (hasDeferred) {
+    const job = s.deferredAiExtraction;
+    if (!validDeferredExtractionJob(job) || s.aiPublic?.pending !== null ||
+        s.aiPublic.log.some((entry: { aiSeq: number }) => entry.aiSeq === job.aiSeq) ||
+        job.graphRevision !== graph.revision || job.aiSeq !== graph.lastTurn + 1 ||
+        s.observationMemo === null || extractionDigest(JSON.stringify(s.observationMemo)) !== job.memoSha256) throw Error();
+    const prior = s.judgments.at(-1);
+    if (prior?.turnIndex !== job.aiSeq - 1 || prior.lastEventId !== job.humanEventId ||
+        prior.aiPublic?.aiSeq !== job.aiSeq || prior.aiPublic.textSha256 !== job.textSha256) throw Error();
+    if (events) {
+      const event = events.find(e => e.seq === job.aiSeq);
+      if (event?.speaker !== "ai" || event.nonReferential || event.id !== job.eventId ||
+          events.filter(e => e.speaker === "ai").at(-1) !== event ||
+          extractionDigest(event.text) !== job.textSha256 ||
+          extractionDigest(JSON.stringify(jevPublicTurns(events, job.aiSeq - 1, true))) !== job.publicTurnsSha256) throw Error();
+    }
+  }
   // Every claim record still held by the graph, withdrawn or not (the live view alone drops a claim as soon as it is withdrawn).
   const graphClaims=new Map<string,any>((s.graph.records as any[]).filter((r:any)=>r?.kind==='claim').map((r:any)=>[r.id,r]));
   const seen=new Set<string>();
@@ -1176,7 +1208,10 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
     throw new Error("Invalid Jev generation retry version");
   }
   const visualFeatureGeneration = isGenerationV19(generationRetryVersion);
-  const visualPurpose = usesJevVisualPurpose(generationRetryVersion);
+  const visualPurpose = usesJevVisualPurpose(generationRetryVersion) || isDeferredAiExtractionGeneration(generationRetryVersion);
+  const deferredProfile = options.deferredAiExtractionProfileSha256;
+  if (deferredProfile !== undefined && (!isDeferredAiExtractionGeneration(generationRetryVersion) ||
+      !/^[a-f0-9]{64}$/u.test(deferredProfile))) throw new JevTurnError("invalid_state");
   const terminology = isGenerationV18(generationRetryVersion) || visualFeatureGeneration ? SHAPE_TERMINOLOGY_GENERATION : undefined;
   const generationInstructions = withShapeTerminology(visualFeatureGeneration ? generation.instructions.replace(
     "形の分析（部分の形・つながり・配置）は、判断にdiscriminatingFeatureがあるときだけ、その特徴を1つに絞って述べて相手の反応を待ってください。",
@@ -1290,6 +1325,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
     try {
       abortIf(signal);
       const state = integrated?validateJevPrivateStateV2(privateState,slots,intervention!,questionLayout,options.dialoguePolicy,generationRetryVersion,usagePolicy,events):structuredClone(privateState);
+      if (state.deferredAiExtraction) throw new JevTurnError("invalid_state");
       if (!integrated && !validAgreeNameScope(state.agreeNameScopeVersion, generationRetryVersion)) throw new JevTurnError("invalid_state");
       checkPruneVersion(state);
       if(!integrated&&(Object.hasOwn(state,'schemaVersion')||Object.hasOwn(state,'interventionPolicy')||state.judgments?.some(j=>Object.hasOwn(j.jevTurn??{},'executed')||Object.hasOwn(j.jevTurn??{},'intervention'))))throw new JevTurnError('invalid_state');
@@ -1305,9 +1341,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         try { state.aiPublic = validateAiPublicState(state.aiPublic, slots, latest.seq - 1, state.graph); }
         catch { throw new JevTurnError("invalid_state"); }
       }
-      const publicTurns: Array<PublicTurn & Pick<Event, "nonReferential">> = events.filter(e => e.seq <= latest.seq &&
-        (!aiEnabled || events.filter(other => other.seq === e.seq).length === 1)).slice(-REFERENCE_LIMITS.publicTurns).map(e => ({ turn: e.seq, speaker: e.speaker, text: e.text,
-        ...(e.nonReferential ? { nonReferential: true } : {}) }));
+      const publicTurns = jevPublicTurns(events, latest.seq, aiEnabled);
       const recoveryCandidates = state.agreeNameScopeVersion === "jev_naming_v1" ? slots : undefined;
       const previous = state.judgments.at(-1), previousExecution=previous?publishedExecution(previous,recoveryCandidates):null, previousAi = previous && publicTurns.find(t => t.speaker === "ai" && t.turn > previous.turnIndex && t.turn < latest.seq);
       const local = { ...options.localGrounding, ...(holisticV3 ? { keepUnboundApproval: true } : {}), ...(holisticV4 ? { approvalFromNamedClaim: true } : {}), extractor: createMemoLocalExtractor({ complete(messages, options) {
@@ -1988,19 +2022,30 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
           progress: "unknown" }];
         record.repairHistory = repairHistory;
       }
-      if (aiEnabled) {
+      const nextGraph = deferredProfile !== undefined && aiEnabled && !aiPending && !record.generationGuard.fallback
+        ? applyReferenceUpdate(state.graph, prepared.update, { publicTurns, generationSucceeded: true }) as Graph : undefined;
+      let deferredJob: DeferredAiExtractionJob | undefined;
+      if (nextGraph && deferredProfile) {
+        const aiSeq = latest.seq + 1;
+        if (!requestSeq || lastEventId !== `event-${latest.seq}`) throw new JevTurnError("invalid_state");
+        deferredJob = { schemaVersion: "deferred_ai_extraction_v1", eventId: `event-${aiSeq}`, aiSeq,
+          humanEventId: lastEventId, requestSeq, textSha256: extractionDigest(result.text),
+          memoSha256: extractionDigest(JSON.stringify(generationMemo)), publicTurnsSha256: extractionDigest(JSON.stringify(publicTurns)),
+          profileSha256: deferredProfile, graphRevision: nextGraph.revision, state: "queued", error: null };
+      } else if (aiEnabled) {
         aiPending ??= await prepareAiPublic({ turn: latest.seq, aiSeq: latest.seq + 1, candidateText: result.text, publicTurns,
           ownSlots: slots, ownAnchors: [...ownAnchors], observations: generationMemo!, issueSummary: generationIssues! }, graph, record.aiPublic!, signal,
           record.generationGuard.fallback, memo === referentMemo ? observationMemo.sha256 : undefined);
         abortIf(signal);
         state.aiPublic!.pending = aiPending;
       }
+      const aiSource = deferredJob ?? aiPending;
       // A validated feature-only repair preserves both the current name and its
       // status. Keep the legacy applyJudgment default outside this Jev boundary.
       const featureOnlyRepair = judgment.action === "repair" && judgment.candidateName === null && judgment.discriminatingFeature !== null;
       const nextState: JevPrivateState = { ...(integrated?{schemaVersion:'jev_private_state_v2' as const,interventionPolicy:state.interventionPolicy}:{}), ledger: generatedRecovery ? ledgerAfterPublication(state.ledger, judgment, execution, withdrawal) :
         record.publicationRecovery || skipLedger || featureOnlyRepair ? structuredClone(state.ledger) : applyJudgment(state.ledger, judgment),
-        graph: applyReferenceUpdate(state.graph, prepared.update, { publicTurns, generationSucceeded: true }) as Graph,
+        graph: nextGraph ?? applyReferenceUpdate(state.graph, prepared.update, { publicTurns, generationSucceeded: true }) as Graph,
         observationMemo: memo, repairHistory, judgments: [...state.judgments, { turnIndex: latest.seq, lastEventId, status: "committed", judgment,
           generationGuard: structuredClone(record.generationGuard), ...(record.publicationRecovery ? { publicationRecovery: record.publicationRecovery } : {}),
           ...(typeof record.generatedPublication?.textSha256 === "string" ? { generatedPublication: record.generatedPublication } : {}),
@@ -2014,8 +2059,8 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
             ...(record.draftSharedClaims?.length ? { draftSharedClaims: structuredClone(record.draftSharedClaims) } : {}),
             ...(record.namingRequest ? { namingRequest: true as const } : {}),
             ...(record.namingReconfirm ? { namingReconfirm: true as const } : {}) },
-          localGrounding: { ...prepared.trace, attemptNumber }, ...(aiEnabled ? { aiPublic: { aiSeq: aiPending!.aiSeq, textSha256: aiPending!.textSha256 } } : {}) }],
-        ...(aiEnabled ? { aiPublic: state.aiPublic } : {}) };
+          localGrounding: { ...prepared.trace, attemptNumber }, ...(aiSource ? { aiPublic: { aiSeq: aiSource.aiSeq, textSha256: aiSource.textSha256 } } : {}) }],
+        ...(aiEnabled ? { aiPublic: state.aiPublic } : {}), ...(deferredJob ? { deferredAiExtraction: deferredJob } : {}) };
       // Keep the naming policy from the original snapshot, including its absence on historical v3 tapes.
       if (state.agreeNameScopeVersion) nextState.agreeNameScopeVersion = state.agreeNameScopeVersion;
       if (baseInput.referenceEvidence?.localAlternatives.length) {
@@ -2185,10 +2230,22 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
     pending.reasons = [...new Set(pending.reasons)]; research.pending = structuredClone(pending);
     return pending;
   }
+  async function completeDeferredAiExtraction(privateState: JevPrivateState, events: Event[], research: AiPublicResearch, signal?: AbortSignal) {
+    const state = validateJevPrivateStateV2(privateState, slots, intervention!, questionLayout, options.dialoguePolicy, generationRetryVersion, usagePolicy, events);
+    const job = state.deferredAiExtraction;
+    const publication = events.find(event => event.id === job?.eventId);
+    if (!job || job.state !== "running" || job.profileSha256 !== deferredProfile || !publication ||
+        !state.observationMemo || !aiEnabled) throw new JevTurnError("invalid_state");
+    return prepareAiPublic({ turn: job.aiSeq - 1, aiSeq: job.aiSeq, candidateText: publication.text,
+      publicTurns: jevPublicTurns(events, job.aiSeq - 1, true), ownSlots: slots, ownAnchors: [...ownAnchors],
+      observations: state.observationMemo, issueSummary: summarizeLocalIssues(state.graph) },
+    state.graph, research, signal, false, job.memoSha256);
+  }
   async function finalRequest({ events, privateState }: { events: Event[]; privateState: JevPrivateState }, retry = false) {
     checkProspectMode(privateState);
     checkPruneVersion(privateState);
     if(integrated)privateState=validateJevPrivateStateV2(privateState,slots,intervention!,questionLayout,options.dialoguePolicy,generationRetryVersion,usagePolicy);else rejectNewLegacyState(privateState);
+    if (privateState.deferredAiExtraction) throw new JevTurnError("invalid_state");
     if (!privateState.observationMemo) throw new JevTurnError("invalid_state");
     const memo = validateObservationMemo(privateState.observationMemo, { ownAnchors });
     const agreed = retry && questionLayout === "two_stage_v3" ? agreedNamesFromLedger(privateState.ledger) : {};
@@ -2199,5 +2256,11 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       { role: "user", content: generation.final + (retry ? "\n指定JSON形式で再提出してください。" + confirmed : "") }], { phase: "final_submission", timeoutMs: generation.timeoutMs });
   }
   return Object.freeze({ slots: Object.freeze([...slots]), initialPrivateState, initializePrivateState, runAiTurn, finalRequest,
-    getAttempts: () => structuredClone(attempts), snapshotGraph: (state: JevPrivateState, events?:readonly Event[]) => {checkPruneVersion(state);checkProspectMode(state);if(!integrated)rejectNewLegacyState(state);return snapshotReferenceGraph((integrated?validateJevPrivateStateV2(state,slots,intervention!,questionLayout,options.dialoguePolicy,generationRetryVersion,usagePolicy,events):state).graph);} });
+    ...(deferredProfile ? { completeDeferredAiExtraction } : {}),
+    getAttempts: () => structuredClone(attempts), snapshotGraph: (state: JevPrivateState, events?:readonly Event[]) => {
+      checkPruneVersion(state);checkProspectMode(state);if(!integrated)rejectNewLegacyState(state);
+      const checked = integrated ? validateJevPrivateStateV2(state,slots,intervention!,questionLayout,options.dialoguePolicy,generationRetryVersion,usagePolicy,events) : state;
+      if (checked.deferredAiExtraction && checked.deferredAiExtraction.profileSha256 !== deferredProfile) throw new JevTurnError("invalid_state");
+      return snapshotReferenceGraph(checked.graph);
+    } });
 }

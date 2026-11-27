@@ -16,10 +16,11 @@ import { participantChatProvider, requireExactParticipantModel, validateParticip
 import { researchHash, researchTrialProfileV3, RESEARCH_TRIAL_PROFILE_V1 } from '../../../dialogue-model/runtime/v2/research-profile.ts';
 import { RESEARCH_MAX_DEADLINE_MS, RESEARCH_MAX_LUNA_ATTEMPT_MS } from '../../../dialogue-model/runtime/v2/research-timeouts.ts';
 import { SHAPE_TERMINOLOGY_GENERATION } from '../../../dialogue-model/runtime/shape-terminology.ts';
+import { DEFERRED_AI_EXTRACTION_GENERATION } from '../../../dialogue-model/runtime/v2/deferred-ai-extraction.ts';
 
 import type { BaseRecord } from '../../../dialogue-model/runtime/v2/base-assignment.ts';
 import { isPilot012ParticipantDialogueProfile, participantMemoryPruneVersion, PILOT012_PARTICIPANT_PROFILE, PILOT012_V18_PARTICIPANT_PROFILE,
-  PILOT012_V19_PARTICIPANT_PROFILE,
+  PILOT012_V19_PARTICIPANT_PROFILE, PILOT012_V20_PARTICIPANT_PROFILE,
   type ParticipantDialogueProfile } from '../../../dialogue-model/runtime/v2/reception.ts';
 
 type Dispatch = (payload: unknown, expectedModelId: string) => Promise<ParticipantDispatchResult>;
@@ -100,6 +101,9 @@ const workerDialogue = {
   },
   [PILOT012_V19_PARTICIPANT_PROFILE]: { ...dialogueV17Pilot012,
     pinnedVersions: { ...dialogueV17Pilot012.pinnedVersions, generationRetryVersion: 'jev_generation_retry_v19' },
+  },
+  [PILOT012_V20_PARTICIPANT_PROFILE]: { ...dialogueV17Pilot012,
+    pinnedVersions: { ...dialogueV17Pilot012.pinnedVersions, generationRetryVersion: DEFERRED_AI_EXTRACTION_GENERATION },
   },
 } as const;
 

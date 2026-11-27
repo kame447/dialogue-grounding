@@ -1105,10 +1105,13 @@ export class TangramSession extends DurableObject<Env> {
           },
         } };
       }
-      return await createNamingTaskV2(({ ...runtime, jevResearch, seed, strategy, referenceMemory, memoryPruneVersion, rotationMode, ...figures,
+      const task = await createNamingTaskV2(({ ...runtime, jevResearch, seed, strategy, referenceMemory, memoryPruneVersion, rotationMode, ...figures,
         utteranceStyle: runtime.jevResearch.profile.utteranceStyle, createTrial: () => trial, onPersist,
         runDir: null, ...(restore ? { restore } : {}),
       }) as unknown as Parameters<typeof createNamingTaskV2>[0]) as NamingTask;
+      if (participantDialogueProfile === 'participant_dialogue_v20_deferred_ai_extraction' && restore)
+        this.ctx.waitUntil(task.whenIdle().catch(() => {}));
+      return task;
     }
     // New trials take the assignment's mode; a restored trial takes its mode from its own record only.
     // A new reception_plan_v3 trial also takes its frozen figure selection; a restored one keeps its record's.

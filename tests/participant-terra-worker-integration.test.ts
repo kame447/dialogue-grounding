@@ -6,7 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { MEMO_LOCAL_EXTRACTION_INSTRUCTIONS, memoExtractionPrompt } from '../dialogue-model/runtime/local-grounding/extract.ts';
 import { MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS, memoAiExtractionPrompt } from '../dialogue-model/runtime/local-grounding/extract-ai.ts';
 import { canonicalReceptionProtocolV2, canonicalReceptionProtocolV3, PILOT012_PARTICIPANT_PROFILE, PILOT012_V18_PARTICIPANT_PROFILE,
-  PILOT012_V19_PARTICIPANT_PROFILE, receptionProtocolSha256, receptionSummary, validateReceptionPlan } from '../dialogue-model/runtime/v2/reception.ts';
+  PILOT012_V19_PARTICIPANT_PROFILE, PILOT012_V20_PARTICIPANT_PROFILE, receptionProtocolSha256, receptionSummary, validateReceptionPlan } from '../dialogue-model/runtime/v2/reception.ts';
+import { DEFERRED_AI_EXTRACTION_GENERATION } from '../dialogue-model/runtime/v2/deferred-ai-extraction.ts';
 import { VISUAL_FEATURE_GENERATION } from '../dialogue-model/runtime/v2/generation-guard.ts';
 import { VISUAL_FEATURE_DRAFT_V19 } from '../dialogue-model/runtime/v2/visual-feature-evidence.ts';
 import { createTrialV2, modelView } from '../dialogue-model/runtime/stimuli/scatter-v2.mjs';
@@ -85,10 +86,12 @@ function answers(questions: Choices, observe = false, selectedAction?: string,
 function memory() {
   let items = new Map<string, any>();
   let pending: Promise<unknown> = Promise.resolve();
+  const hooks: { beforePut?: (key: string, item: any) => Promise<void> } = {};
   const view = (m: Map<string, any>) => ({
     async get(key: string) { return structuredClone(m.get(key)); },
     async put(entries: Record<string, unknown> | string, value?: unknown) {
       for (const [key, item] of Object.entries(typeof entries === 'string' ? { [entries]: value } : entries)) {
+        if (hooks.beforePut) await hooks.beforePut(key, item);
         m.set(key, structuredClone(item));
       }
     },
@@ -98,6 +101,7 @@ function memory() {
     async delete(key: string) { return m.delete(key); },
   });
   return {
+    hooks,
     async get(key: string) { return view(items).get(key); },
     async put(entries: Record<string, unknown>) { await view(items).put(entries); },
     async list(prefix: string) { return view(items).list({ prefix }); },
@@ -228,6 +232,11 @@ function harness(enabled = true, selectedProtocol: typeof protocol & {
 
   return {
     storage, calls, controlled, env, request,
+    liveTrial() { assert.ok(session.trial); return session.trial; },
+    async forceEnd() {
+      const reception = await storage.get('reception:v1');
+      return session.adminForceEndReception(reception.receptionId, reception.revision);
+    },
     async settleBackground() { await Promise.all(background.splice(0)); },
     evict(warmup = preobserve) { session = makeSession(warmup); },
     adminRecord(recordId: string) { return session.adminRecord(recordId); },
@@ -1460,7 +1469,7 @@ function v12Transport(t: TestContext, h: ReturnType<typeof harness>) {
   const textPhases: string[] = [];
   const prompts: { phase: string; system: string[] }[] = [];
   const options = { wrongPhase: '', rewrite: false, quotedDraft: false, sharedReading: false, structuredConfirmation: false,
-    failVisualExtraction: false };
+    failVisualExtraction: false, beforeTextResponse: undefined as undefined | ((phase: string) => Promise<Response | void>) };
   function segment(quote: string, aspect: string, targets: string[], respondsToTurn: number | null = null) {
     return { segmentId: quote.slice(0, 4), quote, aspect, targets, proposition: quote, name: null, linkedIssueId: null, respondsToTurn };
   }
@@ -1549,6 +1558,8 @@ function v12Transport(t: TestContext, h: ReturnType<typeof harness>) {
     textPhases.push(phase);
     prompts.push({ phase, system: body.messages.filter((message: { role: string }) => message.role === 'system')
       .map((message: { content: unknown }) => String(message.content)) });
+    const early = await options.beforeTextResponse?.(phase);
+    if (early) return early;
     return Response.json(chatResponse(options.wrongPhase === phase ? pin.lunaModelId : pin.terraModelId, response));
   });
   return { lookup, options, textPhases, prompts,
@@ -1648,8 +1659,8 @@ test('Terra preobserve v2 keeps approval, start and first response timing privat
 });
 
 async function verifyPilot012WorkerProfile(t: TestContext,
-  participantProfile: typeof PILOT012_PARTICIPANT_PROFILE | typeof PILOT012_V18_PARTICIPANT_PROFILE | typeof PILOT012_V19_PARTICIPANT_PROFILE,
-  generation: 'jev_generation_retry_v17' | typeof SHAPE_TERMINOLOGY_GENERATION | typeof VISUAL_FEATURE_GENERATION) {
+  participantProfile: typeof PILOT012_PARTICIPANT_PROFILE | typeof PILOT012_V18_PARTICIPANT_PROFILE | typeof PILOT012_V19_PARTICIPANT_PROFILE | typeof PILOT012_V20_PARTICIPANT_PROFILE,
+  generation: 'jev_generation_retry_v17' | typeof SHAPE_TERMINOLOGY_GENERATION | typeof VISUAL_FEATURE_GENERATION | typeof DEFERRED_AI_EXTRACTION_GENERATION) {
   const h = harness(true, figureBankProtocol, true);
   const transport = v12Transport(t, h);
   transport.options.sharedReading = true;
@@ -1711,7 +1722,8 @@ async function verifyPilot012WorkerProfile(t: TestContext,
     const material = JSON.parse(action.body.state);
     assert.equal(material.judgmentMaterialVersion, 'jev_repair_quality_v1');
     assert.ok(material.referenceEvidence);
-    assert.equal(material.visualPurposeVersion, generation === VISUAL_FEATURE_GENERATION ? 'jev_visual_purpose_v1' : undefined);
+    assert.equal(material.visualPurposeVersion, generation === VISUAL_FEATURE_GENERATION || generation === DEFERRED_AI_EXTRACTION_GENERATION
+      ? 'jev_visual_purpose_v1' : undefined);
 
     const sent = [...transport.textPhases];
     h.evict();
@@ -1733,6 +1745,208 @@ test('pilot012 v18 pins the terminology generation at approval and preserves it 
 
 test('pilot012 v19 preserves the approved six-figure profile through both trials and cold restore',
   t => verifyPilot012WorkerProfile(t, PILOT012_V19_PARTICIPANT_PROFILE, VISUAL_FEATURE_GENERATION));
+test('pilot012 v20 preserves the approved six-figure profile through both trials and cold restore',
+  t => verifyPilot012WorkerProfile(t, PILOT012_V20_PARTICIPANT_PROFILE, DEFERRED_AI_EXTRACTION_GENERATION));
+
+async function deferredHarness(t: TestContext) {
+  const h = harness(true, figureBankProtocol);
+  const transport = v12Transport(t, h);
+  transport.options.sharedReading = true;
+  h.controlled.selectedAction = 'accept';
+  h.env.PARTICIPANT_DIALOGUE_PROFILE = PILOT012_V20_PARTICIPANT_PROFILE;
+  h.env.PARTICIPANT_AI_PROXY.participantInitialObservationPolicy = transport.observationPolicy;
+  await h.receive();
+  const { plan } = await h.approve();
+  assert.equal(plan.participantDialogueProfile, PILOT012_V20_PARTICIPANT_PROFILE);
+  const { trial } = await jsonOk(await h.start());
+  const id = trial.sessionId, key = 'record:' + id;
+  assert.equal((await h.storage.get(key)).options.generationRetryVersion, DEFERRED_AI_EXTRACTION_GENERATION);
+  return { h, transport, id, key };
+}
+
+test('v20 makes publication durable before display and waits for memory before the next human extraction', { timeout: 20_000 }, async t => {
+  const { h, transport, id, key } = await deferredHarness(t);
+  const write = gate(), releaseWrite = gate(), extracting = gate(), releaseExtraction = gate();
+  h.storage.hooks.beforePut = async (k, item) => {
+    if (k === key && item?.queueState.privateState.deferredAiExtraction?.state === 'queued') {
+      write.resolve();
+      await releaseWrite.promise;
+    }
+  };
+  transport.options.beforeTextResponse = async phase => {
+    if (phase === 'ai_extraction') {
+      extracting.resolve();
+      await releaseExtraction.promise;
+    }
+  };
+  const first = h.request('message', { expectedRecordId: id, text: p5Question, clientId: 'v20-first' });
+  try {
+    await write.promise;
+    const before = h.liveTrial().getState();
+    assert.equal(before.events.length, 2);
+    assert.ok(!transport.textPhases.includes('ai_extraction'));
+    releaseWrite.resolve();
+    await jsonOk(await first);
+    await extracting.promise;
+    const durable = await h.storage.get(key);
+    assert.equal(durable.events.at(-1).text, p5Reading);
+    assert.equal(durable.queueState.privateState.deferredAiExtraction.eventId, durable.events.at(-1).id);
+    const visible = (await jsonOk(await h.request('state'))).trial;
+    assert.equal(visible.events.at(-1).text, p5Reading);
+    assert.doesNotMatch(JSON.stringify(visible), /deferredAiExtraction|publicTurnsSha256|graphRevision/u);
+    await jsonOk(await h.request('message', { expectedRecordId: id, text: p5Support, clientId: 'v20-second' }));
+    assert.equal(transport.textPhases.filter(phase => phase === 'dialogue').length, 1);
+    const duplicate = await jsonOk(await h.request('message', { expectedRecordId: id, text: p5Support, clientId: 'v20-second' }));
+    assert.equal(duplicate.eventId, 'event-4');
+  } finally {
+    releaseWrite.resolve(); releaseExtraction.resolve();
+  }
+  await h.idle();
+  const record = await h.storage.get(key);
+  assert.equal(record.queueState.privateState.deferredAiExtraction, undefined);
+  assert.equal(record.queueState.privateState.aiPublic.log.filter((row: any) => row.aiSeq === 3 && row.status === 'applied').length, 1);
+  assert.equal(transport.textPhases.filter(phase => phase === 'dialogue').length, 2);
+  assert.equal(transport.textPhases.filter(phase => phase === 'ai_extraction').length, 2);
+  assert.ok(record.deferredAiExtractionTimings[0].nextHumanProcessingAtMs >= record.deferredAiExtractionTimings[0].durableAtMs);
+});
+
+test('v20 gates both submissions while the extracted result is being saved', { timeout: 20_000 }, async t => {
+  const { h, id, key } = await deferredHarness(t);
+  const saving = gate(), release = gate();
+  h.storage.hooks.beforePut = async (k, item) => {
+    const state = item?.queueState?.privateState;
+    if (k === key && !state?.deferredAiExtraction && state?.aiPublic?.pending?.aiSeq === 3 && !item.humanSubmission) {
+      saving.resolve();
+      await release.promise;
+    }
+  };
+  await jsonOk(await h.request('message', { expectedRecordId: id, text: p5Question }));
+  await saving.promise;
+  let ai;
+  try {
+    const trial = h.liveTrial().getState();
+    const names = Object.fromEntries(trial.scene.shapes.map(({ id }: { id: string }) => [id, null]));
+    await assert.rejects(h.liveTrial().submitHuman({ names }), { code: 'ai_busy' });
+    let aiReturned = false;
+    ai = h.liveTrial().submitAI().finally(() => { aiReturned = true; });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(aiReturned, false);
+    const stored = await h.storage.get(key);
+    assert.equal(stored.queueState.privateState.deferredAiExtraction.state, 'running');
+    assert.equal(stored.humanSubmission, null);
+    assert.equal(stored.aiSubmission, null);
+  } finally { release.resolve(); }
+  assert.ok(ai);
+  await ai;
+  const stored = await h.storage.get(key);
+  assert.equal(stored.queueState.privateState.deferredAiExtraction, undefined);
+  assert.equal(stored.queueState.privateState.aiPublic.pending.aiSeq, 3);
+  assert.ok(stored.aiSubmission);
+});
+
+test('v20 retries a failed result write with the retained job and makes no additional RPC', async t => {
+  const { h, transport, id, key } = await deferredHarness(t);
+  h.storage.hooks.beforePut = async (k, item) => {
+    const state = item?.queueState?.privateState;
+    if (k === key && !state?.deferredAiExtraction && state?.aiPublic?.pending?.aiSeq === 3) throw new Error('synthetic write failure');
+  };
+  await jsonOk(await h.request('message', { expectedRecordId: id, text: p5Question }));
+  await assert.rejects(h.idle());
+  const before = await h.storage.get(key);
+  assert.equal(before.queueState.privateState.deferredAiExtraction.state, 'running');
+  assert.equal(h.liveTrial().getState().dialogueRecovery, 'retry');
+  assert.equal(h.liveTrial().getState().events.at(-1).text, p5Reading);
+  const phases = [...transport.textPhases];
+  h.storage.hooks.beforePut = undefined;
+  await jsonOk(await h.request('retry', { expectedRecordId: id }));
+  await h.idle();
+  const stored = await h.storage.get(key);
+  assert.equal(stored.queueState.privateState.deferredAiExtraction, undefined);
+  assert.equal(stored.queueState.privateState.aiPublic.pending.aiSeq, 3);
+  assert.deepEqual(transport.textPhases, phases);
+});
+
+for (const savedState of ['queued', 'running'] as const) test(`v20 restores a ${savedState} job and extracts only the published text`, async t => {
+  const { h, transport, id, key } = await deferredHarness(t);
+  transport.options.beforeTextResponse = async phase => phase === 'ai_extraction' ? new Response(null, { status: 422 }) : undefined;
+  await jsonOk(await h.request('message', { expectedRecordId: id, text: p5Question, clientId: 'v20-first' }));
+  await h.idle();
+  const failed = await h.storage.get(key);
+  const job = failed.queueState.privateState.deferredAiExtraction;
+  assert.equal(job.state, 'failed');
+  assert.equal(job.error, 'extraction_failed');
+  assert.equal(failed.events.at(-1).text, p5Reading);
+  assert.equal((await jsonOk(await h.request('state'))).trial.dialogueRecovery, 'retry');
+  assert.equal((await h.request('ai-submit', { expectedRecordId: id })).status, 409);
+
+  // The restarted owner only sees the saved job and the published event.
+  job.state = savedState; job.error = null;
+  await h.storage.transaction(async tx => {
+    const owner = await tx.get('base:owner:v1');
+    owner.admissions[owner.activeKey].record = failed;
+    await tx.put({ 'base:owner:v1': owner, [key]: failed });
+  });
+  const sent = [...transport.textPhases];
+  transport.options.beforeTextResponse = undefined;
+  h.evict();
+  const cold = (await jsonOk(await h.request('state'))).trial;
+  assert.equal(cold.events.at(-1).text, p5Reading);
+  await h.settleBackground();
+  if (savedState === 'running') {
+    assert.equal(cold.dialogueRecovery, 'retry');
+    assert.deepEqual(transport.textPhases, sent);
+    assert.equal((await h.storage.get(key)).queueState.privateState.deferredAiExtraction.error, 'delivery_unknown');
+    await jsonOk(await h.request('retry', { expectedRecordId: id }));
+    await h.idle();
+  }
+  const recovered = await h.storage.get(key);
+  assert.deepEqual(recovered.events, failed.events);
+  assert.equal(recovered.queueState.privateState.deferredAiExtraction, undefined);
+  assert.equal(recovered.queueState.privateState.aiPublic.pending.aiSeq, 3);
+  assert.deepEqual(transport.textPhases.slice(sent.length), ['ai_extraction']);
+});
+
+test('v20 model mismatch preserves the published reply and blocks later decisions and submission', async t => {
+  const { h, transport, id, key } = await deferredHarness(t);
+  transport.options.wrongPhase = 'ai_extraction';
+  await jsonOk(await h.request('message', { expectedRecordId: id, text: p5Question }));
+  await h.idle();
+  const failed = await h.storage.get(key);
+  assert.equal(failed.events.at(-1).text, p5Reading);
+  assert.equal(failed.queueState.privateState.deferredAiExtraction.error, 'model_mismatch');
+  assert.equal(failed.queueState.privateState.aiPublic.pending, null);
+  const viewer = (await jsonOk(await h.request('state'))).trial;
+  assert.equal(viewer.dialogueRecovery, 'unavailable');
+  assert.equal((await h.request('ai-submit', { expectedRecordId: id })).status, 409);
+  const phases = [...transport.textPhases];
+  await jsonOk(await h.request('message', { expectedRecordId: id, text: p5Support, clientId: 'v20-after-mismatch' }));
+  await h.idle();
+  assert.deepEqual(transport.textPhases, phases);
+});
+
+test('v20 force end keeps the published text and discards a late extraction result', { timeout: 20_000 }, async t => {
+  const { h, transport, id, key } = await deferredHarness(t);
+  const extracting = gate(), release = gate();
+  transport.options.beforeTextResponse = async phase => {
+    if (phase === 'ai_extraction') { extracting.resolve(); await release.promise; }
+  };
+  await jsonOk(await h.request('message', { expectedRecordId: id, text: p5Question }));
+  await extracting.promise;
+  try {
+    await h.forceEnd();
+    const terminal = await h.storage.get(key);
+    assert.equal(terminal.status, 'interrupted');
+    assert.equal(terminal.events.at(-1).text, p5Reading);
+    assert.equal(terminal.queueState.privateState.aiPublic.pending, null);
+  } finally { release.resolve(); }
+  await h.settleBackground();
+  h.evict();
+  await jsonOk(await h.request('state'));
+  const stored = await h.storage.get(key);
+  assert.equal(stored.status, 'interrupted');
+  assert.equal(stored.queueState.privateState.aiPublic.pending, null);
+  assert.equal(transport.textPhases.filter(phase => phase === 'ai_extraction').length, 1);
+});
 
 test('Terra preobserve makes a separate validated memo for each distinct frozen AI board', async () => {
   const h = harness(true, { ...figureBankProtocol, figureSetPolicy: 'per_trial',
@@ -2460,6 +2674,7 @@ for (const { dialogueProfile, generation } of [
   { dialogueProfile: PILOT012_PARTICIPANT_PROFILE, generation: 'jev_generation_retry_v17' },
   { dialogueProfile: PILOT012_V18_PARTICIPANT_PROFILE, generation: SHAPE_TERMINOLOGY_GENERATION },
   { dialogueProfile: PILOT012_V19_PARTICIPANT_PROFILE, generation: VISUAL_FEATURE_GENERATION },
+  { dialogueProfile: PILOT012_V20_PARTICIPANT_PROFILE, generation: DEFERRED_AI_EXTRACTION_GENERATION },
 ]) test(`four-figure production Worker (${generation}) completes both conditions through observation, dialogue, cold restore, scoring and review`, async t => {
   const h = harness(true, { ...figureBankProtocol, seedPolicy: 'per_trial',
     figureSelection: { mode: 'preset', setId: PILOT_FIGURE_SET_ID } });
@@ -2494,7 +2709,7 @@ for (const { dialogueProfile, generation } of [
     assert.equal(initial.queueState.privateState.graph.slots.length, 4);
     assert.equal(Object.keys(initial.queueState.privateState.ledger).length, 4);
     assert.equal(initial.jevLedger.phases.terra.initial_observation.posts, 1);
-    const visual = generation === VISUAL_FEATURE_GENERATION;
+    const visual = generation === VISUAL_FEATURE_GENERATION || generation === DEFERRED_AI_EXTRACTION_GENERATION;
     transport.options.failVisualExtraction = visual && predecessor === undefined;
     const callStart = h.calls.length, promptStart = transport.prompts.length;
     await jsonOk(await h.request('message', { expectedRecordId: id, text: '形を一つ確認したいです。', clientId: 'four-figure-turn' }));
@@ -2520,6 +2735,7 @@ for (const { dialogueProfile, generation } of [
     assert.ok(action);
     const usesTerminology = visual || generation === SHAPE_TERMINOLOGY_GENERATION;
     if (visual) {
+      assert.equal(speaking.queueState.privateState.deferredAiExtraction, undefined);
       const trace = speaking.jevTraces.at(-1);
       assert.equal(trace.executed.feature, null);
       assert.deepEqual(trace.executed.detailFigureIds, []);
