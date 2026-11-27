@@ -22,7 +22,7 @@ type CacheEntry = {
   memoSha256: string;
 };
 export type WorkerTerraCache = {
-  read(key: string): Promise<unknown>;
+  read(key: string, signal?: AbortSignal): Promise<unknown>;
   /** Atomically insert on absence and return the stored winner. Never overwrite. */
   putIfAbsent(key: string, entry: CacheEntry): Promise<unknown>;
 };
@@ -41,6 +41,16 @@ function ownProjection(input: ObservationInput) {
     ownAnchors: [...own.ownAnchors].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
       .map(({ id, bbox: { x, y, w, h }, centroid }) => ({ id, bbox: { x, y, w, h }, centroid })),
   };
+}
+
+function initialKey(terraModelId: string, boundJson: string, generation?: InitialObservationGeneration) {
+  const fields = [SCHEMA, terraModelId, OBSERVATION_MEMO_VERSION, OBSERVATION_INITIAL_INSTRUCTIONS, boundJson];
+  if (generation) fields.push(generation);
+  return sha256(JSON.stringify(fields)).then(digest => SCHEMA + ':' + digest);
+}
+
+export function workerTerraInitialKey(pin: ParticipantModelPin, own: ObservationInput, generation?: InitialObservationGeneration) {
+  return initialKey(validateParticipantModelPin(pin).terraModelId, JSON.stringify(ownProjection(own)), generation);
 }
 
 function checkAbort(options?: ObservationOptions): void {
@@ -104,13 +114,6 @@ export function createWorkerTerraObserver({ modelPin, own, visual, cache, timeou
   }, { timeoutMs, now, researchLimits });
 
   let keyPromise: Promise<string> | undefined;
-  function cacheKey(): Promise<string> {
-    const fields = [SCHEMA, terraModelId, OBSERVATION_MEMO_VERSION, OBSERVATION_INITIAL_INSTRUCTIONS, boundJson];
-    if (initialObservationGeneration) fields.push(initialObservationGeneration);
-    keyPromise ??= sha256(JSON.stringify(fields))
-      .then(digest => SCHEMA + ':' + digest);
-    return keyPromise;
-  }
 
   async function validateEntry(value: unknown, key: string): Promise<ObservationMemo> {
     const entry = object(value);
@@ -131,8 +134,8 @@ export function createWorkerTerraObserver({ modelPin, own, visual, cache, timeou
       checkOwn(input);
       if (!cache) return observer.observeAll(bound, options);
       try {
-        const key = await cacheKey();
-        const hit = await cache.read(key);
+        const key = await (keyPromise ??= initialKey(terraModelId, boundJson, initialObservationGeneration));
+        const hit = await cache.read(key, options?.signal);
         checkAbort(options);
         if (hit !== null && hit !== undefined) {
           const memo = await validateEntry(hit, key);

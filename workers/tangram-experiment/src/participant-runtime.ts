@@ -132,14 +132,38 @@ function boundFetch(dispatch: Dispatch, modelId: string, ledger: RunBudget): typ
   };
 }
 
-export function createWorkerParticipantRuntime({ pin, own, proxy, cache, limits, usage, initialObservationGeneration, participantDialogueProfile }: {
+type ParticipantObservationOptions = {
   pin: ParticipantModelPin;
   own: ObservationInput;
   proxy: ParticipantService;
   cache: WorkerTerraCache;
-  participantDialogueProfile?: ParticipantDialogueProfile;
   initialObservationGeneration?: InitialObservationGeneration;
-} & ({ limits: Readonly<BudgetLimits>; usage?: never } | { limits?: never; usage: ParticipantUsageLedger })) {
+};
+
+function participantChat(proxy: ParticipantService, usage?: ParticipantUsageLedger): Dispatch {
+  return (payload, expected) => usage ? proxy.participantUsageChat!(payload, expected) : proxy.participantChat(payload, expected);
+}
+
+export function createParticipantTerraObserver({ pin, own, proxy, cache, usage, initialObservationGeneration }:
+  ParticipantObservationOptions & { usage?: ParticipantUsageLedger }) {
+  const chat = participantChat(proxy, usage);
+  const terra = createWorkerTerraObserver({
+    modelPin: pin, own, cache, timeoutMs: profile.timeouts.observationMs, researchLimits, initialObservationGeneration,
+    visual: (payload, signal) => usage ? usage.dispatch('terra', chat, payload, signal) : chat(payload, pin.terraModelId),
+    ...(usage ? { onCacheHit: () => usage.cacheHit() } : {}),
+  });
+  if (!usage) return terra;
+  return {
+    observeAll: (...args: Parameters<typeof terra.observeAll>) =>
+      usage.logical('terra', 'initial_observation', () => terra.observeAll(...args)),
+    reobserve: (...args: Parameters<typeof terra.reobserve>) =>
+      usage.logical('terra', 'reobservation', () => terra.reobserve(...args)),
+  };
+}
+
+export function createWorkerParticipantRuntime({ pin, own, proxy, cache, limits, usage, initialObservationGeneration, participantDialogueProfile }:
+  ParticipantObservationOptions & { participantDialogueProfile?: ParticipantDialogueProfile } &
+  ({ limits: Readonly<BudgetLimits>; usage?: never } | { limits?: never; usage: ParticipantUsageLedger })) {
   if (pin.schemaVersion !== 'participant_model_pin_v1' && !usage) throw new NamingTaskError('invalid_options');
   const dialogue = participantDialogueProfile === undefined ? null : workerDialogue[participantDialogueProfile];
   if (participantDialogueProfile !== undefined && (!dialogue || pin.schemaVersion !== 'participant_model_pin_v3' || !usage)) {
@@ -147,7 +171,7 @@ export function createWorkerParticipantRuntime({ pin, own, proxy, cache, limits,
   }
   const runtimeProfile = dialogue?.profile ?? profile;
   const ledger = usage ?? new RunBudget(limits!);
-  const chat: Dispatch = (payload, expected) => usage ? proxy.participantUsageChat!(payload, expected) : proxy.participantChat(payload, expected);
+  const chat = participantChat(proxy, usage);
   const choices: Dispatch = (payload, expected) => usage ? proxy.participantUsageChoices!(payload, expected) : proxy.participantChoices(payload, expected);
   function meteredFetch(dispatch: Dispatch, provider: 'jev' | 'luna' | 'terra', expected: string): typeof fetch {
     if (ledger instanceof RunBudget) {
@@ -197,17 +221,9 @@ export function createWorkerParticipantRuntime({ pin, own, proxy, cache, limits,
       return usage.runPhase(phase, () => jevFetch(url, init));
     }) as typeof fetch,
   } : transport;
-  const terra = createWorkerTerraObserver({
-    modelPin: pin, own, cache, timeoutMs: profile.timeouts.observationMs, researchLimits, initialObservationGeneration,
-    visual: (payload, signal) => usage ? usage.dispatch('terra', chat, payload, signal) : chat(payload, pin.terraModelId),
-    ...(usage ? { onCacheHit: () => usage.cacheHit() } : {}),
-  });
   const jevResearch: JevResearchOptions<JevResearchLedger> = {
     ...(dialogue ?? {}), profile: runtimeProfile, ledger,
-    observer: usage ? {
-      observeAll: (input, options) => usage.logical('terra', 'initial_observation', () => terra.observeAll(input, options)),
-      reobserve: (input, options) => usage.logical('terra', 'reobservation', () => terra.reobserve(input, options)),
-    } : terra,
+    observer: createParticipantTerraObserver({ pin, own, proxy, cache, usage, initialObservationGeneration }),
     jevDecision: createJevDecisionClient({ ...transport, enabled: true, questionLayout: runtimeProfile.questionLayout,
       participantTargetMenu: !dialogue, participantPrompts: dialogue !== null })!,
     localGrounding: {

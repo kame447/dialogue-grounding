@@ -3,6 +3,7 @@ import { createChatClient } from "../../../dialogue-model/runtime/client.mjs";
 import { createNamingTaskV2 } from "../../../dialogue-model/runtime/v2/naming-task-v2.mjs";
 import { createGroundingJudgeClient } from "../../../dialogue-model/runtime/grounding/client.ts";
 import { INITIAL_OBSERVATION_STRUCTURED_V1 } from "../../../dialogue-model/runtime/observation/initial-observation-generation.ts";
+import { workerTerraInitialKey } from "../../../dialogue-model/runtime/observation/worker-terra-observer.ts";
 import { CLAIM_PRUNE_V2 } from "../../../dialogue-model/runtime/memory/reference-graph.mjs";
 import { NamingTaskError } from "../../../dialogue-model/runtime/naming-error.mjs";
 import { sessionCookie, sessionId } from "./session-cookie.ts";
@@ -29,7 +30,8 @@ import type { BaseOwnerState, BaseRecord, BaseSession, MakeBaseTask, OwnerRead }
 import { participantContactHTML } from "../../../dialogue-model/runtime/v2/participant-contact.ts";
 import { PARTICIPANT_STOP_HTML } from "../../../dialogue-model/runtime/v2/participant-stop-page.ts";
 import { ReceptionError, validateReception, createReception, approveReception, cancelReception,
-  participantReception, receptionSummary, effectiveBetweenTrials, validateParticipantLimits, isParticipantDialogueProfile } from '../../../dialogue-model/runtime/v2/reception.ts';
+  participantReception, receptionSummary, effectiveBetweenTrials, effectiveFigureSelection, effectiveRotationMode,
+  validateParticipantLimits, isParticipantDialogueProfile } from '../../../dialogue-model/runtime/v2/reception.ts';
 import { isSubmittedQuestionnaire } from '../../../dialogue-model/runtime/v2/questionnaire-gate.ts';
 import { receptionOpen, validateReceptionSettings } from './admin/reception-settings.ts';
 import type { ProtocolEntry, ReceptionSettings } from './admin/reception-settings.ts';
@@ -45,6 +47,7 @@ import { PARTICIPANT_PRODUCTION_PROFILE } from '../../../dialogue-model/runtime/
 import { ParticipantUsageLedger, type ParticipantUsageStore } from '../../../dialogue-model/runtime/web/participant-usage.ts';
 import { createWorkerParticipantRuntime, workerParticipantPolicy, matchesWorkerDialogueProfile,
   type ParticipantService } from "./participant-runtime.ts";
+import { ParticipantPreobservations } from './participant-preobservation.ts';
 export { AdminIndex };
 
 type Strategy = "repair-first" | "bypass-enabled";
@@ -70,6 +73,13 @@ type NamingTask = {
   submitHuman(options: { names: unknown }): Promise<unknown>;
   submitAI(): Promise<unknown>;
 };
+
+function participantTrialMaterial(seed: number, rotationMode: RotationMode, figureSelection?: unknown) {
+  const figures = figureSelection === undefined ? {} : { figureSelection };
+  const trial = createTrialV2({ seed, rotationMode, ...figures });
+  const model = modelView(trial);
+  return { trial, figures, own: { ownImage: { mimeType: model.mimeType, base64: model.png.toString('base64') }, ownAnchors: model.anchors } };
+}
 
 export interface Env extends SoftLimitBindings {
   BASE_ASSIGNMENT_JSON?: string;
@@ -165,6 +175,7 @@ export class TangramSession extends DurableObject<Env> {
   // Trials replaced by /api/start in this browser: their late writes go only to their own archive key.
   private retired = new Set<string>();
   private receptionQueue: Promise<unknown> = Promise.resolve();
+  private readonly preobservations = new ParticipantPreobservations(this.ctx.storage);
   private browserQueue: Promise<unknown> = Promise.resolve();
   // The explicit intent of the admission in progress: a reception plan trial, or the configured legacy assignment.
   private admission: { kind: 'reception'; receptionId: string; expectedRevision: number; index: number;
@@ -251,7 +262,8 @@ export class TangramSession extends DurableObject<Env> {
           ...(entry.failureCause ? { failureCause: entry.failureCause } : {}),
           usage: journal === undefined ? null : ParticipantUsageLedger.readSnapshot(journal, assignmentId, plan.participantModelPin) });
       }
-      return { receptionId, failedStarts };
+      const preobservations = plan.participantModelPin ? await this.preobservations.readUsage(tx, plan.participantModelPin) : [];
+      return { receptionId, failedStarts, ...(preobservations.length ? { preobservations } : {}) };
     });
   }
   async adminApproveReception(input: { expectedRevision: number; order: number; protocol: unknown }): Promise<Reception> {
@@ -261,6 +273,7 @@ export class TangramSession extends DurableObject<Env> {
       if (!receptionOpen(settings.mode)) throw new ReceptionError('reception_closed');
       if (!settings.protocol) throw new ReceptionError('protocol_unconfigured');
       const protocol = settings.protocol.protocol, expected = input?.protocol;
+      let participantPolicy: Awaited<ReturnType<typeof workerParticipantPolicy>> | undefined;
       let participant: Pick<Parameters<typeof approveReception>[1],
         'participantModelPin' | 'participantRuntimeProfile' | 'participantLimits' | 'initialObservationGeneration' | 'participantDialogueProfile'> = {};
       const generationPin = this.env.PARTICIPANT_TERRA_GENERATION_ENABLED === 'on';
@@ -282,9 +295,9 @@ export class TangramSession extends DurableObject<Env> {
           if (configuredProfile !== undefined && !usageOnly) throw new Error('unknown participant profile');
           const participantLimits = usageOnly ? undefined
             : validateParticipantLimits(JSON.parse(this.env.PARTICIPANT_TERRA_LIMITS_JSON ?? 'null'));
-          const { pin: participantModelPin } = await workerParticipantPolicy(this.env.PARTICIPANT_AI_PROXY, usageOnly, initialObservationGeneration,
+          participantPolicy = await workerParticipantPolicy(this.env.PARTICIPANT_AI_PROXY, usageOnly, initialObservationGeneration,
             allTerraPin ? 'participant_model_pin_v3' : generationPin ? 'participant_model_pin_v2' : 'participant_model_pin_v1');
-          participant = { participantModelPin, ...(initialObservationGeneration ? { initialObservationGeneration } : {}),
+          participant = { participantModelPin: participantPolicy.pin, ...(initialObservationGeneration ? { initialObservationGeneration } : {}),
             ...(participantLimits ? { participantLimits } : { participantRuntimeProfile: PARTICIPANT_PRODUCTION_PROFILE }),
             ...(dialogueProfile ? { participantDialogueProfile: dialogueProfile } : {}) };
         } catch {
@@ -298,8 +311,30 @@ export class TangramSession extends DurableObject<Env> {
           ...(protocol.referenceMemory ? { memoryPruneVersion: CLAIM_PRUNE_V2 } : {}) });
         await tx.put({ 'reception:v1':next }); return next;
       }));
+      await this.schedulePreobservations(r.plan, participantPolicy?.proxy);
       await this.indexReception(r); return r;
     });
+  }
+
+  private async schedulePreobservations(plan: Reception['plan'], proxy?: ParticipantService) {
+    if (!plan || plan.schemaVersion === 'reception_plan_v1' ||
+        plan.participantRuntimeProfile !== PARTICIPANT_PRODUCTION_PROFILE || !plan.participantModelPin || !proxy) return;
+    const { participantModelPin: pin, initialObservationGeneration } = plan;
+    const boards = await Promise.allSettled(plan.trials.map(async ({ seed, index }) => {
+      const { own } = participantTrialMaterial(seed, effectiveRotationMode(plan, index),
+        plan.schemaVersion === 'reception_plan_v3' ? effectiveFigureSelection(plan, index) : undefined);
+      return { key: await workerTerraInitialKey(pin, own, initialObservationGeneration), own, trialIndices: [index] };
+    }));
+    const byKey = new Map<string, { key: string; own: ReturnType<typeof participantTrialMaterial>['own']; trialIndices: number[] }>();
+    for (const board of boards) {
+      if (board.status !== 'fulfilled') continue;
+      const existing = byKey.get(board.value.key);
+      if (existing) existing.trialIndices.push(...board.value.trialIndices);
+      else byKey.set(board.value.key, board.value);
+    }
+    for (const board of byKey.values()) {
+      this.ctx.waitUntil(this.preobservations.schedule(board, { pin, proxy, initialObservationGeneration }));
+    }
   }
   async adminCancelReception(input: { expectedRevision: number }): Promise<Reception> {
     return this.receptionSerial(async () => {
@@ -874,21 +909,10 @@ export class TangramSession extends DurableObject<Env> {
       if (rotationMode !== 'relative_pm90' && rotationMode !== 'relative_0') throw new NamingTaskError('invalid_options');
       // The observer and dialogue must see the same board. A restore uses the validated record's selection.
       const figureSelection = restore ? restore.options.figureSelection : binding.figureSelection;
-      const figures = figureSelection === undefined ? {} : { figureSelection };
-      const trial = createTrialV2({ seed, rotationMode, ...figures });
-      const model = modelView(trial);
+      const { trial, figures, own } = participantTrialMaterial(seed, rotationMode, figureSelection);
       const runtime = createWorkerParticipantRuntime({
         proxy: policy.proxy, pin, ...runtimeMode, initialObservationGeneration, participantDialogueProfile,
-        own: { ownImage: { mimeType: model.mimeType, base64: model.png.toString('base64') }, ownAnchors: model.anchors },
-        cache: {
-          read: key => this.ctx.storage.get(key),
-          putIfAbsent: (key, entry) => this.ctx.storage.transaction(async tx => {
-            const found = await tx.get(key);
-            if (found !== undefined) return found;
-            await tx.put({ [key]: entry });
-            return entry;
-          }),
-        },
+        own, cache: this.preobservations.startCache,
       });
       return await createNamingTaskV2(({ ...runtime, seed, strategy, referenceMemory, memoryPruneVersion, rotationMode, ...figures,
         utteranceStyle: runtime.jevResearch.profile.utteranceStyle, createTrial: () => trial, onPersist,
