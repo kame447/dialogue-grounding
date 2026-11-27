@@ -1,6 +1,6 @@
 import { responseText } from '../client.mjs';
 import {
-  createLunaObserver, ObservationError, OBSERVATION_INITIAL_INSTRUCTIONS,
+  createLunaObserver, ObservationError, observationInitialInstructions,
   OBSERVATION_MEMO_VERSION, snapshotObservationInput, validateObservationMemo,
 } from './observe.ts';
 import type { ObservationMessage } from './observe.ts';
@@ -43,14 +43,15 @@ function ownProjection(input: ObservationInput) {
   };
 }
 
-function initialKey(terraModelId: string, boundJson: string, generation?: InitialObservationGeneration) {
-  const fields = [SCHEMA, terraModelId, OBSERVATION_MEMO_VERSION, OBSERVATION_INITIAL_INSTRUCTIONS, boundJson];
+function initialKey(terraModelId: string, boundJson: string, figureCount: number, generation?: InitialObservationGeneration) {
+  const fields = [SCHEMA, terraModelId, OBSERVATION_MEMO_VERSION, observationInitialInstructions(figureCount), boundJson];
   if (generation) fields.push(generation);
   return sha256(JSON.stringify(fields)).then(digest => SCHEMA + ':' + digest);
 }
 
 export function workerTerraInitialKey(pin: ParticipantModelPin, own: ObservationInput, generation?: InitialObservationGeneration) {
-  return initialKey(validateParticipantModelPin(pin).terraModelId, JSON.stringify(ownProjection(own)), generation);
+  const projected = ownProjection(own);
+  return initialKey(validateParticipantModelPin(pin).terraModelId, JSON.stringify(projected), projected.ownAnchors.length, generation);
 }
 
 function checkAbort(options?: ObservationOptions): void {
@@ -134,7 +135,7 @@ export function createWorkerTerraObserver({ modelPin, own, visual, cache, timeou
       checkOwn(input);
       if (!cache) return observer.observeAll(bound, options);
       try {
-        const key = await (keyPromise ??= initialKey(terraModelId, boundJson, initialObservationGeneration));
+        const key = await (keyPromise ??= initialKey(terraModelId, boundJson, bound.ownAnchors.length, initialObservationGeneration));
         const hit = await cache.read(key, options?.signal);
         checkAbort(options);
         if (hit !== null && hit !== undefined) {

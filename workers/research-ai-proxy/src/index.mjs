@@ -3,8 +3,7 @@ import { resolvePurposeModel } from "./modelPolicy.mjs";
 import { OPENROUTER_DECISIONS_URL, DECISION_MODELS, decisionConfig, buildDecisionPayload, sanitizeDecision } from "./decisions.mjs";
 import { GROUNDING_CRITERIA_VERSION, GROUNDING_MODELS, GROUNDING_LEVELS, groundingConfig, buildGroundingPayload, sanitizeGroundingVerdict } from "./grounding.ts";
 import { INITIAL_OBSERVATION_STRUCTURED_V1 } from "../../../dialogue-model/runtime/observation/initial-observation-generation.ts";
-import { OBSERVATION_INITIAL_INSTRUCTIONS } from "../../../dialogue-model/runtime/observation/observe.ts";
-import { INITIAL_OBSERVATION_FORMAT } from "./initial-observation-format.ts";
+import { initialObservationFormatForMessages } from "./initial-observation-format.ts";
 
 const UPSTREAM_URLS = Object.freeze({
   openai: "https://api.openai.com/v1/chat/completions",
@@ -125,9 +124,10 @@ function validatedPayload(body, selectedModel, env, structured) {
     limit : body.max_completion_tokens;
   if (!Number.isSafeInteger(requested) || requested < 1 || requested > limit) return null;
 
-  if (structured && (messages[0].role !== "system" || messages[0].content !== OBSERVATION_INITIAL_INSTRUCTIONS)) return null;
+  const format = structured ? initialObservationFormatForMessages(messages) : null;
+  if (structured && !format) return null;
   return { model: selectedModel, messages, max_completion_tokens: requested,
-    ...(structured ? { response_format: INITIAL_OBSERVATION_FORMAT } : {}) };
+    ...(structured ? { response_format: format } : {}) };
 }
 
 function sanitizeResult(data, model, usageOnly) {

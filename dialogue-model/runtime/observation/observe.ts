@@ -1,3 +1,4 @@
+import { isSupportedFigureCount } from '../stimuli/figure-bank.ts';
 import { deadlineLimit, deadlineValue } from '../v2/research-deadline-options.ts';
 import type { ResearchLimits } from '../v2/research-timeouts.ts';
 // Private visual descriptions only. Action selection remains with Jev (0002).
@@ -48,7 +49,7 @@ function issue(v: unknown): v is ObservationIssue {
     text(v.question, 480) && (v.partnerConstrual === null || text(v.partnerConstrual));
 }
 function anchors(value: unknown): LocalOwnAnchor[] {
-  if (!Array.isArray(value) || value.length !== OBSERVATION_LIMITS.figures) fail("invalid_input");
+  if (!Array.isArray(value) || !isSupportedFigureCount(value.length)) fail("invalid_input");
   const ids = new Set<string>();
   for (const a of value) {
     if (!a || !text(a.id, 160) || ids.has(a.id) || !region(a.bbox) || !exact(a.centroid, ["x", "y"]) ||
@@ -84,8 +85,9 @@ function reobservedFigure(v: unknown): v is ReobservedFigure {
  */
 export function validateObservationMemo(value: unknown, { ownAnchors }: { ownAnchors?: readonly LocalOwnAnchor[] } = {}): ObservationMemo {
   if (!exact(value, ["observedAt", "figures"]) || !timestamp(value.observedAt) || !Array.isArray(value.figures) ||
-      value.figures.length !== OBSERVATION_LIMITS.figures) fail("invalid_input");
+      !isSupportedFigureCount(value.figures.length)) fail("invalid_input");
   const own = ownAnchors === undefined ? null : anchors(ownAnchors);
+  if (own && value.figures.length !== own.length) fail("invalid_input");
   const ids = new Set<string>();
   for (const f of value.figures) {
     if (!exact(f, ["id", "region", "holistic", "analytic", "unknowns", "reobservations"]) ||
@@ -133,6 +135,11 @@ export const OBSERVATION_INITIAL_INSTRUCTIONS = [
   "厳格なJSONのみ。キーは{figures:[{id,holistic:[{construal,basis:[文字列],status:'hypothesis'}],analytic:{shapes:[文字列],composition:文字列,relations:[文字列]},unknowns:[文字列]}]}。",
   "idはownAnchorsの6つと完全一致・各1回。追加キー・Markdown・画像本文は禁止。文字列は240字以内（compositionは480字以内）、holistic最大8、basisは1〜8、それ以外の配列最大16。",
 ].join("\n");
+export function observationInitialInstructions(figureCount: number = OBSERVATION_LIMITS.figures): string {
+  if (!isSupportedFigureCount(figureCount)) fail("invalid_input");
+  return figureCount === 6 ? OBSERVATION_INITIAL_INSTRUCTIONS
+    : OBSERVATION_INITIAL_INSTRUCTIONS.replace("全6図形", `全${figureCount}図形`).replace("ownAnchorsの6つ", `ownAnchorsの${figureCount}つ`);
+}
 export const OBSERVATION_TARGETED_INSTRUCTIONS = [
   "Jevから指定されたfigureIdsとissueだけを自分側の画像で再観察してください。行動は決めず、初回メモを上書きしないでください。",
   "partnerConstrualは相手の公開された見立てで、正解ではありません。相手にも初回のAI仮説にも迎合せず、その見立てを支える画像上の根拠をsupports、反証をcontradicts、見えない・判断不能な点をunknownへ記述してください。異なる見立てだけで別図形や名称不一致と決めないでください。",
@@ -155,7 +162,7 @@ export function observationContextMessages(state: string): TextMessage[] {
 
 export function buildObservationMessages(input: ObservationInput): ObservationMessage[] {
   const own = snapshotInput(input);
-  return [{ role: "system", content: OBSERVATION_INITIAL_INSTRUCTIONS },
+  return [{ role: "system", content: observationInitialInstructions(own.ownAnchors.length) },
     { role: "user", content: JSON.stringify({ ownAnchors: own.ownAnchors }) }, ...ownImageMessage(own.ownImage) as ImageMessage[]];
 }
 export function buildReobservationMessages(input: ReobservationInput): ObservationMessage[] {
@@ -169,8 +176,8 @@ export function buildReobservationMessages(input: ReobservationInput): Observati
 export function parseInitialObservation(raw: unknown, input: ObservationInput, { observedAt }: { observedAt: string }): ObservationMemo {
   const own = snapshotInput(input);
   const value = json(raw, own.ownImage.base64);
-  if (!timestamp(observedAt) || !exact(value, ["figures"]) || !Array.isArray(value.figures) || value.figures.length !== 6 ||
-      ![...value.figures].every(f => initialFigure(f)) || new Set(value.figures.map(f => f.id)).size !== 6 ||
+  if (!timestamp(observedAt) || !exact(value, ["figures"]) || !Array.isArray(value.figures) || value.figures.length !== own.ownAnchors.length ||
+      ![...value.figures].every(f => initialFigure(f)) || new Set(value.figures.map(f => f.id)).size !== own.ownAnchors.length ||
       !value.figures.every(f => own.ownAnchors.some(a => a.id === f.id))) fail("invalid_response");
   // Model ordering is not authoritative; regions/timestamps are program-assigned.
   const figures = value.figures;

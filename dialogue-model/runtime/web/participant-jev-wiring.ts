@@ -79,7 +79,7 @@ function checkedProfile(value: unknown): ResearchTrialProfileV3 {
   return expected;
 }
 /** Plan O records exist only on failed decide() attempts and must re-validate to the identical closed record. */
-function checkedDecisionFailure(trace: any, layout: JevQuestionLayout, p5Enabled: boolean, usagePolicy?: ParticipantUsageOnly, humanLedMoveOn = false): boolean {
+function checkedDecisionFailure(trace: any, layout: JevQuestionLayout, p5Enabled: boolean, usagePolicy?: ParticipantUsageOnly, humanLedMoveOn = false, figureCount = 6): boolean {
   // The local v3 rule is recorded together with its evidence; a bare rule name on a trace is a damaged record.
   if (!Object.hasOwn(trace, 'decisionFailure')) return trace.decisionRejectionCode !== 'action_target_not_allowed';
   const f = trace.decisionFailure;
@@ -87,7 +87,7 @@ function checkedDecisionFailure(trace: any, layout: JevQuestionLayout, p5Enabled
       Object.getPrototypeOf(f) !== Object.prototype || Reflect.ownKeys(f).length !== 1 || !Object.hasOwn(f, 'evidence')) return false;
   if (f.evidence === null) return trace.decisionRejectionCode !== 'action_target_not_allowed';
   // The trace names its own condition (a typed naming request of a holistic_v3 turn): only then may accept be missing from the first stage.
-  const checked = checkDecisionFailureEvidence(f.evidence, { usagePolicy, p5Enabled, humanLedMoveOn, acceptOptional: trace.namingRequest === true && Array.isArray(trace.local?.claims) && hasNameProposal(trace.local.claims, trace.turnIndex) });
+  const checked = checkDecisionFailureEvidence(f.evidence, { usagePolicy, p5Enabled, humanLedMoveOn, figureCount, acceptOptional: trace.namingRequest === true && Array.isArray(trace.local?.claims) && hasNameProposal(trace.local.claims, trace.turnIndex) });
   if (checked === null || checked.questionLayout !== layout || researchHash(checked) !== researchHash(jsonData(f.evidence))) return false;
   // A decision the local v3 table refused names its rule twice, in the turn and in the evidence, and in no other way; no native failure may carry it.
   const local = checked.rejectionCode === 'action_target_not_allowed' && checked.stages.length === 0;
@@ -215,7 +215,7 @@ export function selectParticipantJev(restore: any, provided: unknown, context: {
       const savedLayout = Object.hasOwn(restore.options,'questionLayout') ? restore.options.questionLayout : 'two_stage_v1';
       if (savedLayout !== profile.questionLayout || Object.hasOwn(restore.options,'questionLayout') && savedLayout !== 'two_stage_v2' && savedLayout !== 'two_stage_v3') return invalid();
       const humanLedMoveOn = profile.interventionPolicy.version === 'bypass_acceptance_v2';
-      if (restore.jevTraces?.some?.((trace:any)=>!checkedDecisionFailure(trace,profile.questionLayout,p5Enabled,v.ledger instanceof ParticipantUsageLedger ? PARTICIPANT_USAGE_ONLY : undefined,humanLedMoveOn))) return invalid();
+      if (restore.jevTraces?.some?.((trace:any)=>!checkedDecisionFailure(trace,profile.questionLayout,p5Enabled,v.ledger instanceof ParticipantUsageLedger ? PARTICIPANT_USAGE_ONLY : undefined,humanLedMoveOn, restore.queueState?.privateState?.observationMemo?.figures?.length))) return invalid();
       if (restore.options.profileSha256 !== researchHash(profile) ||
           researchHash(jsonData(restore.options.interventionPolicy)) !== researchHash(profile.interventionPolicy) ||
           restore.queueState?.privateState?.schemaVersion !== 'jev_private_state_v2' ||

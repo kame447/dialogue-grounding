@@ -1,3 +1,4 @@
+import { isSupportedFigureCount } from "../stimuli/figure-bank.ts";
 import { OWN_SLOT_LABELS } from "../visual/own-image-rotation.mjs";
 
 export const STRATEGIES = Object.freeze(["repair-first", "bypass-enabled"]);
@@ -34,9 +35,15 @@ export const RESEARCH_TASK_INSTRUCTIONS_V2 = taskInstructions(
   "内部参照ID・位置名・画像座標を相手への発話に出さず、相手にもそれらでの指定を求めないでください。相手の位置や上下左右の説明を、自分の同じ位置・向きへそのまま対応させないでください。画像内の候補を回転させて考え、向きが変わっても保たれる全体の見立てや形の特徴で照合してください。",
 );
 
-export function taskInstructionsFor(version = 1) {
+export function taskInstructionsV2(figureCount = 6, research = false) {
+  if (!isSupportedFigureCount(figureCount)) throw new Error("Unsupported figure count");
+  const instructions = research ? RESEARCH_TASK_INSTRUCTIONS_V2 : TASK_INSTRUCTIONS_V2;
+  return figureCount === 6 ? instructions : instructions.replace("タングラム6図形", `タングラム${figureCount}図形`);
+}
+
+export function taskInstructionsFor(version = 1, figureCount = 6) {
   if (version === 1) return TASK_INSTRUCTIONS;
-  if (version === 2) return TASK_INSTRUCTIONS_V2;
+  if (version === 2) return taskInstructionsV2(figureCount);
   throw new Error("Unsupported task version");
 }
 
