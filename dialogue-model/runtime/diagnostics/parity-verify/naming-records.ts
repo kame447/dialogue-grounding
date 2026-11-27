@@ -60,6 +60,29 @@ export function namingInputMatches(input: any, material: ReturnType<typeof namin
     equal(input.priorClaims.map(claimRow), claims.filter(c => saved.has(c.id) && retained.has(c.sourceTurn)).map(claimRow));
 }
 
+export function namingRecoveryHistoryMatches(input: any, committed: any[], publicWindow: any[]) {
+  const checks = committed.filter(j => j.publicationRecovery?.act === "confirm_current_topic");
+  if (checks.length === 0) return true;
+  const turns = new Set(checks.map(j => j.turnIndex));
+  const slots: string[] = input.ownSlots;
+  // The compact action ledger repeats an action on each figure that it covered.
+  for (const [i] of slots.entries()) {
+    const actions = input.figures?.["f" + i]?.actions;
+    if (!Array.isArray(actions)) return false;
+    const confirmations = actions.filter(a => turns.has(a[1]));
+    if (confirmations.length !== turns.size || [...turns].some(turn =>
+      !confirmations.some(a => a[0] === "confirm" && a[1] === turn && (a[2] === undefined || a[2] === null)))) return false;
+  }
+  if (!Array.isArray(input.repairHistory) || input.repairHistory.some((row: any) =>
+    turns.has(row.turn) && !equal(row.candidatesBefore, slots))) return false;
+  const prior = committed.at(-1);
+  if (!turns.has(prior.turnIndex)) return true;
+  const question = publicWindow.find(t => t.speaker === "ai" && t.turn > prior.turnIndex && t.turn < input.turn);
+  return equal(input.previousAction, question ? {
+    turn: question.turn, action: "confirm", target: { kind: "multiple", figureIds: slots }, name: null, feature: null,
+  } : null);
+}
+
 export function namingQuestions(instructions: string, target: unknown, candidates: { value: string }[], publicNames: PublicNameCandidate[]) {
   const proposalsByTurn = new Map<number, string[]>();
   for (const { value } of candidates) {
@@ -106,12 +129,12 @@ export function namingHold(grounding: JevNamingGrounding | undefined, execution:
   const conflict = entry.name !== null && entry.status !== "tentative" && normalizeName(entry.name) !== name ||
     Object.entries(ledger).some(([id, other]: [string, any]) => id !== figureId && other.name !== null && normalizeName(other.name) === name);
   const reason = grounding.verdict !== "grounded" ? "naming_grounding_unresolved" : conflict ? "naming_ledger_conflict" : null;
-  return reason && holdPublication(reason, figureId);
+  return reason && holdPublication(reason);
 }
 
-export function holdPublication(reason: unknown, figureId: string) {
+export function holdPublication(reason: unknown) {
   if (reason !== "naming_grounding_unresolved" && reason !== "naming_ledger_conflict") return null;
   return { recovery: { reason, act: "confirm_current_topic" }, judgment: {
-    action: "confirm", targetSlot: figureId, candidateName: null, discriminatingFeature: null, note: null,
+    action: "confirm", targetSlot: null, candidateName: null, discriminatingFeature: null, note: null,
   }, text: HOLD_TEXT };
 }

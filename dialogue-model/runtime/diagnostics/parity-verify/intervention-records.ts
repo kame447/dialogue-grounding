@@ -21,7 +21,7 @@ import {CLAIM_PRUNE_V2,REFERENCE_LIMITS,previewReferenceUpdate,snapshotReference
 import {AI_BOUND_SOURCE,LABELLED_ANSWER_SOURCE,LOCAL_QUESTION_ANSWER_SOURCE} from '../../local-grounding/contract.ts';
 import {check,hash,equal,row,rows,list,META_KEYS} from './core.ts';
 import type {Check,Records} from './core.ts';
-import {NAMING_GUIDANCE,holdPublication,namingHold,namingInputMatches,namingMaterial,namingQuestions,namingVerdict} from './naming-records.ts';
+import {NAMING_GUIDANCE,holdPublication,namingHold,namingInputMatches,namingMaterial,namingQuestions,namingRecoveryHistoryMatches,namingVerdict} from './naming-records.ts';
 const POLICY='376d569120ca36a3eceaf5ab95410f7eb83f25fbb681e7566a684b97c35165c8';
 const ACTIONS=['accept','propose_name','confirm','repair','defer','revisit','agree','move_on','close','request_observation'];
 const INNER_CODES=['invalid_scores','no_valid_alternative','detail_unavailable','invalid_executed','invalid_options','invalid_input','invalid_response','invalid_decision','inconsistent_decision','model_mismatch','key_unavailable','key_leak','unauthorized','payment_required','not_found','rate_limited','upstream_error','network_error','timeout','aborted','cost_cap','cost_unreported','busy'];
@@ -722,7 +722,7 @@ function traceShape(t:any,layout='two_stage_v1',policy?:string,ownSlots:readonly
    ![t.executed,t.intervention?.original,t.intervention?.alternative].every(x=>sharedFields(x,p5))||
    carriesSharedChoice(t.intervention?.detailEvidence)&&!p5)return false;
   const hasRecovery=Object.hasOwn(t,'publicationRecovery');
-  const held=holdPublication(t.publicationRecovery?.reason,t.executed?.target?.figureId);
+  const held=holdPublication(t.publicationRecovery?.reason);
   if(held&&!jevNaming)return false;
   const guardFallbackOk = hasRecovery ? semantic&&t.generationGuard?.fallback===true&&t.generationGuard.regenerated===!held&&
     (!held||t.executed?.action==='agree'&&!!t.namingGrounding&&t.generationGuard.violations?.length===0&&!Object.hasOwn(t,'draftActs'))&&
@@ -746,7 +746,14 @@ function openRerank(r:any,t:any,d:any,scores:any,layout='two_stage_v1'):boolean{
  for(let n=0;n<r.ranking.length;n++){const x=r.ranking[n],p=r.ranking[n-1];if(!exact(x,['action','score'])||!Number.isFinite(x.score)||x.score<0||x.score>1||x.score!==scores[x.action]||p&&(p.score<x.score||p.score===x.score&&ACTIONS.indexOf(p.action)>ACTIONS.indexOf(x.action)))return false;}
  return true;
 }
-function relation(t:any,label:any,slots:string[],layout='two_stage_v1',p5=false):boolean{
+function draftRecovery(violations:readonly string[],execution:any,jevNaming:boolean){
+ const recovery=contentPublicationRecovery(violations,execution);
+ if(jevNaming&&recovery?.recovery.act==='confirm_current_topic'){
+  return {...recovery,judgment:{...recovery.judgment,targetSlot:null}};
+ }
+ return recovery;
+}
+function relation(t:any,label:any,slots:string[],layout='two_stage_v1',p5=false,jevNaming=false):boolean{
  if(t.executed===null&&t.intervention===null)return ['error','aborted'].includes(t.status)&&t.finalAction===null&&t.publicSpeech===null;
  const i=t.intervention,d=t.decisions.at(-1);if(!i||!d||!equal(i.original,project(d))||i.policy!==(label==='repair-first'?'bypass_acceptance_v1:veto':'bypass_acceptance_v1:accept'))return false;
  if(i.reasonCode==='alternative_failed')return t.executed===null&&i.disposition==='rejected'&&['defer','move_on'].includes(d.action)&&i.policy.endsWith(':veto')&&exact(i.failure,['reasonCode','inner'])&&i.failure.reasonCode==='alternative_failed'&&exact(i.failure.inner,['stage','code'])&&['rerank','detail','executed'].includes(i.failure.inner.stage)&&typeof i.failure.inner.code==='string'&&INNER_CODES.includes(i.failure.inner.code)&&t.finalAction===null&&t.publicSpeech===null;
@@ -767,8 +774,8 @@ function relation(t:any,label:any,slots:string[],layout='two_stage_v1',p5=false)
  }
  const e=t.executed,g=t.finalAction;if(g===null)return ['error','aborted'].includes(t.status);
  if(t.publicationRecovery){
-  const recovered=holdPublication(t.publicationRecovery.reason,e.target.figureId)??
-   (Array.isArray(t.generationGuard?.violations)&&contentPublicationRecovery(t.generationGuard.violations,e));
+  const recovered=holdPublication(t.publicationRecovery.reason)??
+   (Array.isArray(t.generationGuard?.violations)&&draftRecovery(t.generationGuard.violations,e,jevNaming));
   return !!recovered&&equal(t.publicationRecovery,recovered.recovery)&&equal(g,recovered.judgment)&&t.publicSpeech===recovered.text;
  }
  return g.action===e.action&&g.targetSlot===(e.target.kind==='single'?e.target.figureId:null)&&g.candidateName===e.name&&g.discriminatingFeature===e.feature;
@@ -994,6 +1001,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
    }
  const namingClaims=jevNaming?liveClaims(graph??tr.lastCommittedState?.graph).sort((a:any,b:any)=>a.sourceTurn-b.sourceTurn||a.turn-b.turn).slice(-160):[];
  const naming=jevNaming?namingMaterial(namingClaims,namingTurns,t):null;
+ const namingPublicWindow=namingTurns.slice(-REFERENCE_LIMITS.publicTurns);
  const restatedRetry=version!==undefined;
  const publicTexts=(tape.events??[]).filter((e:any)=>e.seq<=t.turnIndex).map((e:any)=>e.text);
  const humanTexts=(tape.events??[]).filter((e:any)=>e.seq<=t.turnIndex&&e.speaker==='human').map((e:any)=>e.text);
@@ -1003,7 +1011,10 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
    ? {currentTurnSource:currentTurnNamingSource(execution,jevNaming? (CTX.agree??[]).map(n=>({...n,figureId:execution.target.figureId})):CTX.agree??[],t.turnIndex,
      jevNaming?[]:recentClaims.filter(c=>c.speaker==='human'&&c.act==='name_propose'&&c.aspect==='name'))} : undefined;
 const idsOf=(target:any):string[]=>target?.kind==='single'?[target.figureId]:target?.kind==='multiple'?[...target.figureIds]:[];
- const recentFor=(executed:any)=>(tape.events??[]).length===0?[]:v11RecentHumanTexts(tape.events,t.turnIndex,recentClaims,idsOf(executed?.target),new Map((tape.state?.judgments??[]).map((x:any)=>[x.turnIndex,idsOf((x.jevTurn?.executed??x.jevTurn?.decision)?.target)] as const)));
+ const historicalTargets=new Map<number,readonly string[]>((tape.state?.judgments??[]).map((x:any)=>[x.turnIndex,
+  jevNaming&&x.publicationRecovery?.act==='confirm_current_topic'?Object.keys(tape.state.ledger):
+   idsOf((x.jevTurn?.executed??x.jevTurn?.decision)?.target)] as const));
+ const recentFor=(executed:any)=>(tape.events??[]).length===0?[]:v11RecentHumanTexts(tape.events,t.turnIndex,recentClaims,idsOf(executed?.target),historicalTargets);
  const recentHumanTexts=recentFor(t.executed);
  if(pairs.length===0)return'missing';
  if(!equal(result.sides,[pair.left,pair.right]))return'invalid';
@@ -1115,7 +1126,8 @@ const idsOf=(target:any):string[]=>target?.kind==='single'?[target.figureId]:tar
      if(['human_referent','repair_issue','action','target','shared_construal'].some(key=>Object.hasOwn(p.questions,key))||
         Object.hasOwn(st,'selected')){
       if(naming?(!Array.isArray(m.own?.ownAnchors)||!equal(st.ownSlots,m.own.ownAnchors.map((a:any)=>a.id))||
-        !namingInputMatches(st,naming,namingTurns,namingClaims)):Object.hasOwn(st,'namingEvidence'))return'invalid';
+        !namingInputMatches(st,naming,namingTurns,namingClaims)||
+        !namingRecoveryHistoryMatches(st,tape.state.judgments,namingPublicWindow)):Object.hasOwn(st,'namingEvidence'))return'invalid';
       if(naming&&Object.hasOwn(p.questions,'action')){
        const hr=t.humanReferent;
        if(!hr||!equal(st.humanReferent,{status:hr.status,scores:hr.scores}))return'invalid';
@@ -1226,7 +1238,7 @@ const idsOf=(target:any):string[]=>target?.kind==='single'?[target.figureId]:tar
     // A regeneration that the known drafts cannot explain is a contradiction, except where a hidden instruction (AI public claims on: the remaining private
     // instructions are not in the recorded messages) could have been echoed: that needs material the record does not hold (not reached, not a mismatch).
     if(out.kind==='publish_first'&&generationCount===2&&aiOn){out=deriveGenerationOutcome([...codes(0),'internal_prompt_echo'],codes(1),fb,clean);missing=true;}
-    const recovered=isGenerationV15(version)&&out.kind==='stop'&&out.regenerated?contentPublicationRecovery(out.violations,ex):null;
+    const recovered=isGenerationV15(version)&&out.kind==='stop'&&out.regenerated?draftRecovery(out.violations,ex,jevNaming):null;
     if(recovered&&draftViolationCodes(recovered.text,{...cc,action:recovered.judgment.action,candidateName:null},genMessages[generationCount-1]??[],p5?SHARED_PRIVATE:[]).length)return'invalid';
     if(out.kind==='stop'&&!recovered||out.regenerated!==(generationCount===2))return'invalid';
     if(label===tr.label){
@@ -1886,8 +1898,8 @@ export function interventionChecks(records:Records):Check[]{
      if(!ownTurns.length||!related.length||!js.length||!tr.lastCommittedState)missing=true;
      if(ownTurns.some((v:any)=>v.turn!==t.turnIndex||v.publicText!==t.publicSpeech))conflict=true;
      if(t.generationGuard?.fallback===true){
-      const expectedFallback=t.publicationRecovery?(holdPublication(t.publicationRecovery.reason,t.executed?.target?.figureId)??
-       contentPublicationRecovery(t.generationGuard.violations,t.executed))?.text:expectedOrientationFallback(t.finalAction);
+      const expectedFallback=t.publicationRecovery?(holdPublication(t.publicationRecovery.reason)??
+       draftRecovery(t.generationGuard.violations,t.executed,jevNaming))?.text:expectedOrientationFallback(t.finalAction);
       const aiOn=tr.profile?.localGrounding?.aiPublicClaims===true||Object.hasOwn(tr.lastCommittedState??{},'aiPublic')||js.some((j:any)=>Object.hasOwn(j,'aiPublic'))||Boolean(t.aiPublic);
       if(layout!=='two_stage_v3'||!expectedFallback||t.publicSpeech!==expectedFallback||(aiOn&&t.aiPublic?.pending?.status!=='skipped_fallback'))conflict=true;
      }
@@ -1930,14 +1942,14 @@ export function interventionChecks(records:Records):Check[]{
     if(missing){
      add('binding','not_reached','intervention_trace_missing');
      // A malformed execution relation outranks a missing owner source (malformed → contradictory → missing).
-     if(!committed&&!relation(t,tr.label,ledgerSlots,layout,p5))add('execution','mismatch','intervention_execution_mismatch');else add('execution','not_reached','intervention_trace_missing');
+     if(!committed&&!relation(t,tr.label,ledgerSlots,layout,p5,jevNaming))add('execution','mismatch','intervention_execution_mismatch');else add('execution','not_reached','intervention_trace_missing');
      // Replay is required only for committed attempts; a missing owner is not a replay contradiction.
      if(malformedReplay)add('replay','mismatch','intervention_replay_mismatch');
      else if(committed)add('replay','not_reached','intervention_trace_missing');else add('replay','pass','versioned_intervention_replay',{applicable:false});
      continue;
     }
     add('binding','pass','committed_execution_binding');
-    const rel=relation(t,tr.label,ledgerSlots,layout,p5);add('execution',rel?'pass':'mismatch',rel?'validated_executed_projection':'intervention_execution_mismatch',t.intervention===null&&t.executed===null?{applicable:false}:undefined);
+    const rel=relation(t,tr.label,ledgerSlots,layout,p5,jevNaming);add('execution',rel?'pass':'mismatch',rel?'validated_executed_projection':'intervention_execution_mismatch',t.intervention===null&&t.executed===null?{applicable:false}:undefined);
     if(malformedReplay){add('replay','mismatch','intervention_replay_mismatch');continue;}
     if(!committed&&!replayEntries.length){add('replay','pass','versioned_intervention_replay',{applicable:false});continue;}
     const proof=replayProof(r,tr,t,key!);add('replay',proof==='ok'?'pass':proof==='missing'?'not_reached':'mismatch',proof==='ok'?'versioned_intervention_replay':proof==='missing'?'intervention_replay_missing':'intervention_replay_mismatch');
@@ -2366,6 +2378,18 @@ const PROMPT_VERSIONS:readonly PromptVersion[]=[
   'v2/dialogue-v2.mjs':'0ca530878393721b6d48b55240e2b8c848910758501d90f579b2e0c65a6d1dd6',
   'v2/jev-turn.ts':'5ef2c63124c2ce044da3f3fd453377762b5afc19fc0c8d9af5eae574a3d6b262',
   'v2/generation-guard.ts':'7abc72b13f302dc3fdac1af3b9d02fc1e46b7bdf8b7baba90126ab0005c0b22b',
+  'judgment/instructions.mjs':'0add2f40aaaa01bfdacd1b99418b94e288eb45da6593595304f8d36d0f22de27',
+  'observation/observe.ts':'469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad',
+  'local-grounding/extract.ts':'6e9461e860f22923dbece02c7988713422ed81ac32d937f6d59df8eff84bd83e',
+  'local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01',
+  'decision/jev-decision.ts':'ac62e50df5478283f7d16ae8ee4832d34a4237302ef4418095b3f09e9fa99991',
+  'local-grounding/extract-ai.ts':'e489b7ff573fdbe9e4f0adc9b6ee5f0828bd3c6835dcd8cd6555e191161594a6',
+  'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
+ }},fixed:FIXED_I172,native:NATIVE_I172},
+ {id:'p5_jev_naming_v1_full_confirmation_scope',i172:true,styleMode:'research_split',sources:{scheme:'complete_instruction_source_sha256',files:{
+  'v2/dialogue-v2.mjs':'0ca530878393721b6d48b55240e2b8c848910758501d90f579b2e0c65a6d1dd6',
+  'v2/jev-turn.ts':'eec63a27f0dc2f315cc07f5f14948d6eeaf3850ea47695649daaeddd5914e357',
+  'v2/generation-guard.ts':'003a2beaba3f33d3d7f0c53b8eac48edf59709c8e213f3d3f265f8668631e3a0',
   'judgment/instructions.mjs':'0add2f40aaaa01bfdacd1b99418b94e288eb45da6593595304f8d36d0f22de27',
   'observation/observe.ts':'469a0c99af9d68e681176acfaa43c32dbb4493df82d0ded17b817ae039c1a0ad',
   'local-grounding/extract.ts':'6e9461e860f22923dbece02c7988713422ed81ac32d937f6d59df8eff84bd83e',
