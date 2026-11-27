@@ -55,6 +55,13 @@ const dialogueV13P5 = {
   pinnedVersions: { ...dialogueV12.pinnedVersions, generationRetryVersion: 'jev_generation_retry_v13' },
 } as const;
 
+const dialogueV13P5HumanLedMoveOn = {
+  ...dialogueV13P5,
+  newTrialAgreeNameScopeVersion: 'scoped_v11',
+  profile: researchTrialProfileV3(profile.lunaRequest, profile.timeouts, 'two_stage_v3', 'holistic_v5', 'bypass_acceptance_v2'),
+  pinnedVersions: { ...dialogueV13P5.pinnedVersions, generationRetryVersion: 'jev_generation_retry_v15' },
+} as const;
+
 const workerDialogue = {
   participant_dialogue_v12: dialogueV12,
   participant_dialogue_v12_naming_v2: { ...dialogueV12, newTrialAgreeNameScopeVersion: 'scoped_v9' },
@@ -64,9 +71,9 @@ const workerDialogue = {
   participant_dialogue_v13_p5_naming_v4: { ...dialogueV13P5, newTrialAgreeNameScopeVersion: 'scoped_v11' },
   participant_dialogue_v13_p5_semantic_guard: { ...dialogueV13P5, newTrialAgreeNameScopeVersion: 'scoped_v11',
     pinnedVersions: { ...dialogueV13P5.pinnedVersions, generationRetryVersion: 'jev_generation_retry_v15' } },
-  participant_dialogue_v13_p5_human_led_move_on: { ...dialogueV13P5, newTrialAgreeNameScopeVersion: 'scoped_v11',
-    profile: researchTrialProfileV3(profile.lunaRequest, profile.timeouts, 'two_stage_v3', 'holistic_v5', 'bypass_acceptance_v2'),
-    pinnedVersions: { ...dialogueV13P5.pinnedVersions, generationRetryVersion: 'jev_generation_retry_v15' } },
+  participant_dialogue_v13_p5_human_led_move_on: dialogueV13P5HumanLedMoveOn,
+  participant_dialogue_v13_p5_discriminating_confirmation: { ...dialogueV13P5HumanLedMoveOn,
+    pinnedVersions: { ...dialogueV13P5HumanLedMoveOn.pinnedVersions, generationRetryVersion: 'jev_generation_retry_v16' } },
 } as const;
 
 export function matchesWorkerDialogueProfile(key: ParticipantDialogueProfile | undefined, record: BaseRecord) {

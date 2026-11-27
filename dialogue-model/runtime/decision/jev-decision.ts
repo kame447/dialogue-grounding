@@ -425,6 +425,7 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
   if (!(input.notationV6 === undefined || input.notationV6 === true && input.judgmentLedger !== undefined)) fail("invalid_input");
   if (!(input.notationV11 === undefined || input.notationV11 === true && input.notationV6 === true)) fail("invalid_input");
   if (!(input.featureReplyFilter === undefined || input.featureReplyFilter === true && input.notationV11 === true)) fail("invalid_input");
+  if (!(input.discriminatingConfirmation === undefined || input.discriminatingConfirmation === true && input.p5Enabled === true)) fail("invalid_input");
   if (!(input.rotationMode === undefined || input.rotationMode === "relative_pm90" || input.rotationMode === "relative_0")) fail("invalid_input");
   let ledgerActions: LedgerAction[] | undefined;
   if (input.judgmentLedger !== undefined) {
@@ -1023,6 +1024,7 @@ function unaskedConfirmFeatures({ previousAction, publicTurns, repairHistory, le
 }
 
 const sharedLabel = (index: number) => `use_${index}`;
+const DISCRIMINATING_CONFIRM_DETAIL = "今の論点で何が未確認かを、観察メモと公開発話の意味から判断してください。候補の弁別が必要なら、候補によって違いがあり、まだ答えられていない特徴を優先してください。全候補に共通するだけの特徴や、既に肯定・否定・訂正された点の言い換えは、いまの論点に情報を加えない限り繰り返さないでください。候補を減らす必要がない場合は、同じ論点で未確認の部分の形や対応を確かめる特徴を選んでください。弁別できる特徴が無ければ、同じ論点で相手の説明と見比べられる特徴を選んでください。明示された呼び名の決定の申し出は、いま確かめている対象についての発話として扱い、名称や対象の確定とはみなさないでください。観察メモに記載がないことは、その特徴がない根拠にはなりません。";
 function sharedQuestion(input: JevDecisionInput, offered: readonly SharedConstrual[], confirming: boolean, participantPrompts: boolean): Question {
   return {
     type: "choice",
@@ -1066,8 +1068,15 @@ function prepareDetail(input: JevDecisionInput, selected: JevActionTarget, rejec
     if (!candidates.length) reject(["propose_name", "agree"].includes(selected.action) ? "name_required" : "feature_required");
     if (candidates.length > 255) fail("invalid_input"); // Explicit bound, never silently omit a choice.
   }
-  const offered = layout === "two_stage_v3" && ["confirm", "repair"].includes(selected.action)
+  let offered = layout === "two_stage_v3" && ["confirm", "repair"].includes(selected.action)
     ? unaskedConfirmFeatures(p, scope, candidates, input.featureReplyFilter) : candidates;
+  const discriminatingConfirmation = input.discriminatingConfirmation === true && selected.action === "confirm";
+  if (discriminatingConfirmation) {
+    // Compare only recorded observations. A missing description is not evidence of absence.
+    const comparison = scope.length > 1 ? scope.map(id => p.catalog.features[p.slots.indexOf(id)]) : p.catalog.features;
+    const common = (candidate: DetailCandidate) => comparison.every(values => values.includes(candidate.value));
+    if (offered.every(common)) offered = [...offered, ...candidates.filter(candidate => !common(candidate))];
+  }
   const subsets: string[][] = [];
   const questions: Record<string, Question> = {};
   if (selected.action === "request_observation") {
@@ -1079,7 +1088,9 @@ function prepareDetail(input: JevDecisionInput, selected: JevActionTarget, rejec
       criteria: Object.fromEntries(OBSERVATION_ASPECTS.map(a => [a, OBSERVE_QUESTIONS[a]])) };
   } else {
     const kind = ["propose_name", "agree"].includes(selected.action) ? "name" : "feature";
-    questions[kind] = { type: "choice", instructions: decisionInstructions(input, false, layout, participantPrompts) + `\n第1段の${selected.action}に必要な${kind === "name" ? "名称" : "確認特徴"}だけを選んでください。出典図形は特徴の出所であり、対象候補を単一に確定するものではありません。`,
+    const confirmation = discriminatingConfirmation
+      ? "\n" + DISCRIMINATING_CONFIRM_DETAIL : "";
+    questions[kind] = { type: "choice", instructions: decisionInstructions(input, false, layout, participantPrompts) + `\n第1段の${selected.action}に必要な${kind === "name" ? "名称" : "確認特徴"}だけを選んでください。出典図形は特徴の出所であり、対象候補を単一に確定するものではありません。` + confirmation,
       criteria: Object.fromEntries(offered.map((c, i) => [`${kind}_${i}`, JSON.stringify({ value: c.value, figureIds: c.figureIds })])) };
   }
   if (sharedOffered.length) questions.shared_construal = sharedQuestion(input, sharedOffered, true, participantPrompts);
@@ -1147,7 +1158,7 @@ function detailJsonData(value: unknown, seen = new Set<object>()): void {
 function prepareExecutedDetail(input: JevDecisionInput, selected: JevActionTarget, layout: JevQuestionLayout = "two_stage_v1", participantPrompts = false) {
   try {
     detailJsonData(input); detailJsonData(selected);
-    const optional = ["reobservationAllowed", "humanReferent", "repairProspect", "agreeNames", "repairFacts", "participantLedger", "nameLedger", "nameSource", "namingRequest", "namingRequestStrict", "judgmentLedger", "rotationMode", "notationV6", "notationV11", "featureReplyFilter", "p5Enabled", "sharedConstruals", "humanLedMoveOn"].filter(key => Object.hasOwn(input, key));
+    const optional = ["reobservationAllowed", "humanReferent", "repairProspect", "agreeNames", "repairFacts", "participantLedger", "nameLedger", "nameSource", "namingRequest", "namingRequestStrict", "judgmentLedger", "rotationMode", "notationV6", "notationV11", "featureReplyFilter", "discriminatingConfirmation", "p5Enabled", "sharedConstruals", "humanLedMoveOn"].filter(key => Object.hasOwn(input, key));
     if (!exact(input, ["turn", "publicTurns", "ownSlots", "observations", "issueSummary", "priorClaims", "repairHistory", "previousAction", "publicNames", ...optional])) fail("invalid_input");
     if (!exact(selected, ["action", "target"]) || !includes(input.p5Enabled === true
       ? ["propose_name", "agree", "confirm", "repair", "accept"] : ["propose_name", "agree", "confirm", "repair"], selected.action)) fail("invalid_input");

@@ -2181,13 +2181,16 @@ for (const strategy of ['repair-first', 'bypass-enabled']) {
   });
 }
 
-for (const { order, dialogueProfile, scope } of [
+for (const { order, dialogueProfile, scope, generationVersion = 'jev_generation_retry_v13' } of [
   { order: ['repair-first', 'bypass-enabled'], dialogueProfile: v13Dialogue, scope: 'scoped_v7' },
   { order: ['bypass-enabled', 'repair-first'], dialogueProfile: v13Dialogue, scope: 'scoped_v7' },
   { order: ['repair-first', 'bypass-enabled'], dialogueProfile: v13NamingV4Dialogue, scope: 'scoped_v11' },
   { order: ['bypass-enabled', 'repair-first'], dialogueProfile: v13NamingV4Dialogue, scope: 'scoped_v11' },
+  { order: ['repair-first', 'bypass-enabled'], dialogueProfile: 'participant_dialogue_v13_p5_discriminating_confirmation',
+    scope: 'scoped_v11', generationVersion: 'jev_generation_retry_v16' },
 ]) {
-  test('U6 v13 P5 keeps the approved profile, adoption and cold restore in order ' + order[0] + ' ' + scope, async t => {
+  const version = generationVersion === 'jev_generation_retry_v16' ? 'v16' : 'v13';
+  test('U6 ' + version + ' P5 keeps the approved profile, adoption and cold restore in order ' + order[0] + ' ' + scope, async t => {
     const receptionProtocol = order[0] === 'repair-first' ? figureBankProtocol : protocol;
     const h = harness(true, { ...receptionProtocol, allowedOrders: [order] });
     const transport = v12Transport(t, h);
@@ -2217,7 +2220,7 @@ for (const { order, dialogueProfile, scope } of [
       assert.equal(start.queueState.privateState.agreeNameScopeVersion, scope);
       assert.equal(start.options.questionLayout, 'two_stage_v3');
       assert.equal(start.options.dialoguePolicy, 'holistic_v5');
-      assert.equal(start.options.generationRetryVersion, 'jev_generation_retry_v13');
+      assert.equal(start.options.generationRetryVersion, generationVersion);
       assert.equal(start.options.jevNamingRestoreVersion, 'ai_name_acceptances_v1');
       assert.deepEqual(start.options.technicalTrial, { version: 'adaptive_repair_v3' });
 
@@ -2275,7 +2278,7 @@ for (const { order, dialogueProfile, scope } of [
       await h.idle();
       const continuing = await h.storage.get(key);
       assert.equal(continuing.jevTraces.at(-1).status, 'committed');
-      assert.equal(continuing.jevTraces.at(-1).generationRetryVersion, 'jev_generation_retry_v13');
+      assert.equal(continuing.jevTraces.at(-1).generationRetryVersion, generationVersion);
       await h.complete(id, (await jsonOk(await h.request('state'))).trial);
       const completed = await h.storage.get(key);
       assert.equal(completed.status, 'completed');

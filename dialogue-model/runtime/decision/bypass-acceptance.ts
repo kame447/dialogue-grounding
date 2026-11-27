@@ -106,7 +106,7 @@ function checkRepairProspect(value:unknown):void {
 }
 function prepare(input:unknown,original:unknown,intervention:unknown,questionLayout:JevQuestionLayout='two_stage_v1',usagePolicy?:ParticipantUsageOnly){
  const policy=config(intervention);
- const i=boundary(input,'invalid_input',value=>{const optional=['reobservationAllowed','humanReferent','repairProspect','agreeNames','repairFacts','participantLedger','nameLedger','nameSource','namingRequest','namingRequestStrict','judgmentLedger','rotationMode','notationV6','notationV11','featureReplyFilter','p5Enabled','sharedConstruals','humanLedMoveOn'].filter(k=>!!value&&typeof value==='object'&&Object.hasOwn(value,k));
+ const i=boundary(input,'invalid_input',value=>{const optional=['reobservationAllowed','humanReferent','repairProspect','agreeNames','repairFacts','participantLedger','nameLedger','nameSource','namingRequest','namingRequestStrict','judgmentLedger','rotationMode','notationV6','notationV11','featureReplyFilter','discriminatingConfirmation','p5Enabled','sharedConstruals','humanLedMoveOn'].filter(k=>!!value&&typeof value==='object'&&Object.hasOwn(value,k));
   if(!exact(value,['turn','publicTurns','ownSlots','observations','issueSummary','priorClaims','repairHistory','previousAction','publicNames',...optional]))fail('invalid_input');
   if(Object.hasOwn(value,'repairProspect'))checkRepairProspect(value.repairProspect);
   if(value.humanLedMoveOn!==(interventionVersion(policy.policy)==='bypass_acceptance_v2'?true:undefined))fail('invalid_input');
