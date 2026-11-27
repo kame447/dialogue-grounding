@@ -1,4 +1,6 @@
 import { isSupportedFigureCount } from '../stimuli/figure-bank.ts';
+import { INITIAL_OBSERVATION_STRUCTURED_V2, INITIAL_OBSERVATION_V2_INSTRUCTIONS,
+  isInitialObservationGeneration, type InitialObservationGeneration } from './initial-observation-generation.ts';
 import { deadlineLimit, deadlineValue } from '../v2/research-deadline-options.ts';
 import type { ResearchLimits } from '../v2/research-timeouts.ts';
 // Private visual descriptions only. Action selection remains with Jev (0002).
@@ -135,10 +137,11 @@ export const OBSERVATION_INITIAL_INSTRUCTIONS = [
   "厳格なJSONのみ。キーは{figures:[{id,holistic:[{construal,basis:[文字列],status:'hypothesis'}],analytic:{shapes:[文字列],composition:文字列,relations:[文字列]},unknowns:[文字列]}]}。",
   "idはownAnchorsの6つと完全一致・各1回。追加キー・Markdown・画像本文は禁止。文字列は240字以内（compositionは480字以内）、holistic最大8、basisは1〜8、それ以外の配列最大16。",
 ].join("\n");
-export function observationInitialInstructions(figureCount: number = OBSERVATION_LIMITS.figures): string {
-  if (!isSupportedFigureCount(figureCount)) fail("invalid_input");
-  return figureCount === 6 ? OBSERVATION_INITIAL_INSTRUCTIONS
-    : OBSERVATION_INITIAL_INSTRUCTIONS.replace("全6図形", `全${figureCount}図形`).replace("ownAnchorsの6つ", `ownAnchorsの${figureCount}つ`);
+export function observationInitialInstructions(figureCount: number = OBSERVATION_LIMITS.figures, generation?: InitialObservationGeneration): string {
+  if (!isSupportedFigureCount(figureCount) || generation !== undefined && !isInitialObservationGeneration(generation)) fail("invalid_input");
+  const instructions = generation === INITIAL_OBSERVATION_STRUCTURED_V2 ? INITIAL_OBSERVATION_V2_INSTRUCTIONS : OBSERVATION_INITIAL_INSTRUCTIONS;
+  return figureCount === 6 ? instructions
+    : instructions.replace("全6図形", `全${figureCount}図形`).replace("ownAnchorsの6つ", `ownAnchorsの${figureCount}つ`);
 }
 export const OBSERVATION_TARGETED_INSTRUCTIONS = [
   "Jevから指定されたfigureIdsとissueだけを自分側の画像で再観察してください。行動は決めず、初回メモを上書きしないでください。",

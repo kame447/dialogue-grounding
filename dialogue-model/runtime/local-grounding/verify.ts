@@ -4,7 +4,7 @@ import { AI_BOUND_SOURCE, LABELLED_ANSWER_SOURCE, LOCAL_QUESTION_ANSWER_SOURCE, 
 import type { AiPublicPending, LocalSegmentProposal, LocalFunctionVerdict, LocalVerificationResult, LocalClaimView, PublicTurn } from "./contract.ts";
 import { isBareDeictic, literalSpan, quoteAround } from "../judgment/public-evidence.mjs";
 import { SLOTS } from "../stimuli/board.mjs";
-import { REFERENCE_LIMITS, snapshotReferenceGraph, validateReferenceUpdate, ReferenceGraphError } from "../memory/reference-graph.mjs";
+import { CLAIM_PRUNE_V3, REFERENCE_LIMITS, snapshotReferenceGraph, validateReferenceUpdate, ReferenceGraphError } from "../memory/reference-graph.mjs";
 import { priorClaimViews } from "./derive.ts";
 
 export type LocalGraph = { records: readonly unknown[]; slots?: readonly string[]; memoryPruneVersion?: import("../memory/reference-graph.mjs").MemoryPruneVersion };
@@ -162,6 +162,7 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
         isFigureReplyAspect(aspect) && isFigureReplyAspect(prior.aspect) && prior.targets.length === 1 &&
         (segment.respondsToTurn === null || segment.respondsToTurn === prior.sourceTurn) &&
         targets.length > 0 && (targets.length !== 1 || targets[0] !== prior.targets[0])) {
+      if (graph.memoryPruneVersion === CLAIM_PRUNE_V3) { reject("inconsistent_claim_response"); continue; }
       targets = [...prior.targets];
     }
     // v12: the classifier's closed label stands in for the quote's pointing words; every other condition below (agree, no name, the question's only figure, nothing opposing) is unchanged.

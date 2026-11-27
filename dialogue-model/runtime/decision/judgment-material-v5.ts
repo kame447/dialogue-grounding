@@ -1,8 +1,10 @@
 // holistic_v5 judgment material: the same validated material the older versions send, written compactly.
 // Public history is one numbered speaker line per event; a claim is a row that points at its source line by number instead of quoting it;
-// figures are f0..f5 in ownSlots order; the ledger lists each figure's agreed name and every action that was executed on it.
+// figures are f0..f3 or f0..f5 in ownSlots order; the ledger lists each figure's agreed name and every action that was executed on it.
 // encode and decode are exact inverses except for the claims' quotes, which a reference replaces (a decoded claim has quote "" and a nominal source).
 import type { JevAction, JevTarget } from "./contract.ts";
+import { isSupportedFigureCount } from "../stimuli/figure-bank.ts";
+import { repairQualityEvidence } from "./repair-quality.ts";
 
 export const JUDGMENT_VIEW_V5 = "judgment_v5";
 /** An action executed on figures in an earlier turn (the ledger's typed history). */
@@ -23,6 +25,11 @@ export type MaterialV5Context = { actions: readonly LedgerAction[]; nameLedger?:
 export const JUDGMENT_V5_LEGEND = "stateの記法: publicTurnsは全公開発話を番号順に一度ずつ並べた行（U番号 h=人間 / ai: 発話）です。claimsの各行は" +
   " [claim id, 出典の発話番号, act, aspect, 対象, 名前, 返答先のclaim id, 命題, issueId] で、発言そのものは出典の発話番号の行を参照してください。" +
   "f0〜f5はownSlotsの順の自分の図形です。issuesは局所の論点で、各行は [issue id, aspect, 対象, state, nameState, 名前, 最後の発話番号, claim id] です。figuresは図形ごとに、名称の状態（statusとname）と、これまでに実行した行動 [行動, 発話番号, 名前または特徴, 返答のclaim id] を並べた履歴です。";
+
+export function judgmentV5Legend(figureCount: number = 6): string {
+  if (!isSupportedFigureCount(figureCount)) throw new TypeError("Unsupported figure count");
+  return figureCount === 4 ? JUDGMENT_V5_LEGEND.replace("f0〜f5", "f0〜f3") : JUDGMENT_V5_LEGEND;
+}
 
 /** jev_generation_retry_v11: appended after the legend when a figure's history points at an answer the request's claims do not carry. */
 export const JUDGMENT_V11_ANSWER_LEGEND = "answerClaimsは、figuresの返答のclaim idがclaimsにない行動のためだけに添える行で、各行は [claim id, 出典の発話番号, act, 対象, 命題] です。グラフから外れた回答の出典の発話番号はnullになります。";
@@ -62,6 +69,12 @@ export function encodeMaterialV5(material: any, { actions, nameLedger, answers: 
     ...(material.repairProspect ? { repairProspect: material.repairProspect } : {}),
     ...(material.sharedConstruals?.length ? { sharedConstruals: material.sharedConstruals } : {}),
     ...(material.namingEvidence ? { namingEvidence: material.namingEvidence } : {}),
+    ...(material.referenceEvidence ? { referenceEvidence: material.referenceEvidence } : {}),
+    ...(material.judgmentMaterialVersion ? {
+      judgmentMaterialVersion: material.judgmentMaterialVersion,
+      repairQuality: repairQualityEvidence(material.turn, material.publicTurns, material.priorClaims, material.repairHistory),
+      ...(material.publicationRecoveryContext ? { publicationRecoveryContext: material.publicationRecoveryContext } : {}),
+    } : {}),
     inputBudget: material.inputBudget,
   };
 }

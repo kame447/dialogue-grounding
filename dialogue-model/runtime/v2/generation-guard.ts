@@ -3,47 +3,47 @@
 import type { DialoguePolicy, DraftAct, JevExecutedDecision, PublicNameCandidate } from "../decision/contract.ts";
 // v3 was reserved for the experiment that extended fixed responses.
 // v9 contains every behaviour of v8 and widens only which wordings the orientation check accepts as a stated viewpoint or as the partner's own words. v8 contains every behaviour of v7 and adds the direct pointing-reply match to a targetless or differently-extracted confirm question. v7 contains every behaviour of v6 and widens the unsupported-topic-shift check to the particle-less and "next figure" wordings. v6 contains every behaviour of v5 and adds the unsupported-topic-shift check. v5 contains every behaviour of v4 (viewpoint rules, no fixed-sentence fallback, the whole-history judgment material, the private naming state) and adds the confirm-specific viewpoint note and the topic markers.
-export type GenerationRetryVersion = "jev_generation_retry_v1" | "jev_generation_retry_v2" | "jev_generation_retry_v4" | "jev_generation_retry_v5" | "jev_generation_retry_v6" | "jev_generation_retry_v7" | "jev_generation_retry_v8" | "jev_generation_retry_v9" | "jev_generation_retry_v10" | "jev_generation_retry_v11" | "jev_generation_retry_v12" | "jev_generation_retry_v13" | "jev_generation_retry_v14" | "jev_generation_retry_v15" | "jev_generation_retry_v16";
+export type GenerationRetryVersion = "jev_generation_retry_v1" | "jev_generation_retry_v2" | "jev_generation_retry_v4" | "jev_generation_retry_v5" | "jev_generation_retry_v6" | "jev_generation_retry_v7" | "jev_generation_retry_v8" | "jev_generation_retry_v9" | "jev_generation_retry_v10" | "jev_generation_retry_v11" | "jev_generation_retry_v12" | "jev_generation_retry_v13" | "jev_generation_retry_v14" | "jev_generation_retry_v15" | "jev_generation_retry_v16" | "jev_generation_retry_v17";
 export type RecordedGenerationRetryVersion = Exclude<GenerationRetryVersion, "jev_generation_retry_v1">;
 
-export function hasVersionedViewpoint(version: unknown): version is "jev_generation_retry_v4" | "jev_generation_retry_v5" | "jev_generation_retry_v6" | "jev_generation_retry_v7" | "jev_generation_retry_v8" | "jev_generation_retry_v9" | "jev_generation_retry_v10" | "jev_generation_retry_v11" | "jev_generation_retry_v12" | "jev_generation_retry_v13" | "jev_generation_retry_v14" | "jev_generation_retry_v15" | "jev_generation_retry_v16" {
+export function hasVersionedViewpoint(version: unknown): version is "jev_generation_retry_v4" | "jev_generation_retry_v5" | "jev_generation_retry_v6" | "jev_generation_retry_v7" | "jev_generation_retry_v8" | "jev_generation_retry_v9" | "jev_generation_retry_v10" | "jev_generation_retry_v11" | "jev_generation_retry_v12" | "jev_generation_retry_v13" | "jev_generation_retry_v14" | "jev_generation_retry_v15" | "jev_generation_retry_v16" | "jev_generation_retry_v17" {
   return version === "jev_generation_retry_v4" || version === "jev_generation_retry_v5" || version === "jev_generation_retry_v6" || version === "jev_generation_retry_v7" || version === "jev_generation_retry_v8" || version === "jev_generation_retry_v9" || version === "jev_generation_retry_v10" || version === "jev_generation_retry_v11" || version === "jev_generation_retry_v12" || version === "jev_generation_retry_v13" || version === "jev_generation_retry_v14" || isGenerationV15(version);
 }
 /** v5 or later: what v4 does, plus the confirm viewpoint note, the topic markers and the answer-resolving judgment material. */
-export function isGenerationV5(version: unknown): version is "jev_generation_retry_v5" | "jev_generation_retry_v6" | "jev_generation_retry_v7" | "jev_generation_retry_v8" | "jev_generation_retry_v9" | "jev_generation_retry_v10" | "jev_generation_retry_v11" | "jev_generation_retry_v12" | "jev_generation_retry_v13" | "jev_generation_retry_v14" | "jev_generation_retry_v15" | "jev_generation_retry_v16" {
+export function isGenerationV5(version: unknown): version is "jev_generation_retry_v5" | "jev_generation_retry_v6" | "jev_generation_retry_v7" | "jev_generation_retry_v8" | "jev_generation_retry_v9" | "jev_generation_retry_v10" | "jev_generation_retry_v11" | "jev_generation_retry_v12" | "jev_generation_retry_v13" | "jev_generation_retry_v14" | "jev_generation_retry_v15" | "jev_generation_retry_v16" | "jev_generation_retry_v17" {
   return version === "jev_generation_retry_v5" || version === "jev_generation_retry_v6" || version === "jev_generation_retry_v7" || version === "jev_generation_retry_v8" || version === "jev_generation_retry_v9" || version === "jev_generation_retry_v10" || version === "jev_generation_retry_v11" || version === "jev_generation_retry_v12" || version === "jev_generation_retry_v13" || version === "jev_generation_retry_v14" || isGenerationV15(version);
 }
 /** v6 or later: v5 plus the unsupported-topic-shift check (a draft that moves on while the chosen action is not a move), the scoped_v3 agreement scope and the notation on every question. */
-export function isGenerationV6(version: unknown): version is "jev_generation_retry_v6" | "jev_generation_retry_v7" | "jev_generation_retry_v8" | "jev_generation_retry_v9" | "jev_generation_retry_v10" | "jev_generation_retry_v11" | "jev_generation_retry_v12" | "jev_generation_retry_v13" | "jev_generation_retry_v14" | "jev_generation_retry_v15" | "jev_generation_retry_v16" {
+export function isGenerationV6(version: unknown): version is "jev_generation_retry_v6" | "jev_generation_retry_v7" | "jev_generation_retry_v8" | "jev_generation_retry_v9" | "jev_generation_retry_v10" | "jev_generation_retry_v11" | "jev_generation_retry_v12" | "jev_generation_retry_v13" | "jev_generation_retry_v14" | "jev_generation_retry_v15" | "jev_generation_retry_v16" | "jev_generation_retry_v17" {
   return version === "jev_generation_retry_v6" || version === "jev_generation_retry_v7" || version === "jev_generation_retry_v8" || version === "jev_generation_retry_v9" || version === "jev_generation_retry_v10" || version === "jev_generation_retry_v11" || version === "jev_generation_retry_v12" || version === "jev_generation_retry_v13" || version === "jev_generation_retry_v14" || isGenerationV15(version);
 }
 /** v7 or later: v6 plus the widened topic-shift wordings (particle-less "次いこう", "次の図形を見てみよう"), the scoped_v4 agreement scope and the reference-question binding. */
-export function isGenerationV7(version: unknown): version is "jev_generation_retry_v7" | "jev_generation_retry_v8" | "jev_generation_retry_v9" | "jev_generation_retry_v10" | "jev_generation_retry_v11" | "jev_generation_retry_v12" | "jev_generation_retry_v13" | "jev_generation_retry_v14" | "jev_generation_retry_v15" | "jev_generation_retry_v16" {
+export function isGenerationV7(version: unknown): version is "jev_generation_retry_v7" | "jev_generation_retry_v8" | "jev_generation_retry_v9" | "jev_generation_retry_v10" | "jev_generation_retry_v11" | "jev_generation_retry_v12" | "jev_generation_retry_v13" | "jev_generation_retry_v14" | "jev_generation_retry_v15" | "jev_generation_retry_v16" | "jev_generation_retry_v17" {
   return version === "jev_generation_retry_v7" || version === "jev_generation_retry_v8" || version === "jev_generation_retry_v9" || version === "jev_generation_retry_v10" || version === "jev_generation_retry_v11" || version === "jev_generation_retry_v12" || version === "jev_generation_retry_v13" || version === "jev_generation_retry_v14" || isGenerationV15(version);
 }
 /** v8 or later: v7 plus the direct pointing-reply match (a participant's agree that points at the public confirm question) and the scoped_v5 agreement scope. */
-export function isGenerationV8(version: unknown): version is "jev_generation_retry_v8" | "jev_generation_retry_v9" | "jev_generation_retry_v10" | "jev_generation_retry_v11" | "jev_generation_retry_v12" | "jev_generation_retry_v13" | "jev_generation_retry_v14" | "jev_generation_retry_v15" | "jev_generation_retry_v16" {
+export function isGenerationV8(version: unknown): version is "jev_generation_retry_v8" | "jev_generation_retry_v9" | "jev_generation_retry_v10" | "jev_generation_retry_v11" | "jev_generation_retry_v12" | "jev_generation_retry_v13" | "jev_generation_retry_v14" | "jev_generation_retry_v15" | "jev_generation_retry_v16" | "jev_generation_retry_v17" {
   return version === "jev_generation_retry_v8" || version === "jev_generation_retry_v9" || version === "jev_generation_retry_v10" || version === "jev_generation_retry_v11" || version === "jev_generation_retry_v12" || version === "jev_generation_retry_v13" || version === "jev_generation_retry_v14" || isGenerationV15(version);
 }
 /** v9 or later: v8 plus the wider wordings the orientation check accepts as a stated viewpoint ("こちらの画面で", "こちらの上の…") and as the partner's own words ("そちらでいう…"), and the ai_bound_target provenance of a bound question target. */
-export function isGenerationV9(version: unknown): version is "jev_generation_retry_v9" | "jev_generation_retry_v10" | "jev_generation_retry_v11" | "jev_generation_retry_v12" | "jev_generation_retry_v13" | "jev_generation_retry_v14" | "jev_generation_retry_v15" | "jev_generation_retry_v16" {
+export function isGenerationV9(version: unknown): version is "jev_generation_retry_v9" | "jev_generation_retry_v10" | "jev_generation_retry_v11" | "jev_generation_retry_v12" | "jev_generation_retry_v13" | "jev_generation_retry_v14" | "jev_generation_retry_v15" | "jev_generation_retry_v16" | "jev_generation_retry_v17" {
   return version === "jev_generation_retry_v9" || version === "jev_generation_retry_v10" || version === "jev_generation_retry_v11" || version === "jev_generation_retry_v12" || version === "jev_generation_retry_v13" || version === "jev_generation_retry_v14" || isGenerationV15(version);
 }
 /** v10 or later: v9 plus the narrower quotation exemption: a direction word inside the phrase quoted after "そちらでいう" is excused only when the participant used that very word in public. */
-export function isGenerationV10(version: unknown): version is "jev_generation_retry_v10" | "jev_generation_retry_v11" | "jev_generation_retry_v12" | "jev_generation_retry_v13" | "jev_generation_retry_v14" | "jev_generation_retry_v15" | "jev_generation_retry_v16" {
+export function isGenerationV10(version: unknown): version is "jev_generation_retry_v10" | "jev_generation_retry_v11" | "jev_generation_retry_v12" | "jev_generation_retry_v13" | "jev_generation_retry_v14" | "jev_generation_retry_v15" | "jev_generation_retry_v16" | "jev_generation_retry_v17" {
   return version === "jev_generation_retry_v10" || version === "jev_generation_retry_v11" || version === "jev_generation_retry_v12" || version === "jev_generation_retry_v13" || version === "jev_generation_retry_v14" || isGenerationV15(version);
 }
 /** v11 or later: v10 plus the participant's words as the one source of an excused direction word (recent, not negated, also inside brackets and after "そちらの"), the wider own/partner viewpoint forms,
  * the cause reading that no longer takes "から、" (from) or "のです" as a premise, and the reference-question reply rules (ask rewrite, denied question). */
-export function isGenerationV11(version: unknown): version is "jev_generation_retry_v11" | "jev_generation_retry_v12" | "jev_generation_retry_v13" | "jev_generation_retry_v14" | "jev_generation_retry_v15" | "jev_generation_retry_v16" {
+export function isGenerationV11(version: unknown): version is "jev_generation_retry_v11" | "jev_generation_retry_v12" | "jev_generation_retry_v13" | "jev_generation_retry_v14" | "jev_generation_retry_v15" | "jev_generation_retry_v16" | "jev_generation_retry_v17" {
   return version === "jev_generation_retry_v11" || version === "jev_generation_retry_v12" || version === "jev_generation_retry_v13" || version === "jev_generation_retry_v14" || isGenerationV15(version);
 }
 /** jev_generation_retry_v12 (D1 / #203 G.1, contains v11): the classifier also labels whether an agree answers the point the AI checked, and a typed agree that does so counts as the answer. */
-export function isGenerationV12(version: unknown): version is "jev_generation_retry_v12" | "jev_generation_retry_v13" | "jev_generation_retry_v14" | "jev_generation_retry_v15" | "jev_generation_retry_v16" {
+export function isGenerationV12(version: unknown): version is "jev_generation_retry_v12" | "jev_generation_retry_v13" | "jev_generation_retry_v14" | "jev_generation_retry_v15" | "jev_generation_retry_v16" | "jev_generation_retry_v17" {
   return version === "jev_generation_retry_v12" || version === "jev_generation_retry_v13" || version === "jev_generation_retry_v14" || isGenerationV15(version);
 }
 /** v13 or later opts into P5 shared construals on top of the v12 rules. */
-export function isGenerationV13(version: unknown): version is "jev_generation_retry_v13" | "jev_generation_retry_v14" | "jev_generation_retry_v15" | "jev_generation_retry_v16" {
+export function isGenerationV13(version: unknown): version is "jev_generation_retry_v13" | "jev_generation_retry_v14" | "jev_generation_retry_v15" | "jev_generation_retry_v16" | "jev_generation_retry_v17" {
   return version === "jev_generation_retry_v13" || version === "jev_generation_retry_v14" || isGenerationV15(version);
 }
 /** v14 opts into the isolated pre-publication Jev semantic check for P5 non-naming overclaims (draft_shared_claim). */
@@ -51,15 +51,20 @@ export function isGenerationV14(version: unknown): version is "jev_generation_re
   return version === "jev_generation_retry_v14";
 }
 /** v15 and v16 use the semantic naming guard; the separate v14 shared-claim check remains opt-in. */
-export function isGenerationV15(version: unknown): version is "jev_generation_retry_v15" | "jev_generation_retry_v16" {
+export function isGenerationV15(version: unknown): version is "jev_generation_retry_v15" | "jev_generation_retry_v16" | "jev_generation_retry_v17" {
   return version === "jev_generation_retry_v15" || isGenerationV16(version);
 }
 /** v16 adds guidance to the existing confirmation detail and generation requests. */
-export function isGenerationV16(version: unknown): version is "jev_generation_retry_v16" {
-  return version === "jev_generation_retry_v16";
+export function isGenerationV16(version: unknown): version is "jev_generation_retry_v16" | "jev_generation_retry_v17" {
+  return version === "jev_generation_retry_v16" || isGenerationV17(version);
+}
+
+export function isGenerationV17(version: unknown): version is "jev_generation_retry_v17" {
+  return version === "jev_generation_retry_v17";
 }
 
 export function validAgreeNameScope(scope: unknown, generation: unknown): boolean {
+  if (isGenerationV17(generation)) return scope === "jev_naming_v1";
   if (scope === "scoped_v9" || scope === "scoped_v10") return generation === "jev_generation_retry_v12";
   if (scope === "scoped_v11") return generation === "jev_generation_retry_v12" || generation === "jev_generation_retry_v13" || isGenerationV15(generation);
   if (scope === "jev_naming_v1") return isGenerationV15(generation);
@@ -752,6 +757,20 @@ export function draftViolationCodes(text: string, c: GenerationCodeContext, requ
   return [...new Set([...generationGuardCodes(text, c), ...findLocalPublicationViolations(text, requestMessages),
     ...(c.ai && extraInstructions.length ? findLocalPublicationViolations(text, extraInstructions) : [])])];
 }
+
+const OPENING_V17 = "図形の共同命名の対話を始めます。まだ相手は発言していません。どの図形から話すかを相手が自由に決められる短い自然な導入を、相手に公開する文だけで書いてください。図形、名称、合意、方位を先に示さないでください。";
+
+export async function generateOpeningV17(send: (messages: { role: "system" | "user"; content: string }[]) => Promise<{ text?: unknown }>) {
+  const messages = [{ role: "system" as const, content: OPENING_V17 }, { role: "user" as const, content: "対話を始めてください。" }];
+  const checked = (text: unknown, request: typeof messages) => typeof text === "string" && text.trim() && text.length <= 12000 &&
+    !draftViolationCodes(text, { action: "confirm", candidateName: null, v3: true, holistic: false, adaptive: false, factored: false,
+      ai: true, publicTexts: [], generationRetryVersion: "jev_generation_retry_v17" }, request).length ? text : null;
+  const first = checked((await send(messages))?.text, messages);
+  if (first !== null) return first;
+  const rewrite = [...messages, { role: "system" as const, content: "図形や名称の先取り、方位、内部情報を含めず、公開する導入だけを書き直してください。" }];
+  return checked((await send(rewrite))?.text, rewrite);
+}
+
 export function deriveGenerationOutcome(first: readonly string[], retry: readonly string[] | null, fallbackText: string | null, fallbackClean: boolean): GenerationOutcome {
   if (!first.length) return { kind: "publish_first", regenerated: false, violations: [] };
   const union = [...new Set([...first, ...(retry ?? [])])];
@@ -760,6 +779,10 @@ export function deriveGenerationOutcome(first: readonly string[], retry: readonl
   const orientationOnly = union.length === 1 && union[0] === "orientation_leak" && retry.length === 1 && retry[0] === "orientation_leak";
   return { kind: orientationOnly && fallbackText !== null && fallbackClean ? "fallback" : "stop", regenerated: true, violations: union };
 }
+
+export const PUBLICATION_RECOVERY_V17 = "この応答は直前の稿に代わる公開発話です。新しく指定された対話行為を自然な言葉で行ってください。前に公開していない稿や内部の処理に触れず、まだ確かめていない名前や対応を決定しないでください。方位を使うなら自分の見え方だと明示してください。";
+
+export const HUMAN_MOVE_ON_V17 = "相手が自分から話題を移すことを求めました。先に今の命名への回答を述べ、未確定であれば未確定だと伝えます。そのあと相手が求めた移行を受け止めます。JSONに、最初の発話をtext、移行への応答をmoveOnとして入れ、どちらにも自然な公開文だけを書いてください。";
 
 export type NamingHoldReason = "naming_grounding_unresolved" | "naming_ledger_conflict";
 export type PublicationRecovery =
@@ -782,6 +805,7 @@ const RECOVERABLE_CONTENT = new Set([
  * leakage codes must continue through the existing error path. */
 export function contentPublicationRecovery(violations: readonly string[], execution: Pick<JevExecutedDecision, "action" | "target">,
   version?: GenerationRetryVersion) {
+  if (isGenerationV17(version)) return null;
   const confirmDetail = isGenerationV16(version) && execution.action === "confirm";
   if (!violations.length || violations.some(code => !RECOVERABLE_CONTENT.has(code) &&
     !(confirmDetail && code === "confirmation_detail_mismatch"))) return null;
@@ -792,6 +816,10 @@ export function contentPublicationRecovery(violations: readonly string[], execut
   const recovery: PublicationRecovery = { reason: "draft_content_mismatch", act: naming ? "confirm_current_topic" : "restate_selected_action" };
   return { recovery, text, judgment: { action, targetSlot: execution.target.kind === "single" ? execution.target.figureId : null,
     candidateName: null, discriminatingFeature: null, note: null } };
+}
+
+export function canReconsiderPublication(violations: readonly string[]) {
+  return violations.length > 0 && violations.every(code => RECOVERABLE_CONTENT.has(code) || code === "confirmation_detail_mismatch");
 }
 
 /** Fail closed on unsafe bounded strings: schema-valid text is still untrusted. */

@@ -5,7 +5,8 @@ import {
 } from './observe.ts';
 import type { ObservationMessage } from './observe.ts';
 import type { ObservationInput, ObservationMemo, ObservationObserver, ObservationOptions } from './contract.ts';
-import type { InitialObservationGeneration } from './initial-observation-generation.ts';
+import { INITIAL_OBSERVATION_STRUCTURED_V2,
+  type InitialObservationGeneration } from './initial-observation-generation.ts';
 import { requireExactParticipantModel, validateParticipantModelPin } from '../v2/participant-model-pin.ts';
 import type { ParticipantModelPin } from '../v2/participant-model-pin.ts';
 import type { ResearchLimits } from '../v2/research-timeouts.ts';
@@ -44,7 +45,7 @@ function ownProjection(input: ObservationInput) {
 }
 
 function initialKey(terraModelId: string, boundJson: string, figureCount: number, generation?: InitialObservationGeneration) {
-  const fields = [SCHEMA, terraModelId, OBSERVATION_MEMO_VERSION, observationInitialInstructions(figureCount), boundJson];
+  const fields = [SCHEMA, terraModelId, OBSERVATION_MEMO_VERSION, observationInitialInstructions(figureCount, generation), boundJson];
   if (generation) fields.push(generation);
   return sha256(JSON.stringify(fields)).then(digest => SCHEMA + ':' + digest);
 }
@@ -100,7 +101,9 @@ export function createWorkerTerraObserver({ modelPin, own, visual, cache, timeou
   const observer = createLunaObserver({
     async complete(messages, { signal, phase }) {
       const generation = phase === 'observation_initial' ? initialObservationGeneration : undefined;
-      const response = await visual({ purpose: 'visual_observation', messages,
+      const requestMessages: ObservationMessage[] = generation === INITIAL_OBSERVATION_STRUCTURED_V2
+        ? [{ role: 'system', content: observationInitialInstructions(bound.ownAnchors.length, generation) }, ...messages.slice(1)] : messages;
+      const response = await visual({ purpose: 'visual_observation', messages: requestMessages,
         ...(generation ? { initial_observation_generation: generation } : {}) }, signal);
       if (response?.status !== 200) {
         const error = object(response?.data)?.error;

@@ -13,6 +13,7 @@ import { taskInstructionsV2, TASK_INSTRUCTIONS_V2, RESEARCH_TASK_INSTRUCTIONS_V2
 import { createDialogueV2 } from '../dialogue-model/runtime/v2/dialogue-v2.mjs';
 import { initialObservationFormatForMessages, INITIAL_OBSERVATION_FORMAT } from '../workers/research-ai-proxy/src/initial-observation-format.ts';
 import { handleRequest } from '../workers/research-ai-proxy/src/index.mjs';
+import { judgmentV5Legend, JUDGMENT_V5_LEGEND } from '../dialogue-model/runtime/decision/judgment-material-v5.ts';
 
 const observedAt = '2026-11-20T00:00:00.000Z';
 function own(count = 4) {
@@ -211,4 +212,20 @@ test('both strategies teach four figures for generation and final submission whi
     assert.equal(JSON.stringify(sent.at(-1)).includes('自分の6図形'), false);
   }
   assert.deepEqual(sent[0], sent[1]);
+});
+
+
+test('compact judgment legend teaches only f0 through f3 for four figures and preserves the six-figure constant', () => {
+  assert.equal(judgmentV5Legend(6), JUDGMENT_V5_LEGEND);
+  assert.match(judgmentV5Legend(4), /f0〜f3はownSlots/);
+  assert.doesNotMatch(judgmentV5Legend(4), /f0〜f5/);
+  for (const count of [4, 6]) {
+    const payload = buildJevDecisionPayload({ ...input(count), judgmentLedger: [] });
+    const state = JSON.parse(payload.state);
+    assert.deepEqual(Object.keys(state.figures), Array.from({ length: count }, (_, i) => `f${i}`));
+    for (const question of Object.values(payload.questions)) {
+      assert.ok(question.instructions.includes(judgmentV5Legend(count)));
+      if (count === 4) assert.doesNotMatch(question.instructions, /f0〜f5/);
+    }
+  }
 });

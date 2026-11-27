@@ -33,13 +33,16 @@ export function createProfileDialogue(profile: Profile, options: Parameters<type
   if(Object.hasOwn(options,'interventionPolicy')||Object.hasOwn(options,'decisionTimeoutMs'))throw new JevTurnError('invalid_intervention');
   // The verified profile owns the question layout: no caller override, and two_stage_v2 only on the integrated (v3) profile.
   if(Object.hasOwn(options,'questionLayout'))throw new Error('Jev question layout is set by the profile');
+  if(Object.hasOwn(options,'judgmentMaterialVersion'))throw new Error('Jev judgment material version is set by the profile');
   const layout=profile.questionLayout;
   if(layout!=='two_stage_v1'&&(layout!=='two_stage_v2'&&layout!=='two_stage_v3'||intervention.mode!=='explicit'))throw new Error('Invalid Jev question layout for this profile');
   const local = options.localGrounding as JevTurnLocalOptions | undefined;
   const research = profile.id !== "research_trial_profile_v1";
   const researchLimits = research ? { maxDeadlineMs: RESEARCH_MAX_DEADLINE_MS } : undefined;
   return createDialogueV2({ ...options, ...(intervention.mode==='explicit'?{interventionPolicy:intervention.interventionPolicy!,decisionTimeoutMs:profile.timeouts.decisionMs}:{}),
-    ...(layout!=='two_stage_v1'?{questionLayout:layout}:{}), ...(profile.id==='research_trial_profile_v3'&&profile.dialoguePolicy?{dialoguePolicy:profile.dialoguePolicy}:{}), client: research ? researchGenerationClient(options.client, profile.timeouts.generationMs) : options.client, referenceMemory: profile.referenceMemory, decisionMode: profile.decisionMode,
+    ...(layout!=='two_stage_v1'?{questionLayout:layout}:{}), ...(profile.id==='research_trial_profile_v3'&&profile.dialoguePolicy?{dialoguePolicy:profile.dialoguePolicy}:{}),
+    ...(profile.id==='research_trial_profile_v3'&&profile.judgmentMaterialVersion?{judgmentMaterialVersion:profile.judgmentMaterialVersion}:{}),
+    client: research ? researchGenerationClient(options.client, profile.timeouts.generationMs) : options.client, referenceMemory: profile.referenceMemory, decisionMode: profile.decisionMode,
     utteranceStyle: profile.utteranceStyle, maxReobservations: profile.maxReobservations,
     localGrounding: { ...options.localGrounding!, ...(research ? { researchLimits, aiPublicTransport: { ...local?.aiPublicTransport, timeoutMs: profile.timeouts.decisionMs, researchLimits } } : {}), timeoutMs: profile.timeouts.localMs, aiPublicClaims: profile.localGrounding.aiPublicClaims } });
 }

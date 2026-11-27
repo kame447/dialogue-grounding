@@ -1,6 +1,7 @@
 import { literalSpan } from "../judgment/public-evidence.mjs";
+import type { OwnLedger } from "../judgment/schema.mjs";
 import type { LocalClaimView, LocalFunctionVerdict, LocalSegmentProposal, PublicTurn } from "../local-grounding/contract.ts";
-import type { JevDecisionStageEvidence, JevNamingGrounding, PublicNameCandidate } from "./contract.ts";
+import type { JevDecisionStageEvidence, JevNamingGrounding, JevTarget, PublicNameCandidate } from "./contract.ts";
 
 type LocalEvidence = {
   extractor: { segments: readonly LocalSegmentProposal[] };
@@ -57,4 +58,28 @@ export function readJevNamingGrounding(detail: Pick<JevDecisionStageEvidence, "s
       : namedGrounding && current ? "grounded" : "unconfirmed",
     evidenceTurn: current ? evidenceTurn : null,
   };
+}
+
+export type NamingWithdrawal = { figureId: string; prior: OwnLedger[string]; sourceTurn: number };
+
+export function namingWithdrawalQuestion(ledger: OwnLedger | undefined, target: JevTarget, turn: number) {
+  const prior = target.kind === "single" ? ledger?.[target.figureId] : undefined;
+  if (!prior?.name || target.kind !== "single") return null;
+  const name = JSON.stringify(prior.name);
+  return {
+    type: "choice" as const,
+    instructions: "現在の相手の公開発言とその前の話し合いを読み、すでに使った名称を取り下げる判断に根拠があるか判定してください。対象が分からない、違う図形の話、別名の単なる提案、または相手の意図が未確定なら retain を選んでください。取下げは別の名称の合意を意味しません。",
+    criteria: {
+      retain: "この手番で以前の名称は取り下げない。必要なら同じ論点を修復する。",
+      withdraw_prior_name: `公開手番 ${turn} の相手の発言を踏まえ、対象 ${target.figureId} の以前の名称 ${name} を公開の修復で明示して取り下げる。`,
+    },
+  };
+}
+
+export function readNamingWithdrawal(detail: JevDecisionStageEvidence | null | undefined, ledger: OwnLedger,
+  target: JevTarget, turn: number, publicTurns: readonly PublicTurn[]): NamingWithdrawal | null {
+  if (detail?.stage !== "detail" || detail.choices.naming_withdrawal !== "withdraw_prior_name" ||
+      target.kind !== "single" || !namingWithdrawalQuestion(ledger, target, turn) ||
+      !publicTurns.some(event => event.turn === turn && event.speaker === "human")) return null;
+  return { figureId: target.figureId, prior: { ...ledger[target.figureId] }, sourceTurn: turn };
 }

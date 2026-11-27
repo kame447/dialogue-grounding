@@ -2,7 +2,7 @@ import { WorkerEntrypoint } from 'cloudflare:workers';
 import type { VerifiedParticipantUsage } from './participant-usage-fields.ts';
 import { handleRequest } from './index.mjs';
 import { configuredParticipantPin, configuredParticipantGenerationPin, configuredParticipantAllTerraPin, participantChoices, participantUsageChoices } from './participant-transport.ts';
-import { INITIAL_OBSERVATION_STRUCTURED_V1 } from '../../../dialogue-model/runtime/observation/initial-observation-generation.ts';
+import { INITIAL_OBSERVATION_STRUCTURED_V1, isInitialObservationGeneration } from '../../../dialogue-model/runtime/observation/initial-observation-generation.ts';
 
 interface ProxyEnvironment {
   RESEARCH_PROXY_TOKEN: string;
@@ -78,8 +78,8 @@ export class InternalParticipantProxy extends WorkerEntrypoint<ProxyEnvironment>
     return configuredParticipantPin(this.env);
   }
 
-  async participantInitialObservationPolicy() {
-    return configuredParticipantPin(this.env) ? INITIAL_OBSERVATION_STRUCTURED_V1 : null;
+  async participantInitialObservationPolicy(generation: unknown = INITIAL_OBSERVATION_STRUCTURED_V1) {
+    return isInitialObservationGeneration(generation) && configuredParticipantPin(this.env) ? generation : null;
   }
 
   async participantChat(payload: unknown, expectedModel: string): Promise<InternalResult> {
