@@ -88,12 +88,30 @@ export function renderTurnSheet(record: Data, latency: LatencySummary, {escape, 
     }).join("") || judgments.map(j => line("対象", targetText(j.jevTurn?.executed?.target ?? j.jevTurn?.decision?.target ?? j.judgment?.targetSlot))).join("") ||
       attempts.map(a => line("試行対象", a.judgment?.targetSlot)).join("");
     const decision = traces.map(t => {
-      const publication = t.generatedPublication, executed = publication?.recovery?.executed ?? t.executed;
+      const publication = t.generatedPublication;
+      const finalIntervention = publication?.recovery?.intervention ?? t.intervention;
+      const handling = finalIntervention?.schemaVersion === "jev_intervention_v2" ? finalIntervention.handling : null;
+      const executed = handling && publication?.continuation ? null : publication?.recovery?.executed ?? t.executed;
       const purpose = executed?.visualPurpose;
       const features = records(publication?.visualFeatures?.sources);
+      const issue = executed?.issue;
+      const destination = executed?.destination;
+      const close = publication?.close;
+      const extraRows = handling ? records(finalIntervention.extras) : [];
       return '<div class="turn-block">' + line("試行", t.attemptNumber) + line("選択", values(records(t.decisions).map(d => d.action))) +
         line("方略介入", values([t.intervention?.disposition, t.intervention?.reasonCode])) +
-        line("実行", t.executed?.action ?? t.finalAction?.action) + line("実行名", t.executed ? t.executed.name : t.finalAction ? t.finalAction.candidateName : null) +
+        (handling ? line("論点の扱い", values([handling.class, handling.via, handling.initiator])) +
+          line("採否の根拠", values([finalIntervention.disposition, finalIntervention.reasonCode, handling.anchor?.kind,
+            handling.anchor?.turn ?? handling.anchor?.sourceTurn])) +
+          line("判断の表明の状況", handling.commitmentState) +
+          line("仮定の代替", handling.alternative) +
+          line("実行した論点", values([issue?.kind, issue?.sourceTurn])) +
+          line("移る先", values([destination?.kind, destination?.figureId, destination?.issue?.kind, destination?.issue?.sourceTurn])) : "") +
+        (close ? line("終了の相談", values([close.initiator, close.unresolved ? "未解決あり" : "未解決なし"])) : "") +
+        extraRows.map(extra => line("追加の扱い", values([extra.original?.action, targetText(extra.original?.target), extra.reasonCode,
+          extra.executed?.action, extra.original?.issue?.sourceTurn ?? extra.original?.visualPurpose?.sourceTurn]))).join("") +
+        (t.status === "committed" ? records(publication?.parts).map(part => line("公開文の範囲", values([part.item, part.start, part.end]))).join("") : "") +
+        line("実行", handling ? t.finalAction?.action : t.executed?.action ?? t.finalAction?.action) + line("実行名", t.executed ? t.executed.name : t.finalAction ? t.finalAction.candidateName : null) +
         line("実行特徴", t.executed ? t.executed.feature : t.finalAction ? t.finalAction.discriminatingFeature : null) +
         line("判断の目的", values([purpose?.kind, purpose?.sourceTurn ? "発話 " + purpose.sourceTurn : null])) +
         (t.status === "committed" ? features.map(feature => line("公開した特徴・観察の出所",

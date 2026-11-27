@@ -1,4 +1,5 @@
 import {interventionForStrategy,interventionReference} from '../decision/bypass-acceptance.ts';
+import {issueHandlingForStrategy,issueHandlingReference} from '../decision/issue-handling.ts';
 import {JevTurnError} from './jev-turn.ts';
 // v2 dialogue: unlabeled scattered boards, opaque own ids, asynchronous human
 // messages. This module is a pure adapter for the human message queue: each
@@ -13,6 +14,8 @@ import { stageMemory, prepareMemory } from "../judgment/memory.mjs";
 import { buildDecisionEvidence } from "./decision-evidence.mjs";
 import { resolveActiveJudgment } from "./active-judge.mjs";
 import { findGuardViolations, rewriteReasons, fallbackUtterance, HOLISTIC_V5_VIEWPOINT_RULE } from "./generation-guard.ts";
+import { ISSUE_HANDLING_GENERATION } from "./deferred-ai-extraction.ts";
+import { SINGLE_ISSUE_DEFERRAL } from "./issue-publication.ts";
 import { startGroundingShadow, validateGroundingShadowOptions } from "./grounding-shadow.ts";
 import { prepareLocalGroundingTurn, validateLocalGroundingOptions, localGroundingMemo, findLocalPublicationViolations } from "./local-grounding-turn.ts";
 import { createJevTurnRuntime } from "./jev-turn.ts";
@@ -131,9 +134,20 @@ export const HOLISTIC_V3_ACTION_SCOPE_V2 = Object.freeze({ ...STYLED_TRIAL_V3_AC
 const HOLISTIC_V5_GENERATOR_INSTRUCTIONS_V2 = replaceOnce(
   replaceOnce(HOLISTIC_V3_GENERATOR_INSTRUCTIONS_V2, EARLIER_ORIENTATION_RULE, HOLISTIC_V5_VIEWPOINT_RULE),
   EARLIER_TRIAL_ORIENTATION_RULE, "");
+const ISSUE_HANDLING_GENERATOR_INSTRUCTIONS_V21 = replaceOnce(replaceOnce(HOLISTIC_V5_GENERATOR_INSTRUCTIONS_V2,
+  "defer/revisitは保留・再訪であることが分かるように伝えてください。",
+  "revisitでは以前の論点に戻ることが分かるように伝えてください。hold_openでは保留や後回しを宣言しないでください。"),
+  "行動がdeferでもmove_onでもないときは、未解決の図形について保留・先送り・別の図形への移行を提案しないでください。",
+  SINGLE_ISSUE_DEFERRAL);
 const HOLISTIC_V5_ACTION_SCOPE_V2 = Object.freeze({ ...HOLISTIC_V3_ACTION_SCOPE_V2,
   confirm: replaceOnce(HOLISTIC_V3_ACTION_SCOPE_V2.confirm, "回転に依存しない表現で", "形の参照枠に関する共通教示に沿って"),
   repair: replaceOnce(HOLISTIC_V3_ACTION_SCOPE_V2.repair, "回転に依存しない表現で", "形の参照枠に関する共通教示に沿って") });
+const ISSUE_HANDLING_ACTION_SCOPE_V21 = Object.freeze({ ...HOLISTIC_V5_ACTION_SCOPE_V2,
+  hold_open: "相手の提示に短く反応し、issueの論点について、理解できた、採用する、食い違っている、のいずれも言い切らないでください。ためらい、相手の言葉の短い反復、観察メモに根拠のある候補を独り言のように挙げることのいずれかで、判断がまだ定まらないことを伝えてください。直接の問いや確認の依頼を作らず、相手が自分から補足できるところで発話を終えてください。保留、後回し、移行、名前や対象の確定を宣言しないでください。publicQuestionsに観察メモで答えられる別の問いがあれば先に短く答えてください。issueのkindがresolve_issueのときは、出所のある局所論点を指します。",
+  carry_over: "issueの論点がまだ決まっていないことを短く伝え、後で戻れる形でdestinationへ進んでください。解決や放棄を表明しないでください。partner_choiceなら次の図形は相手に選んでもらい、other_figureなら観察メモの全体の見立てを一つ示してください。same_figure_namingなら呼び名の相談を始め、採用や候補名の決定はしないでください。same_figure_other_issueなら同じ図形を別の点から見ることを持ちかけ、old_issueなら以前に途中になった論点を先に扱うことを持ちかけてください。移る先が未特定なら内容を作らず、以前の点を先に扱うことだけを伝えてください。issueがunknownなら未解決の点を作らず、進むことだけを自然に伝えてください。publicQuestionsに観察メモで答えられる問いがあれば先に短く答えてください。",
+  consult: "issueの論点がまだ合わせられていないことを短く伝え、確かめ続けるか、別の進め方にするかを相手に尋ねてください。進み方は相手に委ね、自分から移ったり、どちらかに誘導したりしないでください。解決や放棄を表明せず、自分側の観察の特徴は述べないでください。",
+  revisit: "以前に未解決のまま残したissueの論点に戻り、そこを解決したいことが伝わるようにしてください。戻ることを一言で伝え、確かめたい点を一つ扱えます。決まったとは言わないでください。",
+});
 
 // Luna participant path (public-act consistency), identical across strategies. The constants above stay
 // as they are for the Jev path. Own-image claims need a basis in the judgment or its memo;
@@ -247,8 +261,13 @@ export function createDialogueV2(options) {
     const p=Object.getOwnPropertyDescriptor(options,'interventionPolicy'),t=Object.getOwnPropertyDescriptor(options,'decisionTimeoutMs');
     if(decisionMode!=='jev'||!referenceMemory||!p?.enumerable||!Object.hasOwn(p,'value')||!t?.enumerable||!Object.hasOwn(t,'value'))throw Error();
     interventionPolicy=p.value;decisionTimeoutMs=t.value;if(!interventionPolicy||Object.getPrototypeOf(interventionPolicy)!==Object.prototype)throw Error();
-    const r=Object.getOwnPropertyDescriptors(interventionPolicy);if(Reflect.ownKeys(r).length!==2||['version','tableSha256'].some(k=>!r[k]?.enumerable||!Object.hasOwn(r[k],'value'))||r.tableSha256.value!==interventionReference(r.version.value).tableSha256||!Number.isSafeInteger(decisionTimeoutMs)||decisionTimeoutMs<1||decisionTimeoutMs>600000)throw Error();
-    intervention=interventionForStrategy(strategy,r.version.value);
+    const r=Object.getOwnPropertyDescriptors(interventionPolicy);
+    if(Reflect.ownKeys(r).length!==2||['version','tableSha256'].some(k=>!r[k]?.enumerable||!Object.hasOwn(r[k],'value'))||
+       !Number.isSafeInteger(decisionTimeoutMs)||decisionTimeoutMs<1||decisionTimeoutMs>600000)throw Error();
+    const issueHandling=r.version.value===issueHandlingReference.version;
+    const reference=issueHandling?issueHandlingReference:interventionReference(r.version.value);
+    if(r.tableSha256.value!==reference.tableSha256)throw Error();
+    intervention=issueHandling?issueHandlingForStrategy(strategy):interventionForStrategy(strategy,r.version.value);
    }catch{throw new JevTurnError('invalid_intervention');}
   }
   // two_stage_v2 exists only for the integrated research profile; every other dialogue keeps two_stage_v1.
@@ -291,9 +310,12 @@ export function createDialogueV2(options) {
     const baseScope = styled ? STYLED_ACTION_SCOPE_V2 : ACTION_SCOPE_V2;
     const trialInstructions = styled ? STYLED_TRIAL_GENERATOR_INSTRUCTIONS_V2 : TRIAL_GENERATOR_INSTRUCTIONS_V2;
     const trialScope = styled ? STYLED_TRIAL_ACTION_SCOPE_V2 : TRIAL_ACTION_SCOPE_V2;
-    const instructions = holisticV5 ? HOLISTIC_V5_GENERATOR_INSTRUCTIONS_V2 : holisticV1 ? HOLISTIC_V3_GENERATOR_INSTRUCTIONS_V2
+    const issueHandling = options.generationRetryVersion === ISSUE_HANDLING_GENERATION;
+    const instructions = issueHandling ? ISSUE_HANDLING_GENERATOR_INSTRUCTIONS_V21
+      : holisticV5 ? HOLISTIC_V5_GENERATOR_INSTRUCTIONS_V2 : holisticV1 ? HOLISTIC_V3_GENERATOR_INSTRUCTIONS_V2
       : v3Trial ? STYLED_TRIAL_V3_GENERATOR_INSTRUCTIONS_V2 : options.technicalTrial ? trialInstructions : baseInstructions;
-    const actionScope = holisticV5 ? HOLISTIC_V5_ACTION_SCOPE_V2 : holisticV1 ? HOLISTIC_V3_ACTION_SCOPE_V2
+    const actionScope = issueHandling ? ISSUE_HANDLING_ACTION_SCOPE_V21
+      : holisticV5 ? HOLISTIC_V5_ACTION_SCOPE_V2 : holisticV1 ? HOLISTIC_V3_ACTION_SCOPE_V2
       : v3Trial ? STYLED_TRIAL_V3_ACTION_SCOPE_V2 : options.technicalTrial ? trialScope : baseScope;
     // #175 is part of the participant prompt. The research layouts retain their own recorded wording.
     const generation = {

@@ -324,6 +324,7 @@ export type LocalPriorAct = {
   discriminatingFeature: string | null;
   /** Copied only from the committed publication trace, never a model verdict. */
   publishedFallback?: boolean;
+  issueHandling?: true;
   followUp?: Omit<LocalPriorAct, "turn" | "followUp" | "publishedFallback"> | null;
 };
 
@@ -387,6 +388,7 @@ export function recordAiClaims({ graph, turn, publicTurns, priorAct, featureSour
   const acts = [priorAct, ...(priorAct.followUp ? [priorAct.followUp] : [])];
   for (const [actIndex, act] of acts.entries()) {
     if (actIndex > 0 && ordinal === 0) ordinal = 1;
+    if (act.issueHandling && ["hold_open", "carry_over", "consult"].includes(act.action)) continue;
     const candidates = act.targetCandidates;
     const targets = act.targetSlot !== null && ownSlots.includes(act.targetSlot) ? [act.targetSlot]
       : act.targetSlot === null && Array.isArray(candidates) && candidates.length >= 2 && candidates.length <= ownSlots.length &&

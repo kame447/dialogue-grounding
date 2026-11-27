@@ -2,9 +2,10 @@
 // validated judgment determines state; detected wording never changes its act.
 import type { DialoguePolicy, DraftAct, JevExecutedDecision, PublicNameCandidate } from "../decision/contract.ts";
 import { isGenerationV18, type ShapeTerminologyVersion } from "../shape-terminology.ts";
-import { DEFERRED_AI_EXTRACTION_GENERATION, isDeferredAiExtractionGeneration } from "./deferred-ai-extraction.ts";
+import { DEFERRED_AI_EXTRACTION_GENERATION, ISSUE_HANDLING_GENERATION, isDeferredAiExtractionGeneration } from "./deferred-ai-extraction.ts";
 export const VISUAL_FEATURE_GENERATION = "jev_generation_retry_v19";
-type GenerationV17Plus = "jev_generation_retry_v17" | ShapeTerminologyVersion | typeof VISUAL_FEATURE_GENERATION | typeof DEFERRED_AI_EXTRACTION_GENERATION;
+type VisualFeatureGeneration = typeof VISUAL_FEATURE_GENERATION | typeof DEFERRED_AI_EXTRACTION_GENERATION | typeof ISSUE_HANDLING_GENERATION;
+type GenerationV17Plus = "jev_generation_retry_v17" | ShapeTerminologyVersion | VisualFeatureGeneration;
 // v3 was reserved for the experiment that extended fixed responses.
 // v9 contains every behaviour of v8 and widens only which wordings the orientation check accepts as a stated viewpoint or as the partner's own words. v8 contains every behaviour of v7 and adds the direct pointing-reply match to a targetless or differently-extracted confirm question. v7 contains every behaviour of v6 and widens the unsupported-topic-shift check to the particle-less and "next figure" wordings. v6 contains every behaviour of v5 and adds the unsupported-topic-shift check. v5 contains every behaviour of v4 (viewpoint rules, no fixed-sentence fallback, the whole-history judgment material, the private naming state) and adds the confirm-specific viewpoint note and the topic markers.
 export type GenerationRetryVersion = "jev_generation_retry_v1" | "jev_generation_retry_v2" | "jev_generation_retry_v4" | "jev_generation_retry_v5" | "jev_generation_retry_v6" | "jev_generation_retry_v7" | "jev_generation_retry_v8" | "jev_generation_retry_v9" | "jev_generation_retry_v10" | "jev_generation_retry_v11" | "jev_generation_retry_v12" | "jev_generation_retry_v13" | "jev_generation_retry_v14" | "jev_generation_retry_v15" | "jev_generation_retry_v16" | GenerationV17Plus;
@@ -67,7 +68,7 @@ export function isGenerationV17(version: unknown): version is GenerationV17Plus 
   return version === "jev_generation_retry_v17" || isGenerationV18(version) || isGenerationV19(version);
 }
 
-export function isGenerationV19(version: unknown): version is typeof VISUAL_FEATURE_GENERATION | typeof DEFERRED_AI_EXTRACTION_GENERATION {
+export function isGenerationV19(version: unknown): version is VisualFeatureGeneration {
   return version === VISUAL_FEATURE_GENERATION || isDeferredAiExtractionGeneration(version);
 }
 
@@ -98,6 +99,7 @@ export function allowsOrientationFallback(version: GenerationRetryVersion | unde
 }
 
 type Action = "accept" | "propose_name" | "confirm" | "agree" | "repair" | "defer" | "revisit" | "move_on" | "close";
+type PublicationAction = Action | "hold_open" | "carry_over" | "consult";
 type Judgment = { action: Action; candidateName?: string | null; discriminatingFeature?: string | null };
 
 const patterns: ReadonlyArray<readonly [string, RegExp]> = [
@@ -586,15 +588,15 @@ function enumeratesAlternatives(text: string, history: readonly string[]): boole
 }
 
 /** All publication rules for the committed primary act; codes only. */
-export function findGuardViolations(text: string, action: Action): string[] {
+export function findGuardViolations(text: string, action: PublicationAction): string[] {
   return [...(action === "agree" ? [] : findAgreementClaims(text)), ...(action === "repair" ? [] : findRepairClaims(text)),
-    ...(action === "defer" || action === "move_on" ? [] : findDeferralClaims(text)), ...findInternalLeaks(text)];
+    ...(["defer", "move_on", "carry_over", "consult"].includes(action) ? [] : findDeferralClaims(text)), ...findInternalLeaks(text)];
 }
 
 const AGREEMENT_CODES = new Set(patterns.map(([code]) => code));
 /** True for the naming-decision wording families (pre-holistic set); holistic_v1 uses them only as a question trigger, never as a blocker. */
 export const isAgreementWordCode = (code: string) => AGREEMENT_CODES.has(code);
-export function currentTurnNamingSource(execution: Pick<JevExecutedDecision, "action" | "target" | "name">,
+export function currentTurnNamingSource(execution: Pick<JevExecutedDecision, "target" | "name"> & { action: PublicationAction },
   candidates: readonly PublicNameCandidate[], turn: number,
   proposals: readonly { sourceTurn: number; name: string | null; targets: readonly string[] }[] = []): boolean {
   if (execution.action !== "agree" || execution.target.kind !== "single" || !execution.name) return false;
@@ -607,7 +609,7 @@ export function currentTurnNamingSource(execution: Pick<JevExecutedDecision, "ac
 }
 
 /** A semantic result can replace only the literal-name checks for the selected act. */
-export function semanticNamingCodes(found: readonly string[], action: Action, choice: DraftAct | null,
+export function semanticNamingCodes(found: readonly string[], action: PublicationAction, choice: DraftAct | null,
   currentTurnSource: boolean): string[] {
   const naming = action === "agree" || action === "propose_name";
   if (!choice) return [...found, "draft_act_unconfirmed"];
@@ -622,7 +624,7 @@ export function semanticNamingCodes(found: readonly string[], action: Action, ch
 /** No new Jev send when the old trigger would not have asked. A self-contained
  * question that proposes only the selected name for the current shape is decidable
  * locally; other drafts need the existing semantic check. */
-export function namingCodesWithoutQuestion(found: readonly string[], text: string, action: Action, name: string | null): string[] {
+export function namingCodesWithoutQuestion(found: readonly string[], text: string, action: PublicationAction, name: string | null): string[] {
   const draft = normalize(text);
   if (action !== "propose_name") {
     return /(?:と|って)呼(?:びませんか|ぶのはどう(?:ですか|でしょう)|んでみませんか)\?/u.test(draft)
@@ -732,7 +734,7 @@ export function findLocalPublicationViolations(text: string, messages: readonly 
   return [...new Set(codes)];
 }
 
-export type GenerationCodeContext = { action: Action; candidateName: string | null; v3: boolean; holistic: boolean; adaptive: boolean; factored: boolean; ai: boolean;
+export type GenerationCodeContext = { action: PublicationAction; candidateName: string | null; v3: boolean; holistic: boolean; adaptive: boolean; factored: boolean; ai: boolean;
   publicTexts: readonly string[]; dialoguePolicy?: DialoguePolicy; generationRetryVersion?: GenerationRetryVersion;
   /** The participant's public utterances so far (v10: the only source of direction words a quotation after "そちらでいう" may excuse). */
   humanTexts?: readonly string[];
@@ -744,10 +746,12 @@ export type GenerationCodeContext = { action: Action; candidateName: string | nu
  * In holistic_v1 the naming-act wording never blocks here; it only triggers the draft_naming question. */
 export function generationGuardCodes(text: string, c: GenerationCodeContext): string[] {
   const squeezed = text.normalize("NFKC").replace(/\s/gu, "");
-  return [...new Set([...findGuardViolations(text, c.action).filter((code) => !(c.holistic && isAgreementWordCode(code))),
+  const issueHandling = c.generationRetryVersion === ISSUE_HANDLING_GENERATION;
+  const explicitNonAdoption = issueHandling && ["hold_open", "carry_over", "consult"].includes(c.action);
+  return [...new Set([...findGuardViolations(text, c.action).filter(code => !c.holistic || explicitNonAdoption || !isAgreementWordCode(code)),
     ...(c.v3 ? findOrientationLeaks(text, c.dialoguePolicy, c.generationRetryVersion, c.humanTexts, c.recentHumanTexts, c.publicTexts) : []),
     ...(c.v3 ? findWorkingNoteLeaks(text, c.publicTexts) : []),
-    ...(c.v3 && isGenerationV6(c.generationRetryVersion) && c.action !== "move_on" && c.action !== "defer" && c.action !== "close" &&
+    ...(c.v3 && isGenerationV6(c.generationRetryVersion) && !["move_on", "defer", "close", "carry_over", "consult"].includes(c.action) &&
       (isGenerationV15(c.generationRetryVersion) || c.vetoed === true || c.action === "confirm" || c.action === "repair") ? (isGenerationV11(c.generationRetryVersion) ? findTopicShiftClaimsV11(text) : isGenerationV7(c.generationRetryVersion) ? findTopicShiftClaimsV7(text) : findTopicShiftClaims(text)) : []),
     ...(c.v3 && c.action === "agree" && c.candidateName !== null ? findAgreeNameMismatch(text, c.candidateName) : []),
     ...(c.v3 && c.action === "propose_name" && c.candidateName !== null ? findProposeNameMismatch(text, c.candidateName) : []),
@@ -755,6 +759,7 @@ export function generationGuardCodes(text: string, c: GenerationCodeContext): st
     ...(c.factored && /repair_?facts|reply_?vs_?previous|not_comparable|widened_or_shifted|same_?question|local_?gaps/iu.test(squeezed) ? ["internal_field"] : []),
     ...(/human[_-]?referent/iu.test(squeezed) ? ["internal_field"] : []),
     ...(isGenerationV19(c.generationRetryVersion) && /(?<![A-Za-z])(?:visualPurpose|observationFeatures|visualFeatures|detailFigureIds)(?![A-Za-z])/u.test(squeezed) ? ["internal_field"] : []),
+    ...(issueHandling && /(?<![A-Za-z_])(?:hold_open|carry_over|partner_choice|other_figure|same_figure_naming|same_figure_other_issue|old_issue|destination|commitment_state|handled_issue|switch_function|non_bypass_alternative|issueHandlingVersion|handlings)(?![A-Za-z_])/u.test(text.normalize("NFKC")) ? ["internal_field"] : []),
     ...(c.ai && /\d+:pub\d+/u.test(text.normalize("NFKC").replace(/[\s\u200b-\u200d\ufeff]+/gu, "")) ? ["internal_id"] : [])])];
 }
 export type GenerationOutcome = { kind: "publish_first" | "publish_retry" | "fallback" | "stop"; regenerated: boolean; violations: string[] };
