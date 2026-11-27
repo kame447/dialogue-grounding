@@ -1,4 +1,5 @@
 import type { ResearchLimits } from '../v2/research-timeouts.ts';
+import type { ReferenceClaimExcerpt } from './reference-evidence.ts';
 // Shared contract for proposition-scoped (partial) grounding memory. Decision 0001.
 // Opt-in research path only: no default strategy, prompt, scoring, UI or model policy
 // depends on this file. Every record is the AI's interpretation of PUBLIC utterances
@@ -94,6 +95,7 @@ export type LocalSegmentProposal = {
 export type LocalExtractionInput = {
   turn: number;
   publicTurns: readonly PublicTurn[];
+  retainedReferenceHistory?: readonly ReferenceClaimExcerpt[];
   ownSlots: readonly string[];
   /** AI's OWN image only; never the partner's image or an answer-key rendering. */
   ownImage: LocalOwnImage;
@@ -122,6 +124,7 @@ export type LocalAnswersChecked = typeof LOCAL_ANSWERS_CHECKED[number];
 export type LocalClassificationInput = {
   turn: number;
   publicTurns: readonly PublicTurn[];
+  retainedReferenceHistory?: readonly ReferenceClaimExcerpt[];
   segments: readonly LocalSegmentProposal[];
   /** Candidate prior claims (id, aspect, targets, act, speaker, sourceTurn, proposition, name). */
   priorClaims: readonly LocalClaimView[];

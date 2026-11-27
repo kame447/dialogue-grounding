@@ -17,8 +17,8 @@ export type DecisionObservationAspect = typeof OBSERVATION_ASPECTS[number];
 export type JevTarget = { kind: "single"; figureId: string } | { kind: "multiple"; figureIds: string[] } | { kind: "none" };
 export const JEV_VISUAL_PURPOSE_VERSION = "jev_visual_purpose_v1";
 export const JEV_VISUAL_PURPOSE_GENERATION = "jev_generation_retry_v19";
-export function usesJevVisualPurpose(generation: unknown): generation is typeof JEV_VISUAL_PURPOSE_GENERATION | "jev_generation_retry_v21" {
-  return generation === JEV_VISUAL_PURPOSE_GENERATION || generation === "jev_generation_retry_v21";
+export function usesJevVisualPurpose(generation: unknown): generation is typeof JEV_VISUAL_PURPOSE_GENERATION | "jev_generation_retry_v21" | "jev_generation_retry_v22" {
+  return generation === JEV_VISUAL_PURPOSE_GENERATION || generation === "jev_generation_retry_v21" || generation === "jev_generation_retry_v22";
 }
 export type JevVisualPurpose =
   | { kind: "clarify_reference" | "resolve_mismatch" | "unknown" }
@@ -256,11 +256,19 @@ export const DRAFT_ACTS = ["adopt_chosen", "adopt_other", "decline_or_hold", "pr
 export const SEMANTIC_DRAFT_ACTS = [...DRAFT_ACTS, "adopt_context", "propose_chosen"] as const;
 export type DraftAct = typeof SEMANTIC_DRAFT_ACTS[number] | "withdraw_selected";
 export type DraftMoveOn = { choice: "honors_request" | "mismatch"; scores: Record<string, number> };
+export const DRAFT_TOPIC_SHIFT_CHOICES = ["within_plan", "unsupported_shift", "unclear"] as const;
+export type DraftTopicShiftResult = { choice: typeof DRAFT_TOPIC_SHIFT_CHOICES[number]; scores: Record<string, number> };
+export type DraftTopicShiftPlan = {
+  humanRequestedMove: boolean;
+  sections: readonly { item: number; start: number; end: number; action: JevDecisionAction; target: JevTarget;
+    issue?: JevIssueRef; destination?: CarryDestination }[];
+};
 export type DraftActInput = { turn: number; publicTurns: readonly PublicTurn[]; reasons: readonly string[];
   selected: { action: JevDecisionAction; target: JevTarget; name: string | null }; draft: string;
-  semanticNaming?: { currentTurnSource: boolean }; withdrawPriorName?: string; moveOnDraft?: string; issueHandlingVersion?: typeof ISSUE_HANDLING_VERSION };
+  semanticNaming?: { currentTurnSource: boolean }; withdrawPriorName?: string; moveOnDraft?: string; issueHandlingVersion?: typeof ISSUE_HANDLING_VERSION;
+  topicShiftPlan?: DraftTopicShiftPlan };
 export type DraftActResult = { status: "ok" | "error"; choice: DraftAct | null; scores: Record<string, number> | null; model: string | null;
-  responseId: string | null; costUsd: number | null; latencyMs: number; error: string | null; moveOn?: DraftMoveOn };
+  responseId: string | null; costUsd: number | null; latencyMs: number; error: string | null; moveOn?: DraftMoveOn; topicShift?: DraftTopicShiftResult };
 /** What a P5 draft claims beyond the shared construal (jev_generation_retry_v14): a closed set judged by Jev. */
 export const DRAFT_SHARED_CLAIMS = ["none", "single_identification_claimed", "unconfirmed_detail_claimed"] as const;
 export type DraftSharedClaim = typeof DRAFT_SHARED_CLAIMS[number];

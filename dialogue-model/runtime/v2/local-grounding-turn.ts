@@ -4,7 +4,8 @@ import { LOCAL_ACTS, LOCAL_ASPECTS, LOCAL_ANSWERS_CHECKED } from "../local-groun
 import type { LocalAct, LocalOwnImage, LocalOwnAnchor, LocalFunctionVerdict, LocalSegmentProposal, LocalGroundingOptions, PublicTurn, LocalRejection, LocalVerificationResult } from "../local-grounding/contract.ts";
 import { verifyLocalUpdate, recordAiClaims, applyVerifiedOperation, type LocalVerificationDiagnostic } from "../local-grounding/verify.ts";
 import { summarizeLocalIssues, priorClaimViews } from "../local-grounding/derive.ts";
-import { previewReferenceUpdate } from "../memory/reference-graph.mjs";
+import { previewReferenceUpdate, REFERENCE_LIMITS } from "../memory/reference-graph.mjs";
+import { buildRetainedReferenceHistory } from "../local-grounding/reference-evidence.ts";
 import { literalSpan } from "../judgment/public-evidence.mjs";
 import { LOCAL_EXTRACTION_INSTRUCTIONS, LocalExtractionError, type LocalExtractionErrorCode } from "../local-grounding/extract.ts";
 import { LOCAL_CLASSIFICATION_INSTRUCTIONS, LocalClassificationError, type LocalClassificationErrorCode } from "../local-grounding/classify.ts";
@@ -108,6 +109,7 @@ export function localGroundingMemo(graph: Graph, update: Update, publicTurns: re
 
 export async function prepareLocalGroundingTurn(options: LocalGroundingOptions, input: {
   graph: Graph; update: Update; publicTurns: readonly PublicTurn[]; signal?: AbortSignal;
+  historicalPublicTurns?: readonly PublicTurn[];
   ownImage: LocalOwnImage; ownAnchors: readonly LocalOwnAnchor[];
   captureResearch?: boolean;
   referenceQuestionBindings?: ReadonlyMap<string, string>;
@@ -118,6 +120,7 @@ export async function prepareLocalGroundingTurn(options: LocalGroundingOptions, 
   bindDirectQuestionReplies?: boolean;
   retainLocalQuestionAnswers?: boolean;
   unbindPartNonAnswers?: boolean;
+  retainDelayedPartAnswers?: boolean;
   namingIntervalStart?: number;
   priorAct?: Parameters<typeof recordAiClaims>[0]["priorAct"];
 }): Promise<{ update: Update; trace: LocalGroundingTrace; research?: LocalGroundingResearchData }> {
@@ -207,11 +210,15 @@ export async function prepareLocalGroundingTurn(options: LocalGroundingOptions, 
     // from options, stored priorAct fields, or other external input.
     if (input.priorAct) merge(recordAiClaims({ graph: input.graph, turn: input.update.turn, publicTurns, priorAct: input.priorAct, featureSource: "none" }));
     const graph = previewReferenceUpdate(input.graph, update, { publicTurns });
+    const retainedReferenceHistory = input.historicalPublicTurns && buildRetainedReferenceHistory(graph, input.historicalPublicTurns, publicTurns, input.update.turn);
+    const earlierTurn = (turn: number | null) => publicTurns.some(source => source.turn === turn && source.turn < input.update.turn) ||
+      retainedReferenceHistory?.some(row => row.sourceTurn === turn);
     const issueSummary = summarizeLocalIssues(graph);
     check();
     let segments;
     try {
       segments = await options.extractor.extract({ turn: input.update.turn, publicTurns: structuredClone(publicTurns),
+        ...(retainedReferenceHistory?.length ? { retainedReferenceHistory: structuredClone(retainedReferenceHistory) } : {}),
         ownSlots: [...input.graph.slots], issueSummary,
         ownImage: { ...input.ownImage }, ownAnchors: structuredClone(input.ownAnchors) },
       { signal: controller.signal, timeoutMs: Math.ceil(timeoutMs) });
@@ -234,18 +241,26 @@ export async function prepareLocalGroundingTurn(options: LocalGroundingOptions, 
       return [{ segmentId: segmentCode(segment.segmentId, index), quote: sourceQuote,
         targets: Array.isArray(segment.targets) ? segment.targets.filter(slot => input.graph.slots.includes(slot)).slice(0, 6) : [], aspect: segment.aspect,
         proposition, name, linkedIssueId: graph.records.some((record: { issueId?: string }) => record.issueId === segment.linkedIssueId) ? segment.linkedIssueId : null,
-        respondsToTurn: Number.isSafeInteger(segment.respondsToTurn) && publicTurns.some(turn => turn.turn === segment.respondsToTurn && turn.turn < input.update.turn) ? segment.respondsToTurn : null,
+        respondsToTurn: Number.isSafeInteger(segment.respondsToTurn) && earlierTurn(segment.respondsToTurn) ? segment.respondsToTurn : null,
         ...(sourceQuote === "[redacted]" || proposition === "[redacted]" || name === "[redacted]" ? { redacted: true as const } : {}) }];
     });
     phase = "classifier_failed";
     const priorClaims = priorClaimViews(graph);
+    if (retainedReferenceHistory?.length) {
+      const allClaims = new Map(priorClaimViews(graph, { limit: REFERENCE_LIMITS.records }).map(claim => [claim.id, claim]));
+      const recentIds = new Set(priorClaims.map(claim => claim.id));
+      for (const { claimId } of retainedReferenceHistory) if (!recentIds.has(claimId) && allClaims.has(claimId)) {
+        priorClaims.push(allClaims.get(claimId)!);
+      }
+    }
     check();
     const beforeEvidence = research ? classifierEvidence(options.classifier) : null;
     let verdicts;
     if (research) research.classifier.status = "error";
     try {
       verdicts = await options.classifier.classify({ turn: input.update.turn, publicTurns: structuredClone(publicTurns),
-        segments: structuredClone(segments), priorClaims }, { signal: controller.signal, timeoutMs: Math.max(1, Math.ceil(deadline - performance.now())),
+        segments: structuredClone(segments), priorClaims,
+        ...(retainedReferenceHistory?.length ? { retainedReferenceHistory: structuredClone(retainedReferenceHistory) } : {}) }, { signal: controller.signal, timeoutMs: Math.max(1, Math.ceil(deadline - performance.now())),
         ...(input.answerFieldRules === true ? { answerField: true } : {}) });
       if (research) research.classifier.status = classifierKind === "jev_local_test" ? "error" : "ok";
     } catch (error) {
@@ -271,7 +286,12 @@ export async function prepareLocalGroundingTurn(options: LocalGroundingOptions, 
       });
     }
     phase = "verification_failed";
-    const verified = verifyLocalUpdate({ graph, turn: input.update.turn, publicTurns, segments, verdicts, keepUnboundApproval: options.keepUnboundApproval === true, approvalFromNamedClaim: options.approvalFromNamedClaim === true, referenceQuestionBindings: input.referenceQuestionBindings, directReferenceReplies: input.directReferenceReplies, refinedReplyRules: input.refinedReplyRules, answerFieldRules: input.answerFieldRules, bindDirectQuestionReplies: input.bindDirectQuestionReplies, retainLocalQuestionAnswers: input.retainLocalQuestionAnswers, unbindPartNonAnswers: input.unbindPartNonAnswers, namingIntervalStart: input.namingIntervalStart });
+    const verified = verifyLocalUpdate({ graph, turn: input.update.turn, publicTurns, retainedReferenceHistory, segments, verdicts,
+      keepUnboundApproval: options.keepUnboundApproval === true, approvalFromNamedClaim: options.approvalFromNamedClaim === true,
+      referenceQuestionBindings: input.referenceQuestionBindings, directReferenceReplies: input.directReferenceReplies,
+      refinedReplyRules: input.refinedReplyRules, answerFieldRules: input.answerFieldRules, bindDirectQuestionReplies: input.bindDirectQuestionReplies,
+      retainLocalQuestionAnswers: input.retainLocalQuestionAnswers, unbindPartNonAnswers: input.unbindPartNonAnswers,
+      retainDelayedPartAnswers: input.retainDelayedPartAnswers, namingIntervalStart: input.namingIntervalStart });
     if (research && verified.diagnostics?.length) research.verification.diagnostics = verified.diagnostics
       .flatMap((diagnostic, index): LocalVerificationDiagnostic[] => {
         const segmentId = segmentCode(diagnostic.segmentId, index);

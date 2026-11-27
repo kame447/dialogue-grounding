@@ -37,8 +37,9 @@ const exact = (value: unknown, keys: readonly string[]) => value !== null && typ
 const spanKeys = ["sourceTurn", "quote", "targets", "act", "aspect"];
 const text = (value: unknown): value is string => typeof value === "string" && value.trim().length > 0 && value.length <= 160 &&
   value !== "[redacted]" && !findLocalPublicationViolations(value, []).some(code => code === "internal_credential" || code === "internal_image");
-const targets = (value: unknown, slots: readonly string[]): value is string[] =>
-  Array.isArray(value) && value.length <= slots.length && new Set(value).size === value.length && [...value].every(id => slots.includes(id));
+const targets = (value: unknown, slots?: readonly string[]): value is string[] =>
+  Array.isArray(value) && value.length <= (slots?.length ?? SLOTS.length) && new Set(value).size === value.length &&
+  [...value].every(id => slots ? slots.includes(id) : typeof id === "string" && id.length > 0 && id.length <= 160);
 
 function publicSources(turns: readonly PublicSource[]) {
   const sources = new Map<number, PublicSource>();
@@ -51,7 +52,7 @@ function publicSources(turns: readonly PublicSource[]) {
   return sources;
 }
 
-function span(value: any, slots: readonly string[], turn: number): value is EvidenceSpan {
+function span(value: any, slots: readonly string[] | undefined, turn: number): value is EvidenceSpan {
   return Number.isSafeInteger(value.sourceTurn) && value.sourceTurn > 0 && value.sourceTurn <= turn &&
     text(value.quote) && targets(value.targets, slots) && LOCAL_ACTS.includes(value.act) && LOCAL_ASPECTS.includes(value.aspect);
 }
@@ -140,4 +141,27 @@ export function buildReferenceEvidence(graph: LocalGraph, turns: readonly Public
     if (evidence.history.length === MAX_HISTORY) break;
   }
   return evidence;
+}
+
+/** Keep the normal message window intact. Older excerpts are provenance data,
+ * never new messages or sources of current-turn claims. */
+export function buildRetainedReferenceHistory(graph: LocalGraph, history: readonly PublicTurn[], recent: readonly PublicTurn[], turn: number) {
+  const first = recent[0]?.turn ?? turn;
+  return buildReferenceEvidence(graph, history.filter(source => source.turn < first), turn, null).history;
+}
+
+export function validRetainedReferenceHistory(value: unknown, recent: readonly PublicTurn[], turn: number, slots?: readonly string[]): value is ReferenceClaimExcerpt[] {
+  const first = Math.min(turn, ...recent.map(source => source.turn));
+  if (!Array.isArray(value) || value.length > MAX_HISTORY ||
+      ![...value].every(row => exact(row, [...spanKeys, "speaker", "source", "respondsTo", "claimId"]) &&
+        (row.speaker === "human" || row.speaker === "ai") && LOCAL_SOURCES.includes(row.source) &&
+        ref(row.claimId) && (row.respondsTo === null || ref(row.respondsTo)) && span(row, slots, first - 1))) return false;
+  return new Set(value.map(row => row.claimId)).size === value.length &&
+    JSON.stringify(value).length <= REFERENCE_EVIDENCE_MAX_CHARS;
+}
+
+export function retainedClaimMatches(row: ReferenceClaimExcerpt, claim: LocalClaimView): boolean {
+  return row.claimId === claim.id && row.sourceTurn === claim.sourceTurn && row.speaker === claim.speaker &&
+    row.quote === claim.quote && row.act === claim.act && row.aspect === claim.aspect && row.source === claim.source &&
+    row.respondsTo === claim.respondsTo && row.targets.length === claim.targets.length && row.targets.every(id => claim.targets.includes(id));
 }
