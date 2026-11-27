@@ -86,8 +86,7 @@ export function namingReconfirmation(claims: readonly LocalClaimView[], turns: r
   const features = affirmative.filter(({ segment, verdict }) => isFigureReplyAspect(segment.aspect) &&
     segment.aspect !== "referent" && segment.aspect !== "question" && segment.targets.length === 1 && verdict.respondsToClaimId === question.id && (!contrast || contrast.replyIds.has(segment.segmentId)));
   const identities = affirmative.filter(({ segment, verdict }) => segment.aspect === "referent" &&
-    (!contrast || segment.targets.length === 1 && verdict.respondsToClaimId === contrast.statementId &&
-      /(?:同じ(?:図形|形)|(?:図形|形)(?:と|に)(?:同じ|一致)|同一(?:の)?(?:図形|形))/u.test(segment.quote.normalize("NFKC"))) &&
+    (!contrast || contrast.identityIds.has(segment.segmentId)) &&
     publicClaims.some(c => c.id === verdict.respondsToClaimId && c.act !== "ask" && c.targets.includes(figureId)));
   const paired = features.some(feature => identities.some(identity =>
     feature.span.end <= identity.span.start || identity.span.end <= feature.span.start));

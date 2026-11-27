@@ -842,7 +842,7 @@ function agreeSource(tr:any,t:any,key:string,tape:any,legacyV3=false,mode?:Repla
    expected=live.filter(eligibleAgree).flatMap((c:any)=>{const s=source(c);return s?[JSON.stringify([c.name,c.targets[0],s.seq])]:[];}).sort();
   }
   const saved=names.map((n:any)=>JSON.stringify([n.name,n.figureId,n.sourceTurn])).sort();
-  if(levels){const match={l0:equal(levels[0],saved),l2:equal(levels[1],saved)};if(!match.l2&&(scoped||!match.l0))return'invalid';CTX.agreeMatch=match;return{known:true,names,namingDenials,...(p5Facts?{p5Facts}:{})};}
+  if(levels){const match={l0:equal(levels[0],saved),l2:equal(levels[1],saved)};if(!match.l2&&(scoped||!match.l0))return'invalid';CTX.agreeMatch=match;return{known:true,names,...(namingDenials?{namingDenials}:{}),...(p5Facts?{p5Facts}:{})};}
   return equal(expected,saved)?{known:true,names}:'invalid';
 }
 // Adaptive trial version of an attempt from its own record: the repair facts mark v3, the agreement gate v2; a bare adaptive v1 is told apart only by

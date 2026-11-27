@@ -12,8 +12,10 @@ const slots: string[] = OWN.ownAnchors.map((anchor: { id: string }) => anchor.id
 const [own, other] = slots;
 const common = "穴がある";
 const property = "突起が一つ";
-const explanation = "こちらでは、突起が一つという特徴が見えます。";
-const question = "そちらの図形も、突起が一つという特徴がありますか？";
+const explanationFor = (feature: string) => `こちらでは、${feature}という特徴が見えます。`;
+const questionFor = (feature: string) => `そちらの図形も、${feature}という特徴がありますか？`;
+const explanation = explanationFor(property);
+const question = questionFor(property);
 const ordinaryStatement = "穴があります。";
 const ordinaryQuestion = "そちらの図形にも穴がありますか？";
 const denial = "いいえ、その図形ではありません。";
@@ -25,10 +27,10 @@ const identity = "私が見ている図形と同じです。";
 const featureReply = "一つです。";
 const agreement = "はい、「くぎ」と呼びましょう。";
 
-function observation(source: "count" | "contradiction" | "common" = "count"): ObservationMemo {
+function observation(source: "count" | "contradiction" | "common" = "count", feature = property): ObservationMemo {
   const memo = structuredClone(OLD.state.observationMemo) as ObservationMemo;
   for (const f of memo.figures) {
-    f.analytic.shapes = source === "common" ? [common] : f.id === own ? [common, property] :
+    f.analytic.shapes = source === "common" ? [common] : f.id === own ? [common, feature] :
       source === "count" ? [common, "突起が二つ"] : [common];
     f.reobservations = f.id === own || source !== "contradiction" ? [] : [{
       observedAt: memo.observedAt, issue: { aspect: "part", question: "突起が一つか", partnerConstrual: null },
@@ -57,7 +59,8 @@ const opening: Turn = { human: original, plan: {
   aiExtraction: extraction(segment("part", ordinaryStatement, "part", [own]), segment("check", ordinaryQuestion, "question", [own])),
 } };
 
-function deniedCheck(requireContrast = true): Turn {
+function deniedCheck(requireContrast = true, feature = property): Turn {
+  const explanation = explanationFor(feature), question = questionFor(feature);
   return { human: denial, plan: {
     action: "confirm", target: "figure_0", referent: "figure_0", speech: explanation + question,
     act: "deny", answers: "not_an_answer", aiActs: ["assert", "ask"],
@@ -67,19 +70,34 @@ function deniedCheck(requireContrast = true): Turn {
       if (key === "segment_0_antecedent") return antecedent(choices, "3:pub2");
       if (key === "feature") {
         if (requireContrast) assert.ok(!Object.values(choices).some(c => JSON.parse(c).value === common));
-        return Object.entries(choices).find(([, c]) => JSON.parse(c).value === property)?.[0];
+        return Object.entries(choices).find(([, c]) => JSON.parse(c).value === feature)?.[0];
       }
     },
   } };
 }
 
-function answer(form: "identity" | "both" | "feature" | "wrong"): Turn {
-  const response = form === "wrong" ? "穴があります。" : featureReply;
-  const referent = form === "feature" ? [] : [segment("identity", identity, "referent", form === "both" ? [own, other] : [own], 4)];
-  return { human: response + (referent.length ? identity : "") + proposal, plan: {
-    action: form === "identity" ? "agree" : "accept", target: "figure_0", referent: "figure_0", speech: form === "identity" ? agreement : "その特徴について聞きました。",
+type Answer = "identity" | "both" | "feature" | "wrong" | "explicit-count" |
+  "other-part" | "other-topic" | "negative-identity" | "uncertain-identity" | "clipped-negation";
+function answer(form: Answer): Turn {
+  const positive = form === "identity" || form === "explicit-count";
+  const response = ({
+    wrong: "穴があります。",
+    "explicit-count": "突起は１つあります。",
+    "other-part": "数えたのは穴です。穴は一つです。",
+    "other-topic": "穴を数えました。一つです。",
+  } as Partial<Record<Answer, string>>)[form] ?? featureReply;
+  const quotedValue = form === "other-part" || form === "other-topic" ? featureReply : response;
+  const identityText = ({
+    "negative-identity": "私が見ている図形と同じではありません。",
+    "uncertain-identity": "同じ図形かは分かりません。",
+    "clipped-negation": "同じ図形ではありません。",
+  } as Partial<Record<Answer, string>>)[form] ?? identity;
+  const quotedIdentity = form === "clipped-negation" ? "同じ図形" : identityText;
+  const referent = form === "feature" ? [] : [segment("identity", quotedIdentity, "referent", form === "both" ? [own, other] : [own], 4)];
+  return { human: response + (referent.length ? identityText : "") + proposal, plan: {
+    action: positive ? "agree" : "close", target: "figure_0", referent: "figure_0", speech: positive ? agreement : "その特徴について聞きました。",
     answers: "answers_checked_point",
-    extraction: extraction(segment("feature", response, "contour", [own], 4, property), ...referent,
+    extraction: extraction(segment("feature", quotedValue, "contour", [own], 4, property), ...referent,
       segment("name", proposal, "name", [own], null, proposal, name)),
     choose: (key, choices) => {
       const acts: Record<string, string> = { segment_0_act: "agree", segment_1_act: referent.length ? "agree" : "name_propose", segment_2_act: "name_propose" };
@@ -88,11 +106,11 @@ function answer(form: "identity" | "both" | "feature" | "wrong"): Turn {
       if (acts[key] && Object.hasOwn(choices, acts[key])) return acts[key];
       // A naming request cannot choose accept. Non-agreement on a different
       // topic is available to both strategies without an extra visual check.
-      if (key === "action" && form !== "identity") {
+      if (key === "action" && !positive) {
         assert.equal(Object.hasOwn(choices, "agree"), false);
         return "close";
       }
-      if (key === "target" && form !== "identity") return "none";
+      if (key === "target" && !positive) return "none";
     },
   } };
 }
@@ -113,6 +131,16 @@ test("a naming contrast requires explicit, non-conflicting observations across t
   rival.reobservations = [];
   assert.deepEqual(contrastFeatures(memo, slots, own), []);
   assert.deepEqual(contrastFeatures(memo, [own], own), []);
+  const counted = observation();
+  const countedRival = counted.figures.find(f => f.id === other)!;
+  const detail = { observedAt: counted.observedAt, issue: { aspect: "part" as const, question: "突起が二つか", partnerConstrual: null },
+    figureId: other, supports: [], contradicts: ["突起は２つある"], unknown: [] };
+  countedRival.reobservations = [detail];
+  assert.deepEqual(contrastFeatures(counted, slots, own), []);
+  countedRival.reobservations = [{ ...detail, contradicts: [], unknown: ["突起が二つある"] }];
+  assert.deepEqual(contrastFeatures(counted, slots, own), []);
+  countedRival.reobservations = [{ ...detail, contradicts: [property], unknown: ["突起が二つある"] }];
+  assert.deepEqual(contrastFeatures(counted, slots, own), [property]);
 });
 
 for (const label of ["repair-first", "bypass-enabled"] as const satisfies readonly Label[]) {
@@ -148,6 +176,50 @@ for (const label of ["repair-first", "bypass-enabled"] as const satisfies readon
 }
 
 for (const label of ["repair-first", "bypass-enabled"] as const) {
+  for (const form of ["identity", "explicit-count"] as const) {
+    test(`naming v5 accepts ${form} with the observation's ある suffix in ${label}`, async () => {
+      const outcomes: Awaited<ReturnType<typeof runTurn>>[] = [];
+      const feature = "突起が一つある";
+      const records = await buildRecords({ ...v5, label, memo: observation("count", feature),
+        turns: [opening, deniedCheck(true, feature), answer(form)],
+        onTurn: (side, outcome) => { if (side === label) outcomes.push(outcome); },
+      });
+      const [, check, agreed] = outcomes;
+      assert.equal(check.speech, explanationFor(feature) + questionFor(feature));
+      assert.equal(agreed.publication.status, "committed");
+      assert.equal(agreed.speech, agreement);
+      assert.deepEqual(agreed.state.ledger[own], { status: "agreed", name });
+      assert.deepEqual(agreed.state.judgments.at(-1).jevTurn.agreeNames, [{ name, figureId: own, sourceTurn: 5 }]);
+      assert.deepEqual(replayStatus(records), ["pass", "pass", "pass", "pass"]);
+    });
+  }
+
+  test(`naming v5 cannot publish a check based on a contradicted rival count in ${label}`, async () => {
+    const memo = observation();
+    memo.figures[1].reobservations = [{
+      observedAt: memo.observedAt, issue: { aspect: "part", question: "突起はいくつか", partnerConstrual: null },
+      figureId: other, supports: [], contradicts: ["突起が二つある"], unknown: [],
+    }];
+    const turn = deniedCheck();
+    turn.plan = { ...turn.plan, action: "confirm", target: "figure_1", speech: "別の図形にも穴がありますか？",
+      aiActs: undefined, aiExtraction: undefined,
+      choose: (key, choices) => {
+        if (key === "segment_0_antecedent") return antecedent(choices, "3:pub2");
+        if (key === "target") assert.equal(Object.hasOwn(choices, "figure_0"), false);
+      } };
+    const outcomes: Awaited<ReturnType<typeof runTurn>>[] = [];
+    const records = await buildRecords({ ...v5, label, memo, turns: [opening, turn],
+      onTurn: (side, outcome) => { if (side === label) outcomes.push(outcome); },
+    });
+    const result = outcomes.at(-1)!;
+    assert.equal(result.publication.status, "committed");
+    assert.equal(result.speech, turn.plan.speech);
+    assert.deepEqual(result.state.judgments.at(-1).jevTurn.executed.target, { kind: "single", figureId: other });
+    assert.deepEqual(result.state.ledger[own], { status: "unassigned", name: null });
+    assert.deepEqual(result.state.judgments.at(-1).jevTurn.agreeNames, []);
+    assert.deepEqual(replayStatus(records), ["pass", "pass", "pass", "pass"]);
+  });
+
   test(`naming v5 records a published contrast with no extra sends in ${label}`, async () => {
     const outcomes: Awaited<ReturnType<typeof runTurn>>[] = [];
     const records = await buildRecords({ ...v5, label, memo: observation(), turns: [opening, deniedCheck()],
@@ -166,7 +238,7 @@ for (const label of ["repair-first", "bypass-enabled"] as const) {
     assert.deepEqual(replayStatus(records), ["pass", "pass", "pass", "pass"]);
   });
 
-  for (const form of ["both", "feature", "wrong"] as const) {
+  for (const form of ["both", "feature", "wrong", "other-part", "other-topic", "negative-identity", "uncertain-identity", "clipped-negation"] as const) {
     test(`naming v5 holds the name after a ${form} response in ${label}`, async () => {
       const outcomes: Awaited<ReturnType<typeof runTurn>>[] = [];
       const records = await buildRecords({ ...v5, label, memo: observation(), turns: [opening, deniedCheck(), answer(form)],
@@ -175,6 +247,7 @@ for (const label of ["repair-first", "bypass-enabled"] as const) {
       const result = outcomes.at(-1)!;
       assert.equal(result.publication.status, "committed");
       assert.equal(result.state.judgments.at(-1).jevTurn.executed.action, "close");
+      assert.equal(result.speech, "その特徴について聞きました。");
       assert.deepEqual(result.state.judgments.at(-1).jevTurn.agreeNames, []);
       assert.deepEqual(result.state.ledger[own], { status: "unassigned", name: null });
       assert.deepEqual(result.state.namingDenials, { [own]: 3 });

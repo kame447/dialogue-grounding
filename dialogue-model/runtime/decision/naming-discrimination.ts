@@ -1,3 +1,4 @@
+import { normalizeName } from "../judgment/name-evidence.mjs";
 import { literalSpan, QUOTE_LIMIT } from "../judgment/public-evidence.mjs";
 import { isFigureReplyAspect } from "../local-grounding/verify.ts";
 import type { LocalClaimView, PublicTurn } from "../local-grounding/contract.ts";
@@ -9,7 +10,7 @@ import type { NamingJudgmentLike } from "./naming-request.ts";
 
 export type NamingDenials = Readonly<Record<string, number>>;
 type VisibleTurn = PublicTurn & { nonReferential?: boolean };
-export type NamingContrastAnswer = { figureId: string; deniedAt: number; questionId: string; statementId: string; replyIds: ReadonlySet<string> };
+export type NamingContrastAnswer = { figureId: string; deniedAt: number; questionId: string; replyIds: ReadonlySet<string>; identityIds: ReadonlySet<string> };
 
 export function validNamingDenials(value: unknown, slots: readonly string[], turn: number): value is NamingDenials {
   return value !== null && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype &&
@@ -21,14 +22,35 @@ const featureKey = (value: string): string => value.normalize("NFKC").trim().rep
 const positiveFeatures = (f: ObservationFigure): string[] =>
   [...f.analytic.shapes, f.analytic.composition, ...f.analytic.relations, ...f.reobservations.flatMap(r => r.supports)];
 
-/** A count expressed for the same literal part and unit is comparable.
- * The program leaves descriptions and paraphrases outside this form unresolved. */
-function partCount(key: string): { part: string; number: string } | null {
-  const parsed = /^([^、。！？?「」『』\s]+?)[がは]([0-9]+|[一二三四五六七八九十])(つ|個|本|箇所|か所)(?:ある)?$/u.exec(key);
+type Count = { part: string | null; unit: string; number: string };
+
+/** The same literal part and unit make counts from the memo and the answer
+ * comparable. Unrecognized descriptions remain unresolved. */
+function parseCount(key: string): Count | null {
+  const parsed = /^(?:([^、。！？?「」『』\s]+?)[がは])?([0-9]+|[一二三四五六七八九十])(つ|個|本|箇所|か所)(?:ある|あります|です)?$/u.exec(key);
   if (!parsed) return null;
   const numeral = "一二三四五六七八九十".indexOf(parsed[2]);
   const number = numeral < 0 ? parsed[2].replace(/^0+(?=\d)/u, "") : String(numeral + 1);
-  return { part: parsed[1] + ":" + parsed[3], number };
+  return { part: parsed[1] ?? null, unit: parsed[3], number };
+}
+
+function countMatches(a: Count, b: Count): boolean {
+  return a.part === b.part && a.unit === b.unit && a.number === b.number;
+}
+
+function matchesFeature(a: string, b: string): boolean {
+  const left = featureKey(a), right = featureKey(b);
+  if (left === right) return true;
+  const x = parseCount(left), y = parseCount(right);
+  return !!x?.part && !!y && countMatches(x, y);
+}
+
+function unresolved(f: ObservationFigure, value: string): boolean {
+  return [...f.unknowns, ...f.reobservations.flatMap(r => r.unknown)].some(note => matchesFeature(note, value));
+}
+
+function contradicts(f: ObservationFigure, value: string): boolean {
+  return f.reobservations.some(r => r.contradicts.some(note => matchesFeature(note, value)));
 }
 
 /** Compare every figure in the pre-selection pool. A missing description
@@ -38,27 +60,25 @@ export function contrastFeatures(memo: ObservationMemo, candidates: readonly str
   if (!selected || candidates.length < 2 || !candidates.includes(figureId)) return [];
   const other = candidates.filter(id => id !== figureId).map(id => memo.figures.find(f => f.id === id));
   return [...new Set(positiveFeatures(selected))].filter(value => {
-    const key = featureKey(value), count = partCount(key);
+    const key = featureKey(value), count = parseCount(key);
     if (!key || /[「」『』?？\n\r。]/u.test(key) || hasOrientationWords(key, "jev_generation_retry_v12") ||
         contrastUtterance(key).question.length > QUOTE_LIMIT || contrastUtterance(key).statement.length > QUOTE_LIMIT) return false;
-    const matches = (text: string) => {
-      const candidate = featureKey(text);
-      const parsed = count && partCount(candidate);
-      return candidate === key || parsed && parsed.part === count?.part && parsed.number === count?.number;
-    };
-    const unresolved = (f: ObservationFigure) =>
-      [...f.unknowns, ...f.reobservations.flatMap(r => r.unknown)].some(matches);
-    const contradicts = (f: ObservationFigure) => f.reobservations.some(r => r.contradicts.some(matches));
-    const otherCounts = (f: ObservationFigure) => {
-      const numbers = positiveFeatures(f).map(text => partCount(featureKey(text)))
-        .filter(parsed => count && parsed?.part === count.part).map(parsed => parsed!.number);
-      return new Set(numbers);
-    };
-    if (unresolved(selected) || contradicts(selected) || otherCounts(selected).size > 1) return false;
+    function countsForPart(f: ObservationFigure) {
+      const counts = new Map<string, string>();
+      if (count?.part) for (const observed of positiveFeatures(f)) {
+        const compared = parseCount(featureKey(observed));
+        if (compared?.part === count.part && compared.unit === count.unit) counts.set(compared.number, observed);
+      }
+      return counts;
+    }
+    if (unresolved(selected, key) || contradicts(selected, key) || countsForPart(selected).size > 1) return false;
     return other.every(f => {
-      if (!f || unresolved(f) || positiveFeatures(f).some(matches)) return false;
-      const counts = otherCounts(f);
-      return counts.size <= 1 && (contradicts(f) || counts.size === 1);
+      if (!f || unresolved(f, key) || positiveFeatures(f).some(note => matchesFeature(note, key))) return false;
+      const counts = countsForPart(f);
+      if (counts.size > 1) return false;
+      if (contradicts(f, key)) return true;
+      const alternative = counts.values().next().value;
+      return alternative !== undefined && !unresolved(f, alternative) && !contradicts(f, alternative);
     });
   });
 }
@@ -121,8 +141,35 @@ export function updateNamingDenials(saved: NamingDenials, claims: readonly Local
   return denials;
 }
 
-function answerKey(s: string): string {
-  return featureKey(s).replace(/^(?:はい|ええ)[、,\s]*/u, "").replace(/(?:です|ます)$/u, "").trim();
+type PublicClause = { start: number; end: number; text: string };
+
+function publicClauses(text: string): PublicClause[] | null {
+  const clauses: PublicClause[] = [];
+  let read = 0;
+  for (const match of text.matchAll(/(?:「[^」\r\n]*」|『[^』\r\n]*』|[^「」『』。．.!！？?…\r\n])+[。．.!！？?…]*/gu)) {
+    if (text.slice(read, match.index).trim()) return null;
+    read = match.index + match[0].length;
+    if (match[0].trim()) clauses.push({ start: match.index, end: read, text: match[0].normalize("NFKC").trim() });
+  }
+  return text.slice(read).trim() ? null : clauses;
+}
+
+const withoutAck = (text: string) => text.replace(/^(?:はい|ええ)[、,\s]+/u, "");
+const isIdentityAffirmation = (text: string) =>
+  /^(?:(?:(?:私|わたし|こちら|自分)(?:が見ている|の))?(?:図形|形)(?:と同じ(?:です|だ)|と一致します)|(?:同じ|同一の)(?:図形|形)(?:です|だ))[。.!]*$/u
+    .test(withoutAck(text));
+
+function opposesIdentity(text: string): boolean {
+  const unquoted = text.replace(/「[^」]*」|『[^』]*』/gu, "");
+  if (/^(?:いいえ[、,\s]*)?(?:違います|違う|分かりません|わかりません)[。.!]*$/u.test(unquoted) ||
+      /(?:別|違う)(?:の)?(?:図形|形)|(?:図形|形)(?:が|は|とは)違(?:う|います)/u.test(unquoted)) return true;
+  if (!/(?:同じ|同一|一致)/u.test(unquoted)) return false;
+  return /(?:[?？]|ません|ない|不明|分から|わから|かどうか|かな|かも|かは|か分|か判|たぶん|多分|おそらく)/u.test(unquoted);
+}
+
+function isNamingClause(text: string, names: ReadonlySet<string>): boolean {
+  const proposal = /^(?:呼び名を変えて[、,]\s*)?[「『]([^「」『』]+)[」』](?:と呼び(?:ませんか|ましょう)|にし(?:ませんか|ましょう)|と呼ぼう|にしよう|で(?:いい|どう)(?:ですか)?)[。.!?]*$/u.exec(text);
+  return proposal !== null && names.has(normalizeName(proposal[1]));
 }
 
 export function namingContrastAnswer(denials: NamingDenials, memo: ObservationMemo | null, candidates: readonly string[],
@@ -146,18 +193,35 @@ export function namingContrastAnswer(denials: NamingDenials, memo: ObservationMe
   const ask = fromPrevious.find(c => c.act === "ask" && c.quote === question && c.targets.length === 1 && c.targets[0] === figureId);
   const assertion = fromPrevious.find(c => c.act === "assert" && c.quote === statement && c.targets.length === 1 && c.targets[0] === figureId);
   if (!ask || !assertion) return null;
-  const key = answerKey(feature);
-  const value = /(?:が|は)([^、。？?！？]+)$/u.exec(key)?.[1].trim();
+  const clauses = publicClauses(human.text);
+  if (!clauses?.length || clauses.some(clause => opposesIdentity(clause.text))) return null;
   const responses = evidence.classifier.verdicts;
   if (responses.some(v => v.act === "deny" && [ask.id, assertion.id].includes(v.respondsToClaimId ?? ""))) return null;
-  const ids = evidence.extractor.segments.filter(segment => {
+  const replies = evidence.extractor.segments.flatMap(segment => {
     const quote = literalSpan(human.text, segment.quote);
-    const response = evidence.classifier.verdicts.find(v => v.segmentId === segment.segmentId);
-    if (!quote || response?.act !== "agree" || response.answersChecked !== "yes" || response.respondsToClaimId !== ask.id ||
-        segment.name !== null || !isFigureReplyAspect(segment.aspect) || segment.targets.length !== 1 || segment.targets[0] !== figureId ||
-        segment.respondsToTurn !== null && segment.respondsToTurn !== previous.turn) return false;
-    const answer = answerKey(quote.text);
-    return answer !== "" && (answer === key || answer === value && answerKey(segment.proposition) === key);
-  }).map(s => s.segmentId);
-  return ids.length ? { figureId, deniedAt, questionId: ask.id, statementId: assertion.id, replyIds: new Set(ids) } : null;
+    if (!quote || segment.name !== null || segment.targets.length !== 1 || segment.targets[0] !== figureId ||
+        segment.respondsToTurn !== null && segment.respondsToTurn !== previous.turn) return [];
+    const clause = clauses.find(c => c.start <= quote.start && c.end >= quote.end);
+    const matched = responses.filter(v => v.segmentId === segment.segmentId);
+    if (!clause || matched.length !== 1 || matched[0].act !== "agree" || matched[0].answersChecked !== "yes") return [];
+    return [{ segment, clause, antecedent: matched[0].respondsToClaimId }];
+  });
+  const identities = replies.filter(r => r.segment.aspect === "referent" &&
+    r.antecedent === assertion.id && isIdentityAffirmation(r.clause.text));
+  const proposals = new Set(claims.flatMap(c => c.speaker === "human" && c.sourceTurn === turn && c.act === "name_propose" &&
+    c.name !== null && c.targets.includes(figureId) ? [normalizeName(c.name)] : []));
+  const key = featureKey(feature), count = parseCount(key);
+  const ids = replies.filter(({ segment, clause, antecedent }) => {
+    if (antecedent !== ask.id || !isFigureReplyAspect(segment.aspect) || /[?？…]/u.test(clause.text)) return false;
+    const answer = featureKey(withoutAck(clause.text));
+    if (!count?.part) return answer === key || answer.replace(/です$/u, "") === key;
+    const said = parseCount(answer);
+    if (!said || !countMatches({ ...said, part: said.part ?? count.part }, count)) return false;
+    if (said.part !== null) return true;
+    // A bare value may borrow the part only from the published question.
+    // Any unexplained clause could establish another topic or a correction.
+    return clauses.every(other => other === clause || identities.some(r => r.clause === other) || isNamingClause(other.text, proposals));
+  }).map(r => r.segment.segmentId);
+  return ids.length ? { figureId, deniedAt, questionId: ask.id,
+    replyIds: new Set(ids), identityIds: new Set(identities.map(r => r.segment.segmentId)) } : null;
 }
