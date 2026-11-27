@@ -1,6 +1,7 @@
 import type { JevNamingGrounding, PublicNameCandidate } from "../../decision/contract.ts";
 import { literalSpan } from "../../judgment/public-evidence.mjs";
 import { normalizeName } from "../../judgment/name-evidence.mjs";
+import { hasRetainedNameSource } from "../../local-grounding/reference-evidence.ts";
 import { equal } from "./core.ts";
 
 export const NAMING_GUIDANCE = "namingEvidence.namesは人が公開発話で述べた実在の名前です。名前の候補があることは、どの図形かが確定したことも、現在の合意も意味しません。公開発話を読み、局所の棄却、否定の論点、古い記述、対象推定は誤り得る材料として扱ってください。受け止めるだけならaccept、同定の確認が要るならconfirmなどを自分で選んでください。agreeを選んでも、後の判定で根拠が足りなければ名前は確定しません。";
@@ -48,7 +49,8 @@ export function namingInputMatches(input: any, material: ReturnType<typeof namin
       input.inputBudget?.omitted?.publicTurns !== turns.length - retained.size) return false;
   const expected = material.names.flatMap(n => {
     const speech = publicTurns.find(t => t.turn === n.sourceTurn);
-    const span = retained.has(n.sourceTurn) && literalSpan(speech?.text, n.name);
+    const span = (retained.has(n.sourceTurn) || hasRetainedNameSource(input.referenceEvidence, n.sourceTurn, n.name)) &&
+      literalSpan(speech?.text, n.name);
     return span ? [{ ...n, name: span.text }] : [];
   });
   if (!equal(input.namingEvidence, { names: expected, localRejections: material.localRejections })) return false;

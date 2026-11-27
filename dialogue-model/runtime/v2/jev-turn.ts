@@ -13,7 +13,9 @@ import { createOwnLedger, validateJudgment, applyJudgment, JudgmentValidationErr
 import { normalizeName } from "../judgment/name-evidence.mjs";
 import { literalSpan } from "../judgment/public-evidence.mjs";
 import { stageMemory } from "../judgment/memory.mjs";
-import { createReferenceGraph, applyReferenceUpdate, previewReferenceUpdate, snapshotReferenceGraph, REFERENCE_LIMITS } from "../memory/reference-graph.mjs";
+import { CLAIM_PRUNE_V3, createReferenceGraph, applyReferenceUpdate, previewReferenceUpdate, snapshotReferenceGraph, REFERENCE_LIMITS } from "../memory/reference-graph.mjs";
+import { buildReferenceEvidence, validReferenceAlternatives } from "../local-grounding/reference-evidence.ts";
+import type { LocalReferenceAlternative, ReferenceEvidence } from "../local-grounding/reference-evidence.ts";
 import { nameBindsFigure } from "../decision/referent-binding.ts";
 import { hasNameProposal, claimsLiveAsOf, reconfirmationPossible, namingTurnKind, namingIntervalEstimates, inheritedTargetClaimIds, agreeCandidateAllowed, inheritsProposalName, turnNameProposals, namingNameKey, targetNamingConflict, publiclyCheckedNamingTarget, usesPublicNamingTarget, usesDirectNamingReplies, retainsLocalQuestionAnswers, answersRepairedNamingCheck, type AgreeNameScopeVersion } from "../decision/naming-request.ts";
 import { namingDenialTargets, namingReconfirmation, type NamingResponseEvidence } from "../decision/naming-reconfirmation.ts";
@@ -204,6 +206,7 @@ export type JevPrivateState = {
   agreeNameScopeVersion?: AgreeNameScopeVersion;
   ledger: OwnLedger; graph: Graph; judgments: CommittedAct[];
   observationMemo: ObservationMemo | null; repairHistory: RepairHistoryEntry[];
+  referenceAlternatives?: LocalReferenceAlternative[];
   aiPublic?: AiPublicState;
 };
 export type JevTurnOptions = {
@@ -690,12 +693,17 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
  try{
   stateJson(value);const s=value as any;const p5Enabled=questionLayout==='two_stage_v3'&&policy==='holistic_v5'&&isGenerationV13(generation);const p5OverclaimEnabled=questionLayout==='two_stage_v3'&&policy==='holistic_v5'&&isGenerationV14(generation);validateOwnLedger(Object.fromEntries(ownSlots.map(k=>[k,{status:'unassigned',name:null}])));
   const hasAgreeNameScope=Object.hasOwn(s??{},'agreeNameScopeVersion');
-  if(!stateExact(s,['schemaVersion','interventionPolicy','ledger','graph','judgments','observationMemo','repairHistory',...(Object.hasOwn(s??{},'aiPublic')?['aiPublic']:[]),...(hasAgreeNameScope?['agreeNameScopeVersion']:[])])||s.schemaVersion!=='jev_private_state_v2'||!stateSame(s.interventionPolicy,interventionReference(version)))throw Error();
+  const referenceEvidenceEnabled=s?.graph?.memoryPruneVersion===CLAIM_PRUNE_V3;
+  const hasAlternatives=Object.hasOwn(s??{},'referenceAlternatives');
+  if(!stateExact(s,['schemaVersion','interventionPolicy','ledger','graph','judgments','observationMemo','repairHistory',...(Object.hasOwn(s??{},'aiPublic')?['aiPublic']:[]),...(hasAgreeNameScope?['agreeNameScopeVersion']:[]),...(referenceEvidenceEnabled&&hasAlternatives?['referenceAlternatives']:[])])||s.schemaVersion!=='jev_private_state_v2'||!stateSame(s.interventionPolicy,interventionReference(version)))throw Error();
   if(!validAgreeNameScope(s.agreeNameScopeVersion,generation)||hasAgreeNameScope&&
     (s.agreeNameScopeVersion===undefined||questionLayout!=='two_stage_v3'||s.agreeNameScopeVersion!=='scoped_v1'&&policy!=='holistic_v5'))throw Error();
   const jevNaming=s.agreeNameScopeVersion==='jev_naming_v1';
   const publicTurns=jevNaming&&events?events.map(e=>({turn:e.seq,speaker:e.speaker,text:e.text})):undefined;
   validateOwnLedger(s.ledger);if(!sameSet(Object.keys(s.ledger),ownSlots))throw Error();const graph=snapshotReferenceGraph(s.graph);
+  if(referenceEvidenceEnabled&&(questionLayout!=='two_stage_v3'||policy!=='holistic_v5'||!hasVersionedViewpoint(generation)))throw Error();
+  if(hasAlternatives&&!validReferenceAlternatives(s.referenceAlternatives,ownSlots,s.graph.lastTurn,
+   events?.map(e=>({turn:e.seq,speaker:e.speaker,text:e.text}))))throw Error();
   // The ai_bound_target provenance exists only in v9 and later records; an earlier version carrying it is refused.
   if(!isGenerationV9(generation)&&Array.isArray(s.graph?.records)&&s.graph.records.some((r:any)=>r?.kind==='claim'&&r.source===AI_BOUND_SOURCE))throw Error();
   // The partner_labelled_answer provenance exists only in v12 records.
@@ -981,6 +989,8 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   // The judgment side of holistic_v5 (whole-history material, ledger, rotation premise, chained agree sources) is versioned with the generation side: a v5 record saved before
   // jev_generation_retry_v4 keeps the judgment requests it was recorded with.
   const judgmentV5 = options.dialoguePolicy === "holistic_v5" && hasVersionedViewpoint(generationRetryVersion);
+  const referenceEvidenceEnabled = memoryPruneVersion === CLAIM_PRUNE_V3;
+  if (referenceEvidenceEnabled && (!judgmentV5 || questionLayout !== "two_stage_v3")) throw new JevTurnError("invalid_state");
   const declaredLayout = (jevDecision as { metadata?: { questionLayout?: unknown } } | undefined)?.metadata?.questionLayout;
   if (declaredLayout !== undefined && declaredLayout !== questionLayout) throw new Error("Jev question layout mismatch");
   const participantMenu = jevDecision?.participantTargetMenuVersion === PARTICIPANT_TARGET_MENU_VERSION;
@@ -1130,7 +1140,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       // v2: decide the gate from the judgments and claims as they stand now; Jev infers over the open entries only.
       const gate = gated ? agreementGate(repairHistory, state.judgments, claims, latest.seq, state.ledger) : null;
       if (gate) record.repairGate = structuredClone(gate);
-      const baseInput: JevDecisionInput = { turn: latest.seq, publicTurns, ownSlots: [...slots], observations: memo,
+      const baseInput: JevDecisionInput & { referenceEvidence?: ReferenceEvidence } = { turn: latest.seq, publicTurns, ownSlots: [...slots], observations: memo,
         issueSummary: summarizeLocalIssues(graph), priorClaims: claims, repairHistory: gate ? inferenceHistory(repairHistory, gate) : repairHistory,
         previousAction: previous && previousAi ? { turn: previousAi.turn, action: previousExecution!.action, target: previousExecution!.target,
           name: previousExecution!.name, feature: previousExecution!.feature } : null,
@@ -1140,6 +1150,10 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       const agreeTurns = judgmentV5
         ? events.filter(e => e.seq <= latest.seq && (!aiEnabled || events.filter(other => other.seq === e.seq).length === 1)).map(e => ({ turn: e.seq, speaker: e.speaker, text: e.text, ...(e.nonReferential ? { nonReferential: true } : {}) }))
         : publicTurns;
+      if (referenceEvidenceEnabled) {
+        baseInput.referenceEvidence = buildReferenceEvidence(graph, agreeTurns, latest.seq,
+          prepared.trace.status === "ok" ? prepared.research : undefined, state.referenceAlternatives);
+      }
       if (participantMenu) baseInput.participantLedger = state.ledger;
       if (questionLayout === "two_stage_v3") {
         if (state.agreeNameScopeVersion === "jev_naming_v1") {
@@ -1602,6 +1616,9 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         ...(aiEnabled ? { aiPublic: state.aiPublic } : {}) };
       // Keep the naming policy from the original snapshot, including its absence on historical v3 tapes.
       if (state.agreeNameScopeVersion) nextState.agreeNameScopeVersion = state.agreeNameScopeVersion;
+      if (baseInput.referenceEvidence?.localAlternatives.length) {
+        nextState.referenceAlternatives = structuredClone(baseInput.referenceEvidence.localAlternatives);
+      }
       // The state this turn would commit is checked by the same validation every later persist and turn start applies, before anything is published:
       // a state the validator refuses must never become the committed one.
       if (integrated) validateJevPrivateStateV2(nextState, slots, intervention!, questionLayout, options.dialoguePolicy, generationRetryVersion, usagePolicy);
