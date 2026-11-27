@@ -16,11 +16,13 @@ import { participantChatProvider, requireExactParticipantModel, validateParticip
 import { researchHash, researchTrialProfileV3, RESEARCH_TRIAL_PROFILE_V1 } from '../../../dialogue-model/runtime/v2/research-profile.ts';
 import { RESEARCH_MAX_DEADLINE_MS, RESEARCH_MAX_LUNA_ATTEMPT_MS } from '../../../dialogue-model/runtime/v2/research-timeouts.ts';
 import { SHAPE_TERMINOLOGY_GENERATION } from '../../../dialogue-model/runtime/shape-terminology.ts';
-import { DEFERRED_AI_EXTRACTION_GENERATION, GENERATION_RETRY_V22, ISSUE_HANDLING_GENERATION } from '../../../dialogue-model/runtime/v2/deferred-ai-extraction.ts';
+import { DEFERRED_AI_EXTRACTION_GENERATION, GENERATION_RETRY_V22, GENERATION_RETRY_V23,
+  ISSUE_HANDLING_GENERATION } from '../../../dialogue-model/runtime/v2/deferred-ai-extraction.ts';
 
 import type { BaseRecord } from '../../../dialogue-model/runtime/v2/base-assignment.ts';
 import { isPilot012ParticipantDialogueProfile, participantMemoryPruneVersion, PILOT012_PARTICIPANT_PROFILE, PILOT012_V18_PARTICIPANT_PROFILE,
-  PILOT012_V19_PARTICIPANT_PROFILE, PILOT012_V20_PARTICIPANT_PROFILE, PILOT012_V21_PARTICIPANT_PROFILE, PILOT012_V22_PARTICIPANT_PROFILE,
+  PILOT012_V19_PARTICIPANT_PROFILE, PILOT012_V20_PARTICIPANT_PROFILE, PILOT012_V21_PARTICIPANT_PROFILE,
+  PILOT012_V22_PARTICIPANT_PROFILE, PILOT012_V23_PARTICIPANT_PROFILE,
   type ParticipantDialogueProfile } from '../../../dialogue-model/runtime/v2/reception.ts';
 
 type Dispatch = (payload: unknown, expectedModelId: string) => Promise<ParticipantDispatchResult>;
@@ -88,6 +90,12 @@ const dialogueV21IssueHandling = {
   pinnedVersions: { ...dialogueV17Pilot012.pinnedVersions, generationRetryVersion: ISSUE_HANDLING_GENERATION },
 } as const;
 
+const dialogueV22IssueFixes = {
+  ...dialogueV21IssueHandling,
+  newTrialAgreeNameScopeVersion: 'jev_naming_v3',
+  pinnedVersions: { ...dialogueV21IssueHandling.pinnedVersions, generationRetryVersion: GENERATION_RETRY_V22 },
+} as const;
+
 const workerDialogue = {
   participant_dialogue_v12: dialogueV12,
   participant_dialogue_v12_naming_v2: { ...dialogueV12, newTrialAgreeNameScopeVersion: 'scoped_v9' },
@@ -114,9 +122,9 @@ const workerDialogue = {
     pinnedVersions: { ...dialogueV17Pilot012.pinnedVersions, generationRetryVersion: DEFERRED_AI_EXTRACTION_GENERATION },
   },
   [PILOT012_V21_PARTICIPANT_PROFILE]: dialogueV21IssueHandling,
-  [PILOT012_V22_PARTICIPANT_PROFILE]: { ...dialogueV21IssueHandling,
-    newTrialAgreeNameScopeVersion: 'jev_naming_v3',
-    pinnedVersions: { ...dialogueV21IssueHandling.pinnedVersions, generationRetryVersion: GENERATION_RETRY_V22 },
+  [PILOT012_V22_PARTICIPANT_PROFILE]: dialogueV22IssueFixes,
+  [PILOT012_V23_PARTICIPANT_PROFILE]: { ...dialogueV22IssueFixes,
+    pinnedVersions: { ...dialogueV22IssueFixes.pinnedVersions, generationRetryVersion: GENERATION_RETRY_V23 },
   },
 } as const;
 

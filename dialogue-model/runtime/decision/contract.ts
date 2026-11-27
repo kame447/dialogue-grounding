@@ -8,6 +8,7 @@ import type { CarryDestination, ExtraSelection, JevActionV21, JevIssueRef, ISSUE
 import type { ObservationMemo } from "../observation/contract.ts";
 import type { LocalAct, LocalClaimView, PublicTurn } from "../local-grounding/contract.ts";
 import type { OwnLedger } from "../judgment/schema.mjs";
+import { isIssueHandlingGeneration, type DeferredAiExtractionGeneration, type DEFERRED_AI_EXTRACTION_GENERATION } from "../v2/deferred-ai-extraction.ts";
 
 export const JEV_ACTIONS = Object.freeze(["accept", "propose_name", "confirm", "repair", "defer", "revisit", "agree", "move_on", "close", "request_observation"] as const);
 export type JevAction = typeof JEV_ACTIONS[number];
@@ -17,8 +18,9 @@ export type DecisionObservationAspect = typeof OBSERVATION_ASPECTS[number];
 export type JevTarget = { kind: "single"; figureId: string } | { kind: "multiple"; figureIds: string[] } | { kind: "none" };
 export const JEV_VISUAL_PURPOSE_VERSION = "jev_visual_purpose_v1";
 export const JEV_VISUAL_PURPOSE_GENERATION = "jev_generation_retry_v19";
-export function usesJevVisualPurpose(generation: unknown): generation is typeof JEV_VISUAL_PURPOSE_GENERATION | "jev_generation_retry_v21" | "jev_generation_retry_v22" {
-  return generation === JEV_VISUAL_PURPOSE_GENERATION || generation === "jev_generation_retry_v21" || generation === "jev_generation_retry_v22";
+export function usesJevVisualPurpose(generation: unknown): generation is typeof JEV_VISUAL_PURPOSE_GENERATION |
+  Exclude<DeferredAiExtractionGeneration, typeof DEFERRED_AI_EXTRACTION_GENERATION> {
+  return generation === JEV_VISUAL_PURPOSE_GENERATION || isIssueHandlingGeneration(generation);
 }
 export type JevVisualPurpose =
   | { kind: "clarify_reference" | "resolve_mismatch" | "unknown" }
