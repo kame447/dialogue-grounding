@@ -55,7 +55,7 @@ test('the status filter has Japanese labels, keeps its values and finds in-progr
   const html = renderList([], { ...filter, status: 'completed' }, null, []);
   const select = html.match(/<select name="status">([\s\S]*?)<\/select>/)![1];
   assert.deepEqual([...select.matchAll(/<option value="([^"]+)"[^>]*>([^<]*)</g)].map(m => [m[1], m[2]]),
-    [['any', 'すべて'], ['active', '進行中（実施中・提出中）'], ['dialogue', '実施中'], ['submitting', '提出中'], ['completed', '終了']]);
+    [['any', 'すべて'], ['active', '進行中（実施中・提出中）'], ['dialogue', '実施中'], ['submitting', '提出中'], ['completed', '終了'], ['interrupted', '強制終了']]);
   assert.match(select, /<option value="completed" selected>/);
   const all = ['dialogue', 'submitting', 'completed'].map(status => summaryOf(record({ status })));
   assert.deepEqual(applyFilter(all, parseFilter(new URLSearchParams('status=active'))).map(s => s.status), ['dialogue', 'submitting']);

@@ -133,11 +133,14 @@ export function createBaseAssignmentSession(options: BaseSessionOptions): BaseSe
         await serial(async () => {
           if (token.failed) return fail('trial_unavailable', 'owner_state_invalid');
           const old = await state(), e = old.admissions[key];
-          if (!e || e.status === 'failed' || e.assignment.assignmentId !== a.assignmentId) return fail('trial_unavailable', 'owner_state_invalid');
+          if (!e || e.status === 'failed' || e.record?.status === 'interrupted' || e.assignment.assignmentId !== a.assignmentId) {
+            return fail('trial_unavailable', 'owner_state_invalid');
+          }
           const value = data(raw);
           if (Object.hasOwn(value, 'assignment') && JSON.stringify(readAssignment(value.assignment)) !== JSON.stringify(a)) return fail('trial_unavailable', 'owner_state_invalid');
           const record = { ...copy(value), assignment: a } as BaseRecord;
           validateBoundBaseRecord(record, a);
+          if (record.status === 'interrupted') return fail('trial_unavailable', 'owner_state_invalid');
           if (e.record && e.record.recordId !== record.recordId) return fail('trial_unavailable', 'owner_state_invalid');
           // A deleted/expired record must not be resurrected by a late callback.
           if (e.status === 'active' && e.record && !await archived(e.record.recordId)) return fail('trial_unavailable', 'record_deleted');
@@ -175,7 +178,7 @@ export function createBaseAssignmentSession(options: BaseSessionOptions): BaseSe
       const view = await port(() => task.getState());
       await serial(async () => {
         const old = await state(), e = old.admissions[key];
-        if (!e || !e.record || e.status === 'failed' || e.record.recordId !== view.sessionId || old.activeKey !== key) return fail();
+        if (!e || !e.record || e.record.status === 'interrupted' || e.status === 'failed' || e.record.recordId !== view.sessionId || old.activeKey !== key) return fail();
         validateBoundBaseRecord(e.record, a);
         if (!restore) {
           token.failureCode = 'record_write_failed';
@@ -199,6 +202,7 @@ export function createBaseAssignmentSession(options: BaseSessionOptions): BaseSe
         const old = await state(), key = old.activeKey;
         if (key === null) return { kind: 'empty' as const };
         const e = old.admissions[key]!;
+        if (e.record?.status === 'interrupted') return { kind: 'empty' as const };
         requireRunnableAssignment(e.assignment, options.adapter);
         if (e.status === 'preparing') {
           if (live === key) return fail('busy');
@@ -247,7 +251,7 @@ export function createBaseAssignmentSession(options: BaseSessionOptions): BaseSe
           requireRunnableAssignment(existing.assignment, options.adapter);
           if (existing.status === 'failed' && existing.record === null && existing.errorCode === 'record_deleted') return fail('not_found');
           if (existing.status === 'preparing') return fail('busy');
-          if (existing.status === 'failed' || !existing.record) return fail();
+          if (existing.status === 'failed' || !existing.record || existing.record.status === 'interrupted') return fail();
           if (!await archived(existing.record.recordId)) return fail('not_found');
           return { kind: 'existing' as const, recordId: existing.record.recordId };
         }

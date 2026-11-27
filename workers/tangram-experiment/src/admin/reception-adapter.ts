@@ -12,6 +12,7 @@ type Owner = {
   adminFailedStartUsage?(receptionId: string): Promise<ReceptionFailedStartUsage | null>;
   adminApproveReception(input: { expectedRevision: number; order: number; protocol: DisplayedProtocol }): Promise<Reception>;
   adminCancelReception(input: { expectedRevision: number }): Promise<Reception>;
+  adminForceEndReception?(id: string, expectedRevision: number): Promise<void>;
   adminDeletedRecordIds?(recordIds: string[]): Promise<string[]>;
   adminSetReceptionParticipantRole?(id: string, role: ParticipantRole, expectedRecordIds: string[] | null): Promise<ParticipantRoleResult>;
 };
@@ -27,6 +28,7 @@ const PAGE_SIZE = 100;
 /** Management values always come from the owning DO, never from index extras. */
 function project(r: Reception): ReceptionAdminRow {
   return { receptionId:r.receptionId, number:r.number, createdAt:r.createdAt, status:r.status, revision:r.revision,
+    ...(r.termination ? { termination: r.termination } : {}),
     plan:r.plan ? { order:[...r.plan.order], rotationMode:effectiveRotationMode(r.plan, 0), betweenTrials:effectiveBetweenTrials(r.plan),
       figureSets:r.plan.trials.map((_, index) => effectiveFigureSelection(r.plan!, index).setId ?? '') } : null,
     trials:r.trials.map(t => ({...t})),
@@ -151,6 +153,10 @@ export function createReceptionAdminPort(options: Options): ReceptionAdminPort {
     },
     approve:(id,input) => mutate(id,owner => owner.adminApproveReception(input)),
     cancel:(id,input) => mutate(id,owner => owner.adminCancelReception(input)),
+    forceEnd:(id,input) => mutate(id,owner => {
+      if (!owner.adminForceEndReception) throw new ReceptionError('reception_unavailable');
+      return owner.adminForceEndReception(id, input.expectedRevision);
+    }),
   };
 }
 

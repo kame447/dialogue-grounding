@@ -497,6 +497,7 @@ export async function createNamingTaskV2({
     if (openingPending()) {
       if (!openingWritePending) {
         const text = await openingText();
+        checkAdminInterruption();
         if (text === null) { await persist(); throw new NamingTaskError("ai_unavailable"); }
         openingWritePending = true;
         queue = createQueue(text, null);
@@ -511,15 +512,21 @@ export async function createNamingTaskV2({
     if (dialogueInterruption !== "budget_exhausted") {
       dialogueInterruption = undefined;
       await queue.retry();
+      checkAdminInterruption();
     }
     await persist();
   }
 
   await persist();
+  let administrativelyInterrupted = false;
+  const checkAdminInterruption = () => {
+    if (administrativelyInterrupted) throw new NamingTaskError("trial_interrupted");
+  };
   return {
     version: VERSION,
     /** Accept a human message immediately, even while the AI is thinking. */
     message(text, clientId) {
+      checkAdminInterruption();
       if (closed) throw new NamingTaskError("dialogue_closed");
       if (openingPending()) throw new NamingTaskError("ai_retry_required");
       if (typeof text !== "string" || !text.trim() || text.length > 2000) throw new NamingTaskError("invalid_message");
@@ -535,11 +542,13 @@ export async function createNamingTaskV2({
     async whenIdle() { await queue.whenIdle(); await persist(); },
     async persistNow() { await persist(); },
     async retry() {
+      checkAdminInterruption();
       if (!dialogueRecoveryEnabled) { await queue.retry(); await persist(); return; }
       recoveryInFlight ??= resumePendingDialogue().finally(() => { recoveryInFlight = null; });
       await recoveryInFlight;
     },
     async interruptDialogue() {
+      checkAdminInterruption();
       const snapshot = queue.getSnapshot();
       if (!dialogueRecoveryEnabled || snapshot.status !== "error" || recoveryInFlight || openingPending()) throw new NamingTaskError("ai_busy");
       markBudgetInterruption(snapshot);
@@ -567,6 +576,7 @@ export async function createNamingTaskV2({
       });
     },
     async submitHuman({ names }) {
+      checkAdminInterruption();
       if (humanSubmission) throw new NamingTaskError("already_submitted");
       const valid = validateNamesV2(names, humanSlots);
       // Never close over unanswered messages: the participant waits for the reply.
@@ -575,14 +585,20 @@ export async function createNamingTaskV2({
       queue.close();
       humanSubmission = valid;
       await settlePublicOnce();
+      checkAdminInterruption();
       try { await scoreIfReady(); } catch { finalError = "scoring_error"; await persist(); throw new NamingTaskError("scoring_error"); }
       await persist();
       return { submitted: true };
     },
     submitAI() {
+      checkAdminInterruption();
       // Concurrent calls share one final request.
       aiSubmitting ??= submitAIOnce().finally(() => { aiSubmitting = null; });
       return aiSubmitting;
+    },
+    stopForAdmin() {
+      administrativelyInterrupted = true;
+      queue.close();
     },
     // Researcher-only; never returned over the participant API.
     researcherView() { return { key: clone(trial.key), privateState: queue.getPrivateState(), attempts: allAttempts(),
@@ -593,6 +609,7 @@ export async function createNamingTaskV2({
     if (aiSubmission) { await scoreIfReady(); await persist(); return { submitted: true }; }
     // Let an in-flight reply settle so the final request sees every answered message.
     await queue.whenIdle();
+    checkAdminInterruption();
     if (!closed) assertSettled();
     closed = true;
     queue.close();
@@ -602,7 +619,13 @@ export async function createNamingTaskV2({
     for (let attempt = 0; attempt < 2 && !aiSubmission; attempt++) {
       let response;
       try { response = await dialogue.finalRequest(snapshot, attempt > 0); }
-      catch { finalError = "ai_unavailable"; await persist(); throw new NamingTaskError("ai_unavailable"); }
+      catch {
+        checkAdminInterruption();
+        finalError = "ai_unavailable";
+        await persist();
+        throw new NamingTaskError("ai_unavailable");
+      }
+      checkAdminInterruption();
       const names = parseAiNamesV2(response.text, dialogue.slots);
       if (names && agreed.every(([slot, name]) => normalizeAgreedName(names[slot]) === normalizeAgreedName(name))) {
         aiSubmission = names;

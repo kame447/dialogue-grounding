@@ -23,10 +23,14 @@ export type BaseAssignment = Readonly<{ schemaVersion: 'base_assignment_v1'; ass
       protocolSha256: string; trialIndex: number; plan: ReceptionPlanV3 }>;
   createdAt: string }>;
 /** Minimum coordinator projection; the existing task owns its complete snapshot. */
-export type RawBaseRecord = { recordId: string; version: 2; seed: number; strategy: Strategy;
-  options: { referenceMemory: boolean; [key: string]: unknown }; status: 'dialogue' | 'submitting' | 'completed';
+type BaseRecordSnapshot = { recordId: string; version: 2; seed: number; strategy: Strategy;
+  options: { referenceMemory: boolean; [key: string]: unknown };
   queueState: { pendingHumanEventIds: string[]; errorCode: string | null; [key: string]: unknown }; [key: string]: unknown };
-export type BaseRecord = RawBaseRecord & { assignment: BaseAssignment };
+export type RawBaseRecord = BaseRecordSnapshot & { status: 'dialogue' | 'submitting' | 'completed'; termination?: never };
+export type BaseRecord = { assignment: BaseAssignment } & (RawBaseRecord |
+  BaseRecordSnapshot &
+  { status: 'interrupted'; termination: import('./admin-termination.ts').AdminTermination }
+);
 export type FailureCode = 'start_interrupted' | 'initialization_failed' | 'record_write_failed' | 'assignment_record_invalid' | 'record_deleted';
 /** Closed diagnostic cause of an initialization_failed start. Never carries a message, response body, key or prompt. */
 export type FailureCause = typeof import('./base-assignment-data.ts').FAILURE_CAUSES[number];

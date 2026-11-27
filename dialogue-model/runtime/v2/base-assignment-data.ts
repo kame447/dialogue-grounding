@@ -9,6 +9,7 @@ import { validateParticipantModelPin } from './participant-model-pin.ts';
 import { resolveFigureSelection, validateResolvedFigureSelection, isLegacyFigureSelection } from '../stimuli/figure-bank.ts';
 import type { ResolvedFigureSelection } from '../stimuli/figure-bank.ts';
 import type { RotationMode } from './reception.ts';
+import { isAdminTermination, isIncompleteTrialStatus } from './admin-termination.ts';
 export type BaseAssignmentErrorCode = 'invalid_request' | 'assignment_unconfigured' | 'assignment_invalid' |
   'assignment_conflict' | 'assignment_record_invalid';
 export class BaseAssignmentError extends Error {
@@ -178,7 +179,9 @@ export function validateBoundBaseRecord(record: unknown, assignment: unknown): v
         ledger.assignmentId !== a.assignmentId || Object.hasOwn(ledger, 'limits')
       : Object.hasOwn(options, 'participantRuntimeProfile') || ledger?.schemaVersion === PARTICIPANT_PRODUCTION_PROFILE) throw new Error('runtime_profile');
     if (typeof r.recordId !== 'string' || !UUID.test(r.recordId) || r.version !== 2 || r.seed !== a.seed || r.strategy !== a.strategy ||
-        options.referenceMemory !== a.referenceMemory || !['dialogue', 'submitting', 'completed'].some(v => v === r.status) ||
+        options.referenceMemory !== a.referenceMemory ||
+        (r.status === 'interrupted' ? !isAdminTermination(r.termination)
+          : !(isIncompleteTrialStatus(r.status) || r.status === 'completed') || Object.hasOwn(r, 'termination')) ||
         !Array.isArray(queue.pendingHumanEventIds) || queue.pendingHumanEventIds.some(v => typeof v !== 'string') ||
         queue.errorCode !== null && typeof queue.errorCode !== 'string' || JSON.stringify(own) !== JSON.stringify(a)) throw new Error('record');
   });

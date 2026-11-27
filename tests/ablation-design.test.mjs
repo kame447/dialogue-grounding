@@ -108,10 +108,12 @@ test("normalization never reads gold, human submission, images, hidden labels or
 });
 
 test("unfinished trials do not read scoring, and missing measurements remain null rather than zero", () => {
-  const record = { status: "dialogue" };
-  Object.defineProperty(record, "scoring", { get() { throw new Error("Premature scoring accessed"); } });
-  assert.deepEqual(normalizeTrialOutcome(record), { status: "dialogue", turns: null, score: null,
-    api: null, actions: null, ledgerFinalDifferences: null });
+  for (const status of ["dialogue", "interrupted"]) {
+    const record = { status };
+    Object.defineProperty(record, "scoring", { get() { throw new Error("Premature scoring accessed"); } });
+    assert.deepEqual(normalizeTrialOutcome(record), { status, turns: null, score: null,
+      api: null, actions: null, ledgerFinalDifferences: null });
+  }
   assert.equal(normalizeTrialOutcome({ status: "completed", scoring: null }).score, null);
   const empty = normalizeTrialOutcome(rawRecord({ status: "dialogue", publicHistory: [], judgments: [], requests: [], aiSubmission: null }));
   assert.deepEqual(empty.turns, { human: 0, ai: 0 });

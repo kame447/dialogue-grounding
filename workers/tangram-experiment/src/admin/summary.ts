@@ -87,8 +87,8 @@ export function summarizeRecord(record: unknown, objectId: string, latency: Late
     strategy: pick(record.strategy, ["repair-first", "bypass-enabled"], "unknown"),
     referenceMemory: record.options?.referenceMemory === true,
     utteranceStyle: pick(record.options?.utteranceStyle, ["default", "concise"], "default"),
-    status: pick(record.status, ["dialogue", "submitting", "completed"], "unknown"),
-    aiStatus: aiStatusOf(record.queueState),
+    status: pick(record.status, ["dialogue", "submitting", "completed", "interrupted"], "unknown"),
+    aiStatus: record.status === "interrupted" ? "closed" : aiStatusOf(record.queueState),
     counts: {
       humanMessages: events.filter((event) => event.speaker === "human").length,
       aiMessages: events.filter((event) => event.speaker === "ai").length,

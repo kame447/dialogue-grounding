@@ -16,6 +16,7 @@ registerHooks({ resolve(s, c, next) {
 const root = process.env.S5_SOURCE_ROOT ?? fileURLToPath(new URL('../', import.meta.url));
 const { TangramSession, AdminIndex }: any = await import(pathToFileURL(root + '/workers/tangram-experiment/src/index.ts').href);
 const { readOwner }: any = await import(pathToFileURL(root + '/dialogue-model/runtime/v2/base-assignment-data.ts').href);
+const { trialTerminationExpectation } = await import('../workers/tangram-experiment/src/admin/trial-termination.ts');
 const now = 946684800001, oldNow = Date.now;
 Date.now = () => now; after(() => { Date.now = oldNow; });
 const ownerKey = 'base:owner:v1';
@@ -76,6 +77,44 @@ function assertNoRecord(value: any, id: string): void {
     assert.notEqual(value.recordId, id, 'no full record or record projection may remain');
     for (const child of Object.values(value)) assertNoRecord(child, id);
   }
+}
+for (const mode of ['assigned', 'legacy archive', 'legacy active only']) {
+  test('force end preserves ' + mode + ' record and rolls back an interrupted write', async () => {
+    const x = fixture(mode !== 'assigned'), id = ids[2], key = 'record:' + id;
+    if (mode === 'legacy active only') {
+      await x.storage.delete(key);
+      const ledger = await x.storage.get('ledger');
+      delete ledger[id];
+      await x.storage.put({ ledger });
+    }
+    const raw = await x.storage.get('active'), questionnaire = await x.storage.get('questionnaire:' + id);
+    const preceding = await x.storage.get('record:' + ids[1]);
+    const expected = trialTerminationExpectation(await x.o.adminRecord(id));
+    assert.ok(expected);
+    const before = x.fingerprint();
+    x.controls.fail = 'put';
+    await assert.rejects(x.o.adminForceEndRecord(id, expected), /synthetic-storage-failure/u);
+    assert.equal(x.fingerprint(), before);
+    x.controls.fail = '';
+    assert.deepEqual(await x.o.adminForceEndRecord(ids[1], expected), { ok: false, error: 'conflict' });
+    assert.deepEqual(await x.o.adminForceEndRecord(id, expected), { ok: true });
+    const stored = await x.storage.get(key);
+    assert.deepEqual(stored, { ...raw, status: 'interrupted', updatedAt: stored.termination.at, termination: { at: stored.updatedAt, by: 'admin' } });
+    assert.deepEqual(await x.storage.get('active'), stored);
+    assert.deepEqual(await x.storage.get('questionnaire:' + id), questionnaire);
+    assert.deepEqual(await x.storage.get('record:' + ids[1]), preceding);
+    const owner = await x.storage.get(ownerKey);
+    if (mode === 'assigned') assert.deepEqual(owner.admissions[owner.activeKey].record, stored);
+    else assert.equal(owner, undefined);
+    const after = x.fingerprint(), cold = x.object();
+    assert.deepEqual(await cold.adminForceEndRecord(id, expected), { ok: true });
+    assert.equal(x.fingerprint(), after);
+    const state = await cold.fetch(new Request('https://synthetic.invalid/api/state'));
+    assert.equal(state.status, 200);
+    assert.equal((await state.json()).interrupted, true);
+    assert.equal(x.factory.tasks.length, 0);
+    await x.done();
+  });
 }
 test('admin deletion scrubs retired owner copy atomically, preserves current restore and after-key idempotency', async () => {
   const x = fixture(), before = await x.storage.get(ownerKey), active = await x.storage.get('active');

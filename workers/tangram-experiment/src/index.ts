@@ -11,7 +11,7 @@ import { AdminIndex } from "./admin/index-do";
 import type { ReceptionFailedStartUsage } from './admin/reception-port.ts';
 import { createReceptionAdminPort, createReceptionSettingsPort } from './admin/reception-adapter.ts';
 import { handleAdmin, isAdminPath, type AdminLimiter } from "./admin/routes.ts";
-import { summarizeRecord } from "./admin/summary.ts";
+import { summarizeRecord, type AdminSummary } from "./admin/summary.ts";
 import type { AuditEntry } from "./admin/index-store.ts";
 import { isParticipantRole, participantRoleView } from "./admin/participant-role.ts";
 import type { ParticipantRoleResult } from "./admin/participant-role.ts";
@@ -25,13 +25,15 @@ import { lockResult, participantReview, QUESTIONNAIRE_FORM, recordListEntry, sor
 import { createBaseAssignmentSession, BaseSessionError } from "../../../dialogue-model/runtime/v2/base-assignment-session.ts";
 import { validateBaseStart, validateBaseAssignmentConfig, BaseAssignmentError } from "../../../dialogue-model/runtime/v2/base-assignment.ts";
 import { assignmentParticipantModelPin, data, readOwner, validateBoundBaseRecord } from "../../../dialogue-model/runtime/v2/base-assignment-data.ts";
-import type { BaseOwnerState, BaseRecord, BaseSession, MakeBaseTask, OwnerRead } from "../../../dialogue-model/runtime/v2/base-assignment.ts";
+import type { BaseOwnerState, BaseRecord, BaseSession, MakeBaseTask, OwnerRead, RawBaseRecord } from "../../../dialogue-model/runtime/v2/base-assignment.ts";
 import { participantContactHTML } from "../../../dialogue-model/runtime/v2/participant-contact.ts";
 import { PARTICIPANT_STOP_HTML } from "../../../dialogue-model/runtime/v2/participant-stop-page.ts";
-import { ReceptionError, validateReception, createReception, approveReception, cancelReception,
+import { ReceptionError, validateReception, createReception, approveReception, cancelReception, terminateReception,
   participantReception, receptionSummary, effectiveBetweenTrials, effectiveFigureSelection, effectiveRotationMode,
   validateParticipantLimits, isParticipantDialogueProfile, participantMemoryPruneVersion,
   PILOT012_PARTICIPANT_PROFILE } from '../../../dialogue-model/runtime/v2/reception.ts';
+import { isAdminTermination, isIncompleteTrialStatus } from '../../../dialogue-model/runtime/v2/admin-termination.ts';
+import type { AdminTermination } from '../../../dialogue-model/runtime/v2/admin-termination.ts';
 import { isSubmittedQuestionnaire } from '../../../dialogue-model/runtime/v2/questionnaire-gate.ts';
 import { receptionOpen, validateReceptionSettings } from './admin/reception-settings.ts';
 import type { ProtocolEntry, ReceptionSettings } from './admin/reception-settings.ts';
@@ -48,6 +50,8 @@ import { ParticipantUsageLedger, type ParticipantUsageStore } from '../../../dia
 import { createWorkerParticipantRuntime, workerParticipantPolicy, matchesWorkerDialogueProfile,
   type ParticipantService } from "./participant-runtime.ts";
 import { ParticipantPreobservations } from './participant-preobservation.ts';
+import { trialTerminationExpectation } from './admin/trial-termination.ts';
+import type { TrialTerminationExpectation, TrialTerminationResult } from './admin/trial-termination.ts';
 export { AdminIndex };
 
 type Strategy = "repair-first" | "bypass-enabled";
@@ -62,6 +66,7 @@ type StoredTrial = {
   closed?: boolean;
   [field: string]: unknown;
 };
+type AdminListRecord = Pick<AdminSummary, 'recordId' | 'status'>;
 
 type NamingTask = {
   getState(): Record<string, unknown>;
@@ -70,6 +75,7 @@ type NamingTask = {
   whenIdle(): Promise<void>;
   retry(): Promise<void>;
   interruptDialogue?(): Promise<void>;
+  stopForAdmin?(): void;
   submitHuman(options: { names: unknown }): Promise<unknown>;
   submitAI(): Promise<unknown>;
 };
@@ -124,7 +130,7 @@ const MAX_BODY_BYTES = 64 * 1024;
 const errors = new Set([
   "invalid_strategy", "invalid_seed", "invalid_submission", "invalid_request", "busy", "trial_required",
   "ai_unavailable", "scoring_error", "invalid_message", "invalid_options", "ai_busy", "ai_retry_required",
-  "submission_error", "already_submitted", "dialogue_closed", "record_write_failed",
+  "submission_error", "already_submitted", "dialogue_closed", "record_write_failed", "trial_interrupted",
   "not_found", "invalid_questionnaire", "questionnaire_submitted", "trial_not_completed", "trial_changed",
 ]);
 
@@ -161,7 +167,7 @@ function sanitizedError(error: unknown): Response {
   const code = error instanceof NamingTaskError && errors.has(error.code) ? error.code : "operation_failed";
   const status = code === "scoring_error" || code === "record_write_failed" ? 500
     : code === "ai_unavailable" ? 502 : code === "not_found" ? 404
-    : ["ai_busy", "ai_retry_required", "busy", "questionnaire_submitted", "trial_not_completed", "trial_changed"].includes(code) ? 409 : 400;
+    : ["ai_busy", "ai_retry_required", "busy", "questionnaire_submitted", "trial_not_completed", "trial_changed", "trial_interrupted"].includes(code) ? 409 : 400;
   return json(status, { error: code });
 }
 
@@ -370,6 +376,120 @@ export class TangramSession extends DurableObject<Env> {
       await this.indexReception(r); return r;
     });
   }
+  async adminForceEndReception(id: string, expectedRevision: number): Promise<void> {
+    const result = await this.forceEnd({ kind: 'reception', id, expectedRevision });
+    if (!result.ok) throw new ReceptionError('reception_conflict');
+  }
+
+  async adminForceEndRecord(id: string, expected: TrialTerminationExpectation): Promise<TrialTerminationResult> {
+    if (!isIncompleteTrialStatus(expected?.status) || typeof expected.revision !== 'string' || !/^[a-f0-9]{64}$/u.test(expected.revision)) {
+      return { ok: false, error: 'conflict' };
+    }
+    return this.forceEnd({ kind: 'record', id, expected });
+  }
+
+  private async forceEnd(target: { kind: 'record'; id: string; expected: TrialTerminationExpectation } |
+      { kind: 'reception'; id: string; expectedRevision: number }): Promise<TrialTerminationResult> {
+    if (!RECORD_ID.test(target.id) || target.kind === 'reception' &&
+        (!Number.isSafeInteger(target.expectedRevision) || target.expectedRevision < 0)) {
+      return { ok: false, error: 'not_found' };
+    }
+    return this.receptionSerial(async () => {
+      const committed = await this.serialized(() => this.ctx.storage.transaction(async tx => {
+        const termination: AdminTermination = { at: new Date().toISOString(), by: 'admin' };
+        const missing = { ok: false, error: 'not_found' } as const;
+        const conflict = { ok: false, error: 'conflict' } as const;
+        const rawReception = await tx.get('reception:v1');
+        const reception = rawReception === undefined ? null : validateReception(rawReception);
+        if (reception && reception.objectId !== this.ctx.id.toString()) return conflict;
+        if (target.kind === 'reception') {
+          if (reception?.receptionId !== target.id) return missing;
+          if (reception.status === 'interrupted' ? reception.revision !== target.expectedRevision + 1
+              : reception.status !== 'in_progress' || reception.revision !== target.expectedRevision) return conflict;
+        }
+
+        const rawOwner = await tx.get<BaseOwnerState>('base:owner:v1');
+        const owner = rawOwner === undefined ? null : readOwner(rawOwner, this.ctx.id.toString());
+        const entries = Object.values(owner?.admissions ?? {});
+        const active = await tx.get<StoredTrial>(ACTIVE_KEY);
+        const tombstones = new Set(await tx.get<string[]>('tombstones'));
+        const ledger = await tx.get<Record<string, number>>('ledger') ?? {};
+        const ids = target.kind === 'record' ? [target.id] : reception!.trials.flatMap(trial =>
+          trial.recordId === null || tombstones.has(trial.recordId) ? [] : [trial.recordId]);
+        const records: StoredTrial[] = [];
+        const updates: Record<string, unknown> = {};
+        let ownsChange = false, linkedTrial = false;
+        for (const id of ids) {
+          if (tombstones.has(id)) return missing;
+          const record = await tx.get<StoredTrial>('record:' + id) ??
+            (active?.recordId === id && !Object.hasOwn(active, 'assignment') ? active : undefined);
+          if (!record || record.recordId !== id) return target.kind === 'record' ? missing : conflict;
+          const entry = entries.find(entry => entry?.record?.recordId === id);
+          if (entry) validateBoundBaseRecord(record, entry.assignment);
+          else if (owner || Object.hasOwn(record, 'assignment')) return conflict;
+          const linked = reception?.trials.some(trial => trial.recordId === id) === true;
+          const source = entry?.assignment.source;
+          if (linked !== Boolean(reception && source && source.kind !== 'server_config_v1' &&
+              source.receptionId === reception.receptionId && reception.trials[source.trialIndex]?.recordId === id)) return conflict;
+          linkedTrial ||= linked;
+          if (entry && entry.record?.status !== record.status) return conflict;
+          if (record.status === 'interrupted' && isAdminTermination(record.termination)) {
+            records.push(record);
+            continue;
+          }
+          if (!isIncompleteTrialStatus(record.status)) {
+            if (target.kind === 'reception' && record.status === 'completed') continue;
+            return conflict;
+          }
+          if (target.kind === 'record') {
+            const expected = trialTerminationExpectation(record);
+            if (expected?.revision !== target.expected.revision || expected.status !== target.expected.status) return conflict;
+          }
+          const next = { ...record, status: 'interrupted', updatedAt: termination.at, termination } as const;
+          if (entry) {
+            validateBoundBaseRecord(next, entry.assignment);
+            entry.record = next as unknown as BaseRecord;
+            ownsChange = true;
+          }
+          updates['record:' + id] = next;
+          if (active?.recordId === id) updates[ACTIVE_KEY] = next;
+          ledger[id] = Date.parse(termination.at);
+          updates.ledger = ledger;
+          records.push(next);
+        }
+        let endedReception: Reception | null = null;
+        if (reception && (target.kind === 'reception' || linkedTrial)) {
+          if (!['in_progress', 'interrupted'].includes(reception.status)) return conflict;
+          endedReception = terminateReception(reception, reception.revision, termination);
+          if (reception.status !== 'interrupted') updates['reception:v1'] = endedReception;
+          for (const entry of entries) {
+            const source = entry?.assignment.source;
+            if (entry?.status === 'preparing' && !entry.record && source &&
+                source.kind !== 'server_config_v1' && source.receptionId === reception.receptionId) {
+              entry.status = 'failed';
+              entry.errorCode = 'start_interrupted';
+              ownsChange = true;
+            }
+          }
+        }
+        if (owner && ownsChange) {
+          owner.revision++;
+          updates['base:owner:v1'] = readOwner(owner, this.ctx.id.toString());
+        }
+        if (Object.keys(updates).length) await tx.put(updates);
+        return { ok: true, records, endedReception } as const;
+      }));
+      if (!committed.ok) return committed;
+      const stoppedIds = committed.records.map(record => record.recordId);
+      const live = this.trial?.getState().sessionId;
+      if (typeof live === 'string' && stoppedIds.includes(live)) this.trial?.stopForAdmin?.();
+      this.forget(stoppedIds);
+      if (committed.endedReception) await this.indexReception(committed.endedReception);
+      for (const record of committed.records) await this.registerSummary(record);
+      return { ok: true };
+    });
+  }
+
   /** Every new trial is admitted here, serialized with reception creation and approval. */
   private async startTrial(body: ApiBody, isolated: boolean): Promise<void> {
     const startRequestReceivedAt = new Date().toISOString();
@@ -442,8 +562,13 @@ export class TangramSession extends DurableObject<Env> {
 
   /** Researcher-only read of one archived trial for /admin. It neither restores nor resumes a trial. */
   async adminRecord(recordId: string): Promise<StoredTrial | null> {
-    const record = await this.readOwnedArchive(recordId);
-    if (record?.options.participantRuntimeProfile === PARTICIPANT_PRODUCTION_PROFILE) {
+    let record = await this.readOwnedArchive(recordId);
+    if (!record && RECORD_ID.test(recordId) && !(await this.adminDeletedRecordIds([recordId])).length) {
+      const active = await this.ctx.storage.get<StoredTrial>(ACTIVE_KEY);
+      if (active?.recordId === recordId && !Object.hasOwn(active, 'assignment') &&
+          await this.ctx.storage.get('base:owner:v1') === undefined) record = active;
+    }
+    if (record?.options?.participantRuntimeProfile === PARTICIPANT_PRODUCTION_PROFILE) {
       const saved = record as unknown as BaseRecord;
       const { assignmentId } = saved.assignment;
       const pin = assignmentParticipantModelPin(saved.assignment);
@@ -485,6 +610,21 @@ export class TangramSession extends DurableObject<Env> {
   async adminDeletedRecordIds(recordIds: string[]): Promise<string[]> {
     const deleted = new Set(await this.ctx.storage.get<string[]>('tombstones'));
     return recordIds.filter(id => deleted.has(id));
+  }
+
+  /** Reconcile stale index rows with the owner without returning record contents. */
+  async adminRecordListStates(records: AdminListRecord[]) {
+    const deleted = await this.adminDeletedRecordIds(records.map(record => record.recordId));
+    const deletedIds = new Set(deleted);
+    const interrupted: { recordId: string; at: string }[] = [];
+    for (const { recordId, status } of records) {
+      if (!isIncompleteTrialStatus(status) || !RECORD_ID.test(recordId) || deletedIds.has(recordId)) continue;
+      const record = await this.ctx.storage.get<StoredTrial>('record:' + recordId);
+      if (record?.recordId === recordId && record.status === 'interrupted' && isAdminTermination(record.termination)) {
+        interrupted.push({ recordId, at: record.termination.at });
+      }
+    }
+    return { deleted, interrupted };
   }
 
   async adminSetParticipantRole(recordId: string, role: unknown): Promise<ParticipantRoleResult> {
@@ -840,7 +980,7 @@ export class TangramSession extends DurableObject<Env> {
               if (!slot || entry.assignment.source.receptionId !== reception.receptionId || slot.recordId !== null && slot.recordId !== entry.record.recordId) throw new ReceptionError('reception_unavailable');
               if (slot.recordId === null) { slot.recordId = entry.record.recordId; changed = true; }
             }
-            if (reception.status !== 'finished' && reception.trials.length === reception.plan!.trials.length && reception.trials.every(t =>
+            if (reception.status === 'in_progress' && reception.trials.length === reception.plan!.trials.length && reception.trials.every(t =>
               Object.values(owner.admissions).some(e => e?.record?.recordId === t.recordId && e?.record?.status === 'completed'))) {
               reception.status = 'finished'; changed = true;
             }
@@ -885,7 +1025,7 @@ export class TangramSession extends DurableObject<Env> {
           : owner?.activeKey && owner.admissions[owner.activeKey];
         // A reserved RPC can finish after initialization failed. Settle it
         // without reopening the assignment or recreating a deleted journal.
-        if (!entry || entry.assignment.assignmentId !== assignmentId ||
+        if (!entry || entry.assignment.assignmentId !== assignmentId || entry.record?.status === 'interrupted' && kind !== 'settle' ||
             entry.status === 'failed' && (kind !== 'settle' || entry.errorCode === 'record_deleted')) {
           throw new NamingTaskError('ai_unavailable');
         }
@@ -931,7 +1071,7 @@ export class TangramSession extends DurableObject<Env> {
         ...(initialObservationGeneration === INITIAL_OBSERVATION_STRUCTURED_V2 &&
           typeof initialMemoReadStartedAt === 'string' && typeof initialMemoReadyAt === 'string'
           ? { initialMemoReadStartedAt, initialMemoReadyAt } : {}) } : snapshot;
-      await binding.onPersist(record as unknown as BaseRecord);
+      await binding.onPersist(record as unknown as RawBaseRecord);
       await this.scheduleExpiry();
       this.ctx.waitUntil(this.registerSummary(record));
     };
@@ -1054,7 +1194,17 @@ export class TangramSession extends DurableObject<Env> {
     return { trial, hideStrategy: true, busy: Boolean(live?.busy) };
   }
 
+  private async interruptedState() {
+    const reception = await this.readReception();
+    const interrupted = reception ? reception.status === 'interrupted'
+      : (await this.ctx.storage.get<StoredTrial>(ACTIVE_KEY))?.status === 'interrupted';
+    return interrupted ? { trial: null, busy: false, hideStrategy: true, interrupted: true,
+      ...(reception ? { reception: participantReception(reception) } : {}) } : null;
+  }
+
   private async participantState(): Promise<unknown> {
+    const interrupted = await this.interruptedState();
+    if (interrupted) return interrupted;
     const state = await this.state();
     const kind = await this.ownerKind();
     if (kind === 'unused') {
@@ -1098,12 +1248,18 @@ export class TangramSession extends DurableObject<Env> {
         return json(401,{error:'session_required'});
       }
       await this.initialize();
+      if (records) return json(200, { records: await this.ownRecords() });
+      if (recordPath) return await this.recordRoute(request, recordPath[1], recordPath[2]);
+      const interrupted = await this.interruptedState();
+      if (interrupted) {
+        if (pathname === '/api/state' && request.method === 'GET' ||
+            pathname === '/api/reception' && request.method === 'POST') return json(200, interrupted);
+        if (request.method === 'POST' && body) throw new NamingTaskError('trial_interrupted');
+      }
       if (pathname === '/api/reception' && request.method === 'POST') {
         await this.receive(); this.trial = (await this.assignmentSession().restore()).task;
         return json(200,await this.participantState());
       }
-      if (records) return json(200, { records: await this.ownRecords() });
-      if (recordPath) return await this.recordRoute(request, recordPath[1], recordPath[2]);
       if (pathname !== '/api/start') this.trial = (await this.assignmentSession().restore()).task;
       if (request.method === 'GET' && pathname === '/api/state') return json(200,await this.participantState());
       if (request.method !== "POST") return json(404, { error: "not_found" });
@@ -1183,14 +1339,17 @@ export default {
         },
         listPage: async after => {
           const { items, next } = await index!.page(after);
-          const recordsByOwner = new Map<string, string[]>();
-          for (const { objectId, recordId } of items) {
-            const ids = recordsByOwner.get(objectId);
-            if (ids) ids.push(recordId);
-            else recordsByOwner.set(objectId, [recordId]);
+          const recordsByOwner = new Map<string, AdminListRecord[]>();
+          for (const { objectId, recordId, status } of items) {
+            const records = recordsByOwner.get(objectId);
+            if (records) records.push({ recordId, status });
+            else recordsByOwner.set(objectId, [{ recordId, status }]);
           }
-          const deleted = new Set((await Promise.all([...recordsByOwner].map(async ([objectId, ids]) =>
-            await owner(objectId)?.adminDeletedRecordIds(ids) ?? []))).flat());
+          const states = await Promise.all([...recordsByOwner].map(async ([objectId, records]) =>
+            await owner(objectId)?.adminRecordListStates(records)));
+          const deleted = new Set(states.flatMap(state => state?.deleted ?? []));
+          const interrupted = new Map(states.flatMap(state =>
+            state?.interrupted.map(({ recordId, at }) => [recordId, at] as const) ?? []));
           if (deleted.size) {
             // An owner deletion can commit before index removal fails. Reconcile
             // on ordinary list reads and omit tombstoned rows even during the outage.
@@ -1200,7 +1359,10 @@ export default {
           const roles = await index!.recordRoles(live.map(item => item.recordId), true);
           return { items: live.flatMap(item => {
             const role = roles[item.recordId];
-            return role === 'deleted' ? [] : [{ ...item, participantRole: participantRoleView(role) }];
+            if (role === 'deleted') return [];
+            const at = interrupted.get(item.recordId);
+            return [{ ...item, ...(at ? { status: 'interrupted', aiStatus: 'closed', updatedAt: at } : {}),
+              participantRole: participantRoleView(role) }];
           }), next };
         },
         getSummary: async (recordId, includeParticipantRole) => {
@@ -1212,6 +1374,8 @@ export default {
         setParticipantRole: async (summary, role) => await owner(summary.objectId)?.adminSetParticipantRole(summary.recordId, role)
           ?? { ok: false, error: 'not_found' },
         getRecord: async (summary) => (await owner(summary.objectId)?.adminRecord(summary.recordId)) ?? null,
+        forceEndRecord: async (summary, expected) => await owner(summary.objectId)?.adminForceEndRecord(summary.recordId, expected)
+          ?? { ok: false, error: 'not_found' },
         // Record first, then its index entry (with a content-free audit entry); both steps are idempotent.
         deleteRecord: async (summary) => {
           const session = owner(summary.objectId);

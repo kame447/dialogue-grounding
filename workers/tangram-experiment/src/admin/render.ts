@@ -10,6 +10,8 @@ import { isParticipantRole } from './participant-role.ts';
 import type { AdminRecordSummary, ParticipantRole } from './participant-role.ts';
 import { RECORD_ID } from './summary.ts';
 import { renderTurnSheet } from "./turn-sheet.ts";
+import type { TrialTerminationExpectation } from './trial-termination.ts';
+import { isAdminTermination, isIncompleteTrialStatus } from '../../../../dialogue-model/runtime/v2/admin-termination.ts';
 import { renderQrSvg } from './qr.ts';
 import { createTrialV2, participantView, ROTATION_MODES } from '../../../../dialogue-model/runtime/stimuli/scatter-v2.mjs';
 import { FIGURE_BANK, FIGURE_BANK_VERSION, FIGURE_SETS, validateResolvedFigureSelection } from '../../../../dialogue-model/runtime/stimuli/figure-bank.ts';
@@ -93,10 +95,10 @@ const participantRole = (item: Pick<AdminRecordSummary, "participantRole">): Par
   isParticipantRole(item.participantRole?.role) ? item.participantRole.role : "unclassified";
 
 export type ListFilter = { status: string; error: "any" | "with" | "without"; memory: "any" | "on" | "off"; role?: ParticipantRole };
-export const STATUS_FILTERS = ["any", "active", "dialogue", "submitting", "completed"] as const;
+export const STATUS_FILTERS = ["any", "active", "dialogue", "submitting", "completed", "interrupted"] as const;
 // The log and the reception list share one vocabulary: 実施中 / 提出中 / 終了.
-const STATUS_LABELS: Record<string, string> = { dialogue: "実施中", submitting: "提出中", completed: "終了" };
-const STATUS_FILTER_LABELS: Record<string, string> = { any: "すべて", active: "進行中（実施中・提出中）", dialogue: "実施中", submitting: "提出中", completed: "終了" };
+const STATUS_LABELS: Record<string, string> = { dialogue: "実施中", submitting: "提出中", completed: "終了", interrupted: "強制終了" };
+const STATUS_FILTER_LABELS: Record<string, string> = { any: "すべて", active: "進行中（実施中・提出中）", ...STATUS_LABELS };
 const statusLabel = (status: string) => STATUS_LABELS[status] ?? status;
 
 /** Unknown filter values fall back to "any"; the filter never reaches storage queries. */
@@ -151,13 +153,14 @@ const aiBadge = (aiStatus: string) => badge("AI " + aiStatus, aiStatus === "erro
 const surveyBadge = (value: string) => badge("仮アンケート" + (QUESTIONNAIRE_LABELS[value] ?? QUESTIONNAIRE_LABELS.none), value === "submitted" ? "done" : value === "draft" ? "warn" : "");
 
 export function renderList(summaries: AdminRecordSummary[], filter: ListFilter, next: string | null, audit: AuditEntry[],
-  _retentionDays?: number, deleted = false, receptions = false): string {
+  _retentionDays?: number, deleted = false, receptions = false, forceEnd = false): string {
   const query = (extra: Record<string, string>) => "?" + new URLSearchParams({ status: filter.status, error: filter.error, memory: filter.memory,
     ...(filter.role ? { role: filter.role } : {}), ...extra });
   const td = (label: string, content: string, cls = "") => `<td data-label="${escapeHtml(label)}"${cls ? ` class="${cls}"` : ""}><div class="cell">${content}</div></td>`;
   const rows = summaries.map((s) => {
     const id = escapeHtml(s.recordId);
-    const actions = RECORD_ID.test(s.recordId) ? `<details class="row-action"><summary>担当者種別を変更</summary>
+    const actions = RECORD_ID.test(s.recordId) ? `${forceEnd && isIncompleteTrialStatus(s.status) ? `<div><a href="/admin/record/${id}#force-end">試行を強制終了</a></div>` : ""}
+<details class="row-action"><summary>担当者種別を変更</summary>
 ${participantRoleForm(`/admin/record/${s.recordId}/participant-role?from=log`)}</details>
 <details class="row-action danger"><summary>記録を削除</summary>
 <p>仮アンケートも削除されます。削除は取り消せません。</p>${deleteRecordForm(s.recordId)}</details>` : "";
@@ -240,7 +243,8 @@ function recordedFigures(r: Record<string, any>): unknown {
   return '未記録（従来の6図形 F1–F6）';
 }
 
-export function renderDetail(record: unknown, summary: AdminRecordSummary, latency: LatencySummary, _retentionDays?: number): string {
+export function renderDetail(record: unknown, summary: AdminRecordSummary, latency: LatencySummary, _retentionDays?: number,
+  forceEnd: TrialTerminationExpectation | null = null): string {
   const r = isPlain(record) ? record : {};
   const judgments = list(r.judgments).filter(isPlain).map((j) => [j.turnIndex, j.judgment?.action, j.judgment?.targetSlot,
     j.judgment?.candidateName, j.judgment?.discriminatingFeature, j.judgment?.followUp ?? null, j.activeJudge ?? null]);
@@ -266,11 +270,19 @@ export function renderDetail(record: unknown, summary: AdminRecordSummary, laten
   const conversation = renderTurnSheet(r, latency, { escape: escapeHtml, time: timeTag });
   const dl = (items: [string, string][]) => `<dl class="summary">${items.map(([k, v]) => `<div><dt>${escapeHtml(k)}</dt><dd>${v}</dd></div>`).join("")}</dl>`;
   const id = escapeHtml(summary.recordId);
+  const interrupted = r.status === 'interrupted' && isAdminTermination(r.termination);
+  const forceEndForm = forceEnd ? `<details id="force-end" class="row-action danger"><summary>試行を強制終了</summary>
+<p>保存された記録は残ります。受付に属する試行は、残りの条件も開始できなくなります。</p>
+<form method="post" action="/admin/record/${id}/force-end">
+<input type="hidden" name="revision" value="${escapeHtml(forceEnd.revision)}"><input type="hidden" name="status" value="${escapeHtml(forceEnd.status)}">
+<label>確認（記録ID） <input name="confirm" autocomplete="off" required></label><button>試行を強制終了</button></form></details>` : "";
   const surveyState = isPlain(r.questionnaire) && typeof r.questionnaire.status === "string" ? r.questionnaire.status : summary.questionnaire;
   return page(`記録 ${summary.recordId.slice(0, 8)}`, `<p><a href="/admin">← 実験ログへ</a></p>
 <h1>記録 ${id}</h1>
 <p><a href="/admin/record/${id}.json">JSONで保存（この記録の全項目）</a></p>
-${dl([["状態", `<div class="badges">${statusBadge(summary.status)}${aiBadge(summary.aiStatus)}${surveyBadge(surveyState)}</div>`], ["開始", timeTag(summary.startedAt)], ["更新", timeTag(summary.updatedAt)],
+${forceEndForm}
+${dl([["状態", `<div class="badges">${statusBadge(interrupted ? "interrupted" : summary.status)}${aiBadge(interrupted ? "closed" : summary.aiStatus)}${surveyBadge(surveyState)}</div>`], ["開始", timeTag(summary.startedAt)], ["更新", timeTag(summary.updatedAt)],
+  ...(interrupted ? [["強制終了", timeTag(r.termination.at)] as [string, string]] : []),
   ["担当者種別", PARTICIPANT_ROLE_LABELS[participantRole(summary)] + (RECORD_ID.test(summary.recordId) ?
     `<details class="row-action"><summary>変更</summary>${participantRoleForm(`/admin/record/${summary.recordId}/participant-role`)}</details>` : "")],
   ["方略", escapeHtml(summary.strategy)], ["参照メモリ", summary.referenceMemory ? "ON" : "OFF"], ["発話様式", escapeHtml(summary.utteranceStyle)],
@@ -298,7 +310,7 @@ export function renderMessage(title: string, message: string, back: { href: stri
   return page(title, `<h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p><p><a href="${escapeHtml(back.href)}">${escapeHtml(back.label)}</a></p>`);
 }
 
-const RECEPTION_LABELS = { pending: '許可待ち', approved: '許可済み', in_progress: '実施中', finished: '終了', cancelled: '取消済み' };
+const RECEPTION_LABELS = { pending: '許可待ち', approved: '許可済み', in_progress: '実施中', finished: '終了', cancelled: '取消済み', interrupted: '強制終了' };
 const receptionBadge = (status: string) => badge(RECEPTION_LABELS[status as keyof typeof RECEPTION_LABELS] ?? status,
   status === 'finished' ? 'done' : status === 'in_progress' || status === 'approved' ? 'live' : status === 'pending' ? 'warn' : '');
 const NAV: [string, string][] = [['/admin/receptions', '受付一覧'], ['/admin/entry', '参加用URL・QRコード'], ['/admin/reception-settings', '受付の設定'], ['/admin/figures', '図形一覧'], ['/admin', '実験ログ']];
@@ -313,8 +325,9 @@ const BETWEEN_LABELS: Record<string, string> = { none: '指定なし', questionn
 /** Present only when the reception list updates itself: the version it was rendered from and the render time. */
 export type ReceptionLive = { version: string; since: string };
 
-export function renderReceptions(items: ReceptionAdminRow[], next: string | null, protocol: ReceptionProtocolStatus, live: ReceptionLive | null = null): string {
-  const form = (entry: ReceptionAdminRow, action: 'approve' | 'cancel') => {
+export function renderReceptions(items: ReceptionAdminRow[], next: string | null, protocol: ReceptionProtocolStatus, live: ReceptionLive | null = null,
+  forceEnd = false): string {
+  const form = (entry: ReceptionAdminRow, action: 'approve' | 'cancel' | 'force-end') => {
     // No preselected order: the researcher chooses one, and the form carries the protocol version it was shown with.
     const choices = action === 'approve' && protocol.configured
       ? `<input type="hidden" name="protocolId" value="${escapeHtml(protocol.protocolId)}"><input type="hidden" name="protocolRevision" value="${escapeHtml(protocol.revision)}"><input type="hidden" name="protocolSha256" value="${escapeHtml(protocol.sha256)}">
@@ -323,7 +336,7 @@ export function renderReceptions(items: ReceptionAdminRow[], next: string | null
     return `<form method="post" action="/admin/reception/${escapeHtml(entry.receptionId)}/${action}">
 <input type="hidden" name="expectedRevision" value="${escapeHtml(entry.revision)}">${choices}
 <label>確認（${escapeHtml(entry.number ?? entry.receptionId.slice(0, 8))} を入力） <input name="confirm" autocomplete="off" required></label>
-<button${action === 'approve' ? ' class="primary"' : ''}>${action === 'approve' ? '許可' : '受付を取消'}</button></form>`;
+<button${action === 'approve' ? ' class="primary"' : ''}>${action === 'approve' ? '許可' : action === 'cancel' ? '受付を取消' : '受付を強制終了'}</button></form>`;
   };
   // A row is redrawn by the live update only when this key changes, so it covers everything its forms carry.
   const protocolKey = protocol.configured ? `${protocol.mode}:${protocol.protocolId}:${protocol.revision}:${protocol.sha256}` : `${protocol.mode}:none`;
@@ -331,6 +344,8 @@ export function renderReceptions(items: ReceptionAdminRow[], next: string | null
   const rows = [...items].sort((a, b) => Number(b.status === 'pending') - Number(a.status === 'pending')).map(entry => {
     const unstarted = !entry.trials.some(trial => trial.recordId !== null || trial.recordDeleted);
     const cancel = unstarted && (entry.status === 'pending' || entry.status === 'approved');
+    const end = forceEnd && entry.status === 'in_progress'
+      ? `<details class="row-action danger"><summary>受付を強制終了</summary><p>進行中の試行を終了し、残りの開始を止めます。</p>${form(entry, 'force-end')}</details>` : '';
     const trials = entry.trials.map(trial => ({
       recordId: !trial.recordDeleted && trial.recordId && RECORD_ID.test(trial.recordId) ? trial.recordId : null,
       deleted: trial.recordDeleted === true,
@@ -350,10 +365,10 @@ export function renderReceptions(items: ReceptionAdminRow[], next: string | null
 ${participantRoleForm(`/admin/reception/${entry.receptionId}/participant-role`, recordIds)}</details>` : '';
     const rowKey = JSON.stringify([entry.revision, protocolKey, trials]);
     return `<tr data-id="${escapeHtml(entry.receptionId)}" data-status="${escapeHtml(entry.status)}" data-created="${escapeHtml(entry.createdAt)}" data-key="${escapeHtml(rowKey)}">${td('受付番号', escapeHtml(entry.number ?? '未割当'))}${td('受付時刻', timeTag(entry.createdAt))}
-${td('状態', receptionBadge(entry.status))}${td('条件順序', escapeHtml(entry.plan?.order.join(' → ') ?? ''))}
+${td('状態', receptionBadge(entry.status) + (entry.termination ? ' ' + timeTag(entry.termination.at) : ''))}${td('条件順序', escapeHtml(entry.plan?.order.join(' → ') ?? ''))}
 ${td('図形セット', escapeHtml(figureSetSummary(entry.plan?.figureSets ?? [])))}${td('回転', escapeHtml(entry.plan ? ROTATION_LABELS[entry.plan.rotationMode] ?? '' : ''))}${td('試行の間', escapeHtml(entry.plan ? BETWEEN_LABELS[entry.plan.betweenTrials] ?? '' : ''))}
 ${td('試行記録', trialLinks ? `<div class="reception-trials">${trialLinks}</div>${bulk}` : '')}
-${td('操作', `${entry.status === 'pending' && unstarted && protocol.configured && protocol.mode !== 'off' ? form(entry, 'approve') : ''}${cancel ? form(entry, 'cancel') : ''}${open}${usage}`, ' class="ops"')}</tr>`;
+${td('操作', `${entry.status === 'pending' && unstarted && protocol.configured && protocol.mode !== 'off' ? form(entry, 'approve') : ''}${cancel ? form(entry, 'cancel') : ''}${end}${open}${usage}`, ' class="ops"')}</tr>`;
   }).join('');
   const names = ['受付番号', '受付時刻', '状態', '条件順序', '図形セット', '回転', '試行の間', '試行記録', '操作'];
   const list = `<div id="reception-list"${live ? ` data-version="${escapeHtml(live.version)}" data-since="${escapeHtml(live.since)}"` : ''}>

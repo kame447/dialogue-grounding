@@ -93,7 +93,7 @@ export type RecordListEntry = {
   questionnaire: "none" | QuestionnaireStatus;
 };
 
-const STATUSES = ["dialogue", "submitting", "completed"];
+const STATUSES = ["dialogue", "submitting", "completed", "interrupted"];
 const iso = (value: unknown) => typeof value === "string" ? value : null;
 
 export function recordListEntry(record: Record<string, unknown>, active: boolean, questionnaire: unknown): RecordListEntry {
