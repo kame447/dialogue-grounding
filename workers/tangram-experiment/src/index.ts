@@ -66,6 +66,7 @@ type NamingTask = {
   persistNow(): Promise<void>;
   whenIdle(): Promise<void>;
   retry(): Promise<void>;
+  interruptDialogue?(): Promise<void>;
   submitHuman(options: { names: unknown }): Promise<unknown>;
   submitAI(): Promise<unknown>;
 };
@@ -1004,7 +1005,7 @@ export class TangramSession extends DurableObject<Env> {
   async fetch(request: Request): Promise<Response> {
     try {
       const pathname = new URL(request.url).pathname;
-      const body = request.method === 'POST' && ['/api/start','/api/message','/api/retry','/api/names','/api/ai-submit'].includes(pathname) ? await readBody(request) : null;
+      const body = request.method === 'POST' && ['/api/start','/api/message','/api/retry','/api/interrupt','/api/names','/api/ai-submit'].includes(pathname) ? await readBody(request) : null;
       if (pathname === '/api/start' && request.method === 'POST') {
         // A body with reception expectations is checked by shape here and by the reception owner later;
         // any other body must be exactly the legacy start (a legacy owner never accepts expectations).
@@ -1032,7 +1033,7 @@ export class TangramSession extends DurableObject<Env> {
       if (pathname !== '/api/start') this.trial = (await this.assignmentSession().restore()).task;
       if (request.method === 'GET' && pathname === '/api/state') return json(200,await this.participantState());
       if (request.method !== "POST") return json(404, { error: "not_found" });
-      if (!["/api/start", "/api/message", "/api/retry", "/api/names", "/api/ai-submit"].includes(pathname)) return json(404, { error: "not_found" });
+      if (!["/api/start", "/api/message", "/api/retry", "/api/interrupt", "/api/names", "/api/ai-submit"].includes(pathname)) return json(404, { error: "not_found" });
       if (pathname === '/api/start') {
         await this.startTrial(body!, isolated);
         return json(200,await this.participantState());
@@ -1052,6 +1053,12 @@ export class TangramSession extends DurableObject<Env> {
         return json(202, { eventId: receipt.eventId, ...await this.participantState() as object });
       }
       if (pathname === "/api/retry") await trial.retry();
+      if (pathname === "/api/interrupt") {
+        if (typeof trial.interruptDialogue !== "function" || (live.dialogueRecovery !== "retry" && live.dialogueRecovery !== "paused")) {
+          return json(409, { error: "ai_busy" });
+        }
+        await trial.interruptDialogue();
+      }
       if (pathname === "/api/names") {
         if (body!.confirm !== true) throw new NamingTaskError("invalid_submission");
         validateEventCount(body!, live.events);
@@ -1172,7 +1179,7 @@ export default {
       if (url.pathname.startsWith("/api/")) {
         const browserHistory = url.pathname === '/api/sessions' && ['GET','POST'].includes(request.method);
         const allowed = browserHistory || request.method === 'GET' && ['/api/state','/api/records'].includes(url.pathname) ||
-          request.method === 'POST' && ['/api/reception','/api/start','/api/message','/api/retry','/api/names','/api/ai-submit'].includes(url.pathname) ||
+          request.method === 'POST' && ['/api/reception','/api/start','/api/message','/api/retry','/api/interrupt','/api/names','/api/ai-submit'].includes(url.pathname) ||
           ['GET','POST'].includes(request.method) && /^\/api\/records\/[^/]+\/(review|questionnaire)$/u.test(url.pathname);
         if (!allowed) return withHeaders(json(404,{error:'not_found'}));
         const cookie = sessionId(request.headers.get('Cookie'));

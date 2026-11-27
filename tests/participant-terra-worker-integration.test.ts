@@ -28,6 +28,14 @@ registerHooks({ resolve(name, context, next) {
 } });
 const { TangramSession, default: participantWorker }: any = await import(new URL('../workers/tangram-experiment/src/index.ts', import.meta.url).href);
 
+// Node needs a duplex flag for the body stream forwarded by the Worker.
+const NativeRequest = globalThis.Request;
+globalThis.Request = class extends NativeRequest {
+  constructor(input: RequestInfo | URL, init?: RequestInit) {
+    super(input, init?.body instanceof ReadableStream ? { ...init, duplex: 'half' } as RequestInit : init);
+  }
+};
+
 const { InternalParticipantProxy }: any = await import(new URL('../workers/research-ai-proxy/src/worker.ts', import.meta.url).href);
 const adminToken = 'synthetic-admin-token-for-offline-test-only';
 const pin = validateParticipantModelPin({
@@ -191,6 +199,11 @@ function harness(enabled = true, selectedProtocol: typeof protocol & {
     storage, calls, controlled, env, request,
     evict() { session = makeSession(); },
     adminRecord(recordId: string) { return session.adminRecord(recordId); },
+    browserRequest(request: Request) {
+      return participantWorker.fetch(request, { ...env,
+        NAMING_SESSIONS: { idFromName: (name: string) => name, get: () => session },
+      }) as Promise<Response>;
+    },
     admin(path: string, authenticated = true) {
       const index = {
         async getReception() { return receptionSummary(await storage.get('reception:v1')); },
@@ -1482,6 +1495,84 @@ function v12Transport(t: TestContext, h: ReturnType<typeof harness>) {
     return Response.json(chatResponse(options.wrongPhase === phase ? pin.lunaModelId : pin.terraModelId, response));
   });
   return { lookup, options, textPhases, prompts };
+}
+
+for (const strategy of ['repair-first', 'bypass-enabled']) {
+  test('#206 Worker interrupt pauses a failed ' + strategy + ' turn across cold restore', async t => {
+    const order = strategy === 'repair-first' ? ['repair-first', 'bypass-enabled'] : ['bypass-enabled', 'repair-first'];
+    const h = harness(true, { ...figureBankProtocol, allowedOrders: [order] });
+    const transport = v12Transport(t, h);
+    h.env.PARTICIPANT_DIALOGUE_PROFILE = 'participant_dialogue_v12_naming_v4';
+    const interrupt = (expectedRecordId: string, authenticated = true) => h.browserRequest(
+      new Request('https://session.invalid/api/interrupt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json',
+          ...(authenticated ? { Cookie: 'tangram_session=' + 'c'.repeat(64) } : {}) },
+        body: JSON.stringify({ expectedRecordId }),
+      }),
+    );
+    const assertError = async (response: Response, status: number, error: string) => {
+      assert.equal(response.status, status);
+      assert.deepEqual(await response.json(), { error });
+    };
+
+    await h.receive();
+    await h.approve();
+    const { trial } = await jsonOk(await h.start());
+    const id = trial.sessionId;
+    const key = 'record:' + id;
+    await assertError(await interrupt(id), 409, 'ai_busy');
+
+    h.controlled.rejectJev = true;
+    const { eventId } = await jsonOk(await h.request('message', {
+      expectedRecordId: id, clientId: 'pause-synthetic', text: 'この形を確認したいです。',
+    }));
+    await h.idle();
+    assert.equal((await jsonOk(await h.request('state'))).trial.dialogueRecovery, 'retry');
+    const failedRetry = await jsonOk(await h.request('retry', { expectedRecordId: id }));
+    assert.equal(failedRetry.trial.dialogueRecovery, 'retry');
+    const failed = await h.storage.get(key);
+    assert.equal(failed.assignment.strategy, strategy);
+    assert.equal(failed.jevLedger.halted, false);
+    assert.deepEqual(failed.queueState.pendingHumanEventIds, [eventId]);
+    const sends = { choices: h.calls.length, text: transport.textPhases.length };
+    await assertError(await interrupt(id, false), 401, 'session_required');
+    await assertError(await interrupt('stale-record-id'), 409, 'trial_changed');
+    assert.deepEqual(await h.storage.get(key), failed);
+
+    h.evict();
+    const paused = (await jsonOk(await interrupt(id))).trial;
+    assert.equal(paused.dialogueRecovery, 'paused');
+    assert.equal(paused.aiStatus, 'error');
+    assert.equal(paused.events.at(-1).id, eventId);
+    const saved = await h.storage.get(key);
+    assert.equal(saved.dialogueInterruption, 'participant_paused');
+    assert.deepEqual(saved.events, failed.events);
+    assert.deepEqual(saved.queueState, failed.queueState);
+    assert.deepEqual(saved.jevTraces, failed.jevTraces);
+
+    h.evict();
+    const restored = (await jsonOk(await h.request('state'))).trial;
+    assert.equal(restored.sessionId, id);
+    assert.equal(restored.dialogueRecovery, 'paused');
+    assert.deepEqual(restored.events, paused.events);
+    assert.equal((await jsonOk(await interrupt(id))).trial.dialogueRecovery, 'paused');
+    const repeatedPause = await h.storage.get(key);
+    assert.deepEqual({ ...repeatedPause, updatedAt: saved.updatedAt }, saved);
+    assert.equal(h.calls.length, sends.choices);
+    assert.equal(transport.textPhases.length, sends.text);
+
+    h.controlled.rejectJev = false;
+    const resumed = (await jsonOk(await h.request('retry', { expectedRecordId: id }))).trial;
+    assert.equal(resumed.dialogueRecovery, 'active');
+    const completedTurn = await h.storage.get(key);
+    assert.equal(Object.hasOwn(completedTurn, 'dialogueInterruption'), false);
+    assert.deepEqual(completedTurn.queueState.pendingHumanEventIds, []);
+    assert.deepEqual(completedTurn.events.slice(0, failed.events.length), failed.events);
+    assert.equal(completedTurn.events.length, failed.events.length + 1);
+    assert.equal(completedTurn.events.at(-1).speaker, 'ai');
+    assert.equal(completedTurn.jevTraces.at(-1).lastEventId, eventId);
+  });
 }
 
 for (const [status, cause] of [[504, 'observation_timeout'], [503, 'observation_unavailable']] as const) {
