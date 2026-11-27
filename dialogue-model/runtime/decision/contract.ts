@@ -172,6 +172,8 @@ export type JevDecisionClient = {
   estimateReferent?(input: JevDecisionInput, options?: JevDecisionCallOptions): Promise<HumanReferentEstimate>;
   /** two_stage_v3 + dialoguePolicy holistic_v1 only. Never throws for a transport or response failure: that is status "error" (unconfirmed). */
   classifyDraftAct?(input: DraftActInput, options?: JevDecisionCallOptions): Promise<DraftActResult>;
+  /** two_stage_v3 + holistic_v5 + jev_generation_retry_v14 only. Never throws for a transport or response failure: that is status "error" (unconfirmed). */
+  classifyDraftSharedClaim?(input: DraftSharedClaimInput, options?: JevDecisionCallOptions): Promise<DraftSharedClaimResult>;
   completeDetail?(input: JevDecisionInput, selected: Pick<JevDecision, "action" | "target">,
     options?: JevDecisionCallOptions): Promise<JevDetailResult>;
 };
@@ -196,6 +198,19 @@ export type DraftAct = typeof DRAFT_ACTS[number];
 export type DraftActInput = { turn: number; publicTurns: readonly PublicTurn[]; reasons: readonly string[];
   selected: { action: JevAction; target: JevTarget; name: string | null }; draft: string };
 export type DraftActResult = { status: "ok" | "error"; choice: DraftAct | null; scores: Record<string, number> | null; model: string | null;
+  responseId: string | null; costUsd: number | null; latencyMs: number; error: string | null };
+/** What a P5 draft claims beyond the shared construal (jev_generation_retry_v14): a closed set judged by Jev. */
+export const DRAFT_SHARED_CLAIMS = ["none", "single_identification_claimed", "unconfirmed_detail_claimed"] as const;
+export type DraftSharedClaim = typeof DRAFT_SHARED_CLAIMS[number];
+export type DraftSharedClaimInput = {
+  turn: number;
+  publicTurns: readonly PublicTurn[];
+  selected: { action: JevAction; target: JevTarget; name: string | null; feature: string | null };
+  sharedConstrual: { figureIds: readonly string[]; construal: string; openDetails: readonly SharedConstrual["openDetails"][number][] };
+  singleIdentificationSupported: boolean;
+  draft: string;
+};
+export type DraftSharedClaimResult = { status: "ok" | "error"; choice: DraftSharedClaim | null; scores: Record<string, number> | null; model: string | null;
   responseId: string | null; costUsd: number | null; latencyMs: number; error: string | null };
 export type JevQuestionLayout = "two_stage_v1" | "two_stage_v2" | "two_stage_v3";
 /** two_stage_v3 is explicit opt-in only (integrated profile). Stage one is one closed question over the actions that have at

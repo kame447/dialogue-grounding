@@ -50,15 +50,18 @@ const dialogueV12 = {
   newTrialAgreeNameScopeVersion: 'scoped_v7',
 } as const;
 
+const dialogueV13P5 = {
+  ...dialogueV12,
+  pinnedVersions: { ...dialogueV12.pinnedVersions, generationRetryVersion: 'jev_generation_retry_v13' },
+} as const;
+
 const workerDialogue = {
   participant_dialogue_v12: dialogueV12,
   participant_dialogue_v12_naming_v2: { ...dialogueV12, newTrialAgreeNameScopeVersion: 'scoped_v9' },
   participant_dialogue_v12_naming_v3: { ...dialogueV12, newTrialAgreeNameScopeVersion: 'scoped_v10' },
   participant_dialogue_v12_naming_v4: { ...dialogueV12, newTrialAgreeNameScopeVersion: 'scoped_v11' },
-  participant_dialogue_v13_p5: {
-    ...dialogueV12,
-    pinnedVersions: { ...dialogueV12.pinnedVersions, generationRetryVersion: 'jev_generation_retry_v13' },
-  },
+  participant_dialogue_v13_p5: dialogueV13P5,
+  participant_dialogue_v13_p5_naming_v4: { ...dialogueV13P5, newTrialAgreeNameScopeVersion: 'scoped_v11' },
 } as const;
 const workerDialogueProfileSha = researchHash(dialogueV12.profile);
 

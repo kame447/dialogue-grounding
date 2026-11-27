@@ -743,16 +743,18 @@ test('P5 dialogue profile keeps management reads available and blocks incomplete
   await error(await h.request('start', { version: 2, expectedReceptionRevision: approved.revision,
     participantDialogueProfile: 'participant_dialogue_v12' }), 400, 'invalid_request');
 
-  const p5Approved = { ...approved, plan: { ...approved.plan, participantDialogueProfile: 'participant_dialogue_v13_p5' } };
-  delete p5Approved.plan.memoryPruneVersion;
-  await put({ 'reception:v1': p5Approved });
-  const listing = await h.admin('/admin/receptions');
-  assert.equal(listing.status, 200);
-  assert.ok((await listing.text()).includes('data-id="' + approved.receptionId + '"'));
-  await error(await h.start(), 409, 'trial_unavailable');
-  assert.deepEqual(await h.storage.get('reception:v1'), p5Approved);
-  assert.deepEqual(await h.storage.get('base:owner:v1'), before);
-  assert.equal(h.calls.length, 0);
+  for (const profile of [v13Dialogue, v13NamingV4Dialogue]) {
+    const p5Approved = { ...approved, plan: { ...approved.plan, participantDialogueProfile: profile } };
+    delete p5Approved.plan.memoryPruneVersion;
+    await put({ 'reception:v1': p5Approved });
+    const listing = await h.admin('/admin/receptions');
+    assert.equal(listing.status, 200);
+    assert.ok((await listing.text()).includes('data-id="' + approved.receptionId + '"'));
+    await error(await h.start(), 409, 'trial_unavailable');
+    assert.deepEqual(await h.storage.get('reception:v1'), p5Approved);
+    assert.deepEqual(await h.storage.get('base:owner:v1'), before);
+    assert.equal(h.calls.length, 0);
+  }
   await put({ 'reception:v1': { ...approved, plan: { ...approved.plan, participantDialogueProfile: 'unknown' } } });
   await error(await h.start(), 409, 'reception_unavailable');
   assert.deepEqual(await h.storage.get('base:owner:v1'), before);
@@ -1404,6 +1406,7 @@ test('pinned capabilities have their own Service entrypoint and no public HTTP r
 
 const v12Dialogue = 'participant_dialogue_v12';
 const v13Dialogue = 'participant_dialogue_v13_p5';
+const v13NamingV4Dialogue = 'participant_dialogue_v13_p5_naming_v4';
 const p5Question = 'どのような形に見えますか？';
 const p5Reading = '鳥のような形に見えます。';
 const p5Support = '私にも鳥に見えます。';
@@ -1777,7 +1780,7 @@ test('U6-B approval rejects unsupported environment and missing v3 before sendin
   const before = await h.storage.get('reception:v1');
   h.env.PARTICIPANT_DIALOGUE_PROFILE = 'unknown';
   await assert.rejects(h.approve(), { code: 'reception_unavailable' });
-  for (const profile of [v12Dialogue, v13Dialogue]) {
+  for (const profile of [v12Dialogue, v13Dialogue, v13NamingV4Dialogue]) {
     h.env.PARTICIPANT_DIALOGUE_PROFILE = profile;
     h.env.PARTICIPANT_TERRA_PROFILE = PARTICIPANT_PRODUCTION_PROFILE;
     h.env.PARTICIPANT_TERRA_ALL_ROLES_ENABLED = undefined;
@@ -1929,17 +1932,22 @@ for (const strategy of ['repair-first', 'bypass-enabled']) {
   });
 }
 
-for (const order of [['repair-first', 'bypass-enabled'], ['bypass-enabled', 'repair-first']]) {
-  test('U6 v13 P5 keeps the approved profile, adoption and cold restore in order ' + order[0], async t => {
+for (const { order, dialogueProfile, scope } of [
+  { order: ['repair-first', 'bypass-enabled'], dialogueProfile: v13Dialogue, scope: 'scoped_v7' },
+  { order: ['bypass-enabled', 'repair-first'], dialogueProfile: v13Dialogue, scope: 'scoped_v7' },
+  { order: ['repair-first', 'bypass-enabled'], dialogueProfile: v13NamingV4Dialogue, scope: 'scoped_v11' },
+  { order: ['bypass-enabled', 'repair-first'], dialogueProfile: v13NamingV4Dialogue, scope: 'scoped_v11' },
+]) {
+  test('U6 v13 P5 keeps the approved profile, adoption and cold restore in order ' + order[0] + ' ' + scope, async t => {
     const receptionProtocol = order[0] === 'repair-first' ? figureBankProtocol : protocol;
     const h = harness(true, { ...receptionProtocol, allowedOrders: [order] });
     const transport = v12Transport(t, h);
     transport.options.sharedReading = true;
     h.controlled.selectedAction = 'accept';
-    h.env.PARTICIPANT_DIALOGUE_PROFILE = v13Dialogue;
+    h.env.PARTICIPANT_DIALOGUE_PROFILE = dialogueProfile;
     await h.receive();
     const approval = await h.approve();
-    assert.equal(approval.plan.participantDialogueProfile, v13Dialogue);
+    assert.equal(approval.plan.participantDialogueProfile, dialogueProfile);
     assert.equal(approval.plan.participantModelPin.schemaVersion, 'participant_model_pin_v3');
     assert.equal(approval.plan.memoryPruneVersion, CLAIM_PRUNE_V2);
     h.env.PARTICIPANT_DIALOGUE_PROFILE = v12Dialogue;
@@ -1948,16 +1956,16 @@ for (const order of [['repair-first', 'bypass-enabled'], ['bypass-enabled', 'rep
     let predecessor: string | undefined;
     for (const strategy of order) {
       const { trial } = await jsonOk(await h.start(predecessor));
-      assert.doesNotMatch(JSON.stringify(trial), /participantDialogueProfile|scoped_v7|holistic_v5|claim_prune_v2/u);
+      assert.doesNotMatch(JSON.stringify(trial), /participantDialogueProfile|scoped_v(?:7|11)|holistic_v5|claim_prune_v2/u);
       const id = trial.sessionId, key = 'record:' + id;
       const start = await h.storage.get(key);
       assert.equal(start.strategy, strategy);
-      assert.equal(start.assignment.source.plan.participantDialogueProfile, v13Dialogue);
-      assert.equal(start.options.participantDialogueProfile, v13Dialogue);
+      assert.equal(start.assignment.source.plan.participantDialogueProfile, dialogueProfile);
+      assert.equal(start.options.participantDialogueProfile, dialogueProfile);
       assert.deepEqual(start.options.participantModelPin, approval.plan.participantModelPin);
       assert.equal(start.options.memoryPruneVersion, CLAIM_PRUNE_V2);
       assert.equal(start.queueState.privateState.graph.memoryPruneVersion, CLAIM_PRUNE_V2);
-      assert.equal(start.queueState.privateState.agreeNameScopeVersion, 'scoped_v7');
+      assert.equal(start.queueState.privateState.agreeNameScopeVersion, scope);
       assert.equal(start.options.questionLayout, 'two_stage_v3');
       assert.equal(start.options.dialoguePolicy, 'holistic_v5');
       assert.equal(start.options.generationRetryVersion, 'jev_generation_retry_v13');
@@ -1996,6 +2004,24 @@ for (const order of [['repair-first', 'bypass-enabled'], ['bypass-enabled', 'rep
       assert.equal(restored.sessionId, id);
       assert.equal(h.calls.length, sent);
       assert.deepEqual((await h.storage.get(key)).queueState.privateState, stored.queueState.privateState);
+      if (dialogueProfile === v13NamingV4Dialogue && predecessor === undefined) {
+        const replaceActiveRecord = async (record: typeof stored) => {
+          await h.storage.transaction(async tx => {
+            const owner = await tx.get('base:owner:v1');
+            owner.admissions[owner.activeKey].record = record;
+            await tx.put({ 'base:owner:v1': owner, [key]: record });
+          });
+          h.evict();
+        };
+        const wrongScope = structuredClone(stored);
+        wrongScope.queueState.privateState.agreeNameScopeVersion = 'scoped_v7';
+        await replaceActiveRecord(wrongScope);
+        const rejected = await h.request('state');
+        assert.equal(rejected.status, 409);
+        assert.deepEqual(await rejected.json(), { error: 'trial_unavailable' });
+        assert.equal(h.calls.length, sent);
+        await replaceActiveRecord(stored);
+      }
       await jsonOk(await send('続けましょう。'));
       await h.idle();
       const continuing = await h.storage.get(key);
@@ -2014,5 +2040,6 @@ for (const order of [['repair-first', 'bypass-enabled'], ['bypass-enabled', 'rep
       predecessor = id;
     }
     assert.equal(h.controlled.legacyCalls, 0);
+    assert.ok(h.calls.every(call => call.kind !== 'choices' || !Object.hasOwn(call.body.questions, 'draft_shared_claim')));
   });
 }

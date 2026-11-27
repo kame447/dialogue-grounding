@@ -5,6 +5,7 @@ import type { NamingResponseEvidence } from "../dialogue-model/runtime/decision/
 import type { LocalClaimView, LocalSegmentProposal, PublicTurn } from "../dialogue-model/runtime/local-grounding/contract.ts";
 import { createOwnLedger } from "../dialogue-model/runtime/judgment/schema.mjs";
 import { buildAgreeNamesV3 } from "../dialogue-model/runtime/v2/jev-turn.ts";
+import { validAgreeNameScope } from "../dialogue-model/runtime/v2/generation-guard.ts";
 import { verifyRecords } from "../dialogue-model/runtime/diagnostics/parity-verify/index.ts";
 import { buildRecords, OWN, OLD, type Turn, type runTurn } from "./support/s4-v3-records.ts";
 
@@ -98,8 +99,22 @@ test("reconfirmation requires distinct linked feature and identity answers, with
   assert.deepEqual(candidates(claims.filter(c => c !== denial), checks, "scoped_v11", yes + identity, response), []);
 });
 
-for (const label of ["repair-first", "bypass-enabled"] as const) {
-  test(`scoped_v11 offers and saves only the renewed name after a rename in ${label}`, async () => {
+test("the P5 naming v4 composition adds only scoped_v11 with generation v13", () => {
+  const scopes = ["scoped_v7", "scoped_v8", "scoped_v9", "scoped_v10", "scoped_v11"];
+  assert.deepEqual(scopes.filter(scope => validAgreeNameScope(scope, "jev_generation_retry_v12")), scopes);
+  assert.deepEqual(scopes.filter(scope => validAgreeNameScope(scope, "jev_generation_retry_v13")),
+    ["scoped_v7", "scoped_v8", "scoped_v11"]);
+  assert.deepEqual(scopes.filter(scope => validAgreeNameScope(scope, "jev_generation_retry_v14")),
+    ["scoped_v7", "scoped_v8"]);
+});
+
+for (const [label, generationRetryVersion] of [
+  ["repair-first", "jev_generation_retry_v12"],
+  ["bypass-enabled", "jev_generation_retry_v12"],
+  ["repair-first", "jev_generation_retry_v13"],
+  ["bypass-enabled", "jev_generation_retry_v13"],
+] as const) {
+  test(`scoped_v11 offers and saves only the renewed name after a rename in ${label} with ${generationRetryVersion}`, async () => {
     const [own, other] = OWN.ownAnchors.map((anchor: { id: string }) => anchor.id);
     const memo = structuredClone(OLD.state.observationMemo);
     memo.figures[0].analytic.shapes = ["端に切れ目がある", "傾きがある"];
@@ -144,7 +159,7 @@ for (const label of ["repair-first", "bypass-enabled"] as const) {
       } },
     ];
     const outcomes: Awaited<ReturnType<typeof runTurn>>[] = [];
-    const records = await buildRecords({ label, dialoguePolicy: "holistic_v5", generationRetryVersion: "jev_generation_retry_v12",
+    const records = await buildRecords({ label, dialoguePolicy: "holistic_v5", generationRetryVersion,
       agreeNameScopeVersion: "scoped_v11", technicalTrial: { version: "adaptive_repair_v3" }, memo, turns,
       onTurn: (side, outcome) => { if (side === label) outcomes.push(outcome); },
     });
