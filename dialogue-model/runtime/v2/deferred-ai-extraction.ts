@@ -7,10 +7,16 @@ import { literalSpan } from "../judgment/public-evidence.mjs";
 export const DEFERRED_AI_EXTRACTION_GENERATION = "jev_generation_retry_v20";
 export const ISSUE_HANDLING_GENERATION = "jev_generation_retry_v21";
 export const GENERATION_RETRY_V22 = "jev_generation_retry_v22";
+export const GENERATION_RETRY_V23 = "jev_generation_retry_v23";
 export const isGenerationV22 = (value: unknown): value is typeof GENERATION_RETRY_V22 => value === GENERATION_RETRY_V22;
-export const isIssueHandlingGeneration = (value: unknown): value is typeof ISSUE_HANDLING_GENERATION | typeof GENERATION_RETRY_V22 =>
-  value === ISSUE_HANDLING_GENERATION || isGenerationV22(value);
-export const isDeferredAiExtractionGeneration = (value: unknown): value is typeof DEFERRED_AI_EXTRACTION_GENERATION | typeof ISSUE_HANDLING_GENERATION | typeof GENERATION_RETRY_V22 =>
+export const isGenerationV23 = (value: unknown): value is typeof GENERATION_RETRY_V23 => value === GENERATION_RETRY_V23;
+type GenerationV22Plus = typeof GENERATION_RETRY_V22 | typeof GENERATION_RETRY_V23;
+type IssueHandlingGeneration = typeof ISSUE_HANDLING_GENERATION | GenerationV22Plus;
+export type DeferredAiExtractionGeneration = typeof DEFERRED_AI_EXTRACTION_GENERATION | IssueHandlingGeneration;
+export const usesV22GenerationRules = (value: unknown): value is GenerationV22Plus => isGenerationV22(value) || isGenerationV23(value);
+export const isIssueHandlingGeneration = (value: unknown): value is IssueHandlingGeneration =>
+  value === ISSUE_HANDLING_GENERATION || usesV22GenerationRules(value);
+export const isDeferredAiExtractionGeneration = (value: unknown): value is DeferredAiExtractionGeneration =>
   value === DEFERRED_AI_EXTRACTION_GENERATION || isIssueHandlingGeneration(value);
 
 export type DeferredAiExtractionJob = {

@@ -46,12 +46,13 @@ import { findNamingActHints, hasOrientationWords, draftViolationCodes, deriveGen
 import { isGenerationV15, currentTurnNamingSource, semanticNamingCodes, namingCodesWithoutQuestion, contentPublicationRecovery, namingPublicationHold,
   type NamingHoldReason, type PublicationRecovery } from "./generation-guard.ts";
 import { isGenerationV16, isGenerationV17, isGenerationV19, confirmationDraftText, canReconsiderPublication, HUMAN_MOVE_ON_V17, PUBLICATION_RECOVERY_V17 } from "./generation-guard.ts";
-import { ISSUE_HANDLING_GENERATION, isGenerationV22, isIssueHandlingGeneration, classificationExtraction, classificationMatchesPublication, extractionDigest,
+import { ISSUE_HANDLING_GENERATION, isGenerationV23, isIssueHandlingGeneration, usesV22GenerationRules, classificationExtraction, classificationMatchesPublication, extractionDigest,
   isDeferredAiExtractionGeneration, validDeferredAiPublicJob, type DeferredAiPublicJob,
   type DeferredClassificationExtraction } from "./deferred-ai-extraction.ts";
 import { isJevVisualPurpose, SEMANTIC_DRAFT_ACTS, visualPurposeMatchesSource } from "../decision/contract.ts";
 import { createMemoAiExtractor, memoAiExtractionPrompt, AiPublicError, aiHash, emptyAiEvidence } from "../local-grounding/extract-ai.ts";
 import { isGenerationV18, SHAPE_TERMINOLOGY_GENERATION, withShapeTerminology } from "../shape-terminology.ts";
+import { generationTaskV23, GENERATION_INSTRUCTIONS_V23, CONCISE_GENERATION_V23, generationActionPromptV23, MULTIPLE_CANDIDATES_V23, PRIVATE_NAMING_STATE_V23 } from "./generation-prompt-v23.ts";
 import { readVisualFeatureDraft, readVisualFeatureEvidence, sameVisualFeatureSources,
   VISUAL_FEATURE_SELECTION_V19, VISUAL_FEATURE_SOURCES_V19, VISUAL_FEATURE_DRAFT_V19 } from "./visual-feature-evidence.ts";
 import type { VisualFeatureEvidence, VisualFeatureSource } from "./visual-feature-evidence.ts";
@@ -1138,7 +1139,7 @@ function validateGeneratedPublication(j: CommittedAct, ledger: OwnLedger, ownSlo
     }
   }
   const lastDraft = j.jevTurn.draftActs?.at(-1);
-  if (isGenerationV22(generation) && (lastDraft?.status !== "ok" || !lastDraft.triggers.includes("topic_shift") ||
+  if (usesV22GenerationRules(generation) && (lastDraft?.status !== "ok" || !lastDraft.triggers.includes("topic_shift") ||
       !validDraftTopicShift(lastDraft.topicShift) || lastDraft.topicShift.choice !== "within_plan" || !digestShape(lastDraft.draftSha256))) throw Error();
   const turns = publicTurns ?? [{ turn: j.turnIndex, speaker: "human" as const, text: "" }];
   const proposedWithdrawal = recovery && execution.action === "repair" && recovery.reason !== "publication_mismatch"
@@ -1154,7 +1155,7 @@ function validateGeneratedPublication(j: CommittedAct, ledger: OwnLedger, ownSlo
   if (publicTurns) {
     const speech = publicTurns.find(event => event.turn === j.turnIndex + 1 && event.speaker === "ai")?.text;
     if (speech === undefined || textDigest(speech) !== publication.textSha256) throw Error();
-    if (isGenerationV22(generation) && textDigest(transition ? speech.slice(0, transition.start - 1) : speech) !== lastDraft?.draftSha256) throw Error();
+    if (usesV22GenerationRules(generation) && textDigest(transition ? speech.slice(0, transition.start - 1) : speech) !== lastDraft?.draftSha256) throw Error();
     if (items.length > 1 && !validIssuePublicationParts(publication.parts, items.length, speech, transition?.start)) throw Error();
     if (visualDetail && !readVisualFeatureEvidence(publication.visualFeatures, memo!, visualTargets,
         transition ? speech.slice(0, transition.start - 1) : speech)) throw Error();
@@ -1531,8 +1532,9 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   }
   const visualFeatureGeneration = isGenerationV19(generationRetryVersion);
   const issueHandling = isIssueHandlingGeneration(generationRetryVersion);
-  const generationV22 = isGenerationV22(generationRetryVersion);
-  const semanticTopicShift = generationV22;
+  const hasV22Rules = usesV22GenerationRules(generationRetryVersion);
+  const generationV23 = isGenerationV23(generationRetryVersion);
+  const semanticTopicShift = hasV22Rules;
   if (issueHandling !== Boolean(intervention && isIssueHandlingPolicy(intervention))) throw new JevTurnError("invalid_intervention");
   const requestedReplayHistory = options.issueHandlingReplayHistory;
   if (requestedReplayHistory !== undefined && (!issueHandling || usagePolicy !== undefined || options.participantPrompts ||
@@ -1543,11 +1545,13 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   if (deferredProfile !== undefined && (!isDeferredAiExtractionGeneration(generationRetryVersion) ||
       !/^[a-f0-9]{64}$/u.test(deferredProfile))) throw new JevTurnError("invalid_state");
   const terminology = isGenerationV18(generationRetryVersion) || visualFeatureGeneration ? SHAPE_TERMINOLOGY_GENERATION : undefined;
-  const generationInstructions = withShapeTerminology(visualFeatureGeneration ? generation.instructions.replace(
+  const generationInstructions = withShapeTerminology(generationV23
+    ? GENERATION_INSTRUCTIONS_V23 + (generation.concise ? "\n" + CONCISE_GENERATION_V23 : "")
+    : visualFeatureGeneration ? generation.instructions.replace(
     "形の分析（部分の形・つながり・配置）は、判断にdiscriminatingFeatureがあるときだけ、その特徴を1つに絞って述べて相手の反応を待ってください。",
     "形の分析（部分の形・つながり・配置）は、相手が尋ねた点や判断で示された論点の解消に必要な範囲で、観察に根拠がある特徴を扱ってください。",
   ) : generation.instructions, terminology);
-  const multiIssueInstructions = issueHandling ? generationInstructions.replace(SINGLE_ISSUE_DEFERRAL, MULTI_ISSUE_DEFERRAL) : generationInstructions;
+  const multiIssueInstructions = issueHandling && !generationV23 ? generationInstructions.replace(SINGLE_ISSUE_DEFERRAL, MULTI_ISSUE_DEFERRAL) : generationInstructions;
   const repairQuality = options.judgmentMaterialVersion === JEV_REPAIR_QUALITY_VERSION;
   if (options.judgmentMaterialVersion !== undefined && (!repairQuality || questionLayout !== "two_stage_v3" ||
       options.dialoguePolicy !== "holistic_v5" || !hasVersionedViewpoint(generationRetryVersion))) {
@@ -1583,6 +1587,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   const maxReobservations = options.maxReobservations ?? 1;
   if (!Number.isSafeInteger(maxReobservations) || maxReobservations < 0 || maxReobservations > 1) throw new Error("Invalid reobservation limit");
   const ownImage = structuredClone(options.ownImage), ownAnchors = structuredClone(options.ownAnchors), slots = ownAnchors.map(a => a.id);
+  const generationTask = generationV23 ? generationTaskV23(slots.length) : generation.task;
   validateLocalGroundingOptions({ ...options.localGrounding, extractor: { async extract() { return []; } } });
   const aiEnabled = options.localGrounding.aiPublicClaims === true;
   const aiExtractor = aiEnabled ? createMemoAiExtractor(client, terminology) : null;
@@ -1595,12 +1600,12 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
   let initialMemo: Promise<ObservationMemo> | null = null, initialRecorded = false;
   const researchV3 = questionLayout === "two_stage_v3" && options.participantPrompts !== true;
   const actInstructions = questionLayout === "two_stage_v3" || isHolisticPolicy(options.dialoguePolicy) ? HOLISTIC_ACT_INSTRUCTIONS : ACT_INSTRUCTIONS;
-  const privateInstructions = [generation.task, generationInstructions, generation.concise ?? "", ACT_INSTRUCTIONS, HOLISTIC_ACT_INSTRUCTIONS, DETAIL_INSTRUCTIONS, REVISIT_MULTIPLE_INSTRUCTIONS, LOCAL_EXTRACTION_INSTRUCTIONS,
+  const privateInstructions = [generationTask, ...(generationV23 ? [generation.task] : []), generationInstructions, generation.concise ?? "", ACT_INSTRUCTIONS, HOLISTIC_ACT_INSTRUCTIONS, DETAIL_INSTRUCTIONS, REVISIT_MULTIPLE_INSTRUCTIONS, LOCAL_EXTRACTION_INSTRUCTIONS,
     MEMO_LOCAL_EXTRACTION_INSTRUCTIONS, ...(researchV3 ? [memoExtractionPrompt(holisticV2, true)] : []), ...(holisticV2 ? [MEMO_LOCAL_EXTRACTION_INSTRUCTIONS_HOLISTIC] : []),
     ...(terminology ? [memoExtractionPrompt(holisticV2, researchV3, terminology)] : []), LOCAL_CLASSIFICATION_INSTRUCTIONS, observationInitialInstructions(slots.length),
     OBSERVATION_TARGETED_INSTRUCTIONS, ...(aiEnabled ? aiPromptBodies : []),
     ...(visualFeatureGeneration ? [VISUAL_FEATURE_SELECTION_V19, VISUAL_FEATURE_SOURCES_V19, VISUAL_FEATURE_DRAFT_V19, memoAiExtractionPrompt(terminology, true)] : []),
-    ...(generationV22 ? [RETAINED_REFERENCE_EXTRACTION_INSTRUCTIONS, RETAINED_REFERENCE_GENERATION_INSTRUCTIONS,
+    ...(hasV22Rules ? [RETAINED_REFERENCE_EXTRACTION_INSTRUCTIONS, RETAINED_REFERENCE_GENERATION_INSTRUCTIONS,
       RECONFIRM_NAME_V22, AGREED_NAME_REFERENCE_V22, MULTI_ISSUE_STAY_V22, CONFIRM_SCOPE_V22] : []),
     ...(issueHandling ? [multiIssueInstructions, MULTI_ISSUE_INSTRUCTIONS, MULTI_ISSUE_REPAIR_SCOPE, MULTI_ISSUE_DRAFT] : []),
     ...(p5Enabled ? [SHARED_CONSTRUAL_INSTRUCTIONS, SHARED_CONSTRUAL_CONFIRM_INSTRUCTIONS] : [])].map(content => ({ role: "system", content }));
@@ -1677,7 +1682,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
         catch { throw new JevTurnError("invalid_state"); }
       }
       const publicTurns = jevPublicTurns(events, latest.seq, aiEnabled);
-      const history = generationV22 ? historicalPublicTurns(events, publicTurns[0]?.turn ?? latest.seq) : undefined;
+      const history = hasV22Rules ? historicalPublicTurns(events, publicTurns[0]?.turn ?? latest.seq) : undefined;
       const jevNaming = usesJevNaming(state.agreeNameScopeVersion);
       const recoveryCandidates = jevNaming ? slots : undefined;
       const previous = state.judgments.at(-1), previousExecution=previous?publishedExecution(previous,recoveryCandidates):null, previousAi = previous && publicTurns.find(t => t.speaker === "ai" && t.turn > previous.turnIndex && t.turn < latest.seq);
@@ -2099,7 +2104,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       const ordinaryQualityGuidance = visualDetail || issueHandling && reconsidered ? publicQuestions() : repairQuality && isGenerationV17(generationRetryVersion) && !reconsidered
         ? (legacyAction ? normalRepairQualityGuidance(legacyAction) + "\n" : "") +
           publicQuestions() : "";
-      const acceptGuidance = generationV22 && repairQuality ? normalRepairQualityGuidance("accept") + "\n" : "";
+      const acceptGuidance = hasV22Rules && repairQuality ? normalRepairQualityGuidance("accept") + "\n" : "";
       let declaredFeatures: VisualFeatureSource[] | null = null;
       const readDraft = (text: string) => {
         transitionText = null;
@@ -2132,25 +2137,30 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
           return value.text;
         } catch { return null; }
       };
-      const scope = multipleItems ? MULTI_ISSUE_INSTRUCTIONS + "\n" +
+      const scope = generationV23 ? "" : multipleItems ? MULTI_ISSUE_INSTRUCTIONS + "\n" +
         (items.some(item => ["confirm", "repair"].includes(item.action)) ? VISUAL_FEATURE_SELECTION_V19 + "\n" : "") +
         items.map((item, index) => {
           const visual = item.action === "confirm" || item.action === "repair";
-          const itemScope = visual ? generationV22
+          const itemScope = visual ? hasV22Rules
             ? (item.action === "confirm" ? generation.actionScope.confirm.replace(CONFIRM_NO_DEFERRAL_V22, "") : generation.actionScope.repair + "。") + MULTI_ISSUE_STAY_V22
             : MULTI_ISSUE_REPAIR_SCOPE : generation.actionScope[item.action];
           const guidance = item.action === "accept" && acceptGuidance ? "\nこの accept の部分に適用します。\n" + acceptGuidance.trimEnd() : "";
           return `items の ${index} 番: ${itemScope}${guidance}`;
         }).join("\n") + "\n"
         : (visualDetail && visualSelection ? VISUAL_FEATURE_SELECTION_V19 +
-          (generationV22 && judgment.action === "confirm" ? "\n" + generation.actionScope.confirm : "") : generation.actionScope[judgment.action]) + "\n" +
+          (hasV22Rules && judgment.action === "confirm" ? "\n" + generation.actionScope.confirm : "") : generation.actionScope[judgment.action]) + "\n" +
           (issueHandling ? visualSelection && !humanLedTransition ? KEEP_ISSUE_V21 + "\n" : ""
             : isGenerationV6(generationRetryVersion) && (isVetoed(selectedIntervention) || visualSelection) ? VETOED_MOVE_V6 + "\n" : "");
-      const actionMessage: Message = { role: "system",
-        content: actInstructions + "\n" + scope +
+      const actionMessage: Message = { role: "system", content: generationV23 ? generationActionPromptV23({
+        items: items.map(publicationItem), visualDetail, humanLedTransition, closing,
+        publicQuestions: repairQualityPublicQuestions(latest.seq, publicTurns, claims),
+        reconsidered: reconsidered !== null, continuing: continuing !== null, namingRequest: record.namingRequest === true,
+        reconfirmation: reconfirmName ? RECONFIRM_NAME_V22 : undefined,
+        namingConflict, withdrawnName: withdrawal?.prior.name ?? null,
+      }) : actInstructions + "\n" + scope +
           (closing?.initiator === "human" ? HUMAN_CLOSE_V21 + "\n" : closing?.unresolved ? UNRESOLVED_CLOSE_V21 + "\n" : "") +
           (versionedGeneration && judgment.action === "accept" ? ACCEPT_FEATURE_REPLY_V5 + "\n" : "") +
-          (reconfirmName ? (generationV22 ? RECONFIRM_NAME_V22 : RECONFIRM_NAME_V5) + "\n" : "") +
+          (reconfirmName ? (hasV22Rules ? RECONFIRM_NAME_V22 : RECONFIRM_NAME_V5) + "\n" : "") +
           (options.dialoguePolicy === "holistic_v5" && judgment.action === "confirm" && record.namingRequest === true
             ? (visualDetail ? CONFIRM_NAMING_REQUEST_V19 : CONFIRM_NAMING_REQUEST_V5) + "\n" : "") +
           (namingConflict ? NAMING_CONFLICT_V5 + "\n" + JSON.stringify(namingConflict) + "\n" : "") +
@@ -2172,16 +2182,18 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
           ...(execution.detailFigureIds ? { detailFigureIds: execution.detailFigureIds } : {}) }) };
       const shared = execution.sharedClaimIds && baseInput.sharedConstruals?.find(candidate => stateSame(candidate.claimIds, execution.sharedClaimIds));
       const retainedReferenceHistory = history && buildRetainedReferenceHistory(graph, history, publicTurns, latest.seq);
-      const messages: Message[] = [{ role: "system", content: generation.task }, { role: "system", content: multipleItems ? multiIssueInstructions : generationInstructions },
-        ...(generation.concise ? [{ role: "system" as const, content: generation.concise }] : []),
+      const messages: Message[] = [{ role: "system", content: generationTask }, { role: "system", content: multipleItems ? multiIssueInstructions : generationInstructions },
+        ...(!generationV23 && generation.concise ? [{ role: "system" as const, content: generation.concise }] : []),
         actionMessage,
-        ...(shared ? [{ role: "system" as const, content: (execution.action === "confirm"
+        ...(shared ? [{ role: "system" as const, content: (!generationV23 && execution.action === "confirm"
           && !visualDetail ? SHARED_CONSTRUAL_CONFIRM_INSTRUCTIONS : SHARED_CONSTRUAL_INSTRUCTIONS) + "\n" +
           JSON.stringify({ figureIds: shared.figureIds, construal: shared.construal, openDetails: shared.openDetails }) }] : []),
-        ...(multipleFeature && !visualDetail ? [{ role: "system" as const, content: DETAIL_INSTRUCTIONS }] : []),
+        ...(generationV23 && items.some(item => item.target.kind === "multiple")
+          ? [{ role: "system" as const, content: MULTIPLE_CANDIDATES_V23 }] : []),
+        ...(!generationV23 && multipleFeature && !visualDetail ? [{ role: "system" as const, content: DETAIL_INSTRUCTIONS }] : []),
           ...(ambiguousRevisit && !issueHandling ? [{ role: "system" as const, content: REVISIT_MULTIPLE_INSTRUCTIONS }] : []),
-        ...(namingState ? [{ role: "system" as const, content: PRIVATE_NAMING_STATE_V5 + "\n" +
-          (generationV22 ? AGREED_NAME_REFERENCE_V22 + "\n" : "") + JSON.stringify(namingState) }] : []),
+        ...(namingState ? [{ role: "system" as const, content: (generationV23 ? PRIVATE_NAMING_STATE_V23 + "\n"
+          : PRIVATE_NAMING_STATE_V5 + "\n" + (hasV22Rules ? AGREED_NAME_REFERENCE_V22 + "\n" : "")) + JSON.stringify(namingState) }] : []),
         ...observationContextMessages(JSON.stringify({ scope: "private_observations_not_ground_truth", memo })),
         { role: "system", content: "局所問題（非公開）:\n" + summarizeLocalIssues(graph) },
         ...(retainedReferenceHistory?.length ? [{ role: "system" as const, content: RETAINED_REFERENCE_GENERATION_INSTRUCTIONS + "\n" +

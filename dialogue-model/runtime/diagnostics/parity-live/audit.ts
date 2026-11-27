@@ -131,7 +131,7 @@ export async function promptSourceManifest() {
     "observation/observe.ts", "local-grounding/extract.ts", "local-grounding/jev-local-test.ts",
     "decision/jev-decision.ts", "local-grounding/extract-ai.ts", "local-grounding/jev-ai-public.ts", "shape-terminology.ts",
     "v2/visual-feature-evidence.ts", "v2/deferred-ai-extraction.ts", "v2/issue-publication.ts",
-    "decision/human-led-move-on.ts"];
+    "decision/human-led-move-on.ts", "v2/generation-prompt-v23.ts"];
   return { scheme: "complete_instruction_source_sha256", files: Object.fromEntries(await Promise.all(files.map(async file =>
     [file, createHash("sha256").update(await readFile(new URL("../../" + file, import.meta.url))).digest("hex")])) ) };
 }

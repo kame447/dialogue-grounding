@@ -39,10 +39,11 @@ import type {Check,Records,Row} from './core.ts';
 import {NAMING_GUIDANCE,holdPublication,namingHold,namingInputMatches,namingMaterial,namingQuestions,namingRecoveryHistoryMatches,namingVerdict} from './naming-records.ts';
 import {draftTopicShiftMatches,TOPIC_SHIFT_CHOICES,TOPIC_SHIFT_RETRY_REASON} from './draft-topic-shift-records.ts';
 import {retainedClassificationMatches,retainedGenerationMatches,retainedReferenceHistory,RETAINED_REFERENCE_EXTRACTION} from './retained-reference-records.ts';
+import {v23OutputMatches,v23PlanMatches,v23PlanMessage} from './generation-prompt-v23-records.ts';
 import {extractionEvidenceForJob,isIssueHandlingExecution,issueHandlingDecisionShape,issueHandlingExtraRequestsMatch,issueHandlingFailureStage,issueHandlingFeatureScope,
  issueHandlingBasisMatches,issueHandlingCloseMatches,issueHandlingLedger,issueHandlingPartsMatch,issueHandlingPublicationPath,
  issueHandlingRelation,issueHandlingReplayBoundary,issueHandlingRequestMatches,issueHandlingSourcesMatch,
- publishedIssueHandlings,publishedPreviousExtras,s4UsesIssueHandling,S4_ISSUE_HANDLING_POLICY,S4_ISSUE_HANDLING_TABLE_SHA256} from './issue-handling-records.ts';
+ publishedIssueHandlings,publishedPreviousExtras,s4UsesIssueHandling,s4UsesV22GenerationRules,S4_ISSUE_HANDLING_POLICY,S4_ISSUE_HANDLING_TABLE_SHA256} from './issue-handling-records.ts';
 const POLICY='376d569120ca36a3eceaf5ab95410f7eb83f25fbb681e7566a684b97c35165c8';
 const ACTIONS=['accept','propose_name','confirm','repair','defer','revisit','agree','move_on','close','request_observation'];
 const INNER_CODES=['invalid_scores','no_valid_alternative','detail_unavailable','invalid_executed','invalid_options','invalid_input','invalid_response','invalid_decision','inconsistent_decision','model_mismatch','key_unavailable','key_leak','unauthorized','payment_required','not_found','rate_limited','upstream_error','network_error','timeout','aborted','cost_cap','cost_unreported','busy'];
@@ -128,7 +129,7 @@ type RetryDraftEvidence={orientation:boolean;orientationCodes?:readonly string[]
 function retryReasonsMatch(text:string,version:RecordedGenerationRetryVersion|undefined,codes?:readonly string[],draft?:RetryDraftEvidence,topicRewrite?:boolean):boolean{
  if(!text)return false;
  const specific=hasVersionedViewpoint(version),restated=version!==undefined;
- const reasons=String(version)==='jev_generation_retry_v22'?RETRY_REASONS_V22:confirmationDraftV16(version)?RETRY_REASONS_V16:specific?RETRY_REASONS_SPECIFIC:RETRY_REASONS;
+ const reasons=s4UsesV22GenerationRules(version)?RETRY_REASONS_V22:confirmationDraftV16(version)?RETRY_REASONS_V16:specific?RETRY_REASONS_SPECIFIC:RETRY_REASONS;
  for(const reason of reasons){
   const viewpoint=!specific&&H5()&&reason.codes.includes('orientation_leak');
   const reasonText=viewpoint?'前の下書きの方位の参照枠を明確にして書き直してください。'+VIEWPOINT_RULE_V5_S4:reason.text;
@@ -709,7 +710,7 @@ export function s4LocalReverify(tape:any,t:any,policy:string,after:any):'ok'|'mi
  const savedIds=new Set(local.claims.map((c:any)=>c.id));
  const before=tape.state.graph;
  const pruneVersion=before.memoryPruneVersion;
- const v22=tape.generationRetryVersion==='jev_generation_retry_v22';
+ const v22=s4UsesV22GenerationRules(tape.generationRetryVersion);
  if(pruneVersion!==after.memoryPruneVersion||pruneVersion!==undefined&&!isClaimPruneVersion(pruneVersion))return'mismatch';
  let base={...after,records:after.records.filter((r:any)=>!(r?.kind==='claim'&&savedIds.has(r.id)))};
  const aiOps=after.records.filter((r:any)=>r?.kind==='claim'&&r.speaker==='ai'&&r.turn===t.turnIndex).map(({turn:_t,...op}:any)=>op);
@@ -813,7 +814,7 @@ function traceShape(t:any,layout='two_stage_v1',policy?:string,ownSlots:readonly
  if(Object.hasOwn(t,'sharedConstruals')&&(!p5||!sharedShape(t.sharedConstruals)))return false;
  if(Object.hasOwn(t,'generationRetryVersion')&&(t.generationRetryVersion==='jev_generation_retry_v1'||!validGenerationRetryVersion(t.generationRetryVersion,layout,policy)||
    (hasVersionedViewpoint(t.generationRetryVersion)?!p5&&(!t.executed||!t.finalAction):t.generationGuard?.regenerated!==true)))return false;
- if(Object.hasOwn(t,'draftActs')&&(layout!=='two_stage_v3'||!draftActsShape(t.draftActs,semantic,generated,t.generationRetryVersion==='jev_generation_retry_v22')))return false;
+ if(Object.hasOwn(t,'draftActs')&&(layout!=='two_stage_v3'||!draftActsShape(t.draftActs,semantic,generated,s4UsesV22GenerationRules(t.generationRetryVersion))))return false;
  if(generated&&(['staged','committed','superseded'].includes(t.status)||Object.hasOwn(t,'generatedPublication'))&&
    !generatedPublicationShape(t,ownSlots,p5,issueHandling))return false;
  if(!draftSharedTraceS4(t,p5Overclaim))return false;
@@ -961,7 +962,7 @@ function generatedPublicationShape(t:any,slots:readonly string[],p5:boolean,issu
     t.decisions.at(-1)?.evidence?.stages?.[0]?.choices?.[MOVE_ON_SOURCE_QUESTION]!=='human_request'||
     last?.moveOn?.choice!=='honors_request'||t.publicSpeech!==null&&(t.publicSpeech[m.start-1]!=='\n'||
       s4Sha256(t.publicSpeech.slice(m.start))!==m.textSha256||s4Sha256(t.publicSpeech.slice(0,m.start-1))!==last.draftSha256)))return false;
- if(t.generationRetryVersion==='jev_generation_retry_v22'&&(last?.status!=='ok'||last.topicShift?.choice!=='within_plan'||
+ if(s4UsesV22GenerationRules(t.generationRetryVersion)&&(last?.status!=='ok'||last.topicShift?.choice!=='within_plan'||
     typeof t.publicSpeech==='string'&&s4Sha256(m?t.publicSpeech.slice(0,m.start-1):t.publicSpeech)!==last.draftSha256))return false;
  return !w||t.publicSpeech===null||s4Sha256(m?t.publicSpeech.slice(0,m.start-1):t.publicSpeech)===last.draftSha256;
 }
@@ -1291,9 +1292,9 @@ function generatedRetryMessagesMatch(generations:any[],topics:ReadonlyMap<number
   const {messages:retry,...retryOptions}=generations[index+1].payload;
   if(!Array.isArray(retry)||!equal(retry.slice(0,-1),initial)||!equal(retryOptions,options))return false;
   const instruction=retry.at(-1);
-  const action=initial.find((message:any)=>message.role==='system'&&typeof message.content==='string'&&
-   message.content.startsWith('Jevが選んだ行動だけを文章にしてください。'));
-  const prefix=RETRY_INSTRUCTION+'\n'+action?.content+'\n';
+  const action=version==='jev_generation_retry_v23'?v23PlanMessage(initial):initial.find((message:any)=>message.role==='system'&&typeof message.content==='string'&&
+   message.content.startsWith('Jevが選んだ行動だけを文章にしてください。'))?.content;
+  const prefix=RETRY_INSTRUCTION+'\n'+action+'\n';
   if(!action||instruction?.role!=='system'||typeof instruction.content!=='string'||!instruction.content.startsWith(prefix))return false;
   const reason=instruction.content.slice(prefix.length),topic=topics.get(index);
   if(reason?!retryReasonsMatch(reason,version,undefined,undefined,topic!==undefined&&topic!=='within_plan'):topic!==undefined)return false;
@@ -1315,7 +1316,8 @@ function generatedReplayProof(tr:any,t:any,tape:any,result:any,pair:any,
  const withoutLatency=(v:any):any=>Array.isArray(v)?v.map(withoutLatency):v&&typeof v==='object'?
    Object.fromEntries(Object.entries(v).filter(([key])=>key!=='latencyMs').map(([k,x])=>[k,withoutLatency(x)])):v;
  const issueHandling=s4UsesIssueHandling(tape.generationRetryVersion);
- const v22=tape.generationRetryVersion==='jev_generation_retry_v22';
+ const v22=s4UsesV22GenerationRules(tape.generationRetryVersion);
+ const v23=tape.generationRetryVersion==='jev_generation_retry_v23';
  const visual=issueHandling||isGenerationV19(tape.generationRetryVersion);
  const terms=visual||isGenerationV18(tape.generationRetryVersion);
  const issueCtx=issueHandling?issueHandlingContext(t,tape.state,graph,tape.events):null;
@@ -1324,6 +1326,7 @@ function generatedReplayProof(tr:any,t:any,tape:any,result:any,pair:any,
   .slice(-REFERENCE_LIMITS.publicTurns).map((event:any)=>({turn:event.seq,speaker:event.speaker,text:event.text,
    ...(event.nonReferential?{nonReferential:true}:{})}));
  const recent=publicTurns.map(({turn,speaker,text}:any)=>({turn,speaker,text}));
+ const v23Questions=v23?repairQualityPublicQuestions(t.turnIndex,publicTurns,liveClaims(graph)):null;
  const draftTurns=recent.slice(-12).map((event:any)=>({...event,text:event.text.slice(0,400)}));
  const before=tape.state.graph;
  const aiOps=v22?(graph?.records??[]).filter((claim:any)=>claim.kind==='claim'&&claim.speaker==='ai'&&claim.turn===t.turnIndex)
@@ -1394,6 +1397,11 @@ function generatedReplayProof(tr:any,t:any,tape:any,result:any,pair:any,
     if(req.phase==='generation'){
      if(req.role!=='generation'||hash(req.payload.messages)!==req.completeMessagesSha256)return'invalid';
      if(v22&&!retainedGenerationMatches(req.payload.messages,recent,generationHistory))return'invalid';
+     if(v23){
+      const count=generations.length;
+      const candidate=count>=priorDrafts?ex:count<2&&p.recovery?.reason==='publication_mismatch'?s.executed:p.recovery?.executed;
+      if(!candidate||!issueCtx||!v23PlanMatches(req.payload.messages,candidate,issueCtx.slots.length,v23Questions))return'invalid';
+     }
      lastRaw=answer.response?.text??answer.text;lastDraft=null;lastExtraction=null;functionAnswers=null;
      generations.push(req);
     }
@@ -1561,14 +1569,15 @@ function generatedReplayProof(tr:any,t:any,tape:any,result:any,pair:any,
       ...(label===tr.label?{graphRevision:graph?.revision}:{})}))return'invalid';
    if(!issueHandlingPartsMatch(p,ex,speech,draftParts))return'invalid';
    const messages=generations.at(-1).payload.messages;
-   if(!issueHandlingGenerationScope(messages,ex,finals,visualDetail,combined,v22,tr.profile?.judgmentMaterialVersion===JEV_REPAIR_QUALITY_VERSION,
-      t.namingReconfirm===true,tape.state.ledger))return'invalid';
+   if(v23?!v23OutputMatches(messages,!!draftParts,visualDetail,combined):
+      !issueHandlingGenerationScope(messages,ex,finals,visualDetail,combined,v22,tr.profile?.judgmentMaterialVersion===JEV_REPAIR_QUALITY_VERSION,
+       t.namingReconfirm===true,tape.state.ledger))return'invalid';
    const start=messages.at(-1)?.content?.startsWith('公開発話を書き直してください。')?messages.slice(0,-1):messages;
    const key=hash({execution:ex,recovery:p.recovery?.reason??null,continuation:p.continuation?.choice??null,combined});
    if(generationPlans.has(key)&&!equal(generationPlans.get(key),start))return'invalid';
    generationPlans.set(key,start);
   }
-  if((!p.recovery||issueHandling)&&tr.profile?.judgmentMaterialVersion===JEV_REPAIR_QUALITY_VERSION){
+  if(!v23&&(!p.recovery||issueHandling)&&tr.profile?.judgmentMaterialVersion===JEV_REPAIR_QUALITY_VERSION){
    const afterRecovery=v22&&p.recovery&&!draftParts&&ex.action==='accept';
    const guidance=(afterRecovery||!(visualDetail||issueHandling&&(p.recovery||draftParts))?normalRepairQualityGuidance(ex.action)+'\n':'')+JSON.stringify({publicQuestions:repairQualityPublicQuestions(t.turnIndex,
     history.slice(-32).map((e:any)=>({turn:e.seq,speaker:e.speaker,text:e.text})),liveClaims(graph))})+'\n';
@@ -1611,6 +1620,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
  const v=promptVersion(records,tr);if(!v)return'invalid';
  const {tape,result}=entries[0],pair=pairs[0];
  if(!figureCountAllowed(Object.keys(tape?.state?.ledger??{}).length,v))return'invalid';
+ if(tape?.generationRetryVersion==='jev_generation_retry_v23'&&!Object.hasOwn(row(row(v.sources).files),'v2/generation-prompt-v23.ts'))return'invalid';
  const pruneVersion = tape?.state?.graph?.memoryPruneVersion;
  const committedState = tr.turns?.find((u:any)=>u.turn===t.turnIndex)?.state;
  const committed = committedState?.graph;
@@ -1637,7 +1647,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
    !equal(referenceEvidence.localAlternatives,committedState?.referenceAlternatives??[])))return'invalid';
  if(isGenerationV17(version)){
   const scope=tape.state.agreeNameScopeVersion;
-  if((rechecksJevNamingAnswers(scope)||version==='jev_generation_retry_v22')&&
+  if((rechecksJevNamingAnswers(scope)||s4UsesV22GenerationRules(version))&&
      (committedState?.agreeNameScopeVersion!==scope||s4LocalReverify(tape,t,tr.profile.dialoguePolicy,committed)!=='ok'))return'invalid';
   return generatedReplayProof(tr,t,tape,result,pair,referenceEvidence,committed);
  }
@@ -2145,7 +2155,8 @@ const MOVE_ON_SOURCE_CRITERIA = Object.freeze({
 function publicationContinuationProof(questions:any,input:any,stage:any,generationVersion?:unknown){
  if(input.judgmentMaterialVersion!==JEV_REPAIR_QUALITY_VERSION||!input.publicationRecoveryContext)return null;
  const expected=publicationContinuationQuestion();
- return equal(questions?.[PUBLICATION_CONTINUATION_QUESTION],{...expected,instructions:withShapeTerminology(expected.instructions,generationVersion)})
+ const terminology=isGenerationV19(generationVersion)?SHAPE_TERMINOLOGY_GENERATION:generationVersion;
+ return equal(questions?.[PUBLICATION_CONTINUATION_QUESTION],{...expected,instructions:withShapeTerminology(expected.instructions,terminology)})
   ?readPublicationContinuation(stage):null;
 }
 function originalQuestions(body:any,input:any,layout='two_stage_v1'):boolean|null{
@@ -3360,6 +3371,24 @@ const PROMPT_VERSIONS:readonly PromptVersion[]=[
   'v2/deferred-ai-extraction.ts':'f857726bb2892faa020fef5e87f184f6e52cac5b1915c7f6e2068f400252d585',
   'v2/issue-publication.ts':'d17114f66ce8ce79cf1c4e1d6f34b2116976215009fc4e33e9540be1bcba1dcb',
   'decision/human-led-move-on.ts':'7c5dc7ff16877f1d9ff5cb6a777895c91aeb28fa6e31af1e7ab3d4ad5ed8d048',
+ }},fixed:FIXED_I172,native:NATIVE_I172},
+ {id:'p5_pilot012_prompt_consolidation_v23',i172:true,fourFigures:true,styleMode:'research_split',sources:{scheme:'complete_instruction_source_sha256',files:{
+  'v2/dialogue-v2.mjs':'2b5469bf4a7280153042b0e34d6527c3f999252af5b2b4d0a841aa366d567a7c',
+  'v2/jev-turn.ts':'2bfb8b73da7ea51e36497d4d0c62b23adb9f12905223b6e43f35d54fa2868beb',
+  'v2/generation-guard.ts':'f1f700369f361875109aaae5bd72363cbe5c0bd38dc146bd9c3d2af4c5382d43',
+  'judgment/instructions.mjs':'eeb20c812729d04e52437a064b31fcd8af60ee2da8b1f6e73d99c4eb8dc8a785',
+  'observation/observe.ts':'eac863a50455665daa62812157d68512a7e33bed9fda271b4e7af4f44b38dde4',
+  'local-grounding/extract.ts':'0bf5f7969d79cbe2c71feea4281e1280139f291fee1c2186bcfaf8d3af27e88c',
+  'local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01',
+  'decision/jev-decision.ts':'ae9a21d875d722a4044ee43421874b1d3e3fae48bc05c023320ea82bcd1ff330',
+  'local-grounding/extract-ai.ts':'c2179cafb7ebdb88d3605b1c681fd20ca6705a1eab7d50dbf2ed7a845458fb24',
+  'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
+  'shape-terminology.ts':'80fddf9e0947ae4e8dad85f3cf5e27700a070f0897225a565967623012ac3cf9',
+  'v2/visual-feature-evidence.ts':'20ae51252417432409a12425bca621d5c0ceb5705aea30578c8bcda852f4bf03',
+  'v2/deferred-ai-extraction.ts':'40ea6e8653c288b83c11ecdcbf78b834e0f8e579ea07b0b3c269f855b8596bf0',
+  'v2/issue-publication.ts':'d17114f66ce8ce79cf1c4e1d6f34b2116976215009fc4e33e9540be1bcba1dcb',
+  'decision/human-led-move-on.ts':'7c5dc7ff16877f1d9ff5cb6a777895c91aeb28fa6e31af1e7ab3d4ad5ed8d048',
+  'v2/generation-prompt-v23.ts':'26159e4192576c79f5b55b9d2e2bdab9bc8a2200971386c9a5f0cce28f67d54c',
  }},fixed:FIXED_I172,native:NATIVE_I172},
  ...HISTORICAL_MAIN_PROMPT_SOURCES.map(({id, files}) => ({
   id, i172: false, styleMode: 'legacy' as const, sources: {scheme: 'complete_instruction_source_sha256', files: {...HISTORICAL_MAIN_SHARED_SOURCES, ...files}},

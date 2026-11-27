@@ -38,16 +38,14 @@ import { inferenceHistory } from '../v2/agreement-gate.ts';
 import { defaultGenerationRetryVersion, hasVersionedViewpoint, isGenerationV12, isGenerationV13, isGenerationV17, isGenerationV19, validGenerationRetryVersion, validAgreeNameScope } from '../v2/generation-guard.ts';
 import type { ShapeTerminologyVersion } from '../shape-terminology.ts';
 import type { GenerationRetryVersion } from '../v2/generation-guard.ts';
-import { isIssueHandlingGeneration, type DEFERRED_AI_EXTRACTION_GENERATION, type GENERATION_RETRY_V22,
-  type ISSUE_HANDLING_GENERATION } from '../v2/deferred-ai-extraction.ts';
+import { isIssueHandlingGeneration, type DeferredAiExtractionGeneration } from '../v2/deferred-ai-extraction.ts';
 import { ISSUE_HANDLING_VERSION } from '../decision/issue-handling.ts';
 
 export type JevResearchLedger = RunBudget | ParticipantUsageLedger;
 const AI_NAME_ACCEPTANCES_V1 = 'ai_name_acceptances_v1';
 type ParticipantJevVersionPin = Readonly<{
   generationRetryVersion: 'jev_generation_retry_v12' | 'jev_generation_retry_v13' | 'jev_generation_retry_v15' | 'jev_generation_retry_v16' |
-    'jev_generation_retry_v17' | ShapeTerminologyVersion | 'jev_generation_retry_v19' | typeof DEFERRED_AI_EXTRACTION_GENERATION |
-    typeof ISSUE_HANDLING_GENERATION | typeof GENERATION_RETRY_V22;
+    'jev_generation_retry_v17' | ShapeTerminologyVersion | 'jev_generation_retry_v19' | DeferredAiExtractionGeneration;
   namingRestoreVersion: typeof AI_NAME_ACCEPTANCES_V1;
 }>;
 export type JevResearchOptions<Ledger extends JevResearchLedger = RunBudget> = Readonly<{ profile: ResearchTrialProfileV3; observer: ObservationObserver;

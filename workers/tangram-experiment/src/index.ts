@@ -32,7 +32,7 @@ import { ReceptionError, validateReception, createReception, approveReception, c
   participantReception, receptionSummary, effectiveBetweenTrials, effectiveFigureSelection, effectiveRotationMode,
   validateParticipantLimits, isParticipantDialogueProfile, isPilot012ParticipantDialogueProfile,
   participantMemoryPruneVersion, PILOT012_V20_PARTICIPANT_PROFILE, PILOT012_V21_PARTICIPANT_PROFILE,
-  PILOT012_V22_PARTICIPANT_PROFILE } from '../../../dialogue-model/runtime/v2/reception.ts';
+  PILOT012_V22_PARTICIPANT_PROFILE, PILOT012_V23_PARTICIPANT_PROFILE } from '../../../dialogue-model/runtime/v2/reception.ts';
 import { isAdminTermination, isIncompleteTrialStatus } from '../../../dialogue-model/runtime/v2/admin-termination.ts';
 import type { AdminTermination } from '../../../dialogue-model/runtime/v2/admin-termination.ts';
 import { isSubmittedQuestionnaire } from '../../../dialogue-model/runtime/v2/questionnaire-gate.ts';
@@ -1111,7 +1111,7 @@ export class TangramSession extends DurableObject<Env> {
         runDir: null, ...(restore ? { restore } : {}),
       }) as unknown as Parameters<typeof createNamingTaskV2>[0]) as NamingTask;
       if (restore && (participantDialogueProfile === PILOT012_V20_PARTICIPANT_PROFILE || participantDialogueProfile === PILOT012_V21_PARTICIPANT_PROFILE ||
-          participantDialogueProfile === PILOT012_V22_PARTICIPANT_PROFILE))
+          participantDialogueProfile === PILOT012_V22_PARTICIPANT_PROFILE || participantDialogueProfile === PILOT012_V23_PARTICIPANT_PROFILE))
         this.ctx.waitUntil(task.whenIdle().catch(() => {}));
       return task;
     }
