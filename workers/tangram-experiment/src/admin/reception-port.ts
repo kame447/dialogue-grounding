@@ -4,16 +4,18 @@ import type { ParticipantUsageSnapshot } from '../../../../dialogue-model/runtim
 import type { ParticipantRole, ParticipantRoleResult, ParticipantRoleView } from './participant-role.ts';
 import type { PreobservationUsage } from '../participant-preobservation.ts';
 import type { participantStartTiming } from './latency.ts';
+import type { AdminTermination } from '../../../../dialogue-model/runtime/v2/admin-termination.ts';
 
 /** Researcher-only projections. These types are not the persisted reception or protocol schema. */
 export type ReceptionStrategy = 'repair-first' | 'bypass-enabled';
-export type ReceptionStatus = 'pending' | 'approved' | 'in_progress' | 'finished' | 'cancelled';
+export type ReceptionStatus = 'pending' | 'approved' | 'in_progress' | 'finished' | 'cancelled' | 'interrupted';
 export type ReceptionAdminRow = {
   receptionId: string;
   number: string | null;
   createdAt: string;
   status: ReceptionStatus;
   revision: number;
+  termination?: AdminTermination;
   /** Frozen plan values; a v1 plan reads as relative_pm90 / none. */
   plan: { order: ReceptionStrategy[]; rotationMode: 'relative_pm90' | 'relative_0'; betweenTrials: 'none' | 'questionnaire_required';
     /** Frozen figure set id per trial; plans before the figure bank read as the legacy set. */ figureSets?: string[] } | null;
@@ -65,6 +67,7 @@ export type ReceptionAdminPort = {
   approve(receptionId: string, input: { order: number; expectedRevision: number; protocol: DisplayedProtocol }): Promise<ReceptionAdminResult>;
   /** The owning DO must CAS revision and reject cancellation after any trial exists. Never delete trial records. */
   cancel(receptionId: string, input: { expectedRevision: number }): Promise<ReceptionAdminResult>;
+  forceEnd?(receptionId: string, input: { expectedRevision: number }): Promise<ReceptionAdminResult>;
   /**
    * Change hint for the live reception list (#159): an opaque version that changes whenever the index rows or
    * the settings change, read from the best-effort index and settings only. With `since` (later pages), it also

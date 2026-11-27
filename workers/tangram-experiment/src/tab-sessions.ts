@@ -13,8 +13,8 @@ export const EMPTY_TAB_SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 export type BrowserSession = { sessionId: string; doName: string; createdAt: string };
 export type ReceptionMode = 'on' | 'off' | 'unavailable';
 export type SessionPhase = 'waiting' | 'ready' | 'in_progress' | 'submitting' |
-  'questionnaire_waiting' | 'ready_next' | 'finished' | 'cancelled' | 'unavailable';
-type SummaryRecord = Omit<RecordListEntry, 'status'> & { status: 'dialogue' | 'submitting' | 'completed' | 'unknown' };
+  'questionnaire_waiting' | 'ready_next' | 'finished' | 'cancelled' | 'interrupted' | 'unavailable';
+type SummaryRecord = Omit<RecordListEntry, 'status'> & { status: 'dialogue' | 'submitting' | 'completed' | 'interrupted' | 'unknown' };
 
 export type BrowserSessionSummary = {
   sessionId: string;
@@ -80,6 +80,7 @@ export function summarizeBrowserSession(input: {
 
   let status: SessionPhase;
   if (blocked) status = 'unavailable';
+  else if (reception?.status === 'interrupted' || active?.status === 'interrupted') status = 'interrupted';
   else if (reception?.status === 'cancelled') status = 'cancelled';
   else if (reception?.status === 'finished') status = 'finished';
   else if (reception?.status === 'pending') status = 'waiting';
@@ -92,7 +93,7 @@ export function summarizeBrowserSession(input: {
 
   return {
     sessionId, createdAt, updatedAt, status,
-    resumable: status !== 'finished' && status !== 'cancelled' && status !== 'unavailable',
+    resumable: status !== 'finished' && status !== 'cancelled' && status !== 'interrupted' && status !== 'unavailable',
     hasUnansweredQuestionnaire: records.some(record => record.status === 'completed' && record.questionnaire !== 'submitted'),
     reception: publicReception, activeRecordId: active?.recordId ?? null, records,
   };

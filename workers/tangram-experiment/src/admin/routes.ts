@@ -13,6 +13,9 @@ import type { AdminRecordSummary, ParticipantRole, ParticipantRoleResult } from 
 import type { LatencySummary } from "./latency.ts";
 import type { AuditEntry } from "./index-store.ts";
 import type { ProtocolFields, ReceptionAdminPort, ReceptionSettingsPort } from './reception-port.ts';
+import { trialTerminationExpectation } from './trial-termination.ts';
+import type { TrialTerminationExpectation, TrialTerminationResult } from './trial-termination.ts';
+import { isIncompleteTrialStatus } from '../../../../dialogue-model/runtime/v2/admin-termination.ts';
 
 export type AdminLimiter = { limit(options: { key: string }): Promise<{ success: boolean }> };
 export type AdminDeps = {
@@ -27,6 +30,7 @@ export type AdminDeps = {
   getRecord(summary: AdminSummary): Promise<unknown | null>;
   /** Deletes the record in its session object, then its index entry (with a content-free audit entry). */
   deleteRecord(summary: AdminSummary): Promise<void>;
+  forceEndRecord?(summary: AdminSummary, expected: TrialTerminationExpectation): Promise<TrialTerminationResult>;
   audit(): Promise<AuditEntry[]>;
   summarizeLatency(record: unknown): LatencySummary;
   /** Optional S5 operator action; participant cookies do not authorize it. */
@@ -172,10 +176,11 @@ const ISO_MS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const UUID_V4 = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
 async function receptionMutation(request: Request, port: ReceptionAdminPort, id: string, action: string): Promise<Response> {
   // A 503 may follow a write whose reply was lost, so it says the outcome is unknown rather than "not done".
+  const operation = action === 'approve' ? '許可' : action === 'force-end' ? '強制終了' : '取消';
   const fail = (status: number, error: string) => status === 503
-    ? receptionFailure(request, action === 'approve' ? '許可の結果を確認できません' : '取消の結果を確認できません', status, error,
+    ? receptionFailure(request, operation + 'の結果を確認できません', status, error,
       '受付を確認できませんでした。受付一覧を開き直して、状態を確認してください。')
-    : receptionFailure(request, action === 'approve' ? '許可していません' : '取り消していません', status, error);
+    : receptionFailure(request, action === 'cancel' ? '取り消していません' : operation + 'していません', status, error);
   if (!RECORD_ID.test(id)) return fail(404, 'not_found');
   const form = await receptionForm(request);
   const allowed = action === 'approve' ? ['order', 'expectedRevision', 'confirm', 'protocolId', 'protocolRevision', 'protocolSha256'] : ['expectedRevision', 'confirm'];
@@ -189,7 +194,8 @@ async function receptionMutation(request: Request, port: ReceptionAdminPort, id:
     const entry = await port.get(id);
     if (!entry || entry.receptionId !== id) return fail(404, 'not_found');
     if (form.get('confirm') !== entry.receptionId.slice(0, 8) && (entry.number === null || form.get('confirm') !== entry.number)) return fail(400, 'invalid_confirmation');
-    if (entry.revision !== expectedRevision) return fail(409, 'conflict');
+    if (entry.revision !== expectedRevision && !(action === 'force-end' && entry.status === 'interrupted' &&
+      entry.revision === expectedRevision + 1)) return fail(409, 'conflict');
     let result;
     if (action === 'approve') {
       const protocol = await port.protocol();
@@ -200,6 +206,9 @@ async function receptionMutation(request: Request, port: ReceptionAdminPort, id:
       if (order === null || order >= protocol.allowedOrders.length) return fail(400, 'invalid_order');
       if (entry.status !== 'pending' || entry.trials.some(trial => trial.recordId !== null)) return fail(409, 'conflict');
       result = await port.approve(id, { order, expectedRevision, protocol: { protocolId: shown.protocolId, revision: shown.revision!, sha256: shown.sha256 } });
+    } else if (action === 'force-end') {
+      if (!port.forceEnd || !['in_progress', 'interrupted'].includes(entry.status)) return fail(409, 'conflict');
+      result = await port.forceEnd(id, { expectedRevision });
     } else {
       if ((entry.status !== 'pending' && entry.status !== 'approved') || entry.trials.some(trial => trial.recordId !== null)) return fail(409, 'conflict');
       result = await port.cancel(id, { expectedRevision });
@@ -301,14 +310,15 @@ export async function handleAdmin(request: Request, deps: AdminDeps): Promise<Re
   const url = new URL(request.url);
   // Deletion is POST-only; a GET to the same path is an unknown page with no side effect.
   const deletePath = request.method === "POST" ? url.pathname.match(/^\/admin\/record\/([^/]+)\/delete$/) : null;
+  const forceEndPath = request.method === "POST" && deps.forceEndRecord ? url.pathname.match(/^\/admin\/record\/([^/]+)\/force-end$/u) : null;
   const nextPath = request.method === 'POST' && deps.prepareNext ? url.pathname.match(/^\/admin\/record\/([^/]+)\/prepare-next$/) : null;
-  const receptionPath = request.method === 'POST' && deps.receptions ? url.pathname.match(/^\/admin\/reception\/([^/]+)\/(approve|cancel)$/) : null;
+  const receptionPath = request.method === 'POST' && deps.receptions ? url.pathname.match(/^\/admin\/reception\/([^/]+)\/(approve|cancel|force-end)$/) : null;
   const rolePath = url.pathname.match(/^\/admin\/(record|reception)\/([^/]+)\/participant-role$/u);
   const settingsPath = request.method === 'POST' && deps.receptionSettings ? url.pathname.match(/^\/admin\/reception-settings\/(protocol|mode)$/) : null;
   if (!deps.receptions && (url.pathname === '/admin/receptions' || url.pathname === '/admin/entry' || url.pathname === '/admin/receptions.js')) return notFound();
   if (!deps.receptions?.version && url.pathname === '/admin/receptions/version') return notFound();
   if (!deps.receptionSettings && url.pathname === '/admin/reception-settings') return notFound();
-  if (request.method === "POST" ? !deletePath && !nextPath && !receptionPath && !settingsPath && !rolePath : request.method !== "GET" && request.method !== "HEAD") return notFound();
+  if (request.method === "POST" ? !deletePath && !forceEndPath && !nextPath && !receptionPath && !settingsPath && !rolePath : request.method !== "GET" && request.method !== "HEAD") return notFound();
   const header = request.headers.get("Authorization");
   // Every credentialed attempt (right or wrong) counts, so guessing is capped per visitor.
   if (presentedToken(header) !== null && !(await deps.limiter.limit({ key: visitorKey(request) })).success) {
@@ -366,7 +376,7 @@ export async function handleAdmin(request: Request, deps: AdminDeps): Promise<Re
       // An unreadable version still starts the live list: an empty version differs from the first good one,
       // so the page is fetched again as soon as the version can be read.
       const live = deps.receptions.version ? { version: version !== null && /^[a-f0-9]{64}$/u.test(version) ? version : '', since } : null;
-      return respond(200, renderReceptions(page.items, page.next, protocol, live), undefined, live ? { 'Content-Security-Policy': LIVE_CSP } : {});
+      return respond(200, renderReceptions(page.items, page.next, protocol, live, Boolean(deps.receptions.forceEnd)), undefined, live ? { 'Content-Security-Policy': LIVE_CSP } : {});
     } catch { return receptionFailure(request, '受付一覧', 503, 'reception_unavailable'); }
   }
   if (deps.receptions?.version && url.pathname === '/admin/receptions/version') {
@@ -413,6 +423,28 @@ export async function handleAdmin(request: Request, deps: AdminDeps): Promise<Re
     }
   }
 
+  if (forceEndPath) {
+    if (!sameOrigin(request, url)) return plain(403, "Forbidden");
+    const id = forceEndPath[1];
+    if (!RECORD_ID.test(id)) return notFound();
+    const form = await receptionForm(request);
+    const revision = form?.get('revision'), status = form?.get('status');
+    const back = { href: '/admin/record/' + id, label: '記録へ' };
+    if (!form || [...form.keys()].length !== 3 || form.get('confirm') !== id ||
+        typeof revision !== 'string' || !/^[a-f0-9]{64}$/u.test(revision) || !isIncompleteTrialStatus(status)) {
+      return respond(400, renderMessage('強制終了していません', '確認欄に記録IDを正確に入力してください。', back));
+    }
+    try {
+      const summary = await deps.getSummary(id);
+      if (!summary || summary.recordId !== id || !OBJECT_ID.test(summary.objectId)) return notFound();
+      const result = await deps.forceEndRecord!(summary, { revision, status });
+      if (!result.ok) return result.error === 'not_found' ? notFound() :
+        respond(409, renderMessage('強制終了していません', '記録の状態が変わりました。開き直して確認してください。', back));
+      return plain(303, '', { Location: back.href });
+    } catch {
+      return respond(503, renderMessage('強制終了の結果を確認できません', '記録を開き直して状態を確認してください。', back));
+    }
+  }
   if (deletePath) {
     if (!sameOrigin(request, url)) return plain(403, "Forbidden");
     const recordId = deletePath[1];
@@ -430,7 +462,7 @@ export async function handleAdmin(request: Request, deps: AdminDeps): Promise<Re
     const filter = parseFilter(url.searchParams);
     const page = await deps.listPage(url.searchParams.get("after"));
     return respond(200, renderList(applyFilter(page.items, filter), filter, page.next, await deps.audit(), deps.retentionDays,
-      url.searchParams.get("deleted") === "1", Boolean(deps.receptions)));
+      url.searchParams.get("deleted") === "1", Boolean(deps.receptions), Boolean(deps.forceEndRecord)));
   }
   const experiment = url.pathname.match(/^\/admin\/record\/([^/]+)\/experiment$/u);
   if (experiment) {
@@ -440,7 +472,7 @@ export async function handleAdmin(request: Request, deps: AdminDeps): Promise<Re
     if (!summary || summary.recordId !== id || !OBJECT_ID.test(summary.objectId)) return notFound();
     const record = await deps.getRecord(summary);
     if (!record || typeof record !== 'object' || (record as {recordId?: unknown}).recordId !== id) return notFound();
-    if (request.method === 'GET' && await deps.canResumeParticipant?.(request, id)) {
+    if (request.method === 'GET' && (record as { status?: unknown }).status !== 'interrupted' && await deps.canResumeParticipant?.(request, id)) {
       return plain(303, '', { Location: '/#resume=' + id });
     }
     return respond(200, renderExperimentPreview(record, summary));
@@ -455,5 +487,6 @@ export async function handleAdmin(request: Request, deps: AdminDeps): Promise<Re
   // Researcher export of the full stored record (including the provisional questionnaire), as a download.
   if (match[2]) return respond(200, JSON.stringify({ ...record, participantRole: summary.participantRole ?? participantRoleView() }, null, 2), "application/json; charset=utf-8",
     { "Content-Disposition": `attachment; filename="tangram-record-${summary.recordId}.json"` });
-  return respond(200, renderDetail(record, summary, deps.summarizeLatency(record), deps.retentionDays));
+  return respond(200, renderDetail(record, summary, deps.summarizeLatency(record), deps.retentionDays,
+    deps.forceEndRecord ? trialTerminationExpectation(record) : null));
 }

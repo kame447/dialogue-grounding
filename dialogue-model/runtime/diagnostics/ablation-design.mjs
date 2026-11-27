@@ -7,7 +7,7 @@ import { SLOTS } from "../stimuli/board.mjs";
 
 const STRATEGIES = ["repair-first", "bypass-enabled"];
 const ACTIONS = ["accept", "propose_name", "confirm", "repair", "defer", "revisit", "agree", "move_on", "close"];
-const STATUSES = ["dialogue", "submitting", "completed", "submission_error", "scoring_error", "aborted"];
+const STATUSES = ["dialogue", "submitting", "completed", "submission_error", "scoring_error", "aborted", "interrupted"];
 const RATE_ACTIONS = ["defer", "revisit", "repair", "confirm"];
 const plain = (v) => v !== null && typeof v === "object" && Object.getPrototypeOf(v) === Object.prototype;
 const count = (v) => Number.isSafeInteger(v) && v >= 0;

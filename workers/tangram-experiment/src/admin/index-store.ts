@@ -40,6 +40,7 @@ export async function upsertSummary(storage: IndexStorage, summary: AdminSummary
   const hash = await recordHash(summary.recordId);
   if (await storage.get("d:" + hash)) return false;
   const previous = await storage.get<AdminSummary>("r:" + summary.recordId);
+  if (previous?.status === "interrupted" && summary.status !== "interrupted") return false;
   const key = orderKey(summary);
   if (previous && orderKey(previous) !== key) await storage.delete([orderKey(previous)]);
   await storage.put({ ["r:" + summary.recordId]: summary, [key]: summary.recordId });

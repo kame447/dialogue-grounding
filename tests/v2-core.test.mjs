@@ -112,6 +112,32 @@ test("submissions use each side's own opaque ids and are scored only after both"
   assert.ok(!JSON.stringify(state.result).includes("figureId"));
 });
 
+test("administrative stop discards an in-flight final result and blocks new task operations", async () => {
+  const { promise: sent, resolve: markSent } = Promise.withResolvers();
+  const { promise: response, resolve: releaseResponse } = Promise.withResolvers();
+  const client = fakeClient({ delays: { final_submission: () => { markSent(); return response; } } });
+  const writes = [];
+  const task = await createNamingTaskV2({ client, strategy: "repair-first", seed: 24, runDir: "",
+    onPersist: async (record) => { writes.push(structuredClone(record)); } });
+  const names = Object.fromEntries(task.getState().scene.shapes.map(({ id }) => [id, "合成名"]));
+  await task.submitHuman({ names });
+  const final = task.submitAI();
+  const rejected = assert.rejects(final, { code: "trial_interrupted" });
+  await sent;
+  const writesBeforeEnd = writes.length;
+  task.stopForAdmin();
+  releaseResponse();
+  await rejected;
+  assert.equal(task.getState().result, undefined);
+  assert.equal(task.getState().aiSubmitted, false);
+  assert.equal(writes.length, writesBeforeEnd);
+  assert.throws(() => task.message("合成の次の発話"), { code: "trial_interrupted" });
+  await assert.rejects(task.retry(), { code: "trial_interrupted" });
+  await assert.rejects(task.submitHuman({ names }), { code: "trial_interrupted" });
+  assert.throws(() => task.submitAI(), { code: "trial_interrupted" });
+  assert.deepEqual(client.calls.map(({ phase }) => phase), ["final_submission"]);
+});
+
 test("names validation and AI parsing reject foreign or missing ids", () => {
   const ids = ["s-0001", "s-0002", "s-0003", "s-0004", "s-0005", "s-0006"];
   assert.throws(() => validateNamesV2({ "上段左": "x" }, ids), /invalid_submission/);
