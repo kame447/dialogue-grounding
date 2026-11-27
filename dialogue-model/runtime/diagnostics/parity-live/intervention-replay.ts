@@ -74,7 +74,10 @@ export async function pairedInterventionReplay(tape:InterventionReplayTape,own:O
    const runtime=createProfileDialogue(profile,{memoryPruneVersion:frozen.state.graph?.memoryPruneVersion,client,image:own.ownImage,anchors:[...own.ownAnchors],strategy:label,generationRetryVersion:frozen.generationRetryVersion??'jev_generation_retry_v1',observer:{async observeAll(){return structuredClone(frozen.state.observationMemo!);},async reobserve(input){const next=take('reobservations') as any;await client.complete(buildReobservationMessages(input),{phase:'observation_targeted'});return next;}},jevDecision:jev,localGrounding:{classifier:createJevLocalTestClassifier({enabled:true,readKey,fetchImpl,timeoutMs:profile.timeouts.localMs,researchLimits:{maxDeadlineMs:600000},questionLayout:profile.questionLayout,...(isHolisticV3Plus(profile.dialoguePolicy)?{dialoguePolicy:profile.dialoguePolicy}:{})})!,aiPublicTransport:{readKey,fetchImpl,timeoutMs:profile.timeouts.decisionMs}},onJevTurnTrace:(t:JevTurnTrace)=>traces.push(t),...(frozen.technicalTrial?{technicalTrial:structuredClone(frozen.technicalTrial)}:{})});
    try{await runtime.runAiTurn({events:frozen.events,privateState:frozen.state,lastEventId:frozen.events.at(-1)!.id,requestSeq:frozen.events.at(-1)!.seq});}
    finally{const t=traces.at(-1);if(t){side.executed=structuredClone(t.executed??null);side.intervention=typeof t.intervention==='object'?structuredClone(t.intervention):null;}}
-   if(!finalOriginal||!generated||!side.executed||!side.intervention)stop('replay_material_missing');
+   const recovery=traces.at(-1)?.publicationRecovery;
+   const namingHold=frozen.state.agreeNameScopeVersion==='jev_naming_v1'&&
+    (recovery?.reason==='naming_grounding_unresolved'||recovery?.reason==='naming_ledger_conflict');
+   if(!finalOriginal||!generated&&!namingHold||!side.executed||!side.intervention)stop('replay_material_missing');
    for(const key of ['common','tail'] as const)for(const k of ['luna','jev','reobservations'] as const)if(indices[key][k]!==segments[key][k].length)stop('replay_unused_material');
    return side;
   };

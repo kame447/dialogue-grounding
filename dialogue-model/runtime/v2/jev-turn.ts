@@ -9,6 +9,7 @@ import {validateOwnLedger} from '../judgment/schema.mjs';
 import type { Judgment, OwnLedger } from "../judgment/schema.mjs";
 import { createOwnLedger, validateJudgment, applyJudgment, JudgmentValidationError } from "../judgment/schema.mjs";
 import { normalizeName } from "../judgment/name-evidence.mjs";
+import { literalSpan } from "../judgment/public-evidence.mjs";
 import { stageMemory } from "../judgment/memory.mjs";
 import { createReferenceGraph, applyReferenceUpdate, previewReferenceUpdate, snapshotReferenceGraph, REFERENCE_LIMITS } from "../memory/reference-graph.mjs";
 import { nameBindsFigure } from "../decision/referent-binding.ts";
@@ -648,7 +649,29 @@ function persistedEvidence(value:any,stage?:'action_target'|'multiple_candidates
 }
 export type JevPrivateStateV2=JevPrivateState & {schemaVersion:'jev_private_state_v2';interventionPolicy:{version:'bypass_acceptance_v1';tableSha256:string}};
 export type JevTurnTraceV2=Omit<JevTurnTrace,'schemaVersion'|'executed'|'intervention'>&{schemaVersion:'jev_turn_trace_v2';executed:ExecutedDecision|null;intervention:InterventionTrace|null};
-export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string[],intervention:InterventionConfig,questionLayout:JevQuestionLayout='two_stage_v1',policy?:string,generation?:GenerationRetryVersion,usagePolicy?:ParticipantUsageOnly):JevPrivateStateV2 {
+function persistedNamingDetail(detail:any,execution:ExecutedDecision,names:readonly PublicNameCandidate[],turn:number,publicTurns?:readonly PublicTurn[]) {
+ const scores=detail?.scores;
+ if(!stateExact(detail?.choices,['name','naming_grounding','naming_evidence']))throw Error();
+ const sources=Object.keys(scores.naming_evidence);
+ const offeredTurns=sources.filter(label=>label!=='none').map(label=>{
+  const match=/^turn_([1-9][0-9]*)$/u.exec(label),source=match?Number(match[1]):null;
+  if(source===null||!Number.isSafeInteger(source)||source>turn||!names.some(n=>n.sourceTurn===source)||
+    publicTurns&&!publicTurns.some(e=>e.turn===source&&e.speaker==='human'))throw Error();
+  return source;
+ });
+ const offeredNames=Object.keys(scores.name);
+ if(!sources.includes('none')||offeredNames.length<1||
+   !sameSet(offeredNames,offeredNames.map((_,i)=>'name_'+i))||
+   !sameSet(Object.keys(scores.naming_grounding),['unresolved','contradicted',...offeredNames.map(n=>'grounded_'+n)]))throw Error();
+ const choices=detail.choices,source=offeredTurns.find(n=>choices.naming_evidence==='turn_'+n);
+ const matchesName=source!==undefined&&names.some(n=>n.sourceTurn===source&&n.name===execution.name);
+ const verdict=choices.naming_grounding;
+ return {verdict:verdict==='unresolved'||verdict==='contradicted'?verdict:
+  matchesName&&verdict==='grounded_'+choices.name?'grounded':'unconfirmed',
+  evidenceTurn:matchesName?source:null};
+}
+
+export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string[],intervention:InterventionConfig,questionLayout:JevQuestionLayout='two_stage_v1',policy?:string,generation?:GenerationRetryVersion,usagePolicy?:ParticipantUsageOnly,events?:readonly Event[]):JevPrivateStateV2 {
  checkedIntervention(intervention);
  if(questionLayout!=='two_stage_v1'&&questionLayout!=='two_stage_v2'&&questionLayout!=='two_stage_v3')throw new JevTurnError('invalid_state');
  try{
@@ -657,6 +680,8 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
   if(!stateExact(s,['schemaVersion','interventionPolicy','ledger','graph','judgments','observationMemo','repairHistory',...(Object.hasOwn(s??{},'aiPublic')?['aiPublic']:[]),...(hasAgreeNameScope?['agreeNameScopeVersion']:[])])||s.schemaVersion!=='jev_private_state_v2'||!stateSame(s.interventionPolicy,{version:'bypass_acceptance_v1',tableSha256:BYPASS_ACCEPTANCE_V1_TABLE_SHA256}))throw Error();
   if(!validAgreeNameScope(s.agreeNameScopeVersion,generation)||hasAgreeNameScope&&
     (s.agreeNameScopeVersion===undefined||questionLayout!=='two_stage_v3'||s.agreeNameScopeVersion!=='scoped_v1'&&policy!=='holistic_v5'))throw Error();
+  const jevNaming=s.agreeNameScopeVersion==='jev_naming_v1';
+  const publicTurns=jevNaming&&events?events.map(e=>({turn:e.seq,speaker:e.speaker,text:e.text})):undefined;
   validateOwnLedger(s.ledger);if(!sameSet(Object.keys(s.ledger),ownSlots))throw Error();const graph=snapshotReferenceGraph(s.graph);
   // The ai_bound_target provenance exists only in v9 and later records; an earlier version carrying it is refused.
   if(!isGenerationV9(generation)&&Array.isArray(s.graph?.records)&&s.graph.records.some((r:any)=>r?.kind==='claim'&&r.source===AI_BOUND_SOURCE))throw Error();
@@ -670,7 +695,7 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
   const graphClaims=new Map<string,any>((s.graph.records as any[]).filter((r:any)=>r?.kind==='claim').map((r:any)=>[r.id,r]));
   const seen=new Set<string>();
   for(const j of s.judgments){
-   if(!stateExact(j,['turnIndex','lastEventId','status','judgment','generationGuard','jevTurn','localGrounding',...(Object.hasOwn(j,'aiPublic')?['aiPublic']:[]),...(isGenerationV15(generation)&&Object.hasOwn(j,'publicationRecovery')?['publicationRecovery']:[])])||j.status!=='committed'||!Number.isSafeInteger(j.turnIndex)||j.turnIndex<1||!(j.lastEventId===null||typeof j.lastEventId==='string'&&j.lastEventId.length<=160))throw Error();
+   if(!stateExact(j,['turnIndex','lastEventId','status','judgment','generationGuard','jevTurn','localGrounding',...(Object.hasOwn(j,'aiPublic')?['aiPublic']:[]),...(isGenerationV15(generation)&&Object.hasOwn(j,'publicationRecovery')?['publicationRecovery']:[]),...(jevNaming&&Object.hasOwn(j,'namingGrounding')?['namingGrounding']:[])])||j.status!=='committed'||!Number.isSafeInteger(j.turnIndex)||j.turnIndex<1||!(j.lastEventId===null||typeof j.lastEventId==='string'&&j.lastEventId.length<=160))throw Error();
    const z=j.jevTurn;if(!stateExact(z,['attemptNumber','decision','executed','intervention',...(Object.hasOwn(z??{},'humanReferent')?['humanReferent']:[]),...(Object.hasOwn(z??{},'repairProspect')?['repairProspect']:[]),...(Object.hasOwn(z??{},'repairGate')?['repairGate']:[]),...(Object.hasOwn(z??{},'draftActs')?['draftActs']:[]),...(Object.hasOwn(z??{},'draftSharedClaims')?['draftSharedClaims']:[]),...(Object.hasOwn(z??{},'namingRequest')?['namingRequest']:[]),...(Object.hasOwn(z??{},'namingReconfirm')?['namingReconfirm']:[]),...(Object.hasOwn(z??{},'agreeNames')?['agreeNames']:[]),...(Object.hasOwn(z??{},'repairFacts')?['repairFacts']:[]),...(Object.hasOwn(z??{},'sharedConstruals')?['sharedConstruals']:[])])||!Number.isSafeInteger(z.attemptNumber)||z.attemptNumber<1)throw Error();
    // The saved turn names its own condition: accept may be missing from its scores and ranking only for a typed naming request (holistic_v3), and only on v3.
    // The marker was derived when the turn was decided, from the claims live then. Here it is checked against the same view of the graph as of that turn (a later withdrawal,
@@ -681,14 +706,23 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
    if(isRequest&&z.namingRequest!==true||isReconfirm&&z.namingReconfirm!==true||isRequest&&isReconfirm||(isRequest||isReconfirm)&&!gated)throw Error();
    if(proposed?!(isRequest||isReconfirm):newest&&(isRequest||isReconfirm))throw Error();
    // A reconfirmation names only what an earlier turn agreed (the same function the restore applies to the saved trace).
-   if(isReconfirm&&proposed&&!reconfirmationPossible(turnNameProposals(turnClaims,j.turnIndex),j.turnIndex,s.judgments,s.ledger))throw Error();
-   const acceptOptional=z.namingRequest===true;
+   if(isReconfirm&&proposed){
+    const published=jevNaming?s.judgments.map((saved:CommittedAct)=>({
+     ...saved,jevTurn:{...saved.jevTurn,executed:publishedExecution(saved)},
+    })):s.judgments;
+    if(!reconfirmationPossible(turnNameProposals(turnClaims,j.turnIndex),j.turnIndex,published,s.ledger))throw Error();
+   }
+   const acceptOptional=!jevNaming&&z.namingRequest===true;
    // holistic_v4: an unadopted name's request never offered accept, so no saved score of it and no executed accept can stand for such a turn.
-   const noAcceptTurn=isHolisticV4Plus(policy)&&questionLayout==='two_stage_v3'&&z.namingRequest===true;
+   const noAcceptTurn=!jevNaming&&isHolisticV4Plus(policy)&&questionLayout==='two_stage_v3'&&z.namingRequest===true;
    const hasAgreeNames=Object.hasOwn(z,'agreeNames');
    // Historical evidence retains the candidate catalog, not the original request's public turns.
    if(questionLayout==='two_stage_v3'&&!hasAgreeNames||hasAgreeNames&&(!Array.isArray(z.agreeNames)||z.agreeNames.length>JEV_DECISION_INPUT_LIMITS.publicNames||z.agreeNames.some((n:any)=>!stateExact(n,['name','figureId','sourceTurn'])||
-     typeof n.name!=='string'||!n.name.trim()||n.name.length>80||!(ownSlots.includes(n.figureId)||questionLayout!=='two_stage_v3'&&n.figureId===null)||!Number.isSafeInteger(n.sourceTurn)||n.sourceTurn<1||n.sourceTurn>j.turnIndex)))throw Error();
+     typeof n.name!=='string'||!n.name.trim()||n.name.length>80||
+     (jevNaming?n.figureId!==null:!(ownSlots.includes(n.figureId)||questionLayout!=='two_stage_v3'&&n.figureId===null))||
+     !Number.isSafeInteger(n.sourceTurn)||n.sourceTurn<1||n.sourceTurn>j.turnIndex||
+     jevNaming&&publicTurns&&!publicTurns.some(e=>e.turn===n.sourceTurn&&e.speaker==='human'&&literalSpan(e.text,n.name)?.text===n.name))))throw Error();
+   if(jevNaming&&new Set(z.agreeNames.map((n:PublicNameCandidate)=>JSON.stringify([n.name,n.sourceTurn]))).size!==z.agreeNames.length)throw Error();
    const hasAgreeFor=(ids:readonly string[])=>hasAgreeNames&&z.agreeNames.some((n:PublicNameCandidate)=>ids.some(id=>n.figureId===null||n.figureId===id));
    const actionLabels=JEV_ACTIONS.filter(a=>a!=='agree'||!hasAgreeNames||hasAgreeFor(ownSlots));
    // v2: closures must be justified by agrees saved before this turn; the prospect was asked over the open entries only.
@@ -721,6 +755,7 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
      const allowed=(V3_ACTION_KINDS as Record<string,readonly string[]>)[d.action];
      if(!allowed||!offered.every(k=>allowed.includes(k==='none'?'none':k.startsWith('figure_')?'single':'multiple')))throw Error();
      if(d.action==='agree'&&!offered.every(k=>hasAgreeFor([ownSlots[Number(k.slice('figure_'.length))]])))throw Error();
+     if(jevNaming&&d.action==='agree'&&!sameSet(offered,ownSlots.map((_,i)=>'figure_'+i)))throw Error();
      if(t.kind==='multiple'&&!TWO_STAGE_V2_CANDIDATE_SETS.some(s=>candidateSetLabel(s)===expected))throw Error();
     }
     if(setStage){
@@ -751,7 +786,7 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
    }
    if(noAcceptTurn&&(original.action==='accept'||z.executed.action==='accept'))throw Error();
    if(questionLayout==='two_stage_v3'&&[original,z.executed].some(e=>e.action==='agree'&&
-    (e.target.kind!=='single'||!hasAgreeNameV3(z.agreeNames,e.name,e.target.figureId))))throw Error();
+    (e.target.kind!=='single'||!hasAgreeNameV3(z.agreeNames,e.name,jevNaming?null:e.target.figureId))))throw Error();
    const t=z.intervention;if(!stateExact(t,['schemaVersion','policy','disposition','reasonCode','original','rerank','alternative','detailEvidence','failure'])||t.schemaVersion!=='jev_intervention_v1'||t.failure!==null||!stateSame(t.original,original))throw Error();
    const accept=t.policy==='bypass_acceptance_v1:accept',veto=t.policy==='bypass_acceptance_v1:veto';if(!accept&&!veto)throw Error();
    if(t.disposition==='adopted'){if(t.reasonCode!==(accept?'no_intervention':'not_in_veto_set')||veto&&['defer','move_on'].includes(d.action)||!stateSame(z.executed,original)||[t.rerank,t.alternative,t.detailEvidence].some(v=>v!==null))throw Error();}
@@ -784,11 +819,19 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
     const sharedAlternative=persistedSharedChoice(z.executed,t.detailEvidence,candidates,isRequest,true);
     const detail=sharedAlternative||['propose_name','agree','confirm','repair'].includes(z.executed.action);if(detail){persistedEvidence(t.detailEvidence,'detail',usagePolicy);}else if(t.detailEvidence!==null)throw Error();
    }else throw Error();
-   if(questionLayout==='two_stage_v3'&&['repair','confirm','revisit'].includes(z.executed.action)){
+   const e=z.executed,g=j.judgment;
+   const namingRecovery=jevNaming&&j.publicationRecovery?.act==='confirm_current_topic';
+   if(questionLayout==='two_stage_v3'&&(['repair','confirm','revisit'].includes(e.action)||namingRecovery)){
     // The repair-history entry created for this judgment keeps the executed candidate set; only a later human reply may update it (progress leaves unknown).
-    const ids=z.executed.target.kind==='single'?[z.executed.target.figureId]:z.executed.target.kind==='multiple'?z.executed.target.figureIds:[];
+    const ids=namingRecovery?[...ownSlots]:e.target.kind==='single'?[e.target.figureId]:e.target.kind==='multiple'?e.target.figureIds:[];
     const entry=s.repairHistory.find((r:any)=>r?.turn===j.turnIndex);
     if(!entry||entry.action!==j.judgment.action||!stateSame(entry.candidatesBefore,ids))throw Error();
+    if(namingRecovery){
+     const speech=j.publicationRecovery.reason==='draft_content_mismatch'?contentPublicationRecovery(j.generationGuard.violations,e)?.text:
+      namingPublicationHold(j.publicationRecovery.reason,e.target.figureId).text;
+     if(!speech||newest&&entry.issueId!==null||entry.question!==speech||
+       publicTurns&&!publicTurns.some(event=>event.turn===j.turnIndex+1&&event.speaker==='ai'&&event.text===speech))throw Error();
+    }
     const after=entry.candidatesAfter,same=stateSame(after,ids),claimsOf=Array.isArray(entry.partnerClaims)?entry.partnerClaims:[];
     if(!Array.isArray(after)||new Set(after).size!==after.length||!after.every((id:string)=>ownSlots.includes(id)))throw Error();
     if(s.judgments.at(-1)===j){
@@ -829,13 +872,32 @@ export function validateJevPrivateStateV2(value:unknown,ownSlots:readonly string
      }
     }
    }
-   const e=z.executed,g=j.judgment;
+   let grounding:JevNamingGrounding|undefined;
+   if(jevNaming&&e.action==='agree'){
+    const detail=t.disposition==='rejected'?t.detailEvidence:d.evidence.stages?.at(-1);
+    grounding=detail?persistedNamingDetail(detail,e,z.agreeNames,j.turnIndex,publicTurns):
+     {verdict:'unconfirmed',evidenceTurn:null};
+    if(!stateSame(j.namingGrounding,grounding))throw Error();
+   }else if(Object.hasOwn(j,'namingGrounding'))throw Error();
+   if(grounding?.verdict!=='grounded'&&grounding&&j.publicationRecovery?.reason!=='naming_grounding_unresolved')throw Error();
    if(Object.hasOwn(j,'publicationRecovery')){
-    const recovered=Array.isArray(j.generationGuard?.violations)&&contentPublicationRecovery(j.generationGuard.violations,e);
-    if(!recovered||!j.generationGuard.regenerated||!j.generationGuard.fallback||
+    const reason=j.publicationRecovery?.reason,held=reason==='naming_grounding_unresolved'||reason==='naming_ledger_conflict';
+    if(held&&(!grounding||e.target.kind!=='single'||(reason==='naming_ledger_conflict')!==(grounding.verdict==='grounded')||
+     !stateSame(j.generationGuard.violations,[])||Object.hasOwn(z,'draftActs')))throw Error();
+    const recovered=held?namingPublicationHold(reason,e.target.figureId):
+     Array.isArray(j.generationGuard?.violations)&&contentPublicationRecovery(j.generationGuard.violations,e);
+    if(!recovered||j.generationGuard.regenerated!==!held||j.generationGuard.fallback!==true||
       !stateSame(j.publicationRecovery,recovered.recovery)||!stateSame(g,recovered.judgment))throw Error();
    }else if(g.action!==e.action||g.targetSlot!==(e.target.kind==='single'?e.target.figureId:null)||g.candidateName!==e.name||g.discriminatingFeature!==e.feature||
      isGenerationV15(generation)&&j.generationGuard?.fallback===true)throw Error();
+   if(grounding&&newest&&e.target.kind==='single'){
+    if(j.publicationRecovery?.reason==='naming_ledger_conflict'){
+     try{validateJudgment({action:'agree',targetSlot:e.target.figureId,candidateName:e.name,discriminatingFeature:null,note:null},{ownLedger:s.ledger});}
+     catch(error){if(error instanceof JudgmentValidationError&&['duplicate_name_requires_repair','reassignment_requires_repair'].includes(error.code))continue;throw error;}
+     throw Error();
+    }
+    if(!j.publicationRecovery&&!stateSame(s.ledger[e.target.figureId],{status:'agreed',name:e.name.trim()}))throw Error();
+   }
   }
   return structuredClone(s);
  }catch{throw new JevTurnError('invalid_state');}
@@ -984,7 +1046,7 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
     let observationPhase: ObservationFailure["observationPhase"] | null = null;
     try {
       abortIf(signal);
-      const state = integrated?validateJevPrivateStateV2(privateState,slots,intervention!,questionLayout,options.dialoguePolicy,generationRetryVersion,usagePolicy):structuredClone(privateState);
+      const state = integrated?validateJevPrivateStateV2(privateState,slots,intervention!,questionLayout,options.dialoguePolicy,generationRetryVersion,usagePolicy,events):structuredClone(privateState);
       if (!integrated && !validAgreeNameScope(state.agreeNameScopeVersion, generationRetryVersion)) throw new JevTurnError("invalid_state");
       checkPruneVersion(state);
       if(!integrated&&(Object.hasOwn(state,'schemaVersion')||Object.hasOwn(state,'interventionPolicy')||state.judgments?.some(j=>Object.hasOwn(j.jevTurn??{},'executed')||Object.hasOwn(j.jevTurn??{},'intervention'))))throw new JevTurnError('invalid_state');
@@ -1671,5 +1733,5 @@ export function createJevTurnRuntime(options: JevTurnOptions) {
       { role: "user", content: generation.final + (retry ? "\n指定JSON形式で再提出してください。" + confirmed : "") }], { phase: "final_submission", timeoutMs: generation.timeoutMs });
   }
   return Object.freeze({ slots: Object.freeze([...slots]), initialPrivateState, initializePrivateState, runAiTurn, finalRequest,
-    getAttempts: () => structuredClone(attempts), snapshotGraph: (state: JevPrivateState) => {checkPruneVersion(state);checkProspectMode(state);if(!integrated)rejectNewLegacyState(state);return snapshotReferenceGraph((integrated?validateJevPrivateStateV2(state,slots,intervention!,questionLayout,options.dialoguePolicy,generationRetryVersion,usagePolicy):state).graph);} });
+    getAttempts: () => structuredClone(attempts), snapshotGraph: (state: JevPrivateState, events?:readonly Event[]) => {checkPruneVersion(state);checkProspectMode(state);if(!integrated)rejectNewLegacyState(state);return snapshotReferenceGraph((integrated?validateJevPrivateStateV2(state,slots,intervention!,questionLayout,options.dialoguePolicy,generationRetryVersion,usagePolicy,events):state).graph);} });
 }

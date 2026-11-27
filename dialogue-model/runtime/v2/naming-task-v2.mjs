@@ -229,7 +229,7 @@ export async function createNamingTaskV2({
   // The queue must never see an uninitialized Jev state, even on a zero-turn submission.
   let initialPrivateState;
   if (jev && restore) {
-    try { dialogue.snapshotGraph(restore.queueState.privateState); }
+    try { dialogue.snapshotGraph(restore.queueState.privateState, restore.queueState.events); }
     catch { throw new NamingTaskError("invalid_options"); }
     initialPrivateState = restore.queueState.privateState;
   } else if (jev) {
