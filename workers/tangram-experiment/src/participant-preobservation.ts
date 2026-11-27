@@ -14,7 +14,7 @@ type Policy = { pin: ParticipantModelPin; proxy: ParticipantService; initialObse
 type StoreReader = { get<T>(key: string): Promise<T | undefined> };
 type StoreTransaction = StoreReader & {
   list<T>(options: { prefix: string }): Promise<Map<string, T>>;
-  put<T>(key: string, value: T): Promise<void>;
+  put(entries: Record<string, unknown>): Promise<void>;
 };
 type Store = StoreReader & { transaction<T>(update: (tx: StoreTransaction) => Promise<T>): Promise<T> };
 type Receipt = {
@@ -43,7 +43,7 @@ export class ParticipantPreobservations {
       putIfAbsent: (key, entry) => storage.transaction(async tx => {
         const found = await tx.get(key);
         if (found !== undefined) return found;
-        await tx.put(key, entry);
+        await tx.put({ [key]: entry });
         return entry;
       }),
     };
@@ -99,7 +99,7 @@ export class ParticipantPreobservations {
       if (await tx.get(receiptKey) !== undefined) return false;
       const receipt: Receipt = { trialIndices: board.trialIndices, startedAt: new Date().toISOString(),
         finishedAt: null, status: 'preparing', errorCode: null };
-      await tx.put(receiptKey, receipt);
+      await tx.put({ [receiptKey]: receipt });
       return true;
     });
     if (!registered) return;
@@ -109,7 +109,7 @@ export class ParticipantPreobservations {
         const receipt = await tx.get<Receipt>(receiptKey);
         if (!receipt) throw new ObservationError('unavailable');
         const usage = write(receipt.usage);
-        await tx.put(receiptKey, { ...receipt, usage });
+        await tx.put({ [receiptKey]: { ...receipt, usage } });
         return usage;
       }),
     };
@@ -123,8 +123,8 @@ export class ParticipantPreobservations {
     }
     await this.storage.transaction(async tx => {
       const receipt = await tx.get<Receipt>(receiptKey);
-      if (receipt) await tx.put(receiptKey, { ...receipt, finishedAt: new Date().toISOString(),
-        status: errorCode === null ? 'ready' : 'failed', errorCode });
+      if (receipt) await tx.put({ [receiptKey]: { ...receipt, finishedAt: new Date().toISOString(),
+        status: errorCode === null ? 'ready' : 'failed', errorCode } });
     });
   }
 }

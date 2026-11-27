@@ -434,6 +434,7 @@ test('Terra observes the approved custom AI board, reuses only its memo and pres
   const approved = await h.approve();
   assert.deepEqual(approved.plan.participantModelPin, pin);
   assert.deepEqual(approved.plan.participantLimits, oldLimits);
+  assert.deepEqual(h.calls.slice(), [], 'the old capped plan does not preobserve');
   h.env.PARTICIPANT_TERRA_ENABLED = 'off';
   const [definition] = approved.plan.trials;
   const full = createTrialV2({ seed: definition.seed, rotationMode: 'relative_pm90', figureSelection: custom });
@@ -445,7 +446,9 @@ test('Terra observes the approved custom AI board, reuses only its memo and pres
   let previous: string | undefined;
   let memoSha: string | undefined;
   for (const strategy of pair) {
+    const beforeStart = h.calls.length;
     const started = await json(await h.start(previous));
+    assert.deepEqual(h.calls.slice(beforeStart).map(call => call.role), previous === undefined ? ['terra'] : []);
     const id = started.trial.sessionId;
     assert.deepEqual(started.trial.scene, human);
     participantOnly(started);
