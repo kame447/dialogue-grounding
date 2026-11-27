@@ -561,6 +561,31 @@ test('force end one trial rechecks archived contents and closes its reception wi
   await h.done();
 });
 
+test('force end reconciles a stale active row when the index write fails', async t => {
+  const h = harness(roleEnv, 'off'), cookie = await h.browser(), owner = h.object(cookie);
+  const id = (await (await owner.fetch(req('/api/start', { version: 2 }))).json()).trial.sessionId;
+  await h.done();
+  await indexSyntheticTrial(h, cookie, id);
+  const detail = '/admin/record/' + id;
+  const initial = await (await h.edge(adminRequest(detail))).text();
+  const revision = /name="revision" value="([a-f0-9]{64})"/u.exec(initial)?.[1];
+  assert.ok(revision);
+  const upsert = t.mock.method(h.index, 'upsert', async () => { throw Error('synthetic index write failure'); });
+  assert.equal((await h.edge(endRequest(detail + '/force-end', { confirm: id, revision, status: 'dialogue' }))).status, 303);
+  assert.equal(upsert.mock.callCount(), 1);
+  assert.equal(h.snapshot(cookie)['record:' + id].status, 'interrupted');
+  assert.equal((await h.index.get(id)).status, 'dialogue');
+  for (const [filter, visible] of [['active', false], ['completed', false], ['interrupted', true]] as const) {
+    const page = await h.edge(adminRequest('/admin?status=' + filter));
+    assert.equal(page.status, 200);
+    const text = await page.text();
+    assert.equal(text.includes(detail), visible, filter);
+    if (visible) assert.match(text, /強制終了/u);
+  }
+  assert.equal((await h.index.get(id)).status, 'dialogue', 'the index was still stale during the list reads');
+  await h.done();
+});
+
 test('force end reception with a failed admission preserves its unfilled slot', async () => {
   const h = harness(roleEnv), cookie = await h.browser(), approval = await approved(h, cookie);
   h.object(cookie).createTrial = async () => { throw Error('synthetic admission failure'); };

@@ -11,7 +11,7 @@ import { AdminIndex } from "./admin/index-do";
 import type { ReceptionFailedStartUsage } from './admin/reception-port.ts';
 import { createReceptionAdminPort, createReceptionSettingsPort } from './admin/reception-adapter.ts';
 import { handleAdmin, isAdminPath, type AdminLimiter } from "./admin/routes.ts";
-import { summarizeRecord } from "./admin/summary.ts";
+import { summarizeRecord, type AdminSummary } from "./admin/summary.ts";
 import type { AuditEntry } from "./admin/index-store.ts";
 import { isParticipantRole, participantRoleView } from "./admin/participant-role.ts";
 import type { ParticipantRoleResult } from "./admin/participant-role.ts";
@@ -66,6 +66,7 @@ type StoredTrial = {
   closed?: boolean;
   [field: string]: unknown;
 };
+type AdminListRecord = Pick<AdminSummary, 'recordId' | 'status'>;
 
 type NamingTask = {
   getState(): Record<string, unknown>;
@@ -609,6 +610,21 @@ export class TangramSession extends DurableObject<Env> {
   async adminDeletedRecordIds(recordIds: string[]): Promise<string[]> {
     const deleted = new Set(await this.ctx.storage.get<string[]>('tombstones'));
     return recordIds.filter(id => deleted.has(id));
+  }
+
+  /** Reconcile stale index rows with the owner without returning record contents. */
+  async adminRecordListStates(records: AdminListRecord[]) {
+    const deleted = await this.adminDeletedRecordIds(records.map(record => record.recordId));
+    const deletedIds = new Set(deleted);
+    const interrupted: { recordId: string; at: string }[] = [];
+    for (const { recordId, status } of records) {
+      if (!isIncompleteTrialStatus(status) || !RECORD_ID.test(recordId) || deletedIds.has(recordId)) continue;
+      const record = await this.ctx.storage.get<StoredTrial>('record:' + recordId);
+      if (record?.recordId === recordId && record.status === 'interrupted' && isAdminTermination(record.termination)) {
+        interrupted.push({ recordId, at: record.termination.at });
+      }
+    }
+    return { deleted, interrupted };
   }
 
   async adminSetParticipantRole(recordId: string, role: unknown): Promise<ParticipantRoleResult> {
@@ -1323,14 +1339,17 @@ export default {
         },
         listPage: async after => {
           const { items, next } = await index!.page(after);
-          const recordsByOwner = new Map<string, string[]>();
-          for (const { objectId, recordId } of items) {
-            const ids = recordsByOwner.get(objectId);
-            if (ids) ids.push(recordId);
-            else recordsByOwner.set(objectId, [recordId]);
+          const recordsByOwner = new Map<string, AdminListRecord[]>();
+          for (const { objectId, recordId, status } of items) {
+            const records = recordsByOwner.get(objectId);
+            if (records) records.push({ recordId, status });
+            else recordsByOwner.set(objectId, [{ recordId, status }]);
           }
-          const deleted = new Set((await Promise.all([...recordsByOwner].map(async ([objectId, ids]) =>
-            await owner(objectId)?.adminDeletedRecordIds(ids) ?? []))).flat());
+          const states = await Promise.all([...recordsByOwner].map(async ([objectId, records]) =>
+            await owner(objectId)?.adminRecordListStates(records)));
+          const deleted = new Set(states.flatMap(state => state?.deleted ?? []));
+          const interrupted = new Map(states.flatMap(state =>
+            state?.interrupted.map(({ recordId, at }) => [recordId, at] as const) ?? []));
           if (deleted.size) {
             // An owner deletion can commit before index removal fails. Reconcile
             // on ordinary list reads and omit tombstoned rows even during the outage.
@@ -1340,7 +1359,10 @@ export default {
           const roles = await index!.recordRoles(live.map(item => item.recordId), true);
           return { items: live.flatMap(item => {
             const role = roles[item.recordId];
-            return role === 'deleted' ? [] : [{ ...item, participantRole: participantRoleView(role) }];
+            if (role === 'deleted') return [];
+            const at = interrupted.get(item.recordId);
+            return [{ ...item, ...(at ? { status: 'interrupted', aiStatus: 'closed', updatedAt: at } : {}),
+              participantRole: participantRoleView(role) }];
           }), next };
         },
         getSummary: async (recordId, includeParticipantRole) => {
