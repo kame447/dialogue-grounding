@@ -14,7 +14,7 @@ import { stageMemory, prepareMemory } from "../judgment/memory.mjs";
 import { buildDecisionEvidence } from "./decision-evidence.mjs";
 import { resolveActiveJudgment } from "./active-judge.mjs";
 import { findGuardViolations, rewriteReasons, fallbackUtterance, HOLISTIC_V5_VIEWPOINT_RULE } from "./generation-guard.ts";
-import { ISSUE_HANDLING_GENERATION } from "./deferred-ai-extraction.ts";
+import { isIssueHandlingGeneration } from "./deferred-ai-extraction.ts";
 import { SINGLE_ISSUE_DEFERRAL } from "./issue-publication.ts";
 import { startGroundingShadow, validateGroundingShadowOptions } from "./grounding-shadow.ts";
 import { prepareLocalGroundingTurn, validateLocalGroundingOptions, localGroundingMemo, findLocalPublicationViolations } from "./local-grounding-turn.ts";
@@ -311,7 +311,7 @@ export function createDialogueV2(options) {
     const baseScope = styled ? STYLED_ACTION_SCOPE_V2 : ACTION_SCOPE_V2;
     const trialInstructions = styled ? STYLED_TRIAL_GENERATOR_INSTRUCTIONS_V2 : TRIAL_GENERATOR_INSTRUCTIONS_V2;
     const trialScope = styled ? STYLED_TRIAL_ACTION_SCOPE_V2 : TRIAL_ACTION_SCOPE_V2;
-    const issueHandling = options.generationRetryVersion === ISSUE_HANDLING_GENERATION;
+    const issueHandling = isIssueHandlingGeneration(options.generationRetryVersion);
     const instructions = issueHandling ? ISSUE_HANDLING_GENERATOR_INSTRUCTIONS_V21
       : holisticV5 ? HOLISTIC_V5_GENERATOR_INSTRUCTIONS_V2 : holisticV1 ? HOLISTIC_V3_GENERATOR_INSTRUCTIONS_V2
       : v3Trial ? STYLED_TRIAL_V3_GENERATOR_INSTRUCTIONS_V2 : options.technicalTrial ? trialInstructions : baseInstructions;

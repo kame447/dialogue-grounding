@@ -2,9 +2,10 @@
 // validated judgment determines state; detected wording never changes its act.
 import type { DialoguePolicy, DraftAct, JevExecutedDecision, PublicNameCandidate } from "../decision/contract.ts";
 import { isGenerationV18, type ShapeTerminologyVersion } from "../shape-terminology.ts";
-import { DEFERRED_AI_EXTRACTION_GENERATION, ISSUE_HANDLING_GENERATION, isDeferredAiExtractionGeneration } from "./deferred-ai-extraction.ts";
+import { DEFERRED_AI_EXTRACTION_GENERATION, GENERATION_RETRY_V22, ISSUE_HANDLING_GENERATION, isDeferredAiExtractionGeneration, isGenerationV22, isIssueHandlingGeneration } from "./deferred-ai-extraction.ts";
+export { GENERATION_RETRY_V22, isGenerationV22 };
 export const VISUAL_FEATURE_GENERATION = "jev_generation_retry_v19";
-type VisualFeatureGeneration = typeof VISUAL_FEATURE_GENERATION | typeof DEFERRED_AI_EXTRACTION_GENERATION | typeof ISSUE_HANDLING_GENERATION;
+type VisualFeatureGeneration = typeof VISUAL_FEATURE_GENERATION | typeof DEFERRED_AI_EXTRACTION_GENERATION | typeof ISSUE_HANDLING_GENERATION | typeof GENERATION_RETRY_V22;
 type GenerationV17Plus = "jev_generation_retry_v17" | ShapeTerminologyVersion | VisualFeatureGeneration;
 // v3 was reserved for the experiment that extended fixed responses.
 // v9 contains every behaviour of v8 and widens only which wordings the orientation check accepts as a stated viewpoint or as the partner's own words. v8 contains every behaviour of v7 and adds the direct pointing-reply match to a targetless or differently-extracted confirm question. v7 contains every behaviour of v6 and widens the unsupported-topic-shift check to the particle-less and "next figure" wordings. v6 contains every behaviour of v5 and adds the unsupported-topic-shift check. v5 contains every behaviour of v4 (viewpoint rules, no fixed-sentence fallback, the whole-history judgment material, the private naming state) and adds the confirm-specific viewpoint note and the topic markers.
@@ -747,7 +748,7 @@ export type GenerationCodeContext = { action: PublicationAction; candidateName: 
  * In holistic_v1 the naming-act wording never blocks here; it only triggers the draft_naming question. */
 export function generationGuardCodes(text: string, c: GenerationCodeContext): string[] {
   const squeezed = text.normalize("NFKC").replace(/\s/gu, "");
-  const issueHandling = c.generationRetryVersion === ISSUE_HANDLING_GENERATION;
+  const issueHandling = isIssueHandlingGeneration(c.generationRetryVersion);
   const explicitNonAdoption = issueHandling && ["hold_open", "carry_over", "consult"].includes(c.action);
   return [...new Set([...findGuardViolations(text, c.action).filter(code => !c.holistic || explicitNonAdoption || !isAgreementWordCode(code)),
     ...(c.v3 ? findOrientationLeaks(text, c.dialoguePolicy, c.generationRetryVersion, c.humanTexts, c.recentHumanTexts, c.publicTexts) : []),
@@ -761,6 +762,7 @@ export function generationGuardCodes(text: string, c: GenerationCodeContext): st
     ...(/human[_-]?referent/iu.test(squeezed) ? ["internal_field"] : []),
     ...(isGenerationV19(c.generationRetryVersion) && /(?<![A-Za-z])(?:visualPurpose|observationFeatures|visualFeatures|detailFigureIds)(?![A-Za-z])/u.test(squeezed) ? ["internal_field"] : []),
     ...(issueHandling && /(?<![A-Za-z_])(?:hold_open|carry_over|partner_choice|other_figure|same_figure_naming|same_figure_other_issue|old_issue|destination|commitment_state|handled_issue|switch_function|non_bypass_alternative|issueHandlingVersion|handlings)(?![A-Za-z_])/u.test(text.normalize("NFKC")) ? ["internal_field"] : []),
+    ...(isGenerationV22(c.generationRetryVersion) && /(?<![A-Za-z])retainedReferenceHistory(?![A-Za-z])/u.test(squeezed) ? ["internal_field"] : []),
     ...(c.ai && /\d+:pub\d+/u.test(text.normalize("NFKC").replace(/[\s\u200b-\u200d\ufeff]+/gu, "")) ? ["internal_id"] : [])])];
 }
 export type GenerationOutcome = { kind: "publish_first" | "publish_retry" | "fallback" | "stop"; regenerated: boolean; violations: string[] };

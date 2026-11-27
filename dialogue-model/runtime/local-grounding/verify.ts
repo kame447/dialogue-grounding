@@ -6,6 +6,7 @@ import { isBareDeictic, literalSpan, quoteAround } from "../judgment/public-evid
 import { SLOTS } from "../stimuli/board.mjs";
 import { CLAIM_PRUNE_V3, REFERENCE_LIMITS, snapshotReferenceGraph, validateReferenceUpdate, ReferenceGraphError } from "../memory/reference-graph.mjs";
 import { priorClaimViews } from "./derive.ts";
+import { retainedClaimMatches, type ReferenceClaimExcerpt } from "./reference-evidence.ts";
 
 export type LocalGraph = { records: readonly unknown[]; slots?: readonly string[]; memoryPruneVersion?: import("../memory/reference-graph.mjs").MemoryPruneVersion };
 export type LocalVerificationDiagnostic = {
@@ -56,6 +57,7 @@ type VerificationInput = {
   graph: LocalGraph;
   turn: number;
   publicTurns: readonly PublicTurn[];
+  retainedReferenceHistory?: readonly ReferenceClaimExcerpt[];
   segments: readonly LocalSegmentProposal[];
   verdicts: readonly LocalFunctionVerdict[];
 };
@@ -94,7 +96,7 @@ function opposesPointingReply(segment: LocalSegmentProposal, question: LocalClai
 const overlap = (a: readonly string[], b: readonly string[]) => a.some(slot => b.includes(slot));
 
 /** Only the CURRENT public human turn may supply a new segment's quote. */
-export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts, keepUnboundApproval = false, approvalFromNamedClaim = false, referenceQuestionBindings, directReferenceReplies = false, refinedReplyRules = false, answerFieldRules = false, bindDirectQuestionReplies = false, retainLocalQuestionAnswers = false, unbindPartNonAnswers = false, namingIntervalStart = 0 }: VerificationInput): LocalVerifiedUpdate {
+export function verifyLocalUpdate({ graph, turn, publicTurns, retainedReferenceHistory, segments, verdicts, keepUnboundApproval = false, approvalFromNamedClaim = false, referenceQuestionBindings, directReferenceReplies = false, refinedReplyRules = false, answerFieldRules = false, bindDirectQuestionReplies = false, retainLocalQuestionAnswers = false, unbindPartNonAnswers = false, namingIntervalStart = 0 }: VerificationInput): LocalVerifiedUpdate {
   const result: LocalVerifiedUpdate = { operations: [], rejected: [] };
   // Revalidate JSON-restored graphs before using any model-selected pointer.
   snapshotReferenceGraph(graph);
@@ -106,6 +108,10 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
   const previousAi = previous?.speaker === "ai" && !(previous as PublicTurn & { nonReferential?: boolean }).nonReferential ? previous : null;
   const previousClaims = previousAi ? active.filter(c => c.speaker === "ai" && c.sourceTurn === previousAi.turn &&
     literalSpan(previousAi.text, c.quote) !== null && !["acknowledge", "withdraw", "defer", "revisit"].includes(c.act)) : [];
+  const hasRetainedSource = (claim: LocalClaimView) => retainedReferenceHistory?.some(row => retainedClaimMatches(row, claim));
+  const canUseSource = (claim: LocalClaimView) => retainedReferenceHistory === undefined || hasRetainedSource(claim) ||
+    publicTurns.some(source => source.turn === claim.sourceTurn && source.speaker === claim.speaker &&
+      !(source as PublicTurn & { nonReferential?: boolean }).nonReferential && source.text.includes(claim.quote));
   const count = (id: string) => segments.filter(s => s?.segmentId === id).length;
   for (const segment of segments) {
     const reject = (reason: string) => { result.rejected.push({ segmentId: typeof segment?.segmentId === "string" ? segment.segmentId : "invalid", reason }); };
@@ -131,13 +137,19 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
     const quote = literalSpan(human.text, segment.quote)?.text;
     if (!quote || quote.length > 160) { reject("nonpublic_quote"); continue; }
     let act = verdict.act;
-    let prior = verdict.respondsToClaimId === null ? null : active.find(c => c.id === verdict.respondsToClaimId) ?? null;
+    let prior = verdict.respondsToClaimId === null ? null : active.find(c => c.id === verdict.respondsToClaimId &&
+      canUseSource(c) && (!hasRetainedSource(c) || segment.respondsToTurn === c.sourceTurn)) ?? null;
     const missingAntecedent = verdict.respondsToClaimId !== null && !prior;
     if (missingAntecedent && !independentActs.has(act)) { reject("missing_claim_response"); continue; }
     let targets = [...segment.targets];
     let aspect = segment.aspect;
     let linkedIssue = segment.linkedIssueId;
     let name = segment.name;
+    if (prior && hasRetainedSource(prior) && act === "agree" &&
+        (verdict.answersChecked === undefined || verdict.answersChecked === "no" ||
+          !targets.length || targets.some(target => !prior!.targets.includes(target)))) {
+      reject("inconsistent_claim_response"); continue;
+    }
     if (unbindPartNonAnswers && act === "agree" && aspect === "part" && verdict.answersChecked === "no" &&
         name === null && targets.length === 0 && prior?.speaker === "ai" && prior.act === "ask" &&
         prior.aspect === "part" && prior.targets.length === 1 && prior.sourceTurn < turn &&
@@ -157,7 +169,7 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
       const proposal = active.filter(c => c.speaker === "human" && c.act === "name_propose" && c.aspect === "name" && c.name !== null && c.sourceTurn > namingIntervalStart && c.sourceTurn < turn)
         .sort((x, y) => x.sourceTurn - y.sourceTurn || x.turn - y.turn).at(-1);
       // (NB-26N-2) A proposal that named a figure is carried only to a question about that figure: after the partner left a figure without any boundary action, the next figure's question does not take its old name.
-      if (proposal && (proposal.targets.length === 0 || prior.targets.length === 0 || overlap(proposal.targets, prior.targets))) prior = proposal;
+      if (proposal && canUseSource(proposal) && (proposal.targets.length === 0 || prior.targets.length === 0 || overlap(proposal.targets, prior.targets))) prior = proposal;
     }
     const approvalRequest = keepUnboundApproval && !!prior && act === "name_propose" && name === null && aspect === "name" && prior.aspect === "name" &&
       (approvalFromNamedClaim ? ["name_propose", "name_accept"].includes(prior.act) : prior.act === "name_propose" && prior.speaker === "human") && prior.name !== null;
@@ -273,7 +285,10 @@ export function verifyLocalUpdate({ graph, turn, publicTurns, segments, verdicts
       if (!span) { reject("nonpublic_name"); continue; }
       name = span.text;
     }
-    if (segment.respondsToTurn !== null && act !== "acknowledge" && !publicTurns.some(t => t.turn === segment.respondsToTurn && t.turn < turn)) {
+    // An older reply must cite the same verified claim and public excerpt.
+    const historicalReply = prior && prior.sourceTurn === segment.respondsToTurn && hasRetainedSource(prior);
+    if (segment.respondsToTurn !== null && act !== "acknowledge" && !historicalReply &&
+        !publicTurns.some(t => t.turn === segment.respondsToTurn && t.turn < turn)) {
       reject("nonpublic_response_turn"); continue;
     }
     // A verified claim response determines its issue. Luna's issue link is an
