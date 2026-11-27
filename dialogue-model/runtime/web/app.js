@@ -107,6 +107,7 @@ const errors = {
   invalid_questionnaire: "アンケートの回答を確認してください。すべての質問に回答が必要です。",
   questionnaire_submitted: "このアンケートは提出済みです。",
   trial_not_completed: "試行が完了してからアンケートに回答できます。",
+  trial_interrupted: "この試行は強制終了されました。",
   trial_changed: "画面を現在の試行に更新したため、直前の操作は送信されませんでした。画面と入力欄を確認し、必要ならもう一度操作してください。",
   not_found: "この試行は表示できません。保存期間が過ぎたか、このブラウザの試行ではありません。",
 };
@@ -547,13 +548,14 @@ function renderStartStage(state) {
   const next = Boolean(state.trial && trialCompleted() && reception?.status === "in_progress");
   // The plan waits for this trial's questionnaire: show the next step, but it cannot start yet.
   const awaitingSurvey = Boolean(state.trial && trialCompleted() && reception?.status === "questionnaire");
-  startReady = reception ? (!state.trial && reception.status === "ready") || next : !state.trial;
+  startReady = !state.interrupted && (reception ? (!state.trial && reception.status === "ready") || next : !state.trial);
   $("start-stage").hidden = Boolean(state.trial) && !next && !awaitingSurvey;
   $("trial-progress").hidden = !state.trial;
+  $("start-trial").hidden = state.interrupted === true;
   $("start-trial").textContent = next || awaitingSurvey ? "次の課題を開始" : "スタート";
   $("reception-number").hidden = !reception?.number;
   $("reception-number").textContent = reception?.number ? `受付番号 ${reception.number}` : "";
-  $("start-message").textContent = !reception ? "案内を確認してから、スタートを押してください。"
+  $("start-message").textContent = state.interrupted ? errors.trial_interrupted : !reception ? "案内を確認してから、スタートを押してください。"
     : awaitingSurvey ? errors.questionnaire_required : next ? "前の課題が終わったら、「次の課題を開始」を押してください。" : reception.status === "ready" ? "準備ができました。スタートを押してください。"
       : reception.status === "finished" ? "すべての課題が完了しました。ご協力ありがとうございました。" : "この画面を開いたまま、開始の案内があるまでお待ちください。";
 }
@@ -643,6 +645,7 @@ function setControls() {
 function scheduleRefresh() {
   clearTimeout(refreshTimer);
   if (showingIncompleteTrial || document.visibilityState === "hidden") return;
+  if (reception?.status === "interrupted") return;
   if (!current && reception && !reviewing) { refreshTimer = setTimeout(() => refreshState(), 5000); return; }
   if (current && !preparing && !reviewing) refreshTimer = setTimeout(() => refreshState(), aiThinking() || pending.length ? 700 : 2000);
 }
@@ -1364,6 +1367,7 @@ const SESSION_STATES = {
   ready_next: ["次の課題待ち", [["再開", "resume"]]],
   finished: ["終了", [["閲覧", "view"]]],
   cancelled: ["取消済み", []],
+  interrupted: ["強制終了", [["閲覧", "view"]]],
   unavailable: ["確認不可", []],
 };
 const sessionTime = (session) => session.updatedAt || session.createdAt ? formatRecordTime(session.updatedAt || session.createdAt) : "";

@@ -250,6 +250,10 @@ function harness(t: TestContext) {
     async idle() { await session.trial?.whenIdle(); },
     record(recordId: string) { return storage.get('record:' + recordId); },
     adminRecord(recordId: string) { return session.adminRecord(recordId); },
+    async forceEndReception() {
+      const saved = await reception();
+      await session.adminForceEndReception(saved.receptionId, saved.revision);
+    },
     async evict({ detached = false } = {}) {
       if (detached) storage = await storage.copy();
       session = worker();
@@ -394,6 +398,44 @@ function productionUsage(record: { jevLedger: unknown } | null) {
 
 const total = (usage: ProductionUsage, role: Role, field: keyof Meter) =>
   Object.values(usage.phases[role]).reduce((count, phase) => count + phase[field], 0);
+
+test('force end keeps the pinned archive and exported usage settles after the stopped turn', async t => {
+  const h = harness(t);
+  await h.receive();
+  await h.settleBackground();
+  const plan = (await h.reception()).plan;
+  const recordId = (await h.start()).trial.sessionId;
+  const sent = latch(), release = latch();
+  h.controlled.reply = async (role, phase) => {
+    if (role === 'luna' && phase === 'generation') {
+      sent.resolve();
+      await release.promise;
+    }
+    return undefined;
+  };
+  try {
+    assert.equal((await h.send(recordId, 'synthetic-end-in-flight')).status, 202);
+    await sent.promise;
+    const before = await h.record(recordId), posts = h.calls.length;
+    await h.forceEndReception();
+    const interrupted = await h.record(recordId);
+    assert.deepEqual(interrupted, { ...before, status: 'interrupted', updatedAt: interrupted.termination.at,
+      termination: { at: interrupted.updatedAt, by: 'admin' } });
+    release.resolve();
+    await h.settleBackground();
+    assert.equal(h.calls.length, posts);
+    assert.deepEqual(await h.record(recordId), interrupted);
+    assert.deepEqual((await h.reception()).plan, plan);
+    const exported = productionUsage(await h.adminRecord(recordId));
+    const generation = exported.phases.luna.generation;
+    assert.deepEqual([exported.latest.luna?.status, generation.posts, generation.inputTokens, generation.unknownPosts], ['ok', 1, 5, 0]);
+    await h.evict({ detached: true });
+    assert.deepEqual(productionUsage(await h.adminRecord(recordId)), exported);
+    assert.equal((await ok(await h.request('state'))).interrupted, true);
+  } finally {
+    release.resolve();
+  }
+});
 
 function assertProductionAccounting(record: { jevLedger: unknown }, posts: WireCall[]) {
   const usage = productionUsage(record);

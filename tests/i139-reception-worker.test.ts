@@ -90,6 +90,8 @@ function harness(overrides: Record<string, unknown> = {}, settings: 'on' | 'unse
         const task = { getState: () => ({ version: 2, sessionId: record.recordId, status: record.status, events: [], submitted: record.status === 'completed', aiSubmitted: record.status === 'completed' }),
           persistNow: async () => input.onPersist(clone(record)), whenIdle: async () => {}, message: () => ({ eventId: 'synthetic', duplicate: false }),
           retry: async () => {}, submitHuman: async () => ({}), submitAI: async () => ({}),
+          stopped: 0, stopForAdmin() { this.stopped++; },
+          save: async (patch: Record<string, unknown>) => { Object.assign(record, patch); await input.onPersist(clone(record)); },
           complete: async () => { record.status = 'completed'; record.closed = true; await input.onPersist(clone(record)); } };
         tasks.set(record.recordId, task); await input.onPersist(clone(record)); return task;
       };
@@ -452,6 +454,159 @@ async function indexSyntheticTrial(h: ReturnType<typeof harness>, cookie: string
   const record = h.snapshot(cookie)['record:' + id];
   await h.index.upsert(summarizeRecord(record, h.object(cookie).ctx.id.toString(), summarizeLatency(record)));
 }
+
+function endRequest(path: string, form: Record<string, string>, opts: { auth?: boolean; origin?: string } = {}) {
+  const headers = new Headers({ Origin: opts.origin ?? 'https://i139.invalid' });
+  if (opts.auth !== false) headers.set('Authorization', 'Bearer ' + ROLE_ADMIN_TOKEN);
+  return new Request('https://i139.invalid' + path, { method: 'POST', headers, body: new URLSearchParams(form) });
+}
+
+test('force end reception protects completed history and closes a submitting trial across eviction', async () => {
+  const h = harness(roleEnv), cookie = await h.browser(), approval = await approved(h, cookie);
+  const first = (await (await start(h, cookie)).json()).trial.sessionId;
+  await h.tasks.get(first).complete();
+  await indexSyntheticTrial(h, cookie, first);
+  const second = (await (await start(h, cookie, { expectedRecordId: first })).json()).trial.sessionId;
+  const task = h.tasks.get(second);
+  await task.save({ status: 'submitting' });
+  await indexSyntheticTrial(h, cookie, second);
+  const before = h.snapshot(cookie), saved = reception(h, cookie);
+  const path = '/admin/reception/' + approval.receptionId + '/force-end';
+  const form = { confirm: saved.number, expectedRevision: String(saved.revision) };
+  const page = await (await h.edge(adminRequest('/admin/receptions'))).text();
+  assert.match(page, /受付を強制終了/u);
+  assert.equal((await h.edge(adminRequest(path))).status, 404);
+  assert.equal((await h.edge(endRequest(path, form, { auth: false }))).status, 401);
+  assert.equal((await h.edge(endRequest(path, form, { origin: 'https://wrong.invalid' }))).status, 403);
+  assert.equal((await h.edge(endRequest(path, { ...form, confirm: 'wrong' }))).status, 400);
+  assert.equal((await h.edge(endRequest(path, { ...form, expectedRevision: String(saved.revision - 1) }))).status, 409);
+  assert.deepEqual(h.snapshot(cookie), before);
+  assert.equal((await h.edge(endRequest(path, form))).status, 303);
+  const after = h.snapshot(cookie), ended = reception(h, cookie);
+  assert.deepEqual(ended, { ...saved, status: 'interrupted', revision: saved.revision + 1, termination: ended.termination });
+  assert.equal(ended.termination.by, 'admin');
+  assert.equal(new Date(ended.termination.at).toISOString(), ended.termination.at);
+  const record = after['record:' + second];
+  assert.deepEqual(record, { ...before['record:' + second], status: 'interrupted', updatedAt: ended.termination.at, termination: ended.termination });
+  assert.deepEqual(after.active, record);
+  const ownerState = after['base:owner:v1'];
+  assert.deepEqual(ownerState.admissions[ownerState.activeKey].record, record);
+  assert.deepEqual(after['record:' + first], before['record:' + first]);
+  assert.equal(after.tombstones, before.tombstones);
+  assert.equal(task.stopped, 1);
+  await assert.rejects(task.complete());
+  assert.equal((await h.edge(endRequest(path, form))).status, 303);
+  assert.deepEqual(h.snapshot(cookie), after);
+  await h.index.upsert(summarizeRecord(before['record:' + second], h.object(cookie).ctx.id.toString(), summarizeLatency(before['record:' + second])));
+  const detail = await (await h.edge(adminRequest('/admin/record/' + second))).text();
+  assert.match(detail, /強制終了/u);
+  assert.doesNotMatch(detail, /name="revision"/u);
+  const exported = await (await h.edge(adminRequest('/admin/record/' + second + '.json'))).json();
+  assert.deepEqual(exported.termination, ended.termination);
+  assert.deepEqual(exported.scoring, before['record:' + second].scoring);
+  for (const filter of ['active', 'completed']) {
+    const html = await (await h.edge(adminRequest('/admin?status=' + filter))).text();
+    assert.doesNotMatch(html, new RegExp(second, 'u'));
+  }
+  const interrupted = await (await h.edge(adminRequest('/admin?status=interrupted'))).text();
+  assert.match(interrupted, new RegExp(second, 'u'));
+  h.evict();
+  const factories = h.factories, owner = h.object(cookie);
+  const state = await owner.fetch(req('/api/state'));
+  assert.equal(state.status, 200);
+  const view = await state.json();
+  assert.equal(view.interrupted, true);
+  assert.equal(view.trial, null);
+  for (const route of ['/api/message', '/api/retry', '/api/names', '/api/ai-submit', '/api/start']) {
+    const body = route === '/api/start'
+      ? { version: 2, expectedRecordId: second, expectedReceptionRevision: ended.revision }
+      : { expectedRecordId: second };
+    const rejected = await owner.fetch(req(route, body));
+    assert.equal(rejected.status, 409, route);
+    assert.deepEqual(await rejected.json(), { error: 'trial_interrupted' });
+  }
+  const { records } = await (await owner.fetch(req('/api/records'))).json();
+  assert.equal(records.find((r: any) => r.recordId === second)?.status, 'interrupted');
+  assert.equal(records.find((r: any) => r.recordId === first)?.status, 'completed');
+  assert.equal(h.factories, factories);
+  await h.done();
+});
+
+test('force end one trial rechecks archived contents and closes its reception without starting the next condition', async () => {
+  const h = harness(roleEnv), cookie = await h.browser();
+  await approved(h, cookie);
+  const id = (await (await start(h, cookie)).json()).trial.sessionId;
+  await indexSyntheticTrial(h, cookie, id);
+  const detail = '/admin/record/' + id, path = detail + '/force-end';
+  const displayedRevision = async () => {
+    const html = await (await h.edge(adminRequest(detail))).text();
+    return /name="revision" value="([a-f0-9]{64})"/u.exec(html)?.[1];
+  };
+  const stale = await displayedRevision();
+  assert.ok(stale);
+  await h.tasks.get(id).save({ queueState: { ...h.snapshot(cookie)['record:' + id].queueState, errorCode: 'ai_unavailable' } });
+  const changed = await displayedRevision();
+  assert.ok(changed);
+  assert.notEqual(changed, stale);
+  const form = { status: 'dialogue', confirm: id, revision: changed };
+  assert.equal((await h.edge(endRequest(path, { ...form, revision: stale }))).status, 409);
+  assert.equal((await h.edge(endRequest(path, { ...form, status: 'submitting' }))).status, 409);
+  assert.equal((await h.edge(endRequest(path, form))).status, 303);
+  const after = h.snapshot(cookie);
+  assert.equal(reception(h, cookie).status, 'interrupted');
+  assert.equal(reception(h, cookie).trials.length, 1);
+  assert.equal((await start(h, cookie, { expectedRecordId: id })).status, 409);
+  assert.equal((await h.edge(endRequest(path, form))).status, 303);
+  assert.deepEqual(h.snapshot(cookie), after);
+  await h.done();
+});
+
+test('force end reconciles a stale active row when the index write fails', async t => {
+  const h = harness(roleEnv, 'off'), cookie = await h.browser(), owner = h.object(cookie);
+  const id = (await (await owner.fetch(req('/api/start', { version: 2 }))).json()).trial.sessionId;
+  await h.done();
+  await indexSyntheticTrial(h, cookie, id);
+  const detail = '/admin/record/' + id;
+  const initial = await (await h.edge(adminRequest(detail))).text();
+  const revision = /name="revision" value="([a-f0-9]{64})"/u.exec(initial)?.[1];
+  assert.ok(revision);
+  const upsert = t.mock.method(h.index, 'upsert', async () => { throw Error('synthetic index write failure'); });
+  assert.equal((await h.edge(endRequest(detail + '/force-end', { confirm: id, revision, status: 'dialogue' }))).status, 303);
+  assert.equal(upsert.mock.callCount(), 1);
+  assert.equal(h.snapshot(cookie)['record:' + id].status, 'interrupted');
+  assert.equal((await h.index.get(id)).status, 'dialogue');
+  for (const [filter, visible] of [['active', false], ['completed', false], ['interrupted', true]] as const) {
+    const page = await h.edge(adminRequest('/admin?status=' + filter));
+    assert.equal(page.status, 200);
+    const text = await page.text();
+    assert.equal(text.includes(detail), visible, filter);
+    if (visible) assert.match(text, /強制終了/u);
+  }
+  assert.equal((await h.index.get(id)).status, 'dialogue', 'the index was still stale during the list reads');
+  await h.done();
+});
+
+test('force end reception with a failed admission preserves its unfilled slot', async () => {
+  const h = harness(roleEnv), cookie = await h.browser(), approval = await approved(h, cookie);
+  h.object(cookie).createTrial = async () => { throw Error('synthetic admission failure'); };
+  const failed = await start(h, cookie);
+  assert.equal(failed.status, 409);
+  assert.deepEqual(await failed.json(), { error: 'trial_unavailable' });
+  const saved = reception(h, cookie);
+  assert.equal(saved.status, 'in_progress');
+  assert.deepEqual(saved.trials, [{ index: 0, recordId: null }]);
+  const path = '/admin/reception/' + approval.receptionId + '/force-end';
+  const form = { confirm: saved.number, expectedRevision: String(saved.revision) };
+  assert.equal((await h.edge(endRequest(path, form))).status, 303);
+  const ended = reception(h, cookie);
+  assert.equal(ended.status, 'interrupted');
+  assert.deepEqual(ended.trials, saved.trials);
+  h.evict();
+  assert.equal((await start(h, cookie)).status, 409);
+  assert.deepEqual(await (await h.object(cookie).fetch(req('/api/records'))).json(), { records: [] });
+  assert.equal(h.factories, 0);
+  await h.done();
+});
 
 test('I209 classifies a completed reception atomically and allows a per-record correction', async () => {
   const h = harness(roleEnv), cookie = await h.browser(), r = await approved(h, cookie);

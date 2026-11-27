@@ -11,6 +11,7 @@ import type { ResolvedFigureSelection } from '../stimuli/figure-bank.ts';
 import { INITIAL_OBSERVATION_STRUCTURED_V2, isInitialObservationGeneration, type InitialObservationGeneration } from '../observation/initial-observation-generation.ts';
 
 import { CLAIM_PRUNE_V2, CLAIM_PRUNE_V3, type MemoryPruneVersion } from '../memory/reference-graph.mjs';
+import { isAdminTermination, type AdminTermination } from './admin-termination.ts';
 
 export type ReceptionProtocol = { schemaVersion: 'reception_protocol_v1'; protocolId: string; revision: number;
   allowedOrders: Strategy[][]; seedPolicy: 'shared' | 'per_trial'; referenceMemory: boolean;
@@ -74,10 +75,10 @@ export type ReceptionPlanV3 = ParticipantPlanSettings & { schemaVersion: 'recept
 export type ReceptionPlan = ReceptionPlanV1 | ReceptionPlanV2 | ReceptionPlanV3;
 /** The protocol version a researcher saw when choosing an order. */
 export type DisplayedProtocol = { protocolId: string; revision: number; sha256: string };
-export type ReceptionStatus = 'pending' | 'approved' | 'in_progress' | 'finished' | 'cancelled';
+export type ReceptionStatus = 'pending' | 'approved' | 'in_progress' | 'finished' | 'cancelled' | 'interrupted';
 export type Reception = { schemaVersion: 'reception_v1'; receptionId: string; objectId: string; createdAt: string;
   number: string | null; status: ReceptionStatus; plan: ReceptionPlan | null; revision: number;
-  trials: { index: number; recordId: string | null }[] };
+  trials: { index: number; recordId: string | null }[]; termination?: AdminTermination };
 export type ReceptionSummary = Pick<Reception, 'receptionId' | 'objectId' | 'createdAt' | 'number' | 'status' | 'revision' | 'trials'>;
 export type ReceptionErrorCode = 'protocol_unconfigured' | 'reception_conflict' | 'invalid_order' | 'reception_unavailable' |
   'reception_not_approved' | 'trial_changed' | 'reception_finished' | 'protocol_changed' | 'reception_closed' |
@@ -286,21 +287,26 @@ export function effectiveParticipantModelPin(plan: ReceptionPlan): ParticipantMo
 }
 export function validateReception(value: unknown): Reception {
   try {
-    const r = object(value, ['schemaVersion','receptionId','objectId','createdAt','number','status','plan','revision','trials']);
+    const keys = ['schemaVersion','receptionId','objectId','createdAt','number','status','plan','revision','trials'];
+    if (value && typeof value === 'object' && Object.hasOwn(value, 'termination')) keys.push('termination');
+    const r = object(value, keys);
     if (r.schemaVersion !== 'reception_v1' || !uuid.test(r.receptionId) || !owner.test(r.objectId) || !iso(r.createdAt) ||
       r.number !== null && (typeof r.number !== 'string' || !/^\d{3}$/u.test(r.number)) ||
-      !['pending','approved','in_progress','finished','cancelled'].includes(r.status) || !int(r.revision) || r.revision < 0 || !Array.isArray(r.trials)) return fail();
+      !['pending','approved','in_progress','finished','cancelled','interrupted'].includes(r.status) ||
+      (r.status === 'interrupted' ? !isAdminTermination(r.termination) : Object.hasOwn(r, 'termination')) ||
+      !int(r.revision) || r.revision < 0 || !Array.isArray(r.trials)) return fail();
     const plan = r.plan === null ? null : validateReceptionPlan(r.plan);
     const trials = r.trials.map((raw: unknown, index: number) => {
       const t = object(raw, ['index','recordId']);
       if (t.index !== index || !plan || index >= plan.trials.length || t.recordId !== null && !uuid.test(t.recordId)) return fail();
       return { index, recordId: t.recordId as string | null };
     });
-    if (r.status === 'pending' && (plan || trials.length) || ['approved','in_progress','finished'].includes(r.status) && !plan ||
-      ['approved','cancelled'].includes(r.status) && trials.length || r.status === 'in_progress' && !trials.length ||
+    if (r.status === 'pending' && (plan || trials.length) || ['approved','in_progress','finished','interrupted'].includes(r.status) && !plan ||
+      ['approved','cancelled'].includes(r.status) && trials.length || ['in_progress','interrupted'].includes(r.status) && !trials.length ||
       r.status === 'finished' && (!plan || trials.length !== plan.trials.length || trials.some((t: {recordId: string|null}) => !t.recordId))) return fail();
     return { schemaVersion:'reception_v1', receptionId:r.receptionId, objectId:r.objectId, createdAt:r.createdAt,
-      number:r.number, status:r.status, plan, revision:r.revision, trials };
+      number:r.number, status:r.status, plan, revision:r.revision, trials,
+      ...(r.status === 'interrupted' ? { termination: { ...r.termination } } : {}) };
   } catch { return fail(); }
 }
 export function createReception(input: { receptionId: string; objectId: string; createdAt: string; number: string | null }): Reception {
@@ -398,11 +404,16 @@ export function cancelReception(value: unknown, expectedRevision: number): Recep
   if (!['pending','approved'].includes(r.status) || r.trials.length || r.revision !== expectedRevision) return fail('reception_conflict');
   return validateReception({ ...r, status:'cancelled', revision:r.revision+1 });
 }
+export function terminateReception(reception: Reception, expectedRevision: number, termination: AdminTermination): Reception {
+  if (reception.status === 'interrupted') return reception;
+  if (reception.status !== 'in_progress' || reception.revision !== expectedRevision) return fail('reception_conflict');
+  return validateReception({ ...reception, status:'interrupted', revision:reception.revision+1, termination });
+}
 /** Public projection: three fields only. `questionnaire` means the plan waits for the predecessor's questionnaire. */
 export function participantReception(value: unknown, context: { awaitingQuestionnaire?: boolean } = {}) {
   const r = validateReception(value);
   const status = r.status === 'in_progress' && context.awaitingQuestionnaire === true ? 'questionnaire'
-    : ({ pending:'waiting', approved:'ready', in_progress:'in_progress', finished:'finished', cancelled:'unavailable' } as const)[r.status];
+    : ({ pending:'waiting', approved:'ready', in_progress:'in_progress', finished:'finished', cancelled:'unavailable', interrupted:'interrupted' } as const)[r.status];
   return { number:r.number, status, revision:r.revision };
 }
 export function receptionSummary(value: unknown): ReceptionSummary {
