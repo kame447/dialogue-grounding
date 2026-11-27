@@ -122,6 +122,77 @@ test('frozen S4 records remain readable with their recorded intervention and rep
   for (const check of checks) assert.equal(check.status, 'pass', check.id);
 });
 
+test('v17 asks the unresolved question Jev selected after a draft mismatch on both decisions', async () => {
+  const mismatchedDraft = '右端に切れ目がある図形、そちらも見つかりましたか？';
+  const published = 'どの特徴をもう少し確かめたいですか？';
+  const ledger = initialState({ profile: legacyProfile, generationRetryVersion: integratedGeneration,
+    agreeNameScopeVersion: 'jev_naming_v1' }).ledger;
+  const records = await buildRecords({ technicalTrial, dialoguePolicy: 'holistic_v5', interventionVersion: 'bypass_acceptance_v2',
+    judgmentMaterialVersion: 'jev_repair_quality_v1', generationRetryVersion: integratedGeneration,
+    agreeNameScopeVersion: 'jev_naming_v1',
+    turns: [{ human: '図形を見分ける特徴を教えてください。', plan: {
+      action: 'accept', target: 'none',
+      drafts: [mismatchedDraft, mismatchedDraft, mismatchedDraft, mismatchedDraft, published],
+      choose: question => question === 'publication_continuation' ? 'ask_unresolved'
+        : question === 'human_move_on_source' ? 'other' : undefined,
+    } }],
+    onTurn(_label, turn) {
+      const publication = turn.trace.generatedPublication;
+      assert.ok(publication?.recovery);
+      assert.equal(publication.recovery.reason, 'publication_mismatch');
+      assert.deepEqual(publication.recovery.violations, ['orientation_leak']);
+      assert.deepEqual(publication.continuation, {
+        reason: 'draft_mismatch', choice: 'ask_unresolved', violations: ['orientation_leak'],
+      });
+      assert.equal(turn.trace.finalAction?.action, 'confirm');
+      assert.equal(turn.trace.finalAction?.discriminatingFeature, null);
+      assert.equal(turn.trace.generationGuard.fallback, false);
+      assert.equal(turn.speech, published);
+      assert.deepEqual(turn.state.ledger, ledger);
+      assert.equal(turn.luna.filter(call => call.phase === 'generation').length, 5);
+    },
+  });
+  const replay = records.trials[0].replay[0].result;
+  assert.equal(replay.commonEqual, true);
+  for (const side of replay.sides) {
+    const requests = side.requests.filter((call: { payload: { questions?: object } }) =>
+      call.payload.questions && Object.hasOwn(call.payload.questions, 'publication_continuation'));
+    assert.deepEqual(requests.map((call: { role: string }) => call.role), ['publication_decision']);
+  }
+  const checks = verifyRecords(records).checks.filter(check => check.id.startsWith('intervention.trial.0.attempt.0.'));
+  assert.equal(checks.length, 4);
+  for (const check of checks) assert.equal(check.status, 'pass', check.id);
+});
+
+test('v17 keeps the human turn pending if the unresolved draft also fails', async () => {
+  const profile = researchTrialProfileV3(lunaRequest, timeouts, 'two_stage_v3', 'holistic_v5',
+    'bypass_acceptance_v2', 'jev_repair_quality_v1');
+  const state = initialState({ profile, generationRetryVersion: integratedGeneration, agreeNameScopeVersion: 'jev_naming_v1' });
+  const human = '図形を見分ける特徴を教えてください。';
+  const mismatchedDraft = '右端に切れ目がある図形、そちらも見つかりましたか？';
+  const drafts = Array<string>(6).fill(mismatchedDraft);
+  await assert.rejects(runTurn(profile, 'repair-first', state, [{ seq: 1, speaker: 'human', text: human }], {
+    action: 'accept', target: 'none', drafts,
+    choose: question => question === 'publication_continuation' ? 'ask_unresolved'
+      : question === 'human_move_on_source' ? 'other' : undefined,
+  }, technicalTrial, integratedGeneration), (error: unknown) => {
+    const failure = error as { code: string; generationErrorCode: string; drafts: string[]; traces: JevTurnTrace[];
+      publication: { status: string; publicEvents: { speaker: string; text: string }[];
+        durable: { errorCode: string; pendingHumanEventIds: string[]; privateState: unknown } } };
+    assert.equal(failure.code, 'generation_failed');
+    assert.equal(failure.generationErrorCode, 'invalid_response');
+    assert.deepEqual(failure.drafts, drafts);
+    assert.equal(failure.traces.at(-1)?.generationGuard.fallback, false);
+    assert.equal(failure.traces.at(-1)?.publicSpeech, null);
+    assert.equal(failure.publication.status, 'error');
+    assert.deepEqual(failure.publication.publicEvents.map(({ speaker, text }) => ({ speaker, text })), [{ speaker: 'human', text: human }]);
+    assert.equal(failure.publication.durable.errorCode, 'ai_unavailable');
+    assert.deepEqual(failure.publication.durable.pendingHumanEventIds, ['event-1']);
+    assert.deepEqual(failure.publication.durable.privateState, state);
+    return true;
+  });
+});
+
 test('generation transport failure preserves the queued event and private state through restore and retry', async () => {
   const started = legacyOptions('repair-first', { rejectGeneration: true });
   const task = await createNamingTaskV2(started.options);
