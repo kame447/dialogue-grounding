@@ -24,6 +24,7 @@
 | --- | --- | --- | --- | --- |
 | 旧 v16 | `jev_generation_retry_v16` | 従来の `holistic_v5` の判断材料 | `claim_prune_v2` | `structured_outputs_v1` など承認時に保存した方式 |
 | v17（`participant_dialogue_v17_pilot012`） | `jev_generation_retry_v17` | `jev_repair_quality_v1` | `claim_prune_v3` | `structured_outputs_v2` |
+| v18（`participant_dialogue_v18_pilot012`） | `jev_generation_retry_v18` | `jev_repair_quality_v1` | `claim_prune_v3` | `structured_outputs_v2` |
 
 承認済みの受付と保存済みの試行は、それぞれに固定された版で開始・復元します。初回観察の方式が保存されていない旧受付には、当時の方式を使います。
 
