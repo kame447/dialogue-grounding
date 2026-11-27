@@ -71,7 +71,7 @@ export type Plan = { action: string; target: string; issue?: string; prospect?: 
   referent?: string };
 const TEXTS: Record<string, string> = { local_extraction: '[]', ai_extraction: '[]' };
 
-export async function runTurn(profile: any, label: Label, state: any, events: any[], plan: Plan, technicalTrial: { version: TrialVersion } | undefined, generationRetryVersion?: RecordedGenerationRetryVersion) {
+export async function runTurn(profile: any, label: Label, state: any, events: any[], plan: Plan, technicalTrial: { version: TrialVersion } | undefined, generationRetryVersion?: RecordedGenerationRetryVersion, own = OWN) {
   const luna: any[] = [], jev: any[] = [], traces: any[] = [], reobservations: any[] = [], boundary = { luna: -1, jev: -1 };
   const httpBodies: { provider: 'luna' | 'jev'; sha256: string }[] = [];
   const capture = (provider: 'luna' | 'jev', init: RequestInit | undefined) => {
@@ -120,8 +120,8 @@ export async function runTurn(profile: any, label: Label, state: any, events: an
     ...(plan.referent ? { estimateReferent: (i: any, o: any) => native.estimateReferent!(i, o) } : {}),
     ...(profile.dialoguePolicy ? { classifyDraftAct: (i: any, o: any) => native.classifyDraftAct!(i, o) } : {}),
     ...(technicalTrial ? { estimateRepairProspect: (i: any, o: any) => native.estimateRepairProspect!(i, o) } : {}) };
-  const runtime = createProfileDialogue(profile, { client, image: OWN.ownImage, anchors: [...OWN.ownAnchors], strategy: label,
-    observer: { async observeAll() { return structuredClone(OLD.state.observationMemo); },
+  const runtime = createProfileDialogue(profile, { client, image: own.ownImage, anchors: [...own.ownAnchors], strategy: label,
+    observer: { async observeAll() { return structuredClone({ ...OLD.state.observationMemo, figures: OLD.state.observationMemo.figures.filter((f: { id: string }) => own.ownAnchors.some((a: { id: string }) => a.id === f.id)) }); },
       async reobserve(input: any) { const result = { observedAt: '2026-01-01T00:00:01.000Z', issue: structuredClone(input.issue),
         figures: input.figureIds.map((figureId: string) => ({ figureId, supports: ['control-feature'], contradicts: [], unknown: [] })) };
         reobservations.push(structuredClone(result)); await client.complete(buildReobservationMessages(input), { phase: 'observation_targeted' }); return result; } }, jevDecision,
@@ -182,21 +182,29 @@ export function publicFocusTurn(figureIndex = 0): Turn {
   return { human: 'この形の特徴を教えてください。', plan: { action: 'accept', target: 'figure_' + figureIndex, referent: 'figure_' + figureIndex, speech: text,
     aiExtraction: JSON.stringify([{ segmentId: 's1', quote: text, proposition: text, name: null, targets: [OWN.ownAnchors[figureIndex].id], aspect: 'part', linkedIssueId: null, respondsToTurn: null }]) } };
 }
-export async function buildRecords({ label = 'repair-first' as Label, technicalTrial, turns, ledger, dialoguePolicy, memo, generationRetryVersion, agreeNameScopeVersion, onTurn, promptSources, interventionVersion, judgmentMaterialVersion }: {
+export async function buildRecords({ label = 'repair-first' as Label, technicalTrial, turns, ledger, dialoguePolicy, memo, generationRetryVersion, agreeNameScopeVersion, onTurn, promptSources, interventionVersion, judgmentMaterialVersion, figureCount = 6 }: {
   label?: Label; technicalTrial?: { version: TrialVersion }; turns: Turn[]; ledger?: Record<string, any>; dialoguePolicy?: DialoguePolicy | null; memo?: ObservationMemo; generationRetryVersion?: RecordedGenerationRetryVersion;
   agreeNameScopeVersion?: AgreeNameScopeVersion;
   onTurn?: (label: Label, result: Awaited<ReturnType<typeof runTurn>>) => void;
   promptSources?: Awaited<ReturnType<typeof promptSourceManifest>>;
   interventionVersion?: InterventionVersion;
   judgmentMaterialVersion?: JudgmentMaterialVersion;
+  figureCount?: 4 | 6;
 }) {
   const n = structuredClone(normal), tr = n.trials[0], m = n.run.manifest;
+  const own = { ...OWN, ownAnchors: OWN.ownAnchors.slice(0, figureCount) };
   await bindCurrentS4PromptSources(n, promptSources);
   const profile = JSON.parse(JSON.stringify(researchTrialProfileV3(m.lunaRequest, m.timeouts, 'two_stage_v3', dialoguePolicy, interventionVersion, judgmentMaterialVersion)));
   const digest = hash(profile);
   for (const s of [n.run, n.summary, tr]) { s.profile = structuredClone(profile); s.profileSha256 = digest; }
   tr.identity.profile = digest; tr.label = label; m.trials[0].label = label; n.summary.runOrder[0].label = label;
   let state: any = initialState({ profile, ledger, memo, generationRetryVersion, agreeNameScopeVersion });
+  if (figureCount === 4) {
+    const slots = own.ownAnchors.map((anchor: { id: string }) => anchor.id);
+    state.ledger = Object.fromEntries(slots.map((slot: string) => [slot, state.ledger[slot]]));
+    state.graph.slots = slots;
+    state.observationMemo.figures = state.observationMemo.figures.filter((figure: { id: string }) => slots.includes(figure.id));
+  }
   let events: any[] = [];
   for (let i = 0; i < turns.length; i++) {
     const seq = events.length + 1;
@@ -204,7 +212,7 @@ export async function buildRecords({ label = 'repair-first' as Label, technicalT
     const run = { state, events: structuredClone(events) };
     const last = i === turns.length - 1;
     if (!last) {
-      const r = await runTurn(profile, label, state, events, turns[i].plan, technicalTrial, generationRetryVersion);
+      const r = await runTurn(profile, label, state, events, turns[i].plan, technicalTrial, generationRetryVersion, own);
       assert.equal(r.publication.status, 'committed');
       onTurn?.(label, r);
       state = r.state;
@@ -212,8 +220,8 @@ export async function buildRecords({ label = 'repair-first' as Label, technicalT
       continue;
     }
     // The final turn is run once per label: the common segment (before the original decision) is shared, each tail is that label's own.
-    const runs = { 'repair-first': await runTurn(profile, 'repair-first', run.state, run.events, turns[i].plan, technicalTrial, generationRetryVersion),
-      'bypass-enabled': await runTurn(profile, 'bypass-enabled', run.state, run.events, turns[i].plan, technicalTrial, generationRetryVersion) };
+    const runs = { 'repair-first': await runTurn(profile, 'repair-first', run.state, run.events, turns[i].plan, technicalTrial, generationRetryVersion, own),
+      'bypass-enabled': await runTurn(profile, 'bypass-enabled', run.state, run.events, turns[i].plan, technicalTrial, generationRetryVersion, own) };
     const a = runs['repair-first'], b = runs['bypass-enabled'];
     assert.equal(a.publication.status, 'committed');
     assert.equal(b.publication.status, 'committed');
@@ -227,12 +235,12 @@ export async function buildRecords({ label = 'repair-first' as Label, technicalT
       common: { luna: a.luna.slice(0, a.boundary.luna), jev: a.jev.slice(0, a.boundary.jev), reobservations: structuredClone(a.reobservations) },
       tails: { 'repair-first': seg(a), 'bypass-enabled': seg(b) }, recorded: { label, expectedRequests: [] }, ...(technicalTrial ? { technicalTrial } : {}),
       ...(version ? { generationRetryVersion: version } : {}) };
-    const probe: any = await pairedInterventionReplay(tape, OWN as any, MODEL, profile);
+    const probe: any = await pairedInterventionReplay(tape, own as any, MODEL, profile);
     assert.equal(probe.status === 'not_reached', false, String(probe.error));
     const recorded = probe.sides.find((s: any) => s.label === label);
     tape.recorded.expectedRequests = recorded.requests.map((r: any, k: number) => ({ provider: r.provider, phase: r.phase, requestSha256: r.preProjectionPayloadSha256,
       actualSendMeasured: true, sendIds: [k + 1], ...(r.provider === 'luna' ? { messagesSha256: r.completeMessagesSha256 } : {}) }));
-    const result: any = await pairedInterventionReplay(tape, OWN as any, MODEL, profile);
+    const result: any = await pairedInterventionReplay(tape, own as any, MODEL, profile);
     assert.equal(result.status, 'same_material_intervention_verified', String(result.error));
     const { trace, state: after } = runs[label];
     // The record keeps its own run's intervention, including the measured latency of the alternative's detail evidence (audit/06 R2).
