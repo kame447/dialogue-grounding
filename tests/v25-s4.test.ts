@@ -46,7 +46,7 @@ const rotationMemo = () => {
   return rotationInitialMemo(anchors, new Map(anchors.map((anchor: { id: string }, i: number) => [anchor.id, projectionOf(VIEWS[i])] as const)), '2026-01-01T00:00:00.000Z');
 };
 type Check = 'off' | 'on';
-type Scene = 'confirm' | 'confirm_regenerated' | 'accept' | 'accept_continued' | 'propose_name';
+type Scene = 'confirm' | 'confirm_regenerated' | 'accept' | 'accept_continued' | 'propose_name' | 'request_observation';
 const draft = (text: string, check: Check, plain = false) => check === 'on' ? JSON.stringify({ text, observationFeatures: [] }) : plain ? text : JSON.stringify({ text });
 const bad = 'この図形をいったん置いて、次のを見よう。';
 const turn = (scene: Scene, check: Check, anchorId: string) => {
@@ -63,6 +63,9 @@ const turn = (scene: Scene, check: Check, anchorId: string) => {
       drafts: [bad, bad, bad, bad, draft('細い部分が端でつながっています。', check)],
       choose: (key: string, _criteria: unknown, { generationCalls }: { generationCalls: number }) => key === 'draft_topic_shift' ? generationCalls < 5 ? 'unsupported_shift' : 'within_plan'
         : key === 'publication_continuation' ? 'ask_unresolved' : choose(key) } },
+    // The decision looks again at the figure (one self-side re-observation) before the final action: the re-observation request is the same bytes as v24's.
+    request_observation: { human: 'もう少し詳しく見てください。', plan: { ...base, action: 'confirm', target: 'figure_0', reobserve: true, speech: draft('見てから確かめます。', check),
+      choose: (key: string) => key === 'observe_aspect' ? 'construal' : choose(key) } },
     propose_name: { human, plan: { ...base, action: 'propose_name', target: 'figure_0', name: '鳥', speech: 'では、「鳥」にしませんか？', aiExtraction: '[]', act: 'construe',
       extraction: JSON.stringify([{ segmentId: 'shape', quote: human, targets: [anchorId], aspect: 'construal', proposition: human, name: null, linkedIssueId: null, respondsToTurn: null }]),
       choose: (key: string) => key === 'draft_naming' ? 'propose_chosen' : choose(key) } },
@@ -77,7 +80,7 @@ function record(scene: Scene, check: Check, { version = 'jev_generation_retry_v2
 }
 
 // ---- 1. S4 passes a v25 record ----
-const SCENES: [Scene, Check][] = [['confirm', 'off'], ['confirm', 'on'], ['confirm_regenerated', 'on'], ['accept', 'off'], ['accept_continued', 'on'], ['propose_name', 'off'], ['propose_name', 'on']];
+const SCENES: [Scene, Check][] = [['confirm', 'off'], ['confirm', 'on'], ['confirm_regenerated', 'on'], ['accept', 'off'], ['accept_continued', 'on'], ['propose_name', 'off'], ['propose_name', 'on'], ['request_observation', 'off'], ['request_observation', 'on']];
 for (const [scene, check] of SCENES) for (const label of ['repair-first', 'bypass-enabled'] as Label[]) {
   test(`v25 ${scene} (${check}, ${label}): S4 verifies the record without the rotation memory`, async () => {
     assert.deepEqual(statuses(await record(scene, check, { label })), ALL_PASS);

@@ -60,7 +60,7 @@ hold_open と carry_over の「公開の問い（publicQuestions）に観察メ�
 
 - 新しい行: `p5_pilot012_generation_cleanup_v25`（`parity-verify/intervention-records.ts` の `PROMPT_VERSIONS`、登録は `docs/generation-cleanup-v25-20261129/s4-register-prompt-version.ts`）。既存の行は 1 行も変えていない。
 - 独立の写し: `generation-prompt-v23-records.ts`（v24 と v25 の変えた文を全文で持ち、v25 の要求は新しい文だけを、v24 の要求は古い文だけを持つことを照合する）、`turned-view-records.ts`（出所の例の 1 文と抽出の 2 文、新しい版を回転別メモを持てる版に追加）、`intervention-records.ts`（v25 の分岐）、`issue-handling-records.ts`（`s4UsesV25GenerationRules`）。
-- 照合: `tests/v25-s4.test.ts`（47 件。記録を作って S4 を通す、新しい文を 1 字変える・v24 の文に戻す・v24 の記録に新しい文を入れると replay だけが不一致になる）。
+- 照合: `tests/v25-s4.test.ts`（55 件。記録を作って S4 を通す、新しい文を 1 字変える・v24 の文に戻す・v24 の記録に新しい文を入れると replay だけが不一致になる）。
 - failure-path の fixture: 確定のソースの commit から `tests/fixtures/parity-verify/failure-path-v25-<sha>/` に 1 回だけ取り直し、`tests/parity-failure-fixture.test.ts` の 2 行（ディレクトリ名と baseCommit の完全な SHA）を向け替えた。手順は `docs/generation-cleanup-v25-20261129/s4-refresh.sh`。旧い fixture は残している。
 
 ## 5. 実 API の短い試験（模擬とは別。統括の許可、上限 24 回、23 回使用）
@@ -84,7 +84,7 @@ hold_open と carry_over の「公開の問い（publicQuestions）に観察メ�
 
 ## 6. 検証（模擬）
 
-試験の一覧と結果は PR の本文。新しい試験: `tests/v25-generation-cleanup.test.ts`（18）、`tests/v25-profile.test.ts`（4）、`tests/v25-s4.test.ts`（47）。既存の `tests/participant-terra-worker-integration.test.ts` は、模擬の `v12Transport` が抽出の要求を指示文の完全一致で分類するため、v25 の ON の抽出の指示を足し、v24 の生成後チェックの試験と 3 図形の束の試験を v25 でも実行するようにした（v24 の試験名と本体は変えていない）。
+試験の一覧と結果は PR の本文。新しい試験: `tests/v25-generation-cleanup.test.ts`（18）、`tests/v25-profile.test.ts`（4）、`tests/v25-s4.test.ts`（55）。既存の `tests/participant-terra-worker-integration.test.ts` は、模擬の `v12Transport` が抽出の要求を指示文の完全一致で分類するため、v25 の ON の抽出の指示を足し、v24 の生成後チェックの試験と 3 図形の束の試験を v25 でも実行するようにした（v24 の試験名と本体は変えていない）。
 
 ## 7. 見送ったこと・確かめていないこと
 
