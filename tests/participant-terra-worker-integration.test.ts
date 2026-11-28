@@ -35,6 +35,7 @@ import { INITIAL_OBSERVATION_STRUCTURED_V1, INITIAL_OBSERVATION_STRUCTURED_V2,
   type InitialObservationGeneration } from '../dialogue-model/runtime/observation/initial-observation-generation.ts';
 import { buildObservationMessages } from '../dialogue-model/runtime/observation/observe.ts';
 import { rotationMemoryPin } from '../dialogue-model/runtime/stimuli/rotation-memory.ts';
+import { ROTATION_PRIVATE_TEXTS } from '../dialogue-model/runtime/decision/rotation-memory-guidance.ts';
 import { overrideRotationMemorySource } from '../workers/tangram-experiment/src/rotation-memory-source.ts';
 import { SHAPE_TERMINOLOGY, SHAPE_TERMINOLOGY_GENERATION } from '../dialogue-model/runtime/shape-terminology.ts';
 
@@ -3595,7 +3596,15 @@ const NEW_MODE_SEED = (() => {
     if (turns.join() === '90,180,270') return seed;
   }
 })();
-async function threeFigureStockFlow(t: TestContext, rotationMode: string, seed?: number) {
+const allStrings = (value: unknown): string[] => typeof value === 'string' ? [value] : Array.isArray(value) ? value.flatMap(allStrings)
+  : value && typeof value === 'object' ? Object.values(value).flatMap(allStrings) : [];
+/**
+ * A reception approved with prepared stock by a deploy that has no rotation-memory bundle (an earlier reception), through both conditions.
+ * `deploy` adds the bundle in the middle: right after the approval (both trials then start after the deploy), or right after the first trial
+ * started (that trial is running at the deploy and takes its turns after it, the second one starts after it). The plan has no pin, so the
+ * deploy changes nothing: the record, the first memo and every request stay on the earlier path.
+ */
+async function threeFigureStockFlow(t: TestContext, rotationMode: string, seed?: number, deploy?: 'afterApprove' | 'afterFirstStart') {
   const figureIds = ['F2', 'F17', 'F30'];
   const selected = { ...figureBankProtocol, rotationMode, revision: figureBankProtocol.revision + 1,
     figureSelection: { mode: 'custom', figureIds: [...figureIds].reverse() } };
@@ -3612,6 +3621,16 @@ async function threeFigureStockFlow(t: TestContext, rotationMode: string, seed?:
   assert.match(transport.prompts[0].system.join('\n'), /全3図形/);
   await h.receive();
   const approved = await h.approve();
+  assert.equal(Object.hasOwn(approved.plan, 'rotationMemory'), false, 'the plan of an earlier reception has no pin');
+  // The deploy that adds the bundle: the earlier one had none (harness() above), the new one has it, and the Durable Object restarts on it.
+  const deployBundle = () => {
+    assert.ok(deployedBundle, 'the new deploy has a bundle');
+    const earlier = overrideRotationMemorySource(deployedBundle);
+    assert.equal(earlier, undefined, 'the earlier deploy had none');
+    t.after(() => { overrideRotationMemorySource(earlier); });
+    h.evict();
+  };
+  if (deploy === 'afterApprove') deployBundle();
   assert.equal(approved.plan.protocolId, selected.protocolId);
   assert.equal(approved.plan.protocolRevision, selected.revision);
   assert.equal(approved.plan.protocolSha256, receptionProtocolSha256(canonicalReceptionProtocolV3(selected)));
@@ -3638,6 +3657,11 @@ async function threeFigureStockFlow(t: TestContext, rotationMode: string, seed?:
     assert.equal(trial.scene.shapes.length, 3);
     assert.doesNotMatch(JSON.stringify(trial), /figureSelection|figureIds|observationMemo|ownAnchors|participantModelPin/u);
     const opening = await h.storage.get(key);
+    if (deploy === 'afterFirstStart' && strategy === 'bypass-enabled') deployBundle();
+    // The earlier path: no pin in the record or its copy of the plan, and no rotation memory in the first memo.
+    assert.equal(Object.hasOwn(opening.options, 'rotationMemory'), false);
+    assert.equal(Object.hasOwn(opening.assignment.source.plan, 'rotationMemory'), false);
+    assert.ok(opening.queueState.privateState.observationMemo.figures.every((figure: any) => !Object.hasOwn(figure, 'rotation')));
     assert.equal(opening.strategy, strategy);
     assert.deepEqual(opening.stimulus.figureIds, figureIds);
     assert.equal(opening.options.rotationMode, rotationMode);
@@ -3649,6 +3673,13 @@ async function threeFigureStockFlow(t: TestContext, rotationMode: string, seed?:
     const requestStart = h.calls.length, promptStart = transport.prompts.length;
     await jsonOk(await h.request('message', { expectedRecordId: id, text: '形を一つ確認したいです。', clientId: 'three-figure-turn' }));
     await h.idle();
+    // Nothing of the rotation memory reaches a request of an earlier reception, whether or not the deploy has the bundle by now.
+    const sent = allStrings([h.calls.slice(requestStart), transport.prompts.slice(promptStart)]).join('\n');
+    assert.equal(sent.includes('rotationLegend'), false);
+    for (const text of ROTATION_PRIVATE_TEXTS) assert.equal(sent.includes(text), false, text.slice(0, 24));
+    const afterTurn = await h.storage.get(key);
+    assert.equal(Object.hasOwn(afterTurn.options, 'rotationMemory'), false);
+    assert.ok(afterTurn.queueState.privateState.observationMemo.figures.every((figure: any) => !Object.hasOwn(figure, 'rotation')));
     const action = h.calls.slice(requestStart).find(call => call.kind === 'choices' && Object.hasOwn(call.body.questions, 'action'));
     assert.ok(action);
     assert.equal(JSON.parse(action.body.state).ownSlots.length, 3);
@@ -3696,6 +3727,13 @@ test('three-figure Worker uses prepared stock across protocol revisions through 
   t => threeFigureStockFlow(t, 'relative_pm90'));
 test('relative_90_180_270 three-figure Worker prepares, approves and starts with no observation request, then scores both conditions and cold-restores them',
   t => threeFigureStockFlow(t, 'relative_90_180_270', NEW_MODE_SEED));
+// A deploy that adds the rotation-memory bundle after such a reception was approved: it keeps its prepared stock and the earlier path in both conditions.
+for (const [mode, seed] of [['relative_pm90', undefined], ['relative_90_180_270', NEW_MODE_SEED]] as const) {
+  test(`${mode}: a reception approved before the deploy that adds the rotation-memory bundle starts and runs both conditions on the earlier path`,
+    t => threeFigureStockFlow(t, mode, seed, 'afterApprove'));
+  test(`${mode}: a trial running at the deploy that adds the rotation-memory bundle keeps the earlier path, and the next one starts on it`,
+    t => threeFigureStockFlow(t, mode, seed, 'afterFirstStart'));
+}
 
 test('a missing prepared cache refuses start before consuming admission, while a saved trial restores from its own memo', async () => {
   const h = harness(true, protocol, true);
