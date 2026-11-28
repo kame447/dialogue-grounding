@@ -12,6 +12,7 @@ import { SCRIPTED_OPENING_MODE } from '../dialogue-model/runtime/v2/opening-mode
 import { validateParticipantModelPin } from '../dialogue-model/runtime/v2/participant-model-pin.ts';
 import { sameRotationMemoryPin, validateRotationMemoryPin, validateRotationMemoryRecord } from '../dialogue-model/runtime/v2/rotation-memory-pin.ts';
 import { readVisualFeatureEvidence } from '../dialogue-model/runtime/v2/visual-feature-evidence.ts';
+import { rotationMemoryLayer } from '../dialogue-model/runtime/decision/rotation-memory-guidance.ts';
 import { INITIAL_OBSERVATION_STRUCTURED_V2 } from '../dialogue-model/runtime/observation/initial-observation-generation.ts';
 import { buildReobservationMessages, mergeReobservation, validateObservationMemo } from '../dialogue-model/runtime/observation/observe.ts';
 import { workerTerraInitialKey } from '../dialogue-model/runtime/observation/worker-terra-observer.ts';
@@ -224,8 +225,9 @@ test('a re-observation of a rotation-memory memo carries only the targeted figur
   const issue = { aspect: 'part' as const, question: '三角形の大きさは？', partnerConstrual: null };
   const messages = buildReobservationMessages({ ...own, memo, figureIds: [target.id], issue });
   const text = JSON.stringify(messages);
-  // The re-observation shows the nouns layer (one line per view) with its legend, not the full projection.
-  assert.ok(text.includes(target.id) && text.includes('rotationLegend') && text.includes('全体: '), 'the targeted figure brings its memory');
+  // The call carries the nouns layer of the targeted figure's memory (C's layer: one line per region), not the stored projection.
+  const regionLine = (rotationMemoryLayer(memo.figures.find(f => f.id === target.id)!.rotation!, 'nouns').regions as string[])[0];
+  assert.ok(text.includes(target.id) && text.includes(regionLine), 'the targeted figure brings its memory');
   assert.ok(!text.includes(other.id), 'no other figure of the board');
   assert.doesNotMatch(text, /"F\d+"|figureKey|bankVersion/u);
   const merged = mergeReobservation(memo, { observedAt: '2026-11-28T00:00:01.000Z', issue,
