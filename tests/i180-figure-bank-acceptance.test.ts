@@ -202,7 +202,8 @@ function workerHarness(initialProtocol: ReceptionProtocolV2 | ReceptionProtocolV
   let badTerra = false;
   const mode = { value: 'on', revision: 1, savedAt: now };
   const readReceptionSettings = async () => ({ mode, protocol: settings(protocol) });
-  const fakeIndex = { readReceptionSettings, async receptionProtocolHistory() { return []; }, async receptionModeHistory() { return []; } };
+  const fakeIndex = { readReceptionSettings, async receptionProtocolHistory() { return []; }, async receptionModeHistory() { return []; },
+    async listFigurePresets() { return [{ id: 'trio-01-v1', revision: 1, name: '3図形（F1–F3）', figureIds: ['F1', 'F2', 'F3'] }]; } };
   const rate = { async limit() { return { success: true }; } };
   const chat = (model: string, content: string) => ({
     status: 200, data: { model, choices: [{ message: { content }, finish_reason: 'stop' }],
@@ -410,7 +411,7 @@ test('per-trial random approval cannot silently give both trials the same six fi
   }
 });
 
-test('the figure catalogue is researcher-only and renders the 30 figures and five preset rows through the Worker', async () => {
+test('the figure catalogue is researcher-only and renders the 30 figures, the new-reception presets and the older six sets through the Worker', async () => {
   const h = workerHarness(v2);
   for (const auth of [undefined, 'Bearer synthetic-wrong-token']) {
     const denied = await h.request('/admin/figures', undefined, { cookie: false, auth });
@@ -423,7 +424,7 @@ test('the figure catalogue is researcher-only and renders the 30 figures and fiv
   const html = await listed.text();
   const { FIGURE_BANK, FIGURE_SETS } = figureBank();
   const labels = [...html.matchAll(/<svg[^>]+aria-label="(F\d+)"/gu)].map(match => match[1]);
-  assert.deepEqual(labels, [...FIGURE_BANK.map(figure => figure.id), ...Object.values(FIGURE_SETS).flat()]);
+  assert.deepEqual(labels, [...FIGURE_BANK.map(figure => figure.id), 'F1', 'F2', 'F3', ...Object.values(FIGURE_SETS).flat()]);
   for (const name of Object.keys(FIGURE_SETS)) assert.ok(html.includes('<h3>' + name + '</h3>'));
   const publicAlias = await h.request('/api/figures', undefined, { auth: 'Bearer ' + adminToken });
   assert.equal(publicAlias.status, 404);
