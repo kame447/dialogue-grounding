@@ -113,7 +113,11 @@ export function createReceptionAdminPort(options: Options): ReceptionAdminPort {
           else trial.participantRole = participantRoleView(role);
         }
       }
-      return { items, next:start+PAGE_SIZE < summaries.length ? page.at(-1)!.receptionId : null };
+      // A reception with only deleted trials is no longer an experiment to manage.
+      // Preserve the owning reception and its trial IDs for admission/retry safety;
+      // an unstarted reception or an unrecorded admission is not a deleted trial.
+      const visible = items.filter(item => !item.trials.length || item.trials.some(trial => !trial.recordDeleted));
+      return { items: visible, next:start+PAGE_SIZE < summaries.length ? page.at(-1)!.receptionId : null };
     },
     async version(since) {
       // Change detection only: index rows and settings are hashed, never shown; management values still come from the owner.
