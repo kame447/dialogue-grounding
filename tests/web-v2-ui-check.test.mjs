@@ -63,13 +63,15 @@ function trial(id = "trial-private") {
   } };
 }
 const tick = async () => { for (let i = 0; i < 40; i++) await Promise.resolve(); };
-async function ui(initial = trial(), handler) {
+async function ui(initial = trial(), handler, { tabSessionId, storage = new Map(), startTime = 10000 } = {}) {
   const { root, ids: e } = makeDOM();
-  let state = { trial: initial }, timerId = 0, now = 10000, clientSequence = 0;
+  let state = { trial: initial }, timerId = 0, now = startTime, clientSequence = 0;
   const timers = new Map(), calls = [];
   runInNewContext(script, {
     Date: class extends Date { static now() { return now; } },
     crypto: { randomUUID: () => "browser-client-" + ++clientSequence },
+    ...(tabSessionId ? { TangramTabSession: { resolve: async () => ({ kind: "restored", sessionId: tabSessionId }) } } : {}),
+    sessionStorage: { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: (key) => storage.delete(key) },
     document: { getElementById: (id) => e[id], createElement: (tag) => new Element(tag), createElementNS: (_, tag) => new Element(tag) },
     FormData: class {
       constructor(form) { this.values = Object.entries(form.elements).map(([name, node]) => [name, node.value]); }
@@ -79,7 +81,7 @@ async function ui(initial = trial(), handler) {
     clearTimeout: (id) => timers.delete(id),
     fetch: async (path, options) => {
       const body = options?.body ? JSON.parse(options.body) : undefined;
-      calls.push({ path, body });
+      calls.push({ path, body, tabHeader: options?.headers?.["X-Tab-Session"] });
       const custom = await handler?.({ path, body, state });
       let value = state;
       // invalidJson models an HTML error page from a proxy in front of the app.
@@ -91,10 +93,6 @@ async function ui(initial = trial(), handler) {
         const eventId = "event-" + (state.trial.events.length + 1);
         state.trial.events.push({ id: eventId, speaker: "human", text: body.text, clientId: body.clientId });
         state.trial.aiStatus = "thinking"; value = { eventId, ...state };
-      }
-      if (path === "/api/retry") {
-        state.trial.aiStatus = "idle";
-        state.trial.events.push({ id: "event-retry", speaker: "ai", text: "再試行した応答" });
       }
       return { ok: true, status: path === "/api/message" ? 202 : 200, json: async () => structuredClone(value) };
     },
@@ -109,19 +107,13 @@ async function ui(initial = trial(), handler) {
     }
     assert.fail("fixture timer did not settle");
   };
-  return { e, root, calls, getState: () => state, advance,
+  return { e, root, calls, storage, now: () => now, getState: () => state, advance,
     poll: async () => {
       const timer = [...timers.values()].filter((entry) => entry.delay === 700 || entry.delay === 2000).sort((a, b) => a.at - b.at)[0];
       assert.ok(timer, "a state refresh is scheduled"); await advance(timer.at - now);
     } };
 }
-const send = (e, text) => { e.utterance.value = text; e.chat.fire("submit"); };
-const messageBodies = (e) => e.history.children.map((node) => node.querySelectorAll("p")[0]?.textContent);
 // The AI's typing bubble (Issue #170): a transient last node of the log.
-const typingShown = (e) => e.history.children.at(-1)?.className === "ai typing-message";
-const typingCount = (e) => e.history.children.filter((node) => node.className === "ai typing-message").length;
-const messageCalls = (calls) => calls.filter((call) => call.path === "/api/message");
-const gate = () => { let release; const wait = new Promise((resolve) => { release = resolve; }); return { wait, release }; };
 const paths = (e) => e.board.children.filter((node) => node.tagName === "path");
 const nameAll = async (e, skip = -1) => {
   for (const [i, path] of paths(e).entries()) {
@@ -130,101 +122,24 @@ const nameAll = async (e, skip = -1) => {
   }
 };
 const itemTexts = (list) => list.children.map((item) => item.querySelectorAll("span")[0]?.textContent);
-const STOPPED = "進行を確認できません。実験担当者にお知らせください。";
-test("v5 offers non-dialogue pause and resume and never posts a retry after the server reports the limit", async () => {
-  const initial = { ...trial(), aiStatus: "error", dialogueRecovery: "retry" };
-  initial.events.push({ id: "event-2", speaker: "human", text: "切れ目はありますか？" });
-  const exhausted = { ...structuredClone(initial), dialogueRecovery: "unavailable" };
-  const h = await ui(initial, ({ path, state }) => {
-    if (path === "/api/interrupt") {
-      state.trial.dialogueRecovery = "paused";
-      return { status: 200, body: state };
-    }
-    if (path === "/api/retry") state.trial.dialogueRecovery = "active";
-  });
-  const { e, calls } = h;
-  assert.equal(e["chat-recovery-message"].textContent, "");
-  assert.equal(e["retry-chat"].textContent, "再開");
-  assert.equal(e["interrupt-chat"].hidden, false);
-  assert.equal(e["leave-incomplete-trial"].hidden, true);
-  assert.equal(e["finish-conversation"].disabled, true);
-  e["interrupt-chat"].fire("click"); await tick();
-  assert.deepEqual(calls.find(call => call.path === "/api/interrupt").body, { expectedRecordId: "trial-private" });
-  assert.equal(e["chat-recovery-message"].textContent, "会話を中断しました。");
-  assert.equal(e["interrupt-chat"].hidden, true);
-  assert.equal(h.getState().trial.events.length, 2);
-  e["retry-chat"].fire("click"); await tick();
-  assert.equal(calls.filter(call => call.path === "/api/retry").length, 1);
-
-  const gone = await ui(exhausted);
-  assert.equal(gone.e["retry-chat"].hidden, true);
-  assert.equal(gone.e["interrupt-chat"].hidden, true);
-  gone.e["retry-chat"].fire("click"); await tick();
-  assert.equal(gone.calls.filter(call => call.path === "/api/retry").length, 0);
-
-  assert.equal(gone.e["leave-incomplete-trial"].hidden, false);
-  assert.equal(gone.e["leave-incomplete-trial"].disabled, false);
-  assert.equal(gone.e["leave-incomplete-trial"].textContent, "試行を中断");
-  const callsBeforeLeaving = gone.calls.length;
-  const snapshot = structuredClone(gone.getState());
-  gone.e["leave-incomplete-trial"].fire("click");
-  await gone.advance(60000);
-  assert.equal(gone.calls.length, callsBeforeLeaving);
-  assert.deepEqual(gone.getState(), snapshot);
-  assert.equal(gone.e.trial.hidden, true);
-  assert.equal(gone.e["incomplete-stage"].hidden, false);
-  assert.equal(gone.e["incomplete-title"].focused, true);
-  assert.match(html, /id="incomplete-title"[^>]*>試行は未完了です<\/h2>/u);
-});
-test("v5 recovers the controls after a retry acknowledgement gets stuck", async () => {
-  const initial = { ...trial(), aiStatus: "error", dialogueRecovery: "retry" };
-  initial.events.push({ id: "event-2", speaker: "human", text: "輪の形ですか？" });
-  const { e, calls, advance } = await ui(initial, ({ path }) => {
-    if (path === "/api/retry") return new Promise(() => {});
-  });
-  e["retry-chat"].fire("click"); await tick();
-  assert.equal(e["retry-chat"].disabled, true);
-  await advance(60000);
-  assert.equal(e["retry-chat"].disabled, false);
-  assert.equal(e["interrupt-chat"].hidden, false);
-  assert.equal(e.notice.textContent, "");
-  assert.deepEqual(messageBodies(e), initial.events.map(event => event.text));
-  assert.equal(calls.filter(call => call.path === "/api/retry").length, 1);
-});
-// Issue #161: no internal cause reaches the participant (AI failure wording,
-// retries of AI work, scoring, HTTP/JSON/transport text or error codes).
-const INTERNAL = /AIの返答|AIに接続|AIの提出を再試行|再試行|採点|エラー|通信|サーバー|[0-9]{3}|JSON|Unexpected|Failed|fetch|Bad Gateway|ai_|_error|scoring|record_write|PRIVATE/u;
+const INTERNAL = /AIの返答|AIに接続|AIの提出を再試行|採点|エラー|通信|サーバー|[0-9]{3}|JSON|Unexpected|Failed|fetch|Bad Gateway|ai_|_error|scoring|record_write|PRIVATE/u;
 const visibleText = (root) => root.textContent;
-const retryButton = (e) => e.submission.children.find((node) => node.tagName === "button" && node.handlers.click);
+const DELAYED = "応答に時間がかかっています。入力した内容は保持されています。";
+const WAITING = "名前を提出しました。AIの提出を待っています。";
+const manualPaths = ["/api/retry", "/api/interrupt", "/api/ai-submit"];
 const submittedTrial = (extra) => ({ ...trial(), submitted: true, closed: true, status: "submitting",
   humanSubmission: Object.fromEntries(trial().scene.shapes.map((shape, i) => [shape.id, "名前" + i])), ...extra });
 
-test("an AI retry in flight shows typing dots instead of the stale error, then the reply", async () => {
-  const held = gate(), initial = trial();
-  initial.aiStatus = "error";
-  const { e } = await ui(initial, async ({ path }) => { if (path === "/api/retry") await held.wait; });
+test("manual recovery buttons and request paths are gone from the participant UI", async () => {
+  const { e, calls, advance } = await ui({ ...trial(), aiStatus: "error", dialogueRecovery: "unavailable" });
+  assert.doesNotMatch(html, /retry-chat|interrupt-chat|leave-incomplete-trial/u);
+  assert.doesNotMatch(script, /\/api\/(?:retry|interrupt|ai-submit)/u);
   assert.equal(e["chat-recovery"].hidden, false);
-  assert.equal(e["chat-recovery-message"].textContent, STOPPED, "a reloaded stopped trial shows the neutral notice at once");
-  assert.equal(typingCount(e), 0);
-  e["retry-chat"].fire("click"); await tick();
-  assert.equal(e["chat-recovery"].hidden, true, "the old error is not shown while the retry runs");
-  assert.ok(typingShown(e), "the retry is shown as AI activity");
-  held.release(); await tick();
-  assert.equal(typingCount(e), 0);
-  assert.equal(e["chat-recovery"].hidden, true);
-  assert.ok(e.history.textContent.includes("再試行した応答"));
-});
-
-test("a failed retry returns to the explicit error after the in-flight state", async () => {
-  const initial = trial();
-  initial.aiStatus = "error";
-  const { e, calls } = await ui(initial, async ({ path }) => (path === "/api/retry" ? { status: 502, body: { error: "ai_unavailable" } } : undefined));
-  e["retry-chat"].fire("click"); await tick();
-  assert.equal(calls.filter((call) => call.path === "/api/retry").length, 1);
-  assert.equal(e["chat-recovery"].hidden, false);
-  assert.equal(e["chat-recovery-message"].textContent, STOPPED);
-  assert.equal(e.notice.textContent, "", "the stop is shown once, beside the composer");
-  assert.equal(typingCount(e), 0);
+  assert.equal(e["chat-recovery"].querySelectorAll("button").length, 0);
+  assert.equal(e["finish-conversation"].disabled, true);
+  await advance(60000);
+  assert.equal(e["chat-recovery-message"].textContent, DELAYED);
+  assert.equal(calls.some(call => manualPaths.includes(call.path)), false);
 });
 
 test("the unanswered-figure warning survives polling until every figure is answered", async () => {
@@ -284,11 +199,12 @@ test("phone layout: conversation stage fits one viewport, desktop rules are unto
 
 for (const [label, reply] of [
   ["a coded AI failure", () => ({ status: 502, body: { error: "ai_unavailable" } })],
+  ["a coded submission failure", () => ({ status: 400, body: { error: "submission_error" } })],
   ["a coded scoring failure with extra detail", () => ({ status: 500, body: { error: "scoring_error", detail: "PRIVATE model-x" } })],
   ["an HTML proxy error page", () => ({ status: 502, invalidJson: true })],
   ["a dropped connection", () => { throw new TypeError("Failed to fetch"); }],
 ]) {
-  test(`i161: ${label} while submitting names shows only the neutral stop`, async () => {
+  test(`i161: ${label} after names were accepted waits for the AI without exposing details`, async () => {
     const { e, root, calls } = await ui(trial(), async ({ path, state }) => {
       if (path !== "/api/names") return;
       Object.assign(state.trial, { submitted: true, closed: true, status: "submitting", finalError: "ai_unavailable",
@@ -299,76 +215,153 @@ for (const [label, reply] of [
     await nameAll(e);
     e.submission.fire("submit"); e["confirm-submit"].fire("click"); await tick();
     assert.equal(calls.filter((call) => call.path === "/api/names").length, 1);
-    assert.equal(e["submission-status"].textContent, STOPPED);
+    assert.equal(e["submission-status"].textContent, WAITING);
     assert.equal(e.notice.textContent, "", "not repeated at the top");
-    assert.equal(retryButton(e).hidden, false);
-    assert.equal(retryButton(e).textContent, "状態を確認");
+    assert.equal(calls.some(call => manualPaths.includes(call.path)), false);
     assert.doesNotMatch(visibleText(root), INTERNAL);
   });
 }
 
-test("i161: an unexplained failure outside the trial view is the same neutral sentence, never the raw error", async () => {
-  const { e, root } = await ui(trial(), ({ path }) => { if (path === "/api/names") throw new TypeError("Failed to fetch"); });
+for (const [label, fail] of [
+  ["the job is busy", () => ({ status: 409, body: { error: "ai_busy" } })],
+  ["the connection drops", () => { throw new TypeError("Failed to fetch"); }],
+]) {
+  test(`names intent is retained and sent once ready when ${label}`, async () => {
+    let posts = 0;
+    const { e, root, calls, advance, getState } = await ui(trial(), ({ path, body, state }) => {
+      if (path !== "/api/names") return;
+      if (++posts === 1) { state.trial.aiStatus = "thinking"; return fail(); }
+      state.trial = { ...state.trial, submitted: true, closed: true, aiStatus: "idle",
+        status: "submitting", humanSubmission: body.names };
+      return { status: 200, body: state };
+    });
+    e["finish-conversation"].fire("click");
+    await nameAll(e);
+    e.submission.fire("submit"); e["confirm-submit"].fire("click"); await tick();
+    assert.equal(e.notice.textContent, "");
+    assert.match(e["submission-status"].textContent, /提出を確認しています/u);
+    assert.equal(getState().trial.submitted, false);
+    assert.equal(e["review-names"].disabled, true);
+    assert.doesNotMatch(visibleText(root), INTERNAL);
+    await advance(5000);
+    assert.equal(posts, 1, "busy state reads do not cause duplicate submissions");
+    getState().trial.aiStatus = "idle";
+    await advance(1000);
+    const names = calls.filter(call => call.path === "/api/names");
+    assert.equal(names.length, 2);
+    assert.deepEqual(names[1].body, names[0].body);
+    assert.equal(e["submission-status"].textContent, WAITING);
+    assert.equal(calls.some(call => manualPaths.includes(call.path)), false);
+  });
+}
+
+test("a scoring failure keeps polling until automatic final submission completes", async () => {
+  const { e, root, calls, advance, getState, poll } = await ui(submittedTrial({ aiSubmitted: true, finalError: "scoring_error" }));
+  assert.equal(e["submission-status"].textContent, WAITING);
+  assert.doesNotMatch(visibleText(root), INTERNAL);
+  assert.equal(e.submission.querySelectorAll("button").length, 1);
+  await advance(61000);
+  assert.equal(e["submission-status"].textContent, DELAYED);
+  Object.assign(getState().trial, { status: "completed", finalError: undefined, aiSubmitted: true, resultLocked: true });
+  await poll();
+  assert.equal(e["submission-status"].textContent, "双方の提出が完了しました。");
+  assert.equal(calls.some(call => manualPaths.includes(call.path) || call.path === "/api/names"), false);
+});
+
+const finishAndConfirm = async ({ e }, cancel = false) => {
   e["finish-conversation"].fire("click");
   await nameAll(e);
-  e.submission.fire("submit"); e["confirm-submit"].fire("click"); await tick();
-  assert.equal(e.notice.textContent, STOPPED);
-  assert.doesNotMatch(visibleText(root), INTERNAL);
-});
+  e.submission.fire("submit");
+  assert.equal(e["confirm-dialog"].open, true);
+  e[cancel ? "confirm-cancel" : "confirm-submit"].fire("click");
+  await tick();
+};
+const nameCalls = ({ calls }) => calls.filter(call => call.path === "/api/names");
+const originalTab = "same-tab";
+const failedSubmission = (path) => path === "/api/names" ? { status: 409, body: { error: "ai_busy" } } : undefined;
+const reloaded = (first, record, handler, tabSessionId = originalTab) =>
+  ui(record, handler, { tabSessionId, storage: first.storage, startTime: first.now() });
+const storedIntent = ({ storage }) => JSON.parse(storage.get("joint-naming-v2-draft") ?? "null")?.pendingSubmission;
 
-test("i161: a v2 scoring failure after both submissions never waits silently; 状態を確認 resumes the same submission once", async () => {
-  const held = gate();
-  const { e, root, calls, getState } = await ui(submittedTrial({ aiSubmitted: true, finalError: "scoring_error" }), async ({ path, state }) => {
-    if (path !== "/api/ai-submit") return;
-    await held.wait;
-    Object.assign(state.trial, { status: "completed", finalError: undefined, aiSubmitted: true,
-      result: { figures: state.trial.scene.shapes.map((shape) => ({ human: { slot: shape.id, rawName: "名前" }, ai: { rawName: "名前" }, matched: true })) } });
+for (const [label, fail] of [
+  ["a busy response", failedSubmission],
+  ["a disconnected POST", (path) => { if (path === "/api/names") throw new TypeError("offline"); }],
+]) {
+  test(`${label} preserves a single confirmed submission across reload until the same trial is ready`, async () => {
+    const first = await ui(trial(), ({ path }) => fail(path), { tabSessionId: originalTab });
+    await finishAndConfirm(first);
+    assert.equal(nameCalls(first).length, 1);
+    assert.equal(storedIntent(first).recordId, "trial-private");
+    let submissions = 0;
+    const next = await reloaded(first, { ...trial(), aiStatus: "thinking", recovering: true }, ({ path, body, state }) => {
+      if (path !== "/api/names") return;
+      submissions++;
+      state.trial = { ...state.trial, aiStatus: "idle", submitted: true, closed: true, humanSubmission: body.names, status: "submitting" };
+      return { status: 200, body: state };
+    });
+    await next.advance(3500);
+    assert.equal(submissions, 0, "the original submission waits for the job");
+    delete next.getState().trial.recovering;
+    next.getState().trial.aiStatus = "idle";
+    await next.advance(700);
+    assert.deepEqual(nameCalls(next), nameCalls(first), "the same names, record, event count and tab are used");
+    assert.equal(next.calls[0].path, "/api/state");
+    assert.equal(submissions, 1);
+    assert.equal(next.e["submission-status"].textContent, WAITING);
+    assert.equal(storedIntent(next), undefined);
+    await next.advance(5000);
+    assert.equal(submissions, 1);
   });
-  assert.equal(e["submission-status"].textContent, STOPPED);
-  assert.equal(retryButton(e).hidden, false);
-  assert.doesNotMatch(visibleText(root), INTERNAL);
-  retryButton(e).fire("click"); retryButton(e).fire("click"); await tick();
-  const order = calls.map((call) => call.path).filter((path) => ["/api/state", "/api/ai-submit", "/api/names"].includes(path));
-  assert.equal(order.at(-2), "/api/state", "the state is read before anything is resumed");
-  assert.equal(order.at(-1), "/api/ai-submit");
-  assert.equal(calls.filter((call) => call.path === "/api/ai-submit").length, 1, "a double click resumes once");
-  assert.equal(calls.filter((call) => call.path === "/api/names").length, 0, "names are never resent");
-  assert.equal(calls.find((call) => call.path === "/api/ai-submit").body.expectedRecordId, getState().trial.sessionId);
-  held.release(); await tick();
-  assert.equal(retryButton(e).hidden, true);
-  assert.notEqual(e["submission-status"].textContent, STOPPED);
+}
+
+test("a submitted record found after reload is tracked without another POST", async () => {
+  const first = await ui(trial(), ({ path }) => failedSubmission(path), { tabSessionId: originalTab });
+  await finishAndConfirm(first);
+  const next = await reloaded(first, submittedTrial({ aiSubmitted: false }));
+  assert.equal(next.e["submission-status"].textContent, WAITING);
+  await next.advance(5000);
+  assert.equal(nameCalls(next).length, 0);
+  assert.equal(storedIntent(next), undefined);
+  Object.assign(next.getState().trial, { aiSubmitted: true, status: "completed", resultLocked: true });
+  await next.poll();
+  assert.equal(next.e["submission-status"].textContent, "双方の提出が完了しました。");
 });
 
-test("i161: a submission with no reported failure waits quietly, then shows the neutral stop after the watchdog", async () => {
-  const { e, calls, advance } = await ui(submittedTrial({ aiSubmitted: false }));
-  assert.equal(e["submission-status"].textContent, "名前を提出しました。AIの提出を待っています。");
-  assert.equal(retryButton(e).hidden, true);
-  await advance(59000);
-  assert.equal(retryButton(e).hidden, true);
-  await advance(2000);
-  assert.equal(e["submission-status"].textContent, STOPPED);
-  assert.equal(retryButton(e).hidden, false);
-  assert.equal(calls.filter((call) => call.path === "/api/ai-submit").length, 0, "nothing is resumed automatically");
+test("changed scopes, forced termination and a cancelled confirmation never replay names", async () => {
+  const later = { ...trial(), events: [...trial().events, { id: "later", speaker: "ai", text: "追加の公開返答" }] };
+  for (const [record, tab, ended] of [
+    [trial("new-trial"), originalTab],
+    [trial(), "different-tab"],
+    [later, originalTab],
+    [null, originalTab, true],
+  ]) {
+    const first = await ui(trial(), ({ path }) => failedSubmission(path), { tabSessionId: originalTab });
+    await finishAndConfirm(first);
+    const next = await reloaded(first, record, ({ path }) => ended && path === "/api/state"
+      ? { status: 200, body: { trial: null, interrupted: true } } : undefined, tab);
+    await next.advance(10000);
+    assert.equal(nameCalls(next).length, 0);
+    assert.equal(storedIntent(next), undefined);
+  }
+  const cancelled = await ui(trial(), undefined, { tabSessionId: originalTab });
+  await finishAndConfirm(cancelled, true);
+  const next = await reloaded(cancelled, trial());
+  await next.advance(10000);
+  assert.equal(nameCalls(cancelled).length + nameCalls(next).length, 0);
+  assert.equal(storedIntent(next), undefined);
 });
 
-test("i161: 状態を確認 on a stalled AI turn only re-reads the state; a double click on a stopped turn resumes it once", async () => {
-  const stalled = trial(); stalled.aiStatus = "thinking";
-  const first = await ui(stalled);
-  await first.advance(60001);
-  assert.equal(first.e["chat-recovery-message"].textContent, STOPPED);
-  first.e["retry-chat"].fire("click"); await tick();
-  assert.equal(first.calls.filter((call) => call.path === "/api/retry").length, 0, "the server still reports work in progress");
-  const stopped = trial(); stopped.aiStatus = "error";
-  const held = gate();
-  const second = await ui(stopped, async ({ path }) => { if (path === "/api/retry") await held.wait; });
-  second.e["retry-chat"].fire("click"); second.e["retry-chat"].fire("click"); await tick();
-  assert.equal(second.calls.filter((call) => call.path === "/api/retry").length, 1);
-  assert.equal(second.calls.filter((call) => call.path === "/api/message").length, 0, "no human message is replayed");
-  held.release(); await tick();
-  assert.equal(second.e["chat-recovery"].hidden, true);
+test("while AI submission is recovering the 60-second copy reports that fact", async () => {
+  const { e, calls, advance } = await ui(submittedTrial({ aiSubmitted: false, recovering: true }));
+  assert.equal(e["submission-status"].textContent, WAITING);
+  await advance(59999);
+  assert.equal(e["submission-status"].textContent, WAITING);
+  await advance(1);
+  assert.equal(e["submission-status"].textContent, "応答に時間がかかっています。自動で再試行しています。入力した内容は保持されています。");
+  assert.equal(calls.some(call => manualPaths.includes(call.path)), false);
 });
 
-test("i161: while waiting for the reception, a lasting failed state read shows the neutral stop on the visible screen", async () => {
+test("i161: while waiting for the reception, a lasting failed state read shows passive connection status", async () => {
   let offline = false;
   const waiting = { trial: null, reception: { status: "waiting", revision: 1 } };
   const { e, advance } = await ui(null, ({ path }) => {
@@ -380,31 +373,27 @@ test("i161: while waiting for the reception, a lasting failed state read shows t
   offline = true; await advance(10000);
   assert.equal(e.notice.textContent, "", "a short interruption stays invisible");
   await advance(60000);
-  assert.equal(e.notice.textContent, STOPPED);
+  assert.equal(e.notice.textContent, "接続の回復を待っています。");
   offline = false; await advance(6000);
   assert.equal(e.notice.textContent, "", "a successful read clears it");
 });
 
-test("i161: 状態を確認 resumes nothing when the fresh state read fails", async () => {
-  let offline = false;
-  const stopped = trial(); stopped.aiStatus = "error";
-  const { e, calls } = await ui(stopped, ({ path }) => { if (offline && path === "/api/state") throw new TypeError("Failed to fetch"); });
-  offline = true; e["retry-chat"].fire("click"); await tick();
-  assert.equal(calls.filter((call) => call.path === "/api/retry").length, 0, "a cached error state is not enough");
-  offline = false; e["retry-chat"].fire("click"); await tick();
-  assert.equal(calls.filter((call) => call.path === "/api/retry").length, 1);
-});
-
-test("i161: a stopped dialogue is shown on the names stage too, and cleared once the reply arrives", async () => {
-  const thinking = trial(); thinking.aiStatus = "thinking";
-  const { e, getState, advance, poll } = await ui(thinking);
+test("if the AI starts while names are being edited, final confirmation waits for the reply", async () => {
+  const { e, getState, advance, poll, calls } = await ui();
   e["finish-conversation"].fire("click");
   assert.equal(e["name-stage"].hidden, false);
-  await advance(61000);
-  assert.equal(e.notice.textContent, STOPPED, "the chat-side notice is hidden on this stage");
+  getState().trial.aiStatus = "thinking"; await poll();
+  await nameAll(e);
+  assert.equal(e["review-names"].disabled, true);
+  e.submission.fire("submit");
+  assert.equal(e["confirm-dialog"].open, false);
+  await advance(60000);
+  assert.equal(e.notice.textContent, DELAYED);
   getState().trial.events.push({ id: "event-2", speaker: "ai", text: "遅れて届いた返答" });
   getState().trial.aiStatus = "idle"; await poll();
   assert.equal(e.notice.textContent, "");
+  assert.equal(e["review-names"].disabled, false);
+  assert.equal(calls.some(call => manualPaths.includes(call.path)), false);
 });
 
 test("i161: a lost names response leaves no stale stop once the server confirms completion", async () => {
@@ -417,9 +406,9 @@ test("i161: a lost names response leaves no stale stop once the server confirms 
   e["finish-conversation"].fire("click");
   await nameAll(e);
   e.submission.fire("submit"); e["confirm-submit"].fire("click"); await tick();
-  assert.equal(e.notice.textContent, STOPPED);
+  assert.equal(e.notice.textContent, "");
   await poll();
-  assert.equal(e.notice.textContent, STOPPED, "an unchanged state does not count as recovery");
+  assert.equal(e["submission-status"].textContent, WAITING);
   Object.assign(getState().trial, { status: "completed", aiSubmitted: true, resultLocked: true });
   await poll();
   assert.equal(e.notice.textContent, "");
@@ -427,4 +416,3 @@ test("i161: a lost names response leaves no stale stop once the server confirms 
   assert.equal(calls.filter((call) => call.path === "/api/names").length, 1);
   assert.equal(calls.filter((call) => call.path === "/api/ai-submit").length, 0);
 });
-

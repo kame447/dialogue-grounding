@@ -6,7 +6,7 @@ import { validateObservationMemo } from '../observation/observe.ts';
 import { researchHash } from './research-profile.ts';
 import { CLAIM_PRUNE_V2 } from '../memory/reference-graph.mjs';
 import { createHash } from 'node:crypto';
-import type { BaseAssignmentConfig, BaseAssignment, BaseRecord, BaseOwnerState } from './base-assignment.ts';
+import type { BaseAssignmentConfig, BaseAssignment, BaseRecord, BaseOwnerState, StartIntent } from './base-assignment.ts';
 import { validateReceptionPlan, effectiveRotationMode, effectiveFigureSelection, effectiveParticipantModelPin, ROTATION_MODES } from './reception.ts';
 import { PARTICIPANT_PRODUCTION_PROFILE } from '../web/participant-usage-policy.ts';
 import { validateParticipantModelPin } from './participant-model-pin.ts';
@@ -40,6 +40,15 @@ export const FAILURE_CAUSES = ['observation_timeout', 'observation_invalid', 'ob
   'generation_failed', 'invalid_state', 'unknown'] as const;
 const isRecordWith = (v: unknown, key: string) => !!v && typeof v === 'object' && Object.hasOwn(v, key);
 export const safeInt = (v: unknown): v is number => typeof v === 'number' && Number.isSafeInteger(v);
+export function readStartIntent(value: unknown): StartIntent {
+  return guard('invalid_request', () => {
+    const i = data(value);
+    if (typeof i.id !== 'string' || !V4.test(i.id) || Object.keys(i).some(k => !['id', 'expectedReceptionRevision', 'expectedRecordId'].includes(k)) ||
+        Object.hasOwn(i, 'expectedReceptionRevision') && (!safeInt(i.expectedReceptionRevision) || i.expectedReceptionRevision < 0) ||
+        Object.hasOwn(i, 'expectedRecordId') && (typeof i.expectedRecordId !== 'string' || !UUID.test(i.expectedRecordId) || i.expectedReceptionRevision === undefined)) throw new Error('start intent');
+    return i as StartIntent;
+  });
+}
 const positive = (v: unknown): v is number => safeInt(v) && v > 0;
 const strategy = (v: unknown) => v === 'repair-first' || v === 'bypass-enabled';
 function guard<T>(code: BaseAssignmentErrorCode, fn: () => T): T { try { return fn(); } catch { throw new BaseAssignmentError(code); } }
@@ -219,11 +228,18 @@ export function readOwner(value: unknown, ownerId: string): BaseOwnerState {
     if (!OWNER.test(ownerId) || o.schemaVersion !== 'base_owner_v1' || o.ownerId !== ownerId || !safeInt(o.revision) || o.revision < 0 ||
         o.activeKey !== null && (typeof o.activeKey !== 'string' || !Object.hasOwn(admissions, o.activeKey))) throw new Error('owner');
     if (o.activeKey === null && Object.keys(admissions).length) throw new Error('pointer');
-    const assignmentIds = new Set<string>(), recordIds = new Set<string>();
+    const assignmentIds = new Set<string>(), recordIds = new Set<string>(), intentIds = new Set<string>();
     for (const [key, v] of Object.entries(admissions)) {
       if (key !== 'initial' && (!key.startsWith('after:') || !UUID.test(key.slice(6)))) throw new Error('key');
-      const hasCause = isRecordWith(v, 'failureCause'),
-        e = data(v, hasCause ? ['schemaVersion', 'assignment', 'status', 'record', 'errorCode', 'failureCause'] : ['schemaVersion', 'assignment', 'status', 'record', 'errorCode']), a = readAssignment(e.assignment);
+      const hasCause = isRecordWith(v, 'failureCause'), hasIntent = isRecordWith(v, 'startIntent');
+      const e = data(v, ['schemaVersion', 'assignment', 'status', 'record', 'errorCode',
+        ...(hasCause ? ['failureCause'] : []), ...(hasIntent ? ['startIntent'] : [])]), a = readAssignment(e.assignment);
+      if (hasIntent) {
+        const intent = readStartIntent(e.startIntent);
+        if (intentIds.has(intent.id) || (a.source.kind === 'server_config_v1') !== (intent.expectedReceptionRevision === undefined) ||
+            intent.expectedRecordId !== (key === 'initial' ? undefined : key.slice(6))) throw new Error('start intent');
+        intentIds.add(intent.id);
+      }
       if (e.schemaVersion !== 'base_assigned_session_v1' || assignmentIds.has(a.assignmentId)) throw new Error('assignment'); assignmentIds.add(a.assignmentId);
       if (e.status === 'active' ? e.record === null || e.errorCode !== null : e.status === 'preparing' ? e.errorCode !== null :
           e.status !== 'failed' || !['start_interrupted', 'initialization_failed', 'record_write_failed', 'assignment_record_invalid', 'record_deleted'].some(c => c === e.errorCode)) throw new Error('status');

@@ -12,7 +12,7 @@ import { INITIAL_OBSERVATION_STRUCTURED_V1, INITIAL_OBSERVATION_STRUCTURED_V2,
   type InitialObservationGeneration } from '../../../dialogue-model/runtime/observation/initial-observation-generation.ts';
 import type { ObservationInput } from '../../../dialogue-model/runtime/observation/contract.ts';
 import { ENGINEERING_LIMITS, RunBudget, type BudgetLimits } from '../../../dialogue-model/runtime/diagnostics/parity-live/audit.ts';
-import { participantLedgerFetch, type JevResearchOptions, type JevResearchLedger } from '../../../dialogue-model/runtime/web/participant-jev-wiring.ts';
+import { LegacyParticipantUsageLedger, participantLedgerFetch, type JevResearchOptions, type JevResearchLedger } from '../../../dialogue-model/runtime/web/participant-jev-wiring.ts';
 import { participantChatProvider, requireExactParticipantModel, validateParticipantModelPin, type ParticipantModelPin } from '../../../dialogue-model/runtime/v2/participant-model-pin.ts';
 import { researchHash, researchTrialProfileV3, RESEARCH_TRIAL_PROFILE_V1 } from '../../../dialogue-model/runtime/v2/research-profile.ts';
 import { RESEARCH_MAX_DEADLINE_MS, RESEARCH_MAX_LUNA_ATTEMPT_MS } from '../../../dialogue-model/runtime/v2/research-timeouts.ts';
@@ -182,7 +182,7 @@ export async function workerParticipantPolicy(proxy: ParticipantService | undefi
   }
 }
 
-function boundFetch(dispatch: Dispatch, modelId: string, ledger: RunBudget): typeof fetch {
+function boundFetch(dispatch: Dispatch, modelId: string, ledger: RunBudget<BudgetLimits | null>): typeof fetch {
   return async (_url, init) => {
     const { status, data } = await dispatch(JSON.parse(String(init?.body)), modelId);
     if (!Number.isInteger(status) || status < 200 || status > 599) throw new NamingTaskError('ai_unavailable');
@@ -212,13 +212,13 @@ type ParticipantObservationOptions = {
   preparedObservation?: PreparedTrialObservationReference;
 };
 
-function participantChat(proxy: ParticipantService, usage?: ParticipantUsageLedger): Dispatch {
-  return (payload, expected) => usage ? proxy.participantUsageChat!(payload, expected) : proxy.participantChat(payload, expected);
+function participantChat(proxy: ParticipantService, usageOnly: boolean): Dispatch {
+  return (payload, expected) => usageOnly ? proxy.participantUsageChat!(payload, expected) : proxy.participantChat(payload, expected);
 }
 
 export function createParticipantTerraObserver({ pin, own, proxy, cache, usage, initialObservationGeneration, preparedObservation }:
   ParticipantObservationOptions & { usage?: ParticipantUsageLedger }) {
-  const chat = participantChat(proxy, usage);
+  const chat = participantChat(proxy, Boolean(usage));
   const terra = createWorkerTerraObserver({
     modelPin: pin, own, cache, ...(preparedObservation ? { requiredInitialMemo: { key: preparedObservation.cacheKey, memoSha256: preparedObservation.memoSha256 } } : {}), timeoutMs: profile.timeouts.observationMs, researchLimits, initialObservationGeneration,
     visual: (payload, signal) => usage ? usage.dispatch('terra', chat, payload, signal) : chat(payload, pin.terraModelId),
@@ -233,9 +233,11 @@ export function createParticipantTerraObserver({ pin, own, proxy, cache, usage, 
   };
 }
 
-export function createWorkerParticipantRuntime({ pin, own, proxy, cache, limits, usage, initialObservationGeneration, participantDialogueProfile, preparedObservation }:
+export function createWorkerParticipantRuntime({ pin, own, proxy, cache, limits, usage, historicalLimits, initialObservationGeneration, participantDialogueProfile, preparedObservation }:
   ParticipantObservationOptions & { participantDialogueProfile?: ParticipantDialogueProfile } &
-  ({ limits: Readonly<BudgetLimits>; usage?: never } | { limits?: never; usage: ParticipantUsageLedger })) {
+  ({ limits: Readonly<BudgetLimits>; usage?: never; historicalLimits?: never } |
+   { limits?: never; usage?: never; historicalLimits: Readonly<BudgetLimits> | null } |
+   { limits?: never; usage: ParticipantUsageLedger; historicalLimits?: never })) {
   if (pin.schemaVersion !== 'participant_model_pin_v1' && !usage) throw new NamingTaskError('invalid_options');
   const dialogue = participantDialogueProfile === undefined ? null : workerDialogue[participantDialogueProfile];
   if (participantDialogueProfile !== undefined && (!dialogue || pin.schemaVersion !== 'participant_model_pin_v3' || !usage ||
@@ -243,9 +245,10 @@ export function createWorkerParticipantRuntime({ pin, own, proxy, cache, limits,
     throw new NamingTaskError('invalid_options');
   }
   const runtimeProfile = dialogue?.profile ?? profile;
-  const ledger = usage ?? new RunBudget(limits!);
-  const chat = participantChat(proxy, usage);
-  const choices: Dispatch = (payload, expected) => usage ? proxy.participantUsageChoices!(payload, expected) : proxy.participantChoices(payload, expected);
+  const usageOnly = Boolean(usage) || historicalLimits !== undefined;
+  const ledger = usage ?? (historicalLimits === undefined ? new RunBudget(limits!) : new LegacyParticipantUsageLedger(historicalLimits));
+  const chat = participantChat(proxy, usageOnly);
+  const choices: Dispatch = (payload, expected) => usageOnly ? proxy.participantUsageChoices!(payload, expected) : proxy.participantChoices(payload, expected);
   function meteredFetch(dispatch: Dispatch, provider: 'jev' | 'luna' | 'terra', expected: string): typeof fetch {
     if (ledger instanceof RunBudget) {
       if (provider === 'terra' || pin.schemaVersion === 'participant_model_pin_v3') throw new NamingTaskError('invalid_options');
@@ -280,7 +283,7 @@ export function createWorkerParticipantRuntime({ pin, own, proxy, cache, limits,
     fetchImpl: jevFetch,
     timeoutMs: profile.timeouts.decisionMs,
     researchLimits,
-    ...(usage ? { usagePolicy: PARTICIPANT_USAGE_ONLY } : { costCapUsd: limits!.jevUsd }),
+    ...(usageOnly ? { usagePolicy: PARTICIPANT_USAGE_ONLY } : { costCapUsd: limits!.jevUsd }),
   };
   const localTransport = usage ? {
     ...transport,

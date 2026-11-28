@@ -13,6 +13,7 @@ import { researchHash } from '../dialogue-model/runtime/v2/research-profile.ts';
 import { createNamingTaskV2 } from '../dialogue-model/runtime/v2/naming-task-v2.mjs';
 import { prepareParticipantJev, validateParticipantJevConfig } from '../dialogue-model/runtime/web/participant-jev-wiring.ts';
 import { REVISIT_MULTIPLE_INSTRUCTIONS, updateRepairHistory } from '../dialogue-model/runtime/v2/jev-turn.ts';
+import { manualRecoveryTimers } from './helpers/recovery-timers.ts';
 
 const seed = 919, modelId = 'synthetic-luna-20261020';
 const trial = createTrialV2({ seed }), model = modelView(trial);
@@ -77,9 +78,11 @@ async function fixture(t: any, changes: any = {}, plan: Plan = { answers: { acti
 }
 async function makeTask(prepared: any, extra: any = {}) {
   let saved: any;
+  const recovery = manualRecoveryTimers();
   const value = { strategy: 'repair-first', seed, referenceMemory: true, ...extra };
-  const task = await createNamingTaskV2({ ...value, ...await prepared.taskOptions(value), runDir: null, createTrial: () => trial, onPersist: async (r: any) => { saved = structuredClone(r); } });
-  return { task, record: () => saved };
+  const task = await createNamingTaskV2({ ...value, ...await prepared.taskOptions(value), runDir: null, createTrial: () => trial,
+    recoveryTimers: recovery.timers, onPersist: async (r: any) => { saved = structuredClone(r); } });
+  return { task, recovery, record: () => saved };
 }
 async function turn(t: any, changes: any, answers: Record<string, string>, strategy = 'bypass-enabled', text = '二つのどちらかです', memoValue: any = rawMemo) {
   const h = await fixture(t, changes, { answers }, memoValue); const prepared = await prepareParticipantJev(h.options);
@@ -151,19 +154,24 @@ test('revisit x multiple (v3): a mixed ledger (same name, other name, unnamed, a
   assert.equal(after.jevTraces.at(-1).executed.action, 'revisit');
 });
 
-test('revisit x multiple (v3): generation failure commits nothing; a retry publishes once', async t => {
+test('revisit x multiple (v3): generation failure commits nothing; automatic recovery publishes once', async t => {
   const h = await fixture(t, V3, { answers: REVISIT_MULTIPLE, failGeneration: 1 });
   const prepared = await prepareParticipantJev(h.options), made = await makeTask(prepared);
-  made.task.message('二つのどちらかです', 'turn-1'); await made.task.whenIdle();
-  assert.equal(made.task.getState().aiStatus, 'error');
+  const { eventId } = made.task.message('二つのどちらかです', 'turn-1'); await made.task.whenIdle();
+  const waiting = made.task.getState();
+  assert.equal(waiting.aiStatus, 'thinking');
+  assert.equal(waiting.recovering, true);
+  assert.deepEqual(made.record().queueState.pendingHumanEventIds, [eventId]);
   assert.equal(aiEvents(made.record()).length, GREETING);
   assert.equal(made.record().queueState.privateState.judgments.length, 0);
   assert.ok(Object.values(made.record().queueState.privateState.ledger).every((e: any) => e.status === 'unassigned'));
   const failedGenerations = h.upstream.generations.length;
-  await made.task.retry(); await made.task.whenIdle();
+  made.recovery.runNext(); await made.task.whenIdle();
   assert.ok(h.upstream.generations.length > failedGenerations);
   assert.equal(made.task.getState().aiStatus, 'idle', JSON.stringify([made.task.getState().aiStatus, made.record().jevTraces.map((r: any) => [r.status, r.errorCode, r.generationErrorCode]), h.upstream.generations.length]));
   assert.equal(aiEvents(made.record()).length, GREETING + 1);
+  assert.deepEqual(made.task.getState().events.slice(0, -1), waiting.events);
+  assert.deepEqual(made.record().queueState.pendingHumanEventIds, []);
   assert.equal(made.record().queueState.privateState.judgments.length, 1);
 });
 
@@ -217,10 +225,17 @@ for (const [name, v2answers, rule, v3answers, v3stages] of [
   assert.equal(aiEvents(v3.record).length, GREETING); assert.equal(v3.trace.executed, null); assert.equal(v3.trace.finalAction, null);
   assert.equal(v3.record.queueState.privateState.judgments.length, 0);
   assert.equal(v3.h.upstream.posts.filter((b: any) => b.questions?.name || b.questions?.feature).length, 0);
-  // The illegal label was never replaced by a legal one: the retry asks again and a legal answer then commits.
+  const waiting = v3.made.task.getState();
+  assert.equal(waiting.aiStatus, 'thinking');
+  assert.equal(waiting.recovering, true);
+  assert.deepEqual(v3.record.queueState.pendingHumanEventIds, [waiting.events.at(-1)?.id]);
+  // Automatic recovery sends the decision again; only the new legal answer can commit.
   v3.h.upstream.plan.answers = { action: 'accept', target: 'none' };
-  await v3.made.task.retry(); await v3.made.task.whenIdle();
+  v3.made.recovery.runNext(); await v3.made.task.whenIdle();
   assert.deepEqual(v3.made.record().jevTraces.map((r: any) => r.status), ['error', 'committed']);
+  assert.deepEqual(v3.made.task.getState().events.slice(0, -1), waiting.events);
+  assert.equal(aiEvents(v3.made.record()).length, GREETING + 1);
+  assert.deepEqual(v3.made.record().queueState.pendingHumanEventIds, []);
 });
 
 test('v3 target stage of agree is limited to figures with their own name evidence; none of the 8 illegal pairs reaches a stage-two request', async t => {
@@ -307,14 +322,20 @@ test('turn level: every reachable legal cell commits with the right target proje
   }
 });
 
-test('restore after a failed generation then a retry never publishes twice', async t => {
+test('restore after a failed generation automatically recovers and publishes once', async t => {
   const h = await fixture(t, V3, { answers: REVISIT_MULTIPLE, failGeneration: 1 });
   const prepared = await prepareParticipantJev(h.options), made = await makeTask(prepared);
-  made.task.message('二つのどちらかです', 'turn-1'); await made.task.whenIdle();
+  const { eventId } = made.task.message('二つのどちらかです', 'turn-1'); await made.task.whenIdle();
   const failed = made.record();
   assert.equal(aiEvents(failed).length, GREETING);
+  assert.deepEqual(failed.queueState.pendingHumanEventIds, [eventId]);
   const restored = await makeTask(prepared, { restore: failed });
-  await restored.task.retry(); await restored.task.whenIdle();
+  const waiting = restored.task.getState();
+  assert.equal(waiting.sessionId, failed.recordId);
+  assert.equal(waiting.recovering, true);
+  restored.recovery.runNext(); await restored.task.whenIdle();
+  assert.deepEqual(restored.task.getState().events.slice(0, -1), waiting.events);
+  assert.deepEqual(restored.record().queueState.pendingHumanEventIds, []);
   assert.equal(aiEvents(restored.record()).length, GREETING + 1);
   assert.equal(restored.record().queueState.privateState.judgments.length, 1);
   assert.equal(restored.record().jevTraces.filter((r: any) => r.status === 'committed').length, 1);

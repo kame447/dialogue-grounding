@@ -1,6 +1,7 @@
 // Deterministic synthetic integration; no participant data or live API.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { manualRecoveryTimers } from "./helpers/recovery-timers.ts";
 import { createDialogueV2 } from "../dialogue-model/runtime/v2/dialogue-v2.mjs";
 import { createNamingTaskV2 } from "../dialogue-model/runtime/v2/naming-task-v2.mjs";
 import { createReferenceGraph, applyReferenceUpdate } from "../dialogue-model/runtime/memory/reference-graph.mjs";
@@ -136,8 +137,9 @@ test("memory OFF and omitted/null local option retain byte-identical requests an
     referenceMemory: false, localGrounding: scripted(example).localGrounding } as Any));
 });
 
-test("naming-task commits, restores local state, preserves opt-in and rolls back failed generation", async () => {
+test("naming-task preserves restored local state through a failed generation and commits on automatic recovery", async () => {
   const records: Any[] = [];
+  const recovery = manualRecoveryTimers();
   let fail = false, extractionCalls = 0;
   const localGrounding: LocalGroundingOptions = {
     extractor: createMockLocalExtractor((input: LocalExtractionInput) => { extractionCalls++; return [{ segmentId: "s1", quote: input.publicTurns.at(-1)!.text,
@@ -146,6 +148,7 @@ test("naming-task commits, restores local state, preserves opt-in and rolls back
   };
   const client = { async complete() { if (fail) throw new Error("PRIVATE-FAILURE-BODY"); return { text: "なるほど。", model: "mock" }; } };
   const base = { client, judge, strategy: "bypass-enabled", seed: 155, runDir: null, referenceMemory: true, localGrounding,
+    recoveryTimers: recovery.timers,
     onPersist: async (record: Any) => { records.push(structuredClone(record)); } };
   const task = await createNamingTaskV2(base as Any);
   task.message("四角が一つあります。", "synthetic-first");
@@ -158,17 +161,29 @@ test("naming-task commits, restores local state, preserves opt-in and rolls back
   assert.deepEqual(restored.getState().events, task.getState().events);
   const callsBefore = extractionCalls;
   fail = true;
-  restored.message("四角についてもう一度話したいです。", "synthetic-second");
+  const { eventId } = restored.message("四角についてもう一度話したいです。", "synthetic-second");
   await restored.whenIdle();
-  assert.equal(restored.getState().aiStatus, "error");
+  const waiting = restored.getState();
+  assert.equal(waiting.aiStatus, "thinking");
+  assert.equal(waiting.recovering, true);
+  assert.equal(waiting.events.at(-1)?.id, eventId);
+  assert.equal(waiting.events.at(-1)?.speaker, "human");
+  assert.deepEqual(records.at(-1).queueState.pendingHumanEventIds, [eventId]);
   assert.deepEqual(restored.researcherView().privateState, before);
   assert.ok(extractionCalls > callsBefore);
   assert.doesNotMatch(JSON.stringify(records.at(-1)), /PRIVATE-FAILURE-BODY/);
   fail = false;
-  await restored.retry();
+  recovery.runNext();
   await restored.whenIdle();
-  assert.equal(restored.getState().aiStatus, "idle");
+  const settled = restored.getState();
+  assert.equal(settled.aiStatus, "idle");
+  assert.equal(settled.sessionId, waiting.sessionId);
+  assert.deepEqual(settled.events.slice(0, -1), waiting.events);
+  assert.equal(settled.events.at(-1)?.text, "なるほど。");
+  assert.equal(settled.events.at(-1)?.speaker, "ai");
+  assert.deepEqual(records.at(-1).queueState.pendingHumanEventIds, []);
   assert.equal(restored.researcherView().privateState.judgments.length, before.judgments.length + 1);
+  assert.equal(restored.researcherView().privateState.graph.revision, before.graph.revision + 1);
 });
 
 test("OFF records are byte-identical for omitted/null options and restore cannot silently enable the feature", async () => {

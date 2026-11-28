@@ -23,17 +23,16 @@ import { RECORD_ID } from "./admin/summary.ts";
 import { lockResult, participantReview, QUESTIONNAIRE_FORM, recordListEntry, sortRecordList,
   type Questionnaire } from "../../../dialogue-model/runtime/v2/participant-records.ts";
 
-import { createBaseAssignmentSession, BaseSessionError } from "../../../dialogue-model/runtime/v2/base-assignment-session.ts";
+import { createBaseAssignmentSession, BaseSessionError, needsAssignmentPreparation } from "../../../dialogue-model/runtime/v2/base-assignment-session.ts";
 import { validateBaseStart, validateBaseAssignmentConfig, BaseAssignmentError } from "../../../dialogue-model/runtime/v2/base-assignment.ts";
-import { assignmentParticipantModelPin, data, readOwner, validateBoundBaseRecord } from "../../../dialogue-model/runtime/v2/base-assignment-data.ts";
-import type { BaseOwnerState, BaseRecord, BaseSession, MakeBaseTask, OwnerRead, RawBaseRecord } from "../../../dialogue-model/runtime/v2/base-assignment.ts";
+import { assignmentParticipantModelPin, data, readOwner, readStartIntent, validateBoundBaseRecord } from "../../../dialogue-model/runtime/v2/base-assignment-data.ts";
+import type { BaseOwnerState, BaseRecord, BaseSession, MakeBaseTask, OwnerRead, RawBaseRecord, StartIntent } from "../../../dialogue-model/runtime/v2/base-assignment.ts";
 import { participantContactHTML } from "../../../dialogue-model/runtime/v2/participant-contact.ts";
 import { PARTICIPANT_STOP_HTML } from "../../../dialogue-model/runtime/v2/participant-stop-page.ts";
 import { ReceptionError, validateReception, createReception, approveReception, validateReceptionApprovalInput, validateReceptionPlan, cancelReception, terminateReception,
   participantReception, receptionSummary, effectiveBetweenTrials, effectiveFigureSelection, effectiveRotationMode,
   validateParticipantLimits, isParticipantDialogueProfile, isPilot012ParticipantDialogueProfile,
-  participantMemoryPruneVersion, PILOT012_V20_PARTICIPANT_PROFILE, PILOT012_V21_PARTICIPANT_PROFILE,
-  PILOT012_V22_PARTICIPANT_PROFILE, PILOT012_V23_PARTICIPANT_PROFILE } from '../../../dialogue-model/runtime/v2/reception.ts';
+  participantMemoryPruneVersion } from '../../../dialogue-model/runtime/v2/reception.ts';
 import { isAdminTermination, isIncompleteTrialStatus } from '../../../dialogue-model/runtime/v2/admin-termination.ts';
 import type { AdminTermination } from '../../../dialogue-model/runtime/v2/admin-termination.ts';
 import { isSubmittedQuestionnaire } from '../../../dialogue-model/runtime/v2/questionnaire-gate.ts';
@@ -67,7 +66,7 @@ type StoredTrial = {
   seed: number;
   strategy: Strategy;
   options: { referenceMemory: boolean; utteranceStyle?: UtteranceStyle; participantRuntimeProfile?: unknown };
-  queueState: { pendingHumanEventIds: string[]; errorCode: string | null };
+  queueState: { pendingHumanEventIds: string[]; errorCode: string | null; privateState?: { deferredAiExtraction?: unknown } };
   closed?: boolean;
   [field: string]: unknown;
 };
@@ -77,7 +76,8 @@ type NamingTask = {
   getState(): Record<string, unknown>;
   message(text: string, clientId?: string): { eventId: string; duplicate: boolean };
   persistNow(): Promise<void>;
-  whenIdle(): Promise<void>;
+  whenIdle(options?: { signal?: AbortSignal }): Promise<void>;
+  hasRecoveryWork?(): boolean;
   retry(): Promise<void>;
   interruptDialogue?(): Promise<void>;
   stopForAdmin?(): void;
@@ -511,16 +511,31 @@ export class TangramSession extends DurableObject<Env> {
       this.forget(stoppedIds);
       if (committed.endedReception) await this.indexReception(committed.endedReception);
       for (const record of committed.records) await this.registerSummary(record);
+      await this.scheduleRecoveryAlarm();
       return { ok: true };
     });
   }
 
   /** Every new trial is admitted here, serialized with reception creation and approval. */
-  private async startTrial(body: ApiBody, isolated: boolean): Promise<void> {
+  private async matchesStartIntent(intent: StartIntent): Promise<boolean> {
+    const raw = await this.ctx.storage.get<BaseOwnerState>('base:owner:v1');
+    if (!raw) return false;
+    const owner = readOwner(raw, this.ctx.id.toString());
+    const saved = owner.activeKey && owner.admissions[owner.activeKey]?.startIntent;
+    if (!saved || saved.id !== intent.id) return false;
+    if (saved.expectedReceptionRevision !== intent.expectedReceptionRevision || saved.expectedRecordId !== intent.expectedRecordId) {
+      throw new NamingTaskError('trial_changed');
+    }
+    return true;
+  }
+
+  private async startTrial(body: ApiBody, isolated: boolean, intent?: StartIntent): Promise<void> {
     const startRequestReceivedAt = new Date().toISOString();
+    if (intent && await this.matchesStartIntent(intent)) return;
     await this.receptionSerial(async () => {
+      if (intent && await this.matchesStartIntent(intent)) return;
       const kind = await this.ownerKind();
-      if (kind === 'reception') return this.receptionStart(body, startRequestReceivedAt);
+      if (kind === 'reception') return this.receptionStart(body, startRequestReceivedAt, intent);
       if (kind === 'unused' || kind === 'legacy') {
         // A new start reads the current setting; unreadable settings never count as off.
         const settings = await this.settings();
@@ -529,14 +544,14 @@ export class TangramSession extends DurableObject<Env> {
       validateBaseStart(body);
       this.admission = { kind:'legacy' };
       try {
-        const result = await this.assignmentSession().start(body);
+        const result = await this.assignmentSession().start(body, intent);
         if (isolated && result.kind === 'completed') throw new NamingTaskError('trial_changed');
         this.trial = result.task;
       } finally { this.admission = null; }
     });
   }
   /** Caller holds receptionSerial. The approved plan decides the trial; the current protocol must still be valid. */
-  private async receptionStart(body: ApiBody, startRequestReceivedAt: string): Promise<void> {
+  private async receptionStart(body: ApiBody, startRequestReceivedAt: string, intent?: StartIntent): Promise<void> {
     await this.currentProtocol(); // A saved plan never bypasses unreadable or unconfigured settings.
     const r = await this.readReception();
     if (!r || !r.plan || !['approved','in_progress'].includes(r.status)) throw new ReceptionError('reception_not_approved');
@@ -569,7 +584,7 @@ export class TangramSession extends DurableObject<Env> {
     if (approvedPin) {
       try {
         participantPolicy = await workerParticipantPolicy(this.env.PARTICIPANT_AI_PROXY,
-          Boolean(plan.participantRuntimeProfile), plan.initialObservationGeneration, approvedPin.schemaVersion);
+          Boolean(plan.participantRuntimeProfile) || this.usesLegacyParticipantAccounting(), plan.initialObservationGeneration, approvedPin.schemaVersion);
         resolveWorkerParticipantModelPin({ approvedPin, configuredPin: participantPolicy.pin });
       } catch { throw new BaseSessionError('trial_unavailable'); }
     }
@@ -588,9 +603,9 @@ export class TangramSession extends DurableObject<Env> {
     this.admission = { kind:'reception', receptionId:r.receptionId, expectedRevision:r.revision, index, startRequestReceivedAt, participantPolicy };
     try {
       if (predecessor) {
-        await this.assignmentSession().prepareNext(predecessor);
+        await this.assignmentSession().prepareNext(predecessor, intent);
         this.trial = (await this.assignmentSession().restore()).task;
-      } else this.trial = (await this.assignmentSession().start({version:2})).task;
+      } else this.trial = (await this.assignmentSession().start({version:2}, intent)).task;
     } finally { this.admission = null; }
   }
   private async questionnaireSubmitted(recordId: string): Promise<boolean> {
@@ -726,13 +741,23 @@ export class TangramSession extends DurableObject<Env> {
       return deleteArchived(tx, recordId);
     }));
     this.forget([recordId]);
-    await this.scheduleExpiry();
+    await this.scheduleRecoveryAlarm();
     return existed;
   }
 
-  /** Old deployments may have scheduled an expiry alarm. Clear it without deleting evidence. */
+  /** Keep accepted work moving even when the participant's tab stops polling. */
   async alarm(): Promise<void> {
-    await this.scheduleExpiry();
+    try {
+      await this.initialize();
+      await this.scheduleRecoveryAlarm();
+      if (await this.hasStoredRecoveryWork()) {
+        const restored = await this.assignmentSession().restore();
+        if (restored.kind === 'restored') {
+          this.trial = restored.task;
+          await restored.task.whenIdle({ signal: AbortSignal.timeout(600_000) });
+        }
+      }
+    } finally { await this.scheduleRecoveryAlarm(); }
     const index = this.index();
     if (index) {
       const tombstones = await this.ctx.storage.get<string[]>('tombstones') ?? [];
@@ -772,9 +797,40 @@ export class TangramSession extends DurableObject<Env> {
     if (typeof current === "string" && recordIds.includes(current)) this.trial = null;
   }
 
-  /** Cancel legacy expiry alarms; saving or accessing a record never schedules deletion. */
-  private async scheduleExpiry(): Promise<void> {
-    await this.ctx.storage.deleteAlarm();
+  private usesLegacyParticipantAccounting(): boolean {
+    return this.env.PARTICIPANT_TERRA_PROFILE === PARTICIPANT_PRODUCTION_PROFILE;
+  }
+
+  private async hasStoredRecoveryWork(storage: Pick<DurableObjectStorage, 'get'> = this.ctx.storage): Promise<boolean> {
+    const owner = await storage.get<BaseOwnerState>('base:owner:v1');
+    const entry = owner?.activeKey && owner.admissions[owner.activeKey];
+    if (!entry || entry.record?.status === 'interrupted' ||
+        (await storage.get<Reception>('reception:v1'))?.status === 'interrupted') return false;
+    if (needsAssignmentPreparation(entry)) return true;
+    const record = entry.record;
+    return entry.status === 'active' && !!record && isIncompleteTrialStatus(record.status) &&
+      record.dialogueInterruption !== 'participant_paused' &&
+      (record.dialogueInterruption !== 'budget_exhausted' || record.options.participantRuntimeProfile === PARTICIPANT_PRODUCTION_PROFILE ||
+        Boolean(record.options.participantModelPin) && this.usesLegacyParticipantAccounting()) &&
+      Boolean(record.status === 'submitting' || record.queueState.errorCode || record.queueState.pendingHumanEventIds.length ||
+        (record.queueState.privateState as { deferredAiExtraction?: unknown } | undefined)?.deferredAiExtraction ||
+        this.trial?.getState().sessionId === record.recordId && this.trial.hasRecoveryWork?.());
+  }
+
+  private async updateRecoveryAlarm(storage: Pick<DurableObjectStorage, 'get' | 'getAlarm' | 'setAlarm' | 'deleteAlarm'>): Promise<void> {
+    if (!await this.hasStoredRecoveryWork(storage)) {
+      await storage.deleteAlarm?.();
+      return;
+    }
+    const now = Date.now(), due = now + 30_000;
+    const alarm = await storage.getAlarm?.();
+    if (alarm !== undefined && alarm !== null && now < alarm && alarm <= due) return;
+    await storage.setAlarm?.(due);
+  }
+
+  /** Legacy expiry alarms never delete records. The archive's own writes govern the watchdog. */
+  private async scheduleRecoveryAlarm(): Promise<void> {
+    await this.serialized(() => this.updateRecoveryAlarm(this.ctx.storage));
   }
 
   /** Best effort: an index failure never affects the participant's trial or its record. */
@@ -794,18 +850,23 @@ export class TangramSession extends DurableObject<Env> {
 
   private async initialize(): Promise<void> {
     if (this.initialized) return this.initialized;
-    this.initialized = (async () => {
+    const work = (async () => {
       const active = await this.ctx.storage.get<StoredTrial>(ACTIVE_KEY);
       if (active) await this.validateArchiveBinding(active);
       // Additive backfill keeps even old active-only evidence, with its original
       // update time. No record is expired during initialization.
       await this.serialized(() => backfillActive(this.ctx.storage, Date.now()));
-      await this.scheduleExpiry();
+      await this.scheduleRecoveryAlarm();
       // Legacy active records may be archived/indexed but never restored into a task.
       const record = await this.ctx.storage.get<StoredTrial>(ACTIVE_KEY);
       if (record) { await this.validateArchiveBinding(record); this.ctx.waitUntil(this.registerSummary(record)); }
     })();
-    return this.initialized;
+    this.initialized = work;
+    try { await work; }
+    catch (error) {
+      if (this.initialized === work) this.initialized = null;
+      throw error;
+    }
   }
 
   /** Narrow metadata RPCs; neither constructs tasks nor selects conditions. */
@@ -951,16 +1012,19 @@ export class TangramSession extends DurableObject<Env> {
         return { receptionId:r.receptionId, plan:r.plan, trialIndex:binding.index };
       },
       makeTask:async binding=>this.createTrial(binding),
+      onPreparing: work => this.ctx.waitUntil(work),
       store:{
         read:async():Promise<OwnerRead>=>{
           const raw = await this.ctx.storage.get<BaseOwnerState>('base:owner:v1');
           if (!raw) return await this.ctx.storage.get(ACTIVE_KEY) ? {kind:'legacy_active'} : {kind:'expired'};
           const owner = readOwner(raw,this.ctx.id.toString());
+          const reception = await this.readReception();
+          if (reception?.status === 'interrupted') return {kind:'state',state:{...owner,activeKey:null,admissions:{}}};
           const current = owner.activeKey && owner.admissions[owner.activeKey];
           if (current && current.errorCode === 'record_deleted') return {kind:'expired'};
           const source = current?.assignment.source;
           if (source?.kind === 'reception_plan_v2' || source?.kind === 'reception_plan_v3') {
-            const plan = (await this.readReception())?.plan;
+            const plan = reception?.plan;
             const dialogueProfile = plan?.schemaVersion === 'reception_plan_v1' ? undefined : plan?.participantDialogueProfile;
             if (dialogueProfile !== source.plan.participantDialogueProfile ||
                 current?.record && !matchesWorkerDialogueProfile(dialogueProfile, current.record)) {
@@ -1001,6 +1065,7 @@ export class TangramSession extends DurableObject<Env> {
           if (current && current.assignment.source.kind !== 'server_config_v1') {
             const rawReception = await tx.get('reception:v1');
             reception = validateReception(rawReception);
+            if (reception.status === 'interrupted') throw new BaseSessionError('trial_unavailable', 'owner_state_invalid');
             const source = current.assignment.source;
             if (source.receptionId !== reception.receptionId || reception.objectId !== owner.ownerId ||
               JSON.stringify(source.plan) !== JSON.stringify(reception.plan)) throw new ReceptionError('reception_unavailable');
@@ -1025,6 +1090,7 @@ export class TangramSession extends DurableObject<Env> {
             if (changed) { reception.revision++; reception = validateReception(reception); updates['reception:v1'] = reception; }
           }
           await tx.put(updates); if (!active) await tx.delete(ACTIVE_KEY);
+          await this.updateRecoveryAlarm(tx);
           indexed = reception;
           return true;
         })).then(applied => {
@@ -1085,8 +1151,10 @@ export class TangramSession extends DurableObject<Env> {
     }
     const admission = !restore && this.admission?.kind === 'reception' ? this.admission : null;
     const admittedPolicy = admission?.participantPolicy;
+    const legacyAccounting = binding.participantModelPin?.schemaVersion === 'participant_model_pin_v1' &&
+      !participantRuntime && this.usesLegacyParticipantAccounting();
     const policy = binding.participantModelPin === undefined ? null
-      : admittedPolicy ?? await workerParticipantPolicy(this.env.PARTICIPANT_AI_PROXY, Boolean(participantRuntime),
+      : admittedPolicy ?? await workerParticipantPolicy(this.env.PARTICIPANT_AI_PROXY, Boolean(participantRuntime) || legacyAccounting,
         undefined, binding.participantModelPin.schemaVersion);
     let pin;
     try {
@@ -1111,16 +1179,20 @@ export class TangramSession extends DurableObject<Env> {
           typeof initialMemoReadStartedAt === 'string' && typeof initialMemoReadyAt === 'string'
           ? { initialMemoReadStartedAt, initialMemoReadyAt } : {}) } : snapshot;
       await binding.onPersist(record as unknown as RawBaseRecord);
-      await this.scheduleExpiry();
       this.ctx.waitUntil(this.registerSummary(record));
     };
     if (pin && policy) {
-      // Pin-only plans predate reception-level limits. Their existing trials have a ledger snapshot.
+      // A pin-only plan can start in production with no historical limit. On
+      // restore, keep the already recorded limits and the old accounting format.
+      const savedLimits = restore && !participantRuntime ? data(restore.jevLedger).limits : undefined;
       const runtimeMode = participantRuntime ? {
         usage: await ParticipantUsageLedger.open(this.participantUsageStore(participantRuntime.assignmentId),
-          participantRuntime.assignmentId, pin, restore?.jevLedger),
-      } : { limits: binding.participantLimits ?? validateParticipantLimits(restore
-        ? data(restore.jevLedger).limits : JSON.parse(this.env.PARTICIPANT_TERRA_LIMITS_JSON ?? 'null')) };
+          participantRuntime.assignmentId, pin, restore?.jevLedger, !restore),
+      } : legacyAccounting ? { historicalLimits: binding.participantLimits ??
+        (restore && savedLimits !== null ? validateParticipantLimits(savedLimits) : null) }
+        : { limits: binding.participantLimits ?? validateParticipantLimits(restore
+          ? savedLimits : JSON.parse(this.env.PARTICIPANT_TERRA_LIMITS_JSON ?? 'null')) };
+      if (binding.recoveringAdmission && !restore && runtimeMode.usage) await runtimeMode.usage.resumeAfterModelMismatch();
       const rotationMode = restore?.options.rotationMode ?? binding.rotationMode ?? 'relative_pm90';
       if (rotationMode !== 'relative_pm90' && rotationMode !== 'relative_0') throw new NamingTaskError('invalid_options');
       // The observer and dialogue must see the same board. A restore uses the validated record's selection.
@@ -1150,9 +1222,8 @@ export class TangramSession extends DurableObject<Env> {
         utteranceStyle: runtime.jevResearch.profile.utteranceStyle, createTrial: () => trial, onPersist,
         runDir: null, ...(restore ? { restore } : {}),
       }) as unknown as Parameters<typeof createNamingTaskV2>[0]) as NamingTask;
-      if (restore && (participantDialogueProfile === PILOT012_V20_PARTICIPANT_PROFILE || participantDialogueProfile === PILOT012_V21_PARTICIPANT_PROFILE ||
-          participantDialogueProfile === PILOT012_V22_PARTICIPANT_PROFILE || participantDialogueProfile === PILOT012_V23_PARTICIPANT_PROFILE))
-        this.ctx.waitUntil(task.whenIdle().catch(() => {}));
+      if (restore && task.hasRecoveryWork?.())
+        this.ctx.waitUntil(task.whenIdle({ signal: AbortSignal.timeout(600_000) }).catch(() => {}));
       return task;
     }
     // New trials take the assignment's mode; a restored trial takes its mode from its own record only.
@@ -1227,17 +1298,18 @@ export class TangramSession extends DurableObject<Env> {
         next.questionnaire.status === "submitted")) throw new NamingTaskError("not_found");
       return next.questionnaire;
     });
-    await this.scheduleExpiry();
+    await this.scheduleRecoveryAlarm();
     this.ctx.waitUntil(this.registerSummary(record));
     return json(200, { recordId, form: QUESTIONNAIRE_FORM, questionnaire });
   }
 
   /** Participant state; a completed trial's result stays withheld until its questionnaire is submitted. */
-  private async state(): Promise<unknown> {
-    const live = this.trial?.getState() ?? null;
+  private async state(starting = false, startIntentId?: string): Promise<unknown> {
+    const live = starting ? null : this.trial?.getState() ?? null;
     const trial = live && typeof live.sessionId === "string"
       ? lockResult(live, await readQuestionnaire(this.ctx.storage, live.sessionId)) : live;
-    return { trial, hideStrategy: true, busy: Boolean(live?.busy) };
+    return { trial, hideStrategy: true, busy: starting || Boolean(live?.busy),
+      ...(starting ? { starting: true } : {}), ...(startIntentId ? { startIntentId } : {}) };
   }
 
   private async interruptedState() {
@@ -1248,10 +1320,10 @@ export class TangramSession extends DurableObject<Env> {
       ...(reception ? { reception: participantReception(reception) } : {}) } : null;
   }
 
-  private async participantState(): Promise<unknown> {
+  private async participantState(starting = false, startIntentId?: string): Promise<unknown> {
     const interrupted = await this.interruptedState();
     if (interrupted) return interrupted;
-    const state = await this.state();
+    const state = await this.state(starting, startIntentId);
     const kind = await this.ownerKind();
     if (kind === 'unused') {
       // Only a browser that has nothing yet depends on the global mode; reasons are never shown.
@@ -1276,7 +1348,14 @@ export class TangramSession extends DurableObject<Env> {
     try {
       const pathname = new URL(request.url).pathname;
       const body = request.method === 'POST' && ['/api/start','/api/message','/api/retry','/api/interrupt','/api/names','/api/ai-submit'].includes(pathname) ? await readBody(request) : null;
+      let startIntent: StartIntent | undefined;
       if (pathname === '/api/start' && request.method === 'POST') {
+        if (Object.hasOwn(body!, 'startIntentId')) {
+          startIntent = readStartIntent({ id: body!.startIntentId,
+            ...(Object.hasOwn(body!, 'expectedReceptionRevision') ? { expectedReceptionRevision: body!.expectedReceptionRevision } : {}),
+            ...(Object.hasOwn(body!, 'expectedRecordId') ? { expectedRecordId: body!.expectedRecordId } : {}) });
+          delete body!.startIntentId;
+        }
         // A body with reception expectations is checked by shape here and by the reception owner later;
         // any other body must be exactly the legacy start (a legacy owner never accepts expectations).
         if (Object.hasOwn(body!,'expectedReceptionRevision') || Object.hasOwn(body!,'expectedRecordId')) {
@@ -1303,16 +1382,25 @@ export class TangramSession extends DurableObject<Env> {
         if (request.method === 'POST' && body) throw new NamingTaskError('trial_interrupted');
       }
       if (pathname === '/api/reception' && request.method === 'POST') {
-        await this.receive(); this.trial = (await this.assignmentSession().restore()).task;
-        return json(200,await this.participantState());
+        await this.receive();
+        const restored = await this.assignmentSession().restore();
+        this.trial = restored.task;
+        return json(200,await this.participantState(restored.kind === 'preparing', restored.startIntentId));
       }
-      if (pathname !== '/api/start') this.trial = (await this.assignmentSession().restore()).task;
-      if (request.method === 'GET' && pathname === '/api/state') return json(200,await this.participantState());
+      const restored = pathname === '/api/start' ? null : await this.assignmentSession().restore();
+      if (restored) this.trial = restored.task;
+      const view = () => this.participantState(restored?.kind === 'preparing', restored?.startIntentId);
+      if (request.method === 'GET' && pathname === '/api/state') return json(200,await view());
       if (request.method !== "POST") return json(404, { error: "not_found" });
       if (!["/api/start", "/api/message", "/api/retry", "/api/interrupt", "/api/names", "/api/ai-submit"].includes(pathname)) return json(404, { error: "not_found" });
       if (pathname === '/api/start') {
-        await this.startTrial(body!, isolated);
-        return json(200,await this.participantState());
+        try { await this.startTrial(body!, isolated, startIntent); }
+        catch (error) {
+          if (!(error instanceof BaseSessionError && error.code === 'trial_unavailable' && startIntent && await this.matchesStartIntent(startIntent))) throw error;
+        }
+        const started = await this.assignmentSession().restore();
+        this.trial = started.task;
+        return json(200,await this.participantState(started.kind === 'preparing', started.startIntentId));
       }
       if (!this.trial) throw new NamingTaskError("trial_required");
       const trial = this.trial;
@@ -1326,7 +1414,7 @@ export class TangramSession extends DurableObject<Env> {
         const receipt = trial.message(body!.text, clientId);
         await trial.persistNow();
         this.ctx.waitUntil(trial.whenIdle().catch(() => {}));
-        return json(202, { eventId: receipt.eventId, ...await this.participantState() as object });
+        return json(202, { eventId: receipt.eventId, ...await view() as object });
       }
       if (pathname === "/api/retry") await trial.retry();
       if (pathname === "/api/interrupt") {
@@ -1340,13 +1428,13 @@ export class TangramSession extends DurableObject<Env> {
         validateEventCount(body!, live.events);
         if (live.status === 'completed') throw new NamingTaskError('already_submitted');
         await trial.submitHuman({ names: body!.names });
-        if (!trial.getState().aiSubmitted) await trial.submitAI();
       }
       if (pathname === "/api/ai-submit") {
         if (isolated && live.status === 'completed') throw new NamingTaskError('trial_changed');
-        await trial.submitAI();
+        if (live.recovering === true && !live.closed) throw new NamingTaskError('ai_busy');
+        if (live.recovering !== true) await trial.submitAI();
       }
-      return json(200, await this.participantState());
+      return json(200, await view());
     } catch (error) {
       return sanitizedError(error);
     }

@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { parseArguments, validateOutputDirectory, loadEvaluationCases, assertPublicText, runEvaluation, generateNextReply, evaluationErrorLine } from "../dialogue-model/runtime/diagnostics/local-grounding-eval/run.ts";
 import { createNamingTaskV2 } from "../dialogue-model/runtime/v2/naming-task-v2.mjs";
 import { createTrialV2 } from "../dialogue-model/runtime/stimuli/scatter-v2.mjs";
+import { manualRecoveryTimers } from "./helpers/recovery-timers.ts";
 
 const repository = fileURLToPath(new URL("..", import.meta.url));
 const policy = { syntheticOnly: true, containsRealParticipantData: false, containsExcelOrPast5Dialogues: false };
@@ -239,7 +240,9 @@ test("local-grounding participant/API payloads exclude private memory; model inp
 test("local model failures and guarded drafts cannot leak raw private response bodies into public state or research records", async () => {
   for (const phase of ["extract", "classify", "generation"]) {
     const records: any[] = [];
+    const recovery = manualRecoveryTimers();
     const privateBody = "private_prompt_image_token_12345";
+    let failGeneration = phase === "generation";
     const localGrounding = {
       extractor: { async extract(input: any) {
         if (phase === "extract") throw Object.assign(new Error(privateBody), { code: privateBody });
@@ -252,22 +255,41 @@ test("local model failures and guarded drafts cannot leak raw private response b
       } },
     };
     const generation = { async complete() {
-      if (phase === "generation") throw Object.assign(new Error(privateBody), { code: "provider_http_error" });
+      if (failGeneration) throw Object.assign(new Error(privateBody), { code: "provider_http_error" });
+      if (phase === "generation") return { text: "こちらでも四角い部分が見えます。", model: "mock" };
       // Both drafts deliberately contain a private id/field; publication must use the safe guard fallback.
       return { text: "ownLedger s-ab12", model: "mock" };
     } };
     const judge = { async judge() { return { action: "accept", targetSlot: null, candidateName: null, discriminatingFeature: null, note: null }; } };
     const task = await createNamingTaskV2({ client: generation, judge, strategy: "repair-first", seed: 1552, referenceMemory: true,
-      localGrounding, runDir: null, onPersist: async (record: any) => { records.push(structuredClone(record)); } } as any);
-    task.message("四角い部分があります。");
+      localGrounding, runDir: null, recoveryTimers: recovery.timers,
+      onPersist: async (record: any) => { records.push(structuredClone(record)); } } as any);
+    const before = task.researcherView().privateState;
+    const { eventId } = task.message("四角い部分があります。");
     await task.whenIdle();
+    if (phase === "generation") {
+      const waiting = task.getState();
+      assert.equal(waiting.aiStatus, "thinking");
+      assert.equal(waiting.recovering, true);
+      assert.equal(waiting.events.at(-1)?.id, eventId);
+      assert.equal(waiting.events.at(-1)?.speaker, "human");
+      assert.deepEqual(records.at(-1).queueState.pendingHumanEventIds, [eventId]);
+      assert.deepEqual(task.researcherView().privateState, before);
+      assert.ok(!JSON.stringify(waiting).includes(privateBody));
+      failGeneration = false;
+      recovery.runNext();
+      await task.whenIdle();
+      assert.deepEqual(task.getState().events.slice(0, -1), waiting.events);
+      assert.equal(task.getState().events.at(-1)?.text, "こちらでも四角い部分が見えます。");
+      assert.equal(task.researcherView().privateState.graph.revision, before.graph.revision + 1);
+    }
     const api = JSON.stringify(task.getState());
     assert.ok(!api.includes(privateBody));
     assert.doesNotMatch(api, /ownLedger|s-ab12|localGrounding|issueSummary/);
-    const record = JSON.stringify(records.at(-1));
+    const record = JSON.stringify(records);
     assert.ok(!record.includes(privateBody));
     assert.doesNotMatch(record, /s-ab12/);
-    assert.equal(task.getState().aiStatus, phase === "generation" ? "error" : "idle");
+    assert.equal(task.getState().aiStatus, "idle");
   }
 });
 

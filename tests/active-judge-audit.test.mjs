@@ -133,6 +133,7 @@ test('active audit: a newer human message supersedes the waiting decision and on
     } } } });
   task.message('最初の合成発話', 'first'); await started.promise;
   task.message('新しい訂正の合成発話', 'second');
+  await task.persistNow();
   assert.equal(task.getState().events.filter(e => e.speaker === 'human').length, 2);
   release.resolve(); await task.whenIdle();
   assert.equal(decisions, 2); assert.equal(generations.length, 1);

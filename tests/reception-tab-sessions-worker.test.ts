@@ -132,6 +132,7 @@ async function harness(receptionMode: 'on' | 'off' = 'off') {
           record.closed = true;
           record.status = 'submitting';
           await persist();
+          await task.submitAI();
         },
         async submitAI() {
           finalCalls++;

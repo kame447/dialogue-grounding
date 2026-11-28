@@ -261,18 +261,19 @@ export function createHumanMessageQueue({ runAiTurn, afterPublication, beforeReq
   }
   async function whenIdle() { while (running) await running; }
   const queue = Object.freeze({
-    enqueue(input) {
+    enqueue(input, { startWork = true } = {}) {
       const receipt = state.acceptHuman(input);
       if (!receipt.duplicate) {
         // Acceptance/invalidation is durable in state before abort listeners run.
         controller?.abort();
-        start();
+        if (startWork) start();
       }
       return receipt;
     },
     getSnapshot: state.getSnapshot,
     getPrivateState: state.getPrivateState,
     getDurableState: state.getDurableState,
+    isRunning: () => running !== null,
     startPublishedWork: start,
     retry() { retryRequested = true; start(); return whenIdle(); },
     whenIdle,

@@ -260,7 +260,7 @@ const dialoguePending = !dialogueV2 && 'Integrate runtime/v2/dialogue-v2.mjs, or
 const namingV2 = await optionalRuntimeModule('v2/naming-task-v2.mjs');
 const namingPending = !namingV2 && 'Integrate runtime/v2/naming-task-v2.mjs and enable its final privacy/submission cases.';
 
-async function taskFixture(extra = {}) {
+async function taskFixture(extra = {}, beforeFinal = () => {}) {
   assert.ok(namingV2, 'v2 naming task is not yet integrated');
   const trial = createTrialV2({ seed: 104729 }), calls = [], scored = [];
   const ids = Object.values(trial.key.human).sort();
@@ -279,6 +279,7 @@ async function taskFixture(extra = {}) {
     },
     client: { async complete(messages, options) {
       calls.push({ phase: options.phase, messages: structuredClone(messages) });
+      if (options.phase === 'final_submission') await beforeFinal();
       return { text: options.phase === 'judgment' ? JSON.stringify({ ...act(NAME[1]), targetSlot: trial.ai.anchors[0].id }) :
         options.phase === 'final_submission' ? JSON.stringify(submission('ai')) : REPLY[1], model: 'synthetic-only' };
     } }, ...extra,
@@ -300,16 +301,19 @@ requirement('v2 participant state: no seed or researcher mapping can reconstruct
 });
 
 for (const first of ['human', 'ai']) requirement(`v2 final names: withheld until both commitments, scored once (${first} first)`, namingPending, async () => {
-  const { task, calls, scored, submission, trial } = await taskFixture();
+  const { promise: entered, resolve: enter } = Promise.withResolvers();
+  const { promise: release, resolve } = Promise.withResolvers();
+  const { task, calls, scored, submission, trial } = await taskFixture({}, first === 'human' ? () => { enter(); return release; } : undefined);
   const publicBefore = task.getState().events;
-  if (first === 'human') await task.submitHuman({ names: submission('human') });
+  const humanSubmission = first === 'human' ? task.submitHuman({ names: submission('human') }) : null;
+  if (humanSubmission) await entered;
   else await task.submitAI();
   const pending = task.getState();
   assert.equal(scored.length, 0);
   assert.equal(Object.hasOwn(pending, 'result'), false);
   assert.equal(Object.hasOwn(pending, 'aiSubmission'), false);
   assert.ok(!JSON.stringify(pending).includes('synthetic final name '), 'private names cannot be published before both commitments');
-  if (first === 'human') await task.submitAI();
+  if (humanSubmission) { resolve(); await humanSubmission; }
   else await task.submitHuman({ names: submission('human') });
   const complete = task.getState();
   assert.equal(scored.length, 1, 'either submission order must trigger scoring exactly once');
@@ -323,9 +327,10 @@ for (const first of ['human', 'ai']) requirement(`v2 final names: withheld until
   }
 });
 
-requirement('v2 task retry: accepted human message survives generation failure without replay or raw error leakage', namingPending, async () => {
-  let attempts = 0;
-  const { task } = await taskFixture({ client: { async complete(_messages, options) {
+requirement('v2 task recovery: accepted human message survives generation failure without replay or raw error leakage', namingPending, async () => {
+  let attempts = 0, recover;
+  const { task } = await taskFixture({ recoveryTimers: { set(callback) { recover = callback; }, clear() { recover = undefined; } },
+    client: { async complete(_messages, options) {
     if (options.phase === 'judgment') return { text: JSON.stringify({ action: 'accept', targetSlot: null,
       candidateName: null, discriminatingFeature: null, note: null }) };
     if (attempts++ === 0) throw new Error(PRIVATE);
@@ -336,10 +341,12 @@ requirement('v2 task retry: accepted human message survives generation failure w
   assert.ok(receipt.eventId);
   await task.whenIdle();
   const failed = task.getState();
-  assert.equal(failed.aiStatus, 'error');
+  assert.equal(failed.aiStatus, 'thinking');
+  assert.equal(failed.recovering, true);
   assert.deepEqual(failed.events.map((event) => event.text), [...opening, PUBLIC[0]]);
   assert.ok(!JSON.stringify(failed).includes(PRIVATE));
-  await task.retry();
+  assert.ok(recover); recover();
+  await task.whenIdle();
   const done = task.getState();
   assert.equal(done.aiStatus, 'idle');
   assert.deepEqual(done.events.map((event) => event.text), [...opening, PUBLIC[0], REPLY[1]]);
@@ -354,13 +361,15 @@ requirement('v2 invalid final response: one bounded format retry, no scoring and
   } } });
   const publicBefore = task.getState().events;
   await task.submitHuman({ names: submission('human') });
-  await assert.rejects(task.submitAI());
   assert.deepEqual(phases, ['final_submission', 'final_submission'], 'invalid format receives exactly one retry');
   assert.equal(scored.length, 0);
   const state = task.getState();
+  assert.equal(state.recovering, true);
+  assert.equal(state.aiSubmitted, false);
   assert.equal(Object.hasOwn(state, 'result'), false);
   assert.deepEqual(state.events, publicBefore);
   assert.ok(!JSON.stringify(state).includes(PRIVATE), 'raw invalid final response stays private');
+  task.stopForAdmin();
 });
 
 requirement('v2 actual dialogue adapter: shared holistic generator, own image only and policy-only condition difference', dialoguePending, async () => {
@@ -589,6 +598,7 @@ requirement('v2 UI: human may compose and submit another message while AI genera
   const e = app.elements;
   assert.equal(e.utterance.disabled, false, 'AI thinking must not disable human input');
   assert.equal(e['send-message'].disabled, false);
+  assert.equal(e['finish-conversation'].disabled, true, 'finishing still waits for the current reply');
   e.utterance.value = PUBLIC[0]; e.chat.fire('submit'); await held.entered;
   e.utterance.value = PUBLIC[1]; e.chat.fire('submit');
   try {

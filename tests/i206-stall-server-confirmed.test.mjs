@@ -90,10 +90,6 @@ async function ui(initial = trial(), handler) {
         state.trial.events.push({ id: eventId, speaker: "human", text: body.text, clientId: body.clientId });
         state.trial.aiStatus = "thinking"; value = { eventId, ...state };
       }
-      if (path === "/api/retry") {
-        state.trial.aiStatus = "idle";
-        state.trial.events.push({ id: "event-retry", speaker: "ai", text: "再試行した応答" });
-      }
       return { ok: true, status: path === "/api/message" ? 202 : 200, json: async () => structuredClone(value) };
     },
   });
@@ -114,84 +110,90 @@ async function ui(initial = trial(), handler) {
       assert.ok(timer, "a state refresh is scheduled"); await advance(timer.at - now);
     } };
 }
-const send = (e, text) => { e.utterance.value = text; e.chat.fire("submit"); };
-// The AI's typing bubble (Issue #170) is display only and always last; it is
-// not a message. Anywhere else it would show up below as a message without text.
-const isTyping = (node) => node?.className === "ai typing-message";
-const typingShown = (e) => isTyping(e.history.children.at(-1));
-const typingCount = (e) => e.history.children.filter(isTyping).length;
-const messageNodes = (e) => typingShown(e) ? e.history.children.slice(0, -1) : e.history.children;
-const messageBodies = (e) => messageNodes(e).map((node) => node.querySelectorAll("p")[0]?.textContent);
-const messageCalls = (calls) => calls.filter((call) => call.path === "/api/message");
-const STOPPED = "進行を確認できません。実験担当者にお知らせください。";
+const typingShown = (e) => e.history.children.at(-1)?.className === "ai typing-message";
+const DELAYED = "応答に時間がかかっています。入力した内容は保持されています。";
+const RECOVERING = "応答に時間がかかっています。自動で再試行しています。入力した内容は保持されています。";
 const gate = () => { let release; const wait = new Promise((resolve) => { release = resolve; }); return { wait, release }; };
+const working = () => ({ ...trial(), aiStatus: "thinking" });
+const manualPaths = ["/api/retry", "/api/interrupt", "/api/ai-submit"];
+function finishReply(state) {
+  state.trial.events.push({ id: "recovered-reply", speaker: "ai", text: "遅れて届いた返答" });
+  state.trial.aiStatus = "idle";
+  delete state.trial.recovering;
+  state.busy = false;
+}
 
-// #206 item 2: a turn the server itself reports as still being processed (busy), read successfully, is confirmed progress. A slow re-observation (up to 85 s in one call)
-// is not a stall, and the client invents no shorter wait of its own. Everything that is not such a report keeps the no-progress watchdog.
-const working = () => { const state = trial(); state.aiStatus = "thinking"; return state; };
-
-test("server-confirmed processing is not a stall: dots stay and no stop is shown past the former one-minute wait", async () => {
-  const { e, advance, getState } = await ui(working());
+test("unchanged busy reports do not reset the one-minute wait or rewrite the live region", async () => {
+  const { e, calls, advance, getState, poll } = await ui(working());
   getState().busy = true;
   await advance(1000);
   const status = e["chat-status"];
   assert.equal(status.getAttribute("role"), "status");
   assert.equal(status.getAttribute("aria-live"), "polite");
   assert.equal(status.textContent, "AIが返答を作成しています");
-  const updates = status.textUpdates;
-  await advance(61000);
-  assert.ok(typingShown(e), "the dots stay while the server reports work in progress");
-  assert.equal(e["chat-recovery"].hidden, true);
-  await advance(120000);
+  assert.equal(e.history.children.at(-1).getAttribute("aria-hidden"), "true");
+  await advance(58999);
   assert.ok(typingShown(e));
   assert.equal(e["chat-recovery"].hidden, true);
-  assert.equal(e.history.children.at(-1).getAttribute("aria-hidden"), "true");
-  assert.equal(status.textContent, "AIが返答を作成しています");
-  assert.equal(status.textUpdates, updates, "unchanged text is not written to the live region again");
+  await advance(1);
+  assert.equal(typingShown(e), false);
+  assert.equal(e["chat-recovery"].hidden, false);
+  assert.equal(status.textContent, DELAYED);
+  const updates = status.textUpdates;
+  await advance(120000);
+  assert.equal(status.textUpdates, updates, "identical polls do not spam the live region");
+  finishReply(getState()); await poll();
+  assert.equal(e["chat-recovery"].hidden, true);
+  assert.match(e.history.textContent, /遅れて届いた返答/u);
+  assert.equal(calls.some(({ path }) => manualPaths.includes(path)), false);
 });
 
-test("when the server stops reporting work and reports an error, the stop shows at once", async () => {
+test("a reported error and subsequent automatic retry require no participant action", async () => {
   const { e, calls, advance, getState, poll } = await ui(working());
   getState().busy = true;
-  await advance(100000);
-  assert.equal(e["chat-recovery"].hidden, true);
+  await advance(1000);
   getState().trial.aiStatus = "error"; getState().busy = false; await poll();
+  assert.equal(typingShown(e), false);
   assert.equal(e["chat-recovery"].hidden, false);
-  assert.equal(e["chat-recovery-message"].textContent, STOPPED);
-  assert.equal(e["chat-status"].textContent, STOPPED);
-  assert.equal(e["retry-chat"].textContent, "状態を確認");
-  assert.equal(e["retry-chat"].disabled, false);
-  const before = calls.length;
-  e["retry-chat"].fire("click"); await tick();
-  assert.deepEqual(calls.slice(before).filter(({ path }) => path === "/api/state" || path === "/api/retry"), [
-    { path: "/api/state", body: undefined }, { path: "/api/retry", body: { expectedRecordId: getState().trial.sessionId } },
-  ]);
+  assert.equal(e["chat-recovery-message"].textContent, "応答を待っています。この画面のままお待ちください。");
+  assert.equal(e["chat-recovery"].querySelectorAll("button").length, 0);
+  Object.assign(getState().trial, { aiStatus: "thinking", recovering: true, dialogueRecovery: "active" }); await poll();
+  await advance(60000);
+  assert.equal(e["chat-status"].textContent, RECOVERING);
+  assert.equal(e["finish-conversation"].disabled, true);
+  finishReply(getState()); await poll();
+  assert.equal(e["chat-recovery"].hidden, true);
+  assert.equal(calls.some(({ path }) => manualPaths.includes(path)), false);
 });
 
-test("a lost connection is not confirmation: busy from an earlier read does not hide the stall once reads fail", async () => {
+test("a lost connection is not progress; the one-minute notice needs no button", async () => {
   let offline = false;
-  const { e, advance, getState } = await ui(working(), ({ path }) => { if (offline && path === "/api/state") throw new TypeError("Failed to fetch"); });
+  const { e, calls, advance, getState, poll } = await ui(working(), ({ path }) => { if (offline && path === "/api/state") throw new TypeError("Failed to fetch"); });
   getState().busy = true;
   await advance(5000);
   assert.equal(e["chat-recovery"].hidden, true);
-  offline = true;
-  await advance(10000);
+  offline = true; await advance(10000);
   assert.equal(e["chat-recovery"].hidden, true, "a short interruption stays invisible");
-  await advance(61000);
+  await advance(45000);
   assert.equal(e["chat-recovery"].hidden, false);
-  assert.equal(e["chat-recovery-message"].textContent, STOPPED);
-});
-
-test("without a server report of work in progress the no-progress watchdog is unchanged", async () => {
-  const { e, advance } = await ui(working());
-  await advance(59000);
+  assert.equal(e["chat-recovery-message"].textContent, DELAYED);
+  assert.equal(e["chat-recovery"].querySelectorAll("button").length, 0);
+  offline = false;
+  finishReply(getState()); await poll();
   assert.equal(e["chat-recovery"].hidden, true);
-  await advance(2000);
-  assert.equal(e["chat-recovery"].hidden, false);
-  assert.equal(e["chat-recovery-message"].textContent, STOPPED);
+  assert.equal(calls.some(({ path }) => manualPaths.includes(path)), false);
 });
 
-test("an unanswered state request times out after the last confirmed busy response; state check does not resend", async () => {
+test("an older response without a recovery field gets the factual one-minute notice", async () => {
+  const { e, advance } = await ui(working());
+  await advance(59999);
+  assert.equal(e["chat-recovery"].hidden, true);
+  await advance(1);
+  assert.equal(e["chat-recovery"].hidden, false);
+  assert.equal(e["chat-recovery-message"].textContent, DELAYED);
+});
+
+test("unanswered state reads time out and ordinary polling recovers when the reply arrives", async () => {
   const pendingRead = gate();
   let noReply = false;
   const { e, calls, advance, getState } = await ui(working(), ({ path }) => {
@@ -199,37 +201,40 @@ test("an unanswered state request times out after the last confirmed busy respon
   });
   getState().busy = true;
   await advance(5000);
+  const before = calls.length;
   noReply = true;
-  await advance(59000);
+  await advance(54999);
   assert.equal(e["chat-recovery"].hidden, true);
-  await advance(2000);
-  assert.equal(e["chat-recovery"].hidden, false);
-  assert.equal(e["chat-status"].textContent, STOPPED);
+  assert.ok(calls.slice(before).filter(({ path }) => path === "/api/state").length > 1, "a hung read cannot strand the poll");
+  await advance(1);
+  assert.equal(e["chat-status"].textContent, DELAYED);
   const updates = e["chat-status"].textUpdates;
   await advance(12000);
   assert.equal(e["chat-status"].textUpdates, updates);
   noReply = false;
-  getState().busy = false;
-  pendingRead.release(); await tick();
-  const before = calls.length;
-  e["retry-chat"].fire("click"); await tick();
-  assert.deepEqual(calls.slice(before).filter(({ path }) => path.startsWith("/api/")), [{ path: "/api/state", body: undefined }]);
-  assert.equal(e["chat-recovery"].hidden, false);
+  finishReply(getState());
+  pendingRead.release(); await tick(); await advance(12000);
+  assert.equal(e["chat-recovery"].hidden, true);
+  assert.match(e.history.textContent, /遅れて届いた返答/u);
+  assert.equal(calls.some(({ path }) => manualPaths.includes(path)), false);
 });
 
-test("a local timer cannot extend a previously received busy report when polling is suspended", async () => {
-  const { e, advance, getState, setVisibility } = await ui(working());
+test("a hidden tab does not poll and the first visible read requires real progress to clear the notice", async () => {
+  const { e, calls, advance, getState, setVisibility, poll } = await ui(working());
   getState().busy = true;
   getState().trial.dialogueRecovery = "active";
   await advance(1000);
   setVisibility("hidden");
-  await advance(61000);
+  const previous = calls.length;
+  await advance(59000);
+  assert.equal(calls.length, previous);
   assert.equal(e["chat-recovery"].hidden, false);
-  assert.equal(e["chat-recovery-message"].textContent, STOPPED);
-  assert.equal(e["chat-status"].textContent, STOPPED);
-  assert.equal(e["retry-chat"].textContent, "状態を確認");
-  setVisibility("visible");
-  await advance(1000);
+  assert.equal(e["chat-status"].textContent, DELAYED);
+  setVisibility("visible"); await tick();
+  assert.equal(calls[previous].path, "/api/state");
+  assert.equal(e["chat-status"].textContent, DELAYED);
+  assert.equal(typingShown(e), false);
+  finishReply(getState()); await poll();
   assert.equal(e["chat-recovery"].hidden, true);
-  assert.equal(e["chat-status"].textContent, "AIが返答を作成しています");
+  assert.equal(e["chat-status"].textContent, "");
 });

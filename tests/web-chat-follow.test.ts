@@ -74,7 +74,7 @@ function makeDOM() {
   return { root, ids };
 }
 type ChatEvent = { id: string; speaker: string; text: string; clientId?: string };
-type Trial = { version: number; sessionId: string; submitted: boolean; aiStatus: string; events: ChatEvent[]; scene: unknown };
+type Trial = { version: number; sessionId: string; submitted: boolean; aiStatus: string; recovering?: boolean; events: ChatEvent[]; scene: unknown };
 function trial(count = 1): Trial {
   const events = Array.from({ length: count }, (_, i) => ({ id: "event-" + (i + 1), speaker: i % 2 ? "human" : "ai", text: "公開の発話" + i }));
   return { version: 2, sessionId: "trial-private", submitted: false, aiStatus: "idle", events, scene: {
@@ -88,6 +88,7 @@ async function ui(initial: Trial, options: Options = {}) {
   let timerId = 0, now = 10000, clientSequence = 0;
   const state = { trial: initial };
   const timers = new Map<number, { callback: () => void; delay: number; at: number }>();
+  const calls: { path: string; method: string }[] = [];
   const observers: (() => void)[] = [];
   const documentElement = new Element("html");
   runInNewContext(script, {
@@ -98,7 +99,8 @@ async function ui(initial: Trial, options: Options = {}) {
     ResizeObserver: class { callback: () => void; constructor(callback: () => void) { this.callback = callback; observers.push(callback); } observe() {} },
     setTimeout: (callback: () => void, delay: number) => { timers.set(++timerId, { callback, delay, at: now + delay }); return timerId; },
     clearTimeout: (id: number) => timers.delete(id),
-    fetch: async (path: string, request?: { body?: string }) => {
+    fetch: async (path: string, request?: { body?: string; method?: string }) => {
+      calls.push({ path, method: request?.method ?? "GET" });
       const body = request?.body ? JSON.parse(request.body) : undefined;
       let value: unknown = state;
       if (path === "/api/message") {
@@ -110,6 +112,15 @@ async function ui(initial: Trial, options: Options = {}) {
     },
   });
   await tick();
+  const advance = async (ms: number) => {
+    const until = now + ms;
+    for (;;) {
+      const timer = [...timers].filter(([, entry]) => entry.at <= until).sort((a, b) => a[1].at - b[1].at)[0];
+      if (!timer) break;
+      timers.delete(timer[0]); now = timer[1].at; timer[1].callback(); await tick();
+    }
+    now = until;
+  };
   const poll = async () => {
     const timer = [...timers].filter(([, entry]) => entry.delay === 700 || entry.delay === 2000).sort((a, b) => a[1].at - b[1].at)[0];
     assert.ok(timer, "a state refresh is scheduled");
@@ -121,7 +132,7 @@ async function ui(initial: Trial, options: Options = {}) {
   };
   const scrollUp = (top = 0) => { e.history.scrollTop = top; e.history.fire("scroll"); };
   const resize = () => observers.forEach((callback) => callback());
-  return { e, state, poll, arrive, scrollUp, resize, documentElement };
+  return { e, state, calls, advance, poll, arrive, scrollUp, resize, documentElement };
 }
 const send = (e: Record<string, Element>, text: string) => { e.utterance.value = text; e.chat.fire("submit"); };
 const isTyping = (node?: Element) => node?.className === "ai typing-message";
@@ -212,8 +223,8 @@ test("a scrolled-up reader with no new arrivals sees no pill; acknowledgement of
 });
 
 // Issue #170 (2026-11-20): the dots left the composer for the log, as the AI's
-// provisional message. The stop notice and its recovery stay beside the composer.
-test("typing dots are a transient AI bubble at the end of the log, not in the composer; status, reduced motion and stop rules hold", async () => {
+// provisional message. The waiting notice stays beside the composer.
+test("typing dots are a transient AI bubble at the end of the log; status, reduced motion and passive recovery hold", async () => {
   assert.doesNotMatch(html, /typing|composer-status/u, "no dots and no reserved dots row in the composer");
   assert.doesNotMatch(css, /composer-status/u);
   assert.ok(ancestorsOf("chat-recovery").includes("chat"), "error/stall recovery stays beside the composer");
@@ -235,9 +246,14 @@ test("typing dots are a transient AI bubble at the end of the log, not in the co
   assert.equal(typing(e).length, 0, "dots stop on error");
   assert.ok(e.history.atBottom);
   assert.equal(e["chat-recovery"].hidden, false);
-  assert.equal(e["retry-chat"].disabled, false, "the composer-area retry is not disabled by composer locking");
+  assert.equal(e["chat-recovery-message"].textContent, "応答を待っています。この画面のままお待ちください。");
+  assert.equal(e["chat-status"].getAttribute("aria-live"), "polite");
+  assert.equal(e["chat-status"].textContent, e["chat-recovery-message"].textContent);
   await arrive("返答");
   assert.equal(typing(e).length, 0);
+  assert.equal(e["chat-recovery"].hidden, true);
+  assert.equal(e["chat-status"].textContent, "");
+  assert.ok(e.history.atBottom);
   assert.equal(bodyOf(e.history.children.at(-1)), "返答");
   assert.match(css, /@media\(prefers-reduced-motion:reduce\)\{\.typing-indicator span\{animation:none\}/u);
 });
@@ -301,16 +317,30 @@ test("composer stays at the bottom: transcript flexes, composer never shrinks; p
   assert.equal(documentElement.style.values["--viewport-height"], "844px");
 });
 
-test("the composer-side recovery button keeps its own disabled rule while an operation runs", async () => {
-  const state = trial(5); state.aiStatus = "error";
-  const { e } = await ui(state);
+test("automatic recovery is announced beside the composer and a state read shows the reply without moving the reader", async () => {
+  const initial = { ...trial(30), aiStatus: "thinking", recovering: true };
+  const { e, state, calls, advance, arrive, scrollUp } = await ui(initial);
+  const before = calls.length;
+  scrollUp(500);
+  assert.equal(e["chat-recovery"].hidden, true);
+  assert.equal(e["finish-conversation"].disabled, true);
+  await advance(60_000);
   assert.equal(e["chat-recovery"].hidden, false);
-  assert.equal(e["retry-chat"].disabled, false);
-  e["retry-chat"].fire("click");
-  assert.equal(e["retry-chat"].disabled, true, "disabled while the retry operation is working");
-  await tick();
-  e["finish-conversation"].fire("click");
-  assert.equal(e["retry-chat"].disabled, true, "disabled when the chat stage is not open");
+  assert.equal(e["chat-recovery-message"].textContent, "応答に時間がかかっています。自動で再試行しています。入力した内容は保持されています。");
+  assert.equal(e["chat-status"].textContent, e["chat-recovery-message"].textContent);
+  assert.equal(typing(e).length, 0);
+  assert.equal(e.history.scrollTop, 500);
+  assert.equal(e["new-messages"].hidden, true);
+  state.trial.recovering = false;
+  await arrive("回復後の返答");
+  assert.equal(e["chat-recovery"].hidden, true);
+  assert.equal(e["chat-status"].textContent, "");
+  assert.equal(e["finish-conversation"].disabled, false);
+  assert.equal(bodyOf(e.history.children.at(-1)), "回復後の返答");
+  assert.equal(e.history.scrollTop, 500);
+  assert.equal(e["new-messages"].hidden, false);
+  assert.ok(calls.length > before);
+  for (const call of calls.slice(before)) assert.deepEqual(call, { path: "/api/state", method: "GET" });
 });
 
 test("a shrinking log keeps followers at the bottom but never moves a scrolled-up reader", async () => {

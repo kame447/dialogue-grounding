@@ -55,18 +55,30 @@ test('a failed record write is reported once as a closed code and carried in the
   assert.equal(records.at(-1).persistFailures.length, 3);
 });
 
-test('a failing write does not stop a turn: the reply is published and the failure is still reported', async () => {
+test('a failed publication write holds the reply until a scheduled save succeeds', async () => {
   const reported: Any[] = [];
-  let failing = false;
-  const task: Any = await createNamingTaskV2({ client: model(), judge: luna, strategy: 'bypass-enabled', seed: 72, runDir: null,
-    onPersist: async () => { if (failing) throw coded('trial_unavailable'); },
+  let failing = true, generation = 0, schedule: (() => void) | undefined;
+  const upstream = model();
+  const task: Any = await createNamingTaskV2({ client: { async complete(...args: Parameters<typeof upstream.complete>) {
+    generation++; return upstream.complete(...args);
+  } }, judge: luna, strategy: 'bypass-enabled', seed: 72, runDir: null,
+    recoveryTimers: { set(callback: () => void) { schedule = callback; }, clear() { schedule = undefined; } },
+    onPersist: async (record: Any) => { if (failing && record.events.length === 3) throw coded('trial_unavailable'); },
     onPersistFailure: (failure: Any) => reported.push(failure) } as Any);
-  failing = true;
-  task.message('三角が二つあるやつから話しましょう');
+  const { eventId } = task.message('三角が二つあるやつから話しましょう');
+  await task.persistNow();
   await task.whenIdle().catch(() => {});
-  assert.equal(task.getState().events.at(-1).speaker, 'ai');
-  assert.equal(task.getState().aiStatus, 'idle');
+  const waiting = task.getState();
+  assert.equal(waiting.events.at(-1).id, eventId);
+  assert.equal(waiting.recovering, true);
   assert.ok(reported.length >= 1 && reported.every(entry => entry.code === 'record_store_rejected'));
+  failing = false;
+  assert.ok(schedule); schedule();
+  await task.whenIdle();
+  assert.equal(task.getState().events.at(-1).speaker, 'ai');
+  assert.equal(task.getState().events.length, waiting.events.length + 1);
+  assert.equal(task.getState().aiStatus, 'idle');
+  assert.equal(generation, 1);
 });
 
 // ---- 2. Read-only requests leave the owner file alone --------------------------------------------------------------------------------
