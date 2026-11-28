@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { researchHash } from '../dialogue-model/runtime/v2/research-profile.ts';
+import type { ObservationMemo } from '../dialogue-model/runtime/observation/contract.ts';
 import { approveReception, createReception, receptionProtocolSha256, validateReceptionPlan,
   validateReceptionApprovalInput, participantReception } from '../dialogue-model/runtime/v2/reception.ts';
 import type { ReceptionProtocolV2 } from '../dialogue-model/runtime/v2/reception.ts';
@@ -14,8 +17,11 @@ const protocol: ReceptionProtocolV2 = { schemaVersion: 'reception_protocol_v2', 
   betweenTrials: 'none', receptionNumberFormat: 'daily_seq3', rotationMode: 'relative_0' };
 const pin = { schemaVersion: 'participant_model_pin_v3' as const, terraModelId: 'gpt-6.1-terra-2026-11-01', jevModelId: 'typesafe/jev-1.14-20261001' };
 const pending = () => createReception({ receptionId: '11111111-1111-4111-8111-111111111111', objectId: 'a'.repeat(64), createdAt: time, number: null });
+const memo: ObservationMemo = { observedAt: time, figures: Array.from({ length: 6 }, (_, i) => ({ id: 's-000' + i, region: { x: i * 20, y: 0, w: 10, h: 10 },
+  holistic: [], analytic: { shapes: ['三角'], composition: '辺でつながる', relations: [] }, unknowns: [], reobservations: [] })) };
+const memoSha256 = createHash('sha256').update(JSON.stringify(memo)).digest('hex');
 const reference = () => validatePreparedObservations({ schemaVersion: 'prepared_observations_v1', bundleId: '33333333-3333-4333-8333-333333333333', preparedAt: time,
-  trials: [0, 1].map(index => ({ index, cacheKey: 'terra_initial_observation_v1:' + 'a'.repeat(64), memoSha256: 'b'.repeat(64) })) }, 2);
+  trials: [0, 1].map(index => ({ index, cacheKey: 'terra_initial_observation_v1:' + 'a'.repeat(64), memoSha256 })) }, 2);
 const options = (): Parameters<typeof approveReception>[1] => ({ expectedRevision: 0, order: 0, protocol, expected: { protocolId: protocol.protocolId, revision: 1,
   sha256: receptionProtocolSha256(JSON.stringify(protocol)) }, approvedAt: time, randomSeed: () => 211,
   participantModelPin: pin, participantRuntimeProfile: PARTICIPANT_PRODUCTION_PROFILE });
@@ -36,9 +42,17 @@ test('prepared provenance freezes both trial references, stays private, and reje
       status: 'dialogue', options: { referenceMemory: true, rotationMode: 'relative_0', participantModelPin: pin, jevResearch: true,
         participantRuntimeProfile: PARTICIPANT_PRODUCTION_PROFILE, preparedObservation },
       stimulus: { version: 'synthetic', rotationMode: 'relative_0', angles: { human: { h1: 0 }, ai: { a1: 0 } } },
-      queueState: { pendingHumanEventIds: [], errorCode: null }, initialObservation: { memoSha256: preparedObservation.memoSha256 },
+      queueState: { pendingHumanEventIds: [], errorCode: null, privateState: { observationMemo: structuredClone(memo) } }, initialObservation: { memoSha256: researchHash(memo) },
       jevLedger: { schemaVersion: PARTICIPANT_PRODUCTION_PROFILE, assignmentId: assignment.assignmentId } };
     assert.doesNotThrow(() => validateBoundBaseRecord(record, assignment));
+    const reobserved = structuredClone(record);
+    reobserved.queueState.privateState.observationMemo.figures[0].reobservations.push({ figureId: memo.figures[0].id,
+      supports: ['三角'], contradicts: [], unknown: [], observedAt: time, issue: { aspect: 'part', question: '確認', partnerConstrual: null } });
+    assert.doesNotThrow(() => validateBoundBaseRecord(reobserved, assignment));
+    const changedMemo = structuredClone(record);
+    changedMemo.queueState.privateState.observationMemo.figures[0].analytic.composition = '別の観察内容';
+    assert.throws(() => validateBoundBaseRecord(changedMemo, assignment), { code: 'assignment_record_invalid' });
+
     for (const change of [{ ...preparedObservation, index: 1 - index }, { ...preparedObservation, memoSha256: 'c'.repeat(64) }, undefined]) {
       const altered = structuredClone(record);
       altered.options.preparedObservation = change as typeof preparedObservation;

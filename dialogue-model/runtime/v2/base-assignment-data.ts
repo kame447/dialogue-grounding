@@ -2,6 +2,8 @@
 // under its existing nodejs_compat flag (also used by the stimulus generator).
 import { isOpeningMode } from './opening-mode.ts';
 import { preparedTrialObservation, validatePreparedTrialObservation } from './prepared-observations.ts';
+import { validateObservationMemo } from '../observation/observe.ts';
+import { researchHash } from './research-profile.ts';
 import { CLAIM_PRUNE_V2 } from '../memory/reference-graph.mjs';
 import { createHash } from 'node:crypto';
 import type { BaseAssignmentConfig, BaseAssignment, BaseRecord, BaseOwnerState } from './base-assignment.ts';
@@ -183,8 +185,14 @@ export function validateBoundBaseRecord(record: unknown, assignment: unknown): v
         graph?.memoryPruneVersion !== memoryPruneVersion) throw new Error('memory_prune_version');
     const preparedObservation = assignmentPreparedObservation(a);
     const recordedObservation = Object.hasOwn(options, 'preparedObservation') ? validatePreparedTrialObservation(options.preparedObservation) : undefined;
-    if (JSON.stringify(preparedObservation) !== JSON.stringify(recordedObservation) || preparedObservation &&
-        data(r.initialObservation).memoSha256 !== preparedObservation.memoSha256) throw new Error('prepared_observation');
+    if (JSON.stringify(preparedObservation) !== JSON.stringify(recordedObservation)) throw new Error('prepared_observation');
+    if (preparedObservation) {
+      // Reobservations append evidence; the initial memo's contents and timestamp remain unchanged.
+      const initialMemo = validateObservationMemo(data(queue.privateState).observationMemo);
+      for (const figure of initialMemo.figures) figure.reobservations = [];
+      if (createHash('sha256').update(JSON.stringify(initialMemo)).digest('hex') !== preparedObservation.memoSha256 ||
+          researchHash(initialMemo) !== data(r.initialObservation).memoSha256) throw new Error('prepared_observation');
+    }
     const generation = plan?.initialObservationGeneration;
     const dialogueProfile = assignmentParticipantDialogueProfile(a);
     if (dialogueProfile === undefined ? Object.hasOwn(options, 'participantDialogueProfile')

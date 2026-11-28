@@ -5,7 +5,7 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { MEMO_LOCAL_EXTRACTION_INSTRUCTIONS, memoExtractionPrompt } from '../dialogue-model/runtime/local-grounding/extract.ts';
 import { MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS, memoAiExtractionPrompt } from '../dialogue-model/runtime/local-grounding/extract-ai.ts';
-import { canonicalReceptionProtocolV2, canonicalReceptionProtocolV3, PILOT012_PARTICIPANT_PROFILE, PILOT012_V18_PARTICIPANT_PROFILE,
+import { approveReception, canonicalReceptionProtocolV2, canonicalReceptionProtocolV3, PILOT012_PARTICIPANT_PROFILE, PILOT012_V18_PARTICIPANT_PROFILE,
   PILOT012_V19_PARTICIPANT_PROFILE, PILOT012_V20_PARTICIPANT_PROFILE, PILOT012_V21_PARTICIPANT_PROFILE, PILOT012_V22_PARTICIPANT_PROFILE,
   PILOT012_V23_PARTICIPANT_PROFILE,
   receptionProtocolSha256, receptionSummary, validateReceptionPlan } from '../dialogue-model/runtime/v2/reception.ts';
@@ -25,6 +25,10 @@ import { PARTICIPANT_PRODUCTION_PROFILE } from '../dialogue-model/runtime/web/pa
 import { ParticipantUsageLedger } from '../dialogue-model/runtime/web/participant-usage.ts';
 import type { LocalClaimView, LocalSegmentProposal } from '../dialogue-model/runtime/local-grounding/contract.ts';
 import { createWorkerParticipantRuntime } from '../workers/tangram-experiment/src/participant-runtime.ts';
+import { resolveParticipantConfiguration } from '../workers/tangram-experiment/src/participant-configuration.ts';
+import { createPreparedObservationRecipe, prepareObservationBundle, preparedObservationPoolKey } from '../workers/tangram-experiment/src/prepared-observation-recipe.ts';
+import type { PreparedObservationBundle } from '../workers/tangram-experiment/src/prepared-observation-recipe.ts';
+import type { WorkerTerraCache } from '../dialogue-model/runtime/observation/worker-terra-observer.ts';
 import { configuredParticipantPin, participantChoices, participantUsageChoices } from '../workers/research-ai-proxy/src/participant-transport.ts';
 import { INITIAL_OBSERVATION_STRUCTURED_V1, INITIAL_OBSERVATION_STRUCTURED_V2,
   type InitialObservationGeneration } from '../dialogue-model/runtime/observation/initial-observation-generation.ts';
@@ -141,6 +145,10 @@ function harness(enabled = true, selectedProtocol: typeof protocol & {
   const displayed = { protocolId: selectedProtocol.protocolId, revision: selectedProtocol.revision, sha256 };
   const storage = memory(), calls: Array<{ kind: string; expected: string; body: any }> = [];
   const background: Promise<unknown>[] = [];
+  let preparedBundle: PreparedObservationBundle | null = null;
+  let preparationUsage: unknown;
+  let preparationLedger: ParticipantUsageLedger | null = null;
+  let preparationPromise: Promise<PreparedObservationBundle> | null = null;
   const controlled: { policy: unknown; terra: unknown; luna: unknown; jev: unknown; legacyCalls: number; observe: boolean; mixedUsage: boolean; invalidTerra?: boolean; rejectJev?: boolean; selectedAction?: string; observationName?: string;
     usageChat?: (body: any, expected: string) => Promise<any>; holdChoice?: (body: { state: string; questions: Choices }) => Promise<void>;
     onStartObservationRead?: () => void;
@@ -221,12 +229,42 @@ function harness(enabled = true, selectedProtocol: typeof protocol & {
     },
   };
 
+  async function prepare() {
+    const { participant, proxy } = await resolveParticipantConfiguration(env, JSON.parse(canonical));
+    if (!proxy || !participant.participantModelPin || participant.participantRuntimeProfile !== PARTICIPANT_PRODUCTION_PROFILE) return null;
+    if (preparedBundle) return preparedBundle;
+    if (preparationPromise) return preparationPromise;
+    preparationPromise = (async () => {
+      const recipe = await createPreparedObservationRecipe({ protocol: JSON.parse(canonical), orderIndex: 0, participant, createdAt: new Date().toISOString() });
+      const entries = new Map<string, unknown>();
+      const cache: WorkerTerraCache = {
+        async read(key) { return entries.get(key); },
+        async putIfAbsent(key, entry) { if (!entries.has(key)) entries.set(key, entry); return entries.get(key); },
+      };
+      const usage = await ParticipantUsageLedger.open({ async read() { return preparationUsage; },
+        async update(write) { const next = write(preparationUsage); preparationUsage = next; return next; } }, recipe.bundleId, participant.participantModelPin!);
+      preparationLedger = usage;
+      preparedBundle = await prepareObservationBundle({ recipe, proxy, cache, usage });
+      return preparedBundle;
+    })();
+    return preparationPromise;
+  }
+  const preparedIndex = {
+    async allocateReceptionNumber() { return null; },
+    async upsertReception() {},
+    async claimPreparedObservations(input: { order: number; participant: Parameters<typeof preparedObservationPoolKey>[0]['participant']; protocolSha256: string }) {
+      if (!preparedBundle || input.protocolSha256 !== sha256 || preparedBundle.poolKey !== preparedObservationPoolKey({ protocol: JSON.parse(canonical),
+        orderIndex: input.order, participant: input.participant })) throw new Error('prepared_observations_unavailable');
+      return structuredClone(preparedBundle);
+    },
+  };
+
   function makeSession(warmup: boolean) {
     const session = new TangramSession({ storage, id: { toString: () => 'c'.repeat(64) },
       waitUntil(promise: Promise<unknown>) { background.push(promise); } }, env);
     session.settings = async () => ({ mode: { value: 'on', revision: 1 }, protocol: { protocol: selectedProtocol, revision: selectedProtocol.revision, sha256 } });
-    // Existing start-path cases use the same frozen approval with no warmup scheduled, as on a pre-deployment reception.
-    if (!warmup) session.schedulePreobservations = async () => {};
+    // Existing start-path cases explicitly restore pre-deployment plans; prepared cases exercise the real approval RPC.
+    session.index = () => preparedIndex;
     const cache = session.preobservations.startCache, read = cache.read;
     cache.read = (key: string, signal?: AbortSignal) => {
       controlled.onStartObservationRead?.();
@@ -240,7 +278,9 @@ function harness(enabled = true, selectedProtocol: typeof protocol & {
       : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }) })) as Promise<Response>;
 
   return {
-    storage, calls, controlled, env, request,
+    storage, calls, controlled, env, request, prepare,
+    preparedBundle: () => structuredClone(preparedBundle),
+    preparationUsage: () => preparationLedger?.snapshot(),
     liveTrial() { assert.ok(session.trial); return session.trial; },
     async forceEnd() {
       const reception = await storage.get('reception:v1');
@@ -276,7 +316,16 @@ function harness(enabled = true, selectedProtocol: typeof protocol & {
       const result = await request('reception', undefined, 'POST');
       assert.equal(result.status, 200, JSON.stringify(await result.clone().json()));
     },
-    approve() { return session.adminApproveReception({ expectedRevision: 0, order: 0, protocol: displayed, participantModelPin: null }); },
+    async approve() {
+      if (preobserve) return session.adminApproveReception({ expectedRevision: 0, order: 0, protocol: displayed, participantModelPin: null });
+      // Freeze an explicitly historical approval. New-production approval is exercised by the prepared fixtures.
+      const { participant } = await resolveParticipantConfiguration(env, JSON.parse(canonical));
+      const reception = await approveReception(await storage.get('reception:v1'), { expectedRevision: 0, order: 0,
+        protocol: JSON.parse(canonical), expected: displayed, approvedAt: new Date().toISOString(), ...participant,
+        randomSeed: () => crypto.getRandomValues(new Uint32Array(1))[0] });
+      await storage.put({ 'reception:v1': reception });
+      return reception;
+    },
     async start(expectedRecordId?: string) {
       const reception = await storage.get('reception:v1');
       return request('start', { version: 2, expectedReceptionRevision: reception.revision, ...(expectedRecordId ? { expectedRecordId } : {}) });
@@ -1577,13 +1626,17 @@ function v12Transport(t: TestContext, h: ReturnType<typeof harness>) {
     observationPolicy: (generation?: InitialObservationGeneration) => proxy.participantInitialObservationPolicy(generation) };
 }
 
-test('Terra preobserve keeps the approved P5 pin, accounts a shared board once, and starts from the cache after eviction', async t => {
+test('prepared P5 observations finish before reception, account a shared board once, and start without inference after eviction', async t => {
   const h = harness(true, figureBankProtocol, true);
   const transport = v12Transport(t, h);
   h.env.PARTICIPANT_DIALOGUE_PROFILE = v13NamingV4Dialogue;
   h.env.PARTICIPANT_TERRA_INITIAL_OBSERVATION_GENERATION = INITIAL_OBSERVATION_STRUCTURED_V1;
   h.env.PARTICIPANT_AI_PROXY.participantInitialObservationPolicy = transport.observationPolicy;
+  const prepared = await h.prepare();
+  assert.ok(prepared);
+  const beforeReception = transport.textPhases.length;
   await h.receive();
+  assert.equal(transport.textPhases.length, beforeReception);
   const [result, duplicate] = await Promise.allSettled([h.approve(), h.approve()]);
   assert.equal(result.status, 'fulfilled');
   assert.equal(duplicate.status, 'rejected');
@@ -1600,14 +1653,13 @@ test('Terra preobserve keeps the approved P5 pin, accounts a shared board once, 
   assert.equal((await h.admin(usagePath, false)).status, 401);
   const exported = await jsonOk(await h.admin(usagePath));
   assert.deepEqual(exported.failedStarts, []);
-  assert.equal(exported.preobservations.length, 1);
-  const [warm] = exported.preobservations;
-  assert.deepEqual(warm.trialIndices, [0, 1]);
-  assert.equal(warm.status, 'ready');
-  assert.ok(Date.parse(warm.finishedAt) >= Date.parse(warm.startedAt));
-  assert.equal(warm.usage.assignmentId, undefined);
-  assert.deepEqual(warm.usage.returnedModels.terra.initial_observation, { model: pin.terraModelId, ok: 1 });
-  const meter = warm.usage.phases.terra.initial_observation;
+  assert.equal(exported.preobservations, undefined);
+  assert.equal(approved.plan.preparedObservations.bundleId, prepared.bundleId);
+  assert.equal(approved.plan.preparedObservations.trials.length, 2);
+  const warm = h.preparationUsage()!;
+  assert.ok(warm.returnedModels);
+  assert.deepEqual(warm.returnedModels.terra.initial_observation, { model: pin.terraModelId, ok: 1 });
+  const meter = warm.phases.terra.initial_observation!;
   assert.deepEqual([meter.calls, meter.posts, meter.unknownPosts, meter.inputTokens, meter.outputTokens, meter.missingCostPosts], [1, 1, 0, 5, 3, 1]);
   h.evict();
   assert.deepEqual(await jsonOk(await h.admin(usagePath)), exported);
@@ -1616,7 +1668,7 @@ test('Terra preobserve keeps the approved P5 pin, accounts a shared board once, 
   const initial = record.jevLedger.phases.terra.initial_observation;
   assert.deepEqual([initial.calls, initial.posts, initial.cacheHits], [1, 0, 1]);
   assert.deepEqual(transport.textPhases, ['initial_observation']);
-  assert.doesNotMatch(JSON.stringify(start), /preobservations|returnedModels|terra_initial_observation|gpt-6|ownAnchors|knownUsd/u);
+  assert.doesNotMatch(JSON.stringify(start), /preobservations|preparedObservations|preparedObservation|bundleId|cacheKey|memoSha256|returnedModels|terra_initial_observation|gpt-6|ownAnchors|knownUsd/u);
   await h.complete(start.trial.sessionId, start.trial);
   const second = await jsonOk(await h.start(start.trial.sessionId));
   const secondRecord = await h.storage.get('record:' + second.trial.sessionId);
@@ -1625,7 +1677,7 @@ test('Terra preobserve keeps the approved P5 pin, accounts a shared board once, 
   assert.deepEqual(transport.textPhases.filter(phase => phase === 'initial_observation'), ['initial_observation']);
 });
 
-test('Terra preobserve v2 keeps approval, start and first response timing private across eviction', async t => {
+test('prepared v2 observations keep preparation, approval, start and first response timing private across eviction', async t => {
   const h = harness(true, figureBankProtocol, true);
   const transport = v12Transport(t, h);
   h.env.PARTICIPANT_DIALOGUE_PROFILE = v13NamingV4Dialogue;
@@ -1636,6 +1688,8 @@ test('Terra preobserve v2 keeps approval, start and first response timing privat
   await assert.rejects(h.approve(), { code: 'reception_unavailable' });
   assert.equal(transport.textPhases.length, 0);
   env.participantInitialObservationPolicy = transport.observationPolicy;
+  const prepared = await h.prepare();
+  assert.ok(prepared);
   const approved = await h.approve();
   assert.equal(approved.plan.initialObservationGeneration, INITIAL_OBSERVATION_STRUCTURED_V2);
   await h.settleBackground();
@@ -1657,12 +1711,12 @@ test('Terra preobserve v2 keeps approval, start and first response timing privat
   assert.equal((await h.admin(path, false)).status, 401);
   const { timing, preobservations } = await jsonOk(await h.admin(path));
   assert.equal(timing.approvedAt, approved.plan.approvedAt);
-  assert.equal(preobservations.length, 1);
-  assert.deepEqual(preobservations[0].trialIndices, [0, 1]);
+  assert.equal(preobservations, undefined);
+  assert.equal(approved.plan.preparedObservations.preparedAt, prepared.preparedAt);
   const [clock] = timing.trials;
   assert.equal(clock.trialIndex, 0);
   assert.equal(clock.initialObservationCacheHit, true);
-  const times = [timing.approvedAt, preobservations[0].startedAt, preobservations[0].finishedAt,
+  const times = [prepared.preparedAt, timing.approvedAt,
     clock.startRequestReceivedAt, clock.initialMemoReadStartedAt, clock.initialMemoReadyAt, clock.trialStartedAt,
     clock.firstHumanReceivedAt, clock.firstAiReplyAt].map(Date.parse);
   assert.ok(times.every((time, i) => Number.isFinite(time) && (i === 0 || time >= times[i - 1])));
@@ -1682,6 +1736,7 @@ async function verifyPilot012WorkerProfile(t: TestContext,
   h.controlled.selectedAction = 'accept';
   h.env.PARTICIPANT_DIALOGUE_PROFILE = participantProfile;
   h.env.PARTICIPANT_AI_PROXY.participantInitialObservationPolicy = transport.observationPolicy;
+  await h.prepare();
   await h.receive();
 
   h.env.PARTICIPANT_TERRA_INITIAL_OBSERVATION_GENERATION = INITIAL_OBSERVATION_STRUCTURED_V1;
@@ -1693,6 +1748,7 @@ async function verifyPilot012WorkerProfile(t: TestContext,
   assert.equal(plan.openingMode, 'scripted_v1');
   if (legacyOpening) {
     delete plan.openingMode;
+    delete plan.preparedObservations;
     await h.storage.transaction(async tx => {
       const reception = await tx.get('reception:v1');
       await tx.put({ 'reception:v1': { ...reception, plan } });
@@ -2354,12 +2410,16 @@ test(`${version} force end keeps the published text and discards a late extracti
   assert.equal(transport.textPhases.filter(phase => phase === 'ai_extraction').length, 1);
 });
 
-test('Terra preobserve makes a separate validated memo for each distinct frozen AI board', async () => {
+test('preparation makes a separate validated memo for each distinct frozen AI board', async () => {
   const h = harness(true, { ...figureBankProtocol, figureSetPolicy: 'per_trial',
     figureSelection: { mode: 'seeded_random', selectionSeed: 201 } }, true);
+  const prepared = await h.prepare();
+  assert.ok(prepared);
+  const beforeReception = h.calls.length;
   await h.receive();
   const approved = await h.approve();
   await h.settleBackground();
+  assert.equal(h.calls.length, beforeReception);
   const visual = h.calls.filter(({ kind }) => kind === 'visual_observation');
   assert.equal(visual.length, 2);
   for (const { seed, rotationMode, figureSelection } of approved.plan.trials) {
@@ -2372,18 +2432,15 @@ test('Terra preobserve makes a separate validated memo for each distinct frozen 
   }
   const entries = await h.storage.list('terra_initial_observation_v1:');
   assert.equal(entries.size, 2);
+  assert.equal(prepared.entries.length, 2);
+  assert.equal(h.preparationUsage()!.phases.terra.initial_observation!.posts, 2);
   const { preobservations } = await jsonOk(await h.admin('/admin/reception/' + approved.receptionId + '/usage.json'));
-  assert.deepEqual(preobservations.map(({ trialIndices }: any) => trialIndices[0]).sort(), [0, 1]);
-  for (const { status, usage } of preobservations) {
-    assert.equal(status, 'ready');
-    assert.equal(usage.phases.terra.initial_observation.posts, 1);
-  }
+  assert.equal(preobservations, undefined);
 });
 
-test('Terra preobserve joins a concurrent start after approval returns while Terra is still running', { timeout: 10_000 }, async () => {
+test('preparing observations cannot be claimed and approval and start never join the running model call', { timeout: 10_000 }, async () => {
   const h = harness(true, protocol, true);
-  const entered = gate(), release = gate(), reading = gate();
-  h.controlled.onStartObservationRead = reading.resolve;
+  const entered = gate(), release = gate();
   let visualPosts = 0;
   h.controlled.usageChat = async ({ purpose }) => {
     assert.equal(purpose, 'visual_observation');
@@ -2391,20 +2448,19 @@ test('Terra preobserve joins a concurrent start after approval returns while Ter
     entered.resolve();
     await release.promise;
   };
-  await h.receive();
-  const approved = await h.approve();
-  await entered.promise;
-  const { preobservations } = await jsonOk(await h.admin('/admin/reception/' + approved.receptionId + '/usage.json'));
-  assert.equal(preobservations[0].status, 'preparing');
-  assert.equal(preobservations[0].usage.phases.terra.initial_observation.unknownPosts, 1);
-  const start = h.start();
+  const preparation = h.prepare();
   try {
-    await reading.promise;
-    await new Promise(resolve => setImmediate(resolve));
+    await entered.promise;
+    await h.receive();
+    await assert.rejects(h.approve(), { code: 'prepared_observations_unavailable' });
+    assert.equal((await h.start()).status, 409);
     assert.equal(visualPosts, 1);
+    assert.equal((await h.storage.get('base:owner:v1')).activeKey, null);
+    assert.equal(h.preparationUsage()!.phases.terra.initial_observation!.unknownPosts, 1);
   } finally { release.resolve(); }
-  const { trial } = await jsonOk(await start);
-  await h.settleBackground();
+  await preparation;
+  await h.approve();
+  const { trial } = await jsonOk(await h.start());
   const record = await h.storage.get('record:' + trial.sessionId);
   assert.equal(visualPosts, 1);
   assert.deepEqual([record.jevLedger.phases.terra.initial_observation.posts,
@@ -2439,51 +2495,44 @@ test('Terra preobserve leaves approvals using the legacy capped ledger on their 
 });
 
 for (const failure of ['invalid_response', 'timeout', 'interrupted', 'cold_restart']) {
-  test('Terra preobserve falls back after ' + failure + ' and preserves separate usage', async () => {
+  test('failed preparation after ' + failure + ' never becomes an approval or start-time fallback', async () => {
     const h = harness(true, protocol, true);
     const entered = gate(), interrupt = gate();
     const bodies: string[] = [];
     h.controlled.usageChat = async (body, expected) => {
       assert.equal(expected, pin.terraModelId);
       bodies.push(JSON.stringify(body));
-      if (bodies.length > 1) return;
       entered.resolve();
       if (failure === 'timeout') return { status: 504, data: { error: 'synthetic_private_timeout' } };
-      if (failure === 'cold_restart') {
-        await interrupt.promise;
-        throw new Error('synthetic proxy interruption');
-      }
-      if (failure === 'interrupted') throw new Error('synthetic proxy interruption');
-      return { status: 200, data: { ...chatResponse(pin.terraModelId, '{}'),
-        usage: { cost: 0.021, prompt_tokens: 17, completion_tokens: 6 } } };
+      if (failure === 'cold_restart') await interrupt.promise;
+      if (failure === 'interrupted' || failure === 'cold_restart') throw new Error('synthetic proxy interruption');
+      return { status: 200, data: { ...chatResponse(pin.terraModelId, '{}'), usage: { cost: 0.021, prompt_tokens: 17, completion_tokens: 6 } } };
     };
-    await h.receive();
-    const approved = await h.approve();
+    const preparation = h.prepare();
+    const failed = assert.rejects(preparation);
     try {
       await entered.promise;
+      await h.receive();
       if (failure === 'cold_restart') h.evict();
-      else await h.settleBackground();
-      const { trial } = await jsonOk(await h.start());
-      const record = await h.storage.get('record:' + trial.sessionId);
-      assert.deepEqual([record.jevLedger.phases.terra.initial_observation.posts,
-        record.jevLedger.phases.terra.initial_observation.cacheHits], [1, 0]);
-      assert.deepEqual(bodies, [bodies[0], bodies[0]]);
-      const { preobservations } = await jsonOk(await h.admin('/admin/reception/' + approved.receptionId + '/usage.json'));
-      const [warm] = preobservations;
-      assert.equal(warm.status, failure === 'cold_restart' ? 'unconfirmed' : 'failed');
-      assert.equal(warm.usage.phases.terra.initial_observation.posts, 1);
-      assert.equal(warm.usage.phases.terra.initial_observation.unknownPosts, failure === 'invalid_response' ? 0 : 1);
-      if (failure === 'invalid_response') {
-        assert.deepEqual(warm.usage.returnedModels.terra.initial_observation, { model: pin.terraModelId, ok: 1 });
-        assert.equal(warm.usage.phases.terra.initial_observation.knownUsd, 0.021);
-      }
-      if (failure === 'timeout') assert.equal(warm.errorCode, 'timeout');
-    } finally {
-      interrupt.resolve();
-      await h.settleBackground();
+      await assert.rejects(h.approve(), { code: 'prepared_observations_unavailable' });
+      assert.equal((await h.start()).status, 409);
+      assert.equal((await h.storage.get('base:owner:v1')).activeKey, null);
+      assert.equal((await h.storage.get('reception:v1')).plan, null);
+      assert.equal(bodies.length, 1, 'approval and start never generate or retry a failed preparation');
+    } finally { interrupt.resolve(); }
+    await failed;
+    const usage = h.preparationUsage()!;
+    const meter = usage.phases.terra.initial_observation!;
+    assert.equal(meter.posts, 1);
+    assert.equal(meter.unknownPosts, failure === 'invalid_response' ? 0 : 1);
+    if (failure === 'invalid_response') {
+      assert.ok(usage.returnedModels);
+      assert.deepEqual(usage.returnedModels.terra.initial_observation, { model: pin.terraModelId, ok: 1 });
+      assert.equal(meter.knownUsd, 0.021);
     }
   });
 }
+
 
 test('human-led move-on keeps the v15 pin and requires its committed trace on cold restore', async t => {
   const h = harness(true, { ...figureBankProtocol, allowedOrders: [['repair-first', 'bypass-enabled']] });
@@ -3242,4 +3291,37 @@ for (const { dialogueProfile, generation } of [
   }
   assert.equal(transport.textPhases.filter(phase => phase === 'initial_observation').length, 2);
   assert.equal(h.controlled.legacyCalls, 0);
+});
+
+
+test('a missing prepared cache refuses start before consuming admission, while a saved trial restores from its own memo', async () => {
+  const h = harness(true, protocol, true);
+  const prepared = await h.prepare();
+  assert.ok(prepared);
+  const posts = h.calls.length;
+  await h.receive();
+  const approved = await h.approve();
+  assert.equal(h.calls.length, posts);
+  const reference = approved.plan.preparedObservations.trials[0];
+  const saved = await h.storage.get(reference.cacheKey);
+  await h.storage.transaction(tx => tx.delete(reference.cacheKey));
+  assert.equal((await h.start()).status, 409);
+  assert.equal((await h.storage.get('base:owner:v1')).activeKey, null);
+  assert.equal((await h.storage.get('reception:v1')).status, 'approved');
+  assert.deepEqual((await h.storage.get('reception:v1')).trials, []);
+  assert.equal(h.calls.length, posts);
+  await h.storage.put({ [reference.cacheKey]: saved });
+  const { trial } = await jsonOk(await h.start());
+  const record = await h.storage.get('record:' + trial.sessionId);
+  assert.equal(record.options.preparedObservation.cacheKey, reference.cacheKey);
+  assert.equal(record.jevLedger.phases.terra.initial_observation.posts, 0);
+  assert.equal(record.jevLedger.phases.terra.initial_observation.cacheHits, 1);
+  assert.equal(h.calls.length, posts);
+  await h.storage.transaction(tx => tx.delete(reference.cacheKey));
+  h.evict();
+  const state = await jsonOk(await h.request('state'));
+  assert.equal(state.trial.sessionId, trial.sessionId);
+  assert.deepEqual(state.trial.events, trial.events);
+  assert.equal(h.calls.length, posts);
+  assert.doesNotMatch(JSON.stringify(state), /preparedObservation|bundleId|cacheKey|memoSha256/u);
 });
