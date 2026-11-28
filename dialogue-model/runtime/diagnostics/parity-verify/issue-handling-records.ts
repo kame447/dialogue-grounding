@@ -8,7 +8,10 @@ export function s4UsesIssueHandling(version: unknown): boolean {
   return version === "jev_generation_retry_v21" || s4UsesV22GenerationRules(version);
 }
 export function s4UsesV22GenerationRules(version: unknown): boolean {
-  return version === "jev_generation_retry_v22" || version === "jev_generation_retry_v23";
+  return version === "jev_generation_retry_v22" || version === "jev_generation_retry_v23" || s4UsesV24GenerationRules(version);
+}
+export function s4UsesV24GenerationRules(version: unknown): boolean {
+  return version === "jev_generation_retry_v24";
 }
 export const S4_ISSUE_HANDLING_VERSION = "jev_issue_handling_v1";
 export const S4_ISSUE_HANDLING_POLICY = "bypass_acceptance_v3";
@@ -724,8 +727,8 @@ export function issueHandlingLedger(before: Row, execution: Execution, withdrawa
 }
 
 export function issueHandlingPublicationPath(publication: Row, execution: Execution,
-    slots: readonly string[], state: Row, turn: number, speech: string): boolean {
-  const pre = issueHandlingFeatureScope(execution, slots, Boolean(publication.continuation)) !== null;
+    slots: readonly string[], state: Row, turn: number, speech: string, checksOff = false, continuationVisual = false): boolean {
+  const pre = !checksOff && (continuationVisual || issueHandlingFeatureScope(execution, slots, Boolean(publication.continuation)) !== null);
   const pending = row(row(state.aiPublic).pending), job = row(state.deferredAiExtraction);
   if (Object.hasOwn(publication, "visualFeatures") !== pre || pending.aiSeq === turn + 1 && Object.keys(job).length) return false;
   const source = pending.aiSeq === turn + 1 ? pending : job;

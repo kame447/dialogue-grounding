@@ -43,7 +43,7 @@ import {v23OutputMatches,v23PlanMatches,v23PlanMessage} from './generation-promp
 import {extractionEvidenceForJob,isIssueHandlingExecution,issueHandlingDecisionShape,issueHandlingExtraRequestsMatch,issueHandlingFailureStage,issueHandlingFeatureScope,
  issueHandlingBasisMatches,issueHandlingCloseMatches,issueHandlingLedger,issueHandlingPartsMatch,issueHandlingPublicationPath,
  issueHandlingRelation,issueHandlingReplayBoundary,issueHandlingRequestMatches,issueHandlingSourcesMatch,
- publishedIssueHandlings,publishedPreviousExtras,s4UsesIssueHandling,s4UsesV22GenerationRules,S4_ISSUE_HANDLING_POLICY,S4_ISSUE_HANDLING_TABLE_SHA256} from './issue-handling-records.ts';
+ publishedIssueHandlings,publishedPreviousExtras,s4UsesIssueHandling,s4UsesV22GenerationRules,s4UsesV24GenerationRules,S4_ISSUE_HANDLING_POLICY,S4_ISSUE_HANDLING_TABLE_SHA256} from './issue-handling-records.ts';
 const POLICY='376d569120ca36a3eceaf5ab95410f7eb83f25fbb681e7566a684b97c35165c8';
 const ACTIONS=['accept','propose_name','confirm','repair','defer','revisit','agree','move_on','close','request_observation'];
 const INNER_CODES=['invalid_scores','no_valid_alternative','detail_unavailable','invalid_executed','invalid_options','invalid_input','invalid_response','invalid_decision','inconsistent_decision','model_mismatch','key_unavailable','key_leak','unauthorized','payment_required','not_found','rate_limited','upstream_error','network_error','timeout','aborted','cost_cap','cost_unreported','busy'];
@@ -129,7 +129,9 @@ type RetryDraftEvidence={orientation:boolean;orientationCodes?:readonly string[]
 function retryReasonsMatch(text:string,version:RecordedGenerationRetryVersion|undefined,codes?:readonly string[],draft?:RetryDraftEvidence,topicRewrite?:boolean):boolean{
  if(!text)return false;
  const specific=hasVersionedViewpoint(version),restated=version!==undefined;
- const reasons=s4UsesV22GenerationRules(version)?RETRY_REASONS_V22:confirmationDraftV16(version)?RETRY_REASONS_V16:specific?RETRY_REASONS_SPECIFIC:RETRY_REASONS;
+ const reasons=s4UsesV24GenerationRules(version)?[...RETRY_REASONS_V22,{codes:['draft_structure_mismatch'],
+  text:'前の下書きは指定の出力形式を満たしていませんでした。公開する内容を、上で指定された JSON の形で返してください。'}]:
+  s4UsesV22GenerationRules(version)?RETRY_REASONS_V22:confirmationDraftV16(version)?RETRY_REASONS_V16:specific?RETRY_REASONS_SPECIFIC:RETRY_REASONS;
  for(const reason of reasons){
   const viewpoint=!specific&&H5()&&reason.codes.includes('orientation_leak');
   const reasonText=viewpoint?'前の下書きの方位の参照枠を明確にして書き直してください。'+VIEWPOINT_RULE_V5_S4:reason.text;
@@ -262,7 +264,7 @@ const SET_LABELS=SETS.map(set=>'figures_'+set.join('_'));
 const setsForCount=(count:number)=>count===6?SETS:SETS.filter(set=>set.every(index=>index<count));
 const setLabelsForCount=(count:number)=>count===6?SET_LABELS:setsForCount(count).map(set=>'figures_'+set.join('_'));
 const targetLabelsForCount=(count:number)=>count===6?TARGET_V3_LABELS:['none',...Array.from({length:count},(_,i)=>'figure_'+i),...setLabelsForCount(count)];
-const figureCountAllowed=(count:number,prompt:PromptVersion|null|undefined)=>count===6||count===4&&prompt?.fourFigures===true;
+const figureCountAllowed=(count:number,prompt:PromptVersion|null|undefined)=>count===6||count===4&&prompt?.fourFigures===true||count===3&&prompt?.threeFigures===true;
 // two_stage_v3: the target labels a target question can carry, and the actions stage one always offers (any target or a figure always exists).
 const TARGET_V3_LABELS=['none',...[0,1,2,3,4,5].map(i=>'figure_'+i),...SET_LABELS];
 // The actions every v3 stage-one question offers (the readers of saved scores have no input to rebuild the closed set from): accept is required unless the trial is holistic_v3,
@@ -501,7 +503,7 @@ function failureRecord(f:any,layout:string,p5:boolean,namingRequest:boolean,
     if(visual&&keys.length&&keys.includes(VISUAL_PURPOSE_QUESTION)!==visualAction)return false;
     if(p5&&(act==='accept'||act==='confirm'&&namingRequest)){
      const target=v3Targets({ownSlots}).find(option=>option.label===sec.choices.target)?.target;
-     if(!target||candidates.length>0&&(![4,6].includes(ownSlots.length)||
+     if(!target||candidates.length>0&&(![3,4,6].includes(ownSlots.length)||
         candidates.some(candidate=>candidate.figureIds.some(id=>!ownSlots.includes(id)))))return false;
      const offered=sharedOffered({action:act,target},candidates,namingRequest);
      if(offered.length){
@@ -585,12 +587,12 @@ const SEMANTIC_NAMING_QUESTIONS_S4={draft_naming:{
  }
 }};
 const DRAFT_TRIGGERS_S4=['agree_action','typed_context','naming_words','quoted_other'];
-function draftActsShape(v:any,semantic:boolean,generated=false,topicShift=false):boolean{
+function draftActsShape(v:any,semantic:boolean,generated=false,topicShift=false,generationV24=false):boolean{
  const baseActs=semantic?Object.keys(SEMANTIC_NAMING_QUESTIONS_S4.draft_naming.criteria):DRAFT_ACTS_S4;
  return Array.isArray(v)&&v.length>=1&&v.length<=2&&v.every((a:any,i:number)=>{
   const moving=Object.hasOwn(a??{},'moveOn'),withdraw=generated&&a?.triggers?.includes('withdraw_prior_name');
   const acts=withdraw?[...baseActs,'withdraw_selected']:baseActs;
-  const triggers=generated?[...DRAFT_TRIGGERS_S4,'withdraw_prior_name','human_led_transition',...(topicShift?['topic_shift']:[])]:DRAFT_TRIGGERS_S4;
+  const triggers=generated?[...DRAFT_TRIGGERS_S4,'withdraw_prior_name','human_led_transition',...(topicShift?['topic_shift']:[]),...(generationV24?['propose_action']:[])]:DRAFT_TRIGGERS_S4;
   const hasShift=Object.hasOwn(a??{},'topicShift');
   const names=Array.isArray(a?.triggers)&&a.triggers.some((trigger:string)=>trigger!=='topic_shift');
   return exact(a,['draft','draftSha256','triggers','status','choice','scores','model','responseId','costUsd','latencyMs','error',...(generated&&moving?['moveOn']:[]),...(topicShift&&hasShift?['topicShift']:[])])&&(a.draft==='initial'&&i===0||a.draft==='retry'&&(i===0||v[i-1].draft==='initial'))&&
@@ -792,7 +794,7 @@ function s4OpenHumanProposal(tape:any,trace:any,askCounts=true):boolean{
  const claims=liveClaims({records:[...(graph?.records??[]),...(trace.local?.claims??[]).filter((c:any)=>c.kind==='claim')]});
  return claims.some((c:any)=>c.speaker==='human'&&c.sourceTurn===trace.turnIndex&&(c.act==='name_propose'&&typeof c.name==='string'||askCounts&&c.act==='ask'&&c.aspect==='name'&&claims.some((q:any)=>q.id===c.respondsTo&&q.act==='name_propose'&&typeof q.name==='string')));
 }
-function traceShape(t:any,layout='two_stage_v1',policy?:string,ownSlots:readonly string[]=[],humanLedMoveOn=false,jevNaming=false,issueHandling=false):boolean{
+function traceShape(t:any,layout='two_stage_v1',policy?:string,ownSlots:readonly string[]=[],humanLedMoveOn=false,jevNaming=false,issueHandling=false,checksOff=false):boolean{
  const req=['schemaVersion','turnIndex','lastEventId','attemptNumber','status','initialObservation','reobservations','local','humanReferent','decisions','intervention','executed','finalAction','publicSpeech','observationMemo','repairHistory','generationGuard'];
  const semantic=isGenerationV15(t?.generationRetryVersion);
  const generated=isGenerationV17(t?.generationRetryVersion);
@@ -814,9 +816,10 @@ function traceShape(t:any,layout='two_stage_v1',policy?:string,ownSlots:readonly
  if(Object.hasOwn(t,'sharedConstruals')&&(!p5||!sharedShape(t.sharedConstruals)))return false;
  if(Object.hasOwn(t,'generationRetryVersion')&&(t.generationRetryVersion==='jev_generation_retry_v1'||!validGenerationRetryVersion(t.generationRetryVersion,layout,policy)||
    (hasVersionedViewpoint(t.generationRetryVersion)?!p5&&(!t.executed||!t.finalAction):t.generationGuard?.regenerated!==true)))return false;
- if(Object.hasOwn(t,'draftActs')&&(layout!=='two_stage_v3'||!draftActsShape(t.draftActs,semantic,generated,s4UsesV22GenerationRules(t.generationRetryVersion))))return false;
+ if(checksOff&&['draftActs','draftSharedClaims'].some(key=>Object.hasOwn(t,key)))return false;
+ if(Object.hasOwn(t,'draftActs')&&(layout!=='two_stage_v3'||!draftActsShape(t.draftActs,semantic,generated,s4UsesV22GenerationRules(t.generationRetryVersion),s4UsesV24GenerationRules(t.generationRetryVersion))))return false;
  if(generated&&(['staged','committed','superseded'].includes(t.status)||Object.hasOwn(t,'generatedPublication'))&&
-   !generatedPublicationShape(t,ownSlots,p5,issueHandling))return false;
+   !generatedPublicationShape(t,ownSlots,p5,issueHandling,checksOff))return false;
  if(!draftSharedTraceS4(t,p5Overclaim))return false;
  if(t.intervention!==null){
   const i=t.intervention,version=humanLedMoveOn?'bypass_acceptance_v2':'bypass_acceptance_v1';
@@ -910,14 +913,15 @@ function issuePlans(intervention:any, replacement?:any):unknown[]{
   ...list(i.extras).flatMap(value=>{const extra=row(value);return [extra.original,...(extra.executed?[extra.executed]:[])];})]);
 }
 
-function generatedPublicationShape(t:any,slots:readonly string[],p5:boolean,issueHandling=false):boolean {
+function generatedPublicationShape(t:any,slots:readonly string[],p5:boolean,issueHandling=false,checksOff=false):boolean {
  const p=t.generatedPublication;
  const unpublished=p?.textSha256===null&&['error','aborted'].includes(t.status)&&t.publicSpeech===null;
  const visual=issueHandling||isGenerationV19(t.generationRetryVersion);
  if(!exact(p,['recovery','continuation','grounding','withdrawal','transition','textSha256',
     ...(visual&&Object.hasOwn(p??{},'visualFeatures')?['visualFeatures']:[]),
     ...(visual&&Object.hasOwn(p??{},'visualPurposeSources')?['visualPurposeSources']:[]),
-    ...(issueHandling?['handlingBasis','close','parts'].filter(key=>Object.hasOwn(p??{},key)):[])])||t.generationGuard?.fallback!==false||
+    ...(issueHandling?['handlingBasis','close','parts'].filter(key=>Object.hasOwn(p??{},key)):[]),
+    ...(checksOff&&Object.hasOwn(p??{},'agreementWithheld')?['agreementWithheld']:[])])||t.generationGuard?.fallback!==false||
     !unpublished&&(typeof p.textSha256!=='string'||!/^[a-f0-9]{64}$/.test(p.textSha256))||
     t.publicSpeech!==null&&s4Sha256(t.publicSpeech)!==p.textSha256)return false;
  const r=p.recovery,c=p.continuation,ex=generatedExecution(p,t.executed,slots);
@@ -925,11 +929,13 @@ function generatedPublicationShape(t:any,slots:readonly string[],p5:boolean,issu
     r!==null&&(!exact(r,['reason','violations','decision','executed','intervention'])||
     !Array.isArray(r.violations)||!['naming_conflict','naming_unresolved','publication_mismatch'].includes(r.reason)||
     (r.reason==='publication_mismatch'?!canReconsiderPublication(r.violations,t.generationRetryVersion):r.violations.length!==0)))return false;
+ if(checksOff&&(r!==null||c!==null||p.withdrawal!==null||
+    Object.hasOwn(p,'agreementWithheld')&&(p.agreementWithheld!==true||ex.action!=='agree')))return false;
  if(c!==null&&(!r||!exact(c,['choice','reason','violations'])||c.choice!==r.decision?.evidence?.stages?.[0]?.choices?.publication_continuation||
     !['acknowledge_unresolved','ask_unresolved'].includes(c.choice)||!['decision_unresolved','draft_mismatch'].includes(c.reason)||
     !Array.isArray(c.violations)||(c.reason==='draft_mismatch'?!canReconsiderPublication(c.violations,t.generationRetryVersion):c.violations.length!==0||r.executed.action!=='agree')))return false;
- if(ex.action==='agree'?p.grounding?.verdict!=='grounded'||!Number.isSafeInteger(p.grounding.evidenceTurn)||
-    p.grounding.evidenceTurn<1||p.grounding.evidenceTurn>t.turnIndex:p.grounding!==null)return false;
+ if(ex.action==='agree'?(p.grounding?.verdict==='grounded'? !Number.isSafeInteger(p.grounding.evidenceTurn)||
+    p.grounding.evidenceTurn<1||p.grounding.evidenceTurn>t.turnIndex:!checksOff||p.agreementWithheld!==true):p.grounding!==null)return false;
  const g=t.finalAction;
  if(!g||g.action!==ex.action||g.targetSlot!==(ex.target.kind==='single'?ex.target.figureId:null)||g.candidateName!==ex.name||
     g.discriminatingFeature!==ex.feature)return false;
@@ -940,18 +946,19 @@ function generatedPublicationShape(t:any,slots:readonly string[],p5:boolean,issu
  if(unpublished)return m===null;
  if(issueHandling&&typeof t.publicSpeech==='string'&&!issueHandlingPartsMatch(p,ex,t.publicSpeech))return false;
  if(!issueHandling&&visual&&!visualPurposeSourcesMatch(p,t.executed,slots,t.turnIndex))return false;
- const issueSlots=issueHandling?issueHandlingFeatureScope(ex,slots,!!c):null;
- const visualDetail=issueHandling?issueSlots!==null:visual&&!c&&['confirm','repair'].includes(ex.action);
+ const continuationVisual=!!c&&s4UsesV24GenerationRules(t.generationRetryVersion);
+ const issueSlots=issueHandling?publicationFeatureScope(ex,slots,c,t.executed,continuationVisual):null;
+ const visualDetail=!checksOff&&(issueHandling?issueSlots!==null:visual&&!c&&['confirm','repair'].includes(ex.action));
  const ids=ex.target.kind==='single'?[ex.target.figureId]:ex.target.kind==='multiple'?ex.target.figureIds:[];
  if(Object.hasOwn(p,'visualFeatures')!==visualDetail||visualDetail&&(!t.observationMemo||
     !readVisualFeatureEvidence(p.visualFeatures,t.observationMemo,issueSlots??ids,
       typeof t.publicSpeech==='string'?(m?t.publicSpeech.slice(0,m.start-1):t.publicSpeech):undefined)))return false;
- if(visualDetail&&(!issueHandling||['confirm','repair','revisit'].includes(ex.action))){
+ if((visualDetail||checksOff)&&['confirm','repair','revisit'].includes(ex.action)){
   const history=t.repairHistory.filter((entry:any)=>entry.turn===t.turnIndex);
   const purpose=ex.visualPurpose??ex.issue;
   const speech=m?t.publicSpeech.slice(0,m.start-1):t.publicSpeech;
   if(history.length!==1||!equal(history[0].candidatesBefore,ids)||history[0].action!==ex.action||
-     history[0].issueId!==(purpose.kind==='resolve_issue'?purpose.issueId:null)||
+     history[0].issueId!==(purpose?.kind==='resolve_issue'?purpose.issueId:null)||
      typeof speech!=='string'||history[0].question!==speech.slice(0,400))return false;
  }
  if(issueHandling&&ex.action==='close'?
@@ -960,11 +967,17 @@ function generatedPublicationShape(t:any,slots:readonly string[],p5:boolean,issu
  if(m!==null&&(!exact(m,['sourceTurn','start','textSha256'])||m.sourceTurn!==t.turnIndex||
     !Number.isSafeInteger(m.start)||m.start<2||typeof m.textSha256!=='string'||!/^[a-f0-9]{64}$/.test(m.textSha256)||
     t.decisions.at(-1)?.evidence?.stages?.[0]?.choices?.[MOVE_ON_SOURCE_QUESTION]!=='human_request'||
-    last?.moveOn?.choice!=='honors_request'||t.publicSpeech!==null&&(t.publicSpeech[m.start-1]!=='\n'||
-      s4Sha256(t.publicSpeech.slice(m.start))!==m.textSha256||s4Sha256(t.publicSpeech.slice(0,m.start-1))!==last.draftSha256)))return false;
- if(s4UsesV22GenerationRules(t.generationRetryVersion)&&(last?.status!=='ok'||last.topicShift?.choice!=='within_plan'||
+    !checksOff&&last?.moveOn?.choice!=='honors_request'||t.publicSpeech!==null&&(t.publicSpeech[m.start-1]!=='\n'||
+      s4Sha256(t.publicSpeech.slice(m.start))!==m.textSha256||!checksOff&&s4Sha256(t.publicSpeech.slice(0,m.start-1))!==last.draftSha256)))return false;
+ if(!checksOff&&s4UsesV22GenerationRules(t.generationRetryVersion)&&(last?.status!=='ok'||last.topicShift?.choice!=='within_plan'||
     typeof t.publicSpeech==='string'&&s4Sha256(m?t.publicSpeech.slice(0,m.start-1):t.publicSpeech)!==last.draftSha256))return false;
  return !w||t.publicSpeech===null||s4Sha256(m?t.publicSpeech.slice(0,m.start-1):t.publicSpeech)===last.draftSha256;
+}
+
+function publicationFeatureScope(ex:any,slots:readonly string[],continuation:any,original:any,continuationVisual:boolean){
+ if(!continuationVisual)return issueHandlingFeatureScope(ex,slots,!!continuation);
+ const scoped=issueHandlingFeatureScope({...original,action:original.action==='carry_over'?'carry_over':'confirm',extras:[]},slots,false);
+ return scoped?.length?scoped:[...slots];
 }
 
 function generatedLedger(before:any,ex:any,withdrawal:any){
@@ -1292,7 +1305,7 @@ function generatedRetryMessagesMatch(generations:any[],topics:ReadonlyMap<number
   const {messages:retry,...retryOptions}=generations[index+1].payload;
   if(!Array.isArray(retry)||!equal(retry.slice(0,-1),initial)||!equal(retryOptions,options))return false;
   const instruction=retry.at(-1);
-  const action=version==='jev_generation_retry_v23'?v23PlanMessage(initial):initial.find((message:any)=>message.role==='system'&&typeof message.content==='string'&&
+  const action=(version==='jev_generation_retry_v23'||s4UsesV24GenerationRules(version))?v23PlanMessage(initial):initial.find((message:any)=>message.role==='system'&&typeof message.content==='string'&&
    message.content.startsWith('Jevが選んだ行動だけを文章にしてください。'))?.content;
   const prefix=RETRY_INSTRUCTION+'\n'+action+'\n';
   if(!action||instruction?.role!=='system'||typeof instruction.content!=='string'||!instruction.content.startsWith(prefix))return false;
@@ -1317,7 +1330,10 @@ function generatedReplayProof(tr:any,t:any,tape:any,result:any,pair:any,
    Object.fromEntries(Object.entries(v).filter(([key])=>key!=='latencyMs').map(([k,x])=>[k,withoutLatency(x)])):v;
  const issueHandling=s4UsesIssueHandling(tape.generationRetryVersion);
  const v22=s4UsesV22GenerationRules(tape.generationRetryVersion);
- const v23=tape.generationRetryVersion==='jev_generation_retry_v23';
+ const v24=s4UsesV24GenerationRules(tape.generationRetryVersion);
+ const v23=v24||tape.generationRetryVersion==='jev_generation_retry_v23';
+ const checksOff=v24&&tape.postGenerationCheck==='off';
+ const checksTopic=v22&&!checksOff;
  const visual=issueHandling||isGenerationV19(tape.generationRetryVersion);
  const terms=visual||isGenerationV18(tape.generationRetryVersion);
  const issueCtx=issueHandling?issueHandlingContext(t,tape.state,graph,tape.events):null;
@@ -1343,10 +1359,12 @@ function generatedReplayProof(tr:any,t:any,tape:any,result:any,pair:any,
   if(!tail)return'missing';
   if(!s||s.label!==label||hash(m)!==s.materialSha256||!equal(m.state,tape.state)||!equal(m.events,tape.events)||
      !equal(m.profile,tr.profile)||!equal(m.common,tape.common)||!equal(m.tail,tail)||m.generationRetryVersion!==tape.generationRetryVersion||
-     !p||!Array.isArray(s.requests)||issueHandling&&m.requestSeq!==tape.requestSeq)return'invalid';
+     !p||!Array.isArray(s.requests)||issueHandling&&m.requestSeq!==tape.requestSeq||
+     (v24?m.postGenerationCheck!==tape.postGenerationCheck:Object.hasOwn(m,'postGenerationCheck')))return'invalid';
   const selected=p.recovery?.decision??t.decisions.at(-1),intervention=p.recovery?.intervention??s.intervention;
   const ex=generatedExecution(p,s.executed,Object.keys(tape.state.ledger));
-  if(!ex||!selected||!intervention)return'invalid';
+  if(!ex||!selected||!intervention||checksOff&&[p.recovery,p.continuation,p.withdrawal].some(x=>x!==null)||
+     Object.hasOwn(p,'agreementWithheld')&&(!checksOff||p.agreementWithheld!==true||ex.action!=='agree'))return'invalid';
   if(issueCtx){
    if(!issueHandlingDecisionShape(selected,issueCtx.slots,!!p.recovery,t.namingRequest===true,evidenceShape)||
       !issueHandlingRelation(t.decisions.at(-1),s.intervention,s.executed,label,issueCtx)||
@@ -1385,7 +1403,8 @@ function generatedReplayProof(tr:any,t:any,tape:any,result:any,pair:any,
          (visual&&req.phase==='ai_extraction'
           ? ![memoAiExtractionPrompt(SHAPE_TERMINOLOGY_GENERATION),memoAiExtractionPrompt(SHAPE_TERMINOLOGY_GENERATION,true)].includes(prompt.content)
           : !prompt.content.endsWith(suffix)))return'invalid';
-      if(!visual&&req.phase==='ai_extraction'&&label===tr.label&&
+      if(checksOff&&req.phase==='ai_extraction'&&prompt.content!==memoAiExtractionPrompt(SHAPE_TERMINOLOGY_GENERATION))return'invalid';
+      if((!visual||checksOff)&&req.phase==='ai_extraction'&&label===tr.label&&
          !equal(t.aiPublic?.prompts?.extraction,{version:2,sha256:s4Sha256(prompt.content)}))return'invalid';
      }
     }
@@ -1400,7 +1419,7 @@ function generatedReplayProof(tr:any,t:any,tape:any,result:any,pair:any,
      if(v23){
       const count=generations.length;
       const candidate=count>=priorDrafts?ex:count<2&&p.recovery?.reason==='publication_mismatch'?s.executed:p.recovery?.executed;
-      if(!candidate||!issueCtx||!v23PlanMatches(req.payload.messages,candidate,issueCtx.slots.length,v23Questions))return'invalid';
+      if(!candidate||!issueCtx||!v23PlanMatches(req.payload.messages,candidate,issueCtx.slots.length,v23Questions,v24))return'invalid';
      }
      lastRaw=answer.response?.text??answer.text;lastDraft=null;lastExtraction=null;functionAnswers=null;
      generations.push(req);
@@ -1425,8 +1444,9 @@ function generatedReplayProof(tr:any,t:any,tape:any,result:any,pair:any,
     });
     if(!retainedClassificationMatches(input,localClaims,recent,t.turnIndex,localHistory,segments))return'invalid';
    }
+   if(checksOff&&req.phase==='draft_shared_claim')return'invalid';
    if(req.phase==='draft_naming'){
-    if(req.role!=='post_generation'||typeof lastRaw!=='string'||lastDraft!==null)return'invalid';
+    if(checksOff||req.role!=='post_generation'||typeof lastRaw!=='string'||lastDraft!==null)return'invalid';
     if(v22){
      const index=generations.length-1,final=index>=priorDrafts;
      const candidate=final?ex:index<2&&p.recovery?.reason==='publication_mismatch'?s.executed:p.recovery?.executed;
@@ -1436,7 +1456,7 @@ function generatedReplayProof(tr:any,t:any,tape:any,result:any,pair:any,
         !Array.isArray(input.reasons)||input.reasons.at(-1)!=='topic_shift'||
         Object.hasOwn(req.payload.questions,'draft_naming')!==(input.reasons.length>1)||
         !draftTopicShiftMatches(input,req.payload.questions.draft_topic_shift,lastRaw,candidate,humanRequestedMove,combined,
-         issueHandlingFeatureScope(candidate,issueCtx.slots,final&&!!p.continuation)!==null,draftTurns,t.turnIndex))return'invalid';
+         publicationFeatureScope(candidate,issueCtx.slots,final&&p.continuation,s.executed,v24&&final&&!!p.continuation)!==null,draftTurns,t.turnIndex))return'invalid';
      inspectedTopics.set(index,checked.choice);
      if(final)topicActRecords.push({draft:index%2===0?'initial':'retry',draftSha256:s4Sha256(input.draft),triggers:input.reasons,status:'ok',
       choice:answer.answers.draft_naming?.choice??null,scores:answer.answers.draft_naming?.probabilities??null,model:answer.model,
@@ -1446,6 +1466,10 @@ function generatedReplayProof(tr:any,t:any,tape:any,result:any,pair:any,
     lastDraft={state:input,answers:answer.answers};continue;
    }
    const questionKeys=Object.keys(req.payload.questions);
+   if(issueCtx?.slots.length===3&&input.view==='judgment_v5'&&(
+      !equal(input.ownSlots,issueCtx.slots)||Object.entries(req.payload.questions).some(([key,question]:[string,any])=>
+       key!==PUBLICATION_CONTINUATION_QUESTION&&(typeof question.instructions!=='string'||
+       !question.instructions.includes('f0〜f2はownSlotsの順の自分の図形です。')||/f0〜f[345]はownSlots/u.test(question.instructions)))))return'invalid';
    if(questionKeys.some(key=>['human_referent','repair_issue','action','target','shared_construal'].includes(key))||Object.hasOwn(input,'selected')){
     if(input.judgmentMaterialVersion!==tr.profile?.judgmentMaterialVersion||
        (referenceEvidence?!equal(input.referenceEvidence,referenceEvidence):Object.hasOwn(input,'referenceEvidence')))return'invalid';
@@ -1476,7 +1500,8 @@ function generatedReplayProof(tr:any,t:any,tape:any,result:any,pair:any,
     if(!p.recovery||!equal(input.publicationRecoveryContext,{previous:{action:s.executed.action,target:s.executed.target,name:s.executed.name,feature:s.executed.feature,
       ...(visual&&s.executed.visualPurpose?{visualPurpose:s.executed.visualPurpose}:{}),
       ...(issueHandling&&s.executed.issue?{issue:s.executed.issue}:{}),
-      ...(issueHandling&&s.executed.destination?{destination:s.executed.destination}:{})},reason:p.recovery.reason}))return'invalid';
+      ...(issueHandling&&s.executed.destination?{destination:s.executed.destination}:{})},reason:p.recovery.reason,
+      ...(v24?{respondToRequest:true}:{})}))return'invalid';
    }else if(Object.hasOwn(input,'publicationRecoveryContext'))return'invalid';
    if(Object.hasOwn(req.payload.questions,'action')){
     if(deciding){
@@ -1504,24 +1529,29 @@ function generatedReplayProof(tr:any,t:any,tape:any,result:any,pair:any,
      !issueHandlingExtraRequestsMatch(decision,input,issueCtx)))return'invalid';
   if(counters.luna!==recorded.luna.length||counters.jev!==recorded.jev.length||originalActions!==t.decisions.length||recoveryActions!==(p.recovery?1:0)||
      ![1,2].includes(generations.length-priorDrafts)||typeof lastRaw!=='string')return'invalid';
-  if(v22&&(inspectedTopics.get(generations.length-1)!=='within_plan'||!generatedRetryMessagesMatch(generations,inspectedTopics,tape.generationRetryVersion)||
+  if((checksTopic||checksOff)&&!generatedRetryMessagesMatch(generations,inspectedTopics,tape.generationRetryVersion))return'invalid';
+  if(checksTopic&&(inspectedTopics.get(generations.length-1)!=='within_plan'||
      label===tr.label&&!equal(withoutLatency(t.draftActs),topicActRecords)))return'invalid';
-  if(v22&&label===tr.label){
+  if(checksTopic&&label===tr.label){
    const topicCodes=['unsupported_topic_shift','draft_topic_shift_unconfirmed'];
    const expected=topicActRecords.flatMap(record=>record.topicShift.choice==='within_plan'?[]:
     [record.topicShift.choice==='unsupported_shift'?topicCodes[0]:topicCodes[1]]);
    if(!equal(t.generationGuard.violations.filter((code:string)=>topicCodes.includes(code)),expected)||
       t.generationGuard.regenerated!==(generations.length-priorDrafts===2))return'invalid';
   }
+  if(checksOff&&label===tr.label&&t.generationGuard.regenerated!==(generations.length===2))return'invalid';
   const hasFeature=!visual&&ex.action==='confirm'&&!p.continuation,combined=p.transition!==null;
-  const issueSlots=issueCtx?issueHandlingFeatureScope(ex,issueCtx.slots,!!p.continuation):null;
-  const visualDetail=issueCtx?issueSlots!==null:visual&&!p.continuation&&['confirm','repair'].includes(ex.action);
+  const issueSlots=issueCtx?publicationFeatureScope(ex,issueCtx.slots,p.continuation,s.executed,v24&&!!p.continuation):null;
+  const structuredVisual=issueCtx?issueSlots!==null:visual&&!p.continuation&&['confirm','repair'].includes(ex.action);
+  const visualDetail=!checksOff&&structuredVisual;
+  const outputKeys=(output:any,keys:string[])=>exact(output,[...keys,
+    ...(checksOff&&Object.hasOwn(output??{},'observationFeatures')?['observationFeatures']:[])]);
   let text=lastRaw,move:string|null=null,draftParts:Array<{item:number;text:string}>|undefined;
   let visualInput=lastRaw,extraction:Row|undefined;
   if(issueHandling&&ex.extras?.length){
    const output=JSON.parse(lastRaw);
-   if(!exact(output,['parts','observationFeatures',...(combined?['moveOn']:[])])||!Array.isArray(output.parts)||
-      !Array.isArray(output.observationFeatures)||!visualDetail&&output.observationFeatures.length||
+   if(!outputKeys(output,['parts',...(!checksOff?['observationFeatures']:[]),...(combined?['moveOn']:[])])||!Array.isArray(output.parts)||
+      !checksOff&&(!Array.isArray(output.observationFeatures)||!visualDetail&&output.observationFeatures.length)||
       combined&&(typeof output.moveOn!=='string'||!output.moveOn.trim()))return'invalid';
    if(output.parts.some((part:any)=>!exact(part,['item','text'])||typeof part.text!=='string'))return'invalid';
    draftParts=output.parts;
@@ -1552,15 +1582,15 @@ function generatedReplayProof(tr:any,t:any,tape:any,result:any,pair:any,
     if(!action||!action.content.includes(VISUAL_FEATURE_SOURCES_V19)||!action.content.includes(VISUAL_FEATURE_DRAFT_V19)||
        !equal(JSON.parse(action.content.split('\n').at(-1)),{...finals,target:ex.target,visualPurpose:ex.visualPurpose,detailFigureIds:[]}))return'invalid';
    }
-  }else if(combined&&!draftParts){
+  }else if((combined||checksOff&&structuredVisual)&&!draftParts){
    const raw=JSON.parse(lastRaw);
-   if(!exact(raw,hasFeature?['text','moveOn','checkedFeature']:['text','moveOn'])||typeof raw.text!=='string'||!raw.text.trim()||
-      typeof raw.moveOn!=='string'||!raw.moveOn.trim()||hasFeature&&raw.checkedFeature!==ex.feature)return'invalid';
-   text=raw.text;move=raw.moveOn;
+   if(!outputKeys(raw,['text',...(combined?['moveOn']:[]),...(hasFeature?['checkedFeature']:[])])||typeof raw.text!=='string'||!raw.text.trim()||
+      combined&&(typeof raw.moveOn!=='string'||!raw.moveOn.trim())||hasFeature&&raw.checkedFeature!==ex.feature)return'invalid';
+   text=raw.text;move=combined?raw.moveOn:null;
   }else if(hasFeature){const draft=confirmationDraftText(lastRaw,ex.feature);if(draft===null)return'invalid';text=draft;}
   const speech=move===null?text:text+'\n'+move;
-  if(!text.trim()||s4Sha256(speech)!==p.textSha256||combined&&(p.transition.start!==text.length+1||s4Sha256(move!)!==p.transition.textSha256||
-      lastDraft?.state?.moveOnDraft!==move||lastDraft.answers?.draft_human_move_on?.choice!=='honors_request'))return'invalid';
+  if(!text.trim()||checksOff&&speech.length>12000||s4Sha256(speech)!==p.textSha256||combined&&(p.transition.start!==text.length+1||s4Sha256(move!)!==p.transition.textSha256||
+      !checksOff&&(lastDraft?.state?.moveOnDraft!==move||lastDraft.answers?.draft_human_move_on?.choice!=='honors_request')))return'invalid';
   if(issueHandling){
    if(!issueHandlingReplayBoundary(s.publicationBoundary,s.requests,visualDetail,{turn:t.turnIndex,requestSeq:tape.requestSeq,
       speech,memo:t.observationMemo,publicTurns,profileSha256:hash(tr.profile),extraction,
@@ -1569,7 +1599,7 @@ function generatedReplayProof(tr:any,t:any,tape:any,result:any,pair:any,
       ...(label===tr.label?{graphRevision:graph?.revision}:{})}))return'invalid';
    if(!issueHandlingPartsMatch(p,ex,speech,draftParts))return'invalid';
    const messages=generations.at(-1).payload.messages;
-   if(v23?!v23OutputMatches(messages,!!draftParts,visualDetail,combined):
+   if(v23?!v23OutputMatches(messages,!!draftParts,structuredVisual,combined,checksOff):
       !issueHandlingGenerationScope(messages,ex,finals,visualDetail,combined,v22,tr.profile?.judgmentMaterialVersion===JEV_REPAIR_QUALITY_VERSION,
        t.namingReconfirm===true,tape.state.ledger))return'invalid';
    const start=messages.at(-1)?.content?.startsWith('公開発話を書き直してください。')?messages.slice(0,-1):messages;
@@ -1585,7 +1615,7 @@ function generatedReplayProof(tr:any,t:any,tape:any,result:any,pair:any,
   }
   const publicTexts=history.map((event:any)=>event.text);
   const humanTexts=history.filter((event:any)=>event.speaker==='human').map((event:any)=>event.text);
-  const codes=(draft:string,action:any,name:string|null,holistic:boolean)=>draftViolationCodes(draft,{action,candidateName:name,v3:true,holistic,
+  const codes=(draft:string,action:any,name:string|null,holistic:boolean)=>draftViolationCodes(draft,{action,candidateName:name,v3:true,holistic,mechanicalOnly:checksOff,
     adaptive:!!tape.technicalTrial,factored:Array.isArray(t.repairFacts),ai:true,publicTexts,humanTexts,recentHumanTexts:humanTexts,
     dialoguePolicy:'holistic_v5',generationRetryVersion:tape.generationRetryVersion,vetoed:intervention.reasonCode==='vetoed_bypass_action'},generations.at(-1).payload.messages);
   const parts=draftParts??[{item:0,text}],items=[ex,...(ex.extras??[])];
@@ -1601,8 +1631,14 @@ function generatedReplayProof(tr:any,t:any,tape:any,result:any,pair:any,
    const source=tape.events.find((e:any)=>e.seq===support?.evidenceTurn&&e.speaker==='human');
    const literal=typeof ex.name==='string'&&typeof source?.text==='string'&&source.text.includes(ex.name);
    const answer=lastDraft?.answers?.draft_naming?.choice;
-   if(!equal(support,p.grounding)||support?.verdict!=='grounded'||!literal||answer!=='adopt_chosen'&&
+   if(checksOff){
+    const candidateLedger=issueHandlingLedger(tape.state.ledger,ex,null);
+    const withheld=support?.verdict!=='grounded'||!literal||candidateLedger===null;
+    if(!equal(support,p.grounding)||p.agreementWithheld!==(withheld?true:undefined))return'invalid';
+   }else if(!equal(support,p.grounding)||support?.verdict!=='grounded'||!literal||answer!=='adopt_chosen'&&
       !(answer==='adopt_context'&&lastDraft.state.semanticNaming?.currentTurnSource===true&&support.evidenceTurn===t.turnIndex))return'invalid';
+  }else if(v24&&!checksOff&&ex.action==='propose_name'){
+   if(lastDraft?.answers?.draft_naming?.choice!=='propose_chosen'||!lastDraft.state.reasons.includes('propose_action'))return'invalid';
   }else if(lastDraft&&['adopt_chosen','adopt_other','adopt_context'].includes(lastDraft.answers?.draft_naming?.choice))return'invalid';
   if(p.withdrawal&&(!equal(p.withdrawal.prior,tape.state.ledger?.[p.withdrawal.figureId])||
       lastDraft?.state?.withdrawPriorName!==p.withdrawal.prior.name||lastDraft.answers?.draft_naming?.choice!=='withdraw_selected'))return'invalid';
@@ -1620,7 +1656,7 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
  const v=promptVersion(records,tr);if(!v)return'invalid';
  const {tape,result}=entries[0],pair=pairs[0];
  if(!figureCountAllowed(Object.keys(tape?.state?.ledger??{}).length,v))return'invalid';
- if(tape?.generationRetryVersion==='jev_generation_retry_v23'&&!Object.hasOwn(row(row(v.sources).files),'v2/generation-prompt-v23.ts'))return'invalid';
+ if((tape?.generationRetryVersion==='jev_generation_retry_v23'||s4UsesV24GenerationRules(tape?.generationRetryVersion))&&!Object.hasOwn(row(row(v.sources).files),'v2/generation-prompt-v23.ts'))return'invalid';
  const pruneVersion = tape?.state?.graph?.memoryPruneVersion;
  const committedState = tr.turns?.find((u:any)=>u.turn===t.turnIndex)?.state;
  const committed = committedState?.graph;
@@ -1633,7 +1669,9 @@ function replayProof(records:any,tr:any,t:any,key:string):'missing'|'invalid'|'o
  if(!validAgreeNameScope(tape?.state?.agreeNameScopeVersion,tape?.generationRetryVersion))return'invalid';
  try{
  const issueHandling=s4UsesIssueHandling(tape.generationRetryVersion);
- if(!exact(tape,['schemaVersion','state','events','common','tails','recorded',...(Object.hasOwn(tape??{},'technicalTrial')?['technicalTrial']:[]),...(Object.hasOwn(tape??{},'generationRetryVersion')?['generationRetryVersion']:[]),...(issueHandling?['requestSeq']:[])])||issueHandling&&(!Number.isSafeInteger(tape.requestSeq)||tape.requestSeq<1)||tape.schemaVersion!=='parity_intervention_replay_v1'||!exact(result,['schemaVersion','status','error','commonEqual','policyConformant','recordedPayloadsReproduced','actualLunaHttpMeasured','hashScheme','excludedEnvelopeFields','sides'])||result.schemaVersion!=='parity_intervention_replay_result_v1'||result.status!=='same_material_intervention_verified'||result.error!==null||result.commonEqual!==true||result.policyConformant!==true||result.recordedPayloadsReproduced!==true||typeof result.actualLunaHttpMeasured!=='boolean'||result.hashScheme!=='canonical_json_sha256_not_raw_body_bytes'||!equal(result.excludedEnvelopeFields,META_KEYS)||!Array.isArray(result.sides)||result.sides.length!==2)return'invalid';
+ const v24=s4UsesV24GenerationRules(tape.generationRetryVersion);
+ if(v24&&!['off','on'].includes(tape.postGenerationCheck))return'invalid';
+ if(!exact(tape,['schemaVersion','state','events','common','tails','recorded',...(Object.hasOwn(tape??{},'technicalTrial')?['technicalTrial']:[]),...(Object.hasOwn(tape??{},'generationRetryVersion')?['generationRetryVersion']:[]),...(issueHandling?['requestSeq']:[]),...(v24?['postGenerationCheck']:[])])||issueHandling&&(!Number.isSafeInteger(tape.requestSeq)||tape.requestSeq<1)||tape.schemaVersion!=='parity_intervention_replay_v1'||!exact(result,['schemaVersion','status','error','commonEqual','policyConformant','recordedPayloadsReproduced','actualLunaHttpMeasured','hashScheme','excludedEnvelopeFields','sides'])||result.schemaVersion!=='parity_intervention_replay_result_v1'||result.status!=='same_material_intervention_verified'||result.error!==null||result.commonEqual!==true||result.policyConformant!==true||result.recordedPayloadsReproduced!==true||typeof result.actualLunaHttpMeasured!=='boolean'||result.hashScheme!=='canonical_json_sha256_not_raw_body_bytes'||!equal(result.excludedEnvelopeFields,META_KEYS)||!Array.isArray(result.sides)||result.sides.length!==2)return'invalid';
  // The replay plan declares a shared version. An attempt without a retry has no retry wire text to bind.
  const version=tape.generationRetryVersion;
  if(Object.hasOwn(tape,'generationRetryVersion')&&(version==='jev_generation_retry_v1'||!validGenerationRetryVersion(version,layout,tr.profile?.dialoguePolicy))||
@@ -2136,7 +2174,10 @@ function rankProof(i:any,d:any,input:any):boolean{
 }
 // holistic_v5 writes the same material in a compact form (decision/judgment-material-v5.ts); S4 reads it back to the older shape before it re-derives anything.
 const LEGEND_V5='stateの記法: publicTurnsは全公開発話を番号順に一度ずつ並べた行（U番号 h=人間 / ai: 発話）です。claimsの各行は [claim id, 出典の発話番号, act, aspect, 対象, 名前, 返答先のclaim id, 命題, issueId] で、発言そのものは出典の発話番号の行を参照してください。f0〜f5はownSlotsの順の自分の図形です。issuesは局所の論点で、各行は [issue id, aspect, 対象, state, nameState, 名前, 最後の発話番号, claim id] です。figuresは図形ごとに、名称の状態（statusとname）と、これまでに実行した行動 [行動, 発話番号, 名前または特徴, 返答のclaim id] を並べた履歴です。';
-const legendForInput=(input:any)=>input.ownSlots?.length===4&&CTX.prompt?.fourFigures?LEGEND_V5.replace('f0〜f5','f0〜f3'):LEGEND_V5;
+const legendForInput=(input:any)=>{
+ const count=input.ownSlots?.length;
+ return count<6&&figureCountAllowed(count,CTX.prompt)?LEGEND_V5.replace('f0〜f5','f0〜f'+(count-1)):LEGEND_V5;
+};
 const LEGEND_V11='answerClaimsは、figuresの返答のclaim idがclaimsにない行動のためだけに添える行で、各行は [claim id, 出典の発話番号, act, 対象, 命題] です。グラフから外れた回答の出典の発話番号はnullになります。';
 const ROTATION_V5='課題の条件として、相手の盤面は自分の盤面と同じ図形を±90度ほど回転して提示しています（relative_pm90）。向きや方位を表す語（上・下・左・右・縦・横など）は、相手と自分で一致しない前提で扱い、向きに依存しない特徴で照合してください。';
 const parseMaterial=(text:string):any=>{const x=JSON.parse(text);return x?.view==='judgment_v5'?decodeMaterialV5(x):x;};
@@ -2154,7 +2195,9 @@ const MOVE_ON_SOURCE_CRITERIA = Object.freeze({
 // The normal decision validator and the v17 recovery proof bind their own stage.
 function publicationContinuationProof(questions:any,input:any,stage:any,generationVersion?:unknown){
  if(input.judgmentMaterialVersion!==JEV_REPAIR_QUALITY_VERSION||!input.publicationRecoveryContext)return null;
- const expected=publicationContinuationQuestion();
+ const v24=s4UsesV24GenerationRules(generationVersion);
+ if(input.publicationRecoveryContext.respondToRequest!==(v24?true:undefined))return null;
+ const expected=publicationContinuationQuestion(v24);
  const terminology=isGenerationV19(generationVersion)?SHAPE_TERMINOLOGY_GENERATION:generationVersion;
  return equal(questions?.[PUBLICATION_CONTINUATION_QUESTION],{...expected,instructions:withShapeTerminology(expected.instructions,terminology)})
   ?readPublicationContinuation(stage):null;
@@ -2433,7 +2476,7 @@ function generationMessagesWith(messages:any[],trace:any,execution:any,tape:any,
     JSON.stringify({figureIds:shared.figureIds,construal:shared.construal,openDetails:shared.openDetails})}:null;
   const figureCount=Object.keys(tape.state.ledger).length;
   if(!figureCountAllowed(figureCount,CTX.prompt))return false;
-  const task=figureCount===4?FIXED.task.replace('タングラム6図形','タングラム4図形'):FIXED.task;
+  const task=FIXED.task.replace('タングラム6図形','タングラム'+figureCount+'図形');
   const expected:any[]=[{role:'system',content:task},{role:'system',content:!H5()&&tape.technicalTrial?FIXED.generator.replace(trial.from,trial.generator):FIXED.generator},...(profile.utteranceStyle==='concise'?[{role:'system',content:FIXED.concise}]:[]),actionMessage,...(sharedMessage?[sharedMessage]:[]),...(['confirm','repair'].includes(execution.action)&&execution.target.kind==='multiple'?[{role:'system',content:FIXED.detail}]:[]),...(layoutOf(profile)==='two_stage_v3'&&execution.action==='revisit'&&execution.target.kind==='multiple'?[{role:'system',content:REVISIT_MULTIPLE}]:[])];
   if(versionedGeneration){
    const namingState=Object.keys(tape.state.ledger).sort().map(figureId=>({figureId,status:tape.state.ledger[figureId].status,name:tape.state.ledger[figureId].name}));
@@ -2643,11 +2686,13 @@ export function interventionChecks(records:Records):Check[]{
     const layout=layoutOf(tr.profile),policy=tr.profile?.dialoguePolicy,p5=p5At(layout,policy,t.generationRetryVersion);
     const humanLedMoveOn=tr.profile?.interventionPolicy?.version==='bypass_acceptance_v2';
     const issueHandling=tr.profile?.interventionPolicy?.version===S4_ISSUE_HANDLING_POLICY;
+    const v24=s4UsesV24GenerationRules(t.generationRetryVersion);
+    const checksOff=v24&&replayEntries[0]?.tape?.postGenerationCheck==='off';
     const failureSlots=Object.keys(tr.lastCommittedState?.ledger??replayEntries[0]?.tape?.state?.ledger??ownTurns[0]?.state?.ledger??{});
     const jevNaming=isJevNamingScope(ownTurns[0]?.state?.agreeNameScopeVersion??tr.lastCommittedState?.agreeNameScopeVersion??replayEntries[0]?.tape?.state?.agreeNameScopeVersion);
-    if(failureSlots.length===4&&!promptVersion(r,tr)?.fourFigures||failureSlots.length>0&&![4,6].includes(failureSlots.length)||
-       !traceShape(t,layout,policy,failureSlots,humanLedMoveOn,jevNaming,issueHandling)||
-       !related.every((c:any)=>traceShape(c,layout,policy,failureSlots,humanLedMoveOn,jevNaming,issueHandling))){
+    if(failureSlots.length>0&&!figureCountAllowed(failureSlots.length,promptVersion(r,tr))||
+       !traceShape(t,layout,policy,failureSlots,humanLedMoveOn,jevNaming,issueHandling,checksOff)||
+       !related.every((c:any)=>traceShape(c,layout,policy,failureSlots,humanLedMoveOn,jevNaming,issueHandling,checksOff))){
      for(const k of ['shape','binding','execution','replay'])add(k,'mismatch','intervention_trace_invalid');continue;
     }
     add('shape','pass','closed_intervention_trace');
@@ -2690,12 +2735,12 @@ export function interventionChecks(records:Records):Check[]{
        const after=[...turns.filter((v:any)=>v.turn===t.turnIndex).map((v:any)=>v.state),tr.lastCommittedState].filter((x:any)=>x&&stateJudgments(x).length&&judgmentKey(stateJudgments(x).at(-1))===key).map((x:any)=>x.ledger);
        if(!before||!after.length)missing=true;
        else if(t.generatedPublication){
-        const next=issueHandling?issueHandlingLedger(before,ex,t.generatedPublication.withdrawal):generatedLedger(before,ex,t.generatedPublication.withdrawal);
+        const next=checksOff&&t.generatedPublication.agreementWithheld?before:issueHandling?issueHandlingLedger(before,ex,t.generatedPublication.withdrawal):generatedLedger(before,ex,t.generatedPublication.withdrawal);
         if(!next||after.some((l:any)=>!equal(l,next)))conflict=true;
        }else if(after.some((l:any)=>!equal(l,before)))conflict=true;
       }
       if(issueHandling&&t.generatedPublication&&t.publicSpeech!==null&&ex&&
-         (!currentState||!issueHandlingPublicationPath(t.generatedPublication,ex,failureSlots,currentState,t.turnIndex,t.publicSpeech)))conflict=true;
+         (!currentState||!issueHandlingPublicationPath(t.generatedPublication,ex,failureSlots,currentState,t.turnIndex,t.publicSpeech,checksOff,v24&&!!t.generatedPublication.continuation)))conflict=true;
     }else if(js.length)conflict=true;
     const malformedReplay=!Array.isArray(suppliedReplay)||suppliedReplay.some((v:any)=>!v?.tape||!Array.isArray(v.tape.events)||!v.tape.events.length||!v.result);
     const events=replayEntries.flatMap((v:any)=>v.tape.events.filter((e:any)=>e?.seq===t.turnIndex)),event=events[0];
@@ -2804,7 +2849,7 @@ const FIXED_HOLISTIC_V5_I172={...FIXED_HOLISTIC_I172,
   confirm:rep(TRIAL_HOLISTIC_I172.scope.confirm,'回転に依存しない表現で','形の参照枠に関する共通教示に沿って'),
   repair:rep(TRIAL_HOLISTIC_I172.scope.repair,'回転に依存しない表現で','形の参照枠に関する共通教示に沿って')}};
 
-type PromptVersion={id:string;sources:unknown;i172:boolean;fourFigures?:boolean;styleMode:'legacy'|'merged'|'profile'|'research_split';
+type PromptVersion={id:string;sources:unknown;i172:boolean;fourFigures?:boolean;threeFigures?:boolean;styleMode:'legacy'|'merged'|'profile'|'research_split';
  fixed:{task:string;generator:string;concise:string;scope:Readonly<Record<string,string>>;act:string;detail:string};
  native:{common:string;referent:string;actions:Readonly<Record<string,string>>}};
 
@@ -3389,6 +3434,24 @@ const PROMPT_VERSIONS:readonly PromptVersion[]=[
   'v2/issue-publication.ts':'d17114f66ce8ce79cf1c4e1d6f34b2116976215009fc4e33e9540be1bcba1dcb',
   'decision/human-led-move-on.ts':'7c5dc7ff16877f1d9ff5cb6a777895c91aeb28fa6e31af1e7ab3d4ad5ed8d048',
   'v2/generation-prompt-v23.ts':'26159e4192576c79f5b55b9d2e2bdab9bc8a2200971386c9a5f0cce28f67d54c',
+ }},fixed:FIXED_I172,native:NATIVE_I172},
+ {id:'p5_pilot012_precheck_reduction_v24',i172:true,fourFigures:true,threeFigures:true,styleMode:'research_split',sources:{scheme:'complete_instruction_source_sha256',files:{
+  'v2/dialogue-v2.mjs':'2b7c59d9bb08026ff662946bb0668ac89049d1366fc488fd6601cd07c0fcc0c2',
+  'v2/jev-turn.ts':'eca4150b0862ca8d75d7d15444d0e41fd01e6ce00df6aef6a65304e3870464c5',
+  'v2/generation-guard.ts':'51359cb086b5a78f023a4dd5b801f31e13e60177efdd83cbf529bb6933a03b00',
+  'judgment/instructions.mjs':'eeb20c812729d04e52437a064b31fcd8af60ee2da8b1f6e73d99c4eb8dc8a785',
+  'observation/observe.ts':'eac863a50455665daa62812157d68512a7e33bed9fda271b4e7af4f44b38dde4',
+  'local-grounding/extract.ts':'0bf5f7969d79cbe2c71feea4281e1280139f291fee1c2186bcfaf8d3af27e88c',
+  'local-grounding/jev-local-test.ts':'64084d50c6d5855cbe64665ad156c6af5d9d3bf061d5e2de372904e45e88df01',
+  'decision/jev-decision.ts':'95a56e87f6c841b7738e4cccccfcbc8da227a1e96189616c1f1e174772b69f74',
+  'local-grounding/extract-ai.ts':'c2179cafb7ebdb88d3605b1c681fd20ca6705a1eab7d50dbf2ed7a845458fb24',
+  'local-grounding/jev-ai-public.ts':'6d3e05a7fb12778754a6cd8ba9c7b00e7045fa55daeded213a46a5a10375f1c7',
+  'shape-terminology.ts':'80fddf9e0947ae4e8dad85f3cf5e27700a070f0897225a565967623012ac3cf9',
+  'v2/visual-feature-evidence.ts':'414236b7823e690138899fec9f36ed766192b65d8e10b34b22865221d9d71ae0',
+  'v2/deferred-ai-extraction.ts':'10f7c9aa53242a55c75b6696be8dc193736b4b695b6016d768737ce0683efa08',
+  'v2/issue-publication.ts':'55c17c514d0257803276ee451eaf4279b00fde0bdced13dd09ae91c1f03259a9',
+  'decision/human-led-move-on.ts':'7c5dc7ff16877f1d9ff5cb6a777895c91aeb28fa6e31af1e7ab3d4ad5ed8d048',
+  'v2/generation-prompt-v23.ts':'2493816a3a3acf689c02a92df09966a39f7501a716df9e3fc6abca696049b9f5',
  }},fixed:FIXED_I172,native:NATIVE_I172},
  ...HISTORICAL_MAIN_PROMPT_SOURCES.map(({id, files}) => ({
   id, i172: false, styleMode: 'legacy' as const, sources: {scheme: 'complete_instruction_source_sha256', files: {...HISTORICAL_MAIN_SHARED_SOURCES, ...files}},

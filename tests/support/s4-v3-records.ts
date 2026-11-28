@@ -216,7 +216,7 @@ export async function buildRecords({ label = 'repair-first' as Label, technicalT
   promptSources?: Awaited<ReturnType<typeof promptSourceManifest>>;
   interventionVersion?: Parameters<typeof researchTrialProfileV3>[4];
   judgmentMaterialVersion?: JudgmentMaterialVersion;
-  figureCount?: 4 | 6;
+  figureCount?: 3 | 4 | 6;
 }) {
   const n = structuredClone(normal), tr = n.trials[0], m = n.run.manifest;
   const own = { ...OWN, ownAnchors: OWN.ownAnchors.slice(0, figureCount) };
@@ -226,7 +226,7 @@ export async function buildRecords({ label = 'repair-first' as Label, technicalT
   for (const s of [n.run, n.summary, tr]) { s.profile = structuredClone(profile); s.profileSha256 = digest; }
   tr.identity.profile = digest; tr.label = label; m.trials[0].label = label; n.summary.runOrder[0].label = label;
   let state: any = initialState({ profile, ledger, memo, generationRetryVersion, agreeNameScopeVersion });
-  if (figureCount === 4) {
+  if (figureCount !== 6) {
     const slots = own.ownAnchors.map((anchor: { id: string }) => anchor.id);
     state.ledger = Object.fromEntries(slots.map((slot: string) => [slot, state.ledger[slot]]));
     state.graph.slots = slots;
@@ -262,6 +262,7 @@ export async function buildRecords({ label = 'repair-first' as Label, technicalT
       common: { luna: a.luna.slice(0, a.boundary.luna), jev: a.jev.slice(0, a.boundary.jev), reobservations: structuredClone(a.reobservations) },
       tails: { 'repair-first': seg(a), 'bypass-enabled': seg(b) }, recorded: { label, expectedRequests: [] }, ...(technicalTrial ? { technicalTrial } : {}),
       ...(version ? { generationRetryVersion: version } : {}),
+      ...(version === "jev_generation_retry_v24" ? { postGenerationCheck: turns[i].plan.postGenerationCheck } : {}),
       ...(isIssueHandlingGeneration(version) ? { requestSeq: runs[label].requestSeq } : {}) };
     const probe: any = await pairedInterventionReplay(tape, own as any, MODEL, profile);
     assert.equal(probe.status === 'not_reached', false, String(probe.error));
