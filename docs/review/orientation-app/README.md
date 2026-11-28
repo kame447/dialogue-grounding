@@ -12,3 +12,6 @@ node docs/review/orientation-app/server.ts
 node --test docs/review/orientation-app/orientation-review.test.ts
 ```
 ブラウザ検証には既存のplaywright-coreとChromiumを指定してbrowser-smoke.mjsを実行する。検証用サーバーとデータは別の一時ディレクトリ・ポートを用いる。
+
+### 具体的な見立ての候補案（第2案）
+`concrete-construal-draft.tsv` は120方向の実際の輪郭と主要領域を参照して作成した具体的な候補（原則2件）と、第1候補に対応する部分の役割。見立ては未確認の仮説であり、別の候補や対象に当てはまらない場合も許す。 `apply-concrete-draft.ts` は元の案から未変更かつ未確認の行だけを確認ページの保存結果へ適用する。既に確認した行、変更した行、メモを付けた行は維持する。既存の確定分割と幾何情報、実験runtimeは変更しない。候補の具体性の改善は、実際の認識の正しさを保証するものではない。
