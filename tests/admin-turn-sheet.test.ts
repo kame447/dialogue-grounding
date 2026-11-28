@@ -143,3 +143,11 @@ test("does not associate a contradictory publication with an unrelated AI uttera
   assert.ok(!rows[3].entries.length);
   assert.ok(rows[2].entries.some(e => e.label === "AI応答試行（未公開・対応未確定）"));
 });
+
+test("ambiguous event ids or sequence numbers do not gain a link from an indexed lookup", () => {
+  for (const duplicate of [{ ...events[2], seq: 99 }, { ...events[2], id: "duplicate-id" }]) {
+    const result = buildTurnSheet({ ...record, events: [...events, duplicate] }, summary);
+    assert.equal(result.rows[3].responseTo, null);
+    assert.ok(result.unmatched.some(e => e.label === "外部要求" && e.value.model === "SECOND"));
+  }
+});

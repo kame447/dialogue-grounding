@@ -39,15 +39,13 @@ const seqOf = (value: unknown): number | null => Number.isSafeInteger(value) && 
 const code = (value: unknown, limit = 40): string | null =>
   typeof value === "string" && new RegExp(`^[a-z][a-z0-9_]{0,${limit - 1}}$`).test(value) ? value : null;
 
-/** Nearest-rank percentile over unsorted values. */
-function percentile(values: number[], p: number): number | null {
-  if (!values.length) return null;
-  const sorted = [...values].sort((a, b) => a - b);
-  return sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil((p / 100) * sorted.length) - 1))];
-}
+/** Nearest-rank percentiles, with one sort per distribution. */
 function distribution(values: number[]): Distribution {
-  return { count: values.length, p50Ms: percentile(values, 50), p90Ms: percentile(values, 90), p95Ms: percentile(values, 95),
-    maxMs: values.length ? Math.max(...values) : null };
+  const sorted = [...values].sort((a, b) => a - b);
+  const percentile = (p: number) => sorted.length
+    ? sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil((p / 100) * sorted.length) - 1))] : null;
+  return { count: sorted.length, p50Ms: percentile(50), p90Ms: percentile(90), p95Ms: percentile(95),
+    maxMs: sorted.length ? sorted.reduce((max, value) => Math.max(max, value), -Infinity) : null };
 }
 const increment = (counts: Record<string, number>, key: string) => { counts[key] = (counts[key] ?? 0) + 1; };
 
@@ -107,7 +105,17 @@ export function summarizeLatency(record: unknown): LatencySummary {
 
   const byPhase: Record<string, PhaseLatency> = {};
   const grouped = new Map<string, Request[]>();
-  requests.forEach((request, index) => grouped.set(phaseOf[index], [...(grouped.get(phaseOf[index]) ?? []), request]));
+  const callsBySeq = new Map<number, CallLatency[]>();
+  requests.forEach((request, index) => {
+    const phase = phaseOf[index];
+    const items = grouped.get(phase) ?? [];
+    items.push(request); grouped.set(phase, items);
+    if (request.requestSeq !== null) {
+      const calls = callsBySeq.get(request.requestSeq) ?? [];
+      calls.push({ phase, latencyMs: request.latencyMs, status: request.ok ? "ok" : "error", errorCode: request.errorCode });
+      callsBySeq.set(request.requestSeq, calls);
+    }
+  });
   for (const [phase, items] of grouped) {
     const values = items.map((item) => item.latencyMs);
     const { p50Ms, p90Ms, p95Ms, maxMs } = distribution(values);
@@ -122,6 +130,23 @@ export function summarizeLatency(record: unknown): LatencySummary {
   for (const request of requests) if (request.errorCode) increment(errorCodes, request.errorCode);
 
   const committedSeqs = new Set<number>();
+  const returnedByEvent = new Map<string, Timing[]>();
+  for (const timing of timings) {
+    if (timing.outcome !== "returned" || timing.lastEventId === null) continue;
+    const bucket = returnedByEvent.get(timing.lastEventId) ?? [];
+    bucket.push(timing); returnedByEvent.set(timing.lastEventId, bucket);
+  }
+  // The timings are sorted, including duplicate request sequences. Count an
+  // open interval by binary search instead of scanning all attempts per turn.
+  function boundary(seq: number, inclusive: boolean): number {
+    let lo = 0, hi = timings.length;
+    while (lo < hi) {
+      const mid = lo + Math.floor((hi - lo) / 2), value = timings[mid].requestSeq;
+      if (value < seq || inclusive && value === seq) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  }
   const turns: TurnLatency[] = [];
   let previousSeq = 0;
   for (let index = 0, lastAi = -1; index < events.length; index++) {
@@ -132,12 +157,15 @@ export function summarizeLatency(record: unknown): LatencySummary {
     if (event.scripted || !humans.length) continue;
     const before = events[index - 1];
     // The committing attempt is the latest returned one on the exact preceding snapshot.
-    const timing = [...timings].reverse().find((item) => item.outcome === "returned" && item.lastEventId === before.id &&
-      !committedSeqs.has(item.requestSeq)) ?? null;
+    const candidates = returnedByEvent.get(before.id);
+    let timing: Timing | null = null;
+    while (candidates?.length) {
+      const candidate = candidates.pop()!;
+      if (!committedSeqs.has(candidate.requestSeq)) { timing = candidate; break; }
+    }
     if (timing) committedSeqs.add(timing.requestSeq);
     const requestSeq = timing?.requestSeq ?? null;
-    const calls: CallLatency[] = requestSeq === null ? [] : requests.flatMap((request, i) => request.requestSeq === requestSeq
-      ? [{ phase: phaseOf[i], latencyMs: request.latencyMs, status: request.ok ? "ok" as const : "error" as const, errorCode: request.errorCode }] : []);
+    const calls = requestSeq === null ? [] : callsBySeq.get(requestSeq) ?? [];
     turns.push({
       aiSeq: event.seq, requestSeq,
       fromTriggerMs: event.atMs - humans[humans.length - 1].atMs,
@@ -148,7 +176,7 @@ export function summarizeLatency(record: unknown): LatencySummary {
       judgeRetries: Math.max(0, (timing?.judgeAttempts ?? 1) - 1),
       validationFailures: timing ? [...timing.validationFailures] : [],
       judgeFallback: timing?.judgeFallback ?? false, guardRegenerated: timing?.guardRegenerated ?? false, guardFallback: timing?.guardFallback ?? false,
-      supersededBefore: requestSeq === null ? 0 : timings.filter((item) => item.requestSeq > previousSeq && item.requestSeq < requestSeq).length,
+      supersededBefore: requestSeq === null ? 0 : Math.max(0, boundary(requestSeq, false) - boundary(previousSeq, true)),
     });
     if (requestSeq !== null) previousSeq = requestSeq;
   }

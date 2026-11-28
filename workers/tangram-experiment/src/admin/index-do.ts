@@ -4,7 +4,7 @@ import type { ParticipantConfigurationEnv } from "../participant-configuration.t
 import type { PreparedClaimRequest } from "../prepared-observation-pool.ts";
 import type { AdminSummary } from "./summary";
 import { getSummary, listAudit, listPage, PARTICIPANT_ROLE_REVISION, recordHash, recordRoles, removeSummaries, setParticipantRole, upsertSummary } from "./index-store.ts";
-import type { AuditEntry, DeletionReason } from "./index-store.ts";
+import type { AuditEntry, DeletionReason, IndexStorage } from "./index-store.ts";
 import { OBJECT_ID, RECORD_ID } from "./summary.ts";
 import { formatReceptionNumber, receptionNumberDay } from '../../../../dialogue-model/runtime/v2/reception.ts';
 import type { ReceptionSummary } from '../../../../dialogue-model/runtime/v2/reception.ts';
@@ -97,8 +97,29 @@ export class AdminIndex extends DurableObject<ParticipantConfigurationEnv> {
     return this.ctx.storage.transaction(tx => upsertSummary(tx, summary));
   }
   async get(recordId: string): Promise<AdminSummary | null> { return getSummary(this.ctx.storage, recordId); }
-  async page(after: string | null): Promise<{ items: AdminSummary[]; next: string | null }> { return listPage(this.ctx.storage, after); }
-  async recordRoles(recordIds: string[], includeDeleted = false) { return recordRoles(this.ctx.storage, recordIds, includeDeleted); }
+  private indexReadStorage(): IndexStorage {
+    const storage = this.ctx.storage;
+    return {
+      get: key => storage.get(key), put: entries => storage.put(entries), delete: keys => storage.delete(keys),
+      list: options => storage.list(options),
+      async getMany<T>(keys: string[]) {
+        const values = await storage.get<T>(keys);
+        // Native DO storage returns a Map. Single-key-only synthetic adapters
+        // may return undefined for the overload; do not swallow real failures.
+        if (values instanceof Map) return values;
+        if (values !== undefined) throw new Error("invalid_index_read");
+        const result = new Map<string, T>();
+        for (let offset = 0; offset < keys.length; offset += 12) {
+          const batch = keys.slice(offset, offset + 12);
+          const entries = await Promise.all(batch.map(async key => [key, await storage.get<T>(key)] as const));
+          for (const [key, value] of entries) if (value !== undefined) result.set(key, value);
+        }
+        return result;
+      },
+    };
+  }
+  async page(after: string | null): Promise<{ items: AdminSummary[]; next: string | null }> { return listPage(this.indexReadStorage(), after); }
+  async recordRoles(recordIds: string[], includeDeleted = false) { return recordRoles(this.indexReadStorage(), recordIds, includeDeleted); }
   async participantRoleRevision(): Promise<string | null> { return await this.ctx.storage.get<string>(PARTICIPANT_ROLE_REVISION) ?? null; }
   async setParticipantRole(recordIds: string[], objectId: string, role: unknown): Promise<boolean> {
     if (!Array.isArray(recordIds) || !OBJECT_ID.test(objectId) ||
