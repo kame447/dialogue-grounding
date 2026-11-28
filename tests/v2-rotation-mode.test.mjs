@@ -191,15 +191,17 @@ test('N10 relative_90_180_270 records its mode, stimulus and trialId and gives t
   assert.ok(turns.includes(180) && turns.every((turn) => [90, 180, 270].includes(turn)));
 });
 
-test('N11 both strategies get the same relative_90_180_270 stimulus: trialId, board images and recorded stimulus', async () => {
+test('N11 both strategies get the same relative_90_180_270 stimulus: trialId, board images, recorded stimulus, scene and key', async () => {
   const [a, b] = await Promise.all(['repair-first', 'bypass-enabled'].map((strategy) => run({ strategy, rotationMode: NEW, seed: NEW_SEED })));
   assert.ok(a.h.images.length > 0);
   assert.deepEqual([...new Set(a.h.images)], [...new Set(b.h.images)]);
   assert.deepEqual(a.record.stimulus, b.record.stimulus);
   assert.equal(a.record.trialId, b.record.trialId);
+  assert.deepEqual(a.task.getState().scene, b.task.getState().scene);
+  assert.deepEqual(a.task.researcherView().key, b.task.researcherView().key);
 });
 
-test('N12 the participant state of relative_90_180_270 shows neither the mode nor angles, and its scene is the human board of relative_pm90', async () => {
+test('N12the participant state of relative_90_180_270 shows neither the mode nor angles, and its scene is the human board of relative_pm90', async () => {
   const { task } = await run({ rotationMode: NEW, seed: NEW_SEED });
   const state = task.getState();
   assert.doesNotMatch(JSON.stringify(state), /relative|rotation|angle|stimulus/iu);
@@ -212,10 +214,12 @@ test('N13 save → JSON → restore keeps relative_90_180_270 whatever the calle
     const saved = JSON.parse(JSON.stringify(first.record));
     for (const other of ['relative_pm90', 'relative_0', undefined]) {
       const h = harness();
-      const { record } = await run({ strategy, rotationMode: other, seed: NEW_SEED, restore: saved }, h);
+      const { task, record } = await run({ strategy, rotationMode: other, seed: NEW_SEED, restore: saved }, h);
       assert.equal(record.options.rotationMode, NEW);
       assert.deepEqual(record.stimulus, saved.stimulus);
       assert.equal(record.trialId, saved.trialId);
+      assert.deepEqual(task.getState().scene, first.task.getState().scene);
+      assert.deepEqual(task.researcherView().key, first.task.researcherView().key);
       assert.ok(sawImage(h, NEW, NEW_SEED));
       assert.ok(!sawImage(h, 'relative_pm90', NEW_SEED) && !sawImage(h, 'relative_0', NEW_SEED));
     }
