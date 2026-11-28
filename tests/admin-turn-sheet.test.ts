@@ -43,8 +43,9 @@ test("links requests, failed and superseded attempts to the exact input; links r
   assert.equal(rows.length, events.length);
   assert.equal(rows[0].entries.length, 0);
   assert.equal(rows[1].entries.find(e => e.label === "外部要求")?.value.model, "FIRST");
-  assert.equal(rows[2].entries.find(e => e.label === "外部要求")?.value.model, "SECOND");
-  assert.equal(rows[2].entries.find(e => e.label === "API送信記録")?.value.model, "JEV");
+  assert.equal(rows[3].entries.find(e => e.label === "外部要求")?.value.model, "SECOND");
+  assert.ok(rows[2].entries.every(e => e.value.model !== "SECOND"));
+  assert.equal(rows[3].entries.find(e => e.label === "API送信記録")?.value.model, "JEV");
   assert.equal(rows[3].responseTo, 3);
   assert.equal(rows[4].entries.find(e => e.label === "外部要求")?.value.errorCode, "timeout");
   assert.equal(unmatched.length, 1);
@@ -72,6 +73,7 @@ test("renders selected vs executed action, uncalibrated referent, guard failures
   assert.match(html, /memory_unsupported_name/);
   assert.match(html, /href="#utterance-3"/);
   assert.match(html, /popovertarget="turn-detail-2"/);
+  assert.match(html, /popovertarget="turn-detail-3"/);
   assert.match(html, /popover="auto" id="turn-detail-2"/);
   assert.match(html, /発話に対応づけられない処理/);
 });
@@ -83,4 +85,61 @@ test("legacy records preserve known memory rejection and unknown detail; hostile
   assert.match(html, /memory_not_literal_in_public_text/);
   assert.match(html, /&lt;script&gt;bad&lt;\/script&gt;/);
   assert.doesNotMatch(html, /<script/i);
+});
+
+test("separates human interpretation from actual AI action and attaches later classification to the AI utterance", () => {
+  const traces = structuredClone(record.jevTraces) as any[];
+  Object.assign(traces[1], {
+    publicSpeech: "応答",
+    humanReferent: { scores: { f1: .8 }, status: "ok", model: "jev-exact", latencyMs: 312 },
+    local: { localStatus: "ok", extractor: { segments: [{ segmentId: "s1", quote: "補足", aspect: "shape" }] },
+      classifier: { kind: "jev_local_test", model: "jev-exact", status: "ok", verdicts: [{ segmentId: "s1", act: "deny" }] },
+      verification: { accepted: ["s1"], rejected: [] } },
+    aiPublic: { pending: { aiSeq: 4, status: "ready", candidates: [{ quote: "応答", act: "ask", aspect: "shape" }] },
+      stages: { ai_function: { status: "ok", calls: 1, model: "jev-exact", choices: [{ segmentId: "a1", act: "ask" }] } } },
+  });
+  traces[1].decisions[0].evidence = { stages: [{ stage: "action", model: "jev-exact", latencyMs: 432 }] };
+  // A later uncommitted attempt cannot claim that it applied the preceding AI memory.
+  traces[2].aiPublic = { application: { aiSeq: 4, status: "applied" } };
+  const source = { ...record, jevTraces: traces, requests: [
+    { requestSeq: 8, kind: "local_extraction", model: "terra-human", status: "ok", latencyMs: 12 },
+    { requestSeq: 8, kind: "generation", model: "terra-ai", status: "ok", latencyMs: 34 },
+    { requestSeq: 8, kind: "ai_extraction", model: "terra-post", status: "ok", latencyMs: 56 },
+  ], deferredAiExtractionTimings: [{ eventId: "a1", requestSeq: 8, status: "complete", startedAtMs: 10, finishedAtMs: 30 }],
+  aiPublicSettlement: { status: "ok", records: [{ turnIndex: 3, lastEventId: "h2", attemptNumber: 8, aiSeq: 4, status: "published_unapplied", sourceStatus: "ready" }] } };
+  const html = render(source);
+  const row = (n: number) => html.match(new RegExp('<tr id="utterance-' + n + '">([\\s\\S]*?)</tr>'))![1];
+  const human = row(3), ai = row(4);
+  assert.match(human, /人間の参照先/); assert.match(human, /補足 \/ deny \/ shape/); assert.match(human, /terra-human/);
+  assert.doesNotMatch(human, /vetoed_bypass_action|terra-ai|terra-post|Jev・action/);
+  assert.match(ai, /方略介入/); assert.match(ai, /実行：<\/span>repair/);
+  assert.match(ai, /Jev・action \/ jev-exact \/ 432 ms/); assert.match(ai, /terra-ai/); assert.match(ai, /terra-post/);
+  assert.match(ai, /公開発話の論点/); assert.match(ai, /分類時間：<\/span>20 ms/); assert.match(ai, /published_unapplied/);
+  assert.doesNotMatch(ai, /人間の参照先|terra-human|前のAI発話のメモリ反映試行/);
+  assert.match(row(5), /前のAI発話のメモリ反映試行（未確定）/);
+  assert.equal(buildTurnSheet(source, summarizeLatency(source)).unmatched.length, 0);
+});
+
+test("shows the deferred classification as unfinished during an ongoing experiment, then on the same AI row when it settles", () => {
+  const traces = structuredClone(record.jevTraces) as any[];
+  traces[1].aiPublic = { pending: null, stages: { ai_function: { status: "not_called", calls: 0 } } };
+  const running = { ...record, status: "dialogue", jevTraces: traces, deferredAiExtractionTimings: [
+    { eventId: "a1", requestSeq: 8, status: "running", startedAtMs: 10, finishedAtMs: null },
+  ] };
+  assert.match(render(running).match(/<tr id="utterance-4">([\s\S]*?)<\/tr>/)![1], /発話後の分類：<\/span>running/);
+  traces[1].aiPublic = { pending: { aiSeq: 4, status: "ready", candidates: [] }, stages: { ai_function: { status: "ok", calls: 1, model: "jev" } } };
+  const complete = { ...running, deferredAiExtractionTimings: [{ eventId: "a1", requestSeq: 8, status: "complete", startedAtMs: 10, finishedAtMs: 20 }] };
+  const ai = render(complete).match(/<tr id="utterance-4">([\s\S]*?)<\/tr>/)![1];
+  assert.match(ai, /発話後の分類：<\/span>complete/);
+  assert.match(ai, /Jev・ai_function/);
+});
+
+test("does not associate a contradictory publication with an unrelated AI utterance", () => {
+  const traces = structuredClone(record.jevTraces) as any[];
+  traces[1].publicSpeech = "別の発話";
+  const r = { ...record, jevTraces: traces };
+  const { rows } = buildTurnSheet(r, summarizeLatency(r));
+  assert.equal(rows[3].responseTo, null);
+  assert.ok(!rows[3].entries.length);
+  assert.ok(rows[2].entries.some(e => e.label === "AI応答試行（未公開・対応未確定）"));
 });
