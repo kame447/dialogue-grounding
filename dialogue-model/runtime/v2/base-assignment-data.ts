@@ -117,6 +117,10 @@ export function assignmentRotationMode(a: BaseAssignment): RotationMode {
 export function assignmentMemoryPruneVersion(a: BaseAssignment) {
   return a.source.kind === 'server_config_v1' ? a.source.memoryPruneVersion : a.source.plan.memoryPruneVersion;
 }
+export function assignmentPartObservationVersion(a: BaseAssignment) {
+  return a.source.kind === 'reception_plan_v2' || a.source.kind === 'reception_plan_v3'
+    ? a.source.plan.partObservationVersion : undefined;
+}
 export function assignmentOpeningMode(a: BaseAssignment) {
   return a.source.kind === 'server_config_v1' ? a.source.openingMode
     : a.source.kind === 'reception_plan_v1' ? undefined : a.source.plan.openingMode;
@@ -186,6 +190,8 @@ export function validateBoundBaseRecord(record: unknown, assignment: unknown): v
     if (JSON.stringify(pin) !== JSON.stringify(recordedPin) || pin && options.jevResearch !== true) throw new Error('model_pin');
     const plan = a.source.kind === 'reception_plan_v2' || a.source.kind === 'reception_plan_v3' ? a.source.plan : null;
     const profile = plan?.participantRuntimeProfile;
+    const partObservationVersion = assignmentPartObservationVersion(a);
+    if (partObservationVersion ? options.partObservationVersion !== partObservationVersion : Object.hasOwn(options, 'partObservationVersion')) throw new Error('part_observation_version');
     const openingMode = assignmentOpeningMode(a);
     if (openingMode ? options.openingMode !== openingMode : Object.hasOwn(options, 'openingMode')) throw new Error('opening_mode');
     const memoryPruneVersion = assignmentMemoryPruneVersion(a);

@@ -1,0 +1,219 @@
+{
+  "observer": "FrostyGauss",
+  "reviewer": "CalmFermi",
+  "method": "第1ラウンド後、指定された他者の観察・依頼と既に確認した実画像を照合。意見の差を保持した。",
+  "groupAObjections": false,
+  "groupBObjections": false,
+  "items": [
+    {
+      "item": "item-01",
+      "group": "A",
+      "decision": "support",
+      "reason": "カモの配置に同意。P3の四角い頭に嘴がないため種の確信度は低い。",
+      "resolution": "提案に同意。"
+    },
+    {
+      "item": "item-02",
+      "group": "C",
+      "decision": "reject",
+      "reason": "ツルの追加は不支持。P2は首に見えるが、長い嘴や脚がなくツルを選ぶ根拠が弱い。カモも種の決め手が弱いので確信度は低に修正したい。",
+      "resolution": "カモは低で支持、ツルは不支持。"
+    },
+    {
+      "item": "item-03",
+      "group": "B",
+      "decision": "support",
+      "reason": "六角形の本体と左の突起だけでは具体物に絞れない。",
+      "resolution": "見立てなしに同意。"
+    },
+    {
+      "item": "item-04",
+      "group": "C",
+      "decision": "support",
+      "reason": "稲妻を支持。幅広い上部から左右に折れ、下へ鋭く尖る輪郭は雷の記号に見える。左の段が四角いことは弱点。",
+      "resolution": "稲妻を支持。"
+    },
+    {
+      "item": "item-05",
+      "group": "B",
+      "decision": "support",
+      "reason": "カモ案は取り下げに同意。四角い頭に嘴がなく翼・脚の対応も弱い。",
+      "resolution": "見立てなしに同意。"
+    },
+    {
+      "item": "item-06",
+      "group": "B",
+      "decision": "support",
+      "reason": "台形と二つの突起からは対象が決まらない。",
+      "resolution": "見立てなしに同意。"
+    },
+    {
+      "item": "item-07",
+      "group": "C",
+      "decision": "reject",
+      "reason": "オオカミは不支持。上向きの鼻先という読みは可能だが耳がなく、胸と足の角張りも強く種まで絞れない。",
+      "resolution": "見立てなしに同意。"
+    },
+    {
+      "item": "item-08",
+      "group": "B",
+      "decision": "support",
+      "reason": "魚状には見えるが特定の種類を示す手掛かりがなく、キツネの顔としても弱い。",
+      "resolution": "見立てなしに同意。"
+    },
+    {
+      "item": "item-09",
+      "group": "C",
+      "decision": "support",
+      "reason": "ニワトリを低で支持。P1の大三角を立てた尾、P4を下げた首と頭に読める。尾が胴より非常に大きく嘴は不明瞭。馬も低で支持。",
+      "resolution": "ニワトリと馬を低で支持。"
+    },
+    {
+      "item": "item-10",
+      "group": "A",
+      "decision": "support",
+      "reason": "座る犬に同意。鼻先が低く頭と胴が一体である点は弱い。",
+      "resolution": "提案に同意。"
+    },
+    {
+      "item": "item-11",
+      "group": "C",
+      "decision": "reject",
+      "reason": "馬は不支持。下がるP4を首と頭に読むことはできるが、P2下端に独立した脚が見えず馬の決め手がない。カモも低のまま。",
+      "resolution": "カモは低で支持、馬は不支持。"
+    },
+    {
+      "item": "item-12",
+      "group": "B",
+      "decision": "support",
+      "reason": "裾状の台形と四角い頭は読めるが、腕が太い三角で姿勢も定まらない。",
+      "resolution": "見立てなしに同意。"
+    },
+    {
+      "item": "item-13",
+      "group": "C",
+      "decision": "reject",
+      "reason": "かかしは不支持。横帯を左右の腕と読めるが、P3の小さな尖りが頭として弱く、中央の下端も支柱として細くない。飛行機は支持。",
+      "resolution": "飛行機を支持、かかしは不支持。"
+    },
+    {
+      "item": "item-14",
+      "group": "B",
+      "decision": "support",
+      "reason": "魚状には見えるが種が特定できず、船としては下の突起の対応が弱い。",
+      "resolution": "見立てなしに同意。"
+    },
+    {
+      "item": "item-15",
+      "group": "C",
+      "decision": "support",
+      "reason": "ニワトリを低で支持。右のP2を嘴、上のP3をとさかと読むと位置がまとまる。ただしとさかが単純な三角で脚はない。カモも低で支持。",
+      "resolution": "ニワトリとカモを低で支持。"
+    },
+    {
+      "item": "item-16",
+      "group": "B",
+      "decision": "support",
+      "reason": "魚状には見えるが種が特定できず、跳ぶ犬の姿勢にも決め手がない。",
+      "resolution": "見立てなしに同意。"
+    },
+    {
+      "item": "item-17",
+      "group": "A",
+      "decision": "support",
+      "reason": "右向きのキツネに同意。二つの耳と鼻先が見えるが、体と脚は不明瞭。",
+      "resolution": "提案に同意。"
+    },
+    {
+      "item": "item-18",
+      "group": "B",
+      "decision": "support",
+      "reason": "突起を頭・胴・尾としてまとめにくい。",
+      "resolution": "見立てなしに同意。"
+    },
+    {
+      "item": "item-19",
+      "group": "C",
+      "decision": "reject",
+      "reason": "拳銃は不支持。右のP4は銃身に見えるが、左上のP1が大きく突き出し、P2は幅広い三角で握りとして弱い。",
+      "resolution": "見立てなしを維持し、拳銃案とは未合意。"
+    },
+    {
+      "item": "item-20",
+      "group": "A",
+      "decision": "support",
+      "reason": "帆船に同意。帆が船体の左にはみ出す点は弱い。",
+      "resolution": "提案に同意。"
+    },
+    {
+      "item": "item-21",
+      "group": "B",
+      "decision": "support",
+      "reason": "上下の突起を自然な部位にまとめにくい。",
+      "resolution": "見立てなしに同意。"
+    },
+    {
+      "item": "item-22",
+      "group": "C",
+      "decision": "support",
+      "reason": "スコップを支持し1位にする。左下に尖る幅広い刃と右上へ延びる柄の配置が合い、フライパンより先端の尖りを説明しやすい。フライパンも低で支持。",
+      "resolution": "スコップ1位、フライパン2位。"
+    },
+    {
+      "item": "item-23",
+      "group": "C",
+      "decision": "reject",
+      "reason": "カンガルーは不支持。P3を頭、P2を前脚と読めるが、耳や長い尾が見えずP4も四角い。ウサギも耳が前上方へ伸びる点は弱いが、P2の顔とP3の長い耳は支持する。",
+      "resolution": "ウサギを維持し、カンガルー案とは未合意。"
+    },
+    {
+      "item": "item-24",
+      "group": "C",
+      "decision": "revise",
+      "reason": "階段を支持。上側の連続する段と右下へ下る輪郭が階段を思わせる。ただし踏面の幅が不揃い。カモは頭と翼の対応が弱く取り下げる。",
+      "resolution": "階段を支持、カモを取り下げ。"
+    },
+    {
+      "item": "item-25",
+      "group": "A",
+      "decision": "support",
+      "reason": "飛ぶカモに同意。四角い頭に嘴がないため確信度は低い。",
+      "resolution": "提案に同意。"
+    },
+    {
+      "item": "item-26",
+      "group": "A",
+      "decision": "support",
+      "reason": "片手を挙げた人に同意。頭が胴の左にずれ、脚は分かれない。",
+      "resolution": "提案に同意。"
+    },
+    {
+      "item": "item-27",
+      "group": "C",
+      "decision": "revise",
+      "reason": "猫を低で支持。P1とP2の尖りを耳、P3を鼻先、P4・P5を胴と尾に読めるが、胴と脚は不明瞭。キツネの読みも維持する。",
+      "resolution": "猫を共通案として支持、キツネは片方の案として残す。"
+    },
+    {
+      "item": "item-28",
+      "group": "B",
+      "decision": "support",
+      "reason": "尖りと左の四角を一つの対象にまとめにくい。",
+      "resolution": "見立てなしに同意。"
+    },
+    {
+      "item": "item-29",
+      "group": "C",
+      "decision": "support",
+      "reason": "猫を低で支持。P1が前脚、P2が頭から背、P4が立てた尾に見える。ただし耳がなく犬との識別は困難。犬も低で支持し、姿勢は尾を立てた横姿までに留めたい。",
+      "resolution": "猫と犬を低で支持、姿勢は尾を立てた横姿。"
+    },
+    {
+      "item": "item-30",
+      "group": "C",
+      "decision": "reject",
+      "reason": "拳銃は不支持。右のP4は銃身に見えるが、後部P3が大きく、P1の上下両端の尖りと太い握りが拳銃に見えにくい。",
+      "resolution": "見立てなしに同意。"
+    }
+  ]
+}

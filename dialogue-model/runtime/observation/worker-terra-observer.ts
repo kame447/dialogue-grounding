@@ -1,3 +1,4 @@
+import { PART_OBSERVATION_INSTRUCTIONS, hasReviewedOwnParts } from './parts.ts';
 import { responseText } from '../client.mjs';
 import {
   createLunaObserver, ObservationError, observationInitialInstructions,
@@ -41,18 +42,20 @@ function ownProjection(input: ObservationInput) {
     ownImage: own.ownImage,
     ownAnchors: [...own.ownAnchors].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
       .map(({ id, bbox: { x, y, w, h }, centroid }) => ({ id, bbox: { x, y, w, h }, centroid })),
+    ...(own.ownParts ? { ownParts: [...own.ownParts].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0) } : {}),
   };
 }
 
-function initialKey(terraModelId: string, boundJson: string, figureCount: number, generation?: InitialObservationGeneration) {
+function initialKey(terraModelId: string, boundJson: string, figureCount: number, generation?: InitialObservationGeneration, hasParts = false) {
   const fields = [SCHEMA, terraModelId, OBSERVATION_MEMO_VERSION, observationInitialInstructions(figureCount, generation), boundJson];
   if (generation) fields.push(generation);
+  if (hasParts) fields.push(PART_OBSERVATION_INSTRUCTIONS);
   return sha256(JSON.stringify(fields)).then(digest => SCHEMA + ':' + digest);
 }
 
 export function workerTerraInitialKey(pin: ParticipantModelPin, own: ObservationInput, generation?: InitialObservationGeneration) {
   const projected = ownProjection(own);
-  return initialKey(validateParticipantModelPin(pin).terraModelId, JSON.stringify(projected), projected.ownAnchors.length, generation);
+  return initialKey(validateParticipantModelPin(pin).terraModelId, JSON.stringify(projected), projected.ownAnchors.length, generation, !!projected.ownParts);
 }
 
 function checkAbort(options?: ObservationOptions): void {
@@ -80,7 +83,7 @@ async function validateEntry(value: unknown, key: string, modelId: string, bound
   const entry = object(value);
   if (!entry || Reflect.ownKeys(entry).length !== 5 || entry.schemaVersion !== SCHEMA ||
       entry.key !== key || entry.modelId !== modelId || typeof entry.memoSha256 !== 'string') throw new ObservationError('invalid_response');
-  const memo = validateObservationMemo(entry.memo, { ownAnchors: bound.ownAnchors });
+  const memo = validateObservationMemo(entry.memo, { ownAnchors: bound.ownAnchors, ownParts: bound.ownParts });
   const text = JSON.stringify(memo);
   if (memo.figures.some(figure => figure.reobservations.length !== 0) || text.includes(bound.ownImage.base64) ||
       await sha256(text) !== entry.memoSha256) throw new ObservationError('invalid_response');
@@ -93,7 +96,7 @@ export async function validateWorkerTerraCacheEntry(value: unknown, options: {
 }): Promise<WorkerTerraCacheEntry> {
   const { terraModelId } = validateParticipantModelPin(options.modelPin);
   const bound = ownProjection(options.own);
-  const key = await initialKey(terraModelId, JSON.stringify(bound), bound.ownAnchors.length, options.initialObservationGeneration);
+  const key = await initialKey(terraModelId, JSON.stringify(bound), bound.ownAnchors.length, options.initialObservationGeneration, !!bound.ownParts);
   if (key !== options.key) throw new ObservationError('invalid_response');
   const memo = await validateEntry(value, key, terraModelId, bound);
   return { schemaVersion: SCHEMA, key, modelId: terraModelId, memo, memoSha256: (value as WorkerTerraCacheEntry).memoSha256 };
@@ -143,17 +146,21 @@ export function createWorkerTerraObserver({ modelPin, own, visual, cache, timeou
 
   let keyPromise: Promise<string> | undefined;
 
-
   return {
     async observeAll(input, options) {
       checkAbort(options);
       checkOwn(input);
+      // Reviewed parts carry a static prepared memo: no provider request, cache read or wait. It is never combined with a required prepared memo.
+      if (hasReviewedOwnParts(bound.ownParts)) {
+        if (requiredInitialMemo) throw new ObservationError('invalid_response');
+        return observer.observeAll(bound, options);
+      }
       if (!cache) {
         if (requiredInitialMemo) throw new ObservationError('unavailable');
         return observer.observeAll(bound, options);
       }
       try {
-        const key = await (keyPromise ??= initialKey(terraModelId, boundJson, bound.ownAnchors.length, initialObservationGeneration));
+        const key = await (keyPromise ??= initialKey(terraModelId, boundJson, bound.ownAnchors.length, initialObservationGeneration, !!bound.ownParts));
         if (requiredInitialMemo && key !== requiredInitialMemo.key) throw new ObservationError('invalid_response');
         const hit = await cache.read(key, options?.signal);
         checkAbort(options);

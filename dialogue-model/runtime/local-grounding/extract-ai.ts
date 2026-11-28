@@ -3,6 +3,7 @@ import { LOCAL_ASPECTS } from "./contract.ts";
 import type { AiPublicInput, AiStageEvidence, LocalSegmentProposal } from "./contract.ts";
 import { literalSpan } from "../judgment/public-evidence.mjs";
 import { validateObservationMemo, observationContextMessages } from "../observation/observe.ts";
+import { hasPartGeometry, withPartDescriptions, PART_REFERENCE_INSTRUCTIONS, PART_FEATURE_SOURCES } from "../observation/part-consumers.ts";
 import { withShapeTerminology, type ShapeTerminologyVersion } from "../shape-terminology.ts";
 import { readVisualFeatureEvidence, VISUAL_FEATURE_SOURCES_V19 } from "../v2/visual-feature-evidence.ts";
 import type { VisualFeatureEvidence } from "../v2/visual-feature-evidence.ts";
@@ -48,18 +49,19 @@ export function snapshotAiExtraction(input: AiPublicInput): AiPublicInput {
   return { turn: input.turn, aiSeq: input.aiSeq, candidateText: input.candidateText, publicTurns,
     ownSlots: [...input.ownSlots], ownAnchors, observations, issueSummary: input.issueSummary };
 }
-export const memoAiExtractionPrompt = (terminology?: ShapeTerminologyVersion, visualFeatures = false): string => {
-  const original = withShapeTerminology(MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS, terminology);
+export const memoAiExtractionPrompt = (terminology?: ShapeTerminologyVersion, visualFeatures = false, withParts = false): string => {
+  const original = withShapeTerminology(MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS, terminology) +
+    (withParts ? "\n" + PART_REFERENCE_INSTRUCTIONS + (visualFeatures ? "\n" + PART_FEATURE_SOURCES : "") : "");
   return visualFeatures ? original + "\n" + VISUAL_FEATURE_SOURCES_V19 +
     '\nこの場合は配列だけでなく、segments（上記の局所命題の配列）と visualFeatures を持つJSONオブジェクトを返してください。visualFeatures は {sources:[{source:{figureId,path},quote}]} です。公開文の中で自分側の観察に根拠を置く特徴だけを、実際にその特徴を表した箇所の引用と結び付けてください。観察の利用がなければ sources は空配列です。自分側の観察に基づく説明として述べているのに、メモから根拠を特定できない場合は visualFeatures を null にしてください。' : original;
 };
 
 export function buildMemoAiExtractionMessages(input: AiPublicInput, terminology?: ShapeTerminologyVersion, visualFeatures = false) {
   const snapshot = snapshotAiExtraction(input);
-  const state = JSON.stringify(snapshot);
+  const state = JSON.stringify({ ...snapshot, observations: withPartDescriptions(snapshot.observations) });
   if (state.length > 192000) fail("invalid_input");
   // Same transport as every other memo-bearing request: one message up to 20,000 characters, numbered chunks beyond.
-  return [{ role: "system" as const, content: memoAiExtractionPrompt(terminology, visualFeatures) }, ...observationContextMessages(state)];
+  return [{ role: "system" as const, content: memoAiExtractionPrompt(terminology, visualFeatures, hasPartGeometry(snapshot.observations)) }, ...observationContextMessages(state)];
 }
 export type AiExtractionDiagnostics = { rejected: Array<{ segmentId: string; reason: "name_by_literal_path" | "nonpublic_quote" }> };
 export function parseAiExtraction(raw: unknown, input: AiPublicInput, diagnostics: AiExtractionDiagnostics = { rejected: [] },

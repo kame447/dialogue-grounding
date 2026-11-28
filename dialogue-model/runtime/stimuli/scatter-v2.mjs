@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { FIGURE_BANK, isLegacyFigureSelection, resolveFigureSelection } from './figure-bank.ts';
 import { boundarySegments, polygonArea, transformPolygon } from './geometry.mjs';
 import { renderPolygons } from './render.mjs';
+import { createPartGeometry, isPartObservationVersion } from './part-geometry.ts';
 
 // Prototype presentation constants, not adopted experimental conditions.
 export const BOARD_WIDTH = 1200;
@@ -205,6 +206,9 @@ const sceneOf = layout => ({
 
 // Generation-time stimulus metadata, kept off the trial object so its relative_pm90 bytes stay unchanged.
 const stimuli = new WeakMap();
+// Own-side source polygons stay private until a versioned model projection is requested.
+const ownPartSources = new WeakMap();
+const ownPartCatalogs = new WeakMap();
 
 /** Researcher-owned trial. Project it with participantView/modelView before sending it. */
 export function createTrialV2({ seed, rotationMode = 'relative_pm90', figureSelection = /** @type {unknown} */ (undefined) }) {
@@ -236,6 +240,7 @@ export function createTrialV2({ seed, rotationMode = 'relative_pm90', figureSele
     selectionSeed: selection.selectionSeed, selectionMode: selection.mode,
   });
   stimuli.set(trial, record);
+  ownPartSources.set(trial, layouts.ai.map(({ id, polygons }) => ({ id, polygons })));
   return trial;
 }
 
@@ -254,9 +259,27 @@ export function participantView(trial) {
   return { width, height, shapes: shapes.map(p => ({ id: p.id, path: p.path, centroid: { x: p.centroid.x, y: p.centroid.y } })) };
 }
 
-/** Model-only image and private local anchors. Never publish the anchors as labels. */
-export function modelView(trial) {
+/** Model-only image and private local anchors. Never publish the anchors as labels.
+ * @param {object} trial
+ * @param {{ partObservationVersion?: import('./part-geometry.ts').PartObservationVersion }} [options]
+ */
+export function modelView(trial, { partObservationVersion = undefined } = {}) {
+  if (partObservationVersion !== undefined && !isPartObservationVersion(partObservationVersion)) throw new TypeError('unknown part observation version');
+  let parts;
+  if (partObservationVersion !== undefined) {
+    const sources = ownPartSources.get(trial);
+    if (!sources) throw new TypeError('part observation requires the original generated trial');
+    const cached = ownPartCatalogs.get(trial);
+    parts = cached?.get(partObservationVersion);
+    if (!parts) {
+      parts = sources.map(({ id, polygons }) => ({ id, parts: createPartGeometry(polygons, partObservationVersion) }));
+      const versions = cached ?? new Map();
+      versions.set(partObservationVersion, parts);
+      ownPartCatalogs.set(trial, versions);
+    }
+  }
   return {
+    ...(parts ? { parts: structuredClone(parts) } : {}),
     png: Buffer.from(trial.ai.png), mimeType: trial.ai.mimeType,
     anchors: trial.ai.anchors.map(p => ({
       id: p.id, bbox: { x: p.bbox.x, y: p.bbox.y, w: p.bbox.w, h: p.bbox.h },
