@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ja">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>図形・回転別観察メモ確認</title><link rel="stylesheet" href="/style.css"></head>
+<body><main>
+<header><div><h1>回転別の観察メモ確認</h1><p id="progress">読み込み中</p></div><div class="tools"><label class="check"><input id="pending-only" type="checkbox">未確認のみ</label><button id="export">JSONを書き出す</button><button id="import-toggle">JSONを読み込む</button></div></header>
+<div id="save-status" role="status">読み込み中</div>
+<div id="import-panel" hidden><input type="file" id="import-file" accept=".json,application/json"><button id="import-apply">取り込む</button><p id="import-status" role="status"></p></div>
+<nav id="figure-nav" aria-label="図形一覧"></nav>
+<section id="editor" hidden>
+<div class="section-title"><h2 id="figure-title"></h2><span id="figure-status"></span></div>
+<div id="orientations" aria-label="回転方向"></div>
+<div class="workspace">
+<div class="visual-column">
+ <figure><figcaption>元の図形</figcaption><div id="silhouette" class="drawing"></div></figure>
+ <figure><figcaption>確定したまとまり</figcaption><div id="grouped" class="drawing"></div></figure>
+ <div class="relations"><h3>位置関係</h3><div id="relations"></div></div>
+</div>
+<div class="memo-column">
+ <section class="whole"><h3>全体の見立て（仮説）</h3><textarea id="whole" rows="2"></textarea><details><summary>見立ての根拠</summary><textarea id="whole-basis" rows="4"></textarea></details></section>
+ <div id="parts"></div>
+ <label for="note">修正メモ（任意）</label><textarea id="note" rows="2"></textarea>
+</div></div>
+<div class="actions"><button id="prev">前へ</button><button id="next">次へ</button><button id="needs">要修正として次へ</button><button id="confirm" class="primary">確認して次へ</button></div>
+</section>
+<div id="complete" hidden><h2>全方向の確認が完了しました</h2><p>JSONを書き出せます。確認済みの図形も一覧から開けます。</p></div>
+<div class="bottom"><button id="retry" hidden>保存を再試行</button><button id="backup" hidden>未保存データをJSONで退避</button><button id="reload" hidden>退避して保存版を読み込む</button></div>
+</main><script src="/client.js"></script></body></html>

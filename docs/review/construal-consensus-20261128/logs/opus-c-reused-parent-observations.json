@@ -1,0 +1,289 @@
+[
+  {
+    "item": "item-01",
+    "silhouetteImpression": "中央に家形の大きな五角形、その左下から左上へ伸びる注ぎ口のような帯、右に取っ手のような三角があり、急須に見える。",
+    "candidates": [
+      {
+        "rank": 1,
+        "noun": "ティーポット",
+        "posture": "置かれている",
+        "direction": "注ぎ口が左上、取っ手が右",
+        "confidence": "中",
+        "parts": [
+          {
+            "id": "P1",
+            "role": "取っ手",
+            "evidence": "胴の右側に付く三角形"
+          },
+          {
+            "id": "P2",
+            "role": "胴とふた",
+            "evidence": "屋根形の上部を持つ大きな五角形"
+          },
+          {
+            "id": "P3",
+            "role": "注ぎ口の付け根",
+            "evidence": "胴の左下の正方形"
+          },
+          {
+            "id": "P4",
+            "role": "注ぎ口",
+            "evidence": "左上へ斜めに伸びる平行四辺形"
+          }
+        ],
+        "evidence": "胴の下寄りから斜め上へ伸びる注ぎ口と反対側の取っ手が、ポットの横姿に合う。",
+        "weaknesses": "取っ手が三角形で輪になっていない。"
+      }
+    ],
+    "noConstrual": false,
+    "noConstrualReason": "",
+    "uncertainty": "屋根の家を載せた舟（屋形船）とも読める。"
+  },
+  {
+    "item": "item-03",
+    "silhouetteImpression": "上部に頭とくちばしのような左向きの尖り、右へ張り出す翼、下に二本の尖った脚があり、左を向いて立つ鳥に見える。",
+    "candidates": [
+      {
+        "rank": 1,
+        "noun": "カラス",
+        "posture": "立って片翼を右へ広げる",
+        "direction": "左向き、頭が左上",
+        "confidence": "低",
+        "parts": [
+          {
+            "id": "P1",
+            "role": "胴と二本の脚",
+            "evidence": "縦長で下端に切れ込みがあり二本に分かれる"
+          },
+          {
+            "id": "P2",
+            "role": "右へ広げた翼",
+            "evidence": "頭の右下から右へ張り出す三角形"
+          },
+          {
+            "id": "P3",
+            "role": "後頭部",
+            "evidence": "頭の右上の小三角形"
+          },
+          {
+            "id": "P4",
+            "role": "頭",
+            "evidence": "左上の正方形"
+          },
+          {
+            "id": "P5",
+            "role": "左へ尖るくちばし",
+            "evidence": "頭の下で左を向く小三角形"
+          }
+        ],
+        "evidence": "左向きの尖り・翼・脚の位置関係が立った鳥の横姿に対応する。",
+        "weaknesses": "種を特定する手がかり（首の長さ、尾）が乏しい。"
+      }
+    ],
+    "noConstrual": false,
+    "noConstrualReason": "",
+    "uncertainty": "右腕を伸ばした人とも読めるが顔の尖りが説明しにくい。"
+  },
+  {
+    "item": "item-07",
+    "silhouetteImpression": "左下から右上へ太い筒のような帯が持ち上がり、その右下に四角い台と三角の支え、左下に斜めの脚がある。台に載せた筒状の物に見える。",
+    "candidates": [
+      {
+        "rank": 1,
+        "noun": "大砲",
+        "posture": "砲身を斜め上へ向けて据えられている",
+        "direction": "砲口が右上",
+        "confidence": "低",
+        "parts": [
+          {
+            "id": "P1",
+            "role": "砲身",
+            "evidence": "右上へ伸びる太く長い平行四辺形"
+          },
+          {
+            "id": "P2",
+            "role": "砲架（砲身の支え）",
+            "evidence": "砲身の右下を支える三角形"
+          },
+          {
+            "id": "P3",
+            "role": "車輪・台座",
+            "evidence": "右下の正方形"
+          },
+          {
+            "id": "P4",
+            "role": "地面へ伸びる脚（後部）",
+            "evidence": "左下へ伸びる平行四辺形"
+          }
+        ],
+        "evidence": "斜めに持ち上がった長い筒と下の支えの組み合わせが据え置きの砲に合う。",
+        "weaknesses": "砲身が太すぎ、車輪の丸みが無い。"
+      },
+      {
+        "rank": 2,
+        "noun": "望遠鏡",
+        "posture": "三脚に載せて斜め上へ向ける",
+        "direction": "筒先が右上",
+        "confidence": "低",
+        "parts": [
+          {
+            "id": "P1",
+            "role": "鏡筒",
+            "evidence": "右上へ伸びる太い帯"
+          },
+          {
+            "id": "P2",
+            "role": "架台",
+            "evidence": "筒の下の三角形"
+          },
+          {
+            "id": "P3",
+            "role": "脚の一本",
+            "evidence": "右下の正方形"
+          },
+          {
+            "id": "P4",
+            "role": "脚の一本",
+            "evidence": "左下へ伸びる平行四辺形"
+          }
+        ],
+        "evidence": "筒と、下で左右に開く支えの関係が三脚の望遠鏡に合う。",
+        "weaknesses": "脚が短く太い。"
+      }
+    ],
+    "noConstrual": false,
+    "noConstrualReason": "",
+    "uncertainty": "生き物（首を上げた動物）とも読めるが頭の区別が無い。"
+  },
+  {
+    "item": "item-08",
+    "silhouetteImpression": "上が屋根のように尖った縦長の柱の右側中ほどから、右へ尖った台形が突き出している。まとまった具体物が浮かびにくい。",
+    "candidates": [],
+    "noConstrual": true,
+    "noConstrualReason": "縦長の五角形と右への突起だけでは、頭・体などの対応が決まらない。巣箱と止まり木、牛乳パックなども部分的にしか合わない。",
+    "uncertainty": "右へ尖る台形をくちばしと見れば右向きの鳥の頭にも見えるが、体との区別が無い。"
+  },
+  {
+    "item": "item-09",
+    "silhouetteImpression": "上辺が広く下へすぼまる大きな逆台形の下に細い管と三角が付き、漏斗のように見える。",
+    "candidates": [
+      {
+        "rank": 1,
+        "noun": "じょうご（漏斗）",
+        "posture": "口を上にして立つ",
+        "direction": "口が上、管が下",
+        "confidence": "中",
+        "parts": [
+          {
+            "id": "P1",
+            "role": "円錐形の口",
+            "evidence": "上辺が広く下へすぼまる逆台形"
+          },
+          {
+            "id": "P2",
+            "role": "取っ手",
+            "evidence": "口の右下に付く三角形"
+          },
+          {
+            "id": "P3",
+            "role": "管",
+            "evidence": "すぼまった下端から下へ出る正方形"
+          }
+        ],
+        "evidence": "広い口が一点へ絞られて細い管に続く形が漏斗に合う。",
+        "weaknesses": "管が短く太い。"
+      }
+    ],
+    "noConstrual": false,
+    "noConstrualReason": "",
+    "uncertainty": "脚の付いたテーブルや杯にも見えるが脚の数が合わない。"
+  },
+  {
+    "item": "item-15",
+    "silhouetteImpression": "縦長の上半身の右側に三角の切れ込みがあり、下で右下へ尾のように伸びる。頭を前へ出し尾を下へ伸ばすタツノオトシゴのようにも見える。",
+    "candidates": [
+      {
+        "rank": 1,
+        "noun": "タツノオトシゴ",
+        "posture": "立ち泳ぎ",
+        "direction": "右向き、尾が右下",
+        "confidence": "低",
+        "parts": [
+          {
+            "id": "P1",
+            "role": "頭と口先",
+            "evidence": "最上部の逆三角形で右へ張り出す"
+          },
+          {
+            "id": "P2",
+            "role": "胸・腹のふくらみ",
+            "evidence": "右へ尖る大きな三角形"
+          },
+          {
+            "id": "P3",
+            "role": "腹の下端",
+            "evidence": "胸の下の小三角形"
+          },
+          {
+            "id": "P4",
+            "role": "尾",
+            "evidence": "右下へ伸びる三角形"
+          },
+          {
+            "id": "P5",
+            "role": "尾の先",
+            "evidence": "最下端の小三角形"
+          }
+        ],
+        "evidence": "上で前へ出る頭、ふくらむ腹、下へ伸びる尾の縦の並びが合う。",
+        "weaknesses": "尾が巻いておらず、頭と腹の区切りが弱い。"
+      }
+    ],
+    "noConstrual": false,
+    "noConstrualReason": "",
+    "uncertainty": "見立てなしに近い。アルファベットのKのような図形にも見える。"
+  },
+  {
+    "item": "item-20",
+    "silhouetteImpression": "角の落ちた大きな丸っこい塊の左に小さな三角、下に小さな三角があり、左を向いたひよこに見えなくもない。",
+    "candidates": [
+      {
+        "rank": 1,
+        "noun": "ひよこ",
+        "posture": "立っている",
+        "direction": "左向き",
+        "confidence": "低",
+        "parts": [
+          {
+            "id": "P1",
+            "role": "頭と胴",
+            "evidence": "上の角が落ちて丸みのある大きな多角形"
+          },
+          {
+            "id": "P2",
+            "role": "くちばし",
+            "evidence": "左側で左へ尖る小三角形"
+          },
+          {
+            "id": "P3",
+            "role": "足",
+            "evidence": "下端で下へ尖る小三角形"
+          }
+        ],
+        "evidence": "丸い体に小さな尖りが前と下に付く。",
+        "weaknesses": "くちばしの位置が低く、体の右下に段がある。"
+      }
+    ],
+    "noConstrual": false,
+    "noConstrualReason": "",
+    "uncertainty": "見立てなしに近い。横顔の頭（鼻が左）とも読める。"
+  },
+  {
+    "item": "item-23",
+    "silhouetteImpression": "右へ尖る大きな三角の左に縦長の帯と小さな四角が付き、右向きの魚や矢じりのように見えるが弱い。",
+    "candidates": [],
+    "noConstrual": true,
+    "noConstrualReason": "右へ尖る三角を頭とすると尾が四角く、魚としても矢としても部分の形が合わない。",
+    "uncertainty": "右向きの魚（P1が頭、P3が尾）が最も近いが、種まで特定できない。"
+  }
+]

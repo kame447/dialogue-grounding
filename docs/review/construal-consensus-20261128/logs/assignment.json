@@ -1,0 +1,47 @@
+{
+  "source": "CherryCurie opus-round1.jsonl immutable snapshot",
+  "parentCompleted": 36,
+  "createdAt": "2026-11-28T14:26:55.072523",
+  "groups": [
+    {
+      "group": "a",
+      "agent": "CalmFermi",
+      "terraPeer": "FrostyGauss",
+      "directory": "/Users/Shogo/Research/dialogue-grounding/private-runs/2026-11-28-construal-consensus-CherryCurie/paired-review-v1/opus-a",
+      "total": 30,
+      "reuseCount": 10,
+      "pendingCount": 20,
+      "terraRound1": "/Users/Shogo/Research/dialogue-grounding/private-runs/2026-11-28-construal-consensus-CherryCurie/images-v1/terra-a/round1-observations.json"
+    },
+    {
+      "group": "b",
+      "agent": "GoldNewton",
+      "terraPeer": "RainyPascal",
+      "directory": "/Users/Shogo/Research/dialogue-grounding/private-runs/2026-11-28-construal-consensus-CherryCurie/paired-review-v1/opus-b",
+      "total": 30,
+      "reuseCount": 10,
+      "pendingCount": 20,
+      "terraRound1": "/Users/Shogo/Research/dialogue-grounding/private-runs/2026-11-28-construal-consensus-CherryCurie/images-v1/terra-b/round1-observations.json"
+    },
+    {
+      "group": "c",
+      "agent": "CreamMaxwell",
+      "terraPeer": "SturdyLangmuir",
+      "directory": "/Users/Shogo/Research/dialogue-grounding/private-runs/2026-11-28-construal-consensus-CherryCurie/paired-review-v1/opus-c",
+      "total": 30,
+      "reuseCount": 8,
+      "pendingCount": 22,
+      "terraRound1": "/Users/Shogo/Research/dialogue-grounding/private-runs/2026-11-28-construal-consensus-CherryCurie/images-v1/terra-c/round1-observations.json"
+    },
+    {
+      "group": "d",
+      "agent": "DapperEinstein",
+      "terraPeer": "CherryLavoisier",
+      "directory": "/Users/Shogo/Research/dialogue-grounding/private-runs/2026-11-28-construal-consensus-CherryCurie/paired-review-v1/opus-d",
+      "total": 30,
+      "reuseCount": 8,
+      "pendingCount": 22,
+      "terraRound1": "/Users/Shogo/Research/dialogue-grounding/private-runs/2026-11-28-construal-consensus-CherryCurie/images-v1/terra-d/round1-observations.json"
+    }
+  ]
+}

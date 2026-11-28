@@ -1,5 +1,6 @@
 import { isSupportedFigureCount } from '../stimuli/figure-bank.ts';
 import { ROTATION_MODES } from '../stimuli/scatter-v2.mjs';
+import { modelPartGeometry, hasPartGeometry, PART_INDEX_INSTRUCTIONS } from '../observation/part-consumers.ts';
 import { ISSUE_HANDLING_MOVE_ON_CRITERIA, ISSUE_HANDLING_MOVE_ON_INSTRUCTIONS, MOVE_ON_SOURCE_QUESTION } from "./human-led-move-on.ts";
 import { COMMITMENT_STATES, ISSUE_HANDLING_VERSION, JEV_ACTIONS_V21, NON_BYPASS_ALTERNATIVES, SWITCH_FUNCTIONS, issueAlternativeTarget, issueHandlingMatchesSource, projectExtraHandling } from "./issue-handling.ts";
 import type { CarryDestination, ExecutedExtra, ExtraHandling, ExtraSelection, JevIssueRef } from "./issue-handling.ts";
@@ -204,10 +205,12 @@ export const TWO_STAGE_V3_TARGET_INSTRUCTIONS = "stateのselected.actionが第1�
 export const TWO_STAGE_V2_CANDIDATE_SET_INSTRUCTIONS = "第1段で対象をmultiple（一つに絞れない）としました。この行動で対象候補として扱う自分の図形の集合を、2図形以上の組合せから一つ選んでください。公開発話と観察メモに根拠がある図形を含め、根拠のない図形は含めないでください。";
 export const TWO_STAGE_V2_CANDIDATE_SET_CRITERION = (figureIds: readonly string[]) => `自分の候補図形の集合 ${JSON.stringify(figureIds)}。観察メモを参照。`;
 /** holistic_v5: the notation legend and the task's rotation condition, for every question (the referent estimate included). */
-const v5Suffix = (input: JevDecisionInput) => input.judgmentLedger === undefined ? "" : "\n" + judgmentV5Legend(input.ownSlots.length) + (input.notationV11 === true ? "\n" + JUDGMENT_V11_ANSWER_LEGEND : "") + rotationPremise(input.rotationMode) +
+const v5LegacySuffix = (input: JevDecisionInput) => input.judgmentLedger === undefined ? "" : "\n" + judgmentV5Legend(input.ownSlots.length) + (input.notationV11 === true ? "\n" + JUDGMENT_V11_ANSWER_LEGEND : "") + rotationPremise(input.rotationMode) +
   (input.issueHandlingVersion === ISSUE_HANDLING_VERSION ? "\n" + ISSUE_HANDLING_LEGEND +
     (input.previousAction && input.judgmentLedger.some(a => a.turn === input.previousAction!.decisionTurn && a.extras?.length)
       ? "\n" + PREVIOUS_EXTRAS_LEGEND : "") : "");
+const v5Suffix = (input: JevDecisionInput) => v5LegacySuffix(input) +
+  (hasPartGeometry(input.observations) ? "\n" + PART_INDEX_INSTRUCTIONS : "");
 const decisionInstructions = (input: JevDecisionInput, prospect = false, layout: JevQuestionLayout = "two_stage_v1", participantPrompts = false) =>
   (layout === "two_stage_v3" ? (participantPrompts ? COMMON_V3 : RESEARCH_COMMON_V3) : layout === "two_stage_v2" ? COMMON_V2 : COMMON) + (input.humanReferent === undefined ? "" : "\n" + HUMAN_REFERENT_GUIDANCE) + (!prospect || input.repairProspect === undefined ? "" : "\n" + REPAIR_PROSPECT_GUIDANCE) + factsGuidance(input) + v5Suffix(input) +
   (input.jevNaming ? "\n" + JEV_NAMING_GUIDANCE : "") +
@@ -651,8 +654,15 @@ function prepare(input: JevDecisionInput, layout: JevQuestionLayout = "two_stage
       return { figureId, issue: { aspect: r.issue.aspect, question: r.issue.question, partnerConstrual: r.issue.partnerConstrual },
         supports: [...r.supports], contradicts: [...r.contradicts], unknown: [...r.unknown] };
     });
+    let parts;
+    if (Object.hasOwn(f, "parts")) {
+      try { parts = modelPartGeometry((f as typeof f & { parts?: unknown }).parts); }
+      catch { return fail("invalid_input"); }
+      if (!f.region || parts.origin[0] !== f.region.x || parts.origin[1] !== f.region.y ||
+          parts.size[0] !== f.region.w || parts.size[1] !== f.region.h) fail("invalid_input");
+    }
     return { figureId, holistic, analytic: { shapes: [...f.analytic.shapes], composition: f.analytic.composition, relations: [...f.analytic.relations] },
-      unknowns: [...f.unknowns], reobservations };
+      unknowns: [...f.unknowns], reobservations, ...(parts ? { parts } : {}) };
   });
   const claimIds = new Set<string>();
   const priorClaims = input.priorClaims.filter(c => c?.turn <= input.turn && c.sourceTurn <= input.turn &&

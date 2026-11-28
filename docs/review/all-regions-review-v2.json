@@ -1,0 +1,8710 @@
+{
+  "schemaVersion": "tangram_all_regions_review_v2",
+  "round": 2,
+  "reviewStatus": "未確認",
+  "coordinateFrame": "figure_local_pixels",
+  "provenance": {
+    "previousUiResultReceived": false,
+    "previousUiResultsNote": "前回の確認画面内での修正・確認操作の結果そのものは未受領。保存されている初期提案と、チャットで明示された6図形の訂正を基にした2回目の確認用データ。",
+    "sourceFiles": [
+      "all-part-catalogs.json",
+      "primary-groups-review-20261128.json",
+      "six-region-corrections.json"
+    ],
+    "knownWholePieceGroupLimit": "人間が捉える境界は元ピースの内部を通る場合がある。6図形では任意領域として表す。",
+    "remainderPolicy": "残余部分のまとめ方はassistant proposalであり、ユーザー承認済みにしない。全30図形を未確認として開始する。"
+  },
+  "modifiedFigureIds": [
+    "F6",
+    "F11",
+    "F16",
+    "F19",
+    "F20",
+    "F30"
+  ],
+  "items": [
+    {
+      "figureId": "F1",
+      "round": 2,
+      "reviewStatus": "未確認",
+      "coordinateFrame": "figure_local_pixels",
+      "origin": [
+        310,
+        310
+      ],
+      "size": [
+        270,
+        450
+      ],
+      "pieces": [
+        {
+          "id": 1,
+          "polygon": [
+            [
+              90,
+              90
+            ],
+            [
+              270,
+              90
+            ],
+            [
+              90,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 2,
+          "polygon": [
+            [
+              90,
+              270
+            ],
+            [
+              270,
+              90
+            ],
+            [
+              270,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 3,
+          "polygon": [
+            [
+              0,
+              180
+            ],
+            [
+              90,
+              90
+            ],
+            [
+              90,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 4,
+          "polygon": [
+            [
+              90,
+              0
+            ],
+            [
+              180,
+              90
+            ],
+            [
+              90,
+              90
+            ]
+          ]
+        },
+        {
+          "id": 5,
+          "polygon": [
+            [
+              0,
+              90
+            ],
+            [
+              90,
+              0
+            ],
+            [
+              90,
+              90
+            ]
+          ]
+        },
+        {
+          "id": 6,
+          "polygon": [
+            [
+              180,
+              270
+            ],
+            [
+              270,
+              270
+            ],
+            [
+              270,
+              360
+            ],
+            [
+              180,
+              360
+            ]
+          ]
+        },
+        {
+          "id": 7,
+          "polygon": [
+            [
+              90,
+              450
+            ],
+            [
+              180,
+              360
+            ],
+            [
+              270,
+              360
+            ],
+            [
+              180,
+              450
+            ]
+          ]
+        }
+      ],
+      "regions": [
+        {
+          "id": "A",
+          "label": "4＋5のまとまり",
+          "polygon": [
+            [
+              0,
+              90
+            ],
+            [
+              90,
+              0
+            ],
+            [
+              180,
+              90
+            ]
+          ],
+          "wholePieces": [
+            4,
+            5
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "B",
+          "label": "1＋2＋3のまとまり",
+          "polygon": [
+            [
+              0,
+              180
+            ],
+            [
+              90,
+              90
+            ],
+            [
+              270,
+              90
+            ],
+            [
+              270,
+              270
+            ],
+            [
+              90,
+              270
+            ]
+          ],
+          "wholePieces": [
+            1,
+            2,
+            3
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "C",
+          "label": "6＋7のまとまり",
+          "polygon": [
+            [
+              90,
+              450
+            ],
+            [
+              180,
+              360
+            ],
+            [
+              180,
+              270
+            ],
+            [
+              270,
+              270
+            ],
+            [
+              270,
+              360
+            ],
+            [
+              180,
+              450
+            ]
+          ],
+          "wholePieces": [
+            6,
+            7
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        }
+      ],
+      "note": "前の確認画面に最初に表示した案です。画面内での修正結果は未受領のため、全体を再確認してください。 2026-11-28のユーザー指定",
+      "provenance": {
+        "kind": "previous_initial_groups",
+        "previousUiResultReceived": false,
+        "sourceFile": "primary-groups-review-20261128.json",
+        "sourceGroups": [
+          [
+            4,
+            5
+          ],
+          [
+            1,
+            2,
+            3
+          ],
+          [
+            6,
+            7
+          ]
+        ]
+      }
+    },
+    {
+      "figureId": "F2",
+      "round": 2,
+      "reviewStatus": "未確認",
+      "coordinateFrame": "figure_local_pixels",
+      "origin": [
+        310,
+        220
+      ],
+      "size": [
+        450,
+        360
+      ],
+      "pieces": [
+        {
+          "id": 1,
+          "polygon": [
+            [
+              90,
+              180
+            ],
+            [
+              270,
+              180
+            ],
+            [
+              90,
+              360
+            ]
+          ]
+        },
+        {
+          "id": 2,
+          "polygon": [
+            [
+              90,
+              180
+            ],
+            [
+              270,
+              0
+            ],
+            [
+              270,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 3,
+          "polygon": [
+            [
+              270,
+              0
+            ],
+            [
+              360,
+              90
+            ],
+            [
+              270,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 4,
+          "polygon": [
+            [
+              90,
+              90
+            ],
+            [
+              180,
+              90
+            ],
+            [
+              90,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 5,
+          "polygon": [
+            [
+              270,
+              180
+            ],
+            [
+              360,
+              90
+            ],
+            [
+              360,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 6,
+          "polygon": [
+            [
+              0,
+              270
+            ],
+            [
+              90,
+              270
+            ],
+            [
+              90,
+              360
+            ],
+            [
+              0,
+              360
+            ]
+          ]
+        },
+        {
+          "id": 7,
+          "polygon": [
+            [
+              360,
+              90
+            ],
+            [
+              450,
+              0
+            ],
+            [
+              450,
+              90
+            ],
+            [
+              360,
+              180
+            ]
+          ]
+        }
+      ],
+      "regions": [
+        {
+          "id": "A",
+          "label": "1＋6のまとまり",
+          "polygon": [
+            [
+              0,
+              270
+            ],
+            [
+              90,
+              270
+            ],
+            [
+              90,
+              180
+            ],
+            [
+              270,
+              180
+            ],
+            [
+              90,
+              360
+            ],
+            [
+              0,
+              360
+            ]
+          ],
+          "wholePieces": [
+            1,
+            6
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "B",
+          "label": "2＋3＋4＋5のまとまり",
+          "polygon": [
+            [
+              90,
+              90
+            ],
+            [
+              180,
+              90
+            ],
+            [
+              270,
+              0
+            ],
+            [
+              360,
+              90
+            ],
+            [
+              360,
+              180
+            ],
+            [
+              90,
+              180
+            ]
+          ],
+          "wholePieces": [
+            2,
+            3,
+            4,
+            5
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "C",
+          "label": "7のまとまり",
+          "polygon": [
+            [
+              360,
+              90
+            ],
+            [
+              450,
+              0
+            ],
+            [
+              450,
+              90
+            ],
+            [
+              360,
+              180
+            ]
+          ],
+          "wholePieces": [
+            7
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        }
+      ],
+      "note": "前の確認画面に最初に表示した案です。画面内での修正結果は未受領のため、全体を再確認してください。 左下の折れた張出し、上のまとまり、右の細い跳ね上がり。中央の切れ目は自明ではない。",
+      "provenance": {
+        "kind": "previous_initial_groups",
+        "previousUiResultReceived": false,
+        "sourceFile": "primary-groups-review-20261128.json",
+        "sourceGroups": [
+          [
+            1,
+            6
+          ],
+          [
+            2,
+            3,
+            4,
+            5
+          ],
+          [
+            7
+          ]
+        ]
+      }
+    },
+    {
+      "figureId": "F3",
+      "round": 2,
+      "reviewStatus": "未確認",
+      "coordinateFrame": "figure_local_pixels",
+      "origin": [
+        310,
+        220
+      ],
+      "size": [
+        360,
+        450
+      ],
+      "pieces": [
+        {
+          "id": 1,
+          "polygon": [
+            [
+              90,
+              180
+            ],
+            [
+              270,
+              180
+            ],
+            [
+              90,
+              360
+            ]
+          ]
+        },
+        {
+          "id": 2,
+          "polygon": [
+            [
+              90,
+              180
+            ],
+            [
+              270,
+              0
+            ],
+            [
+              270,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 3,
+          "polygon": [
+            [
+              270,
+              0
+            ],
+            [
+              360,
+              90
+            ],
+            [
+              270,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 4,
+          "polygon": [
+            [
+              90,
+              90
+            ],
+            [
+              180,
+              90
+            ],
+            [
+              90,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 5,
+          "polygon": [
+            [
+              90,
+              360
+            ],
+            [
+              180,
+              270
+            ],
+            [
+              180,
+              360
+            ]
+          ]
+        },
+        {
+          "id": 6,
+          "polygon": [
+            [
+              0,
+              90
+            ],
+            [
+              90,
+              90
+            ],
+            [
+              90,
+              180
+            ],
+            [
+              0,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 7,
+          "polygon": [
+            [
+              180,
+              270
+            ],
+            [
+              270,
+              360
+            ],
+            [
+              270,
+              450
+            ],
+            [
+              180,
+              360
+            ]
+          ]
+        }
+      ],
+      "regions": [
+        {
+          "id": "A",
+          "label": "4＋6のまとまり",
+          "polygon": [
+            [
+              0,
+              90
+            ],
+            [
+              180,
+              90
+            ],
+            [
+              90,
+              180
+            ],
+            [
+              0,
+              180
+            ]
+          ],
+          "wholePieces": [
+            4,
+            6
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "B",
+          "label": "1＋2＋3のまとまり",
+          "polygon": [
+            [
+              90,
+              180
+            ],
+            [
+              270,
+              0
+            ],
+            [
+              360,
+              90
+            ],
+            [
+              90,
+              360
+            ]
+          ],
+          "wholePieces": [
+            1,
+            2,
+            3
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "C",
+          "label": "5＋7のまとまり",
+          "polygon": [
+            [
+              90,
+              360
+            ],
+            [
+              180,
+              270
+            ],
+            [
+              270,
+              360
+            ],
+            [
+              270,
+              450
+            ],
+            [
+              180,
+              360
+            ]
+          ],
+          "wholePieces": [
+            5,
+            7
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        }
+      ],
+      "note": "前の確認画面に最初に表示した案です。画面内での修正結果は未受領のため、全体を再確認してください。 左の横長な突出、斜めの主塊、右下へ曲がる突出。",
+      "provenance": {
+        "kind": "previous_initial_groups",
+        "previousUiResultReceived": false,
+        "sourceFile": "primary-groups-review-20261128.json",
+        "sourceGroups": [
+          [
+            4,
+            6
+          ],
+          [
+            1,
+            2,
+            3
+          ],
+          [
+            5,
+            7
+          ]
+        ]
+      }
+    },
+    {
+      "figureId": "F4",
+      "round": 2,
+      "reviewStatus": "未確認",
+      "coordinateFrame": "figure_local_pixels",
+      "origin": [
+        310,
+        220
+      ],
+      "size": [
+        360,
+        360
+      ],
+      "pieces": [
+        {
+          "id": 1,
+          "polygon": [
+            [
+              90,
+              180
+            ],
+            [
+              270,
+              180
+            ],
+            [
+              90,
+              360
+            ]
+          ]
+        },
+        {
+          "id": 2,
+          "polygon": [
+            [
+              90,
+              180
+            ],
+            [
+              270,
+              0
+            ],
+            [
+              270,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 3,
+          "polygon": [
+            [
+              0,
+              90
+            ],
+            [
+              180,
+              90
+            ],
+            [
+              90,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 4,
+          "polygon": [
+            [
+              0,
+              360
+            ],
+            [
+              90,
+              270
+            ],
+            [
+              90,
+              360
+            ]
+          ]
+        },
+        {
+          "id": 5,
+          "polygon": [
+            [
+              0,
+              90
+            ],
+            [
+              90,
+              0
+            ],
+            [
+              90,
+              90
+            ]
+          ]
+        },
+        {
+          "id": 6,
+          "polygon": [
+            [
+              90,
+              0
+            ],
+            [
+              180,
+              0
+            ],
+            [
+              180,
+              90
+            ],
+            [
+              90,
+              90
+            ]
+          ]
+        },
+        {
+          "id": 7,
+          "polygon": [
+            [
+              270,
+              0
+            ],
+            [
+              360,
+              90
+            ],
+            [
+              360,
+              180
+            ],
+            [
+              270,
+              90
+            ]
+          ]
+        }
+      ],
+      "regions": [
+        {
+          "id": "A",
+          "label": "3＋5＋6のまとまり",
+          "polygon": [
+            [
+              0,
+              90
+            ],
+            [
+              90,
+              0
+            ],
+            [
+              180,
+              0
+            ],
+            [
+              180,
+              90
+            ],
+            [
+              90,
+              180
+            ]
+          ],
+          "wholePieces": [
+            3,
+            5,
+            6
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "B",
+          "label": "1＋2＋4のまとまり",
+          "polygon": [
+            [
+              0,
+              360
+            ],
+            [
+              90,
+              270
+            ],
+            [
+              90,
+              180
+            ],
+            [
+              270,
+              0
+            ],
+            [
+              270,
+              180
+            ],
+            [
+              90,
+              360
+            ]
+          ],
+          "wholePieces": [
+            1,
+            2,
+            4
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "C",
+          "label": "7のまとまり",
+          "polygon": [
+            [
+              270,
+              0
+            ],
+            [
+              360,
+              90
+            ],
+            [
+              360,
+              180
+            ],
+            [
+              270,
+              90
+            ]
+          ],
+          "wholePieces": [
+            7
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        }
+      ],
+      "note": "前の確認画面に最初に表示した案です。画面内での修正結果は未受領のため、全体を再確認してください。 左上の五角形、斜めに伸びる胴、右の細い突出。",
+      "provenance": {
+        "kind": "previous_initial_groups",
+        "previousUiResultReceived": false,
+        "sourceFile": "primary-groups-review-20261128.json",
+        "sourceGroups": [
+          [
+            3,
+            5,
+            6
+          ],
+          [
+            1,
+            2,
+            4
+          ],
+          [
+            7
+          ]
+        ]
+      }
+    },
+    {
+      "figureId": "F5",
+      "round": 2,
+      "reviewStatus": "未確認",
+      "coordinateFrame": "figure_local_pixels",
+      "origin": [
+        310,
+        310
+      ],
+      "size": [
+        360,
+        360
+      ],
+      "pieces": [
+        {
+          "id": 1,
+          "polygon": [
+            [
+              90,
+              90
+            ],
+            [
+              270,
+              90
+            ],
+            [
+              90,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 2,
+          "polygon": [
+            [
+              90,
+              270
+            ],
+            [
+              270,
+              90
+            ],
+            [
+              270,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 3,
+          "polygon": [
+            [
+              0,
+              180
+            ],
+            [
+              90,
+              90
+            ],
+            [
+              90,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 4,
+          "polygon": [
+            [
+              180,
+              270
+            ],
+            [
+              270,
+              270
+            ],
+            [
+              270,
+              360
+            ]
+          ]
+        },
+        {
+          "id": 5,
+          "polygon": [
+            [
+              270,
+              180
+            ],
+            [
+              360,
+              180
+            ],
+            [
+              270,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 6,
+          "polygon": [
+            [
+              90,
+              0
+            ],
+            [
+              180,
+              0
+            ],
+            [
+              180,
+              90
+            ],
+            [
+              90,
+              90
+            ]
+          ]
+        },
+        {
+          "id": 7,
+          "polygon": [
+            [
+              0,
+              90
+            ],
+            [
+              90,
+              0
+            ],
+            [
+              90,
+              90
+            ],
+            [
+              0,
+              180
+            ]
+          ]
+        }
+      ],
+      "regions": [
+        {
+          "id": "A",
+          "label": "6＋7のまとまり",
+          "polygon": [
+            [
+              0,
+              90
+            ],
+            [
+              90,
+              0
+            ],
+            [
+              180,
+              0
+            ],
+            [
+              180,
+              90
+            ],
+            [
+              90,
+              90
+            ],
+            [
+              0,
+              180
+            ]
+          ],
+          "wholePieces": [
+            6,
+            7
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "B",
+          "label": "1＋2＋3のまとまり",
+          "polygon": [
+            [
+              0,
+              180
+            ],
+            [
+              90,
+              90
+            ],
+            [
+              270,
+              90
+            ],
+            [
+              270,
+              270
+            ],
+            [
+              90,
+              270
+            ]
+          ],
+          "wholePieces": [
+            1,
+            2,
+            3
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "C",
+          "label": "4のまとまり",
+          "polygon": [
+            [
+              180,
+              270
+            ],
+            [
+              270,
+              270
+            ],
+            [
+              270,
+              360
+            ]
+          ],
+          "wholePieces": [
+            4
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "D",
+          "label": "5のまとまり",
+          "polygon": [
+            [
+              270,
+              180
+            ],
+            [
+              360,
+              180
+            ],
+            [
+              270,
+              270
+            ]
+          ],
+          "wholePieces": [
+            5
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        }
+      ],
+      "note": "前の確認画面に最初に表示した案です。画面内での修正結果は未受領のため、全体を再確認してください。 上の折れた部分、中央の五角形、下と右の三角の突出。4と5は点で触れるだけ。",
+      "provenance": {
+        "kind": "previous_initial_groups",
+        "previousUiResultReceived": false,
+        "sourceFile": "primary-groups-review-20261128.json",
+        "sourceGroups": [
+          [
+            6,
+            7
+          ],
+          [
+            1,
+            2,
+            3
+          ],
+          [
+            4
+          ],
+          [
+            5
+          ]
+        ]
+      }
+    },
+    {
+      "figureId": "F6",
+      "round": 2,
+      "reviewStatus": "未確認",
+      "coordinateFrame": "figure_local_pixels",
+      "origin": [
+        220,
+        400
+      ],
+      "size": [
+        360,
+        360
+      ],
+      "pieces": [
+        {
+          "id": 1,
+          "polygon": [
+            [
+              180,
+              0
+            ],
+            [
+              360,
+              0
+            ],
+            [
+              180,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 2,
+          "polygon": [
+            [
+              0,
+              180
+            ],
+            [
+              180,
+              0
+            ],
+            [
+              180,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 3,
+          "polygon": [
+            [
+              0,
+              0
+            ],
+            [
+              180,
+              0
+            ],
+            [
+              90,
+              90
+            ]
+          ]
+        },
+        {
+          "id": 4,
+          "polygon": [
+            [
+              0,
+              90
+            ],
+            [
+              90,
+              90
+            ],
+            [
+              0,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 5,
+          "polygon": [
+            [
+              90,
+              180
+            ],
+            [
+              180,
+              180
+            ],
+            [
+              180,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 6,
+          "polygon": [
+            [
+              180,
+              180
+            ],
+            [
+              270,
+              180
+            ],
+            [
+              270,
+              270
+            ],
+            [
+              180,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 7,
+          "polygon": [
+            [
+              90,
+              360
+            ],
+            [
+              180,
+              270
+            ],
+            [
+              270,
+              270
+            ],
+            [
+              180,
+              360
+            ]
+          ]
+        }
+      ],
+      "regions": [
+        {
+          "id": "A",
+          "label": "1・3 ＋ 2の半分 → 大きな三角形",
+          "polygon": [
+            [
+              0,
+              0
+            ],
+            [
+              360,
+              0
+            ],
+            [
+              180,
+              180
+            ]
+          ],
+          "wholePieces": [
+            1,
+            3
+          ],
+          "partialPieces": [
+            {
+              "piece": 2,
+              "fraction": 0.5,
+              "polygon": [
+                [
+                  90,
+                  90
+                ],
+                [
+                  180,
+                  0
+                ],
+                [
+                  180,
+                  180
+                ]
+              ]
+            }
+          ],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "user_description_coordinate_proposal",
+            "detail": "チャットでの形状説明を満たすように算出した境界。端点座標の確認はこれから。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "B",
+          "label": "2の残り半分＋4の台形（提案）",
+          "polygon": [
+            [
+              0,
+              90
+            ],
+            [
+              90,
+              90
+            ],
+            [
+              180,
+              180
+            ],
+            [
+              0,
+              180
+            ]
+          ],
+          "wholePieces": [
+            4
+          ],
+          "partialPieces": [
+            {
+              "piece": 2,
+              "polygon": [
+                [
+                  0,
+                  180
+                ],
+                [
+                  90,
+                  90
+                ],
+                [
+                  180,
+                  180
+                ]
+              ],
+              "fraction": 0.5
+            }
+          ],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "assistant_remainder_proposal",
+            "detail": "大きな三角形から除いた2の半分を4とまとめる案。所属は未確認。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "C",
+          "label": "5＋6＋7のまとまり（提案）",
+          "polygon": [
+            [
+              90,
+              180
+            ],
+            [
+              270,
+              180
+            ],
+            [
+              270,
+              270
+            ],
+            [
+              180,
+              360
+            ],
+            [
+              90,
+              360
+            ],
+            [
+              180,
+              270
+            ]
+          ],
+          "wholePieces": [
+            5,
+            6,
+            7
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "assistant_remainder_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        }
+      ],
+      "note": "1・3と2の半分で大きな三角形にする境界案です。残りの2半分＋4、5＋6＋7のまとめ方は提案であり、未確認です。",
+      "provenance": {
+        "kind": "user_description_and_assistant_completion",
+        "previousUiResultReceived": false,
+        "sourceFile": "six-region-corrections.json",
+        "userDescription": "2が思っていた形と違った。おそらく3,1,2の半分で大きい三角形として認識すると思う",
+        "coordinatesUserConfirmed": false,
+        "remainderAssignmentsUserConfirmed": false
+      },
+      "cut": {
+        "sourcePiece": 2,
+        "endpoints": [
+          [
+            90,
+            90
+          ],
+          [
+            180,
+            180
+          ]
+        ]
+      }
+    },
+    {
+      "figureId": "F7",
+      "round": 2,
+      "reviewStatus": "未確認",
+      "coordinateFrame": "figure_local_pixels",
+      "origin": [
+        220,
+        400
+      ],
+      "size": [
+        450,
+        270
+      ],
+      "pieces": [
+        {
+          "id": 1,
+          "polygon": [
+            [
+              180,
+              0
+            ],
+            [
+              360,
+              180
+            ],
+            [
+              180,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 2,
+          "polygon": [
+            [
+              0,
+              180
+            ],
+            [
+              180,
+              0
+            ],
+            [
+              180,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 3,
+          "polygon": [
+            [
+              0,
+              0
+            ],
+            [
+              90,
+              90
+            ],
+            [
+              0,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 4,
+          "polygon": [
+            [
+              270,
+              90
+            ],
+            [
+              360,
+              90
+            ],
+            [
+              360,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 5,
+          "polygon": [
+            [
+              270,
+              90
+            ],
+            [
+              360,
+              0
+            ],
+            [
+              360,
+              90
+            ]
+          ]
+        },
+        {
+          "id": 6,
+          "polygon": [
+            [
+              360,
+              0
+            ],
+            [
+              450,
+              0
+            ],
+            [
+              450,
+              90
+            ],
+            [
+              360,
+              90
+            ]
+          ]
+        },
+        {
+          "id": 7,
+          "polygon": [
+            [
+              180,
+              180
+            ],
+            [
+              270,
+              180
+            ],
+            [
+              360,
+              270
+            ],
+            [
+              270,
+              270
+            ]
+          ]
+        }
+      ],
+      "regions": [
+        {
+          "id": "A",
+          "label": "3のまとまり",
+          "polygon": [
+            [
+              0,
+              0
+            ],
+            [
+              90,
+              90
+            ],
+            [
+              0,
+              180
+            ]
+          ],
+          "wholePieces": [
+            3
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "B",
+          "label": "1＋2のまとまり",
+          "polygon": [
+            [
+              0,
+              180
+            ],
+            [
+              180,
+              0
+            ],
+            [
+              360,
+              180
+            ]
+          ],
+          "wholePieces": [
+            1,
+            2
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "C",
+          "label": "4＋5＋6のまとまり",
+          "polygon": [
+            [
+              270,
+              90
+            ],
+            [
+              360,
+              0
+            ],
+            [
+              450,
+              0
+            ],
+            [
+              450,
+              90
+            ],
+            [
+              360,
+              90
+            ],
+            [
+              360,
+              180
+            ]
+          ],
+          "wholePieces": [
+            4,
+            5,
+            6
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "D",
+          "label": "7のまとまり",
+          "polygon": [
+            [
+              180,
+              180
+            ],
+            [
+              270,
+              180
+            ],
+            [
+              360,
+              270
+            ],
+            [
+              270,
+              270
+            ]
+          ],
+          "wholePieces": [
+            7
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        }
+      ],
+      "note": "前の確認画面に最初に表示した案です。画面内での修正結果は未受領のため、全体を再確認してください。 左の三角、中央の大三角、右上の折れた突出、右下の細い突出。",
+      "provenance": {
+        "kind": "previous_initial_groups",
+        "previousUiResultReceived": false,
+        "sourceFile": "primary-groups-review-20261128.json",
+        "sourceGroups": [
+          [
+            3
+          ],
+          [
+            1,
+            2
+          ],
+          [
+            4,
+            5,
+            6
+          ],
+          [
+            7
+          ]
+        ]
+      }
+    },
+    {
+      "figureId": "F8",
+      "round": 2,
+      "reviewStatus": "未確認",
+      "coordinateFrame": "figure_local_pixels",
+      "origin": [
+        220,
+        310
+      ],
+      "size": [
+        540,
+        270
+      ],
+      "pieces": [
+        {
+          "id": 1,
+          "polygon": [
+            [
+              180,
+              90
+            ],
+            [
+              360,
+              270
+            ],
+            [
+              180,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 2,
+          "polygon": [
+            [
+              0,
+              270
+            ],
+            [
+              180,
+              90
+            ],
+            [
+              180,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 3,
+          "polygon": [
+            [
+              0,
+              90
+            ],
+            [
+              90,
+              180
+            ],
+            [
+              0,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 4,
+          "polygon": [
+            [
+              270,
+              180
+            ],
+            [
+              360,
+              180
+            ],
+            [
+              360,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 5,
+          "polygon": [
+            [
+              270,
+              180
+            ],
+            [
+              360,
+              90
+            ],
+            [
+              360,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 6,
+          "polygon": [
+            [
+              360,
+              90
+            ],
+            [
+              450,
+              90
+            ],
+            [
+              450,
+              180
+            ],
+            [
+              360,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 7,
+          "polygon": [
+            [
+              360,
+              90
+            ],
+            [
+              450,
+              0
+            ],
+            [
+              540,
+              0
+            ],
+            [
+              450,
+              90
+            ]
+          ]
+        }
+      ],
+      "regions": [
+        {
+          "id": "A",
+          "label": "3のまとまり",
+          "polygon": [
+            [
+              0,
+              90
+            ],
+            [
+              90,
+              180
+            ],
+            [
+              0,
+              270
+            ]
+          ],
+          "wholePieces": [
+            3
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "B",
+          "label": "1＋2のまとまり",
+          "polygon": [
+            [
+              0,
+              270
+            ],
+            [
+              180,
+              90
+            ],
+            [
+              360,
+              270
+            ]
+          ],
+          "wholePieces": [
+            1,
+            2
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "C",
+          "label": "4＋5＋6＋7のまとまり",
+          "polygon": [
+            [
+              270,
+              180
+            ],
+            [
+              450,
+              0
+            ],
+            [
+              540,
+              0
+            ],
+            [
+              450,
+              90
+            ],
+            [
+              450,
+              180
+            ],
+            [
+              360,
+              180
+            ],
+            [
+              360,
+              270
+            ]
+          ],
+          "wholePieces": [
+            4,
+            5,
+            6,
+            7
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        }
+      ],
+      "note": "前の確認画面に最初に表示した案です。画面内での修正結果は未受領のため、全体を再確認してください。 左の三角、中央の大三角、右上へ長く続く突出。",
+      "provenance": {
+        "kind": "previous_initial_groups",
+        "previousUiResultReceived": false,
+        "sourceFile": "primary-groups-review-20261128.json",
+        "sourceGroups": [
+          [
+            3
+          ],
+          [
+            1,
+            2
+          ],
+          [
+            4,
+            5,
+            6,
+            7
+          ]
+        ]
+      }
+    },
+    {
+      "figureId": "F9",
+      "round": 2,
+      "reviewStatus": "未確認",
+      "coordinateFrame": "figure_local_pixels",
+      "origin": [
+        400,
+        310
+      ],
+      "size": [
+        450,
+        360
+      ],
+      "pieces": [
+        {
+          "id": 1,
+          "polygon": [
+            [
+              0,
+              90
+            ],
+            [
+              180,
+              90
+            ],
+            [
+              180,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 2,
+          "polygon": [
+            [
+              180,
+              90
+            ],
+            [
+              360,
+              90
+            ],
+            [
+              180,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 3,
+          "polygon": [
+            [
+              180,
+              90
+            ],
+            [
+              270,
+              0
+            ],
+            [
+              360,
+              90
+            ]
+          ]
+        },
+        {
+          "id": 4,
+          "polygon": [
+            [
+              180,
+              270
+            ],
+            [
+              270,
+              180
+            ],
+            [
+              270,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 5,
+          "polygon": [
+            [
+              90,
+              180
+            ],
+            [
+              180,
+              270
+            ],
+            [
+              90,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 6,
+          "polygon": [
+            [
+              180,
+              270
+            ],
+            [
+              270,
+              270
+            ],
+            [
+              270,
+              360
+            ],
+            [
+              180,
+              360
+            ]
+          ]
+        },
+        {
+          "id": 7,
+          "polygon": [
+            [
+              270,
+              0
+            ],
+            [
+              360,
+              0
+            ],
+            [
+              450,
+              90
+            ],
+            [
+              360,
+              90
+            ]
+          ]
+        }
+      ],
+      "regions": [
+        {
+          "id": "A",
+          "label": "3＋7のまとまり",
+          "polygon": [
+            [
+              180,
+              90
+            ],
+            [
+              270,
+              0
+            ],
+            [
+              360,
+              0
+            ],
+            [
+              450,
+              90
+            ]
+          ],
+          "wholePieces": [
+            3,
+            7
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "B",
+          "label": "1＋2＋5のまとまり",
+          "polygon": [
+            [
+              0,
+              90
+            ],
+            [
+              360,
+              90
+            ],
+            [
+              180,
+              270
+            ],
+            [
+              90,
+              270
+            ],
+            [
+              90,
+              180
+            ]
+          ],
+          "wholePieces": [
+            1,
+            2,
+            5
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "C",
+          "label": "4＋6のまとまり",
+          "polygon": [
+            [
+              180,
+              270
+            ],
+            [
+              270,
+              180
+            ],
+            [
+              270,
+              360
+            ],
+            [
+              180,
+              360
+            ]
+          ],
+          "wholePieces": [
+            4,
+            6
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        }
+      ],
+      "note": "前の確認画面に最初に表示した案です。画面内での修正結果は未受領のため、全体を再確認してください。 上端の台形、中央の大きな塊、下へ伸びる部分。",
+      "provenance": {
+        "kind": "previous_initial_groups",
+        "previousUiResultReceived": false,
+        "sourceFile": "primary-groups-review-20261128.json",
+        "sourceGroups": [
+          [
+            3,
+            7
+          ],
+          [
+            1,
+            2,
+            5
+          ],
+          [
+            4,
+            6
+          ]
+        ]
+      }
+    },
+    {
+      "figureId": "F10",
+      "round": 2,
+      "reviewStatus": "未確認",
+      "coordinateFrame": "figure_local_pixels",
+      "origin": [
+        400,
+        310
+      ],
+      "size": [
+        360,
+        360
+      ],
+      "pieces": [
+        {
+          "id": 1,
+          "polygon": [
+            [
+              0,
+              90
+            ],
+            [
+              180,
+              90
+            ],
+            [
+              180,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 2,
+          "polygon": [
+            [
+              180,
+              90
+            ],
+            [
+              360,
+              90
+            ],
+            [
+              180,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 3,
+          "polygon": [
+            [
+              180,
+              90
+            ],
+            [
+              270,
+              0
+            ],
+            [
+              360,
+              90
+            ]
+          ]
+        },
+        {
+          "id": 4,
+          "polygon": [
+            [
+              180,
+              270
+            ],
+            [
+              270,
+              180
+            ],
+            [
+              270,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 5,
+          "polygon": [
+            [
+              90,
+              180
+            ],
+            [
+              180,
+              270
+            ],
+            [
+              90,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 6,
+          "polygon": [
+            [
+              180,
+              270
+            ],
+            [
+              270,
+              270
+            ],
+            [
+              270,
+              360
+            ],
+            [
+              180,
+              360
+            ]
+          ]
+        },
+        {
+          "id": 7,
+          "polygon": [
+            [
+              90,
+              90
+            ],
+            [
+              180,
+              0
+            ],
+            [
+              270,
+              0
+            ],
+            [
+              180,
+              90
+            ]
+          ]
+        }
+      ],
+      "regions": [
+        {
+          "id": "A",
+          "label": "1＋2＋3＋5＋7のまとまり",
+          "polygon": [
+            [
+              0,
+              90
+            ],
+            [
+              90,
+              90
+            ],
+            [
+              180,
+              0
+            ],
+            [
+              270,
+              0
+            ],
+            [
+              360,
+              90
+            ],
+            [
+              180,
+              270
+            ],
+            [
+              90,
+              270
+            ],
+            [
+              90,
+              180
+            ]
+          ],
+          "wholePieces": [
+            1,
+            2,
+            3,
+            5,
+            7
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "B",
+          "label": "4＋6のまとまり",
+          "polygon": [
+            [
+              180,
+              270
+            ],
+            [
+              270,
+              180
+            ],
+            [
+              270,
+              360
+            ],
+            [
+              180,
+              360
+            ]
+          ],
+          "wholePieces": [
+            4,
+            6
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        }
+      ],
+      "note": "前の確認画面に最初に表示した案です。画面内での修正結果は未受領のため、全体を再確認してください。 上の広い塊をまとめ、下の突出を分ける。F9と同じ3群としても読める。",
+      "provenance": {
+        "kind": "previous_initial_groups",
+        "previousUiResultReceived": false,
+        "sourceFile": "primary-groups-review-20261128.json",
+        "sourceGroups": [
+          [
+            1,
+            2,
+            3,
+            5,
+            7
+          ],
+          [
+            4,
+            6
+          ]
+        ]
+      }
+    },
+    {
+      "figureId": "F11",
+      "round": 2,
+      "reviewStatus": "未確認",
+      "coordinateFrame": "figure_local_pixels",
+      "origin": [
+        220,
+        220
+      ],
+      "size": [
+        360,
+        360
+      ],
+      "pieces": [
+        {
+          "id": 1,
+          "polygon": [
+            [
+              180,
+              180
+            ],
+            [
+              360,
+              180
+            ],
+            [
+              180,
+              360
+            ]
+          ]
+        },
+        {
+          "id": 2,
+          "polygon": [
+            [
+              0,
+              360
+            ],
+            [
+              180,
+              180
+            ],
+            [
+              180,
+              360
+            ]
+          ]
+        },
+        {
+          "id": 3,
+          "polygon": [
+            [
+              90,
+              90
+            ],
+            [
+              180,
+              180
+            ],
+            [
+              90,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 4,
+          "polygon": [
+            [
+              0,
+              270
+            ],
+            [
+              90,
+              180
+            ],
+            [
+              90,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 5,
+          "polygon": [
+            [
+              0,
+              270
+            ],
+            [
+              90,
+              270
+            ],
+            [
+              0,
+              360
+            ]
+          ]
+        },
+        {
+          "id": 6,
+          "polygon": [
+            [
+              180,
+              90
+            ],
+            [
+              270,
+              90
+            ],
+            [
+              270,
+              180
+            ],
+            [
+              180,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 7,
+          "polygon": [
+            [
+              0,
+              0
+            ],
+            [
+              90,
+              90
+            ],
+            [
+              90,
+              180
+            ],
+            [
+              0,
+              90
+            ]
+          ]
+        }
+      ],
+      "regions": [
+        {
+          "id": "A",
+          "label": "下の大きな塊 ＋ 3の下半分",
+          "polygon": [
+            [
+              90,
+              180
+            ],
+            [
+              360,
+              180
+            ],
+            [
+              180,
+              360
+            ],
+            [
+              0,
+              360
+            ],
+            [
+              0,
+              270
+            ]
+          ],
+          "wholePieces": [
+            1,
+            2,
+            4,
+            5
+          ],
+          "partialPieces": [
+            {
+              "piece": 3,
+              "fraction": 0.5,
+              "polygon": [
+                [
+                  90,
+                  180
+                ],
+                [
+                  180,
+                  180
+                ],
+                [
+                  90,
+                  270
+                ]
+              ]
+            }
+          ],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "user_description_coordinate_proposal",
+            "detail": "チャットでの形状説明を満たすように算出した境界。端点座標の確認はこれから。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "B",
+          "label": "上への張り出し ＋ 3の上半分",
+          "polygon": [
+            [
+              0,
+              0
+            ],
+            [
+              180,
+              180
+            ],
+            [
+              90,
+              180
+            ],
+            [
+              0,
+              90
+            ]
+          ],
+          "wholePieces": [
+            7
+          ],
+          "partialPieces": [
+            {
+              "piece": 3,
+              "fraction": 0.5,
+              "polygon": [
+                [
+                  90,
+                  90
+                ],
+                [
+                  180,
+                  180
+                ],
+                [
+                  90,
+                  180
+                ]
+              ]
+            }
+          ],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "user_description_coordinate_proposal",
+            "detail": "チャットでの形状説明を満たすように算出した境界。端点座標の確認はこれから。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "C",
+          "label": "6の正方形（提案）",
+          "polygon": [
+            [
+              180,
+              90
+            ],
+            [
+              270,
+              90
+            ],
+            [
+              270,
+              180
+            ],
+            [
+              180,
+              180
+            ]
+          ],
+          "wholePieces": [
+            6
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "assistant_remainder_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        }
+      ],
+      "note": "3を半分に切り、下の大きな塊と上の張り出しへ分ける案です。6は単独の領域として残す提案です。",
+      "provenance": {
+        "kind": "user_description_and_assistant_completion",
+        "previousUiResultReceived": false,
+        "sourceFile": "six-region-corrections.json",
+        "userDescription": "3の半分で区切って下の大きな塊と上の飛び出してるやつで判定すると思う",
+        "coordinatesUserConfirmed": false,
+        "remainderAssignmentsUserConfirmed": false
+      },
+      "cut": {
+        "sourcePiece": 3,
+        "endpoints": [
+          [
+            90,
+            180
+          ],
+          [
+            180,
+            180
+          ]
+        ]
+      }
+    },
+    {
+      "figureId": "F12",
+      "round": 2,
+      "reviewStatus": "未確認",
+      "coordinateFrame": "figure_local_pixels",
+      "origin": [
+        220,
+        220
+      ],
+      "size": [
+        360,
+        360
+      ],
+      "pieces": [
+        {
+          "id": 1,
+          "polygon": [
+            [
+              180,
+              180
+            ],
+            [
+              360,
+              180
+            ],
+            [
+              360,
+              360
+            ]
+          ]
+        },
+        {
+          "id": 2,
+          "polygon": [
+            [
+              180,
+              180
+            ],
+            [
+              360,
+              0
+            ],
+            [
+              360,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 3,
+          "polygon": [
+            [
+              180,
+              180
+            ],
+            [
+              270,
+              270
+            ],
+            [
+              180,
+              360
+            ]
+          ]
+        },
+        {
+          "id": 4,
+          "polygon": [
+            [
+              90,
+              270
+            ],
+            [
+              180,
+              270
+            ],
+            [
+              180,
+              360
+            ]
+          ]
+        },
+        {
+          "id": 5,
+          "polygon": [
+            [
+              90,
+              180
+            ],
+            [
+              180,
+              180
+            ],
+            [
+              180,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 6,
+          "polygon": [
+            [
+              90,
+              90
+            ],
+            [
+              180,
+              90
+            ],
+            [
+              180,
+              180
+            ],
+            [
+              90,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 7,
+          "polygon": [
+            [
+              0,
+              180
+            ],
+            [
+              90,
+              180
+            ],
+            [
+              180,
+              270
+            ],
+            [
+              90,
+              270
+            ]
+          ]
+        }
+      ],
+      "regions": [
+        {
+          "id": "A",
+          "label": "1＋2のまとまり",
+          "polygon": [
+            [
+              180,
+              180
+            ],
+            [
+              360,
+              0
+            ],
+            [
+              360,
+              360
+            ]
+          ],
+          "wholePieces": [
+            1,
+            2
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "B",
+          "label": "3＋4＋5＋7のまとまり",
+          "polygon": [
+            [
+              0,
+              180
+            ],
+            [
+              180,
+              180
+            ],
+            [
+              270,
+              270
+            ],
+            [
+              180,
+              360
+            ]
+          ],
+          "wholePieces": [
+            3,
+            4,
+            5,
+            7
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "C",
+          "label": "6のまとまり",
+          "polygon": [
+            [
+              90,
+              90
+            ],
+            [
+              180,
+              90
+            ],
+            [
+              180,
+              180
+            ],
+            [
+              90,
+              180
+            ]
+          ],
+          "wholePieces": [
+            6
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        }
+      ],
+      "note": "前の確認画面に最初に表示した案です。画面内での修正結果は未受領のため、全体を再確認してください。 右の大きな三角形、左下の台形の塊、上の四角い突起。",
+      "provenance": {
+        "kind": "previous_initial_groups",
+        "previousUiResultReceived": false,
+        "sourceFile": "primary-groups-review-20261128.json",
+        "sourceGroups": [
+          [
+            1,
+            2
+          ],
+          [
+            3,
+            4,
+            5,
+            7
+          ],
+          [
+            6
+          ]
+        ]
+      }
+    },
+    {
+      "figureId": "F13",
+      "round": 2,
+      "reviewStatus": "未確認",
+      "coordinateFrame": "figure_local_pixels",
+      "origin": [
+        310,
+        220
+      ],
+      "size": [
+        360,
+        450
+      ],
+      "pieces": [
+        {
+          "id": 1,
+          "polygon": [
+            [
+              90,
+              180
+            ],
+            [
+              270,
+              180
+            ],
+            [
+              270,
+              360
+            ]
+          ]
+        },
+        {
+          "id": 2,
+          "polygon": [
+            [
+              90,
+              180
+            ],
+            [
+              270,
+              360
+            ],
+            [
+              90,
+              360
+            ]
+          ]
+        },
+        {
+          "id": 3,
+          "polygon": [
+            [
+              0,
+              270
+            ],
+            [
+              90,
+              180
+            ],
+            [
+              90,
+              360
+            ]
+          ]
+        },
+        {
+          "id": 4,
+          "polygon": [
+            [
+              180,
+              90
+            ],
+            [
+              270,
+              180
+            ],
+            [
+              180,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 5,
+          "polygon": [
+            [
+              270,
+              180
+            ],
+            [
+              360,
+              270
+            ],
+            [
+              270,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 6,
+          "polygon": [
+            [
+              180,
+              360
+            ],
+            [
+              270,
+              360
+            ],
+            [
+              270,
+              450
+            ],
+            [
+              180,
+              450
+            ]
+          ]
+        },
+        {
+          "id": 7,
+          "polygon": [
+            [
+              180,
+              0
+            ],
+            [
+              270,
+              90
+            ],
+            [
+              270,
+              180
+            ],
+            [
+              180,
+              90
+            ]
+          ]
+        }
+      ],
+      "regions": [
+        {
+          "id": "A",
+          "label": "1＋2＋3のまとまり",
+          "polygon": [
+            [
+              0,
+              270
+            ],
+            [
+              90,
+              180
+            ],
+            [
+              270,
+              180
+            ],
+            [
+              270,
+              360
+            ],
+            [
+              90,
+              360
+            ]
+          ],
+          "wholePieces": [
+            1,
+            2,
+            3
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "B",
+          "label": "4＋7のまとまり",
+          "polygon": [
+            [
+              180,
+              0
+            ],
+            [
+              270,
+              90
+            ],
+            [
+              270,
+              180
+            ],
+            [
+              180,
+              180
+            ]
+          ],
+          "wholePieces": [
+            4,
+            7
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "C",
+          "label": "5のまとまり",
+          "polygon": [
+            [
+              270,
+              180
+            ],
+            [
+              360,
+              270
+            ],
+            [
+              270,
+              270
+            ]
+          ],
+          "wholePieces": [
+            5
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "D",
+          "label": "6のまとまり",
+          "polygon": [
+            [
+              180,
+              360
+            ],
+            [
+              270,
+              360
+            ],
+            [
+              270,
+              450
+            ],
+            [
+              180,
+              450
+            ]
+          ],
+          "wholePieces": [
+            6
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        }
+      ],
+      "note": "前の確認画面に最初に表示した案です。画面内での修正結果は未受領のため、全体を再確認してください。 中央の五角形、上へ伸びる部分、右の三角形、下の四角形。右の小さな三角形を独立した部分として残す案。",
+      "provenance": {
+        "kind": "previous_initial_groups",
+        "previousUiResultReceived": false,
+        "sourceFile": "primary-groups-review-20261128.json",
+        "sourceGroups": [
+          [
+            1,
+            2,
+            3
+          ],
+          [
+            4,
+            7
+          ],
+          [
+            5
+          ],
+          [
+            6
+          ]
+        ]
+      }
+    },
+    {
+      "figureId": "F14",
+      "round": 2,
+      "reviewStatus": "未確認",
+      "coordinateFrame": "figure_local_pixels",
+      "origin": [
+        310,
+        220
+      ],
+      "size": [
+        360,
+        360
+      ],
+      "pieces": [
+        {
+          "id": 1,
+          "polygon": [
+            [
+              90,
+              180
+            ],
+            [
+              270,
+              180
+            ],
+            [
+              270,
+              360
+            ]
+          ]
+        },
+        {
+          "id": 2,
+          "polygon": [
+            [
+              90,
+              180
+            ],
+            [
+              270,
+              360
+            ],
+            [
+              90,
+              360
+            ]
+          ]
+        },
+        {
+          "id": 3,
+          "polygon": [
+            [
+              0,
+              270
+            ],
+            [
+              90,
+              180
+            ],
+            [
+              90,
+              360
+            ]
+          ]
+        },
+        {
+          "id": 4,
+          "polygon": [
+            [
+              180,
+              90
+            ],
+            [
+              270,
+              180
+            ],
+            [
+              180,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 5,
+          "polygon": [
+            [
+              270,
+              180
+            ],
+            [
+              360,
+              270
+            ],
+            [
+              270,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 6,
+          "polygon": [
+            [
+              270,
+              270
+            ],
+            [
+              360,
+              270
+            ],
+            [
+              360,
+              360
+            ],
+            [
+              270,
+              360
+            ]
+          ]
+        },
+        {
+          "id": 7,
+          "polygon": [
+            [
+              180,
+              0
+            ],
+            [
+              270,
+              90
+            ],
+            [
+              270,
+              180
+            ],
+            [
+              180,
+              90
+            ]
+          ]
+        }
+      ],
+      "regions": [
+        {
+          "id": "A",
+          "label": "1＋2＋3＋5＋6のまとまり",
+          "polygon": [
+            [
+              0,
+              270
+            ],
+            [
+              90,
+              180
+            ],
+            [
+              270,
+              180
+            ],
+            [
+              360,
+              270
+            ],
+            [
+              360,
+              360
+            ],
+            [
+              90,
+              360
+            ]
+          ],
+          "wholePieces": [
+            1,
+            2,
+            3,
+            5,
+            6
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "B",
+          "label": "4＋7のまとまり",
+          "polygon": [
+            [
+              180,
+              0
+            ],
+            [
+              270,
+              90
+            ],
+            [
+              270,
+              180
+            ],
+            [
+              180,
+              180
+            ]
+          ],
+          "wholePieces": [
+            4,
+            7
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        }
+      ],
+      "note": "前の確認画面に最初に表示した案です。画面内での修正結果は未受領のため、全体を再確認してください。 下の広い塊と上へ伸びる部分。下の塊は外形が一続きなので、右端の5と6もまとめる案。",
+      "provenance": {
+        "kind": "previous_initial_groups",
+        "previousUiResultReceived": false,
+        "sourceFile": "primary-groups-review-20261128.json",
+        "sourceGroups": [
+          [
+            1,
+            2,
+            3,
+            5,
+            6
+          ],
+          [
+            4,
+            7
+          ]
+        ]
+      }
+    },
+    {
+      "figureId": "F15",
+      "round": 2,
+      "reviewStatus": "未確認",
+      "coordinateFrame": "figure_local_pixels",
+      "origin": [
+        400,
+        310
+      ],
+      "size": [
+        360,
+        450
+      ],
+      "pieces": [
+        {
+          "id": 1,
+          "polygon": [
+            [
+              0,
+              270
+            ],
+            [
+              180,
+              90
+            ],
+            [
+              180,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 2,
+          "polygon": [
+            [
+              180,
+              90
+            ],
+            [
+              360,
+              270
+            ],
+            [
+              180,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 3,
+          "polygon": [
+            [
+              180,
+              90
+            ],
+            [
+              360,
+              90
+            ],
+            [
+              270,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 4,
+          "polygon": [
+            [
+              90,
+              90
+            ],
+            [
+              180,
+              90
+            ],
+            [
+              90,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 5,
+          "polygon": [
+            [
+              90,
+              0
+            ],
+            [
+              180,
+              90
+            ],
+            [
+              90,
+              90
+            ]
+          ]
+        },
+        {
+          "id": 6,
+          "polygon": [
+            [
+              90,
+              270
+            ],
+            [
+              180,
+              270
+            ],
+            [
+              180,
+              360
+            ],
+            [
+              90,
+              360
+            ]
+          ]
+        },
+        {
+          "id": 7,
+          "polygon": [
+            [
+              0,
+              360
+            ],
+            [
+              90,
+              270
+            ],
+            [
+              90,
+              360
+            ],
+            [
+              0,
+              450
+            ]
+          ]
+        }
+      ],
+      "regions": [
+        {
+          "id": "A",
+          "label": "1＋2のまとまり",
+          "polygon": [
+            [
+              0,
+              270
+            ],
+            [
+              180,
+              90
+            ],
+            [
+              360,
+              270
+            ]
+          ],
+          "wholePieces": [
+            1,
+            2
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "B",
+          "label": "3のまとまり",
+          "polygon": [
+            [
+              180,
+              90
+            ],
+            [
+              360,
+              90
+            ],
+            [
+              270,
+              180
+            ]
+          ],
+          "wholePieces": [
+            3
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "C",
+          "label": "4＋5のまとまり",
+          "polygon": [
+            [
+              90,
+              0
+            ],
+            [
+              180,
+              90
+            ],
+            [
+              90,
+              180
+            ]
+          ],
+          "wholePieces": [
+            4,
+            5
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "D",
+          "label": "6＋7のまとまり",
+          "polygon": [
+            [
+              0,
+              360
+            ],
+            [
+              90,
+              270
+            ],
+            [
+              180,
+              270
+            ],
+            [
+              180,
+              360
+            ],
+            [
+              90,
+              360
+            ],
+            [
+              0,
+              450
+            ]
+          ],
+          "wholePieces": [
+            6,
+            7
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        }
+      ],
+      "note": "前の確認画面に最初に表示した案です。画面内での修正結果は未受領のため、全体を再確認してください。 中央の大きな三角形、右上の三角形、左上の三角形、左下へ伸びる部分。右上の3を中央と一体で見るかは要確認。",
+      "provenance": {
+        "kind": "previous_initial_groups",
+        "previousUiResultReceived": false,
+        "sourceFile": "primary-groups-review-20261128.json",
+        "sourceGroups": [
+          [
+            1,
+            2
+          ],
+          [
+            3
+          ],
+          [
+            4,
+            5
+          ],
+          [
+            6,
+            7
+          ]
+        ]
+      }
+    },
+    {
+      "figureId": "F16",
+      "round": 2,
+      "reviewStatus": "未確認",
+      "coordinateFrame": "figure_local_pixels",
+      "origin": [
+        310,
+        400
+      ],
+      "size": [
+        360,
+        450
+      ],
+      "pieces": [
+        {
+          "id": 1,
+          "polygon": [
+            [
+              90,
+              0
+            ],
+            [
+              270,
+              180
+            ],
+            [
+              90,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 2,
+          "polygon": [
+            [
+              90,
+              180
+            ],
+            [
+              270,
+              180
+            ],
+            [
+              270,
+              360
+            ]
+          ]
+        },
+        {
+          "id": 3,
+          "polygon": [
+            [
+              0,
+              90
+            ],
+            [
+              90,
+              0
+            ],
+            [
+              90,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 4,
+          "polygon": [
+            [
+              90,
+              180
+            ],
+            [
+              180,
+              270
+            ],
+            [
+              90,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 5,
+          "polygon": [
+            [
+              0,
+              90
+            ],
+            [
+              90,
+              180
+            ],
+            [
+              0,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 6,
+          "polygon": [
+            [
+              0,
+              180
+            ],
+            [
+              90,
+              180
+            ],
+            [
+              90,
+              270
+            ],
+            [
+              0,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 7,
+          "polygon": [
+            [
+              270,
+              270
+            ],
+            [
+              360,
+              360
+            ],
+            [
+              360,
+              450
+            ],
+            [
+              270,
+              360
+            ]
+          ]
+        }
+      ],
+      "regions": [
+        {
+          "id": "A",
+          "label": "大きな塊 ＋ 2の上側",
+          "polygon": [
+            [
+              0,
+              90
+            ],
+            [
+              90,
+              0
+            ],
+            [
+              270,
+              180
+            ],
+            [
+              270,
+              270
+            ],
+            [
+              0,
+              270
+            ]
+          ],
+          "wholePieces": [
+            1,
+            3,
+            4,
+            5,
+            6
+          ],
+          "partialPieces": [
+            {
+              "piece": 2,
+              "fraction": 0.75,
+              "polygon": [
+                [
+                  90,
+                  180
+                ],
+                [
+                  270,
+                  180
+                ],
+                [
+                  270,
+                  270
+                ],
+                [
+                  180,
+                  270
+                ]
+              ]
+            }
+          ],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "user_description_coordinate_proposal",
+            "detail": "チャットでの形状説明を満たすように算出した境界。端点座標の確認はこれから。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "B",
+          "label": "下に伸びる部分 ＋ 2の下側",
+          "polygon": [
+            [
+              180,
+              270
+            ],
+            [
+              270,
+              270
+            ],
+            [
+              360,
+              360
+            ],
+            [
+              360,
+              450
+            ]
+          ],
+          "wholePieces": [
+            7
+          ],
+          "partialPieces": [
+            {
+              "piece": 2,
+              "fraction": 0.25,
+              "polygon": [
+                [
+                  180,
+                  270
+                ],
+                [
+                  270,
+                  270
+                ],
+                [
+                  270,
+                  360
+                ]
+              ]
+            }
+          ],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "user_description_coordinate_proposal",
+            "detail": "チャットでの形状説明を満たすように算出した境界。端点座標の確認はこれから。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        }
+      ],
+      "note": "2を途中で切り、大きな塊と下へ伸びる部分に分ける案です。切る向きは未指定なので、塊の下辺を延長する水平線で示しています。位置と向きを再確認してください。",
+      "provenance": {
+        "kind": "user_description_and_assistant_completion",
+        "previousUiResultReceived": false,
+        "sourceFile": "six-region-corrections.json",
+        "userDescription": "2の途中できれて大きな塊と下に伸びてるやつと認識すると思う",
+        "coordinatesUserConfirmed": false,
+        "remainderAssignmentsUserConfirmed": false
+      },
+      "cut": {
+        "sourcePiece": 2,
+        "endpoints": [
+          [
+            180,
+            270
+          ],
+          [
+            270,
+            270
+          ]
+        ]
+      },
+      "alternativeCut": [
+        [
+          180,
+          270
+        ],
+        [
+          270,
+          180
+        ]
+      ]
+    },
+    {
+      "figureId": "F17",
+      "round": 2,
+      "reviewStatus": "未確認",
+      "coordinateFrame": "figure_local_pixels",
+      "origin": [
+        310,
+        400
+      ],
+      "size": [
+        360,
+        360
+      ],
+      "pieces": [
+        {
+          "id": 1,
+          "polygon": [
+            [
+              90,
+              0
+            ],
+            [
+              270,
+              180
+            ],
+            [
+              90,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 2,
+          "polygon": [
+            [
+              90,
+              180
+            ],
+            [
+              270,
+              180
+            ],
+            [
+              270,
+              360
+            ]
+          ]
+        },
+        {
+          "id": 3,
+          "polygon": [
+            [
+              0,
+              90
+            ],
+            [
+              90,
+              0
+            ],
+            [
+              90,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 4,
+          "polygon": [
+            [
+              180,
+              90
+            ],
+            [
+              270,
+              90
+            ],
+            [
+              270,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 5,
+          "polygon": [
+            [
+              270,
+              90
+            ],
+            [
+              360,
+              90
+            ],
+            [
+              270,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 6,
+          "polygon": [
+            [
+              270,
+              0
+            ],
+            [
+              360,
+              0
+            ],
+            [
+              360,
+              90
+            ],
+            [
+              270,
+              90
+            ]
+          ]
+        },
+        {
+          "id": 7,
+          "polygon": [
+            [
+              270,
+              180
+            ],
+            [
+              360,
+              270
+            ],
+            [
+              360,
+              360
+            ],
+            [
+              270,
+              270
+            ]
+          ]
+        }
+      ],
+      "regions": [
+        {
+          "id": "A",
+          "label": "1＋2＋3のまとまり",
+          "polygon": [
+            [
+              0,
+              90
+            ],
+            [
+              90,
+              0
+            ],
+            [
+              270,
+              180
+            ],
+            [
+              270,
+              360
+            ]
+          ],
+          "wholePieces": [
+            1,
+            2,
+            3
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "B",
+          "label": "4＋5＋6のまとまり",
+          "polygon": [
+            [
+              180,
+              90
+            ],
+            [
+              270,
+              90
+            ],
+            [
+              270,
+              0
+            ],
+            [
+              360,
+              0
+            ],
+            [
+              360,
+              90
+            ],
+            [
+              270,
+              180
+            ]
+          ],
+          "wholePieces": [
+            4,
+            5,
+            6
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "C",
+          "label": "7のまとまり",
+          "polygon": [
+            [
+              270,
+              180
+            ],
+            [
+              360,
+              270
+            ],
+            [
+              360,
+              360
+            ],
+            [
+              270,
+              270
+            ]
+          ],
+          "wholePieces": [
+            7
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        }
+      ],
+      "note": "前の確認画面に最初に表示した案です。画面内での修正結果は未受領のため、全体を再確認してください。 左側から下へ続く大きな台形の塊、右上の曲がった突起、右下へ伸びる部分。",
+      "provenance": {
+        "kind": "previous_initial_groups",
+        "previousUiResultReceived": false,
+        "sourceFile": "primary-groups-review-20261128.json",
+        "sourceGroups": [
+          [
+            1,
+            2,
+            3
+          ],
+          [
+            4,
+            5,
+            6
+          ],
+          [
+            7
+          ]
+        ]
+      }
+    },
+    {
+      "figureId": "F18",
+      "round": 2,
+      "reviewStatus": "未確認",
+      "coordinateFrame": "figure_local_pixels",
+      "origin": [
+        400,
+        310
+      ],
+      "size": [
+        360,
+        450
+      ],
+      "pieces": [
+        {
+          "id": 1,
+          "polygon": [
+            [
+              0,
+              90
+            ],
+            [
+              180,
+              90
+            ],
+            [
+              180,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 2,
+          "polygon": [
+            [
+              180,
+              90
+            ],
+            [
+              360,
+              90
+            ],
+            [
+              180,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 3,
+          "polygon": [
+            [
+              180,
+              270
+            ],
+            [
+              270,
+              180
+            ],
+            [
+              360,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 4,
+          "polygon": [
+            [
+              180,
+              270
+            ],
+            [
+              270,
+              270
+            ],
+            [
+              270,
+              360
+            ]
+          ]
+        },
+        {
+          "id": 5,
+          "polygon": [
+            [
+              270,
+              0
+            ],
+            [
+              360,
+              90
+            ],
+            [
+              270,
+              90
+            ]
+          ]
+        },
+        {
+          "id": 6,
+          "polygon": [
+            [
+              90,
+              0
+            ],
+            [
+              180,
+              0
+            ],
+            [
+              180,
+              90
+            ],
+            [
+              90,
+              90
+            ]
+          ]
+        },
+        {
+          "id": 7,
+          "polygon": [
+            [
+              270,
+              270
+            ],
+            [
+              360,
+              360
+            ],
+            [
+              360,
+              450
+            ],
+            [
+              270,
+              360
+            ]
+          ]
+        }
+      ],
+      "regions": [
+        {
+          "id": "A",
+          "label": "1＋2のまとまり",
+          "polygon": [
+            [
+              0,
+              90
+            ],
+            [
+              360,
+              90
+            ],
+            [
+              180,
+              270
+            ]
+          ],
+          "wholePieces": [
+            1,
+            2
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "B",
+          "label": "6のまとまり",
+          "polygon": [
+            [
+              90,
+              0
+            ],
+            [
+              180,
+              0
+            ],
+            [
+              180,
+              90
+            ],
+            [
+              90,
+              90
+            ]
+          ],
+          "wholePieces": [
+            6
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "C",
+          "label": "5のまとまり",
+          "polygon": [
+            [
+              270,
+              0
+            ],
+            [
+              360,
+              90
+            ],
+            [
+              270,
+              90
+            ]
+          ],
+          "wholePieces": [
+            5
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "D",
+          "label": "3＋4＋7のまとまり",
+          "polygon": [
+            [
+              180,
+              270
+            ],
+            [
+              270,
+              180
+            ],
+            [
+              360,
+              270
+            ],
+            [
+              270,
+              270
+            ],
+            [
+              360,
+              360
+            ],
+            [
+              360,
+              450
+            ]
+          ],
+          "wholePieces": [
+            3,
+            4,
+            7
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        }
+      ],
+      "note": "前の確認画面に最初に表示した案です。画面内での修正結果は未受領のため、全体を再確認してください。 中央の大きな三角形、上の四角形、右上の小さな三角形、右下へ伸びる部分。右上の5を独立させるかが曖昧。",
+      "provenance": {
+        "kind": "previous_initial_groups",
+        "previousUiResultReceived": false,
+        "sourceFile": "primary-groups-review-20261128.json",
+        "sourceGroups": [
+          [
+            1,
+            2
+          ],
+          [
+            6
+          ],
+          [
+            5
+          ],
+          [
+            3,
+            4,
+            7
+          ]
+        ]
+      }
+    },
+    {
+      "figureId": "F19",
+      "round": 2,
+      "reviewStatus": "未確認",
+      "coordinateFrame": "figure_local_pixels",
+      "origin": [
+        310,
+        310
+      ],
+      "size": [
+        450,
+        450
+      ],
+      "pieces": [
+        {
+          "id": 1,
+          "polygon": [
+            [
+              90,
+              270
+            ],
+            [
+              270,
+              90
+            ],
+            [
+              270,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 2,
+          "polygon": [
+            [
+              90,
+              270
+            ],
+            [
+              270,
+              270
+            ],
+            [
+              270,
+              450
+            ]
+          ]
+        },
+        {
+          "id": 3,
+          "polygon": [
+            [
+              0,
+              360
+            ],
+            [
+              90,
+              270
+            ],
+            [
+              180,
+              360
+            ]
+          ]
+        },
+        {
+          "id": 4,
+          "polygon": [
+            [
+              270,
+              90
+            ],
+            [
+              360,
+              90
+            ],
+            [
+              270,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 5,
+          "polygon": [
+            [
+              270,
+              180
+            ],
+            [
+              360,
+              270
+            ],
+            [
+              270,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 6,
+          "polygon": [
+            [
+              270,
+              0
+            ],
+            [
+              360,
+              0
+            ],
+            [
+              360,
+              90
+            ],
+            [
+              270,
+              90
+            ]
+          ]
+        },
+        {
+          "id": 7,
+          "polygon": [
+            [
+              270,
+              270
+            ],
+            [
+              360,
+              270
+            ],
+            [
+              450,
+              360
+            ],
+            [
+              360,
+              360
+            ]
+          ]
+        }
+      ],
+      "regions": [
+        {
+          "id": "A",
+          "label": "1・3 ＋ 2の上側 → 大きな三角形",
+          "polygon": [
+            [
+              0,
+              360
+            ],
+            [
+              270,
+              90
+            ],
+            [
+              270,
+              360
+            ]
+          ],
+          "wholePieces": [
+            1,
+            3
+          ],
+          "partialPieces": [
+            {
+              "piece": 2,
+              "fraction": 0.75,
+              "polygon": [
+                [
+                  90,
+                  270
+                ],
+                [
+                  270,
+                  270
+                ],
+                [
+                  270,
+                  360
+                ],
+                [
+                  180,
+                  360
+                ]
+              ]
+            }
+          ],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "user_description_coordinate_proposal",
+            "detail": "チャットでの形状説明を満たすように算出した境界。端点座標の確認はこれから。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "B",
+          "label": "4＋6の上部（提案）",
+          "polygon": [
+            [
+              270,
+              0
+            ],
+            [
+              360,
+              0
+            ],
+            [
+              360,
+              90
+            ],
+            [
+              270,
+              180
+            ]
+          ],
+          "wholePieces": [
+            4,
+            6
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "assistant_remainder_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "C",
+          "label": "5＋7の張り出し（提案）",
+          "polygon": [
+            [
+              270,
+              180
+            ],
+            [
+              450,
+              360
+            ],
+            [
+              360,
+              360
+            ],
+            [
+              270,
+              270
+            ]
+          ],
+          "wholePieces": [
+            5,
+            7
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "assistant_remainder_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "D",
+          "label": "2から切り離した小三角形（所属未確認）",
+          "polygon": [
+            [
+              180,
+              360
+            ],
+            [
+              270,
+              360
+            ],
+            [
+              270,
+              450
+            ]
+          ],
+          "wholePieces": [],
+          "partialPieces": [
+            {
+              "piece": 2,
+              "polygon": [
+                [
+                  180,
+                  360
+                ],
+                [
+                  270,
+                  360
+                ],
+                [
+                  270,
+                  450
+                ]
+              ],
+              "fraction": 0.25
+            }
+          ],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "assistant_remainder_proposal",
+            "detail": "主な三角形から除いた断片を見落とさないため独立領域として表示。所属は未確認。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        }
+      ],
+      "note": "1・3と2の上側で大きな三角形にする案です。2の下側は所属が指定されていないため独立して表示します。4＋6、5＋7のまとめ方も再確認対象です。",
+      "provenance": {
+        "kind": "user_description_and_assistant_completion",
+        "previousUiResultReceived": false,
+        "sourceFile": "six-region-corrections.json",
+        "userDescription": "2の下部分だけ除いて123で大きな三角形として認識すると思う",
+        "coordinatesUserConfirmed": false,
+        "remainderAssignmentsUserConfirmed": false
+      },
+      "cut": {
+        "sourcePiece": 2,
+        "endpoints": [
+          [
+            180,
+            360
+          ],
+          [
+            270,
+            360
+          ]
+        ]
+      }
+    },
+    {
+      "figureId": "F20",
+      "round": 2,
+      "reviewStatus": "未確認",
+      "coordinateFrame": "figure_local_pixels",
+      "origin": [
+        310,
+        310
+      ],
+      "size": [
+        450,
+        450
+      ],
+      "pieces": [
+        {
+          "id": 1,
+          "polygon": [
+            [
+              90,
+              270
+            ],
+            [
+              270,
+              90
+            ],
+            [
+              270,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 2,
+          "polygon": [
+            [
+              90,
+              270
+            ],
+            [
+              270,
+              270
+            ],
+            [
+              270,
+              450
+            ]
+          ]
+        },
+        {
+          "id": 3,
+          "polygon": [
+            [
+              0,
+              180
+            ],
+            [
+              180,
+              180
+            ],
+            [
+              90,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 4,
+          "polygon": [
+            [
+              270,
+              90
+            ],
+            [
+              360,
+              90
+            ],
+            [
+              270,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 5,
+          "polygon": [
+            [
+              270,
+              180
+            ],
+            [
+              360,
+              270
+            ],
+            [
+              270,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 6,
+          "polygon": [
+            [
+              270,
+              0
+            ],
+            [
+              360,
+              0
+            ],
+            [
+              360,
+              90
+            ],
+            [
+              270,
+              90
+            ]
+          ]
+        },
+        {
+          "id": 7,
+          "polygon": [
+            [
+              270,
+              270
+            ],
+            [
+              360,
+              270
+            ],
+            [
+              450,
+              360
+            ],
+            [
+              360,
+              360
+            ]
+          ]
+        }
+      ],
+      "regions": [
+        {
+          "id": "A",
+          "label": "2・3 ＋ 1の下側 → 大きな三角形",
+          "polygon": [
+            [
+              0,
+              180
+            ],
+            [
+              270,
+              180
+            ],
+            [
+              270,
+              450
+            ]
+          ],
+          "wholePieces": [
+            2,
+            3
+          ],
+          "partialPieces": [
+            {
+              "piece": 1,
+              "fraction": 0.75,
+              "polygon": [
+                [
+                  90,
+                  270
+                ],
+                [
+                  180,
+                  180
+                ],
+                [
+                  270,
+                  180
+                ],
+                [
+                  270,
+                  270
+                ]
+              ]
+            }
+          ],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "user_description_coordinate_proposal",
+            "detail": "チャットでの形状説明を満たすように算出した境界。端点座標の確認はこれから。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "B",
+          "label": "1の上側＋4＋6の上部（提案）",
+          "polygon": [
+            [
+              180,
+              180
+            ],
+            [
+              270,
+              90
+            ],
+            [
+              270,
+              0
+            ],
+            [
+              360,
+              0
+            ],
+            [
+              360,
+              90
+            ],
+            [
+              270,
+              180
+            ]
+          ],
+          "wholePieces": [
+            4,
+            6
+          ],
+          "partialPieces": [
+            {
+              "piece": 1,
+              "polygon": [
+                [
+                  180,
+                  180
+                ],
+                [
+                  270,
+                  90
+                ],
+                [
+                  270,
+                  180
+                ]
+              ],
+              "fraction": 0.25
+            }
+          ],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "assistant_remainder_proposal",
+            "detail": "切り離した1の上側を、辺で接する4＋6に合わせる案。ユーザーがこの所属を承認したことは意味しない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "C",
+          "label": "5＋7の張り出し（提案）",
+          "polygon": [
+            [
+              270,
+              180
+            ],
+            [
+              450,
+              360
+            ],
+            [
+              360,
+              360
+            ],
+            [
+              270,
+              270
+            ]
+          ],
+          "wholePieces": [
+            5,
+            7
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "assistant_remainder_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        }
+      ],
+      "note": "2・3と1の下側で大きな三角形にする案です。切り離した1の上側を4＋6へまとめることは追加の提案です。5＋7も含め、残りの所属を再確認してください。",
+      "provenance": {
+        "kind": "user_description_and_assistant_completion",
+        "previousUiResultReceived": false,
+        "sourceFile": "six-region-corrections.json",
+        "userDescription": "1の上だけ除いて123で大きな三角形として認識すると思う",
+        "coordinatesUserConfirmed": false,
+        "remainderAssignmentsUserConfirmed": false
+      },
+      "cut": {
+        "sourcePiece": 1,
+        "endpoints": [
+          [
+            180,
+            180
+          ],
+          [
+            270,
+            180
+          ]
+        ]
+      }
+    },
+    {
+      "figureId": "F21",
+      "round": 2,
+      "reviewStatus": "未確認",
+      "coordinateFrame": "figure_local_pixels",
+      "origin": [
+        400,
+        220
+      ],
+      "size": [
+        270,
+        450
+      ],
+      "pieces": [
+        {
+          "id": 1,
+          "polygon": [
+            [
+              0,
+              180
+            ],
+            [
+              180,
+              180
+            ],
+            [
+              0,
+              360
+            ]
+          ]
+        },
+        {
+          "id": 2,
+          "polygon": [
+            [
+              0,
+              0
+            ],
+            [
+              180,
+              180
+            ],
+            [
+              0,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 3,
+          "polygon": [
+            [
+              90,
+              90
+            ],
+            [
+              270,
+              90
+            ],
+            [
+              180,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 4,
+          "polygon": [
+            [
+              90,
+              270
+            ],
+            [
+              180,
+              180
+            ],
+            [
+              180,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 5,
+          "polygon": [
+            [
+              90,
+              270
+            ],
+            [
+              180,
+              270
+            ],
+            [
+              90,
+              360
+            ]
+          ]
+        },
+        {
+          "id": 6,
+          "polygon": [
+            [
+              180,
+              180
+            ],
+            [
+              270,
+              180
+            ],
+            [
+              270,
+              270
+            ],
+            [
+              180,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 7,
+          "polygon": [
+            [
+              0,
+              360
+            ],
+            [
+              90,
+              270
+            ],
+            [
+              90,
+              360
+            ],
+            [
+              0,
+              450
+            ]
+          ]
+        }
+      ],
+      "regions": [
+        {
+          "id": "A",
+          "label": "1＋2＋4＋5＋7のまとまり",
+          "polygon": [
+            [
+              0,
+              0
+            ],
+            [
+              180,
+              180
+            ],
+            [
+              180,
+              270
+            ],
+            [
+              0,
+              450
+            ]
+          ],
+          "wholePieces": [
+            1,
+            2,
+            4,
+            5,
+            7
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "B",
+          "label": "3のまとまり",
+          "polygon": [
+            [
+              90,
+              90
+            ],
+            [
+              270,
+              90
+            ],
+            [
+              180,
+              180
+            ]
+          ],
+          "wholePieces": [
+            3
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "C",
+          "label": "6のまとまり",
+          "polygon": [
+            [
+              180,
+              180
+            ],
+            [
+              270,
+              180
+            ],
+            [
+              270,
+              270
+            ],
+            [
+              180,
+              270
+            ]
+          ],
+          "wholePieces": [
+            6
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        }
+      ],
+      "note": "前の確認画面に最初に表示した案です。画面内での修正結果は未受領のため、全体を再確認してください。 縦長の凸な台形を中心に、右上の三角形と右中段の正方形を突出部として分ける。",
+      "provenance": {
+        "kind": "previous_initial_groups",
+        "previousUiResultReceived": false,
+        "sourceFile": "primary-groups-review-20261128.json",
+        "sourceGroups": [
+          [
+            1,
+            2,
+            4,
+            5,
+            7
+          ],
+          [
+            3
+          ],
+          [
+            6
+          ]
+        ]
+      }
+    },
+    {
+      "figureId": "F22",
+      "round": 2,
+      "reviewStatus": "未確認",
+      "coordinateFrame": "figure_local_pixels",
+      "origin": [
+        310,
+        220
+      ],
+      "size": [
+        360,
+        450
+      ],
+      "pieces": [
+        {
+          "id": 1,
+          "polygon": [
+            [
+              90,
+              180
+            ],
+            [
+              270,
+              180
+            ],
+            [
+              90,
+              360
+            ]
+          ]
+        },
+        {
+          "id": 2,
+          "polygon": [
+            [
+              90,
+              0
+            ],
+            [
+              270,
+              180
+            ],
+            [
+              90,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 3,
+          "polygon": [
+            [
+              180,
+              90
+            ],
+            [
+              360,
+              90
+            ],
+            [
+              270,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 4,
+          "polygon": [
+            [
+              180,
+              270
+            ],
+            [
+              270,
+              180
+            ],
+            [
+              270,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 5,
+          "polygon": [
+            [
+              180,
+              270
+            ],
+            [
+              270,
+              270
+            ],
+            [
+              180,
+              360
+            ]
+          ]
+        },
+        {
+          "id": 6,
+          "polygon": [
+            [
+              0,
+              0
+            ],
+            [
+              90,
+              0
+            ],
+            [
+              90,
+              90
+            ],
+            [
+              0,
+              90
+            ]
+          ]
+        },
+        {
+          "id": 7,
+          "polygon": [
+            [
+              90,
+              360
+            ],
+            [
+              180,
+              270
+            ],
+            [
+              180,
+              360
+            ],
+            [
+              90,
+              450
+            ]
+          ]
+        }
+      ],
+      "regions": [
+        {
+          "id": "A",
+          "label": "1＋2＋4＋5＋7のまとまり",
+          "polygon": [
+            [
+              90,
+              0
+            ],
+            [
+              270,
+              180
+            ],
+            [
+              270,
+              270
+            ],
+            [
+              90,
+              450
+            ]
+          ],
+          "wholePieces": [
+            1,
+            2,
+            4,
+            5,
+            7
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "B",
+          "label": "3のまとまり",
+          "polygon": [
+            [
+              180,
+              90
+            ],
+            [
+              360,
+              90
+            ],
+            [
+              270,
+              180
+            ]
+          ],
+          "wholePieces": [
+            3
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "C",
+          "label": "6のまとまり",
+          "polygon": [
+            [
+              0,
+              0
+            ],
+            [
+              90,
+              0
+            ],
+            [
+              90,
+              90
+            ],
+            [
+              0,
+              90
+            ]
+          ],
+          "wholePieces": [
+            6
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        }
+      ],
+      "note": "前の確認画面に最初に表示した案です。画面内での修正結果は未受領のため、全体を再確認してください。 F21と共通する縦長の台形に、右上の三角形と左上の正方形が付いた構成として分ける。",
+      "provenance": {
+        "kind": "previous_initial_groups",
+        "previousUiResultReceived": false,
+        "sourceFile": "primary-groups-review-20261128.json",
+        "sourceGroups": [
+          [
+            1,
+            2,
+            4,
+            5,
+            7
+          ],
+          [
+            3
+          ],
+          [
+            6
+          ]
+        ]
+      }
+    },
+    {
+      "figureId": "F23",
+      "round": 2,
+      "reviewStatus": "未確認",
+      "coordinateFrame": "figure_local_pixels",
+      "origin": [
+        130,
+        310
+      ],
+      "size": [
+        450,
+        360
+      ],
+      "pieces": [
+        {
+          "id": 1,
+          "polygon": [
+            [
+              270,
+              90
+            ],
+            [
+              450,
+              90
+            ],
+            [
+              270,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 2,
+          "polygon": [
+            [
+              90,
+              270
+            ],
+            [
+              270,
+              90
+            ],
+            [
+              270,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 3,
+          "polygon": [
+            [
+              0,
+              180
+            ],
+            [
+              180,
+              180
+            ],
+            [
+              90,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 4,
+          "polygon": [
+            [
+              180,
+              90
+            ],
+            [
+              270,
+              90
+            ],
+            [
+              180,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 5,
+          "polygon": [
+            [
+              180,
+              0
+            ],
+            [
+              270,
+              90
+            ],
+            [
+              180,
+              90
+            ]
+          ]
+        },
+        {
+          "id": 6,
+          "polygon": [
+            [
+              90,
+              0
+            ],
+            [
+              180,
+              0
+            ],
+            [
+              180,
+              90
+            ],
+            [
+              90,
+              90
+            ]
+          ]
+        },
+        {
+          "id": 7,
+          "polygon": [
+            [
+              180,
+              270
+            ],
+            [
+              270,
+              270
+            ],
+            [
+              360,
+              360
+            ],
+            [
+              270,
+              360
+            ]
+          ]
+        }
+      ],
+      "regions": [
+        {
+          "id": "A",
+          "label": "1＋2のまとまり",
+          "polygon": [
+            [
+              90,
+              270
+            ],
+            [
+              270,
+              90
+            ],
+            [
+              450,
+              90
+            ],
+            [
+              270,
+              270
+            ]
+          ],
+          "wholePieces": [
+            1,
+            2
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "B",
+          "label": "3のまとまり",
+          "polygon": [
+            [
+              0,
+              180
+            ],
+            [
+              180,
+              180
+            ],
+            [
+              90,
+              270
+            ]
+          ],
+          "wholePieces": [
+            3
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "C",
+          "label": "4＋5＋6のまとまり",
+          "polygon": [
+            [
+              90,
+              0
+            ],
+            [
+              180,
+              0
+            ],
+            [
+              270,
+              90
+            ],
+            [
+              180,
+              180
+            ],
+            [
+              180,
+              90
+            ],
+            [
+              90,
+              90
+            ]
+          ],
+          "wholePieces": [
+            4,
+            5,
+            6
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "D",
+          "label": "7のまとまり",
+          "polygon": [
+            [
+              180,
+              270
+            ],
+            [
+              270,
+              270
+            ],
+            [
+              360,
+              360
+            ],
+            [
+              270,
+              360
+            ]
+          ],
+          "wholePieces": [
+            7
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        }
+      ],
+      "note": "前の確認画面に最初に表示した案です。画面内での修正結果は未受領のため、全体を再確認してください。 中央の平行四辺形、左の三角形、上の曲がった突出部、右下の細い突出部に分ける。",
+      "provenance": {
+        "kind": "previous_initial_groups",
+        "previousUiResultReceived": false,
+        "sourceFile": "primary-groups-review-20261128.json",
+        "sourceGroups": [
+          [
+            1,
+            2
+          ],
+          [
+            3
+          ],
+          [
+            4,
+            5,
+            6
+          ],
+          [
+            7
+          ]
+        ]
+      }
+    },
+    {
+      "figureId": "F24",
+      "round": 2,
+      "reviewStatus": "未確認",
+      "coordinateFrame": "figure_local_pixels",
+      "origin": [
+        310,
+        400
+      ],
+      "size": [
+        270,
+        540
+      ],
+      "pieces": [
+        {
+          "id": 1,
+          "polygon": [
+            [
+              90,
+              0
+            ],
+            [
+              270,
+              180
+            ],
+            [
+              90,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 2,
+          "polygon": [
+            [
+              90,
+              180
+            ],
+            [
+              270,
+              180
+            ],
+            [
+              90,
+              360
+            ]
+          ]
+        },
+        {
+          "id": 3,
+          "polygon": [
+            [
+              0,
+              270
+            ],
+            [
+              90,
+              180
+            ],
+            [
+              90,
+              360
+            ]
+          ]
+        },
+        {
+          "id": 4,
+          "polygon": [
+            [
+              0,
+              270
+            ],
+            [
+              90,
+              360
+            ],
+            [
+              0,
+              360
+            ]
+          ]
+        },
+        {
+          "id": 5,
+          "polygon": [
+            [
+              0,
+              360
+            ],
+            [
+              90,
+              360
+            ],
+            [
+              90,
+              450
+            ]
+          ]
+        },
+        {
+          "id": 6,
+          "polygon": [
+            [
+              90,
+              360
+            ],
+            [
+              180,
+              360
+            ],
+            [
+              180,
+              450
+            ],
+            [
+              90,
+              450
+            ]
+          ]
+        },
+        {
+          "id": 7,
+          "polygon": [
+            [
+              0,
+              360
+            ],
+            [
+              90,
+              450
+            ],
+            [
+              90,
+              540
+            ],
+            [
+              0,
+              450
+            ]
+          ]
+        }
+      ],
+      "regions": [
+        {
+          "id": "A",
+          "label": "1＋2のまとまり",
+          "polygon": [
+            [
+              90,
+              0
+            ],
+            [
+              270,
+              180
+            ],
+            [
+              90,
+              360
+            ]
+          ],
+          "wholePieces": [
+            1,
+            2
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "B",
+          "label": "3＋4＋5＋7のまとまり",
+          "polygon": [
+            [
+              0,
+              270
+            ],
+            [
+              90,
+              180
+            ],
+            [
+              90,
+              540
+            ],
+            [
+              0,
+              450
+            ]
+          ],
+          "wholePieces": [
+            3,
+            4,
+            5,
+            7
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "C",
+          "label": "6のまとまり",
+          "polygon": [
+            [
+              90,
+              360
+            ],
+            [
+              180,
+              360
+            ],
+            [
+              180,
+              450
+            ],
+            [
+              90,
+              450
+            ]
+          ],
+          "wholePieces": [
+            6
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        }
+      ],
+      "note": "前の確認画面に最初に表示した案です。画面内での修正結果は未受領のため、全体を再確認してください。 上側の大きな三角形、左下の縦長の台形、右下の正方形に分ける。",
+      "provenance": {
+        "kind": "previous_initial_groups",
+        "previousUiResultReceived": false,
+        "sourceFile": "primary-groups-review-20261128.json",
+        "sourceGroups": [
+          [
+            1,
+            2
+          ],
+          [
+            3,
+            4,
+            5,
+            7
+          ],
+          [
+            6
+          ]
+        ]
+      }
+    },
+    {
+      "figureId": "F25",
+      "round": 2,
+      "reviewStatus": "未確認",
+      "coordinateFrame": "figure_local_pixels",
+      "origin": [
+        310,
+        310
+      ],
+      "size": [
+        360,
+        360
+      ],
+      "pieces": [
+        {
+          "id": 1,
+          "polygon": [
+            [
+              90,
+              270
+            ],
+            [
+              270,
+              90
+            ],
+            [
+              270,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 2,
+          "polygon": [
+            [
+              90,
+              90
+            ],
+            [
+              270,
+              90
+            ],
+            [
+              90,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 3,
+          "polygon": [
+            [
+              90,
+              90
+            ],
+            [
+              180,
+              0
+            ],
+            [
+              270,
+              90
+            ]
+          ]
+        },
+        {
+          "id": 4,
+          "polygon": [
+            [
+              270,
+              90
+            ],
+            [
+              360,
+              180
+            ],
+            [
+              270,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 5,
+          "polygon": [
+            [
+              270,
+              90
+            ],
+            [
+              360,
+              90
+            ],
+            [
+              360,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 6,
+          "polygon": [
+            [
+              90,
+              270
+            ],
+            [
+              180,
+              270
+            ],
+            [
+              180,
+              360
+            ],
+            [
+              90,
+              360
+            ]
+          ]
+        },
+        {
+          "id": 7,
+          "polygon": [
+            [
+              0,
+              180
+            ],
+            [
+              90,
+              270
+            ],
+            [
+              90,
+              360
+            ],
+            [
+              0,
+              270
+            ]
+          ]
+        }
+      ],
+      "regions": [
+        {
+          "id": "A",
+          "label": "1＋2＋3のまとまり",
+          "polygon": [
+            [
+              90,
+              90
+            ],
+            [
+              180,
+              0
+            ],
+            [
+              270,
+              90
+            ],
+            [
+              270,
+              270
+            ],
+            [
+              90,
+              270
+            ]
+          ],
+          "wholePieces": [
+            1,
+            2,
+            3
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "B",
+          "label": "4＋5のまとまり",
+          "polygon": [
+            [
+              270,
+              90
+            ],
+            [
+              360,
+              90
+            ],
+            [
+              360,
+              180
+            ],
+            [
+              270,
+              180
+            ]
+          ],
+          "wholePieces": [
+            4,
+            5
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "C",
+          "label": "6＋7のまとまり",
+          "polygon": [
+            [
+              0,
+              180
+            ],
+            [
+              90,
+              270
+            ],
+            [
+              180,
+              270
+            ],
+            [
+              180,
+              360
+            ],
+            [
+              90,
+              360
+            ],
+            [
+              0,
+              270
+            ]
+          ],
+          "wholePieces": [
+            6,
+            7
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        }
+      ],
+      "note": "前の確認画面に最初に表示した案です。画面内での修正結果は未受領のため、全体を再確認してください。 中央の五角形、右の正方形、左下の曲がった突出部に分ける。F1と同程度の粗さ。",
+      "provenance": {
+        "kind": "previous_initial_groups",
+        "previousUiResultReceived": false,
+        "sourceFile": "primary-groups-review-20261128.json",
+        "sourceGroups": [
+          [
+            1,
+            2,
+            3
+          ],
+          [
+            4,
+            5
+          ],
+          [
+            6,
+            7
+          ]
+        ]
+      }
+    },
+    {
+      "figureId": "F26",
+      "round": 2,
+      "reviewStatus": "未確認",
+      "coordinateFrame": "figure_local_pixels",
+      "origin": [
+        310,
+        310
+      ],
+      "size": [
+        360,
+        360
+      ],
+      "pieces": [
+        {
+          "id": 1,
+          "polygon": [
+            [
+              90,
+              270
+            ],
+            [
+              270,
+              90
+            ],
+            [
+              270,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 2,
+          "polygon": [
+            [
+              90,
+              90
+            ],
+            [
+              270,
+              90
+            ],
+            [
+              90,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 3,
+          "polygon": [
+            [
+              90,
+              90
+            ],
+            [
+              180,
+              0
+            ],
+            [
+              270,
+              90
+            ]
+          ]
+        },
+        {
+          "id": 4,
+          "polygon": [
+            [
+              270,
+              90
+            ],
+            [
+              360,
+              180
+            ],
+            [
+              270,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 5,
+          "polygon": [
+            [
+              270,
+              90
+            ],
+            [
+              360,
+              90
+            ],
+            [
+              360,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 6,
+          "polygon": [
+            [
+              90,
+              270
+            ],
+            [
+              180,
+              270
+            ],
+            [
+              180,
+              360
+            ],
+            [
+              90,
+              360
+            ]
+          ]
+        },
+        {
+          "id": 7,
+          "polygon": [
+            [
+              0,
+              0
+            ],
+            [
+              90,
+              90
+            ],
+            [
+              90,
+              180
+            ],
+            [
+              0,
+              90
+            ]
+          ]
+        }
+      ],
+      "regions": [
+        {
+          "id": "A",
+          "label": "1＋2＋3のまとまり",
+          "polygon": [
+            [
+              90,
+              90
+            ],
+            [
+              180,
+              0
+            ],
+            [
+              270,
+              90
+            ],
+            [
+              270,
+              270
+            ],
+            [
+              90,
+              270
+            ]
+          ],
+          "wholePieces": [
+            1,
+            2,
+            3
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "B",
+          "label": "4＋5のまとまり",
+          "polygon": [
+            [
+              270,
+              90
+            ],
+            [
+              360,
+              90
+            ],
+            [
+              360,
+              180
+            ],
+            [
+              270,
+              180
+            ]
+          ],
+          "wholePieces": [
+            4,
+            5
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "C",
+          "label": "6のまとまり",
+          "polygon": [
+            [
+              90,
+              270
+            ],
+            [
+              180,
+              270
+            ],
+            [
+              180,
+              360
+            ],
+            [
+              90,
+              360
+            ]
+          ],
+          "wholePieces": [
+            6
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "D",
+          "label": "7のまとまり",
+          "polygon": [
+            [
+              0,
+              0
+            ],
+            [
+              90,
+              90
+            ],
+            [
+              90,
+              180
+            ],
+            [
+              0,
+              90
+            ]
+          ],
+          "wholePieces": [
+            7
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        }
+      ],
+      "note": "前の確認画面に最初に表示した案です。画面内での修正結果は未受領のため、全体を再確認してください。 中央の五角形を一つにまとめ、右の正方形・下の正方形・左上の細い突出部を分ける。",
+      "provenance": {
+        "kind": "previous_initial_groups",
+        "previousUiResultReceived": false,
+        "sourceFile": "primary-groups-review-20261128.json",
+        "sourceGroups": [
+          [
+            1,
+            2,
+            3
+          ],
+          [
+            4,
+            5
+          ],
+          [
+            6
+          ],
+          [
+            7
+          ]
+        ]
+      }
+    },
+    {
+      "figureId": "F27",
+      "round": 2,
+      "reviewStatus": "未確認",
+      "coordinateFrame": "figure_local_pixels",
+      "origin": [
+        130,
+        400
+      ],
+      "size": [
+        450,
+        270
+      ],
+      "pieces": [
+        {
+          "id": 1,
+          "polygon": [
+            [
+              270,
+              0
+            ],
+            [
+              450,
+              0
+            ],
+            [
+              270,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 2,
+          "polygon": [
+            [
+              90,
+              180
+            ],
+            [
+              270,
+              0
+            ],
+            [
+              270,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 3,
+          "polygon": [
+            [
+              90,
+              0
+            ],
+            [
+              180,
+              90
+            ],
+            [
+              90,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 4,
+          "polygon": [
+            [
+              0,
+              180
+            ],
+            [
+              90,
+              90
+            ],
+            [
+              90,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 5,
+          "polygon": [
+            [
+              90,
+              180
+            ],
+            [
+              180,
+              180
+            ],
+            [
+              180,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 6,
+          "polygon": [
+            [
+              0,
+              180
+            ],
+            [
+              90,
+              180
+            ],
+            [
+              90,
+              270
+            ],
+            [
+              0,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 7,
+          "polygon": [
+            [
+              270,
+              180
+            ],
+            [
+              360,
+              90
+            ],
+            [
+              450,
+              90
+            ],
+            [
+              360,
+              180
+            ]
+          ]
+        }
+      ],
+      "regions": [
+        {
+          "id": "A",
+          "label": "1＋2＋7のまとまり",
+          "polygon": [
+            [
+              90,
+              180
+            ],
+            [
+              270,
+              0
+            ],
+            [
+              450,
+              0
+            ],
+            [
+              360,
+              90
+            ],
+            [
+              450,
+              90
+            ],
+            [
+              360,
+              180
+            ]
+          ],
+          "wholePieces": [
+            1,
+            2,
+            7
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "B",
+          "label": "3＋4＋6のまとまり",
+          "polygon": [
+            [
+              0,
+              180
+            ],
+            [
+              90,
+              90
+            ],
+            [
+              90,
+              0
+            ],
+            [
+              180,
+              90
+            ],
+            [
+              90,
+              180
+            ],
+            [
+              90,
+              270
+            ],
+            [
+              0,
+              270
+            ]
+          ],
+          "wholePieces": [
+            3,
+            4,
+            6
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "C",
+          "label": "5のまとまり",
+          "polygon": [
+            [
+              90,
+              180
+            ],
+            [
+              180,
+              180
+            ],
+            [
+              180,
+              270
+            ]
+          ],
+          "wholePieces": [
+            5
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        }
+      ],
+      "note": "前の確認画面に最初に表示した案です。画面内での修正結果は未受領のため、全体を再確認してください。 右側の大きなまとまり、左側の縦長のまとまり、下向きの小さな三角形に分ける。",
+      "provenance": {
+        "kind": "previous_initial_groups",
+        "previousUiResultReceived": false,
+        "sourceFile": "primary-groups-review-20261128.json",
+        "sourceGroups": [
+          [
+            1,
+            2,
+            7
+          ],
+          [
+            3,
+            4,
+            6
+          ],
+          [
+            5
+          ]
+        ]
+      }
+    },
+    {
+      "figureId": "F28",
+      "round": 2,
+      "reviewStatus": "未確認",
+      "coordinateFrame": "figure_local_pixels",
+      "origin": [
+        400,
+        400
+      ],
+      "size": [
+        450,
+        360
+      ],
+      "pieces": [
+        {
+          "id": 1,
+          "polygon": [
+            [
+              0,
+              180
+            ],
+            [
+              180,
+              0
+            ],
+            [
+              180,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 2,
+          "polygon": [
+            [
+              180,
+              0
+            ],
+            [
+              360,
+              180
+            ],
+            [
+              180,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 3,
+          "polygon": [
+            [
+              180,
+              180
+            ],
+            [
+              360,
+              180
+            ],
+            [
+              270,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 4,
+          "polygon": [
+            [
+              180,
+              180
+            ],
+            [
+              270,
+              270
+            ],
+            [
+              180,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 5,
+          "polygon": [
+            [
+              90,
+              180
+            ],
+            [
+              180,
+              180
+            ],
+            [
+              180,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 6,
+          "polygon": [
+            [
+              180,
+              270
+            ],
+            [
+              270,
+              270
+            ],
+            [
+              270,
+              360
+            ],
+            [
+              180,
+              360
+            ]
+          ]
+        },
+        {
+          "id": 7,
+          "polygon": [
+            [
+              270,
+              270
+            ],
+            [
+              360,
+              180
+            ],
+            [
+              450,
+              180
+            ],
+            [
+              360,
+              270
+            ]
+          ]
+        }
+      ],
+      "regions": [
+        {
+          "id": "A",
+          "label": "1＋2のまとまり",
+          "polygon": [
+            [
+              0,
+              180
+            ],
+            [
+              180,
+              0
+            ],
+            [
+              360,
+              180
+            ]
+          ],
+          "wholePieces": [
+            1,
+            2
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "B",
+          "label": "3＋4＋5＋7のまとまり",
+          "polygon": [
+            [
+              90,
+              180
+            ],
+            [
+              450,
+              180
+            ],
+            [
+              360,
+              270
+            ],
+            [
+              180,
+              270
+            ]
+          ],
+          "wholePieces": [
+            3,
+            4,
+            5,
+            7
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "C",
+          "label": "6のまとまり",
+          "polygon": [
+            [
+              180,
+              270
+            ],
+            [
+              270,
+              270
+            ],
+            [
+              270,
+              360
+            ],
+            [
+              180,
+              360
+            ]
+          ],
+          "wholePieces": [
+            6
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        }
+      ],
+      "note": "前の確認画面に最初に表示した案です。画面内での修正結果は未受領のため、全体を再確認してください。 上の大きな三角形、下の横長の台形、下向きの正方形に分ける。",
+      "provenance": {
+        "kind": "previous_initial_groups",
+        "previousUiResultReceived": false,
+        "sourceFile": "primary-groups-review-20261128.json",
+        "sourceGroups": [
+          [
+            1,
+            2
+          ],
+          [
+            3,
+            4,
+            5,
+            7
+          ],
+          [
+            6
+          ]
+        ]
+      }
+    },
+    {
+      "figureId": "F29",
+      "round": 2,
+      "reviewStatus": "未確認",
+      "coordinateFrame": "figure_local_pixels",
+      "origin": [
+        310,
+        310
+      ],
+      "size": [
+        450,
+        360
+      ],
+      "pieces": [
+        {
+          "id": 1,
+          "polygon": [
+            [
+              90,
+              90
+            ],
+            [
+              270,
+              90
+            ],
+            [
+              270,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 2,
+          "polygon": [
+            [
+              270,
+              90
+            ],
+            [
+              450,
+              90
+            ],
+            [
+              270,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 3,
+          "polygon": [
+            [
+              270,
+              270
+            ],
+            [
+              360,
+              180
+            ],
+            [
+              450,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 4,
+          "polygon": [
+            [
+              270,
+              0
+            ],
+            [
+              360,
+              90
+            ],
+            [
+              270,
+              90
+            ]
+          ]
+        },
+        {
+          "id": 5,
+          "polygon": [
+            [
+              270,
+              270
+            ],
+            [
+              360,
+              270
+            ],
+            [
+              270,
+              360
+            ]
+          ]
+        },
+        {
+          "id": 6,
+          "polygon": [
+            [
+              180,
+              0
+            ],
+            [
+              270,
+              0
+            ],
+            [
+              270,
+              90
+            ],
+            [
+              180,
+              90
+            ]
+          ]
+        },
+        {
+          "id": 7,
+          "polygon": [
+            [
+              0,
+              0
+            ],
+            [
+              90,
+              0
+            ],
+            [
+              180,
+              90
+            ],
+            [
+              90,
+              90
+            ]
+          ]
+        }
+      ],
+      "regions": [
+        {
+          "id": "A",
+          "label": "1＋2のまとまり",
+          "polygon": [
+            [
+              90,
+              90
+            ],
+            [
+              450,
+              90
+            ],
+            [
+              270,
+              270
+            ]
+          ],
+          "wholePieces": [
+            1,
+            2
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "B",
+          "label": "4＋6のまとまり",
+          "polygon": [
+            [
+              180,
+              0
+            ],
+            [
+              270,
+              0
+            ],
+            [
+              360,
+              90
+            ],
+            [
+              180,
+              90
+            ]
+          ],
+          "wholePieces": [
+            4,
+            6
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "C",
+          "label": "7のまとまり",
+          "polygon": [
+            [
+              0,
+              0
+            ],
+            [
+              90,
+              0
+            ],
+            [
+              180,
+              90
+            ],
+            [
+              90,
+              90
+            ]
+          ],
+          "wholePieces": [
+            7
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "D",
+          "label": "3＋5のまとまり",
+          "polygon": [
+            [
+              270,
+              270
+            ],
+            [
+              360,
+              180
+            ],
+            [
+              450,
+              270
+            ],
+            [
+              360,
+              270
+            ],
+            [
+              270,
+              360
+            ]
+          ],
+          "wholePieces": [
+            3,
+            5
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "previous_initial_group_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        }
+      ],
+      "note": "前の確認画面に最初に表示した案です。画面内での修正結果は未受領のため、全体を再確認してください。 中央の下向き三角形、上の台形、左上の細い突出部、右下の折れた突出部に分ける。",
+      "provenance": {
+        "kind": "previous_initial_groups",
+        "previousUiResultReceived": false,
+        "sourceFile": "primary-groups-review-20261128.json",
+        "sourceGroups": [
+          [
+            1,
+            2
+          ],
+          [
+            4,
+            6
+          ],
+          [
+            7
+          ],
+          [
+            3,
+            5
+          ]
+        ]
+      }
+    },
+    {
+      "figureId": "F30",
+      "round": 2,
+      "reviewStatus": "未確認",
+      "coordinateFrame": "figure_local_pixels",
+      "origin": [
+        310,
+        130
+      ],
+      "size": [
+        450,
+        540
+      ],
+      "pieces": [
+        {
+          "id": 1,
+          "polygon": [
+            [
+              90,
+              270
+            ],
+            [
+              270,
+              270
+            ],
+            [
+              90,
+              450
+            ]
+          ]
+        },
+        {
+          "id": 2,
+          "polygon": [
+            [
+              90,
+              270
+            ],
+            [
+              270,
+              90
+            ],
+            [
+              270,
+              270
+            ]
+          ]
+        },
+        {
+          "id": 3,
+          "polygon": [
+            [
+              90,
+              450
+            ],
+            [
+              180,
+              360
+            ],
+            [
+              180,
+              540
+            ]
+          ]
+        },
+        {
+          "id": 4,
+          "polygon": [
+            [
+              0,
+              360
+            ],
+            [
+              90,
+              360
+            ],
+            [
+              90,
+              450
+            ]
+          ]
+        },
+        {
+          "id": 5,
+          "polygon": [
+            [
+              180,
+              360
+            ],
+            [
+              270,
+              270
+            ],
+            [
+              270,
+              360
+            ]
+          ]
+        },
+        {
+          "id": 6,
+          "polygon": [
+            [
+              270,
+              90
+            ],
+            [
+              360,
+              90
+            ],
+            [
+              360,
+              180
+            ],
+            [
+              270,
+              180
+            ]
+          ]
+        },
+        {
+          "id": 7,
+          "polygon": [
+            [
+              270,
+              90
+            ],
+            [
+              360,
+              0
+            ],
+            [
+              450,
+              0
+            ],
+            [
+              360,
+              90
+            ]
+          ]
+        }
+      ],
+      "regions": [
+        {
+          "id": "A",
+          "label": "1の上側・2・5 → 三角形 ＋ 長方形",
+          "polygon": [
+            [
+              90,
+              270
+            ],
+            [
+              270,
+              90
+            ],
+            [
+              270,
+              360
+            ],
+            [
+              90,
+              360
+            ]
+          ],
+          "wholePieces": [
+            2,
+            5
+          ],
+          "partialPieces": [
+            {
+              "piece": 1,
+              "polygon": [
+                [
+                  90,
+                  270
+                ],
+                [
+                  270,
+                  270
+                ],
+                [
+                  180,
+                  360
+                ],
+                [
+                  90,
+                  360
+                ]
+              ],
+              "fraction": 0.75
+            }
+          ],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "user_description_coordinate_proposal",
+            "detail": "チャットでの形状説明を満たすように算出した境界。端点座標の確認はこれから。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          },
+          "substructure": [
+            {
+              "label": "三角形",
+              "polygon": [
+                [
+                  90,
+                  270
+                ],
+                [
+                  270,
+                  90
+                ],
+                [
+                  270,
+                  270
+                ]
+              ]
+            },
+            {
+              "label": "長方形",
+              "polygon": [
+                [
+                  90,
+                  270
+                ],
+                [
+                  270,
+                  270
+                ],
+                [
+                  270,
+                  360
+                ],
+                [
+                  90,
+                  360
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "id": "B",
+          "label": "4・1の下側・3 → 大きな三角形",
+          "polygon": [
+            [
+              0,
+              360
+            ],
+            [
+              180,
+              360
+            ],
+            [
+              180,
+              540
+            ]
+          ],
+          "wholePieces": [
+            3,
+            4
+          ],
+          "partialPieces": [
+            {
+              "piece": 1,
+              "polygon": [
+                [
+                  90,
+                  360
+                ],
+                [
+                  180,
+                  360
+                ],
+                [
+                  90,
+                  450
+                ]
+              ],
+              "fraction": 0.25
+            }
+          ],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "user_description_coordinate_proposal",
+            "detail": "チャットでの形状説明を満たすように算出した境界。端点座標の確認はこれから。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        },
+        {
+          "id": "C",
+          "label": "6＋7の先端（提案）",
+          "polygon": [
+            [
+              270,
+              90
+            ],
+            [
+              360,
+              0
+            ],
+            [
+              450,
+              0
+            ],
+            [
+              360,
+              90
+            ],
+            [
+              360,
+              180
+            ],
+            [
+              270,
+              180
+            ]
+          ],
+          "wholePieces": [
+            6,
+            7
+          ],
+          "partialPieces": [],
+          "reviewStatus": "未確認",
+          "provenance": {
+            "kind": "assistant_remainder_proposal",
+            "detail": "元の部品の辺接続カタログにある輪郭を使用。前回の確認画面の操作結果を表すものではない。",
+            "coordinatesUserConfirmed": false,
+            "previousUiResultReceived": false
+          }
+        }
+      ],
+      "note": "1を途中で切り、1の上側＋2＋5を三角形と長方形のまとまり、4＋1の下側＋3を大きな三角形とする案です。6＋7の先端も再確認対象です。",
+      "provenance": {
+        "kind": "user_description_and_assistant_completion",
+        "previousUiResultReceived": false,
+        "sourceFile": "six-region-corrections.json",
+        "userDescription": "1の下の部分除いて125で三角形に長方形がついた図形で413で三角形として認識すると思う",
+        "coordinatesUserConfirmed": false,
+        "remainderAssignmentsUserConfirmed": false
+      },
+      "cut": {
+        "sourcePiece": 1,
+        "endpoints": [
+          [
+            90,
+            360
+          ],
+          [
+            180,
+            360
+          ]
+        ]
+      }
+    }
+  ],
+  "localValidation": {
+    "figureCount": 30,
+    "allReviewStatusesUnconfirmed": true,
+    "declaredSourceAreasAndRegionAreasAgree": true,
+    "sourcePieceAreasAccountedExactlyOnce": true,
+    "allRegionVerticesWithinFigureSize": true,
+    "independentGeometryReview": "requested_after_save"
+  }
+}

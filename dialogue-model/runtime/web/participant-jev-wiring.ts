@@ -359,7 +359,7 @@ export async function createParticipantCacheObserver(options: {directory:string;
       } catch { throw new ParticipantJevError('initialization_failed'); }
     },
     async reobserve(input,callOptions) {
-      check({ownImage:input.ownImage,ownAnchors:input.ownAnchors});
+      check({ownImage:input.ownImage,ownAnchors:input.ownAnchors, ...(input.ownParts !== undefined ? {ownParts:input.ownParts} : {})});
       return options.reobserver.reobserve(input,{...callOptions,timeoutMs:options.profile.timeouts.observationMs});
     },
   };

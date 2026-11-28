@@ -1,3 +1,4 @@
+import { isPartObservationVersion } from '../stimuli/part-geometry.ts';
 import { SCRIPTED_OPENING_MODE, SCRIPTED_OPENING_TEXT, isOpeningMode } from './opening-mode.ts';
 import { ParticipantUsageLedger } from '../web/participant-usage.ts';
 import { PARTICIPANT_USAGE_ONLY } from '../web/participant-usage-policy.ts';
@@ -104,6 +105,7 @@ export function parseAiNamesV2(text, slots) {
  *   recoveryTimers?: {set(callback: () => void, delayMs: number): ReturnType<typeof setTimeout>, clear(handle: ReturnType<typeof setTimeout>): void},
  *   decisionShadowClient?: {chooseAction(request: object): Promise<any>} | null,
  *   activeDecision?: {purpose: string, client: {chooseAction(request: object): Promise<any>}} | null,
+ *   partObservationVersion?: import('../stimuli/part-geometry.ts').PartObservationVersion,
  *   openingMode?: import("./opening-mode.ts").OpeningMode, utteranceStyle?: string, rotationMode?: string, groundingShadow?: import('./grounding-shadow.ts').GroundingShadowOptions | null,
  *   memoryPruneVersion?: import("../memory/reference-graph.mjs").MemoryPruneVersion,
  *   localGrounding?: import('../local-grounding/contract.ts').LocalGroundingOptions | null,
@@ -116,7 +118,7 @@ export async function createNamingTaskV2({
   createTrial = createTrialV2, scoreTrial = defaultScoreTrial, judge = null, now = () => Date.now(),
   recoveryTimers = { set(callback, delayMs) { const timer = setTimeout(callback, delayMs); timer.unref?.(); return timer; }, clear: clearTimeout },
   restore = null, onPersist = null, onPersistFailure = null, onPersistSlow = null, decisionShadowClient = null, activeDecision = null, utteranceStyle = "default",
-  openingMode = undefined, groundingShadow = null, localGrounding = null, onLocalGroundingTrace = null, jevResearch = null, rotationMode = "relative_pm90", figureSelection = undefined,
+  partObservationVersion = undefined, openingMode = undefined, groundingShadow = null, localGrounding = null, onLocalGroundingTrace = null, jevResearch = null, rotationMode = "relative_pm90", figureSelection = undefined,
 }) {
   // Checked before any generation, observation or persist.
   const rotation = trialRotation(restore, rotationMode);
@@ -142,6 +144,13 @@ export async function createNamingTaskV2({
         Object.hasOwn(restore.options ?? {}, 'openingMode') && !isOpeningMode(saved)) throw new NamingTaskError('invalid_options');
     openingMode = saved;
   }
+  if (restore) {
+    const saved = restore.options?.partObservationVersion;
+    if (partObservationVersion !== undefined && partObservationVersion !== saved ||
+        Object.hasOwn(restore.options ?? {}, 'partObservationVersion') && !isPartObservationVersion(saved)) throw new NamingTaskError('invalid_options');
+    partObservationVersion = saved;
+  }
+  if (partObservationVersion !== undefined && (!isPartObservationVersion(partObservationVersion) || !jev)) throw new NamingTaskError('invalid_options');
   if (openingMode !== undefined && !isOpeningMode(openingMode)) throw new NamingTaskError('invalid_options');
   const scriptedOpening = openingMode === SCRIPTED_OPENING_MODE ? SCRIPTED_OPENING_TEXT : SCRIPTED_OPENING;
   const generatedOpening = openingMode === undefined && isGenerationV17(jev?.generationRetryVersion);
@@ -175,7 +184,7 @@ export async function createNamingTaskV2({
     throw new NamingTaskError("invalid_options");
   }
   const scene = participantView(trial);
-  const model = modelView(trial);
+  const model = modelView(trial, { partObservationVersion });
   const humanSlots = scene.shapes.map((shape) => shape.id);
   const requests = restore?.requests ? clone(restore.requests) : [];
   // Private per-attempt timings; they survive restore with the record.
@@ -232,7 +241,7 @@ export async function createNamingTaskV2({
     },
   };
   const dialogue = createDialogueV2({ client: trackingClient, strategy, image: { mimeType: model.mimeType, base64: model.png.toString("base64") },
-    anchors: model.anchors, judge, referenceMemory, memoryPruneVersion, decisionShadowClient: trackDecisions(decisionShadowClient, "decision_shadow"),
+    anchors: model.anchors, ...(model.parts ? { ownParts: model.parts } : {}), judge, referenceMemory, memoryPruneVersion, decisionShadowClient: trackDecisions(decisionShadowClient, "decision_shadow"),
     activeDecision: activeDecision && { ...activeDecision, client: trackDecisions(activeDecision.client, "decision_active") }, utteranceStyle: style,
     groundingShadow: grounding, onGroundingShadow: grounding ? (record) => { groundingRecords.push(record); } : null,
     localGrounding: local, onLocalGroundingTrace,
@@ -566,7 +575,7 @@ export async function createNamingTaskV2({
     const savedTraces = completion ? jevTraces.map((trace, index) => index === completion.traceIndex ? completion.trace : trace) : jevTraces;
     const record = {
       recordId, version: VERSION, trialId: trial.trialId, seed, strategy, startedAt, updatedAt: new Date(now()).toISOString(),
-      options: { visualAid: false, ...(openingMode ? { openingMode } : {}), referenceMemory, ...(memoryPruneVersion ? { memoryPruneVersion } : {}), decisionShadow: Boolean(decisionShadowClient), activeDecision: activeDecision?.purpose ?? null, utteranceStyle: style,
+      options: { visualAid: false, ...(partObservationVersion ? { partObservationVersion } : {}), ...(openingMode ? { openingMode } : {}), referenceMemory, ...(memoryPruneVersion ? { memoryPruneVersion } : {}), decisionShadow: Boolean(decisionShadowClient), activeDecision: activeDecision?.purpose ?? null, utteranceStyle: style,
         // Legacy records keep their original shape; they never gain rotation fields on restore.
         ...(rotation.legacy ? {} : { rotationMode: rotation.mode }),
         // Present only for a trial that selected figures, so earlier records keep their shape.

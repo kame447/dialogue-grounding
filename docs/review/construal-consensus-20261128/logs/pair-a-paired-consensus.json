@@ -1,0 +1,3494 @@
+{
+  "group": "a",
+  "opusAgent": "CalmFermi",
+  "opusModel": "claude-opus-5-5",
+  "terraAgent": "FrostyGauss",
+  "sources": {
+    "opusReviewerRound1": "/Users/Shogo/Research/dialogue-grounding/private-runs/2026-11-28-construal-consensus-CherryCurie/paired-review-v1/opus-a/round1-independent.json",
+    "opusParentReused": "/Users/Shogo/Research/dialogue-grounding/private-runs/2026-11-28-construal-consensus-CherryCurie/paired-review-v1/opus-a/completed-parent-observations.json",
+    "terraRound1": "/Users/Shogo/Research/dialogue-grounding/private-runs/2026-11-28-construal-consensus-CherryCurie/images-v1/terra-a/round1-observations.json",
+    "terraRound2": "/Users/Shogo/Research/dialogue-grounding/private-runs/2026-11-28-construal-consensus-CherryCurie/images-v1/terra-a/round2-crossreview.json",
+    "reviewRequest": "/Users/Shogo/Research/dialogue-grounding/private-runs/2026-11-28-construal-consensus-CherryCurie/paired-review-v1/opus-a/round2-review-request.md"
+  },
+  "policy": {
+    "consensusCandidates": "双方（Opus 側と Terra）が支持した候補のみ。片方だけの候補は discussion に残す。",
+    "confidence": "双方が示した確信度のうち低い方を採る。",
+    "noConstrual": "双方が見立てなしと判断した項目は 合意 かつ noConstrual true。未合意は consensusCandidates 空・noConstrual true・noConstrualReason を「合意に至らず：」で始める。",
+    "opusSource": "reviewer は CalmFermi の独立観察（20項目）、parent は CherryCurie の保存済み独立観察（10項目）。親の項目では CalmFermi が Opus 側の合議を担当した。"
+  },
+  "exchange": [
+    {
+      "ts": "2026-11-28T05:49:49Z",
+      "event": "CalmFermi が round1-independent.json を保存（この後に親・Terra の結果を読んだ）"
+    },
+    {
+      "ts": "2026-11-28T05:55:25Z",
+      "mail": 23352,
+      "frm": "CalmFermi",
+      "to": "FrostyGauss",
+      "event": "照合と依頼（round2-review-request.md）"
+    },
+    {
+      "ts": "2026-11-28T05:56:38Z",
+      "mail": 23353,
+      "frm": "FrostyGauss",
+      "to": "CalmFermi",
+      "event": "30項目の判断（round2-crossreview.json）"
+    },
+    {
+      "ts": "2026-11-28T05:59:46Z",
+      "mail": 23357,
+      "frm": "CalmFermi",
+      "to": "FrostyGauss",
+      "event": "最終案の通知（23・27 で Terra 案を追加支持。異議があれば元の判断に戻す）"
+    }
+  ],
+  "items": [
+    {
+      "item": "item-01",
+      "opusSource": "reviewer",
+      "opusIndependent": {
+        "item": "item-01",
+        "silhouetteImpression": "左中段に正方形（P3）が突き出し、小三角（P2）を介して大きな直角三角形（P1）につながる。P1の水平な上辺から細い台形（P4）が右上へ斜めに立ち上がり、P1右上の角から小三角（P5）が右へ尖る。P1の下の頂点は右下に深く垂れる。翼を打ち上げて左へ飛ぶ鳥に見える。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "カモ",
+            "posture": "首を前へ伸ばし、片方の翼を高く打ち上げて飛ぶ",
+            "direction": "左向き（頭が左）",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "胴体（下へ垂れる三角部は打ち下ろした手前の翼または腹）",
+                "evidence": "最大部品（56%）。水平な上辺が首元から尾元まで続く背中の線になり、その下に体の重みが垂れる"
+              },
+              {
+                "id": "P2",
+                "role": "首",
+                "evidence": "頭（P3）と胴（P1）の間をつなぐ小三角（6%）。前から後ろへ斜めに下がって胴に入る"
+              },
+              {
+                "id": "P3",
+                "role": "頭",
+                "evidence": "左端に単独で突き出した正方形（12.5%）。胴から首を介して前方へ離れている"
+              },
+              {
+                "id": "P4",
+                "role": "打ち上げた翼",
+                "evidence": "P1上辺の中ほどから右上へ斜めに伸びる細長い台形（18.75%）。羽ばたきで上げた翼の形"
+              },
+              {
+                "id": "P5",
+                "role": "尾",
+                "evidence": "P1右上の角から後方（右）へ尖る小三角（6%）。頭と反対側の端にある"
+              }
+            ],
+            "evidence": "頭（P3）・首（P2）・背中の線（P1上辺）・翼（P4）・尾（P5）が左から右へ順に並び、首を前に伸ばして飛ぶ水鳥の側面の配置に合う。",
+            "weaknesses": "頭が正方形でくちばしがない。P1の下に垂れる三角部は胴としては深く、後端（右）の垂直な辺は鳥の体形に合わない。カモと特定する根拠は「首を伸ばして飛ぶ」姿勢だけで弱い。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "P5をくちばし、P2＋P3を長い尾として右向きの鳥と読む余地もあるが、尾が正方形で終わり、P1の垂直な前面も不自然なため候補にしなかった。種の特定は弱い。"
+      },
+      "terraIndependent": {
+        "item": "item-01",
+        "silhouetteImpression": "左に頭を向け、翼を広げた鳥に見えた。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "飛んでいるカモ",
+            "posture": "翼を広げて飛ぶ",
+            "direction": "頭が左、尾が右",
+            "confidence": "中",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "胴体と手前の翼",
+                "evidence": "中央から右下へ大きく張る三角形"
+              },
+              {
+                "id": "P2",
+                "role": "首",
+                "evidence": "左の四角と胴体の間にある小三角形"
+              },
+              {
+                "id": "P3",
+                "role": "頭",
+                "evidence": "左端の四角"
+              },
+              {
+                "id": "P4",
+                "role": "奥の翼",
+                "evidence": "胴体から右上へ斜めに伸びる"
+              },
+              {
+                "id": "P5",
+                "role": "尾",
+                "evidence": "胴体の右端に小さく突き出る"
+              }
+            ],
+            "evidence": "左右に頭と尾が伸び、中央に上下の翼が開いて見える。",
+            "weaknesses": "頭が四角く、くちばしや足は見えない。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "翼のうち下側が大きく、胴体との境目は曖昧。"
+      },
+      "consensusCandidates": [
+        {
+          "rank": 1,
+          "noun": "カモ",
+          "posture": "首を前へ伸ばし、翼を上下に開いて飛ぶ",
+          "direction": "左向き（頭が左、尾が右）",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "胴体と下側（手前）の翼",
+              "evidence": "最大部品（56%）。水平な上辺が背中の線で、下へ大きく張る三角部は胴と打ち下ろした翼にまたがる（Opus・Terra とも同じ対応）"
+            },
+            {
+              "id": "P2",
+              "role": "首",
+              "evidence": "左端の頭と胴の間をつなぐ小三角（双方一致）"
+            },
+            {
+              "id": "P3",
+              "role": "頭",
+              "evidence": "左端に単独で突き出す正方形（双方一致）"
+            },
+            {
+              "id": "P4",
+              "role": "上げた（奥の）翼",
+              "evidence": "胴の上辺から右上へ斜めに伸びる細長い台形（双方一致）"
+            },
+            {
+              "id": "P5",
+              "role": "尾",
+              "evidence": "胴の右上の角から右へ小さく尖る三角（双方一致）"
+            }
+          ],
+          "evidence": "Opus と Terra が独立に同じ名詞と同じ部分対応に到達した。頭・首・胴・翼・尾が左から右へ順に並ぶ。",
+          "weaknesses": "頭が四角く、くちばしと脚がない。下側の大きな三角は胴としては深く、翼との境が曖昧。カモと種を決める手がかりは首を伸ばす飛び方だけ。"
+        }
+      ],
+      "noConstrual": false,
+      "noConstrualReason": "",
+      "agreementStatus": "合意",
+      "discussion": "Opus（CalmFermi）は独立にカモ（低）、Terra（FrostyGauss）は独立に飛んでいるカモ（中）を挙げ、P1〜P5の役割も一致した（P1を胴と下側の翼にまたがる部分とする点まで同じ）。Terra 第2ラウンド判断: support（カモの配置に同意。P3の四角い頭に嘴がないため種の確信度は低い。）。確信度は Terra の指摘どおり低とした。"
+    },
+    {
+      "item": "item-02",
+      "opusSource": "parent",
+      "opusIndependent": {
+        "item": "item-02",
+        "silhouetteImpression": "下向きの大きな三角の胴、左上へ伸びる首と四角い頭、右上へ上がる翼があり、首を伸ばして飛ぶ大型の鳥に見える。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "ツル",
+            "posture": "首を伸ばして飛ぶ",
+            "direction": "頭が左上",
+            "confidence": "中",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "胴（右端が尾）",
+                "evidence": "中央の大きな三角形で、他の部分がすべてここから出る"
+              },
+              {
+                "id": "P2",
+                "role": "首",
+                "evidence": "頭と胴をつなぐ斜めの細い平行四辺形"
+              },
+              {
+                "id": "P3",
+                "role": "頭",
+                "evidence": "左端の正方形"
+              },
+              {
+                "id": "P4",
+                "role": "上げた翼",
+                "evidence": "胴の上から右上へ伸びる平行四辺形"
+              }
+            ],
+            "evidence": "長い首・上げた翼・胴の並びが飛ぶ大型の鳥の姿に合う。",
+            "weaknesses": "脚が無く、胴の下向きの尖りの説明が弱い。"
+          },
+          {
+            "rank": 2,
+            "noun": "白鳥",
+            "posture": "首を伸ばして飛ぶ",
+            "direction": "頭が左上",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "胴",
+                "evidence": "大きな三角形"
+              },
+              {
+                "id": "P2",
+                "role": "首",
+                "evidence": "斜めの平行四辺形"
+              },
+              {
+                "id": "P3",
+                "role": "頭",
+                "evidence": "左端の正方形"
+              },
+              {
+                "id": "P4",
+                "role": "翼",
+                "evidence": "右上へ伸びる平行四辺形"
+              }
+            ],
+            "evidence": "長い首の水鳥として同じ対応が成り立つ。",
+            "weaknesses": "ツルとの区別は形からはつかない。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "種の区別（ツル・白鳥・ガン）は形だけでは決まらない。"
+      },
+      "terraIndependent": {
+        "item": "item-02",
+        "silhouetteImpression": "左に頭を突き出して翼を広げる鳥に見えた。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "飛んでいるカモ",
+            "posture": "翼を広げて飛ぶ",
+            "direction": "頭が左上、翼が右上と右下",
+            "confidence": "中",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "胴体と手前の翼",
+                "evidence": "中央から右下に広がる大きな三角形"
+              },
+              {
+                "id": "P2",
+                "role": "首",
+                "evidence": "左上の頭と胴体を斜めにつなぐ"
+              },
+              {
+                "id": "P3",
+                "role": "頭",
+                "evidence": "左端の四角"
+              },
+              {
+                "id": "P4",
+                "role": "奥の翼",
+                "evidence": "中央から右上へ伸びる細長い部分"
+              }
+            ],
+            "evidence": "頭から斜めの首が胴体につながり、両側に翼を広げて見える。",
+            "weaknesses": "嘴と尾がはっきり分かれず、翼の形も非対称。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "右下の大きな三角形は翼と胴体の両方にまたがると見た。"
+      },
+      "consensusCandidates": [
+        {
+          "rank": 1,
+          "noun": "カモ",
+          "posture": "首を伸ばして飛ぶ",
+          "direction": "左向き（頭が左上）",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "胴と下側の翼（右端が尾）",
+              "evidence": "中央の大きな三角形で、他の部分がすべてここから出る（親は胴、Terra は胴体と手前の翼と読んだ）"
+            },
+            {
+              "id": "P2",
+              "role": "首",
+              "evidence": "頭と胴を斜めにつなぐ平行四辺形（双方一致）"
+            },
+            {
+              "id": "P3",
+              "role": "頭",
+              "evidence": "左端の正方形（双方一致）"
+            },
+            {
+              "id": "P4",
+              "role": "上げた翼",
+              "evidence": "胴の上から右上へ伸びる台形（双方一致）"
+            }
+          ],
+          "evidence": "頭・首・胴・上げた翼の配置は親と Terra で一致し、item-01・item-25 と同じ型の飛ぶ鳥として読める（Terra の独立案、Opus が合議で支持）。",
+          "weaknesses": "くちばし・脚・尾がはっきりせず、種を決める手がかりがない。下側の大三角が胴と翼にまたがる。"
+        }
+      ],
+      "noConstrual": false,
+      "noConstrualReason": "",
+      "agreementStatus": "一部合意",
+      "discussion": "親は独立にツル（中）と白鳥（低）、Terra は独立に飛んでいるカモ（中）を挙げ、P1〜P4の役割（頭P3・首P2・胴P1・翼P4）は一致した。Opus 合議担当は、P2が平行四辺形で item-01 より首が長いことから、ツル1位・カモ2位を提案した。Terra 第2ラウンド判断: reject（ツルの追加は不支持。P2は首に見えるが、長い嘴や脚がなくツルを選ぶ根拠が弱い。カモも種の決め手が弱いので確信度は低に修正したい。）。双方が支持するカモだけを候補に入れた。ツルは親の Opus 側案として残る（首の長さは根拠になるが、くちばしと脚がない）。白鳥はツルと形で区別できないため落とした。"
+    },
+    {
+      "item": "item-03",
+      "opusSource": "reviewer",
+      "opusIndependent": {
+        "item": "item-03",
+        "silhouetteImpression": "縦長の大きな六角形（P1）が右に立ち、上部の左角が斜めに欠け、下端はV字に尖る。P1左辺の上寄りから台形（P2）が左へ水平に突き出し、先端は左下で鋭く尖る。縦の本体と左向きの突起だけの簡素な形。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "ペンギン",
+            "posture": "直立している",
+            "direction": "左向き（くちばしが左）",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "頭から胴（直立した体）",
+                "evidence": "縦に長い最大部品（81%）。上部左の斜めの欠けが額の傾き、下端のV字が足元の尖りに見える"
+              },
+              {
+                "id": "P2",
+                "role": "くちばし",
+                "evidence": "P1の上寄りから左へ突き出し、先端が鋭く尖る台形（19%）。頭の高さから前へ出る"
+              }
+            ],
+            "evidence": "直立した縦長の体の上部から前方へくちばしが出る配置が、立っている鳥の横姿に合う。",
+            "weaknesses": "翼（フリッパー）と足がない。くちばしが体に比べて太く長い。体の下端がV字に尖るのは足元として不自然。"
+          },
+          {
+            "rank": 2,
+            "noun": "ヘアドライヤー",
+            "posture": "吹き出し口を水平に向けて立てた形",
+            "direction": "左向き（吹き出し口が左）",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "本体と持ち手",
+                "evidence": "縦長の最大部品。P2の付け根より下が長く伸び、持ち手に見える"
+              },
+              {
+                "id": "P2",
+                "role": "吹き出し口（ノズル）",
+                "evidence": "本体上部から左へ水平に突き出し、先が細くなる"
+              }
+            ],
+            "evidence": "縦の本体の上寄りから水平の筒が出る、ピストル型の道具の配置。",
+            "weaknesses": "モーター部の丸みがなく、本体と持ち手の区別がない。吹き出し口の先が尖るのはドライヤーとして不自然。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "縦の本体と横向きの突起という抽象形で、鳥と道具のどちらにも決め手がない。見立てなしも妥当な範囲。"
+      },
+      "terraIndependent": {
+        "item": "item-03",
+        "silhouetteImpression": "右に縦長の塊があり、左へ短い突起が出ている形に見えた。",
+        "candidates": [],
+        "noConstrual": true,
+        "noConstrualReason": "右の大きな六角形と左の突起を、特定の品物の部位として無理なく対応できない。",
+        "uncertainty": "突起を柄と見る道具の読みもあるが、右側の形と釣り合わない。"
+      },
+      "consensusCandidates": [],
+      "noConstrual": true,
+      "noConstrualReason": "双方とも見立てなしと判断：縦長の本体と左向きの突起だけで、具体物の部位に無理なく対応できない。",
+      "agreementStatus": "合意",
+      "discussion": "Opus は独立にペンギン（低）とヘアドライヤー（低）、Terra は独立に見立てなし（突起を柄と見る道具の読みも、右側の形と釣り合わない）とした。合議で Opus が両案を部分の対応が弱いとして取り下げた。Terra 第2ラウンド判断: support（六角形の本体と左の突起だけでは具体物に絞れない。）。"
+    },
+    {
+      "item": "item-04",
+      "opusSource": "reviewer",
+      "opusIndependent": {
+        "item": "item-04",
+        "silhouetteImpression": "上辺が水平な逆三角形（P1）が上部を占め、その下の頂点から右下に台形（P2）が続いて、右側にくの字の切れ込みと下端の鋭い先端を作る。P1頂点の左下に正方形（P3）が段のように突き出す。上が広く下が尖ったジグザグ形。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "稲妻",
+            "posture": "上から下へジグザグに走る（雷の記号）",
+            "direction": "下向き（先端が下）",
+            "confidence": "中",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "上部の幅広い部分",
+                "evidence": "上辺が全幅の水平線で、下へ向かって細くなる逆三角（50%）"
+              },
+              {
+                "id": "P2",
+                "role": "下半の折れ曲がりと先端",
+                "evidence": "右側にくの字の切れ込みを作り、下端で鋭く尖る台形（37.5%）"
+              },
+              {
+                "id": "P3",
+                "role": "左側の折れ目（段）",
+                "evidence": "P1頂点の左下に段状に突き出す正方形（12.5%）で、左側のジグザグを作る"
+              }
+            ],
+            "evidence": "幅広い上部から左右に折れながら下の一点へ細くなる輪郭が、雷の記号の形に近い。",
+            "weaknesses": "左側の折れ目が四角い段で、斜めのジグザグになっていない。上辺が水平な点も典型からずれる。"
+          },
+          {
+            "rank": 2,
+            "noun": "魚",
+            "posture": "頭を下にして潜るように泳ぐ",
+            "direction": "下向き（頭が下）",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "尾びれ",
+                "evidence": "上部で扇形に広がる逆三角。右側の切れ込みが尾の付け根のくびれに見える"
+              },
+              {
+                "id": "P2",
+                "role": "胴と頭",
+                "evidence": "下へ細くなり、先端が口のように尖る"
+              },
+              {
+                "id": "P3",
+                "role": "胸びれ",
+                "evidence": "胴の左側面から小さく突き出す正方形"
+              }
+            ],
+            "evidence": "広い尾びれ、くびれ、細くなる胴と口先が上から下へ並ぶ。",
+            "weaknesses": "左側には尾の付け根のくびれがなく、胸びれが四角い。胴と頭の区別がない。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "記号（稲妻）としての読みが主で、生物としての読みは補助的。どちらも部分の一致は粗い。"
+      },
+      "terraIndependent": {
+        "item": "item-04",
+        "silhouetteImpression": "上の逆三角形と右下の尖った部分がつながった形に見えた。",
+        "candidates": [],
+        "noConstrual": true,
+        "noConstrualReason": "上と右下の尖り、左の四角を合わせて特定のものと判断できない。",
+        "uncertainty": "漏斗などを連想したが、左の四角と右に張り出す輪郭が決め手にならない。"
+      },
+      "consensusCandidates": [
+        {
+          "rank": 1,
+          "noun": "稲妻",
+          "posture": "上から下へジグザグに走る（雷の記号）",
+          "direction": "下向き（先端が下）",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "上部の幅広い部分",
+              "evidence": "上辺が全幅の水平線で、下へ向かって細くなる逆三角（50%）"
+            },
+            {
+              "id": "P2",
+              "role": "下半の折れ曲がりと先端",
+              "evidence": "右側にくの字の切れ込みを作り、下端で鋭く尖る台形（37.5%）"
+            },
+            {
+              "id": "P3",
+              "role": "左側の折れ目（段）",
+              "evidence": "P1頂点の左下に段状に突き出す正方形（12.5%）で、左側のジグザグを作る"
+            }
+          ],
+          "evidence": "幅広い上部から左右に折れながら下の一点へ細くなる輪郭が、雷の記号に近い（Opus の独立案、Terra が合議で支持）。",
+          "weaknesses": "左側の折れ目が四角い段で、斜めのジグザグにならない。上辺が水平な点も典型からずれる。"
+        }
+      ],
+      "noConstrual": false,
+      "noConstrualReason": "",
+      "agreementStatus": "合意",
+      "discussion": "Opus は独立に稲妻（中）と魚（低）、Terra は独立に見立てなし（漏斗を連想したが決め手がない）とした。合議で Opus が稲妻の支持を求めた。Terra 第2ラウンド判断: support（稲妻を支持。幅広い上部から左右に折れ、下へ鋭く尖る輪郭は雷の記号に見える。左の段が四角いことは弱点。）。魚は分類名にとどまるため Opus が取り下げた。Terra が独立には見立てなしとしていたことを考え、確信度は低とした。"
+    },
+    {
+      "item": "item-05",
+      "opusSource": "reviewer",
+      "opusIndependent": {
+        "item": "item-05",
+        "silhouetteImpression": "右下がりの大きな平行四辺形（P1）が中央に立ち、左上の角が最も高い鋭い山になる。右上には小さな平行四辺形（P5）が斜めに立ち上がり、P1との間にV字の谷ができる。下部は左の三角（P3）と正方形（P4）、右の下向きの三角（P2）の2つに分かれ、脚のように見える。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "イヌ",
+            "posture": "前足を前に出して座り、頭を上げ、尾を立てる",
+            "direction": "左向き（頭が左上）",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "頭部から背・胴",
+                "evidence": "最大部品（50%）。左上の鋭い角が最も高い頭頂（耳・鼻先）で、上辺が後方（右）へ下がる背中の線になる"
+              },
+              {
+                "id": "P2",
+                "role": "後脚",
+                "evidence": "P1の右下から下へ尖って伸びる三角（12.5%）。体の後方の下にある"
+              },
+              {
+                "id": "P3",
+                "role": "胸から前脚の付け根",
+                "evidence": "P1の左下から左下へ張り出す三角（12.5%）。胸の張り出しに見える"
+              },
+              {
+                "id": "P4",
+                "role": "前足",
+                "evidence": "P3の下に接する正方形（12.5%）。図の左下の接地部"
+              },
+              {
+                "id": "P5",
+                "role": "立てた尾",
+                "evidence": "P1右辺の上寄りから右上へ立ち上がる細い平行四辺形（12.5%）。背中の後端から上へ伸びる"
+              }
+            ],
+            "evidence": "頭が前上、背中が後方へ下がり、後端で尾が上がり、前後に脚が分かれる配置が、座った四足獣の横姿に合う。",
+            "weaknesses": "頭部が独立した部品ではなくP1の角にすぎず、鼻先と耳の区別がない。前足が頭より前へ大きく出る。イヌと特定する根拠は尾を立てた姿勢くらいで弱い。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "P5を挙げた腕、P3＋P4とP2を2本の脚として「走る人」とも読めるが、頭にあたる部品がない。動物とする読みも頭の形が弱い。"
+      },
+      "terraIndependent": {
+        "item": "item-05",
+        "silhouetteImpression": "左下に頭を下げ、右に尾を上げた鳥に見えた。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "餌をついばむカモ",
+            "posture": "頭を下げて立つ",
+            "direction": "頭が左下、尾が右上",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "胴体と上がった翼",
+                "evidence": "中央の大きな斜めの領域が背中から翼に広がる"
+              },
+              {
+                "id": "P2",
+                "role": "脚",
+                "evidence": "胴体の下へ細く尖って伸びる"
+              },
+              {
+                "id": "P3",
+                "role": "首",
+                "evidence": "左下の四角と中央をつなぐ三角形"
+              },
+              {
+                "id": "P4",
+                "role": "頭",
+                "evidence": "左下端の四角"
+              },
+              {
+                "id": "P5",
+                "role": "尾",
+                "evidence": "胴体右側から右上へ突き出る"
+              }
+            ],
+            "evidence": "左下に下がった頭と右上の尾の間に、翼を立てた胴体があるように見える。",
+            "weaknesses": "頭が四角く嘴がなく、脚も一本だけで翼が極端に大きい。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "左下の四角は頭でなく脚とも読める。"
+      },
+      "consensusCandidates": [],
+      "noConstrual": true,
+      "noConstrualReason": "双方とも見立てなしと判断：頭の位置（P1左上の山か、左下のP4か）が定まらず、Opus のイヌも Terra のついばむカモも確信度が低いため、双方取り下げた。",
+      "agreementStatus": "合意",
+      "discussion": "Opus は独立にイヌ（座って尾を立てる、頭はP1左上の山、低）、Terra は独立についばむカモ（頭はP4、低）を挙げた。頭の位置が両立せず、どちらも確信度が低いため、Opus が両方を落とす案を出した。Terra 第2ラウンド判断: support（カモ案は取り下げに同意。四角い頭に嘴がなく翼・脚の対応も弱い。）。"
+    },
+    {
+      "item": "item-06",
+      "opusSource": "reviewer",
+      "opusIndependent": {
+        "item": "item-06",
+        "silhouetteImpression": "左右対称に近い大きな台形（P1）が横に伸び、右端は低く尖る。P1の左上に縦辺を左にした三角（P2）が上へ尖って立ち、P1左端の下に正方形（P3）がぶら下がる。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "アザラシ",
+            "posture": "腹ばいで頭を持ち上げる",
+            "direction": "左向き（頭が左）",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "胴体",
+                "evidence": "最大部品（75%）の横長の台形で、後ろ（右）へ細く尖っていく"
+              },
+              {
+                "id": "P2",
+                "role": "持ち上げた頭（鼻先が上）",
+                "evidence": "胴の前端（左）の上に、縦辺を前にして上へ尖る三角（12.5%）"
+              },
+              {
+                "id": "P3",
+                "role": "前ひれ",
+                "evidence": "胴の前端の下に接する正方形（12.5%）。体を支える前ひれの位置"
+              }
+            ],
+            "evidence": "前端で頭を上げ、前ひれで体を支え、後方へ細くなる胴という配置。",
+            "weaknesses": "台形の上辺が平らで胴の丸みがない。頭が細い三角で首との区別がない。後ろひれがない。"
+          },
+          {
+            "rank": 2,
+            "noun": "ハイヒール",
+            "posture": "横から見た片方の靴",
+            "direction": "右向き（つま先が右）",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "靴本体（つま先から履き口）",
+                "evidence": "右端の尖りがつま先、上辺の平らな部分が履き口、底辺が靴底"
+              },
+              {
+                "id": "P2",
+                "role": "かかと側の背（ヒールカウンター）",
+                "evidence": "左端で上へ高く立つ三角"
+              },
+              {
+                "id": "P3",
+                "role": "ヒール",
+                "evidence": "靴底の後端（左）の下に付く正方形"
+              }
+            ],
+            "evidence": "つま先・履き口・かかとの背・ヒールが、靴の側面の位置関係で並ぶ。",
+            "weaknesses": "靴底が水平でハイヒールの傾斜がない。かかとの背が高すぎ、ヒールが角ばった塊。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "低く横に伸びる本体、左上の尖り、左下の四角という抽象形で、動物（アザラシ・うずくまるウサギ）と靴のどちらにも決め手が弱い。"
+      },
+      "terraIndependent": {
+        "item": "item-06",
+        "silhouetteImpression": "平らな底と右に傾く大きな面、左の突起がある形に見えた。",
+        "candidates": [],
+        "noConstrual": true,
+        "noConstrualReason": "大きな台形に付く二つの突起の役割が定まらない。",
+        "uncertainty": "アイロンのようにも見えるが、左下の四角や上の突起の役割が定まらない。"
+      },
+      "consensusCandidates": [],
+      "noConstrual": true,
+      "noConstrualReason": "双方とも見立てなしと判断：大きな台形に付く2つの突起の役割が定まらない。",
+      "agreementStatus": "合意",
+      "discussion": "Opus は独立にアザラシ（低）とハイヒール（低）、Terra は独立に見立てなし（アイロンを連想したが、左下の四角や上の突起の役割が定まらない）とした。合議で Opus が両案を取り下げた。Terra 第2ラウンド判断: support（台形と二つの突起からは対象が決まらない。）。"
+    },
+    {
+      "item": "item-07",
+      "opusSource": "reviewer",
+      "opusIndependent": {
+        "item": "item-07",
+        "silhouetteImpression": "縦長の図形で、右辺は垂直な直線。左辺は三角が交互に出入りするジグザグになる。最上部左に小三角（P5）が上へ尖り、そこから右へ階段状に下がる（P4→P3）。中段に左へ尖る大三角（P2）、最下部に上向きの小三角（P1）がある。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "オオカミ",
+            "posture": "座って鼻先を真上に向け、遠吠えする",
+            "direction": "左向き（顔が左上）",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "前足（接地部）",
+                "evidence": "最下部で底辺が水平な三角（12.5%）。左端の尖りが前へ出した足先"
+              },
+              {
+                "id": "P2",
+                "role": "胸と前脚",
+                "evidence": "左へ尖って張り出す最大部品（50%）。胸の膨らみにあたり、右辺の垂直線が背中"
+              },
+              {
+                "id": "P3",
+                "role": "首の後ろ（うなじ）",
+                "evidence": "P2右上の小三角（6.25%）。頭の後ろから背中へ一段下がる"
+              },
+              {
+                "id": "P4",
+                "role": "頭部（斜辺があごの下の線）",
+                "evidence": "右上が直角の三角（25%）。斜辺が左上から右下へ下がり、上を向いた顔のあご下から喉の線になる"
+              },
+              {
+                "id": "P5",
+                "role": "上を向いた鼻先",
+                "evidence": "最上部の小三角（6.25%）。左辺が垂直に立ち、先端が図で最も高い"
+              }
+            ],
+            "evidence": "頭が最上部で上を向き、喉の線が斜めに下がり、胸が前へ張り出し、背中がまっすぐ下りて、足が前下に出る配置が、座って遠吠えする姿に合う。",
+            "weaknesses": "耳がなく、鼻先が短い三角。左辺の凹凸が規則的すぎ、胸と前足の境が誇張される。オオカミと特定する根拠は上を向く頭の姿勢だけ。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "P5を耳として左向きに座るネコと読む余地もある（耳が顔の前端に来る点で不自然）。左辺のジグザグからタツノオトシゴも浮かぶが、口先の向きが合わない。"
+      },
+      "terraIndependent": {
+        "item": "item-07",
+        "silhouetteImpression": "右に縦の辺があり、左へ折れながら突き出る細長い形に見えた。",
+        "candidates": [],
+        "noConstrual": true,
+        "noConstrualReason": "縦長の輪郭から特定の姿勢や品物を確信できない。",
+        "uncertainty": "人の横姿も考えたが頭と手足の区別に確信が持てない。"
+      },
+      "consensusCandidates": [],
+      "noConstrual": true,
+      "noConstrualReason": "双方とも見立てなしと判断：縦長でジグザグの輪郭からは、耳のない上向きの頭（オオカミ案）で種や姿勢を確信できない。",
+      "agreementStatus": "合意",
+      "discussion": "Opus は独立にオオカミ（座って遠吠え、低）、Terra は独立に見立てなし（人の横姿も考えたが、頭と手足の区別に確信が持てない）とした。合議で Opus がオオカミの支持を求めたが、Terra は不支持で、事前の取り決めどおり見立てなしで合意した。Terra 第2ラウンド判断: reject（オオカミは不支持。上向きの鼻先という読みは可能だが耳がなく、胸と足の角張りも強く種まで絞れない。）。"
+    },
+    {
+      "item": "item-08",
+      "opusSource": "reviewer",
+      "opusIndependent": {
+        "item": "item-08",
+        "silhouetteImpression": "左へ尖る大きな直角三角形（P1）と、その右に縦長の台形（P2）が接し、P2の上の角はP1より高く尖って突き出す。P2右辺の中ほどから正方形（P3）が右へ出る。左向きの矢じりに似た形。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "キツネ",
+            "posture": "頭部の横顔（首を後ろへ伸ばす）",
+            "direction": "左向き（鼻先が左）",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "鼻先から顔・あご",
+                "evidence": "左端が鋭く尖る大三角（50%）。上の斜辺が鼻筋、下の斜辺があご下の線"
+              },
+              {
+                "id": "P2",
+                "role": "後頭部と立った耳",
+                "evidence": "P1の右に接する縦長の台形（37.5%）。上の角がP1より高く尖り、立ち耳に見える"
+              },
+              {
+                "id": "P3",
+                "role": "首",
+                "evidence": "P2右辺から後方（右）へ出る正方形（12.5%）"
+              }
+            ],
+            "evidence": "長く尖った鼻先、頭の後ろで立つ耳、後方の首という横顔の配置。",
+            "weaknesses": "あごの下がP2より下まで尖って垂れる。首（P3）が細く水平で、頭に対して小さい。耳は1つで、目などの手がかりはない。"
+          },
+          {
+            "rank": 2,
+            "noun": "魚",
+            "posture": "泳ぐ",
+            "direction": "左向き（頭が左）",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "頭（口先が左）",
+                "evidence": "左へ尖る大三角"
+              },
+              {
+                "id": "P2",
+                "role": "胴（上の角が背びれ）",
+                "evidence": "縦に高い台形で、上の突き出しが背びれに見える"
+              },
+              {
+                "id": "P3",
+                "role": "尾",
+                "evidence": "胴の後ろの小さな突起"
+              }
+            ],
+            "evidence": "尖った頭、背びれのある胴、後方の尾が左から順に並ぶ。",
+            "weaknesses": "尾が四角く小さく、尾びれの広がりがない。頭が胴より大きい。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "矢印やロケットのような記号的な読みもあり、生物としての根拠は強くない。"
+      },
+      "terraIndependent": {
+        "item": "item-08",
+        "silhouetteImpression": "左を向く魚のように見えた。",
+        "candidates": [],
+        "noConstrual": true,
+        "noConstrualReason": "魚のような輪郭には見えるが、種類を示せる形の手掛かりがなく、特定の名詞に絞れない。",
+        "uncertainty": "左向きの矢印としても読め、魚の種類までは見分けられない。"
+      },
+      "consensusCandidates": [],
+      "noConstrual": true,
+      "noConstrualReason": "双方とも見立てなしと判断：左向きに尖る輪郭は矢印や魚のようにも見えるが、「魚」は分類名にとどまり、キツネの頭部としても首とあごの形が合わない。",
+      "agreementStatus": "合意",
+      "discussion": "Opus は独立にキツネの頭部（低）と魚（低）、Terra は独立に見立てなし（魚状だが種類を示す手掛かりがない）とした。合議で、魚は分類名なので採らず、キツネも Opus が取り下げた。Terra 第2ラウンド判断: support（魚状には見えるが特定の種類を示す手掛かりがなく、キツネの顔としても弱い。）。"
+    },
+    {
+      "item": "item-09",
+      "opusSource": "parent",
+      "opusIndependent": {
+        "item": "item-09",
+        "silhouetteImpression": "左に縦長の大きな三角、右に下へ曲がる首と頭があり、尾羽を立てて右下をついばむ鶏に見える。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "ニワトリ",
+            "posture": "首を下げて餌をついばむ",
+            "direction": "右向き、頭が右下",
+            "confidence": "中",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "立てた尾羽",
+                "evidence": "左端で縦に立つ大きな三角形"
+              },
+              {
+                "id": "P2",
+                "role": "脚",
+                "evidence": "胴の下に垂れる正方形"
+              },
+              {
+                "id": "P3",
+                "role": "胴・首の付け根",
+                "evidence": "中央上の台形で、尾と頭をつなぐ"
+              },
+              {
+                "id": "P4",
+                "role": "下げた首と頭（くちばしが右下）",
+                "evidence": "右側で右下へ下りる平行四辺形"
+              }
+            ],
+            "evidence": "大きな尾と下へ曲がった頭の組み合わせが、ついばむ鶏の横姿に合う。",
+            "weaknesses": "尾が胴より大きすぎ、くちばしの尖りが弱い。"
+          },
+          {
+            "rank": 2,
+            "noun": "馬",
+            "posture": "首を下げて草を食べる",
+            "direction": "右向き、頭が右下",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "尻・後半身",
+                "evidence": "左の大きな三角形"
+              },
+              {
+                "id": "P2",
+                "role": "脚",
+                "evidence": "下へ垂れる正方形"
+              },
+              {
+                "id": "P3",
+                "role": "肩・胸",
+                "evidence": "中央の台形"
+              },
+              {
+                "id": "P4",
+                "role": "首と頭",
+                "evidence": "右下へ下りる平行四辺形"
+              }
+            ],
+            "evidence": "頭を地面へ下ろす輪郭が草を食む姿に近い。",
+            "weaknesses": "脚が一本しかなく胴が短い。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "左の三角形を尾と見るか体の後半と見るかで読みが変わる。"
+      },
+      "terraIndependent": {
+        "item": "item-09",
+        "silhouetteImpression": "右に首と頭を下げた馬のように見えた。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "馬",
+            "posture": "頭を下げて立つ",
+            "direction": "頭が右、後ろが左",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "胴体と後ろ脚",
+                "evidence": "左側の大きな三角形が胴体から下端に及ぶ"
+              },
+              {
+                "id": "P2",
+                "role": "脚",
+                "evidence": "中央左から下へ垂れる台形"
+              },
+              {
+                "id": "P3",
+                "role": "首",
+                "evidence": "中央から右上に立ち上がる台形"
+              },
+              {
+                "id": "P4",
+                "role": "頭",
+                "evidence": "首から右下へ折れた細長い部分"
+              }
+            ],
+            "evidence": "右側の折れた首と頭、その左の胴体と下向きの脚が四足動物を連想させる。",
+            "weaknesses": "胴体が大きな三角形で、脚や耳が十分に分かれない。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "左の大きな三角形を尾や翼と見る読みもある。"
+      },
+      "consensusCandidates": [
+        {
+          "rank": 1,
+          "noun": "ニワトリ",
+          "posture": "首を下げて餌をついばむ",
+          "direction": "右向き（頭が右下）",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "立てた尾羽",
+              "evidence": "左端で縦に立つ大きな三角形（親の対応。Terra も合議で同じ読みを認めた）"
+            },
+            {
+              "id": "P2",
+              "role": "脚",
+              "evidence": "胴の下に垂れる台形"
+            },
+            {
+              "id": "P3",
+              "role": "胴と首の付け根",
+              "evidence": "中央上の台形で、尾と頭をつなぐ"
+            },
+            {
+              "id": "P4",
+              "role": "下げた首と頭（くちばしが右下）",
+              "evidence": "右側で右下へ下りる平行四辺形"
+            }
+          ],
+          "evidence": "大きな尾と下へ曲がった頭の組み合わせが、ついばむ鶏の横姿に合う（親の独立案、Terra が合議で支持）。",
+          "weaknesses": "尾が胴より非常に大きく、くちばしの尖りが弱い。"
+        },
+        {
+          "rank": 2,
+          "noun": "馬",
+          "posture": "首を下げて立つ（草を食べる）",
+          "direction": "右向き（頭が右下）",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "尻と後ろ半身（後ろ脚を含む）",
+              "evidence": "左の大きな三角形（親は尻・後半身、Terra は胴体と後ろ脚と読んだ）"
+            },
+            {
+              "id": "P2",
+              "role": "脚",
+              "evidence": "下へ垂れる台形（双方一致）"
+            },
+            {
+              "id": "P3",
+              "role": "肩から首の付け根",
+              "evidence": "中央の台形（親は肩・胸、Terra は首と読んだ）"
+            },
+            {
+              "id": "P4",
+              "role": "下げた首と頭",
+              "evidence": "右下へ下りる平行四辺形（双方一致）"
+            }
+          ],
+          "evidence": "頭を地面へ下ろす輪郭と下向きの脚が、草を食む四足動物を思わせる（親と Terra が独立に挙げた共通案）。",
+          "weaknesses": "脚が一本しかなく、胴が大きな三角形で耳もない。"
+        }
+      ],
+      "noConstrual": false,
+      "noConstrualReason": "",
+      "agreementStatus": "合意",
+      "discussion": "親（CherryCurie）は独立にニワトリ（中）と馬（低）、Terra は独立に馬（低）を挙げた。馬は双方が独立に挙げた共通案。合議で Opus 合議担当（CalmFermi）がニワトリ（P1を立てた尾羽とする読み）の支持を求めた。Terra 第2ラウンド判断: support（ニワトリを低で支持。P1の大三角を立てた尾、P4を下げた首と頭に読める。尾が胴より非常に大きく嘴は不明瞭。馬も低で支持。）。親の順位どおりニワトリを1位とし、確信度は双方が示した値の低い方（低）とした。"
+    },
+    {
+      "item": "item-10",
+      "opusSource": "parent",
+      "opusIndependent": {
+        "item": "item-10",
+        "silhouetteImpression": "右に尖った頂部を持つ大きな縦長の塊、左に突き出た四角、左下へ伸びる斜めの帯があり、具体物としてはまとまりにくい。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "犬",
+            "posture": "前脚を伸ばして座る",
+            "direction": "左向き",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "頭頂（耳）から胴・後ろ脚",
+                "evidence": "右側の縦長の五角形で上端が尖る"
+              },
+              {
+                "id": "P2",
+                "role": "前へ伸ばした前脚",
+                "evidence": "左下へ伸びる平行四辺形"
+              },
+              {
+                "id": "P3",
+                "role": "鼻先",
+                "evidence": "上部で左へ突き出た正方形"
+              }
+            ],
+            "evidence": "左へ突き出た鼻先と下へ伸びる前脚が、座る犬の横姿に部分的に対応する。",
+            "weaknesses": "頭と胴が一体で区別できず、鼻先の位置が低すぎる。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "見立てなしに近い。斧や鳥の頭とも読めるが決め手が無い。"
+      },
+      "terraIndependent": {
+        "item": "item-10",
+        "silhouetteImpression": "左向きに座る犬の横姿に見えた。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "座っている犬",
+            "posture": "前脚を伸ばして座る",
+            "direction": "顔が左、背中が右",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "頭と胴体",
+                "evidence": "上に尖り右側を占める大きな五角形"
+              },
+              {
+                "id": "P2",
+                "role": "前脚",
+                "evidence": "体の左下から斜め左下へ伸びる"
+              },
+              {
+                "id": "P3",
+                "role": "鼻先",
+                "evidence": "頭の左に突き出す四角"
+              }
+            ],
+            "evidence": "尖った耳のような上端と左の鼻先、斜め下の脚が座る犬を思わせる。",
+            "weaknesses": "耳と胴体が一続きで、後脚や尾がはっきりしない。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "左上の四角を頭と見ると人物の姿にも見える。"
+      },
+      "consensusCandidates": [
+        {
+          "rank": 1,
+          "noun": "犬",
+          "posture": "前脚を前へ伸ばして座る",
+          "direction": "左向き（顔が左、背中が右）",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "頭頂（耳）から胴・後ろ脚",
+              "evidence": "右側の縦長の五角形で、上端の尖りが耳に見える（親・Terra とも同じ対応）"
+            },
+            {
+              "id": "P2",
+              "role": "前へ伸ばした前脚",
+              "evidence": "体の左下から左下へ伸びる平行四辺形（双方一致）"
+            },
+            {
+              "id": "P3",
+              "role": "鼻先",
+              "evidence": "上部で左へ突き出す正方形（双方一致）"
+            }
+          ],
+          "evidence": "親と Terra が独立に同じ名詞・姿勢・部分対応を挙げた。",
+          "weaknesses": "頭と胴が一続きで区別できず、鼻先の位置が低い。後ろ脚と尾がはっきりしない。親は「見立てなしに近い」とも記している。"
+        }
+      ],
+      "noConstrual": false,
+      "noConstrualReason": "",
+      "agreementStatus": "合意",
+      "discussion": "親は独立に犬（低）、Terra は独立に座っている犬（低）を挙げ、名詞・姿勢・部分対応（P1頭から胴、P2前脚、P3鼻先）が一致した。Terra 第2ラウンド判断: support（座る犬に同意。鼻先が低く頭と胴が一体である点は弱い。）。双方とも確信度は低く、親は見立てなしに近いとも書いているため、低のままとした。"
+    },
+    {
+      "item": "item-11",
+      "opusSource": "reviewer",
+      "opusIndependent": {
+        "item": "item-11",
+        "silhouetteImpression": "上辺が平らな大きな五角形（P2）が中央にあり、下端はV字に尖る。P2の右上に正方形（P3）が上辺をそろえて続き、その先に平行四辺形（P4）が右下へ垂れる。P2の左下に左へ尖る三角（P1）が付く。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "ゾウ",
+            "posture": "鼻を下へ垂らして立つ",
+            "direction": "右向き（頭が右）",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "尾（または後ろへ伸ばした後脚）",
+                "evidence": "胴の後方（左）の下から後ろへ尖る三角（12.5%）"
+              },
+              {
+                "id": "P2",
+                "role": "胴と脚",
+                "evidence": "最大部品（62.5%）。上辺の平らな線が背中、下のV字が脚の位置"
+              },
+              {
+                "id": "P3",
+                "role": "頭",
+                "evidence": "背中の線と上辺をそろえて前（右）に付く正方形（12.5%）"
+              },
+              {
+                "id": "P4",
+                "role": "鼻",
+                "evidence": "頭から前下方へ斜めに垂れる細長い平行四辺形（12.5%）"
+              }
+            ],
+            "evidence": "大きな胴の前に頭が付き、そこから細長い部分が下へ垂れる配置が、鼻を垂らしたゾウの側面に合う。",
+            "weaknesses": "脚が1つのV字で、柱のような4本脚にならない。頭が小さく耳がない。尾としてはP1が大きい。"
+          },
+          {
+            "rank": 2,
+            "noun": "ウマ",
+            "posture": "首を下げて草を食べる",
+            "direction": "右向き（頭が右下）",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "尾",
+                "evidence": "胴の後方から後ろへ突き出す三角"
+              },
+              {
+                "id": "P2",
+                "role": "胴と脚",
+                "evidence": "平らな背中と下のV字"
+              },
+              {
+                "id": "P3",
+                "role": "首の付け根（き甲）",
+                "evidence": "背中の線の前端の正方形"
+              },
+              {
+                "id": "P4",
+                "role": "首から頭（下げている）",
+                "evidence": "前下方へ長く伸びる平行四辺形"
+              }
+            ],
+            "evidence": "平らな背、前で下がる長い首と頭、後ろの尾という、草を食む四足獣の配置。",
+            "weaknesses": "胴が重く、脚が短いV字だけ。首と頭の区別がない。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "「頭を下げた四足獣を右から見る」という構図は比較的安定しているが、種（ゾウ・ウマ・ウシなど）は形から決めにくい。"
+      },
+      "terraIndependent": {
+        "item": "item-11",
+        "silhouetteImpression": "右に頭を下げた鳥が横向きにいるように見えた。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "餌をついばむカモ",
+            "posture": "頭を下げる",
+            "direction": "頭が右下、尾が左",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "尾",
+                "evidence": "左端に尖る三角形"
+              },
+              {
+                "id": "P2",
+                "role": "胴体",
+                "evidence": "中央の大きな五角形"
+              },
+              {
+                "id": "P3",
+                "role": "首の付け根",
+                "evidence": "胴体右上につながる四角"
+              },
+              {
+                "id": "P4",
+                "role": "首と頭",
+                "evidence": "右端から斜め下へ垂れる"
+              }
+            ],
+            "evidence": "左の尾から中央の胴、右に下げた首と頭へと連なって見える。",
+            "weaknesses": "脚と明確な嘴がなく、首の境目も角張っている。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "右の突起は頭でなく別の部位とも読める。"
+      },
+      "consensusCandidates": [
+        {
+          "rank": 1,
+          "noun": "カモ",
+          "posture": "頭を下げて餌をついばむ",
+          "direction": "右向き（頭が右下、尾が左）",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "尾",
+              "evidence": "左端に尖る三角形（Terra の対応。Opus のウマ案でも同じ役割）"
+            },
+            {
+              "id": "P2",
+              "role": "胴",
+              "evidence": "中央の大きな五角形。下端のV字は胴の下側"
+            },
+            {
+              "id": "P3",
+              "role": "首の付け根",
+              "evidence": "胴の右上に上辺をそろえてつながる正方形"
+            },
+            {
+              "id": "P4",
+              "role": "下げた首と頭",
+              "evidence": "右端から斜め下へ垂れる平行四辺形"
+            }
+          ],
+          "evidence": "左の短く尖った尾から胴、右へ下げた首と頭へと連なる（Terra の独立案、Opus が合議で支持）。",
+          "weaknesses": "脚と明確なくちばしがなく、首の境目が角張る。下端のV字の役割が定まらない。"
+        }
+      ],
+      "noConstrual": false,
+      "noConstrualReason": "",
+      "agreementStatus": "合意",
+      "discussion": "Opus は独立にゾウ（低）とウマ（低）、Terra は独立についばむカモ（低）を挙げた。Terra の部分対応（P1尾、P2胴、P3首の付け根、P4下げた首と頭）は Opus のウマ案と同じ。合議で Opus はカモを支持し（短く尖る尾P1が合う）、ウマを2位として提案した。Terra 第2ラウンド判断: reject（馬は不支持。下がるP4を首と頭に読むことはできるが、P2下端に独立した脚が見えず馬の決め手がない。カモも低のまま。）。Opus はこれを受け入れてウマを取り下げ、ゾウ（P3頭・P4鼻とする読み。脚が1つのV字になる）も取り下げた。"
+    },
+    {
+      "item": "item-12",
+      "opusSource": "reviewer",
+      "opusIndependent": {
+        "item": "item-12",
+        "silhouetteImpression": "裾の広い大きな台形（P1）が下半を占め、その平らな上辺の中央に正方形（P3）が載る。P3の左隣に、縦辺を左にした三角（P2）がP3より高く上へ尖って立つ。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "人",
+            "posture": "裾の広い服で座り（または立ち）、片手を高く挙げる",
+            "direction": "正面向き（挙げた手は図の左側）",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "胴体と広がった裾",
+                "evidence": "左右対称の台形（75%）。裾が広く、上がすぼまる"
+              },
+              {
+                "id": "P2",
+                "role": "挙げた腕と手",
+                "evidence": "頭（P3）の左隣の肩の位置から上へ尖り、頭頂より高く伸びる三角（12.5%）"
+              },
+              {
+                "id": "P3",
+                "role": "頭",
+                "evidence": "台形の上辺の中央に載る正方形（12.5%）"
+              }
+            ],
+            "evidence": "中央上の頭、左右対称の胴、片側だけ頭より高く伸びる突起という配置が、挙手する人の正面像に合う。",
+            "weaknesses": "腕が細い棒ではなく幅広い三角で、反対の腕がない。座っているか立っているかは決められない。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "煙突のある家、旗の立つ山なども浮かぶが、単一の物として部分の一致が弱い。全体として見立てなしも妥当。"
+      },
+      "terraIndependent": {
+        "item": "item-12",
+        "silhouetteImpression": "山形の上に四角い突起が立つ形に見えた。",
+        "candidates": [],
+        "noConstrual": true,
+        "noConstrualReason": "三角形状の大きな部分と上の二つの突起を特定のものにまとめられない。",
+        "uncertainty": "屋根と煙突を連想するが、左上の尖りと下の幅広さを含めた建物の輪郭が定まらない。"
+      },
+      "consensusCandidates": [],
+      "noConstrual": true,
+      "noConstrualReason": "双方とも見立てなしと判断：山形の上に四角と尖りが立つ形で、手を挙げる人・屋根と煙突のどちらとしても部分が揃わない。",
+      "agreementStatus": "合意",
+      "discussion": "Opus は独立に人（片手を挙げる、低）、Terra は独立に見立てなし（屋根と煙突を連想したが、建物の輪郭が定まらない）とした。合議で Opus が取り下げた。Terra 第2ラウンド判断: support（裾状の台形と四角い頭は読めるが、腕が太い三角で姿勢も定まらない。）。"
+    },
+    {
+      "item": "item-13",
+      "opusSource": "parent",
+      "opusIndependent": {
+        "item": "item-13",
+        "silhouetteImpression": "横に長い腕のような帯が左右に伸び、上に小さな尖り、下に下へ尖る五角形の胴があり、腕を広げたかかしや翼を広げた鳥の正面に見える。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "かかし",
+            "posture": "両腕を横に広げて立つ",
+            "direction": "正面、頭が上",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "胴（着物）",
+                "evidence": "中央で下へ尖る五角形"
+              },
+              {
+                "id": "P2",
+                "role": "左腕",
+                "evidence": "胴の左上から左へ伸びる平行四辺形"
+              },
+              {
+                "id": "P3",
+                "role": "頭",
+                "evidence": "胴の上の小三角形"
+              },
+              {
+                "id": "P4",
+                "role": "右腕",
+                "evidence": "胴の右上の正方形"
+              }
+            ],
+            "evidence": "左右に張り出す腕と中央の頭・胴の配置が、腕を広げて立つかかしに合う。",
+            "weaknesses": "左右の腕の長さが違い、頭が小さく尖る。"
+          },
+          {
+            "rank": 2,
+            "noun": "ワシ",
+            "posture": "翼を広げて正面から飛んでくる",
+            "direction": "正面、頭が上",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "胴と尾",
+                "evidence": "下へ尖る五角形"
+              },
+              {
+                "id": "P2",
+                "role": "左の翼",
+                "evidence": "左へ伸びる平行四辺形"
+              },
+              {
+                "id": "P3",
+                "role": "頭",
+                "evidence": "上の小三角形"
+              },
+              {
+                "id": "P4",
+                "role": "右の翼",
+                "evidence": "右の正方形"
+              }
+            ],
+            "evidence": "左右の張り出しを翼、下の尖りを尾と見られる。",
+            "weaknesses": "翼が短く左右非対称。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "左右非対称なので、正面の姿として読むには無理がある。"
+      },
+      "terraIndependent": {
+        "item": "item-13",
+        "silhouetteImpression": "左に機首を向けた飛行機を上から見たように見えた。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "飛行機",
+            "posture": "水平に飛ぶ",
+            "direction": "機首が左、尾が右",
+            "confidence": "中",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "胴体中央と手前の翼",
+                "evidence": "中央から下に大きく張り出す五角形"
+              },
+              {
+                "id": "P2",
+                "role": "機首",
+                "evidence": "左へ細く尖る台形"
+              },
+              {
+                "id": "P3",
+                "role": "奥の翼",
+                "evidence": "中央上に突き出る三角形"
+              },
+              {
+                "id": "P4",
+                "role": "尾部",
+                "evidence": "右端の四角"
+              }
+            ],
+            "evidence": "左右に細長く伸びる胴体と上下の翼が飛行機の平面形を思わせる。",
+            "weaknesses": "尾が四角く、上下の翼の大きさがかなり違う。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "魚にも見えるが、左右に伸びる胴体と翼を優先した。"
+      },
+      "consensusCandidates": [
+        {
+          "rank": 1,
+          "noun": "飛行機",
+          "posture": "水平に飛ぶ（上から見た形）",
+          "direction": "機首が左、尾が右",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "胴体中央と下側の翼",
+              "evidence": "中央から下へ大きく張り出す五角形"
+            },
+            {
+              "id": "P2",
+              "role": "機首",
+              "evidence": "左へ細く尖る台形"
+            },
+            {
+              "id": "P3",
+              "role": "上側の翼",
+              "evidence": "中央上に突き出る小三角形"
+            },
+            {
+              "id": "P4",
+              "role": "尾部",
+              "evidence": "右端の正方形"
+            }
+          ],
+          "evidence": "P2・P1上部・P4が同じ高さの横帯をなし、左端の尖った機首と右端の尾、上下の翼として読める（Terra の独立案、Opus が合議で支持）。",
+          "weaknesses": "尾が四角く、上下の翼の大きさがかなり違う。"
+        }
+      ],
+      "noConstrual": false,
+      "noConstrualReason": "",
+      "agreementStatus": "一部合意",
+      "discussion": "親は独立にかかし（低）とワシ（低）、Terra は独立に飛行機（中）を挙げた。P2・P1上部・P4が同じ高さの横帯をなす点は両案に共通。Opus 合議担当は飛行機を支持し、かかし（横帯を広げた両腕、P1を着物の胴と下の支柱、P3を頭）の支持を求めた。Terra 第2ラウンド判断: reject（かかしは不支持。横帯を左右の腕と読めるが、P3の小さな尖りが頭として弱く、中央の下端も支柱として細くない。飛行機は支持。）。双方が支持する飛行機だけを候補に入れ、かかしは親の Opus 側案として残る。ワシは左右非対称で翼が短いため落とした。確信度は双方が示した値の低い方（低）とした。"
+    },
+    {
+      "item": "item-14",
+      "opusSource": "reviewer",
+      "opusIndependent": {
+        "item": "item-14",
+        "silhouetteImpression": "左へ尖る五角形（P1）が中心で、上辺左寄りに正方形（P2）が立ち、右下に正方形（P3）が一段低く続く。P3の下に平行四辺形（P4）が左下へ斜めに垂れる。上辺は左上から右下へ3段の階段状。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "汽船",
+            "posture": "水面を進む",
+            "direction": "左向き（船首が左）",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "船体（船首が左で尖る）",
+                "evidence": "左端が尖り、底が平らな最大部品（62.5%）"
+              },
+              {
+                "id": "P2",
+                "role": "煙突",
+                "evidence": "船体の上に立つ正方形（12.5%）"
+              },
+              {
+                "id": "P3",
+                "role": "船尾",
+                "evidence": "船体の後ろ（右）に一段低く続く正方形（12.5%）"
+              },
+              {
+                "id": "P4",
+                "role": "航跡（または舵）",
+                "evidence": "船尾の下から斜めに伸びる平行四辺形（12.5%）"
+              }
+            ],
+            "evidence": "尖った船首、上に立つ煙突、後方の一段低い船尾という、船の側面の配置。",
+            "weaknesses": "船体の上部が広く、喫水線がわからない。P4が船体より下へ突き出すのは船として不自然。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "左へ尖る本体と段状の上辺は、拳銃（P4をグリップとすると傾きが逆）や魚（P4のひれが前向き）とも読めるが、いずれも一致が弱い。見立てなしも妥当。"
+      },
+      "terraIndependent": {
+        "item": "item-14",
+        "silhouetteImpression": "左に尖った頭と右下に折れた尾の魚に見えた。",
+        "candidates": [],
+        "noConstrual": true,
+        "noConstrualReason": "魚のような輪郭には見えるが、種類を示せる形の手掛かりがなく、特定の名詞に絞れない。",
+        "uncertainty": "飛行機の機首と尾翼という読みもある。"
+      },
+      "consensusCandidates": [],
+      "noConstrual": true,
+      "noConstrualReason": "双方とも見立てなしと判断：左へ尖る本体と段状の上辺を持つが、船・魚・飛行機のどれとしても下へ出る部分の対応が弱い。",
+      "agreementStatus": "合意",
+      "discussion": "Opus は独立に汽船（低）、Terra は独立に見立てなし（魚状だが種類が特定できず、飛行機の機首と尾翼とも読める）とした。合議で Opus が取り下げた。Terra 第2ラウンド判断: support（魚状には見えるが種が特定できず、船としては下の突起の対応が弱い。）。"
+    },
+    {
+      "item": "item-15",
+      "opusSource": "reviewer",
+      "opusIndependent": {
+        "item": "item-15",
+        "silhouetteImpression": "大きな八角形（P1）が下の角を落として丸みを持ち、上辺は左側が一段低い。P1右上の角に、上へ尖る小三角（P3）と右へ尖る小三角（P2）が並んで付く。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "ニワトリ",
+            "posture": "うずくまって座る（めんどり）",
+            "direction": "右向き（くちばしが右）",
+            "confidence": "中",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "頭部から胴（丸い体）",
+                "evidence": "最大部品（87.5%）。下の角が落ちて丸く、右上の高い部分が頭、左の一段低い部分が背から尾"
+              },
+              {
+                "id": "P2",
+                "role": "くちばし",
+                "evidence": "頭の右から右へ尖る小三角（6.25%）。上辺が水平で、下辺が斜めに戻る"
+              },
+              {
+                "id": "P3",
+                "role": "とさか",
+                "evidence": "頭の上で上へ尖って立つ小三角（6.25%）。くちばしのすぐ上の頭頂にある"
+              }
+            ],
+            "evidence": "丸い体、頭頂のとさか、前方のくちばしの3要素がそろい、うずくまる鶏の横姿に合う。",
+            "weaknesses": "尾羽の立ち上がりや脚がない。とさかが1枚の三角で単純。"
+          },
+          {
+            "rank": 2,
+            "noun": "ネコ",
+            "posture": "座って耳を立てる",
+            "direction": "右向き（鼻先が右）",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "頭部から胴",
+                "evidence": "丸みのある大きな体"
+              },
+              {
+                "id": "P2",
+                "role": "鼻先・口元",
+                "evidence": "頭の右へ小さく尖る"
+              },
+              {
+                "id": "P3",
+                "role": "耳",
+                "evidence": "頭頂で上へ尖る"
+              }
+            ],
+            "evidence": "丸い体の右上に、立った耳と前へ出る鼻先がある。",
+            "weaknesses": "耳が鼻先のすぐ上の前端にあり、横顔の耳の位置として前すぎる。耳が1つしかない。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "鳥（くちばし＋とさか）と読むのが最も自然だが、P2・P3が小さいため獣の頭部と読む余地も残る。"
+      },
+      "terraIndependent": {
+        "item": "item-15",
+        "silhouetteImpression": "右に尖ったくちばしを出した鳥の横顔に見えた。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "カモ",
+            "posture": "体を丸めて浮かぶ",
+            "direction": "くちばしが右",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "胴体と頭",
+                "evidence": "下が幅広く右上へ立ち上がる大きな領域"
+              },
+              {
+                "id": "P2",
+                "role": "くちばし",
+                "evidence": "右上端の小さな三角形"
+              },
+              {
+                "id": "P3",
+                "role": "頭の上の羽",
+                "evidence": "上へ尖る小さな三角形"
+              }
+            ],
+            "evidence": "丸い胴に近い下部と、右に伸びる三角のくちばしが浮かぶカモを思わせる。",
+            "weaknesses": "胴体が角張り、頭頂の羽はカモらしさを弱める。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "尖った部分を耳と見ると横向きの猫にも見える。"
+      },
+      "consensusCandidates": [
+        {
+          "rank": 1,
+          "noun": "ニワトリ",
+          "posture": "うずくまって座る（めんどり）",
+          "direction": "右向き（くちばしが右）",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "頭部から胴（丸い体）",
+              "evidence": "最大部品（87.5%）。下の角が落ちて丸く、右上の高い部分が頭"
+            },
+            {
+              "id": "P2",
+              "role": "くちばし",
+              "evidence": "頭の右から右へ尖る小三角（双方一致）"
+            },
+            {
+              "id": "P3",
+              "role": "とさか",
+              "evidence": "頭の上で上へ尖る小三角。くちばしのすぐ上の頭頂にある"
+            }
+          ],
+          "evidence": "丸い体、頭頂のとさか、前方のくちばしがそろう（Opus の独立案、Terra が合議で支持）。",
+          "weaknesses": "とさかが単純な三角で、脚や尾羽の立ち上がりがない。"
+        },
+        {
+          "rank": 2,
+          "noun": "カモ",
+          "posture": "体を丸めて水に浮かぶ",
+          "direction": "右向き（くちばしが右）",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "胴体と頭",
+              "evidence": "下が幅広く右上へ立ち上がる大きな領域"
+            },
+            {
+              "id": "P2",
+              "role": "くちばし",
+              "evidence": "右上端の小さな三角形（双方一致）"
+            },
+            {
+              "id": "P3",
+              "role": "頭の上の羽",
+              "evidence": "上へ尖る小さな三角形"
+            }
+          ],
+          "evidence": "丸い胴と右へ伸びる三角のくちばしが、浮かぶカモを思わせる（Terra の独立案、Opus が合議で支持）。",
+          "weaknesses": "胴体が角張り、頭頂の羽はカモらしさを弱める。"
+        }
+      ],
+      "noConstrual": false,
+      "noConstrualReason": "",
+      "agreementStatus": "合意",
+      "discussion": "Opus は独立にニワトリ（中）とネコ（低）、Terra は独立にカモ（低）を挙げた。P2をくちばし、P3を頭頂の突起とする対応は一致。Terra 自身が「頭頂の羽はカモらしさを弱める」と書いていたため、Opus はP3をとさかと見るニワトリを1位、カモを2位とする案を出した。Terra 第2ラウンド判断: support（ニワトリを低で支持。右のP2を嘴、上のP3をとさかと読むと位置がまとまる。ただしとさかが単純な三角で脚はない。カモも低で支持。）。ネコは双方が別案として触れただけで弱いため落とした。確信度は双方が示した値の低い方（低）。"
+    },
+    {
+      "item": "item-16",
+      "opusSource": "reviewer",
+      "opusIndependent": {
+        "item": "item-16",
+        "silhouetteImpression": "左へ尖る五角形（P1）が中心。上辺左寄りに正方形（P2）が立ち、右辺の下寄りから正方形（P3）が右へ突き出す。P1の左下から平行四辺形（P4）が左下へ斜めに伸びる。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "イヌ",
+            "posture": "前脚を前へ伸ばして跳ぶ（駆ける）",
+            "direction": "左向き（頭が左）",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "頭（鼻先が左）と胴",
+                "evidence": "左端が尖る最大部品（62.5%）。尖りが鼻先、右の四角い部分が胴"
+              },
+              {
+                "id": "P2",
+                "role": "立った耳",
+                "evidence": "P1上辺の左寄り（頭の上）に立つ正方形（12.5%）"
+              },
+              {
+                "id": "P3",
+                "role": "後ろへ伸ばした尾",
+                "evidence": "胴の後端（右）から水平に突き出す正方形（12.5%）"
+              },
+              {
+                "id": "P4",
+                "role": "前へ伸ばした前脚",
+                "evidence": "体の前下から左下へ斜めに伸びる平行四辺形（12.5%）"
+              }
+            ],
+            "evidence": "鼻先・耳・尾・前脚が、左へ跳ぶ四足獣の要素として並ぶ。",
+            "weaknesses": "頭と胴が1つの部品で区別がない。後脚がない。耳と尾が四角い。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "P2を背びれ、P3を尾、P4をひれとして左向きの魚とも読めるが、ひれが前へ傾くのは不自然。P2を頭とするアヒルもくちばしがなく弱い。見立てなしも妥当。"
+      },
+      "terraIndependent": {
+        "item": "item-16",
+        "silhouetteImpression": "左に向かう魚のように見えた。",
+        "candidates": [],
+        "noConstrual": true,
+        "noConstrualReason": "魚のような輪郭には見えるが、種類を示せる形の手掛かりがなく、特定の名詞に絞れない。",
+        "uncertainty": "下の突起を翼と見れば飛行機にも見える。"
+      },
+      "consensusCandidates": [],
+      "noConstrual": true,
+      "noConstrualReason": "双方とも見立てなしと判断：左へ尖る本体に3つの突起が付く形で、跳ぶ動物・魚・飛行機のどれとしても決め手がない。",
+      "agreementStatus": "合意",
+      "discussion": "Opus は独立にイヌ（跳ぶ、低）、Terra は独立に見立てなし（魚状だが種類が特定できず、下の突起を翼と見れば飛行機）とした。合議で Opus が取り下げた。Terra 第2ラウンド判断: support（魚状には見えるが種が特定できず、跳ぶ犬の姿勢にも決め手がない。）。"
+    },
+    {
+      "item": "item-17",
+      "opusSource": "reviewer",
+      "opusIndependent": {
+        "item": "item-17",
+        "silhouetteImpression": "上部に2つの鋭い山（P1の上端とP4）が並び、間にV字の谷がある。右の山の下から小三角（P5）が右へ尖る。左側に台形（P2）、左下に平行四辺形（P3）が斜めに垂れる。右下側は一直線の斜辺。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "キツネ",
+            "posture": "耳を立てて前を見る頭部（首まで）",
+            "direction": "右向き（鼻先が右）",
+            "confidence": "中",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "頭部（上端の尖りが左の耳）",
+                "evidence": "最大部品（50%）。上端の鋭い角が左の耳、右へ張る直角の頂点が顔の前"
+              },
+              {
+                "id": "P2",
+                "role": "後頭部からうなじ",
+                "evidence": "頭の後ろ（左）に付く台形（18.75%）"
+              },
+              {
+                "id": "P3",
+                "role": "首（胸元へ下がる）",
+                "evidence": "頭の下から左下へ斜めに伸びる平行四辺形（12.5%）"
+              },
+              {
+                "id": "P4",
+                "role": "右の耳",
+                "evidence": "上へ鋭く尖る三角（12.5%）。P1の上端と並んで2つ目の耳になる"
+              },
+              {
+                "id": "P5",
+                "role": "鼻先（口吻）",
+                "evidence": "右の耳の下から右へ尖る小三角（6.25%）"
+              }
+            ],
+            "evidence": "2つの尖った立ち耳と、右へ尖る鼻先がそろい、細い首が左下へ続く横顔の形。",
+            "weaknesses": "鼻先が短く小さい。耳の間の谷が深く、頭の丸みがない。"
+          },
+          {
+            "rank": 2,
+            "noun": "ネコ",
+            "posture": "耳を立てた頭部（首まで）",
+            "direction": "右向き（鼻先が右）",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "頭部（上端の尖りが左の耳）",
+                "evidence": "最大部品。上端の鋭い角が左の耳"
+              },
+              {
+                "id": "P2",
+                "role": "後頭部",
+                "evidence": "頭の後ろに付く台形"
+              },
+              {
+                "id": "P3",
+                "role": "首",
+                "evidence": "頭の下から左下へ伸びる平行四辺形"
+              },
+              {
+                "id": "P4",
+                "role": "右の耳",
+                "evidence": "上へ尖る三角"
+              },
+              {
+                "id": "P5",
+                "role": "鼻・口元",
+                "evidence": "右へ小さく尖る小三角"
+              }
+            ],
+            "evidence": "2つの立ち耳と短い鼻先。",
+            "weaknesses": "耳が頭に比べて大きく、鼻先が尖る点はキツネ寄り。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "2つの立ち耳と鼻先から、イヌ科・ネコ科の頭部とする読みは比較的安定しているが、種の区別は弱い。"
+      },
+      "terraIndependent": {
+        "item": "item-17",
+        "silhouetteImpression": "右を向いたキツネの顔と、左下に伸びる体に見えた。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "キツネ",
+            "posture": "横向きに立つ",
+            "direction": "顔が右、体が左下",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "顔と左側の耳",
+                "evidence": "中央の大三角形が右の顔へ集まり、左上に尖る"
+              },
+              {
+                "id": "P2",
+                "role": "首",
+                "evidence": "顔の左側にある短い台形"
+              },
+              {
+                "id": "P3",
+                "role": "体の後ろ側",
+                "evidence": "左下へ斜めに延びる部分"
+              },
+              {
+                "id": "P4",
+                "role": "右側の耳",
+                "evidence": "顔の上の鋭い三角形"
+              },
+              {
+                "id": "P5",
+                "role": "鼻先",
+                "evidence": "右へ突き出す三角形"
+              }
+            ],
+            "evidence": "上の二つの尖りが耳、右の尖りが鼻先に見え、キツネの横顔を思わせる。",
+            "weaknesses": "脚や尾が独立して見えず、頭が体に比べて非常に大きい。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "顔の輪郭を優先した読みで、左下の部分の解釈は不確か。"
+      },
+      "consensusCandidates": [
+        {
+          "rank": 1,
+          "noun": "キツネ",
+          "posture": "耳を立てた横姿（大きな頭部から首と体が左下へ続く）",
+          "direction": "右向き（鼻先が右）",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "顔と左の耳",
+              "evidence": "最大部品（50%）。上端の鋭い角が左の耳で、右へ張る直角の頂点に顔が集まる（双方一致）"
+            },
+            {
+              "id": "P2",
+              "role": "後頭部から首",
+              "evidence": "頭の左に付く台形（Opus は後頭部からうなじ、Terra は首と読んだ）"
+            },
+            {
+              "id": "P3",
+              "role": "首から左下へ続く体",
+              "evidence": "頭の下から左下へ斜めに伸びる平行四辺形（Opus は首、Terra は体の後ろ側と読んだ）"
+            },
+            {
+              "id": "P4",
+              "role": "右の耳",
+              "evidence": "上へ鋭く尖る三角で、P1の上端と並ぶ2つ目の耳（双方一致）"
+            },
+            {
+              "id": "P5",
+              "role": "鼻先",
+              "evidence": "右の耳の下から右へ尖る小三角（双方一致）"
+            }
+          ],
+          "evidence": "上の2つの尖りを耳、右の尖りを鼻先とする読みで、Opus と Terra が独立にキツネへ到達した。",
+          "weaknesses": "頭が体に比べて非常に大きく、脚や尾が独立して見えない。鼻先は短い。"
+        }
+      ],
+      "noConstrual": false,
+      "noConstrualReason": "",
+      "agreementStatus": "合意",
+      "discussion": "Opus は独立にキツネの頭部（中）とネコの頭部（低）、Terra は独立にキツネの横姿（低）を挙げた。耳（P1上端・P4）と鼻先（P5）の対応は一致し、P2・P3は Opus が後頭部と首、Terra が首と体と読んだため、両方を含む役割にまとめた。Terra 第2ラウンド判断: support（右向きのキツネに同意。二つの耳と鼻先が見えるが、体と脚は不明瞭。）。ネコは Opus だけの案なので候補に入れなかった。確信度は双方が示した値の低い方（低）とした。"
+    },
+    {
+      "item": "item-18",
+      "opusSource": "reviewer",
+      "opusIndependent": {
+        "item": "item-18",
+        "silhouetteImpression": "右下がりの大きな平行四辺形（P2）が中央を斜めに横切り、その左上端から細い平行四辺形（P4）が右上へ立つ。P2の左下に五角形（P1）が下へ尖って付き、右下端の下に小三角（P3）が付く。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "ウサギ",
+            "posture": "座って耳を後ろへ倒す",
+            "direction": "左向き（顔が左）",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "胸と前脚",
+                "evidence": "体の前（左）下に付き、下へ尖る五角形（31.25%）。前脚が地面へ伸びる"
+              },
+              {
+                "id": "P2",
+                "role": "頭から背・胴",
+                "evidence": "最大部品（50%）。左上端が頭、右下へ下がる長い辺が背中"
+              },
+              {
+                "id": "P3",
+                "role": "後ろ足（または尾）",
+                "evidence": "胴の後端の下に付く小三角（6.25%）"
+              },
+              {
+                "id": "P4",
+                "role": "後ろへ倒した長い耳",
+                "evidence": "頭（P2の左上端）から右上へ細長く伸びる平行四辺形（12.5%）"
+              }
+            ],
+            "evidence": "細長い耳が頭から後方へ伸び、前が高く後ろへ下がる体と前脚が、座るウサギの横姿に合う。",
+            "weaknesses": "頭部が独立せず、顔の形がない。前脚が太く大きい。耳の付け根が頭の前端に寄る。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "P4とP2の重なりがZ字（稲妻）にも見え、生物でない読みも残る。"
+      },
+      "terraIndependent": {
+        "item": "item-18",
+        "silhouetteImpression": "左上から右下へ折れ曲がる細長い形に見えた。",
+        "candidates": [],
+        "noConstrual": true,
+        "noConstrualReason": "左右の突起を一貫した頭・胴・尾などに対応できない。",
+        "uncertainty": "鳥の首や尾を考えたが、頭と胴体を無理なく一続きに対応できない。"
+      },
+      "consensusCandidates": [],
+      "noConstrual": true,
+      "noConstrualReason": "双方とも見立てなしと判断：右下がりの帯とZ字状の折れを、頭・胴・尾として一貫して対応できない。",
+      "agreementStatus": "合意",
+      "discussion": "Opus は独立にウサギ（座って耳を後ろへ倒す、低）、Terra は独立に見立てなし（鳥の首や尾を考えたが一続きに対応できない）とした。合議で Opus が頭部が独立しない点から取り下げた。Terra 第2ラウンド判断: support（突起を頭・胴・尾としてまとめにくい。）。"
+    },
+    {
+      "item": "item-19",
+      "opusSource": "parent",
+      "opusIndependent": {
+        "item": "item-19",
+        "silhouetteImpression": "右へ尖る大きな三角の上から右へ水平な棒が伸び、左上に尖った突起、下に小さな三角がある。右を向けた拳銃のような形に見える。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "拳銃",
+            "posture": "横向きに構えられている",
+            "direction": "銃口が右、握りが下",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "撃鉄・後部",
+                "evidence": "左上へ尖る縦長の平行四辺形"
+              },
+              {
+                "id": "P2",
+                "role": "本体と握り",
+                "evidence": "下端が尖る大きな三角形"
+              },
+              {
+                "id": "P3",
+                "role": "引き金",
+                "evidence": "銃身の下の小三角形"
+              },
+              {
+                "id": "P4",
+                "role": "銃身",
+                "evidence": "右へ水平に伸びる平行四辺形"
+              }
+            ],
+            "evidence": "水平な銃身・下の引き金・後ろの握りの位置関係が拳銃の横姿に合う。",
+            "weaknesses": "握りが三角形で太く、銃身との角度が不自然。"
+          },
+          {
+            "rank": 2,
+            "noun": "ハチドリ",
+            "posture": "空中で止まる",
+            "direction": "右向き、くちばしが右",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "尾",
+                "evidence": "左上へ立つ平行四辺形"
+              },
+              {
+                "id": "P2",
+                "role": "胴",
+                "evidence": "大きな三角形"
+              },
+              {
+                "id": "P3",
+                "role": "喉",
+                "evidence": "くちばしの下の小三角形"
+              },
+              {
+                "id": "P4",
+                "role": "長いくちばし",
+                "evidence": "右へ水平に伸びる細長い部分"
+              }
+            ],
+            "evidence": "右へ長く伸びる細い部分が長いくちばしに見える。",
+            "weaknesses": "翼が無く、くちばしが太い。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "生き物と道具のどちらとも決めにくい。"
+      },
+      "terraIndependent": {
+        "item": "item-19",
+        "silhouetteImpression": "左に上下の突起があり、右に四角が突き出た形に見えた。",
+        "candidates": [],
+        "noConstrual": true,
+        "noConstrualReason": "左の上下の尖りと右端の四角を特定の対象に対応できない。",
+        "uncertainty": "飛ぶ鳥や飛行機に見えなくもないが、右端の四角と左上の形の役割が定まらない。"
+      },
+      "consensusCandidates": [],
+      "noConstrual": true,
+      "noConstrualReason": "合意に至らず：親（Opus 側）は拳銃とハチドリ（いずれも低）を挙げ、Terra は見立てなしを維持した。",
+      "agreementStatus": "未合意",
+      "discussion": "親は独立に拳銃（低：P4銃身、P3引き金、P2本体と握り、P1撃鉄・後部）とハチドリ（低：P4長いくちばし、P1尾）を挙げ、Terra は独立に見立てなし（左の上下の尖りと右端の四角の役割が定まらない）とした。合議で Opus 合議担当は、同じ型の item-30 で Opus も独立に拳銃を挙げていたことを示し、拳銃の支持を求めた。Terra 第2ラウンド判断: reject（拳銃は不支持。右のP4は銃身に見えるが、左上のP1が大きく突き出し、P2は幅広い三角で握りとして弱い。）。Terra は「拳銃案とは未合意」と明記した。ハチドリは合議で取り上げていない。合意を装わず、未合意として双方の案を残す。"
+    },
+    {
+      "item": "item-20",
+      "opusSource": "parent",
+      "opusIndependent": {
+        "item": "item-20",
+        "silhouetteImpression": "下に台形の船体、左上に大きな三角、右上に四角があり、帆と船室を持つ船に見える。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "帆船",
+            "posture": "水面に浮かんで進む",
+            "direction": "船首が右、帆が左寄り",
+            "confidence": "中",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "帆",
+                "evidence": "船体の上に立つ大きな三角形"
+              },
+              {
+                "id": "P2",
+                "role": "船体",
+                "evidence": "上辺が長く下辺が短い台形"
+              },
+              {
+                "id": "P3",
+                "role": "船室（または煙突）",
+                "evidence": "船体の右上に載る正方形"
+              }
+            ],
+            "evidence": "台形の船体の上に三角の帆と四角い船室が載る典型的な船の形。",
+            "weaknesses": "帆が船体より左へはみ出している。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "四角を煙突と見れば汽船にもなる。"
+      },
+      "terraIndependent": {
+        "item": "item-20",
+        "silhouetteImpression": "三角の帆を立てた船に見えた。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "帆船",
+            "posture": "水面に浮かぶ",
+            "direction": "船首が右、帆は左側",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "帆",
+                "evidence": "船体上の大きな三角形"
+              },
+              {
+                "id": "P2",
+                "role": "船体",
+                "evidence": "下側に横長に伸び両端が尖る台形"
+              },
+              {
+                "id": "P3",
+                "role": "甲板上の構造物",
+                "evidence": "船体右寄りに立つ四角"
+              }
+            ],
+            "evidence": "大きな三角の帆と、その下に細長い船体の組み合わせが帆船を思わせる。",
+            "weaknesses": "帆が船体の左へ大きくはみ出し、四角い構造物も目立つ。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "右の四角は煙突にも見え、帆船としてはやや不自然。"
+      },
+      "consensusCandidates": [
+        {
+          "rank": 1,
+          "noun": "帆船",
+          "posture": "水面に浮かんで進む",
+          "direction": "右向き（船首が右、帆は左寄り）",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "帆",
+              "evidence": "船体の上に立つ大きな三角形（親・Terra とも同じ対応）"
+            },
+            {
+              "id": "P2",
+              "role": "船体",
+              "evidence": "上辺が長く下辺が短い横長の台形（双方一致）"
+            },
+            {
+              "id": "P3",
+              "role": "船室または煙突",
+              "evidence": "船体の右寄りに載る正方形（双方一致）"
+            }
+          ],
+          "evidence": "三角の帆、細長い船体、甲板上の四角という船の典型的な側面形で、親と Terra が独立に一致した。",
+          "weaknesses": "帆が船体の左へ大きくはみ出す。四角を煙突と見れば汽船にも近い。"
+        }
+      ],
+      "noConstrual": false,
+      "noConstrualReason": "",
+      "agreementStatus": "合意",
+      "discussion": "親は独立に帆船（中）、Terra は独立に帆船（低）を挙げ、名詞・向き・部分対応（P1帆、P2船体、P3船室または構造物）が一致した。Terra 第2ラウンド判断: support（帆船に同意。帆が船体の左にはみ出す点は弱い。）。確信度は双方が示した値の低い方（低）とした。"
+    },
+    {
+      "item": "item-21",
+      "opusSource": "reviewer",
+      "opusIndependent": {
+        "item": "item-21",
+        "silhouetteImpression": "上部に縦長の六角形（P1）があり、頂部に2つの尖った山が並ぶ。P1の左辺の下から右下へ斜めの辺が続く。下部では左に上向きの三角（P2）、右に小三角（P5）が横へ張り出し、その下の右寄りに小三角（P3）と正方形（P4）が並ぶ。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "ネコ",
+            "posture": "座って両耳を立てる",
+            "direction": "右向き（顔が右）",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "頭部と胴（頂部の2つの山が両耳）",
+                "evidence": "最大部品（62.5%）。頂部の2つの鋭い山が並んだ耳、右の垂直辺が顔の前面"
+              },
+              {
+                "id": "P2",
+                "role": "腰と後ろ脚の腿",
+                "evidence": "体の後ろ（左）下で、底辺を地面に置く三角（12.5%）"
+              },
+              {
+                "id": "P3",
+                "role": "後ろ足",
+                "evidence": "腰の下の右寄りにある小三角（6.25%）"
+              },
+              {
+                "id": "P4",
+                "role": "前足",
+                "evidence": "右下で接地する正方形（12.5%）"
+              },
+              {
+                "id": "P5",
+                "role": "胸元と前脚",
+                "evidence": "顔の下から右へ張り出す小三角（6.25%）"
+              }
+            ],
+            "evidence": "頂部の2つの尖りが両耳として最も強い手がかりで、下部の部品が座った脚の集まりとして読める。",
+            "weaknesses": "顔や鼻先の形がない。頭と胴が一体で、背中側に深いくぼみがある。脚の部品の役割分担は恣意的。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "左向き（左の垂直辺を顔、P5を尾）とも読め、向きが決まらない。チューリップ（2つの山を花びら、P2・P5を葉）なども浮かぶ。見立てなしも妥当。"
+      },
+      "terraIndependent": {
+        "item": "item-21",
+        "silhouetteImpression": "上に二つの突起、右下に四角が付いた縦長の形に見えた。",
+        "candidates": [],
+        "noConstrual": true,
+        "noConstrualReason": "上と右下の突起を自然な部位として対応できない。",
+        "uncertainty": "耳のある生き物にも見えるが、下端の四角を頭や足として納得できない。"
+      },
+      "consensusCandidates": [],
+      "noConstrual": true,
+      "noConstrualReason": "双方とも見立てなしと判断：上の2つの尖りは耳にも見えるが、向きも脚の対応も定まらない。",
+      "agreementStatus": "合意",
+      "discussion": "Opus は独立にネコ（座って両耳を立てる、低）、Terra は独立に見立てなし（耳のある生き物にも見えるが、下端の四角を頭や足にできない）とした。合議で Opus が取り下げた。Terra 第2ラウンド判断: support（上下の突起を自然な部位にまとめにくい。）。"
+    },
+    {
+      "item": "item-22",
+      "opusSource": "parent",
+      "opusIndependent": {
+        "item": "item-22",
+        "silhouetteImpression": "左下に先の尖った幅広の板、右上へ細い柄が伸び、スコップに見える。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "スコップ",
+            "posture": "斜めに置かれている",
+            "direction": "刃先が左下、柄が右上",
+            "confidence": "中",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "刃（先端が左下）",
+                "evidence": "左下へ尖る幅広の六角形"
+              },
+              {
+                "id": "P2",
+                "role": "柄",
+                "evidence": "刃の右上から右上へ伸びる細い平行四辺形"
+              }
+            ],
+            "evidence": "幅広く先の尖った板と、そこから一直線に伸びる細い柄の組み合わせ。",
+            "weaknesses": "柄が刃の中心線からずれている。"
+          },
+          {
+            "rank": 2,
+            "noun": "ギター",
+            "posture": "斜めに置かれている",
+            "direction": "胴が左下、ネックが右上",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "胴",
+                "evidence": "左下の幅広の六角形"
+              },
+              {
+                "id": "P2",
+                "role": "ネック",
+                "evidence": "右上へ伸びる細い平行四辺形"
+              }
+            ],
+            "evidence": "大きな胴と細長い棹の比率が楽器に合う。",
+            "weaknesses": "胴にくびれが無く角張る。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "おたまやフライパンなど、柄の付いた道具全般にも当てはまる。"
+      },
+      "terraIndependent": {
+        "item": "item-22",
+        "silhouetteImpression": "右上へ柄が伸びるフライパンに見えた。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "フライパン",
+            "posture": "柄を斜め上に向けて置かれる",
+            "direction": "本体が左下、柄が右上",
+            "confidence": "中",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "パンの本体",
+                "evidence": "左下に大きく広がる五角形"
+              },
+              {
+                "id": "P2",
+                "role": "柄",
+                "evidence": "本体から右上へ伸びる細長い台形"
+              }
+            ],
+            "evidence": "広い本体から細い柄が一本伸びる形がフライパンを思わせる。",
+            "weaknesses": "本体が深い五角形で、通常の浅く丸い鍋底とは違う。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "シャベルやラケットにも見えるが、柄と本体の太さの対比からフライパンと見た。"
+      },
+      "consensusCandidates": [
+        {
+          "rank": 1,
+          "noun": "スコップ",
+          "posture": "斜めに置かれている",
+          "direction": "刃先が左下、柄が右上",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "刃（先端が左下）",
+              "evidence": "左下へ尖る幅広の五角形"
+            },
+            {
+              "id": "P2",
+              "role": "柄",
+              "evidence": "刃の右上から右上へ伸びる細い台形"
+            }
+          ],
+          "evidence": "幅広く先の尖った刃と、そこから伸びる細い柄の組み合わせ（親の独立案。Terra も「フライパンより先端の尖りを説明しやすい」として1位に置いた）。",
+          "weaknesses": "柄が刃の中心線からずれている。"
+        },
+        {
+          "rank": 2,
+          "noun": "フライパン",
+          "posture": "柄を斜め上に向けて置かれる",
+          "direction": "本体が左下、柄が右上",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "本体（鍋）",
+              "evidence": "左下に大きく広がる五角形"
+            },
+            {
+              "id": "P2",
+              "role": "柄",
+              "evidence": "本体の縁から右上へ伸びる細長い台形"
+            }
+          ],
+          "evidence": "広い本体から細い柄が一本伸び、柄が本体の縁から出る形がフライパンに合う（Terra の独立案、Opus が合議で支持）。",
+          "weaknesses": "本体が深く角張った五角形で、浅く丸い鍋底と違う。"
+        }
+      ],
+      "noConstrual": false,
+      "noConstrualReason": "",
+      "agreementStatus": "合意",
+      "discussion": "親は独立にスコップ（中）とギター（低）、Terra は独立にフライパン（中、不確かさにシャベルも記載）を挙げ、本体P1と柄P2の対応は共通。合議で Opus 合議担当が両方の採用を提案した。Terra 第2ラウンド判断: support（スコップを支持し1位にする。左下に尖る幅広い刃と右上へ延びる柄の配置が合い、フライパンより先端の尖りを説明しやすい。フライパンも低で支持。）。ギターは胴にくびれがなく、双方の支持がないため落とした。確信度は双方が示した値の低い方（低）とした。"
+    },
+    {
+      "item": "item-23",
+      "opusSource": "parent",
+      "opusIndependent": {
+        "item": "item-23",
+        "silhouetteImpression": "左上に斜めに突き出た頭、その下の左に小さな腕、右下へ斜めに下がる背中と、右下端の四角があり、左を向いて立つカンガルーに見える。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "カンガルー",
+            "posture": "後ろ脚と尾で立つ",
+            "direction": "左向き、頭が左上",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "胴（背中が右下へ下がる）",
+                "evidence": "縦の辺が左にある大きな直角三角形"
+              },
+              {
+                "id": "P2",
+                "role": "前脚（短い腕）",
+                "evidence": "胴の左に付く小さな三角形"
+              },
+              {
+                "id": "P3",
+                "role": "頭",
+                "evidence": "最上部で左上へ突き出る平行四辺形"
+              },
+              {
+                "id": "P4",
+                "role": "尾の先・後ろ足",
+                "evidence": "右下端の正方形"
+              }
+            ],
+            "evidence": "上へ伸びる頭、前の小さな腕、下へ広がる胴の並びがカンガルーの立ち姿に合う。",
+            "weaknesses": "尾が短く、脚の区別が無い。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "左上を向くアシカやペンギンとも読める。"
+      },
+      "terraIndependent": {
+        "item": "item-23",
+        "silhouetteImpression": "左を向いて座るウサギの横姿に見えた。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "ウサギ",
+            "posture": "座っている",
+            "direction": "頭が左、体が右下",
+            "confidence": "中",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "胴体",
+                "evidence": "中央から右下へ大きく広がる三角形"
+              },
+              {
+                "id": "P2",
+                "role": "顔",
+                "evidence": "胴体左上に接し左へ尖る三角形"
+              },
+              {
+                "id": "P3",
+                "role": "耳",
+                "evidence": "頭上から左上へ長く伸びる台形"
+              },
+              {
+                "id": "P4",
+                "role": "後ろ足",
+                "evidence": "胴体の右下につく四角"
+              }
+            ],
+            "evidence": "左に突き出た顔と長い耳、右下に広がる胴体が座ったウサギを思わせる。",
+            "weaknesses": "後ろ足が四角く、耳は一本しか見えない。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "右下の四角は足でなく尾と読むこともできる。"
+      },
+      "consensusCandidates": [
+        {
+          "rank": 1,
+          "noun": "ウサギ",
+          "posture": "座っている",
+          "direction": "左向き（頭が左、体が右下）",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "胴体",
+              "evidence": "中央から右下へ大きく広がる三角形"
+            },
+            {
+              "id": "P2",
+              "role": "顔",
+              "evidence": "胴体の左上に接し、左へ尖る三角形"
+            },
+            {
+              "id": "P3",
+              "role": "耳",
+              "evidence": "頭上から左上へ長く伸びる台形"
+            },
+            {
+              "id": "P4",
+              "role": "後ろ足",
+              "evidence": "胴体の右下につく正方形"
+            }
+          ],
+          "evidence": "左へ突き出た顔と長い耳、右下に広がる胴が、座ったウサギを思わせる（Terra の独立案、Opus が合議で支持）。",
+          "weaknesses": "耳P3が頭から前上方（左上）へ伸び、後ろへ倒れる耳の向きと逆。耳は一本だけで、後ろ足が四角い。"
+        }
+      ],
+      "noConstrual": false,
+      "noConstrualReason": "",
+      "agreementStatus": "一部合意",
+      "discussion": "親は独立にカンガルー（低：P3頭、P2短い前脚、P1胴、P4尾の先・後ろ足）、Terra は独立にウサギ（中：P2顔、P3耳）を挙げ、P2・P3の役割が対立した。合議で Opus 合議担当は、ウサギだと耳P3が前上方へ伸びるという反証を示し、カンガルーの支持を求めた。Terra 第2ラウンド判断: reject（カンガルーは不支持。P3を頭、P2を前脚と読めるが、耳や長い尾が見えずP4も四角い。ウサギも耳が前上方へ伸びる点は弱いが、P2の顔とP3の長い耳は支持する。）。Opus 合議担当は画像を見直し、P2を顔、P3を長い耳とする読みは成り立つと判断して、ウサギを低で支持した（2026-11-28 05:59Z、メール23357で Terra に通知）。双方が支持するウサギだけを候補に入れ、カンガルーは親の Opus 側案として残る。"
+    },
+    {
+      "item": "item-24",
+      "opusSource": "reviewer",
+      "opusIndependent": {
+        "item": "item-24",
+        "silhouetteImpression": "左上から右下へ、平行四辺形（P4）、正方形（P3）、台形（P1）、直角三角形（P2）が一段ずつ下がりながら並ぶ。上側から右側は段々、左下側はほぼ一直線の斜辺。右下端は下へ尖る。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "階段",
+            "posture": "左上から右下へ下る段",
+            "direction": "右下へ下る（横から見た形）",
+            "confidence": "中",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "3段目とその下の構造",
+                "evidence": "上辺が水平な台形（50%）。左下の斜辺が階段の下側の線になる"
+              },
+              {
+                "id": "P2",
+                "role": "最下段",
+                "evidence": "上辺が水平な直角三角形（25%）で、さらに一段下にある"
+              },
+              {
+                "id": "P3",
+                "role": "2段目",
+                "evidence": "上辺が水平な正方形（12.5%）で、P4より一段下"
+              },
+              {
+                "id": "P4",
+                "role": "最上段",
+                "evidence": "最も高い位置にある平行四辺形（12.5%）"
+              }
+            ],
+            "evidence": "上辺がほぼ等間隔に下がる段々と、下側の一直線の斜辺が、横から見た階段の形に合う。",
+            "weaknesses": "最上段（P4）の上辺が斜めで踏み板にならない。最下段（P2）が下へ尖り、床につながらない。"
+          },
+          {
+            "rank": 2,
+            "noun": "稲妻",
+            "posture": "左上から右下へ折れながら走る",
+            "direction": "右下向き（先端が右下）",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "中央の帯",
+                "evidence": "斜めに走る主部"
+              },
+              {
+                "id": "P2",
+                "role": "先端",
+                "evidence": "下へ鋭く尖る三角"
+              },
+              {
+                "id": "P3",
+                "role": "折れ目",
+                "evidence": "段の角を作る正方形"
+              },
+              {
+                "id": "P4",
+                "role": "始点",
+                "evidence": "左上端の細い部分"
+              }
+            ],
+            "evidence": "段々に折れ、最後に尖った先端で終わる輪郭。",
+            "weaknesses": "左下側が一直線でジグザグにならない。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "段の形に強く依存する見立てで、具体物としては階段が最も安定。"
+      },
+      "terraIndependent": {
+        "item": "item-24",
+        "silhouetteImpression": "左上に首を伸ばして飛ぶ鳥のように見えた。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "飛んでいるカモ",
+            "posture": "首を伸ばして飛ぶ",
+            "direction": "頭が左上、尾が右下",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "胴体と翼",
+                "evidence": "中央に斜めに広がる台形"
+              },
+              {
+                "id": "P2",
+                "role": "尾",
+                "evidence": "右下に張り出す三角形"
+              },
+              {
+                "id": "P3",
+                "role": "首",
+                "evidence": "中央と左上の先端をつなぐ四角"
+              },
+              {
+                "id": "P4",
+                "role": "頭",
+                "evidence": "左上端へ伸びる細い部分"
+              }
+            ],
+            "evidence": "左上へ伸びる首と右下の尾の間に、斜め向きの胴体が見える。",
+            "weaknesses": "頭が細長すぎて嘴と区別できず、翼も明瞭でない。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "折れた階段状の輪郭にも見える。"
+      },
+      "consensusCandidates": [
+        {
+          "rank": 1,
+          "noun": "階段",
+          "posture": "左上から右下へ下る段",
+          "direction": "右下へ下る（横から見た形）",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "3段目とその下の構造",
+              "evidence": "上辺が水平な台形（50%）。左下の斜辺が階段の下側の線になる"
+            },
+            {
+              "id": "P2",
+              "role": "最下段",
+              "evidence": "上辺が水平な直角三角形（25%）で、さらに一段下にある"
+            },
+            {
+              "id": "P3",
+              "role": "2段目",
+              "evidence": "上辺が水平な正方形（12.5%）で、P4より一段下"
+            },
+            {
+              "id": "P4",
+              "role": "最上段",
+              "evidence": "最も高い位置にある平行四辺形（12.5%）"
+            }
+          ],
+          "evidence": "上辺がほぼ等間隔に下がる段々と、下側の一直線の斜辺が、横から見た階段の形に合う（Opus の独立案、Terra が合議で支持）。",
+          "weaknesses": "最上段P4の上辺が斜めで踏み板にならず、最下段P2が下へ尖る。踏面の幅が不揃い。"
+        }
+      ],
+      "noConstrual": false,
+      "noConstrualReason": "",
+      "agreementStatus": "合意",
+      "discussion": "Opus は独立に階段（中）と稲妻（低）、Terra は独立に飛んでいるカモ（低。不確かさの欄に「階段状」と記載）を挙げた。合議で Opus が階段の支持を求め、カモについては頭P4の形と翼がない点を指摘した。Terra 第2ラウンド判断: revise（階段を支持。上側の連続する段と右下へ下る輪郭が階段を思わせる。ただし踏面の幅が不揃い。カモは頭と翼の対応が弱く取り下げる。）。Opus も稲妻（左下側が一直線でジグザグにならない）を取り下げた。確信度は双方が示した値の低い方（低）とした。"
+    },
+    {
+      "item": "item-25",
+      "opusSource": "reviewer",
+      "opusIndependent": {
+        "item": "item-25",
+        "silhouetteImpression": "右上から左下へ斜めに走る太い帯（P1）が下半を占める。上部では、左上の正方形（P3）から小三角（P2）が右下へ下がってP1につながり、右上には細い平行四辺形（P4）がP1の上辺から右上へ立つ。全体としてY字・レ点に近い。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "カモ",
+            "posture": "翼を上げ、体を立てて舞い降りる",
+            "direction": "左向き（頭が左上）",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "胴（左下端は前へ下ろした体と脚）",
+                "evidence": "最大部品（62.5%）。水平な上辺が背中、左下へ垂れる部分が前へ下ろした体"
+              },
+              {
+                "id": "P2",
+                "role": "首",
+                "evidence": "頭（P3）と胴の間をつなぐ小三角（12.5%）"
+              },
+              {
+                "id": "P3",
+                "role": "頭",
+                "evidence": "左上端に単独で出る正方形（12.5%）"
+              },
+              {
+                "id": "P4",
+                "role": "打ち上げた翼",
+                "evidence": "背中（P1上辺）から右上へ斜めに立つ平行四辺形（12.5%）"
+              }
+            ],
+            "evidence": "頭・首・背中・上げた翼の配置が item-01 の飛ぶ鳥と同じ型で、体だけが前下へ傾く。",
+            "weaknesses": "胴が頭の下へ大きく垂れ、尾にあたる部分が背中の右端の角だけ。くちばしがない。"
+          },
+          {
+            "rank": 2,
+            "noun": "ハト",
+            "posture": "両翼を高く上げて飛ぶ",
+            "direction": "右上向き（頭が右上）",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "頭から胴・尾",
+                "evidence": "右上端の鋭い角が頭（くちばし）、左下端が尾"
+              },
+              {
+                "id": "P2",
+                "role": "左の翼の付け根",
+                "evidence": "胴の上辺の左寄りから左上へ広がる三角"
+              },
+              {
+                "id": "P3",
+                "role": "左の翼の先",
+                "evidence": "P2の先に付く正方形"
+              },
+              {
+                "id": "P4",
+                "role": "右の翼",
+                "evidence": "胴の上辺から右上へ立つ平行四辺形"
+              }
+            ],
+            "evidence": "体の上でV字に開く2つの突起を、打ち上げた両翼と読む。",
+            "weaknesses": "頭部がP1の角にすぎない。左右の翼の形が大きく違う。ハトと特定する根拠はない。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "Y字の道具（パチンコ）、頭から飛び込む人（P3＋P2とP4を開いた脚）などの読みも並び、決め手がない。見立てなしも妥当。"
+      },
+      "terraIndependent": {
+        "item": "item-25",
+        "silhouetteImpression": "左上の頭と右上に上げた翼を持つ鳥に見えた。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "飛んでいるカモ",
+            "posture": "翼を上げて飛ぶ",
+            "direction": "頭が左上、尾が右",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "胴体と下側の翼",
+                "evidence": "中央から左下と右へ広がる大きな台形"
+              },
+              {
+                "id": "P2",
+                "role": "首",
+                "evidence": "左上の頭と胴体の間の三角形"
+              },
+              {
+                "id": "P3",
+                "role": "頭",
+                "evidence": "左上端の四角"
+              },
+              {
+                "id": "P4",
+                "role": "上げた翼",
+                "evidence": "胴体から右上に伸びる細長い部分"
+              }
+            ],
+            "evidence": "左上の頭から胴体が続き、上下に羽を開いたように見える。",
+            "weaknesses": "頭が四角く、尾と翼の区別も曖昧。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "右上の二つの先端を尾羽と見ることもできる。"
+      },
+      "consensusCandidates": [
+        {
+          "rank": 1,
+          "noun": "カモ",
+          "posture": "翼を上げて飛ぶ（体を立てて舞い降りる姿とも読める）",
+          "direction": "左向き（頭が左上、尾が右）",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "胴体と下側の翼",
+              "evidence": "最大部品（62.5%）。水平な上辺が背中で、左下へ広がる部分を Terra は下側の翼、Opus は前へ下ろした体と読んだ"
+            },
+            {
+              "id": "P2",
+              "role": "首",
+              "evidence": "左上の頭と胴の間の三角（双方一致）"
+            },
+            {
+              "id": "P3",
+              "role": "頭",
+              "evidence": "左上端の正方形（双方一致）"
+            },
+            {
+              "id": "P4",
+              "role": "上げた翼",
+              "evidence": "胴の上辺から右上へ伸びる細長い平行四辺形（双方一致）"
+            }
+          ],
+          "evidence": "頭・首・上げた翼の配置が item-01 と同じ型で、Opus と Terra が独立にカモを挙げた。",
+          "weaknesses": "頭が四角く、くちばしがない。尾と翼の区別が曖昧で、左下へ大きく張る部分の役割が定まらない。"
+        }
+      ],
+      "noConstrual": false,
+      "noConstrualReason": "",
+      "agreementStatus": "合意",
+      "discussion": "Opus は独立にカモ（舞い降りる、低）とハト（右上へ飛ぶ、低）、Terra は独立に飛んでいるカモ（低）を挙げた。カモの部分対応（P2首、P3頭、P4上げた翼）は一致し、P1の左下部分の読みだけ異なるため両方を役割に残した。Terra 第2ラウンド判断: support（飛ぶカモに同意。四角い頭に嘴がないため確信度は低い。）。ハトは Opus だけの案で、頭がP1の角にすぎず根拠が弱いため落とした。"
+    },
+    {
+      "item": "item-26",
+      "opusSource": "reviewer",
+      "opusIndependent": {
+        "item": "item-26",
+        "silhouetteImpression": "最上部に正方形（P4）、その下に下向きの三角（P3）、中央に左へ尖る大三角（P2）、最下部に上向きの三角（P1）が縦に並ぶ。右辺は垂直な直線で、その上寄りから平行四辺形（P5）が右上へ斜めに伸びる。左辺はジグザグ。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "人",
+            "posture": "片手を高く挙げ、もう一方の手を腰に当てて立つ（手を振る・踊る）",
+            "direction": "正面向き（挙げた手は図の右上）",
+            "confidence": "中",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "脚・足元",
+                "evidence": "最下部で底辺が水平な三角（12.5%）"
+              },
+              {
+                "id": "P2",
+                "role": "胴（左の尖りは腰に当てた腕の肘）",
+                "evidence": "最大部品（50%）。左へ尖る頂点が、腰に当てた腕の肘のように張り出す"
+              },
+              {
+                "id": "P3",
+                "role": "肩と胸",
+                "evidence": "頭の下で左右に広がる逆三角（12.5%）"
+              },
+              {
+                "id": "P4",
+                "role": "頭",
+                "evidence": "最上部の正方形（12.5%）"
+              },
+              {
+                "id": "P5",
+                "role": "挙げた腕",
+                "evidence": "胴の右上から右上へ斜めに伸びる細い平行四辺形（12.5%）"
+              }
+            ],
+            "evidence": "頭・肩・胴・足が縦に並び、片側から腕が上がる人の立ち姿の配置。",
+            "weaknesses": "頭が図の左寄りで胴の中心からずれる。脚が1つの三角で、2本に分かれない。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "人の立ち姿としては比較的安定。頭が左に寄るので、左向きの横姿で腕を後ろへ振り上げている（投げる動作）とも読める。"
+      },
+      "terraIndependent": {
+        "item": "item-26",
+        "silhouetteImpression": "左上に頭があり右に腕を上げた人に見えた。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "手を上げて立つ人",
+            "posture": "腕を上げ、脚を曲げる",
+            "direction": "頭が左上、上げた手が右上",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "足元",
+                "evidence": "下端の三角形が水平な接地面を作る"
+              },
+              {
+                "id": "P2",
+                "role": "胴体と曲げた脚",
+                "evidence": "中央の大きな三角形が腰から下まで広がる"
+              },
+              {
+                "id": "P3",
+                "role": "肩と首",
+                "evidence": "頭の下から中央へ広がる三角形"
+              },
+              {
+                "id": "P4",
+                "role": "頭",
+                "evidence": "左上端の四角"
+              },
+              {
+                "id": "P5",
+                "role": "上げた腕",
+                "evidence": "中央右から右上へ突き出る細長い部分"
+              }
+            ],
+            "evidence": "左上の頭から胴が続き、右上へ腕を上げた姿に見える。",
+            "weaknesses": "胴と脚の境目がなく、もう一方の腕も見えない。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "頭の四角が胴の真上からずれており、姿勢の読みには幅がある。"
+      },
+      "consensusCandidates": [
+        {
+          "rank": 1,
+          "noun": "人",
+          "posture": "片手を高く挙げて立つ",
+          "direction": "頭が左上、挙げた手が右上",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "足元",
+              "evidence": "下端の三角形が水平な接地面を作る（双方一致）"
+            },
+            {
+              "id": "P2",
+              "role": "胴（左の尖りは曲げた膝か腰に当てた肘）",
+              "evidence": "最大部品（50%）。左へ尖る頂点を、Opus は腰に当てた腕の肘、Terra は曲げた脚と読んだ"
+            },
+            {
+              "id": "P3",
+              "role": "肩と胸",
+              "evidence": "頭の下で左右に広がる逆三角（双方ほぼ一致）"
+            },
+            {
+              "id": "P4",
+              "role": "頭",
+              "evidence": "最上部の正方形（双方一致）"
+            },
+            {
+              "id": "P5",
+              "role": "挙げた腕",
+              "evidence": "胴の右上から右上へ伸びる細長い平行四辺形（双方一致）"
+            }
+          ],
+          "evidence": "頭・肩・胴・足が縦に並び、片側から腕が上がる人の立ち姿として、Opus と Terra が独立に一致した。",
+          "weaknesses": "頭が胴の中心から左へずれる。脚が1つの三角で2本に分かれず、もう一方の腕も見えない。"
+        }
+      ],
+      "noConstrual": false,
+      "noConstrualReason": "",
+      "agreementStatus": "合意",
+      "discussion": "Opus は独立に人（片手を挙げ、もう一方を腰に当てる、中）、Terra は独立に手を上げて立つ人（低）を挙げた。P1・P3・P4・P5の役割は一致し、P2の左の尖りだけ肘か膝かで分かれたので両方を残した。向きは Opus が正面、Terra が頭が左上と書いたため、図上の位置で記した。Terra 第2ラウンド判断: support（片手を挙げた人に同意。頭が胴の左にずれ、脚は分かれない。）。確信度は双方が示した値の低い方（低）とした。"
+    },
+    {
+      "item": "item-27",
+      "opusSource": "parent",
+      "opusIndependent": {
+        "item": "item-27",
+        "silhouetteImpression": "上部に二つの尖りと谷があり耳のように見え、左下へ伸びる三角と右下へ伸びる脚がある。跳ねる小動物に見えなくもない。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "ウサギ",
+            "posture": "左へ跳ねる",
+            "direction": "左向き、耳が上",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "頭と胴（右上の角が片耳）",
+                "evidence": "縦の辺が右にある大きな三角形で、上端が尖る"
+              },
+              {
+                "id": "P2",
+                "role": "もう一方の耳",
+                "evidence": "上端左で上へ尖る三角形"
+              },
+              {
+                "id": "P3",
+                "role": "前へ伸ばした前脚",
+                "evidence": "左下へ伸びる三角形"
+              },
+              {
+                "id": "P4",
+                "role": "尻",
+                "evidence": "胴の右の正方形"
+              },
+              {
+                "id": "P5",
+                "role": "後ろへ蹴り出す後ろ脚",
+                "evidence": "右下へ伸びる平行四辺形"
+              }
+            ],
+            "evidence": "二つの尖った耳と、前後に開いた脚が跳ねる姿に対応する。",
+            "weaknesses": "頭の位置がはっきりせず、胴が三角形で不自然。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "耳のある猫の座り姿にも見えるが、どちらも弱い。"
+      },
+      "terraIndependent": {
+        "item": "item-27",
+        "silhouetteImpression": "左向きの尖った顔に二つの耳があるキツネに見えた。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "キツネ",
+            "posture": "横向きに伏せる",
+            "direction": "顔が左、尾が右下",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "頭と右側の耳",
+                "evidence": "中央の大きな三角形が上に尖り顔に続く"
+              },
+              {
+                "id": "P2",
+                "role": "左側の耳",
+                "evidence": "左上に尖る三角形"
+              },
+              {
+                "id": "P3",
+                "role": "鼻先",
+                "evidence": "左へ長く尖る三角形"
+              },
+              {
+                "id": "P4",
+                "role": "胴体",
+                "evidence": "顔の右にある四角"
+              },
+              {
+                "id": "P5",
+                "role": "尾",
+                "evidence": "胴の右下へ斜めに伸びる"
+              }
+            ],
+            "evidence": "二つの尖った耳と左に伸びる鼻先、右下に続く尾がキツネを思わせる。",
+            "weaknesses": "頭に対して胴が小さく、脚が区別できない。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "正面に近い猫の顔としても読める。"
+      },
+      "consensusCandidates": [
+        {
+          "rank": 1,
+          "noun": "キツネ",
+          "posture": "耳を立てて横向きに伏せる",
+          "direction": "左向き（顔が左、尾が右下）",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "頭と右側の耳",
+              "evidence": "中央の大きな三角形で、上端の尖りが右の耳、左へ顔が続く"
+            },
+            {
+              "id": "P2",
+              "role": "左側の耳",
+              "evidence": "左上で上へ尖る三角形"
+            },
+            {
+              "id": "P3",
+              "role": "鼻先",
+              "evidence": "顔の下から左へ長く尖る三角形"
+            },
+            {
+              "id": "P4",
+              "role": "胴体",
+              "evidence": "顔の右にある正方形"
+            },
+            {
+              "id": "P5",
+              "role": "尾",
+              "evidence": "胴の右下へ斜めに伸びる平行四辺形"
+            }
+          ],
+          "evidence": "二つの尖った耳と、左へ伸びる尖った鼻先、右下に続く尾（Terra の独立案、Opus が合議で支持）。",
+          "weaknesses": "頭に対して胴が小さく、脚が区別できない。"
+        },
+        {
+          "rank": 2,
+          "noun": "猫",
+          "posture": "耳を立てて伏せる（または座る）",
+          "direction": "左向き（顔が左）",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "頭と右側の耳",
+              "evidence": "中央の大きな三角形で、上端の尖りが右の耳"
+            },
+            {
+              "id": "P2",
+              "role": "左側の耳",
+              "evidence": "左上で上へ尖る三角形"
+            },
+            {
+              "id": "P3",
+              "role": "鼻先・口元",
+              "evidence": "顔の下から左へ尖る三角形"
+            },
+            {
+              "id": "P4",
+              "role": "胴",
+              "evidence": "顔の右の正方形"
+            },
+            {
+              "id": "P5",
+              "role": "尾",
+              "evidence": "胴の右下へ伸びる平行四辺形"
+            }
+          ],
+          "evidence": "二つの尖った耳を持つ大きな頭（親と Terra がともに別案として触れ、Terra が合議で共通案として支持、Opus も支持）。",
+          "weaknesses": "鼻先P3が長く尖り、ネコの短い口元と合わない。胴と脚が不明瞭。"
+        }
+      ],
+      "noConstrual": false,
+      "noConstrualReason": "",
+      "agreementStatus": "合意",
+      "discussion": "親は独立にウサギ（低：二つの耳、P3前脚、P4尻、P5後ろ脚）、Terra は独立にキツネ（低：P3鼻先、P4胴、P5尾）を挙げた。上の2つの尖り（P2とP1上端）を耳とする点は共通で、親も Terra も別案としてネコに触れていた。Terra 第2ラウンド判断: revise（猫を低で支持。P1とP2の尖りを耳、P3を鼻先、P4・P5を胴と尾に読めるが、胴と脚は不明瞭。キツネの読みも維持する。）。Opus 合議担当は、P3の尖った鼻先はネコよりキツネに合うとしてキツネも支持し（2026-11-28 05:59Z、メール23357で Terra に通知）、キツネを1位・猫を2位とした。親のウサギは、耳が短い三角で頭の位置が定まらない（親自身も弱点として記載）ため Opus 側で取り下げた。"
+    },
+    {
+      "item": "item-28",
+      "opusSource": "reviewer",
+      "opusIndependent": {
+        "item": "item-28",
+        "silhouetteImpression": "縦の辺を左にした大三角（P1）が中央にあり、上端と下端が尖る。左上に左へ尖る小三角（P3）、左の中段に正方形（P2）が突き出す。右上には上へ尖る三角（P4）と、右上へ斜めに伸びる台形の帯（P5）が並び、上辺にW字の山並みを作る。右下側は一直線の斜辺。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "ニワトリ",
+            "posture": "胸を張って立ち、尾羽を高く上げる（おんどり）",
+            "direction": "左向き（くちばしが左）",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "頭から胴",
+                "evidence": "最大部品（50%）。上端の尖りが頭頂、下端の尖りが体の下端"
+              },
+              {
+                "id": "P2",
+                "role": "張り出した胸",
+                "evidence": "体の前（左）の中段から前へ突き出す正方形（12.5%）"
+              },
+              {
+                "id": "P3",
+                "role": "くちばし",
+                "evidence": "頭頂の左に付き、左へ尖る小三角（6.25%）"
+              },
+              {
+                "id": "P4",
+                "role": "短い尾羽",
+                "evidence": "背の後方で上へ尖る三角（12.5%）"
+              },
+              {
+                "id": "P5",
+                "role": "長い尾羽",
+                "evidence": "P4の後ろから右上へ長く伸びる帯（18.75%）"
+              }
+            ],
+            "evidence": "前のくちばし、張り出した胸、後ろで上へ伸びる2段の尾羽が、おんどりの側面に合う。",
+            "weaknesses": "とさかと脚がない。体の下端が尖り、胴の丸みがない。くちばしが頭に対して大きい。"
+          },
+          {
+            "rank": 2,
+            "noun": "リス",
+            "posture": "後ろ足で座り、前足で物を持ち、尾を立てる",
+            "direction": "左向き（鼻先が左）",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "頭から胴",
+                "evidence": "最大部品。上端が頭頂、下端が座った腰"
+              },
+              {
+                "id": "P2",
+                "role": "前足と持った木の実",
+                "evidence": "胸の前に突き出す正方形"
+              },
+              {
+                "id": "P3",
+                "role": "鼻先",
+                "evidence": "頭の前で左へ尖る小三角"
+              },
+              {
+                "id": "P4",
+                "role": "尾の付け根",
+                "evidence": "背の後ろで上へ尖る三角"
+              },
+              {
+                "id": "P5",
+                "role": "立てた尾",
+                "evidence": "後ろから右上へ大きく伸びる帯"
+              }
+            ],
+            "evidence": "前足で物を抱える胸元と、後ろで高く上がる尾。",
+            "weaknesses": "尾がP4とP5に分かれ、間に谷ができて、ふさふさした一続きの尾にならない。耳がない。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "後方へ上がる尾（羽）と前方の突起という構図は動物の側面として読めるが、鳥か獣かの決め手が弱い。"
+      },
+      "terraIndependent": {
+        "item": "item-28",
+        "silhouetteImpression": "右上へ細長く伸び、上に二つの尖りがある形に見えた。",
+        "candidates": [],
+        "noConstrual": true,
+        "noConstrualReason": "上の尖りと左の四角が一つの対象としてまとまらない。",
+        "uncertainty": "鳥や飛行機も考えたが、左の四角と上下の突起が自然な部位にまとまらない。"
+      },
+      "consensusCandidates": [],
+      "noConstrual": true,
+      "noConstrualReason": "双方とも見立てなしと判断：上辺のW字の尖りと左の四角が一つの対象にまとまらない。",
+      "agreementStatus": "合意",
+      "discussion": "Opus は独立にニワトリ（おんどり、低）とリス（低）、Terra は独立に見立てなし（鳥や飛行機も考えた）とした。合議で Opus が、とさか・脚・ひと続きの尾がないとして取り下げた。Terra 第2ラウンド判断: support（尖りと左の四角を一つの対象にまとめにくい。）。"
+    },
+    {
+      "item": "item-29",
+      "opusSource": "parent",
+      "opusIndependent": {
+        "item": "item-29",
+        "silhouetteImpression": "左上から右下へ傾いた太い帯の下に脚があり、右端で細い帯が右上へ立ち上がる。しっぽを立てて座る四つ足の動物の横姿に見える。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "猫",
+            "posture": "座ってしっぽを立てる",
+            "direction": "左向き、頭が左上",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "前脚",
+                "evidence": "帯の左寄りから真下へ下りる縦長の五角形"
+              },
+              {
+                "id": "P2",
+                "role": "頭から背中",
+                "evidence": "左上が高く右下へ下がる大きな平行四辺形"
+              },
+              {
+                "id": "P3",
+                "role": "腰・後ろ脚",
+                "evidence": "右端下の小三角形"
+              },
+              {
+                "id": "P4",
+                "role": "立てたしっぽ",
+                "evidence": "右端から右上へ伸びる細い平行四辺形"
+              }
+            ],
+            "evidence": "前が高く後ろが低い背中、前脚、立てたしっぽが座る猫の横姿に対応する。",
+            "weaknesses": "頭と背中が一続きで、耳が無い。"
+          },
+          {
+            "rank": 2,
+            "noun": "セキレイ",
+            "posture": "尾を上げて止まる",
+            "direction": "左向き、頭が左上",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "脚",
+                "evidence": "下へ伸びる縦長の部分"
+              },
+              {
+                "id": "P2",
+                "role": "頭と胴",
+                "evidence": "左上へ伸びる大きな平行四辺形"
+              },
+              {
+                "id": "P3",
+                "role": "腹の後ろ",
+                "evidence": "胴の後端の小三角形"
+              },
+              {
+                "id": "P4",
+                "role": "上げた尾",
+                "evidence": "右上へ立つ細い平行四辺形"
+              }
+            ],
+            "evidence": "細く上げた尾が尾を振る小鳥の特徴に合う。",
+            "weaknesses": "くちばしが無く胴が太すぎる。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "頭の位置が明示されず、動物の種類は決めにくい。"
+      },
+      "terraIndependent": {
+        "item": "item-29",
+        "silhouetteImpression": "左を向き尾を上げて立つ犬のように見えた。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "犬",
+            "posture": "立って尾を上げる",
+            "direction": "頭が左上、尾が右上",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "脚",
+                "evidence": "左下に垂直に伸びる台形"
+              },
+              {
+                "id": "P2",
+                "role": "頭と胴体",
+                "evidence": "左上の先から中央へ斜めに広がる台形"
+              },
+              {
+                "id": "P3",
+                "role": "腰",
+                "evidence": "胴体右端の小さな三角形"
+              },
+              {
+                "id": "P4",
+                "role": "上げた尾",
+                "evidence": "腰から右上へ細長く伸びる"
+              }
+            ],
+            "evidence": "左上の頭から胴が続き、右に尾を上げた四足動物の横姿を連想させる。",
+            "weaknesses": "頭と胴体の境界がなく、脚は一本しか見えない。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "左上の部分を長い首や別の突起と見る読みもある。"
+      },
+      "consensusCandidates": [
+        {
+          "rank": 1,
+          "noun": "猫",
+          "posture": "尾を立てた横姿（座る／立つは決めない）",
+          "direction": "左向き（頭が左上、尾が右上）",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "前脚",
+              "evidence": "帯の左寄りから真下へ下りる台形（親・Terra とも同じ対応）"
+            },
+            {
+              "id": "P2",
+              "role": "頭から背中と胴",
+              "evidence": "左上が高く右下へ下がる大きな台形（双方一致）"
+            },
+            {
+              "id": "P3",
+              "role": "腰（後ろ脚の付け根）",
+              "evidence": "胴の右端下の小三角形（双方一致）"
+            },
+            {
+              "id": "P4",
+              "role": "立てた尾",
+              "evidence": "右端から右上へ伸びる細い平行四辺形（双方一致）"
+            }
+          ],
+          "evidence": "前が高く後ろが低い背中、前脚、立てた尾が、尾を立てた四つ足の動物の横姿に合う（親の独立案、Terra が合議で支持）。",
+          "weaknesses": "頭と背中が一続きで耳がなく、犬との区別はつかない。脚が一本しか見えない。"
+        },
+        {
+          "rank": 2,
+          "noun": "犬",
+          "posture": "尾を立てた横姿（座る／立つは決めない）",
+          "direction": "左向き（頭が左上、尾が右上）",
+          "confidence": "低",
+          "parts": [
+            {
+              "id": "P1",
+              "role": "前脚",
+              "evidence": "左下に垂直に伸びる台形"
+            },
+            {
+              "id": "P2",
+              "role": "頭と胴体",
+              "evidence": "左上の先から中央へ斜めに広がる台形"
+            },
+            {
+              "id": "P3",
+              "role": "腰",
+              "evidence": "胴体右端の小さな三角形"
+            },
+            {
+              "id": "P4",
+              "role": "上げた尾",
+              "evidence": "腰から右上へ細長く伸びる平行四辺形"
+            }
+          ],
+          "evidence": "左上の頭から胴が続き、右に尾を上げた四足動物の横姿（Terra の独立案、Opus が合議で支持）。",
+          "weaknesses": "頭と胴体の境界がなく、脚は一本しか見えない。猫との区別はつかない。"
+        }
+      ],
+      "noConstrual": false,
+      "noConstrualReason": "",
+      "agreementStatus": "合意",
+      "discussion": "親は独立に猫（座ってしっぽを立てる、低）とセキレイ（低）、Terra は独立に犬（立って尾を上げる、低）を挙げ、部分対応（P1前脚、P2頭から背、P3腰、P4立てた尾）は一致した。合議で Opus 合議担当が猫と犬の両方採用を提案した。Terra 第2ラウンド判断: support（猫を低で支持。P1が前脚、P2が頭から背、P4が立てた尾に見える。ただし耳がなく犬との識別は困難。犬も低で支持し、姿勢は尾を立てた横姿までに留めたい。）。姿勢は「尾を立てた横姿」までに留めた。セキレイはくちばしがなく胴が太いため落とした。"
+    },
+    {
+      "item": "item-30",
+      "opusSource": "reviewer",
+      "opusIndependent": {
+        "item": "item-30",
+        "silhouetteImpression": "左側に、縦の辺を持つ大三角（P1）と左向きの半六角形（P3）が合わさった丸みのある塊があり、上端と下端が尖る。右上へ横長の台形（P4）が水平に突き出し、その下に小三角（P2）が付く。",
+        "candidates": [
+          {
+            "rank": 1,
+            "noun": "ヘアドライヤー",
+            "posture": "横から見て、吹き出し口を水平に向ける",
+            "direction": "右向き（吹き出し口が右）",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "本体の前半と持ち手（下端の尖り）",
+                "evidence": "最大部品（50%）。下端の尖りが下へ伸びる持ち手"
+              },
+              {
+                "id": "P2",
+                "role": "スイッチ（持ち手の前の部分）",
+                "evidence": "吹き出し口の下、本体の前下にある小三角（6.25%）"
+              },
+              {
+                "id": "P3",
+                "role": "本体の後部（丸い送風部）",
+                "evidence": "左へ張り出す半六角形（25%）で、本体の丸みを作る"
+              },
+              {
+                "id": "P4",
+                "role": "吹き出し口（ノズル）",
+                "evidence": "本体から右へ水平に突き出す横長の台形（18.75%）"
+              }
+            ],
+            "evidence": "丸い本体から水平に伸びる筒と、下へ出る持ち手の配置。",
+            "weaknesses": "本体の上端も尖る。持ち手が短く尖っている。"
+          },
+          {
+            "rank": 2,
+            "noun": "拳銃",
+            "posture": "横から見る",
+            "direction": "右向き（銃口が右）",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "機関部（上端の尖りが撃鉄、下端がグリップ）",
+                "evidence": "最大部品で、上下に尖る"
+              },
+              {
+                "id": "P2",
+                "role": "引き金",
+                "evidence": "銃身の下、機関部の前下の小三角"
+              },
+              {
+                "id": "P3",
+                "role": "銃の後部",
+                "evidence": "左へ張り出す半六角形"
+              },
+              {
+                "id": "P4",
+                "role": "銃身",
+                "evidence": "右へ水平に伸びる横長の部品"
+              }
+            ],
+            "evidence": "水平の銃身、その下の引き金、後部の撃鉄とグリップという配置。",
+            "weaknesses": "後部が大きく丸く、銃身が短い。グリップが後ろへ傾かず真下へ尖る。"
+          },
+          {
+            "rank": 3,
+            "noun": "キツツキ",
+            "posture": "頭部の横顔",
+            "direction": "右向き（くちばしが右）",
+            "confidence": "低",
+            "parts": [
+              {
+                "id": "P1",
+                "role": "頭（上端の尖りが冠羽）と首（下端）",
+                "evidence": "最大部品で、上下に尖る"
+              },
+              {
+                "id": "P2",
+                "role": "のど（下くちばしの付け根）",
+                "evidence": "くちばしの下の小三角"
+              },
+              {
+                "id": "P3",
+                "role": "後頭部",
+                "evidence": "左へ張り出す半六角形"
+              },
+              {
+                "id": "P4",
+                "role": "長いくちばし",
+                "evidence": "頭から右へ水平に長く出る"
+              }
+            ],
+            "evidence": "丸い頭から長いくちばしが水平に出る。",
+            "weaknesses": "くちばしが先細りにならず、先端が四角い。"
+          }
+        ],
+        "noConstrual": false,
+        "noConstrualReason": "",
+        "uncertainty": "「丸い塊から水平の棒が出る」という構図は安定しているが、道具（ドライヤー・拳銃）と鳥の頭のどれかは決め手がない。"
+      },
+      "terraIndependent": {
+        "item": "item-30",
+        "silhouetteImpression": "右へ四角く伸び、左上と下に尖りがある形に見えた。",
+        "candidates": [],
+        "noConstrual": true,
+        "noConstrualReason": "右端の四角と左・下の張り出しの役割が定まらない。",
+        "uncertainty": "魚や鳥にも見えるが、頭と尾の位置を自然に決められない。"
+      },
+      "consensusCandidates": [],
+      "noConstrual": true,
+      "noConstrualReason": "双方とも見立てなしと判断：丸い塊から水平の棒が出る形だが、拳銃・ヘアドライヤー・鳥の頭のどれとしても、後部と上下の尖りの対応が弱い。",
+      "agreementStatus": "合意",
+      "discussion": "Opus は独立にヘアドライヤー・拳銃・キツツキ（いずれも低）、Terra は独立に見立てなし（魚や鳥にも見えるが頭と尾の位置を決められない）とした。合議で Opus が拳銃だけを残す案を出したが Terra は不支持で、事前の取り決めどおり見立てなしで合意した。同じ型の item-19 では、親の拳銃案が未合意として残っている。Terra 第2ラウンド判断: reject（拳銃は不支持。右のP4は銃身に見えるが、後部P3が大きく、P1の上下両端の尖りと太い握りが拳銃に見えにくい。）。"
+    }
+  ]
+}

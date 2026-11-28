@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { isPartObservationVersion, type PartObservationVersion } from '../stimuli/part-geometry.ts';
 import { isOpeningMode, type OpeningMode } from './opening-mode.ts';
 import { validatePreparedObservations } from './prepared-observations.ts';
 import type { PreparedObservationReference } from './prepared-observations.ts';
@@ -71,6 +72,7 @@ export function participantMemoryPruneVersion(profile?: ParticipantDialogueProfi
 }
 export type ParticipantPlanSettings = {
   preparedObservations?: PreparedObservationReference;
+  partObservationVersion?: PartObservationVersion;
   openingMode?: OpeningMode;
   memoryPruneVersion?: MemoryPruneVersion;
   participantModelPin?: ParticipantModelPin;
@@ -214,6 +216,7 @@ function participantPlan(value: unknown) {
   const hasPrepared = Object.hasOwn(fields, 'preparedObservations');
   const hasPrune = Object.hasOwn(fields, 'memoryPruneVersion');
   const hasOpeningMode = Object.hasOwn(fields, 'openingMode');
+  const hasParts = Object.hasOwn(fields, 'partObservationVersion');
   const hasPin = Object.hasOwn(fields, 'participantModelPin');
   const hasLimits = Object.hasOwn(fields, 'participantLimits');
   const hasProfile = Object.hasOwn(fields, 'participantRuntimeProfile');
@@ -221,11 +224,12 @@ function participantPlan(value: unknown) {
   const hasDialogueProfile = Object.hasOwn(fields, 'participantDialogueProfile');
   const hasPostGenerationCheck = Object.hasOwn(fields, 'postGenerationCheck');
   if ((hasLimits || hasProfile || hasGeneration) && !hasPin || hasLimits && hasProfile) return fail();
-  const p = object(value, [...PLAN_KEYS, ...(hasPrepared ? ['preparedObservations'] : []), ...(hasOpeningMode ? ['openingMode'] : []),
+  const p = object(value, [...PLAN_KEYS, ...(hasPrepared ? ['preparedObservations'] : []), ...(hasOpeningMode ? ['openingMode'] : []), ...(hasParts ? ['partObservationVersion'] : []),
     ...(hasPrune ? ['memoryPruneVersion'] : []), ...(hasPin ? ['participantModelPin'] : []), ...(hasLimits ? ['participantLimits'] : []),
     ...(hasProfile ? ['participantRuntimeProfile'] : []), ...(hasGeneration ? ['initialObservationGeneration'] : []),
     ...(hasDialogueProfile ? ['participantDialogueProfile'] : []), ...(hasPostGenerationCheck ? ['postGenerationCheck'] : [])]);
   if (hasOpeningMode && !isOpeningMode(p.openingMode)) return fail();
+  if (hasParts && (!isPartObservationVersion(p.partObservationVersion) || !hasPin || !hasProfile)) return fail();
   if (hasProfile && p.participantRuntimeProfile !== PARTICIPANT_PRODUCTION_PROFILE) return fail();
   const generation = isInitialObservationGeneration(p.initialObservationGeneration) ? p.initialObservationGeneration : undefined;
   if (hasGeneration && generation === undefined) return fail();
@@ -246,6 +250,7 @@ function participantPlan(value: unknown) {
   if (preparedObservations && (!pin || !hasProfile || !iso(p.approvedAt) || preparedObservations.preparedAt > p.approvedAt)) return fail();
   const participant: ParticipantPlanSettings = {
     ...(preparedObservations ? { preparedObservations } : {}),
+    ...(hasParts ? { partObservationVersion: p.partObservationVersion as PartObservationVersion } : {}),
     ...(hasOpeningMode ? { openingMode: p.openingMode as OpeningMode } : {}),
     ...(hasPrune ? { memoryPruneVersion } : {}),
     ...(pin ? { participantModelPin: pin } : {}),
@@ -391,6 +396,7 @@ export async function approveReception(value: unknown, options: ParticipantPlanS
   if (options.postGenerationCheck !== undefined && (!v24 || !isPostGenerationCheck(options.postGenerationCheck))) return fail();
   const participant = {
     ...(options.preparedObservations !== undefined ? { preparedObservations: options.preparedObservations } : {}),
+    ...(options.partObservationVersion !== undefined ? { partObservationVersion: options.partObservationVersion } : {}),
     ...(options.openingMode !== undefined ? { openingMode: options.openingMode } : {}),
     ...(options.memoryPruneVersion !== undefined ? { memoryPruneVersion: options.memoryPruneVersion } : {}),
     ...(options.participantModelPin !== undefined ? { participantModelPin: options.participantModelPin } : {}),

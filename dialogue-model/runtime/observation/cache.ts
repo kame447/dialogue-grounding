@@ -1,3 +1,4 @@
+import { PART_OBSERVATION_INSTRUCTIONS } from "./parts.ts";
 import { deadlineLimit, deadlineValue } from '../v2/research-deadline-options.ts';
 import type { ResearchLimits } from '../v2/research-timeouts.ts';
 // Node-only, opt-in initial observation storage. No API accepts dialogue memos.
@@ -63,7 +64,7 @@ function canonical(v: unknown): string {
   return JSON.stringify(v);
 }
 function initialMemo(value: unknown, input: ObservationInput): ObservationMemo {
-  const memo = validateObservationMemo(value, { ownAnchors: input.ownAnchors });
+  const memo = validateObservationMemo(value, { ownAnchors: input.ownAnchors, ownParts: input.ownParts });
   if (memo.figures.some(f => f.reobservations.length !== 0)) fail("invalid_input");
   return memo;
 }
@@ -83,8 +84,11 @@ export function createObservationCacheKey(input: ObservationInput, { modelId }: 
   const bytes = Buffer.from(own.ownImage.base64, "base64");
   if (bytes.toString("base64") !== own.ownImage.base64) fail("invalid_input");
   const ordered = [...own.ownAnchors].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
-  return { imageHash: hash(bytes), anchorsHash: hash(canonical(ordered)), modelId,
-    instructionHash: hash(observationInitialInstructions(own.ownAnchors.length)), formatVersion: OBSERVATION_MEMO_VERSION };
+  const partRows = own.ownParts ? ordered.map(anchor => own.ownParts!.find(row => row.id === anchor.id)!) : undefined;
+  const geometry = partRows ? { ownAnchors: ordered, ownParts: partRows } : ordered;
+  const instructions = observationInitialInstructions(own.ownAnchors.length) + (partRows ? "\n" + PART_OBSERVATION_INSTRUCTIONS : "");
+  return { imageHash: hash(bytes), anchorsHash: hash(canonical(geometry)), modelId,
+    instructionHash: hash(instructions), formatVersion: OBSERVATION_MEMO_VERSION };
 }
 /** Filename is data-independent except for its validated key hash; no paths from model text. */
 export function observationCacheFileName(key: ObservationCacheKey): string {
