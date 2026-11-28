@@ -1,4 +1,4 @@
-import test, { type TestContext } from 'node:test';
+import test, { afterEach, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { registerHooks } from 'node:module';
 import { existsSync } from 'node:fs';
@@ -125,7 +125,8 @@ function memory() {
     async deleteAlarm() { await view(items).deleteAlarm(); },
     transaction<T>(fn: (tx: ReturnType<typeof view>) => Promise<T>) {
       const update = pending.then(async () => {
-        const staged = structuredClone(items), result = await fn(view(staged));
+        // get/put already detach values. The transaction only mutates its map.
+        const staged = new Map(items), result = await fn(view(staged));
         items = staged;
         return result;
       });
@@ -140,6 +141,12 @@ function gate() {
   const promise = new Promise<void>(done => { resolve = done; });
   return { promise, resolve };
 }
+
+const disposeHarnesses = new Set<() => void>();
+afterEach(() => {
+  for (const dispose of disposeHarnesses) dispose();
+  disposeHarnesses.clear();
+});
 
 function harness(enabled = true, selectedProtocol: typeof protocol & {
   figureSelection?: { mode: string; setId?: string; selectionSeed?: number }; figureSetPolicy?: string;
@@ -167,7 +174,7 @@ function harness(enabled = true, selectedProtocol: typeof protocol & {
     PARTICIPANT_TERRA_GENERATION_ENABLED: undefined as string | undefined,
     PARTICIPANT_TERRA_ALL_ROLES_ENABLED: undefined as string | undefined,
     PARTICIPANT_DIALOGUE_PROFILE: undefined as string | undefined,
-    PARTICIPANT_TERRA_LIMITS_JSON: JSON.stringify(approvedLimits),
+    PARTICIPANT_TERRA_LIMITS_JSON: JSON.stringify(approvedLimits) as string | undefined,
     PARTICIPANT_TERRA_INITIAL_OBSERVATION_GENERATION: undefined as string | undefined,
     V2_UTTERANCE_STYLE: 'concise',
     AI_PROXY: { async chat() { controlled.legacyCalls++; throw new Error('synthetic legacy call'); } },
@@ -278,6 +285,7 @@ function harness(enabled = true, selectedProtocol: typeof protocol & {
     return session;
   }
   let session = makeSession(preobserve);
+  disposeHarnesses.add(() => session.trial?.stopForAdmin?.());
   const request = (path: string, body?: unknown, method = body === undefined ? 'GET' : 'POST') =>
     session.fetch(new Request('https://session.invalid/api/' + path, { method, ...(body === undefined ? {}
       : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }) })) as Promise<Response>;
@@ -451,9 +459,18 @@ for (const selected of [protocol, figureBankProtocol]) test(
   assert.deepEqual(failed.usage, await h.storage.get('participant-usage:' + assignmentId));
   const meter = failed.usage.phases.terra.initial_observation;
   assert.deepEqual([meter.posts, meter.knownUsd, meter.inputTokens, meter.outputTokens, meter.missingCostPosts], [1, 0.021, 17, 6, 0]);
-  assert.equal((await h.request('state')).status, 409);
-  assert.equal((await h.start()).status, 409);
   assert.equal(h.calls.length, 1);
+  h.controlled.invalidTerra = false;
+  const starting = await jsonOk(await h.request('state'));
+  assert.equal(starting.starting, true);
+  assert.equal(starting.trial, null);
+  await h.settleBackground();
+  const recovered = (await jsonOk(await h.request('state'))).trial;
+  const saved = await h.storage.get('record:' + recovered.sessionId);
+  assert.equal(saved.assignment.assignmentId, assignmentId);
+  assert.equal(saved.jevLedger.phases.terra.initial_observation.posts, 2);
+  assert.equal((await h.storage.get('reception:v1')).trials.length, 1);
+  assert.equal(h.calls.length, 2);
 });
 
 // Production runs per_trial: the second condition has its own stimulus, so it calls Terra again instead of reusing the first memo (a shared seed never exercises this).
@@ -1236,6 +1253,101 @@ test('an existing trial from a model-only plan restores with its recorded limits
   assert.equal(restored.trial.sessionId, recordId);
   assert.equal(h.calls.filter(({ kind }) => kind === 'visual_observation').length, 1);
 });
+
+test('production starts and restores an old pin-only plan with no limits variable', async () => {
+  const h = harness();
+  h.env.PARTICIPANT_TERRA_PROFILE = undefined;
+  await h.receive();
+  await h.approve();
+  await h.storage.transaction(async tx => {
+    const reception = await tx.get('reception:v1');
+    delete reception.plan.participantLimits;
+    await tx.put({ 'reception:v1': reception });
+  });
+  h.env.PARTICIPANT_TERRA_PROFILE = PARTICIPANT_PRODUCTION_PROFILE;
+  delete h.env.PARTICIPANT_TERRA_LIMITS_JSON;
+  const { trial } = await jsonOk(await h.start());
+  h.evict();
+  assert.equal((await jsonOk(await h.request('state'))).trial.sessionId, trial.sessionId);
+  const record = await h.storage.get('record:' + trial.sessionId);
+  assert.equal(record.jevLedger.limits, null);
+  assert.equal(record.jevLedger.budgetEnforcement, 'observe_only');
+  assert.deepEqual(record.jevLedger.thresholdsReached, []);
+  assert.equal(record.options.participantRuntimeProfile, undefined);
+  assert.deepEqual(record.options.participantModelPin, pin);
+});
+
+for (const strategy of ['repair-first', 'bypass-enabled'] as const) {
+  test(`production recovers an old capped ${strategy} trial and meters beyond its saved thresholds`, async () => {
+    const h = harness(true, { ...protocol, allowedOrders: [[strategy]] });
+    h.env.PARTICIPANT_TERRA_PROFILE = undefined;
+    h.env.PARTICIPANT_TERRA_LIMITS_JSON = JSON.stringify({ ...approvedLimits, jevPosts: 1 });
+    await h.receive();
+    await h.approve();
+    const { trial } = await jsonOk(await h.start());
+    const id = trial.sessionId, key = 'record:' + id;
+    const { eventId } = await jsonOk(await h.request('message', { expectedRecordId: id,
+      text: '合成の形を確認します。', clientId: 'old-cap' }));
+    await h.idle();
+    const stopped = await h.storage.get(key);
+    assert.equal(stopped.jevLedger.halted, true);
+    assert.equal(stopped.jevLedger.jevPosts, 1);
+    assert.deepEqual(stopped.queueState.pendingHumanEventIds, [eventId]);
+    stopped.dialogueInterruption = 'budget_exhausted';
+    await h.storage.transaction(async tx => {
+      const owner = await tx.get('base:owner:v1');
+      owner.admissions[owner.activeKey].record = stopped;
+      await tx.put({ [key]: stopped, active: stopped, 'base:owner:v1': owner });
+    });
+
+    h.env.PARTICIPANT_TERRA_PROFILE = PARTICIPANT_PRODUCTION_PROFILE;
+    delete h.env.PARTICIPANT_TERRA_LIMITS_JSON;
+    h.controlled.mixedUsage = true;
+    h.evict();
+    const { trial: waiting } = await jsonOk(await h.request('state'));
+    assert.equal(waiting.sessionId, id);
+    assert.equal(waiting.dialogueRecovery, 'active');
+    assert.equal(waiting.recovering, true);
+    await h.recover();
+    const saved = await h.storage.get(key);
+    assert.equal(saved.strategy, strategy);
+    assert.deepEqual(saved.options.participantModelPin, stopped.options.participantModelPin);
+    assert.deepEqual(saved.jevLedger.limits, stopped.jevLedger.limits);
+    assert.deepEqual(saved.jevLedger.sends.slice(0, stopped.jevLedger.sends.length), stopped.jevLedger.sends);
+    assert.equal(saved.jevLedger.halted, false);
+    assert.equal(saved.jevLedger.budgetEnforcement, 'observe_only');
+    assert.ok(saved.jevLedger.thresholdsReached.includes('jevPosts'));
+    assert.ok(saved.jevLedger.thresholdsReached.includes('lunaTokens'));
+    assert.ok(saved.jevLedger.thresholdsReached.includes('jevUsd'));
+    assert.ok(saved.jevLedger.unresolvedJevSends.length > 0, 'unreported costs stay unknown');
+    assert.deepEqual(saved.events.slice(0, -1), stopped.events);
+    assert.equal(saved.events.at(-1).speaker, 'ai');
+    assert.deepEqual(saved.queueState.pendingHumanEventIds, []);
+    assert.equal(saved.dialogueInterruption, undefined);
+
+    h.evict();
+    const { trial: restored } = await jsonOk(await h.request('state'));
+    assert.equal(restored.sessionId, id);
+    assert.equal(restored.events.length, saved.events.length);
+
+    h.controlled.luna = pin.terraModelId;
+    const mismatchEvent = await jsonOk(await h.request('message', { expectedRecordId: id, text: '別の形の合成の発話です。' }));
+    await h.idle();
+    const mismatch = await h.storage.get(key);
+    assert.equal(mismatch.events.at(-1).id, mismatchEvent.eventId);
+    assert.equal(mismatch.jevLedger.haltReason, 'model_mismatch');
+    const mismatchView = (await jsonOk(await h.request('state'))).trial;
+    assert.equal(mismatchView.dialogueRecovery, 'active');
+    assert.equal(mismatchView.recovering, true);
+    h.controlled.luna = pin.lunaModelId;
+    await h.recover();
+    const complete = await h.storage.get(key);
+    assert.deepEqual(complete.events.slice(0, -1), mismatch.events);
+    assert.equal(complete.events.at(-1).speaker, 'ai');
+    assert.equal(complete.jevLedger.halted, false);
+    assert.ok(complete.jevLedger.stops.some(({ reason }: { reason: string }) => reason === 'model_mismatch'));
+  });
+}
 
 test('Worker legacy approval still starts and restores through legacy options after Terra opt-in', async () => {
   const h = harness(false);

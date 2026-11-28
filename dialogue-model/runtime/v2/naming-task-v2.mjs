@@ -18,7 +18,7 @@ import { STRATEGIES } from "../judgment/instructions.mjs";
 import { STATUSES } from "../judgment/schema.mjs";
 import { normalizeName as normalizeAgreedName } from "../judgment/name-evidence.mjs";
 import { selectParticipantJev, participantLunaClient, withParticipantJevTurn, restoreParticipantJevLedger,
-  participantInitialObservation } from "../web/participant-jev-wiring.ts";
+  LegacyParticipantUsageLedger, participantInitialObservation } from "../web/participant-jev-wiring.ts";
 import { allowsOrientationFallback, generateOpeningV17, hasVersionedViewpoint, isGenerationV17 } from "./generation-guard.ts";
 import { researchHash } from "./research-profile.ts";
 import { isDeferredAiExtractionGeneration } from "./deferred-ai-extraction.ts";
@@ -134,6 +134,7 @@ export async function createNamingTaskV2({
   const style = restore?.options?.utteranceStyle ?? utteranceStyle;
   const jev = selectParticipantJev(restore, jevResearch, { referenceMemory, strategy, style,
     legacy: [localGrounding, activeDecision, decisionShadowClient, groundingShadow] });
+  const legacyMeter = jev?.ledger instanceof LegacyParticipantUsageLedger ? jev.ledger : null;
   if (memoryPruneVersion === CLAIM_PRUNE_V3 && !jev) throw new NamingTaskError("invalid_options");
   if (restore) {
     const saved = restore.options?.openingMode;
@@ -147,7 +148,8 @@ export async function createNamingTaskV2({
   const dialogueRecoveryEnabled = !!jev && !allowsOrientationFallback(jev.generationRetryVersion);
   let dialogueInterruption = restore?.dialogueInterruption;
   if (restore && Object.hasOwn(restore, "dialogueInterruption") &&
-      (!dialogueRecoveryEnabled || !["participant_paused", "budget_exhausted"].includes(dialogueInterruption) ||
+      ((!dialogueRecoveryEnabled && !(legacyMeter && dialogueInterruption === "budget_exhausted")) ||
+        !["participant_paused", "budget_exhausted"].includes(dialogueInterruption) ||
         restore.status !== "dialogue" || restore.queueState?.closed !== false ||
         restore.queueState?.errorCode !== "ai_unavailable" ||
         !Array.isArray(restore.queueState.pendingHumanEventIds) || !restore.queueState.pendingHumanEventIds.length)) {
@@ -192,7 +194,10 @@ export async function createNamingTaskV2({
   let pendingPublicationId = null, publicationAtMs = null, deferredSaveFailed = false;
   let deferredCompletion = null;
   if (jev && restore && !usage) restoreParticipantJevLedger(jev.ledger, restore.jevLedger);
-  if (dialogueInterruption === "budget_exhausted" && (usage || !jev?.ledger.stopReason())) throw new NamingTaskError("invalid_options");
+  if (dialogueInterruption === "budget_exhausted") {
+    if (legacyMeter) dialogueInterruption = undefined;
+    else if (usage || !jev?.ledger.stopReason()) throw new NamingTaskError("invalid_options");
+  }
   const effectiveClient = jev ? participantLunaClient(client, jev.ledger, jev.profile) : client;
   // The queue runs one AI turn at a time, so every upstream call starts inside the
   // current attempt (requestSeq) or outside any turn (final submission: null).
@@ -233,7 +238,7 @@ export async function createNamingTaskV2({
     localGrounding: local, onLocalGroundingTrace,
     ...(jev ? { decisionMode: "jev", observer: jev.observer, jevDecision: jev.jevDecision,
       ...(jev.technicalTrial ? { technicalTrial: clone(jev.technicalTrial) } : {}),
-      localGrounding: jev.localGrounding, ...(usage ? { usagePolicy: PARTICIPANT_USAGE_ONLY } : {}), maxReobservations: jev.profile.maxReobservations,
+      localGrounding: jev.localGrounding, ...(usage || legacyMeter ? { usagePolicy: PARTICIPANT_USAGE_ONLY } : {}), maxReobservations: jev.profile.maxReobservations,
       rotationMode: rotation.mode,
       interventionPolicy: jev.profile.interventionPolicy, decisionTimeoutMs: jev.profile.timeouts.decisionMs,
       ...(jev.profile.questionLayout !== "two_stage_v1" ? { questionLayout: jev.profile.questionLayout } : {}),
@@ -276,7 +281,7 @@ export async function createNamingTaskV2({
     }
     currentRequestSeq = input.requestSeq;
     try {
-      if (usage) await persist(); // Ensure the accepted input and clientId are durable before any RPC.
+      if (usage || legacyMeter) await persist(); // Ensure the accepted input and clientId are durable before any RPC.
       const result = await (usage ? usage.runTurn(input.lastEventId, input.signal, () => dialogue.runAiTurn(input)) : jev ? withParticipantJevTurn(jev.ledger, input.requestSeq, () => dialogue.runAiTurn(input)) : dialogue.runAiTurn(input));
       if (jev?.ledger.halted) throw new NamingTaskError("ai_unavailable");
       if (jev?.namingRestoreVersion) {
@@ -448,7 +453,7 @@ export async function createNamingTaskV2({
 
   // A stopped generation retains the queue, including on a process restore.
   function markBudgetInterruption(snapshot) {
-    if (!dialogueRecoveryEnabled || usage || snapshot.status !== "error") return;
+    if (!dialogueRecoveryEnabled || usage || legacyMeter || snapshot.status !== "error") return;
     const reason = jev.ledger.stopReason();
     if (!reason) return;
     dialogueInterruption = "budget_exhausted";
@@ -639,7 +644,7 @@ export async function createNamingTaskV2({
   const recoveryDelays = [2000, 4000, 8000, 16000, 30000, 60000];
   let recoveryInFlight = null, recoveryTimer = null, retryIndex = 0;
   const stoppedForBudget = () => dialogueInterruption === "budget_exhausted" ||
-    Boolean(!usage && queue.getSnapshot().status === "error" && jev?.ledger.stopReason());
+    Boolean(!usage && !legacyMeter && queue.getSnapshot().status === "error" && jev?.ledger.stopReason());
   const recoveryAllowed = () => !administrativelyInterrupted && dialogueInterruption !== "participant_paused" && !stoppedForBudget();
   const submissionPending = () => submissionRequested && (!aiSubmission || humanSubmission && !result);
   function hasRecoveryWork() {
@@ -677,6 +682,7 @@ export async function createNamingTaskV2({
     recoveryInFlight = Promise.resolve().then(async () => {
       checkAdminInterruption();
       if (usage) await usage.resumeAfterModelMismatch();
+      if (legacyMeter?.halted) legacyMeter.resumeAfterModelMismatch();
       if (persistencePending) await persist();
       if (!closed) await resumePendingDialogue();
       if (submissionPending()) await submitAI();
@@ -729,7 +735,7 @@ export async function createNamingTaskV2({
 
   await persist();
   recoveryReady = true;
-  if (recoveryAllowed() && !closed && !usage?.halted && initialQueue && !initialQueue.errorCode &&
+  if (recoveryAllowed() && !closed && !usage?.halted && !legacyMeter?.halted && initialQueue && !initialQueue.errorCode &&
       (queue.getSnapshot().status === "pending" || initialQueue.privateState.deferredAiExtraction?.state === "queued")) {
     queue.startPublishedWork();
     followQueue();

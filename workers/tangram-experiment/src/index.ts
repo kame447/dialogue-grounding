@@ -584,7 +584,7 @@ export class TangramSession extends DurableObject<Env> {
     if (approvedPin) {
       try {
         participantPolicy = await workerParticipantPolicy(this.env.PARTICIPANT_AI_PROXY,
-          Boolean(plan.participantRuntimeProfile), plan.initialObservationGeneration, approvedPin.schemaVersion);
+          Boolean(plan.participantRuntimeProfile) || this.usesLegacyParticipantAccounting(), plan.initialObservationGeneration, approvedPin.schemaVersion);
         resolveWorkerParticipantModelPin({ approvedPin, configuredPin: participantPolicy.pin });
       } catch { throw new BaseSessionError('trial_unavailable'); }
     }
@@ -797,6 +797,10 @@ export class TangramSession extends DurableObject<Env> {
     if (typeof current === "string" && recordIds.includes(current)) this.trial = null;
   }
 
+  private usesLegacyParticipantAccounting(): boolean {
+    return this.env.PARTICIPANT_TERRA_PROFILE === PARTICIPANT_PRODUCTION_PROFILE;
+  }
+
   private async hasStoredRecoveryWork(storage: Pick<DurableObjectStorage, 'get'> = this.ctx.storage): Promise<boolean> {
     const owner = await storage.get<BaseOwnerState>('base:owner:v1');
     const entry = owner?.activeKey && owner.admissions[owner.activeKey];
@@ -806,7 +810,8 @@ export class TangramSession extends DurableObject<Env> {
     const record = entry.record;
     return entry.status === 'active' && !!record && isIncompleteTrialStatus(record.status) &&
       record.dialogueInterruption !== 'participant_paused' &&
-      (record.dialogueInterruption !== 'budget_exhausted' || record.options.participantRuntimeProfile === PARTICIPANT_PRODUCTION_PROFILE) &&
+      (record.dialogueInterruption !== 'budget_exhausted' || record.options.participantRuntimeProfile === PARTICIPANT_PRODUCTION_PROFILE ||
+        Boolean(record.options.participantModelPin) && this.usesLegacyParticipantAccounting()) &&
       Boolean(record.status === 'submitting' || record.queueState.errorCode || record.queueState.pendingHumanEventIds.length ||
         (record.queueState.privateState as { deferredAiExtraction?: unknown } | undefined)?.deferredAiExtraction ||
         this.trial?.getState().sessionId === record.recordId && this.trial.hasRecoveryWork?.());
@@ -1146,8 +1151,10 @@ export class TangramSession extends DurableObject<Env> {
     }
     const admission = !restore && this.admission?.kind === 'reception' ? this.admission : null;
     const admittedPolicy = admission?.participantPolicy;
+    const legacyAccounting = binding.participantModelPin?.schemaVersion === 'participant_model_pin_v1' &&
+      !participantRuntime && this.usesLegacyParticipantAccounting();
     const policy = binding.participantModelPin === undefined ? null
-      : admittedPolicy ?? await workerParticipantPolicy(this.env.PARTICIPANT_AI_PROXY, Boolean(participantRuntime),
+      : admittedPolicy ?? await workerParticipantPolicy(this.env.PARTICIPANT_AI_PROXY, Boolean(participantRuntime) || legacyAccounting,
         undefined, binding.participantModelPin.schemaVersion);
     let pin;
     try {
@@ -1175,12 +1182,16 @@ export class TangramSession extends DurableObject<Env> {
       this.ctx.waitUntil(this.registerSummary(record));
     };
     if (pin && policy) {
-      // Pin-only plans predate reception-level limits. Their existing trials have a ledger snapshot.
+      // A pin-only plan can start in production with no historical limit. On
+      // restore, keep the already recorded limits and the old accounting format.
+      const savedLimits = restore && !participantRuntime ? data(restore.jevLedger).limits : undefined;
       const runtimeMode = participantRuntime ? {
         usage: await ParticipantUsageLedger.open(this.participantUsageStore(participantRuntime.assignmentId),
           participantRuntime.assignmentId, pin, restore?.jevLedger, !restore),
-      } : { limits: binding.participantLimits ?? validateParticipantLimits(restore
-        ? data(restore.jevLedger).limits : JSON.parse(this.env.PARTICIPANT_TERRA_LIMITS_JSON ?? 'null')) };
+      } : legacyAccounting ? { historicalLimits: binding.participantLimits ??
+        (restore && savedLimits !== null ? validateParticipantLimits(savedLimits) : null) }
+        : { limits: binding.participantLimits ?? validateParticipantLimits(restore
+          ? savedLimits : JSON.parse(this.env.PARTICIPANT_TERRA_LIMITS_JSON ?? 'null')) };
       if (binding.recoveringAdmission && !restore && runtimeMode.usage) await runtimeMode.usage.resumeAfterModelMismatch();
       const rotationMode = restore?.options.rotationMode ?? binding.rotationMode ?? 'relative_pm90';
       if (rotationMode !== 'relative_pm90' && rotationMode !== 'relative_0') throw new NamingTaskError('invalid_options');

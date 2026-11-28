@@ -17,7 +17,7 @@ export type SendReceipt = { id: number; provider: "luna" | "jev"; phase: string 
   logicalCallId: number | null;
   status: "in_flight" | "sent_result_unknown" | "observed_response"; costUsd: number | null;
   inputTokens: number | null; outputTokens: number | null; model: string | null; modelMatches: boolean | null };
-export class RunBudget {
+export class RunBudget<Limits extends BudgetLimits | null = BudgetLimits> {
   lunaCalls = 0; halted = false; jevUnknown = false;
   haltReason: string | null = null;
   syntheticInputTokens = 0; syntheticOutputTokens = 0; syntheticInputUnknown = 0; syntheticOutputUnknown = 0;
@@ -26,11 +26,12 @@ export class RunBudget {
   onChange: ((entry: SendReceipt) => void) | null = null;
   onRefusal: ((entry: { kind: string; reason: string; logicalCallId?: number | null }) => void) | null = null;
   onLedgerEvent: ((event: { type: "reserve" | "send" | "response" | "stop"; entry?: SendReceipt; reason?: string; inFlight?: number[] }) => void) | null = null;
-  readonly limits: BudgetLimits;
-  constructor(limits: BudgetLimits) {
-    if (![limits.lunaCalls, limits.lunaTokens, limits.lunaPosts, limits.jevPosts].every(v => Number.isSafeInteger(v) && v > 0) ||
+  readonly limits: Limits;
+  constructor(limits: Limits, withoutHistoricalLimits?: "observe_only") {
+    if (limits === null ? withoutHistoricalLimits !== "observe_only"
+      : ![limits.lunaCalls, limits.lunaTokens, limits.lunaPosts, limits.jevPosts].every(v => Number.isSafeInteger(v) && v > 0) ||
         !Number.isFinite(limits.jevUsd) || limits.jevUsd <= 0) throw new Error("invalid_budget");
-    this.limits = { ...limits };
+    this.limits = limits === null ? limits : { ...limits };
   }
   get observedJevUsd() { return this.sends.reduce((n, s) => n + (s.provider === "jev" ? s.costUsd ?? 0 : 0), 0); }
   get lunaPosts() { return this.sends.filter(s => s.provider === "luna").length; }
@@ -38,12 +39,12 @@ export class RunBudget {
   get observedInputTokens() { return this.syntheticInputTokens + this.sends.reduce((n, s) => n + (s.provider === "luna" ? s.inputTokens ?? 0 : 0), 0); }
   get observedOutputTokens() { return this.syntheticOutputTokens + this.sends.reduce((n, s) => n + (s.provider === "luna" ? s.outputTokens ?? 0 : 0), 0); }
   get observedLunaTokens() { return this.observedInputTokens + this.observedOutputTokens; }
-  stopReason(): string | null { return this.jevUnknown ? "jev_cost_unknown" : this.halted ? "budget_stop" : this.observedJevUsd >= this.limits.jevUsd ? "observed_jev_budget"
+  stopReason(): string | null { return this.jevUnknown ? "jev_cost_unknown" : this.halted ? "budget_stop" : !this.limits ? null : this.observedJevUsd >= this.limits.jevUsd ? "observed_jev_budget"
     : this.lunaCalls >= this.limits.lunaCalls ? "luna_call_budget" : this.lunaPosts >= this.limits.lunaPosts ? "luna_http_budget"
       : this.jevPosts >= this.limits.jevPosts ? "jev_http_budget" : this.observedLunaTokens >= this.limits.lunaTokens ? "luna_token_budget" : null; }
   beforeSend(reservedLunaCall = false, logicalCallId: number | null = null) {
     const reason = this.stopReason();
-    if (reason && !(reservedLunaCall && reason === "luna_call_budget" && !this.halted && !this.jevUnknown &&
+    if (reason && !(this.limits && reservedLunaCall && reason === "luna_call_budget" && !this.halted && !this.jevUnknown &&
         this.observedJevUsd < this.limits.jevUsd && this.lunaPosts < this.limits.lunaPosts && this.jevPosts < this.limits.jevPosts &&
         this.observedLunaTokens < this.limits.lunaTokens)) { this.stop(reason); this.refuse(reservedLunaCall ? "luna_post" : "call", reason, logicalCallId); throw new Error("budget_stop"); }
   }
@@ -66,6 +67,7 @@ export class RunBudget {
     this.onChange?.(structuredClone(entry));
   }
   checkObservedLimits() {
+    if (!this.limits) return;
     if (this.observedJevUsd >= this.limits.jevUsd) this.stop("observed_jev_budget");
     if (this.observedLunaTokens >= this.limits.lunaTokens) this.stop("luna_token_budget");
   }
@@ -83,7 +85,7 @@ export class RunBudget {
     inFlight: this.sends.filter(s => s.status === "in_flight").map(s => s.id), sends: structuredClone(this.sends), refusals: structuredClone(this.refusals),
     lunaPosts: this.lunaPosts, jevPosts: this.jevPosts, jevUnknown: this.jevUnknown,
     halted: this.halted, haltReason: this.haltReason, stops: structuredClone(this.stops), unresolvedJevSends: this.sends.filter(s => s.provider === "jev" && s.costUsd === null).map(s => s.id),
-    lunaCostUsd: null, totalUsd: null, limits: { ...this.limits },
+    lunaCostUsd: null, totalUsd: null, limits: this.limits === null ? this.limits : { ...this.limits },
     countLimit: "atomic_pre_send_reservation", usdScope: "observed_jev_stop_threshold_all_in_flight_may_overshoot",
     tokenScope: "observed_lower_bound_stop_threshold_unknown_fields_excluded" }; }
 }
