@@ -4,6 +4,7 @@ import { ParticipantUsageLedger } from '../../../dialogue-model/runtime/web/part
 import { resolveParticipantConfiguration } from './participant-configuration.ts';
 import type { ParticipantConfigurationEnv } from './participant-configuration.ts';
 import { preparedObservationPoolKey, prepareObservationBundle, validatePreparedObservationBundle } from './prepared-observation-recipe.ts';
+import { usesThreeFigures } from './admin/reception-settings.ts';
 import type { ReceptionSettings } from './admin/reception-settings.ts';
 import type { PreparedObservationPoolStatus } from './admin/prepared-observation-port.ts';
 import {
@@ -33,7 +34,8 @@ export class PreparedObservationCoordinator {
 
   private async context() {
     const settings = await this.options.readSettings(), protocol = settings.protocol?.protocol;
-    if (!protocol || !protocol.referenceMemory || this.options.env.PARTICIPANT_TERRA_ENABLED !== 'on' ||
+    // Observation stock is prepared only for settings that can make new receptions: three figures (#268).
+    if (!protocol || !protocol.referenceMemory || !usesThreeFigures(protocol) || this.options.env.PARTICIPANT_TERRA_ENABLED !== 'on' ||
         this.options.env.PARTICIPANT_TERRA_PROFILE !== PARTICIPANT_PRODUCTION_PROFILE) {
       return { settings, supported: false as const, specs: [] as PreparedPoolSpec[], proxy: undefined };
     }
