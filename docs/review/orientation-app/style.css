@@ -20,3 +20,10 @@
 .none{display:block;font-size:12px;color:#5d6977;margin:2px 0 4px}
 .indep-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
 @media(max-width:800px){.cand{grid-template-columns:repeat(2,minmax(0,1fr))}.cand-notes{grid-template-columns:1fr}}
+.badge.check{background:#fde2c8;color:#7a3b00}
+.whole-cand{grid-template-columns:minmax(0,1fr) minmax(0,1.1fr) minmax(0,1.4fr) 4.6em 2.2em}
+.roles{grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:5px}
+.role{display:flex;align-items:center;gap:5px;margin:0;font-size:12px;color:#39424d}
+.role span{flex:none}
+.role input{flex:1;min-width:0}
+@media(max-width:800px){.whole-cand{grid-template-columns:repeat(2,minmax(0,1fr))}}

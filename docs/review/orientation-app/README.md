@@ -28,3 +28,14 @@ node --test docs/review/orientation-app/independent-part-review.test.ts docs/rev
 ```sh
 PLAYWRIGHT_CORE_PATH=<playwright-core> CHROMIUM_PATH=<chromium> PART_CONSTRUAL=<part-construal-468.json> node docs/review/orientation-app/browser-independent-parts.ts
 ```
+
+### 全体の見立ての構造化
+自由文の全体の見立て（`whole`・`wholeBasis`・「全体の見立てでの役割」）とは別に、方向ごとに候補0〜3件（名詞・姿勢・向き・確信度・その方向の全領域の役割・根拠・弱点）と「見立てなし」を構造化して持つ。研究者の確認後に確認済みの書き出しから束を作り直すため、自由文を解析せずに済ませる層。独立部分の見立てと同じ操作感と状態（AI案・確認済み・編集済み・未作成）で、全体の見立ての欄の下に「全体の見立ての候補」として出る。
+- 保存: トップレベル `wholeConstruals`（`schemaVersion: tangram_whole_construal_review_v1`、`rows` は120方向）。独立部分の層と同じ扱い（旧版の保存内容には空の層をメモリ上だけで補い、`wholeConstruals` を送らない旧版の画面・道具の保存は層を変えず、旧版のサーバーを通しても保たれる）。
+- 自由文との照合の印 `needsTextCheck`（画面では「自由文と要照合」）: 反映時に自由文が AI 案の文と一致しない行（研究者が手で直した行）に付く。構造化の欄は自動で埋めず、AI 案を未確認の参考として入れるだけ。構造化の後に自由文を編集した行にも付き、構造化の欄を編集するか「確認して次へ」を押すと外れる。
+- 書き出し: 各方向（`results[]`）に `wholeConstrual`（`reviewStatus`、`candidates`（`rank`・`noun`・`posture`・`direction`・`confidence`・`parts`（`id`・`role`、領域の並びどおり全領域）・`evidence`・`weaknesses`）、`noConstrual`、`noConstrualReason`、`needsTextCheck`、`ai`（`agreementStatus`・`discussion`、AI案が無ければ `null`））とトップに `wholeConstrualSchemaVersion`。名詞が空の下書きの候補は含めない。取り込みは各方向の `wholeConstrual` から層を復元し、無い方向は現在の層を保つ。
+- AI案の反映: `docs/review/part-construal-20261128/apply-whole-construal-to-review.ts`（`--consensus consensus-120.json`、独立部分と同じ安全性と `--dry-run`）。
+- 方向の完了＝確認済み、かつ2つの層に「AI案の未確認」も「自由文と要照合」の印も無いこと。
+```sh
+node --test docs/review/orientation-app/whole-construal-review.test.ts docs/review/part-construal-20261128/apply-whole-construal-to-review.test.ts
+```
