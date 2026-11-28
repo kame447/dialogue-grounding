@@ -1,34 +1,85 @@
-// Prompt text for the rotation memory: an optional `rotation` on an observation figure (the same figure imagined turned, with whole and part construals).
-// The legend (what the data is) is defined once here and every model call carries it once, next to the data. It describes the AI's own imagination only:
+// Prompt text and per-call layers of the rotation memory: an optional `rotation` on an observation figure (the same figure imagined turned, with whole and part construals).
+// Shapes, validation and name/feature candidates come from stimuli/rotation-memory-shape.ts (B1); this file only decides what each model call sees and how it is explained.
+// The legend (what the data is) is defined once here and every call carries it once, next to the data. It describes the AI's own imagination only:
 // it never mentions the partner's board, the rotation mode or which view is close to the partner, so it is byte-identical for every rotation mode.
 // The partner-side task condition stays in the existing mode sentences (ROTATION_V5 ...). Each call adds only a short usage text of its own.
-// A request without `rotation` on any figure never reaches this module's texts, so every earlier version keeps its bytes.
+// A request without a valid `rotation` on any figure never reaches this module's texts, so every earlier version keeps its bytes.
+import { rotationNameCandidates, rotationFeatureCandidates, validateOwnRotationMemory } from "../stimuli/rotation-memory-shape.ts";
+import type { OwnRotationMemory, OwnRotationView } from "../stimuli/rotation-memory-shape.ts";
+
+export { rotationNameCandidates, rotationFeatureCandidates };
+export type { OwnRotationMemory };
 
 const object = (v: unknown): v is Record<string, unknown> => !!v && Object.getPrototypeOf(v) === Object.prototype;
-const text = (v: unknown, max: number): v is string => typeof v === "string" && v.trim().length > 0 && v.length <= max;
-const ID = /^[A-Za-z0-9_-]{1,16}$/u;
 
-/** One view (the current one or a turned one): whole construals, and part candidates per region id. A confidence is written only when it is 中 or 高 (absent = 低). */
-export type RotationCandidate = { noun: string; owner?: string; confidence?: "中" | "高" };
-export type RotationWhole = { noun: string; posture: string; direction: string; confidence?: "中" | "高"; roles: Record<string, string> };
-export type RotationView = { whole: RotationWhole[]; parts: Record<string, RotationCandidate[]> };
-export type RotationRegion = { id: string; shapeName: string; areaPercent: number; at: string; tip?: string; concave?: true; adjacent: string[] };
-export type ModelRotation = { regions: RotationRegion[]; current: RotationView; turned: (RotationView & { rel: 90 | 180 | 270 })[]; wholeAnywhere: boolean };
+/** What a call is shown: nouns = whole/part nouns with minimal geometry; roles = nouns + the roles of regions in each whole + full geometry; full = everything. */
+export type RotationLayer = "nouns" | "roles" | "full";
+/** One place that says which layer each kind of call carries (decision: the fixed small block counted in the state budget). */
+export const ROTATION_LAYER_OF_CALL = Object.freeze({ decision: "nouns", generation: "roles", extraction: "roles", reobservation: "nouns" } as const);
 
-/** True when at least one figure of a memo (or of a decision input's observations) carries a rotation memory. */
+/** The figure's rotation memory when it is present and well formed, else null. A malformed value is treated as absent: it never stops a request. */
+export function figureRotation(figure: unknown): OwnRotationMemory | null {
+  if (!object(figure) || !Object.hasOwn(figure, "rotation")) return null;
+  try { return validateOwnRotationMemory(figure.rotation); } catch { return null; }
+}
+/** True when at least one figure carries a well-formed rotation memory. Every call decides "new text or old bytes" with this one test. */
 export function hasRotationMemory(memo: { figures: readonly unknown[] } | undefined): boolean {
-  return !!memo && Array.isArray(memo.figures) && memo.figures.some(figure => object(figure) && Object.hasOwn(figure, "rotation"));
+  return !!memo && Array.isArray(memo.figures) && memo.figures.some(figure => figureRotation(figure) !== null);
 }
 
-export const ROTATION_MEMORY_LEGEND = "rotationは、自分の同じ図形を向きを変えて見たと想像したときの見立ての記録で、すべて仮説です。" +
-  "regionsは図形の領域（id、形、面積の割合、自分の今の画面での位置at、隣り合う領域）で、領域のidで他の項目と結び付きます。" +
-  "currentは今の向き、turnedは今の向きを時計回りにrel度回したと想像した向きで、どの向きも同じ形式です。" +
-  "各向きのwholeは全体の見立ての配列で、noun=見立てた物、posture=その姿勢、direction=その見え方の中での向き、roles=領域idごとの役割、confidenceは中・高のときだけ付き、無ければ低です。空の配列はその向きに全体の見立てがないことです。" +
-  "partsは全体の見立てとは別の、領域idごとの部分の見立ての候補です（noun、持ち主のowner）。wholeAnywhereはどれかの向きにwholeがあるかを示します。" +
-  "turnedの方向や位置の語はその見え方の中の向きなので、今の画面での位置はregionsのatで言います。";
+type Layered = Record<string, unknown>;
+const mark = (c: { confidence?: "中" | "高" }) => c.confidence === undefined ? {} : { confidence: c.confidence };
+function layerView(view: OwnRotationView, layer: RotationLayer): Layered {
+  const whole = view.whole.map(w => ({ noun: w.noun, ...mark(w),
+    ...(layer === "nouns" ? {} : { roles: w.roles }), ...(layer === "full" ? { posture: w.posture, direction: w.direction } : {}) }));
+  const parts = Object.fromEntries(Object.entries(view.parts).map(([id, list]) => [id,
+    list.map(c => ({ noun: c.noun, ...mark(c), ...(layer === "full" && c.owner !== undefined ? { owner: c.owner } : {}) }))]));
+  return { whole, parts };
+}
+const nounMark = (c: { noun: string; confidence?: "中" | "高" }) => c.confidence === undefined ? c.noun : `${c.noun}（${c.confidence}）`;
+/** The nouns layer writes a view as one line: "全体: 見立て・見立て / P1 部分の見立て・… / P2 …"; "全体: なし" when the view has no whole construal. */
+const viewLine = (view: OwnRotationView): string => ["全体: " + (view.whole.length ? view.whole.map(nounMark).join("・") : "なし"),
+  ...Object.entries(view.parts).map(([id, list]) => `${id} ${list.map(nounMark).join("・")}`)].join(" / ");
+/** A pure projection of a validated rotation memory onto a layer. Nouns, confidence marks, region ids and wholeAnywhere survive in every layer. */
+export function rotationMemoryLayer(rotation: OwnRotationMemory, layer: RotationLayer): Layered {
+  if (layer === "nouns") return { regions: rotation.regions.map(r => `${r.id} ${r.shapeName} ${r.areaPercent}%`), current: viewLine(rotation.current),
+    turned: rotation.turned.map(t => ({ rel: t.rel, view: viewLine(t) })), wholeAnywhere: rotation.wholeAnywhere };
+  return { regions: rotation.regions, current: layerView(rotation.current, layer), turned: rotation.turned.map(t => ({ rel: t.rel, ...layerView(t, layer) })), wholeAnywhere: rotation.wholeAnywhere };
+}
+/** The memo as a call shows it: every well-formed rotation replaced by its layer, a malformed one removed. Other fields are untouched. */
+export function withRotationLayer<T extends { figures: readonly unknown[] }>(memo: T, layer: RotationLayer): T {
+  if (!hasRotationMemory(memo)) return memo;
+  return { ...memo, figures: memo.figures.map(figure => {
+    if (!object(figure) || !Object.hasOwn(figure, "rotation")) return figure;
+    const { rotation: _own, ...rest } = figure;
+    const rotation = figureRotation(figure);
+    return rotation ? { ...rest, rotation: rotationMemoryLayer(rotation, layer) } : rest;
+  }) };
+}
 
+/** The legend of a layer: the base says what the data is; the clauses are present only for the keys the layer carries. */
+export function rotationLegend(layer: RotationLayer): string {
+  const detail = layer !== "nouns", full = layer === "full";
+  const head = "rotationは、自分の同じ図形を向きを変えて見たと想像したときの見立ての記録で、すべて仮説です。";
+  if (!detail) return head + "regionsは図形の領域の「領域id 形 面積の割合」で、領域のidで部分の見立てと結び付きます。" +
+    "currentは今の向き、turnedは今の向きを時計回りにrel度回したと想像した向きで、各向きは「全体: 全体の見立て / 領域id 部分の見立ての候補」の1行です。" +
+    "見立ては・で並び、確信度は中・高のときだけ括弧で付き、無ければ低です。「全体: なし」はその向きに全体の見立てがないことです。" +
+    "部分の見立ては全体の見立てとは別の候補です。wholeAnywhereはどれかの向きに全体の見立てがあるかを示します。";
+  return head +
+    "regionsは図形の領域のid・形・面積の割合で、領域のidで他の項目と結び付きます。" + "atは自分の今の画面での位置、tipは尖った頂点の向き、adjacentは隣り合う領域です。" +
+    "currentは今の向き、turnedは今の向きを時計回りにrel度回したと想像した向きで、どの向きも同じ形式です。" +
+    "各向きのwholeは全体の見立ての配列で、nounは見立てた物、confidenceは中・高のときだけ付き無ければ低です" +
+    (detail ? "、rolesは領域idごとの役割" : "") + (full ? "、postureはその姿勢、directionはその見え方の中での向き" : "") + "。空の配列はその向きに全体の見立てがないことです。" +
+    "partsは全体の見立てとは別の、領域idごとの部分の見立ての候補です" + (full ? "（ownerはその部分を持つ物）" : "") + "。wholeAnywhereはどれかの向きにwholeがあるかを示します。" +
+    (detail ? "turnedの位置や方向の語はその見え方の中の向きなので、今の画面での位置はregionsのatで言います。" : "");
+}
+export const ROTATION_LEGENDS: Readonly<Record<RotationLayer, string>> = Object.freeze({ nouns: rotationLegend("nouns"), roles: rotationLegend("roles"), full: rotationLegend("full") });
 /** The key that carries the legend next to the data in a JSON state or context (once per call). */
 export const ROTATION_LEGEND_KEY = "rotationLegend";
+/** `{ rotationLegend }` for a memo that carries a rotation memory, else nothing (the old bytes). */
+export function rotationLegendEntry(memo: { figures: readonly unknown[] } | undefined, layer: RotationLayer): Record<string, string> {
+  return hasRotationMemory(memo) ? { [ROTATION_LEGEND_KEY]: ROTATION_LEGENDS[layer] } : {};
+}
 
 // ---- decision (Jev) ----
 /** Replaces the one common-instruction sentence that sends a different construal to re-observation first. */
@@ -41,7 +92,7 @@ export const ROTATION_ACTION_USE = "回転別メモ（rotation）で答えられ
 /** Added to the target question and to the partner-referent estimate. */
 export const ROTATION_MATCH_USE = "相手の説明は、今の向きの見立てだけでなく、rotationの別の向きの見立てや部分の候補とも照合してください。同じ図形の別の向きの見立てに合うことは候補の根拠にとどまり、図形や名前の確定ではありません。";
 
-/** Replaces the whole accept / request_observation criterion (including the repair-quality paragraph) of a request that carries a rotation memory: each point is stated once. */
+/** Replace the whole accept / request_observation criterion (including the repair-quality paragraph) of a request that carries a rotation memory: each point is stated once. */
 export const ROTATION_ACCEPT_ANSWER = "相手が図形全体や見た目・特徴を尋ねたとき（複数の図形をまとめて尋ねたときを含む）は、質問を返すconfirmや部品の確認を重ねず、このacceptで観察メモ（rotationの別の向きの見立てや部分の候補を含む）に根拠のある答えを、求められた図形すべてについて直接返す。" +
   "全体の問いには全体の見立てを先に、細部の問いにはその細部を、ある・ない・不明のいずれかで答える。今の向きに全体の見立てがなくても、別の向きの見立てや部分の候補があれば答えられる。見立ては説明であり、名前の提案・採用ではない。";
 export const ROTATION_ACCEPT_BACKCHANNEL = "相手の発話が相槌だけ（新しい情報も問いもない）で、直前のAI行動もacceptだった場合は同じ受け止めを繰り返さず、より具体的な説明や次に役立つ見立てがあれば返す。" +
@@ -52,7 +103,7 @@ export const ROTATION_REQUEST_OBSERVATION = "回転別メモ（rotation）にな
   "以前の観察でも不明な点を再観察し、一方の画面の方位を他方の証拠に使わない。";
 
 // ---- generation ----
-/** Applied to the finished generation instructions of a turn whose memo carries a rotation memory; every `from` must be found (checked when used). */
+/** Applied to the finished generation instructions of a turn whose memo carries a rotation memory; every `from` must be found exactly once. */
 export const GENERATION_ROTATION_EDITS: readonly (readonly [from: string, to: string])[] = Object.freeze([
   ["自然な見立てがなければ全体の形でかまいません。",
     "今の向きに見立てがあればそれを自然に優先し、なければ最初から、別の向きの見立てを「見る角度によっては〜」「向きを変えて見ると〜」と添えて伝えてかまいません。" +
@@ -78,52 +129,3 @@ export function applyGenerationRotationEdits(instructions: string): string {
 export const EXTRACTION_ROTATION_USE = "相手の説明は、今の向きだけでなくrotationの別の向きの見立てや部分の候補とも照合し、合う図形をtargetsの候補に残してください。一致は候補の根拠にとどまり、同じ図形・名前の合意の確定ではありません。";
 export const AI_EXTRACTION_ROTATION_USE = "「向きを変えて見ると〜」「見る角度によっては〜」は、rotationに根拠がある自分側の想像の見立て（construal）として抽出してください。相手の画面の向きの主張ではありません。";
 export const REOBSERVATION_ROTATION_USE = "figuresのrotationは自分の図形を向きを変えて見たと想像した見立ての記録で、今の画像上の根拠ではありません。画像で確かめられる点だけをsupports・contradicts・unknownへ書いてください。";
-
-/** Candidate names a figure's rotation memory offers: the current view first, then the turned views, without repeats. */
-export function rotationNameCandidates(rotation: { current: RotationView; turned: readonly RotationView[] }): string[] {
-  const names: string[] = [];
-  for (const view of [rotation.current, ...rotation.turned]) for (const whole of view.whole) if (!names.includes(whole.noun)) names.push(whole.noun);
-  return names;
-}
-
-// ---- model-facing copy ----
-function candidate(value: unknown): RotationCandidate {
-  if (!object(value) || !text(value.noun, 40) || value.owner !== undefined && !text(value.owner, 40) ||
-      value.confidence !== undefined && value.confidence !== "中" && value.confidence !== "高") throw new TypeError("invalid_rotation_memory");
-  return { noun: value.noun, ...(value.owner !== undefined ? { owner: value.owner as string } : {}), ...(value.confidence !== undefined ? { confidence: value.confidence } : {}) };
-}
-function view(value: unknown): RotationView {
-  if (!object(value) || !Array.isArray(value.whole) || value.whole.length > 8 || !object(value.parts)) throw new TypeError("invalid_rotation_memory");
-  const whole = value.whole.map((w: unknown): RotationWhole => {
-    if (!object(w) || !text(w.noun, 40) || !text(w.posture, 80) || !text(w.direction, 80) || !object(w.roles) ||
-        w.confidence !== undefined && w.confidence !== "中" && w.confidence !== "高") throw new TypeError("invalid_rotation_memory");
-    const roles = Object.fromEntries(Object.entries(w.roles).map(([id, role]) => {
-      if (!ID.test(id) || !text(role, 80)) throw new TypeError("invalid_rotation_memory");
-      return [id, role];
-    }));
-    return { noun: w.noun, posture: w.posture, direction: w.direction, ...(w.confidence !== undefined ? { confidence: w.confidence } : {}), roles };
-  });
-  const parts = Object.fromEntries(Object.entries(value.parts).map(([id, list]) => {
-    if (!ID.test(id) || !Array.isArray(list) || list.length < 1 || list.length > 6) throw new TypeError("invalid_rotation_memory");
-    return [id, list.map(candidate)];
-  }));
-  return { whole, parts };
-}
-/** Rebuilds a rotation memory from known keys only (nothing else can reach a prompt); throws a TypeError on a malformed value. The caller decides what a failure means. */
-export function modelRotation(value: unknown): ModelRotation {
-  if (!object(value) || !Array.isArray(value.regions) || !value.regions.length || value.regions.length > 12 || !Array.isArray(value.turned) || value.turned.length !== 3 ||
-      typeof value.wholeAnywhere !== "boolean") throw new TypeError("invalid_rotation_memory");
-  const regions = value.regions.map((r: unknown): RotationRegion => {
-    if (!object(r) || !ID.test(String(r.id)) || !text(r.shapeName, 40) || typeof r.areaPercent !== "number" || !Number.isFinite(r.areaPercent) || !text(r.at, 40) ||
-        r.tip !== undefined && !text(r.tip, 16) || r.concave !== undefined && r.concave !== true ||
-        !Array.isArray(r.adjacent) || !r.adjacent.every((id: unknown) => typeof id === "string" && ID.test(id))) throw new TypeError("invalid_rotation_memory");
-    return { id: r.id as string, shapeName: r.shapeName, areaPercent: r.areaPercent, at: r.at, ...(r.tip !== undefined ? { tip: r.tip as string } : {}),
-      ...(r.concave === true ? { concave: true as const } : {}), adjacent: [...r.adjacent as string[]] };
-  });
-  const turned = value.turned.map((t: unknown) => {
-    if (!object(t) || t.rel !== 90 && t.rel !== 180 && t.rel !== 270) throw new TypeError("invalid_rotation_memory");
-    return { rel: t.rel as 90 | 180 | 270, ...view(t) };
-  });
-  if (new Set(turned.map(t => t.rel)).size !== 3) throw new TypeError("invalid_rotation_memory");
-  return { regions, current: view(value.current), turned, wholeAnywhere: value.wholeAnywhere };
-}
