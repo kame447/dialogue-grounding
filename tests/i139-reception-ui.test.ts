@@ -5,6 +5,7 @@ import { runInNewContext } from 'node:vm';
 
 const web = new URL('../dialogue-model/runtime/web/', import.meta.url);
 const [script, html] = await Promise.all(['app.js', 'index.html'].map(name => readFile(new URL(name, web), 'utf8')));
+const START_INTENT = '22222222-2222-4222-8222-222222222222';
 class Element {
   tagName: string; children: Element[] = []; handlers: Record<string, Function[]> = {}; attributes: Record<string, string> = {};
   value = ''; _text = ''; disabled = false; hidden = false; open = false; scrollTop = 0; clientHeight = 400;
@@ -45,7 +46,7 @@ async function ui(initial: any = { trial: null, reception: { number: '007', stat
   const document = { visibilityState: 'visible', getElementById: (id: string) => e[id],
     createElement: (tag: string) => new Element(tag), createElementNS: (_: unknown, tag: string) => new Element(tag),
     addEventListener(type: string, fn: Function) { (listeners[type] ??= []).push(fn); } };
-  runInNewContext(script, { document,
+  runInNewContext(script, { document, crypto: { randomUUID: () => START_INTENT },
     setTimeout: (callback: Function, delay: number) => { timers.set(++timerId, { callback, delay }); return timerId; },
     clearTimeout: (id: number) => timers.delete(id),
     fetch: async (path: string, opts: any) => {
@@ -85,8 +86,10 @@ test('unassigned reception never renders placeholders or private settings; appro
   // Same state envelope as the real-edge ready contract (values are synthetic).
   x.setState({ trial: null, hideStrategy: true, busy: false, reception: { number: '007', status: 'ready', revision: 4 } });
   await x.poll(); assert.equal(x.e['start-trial'].disabled, false);
+  assert.equal(x.calls.filter(c => c.path === '/api/start').length, 0);
   x.e['start-trial'].fire('click'); await tick();
-  assert.deepEqual(x.calls.filter(c => c.path === '/api/start'), [{ path: '/api/start', method: 'POST', body: { version: 2, expectedReceptionRevision: 4 } }]);
+  assert.deepEqual(x.calls.filter(c => c.path === '/api/start'), [{ path: '/api/start', method: 'POST',
+    body: { version: 2, startIntentId: START_INTENT, expectedReceptionRevision: 4 } }]);
 });
 
 test('waiting reception polling stops while hidden and resumes on visibility', async () => {
@@ -99,14 +102,16 @@ test('legacy state without reception mode preserves explicit start with no admis
   const x = await ui({ trial: null }, { legacy: true });
   assert.equal(x.receptionCalls, 0); assert.equal(x.e['start-trial'].disabled, false);
   x.e['start-trial'].fire('click'); await tick();
-  assert.deepEqual(x.calls.filter(c => c.path === '/api/start'), [{ path: '/api/start', method: 'POST', body: { version: 2 } }]);
+  assert.deepEqual(x.calls.filter(c => c.path === '/api/start'), [{ path: '/api/start', method: 'POST',
+    body: { version: 2, startIntentId: START_INTENT } }]);
 });
 
 test('reception mode with an optional admission 404 preserves the known state and explicit start', async () => {
   const x = await ui({ trial: null, reception: { number: '007', status: 'ready', revision: 4 } }, { legacy: true });
   assert.equal(x.receptionCalls, 1); assert.equal(x.e['start-trial'].disabled, false);
   x.e['start-trial'].fire('click'); await tick();
-  assert.deepEqual(x.calls.filter(c => c.path === '/api/start'), [{ path: '/api/start', method: 'POST', body: { version: 2, expectedReceptionRevision: 4 } }]);
+  assert.deepEqual(x.calls.filter(c => c.path === '/api/start'), [{ path: '/api/start', method: 'POST',
+    body: { version: 2, startIntentId: START_INTENT, expectedReceptionRevision: 4 } }]);
 });
 
 test('unavailable reception never enables start', async () => {
@@ -123,7 +128,7 @@ test('completed trial offers the participant next start with both expected revis
   assert.equal(x.e['start-trial'].disabled, false); assert.equal(x.e['start-trial'].textContent.trim(), '次の課題を開始');
   x.e['start-trial'].fire('click'); await tick();
   assert.deepEqual(x.calls.filter(c => c.path === '/api/start'), [{ path: '/api/start', method: 'POST',
-    body: { version: 2, expectedReceptionRevision: 5, expectedRecordId: current.sessionId } }]);
+    body: { version: 2, startIntentId: START_INTENT, expectedReceptionRevision: 5, expectedRecordId: current.sessionId } }]);
 });
 
 test('a reception waiting for the predecessor questionnaire never offers the next start until the server state changes', async () => {
