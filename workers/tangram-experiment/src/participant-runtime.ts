@@ -1,3 +1,4 @@
+import type { PreparedTrialObservationReference } from '../../../dialogue-model/runtime/v2/prepared-observations.ts';
 import { ParticipantUsageLedger, type ParticipantDispatchResult } from '../../../dialogue-model/runtime/web/participant-usage.ts';
 import { PARTICIPANT_USAGE_ONLY } from '../../../dialogue-model/runtime/web/participant-usage-policy.ts';
 import { MODEL_CONTRACT_V2 } from '../../../dialogue-model/runtime/model-identity-contract.ts';
@@ -208,17 +209,18 @@ type ParticipantObservationOptions = {
   proxy: ParticipantService;
   cache: WorkerTerraCache;
   initialObservationGeneration?: InitialObservationGeneration;
+  preparedObservation?: PreparedTrialObservationReference;
 };
 
 function participantChat(proxy: ParticipantService, usage?: ParticipantUsageLedger): Dispatch {
   return (payload, expected) => usage ? proxy.participantUsageChat!(payload, expected) : proxy.participantChat(payload, expected);
 }
 
-export function createParticipantTerraObserver({ pin, own, proxy, cache, usage, initialObservationGeneration }:
+export function createParticipantTerraObserver({ pin, own, proxy, cache, usage, initialObservationGeneration, preparedObservation }:
   ParticipantObservationOptions & { usage?: ParticipantUsageLedger }) {
   const chat = participantChat(proxy, usage);
   const terra = createWorkerTerraObserver({
-    modelPin: pin, own, cache, timeoutMs: profile.timeouts.observationMs, researchLimits, initialObservationGeneration,
+    modelPin: pin, own, cache, ...(preparedObservation ? { requiredInitialMemo: { key: preparedObservation.cacheKey, memoSha256: preparedObservation.memoSha256 } } : {}), timeoutMs: profile.timeouts.observationMs, researchLimits, initialObservationGeneration,
     visual: (payload, signal) => usage ? usage.dispatch('terra', chat, payload, signal) : chat(payload, pin.terraModelId),
     ...(usage ? { onCacheHit: () => usage.cacheHit() } : {}),
   });
@@ -231,7 +233,7 @@ export function createParticipantTerraObserver({ pin, own, proxy, cache, usage, 
   };
 }
 
-export function createWorkerParticipantRuntime({ pin, own, proxy, cache, limits, usage, initialObservationGeneration, participantDialogueProfile }:
+export function createWorkerParticipantRuntime({ pin, own, proxy, cache, limits, usage, initialObservationGeneration, participantDialogueProfile, preparedObservation }:
   ParticipantObservationOptions & { participantDialogueProfile?: ParticipantDialogueProfile } &
   ({ limits: Readonly<BudgetLimits>; usage?: never } | { limits?: never; usage: ParticipantUsageLedger })) {
   if (pin.schemaVersion !== 'participant_model_pin_v1' && !usage) throw new NamingTaskError('invalid_options');
@@ -294,7 +296,7 @@ export function createWorkerParticipantRuntime({ pin, own, proxy, cache, limits,
   } : transport;
   const jevResearch: JevResearchOptions<JevResearchLedger> = {
     ...(dialogue ?? {}), profile: runtimeProfile, ledger,
-    observer: createParticipantTerraObserver({ pin, own, proxy, cache, usage, initialObservationGeneration }),
+    observer: createParticipantTerraObserver({ pin, own, proxy, cache, usage, initialObservationGeneration, preparedObservation }),
     jevDecision: createJevDecisionClient({ ...transport, enabled: true, questionLayout: runtimeProfile.questionLayout,
       participantTargetMenu: !dialogue, participantPrompts: dialogue !== null })!,
     localGrounding: {

@@ -46,6 +46,7 @@ function failure(error: unknown): ReceptionAdminResult {
     case 'protocol_unconfigured': return { ok:false, error:'protocol_unconfigured' };
     case 'protocol_changed': return { ok:false, error:'protocol_changed' };
     case 'reception_closed': return { ok:false, error:'reception_closed' };
+    case 'prepared_observations_unavailable': return { ok:false, error:'prepared_observations_unavailable' };
     default: return { ok:false, error:'reception_unavailable' };
   }
 }

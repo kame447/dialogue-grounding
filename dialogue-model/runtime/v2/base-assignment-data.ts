@@ -1,6 +1,7 @@
 // Shared validation internals. node:crypto is already available to the Worker
 // under its existing nodejs_compat flag (also used by the stimulus generator).
 import { isOpeningMode } from './opening-mode.ts';
+import { preparedTrialObservation, validatePreparedTrialObservation } from './prepared-observations.ts';
 import { CLAIM_PRUNE_V2 } from '../memory/reference-graph.mjs';
 import { createHash } from 'node:crypto';
 import type { BaseAssignmentConfig, BaseAssignment, BaseRecord, BaseOwnerState } from './base-assignment.ts';
@@ -109,6 +110,10 @@ export function assignmentOpeningMode(a: BaseAssignment) {
   return a.source.kind === 'server_config_v1' ? a.source.openingMode
     : a.source.kind === 'reception_plan_v1' ? undefined : a.source.plan.openingMode;
 }
+export function assignmentPreparedObservation(a: BaseAssignment) {
+  if (a.source.kind !== 'reception_plan_v2' && a.source.kind !== 'reception_plan_v3') return undefined;
+  return a.source.plan.preparedObservations ? preparedTrialObservation(a.source.plan.preparedObservations, a.source.trialIndex) : undefined;
+}
 export function assignmentParticipantModelPin(a: BaseAssignment) {
   return a.source.kind === 'server_config_v1' ? undefined : effectiveParticipantModelPin(a.source.plan);
 }
@@ -176,6 +181,10 @@ export function validateBoundBaseRecord(record: unknown, assignment: unknown): v
     const graph = (queue.privateState as { graph?: { memoryPruneVersion?: unknown } } | null)?.graph;
     if ((memoryPruneVersion ? options.memoryPruneVersion !== memoryPruneVersion : Object.hasOwn(options, 'memoryPruneVersion')) ||
         graph?.memoryPruneVersion !== memoryPruneVersion) throw new Error('memory_prune_version');
+    const preparedObservation = assignmentPreparedObservation(a);
+    const recordedObservation = Object.hasOwn(options, 'preparedObservation') ? validatePreparedTrialObservation(options.preparedObservation) : undefined;
+    if (JSON.stringify(preparedObservation) !== JSON.stringify(recordedObservation) || preparedObservation &&
+        data(r.initialObservation).memoSha256 !== preparedObservation.memoSha256) throw new Error('prepared_observation');
     const generation = plan?.initialObservationGeneration;
     const dialogueProfile = assignmentParticipantDialogueProfile(a);
     if (dialogueProfile === undefined ? Object.hasOwn(options, 'participantDialogueProfile')

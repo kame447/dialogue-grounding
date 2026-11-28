@@ -1,5 +1,8 @@
 import { createHash } from 'node:crypto';
 import { isOpeningMode, type OpeningMode } from './opening-mode.ts';
+import { validatePreparedObservations } from './prepared-observations.ts';
+import type { PreparedObservationReference } from './prepared-observations.ts';
+export type { PreparedObservationReference, PreparedTrialObservationReference } from './prepared-observations.ts';
 import { PARTICIPANT_PRODUCTION_PROFILE, type ParticipantProductionProfile } from '../web/participant-usage-policy.ts';
 import type { Strategy } from './base-assignment.ts';
 import type { BudgetLimits } from '../diagnostics/parity-live/audit.ts';
@@ -63,7 +66,8 @@ export function isParticipantDialogueProfile(value: unknown): value is Participa
 export function participantMemoryPruneVersion(profile?: ParticipantDialogueProfile): MemoryPruneVersion {
   return isPilot012ParticipantDialogueProfile(profile) ? CLAIM_PRUNE_V3 : CLAIM_PRUNE_V2;
 }
-type ParticipantPlanSettings = {
+export type ParticipantPlanSettings = {
+  preparedObservations?: PreparedObservationReference;
   openingMode?: OpeningMode;
   memoryPruneVersion?: MemoryPruneVersion;
   participantModelPin?: ParticipantModelPin;
@@ -98,7 +102,7 @@ export type Reception = { schemaVersion: 'reception_v1'; receptionId: string; ob
 export type ReceptionSummary = Pick<Reception, 'receptionId' | 'objectId' | 'createdAt' | 'number' | 'status' | 'revision' | 'trials'>;
 export type ReceptionErrorCode = 'protocol_unconfigured' | 'reception_conflict' | 'invalid_order' | 'reception_unavailable' |
   'reception_not_approved' | 'trial_changed' | 'reception_finished' | 'protocol_changed' | 'reception_closed' |
-  'reception_required' | 'questionnaire_required';
+  'reception_required' | 'questionnaire_required' | 'prepared_observations_unavailable';
 export class ReceptionError extends Error {
   readonly code: ReceptionErrorCode;
   constructor(code: ReceptionErrorCode) { super(code); this.name = 'ReceptionError'; this.code = code; }
@@ -198,6 +202,7 @@ export const receptionProtocolSha256 = (canonical: string): string => createHash
 const PLAN_KEYS = ['schemaVersion','protocolId','protocolRevision','protocolSha256','order','betweenTrials','trials','approvedAt'];
 function participantPlan(value: unknown) {
   const fields = value && typeof value === 'object' ? value : {};
+  const hasPrepared = Object.hasOwn(fields, 'preparedObservations');
   const hasPrune = Object.hasOwn(fields, 'memoryPruneVersion');
   const hasOpeningMode = Object.hasOwn(fields, 'openingMode');
   const hasPin = Object.hasOwn(fields, 'participantModelPin');
@@ -206,7 +211,7 @@ function participantPlan(value: unknown) {
   const hasGeneration = Object.hasOwn(fields, 'initialObservationGeneration');
   const hasDialogueProfile = Object.hasOwn(fields, 'participantDialogueProfile');
   if ((hasLimits || hasProfile || hasGeneration) && !hasPin || hasLimits && hasProfile) return fail();
-  const p = object(value, [...PLAN_KEYS, ...(hasOpeningMode ? ['openingMode'] : []),
+  const p = object(value, [...PLAN_KEYS, ...(hasPrepared ? ['preparedObservations'] : []), ...(hasOpeningMode ? ['openingMode'] : []),
     ...(hasPrune ? ['memoryPruneVersion'] : []), ...(hasPin ? ['participantModelPin'] : []), ...(hasLimits ? ['participantLimits'] : []),
     ...(hasProfile ? ['participantRuntimeProfile'] : []), ...(hasGeneration ? ['initialObservationGeneration'] : []),
     ...(hasDialogueProfile ? ['participantDialogueProfile'] : [])]);
@@ -224,7 +229,10 @@ function participantPlan(value: unknown) {
   if (isPilot012ParticipantDialogueProfile(dialogueProfile) &&
       (!hasPrune || generation !== INITIAL_OBSERVATION_STRUCTURED_V2)) return fail();
   const limits = hasLimits ? validateParticipantLimits(p.participantLimits) : undefined;
+  const preparedObservations = hasPrepared ? validatePreparedObservations(p.preparedObservations, Array.isArray(p.trials) ? p.trials.length : 0) : undefined;
+  if (preparedObservations && (!pin || !hasProfile || !iso(p.approvedAt) || preparedObservations.preparedAt > p.approvedAt)) return fail();
   const participant: ParticipantPlanSettings = {
+    ...(preparedObservations ? { preparedObservations } : {}),
     ...(hasOpeningMode ? { openingMode: p.openingMode as OpeningMode } : {}),
     ...(hasPrune ? { memoryPruneVersion } : {}),
     ...(pin ? { participantModelPin: pin } : {}),
@@ -341,6 +349,22 @@ function displayed(value: unknown): DisplayedProtocol {
     return { protocolId: d.protocolId, revision: d.revision, sha256: d.sha256 };
   } catch { return fail('protocol_changed'); }
 }
+/** Check the approval intent before claiming a prepared bundle; this does not draw any random material. */
+export function validateReceptionApprovalInput(value: unknown, options: {
+  expectedRevision: number; order: number; protocol: unknown; expected?: unknown;
+}): void {
+  const r = validateReception(value);
+  const version = options.protocol && typeof options.protocol === 'object' ? (options.protocol as { schemaVersion?: unknown }).schemaVersion : undefined;
+  const p = version === 'reception_protocol_v3' ? validateReceptionProtocolV3(options.protocol)
+    : version === 'reception_protocol_v2' ? validateReceptionProtocolV2(options.protocol) : validateReceptionProtocol(options.protocol);
+  if (r.status !== 'pending' || r.revision !== options.expectedRevision) return fail('reception_conflict');
+  if (p.schemaVersion !== 'reception_protocol_v1') {
+    const shown = displayed(options.expected);
+    if (shown.protocolId !== p.protocolId || shown.revision !== p.revision || shown.sha256 !== receptionProtocolSha256(JSON.stringify(p))) return fail('protocol_changed');
+  }
+  if (!int(options.order) || !p.allowedOrders[options.order]) return fail('invalid_order');
+}
+
 /**
  * v1 (pure, legacy) freezes a v1 plan exactly as before. v2 requires the displayed
  * version and compares it with the same protocol snapshot the plan is copied from.
@@ -350,6 +374,7 @@ export async function approveReception(value: unknown, options: ParticipantPlanS
 }): Promise<Reception> {
   const r = validateReception(value);
   const participant = {
+    ...(options.preparedObservations !== undefined ? { preparedObservations: options.preparedObservations } : {}),
     ...(options.openingMode !== undefined ? { openingMode: options.openingMode } : {}),
     ...(options.memoryPruneVersion !== undefined ? { memoryPruneVersion: options.memoryPruneVersion } : {}),
     ...(options.participantModelPin !== undefined ? { participantModelPin: options.participantModelPin } : {}),
