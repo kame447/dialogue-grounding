@@ -13,7 +13,7 @@ import { validateParticipantModelPin } from '../dialogue-model/runtime/v2/partic
 import { sameRotationMemoryPin, validateRotationMemoryPin, validateRotationMemoryRecord } from '../dialogue-model/runtime/v2/rotation-memory-pin.ts';
 import { readVisualFeatureEvidence } from '../dialogue-model/runtime/v2/visual-feature-evidence.ts';
 import { INITIAL_OBSERVATION_STRUCTURED_V2 } from '../dialogue-model/runtime/observation/initial-observation-generation.ts';
-import { validateObservationMemo } from '../dialogue-model/runtime/observation/observe.ts';
+import { buildReobservationMessages, mergeReobservation, validateObservationMemo } from '../dialogue-model/runtime/observation/observe.ts';
 import { workerTerraInitialKey } from '../dialogue-model/runtime/observation/worker-terra-observer.ts';
 import {
   ROTATION_MEMO_ABSENT, ROTATION_MEMO_COMPOSITION, createRotationMemoryObserver, rotationInitialMemo,
@@ -215,6 +215,23 @@ test('rotation is optional per figure; only a malformed saved value is refused; 
   const checked = validateObservationMemo(earlier, { ownAnchors: own.ownAnchors });
   assert.deepEqual(checked, earlier);
   assert.ok(checked.figures.every(f => !Object.hasOwn(f, 'rotation')));
+});
+
+test('a re-observation of a rotation-memory memo carries only the targeted figure and still merges back', async () => {
+  const { trial, own } = board(FIGURES[4]);
+  const memo = rotationInitialMemo(own.ownAnchors, projectOwnFigures(trial, own.ownAnchors, realSource), approvedAt);
+  const [target, other] = own.ownAnchors;
+  const issue = { aspect: 'part' as const, question: '三角形の大きさは？', partnerConstrual: null };
+  const messages = buildReobservationMessages({ ...own, memo, figureIds: [target.id], issue });
+  const text = JSON.stringify(messages);
+  assert.ok(text.includes(target.id) && text.includes('shapeName'), 'the targeted figure brings its memory');
+  assert.ok(!text.includes(other.id), 'no other figure of the board');
+  assert.doesNotMatch(text, /"F\d+"|figureKey|bankVersion/u);
+  const merged = mergeReobservation(memo, { observedAt: '2026-11-28T00:00:01.000Z', issue,
+    figures: [{ figureId: target.id, supports: ['三角を含む'], contradicts: [], unknown: [] }] });
+  assert.equal(merged.figures.find(f => f.id === target.id)!.reobservations.length, 1);
+  assert.deepEqual(merged.figures.map(f => f.rotation), memo.figures.map(f => f.rotation), 'the saved memory is not touched');
+  assert.deepEqual(validateObservationMemo(merged, { ownAnchors: own.ownAnchors }), merged);
 });
 
 test('visual-feature evidence resolves rotation paths, and only those that lead to a string of that figure', async () => {
