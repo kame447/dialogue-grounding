@@ -26,6 +26,7 @@ function fixture() {
     receptionSettings: {
       async read() { calls.push({ op: 'settings' }); return structuredClone(view); },
       async saveProtocol() { throw new Error('unexpected save'); }, async saveMode() { throw new Error('unexpected save'); },
+      async savePostGenerationCheck() { throw new Error('unexpected save'); },
     },
     preparedObservations: {
       async status() { calls.push({ op: 'status' }); if (failed === 'status') throw new Error(PRIVATE); return structuredClone(current) as PreparedObservationPoolStatus; },

@@ -248,6 +248,7 @@ function abortIf(signal) {
  *   issueHandlingReplayHistory?: import('./jev-turn.ts').IssueHandlingReplayHistory,
  *   participantPrompts?: boolean,
  *   generationRetryVersion?: import('./jev-turn.ts').GenerationRetryVersion,
+ *   postGenerationCheck?: import('./deferred-ai-extraction.ts').PostGenerationCheck,
  *   judgmentMaterialVersion?: import('../decision/repair-quality.ts').JudgmentMaterialVersion,
  *   newTrialAgreeNameScopeVersion?: import('./jev-turn.ts').JevTurnOptions['newTrialAgreeNameScopeVersion'],
  *   onJevTurnTrace?: ((record: import('./jev-turn.ts').JevTurnTrace) => unknown) | null }} options
@@ -350,6 +351,7 @@ export function createDialogueV2(options) {
       ...(options.dialoguePolicy ? { dialoguePolicy: options.dialoguePolicy } : {}),
       ...(options.rotationMode ? { rotationMode: options.rotationMode } : {}),
       generationRetryVersion: options.generationRetryVersion,
+      postGenerationCheck: options.postGenerationCheck,
       issueHandlingReplayHistory: options.issueHandlingReplayHistory,
       deferredAiExtractionProfileSha256: options.deferredAiExtractionProfileSha256,
       judgmentMaterialVersion: options.judgmentMaterialVersion,

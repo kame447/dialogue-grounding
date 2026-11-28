@@ -7,9 +7,9 @@ import { MEMO_LOCAL_EXTRACTION_INSTRUCTIONS, memoExtractionPrompt } from '../dia
 import { MEMO_AI_PUBLIC_EXTRACTION_INSTRUCTIONS, memoAiExtractionPrompt } from '../dialogue-model/runtime/local-grounding/extract-ai.ts';
 import { approveReception, canonicalReceptionProtocolV2, canonicalReceptionProtocolV3, PILOT012_PARTICIPANT_PROFILE, PILOT012_V18_PARTICIPANT_PROFILE,
   PILOT012_V19_PARTICIPANT_PROFILE, PILOT012_V20_PARTICIPANT_PROFILE, PILOT012_V21_PARTICIPANT_PROFILE, PILOT012_V22_PARTICIPANT_PROFILE,
-  PILOT012_V23_PARTICIPANT_PROFILE,
+  PILOT012_V23_PARTICIPANT_PROFILE, PILOT012_V24_PARTICIPANT_PROFILE,
   receptionProtocolSha256, receptionSummary, validateReceptionPlan } from '../dialogue-model/runtime/v2/reception.ts';
-import { DEFERRED_AI_EXTRACTION_GENERATION, GENERATION_RETRY_V22, GENERATION_RETRY_V23, ISSUE_HANDLING_GENERATION,
+import { DEFERRED_AI_EXTRACTION_GENERATION, GENERATION_RETRY_V22, GENERATION_RETRY_V23, GENERATION_RETRY_V24, ISSUE_HANDLING_GENERATION,
   isGenerationV23, isIssueHandlingGeneration, usesV22GenerationRules } from '../dialogue-model/runtime/v2/deferred-ai-extraction.ts';
 import { createNamingTaskV2 } from '../dialogue-model/runtime/v2/naming-task-v2.mjs';
 import { VISUAL_FEATURE_GENERATION } from '../dialogue-model/runtime/v2/generation-guard.ts';
@@ -166,7 +166,7 @@ function harness(enabled = true, selectedProtocol: typeof protocol & {
     usageChat?: (body: any, expected: string) => Promise<any>; holdChoice?: (body: { state: string; questions: Choices }) => Promise<void>;
     onStartObservationRead?: () => void;
     choose?: (name: string, body: { state: string; questions: Choices }) => string | undefined;
-    wrongChoiceModel?: (questions: Choices) => boolean; secondAction?: string } =
+    wrongChoiceModel?: (questions: Choices) => boolean; secondAction?: string; postGenerationCheck?: 'on' | 'off' } =
     { policy: { ...pin }, terra: pin.terraModelId, luna: pin.lunaModelId, jev: pin.jevModelId, legacyCalls: 0, observe: false, mixedUsage: false };
   let slots: string[] = [];
   const env = {
@@ -275,7 +275,9 @@ function harness(enabled = true, selectedProtocol: typeof protocol & {
   function makeSession(warmup: boolean) {
     const session = new TangramSession({ storage, id: { toString: () => 'c'.repeat(64) },
       waitUntil(promise: Promise<unknown>) { background.push(promise); } }, env);
-    session.settings = async () => ({ mode: { value: 'on', revision: 1 }, protocol: { protocol: selectedProtocol, revision: selectedProtocol.revision, sha256 } });
+    session.settings = async () => ({ mode: { value: 'on', revision: 1 }, protocol: { protocol: selectedProtocol, revision: selectedProtocol.revision, sha256 },
+      ...(controlled.postGenerationCheck ? { postGenerationCheck: { value: controlled.postGenerationCheck, revision: 1,
+        savedAt: '2026-01-01T00:00:00.000Z' } } : {}) });
     // Existing start-path cases explicitly restore pre-deployment plans; prepared cases exercise the real approval RPC.
     session.index = () => preparedIndex;
     const cache = session.preobservations.startCache, read = cache.read;
@@ -1907,9 +1909,11 @@ async function verifyPilot012WorkerProfile(t: TestContext,
   await assert.rejects(h.approve(), { code: 'reception_unavailable' });
   assert.equal((await h.storage.get('reception:v1')).plan, null);
   h.env.PARTICIPANT_TERRA_INITIAL_OBSERVATION_GENERATION = undefined;
+  if (legacyOpening) h.controlled.postGenerationCheck = 'on';
 
   const { plan } = await h.approve();
   assert.equal(plan.openingMode, 'scripted_v1');
+  assert.equal(Object.hasOwn(plan, 'postGenerationCheck'), false);
   if (legacyOpening) {
     delete plan.openingMode;
     delete plan.preparedObservations;
@@ -1945,6 +1949,10 @@ async function verifyPilot012WorkerProfile(t: TestContext,
     assert.deepEqual(start.assignment.source.plan, plan);
     assert.deepEqual(start.options.participantModelPin, plan.participantModelPin);
     assert.equal(start.options.participantDialogueProfile, participantProfile);
+    assert.equal(Object.hasOwn(start.options, 'postGenerationCheck'), false);
+    if (legacyOpening) {
+      assert.throws(() => validateBoundBaseRecord({ ...start, options: { ...start.options, postGenerationCheck: 'off' } }, start.assignment));
+    }
     assert.equal(start.options.initialObservationGeneration, INITIAL_OBSERVATION_STRUCTURED_V2);
     assert.equal(start.options.memoryPruneVersion, CLAIM_PRUNE_V3);
     assert.equal(start.queueState.privateState.graph.memoryPruneVersion, CLAIM_PRUNE_V3);
@@ -2008,6 +2016,74 @@ async function verifyPilot012WorkerProfile(t: TestContext,
 
 test('an already approved v23 reception keeps generated openings in both conditions after the scripted-opening update',
   t => verifyPilot012WorkerProfile(t, PILOT012_V23_PARTICIPANT_PROFILE, GENERATION_RETRY_V23, true));
+
+for (const [strategy, configured] of [
+  ['repair-first', undefined], ['bypass-enabled', undefined], ['repair-first', 'off'], ['bypass-enabled', 'on'],
+] as const) {
+  test(`v24 post-generation checking pins ${configured ?? 'default OFF'} for ${strategy} at approval through cold restore`, async t => {
+    const expected = configured ?? 'off';
+    const h = harness(true, { ...figureBankProtocol, allowedOrders: [[strategy]] }, true);
+    const transport = v12Transport(t, h);
+    transport.options.sharedReading = true;
+    h.controlled.selectedAction = 'accept';
+    const draftChecks = () => h.calls.filter(call => call.kind === 'choices' &&
+      Object.keys(call.body.questions).some(key => key.startsWith('draft_')));
+    if (expected === 'off') {
+      h.controlled.holdChoice = async body => {
+        if (Object.keys(body.questions).some(key => key.startsWith('draft_'))) throw new Error('unexpected prepublication check');
+      };
+    }
+    h.env.PARTICIPANT_DIALOGUE_PROFILE = PILOT012_V24_PARTICIPANT_PROFILE;
+    h.env.PARTICIPANT_AI_PROXY.participantInitialObservationPolicy = transport.observationPolicy;
+    const prepared = await h.prepare();
+    assert.ok(prepared);
+    await h.receive();
+    h.controlled.postGenerationCheck = configured;
+    const { plan } = await h.approve();
+    assert.equal(plan.postGenerationCheck, expected);
+    assert.equal(plan.order[0], strategy);
+    assert.equal(plan.preparedObservations.bundleId, prepared.bundleId);
+    h.controlled.postGenerationCheck = expected === 'off' ? 'on' : 'off';
+    h.evict();
+    const { trial } = await jsonOk(await h.start());
+    const id = trial.sessionId;
+    const key = 'record:' + id;
+    assert.equal(Object.hasOwn(trial, 'postGenerationCheck'), false);
+    const started = await h.storage.get(key);
+    assert.equal(started.options.generationRetryVersion, GENERATION_RETRY_V24);
+    assert.equal(started.options.postGenerationCheck, expected);
+    assert.equal(started.assignment.source.plan.postGenerationCheck, expected);
+    assert.equal(started.strategy, strategy);
+    const missing = structuredClone(started), forged = structuredClone(started);
+    delete missing.options.postGenerationCheck;
+    forged.options.postGenerationCheck = h.controlled.postGenerationCheck;
+    assert.throws(() => validateBoundBaseRecord(missing, started.assignment));
+    assert.throws(() => validateBoundBaseRecord(forged, started.assignment));
+
+    for (const [index, reply] of [p5Question, 'もう少し観察について教えてください。'].entries()) {
+      const before = transport.textPhases.filter(phase => phase === 'ai_extraction').length;
+      await jsonOk(await h.request('message', { expectedRecordId: id, text: reply }));
+      await h.idle();
+      const record = await h.storage.get(key);
+      const trace = record.jevTraces.at(-1);
+      assert.equal(record.queueState.errorCode, null);
+      assert.equal(trace.status, 'committed');
+      assert.equal(trace.executed.action, 'accept');
+      assert.equal(trace.intervention.schemaVersion, 'jev_intervention_v2');
+      assert.equal(record.events.at(-1).speaker, 'ai');
+      assert.equal(record.options.postGenerationCheck, expected);
+      if (expected === 'off') {
+        assert.equal(Object.hasOwn(trace, 'draftActs'), false);
+        assert.equal(draftChecks().length, 0);
+      } else assert.ok(draftChecks().length > index);
+      assert.equal(transport.textPhases.filter(phase => phase === 'ai_extraction').length - before, 1);
+      assert.equal(record.queueState.privateState.deferredAiExtraction, undefined);
+      assert.equal(record.queueState.privateState.aiPublic.pending.aiSeq, record.events.at(-1).seq);
+      h.evict();
+      assert.equal((await jsonOk(await h.request('state'))).trial.sessionId, id);
+    }
+  });
+}
 
 test('pilot012 pins the integrated versions at approval and preserves them through both trials and cold restore',
   t => verifyPilot012WorkerProfile(t, PILOT012_PARTICIPANT_PROFILE, 'jev_generation_retry_v17'));

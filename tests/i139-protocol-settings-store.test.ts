@@ -50,6 +50,26 @@ test('unsaved settings are a normal state: no protocol, mode unset', async () =>
   assert.deepEqual(await index.receptionProtocolHistory(), []);
 });
 
+test('post-generation checking is revisioned separately from protocol and reception availability', async () => {
+  const { index, storage } = fresh();
+  assert.equal((await index.saveReceptionProtocol({ expectedRevision: 0, fields: fields() })).ok, true);
+  const before = await index.readReceptionSettings();
+  assert.equal(Object.hasOwn(before, 'postGenerationCheck'), false);
+  assert.deepEqual(await index.saveReceptionPostGenerationCheck({ expectedRevision: 0, value: 'on' }), { ok: true, revision: 1 });
+  const enabled = settings.validateReceptionSettings(clone(await index.readReceptionSettings()));
+  assert.equal(enabled.postGenerationCheck?.value, 'on');
+  assert.deepEqual(enabled.protocol, before.protocol);
+  assert.deepEqual(enabled.mode, before.mode);
+  const snapshot = storage.snapshot();
+  assert.deepEqual(await index.saveReceptionPostGenerationCheck({ expectedRevision: 0, value: 'off' }), { ok: false, error: 'conflict' });
+  assert.deepEqual(await index.saveReceptionPostGenerationCheck({ expectedRevision: 1, value: true }), { ok: false, error: 'invalid' });
+  assert.deepEqual(storage.snapshot(), snapshot);
+  assert.deepEqual(await index.saveReceptionPostGenerationCheck({ expectedRevision: 1, value: 'off' }), { ok: true, revision: 2 });
+  assert.equal((await index.readReceptionSettings()).postGenerationCheck?.value, 'off');
+  storage.remove('reception-post-generation-check:current');
+  await assert.rejects(index.readReceptionSettings(), broken);
+});
+
 test('protocol saves are compare-and-swap, keep one protocol id, and append a complete canonical protocol per revision', async () => {
   const { index, storage } = fresh();
   const first = await index.saveReceptionProtocol({ expectedRevision: 0, fields: fields() });

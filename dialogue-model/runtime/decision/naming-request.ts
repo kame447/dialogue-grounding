@@ -37,6 +37,7 @@ export function claimsLiveAsOf(records: readonly { kind?: unknown; id?: unknown;
 export type NamingJudgmentEvidence = { turnIndex?: unknown; judgment?: { action?: unknown; targetSlot?: unknown; candidateName?: unknown; discriminatingFeature?: unknown; followUp?: unknown } | null;
   jevTurn?: { executed?: { action?: unknown; name?: unknown; visualPurpose?: unknown } | null } | null;
   generatedPublication?: { recovery?: { executed?: { visualPurpose?: unknown } } | null;
+    agreementWithheld?: true;
     withdrawal?: { figureId?: unknown } | null } | null };
 /** The names the judgments before `turn` left agreed, replayed over an empty ledger with the same acts the run applies (a judgment on no single figure and a feature-only
  * repair leave the ledger alone). A later defer or repair of an agreed name takes it out again. */
@@ -54,7 +55,7 @@ function namesAgreedBefore(judgments: readonly NamingJudgmentEvidence[], turn: n
     else if (name !== null && (g.action === "accept" || g.action === "propose_name")) ledger.set(slot, { status: current.status === "agreed" ? "agreed" : "tentative", name });
   };
   for (const x of judgments) {
-    if (typeof x?.turnIndex !== "number" || x.turnIndex >= turn || !x.judgment) continue;
+    if (typeof x?.turnIndex !== "number" || x.turnIndex >= turn || !x.judgment || x.generatedPublication?.agreementWithheld) continue;
     const g = x.judgment;
     const execution = x.generatedPublication?.recovery?.executed ?? x.jevTurn?.executed;
     if (g.action === "repair" && g.candidateName === null && execution?.visualPurpose !== undefined) {
@@ -74,7 +75,8 @@ function namesAgreedBefore(judgments: readonly NamingJudgmentEvidence[], turn: n
 export function reconfirmationPossible(proposals: readonly NamingClaimLike[], turn: number, judgments: readonly NamingJudgmentEvidence[], ledger: NamingLedgerLike): boolean {
   if (!proposals.length) return false;
   const before = namesAgreedBefore(judgments, turn);
-  const everAgreed = (key: string) => judgments.some(x => x?.jevTurn?.executed?.action === "agree" && typeof x.jevTurn.executed.name === "string" && namingNameKey(x.jevTurn.executed.name) === key);
+  const everAgreed = (key: string) => judgments.some(x => !x?.generatedPublication?.agreementWithheld &&
+    x?.jevTurn?.executed?.action === "agree" && typeof x.jevTurn.executed.name === "string" && namingNameKey(x.jevTurn.executed.name) === key);
   return proposals.every(p => {
     if (typeof p.name !== "string") return false;
     const key = namingNameKey(p.name);
@@ -100,7 +102,8 @@ export function usesPublicNamingTarget(scope: unknown): scope is Exclude<AgreeNa
 export type NamingJudgmentLike = {
   turnIndex?: unknown; judgment?: { action?: unknown } | null; generationGuard?: { fallback?: boolean } | null;
   jevTurn?: { humanReferent?: unknown; executed?: { target: { kind: string; figureId?: string; figureIds?: readonly string[] }; destination?: { kind: string } } } | null;
-  generatedPublication?: { transition?: unknown; recovery?: { executed?: { action?: string; destination?: { kind: string } } } | null } | null;
+  generatedPublication?: { transition?: unknown; agreementWithheld?: true;
+    recovery?: { executed?: { action?: string; destination?: { kind: string } } } | null } | null;
   aiPublic?: { aiSeq?: number };
 };
 
@@ -108,7 +111,7 @@ export function isNamingIntervalBoundary(judgment: NamingJudgmentLike, issueHand
   const action = judgment.judgment?.action;
   if (!issueHandling) return action === "agree" || action === "defer" || action === "move_on";
   const destination = judgment.generatedPublication?.recovery?.executed?.destination ?? judgment.jevTurn?.executed?.destination;
-  return action === "agree" || !!judgment.generatedPublication?.transition ||
+  return action === "agree" && !judgment.generatedPublication?.agreementWithheld || !!judgment.generatedPublication?.transition ||
     action === "carry_over" && (destination?.kind === "partner_choice" || destination?.kind === "other_figure" || destination?.kind === "old_issue");
 }
 

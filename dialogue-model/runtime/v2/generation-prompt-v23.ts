@@ -63,6 +63,7 @@ type ActionPrompt = {
   items: readonly PromptItem[];
   publicQuestions: ReturnType<typeof repairQualityPublicQuestions>;
   visualDetail: boolean;
+  omitVisualSources?: boolean;
   humanLedTransition: boolean;
   closing: Closing | null;
   reconsidered: boolean;
@@ -104,16 +105,16 @@ function actionScope(action: JevDecisionAction, partOnly: boolean, continuing: b
   throw new Error("Missing v23 generation scope for " + action);
 }
 
-function outputContract(multiple: boolean, visual: boolean, moveOn: boolean) {
+function outputContract(multiple: boolean, visual: boolean, moveOn: boolean, omitVisualSources?: boolean) {
   if (!multiple && !visual && !moveOn) return ["今回は公開発話の本文だけを返してください。"];
   const main = multiple ? "parts" : "text";
-  const keys = [main, ...(multiple || visual ? ["observationFeatures"] : []), ...(moveOn ? ["moveOn"] : [])];
+  const keys = [main, ...(!omitVisualSources && (multiple || visual) ? ["observationFeatures"] : []), ...(moveOn ? ["moveOn"] : [])];
   return [
     `【出力】${keys.join("・")} のキーだけを持つ JSON オブジェクトを1個返してください。補足や Markdown は付けません。`,
     multiple
       ? 'parts は公開する順に並べた {"item":番号,"text":"この扱いの公開文"} の配列です。items の全番号を一度ずつ使ってください。'
       : "text には自然な公開発話を書いてください。",
-    ...(visual ? [VISUAL_FEATURE_SOURCES_V23] : multiple ? ["observationFeatures は必ず空配列 [] にしてください。"] : []),
+    ...(omitVisualSources ? [] : visual ? [VISUAL_FEATURE_SOURCES_V23] : multiple ? ["observationFeatures は必ず空配列 [] にしてください。"] : []),
     ...(moveOn ? [`相手が話題を移すことを求めています。${main} には今の命名への回答（未確定ならその旨）を書き、移行は述べないでください。moveOn には移行への自然な受け止めだけを書いてください。moveOn は最後に公開されます。`] : []),
   ];
 }
@@ -141,7 +142,7 @@ export function generationActionPromptV23(input: ActionPrompt) {
         : []),
     ...(reconsidered ? ["直前の未公開稿に代わる応答です。新しく指定された計画で応じ、未確認の名前や対応を決定しないでください。"] : []),
     ...(continuing ? ["命名・対象の対応は未確定です。その点について会話を続け、合意したとは言わず以前の採用も変更しないでください。"] : []),
-    ...outputContract(multiple, visualDetail, humanLedTransition),
+    ...outputContract(multiple, visualDetail, humanLedTransition, input.omitVisualSources),
     PUBLIC_QUESTIONS_V23,
     JSON.stringify({ publicQuestions: input.publicQuestions }),
     JSON.stringify(plan),
