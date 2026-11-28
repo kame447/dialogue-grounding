@@ -1,6 +1,7 @@
 // The rotation-memory bundle as the participant Worker reads it. The bundle is compiled into the deploy: nothing here is
 // configuration, and no setting turns it off. A new reception pins this bundle at approval; a trial reads it once at its start.
 import { trialStimulusV2 } from '../../../dialogue-model/runtime/stimuli/scatter-v2.mjs';
+import { projectOwnRotationMemory, rotationMemoryPin } from '../../../dialogue-model/runtime/stimuli/rotation-memory.ts';
 import type { OwnRotationMemory } from '../../../dialogue-model/runtime/stimuli/rotation-memory-shape.ts';
 import type { ParticipantPlanSettings } from '../../../dialogue-model/runtime/v2/reception.ts';
 import type { RotationMemoryPin } from '../../../dialogue-model/runtime/v2/rotation-memory-pin.ts';
@@ -13,8 +14,7 @@ export type RotationMemorySource = {
   project(input: { figureKey: string; rotation: number }): OwnRotationMemory | undefined;
 };
 
-// Wired to stimuli/rotation-memory.ts when the bundle lands; until then there is no source and receptions keep the earlier path.
-let current: RotationMemorySource | undefined;
+let current: RotationMemorySource | undefined = { pin: rotationMemoryPin, project: projectOwnRotationMemory };
 export const rotationMemorySource = (): RotationMemorySource | undefined => current;
 /** Test seam only. Production code never calls it. Returns the previous source so a test can restore it. */
 export function overrideRotationMemorySource(next: RotationMemorySource | undefined): RotationMemorySource | undefined {

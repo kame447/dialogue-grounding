@@ -1,6 +1,7 @@
 import { literalSpan } from "../judgment/public-evidence.mjs";
 import type { ObservationMemo } from "../observation/contract.ts";
 import { describePart } from "../observation/part-consumers.ts";
+import { rotationSourceValue } from "../stimuli/rotation-memory-shape.ts";
 
 export type VisualFeatureSource = { figureId: string; path: (string | number)[] };
 export type ExtractedVisualFeature = { source: VisualFeatureSource; quote: string };
@@ -17,6 +18,8 @@ function sourceValue(memo: ObservationMemo, source: VisualFeatureSource): string
   if (!figure) return;
   const { path } = source;
   const [section, entry, field, item] = path;
+  // The pre-made rotation memory: ["rotation", ...path inside the projection], e.g. ["rotation","turned",1,"parts","P1",0,"noun"].
+  if (section === "rotation" && path.length > 1) return figure.rotation ? rotationSourceValue(figure.rotation, path.slice(1)) : undefined;
   if (section === "parts" && entry === "descriptions" && path.length === 3 && index(field)) {
     try { return describePart((figure as typeof figure & { parts?: unknown }).parts, field); }
     catch { return; }
