@@ -60,7 +60,8 @@ test('S0 独立性: parity-verify/ は runtime の rotation 系 module を値と
     // import … from '…'・export … from '…'・import('…')。type だけの import は消えるので数えない。
     const statements = [...text.matchAll(/^(?:import|export)\s+(type\s+)?[^;]*?from\s+['"]([^'"]+)['"]/gmu)].map(m => ({ typeOnly: m[1] !== undefined, target: m[2] }))
       .concat([...text.matchAll(/\bimport\(\s*['"]([^'"]+)['"]\s*\)/gu)].map(m => ({ typeOnly: false, target: m[1] })));
-    for (const { typeOnly, target } of statements) if (!typeOnly && FORBIDDEN_IMPORT.test(target)) offenders.push(`${file.slice(root.length)} → ${target}`);
+    // 検証器の中の file（./…）は S4 自身の写し（例: rotation-memory-records.ts）なので数えない。検証器の外（../…）の runtime の rotation 系だけが対象。
+    for (const { typeOnly, target } of statements) if (!typeOnly && target.startsWith('../') && FORBIDDEN_IMPORT.test(target)) offenders.push(`${file.slice(root.length)} → ${target}`);
   }
   assert.deepEqual(offenders, [], 'S4 の写しが runtime の実装を import している（独立の写しでない）');
 });
