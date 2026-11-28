@@ -72,13 +72,15 @@ function trial(completed = false) {
 async function ui(initial = null, handler) {
   const { root, e } = makeDOM();
   let state = { trial: initial }, timerId = 0;
-  const calls = [], timers = new Map();
+  const calls = [], timers = new Map(), delays = new Map(), frames = new Map();
   const storage = new Map();
   runInNewContext(script, {
     sessionStorage: { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: (key) => storage.delete(key) },
     document: { getElementById: (id) => e[id], createElement: (tag) => new Element(tag), createElementNS: (_, tag) => new Element(tag) },
-    setTimeout: (callback) => { timers.set(++timerId, callback); return timerId; },
-    clearTimeout: (id) => timers.delete(id),
+    setTimeout: (callback, delay = 0) => { timers.set(++timerId, callback); delays.set(timerId, delay); return timerId; },
+    clearTimeout: (id) => { timers.delete(id); delays.delete(id); },
+    requestAnimationFrame: (callback) => { frames.set(++timerId, callback); return timerId; },
+    cancelAnimationFrame: (id) => frames.delete(id),
     fetch: async (path, options) => {
       const body = options?.body ? JSON.parse(options.body) : undefined;
       calls.push({ path, method: options?.method ?? "GET", body });
@@ -91,11 +93,17 @@ async function ui(initial = null, handler) {
     },
   });
   await tick();
-  return { root, e, calls, poll: async () => {
-    const callbacks = [...timers.values()]; timers.clear();
-    for (const callback of callbacks) callback();
-    await tick();
-  } };
+  const run = async (callbacks) => { for (const callback of callbacks) callback(); await tick(); };
+  return { root, e, calls, frames,
+    timersAt: (delay) => [...timers].filter(([id]) => delays.get(id) === delay).map(([, callback]) => callback),
+    frame: async () => { const callbacks = [...frames.values()]; frames.clear(); await run(callbacks); },
+    runTimers: async (delay) => {
+      const callbacks = [];
+      for (const [id, callback] of timers) if (delays.get(id) === delay) { callbacks.push(callback); timers.delete(id); delays.delete(id); }
+      await run(callbacks);
+    },
+    poll: async () => { const callbacks = [...timers.values()]; timers.clear(); delays.clear(); await run(callbacks); },
+  };
 }
 const starts = (calls) => calls.filter((call) => call.path === "/api/start");
 const visibleText = (node) => node.hidden || (["dialog", "head"].includes(node.tagName) && !node.open) ? "" :
@@ -228,3 +236,130 @@ for (const [path, fire] of actions) {
     assert.doesNotMatch(e.history.textContent, /送ろうとした下書き/u, "the draft is not a message in the new trial");
   });
 }
+
+
+const scriptedTrial = (id = "scripted-trial") => ({ ...trial(), sessionId: id, openingMode: "scripted_v1",
+  events: [{ id: id + "-opening", speaker: "ai", text: "どれから話しましょうか？", nonReferential: true }] });
+const typingShown = (e) => e.history.children.at(-1)?.className === "ai typing-message";
+
+test("a new start shows the scene and the usual dots, then the saved opening one second after paint", async () => {
+  const x = await ui(null, ({ path, setState }) => {
+    if (path === "/api/start") setState({ trial: scriptedTrial() });
+  });
+  x.e["start-trial"].fire("click"); x.e["start-trial"].fire("click"); await tick();
+  assert.equal(starts(x.calls).length, 1);
+  assert.equal(x.e.trial.hidden, false);
+  assert.equal(x.e["conversation-stage"].hidden, false);
+  assert.ok(x.e.board.children.length);
+  assert.ok(typingShown(x.e));
+  assert.doesNotMatch(x.e.history.textContent, /どれから話しましょうか/u);
+  assert.equal(x.e.utterance.disabled, false, "the participant can already write a draft");
+  assert.equal(x.e["send-message"].disabled, true);
+  assert.equal(x.e["finish-conversation"].disabled, true);
+  x.e.utterance.value = "上の形から話したいです"; x.e.chat.fire("submit");
+  x.e["finish-conversation"].fire("click");
+  assert.equal(x.calls.some(({ path }) => path === "/api/message"), false);
+  assert.equal(x.e["conversation-stage"].hidden, false);
+  assert.equal(x.timersAt(1000).length, 0, "network completion alone must not start the display countdown");
+  await x.frame();
+  assert.equal(x.timersAt(1000).length, 0, "allow the first rendered frame to paint");
+  await x.frame();
+  assert.equal(x.timersAt(1000).length, 1);
+  assert.ok(typingShown(x.e));
+  await x.runTimers(1000);
+  assert.equal(typingShown(x.e), false);
+  assert.match(x.e.history.textContent, /どれから話しましょうか/u);
+  assert.equal(x.e.history.children.length, 1);
+  assert.equal(x.e["send-message"].disabled, false);
+  assert.equal(x.e["finish-conversation"].disabled, false);
+  assert.equal(x.e.utterance.value, "上の形から話したいです");
+  await x.poll(); await x.frame();
+  assert.equal(x.e.history.children.length, 1, "polling neither duplicates nor hides the greeting again");
+  assert.equal(x.timersAt(1000).length, 0);
+});
+
+test("reloading an existing scripted opening shows its saved history immediately", async () => {
+  const x = await ui(scriptedTrial());
+  assert.match(x.e.history.textContent, /どれから話しましょうか/u);
+  assert.equal(typingShown(x.e), false);
+  assert.equal(x.e["send-message"].disabled, false);
+  assert.equal(x.frames.size, 0);
+  assert.equal(x.timersAt(1000).length, 0);
+  assert.equal(starts(x.calls).length, 0);
+});
+
+test("a trial switch cancels the opening timer and ignores an already dispatched callback", async () => {
+  let serverTrial = null;
+  const x = await ui(null, ({ path, setState }) => {
+    if (path === "/api/start") { serverTrial = scriptedTrial(); setState({ trial: serverTrial }); }
+    if (path === "/api/state") return { body: { trial: serverTrial } };
+  });
+  x.e["start-trial"].fire("click"); await tick(); await x.frame(); await x.frame();
+  const stale = x.timersAt(1000)[0];
+  assert.equal(typeof stale, "function");
+  serverTrial = { ...trial(), sessionId: "different-trial", events: [{ id: "different-opening", speaker: "ai", text: "別の試行の会話" }] };
+  await x.runTimers(2000);
+  assert.match(x.e.history.textContent, /別の試行の会話/u);
+  assert.equal(x.timersAt(1000).length, 0);
+  stale(); await tick();
+  assert.match(x.e.history.textContent, /別の試行の会話/u);
+  assert.doesNotMatch(x.e.history.textContent, /どれから話しましょうか/u);
+  assert.equal(typingShown(x.e), false);
+  assert.equal(x.e["send-message"].disabled, false);
+});
+
+test("a failed start creates no presentation timer; an explicit retry presents the opening once", async () => {
+  let fail = true;
+  const x = await ui(null, ({ path, setState }) => {
+    if (path !== "/api/start") return;
+    if (fail) return { status: 409, body: { error: "trial_unavailable" } };
+    setState({ trial: scriptedTrial() });
+  });
+  x.e["start-trial"].fire("click"); await tick();
+  assert.equal(x.frames.size, 0);
+  assert.equal(x.timersAt(1000).length, 0);
+  fail = false; x.e["start-trial"].fire("click"); await tick();
+  assert.ok(typingShown(x.e));
+  await x.frame(); await x.frame(); await x.runTimers(1000);
+  assert.equal(x.e.history.children.length, 1);
+  assert.equal(typingShown(x.e), false);
+  assert.equal(starts(x.calls).length, 2);
+});
+
+
+test("a legacy generated opening is displayed immediately even after an explicit start", async () => {
+  const x = await ui(null, ({ path, setState }) => {
+    if (path === "/api/start") setState({ trial: trial() });
+  });
+  x.e["start-trial"].fire("click"); await tick();
+  assert.match(x.e.history.textContent, /公開された会話/u);
+  assert.equal(typingShown(x.e), false);
+  assert.equal(x.e["send-message"].disabled, false);
+  assert.equal(x.frames.size, 0);
+  assert.equal(x.timersAt(1000).length, 0);
+});
+
+test("a state poll can reveal a newly started trial before its POST returns without replaying the opening", async () => {
+  const held = gate();
+  let state = { trial: null, reception: { status: "ready", revision: 1 } };
+  const x = await ui(null, async ({ path }) => {
+    if (path === "/api/start") {
+      state = { trial: scriptedTrial(), reception: { status: "in_progress", revision: 2 } };
+      await held.wait;
+      return { body: state };
+    }
+    if (["/api/state", "/api/reception"].includes(path)) return { body: state };
+  });
+  x.e["start-trial"].fire("click"); await tick();
+  await x.runTimers(5000);
+  assert.equal(x.e.trial.hidden, false);
+  assert.ok(typingShown(x.e));
+  assert.doesNotMatch(x.e.history.textContent, /どれから話しましょうか/u);
+  await x.frame(); await x.frame(); await x.runTimers(1000);
+  assert.match(x.e.history.textContent, /どれから話しましょうか/u);
+  held.release(); await tick(); await x.frame();
+  assert.equal(x.e.history.children.length, 1);
+  assert.equal(typingShown(x.e), false);
+  assert.equal(x.timersAt(1000).length, 0);
+  assert.equal(x.e["send-message"].disabled, false);
+});

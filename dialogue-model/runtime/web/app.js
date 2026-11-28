@@ -26,6 +26,8 @@ let localStage = "chat";
 let reviewStage = null;
 let messageSequence = 0;
 let typingTimer;
+let openingStart = null;
+let openingDisplay = null;
 let activitySignature = "";
 let activitySince = 0;
 let chatStalled = false;
@@ -59,6 +61,7 @@ const sessionHeaders = (sessionId) => sessionId ? { "X-Tab-Session": sessionId }
 const CHAT_STALL_MS = 60000;
 const MESSAGE_ACK_MS = 20000;
 const STATE_REFRESH_MS = 10000;
+const OPENING_DISPLAY_MS = 1000;
 const newClientId = () => globalThis.crypto?.randomUUID?.() ??
   `chat-${Date.now().toString(36)}-${++messageSequence}-${Math.random().toString(36).slice(2, 12)}`;
 const draftKey = "joint-naming-v2-draft";
@@ -151,7 +154,7 @@ const resultsUnlocked = () => resultsReady() && current?.resultLocked !== true &
 const participantStage = () => resolveStage({ localStage, reviewStage, submitted: submitted(), completed: trialCompleted(), survey: surveyAvailability() });
 const chatOpen = () => dialogueOpen() && participantStage() === "chat";
 const canEditComposer = () => chatOpen() && !reviewing && !showingIncompleteTrial;
-const canSendMessage = () => canEditComposer() && !working && !recoveryPending();
+const canSendMessage = () => canEditComposer() && !working && !recoveryPending() && !openingPending();
 const aiThinking = () => current?.aiStatus === "thinking" || serverBusy;
 function svgNode(tag, attributes = {}) {
   const node = document.createElementNS(SVG, tag);
@@ -165,6 +168,7 @@ function closeDialog(id, restore = true) {
   if (restore) (id === "name-dialog" ? selectedTarget : $("review-names"))?.focus({ preventScroll: true });
 }
 function resetLocal() {
+  clearOpeningDisplay();
   closeDialog("name-dialog", false);
   closeDialog("confirm-dialog", false);
   localStage = "chat"; reviewStage = null; resetSurvey();
@@ -352,7 +356,7 @@ function stageFocusTarget(stage) {
     chatOpen() ? $("utterance") : $("history");
 }
 function changeStage(stage) {
-  if (!current || working) return;
+  if (!current || working || openingPending()) return;
   if (submitted()) {
     // Review navigation never changes the submission; the questionnaire draft
     // lives outside the stage and survives every switch.
@@ -368,6 +372,41 @@ function eventsFor(trial) {
   return trial?.events ?? (trial?.publicHistory ?? []).map((item, i) => ({ id: i, speaker: item.role === "assistant" ? "ai" : "human", text: item.content }));
 }
 const events = () => eventsFor(current);
+const openingPending = () => Boolean(openingDisplay && openingDisplay.recordId === trialIdentity(current) && !reviewing);
+const visibleEvents = () => openingPending() ? events().slice(1) : events();
+function clearOpeningDisplay() {
+  if (!openingDisplay) return;
+  clearTimeout(openingDisplay.timer);
+  globalThis.cancelAnimationFrame?.(openingDisplay.frame);
+  openingDisplay = null;
+}
+function prepareOpeningDisplay() {
+  if (openingDisplay && (!dialogueOpen() || reviewing || events().length !== 1 || events()[0]?.id !== openingDisplay.eventId)) clearOpeningDisplay();
+  if (!openingStart || reviewing || openingStart.sessionId !== requestSession() || !current || trialIdentity(current) === openingStart.previousTrialId) return;
+  openingStart = null;
+  const first = events()[0];
+  if (current.openingMode === "scripted_v1" && dialogueOpen() && events().length === 1 && first?.speaker === "ai") {
+    openingDisplay = { recordId: trialIdentity(current), eventId: first.id, timer: null, frame: null, scheduled: false };
+  }
+}
+function scheduleOpeningDisplay() {
+  const display = openingDisplay;
+  if (!display || display.scheduled) return;
+  display.scheduled = true;
+  const reveal = () => {
+    if (openingDisplay !== display || trialIdentity(current) !== display.recordId) return;
+    clearOpeningDisplay(); renderHistory(); setControls();
+  };
+  const countdown = () => {
+    if (openingDisplay === display) display.timer = setTimeout(reveal, OPENING_DISPLAY_MS);
+  };
+  // Start the brief dots after the new scene has had a frame to paint.
+  if (typeof globalThis.requestAnimationFrame === "function") {
+    display.frame = globalThis.requestAnimationFrame(() => {
+      if (openingDisplay === display) display.frame = globalThis.requestAnimationFrame(countdown);
+    });
+  } else countdown();
+}
 function reconciles(item, event) {
   if (event.speaker !== "human") return false;
   // clientId works before the POST acknowledgement; eventId supports receipts
@@ -379,7 +418,7 @@ function reconciles(item, event) {
 // bottom and older ones are pushed up. A reader who scrolled up is never moved;
 // a pill offers the jump instead. Only explicit actions resume following.
 const AT_BOTTOM_PX = 40;
-const messageCount = () => events().length + pending.length;
+const messageCount = () => visibleEvents().length + pending.length;
 function updateFollowPill() {
   if (followHistory) seenMessages = messageCount();
   $("new-messages").hidden = followHistory || messageCount() <= seenMessages || participantStage() !== "chat";
@@ -444,7 +483,7 @@ function renderProgress() {
     else if (!dialogueFailed() && !submissionFailed()) typingTimer = setTimeout(renderProgress, remaining);
   }
   const stopped = progressStopped();
-  const showDots = chatWaiting() && !failed && !stopped;
+  const showDots = (chatWaiting() || openingPending()) && !failed && !stopped;
   renderTyping(showDots);
   $("chat-recovery").hidden = !stopped;
   const recovery = current?.dialogueRecovery;
@@ -511,12 +550,13 @@ function renderHistory() {
   const scrollTop = log.scrollTop;
   const publicEvents = events();
   pending = pending.filter((item) => !publicEvents.some((event) => reconciles(item, event)));
-  const signature = JSON.stringify([publicEvents, pending.map(({ text, status, clientId }) => ({ text, status, clientId }))]);
+  const shownEvents = visibleEvents();
+  const signature = JSON.stringify([shownEvents, pending.map(({ text, status, clientId }) => ({ text, status, clientId }))]);
   if (log.historySignature !== signature) {
     log.historySignature = signature;
     log.replaceChildren();
     // Keep the server's append-only order; unacknowledged local drafts follow.
-    const items = [...publicEvents, ...pending.map((item) => ({ ...item, speaker: "human", local: item }))];
+    const items = [...shownEvents, ...pending.map((item) => ({ ...item, speaker: "human", local: item }))];
     for (const item of items) {
       const li = document.createElement("li");
       li.className = item.speaker === "ai" ? "ai" : "human";
@@ -588,6 +628,7 @@ function render(state) {
     $("notice").textContent = participantMessage("trial_changed");
   }
   current = trial; serverBusy = Boolean(state.busy);
+  prepareOpeningDisplay();
   // Refresh the watchdog only when a server response confirms ongoing work.
   // Repainting the UI must not renew a report received before polling stopped.
   if (state.busy === true && !chatDisconnected && !dialogueFailed() && !submissionFailed()) {
@@ -613,7 +654,7 @@ function render(state) {
   if (trialCompleted() && previousStage !== participantStage() && ["questionnaire", "results"].includes(participantStage())) stageFocusTarget(participantStage()).focus({ preventScroll: true });
   renderSurvey(); renderRecords();
   renderResults();
-  setControls(); scheduleRefresh();
+  setControls(); scheduleRefresh(); scheduleOpeningDisplay();
 }
 // Nothing of the result is put into the page while it is locked.
 function renderResults() {
@@ -631,7 +672,7 @@ function setControls() {
   $("history").querySelectorAll("button").forEach((node) => { node.disabled = working || sending || !chatOpen() || recoveryPending(); });
   $("utterance").disabled = !canEditComposer();
   $("send-message").disabled = !canSendMessage();
-  $("finish-conversation").disabled = working || sending || pending.some((item) => item.status === "queued") || !dialogueOpen() || recoveryPending() || !scene()?.shapes?.length;
+  $("finish-conversation").disabled = working || sending || pending.some((item) => item.status === "queued") || !dialogueOpen() || recoveryPending() || openingPending() || !scene()?.shapes?.length;
   $("back-to-chat").disabled = working;
   $("finish-conversation").hidden = submitted();
   $("chat").hidden = submitted();
@@ -639,7 +680,7 @@ function setControls() {
   $("names-title-text").textContent = submitted() ? "提出した名前" : "名前を決める";
   $("back-to-chat").textContent = submitted() ? "会話を見る" : "会話に戻る";
   $("names-help").textContent = submitted() ? "提出済みの名前です。変更はできません。図形を選ぶと拡大して確認できます。" : "会話で共有した名前を確認してください。図形を選ぶと修正できます。";
-  $("review-names").disabled = working || aiThinking() || sending || pending.some((item) => item.status === "queued") || !dialogueOpen() || !scene()?.shapes?.length;
+  $("review-names").disabled = working || aiThinking() || sending || pending.some((item) => item.status === "queued") || !dialogueOpen() || openingPending() || !scene()?.shapes?.length;
   $("confirm-submit").disabled = working || aiThinking() || sending || !dialogueOpen();
 }
 function scheduleRefresh() {
@@ -1352,7 +1393,11 @@ document.addEventListener?.("visibilitychange", () => {
 $("start-trial").addEventListener("click", () => {
   if (!canStart()) return;
   const expectation = reception ? { expectedReceptionRevision: reception.revision, ...(current ? { expectedRecordId: current.sessionId } : {}) } : {};
-  operate(() => api("/api/start", { version: 2, ...expectation }));
+  const attempt = { previousTrialId: trialIdentity(current), sessionId: requestSession() };
+  openingStart = attempt;
+  operate(() => api("/api/start", { version: 2, ...expectation })).finally(() => {
+    if (openingStart === attempt) openingStart = null;
+  });
 });
 // ---- Entry screen and tab-isolated sessions -------------------------------
 // A new tab starts here, never inside another participant's conversation. The
@@ -1418,6 +1463,7 @@ function renderEntry(sessions) {
 }
 // Forget the bound session and the screen of the previous participant.
 function leaveSession() {
+  openingStart = null;
   try { tabSession()?.clear(); } catch { /* The tab keeps no binding. */ }
   activeTabSessionId = null; reviewing = null; current = null; reception = null; startReady = false; preparing = false;
   generation++; stateEpoch++; clearTimeout(refreshTimer); clearTimeout(typingTimer);
