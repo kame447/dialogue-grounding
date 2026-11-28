@@ -1,3 +1,4 @@
+import { PART_OBSERVATION_INSTRUCTIONS, validateOwnParts, validatePartsForRegion } from "./parts.ts";
 import { isSupportedFigureCount } from '../stimuli/figure-bank.ts';
 import { INITIAL_OBSERVATION_STRUCTURED_V2, INITIAL_OBSERVATION_V2_INSTRUCTIONS,
   isInitialObservationGeneration, type InitialObservationGeneration } from './initial-observation-generation.ts';
@@ -25,7 +26,7 @@ export type ObservationClient = { complete(messages: ObservationMessage[], optio
   phase: string; timeoutMs: number; signal: AbortSignal;
 }): Promise<{ text: string }> };
 
-/** Bump when the persisted shape accepted by validateObservationMemo changes. */
+/** Legacy memo format; optional parts carry their own schema version and cache material. */
 export const OBSERVATION_MEMO_VERSION = 1;
 export { snapshotInput as snapshotObservationInput };
 
@@ -68,7 +69,11 @@ function snapshotInput(input: ObservationInput): ObservationInput {
   if (!image || !["image/png", "image/jpeg", "image/webp"].includes(image.mimeType) || typeof image.base64 !== "string" ||
       image.base64.length === 0 || image.base64.length > 14 * 1024 * 1024 - 64 || image.base64.length % 4 !== 0 ||
       !/^[A-Za-z0-9+/]+={0,2}$/u.test(image.base64)) fail("invalid_input");
-  return { ownImage: { mimeType: image.mimeType, base64: image.base64 }, ownAnchors };
+  let ownParts: ObservationInput["ownParts"];
+  if (Object.hasOwn(input, "ownParts")) {
+    try { ownParts = validateOwnParts(input.ownParts, ownAnchors); } catch { fail("invalid_input"); }
+  }
+  return { ownImage: { mimeType: image.mimeType, base64: image.base64 }, ownAnchors, ...(ownParts ? { ownParts } : {}) };
 }
 function initialFigure(v: unknown): v is Omit<ObservationMemo["figures"][number], "region" | "reobservations"> {
   return exact(v, ["id", "holistic", "analytic", "unknowns"]) && text(v.id, 160) && Array.isArray(v.holistic) &&
@@ -85,14 +90,25 @@ function reobservedFigure(v: unknown): v is ReobservedFigure {
 /** Strict restore/injection boundary; returns a detached copy, never a boolean.
  * Supplying anchors additionally checks every ID and pixel region against the current own image.
  */
-export function validateObservationMemo(value: unknown, { ownAnchors }: { ownAnchors?: readonly LocalOwnAnchor[] } = {}): ObservationMemo {
+export function validateObservationMemo(value: unknown, options: {
+  ownAnchors?: readonly LocalOwnAnchor[]; ownParts?: ObservationInput["ownParts"];
+} = {}): ObservationMemo {
+  const { ownAnchors, ownParts } = options;
   if (!exact(value, ["observedAt", "figures"]) || !timestamp(value.observedAt) || !Array.isArray(value.figures) ||
       !isSupportedFigureCount(value.figures.length)) fail("invalid_input");
   const own = ownAnchors === undefined ? null : anchors(ownAnchors);
   if (own && value.figures.length !== own.length) fail("invalid_input");
+  const hasParts = value.figures.some(f => f && Object.hasOwn(f, "parts"));
+  let expectedParts: ObservationInput["ownParts"];
+  if (Object.hasOwn(options, "ownParts")) {
+    if (hasParts !== (ownParts !== undefined) || ownParts !== undefined && !own) fail("invalid_input");
+    if (ownParts !== undefined) {
+      try { expectedParts = validateOwnParts(ownParts, own!); } catch { fail("invalid_input"); }
+    }
+  }
   const ids = new Set<string>();
   for (const f of value.figures) {
-    if (!exact(f, ["id", "region", "holistic", "analytic", "unknowns", "reobservations"]) ||
+    if (!exact(f, ["id", "region", "holistic", "analytic", "unknowns", "reobservations", ...(hasParts ? ["parts"] : [])]) ||
         !initialFigure({ id: f.id, holistic: f.holistic, analytic: f.analytic, unknowns: f.unknowns }) ||
         !text(f.id, 160) || ids.has(f.id) || !region(f.region) || !Array.isArray(f.reobservations) ||
         f.reobservations.length > OBSERVATION_LIMITS.reobservations) fail("invalid_input");
@@ -101,6 +117,13 @@ export function validateObservationMemo(value: unknown, { ownAnchors }: { ownAnc
       const a = own.find(a => a.id === f.id);
       const bbox = f.region;
       if (!a || !(["x", "y", "w", "h"] as const).every(k => a.bbox[k] === bbox[k])) fail("invalid_input");
+    }
+    if (hasParts) {
+      try {
+        const parts = validatePartsForRegion(f.parts, f.region);
+        const expected = expectedParts?.find(row => row.id === f.id)?.parts;
+        if (expectedParts && JSON.stringify(parts) !== JSON.stringify(expected)) fail("invalid_input");
+      } catch { fail("invalid_input"); }
     }
     let latest = value.observedAt;
     for (const r of f.reobservations) {
@@ -115,7 +138,7 @@ export function validateObservationMemo(value: unknown, { ownAnchors }: { ownAnc
 }
 function snapshotTargeted(input: ReobservationInput): ReobservationInput {
   const own = snapshotInput(input);
-  const memo = validateObservationMemo(input.memo, { ownAnchors: own.ownAnchors });
+  const memo = validateObservationMemo(input.memo, { ownAnchors: own.ownAnchors, ownParts: own.ownParts });
   if (!Array.isArray(input.figureIds) || input.figureIds.length < 1 || input.figureIds.length > OBSERVATION_LIMITS.figures ||
       ![...input.figureIds].every(id => own.ownAnchors.some(a => a.id === id)) || new Set(input.figureIds).size !== input.figureIds.length ||
       !issue(input.issue)) fail("invalid_input");
@@ -166,12 +189,17 @@ export function observationContextMessages(state: string): TextMessage[] {
 export function buildObservationMessages(input: ObservationInput): ObservationMessage[] {
   const own = snapshotInput(input);
   return [{ role: "system", content: observationInitialInstructions(own.ownAnchors.length) },
-    { role: "user", content: JSON.stringify({ ownAnchors: own.ownAnchors }) }, ...ownImageMessage(own.ownImage) as ImageMessage[]];
+    { role: "user", content: JSON.stringify({ ownAnchors: own.ownAnchors }) },
+    ...(own.ownParts ? [{ role: "user" as const, content: PART_OBSERVATION_INSTRUCTIONS },
+      ...observationContextMessages(JSON.stringify({ ownParts: own.ownParts }))] : []),
+    ...ownImageMessage(own.ownImage) as ImageMessage[]];
 }
 export function buildReobservationMessages(input: ReobservationInput): ObservationMessage[] {
   const own = snapshotTargeted(input);
   const ids = new Set(own.figureIds);
-  return [{ role: "system", content: OBSERVATION_TARGETED_INSTRUCTIONS }, ...observationContextMessages(JSON.stringify({
+  return [{ role: "system", content: OBSERVATION_TARGETED_INSTRUCTIONS },
+    ...(own.ownParts ? [{ role: "user" as const, content: PART_OBSERVATION_INSTRUCTIONS }] : []),
+    ...observationContextMessages(JSON.stringify({
     figureIds: own.figureIds, issue: own.issue, ownAnchors: own.ownAnchors.filter(a => ids.has(a.id)),
     figures: own.memo.figures.filter(f => ids.has(f.id)),
   })), ...ownImageMessage(own.ownImage) as ImageMessage[]];
@@ -186,7 +214,8 @@ export function parseInitialObservation(raw: unknown, input: ObservationInput, {
   const figures = value.figures;
   return validateObservationMemo({ observedAt, figures: own.ownAnchors.map(a => ({
     ...figures.find(f => f.id === a.id), region: { ...a.bbox }, reobservations: [],
-  })) }, { ownAnchors: own.ownAnchors });
+    ...(own.ownParts ? { parts: structuredClone(own.ownParts.find(row => row.id === a.id)!.parts) } : {}),
+  })) }, { ownAnchors: own.ownAnchors, ownParts: own.ownParts });
 }
 export function parseReobservation(raw: unknown, input: ReobservationInput, { observedAt }: { observedAt: string }): ReobservationResult {
   const own = snapshotTargeted(input);

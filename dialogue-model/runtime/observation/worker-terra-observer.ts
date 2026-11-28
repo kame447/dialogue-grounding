@@ -1,3 +1,4 @@
+import { PART_OBSERVATION_INSTRUCTIONS } from './parts.ts';
 import { responseText } from '../client.mjs';
 import {
   createLunaObserver, ObservationError, observationInitialInstructions,
@@ -41,18 +42,20 @@ function ownProjection(input: ObservationInput) {
     ownImage: own.ownImage,
     ownAnchors: [...own.ownAnchors].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
       .map(({ id, bbox: { x, y, w, h }, centroid }) => ({ id, bbox: { x, y, w, h }, centroid })),
+    ...(own.ownParts ? { ownParts: [...own.ownParts].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0) } : {}),
   };
 }
 
-function initialKey(terraModelId: string, boundJson: string, figureCount: number, generation?: InitialObservationGeneration) {
+function initialKey(terraModelId: string, boundJson: string, figureCount: number, generation?: InitialObservationGeneration, hasParts = false) {
   const fields = [SCHEMA, terraModelId, OBSERVATION_MEMO_VERSION, observationInitialInstructions(figureCount, generation), boundJson];
   if (generation) fields.push(generation);
+  if (hasParts) fields.push(PART_OBSERVATION_INSTRUCTIONS);
   return sha256(JSON.stringify(fields)).then(digest => SCHEMA + ':' + digest);
 }
 
 export function workerTerraInitialKey(pin: ParticipantModelPin, own: ObservationInput, generation?: InitialObservationGeneration) {
   const projected = ownProjection(own);
-  return initialKey(validateParticipantModelPin(pin).terraModelId, JSON.stringify(projected), projected.ownAnchors.length, generation);
+  return initialKey(validateParticipantModelPin(pin).terraModelId, JSON.stringify(projected), projected.ownAnchors.length, generation, !!projected.ownParts);
 }
 
 function checkAbort(options?: ObservationOptions): void {
@@ -125,7 +128,7 @@ export function createWorkerTerraObserver({ modelPin, own, visual, cache, timeou
         entry.key !== key || entry.modelId !== terraModelId || typeof entry.memoSha256 !== 'string') {
       throw new ObservationError('invalid_response');
     }
-    const memo = validateObservationMemo(entry.memo, { ownAnchors: bound.ownAnchors });
+    const memo = validateObservationMemo(entry.memo, { ownAnchors: bound.ownAnchors, ownParts: bound.ownParts });
     const text = JSON.stringify(memo);
     if (memo.figures.some(figure => figure.reobservations.length !== 0) || text.includes(bound.ownImage.base64) ||
         await sha256(text) !== entry.memoSha256) throw new ObservationError('invalid_response');
@@ -138,7 +141,7 @@ export function createWorkerTerraObserver({ modelPin, own, visual, cache, timeou
       checkOwn(input);
       if (!cache) return observer.observeAll(bound, options);
       try {
-        const key = await (keyPromise ??= initialKey(terraModelId, boundJson, bound.ownAnchors.length, initialObservationGeneration));
+        const key = await (keyPromise ??= initialKey(terraModelId, boundJson, bound.ownAnchors.length, initialObservationGeneration, !!bound.ownParts));
         const hit = await cache.read(key, options?.signal);
         checkAbort(options);
         if (hit !== null && hit !== undefined) {
