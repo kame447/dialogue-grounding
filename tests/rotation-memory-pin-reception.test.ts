@@ -224,7 +224,8 @@ test('a re-observation of a rotation-memory memo carries only the targeted figur
   const issue = { aspect: 'part' as const, question: '三角形の大きさは？', partnerConstrual: null };
   const messages = buildReobservationMessages({ ...own, memo, figureIds: [target.id], issue });
   const text = JSON.stringify(messages);
-  assert.ok(text.includes(target.id) && text.includes('shapeName'), 'the targeted figure brings its memory');
+  // The re-observation shows the nouns layer (one line per view) with its legend, not the full projection.
+  assert.ok(text.includes(target.id) && text.includes('rotationLegend') && text.includes('全体: '), 'the targeted figure brings its memory');
   assert.ok(!text.includes(other.id), 'no other figure of the board');
   assert.doesNotMatch(text, /"F\d+"|figureKey|bankVersion/u);
   const merged = mergeReobservation(memo, { observedAt: '2026-11-28T00:00:01.000Z', issue,
