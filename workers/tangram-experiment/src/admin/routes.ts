@@ -5,7 +5,7 @@
 import { checkAdmin, presentedToken } from "./auth.ts";
 import { RECEPTIONS_LIVE_JS } from './receptions-live.ts';
 import { LOG_LIVE_JS } from './log-live.ts';
-import { ADMIN_CSS, applyFilter, parseFilter, renderDetail, renderList, renderMessage, renderReceptions, renderEntry, renderSettings, renderExperimentPreview, renderFigures } from "./render.ts";
+import { ADMIN_CSS, applyFilter, parseFilter, renderDetail, renderList, renderMessage, renderReceptions, renderEntry, renderSettings, renderExperimentPreview, renderFigures, renderFigurePresets, renderFigurePresetEditor } from "./render.ts";
 import { FIGURE_SETS, FIGURE_BANK, isSupportedFigureCount } from '../../../../dialogue-model/runtime/stimuli/figure-bank.ts';
 import { OBJECT_ID, RECORD_ID } from "./summary.ts";
 import type { AdminSummary } from "./summary.ts";
@@ -13,7 +13,9 @@ import { isParticipantRole, participantRoleView } from "./participant-role.ts";
 import type { AdminRecordSummary, ParticipantRole, ParticipantRoleResult } from "./participant-role.ts";
 import type { LatencySummary } from "./latency.ts";
 import type { AuditEntry } from "./index-store.ts";
-import type { ProtocolFields, ReceptionAdminPort, ReceptionSettingsPort } from './reception-port.ts';
+import type { ProtocolFields, ProtocolFormFields, ProtocolFormInput, ReceptionAdminPort, ReceptionSettingsPort } from './reception-port.ts';
+import { isFigurePresetId } from './figure-presets.ts';
+import type { FigurePresetPort } from './figure-presets.ts';
 import type { PreparedObservationPoolStatus } from './prepared-observation-port.ts';
 import { trialTerminationExpectation } from './trial-termination.ts';
 import type { TrialTerminationExpectation, TrialTerminationResult } from './trial-termination.ts';
@@ -250,25 +252,31 @@ const SINGLE: Readonly<Record<string, readonly string[]>> = Object.freeze({ seed
 const FIGURE_KEYS = ['figureMode', 'figureSetPolicy', 'figureSetId', 'selectionSeed', 'figureIds', 'figureCount'];
 const BANK_IDS = new Set(FIGURE_BANK.map(f => f.id));
 /** The figure source and its allocation, both explicit. Inputs that belong to another mode are ignored; per_trial needs the seeded mode. */
-function figureFields(form: URLSearchParams): Pick<ProtocolFields, 'figureSelection' | 'figureSetPolicy'> | null {
+function figureFields(form: URLSearchParams): Pick<ProtocolFormFields, 'figureSelection' | 'figureSetPolicy'> | null {
   const mode = form.getAll('figureMode'), policy = form.getAll('figureSetPolicy');
   if (mode.length !== 1 || policy.length !== 1 || (policy[0] !== 'shared' && policy[0] !== 'per_trial')) return null;
-  let figureSelection: ProtocolFields['figureSelection'];
+  let figureSelection: ProtocolFormFields['figureSelection'];
   if (mode[0] === 'preset') {
     const set = form.getAll('figureSetId');
-    if (set.length !== 1 || !Object.hasOwn(FIGURE_SETS, set[0])) return null;
-    figureSelection = { mode: 'preset', setId: set[0] };
+    if (set.length !== 1) return null;
+    if (Object.hasOwn(FIGURE_SETS, set[0])) figureSelection = { mode: 'preset', setId: set[0] };
+    else {
+      const [id, rawRevision, ...rest] = set[0].split(':');
+      const revision = unsigned(rawRevision ?? null);
+      if (!isFigurePresetId(id) || revision === null || revision < 1 || rest.length) return null;
+      figureSelection = { mode: 'managed_preset', id, revision };
+    }
   } else if (mode[0] === 'seeded_random') {
     const seeds = form.getAll('selectionSeed'), counts = form.getAll('figureCount');
-    if (seeds.length > 1 || counts.length > 1 || counts.some(value => value !== '4' && value !== '6')) return null;
-    const figureCount = counts.length ? Number(counts[0]) as 4 | 6 : undefined;
-    const size = figureCount === undefined ? {} : { figureCount };
+    const rawCount = counts[0] ?? '3';
+    const figureCount = Number(rawCount);
+    if (seeds.length > 1 || counts.length > 1 || !isSupportedFigureCount(figureCount) || String(figureCount) !== rawCount) return null;
     const raw = (seeds[0] ?? '').trim();
-    if (raw === '') figureSelection = { mode: 'seeded_random', selectionSeed: null, ...size };
+    if (raw === '') figureSelection = { mode: 'seeded_random', selectionSeed: null, figureCount };
     else {
       const seed = /^-?\d{1,16}$/u.test(raw) ? Number(raw) : NaN;
       if (!Number.isSafeInteger(seed)) return null;
-      figureSelection = { mode: 'seeded_random', selectionSeed: seed, ...size };
+      figureSelection = { mode: 'seeded_random', selectionSeed: seed, figureCount };
     }
   } else if (mode[0] === 'custom') {
     const ids = form.getAll('figureIds');
@@ -278,8 +286,8 @@ function figureFields(form: URLSearchParams): Pick<ProtocolFields, 'figureSelect
   if (policy[0] === 'per_trial' && figureSelection.mode !== 'seeded_random') return null;
   return { figureSelection, figureSetPolicy: policy[0] };
 }
-/** Every field must be selected explicitly; nothing missing is filled with a default. */
-function protocolForm(form: URLSearchParams): { expectedRevision: number; fields: ProtocolFields } | null {
+/** Require the protocol choices. The random figure count defaults to three within its source. */
+function protocolForm(form: URLSearchParams): ProtocolFormInput | null {
   const keys = [...new Set(form.keys())];
   if (keys.some(k => k !== 'orders' && k !== 'expectedRevision' && !Object.hasOwn(SINGLE, k) && !FIGURE_KEYS.includes(k))) return null;
   if (['expectedRevision', ...Object.keys(SINGLE)].some(k => form.getAll(k).length !== 1)) return null;
@@ -315,6 +323,36 @@ async function settingsMutation(request: Request, port: ReceptionSettingsPort, k
     case 'protocol_unconfigured': return respond(409, renderMessage(NOT_SAVED, 'プロトコルを保存してから、受付を使ってください。'));
     default: return respond(503, renderMessage(NOT_SAVED, '設定を保存できませんでした。'));
   }
+}
+
+async function figurePresetRoute(request: Request, port: FigurePresetPort, segment?: string, hide = false): Promise<Response> {
+  const location = '/admin/figure-presets';
+  const back = { href: location, label: 'プリセット一覧へ' };
+  const fail = (status: number, message: string) => respond(status, renderMessage('図形プリセット', message, back));
+  const id = segment === 'new' ? null : segment;
+  if (id !== undefined && id !== null && !isFigurePresetId(id) || hide && !id) return notFound();
+  try {
+    if (request.method !== 'POST') {
+      if (hide) return notFound();
+      if (id === undefined) return respond(200, renderFigurePresets(await port.list()));
+      if (id === null) return respond(200, renderFigurePresetEditor(null));
+      const preset = await port.read(id);
+      return preset ? respond(200, renderFigurePresetEditor(preset)) : notFound();
+    }
+    if (id === undefined) return notFound();
+    const form = await receptionForm(request);
+    const expectedRevision = form && unsigned(form.get('expectedRevision'));
+    const keys = hide ? ['expectedRevision'] : ['expectedRevision', 'name', 'figureIds'];
+    if (!form || expectedRevision === null || form.getAll('expectedRevision').length !== 1 ||
+      [...form.keys()].some(key => !keys.includes(key)) || !hide && form.getAll('name').length !== 1) {
+      return fail(400, '名前と図形3個を確認してください。');
+    }
+    const result = await port.save({ id, expectedRevision, ...(hide ? { hide: true } :
+      { name: form.get('name')!, figureIds: form.getAll('figureIds') }) });
+    if (result.ok) return plain(303, '', { Location: location });
+    if (result.error === 'conflict') return fail(409, 'プリセットが変わりました。一覧から開き直してください。');
+    return fail(400, '名前と図形3個を確認してください。');
+  } catch { return fail(503, 'プリセットの状況を確認できませんでした。'); }
 }
 
 const PREPARATION_ERRORS = new Set(['configuration_unavailable', 'configuration_changed', 'preparation_failed', 'preparation_interrupted', 'unavailable']);
@@ -358,12 +396,14 @@ export async function handleAdmin(request: Request, deps: AdminDeps): Promise<Re
   const receptionPath = request.method === 'POST' && deps.receptions ? url.pathname.match(/^\/admin\/reception\/([^/]+)\/(approve|cancel|force-end)$/) : null;
   const rolePath = url.pathname.match(/^\/admin\/(record|reception)\/([^/]+)\/participant-role$/u);
   const settingsPath = request.method === 'POST' && deps.receptionSettings ? url.pathname.match(/^\/admin\/reception-settings\/(protocol|mode|post-generation-check)$/) : null;
+  const presetPath = url.pathname.match(/^\/admin\/figure-presets(?:\/([^/]+)(\/hide)?)?$/u);
+  if (presetPath && !deps.receptionSettings?.figurePresets) return notFound();
   const observationsPath = url.pathname === '/admin/reception-settings/observations';
   if (observationsPath && !deps.preparedObservations) return notFound();
   if (!deps.receptions && (url.pathname === '/admin/receptions' || url.pathname === '/admin/entry' || url.pathname === '/admin/receptions.js')) return notFound();
   if (!deps.receptions?.version && url.pathname === '/admin/receptions/version') return notFound();
   if (!deps.receptionSettings && url.pathname === '/admin/reception-settings') return notFound();
-  if (request.method === "POST" ? !deletePath && !forceEndPath && !nextPath && !receptionPath && !settingsPath && !observationsPath && !rolePath : request.method !== "GET" && request.method !== "HEAD") return notFound();
+  if (request.method === "POST" ? !deletePath && !forceEndPath && !nextPath && !receptionPath && !settingsPath && !observationsPath && !rolePath && !presetPath : request.method !== "GET" && request.method !== "HEAD") return notFound();
   const header = request.headers.get("Authorization");
   // Every credentialed attempt (right or wrong) counts, so guessing is capped per visitor.
   if (presentedToken(header) !== null && !(await deps.limiter.limit({ key: visitorKey(request) })).success) {
@@ -400,11 +440,16 @@ export async function handleAdmin(request: Request, deps: AdminDeps): Promise<Re
     if (!sameOrigin(request, url)) return plain(403, 'Forbidden');
     return settingsMutation(request, deps.receptionSettings!, settingsPath[1]);
   }
+  if (presetPath) {
+    if (request.method === 'POST' && !sameOrigin(request, url)) return plain(403, 'Forbidden');
+    return figurePresetRoute(request, deps.receptionSettings!.figurePresets!, presetPath[1], Boolean(presetPath[2]));
+  }
   if (deps.receptionSettings && url.pathname === '/admin/reception-settings') {
     try {
-      const [view, observations] = await Promise.all([deps.receptionSettings.read(),
-        deps.preparedObservations ? deps.preparedObservations.status().then(preparedObservationStatus).catch(() => null) : undefined]);
-      return respond(200, renderSettings(view, observations));
+      const [view, observations, presets] = await Promise.all([deps.receptionSettings.read(),
+        deps.preparedObservations ? deps.preparedObservations.status().then(preparedObservationStatus).catch(() => null) : undefined,
+        deps.receptionSettings.figurePresets?.list()]);
+      return respond(200, renderSettings(view, observations, presets));
     }
     catch { return respond(503, renderMessage('受付の設定', '設定を読み込めませんでした。')); }
   }

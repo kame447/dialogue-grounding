@@ -12,6 +12,9 @@
 import { ReceptionError, validateReceptionProtocolV2, validateReceptionProtocolV3, receptionProtocolSha256 } from '../../../../dialogue-model/runtime/v2/reception.ts';
 import type { ReceptionProtocolV2, ReceptionProtocolV3 } from '../../../../dialogue-model/runtime/v2/reception.ts';
 import { isPostGenerationCheck, type PostGenerationCheck } from '../../../../dialogue-model/runtime/v2/deferred-ai-extraction.ts';
+import { FIGURE_SET_SIZE } from '../../../../dialogue-model/runtime/stimuli/figure-bank.ts';
+import { readFigurePreset } from './figure-presets.ts';
+import type { ProtocolFigureSelection, ProtocolFormInput } from './reception-port.ts';
 
 export type SettingsStorage = {
   get<T = unknown>(key: string): Promise<T | undefined>;
@@ -148,6 +151,39 @@ export async function saveProtocol(storage: SettingsStorage, input: { expectedRe
   await storage.put({ [PROTOCOL]: { revision, protocolId: protocol.protocolId, sha256, savedAt },
     [revKey(PROTOCOL_REV, revision)]: { revision, sha256, savedAt, protocol } });
   return { ok: true, revision };
+}
+
+function sameFigureSelection(a: ProtocolFigureSelection, b: ProtocolFigureSelection): boolean {
+  if (a.mode === 'seeded_random' && b.mode === 'seeded_random') {
+    return a.selectionSeed === b.selectionSeed && (a.figureCount ?? FIGURE_SET_SIZE) === (b.figureCount ?? FIGURE_SET_SIZE);
+  }
+  if (a.mode === 'preset' && b.mode === 'preset') return a.setId === b.setId;
+  return a.mode === 'custom' && b.mode === 'custom' &&
+    a.figureIds.length === b.figureIds.length && a.figureIds.every(id => b.figureIds.includes(id));
+}
+
+/** All reads and the write run inside one transaction. Only the frozen IDs enter the saved protocol. */
+export async function saveProtocolFromForm(storage: SettingsStorage, input: ProtocolFormInput, now: number, newId: () => string): Promise<SaveResult> {
+  const { expectedRevision, fields } = input;
+  const selection = fields.figureSelection;
+  let figureSelection: ProtocolFigureSelection;
+  if (selection.mode === 'managed_preset') {
+    if (fields.figureSetPolicy !== 'shared') return { ok: false, error: 'invalid' };
+    const preset = await readFigurePreset(storage, selection.id);
+    if (!preset || preset.revision !== selection.revision) return { ok: false, error: 'conflict' };
+    figureSelection = { mode: 'custom', figureIds: preset.figureIds };
+  } else if ((selection.mode === 'custom' && selection.figureIds.length === 3) ||
+    (selection.mode === 'seeded_random' && selection.figureCount === 3)) {
+    figureSelection = selection;
+  } else {
+    const { protocol } = await readSettings(storage);
+    if (expectedRevision !== (protocol?.revision ?? 0)) return { ok: false, error: 'conflict' };
+    const current = protocol?.protocol;
+    if (current?.schemaVersion !== 'reception_protocol_v3' || current.figureSetPolicy !== fields.figureSetPolicy ||
+      !sameFigureSelection(current.figureSelection, selection)) return { ok: false, error: 'invalid' };
+    figureSelection = current.figureSelection;
+  }
+  return saveProtocol(storage, { expectedRevision, fields: { ...fields, figureSelection } }, now, newId);
 }
 
 export async function saveMode(storage: SettingsStorage, input: { expectedRevision: unknown; value: unknown }, now: number): Promise<SaveResult> {

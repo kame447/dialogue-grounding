@@ -7,7 +7,7 @@ import { PIECES } from './pieces.mjs';
 export const FIGURE_BANK_VERSION = 'tangram-bank-v1';
 export const LEGACY_FIGURE_SET_ID = 'legacy-v1';
 export const PILOT_FIGURE_SET_ID = 'pilot-four-v1';
-export const SUPPORTED_FIGURE_COUNTS = Object.freeze([4, 6] as const);
+export const SUPPORTED_FIGURE_COUNTS = Object.freeze([3, 4, 6] as const);
 export type FigureCount = typeof SUPPORTED_FIGURE_COUNTS[number];
 export const isSupportedFigureCount = (value: unknown): value is FigureCount => SUPPORTED_FIGURE_COUNTS.some(count => count === value);
 
@@ -89,7 +89,7 @@ export type ResolvedFigureSelection = {
 const sha256 = (text: string) => createHash('sha256').update(text).digest();
 
 function validateFigureIds(value: unknown): string[] {
-  if (!Array.isArray(value) || !isSupportedFigureCount(value.length)) throw new TypeError('figureIds must list four or six figures');
+  if (!Array.isArray(value) || !isSupportedFigureCount(value.length)) throw new TypeError('figureIds must list three, four or six figures');
   if (!value.every(id => typeof id === 'string' && bankIds.has(id))) throw new TypeError('unknown figure id');
   if (new Set(value).size !== value.length) throw new TypeError('figureIds must not repeat');
   return [...value];
@@ -119,7 +119,7 @@ function expectedSelection(mode: unknown, spec: Record<string, unknown>): Resolv
     const seed = spec.selectionSeed;
     if (typeof seed !== 'number' || !Number.isSafeInteger(seed)) throw new TypeError('selectionSeed must be a safe integer');
     const figureCount = Object.hasOwn(spec, 'figureCount') ? spec.figureCount : FIGURE_SET_SIZE;
-    if (!isSupportedFigureCount(figureCount)) throw new TypeError('figureCount must be four or six');
+    if (!isSupportedFigureCount(figureCount)) throw new TypeError('figureCount must be three, four or six');
     const figureIds = seededFigureIds(seed, figureCount);
     return { bankVersion: FIGURE_BANK_VERSION, mode, setId: 'seeded-' + sha256(`${FIGURE_BANK_VERSION}:${seed}:${figureIds.join(',')}`).toString('hex').slice(0, 8), selectionSeed: seed, figureIds };
   }

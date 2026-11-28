@@ -2,7 +2,8 @@ import { PARTICIPANT_PRODUCTION_PROFILE } from '../../../../dialogue-model/runti
 import { ReceptionError, validateReception, effectiveRotationMode, effectiveBetweenTrials, effectiveFigureSelection } from '../../../../dialogue-model/runtime/v2/reception.ts';
 import { validateReceptionSettings } from './reception-settings.ts';
 import type { Reception, ReceptionSummary } from '../../../../dialogue-model/runtime/v2/reception.ts';
-import type { DisplayedProtocol, ReceptionAdminPort, ReceptionAdminRow, ReceptionAdminResult, ReceptionFailedStartUsage, ReceptionSettingsPort } from './reception-port.ts';
+import type { DisplayedProtocol, ProtocolFormInput, ReceptionAdminPort, ReceptionAdminRow, ReceptionAdminResult, ReceptionFailedStartUsage, ReceptionSettingsPort } from './reception-port.ts';
+import type { FigurePresetPort } from './figure-presets.ts';
 import { OBJECT_ID, RECORD_ID } from './summary.ts';
 import { participantRoleView } from './participant-role.ts';
 import type { ParticipantRole, ParticipantRoleResult } from './participant-role.ts';
@@ -167,8 +168,9 @@ export function createReceptionAdminPort(options: Options): ReceptionAdminPort {
 
 type SettingsIndex = {
   readReceptionSettings(): Promise<unknown>; receptionProtocolHistory(): Promise<unknown>; receptionModeHistory(): Promise<unknown>;
-  saveReceptionProtocol(input: unknown): Promise<unknown>; saveReceptionMode(input: unknown): Promise<unknown>;
+  saveManagedReceptionProtocol(input: ProtocolFormInput): Promise<unknown>; saveReceptionMode(input: unknown): Promise<unknown>;
   saveReceptionPostGenerationCheck(input: unknown): Promise<unknown>;
+  listFigurePresets: FigurePresetPort['list']; readFigurePreset: FigurePresetPort['read']; saveFigurePreset: FigurePresetPort['save'];
 };
 const SAVE_ERRORS = ['conflict', 'invalid', 'protocol_unconfigured', 'unavailable'];
 function saveResult(value: unknown) {
@@ -183,8 +185,13 @@ export function createReceptionSettingsPort(index: SettingsIndex): ReceptionSett
       return { ...settings, protocolHistory:structuredClone(await index.receptionProtocolHistory()) as never,
         modeHistory:structuredClone(await index.receptionModeHistory()) as never };
     },
-    async saveProtocol(input) { return saveResult(await index.saveReceptionProtocol(input)); },
+    async saveProtocol(input) { return saveResult(await index.saveManagedReceptionProtocol(input)); },
     async saveMode(input) { return saveResult(await index.saveReceptionMode(input)); },
     async savePostGenerationCheck(input) { return saveResult(await index.saveReceptionPostGenerationCheck(input)); },
+    figurePresets: {
+      async list() { return structuredClone(await index.listFigurePresets()); },
+      async read(id) { return structuredClone(await index.readFigurePreset(id)); },
+      async save(input) { return structuredClone(await index.saveFigurePreset(input)); },
+    },
   };
 }

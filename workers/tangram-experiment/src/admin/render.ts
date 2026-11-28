@@ -14,7 +14,8 @@ import type { TrialTerminationExpectation } from './trial-termination.ts';
 import { isAdminTermination, isIncompleteTrialStatus } from '../../../../dialogue-model/runtime/v2/admin-termination.ts';
 import { renderQrSvg } from './qr.ts';
 import { createTrialV2, participantView, ROTATION_MODES } from '../../../../dialogue-model/runtime/stimuli/scatter-v2.mjs';
-import { FIGURE_BANK, FIGURE_BANK_VERSION, FIGURE_SETS, validateResolvedFigureSelection } from '../../../../dialogue-model/runtime/stimuli/figure-bank.ts';
+import { FIGURE_BANK, FIGURE_BANK_VERSION, FIGURE_SETS, FIGURE_SET_SIZE, SUPPORTED_FIGURE_COUNTS, validateResolvedFigureSelection } from '../../../../dialogue-model/runtime/stimuli/figure-bank.ts';
+import type { FigurePreset } from './figure-presets.ts';
 import type { BankFigure } from '../../../../dialogue-model/runtime/stimuli/figure-bank.ts';
 
 export const ADMIN_CSS = `:root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans JP",sans-serif;font-size:14px;line-height:1.5;color:#222;background:#f7f7f4;--line:#d8d8d2;--accent:#2a5d8f;--tint:#eaf1f8}
@@ -67,6 +68,8 @@ details.danger>summary{color:#9b2c1f}
 .turn-sheet{max-height:72vh;overflow:auto;border:1px solid var(--line);background:#fff}.turn-sheet table{border-collapse:separate;border-spacing:0;min-width:1300px;table-layout:fixed;font-size:.85rem}.turn-sheet th,.turn-sheet td{border:0;border-right:1px solid #ddd;border-bottom:1px solid #ddd;padding:8px;overflow-wrap:anywhere;white-space:pre-wrap}.turn-sheet th{position:sticky;top:0;z-index:2;white-space:normal;background:#eee}.turn-sheet tr:nth-child(even) td{background:#fafafa}.turn-sheet th:nth-child(1){width:44px}.turn-sheet th:nth-child(2){width:54px}.turn-sheet th:nth-child(3){width:105px}.turn-sheet th:nth-child(4){width:300px}.turn-sheet th:nth-child(5){width:170px}.turn-sheet th:nth-child(6){width:195px}.turn-sheet th:nth-child(7){width:180px}.turn-sheet th:nth-child(8){width:195px}.turn-sheet th:nth-child(9){width:100px}.turn-sheet .seq,.turn-sheet .speaker{font-weight:600}.turn-sheet .utterance{font-size:.95rem}.turn-sheet td:first-child,.turn-sheet th:first-child{position:sticky;left:0;background:#eee;z-index:1}.turn-sheet th:first-child{z-index:3}.turn-sheet time{font-variant-numeric:tabular-nums}.turn-sheet .turn-open{min-height:30px;padding:3px 7px;font-size:.8rem;white-space:nowrap}.turn-popover{width:min(840px,92vw);max-height:85vh;overflow:auto;border:1px solid var(--line);border-radius:6px;padding:16px 20px;color:#222;background:#fff;box-shadow:0 8px 32px #0002;white-space:normal}.turn-popover::backdrop{background:#0003}.turn-popover-head{display:flex;justify-content:space-between;align-items:center;gap:12px}.turn-popover-head h3{margin:0}.turn-popover .utterance{white-space:pre-wrap;overflow-wrap:anywhere}.turn-popover .turn-entry pre{font-size:.85rem;max-height:48vh}.turn-sheet .turn-block+.turn-block{border-top:1px solid #ddd;margin-top:5px;padding-top:5px}.turn-sheet tr:target td{background:var(--tint)}.turn-detail summary,.turn-entry summary{cursor:pointer;overflow-wrap:anywhere;color:var(--accent)}.turn-entry{padding:5px 0;border-top:1px solid var(--line)}.turn-entry pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:32vh;overflow:auto;background:#f5f5f5;padding:6px}.unlinked{margin:10px 0}.record-detail{max-width:none}
 .figure-grid{display:flex;flex-wrap:wrap;gap:12px}.figure-grid figure{margin:0;text-align:center}.figure-art{display:flex;align-items:center;justify-content:center;min-width:112px;min-height:112px;padding:4px;background:#fff;border:1px solid var(--line);border-radius:4px}
 .figure-art svg{max-width:96px;height:auto;fill:#24476b;stroke:#24476b;stroke-width:1;stroke-linejoin:round}.figure-grid figcaption{font-weight:600}
+.preset-editor .figure-grid label{display:grid;justify-items:center;gap:4px;cursor:pointer}
+.preset-editor .figure-grid label:has(input:checked) .figure-art{border-color:var(--accent);background:var(--tint)}
 fieldset.figure-source{display:grid;gap:8px}.figure-source>div>label{display:block}.figure-source .sub{margin:4px 0 0 20px;display:flex;flex-wrap:wrap;gap:4px 12px}.figure-source input[type=text]{width:12em}
 @media (max-width:699px){ol.chat li,ol.chat li.human{max-width:none;margin-left:0}dl.summary{grid-template-columns:1fr 1fr}}`;
 
@@ -442,21 +445,31 @@ function renderPreparedObservations(view: SettingsView, status: PreparedObservat
 }
 
 /** Researcher settings form. Unsaved settings preselect nothing; saved settings preselect the current values. */
-export function renderSettings(view: SettingsView, observations?: PreparedObservationPoolStatus | null): string {
+export function renderSettings(view: SettingsView, observations?: PreparedObservationPoolStatus | null, presets?: readonly FigurePreset[]): string {
   const p = view.protocol?.protocol;
   const current: Record<string, string> = p ? { figureSetPolicy: p.figureSetPolicy ?? '', seedPolicy: p.seedPolicy, referenceMemory: p.referenceMemory ? 'on' : 'off', betweenTrials: p.betweenTrials,
     rotationMode: p.rotationMode, receptionNumberFormat: p.receptionNumberFormat } : {};
   const orders = new Set(p ? p.allowedOrders.map(o => o.join(',')) : []);
-  // A protocol saved before the figure bank has no figure fields: they stay unselected so the researcher chooses them.
+  // The source and allocation are explicit. A saved random selection without a count denotes the legacy size.
   const selection = p?.figureSelection, policy = p?.figureSetPolicy;
   const customIds = new Set(selection?.mode === 'custom' ? selection.figureIds : []);
-  const randomCount = selection?.mode === 'seeded_random' ? selection.figureCount ?? 6 : undefined;
+  const randomCount = selection?.mode === 'seeded_random' ? selection.figureCount ?? FIGURE_SET_SIZE : undefined;
+  const currentPreset = selection?.mode === 'preset' ? selection.setId : undefined;
+  const savedPreset = currentPreset && Object.hasOwn(FIGURE_SETS, currentPreset)
+    ? `<label><input type="radio" name="figureSetId" value="${escapeHtml(currentPreset)}" checked> ${escapeHtml(FIGURE_SET_LABELS[currentPreset] ?? currentPreset)}</label>` : '';
+  const presetChoices = savedPreset + (presets ?? []).map(preset =>
+    `<label><input type="radio" name="figureSetId" value="${escapeHtml(`${preset.id}:${preset.revision}`)}"> ${escapeHtml(preset.name)} ・ ${escapeHtml(preset.figureIds.join('、'))}</label>`).join('');
+  const presetSource = presetChoices ? `<div><label><input type="radio" name="figureMode" value="preset" required${currentPreset ? ' checked' : ''}> プリセット</label>
+<div class="sub">${presetChoices}</div></div>` : '';
+  const counts = presets === undefined ? SUPPORTED_FIGURE_COUNTS : SUPPORTED_FIGURE_COUNTS.filter(count => count === 3 || count === randomCount);
+  const customLabel = presets === undefined ? '3個・4個・6個' : '3個';
+  const legacyCustom = presets !== undefined && customIds.size > 3
+    ? `<p class="muted">現在は${customIds.size}個で保存されています。選び直す場合は3個を選んでください。</p>` : '';
   const figureSource = `<fieldset class="figure-source"><legend>図形セット</legend>
-<div><label><input type="radio" name="figureMode" value="preset" required${selection?.mode === 'preset' ? ' checked' : ''}> プリセット</label>
-<div class="sub">${Object.keys(FIGURE_SETS).map(id => `<label><input type="radio" name="figureSetId" value="${escapeHtml(id)}"${selection?.mode === 'preset' && selection.setId === id ? ' checked' : ''}> ${escapeHtml(FIGURE_SET_LABELS[id] ?? id)}</label>`).join('')}</div></div>
+${presets === undefined ? '' : '<p><a href="/admin/figure-presets">図形プリセットを管理</a></p>'}${presetSource}
 <div><label><input type="radio" name="figureMode" value="seeded_random" required${selection?.mode === 'seeded_random' ? ' checked' : ''}> シード乱数</label>
-<div class="sub"><label>図形数 <select name="figureCount"><option value="">選択してください</option>${[4, 6].map(count => `<option value="${count}"${randomCount === count ? ' selected' : ''}>${count}</option>`).join('')}</select></label><label>シード <input type="text" name="selectionSeed" inputmode="numeric" autocomplete="off" placeholder="空欄で自動"${selection?.mode === 'seeded_random' && selection.selectionSeed !== null ? ` value="${escapeHtml(selection.selectionSeed)}"` : ''}></label></div></div>
-<div><label><input type="radio" name="figureMode" value="custom" required${selection?.mode === 'custom' ? ' checked' : ''}> 図形を選ぶ（4個または6個）</label>
+<div class="sub"><label>図形数 <select name="figureCount">${counts.map(count => `<option value="${count}"${randomCount === count ? ' selected' : ''}>${count}</option>`).join('')}</select></label><label>シード <input type="text" name="selectionSeed" inputmode="numeric" autocomplete="off" placeholder="空欄で自動"${selection?.mode === 'seeded_random' && selection.selectionSeed !== null ? ` value="${escapeHtml(selection.selectionSeed)}"` : ''}></label></div></div>
+<div><label><input type="radio" name="figureMode" value="custom" required${selection?.mode === 'custom' ? ' checked' : ''}> 図形を選ぶ（${customLabel}）</label>${legacyCustom}
 <div class="sub">${FIGURE_BANK.map(f => `<label><input type="checkbox" name="figureIds" value="${escapeHtml(f.id)}"${customIds.has(f.id) ? ' checked' : ''}> ${escapeHtml(f.id)}</label>`).join('')}</div></div></fieldset>`;
   const mark = (on: boolean) => on ? ' checked' : '';
   const fieldset = (name: string, legend: string, choices: [string, string][]) => `<fieldset><legend>${escapeHtml(legend)}</legend>${choices.map(([value, label]) =>
@@ -491,6 +504,26 @@ function figureSvg(figure: BankFigure): string {
   const w = Math.max(...points.map(q => q[0])) - minX, h = Math.max(...points.map(q => q[1])) - minY;
   const polygons = figure.pieces.map(piece => `<polygon points="${piece.points.map(([x, y]) => `${(x - minX) * SCALE + PAD},${(y - minY) * SCALE + PAD}`).join(' ')}"/>`).join('');
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${w * SCALE + 2 * PAD}" height="${h * SCALE + 2 * PAD}" viewBox="0 0 ${w * SCALE + 2 * PAD} ${h * SCALE + 2 * PAD}" role="img" aria-label="${escapeHtml(figure.id)}">${polygons}</svg>`;
+}
+export function renderFigurePresets(presets: readonly FigurePreset[]): string {
+  return page('図形プリセット', `<p><a href="/admin/reception-settings">受付の設定へ</a></p><h1>図形プリセット</h1>
+<p><a href="/admin/figure-presets/new">プリセットを作成</a></p>
+${presets.length ? `<ul>${presets.map(preset =>
+    `<li><a href="/admin/figure-presets/${escapeHtml(preset.id)}">${escapeHtml(preset.name)}</a> ${escapeHtml(preset.figureIds.join('、'))}</li>`).join('')}</ul>`
+    : '<p>表示中のプリセットはありません。</p>'}`);
+}
+export function renderFigurePresetEditor(preset: FigurePreset | null): string {
+  const heading = preset ? '図形プリセットを編集' : '図形プリセットを作成';
+  const action = '/admin/figure-presets/' + (preset?.id ?? 'new');
+  const revision = `<input type="hidden" name="expectedRevision" value="${preset?.revision ?? 0}">`;
+  const selected = new Set(preset?.figureIds);
+  return page(heading, `<p><a href="/admin/figure-presets">プリセット一覧へ</a></p><h1>${heading}</h1>
+<form method="post" action="${escapeHtml(action)}" class="preset-editor">${revision}
+<p><label>名前 <input type="text" name="name" value="${escapeHtml(preset?.name)}" required></label></p>
+<fieldset><legend>図形を3個選ぶ</legend><div class="figure-grid">${FIGURE_BANK.map(figure =>
+    `<label><span class="figure-art" aria-hidden="true">${figureSvg(figure)}</span><span><input type="checkbox" name="figureIds" value="${escapeHtml(figure.id)}"${selected.has(figure.id) ? ' checked' : ''}> ${escapeHtml(figure.id)}</span></label>`).join('')}</div></fieldset>
+<p><button class="primary">保存</button></p></form>
+${preset ? `<form method="post" action="${escapeHtml(action)}/hide">${revision}<button>プリセットを非表示</button></form>` : ''}`);
 }
 export function renderFigures(): string {
   const cell = (figure: BankFigure) => `<figure><div class="figure-art">${figureSvg(figure)}</div><figcaption>${escapeHtml(figure.id)}</figcaption></figure>`;

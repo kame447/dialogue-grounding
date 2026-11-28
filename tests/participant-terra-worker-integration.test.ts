@@ -150,7 +150,7 @@ afterEach(() => {
 });
 
 function harness(enabled = true, selectedProtocol: typeof protocol & {
-  figureSelection?: { mode: string; setId?: string; selectionSeed?: number }; figureSetPolicy?: string;
+  figureSelection?: { mode: string; setId?: string; selectionSeed?: number; figureIds?: string[] }; figureSetPolicy?: string;
 } = protocol, preobserve = false) {
   const canonical = selectedProtocol.schemaVersion === 'reception_protocol_v3'
     ? canonicalReceptionProtocolV3(selectedProtocol) : canonicalReceptionProtocolV2(selectedProtocol);
@@ -242,13 +242,13 @@ function harness(enabled = true, selectedProtocol: typeof protocol & {
     },
   };
 
-  async function prepare() {
-    const { participant, proxy } = await resolveParticipantConfiguration(env, JSON.parse(canonical));
+  async function prepare(sourceProtocol = JSON.parse(canonical)) {
+    const { participant, proxy } = await resolveParticipantConfiguration(env, sourceProtocol);
     if (!proxy || !participant.participantModelPin || participant.participantRuntimeProfile !== PARTICIPANT_PRODUCTION_PROFILE) return null;
     if (preparedBundle) return preparedBundle;
     if (preparationPromise) return preparationPromise;
     preparationPromise = (async () => {
-      const recipe = await createPreparedObservationRecipe({ protocol: JSON.parse(canonical), orderIndex: 0, participant, createdAt: new Date().toISOString() });
+      const recipe = await createPreparedObservationRecipe({ protocol: sourceProtocol, orderIndex: 0, participant, createdAt: new Date().toISOString() });
       const entries = new Map<string, unknown>();
       const cache: WorkerTerraCache = {
         async read(key) { return entries.get(key); },
@@ -3571,6 +3571,85 @@ for (const { dialogueProfile, generation } of [
   assert.equal(h.controlled.legacyCalls, 0);
 });
 
+
+test('three-figure Worker uses prepared stock across protocol revisions through both conditions, scoring and cold restore', async t => {
+  const figureIds = ['F2', 'F17', 'F30'];
+  const selected = { ...figureBankProtocol, revision: figureBankProtocol.revision + 1,
+    figureSelection: { mode: 'custom', figureIds: [...figureIds].reverse() } };
+  const h = harness(true, selected, true);
+  const transport = v12Transport(t, h);
+  h.env.PARTICIPANT_DIALOGUE_PROFILE = PILOT012_V23_PARTICIPANT_PROFILE;
+  h.env.PARTICIPANT_TERRA_INITIAL_OBSERVATION_GENERATION = INITIAL_OBSERVATION_STRUCTURED_V2;
+  h.env.PARTICIPANT_AI_PROXY.participantInitialObservationPolicy = transport.observationPolicy;
+
+  const prepared = await h.prepare({ ...selected, protocolId: '80a303b4-e262-46f0-aaa4-2b5645034cd3', revision: 1 });
+  assert.ok(prepared);
+  assert.deepEqual(transport.textPhases, ['initial_observation']);
+  assert.match(transport.prompts[0].system.join('\n'), /全3図形/);
+  await h.receive();
+  const approved = await h.approve();
+  assert.equal(approved.plan.protocolId, selected.protocolId);
+  assert.equal(approved.plan.protocolRevision, selected.revision);
+  assert.equal(approved.plan.protocolSha256, receptionProtocolSha256(canonicalReceptionProtocolV3(selected)));
+  assert.notEqual(prepared.plan.protocolSha256, approved.plan.protocolSha256);
+  assert.equal(approved.plan.preparedObservations.bundleId, prepared.bundleId);
+  assert.deepEqual(approved.plan.trials.map((trial: any) => trial.figureSelection.figureIds), [figureIds, figureIds]);
+
+  let predecessor: string | undefined;
+  for (const strategy of ['bypass-enabled', 'repair-first']) {
+    h.evict();
+    const { trial } = await jsonOk(await h.start(predecessor));
+    const id = trial.sessionId, key = 'record:' + id;
+    assert.equal(trial.scene.shapes.length, 3);
+    assert.doesNotMatch(JSON.stringify(trial), /figureSelection|figureIds|observationMemo|ownAnchors|participantModelPin/u);
+    const opening = await h.storage.get(key);
+    assert.equal(opening.strategy, strategy);
+    assert.deepEqual(opening.stimulus.figureIds, figureIds);
+    assert.equal(opening.queueState.privateState.observationMemo.figures.length, 3);
+    assert.equal(opening.jevLedger.phases.terra.initial_observation.posts, 0);
+    assert.equal(opening.jevLedger.phases.terra.initial_observation.cacheHits, 1);
+    const requestStart = h.calls.length, promptStart = transport.prompts.length;
+    await jsonOk(await h.request('message', { expectedRecordId: id, text: '形を一つ確認したいです。', clientId: 'three-figure-turn' }));
+    await h.idle();
+    const action = h.calls.slice(requestStart).find(call => call.kind === 'choices' && Object.hasOwn(call.body.questions, 'action'));
+    assert.ok(action);
+    assert.equal(JSON.parse(action.body.state).ownSlots.length, 3);
+    assert.match(action.body.questions.action.instructions, /f0〜f2はownSlots/);
+    const generation = transport.prompts.slice(promptStart).find(prompt => prompt.phase === 'generation');
+    assert.ok(generation);
+    assert.match(generation.system.join('\n'), /タングラム3図形/);
+    assert.doesNotMatch(generation.system.join('\n'), /タングラム[46]図形/);
+    const spoken = (await jsonOk(await h.request('state'))).trial;
+    assert.equal(spoken.events.at(-1).text, v12Check);
+
+    const callsBeforeRestore = h.calls.length, phasesBeforeRestore = transport.textPhases.length;
+    h.evict();
+    const restored = (await jsonOk(await h.request('state'))).trial;
+    assert.equal(restored.sessionId, id);
+    assert.deepEqual(restored.scene, trial.scene);
+    assert.deepEqual(restored.events, spoken.events);
+    assert.equal(h.calls.length, callsBeforeRestore);
+    assert.equal(transport.textPhases.length, phasesBeforeRestore);
+    await h.complete(id, restored);
+    const record = await h.storage.get(key);
+    assert.equal(record.status, 'completed');
+    assert.equal(record.scoring.result.total, 3);
+    assert.equal(Object.keys(record.humanSubmission).length, 3);
+    assert.equal(Object.keys(record.aiSubmission).length, 3);
+    validateBoundBaseRecord(record, record.assignment);
+    h.evict();
+    const { form } = await jsonOk(await h.request('records/' + id + '/questionnaire'));
+    await jsonOk(await h.request('records/' + id + '/questionnaire', {
+      answers: Object.fromEntries(form.items.map((item: { id: string }) => [item.id, 4])), comment: '', submit: true,
+    }));
+    const review = await jsonOk(await h.request('records/' + id + '/review'));
+    assert.equal(review.result.total, 3);
+    assert.deepEqual(review.scene, restored.scene);
+    predecessor = id;
+  }
+  assert.deepEqual(transport.textPhases.filter(phase => phase === 'initial_observation'), ['initial_observation']);
+  assert.deepEqual((await h.storage.get('reception:v1')).plan, approved.plan);
+});
 
 test('a missing prepared cache refuses start before consuming admission, while a saved trial restores from its own memo', async () => {
   const h = harness(true, protocol, true);

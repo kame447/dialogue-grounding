@@ -59,9 +59,9 @@ test('protocol form: each figure mode and policy is explicit, and the saved fiel
   assert.equal(preset.status, 303);
   assert.deepEqual(preset.fields.figureSelection, { mode: 'preset', setId: 'bank-set-b' }); assert.equal(preset.fields.figureSetPolicy, 'shared');
   const auto = await saved([['figureMode', 'seeded_random'], ['selectionSeed', ''], ['figureSetPolicy', 'per_trial']]);
-  assert.equal(auto.status, 303); assert.deepEqual(auto.fields.figureSelection, { mode: 'seeded_random', selectionSeed: null }); assert.equal(auto.fields.figureSetPolicy, 'per_trial');
+  assert.equal(auto.status, 303); assert.deepEqual(auto.fields.figureSelection, { mode: 'seeded_random', selectionSeed: null, figureCount: 3 }); assert.equal(auto.fields.figureSetPolicy, 'per_trial');
   const fixed = await saved([['figureMode', 'seeded_random'], ['selectionSeed', ' -17 '], ['figureSetPolicy', 'shared']]);
-  assert.deepEqual(fixed.fields.figureSelection, { mode: 'seeded_random', selectionSeed: -17 });
+  assert.deepEqual(fixed.fields.figureSelection, { mode: 'seeded_random', selectionSeed: -17, figureCount: 3 });
   const ids = ['F30', 'F2', 'F11', 'F7', 'F19', 'F25'];
   const custom = await saved([['figureMode', 'custom'], ...ids.map(id => ['figureIds', id]), ['figureSetPolicy', 'shared']]);
   assert.equal(custom.status, 303);
@@ -107,6 +107,15 @@ test('settings form: a saved v2 protocol keeps its fields preselected but leaves
   assert.match(seeded, /name="selectionSeed"[^>]*value="41"/u); assert.match(seeded, /name="figureSetPolicy" value="per_trial" required checked/u);
   const unsaved = renderSettings({ protocol: null, mode: { value: 'unset', revision: 0 }, protocolHistory: [], modeHistory: [] });
   assert.equal((unsaved.match(/ checked/gu) ?? []).length, 0, 'nothing is preselected before the first save');
+  assert.doesNotMatch(unsaved, /name="figureSetId"/u);
+  assert.match(unsaved, /<select name="figureCount"><option value="3">3<\/option><option value="4">4<\/option><option value="6">6<\/option>/u);
+  assert.match(unsaved, /図形を選ぶ（3個・4個・6個）/u);
+  for (const [id, label] of [['pilot-four-v1', '4図形（F1–F4）'], ['bank-set-d', 'bank-set-d（F25–F30）']]) {
+    const preset = renderSettings(settingsView({ ...PROTOCOL_V2, schemaVersion: 'reception_protocol_v3', figureSetPolicy: 'shared',
+      figureSelection: { mode: 'preset', setId: id } }) as any);
+    assert.deepEqual([...preset.matchAll(/name="figureSetId" value="([^"]+)" checked> ([^<]+)/gu)].map(match => match.slice(1)), [[id, label]]);
+    assert.equal((preset.match(/name="figureSetId"/gu) ?? []).length, 1);
+  }
 });
 
 function memory(): SettingsStorage & { values: Map<string, unknown> } {
@@ -169,6 +178,20 @@ test('experiment preview draws the recorded figures; an invalid selection never 
 });
 
 
+test('three-figure protocol form accepts explicit random and arbitrary custom choices', async () => {
+  const random = await saved([['figureMode', 'seeded_random'], ['figureCount', '3'], ['selectionSeed', '41'], ['figureSetPolicy', 'shared']]);
+  assert.equal(random.status, 303);
+  assert.deepEqual(random.fields.figureSelection, { mode: 'seeded_random', selectionSeed: 41, figureCount: 3 });
+  const ids = ['F30', 'F2', 'F11'];
+  const custom = (ids: string[]) => saved([['figureMode', 'custom'], ...ids.map(id => ['figureIds', id]), ['figureSetPolicy', 'shared']]);
+  const selected = await custom(ids);
+  assert.equal(selected.status, 303);
+  assert.deepEqual(selected.fields.figureSelection, { mode: 'custom', figureIds: ['F2', 'F11', 'F30'] });
+  for (const invalid of [['F2', 'F30'], ['F2', 'F2', 'F30'], ['F2', 'F11', 'F31']]) {
+    assert.deepEqual(await custom(invalid), { status: 400, writes: 0, fields: undefined });
+  }
+});
+
 test('four-figure protocol form saves preset, random and custom choices without changing the six-figure form', async () => {
   const preset = await saved([['figureMode', 'preset'], ['figureSetId', 'pilot-four-v1'], ['figureSetPolicy', 'shared']]);
   assert.equal(preset.status, 303);
@@ -180,7 +203,7 @@ test('four-figure protocol form saves preset, random and custom choices without 
   const custom = await saved([['figureMode', 'custom'], ...['F4', 'F1', 'F3', 'F2'].map(id => ['figureIds', id]), ['figureSetPolicy', 'shared']]);
   assert.equal(custom.status, 303);
   assert.deepEqual(custom.fields.figureSelection, { mode: 'custom', figureIds: ['F1', 'F2', 'F3', 'F4'] });
-  for (const count of ['3', '5', '7', '4.0', '04', '']) {
+  for (const count of ['2', '5', '7', '3.0', '03', '']) {
     const invalid = await saved([['figureMode', 'seeded_random'], ['figureCount', count], ['figureSetPolicy', 'shared']]);
     assert.equal(invalid.status, 400, count); assert.equal(invalid.writes, 0, count);
   }

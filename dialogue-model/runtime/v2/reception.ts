@@ -179,7 +179,12 @@ function protocolFigureSelection(value: unknown): ProtocolFigureSelection {
       ...(Object.hasOwn(head, 'figureCount') ? { figureCount: head.figureCount as FigureCount } : {}) };
   }
   if (head.mode === 'custom') {
-    try { return { mode: 'custom', figureIds: [...resolveFigureSelection({ mode: 'custom', figureIds: head.figureIds }).figureIds] }; } catch { return fail(); }
+    try {
+      const figureIds = [...resolveFigureSelection({ mode: 'custom', figureIds: head.figureIds }).figureIds];
+      // A three-figure protocol saves the set itself, independent of preset identity and selection order.
+      if (figureIds.length === 3) figureIds.sort((a, b) => Number(a.slice(1)) - Number(b.slice(1)));
+      return { mode: 'custom', figureIds };
+    } catch { return fail(); }
   }
   return fail();
 }
