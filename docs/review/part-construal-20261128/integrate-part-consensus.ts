@@ -86,9 +86,10 @@ for (const g of GROUPS) {
       const candidates = Array.isArray(r.consensusCandidates) ? r.consensusCandidates : [];
       if (!STATUSES.includes(r.agreementStatus)) problems.push(`${where}: agreementStatus`);
       if (candidates.length > 3) problems.push(`${where}: more than 3 candidates`);
-      if (r.noCandidate !== (candidates.length === 0)) problems.push(`${where}: noCandidate must match an empty candidate list`);
+      // 未合意 adopts nothing; pairs may mark it noCandidate:false to keep it apart from an agreed "none".
+      const unresolved = r.agreementStatus === '未合意';
+      if (unresolved ? candidates.length > 0 : r.noCandidate !== (candidates.length === 0)) problems.push(`${where}: noCandidate must match an empty candidate list (未合意 adopts nothing)`);
       if (r.noCandidate && !text(r.noCandidateReason).trim()) problems.push(`${where}: noCandidateReason missing`);
-      if (r.agreementStatus === '未合意' && candidates.length) problems.push(`${where}: 未合意 must not carry adopted candidates`);
       if (!text(r.discussion).trim()) problems.push(`${where}: discussion missing`);
       candidates.forEach((c, k) => checkCandidate(c, `${where} candidate ${k + 1}`));
       const [figureId, rotation] = id.split('@');
@@ -97,7 +98,8 @@ for (const g of GROUPS) {
         members: catalogRegions.find(c => c.id === r.id)!.members,
         candidates: candidates.map((c, k) => ({ rank: k + 1, noun: c.noun, ...(c.owner ? { owner: c.owner } : {}), basis: c.basis,
           confidence: c.confidence, evidence: c.evidence, weaknesses: c.weaknesses ?? '' })),
-        noCandidate: r.noCandidate, noCandidateReason: text(r.noCandidateReason), agreementStatus: r.agreementStatus,
+        noCandidate: candidates.length === 0,
+        noCandidateReason: text(r.noCandidateReason) || (unresolved ? '未合意（双方の案は discussion に記録）' : ''), agreementStatus: r.agreementStatus,
         group: g.group, item: x.item, opusAgent: g.opus, terraAgent: g.terra,
         opusIndependent: r.opusIndependent, terraIndependent: r.terraIndependent, discussion: r.discussion,
       });
