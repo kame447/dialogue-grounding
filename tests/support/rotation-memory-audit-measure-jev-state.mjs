@@ -65,7 +65,7 @@ export async function makeHarness(root) {
       prospect: () => decision.buildRepairProspectPayload(input, { questionLayout: layout }),
     };
     return Object.fromEntries(Object.entries(calls).map(([name, build]) => {
-      try { const payload = build(); const state = payload.state ?? payload.payload?.state; return [name, { ok: true, stateChars: String(state).length, state: String(state) }]; }
+      try { const payload = build(); const state = payload.state ?? payload.payload?.state; return [name, { ok: true, stateChars: String(state).length, state: String(state), questions: JSON.stringify(payload.questions ?? payload.payload?.questions ?? null) }]; }
       catch (error) { return [name, { ok: false, error: error instanceof Error ? error.message : String(error) }]; }
     }));
   }
