@@ -13,9 +13,15 @@ const number = (value: unknown): value is number => Number.isSafeInteger(value) 
 export function buildTurnSheet(r: Data, latency: LatencySummary) {
   const rows: EventRow[] = records(r.events).map(event => ({ event, entries: [], responseTo: null, responseMs: null }));
   const unmatched: Entry[] = [];
-  const unique = (items: EventRow[]) => items.length === 1 ? items[0] : undefined;
-  const bySeq = (seq: unknown) => number(seq) ? unique(rows.filter(row => row.event.seq === seq)) : undefined;
-  const byId = (id: unknown) => typeof id === "string" && id ? unique(rows.filter(row => row.event.id === id)) : undefined;
+  // Ambiguous identifiers remain unlinked, just as in the old unique scan.
+  const seqRows = new Map<number, EventRow | undefined>(), idRows = new Map<string, EventRow | undefined>();
+  for (const row of rows) {
+    const { seq, id } = row.event;
+    if (number(seq)) seqRows.set(seq, seqRows.has(seq) ? undefined : row);
+    if (typeof id === "string" && id) idRows.set(id, idRows.has(id) ? undefined : row);
+  }
+  const bySeq = (seq: unknown) => number(seq) ? seqRows.get(seq) : undefined;
+  const byId = (id: unknown) => typeof id === "string" && id ? idRows.get(id) : undefined;
   const humanFor = (value: Data) => {
     const byTurn = bySeq(value.turnIndex);
     const row = value.lastEventId == null ? byTurn : byId(value.lastEventId);
@@ -38,6 +44,17 @@ export function buildTurnSheet(r: Data, latency: LatencySummary) {
   const timings = records(r.turnTimings);
   const sourceEntries = [["judgments", "確定判断"], ["attempts", "実行試行"], ["jevTraces", "Jev処理"], ["groundingShadow", "影判定"]] as const;
   const attemptId = (value: Data) => value.attemptNumber ?? value.jevTurn?.attemptNumber;
+  const groupAttempts = (values: unknown) => {
+    const grouped = new Map<number, Data[]>();
+    for (const value of records(values)) {
+      const id = attemptId(value);
+      if (!number(id)) continue;
+      const bucket = grouped.get(id) ?? [];
+      bucket.push(value); grouped.set(id, bucket);
+    }
+    return grouped;
+  };
+  const tracesByAttempt = groupAttempts(r.jevTraces), judgmentsByAttempt = groupAttempts(r.judgments);
   for (const value of timings) register(value.requestSeq, humanFor(value));
   for (const [key] of sourceEntries) for (const value of records(r[key])) register(attemptId(value), humanFor(value));
 
@@ -49,8 +66,8 @@ export function buildTurnSheet(r: Data, latency: LatencySummary) {
     if (ai?.event.speaker !== "ai") continue;
     ai.responseMs = turn.fromTriggerMs;
     if (!human || !number(human.event.seq) || human.event.seq >= ai.event.seq || !number(turn.requestSeq)) continue;
-    const traces = records(r.jevTraces).filter(t => attemptId(t) === turn.requestSeq);
-    const judgments = records(r.judgments).filter(t => attemptId(t) === turn.requestSeq);
+    const traces = tracesByAttempt.get(turn.requestSeq) ?? [];
+    const judgments = judgmentsByAttempt.get(turn.requestSeq) ?? [];
     if (traces.some(t => t.status !== "committed" || typeof t.publicSpeech === "string" && t.publicSpeech !== ai.event.text ||
         number(t.aiPublic?.pending?.aiSeq) && t.aiPublic.pending.aiSeq !== ai.event.seq) ||
         judgments.some(j => j.status !== "committed" || number(j.aiPublic?.aiSeq) && j.aiPublic.aiSeq !== ai.event.seq)) continue;

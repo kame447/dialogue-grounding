@@ -11,7 +11,7 @@ import { escapeHtml, renderDetail, renderList, parseFilter, applyFilter } from "
 import { summarizeLatency } from "../workers/tangram-experiment/src/admin/latency.ts";
 import { ACTIVE_KEY, archiveKey, archiveSnapshot, backfillActive, deleteArchived, expireRecords, expiredIds, nextExpiry, readArchived,
   retentionDays } from "../workers/tangram-experiment/src/admin/archive.ts";
-import { getSummary, listAudit, listPage, recordHash, removeSummaries, upsertSummary } from "../workers/tangram-experiment/src/admin/index-store.ts";
+import { getSummary, listAudit, listPage, recordHash, recordRoles, removeSummaries, upsertSummary } from "../workers/tangram-experiment/src/admin/index-store.ts";
 
 const TOKEN = "t".repeat(20) + "-synthetic-test-token-0123456789";
 const OBJECT = "a".repeat(64);
@@ -383,6 +383,30 @@ test("the index pages newest first with no cap, and re-indexing moves an entry i
   assert.equal(first.items[0].recordId, id(0));
   assert.equal([...index.map.keys()].filter((k) => k.startsWith("u:")).length, 250);
   assert.equal((await listPage(index, "not-a-cursor")).items[0].recordId, id(0));
+});
+
+test("index pages and role lookups use bounded native batch reads, preserving stale-key and deletion behavior", async () => {
+  const storage = memoryStorage();
+  const first = summaryOf(record({ recordId: FIRST, updatedAt: iso(T0) }));
+  const second = summaryOf(record({ recordId: SECOND, updatedAt: iso(T0 + 1000) }));
+  await upsertSummary(storage, first); await upsertSummary(storage, second);
+  const batches: string[][] = [];
+  const readOnly = { ...storage,
+    async get<T>(_key: string): Promise<T | undefined> { throw new Error("unexpected single read"); },
+    async getMany<T>(keys: string[]): Promise<Map<string, T>> {
+      batches.push([...keys]);
+      return new Map(keys.filter(key => storage.map.has(key)).map(key => [key, structuredClone(storage.map.get(key)) as T]));
+    },
+  };
+  const page = await listPage(readOnly);
+  assert.deepEqual(page.items.map(s => s.recordId), [SECOND, FIRST]);
+  assert.deepEqual(batches, [["r:" + SECOND, "r:" + FIRST]]);
+  batches.length = 0;
+  await removeSummaries(storage, [FIRST], "admin", T0);
+  assert.deepEqual(await recordRoles(readOnly, [FIRST, SECOND, SECOND], true), { [FIRST]: "deleted", [SECOND]: "unclassified" });
+  assert.equal(batches.length, 2);
+  assert.equal(batches[0].length, 2);
+  assert.deepEqual(batches[1], ["participant-role:" + SECOND]);
 });
 
 // --- Summary, rendering, latency ------------------------------------------
