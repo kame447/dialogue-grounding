@@ -14,6 +14,7 @@ import type { AdminRecordSummary, ParticipantRole, ParticipantRoleResult } from 
 import type { LatencySummary } from "./latency.ts";
 import type { AuditEntry } from "./index-store.ts";
 import type { ProtocolFields, ReceptionAdminPort, ReceptionSettingsPort } from './reception-port.ts';
+import type { PreparedObservationPoolStatus } from './prepared-observation-port.ts';
 import { trialTerminationExpectation } from './trial-termination.ts';
 import type { TrialTerminationExpectation, TrialTerminationResult } from './trial-termination.ts';
 import { isIncompleteTrialStatus } from '../../../../dialogue-model/runtime/v2/admin-termination.ts';
@@ -41,6 +42,10 @@ export type AdminDeps = {
   receptions?: ReceptionAdminPort;
   /** Researcher reception settings (protocol and reception mode). */
   receptionSettings?: ReceptionSettingsPort;
+  preparedObservations?: {
+    status(): Promise<PreparedObservationPoolStatus>;
+    prepare(input: { expectedProtocolRevision: number }): Promise<{ ok: true } | { ok: false; error: 'conflict' | 'unconfigured' | 'unavailable' }>;
+  };
 };
 
 export const ADMIN_HEADERS: Readonly<Record<string, string>> = Object.freeze({
@@ -162,11 +167,14 @@ const RECEPTION_MESSAGES: Readonly<Record<string, string>> = Object.freeze({
   protocol_changed: '設定が変わりました。開き直してから許可してください。',
   reception_closed: '受付を使わない設定のため、許可できません。',
   reception_unavailable: '受付を確認できませんでした。開き直してから操作してください。',
+  prepared_observations_unavailable: '初回観察メモの準備が完了していません。設定画面で観察メモを準備してください。',
 });
 /** The same status either way; the page names only the closed code's message, never the submitted or backend values. */
 function receptionFailure(request: Request, title: string, status: number, error: string, message = RECEPTION_MESSAGES[error]): Response {
   if (!wantsHtml(request)) return receptionError(status, error);
-  return respond(status, renderMessage(title, message ?? RECEPTION_MESSAGES.reception_unavailable, { href: '/admin/receptions', label: '受付一覧へ' }));
+  const back = error === 'prepared_observations_unavailable'
+    ? { href: '/admin/reception-settings', label: '受付の設定へ' } : { href: '/admin/receptions', label: '受付一覧へ' };
+  return respond(status, renderMessage(title, message ?? RECEPTION_MESSAGES.reception_unavailable, back));
 }
 const unsigned = (text: string | null): number | null => {
   if (text === null || !/^(0|[1-9][0-9]*)$/.test(text)) return null;
@@ -216,13 +224,15 @@ async function receptionMutation(request: Request, port: ReceptionAdminPort, id:
     }
     if (!result.ok) {
       // The result remains allowlisted at runtime: never reflect an arbitrary backend error.
-      switch (result.error) {
+      const error: string = result.error;
+      switch (error) {
         case 'not_found': return fail(404, 'not_found');
         case 'invalid_order': return fail(400, 'invalid_order');
         case 'conflict': return fail(409, 'conflict');
         case 'protocol_unconfigured': return fail(409, 'protocol_unconfigured');
         case 'protocol_changed': return fail(409, 'protocol_changed');
         case 'reception_closed': return fail(409, 'reception_closed');
+        case 'prepared_observations_unavailable': return fail(409, 'prepared_observations_unavailable');
         default: return fail(503, 'reception_unavailable');
       }
     }
@@ -306,6 +316,37 @@ async function settingsMutation(request: Request, port: ReceptionSettingsPort, k
   }
 }
 
+const PREPARATION_ERRORS = new Set(['configuration_unavailable', 'configuration_changed', 'preparation_failed', 'preparation_interrupted', 'unavailable']);
+function preparedObservationStatus(value: PreparedObservationPoolStatus): PreparedObservationPoolStatus {
+  const count = (v: unknown): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0;
+  if (!value || typeof value.supported !== 'boolean' || !count(value.targetPerOrder) ||
+      value.protocolRevision !== null && (!count(value.protocolRevision) || value.protocolRevision < 1) || !Array.isArray(value.orders)) throw new Error('invalid_status');
+  const orders = value.orders.map(row => {
+    if (!row || !count(row.orderIndex) || !Array.isArray(row.order) || row.order.length < 1 || row.order.length > 2 ||
+        row.order.some(strategy => strategy !== 'repair-first' && strategy !== 'bypass-enabled') || new Set(row.order).size !== row.order.length ||
+        ![row.ready, row.queued, row.preparing, row.failed].every(count)) throw new Error('invalid_status');
+    return { orderIndex: row.orderIndex, order: [...row.order], ready: row.ready, queued: row.queued, preparing: row.preparing, failed: row.failed };
+  });
+  if (new Set(orders.map(row => row.orderIndex)).size !== orders.length) throw new Error('invalid_status');
+  return { supported: value.supported, protocolRevision: value.protocolRevision, targetPerOrder: value.targetPerOrder, orders,
+    errorCode: value.errorCode === null ? null : PREPARATION_ERRORS.has(value.errorCode) ? value.errorCode : 'unavailable' };
+}
+
+async function preparedObservationMutation(request: Request, port: NonNullable<AdminDeps['preparedObservations']>): Promise<Response> {
+  const back = { href: '/admin/reception-settings', label: '受付の設定へ' };
+  const fail = (status: number, message: string) => respond(status, renderMessage('初回観察メモの準備', message, back));
+  const form = await receptionForm(request), revision = form && unsigned(form.get('expectedProtocolRevision'));
+  if (!form || revision === null || revision < 1 || form.getAll('expectedProtocolRevision').length !== 1 ||
+      [...form.keys()].some(key => key !== 'expectedProtocolRevision')) return fail(400, '設定画面を開き直してから準備してください。');
+  try {
+    const result = await port.prepare({ expectedProtocolRevision: revision });
+    if (result.ok) return plain(303, '', { Location: '/admin/reception-settings' });
+    if (result.error === 'conflict') return fail(409, '設定が変わりました。設定画面を開き直してから準備してください。');
+    if (result.error === 'unconfigured') return fail(409, '準備に必要な設定がありません。プロトコルを確認して保存してください。');
+  } catch { /* A lost reply can follow a queued preparation; report an unknown outcome. */ }
+  return fail(503, '準備の状況を確認できませんでした。設定画面を開き直して確認してください。');
+}
+
 export async function handleAdmin(request: Request, deps: AdminDeps): Promise<Response> {
   if (!deps.limiter || typeof deps.token !== "string") return notFound();
   const url = new URL(request.url);
@@ -316,10 +357,12 @@ export async function handleAdmin(request: Request, deps: AdminDeps): Promise<Re
   const receptionPath = request.method === 'POST' && deps.receptions ? url.pathname.match(/^\/admin\/reception\/([^/]+)\/(approve|cancel|force-end)$/) : null;
   const rolePath = url.pathname.match(/^\/admin\/(record|reception)\/([^/]+)\/participant-role$/u);
   const settingsPath = request.method === 'POST' && deps.receptionSettings ? url.pathname.match(/^\/admin\/reception-settings\/(protocol|mode)$/) : null;
+  const observationsPath = url.pathname === '/admin/reception-settings/observations';
+  if (observationsPath && !deps.preparedObservations) return notFound();
   if (!deps.receptions && (url.pathname === '/admin/receptions' || url.pathname === '/admin/entry' || url.pathname === '/admin/receptions.js')) return notFound();
   if (!deps.receptions?.version && url.pathname === '/admin/receptions/version') return notFound();
   if (!deps.receptionSettings && url.pathname === '/admin/reception-settings') return notFound();
-  if (request.method === "POST" ? !deletePath && !forceEndPath && !nextPath && !receptionPath && !settingsPath && !rolePath : request.method !== "GET" && request.method !== "HEAD") return notFound();
+  if (request.method === "POST" ? !deletePath && !forceEndPath && !nextPath && !receptionPath && !settingsPath && !observationsPath && !rolePath : request.method !== "GET" && request.method !== "HEAD") return notFound();
   const header = request.headers.get("Authorization");
   // Every credentialed attempt (right or wrong) counts, so guessing is capped per visitor.
   if (presentedToken(header) !== null && !(await deps.limiter.limit({ key: visitorKey(request) })).success) {
@@ -344,12 +387,24 @@ export async function handleAdmin(request: Request, deps: AdminDeps): Promise<Re
       return respond(200, JSON.stringify({ recordId: id, role: summary.participantRole?.role ?? 'unclassified' }), 'application/json; charset=utf-8');
     } catch { return receptionError(503, 'unavailable'); }
   }
+  if (observationsPath) {
+    if (request.method === 'POST') {
+      if (!sameOrigin(request, url)) return plain(403, 'Forbidden');
+      return preparedObservationMutation(request, deps.preparedObservations!);
+    }
+    try { return respond(200, JSON.stringify(preparedObservationStatus(await deps.preparedObservations!.status())), 'application/json; charset=utf-8'); }
+    catch { return receptionError(503, 'unavailable'); }
+  }
   if (settingsPath) {
     if (!sameOrigin(request, url)) return plain(403, 'Forbidden');
     return settingsMutation(request, deps.receptionSettings!, settingsPath[1]);
   }
   if (deps.receptionSettings && url.pathname === '/admin/reception-settings') {
-    try { return respond(200, renderSettings(await deps.receptionSettings.read())); }
+    try {
+      const [view, observations] = await Promise.all([deps.receptionSettings.read(),
+        deps.preparedObservations ? deps.preparedObservations.status().then(preparedObservationStatus).catch(() => null) : undefined]);
+      return respond(200, renderSettings(view, observations));
+    }
     catch { return respond(503, renderMessage('受付の設定', '設定を読み込めませんでした。')); }
   }
   if (receptionPath) {
