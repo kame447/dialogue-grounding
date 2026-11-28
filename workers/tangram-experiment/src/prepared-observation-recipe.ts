@@ -98,9 +98,16 @@ export function preparedObservationPoolKey(value: PreparedObservationRequest): s
   try {
     const checked = request(value);
     const generation = checked.participant.initialObservationGeneration;
-    return POOL_SCHEMA + ':' + sha256(canonical({ ...checked, schemaVersion: POOL_SCHEMA,
+    const selection = checked.protocol.schemaVersion === 'reception_protocol_v3' ? checked.protocol.figureSelection : undefined;
+    const threeFigures = selection?.mode === 'custom' && selection.figureIds.length === 3 ||
+      selection?.mode === 'seeded_random' && selection.figureCount === 3;
+    // Three-figure stock can be reused across protocol revisions with the same preparation inputs.
+    const { protocolId, revision, ...protocolMaterial } = checked.protocol;
+    return POOL_SCHEMA + ':' + sha256(canonical({ ...checked,
+      protocol: threeFigures ? protocolMaterial : checked.protocol, schemaVersion: POOL_SCHEMA,
       figureBankVersion: FIGURE_BANK_VERSION, observationMemoVersion: OBSERVATION_MEMO_VERSION,
-      initialInstructionsSha256: [4, 6].map(count => sha256(observationInitialInstructions(count, generation))),
+      initialInstructionsSha256: (threeFigures ? [3, 4, 6] : [4, 6])
+        .map(count => sha256(observationInitialInstructions(count, generation))),
     }));
   } catch { return fail(); }
 }

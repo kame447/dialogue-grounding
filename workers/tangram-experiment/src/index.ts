@@ -318,8 +318,14 @@ export class TangramSession extends DurableObject<Env> {
             } });
           if (draw !== bundle.randomSeeds.length || !proposed.plan || proposed.plan.schemaVersion === 'reception_plan_v1') throw new Error();
           const template = validateReceptionPlan(bundle.plan);
-          if (template.schemaVersion === 'reception_plan_v1' || template.preparedObservations ||
-              JSON.stringify({ ...proposed.plan, approvedAt: null }) !== JSON.stringify({ ...template, approvedAt: null })) throw new Error();
+          if (template.schemaVersion === 'reception_plan_v1' || template.preparedObservations) throw new Error();
+          const plan = proposed.plan;
+          // Current protocol identity was validated by approveReception. Reusable stock must still match the actual plan and boards.
+          const reusable = plan.schemaVersion === 'reception_plan_v3' &&
+            plan.trials.every(trial => trial.figureSelection.figureIds.length === 3);
+          const preparedPlan = reusable ? { ...template, protocolId: plan.protocolId,
+            protocolRevision: plan.protocolRevision, protocolSha256: plan.protocolSha256 } : template;
+          if (JSON.stringify({ ...plan, approvedAt: null }) !== JSON.stringify({ ...preparedPlan, approvedAt: null })) throw new Error();
           const entries = new Map(bundle.entries.map(item => [item.key, item.entry]));
           if (entries.size !== bundle.entries.length) throw new Error();
           const checked = new Map<string, PreparedObservationBundle['entries'][number]['entry']>();

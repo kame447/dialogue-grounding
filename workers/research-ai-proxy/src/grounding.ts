@@ -84,8 +84,9 @@ export function buildGroundingPayload(body: unknown): GroundingPayload | null {
   let common = COMMON_INSTRUCTIONS;
   try {
     const state = JSON.parse(record.state);
-    if (state?.aiOwnNotes?.notes && Object.keys(state.aiOwnNotes.notes).length === 4) {
-      common = COMMON_INSTRUCTIONS.map(line => line.replace("同じ6図形", "同じ4図形"));
+    const count = state?.aiOwnNotes?.notes ? Object.keys(state.aiOwnNotes.notes).length : 0;
+    if (count === 3 || count === 4) {
+      common = COMMON_INSTRUCTIONS.map(line => line.replace("同じ6図形", `同じ${count}図形`));
     }
   } catch { /* Older callers may supply plain text state. */ }
   return {
